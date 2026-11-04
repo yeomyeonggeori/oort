@@ -20,9 +20,15 @@ import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { MessageBody } from "@/features/timeline/MessageBody";
+import { SystemLine } from "@/features/timeline/SystemLine";
+import { isSystemLineMessage } from "@/features/timeline/systemLineRows";
 import { ThreadComposer } from "@/features/timeline/ThreadComposer";
 import {
   memberFor,
@@ -35,6 +41,7 @@ import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import { InboxApprovalActions } from "./InboxApprovalActions";
 import { approvalRowControl, settledStatusLine } from "./approvalsPanel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 오른쪽 패널 (#3663): 목록에서 고른 항목의 **맥락**.
@@ -147,6 +154,26 @@ function ContextRow({
           )}
         </span>
       </span>
+    </li>
+  );
+}
+
+// 방에 알리는 실행 중단 줄(#5128, 타임라인 #5079의 짝)은 누가 한 말이 아니다. 줄의 작성자는 멈춘 사람이라 행(아바타·이름·시각·본문)으로
+// 그리면 그 사람이 쓴 글처럼 붙는다. 그래서 이 창에서도 타임라인과 같은 `SystemLine` 으로 가운데의 조용한 줄이 된다. 판정은 코어
+// `isRunCancelledNotice` 하나(`isSystemLineMessage`: 줄로 그릴 본문이 없으면 일반 행으로 남는다).
+//
+// 항목 메시지의 신원(스크롤 기준 `targetRef`·`aria-current`·착지 면)은 `ContextRow` 만 든다. 줄은 그 신원을 달지 않는다.
+//   - 줄은 항목이 될 길이 없다. 서버 투영은 `text`·`artifact` 만 항목으로 삼고(migration 126), `dmEntry` 는 대화형(`text`) 메시지만
+//     대표로 고르고, 줄은 `root_id` 없이 쓰여 스레드 답글 목록에도 들지 않는다. 줄은 항목 행 옆에 설 뿐이다.
+//   - 그래도 항목이 줄을 가리키면(투영이 바뀐 미래) 줄은 눌리거나 답할 곳이 없는 글줄이라 「현재」 표식·착지 면을 얹지 않는다. 패널은
+//     대상을 못 찾은 때와 같은 길로 대화 끝으로 간다. 시험이 이 선택을 못 박는다.
+// 초점 정거장도 아니다: 칸 안에 단추·링크·`tabindex` 가 없다. `data-testid` 도 글쓴이가 있는 행(`inbox-context-row`)과 달라서, 행을 세는
+// 쪽(시험·캡처)이 줄을 행으로 세지 않는다. 이 창은 행을 이어 붙이지 않아(모든 행이 이름 머리를 든다) 타임라인의 묶음 규칙
+// (`startGroupAfterSystemLine`)은 필요 없다.
+function ContextSystemLine({ message }: { message: Message }) {
+  return (
+    <li data-testid="inbox-context-system-line">
+      <SystemLine message={message} />
     </li>
   );
 }
@@ -269,7 +296,8 @@ export function InboxDetail({
   /** 좁은 화면에서 목록으로 돌아간다. 넓은 화면에서는 주지 않는다. */
   onBack?: () => void;
   onToggleRead: (entry: MailboxEntry) => void;
-  onDecided: (outcome: DecisionOutcome) => void;
+  /** 결정 응답이 닿았다. `approvalId`는 이 패널이 결정한 승인이다(라우트의 안내가 어느 승인의 것인지 안다, #5174 L5). */
+  onDecided: (outcome: DecisionOutcome, approvalId: string) => void;
   readBusy: boolean;
 }) {
   const { session, workspaceId } = useSession();
@@ -344,6 +372,8 @@ export function InboxDetail({
   const settledReceipt = useSettledApproval(entry.task?.approvalId);
   const settledLine =
     settledReceipt === null ? null : settledStatusLine(settledReceipt.status);
+  // 막았을 때 결정 단추 자리의 한 줄: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5239). 타임라인 카드와 같은 문장이다.
+  const blockedLine = useApprovalBlockedLine();
   const control =
     entry.task === undefined
       ? null
@@ -454,7 +484,7 @@ export function InboxDetail({
                 approvalId={control.approvalId}
                 onSettled={(outcome) => {
                   panelRef.current?.focus();
-                  onDecided(outcome);
+                  onDecided(outcome, control.approvalId);
                 }}
                 execution={entry.task.execution}
               />
@@ -470,11 +500,10 @@ export function InboxDetail({
             )}
             {control?.kind === "offline" && (
               <p
-                className="text-meta text-ink-muted"
+                className="text-meta text-ink-muted break-keep"
                 data-testid="inbox-approval-offline"
               >
-                연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서
-                승인하거나 거부할 수 있어요.
+                {blockedLine}
               </p>
             )}
           </div>
@@ -507,10 +536,10 @@ export function InboxDetail({
             )}
             <Skeleton ready={!context.isLoading} rows={3} className="p-2">
               {context.isError ? (
-                <InlineBanner
-                  message="대화를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={() => void context.refetch()}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadConversationTitle}
+                  cause={loadCauseOf(context.error)}
+                  onRetry={() => void context.refetch()}
                   testId="inbox-context-error"
                 />
               ) : messages.length === 0 ? (
@@ -519,20 +548,24 @@ export function InboxDetail({
                 </p>
               ) : (
                 <ul className="flex flex-col" data-testid="inbox-context">
-                  {messages.map((message) => (
-                    <ContextRow
-                      key={message.id}
-                      message={message}
-                      directory={directory}
-                      selfMemberId={session.member.id}
-                      isTarget={message.id === targetId}
-                      targetRef={targetRef}
-                      highlighted={
-                        message.id === targetId &&
-                        flashKey === `${entry.key}|${targetId}`
-                      }
-                    />
-                  ))}
+                  {messages.map((message) =>
+                    isSystemLineMessage(message) ? (
+                      <ContextSystemLine key={message.id} message={message} />
+                    ) : (
+                      <ContextRow
+                        key={message.id}
+                        message={message}
+                        directory={directory}
+                        selfMemberId={session.member.id}
+                        isTarget={message.id === targetId}
+                        targetRef={targetRef}
+                        highlighted={
+                          message.id === targetId &&
+                          flashKey === `${entry.key}|${targetId}`
+                        }
+                      />
+                    )
+                  )}
                 </ul>
               )}
             </Skeleton>
@@ -556,7 +589,7 @@ export function InboxDetail({
           className="border-t border-line px-4 py-3 text-meta text-ink-muted"
           data-testid="inbox-reply-offline"
         >
-          오프라인이라 답장을 보낼 수 없어요. 연결되면 여기서 답할 수 있어요.
+          <BlockedReason frame="inboxReply" />
         </p>
       ) : (
         <ReplyBox entry={entry} onSent={refresh} />

@@ -1375,11 +1375,16 @@ describe("avatar tones (#4148)", () => {
   });
 });
 
-// 이미지 라이트박스의 칩 (#4751). 칩은 `glass` 위에 서고, 그 유리는 블러된 앱 위의 무대(공용 스크림 + `--lightbox-stage` 한 겹)
-// 위에 선다. 유리는 반투명이라 위 표로 잴 수 없으므로(tokens.css 「유리·스크림」) 여기서 최악 합성을 직접 만들어 잰다:
-// 앱 바닥 → 공용 스크림 → 무대 한 겹 → 유리 → 글자. 블러는 평균색을 옮기지 않으므로 합성만 재고, `glass`의 saturate(1.4)는 재지 않는다.
-describe("이미지 라이트박스 칩 (#4751)", () => {
+// 이미지 라이트박스의 조작 (#4751 → #5190). 위 줄·양옆·아래 줄은 **스킴과 무관하게 어둡다**(`lightbox-chrome·side·foot`의 `color-scheme: dark`):
+// 유리(`--glass`)·글자(`--ink`)·가는 선(`--line-strong`)은 앱이 라이트여도 다크 값으로 읽힌다. 그 뒤의 바닥(앱 → 공용 스크림 → 무대 한 겹)만
+// 앱 스킴을 따른다. 유리는 반투명이라 위 표로 잴 수 없으므로(tokens.css 「유리·스크림」) 여기서 최악 합성을 직접 만들어 잰다. 블러는 평균색을
+// 옮기지 않으므로 합성만 재고, `glass`의 saturate(1.4)는 재지 않는다.
+//   · 단추·캡슐의 글자와 아이콘: 앱 바닥 → 공용 스크림 → 무대 한 겹 → 유리(다크) → 글자(다크 `--ink`)
+//   · 머리 글자(보낸 사람·시각)는 칩이 없다: 앱 바닥 → 공용 스크림 → 무대 한 겹 → 글자. 확대하면 밝은 사진이 줄 아래로 들어오므로
+//     사진 → `--lightbox-scrim` 판 → 글자도 잰다(맞춤에서는 사진이 줄 밖에 선다).
+describe("이미지 라이트박스 조작 (#5190)", () => {
   type Rgb = [number, number, number];
+  const CHROME = 1; // 어두운 범위(`color-scheme: dark`)가 읽는 스킴
   const alphaPair = (name: string): [ScrimLayer, ScrimLayer] => {
     const rgba = String.raw`rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:\s*[,/]\s*([\d.]+))?\s*\)`;
     const m = css.match(new RegExp(String.raw`--${name}:\s*light-dark\(\s*${rgba}\s*,\s*${rgba}\s*\)`));
@@ -1390,9 +1395,17 @@ describe("이미지 라이트박스 칩 (#4751)", () => {
     });
     return [layer(1), layer(5)];
   };
+  /** 스킴 하나가 아닌 한 색(`--lightbox-scrim`: 어느 스킴에서든 같다). */
+  const single = (name: string): ScrimLayer => {
+    const rgba = String.raw`rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:\s*[,/]\s*([\d.]+))?\s*\)`;
+    const m = css.match(new RegExp(String.raw`--${name}:\s*${rgba}\s*;`));
+    if (!m) throw new Error(`--${name} missing from tokens.css, or not a single rgba(...)`);
+    return { rgb: [Number(m[1]), Number(m[2]), Number(m[3])], alpha: m[4] === undefined ? 1 : Number(m[4]) };
+  };
   const GLASS = alphaPair("glass");
   const STAGE = alphaPair("lightbox-stage");
   const STAGE_SOLID = alphaPair("lightbox-stage-solid");
+  const LIGHTBOX_SCRIM = single("lightbox-scrim");
   const over = (layer: ScrimLayer, under: Rgb): Rgb =>
     under.map((c, i) => layer.rgb[i] * layer.alpha + c * (1 - layer.alpha)) as Rgb;
   const hexRgb = (hex: string): Rgb => channels(hex).map((c) => c * 255) as Rgb;
@@ -1400,53 +1413,65 @@ describe("이미지 라이트박스 칩 (#4751)", () => {
     const [hi, lo] = [luminanceRGB(a), luminanceRGB(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   };
-  /** 앱 바닥 → 공용 스크림 → 무대 한 겹 → 유리: 칩 글자가 실제로 올라서는 색. */
-  const chipGround = (scheme: 0 | 1, backdrop: Rgb): Rgb =>
-    over(GLASS[scheme], over(STAGE[scheme], over(SCRIM[scheme], backdrop)));
+  const INK = hexRgb(pick("ink", CHROME));
+  /** 앱 바닥 → 공용 스크림 → 무대 한 겹: 머리 글자가 맞춤에서 실제로 올라서는 색. */
+  const stageGround = (app: 0 | 1, backdrop: Rgb): Rgb => over(STAGE[app], over(SCRIM[app], backdrop));
+  /** 그 위에 다크 유리: 단추·캡슐의 글자와 아이콘이 올라서는 색. */
+  const chipGround = (app: 0 | 1, backdrop: Rgb): Rgb => over(GLASS[CHROME], stageGround(app, backdrop));
 
-  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
-    it(`${label}: 칩의 주 글자(--ink)가 어느 앱 바닥 위에서도 7:1 이상이다`, () => {
+  for (const [app, label] of [[0, "라이트 앱"], [1, "다크 앱"]] as const) {
+    it(`${label}: 단추·캡슐의 글자와 아이콘(다크 --ink)이 어느 앱 바닥 위에서도 7:1 이상이다`, () => {
       for (const bg of SURFACES) {
-        const ground = chipGround(scheme, hexRgb(pick(bg, scheme)));
-        expect(contrastRGB(hexRgb(pick("ink", scheme)), ground), `ink on glass over ${bg}`).toBeGreaterThanOrEqual(7);
+        expect(contrastRGB(INK, chipGround(app, hexRgb(pick(bg, app)))), `ink on dark glass over ${bg}`).toBeGreaterThanOrEqual(7);
       }
     });
 
-    // 칩의 두 줄(보낸 사람 · 날짜·시각)은 모두 --ink다. 처음에는 둘째 줄을 --ink-muted로 두고 「SURFACES 위에서 4.5:1」만 재어 통과했지만,
-    // 실제 칩은 사이드바 띠(어두운 테마에서는 짙은 남색) 위에 서고 그 바닥은 공용 스크림에 한 번 더 어두워져서 --ink-muted가 3.7~4.4:1까지
-    // 내려갔다(design-review, 노을·흑연 라이트의 픽셀 실측). 앞 단정이 틀린 이유: SURFACES는 밝은 앱 바닥만 담는다. 그래서 바닥의 양 끝
-    // (순백·순흑)에서도 4.5:1을 요구하는 이 단정이 칩 글자 역할(--ink)을 지키고, 보조 글자색은 칩에 쓰지 않는다.
-    it(`${label}: 앱 내용이 순백·순흑이어도 칩 글자와 아이콘(--ink)은 4.5:1 이상이다`, () => {
+    // 앱 내용이 순백·순흑이어도(SURFACES는 밝은 앱 바닥만 담는다) 지킨다. 앞 판에서 이 두 끝이 보조 글자색을 잡았다(design-review #4751).
+    it(`${label}: 앱 내용이 순백·순흑이어도 단추 아이콘과 머리 글자(다크 --ink)는 4.5:1 이상이다`, () => {
       for (const backdrop of [[255, 255, 255], [0, 0, 0]] as Rgb[]) {
-        expect(contrastRGB(hexRgb(pick("ink", scheme)), chipGround(scheme, backdrop)), `ink, backdrop ${backdrop}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRGB(INK, chipGround(app, backdrop)), `ink on dark glass, backdrop ${backdrop}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRGB(INK, stageGround(app, backdrop)), `ink on the bare stage, backdrop ${backdrop}`).toBeGreaterThanOrEqual(4.5);
       }
     });
 
-    it(`${label}: 칩이 기대는 유리(--glass)는 70% 이상 불투명하다(글자 대비가 이 가정 위에 선다)`, () => {
-      // 위 합성은 유리 알파 .72~.74를 전제한다. 알파를 낮추면 바닥이 더 비쳐 칩 글자가 사이드바 띠·사진 어둠에 먹히므로, 값이 내려가는 날
-      // 이 단정이 먼저 빨개진다(합성 단정은 순백·순흑 두 끝만 보므로 알파 하락을 늦게 잡는다).
-      expect(GLASS[scheme].alpha).toBeGreaterThanOrEqual(0.7);
+    it(`${label}: 내려받기·복사 실패 문구(--danger)는 불투명한 --surface-raised 위에서 4.5:1 이상이다(배너는 유리가 아니라 앱 스킴의 이 면에 선다)`, () => {
+      expect(contrast(pick("danger", app), pick("surface-raised", app))).toBeGreaterThanOrEqual(4.5);
     });
 
-    it(`${label}: 내려받기 실패 문구(--danger)는 불투명한 --surface-raised 위에서 4.5:1 이상이다(배너는 유리가 아니라 이 면에 선다)`, () => {
-      expect(contrast(pick("danger", scheme), pick("surface-raised", scheme))).toBeGreaterThanOrEqual(4.5);
-    });
-
-    it(`${label}: 유리를 끈 무대는 불투명하고 어둡고, 칩의 가는 테두리(--line-strong)가 그 위에서 3:1 이상이다`, () => {
-      const solid = STAGE_SOLID[scheme];
+    it(`${label}: 유리를 끈 무대는 불투명하고 어둡고, 조작의 가는 선(다크 --line-strong)이 그 위에서 3:1 이상이다`, () => {
+      const solid = STAGE_SOLID[app];
       expect(solid.alpha, "opaque").toBe(1);
       expect(luminanceRGB(solid.rgb), "dark stage").toBeLessThanOrEqual(0.02);
-      expect(contrastRGB(hexRgb(pick("line-strong", scheme)), solid.rgb), "line-strong on the solid stage").toBeGreaterThanOrEqual(3);
+      expect(contrastRGB(hexRgb(pick("line-strong", CHROME)), solid.rgb), "line-strong on the solid stage").toBeGreaterThanOrEqual(3);
     });
 
     it(`${label}: 비치는 무대 한 겹은 반투명이고 흰색이 아니다(공용 스크림 위에 어둠만 더한다)`, () => {
-      const layer = STAGE[scheme];
+      const layer = STAGE[app];
       expect(layer.alpha, "translucent").toBeLessThan(1);
       expect(layer.rgb.join(","), "tint").not.toBe("255,255,255");
       for (const bg of SURFACES) {
-        const under = over(SCRIM[scheme], hexRgb(pick(bg, scheme)));
+        const under = over(SCRIM[app], hexRgb(pick(bg, app)));
         expect(luminanceRGB(over(layer, under)), `stage over scrim over ${bg}`).toBeLessThanOrEqual(luminanceRGB(under));
       }
     });
   }
+
+  it("칩이 기대는 다크 유리(--glass)는 70% 이상 불투명하다(글자 대비가 이 가정 위에 선다)", () => {
+    // 위 합성은 유리 알파 .72를 전제한다. 알파를 낮추면 바닥이 더 비쳐 아이콘이 무대·사진 밝기에 먹히므로, 값이 내려가는 날 이 단정이
+    // 먼저 빨개진다(합성 단정은 순백·순흑 두 끝만 보므로 알파 하락을 늦게 잡는다).
+    expect(GLASS[CHROME].alpha).toBeGreaterThanOrEqual(0.7);
+  });
+
+  // 확대하면 사진이 위 줄·아래 줄 뒤로 들어온다. 판(`--lightbox-scrim`)이 없으면 흰 문서 사진 위에서 흰 이름·시각이 사라진다(폰 뷰어 머리말과 같은
+  // 이유). 최악의 사진은 순백이다.
+  it("확대해 순백 사진이 머리 뒤로 들어와도 판 위의 머리 글자(다크 --ink)는 4.5:1 이상이다", () => {
+    expect(contrastRGB(INK, over(LIGHTBOX_SCRIM, [255, 255, 255])), "ink on the scrim over a pure white photo").toBeGreaterThanOrEqual(4.5);
+    expect(contrastRGB(INK, over(LIGHTBOX_SCRIM, [0, 0, 0])), "ink on the scrim over a pure black photo").toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("판은 반투명이고 순흑·순백이 아니다(사진 위에 어둠만 더한다)", () => {
+    expect(LIGHTBOX_SCRIM.alpha, "translucent").toBeLessThan(1);
+    expect(LIGHTBOX_SCRIM.rgb.join(","), "not pure black").not.toBe("0,0,0");
+    expect(LIGHTBOX_SCRIM.rgb.join(","), "not pure white").not.toBe("255,255,255");
+  });
 });

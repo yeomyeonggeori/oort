@@ -133,6 +133,12 @@ pub enum InteractionRefused {
     NotAuthorForDelete,
     #[error("deleted messages cannot be edited")]
     EditDeleted,
+    /// An approval card's `body` is the one sentence the lock screen, the notification and a
+    /// card-less client show (ADR-0204 증보 6 D6-3), and the settlement rewrites it
+    /// (`settle_approval_card_in_tx`). Neither edit path writes it — for anyone, its author
+    /// included.
+    #[error("approval cards are written by the server")]
+    ApprovalCardOwned,
     #[error("deleted messages cannot receive reactions")]
     ReactDeleted,
     #[error("message reaction limit reached")]
@@ -173,9 +179,17 @@ pub struct LockedMessage {
     pub seq: i64,
     pub state: String,
     pub deleted_at: Option<DateTime<Utc>>,
+    /// `message.type` as its database label (`text`, `approval_request`, …).
+    pub message_type: String,
 }
 
 impl LockedMessage {
+    /// An approval card — written, and rewritten at settlement, by the server alone
+    /// ([`InteractionRefused::ApprovalCardOwned`]).
+    pub fn is_approval_card(&self) -> bool {
+        self.message_type == crate::message::MessageType::ApprovalRequest.as_db_label()
+    }
+
     /// Both halves of "deleted", because both are written and either alone is a
     /// half-tombstone: Swift's own guards read `state == "deleted" ||
     /// deletedAt != nil` every time.
@@ -194,7 +208,8 @@ pub async fn lock_message_in_tx(
     message_id: Uuid,
 ) -> Result<Option<LockedMessage>, DbError> {
     let row = sqlx::query(
-        "SELECT channel_id, author_member_id, seq, state::text AS state, deleted_at \
+        "SELECT channel_id, author_member_id, seq, state::text AS state, deleted_at, \
+                type::text AS message_type \
            FROM message \
           WHERE id = $1 \
           FOR UPDATE",
@@ -209,6 +224,7 @@ pub async fn lock_message_in_tx(
         seq: row.try_get("seq")?,
         state: row.try_get("state")?,
         deleted_at: row.try_get("deleted_at")?,
+        message_type: row.try_get("message_type")?,
     }))
 }
 
@@ -230,9 +246,12 @@ pub struct InteractionMessage {
 ///
 /// `sent_via` (ADR-0216 D8) is read back but never written here: every `UPDATE` in this
 /// module names the columns it changes, so an edit keeps a developer token's marker.
+/// `also_in_channel` (ADR-0148 증보, #4887) is the same: read back so the edit frame and the
+/// `PATCH` answer say what the row says, never written, so an edit keeps the sender's choice.
 const INTERACTION_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, run_id, client_msg_id";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, also_in_channel, \
+     run_id, client_msg_id";
 
 fn decode_interaction(row: &sqlx::postgres::PgRow) -> Result<InteractionMessage, sqlx::Error> {
     Ok(InteractionMessage {
@@ -324,6 +343,10 @@ pub fn build_message_edited_payload(workspace_id: Uuid, projection: &Interaction
     // ADR-0216 D8 — an edit re-publishes the whole message, so it carries the marker the
     // edit kept; absent (not null) for every message that has none, as on `message.new`.
     crate::message::insert_sent_via(&mut payload, message.sent_via);
+    // ADR-0148 증보 — the same re-publish rule for the 「대화에도 보내기」 flag: on only when on, and
+    // present on the edit frame so that "said nothing" is never read as "off" (a main-flow row
+    // would vanish on the first edit).
+    crate::message::insert_also_in_channel(&mut payload, message.also_in_channel);
 
     interaction_envelope(
         workspace_id,
@@ -480,6 +503,11 @@ pub async fn edit_message_in_tx(
     };
     if locked.author_member_id != actor_member_id {
         return Ok(Err(InteractionRefused::NotAuthorForEdit));
+    }
+    // After the authorship check, like the tombstone rule: a non-author learns nothing about
+    // what kind of message it is from the refusal.
+    if locked.is_approval_card() {
+        return Ok(Err(InteractionRefused::ApprovalCardOwned));
     }
     if locked.is_deleted() {
         return Ok(Err(InteractionRefused::EditDeleted));
@@ -957,6 +985,10 @@ pub async fn stream_message_body_in_tx(
     // must not learn from the refusal whether the message is a tombstone.
     if locked.author_member_id != actor_member_id {
         return Ok(Err(InteractionRefused::NotAuthorForEdit));
+    }
+    // An approval card is not a stream to grow: its body is the server's sentence.
+    if locked.is_approval_card() {
+        return Ok(Err(InteractionRefused::ApprovalCardOwned));
     }
     if locked.is_deleted() {
         return Ok(Err(InteractionRefused::EditDeleted));
@@ -1875,6 +1907,7 @@ mod tests {
             edited_at: DateTime::from_timestamp_millis(1_700_000_777_000),
             deleted_at: None,
             sent_via: None,
+            also_in_channel: false,
         }
     }
 
@@ -2192,8 +2225,15 @@ mod tests {
             seq: 1,
             state: "sent".into(),
             deleted_at: None,
+            message_type: "text".into(),
         };
         assert!(!base.is_deleted());
+        assert!(!base.is_approval_card());
+        assert!(LockedMessage {
+            message_type: "approval_request".into(),
+            ..base.clone()
+        }
+        .is_approval_card());
         assert!(LockedMessage {
             state: "deleted".into(),
             ..base.clone()
@@ -2216,6 +2256,7 @@ mod tests {
             InteractionRefused::NotAuthorForEdit,
             InteractionRefused::NotAuthorForDelete,
             InteractionRefused::EditDeleted,
+            InteractionRefused::ApprovalCardOwned,
             InteractionRefused::ReactDeleted,
             InteractionRefused::ReactionLimit,
             InteractionRefused::EmptyBody,

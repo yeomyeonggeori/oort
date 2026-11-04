@@ -88,6 +88,18 @@ export function pinFailureMessage(error: unknown): string {
   }
 }
 
+/**
+ * 「대화에도 보내기」를 켜고 보낸 요청이 **본문 모양 때문에** 거절됐는가(ADR-0148 증보 호환 표).
+ *
+ * 옛 서버는 전송 본문이 닫힌 규칙(`deny_unknown_fields`)이라 모르는 키 `alsoInChannel` 을 400(또는 본문 해석 오류 422)으로 거절한다.
+ * 새 서버의 400(지워진 원본·이미 답글)과 와이어로는 가를 수 없어서 **켠 때만** 이 판정을 쓴다 — 호출자가 안내하는 행동(체크를 끄고
+ * 다시 보내기)은 어느 쪽이든 맞고, 끈 채 또 거절되면 평소 문장(`replyFailureMessage`)이 진짜 이유를 말한다. 조용히 스레드로만 보내지 않는다.
+ */
+export function isClosedBodyRejection(error: unknown): boolean {
+  const status = statusOf(error);
+  return status === 400 || status === 422;
+}
+
 export function replyFailureMessage(error: unknown): string {
   switch (statusOf(error)) {
     case 400:

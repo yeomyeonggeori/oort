@@ -780,7 +780,7 @@ describe("오프라인 저장 (review #2961 H1)", () => {
     const save = q(host, "ai-connect-card-key-save") as HTMLButtonElement;
     expect(save.getAttribute("aria-disabled")).toBe("true");
     expect(document.getElementById(save.getAttribute("aria-describedby")?.split(" ")[0] ?? "")?.textContent).toContain(
-      "연결이 끊겨"
+      "You're offline, so you can't check or change the team AI key right now."
     );
     input.value = SECRET;
     await act(async () => save.click());
@@ -982,7 +982,7 @@ describe("네 상태 · 권한", () => {
     const check = await until(host, "ai-connect-card-team-check");
     expect(check.getAttribute("aria-disabled")).toBe("true");
     const reason = check.getAttribute("aria-describedby") as string;
-    expect(document.getElementById(reason)?.textContent).toContain("연결이 끊겨");
+    expect(document.getElementById(reason)?.textContent).toContain("You're offline, so you can't check or change the team AI key right now.");
     act(() => check.click());
     expect(testProviderLink).not.toHaveBeenCalled();
   });

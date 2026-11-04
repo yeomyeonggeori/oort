@@ -471,8 +471,9 @@ describe('an invite deep link', () => {
 describe('a session that ended', () => {
   it('says why the person is back here', () => {
     render(<ConnectScreen sessionExpired />);
+    // 사전(`connection.session.expired`)의 해요체 문장이다(#5222) - 웹·데스크탑과 한 벌.
     expect(screen.getByTestId('session-expired')).toHaveTextContent(
-      '로그인이 만료되었습니다. 다시 연결해 주세요.',
+      '로그인이 만료됐어요. 다시 로그인해 주세요.',
     );
   });
 

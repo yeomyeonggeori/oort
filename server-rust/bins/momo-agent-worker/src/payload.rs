@@ -122,6 +122,14 @@ pub struct AgentJobPayload {
     /// Requested welcome marker (`opener` / `provider-required` / `closer`).
     #[serde(default)]
     pub welcome_kind: Option<String>,
+    /// ADR-0201 증보 v3 B5 (#4967): the **new payload kind** `team_ai_task_step`. Set only on the job
+    /// that runs one step of the team AI's long task — the step number it intends to run. It is a
+    /// hint, not the judgement: task mode is the existence of the run's `team_ai_task` row, and
+    /// `momo_agent::team_ai_task::decide_step` compares this number with the row, so a duplicate,
+    /// a re-claim or a late job all reach the same verdict. A request's own first-turn job carries
+    /// none (read as step 1).
+    #[serde(default)]
+    pub team_ai_task_step: Option<i32>,
 }
 
 /// The tool call a human approved (`approval.payload.tool_call`, projected by
@@ -204,6 +212,11 @@ impl AgentJobPayload {
     /// Is this job the resume of an approved tool call?
     pub fn is_resume(&self) -> bool {
         self.resume_from_approval_id.is_some()
+    }
+
+    /// The step of the team AI's task this job intends to run (`1` for a first-turn job).
+    pub fn task_step(&self) -> i32 {
+        self.team_ai_task_step.unwrap_or(1).max(1)
     }
 
     /// ADR-0181 welcome kickoff job. The worker creates the run so a missing

@@ -1,0 +1,100 @@
+appId: app.momo.ios
+name: "5207-share-sheet"
+env:
+  # 1 이면(표면을 `-momoMeasure SHARE-ATTACH-probe+flip` 으로 띄웠을 때) 시트가 닫힌 뒤 하네스가 얹는 연결 흔들림(끊겼다 이어짐)이 끝나기를 기다린 다음 단정한다.
+  FLAPS: "0"
+---
+# 5207-share-sheet — 영상·파일 첨부 카드를 눌러 연 iOS 공유 시트를 여닫을 때 (#5207, owner 11-03):
+#   ① 시트를 **닫으려고 바로 위(답글 줄)를 누르면** 시트가 닫히면서 그 탭이 아래로 새어 스레드가 열렸다.
+#   ② 시트가 열리고 닫혀도 대화 목록의 자리가 그대로여야 한다(맨 아래였으면 맨 아래, 읽던 자리면 그 자리).
+#
+# 표면 `-momoMeasure SHARE-ATTACH-probe`(`measure/shareAttachment.tsx`)는 진짜 머리·타임라인·컴포저가 선 대화에 파일 카드(WebM 영상)를 세운다
+# (맨 끝 `v1.webm`, 어제의 중간 `v0.webm`). WebM 인 까닭(#5268): mp4·mov 영상은 #5208(#5235)부터 앱 안 영상 뷰어로 열려 공유 시트가 서지 않는다 —
+# 앱이 못 읽는 WebM 만 파일 카드 → 내려받기 → 공유 시트 길로 남는다(jest `shareSheet.test.tsx` 와 같은 재료).
+# 서버·레일만 없다 — 첨부 바이트는 `measure/share-stub.mjs` 가 대신 답하고, 카드를 누르는 것도 시트를 닫는 것도
+# 이 흐름의 **실제 탭**이다. 화면 맨 위 한 줄(`share-probe`)이 앱이 아는 그대로를 적는다:
+#   app=<앱 상태> share=<never|open|closed> thread=<스레드가 열린 횟수> touch=<목록 영역이 받은 터치 수> base=<기준 y> y=<지금 y> drift=<기준에서 벗어난 최댓값> moves=<보고 수>
+#
+#   node clients/mobile/measure/share-stub.mjs &                    # 포트 18995(`SHARE_STUB_PORT`), 다른 워크트리와 겹치면 `-momoShareStub host:port`
+#   xcrun simctl launch <udid> app.momo.ios -momoMeasure SHARE-ATTACH-probe -RCT_jsLocation 127.0.0.1:$METRO
+#   maestro --udid <udid> test clients/mobile/maestro/5207-share-sheet.yaml
+#
+# 시뮬레이터(iPhone 17 Pro, 402x874pt, iOS 26.5)의 시트는 위쪽 약 57% 지점(498pt)에서 시작하고, 그 바로 위 약 52%(454pt)·왼쪽 29%에 셋째 답글 줄
+# 「↳ 이도현님에게 답글」이 선다 — 아래 탭의 자리다. 시트 위쪽은 어둡지 않고 눌림이 그대로 뒤로 간다(고치기 전에는 그 탭이 줄의 `onPress` 를 불러 스레드가 열렸다).
+#
+# 고치기 전(`Share.share` 를 곧바로 부르던 판)에는 A 의 `thread=0` 단정이 깨진다(`thread=1`, 화면에 빨간 「하네스: 스레드가 열렸다」). 고친 뒤에는 시트가 닫히고
+# 목록은 그대로다(`drift=0 moves=0`).
+#
+# 연결 흔들림을 얹은 판: `-momoMeasure SHARE-ATTACH-probe+flip` 으로 띄우고 `-e FLAPS=1` 로 돌린다. 하네스가 시트가 닫힐 때(또는 앱이 비활성→활성으로 돌아올 때) 연결이 한 번
+# 끊겼다 이어지는 장면(`realtimeConnected` 가 두 번 뒤집힘)을 모형으로 얹는다 — 이력이 더 남은 방에서 그 두 번의 뒤집힘이 목록의 `refreshControl` 자리를 뒤집으면 목록이
+# 통째로 다시 서서 맨 위에서 맨 아래로 훑는다(#4949, `Timeline.tsx` 의 `NoPullSlot`). 그 자리를 옛 모양(`undefined` 로 비움)으로 되돌리면 이 판의 `drift=0 moves=0` 이 깨진다.
+- extendedWaitUntil:
+    visible:
+      id: "share-probe"
+    timeout: 60000
+# 디버그 빌드의 LogBox 띠가 컴포저 위를 덮고 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- waitForAnimationToEnd
+
+# ---- A. 맨 아래에서 읽던 대로: 카드 → 시트 → 시트 바로 위의 답글 줄을 눌러 닫는다 -------------------------------------------------
+- tapOn:
+    text: "v1.webm.*"
+- extendedWaitUntil:
+    visible: "복사"
+    timeout: 30000
+- waitForAnimationToEnd
+# 사람이 시트를 닫으려고 누르는 자리: 시트 맨 위 가장자리 바로 위의 「↳ 이도현님에게 답글」 줄.
+- tapOn:
+    point: "29%,52%"
+- extendedWaitUntil:
+    notVisible: "복사"
+    timeout: 10000
+- waitForAnimationToEnd
+# 시트는 닫혔고(시트가 서 있는 동안은 접근성 트리에 시트만 남아 probe 줄을 읽을 수 없다 — 닫힌 뒤에 읽는다),
+- runFlow:
+    when:
+      true: ${FLAPS == '1'}
+    commands:
+      - extendedWaitUntil:
+          visible: ".*flaps=1.*"
+          timeout: 15000
+# 그동안 앱은 한 번도 비활성이 되지 않았다(시트는 앱 상태를 바꾸지 않는다),
+- assertVisible: ".*app=active flips=0 share=closed.*"
+# 그 탭은 뒤 화면의 줄에 닿지 않았다 — 스레드가 열리지 않았고(고치기 전에는 thread=1),
+- assertVisible: ".*thread=0 .*"
+- assertNotVisible:
+    id: "share-thread-opened"
+# 목록은 그 자리다(맨 아래였으면 맨 아래).
+- assertVisible: ".*drift=0 moves=0.*"
+
+# ---- B. 맨 아래가 아닌 곳(읽던 자리)에서: 어제의 중간 카드 → 시트 → 아래로 쓸어 닫는다 ---------------------------------------------
+- scrollUntilVisible:
+    element: "v0.webm.*"
+    direction: UP
+    timeout: 40000
+- waitForAnimationToEnd
+- tapOn:
+    text: "v0.webm.*"
+- extendedWaitUntil:
+    visible: "복사"
+    timeout: 30000
+- waitForAnimationToEnd
+- swipe:
+    start: 50%,62%
+    end: 50%,98%
+    duration: 400
+- extendedWaitUntil:
+    notVisible: "복사"
+    timeout: 10000
+- waitForAnimationToEnd
+- runFlow:
+    when:
+      true: ${FLAPS == '1'}
+    commands:
+      - extendedWaitUntil:
+          visible: ".*flaps=2.*"
+          timeout: 15000
+- assertVisible: ".*app=active flips=0 share=closed.*"
+- assertVisible: ".*thread=0 .*"
+# 읽던 자리 그대로다 — 시트를 여닫는 동안 목록이 한 번도 움직이지 않았다.
+- assertVisible: ".*drift=0 moves=0.*"

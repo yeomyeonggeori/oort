@@ -90,6 +90,8 @@ HAND_LITERALS = {
     "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
     # #4820 C2b 3부: the two halves of the hosted expression door are typed by hand, so the README lists both.
     "OORT_HOSTED_MEDIA_STRICT", "HERMES_MEDIA_DELIVERY_STRICT",
+    # #4934: the api's private address the worker reads a requester's picture through is typed by hand too.
+    "OORT_API_INTERNAL_ORIGIN",
 }
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
@@ -288,10 +290,41 @@ KNOWN_CENTRIFUGO_SETTINGS = {
 
 
 
+def hermes_config_shas(repo_root: Path, errors: list[str]) -> list[str]:
+    """The sha256 of every config the gate and the start command accept, in the catalog's order: the renderer rebuilds them from the repo's
+    own pieces (same input, same bytes). lockgate.py carries the same table (`ACCEPTED_CONFIG_SHA256`); the two have to be one list."""
+    import importlib.util
+
+    def load(name: str):
+        spec = importlib.util.spec_from_file_location("catalog_check_" + name, repo_root / "infra" / "hermes" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    try:
+        renderer, gate = load("render_model_config"), load("lockgate")
+        catalog = renderer.repo_catalog(str(repo_root / "infra" / "hermes"))
+        shas = {name: renderer.sha256_of(text) for name, text in catalog.items()}
+    except Exception as exc:  # a renderer that cannot render the catalog is a catalog nobody can accept
+        errors.append("infra/hermes/render_model_config.py cannot rebuild the config catalog: %s" % exc.__class__.__name__)
+        return []
+    if dict(gate.ACCEPTED_CONFIG_SHA256) != {sha: name for name, sha in shas.items()} \
+            or list(gate.ACCEPTED_CONFIG_SHA256.values()) != list(shas):
+        errors.append(
+            "infra/hermes/lockgate.py ACCEPTED_CONFIG_SHA256 is not the config catalog `render_model_config.py --catalog` rebuilds "
+            "(names, hashes and order): update the table, then the start command and HERMES_LOCKGATE_B64"
+        )
+    return list(shas.values())
+
+
 def hermes_canonical(
-    config_sha: str, gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
+    config_shas: list[str], gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
+
+    #4935: the config is pinned to a LIST of sha256 values, not one: the default config and the connector-mode config of each model
+    fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
+    decoded file's hash is exactly one of them (whole-line, fixed-string match), and `|| { echo ... >&2; exit 78; }` says why it stopped.
 
     The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
     variable: `printf " " | base64 -d` is an empty gate script that would exit 0 and start Hermes unchecked
@@ -321,8 +354,12 @@ def hermes_canonical(
         ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/__init__.py"]),
         (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_MANIFEST_B64"]),
         ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/plugin.yaml"]),
-        (";", ["echo", "%s  %s" % (config_sha, HERMES_DATA + "/config.yaml")]),
-        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["sha256sum", HERMES_DATA + "/config.yaml"]),
+        ("|", ["cut", "-c1-64"]),
+        ("|", ["grep", "-qxF"] + [word for sha in config_shas for word in ("-e", sha)]),
+        ("||", ["{", "echo", ANY, ">", "&", "2"]),
+        (";", ["exit", "78"]),
+        (";", ["}"]),
         (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["echo", "%s  %s" % (guard_sha, HERMES_GUARD_DIR + "/__init__.py")]),
@@ -735,20 +772,22 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     if extra_keys:
         errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
     shas = []
-    for name in ("config.yaml", "lockgate.py", "plugins/oort-image-guard/__init__.py",
+    for name in ("lockgate.py", "plugins/oort-image-guard/__init__.py",
                  "plugins/oort-image-guard/plugin.yaml", "login_relay.py", "mcp_login_probe.py"):
         try:
             shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
-    if len(shas) == 6:
-        diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
+    config_shas = hermes_config_shas(repo_root, errors)
+    if len(shas) == 5 and config_shas:
+        diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(config_shas, *shas))
         if diff:
             errors.append(
-                "hermes start command is not the canonical command list (gate-first, fail-closed, config, gate and "
-                "the two image-guard plugin files pinned to the sha256 of infra/hermes/config.yaml, lockgate.py and "
-                "plugins/oort-image-guard/*, the plugin installed before the gate; the login relay block only with a key, "
-                "its two files pinned the same way, key variables unset before exec): %s" % diff
+                "hermes start command is not the canonical command list (gate-first, fail-closed, config pinned to the sha256 LIST of "
+                "`render_model_config.py --catalog` (the default config and a connector-mode config for each model fragment), gate and "
+                "the two image-guard plugin files pinned to the sha256 of lockgate.py and plugins/oort-image-guard/*, the plugin "
+                "installed before the gate; the login relay block only with a key, its two files pinned the same way, key variables "
+                "unset before exec): %s" % diff
             )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
         errors.append("hermes volume mountPath %r != %s" % ((hermes.get("volume") or {}).get("mountPath"), HERMES_DATA))
@@ -827,6 +866,32 @@ def self_media_errors(services: dict) -> list[str]:
     for name, svc in services.items():
         if name not in SELF_MEDIA_SERVICES and SELF_MEDIA_VAR in (svc.get("variables") or {}):
             errors.append("%s must not carry %s (agent-worker and hermes only, #4820 C2a)" % (name, SELF_MEDIA_VAR))
+    return errors
+
+
+API_INTERNAL_VAR = "OORT_API_INTERNAL_ORIGIN"
+
+
+def api_internal_errors(services: dict) -> list[str]:
+    """#4934 (ADR-0151 증보 3): agent-worker reads a requester's attachment THROUGH the api, at the api's private address.
+
+    A Railway volume attaches to one service, so the `local` archive is api's alone. The worker mints a single-use address
+    in the database and spends it itself at `{origin}/v1/self-media/{ws}/{token}`; the origin is the api's own declaration
+    (`privateHostname` + `port`, plain http on the private network), never the public edge (the single-use credential would
+    otherwise travel the internet to reach the service next door) and never derived from anything else. Only agent-worker
+    carries the name: no other service has a business reading a requester's picture."""
+    errors: list[str] = []
+    api = services["api"]
+    want = "http://%s:%s" % (api.get("privateHostname"), api.get("port"))
+    got = (services["agent-worker"].get("variables") or {}).get(API_INTERNAL_VAR)
+    if got != want:
+        errors.append(
+            "agent-worker %s %r must be %s (the api's own private address; without it the worker cannot read "
+            "a requester's picture on Railway, #4934)" % (API_INTERNAL_VAR, got, want)
+        )
+    for name, svc in services.items():
+        if name != "agent-worker" and API_INTERNAL_VAR in (svc.get("variables") or {}):
+            errors.append("%s must not carry %s (agent-worker only, #4934)" % (name, API_INTERNAL_VAR))
     return errors
 
 
@@ -1041,6 +1106,7 @@ def collect_errors(
     # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
     errors.extend(github_errors(services))
     errors.extend(self_media_errors(services))
+    errors.extend(api_internal_errors(services))
     errors.extend(hosted_media_strict_errors(services))
 
     # -- Postgres image service ----------------------------------------------
@@ -1289,6 +1355,24 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
     elif kind == "sender-cent-api-key":  # G10
         services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
+    elif kind == "hermes-config-hash-dropped":  # #4935: one accepted config no longer in the start command's list
+        command = services["hermes"]["startCommand"]
+        listed = re.search(r"grep -qxF((?: -e [0-9a-f]{64})+)", command)
+        if listed is None:
+            raise SystemExit("mutation %s: no config hash list in the hermes start command" % kind)
+        last = re.findall(r" -e [0-9a-f]{64}", listed.group(1))[-1]
+        services["hermes"]["startCommand"] = command.replace(listed.group(1), listed.group(1)[: -len(last)], 1)
+    elif kind == "hermes-config-hash-foreign":  # #4935: a config nobody rebuilds from the repo's pieces is accepted
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + "0" * 64 + " -e ", kind
+        )
+    elif kind == "hermes-config-substring":  # #4935: whole-line match weakened to a substring match
+        services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qF -e ", kind)
+    elif kind == "hermes-config-check-dropped":  # #4935: the config is not checked at all
+        services["hermes"]["startCommand"] = re.sub(
+            r"sha256sum /opt/data/config\.yaml \| cut -c1-64 \| grep -qxF(?: -e [0-9a-f]{64})+ \|\| \{ echo \"[^\"]*\" >&2; exit 78; \}; ",
+            "", services["hermes"]["startCommand"],
+        )
     elif kind == "hermes-guard-sha-stale":  # #4820 review: the pinned guard bytes no longer match the plugin file
         command = services["hermes"]["startCommand"]
         stale = re.search(r"echo \"([0-9a-f]{64})  /opt/data/plugins/oort-image-guard/__init__\.py", command)
@@ -1425,6 +1509,14 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["variables"][SELF_MEDIA_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
     elif kind == "relay-self-media-origin":
         services["relay"]["variables"][SELF_MEDIA_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-api-internal-dropped":  # the worker could not read a requester's picture on Railway
+        del services["agent-worker"]["variables"][API_INTERNAL_VAR]
+    elif kind == "worker-api-internal-wrong-port":  # not the port the api listens on
+        services["agent-worker"]["variables"][API_INTERNAL_VAR] = "http://api.railway.internal:3000"
+    elif kind == "worker-api-internal-public-edge":  # the single-use credential would cross the public edge
+        services["agent-worker"]["variables"][API_INTERNAL_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "relay-api-internal-origin":
+        services["relay"]["variables"][API_INTERNAL_VAR] = "http://api.railway.internal:8080"
     elif kind == "worker-hosted-strict-dropped":
         del services["agent-worker"]["variables"][HOSTED_STRICT_VAR]
     elif kind == "worker-hosted-strict-attested":  # the template would attest strict media delivery for the operator
@@ -1494,6 +1586,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
     ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-dropped", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-foreign", "hermes start command is not the canonical command list"),
+    ("hermes-config-substring", "hermes start command is not the canonical command list"),
+    ("hermes-config-check-dropped", "hermes start command is not the canonical command list"),
     ("hermes-no-guard-install", "hermes start command is not the canonical command list"),
     ("hermes-image-floating", "hermes image"),
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
@@ -1521,6 +1617,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("worker-self-media-dropped", "agent-worker OORT_SELF_MEDIA_ORIGIN"),
     ("hermes-self-media-wrong-host", "hermes OORT_SELF_MEDIA_ORIGIN"),
     ("relay-self-media-origin", "relay must not carry OORT_SELF_MEDIA_ORIGIN"),
+    ("worker-api-internal-dropped", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("worker-api-internal-wrong-port", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("worker-api-internal-public-edge", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("relay-api-internal-origin", "relay must not carry OORT_API_INTERNAL_ORIGIN"),
     ("worker-hosted-strict-dropped", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
     ("worker-hosted-strict-attested", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
     ("hermes-media-strict-dropped", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
@@ -1555,11 +1655,12 @@ def prove_mutations(
                 raise SystemExit("mutation %s failed without naming its rule (%s): %s" % (kind, needle, joined))
             print("mutation %s RED (%s)" % (kind, needle))
         # README: drop one row → the table no longer covers a value the operator must type. The first row is the
-        # long-standing one; the other two are the hosted door's halves (#4820 C2b 3부).
+        # long-standing one; the next two are the hosted door's halves (#4820 C2b 3부); the last is #4934's.
         readme = readme_path.read_text()
         for service, var, label in (
             ("agent-worker", "WORKER_DATABASE_URL", "readme-row-missing"),
             ("agent-worker", HOSTED_STRICT_VAR, "readme-row-missing-hosted-strict"),
+            ("agent-worker", API_INTERNAL_VAR, "readme-row-missing-api-internal"),
             ("hermes", MEDIA_STRICT_VAR, "readme-row-missing-media-strict"),
         ):
             kept = [

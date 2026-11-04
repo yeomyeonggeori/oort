@@ -244,4 +244,4 @@ echo "[owner-claim] migrate-time bootstrap planted claim-pending owner + credent
 
 remove_owned
 CLEANUP_DONE=1
-echo "[owner-claim] PASS PG18 migrate-time bootstrap plus issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction plus #1767 password-reset red/green"
+echo "[owner-claim] PASS PG18 migrate-time bootstrap plus issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction plus #1767 password-reset red/green plus #4596 operator-password reconfirm/claimKind/pending-link end/no-leak"

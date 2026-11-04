@@ -7,7 +7,7 @@
 // selected session survives in `?session=`, and the narrow layout swaps list
 // for the exact existing WorkSessionDetail/ObserverTerminal.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -24,6 +24,31 @@ const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const otherMemberId = "00000000-0000-7000-8000-000000000102";
 const channelId = "00000000-0000-7000-8000-000000000201";
+
+// 사전에서 오는 문장은 한국어로 읽는다(#5304). Playwright 컨텍스트가 언어를 주지 않으면 Chromium 기본(en-US)이라 앱이 사전의
+// 영어 문장을 그린다 — 그래서 이 게이트의 모든 컨텍스트가 `locale: GATE_LOCALE`을 넘긴다.
+const GATE_LOCALE = "ko-KR";
+// 작업 콘솔 오프라인 띠의 두 문장(#5260이 원인별 틀 `blocked.workStateStale.*`·`blocked.workStateNone.*`로 옮겼다)은 한국어 사전
+// (blocked.json)이 정본이다. 손으로 적으면 이 게이트가 화면을 지키는 것이 아니라 문장이 고쳐지는 것을 막는 쪽이 된다
+// (gate-connection·capture-5260과 같은 규칙).
+const KO_BLOCKED = JSON.parse(
+  readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs", GATE_LOCALE, "blocked.json"),
+    "utf8"
+  )
+);
+function koBlockedLine(key) {
+  const text = KO_BLOCKED[key];
+  if (typeof text !== "string" || text === "") {
+    throw new Error(`한국어 사전(blocked.json)에 ${key}가 없다`);
+  }
+  return text;
+}
+// 이 게이트가 거는 것은 브라우저 `offline` 이벤트(기기 오프라인)이고 REST 실패는 주입하지 않는다 — 연결 모델이 기기 오프라인을
+// 서버 못 닿음보다 먼저 고르므로(`model.ts`) 두 장면 모두 `.offline` 쪽 문장이다. 「서버에 닿지 못했어요」 쪽은 이 장면의 원인이 아니다.
+const WORK_STATE_STALE_OFFLINE = koBlockedLine("blocked.workStateStale.offline");
+const WORK_STATE_NONE_OFFLINE = koBlockedLine("blocked.workStateNone.offline");
+
 // The hosts the two observation fixtures "dial". Their sockets are the ones
 // GateWebSocket never opens, which is the only way to hold a surface in 연결 중
 // long enough to leave it by a door the socket does not know about. They are
@@ -1013,12 +1038,11 @@ async function assertConsole(context, state) {
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   const cachedOffline = page.getByTestId("work-console-offline");
   await cachedOffline.waitFor();
-  if (
-    (await cachedOffline.textContent())?.includes(
-      "아래는 마지막으로 확인된 작업 상태입니다."
-    ) !== true
-  ) {
-    throw new Error("cached offline state did not name its last-known projection");
+  const cachedOfflineText = ((await cachedOffline.textContent()) ?? "").trim();
+  if (!cachedOfflineText.includes(WORK_STATE_STALE_OFFLINE)) {
+    throw new Error(
+      `cached offline state did not name its last-known projection: expected "${WORK_STATE_STALE_OFFLINE}" in "${cachedOfflineText}"`
+    );
   }
   await page.waitForFunction(() => {
     const detail = document.querySelector('[data-testid="work-detail"]');
@@ -1037,6 +1061,7 @@ async function assertTerminalState(
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, state);
@@ -1063,6 +1088,7 @@ async function assertMetadataFallback(
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, state);
@@ -1103,6 +1129,7 @@ async function assertDisplayConnectCleanup(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal" });
@@ -1179,6 +1206,7 @@ async function assertObserverConnectCleanup(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal" });
@@ -1292,6 +1320,7 @@ async function assertDisplayBusy(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", hangDisplayAttach: true });
@@ -1357,6 +1386,7 @@ async function assertDisplayFailed(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", displayAttachStatus: 409 });
@@ -1405,6 +1435,7 @@ async function assertDisplayWatching(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", displayLive: true });
@@ -1522,6 +1553,7 @@ async function assertColdOffline(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, {
@@ -1533,12 +1565,11 @@ async function assertColdOffline(browser) {
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));
     const banner = page.getByTestId("work-console-offline");
     await banner.waitFor();
-    if (
-      (await banner.textContent())?.includes(
-        "아직 표시할 저장된 작업 상태가 없습니다."
-      ) !== true
-    ) {
-      throw new Error("cold offline state claimed that a cached projection exists");
+    const coldOfflineText = ((await banner.textContent()) ?? "").trim();
+    if (!coldOfflineText.includes(WORK_STATE_NONE_OFFLINE)) {
+      throw new Error(
+        `cold offline state claimed that a cached projection exists: expected "${WORK_STATE_NONE_OFFLINE}" in "${coldOfflineText}"`
+      );
     }
   } finally {
     await context.close();
@@ -1560,6 +1591,7 @@ async function main() {
       const context = await browser.newContext({
         viewport: { width: 1280, height: 800 },
         reducedMotion: "reduce",
+        locale: GATE_LOCALE,
       });
       const state = {
         mode: "normal",

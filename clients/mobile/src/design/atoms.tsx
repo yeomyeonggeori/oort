@@ -13,9 +13,11 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {circleLook} from './sheetModel';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePalette, useStyles} from './theme';
 import {PULL_FILL} from './pullRefresh';
+import {withLineHeadroom} from './lineHeadroom';
 import type {PullScrollProps} from './refresh';
 
 // =============================================================================
@@ -233,8 +235,11 @@ export function TapRow({
  * 세 얼굴은 형제 `OnboardingButton`(`features/onboarding/OnboardingControls.tsx`)과 같은 규칙이다:
  *
  *   쉼      잉크 채움 + `onPrimary` 라벨
- *   잠김    `disabled` 이고 일하는 중이 아닐 때 — 채움을 걷고 옅은 칸(`surfaceMuted`)으로 두되
- *           **라벨은 `textMuted` 로 읽힌다**(옅은 칸 위 흰 글자는 1.26:1 로 사라졌다)
+ *   잠김    `disabled` 이고 일하는 중이 아닐 때 — 채움을 걷고 **시트 위 문법의 옅은 칸**(`circleLook` 채움·가장자리 +
+ *           `elevationRest` 그림자)으로 두되 **라벨은 `textMuted` 로 읽힌다**(옅은 칸 위 흰 글자는 1.26:1 로 사라졌다).
+ *           칸을 `surfaceMuted` 로 두었을 때는 밝은 시트 위에서 칸이 시트와 1.000~1.009:1 이라 단추가 문장처럼 섰다 —
+ *           이 부품의 소비처 열 곳 중 일곱이 시트 위다(#5170 L1). 형제 알약(`ExpressionAddMenu`·`ExpressionChapter`,
+ *           #5099·#5065)이 시트 위에서 하는 답과 같다. 형제 `OnboardingButton` 은 바닥 위에 서고 아직 `surfaceMuted` 다.
  *   진행    `busy` — 잉크 채움을 그대로 두어 표시기와 낱말이 그 위에서 읽힌다(`disabled` 를 같이
  *           주어도 진행이 이긴다). 누를 수 없는 것은 잠김과 같다.
  *
@@ -475,11 +480,11 @@ export function NoticeBlock({
             한국어 문장이고(인용·고정·검색·세션 앵커의 네 고지 + 서버 능력 고지),
             그중 하나만 예외로 두면 같은 상자가 문장마다 다르게 끊긴다. */}
         <View style={styles.noticeText}>
-          <Text style={styles.noticeHeadline} lineBreakStrategyIOS="hangul-word">
+          <Text style={withLineHeadroom(styles.noticeHeadline)} lineBreakStrategyIOS="hangul-word">
             {headline}
           </Text>
           {detail ? (
-            <Text style={styles.noticeDetail} lineBreakStrategyIOS="hangul-word">
+            <Text style={withLineHeadroom(styles.noticeDetail)} lineBreakStrategyIOS="hangul-word">
               {detail}
             </Text>
           ) : null}
@@ -511,11 +516,17 @@ export function NoticeBlock({
  * **라벨**(「다음 결정 보기」·「기본 제공」·단추 이름)에도 쓴다 — 결정 무대·테마·에이전트 비용(#4982)은 한글이 든 글자 전부가
  * 이 부품이고, 하네스(`__tests__/fixtures/hangulWord.ts`)가 빠진 글자를 센다. 숫자·이모지·아이콘 글리프에는 쓰지 않는다.
  * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
+ *
+ * **줄 높이에 여유를 준다**(`withLineHeadroom`, #5288): 여러 줄로 접힌 글이 첫 줄만 그려지고 잘리는 결함은 `hangul-word` 탓이 아니라(여섯 줄바꿈
+ * 전략이 같은 절대 y 에서 똑같이 났다) 글 상자 높이가 float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다. 한글이 없는 글에서
+ * `hangul-word` 를 빼는 것은 고침이 아니다 — 그 글도 같은 자리에서 잘렸다. 같은 여유가 **`hangul-word` 를 실제로 켠다**: 컨테이너 높이가 줄 수의
+ * 요구와 정확히 같으면(정수 줄 높이 글 전부) 줄바꿈 전략이 꺼져 한 글자 고아 줄이 났다(근거·실측은 `lineHeadroom.ts`).
  */
 export function Sentence(
   props: React.ComponentProps<typeof Text>,
 ): React.JSX.Element {
-  return <Text lineBreakStrategyIOS="hangul-word" {...props} />;
+  const {style, ...rest} = props;
+  return <Text lineBreakStrategyIOS="hangul-word" {...rest} style={withLineHeadroom(style)} />;
 }
 
 /** An inline failure attached to a form, rather than a whole-surface state. */
@@ -774,10 +785,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     alignItems: 'center',
     // 주 행동 = 잉크. `accent` 는 신호라 이 단추를 칠하지 않는다(#5100, `PrimaryButton` 주석).
     backgroundColor: color.primary,
+    // 가장자리 두께는 쉼·잠김이 같다: 쉼은 가장자리가 채움과 같은 잉크라 보이지 않고, 잠김만 색을 입는다. 잠길 때만 두께가
+    // 생기면 단추가 0.66pt 뛴다. (투명 글자 값을 새로 적지 않는 것은 직접 문구 장부가 그 낱말을 문구로 세기 때문이다.)
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.primary,
   },
-  // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다).
-  // 온보딩 단추의 `buttonInert` 와 같은 값.
-  buttonDisabled: {backgroundColor: color.surfaceMuted},
+  // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다). 칸은 **시트 위 문법**이다 —
+  // 라이트는 `surface` 가 시트 위에 서고 그림자가 띄우며, 다크는 한 단 위 `surfaceMuted` + 가장자리 한 줄이다(`circleLook`).
+  // `surfaceMuted` 만으로는 밝은 시트 위에서 칸이 사라진다(#5170 L1, 새벽하늘 1.009 · 흑연·노을 1.000).
+  buttonDisabled: {
+    backgroundColor: circleLook(color).fill,
+    borderColor: circleLook(color).ring,
+    boxShadow: color.elevationRest,
+  },
   // 잉크 채움은 눌려도 잉크다 — 흐림만 낮춘다(온보딩 `buttonPrimaryPressed`, 웹 `hover:opacity-90` 의 짝).
   buttonPressed: {opacity: 0.86},
   buttonBusy: {flexDirection: 'row', alignItems: 'center', gap: space.sm},

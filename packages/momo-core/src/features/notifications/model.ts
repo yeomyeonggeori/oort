@@ -17,8 +17,11 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //   - only on a surface that can raise OS notifications: the desktop shell, or
 //     a browser tab whose user opted in and was granted permission (#3340). The
 //     rules below are the same for both; only the gate differs;
-//   - only for the two events that are addressed to a person — a mention the
-//     SERVER recorded, and an approval request waiting on a human decision;
+//   - only for the events that are addressed to a person — a mention the
+//     SERVER recorded, an approval request waiting on a human decision, and (#4890)
+//     a new reply from someone else in a thread the SERVER says this member
+//     follows. The follow answer is handed in (`isFollowingThread`); this module
+//     never infers a thread from who wrote in it;
 //   - never when the window already has focus (zero-noise: the message is on
 //     screen, or one keystroke away);
 //   - never twice for the same message, never for one's own writing, never for
@@ -40,8 +43,11 @@ import { agentCardModel } from "../timeline/agentCardModel";
  * `dm` (#3339): a message in a direct conversation (including a consented group DM) that does not mention
  * you. Off by default on this device (`preference.ts`): a DM is the noisiest
  * thing a person can do to a teammate, so the person opts in.
+ *
+ * `thread-reply` (#4890, ADR-0206 증보 1): a new reply from someone else in a thread this member follows.
+ * On by default; 「그만 따라가기」 is the per-thread off switch and the server's answer for that thread decides.
  */
-export type NotifyKind = "mention" | "approval" | "dm";
+export type NotifyKind = "mention" | "approval" | "dm" | "thread-reply";
 
 /** Why nothing was shown. Every value is a rule someone can argue with. */
 export type NotifySkip =
@@ -64,7 +70,14 @@ export type NotifySkip =
   /** Replayed by a reconnect, not live. */
   | "stale"
   /** This device turned this kind off. */
-  | "kind-disabled";
+  | "kind-disabled"
+  /** A thread reply, and the server says this member does not follow that thread (#4890). */
+  | "not-followed"
+  /**
+   * A thread reply that would otherwise show, whose follow state the server has not told this device yet (#4890).
+   * The caller asks the server about that one thread and decides again with the answer; nothing is shown on a guess.
+   */
+  | "follow-unknown";
 
 export interface DesktopNotification {
   kind: NotifyKind;
@@ -160,6 +173,23 @@ export function notifiableKind(
   return null;
 }
 
+/**
+ * Could this be a 「참여한 스레드의 새 답글」 (#4890)? Only the **shape** is decided here: a person-readable text
+ * reply (`rootId` set) outside a DM. Whether this member follows that thread is the SERVER's answer and is read
+ * last in `notifyDecision`; a mention, a reply that quotes you, and the author's own writing are settled before it.
+ *
+ * A DM is out: every DM message already has its own kind, and the server refuses to follow a DM thread
+ * (`thread_follow_not_applicable`).
+ */
+export function isThreadReplyCandidate(message: Message, isDirect = false): boolean {
+  return (
+    !isDirect &&
+    message.type === "text" &&
+    message.state !== "deleted" &&
+    message.rootId !== undefined
+  );
+}
+
 // ---- decision --------------------------------------------------------------
 
 /**
@@ -219,6 +249,20 @@ export interface NotifyContext {
    * 배지·인박스는 이 입력과 무관하다(별개 원장, ADR-0124 D2).
    */
   paused?: boolean;
+  /**
+   * Does this member follow this thread (#4890)? **Only what the server told this device**: `ThreadRepliesPage.following`
+   * and the answer of `PUT`/`DELETE …/follow` (`threadFollowStore`), never a guess from who wrote in it. `undefined` =
+   * the server has not said (or the answer is too old): the decision then ends in `follow-unknown` and the caller asks
+   * the server about that one thread. Absent means this surface has no follow answer, so a thread reply is ordinary
+   * traffic and never a banner.
+   */
+  isFollowingThread?: (rootId: string) => boolean | undefined;
+  /**
+   * Is this thread what the window shows right now (its panel is open on this root)? A reply is **not** in the
+   * visible main timeline, so for a thread reply the channel being on screen proves nothing (`isTargetVisible` is
+   * the channel-level question and does not apply). Absent means "assume visible", like `isTargetVisible`.
+   */
+  isThreadVisible?: (rootId: string) => boolean;
   /** Server per-member mute for a channel (Channel.muted). */
   isMuted: (channelId: string) => boolean;
   /** Message ids already announced this run. */
@@ -252,11 +296,14 @@ export function notifyDecision(
   if (event.type !== "message.new") return { show: false, skip: "edited" };
 
   const message = payloadToMessage(event.payload);
-  const kind = notifiableKind(
-    message,
-    context.selfMemberId,
-    context.isDirect?.(message.channelId) ?? false
-  );
+  const isDirect = context.isDirect?.(message.channelId) ?? false;
+  let kind = notifiableKind(message, context.selfMemberId, isDirect);
+  // 스레드 답글 갈래(#4890): 멘션·승인·DM이 아닌 스레드 답글만 후보다. 따라가는지는 맨 끝에서 읽는다.
+  const threadRootId =
+    kind === null && context.isFollowingThread !== undefined && isThreadReplyCandidate(message, isDirect)
+      ? message.rootId
+      : undefined;
+  if (threadRootId !== undefined) kind = "thread-reply";
   if (kind === null) return { show: false, skip: "not-notifiable" };
   if (uuidEq(message.authorMemberId, context.selfMemberId)) {
     return { show: false, skip: "self" };
@@ -275,11 +322,15 @@ export function notifyDecision(
     return { show: false, skip: "stale" };
   }
   if (context.isAnnounced(message.id)) return { show: false, skip: "duplicate" };
-  if (
-    context.windowFocused &&
-    (context.isTargetVisible?.(message.channelId) ?? true)
-  ) {
+  if (context.windowFocused && onScreen(message, threadRootId, context)) {
     return { show: false, skip: "focused" };
+  }
+  // 스레드 답글은 여기까지 다른 이유로 걸러지지 않았을 때만 서버에 묻는다(`follow-unknown`): 묻는 값이 한 건의 요청이라
+  // 걸러질 글에 쓰지 않는다. 서버가 따라간다고 말한 스레드만 배너가 된다.
+  if (threadRootId !== undefined) {
+    const following = context.isFollowingThread?.(threadRootId);
+    if (following === undefined) return { show: false, skip: "follow-unknown" };
+    if (!following) return { show: false, skip: "not-followed" };
   }
 
   const notification: DesktopNotification = {
@@ -350,6 +401,22 @@ function notificationSource(
 }
 
 /**
+ * 이 메시지가 지금 화면에 있는가 — 배너가 소음이 되는 때. 일반 메시지는 **채널**이 화면에 있으면 있다(#3339). 스레드 답글은
+ * 본류 목록의 줄이 아니므로 **그 스레드 패널이 열려 있어야** 보인다(`isThreadVisible`). 「대화에도 보내기」(#4887)를 고른
+ * 답글은 본류에도 한 줄로 서므로 채널이 화면에 있어도 본 것이다.
+ */
+function onScreen(
+  message: Message,
+  threadRootId: string | undefined,
+  context: NotifyContext
+): boolean {
+  const channelVisible = context.isTargetVisible?.(message.channelId) ?? true;
+  if (threadRootId === undefined) return channelVisible;
+  if (context.isThreadVisible?.(threadRootId) ?? true) return true;
+  return message.alsoInChannel === true && channelVisible;
+}
+
+/**
  * An approval card carries the server's own public title, which says what is
  * being asked for. The raw body of that message is the same sentence at best
  * and internal vocabulary at worst, so the card copy wins when there is one.
@@ -379,23 +446,67 @@ export function rememberAnnounced(
   return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
+// ---- thread banner flood cap (#5017) ---------------------------------------
+
+/**
+ * 한 스레드의 답글이 이 기기에서 배너가 될 수 있는 건수 — `THREAD_BANNER_WINDOW_MS` 동안. 폰 푸시의 대량 층과 같은 값이다
+ * (ADR-0206 증보 1 F6: 스레드 루트당 60초에 개별 6건, `momo-notifier` `bulk.rs` 의 `INDIVIDUAL_PER_WINDOW`). 한 곳의 상수다.
+ *
+ * 폰과 다른 점 둘: 서버는 달력의 고정된 1분 창이라 경계에서 6+6이 나가지만, 여기는 미끄러지는 60초 창이라 **어느 60초에도 이 값을
+ * 넘지 않는다**. 그리고 폰은 7번째부터 「새 글이 여러 개 있어요」 한 건으로 합쳐 보내지만 배너에는 합칠 곳이 없다 — 한도를 넘은
+ * 답글은 배너가 **되지 않는다**(인박스·읽지 않음 표시에는 그대로 남는다).
+ */
+export const THREAD_BANNER_CAP = 6;
+export const THREAD_BANNER_WINDOW_MS = 60_000;
+
+/** 스레드 루트(소문자 id) → 그 창 안에서 배너로 허락한 시각들. 창 밖의 항목은 다음 판정에서 버려져 늘어나지 않는다. */
+export type ThreadBannerLedger = ReadonlyMap<string, readonly number[]>;
+
+export const EMPTY_THREAD_BANNER_LEDGER: ThreadBannerLedger = new Map();
+
+/**
+ * 이 스레드의 답글 하나를 배너로 허락하는가. 허락하면 시각을 적는다. 새 장부를 돌려주므로 호출부는 ref 에 쥐고 이 함수는
+ * 그것 없이 시험된다(`rememberAnnounced` 와 같은 모양). 판정은 다른 이유로 걸러지지 않아 **배너가 될 답글에만** 쓴다:
+ * 걸러질 글이 한도를 먹지 않게.
+ */
+export function admitThreadBanner(
+  ledger: ThreadBannerLedger,
+  rootId: string,
+  nowMs: number
+): { admitted: boolean; ledger: ThreadBannerLedger } {
+  const next = new Map<string, readonly number[]>();
+  for (const [key, stamps] of ledger) {
+    const live = stamps.filter((at) => nowMs - at < THREAD_BANNER_WINDOW_MS);
+    if (live.length > 0) next.set(key, live);
+  }
+  const key = rootId.toLowerCase();
+  const live = next.get(key) ?? [];
+  if (live.length >= THREAD_BANNER_CAP) return { admitted: false, ledger: next };
+  next.set(key, [...live, nowMs]);
+  return { admitted: true, ledger: next };
+}
+
 // ---- click landing ---------------------------------------------------------
 
 /**
  * How long a shown notification stays the reason the window is being looked at.
  *
- * KNOWN APPROXIMATION. `notification_show` (MOMO-603) is fire-and-forget: the
- * shell reports permission and delivery, never a click, so the web layer cannot
- * be told which banner was clicked. What it can observe is that clicking a
- * macOS notification activates the app, and the window was unfocused when the
- * banner was shown (that is a precondition of showing it at all). So the target
- * is armed at show time and consumed by the next focus.
+ * KNOWN APPROXIMATION, used only where the shell cannot report a click (#5059:
+ * macOS reports it; this window is armed for another OS, a shell build without
+ * the command, and a banner the shell shows plain). `notification_show`
+ * (MOMO-603) is fire-and-forget: the shell reports permission and delivery,
+ * never a click, so the web layer cannot be told which banner was clicked. What
+ * it can observe is that clicking a macOS notification activates the app, and
+ * the window was unfocused when the banner was shown (that is a precondition of
+ * showing it at all). So the target is armed at show time and consumed by the
+ * next focus.
  *
  * The failure mode is honest and small: someone who ignores the banner and
  * switches to momo within this window lands on the mentioned channel instead of
  * where they left off — one sidebar click away, and usually where they were
  * heading. The proper fix is a click event from the shell, which needs a Rust
- * notification path that keeps the handle (`clients/desktop/README.md`).
+ * notification path that keeps the handle: `notification_show_clickable` and
+ * `momo:notification-click` (`clients/desktop/README.md`).
  */
 export const OPEN_ARM_TTL_MS = 20_000;
 
@@ -408,6 +519,11 @@ export interface ArmedOpen {
    * 메시지가 끼면 사라지고, 그때는 채널로 간다 — 어느 카드를 뜻하는지 추측하지 않는다.
    */
   messageId?: string;
+  /**
+   * 무장된 알림이 **모두 같은 스레드의 답글**일 때만 있다(#5017). 카드(`messageId`)는 서로 달라도 가는 곳이 그 스레드 하나라서
+   * 묶인 배너를 눌러도 채널이 아니라 그 스레드로 착지한다. 이때 `messageId` 는 그중 가장 늦은 답글이다.
+   */
+  rootId?: string;
   armedAtMs: number;
 }
 
@@ -415,19 +531,26 @@ export interface ArmedOpen {
  * Arm (or re-arm) the landing target. Two notifications for the same channel
  * still point at it; two channels cancel each other out, because guessing which
  * of them someone meant is worse than landing on the list that holds both.
+ *
+ * 같은 스레드의 답글끼리는 채널 안에서도 한 곳을 가리킨다(#5017): `rootId` 가 같으면 카드가 달라도 스레드가 목적지이고
+ * 가장 늦은 답글을 기억한다. 스레드가 다르거나 스레드가 아닌 알림이 끼면 예전처럼 채널로 돌아간다.
  */
 export function armOpen(
   current: ArmedOpen | null,
   channelId: string,
   nowMs: number,
   ttlMs: number = OPEN_ARM_TTL_MS,
-  messageId?: string
+  messageId?: string,
+  rootId?: string
 ): ArmedOpen {
   const live = current !== null && nowMs - current.armedAtMs <= ttlMs;
   if (!live) {
-    return messageId === undefined
-      ? { channelId, armedAtMs: nowMs }
-      : { channelId, messageId, armedAtMs: nowMs };
+    return {
+      channelId,
+      ...(messageId === undefined ? {} : { messageId }),
+      ...(messageId === undefined || rootId === undefined ? {} : { rootId }),
+      armedAtMs: nowMs,
+    };
   }
   const same =
     current.channelId !== null && uuidEq(current.channelId, channelId);
@@ -436,8 +559,18 @@ export function armOpen(
     messageId !== undefined &&
     current.messageId !== undefined &&
     uuidEq(current.messageId, messageId);
-  return sameCard
-    ? { channelId: current.channelId, messageId, armedAtMs: nowMs }
+  const sameThread =
+    same &&
+    messageId !== undefined &&
+    rootId !== undefined &&
+    uuidEq(current.rootId, rootId);
+  return sameCard || sameThread
+    ? {
+        channelId: current.channelId,
+        messageId,
+        ...(rootId === undefined ? {} : { rootId }),
+        armedAtMs: nowMs,
+      }
     : { channelId: same ? current.channelId : null, armedAtMs: nowMs };
 }
 

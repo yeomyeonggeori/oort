@@ -6,11 +6,15 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type MembershipRole, type RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import type { RoleLabels } from "@momo/core/features/directory/model";
 import { DEFAULT_ROLE_LABELS } from "@momo/core/features/directory/model";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenAgentProfileContext } from "@/features/routing/useAgentProfile";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { MemberProfileProvider } from "./MemberProfileDialog";
 import { useOpenMemberProfile } from "./memberProfileContext";
@@ -68,6 +72,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
   vi.unstubAllGlobals();
 });
 
@@ -170,7 +175,12 @@ function mountProfile(options: {
   labels?: RoleLabels;
   roster?: RosterMember[];
   connStatus?: SessionContextValue["connStatus"];
+  /** 기기 오프라인은 브라우저가 안다. 소켓만 끊긴 것(`connStatus`)과 다른 사실이다(#5201 결정 ③). */
+  deviceOffline?: boolean;
+  /** 명부를 읽지 못하게 한다(받아 둔 명부 없음). 줄 때만 한국어 로케일로 감싼다(#5242). */
+  rosterFailure?: { error: Error; locale: AppLocale };
 }): { host: HTMLElement; client: QueryClient } {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: options.deviceOffline !== true });
   const roster = options.roster ?? ROSTER;
   const client = new QueryClient({
     defaultOptions: {
@@ -179,8 +189,12 @@ function mountProfile(options: {
     },
   });
   client.setQueryData(workspaceIdentityKey(WS), workspace(options.labels ?? {}));
-  client.setQueryData(["roster", WS], roster);
-  fetchRoster.mockResolvedValue(roster);
+  if (options.rosterFailure) {
+    fetchRoster.mockRejectedValue(options.rosterFailure.error);
+  } else {
+    client.setQueryData(["roster", WS], roster);
+    fetchRoster.mockResolvedValue(roster);
+  }
 
   const host = document.createElement("div");
   document.body.append(host);
@@ -207,7 +221,12 @@ function mountProfile(options: {
       )
     )
   );
-  act(() => mountedRoot?.render(tree));
+  const { rosterFailure } = options;
+  act(() =>
+    mountedRoot?.render(
+      rosterFailure ? createElement(LocaleProvider, { locale: rosterFailure.locale, children: tree }) : tree
+    )
+  );
   return { host, client };
 }
 
@@ -620,11 +639,22 @@ describe("멤버 프로필 역할 변경", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it("오프라인이면 컨트롤을 잠그고 기존 배너 사유를 가리킨다", async () => {
+  it("실시간만 끊겨도 컨트롤은 열려 있고 오프라인 배너도 없다(결정 ③)", async () => {
     mountProfile({
       viewer: OWNER,
       targetId: MEMBER_ID,
       connStatus: "disconnected",
+    });
+    await waitForDialog();
+    expect(document.querySelector('[data-testid="member-profile-offline"]')).toBeNull();
+    expect(roleSelect()?.disabled).toBe(false);
+  });
+
+  it("오프라인이면 컨트롤을 잠그고 기존 배너 사유를 가리킨다", async () => {
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      deviceOffline: true,
     });
     await waitForDialog();
     expect(document.querySelector('[data-testid="member-profile-offline"]')).not.toBeNull();
@@ -636,5 +666,46 @@ describe("멤버 프로필 역할 변경", () => {
     expect(applyButton()?.getAttribute("aria-describedby")).toBe(
       "member-profile-offline-reason"
     );
+  });
+});
+
+// #5242: 멤버 프로필을 불러오지 못했을 때. 옛 「멤버 프로필을 불러오지 못했습니다.」 배너는 원인 상자다.
+describe("멤버 프로필: 불러오기 실패 (#5242)", () => {
+  // 지키는 것: 받아 둔 명부가 없으면 상자(제목 + 이유 + 다시 시도). 이유는 원인을 따라가고 다시 시도가 명부를 다시 읽는다.
+  it("명부를 읽지 못하면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 명부를 다시 읽는다", async () => {
+    const ko = await koreanLocale();
+    // 기기가 꺼져 있으면 이 대화상자는 자기 「연결 끊김」 줄을 먼저 말하므로(`memberProfileViewState`), 상자의 원인은 둘이다.
+    const cases: [Error, string, string][] = [
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, cause, reason] of cases) {
+      fetchRoster.mockReset();
+      mountProfile({
+        viewer: OWNER,
+        targetId: MEMBER_ID,
+        rosterFailure: { error, locale: ko },
+      });
+      const box = await vi.waitFor(() => {
+        const node = document.querySelector<HTMLElement>('[data-testid="member-profile-error"]');
+        expect(node).not.toBeNull();
+        return node as HTMLElement;
+      });
+      expect(box.getAttribute("role")).toBe("alert");
+      expect(box.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box.textContent).toContain("멤버 프로필을 불러오지 못했어요");
+      expect(box.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      expect(document.body.textContent).not.toContain("멤버 프로필을 불러오지 못했습니다");
+      const reads = fetchRoster.mock.calls.length;
+      await act(async () => {
+        box.querySelector("button")?.click();
+      });
+      await vi.waitFor(() => expect(fetchRoster.mock.calls.length).toBeGreaterThan(reads));
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      document.body.innerHTML = "";
+      mountedRoot = null;
+      mountedHost = null;
+    }
   });
 });

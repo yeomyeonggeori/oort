@@ -543,6 +543,24 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     run: navigateTo("/settings", "설정"),
   },
   {
+    // 에이전트가 제안하는 「작업 요청 열기」 카드의 명령 id (#4972 S9, ADR-0201 증보 v3 B8 C1). 와이어
+    // 이름·harness enum(claude|codex)·prompt 규칙의 주인은 서버(`momo_agent::card_suggest`)이고,
+    // 카드 렌더와 「작업 요청」 시트 미리 채우기는 웹·폰 몫이다. 팔레트에 줄을 세우지 않는다
+    // (`available` 거짓): 사람이 직접 보내는 길(폰 「내 맥에 보내기」 시트, 웹 컴포저의 개인 에이전트
+    // 호출)은 이미 있고, 이 명령은 도우미가 글을 채워 줄 때만 선다. 열면 「내 작업」으로 간다(인자를
+    // 읽는 쪽은 카드).
+    id: "work.request.open",
+    title: "작업 요청 열기",
+    group: "navigate",
+    kind: "client",
+    keywords: ["작업", "요청", "work", "claude", "codex"],
+    icon: "work",
+    testId: "switcher-work-request-open",
+    agentSuggestable: true,
+    available: () => false,
+    run: navigateTo(WORK_PATH, "작업"),
+  },
+  {
     // 표면 이름은 판정표에서 든다. 진입점과 도착지가 각자 적으면 갈라진다.
     id: "nav.workConsole",
     title: serverSurface("workConsole").label,

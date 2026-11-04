@@ -23,6 +23,10 @@ import {
 } from "@momo/core/features/auth/personalAgentCall";
 import { SignerRefusal, type HumanControlSigner } from "@momo/core/features/auth/signedControl";
 import { mentionedAgents } from "@momo/core/features/routing/mentionTargets";
+import {
+  workRequestHarnessOfWire,
+  type WorkRequestHarness,
+} from "@momo/core/features/timeline/commandSuggest";
 import { ApiError, uuidEq, type Message, type RosterMember, type WorkHost } from "@momo/core/lib/api";
 
 /** 로스터가 준 개인 에이전트 한 명(내 것). */
@@ -68,6 +72,27 @@ export function myPersonalAgent(member: RosterMember, selfId: string): MyPersona
   if (!uuidEq(value.ownerId, selfId)) return null;
   const label = typeof value.label === "string" && value.label.trim() !== "" ? value.label.trim() : member.displayName;
   return { memberId: member.id, handle: member.handle, label, harness: value.harness };
+}
+
+/**
+ * 「작업 요청」 카드(`work.request.open`, #4972)가 입력창에 이름을 채울 내 개인 에이전트.
+ *
+ * 웹에는 별도의 「작업 요청」 시트가 없다 — 내 맥에 일을 보내는 웹의 길은 컴포저에서 내 개인
+ * 에이전트를 부르는 것이다(위 머리말). 카드가 이름 붙인 도구(`harness`)의 에이전트가 있으면 그것을,
+ * 없으면(또는 도구가 정해지지 않았으면) 내 개인 에이전트 중 첫째를 쓴다 — 폰 시트가 「고를 수 없는
+ * 도구면 평소 기본값이 이긴다」고 하는 것과 같은 규칙이다. 내 개인 에이전트가 없으면 null.
+ */
+export function workRequestTarget(
+  members: readonly RosterMember[],
+  selfId: string,
+  harness: WorkRequestHarness | null
+): MyPersonalAgent | null {
+  const mine = members
+    .map((member) => myPersonalAgent(member, selfId))
+    .filter((agent): agent is MyPersonalAgent => agent !== null);
+  const wanted =
+    harness === null ? undefined : mine.find((agent) => workRequestHarnessOfWire(agent.harness) === harness);
+  return wanted ?? mine[0] ?? null;
 }
 
 /** 내 맥과 질문용 기본 폴더. 둘 다 있어야 서명할 수 있다. */

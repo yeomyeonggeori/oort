@@ -687,9 +687,12 @@ describe('만든 그림', () => {
     const choice = expressionChoice(draft, Date.now());
     expect(choice).not.toBeNull();
     await press('expression-draft-approve');
+    // 종류(ADR-0218 §10 J3): 고르지 않았으니 초안 단계가 미리 고른 추천이 가는데, 코어 fixture 의 초안은 움직이는 GIF 라 `sticker` 다.
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
-        expect.objectContaining(expressionActivateRequest(root, choice)),
+        expect.objectContaining(
+          expressionActivateRequest(root, {...choice, kind: 'sticker'}),
+        ),
       ),
     );
     await waitFor(() =>

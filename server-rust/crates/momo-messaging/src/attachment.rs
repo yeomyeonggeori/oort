@@ -110,6 +110,52 @@ pub struct MessageAttachment {
     pub name: String,
     pub mime: String,
     pub size_bytes: i64,
+    /// The video summary (ADR-0151 증보 5 D5, #4673): **only** on an attachment whose sender
+    /// put a length and size on it (`PUT …/media`), so the key is absent for everything else —
+    /// a photo, a document, and a video from a client that does not measure one. A client
+    /// that has never heard of it reads the same four keys it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<AttachmentMedia>,
+}
+
+/// The kind a [`AttachmentMedia`] carries today. A closed word, not a mime: the card draws a
+/// video the same whichever container it came in.
+pub const MEDIA_KIND_VIDEO: &str = "video";
+
+/// What a message's attachment card learns about a video before it opens it (openapi
+/// `AttachmentMedia`, ADR-0151 증보 5 D5).
+///
+/// **Never the poster itself.** `has_poster` says whether `GET …/poster` has something to
+/// serve; the bytes ride that route alone — no projection, no realtime frame, no outbox row
+/// carries them (`a_poster_is_never_in_a_payload`). The numbers are the sender's declaration,
+/// checked for range only, so a client clamps the card it draws from them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttachmentMedia {
+    pub kind: String,
+    pub duration_ms: i64,
+    pub width: i64,
+    pub height: i64,
+    pub has_poster: bool,
+}
+
+impl AttachmentMedia {
+    /// A video summary from the (nullable) columns a `LEFT JOIN attachment_media` yields:
+    /// `None` when the join found no row.
+    pub(crate) fn from_joined(
+        duration_ms: Option<i32>,
+        width: Option<i32>,
+        height: Option<i32>,
+        has_poster: bool,
+    ) -> Option<Self> {
+        Some(Self {
+            kind: MEDIA_KIND_VIDEO.to_string(),
+            duration_ms: i64::from(duration_ms?),
+            width: i64::from(width?),
+            height: i64::from(height?),
+            has_poster,
+        })
+    }
 }
 
 /// Why an attachment name or mime was refused (Swift `validatedName` /
@@ -596,9 +642,16 @@ pub async fn message_attachments_in_tx(
     conn: &mut PgConnection,
     message_id: Uuid,
 ) -> Result<Vec<MessageAttachment>, DbError> {
+    // The video summary rides the same statement (`LEFT JOIN attachment_media`): one read, one
+    // snapshot, and the poster's bytes are not in the select list (`a_poster_is_never_in_a_payload`).
     let rows = sqlx::query(
-        "SELECT a.id, a.name, a.mime, a.size_bytes FROM attachment a \
+        "SELECT a.id, a.name, a.mime, a.size_bytes, \
+                am.duration_ms AS media_duration_ms, am.width AS media_width, \
+                am.height AS media_height, (am.poster_mime IS NOT NULL) AS media_has_poster \
+           FROM attachment a \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+           LEFT JOIN attachment_media am \
+                  ON am.workspace_id = a.workspace_id AND am.attachment_id = a.id \
           WHERE a.message_id = $1 AND a.status = 'complete' \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
           ORDER BY a.created_at ASC, a.id ASC",
@@ -613,6 +666,12 @@ pub async fn message_attachments_in_tx(
                 name: row.try_get("name")?,
                 mime: row.try_get("mime")?,
                 size_bytes: row.try_get("size_bytes")?,
+                media: AttachmentMedia::from_joined(
+                    row.try_get("media_duration_ms")?,
+                    row.try_get("media_width")?,
+                    row.try_get("media_height")?,
+                    row.try_get("media_has_poster")?,
+                ),
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
@@ -633,14 +692,27 @@ pub async fn message_attachments_in_tx(
 /// stops the row from listing the file names, sizes and ids of what its author
 /// removed. The aggregate is then `NULL`, which [`decode_paged_attachments`] reads
 /// as "none" and the DTO omits.
+///
+/// **The video summary rides the same aggregate** (ADR-0151 증보 5 D5, #4673): an attachment with
+/// an `attachment_media` row gets a `media` object (`kind`, `durationMs`, `width`, `height`,
+/// `hasPoster`), every other attachment keeps the four keys it always had. `hasPoster` is read
+/// off `poster_mime`, **not** the bytes: this statement never names the poster's bytes, so no page
+/// can carry them, and the team AI's read role (which may not read that column) can run it.
 pub(crate) const PAGED_ATTACHMENT_JOIN: &str = "LEFT JOIN LATERAL ( \
        SELECT jsonb_agg( \
                 jsonb_build_object( \
                   'id', a.id::text, 'name', a.name, 'mime', a.mime, \
                   'sizeBytes', a.size_bytes \
-                ) ORDER BY a.created_at ASC, a.id ASC \
+                ) || CASE WHEN am.attachment_id IS NULL THEN '{}'::jsonb \
+                          ELSE jsonb_build_object('media', jsonb_build_object( \
+                                 'kind', 'video', 'durationMs', am.duration_ms, \
+                                 'width', am.width, 'height', am.height, \
+                                 'hasPoster', am.poster_mime IS NOT NULL)) END \
+                ORDER BY a.created_at ASC, a.id ASC \
               ) AS items \
          FROM attachment a \
+         LEFT JOIN attachment_media am \
+                ON am.workspace_id = a.workspace_id AND am.attachment_id = a.id \
         WHERE a.message_id = m.id AND a.status = 'complete' \
           AND m.state <> 'deleted' AND m.deleted_at IS NULL \
      ) att ON true";
@@ -722,6 +794,7 @@ mod tests {
             name: "보고서.pdf".into(),
             mime: "application/pdf".into(),
             size_bytes: 1234,
+            media: None,
         })
         .expect("serialize");
         assert_eq!(json["sizeBytes"], 1234);
@@ -731,6 +804,55 @@ mod tests {
             json.get("driveFileId").is_none() && json.get("status").is_none(),
             "an archive identifier must never reach a client: {json}"
         );
+    }
+
+    /// ADR-0151 증보 5 D5: the video summary is five camel-case keys, absent when the attachment
+    /// has none, and the four keys a page row had before it still decode (a page written by an
+    /// older server, a fixture).
+    #[test]
+    fn the_media_summary_has_five_camel_case_keys_and_is_absent_without_media() {
+        let attachment = |media| MessageAttachment {
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            name: "clip.mp4".into(),
+            mime: "video/mp4".into(),
+            size_bytes: 2048,
+            media,
+        };
+        let with = serde_json::to_value(attachment(Some(AttachmentMedia {
+            kind: MEDIA_KIND_VIDEO.into(),
+            duration_ms: 4200,
+            width: 1280,
+            height: 720,
+            has_poster: true,
+        })))
+        .expect("serialize");
+        assert_eq!(
+            with["media"],
+            json!({
+                "kind": "video", "durationMs": 4200, "width": 1280, "height": 720,
+                "hasPoster": true
+            })
+        );
+        let back: MessageAttachment = serde_json::from_value(with).expect("round trip");
+        assert_eq!(back.media.map(|media| media.duration_ms), Some(4200));
+
+        let without = serde_json::to_value(attachment(None)).expect("serialize");
+        assert!(
+            without.get("media").is_none(),
+            "no media, no key: {without}"
+        );
+        let old_row: MessageAttachment = serde_json::from_value(json!({
+            "id": "11111111-1111-1111-1111-111111111111", "name": "a.pdf",
+            "mime": "application/pdf", "sizeBytes": 1
+        }))
+        .expect("a four-key row still decodes");
+        assert_eq!(old_row.media, None);
+        // and a stray key is still refused: the decoder is the SQL's contract
+        assert!(serde_json::from_value::<MessageAttachment>(json!({
+            "id": "11111111-1111-1111-1111-111111111111", "name": "a.pdf",
+            "mime": "application/pdf", "sizeBytes": 1, "posterBytes": "AAAA"
+        }))
+        .is_err());
     }
 
     #[test]
@@ -791,6 +913,12 @@ mod tests {
         // 'sizeBytes' inside the aggregate is the wire key, not the column —
         // the projection is built in SQL, so this is where that contract lives.
         assert!(PAGED_ATTACHMENT_JOIN.contains("'sizeBytes', a.size_bytes"));
+        // the video summary rides the aggregate (ADR-0151 증보 5 D5) and the picture does not:
+        // `hasPoster` is read off the label column. That no source outside `attachment_media.rs`
+        // names the bytes column — this constant included — is
+        // `tests/attachment_media_static_guards.rs::only_one_module_names_the_posters_bytes`.
+        assert!(PAGED_ATTACHMENT_JOIN.contains("LEFT JOIN attachment_media am"));
+        assert!(PAGED_ATTACHMENT_JOIN.contains("'hasPoster', am.poster_mime IS NOT NULL"));
     }
 
     #[test]

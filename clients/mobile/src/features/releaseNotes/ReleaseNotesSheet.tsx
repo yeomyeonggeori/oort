@@ -8,7 +8,7 @@ import {
 import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
 import {nativeBuildVersion} from 'expo-application';
 import React, {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {AccessibilityInfo, findNodeHandle, StyleSheet, Text, View} from 'react-native';
 
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
@@ -22,6 +22,7 @@ import {
   qrKeyEnrollmentArmed,
   subscribeNotifyPrimerHeld,
 } from '../onboarding/phoneFlow';
+import {BulletLine} from './BulletLine';
 import {markReleaseNoteSeen, useLastSeenReleaseNote} from './seenStore';
 import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 
@@ -29,16 +30,27 @@ import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 // 업데이트 뒤 처음 열 때 한 번 올라오는 작은 「업데이트 소식」 시트 (#4937, owner 10-31).
 //
 // 시트다(`docs/design-system/phone-sheets.md` §1): 지금 화면을 두고 하는 짧은 일, 행동 하나. 작게 둔다: 제목, 버전과
-// 공개일, 한 문장 요약, **이 화면(폰)에서 보이는** 변화의 제목 몇 줄, 그리고 「자세히 보기」 한 줄. 항목의 바뀐 점·써
+// 공개일, 한 문장 요약, **이 화면(폰)에서 보이는** 변화의 제목(불릿), 그리고 「자세히 보기」 한 줄. 항목의 바뀐 점·써
 // 보는 방법은 설정의 버전별 내용에 있다. 닫는 길은 공용 시트의 것 그대로다(오른쪽 위 원형 X · 스크림 · 끌어내리기 ·
 // VoiceOver escape).
+//
+// 제목은 네 개까지 보이고, 넘치면 카드 안 맨 아래의 「더보기」 행(제자리 펼침 행 `ListRow accessory="expand"`)이 나머지를 **그
+// 자리에서** 펼친다(owner 11-04, #5298: 「그 밖에 N가지」로 접지 않는다). 다시 접지는 않는다: 행은 펼치는 순간 사라지므로
+// VoiceOver 초점이 길을 잃지 않게 처음 새로 선 항목으로 옮긴다(웹 대화상자와 같은 약속). 「더 들어간다」(›)는 아래 「자세히
+// 보기」 행이고, 「더보기」(⌄)는 이 자리에서 고르는 행이다(`ListRow` 가 둘을 가른다).
 //
 // 「자세히 보기」는 **시트를 먼저 내리고** 설정 페이지를 연다(`closesSheet`, §1 규칙 2: Modal 위에 화면을 쌓지 않는다).
 // 닫는 길이 하나(`onClose`)라서 「봤다」 기록은 거기서만 한다: X 로 닫든 「자세히 보기」로 닫든 같은 소식은 다시 안 뜬다.
 // =============================================================================
 
-/** 작은 시트에 제목을 몇 줄까지 보일까. 나머지는 「그 밖에 N가지」로 접는다. */
+/** 작은 시트에 제목을 몇 줄까지 처음 보일까. 넘치는 것은 「더보기」가 한 번에 펼친다. */
 const SHOWN_TITLES = 4;
+
+/** 「더보기」가 사라진 뒤 VoiceOver 초점을 처음 새 항목으로 옮기기까지: 네이티브 뷰가 서는 한 틱(`AttachMenu` 의 `focusDelayMs` 와 같다). */
+const FOCUS_AFTER_EXPAND_MS = 60;
+
+// testID 는 템플릿 문자열로 짓지 않는다: 직접 문구 장부(`direct-copy.mjs`)가 JSX 안의 템플릿 조각을 문구로 센다.
+const titleTestId = (id: string) => 'release-notes-title-' + id;
 
 const SHEET_TEST_ID = 'release-notes-sheet';
 
@@ -58,10 +70,21 @@ export function ReleaseNotesSheet({
   onOpenDetails: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {messages, noteLocale} = useReleaseNotesMessages();
+  const {messages} = useReleaseNotesMessages();
+  const [expanded, setExpanded] = useState(false);
+  const firstExtra = useRef<View>(null);
   const items = itemsForSurface(note, PHONE_SURFACE);
-  const shown = items.slice(0, SHOWN_TITLES);
-  const hidden = items.length - shown.length;
+  const folded = items.length > SHOWN_TITLES && !expanded;
+  const shown = folded ? items.slice(0, SHOWN_TITLES) : items;
+  // 눌린 「더보기」 행은 펼치는 순간 사라진다: 초점이 길을 잃지 않게 처음 새로 선 항목이 받는다(낭독이 그 항목부터 읽는다).
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const timer = setTimeout(() => {
+      const handle = findNodeHandle(firstExtra.current);
+      if (handle !== null) AccessibilityInfo.setAccessibilityFocus(handle);
+    }, FOCUS_AFTER_EXPAND_MS);
+    return () => clearTimeout(timer);
+  }, [expanded]);
   const title = messages.formatMessage('releaseNotes.popup.title');
   const closeLabel = messages.formatMessage('releaseNotes.popup.close');
   return (
@@ -87,24 +110,31 @@ export function ReleaseNotesSheet({
               {' · '}
               {note.releasedOn}
             </Text>
-            <Sentence style={styles.summary}>{note.summary[noteLocale]}</Sentence>
+            <Sentence style={styles.summary}>
+              {messages.formatMessage(note.summary)}
+            </Sentence>
             {shown.length > 0 ? (
               <View style={styles.titles} testID="release-notes-sheet-titles">
-                {shown.map(item => (
-                  <Sentence key={item.id} style={styles.itemTitle}>
-                    {item.copy[noteLocale].title}
-                  </Sentence>
+                {shown.map((item, index) => (
+                  <BulletLine
+                    key={item.id}
+                    ref={expanded && index === SHOWN_TITLES ? firstExtra : undefined}
+                    testID={titleTestId(item.id)}>
+                    {messages.formatMessage(item.title)}
+                  </BulletLine>
                 ))}
-                {hidden > 0 ? (
-                  <Sentence style={styles.more}>
-                    {messages.formatMessage('releaseNotes.popup.more', {
-                      count: hidden,
-                    })}
-                  </Sentence>
-                ) : null}
               </View>
             ) : null}
           </View>
+          {folded ? (
+            <ListRow
+              title={messages.formatMessage('releaseNotes.popup.showMore')}
+              accessory="expand"
+              expanded={expanded}
+              onPress={() => setExpanded(true)}
+              testID="release-notes-more"
+            />
+          ) : null}
         </GroupCard>
         <GroupCard>
           <ListRow
@@ -180,6 +210,4 @@ const buildStyles = (color: Palette) =>
     meta: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
     summary: {fontSize: font.body, lineHeight: line.body, color: color.text},
     titles: {gap: space.xs, paddingTop: space.xs},
-    itemTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
-    more: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
   });

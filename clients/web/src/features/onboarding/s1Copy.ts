@@ -5,7 +5,6 @@ export const S1_DETAIL = "우리 팀 이름과 내 이름부터 정해요.";
 export const S1_TROUBLE_LINE = "이름을 아직 저장하지 못했어요.";
 /** 다른 곳에서 이름이 먼저 바뀌었을 때(409). 배너가 두 선택지를 말한다. */
 export const S1_STALE_LINE = "그사이 누가 이름을 바꿨어요. 어느 쪽으로 할까요?";
-export const S1_OFFLINE_LINE = "연결이 끊겨서 잠깐 기다려요.";
 export const S1_PRIMARY_LABEL = "이름 저장";
 export const S1_PRIMARY_BUSY = "저장 중";
 export const S1_PRIMARY_RETRY = "다시 시도";
@@ -26,8 +25,6 @@ export const S1_FAILURE =
 export const S1_KEEP_THEIRS = "이 이름으로 유지";
 export const S1_KEEP_MINE = "내 이름으로 저장";
 export const S1_OFFLINE_NOTE_ID = "onboarding-s1-offline-note";
-export const S1_OFFLINE_REASON =
-  "연결이 끊겨 지금은 이름을 저장할 수 없습니다. 다시 연결되면 이어서 저장할 수 있습니다.";
 export const S1_HANDLE_ERROR_ID = "onboarding-s1-handle-error";
 export const S1_WORKSPACE_ERROR_ID = "onboarding-s1-workspace-error";
 export const S1_DISPLAY_ERROR_ID = "onboarding-s1-display-error";

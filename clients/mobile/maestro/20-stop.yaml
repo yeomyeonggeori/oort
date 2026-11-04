@@ -51,6 +51,26 @@ name: 20-stop
       id: "composer-working"
     timeout: 60000
 
+# #4620: the stop control moved from the old activity line into the sheet the rail
+# opens (the rail is one fixed-height line now — nothing with a button lives in it).
+# One extra tap opens that sheet; the control and its test ids are unchanged.
+- tapOn:
+    id: "composer-working"
+# The sheet is recognised by what is IN it, never by `composer-working-sheet` (#5286). That id is
+# PageSheet's `testID` prop, which PageSheet hands to React Native's <Modal>, and <Modal> puts it on
+# `RCTModalHostView` — a placeholder in the page's own hierarchy; the sheet's content is presented in a
+# view controller of its own. The placeholder is not an element in the accessibility tree XCUITest (and
+# so Maestro) reads, so the id never shows on a simulator however plainly the sheet is open (Jest finds
+# it because it walks the React tree, not the native one) and the 30s wait always ran out. With the sheet
+# up the native tree does hold `page-sheet` (named by the title), the close button, the scroll, the
+# agent's row and the stop control below. The close button exists only while this sheet is up; the
+# title is the sheet's own name (timeline.agentRail.sheetTitle).
+- extendedWaitUntil:
+    visible:
+      id: "composer-working-sheet-close"
+    timeout: 30000
+- assertVisible: "일하는 에이전트"
+
 # Arm. The control is two-tap on purpose, so the first tap must NOT cancel
 # anything — asserted by the fact that the confirm sentence is what appears next
 # and the turn is still running under it.

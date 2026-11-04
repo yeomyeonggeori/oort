@@ -1,0 +1,34 @@
+import type { useFormatMessage } from "@/i18n/useFormatMessage";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
+import { CONNECTION_KEYS, type ConnectionPlainKey } from "@momo/core/features/connection/copyKeys";
+import { causeOfFailure, causeOfUnknownFailure } from "@momo/core/features/connection/failure";
+import { copyForCause, type ConnectionCause } from "@momo/core/features/connection/model";
+
+// =============================================================================
+// 남은 「불러오지 못했습니다」 자리들이 함께 쓰는 순수 도우미 (#5242, #5221 후속). 컴포넌트는 `LoadFailureBox.tsx`에 있다.
+// =============================================================================
+
+/**
+ * 이 자리의 오류 객체 하나가 말하는 원인. 렌더 때 기기 온라인 여부를 읽는다(S-C 상자 자리들과 같다).
+ * 오류 객체를 **모르는** 자리(훅이 `isError`만 내놓거나 원천이 여럿이라 하나로 말할 수 없다)는 `null`을 넘기고, 그때는 기기가 아는
+ * 사실 하나만 안다: 꺼져 있으면 오프라인, 아니면 원인 없음(이유는 「문제가 생겼어요」). 오류 객체가 있는데 연결 쪽 원인이 아니면
+ * 기기 상태와 무관하게 원인 없음이다.
+ */
+export function loadCauseOf(error: unknown): ConnectionCause | null {
+  if (error === null || error === undefined) return causeOfUnknownFailure(deviceOnlineNow());
+  return causeOfFailure(error, deviceOnlineNow());
+}
+
+type FormatMessage = ReturnType<typeof useFormatMessage>;
+
+/** 제목 + 이유를 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀). 문자열만 받는 자리(설명·aria)에도 쓴다. */
+export function loadFailureSentence(
+  formatMessage: FormatMessage,
+  titleKey: ConnectionPlainKey,
+  cause: ConnectionCause | null
+): string {
+  return formatMessage(CONNECTION_KEYS.loadSentence, {
+    title: formatMessage(titleKey),
+    reason: formatMessage(copyForCause(cause).loadReason),
+  });
+}

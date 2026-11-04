@@ -28,6 +28,10 @@
 //      실제로 디코드된 그림)을 갖고, 타임라인 이미지는 라이트박스로 열려 Esc 로
 //      닫히며 포커스가 여는 버튼으로 돌아오고, PDF 카드는 머리가 `%PDF-` 인
 //      바이트만 `application/pdf` 로 재타입해 opener 없는 새 창에 건다.
+//   5c. 사진 hero      타임라인 이미지를 누르면 제자리 사진에서 커지고 닫으면 돌아간다(#4775).
+//      (#4775·#4841)  `gates/flows/photo-hero.mjs` 가 라이트·다크 × 앱의 큰 글자로 재는 것: hero 가 실제로
+//                        움직이고, 전환 중·뒤에 대화가 한 칸도 움직이지 않고, 확대한 채 Esc 한 번이 맞춤으로
+//                        돌아간 뒤 닫히고 포커스가 여는 버튼으로 돌아오며, 움직임 줄이기에는 hero 가 없다.
 //   6. **첨부 없는 경로가 그대로다** — 파일을 한 번도 안 붙인 메시지의 DOM에는
 //      첨부 노드가 하나도 없고, 컴포저의 전송 조건도 이전과 같다.
 //
@@ -49,6 +53,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { focusReturnsTo } from "./focus.mjs";
+import { exercisePhotoHero } from "./flows/photo-hero.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -101,6 +106,14 @@ function trayMaxPx() {
   return Number(match[1]);
 }
 
+/** 트레이 이미지 카드의 한 변(#5200)의 정본도 `tokens.css` 다. 썸네일은 그 두 배로 그려진다. */
+function trayCardPx() {
+  const css = readFileSync(resolve(webRoot, "src/design/tokens.css"), "utf8");
+  const match = css.match(/--spacing-tray-card:\s*(\d+)px/);
+  if (match === null) throw new Error("tokens.css의 --spacing-tray-card를 읽지 못했다");
+  return Number(match[1]);
+}
+
 /** 다음 행동 문구의 정본도 코어다 (design-review M-1). */
 function issueNext(issue) {
   const source = readFileSync(
@@ -135,6 +148,7 @@ function mimeLabelText() {
 
 const COPY = attachCopy();
 const TRAY_MAX = trayMaxPx();
+const TRAY_CARD = trayCardPx();
 const MIME_LABEL_TEXT = mimeLabelText();
 const MISMATCH_COPY = issueCopy("mismatch");
 const TOO_LARGE_COPY = issueCopy("too-large");
@@ -1117,6 +1131,44 @@ async function exerciseTimeline(browser) {
     (await card.getByTestId("attachment-download").count()) === 1,
     "카드에 내려받기가 없다"
   );
+  // 마우스가 떠나면 다시 접힌다: 호버가 행동을 붙들어 두지 않는다.
+  await page_.mouse.move(0, 0);
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "마우스가 떠났는데 내려받기가 카드에 남아 있다"
+  );
+  // 마우스로 눌러 준 초점은 키보드 초점이 아니다(`:focus-visible` 아님, `useRevealOnHover`). 누르고 떠나면 초점이 카드에
+  // 남아도 행동은 접힌다 — 이것이 켜지면 클릭 한 번이 행동을 영영 붙들어 둔다. 시험이 정말 「초점은 있고 키보드는 아님」을
+  // 만들었는지부터 잰다(못 만들면 아래 0 은 아무것도 지키지 못한다).
+  await card.click({ position: { x: 20, y: 8 } });
+  await page_.mouse.move(0, 0);
+  expect(
+    await card.evaluate((node) => document.activeElement === node && !node.matches(":focus-visible")),
+    "시험이 카드에 마우스 초점(키보드 아님)을 만들지 못했다"
+  );
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "마우스로 준 초점이 내려받기를 붙들어 둔다"
+  );
+  // 키보드로 오면 호버 없이도 선다. 진짜 Tab 한 번으로 입력 방식을 키보드로 만든 뒤 `focus()` 한다(마우스로 간 초점은 안 서는 것이
+  // 위에서 확인됐으니 같은 카드를 다시 키보드 초점으로 가져간다).
+  await page_.evaluate(() => document.activeElement?.blur());
+  await page_.keyboard.press("Tab");
+  await card.focus();
+  expect(
+    await card.evaluate((node) => document.activeElement === node && node.matches(":focus-visible")),
+    "시험이 카드에 키보드 초점(:focus-visible)을 만들지 못했다"
+  );
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 1,
+    "키보드 초점을 받은 카드에 내려받기가 서지 않는다"
+  );
+  // 초점이 떠나면(마우스도 없다) 다시 접힌다.
+  await page_.getByTestId("composer-input").focus();
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "초점이 떠났는데 내려받기가 카드에 남아 있다"
+  );
 
   const imageRow = page_.locator(
     `[data-testid="timeline-message"][data-message-id="${IMAGE_MSG.toLowerCase()}"]`
@@ -1196,14 +1248,23 @@ async function exercisePreview(browser) {
     height: img.getBoundingClientRect().height,
   }));
   expect(thumbFacts.src.startsWith("data:image/png"), "트레이 썸네일이 data: 가 아니다");
-  // 트레이 썸네일 한 변은 64px(`--spacing-tray-thumb`)이고 레티나용으로 그 두 배인 128px 정사각형으로 디코드한다
-  // (draftThumbnail.ts). 옛 48px/96px 값은 칩이 작던 때의 것이다(#5048).
-  expect(thumbFacts.natural === 128, `썸네일이 128px 로 그려지지 않았다 (${thumbFacts.natural})`);
+  // #5200: 카드 한 변은 `--spacing-tray-card` 이고, 캔버스는 그 두 배(레티나에서 흐리지 않게)다.
   expect(
-    thumbFacts.width === 64 && thumbFacts.height === 64,
-    `썸네일 상자가 64px 정사각형이 아니다 (${thumbFacts.width}x${thumbFacts.height})`
+    thumbFacts.natural === TRAY_CARD * 2,
+    `썸네일이 카드(${TRAY_CARD}px)의 2배로 그려지지 않았다 (${thumbFacts.natural})`
   );
-  await clearDrafts(page_);
+  // 정사각형인 것은 카드다(그림은 카드의 1px 테두리 안쪽).
+  const cardBox = await page_.getByTestId("attachment-chip").first().boundingBox();
+  expect(
+    cardBox.width === TRAY_CARD && cardBox.height === TRAY_CARD,
+    `이미지 카드가 ${TRAY_CARD}px 정사각형이 아니다 (${cardBox.width}x${cardBox.height})`
+  );
+  expect(
+    thumbFacts.width >= TRAY_CARD - 2 && thumbFacts.height >= TRAY_CARD - 2,
+    `썸네일이 카드를 채우지 않는다 (${thumbFacts.width}x${thumbFacts.height})`
+  );
+  // 하나뿐이면 「모두 지우기」는 서지 않는다(넷부터). 카드의 ×로 뺀다.
+  await page_.getByTestId("attachment-chip-remove").click();
 
   // ② 라이트박스: 열고, Esc 로 닫고, 포커스가 여는 버튼으로 돌아온다.
   const imageRow = page_.locator(
@@ -1282,6 +1343,97 @@ async function exercisePreview(browser) {
   await context.close();
   console.log("[6b] 트레이 썸네일은 data: 로 서고, 라이트박스는 Esc·포커스 복귀를 지키고,");
   console.log("     PDF 는 opener 없는 application/pdf 창으로 열린다 (#2701)");
+}
+
+// ---- #4775·#4841. 사진 열기·닫기 hero 전환 --------------------------------
+//
+// `gates/flows/photo-hero.mjs` 는 「인증된 대화 화면」과 「그 사진의 여는 버튼」만 받는 흐름인데 어느 게이트에도 이어져
+// 있지 않았다(#4841). 이 판이 그 둘을 댄다: 같은 목 서버·같은 대화에서 라이트·다크 각각 한 번, 앱의 큰 글자
+// (`data-font-size="larger"`) 상태로. 컨텍스트는 `no-preference` 로 연다 — 타임라인·미리보기 구역의 `reduce` 는 전환 없이
+// 즉시 열려야 그쪽 측정이 서기 때문에 일부러이고, hero 는 움직임이 켜진 화면에서만 잴 수 있다(흐름이 안에서 reduce 로도 바꿔 잰다).
+// 흐름이 던지는 AssertionError·시간 초과는 어느 줄에서 어느 배색으로 깨졌는지 이 게이트의 말로 다시 던진다.
+
+async function exerciseHero(browser) {
+  const shotsDir = resolve(webRoot, "artifacts/attachment");
+  for (const scheme of ["light", "dark"]) {
+    const archive = createArchive();
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      colorScheme: scheme,
+      reducedMotion: "no-preference",
+    });
+    const page_ = await context.newPage();
+    // 흐름 안의 기다림이 기본 마감(30초) 끝까지 매달려 있지 않게 한다. 로컬 부하가 높을 때도 15초면 넉넉하다.
+    page_.setDefaultTimeout(15_000);
+    await installRealtimeSocket(page_);
+    await installRoutes(context, archive);
+    await login(page_);
+    // 앱의 큰 글자(설정 > 글자 크기). 부트가 저장값을 찍은 뒤에 켠다(`gate-channel-header-fit` 과 같은 길).
+    await page_.evaluate(() =>
+      document.documentElement.setAttribute("data-font-size", "larger")
+    );
+    await openChannel(page_);
+
+    const imageRow = page_.locator(
+      `[data-testid="timeline-message"][data-message-id="${IMAGE_MSG.toLowerCase()}"]`
+    );
+    await imageRow.waitFor({ timeout: 10_000 });
+    // 사진이 디코드돼 자리가 정해진 뒤에야 hero 가 출발 자리를 안다. 디코드 직후의 레이아웃(onLoad → 자연 크기)이 끝나길
+    // 두 프레임 더 기다린다 — 흐름의 「대화가 움직이지 않았다」 측정은 그 뒤부터다.
+    await page_.waitForFunction(
+      (id) => {
+        const img = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"] [data-testid="attachment-image"] img`
+        );
+        return img !== null && img.complete && img.naturalWidth > 0;
+      },
+      IMAGE_MSG.toLowerCase(),
+      { timeout: 15_000 }
+    );
+    await page_.evaluate(
+      () =>
+        new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done))
+        )
+    );
+    expect(
+      (await page_.evaluate(() => document.documentElement.getAttribute("data-font-size"))) === "larger",
+      "큰 글자 상태가 흐름이 돌기 전에 풀렸다"
+    );
+
+    const opener = imageRow.locator('[data-testid="attachment-image"] button').first();
+    // 전환 중간 프레임은 캡처 모드에서만 남긴다(artifacts/ 는 git 이 무시한다).
+    let midFrame;
+    if (process.env.ATTACH_GATE_SHOTS === "1") {
+      mkdirSync(shotsDir, { recursive: true });
+      midFrame = resolve(shotsDir, `hero-mid-${scheme}.png`);
+    }
+    try {
+      await exercisePhotoHero(page_, opener, { midFrame });
+    } catch (error) {
+      // 흐름의 시간 초과는 어느 기다림인지 말해 주지 않는다(전부 `waitForFunction`). 깨진 순간의 화면 상태를 함께 적는다:
+      // hero 가 안 떴으면 「라이트박스 없음·.stage-hero 0」, 포커스가 안 돌아왔으면 「라이트박스 없음·초점 body」.
+      const at = await page_
+        .evaluate(() => {
+          const active = document.activeElement;
+          const id = active?.getAttribute("data-testid");
+          return {
+            lightbox:
+              document.querySelector('[data-testid="image-lightbox"]')?.getAttribute("data-stage-phase") ?? "없음",
+            hero: document.querySelectorAll(".stage-hero").length,
+            focus: `${active?.tagName.toLowerCase() ?? "?"}${id ? `[${id}]` : ""}`,
+          };
+        })
+        .catch(() => null);
+      fail(
+        `사진 hero 흐름이 ${scheme} 에서 깨졌다: ${error instanceof Error ? error.message : String(error)}` +
+          (at === null ? "" : ` (그때 라이트박스 ${at.lightbox} · .stage-hero ${at.hero}개 · 초점 ${at.focus})`)
+      );
+    }
+    await context.close();
+  }
+  console.log("[5c] 사진 hero: 라이트·다크 × 큰 글자에서 hero 가 움직이고, 대화는 움직이지 않고,");
+  console.log("     확대한 채 Esc 한 번이 맞춤으로 돌아간 뒤 닫히며 포커스가 돌아오고, 움직임 줄이기엔 hero 가 없다 (#4775)");
 }
 
 // ---- B-3. 막대는 실제로 움직이고, 100%를 먼저 말하지 않는다 ------------------
@@ -1483,6 +1635,8 @@ async function exerciseOverflow(browser) {
     return {
       listClient: list.clientHeight,
       listScroll: list.scrollHeight,
+      listClientW: list.clientWidth,
+      listScrollW: list.scrollWidth,
       trayHeight: Math.round(tray.getBoundingClientRect().height),
       composerHeight: Math.round(composer.getBoundingClientRect().height),
       windowHeight: window.innerHeight,
@@ -1494,9 +1648,15 @@ async function exerciseOverflow(browser) {
     measured.listClient <= TRAY_MAX + 1,
     `트레이 목록이 상한(${TRAY_MAX}px)을 넘었다: ${measured.listClient}px`
   );
+  // #5200: 카드는 입력창 안 **한 줄**이다. 20개를 채우면 줄바꿈으로 자라는 것이 아니라 가로로 밀린다.
+  // 그래서 앞 판의 「세로로 스크롤한다」는 단정은 「세로로 자라지 않고 가로로 넘친다」로 바뀌었다.
   expect(
-    measured.listScroll > measured.listClient,
-    "20개가 상한 안에 다 들어갔다 — 이 판이 재려던 상황이 아니다"
+    measured.listScroll <= measured.listClient + 1,
+    `카드가 한 줄을 넘어 세로로 자랐다 (${measured.listScroll}/${measured.listClient}px)`
+  );
+  expect(
+    measured.listScrollW > measured.listClientW + 4,
+    "20개가 한 줄에 다 들어갔다 — 이 판이 재려던 상황이 아니다"
   );
   expect(
     measured.composerHeight < measured.windowHeight,
@@ -1531,7 +1691,7 @@ async function exerciseOverflow(browser) {
 
   await context.close();
   console.log(
-    `[B-2] 트레이 ${measured.trayHeight}px (목록 ${measured.listClient}/${measured.listScroll}), ` +
+    `[B-2] 트레이 ${measured.trayHeight}px (한 줄 ${measured.listClient}px · 가로 ${measured.listClientW}/${measured.listScrollW}), ` +
       `컴포저 ${measured.composerHeight} < 창 ${measured.windowHeight}, 대화 ${measured.messages}행 유지`
   );
   console.log(
@@ -1685,13 +1845,12 @@ async function captureShots(browser) {
         scheme,
         completeStatus: 409,
       });
-      // 행 액션 → 「답글 달기」. 이 표면으로 가는 길은 그것 하나다.
+      // 행 도구 막대 → 「답글 달기」. 이 표면으로 가는 길은 그것 하나다(#5192: 답글은 도구 막대의 몫이라 ⋮ 메뉴에는 없다).
       const row = page_.locator(
         `[data-testid="timeline-message"][data-message-id="${FILE_MSG.toLowerCase()}"]`
       );
       await row.hover();
-      await row.getByTestId("message-actions-trigger").click();
-      await page_.getByTestId("menu-reply").click();
+      await row.getByTestId("toolbar-reply").click();
       await page_.getByTestId("thread-composer-input").waitFor({ timeout: 15_000 });
       await page_
         .locator('[data-testid="thread-composer"] input[type="file"]')
@@ -1791,6 +1950,8 @@ async function captureShots(browser) {
       const pdfRow = page_.locator(
         `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
       );
+      // 열기는 카드 위에 마우스가 있거나 키보드 초점이 있을 때만 선다(Buzz식 호버 노출). 캡처 판만 이 줄이 따라가지 못하고 있었다.
+      await pdfRow.getByTestId("attachment-card").hover();
       await pdfRow.getByTestId("attachment-open-pdf").click();
       await page_.waitForFunction(
         () =>
@@ -1843,13 +2004,18 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      await exerciseComposer(browser);
-      await exerciseProgress(browser);
-      await exerciseNarrow(browser);
-      await exerciseOverflow(browser);
-      await exerciseFailure(browser);
-      await exerciseTimeline(browser);
-      await exercisePreview(browser);
+      // ATTACH_GATE_ONLY=composer,progress,narrow,overflow,failure,timeline,preview,hero 로 구역을 고른다
+      // (#5200: 타임라인 구역이 따로 낡아 있어 컴포저 쪽만 돌릴 길이 필요했다). 비우면 전부다.
+      const only = (process.env.ATTACH_GATE_ONLY ?? "").split(",").filter(Boolean);
+      const run = (name, section) => (only.length === 0 || only.includes(name) ? section(browser) : undefined);
+      await run("composer", exerciseComposer);
+      await run("progress", exerciseProgress);
+      await run("narrow", exerciseNarrow);
+      await run("overflow", exerciseOverflow);
+      await run("failure", exerciseFailure);
+      await run("timeline", exerciseTimeline);
+      await run("preview", exercisePreview);
+      await run("hero", exerciseHero);
       if (process.env.ATTACH_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();

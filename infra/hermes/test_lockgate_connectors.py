@@ -131,10 +131,10 @@ class ConnectorRules(unittest.TestCase):
         cfg = healthy()
         cfg["web"] = {"search_backend": "openai-native", "keyless_fallback": False}
         self.assertEqual(self.problems(cfg), [])
-        self.assertEqual(lockgate.tool_problems(cfg, {"memory", "todo_list", "session_search"}), [])
+        self.assertEqual(lockgate.tool_problems(cfg, {"todo_list"}), [])
         for tool in ("web_search", "web_extract"):
             with self.subTest(tool=tool):
-                self.assertOnly(lockgate.tool_problems(cfg, {"memory", tool}), "connector mode forbids all web")
+                self.assertOnly(lockgate.tool_problems(cfg, {"todo_list", tool}), "connector mode forbids all web")
 
     def test_selected_image_tool_is_refused_even_with_the_connector_deny_list(self):
         # ADR-0203 augmentation (#4820, I3): the image tool is a model-chosen outbound call (a prompt, reference images
@@ -142,8 +142,8 @@ class ConnectorRules(unittest.TestCase):
         cfg = healthy()
         cfg["image_gen"] = {"provider": "openai-codex"}
         self.assertEqual(self.problems(cfg), [])
-        self.assertEqual(lockgate.tool_problems(cfg, {"memory", "todo_list", "session_search"}), [])
-        self.assertOnly(lockgate.tool_problems(cfg, {"memory", "image_generate"}), "connector mode forbids image generation")
+        self.assertEqual(lockgate.tool_problems(cfg, {"todo_list"}), [])
+        self.assertOnly(lockgate.tool_problems(cfg, {"todo_list", "image_generate"}), "connector mode forbids image generation")
 
     def test_the_app_id_to_server_key_rule(self):
         self.assertEqual(lockgate.app_server_key("com.momo.plugins.google-calendar"), "google_calendar")

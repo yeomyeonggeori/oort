@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { GithubReturnLanding } from "@/features/github/GithubReturnLanding";
 import { GithubHandoffPage } from "@/features/github/GithubHandoffPage";
@@ -7,6 +7,7 @@ import { isGithubHandoffPath } from "@/features/github/handoff";
 import { githubReturnFromSearch } from "@momo/core/features/github/model";
 import { queryClient } from "@/app/queryClient";
 import { SessionProvider, useRestoredSession } from "@/app/session";
+import { ConnectionProvider } from "@/features/common/connectionModel";
 import {
   createRealtime,
   resolveSpikeRealtimeUrl,
@@ -51,7 +52,10 @@ import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
 import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 import { CliConsentRoute } from "@/features/cliLogin/CliConsentRoute";
 import { isCliConsentPath } from "@/features/cliLogin/cliConsentPath";
-import type { LoginResponse, Member } from "@momo/core/lib/api";
+import { restoreSession, type LoginResponse, type Member } from "@momo/core/lib/api";
+import { SessionNotice } from "@/app/SessionNotice";
+import { hasPersistedSession } from "@/lib/session";
+import { clearSessionNotices } from "@/lib/sessionNotice";
 import { FirstAgentStage } from "@/features/welcome/FirstAgentStage";
 import { readFirstAgentCapturePoseFromLocation } from "@/features/welcome/firstAgent";
 import { AiConnectReentryRoute } from "@/features/welcome/AiConnectReentryRoute";
@@ -154,7 +158,10 @@ function FirstRunSession({
         replaceSessionMember,
       }}
     >
-      <HashRouter>{children}</HashRouter>
+      {/* 첫 실행 화면의 쓰기 게이트(`useOffline`)도 같은 연결 상태 모델을 읽는다(#5220). 셸과 같은 입력을 넣는 한 벌이다. */}
+      <ConnectionProvider>
+        <HashRouter>{children}</HashRouter>
+      </ConnectionProvider>
     </SessionProvider>
   );
 }
@@ -165,6 +172,13 @@ function FirstRunSession({
 export function App() {
   const { status, session, signIn, signOut, replaceSessionMember } =
     useRestoredSession();
+  // 로그인 화면 위 「서버에 닿지 못했어요」의 다시 시도(#5221): 저장된 로그인으로 복원을 한 번 더 시도한다. 회전은 한 번에 하나만
+  // 날아간다(`rotationInFlight`)라서 처음 시도가 아직 끝나지 않았어도 같은 요청에 합류한다.
+  const retryRestore = useCallback(async () => {
+    const restored = await restoreSession();
+    if (restored) signIn(restored);
+    else if (!hasPersistedSession()) clearSessionNotices();
+  }, [signIn]);
   const [firstRunTick, setFirstRunTick] = useState(0);
   // GitHub 에서 돌아온 주소의 단어(`?githubApp=`·`?githubInstall=`)는 첫 렌더에 한 번만 읽어 붙든다.
   // 로그인 안 된 브라우저의 착지가 읽은 뒤 주소에서 지우기 때문이다(#4220). 로그인된 브라우저는 이
@@ -274,7 +288,12 @@ export function App() {
         </HashRouter>
       );
     }
-    return <ConnectPage onLoggedIn={signIn} />;
+    return (
+      <>
+        <SessionNotice onRetryRestore={retryRestore} />
+        <ConnectPage onLoggedIn={signIn} />
+      </>
+    );
   }
 
   // ADR-0181 kickoff lives in the welcome channel, so a fresh signup holds the

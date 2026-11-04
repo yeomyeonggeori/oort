@@ -20,7 +20,9 @@
 //! * the Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`, every
 //!   authenticated route). What replaced it is narrower on purpose: the per-member
 //!   **write** budget at the bottom of this file (#4234, ADR-0208 D10 증보), mounted
-//!   on the five write endpoints (three surfaces) a member can flood. Reads and the
+//!   on the five write endpoints (three surfaces) a member can flood, and spent in the
+//!   handler, only when a request makes this server fetch from a remote site, by the
+//!   two unfurl proxy reads (#4881, [`MemberWrite::UnfurlProxy`]). Other reads and the
 //!   streaming `PATCH` have no per-member budget;
 //! * the per-IP `audit_log` row. Swift never writes it for the per-IP axis either
 //!   (:186-195), because that axis runs before any principal exists and
@@ -554,7 +556,9 @@ pub(crate) async fn per_ip_refused(
 
 /// [`per_ip_refused`] for a surface whose one refusal is a different status. `refused` is the
 /// status that spends the address's budget; every other answer — a served response above all —
-/// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404.
+/// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404. (Since #5072 one thing it
+/// answers is not charged: an archive that failed behind a token that was already spent is a 502 — it is not a
+/// guess, and a storage outage must not lock a workspace's pictures out.)
 ///
 /// `scope` splits one surface's budget further than the address: `Some(scope)` is a second part of
 /// the key (`{key_prefix}:{scope}:{ip}`), so two scopes on one address never share a budget. The
@@ -632,7 +636,8 @@ fn refused_key(key_prefix: &str, scope: Option<&str>, ip: &str) -> String {
 /// `GET /v1/self-media/{ws}/{token}` answers one 404 for everything it refuses (unknown, other
 /// workspace, expired, spent, run over, not the requester's file). Only that 404 spends the
 /// budget, and a key whose budget is spent is turned away (429 + `Retry-After`) before the handler
-/// and its database transaction run. A served picture spends nothing.
+/// and its database transaction run. A served picture spends nothing, and neither does the 502 a caller who
+/// has already spent a good token is told when the archive behind it failed (#5072, ADR-0151 증보 6).
 ///
 /// **Its own limit, split by the workspace in the path** (security review L7). The co-hosted
 /// Hermes reaches the api from one address for every workspace, and its picture tool lets any
@@ -816,6 +821,35 @@ pub enum MemberWrite {
     ScheduledWrite,
     /// `POST …/channels/{ch}/attachments/uploads`.
     UploadStart,
+    /// `PUT …/channels/{ch}/attachments/{id}/media` (ADR-0151 증보 5 D5, #4673 review M-1): a video's
+    /// length, size and poster. One accepted request writes up to 256 KiB into Postgres (a replace
+    /// writes it again) and reads the object's first bytes from the archive, and an upload start
+    /// does one Drive call: the two are the same kind of write and get the same size of budget, in a
+    /// key space of their own, so a person who is uploading videos cannot be refused a media write
+    /// by the uploads they have started, or the other way round. Refused requests count too — the
+    /// gate runs before the body is read.
+    MediaWrite,
+    /// `GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`: reads, but reads that can make
+    /// this server GET a site the caller's card names. Spent in the handler, **not** by a route
+    /// layer, and only by a request that really would fetch (no cached picture, no recent failure
+    /// remembered: `momo_unfurl::proxy_goes_outbound`), so rendering a timeline of cached cards
+    /// costs nothing and the budget is what stops a member from using the proxy to knock on third
+    /// parties' doors (#4881 security review M-2, ADR-0170 증보 D13). A request turned away for want
+    /// of a place to fetch (`ProxyError::Busy`) is given its unit back ([`refund_member_write`]):
+    /// nothing left the building.
+    UnfurlProxy,
+    /// `POST …/expressions/photo-drafts` (ADR-0218 §8 H9, #4941): a start may end in one call
+    /// to the team's image model. A short-window guard on starts, not an allowance: how many
+    /// pictures a team may draw is the team's own decision (#4944).
+    PhotoDraft,
+    /// `POST …/channels/{ch}/unfurl-previews`: a link a member typed into the composer, asked about
+    /// **before** the message exists (ADR-0170 증보 2026-11-01 D20, #4884). The one request where
+    /// the member names the address this server will GET and the answer comes straight back, so
+    /// the budget is smaller than the proxy's and counts only a request that really fetches (an
+    /// answer the server already holds, a switch that is off, and a request turned away for want
+    /// of a place spend nothing). Spent in the handler, like [`MemberWrite::UnfurlProxy`], and a
+    /// request turned away for want of a place gets its unit back ([`refund_member_write`]).
+    UnfurlPreview,
 }
 
 impl MemberWrite {
@@ -826,6 +860,10 @@ impl MemberWrite {
             MemberWrite::MessageSend => "message_send",
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
+            MemberWrite::MediaWrite => "media_write",
+            MemberWrite::UnfurlProxy => "unfurl_proxy",
+            MemberWrite::PhotoDraft => "photo_draft",
+            MemberWrite::UnfurlPreview => "unfurl_preview",
         }
     }
 
@@ -836,6 +874,10 @@ impl MemberWrite {
             MemberWrite::MessageSend => "write:send",
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
+            MemberWrite::MediaWrite => "write:media",
+            MemberWrite::UnfurlProxy => "write:unfurl",
+            MemberWrite::PhotoDraft => "write:photo",
+            MemberWrite::UnfurlPreview => "write:unfurl_preview",
         }
     }
 }
@@ -862,6 +904,10 @@ pub fn member_write_limit(
         }
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+        (MemberWrite::MediaWrite, _) => config.media_write_per_member_limit,
+        (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
+        (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
+        (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
     }
 }
 
@@ -914,16 +960,43 @@ pub(crate) async fn spend_member_write(
     surface: MemberWrite,
     principal: &Principal,
 ) -> Result<(), u64> {
+    spend_member_write_unit(state, surface, principal)
+        .await
+        .map(|_| ())
+}
+
+/// One unit of a member's budget that a request spent, kept so the request can give it back
+/// ([`refund_member_write`]) when the work it paid for did not happen.
+#[derive(Debug)]
+pub(crate) struct SpentUnit {
+    key: String,
+    at: Instant,
+}
+
+/// [`spend_member_write`] that also says which unit it spent: `Ok(Some(unit))` for a counted
+/// request, `Ok(None)` when the surface has no budget (limit 0) and nothing was counted.
+///
+/// For a caller that spends **before** the work and must hand the unit back when the work is
+/// turned away for a reason that is not the member's doing (the link-card proxy's `Busy`).
+pub(crate) async fn spend_member_write_unit(
+    state: &AppState,
+    surface: MemberWrite,
+    principal: &Principal,
+) -> Result<Option<SpentUnit>, u64> {
     let config = &state.rate_limit.config;
     let limit = member_write_limit(config, surface, principal.kind);
     if limit == 0 {
-        return Ok(());
+        return Ok(None);
     }
     let key = member_write_key(surface, principal.member_id);
     let window = Duration::from_secs(config.window_seconds);
-    let verdict = state.rate_limit.member_writes.check(&key, limit, window);
+    let at = Instant::now();
+    let verdict = state
+        .rate_limit
+        .member_writes
+        .check_at(&key, limit, window, at);
     if verdict.allowed {
-        return Ok(());
+        return Ok(Some(SpentUnit { key, at }));
     }
     // Only the first denial of a burst owns a reservation, so a flood of parallel refusals has
     // exactly one request that goes on to the database.
@@ -931,6 +1004,13 @@ pub(crate) async fn spend_member_write(
         record_member_write_denial(state, principal, surface, limit, &key, reservation).await;
     }
     Err(verdict.retry_after_seconds)
+}
+
+/// Take back the unit [`spend_member_write_unit`] counted, as if the request had not been
+/// counted: the member's budget is what it was before. A unit that has already left the window
+/// is gone and this does nothing.
+pub(crate) fn refund_member_write(state: &AppState, unit: SpentUnit) {
+    state.rate_limit.member_writes.forget_at(&unit.key, unit.at);
 }
 
 /// The audit half of a first denial. Never fails the request: an audit that cannot
@@ -1215,6 +1295,131 @@ impl PasswordGuessBudget for AccountGuessBudget {
     }
 }
 
+// ---------------------------------------------------------------------------
+// #4596 — the operator's reissue budget and the refusal's audit slot (ADR-0215 D6, D9)
+// ---------------------------------------------------------------------------
+//
+// `POST …/members/{member}/password-reset` asks the operator for their own current
+// password, so every request to it is a guess at that password. The budget is spent
+// **first**, before the standing or the body or the password is looked at, and a right
+// password costs one like a wrong one: the limiter is atomic, so counting at admission is
+// the only way N parallel guesses cannot all pass a "not yet exhausted" look.
+//
+// **Whose budget.** The operator's: the member making the request, and nothing else. Not a
+// sign-in lineage — a stolen session can start new lineages without limit, so a lineage key
+// would not limit guessing — not the target and not the caller's address. The cost is named in
+// [`RateLimitConfig::password_reset_issue_per_admin_limit`]: whoever holds a stolen operator
+// session can use that operator's reissues up for the window, and the other owners and admins
+// can still issue.
+//
+// **No off switch.** 0 (or garbage) is the default in the config and again here, so a
+// `RateLimitConfig` built by hand with 0 cannot silently unbudget a guessable surface.
+//
+// State is the shared in-process limiter: reset by a restart, not shared between replicas —
+// the contract of every limiter in this file.
+
+/// The key one operator's reissue requests are counted under. A function, not an inline
+/// `format!`, so the budget and its tests spend the same key.
+pub(crate) fn password_reset_issue_key(operator_id: Uuid) -> String {
+    format!("pwreset-issue:member:{operator_id}")
+}
+
+/// Spend one request of `operator_id`'s reissue budget, now. `Err` is the 429.
+pub(crate) fn admit_password_reset_issue(
+    state: &RateLimitState,
+    operator_id: Uuid,
+) -> Result<(), ApiError> {
+    admit_password_reset_issue_at(state, operator_id, Instant::now())
+}
+
+fn admit_password_reset_issue_at(
+    state: &RateLimitState,
+    operator_id: Uuid,
+    now: Instant,
+) -> Result<(), ApiError> {
+    let limit = match state.config.password_reset_issue_per_admin_limit {
+        0 => RateLimitConfig::default().password_reset_issue_per_admin_limit,
+        limit => limit,
+    };
+    let window_seconds = state.config.window_seconds;
+    let verdict = state.limiter.check_at(
+        &password_reset_issue_key(operator_id),
+        limit,
+        Duration::from_secs(window_seconds),
+        now,
+    );
+    if verdict.allowed {
+        return Ok(());
+    }
+    if verdict.should_log {
+        // One line per burst, and nothing but the operator's id (not a secret) and the
+        // reason: no workspace address, no target, nothing the request sent.
+        tracing::warn!(
+            member_id = %operator_id,
+            limit,
+            window_seconds,
+            "operator password-reset issue requests are over budget"
+        );
+    }
+    let mut refused = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
+    refused.retry_after_seconds = Some(verdict.retry_after_seconds);
+    Err(refused)
+}
+
+/// The one `member.password_reset.refused` row a window of wrong operator passwords may
+/// leave per operator (ADR-0215 D9). The same shape as [`audit_denial_once`]'s slot: an
+/// `audit:` key admitting one request per window, taken **before** the row is written and
+/// handed back unless the row was committed ([`RefusalAuditSlot::written`]), so a write that
+/// failed, or a request dropped mid-write, does not use the window's only row up.
+///
+/// A flood of wrong passwords is bounded twice: by the reissue budget (5 a window) and by
+/// this slot (one row a window). The member, not the sign-in lineage, is what a slot is for.
+///
+/// It owns the state by `Arc` rather than borrowing it, so the task that writes the row
+/// (see `routes::password::record_wrong_operator_password`) can carry the slot with it: a
+/// task that panics gives the slot back while it unwinds, like [`SlotClaim`].
+pub(crate) struct RefusalAuditSlot {
+    state: Arc<RateLimitState>,
+    slot: String,
+    at: Instant,
+    written: bool,
+}
+
+impl RefusalAuditSlot {
+    /// Take this operator's slot for the current window, or `None` when the window's row
+    /// has already been spoken for.
+    pub(crate) fn take(state: &Arc<RateLimitState>, operator_id: Uuid) -> Option<Self> {
+        Self::take_at(state, operator_id, Instant::now())
+    }
+
+    fn take_at(state: &Arc<RateLimitState>, operator_id: Uuid, now: Instant) -> Option<Self> {
+        let slot = format!("audit:{}", password_reset_issue_key(operator_id));
+        let window = Duration::from_secs(state.config.window_seconds);
+        if !state.limiter.check_at(&slot, 1, window, now).allowed {
+            return None;
+        }
+        Some(RefusalAuditSlot {
+            state: Arc::clone(state),
+            slot,
+            at: now,
+            written: false,
+        })
+    }
+
+    /// The row committed: the slot stays taken for the rest of the window.
+    pub(crate) fn written(mut self) {
+        self.written = true;
+    }
+}
+
+impl Drop for RefusalAuditSlot {
+    fn drop(&mut self) {
+        if !self.written {
+            self.state.limiter.forget_at(&self.slot, self.at);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1462,13 +1667,17 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Four different numbers, so a swapped field cannot pass by coincidence.
+    /// Different numbers for every surface, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
             message_send_per_agent_limit: 22,
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
+            unfurl_proxy_per_member_limit: 55,
+            photo_draft_per_member_limit: 66,
+            unfurl_preview_per_member_limit: 77,
+            media_write_per_member_limit: 88,
             ..RateLimitConfig::default()
         }
     }
@@ -1495,6 +1704,26 @@ mod tests {
                 44,
                 "an agent bearer cannot reach this route today; if one ever does it is held to a budget, not exempt"
             );
+            assert_eq!(
+                limit(MemberWrite::UnfurlProxy, kind),
+                55,
+                "the proxy budget is one number for every credential"
+            );
+            assert_eq!(
+                limit(MemberWrite::PhotoDraft, kind),
+                66,
+                "a photo start has one limit whoever asks"
+            );
+            assert_eq!(
+                limit(MemberWrite::UnfurlPreview, kind),
+                77,
+                "the preview budget is its own number, not the proxy's"
+            );
+            assert_eq!(
+                limit(MemberWrite::MediaWrite, kind),
+                88,
+                "a media write has one limit whoever asks, and it is not the upload start's"
+            );
         }
     }
 
@@ -1507,13 +1736,17 @@ mod tests {
             (MemberWrite::MessageSend, "message_send"),
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
+            (MemberWrite::UnfurlProxy, "unfurl_proxy"),
+            (MemberWrite::PhotoDraft, "photo_draft"),
+            (MemberWrite::UnfurlPreview, "unfurl_preview"),
+            (MemberWrite::MediaWrite, "media_write"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 3);
+        assert_eq!(keys.len(), 7);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),
@@ -2175,6 +2408,106 @@ mod tests {
                 )
                 .allowed,
             "on a shared map a 60 s sweep forgets an hour-long bucket — why the budget is a type"
+        );
+    }
+
+    // -- #4596 the operator's reissue budget and the refusal's audit slot ---------------------
+
+    fn reissue_state(limit: u32) -> RateLimitState {
+        RateLimitState {
+            config: RateLimitConfig {
+                password_reset_issue_per_admin_limit: limit,
+                ..RateLimitConfig::default()
+            },
+            limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
+        }
+    }
+
+    fn shared_reissue_state(limit: u32) -> Arc<RateLimitState> {
+        Arc::new(reissue_state(limit))
+    }
+
+    /// The limit admits exactly that many requests per operator and window — the next one is
+    /// the 429, with a truthful `Retry-After` — and one operator's spent budget refuses nobody
+    /// else (the key is the member, ADR-0215 D6).
+    #[test]
+    fn an_operator_may_ask_for_exactly_their_limit_and_nobody_elses_budget_moves() {
+        let state = reissue_state(2);
+        let (operator, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        assert!(admit_password_reset_issue_at(&state, operator, start).is_ok());
+        assert!(admit_password_reset_issue_at(&state, operator, start).is_ok());
+        let refused = admit_password_reset_issue_at(&state, operator, start)
+            .expect_err("the third request in the window is over budget");
+        assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            refused
+                .retry_after_seconds
+                .is_some_and(|seconds| seconds > 0),
+            "a 429 that says when to come back, never 0"
+        );
+        assert!(
+            admit_password_reset_issue_at(&state, other, start).is_ok(),
+            "another operator has a budget of their own"
+        );
+        assert!(
+            admit_password_reset_issue_at(&state, operator, start + Duration::from_secs(61))
+                .is_ok(),
+            "the window slid, so the operator has room again"
+        );
+        assert_eq!(
+            password_reset_issue_key(operator),
+            format!("pwreset-issue:member:{operator}"),
+            "the key is the member and nothing else — never a lineage"
+        );
+    }
+
+    /// A budget of 0 in a hand-built config is not "off": it is the default.
+    #[test]
+    fn a_zero_reissue_budget_is_the_default_not_an_off_switch() {
+        let state = reissue_state(0);
+        let operator = Uuid::new_v4();
+        let start = Instant::now();
+        let admitted = (0..100)
+            .take_while(|_| admit_password_reset_issue_at(&state, operator, start).is_ok())
+            .count();
+        assert_eq!(
+            admitted,
+            RateLimitConfig::default().password_reset_issue_per_admin_limit as usize,
+            "a 0 must not let the requests through unbudgeted"
+        );
+    }
+
+    /// One audit row per operator and window, handed back unless it was written — so a write
+    /// that failed (or a dropped request) does not use the window's only row up, and one
+    /// operator's slot does not close another's.
+    #[test]
+    fn the_refusal_audit_slot_is_one_per_operator_and_window_and_comes_back_unless_written() {
+        let state = shared_reissue_state(5);
+        let (operator, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+
+        let first = RefusalAuditSlot::take_at(&state, operator, start).expect("the window's slot");
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start).is_none(),
+            "one row a window, however many wrong passwords"
+        );
+        assert!(
+            RefusalAuditSlot::take_at(&state, other, start).is_some(),
+            "another operator's slot is their own"
+        );
+        drop(first);
+        let retry = RefusalAuditSlot::take_at(&state, operator, start)
+            .expect("a slot whose row was never written is handed back");
+        retry.written();
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start).is_none(),
+            "a slot whose row committed stays taken for the window"
+        );
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start + Duration::from_secs(61)).is_some(),
+            "the next window has a row again"
         );
     }
 }

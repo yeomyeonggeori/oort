@@ -46,6 +46,13 @@ vi.mock("@momo/core/features/settings/defaultAi", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/defaultAi")>();
   return { ...actual, fetchProviderDefaultAi: vi.fn(), putProviderDefaultAi: vi.fn() };
 });
+// 「사용 한도」 칸(#5026)은 이 시험의 주제가 아니다: 한도 읽기를 모르는 서버처럼 답해 칸이 서지 않게 한다. 실제 네트워크로
+// 가면 읽기 실패 안내(role="alert")가 이 화면의 다른 경고보다 앞에 서서 단정을 가로챈다. `vi.fn()` 이 아니라 평범한 함수인 까닭:
+// `resetAllMocks` 가 구현을 비우면 `undefined` 가 돌아와 칸이 오류로 읽는다.
+vi.mock("@momo/core/features/settings/teamAiLimits", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/settings/teamAiLimits")>();
+  return { ...actual, fetchTeamAiLimitsBag: () => Promise.resolve({}) };
+});
 vi.mock("@momo/core/features/ai/personalKeys", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/ai/personalKeys")>();
   return {

@@ -10,6 +10,9 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { UNCOLLECTED_WORD } from "@momo/core/features/agents/runWaiting";
+import { koreanLocale } from "@/testing/koLocale";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
 import { MessageRow } from "./MessageRow";
 
 const api = vi.hoisted(() => ({ fetchAgentLiveness: vi.fn(), fetchAgentRunEvents: vi.fn() }));
@@ -32,7 +35,10 @@ const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENV
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+// 공급자 밖의 화면은 번들된 영어로 물러나므로(`useFormatMessage`), 한국어 문구(「답글 2개」)를 단정하는 이 파일은 한국어 공급자로 감싼다.
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
@@ -172,7 +178,7 @@ function mount(props: Partial<Parameters<typeof MessageRow>[0]> & { startsGroup:
       createElement(
         QueryClientProvider,
         { client },
-        createElement(MessageRow, { message: message(), directory, ...props })
+        createElement(LocaleProvider, { locale: ko, children: createElement(MessageRow, { message: message(), directory, ...props }) })
       )
     )
   );

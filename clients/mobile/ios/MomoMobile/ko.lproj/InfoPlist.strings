@@ -4,4 +4,4 @@
 "NSLocalNetworkUsageDescription" = "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요.";
 "NSMicrophoneUsageDescription" = "oort는 소리를 녹음하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.";
 "NSPhotoLibraryUsageDescription" = "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요.";
-"NSPhotoLibraryAddUsageDescription" = "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.";
+"NSPhotoLibraryAddUsageDescription" = "저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요.";

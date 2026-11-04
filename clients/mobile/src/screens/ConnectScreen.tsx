@@ -95,7 +95,8 @@ import {
 import {formRevealOffset, type RevealSpan} from '../lib/formReveal';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
-import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {createMobileRememberedLogin} from '../storage/rememberedLogin';
 import {
@@ -229,6 +230,7 @@ export default function ConnectScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const keyboardAppearance = useKeyboardAppearance();
   const prefill = useJoinPrefill();
   const deviceLinkArrival = useDeviceLinkArrival();
@@ -797,8 +799,8 @@ export default function ConnectScreen({
         ) : null}
         {!online ? (
           <NoticeBlock
-            headline="오프라인입니다."
-            detail="네트워크가 연결되면 다시 시도하세요."
+            headline={formatMessage(CONNECTION_KEYS.offlineTitle)}
+            detail={formatMessage(CONNECTION_KEYS.bootOfflineDetail)}
             testID="connect-offline"
           />
         ) : null}
@@ -823,7 +825,7 @@ export default function ConnectScreen({
       : linkFailure
         ? {expression: 'flustered' as const, line: LINK_FAILED_LINE, detail: undefined}
         : !online
-          ? {expression: 'flustered' as const, line: OFFLINE_LINE, detail: '네트워크가 연결되면 QR을 찍을 수 있어요.'}
+          ? {expression: 'flustered' as const, line: OFFLINE_LINE, detail: formatMessage(CONNECTION_KEYS.bootOfflineQrDetail)}
           : {expression: 'idle' as const, line: WELCOME_LINE, detail: WELCOME_DETAIL};
     const guideTestID = permissionDenied
       ? 'qr-permission-denied'
@@ -965,13 +967,16 @@ export default function ConnectScreen({
             ) : null}
 
             {sessionExpired ? (
-              <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
+              <NoticeBlock
+                headline={formatMessage(CONNECTION_KEYS.sessionExpired)}
+                testID="session-expired"
+              />
             ) : null}
 
             {!online ? (
               <NoticeBlock
-                headline="오프라인입니다."
-                detail="네트워크가 연결되면 다시 시도하세요."
+                headline={formatMessage(CONNECTION_KEYS.offlineTitle)}
+                detail={formatMessage(CONNECTION_KEYS.bootOfflineDetail)}
                 testID="connect-offline"
               />
             ) : null}

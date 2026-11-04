@@ -1,4 +1,4 @@
-import {useEffect} from 'react';
+import {useEffect, useState} from 'react';
 import {AppState, type AppStateStatus} from 'react-native';
 import {
   holdChannelViewing,
@@ -19,6 +19,29 @@ export const appStateForeground: ForegroundPort = {
     return () => subscription.remove();
   },
 };
+
+/**
+ * 앱이 앞에 있는가 — 「보고 있음」 신호와 같은 어댑터(`appStateForeground`)를 구독한다. 뒤에 있는 동안 온 답글을 읽은 것으로
+ * 치지 않는 판정이 이 하나다: 스레드 화면의 읽음 신호(`ThreadPanel`)와 열린 스레드의 요약 줄(`ConversationScreen` →
+ * `Timeline.viewingThreadId`)이 같은 값을 읽어야 서로 어긋나지 않는다(#5032).
+ *
+ * `enabled`가 거짓이면 구독도 재그림도 없다(늘 앞이라고 답한다): 대화 화면은 열린 스레드가 없을 때 앱 앞뒤 전환에 다시 그려질 이유가 없다.
+ */
+export function useAppForeground(enabled = true): boolean {
+  const [active, setActive] = useState(() => appStateForeground.isForeground());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    // 구독을 걸지 않은 동안의 전이는 못 봤으니 거는 순간의 값으로 맞춘다.
+    setActive(appStateForeground.isForeground());
+    const unsubscribe = appStateForeground.subscribe(setActive);
+    return () => {
+      unsubscribe();
+      // 구독이 끝나면 값도 버린다: 다음에 켤 때 낡은 값이 먼저 읽히지 않게 한다. 꺼 둔 동안은 늘 앞이라고 답한다.
+      setActive(true);
+    };
+  }, [enabled]);
+  return enabled ? active : true;
+}
 
 /** 대화 화면이 앞에 있는 동안만 신호를 보낸다. */
 export function useViewingBeat(

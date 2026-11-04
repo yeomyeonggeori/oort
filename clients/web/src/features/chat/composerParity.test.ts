@@ -94,6 +94,19 @@ describe("컴포저 공용 표면 (#1688)", () => {
     );
   });
 
+  it("채널과 스레드가 같은 링크 미리보기 훅·카드 줄을 쓰고 ✕를 보낼 때 싣는다 (#5016)", () => {
+    for (const composer of [channel, thread]) {
+      expect(composer).toContain("useComposerLinkPreview(");
+      expect(composer).toContain("<ComposerLinkPreview");
+      // Esc 순서(멘션 목록 → 카드 → 인용)를 코어 규칙에 묻는 키 상태와, 켠 때만 가는 요청 필드.
+      expect(composer).toContain("previewOpen: linkPreview.cards.length > 0");
+      expect(composer).toContain("suppressUnfurl: true");
+    }
+    // 채널 입력창과 스레드 패널은 한 화면에 함께 서므로 시험 열쇠가 겹치지 않는다.
+    expect(thread).toContain('testId="thread-composer-link-preview"');
+    expect(thread).toContain("threadRootId: rootId");
+  });
+
   it("채널과 스레드가 입력 다음에 +·@·이모지·보내기 한 벌을 둔다 (#1749)", () => {
     expect(channel).toMatch(
       /data-testid="composer-input"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/
@@ -157,9 +170,16 @@ describe("컴포저 공용 표면 (#1688)", () => {
       expect(composer).toContain("focus-visible-within:focus-ring");
       expect(composer).not.toContain("focus-within:focus-ring");
       expect(composer).not.toContain("focus:border");
-      expect(composer).toContain('event.target.closest("button")');
+      // 버튼과 첨부 카드(#5200: 초점을 받고 Backspace/Delete 로 빼는 자기 컨트롤)는 자기 클릭을 지킨다.
+      // 그릇이 캐럿을 글 칸으로 돌려주면 방금 카드에 둔 초점이 튕겨 나간다.
+      expect(composer).toContain('event.target.closest("button, [data-attachment-card]")');
       expect(composer).toContain(".current?.focus()");
+      // 카드에 키보드 초점이 있으면 그릇의 링을 접는 규칙(tokens.css)이 이 표식으로 두 그릇을 잡는다(#5200).
+      expect(composer).toContain('data-composer-frame=""');
     }
+    expect(tokens).toMatch(
+      /^\[data-composer-frame\]:has\(\[data-attachment-card\]:focus-visible\)\s*\{\s*outline:\s*none;/m
+    );
     const channelInputClass = channel.match(
       /<textarea[\s\S]*?data-testid="composer-input"[\s\S]*?className="([^"]*)"\s*\/>/
     )?.[1];

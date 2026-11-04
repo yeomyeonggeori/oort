@@ -22,7 +22,15 @@ pub struct UnfurlRecord {
     pub description: Option<String>,
     pub domain: Option<String>,
     pub image_proxy_key: Option<String>,
+    /// Remote picture address. Only the authenticated proxy reads it; never sent to a client.
     pub image_url: Option<String>,
+    pub site_name: Option<String>,
+    pub icon_proxy_key: Option<String>,
+    /// Remote icon address. Only the authenticated icon proxy reads it; never sent to a client.
+    pub icon_source_url: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub is_video: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -33,7 +41,18 @@ pub struct CacheHit {
     pub domain: Option<String>,
     pub image_proxy_key: Option<String>,
     pub image_url: Option<String>,
+    pub site_name: Option<String>,
+    pub icon_proxy_key: Option<String>,
+    pub icon_source_url: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub is_video: bool,
 }
+
+/// The columns of a card row, in the order [`decode_record`] reads them.
+const RECORD_COLUMNS: &str = "id, workspace_id, channel_id, message_id, url_key, source_url, \
+     status, title, description, domain, image_proxy_key, image_url, \
+     site_name, icon_proxy_key, icon_source_url, image_width, image_height, is_video";
 
 #[derive(Debug, Clone)]
 pub struct ClaimedJob {
@@ -164,7 +183,8 @@ pub async fn cache_lookup(
     url_key: &str,
 ) -> Result<Option<CacheHit>, DbError> {
     let row = sqlx::query(
-        "SELECT status, title, description, domain, image_proxy_key, image_url \
+        "SELECT status, title, description, domain, image_proxy_key, image_url, \
+                site_name, icon_proxy_key, icon_source_url, image_width, image_height, is_video \
            FROM unfurl_url_cache \
           WHERE workspace_id = $1 AND url_key = $2 AND expires_at > now()",
     )
@@ -179,6 +199,12 @@ pub async fn cache_lookup(
         domain: row.get("domain"),
         image_proxy_key: row.get("image_proxy_key"),
         image_url: row.get("image_url"),
+        site_name: row.get("site_name"),
+        icon_proxy_key: row.get("icon_proxy_key"),
+        icon_source_url: row.get("icon_source_url"),
+        image_width: row.get("image_width"),
+        image_height: row.get("image_height"),
+        is_video: row.get("is_video"),
     }))
 }
 
@@ -194,6 +220,12 @@ pub struct UpsertSpec<'a> {
     pub domain: Option<&'a str>,
     pub image_proxy_key: Option<&'a str>,
     pub image_url: Option<&'a str>,
+    pub site_name: Option<&'a str>,
+    pub icon_proxy_key: Option<&'a str>,
+    pub icon_source_url: Option<&'a str>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub is_video: bool,
 }
 
 pub async fn upsert_unfurl_and_cache(
@@ -205,8 +237,9 @@ pub async fn upsert_unfurl_and_cache(
         sqlx::query(
             "INSERT INTO unfurl_url_cache \
                (workspace_id, url_key, status, title, description, domain, \
-                image_proxy_key, image_url, fetched_at, expires_at) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9) \
+                image_proxy_key, image_url, site_name, icon_proxy_key, icon_source_url, \
+                image_width, image_height, is_video, fetched_at, expires_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15) \
              ON CONFLICT (workspace_id, url_key) DO UPDATE SET \
                status = EXCLUDED.status, \
                title = EXCLUDED.title, \
@@ -214,6 +247,12 @@ pub async fn upsert_unfurl_and_cache(
                domain = EXCLUDED.domain, \
                image_proxy_key = EXCLUDED.image_proxy_key, \
                image_url = EXCLUDED.image_url, \
+               site_name = EXCLUDED.site_name, \
+               icon_proxy_key = EXCLUDED.icon_proxy_key, \
+               icon_source_url = EXCLUDED.icon_source_url, \
+               image_width = EXCLUDED.image_width, \
+               image_height = EXCLUDED.image_height, \
+               is_video = EXCLUDED.is_video, \
                fetched_at = now(), \
                expires_at = EXCLUDED.expires_at",
         )
@@ -225,6 +264,12 @@ pub async fn upsert_unfurl_and_cache(
         .bind(spec.domain)
         .bind(spec.image_proxy_key)
         .bind(spec.image_url)
+        .bind(spec.site_name)
+        .bind(spec.icon_proxy_key)
+        .bind(spec.icon_source_url)
+        .bind(spec.image_width)
+        .bind(spec.image_height)
+        .bind(spec.is_video)
         .bind(expires_at)
         .execute(&mut *conn)
         .await?;
@@ -232,8 +277,10 @@ pub async fn upsert_unfurl_and_cache(
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO message_unfurl \
            (workspace_id, channel_id, message_id, url_key, source_url, status, \
-            title, description, domain, image_proxy_key, image_url, fetched_at, expires_at) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12) \
+            title, description, domain, image_proxy_key, image_url, \
+            site_name, icon_proxy_key, icon_source_url, image_width, image_height, is_video, \
+            fetched_at, expires_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),$18) \
          ON CONFLICT (message_id, url_key) DO UPDATE SET \
            status = EXCLUDED.status, \
            title = EXCLUDED.title, \
@@ -241,6 +288,12 @@ pub async fn upsert_unfurl_and_cache(
            domain = EXCLUDED.domain, \
            image_proxy_key = EXCLUDED.image_proxy_key, \
            image_url = EXCLUDED.image_url, \
+           site_name = EXCLUDED.site_name, \
+           icon_proxy_key = EXCLUDED.icon_proxy_key, \
+           icon_source_url = EXCLUDED.icon_source_url, \
+           image_width = EXCLUDED.image_width, \
+           image_height = EXCLUDED.image_height, \
+           is_video = EXCLUDED.is_video, \
            fetched_at = now(), \
            expires_at = EXCLUDED.expires_at, \
            updated_at = now() \
@@ -257,6 +310,12 @@ pub async fn upsert_unfurl_and_cache(
     .bind(spec.domain)
     .bind(spec.image_proxy_key)
     .bind(spec.image_url)
+    .bind(spec.site_name)
+    .bind(spec.icon_proxy_key)
+    .bind(spec.icon_source_url)
+    .bind(spec.image_width)
+    .bind(spec.image_height)
+    .bind(spec.is_video)
     .bind(expires_at)
     .fetch_one(&mut *conn)
     .await?;
@@ -267,13 +326,13 @@ pub async fn list_unfurls_in_tx(
     conn: &mut PgConnection,
     message_id: Uuid,
 ) -> Result<Vec<UnfurlRecord>, DbError> {
-    let rows = sqlx::query(
-        "SELECT id, workspace_id, channel_id, message_id, url_key, source_url, \
-                status, title, description, domain, image_proxy_key, image_url \
-           FROM message_unfurl \
+    // Rows written in one transaction share `created_at`; the uuidv7 id (monotonic within the
+    // writing session) keeps them in the order the links appeared in the message.
+    let rows = sqlx::query(&format!(
+        "SELECT {RECORD_COLUMNS} FROM message_unfurl \
           WHERE message_id = $1 \
-          ORDER BY created_at",
-    )
+          ORDER BY created_at, id"
+    ))
     .bind(message_id)
     .fetch_all(&mut *conn)
     .await?;
@@ -284,11 +343,9 @@ pub async fn load_unfurl_in_tx(
     conn: &mut PgConnection,
     unfurl_id: Uuid,
 ) -> Result<Option<UnfurlRecord>, DbError> {
-    let row = sqlx::query(
-        "SELECT id, workspace_id, channel_id, message_id, url_key, source_url, \
-                status, title, description, domain, image_proxy_key, image_url \
-           FROM message_unfurl WHERE id = $1",
-    )
+    let row = sqlx::query(&format!(
+        "SELECT {RECORD_COLUMNS} FROM message_unfurl WHERE id = $1"
+    ))
     .bind(unfurl_id)
     .fetch_optional(&mut *conn)
     .await?;
@@ -309,7 +366,51 @@ fn decode_record(row: sqlx::postgres::PgRow) -> UnfurlRecord {
         domain: row.get("domain"),
         image_proxy_key: row.get("image_proxy_key"),
         image_url: row.get("image_url"),
+        site_name: row.get("site_name"),
+        icon_proxy_key: row.get("icon_proxy_key"),
+        icon_source_url: row.get("icon_source_url"),
+        image_width: row.get("image_width"),
+        image_height: row.get("image_height"),
+        is_video: row.get("is_video"),
     }
+}
+
+/// Record the size the image proxy measured from the bytes it received, **once** (D12). Only a
+/// card that has no size yet is touched, and the 24 h cache row for the same page and picture is
+/// brought along so the next message that links the page starts with it. Returns whether the
+/// card row was written. Runs under the caller's tenant transaction, so RLS decides whose rows.
+pub async fn record_measured_size(
+    conn: &mut PgConnection,
+    record: &UnfurlRecord,
+    width: i32,
+    height: i32,
+) -> Result<bool, DbError> {
+    let written = sqlx::query(
+        "UPDATE message_unfurl SET image_width = $2, image_height = $3 \
+          WHERE id = $1 AND image_width IS NULL AND image_height IS NULL",
+    )
+    .bind(record.id)
+    .bind(width)
+    .bind(height)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected()
+        > 0;
+    if written {
+        sqlx::query(
+            "UPDATE unfurl_url_cache SET image_width = $4, image_height = $5 \
+              WHERE workspace_id = $1 AND url_key = $2 AND image_proxy_key = $3 \
+                AND image_width IS NULL AND image_height IS NULL",
+        )
+        .bind(record.workspace_id)
+        .bind(&record.url_key)
+        .bind(&record.image_proxy_key)
+        .bind(width)
+        .bind(height)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(written)
 }
 
 pub fn cent_channel(workspace_id: Uuid, channel_id: Uuid) -> String {

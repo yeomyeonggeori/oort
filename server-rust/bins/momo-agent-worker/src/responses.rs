@@ -132,7 +132,7 @@ use serde_json::{json, Value};
 
 use crate::provider::{
     post_event_stream, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, DeltaSink,
-    DiscardDeltas, ProviderEndpoint, ProviderError, ProviderToolCall,
+    DiscardDeltas, ModelImage, ProviderEndpoint, ProviderError, ProviderToolCall,
 };
 
 /// `POST {base_url}/responses`, `stream=true`, `store=false`.
@@ -172,7 +172,35 @@ impl ChatProvider for OpenAiResponsesProvider {
         request: &ChatRequest,
         sink: &dyn DeltaSink,
     ) -> Result<ChatCompletion, ProviderError> {
-        let body = build_request_body(request);
+        self.stream_body(endpoint, build_request_body(request), sink)
+            .await
+    }
+
+    /// A picture rides the last user message as an `input_image` part (#4970).
+    async fn complete_with_images(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        images: &[ModelImage],
+    ) -> Result<ChatCompletion, ProviderError> {
+        self.stream_body(
+            endpoint,
+            build_request_body_with_images(request, images),
+            &DiscardDeltas,
+        )
+        .await
+    }
+}
+
+impl OpenAiResponsesProvider {
+    /// Post one rendered body and read the event stream to its end — the one place a Responses
+    /// answer is read, whether the request carried a picture or not.
+    async fn stream_body(
+        &self,
+        endpoint: &ProviderEndpoint,
+        body: Value,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
         let mut response = post_event_stream(&self.client, endpoint, &body).await?;
         let mut stream = ResponseStream::new();
         loop {
@@ -263,6 +291,43 @@ pub fn build_request_body(request: &ChatRequest) -> Value {
     // usage ledger 계상으로 사후 관측한다. api.openai.com 표준 Responses에 이 필드를
     // 조건부로 되살리는 것은 후속(와이어별 capability 분기).
     let _ = request.max_tokens;
+    body
+}
+
+/// [`build_request_body`] with `images` as `input_image` parts at the front of the **last user
+/// message**'s content (#4970). Each part is `{"type":"input_image","image_url":"data:<type>;base64,…"}`;
+/// the message's own text stays one `input_text` part. With no pictures it is exactly
+/// [`build_request_body`].
+pub fn build_request_body_with_images(request: &ChatRequest, images: &[ModelImage]) -> Value {
+    let mut body = build_request_body(request);
+    if images.is_empty() {
+        return body;
+    }
+    let parts = images
+        .iter()
+        .map(|image| json!({"type": "input_image", "image_url": image.data_url()}));
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return body;
+    };
+    let target = input
+        .iter_mut()
+        .rev()
+        .find(|item| item.get("role").and_then(Value::as_str) == Some("user"));
+    match target
+        .and_then(|item| item.get_mut("content"))
+        .and_then(Value::as_array_mut)
+    {
+        Some(content) => {
+            let mut rebuilt: Vec<Value> = parts.collect();
+            rebuilt.append(content);
+            *content = rebuilt;
+        }
+        None => input.push(json!({
+            "type": "message",
+            "role": "user",
+            "content": parts.collect::<Vec<_>>(),
+        })),
+    }
     body
 }
 
@@ -942,6 +1007,54 @@ mod tests {
         let body = build_request_body(&chosen);
         assert!(body.get("provider").is_none(), "{body}");
         assert!(!body.to_string().contains("openai-codex"), "{body}");
+    }
+
+    /// #4970: a picture is an `input_image` part (a data URL) at the front of the LAST user message's
+    /// content; the message's text stays one `input_text` part; no other item is touched; with no picture
+    /// the body is exactly the plain one.
+    #[test]
+    fn a_picture_rides_the_last_user_message_as_an_input_image_part() {
+        let image = ModelImage {
+            media_type: "image/png",
+            data: vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4],
+        };
+        let request = ChatRequest {
+            provider: None,
+            model: "gpt-x".to_string(),
+            messages: vec![
+                ChatMessage::system("규칙"),
+                ChatMessage::user("이 사진 뭐야"),
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: "(읽기 도구 호출: read_attachment)".to_string(),
+                },
+                ChatMessage::user("[데이터 — 결과]"),
+            ],
+            max_tokens: None,
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+        };
+        assert_eq!(
+            build_request_body_with_images(&request, &[]),
+            build_request_body(&request),
+            "no picture, no change"
+        );
+        let plain = build_request_body(&request);
+        let body = build_request_body_with_images(&request, std::slice::from_ref(&image));
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0], plain["input"][0]);
+        assert_eq!(input[1], plain["input"][1]);
+        let content = input[2]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "input_image");
+        assert_eq!(content[0]["image_url"], image.data_url());
+        assert!(content[0]["image_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        assert_eq!(content[1]["type"], "input_text");
+        assert_eq!(content[1]["text"], "[데이터 — 결과]");
     }
 
     fn request() -> ChatRequest {

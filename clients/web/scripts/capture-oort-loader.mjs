@@ -5,8 +5,10 @@
 // 실제 앱(빌드한 dist)을 mock /v1 위에 띄워 로더가 서는 자리를 **구현된 화면 그대로**
 // 라이트·다크 1440 으로 찍고, 같은 화면에서 움직임 GIF 를 뽑는다.
 //
-//   연결 배너      레일이 15초 안 올라오면 선다(never-connected). 도는 중, 다시 연결 누른 뒤,
-//                  6초 뒤 실패(정지 마크), 브라우저 오프라인(정지 마크), 동작 줄이기(정지 + 숨).
+// 문장은 사전에서 와 기기 언어를 따르므로 컨텍스트마다 `locale: "ko-KR"`을 준다(카드 선택자가 한국어 단추 이름을 읽는다).
+//
+//   연결 카드      레일이 10초 안 올라오면 사이드바 아래 카드가 선다(#5220, 모델의 「끊김」). 도는 중,
+//                  「지금 다시 연결」 누른 뒤(「연결 중」), 브라우저 오프라인(정지 마크), 동작 줄이기(정지 + 숨).
 //   첫 로딩        세션 복원을 붙잡아 둔 동안의 큰 로더(코메토 + 위성)와 「불러오는 중」.
 //
 //   OUT_DIR=/path DIST_DIR=/path/to/dist node scripts/capture-oort-loader.mjs
@@ -38,7 +40,7 @@ const PORT = Number(process.env.CAPTURE_PORT || 5183);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const WIDTH = Number(process.env.CAPTURE_WIDTH || 1440);
 const VIEWPORT = { width: WIDTH, height: 900 };
-/** 1440 이 아닌 폭은 배너가 접히는 모습만 본다(연결 중 한 장, 파일 이름에 폭이 붙는다). */
+/** 1440 이 아닌 폭은 카드가 좁아진 모습만 본다(끊김 한 장, 파일 이름에 폭이 붙는다). */
 const NARROW = WIDTH !== 1440;
 const SUFFIX = NARROW ? `-w${WIDTH}` : "";
 /** 한 주기(ms). tokens.css `--oort-loader-period`. */
@@ -175,15 +177,15 @@ async function recordGif(page, { clip, frames, from = 0, scale, out, workDir }) 
 }
 
 async function captureScheme(browser, scheme, shots, gifs) {
-  // ---- 연결 배너 (움직임) --------------------------------------------------
+  // ---- 연결 카드 (움직임) --------------------------------------------------
   {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion: "no-preference" });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion: "no-preference" });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);
 
-    // 15초 안 올라오면 배너가 선다.
-    await page.getByTestId("connection-banner").waitFor({ state: "visible", timeout: 40_000 });
+    // 10초 안 올라오면 사이드바 아래 카드가 선다.
+    await page.getByTestId("connection-card").waitFor({ state: "visible", timeout: 40_000 });
     await freezeAt(page, 0.45 * PERIOD_MS); // 위성이 궤도에 나가 있는 순간
     const loading = join(OUT_DIR, `oort-loader-web-banner-connecting${SUFFIX}-${scheme}.png`);
     await page.screenshot({ path: loading });
@@ -193,11 +195,11 @@ async function captureScheme(browser, scheme, shots, gifs) {
       return;
     }
 
-    // GIF: 배너 왼쪽(아이콘 + 문장 앞부분). 시계를 세워 한 주기를 찍는다.
-    const banner = await page.getByTestId("connection-banner").boundingBox();
+    // GIF: 카드(문장 + 곁의 로더). 시계를 세워 한 주기를 찍는다.
+    const banner = await page.getByTestId("connection-card").boundingBox();
     const gif = join(OUT_DIR, `oort-loader-web-banner-${scheme}.gif`);
     await recordGif(page, {
-      clip: { x: banner.x, y: banner.y, width: 560, height: banner.height },
+      clip: { x: banner.x, y: banner.y, width: banner.width, height: banner.height },
       frames: 36,
       scale: 0.75,
       out: gif,
@@ -208,37 +210,32 @@ async function captureScheme(browser, scheme, shots, gifs) {
     // 애니메이션을 다시 흐르게 한다(이어서 실제 상호작용).
     await page.evaluate(() => document.getAnimations().forEach((a) => a.play()));
 
-    // 다시 연결을 누르면 「연결 중」, 로더는 계속 돈다.
-    await page.getByRole("button", { name: "다시 연결" }).click();
-    await page.getByRole("button", { name: "연결 중" }).waitFor({ state: "visible" });
+    // 「지금 다시 연결」을 누르면 카드가 「연결 중」(단추 없음)으로 이어지고, 로더는 계속 돈다.
+    await page.getByRole("button", { name: "지금 다시 연결" }).click();
+    await page.locator('[data-testid="connection-card"][data-tone="connecting"]').waitFor({ state: "visible" });
     await freezeAt(page, 0.45 * PERIOD_MS);
     const running = join(OUT_DIR, `oort-loader-web-banner-retry-running-${scheme}.png`);
     await page.screenshot({ path: running });
     shots.push(running);
     await page.evaluate(() => document.getAnimations().forEach((a) => a.play()));
 
-    // 6초 안에 안 붙으면 실패 문장, 같은 마크가 멈춰 선다.
-    await page.getByText("다시 연결하지 못했습니다", { exact: false }).waitFor({ state: "visible", timeout: 15_000 });
-    const failed = join(OUT_DIR, `oort-loader-web-banner-failed-still-${scheme}.png`);
-    await page.screenshot({ path: failed });
-    shots.push(failed);
-
-    // 브라우저 오프라인: 대기 없이 서고, 정지 마크.
+    // 브라우저 오프라인: 대기 없이 서고, 정지 마크(진행 중인 것이 없다). 옛 「다시 연결하지 못했습니다」
+    // 상태는 없다: 누른 뒤 안 붙으면 모델이 새 10초 뒤 다시 「끊김」을 세운다.
     await context.setOffline(true);
-    await page.getByText("네트워크가 끊겼습니다", { exact: false }).waitFor({ state: "visible" });
+    await page.locator('[data-testid="connection-card"][data-tone="offline"]').waitFor({ state: "visible" });
     const offline = join(OUT_DIR, `oort-loader-web-banner-offline-still-${scheme}.png`);
     await page.screenshot({ path: offline });
     shots.push(offline);
     await context.close();
   }
 
-  // ---- 연결 배너 (동작 줄이기) ------------------------------------------------
+  // ---- 연결 카드 (동작 줄이기) ------------------------------------------------
   {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion: "reduce" });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);
-    await page.getByTestId("connection-banner").waitFor({ state: "visible", timeout: 40_000 });
+    await page.getByTestId("connection-card").waitFor({ state: "visible", timeout: 40_000 });
     await freezeAt(page, 0.5 * PERIOD_MS); // 투명도 숨의 가장 옅은 순간
     const reduced = join(OUT_DIR, `oort-loader-web-banner-reduced-motion-${scheme}.png`);
     await page.screenshot({ path: reduced });
@@ -248,7 +245,7 @@ async function captureScheme(browser, scheme, shots, gifs) {
 
   // ---- 첫 로딩 (복원을 붙잡아 둔 동안) -------------------------------------------
   for (const reducedMotion of ["no-preference", "reduce"]) {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);

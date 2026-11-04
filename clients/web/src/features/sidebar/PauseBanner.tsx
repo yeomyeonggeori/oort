@@ -5,7 +5,6 @@ import {
   pauseBanner,
   type PauseBannerKind,
 } from "@momo/core/features/presence/pauseBanner";
-import { PAUSE_UNTIL_OFFLINE_REASON } from "@momo/core/features/presence/pauseUntil";
 import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
 import {
   fetchNotificationRules,
@@ -18,6 +17,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { notificationRulesQueryKey } from "@/features/settings/notificationRulesKey";
 import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed";
 import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 멈춤이 보인다 — 사이드바 프로필 줄 위의 한 줄 (ADR-0204 D3, #3923, 위치 #4107).
@@ -245,7 +245,7 @@ export function PauseBanner({
             className="break-keep text-balance text-meta text-ink-muted"
             data-testid="pause-banner-offline"
           >
-            {PAUSE_UNTIL_OFFLINE_REASON}
+            <BlockedReason frame="changeIt" />
           </p>
         ) : failureText === null ? null : (
           <p

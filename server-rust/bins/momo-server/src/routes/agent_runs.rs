@@ -70,6 +70,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use chrono::Utc;
 use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
     active_run_cursor_in_tx, agent_run_cursor_is_visible_in_tx, assemble_run_progress,
@@ -78,10 +79,11 @@ use momo_agent::{
     list_active_run_progress_base_in_tx, list_agent_run_summaries_in_tx,
     list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_ledger_in_tx,
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
-    lock_run_for_cancel_in_tx, validated_active_run_limit, validated_run_limit,
-    visible_active_run_counts_in_tx, visible_channels_in_tx, workspace_active_run_totals_in_tx,
-    ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun, QueueEntry, RequestedRouting,
-    RunEventInclude, RunProgressBase, RunProgressRow, RunStatus, RunTrigger,
+    lock_run_for_cancel_in_tx, redact_unseen_approvals_in_tx, validated_active_run_limit,
+    validated_run_limit, visible_active_run_counts_in_tx, visible_channels_in_tx,
+    workspace_active_run_totals_in_tx, ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun,
+    QueueEntry, RequestedRouting, RunEventInclude, RunProgressBase, RunProgressRow, RunStatus,
+    RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -93,14 +95,16 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery,
-    AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
-    AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
-    AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
+    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery, AgentRunActivityDto,
+    AgentRunActivityTallyDto, AgentRunBundleDto, AgentRunCancelResponse, AgentRunEventDto,
+    AgentRunEventsQuery, AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery,
+    AgentRunPageResponse, AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSpentDto, AgentRunSummaryDto,
     AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
     CreateAgentRunRequest,
 };
 use crate::error::ApiError;
+use crate::routes::run_bundle::run_bundles_in_tx;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_rail_frame, emit_terminal_agent_status, epoch_ms,
     path_uuid, require_human, run_response, settle_db, workspace_scope, DbRejectable,
@@ -125,6 +129,9 @@ const BRANCH_LIMIT: usize = 512;
 const HOSTED_CONNECTION_NOT_ACTIVE: &str = "hosted_connection_not_active";
 const HOSTED_CHANNEL_NOT_APPROVED: &str = "hosted_channel_not_approved";
 const AGENT_PAUSED: &str = "agent_paused";
+
+/// ADR-0201 증보 v3 B5-10 (#4967): `type=work` aimed at the workspace's team AI (HTTP 409, before any write).
+const TEAM_AI_USE_MENTION: &str = "team_ai_use_mention";
 
 /// `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs`.
 pub async fn create(
@@ -184,6 +191,22 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0201 증보 v3 B5-10 (#4967): the workspace's team AI is called by mention or DM,
+                // never by `type=work`. A work run has no trigger message, and the helper derives its
+                // requester from the trigger message alone (B13-I3) — so before this, the run was
+                // created and then closed without a word. It is a 409 with its own code instead, before
+                // any write: the channel agent was found (a stranger still gets the 404 above), and
+                // nothing about the helper is revealed to someone who could not address it anyway.
+                if momo_workspace_actions::team_ai::read_state_in_tx(conn, workspace_id)
+                    .await?
+                    .is_team_ai(agent_member_id)
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        TEAM_AI_USE_MENTION,
+                        "도우미는 멘션이나 DM으로 불러 주세요",
+                    )));
+                }
                 // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's
                 // connected apps takes a work request from that human only
                 // (`type=work` passes the same predicate as a mention). Before
@@ -705,7 +728,7 @@ pub async fn detail(
     let member_id = principal.member_id;
     let kind = principal.kind;
 
-    let run = settle_db(
+    let (run, spent) = settle_db(
         "agent_runs.detail",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -720,13 +743,22 @@ pub async fn detail(
                         "work run is not bound to this actor",
                     )));
                 }
-                Ok(Ok(run))
+                // ADR-0201 v3 B12: a team-AI task run says what it has spent — this run's own
+                // ledger sums (a run without a task row has none), read after the room check so
+                // a caller the run is hidden from learns nothing.
+                let spent =
+                    momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &[run.id])
+                        .await?
+                        .remove(&run.id);
+                Ok(Ok((run, spent)))
             })
         })
         .await,
     )?;
 
-    Ok(Json(run_response(&run)))
+    let mut response = run_response(&run);
+    response.spent = spent.as_ref().map(AgentRunSpentDto::from);
+    Ok(Json(response))
 }
 
 /// Swift `canReadRun` (:626-641).
@@ -788,6 +820,7 @@ pub async fn progress(
     };
     let limit = validated_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let rows = settle_db(
         "agent_runs.progress",
@@ -809,6 +842,7 @@ pub async fn progress(
                     workspace_id,
                     member_id,
                     base,
+                    now,
                 )
                 .await?))
             })
@@ -817,7 +851,10 @@ pub async fn progress(
     )?;
 
     Ok(Json(AgentRunProgressPageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
     }))
 }
 
@@ -826,12 +863,16 @@ pub async fn progress(
 /// own predicate and handed to the pure assembly as plain facts (momo-agent owns
 /// no outbox SQL). Shared by the channel read and the workspace "running now"
 /// read so a row's `phase`, `leaseState` and `queuePosition` mean one thing.
+///
+/// Each row comes with its `bundle` (ADR-0186 v6 R-f): one approval of the run, read
+/// for `member_id` as of `now` (`routes::run_bundle`).
 async fn assemble_progress_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     base: Vec<RunProgressBase>,
-) -> Result<Vec<RunProgressRow>, momo_db::DbError> {
+    now: chrono::DateTime<Utc>,
+) -> Result<Vec<(RunProgressRow, Option<AgentRunBundleDto>)>, momo_db::DbError> {
     let wanting_job: Vec<(Uuid, Uuid)> = base
         .iter()
         .filter(|run| matches!(run.summary.status, RunStatus::Queued | RunStatus::Running))
@@ -863,15 +904,34 @@ async fn assemble_progress_in_tx(
                 .filter_map(|job| QueueEntry::from_payload(job.id, agent, &job.payload)),
         );
     }
-    let queue_channels: Vec<Uuid> = queue
+    // One read of the viewer's rooms answers both questions the assembly asks: which runs
+    // ahead in the queue may be named, and whether the approval a run is parked on was
+    // raised in a room the viewer is in (`approvalId` and its deadline follow the `bundle`'s
+    // rule, not the run's: the approval's room need not be the run's).
+    let named_channels: Vec<Uuid> = queue
         .iter()
         .map(|entry| entry.channel_id)
+        .chain(base.iter().filter_map(|run| run.approval_channel_id))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
+    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &named_channels).await?;
 
-    Ok(assemble_run_progress(base, &jobs, &queue, &visible))
+    let rows = assemble_run_progress(base, &jobs, &queue, &visible);
+    let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
+    let mut bundles = run_bundles_in_tx(conn, workspace_id, member_id, &run_ids, now).await?;
+    // ADR-0201 v3 B12 (#4968): the run's own ledger sums, for a team-AI task run only — one
+    // grouped read for the whole page, keyed by run id and by nothing else.
+    let mut spent =
+        momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &run_ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            row.spent = spent.remove(&row.summary.id);
+            let bundle = bundles.remove(&row.summary.id);
+            (row, bundle)
+        })
+        .collect())
 }
 
 /// The pending delivery job behind each `(run, agent)`, keyed by run id.
@@ -899,7 +959,7 @@ async fn job_facts_in_tx(
     )
 }
 
-fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
+fn progress_dto(row: &RunProgressRow, bundle: Option<AgentRunBundleDto>) -> AgentRunProgressDto {
     AgentRunProgressDto {
         id: row.summary.id.to_string(),
         channel_id: row.summary.channel_id.to_string(),
@@ -915,6 +975,8 @@ fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
         last_event_at_ms: row.last_event_at.map(epoch_ms),
         approval_id: row.approval_id.map(|id| id.to_string()),
         approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
+        bundle,
+        spent: row.spent.as_ref().map(AgentRunSpentDto::from),
         end_reason: row.end_reason.clone(),
         queue_position: row.queue_position,
         ahead_total: row.queue_position.map(|_| row.ahead_total),
@@ -988,6 +1050,7 @@ pub async fn active(
     };
     let limit = validated_active_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let (rows, next_cursor, counts, totals, claimed) = settle_db(
         "agent_runs.active",
@@ -1016,7 +1079,8 @@ pub async fn active(
                     limit,
                 )
                 .await?;
-                let rows = assemble_progress_in_tx(conn, workspace_id, member_id, base).await?;
+                let rows =
+                    assemble_progress_in_tx(conn, workspace_id, member_id, base, now).await?;
 
                 let counts =
                     visible_active_run_counts_in_tx(conn, workspace_id, member_id, scope).await?;
@@ -1075,7 +1139,10 @@ pub async fn active(
         .collect();
 
     Ok(Json(AgentRunActivePageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
         agents,
         next_cursor: next_cursor.map(|id| id.to_string()),
     }))
@@ -1087,6 +1154,12 @@ pub async fn active(
 /// resume from and no raw sequence to leak), oldest first. A run that is not in
 /// this workspace, and a run whose channel the caller is not an active member of,
 /// are the same **404** — the answer is no existence oracle.
+///
+/// A row's `approvalId` — and with it that row's `actorMemberId` and `code` — is told to a
+/// caller only under the rule `AgentRunProgress.approvalId` follows: they are an active member
+/// of the channel **the approval** was raised in, which need not be the run's (#5007). The row
+/// itself (`ordinal`, `kind`, `createdAtMs`) stays, and a row that names no approval is as it
+/// was.
 pub async fn events(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -1104,7 +1177,16 @@ pub async fn events(
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 match list_run_ledger_in_tx(conn, workspace_id, run_id, member_id, include).await? {
-                    Some(ledger) => Ok(Ok(ledger)),
+                    Some(mut ledger) => {
+                        redact_unseen_approvals_in_tx(
+                            conn,
+                            workspace_id,
+                            member_id,
+                            &mut ledger.events,
+                        )
+                        .await?;
+                        Ok(Ok(ledger))
+                    }
                     None => Ok(Err(ApiError::not_found("agent run not found"))),
                 }
             })
@@ -1126,6 +1208,23 @@ pub async fn events(
                 actor_member_id: event.actor_member_id.map(|id| id.to_string()),
                 tool: event.tool.clone(),
                 duration_ms: event.duration_ms,
+                activity: event.activity.as_ref().map(|activity| AgentRunActivityDto {
+                    id: activity.id.clone(),
+                    kind: activity.kind.clone(),
+                    label: activity.label.clone(),
+                    status: activity.status.clone(),
+                    n: activity.n,
+                    started_at_ms: epoch_ms(activity.started_at),
+                }),
+                plan: event.plan.as_ref().map(|steps| {
+                    steps
+                        .iter()
+                        .map(|step| AgentRunPlanStepDto {
+                            text: step.text.clone(),
+                            status: step.status.clone(),
+                        })
+                        .collect()
+                }),
                 created_at_ms: epoch_ms(event.created_at),
             })
             .collect(),
@@ -1141,13 +1240,25 @@ pub async fn events(
                 .collect()
         }),
         tool_call_rows_capped: ledger.tool_call_rows_capped,
+        activity_tally: ledger.activity_tally.map(|tally| {
+            tally
+                .into_iter()
+                .map(|row| AgentRunActivityTallyDto {
+                    kind: row.kind,
+                    completed: row.completed,
+                    failed: row.failed,
+                })
+                .collect()
+        }),
+        activity_rows_trimmed: ledger.activity_rows_trimmed,
     }))
 }
 
 /// `?include=` of the ledger read: a comma-separated subset of the closed set
-/// `{doorbell, tools}` (ADR-0200 증보 2026-10-14 / 2026-10-15 T4). Blank parts are
-/// ignored and a repeat is harmless; any other value is a 400, so a typo is never
-/// silently read as "nothing extra".
+/// `{doorbell, tools, activity}` (ADR-0200 증보 2026-10-14 / 2026-10-15 T4 / 증보 7 7-7).
+/// Blank parts are ignored and a repeat is harmless; any other value is a 400, so a typo is
+/// never silently read as "nothing extra". `activity` is what opens the agent-reported
+/// `activity` / `plan` rows; without it not one of them is returned.
 fn parse_run_event_include(raw: Option<&str>) -> Result<RunEventInclude, ApiError> {
     let mut include = RunEventInclude::default();
     for part in raw.unwrap_or("").split(',').map(str::trim) {
@@ -1155,9 +1266,10 @@ fn parse_run_event_include(raw: Option<&str>) -> Result<RunEventInclude, ApiErro
             "" => {}
             "doorbell" => include.doorbell = true,
             "tools" => include.tools = true,
+            "activity" => include.activity = true,
             _ => {
                 return Err(ApiError::bad_request(
-                    "include must be doorbell, tools or both",
+                    "include must be doorbell, tools, activity or a comma-separated mix of them",
                 ))
             }
         }
@@ -1189,7 +1301,12 @@ fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
 /// not say this — and it is written at all because a run that simply goes quiet
 /// is indistinguishable from a run that is thinking. The stop has to be visible
 /// to the room, not just to the person who tapped it.
-const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중지했어요.";
+///
+/// The verb is 「중단」, the same word the stop button, the receipt and the run's
+/// end reason use (`runCancel.ts` · `runPhase.ts`): one event, one word (#5079).
+/// This sentence used to say 「중지」, so the room read a different word than the
+/// person who had just pressed 「실행 중단」.
+const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중단했어요.";
 
 /// `message.props.kind` (Swift :532) — what a client switches on to render the
 /// line as a stop rather than as generic system chatter.
@@ -1197,6 +1314,14 @@ const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
 
 const CANCEL_AUDIT_ACTION: &str = "agent.run.cancelled";
 const CANCEL_AUDIT_SCHEMA: &str = "momo.agent_run.cancelled.v1";
+
+/// The 409 a stop gets for a run that is not something a stop can act on, naming the status it has.
+fn run_already(status: RunStatus) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!("agent run is already {}", status.as_db_label()),
+    )
+}
 
 /// `agent_run.error.code` (Swift :492). The run ended, and this is *why* — an
 /// error object that names a person's decision rather than a failure, which is
@@ -1225,7 +1350,9 @@ const CANCEL_ERROR_CODE: &str = "human_cancelled";
 /// line, a second audit row, or re-retire jobs. Any other terminal status is a
 /// 409 carrying the status it actually has, because "already succeeded" is not
 /// "stopped" and answering 200 would tell a person their stop worked when what
-/// really happened is that the agent finished first.
+/// really happened is that the agent finished first. The one exception is a
+/// `failed` run whose team-AI task is still active (`CancellableRun::is_stoppable`): it is
+/// not over, so a stop is taken.
 ///
 /// ## What the transaction settles
 ///
@@ -1305,11 +1432,10 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
         )));
     }
     let already_cancelled = run.status == RunStatus::Cancelled;
-    if !already_cancelled && !run.status.is_cancellable() {
-        return Ok(Err(ApiError::new(
-            StatusCode::CONFLICT,
-            format!("agent run is already {}", run.status.as_db_label()),
-        )));
+    // `is_stoppable` is `is_cancellable` plus one case (#5029): a `failed` run whose team-AI task is
+    // still active is not over.
+    if !already_cancelled && !run.is_stoppable() {
+        return Ok(Err(run_already(run.status)));
     }
 
     // Read before the idempotent early-return, exactly as Swift does (:466-489):
@@ -1338,11 +1464,18 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     )
     .await?;
     if !cancelled {
-        // The row was locked and read as cancellable a few statements ago, so a
-        // no-op here means the guard and the read disagree — a bug in one of
-        // them, not a client outcome. Surfacing it as a 500 beats reporting a
-        // cancellation that never happened.
-        return Err(momo_db::DbError::from(sqlx::Error::RowNotFound));
+        // The row was locked and read as cancellable a few statements ago. The one way a no-op is not a
+        // bug is the widened arm (#5029): the read judged "a task is still active" on the snapshot it
+        // took before it got the lock, the statement judges it on a snapshot of its own, and a task that
+        // ended in between — the worker's closing transaction committed while this stop waited for the
+        // lock, or a close that takes no run lock — shows only to the statement. The run has left the
+        // stoppable set: say what it is now, like any other finished run (review r1 L-1). If the facts
+        // still call it stoppable, the guard and the read disagree — a bug in one of them, not a client
+        // outcome — and surfacing a 500 beats reporting a cancellation that never happened.
+        return match lock_run_for_cancel_in_tx(conn, workspace_id, run_id, member_id).await? {
+            Some(now) if !now.is_stoppable() => Ok(Err(run_already(now.status))),
+            _ => Err(momo_db::DbError::from(sqlx::Error::RowNotFound)),
+        };
     }
 
     // The system line goes through the message spine, so it takes a real
@@ -1767,37 +1900,59 @@ fn agent_job_broadcast_payload(
 mod tests {
     use super::*;
 
-    /// ADR-0200 증보 2026-10-15 T4: `include` is a comma set over `{doorbell, tools}`;
-    /// nothing asked for means neither, and an unknown token is a 400 (not "nothing").
+    /// ADR-0200 증보 2026-10-15 T4 / 증보 7 7-7: `include` is a comma set over
+    /// `{doorbell, tools, activity}`; nothing asked for means none of them (so the helper's
+    /// read tool, which reads with `RunEventInclude::default()`, never sees an agent's label),
+    /// and an unknown token is a 400 (not "nothing").
     #[test]
     fn the_ledger_include_is_a_closed_comma_set() {
         let none = RunEventInclude::default();
-        let doorbell = RunEventInclude {
-            doorbell: true,
-            tools: false,
+        assert_eq!(
+            none,
+            RunEventInclude {
+                doorbell: false,
+                tools: false,
+                activity: false,
+            },
+            "the default asks for nothing"
+        );
+        let only = |doorbell, tools, activity| RunEventInclude {
+            doorbell,
+            tools,
+            activity,
         };
-        let tools = RunEventInclude {
-            doorbell: false,
-            tools: true,
-        };
-        let both = RunEventInclude {
-            doorbell: true,
-            tools: true,
-        };
+        let doorbell = only(true, false, false);
+        let tools = only(false, true, false);
+        let activity = only(false, false, true);
+        let both = only(true, true, false);
+        let all = only(true, true, true);
         for (raw, want) in [
             (None, none),
             (Some(""), none),
             (Some(" "), none),
             (Some("doorbell"), doorbell),
             (Some("tools"), tools),
+            (Some("activity"), activity),
             (Some("doorbell,tools"), both),
             (Some("tools, doorbell"), both),
+            (Some("doorbell,tools,activity"), all),
+            (Some(" activity , tools , doorbell "), all),
             (Some("tools,tools"), tools),
+            (Some("activity,activity"), activity),
             (Some("tools,"), tools),
         ] {
             assert_eq!(parse_run_event_include(raw).unwrap(), want, "{raw:?}");
         }
-        for raw in ["tool", "TOOLS", "doorbell,args", "tools;doorbell", "*"] {
+        for raw in [
+            "tool",
+            "TOOLS",
+            "Activity",
+            "activities",
+            "plan",
+            "doorbell,args",
+            "tools;doorbell",
+            "*",
+        ] {
             assert!(parse_run_event_include(Some(raw)).is_err(), "{raw}");
         }
     }

@@ -43,9 +43,13 @@
 //!   message is `momo-messaging`'s, the run and the ledger are `momo-agent`'s,
 //!   the `provider_link` read is `momo-settings`'. Invariant #3 and invariant #6
 //!   both stay single-chokepoint.
-//! * **Outbound HTTP to the LLM provider only.** That call is this binary's
-//!   whole purpose (the Swift AgentWorker does the same). It never calls
-//!   momo-server, and it never publishes to Centrifugo.
+//! * **Outbound HTTP to the LLM provider, plus one read from the api.** The provider
+//!   call is this binary's whole purpose (the Swift AgentWorker does the same). Since
+//!   #4934 the one other call is `GET /v1/self-media/{ws}/{token}` on the api's private
+//!   address (`OORT_API_INTERNAL_ORIGIN`), with a single-use token this worker minted
+//!   itself, to read the picture a person asked to have as their profile image when the
+//!   archive is a volume only the api mounts (ADR-0151 증보 3, [`self_media`]). It never
+//!   publishes to Centrifugo.
 //! * **No credential in a log, a row, or a message.** See [`redact_secrets`].
 //!
 //! ## B7.2 — the turn can now delegate
@@ -74,6 +78,9 @@
 
 pub mod a2a;
 pub mod anthropic;
+pub mod attachment_image;
+mod attachment_lockdown;
+pub mod attachment_text;
 pub mod completion_report;
 pub mod config;
 pub mod consolidate;
@@ -90,12 +97,14 @@ mod personal;
 pub mod provider;
 pub mod responses;
 /// #4820 C2a — the photo address the co-hosted Hermes' picture tool reads: the worker's half (mint + the one line).
-mod self_media;
+/// #4934 — and the worker's own read of a requester's attachment through the api's private address.
+pub mod self_media;
 pub mod serving;
 pub mod sse;
 pub mod stream;
 pub mod summary;
 mod team_ai;
+mod team_ai_files;
 pub mod tool_exec;
 pub mod topics;
 
@@ -275,6 +284,16 @@ pub fn degraded_provider_message() -> &'static str {
     "지금은 답변을 만들지 못했어요. 잠시 뒤에 다시 멘션해 주세요."
 }
 
+/// What stands in an **ordinary** turn's answer where a `data:image/…` address was cut out (#4908).
+///
+/// The co-hosted Hermes turns a `MEDIA:` line into that address — MiB of base64 — in any non-streamed
+/// answer, not only a hosted-door turn's, and a message cannot show it. The worker cuts it (the door's own
+/// rule, [`momo_workspace_actions::hosted_expression::replace_pictures`]) and says so in one short
+/// sentence in the place: one sentence for each address, nothing else about the answer changes. (Turning
+/// the picture into an attachment instead is a follow-up: it needs a path of its own for the worker to
+/// write to the api's storage.) Korean, in the voice of the sentences above and of the door's.
+pub const PICTURE_REMOVED_SENTENCE: &str = "그림은 이 메시지에 실을 수 없어서 뺐어요.";
+
 /// Strip anything credential-shaped out of a string that is about to be
 /// persisted (`outbox.last_error`), shown to a user (the degraded message), or
 /// logged.
@@ -409,6 +428,9 @@ impl ResolvedTransport {
 pub struct AgentWorker {
     pool: PgPool,
     drive: Arc<dyn momo_drive::DriveArchive>,
+    /// #4934 — the client the worker reads a requester's attachment through the api with. Built only when
+    /// `OORT_API_INTERNAL_ORIGIN` is set; follows no redirect and ignores proxies (`self_media::attachment_client`).
+    attachment_client: Option<reqwest::Client>,
     provider: Arc<dyn ChatProvider>,
     /// The OAuth token endpoint client (ADR-0147 결정 2). A seam, so the
     /// conformance suite can point it at its own server rather than the internet.
@@ -485,9 +507,21 @@ impl AgentWorker {
     ) -> AgentWorker {
         let ttl = Duration::from_millis(2_000);
         let config_memory = config.memory.clone();
+        let attachment_client = config
+            .api_internal_origin
+            .as_ref()
+            .and_then(|_| self_media::attachment_client());
+        if config.api_internal_origin.is_some() && attachment_client.is_none() {
+            // Every read would answer "unavailable" without a trace otherwise (the TLS backend did not start).
+            tracing::error!(
+                "OORT_API_INTERNAL_ORIGIN is set but the HTTP client for attachment reads could not be built; \
+                 a requester's picture cannot be read"
+            );
+        }
         AgentWorker {
             pool,
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
+            attachment_client,
             provider,
             refresher,
             config,
@@ -847,6 +881,16 @@ impl AgentWorker {
             agent_member_id: payload.agent_member_id,
             run_id,
         };
+        // #5084 — the key of the `thinking` frame this start publishes. The first start of a run is
+        // `thinking`; a **resumed** start (the job an approval releases) is the frame that takes the
+        // rail off 「승인 대기」, and under the same key as the first one Centrifugo's 5-minute cache
+        // would swallow it whenever the person approved within five minutes of the turn's start —
+        // leaving the badge on 승인 대기 for a run that is working again. One key per approval, so
+        // a second hold's resume is its own frame too.
+        let thinking_key = match payload.resume_from_approval_id {
+            Some(approval_id) => format!("thinking:resumed:{approval_id}"),
+            None => "thinking".to_string(),
+        };
         let started = with_tenant_tx(&self.pool, job.workspace_id, move |conn| {
             Box::pin(async move {
                 let started = mark_run_started_in_tx(conn, run_id).await?;
@@ -884,7 +928,7 @@ impl AgentWorker {
                             started_address,
                             momo_agent::AgentPhase::Thinking,
                             now_ms(),
-                            "thinking",
+                            &thinking_key,
                         ),
                     )
                     .await?;
@@ -1289,7 +1333,12 @@ impl AgentWorker {
         // #4820 C2b 2부 — a door turn's answer is taken apart here: a valid request block becomes a card
         // (or a failure card) and the turn ends; anything else continues below as an ordinary answer, but
         // with the **cleaned** text — no picture, no `MEDIA:` line, no request block — which is the only
-        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it was.
+        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it
+        // was, except that a `data:image/…` address in it is cut the door's way and a sentence stands in
+        // its place (#4908). On the size limits: a non-streamed answer was already read under
+        // `RESPONSE_BODY_MAX_BYTES` (12 MiB) to get here, so that limit always comes first and this cut
+        // cannot be ordered before it; the message write (`insert_message_in_tx`, `message.body`) has no
+        // limit of its own — so the cut is before the only write that could carry the picture.
         let answer_text = if door_turn.is_some() {
             match self
                 .hosted_door_land(
@@ -1322,7 +1371,26 @@ impl AgentWorker {
                 hosted_door::Landed::Answer(text) => text,
             }
         } else {
-            completion.text
+            // #4908 — before the completion report is read (a picture address inside the fence would
+            // otherwise ride `props`) and before `commit_turn`. No address in the text: it is
+            // `completion.text` itself, moved, not a byte different.
+            match momo_workspace_actions::hosted_expression::replace_pictures(
+                &completion.text,
+                PICTURE_REMOVED_SENTENCE,
+            ) {
+                Some(replaced) => {
+                    // Counts only, never the text (redaction, L4 §7).
+                    tracing::info!(
+                        run_id = %run_id,
+                        pictures = replaced.cuts,
+                        bytes_before = completion.text.len(),
+                        bytes_after = replaced.text.len(),
+                        "picture addresses replaced in an ordinary answer"
+                    );
+                    replaced.text
+                }
+                None => completion.text,
+            }
         };
 
         // #1454 — the completion report, if the model wrote one. The fence is
@@ -1757,6 +1825,22 @@ impl AgentWorker {
                 )
                 .await?;
 
+                // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the
+                // `push_action` refusal give, judged on the payload that was just stored.
+                let mut card_props = approval_request_props(
+                    approval_id,
+                    run_id,
+                    channel_id,
+                    ACTION_TYPE_TOOL_CALL,
+                    &call,
+                    &raw_arguments,
+                    expires_at,
+                    execution.as_ref(),
+                );
+                momo_agent::actions::stamp_decision_mode(
+                    &mut card_props,
+                    momo_agent::actions::decision_mode(ACTION_TYPE_TOOL_CALL, &approval_payload),
+                );
                 let card = send_message_in_tx(
                     conn,
                     workspace_id,
@@ -1765,16 +1849,7 @@ impl AgentWorker {
                         author_member_id: agent_member_id,
                         message_type: MessageType::ApprovalRequest,
                         body: Some(approval_request_body(&call.name)),
-                        props: approval_request_props(
-                            approval_id,
-                            run_id,
-                            channel_id,
-                            ACTION_TYPE_TOOL_CALL,
-                            &call,
-                            &raw_arguments,
-                            expires_at,
-                            execution.as_ref(),
-                        ),
+                        props: card_props,
                         root_id: None,
                         // `None`, like the call card above. What this message
                         // points at is an `approval` row, not a message: the
@@ -1798,6 +1873,21 @@ impl AgentWorker {
                 if !park_run_for_approval_in_tx(conn, run_id, expires_at).await? {
                     return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
                 }
+                // #5084 — the rail is told the run now waits on a person. In the park's own
+                // transaction, after the card (so a reader who sees 「승인 대기」 can find the
+                // card), and only when the guarded park above actually moved the run: a retried
+                // turn that finds it already parked returned before this line.
+                emit_awaiting_approval_agent_status(
+                    conn,
+                    momo_agent::AgentRunAddress {
+                        workspace_id,
+                        channel_id,
+                        agent_member_id,
+                        run_id,
+                    },
+                    approval_id,
+                )
+                .await?;
 
                 write_audit(
                     conn,
@@ -2592,6 +2682,9 @@ impl AgentWorker {
                         PROVIDER_FAILED,
                     )
                     .await;
+                    // ADR-0201 증보 v3 B13-I7 (#4967): the run has failed for good, so the team AI's
+                    // task of it (if any) ends with it — its note must not outlive the run.
+                    self.team_ai_task_end_failed(job.workspace_id, run_id).await;
                 }
             }
             self.settle_failed(job.id, &format!("max attempts: {reason}"))
@@ -4184,6 +4277,9 @@ impl AgentWorker {
         let mut ticker = tokio::time::interval(self.config.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
+        // ADR-0201 증보 v3 B13-I7 (#4967): the team AI's task rows of runs that ended through a path
+        // that does not know tasks are closed (their notes gone) about once a minute.
+        let mut last_task_sweep: Option<Instant> = None;
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
@@ -4193,6 +4289,16 @@ impl AgentWorker {
                 }
             }
             self.drain_to_empty().await;
+            if last_task_sweep.is_none_or(|at| at.elapsed() >= Duration::from_secs(60)) {
+                last_task_sweep = Some(Instant::now());
+                match self.sweep_orphan_tasks().await {
+                    Ok(0) => {}
+                    Ok(closed) => {
+                        tracing::info!(closed, "team ai task sweep closed orphaned tasks")
+                    }
+                    Err(error) => tracing::warn!(error = %error, "team ai task sweep failed"),
+                }
+            }
         }
 
         listener.abort();
@@ -4587,6 +4693,23 @@ async fn emit_terminal_agent_status(
     emit_rail_frame(conn, workspace_id, channel_id, &frame).await
 }
 
+/// Publish the `(thinking, awaiting_approval)` rail frame for a run this worker's transaction just
+/// parked on a person (#5084) — the worker-side twin of `momo-server`'s
+/// `routes::shared::emit_awaiting_approval_agent_status`, the same few lines around the same
+/// builder ([`momo_agent::awaiting_approval_agent_status_payload`]).
+///
+/// It must be called on the **park's own connection** and only once the guarded park has returned
+/// `true`: the frame then commits with the run's new status and the card, or not at all, and a
+/// retried turn that lost the park never reaches it.
+async fn emit_awaiting_approval_agent_status(
+    conn: &mut PgConnection,
+    address: momo_agent::AgentRunAddress,
+    approval_id: Uuid,
+) -> Result<(), DbError> {
+    let frame = momo_agent::awaiting_approval_agent_status_payload(address, now_ms(), approval_id);
+    emit_rail_frame(conn, address.workspace_id, address.channel_id, &frame).await
+}
+
 /// Put one already-shaped rail frame on the outbox — the worker's twin of
 /// `momo-server`'s `routes::shared::emit_rail_frame`, partitioned on the channel
 /// so every frame of a turn shares one FIFO with that turn's messages.
@@ -4626,6 +4749,40 @@ mod tests {
             !message.chars().any(|c| c.is_ascii_alphabetic()),
             "no English internal vocabulary reaches the channel: {message}"
         );
+    }
+
+    /// #4908. The sentence that stands where a picture address was cut is one plain Korean line, and it
+    /// can stand anywhere an address stood — in a markdown image's place, in a JSON string of a
+    /// completion report — without breaking it or being read as a picture again: no quote, backslash,
+    /// newline or markup, and none of the words the cut exists to keep out of the channel.
+    #[test]
+    fn the_picture_removed_sentence_is_one_plain_korean_line_that_cannot_break_what_it_stands_in() {
+        let sentence = PICTURE_REMOVED_SENTENCE;
+        assert!(sentence.ends_with("어요."), "{sentence}");
+        for forbidden in [
+            "data:",
+            "base64",
+            "MEDIA:",
+            "oort-expression",
+            "oort:report",
+            "![",
+            "](",
+            "```",
+            "\"",
+            "\\",
+            "\n",
+            "<",
+            ">",
+        ] {
+            assert!(!sentence.contains(forbidden), "{forbidden:?} in {sentence}");
+        }
+        assert!(
+            !sentence.chars().any(|c| c.is_ascii_alphabetic()),
+            "no English vocabulary reaches the channel: {sentence}"
+        );
+        let wrapped = format!("{{\"summary\":\"{sentence}\"}}");
+        let parsed: Value = serde_json::from_str(&wrapped).expect("still a JSON string");
+        assert_eq!(parsed["summary"], json!(sentence));
     }
 
     /// The provider's words are moved, not deleted. `props` rides the relay to

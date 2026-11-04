@@ -1105,6 +1105,15 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
   `section` ∈ `profile | appearance | notifications | shortcuts | devices |
   workspace | members | memory | usage | code | updates | plugins`(`plugins`는 앱
   화면)다. 경로가 아니라 섹션 id다. 다른 값은 거절되니 글로 답한다.
+- 그리고 `commandId: "work.request.open"`(ADR-0201 증보 v3 B8 C1)은 사람이 코드
+  일을 자기 맥에 맡겨 달라고 할 때 쓴다. 카드는 그 사람의 「작업 요청」 시트를
+  네가 쓴 글로 미리 채워 열고, 읽고 보내는 것은 **그 사람**이다. `args`는 필수
+  `prompt`(그 사람 말투의 평문, UTF-8 1~8,000바이트, 줄바꿈·탭 말고는 제어 문자
+  없음, 보이지 않는 글자 없음, `/`로 시작하지 않음 — 서명 spawn이 쓰는 규칙
+  그대로)와 선택 `harness` ∈ `claude | codex`(그 사람이 댄 이름. `team_key`는
+  `ai.connect`의 값이라 여기서는 거절된다)다. 다른 키(`folder`, `channel`,
+  `label` 등)는 거절된다. 카드는 아무것도 실행하지 않고 자기 승인 행·감사 행도
+  남기지 않는다. spawn은 그 사람이 보낼 때 소유자 기기 키로 서명한다.
 
 #### 3.3.17 도어벨 (실시간 wake)
 
@@ -1957,7 +1966,10 @@ scripts/oort doctor --json
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser]
+  disabled_toolsets: [terminal, code_execution, browser, memory, session_search]
+memory:                        # ADR-0203 R2: Hermes 하나가 모든 워크스페이스를 맡아서
+  memory_enabled: false        # 런 사이 기억·세션 검색을 두지 않아요
+  user_profile_enabled: false
 ```
 
    API 서버 toolset은 터미널·코드 실행·브라우저를 기본으로 켜 두고, API 서버
@@ -2001,6 +2013,20 @@ agent:
 삭제하세요. 워크스페이스 하나만 Hermes 하나에 연결하세요(여러 워크스페이스의
 대화가 한 볼륨에 섞여요).
 
+볼륨 `.env`에는 허용 목록이 있어요(#4950). Hermes는 게이트가 끝난 뒤 이 파일의 모든 이름을
+적용하므로, `lockgate.py`는 파일에 이것만 두게 해요. 운영자가 넣는 모델 키
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), 그리고 Hermes가 새 볼륨의 첫 기동에 써 넣는
+템플릿 11줄(나온 그대로)이에요. 연결 모드 Hermes의 Google 클라이언트 쌍
+(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`)은 서비스 변수라서 이 파일에는 두지 않아요.
+Hermes는 이 파일을 판독기 둘로 읽고 게이트도 둘의 눈으로 판정해요. 값은 한 줄이어야 하고(값 안의
+줄바꿈은 거절해요), 어느 판독기든 읽는 이름은 목록에 있어야 해요. 그 밖의 이름은 값이 비어 있어도
+이름만 대고 시작을 거절해요(게이트는 값을 출력하지 않아요). 옆에 `.op.env`가 있거나
+`/opt/data/profiles/` 아래에 항목이 하나라도 있어도 거절해요(폴더가 없거나 비어 있는 것은 괜찮아요. 프로필을 만들었다 지웠다면 Hermes가 남기는 `.deleted` 표식도
+항목 하나로 세요). 이미 도는
+Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
+(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`는
+이름만 보여줘요) 목록에 없는 줄을 지우세요.
+
 **제로 베이스 지름길 (#4072).** 1~7번은 이제 템플릿과 생성기가 대신 해요. 잠금을
 읽는 일과 모델 키는 여전히 운영자 몫이에요.
 
@@ -2033,20 +2059,21 @@ agent:
   Hermes가 만든 그림을 Hermes의 답에서 읽어 와요. 그래서 문은 **둘 다 켜야** 열려요.
   Hermes 쪽은 `HERMES_MEDIA_DELIVERY_STRICT=1`이에요(Hermes의 엄격한 미디어 전달이에요.
   꺼져 있으면 답에 적힌 `MEDIA:` 줄이 읽을 수 있는 아무 파일이나 내줘요). 템플릿과 compose가
-  알아서 넣고, `lockgate.py`는 그림 도구가 켜진 Hermes에 이 값이 정확히 `1`이 아니면
-  시작을 거절해요(볼륨 `.env`에 이 이름이 있어도 거절해요). 워커 쪽은 agent-worker의
+  알아서 넣고, `lockgate.py`는 이 값이 정확히 `1`이 아니면 그림 도구와 상관없이 어떤
+  모드에서도 시작을 거절해요(볼륨 `.env`에 이 이름이 있어도 거절해요). 워커 쪽은 agent-worker의
   `OORT_HOSTED_MEDIA_STRICT=1`이에요. 워커가 연결하는 Hermes가 그 엄격한 Hermes라는
   운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
   닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
   게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
   `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`와 시작
   명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
-  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서 `image_guard` 안의
+  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서
   `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.
   정확히 `1`일 때만 문이 열려요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
   배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
-  운영자가 직접 책임져요.
+  운영자가 직접 책임져요(게이트는 자기 표에 sha256이 없는 설정을 거절해요, #4935:
+  `python3 infra/hermes/render_model_config.py --catalog`).
 - **모델 인증은 이 작업 밖이에요**(#4073). 모델 없이도 Hermes는 뜨고 카드도 보여요.
   모델을 정하기 전까지 대화 한 번은 「Hermes가 아직 모델 provider에 연결되지 않았다」
   고 답해요.
@@ -2104,7 +2131,10 @@ oort는 판단하거나 보증하지 않아요. 구독 토큰을 oort·채널·o
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web, memory, session_search]
+memory:                        # ADR-0203 R2, 첫 설정과 같아요
+  memory_enabled: false
+  user_profile_enabled: false
 mcp_servers:
   gmail:                       # com.momo.plugins.gmail -> 키 "gmail"
     url: https://<벤더 MCP 주소>

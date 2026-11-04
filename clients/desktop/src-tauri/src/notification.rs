@@ -10,6 +10,11 @@
 // (`@tauri-apps/api`) for the whole desktop bridge, and the permission dance
 // stays a single call the React tree can await instead of a plugin-shaped
 // multi-step protocol.
+//
+// A click on a banner is the one thing the plugin cannot report: its desktop
+// `show()` is fire-and-forget. `notification_show_clickable` is the path that
+// can, on macOS (`notification_click.rs`, #5059); everything else, and every
+// banner that cannot wait, goes through the plugin as before.
 
 use serde::Serialize;
 use tauri::plugin::PermissionState;
@@ -77,20 +82,93 @@ pub fn notification_show<R: Runtime>(
     title: String,
     body: Option<String>,
 ) -> Result<bool, String> {
-    let state = app
-        .notification()
-        .permission_state()
-        .map_err(|error| error.to_string())?;
-    if !matches!(state, PermissionState::Granted) {
+    if !permission_granted(&app)? {
         return Ok(false);
     }
+    show_plain(&app, title, body)?;
+    Ok(true)
+}
 
+fn permission_granted<R: Runtime>(app: &AppHandle<R>) -> Result<bool, String> {
+    app.notification()
+        .permission_state()
+        .map(|state| matches!(state, PermissionState::Granted))
+        .map_err(|error| error.to_string())
+}
+
+/// One banner through the plugin: fire-and-forget, no way to learn of a click. The fallback for
+/// every banner that cannot be a clickable one (`notification_show_clickable`).
+pub(crate) fn show_plain<R: Runtime>(
+    app: &AppHandle<R>,
+    title: String,
+    body: Option<String>,
+) -> Result<(), String> {
     let mut builder = app.notification().builder().title(title);
     if let Some(body) = body {
         builder = builder.body(body);
     }
-    builder.show().map_err(|error| error.to_string())?;
-    Ok(true)
+    builder.show().map_err(|error| error.to_string())
+}
+
+/// What `notification_show_clickable` did with a banner (#5059).
+#[cfg(desktop)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClickableOutcome {
+    /// Shown, and a click on it arrives as a `momo:notification-click` event carrying the
+    /// request's `id` and `target`.
+    Clickable,
+    /// Shown, but a click on it cannot be reported (another OS, too many banners already waiting,
+    /// a malformed click request). The web layer must not expect an event for it.
+    Plain,
+    /// Not shown: permission is not granted.
+    Refused,
+}
+
+/// Whether this shell can report a banner click at all: macOS, where the shell keeps the banner's
+/// handle (`notification_click.rs`). The web layer asks once per run; it decides whether the
+/// old "the window came to the front within 20 s" approximation stays armed. A shell that does
+/// not have this command (an older build) fails the call, which the web layer reads as "no".
+#[cfg(desktop)]
+#[tauri::command]
+pub fn notification_click_supported() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// Shows one native notification and, where the shell can, reports its click (#5059).
+///
+/// `id` is a token the web layer minted for this banner and `target` the app route a click
+/// should open; both come back unchanged in `momo:notification-click`, and only on a click. The
+/// answer says whether that will happen: [`ClickableOutcome::Clickable`] only after the wait is
+/// really started, so the web layer never expects an event that cannot come.
+///
+/// Anything that cannot be waited on is shown the plain way instead of being dropped: another
+/// OS, a banner past `MAX_PENDING_CLICKS`, a thread that could not start, a malformed `id` or
+/// `target`. Losing a banner would cost the person a mention; losing its click costs one
+/// sidebar click.
+#[cfg(desktop)]
+#[tauri::command]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+pub fn notification_show_clickable<R: Runtime>(
+    app: AppHandle<R>,
+    title: String,
+    body: Option<String>,
+    id: String,
+    target: String,
+) -> Result<ClickableOutcome, String> {
+    if !permission_granted(&app)? {
+        return Ok(ClickableOutcome::Refused);
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(click) = crate::notification_click::parse_click(id, target) {
+        if crate::notification_click::show_with_click(&app, title.clone(), body.clone(), click) {
+            return Ok(ClickableOutcome::Clickable);
+        }
+    }
+
+    show_plain(&app, title, body)?;
+    Ok(ClickableOutcome::Plain)
 }
 
 /// Largest number the Dock tile shows. Past this the web side's own count is
@@ -125,6 +203,35 @@ fn badge_value(count: u32) -> Option<i64> {
         None
     } else {
         Some(i64::from(count.min(DOCK_BADGE_MAX)))
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod click_tests {
+    use super::{notification_click_supported, ClickableOutcome};
+
+    /// The web layer reads these three words; a rename here is a silent "refused" there.
+    #[test]
+    fn the_outcome_words_are_the_ones_the_web_layer_reads() {
+        for (outcome, word) in [
+            (ClickableOutcome::Clickable, "clickable"),
+            (ClickableOutcome::Plain, "plain"),
+            (ClickableOutcome::Refused, "refused"),
+        ] {
+            assert_eq!(serde_json::to_value(outcome).unwrap(), word);
+        }
+    }
+
+    /// Only macOS keeps the banner's handle; the other desktops stay on the plain path, where
+    /// the web layer keeps its focus approximation.
+    #[test]
+    fn only_macos_reports_clicks() {
+        // A literal per platform rather than `cfg!(..)` echoed back: the function is defined
+        // as that expression, so comparing it with itself could never fail.
+        #[cfg(target_os = "macos")]
+        assert!(notification_click_supported());
+        #[cfg(not(target_os = "macos"))]
+        assert!(!notification_click_supported());
     }
 }
 

@@ -95,13 +95,17 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#an_access_token_outliving_its_logout_cannot_register_a_key"
   - id: AUTH-4
-    claim: "One-time login claims and password-reset links work once, are stored as hashes, and are scoped to their own workspace."
-    scope: "Real PostgreSQL."
+    claim: "One-time login claims and password-reset links work once, are stored as hashes, and are scoped to their own workspace; an owner or admin can issue a password-reset link only by re-entering their own password (no password is a 400, a wrong one a 403 that leaves the member's pending link untouched, and the attempts are budgeted per operator), a pending link ends with the member's sessions when the member is suspended, removed or leaves but not when they change their own password, and the link and the passwords typed along the way reach no captured log line or audit row."
+    scope: "Real PostgreSQL. The operator's attempt budget is in-process: one server instance, reset by a restart, not shared between replicas. A link is a bearer secret that works for whoever holds it until it ends, and the server cannot tell who the operator handed it to; checking that is the operator's job and is not tested. The no-leak proof is the debug-level log lines and the audit rows of one test run through the issue and claim routes, with a planted-leak control inside the same test."
     priority: P1
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/claim_conformance_pg.rs#claim_issue_login_reject_consume_login_reuse_and_hash_only"
       - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#reset_issue_consume_reuse_reissue_and_cross_workspace"
+      - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#the_issue_asks_for_the_operators_own_password_and_a_refusal_changes_nothing"
+      - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#the_operators_budget_is_per_operator_and_counts_a_right_password_too"
+      - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#a_pending_reset_link_ends_with_the_members_sessions_but_not_with_their_own_change"
+      - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#what_the_operator_typed_and_the_link_never_leave_the_server_but_in_the_answer_that_hands_them_over"
 
   # ---- 웹훅 · 바깥으로 나가는 요청 --------------------------------------------------
   - id: WH-1

@@ -1501,6 +1501,19 @@ async fn in_place_grant_card(
         return Ok(true);
     }
 
+    let payload = grant::in_place_grant_payload(
+        agent.member_id,
+        send.author_member_id,
+        connection_id,
+        send.channel_id,
+        &facts.name,
+        send.message_id,
+    );
+    // ADR-0204 증보 6 D6-2: the card the server raised in place — a person called the agent in
+    // this very channel — is the one `hosted.channels.grant` that is still decided from the
+    // banner; the card carries the same answer the push and the `push_action` refusal give.
+    let decision =
+        momo_agent::actions::decision_mode(momo_agent::ACTION_TYPE_WORKSPACE_ACTION, &payload);
     let approval_id = momo_agent::create_pending_approval_in_tx(
         &mut *conn,
         send.workspace_id,
@@ -1512,14 +1525,7 @@ async fn in_place_grant_card(
             // requires a human — so self-approval stays structurally impossible.
             requested_by: agent.member_id,
             action_type: momo_agent::ACTION_TYPE_WORKSPACE_ACTION.to_string(),
-            payload: grant::in_place_grant_payload(
-                agent.member_id,
-                send.author_member_id,
-                connection_id,
-                send.channel_id,
-                &facts.name,
-                send.message_id,
-            ),
+            payload,
             expires_at,
         },
     )
@@ -1559,6 +1565,7 @@ async fn in_place_grant_card(
             Value::String(send.author_member_id.to_string()),
         );
     }
+    momo_agent::actions::stamp_decision_mode(&mut props, decision);
     let card = send_thread_notice_in_tx(
         &mut *conn,
         send.workspace_id,
@@ -1566,7 +1573,7 @@ async fn in_place_grant_card(
             channel_id: send.channel_id,
             author_member_id: agent.member_id,
             message_type: MessageType::ApprovalRequest,
-            body: Some(grant::in_place_grant_body(&agent.display_name)),
+            body: Some(grant::in_place_grant_body()),
             props,
             // Where the person spoke: their thread, or the main timeline.
             root_id: send.root_id,

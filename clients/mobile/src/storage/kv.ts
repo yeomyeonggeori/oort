@@ -113,6 +113,15 @@ export const NON_SECRET_KEYS = {
    */
   composerDrafts: 'momo.mobile.composer.drafts.v1',
   /**
+   * 보내지 못한 글 (#5222, #5201 결정 ⑤). 열쇠 `워크스페이스:채널:멱등키` → 한 건의 JSON(코어 `serializeFailedSend`)인 지도 한 덩이이고,
+   * 수명·정원·비밀 키 거부·로그아웃 삭제는 `features/conversation/failedSends.ts` 가 진다. 위 초안과 같은 규칙이다.
+   *
+   * 여기 있어도 되는 이유도 초안과 같다: **사람이 자기 손으로 쓴 글**이 이 기기에 그대로 있는 것이고, 서버가 받았다는 증명이 없는(응답이
+   * 유실됐을 수 있는) 글이다. 행 전체(멱등 키 · 첨부 id · 인용)를 남기는 까닭은 웹과 같다 - 키가 살아야 다시 보내도 서버가 중복을 막는다.
+   * 토큰과는 다른 종류의 값이고, 잃으면 사람이 쓴 글이 없어진다.
+   */
+  failedSends: 'momo.mobile.composer.failed-sends.v1',
+  /**
    * 라이트/다크/시스템 중 사람이 고른 것 (U2, 옛 키 — 읽기 전용). 값은 `ThemeChoice` 세
    * 낱말 중 하나다. **키가 없다는 것과 「시스템」을 골랐다는 것은 다르다**: 이 키와 새 키
    * (`appearance`)가 모두 없을 때만 폰의 기본(라이트)이고, 하나라도 있으면 거기 적힌 선택이
@@ -177,6 +186,13 @@ export const NON_SECRET_KEYS = {
    * 소식을 한 번 더 볼 뿐이다. 계정 정보 없음.
    */
   releaseNotesSeen: 'momo.mobile.release-notes.seen.v1',
+  /**
+   * 「링크 미리보기」 — 이 폰이 대화의 링크 카드를 어떻게 그리는가 (#4883). 값은 `rich`(크게) ·
+   * `compact`(작게) · `off`(끄기) 세 낱말 중 하나이고, 웹의 `momo.web.link-preview.v1` 과 **같은 값 이름**이다.
+   * 키가 없거나 모르는 값이면 코어의 `DEFAULT_UNFURL_SIZE`(작게)다. 기기 취향이라 로그아웃에도 남고
+   * 서버·다른 멤버 화면과 무관하다. 비밀이 아니다.
+   */
+  linkPreview: 'momo.mobile.link-preview.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

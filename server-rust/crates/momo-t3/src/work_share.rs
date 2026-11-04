@@ -30,6 +30,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::error::T3Error;
+use momo_wire::report_text::{checked_report_text, checked_text, is_unsafe_char, ReportTextFault};
 
 /// ADR-0190 D4-b: the closed harness list.
 pub const HARNESSES: &[&str] = &["claude", "codex", "grok", "opencode", "shell", "other"];
@@ -92,45 +93,16 @@ impl ShareRejection {
     }
 }
 
-fn is_unsafe_char(c: char) -> bool {
-    // Control characters include ESC (ANSI) and NUL; the rest is the invisible /
-    // direction-changing class (Unicode Cf, Zl, Zp and the default-ignorable
-    // fillers) that makes one string read as another or breaks a line in a card.
-    c.is_control()
-        || matches!(
-            c,
-            '\u{00AD}'
-                | '\u{034F}'
-                | '\u{061C}'
-                | '\u{115F}'..='\u{1160}'
-                | '\u{17B4}'..='\u{17B5}'
-                | '\u{180B}'..='\u{180F}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{2028}'..='\u{202E}'
-                | '\u{2060}'..='\u{206F}'
-                | '\u{3164}'
-                | '\u{FE00}'..='\u{FE0F}'
-                | '\u{FEFF}'
-                | '\u{FFA0}'
-                | '\u{FFF0}'..='\u{FFFB}'
-                | '\u{E0000}'..='\u{E0FFF}'
-        )
-}
-
 fn bounded_text(raw: &str, field: &str, max: usize) -> Result<String, ShareRejection> {
-    let value = raw.trim();
-    let length = value.chars().count();
-    if !(1..=max).contains(&length) {
-        return Err(ShareRejection::new(format!(
-            "{field} must contain 1...{max} characters"
-        )));
-    }
-    if value.chars().any(is_unsafe_char) {
-        return Err(ShareRejection::new(format!(
-            "{field} must not contain control characters"
-        )));
-    }
-    Ok(value.to_string())
+    checked_text(raw, max).map_err(|fault| match fault {
+        ReportTextFault::Length => {
+            ShareRejection::new(format!("{field} must contain 1...{max} characters"))
+        }
+        // `checked_text` never answers `PathSeparator`; the arm keeps the match total.
+        ReportTextFault::UnsafeChar | ReportTextFault::PathSeparator => {
+            ShareRejection::new(format!("{field} must not contain control characters"))
+        }
+    })
 }
 
 /// Repository display name: the last path element. A separator is refused, not
@@ -196,6 +168,31 @@ pub fn validated_state(raw: &str) -> Result<String, ShareRejection> {
     }
 }
 
+/// One piece of agent-reported plain text under **the** shared character rule
+/// ([`momo_wire::report_text::checked_report_text`], ADR-0200 증보 7 7-3), with the refusal spelled
+/// as a message that names `field` and the rule, never the value (the stage path's wording).
+///
+/// A stage marker (80), an activity label (40), a plan step (60) and an activity id (32, plus
+/// its own alphabet in `momo-agent`) all pass through that one function, so the four fields
+/// cannot drift apart. The SQL backstop (`agent_report_text_ok`, migration 168) is a subset of it.
+pub fn validated_report_text(
+    raw: &str,
+    field: &str,
+    max_chars: usize,
+) -> Result<String, ShareRejection> {
+    checked_report_text(raw, max_chars).map_err(|fault| match fault {
+        ReportTextFault::Length => {
+            ShareRejection::new(format!("{field} must contain 1...{max_chars} characters"))
+        }
+        ReportTextFault::UnsafeChar => {
+            ShareRejection::new(format!("{field} must not contain control characters"))
+        }
+        ReportTextFault::PathSeparator => {
+            ShareRejection::new(format!("{field} must not contain a path separator"))
+        }
+    })
+}
+
 pub fn validated_stage_markers(raw: &[String]) -> Result<Vec<String>, ShareRejection> {
     if raw.len() > MAX_STAGE_MARKERS {
         return Err(ShareRejection::new(format!(
@@ -203,16 +200,7 @@ pub fn validated_stage_markers(raw: &[String]) -> Result<Vec<String>, ShareRejec
         )));
     }
     raw.iter()
-        .map(|marker| {
-            let text = bounded_text(marker, "stage marker", MAX_STAGE_MARKER_CHARS)?;
-            // Stage labels are short words; a path separator means a path.
-            if text.contains('/') || text.contains('\\') {
-                return Err(ShareRejection::new(
-                    "stage marker must not contain a path separator",
-                ));
-            }
-            Ok(text)
-        })
+        .map(|marker| validated_report_text(marker, "stage marker", MAX_STAGE_MARKER_CHARS))
         .collect()
 }
 
@@ -584,6 +572,47 @@ mod tests {
                 "must refuse {bad:?}"
             );
         }
+    }
+
+    /// ADR-0200 증보 7 7-3: the stage marker goes through the shared rule
+    /// (`momo_wire::report_text`, whose own tests pin the rule); the stage path keeps its verdicts
+    /// and its exact refusal sentences.
+    #[test]
+    fn the_stage_path_is_the_shared_rule_with_its_own_sentences() {
+        for text in [
+            "원인 찾음",
+            "a/b",
+            "a\\b",
+            "bad\u{7}",
+            "\u{202E}rtl",
+            "zero\u{200B}width",
+            "   ",
+            "",
+            "/Users/me/secret/auth.rs",
+        ] {
+            assert_eq!(
+                validated_stage_markers(&[text.to_string()]).is_ok(),
+                checked_report_text(text, MAX_STAGE_MARKER_CHARS).is_ok(),
+                "{text:?}: the stage path and the shared function agree"
+            );
+        }
+        assert_eq!(
+            validated_stage_markers(&["x".repeat(81)]).unwrap_err().0,
+            "stage marker must contain 1...80 characters"
+        );
+        assert_eq!(
+            validated_stage_markers(&["bad\u{7}".into()]).unwrap_err().0,
+            "stage marker must not contain control characters"
+        );
+        assert_eq!(
+            validated_stage_markers(&["a/b".into()]).unwrap_err().0,
+            "stage marker must not contain a path separator"
+        );
+        assert_eq!(
+            validated_report_text("a/b", "plan step", 60).unwrap_err().0,
+            "plan step must not contain a path separator",
+            "the message names the field it was given"
+        );
     }
 
     #[test]

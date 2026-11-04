@@ -2,6 +2,1144 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "attachments.tray.noticeDismiss": [
+    {
+      "type": 0,
+      "value": "Got it"
+    }
+  ],
+  "attachments.tray.overflow": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file doesn't"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files don't"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " fit: a message holds up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "attachments.tray.removeNamed": [
+    {
+      "type": 0,
+      "value": "Remove attachment "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", play"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, play"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't play this video"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "This video isn't available anymore"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "Loading video"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "Pause"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "Play"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "Replay from the start"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "Saves the video to your photo library"
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "Playback position"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "Go to this video"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 0,
+      "value": "Video "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 0,
+      "value": "Item "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "blocked.addMemberLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can add members once you're connected again."
+    }
+  ],
+  "blocked.addMemberLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can add members once we're connected again."
+    }
+  ],
+  "blocked.aiKeysLead.offline": [
+    {
+      "type": 0,
+      "value": "You're offline."
+    }
+  ],
+  "blocked.aiKeysLead.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
+  "blocked.approveOrDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't approve or disconnect right now."
+    }
+  ],
+  "blocked.approveOrDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't approve or disconnect right now."
+    }
+  ],
+  "blocked.changeAiLink.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change or check this connection right now."
+    }
+  ],
+  "blocked.changeAiLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change or check this connection right now."
+    }
+  ],
+  "blocked.changeHere.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this right now. You can change it here once you're connected again."
+    }
+  ],
+  "blocked.changeHere.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this right now. You can change it here once we're connected again."
+    }
+  ],
+  "blocked.changeIt.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this right now."
+    }
+  ],
+  "blocked.changeIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this right now."
+    }
+  ],
+  "blocked.changeLimits.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change the limits right now."
+    }
+  ],
+  "blocked.changeLimits.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change the limits right now."
+    }
+  ],
+  "blocked.changeProfile.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change your display name, handle, or profile photo right now."
+    }
+  ],
+  "blocked.changeProfile.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change your display name, handle, or profile photo right now."
+    }
+  ],
+  "blocked.changeRules.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change the rules right now."
+    }
+  ],
+  "blocked.changeRules.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change the rules right now."
+    }
+  ],
+  "blocked.changeSetting.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this setting right now."
+    }
+  ],
+  "blocked.changeSetting.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this setting right now."
+    }
+  ],
+  "blocked.changeStatus.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change your status right now."
+    }
+  ],
+  "blocked.changeStatus.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change your status right now."
+    }
+  ],
+  "blocked.changeTeamAiKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't check or change the team AI key right now."
+    }
+  ],
+  "blocked.changeTeamAiKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't check or change the team AI key right now."
+    }
+  ],
+  "blocked.confirmDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't confirm disconnecting right now."
+    }
+  ],
+  "blocked.confirmDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't confirm disconnecting right now."
+    }
+  ],
+  "blocked.contentStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the content as last confirmed."
+    }
+  ],
+  "blocked.contentStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the content as last confirmed."
+    }
+  ],
+  "blocked.createAgentLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create an agent once you're connected again."
+    }
+  ],
+  "blocked.createAgentLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create an agent once we're connected again."
+    }
+  ],
+  "blocked.createChannelLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create a channel once you're connected again."
+    }
+  ],
+  "blocked.createChannelLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create a channel once we're connected again."
+    }
+  ],
+  "blocked.createDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create a connection right now. Try again once you're connected again."
+    }
+  ],
+  "blocked.createDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create a connection right now. Try again once we're connected again."
+    }
+  ],
+  "blocked.createInviteLink.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create an invite link right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createInviteLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create an invite link right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createQrLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create the QR code once you're connected again."
+    }
+  ],
+  "blocked.createQrLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create the QR code once we're connected again."
+    }
+  ],
+  "blocked.createThing.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create this right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createThing.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create this right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createWebhookUrl.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create the URL right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createWebhookUrl.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create the URL right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createWorkspace.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create a workspace right now."
+    }
+  ],
+  "blocked.createWorkspace.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create a workspace right now."
+    }
+  ],
+  "blocked.createWorkspaceLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create a workspace once you're connected again."
+    }
+  ],
+  "blocked.createWorkspaceLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create a workspace once we're connected again."
+    }
+  ],
+  "blocked.decideNow.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. You can press it once you're connected again."
+    }
+  ],
+  "blocked.decideNow.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. You can press it once we're connected again."
+    }
+  ],
+  "blocked.decisionStage.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Look through the details, and decide once you're connected again."
+    }
+  ],
+  "blocked.decisionStage.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Look through the details, and decide once we're connected again."
+    }
+  ],
+  "blocked.delegate.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't hand this off right now."
+    }
+  ],
+  "blocked.delegate.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't hand this off right now."
+    }
+  ],
+  "blocked.deleteDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't delete the connection right now. You can delete it once you're connected again."
+    }
+  ],
+  "blocked.deleteDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't delete the connection right now. You can delete it once we're connected again."
+    }
+  ],
+  "blocked.doThis.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't do this right now."
+    }
+  ],
+  "blocked.doThis.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't do this right now."
+    }
+  ],
+  "blocked.doThisLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't do this right now. Try again once you're connected again."
+    }
+  ],
+  "blocked.doThisLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't do this right now. Try again once we're connected again."
+    }
+  ],
+  "blocked.draftsOnDevice.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Your drafts are on this device."
+    }
+  ],
+  "blocked.draftsOnDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Your drafts are on this device."
+    }
+  ],
+  "blocked.huddleJoined.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Messages can't go through, but audio may keep going and you can still leave the huddle."
+    }
+  ],
+  "blocked.huddleJoined.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Messages can't go through, but audio may keep going and you can still leave the huddle."
+    }
+  ],
+  "blocked.huddleUnavailable.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so huddles aren't available right now."
+    }
+  ],
+  "blocked.huddleUnavailable.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so huddles aren't available right now."
+    }
+  ],
+  "blocked.inboxReply.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send a reply right now. Once you're connected again, you can reply here."
+    }
+  ],
+  "blocked.inboxReply.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't send a reply right now. Once we're connected again, you can reply here."
+    }
+  ],
+  "blocked.issueCredential.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't issue or change connection values right now."
+    }
+  ],
+  "blocked.issueCredential.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't issue or change connection values right now."
+    }
+  ],
+  "blocked.issueKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't issue this right now."
+    }
+  ],
+  "blocked.issueKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't issue this right now."
+    }
+  ],
+  "blocked.keepListIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep browsing the list, and issue once you're connected again."
+    }
+  ],
+  "blocked.keepListIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep browsing the list, and issue once we're connected again."
+    }
+  ],
+  "blocked.keepViewChangeLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep reading what was last received, and make changes once you're connected again."
+    }
+  ],
+  "blocked.keepViewChangeLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep reading what was last received, and make changes once we're connected again."
+    }
+  ],
+  "blocked.keepViewIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep reading the last state received, and issue values or approve once you're connected again."
+    }
+  ],
+  "blocked.keepViewIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep reading the last state received, and issue values or approve once we're connected again."
+    }
+  ],
+  "blocked.lastSyncedList.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". Below is how things were then."
+    }
+  ],
+  "blocked.lastSyncedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". Below is how things were then."
+    }
+  ],
+  "blocked.listStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the list as last confirmed."
+    }
+  ],
+  "blocked.listStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the list as last confirmed."
+    }
+  ],
+  "blocked.loadHosts.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the registered host list can't be loaded. We'll load it once you're connected again."
+    }
+  ],
+  "blocked.loadHosts.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the registered host list can't be loaded. We'll load it once we're connected again."
+    }
+  ],
+  "blocked.loadPolicy.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the policy can't be loaded. Existing sessions stay as they are."
+    }
+  ],
+  "blocked.loadPolicy.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the policy can't be loaded. Existing sessions stay as they are."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the workspace defaults can't be loaded. We'll load them once you're connected again."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the workspace defaults can't be loaded. We'll load them once we're connected again."
+    }
+  ],
+  "blocked.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're connected again, you can resume or stop here."
+    }
+  ],
+  "blocked.loginHandoff.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can resume or stop here."
+    }
+  ],
+  "blocked.memberListStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Showing the member list we last received."
+    }
+  ],
+  "blocked.memberListStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Showing the member list we last received."
+    }
+  ],
+  "blocked.neverReceivedList.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. We haven't received this list even once yet."
+    }
+  ],
+  "blocked.neverReceivedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. We haven't received this list even once yet."
+    }
+  ],
+  "blocked.openExistingDm.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can still go to people you're already chatting with."
+    }
+  ],
+  "blocked.openExistingDm.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can still go to people you're already chatting with."
+    }
+  ],
+  "blocked.register.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't register right now."
+    }
+  ],
+  "blocked.register.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't register right now."
+    }
+  ],
+  "blocked.relinkKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't link again right now."
+    }
+  ],
+  "blocked.relinkKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't link again right now."
+    }
+  ],
+  "blocked.reloadPicturesLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. We'll reload the pictures once you're connected again."
+    }
+  ],
+  "blocked.reloadPicturesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. We'll reload the pictures once we're connected again."
+    }
+  ],
+  "blocked.revokeKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't revoke this right now."
+    }
+  ],
+  "blocked.revokeKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't revoke this right now."
+    }
+  ],
+  "blocked.rotateOrRevoke.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't rotate or revoke this right now."
+    }
+  ],
+  "blocked.rotateOrRevoke.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't rotate or revoke this right now."
+    }
+  ],
+  "blocked.saveAfterReconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can save once you're connected again."
+    }
+  ],
+  "blocked.saveAfterReconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can save once we're connected again."
+    }
+  ],
+  "blocked.saveChangesLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can save changes once you're connected again."
+    }
+  ],
+  "blocked.saveChangesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can save changes once we're connected again."
+    }
+  ],
+  "blocked.saveDisplayName.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the display name right now."
+    }
+  ],
+  "blocked.saveDisplayName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the display name right now."
+    }
+  ],
+  "blocked.saveIt.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save this right now."
+    }
+  ],
+  "blocked.saveIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save this right now."
+    }
+  ],
+  "blocked.saveName.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the name right now."
+    }
+  ],
+  "blocked.saveName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the name right now."
+    }
+  ],
+  "blocked.saveNameResume.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the name right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.saveNameResume.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the name right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.saveReminder.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the reminder right now."
+    }
+  ],
+  "blocked.saveReminder.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the reminder right now."
+    }
+  ],
+  "blocked.saveWelcome.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the welcome settings right now."
+    }
+  ],
+  "blocked.saveWelcome.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the welcome settings right now."
+    }
+  ],
+  "blocked.sendRequestLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can send the request once you're connected again."
+    }
+  ],
+  "blocked.sendRequestLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can send the request once we're connected again."
+    }
+  ],
+  "blocked.signIn.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't sign in right now."
+    }
+  ],
+  "blocked.signIn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't sign in right now."
+    }
+  ],
+  "blocked.startDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't start disconnecting right now."
+    }
+  ],
+  "blocked.startDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't start disconnecting right now."
+    }
+  ],
+  "blocked.stopOrDelete.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't pause or delete this right now."
+    }
+  ],
+  "blocked.stopOrDelete.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't pause or delete this right now."
+    }
+  ],
+  "blocked.subscribe.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't subscribe right now."
+    }
+  ],
+  "blocked.subscribe.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't subscribe right now."
+    }
+  ],
+  "blocked.terminalStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Sessions already loaded stay as they are, and the output continues once you're connected again."
+    }
+  ],
+  "blocked.terminalStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Sessions already loaded stay as they are, and the output continues once we're connected again."
+    }
+  ],
+  "blocked.turnOn.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't turn this on right now."
+    }
+  ],
+  "blocked.turnOn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't turn this on right now."
+    }
+  ],
+  "blocked.turnOnHelper.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't turn on the helper right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.turnOnHelper.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't turn on the helper right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unlinkDevice.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't unlink the device right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.unlinkDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't unlink the device right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unlinkTeamAi.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't disconnect right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.unlinkTeamAi.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't disconnect right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unregister.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't unregister right now."
+    }
+  ],
+  "blocked.unregister.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't unregister right now."
+    }
+  ],
+  "blocked.updatesPausedStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so updates have paused. Below is the state as last confirmed."
+    }
+  ],
+  "blocked.updatesPausedStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so updates have paused. Below is the state as last confirmed."
+    }
+  ],
+  "blocked.waitAMoment.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so let's wait a moment."
+    }
+  ],
+  "blocked.waitAMoment.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so let's wait a moment."
+    }
+  ],
+  "blocked.workStateNone.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. There's no saved work state to show yet."
+    }
+  ],
+  "blocked.workStateNone.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. There's no saved work state to show yet."
+    }
+  ],
+  "blocked.workStateStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the work state as last confirmed."
+    }
+  ],
+  "blocked.workStateStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the work state as last confirmed."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -72,6 +1210,394 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Remember my email"
+    }
+  ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "Reconnect now"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "Try again once you're connected to a network."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "Once you're connected to a network, you can scan the QR code."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Your saved sign-in is still here, and we'll keep trying once you're connected."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "Connecting…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "You haven't loaded this list yet."
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "You can only see what's already loaded. We'll reconnect automatically."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "You're offline"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "New messages may show up late."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "Live connection lost"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "Reconnected"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "We'll try again in a moment."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "Can't reach the server"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "It will reconnect soon."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "The server is updating"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "Try again. If it keeps happening, copy the connection log and send it to us."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "There's a problem with the connection"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send right now. Your draft is still here, and you can send it once you're connected again."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
+    }
+  ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't show which channels this agent is in"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent profile"
+    }
+  ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent list"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the task details"
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the conversation"
+    }
+  ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device keys"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the status of Hermes on this server"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the next items. The ones you already have are still here"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the inbox"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device list"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the link check setting"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member profile"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list"
+    }
+  ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load new messages"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the notification rules"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can try again once you're connected."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Try again in a moment."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't send"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't send because you're offline"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "The server didn't accept it"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "Couldn't send because we can't reach the server"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "Resend"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend all "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "Your session has expired. Please sign in again."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "This server has no file storage connected"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because you're offline"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because the server isn't responding"
     }
   ],
   "desktop.menu.close": [
@@ -180,6 +1706,231 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Window"
+    }
+  ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "Closing the window keeps oort in the menu bar, so you still get notifications"
+    }
+  ],
+  "desktop.tray.more": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "desktop.tray.newMessage": [
+    {
+      "type": 0,
+      "value": "New message"
+    }
+  ],
+  "desktop.tray.none": [
+    {
+      "type": 0,
+      "value": "Nothing running"
+    }
+  ],
+  "desktop.tray.open": [
+    {
+      "type": 0,
+      "value": "Open oort"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "Mark all as read"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 6,
+      "value": "approvals",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "panes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " are still waiting for you"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.running": [
+    {
+      "type": 0,
+      "value": "Running"
+    }
+  ],
+  "desktop.tray.stateBlocked": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "desktop.tray.stateWorking": [
+    {
+      "type": 0,
+      "value": "Working"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -474,6 +2225,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "https://giphy.com/gifs/…"
+    }
+  ],
+  "expressions.kind.autoNote": [
+    {
+      "type": 0,
+      "value": "Picked to match the picture's size and motion. You can change it."
+    }
+  ],
+  "expressions.kind.emoji": [
+    {
+      "type": 0,
+      "value": "Team emoji"
+    }
+  ],
+  "expressions.kind.hintEmoji": [
+    {
+      "type": 0,
+      "value": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves."
+    }
+  ],
+  "expressions.kind.hintSticker": [
+    {
+      "type": 0,
+      "value": "A large picture. It is sent big, and a moving one shows under GIF."
+    }
+  ],
+  "expressions.kind.legend": [
+    {
+      "type": 0,
+      "value": "Kind"
+    }
+  ],
+  "expressions.kind.sticker": [
+    {
+      "type": 0,
+      "value": "Emoticon"
     }
   ],
   "expressions.make.agent": [
@@ -829,6 +2616,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Send request"
+    }
+  ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "Emoticon"
+    }
+  ],
+  "expressions.panel.viewEmpty": [
+    {
+      "type": 0,
+      "value": "Nothing in this view yet"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "Team expression views"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "Team emoji"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -1391,10 +3208,52 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
-  "mobile.connection.reconnectNow": [
+  "mobile.attachmentSave.failed": [
     {
       "type": 0,
-      "value": "Reconnect now"
+      "value": "Couldn't save · Try again"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "Photos access is off · Open Settings"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "Saved to Files"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "Saved to Photos"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "Saves to your photo library"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "Save to Files"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "Save to Photos"
     }
   ],
   "mobile.ios.cameraUsage": [
@@ -1424,13 +3283,121 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort does not save photos to your library. All features work without this permission."
+      "value": "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
     {
       "type": 0,
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "Link copied"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t copy the link."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "Loading link preview"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "Remove preview"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "Every link preview on this message disappears for everyone and won’t be made again. The message and its links stay."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t remove the link preview. Check your connection and try again."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "Removing…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove this link preview?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "Share"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close link actions"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Link actions"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address and title on the right."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "Shows a large picture on top, with the title and description below. Links without a large picture look like Small."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "Applies to this device only. Web and desktop are set separately."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "Link previews"
     }
   ],
   "mobile.locale.backToSettings": [
@@ -1449,6 +3416,440 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Posted an invite link"
+    }
+  ],
+  "recovery.claim.hostBody": [
+    {
+      "type": 0,
+      "value": "Your new password is sent to the server below. Continue only if the address is the one your admin gave you."
+    }
+  ],
+  "recovery.claim.hostConfirm": [
+    {
+      "type": 0,
+      "value": "Yes, continue"
+    }
+  ],
+  "recovery.claim.hostReject": [
+    {
+      "type": 0,
+      "value": "No, go back"
+    }
+  ],
+  "recovery.claim.hostTitle": [
+    {
+      "type": 0,
+      "value": "Is this the right server?"
+    }
+  ],
+  "recovery.claim.invalidChar": [
+    {
+      "type": 0,
+      "value": "The password contains a character that cannot be used."
+    }
+  ],
+  "recovery.claim.passwordHint": [
+    {
+      "type": 0,
+      "value": "At least "
+    },
+    {
+      "type": 2,
+      "value": "min",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters and at most "
+    },
+    {
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " bytes. A Korean syllable takes 3 bytes, so Korean-only fits "
+    },
+    {
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "recovery.claim.resetExpired": [
+    {
+      "type": 0,
+      "value": "This link expired after 24 hours. Ask an admin for a new link."
+    }
+  ],
+  "recovery.claim.resetUsed": [
+    {
+      "type": 0,
+      "value": "This link was already used or replaced by a newer one. If you already set your password, sign in. Otherwise ask an admin for a new link."
+    }
+  ],
+  "recovery.claim.title": [
+    {
+      "type": 0,
+      "value": "Choose a new password."
+    }
+  ],
+  "recovery.help.adminBody": [
+    {
+      "type": 0,
+      "value": "A workspace admin confirms it is you, then sends a one-time reset link. Copy the message below and pass it on."
+    }
+  ],
+  "recovery.help.adminTitle": [
+    {
+      "type": 0,
+      "value": "Ask an admin for a link"
+    }
+  ],
+  "recovery.help.back": [
+    {
+      "type": 0,
+      "value": "Back to sign in"
+    }
+  ],
+  "recovery.help.guideDetail": [
+    {
+      "type": 0,
+      "value": "An admin can send you a link to set a new one."
+    }
+  ],
+  "recovery.help.guideLine": [
+    {
+      "type": 0,
+      "value": "Forgetting a password is fine."
+    }
+  ],
+  "recovery.help.link": [
+    {
+      "type": 0,
+      "value": "Forgot your password?"
+    }
+  ],
+  "recovery.help.receivedEmpty": [
+    {
+      "type": 0,
+      "value": "Paste the link you received."
+    }
+  ],
+  "recovery.help.receivedHint": [
+    {
+      "type": 0,
+      "value": "The link works once, within 24 hours. When you set a new password, your other devices on this account are signed out."
+    }
+  ],
+  "recovery.help.receivedInvalid": [
+    {
+      "type": 0,
+      "value": "This does not read as a reset link. Paste the link the admin sent, exactly as it came."
+    }
+  ],
+  "recovery.help.receivedLabel": [
+    {
+      "type": 0,
+      "value": "Reset link"
+    }
+  ],
+  "recovery.help.receivedPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://team.example.com/claim/…"
+    }
+  ],
+  "recovery.help.receivedSubmit": [
+    {
+      "type": 0,
+      "value": "Open link"
+    }
+  ],
+  "recovery.help.receivedTitle": [
+    {
+      "type": 0,
+      "value": "I received a link"
+    }
+  ],
+  "recovery.help.requestCopied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "recovery.help.requestCopy": [
+    {
+      "type": 0,
+      "value": "Copy message"
+    }
+  ],
+  "recovery.help.requestLabel": [
+    {
+      "type": 0,
+      "value": "Request message"
+    }
+  ],
+  "recovery.help.requestNoEmail": [
+    {
+      "type": 0,
+      "value": "I forgot my oort password and need a reset link. Server: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "recovery.help.requestWithEmail": [
+    {
+      "type": 0,
+      "value": "I forgot my oort password and need a reset link. Server: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", email: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "recovery.issue.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "recovery.issue.confirmLead": [
+    {
+      "type": 0,
+      "value": "This link lets "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " choose a new password. Check these points first."
+    }
+  ],
+  "recovery.issue.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Create a reset link"
+    }
+  ],
+  "recovery.issue.entryAction": [
+    {
+      "type": 0,
+      "value": "Create reset link"
+    }
+  ],
+  "recovery.issue.entryHint": [
+    {
+      "type": 0,
+      "value": "Hand a one-time link to a member who forgot their password."
+    }
+  ],
+  "recovery.issue.errorBadTarget": [
+    {
+      "type": 0,
+      "value": "A reset link can only be created for a person."
+    }
+  ],
+  "recovery.issue.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You cannot create a reset link for this member. Your role does not allow it."
+    }
+  ],
+  "recovery.issue.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Could not create the link. Try again in a moment."
+    }
+  ],
+  "recovery.issue.errorInactive": [
+    {
+      "type": 0,
+      "value": "This member is not active right now, so a link cannot be created."
+    }
+  ],
+  "recovery.issue.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "recovery.issue.errorNotFound": [
+    {
+      "type": 0,
+      "value": "This member was not found in the roster. Refresh the roster and try again."
+    }
+  ],
+  "recovery.issue.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "recovery.issue.errorRateLimitedAfter": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " seconds."
+    }
+  ],
+  "recovery.issue.errorRequired": [
+    {
+      "type": 0,
+      "value": "Enter your password."
+    }
+  ],
+  "recovery.issue.errorWrongPassword": [
+    {
+      "type": 0,
+      "value": "That password is not correct. Try again."
+    }
+  ],
+  "recovery.issue.factTerm": [
+    {
+      "type": 0,
+      "value": "Password"
+    }
+  ],
+  "recovery.issue.issuedClose": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "recovery.issue.issuedCopied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "recovery.issue.issuedCopy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "recovery.issue.issuedDeliver": [
+    {
+      "type": 0,
+      "value": "Send it by messenger or hand it over in person."
+    }
+  ],
+  "recovery.issue.issuedExpires": [
+    {
+      "type": 0,
+      "value": "Works once, until "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "recovery.issue.issuedLead": [
+    {
+      "type": 0,
+      "value": "You can see this link only here, only now. It cannot be shown again once you close this, so pass it on now."
+    }
+  ],
+  "recovery.issue.issuedLinkLabel": [
+    {
+      "type": 0,
+      "value": "Reset link"
+    }
+  ],
+  "recovery.issue.issuedLocalOnly": [
+    {
+      "type": 0,
+      "value": "This address may open only on this computer or its network."
+    }
+  ],
+  "recovery.issue.issuedTitle": [
+    {
+      "type": 0,
+      "value": "Reset link created"
+    }
+  ],
+  "recovery.issue.lineLogout": [
+    {
+      "type": 0,
+      "value": "When the person sets a password, every device they are signed in on is signed out."
+    }
+  ],
+  "recovery.issue.lineOnce": [
+    {
+      "type": 0,
+      "value": "The link works once, within 24 hours."
+    }
+  ],
+  "recovery.issue.lineOrder": [
+    {
+      "type": 0,
+      "value": "If this member needs to be signed out everywhere, do that first and create the link afterwards. Doing it after the link exists disables the link too."
+    }
+  ],
+  "recovery.issue.lineReplace": [
+    {
+      "type": 0,
+      "value": "Any link you made before stops working."
+    }
+  ],
+  "recovery.issue.lineVerify": [
+    {
+      "type": 0,
+      "value": "Confirming who it is falls to you. Send the link only to someone you verified in person or by phone, not through a chat the account may be compromised in."
+    }
+  ],
+  "recovery.issue.passwordHint": [
+    {
+      "type": 0,
+      "value": "Enter your own password as the admin creating the link."
+    }
+  ],
+  "recovery.issue.passwordLabel": [
+    {
+      "type": 0,
+      "value": "Your password"
+    }
+  ],
+  "recovery.issue.submit": [
+    {
+      "type": 0,
+      "value": "Create link"
+    }
+  ],
+  "recovery.issue.submitBusy": [
+    {
+      "type": 0,
+      "value": "Creating the link"
     }
   ],
   "releaseNotes.action.close": [
@@ -1473,6 +3874,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "What changed"
+    }
+  ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "Other changes"
     }
   ],
   "releaseNotes.detail.tryIt": [
@@ -1517,36 +3924,10 @@ export const catalog: MessageCatalog = {
       "value": "Close What's new"
     }
   ],
-  "releaseNotes.popup.more": [
+  "releaseNotes.popup.showMore": [
     {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more change"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more changes"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "Show more"
     }
   ],
   "releaseNotes.popup.title": [
@@ -1573,6 +3954,642 @@ export const catalog: MessageCatalog = {
       "value": "Phone"
     }
   ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "Attachments"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "Conversations"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "Notifications"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "Settings"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "Agent lists and profiles show this month's cost, and admins get a monthly report. In a DM between people, calling an agent first asks everyone for consent, and the agent joins once all agree."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "Agent costs and calling an agent in a DM"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "Open the agent list and a profile. As an admin, open Settings › Usage on the desktop or Settings › Monthly report on the phone. In a DM, mention an agent and look for the consent card."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "A channel's notification line shows its state with a bell icon and words. It flips the moment you tap, and if saving fails only that channel goes back."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "Channel notification state"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap the notification line on the conversation info page, in the ⋮ menu or in a channel row menu. On the desktop, use the channel header ⋮ menu or the sidebar row menu."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "The composer grows to four lines on the phone and five on the desktop, then scrolls inside. A long pasted text fits its height and the last line is no longer clipped."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "Composer height"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "Type several lines, then paste a long text."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, reactions and status take every standard emoji. The Our team slot of the emoji picker holds team emoji, stickers and GIFs, and you can register new ones."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "Emoji and team emoji"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap + in the quick reaction row and search by name. On both, open the Our team slot of the emoji picker."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "The band at the top of a conversation is gone: back, the name and ⋮ float as three glass buttons. Coming back to the app or unlocking the phone reconnects sooner, pulling down at the top of a conversation re-checks the connection, and a light tap comes with a long press or a reaction."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "Phone conversation header and reconnecting"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "Open a conversation and scroll to the top, then leave the app for a moment and come back. If the disconnected band shows, tap Reconnect now."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "A photo grows out of the picture you tapped and closes back into it. Back, Esc or a drag down closes it, and with Reduce Motion on it opens and closes at once."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "Opening and closing photos"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "Open a photo in a conversation and close it in a few different ways."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "Settings › Profile › Language lets you follow the device language or pick 한국어 or English. It applies at once, though not every screen is translated yet. On the phone, Settings › Theme › Theme style opens a full-screen picker."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "Language setting and phone theme picker"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "Change the language and check that the settings screen changes. On the phone, also pick a theme style."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "Conversations look better, and a language setting, team emoji and agent costs are new."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "Under the composer, the name of who is typing is bold and three dots move. With Reduce Motion on, the dots stay still."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "Typing indicator"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "Watch the line under the composer while a person or an agent is writing a reply."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine1": [
+    {
+      "type": 0,
+      "value": "On desktop, a plan button in the conversation header shows how many steps are left when an agent reports a plan."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine10": [
+    {
+      "type": 0,
+      "value": "On the phone, a line above the composer in agent conversations shows who is working, and tapping it opens a sheet."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine11": [
+    {
+      "type": 0,
+      "value": "On the phone, requests show an agent status chip, plus a line saying what to do if it was not picked up or failed."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine12": [
+    {
+      "type": 0,
+      "value": "After you decide in the inbox, the receipt line no longer shows twice, and an approval card states its time left once."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine13": [
+    {
+      "type": 0,
+      "value": "On the phone, a finished request gets a chip with its time and step count, and tapping it opens the work record."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine14": [
+    {
+      "type": 0,
+      "value": "Admins pick the team AI key, helper name and abilities in onboarding and settings, and can switch abilities by chat."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine15": [
+    {
+      "type": 0,
+      "value": "Team AI usage is unlimited by default, and admins can turn on a daily or monthly limit in Usage limits in settings."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine2": [
+    {
+      "type": 0,
+      "value": "The desktop work panel and phone work record sheet split what the agent reported from what oort measured."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine3": [
+    {
+      "type": 0,
+      "value": "A tool call has one approval card, and a rejected, expired or canceled approval closes its call card as stopped."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine4": [
+    {
+      "type": 0,
+      "value": "After you approve a tool call, its approval card goes on to show the result, and no separate result row appears."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine5": [
+    {
+      "type": 0,
+      "value": "Phone approval cards get a button to request again, which puts a draft message in the composer."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine6": [
+    {
+      "type": 0,
+      "value": "On the phone, the Home working card and the Agents tab mark an agent that is waiting for approval."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine7": [
+    {
+      "type": 0,
+      "value": "In the inbox, a decided approval becomes a one-line receipt, and its buttons vanish once another device has decided."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine8": [
+    {
+      "type": 0,
+      "value": "For code work the helper offers a Hand a task to my Mac card, and it reads text, PDF and image attachments."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine9": [
+    {
+      "type": 0,
+      "value": "On a team server, agents can now read photos you send in a conversation."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "Wide screenshots use more of the conversation column, so their text is readable before you open them."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "On the phone, the tap that closes the share sheet no longer opens the thread underneath."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine3": [
+    {
+      "type": 0,
+      "value": "Pinch anywhere in the phone photo viewer; very long pictures can fill the screen, and a double tap shows full size."
+    }
+  ],
+  "releaseNotes.v0142.connectionChanged": [
+    {
+      "type": 0,
+      "value": "The connecting notice appears only after a full second, and when the connection fails it says whether you are offline or the server cannot be reached. Unsent messages and attachments get icons to send again or delete, and messages that failed on a network error go out again on their own once you reconnect."
+    }
+  ],
+  "releaseNotes.v0142.connectionTitle": [
+    {
+      "type": 0,
+      "value": "Connection status and unsent messages"
+    }
+  ],
+  "releaseNotes.v0142.connectionTryIt": [
+    {
+      "type": 0,
+      "value": "When your connection is shaky, watch when the connection notice appears. If a message did not go through, use the icons beside it to send it again or delete it."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "Reaction chips are now pills, and the ones you added have an accent outline."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "A stopped run shows as a quiet centered system line, worded the same everywhere."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "A message carries up to three link cards, and older Korean sites no longer show garbled text."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine4": [
+    {
+      "type": 0,
+      "value": "Check “Also send to the conversation” on a thread reply and it shows there too, with a link back to the thread."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine1": [
+    {
+      "type": 0,
+      "value": "Even with a long channel name, the header buttons stay inside the pane and the title shortens to one line."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine2": [
+    {
+      "type": 0,
+      "value": "In a narrow window with the sidebar open, the channel composer keeps its minimum width."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine3": [
+    {
+      "type": 0,
+      "value": "Tooltips appear sooner, and on the Mac right-clicking message text opens the message menu."
+    }
+  ],
+  "releaseNotes.v0142.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewChanged": [
+    {
+      "type": 0,
+      "value": "Press ↑ in an empty composer to edit your last message, and the message ⋮ menu is shorter with Edit at the top for your own messages. Attachments sit in a one-row card strip inside the composer, up to 20, and the image viewer gains zoom out, fit and zoom in controls plus a Copy image button."
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTitle": [
+    {
+      "type": 0,
+      "value": "Editing messages and viewing images"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTryIt": [
+    {
+      "type": 0,
+      "value": "Press ↑ in an empty composer, then attach a few files and open an image at full size."
+    }
+  ],
+  "releaseNotes.v0142.expressionsChanged": [
+    {
+      "type": 0,
+      "value": "A new expression button left of Send on the phone opens one sheet to search emoticons, emoji, team emoji and GIFs. Use Add to import from an album or a link, or Make with AI to have your team's image model turn one photo into a background-removed or caricature emoticon."
+    }
+  ],
+  "releaseNotes.v0142.expressionsTitle": [
+    {
+      "type": 0,
+      "value": "Expression button and photo emoticons"
+    }
+  ],
+  "releaseNotes.v0142.expressionsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap the expression button next to the composer. Open Make with AI from the Team emoji tab on the phone or the Our team slot of the emoji picker on desktop; with no image model on your team, you'll see how to connect one."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewChanged": [
+    {
+      "type": 0,
+      "value": "Link cards now default to Small, show a site icon and a video mark, and appear on the phone too. Paste a link and a card shows above the composer before you send, and ✕ sends just this message without a preview."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTitle": [
+    {
+      "type": 0,
+      "value": "Link previews"
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTryIt": [
+    {
+      "type": 0,
+      "value": "Paste a link into a conversation. Choose Small, Large or Off in Settings › Display › Link previews on the phone, or in Settings › Appearance › Conversation display on web and desktop."
+    }
+  ],
+  "releaseNotes.v0142.menuBarChanged": [
+    {
+      "type": 0,
+      "value": "An oort icon now sits in the Mac menu bar, with a dot when something is unread. While you're signed in, closing the window keeps the app running in the menu bar so notifications keep coming."
+    }
+  ],
+  "releaseNotes.v0142.menuBarTitle": [
+    {
+      "type": 0,
+      "value": "Mac menu bar and closing the window"
+    }
+  ],
+  "releaseNotes.v0142.menuBarTryIt": [
+    {
+      "type": 0,
+      "value": "Click the menu bar icon to see running tasks. To quit, use Quit oort or ⌘Q, and reopen the window with Open oort or from the Dock."
+    }
+  ],
+  "releaseNotes.v0142.networkLine1": [
+    {
+      "type": 0,
+      "value": "On the phone, a band above Home, Inbox and Agents tells you when the device is offline or the server cannot be reached."
+    }
+  ],
+  "releaseNotes.v0142.networkLine2": [
+    {
+      "type": 0,
+      "value": "Web and desktop show a connection card under the sidebar, and sending stays open if only the live connection drops."
+    }
+  ],
+  "releaseNotes.v0142.networkLine3": [
+    {
+      "type": 0,
+      "value": "Web and desktop reconnect when a window that was hidden for over 30 seconds comes back."
+    }
+  ],
+  "releaseNotes.v0142.networkLine4": [
+    {
+      "type": 0,
+      "value": "Unsent messages stay on this device through a channel switch or reload, and two or more get a Resend all button."
+    }
+  ],
+  "releaseNotes.v0142.networkLine5": [
+    {
+      "type": 0,
+      "value": "A failed load or upload now says why, and the sign-in screen explains an expired session or an unreachable server."
+    }
+  ],
+  "releaseNotes.v0142.networkLine6": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a blocked composer or approval row now says whether you are offline or the server is unreachable."
+    }
+  ],
+  "releaseNotes.v0142.networkTopic": [
+    {
+      "type": 0,
+      "value": "Connection"
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Opening a notification clears stacked sheets and dialogs and goes straight to that message, keeping your draft."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "Threads you reply in or are mentioned in are followed on their own, and notification settings can turn their alerts off."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine3": [
+    {
+      "type": 0,
+      "value": "An approval alert is one question, and a one-line receipt stays after you decide."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine4": [
+    {
+      "type": 0,
+      "value": "On the Mac, clicking a notification banner now opens the right message."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetChanged": [
+    {
+      "type": 0,
+      "value": "Admins create a link with “Create reset link” in a member profile, usable once within 24 hours, and every other device of that member signs out once they choose a new password. On the sign-in screen, “Forgot your password?” tells you to ask an admin for a link and copies a request message for you."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTitle": [
+    {
+      "type": 0,
+      "value": "When you forget your password"
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTryIt": [
+    {
+      "type": 0,
+      "value": "As an admin, open “Create reset link” in a member profile. On the sign-in screen, select “Forgot your password?” to read the steps."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine1": [
+    {
+      "type": 0,
+      "value": "In the channel list, rows without new posts turn gray and rows with new posts get a count chip."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine2": [
+    {
+      "type": 0,
+      "value": "Touching a row just to scroll no longer flashes its pressed color."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine3": [
+    {
+      "type": 0,
+      "value": "While typing, dragging the conversation down lowers the keyboard and rests the composer to one line."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine4": [
+    {
+      "type": 0,
+      "value": "Returning to the app no longer sweeps the list downward, and arrival highlights are lighter and shorter."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, tap a video attachment to play it right in the app. Saving is now separate from sharing: photos and videos go straight to your photo library, and for other files you pick a place in the Files app."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTitle": [
+    {
+      "type": 0,
+      "value": "Phone video playback and saving attachments"
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTryIt": [
+    {
+      "type": 0,
+      "value": "Tap a video card to play it. Then use Save in the photo viewer, or the ↓ on a file card, to save to Photos or Files."
+    }
+  ],
+  "releaseNotes.v0142.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0142.settingsLine1": [
+    {
+      "type": 0,
+      "value": "What's new now lives in Settings: it opens once after an update, and each version's notes can be reread there."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine2": [
+    {
+      "type": 0,
+      "value": "The Beta tag on Language is gone, and phone haptics are fixed to Rich with no setting to choose."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine3": [
+    {
+      "type": 0,
+      "value": "The sign-in screen remembers your email for each server, and the first screen has a language chip at the top right."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine4": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until channel-specific invites are ready, so Guest is not offered when inviting."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine5": [
+    {
+      "type": 0,
+      "value": "If your saved sign-in was cleared, web and desktop no longer stay on the loading screen and go to sign-in instead."
+    }
+  ],
+  "releaseNotes.v0142.summary": [
+    {
+      "type": 0,
+      "value": "Link previews and threads are redesigned, and the phone gets an expression button while the Mac gets a menu bar icon."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine1": [
+    {
+      "type": 0,
+      "value": "When you register a team expression, you pick a kind, Team emoji or Emoticon, or accept the suggestion."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine2": [
+    {
+      "type": 0,
+      "value": "Expression views no longer overlap, and the three web panel views are named Team emoji, Emoticon and GIF."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine3": [
+    {
+      "type": 0,
+      "value": "A photo emoticon whose background could not be removed is no longer described as background removed."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsTopic": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "releaseNotes.v0142.threadsChanged": [
+    {
+      "type": 0,
+      "value": "The thread summary under a message now shows overlapping faces, the reply count and a new-replies chip, and following a thread brings alerts for new replies. On the phone, swipe a message from right to left to reply in its thread."
+    }
+  ],
+  "releaseNotes.v0142.threadsTitle": [
+    {
+      "type": 0,
+      "value": "Thread summary and following"
+    }
+  ],
+  "releaseNotes.v0142.threadsTryIt": [
+    {
+      "type": 0,
+      "value": "Open a thread from the summary line under a message and choose Follow thread in its header. On the phone, try swiping a message too."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -1597,6 +4614,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "date"
+    }
+  ],
+  "reply.alsoInChannel.label": [
+    {
+      "type": 0,
+      "value": "Also send to the conversation"
+    }
+  ],
+  "reply.alsoInChannel.unsupported": [
+    {
+      "type": 0,
+      "value": "This server does not support “Also send to the conversation” yet. Turn it off and send again."
     }
   ],
   "reply.card.cancel": [
@@ -1657,6 +4686,620 @@ export const catalog: MessageCatalog = {
       "value": "Send reply"
     }
   ],
+  "reply.home.excerptDeleted": [
+    {
+      "type": 0,
+      "value": "Deleted message"
+    }
+  ],
+  "reply.home.header": [
+    {
+      "type": 0,
+      "value": "Replied in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s thread"
+    }
+  ],
+  "reply.home.headerSelf": [
+    {
+      "type": 0,
+      "value": "Replied in my thread"
+    }
+  ],
+  "reply.home.headerUnknown": [
+    {
+      "type": 0,
+      "value": "Replied in a thread"
+    }
+  ],
+  "reply.home.open": [
+    {
+      "type": 0,
+      "value": "Open the thread this reply is in"
+    }
+  ],
+  "settings.aiLimits.ceilingSearches": [
+    {
+      "type": 0,
+      "value": "The server operator capped this at "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " searches a day."
+    }
+  ],
+  "settings.aiLimits.ceilingTokens": [
+    {
+      "type": 0,
+      "value": "The server operator capped this at "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens a day."
+    }
+  ],
+  "settings.aiLimits.cleared": [
+    {
+      "type": 0,
+      "value": "Limit turned off."
+    }
+  ],
+  "settings.aiLimits.description": [
+    {
+      "type": 0,
+      "value": "Limits on what the helper uses. There is no limit by default, because your team pays for its own key and decides. You can turn on a daily or monthly limit."
+    }
+  ],
+  "settings.aiLimits.errorEmpty": [
+    {
+      "type": 0,
+      "value": "Enter a value."
+    }
+  ],
+  "settings.aiLimits.errorInvalidCount": [
+    {
+      "type": 0,
+      "value": "Enter a whole number of 1 or more."
+    }
+  ],
+  "settings.aiLimits.errorInvalidUsd": [
+    {
+      "type": 0,
+      "value": "Enter an amount above 0, with up to six decimal places."
+    }
+  ],
+  "settings.aiLimits.errorOverCeiling": [
+    {
+      "type": 0,
+      "value": "You can enter at most "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", the limit the server operator set."
+    }
+  ],
+  "settings.aiLimits.errorTooLarge": [
+    {
+      "type": 0,
+      "value": "Enter "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " or less."
+    }
+  ],
+  "settings.aiLimits.errorZero": [
+    {
+      "type": 0,
+      "value": "0 can't be used as a limit. To remove the limit, turn the switch off."
+    }
+  ],
+  "settings.aiLimits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load usage limits."
+    }
+  ],
+  "settings.aiLimits.loading": [
+    {
+      "type": 0,
+      "value": "Loading usage limits."
+    }
+  ],
+  "settings.aiLimits.notAdmin": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can see this."
+    }
+  ],
+  "settings.aiLimits.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so limits can't be changed right now."
+    }
+  ],
+  "settings.aiLimits.operatorOff": [
+    {
+      "type": 0,
+      "value": "The server operator has paused the team AI."
+    }
+  ],
+  "settings.aiLimits.operatorSearchOff": [
+    {
+      "type": 0,
+      "value": "The server operator has turned web search off."
+    }
+  ],
+  "settings.aiLimits.pricingNote": [
+    {
+      "type": 0,
+      "value": "Calculated from public prices. It can differ from your provider's invoice."
+    }
+  ],
+  "settings.aiLimits.resetsDate": [
+    {
+      "type": 0,
+      "value": "Starts over on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "settings.aiLimits.resetsDay": [
+    {
+      "type": 0,
+      "value": "Starts over "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "settings.aiLimits.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.aiLimits.rowHint": [
+    {
+      "type": 0,
+      "value": "Set daily and monthly limits on helper usage and see how much is used."
+    }
+  ],
+  "settings.aiLimits.save": [
+    {
+      "type": 0,
+      "value": "Save"
+    }
+  ],
+  "settings.aiLimits.saved": [
+    {
+      "type": 0,
+      "value": "Saved."
+    }
+  ],
+  "settings.aiLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the limit. Check your connection and try again."
+    }
+  ],
+  "settings.aiLimits.saveForbidden": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can change limits."
+    }
+  ],
+  "settings.aiLimits.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "settings.aiLimits.searchesLabel": [
+    {
+      "type": 0,
+      "value": "Daily web search limit"
+    }
+  ],
+  "settings.aiLimits.searchesOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " searches"
+    }
+  ],
+  "settings.aiLimits.searchesToday": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " searches used today"
+    }
+  ],
+  "settings.aiLimits.searchesUnit": [
+    {
+      "type": 0,
+      "value": "searches"
+    }
+  ],
+  "settings.aiLimits.searchesValueLabel": [
+    {
+      "type": 0,
+      "value": "Web searches per day"
+    }
+  ],
+  "settings.aiLimits.searchHint": [
+    {
+      "type": 0,
+      "value": "When it is reached, the helper answers without web search until the next reset."
+    }
+  ],
+  "settings.aiLimits.stopHint": [
+    {
+      "type": 0,
+      "value": "When it is reached, the helper stops and offers a button to hand the request to another agent."
+    }
+  ],
+  "settings.aiLimits.title": [
+    {
+      "type": 0,
+      "value": "Usage limits"
+    }
+  ],
+  "settings.aiLimits.tokensLabel": [
+    {
+      "type": 0,
+      "value": "Daily token limit"
+    }
+  ],
+  "settings.aiLimits.tokensOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens"
+    }
+  ],
+  "settings.aiLimits.tokensToday": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens used today"
+    }
+  ],
+  "settings.aiLimits.tokensUnit": [
+    {
+      "type": 0,
+      "value": "tokens"
+    }
+  ],
+  "settings.aiLimits.tokensValueLabel": [
+    {
+      "type": 0,
+      "value": "Tokens per day"
+    }
+  ],
+  "settings.aiLimits.unsupported": [
+    {
+      "type": 0,
+      "value": "This server doesn't support usage limits yet."
+    }
+  ],
+  "settings.aiLimits.usageMonth": [
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% used this month"
+    }
+  ],
+  "settings.aiLimits.usageToday": [
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% used today"
+    }
+  ],
+  "settings.aiLimits.usdApprox": [
+    {
+      "type": 0,
+      "value": "About "
+    },
+    {
+      "type": 1,
+      "value": "amount"
+    },
+    {
+      "type": 0,
+      "value": " or more"
+    }
+  ],
+  "settings.aiLimits.usdInactive": [
+    {
+      "type": 0,
+      "value": "The model in use has no known price, so this spending limit is not being applied. Consider a token limit as well."
+    }
+  ],
+  "settings.aiLimits.usdLabel": [
+    {
+      "type": 0,
+      "value": "Monthly spending limit"
+    }
+  ],
+  "settings.aiLimits.usdModelUnpriced": [
+    {
+      "type": 0,
+      "value": "The model in use has no known price, so a spending limit can't be turned on. Try a token limit."
+    }
+  ],
+  "settings.aiLimits.usdNoUsageYet": [
+    {
+      "type": 0,
+      "value": "You can turn this on after the helper has answered once."
+    }
+  ],
+  "settings.aiLimits.usdOfLimit": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    }
+  ],
+  "settings.aiLimits.usdThisMonth": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " this month"
+    }
+  ],
+  "settings.aiLimits.usdUnavailableNow": [
+    {
+      "type": 0,
+      "value": "A spending limit can't be turned on right now."
+    }
+  ],
+  "settings.aiLimits.usdUnit": [
+    {
+      "type": 0,
+      "value": "USD"
+    }
+  ],
+  "settings.aiLimits.usdUnpricedRuns": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " request"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " requests"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " on a model with no known price "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "is"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "are"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " not counted in the amount."
+    }
+  ],
+  "settings.aiLimits.usdValueLabel": [
+    {
+      "type": 0,
+      "value": "Amount per month (USD)"
+    }
+  ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "Small"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address, a one-line title and a one-line description on the right."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "Keeps only the link in the message and draws no card."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "Large"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
+    }
+  ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
+  "settings.invite.guestInvitesPaused": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
+    }
+  ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "New replies from others in threads you follow."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "New replies in followed threads"
+    }
+  ],
   "settings.profile.languageCurrent": [
     {
       "type": 0,
@@ -1707,6 +5350,1726 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "teamAi.helper.aliasesLine": [
+    {
+      "type": 0,
+      "value": "Call names: "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "teamAi.helper.aliasNotDerivable": [
+    {
+      "type": 0,
+      "value": "This name cannot become a short call name. In chat, type @ and the full name."
+    }
+  ],
+  "teamAi.helper.aliasReserved": [
+    {
+      "type": 0,
+      "value": "This name cannot be used as a call name."
+    }
+  ],
+  "teamAi.helper.description": [
+    {
+      "type": 0,
+      "value": "Set the helper name and what it can do."
+    }
+  ],
+  "teamAi.helper.nameErrorForbidden": [
+    {
+      "type": 0,
+      "value": "Only an owner or admin can change the name."
+    }
+  ],
+  "teamAi.helper.nameErrorInvalid": [
+    {
+      "type": 0,
+      "value": "The name cannot be empty or longer than 100 characters."
+    }
+  ],
+  "teamAi.helper.nameErrorOther": [
+    {
+      "type": 0,
+      "value": "Could not change the name. Check your connection and try again."
+    }
+  ],
+  "teamAi.helper.nameErrorReserved": [
+    {
+      "type": 0,
+      "value": "This name cannot be used in mentions. Try a different name."
+    }
+  ],
+  "teamAi.helper.nameErrorTaken": [
+    {
+      "type": 0,
+      "value": "Another member uses this name or one that looks too similar. Try a different name."
+    }
+  ],
+  "teamAi.helper.nameHint": [
+    {
+      "type": 0,
+      "value": "You can call it by the new name too. Earlier call names stay, and past 4 the oldest ones drop off."
+    }
+  ],
+  "teamAi.helper.nameLabel": [
+    {
+      "type": 0,
+      "value": "Helper name"
+    }
+  ],
+  "teamAi.helper.nameSave": [
+    {
+      "type": 0,
+      "value": "Save name"
+    }
+  ],
+  "teamAi.helper.nameSaved": [
+    {
+      "type": 0,
+      "value": "Name changed."
+    }
+  ],
+  "teamAi.helper.nameSaving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "teamAi.helper.rolesForbidden": [
+    {
+      "type": 0,
+      "value": "Only an owner or admin can change what the helper does."
+    }
+  ],
+  "teamAi.helper.rolesHeading": [
+    {
+      "type": 0,
+      "value": "What it can do"
+    }
+  ],
+  "teamAi.helper.rolesHint": [
+    {
+      "type": 0,
+      "value": "When off, the helper does not do that. Only admins turn these on or off."
+    }
+  ],
+  "teamAi.helper.rolesMemoryOff": [
+    {
+      "type": 0,
+      "value": "Team memory is off. Turn it on first under Settings › Memory."
+    }
+  ],
+  "teamAi.helper.rolesOffline": [
+    {
+      "type": 0,
+      "value": "You are offline, so this cannot be changed now."
+    }
+  ],
+  "teamAi.helper.rolesSaveFailed": [
+    {
+      "type": 0,
+      "value": "Could not change what the helper does. Check your connection and try again."
+    }
+  ],
+  "teamAi.phone.loadFailed": [
+    {
+      "type": 0,
+      "value": "Could not load helper settings."
+    }
+  ],
+  "teamAi.phone.loading": [
+    {
+      "type": 0,
+      "value": "Loading helper settings."
+    }
+  ],
+  "teamAi.phone.rowTitle": [
+    {
+      "type": 0,
+      "value": "Helper"
+    }
+  ],
+  "teamAi.roles.alwaysOn": [
+    {
+      "type": 0,
+      "value": "Always on."
+    }
+  ],
+  "teamAi.roles.chatReadHint": [
+    {
+      "type": 0,
+      "value": "Answers questions, reads the chats and members the caller can see, and searches the web."
+    }
+  ],
+  "teamAi.roles.chatReadName": [
+    {
+      "type": 0,
+      "value": "Chat and reading"
+    }
+  ],
+  "teamAi.roles.codeHint": [
+    {
+      "type": 0,
+      "value": "Prefills a work request card for code tasks. The helper does not run code itself."
+    }
+  ],
+  "teamAi.roles.codeName": [
+    {
+      "type": 0,
+      "value": "Code"
+    }
+  ],
+  "teamAi.roles.filesHint": [
+    {
+      "type": 0,
+      "value": "Reads attached files."
+    }
+  ],
+  "teamAi.roles.filesName": [
+    {
+      "type": 0,
+      "value": "Files"
+    }
+  ],
+  "teamAi.roles.inviteAccessHint": [
+    {
+      "type": 0,
+      "value": "Raises approval cards to create invite links and invite agents."
+    }
+  ],
+  "teamAi.roles.inviteAccessName": [
+    {
+      "type": 0,
+      "value": "Invites and access"
+    }
+  ],
+  "teamAi.roles.longResearchHint": [
+    {
+      "type": 0,
+      "value": "Keeps working on research that takes a while."
+    }
+  ],
+  "teamAi.roles.longResearchName": [
+    {
+      "type": 0,
+      "value": "Long research"
+    }
+  ],
+  "teamAi.roles.memoryHint": [
+    {
+      "type": 0,
+      "value": "Searches team memory and suggests things worth remembering."
+    }
+  ],
+  "teamAi.roles.memoryName": [
+    {
+      "type": 0,
+      "value": "Memory"
+    }
+  ],
+  "teamAi.roles.noticeBoth": [
+    {
+      "type": 0,
+      "value": "Turning on Files and Memory sends the content of attachments the helper reads and team memory it finds to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeFiles": [
+    {
+      "type": 0,
+      "value": "Turning on Files sends the content of attachments the helper reads to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeMemory": [
+    {
+      "type": 0,
+      "value": "Turning on Memory sends the content of team memory the helper finds to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.workspaceAdminHint": [
+    {
+      "type": 0,
+      "value": "Raises approval cards to create channels, change profiles and names, and change settings or install apps."
+    }
+  ],
+  "teamAi.roles.workspaceAdminName": [
+    {
+      "type": 0,
+      "value": "Workspace management"
+    }
+  ],
+  "teamAi.stage.checkingLine": [
+    {
+      "type": 0,
+      "value": "Checking the team AI connection."
+    }
+  ],
+  "teamAi.stage.continue": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "teamAi.stage.doneDetail": [
+    {
+      "type": 0,
+      "value": "Mention it with @ in chat to try it."
+    }
+  ],
+  "teamAi.stage.doneLine": [
+    {
+      "type": 0,
+      "value": "The helper is on."
+    }
+  ],
+  "teamAi.stage.enable": [
+    {
+      "type": 0,
+      "value": "Turn helper on"
+    }
+  ],
+  "teamAi.stage.enableFailedDetail": [
+    {
+      "type": 0,
+      "value": "Your key is saved. Try again, or skip and turn it on later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.enableFailedLine": [
+    {
+      "type": 0,
+      "value": "Could not turn the helper on."
+    }
+  ],
+  "teamAi.stage.enabling": [
+    {
+      "type": 0,
+      "value": "Turning on"
+    }
+  ],
+  "teamAi.stage.enablingLine": [
+    {
+      "type": 0,
+      "value": "Turning the helper on."
+    }
+  ],
+  "teamAi.stage.keyDetail": [
+    {
+      "type": 0,
+      "value": "With a key, a helper in chat answers questions and raises changes as approval cards. If you skip, the helper stays off."
+    }
+  ],
+  "teamAi.stage.keyFailedLine": [
+    {
+      "type": 0,
+      "value": "Could not verify the key."
+    }
+  ],
+  "teamAi.stage.keyLine": [
+    {
+      "type": 0,
+      "value": "Add a team AI key?"
+    }
+  ],
+  "teamAi.stage.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
+  "teamAi.stage.loadErrorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again, or set this up later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.loadErrorLine": [
+    {
+      "type": 0,
+      "value": "Could not check the team AI connection."
+    }
+  ],
+  "teamAi.stage.nameRequired": [
+    {
+      "type": 0,
+      "value": "Enter a name."
+    }
+  ],
+  "teamAi.stage.notOperatorDetail": [
+    {
+      "type": 0,
+      "value": "Once the operator adds a key under Settings › AI, you can turn the helper on. You can skip this for now."
+    }
+  ],
+  "teamAi.stage.notOperatorLine": [
+    {
+      "type": 0,
+      "value": "The server operator adds the team AI key."
+    }
+  ],
+  "teamAi.stage.offline": [
+    {
+      "type": 0,
+      "value": "You are offline, so the helper cannot be turned on now. You can continue once you reconnect."
+    }
+  ],
+  "teamAi.stage.reentry": [
+    {
+      "type": 0,
+      "value": "You can skip. Add a key and turn the helper on any time under Settings › AI."
+    }
+  ],
+  "teamAi.stage.renameFailedNote": [
+    {
+      "type": 0,
+      "value": "The name was not changed. Try again under Settings › AI."
+    }
+  ],
+  "teamAi.stage.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "teamAi.stage.setupDetail": [
+    {
+      "type": 0,
+      "value": "The key is connected. You can change these later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.setupLine": [
+    {
+      "type": 0,
+      "value": "Name the helper and choose what it does."
+    }
+  ],
+  "teamAi.stage.setupUnverifiedDetail": [
+    {
+      "type": 0,
+      "value": "This server does not check the key directly. You will know it works when the helper first answers."
+    }
+  ],
+  "teamAi.stage.verifyingLine": [
+    {
+      "type": 0,
+      "value": "Checking the key."
+    }
+  ],
+  "timeline.agentRail.open": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " Show working agents"
+    }
+  ],
+  "timeline.agentRail.openActivity": [
+    {
+      "type": 0,
+      "value": "View activity"
+    }
+  ],
+  "timeline.agentRail.openRecord": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s work record"
+    }
+  ],
+  "timeline.agentRail.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close working agents"
+    }
+  ],
+  "timeline.agentRail.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Working agents"
+    }
+  ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "There's already text in the message box, so it wasn't added. Clear it and tap again."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "Added to the message box. Send it and the agent will propose it again."
+    }
+  ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.lightbox.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "timeline.lightbox.copy": [
+    {
+      "type": 0,
+      "value": "Copy image"
+    }
+  ],
+  "timeline.lightbox.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy the image. Download the file instead."
+    }
+  ],
+  "timeline.lightbox.zoomIn": [
+    {
+      "type": 0,
+      "value": "Zoom in"
+    }
+  ],
+  "timeline.lightbox.zoomOut": [
+    {
+      "type": 0,
+      "value": "Zoom out"
+    }
+  ],
+  "timeline.runException.open": [
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": ". Open work record"
+    }
+  ],
+  "timeline.runException.settings": [
+    {
+      "type": 0,
+      "value": "Open agent settings"
+    }
+  ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "Sending"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change following. Try again in a moment."
+    }
+  ],
+  "timeline.thread.followHint": [
+    {
+      "type": 0,
+      "value": "Replying makes you follow this thread."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "Not following this thread. Press to follow."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "Following this thread. Press to stop following."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "Follow thread"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "Stop following"
+    }
+  ],
+  "timeline.thread.open": [
+    {
+      "type": 0,
+      "value": "Open thread, "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.openUnread": [
+    {
+      "type": 0,
+      "value": "Open thread, "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 6,
+      "value": "unread",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.replyCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.unreadChip": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.triggerChip.jumpHint": [
+    {
+      "type": 0,
+      "value": "Go to the reply"
+    }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "Link preview: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "Send this message without a preview"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "This message will be sent without a link preview."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "Link preview before sending"
+    }
+  ],
+  "timeline.unfurl.video": [
+    {
+      "type": 0,
+      "value": "Video"
+    }
+  ],
+  "timeline.workHealth.dwell": [
+    {
+      "type": 0,
+      "value": "On the same step for "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workHealth.failedActivities": [
+    {
+      "type": 0,
+      "value": "Failed activities "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.quiet": [
+    {
+      "type": 0,
+      "value": "Quiet · last report "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min ago"
+    }
+  ],
+  "timeline.workHealth.quietShort": [
+    {
+      "type": 0,
+      "value": "Quiet"
+    }
+  ],
+  "timeline.workHealth.rejectedApprovals": [
+    {
+      "type": 0,
+      "value": "Rejected approvals "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.retries": [
+    {
+      "type": 0,
+      "value": "oort call retries "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workPlan.button": [
+    {
+      "type": 0,
+      "value": "Plan, "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " steps done"
+    }
+  ],
+  "timeline.workPlan.buttonDone": [
+    {
+      "type": 0,
+      "value": "Plan, all "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " steps done"
+    }
+  ],
+  "timeline.workPlan.maybeStale": [
+    {
+      "type": 0,
+      "value": "The record is long, so this may not be the latest plan."
+    }
+  ],
+  "timeline.workPlan.notLive": [
+    {
+      "type": 0,
+      "value": "This session is not running now. This is the last plan it reported."
+    }
+  ],
+  "timeline.workPlan.openAll": [
+    {
+      "type": 0,
+      "value": "See all"
+    }
+  ],
+  "timeline.workPlan.sessionLabel": [
+    {
+      "type": 0,
+      "value": "Work session"
+    }
+  ],
+  "timeline.workPlan.stepCurrent": [
+    {
+      "type": 0,
+      "value": "Current step"
+    }
+  ],
+  "timeline.workPlan.stepDone": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "timeline.workPlan.stepPending": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "timeline.workPlan.switching": [
+    {
+      "type": 0,
+      "value": "Loading the plan for the selected session. The list above is the last plan read."
+    }
+  ],
+  "timeline.workPlan.title": [
+    {
+      "type": 0,
+      "value": "Plan · "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " done"
+    }
+  ],
+  "timeline.workPlan.titleDone": [
+    {
+      "type": 0,
+      "value": "Plan · Done"
+    }
+  ],
+  "timeline.workRecord.bundleRead": [
+    {
+      "type": 0,
+      "value": "Read "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleReadSearch": [
+    {
+      "type": 0,
+      "value": "Read "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · Search "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleSearch": [
+    {
+      "type": 0,
+      "value": "Search "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.capped": [
+    {
+      "type": 0,
+      "value": "Only the first "
+    },
+    {
+      "type": 2,
+      "value": "shown",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " calls are listed. The total above counts every call."
+    }
+  ],
+  "timeline.workRecord.durationMinutes": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "m "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.workRecord.durationSeconds": [
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.workRecord.durationUnderTenth": [
+    {
+      "type": 0,
+      "value": "Under 0.1s"
+    }
+  ],
+  "timeline.workRecord.emptyEnded": [
+    {
+      "type": 0,
+      "value": "oort measured no tool call on this run."
+    }
+  ],
+  "timeline.workRecord.emptyOpen": [
+    {
+      "type": 0,
+      "value": "oort has not measured any tool call yet."
+    }
+  ],
+  "timeline.workRecord.failureAlreadyClaimed": [
+    {
+      "type": 0,
+      "value": "Already claimed elsewhere"
+    }
+  ],
+  "timeline.workRecord.failureClaimExpired": [
+    {
+      "type": 0,
+      "value": "The claim had already expired"
+    }
+  ],
+  "timeline.workRecord.failureConflict": [
+    {
+      "type": 0,
+      "value": "Conflicted with another change"
+    }
+  ],
+  "timeline.workRecord.failureInternal": [
+    {
+      "type": 0,
+      "value": "A server-side problem"
+    }
+  ],
+  "timeline.workRecord.failureInvalidArguments": [
+    {
+      "type": 0,
+      "value": "The request was malformed"
+    }
+  ],
+  "timeline.workRecord.failureNotAuthorized": [
+    {
+      "type": 0,
+      "value": "Not authorized"
+    }
+  ],
+  "timeline.workRecord.failureUnavailable": [
+    {
+      "type": 0,
+      "value": "Not available right now"
+    }
+  ],
+  "timeline.workRecord.kindDelegate": [
+    {
+      "type": 0,
+      "value": "Hand off to another agent"
+    }
+  ],
+  "timeline.workRecord.kindEdit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "timeline.workRecord.kindOther": [
+    {
+      "type": 0,
+      "value": "Other work"
+    }
+  ],
+  "timeline.workRecord.kindRead": [
+    {
+      "type": 0,
+      "value": "Read"
+    }
+  ],
+  "timeline.workRecord.kindRun": [
+    {
+      "type": 0,
+      "value": "Run a command"
+    }
+  ],
+  "timeline.workRecord.kindSearch": [
+    {
+      "type": 0,
+      "value": "Search"
+    }
+  ],
+  "timeline.workRecord.kindWeb": [
+    {
+      "type": 0,
+      "value": "Web request"
+    }
+  ],
+  "timeline.workRecord.noteAgent": [
+    {
+      "type": 0,
+      "value": "What the agent reported about itself. oort has not verified it."
+    }
+  ],
+  "timeline.workRecord.noteComputer": [
+    {
+      "type": 0,
+      "value": "Sent by the work running on my computer."
+    }
+  ],
+  "timeline.workRecord.noteOort": [
+    {
+      "type": 0,
+      "value": "Tool calls that oort measured itself. Arguments and contents are not recorded."
+    }
+  ],
+  "timeline.workRecord.repeat": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.sourceAgent": [
+    {
+      "type": 0,
+      "value": "Agent report"
+    }
+  ],
+  "timeline.workRecord.sourceComputer": [
+    {
+      "type": 0,
+      "value": "My computer"
+    }
+  ],
+  "timeline.workRecord.sourceOort": [
+    {
+      "type": 0,
+      "value": "oort record"
+    }
+  ],
+  "timeline.workRecord.statusFailed": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "timeline.workRecord.statusRunning": [
+    {
+      "type": 0,
+      "value": "In progress"
+    }
+  ],
+  "timeline.workRecord.statusUnclosed": [
+    {
+      "type": 0,
+      "value": "No end reported"
+    }
+  ],
+  "timeline.workRecord.summary": [
+    {
+      "type": 6,
+      "value": "calls",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool call"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool calls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.workRecord.summaryFailed": [
+    {
+      "type": 6,
+      "value": "calls",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool call"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool calls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 2,
+      "value": "failed",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " failed"
+    }
+  ],
+  "timeline.workRecord.unsupported": [
+    {
+      "type": 0,
+      "value": "oort's call record will show once the server is updated."
+    }
+  ],
+  "timeline.workReport.emptyEnded": [
+    {
+      "type": 0,
+      "value": "The agent reported no activity on this run."
+    }
+  ],
+  "timeline.workReport.emptyOpen": [
+    {
+      "type": 0,
+      "value": "The agent has not reported any activity yet."
+    }
+  ],
+  "timeline.workReport.planNotLive": [
+    {
+      "type": 0,
+      "value": "This run is not working now. This is the last plan the agent reported."
+    }
+  ],
+  "timeline.workReport.tally": [
+    {
+      "type": 0,
+      "value": "Finished activity · "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.workReport.trimmed": [
+    {
+      "type": 0,
+      "value": "Some older activity is kept only in the total."
+    }
+  ],
+  "timeline.workReport.unsupported": [
+    {
+      "type": 0,
+      "value": "The activity the agent reports will show once the server is updated."
+    }
+  ],
+  "timeline.workRequest.composerBusy": [
+    {
+      "type": 0,
+      "value": "You have a draft in progress, so nothing was filled in. Clear the message box and press again."
+    }
+  ],
+  "timeline.workRequest.fill": [
+    {
+      "type": 0,
+      "value": "Fill the message box"
+    }
+  ],
+  "timeline.workRequest.fillHint": [
+    {
+      "type": 0,
+      "value": "Check the text, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.fillLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": fill the message box"
+    }
+  ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "This is a direct message, so it can't be filled into the message box. Press it from a channel."
+    }
+  ],
+  "timeline.workRequest.labelAny": [
+    {
+      "type": 0,
+      "value": "Hand a task to my Mac"
+    }
+  ],
+  "timeline.workRequest.labelClaude": [
+    {
+      "type": 0,
+      "value": "Hand it to Claude Code on my Mac"
+    }
+  ],
+  "timeline.workRequest.labelCodex": [
+    {
+      "type": 0,
+      "value": "Hand it to Codex on my Mac"
+    }
+  ],
+  "timeline.workRequest.noPersonalAgent": [
+    {
+      "type": 0,
+      "value": "No Claude Code or Codex is connected on your Mac yet. Connect one under My tools in AI first."
+    }
+  ],
+  "timeline.workRequest.openSheet": [
+    {
+      "type": 0,
+      "value": "Open task request"
+    }
+  ],
+  "timeline.workRequest.openSheetLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": open task request"
+    }
+  ],
+  "timeline.workRequest.openTools": [
+    {
+      "type": 0,
+      "value": "Open my tools"
+    }
+  ],
+  "timeline.workRequest.sheetHint": [
+    {
+      "type": 0,
+      "value": "Check the text in the sheet, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.threadClosed": [
+    {
+      "type": 0,
+      "value": "Open the thread and press again."
+    }
+  ],
+  "timeline.workStream.limit": [
+    {
+      "type": 0,
+      "value": "This section shows only the streamed text and tool calls that arrived after you opened this panel, and it does not keep them."
+    }
+  ],
+  "timeline.workSummary.agentReported": [
+    {
+      "type": 0,
+      "value": "Agent report"
+    }
+  ],
+  "timeline.workSummary.duration": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workSummary.durationHours": [
+    {
+      "type": 2,
+      "value": "hours",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workSummary.durationShort": [
+    {
+      "type": 0,
+      "value": "Under 1 min"
+    }
+  ],
+  "timeline.workSummary.kindDelegate": [
+    {
+      "type": 0,
+      "value": "Handoffs "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindEdit": [
+    {
+      "type": 0,
+      "value": "Edits "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindOther": [
+    {
+      "type": 0,
+      "value": "Other "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRead": [
+    {
+      "type": 0,
+      "value": "Reads "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRun": [
+    {
+      "type": 0,
+      "value": "Commands "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindSearch": [
+    {
+      "type": 0,
+      "value": "Searches "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindWeb": [
+    {
+      "type": 0,
+      "value": "Web "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.openPanel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": ". Open work panel"
+    }
+  ],
+  "timeline.workSummary.stages": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " step"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " steps"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.workTool.actionClaimSecret": [
+    {
+      "type": 0,
+      "value": "Take a secret"
+    }
+  ],
+  "timeline.workTool.actionInitiate": [
+    {
+      "type": 0,
+      "value": "Raise an unasked approval card"
+    }
+  ],
+  "timeline.workTool.actionPropose": [
+    {
+      "type": 0,
+      "value": "Request approval"
+    }
+  ],
+  "timeline.workTool.cardSuggest": [
+    {
+      "type": 0,
+      "value": "Suggest a card"
+    }
+  ],
+  "timeline.workTool.conversationRead": [
+    {
+      "type": 0,
+      "value": "Read conversation"
+    }
+  ],
+  "timeline.workTool.expressionAssemble": [
+    {
+      "type": 0,
+      "value": "Assemble an expression"
+    }
+  ],
+  "timeline.workTool.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read inbox"
+    }
+  ],
+  "timeline.workTool.jobRelease": [
+    {
+      "type": 0,
+      "value": "Release work"
+    }
+  ],
+  "timeline.workTool.jobRenew": [
+    {
+      "type": 0,
+      "value": "Extend the claim"
+    }
+  ],
+  "timeline.workTool.jobsClaim": [
+    {
+      "type": 0,
+      "value": "Claim work"
+    }
+  ],
+  "timeline.workTool.jobStart": [
+    {
+      "type": 0,
+      "value": "Report work started"
+    }
+  ],
+  "timeline.workTool.messagePost": [
+    {
+      "type": 0,
+      "value": "Post a message"
+    }
+  ],
+  "timeline.workTool.ping": [
+    {
+      "type": 0,
+      "value": "Report being alive"
+    }
+  ],
+  "timeline.workTool.runComplete": [
+    {
+      "type": 0,
+      "value": "Report completion"
+    }
+  ],
+  "timeline.workTool.runEvent": [
+    {
+      "type": 0,
+      "value": "Report progress"
+    }
+  ],
+  "timeline.workTool.unknown": [
+    {
+      "type": 0,
+      "value": "oort tool"
     }
   ]
 };

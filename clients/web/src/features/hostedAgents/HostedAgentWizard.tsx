@@ -154,6 +154,7 @@ import {
   initialAutoAdvanceArmed,
   type HostedWizardLaunch,
 } from "./hostedWizardLaunch";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // "Bring your hosted agent" pairing wizard (ADR-0162, goal HAP-UX1 / #1360).
@@ -588,7 +589,7 @@ function HostedWizardBody({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="keepViewIssueLater" />}
           testId="hosted-wizard-offline"
         />
       )}

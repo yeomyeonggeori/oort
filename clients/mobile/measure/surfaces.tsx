@@ -58,6 +58,7 @@ import {
   UnreadDivider,
   WorkingRow,
 } from '../src/features/conversation/MessageRow';
+import {ResendAllBar} from '../src/features/conversation/ResendAllBar';
 import {MissedDigestCardView} from '../src/features/memory/MissedDigestCard';
 import {MemoryDigestSheet} from '../src/features/memory/MemoryDigestSheet';
 import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
@@ -84,7 +85,7 @@ import {ApprovalDecision} from '../src/features/inbox/ApprovalDecision';
 import {StopTurnControl} from '../src/features/agents/StopTurnControl';
 import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {signalFromProgress} from '@momo/core/features/agents/runPhase';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
 import type {ChannelRail} from '../src/realtime/channelRail';
@@ -199,23 +200,26 @@ import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
+import {SentenceWrapSurface} from './sentenceWrap';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {JumpLatestSurface} from './jumpLatest';
 import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
-import {ActivityRowsSurface} from './activityRows';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
+import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
+import {ConnectionStripSurface} from './connectionStrip';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
 import {PinApprovalSurface} from './pinApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
+import {ShareAttachSurface} from './shareAttachment';
 
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2164,6 +2168,26 @@ const releaseNotesEn = () =>
     },
   });
 
+/**
+ * 승인 카드 하나의 고정 fixture. `approval-card`(결정 전·후 셋)와 `approved`(승인된 뒤, #5172)가 **같은 메시지**로 서서 두 표면이
+ * 서로 다른 카드를 보여 주는 일이 없게 한 곳에서 짓는다. `over` 는 카드 props 를 덮는다(서버가 나중에 고쳐 둔 상태 등).
+ */
+function approvalCardMessage(over: Record<string, unknown> = {}): Message {
+  return {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000b1',
+    type: 'approval_request',
+    body: '툴 호출 승인',
+    authorMemberId: AGENT,
+    props: {
+      approval_id: 'ap-1',
+      title: 'github.search_issues 실행 허가',
+      approval_status: 'pending',
+      ...over,
+    },
+  } as unknown as Message;
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -2276,13 +2300,16 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('bubble-clip')) {
     return <BubbleClipSurface which={name.slice('bubble-clip'.length).replace(/^-/, '')} />;
   }
+  // #5288: 줄바꿈 전략별 잰 줄 수 ↔ 그린 줄 수 — 같은 글을 `hangul-word`·`standard`·지정 없음으로 그려 어긋남을 숫자로 적는다(`sentenceWrap.tsx`).
+  if (name.startsWith('sentence-wrap')) {
+    return <SentenceWrapSurface which={name.slice('sentence-wrap'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('bubble-')) return <BubbleSurface which={name.slice('bubble-'.length)} />;
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
   // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
-  if (name === 'activity-rows' || name === 'activity-rows-wide') return <ActivityRowsSurface wide={name === 'activity-rows-wide'} />;
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
   if (name.startsWith('dm-steady')) {
     return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
@@ -2315,6 +2342,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('oort-loader')) {
     return <OortLoaderSurface which={name.slice('oort-loader'.length).replace(/^-/, '')} />;
   }
+  // #5222: 폰 셸 띠(홈·받은함·에이전트 위)와 대화 화면 띠. 실제 연결 공급자·실제 띠가 스크립트된 기기·소켓·REST 사건 위에서 선다.
+  if (name.startsWith('conn-strip')) {
+    return <ConnectionStripSurface which={name.slice('conn-strip'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
   }
@@ -2327,6 +2358,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return (
       <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
     );
+  }
+
+  // #5207: 첨부 내려받기 공유 시트(시트가 열리고 닫힐 때 목록 자리·닫는 탭이 아래로 새는가). 실제 대화에 파일 카드, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('share-attach')) {
+    return <ShareAttachSurface which={name.slice('share-attach'.length).replace(/^-/, '')} />;
   }
 
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
@@ -2355,6 +2391,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4285: 아무도 가져가지 않은 요청 — 홈 「작업 중」 카드와 대화 아래 활동 줄(「아직 받지 않았어요」·「취소」).
   if (isUncollectedSurface(name)) {
     return <UncollectedSurface name={name} />;
+  }
+
+  // #4658: 작업 타임라인 시트(에이전트 보고·oort 기록·계획·건강 신호)와 끝난 요청의 요약 칩.
+  if (isWorkTimelineSurface(name)) {
+    return <WorkTimelineSurface name={name} />;
   }
 
   switch (name) {
@@ -2660,18 +2701,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     // ---- U4-4 M1 (#1084): 승인 카드가 막다른 길이 아니게 됐다 -----------------
     case 'approval-card': {
-      const approvalMessage = {
-        ...MESSAGE,
-        id: '00000000-0000-7000-8000-0000000000b1',
-        type: 'approval_request',
-        body: '툴 호출 승인',
-        authorMemberId: AGENT,
-        props: {
-          approval_id: 'ap-1',
-          title: 'github.search_issues 실행 허가',
-          approval_status: 'pending',
-        },
-      } as unknown as Message;
+      const approvalMessage = approvalCardMessage();
       const gates = new Map([
         [
           'ap-1',
@@ -2710,6 +2740,36 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5172: 승인된 뒤의 카드 -----------------------------------------------
+    //
+    // `approval-card` 는 셋째 카드만 승인된 모양이라 「승인됨」 장면만 증거로 쓰려는 캡처(`-momoMeasure APPROVED`)에는 맞는 표면이
+    // 없었다 — 이름을 모르는 하네스는 아래 `default:` 의 오류 안내 화면을 찍었고, 그 사진이 승인된 카드의 증거로 받아들여졌다.
+    // 같은 카드(`approvalCardMessage`)가 승인된 뒤를 두 길로 말한다:
+    //   ① 방금 승인을 누른 직후 — 이 화면의 영수증(`approvalReceipts`)이 카드를 덮는다.
+    //   ② 대화를 다시 열었을 때 — 서버가 카드의 `approval_status` 를 `approved` 로 고쳐 두었고 이 화면에는 영수증이 없다.
+    // 둘 다 배송되는 `MessageRow` 가 그린다.
+    case 'approved':
+      return (
+        <Frame label="승인됨 — 방금 승인한 카드(영수증) / 다시 열었을 때(서버가 알려 준 상태) (#5172)">
+          <MessageRow
+            message={approvalCardMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalReceipts={
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
+            }
+          />
+          <MessageRow
+            message={approvalCardMessage({approval_status: 'approved'})}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
     // ---- U4-4 M2 (#1083): 시간과 경계 ----------------------------------------
     case 'group': {
       // 한 사람이 연달아 쓴 그룹. 이 goal 의 논점 둘이 여기서만 보인다:
@@ -3044,6 +3104,125 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5210: 보내지 못한 메시지의 아이콘 둘 -----------------------------------
+    //
+    // 새로고침(다시 보내기) · 빨간 X(지우기). owner 에게 보여 줄 장면이라 확정 행 → 글이 실패한 행 → 첨부가 실패한
+    // 행을 한 화면에 세운다. 캡처: `-momoMeasure SEND-FAILED`(다크) · `-momoMeasure LIGHT-SEND-FAILED`(라이트).
+    case 'send-failed': {
+      const failed = (
+        clientMsgId: string,
+        body: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status: 'failed',
+        sinceSeq: null,
+        createdAtMs: NOW,
+        ...extra,
+      });
+      return (
+        <Frame label="보내지 못한 메시지 — 새로고침(다시 보내기) · 빨간 X(지우기)">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                authorMemberId: OTHER,
+                body: '금요일 배포 공지 초안이에요. 이대로 올려도 될까요?',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <PendingRow
+            pending={failed('c-1', '좋아요, 제목만 조금 짧게 바꿔서 올릴게요.') as never}
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={
+              failed('c-2', '견적서와 회의록 같이 보내요', {
+                attachments: [
+                  {id: 'att-1', name: '견적서-2026-11.pdf', mime: 'application/pdf', sizeBytes: 186_368},
+                  {id: 'att-2', name: '회의록-1102.pdf', mime: 'application/pdf', sizeBytes: 65_536},
+                ],
+              }) as never
+            }
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+        </Frame>
+      );
+    }
+    // #5222: 보내지 못한 글이 여럿일 때. 첫 실패 줄 위에 「N개 모두 다시 보내기」 한 번, 줄마다 이유 한 줄(오프라인 · 서버에 닿지 못함 ·
+    // 서버가 거절)과 새로고침·X. 실제 `ResendAllBar`·`PendingRow` 를 `Timeline` 이 그리는 순서로 세운다. 캡처: `-momoMeasure SEND-FAILED-ALL`.
+    case 'send-failed-all': {
+      const failed = (clientMsgId: string, body: string, at: number) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status: 'failed',
+        sinceSeq: null,
+        createdAtMs: NOW + at,
+      });
+      return (
+        <Frame label="보내지 못한 글이 여럿 - N개 모두 다시 보내기 · 줄마다 이유">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                authorMemberId: OTHER,
+                body: '금요일 배포 공지 초안이에요. 이대로 올려도 될까요?',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <ResendAllBar count={3} onPress={() => {}} />
+          <PendingRow
+            pending={failed('c-1', '좋아요, 제목만 조금 짧게 바꿔서 올릴게요.', 1) as never}
+            startsGroup
+            directory={DIRECTORY}
+            failureKind="offline"
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={failed('c-2', '공지 전에 한 번 더 읽어 볼게요.', 2) as never}
+            startsGroup={false}
+            directory={DIRECTORY}
+            failureKind="server"
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={failed('c-3', '배포는 오후 3시로 잡았어요.', 3) as never}
+            startsGroup={false}
+            directory={DIRECTORY}
+            failureKind="rejected"
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+        </Frame>
+      );
+    }
     // ---- U4-5M (#1097): 폰 위생 · 착지 틴트 · 기준선 ------------------------
     //
     // 셋 다 **한 장에 한 논점**이다. 위생 결함은 옆에 비교 대상이 없으면 사진에서
@@ -3094,6 +3273,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             startsGroup={false}
             directory={DIRECTORY}
             onResend={() => {}}
+            onDiscard={() => {}}
           />
         </Frame>
       );
@@ -4265,7 +4445,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             }
             composer={
               <>
-                <AgentActivityBar
+                <TurnsActivityRail
                   turns={channelTurns}
                   directory={ADE_DIRECTORY}
                   nowMs={Date.now()}
@@ -5199,7 +5379,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
-            approval-card · approval-notes · avatar · composer-offline ·
+            approval-card · approved · approval-notes · avatar · composer-offline ·
             composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             team-board · work-detail · agent-sessions ·
@@ -5953,7 +6133,7 @@ function RespondingSurface(): React.JSX.Element {
         nowMs={t}
         runStatus={[running]}
       />
-      <AgentActivityBar
+      <TurnsActivityRail
         turns={turn === null ? [] : [turn]}
         directory={DIRECTORY}
         nowMs={t}
@@ -5992,7 +6172,12 @@ function RunLedgerSurface(): React.JSX.Element {
       ],
     }).events,
   );
-  return <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />;
+  // 시트는 실시간 연결 상태를 읽는다(끊기면 한정 문장·점 없음, #4658): 하네스의 기본(`connecting`)이 아니라 연결된 화면을 찍는다.
+  return (
+    <RealtimeContext.Provider value={CONNECTED_RAIL}>
+      <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />
+    </RealtimeContext.Provider>
+  );
 }
 
 const harnessClient = new QueryClient({
@@ -7891,6 +8076,13 @@ if (
   isUncollectedSurface(LAUNCHED.name)
 ) {
   seedUncollected(harnessClient, LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  isWorkTimelineSurface(LAUNCHED.name)
+) {
+  seedWorkTimeline(harnessClient, LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&

@@ -877,17 +877,23 @@ async function exercise(browser) {
     );
   }
 
-  // ---- 8. 두 장치는 메뉴에서도 다른 말이다 -----------------------------------
+  // ---- 8. 두 장치는 다른 말이다: 답글은 도구 막대, 인용은 ⋯ 메뉴 (#5192) --------
+  // 이전에는 두 항목이 모두 메뉴에 있었다. 지금 답글은 도구 막대의 단추이고(반응·답글은 Buzz처럼 메뉴가 되풀이하지 않는다),
+  // 메뉴에는 인용만 있다. 「다른 낱말로 갈라 놓는다」는 ADR-0148의 약속은 두 자리를 합쳐서 지킨다.
   await openRowMenu(page, ORIGIN_MSG);
   const menu = page.getByTestId("message-action-menu");
   const menuText = (await menu.textContent()) ?? "";
-  if (
-    !menuText.includes("답글 달기") ||
-    !menuText.includes(QUOTE_ACTION_LABEL)
-  ) {
+  const replyName =
+    (await rowLocator(page, ORIGIN_MSG)
+      .getByTestId("toolbar-reply")
+      .getAttribute("aria-label")) ?? "";
+  if (replyName !== "답글 달기" || !menuText.includes(QUOTE_ACTION_LABEL)) {
     throw new Error(
-      `the menu must offer both devices with different words, read "${menuText}"`
+      `the two devices must be offered with different words (toolbar reply "${replyName}", menu "${menuText}")`
     );
+  }
+  if (menuText.includes("답글 달기") || (await menu.getByTestId("menu-reply").count()) !== 0) {
+    throw new Error(`the menu must not repeat the toolbar's reply, read "${menuText}"`);
   }
   // 두 항목은 서로 다른 낱말이어야 하고, 그 다름이 *어디로 가는지*를 말해야 한다.
   // 「인용하기」였을 때는 둘 다 「~하기/달기」로 끝나 메뉴에서 「답을 단다」로 똑같이
@@ -1178,10 +1184,23 @@ async function exerciseTouch(browser, menuKeys) {
     .evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("data-testid")?.slice("sheet-".length))
     );
-  if (JSON.stringify(sheetKeys) !== JSON.stringify(menuKeys)) {
+  // 길게 누르기 시트는 **전체 목록**이다: 손가락에는 호버 도구 막대가 없어서 도구 막대 몫(빠른 반응·「더 보기」·답글)이 시트에 함께
+  // 선다(`messageActionItemsForSurface`, #5192가 답글·반응을 ⋯ 메뉴에서 도구 막대로 옮겼다). 그래서 ⋯ 메뉴와 같다고 단정하는 것은
+  // 도구 막대 몫을 뺀 행동이고, 도구 막대 몫은 시트에 **정말 있어야** 한다(터치가 답글·반응에 닿는 유일한 길이다).
+  const sheetActionKeys = sheetKeys.filter(
+    (key) => !key.startsWith("react-") && key !== "reply"
+  );
+  if (JSON.stringify(sheetActionKeys) !== JSON.stringify(menuKeys)) {
     throw new Error(
-      `long-press and ⋯ actions drifted: ${JSON.stringify(sheetKeys)} != ${JSON.stringify(menuKeys)}`
+      `long-press and ⋯ actions drifted: ${JSON.stringify(sheetActionKeys)} != ${JSON.stringify(menuKeys)}`
     );
+  }
+  for (const key of ["react-more", "reply"]) {
+    if (!sheetKeys.includes(key)) {
+      throw new Error(
+        `the long-press sheet lost ${key}, the only touch path to a toolbar action: ${JSON.stringify(sheetKeys)}`
+      );
+    }
   }
   await sheet.getByTestId("sheet-copy").click();
   await sheet.getByTestId("sheet-copy").getByText("복사됨").waitFor();

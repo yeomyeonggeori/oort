@@ -21,8 +21,12 @@ pub mod app_notice;
 pub mod app_runtimes;
 pub mod approvals;
 pub mod apps_used;
+/// ADR-0151 증보 5 D3 (#4671) — the answer to a read of an attachment's bytes: `200`,
+/// `206`, `416` and `HEAD`. It decides nothing about who may read.
+pub(crate) mod attachment_bytes;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
 /// content proxy, plus the stub archive's own upload endpoint.
+pub mod attachment_media;
 pub mod attachments;
 pub mod auth_routes;
 pub mod channels;
@@ -53,6 +57,7 @@ pub mod dms;
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
+pub mod expression_photo;
 pub mod expressions;
 pub mod github_app;
 pub mod github_ingress;
@@ -76,6 +81,10 @@ pub mod member_lifecycle;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and settings (RLS-filtered).
 pub mod memory;
 pub mod messages;
+/// ADR-0206 D11 (#4341) — 「왜 알림이 안 와요」 diagnostics and the test push (self-scoped, human only).
+pub mod notification_diagnostics;
+/// ADR-0206 D5·D13 (#4494 N3) — per-kind switches, presentation, work hours and delay (self-scoped, human only).
+pub mod notification_prefs;
 pub mod notification_rules;
 /// #1767 — operator-issued password reset + self password change.
 pub mod password;
@@ -101,6 +110,8 @@ pub mod reminders;
 /// `props.requestedApps` marker (a marker, never a grant).
 pub(crate) mod requested_apps;
 pub mod roster;
+/// ADR-0186 v6 R-f / #4763 — `AgentRunProgress.bundle`: one approval of a run, read for the viewer.
+pub(crate) mod run_bundle;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
 pub mod search;
@@ -113,6 +124,8 @@ pub mod shared;
 pub mod sidebar_prefs;
 pub mod subscription_agents;
 pub mod terminal_attach;
+/// ADR-0206 증보 1 / #4889 — `PUT`/`DELETE …/messages/{root}/follow`: follow a thread, or stop.
+pub mod thread_follow;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
 pub mod unfurl;
 pub mod usage;

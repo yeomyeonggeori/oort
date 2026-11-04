@@ -136,7 +136,7 @@ export const NOTIFICATION_TAP_COPY = {
   otherWorkspace: '이 알림은 다른 워크스페이스의 것이라 여기서 열 수 없습니다.',
   channelGone: '이 알림의 대화가 없어졌거나 볼 권한이 없습니다.',
   // 목록 조회 실패는 여기 문장이 없다 (#2584 리뷰 M-1). 그 사실은 목록 자리의
-  // `ErrorState` 한 상자가 말하고(`CHANNEL_LIST_FAILED`), 탭은 그 「다시 시도」가
+  // `ErrorState` 한 상자가 말하고(`connection.load.channelListTitle`), 탭은 그 「다시 시도」가
   // 성공할 때까지 기다린다(`useNotificationTapRouting`).
   messageDeleted: '이 알림의 메시지는 삭제됐습니다.',
   threadRootNotLoaded:

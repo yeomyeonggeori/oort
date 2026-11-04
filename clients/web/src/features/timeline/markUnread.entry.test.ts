@@ -47,11 +47,12 @@ describe("⋯ 메뉴 「여기부터 안 읽음」", () => {
     expect(labels[0]).toBe("여기부터 안 읽음");
   });
 
-  it("인벤토리에 항목이 있고 Accrued 주석 자리에 들어온다", () => {
+  it("인벤토리에 항목이 있고 「이 메시지를 두고 하는 일」 묶음의 끝(나중에 알림 뒤, 복사 묶음 앞)에 선다", () => {
+    // #5192: 메뉴는 묶음 순서다(인용·고정·나중에 알림·안 읽음 | 복사 | 고치기·지우기). 옛 자리(링크 복사 뒤·고치기 앞)는 묶음 이전의 순서였다.
     const keys = messageActionItems(available, copyReady).map((item) => item.key);
     expect(keys).toContain("mark-unread");
-    expect(keys.indexOf("mark-unread")).toBeGreaterThan(keys.indexOf("copy-link"));
-    expect(keys.indexOf("mark-unread")).toBeLessThan(keys.indexOf("edit"));
+    expect(keys.indexOf("mark-unread")).toBeGreaterThan(keys.indexOf("remind"));
+    expect(keys.indexOf("mark-unread")).toBeLessThan(keys.indexOf("copy"));
   });
 
   it("읽음 상태 문법은 Mail 을 쓴다 (숨김 EyeOff 가 아니다)", () => {

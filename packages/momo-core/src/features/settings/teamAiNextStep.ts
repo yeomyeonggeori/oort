@@ -23,12 +23,21 @@ import { aiDefaultFeatureRow } from "../ai/aiHubModel";
 import { normalizeAlias, preferredMentionName } from "../routing/helperAliases";
 import { TEAM_AI_DEFAULT_HANDLE } from "../timeline/teamAi";
 import type { ProviderDefaultAi } from "./defaultAi";
-import type { TeamAiSupport, TeamAiSwitchState } from "./teamAiSwitch";
+import { TEAM_AI_DEFAULT_NAME, type TeamAiSupport, type TeamAiSwitchState } from "./teamAiSwitch";
 
 export const TEAM_AI_ALIAS_STATUS_KEY = "team_ai_alias_status";
 
-/** H2-2: v2 별칭은 셋으로 고정이고 이 순서로 보인다. */
+/**
+ * 도우미를 처음 켤 때 서버가 심는 기본 별칭 셋(H2-2). 이 순서로 먼저 보인다. 관리자가 이름을
+ * 바꾸면 새 이름의 별칭이 이 뒤에 더해지고(B10-3, 최대 4개) 넘으면 오래된 것부터 지워진다.
+ */
 export const TEAM_AI_ALIASES = ["oort", "오르트", "claude"] as const;
+
+/**
+ * 별칭 상태 키의 모양(서버 `member_handle_alias` CHECK와 같다: 소문자·숫자·`_`·`-`·한글, 2~16자).
+ * 도우미 표시 이름이 별칭이 못 된 까닭을 싣는 `@name` 키는 이 모양이 아니라서 별칭으로 읽히지 않는다.
+ */
+const ALIAS_KEY = /^[a-z0-9_\-가-힣]{2,16}$/u;
 
 /**
  * 별칭 하나의 상태. `registered` = 부를 수 있음, `taken` = 실제 멤버의 핸들과 겹쳐 등록하지
@@ -51,22 +60,56 @@ const STATES: ReadonlySet<string> = new Set(["registered", "taken", "display_nam
 
 /**
  * 가방의 `team_ai_alias_status` 를 읽는다. 키가 없으면(S1 이전 서버, 아직 안 켬) null.
- * 알 수 없는 상태 값은 버린다. 결과는 `TEAM_AI_ALIASES` 순서다.
+ * 알 수 없는 상태 값과 별칭 모양이 아닌 키는 버린다. 순서: 기본 셋(`TEAM_AI_ALIASES`) 먼저,
+ * 이름을 바꾸며 더해진 별칭은 그 뒤에 글자 순이다(JSON 객체는 등록 순서를 싣지 못한다).
  */
 export function readTeamAiAliasStatus(bag: unknown): TeamAiAliasStatus[] | null {
   const raw = bagRecord(bagRecord(bag)[TEAM_AI_ALIAS_STATUS_KEY]);
   const entries = new Map<string, TeamAiAliasState>();
   for (const [key, value] of Object.entries(raw)) {
     if (typeof value !== "string" || !STATES.has(value)) continue;
-    entries.set(normalizeAlias(key), value as TeamAiAliasState);
+    const alias = normalizeAlias(key);
+    if (!ALIAS_KEY.test(alias)) continue;
+    entries.set(alias, value as TeamAiAliasState);
   }
   if (entries.size === 0) return null;
   const out: TeamAiAliasStatus[] = [];
   for (const alias of TEAM_AI_ALIASES) {
     const state = entries.get(alias);
-    if (state !== undefined) out.push({ alias, state });
+    if (state !== undefined) {
+      out.push({ alias, state });
+      entries.delete(alias);
+    }
+  }
+  for (const alias of [...entries.keys()].sort()) {
+    out.push({ alias, state: entries.get(alias) as TeamAiAliasState });
   }
   return out.length > 0 ? out : null;
+}
+
+/** 현재 표시 이름이 부르는 이름(별칭)이 못 된 까닭(#4966: `@name` 키). 별칭이 만들어졌으면 null. */
+export type TeamAiNameStatus = "not_derivable" | "reserved";
+
+const NAME_STATUS_KEY = "@name";
+
+export function readTeamAiNameStatus(bag: unknown): TeamAiNameStatus | null {
+  const raw = bagRecord(bagRecord(bag)[TEAM_AI_ALIAS_STATUS_KEY]);
+  const value = raw[NAME_STATUS_KEY];
+  return value === "not_derivable" || value === "reserved" ? value : null;
+}
+
+/**
+ * 이 글자(별칭)를 핸들로 쓰는 멤버의 표시 이름. 지워진 멤버는 보지 않는다. 없으면 null.
+ * 막힌 별칭의 문장(`teamAiAliasNotices`)이 누가 쓰고 있는지 말할 때 쓴다.
+ */
+export function handleHolderName(
+  members: readonly Pick<RosterMember, "status" | "handle" | "displayName">[] | undefined,
+  alias: string
+): string | null {
+  const holder = (members ?? []).find(
+    (member) => member.status !== "deleted" && member.handle.toLowerCase() === alias
+  );
+  return holder?.displayName ?? null;
 }
 
 /** 부를 수 있는 별칭(등록됨 + 이름 겹침 경고). */
@@ -143,22 +186,24 @@ export function teamAiNextStepView(input: TeamAiNextStepInput): TeamAiNextStepVi
 const TEAM_AGENT_ROW = aiDefaultFeatureRow("teamAgent").feature;
 
 export const TEAM_AI_NEXT_STEP_COPY = {
-  title: "다음 단계: 팀 AI(oort 도우미) 켜기",
-  lead: "켜면 채팅에서 oort 도우미를 불러 이 키로 물어보고, 바꿀 일은 승인 카드로 받을 수 있어요.",
+  // 도우미 이름이 든 문구는 멤버의 표시 이름으로 채운다(ADR-0201 증보 v3 B10-7). 이름을 글자로 쓰지 않는다.
+  title: (helperName: string) => `다음 단계: 팀 AI(${helperName}) 켜기`,
+  lead: (helperName: string) =>
+    `켜면 채팅에서 ${attachParticle(helperName, "object")} 불러 이 키로 물어보고, 바꿀 일은 승인 카드로 받을 수 있어요.`,
   step1Title: "이 키를 팀 AI 기본으로 쓰기",
   step1Done: `기본 AI의 「${TEAM_AGENT_ROW}」 줄이 이 키를 써요.`,
   step1Todo: `아래 기본 AI 표의 「${TEAM_AGENT_ROW}」 줄에서 이 키를 골라 주세요. 고를 모델이 안 보이면 위 키 줄에서 「연결 확인」을 먼저 눌러 주세요.`,
   step1Stale: `「${TEAM_AGENT_ROW}」 줄이 예전 연결을 가리켜요. 아래 표에서 이 키로 다시 골라 주세요.`,
   step1Action: "기본 AI 표로 가기",
-  step2Title: "팀 AI(oort 도우미) 켜기",
-  step2Action: "oort 도우미 켜기",
+  step2Title: (helperName: string) => `팀 AI(${helperName}) 켜기`,
+  step2Action: (helperName: string) => `${helperName} 켜기`,
   step2Busy: "도우미 켜는 중",
   step2Blocked: "1단계를 마치면 켤 수 있어요.",
   step3Title: "채널에서 불러 보기",
-  enabled: "oort 도우미를 켰어요.",
+  enabled: (helperName: string) => `${attachParticle(helperName, "object")} 켰어요.`,
   channelLabel: "불러 볼 채널",
   noChannel: "들어가 있는 채널이 없어요. 채널을 만든 뒤 불러 보세요.",
-  capLine: "하루 사용량에는 상한이 있어요. 다 쓰면 다음 날 다시 쓸 수 있어요.",
+  capLine: "사용량 한도는 정하지 않으면 없어요. 원하면 아래 「사용 한도」에서 정할 수 있어요.",
   sendsTitle: "모델에 보내는 것",
   sendsLine:
     "부른 사람의 메시지, 채널·멤버 이름, 그리고 답에 필요할 때 부른 사람이 볼 수 있는 범위 안에서 찾아본 내용이에요. 바꾸는 일은 승인 카드를 거쳐요.",
@@ -172,11 +217,16 @@ export function teamAiTryLabel(channelName: string | null, name: string): string
   return `${where} @${name} 불러 보기`;
 }
 
+/** 부를 수 있는 별칭을 「@oort · @오르트」로 이은 글자. 없으면 null. 문장은 사전(`teamAi.helper.aliasesLine`)이 감싼다. */
+export function teamAiCallableNames(status: readonly TeamAiAliasStatus[] | null): string | null {
+  const names = callableAliases(status);
+  return names.length === 0 ? null : names.map((alias) => `@${alias}`).join(" · ");
+}
+
 /** 등록된 별칭 줄. 없으면 null. */
 export function teamAiCallableLine(status: readonly TeamAiAliasStatus[] | null): string | null {
-  const names = callableAliases(status);
-  if (names.length === 0) return null;
-  return `부르는 이름: ${names.map((alias) => `@${alias}`).join(" · ")}`;
+  const names = teamAiCallableNames(status);
+  return names === null ? null : `부르는 이름: ${names}`;
 }
 
 /**
@@ -185,7 +235,8 @@ export function teamAiCallableLine(status: readonly TeamAiAliasStatus[] | null):
  */
 export function teamAiAliasNotices(
   status: readonly TeamAiAliasStatus[] | null,
-  holderName: (alias: string) => string | null
+  holderName: (alias: string) => string | null,
+  helperName: string = TEAM_AI_DEFAULT_NAME
 ): string[] {
   const out: string[] = [];
   for (const entry of status ?? []) {
@@ -198,7 +249,7 @@ export function teamAiAliasNotices(
       );
     } else if (entry.state === "display_name_match") {
       out.push(
-        `표시 이름이 「${entry.alias}」인 멤버가 있어요. @${attachParticle(entry.alias, "topic")} oort 도우미를 불러요.`
+        `표시 이름이 「${entry.alias}」인 멤버가 있어요. @${attachParticle(entry.alias, "topic")} ${attachParticle(helperName, "object")} 불러요.`
       );
     }
   }

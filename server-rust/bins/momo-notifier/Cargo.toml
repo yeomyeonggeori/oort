@@ -69,6 +69,11 @@ serde.workspace = true
 momo-settings = { path = "../../crates/momo-settings" }
 # #4284: the woken-not-collected conformance writes ring rows with the REAL ledger writer.
 momo-webhook = { path = "../../crates/momo-webhook" }
+# #4341 (ADR-0206 D11): the test push is driven through the REAL relay router (stub APNs,
+# loopback) so the relay's own vocabulary check, static body and refusal texts are what the
+# conformance reads — the diagnostics classify those texts, and a hand-written stand-in could
+# not notice the relay rewording one.
+momo-push-relay = { path = "../momo-push-relay" }
 axum.workspace = true
 chrono.workspace = true
 ed25519-dalek.workspace = true

@@ -329,11 +329,13 @@ describe('가져오기', () => {
       .json as ExpressionDraft;
     const choice = expressionChoice(draft, Date.now());
     expect(choice).not.toBeNull();
+    // 종류(ADR-0218 §10 J3): 사람이 고르지 않았으니 초안 단계가 미리 고른 추천이 간다. 코어 fixture 의 초안은 움직이는 GIF 라
+    // 추천은 `sticker` 다(작은 정지 그림의 `emoji` 와 사람이 고른 값은 `expressionKind.test.tsx`).
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith({
         method: 'POST',
         path: `${root}/expressions`,
-        body: choice,
+        body: {...choice, kind: 'sticker'},
       }),
     );
     await waitFor(() =>
@@ -950,7 +952,8 @@ describe('웹과 같은 문장·같은 전송', () => {
       'expressions.make.agentHint',
       'expressions.make.noAgentsDetail',
       'expressions.make.sent',
-      'expressions.make.offline',
+      // `expressions.make.offline`은 뺐다: 웹은 #5260부터 막은 원인별 사전 틀(`blocked.sendRequestLater.*`)을 읽어 이 문장을
+      // 소스에 쥐지 않는다. 폰이 같은 원인별 틀로 옮기는 일은 #5281(폰 남은 직접 문구)이다.
     ]);
     same('flow', [
       'expressions.make.failDmForbidden',

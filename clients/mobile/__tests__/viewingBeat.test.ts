@@ -3,7 +3,7 @@ import {AppState} from 'react-native';
 
 import {resetViewingBeatForTests} from '@momo/core/features/readState/viewingBeat';
 import {ApiError, touchChannelViewing} from '@momo/core/lib/api';
-import {useViewingBeat} from '../src/features/readState/useViewingBeat';
+import {useAppForeground, useViewingBeat} from '../src/features/readState/useViewingBeat';
 
 // =============================================================================
 // 폰의 「보고 있음」 존재 신호 (#4063, ADR-0204 증보 3).
@@ -125,5 +125,38 @@ describe('폰 보고 있음 신호', () => {
       });
     }
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useAppForeground (#5032)', () => {
+  it('스레드가 열려 있을 때만(enabled) 앱 앞뒤를 따라간다 — 꺼 두면 구독이 없고 늘 앞이며, 다시 켤 때 낡은 값이 먼저 읽히지 않는다', () => {
+    const seen: boolean[] = [];
+    const {result, rerender} = renderHook(
+      ({on}: {on: boolean}) => {
+        const value = useAppForeground(on);
+        seen.push(value);
+        return value;
+      },
+      {initialProps: {on: false}},
+    );
+    expect(appStateHandler).toBeNull();
+    expect(result.current).toBe(true);
+    // 앱이 뒤에 있는 채 켠다(알림에서 스레드가 열린다): 켜는 순간의 값으로 맞춘다.
+    currentState = 'background';
+    rerender({on: true});
+    expect(appStateHandler).not.toBeNull();
+    expect(result.current).toBe(false);
+    goTo('active');
+    expect(result.current).toBe(true);
+    // 끄면 구독을 풀고 늘 앞이다. 꺼 둔 동안 뒤로 갔던 값이 다음에 켜는 첫 그림에 새어 나오지 않는다.
+    goTo('background');
+    rerender({on: false});
+    expect(appStateHandler).toBeNull();
+    expect(result.current).toBe(true);
+    currentState = 'active';
+    const before = seen.length;
+    rerender({on: true});
+    expect(seen[before]).toBe(true);
+    expect(result.current).toBe(true);
   });
 });

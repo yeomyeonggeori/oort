@@ -28,6 +28,7 @@ import {
   memberFor,
   memberNameParts,
 } from '@momo/core/features/workspace/directory';
+import {UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
@@ -44,7 +45,6 @@ import type {
   CancelOutcome,
   CancelWording,
 } from '@momo/core/features/agents/runCancel';
-import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -79,13 +79,12 @@ import {
   type ProfilePhoto,
 } from '../features/directory/MemberProfileSheet';
 import {useMemberStatusDot} from '../features/presence/useMemberStatusDot';
-import {AgentActivityBar} from '../features/agents/turnSurfaces';
+import {ConversationActivityRail} from '../features/agents/ActivityRail';
+import {isRailReserved, nextRailDeadlineMs, useFireAt} from '../features/agents/railClock';
+import {activityRail} from '@momo/core/features/agents/activityRail';
 import {
   agentTurnsInChannel,
-  hasChannelTurn,
-  TURN_STALENESS_GRID_MS,
   useAgentWorkingSignals,
-  useTickingNow,
 } from '../features/agents/workingSignal';
 import {
   applyApprovalWaits,
@@ -101,6 +100,9 @@ import {
   type ApprovalReceipt,
 } from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
+import {useConnectionBand} from '../features/connection/useConnectionBand';
+import {useConnectionGates} from '../features/connection/useConnectionGates';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -112,7 +114,7 @@ import {
   Composer,
   type ComposerSendOptions,
 } from '../features/conversation/Composer';
-import {channelDraftKey} from '../features/conversation/drafts';
+import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
 import {CONV} from '../features/conversation/convDesign';
 import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -135,12 +137,14 @@ import {
   useLongPressHint,
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
 import {
   MakeLandingContext,
   useLandOnMadeDm,
 } from '../features/conversation/makeLanding';
 import {useReplyDraft} from '../features/conversation/useReplyDraft';
+import {threadsAreFollowable} from '@momo/core/features/timeline/threadFollow';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
@@ -151,7 +155,7 @@ import {dmClosureMode} from '../features/sidebar/dmVerdicts';
 import type {ChannelRowTarget} from '../features/sidebar/channelRowActions';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {visitFlushReason} from '../features/readState/advertise';
-import {useViewingBeat} from '../features/readState/useViewingBeat';
+import {useAppForeground, useViewingBeat} from '../features/readState/useViewingBeat';
 import {useReportViewedConversation} from '../push/viewedConversation';
 import {
   foldVisitBoundary,
@@ -172,12 +176,8 @@ import {
   planNotificationLanding,
   type NotificationLanding,
 } from '../push/tapArrival';
-import {bandIsSilent} from '../realtime/connectionDisplay';
 import {useRealtime} from '../realtime/RealtimeProvider';
-import {
-  useAgentLiveness,
-  useAgentLivenessLookup,
-} from '../features/agents/useAgentLiveness';
+import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {ChannelAudienceContext} from '../features/conversation/appsTail';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
@@ -335,6 +335,7 @@ export default function ConversationScreen({
   onOpenConversation,
   onOpenAgent,
   onDelegateWork,
+  onAskMac,
   onOpenWorkSession,
   onOpenWorkList,
   onOpenSettings,
@@ -374,6 +375,12 @@ export default function ConversationScreen({
    */
   onDelegateWork?: (prefill: {agentMemberId: string; channelId: string}) => void;
   /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)를 누르면 「내 맥에 보내기」 시트를
+   * **작업 요청 모드로, 글과 하네스를 미리 채워** 연다. 보내는 것은 사람이다. 셸이 시트를 쥐고 있어서
+   * 없으면(시트를 열 곳이 없는 표면) 카드는 한 줄로만 선다 — 누르면 아무 일도 없는 단추를 세우지 않는다.
+   */
+  onAskMac?: (prefill: WorkRequestOpen) => void;
+  /**
    * 내 개인 에이전트를 부른 호출이 맥에 닿으면 만들어진 세션의 N3 대화로 간다 (#3638).
    * 못 찾으면 작업 목록으로 간다. 둘 다 셸의 같은 액션이다.
    */
@@ -393,9 +400,10 @@ export default function ConversationScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
-  // `bandStatus` 는 띠가 말해도 되는 상태다 — 끊긴 첫 1초는 말이 없다(#4949). 소켓이 살아 있는가를 묻는
-  // 자리(`railLive`·전송 잠금)는 그대로 `status` 를 읽는다.
-  const {rail, status: railStatus, bandStatus = railStatus, reconnect} = useRealtime();
+  // 소켓이 살아 있는가를 묻는 자리(`railLive`)는 `status` 를 읽는다. 사람에게 **말하는** 것(첫 1초 침묵 #4949 · 「연결 중」 ·
+  // 끊김의 원인 · 「다시 연결됐어요」)은 코어 연결 상태 모델이 정하고 아래 `band` 로 온다(#5222).
+  const {rail, status: railStatus, reconnect} = useRealtime();
+  const {band, recovering} = useConnectionBand();
   // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
   // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
@@ -515,8 +523,8 @@ export default function ConversationScreen({
     channel,
     directory,
     members: rosterMembers ?? NO_MEMBERS,
-    sendPlain: (body, clientMsgId) =>
-      void timeline.send(body, undefined, undefined, clientMsgId),
+    sendPlain: (body, clientMsgId, flags) =>
+      void timeline.send(body, undefined, undefined, clientMsgId, flags),
     ingest: timeline.ingest,
     onOpenWorkSession,
     onOpenWorkList,
@@ -525,33 +533,20 @@ export default function ConversationScreen({
   const dmHint = useDmDeliveryHint({workspaceId, channelId, directory, dmAgent});
 
   // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
-  // The 1Hz clock is mounted for THIS channel's turns, not the workspace's.
-  // `hasChannelTurn` is clock-free precisely so that decision can be made before
-  // there is a clock; gating on the store's size alone would re-render this
-  // screen once a second because an agent is busy in a channel nobody here is
-  // looking at, which on a phone is battery bought with nothing on screen.
+  // **초 단위로 다시 그리지 않는다**(#4620). 예전에는 열린 턴이 있는 동안 1초 시계를 이 화면에 마운트했다(`useTickingNow`) — 「3초째」
+  // 글자를 보이려는 것이었고, 그 글자가 줄 수를 뒤집어 입력창 위의 대화를 흔들었다(#4613). 레일의 글자에는 시간이 없다. 시간이
+  // 사실을 바꾸는 순간은 셋뿐이라(`nextRailDeadlineMs`: 라이브 신호의 90초 만료 · 아무도 가져가지 않은 요청의 유예 마감 · 대기 승인의 기한)
+  // 그 순간에 **한 번만** 다시 그린다. 그 밖의 변화는 스토어의 사실이 바뀌는 것이고 그때는 스토어가 이미 렌더를 일으킨다.
   //
-  // `useTickingNow` returns the RENDER's own clock whatever the argument says.
-  // The argument only buys the 1Hz re-render, and that is what makes the same
-  // `nowMs` safe to hand to the staleness filter below: a frozen now can never
-  // find a signal stale, and a dead rail is exactly when one most needs to
-  // expire.
+  // 판정 시각(`evalNowMs`)은 **하나**다: 만료·유예·승인 기한을 가르는 모든 판정(`turns` · 레일)과 마감 계산이 같은 시각을 읽는다. 마감 계산이 더
+  // 늦은 시각을 읽으면 방금 지난 마감이 「없음」으로 계산돼 타이머가 걸리지 않고, 낡은 판정이 다음 사건까지 남는다. 얼어붙은 시각은 만료를 영영
+  // 못 찾으므로(`useTickingNow` 머리말) 사실이 바뀔 때마다(`signals`·승인 표·마감 신호) 새로 읽는다.
+  //
+  // 마감 시계는 **소켓이 끊겨도 건다**: 마감은 서버가 알려 준 사실(요청 시각·기한)과 신호의 나이에서 오는 것이지 소켓의 상태가 아니다. 끊긴 레일은
+  // 신호가 낡아 가는 때이고(90초), 아래 메시지의 예외 줄은 소켓과 무관하게 유예 마감에 선다 — 레일만 멈춰 있으면 같은 run을 두 자리가 다르게 말한다.
   const signals = useAgentWorkingSignals();
   const railLive = railStatus === 'connected';
-  const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  // 초 단위로 흔들리는 `turnNowMs` 를 그대로 넣으면 이 배열은 매초 새 배열이 되고,
-  // `AgentActivityBar` 안의 두 `useMemo`(`[turns, directory]`·`[turns]`)는 영영
-  // 적중하지 못한다 — 초당 한 번 줄 문구를 처음부터 다시 만든다는 뜻이다.
-  //
-  // 그래서 만료 판정에만 필요한 만큼으로 시계를 **양자화**한다. TTL 은 90초이므로
-  // 5초 격자면 만료가 최대 5초 늦을 뿐이고(그 사이 스토어의 15초 sweep 이 이미
-  // 돌고 있다), 배열 동일성은 5초에 한 번만 바뀐다. 경과 숫자는 이 값을 쓰지
-  // 않는다 — 그것은 아래로 그대로 내려가는 `turnNowMs` 의 몫이다.
-  // 내림이 아니라 **올림**이다. 내림은 격자만큼 과거의 시각을 먹이므로 만료가
-  // 그만큼 늦어지고, 늦은 만료는 「작업 중」을 사실보다 오래 말하는 쪽이다. 올림은
-  // 반대로 최대 5초 일찍 거두는데, 그것은 이 제품이 늘 고르는 방향이다 — 모르면
-  // 모른다고 말하지, 아는 척 붙들고 있지 않는다.
-  const staleBucket = Math.ceil(turnNowMs / TURN_STALENESS_GRID_MS);
+  const [clockTick, setClockTick] = useState(0);
   // 승인 원장이 레일보다 이긴다(#3738, 웹 `ComposerActivityRail` 과 같은 덮어쓰기). 서버는 승인에 걸린 run 을 DB 에서는
   // 승인 대기로 세우지만 레일 프레임으로는 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 그 에이전트는 계속 「일하는
   // 중」이다. 사람을 기다리는 카드가 이 채널에 있으면 그 에이전트의 턴은 승인 대기이고, 자리표시(`turnPlaceholderKey`)와
@@ -561,32 +556,24 @@ export default function ConversationScreen({
     waits: approvalWaitList,
     provided: approvalsProvided,
   } = usePendingApprovals(channelId);
+  const evalNowMs = useMemo(
+    () => Date.now(),
+    // `clockTick`: 마감이 지났다는 신호다 — 값은 읽지 않고 새로 읽게만 한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signals, channelId, approvalWaitList, clockTick],
+  );
   const turns = useMemo(
     () =>
       applyApprovalWaits(
-        agentTurnsInChannel(
-          signals,
-          channelId,
-          staleBucket * TURN_STALENESS_GRID_MS,
-        ),
+        agentTurnsInChannel(signals, channelId, evalNowMs),
         channelId,
         approvalWaitList,
-        staleBucket * TURN_STALENESS_GRID_MS,
+        evalNowMs,
       ),
-    [signals, channelId, staleBucket, approvalWaitList],
+    [signals, channelId, approvalWaitList, evalNowMs],
   );
-
-  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
-  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 DM 머리의
-  // 상태 점(`peerLiveness`)과 요청을 나눠 쓴다.
-  const waitingAgentIds = useMemo(
-    () =>
-      turns
-        .filter(turn => isUntakenHumanRun(turn.server))
-        .map(turn => turn.memberId),
-    [turns],
-  );
-  const livenessFor = useAgentLivenessLookup(waitingAgentIds);
+  const fireClock = useCallback(() => setClockTick(tick => tick + 1), []);
+  useFireAt(nextRailDeadlineMs(turns, evalNowMs, undefined, approvalWaitList), fireClock);
 
   // ---- 답이 나타날 자리 (#999) ---------------------------------------------
   //
@@ -926,6 +913,10 @@ export default function ConversationScreen({
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
+  // 열린 스레드를 **보고 있는가**(스레드 화면이 떠 있고 앱이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은
+  // 수를 0으로 읽는다. 스레드 화면이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 앱 앞 판정이다(#5032). 스레드가 열려 있을
+  // 때만 구독한다 — 열려 있지 않으면 이 화면은 앱 앞뒤 전환에 다시 그려지지 않는다.
+  const appForeground = useAppForeground(thread !== null);
   // 앞에 떠 있는 동안 온 푸시가 「지금 보는 대화」를 읽는 자리 (#4310). 방과, 열려 있는 스레드가
   // 있으면 그 루트를 올린다 — 알림 처리기(`push/foregroundPresentation.ts`)가 같은 방·같은
   // 스레드의 알림만 숨기려면 둘 다 필요하다.
@@ -1345,6 +1336,15 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
+  /**
+   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
+   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
+   */
+  const onJumpToMessage = useCallback(
+    (messageId: string, seq: number) => requestJump('search', messageId, seq),
+    [requestJump],
+  );
+
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1495,7 +1495,14 @@ export default function ConversationScreen({
   // 컴포저는 그동안 레일을 읽고 있었다. 한 화면이 같은 사실에 두 신호를 들면
   // 그 둘은 반드시 갈라진다 — 이 파일이 「연결 중…」 하나로 두 상태를 덮던 옛
   // 결함(M3)에서 이미 배운 것이다.
+  // 기기 온라인(NetInfo): AI 연결 카드·프로필 시트 같은 읽기·REST 화면이 읽는다.
   const networkOnline = useOnline();
+  // 보내기·올리기·승인을 막는 질문은 코어 연결 상태 모델이 답한다(#5222, 결정 ③): 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
+  // 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없으면 NetInfo 만으로 같은 질문에 답한다.
+  const gates = useConnectionGates();
+  const formatMessage = useFormatMessage();
+  const composerNote =
+    gates.composerNote === null ? undefined : formatMessage(gates.composerNote);
   const invalidateApprovals = useInvalidateApprovals();
   const [approvalReceipts, setApprovalReceipts] =
     useState<ReadonlyMap<string, ApprovalReceipt>>(NO_RECEIPTS);
@@ -1518,12 +1525,15 @@ export default function ConversationScreen({
       // 문장과 **상태**를 함께 든다. 상태가 없으면 칩은 스냅샷을 그대로 둔다 —
       // 원장이 알아볼 수 없는 상태를 답했을 때 우리가 지어내지 않는다.
       setApprovalReceipts(previous =>
-        new Map(previous).set(
-          approvalId,
-          secretOnce === undefined
-            ? {note, status: outcome.status}
-            : {note, status: outcome.status, secretOnce},
-        ),
+        new Map(previous).set(approvalId, {
+          note,
+          status: outcome.status,
+          // 누가 결정했는지(#5171): 「다시 요청」이 방금 거부한 사람에게 서지 않게 한다.
+          ...(outcome.decidedByMemberId === undefined
+            ? {}
+            : {decidedByMemberId: outcome.decidedByMemberId}),
+          ...(secretOnce === undefined ? {} : {secretOnce}),
+        }),
       );
       // 결과도 말해 준다. 무장은 알리고 결과는 알리지 않으면, 화면을 보지 않는
       // 사람에게 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다(인박스 2R H3).
@@ -1591,14 +1601,19 @@ export default function ConversationScreen({
       setQuote(null);
       // 인용·첨부가 없는 글만 호출로 간다 — 코어 호출 경로는 둘을 싣지 않는다. 그 밖의
       // `@별칭`은 평범한 메시지다(서버도 거기서 작업을 만들지 않는다).
+      //
+      // 입력칸 ✕로 미리보기를 끈 글(#5016)은 호출 길에도 같은 표시를 싣는다(#5037): 코어 `callPersonalAgent` 가
+      // 메시지를 직접 보내므로 표시가 이 길로 넘어가지 않으면 사람이 끈 카드가 `@별칭` 메시지에만 되살아난다.
+      // 켠 때만 있다 — 켜지 않은 전송은 예전과 같은 호출이다.
+      const flags = options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined;
       if (
         replyToId === undefined &&
         (options?.attachments?.length ?? 0) === 0 &&
-        tryPersonalCall(body)
+        tryPersonalCall(body, flags)
       ) {
         return;
       }
-      void send(body, replyToId, options?.attachments);
+      void send(body, replyToId, options?.attachments, undefined, flags);
     },
     [send, tryPersonalCall, sendReplyDraft],
   );
@@ -1618,8 +1633,12 @@ export default function ConversationScreen({
     togglePin,
     editBody,
     removeMessage,
+    removeUnfurls,
     loadOlder,
     resend,
+    resendAll,
+    failureKinds,
+    discard,
     reload,
   } = timeline;
   const openThread = useCallback((message: Message) => {
@@ -1642,6 +1661,13 @@ export default function ConversationScreen({
   const onResendPending = useCallback(
     (clientMsgId: string) => void resend(clientMsgId),
     [resend],
+  );
+  // 「N개 모두 다시 보내기」(#5222): 실패한 글 전부를 보낸 순서대로 같은 멱등 키로 한 번씩.
+  const onResendAll = useCallback(() => void resendAll(), [resendAll]);
+  // 같은 이유로 고정된 동일성이다(위 머리말). 지운 행을 돌려받는 호출자는 아직 없다(「지우고 고쳐 쓰기」는 후속).
+  const onDiscardPending = useCallback(
+    (clientMsgId: string) => void discard(clientMsgId),
+    [discard],
   );
   const closeThread = useCallback(() => {
     setThread(null);
@@ -1696,20 +1722,29 @@ export default function ConversationScreen({
       onTogglePin: togglePin,
       onEdit: editBody,
       onDelete: removeMessage,
+      // 작성자가 링크 미리보기를 모두에게서 지운다(#4883). 시트가 작성자에게만 행을 세운다.
+      onRemoveUnfurls: removeUnfurls,
       onOpenThread: openThread,
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
+      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
       onOpenMemoryEvidence: openMemoryEvidence,
       // 다른 방으로 건너갈 셸이 없으면 열 곳이 없다 — 그때 「전문 보기」는 서지 않는다(#4705).
       ...(onOpenConversation !== undefined ? {onOpenMessage: openApprovalMessage} : {}),
+      // 닫힌 승인 카드의 「다시 요청」이 **이 화면의** 입력창에 초안을 넣는다(#5171). 쓰던 글이 있으면 덮지 않고 거절한다.
+      onRepropose: (draft: string) => seedDraft(channelDraftKey(channelId), draft),
+      // 시트를 열 셸이 없으면 도우미의 「작업 요청 열기」 카드에 누를 단추가 서지 않는다(#4972).
+      ...(onAskMac !== undefined ? {onOpenWorkRequest: onAskMac} : {}),
     }),
     [
       workspaceId,
+      channelId,
       openMemoryEvidence,
+      onAskMac,
       onOpenConversation,
       openApprovalMessage,
       member.id,
@@ -1717,10 +1752,12 @@ export default function ConversationScreen({
       togglePin,
       editBody,
       removeMessage,
+      removeUnfurls,
       openThread,
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
+      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],
@@ -2093,12 +2130,23 @@ export default function ConversationScreen({
     }
     return turns.filter(turn => turn.runId === undefined || !runIds.has(turn.runId.toLowerCase()));
   }, [dmAgent, turns, requestRuns, timeline.state.messages]);
+  // 입력창 레일(#4620): 코어 `activityRail`이 한 줄을 정한다(낱말·합치기·유예). 칸은 에이전트가 있는 대화에서만 미리 잡는다.
+  const workRail = useMemo(
+    () =>
+      activityRail(
+        railTurns,
+        memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+        evalNowMs,
+      ),
+    [railTurns, directory, evalNowMs],
+  );
+  const railReserved = isRailReserved({dmAgent, directory, channelId});
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
     <MakeLandingContext.Provider value={landOnMadeDm}>
     <DecisionStageScope key={`${workspaceId}:${channelId}`} messages={messages} runs={requestRuns} directory={directory} viewerMemberId={member.id}
-      gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!networkOnline} onSettled={onApprovalSettled}>
+      gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!gates.canDecide} onSettled={onApprovalSettled}>
     <Screen style={styles.screen}>
       {/* 사용자 배경(ADR-0189 증보 2) — 꺼져 있으면 아무것도 그리지 않는다. */}
       <AppBackground />
@@ -2127,7 +2175,7 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
-        railStatus={bandStatus}
+        band={band}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
       >
@@ -2143,7 +2191,7 @@ export default function ConversationScreen({
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
-              approvalOffline={!networkOnline}
+              approvalOffline={!gates.canDecide}
               // 원장 표면이 없는 서버에서는 「다시 연결되면 여기서」가 거짓말이
               // 된다 — 코어가 그 갈래를 오프라인보다 앞에 두는 이유이고, 이
               // 사실은 이 훅만 안다.
@@ -2153,6 +2201,7 @@ export default function ConversationScreen({
               directory={directory}
               status={timeline.status}
               channelKind={channel?.kind}
+              viewingThreadId={thread !== null && appForeground ? thread.id : null}
               requestThoughts={dmAgent !== null}
               peer={peer}
               dmGroup={dmGroup}
@@ -2163,11 +2212,13 @@ export default function ConversationScreen({
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
+              // 링크 카드(#4883) — 목록이 줄마다 자기 메시지의 카드를 유도한다.
+              unfurls={timeline.unfurls}
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
               // 「연결 복구 중」은 사람이 보는 띠가 선 동안이다 — 끊긴 첫 1초(띠가 조용한 동안)에는 당김 문이 바뀌지 않는다(#4949).
-              realtimeConnected={bandIsSilent(bandStatus)}
+              realtimeConnected={!recovering}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
@@ -2176,6 +2227,9 @@ export default function ConversationScreen({
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}
+              onResendAll={onResendAll}
+              onDiscardPending={onDiscardPending}
+              failureKinds={failureKinds}
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
@@ -2213,13 +2267,16 @@ export default function ConversationScreen({
                 over the composer rather than in the header for the same reason
                 the web bar does — the header is where the channel's identity
                 lives, and a turn is not an identity. */}
-            <AgentActivityBar
+            <ConversationActivityRail
+              rail={workRail}
               turns={railTurns}
-              directory={directory}
-              nowMs={turnNowMs}
+              runs={requestRuns}
               live={railLive}
+              reserved={railReserved}
+              directory={directory}
               renderStop={renderStop}
-              livenessFor={livenessFor}
+              stopOutcome={stopOutcome}
+              onOpenActivity={isSurfaceProvided('ade') ? openAde : undefined}
             />
             {/* ===================================================
                 「작업 중」 **바로 아래** (design-review M-5).
@@ -2276,7 +2333,8 @@ export default function ConversationScreen({
               // 옛 배선(`railStatus === 'disconnected'`)이 답한다고 주장했을
               // 뿐이다. 근거는 `useOnline.ts` 머리말, 판정은 `Composer` 의
               // `offline` prop 주석에 있다.
-              offline={!networkOnline}
+              offline={!gates.canSend}
+              offlineNote={composerNote}
               draftKey={channelDraftKey(channelId)}
               attachmentTarget={{workspaceId, channelId}}
               quote={quote}
@@ -2316,8 +2374,10 @@ export default function ConversationScreen({
           approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
           onOpenMessage={openApprovalMessage}
+          onOpenWorkRequest={onAskMac}
           nowMs={nowMs}
           onClose={closeThread}
+          followable={threadsAreFollowable(channel?.kind)}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
           onReaderTookList={onReaderTookList}

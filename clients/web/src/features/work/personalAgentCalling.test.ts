@@ -28,6 +28,7 @@ import {
   pickCallHost,
   previewFor,
   runPersonalAgentCall,
+  workRequestTarget,
   type PersonalCallSpec,
 } from "./personalAgentCalling";
 
@@ -289,5 +290,31 @@ describe("the call, as the composer runs it", () => {
     await expect(run(spec({ signer }))).rejects.toBeInstanceOf(ApiError);
     expect(signed).toHaveLength(0);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("workRequestTarget — 「작업 요청」 카드가 채울 내 개인 에이전트 (#4972)", () => {
+  const myClaude = agent("my-claude", mine({ harness: "claude_code" }));
+  const myCodex = agent("my-codex", mine({ harness: "codex", label: "내 Codex" }));
+  const someoneElses = agent("their-codex", mine({ harness: "codex", ownerId: OTHER }));
+  const off = agent("off-claude", mine({ enabled: false }));
+  const plain = agent("hermes", null);
+
+  it("카드가 이름 붙인 도구의 에이전트를 고르고, claude_code·claude를 같은 도구로 읽는다", () => {
+    const members = [myClaude, myCodex];
+    expect(workRequestTarget(members, ME, "codex")?.handle).toBe("my-codex");
+    expect(workRequestTarget(members, ME, "claude")?.handle).toBe("my-claude");
+    expect(workRequestTarget([agent("c", mine({ harness: "claude" }))], ME, "claude")?.handle).toBe("c");
+  });
+
+  it("도구가 정해지지 않았거나 그 도구의 에이전트가 없으면 내 것 중 첫째가 기본값이다", () => {
+    expect(workRequestTarget([myClaude, myCodex], ME, null)?.handle).toBe("my-claude");
+    expect(workRequestTarget([myClaude], ME, "codex")?.handle).toBe("my-claude");
+  });
+
+  it("남의 개인 에이전트·꺼진 것·개인이 아닌 에이전트는 후보가 아니고, 없으면 null이다", () => {
+    expect(workRequestTarget([someoneElses, off, plain], ME, "codex")).toBeNull();
+    expect(workRequestTarget([someoneElses, myCodex], ME, "codex")?.handle).toBe("my-codex");
+    expect(workRequestTarget([], ME, null)).toBeNull();
   });
 });

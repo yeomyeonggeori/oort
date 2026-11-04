@@ -27,10 +27,11 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) or the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
+//! | `a_test_push_runs_as_the_production_app_and_notifier_roles` (ADR-0206 D11·D15, #4341) | drop `momo_app`'s write on the four `notification_rule` test columns or its outbox INSERT (the route's reservation dies with `permission denied`), drop `momo_notifier`'s `outbox` UPDATE or its `push_token`/`device`/`member`/`membership`/`channel_seq` reads (the second drain dies), or give the notifier a way to INSERT `push_system` rows itself |
 //! | `an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_without_touching_the_inbox` (ADR-0186 증보 v5 U-f, #4702) | make the approval sweep write the proposer's inbox reference (`append_run_reference_in_tx` from `settle_expired_in_tx`): it dies with `permission denied for table token`, the whole workspace's sweep rolls back and the card stays `pending`; or grant the notifier `token` / a write on the inbox tables (the denied-write half goes red); or drop `momo_app`'s write on the inbox tables (the decision route's reference write goes red) |
 //!
 //! Why #3553 got through anyway: the first test below already called
@@ -63,8 +64,11 @@ use momo_notifier::{
     approval_sweep, control_window_sweep, FixedAdapterResolver, Notifier, NotifierConfig,
     PushConfig,
 };
+use momo_outbox::{emit_push_system, PushSystemReason};
 use momo_push::{
-    settle_dispatch_and_invalidate, DispatchOutcome, PushDispatch, PushDispatcher, SettleOutcome,
+    compute_diagnostics, reserve_test_push_in_tx, settle_dispatch_and_invalidate,
+    test_notification_collapse_id, DispatchOutcome, LastTestStatus, PushDispatch, PushDispatcher,
+    SettleOutcome, TestPushSlot,
 };
 use momo_t3::MockProviderAdapter;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -1452,6 +1456,59 @@ async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
     );
 }
 
+/// ADR-0206 증보 1 F1 / #4889 2단계 (migration 165): the `thread_reply` arm of the push judgment
+/// reads `thread_follow`, so the production notifier holds **SELECT and nothing else** on it. The
+/// writes are the API's and the agent worker's (`momo_app`, `momo_worker`), never the notifier's
+/// (its own message lines are `ThreadPolicy::Skip` and never reach the automatic follow), and no
+/// role is BYPASSRLS because of this table. Also: the judgment as the production notifier does not
+/// die with `permission denied` (Postgres checks table privileges when the statement starts, so an
+/// unknown message id is enough to prove the read is granted).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_production_notifier_role_reads_thread_follow_and_writes_nothing_there() {
+    let db = ProdDb::create().await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+
+    sqlx::query("SELECT count(*) FROM thread_follow")
+        .fetch_one(&notifier)
+        .await
+        .expect("the notifier reads thread_follow (migration 165 + bootstrap_runtime_roles.sql)");
+    sqlx::query("SELECT last_read_reply_seq FROM thread_follow WHERE false")
+        .fetch_all(&notifier)
+        .await
+        .expect("the notifier reads the new column too (a table-level SELECT covers it)");
+
+    for (verb, sql) in [
+        (
+            "INSERT",
+            "INSERT INTO thread_follow (workspace_id, channel_id, root_id, member_id, state) \
+             SELECT gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'auto' WHERE false",
+        ),
+        (
+            "UPDATE",
+            "UPDATE thread_follow SET last_read_reply_seq = last_read_reply_seq WHERE false",
+        ),
+        ("DELETE", "DELETE FROM thread_follow WHERE false"),
+    ] {
+        match sqlx::query(sql).execute(&notifier).await {
+            Ok(_) => panic!("the production notifier must not {verb} thread_follow"),
+            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42501") => {}
+            Err(error) => panic!("{verb} thread_follow failed for a reason other than permission: {error}"),
+        }
+    }
+
+    {
+        let mut conn = notifier.acquire().await.expect("acquire");
+        let judged = momo_push::judge_targets(&mut conn, Uuid::new_v4(), Uuid::new_v4())
+            .await
+            .expect("the judgment runs as the production notifier, thread_follow included");
+        assert!(judged.is_empty(), "an unknown message notifies nobody");
+    }
+
+    notifier.close().await;
+    db.finish().await;
+}
+
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
@@ -1460,9 +1517,9 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `schema_migrations`, `work_cloud_host_transition`: #4372, see
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
-    // `self_media_token` (#4820 C2a L6 lockdown, see below) are
-    // the only tables outside the rule; everything else must be readable and writable
-    // by the three ALL-TABLES roles.
+    // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
+    // lockdown, see below) and `attachment_media` (#4673 C5 lockdown, see below) are the only tables
+    // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -1473,6 +1530,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname NOT LIKE 'cloud\\_box%' \
             AND c.relname NOT LIKE 'scheduled\\_message%' \
             AND c.relname <> 'self_media_token' \
+            AND c.relname <> 'team_ai_task' \
+            AND c.relname <> 'attachment_media' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1552,6 +1611,79 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("self media table count");
+    // `team-ai-task-lockdown` (bootstrap_runtime_roles.sql, #4967 security review r1 M1): a row's note
+    // is model-written text that may carry what the helper read for one requester, and the BYPASSRLS
+    // roles skip RLS, so their table privileges keep every tenant's notes from a role with no business
+    // reading them. `momo_worker` runs the task (SELECT/INSERT/UPDATE), `momo_app` counts the slot and
+    // ends a cancelled task (SELECT/UPDATE), relay and notifier touch nothing; nobody deletes a row or
+    // holds TRUNCATE/REFERENCES/TRIGGER.
+    let team_ai_task_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'team_ai_task' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("team ai task privilege scan");
+    let team_ai_task_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'team_ai_task'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("team ai task table count");
+    // `attachment-media-lockdown` (bootstrap_runtime_roles.sql, #4673 C5; ADR-0151 증보 5 D5): the
+    // poster is one frame of a member's video, and the BYPASSRLS roles skip RLS, so their table
+    // privileges are what keeps every tenant's frames from a role with no business reading them.
+    // `momo_app` writes (INSERT, UPDATE for the idempotent replace) and reads (SELECT); the team AI's
+    // read role `momo_helper_read` reads every column but the poster's bytes (the page statements it
+    // runs join this table for the summary); nobody deletes (the foreign key cascades as the owner);
+    // relay, worker and notifier touch nothing.
+    let attachment_media_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'attachment_media' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("attachment media privilege scan");
+    let attachment_media_column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, a.attname, \
+                       has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT')) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+          WHERE n.nspname = 'public' AND c.relname = 'attachment_media' \
+            AND has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT') \
+                IS DISTINCT FROM (r.rolname = 'momo_app' \
+                                  OR (r.rolname = 'momo_helper_read' AND a.attname <> 'poster_bytes')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("attachment media column privilege scan");
+    let attachment_media_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'attachment_media'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("attachment media table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -1576,6 +1708,27 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         self_media_drift.is_empty(),
         "self_media_token privileges drifted from the lockdown: {self_media_drift:?}"
+    );
+    assert_eq!(
+        team_ai_task_tables, 1,
+        "the scan must actually see the team_ai_task table, or it proves nothing"
+    );
+    assert!(
+        team_ai_task_drift.is_empty(),
+        "team_ai_task privileges drifted from the lockdown: {team_ai_task_drift:?}"
+    );
+    assert_eq!(
+        attachment_media_tables, 1,
+        "the scan must actually see the attachment_media table, or it proves nothing"
+    );
+    assert!(
+        attachment_media_drift.is_empty(),
+        "attachment_media privileges drifted from the lockdown: {attachment_media_drift:?}"
+    );
+    assert!(
+        attachment_media_column_drift.is_empty(),
+        "attachment_media column privileges drifted from the lockdown (the poster's bytes are momo_app's alone): \
+         {attachment_media_column_drift:?}"
     );
 }
 
@@ -3270,5 +3423,115 @@ async fn dm_expiry_savepoint_isolates_one_bad_card_and_retries_it_next_tick() {
         "the retry commits rather than merely skipping the failed card"
     );
     notifier.close().await;
+    db.finish().await;
+}
+
+/// ADR-0206 D11·D15 (#4341) — the test push runs as the PRODUCTION roles. The dev role file hands
+/// every runtime role every verb on every table, so no other suite can see a grant the real roles
+/// lack. Here `momo_app` reserves the slot (the four `notification_rule` test columns, the
+/// `push_token` count) and enqueues the `push_system` row in one transaction; `momo_notifier`
+/// drains it (the `push_system` claim, the token/device/member reads, the dispatch-log claim with
+/// a NULL message, the settle); `momo_app` reads the outcome back through the diagnostics. A
+/// missing grant on any step is a `permission denied` that only this suite sees.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn a_test_push_runs_as_the_production_app_and_notifier_roles() {
+    let db = ProdDb::create().await;
+    let workspace = Uuid::new_v4();
+    let member = Uuid::new_v4();
+    let device = Uuid::new_v4();
+    sqlx::raw_sql(&format!(
+        "INSERT INTO workspace (id, slug, name) VALUES ('{workspace}', 'prod-{workspace}', 'prod');
+         INSERT INTO member (id, workspace_id, kind, display_name, handle)
+           VALUES ('{member}', '{workspace}', 'human', 'prod-me', 'prod-me');
+         INSERT INTO device (id, workspace_id, member_id, platform)
+           VALUES ('{device}', '{workspace}', '{member}', 'ios'::device_platform);
+         INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic)
+           VALUES ('{workspace}', '{device}', '{member}', '{token}', 'sandbox'::push_env, 'kim.dawn.momo.e2e');",
+        token = Uuid::new_v4().simple().to_string().repeat(2),
+    ))
+    .execute(&db.su)
+    .await
+    .expect("seed a member with one live token");
+    let app = db.role("momo_app", "momo_app_dev_pw").await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+
+    // (1) As momo_app: reserve and enqueue in one transaction.
+    let test_id = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            let TestPushSlot::Reserved {
+                test_id,
+                device_count,
+            } = reserve_test_push_in_tx(conn, workspace, member).await?
+            else {
+                panic!("a member with a live token must get a slot");
+            };
+            assert_eq!(device_count, 1);
+            emit_push_system(
+                conn,
+                workspace,
+                PushSystemReason::TestNotification,
+                member,
+                None,
+                test_id,
+                &test_notification_collapse_id(test_id),
+            )
+            .await?;
+            Ok(test_id)
+        })
+    })
+    .await
+    .expect("momo_app reserves the slot and enqueues the push_system row");
+
+    // (2) As momo_notifier: drain the second feed.
+    let relay = Arc::new(RecordingPush {
+        sent: Mutex::new(Vec::new()),
+    });
+    let drain = PushDrain::new(notifier.clone(), PushConfig::for_target(), relay.clone());
+    let stats = drain
+        .drain_system_once(16)
+        .await
+        .expect("momo_notifier claims the push_system row");
+    assert_eq!((stats.claimed, stats.dispatched), (1, 1), "{stats:?}");
+    let sent = relay.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].reason, "test_notification");
+    assert_eq!(sent[0].category, "momo.system");
+    let (status, message): (Option<i32>, Option<Uuid>) = sqlx::query_as(
+        "SELECT apns_status, message_id FROM push_dispatch_log WHERE collapse_id = $1",
+    )
+    .bind(test_notification_collapse_id(test_id))
+    .fetch_one(&db.su)
+    .await
+    .expect("the dispatch-log row");
+    assert_eq!((status, message), (Some(200), None));
+
+    // (3) As momo_app again: the diagnostics read the result back.
+    let diagnostics = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move { compute_diagnostics(conn, workspace, member, None, None).await })
+    })
+    .await
+    .expect("momo_app reads the diagnostics");
+    assert!(diagnostics.ok, "{diagnostics:?}");
+    let last = diagnostics.last_test.expect("the last test");
+    assert_eq!((last.id, last.status), (test_id, LastTestStatus::Sent));
+
+    // (4) The notifier cannot write the feed it drains: a push_system row is the API's to make.
+    let denied = sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id) VALUES ($1, $2) \
+         ON CONFLICT (workspace_id, member_id) DO UPDATE SET last_test_id = $3",
+    )
+    .bind(workspace)
+    .bind(member)
+    .bind(Uuid::new_v4())
+    .execute(&notifier)
+    .await;
+    let denied = denied.expect_err("momo_notifier must not be able to write notification_rule");
+    assert!(
+        denied.to_string().contains("permission denied"),
+        "the refusal is a missing grant, not some other error: {denied}"
+    );
+    notifier.close().await;
+    app.close().await;
     db.finish().await;
 }

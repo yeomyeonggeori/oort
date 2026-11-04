@@ -19,6 +19,8 @@ import {
   resetOwnerOnboardingLoadState,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { releaseSessionRestore } from "@/features/auth/onboardingSessionHold";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 
 const restoreSession = vi.hoisted(() => vi.fn());
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
@@ -235,8 +237,11 @@ async function mountApp(): Promise<HTMLElement> {
   mountedHost = host;
   mountedRoot = createRoot(host);
   await act(async () => {
+    // 한국어 사전을 올려서 사람이 읽는 문장 그대로 단정한다(provider 없이는 영어 사전으로 읽는다).
     mountedRoot?.render(
-      createElement(QueryClientProvider, { client }, createElement(App))
+      <LocaleProvider locale={await koreanLocaleForTest()}>
+        {createElement(QueryClientProvider, { client }, createElement(App))}
+      </LocaleProvider>
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -277,6 +282,14 @@ async function submitClaimFrom(host: HTMLElement) {
   await waitForUi(() => {
     expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
   });
+}
+
+/** S2 다음은 건너뛸 수 있는 팀 AI 단계다(#4945). 건너뛰면 서버에 쓰지 않고 셸로 간다. */
+async function skipTeamAiStage() {
+  await waitForUi(() => {
+    expect(document.querySelector('[data-testid="onboarding-team-ai-skip"]')).not.toBeNull();
+  });
+  click("onboarding-team-ai-skip");
 }
 
 async function submitS1() {
@@ -333,15 +346,16 @@ describe("claim D1″ on the onboarding 2.0 frame (#2811)", () => {
     expect(host.querySelector(".brand-lockup")).toBeNull();
     const title = host.querySelector('[data-testid="claim-title"]');
     expect(title?.tagName).toBe("H1");
-    expect(title?.textContent).toBe("이 서버의 첫 주인이에요.");
-    expect(host.querySelector('[data-testid="kometto-guide-detail"]')?.textContent).toBe(
-      "비밀번호를 정해요."
-    );
+    // 입력 전 머리는 두 종류의 링크(첫 주인·재설정)에 중립이다. 종류는 응답을 받은 뒤에야 안다
+    // (ADR-0215 D6): 「첫 주인」이라 말하면 재설정 링크를 연 멤버에게 거짓말이 된다.
+    expect(title?.textContent).toBe("새 비밀번호를 정해요.");
+    expect(title?.textContent).not.toContain("첫 주인");
+    expect(host.querySelector('[data-testid="kometto-guide-detail"]')).toBeNull();
     expect(
       host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
     ).toBe("idle");
     const dots = host.querySelector('[data-testid="onboarding-dots"]');
-    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-total")).toBe("5");
     expect(dots?.getAttribute("data-current")).toBe("1");
     for (const id of ["claim-password", "claim-confirm"]) {
       expect(host.querySelector(`[data-testid="${id}"]`)?.className, id).toContain(
@@ -367,7 +381,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
     ).toBe("2");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 2단계");
+    ).toBe("5단계 중 2단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(host.querySelector('[data-testid="session-restoring"]')).toBeNull();
@@ -378,7 +392,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
 });
 
 describe("claim → S1 submit → S2", () => {
-  it("calls E1 and E2 once then renders S2 at dot 3 of 4", async () => {
+  it("calls E1 and E2 once then renders S2 at dot 3 of 5", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
     await waitForUi(() => {
@@ -405,10 +419,10 @@ describe("claim → S1 submit → S2", () => {
     ).toBe("3");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 3단계");
+    ).toBe("5단계 중 3단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
     expect(peekFreshSignup()).toEqual({
       workspaceId: session.member.workspaceId,
@@ -451,7 +465,7 @@ describe("reload during S1 re-enters S1", () => {
     await submitS1();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
 
     unmountApp();
@@ -464,6 +478,7 @@ describe("reload during S1 re-enters S1", () => {
     expect(afterS1.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
 
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     });
@@ -509,6 +524,7 @@ describe("재질문 S1의 「이대로 쓸게요」 (#3714)", () => {
       expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     });
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     });
@@ -535,6 +551,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(getPersistedSession()?.member.displayName).toBe("성재");
     expect(getPersistedSession()?.member.handle).toBe("seongjae");
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(host.querySelector('[data-testid="self-name"]')?.textContent).toBe(
         "성재"
@@ -582,6 +599,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     });
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     });

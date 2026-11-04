@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,session_refresh,updater,detect,harness_status,opener,
+// notification,notification_click,tray,keychain,session_refresh,updater,detect,harness_status,opener,
 // pdf_viewer,downloads,pty,git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
@@ -20,6 +20,12 @@
 
 import { IS_TAURI } from "./env";
 import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
+import {
+  CLICKABLE_OUTCOME,
+  readClickableOutcome,
+  type ClickableOutcome,
+  type NotificationClick,
+} from "@momo/core/features/notifications/bannerClick";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
@@ -45,6 +51,10 @@ export const DESKTOP_EVENT = {
   discovery: "momo:discovery",
   /** Bytes downloaded so far while an update installs. */
   updateProgress: "momo:update-progress",
+  /** One banner the shell reports clicks for was clicked (#5059). macOS only. */
+  notificationClick: "momo:notification-click",
+  /** A menu-bar menu entry that needs the page was picked (#5193). macOS only. */
+  trayAction: "momo:tray-action",
 } as const;
 
 // ---- module plumbing --------------------------------------------------------
@@ -1265,19 +1275,99 @@ export async function requestNotificationPermission(): Promise<DesktopNotificati
 }
 
 /**
+ * Permission is granted (asking at most once per run); the two show paths gate on the same answer.
+ * `ask: false` only reads it: a banner that must not be the reason for an OS permission dialog.
+ */
+async function permissionGranted(ask = true): Promise<boolean> {
+  const permission = ask ? await ensureNotificationPermission() : await notificationPermission();
+  return permission === "granted";
+}
+
+/**
  * Show one native notification. Returns false when it was not shown — in a
  * browser, or because permission is not granted. A refused notification is a
  * normal state, so it is a return value rather than a thrown error.
+ *
+ * `options.ask` (default true): whether a permission that was never decided may be asked for now. The
+ * once-only 「창을 닫아도 메뉴 막대에 남아요」 notice (#5196) passes `false`: it is told right after the
+ * window went away, the worst moment for a permission dialog, and it is meaningless to someone who has
+ * notifications off.
  */
-export async function showNotification(title: string, body?: string): Promise<boolean> {
+export async function showNotification(
+  title: string,
+  body?: string,
+  options: { ask?: boolean } = {}
+): Promise<boolean> {
   if (!IS_TAURI) return false;
-  if ((await ensureNotificationPermission()) !== "granted") return false;
+  if (!(await permissionGranted(options.ask ?? true))) return false;
   try {
     return await invoke<boolean>("notification_show", { title, body });
   } catch (error) {
     console.warn("[momo] native notification failed", error);
     return false;
   }
+}
+
+/** What the shell says when a banner it reports clicks for is clicked: the page's own id and route, unchanged. */
+export type NotificationClickPayload = NotificationClick;
+
+/** `clickable`: a click on it arrives as an event. `plain`: shown, but no event will come. `refused`: not shown. */
+export type ClickableNotificationOutcome = ClickableOutcome;
+
+let clickSupportPromise: Promise<boolean> | null = null;
+
+/**
+ * Can this shell tell which banner was clicked (#5059)? Asked once per run and kept, because two callers decide on it
+ * (whether a banner is shown clickable, and whether the old 「창이 앞에 왔다」 guess stays armed) and they must never
+ * disagree. A browser tab, a shell on another OS, and a shell build that has no such command all answer `false` — the
+ * last one is the rejected call, so an older shell keeps the guess instead of losing the landing.
+ */
+export function notificationClickSupported(): Promise<boolean> {
+  if (!IS_TAURI) return Promise.resolve(false);
+  clickSupportPromise ??= invoke<unknown>("notification_click_supported").then(
+    (supported) => supported === true,
+    () => false
+  );
+  return clickSupportPromise;
+}
+
+/**
+ * Show one banner whose click the shell reports (#5059). `click.id` is the page's own token for this banner and
+ * `click.target` the route a click should open; both come back unchanged in `onNotificationClick`, and only on a click.
+ * Call it only where `notificationClickSupported()` is true — elsewhere the answer is `plain` at best.
+ *
+ * The page must have written `click.id` down BEFORE calling this (`shownBanners.ts`): the click can arrive before this
+ * promise settles, and a click for an id the page does not know is ignored.
+ */
+export async function showClickableNotification(
+  title: string,
+  body: string | undefined,
+  click: NotificationClickPayload
+): Promise<ClickableNotificationOutcome> {
+  if (!IS_TAURI) return CLICKABLE_OUTCOME.refused;
+  if (!(await permissionGranted())) return CLICKABLE_OUTCOME.refused;
+  try {
+    return readClickableOutcome(
+      await invoke<unknown>("notification_show_clickable", {
+        title,
+        body,
+        id: click.id,
+        target: click.target,
+      })
+    );
+  } catch (error) {
+    console.warn("[momo] clickable native notification failed", error);
+    return CLICKABLE_OUTCOME.refused;
+  }
+}
+
+/**
+ * A banner this shell reports clicks for was clicked. In a browser tab it resolves at once to a no-op. The payload is
+ * whatever crossed the IPC boundary: a caller must match it against what the page itself showed (`shownBanners.ts`)
+ * and never use it as a route as it arrives.
+ */
+export function onNotificationClick(handler: (click: NotificationClickPayload) => void): Promise<() => void> {
+  return listen<NotificationClickPayload>(DESKTOP_EVENT.notificationClick, handler);
 }
 
 /**
@@ -1296,6 +1386,52 @@ export async function setDockBadge(count: number): Promise<boolean> {
     console.warn("[momo] dock badge failed", error);
     return false;
   }
+}
+
+/**
+ * The state the menu-bar icon draws (#5193). Every push carries all of it: the Dock badge's number, the
+ * running work, and the menu's words already in the person's language (the shell holds no copy). The
+ * shape and its limits are `clients/desktop/src-tauri/src/tray.rs`; `trayModel.ts` builds it.
+ */
+export interface TrayStatusWire {
+  unread: number;
+  compose: boolean;
+  /** 「모두 읽음 처리」가 할 일이 있다(안 읽은 멘션·DM이 있다, #5195). 켜짐 여부만 말한다. */
+  readAll: boolean;
+  labels: { running: string; none: string; newMessage: string; readAll: string; open: string; quit: string };
+  running: { id: string; title: string; state: string }[];
+  more: string | null;
+  /** 「모두 읽음 처리」를 눌러도 남는 일(승인·응답 필요 칸)을 말하는 한 줄. 남는 게 없으면 null. */
+  remaining: string | null;
+}
+
+/**
+ * Draw the menu-bar icon and its menu. Fire-and-forget like `setDockBadge`: a browser, an older shell
+ * without the command, or another OS than macOS simply has no menu-bar icon, which is not an error.
+ * `true` only when the shell took the status.
+ */
+export async function setTrayStatus(status: TrayStatusWire): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    // A count that is not a finite number would serialize to `null`, which the shell's `u32` refuses.
+    const unread = Number.isFinite(status.unread)
+      ? Math.max(0, Math.min(Math.trunc(status.unread), 0xffffffff))
+      : 0;
+    await invoke<void>("tray_status_set", { status: { ...status, unread } });
+    return true;
+  } catch (error) {
+    console.warn("[momo] tray status failed", error);
+    return false;
+  }
+}
+
+/**
+ * A menu-bar menu entry that needs the page was picked. In a browser tab it resolves at once to a no-op.
+ * The payload is whatever crossed the IPC boundary: a caller must read its shape (`readTrayAction`) and
+ * match a row id against the rows the page itself sent, and never act on it as it arrives.
+ */
+export function onTrayAction(handler: (payload: unknown) => void): Promise<() => void> {
+  return listen<unknown>(DESKTOP_EVENT.trayAction, handler);
 }
 
 // ---- OS credential store ----------------------------------------------------

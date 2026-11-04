@@ -210,7 +210,15 @@ describe("team expressions web/desktop port", () => {
   it("shares emoji/sticker/GIF views and confirmation gates destructive mutations", async () => {
     const store = makeStore(); await store.refresh(); const mutation = vi.spyOn(store, "mutate"); const pick = vi.fn();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="reaction" onPick={pick} />));
-    fireEvent.click(view.getByLabelText("스티커"));
+    // ADR-0218 §10 J2: 세 보기는 겹치지 않는다. 파티 앵무새는 움직이는 팀 이모지라 팀 이모지 보기에, 움직이는 이모티콘 둘은
+    // GIF 보기에 있고 움직이지 않는 이모티콘이 없는 이모티콘 보기는 비어 있다(자세한 분포는 ExpressionKind.test.tsx).
+    // 보기 이름은 사전의 것이고(폰 시트의 탭 이름과 같은 체계, #5112 3단계) 이 시험은 제공자 없는 고정 영어 사전으로 돈다:
+    // 「Team emoji」 · 「Emoticon」 · 「GIF」. 기대값은 사전에서 읽지 않고 글자로 적는다.
+    const labels = () => view.queryAllByRole("button", { name: /반응으로 고르기$/ }).map((button) => button.getAttribute("aria-label")).sort();
+    expect(labels()).toEqual(["파티 앵무새 반응으로 고르기"]);
+    fireEvent.click(view.getByLabelText("Emoticon")); expect(labels()).toEqual([]);
+    fireEvent.click(view.getByLabelText("GIF")); expect(labels()).toEqual(["기절 반응으로 고르기", "엄지척 반응으로 고르기"]);
+    fireEvent.click(view.getByLabelText("Team emoji"));
     fireEvent.change(view.getByLabelText("우리 팀 표현 검색"), { target: { value: "ㅍㅌ" } });
     fireEvent.click(view.getByRole("button", { name: "파티 앵무새 반응으로 고르기" })); expect(pick).toHaveBeenCalledWith(":party_parrot:");
     const trigger = view.getByRole("button", { name: "파티 앵무새 관리" });
@@ -246,7 +254,7 @@ describe("team expressions web/desktop port", () => {
     expect(view.queryByTestId("team-expressions")).toBeTruthy();
     store.transport.json = vi.fn().mockRejectedValue(new Error("unreachable"));
     await act(() => store.refresh()); expect(view.getByRole("button", { name: "다시 시도" })).toBeTruthy();
-    await act(async () => { store.setOffline(true); }); expect(view.getByText(/연결이 끊겼어요/)).toBeTruthy();
+    await act(async () => { store.setOffline(true); }); expect(view.getByText(/You're offline\. We'll reload the pictures/)).toBeTruthy();
     const fresh = makeStore(); await fresh.refresh();
     for (const item of fresh.getSnapshot().cache.items) await fresh.mutate({ method: "DELETE", path: `${fresh.base}/expressions/${item.id}` });
     await act(async () => { view.rerender(wrapper(fresh, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />)); });

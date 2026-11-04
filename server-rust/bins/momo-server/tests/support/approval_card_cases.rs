@@ -544,9 +544,295 @@ async fn settled_pushes_only_wake_the_requester_and_survive_prior_approval_dedup
             targets(&notifier, f.workspace, &c).await.is_empty(),
             "requester left the conversation"
         );
-        assert!(
-            targets(&notifier, Uuid::new_v4(), &c).await.is_empty(),
-            "tenant scope"
+        // Tenant scope is not asked here: the requester has left, so no tenant would return
+        // anyone. `a_settlement_push_is_judged_from_its_own_tenants_rows_only` asks it where it
+        // can fail.
+    }
+}
+
+/// The other tenant's rows a settlement push could be moved by: each names **this** tenant's
+/// channel and requester but carries another workspace's id (these tables' foreign keys are
+/// per column, not per workspace, so the rows can exist). `Token` is a token that sits in the
+/// other tenant on one of this tenant's devices; `Device` is a device in the other tenant under
+/// one of this tenant's tokens.
+#[derive(Clone, Copy, Debug)]
+enum OtherTenantRow {
+    ReadCursor,
+    Viewing,
+    DoNotDisturb,
+    Mute,
+    Token,
+    Device,
+}
+
+const OTHER_TENANT_ROWS: [OtherTenantRow; 6] = [
+    OtherTenantRow::ReadCursor,
+    OtherTenantRow::Viewing,
+    OtherTenantRow::DoNotDisturb,
+    OtherTenantRow::Mute,
+    OtherTenantRow::Token,
+    OtherTenantRow::Device,
+];
+
+/// Write one such row into `workspace` (another tenant to plant it, this one for the control).
+/// A `Device` row puts the device in `workspace` and its token in this tenant. Returns what
+/// [`remove_row`] needs to take it out again.
+async fn plant_row(
+    su: &PgPool,
+    kind: OtherTenantRow,
+    workspace: Uuid,
+    this: &Fixture,
+    own_device: Uuid,
+) -> Uuid {
+    let marker = Uuid::new_v4();
+    let token = format!("{}{}", marker.simple(), marker.simple());
+    match kind {
+        OtherTenantRow::ReadCursor => {
+            sqlx::query(
+                "INSERT INTO read_state(workspace_id,channel_id,member_id,last_read_seq,last_read_at) \
+                 VALUES($1,$2,$3,999999,now())",
+            )
+            .bind(workspace)
+            .bind(this.channel)
+            .bind(this.human)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+        OtherTenantRow::Viewing => {
+            sqlx::query(
+                "INSERT INTO channel_viewing(workspace_id,channel_id,member_id,seen_at) \
+                 VALUES($1,$2,$3,now())",
+            )
+            .bind(workspace)
+            .bind(this.channel)
+            .bind(this.human)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+        OtherTenantRow::DoNotDisturb => {
+            sqlx::query(
+                "INSERT INTO notification_rule(workspace_id,member_id,dnd) VALUES($1,$2,true)",
+            )
+            .bind(workspace)
+            .bind(this.human)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+        OtherTenantRow::Mute => {
+            sqlx::query(
+                "INSERT INTO notification_pref(workspace_id,channel_id,member_id) VALUES($1,$2,$3)",
+            )
+            .bind(workspace)
+            .bind(this.channel)
+            .bind(this.human)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+        OtherTenantRow::Token => {
+            // A device holds one active token per environment: the planted one is the other's.
+            sqlx::query(
+                "INSERT INTO push_token(id, workspace_id, device_id, member_id, apns_token, env, topic) \
+                 VALUES($1,$2,$3,$4,$5,'production','test.approval.outcome')",
+            )
+            .bind(marker)
+            .bind(workspace)
+            .bind(own_device)
+            .bind(this.human)
+            .bind(&token)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+        OtherTenantRow::Device => {
+            sqlx::query(
+                "INSERT INTO device(id, workspace_id, member_id, platform) VALUES($1,$2,$3,'ios')",
+            )
+            .bind(marker)
+            .bind(workspace)
+            .bind(this.human)
+            .execute(su)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO push_token(workspace_id, device_id, member_id, apns_token, env, topic) \
+                 VALUES($1,$2,$3,$4,'sandbox','test.approval.outcome')",
+            )
+            .bind(this.workspace)
+            .bind(marker)
+            .bind(this.human)
+            .bind(&token)
+            .execute(su)
+            .await
+            .unwrap();
+        }
+    }
+    marker
+}
+
+async fn remove_row(
+    su: &PgPool,
+    kind: OtherTenantRow,
+    workspace: Uuid,
+    this: &Fixture,
+    marker: Uuid,
+) {
+    let (sql, binds): (&str, Vec<Uuid>) = match kind {
+        OtherTenantRow::ReadCursor => (
+            "DELETE FROM read_state WHERE channel_id=$1 AND member_id=$2",
+            vec![this.channel, this.human],
+        ),
+        OtherTenantRow::Viewing => (
+            "DELETE FROM channel_viewing WHERE channel_id=$1 AND member_id=$2",
+            vec![this.channel, this.human],
+        ),
+        OtherTenantRow::DoNotDisturb => (
+            "DELETE FROM notification_rule WHERE workspace_id=$1 AND member_id=$2",
+            vec![workspace, this.human],
+        ),
+        OtherTenantRow::Mute => (
+            "DELETE FROM notification_pref WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3",
+            vec![workspace, this.channel, this.human],
+        ),
+        OtherTenantRow::Token => ("DELETE FROM push_token WHERE id=$1", vec![marker]),
+        OtherTenantRow::Device => {
+            sqlx::query("DELETE FROM push_token WHERE device_id=$1")
+                .bind(marker)
+                .execute(su)
+                .await
+                .unwrap();
+            ("DELETE FROM device WHERE id=$1", vec![marker])
+        }
+    };
+    let mut query = sqlx::query(sql);
+    for bind in binds {
+        query = query.bind(bind);
+    }
+    query.execute(su).await.unwrap();
+}
+
+/// Who the settlement push of `candidate` reaches under `workspace`, as `(person, token)`.
+async fn judged_people(
+    pool: &PgPool,
+    workspace: Uuid,
+    candidate: &PushCandidate,
+) -> Vec<(Uuid, Uuid)> {
+    let mut people: Vec<(Uuid, Uuid)> = targets(pool, workspace, candidate)
+        .await
+        .into_iter()
+        .map(|target| (target.member_id, target.token_id))
+        .collect();
+    people.sort();
+    people
+}
+
+/// **Tenant scope of a settlement push, measured with rows that could move it.** The requester
+/// of one tenant's card has two devices; another real tenant (people and a device of its own)
+/// holds rows that name that requester and that channel — a read cursor, a viewing signal, a
+/// do-not-disturb rule, a mute, a token on one of the requester's devices, a device under one of
+/// their tokens. The judgment is the same with them as without, and each of the same rows
+/// written into the requester's **own** tenant does move it (so the plant is live, not
+/// vacuous). The candidate judged under the other real tenant reaches nobody.
+///
+/// Revert: take one `workspace_id = $1` off the judgment's read cursor, viewing, token, device,
+/// mute or rule join (`momo_push::judgment`) and the matching row below changes who is woken.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_settlement_push_is_judged_from_its_own_tenants_rows_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    let f = seed(&su).await;
+    let admin_jwt = seed_plain_member(&su, &f).await;
+    let decider: Uuid = sqlx::query_scalar(
+        "SELECT actor_member_id FROM token WHERE token_hash=digest($1::text,'sha256')",
+    )
+    .bind(&admin_jwt)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE workspace_membership SET role='admin' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(decider)
+    .execute(&su)
+    .await
+    .unwrap();
+    for _ in 0..2 {
+        device(&su, f.workspace, f.human).await;
+    }
+    let (approval, card, _) = pending(&su, &client, &base, &f, false).await;
+    let (status, _, body) = decide_as(
+        &client,
+        &base,
+        f.workspace,
+        &admin_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    // The requester has not read the channel: whatever cursor they had is not part of this.
+    sqlx::query("DELETE FROM read_state WHERE channel_id=$1 AND member_id=$2")
+        .bind(f.channel)
+        .bind(f.human)
+        .execute(&su)
+        .await
+        .unwrap();
+    let c = candidate(&su, card).await;
+    let baseline = judged_people(&notifier, f.workspace, &c).await;
+    assert_eq!(
+        baseline.len(),
+        2,
+        "the requester's two devices, and nobody else: {baseline:?}"
+    );
+    assert!(baseline.iter().all(|(person, _)| *person == f.human));
+    let own_device: Uuid = sqlx::query_scalar(
+        "SELECT device_id FROM push_token WHERE workspace_id=$1 AND member_id=$2 ORDER BY id LIMIT 1",
+    )
+    .bind(f.workspace)
+    .bind(f.human)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // Another real tenant, with a person and a device of its own.
+    let other = seed(&su).await;
+    device(&su, other.workspace, other.human).await;
+    assert!(
+        targets(&notifier, other.workspace, &c).await.is_empty(),
+        "this tenant's candidate, judged under another tenant that has people and devices"
+    );
+
+    for kind in OTHER_TENANT_ROWS {
+        let planted = plant_row(&su, kind, other.workspace, &f, own_device).await;
+        assert_eq!(
+            judged_people(&notifier, f.workspace, &c).await,
+            baseline,
+            "{kind:?}: a row of another tenant moved this tenant's judgment"
+        );
+        remove_row(&su, kind, other.workspace, &f, planted).await;
+
+        // The control: the same row, in the requester's own tenant, does move it.
+        let own = plant_row(&su, kind, f.workspace, &f, own_device).await;
+        assert_ne!(
+            judged_people(&notifier, f.workspace, &c).await,
+            baseline,
+            "{kind:?}: the same row in the requester's own tenant changes nothing, so the plant above proves nothing"
+        );
+        remove_row(&su, kind, f.workspace, &f, own).await;
+        assert_eq!(
+            judged_people(&notifier, f.workspace, &c).await,
+            baseline,
+            "{kind:?}: the control row was not taken out again"
         );
     }
 }
@@ -632,5 +918,77 @@ async fn a_triggerless_run_never_produces_a_requester_notification() {
         .await
         .unwrap();
         assert_eq!(count, 0, "nobody requested this run");
+    }
+}
+
+/// ADR-0204 증보 6 D6-2 · D6-3, from the real Agent Port producer: the card a proposal leaves
+/// behind says **one question** (never the old 「승인 요청: …」, never English), quotes a channel's
+/// name after the sentence and never inside it, and carries `props.decision_mode` — the word the
+/// one function answers for the payload that was stored. A client reads that word; it does not
+/// work the answer out again.
+///
+/// Revert: put `stamp_decision_mode` back out of the props at the producer, or write the body
+/// from `action.title` again.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_proposal_card_asks_one_question_and_carries_the_decision_mode() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    for (action_id, args, body, mode) in [
+        (
+            "invite.create",
+            json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+            "팀원 초대 링크를 만들어도 될까요?",
+            "open",
+        ),
+        (
+            "channel.create",
+            json!({"name": "qa-asked", "kind": "private"}),
+            "비공개 채널을 만들어도 될까요? · 「qa-asked」",
+            "inline",
+        ),
+        (
+            "channel.create",
+            json!({"name": "team2", "kind": "public"}),
+            "채널을 만들어도 될까요? · 「team2」",
+            "inline",
+        ),
+    ] {
+        let f = seed(&su).await;
+        let (status, proposed) =
+            try_propose_action_3706(&client, &base, &su, &f, action_id, args).await;
+        assert_eq!(status, 200, "{action_id}: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let card = Uuid::parse_str(
+            structured(&proposed)["cardMessageId"]
+                .as_str()
+                .expect("cardMessageId"),
+        )
+        .expect("uuid");
+        let (card_body, props): (String, Value) =
+            sqlx::query_as("SELECT body, props FROM message WHERE id=$1")
+                .bind(card)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(card_body, body, "{action_id}");
+        assert!(
+            !card_body.contains("승인 요청") && !card_body.contains("Approval required"),
+            "{card_body}"
+        );
+        assert_eq!(props["decision_mode"], mode, "{action_id}");
+        let (action_type, payload): (String, Value) =
+            sqlx::query_as("SELECT action_type, payload FROM approval WHERE id=$1")
+                .bind(approval)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(
+            momo_agent::actions::decision_mode(&action_type, &payload).as_str(),
+            mode,
+            "{action_id}: the card carries the one function's own answer"
+        );
     }
 }

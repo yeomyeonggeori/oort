@@ -221,6 +221,25 @@ fn app_commands_are_gated_by_the_capability() {
     assert!(authority
         .resolve_access("dock_badge_set", "other", "other", &local)
         .is_none());
+    // The banner pair that reports a click (#5059) is the main window's alone too. The click
+    // itself is an event the window listens to, which `core:default` already allows.
+    for command in [
+        "notification_click_supported",
+        "notification_show_clickable",
+    ] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} must be granted to the main window"
+        );
+        assert!(
+            authority
+                .resolve_access(command, "other", "other", &local)
+                .is_none(),
+            "{command} must not be granted to another window"
+        );
+    }
     // Control: a command no capability grants is refused, which is only true
     // once the app manifest exists.
     assert!(authority
@@ -421,6 +440,199 @@ fn tauri_grants_the_window_glass_commands_to_the_local_main_window_only() {
             .resolve_access(command, "other", "other", &local)
             .is_none());
     }
+}
+
+/// The menu-bar icon's one command (#5193) is in the ACL manifest, in the desktop handler table
+/// only, and answers the main window's bundled origin alone: not a remote page loaded into the main
+/// window, not another window. A page that could call it from elsewhere could draw its own text
+/// into the menu bar.
+#[test]
+fn tauri_grants_the_tray_status_command_to_the_local_main_window_only() {
+    let manifest = quoted_list(BUILD_RS, "const APP_COMMANDS");
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .expect("desktop handler table");
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .expect("mobile handler table");
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let command = "tray_status_set";
+    // The command takes `State<TrayState>`: a build that registers the command and forgets to manage the
+    // state compiles, passes every other test, and fails on the first call in the running app.
+    assert!(
+        LIB_RS.contains(".manage(tray::TrayState::default())"),
+        "tray::TrayState is not managed in lib.rs"
+    );
+    assert!(
+        manifest.iter().any(|c| c == command),
+        "{command} not in build.rs APP_COMMANDS"
+    );
+    assert!(desktop.iter().any(|c| c == command), "{command} desktop");
+    assert!(!mobile.iter().any(|c| c == command), "{command} mobile");
+    assert!(authority
+        .resolve_access(command, "main", "main", &local)
+        .is_some());
+    for url in [
+        "https://evil.example/",
+        "https://oort-team.up.railway.app/",
+        "http://127.0.0.1:8080/",
+    ] {
+        let remote = tauri::ipc::Origin::Remote {
+            url: url.parse().unwrap(),
+        };
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &remote)
+                .is_none(),
+            "{command} from {url}"
+        );
+    }
+    assert!(authority
+        .resolve_access(command, "other", "other", &local)
+        .is_none());
+}
+
+/// The page does not get tauri's own tray API (#5193). `core:default` carries `core:tray:default`
+/// ("enables all commands"), and the commands behind it exist only while tauri's `tray-icon` feature
+/// is on — which this crate turns on for the menu-bar icon. Without a refusal the page could create
+/// its own status items, swap the icon and replace the menu, none of it through the one command that
+/// validates and bounds what the menu shows. The tray is built in Rust and the page's whole part is
+/// `tray_status_set`, so every `plugin:tray|*` command must stay refused for the main window.
+///
+/// The command list is read from the ACL manifest the build generated, not typed here: a command a
+/// later tauri adds to `core:tray` is checked without anyone remembering to list it.
+#[test]
+fn the_page_cannot_call_tauris_own_tray_api() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/gen/schemas/acl-manifests.json"
+    );
+    let acl: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut commands: Vec<String> = Vec::new();
+    for (name, permission) in acl["core:tray"]["permissions"]
+        .as_object()
+        .expect("core:tray permissions")
+    {
+        if name.starts_with("allow-") {
+            for command in permission["commands"]["allow"]
+                .as_array()
+                .expect("allow list")
+            {
+                commands.push(command.as_str().expect("command name").to_owned());
+            }
+        }
+    }
+    // The loop below must not be able to pass by finding nothing.
+    for expected in ["new", "set_menu", "set_icon", "remove_by_id", "set_visible"] {
+        assert!(
+            commands.iter().any(|c| c == expected),
+            "core:tray no longer lists {expected}: {commands:?}"
+        );
+    }
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in &commands {
+        let key = format!("plugin:tray|{command}");
+        assert!(
+            authority
+                .resolve_access(&key, "main", "main", &local)
+                .is_none(),
+            "{key} is reachable from the page; deny it in capabilities/default.json"
+        );
+    }
+    // Controls: the resolver answers for the window's other core commands (so it is not refusing
+    // everything), and the page's one tray command is the granted one.
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "main", "main", &local)
+        .is_some());
+    assert!(authority
+        .resolve_access("tray_status_set", "main", "main", &local)
+        .is_some());
+}
+
+/// What a close means is decided in ONE place (#5196). `main_window.rs` is the only module that answers a
+/// `CloseRequested`, and the only one that may call `prevent_close` apart from the single branch it hands
+/// to `rotation_hold.rs` ("a close that ends the app while a rotation is open"). A second handler — the
+/// state `rotation_hold.rs` used to have of its own — would answer the same request twice, one hiding the
+/// window while the other lets it die. `lib.rs` hands both entrances to that file: the window event and the
+/// Dock icon's Reopen.
+#[test]
+fn only_main_window_decides_what_a_close_means() {
+    let sources = crate_sources();
+    assert!(sources.iter().any(|(n, _)| n == "main_window.rs"));
+    for (name, src) in &sources {
+        let code = code_only(src);
+        match name.as_str() {
+            "main_window.rs" | "shell_contract.rs" => {}
+            "rotation_hold.rs" => {
+                assert!(
+                    !code.contains("CloseRequested"),
+                    "rotation_hold.rs answers a close request again"
+                );
+                assert_eq!(
+                    code.matches("prevent_close").count(),
+                    1,
+                    "rotation_hold.rs: exactly the one branch main_window hands it"
+                );
+            }
+            other => {
+                assert!(
+                    !code.contains("CloseRequested") && !code.contains("prevent_close"),
+                    "{other} handles a close request; what a close means is main_window.rs's alone"
+                );
+            }
+        }
+    }
+    let lib = code_only(LIB_RS);
+    assert!(
+        lib.contains(".on_window_event(main_window::on_window_event)"),
+        "lib.rs does not hand window events to main_window"
+    );
+    assert!(
+        !lib.contains("rotation_hold::on_close_requested"),
+        "lib.rs still answers a close through rotation_hold"
+    );
+    assert!(
+        lib.contains("main_window::on_reopen(_app, has_visible_windows);"),
+        "lib.rs does not hand the Dock icon's Reopen to main_window"
+    );
+}
+
+/// The close decision's answer to "can the app stay without its window" is written where the menu model it
+/// follows is stored: `apply`, in `tray.rs`. `apply` needs a real status item, so no test can run it; this
+/// pins the one line that feeds `TrayState::keeps_app_running` — a build that loses it still passes every
+/// other test and has a red button that always ends the app (the feature silently dead), and one that
+/// writes it from anything but the page's `compose` keeps an app with nobody signed in running.
+#[test]
+fn the_tray_tells_the_close_decision_whether_someone_is_signed_in() {
+    const TRAY_RS: &str = include_str!("tray.rs");
+    let code = code_only(TRAY_RS);
+    let apply = &code[code
+        .find("fn apply(app: &AppHandle")
+        .expect("tray.rs `apply`")..];
+    let apply = &apply[..apply.find("#[cfg(test)]").unwrap_or(apply.len())];
+    assert_eq!(
+        apply
+            .matches("state.staying.store(model.compose, Ordering::SeqCst);")
+            .count(),
+        1,
+        "`apply` does not write the staying answer from the model's `compose`"
+    );
+    // Written after the model is known to have been drawn, and before the model is moved into `last`.
+    let store = apply.find("state.staying.store(").unwrap();
+    let last = apply
+        .find("applied.last = Some(model);")
+        .expect("`apply` stores the model");
+    assert!(
+        store < last,
+        "the staying answer is written after the model was moved"
+    );
 }
 
 /// The glass invariants (the doc comment of `window_vibrancy.rs`): the window is created

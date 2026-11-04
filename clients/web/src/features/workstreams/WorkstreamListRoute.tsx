@@ -26,6 +26,7 @@ import {
   workstreamStatusOf,
 } from "@momo/core/features/workstreams/model";
 import { useWorkstreams } from "./useWorkstreams";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 작업 흐름 목록 (MOMO-677 / ADR-0143 이행 3).
@@ -249,7 +250,7 @@ export function WorkstreamListRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 아래는 마지막으로 확인된 목록입니다."
+          message={<BlockedReason frame="listStale" />}
           testId="workstream-offline"
         />
       )}

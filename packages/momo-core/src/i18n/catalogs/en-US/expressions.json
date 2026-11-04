@@ -188,5 +188,16 @@
   "expressions.sheet.unavailable": "This one is not available right now. Please choose another.",
   "expressions.sheet.hintPreview": "Preview at full size",
   "expressions.sheet.hintInsert": "Add to the message box",
-  "expressions.sheet.hintReact": "React"
+  "expressions.sheet.hintReact": "React",
+  "expressions.panel.viewsLegend": "Team expression views",
+  "expressions.panel.viewTeam": "Team emoji",
+  "expressions.panel.viewEmoticon": "Emoticon",
+  "expressions.panel.viewGif": "GIF",
+  "expressions.kind.legend": "Kind",
+  "expressions.kind.emoji": "Team emoji",
+  "expressions.kind.sticker": "Emoticon",
+  "expressions.kind.hintEmoji": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves.",
+  "expressions.kind.hintSticker": "A large picture. It is sent big, and a moving one shows under GIF.",
+  "expressions.kind.autoNote": "Picked to match the picture's size and motion. You can change it.",
+  "expressions.panel.viewEmpty": "Nothing in this view yet"
 }

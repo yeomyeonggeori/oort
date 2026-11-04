@@ -51,6 +51,9 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { UpdateButton } from "@/features/updates/UpdateButton";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
@@ -120,11 +123,8 @@ import {
   setSidebarSectionCollapsed,
   useSidebarSectionsCollapsed,
 } from "./sidebarSectionPreference";
-import {
-  connectionBarClass,
-  connectionCopy,
-  showsConnectionBar,
-} from "./connStatusIndicator";
+import { ConnectionCard } from "./ConnectionCard";
+import { showsConnectionCard } from "@momo/core/features/connection/screenState";
 import { Button } from "@/design/ui/button";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { cn } from "@/design/lib/cn";
@@ -865,23 +865,6 @@ export function Sidebar({
           marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
-              {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
-                  the accessible name both derive from the status, and while connected
-                  the element is not rendered at all. 12x4 bar = the workspace rail's
-                  marker grammar, deliberately not the avatar badge's circle. */}
-              {showsConnectionBar(connStatus) && (
-                <span
-                  data-testid="conn-status"
-                  data-status={connStatus}
-                  role="img"
-                  aria-label={connectionCopy(connStatus)}
-                  title={connectionCopy(connStatus)}
-                  className={cn(
-                    "h-1 w-3 shrink-0 rounded-full",
-                    connectionBarClass(connStatus)
-                  )}
-                />
-              )}
               {/* 접힘(⌘B)에서만 프로필이 레일에 아바타로 선다. 펼친 동안은 목록 끝의 한 줄이다(#3574). */}
               {railCollapsed && profileCard(true)}
             </div>
@@ -1028,7 +1011,7 @@ export function Sidebar({
                     이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
                     그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
                     이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
-                    주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
+                    주는 것**이고, 「채널 목록을 불러오지 못했어요」 줄·상자(#5242)와 같은 배너·같은
                     액션 문법이다.
                   · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
                     없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
@@ -1204,14 +1187,31 @@ export function Sidebar({
                 }
               >
                 <Skeleton ready={!channelsQuery.isLoading} rows={4}>
-                  {channelsQuery.error && (
-                    <InlineBanner
-                      message="채널을 불러오지 못했습니다."
-                      actionLabel="다시 시도"
-                      onAction={() => void channelsQuery.refetch()}
-                      testId="channels-error"
-                    />
-                  )}
+                  {/* 읽기 실패(#5242, #5221 후속): 받아 둔 채널이 하나도 없으면 원인
+                      상자, 있으면 목록은 그대로 두고 위에 한 줄만. 읽을 것이 있는데
+                      240px 서랍의 위쪽을 상자가 밀어내면 정보를 버리는 일이다.
+
+                      둘 다 사이드바 시트 위에 서므로 「다시 시도」 알약이 시트 위 문법을
+                      받는다(#5306): 보조 채움은 시트와 같은 색(밝은 스킴 1.009:1)이라
+                      알약이 사라지고 글자만 남았다. 아래 빈 상태 「채널 만들기」가 쓰는
+                      한 벌(`band-surface bg-surface shadow-sm`)이다. */}
+                  {channelsQuery.error &&
+                    (channels.length + dms.length === 0 ? (
+                      <LoadFailureBox
+                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                        cause={loadCauseOf(channelsQuery.error)}
+                        onRetry={() => void channelsQuery.refetch()}
+                        retryClassName="band-surface bg-surface shadow-sm"
+                        testId="channels-error"
+                      />
+                    ) : (
+                      <LoadFailureLine
+                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                        onRetry={() => void channelsQuery.refetch()}
+                        retryClassName="band-surface bg-surface shadow-sm"
+                        testId="channels-error-line"
+                      />
+                    ))}
                   {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
                       본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
                       좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
@@ -1500,6 +1500,11 @@ export function Sidebar({
                 selfMember={selfMember}
               />
             )}
+            {/* 연결이 끊겼거나 다시 붙는 중이면 프로필 줄 바로 위 한 장(#5220, #5201 결정 ①, Buzz 방식). 정상이면
+                카드 자체가 없고, 말하는 자리는 한 곳이라 서랍이거나 목록 열이 접혔을 때는 서지 않는다 — 그때는
+                셸의 위쪽 띠가 같은 문장으로 말한다(`showsConnectionCard`·`showsConnectionBanner`는 서로의 여집합이다).
+                뜨고 지는 것이 프로필 줄을 움직이지 않는 이유는 알림 멈춤 줄과 같다(위, #4107). */}
+            {showsConnectionCard({ asDrawer, listCollapsed: channelPaneCollapsed }) && <ConnectionCard />}
             <div
               className="flex items-center gap-1 pt-2"
               data-testid="sidebar-profile-foot"

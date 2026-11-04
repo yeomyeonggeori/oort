@@ -29,6 +29,10 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 struct ErrorBody {
     error: ErrorMessage,
+    /// `claimKind` beside `error` (ADR-0215 D6) — only `POST /v1/claim`'s 409 and 410
+    /// carry it; omitted (never `null`) everywhere else.
+    #[serde(rename = "claimKind", skip_serializing_if = "Option::is_none")]
+    claim_kind: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +53,9 @@ pub struct ApiError {
     /// `Retry-After` (whole seconds) on the response; `None` sends no header. Only a
     /// refusal that tells the client when to come back carries one ([`ApiError::busy`]).
     pub retry_after_seconds: Option<u64>,
+    /// `claimKind` at the top of the body, beside `error` (ADR-0215 D6). Set only by
+    /// [`ApiError::with_claim_kind`], which only the claim route's 409 and 410 call.
+    pub claim_kind: Option<String>,
 }
 
 impl ApiError {
@@ -58,6 +65,7 @@ impl ApiError {
             message: message.into(),
             code: None,
             retry_after_seconds: None,
+            claim_kind: None,
         }
     }
 
@@ -68,6 +76,7 @@ impl ApiError {
             message: message.into(),
             code: Some(code),
             retry_after_seconds: None,
+            claim_kind: None,
         }
     }
 
@@ -80,7 +89,16 @@ impl ApiError {
             message: "the server is busy; retry shortly".to_string(),
             code: None,
             retry_after_seconds: Some(retry_after_seconds),
+            claim_kind: None,
         }
+    }
+
+    /// Name the kind of the claim token this refusal is about (ADR-0215 D6). Called only for
+    /// the claim route's 409 and 410: the caller holds the token itself, which is 256 bits
+    /// and so no oracle. A 404, 400 or 429 must not carry it.
+    pub fn with_claim_kind(mut self, claim_kind: impl Into<String>) -> Self {
+        self.claim_kind = Some(claim_kind.into());
+        self
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -113,6 +131,7 @@ impl ApiError {
                 message: self.message,
                 code: self.code,
             },
+            claim_kind: self.claim_kind,
         }
     }
 }
@@ -177,6 +196,26 @@ mod tests {
     fn an_uncoded_error_keeps_the_original_envelope() {
         let body = serde_json::to_value(ApiError::forbidden("nope").envelope()).unwrap();
         assert_eq!(body, serde_json::json!({"error": {"message": "nope"}}));
+    }
+
+    /// ADR-0215 D6: `claimKind` sits beside `error`, only when a refusal was given one.
+    #[test]
+    fn a_claim_refusal_names_the_kind_beside_the_error_and_nothing_else_does() {
+        let named = ApiError::new(StatusCode::GONE, "claim token has expired")
+            .with_claim_kind("password_reset");
+        assert_eq!(
+            serde_json::to_value(named.envelope()).unwrap(),
+            serde_json::json!({
+                "error": {"message": "claim token has expired"},
+                "claimKind": "password_reset"
+            })
+        );
+        let plain = ApiError::not_found("claim token is invalid");
+        let body = serde_json::to_value(plain.envelope()).unwrap();
+        assert!(
+            body.get("claimKind").is_none(),
+            "an error nobody named a kind for must not grow the key: {body}"
+        );
     }
 
     /// ADR-0215 D2 on the wire: the length refusals and the NUL refusal are

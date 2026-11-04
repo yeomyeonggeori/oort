@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
+import type { MessageArgs, MessageKey, MessageService } from "@momo/core/i18n";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { isDesktop } from "@/lib/tauri";
@@ -60,20 +62,57 @@ type DockCell = "counted" | "never" | "dm";
 /** 폰 푸시 열은 정보뿐이다(폰 설정은 #3342). */
 type PhoneCell = "phone" | "desktop-only" | "soon";
 
+/** 값이 없는 문구의 사전 키(이 표는 값을 끼우지 않는다). */
+type PlainMessageKey = {
+  [K in MessageKey]: MessageArgs[K] extends Record<string, never> ? K : never;
+}[MessageKey];
+
 export interface DesktopNotificationKindRow {
   /** 이 기기에 저장되는 스위치. 없으면 OS 알림 열도 「곧 열려요」. */
   id: DesktopNotifyKind | null;
-  name: string;
-  description: string;
-  dock: DockCell;
-  phone: PhoneCell;
+  name?: string;
+  description?: string;
+  /**
+   * 문구를 사전에서 읽는 행(#4890): 있으면 `name`·`description` 은 쓰지 않는다. 새 문구는 사전(ko·en)으로만 들어온다 —
+   * 이 표의 옛 행은 아직 직접 문구라서(ADR-0213 이관 전) 두 길이 한 표에 같이 산다.
+   */
+  copyKeys?: { name: PlainMessageKey; summary: PlainMessageKey };
+  /** 생략하면 독 배지는 세지 않는다(`dockCellText` 의 마지막 줄). */
+  dock?: DockCell;
+  /** 생략하면 「곧 열려요」: 폰의 종류별 스위치는 서버 저장소(알림 설정 v2, #4494)가 생겨야 열린다. */
+  phone?: PhoneCell;
 }
+
+function rowText(
+  row: DesktopNotificationKindRow,
+  formatMessage: MessageService["formatMessage"]
+): { name: string; description: string } {
+  if (row.copyKeys !== undefined) {
+    return {
+      name: formatMessage(row.copyKeys.name),
+      description: formatMessage(row.copyKeys.summary),
+    };
+  }
+  return { name: row.name ?? "", description: row.description ?? "" };
+}
+
+const phoneCellText = (row: DesktopNotificationKindRow): string =>
+  row.phone === undefined ? PHONE_CELL_TEXT.phone : PHONE_CELL_TEXT[row.phone];
 
 // 종류 × 채널 표(#3339 시안 8번). 기본값은 preference.ts가 갖는다.
 export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<DesktopNotificationKindRow> = [
   { id: "approval", name: "승인 필요", description: "에이전트가 허용을 기다려요.", dock: "counted", phone: "phone" },
   { id: "pane-waiting", name: "응답 필요 (이 기기 세션)", description: "로컬 칸이 입력을 기다려요.", dock: "counted", phone: "desktop-only" },
   { id: "mention", name: "멘션", description: "나를 멘션한 메시지예요.", dock: "counted", phone: "phone" },
+  // 따라가는 스레드의 새 답글(#4890). 폰 푸시는 서버가 이미 보내지만 폰에서 끄는 스위치는 서버 저장소(알림 설정 v2, #4494)가
+  // 생겨야 해서 이 칸은 「곧 열려요」다. 독 배지는 세지 않는다(수는 나에게 필요한 일만).
+  {
+    id: "thread-reply",
+    copyKeys: {
+      name: "settings.notifications.threadReplyName",
+      summary: "settings.notifications.threadReplyDescription",
+    },
+  },
   { id: "work-mine-done", name: "내 작업 끝남", description: "이 기기에서 돌린 세션이 끝났어요.", dock: "never", phone: "phone" },
   { id: null, name: "팀 작업 끝남", description: "다른 사람의 세션이 끝났어요.", dock: "never", phone: "soon" },
   { id: "dm", name: "새 DM", description: "1:1 대화의 새 글이에요.", dock: "dm", phone: "phone" },
@@ -230,6 +269,7 @@ export function DesktopNotificationGroup() {
   const [requesting, setRequesting] = useState(false);
   const requestingRef = useRef(false);
   const kinds = useDesktopNotificationKinds();
+  const formatMessage = useFormatMessage();
   const unsupportedReasonId = useId();
   const dockOffReasonId = useId();
   const dockLabelId = useId();
@@ -285,7 +325,7 @@ export function DesktopNotificationGroup() {
   // 좁은 카드에서 접힌 열의 내용을 이름 아래 한 줄로 말한다.
   const extraLine = (row: DesktopNotificationKindRow): string => {
     const parts = browser ? [] : [`독 배지 ${dockCellText(row)}`];
-    parts.push(`폰 푸시 ${PHONE_CELL_TEXT[row.phone]}`);
+    parts.push(`폰 푸시 ${phoneCellText(row)}`);
     return parts.join(" · ");
   };
 
@@ -343,12 +383,13 @@ export function DesktopNotificationGroup() {
             <tbody>
               {DESKTOP_NOTIFICATION_KIND_ROWS.map((row) => {
                 const rowKey = row.id ?? "team-work-done";
+                const text = rowText(row, formatMessage);
                 return (
                   <tr key={rowKey} className="border-b border-line last:border-b-0">
                     <th scope="row" className="min-w-0 px-4 py-3 align-top font-normal">
-                      <span className="block text-body font-semibold text-ink">{row.name}</span>
+                      <span className="block text-body font-semibold text-ink">{text.name}</span>
                       <span className="block break-keep text-meta text-ink-muted">
-                        {row.description}
+                        {text.description}
                       </span>
                       <span className="kinds-extra-line block break-keep pt-1 text-meta text-ink-muted">
                         {extraLine(row)}
@@ -361,7 +402,7 @@ export function DesktopNotificationGroup() {
                         <span className="text-meta text-ink-muted">데스크탑 전용</span>
                       ) : (
                         <Switch
-                          aria-label={`${row.name} OS 알림`}
+                          aria-label={`${text.name} OS 알림`}
                           checked={kinds[row.id]}
                           disabled={kindsLocked}
                           describedBy={lockedDescribedBy}
@@ -378,7 +419,7 @@ export function DesktopNotificationGroup() {
                       </td>
                     )}
                     <td className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
-                      {PHONE_CELL_TEXT[row.phone]}
+                      {phoneCellText(row)}
                     </td>
                   </tr>
                 );

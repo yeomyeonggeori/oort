@@ -10,6 +10,10 @@ import {
   Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { reminderIsOverdue } from "@momo/core/features/reminders/model";
@@ -20,7 +24,8 @@ import { isDesktop } from "@/lib/tauri";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { decisionNote, type DecisionNote } from "./approvalsPanel";
+import { decisionNote, receiptSaidInPane, settledStatusLine, type DecisionNote } from "./approvalsPanel";
+import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import {
   filterMailbox,
   mailboxCounts,
@@ -42,6 +47,7 @@ import {
   webMailboxPanelId,
   webMailboxTabId,
 } from "./mailboxTab";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 (#3663). 메일함·알림함처럼 **나와 관련된 것의 목록**과 오른쪽의 **맥락 패널**.
@@ -147,6 +153,7 @@ export function InboxRoute() {
   const mailbox = useMailbox(
     rawFilter === "reminders" ? "reminders" : parseMailboxFilter(rawFilter)
   );
+  const formatMessage = useFormatMessage();
   const isServer = mailbox.source === "server";
   const tabs = useMemo(
     () => mailboxTabs(tasksProvided, isServer),
@@ -195,6 +202,15 @@ export function InboxRoute() {
     live === null &&
     mailbox.ledgerAnswered;
   const active: MailboxEntry | null = approvalGone ? null : (live ?? selected);
+
+  // 결정 영수증이 눈에 보이는 자리는 하나다(#5174 L5). 상세 패널이 같은 승인의 같은 문장을 컨트롤 자리에서 이미 말하는
+  // 동안 배너 노드는 눈에서만 물러나고(낭독은 이 노드가 한 번 맡는다), 패널이 닫히면 같은 노드가 눈에 보이게 올라온다.
+  const paneApprovalId = active?.task?.approvalId;
+  const paneReceipt = useSettledApproval(paneApprovalId);
+  const bannerYields = receiptSaidInPane(note, {
+    approvalId: paneApprovalId,
+    line: paneReceipt === null ? null : settledStatusLine(paneReceipt.status),
+  });
 
   const counts = useMemo(() => mailboxCounts(mailbox.entries), [mailbox.entries]);
 
@@ -295,8 +311,8 @@ export function InboxRoute() {
   );
 
   const onDecided = useCallback(
-    (outcome: DecisionOutcome) => {
-      setNote(decisionNote(outcome));
+    (outcome: DecisionOutcome, approvalId: string) => {
+      setNote({ ...decisionNote(outcome), approvalId });
       invalidateApprovals();
     },
     [invalidateApprovals]
@@ -402,13 +418,21 @@ export function InboxRoute() {
       {isDesktop() ? <LocalPaneInbox /> : null}
 
       {note && (
-        <InlineBanner
-          tone={note.tone === "error" ? "error" : "neutral"}
-          message={note.text}
-          actionLabel="닫기"
-          onAction={() => setNote(null)}
-          testId="inbox-decision-note"
-        />
+        // 같은 노드가 두 모습을 가진다: 패널이 같은 문장을 말하는 동안은 `sr-only`(낭독만, 닫기 단추 없음: 보이지 않는
+        // 단추에 초점이 앉지 않게), 패널이 닫히면 눈에 보이는 배너. 노드를 갈아 끼우면 낭독이 두 번 된다.
+        // 클래스는 정적 문자열이고 모습은 `data-said-in-pane`이 고른다(직접 문구 장부가 JSX 식 안의 문자열을 세므로).
+        <div
+          className="data-said-in-pane:sr-only"
+          data-said-in-pane={bannerYields ? "" : undefined}
+        >
+          <InlineBanner
+            tone={note.tone === "error" ? "error" : "neutral"}
+            message={note.text}
+            actionLabel="닫기"
+            onAction={bannerYields ? undefined : () => setNote(null)}
+            testId="inbox-decision-note"
+          />
+        </div>
       )}
 
       {readError && (
@@ -425,12 +449,13 @@ export function InboxRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태예요.`
-              : "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+            <BlockedListLine
+              relativeTime={
+                (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
+                  ? relativeLabel(filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs, Date.now())
+                  : null
+              }
+            />
           }
           testId="inbox-offline"
         />
@@ -462,10 +487,10 @@ export function InboxRoute() {
               }
             >
               {state === "error" ? (
-                <InlineBanner
-                  message="인박스를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={mailbox.refetch}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadInboxTitle}
+                  cause={loadCauseOf(mailbox.failure)}
+                  onRetry={mailbox.refetch}
                   testId="inbox-error"
                 />
               ) : filter === "task" && mailbox.tasksAbsent ? (
@@ -515,7 +540,11 @@ export function InboxRoute() {
                               role="status"
                               data-testid="inbox-more-error"
                             >
-                              다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요.
+                              {loadFailureSentence(
+                                formatMessage,
+                                CONNECTION_KEYS.loadInboxMoreTitle,
+                                loadCauseOf(mailbox.failure)
+                              )}
                             </p>
                           )}
                         </div>

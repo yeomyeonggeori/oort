@@ -506,7 +506,7 @@ describe("끊겨 있으면 단추 자리에 이유를 말한다 (#2899 H2 와 �
     connection.offline = true;
     await rerender(rosterMember());
     expect(button()).toBeNull();
-    expect(offlineLine()?.textContent).toContain("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(offlineLine()?.textContent).toContain("You're offline, so you can't change this right now.");
     expect(offlineLine()?.getAttribute("role")).toBe("status");
     expect(lineText()).toBe("알림 일시 중지 중 · 오후 10:00까지");
     expect(patchNotificationRules).not.toHaveBeenCalled();

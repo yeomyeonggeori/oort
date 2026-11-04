@@ -5,6 +5,14 @@ import { Avatar } from "./MessageRow";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
 import { QuoteBlock } from "./QuoteBlock";
+import { SendFailureActions } from "./SendFailureActions";
+import { Button } from "@/design/ui/button";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import {
+  sendFailureReasonKey,
+  type SendFailureKind,
+} from "@momo/core/features/connection/sendFailure";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
 import { resolveQuote } from "@momo/core/features/timeline/quote";
 import type { Message } from "@momo/core/lib/api";
@@ -25,9 +33,10 @@ import {
 // twitch into place when the server echo replaces it.
 //
 // Delivery status is stated in words, not with a decorative dot or a spinner:
-// "전송 중" while the write path is running, "전송 실패" plus a retry when it
-// is not. That retry re-sends with the SAME idempotency key, which is what the
-// server's exactly-once write path is for (model.ts retryPending).
+// "전송 중" while the write path is running, "전송 실패" plus two icons when it
+// is not (#5210): refresh re-sends with the SAME idempotency key, which is what
+// the server's exactly-once write path is for (model.ts retryPending); the red X
+// discards the local row (model.ts discardPending, never a server call).
 // =============================================================================
 
 export function PendingRow({
@@ -36,6 +45,10 @@ export function PendingRow({
   directory,
   quoteLookup,
   onResend,
+  onDiscard,
+  failureKind = null,
+  resendAllCount,
+  onResendAll,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
@@ -43,8 +56,20 @@ export function PendingRow({
   /** 이 echo가 인용한 원본을 화면에 있는 행에서 찾는다 (ADR-0148). */
   quoteLookup?: (messageId: string) => Message | undefined;
   onResend?: (clientMsgId: string) => Promise<void> | void;
+  /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
+  onDiscard?: (clientMsgId: string) => void;
+  /** 왜 보내지 못했나(#5221). 없으면 원인 없이 「전송 실패」만 말한다. */
+  failureKind?: SendFailureKind | null;
+  /**
+   * 실패한 행이 둘 이상일 때 **마지막** 실패 행에만 개수가 온다(#5221): 이 행 아래에 「N개 모두 다시 보내기」가 선다.
+   * 둘 이상일 때만인 이유는 하나일 때는 아이콘이 이미 그 일을 하기 때문이다.
+   */
+  resendAllCount?: number;
+  onResendAll?: () => Promise<void> | void;
 }) {
+  const formatMessage = useFormatMessage();
   const [resending, setResending] = useState(false);
+  const [resendingAll, setResendingAll] = useState(false);
   const author = memberFor(directory, pending.authorMemberId);
   const name = author?.displayName ?? "나";
   const failed = pending.status === "failed";
@@ -118,28 +143,49 @@ export function PendingRow({
             className="flex flex-wrap items-center gap-2 text-meta text-danger"
             data-testid="pending-failed"
           >
-            전송 실패
-            {onResend && (
-              <button
-                type="button"
-                disabled={resending}
-                data-testid="pending-resend"
-                onClick={() => {
+            {/* 원인 한 줄(#5221): 닫힌 분류의 완결된 문장이고 상태 코드·서버 원문은 없다. 종류를 모르면 지금까지처럼
+                「전송 실패」만 말한다. */}
+            <span data-testid="pending-failed-reason" data-failure-kind={failureKind ?? undefined}>
+              {failureKind === null
+                ? formatMessage("timeline.send.failed")
+                : formatMessage(sendFailureReasonKey(failureKind))}
+            </span>
+            <SendFailureActions
+              resending={resending}
+              onResend={
+                onResend &&
+                (() => {
                   setResending(true);
                   void Promise.resolve(onResend(pending.clientMsgId)).finally(
                     () => setResending(false)
                   );
-                }}
-                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:focus-ring disabled:opacity-50"
-              >
-                {resending ? "보내는 중…" : "다시 보내기"}
-              </button>
-            )}
+                })
+              }
+              onDiscard={onDiscard && (() => onDiscard(pending.clientMsgId))}
+            />
           </span>
         ) : (
           <span className="text-meta text-ink-muted" data-testid="pending-sending">
-            전송 중
+            {formatMessage("timeline.send.sending")}
           </span>
+        )}
+        {failed && onResendAll && resendAllCount !== undefined && resendAllCount >= 2 && (
+          <div className="mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="pending-resend-all"
+              aria-busy={resendingAll || undefined}
+              onClick={() => {
+                if (resendingAll) return;
+                setResendingAll(true);
+                void Promise.resolve(onResendAll()).finally(() => setResendingAll(false));
+              }}
+            >
+              {formatMessage(CONNECTION_KEYS.resendAll, { count: resendAllCount })}
+            </Button>
+          </div>
         )}
       </div>
     </article>

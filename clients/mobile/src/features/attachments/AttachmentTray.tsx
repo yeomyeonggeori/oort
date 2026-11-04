@@ -1,4 +1,4 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useCallback, useEffect, useRef} from 'react';
 import {
   AccessibilityInfo,
   Image,
@@ -26,7 +26,9 @@ import {
   uploadIssueNext,
   type AttachmentDraft,
   type UploadIssue,
+  type UploadReasonFor,
 } from '@momo/core/features/attachments/model';
+import {uploadReasonKey} from '@momo/core/features/connection/uploadFailure';
 
 import {draftPickedUri} from './draftStore';
 import {
@@ -40,6 +42,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {CONV} from '../conversation/convDesign';
 
 export function AttachmentTray({
@@ -65,12 +68,13 @@ export function AttachmentTray({
   // 만들고(웹 트레이가 같은 함수를 소비한다), 폰의 전달 관례는 형제들처럼
   // `announceForAccessibility`다 — 소리로만 전달된다, RN에는 웹의 `focus()`가
   // 없다(ApprovalDecision.tsx와 같은 이유).
+  const reasonFor = useUploadReasonFor();
   const announcedDrafts = useRef<AttachmentDraft[]>([]);
   useEffect(() => {
-    const sentence = draftAnnouncement(announcedDrafts.current, drafts);
+    const sentence = draftAnnouncement(announcedDrafts.current, drafts, reasonFor);
     announcedDrafts.current = drafts;
     if (sentence !== null) AccessibilityInfo.announceForAccessibility(sentence);
-  }, [drafts]);
+  }, [drafts, reasonFor]);
 
   // picker 사유(선택 취소·권한 거부)는 draft가 되기 전의 실패라 위 문장에
   // 실리지 않는다 — 같은 채널로 따로 말한다. 사유가 걷히는 전이는 침묵한다.
@@ -191,7 +195,8 @@ function DraftRow({
   onRetry: (localId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const status = draftStatusLine(draft);
+  const reasonFor = useUploadReasonFor();
+  const status = draftStatusLine(draft, reasonFor);
   const label = attachmentDisplayName(draft);
   const name = splitFileName(label);
   const retryable =
@@ -311,6 +316,21 @@ function DraftRow({
       {remove}
       {progress}
     </View>
+  );
+}
+
+/**
+ * 실패한 칩의 이유를 **원인의 분류 문장**으로 갈아 끼운다(#5222): 오프라인·서버에 닿지 못함이면 사전의 그 문장을, 아니면 `undefined`(칩의 기존
+ * 문장). 상태 코드는 문장에 없다. 눈에 보이는 줄과 낭독이 같은 길을 쓴다(웹 트레이의 `useUploadReasonFor` 와 같다).
+ */
+function useUploadReasonFor(): UploadReasonFor {
+  const formatMessage = useFormatMessage();
+  return useCallback(
+    (draft: AttachmentDraft) => {
+      const key = uploadReasonKey(draft.failureCause);
+      return key === null ? undefined : formatMessage(key);
+    },
+    [formatMessage],
   );
 }
 

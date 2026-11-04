@@ -239,7 +239,8 @@ const SCENES = [
   },
   {
     name: "notifications-error", section: "notifications", desktop: false, cfg: { rules: "500", perm: "granted" },
-    ready: async (page) => { await waitText(page, "notification-rules-error", "불러오지 못했어요"); },
+    // 문장은 사전에서 오고 이 캡처는 로케일을 정하지 않는다(#5242): 문장이 아니라 다시 시도 단추가 서기를 기다린다.
+    ready: async (page) => { await page.locator("[data-testid=notification-rules-error] button").waitFor({ timeout: 10_000 }); },
     verify: async (page, tag) =>
       check(`${tag} 다시 불러오기 단추가 있다`, (await page.locator("[data-testid=notification-rules-error] button").count()) === 1),
   },

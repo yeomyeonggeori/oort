@@ -1,6 +1,8 @@
 import * as React from "react";
 import { cn } from "@/design/lib/cn";
+import { tooltipGroup } from "./tooltipGroup";
 import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
+import { fitTooltipElement } from "./tooltipFit";
 
 // 공용 툴팁 (#4324). Buzz `shared/ui/tooltip.tsx`의 동작을 우리 토큰으로 옮긴 것이다.
 //
@@ -9,7 +11,8 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 // 래퍼는 포커스도 탭 정거장도 만들지 않는 `span`이고, 트리거는 자식 그대로다.
 //
 // 동작
-//   · 가리키면 `TOOLTIP_DELAY_MS`(500) 뒤에 뜬다. 터치 포인터는 띄우지 않는다.
+//   · 처음 가리키면 `TOOLTIP_DELAY_MS` 뒤에 뜬다(그 전에 나가면 안 뜬다: 지나가는 포인터를 거른다). 툴팁이 떠 있거나 방금
+//     닫혔으면(`TOOLTIP_SKIP_DELAY_MS` 안) 옮겨 간 트리거는 지연 없이 바로 뜬다(`tooltipGroup.ts`). 터치 포인터는 띄우지 않는다.
 //   · 키보드 초점(`:focus-visible`)은 지연 없이 즉시 뜬다. 마우스 클릭으로 간 초점은 띄우지 않는다.
 //   · 눌리면·포인터가 나가면·초점이 나가면·Esc면 닫는다. 닫힘은 즉시다(나타남만 모션이 있다).
 //   · 트리거가 이미 `aria-label`로 같은 이름을 갖는다. 툴팁은 눈으로 보는 보조라
@@ -19,6 +22,8 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 //     위로는 잘린다. 단추에 네이티브 `title`을 같이 두지 않는다(둘이 같이 뜬다). 규칙의 문서는 design-system §2.9.
 //   · 띠 안(셸의 상단 줄 오른쪽 자리의 다운로드 단추, #4587)에서도 같은 부품이다: 알약의 글자는 `--ink-base`라서 띠 범위가
 //     `--ink`를 on-band로 다시 묶어도 면과 짝이 맞는다(`tooltip-surface`, tokens.css).
+//   · 자기를 가둔 판 안에 머문다(#4230). 툴팁은 포털이 아니라 이 자리에 그려지므로 판이 `overflow: clip`이면 가장자리를 넘는 글자가
+//     잘린다. 열릴 때 한 번 재서 판(과 창) 안으로 밀어 넣고, 판보다 넓으면 판 폭에서 줄바꿈한다(`tooltipFit.ts`).
 
 export type TooltipSide = "top" | "bottom";
 
@@ -69,6 +74,12 @@ export function Tooltip({
 }: TooltipProps) {
   const [open, setOpen] = React.useState(defaultOpen);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipRef = React.useRef<HTMLSpanElement>(null);
+
+  // 그려진 뒤 칠하기 전에 잰다: 한 프레임도 가장자리를 넘은 채로 보이지 않는다.
+  React.useLayoutEffect(() => {
+    if (open && tipRef.current !== null) fitTooltipElement(tipRef.current, align);
+  }, [open, label, align]);
 
   const clear = React.useCallback(() => {
     if (timer.current !== null) {
@@ -81,6 +92,14 @@ export function Tooltip({
     setOpen(false);
   }, [clear]);
   React.useEffect(() => clear, [clear]);
+  // 떠 있는 동안 무리에 「떠 있음」을 알린다. 정리 함수가 닫힘·언마운트를 모두 맡는다(포인터가 나가서 닫히든, 트리거가 사라져
+  // 닫히든 같은 길이다). 지연 없는 옮겨 가기는 이 기록에서 나온다.
+  React.useEffect(() => {
+    if (!open) return undefined;
+    tooltipGroup.opened();
+    return () => tooltipGroup.closed();
+  }, [open]);
+  React.useEffect(() => tooltipGroup.attach(), []);
 
   return (
     <span
@@ -88,10 +107,15 @@ export function Tooltip({
       onPointerEnter={(event) => {
         if (event.pointerType === "touch") return;
         clear();
+        const wait = tooltipGroup.delayFor(delayMs);
+        if (wait <= 0) {
+          setOpen(true);
+          return;
+        }
         timer.current = setTimeout(() => {
           timer.current = null;
           setOpen(true);
-        }, delayMs);
+        }, wait);
       }}
       onPointerLeave={close}
       onPointerDown={close}
@@ -108,6 +132,7 @@ export function Tooltip({
       {children}
       {open && (
         <span
+          ref={tipRef}
           aria-hidden="true"
           data-testid="tooltip"
           data-side={side}

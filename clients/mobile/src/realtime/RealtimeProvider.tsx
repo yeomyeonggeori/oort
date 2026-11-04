@@ -4,11 +4,16 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import {
+  ConnectionProvider,
+  NO_FEED,
+  type SocketFeed,
+} from '../features/connection/ConnectionProvider';
 import {getPersistedSession} from '../storage/secureSession';
 import {socketWanted} from './backgroundPolicy';
-import {bandOf, initialDisplayState} from './connectionDisplay';
 import {createChannelRail, type ChannelRail} from './channelRail';
 import {createRealtimeTransport} from './centrifugeTransport';
 
@@ -54,14 +59,6 @@ export interface RealtimeContextValue {
   /** Null until the session yields a websocket address. */
   rail: ChannelRail | null;
   status: RealtimeStatus;
-  /**
-   * What the connection BAND may say (#4949): `status` with a quiet first second. A reconnect
-   * that is over inside `CONNECTING_BAND_DELAY_MS` never reaches the band, so it never flashes
-   * 「연결 중…」; `connected` here means the band is silent, not that the socket is live — for
-   * that, read `status`. Absent in a hand-built context (tests, capture harness): the band then
-   * follows `status`, the behaviour before this field existed.
-   */
-  bandStatus?: RealtimeStatus;
   reconnect?: () => Promise<void>;
   /**
    * Does the background policy want a socket at all right now (goal RN-T2)?
@@ -103,8 +100,9 @@ export function RealtimeProvider({
 }): React.JSX.Element {
   const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
-  // Silent until the first gap has lasted a second — a cold start is a gap too (#4949).
-  const [band, setBand] = useState<RealtimeStatus>(() => bandOf(initialDisplayState()));
+  // 사람에게 말하는 판정(첫 1초 침묵·「연결 중」·「끊김」의 원인)은 코어 연결 상태 모델이 한다(#5222). 전송이 밖에서 받은
+  // 소켓 사건을 이 ref 를 거쳐 그 모델에 먹인다 — 아래 `ConnectionProvider` 가 채운다.
+  const feedRef = useRef<SocketFeed>(NO_FEED);
   const [rail, setRail] = useState<ChannelRail | null>(null);
   const [reconnect, setReconnect] = useState<(() => Promise<void>) | undefined>();
   const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
@@ -113,11 +111,13 @@ export function RealtimeProvider({
     if (url === '') return;
     // `status` reads `connecting` from the moment a socket leaves `connected` until a ten-second
     // outage deadline; a retry loop cannot restart that deadline, a foreground return can (#4783).
-    // The BAND is quieter (#4949): it says nothing for the first second of a gap.
+    // It answers "is the socket live" for the surfaces that ask. What the person is TOLD (a silent first
+    // second #4949, 「연결 중」, the cause of an outage) is the connection model's job (#5222): the same
+    // socket events are fed to it through `feedRef`.
     const transport = createRealtimeTransport({
       url,
       onStatus: setStatus,
-      onBand: setBand,
+      onSocketEvent: event => feedRef.current(event),
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
@@ -135,18 +135,19 @@ export function RealtimeProvider({
     };
   }, [url]);
 
-  // Without a websocket address there is no transport to quiet anything: `status` stays
-  // `connecting` and the band says so, as it always did.
-  const bandStatus = url === '' ? status : band;
   const value = useMemo<RealtimeContextValue>(
-    () => ({rail, status, bandStatus, subscriptionsWanted, reconnect}),
-    [rail, status, bandStatus, subscriptionsWanted, reconnect],
+    () => ({rail, status, subscriptionsWanted, reconnect}),
+    [rail, status, subscriptionsWanted, reconnect],
   );
 
+  // 연결 상태 모델은 이 소켓·기기·REST 를 한 번에 읽는 앱 하나의 사실이라 소켓을 만드는 이 공급자 안에 선다. 자식
+  // effect 가 먼저 돌아 `feedRef` 가 채워진 뒤에 전송이 시작한다.
   return (
-    <RealtimeContext.Provider value={value}>
-      {children}
-    </RealtimeContext.Provider>
+    <ConnectionProvider feedRef={feedRef}>
+      <RealtimeContext.Provider value={value}>
+        {children}
+      </RealtimeContext.Provider>
+    </ConnectionProvider>
   );
 }
 

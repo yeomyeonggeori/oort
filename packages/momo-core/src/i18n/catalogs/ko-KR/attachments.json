@@ -1,0 +1,23 @@
+{
+  "attachments.tray.removeNamed": "{name} 첨부 빼기",
+  "attachments.video.cardLabel": "{name}, 동영상, {duration}, 재생",
+  "attachments.video.cardLabelNoDuration": "{name}, 동영상, 재생",
+  "attachments.video.play": "재생",
+  "attachments.video.pause": "일시정지",
+  "attachments.video.replay": "처음부터 다시 재생",
+  "attachments.video.mute": "소리 끄기",
+  "attachments.video.unmute": "소리 켜기",
+  "attachments.video.seekLabel": "재생 위치",
+  "attachments.video.seekValue": "{position} / {total}",
+  "attachments.video.loading": "영상을 불러오는 중",
+  "attachments.video.failed": "영상을 재생하지 못했어요",
+  "attachments.video.gone": "이 영상은 더 이상 볼 수 없어요",
+  "attachments.video.retry": "다시 시도",
+  "attachments.video.thumbLabel": "{position, number}번째 영상",
+  "attachments.video.thumbHint": "이 영상으로 이동",
+  "attachments.video.saveHint": "영상을 사진 보관함에 저장해요",
+  "attachments.viewer.mixedCaption": "{total, number}개 중 {position, number}번",
+  "attachments.viewer.mixedCaptionLabel": "{total, number}개 중 {position, number}번째",
+  "attachments.tray.overflow": "{count, number}개는 한 메시지의 상한({max, number}개)을 넘어 넣지 못했습니다.",
+  "attachments.tray.noticeDismiss": "확인"
+}

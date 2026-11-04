@@ -453,8 +453,9 @@ it none of these exist and no Hermes is started.
 
 - The `hermes` service is the official image pinned by digest, on the private
   network only, with no published port. It runs `infra/hermes/lockgate.py gate`
-  before the Hermes entrypoint (chat, Codex subscription search and Codex
-  subscription image generation allow-list, without `web_extract`; connectors keep
+  before the Hermes entrypoint (todo list, Codex subscription search and Codex
+  subscription image generation allow-list, without `web_extract` and without `memory` and
+  `session_search`, which would let one workspace's run read what another's left; connectors keep
   all `web` tools and `image_gen` off) and checks the oort image guard plugin, which
   refuses image addresses and file paths before the tool runs (the one exception,
   when `OORT_SELF_MEDIA_ORIGIN` is set, is this oort's own short-lived address of the
@@ -464,8 +465,11 @@ it none of these exist and no Hermes is started.
   gate means a container that restarts and never listens, so the probe
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
-  backs it. Editing `infra/hermes/config.yaml` or the start command takes that
-  back on yourself.
+  backs it. The gate also accepts only the config files of its own table (the
+  default config, and a connector-mode config per model fragment that
+  `infra/hermes/render_model_config.py --catalog` lists, #4935): a config with any other
+  byte does not start. Editing `infra/hermes/config.yaml` or the start command takes the
+  backing back on yourself, and the gate's table with it.
 - Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
   database and `oort backup`; back it up yourself. `down -v` removes it.
 - Model authentication is a separate step (#4073). Without it the card appears

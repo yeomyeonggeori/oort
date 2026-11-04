@@ -29,7 +29,9 @@
 //! P2 adds [`push`], the `push_candidate` half (migration 011): the notifier's
 //! claim and its boot-time reclaim of rows a crashed run left `processing`. Its
 //! `WHERE` clause is disjoint from all three by `kind`, so the fourth consumer
-//! keeps its own feed too.
+//! keeps its own feed too. #4341 (ADR-0206 D15, migration 170) adds the
+//! `push_system` feed beside it in the same module: the pushes that name no
+//! message, claimed by the notifier's second drain under `kind = 'push_system'`.
 
 //! #1222 adds [`webhook`], the `webhook_delivery` half (migration 033): the
 //! outbound sender's claim and the transaction-scoped settlement it shares with
@@ -68,10 +70,12 @@ pub use gateway::{
     HOSTED_LEASE_SECONDS_DEFAULT, HOSTED_LEASE_SECONDS_MAX, HOSTED_LEASE_SECONDS_MIN,
 };
 pub use push::{
-    claim_push_candidate_batch, emit_approval_settled_push_candidate,
-    emit_stream_closed_push_candidate, reclaim_stuck_push_candidates,
-    stream_closed_candidate_payload, ClaimedPushCandidate, PUSH_CANDIDATE_SCHEMA,
-    PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
+    claim_push_candidate_batch, claim_push_system_batch, emit_approval_settled_push_candidate,
+    emit_push_system, emit_stream_closed_push_candidate, push_system_payload,
+    reclaim_stuck_push_candidates, reclaim_stuck_push_system, stream_closed_candidate_payload,
+    ClaimedPushCandidate, ClaimedPushSystem, PushSystemDecodeError, PushSystemPayload,
+    PushSystemReason, PUSH_CANDIDATE_SCHEMA, PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
+    PUSH_SYSTEM_COLLAPSE_ID_MAX_BYTES, PUSH_SYSTEM_SCHEMA,
 };
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,

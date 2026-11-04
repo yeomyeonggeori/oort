@@ -46,6 +46,12 @@ import { ListboxSelect } from "@/design/ui/listbox-select";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import {
+  statusDraftKey,
+  takeEntryDraft,
+  useHoldDraftOnEntry,
+} from "@/lib/entryDrafts";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings dialog (sidebar profile card) for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
@@ -107,6 +113,25 @@ function seedExpiryFields(
   };
 }
 
+/** 사람이 고친 값 — 열릴 때 시드(`seedExpiryFields` 와 저장된 상태)와 같은 모양이다. 알림 클릭이 대화상자를 닫을 때 맡긴다(#5058). */
+interface StatusDraft {
+  emoji: string;
+  text: string;
+  expiry: StatusExpiryChoice;
+  date: string;
+  time: string;
+}
+
+function statusDraftChanged(seed: StatusDraft, now: StatusDraft): boolean {
+  return (
+    seed.emoji !== now.emoji ||
+    seed.text !== now.text ||
+    seed.expiry !== now.expiry ||
+    seed.date !== now.date ||
+    seed.time !== now.time
+  );
+}
+
 export function SetStatusDialog({
   open,
   onOpenChange,
@@ -135,6 +160,8 @@ export function SetStatusDialog({
   const textRef = useRef<HTMLInputElement>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const seededOpenRef = useRef(false);
+  // 열릴 때 시드한 값. 알림 클릭이 닫을 때 「사람이 고친 것이 있는가」를 이것과 견주어 가른다(#5058).
+  const seedRef = useRef<StatusDraft | null>(null);
   const [emoji, setEmoji] = useState("");
   const [text, setText] = useState("");
   const [expiry, setExpiry] = useState<StatusExpiryChoice>("none");
@@ -164,19 +191,29 @@ export function SetStatusDialog({
     // card and directory (H-2): an expired stamp does not come back.
     const now = nowMs ?? Date.now();
     const visible = selfMember ? visibleCustomStatus(selfMember, now) : null;
-    setEmoji(visible?.emoji ?? "");
-    setText(visible?.text ?? "");
-    setFailed(null);
-    setCustomError(null);
-    setPickerOpen(false);
     const seeded = seedExpiryFields(
       visible ? selfMember?.statusExpiresAtMs : undefined,
       now
     );
-    setExpiry(seeded.expiry);
-    setDate(seeded.date);
-    setTime(seeded.time);
-  }, [open, selfMember, nowMs]);
+    const seed: StatusDraft = {
+      emoji: visible?.emoji ?? "",
+      text: visible?.text ?? "",
+      expiry: seeded.expiry,
+      date: seeded.date,
+      time: seeded.time,
+    };
+    seedRef.current = seed;
+    // 알림 클릭이 닫은 대화상자였다면 쓰던 입력이 시드를 이긴다(#5058). 사람이 닫기로 닫았다면 맡긴 것이 없어 평소의 시드다.
+    const start = takeEntryDraft<StatusDraft>(statusDraftKey(workspaceId)) ?? seed;
+    setEmoji(start.emoji);
+    setText(start.text);
+    setFailed(null);
+    setCustomError(null);
+    setPickerOpen(false);
+    setExpiry(start.expiry);
+    setDate(start.date);
+    setTime(start.time);
+  }, [open, selfMember, nowMs, workspaceId]);
 
   const mutation = useMutation({
     mutationFn: (write: Parameters<typeof setPresenceStatus>[1]) =>
@@ -214,6 +251,15 @@ export function SetStatusDialog({
   });
 
   const busy = mutation.isPending || offline;
+
+  // 알림 클릭이 이 대화상자를 닫을 때 사람이 고친 입력을 맡긴다(#5058). 닫혀 있거나 저장 중이거나 고친 것이 없으면 맡길 것이 없다 —
+  // 저장 중에는 대화상자가 스스로 닫히지 않고(`onOpenChange`), 곧 끝나는 일이다.
+  useHoldDraftOnEntry<StatusDraft>(statusDraftKey(workspaceId), () => {
+    const seed = seedRef.current;
+    if (!open || seed === null || mutation.isPending) return undefined;
+    const draft: StatusDraft = { emoji, text, expiry, date, time };
+    return statusDraftChanged(seed, draft) ? draft : undefined;
+  });
 
   const commit = async (write: Parameters<typeof setPresenceStatus>[1], fail: string) => {
     if (busy) return;
@@ -280,7 +326,7 @@ export function SetStatusDialog({
           {offline && (
             <InlineBanner
               tone="neutral"
-              message="연결이 끊겨 지금은 상태를 바꿀 수 없습니다."
+              message={<BlockedReason frame="changeStatus" />}
               testId="set-status-offline"
             />
           )}

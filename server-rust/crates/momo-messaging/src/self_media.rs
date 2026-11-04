@@ -20,8 +20,27 @@
 //! What is deliberately not here: any Drive URL (the route proxies the bytes itself), any
 //! token or Drive id in a log line, an audit row or the outbox (the token table is the record,
 //! hash only; [`redact_self_media_urls`] is the scrub every error string passes), and any way
-//! to name an attachment that is not the trigger message's (no attachment id comes from a
-//! caller — not from the agent, not from the model, not from a request).
+//! to hand a **model** an address for an attachment that is not the trigger message's
+//! ([`mint_for_run_in_tx`] takes no attachment id: not from the agent, not from the model, not
+//! from a request).
+//!
+//! ## The second mint: the worker's own read (#4934, ADR-0151 증보 3)
+//!
+//! On Railway the api and the agent-worker are different services and the `local` archive is a
+//! volume only the api can mount, so the worker cannot read the picture a person asked to have
+//! turned into a profile image. [`mint_for_attachment_in_tx`] is the same token for that read: the
+//! worker mints it, **spends it itself** against the api's private address, and the bytes come back
+//! over the one route above. It names an attachment, which is the one widening of this module's old
+//! rule, and it is bounded by the same predicate the direct-Drive read has always used:
+//!
+//! * the id is the one the proposal arguments carry, and it passes
+//!   [`find_requester_attachment_in_tx`] — complete, an image, within the ceiling, on a live message
+//!   **the run's requester wrote in the run's own conversation** — before a row is written, and again
+//!   at [`redeem_in_tx`];
+//! * the token never becomes text a model reads (the worker holds it for one request and it is not in
+//!   any payload, message or error it writes), so nothing a model can say reaches the route;
+//! * it lives [`SELF_MEDIA_INTERNAL_TTL_SECS`], not five minutes: the read happens right after the
+//!   mint, and a token nobody spent is dead almost at once.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -31,17 +50,70 @@ use sha2::{Digest, Sha256};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::agent_avatar::{find_requester_attachment_in_tx, requester_of_run_in_tx};
+use crate::agent_avatar::{
+    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx, requester_of_run_in_tx,
+    RequesterAttachmentUse,
+};
 use crate::identity::is_channel_member;
 
 /// The fixed path prefix of the address. The Hermes guard plugin pins the same literal.
 pub const SELF_MEDIA_PATH_PREFIX: &str = "/v1/self-media/";
 /// How long a minted address lives. The table's own ceiling is ten minutes.
 pub const SELF_MEDIA_TTL_SECS: i64 = 300;
+/// How long the worker's own read address lives (#4934): minted right before the worker spends it, so
+/// it covers the read deadline with room to spare and nothing more.
+pub const SELF_MEDIA_INTERNAL_TTL_SECS: i64 = 60;
 /// The same input ceiling a picture moved inside the server has (ADR-0218 G3.2).
 pub const SELF_MEDIA_MAX_BYTES: i64 = 5 * 1024 * 1024;
 /// 32 random bytes in unpadded URL-safe base64.
 pub const SELF_MEDIA_TOKEN_CHARS: usize = 43;
+
+/// The recorded media types of a picture the helper may look at (the avatar's three).
+pub const READ_IMAGE_MIMES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+/// The recorded media types of a text file the helper may read. A closed list: the stored value is
+/// what an uploader declared, and a type that is not here (`text/html`, `text/xml`, a word-processor
+/// file) is not read at all.
+pub const READ_TEXT_MIMES: [&str; 4] = [
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+];
+/// The one PDF media type.
+pub const READ_PDF_MIME: &str = "application/pdf";
+/// Everything [`RequesterAttachmentUse::Read`] accepts (ADR-0151 증보 4).
+pub const READ_MIMES: [&str; 8] = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/pdf",
+];
+
+/// What kind of thing a recorded media type is to the reader: a picture to look at, letters to read,
+/// or a PDF to pull letters out of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadKind {
+    Image,
+    Text,
+    Pdf,
+}
+
+/// The [`ReadKind`] of a recorded media type, or `None` for one the helper does not read.
+pub fn read_kind(mime: &str) -> Option<ReadKind> {
+    if READ_IMAGE_MIMES.contains(&mime) {
+        Some(ReadKind::Image)
+    } else if READ_TEXT_MIMES.contains(&mime) {
+        Some(ReadKind::Text)
+    } else if mime == READ_PDF_MIME {
+        Some(ReadKind::Pdf)
+    } else {
+        None
+    }
+}
 /// Spent and expired rows stay a day (they are the record), then the next mint in that workspace drops them.
 const CLEANUP_AFTER_SECS: f64 = 86_400.0;
 
@@ -72,11 +144,31 @@ impl std::fmt::Debug for SelfMediaGrant {
 }
 
 /// What a redeemed token lets the route read: one Drive file, its declared size and mime.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Debug`-derived, like [`SelfMediaGrant`]: `drive_file_id` is the archive's own name for the file
+/// (#4970 review, L5).
+#[derive(Clone, PartialEq, Eq)]
 pub struct SelfMediaSource {
     pub drive_file_id: String,
     pub size_bytes: i64,
     pub mime: String,
+}
+
+impl std::fmt::Debug for SelfMediaSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Destructured so that a field added later has to be decided on here, not skipped silently.
+        let SelfMediaSource {
+            drive_file_id: _,
+            size_bytes,
+            mime,
+        } = self;
+        formatter
+            .debug_struct("SelfMediaSource")
+            .field("drive_file_id", &"<redacted>")
+            .field("size_bytes", size_bytes)
+            .field("mime", mime)
+            .finish()
+    }
 }
 
 /// The configured public origin, accepted only in the one canonical form the guard plugin and the
@@ -160,11 +252,18 @@ fn new_token() -> Option<String> {
 
 /// Does `bytes` start like the image its row says it is? The route serves what an uploader chose
 /// to store, from the api's own origin, so it refuses bytes that are not the declared picture.
+///
+/// ADR-0151 증보 4 widens this from the three pictures to what [`READ_MIMES`] names: a PDF starts with
+/// `%PDF-`, and a text file has no magic, so it is **not empty and holds no NUL byte** (a binary file
+/// that merely claims `text/plain` is refused). Whether the text is UTF-8 or a Korean legacy encoding
+/// is the reader's question, not the route's.
 pub fn bytes_match_mime(mime: &str, bytes: &[u8]) -> bool {
     match mime {
         "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "image/jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
         "image/webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        READ_PDF_MIME => bytes.starts_with(b"%PDF-"),
+        text if READ_TEXT_MIMES.contains(&text) => !bytes.is_empty() && !bytes.contains(&0),
         _ => false,
     }
 }
@@ -213,17 +312,13 @@ pub async fn trigger_photo_in_tx(
     run_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<Option<TriggerPhoto>, DbError> {
-    // Who asked: the author of the run's trigger message, a live human (the avatar flow's rule).
+    // Who asked, and where: the author of the run's trigger message, a live human (the avatar flow's
+    // rule), in a conversation both they and the agent are still in.
     let Some((requester, channel_id)) =
-        requester_of_run_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+        requester_in_conversation_in_tx(conn, workspace_id, run_id, agent_member_id).await?
     else {
         return Ok(None);
     };
-    if !is_channel_member(conn, channel_id, agent_member_id).await?
-        || !is_channel_member(conn, channel_id, requester).await?
-    {
-        return Ok(None);
-    }
     // The picture: the first complete image of the trigger message itself. No id comes from outside.
     let attachment_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT a.id FROM attachment a \
@@ -260,6 +355,28 @@ pub async fn trigger_photo_in_tx(
     }))
 }
 
+/// The person a run was raised by and the conversation it is in, **only while both that person and
+/// the agent are still members of it**. The one head of both mints: a hosted turn's trigger photo and
+/// the worker's own read begin from the same "who asked, and where".
+async fn requester_in_conversation_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, DbError> {
+    let Some((requester, channel_id)) =
+        requester_of_run_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    if !is_channel_member(conn, channel_id, agent_member_id).await?
+        || !is_channel_member(conn, channel_id, requester).await?
+    {
+        return Ok(None);
+    }
+    Ok(Some((requester, channel_id)))
+}
+
 /// [`mint_for_run_in_tx`] with an explicit TTL (seconds). The table refuses anything over ten
 /// minutes or not positive, so a wrong value here is an error, not a long-lived token.
 pub async fn mint_with_ttl_in_tx(
@@ -278,6 +395,172 @@ pub async fn mint_with_ttl_in_tx(
         channel_id,
         attachment_id,
     } = photo;
+    insert_token_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        requester,
+        channel_id,
+        attachment_id,
+        ttl_secs,
+    )
+    .await
+}
+
+/// Mint the worker's own read address (#4934) for the attachment `attachment_id` of this run's
+/// requester, with the production read TTL ([`SELF_MEDIA_INTERNAL_TTL_SECS`]). `None` — no live human
+/// requester, either of them gone from the conversation, or an attachment that is not the requester's
+/// complete image on a live message in this conversation — is every refusal alike, and writes nothing.
+///
+/// The caller is the agent-worker, and the token is for **its own** request to the api's private
+/// address: it must never be put into text a model reads (that is [`mint_for_run_in_tx`]'s address and
+/// nothing else's).
+pub async fn mint_for_attachment_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_attachment_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        SELF_MEDIA_INTERNAL_TTL_SECS,
+    )
+    .await
+}
+
+/// [`mint_for_attachment_in_tx`] with an explicit TTL (seconds); the table's ten-minute ceiling and
+/// positivity check apply exactly as for [`mint_with_ttl_in_tx`].
+///
+/// The ownership rule is the one every requester-attachment read follows
+/// ([`find_requester_attachment_in_tx`]), asked **before** any row is written, so a refused id leaves
+/// no trace in the table; [`redeem_in_tx`] asks it again.
+pub async fn mint_for_attachment_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_use_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        RequesterAttachmentUse::Avatar,
+        ttl_secs,
+    )
+    .await
+}
+
+/// The worker's own read address (#4970, ADR-0151 증보 4) for a **file the helper was asked to read**:
+/// the same single-use, 60-second, hash-only token as [`mint_for_attachment_in_tx`], judged by
+/// [`RequesterAttachmentUse::Read`] (the three pictures, text and PDF) instead of the avatar's three.
+/// `None` is every refusal alike — no live human requester, either of them gone from the conversation,
+/// or an attachment that is not the requester's complete, readable-type file on a live message in this
+/// conversation within [`SELF_MEDIA_MAX_BYTES`] — and writes nothing.
+pub async fn mint_for_read_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_read_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        SELF_MEDIA_INTERNAL_TTL_SECS,
+    )
+    .await
+}
+
+/// [`mint_for_read_in_tx`] with an explicit TTL (seconds).
+pub async fn mint_for_read_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_use_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        RequesterAttachmentUse::Read,
+        ttl_secs,
+    )
+    .await
+}
+
+/// The one body of both worker mints: who asked, where, and — **before a row is written** — whether
+/// the id passes the requester-attachment rule for `usage`.
+async fn mint_for_use_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    usage: RequesterAttachmentUse,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    let Some((requester, channel_id)) =
+        requester_in_conversation_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    if find_requester_attachment_for_in_tx(
+        conn,
+        workspace_id,
+        requester,
+        channel_id,
+        attachment_id,
+        SELF_MEDIA_MAX_BYTES,
+        usage,
+    )
+    .await?
+    .is_none()
+    {
+        return Ok(None);
+    }
+    insert_token_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        requester,
+        channel_id,
+        attachment_id,
+        ttl_secs,
+    )
+    .await
+}
+
+/// Write one token row (hash only) for a binding the caller has **already proved**, after dropping the
+/// workspace's day-old rows. `None` only when the system has no entropy to make a token from.
+#[allow(clippy::too_many_arguments)]
+async fn insert_token_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    requester: Uuid,
+    channel_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
     let Some(token) = new_token() else {
         return Ok(None);
     };
@@ -346,31 +629,26 @@ pub async fn redeem_in_tx(
     {
         return Ok(None);
     }
-    let Some(source) = find_requester_attachment_in_tx(
+    // ADR-0151 증보 4: judged as a **read** — the three pictures every token has always been for, and
+    // the text and PDF types only the helper's own mint (`mint_for_read_in_tx`) ever binds a token to.
+    // For a picture this is the question it has always been asked; no token's reach grows.
+    let Some(source) = find_requester_attachment_for_in_tx(
         conn,
         workspace_id,
         requester,
         channel_id,
         attachment_id,
         SELF_MEDIA_MAX_BYTES,
+        RequesterAttachmentUse::Read,
     )
     .await?
     else {
         return Ok(None);
     };
-    let mime: Option<String> =
-        sqlx::query_scalar("SELECT mime FROM attachment WHERE workspace_id = $1 AND id = $2")
-            .bind(workspace_id)
-            .bind(attachment_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    let Some(mime) = mime else {
-        return Ok(None);
-    };
     Ok(Some(SelfMediaSource {
         drive_file_id: source.drive_file_id,
         size_bytes: source.size_bytes,
-        mime,
+        mime: source.mime,
     }))
 }
 
@@ -574,6 +852,21 @@ mod tests {
         );
     }
 
+    /// The worker's own read (#4934) asks the direct-Drive path's question with the route's ceiling, and
+    /// the route answers with its own: if the two numbers ever drifted, a picture the proposal accepted
+    /// would be one the route refuses (or the reverse). They are one number.
+    #[test]
+    fn the_route_and_the_avatar_read_share_one_size_ceiling() {
+        assert_eq!(
+            SELF_MEDIA_MAX_BYTES,
+            crate::agent_avatar::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT as i64
+        );
+        // the read address lives 60 seconds (ADR-0151 증보 3 D4): shorter than the hosted one's 300 and inside
+        // the table's own ten-minute ceiling — a change of the number is a change of the ADR and of this test
+        assert_eq!(SELF_MEDIA_INTERNAL_TTL_SECS, 60);
+        assert_eq!(SELF_MEDIA_TTL_SECS, 300);
+    }
+
     #[test]
     fn the_sniff_checks_the_declared_image_type() {
         assert!(bytes_match_mime("image/png", b"\x89PNG\r\n\x1a\nxxxx"));
@@ -584,5 +877,58 @@ mod tests {
         assert!(!bytes_match_mime("image/webp", b"RIFF\0\0\0\0WAVE"));
         assert!(!bytes_match_mime("image/gif", b"GIF89a"));
         assert!(!bytes_match_mime("text/html", b"<html>"));
+    }
+
+    /// ADR-0151 증보 4: a PDF starts with `%PDF-`; text has no magic, so it is non-empty and holds no
+    /// NUL; a type outside [`READ_MIMES`] is never served whatever its bytes look like.
+    #[test]
+    fn the_sniff_checks_pdf_and_text_too() {
+        assert!(bytes_match_mime("application/pdf", b"%PDF-1.7\n%\xe2\xe3"));
+        assert!(!bytes_match_mime("application/pdf", b"<html>%PDF-"));
+        assert!(!bytes_match_mime("application/pdf", b""));
+        for text in READ_TEXT_MIMES {
+            assert!(bytes_match_mime(text, "안녕 hello\n".as_bytes()), "{text}");
+            assert!(!bytes_match_mime(text, b""), "{text}");
+            assert!(!bytes_match_mime(text, b"binary\0inside"), "{text}");
+            assert!(!bytes_match_mime(text, b"\x89PNG\r\n\x1a\n\0"), "{text}");
+        }
+        for refused in [
+            "text/html",
+            "text/xml",
+            "application/zip",
+            "application/octet-stream",
+            "image/svg+xml",
+            "image/gif",
+            "",
+        ] {
+            assert!(!bytes_match_mime(refused, b"plain words"), "{refused}");
+        }
+        // every type the Read use accepts is one the sniff can judge, and is classified
+        for mime in READ_MIMES {
+            assert!(read_kind(mime).is_some(), "{mime}");
+        }
+        assert_eq!(read_kind("image/png"), Some(ReadKind::Image));
+        assert_eq!(read_kind("text/csv"), Some(ReadKind::Text));
+        assert_eq!(read_kind("application/pdf"), Some(ReadKind::Pdf));
+        assert_eq!(read_kind("image/gif"), None);
+        assert_eq!(
+            RequesterAttachmentUse::Read.mimes(),
+            &READ_MIMES,
+            "the use and the sniff name the same eight types"
+        );
+        assert_eq!(READ_MIMES.len(), 3 + READ_TEXT_MIMES.len() + 1);
+    }
+
+    /// #4970 review L5: the archive's name for a file is in no `{:?}`, like the token in [`SelfMediaGrant`].
+    #[test]
+    fn a_redeemed_source_never_prints_the_archives_name_for_the_file() {
+        let source = SelfMediaSource {
+            drive_file_id: "DRIVE-NAME-4970".to_string(),
+            size_bytes: 7,
+            mime: "text/plain".to_string(),
+        };
+        let printed = format!("{source:?} {source:#?}");
+        assert!(!printed.contains("DRIVE-NAME-4970"), "{printed}");
+        assert!(printed.contains("text/plain") && printed.contains('7'));
     }
 }

@@ -1,5 +1,8 @@
+import type { MessageKey } from "@momo/core/i18n";
 import { SegmentedControl, type SegmentOption } from "@/design/ui/segmented-control";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
+  LINK_PREVIEW_PREFERENCES,
   setLinkPreviewPreference,
   useLinkPreviewPreference,
   type LinkPreviewPreference,
@@ -16,20 +19,26 @@ import { ThreadLayoutRow } from "./ThreadLayoutRow";
 // 그리지 않는다. 자리는 청사진 §5.3-a의 순서다: 글자 크기 → 대화 밀도 → 링크 미리보기 →
 // 대화 미리보기 → 스레드 배치.
 
-const LINK_OPTIONS: readonly SegmentOption<LinkPreviewPreference>[] = [
-  { value: "rich", label: "사진 카드" },
-  { value: "compact", label: "작은 카드" },
-  { value: "off", label: "숨기기" },
-];
+// 저장되는 값은 rich·compact·off 그대로다(이름이 아니라 화면의 낱말만 작게·크게·끄기로 바뀌었다, #4882).
+// 낱말과 설명은 사전 키다: 이 줄은 새 문구라 직접 문구 장부에 더하지 않는다.
+const LINK_LABEL_KEY = {
+  compact: "settings.appearance.linkPreviewCompact",
+  rich: "settings.appearance.linkPreviewRich",
+  off: "settings.appearance.linkPreviewOff",
+} as const satisfies Record<LinkPreviewPreference, MessageKey>;
 
-const LINK_DETAIL: Record<LinkPreviewPreference, string> = {
-  rich: "이미지가 있으면 사진을 위에 두고, 제목과 설명을 그 아래에 둬요. 사진이 없으면 작은 카드와 같아요.",
-  compact: "제목, 설명, 작은 그림을 한 덩어리로 보여줘요.",
-  off: "메시지 속 링크만 남기고 카드는 그리지 않아요.",
-};
+const LINK_HINT_KEY = {
+  compact: "settings.appearance.linkPreviewCompactHint",
+  rich: "settings.appearance.linkPreviewRichHint",
+  off: "settings.appearance.linkPreviewOffHint",
+} as const satisfies Record<LinkPreviewPreference, MessageKey>;
 
 export function DisplayPrefs() {
   const linkPreview = useLinkPreviewPreference();
+  const formatMessage = useFormatMessage();
+  const linkOptions: readonly SegmentOption<LinkPreviewPreference>[] = LINK_PREVIEW_PREFERENCES.map(
+    (value) => ({ value, label: formatMessage(LINK_LABEL_KEY[value]) })
+  );
   return (
     <SettingsSection
       title="대화 표시"
@@ -39,13 +48,13 @@ export function DisplayPrefs() {
       <DensityRow />
       <SettingsRow
         label="링크 미리보기"
-        description={LINK_DETAIL[linkPreview]}
+        description={formatMessage(LINK_HINT_KEY[linkPreview])}
         labelId="appearance-link-label"
       >
         <SegmentedControl
           legend="링크 미리보기 모양"
           name="link-preview"
-          options={LINK_OPTIONS}
+          options={linkOptions}
           value={linkPreview}
           onValueChange={setLinkPreviewPreference}
           testId="link-preview-choice"

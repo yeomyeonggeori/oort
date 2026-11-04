@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
-import { agentCardModel } from "./agentCardModel";
+import { agentCardModel, agentRequestBundle } from "./agentCardModel";
 import { presentableRows, settleToolCalls } from "./toolCallSettle";
 
 // #4986. 서버는 `tool_call` 행을 한 번 쓰고 고치지 않는다(`{name, arguments, call_id}` 가 전부).
@@ -195,19 +195,121 @@ describe("승인이 걸린 호출은 짝 승인 카드 한 장이 말한다 (#50
     expect(ids([call("a"), approvalCard("a", "pending", { approval_id: "" })])).toEqual(["call-a", "card-a"]);
   });
 
-  it("호출 행만 접는다: 같은 call_id 의 결과 행·승인 카드·승인에 걸리지 않은 다른 호출은 그대로 선다", () => {
-    expect(ids([call("a"), approvalCard("a", "approved"), result("a")])).toEqual(["card-a", "result-a"]);
+  it("호출 행만 접는다: 아직 끝나지 않은 승인의 결과 행·승인 카드·승인에 걸리지 않은 다른 호출은 그대로 선다", () => {
+    // 승인됨 카드의 결과 행은 #5168 이 승인 카드로 접는다(아래 describe). 여기서는 접히지 않는 쪽만 잰다.
+    expect(ids([call("a"), approvalCard("a", "pending"), result("a")])).toEqual(["card-a", "result-a"]);
     expect(ids([call("a"), approvalCard("a", "pending"), call("b")])).toEqual(["card-a", "call-b"]);
     expect(ids([approvalCard("a", "pending")])).toEqual(["card-a"]);
   });
 
   it("접힌 호출 행의 이름을 결과 카드가 빌린다: 접기는 짝짓기 뒤에 한다", () => {
-    const rows = presentableRows([call("a"), approvalCard("a", "approved"), result("a")]);
+    // 카드 스냅샷이 아직 대기인데 결과가 먼저 보이는 순간(결정 패치가 오기 전): 호출 행은 접히고, 승인 카드가 닫지 않은
+    // 결과 줄은 접힌 호출 행의 이름으로 선다. 승인됨 카드의 결과 줄은 #5168 이 카드로 접는다(아래 describe).
+    const rows = presentableRows([call("a"), approvalCard("a", "pending"), result("a")]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a", "result-a"]);
     expect(toolCardOf(rows[1]!).title).toBe("work.session.end 실행");
   });
 
   it("로그인 핸드오프 승인도 승인 카드 가족이라 그 호출 행을 접는다", () => {
     const handoff = approvalCard("a", "pending", { kind: "login_handoff", tool_name: "work.session.login_handoff" });
     expect(ids([call("a", { name: "work.session.login_handoff" }), handoff])).toEqual(["card-a"]);
+  });
+});
+
+
+// #5168 (검증 줄 3회차, #5066의 다음 국면). 승인한 도구 호출은 결정 뒤 워커에서 실행되고, 끝은 같은 `call_id` 의 `tool_result`
+// 행으로 따로 온다. 서버는 승인 카드를 그때 다시 고치지 않고(「실행 중 → 끝」은 run이 말한다, ADR-0186 v6 R-b 2), 클라이언트는
+// 결정 뒤 run 을 그 카드에 잇지 못해서(진행 읽기는 승인을 기다리는 동안에만 승인 id 를 싣는다) 카드가 「실행 중」에 영영 머물렀고
+// 결과 행은 카드가 한 장 더로 섰다. 이 시험은 두 장이 한 장이 되는 규칙을 코어에서 잰다: 승인됨 카드는 같은 호출의 결과로
+// 「끝」·「실패」로 닫히고, 그 결과 행은 따로 서지 않는다. 카드를 읽는 말은 웹·폰이 같은 코어(`requestBundleState`)에서 읽는다.
+describe("승인한 도구 호출은 같은 call_id 의 결과로 닫히고 결과 줄은 따로 서지 않는다 (#5168)", () => {
+  const at = (message: Message, seq: number): Message => ({ ...message, seq });
+  const started = () => at(call("a"), 1);
+  const approved = (callId = "a", extra: Record<string, unknown> = {}, over: Partial<Message> = {}) =>
+    at(approvalCard(callId, "approved", extra, over), 2);
+  const finished = (callId = "a", extra: Record<string, unknown> = {}, over: Partial<Message> = {}): Message => ({
+    ...result(callId, extra), seq: 3, ...over,
+  });
+  const stateOf = (message: Message) => agentRequestBundle(message, { nowMs: 1 })?.state;
+
+  it("바탕: 승인됨 카드는 결과를 모르면 「실행 중」이다 — 완료를 추측하지 않는다", () => {
+    const rows = presentableRows([started(), approved()]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a"]);
+    expect(stateOf(rows[0]!)).toBe("executing");
+  });
+
+  it("같은 call_id 의 성공 결과가 오면 승인 카드가 「끝」으로 닫히고 결과 줄은 서지 않는다: 한 호출에 한 장", () => {
+    const rows = presentableRows([started(), approved(), finished()]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a"]);
+    expect(stateOf(rows[0]!)).toBe("done");
+  });
+
+  it("결과가 오류면 「실패」로 닫힌다", () => {
+    const rows = presentableRows([started(), approved(), finished("a", { is_error: true, output: "권한이 없어요" })]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a"]);
+    expect(stateOf(rows[0]!)).toBe("failed");
+  });
+
+  it("다른 call_id 의 결과는 카드를 닫지 않고 따로 선다", () => {
+    const rows = presentableRows([started(), approved("a"), finished("b")]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a", "result-b"]);
+    expect(stateOf(rows[0]!)).toBe("executing");
+  });
+
+  it.each(["pending", "rejected", "expired", "cancelled"])(
+    "%s 카드는 닫지도 접지도 않는다: 카드는 원본 그대로이고 결과 줄이 남는다",
+    (status) => {
+      const card = at(approvalCard("a", status), 2);
+      const rows = presentableRows([started(), card, finished()]);
+      expect(rows.map((message) => message.id)).toEqual(["card-a", "result-a"]);
+      expect(rows[0]).toBe(card);
+    }
+  );
+
+  it.each<[string, () => Message[]]>([
+    ["거부·만료로 닫힌 옛 결과 줄(`status`)", () => [approved(), finished("a", { is_error: true, status: "rejected", approval_id: "ap-a" })]],
+    ["지운 결과", () => [approved(), finished("a", {}, { state: "deleted" })]],
+    ["다른 채널의 결과", () => [approved(), finished("a", {}, { channelId: "channel-2" })]],
+    ["카드보다 먼저 온 결과(같은 call_id 를 다시 쓴 앞 호출의 것)", () => [approved(), at(finished(), 1)]],
+    ["행동 승인 카드", () => [approved("a", { action_type: "workspace_action" }), finished()]],
+    ["로그인 핸드오프 카드", () => [approved("a", { kind: "login_handoff" }), finished()]],
+    ["서버가 이미 result 를 쓴 카드", () => [approved("a", { result: { status: "executed" } }), finished()]],
+    ["행동 결과 카드(`momo.action_result`)", () => [approved(), finished("a", { "momo.action_result": { v: 1, action_id: "channel.create", status: "executed", rows: [] } })]],
+    ["승인 id 없는 카드", () => [approved("a", { approval_id: "" }), finished()]],
+  ])("짝으로 세지 않는다 — %s: 결과 줄이 남고 카드는 원본 그대로다", (_name, build) => {
+    const messages = build();
+    const rows = presentableRows(messages);
+    expect(rows.map((message) => message.id)).toContain("result-a");
+    expect(rows[0]).toBe(messages[0]);
+  });
+
+  it("같은 call_id 를 다시 쓴 두 번째 승인은 자기 뒤에 온 결과로만 닫힌다", () => {
+    const second = at(approvalCard("a", "approved", { approval_id: "ap-a2" }, { id: "card-a2" }), 4);
+    const first = [approved(), finished()];
+    // 둘째 카드는 앞 호출의 결과(seq 3)로 닫히지 않는다.
+    const waiting = presentableRows([...first, second]);
+    expect(waiting.map((message) => message.id)).toEqual(["card-a", "card-a2"]);
+    expect([stateOf(waiting[0]!), stateOf(waiting[1]!)]).toEqual(["done", "executing"]);
+    // 둘째의 결과가 오면 각자 자기 결과로 닫히고 두 결과 줄이 모두 접힌다.
+    const both = presentableRows([...first, second, { ...finished(), id: "result-a2", seq: 5 }]);
+    expect(both.map((message) => message.id)).toEqual(["card-a", "card-a2"]);
+    expect([stateOf(both[0]!), stateOf(both[1]!)]).toEqual(["done", "done"]);
+  });
+
+  it("두 승인 뒤에 결과가 하나뿐이면 그 결과는 가까운 쪽(뒤 카드)의 것이다: 앞 카드는 결과를 못 받았으니 「실행 중」 그대로다", () => {
+    const second = at(approvalCard("a", "approved", { approval_id: "ap-a2" }, { id: "card-a2" }), 4);
+    const lateResult = { ...finished(), id: "result-late", seq: 5 };
+    const rows = presentableRows([approved(), second, lateResult]);
+    expect(rows.map((message) => message.id)).toEqual(["card-a", "card-a2"]);
+    expect([stateOf(rows[0]!), stateOf(rows[1]!)]).toEqual(["executing", "done"]);
+  });
+
+  it("같은 원본이면 같은 사본을 돌려주고 원본은 건드리지 않는다(카드가 다시 그려지지 않는다)", () => {
+    const messages = [started(), approved(), finished()];
+    const first = presentableRows(messages)[0]!;
+    const second = presentableRows([...messages])[0]!;
+    expect(first).toBe(second);
+    expect(first).not.toBe(messages[1]);
+    expect(messages[1]!.props?.["result"]).toBeUndefined();
   });
 });

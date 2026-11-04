@@ -5,7 +5,8 @@
 # Re-written to /opt/data/config.yaml from $HERMES_CONFIG_B64 on EVERY start, then checked by
 # lockgate.py BEFORE the Hermes entrypoint (and so before any listener) runs.
 # Deny-list is Hermes' only switch (agent.disabled_toolsets); lockgate.py adds the allow-list.
-# Remaining chat-only surface after this list: memory, todo, session_search.
+# Remaining chat-only surface after this list: todo. `memory` and `session_search` are off too (#4898, ADR-0203 augmentation of 2026-11-01):
+# a Hermes that reads mail and drive keeps the tool results in ONE history for every run, and `memory` writes ONE file that every session loads.
 agent:
   max_turns: 12           # chat-only agent: bound tool-loop cost (Hermes default is 500)
   disabled_toolsets:
@@ -24,6 +25,8 @@ agent:
     - video_gen       # video generation and editing
     - x_search        # X (Twitter) search
     - skills          # skill_manage writes persistent instructions that outlive the chat (verified: creates a skill on the volume)
+    - memory          # memory: ONE MEMORY.md / USER.md per Hermes home, loaded into the system prompt of every session: what a run of one workspace writes, a run of another reads (#4898)
+    - session_search  # session_search: full-text search and read over the whole state.db, every earlier run of every workspace, tool-call arguments included (#4898)
     - tts             # text_to_speech
     - stt             # speech-to-text
     - kanban          # kanban_* task board
@@ -33,6 +36,9 @@ agent:
     - discord_admin   # discord admin tool
     - yuanbao         # yuanbao messaging tools
     - a2a             # agent-to-agent calls to other endpoints
+memory:
+  memory_enabled: false        # no MEMORY.md in any system prompt. `_init_memory` reads this flag, not the toolset: an existing file would stay injected otherwise (#4898)
+  user_profile_enabled: false  # the same for USER.md; the gate needs both explicitly false, and no `memory.provider`
 approvals:
   mode: manual            # never "off"; no HERMES_YOLO_MODE
   unattended_mode: deny   # API sessions cannot approve anything
