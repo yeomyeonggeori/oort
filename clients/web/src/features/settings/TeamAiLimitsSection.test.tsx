@@ -378,7 +378,7 @@ describe("저장 실패·읽기 실패·오프라인", () => {
     fetchBag.mockResolvedValue(bagOf(ON));
     const view = await mount(true);
     expect(pick(view, "team-ai-limits-offline")?.textContent).toBe(
-      "연결이 끊겨 지금은 한도를 바꿀 수 없어요."
+      "오프라인이라 지금은 한도를 바꿀 수 없어요."
     );
     expect(toggle(view, "dailyTokens")?.disabled).toBe(true);
     expect(input(view, "dailyTokens")?.disabled).toBe(true);

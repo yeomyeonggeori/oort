@@ -3,6 +3,7 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
+import {AccessibilityInfo} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -168,6 +169,28 @@ describe('홈 · 받은함 (진짜 AppShell)', () => {
     expect(strip).toHaveTextContent('서버에 닿지 못했어요', {exact: false});
     expect(strip.props.accessibilityRole).toBe('button');
     expect(strip.props.accessibilityLabel).toBe('지금 다시 연결');
+  });
+});
+
+describe('셸 띠 낭독 (진짜 AppShell, #5262)', () => {
+  it('홈 · 받은함 띠가 함께 마운트돼 있어도 오프라인이 되는 순간 VoiceOver 가 한 번 읽는다 - 띠마다가 아니라 셸에 하나다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+    installFetch();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    announce.mockClear();
+
+    await emitNet(false);
+    // 숨은 받은함 탭도 언마운트가 아니라서 띠가 둘 이상 서 있다 - 그래도 낭독은 한 번이다.
+    expect(
+      screen.getAllByTestId('shell-connection-strip', {includeHiddenElements: true}).length,
+    ).toBeGreaterThanOrEqual(2);
+    const spoken = announce.mock.calls
+      .map(call => String(call[0]))
+      .filter(text => text.includes('오프라인이에요'));
+    expect(spoken).toEqual(['오프라인이에요. 받아 둔 내용만 보여요. 연결되면 자동으로 이어져요.']);
   });
 });
 

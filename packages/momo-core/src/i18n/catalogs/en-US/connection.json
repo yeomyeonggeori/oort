@@ -37,5 +37,7 @@
   "connection.upload.failedServer": "Couldn't upload because the server isn't responding",
   "connection.upload.failedNoArchive": "This server has no file storage connected",
   "connection.session.expired": "Your session has expired. Please sign in again.",
+  "connection.boot.offlineDetail": "Try again once you're connected to a network.",
+  "connection.boot.offlineQrDetail": "Once you're connected to a network, you can scan the QR code.",
   "connection.boot.unreachable": "We can't reach the server. Your saved sign-in is still here, and we'll keep trying once you're connected."
 }

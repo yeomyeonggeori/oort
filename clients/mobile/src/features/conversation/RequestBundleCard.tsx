@@ -55,6 +55,7 @@ import {deadlinePassed} from './approvalGate';
 import {phoneRequestBundle} from './requestLoop';
 import {copyText} from './copy';
 import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
+import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 import {spawnHostGate} from '@momo/core/features/timeline/spawnHostChoice';
 
 export function RequestBundleCard({
@@ -100,6 +101,8 @@ export function RequestBundleCard({
   const [expanded, setExpanded] = useState(false);
   const [reproposeNote, setReproposeNote] = useState<string | null>(null);
   const formatMessage = useFormatMessage();
+  // 막은 원인의 문장(#5262): 연결 모델이 없으면 undefined 라 아래에서 기존 문장으로 물러난다.
+  const blockedLine = useApprovalBlockedLine();
   const decision = useRef<ApprovalDecisionHandle | null>(null);
   useImperativeHandle(
     decisionRef,
@@ -343,7 +346,7 @@ export function RequestBundleCard({
       ) : model.state === 'approval' ? (
         <Sentence style={styles.meta} testID="request-bundle-waiting">
           {decideAfterReconnect
-            ? '연결이 돌아오면 여기서 결정할 수 있어요.'
+            ? (blockedLine ?? '연결이 돌아오면 여기서 결정할 수 있어요.')
             : model.waitingFor}
         </Sentence>
       ) : null}

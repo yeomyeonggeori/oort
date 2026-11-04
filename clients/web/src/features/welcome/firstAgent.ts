@@ -48,8 +48,6 @@ export const FIRST_AGENT_CHANNEL_PENDING =
   "이 에이전트가 답할 채널 승인이 아직 끝나지 않았어요.";
 
 export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했어요.";
-export const FIRST_AGENT_OFFLINE_REASON =
-  "연결이 끊겼어요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요.";
 
 export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 

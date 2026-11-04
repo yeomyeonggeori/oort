@@ -31,6 +31,7 @@ import {
   readFirstMentionRecord,
   writeFirstMentionRecord,
 } from "./firstMentionStore";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 호스티드 에이전트 초대 직후 첫 멘션 왕복 (T-6 / #1656).
@@ -44,7 +45,6 @@ import {
 // =============================================================================
 
 const hostedPairingProvided = isSurfaceProvided("hostedAgentPairing");
-const OFFLINE_LOCK_REASON = "연결이 끊겨 지금은 할 수 없어요";
 
 function asMentionMessages(
   messages: readonly Message[],
@@ -83,12 +83,14 @@ function SurfaceAction({
   onClick: () => void;
   testId?: string;
 }) {
+  // 잠긴 이유: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const lockReason = useBlockedReason("doThis");
   return (
     <Button
       type="button"
       size="sm"
       aria-disabled={offline || undefined}
-      aria-label={offline ? `${label}. ${OFFLINE_LOCK_REASON}` : undefined}
+      aria-label={offline ? `${label}. ${lockReason}` : undefined}
       className={cn(offline && "opacity-50")}
       onClick={() => {
         if (offline) return;

@@ -449,6 +449,9 @@ export function AttachmentList({
   // WebKit에서도 원래 미리보기 버튼으로 돌아간다(dialog.tsx의 명시 opener 계약).
   const sources = useRef(new Map<string, HTMLImageElement>());
   const lightboxOpener = useRef<HTMLButtonElement | null>(null);
+  // 마지막 클릭이 키보드(Enter·Space)에서 왔는가: 그런 클릭은 `detail`이 0이고 마우스는 1 이상이다(Chromium·WebKit 실측). 라이트박스가
+  // 첫 초점(닫기)에 링을 세울지 가르는 데 쓴다(#5275 H1). 캡처 단계에서 적어 두면 아래 열기 단추의 onClick보다 먼저다.
+  const lightboxByKeyboard = useRef(false);
   const images = lightboxAttachments(attachments);
   const files = attachments.filter((attachment) => !showsInlinePreview(attachment));
   if (attachments.length === 0) return null;
@@ -457,6 +460,9 @@ export function AttachmentList({
       <ul
         className={cn("mt-1 flex flex-col gap-1", muted && "opacity-70")}
         data-testid="attachment-list"
+        onClickCapture={(event) => {
+          lightboxByKeyboard.current = event.detail === 0;
+        }}
       >
         {images.length > 0 && (
           <li className="min-w-0">
@@ -492,6 +498,7 @@ export function AttachmentList({
         images={images}
         selectedId={lightbox?.attachmentId ?? null}
         opener={lightboxOpener.current}
+        openedByKeyboard={lightboxByKeyboard.current}
         source={id => sources.current.get(id) ?? null}
         offline={offline}
         senderName={senderName ?? null}

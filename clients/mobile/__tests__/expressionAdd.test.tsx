@@ -952,7 +952,8 @@ describe('웹과 같은 문장·같은 전송', () => {
       'expressions.make.agentHint',
       'expressions.make.noAgentsDetail',
       'expressions.make.sent',
-      'expressions.make.offline',
+      // `expressions.make.offline`은 뺐다: 웹은 #5260부터 막은 원인별 사전 틀(`blocked.sendRequestLater.*`)을 읽어 이 문장을
+      // 소스에 쥐지 않는다. 폰이 같은 원인별 틀로 옮기는 일은 #5281(폰 남은 직접 문구)이다.
     ]);
     same('flow', [
       'expressions.make.failDmForbidden',

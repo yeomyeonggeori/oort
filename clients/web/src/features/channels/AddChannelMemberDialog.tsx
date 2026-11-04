@@ -34,6 +34,7 @@ import {
   useAddChannelMember,
   type AddChannelMemberTarget,
 } from "./useAddChannelMember";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 채널에 멤버 추가 다이얼로그 (검수 #2). Reading this as: a roster picker for
@@ -379,7 +380,7 @@ function AddChannelMemberPanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 멤버 추가는 다시 연결된 뒤에 할 수 있습니다."
+          message={<BlockedReason frame="addMemberLater" />}
           testId="add-member-offline"
         />
       )}

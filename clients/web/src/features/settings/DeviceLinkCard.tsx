@@ -14,6 +14,7 @@ import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { CopyButton } from "./SettingsFields";
 import { readDeviceLinkLive, writeDeviceLinkLive } from "./deviceLinkLive";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings / first-run for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -384,7 +385,7 @@ export function DeviceLinkCard({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 다시 연결되면 QR을 만들 수 있어요."
+          message={<BlockedReason frame="createQrLater" />}
           messageId={OFFLINE_REASON_ID}
           testId="device-link-offline"
           separator={false}

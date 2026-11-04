@@ -52,6 +52,7 @@ import {
   workConsoleSessionPath,
   type WorkConsoleLocation,
 } from "./model";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 작업 콘솔 (#1289).
@@ -370,8 +371,8 @@ export function WorkConsoleRoute() {
           tone="neutral"
           message={
             hasCachedProjection
-              ? "연결이 끊겼습니다. 아래는 마지막으로 확인된 작업 상태입니다."
-              : "연결이 끊겼습니다. 아직 표시할 저장된 작업 상태가 없습니다."
+              ? <BlockedReason frame="workStateStale" />
+              : <BlockedReason frame="workStateNone" />
           }
           testId="work-console-offline"
         />

@@ -47,6 +47,7 @@ import {
   sceneDispatchMouseEvent,
   sceneNameFromShotPath,
 } from "./capture-clock.mjs";
+import { withCaptureLocale } from "./capture-locale.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // 앵커 착지 행 클래스: 정본은 제품 소스(`inbox/anchor.ts`)다. 값을 베끼지 않는다(gates/landing-class.mjs, #5048).
@@ -139,8 +140,10 @@ function wrapContextShotGuard(context) {
 
 function wrapBrowserShotGuard(browser) {
   const origNewContext = browser.newContext.bind(browser);
-  browser.newContext = async (...args) => {
-    const context = await origNewContext(...args);
+  browser.newContext = async (options, ...rest) => {
+    // 컨텍스트마다 언어를 한 곳에서 준다(#5260): 안 주면 Chromium 기본(en-US)이라 사전 문장이 영어로 찍힌다.
+    // 호출이 직접 정한 `locale`은 그대로 두고, `CAPTURE_LOCALE`로 바꿀 수 있다.
+    const context = await origNewContext(withCaptureLocale(options), ...rest);
     wrapContextShotGuard(context);
     return context;
   };
