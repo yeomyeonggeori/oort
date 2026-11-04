@@ -58,6 +58,7 @@ import {
   useMemoryItem,
   useMemoryItemEvents,
 } from "./useMemory";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 기억 하나의 상세 (ADR-0196 D9 · D12 V4, #3170): 본문, 종류·출처, 근거 역링크, 이력,
@@ -157,7 +158,7 @@ export function MemoryItemDetailPane({
     : !current
       ? BROWSER_NOT_CURRENT
       : offline
-        ? "연결이 끊겨 있어서 지금은 바꿀 수 없어요."
+        ? <BlockedReason frame="changeIt" />
         : null;
   const reasonId = "memory-detail-reason";
   const channelName =

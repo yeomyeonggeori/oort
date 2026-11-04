@@ -203,6 +203,922 @@ export const catalog: MessageCatalog = {
       "value": "번째"
     }
   ],
+  "blocked.addMemberLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 멤버 추가는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.addMemberLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 멤버 추가는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.aiKeysLead.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요."
+    }
+  ],
+  "blocked.aiKeysLead.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요."
+    }
+  ],
+  "blocked.approveOrDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 승인하거나 끊을 수 없어요."
+    }
+  ],
+  "blocked.approveOrDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 승인하거나 끊을 수 없어요."
+    }
+  ],
+  "blocked.changeAiLink.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이 연결을 바꾸거나 확인할 수 없어요."
+    }
+  ],
+  "blocked.changeAiLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이 연결을 바꾸거나 확인할 수 없어요."
+    }
+  ],
+  "blocked.changeHere.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 바꿀 수 없어요. 다시 연결되면 여기서 바꿀 수 있어요."
+    }
+  ],
+  "blocked.changeHere.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 바꿀 수 없어요. 다시 연결되면 여기서 바꿀 수 있어요."
+    }
+  ],
+  "blocked.changeIt.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeLimits.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeLimits.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeProfile.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeProfile.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeRules.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 규칙을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeRules.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 규칙을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeSetting.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이 설정을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeSetting.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이 설정을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeStatus.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 상태를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeStatus.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 상태를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeTeamAiKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeTeamAiKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.confirmDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 해제를 확정할 수 없어요."
+    }
+  ],
+  "blocked.confirmDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 해제를 확정할 수 없어요."
+    }
+  ],
+  "blocked.contentStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 내용이에요."
+    }
+  ],
+  "blocked.contentStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 내용이에요."
+    }
+  ],
+  "blocked.createAgentLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createAgentLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createChannelLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createChannelLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결을 만들 수 없어요. 다시 연결된 뒤에 눌러 주세요."
+    }
+  ],
+  "blocked.createDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결을 만들 수 없어요. 다시 연결된 뒤에 눌러 주세요."
+    }
+  ],
+  "blocked.createInviteLink.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createInviteLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createQrLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 다시 연결되면 QR을 만들 수 있어요."
+    }
+  ],
+  "blocked.createQrLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 다시 연결되면 QR을 만들 수 있어요."
+    }
+  ],
+  "blocked.createThing.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createThing.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWebhookUrl.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWebhookUrl.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWorkspace.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 워크스페이스를 만들 수 없어요."
+    }
+  ],
+  "blocked.createWorkspace.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 워크스페이스를 만들 수 없어요."
+    }
+  ],
+  "blocked.createWorkspaceLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createWorkspaceLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.decideNow.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요."
+    }
+  ],
+  "blocked.decideNow.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요."
+    }
+  ],
+  "blocked.decisionStage.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 내용을 살펴보고 다시 연결되면 결정해 주세요."
+    }
+  ],
+  "blocked.decisionStage.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 내용을 살펴보고 다시 연결되면 결정해 주세요."
+    }
+  ],
+  "blocked.delegate.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 맡길 수 없어요."
+    }
+  ],
+  "blocked.delegate.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 맡길 수 없어요."
+    }
+  ],
+  "blocked.deleteDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결을 지울 수 없어요. 다시 연결되면 지울 수 있어요."
+    }
+  ],
+  "blocked.deleteDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결을 지울 수 없어요. 다시 연결되면 지울 수 있어요."
+    }
+  ],
+  "blocked.doThis.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 할 수 없어요."
+    }
+  ],
+  "blocked.doThis.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 할 수 없어요."
+    }
+  ],
+  "blocked.doThisLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 할 수 없어요. 다시 연결되면 눌러 보세요."
+    }
+  ],
+  "blocked.doThisLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 할 수 없어요. 다시 연결되면 눌러 보세요."
+    }
+  ],
+  "blocked.draftsOnDevice.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 초안은 이 기기에 있어요."
+    }
+  ],
+  "blocked.draftsOnDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 초안은 이 기기에 있어요."
+    }
+  ],
+  "blocked.huddleJoined.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 메시지를 주고받을 수 없지만, 오디오는 계속될 수 있고 허들 나가기는 사용할 수 있어요."
+    }
+  ],
+  "blocked.huddleJoined.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 메시지를 주고받을 수 없지만, 오디오는 계속될 수 있고 허들 나가기는 사용할 수 있어요."
+    }
+  ],
+  "blocked.huddleUnavailable.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 허들을 사용할 수 없어요."
+    }
+  ],
+  "blocked.huddleUnavailable.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 허들을 사용할 수 없어요."
+    }
+  ],
+  "blocked.inboxReply.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."
+    }
+  ],
+  "blocked.inboxReply.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."
+    }
+  ],
+  "blocked.issueCredential.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결 값을 발급하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.issueCredential.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결 값을 발급하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.issueKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 발급할 수 없어요."
+    }
+  ],
+  "blocked.issueKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 발급할 수 없어요."
+    }
+  ],
+  "blocked.keepListIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepListIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewChangeLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewChangeLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.lastSyncedList.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". 아래는 그때의 상태예요."
+    }
+  ],
+  "blocked.lastSyncedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". 아래는 그때의 상태예요."
+    }
+  ],
+  "blocked.listStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 목록이에요."
+    }
+  ],
+  "blocked.listStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 목록이에요."
+    }
+  ],
+  "blocked.loadHosts.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
+    }
+  ],
+  "blocked.loadHosts.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
+    }
+  ],
+  "blocked.loadPolicy.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
+    }
+  ],
+  "blocked.loadPolicy.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 워크스페이스 기본값을 불러올 수 없어요. 다시 연결되면 불러와요."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 워크스페이스 기본값을 불러올 수 없어요. 다시 연결되면 불러와요."
+    }
+  ],
+  "blocked.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 재개하거나 중단할 수 있어요."
+    }
+  ],
+  "blocked.loginHandoff.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 재개하거나 중단할 수 있어요."
+    }
+  ],
+  "blocked.memberListStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 멤버 목록을 보여 줘요."
+    }
+  ],
+  "blocked.memberListStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 멤버 목록을 보여 줘요."
+    }
+  ],
+  "blocked.neverReceivedList.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
+  "blocked.neverReceivedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
+  "blocked.openExistingDm.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 이미 대화 중인 사람에게는 이동할 수 있어요."
+    }
+  ],
+  "blocked.openExistingDm.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 이미 대화 중인 사람에게는 이동할 수 있어요."
+    }
+  ],
+  "blocked.register.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 등록할 수 없어요."
+    }
+  ],
+  "blocked.register.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 등록할 수 없어요."
+    }
+  ],
+  "blocked.relinkKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 다시 연결할 수 없어요."
+    }
+  ],
+  "blocked.relinkKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 다시 연결할 수 없어요."
+    }
+  ],
+  "blocked.reloadPicturesLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 그림을 다시 불러와요."
+    }
+  ],
+  "blocked.reloadPicturesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결되면 그림을 다시 불러와요."
+    }
+  ],
+  "blocked.revokeKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 회수할 수 없어요."
+    }
+  ],
+  "blocked.revokeKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 회수할 수 없어요."
+    }
+  ],
+  "blocked.rotateOrRevoke.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 회전하거나 폐기할 수 없어요."
+    }
+  ],
+  "blocked.rotateOrRevoke.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 회전하거나 폐기할 수 없어요."
+    }
+  ],
+  "blocked.saveAfterReconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 저장은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.saveAfterReconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 저장은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.saveChangesLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 변경은 다시 연결된 뒤에 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveChangesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 변경은 다시 연결된 뒤에 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveDisplayName.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 표시 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveDisplayName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 표시 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveIt.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveName.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveNameResume.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이름을 저장할 수 없어요. 다시 연결되면 이어서 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveNameResume.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이름을 저장할 수 없어요. 다시 연결되면 이어서 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveReminder.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 알림을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveReminder.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 알림을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveWelcome.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 웰컴 설정을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveWelcome.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 웰컴 설정을 저장할 수 없어요."
+    }
+  ],
+  "blocked.sendRequestLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 요청을 보낼 수 있어요."
+    }
+  ],
+  "blocked.sendRequestLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결되면 요청을 보낼 수 있어요."
+    }
+  ],
+  "blocked.signIn.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 로그인할 수 없어요."
+    }
+  ],
+  "blocked.signIn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 로그인할 수 없어요."
+    }
+  ],
+  "blocked.startDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 해제를 시작할 수 없어요."
+    }
+  ],
+  "blocked.startDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 해제를 시작할 수 없어요."
+    }
+  ],
+  "blocked.stopOrDelete.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 멈추거나 지울 수 없어요."
+    }
+  ],
+  "blocked.stopOrDelete.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 멈추거나 지울 수 없어요."
+    }
+  ],
+  "blocked.subscribe.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 구독할 수 없어요."
+    }
+  ],
+  "blocked.subscribe.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 구독할 수 없어요."
+    }
+  ],
+  "blocked.terminalStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받아요."
+    }
+  ],
+  "blocked.terminalStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받아요."
+    }
+  ],
+  "blocked.turnOn.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 켤 수 없어요."
+    }
+  ],
+  "blocked.turnOn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 켤 수 없어요."
+    }
+  ],
+  "blocked.turnOnHelper.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.turnOnHelper.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unlinkDevice.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요."
+    }
+  ],
+  "blocked.unlinkDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요."
+    }
+  ],
+  "blocked.unlinkTeamAi.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unlinkTeamAi.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unregister.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 등록을 해제할 수 없어요."
+    }
+  ],
+  "blocked.unregister.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 등록을 해제할 수 없어요."
+    }
+  ],
+  "blocked.updatesPausedStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 갱신이 멈췄어요. 아래는 마지막으로 확인된 상태예요."
+    }
+  ],
+  "blocked.updatesPausedStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 갱신이 멈췄어요. 아래는 마지막으로 확인된 상태예요."
+    }
+  ],
+  "blocked.waitAMoment.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 잠깐 기다려요."
+    }
+  ],
+  "blocked.waitAMoment.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 잠깐 기다려요."
+    }
+  ],
+  "blocked.workStateNone.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아직 보여 줄 저장된 작업 상태가 없어요."
+    }
+  ],
+  "blocked.workStateNone.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아직 보여 줄 저장된 작업 상태가 없어요."
+    }
+  ],
+  "blocked.workStateStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 작업 상태예요."
+    }
+  ],
+  "blocked.workStateStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -276,6 +1192,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
     }
   ],
   "connection.boot.unreachable": [
@@ -384,10 +1312,40 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
     }
   ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "활동을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 프로필을 불러오지 못했어요"
+    }
+  ],
   "connection.load.agentRosterTitle": [
     {
       "type": 0,
       "value": "에이전트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "작업 상세를 불러오지 못했어요"
     }
   ],
   "connection.load.channelListTitle": [
@@ -402,6 +1360,54 @@ export const catalog: MessageCatalog = {
       "value": "대화를 불러오지 못했어요"
     }
   ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "기기 키 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "같은 서버의 Hermes 상태를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "인박스를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "기기 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "링크 확인 설정을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오지 못했어요"
+    }
+  ],
   "connection.load.membersTitle": [
     {
       "type": 0,
@@ -412,6 +1418,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "새 글을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
   "connection.load.reasonOffline": [
@@ -430,6 +1442,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
     }
   ],
   "connection.load.threadTitle": [

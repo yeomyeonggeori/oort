@@ -19,6 +19,7 @@ import {
 import type { Huddle } from "@momo/core/lib/api";
 import { HuddleMicMenu } from "./HuddleMicMenu";
 import { useHuddle, type HuddleController } from "./useHuddle";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 /** 참가자 전원의 이름(쉼표로 이은 전문): 칩의 `title`과 이름 글의 `title`이 같은 글을 읽는다. */
 function participantNames(huddle: Huddle): string {
@@ -308,7 +309,7 @@ export function HuddleHeaderBanner({
     return (
       <InlineBanner
         tone="neutral"
-        message="메시지 연결이 끊겼습니다. 오디오는 계속될 수 있으며 허들 나가기는 사용할 수 있습니다."
+        message={<BlockedReason frame="huddleJoined" />}
         testId="huddle-joined-offline"
       />
     );
@@ -317,7 +318,7 @@ export function HuddleHeaderBanner({
     return (
       <InlineBanner
         tone="neutral"
-        message="오프라인에서는 허들을 사용할 수 없습니다."
+        message={<BlockedReason frame="huddleUnavailable" />}
         testId="huddle-offline"
       />
     );

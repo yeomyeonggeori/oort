@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
-import { causeOfFailure } from "./failure";
+import { causeOfFailure, causeOfUnknownFailure } from "./failure";
 
 // 실패한 그 자리가 말하는 원인. 서버가 직접 답한 거절을 「서버에 닿지 못함」이라 부르면 사람이 할 수 있는 일(내용을
 // 고치기)을 숨기고, 닿지 못한 것을 거절이라 부르면 기다리면 될 일에 겁을 준다.
@@ -39,5 +39,14 @@ describe("실패의 원인 분류", () => {
     expect(causeOfFailure(new Error("boom"), false)).toBeNull();
     expect(causeOfFailure("x", true)).toBeNull();
     expect(causeOfFailure(undefined, true)).toBeNull();
+  });
+});
+
+describe("오류 객체를 모르는 자리의 원인", () => {
+  // 지키는 것: 기기가 아는 사실 하나만 본다. 꺼져 있다고 알 때만 오프라인이고, 모르면 오프라인이라 하지 않는다.
+  it("꺼져 있다고 알 때만 오프라인이고, 켜져 있거나 모르면 원인 없음", () => {
+    expect(causeOfUnknownFailure(false)).toBe("deviceOffline");
+    expect(causeOfUnknownFailure(true)).toBeNull();
+    expect(causeOfUnknownFailure(null)).toBeNull();
   });
 });

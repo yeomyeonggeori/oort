@@ -50,6 +50,7 @@ import {
   type WorkstreamActor,
 } from "@momo/core/features/workstreams/model";
 import { useWorkstream, useWorkstreamRuns } from "./useWorkstreams";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 작업 흐름 상세 (MOMO-677 / ADR-0143 이행 3).
@@ -506,7 +507,7 @@ export function WorkstreamDetailRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 아래는 마지막으로 확인된 내용입니다."
+          message={<BlockedReason frame="contentStale" />}
           testId="workstream-detail-offline"
         />
       )}

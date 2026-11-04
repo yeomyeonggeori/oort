@@ -22,6 +22,9 @@ import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { MessageBody } from "@/features/timeline/MessageBody";
 import { SystemLine } from "@/features/timeline/SystemLine";
@@ -38,6 +41,7 @@ import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import { InboxApprovalActions } from "./InboxApprovalActions";
 import { approvalRowControl, settledStatusLine } from "./approvalsPanel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 오른쪽 패널 (#3663): 목록에서 고른 항목의 **맥락**.
@@ -532,10 +536,10 @@ export function InboxDetail({
             )}
             <Skeleton ready={!context.isLoading} rows={3} className="p-2">
               {context.isError ? (
-                <InlineBanner
-                  message="대화를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={() => void context.refetch()}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadConversationTitle}
+                  cause={loadCauseOf(context.error)}
+                  onRetry={() => void context.refetch()}
                   testId="inbox-context-error"
                 />
               ) : messages.length === 0 ? (
@@ -585,7 +589,7 @@ export function InboxDetail({
           className="border-t border-line px-4 py-3 text-meta text-ink-muted"
           data-testid="inbox-reply-offline"
         >
-          오프라인이라 답장을 보낼 수 없어요. 연결되면 여기서 답할 수 있어요.
+          <BlockedReason frame="inboxReply" />
         </p>
       ) : (
         <ReplyBox entry={entry} onSent={refresh} />

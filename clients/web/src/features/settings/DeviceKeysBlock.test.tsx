@@ -5,6 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { DesktopDeviceKeyStatus } from "@/lib/tauri";
 import { DevicesSection } from "./DevicesSection";
@@ -138,7 +142,9 @@ const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: 
 let root: Root | null = null;
 let hostEl: HTMLElement | null = null;
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactAct.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal(
@@ -178,22 +184,20 @@ afterEach(() => {
   resetEscapeLayers();
 });
 
-function mount(): HTMLElement {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+function mount(korean = false): HTMLElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } },
   });
   hostEl = document.createElement("div");
   document.body.append(hostEl);
   root = createRoot(hostEl);
-  act(() =>
-    root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(DevicesSection, { offline: false, workspaceId: WS, memberId: ME })
-      )
-    )
+  const page = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(DevicesSection, { offline: false, workspaceId: WS, memberId: ME })
   );
+  act(() => root?.render(korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page));
   return hostEl;
 }
 
@@ -238,6 +242,35 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     core.listDeviceKeys.mockResolvedValue([rootRow, key()]);
     await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row appears");
     expect(q(host, "device-keys-no-phone")).toBeNull();
+  });
+
+  // #5242: 기기 키 목록을 못 읽으면 옛 「기기 키 목록을 불러오지 못했어요. 다시 시도해 주세요.」 대신 원인을 말하는 한 줄이 선다.
+  it("기기 키 목록을 못 읽으면 제목 뒤에 원인이 붙은 한 줄이 서고, 다시 시도가 목록을 다시 읽는다", async () => {
+    const cases: [Error, string][] = [
+      [new NetworkError("unreachable", 15_000), "기기 키 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "기기 키 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, sentence] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      core.listDeviceKeys.mockReset();
+      core.listDeviceKeys.mockRejectedValue(error);
+      const host = mount(true);
+      await waitFor(() => q(host, "device-keys-server-error") !== null, "server error");
+      const note = q(host, "device-keys-server-error")!;
+      expect(note.getAttribute("role")).toBe("alert");
+      expect(note.textContent).toContain(sentence);
+      expect(note.textContent).not.toMatch(/\d{3}/);
+      const reads = core.listDeviceKeys.mock.calls.length;
+      await act(async () => {
+        note.querySelector("button")?.click();
+      });
+      await waitFor(() => core.listDeviceKeys.mock.calls.length > reads, "retry reads again");
+      act(() => root?.unmount());
+      hostEl?.remove();
+      root = null;
+      hostEl = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("브라우저 탭에서는 그리지 않는다 (서명 키는 데스크탑 셸에만 있다)", async () => {

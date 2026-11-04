@@ -25,6 +25,7 @@ import {
 } from "./openDecisionStage";
 import { useDecisionStageDrag } from "./useDecisionStageDrag";
 import "./DecisionStage.css";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 /** 셸 한 곳에 둬요. 카드·칩은 openDecisionStage만 부르면 돼요. */
 export function DecisionStageHost() {
@@ -218,7 +219,7 @@ export function DecisionStage({ request, open, onClose }: {
           <DialogDescription className="sr-only">왼쪽과 오른쪽 화살표로 넘겨 보고, Esc로 닫아요. 결정은 거부 또는 승인 버튼을 눌러요.</DialogDescription>
           <main className="flex min-h-0 min-w-0 overflow-y-auto overscroll-contain" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
             <article ref={articleRef} className="m-auto flex w-full max-w-pane-md flex-col gap-4 rounded-2xl bg-surface p-6 text-body text-ink shadow-lg" data-testid="decision-stage-card">
-              {offline ? <InlineBanner tone="neutral" separator={false} message="연결이 없어요. 내용을 살펴보고 연결되면 결정해 주세요." testId="decision-stage-offline" /> : null}
+              {offline ? <InlineBanner tone="neutral" separator={false} message={<BlockedReason frame="decisionStage" />} testId="decision-stage-offline" /> : null}
               {request.loading ? <Skeleton ready={false} rows={4} /> : request.error ? (
                 <InlineBanner separator={false} message={request.error} actionLabel={request.onRetry ? "다시 불러오기" : undefined} onAction={request.onRetry} />
               ) : complete ? (

@@ -11,7 +11,8 @@
 //     브라우저(신호등 없음) 두 장. `OUT_ROOT/<LABEL>/*.png`.
 //   · 측정(`CHECKS=1`): 같은 장면에서 숫자로 잰다. 머리 요소가 신호등 자리(왼쪽 위 80x40)를 덮지 않고, 머리 줄의 세로 가운데가
 //     신호등 원 중심(y=20)에 맞고, 브라우저에서는 그 80px을 비우지 않는다. ←/→·+/-/0·Esc, 초점 가두기와 복귀, 낭독 이름, 복사.
-//     엔진은 Chromium과 WebKit(WKWebView의 엔진)이다.
+//     키보드로 열기(`ONLY=focus`, #5275): Enter로 열고(입력 방식 표지는 pointer) Tab·Shift+Tab이 밖으로 새지 않는지, 첫 초점 링이
+//     서는지(마우스로 열면 안 서는지), 펼치는 동안에도 안 새는지. 엔진은 Chromium과 WebKit(WKWebView의 엔진)이다.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓(capture-4190과 같은 길). 벽시계·로케일·시간대를 고정한다. 신호등은 진짜가 아니라
 // **페이지 위에 덧그린 세 원**이다(캡처 전용, 측정이 끝난 뒤에만 그린다): 네이티브 창 틀은 헤드리스 브라우저에 없다.
@@ -22,6 +23,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
+import { focusReturnsTo } from "../gates/focus.mjs";
 
 const WEB_ROOT = process.env.WEB_ROOT
   ? resolve(process.env.WEB_ROOT)
@@ -391,8 +393,9 @@ async function captureScenes(browserType, origin) {
       }
     }
     // 키보드로 열어 초점 고리를 본다(마우스로 열면 :focus-visible이 고리를 그리지 않는다). 닫기(처음 초점) → Shift+Tab으로 복사 → Tab 두 번으로 이전 단추.
-    {
-      const { context, page } = await open(browser, origin, "light", VIEWPORTS[1], { desktop: true });
+    // 라이트·다크 둘 다: 첫 장면(`desktop-focus-first-*`)은 키보드로 연 직후 화면 전체이고, 닫기 둘레의 링은 잘라 둔 사진(`desktop-focus-close-*`)에서 본다(#5275).
+    for (const scheme of SCHEMES) {
+      const { context, page } = await open(browser, origin, scheme, VIEWPORTS[1], { desktop: true });
       try {
         const trigger = opener(page, MULTI_MSG);
         await trigger.scrollIntoViewIfNeeded();
@@ -402,12 +405,13 @@ async function captureScenes(browserType, origin) {
         await page.waitForFunction(() => document.querySelector('[data-testid="image-lightbox"]')?.dataset.stagePhase === "open", null, { timeout: 15_000 });
         await page.waitForTimeout(250);
         await drawTrafficLights(page);
-        await shoot(page, "desktop-focus-close-light-1440", { clip: { x: 1100, y: 0, width: 340, height: 60 } });
+        await shoot(page, `desktop-focus-first-${scheme}-1440`);
+        await shoot(page, `desktop-focus-close-${scheme}-1440`, { clip: { x: 1100, y: 0, width: 340, height: 60 } });
         await page.keyboard.press("Shift+Tab");
-        await shoot(page, "desktop-focus-copy-light-1440", { clip: { x: 1100, y: 0, width: 340, height: 60 } });
+        await shoot(page, `desktop-focus-copy-${scheme}-1440`, { clip: { x: 1100, y: 0, width: 340, height: 60 } });
         await page.keyboard.press("Tab");
         await page.keyboard.press("Tab");
-        await shoot(page, "desktop-focus-prev-light-1440", { clip: { x: 0, y: 410, width: 100, height: 80 } });
+        await shoot(page, `desktop-focus-prev-${scheme}-1440`, { clip: { x: 0, y: 410, width: 100, height: 80 } });
         await eraseTrafficLights(page);
         await closeLightbox(page);
       } finally {
@@ -774,10 +778,135 @@ async function keyboardChecks(browserType, engine, origin) {
       await page.keyboard.press("Equal"); await settle();
       await page.keyboard.press("Escape");
       await page.getByTestId("image-lightbox").waitFor({ state: "detached", timeout: 10_000 });
-      const back = await trigger.evaluate((node) => node === document.activeElement);
+      // 복귀는 닫힘 전환이 끝난 뒤 프레임에 일어난다(gates/focus.mjs, #5048): 한 번만 재면 경주다.
+      const back = await focusReturnsTo(trigger);
       check(engine, "[초점] Esc로 닫으면 초점이 여는 단추로 돌아온다(확대 중이어도)", back === true);
     } finally {
       await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * 키보드로 열기 (#5275): 초점 가두기(B1)와 첫 초점의 링(H1). 마우스로 여는 길과 다르다: 열기 단추가 Enter로 눌리고, 그때 입력 방식 표지
+ * (`data-focus-modality`)는 아직 pointer다(Enter·Space는 표지를 올리지 않는다). 수리 전에는 ① 움직임 줄이기로 열면 `interactive`가
+ * Radix FocusScope보다 먼저 닫기를 잡아 「마지막 초점」 기억이 비었고, WebKit(단추를 건너뛰는 탭 순서)의 Shift+Tab 한 번이 무대 뒤 입력창으로
+ * 샜으며, ② 두 엔진 모두 첫 초점 「닫기」에 링이 없었다. 여기서는 Tab 없이 `focus()` + Enter로 열어 표지를 pointer로 둔다(실제로 틀린 길).
+ */
+async function keyboardOpenChecks(browserType, engine, origin) {
+  const browser = await browserType.launch();
+  try {
+    const state = (page) => page.evaluate(() => {
+      const el = document.activeElement;
+      const box = document.querySelector('[data-testid="image-lightbox"]');
+      const style = el ? getComputedStyle(el) : null;
+      return {
+        id: el?.getAttribute?.("data-testid") ?? el?.tagName ?? null,
+        inside: !!(box && el && box.contains(el)),
+        ring: style ? `${style.outlineStyle} ${style.outlineWidth}` : null,
+        // 계산된 outline이 실제로 그려지는 모양인가(style none이면 폭 값이 남아 있어도 안 그려진다).
+        ringShown: style ? style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2 : false,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
+        phase: box?.getAttribute("data-stage-phase") ?? null,
+      };
+    });
+    const openByKeyboard = async (page) => {
+      const trigger = opener(page, MULTI_MSG);
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.focus();
+      const stamp = (await state(page)).modality;
+      await page.keyboard.press("Enter");
+      return { trigger, stamp };
+    };
+    const settledOpen = async (page) => {
+      await page.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
+      await page.waitForFunction(() => document.querySelector('[data-testid="image-lightbox"]')?.dataset.stagePhase === "open", null, { timeout: 15_000 });
+      await page.waitForTimeout(250);
+    };
+    // 한 번에 한 방향을 길게 누르는 것이 아니라 섞어 누른다. 첫 두 번이 Shift+Tab인 것이 중요하다: 수리 전 WebKit은 거기서 새어 나갔다.
+    const KEYS = ["Shift+Tab", "Shift+Tab", "Tab", "Tab", "Tab", "Shift+Tab", "Tab", "Tab", "Tab", "Tab", "Tab", "Shift+Tab", "Tab", "Tab"];
+
+    for (const motion of ["reduce", "no-preference"]) {
+      const tag = `[키보드로 열기·${motion === "reduce" ? "움직임 줄임" : "움직임 켬"}]`;
+      const { context, page } = await open(browser, origin, "light", VIEWPORTS[1], { desktop: false, motion });
+      try {
+        const { trigger, stamp } = await openByKeyboard(page);
+        check(engine, `${tag} 시험이 실제로 틀린 길에서 시작한다(입력 방식 표지가 아직 pointer)`, stamp === "pointer", String(stamp));
+        await settledOpen(page);
+        const first = await state(page);
+        check(engine, `${tag} 열면 초점이 닫기 단추에 선다`, first.id === "image-lightbox-close" && first.inside, JSON.stringify(first));
+        check(engine, `${tag} 첫 초점 「닫기」에 초점 링이 보인다(계산된 outline)`, first.ringShown === true, JSON.stringify(first));
+        let escaped = 0;
+        const visited = [];
+        for (const key of KEYS) {
+          await page.keyboard.press(key);
+          await page.waitForTimeout(40);
+          const now = await state(page);
+          if (!now.inside) escaped += 1;
+          visited.push(`${key}:${now.id}${now.inside ? "" : "(밖)"}`);
+        }
+        check(engine, `${tag} Tab·Shift+Tab ${KEYS.length}번 동안 초점이 라이트박스 밖으로 나가지 않는다`, escaped === 0, `escaped=${escaped} ${visited.join(" ")}`);
+        await page.keyboard.press("Escape");
+        await page.getByTestId("image-lightbox").waitFor({ state: "detached", timeout: 10_000 });
+        check(engine, `${tag} Esc로 닫으면 초점이 여는 썸네일로 돌아온다`, (await focusReturnsTo(trigger)) === true);
+      } finally {
+        await context.close();
+      }
+    }
+
+    // 펼치는 동안(hero 이동 중): 크롬은 숨어 닫기가 초점을 못 받는다. 이때 초점이 열기 단추(무대 뒤)에 남으면 Tab이 밖으로 샌다.
+    // hero 애니메이션을 만들어지는 순간 멈춰 이 구간을 결정적으로 만든다(시계에 기대지 않는다).
+    {
+      const tag = "[키보드로 열기·펼치는 중]";
+      const { context, page } = await open(browser, origin, "light", VIEWPORTS[1], { desktop: false, motion: "no-preference" });
+      try {
+        await page.evaluate(() => {
+          const original = Element.prototype.animate;
+          window.__heroHeld = [];
+          Element.prototype.animate = function (...args) {
+            const animation = original.apply(this, args);
+            if (this.classList?.contains("stage-hero")) { animation.pause(); window.__heroHeld.push(animation); }
+            return animation;
+          };
+        });
+        await openByKeyboard(page);
+        await page.waitForFunction(() => window.__heroHeld.length > 0, null, { timeout: 15_000 });
+        await page.waitForTimeout(150);
+        const held = await state(page);
+        check(engine, `${tag} 시험이 펼치는 구간에 선다(단계 opening)`, held.phase === "opening", JSON.stringify(held));
+        let escaped = 0;
+        const visited = [];
+        for (const key of ["Tab", "Shift+Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab"]) {
+          await page.keyboard.press(key);
+          await page.waitForTimeout(40);
+          const now = await state(page);
+          if (!now.inside) escaped += 1;
+          visited.push(`${key}:${now.id}${now.inside ? "" : "(밖)"}`);
+        }
+        check(engine, `${tag} 펼치는 동안 Tab·Shift+Tab이 라이트박스 밖으로 새지 않는다`, escaped === 0, `escaped=${escaped} ${visited.join(" ")}`);
+        await page.evaluate(() => window.__heroHeld.forEach((animation) => animation.play()));
+        await settledOpen(page);
+        const landed = await state(page);
+        check(engine, `${tag} 펼침이 끝나면 초점이 닫기 단추로 옮겨 가고 링이 보인다`, landed.id === "image-lightbox-close" && landed.ringShown === true, JSON.stringify(landed));
+      } finally {
+        await context.close();
+      }
+    }
+
+    // 마우스로 열면 링이 서지 않는다: 같은 첫 초점이지만 입력 방식 표지가 pointer 그대로여야 한다.
+    {
+      const tag = "[마우스로 열기]";
+      const { context, page } = await open(browser, origin, "light", VIEWPORTS[1], { desktop: false, motion: "reduce" });
+      try {
+        await openLightbox(page, MULTI_MSG);
+        const clicked = await state(page);
+        check(engine, `${tag} 열면 초점이 닫기 단추에 선다`, clicked.id === "image-lightbox-close" && clicked.inside, JSON.stringify(clicked));
+        check(engine, `${tag} 첫 초점 「닫기」에 초점 링이 서지 않는다`, clicked.ringShown === false && clicked.modality === "pointer", JSON.stringify(clicked));
+      } finally {
+        await context.close();
+      }
     }
   } finally {
     await browser.close();
@@ -893,14 +1022,15 @@ async function probe(origin) {
 }
 
 async function runChecks(origin) {
-  // `ONLY=geometry,pixel,narrow,keyboard,copy`: 사보타주 때 지키는 줄에 해당하는 묶음만 돌린다. 기본은 전부다.
-  const only = new Set((process.env.ONLY || "geometry,pixel,narrow,keyboard,copy").split(","));
+  // `ONLY=geometry,pixel,narrow,keyboard,focus,copy`: 사보타주 때 지키는 줄에 해당하는 묶음만 돌린다. 기본은 전부다.
+  const only = new Set((process.env.ONLY || "geometry,pixel,narrow,keyboard,focus,copy").split(","));
   for (const name of ENGINES) {
     const browserType = name === "webkit" ? webkit : chromium;
     if (only.has("geometry")) await geometryChecks(browserType, name, origin);
     if (only.has("pixel")) await pixelChecks(browserType, name, origin);
     if (only.has("narrow")) await narrowChecks(browserType, name, origin);
     if (only.has("keyboard")) await keyboardChecks(browserType, name, origin);
+    if (only.has("focus")) await keyboardOpenChecks(browserType, name, origin);
   }
   if (only.has("copy") && ENGINES.includes("chromium")) await copyChecks(origin);
   writeFileSync(resolve(outDir(), "checks.json"), JSON.stringify({ label: LABEL, dist: DIST, passes, failures }, null, 2));

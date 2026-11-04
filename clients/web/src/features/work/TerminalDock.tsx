@@ -16,6 +16,7 @@ import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
 import { useSession } from "@/app/session";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import { WORK_CONSOLE_VIEW_PATH } from "@momo/core/features/workbench/workTab";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 function readPx(name: string): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -343,7 +344,7 @@ export function TerminalDock({
           <InlineBanner
             tone="neutral"
             separator={false}
-            message="연결이 끊겼습니다. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받습니다."
+            message={<BlockedReason frame="terminalStale" />}
             testId="terminal-dock-offline"
           />
         )}
