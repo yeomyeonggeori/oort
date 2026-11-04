@@ -42,6 +42,7 @@ import {
 import { SecretInput } from "./SecretInput";
 import { ChoiceRadios, Field, SelectField, SettingsToggleRow } from "./SettingsFields";
 import { SettingsSection } from "./shell/SettingsSection";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -64,8 +65,7 @@ import { SettingsSection } from "./shell/SettingsSection";
 // =============================================================================
 
 const OFFLINE_NOTE_ID = "dev-access-create-offline-note";
-const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 연결을 만들 수 없어요. 다시 연결된 뒤에 눌러 주세요.";
+const OFFLINE_CREATE_REASON: BlockedFrame = "createDevAccess";
 
 const NAME_HINT = "목록에서 이 연결을 알아볼 수 있는 이름이에요.";
 const PASSWORD_HINT = "연결을 만들 때마다 한 번 더 확인해요. 이 값은 저장하지 않아요.";
@@ -434,7 +434,7 @@ export function DevAccessCreateForm({
                 className="min-w-0 flex-1 break-keep text-meta text-ink-muted"
                 data-testid="dev-access-create-offline"
               >
-                {OFFLINE_CREATE_REASON}
+                <BlockedReason frame={OFFLINE_CREATE_REASON} />
               </span>
             )}
             <Button

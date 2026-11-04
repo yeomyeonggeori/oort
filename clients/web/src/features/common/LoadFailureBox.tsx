@@ -2,6 +2,7 @@ import { Button } from "@/design/ui/button";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { CONNECTION_KEYS, type ConnectionPlainKey } from "@momo/core/features/connection/copyKeys";
 import { copyForCause, type ConnectionCause } from "@momo/core/features/connection/model";
+import { loadFailureSentence } from "./loadFailure";
 import { InlineBanner } from "./States";
 
 // =============================================================================
@@ -46,6 +47,50 @@ export function LoadFailureBox({
         {formatMessage(CONNECTION_KEYS.retry)}
       </Button>
     </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// 남은 「불러오지 못했습니다」 자리들 (#5242, #5221 후속).
+//
+// 자리가 통째로 비는 곳(목록·상세·창 본문, 받아 둔 것 없음)은 위의 상자, 카드·설정 행·좁은 자리는 아래의 한 줄(`LoadFailureNote`)이다.
+// 둘은 같은 제목 키와 같은 이유 표(`copyForCause`)를 읽는다: 무엇을 못 불러왔고(제목) 왜이며 무엇을 하면 되는지(이유)를 닫힌 분류의
+// 완결된 문장으로 말하고, 상태 코드·서버 원문은 어디에도 없다. 실패한 그 자리의 오류 객체가 없으면(`isError`만 아는 자리) 원인은 `null`이고
+// 이유는 「문제가 생겼어요」다.
+// -----------------------------------------------------------------------------
+
+/**
+ * 상자가 맞지 않는 좁은 자리의 **원인 한 줄**: 옛 `InlineBanner`가 서던 그 자리에 그대로 서고(같은 배너·같은 여백 규칙),
+ * 문장만 제목 + 이유 한 벌이 된다. 단추가 없는 자리는 `onRetry`를 생략한다(문장은 그대로다).
+ */
+export function LoadFailureNote({
+  titleKey,
+  cause,
+  onRetry,
+  actionBusy,
+  separator,
+  className,
+  testId,
+}: {
+  titleKey: ConnectionPlainKey;
+  cause: ConnectionCause | null;
+  onRetry?: () => void;
+  actionBusy?: boolean;
+  separator?: boolean;
+  className?: string;
+  testId?: string;
+}) {
+  const formatMessage = useFormatMessage();
+  return (
+    <InlineBanner
+      message={loadFailureSentence(formatMessage, titleKey, cause)}
+      actionLabel={onRetry ? formatMessage(CONNECTION_KEYS.retry) : undefined}
+      onAction={onRetry}
+      actionBusy={actionBusy}
+      separator={separator}
+      className={className}
+      testId={testId}
+    />
   );
 }
 

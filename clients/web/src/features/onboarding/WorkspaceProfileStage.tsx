@@ -50,9 +50,7 @@ import {
   S1_DISPLAY_ERROR_ID,
   S1_FAILURE,
   S1_HANDLE_ERROR_ID,
-  S1_OFFLINE_LINE,
   S1_OFFLINE_NOTE_ID,
-  S1_OFFLINE_REASON,
   S1_PRIMARY_BUSY,
   S1_PRIMARY_LABEL,
   S1_PRIMARY_RETRY,
@@ -67,6 +65,7 @@ import {
   S1_WORKSPACE_ERROR_ID,
 } from "./s1Copy";
 import { clearS1Draft, readS1Draft, resolveS1Seeds, writeS1Draft } from "./s1Draft";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: onboarding S1 (우리 팀 이름, 온보딩 2.0 D2) for internal
 // team users on web+Tauri, density 5/10, motion 2/10.
@@ -109,6 +108,8 @@ export function WorkspaceProfileStage({
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const offline = useBrowserOffline();
+  // 막은 원인을 말하는 문장(#5260). 이 단계의 게이트는 브라우저 오프라인이라 원인은 기기 오프라인이다.
+  const offlineLine = useBlockedReason("waitAMoment");
   const queryClient = useQueryClient();
   const workspaceEdited = useRef(false);
   const profileSaved = hasOwnerOnboardingSettingsDoor("profile");
@@ -347,7 +348,7 @@ export function WorkspaceProfileStage({
   const guideState: GuideState =
     offline || formError || staleName ? "trouble" : "awaiting";
   const guideLine = offline
-    ? S1_OFFLINE_LINE
+    ? offlineLine
     : staleName
       ? S1_STALE_LINE
       : formError
@@ -380,7 +381,7 @@ export function WorkspaceProfileStage({
         {offline && (
           <InlineBanner
             tone="neutral"
-            message={S1_OFFLINE_REASON}
+            message={<BlockedReason frame="saveNameResume" />}
             messageId={S1_OFFLINE_NOTE_ID}
             testId="onboarding-s1-offline"
           />

@@ -255,7 +255,14 @@ describe("문구 키 전수", () => {
     };
     const ko = await format("ko-KR");
     const en = await format("en-US");
+    // 값만 잇는 틀(제목 + 이유를 한 문장으로 묶는 `{title}. {reason}`)에는 글자가 없다. 한글 검사 대신 두 값이 모두 들어갔는지 잰다(#5242).
+    const templateOnly = new Set<string>([K.loadSentence]);
     for (const key of registry) {
+      if (templateOnly.has(key)) {
+        expect(ko[key], key).toBe("3m. 3m");
+        expect(en[key], key).toBe("3m. 3m");
+        continue;
+      }
       expect(ko[key], key).toMatch(/[가-힣]/);
       expect(en[key], key).not.toMatch(/[가-힣]/);
       expect(en[key].trim(), key).not.toBe("");

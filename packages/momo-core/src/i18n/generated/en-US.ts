@@ -224,6 +224,922 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "blocked.addMemberLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can add members once you're connected again."
+    }
+  ],
+  "blocked.addMemberLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can add members once we're connected again."
+    }
+  ],
+  "blocked.aiKeysLead.offline": [
+    {
+      "type": 0,
+      "value": "You're offline."
+    }
+  ],
+  "blocked.aiKeysLead.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
+  "blocked.approveOrDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't approve or disconnect right now."
+    }
+  ],
+  "blocked.approveOrDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't approve or disconnect right now."
+    }
+  ],
+  "blocked.changeAiLink.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change or check this connection right now."
+    }
+  ],
+  "blocked.changeAiLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change or check this connection right now."
+    }
+  ],
+  "blocked.changeHere.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this right now. You can change it here once you're connected again."
+    }
+  ],
+  "blocked.changeHere.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this right now. You can change it here once we're connected again."
+    }
+  ],
+  "blocked.changeIt.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this right now."
+    }
+  ],
+  "blocked.changeIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this right now."
+    }
+  ],
+  "blocked.changeLimits.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change the limits right now."
+    }
+  ],
+  "blocked.changeLimits.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change the limits right now."
+    }
+  ],
+  "blocked.changeProfile.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change your display name, handle, or profile photo right now."
+    }
+  ],
+  "blocked.changeProfile.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change your display name, handle, or profile photo right now."
+    }
+  ],
+  "blocked.changeRules.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change the rules right now."
+    }
+  ],
+  "blocked.changeRules.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change the rules right now."
+    }
+  ],
+  "blocked.changeSetting.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change this setting right now."
+    }
+  ],
+  "blocked.changeSetting.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change this setting right now."
+    }
+  ],
+  "blocked.changeStatus.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't change your status right now."
+    }
+  ],
+  "blocked.changeStatus.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't change your status right now."
+    }
+  ],
+  "blocked.changeTeamAiKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't check or change the team AI key right now."
+    }
+  ],
+  "blocked.changeTeamAiKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't check or change the team AI key right now."
+    }
+  ],
+  "blocked.confirmDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't confirm disconnecting right now."
+    }
+  ],
+  "blocked.confirmDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't confirm disconnecting right now."
+    }
+  ],
+  "blocked.contentStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the content as last confirmed."
+    }
+  ],
+  "blocked.contentStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the content as last confirmed."
+    }
+  ],
+  "blocked.createAgentLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create an agent once you're connected again."
+    }
+  ],
+  "blocked.createAgentLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create an agent once we're connected again."
+    }
+  ],
+  "blocked.createChannelLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create a channel once you're connected again."
+    }
+  ],
+  "blocked.createChannelLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create a channel once we're connected again."
+    }
+  ],
+  "blocked.createDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create a connection right now. Try again once you're connected again."
+    }
+  ],
+  "blocked.createDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create a connection right now. Try again once we're connected again."
+    }
+  ],
+  "blocked.createInviteLink.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create an invite link right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createInviteLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create an invite link right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createQrLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create the QR code once you're connected again."
+    }
+  ],
+  "blocked.createQrLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create the QR code once we're connected again."
+    }
+  ],
+  "blocked.createThing.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create this right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createThing.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create this right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createWebhookUrl.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create the URL right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.createWebhookUrl.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create the URL right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.createWorkspace.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't create a workspace right now."
+    }
+  ],
+  "blocked.createWorkspace.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't create a workspace right now."
+    }
+  ],
+  "blocked.createWorkspaceLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can create a workspace once you're connected again."
+    }
+  ],
+  "blocked.createWorkspaceLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can create a workspace once we're connected again."
+    }
+  ],
+  "blocked.decideNow.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. You can press it once you're connected again."
+    }
+  ],
+  "blocked.decideNow.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. You can press it once we're connected again."
+    }
+  ],
+  "blocked.decisionStage.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Look through the details, and decide once you're connected again."
+    }
+  ],
+  "blocked.decisionStage.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Look through the details, and decide once we're connected again."
+    }
+  ],
+  "blocked.delegate.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't hand this off right now."
+    }
+  ],
+  "blocked.delegate.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't hand this off right now."
+    }
+  ],
+  "blocked.deleteDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't delete the connection right now. You can delete it once you're connected again."
+    }
+  ],
+  "blocked.deleteDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't delete the connection right now. You can delete it once we're connected again."
+    }
+  ],
+  "blocked.doThis.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't do this right now."
+    }
+  ],
+  "blocked.doThis.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't do this right now."
+    }
+  ],
+  "blocked.doThisLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't do this right now. Try again once you're connected again."
+    }
+  ],
+  "blocked.doThisLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't do this right now. Try again once we're connected again."
+    }
+  ],
+  "blocked.draftsOnDevice.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Your drafts are on this device."
+    }
+  ],
+  "blocked.draftsOnDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Your drafts are on this device."
+    }
+  ],
+  "blocked.huddleJoined.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Messages can't go through, but audio may keep going and you can still leave the huddle."
+    }
+  ],
+  "blocked.huddleJoined.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Messages can't go through, but audio may keep going and you can still leave the huddle."
+    }
+  ],
+  "blocked.huddleUnavailable.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so huddles aren't available right now."
+    }
+  ],
+  "blocked.huddleUnavailable.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so huddles aren't available right now."
+    }
+  ],
+  "blocked.inboxReply.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send a reply right now. Once you're connected again, you can reply here."
+    }
+  ],
+  "blocked.inboxReply.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't send a reply right now. Once we're connected again, you can reply here."
+    }
+  ],
+  "blocked.issueCredential.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't issue or change connection values right now."
+    }
+  ],
+  "blocked.issueCredential.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't issue or change connection values right now."
+    }
+  ],
+  "blocked.issueKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't issue this right now."
+    }
+  ],
+  "blocked.issueKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't issue this right now."
+    }
+  ],
+  "blocked.keepListIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep browsing the list, and issue once you're connected again."
+    }
+  ],
+  "blocked.keepListIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep browsing the list, and issue once we're connected again."
+    }
+  ],
+  "blocked.keepViewChangeLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep reading what was last received, and make changes once you're connected again."
+    }
+  ],
+  "blocked.keepViewChangeLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep reading what was last received, and make changes once we're connected again."
+    }
+  ],
+  "blocked.keepViewIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can keep reading the last state received, and issue values or approve once you're connected again."
+    }
+  ],
+  "blocked.keepViewIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can keep reading the last state received, and issue values or approve once we're connected again."
+    }
+  ],
+  "blocked.lastSyncedList.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". Below is how things were then."
+    }
+  ],
+  "blocked.lastSyncedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". Below is how things were then."
+    }
+  ],
+  "blocked.listStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the list as last confirmed."
+    }
+  ],
+  "blocked.listStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the list as last confirmed."
+    }
+  ],
+  "blocked.loadHosts.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the registered host list can't be loaded. We'll load it once you're connected again."
+    }
+  ],
+  "blocked.loadHosts.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the registered host list can't be loaded. We'll load it once we're connected again."
+    }
+  ],
+  "blocked.loadPolicy.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the policy can't be loaded. Existing sessions stay as they are."
+    }
+  ],
+  "blocked.loadPolicy.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the policy can't be loaded. Existing sessions stay as they are."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so the workspace defaults can't be loaded. We'll load them once you're connected again."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so the workspace defaults can't be loaded. We'll load them once we're connected again."
+    }
+  ],
+  "blocked.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're connected again, you can resume or stop here."
+    }
+  ],
+  "blocked.loginHandoff.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can resume or stop here."
+    }
+  ],
+  "blocked.memberListStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Showing the member list we last received."
+    }
+  ],
+  "blocked.memberListStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Showing the member list we last received."
+    }
+  ],
+  "blocked.neverReceivedList.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. We haven't received this list even once yet."
+    }
+  ],
+  "blocked.neverReceivedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. We haven't received this list even once yet."
+    }
+  ],
+  "blocked.openExistingDm.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can still go to people you're already chatting with."
+    }
+  ],
+  "blocked.openExistingDm.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can still go to people you're already chatting with."
+    }
+  ],
+  "blocked.register.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't register right now."
+    }
+  ],
+  "blocked.register.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't register right now."
+    }
+  ],
+  "blocked.relinkKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't link again right now."
+    }
+  ],
+  "blocked.relinkKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't link again right now."
+    }
+  ],
+  "blocked.reloadPicturesLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. We'll reload the pictures once you're connected again."
+    }
+  ],
+  "blocked.reloadPicturesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. We'll reload the pictures once we're connected again."
+    }
+  ],
+  "blocked.revokeKey.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't revoke this right now."
+    }
+  ],
+  "blocked.revokeKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't revoke this right now."
+    }
+  ],
+  "blocked.rotateOrRevoke.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't rotate or revoke this right now."
+    }
+  ],
+  "blocked.rotateOrRevoke.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't rotate or revoke this right now."
+    }
+  ],
+  "blocked.saveAfterReconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can save once you're connected again."
+    }
+  ],
+  "blocked.saveAfterReconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can save once we're connected again."
+    }
+  ],
+  "blocked.saveChangesLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can save changes once you're connected again."
+    }
+  ],
+  "blocked.saveChangesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can save changes once we're connected again."
+    }
+  ],
+  "blocked.saveDisplayName.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the display name right now."
+    }
+  ],
+  "blocked.saveDisplayName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the display name right now."
+    }
+  ],
+  "blocked.saveIt.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save this right now."
+    }
+  ],
+  "blocked.saveIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save this right now."
+    }
+  ],
+  "blocked.saveName.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the name right now."
+    }
+  ],
+  "blocked.saveName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the name right now."
+    }
+  ],
+  "blocked.saveNameResume.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the name right now. You can pick up where you left off once you're connected again."
+    }
+  ],
+  "blocked.saveNameResume.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the name right now. You can pick up where you left off once we're connected again."
+    }
+  ],
+  "blocked.saveReminder.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the reminder right now."
+    }
+  ],
+  "blocked.saveReminder.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the reminder right now."
+    }
+  ],
+  "blocked.saveWelcome.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't save the welcome settings right now."
+    }
+  ],
+  "blocked.saveWelcome.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't save the welcome settings right now."
+    }
+  ],
+  "blocked.sendRequestLater.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can send the request once you're connected again."
+    }
+  ],
+  "blocked.sendRequestLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. You can send the request once we're connected again."
+    }
+  ],
+  "blocked.signIn.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't sign in right now."
+    }
+  ],
+  "blocked.signIn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't sign in right now."
+    }
+  ],
+  "blocked.startDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't start disconnecting right now."
+    }
+  ],
+  "blocked.startDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't start disconnecting right now."
+    }
+  ],
+  "blocked.stopOrDelete.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't pause or delete this right now."
+    }
+  ],
+  "blocked.stopOrDelete.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't pause or delete this right now."
+    }
+  ],
+  "blocked.subscribe.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't subscribe right now."
+    }
+  ],
+  "blocked.subscribe.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't subscribe right now."
+    }
+  ],
+  "blocked.terminalStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Sessions already loaded stay as they are, and the output continues once you're connected again."
+    }
+  ],
+  "blocked.terminalStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Sessions already loaded stay as they are, and the output continues once we're connected again."
+    }
+  ],
+  "blocked.turnOn.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't turn this on right now."
+    }
+  ],
+  "blocked.turnOn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't turn this on right now."
+    }
+  ],
+  "blocked.turnOnHelper.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't turn on the helper right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.turnOnHelper.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't turn on the helper right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unlinkDevice.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't unlink the device right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.unlinkDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't unlink the device right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unlinkTeamAi.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't disconnect right now. You can continue once you're connected again."
+    }
+  ],
+  "blocked.unlinkTeamAi.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't disconnect right now. You can continue once we're connected again."
+    }
+  ],
+  "blocked.unregister.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't unregister right now."
+    }
+  ],
+  "blocked.unregister.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't unregister right now."
+    }
+  ],
+  "blocked.updatesPausedStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so updates have paused. Below is the state as last confirmed."
+    }
+  ],
+  "blocked.updatesPausedStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so updates have paused. Below is the state as last confirmed."
+    }
+  ],
+  "blocked.waitAMoment.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so let's wait a moment."
+    }
+  ],
+  "blocked.waitAMoment.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so let's wait a moment."
+    }
+  ],
+  "blocked.workStateNone.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. There's no saved work state to show yet."
+    }
+  ],
+  "blocked.workStateNone.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. There's no saved work state to show yet."
+    }
+  ],
+  "blocked.workStateStale.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Below is the work state as last confirmed."
+    }
+  ],
+  "blocked.workStateStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Below is the work state as last confirmed."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -438,6 +1354,42 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
     }
   ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't show which channels this agent is in"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent profile"
+    }
+  ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent list"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the task details"
+    }
+  ],
   "connection.load.channelListTitle": [
     {
       "type": 0,
@@ -450,6 +1402,54 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the conversation"
     }
   ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device keys"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the status of Hermes on this server"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the next items. The ones you already have are still here"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the inbox"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device list"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the link check setting"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member profile"
+    }
+  ],
   "connection.load.membersTitle": [
     {
       "type": 0,
@@ -460,6 +1460,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load new messages"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the notification rules"
     }
   ],
   "connection.load.reasonOffline": [
@@ -478,6 +1484,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
     }
   ],
   "connection.load.threadTitle": [

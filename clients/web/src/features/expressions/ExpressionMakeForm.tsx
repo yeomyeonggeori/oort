@@ -31,6 +31,7 @@ import { useExpressions } from "./context";
 import { ExpressionMakePreview } from "./ExpressionMakePreview";
 import { MakeStepError, makeFailureLine, resumeAttempt, runMakeAttempt, type MakeAttempt, type MakeStep } from "./makeFlow";
 import { useReduceMotion } from "./useReduceMotion";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「AI와 만들기」 양식 (#4820 B, ADR-0218 §7 G8의 B 줄).
@@ -330,7 +331,7 @@ export function ExpressionMakeForm({ onImport, onClose }: { onImport: () => void
     </div>
 
     <div className="flex flex-col gap-2 border-t border-line pt-3" hidden={gated} data-testid="expression-make-footer">
-      {offline && <p id={ids.offline} role="status" className="break-keep text-meta text-ink-muted">연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요.</p>}
+      {offline && <p id={ids.offline} role="status" className="break-keep text-meta text-ink-muted"><BlockedReason frame="sendRequestLater" /></p>}
       {busy && <p role="status" className="text-meta text-ink-muted" data-testid="expression-make-status">{STEP_LINES[phase.step]}</p>}
       {phase.kind === "failed" && <p role="alert" className="break-keep text-meta text-danger" data-testid="expression-make-error">{phase.line}</p>}
       {sent && <p role="status" className="break-keep text-meta" data-testid="expression-make-sent">요청을 보냈어요. 에이전트의 답과 승인 카드는 대화에서 볼 수 있어요.</p>}

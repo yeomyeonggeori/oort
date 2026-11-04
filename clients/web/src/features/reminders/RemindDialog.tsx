@@ -23,6 +23,7 @@ import {
   REMINDER_NOTE_MAX,
   REMINDER_SNOOZE_COMMIT_LABEL,
 } from "@momo/core/features/reminders/model";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: message overflow / inbox snooze dialog for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
@@ -105,7 +106,7 @@ export function RemindDialog({
         {offline && (
           <InlineBanner
             tone="neutral"
-            message="연결이 끊겨 지금은 알림을 저장할 수 없습니다."
+            message={<BlockedReason frame="saveReminder" />}
             testId="remind-dialog-offline"
           />
         )}

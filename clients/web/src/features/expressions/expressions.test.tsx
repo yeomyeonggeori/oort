@@ -254,7 +254,7 @@ describe("team expressions web/desktop port", () => {
     expect(view.queryByTestId("team-expressions")).toBeTruthy();
     store.transport.json = vi.fn().mockRejectedValue(new Error("unreachable"));
     await act(() => store.refresh()); expect(view.getByRole("button", { name: "다시 시도" })).toBeTruthy();
-    await act(async () => { store.setOffline(true); }); expect(view.getByText(/연결이 끊겼어요/)).toBeTruthy();
+    await act(async () => { store.setOffline(true); }); expect(view.getByText(/You're offline\. We'll reload the pictures/)).toBeTruthy();
     const fresh = makeStore(); await fresh.refresh();
     for (const item of fresh.getSnapshot().cache.items) await fresh.mutate({ method: "DELETE", path: `${fresh.base}/expressions/${item.id}` });
     await act(async () => { view.rerender(wrapper(fresh, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />)); });

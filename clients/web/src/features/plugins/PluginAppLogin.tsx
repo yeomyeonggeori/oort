@@ -19,6 +19,7 @@ import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { StatusChip } from "@/features/settings/SettingsFields";
 import { LoginRelaySession } from "@/features/settings/LoginRelaySession";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: 앱 상세 › 로그인 (instance operator only) for internal team users on web+Tauri,
 // density 6/10, motion 1/10.
@@ -157,7 +158,7 @@ export function PluginAppLogin({ pluginId, offline }: { pluginId: string; offlin
         )}
       </div>
       {startError !== null && <InlineBanner message={startError} testId="app-login-start-error" />}
-      {offline && <InlineBanner tone="neutral" message="연결이 끊긴 동안에는 로그인할 수 없어요." testId="app-login-offline" />}
+      {offline && <InlineBanner tone="neutral" message={<BlockedReason frame="signIn" />} testId="app-login-offline" />}
       {active !== null && (
         <LoginRelaySession
           key={`${agentId}:${active.loginId}`}

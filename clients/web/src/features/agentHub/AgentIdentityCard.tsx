@@ -9,6 +9,7 @@ import { InlineBanner } from "@/features/common/States";
 import { MemberAvatar } from "@/features/common/MemberAvatar";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { renameDraftState, renameErrorCopy } from "./identityCardModel";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // 에이전트 › 프로필 탭 맨 위 「프로필 카드」 (#3821). 사진 · 표시 이름 · 소개 · 상태 문구를
 // 한 판에 둔다. 이름은 소유자와 admin이 여기서 바꾼다(`PATCH /agents/{agent}`).
@@ -96,7 +97,7 @@ export function AgentIdentityCard({
               </p>
               {offline && (
                 <p className="text-meta text-ink-muted">
-                  연결이 끊긴 동안에는 저장할 수 없어요.
+                  <BlockedReason frame="saveIt" />
                 </p>
               )}
               {rename.isError && (
@@ -162,7 +163,7 @@ export function AgentIdentityCard({
               )}
               {offline && canEdit && (
                 <p className="text-meta text-ink-muted">
-                  연결이 끊긴 동안에는 바꿀 수 없어요.
+                  <BlockedReason frame="changeIt" />
                 </p>
               )}
             </>

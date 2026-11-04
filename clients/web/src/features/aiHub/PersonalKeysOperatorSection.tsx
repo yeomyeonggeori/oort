@@ -31,6 +31,7 @@ import {
   personalKeysQueryPrefix,
 } from "./personalKeysShared";
 import { PersonalKeyRevokeDialog } from "./PersonalKeyRevokeDialog";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「개인 API 키」 운영자 구획 (#3469, 서버 #3415). 팀 AI 키 화면 아래.
@@ -126,7 +127,7 @@ export function PersonalKeysOperatorSection({
       </p>
       {offline && (
         <p id={OFFLINE_NOTE_ID} className="break-keep pt-2 text-meta text-ink-muted">
-          {COPY.form.offline}
+          <BlockedReason frame="issueKey" />
         </p>
       )}
 

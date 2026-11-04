@@ -18,6 +18,7 @@ import { useDirectory } from "@/features/workspace/useWorkspace";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › 워크스페이스 › 「oort 도우미」 (ADR-0201 D8, #3836).
@@ -115,7 +116,7 @@ export function TeamAiSetting({
       {offline && (
         <CardBody>
           <p id={offlineId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.
+            <BlockedReason frame="changeSetting" />
           </p>
         </CardBody>
       )}

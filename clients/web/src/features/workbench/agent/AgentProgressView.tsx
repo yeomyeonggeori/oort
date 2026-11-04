@@ -16,7 +16,6 @@ import {
   DEFAULT_REPLY_MODE,
   PERMISSION_ASK,
   PERMISSION_LAPSED_LINE,
-  PERMISSION_OFFLINE_LINE,
   PERMISSION_HOST_WAIT_MS,
   canAllow,
   permissionFailure,
@@ -56,6 +55,7 @@ import {
   type InstructFrom,
 } from "@momo/core/features/auth/humanSignature";
 import "./agentPane.css";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: 작업 공간 A 칸 진행 뷰(에이전트 작업 레인 한 세션) for internal
 // team users on web+Tauri, density 7/10, motion 1/10.
@@ -798,7 +798,8 @@ function PermissionCard({
   // 연결이 끊기면 결정이 닿았는지 알 길(실시간 `approval.decided`)이 없으므로 잠근다.
   const blocked = unavailable || cramped || offline;
   const describedBy = blocked ? unavailableId : undefined;
-  const reason = unavailable ? DECIDE_UNAVAILABLE : offline ? PERMISSION_OFFLINE_LINE : CRAMPED_LINE;
+  // 잠긴 이유 한 줄. 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260). 이른 return 뒤라 훅이 아니라 컴포넌트로 읽는다.
+  const reason = unavailable ? DECIDE_UNAVAILABLE : offline ? <BlockedReason frame="decideNow" /> : CRAMPED_LINE;
   // 브라우저의 허락(D-4): 허락만 잠그고 한 줄로 말한다. 거부는 잠그지 않는다.
   const inAppLine = inApp && !blocked && permission.allow !== null;
 

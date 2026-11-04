@@ -2877,10 +2877,19 @@
  * 상단 패딩)만큼만 다시 내려 앉힌다. 하단 가장자리가 패딩 상자 안에 머물므로
  * 자기 행 본문 텍스트 Range와 교차 0이 된다(B11 R2 Blocker의 후계 자
  * `assertHoverToolbarClearsBodyText`). 나머지 높이는 행간·이전 행 하단 패딩
- * 위에 얹힌다. 임의 translate 값은 금지라 토큰으로 계산한다. */
+ * 위에 얹힌다. 임의 translate 값은 금지라 토큰으로 계산한다.
+ *
+ * `--hover-toolbar-slide`(단위 없는 px, 없으면 0)는 위·아래 경계가 모두 이웃 글자에
+ * 막힐 때 막대를 **행 안쪽의 글자 없는 창**으로 더 내려 앉히는 거리다(#5179,
+ * `hoverToolbarModel.placeToolbar`). 값은 마운트 때 잰 자리에서 JS가 CSSOM으로
+ * 건다(`tooltipFit`의 `--tooltip-shift`와 같은 방식 — 인라인 style 속성은 CSP가
+ * 막는다). 밀지 않는 막대는 이 규칙 그대로다.
+ *
+ * `--hover-toolbar-nudge`(단위 없는 px, 없으면 0)는 두 straddle이 모두 읽는 가로 비끼기다:
+ * 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계에서 막대를 오른쪽으로 비껴 세운다(#5179). */
 @utility hover-toolbar-straddle {
   top: 0;
-  translate: 0 calc(-100% + var(--spacing-row));
+  translate: calc(var(--hover-toolbar-nudge, 0) * 1px) calc(-100% + var(--spacing-row) + var(--hover-toolbar-slide, 0) * 1px);
 }
 
 /* 위쪽 여유가 없을 때의 대칭 (#1743 H-4).
@@ -2891,7 +2900,7 @@
 @utility hover-toolbar-straddle-below {
   top: auto;
   bottom: 0;
-  translate: 0 calc(100% - var(--spacing-row));
+  translate: calc(var(--hover-toolbar-nudge, 0) * 1px) calc(100% - var(--spacing-row));
 }
 
 /* 메시지 줄·인박스 줄의 옅은 호버 (#4324). 가리킨 줄과 키보드 초점 줄은 `--surface-hover`를
