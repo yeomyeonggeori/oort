@@ -18,7 +18,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo} from 'react-native';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -309,6 +309,25 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     const sheet = await screen.findByTestId('release-notes-sheet');
     expect(within(screen.getByTestId('release-notes-more')).getByText('Show more')).toBeTruthy();
     expect(within(sheet).queryByText(/more change/i)).toBeNull();
+  });
+
+  it('불릿은 글자가 아니라 눈에 보이는 도형이다: 채움이 있는 4pt 원이고 글자 점이 섞이지 않는다 (#5298)', async () => {
+    render(withLocale(host('3058')));
+    await screen.findByTestId('release-notes-sheet');
+    const dots = screen.getAllByTestId('release-notes-bullet');
+    expect(dots).toHaveLength(4);
+    for (const dot of dots) {
+      const style = StyleSheet.flatten(dot.props.style);
+      // 크기 0 이거나 채움이 없는 점은 「있지만 안 보이는」 불릿이다: 값을 잰다.
+      expect(style).toMatchObject({width: 4, height: 4});
+      expect(style.borderRadius).toBeGreaterThanOrEqual(2);
+      expect(style.backgroundColor).toEqual(expect.any(String));
+      expect(String(style.backgroundColor)).not.toMatch(/^(transparent|rgba\(0, ?0, ?0, ?0\))$/);
+    }
+    // 점은 글자(`•`)가 아니다: 줄의 글에는 점 글자가 섞이지 않는다.
+    const row = within(screen.getByTestId('release-notes-title-typing'));
+    expect(row.getByText(koText.formatMessage(realItem('typing').title))).toBeTruthy();
+    expect(row.queryByText('•')).toBeNull();
   });
 
   it('닫은 소식은 같은 빌드에서 다시 안 올라온다 (앱을 다시 켜도)', async () => {

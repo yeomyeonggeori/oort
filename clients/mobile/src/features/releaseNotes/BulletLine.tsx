@@ -29,11 +29,8 @@ export const BulletLine = forwardRef<
   const styles = useStyles(buildStyles);
   return (
     <View ref={ref} accessible style={styles.row} testID={testID}>
-      <View
-        importantForAccessibility="no"
-        style={styles.cell}
-        testID="release-notes-bullet">
-        <View style={styles.dot} />
+      <View importantForAccessibility="no" style={styles.cell}>
+        <View style={styles.dot} testID="release-notes-bullet" />
       </View>
       <Sentence style={styles.text}>{children}</Sentence>
     </View>
