@@ -65,6 +65,8 @@ describe('PendingRow — 못 보낸 이유의 한 줄', () => {
   ] as const)('%s: 완결된 문장 하나를 말하고 상태 코드·서버 원문이 없다', async (kind, sentence) => {
     mount(kind);
     await waitFor(() => expect(screen.getByTestId('pending-failed-reason')).toHaveTextContent(sentence));
+    // 완성된 문장이라 어절 가운데서 꺾이지 않는다(5a M1, #5288) — `Sentence` 로 그린다. 깨뜨리면(날 `Text` 로) 빨개진다.
+    expect(screen.getByTestId('pending-failed-reason').props.lineBreakStrategyIOS).toBe('hangul-word');
     expect(screen.getByTestId('pending-failed-reason')).not.toHaveTextContent(/\d{3}/);
     expect(screen.queryByText('전송 실패')).toBeNull();
   });

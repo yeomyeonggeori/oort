@@ -30,6 +30,7 @@ import {
   type NativeSyntheticEvent,
   type TextLayoutEventData,
 } from 'react-native';
+import {headroomLineHeight} from '../../design/lineHeadroom';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
 import {bubbleFor} from './bubble';
@@ -809,7 +810,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 말풍선은 내용 폭까지만 — 짧은 글(「네네」)은 좁다. 가장 넓어도 행 칸(본문 열)을 넘지 않는다.
   bubble: {alignSelf: 'flex-start', maxWidth: '100%'},
   bubbleMuted: {opacity: 0.6},
-  paragraph: {fontSize: font.body, color: color.text, lineHeight: line.body},
+  // 줄 높이에 여유(0.01pt)를 둔다(#5288·#4894): 두 줄로 접힌 글이 첫 줄만 그려지고 말풍선 오른쪽에서 잘리던 결함의 원인은 글 상자 높이가
+  // float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다 — 정수 줄 높이 글은 매번 그 길에 든다. 근거·실측은 `design/lineHeadroom.ts`.
+  paragraph: {fontSize: font.body, color: color.text, lineHeight: headroomLineHeight(line.body)},
   muted: {color: color.textMuted},
   strong: {fontWeight: '700'},
   em: {fontStyle: 'italic'},
@@ -888,7 +891,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 문단·목록에서 이미 하는 것과 같은 배선). 기본은 본문과 **같은 잉크**다:
   // 사람이 꺼내러 온 것(명령어·해시·경로)이 산문보다 한 급 아래일 이유가 없다.
   // ===========================================================================
-  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: line.code},
+  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: headroomLineHeight(line.code)},
   list: {gap: space.xs},
   listItem: {flexDirection: 'row', gap: space.xs},
   // ===========================================================================
@@ -907,7 +910,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // ===========================================================================
   listMarker: {
     fontSize: font.body,
-    lineHeight: line.body,
+    lineHeight: headroomLineHeight(line.body),
     color: color.textMuted,
     // 두 자리 + 마침표만큼. **오른쪽 정렬**이라 마침표가 한 줄에 서고, 그래서
     // 9번과 10번의 본문 시작점도 한 줄에 선다.
@@ -932,5 +935,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // `flexShrink: 1` 은 자연 폭(`AtMost` 로 잰 줄바꿈 폭)을 몫으로 내고, 모자랄 때만 줄어든다. 줄어든 폭에서의 높이는
   // 가로줄의 교차축이라 마지막 판에서 다시 재어지므로, 말풍선 폭과 글 높이가 같은 폭을 본다.
   // ===========================================================================
-  listText: {flexShrink: 1, fontSize: font.body, color: color.text, lineHeight: line.body},
+  listText: {flexShrink: 1, fontSize: font.body, color: color.text, lineHeight: headroomLineHeight(line.body)},
 });

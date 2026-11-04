@@ -19,6 +19,10 @@
  *   G  글이 보인다            글자가 있는 문단의 글 상자 폭이 4pt 이상이다  (목록 말풍선이 0pt 로 접히던 결함)
  *   H  말풍선이 글을 담는다    Σ(문단 높이) + 2·padY ≤ bubble.h            (말풍선이 안의 글보다 낮아 글이 밖으로 넘치던 결함 —
  *                                                                         문단 사이 간격은 더해질 뿐이라 이 합은 필요조건이다)
+ *   I  줄이 빠지지 않는다      text.h − lines.bottom ≤ ½ · 줄 높이         (글 상자는 N 줄 높이인데 N−1 줄 이하로 그려진다 = 첫 줄이 줄바꿈 없이
+ *                                                                         오른쪽에서 잘리고 둘째 줄이 빈다. 글 상자 높이가 float 반올림으로 줄 수의
+ *                                                                         요구보다 1e-4pt 낮게 내려올 때 난다 — 절대 y 가 크고 1/3pt 소수일 때만이라
+ *                                                                         `-momoClipBase`·`-momoClipReps` 로 훑어야 잡힌다. #5288·#4894)
  *
  * 한 문단의 틀(text)과 그린 줄(lines)은 같은 key 로 짝지어 읽는다. 말풍선은 key 의 앞자리(`<n>.<블록>` 의 n)로 찾는다.
  *
@@ -114,6 +118,12 @@ if (mode === 'serve') {
       if (cc > TOL) out.push(`C 문단 ${p.key}: 그린 줄 끝 ${p.lines.maxRight} > 글 상자 ${p.text.w} (+${cc.toFixed(2)})`);
       if (d > TOL) out.push(`D 문단 ${p.key}: 줄 아래끝 ${p.lines.bottom} > 글 상자 높이 ${p.text.h} (+${d.toFixed(2)})`);
       if (p.lines.chars > 0 && p.text.w < 4) out.push(`G 문단 ${p.key}: 글자 ${p.lines.chars}자인데 글 상자 폭이 ${p.text.w}pt — 안 보인다`);
+      if (typeof p.lines.lineH === 'number' && p.lines.lineH > 0) {
+        const missing = p.text.h - p.lines.bottom;
+        if (missing > p.lines.lineH / 2) {
+          out.push(`I 문단 ${p.key}: 글 상자 높이 ${p.text.h} 인데 그린 줄은 ${p.lines.n}줄(아래끝 ${p.lines.bottom}, 줄 높이 ${p.lines.lineH}) — ${(missing / p.lines.lineH).toFixed(1)}줄이 빠졌다`);
+        }
+      }
     }
     // H: 말풍선마다 안에 앉은 문단 높이의 합이 말풍선 안쪽 높이를 넘지 않는다. 줄 보기(row)에는 말풍선이 없다.
     if (!c.row) {
@@ -163,7 +173,7 @@ if (mode === 'serve') {
     console.log(`RESULT: FAIL — ${problems.join('; ')}`);
     process.exit(1);
   }
-  console.log(`RESULT: PASS — ${cases.length}칸 모두 A~H 통과`);
+  console.log(`RESULT: PASS — ${cases.length}칸 모두 A~I 통과`);
 } else {
   console.error('usage: node measure/bubble-clip-check.mjs serve|check …');
   process.exit(2);

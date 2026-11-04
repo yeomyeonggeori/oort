@@ -310,6 +310,8 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
     expect(screen.getByTestId('composer-offline').props.children).toBe(
       COMPOSER_OFFLINE_COPY,
     );
+    // 완성된 문장이라 어절 가운데서 꺾이지 않는다(5a M1, #5288) — `Sentence` 로 그린다. 깨뜨리면(날 `Text` 로) 빨개진다.
+    expect(screen.getByTestId('composer-offline').props.lineBreakStrategyIOS).toBe('hangul-word');
     // 흐려진 버튼에 먼저 도착하는 길이 있다(로터·직접 탐색). 이유는 버튼도 든다.
     expect(screen.getByTestId('composer-send').props.accessibilityHint).toBe(
       COMPOSER_OFFLINE_COPY,
