@@ -16,12 +16,17 @@ import { InlineBanner } from "./States";
 // (`copyForCause`)가 고른다. 말은 이 자리에서만 하고 연결 카드는 되풀이하지 않는다(감사 §4 원칙 3).
 //
 // 왼쪽 정렬의 조용한 상자다(가운데 정렬 빈 상태 포스터가 아니다, 웹 스킬 §8).
+//
+// **시트·회색 띠 위에 서는 자리**(사이드바)는 `retryClassName`으로 알약의 모양을 받는다(#5306): 보조 채움(`outline`)은 시트와 같은 색이라 알약이
+// 사라지고 굵은 글자만 남으므로, 호출부가 사이드바 빈 상태 「채널 만들기」와 같은 시트 위 문법(`band-surface bg-surface shadow-sm`)을 넘긴다.
+// 본문 판 위는 아무것도 넘기지 않으므로 그대로다.
 // =============================================================================
 
 export function LoadFailureBox({
   titleKey,
   cause,
   onRetry,
+  retryClassName,
   testId,
 }: {
   /** 표면별 제목의 사전 키(`CONNECTION_KEYS.loadConversationTitle` 등). */
@@ -29,6 +34,8 @@ export function LoadFailureBox({
   /** 실패가 말하는 원인. 연결 쪽 원인이 아니면 `null`. */
   cause: ConnectionCause | null;
   onRetry: () => void;
+  /** 「다시 시도」 알약이 서는 바탕이 정하는 자: 시트·회색 띠 위(사이드바)면 시트 위 문법을 넘긴다. 기본은 보조 채움(본문 판 위). */
+  retryClassName?: string;
   testId?: string;
 }) {
   const formatMessage = useFormatMessage();
@@ -43,7 +50,7 @@ export function LoadFailureBox({
       <p className="text-body text-ink-muted" data-testid="load-failure-reason">
         {formatMessage(copyForCause(cause).loadReason)}
       </p>
-      <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+      <Button type="button" variant="outline" size="sm" className={retryClassName} onClick={onRetry}>
         {formatMessage(CONNECTION_KEYS.retry)}
       </Button>
     </div>
@@ -98,11 +105,14 @@ export function LoadFailureNote({
 export function LoadFailureLine({
   titleKey,
   onRetry,
+  retryClassName,
   testId,
   className,
 }: {
   titleKey: ConnectionPlainKey;
   onRetry: () => void;
+  /** 「다시 시도」 알약이 서는 바탕이 정하는 자: 시트·회색 띠 위(사이드바)면 시트 위 문법을 넘긴다. 기본은 보조 채움(본문 판 위). */
+  retryClassName?: string;
   testId?: string;
   className?: string;
 }) {
@@ -112,6 +122,7 @@ export function LoadFailureLine({
       message={formatMessage(titleKey)}
       actionLabel={formatMessage(CONNECTION_KEYS.retry)}
       onAction={onRetry}
+      actionClassName={retryClassName}
       testId={testId}
       className={className}
     />
