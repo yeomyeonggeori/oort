@@ -10,8 +10,14 @@ import React from 'react';
 
 import {resolveAppearance} from '../src/design/appearanceState';
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
-import {color, ds2Radius, SAFE_GUTTER} from '../src/design/tokens';
-import {bubbleFor, BUBBLE_MIN_CONTRAST, otherBubbleFill} from '../src/features/conversation/bubble';
+import {FixedScheme} from '../src/design/theme';
+import {color, darkPalette, ds2Radius, lightPalette, SAFE_GUTTER, type Palette} from '../src/design/tokens';
+import {
+  bubbleFor,
+  BUBBLE_MIN_CONTRAST,
+  failedBubbleFor,
+  otherBubbleFill,
+} from '../src/features/conversation/bubble';
 import {CONV} from '../src/features/conversation/convDesign';
 import {LandedTintFade} from '../src/features/conversation/LandedTintFade';
 import {
@@ -392,7 +398,7 @@ describe('말풍선 — 토큰으로만 그린다', () => {
     expect(style.opacity).toBeUndefined();
   });
 
-  it('실패한 메아리만 흐리다 (실패 줄은 예전 그대로)', () => {
+  it('실패한 메아리만 옅다 — 채움만 옅고 불투명도 막은 없다 (실패 줄은 예전 그대로, #5294)', () => {
     render(
       <PendingRow
         pending={{
@@ -407,8 +413,13 @@ describe('말풍선 — 토큰으로만 그린다', () => {
       />,
     );
     const style = flat(screen.getByTestId('message-bubble').props.style);
-    expect(style.backgroundColor).toBe(color.accent);
-    expect(style.opacity).toBe(0.6);
+    const faded = failedBubbleFor(color, bubbleFor(color).mine);
+    expect(style.backgroundColor).toBe(faded.bg);
+    // 옅다: 정상 전송 메아리의 신호색 채움이 아니다.
+    expect(style.backgroundColor).not.toBe(color.accent);
+    // 옅기는 채움의 몫이다 — 말풍선 전체에 막(opacity)을 걸면 글자가 바탕으로 함께 녹는다(밝음 2.66:1 · 어두움 3.52:1).
+    expect(style.opacity).toBeUndefined();
+    // 깨뜨리면: MessageBody 가 muted 에 `opacity: 0.6` 을 되돌리면 → 마지막 단정이 빨갛다.
   });
 });
 
@@ -467,10 +478,52 @@ describe('말풍선 토큰 — 덮어쓰기와 대비', () => {
       const b = bubbleFor(p as never);
       if (contrast(b.mine.fg, b.mine.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} mine`);
       if (contrast(b.other.fg, b.other.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} other`);
+      // 보내지 못한 내 말풍선(#5294): 옅힌 채움 위에서도 글자 대비가 4.5:1 이상 — 모든 테마·신호색·모드에서.
+      const failed = failedBubbleFor(p as never, b.mine);
+      if (contrast(failed.fg, failed.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} mine-failed`);
     }
     expect(bad).toEqual([]);
     expect(all.length).toBeGreaterThan(60);
     // 깨뜨리면: 내 말풍선 글자를 text 로(onAccent 대신) → 다수 조합이 빨강.
+    // 깨뜨리면: failedBubbleFor 가 글자색을 tone.fg(onAccent) 그대로 두고 채움만 옅히면 → 모든 조합의 mine-failed 가 빨강.
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #5294 (화면 검수 5a M5) — 보내지 못한 내 말풍선의 글자는 두 스킴 모두 본문 AA(4.5:1)를 지킨다.
+//
+// 옛 판은 말풍선 전체에 `opacity: 0.6` 을 걸었다. RN 은 불투명도를 자식(글자)까지 한 장으로 합성하므로 채움과 글자가 함께 바탕(`bg`)으로
+// 녹아 밝음 2.66:1 · 어두움 3.52:1 이었다. 그래서 여기서는 **그려진 트리**의 채움·글자·불투명도를 읽어 바탕 위에 합성한 뒤 잰다.
+// -----------------------------------------------------------------------------
+
+const FAILED_ECHO = {
+  clientMsgId: 'c-1',
+  channelId: 'ch',
+  authorMemberId: SELF,
+  body: '못 보낸 글',
+  status: 'failed',
+} as never;
+
+describe.each([
+  ['light', lightPalette],
+  ['dark', darkPalette],
+] as ReadonlyArray<readonly ['light' | 'dark', Palette]>)('보내지 못한 내 말풍선 글자 대비 — %s (#5294)', (scheme, palette) => {
+  it('그려진 채움 위 글자가 바탕에 합성된 뒤에도 4.5:1 이상이고, 못 보냈다는 것은 채움으로 보인다', () => {
+    render(
+      <FixedScheme scheme={scheme}>
+        <PendingRow pending={FAILED_ECHO} startsGroup directory={DIRECTORY} />
+      </FixedScheme>,
+    );
+    const bubble = flat(screen.getByTestId('message-bubble').props.style);
+    const text = flat(screen.getByText('못 보낸 글').props.style);
+    const alpha = typeof bubble.opacity === 'number' ? bubble.opacity : 1;
+    // 불투명도는 자식까지 한 장으로 합성된다 — 채움도 글자도 같은 알파로 바탕(`bg`) 위에 얹힌다.
+    const fill = blendOver(String(bubble.backgroundColor), palette.bg, alpha);
+    const ink = blendOver(String(text.color), palette.bg, alpha);
+    expect(contrast(ink, fill)).toBeGreaterThanOrEqual(BUBBLE_MIN_CONTRAST);
+    // 옅기는 여전히 보인다 — 채움이 정상 전송의 신호색이 아니다(그냥 막을 걷어 낸 것이 아니다).
+    expect(String(bubble.backgroundColor).toLowerCase()).not.toBe(palette.accent.toLowerCase());
+    // 깨뜨리면: MessageBody 가 muted 에 `opacity: 0.6` 을 되돌리면 → 밝음 2.66 · 어두움 3.52 로 첫 단정이 빨갛다.
   });
 });
 
