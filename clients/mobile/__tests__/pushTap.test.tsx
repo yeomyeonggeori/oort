@@ -14,6 +14,9 @@ import * as Notifications from 'expo-notifications';
 import React from 'react';
 import {AccessibilityInfo, AppState, FlatList} from 'react-native';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -23,7 +26,6 @@ import {
   jumpNoticeSpeech,
 } from '../src/features/conversation/jumpNotice';
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
-import {CHANNEL_LIST_FAILED} from '../src/features/sidebar/rows';
 import {PUSH_ACTION} from '../src/push/contract';
 import {
   NOTIFICATION_TAP_COPY,
@@ -34,6 +36,11 @@ import {
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+
+// 목록 자리 상자의 제목이자 알림 탭이 막혔을 때의 낭독 문장(#5285): 손으로 적은 합쇼체 상수 대신 사전의 해요체 문장이다. 상자와 낭독이 **같은 키**를 읽는다.
+const CHANNEL_LIST_FAILED = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(
+  CONNECTION_KEYS.loadChannelListTitle,
+);
 
 // 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
 // 끝난 뒤 1.5초, #3921·#4949)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
