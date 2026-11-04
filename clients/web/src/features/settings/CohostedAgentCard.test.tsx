@@ -7,6 +7,9 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { CohostedAgentCard } from "./CohostedAgentCard";
 
 // #3883 짝 UI (ADR-0203 D3·Q2): 카드는 서버가 알 때만, 운영자에게만 보이고, 잠금 선언 전에는 체크리스트뿐이며,
@@ -67,28 +70,29 @@ function LocationProbe() {
   return createElement("output", { "data-testid": "probe-path" }, useLocation().pathname);
 }
 
-function mount(offline = false): HTMLElement {
+let ko: AppLocale;
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+function mount(offline = false, korean = false): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  act(() => {
-    root?.render(
+  const page = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(
+      MemoryRouter,
+      null,
       createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          MemoryRouter,
-          null,
-          createElement(
-            SessionProvider,
-            { value: sessionValue() },
-            createElement(CohostedAgentCard, { offline, workspaceId: WS }),
-            createElement(LocationProbe)
-          )
-        )
+        SessionProvider,
+        { value: sessionValue() },
+        createElement(CohostedAgentCard, { offline, workspaceId: WS }),
+        createElement(LocationProbe)
       )
-    );
+    )
+  );
+  act(() => {
+    root?.render(korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page);
   });
   return host;
 }
@@ -102,7 +106,8 @@ async function until(id: string): Promise<HTMLElement> {
 }
 const calls = () => api.request.mock.calls.map((call) => `${(call[1] as RequestInit | undefined)?.method ?? "GET"} ${call[0]}`);
 
-beforeEach(() => {
+beforeEach(async () => {
+  ko = await koreanLocale();
   flags.IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
   api.request.mockReset();
@@ -117,6 +122,21 @@ afterEach(() => {
 });
 
 describe("CohostedAgentCard", () => {
+  // #5242: 서버가 답했는데 읽을 수 없거나 5xx이면 운영자에게 보이는 오류다. 옛 한 문장 배너는 원인을 말하는 한 줄이 됐다.
+  it("서버가 오류로 답하면 제목 뒤에 이유가 붙은 한 줄이 서고, 다시 시도가 상태를 다시 읽는다", async () => {
+    api.request.mockRejectedValue(new ApiError(500, "boom", "internal"));
+    mount(false, true);
+    const note = await until("ai-cohosted-error");
+    expect(note.getAttribute("role")).toBe("alert");
+    expect(note.textContent).toContain("같은 서버의 Hermes 상태를 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요.");
+    expect(note.textContent).not.toMatch(/\d{3}/);
+    const reads = api.request.mock.calls.length;
+    await act(async () => {
+      note.querySelector("button")?.click();
+    });
+    await waitFor(() => expect(api.request.mock.calls.length).toBeGreaterThan(reads));
+  });
+
   it("draws nothing for a stranger, an old server or an undeclared instance, and never probes", async () => {
     for (const outcome of [
       () => Promise.reject(new ApiError(403, "no")),

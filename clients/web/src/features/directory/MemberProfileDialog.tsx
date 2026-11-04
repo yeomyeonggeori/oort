@@ -24,6 +24,9 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
@@ -438,10 +441,10 @@ function MemberProfilePanel({
       ) : viewState === "loading" ? (
         <ProfileSkeleton />
       ) : viewState === "error" ? (
-        <InlineBanner
-          message="멤버 프로필을 불러오지 못했습니다."
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadMemberProfileTitle}
+          cause={loadCauseOf(query.error)}
+          onRetry={() => void query.refetch()}
           testId="member-profile-error"
         />
       ) : (

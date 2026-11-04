@@ -22,7 +22,6 @@ import {
   linkUnresolvedSentence,
   TEAM_DEFAULTS_CHECK_FIRST,
   TEAM_DEFAULTS_APPLIED,
-  TEAM_DEFAULTS_OFFLINE,
   teamChoiceText,
   teamModelNote,
   teamOptionKey,
@@ -53,6 +52,7 @@ import {
 } from "./remoteWorkStore";
 import { readDesignParam } from "./aiMyAccountsModel";
 import { REMOTE_WORK_APPLYING } from "@momo/core/features/settings/remoteWorkProfile";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings (AI 연결 · 기본 AI) for internal team users on web+Tauri,
 // density 6/10, motion 1/10 (none added).
@@ -205,6 +205,8 @@ function DefaultRow({
   remote: RemoteWorkView;
 }) {
   const titleId = `ai-default-${row.id}-title`;
+  // 잠겼을 때의 줄: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260). 코어 상수는 폰의 몫이다.
+  const offlineNote = useBlockedReason("changeIt");
   const resolved = resolveRow(row.id, prefs, input);
   const personal = row.audience === "me";
   const lines: { key: string; text: string; tone: "muted" | "warn" }[] = [];
@@ -313,7 +315,7 @@ function DefaultRow({
       choice = <ReadOnlyBox>{teamChoiceText(id, saved)}</ReadOnlyBox>;
       if (team.offline) {
         // 확인 버튼도 잠긴 동안에는 「연결 확인을 하면」을 말하지 않는다.
-        lines.push({ key: "note", text: TEAM_DEFAULTS_OFFLINE, tone: "muted" });
+        lines.push({ key: "note", text: offlineNote, tone: "muted" });
       } else if (!saved || saved.linkResolved) {
         lines.push({ key: "model", text: TEAM_DEFAULTS_CHECK_FIRST, tone: "muted" });
       }
@@ -354,7 +356,7 @@ function DefaultRow({
       lines.push({ key: "saved", text: linkUnresolvedSentence(saved, canPick), tone: "warn" });
     }
     if (canPick && team.offline) {
-      lines.push({ key: "note", text: TEAM_DEFAULTS_OFFLINE, tone: "muted" });
+      lines.push({ key: "note", text: offlineNote, tone: "muted" });
     }
     if (team.saveError?.rowId === id) {
       lines.push({ key: "error", text: team.saveError.message, tone: "warn" });

@@ -21,6 +21,7 @@ import { ExpressionMakeEntry } from "./ExpressionMakeEntry";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { ExpressionImage } from "./ExpressionImage";
 import { useExpressions } from "./context";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // 「＋」는 메뉴다: 가져오기(직접 올리기·출처 링크)와 AI와 만들기. 두 길은 권한(canAdd)과 오프라인 규칙이 같다.
 type PanelMode = "list" | "import" | "make";
@@ -128,7 +129,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
       </DropdownMenuContent></DropdownMenu> : <Button ref={backButton} type="button" variant="secondary" size="sm" onClick={backToList}><ArrowLeft aria-hidden="true" />목록으로</Button>}
     </div>
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
-    {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
+    {offline && <InlineBanner message={<BlockedReason frame="reloadPicturesLater" />} separator={false} />}
     {confirming ? <div role="group" aria-labelledby={confirmTitleId} aria-describedby={confirmBodyId} className="flex flex-col gap-3" data-testid="expression-confirm">
       <p id={confirmTitleId} className="text-title font-semibold text-ink">{target.action === "delete" ? "팀 그림을 삭제할까요?" : "팀 그림을 신고할까요?"}</p>
       <p id={confirmBodyId} className="text-body text-ink-muted">{target.action === "delete" ? "지운 이름은 다시 쓸 수 없어요. 예전 메시지와 반응은 이름 문자열로 표시돼요." : "신고하면 팀 전체에서 즉시 숨겨져요. 신고자와 내용은 관리자만 볼 수 있어요."}</p>

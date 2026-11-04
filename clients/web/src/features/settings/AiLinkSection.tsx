@@ -75,6 +75,7 @@ import { TeamKeyForm } from "./TeamKeyForm";
 import { TeamUnlinkDialog } from "./TeamUnlinkDialog";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
 import { CohostedAgentCard } from "./CohostedAgentCard";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // AI (#2877, 시안 claudedocs/ai-accounts/mockups.html §1·§6).
@@ -108,8 +109,7 @@ import { CohostedAgentCard } from "./CohostedAgentCard";
  */
 const LINK_OFFLINE_NOTE_ID = "ai-link-offline-note";
 const LINK_BUSY_NOTE_ID = "ai-link-busy-note";
-const LINK_OFFLINE_REASON =
-  "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없어요.";
+const LINK_OFFLINE_REASON: BlockedFrame = "changeAiLink";
 const LINK_BUSY_REASON =
   "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 바꾸거나 확인할 수 있어요.";
 
@@ -752,7 +752,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
               className="break-keep text-meta text-ink-muted"
               data-testid="ai-link-offline"
             >
-              {LINK_OFFLINE_REASON}
+              <BlockedReason frame={LINK_OFFLINE_REASON} />
             </p>
           )}
           {!offline && busy && (

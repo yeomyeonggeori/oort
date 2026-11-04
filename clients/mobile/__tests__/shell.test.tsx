@@ -379,15 +379,21 @@ describe('the four states of the 대화 list', () => {
     );
   });
 
-  it('shows the core’s transport copy when nothing answered', async () => {
+  it('says what failed in the dictionary’s sentence when nothing answered — the cause is the strip’s to say, once (#5285)', async () => {
     globalThis.fetch = jest.fn(async () => {
       throw new TypeError('Network request failed');
     }) as unknown as typeof fetch;
     renderShell();
     await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
-    expect(screen.getByTestId('channels-error')).toHaveTextContent(
-      /주소와 네트워크를 확인하고 다시 시도해 주세요\./,
+    // The box names WHAT failed in the dictionary's 해요체 sentence. The core's raw transport copy (an old 합쇼체 hint about addresses)
+    // is gone — that classification now lives in the dictionary (`connection.load.*`), not in whatever `NetworkError.message` says.
+    expect(screen.getByTestId('channels-error')).toHaveTextContent('채널 목록을 불러오지 못했어요', {exact: false});
+    expect(screen.queryByText(/주소와 네트워크를 확인/)).toBeNull();
+    // Three reads that never got an answer put the shell strip up; from then on the box does not repeat the cause the strip says.
+    await waitFor(() =>
+      expect(screen.getByTestId('shell-connection-strip')).toHaveTextContent('서버에 닿지 못했어요', {exact: false}),
     );
+    expect(screen.queryAllByText(/서버에 닿지 못했어요/)).toHaveLength(1);
   });
 });
 

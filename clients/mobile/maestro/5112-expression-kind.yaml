@@ -60,6 +60,9 @@ name: 5112-expression-kind
 - tapOn:
     id: "expression-import-display-name"
 - inputText: "종류 시험"
+# 입력이 끝났으니 자판을 접는다(#5286). 자판이 올라온 채로는 사진 단추(`expression-import-photo`)가 자판 밑에 가려져, 그 자리를 누르면
+# 사진 창이 아니라 자판의 「ㅋ」 키가 눌렸다(표시 이름이 「종류 시험ㅋ」이 되고 사진 창 단정이 30초 뒤 붉어졌다).
+- hideKeyboard
 - tapOn:
     id: "expression-import-photo"
 # 시스템 사진 창(PHPicker): 칸의 낭독 이름은 「Photo, <날짜>」(영어 기기) 또는 「사진, <날짜>」(한국어 기기)다.

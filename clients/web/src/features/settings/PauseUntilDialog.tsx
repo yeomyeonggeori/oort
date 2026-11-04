@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   customPauseUntil,
   customPauseUntilMessage,
-  PAUSE_UNTIL_OFFLINE_REASON,
   pauseUntilAtMs,
   pauseUntilConfirmLabel,
   pauseUntilDescription,
@@ -29,6 +28,7 @@ import { Input } from "@/design/ui/input";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: confirm dialog for a notification pause, opened from settings and
 // from the sidebar profile menu, internal team users on web+Tauri, density 7/10,
@@ -175,7 +175,7 @@ export function PauseUntilDialog({
         {offline && (
           <InlineBanner
             tone="neutral"
-            message={PAUSE_UNTIL_OFFLINE_REASON}
+            message={<BlockedReason frame="changeIt" />}
             testId="pause-until-offline"
           />
         )}

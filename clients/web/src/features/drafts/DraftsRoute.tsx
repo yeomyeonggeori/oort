@@ -36,6 +36,7 @@ import {
   type DraftViewItem,
 } from "./model";
 import { useDraftsPanel } from "./useDraftsPanel";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 크로스채널 초안 패널 (#1901). 쓰다 만 글은 이미 draftStore에 있고, 여기는
@@ -268,7 +269,7 @@ export function DraftsRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="오프라인. 초안은 이 기기에 있습니다."
+          message={<BlockedReason frame="draftsOnDevice" />}
           testId="drafts-offline"
         />
       )}

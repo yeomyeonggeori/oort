@@ -419,10 +419,10 @@ describe("DeviceLinkCard R2 proofs", () => {
     const describedBy = create.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy!)?.textContent).toMatch(
-      /연결이 끊겼/
+      /You're offline\. You can create the QR code/
     );
     expect(host.querySelector('[data-testid="device-link-offline"]')?.textContent).toMatch(
-      /연결이 끊겼/
+      /You're offline\. You can create the QR code/
     );
   });
 

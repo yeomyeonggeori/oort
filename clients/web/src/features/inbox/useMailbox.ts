@@ -106,6 +106,11 @@ export interface Mailbox {
    * 실패도 승인이 섞인 탭에서만 센다(#5116).
    */
   error: boolean;
+  /**
+   * 서버 경로가 답하지 못했을 때의 그 오류 객체(투영 탐지 → 목록 순). 화면이 실패의 원인 문장(오프라인 / 서버에 닿지 못함)을 정하는
+   * 데 쓴다(#5242). 구 서버 경로는 원천이 여럿이라 하나로 말할 수 없어 `null`이고, 그때 이유는 「문제가 생겼어요」다.
+   */
+  failure: unknown;
   /** 승인 원장이 없는 서버: 「처리할 일」 칸을 장애가 아닌 미제공으로 말한다. */
   tasksAbsent: boolean;
   /**
@@ -271,6 +276,7 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
     fetchMore: () => void query.fetchNextPage(),
     isLoading: surface.isPending || (serverOn && (query.isLoading || ledgerLoading)),
     error: surface.isError || (serverOn && (query.isError || ledgerFailed)),
+    failure: surface.error ?? (serverOn ? query.error : null),
     tasksAbsent: !tasksProvided || needsAction.absent,
     ledgerAnswered: listed && ledgerHasAnswered(tasksProvided, needsAction),
     capped: false,
@@ -519,6 +525,7 @@ function useComposedMailbox(
       channelResults.isLoading ||
       (tasksProvided && needsAction.isLoading)),
     error,
+    failure: null,
     tasksAbsent: !tasksProvided || needsAction.absent,
     ledgerAnswered: ledgerHasAnswered(tasksProvided, needsAction),
     capped,

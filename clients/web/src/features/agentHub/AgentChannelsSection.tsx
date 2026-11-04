@@ -5,6 +5,9 @@ import { Button } from "@/design/ui/button";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { useSession } from "@/app/session";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useChannels } from "@/features/workspace/useWorkspace";
 import {
   addChannelMember,
@@ -144,11 +147,11 @@ export function AgentChannelsSection({
           <Skeleton ready={false} rows={3} className="p-0" />
         </div>
       ) : channelsQuery.isError ? (
-        <InlineBanner
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadAgentChannelsTitle}
+          cause={loadCauseOf(channelsQuery.error)}
+          onRetry={() => void channelsQuery.refetch()}
           separator={false}
-          message="채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요."
-          actionLabel="다시 시도"
-          onAction={() => void channelsQuery.refetch()}
           testId="agent-hub-channels-list-error"
         />
       ) : placement.present.length === 0 ? (

@@ -22,6 +22,9 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
@@ -33,6 +36,7 @@ import {
   NewDmOpenStateContext,
 } from "./useNewDm";
 import { useOpenDm } from "./useOpenDm";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 새 다이렉트 메시지 (#3662, Buzz의 「To:」 선택 모달을 우리 문법으로).
@@ -211,10 +215,10 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
     body = <Skeleton ready={false} rows={6} className="p-4" />;
   } else if (roster.error !== null && candidates.length === 0) {
     body = (
-      <InlineBanner
-        message="멤버 명부를 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={() => void roster.refetch()}
+      <LoadFailureBox
+        titleKey={CONNECTION_KEYS.loadMembersTitle}
+        cause={loadCauseOf(roster.error)}
+        onRetry={() => void roster.refetch()}
         testId="new-dm-roster-error"
       />
     );
@@ -283,7 +287,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 이미 대화 중인 사람에게는 이동할 수 있습니다."
+          message={<BlockedReason frame="openExistingDm" />}
           testId="new-dm-offline"
         />
       ) : null}

@@ -30,6 +30,7 @@ import { seedComposerText } from "@/features/chat/draftStore";
 import { channelPath } from "@/features/inbox/anchor";
 import { teamAiSettingKey } from "@/features/settings/TeamAiSetting";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「팀 AI 키」 구획의 다음 단계 카드 (ADR-0201 증보 v2 H8, #3893).
@@ -308,7 +309,7 @@ export function TeamAiNextStepCard({
             blocked ? (
               <span id={blockedId}>{COPY.step2Blocked}</span>
             ) : offline ? (
-              <span id={offlineId}>{COPY.offline}</span>
+              <span id={offlineId}><BlockedReason frame="turnOn" /></span>
             ) : null
           }
           action={
