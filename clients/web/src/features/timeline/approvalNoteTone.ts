@@ -55,9 +55,12 @@ export const APPROVAL_NOTE_ROLE_TOKEN: Record<string, string> = {
  * 영수증만 본문 크기로 서는 이유는 `AgentCard.tsx`의 `ApprovalNoteLine` 독스트링에
  * 있다(방금 내가 한 되돌릴 수 없는 행동의 기록이고, 체크 아이콘이 함께 선다).
  * 나머지 둘은 `text-meta`를 공유하고 잉크로 갈린다.
+ *
+ * 차단 줄만 `break-keep`을 든다(#5294): 막힌 **원인 문장**이라 길고, 어절 가운데서 줄이 바뀌면(「연/결되면」) 그 문장이 가장 읽혀야 할
+ * 자리가 깨진다. 컴포저 오프라인 줄이 이 클래스를 그대로 입는다는 쌍둥이 시험(`approvalNoteTone.test.ts`)이 컴포저 쪽도 함께 지킨다.
  */
 export const APPROVAL_NOTE_TONE_CLASS: Record<ApprovalNoteTone, string> = {
   receipt: "text-body text-ink",
-  blocked: "text-meta text-warn",
+  blocked: "text-meta text-warn break-keep",
   guidance: "text-meta text-ink-muted",
 };

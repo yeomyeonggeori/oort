@@ -2567,3 +2567,6 @@ async fn join_channel_to(su: &PgPool, tenant: &Tenant, channel: Uuid, member: Uu
 
 #[path = "cases/dm_agent_admission.rs"]
 mod dm_agent_admission;
+
+#[path = "cases/awaiting_approval_rail.rs"]
+mod awaiting_approval_rail;

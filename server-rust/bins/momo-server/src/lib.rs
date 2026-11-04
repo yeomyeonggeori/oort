@@ -333,8 +333,18 @@ pub struct AppState {
     pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
     /// `MOMO_UNFURL_ENABLED == 1` at start-up: the instance's switch for every request this
     /// server makes to an outside address on someone's behalf (ADR-0170 D3). The expression
-    /// link import honours it (ADR-0218 D5, planner decision 3).
+    /// link import honours it (ADR-0218 D5, planner decision 3), and so does the composer's link
+    /// preview (ADR-0170 증보 2026-11-01 D16).
     pub unfurl_enabled: bool,
+    /// ADR-0218 §8 (#4941) — the only object in this process that can ask a team-connected image
+    /// model to draw. Default is the egress-guarded client under the default (public addresses
+    /// only) policy; `main` gives it the operator's policy and a test injects its own.
+    pub image_model: Arc<dyn momo_image_model::ImageModelClient>,
+    /// Which team-key hosts are image providers, and which model each one asks for.
+    pub image_models: Arc<momo_image_model::ImageModelConfig>,
+    /// Where the photo routes open the team's image key from (ADR-0218 §8 H11 (a)). Default is the
+    /// operator's sealed link; a test wraps it to count the openings.
+    pub team_keys: Arc<dyn routes::expression_photo::TeamKeySource>,
     /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
     /// child from. `None` is the production answer: resolved per call from
     /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
@@ -345,6 +355,10 @@ pub struct AppState {
     /// test shortens it. The ordinary 64 KiB body has no such deadline.
     pub large_body_deadline: std::time::Duration,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
+    /// ADR-0170 증보 2026-11-01 D18 (#4884) — the link previews this process holds for members who
+    /// are still composing: in memory only, per (workspace, member, address). Tests build one with
+    /// small limits.
+    pub unfurl_previews: Arc<momo_unfurl::PreviewCache>,
     /// #2960 — 「연결 확인」: the only object in this process that can call a
     /// provider, and all it can do is one guarded read-only GET per hop
     /// (`momo_provider_probe`). Default is the guarded probe under the
@@ -362,6 +376,12 @@ pub struct AppState {
     /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
     /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
     pub github: Arc<routes::github_app::GithubAppState>,
+    /// ADR-0201 증보 v3 B9 (#4944) — the operator's ceilings on the team AI (`TEAM_AI_DAILY_TOKEN_CAP`,
+    /// `TEAM_AI_DAILY_SEARCH_CAP`), **as the api reads them**: the agent-worker is what enforces the
+    /// ceiling, and the api only explains it to the administrator on the settings screen
+    /// (`team_ai_limits_status.operatorCeiling`). Default: no ceiling. Set the same values on both
+    /// processes — a ceiling the api does not know is still enforced, just not shown.
+    pub team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
 }
 
 impl AppState {
@@ -399,9 +419,16 @@ impl AppState {
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
             unfurl_enabled: momo_unfurl::enabled_from_env(),
+            image_model: Arc::new(momo_image_model::GuardedImageModel::new(
+                momo_settings::EgressPolicy::default(),
+                momo_image_model::DEFAULT_DEADLINE,
+            )),
+            image_models: Arc::new(momo_image_model::ImageModelConfig::default()),
+            team_keys: Arc::new(routes::expression_photo::SealedLink),
             assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
+            unfurl_previews: Arc::new(momo_unfurl::PreviewCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
                 momo_provider_probe::GuardedProviderProbe::new(
                     momo_settings::EgressPolicy::default(),
@@ -423,7 +450,19 @@ impl AppState {
                     routes::provider_link::PROBE_TIMEOUT,
                 )),
             )),
+            team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
         }
+    }
+
+    /// ADR-0201 증보 v3 B9 (#4944) — attach the operator's team-AI ceilings (`main.rs` from the
+    /// env, a test with explicit values). Never read from the process environment here: a test
+    /// must not set one.
+    pub fn with_team_ai_caps(
+        mut self,
+        caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
+    ) -> Self {
+        self.team_ai_caps = caps;
+        self
     }
 
     /// ADR-0205 — attach the GitHub App sealing key (`GITHUB_APP_MASTER_KEY`). The converter
@@ -505,6 +544,26 @@ impl AppState {
 
     pub fn with_unfurl_http(mut self, http: Arc<dyn momo_unfurl::UnfurlHttp>) -> Self {
         self.unfurl_http = http;
+        self
+    }
+
+    /// ADR-0218 §8 (#4941) — the image-model client and the hosts/models it may be pointed at.
+    pub fn with_image_model(
+        mut self,
+        client: Arc<dyn momo_image_model::ImageModelClient>,
+        config: momo_image_model::ImageModelConfig,
+    ) -> Self {
+        self.image_model = client;
+        self.image_models = Arc::new(config);
+        self
+    }
+
+    /// Where the photo routes open the team's image key from (see [`AppState::team_keys`]).
+    pub fn with_team_keys(
+        mut self,
+        source: Arc<dyn routes::expression_photo::TeamKeySource>,
+    ) -> Self {
+        self.team_keys = source;
         self
     }
 
@@ -768,6 +827,21 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/expressions/import",
             post(routes::expressions::import),
         )
+        // ADR-0218 §8 (#4941): the team image model. Availability first (it reads the team key to
+        // say which company a photo would go to), then the one route that sends a photo.
+        .route(
+            "/v1/workspaces/{ws}/expressions/photo-model",
+            get(routes::expression_photo::availability),
+        )
+        // The list is chained after the layers, so neither the start budget nor the body limit
+        // covers it: a read is never counted (ADR-0218 §9 I1, #4992).
+        .route(
+            "/v1/workspaces/{ws}/expressions/photo-drafts",
+            post(routes::expression_photo::create)
+                .route_layer(member_write(rate_limit::MemberWrite::PhotoDraft))
+                .layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES))
+                .get(routes::expression_photo::list),
+        )
         .route(
             "/v1/workspaces/{ws}/expression-drafts/{draftId}",
             get(routes::expressions::get_draft),
@@ -810,6 +884,19 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
             get(routes::messages::replies),
+        )
+        // ADR-0206 증보 1 F8 (#4889) — follow a thread, or stop following it. A personal
+        // setting, so the caller is always the bearer and nothing is broadcast.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/follow",
+            put(routes::thread_follow::follow).delete(routes::thread_follow::unfollow),
+        )
+        // #4889 stage 2 — 「여기까지 읽었어요」: move the caller's read position in a followed
+        // thread forward. Personal like the follow verbs; the signal is explicit because a
+        // `GET …/replies` is also the inbox's and the work panels' read.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/read",
+            put(routes::thread_follow::mark_read),
         )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
@@ -863,6 +950,27 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/unfurls/{id}/image",
             get(routes::unfurl::image),
         )
+        // ADR-0170 amendment 2026-10-31 D9 — the site icon, through the same proxy kind.
+        .route(
+            "/v1/workspaces/{ws}/unfurls/{id}/icon",
+            get(routes::unfurl::icon),
+        )
+        // ADR-0170 amendment 2026-11-01 D14/D19 (#4884) — the card of a link that is still in the
+        // composer. The request belongs to a channel (it is allowed where a send would be); the
+        // picture and icon come back through two paths keyed by the preview's own id, served by
+        // the same proxy code as a stored card's. Neither is on a developer token's closed table.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/unfurl-previews",
+            post(routes::unfurl::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/unfurl-previews/{id}/image",
+            get(routes::unfurl::preview_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/unfurl-previews/{id}/icon",
+            get(routes::unfurl::preview_icon),
+        )
         // ADR-0151 — 첨부. Three routes, and the split between them is the
         // decision: the upload session hands out a Drive capability so the bytes
         // never cross this process, while the content proxy reads them here so
@@ -877,9 +985,31 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/complete",
             post(routes::attachments::complete),
         )
+        // `HEAD` is mounted next to `GET` on purpose, though axum would answer it from
+        // the GET handler: the same handler answers both (it reads the method), a
+        // `HEAD` opens nothing of the archive's, and the mounted table now says what
+        // the contract file says (ADR-0151 증보 5 D3, #4671).
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
-            get(routes::attachments::content),
+            get(routes::attachments::content).head(routes::attachments::content),
+        )
+        // ADR-0151 증보 5 D5 (#4673) — a video's length, size and poster. The write is the
+        // uploader's, before the send, and spends a per-member budget of its own like the upload
+        // start beside it (review M-1: a write of up to 256 KiB into Postgres per request); the read
+        // is the content route's own authorization, so the picture is as visible as the bytes and
+        // no more. Absent from the agent-route allow-list and from a developer token's closed
+        // table, like the three above.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/media",
+            put(routes::attachment_media::set_media)
+                .route_layer(member_write(rate_limit::MemberWrite::MediaWrite))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::attachment_media::MAX_MEDIA_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/poster",
+            get(routes::attachment_media::poster),
         )
         // ADR-0122 / HD-1 — PostgreSQL lifecycle + transactional outbox;
         // LiveKit is only the optional media plane and grant verifier.
@@ -1185,6 +1315,30 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/notification-rules/push-kinds",
             get(routes::notification_rules::get_push_kinds)
                 .patch(routes::notification_rules::patch_push_kinds),
+        )
+        // ADR-0206 D11 (#4341) — 「왜 알림이 안 와요」. The caller's own blockers as closed
+        // codes, and a test push to the caller's own devices that bypasses the push judgment.
+        // Self-scoped (the member is the credential's) and human-only: the agent-bearer
+        // allow-list does not list these paths, and each handler checks `require_human` again.
+        .route(
+            "/v1/workspaces/{ws}/notification-diagnostics",
+            get(routes::notification_diagnostics::get),
+        )
+        .route(
+            "/v1/workspaces/{ws}/notification-diagnostics/test",
+            post(routes::notification_diagnostics::test),
+        )
+        // ADR-0206 D5·D13 (#4494 N3) — the caller's per-kind switches (kind × surface), sound
+        // slots, work hours and phone delay, with the server's own `effective` evaluation. Self-scoped
+        // (the member is the credential's) and human-only like the diagnostics above: the
+        // agent-bearer allow-list does not list this path and each handler checks `require_human`.
+        .route(
+            "/v1/workspaces/{ws}/notification-prefs",
+            get(routes::notification_prefs::get)
+                .patch(routes::notification_prefs::patch)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::notification_prefs::MAX_PATCH_BODY_BYTES,
+                )),
         )
         // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
         // settings switches. Human-only; visibility and write authority are the

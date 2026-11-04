@@ -34,7 +34,11 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import {roleRequiredCopy} from '@momo/core/features/approvals/actionRole';
-import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
+import {
+  BAR_CONTROL_MAX_SCALE,
+  Sentence,
+  STACK_PILL_SCALE,
+} from '../../design/atoms';
 import {GlassSurface, LiquidGlassAllowed} from '../../design/glass';
 import {CloseCircle} from '../../design/SheetChrome';
 import {useStyles} from '../../design/theme';
@@ -49,8 +53,10 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
+import {useDismissOnEntry} from '../../lib/useDismissOnEntry';
 import {StageHero} from '../attachments/StageHero';
 import {phoneRequestBundle} from '../conversation/requestLoop';
+import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 import {
   linkOnceFrom,
   type ApprovalGate,
@@ -100,6 +106,12 @@ export function DecisionStage({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 막은 원인의 문장(#5262): 연결 모델이 없는 곳(하네스·시험)은 undefined 라 기존 문장으로 물러난다.
+  const blockedLine = useApprovalBlockedLine();
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 영웅 모션으로 돌아가는 `hero.close()` 가 아니라 부모의 `onClose` 다 — 그 모션은
+  // 무대를 연 카드로 돌아가는 것인데, 알림은 그 카드가 있는 자리에서 사람을 데려가는 입구다. 진행 중인 결정은 서버에 이미
+  // 나갔고 영수증은 무대 밖(`onSettled`)에서 받는다.
+  useDismissOnEntry(onClose);
   const [receipts, setReceipts] = useState<
     ReadonlyMap<string, ApprovalReceipt>
   >(new Map());
@@ -376,6 +388,11 @@ export function DecisionStage({
       </GlassSurface>
     ) : null;
 
+  // 이전/다음이 눌리지 않는 때: 첫 장·마지막 장이거나, 넘길 수 없는 순간(보내는 중·영수증·불러오는 중). 눌리지 않는 단추는 눌리는
+  // 단추와 다르게 보인다(#4982) - 같은 모양이면 눌러도 아무 일도 없는 단추가 된다.
+  const previousDisabled = !canNavigate || model.index <= 0;
+  const nextDisabled = !canNavigate || model.index >= model.cards.length - 1;
+
   return (
     <Modal
       transparent
@@ -408,7 +425,7 @@ export function DecisionStage({
           </LiquidGlassAllowed.Provider>
           <SafeAreaView style={styles.layout}>
             <View style={styles.header}>
-              <Text style={styles.meta}>결정 보기</Text>
+              <Sentence style={styles.meta}>결정 보기</Sentence>
               <CloseCircle
                 label="결정 무대 닫기"
                 onPress={() => {
@@ -462,7 +479,7 @@ export function DecisionStage({
                         onPress={onRetry}
                         style={styles.control}
                       >
-                        <Text style={styles.body}>다시 불러오기</Text>
+                        <Sentence style={styles.body}>다시 불러오기</Sentence>
                       </Pressable>
                     ) : null}
                   </>
@@ -471,6 +488,7 @@ export function DecisionStage({
                     ref={heading}
                     style={styles.title}
                     accessibilityRole="header"
+                    lineBreakStrategyIOS="hangul-word"
                   >
                     모두 처리했어요
                   </Text>
@@ -505,18 +523,18 @@ export function DecisionStage({
                         else if (action === 'decrement') move('previous');
                       }}
                     >
-                      <Text style={styles.title} accessibilityRole="header">
+                      <Sentence style={styles.title} accessibilityRole="header">
                         {current.bundle.headline}
-                      </Text>
+                      </Sentence>
                       {flowing ? null : (
-                        <Text style={styles.meta}>
+                        <Sentence style={styles.meta}>
                           끌어 넘겨 보기 · 결정은 버튼을 눌러요
-                        </Text>
+                        </Sentence>
                       )}
                     </View>
                     {offline ? (
-                      <Sentence style={styles.body}>
-                        연결이 없어요. 내용을 살펴보고 연결되면 결정해 주세요.
+                      <Sentence style={styles.body} testID="decision-stage-offline">
+                        {blockedLine ?? '연결이 없어요. 내용을 살펴보고 연결되면 결정해 주세요.'}
                       </Sentence>
                     ) : null}
                     {current.bundle.valueChips.map((value, index) => (
@@ -526,7 +544,7 @@ export function DecisionStage({
                         accessible
                         accessibilityLabel={value.labelText}
                       >
-                        <Text style={styles.meta}>{value.label}</Text>
+                        <Sentence style={styles.meta}>{value.label}</Sentence>
                         <Sentence style={styles.body}>
                           {value.before !== undefined
                             ? `${value.before} → `
@@ -547,9 +565,6 @@ export function DecisionStage({
                         예상 비용 {formatMicroUsd(entry.card.estimatedMicroUsd)}
                       </Sentence>
                     ) : null}
-                    <Sentence style={styles.meta}>
-                      {current.bundle.quietLine}
-                    </Sentence>
                     {current.bundle.waitingFor ? (
                       <Sentence style={styles.body}>
                         {current.bundle.waitingFor}
@@ -565,16 +580,22 @@ export function DecisionStage({
                         결정 상태를 확인하지 못했어요. 닫고 다시 열어 주세요.
                       </Sentence>
                     ) : null}
+                    {/* 「자세히」는 한 번만 선다(#4982). 코어의 조용한 줄(`quietLine`)이 이미 「… · 자세히」로 끝나서, 이 줄을
+                        눌리지 않는 글로 두고 같은 낱말의 단추를 하나 더 세우면 첫째는 눌리지 않았다. 대화 안의 묶음 카드와 같은
+                        모양으로 그 줄 자체가 단추다. 낭독 이름은 보이는 글(남은 시간)을 그대로 말한다. */}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={
-                        expanded ? '자세히 접기' : current.bundle.details.label
+                        expanded ? '자세히 접기' : current.bundle.quietLine
                       }
                       onPress={() => setExpanded(value => !value)}
                       accessibilityState={{expanded}}
                       style={styles.control}
+                      testID="decision-stage-details-toggle"
                     >
-                      <Text style={styles.meta}>자세히</Text>
+                      <Sentence style={styles.meta}>
+                        {current.bundle.quietLine}
+                      </Sentence>
                     </Pressable>
                     {expanded
                       ? current.bundle.details.rows
@@ -609,13 +630,17 @@ export function DecisionStage({
                           style={styles.control}
                           onPress={advance}
                         >
-                          <Text style={styles.body}>다음 결정 보기</Text>
+                          <Sentence style={styles.body}>다음 결정 보기</Sentence>
                         </Pressable>
                       </View>
                     ) : null}
                   </>
                 ) : (
-                  <Text ref={heading} style={styles.body}>
+                  <Text
+                    ref={heading}
+                    style={styles.body}
+                    lineBreakStrategyIOS="hangul-word"
+                  >
                     지금 살펴볼 결정이 없어요.
                   </Text>
                 )}
@@ -644,36 +669,45 @@ export function DecisionStage({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="이전 결정"
-                  accessibilityState={{
-                    disabled: !canNavigate || model.index <= 0,
-                  }}
-                  disabled={!canNavigate || model.index <= 0}
+                  accessibilityState={{disabled: previousDisabled}}
+                  disabled={previousDisabled}
                   onPress={() => move('previous')}
-                  style={styles.control}
+                  style={[
+                    styles.control,
+                    previousDisabled && styles.controlDisabled,
+                  ]}
+                  testID="decision-stage-previous"
                 >
-                  <Text style={styles.body}>이전</Text>
+                  <Sentence
+                    style={styles.body}
+                    maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  >
+                    이전
+                  </Sentence>
                 </Pressable>
-                <Text
+                <Sentence
                   style={styles.meta}
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
                   accessibilityLiveRegion="polite"
                   testID="decision-stage-position"
                 >
                   {model.positionLabel}
-                </Text>
+                </Sentence>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="다음 결정"
-                  accessibilityState={{
-                    disabled:
-                      !canNavigate || model.index >= model.cards.length - 1,
-                  }}
-                  disabled={
-                    !canNavigate || model.index >= model.cards.length - 1
-                  }
+                  accessibilityState={{disabled: nextDisabled}}
+                  disabled={nextDisabled}
                   onPress={() => move('next')}
-                  style={styles.control}
+                  style={[styles.control, nextDisabled && styles.controlDisabled]}
+                  testID="decision-stage-next"
                 >
-                  <Text style={styles.body}>다음</Text>
+                  <Sentence
+                    style={styles.body}
+                    maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  >
+                    다음
+                  </Sentence>
                 </Pressable>
               </View>
               <ScrollView
@@ -704,13 +738,27 @@ export function DecisionStage({
                     style={[
                       styles.thumbnail,
                       current?.id === card.id && styles.selected,
+                      !canNavigate && styles.controlDisabled,
                     ]}
                     testID={`decision-stage-thumbnail-${card.id}`}
                   >
-                    <Text style={styles.meta} numberOfLines={2}>
+                    {/* 큰 글씨(`flowing`)에서는 한 줄 머리말만 서고 상태 낱말은 낭독 이름(위 `accessibilityLabel`)에만 둔다: 넘기기 줄이
+                        본문 창을 나눠 갖는 몫을 줄인다(#4982, #4921 남은 한계). 기본 크기는 그대로 두 줄 + 낱말이다. */}
+                    <Sentence
+                      style={styles.meta}
+                      numberOfLines={flowing ? 1 : 2}
+                      maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                    >
                       {card.bundle.headline}
-                    </Text>
-                    <Text style={styles.meta}>{card.bundle.word}</Text>
+                    </Sentence>
+                    {flowing ? null : (
+                      <Sentence
+                        style={styles.meta}
+                        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                      >
+                        {card.bundle.word}
+                      </Sentence>
+                    )}
                   </Pressable>
                 ))}
               </ScrollView>
@@ -797,6 +845,8 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       padding: space.sm,
     },
+    // 눌리지 않는 이전/다음/썸네일. 저장소의 비활성 모양(`rowDisabled` 등)과 같은 값이다.
+    controlDisabled: {opacity: 0.55},
     actions: {padding: space.md},
     navigation: {gap: space.xs, paddingBottom: space.sm},
     thumbnails: {flexGrow: 0, flexShrink: 1},

@@ -99,3 +99,22 @@ it('terminal on a socket that never reported anything else still shows the outag
   expect(jest.getTimerCount()).toBe(0);
   display.dispose();
 });
+
+// ---------------------------------------------------------------------------
+// 띠(band)의 1초 침묵은 이 파일의 일이 아니다 (#5222, #5201 S-D)
+//
+// `shown`(소켓이 살아 있는가를 묻는 쪽이 읽는 상태)만 이 파일이 만든다. 사람에게 말하는 판정 — 끊긴 첫 1초의 침묵(#4949), 「연결 중」, 「끊김」의
+// 원인 — 은 코어 연결 상태 모델이 하고 폰의 `ConnectionProvider` 가 소켓 사건을 먹인다. 옛 `bandOf`·`onBand`·조용한 시계 시험(#4949)은
+// `connectionProvider.test.tsx` 가 같은 장면을 실제 공급자·머리로 다시 잰다(0.6초 안에 이어짐 · 1.5초 · 이미 선 띠 · 복귀 · 끝난 소켓).
+// ---------------------------------------------------------------------------
+
+it('이 시계는 말하는 일을 하지 않는다: 띠를 위한 조용한 시계·콜백이 남아 있지 않다', () => {
+  const {display} = drive();
+  display.push({kind: 'raw', status: 'connected'});
+  display.push({kind: 'raw', status: 'connecting'});
+  // 틈이 시작되면 시계는 하나(10초 마감)뿐이다 — 옛 판은 1초 조용한 시계를 하나 더 걸었다.
+  expect(jest.getTimerCount()).toBe(1);
+  expect(Object.keys(display).sort()).toEqual(['current', 'dispose', 'push']);
+  display.dispose();
+  expect(jest.getTimerCount()).toBe(0);
+});

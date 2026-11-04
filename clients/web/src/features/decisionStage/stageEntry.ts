@@ -2,22 +2,36 @@ import type { Member, AgentRunProgress, Message } from "@momo/core/lib/api";
 import { fetchMessages } from "@momo/core/lib/api";
 import { agentCardModel, resolveApprovalStatus, type AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
 import { approvalHeadTitle } from "@momo/core/features/timeline/agentInitiative";
-import { requestBundleModel, runBundleSnapshot, type RequestBundleContext } from "@momo/core/features/timeline/requestBundle";
+import { requestBundleModel, runBundleCanDecide, runBundleSnapshot, type RequestBundleContext } from "@momo/core/features/timeline/requestBundle";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { decisionNote } from "@/features/inbox/approvalsPanel";
 import { rememberSettledApproval, settledApprovalFor, type SettledReceipt } from "@/features/timeline/settledApprovals";
 import { decisionStageSnapshot, openDecisionStage, type DecisionStageEntry, type DecisionStageRequest } from "./openDecisionStage";
 
-/** ApprovalBody와 무대는 같은 명부·서버 권한·옛 카드 폴백을 읽어요. */
-export function approvalBundleContext(card: Pick<AgentApprovalCard, "bundle">, member: Member, directory: Directory): Omit<RequestBundleContext, "nowMs"> {
+/**
+ * ApprovalBody와 무대는 같은 명부·서버 권한·옛 카드 폴백을 읽어요. 그 승인의 run 진행 bundle을 알면
+ * (`run`) 서버가 보는 사람에게 해 준 「못 한다」(`canDecide: false`)도 읽어요: 단추를 거두기만 하고,
+ * 「한다」는 단추를 더 세우지 않아요.
+ *
+ * 같은 `run`을 문맥에도 실어요(#5254). 결과 줄(`tool_result`) 없이 끝나는 도구 호출(에이전트 오류·사람의 중단)은 카드가
+ * 말할 길이 이 run의 끝뿐이고, 폰이 `requestBundleModel`에 `run`을 넘기는 것과 같은 코어 규칙(`requestBundleState`의 run 가지)이
+ * 읽어요. 결과가 카드에 있으면 그 결과가 먼저예요(코어 순서). 「이 승인에 이어진 run」을 고르는 일은 부른 쪽의 몫이에요.
+ */
+export function approvalBundleContext(
+  card: { bundle?: AgentApprovalCard["bundle"]; approvalId?: string | null },
+  member: Member,
+  directory: Directory,
+  run?: Pick<AgentRunProgress, "bundle" | "phase" | "endReason">
+): Omit<RequestBundleContext, "nowMs"> {
   const viewer = memberFor(directory, member.id) ?? member;
   const role = memberFor(directory, member.id)?.role;
   return {
     viewerMemberId: member.id,
     viewerKind: viewer.kind,
-    canDecide: card.bundle?.canDecide ?? true,
+    canDecide: (card.bundle?.canDecide ?? true) && runBundleCanDecide(run, card.approvalId) !== false,
     isWorkspaceAdmin: role === "owner" || role === "admin",
     nameFor: (id) => memberFor(directory, id)?.displayName,
+    ...(run === undefined ? {} : { run }),
   };
 }
 
@@ -80,7 +94,9 @@ export function openRunDecisionStage({ runs, member, directory, workspaceId, cha
           const runId = message.props?.run_id ?? message.props?.runId;
           if (!approvalIds.has(card.approvalId.toLowerCase()) && !(typeof runId === "string" && runIds.has(runId.toLowerCase()))) continue;
           const prepared = approvalBundleCard(card);
-          if (requestBundleModel(prepared, { ...approvalBundleContext(card, member, directory), nowMs: Date.now() }).canDecide) {
+          // 그 승인을 가리키는 run의 bundle이 「못 한다」면 무대에 올리지 않아요(서버가 보는 사람 기준으로 판정).
+          const run = runs.find((candidate) => runBundleCanDecide(candidate, card.approvalId) !== undefined);
+          if (requestBundleModel(prepared, { ...approvalBundleContext(card, member, directory, run), nowMs: Date.now() }).canDecide) {
             found.set(card.approvalId.toLowerCase(), { id: message.id, card: prepared });
           }
         }

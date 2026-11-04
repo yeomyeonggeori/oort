@@ -47,6 +47,10 @@ export const HOME_ICONS = {
   // 상대를 알아볼 수 없는 DM(「나간 멤버」)의 기본 아바타 글리프 (#4252). 웹 `DmAvatar` 의 Lucide `user`
   // (16)와 같은 모양이고 같은 레시피(선 1.8, viewBox 24, 18pt 의 1·2·3배)다.
   user: require('./user18.png') as ImageSourcePropType,
+  // 섹션 머리 「채널」 전용 (#4979, owner 11-01). 머리가 줄과 같은 `#`(hash)라 줄 하나처럼 읽혔다 — 여러 채널이 겹친 묶음으로
+  // 읽히는 Lucide `layers`(ISC, 웹 `lucide-react` 0.454.0 의 경로 그대로: path 셋)로 바꾼다. 같은 레시피(선 1.8, viewBox 24,
+  // 22pt 의 1·2·3배: `rsvg-convert -w <22|44|66> -h <22|44|66>`). 줄의 `hash`·`lock`은 그대로다(#4953).
+  layers: require('./layers22.png') as ImageSourcePropType,
 } as const;
 
 export type HomeIconName = keyof typeof HOME_ICONS;
@@ -64,9 +68,10 @@ export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
   down: 20,
   bot: 18,
   user: 18,
+  layers: 22,
 };
 
-// ---- 대화 아이콘 여덟 (DS2-4 #2716 · 시계 #4455) -----------------------------
+// ---- 대화 아이콘 아홉 (DS2-4 #2716 · 시계 #4455 · 답글 #4869) -----------------
 // 같은 레시피(선 1.8, viewBox 24, 1·2·3배). `left`·`up`·`check`·`file`·`plus`·`x`는
 // 시안 `<symbol>`이고, `kebab`(세로 점 셋)은 시안에 없어 Lucide `ellipsis-vertical`
 // 이다 — owner 피드백 표의 Buzz 머리 오른쪽 「⋮」. 이름이 셸의 `plus`·`x`와 겹치는
@@ -87,6 +92,14 @@ export const CONV_ICONS = {
   // 오래 걸리는 전송의 표지 (#4455). Lucide `clock`(ISC) — 같은 레시피(선 1.8, viewBox 24, 12pt 의
   // 1·2·3배). 시각 글자(`font.meta` 12)와 같은 크기라 이름 줄 옆에서 글자보다 튀지 않는다.
   clock: require('./clock.png') as ImageSourcePropType,
+  // 밀어서 답글(#4869)의 문턱 표지. Lucide `reply`(ISC, 웹 `lucide-react` 0.454.0 의 경로 그대로 — polyline `9 17 4 12 9 7` +
+  // path `M20 18v-2a4 4 0 0 0-4-4H4`), 같은 레시피(선 1.8, viewBox 24, 20pt 의 1·2·3배: `rsvg-convert -w <20|40|60>`).
+  reply: require('./reply20.png') as ImageSourcePropType,
+  // 스레드 머리의 「따라가기」 단추(#4890). Lucide `bell`·`bell-off`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로)를
+  // 같은 레시피(선 1.8, viewBox 24, `rsvg-convert`, 20pt 의 1·2·3배)로 **옮겨 담았다**. 새로 그린 것이 아니다. 켜짐은 `bell`,
+  // 꺼짐은 빗금이 있는 `bell-off`.
+  bell: require('./bell.png') as ImageSourcePropType,
+  bellOff: require('./bell-off.png') as ImageSourcePropType,
 } as const;
 
 export type ConvIconName = keyof typeof CONV_ICONS;
@@ -104,6 +117,9 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   cross: 14,
   file: 18,
   clock: 12,
+  reply: 20,
+  bell: 20,
+  bellOff: 20,
 };
 
 // ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------
@@ -182,3 +198,42 @@ export type ViewerIconName = keyof typeof VIEWER_ICONS;
 
 /** 둥근 유리 단추 안 글리프 22 — 뒤로(`CONV_ICON_SIZE.left`)와 같은 크기라 세 단추의 글리프가 한 무게로 읽힌다. */
 export const VIEWER_ICON_SIZE = 22;
+
+// ---- 영상 아이콘 여섯 (#5208) -------------------------------------------------
+// Lucide `play`·`pause`·`volume-2`·`volume-x`·`video`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로),
+// 같은 레시피(선 1.8, viewBox 24). 새 모양을 그리지 않고 **기존 묶음에서 옮겨 담았다**. `play`·`pause`는 재생 단추의 관례대로
+// 안을 채웠다(`fill`만 더했다 — 경로는 그대로다). 크기는 쓰는 자리의 1·2·3배다: 유리 단추 글리프 22, 카드 한가운데 재생 표지 28,
+// 파일 카드 타일 안 영상기 18. 다시 만드는 법: `rsvg-convert -w <pt|2pt|3pt> -h <pt|2pt|3pt>`.
+
+export const VIDEO_ICONS = {
+  play: require('./play22.png') as ImageSourcePropType,
+  pause: require('./pause22.png') as ImageSourcePropType,
+  volume: require('./volume22.png') as ImageSourcePropType,
+  volumeOff: require('./volumeoff22.png') as ImageSourcePropType,
+  /** 카드 한가운데의 재생 표지. */
+  playMark: require('./play28.png') as ImageSourcePropType,
+  /** 파일 카드 타일 안의 영상기 — 포스터가 없는 영상이 문서 아이콘으로 서지 않게 한다. */
+  video: require('./video18.png') as ImageSourcePropType,
+} as const;
+
+export type VideoIconName = keyof typeof VIDEO_ICONS;
+
+export const VIDEO_ICON_SIZE: Readonly<Record<VideoIconName, number>> = {
+  play: 22,
+  pause: 22,
+  volume: 22,
+  volumeOff: 22,
+  playMark: 28,
+  video: 18,
+};
+
+// ---- 링크 카드의 지구 (#4883) -------------------------------------------------
+// Lucide `globe`(ISC, 웹이 `lucide-react` 로 쓰는 같은 집합 — 경로 그대로), 같은 레시피(선 1.8, viewBox 24,
+// 24pt 의 1·2·3배). 서버가 사이트 아이콘을 주지 못한 카드의 **기본 아이콘**이다(코어 `unfurlCardModel`:
+// `iconUrl` 이 없으면 지구). 주소 줄에서는 16으로, 그림 칸의 타일에서는 24로 그린다(큰 래스터를 줄여 그린다).
+// 다시 만드는 법: `rsvg-convert -w <24|48|72> -h <24|48|72>`, 경로는
+// `<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>`.
+
+export const LINK_CARD_ICONS = {
+  globe: require('./globe24.png') as ImageSourcePropType,
+} as const;

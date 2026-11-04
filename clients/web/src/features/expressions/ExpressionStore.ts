@@ -2,6 +2,7 @@ import { emptyExpressionUsage, recordExpressionUse, restoreExpressionUsage } fro
 import { tokenizeExpressions } from "@momo/core/features/expressions/message";
 import { applyExpressionList, emptyExpressionCache } from "@momo/core/features/expressions/cache";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
+import { photoModelRequest, readPhotoDraftResult, readPhotoModel, type PhotoDraftResult, type PhotoModel } from "@momo/core/features/expressions/photo";
 import type { ExpressionDraft, ExpressionList, ExpressionMutation } from "@momo/core/features/expressions/types";
 import type { ExpressionRequest, ExpressionTransport } from "./transport";
 
@@ -50,6 +51,18 @@ export class ExpressionStore {
     const value = await this.transport.json(request);
     if (!matchesExpressionContract("Draft", value) || (value as ExpressionDraft).workspaceId !== this.workspaceId) throw new Error("expression draft");
     return value as ExpressionDraft;
+  }
+  /** 팀에 이미지 모델이 연결돼 있는가, 있다면 사진이 어느 회사로 가는가(ADR-0218 §8 H9). */
+  async photoModel(): Promise<PhotoModel> {
+    const model = readPhotoModel(await this.transport.json(photoModelRequest(this.base)));
+    if (!model) throw new Error("expression photo model");
+    return model;
+  }
+  /** 사진 한 장으로 만든 초안과 서버가 배경에 한 일. */
+  async photoDraft(request: ExpressionRequest): Promise<PhotoDraftResult> {
+    const result = readPhotoDraftResult(await this.transport.json(request), this.workspaceId);
+    if (!result) throw new Error("expression photo draft");
+    return result;
   }
   async mutate(request: ExpressionRequest): Promise<ExpressionMutation> {
     const value = await this.transport.json(request);

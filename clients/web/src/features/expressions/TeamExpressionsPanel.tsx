@@ -1,38 +1,69 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { ArrowLeft, MoreHorizontal, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
+import type { MessageKey } from "@momo/core/i18n";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
+import { expressionsForTab, firstFilledShelf, type ExpressionShelf } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionMetadata } from "@momo/core/features/expressions/types";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
-import { ExpressionMakeForm } from "./ExpressionMakeForm";
+import { ExpressionMakeEntry } from "./ExpressionMakeEntry";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { ExpressionImage } from "./ExpressionImage";
 import { useExpressions } from "./context";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // 「＋」는 메뉴다: 가져오기(직접 올리기·출처 링크)와 AI와 만들기. 두 길은 권한(canAdd)과 오프라인 규칙이 같다.
 type PanelMode = "list" | "import" | "make";
+// 잠금의 흐림은 잠금과 한 식이 켠다(#1486 문법). 클래스 글자는 상수로 둬서 JSX 식 안의 문자열로 세지 않는다.
+const DIM = "opacity-50";
 
-export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void }) {
+// 세 보기의 이름은 사전의 것이다: 폰 시트의 탭 이름(owner 10-31, #4942)과 같은 체계이고 카드의 종류 이름과 같은 말이다(팀 이모지 · 이모티콘 · GIF,
+// #5112 3단계). 값이 곧 코어의 칸 이름이다. 웹 패널에는 표준 유니코드 이모지 보기가 없어서 「팀 이모지」라 써도 다른 보기와 겹치지 않는다.
+const VIEW_OPTIONS = [
+  { value: "team", name: "expressions.panel.viewTeam" },
+  { value: "emoticon", name: "expressions.panel.viewEmoticon" },
+  { value: "gif", name: "expressions.panel.viewGif" },
+] as const satisfies readonly { value: ExpressionShelf; name: MessageKey }[];
+
+export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void;
+  /**
+   * 확인 단계가 서 있는 동안 Esc의 임자가 되는 자리. 고르개(Radix 팝오버)가 Esc를 문서 캡처 단계에서 먼저 가져가므로, 고르개가
+   * 이 ref를 읽어 확인 단계 취소를 부른다. 확인이 없으면 null이다. 확인 단계에서 Esc가 고르개 통째로 닫으면 안 된다(#4986).
+   */
+  escapeClaim?: MutableRefObject<(() => void) | null> }) {
   const { store, cache, usage, status, offline } = useExpressions();
+  const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
-  const [view, setView] = useState("emoji");
+  // ADR-0218 §10 J2: 세 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`). 팀 이모지 = 작은 팀 이모지(움직여도),
+  // 이모티콘 = 움직이지 않는 큰 그림, GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 칸 이름이다.
+  // 사람이 고르기 전에는 등록이 있는 첫 칸을 연다: 옛 등록은 모두 이모티콘(`sticker`)이라 팀 이모지 칸만 열면 있는 그림이 안 보인다(J5).
+  const [picked, setPicked] = useState<ExpressionShelf | null>(null);
+  const view = picked ?? firstFilledShelf(cache.items);
   const [mode, setMode] = useState<PanelMode>("list");
   const addTrigger = useRef<HTMLButtonElement>(null);
   const backButton = useRef<HTMLButtonElement>(null);
   const focusTrigger = useRef(false);
   const [admin, setAdmin] = useState(false);
-  const menuOpener = useRef<HTMLElement | null>(null);
-  const [target, setTarget] = useState<{ item: Expression; action: "delete" | "report"; opener: HTMLElement } | null>(null);
+  const [target, setTarget] = useState<{ item: Expression; action: "delete" | "report" } | null>(null);
+  // 확인 단계는 이 고르개 안의 단계다. 별도 대화상자(스크림 층 200)가 고르개(표면 층 300) 아래에 깔려서 고르개가 밝게 남았다(#4986).
+  // 닫으면 초점이 그 항목의 「관리」로 돌아간다. 목록은 확인 중에 내려가므로 단추 노드를 들고 있지 않고 항목 id로 다시 찾는다.
+  const returnFocusTo = useRef<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmTitleId = useId();
+  const confirmBodyId = useId();
   const [reason, setReason] = useState("copyright");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -52,50 +83,78 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (to
     if (mode !== "list") backButton.current?.focus();
     else if (focusTrigger.current) { focusTrigger.current = false; addTrigger.current?.focus(); }
   }, [mode]);
+  // 확인 단계가 서면 초점은 「취소」로 간다(되돌릴 수 없는 쪽이 아니라 안전한 쪽). 닫히면 그 항목의 「관리」로 돌아가고,
+  // 항목이 사라졌으면(지움·신고로 숨김) 목록의 검색 칸으로 간다 — 초점이 문서 처음(body)으로 떨어지지 않게.
+  useLayoutEffect(() => {
+    if (target !== null) { cancelRef.current?.focus(); return; }
+    const id = returnFocusTo.current;
+    if (id === null) return;
+    returnFocusTo.current = null;
+    const manage = [...(listRef.current?.querySelectorAll<HTMLElement>("[data-manage]") ?? [])].find((node) => node.getAttribute("data-manage") === id);
+    (manage ?? searchRef.current)?.focus();
+  }, [target]);
+  function closeConfirm() {
+    // 보내는 동안에는 닫지 않는다: 요청은 이미 나갔고, 결과를 이 단계가 말해야 한다.
+    if (busy || lock.current || !target) return;
+    returnFocusTo.current = target.item.id;
+    setError(null);
+    setTarget(null);
+  }
+  const closeConfirmRef = useRef(closeConfirm);
+  closeConfirmRef.current = closeConfirm;
+  const confirming = target !== null;
+  useEffect(() => {
+    if (!escapeClaim || !confirming) return;
+    escapeClaim.current = () => closeConfirmRef.current();
+    return () => { escapeClaim.current = null; };
+  }, [escapeClaim, confirming]);
   if (!store) return null;
   function backToList() { focusTrigger.current = true; setMode("list"); }
-  const items = searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage).filter((item) => view !== "gif" || item.media?.large.mime === "image/gif");
+  const items = expressionsForTab(searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage), view);
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
     lock.current = true; setBusy(true); setError(null);
     try {
       await store.mutate({ method: target.action === "delete" ? "DELETE" : "POST", path: `${store.base}/expressions/${target.item.id}${target.action === "report" ? "/report" : ""}`, body: target.action === "report" ? { reason } : undefined });
+      returnFocusTo.current = target.item.id;
       setTarget(null);
     } catch { setError("변경하지 못했어요. 연결과 권한을 확인하고 다시 시도해 주세요."); }
     finally { lock.current = false; setBusy(false); }
   }
   return <div className="flex min-h-0 flex-col gap-2" data-testid="team-expressions">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-body font-semibold">우리 팀</p>
-      {mode === "list" ? <DropdownMenu><DropdownMenuTrigger asChild disabled={!canAdd || offline}><Button ref={addTrigger} type="button" variant="secondary" size="sm" disabled={!canAdd || offline} data-testid="expression-add-menu"><Plus aria-hidden="true" />추가하기</Button></DropdownMenuTrigger><DropdownMenuContent align="end">
+      {confirming ? null : mode === "list" ? <DropdownMenu><DropdownMenuTrigger asChild disabled={!canAdd || offline}><Button ref={addTrigger} type="button" variant="secondary" size="sm" disabled={!canAdd || offline} data-testid="expression-add-menu"><Plus aria-hidden="true" />추가하기</Button></DropdownMenuTrigger><DropdownMenuContent align="end">
         <DropdownMenuItem data-testid="expression-add-import" onSelect={() => setMode("import")}>가져오기</DropdownMenuItem>
         <DropdownMenuItem data-testid="expression-add-make" onSelect={() => setMode("make")}>AI와 만들기</DropdownMenuItem>
       </DropdownMenuContent></DropdownMenu> : <Button ref={backButton} type="button" variant="secondary" size="sm" onClick={backToList}><ArrowLeft aria-hidden="true" />목록으로</Button>}
     </div>
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
-    {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
-    {mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeForm onImport={() => setMode("import")} onClose={onClose} /> : <>
-      <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setView} options={[{ value: "emoji", label: "이모지" }, { value: "sticker", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
-      <Input type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+    {offline && <InlineBanner message={<BlockedReason frame="reloadPicturesLater" />} separator={false} />}
+    {confirming ? <div role="group" aria-labelledby={confirmTitleId} aria-describedby={confirmBodyId} className="flex flex-col gap-3" data-testid="expression-confirm">
+      <p id={confirmTitleId} className="text-title font-semibold text-ink">{target.action === "delete" ? "팀 그림을 삭제할까요?" : "팀 그림을 신고할까요?"}</p>
+      <p id={confirmBodyId} className="text-body text-ink-muted">{target.action === "delete" ? "지운 이름은 다시 쓸 수 없어요. 예전 메시지와 반응은 이름 문자열로 표시돼요." : "신고하면 팀 전체에서 즉시 숨겨져요. 신고자와 내용은 관리자만 볼 수 있어요."}</p>
+      {target.action === "report" && <label className="text-body">신고 사유<Select value={reason} onChange={(event) => setReason(event.target.value)} disabled={busy}><option value="copyright">저작권</option><option value="face">사람 얼굴</option><option value="other">기타</option></Select></label>}
+      {error && <p role="alert" className="text-body text-danger">{error}</p>}
+      {/* 진행·잠금 문법(#1486): 보내는 단추는 `aria-busy` + 바뀐 낱말이고 자기 진행으로 잠그지도 흐리지도 않는다. 형제인 「취소」는
+          그 진행 때문에 잠기므로 aria-disabled + 흐림 + 가드(closeConfirm)다. 둘 다 네이티브 disabled가 아니라서 초점을 쥔 단추가
+          disabled가 되어 초점이 body로 떨어지는 일이 없다(#4986). 연결이 없을 때만 보내는 단추도 잠긴다. */}
+      <div className="flex justify-end gap-2"><Button ref={cancelRef} type="button" variant="secondary" aria-disabled={busy || undefined} className={cn(busy && DIM)} onClick={closeConfirm}>취소</Button><Button type="button" variant="destructive" aria-busy={busy || undefined} aria-disabled={offline || undefined} className={cn(offline && DIM)} onClick={() => void confirm()}>{busy ? "처리 중" : target.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
+    </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
+      <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />
+      <Input ref={searchRef} type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
-        <ul className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
+      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
+        <ul ref={listRef} className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);
             if (active?.status === "active") onPick(expressionToken(active.name));
-          }}><ExpressionImage item={item} size={view === "sticker" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
-          <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`${item.displayName} 관리`} onFocus={(event) => { menuOpener.current = event.currentTarget; }} onPointerDown={(event) => { menuOpener.current = event.currentTarget; }}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent>
-            <DropdownMenuItem onSelect={(event) => { setError(null); setTarget({ item, action: "report", opener: menuOpener.current ?? event.currentTarget as HTMLElement }); }}>신고하기</DropdownMenuItem>
-            <DropdownMenuItem disabled={item.createdBy !== store.memberId && !admin} onSelect={(event) => { setError(null); setTarget({ item, action: "delete", opener: menuOpener.current ?? event.currentTarget as HTMLElement }); }}>삭제하기{item.createdBy !== store.memberId && !admin ? " (만든 사람·관리자만)" : ""}</DropdownMenuItem>
+          }}><ExpressionImage item={item} size={view === "emoticon" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`${item.displayName} 관리`} data-manage={item.id}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => { setError(null); setTarget({ item, action: "report" }); }}>신고하기</DropdownMenuItem>
+            <DropdownMenuItem disabled={item.createdBy !== store.memberId && !admin} onSelect={() => { setError(null); setTarget({ item, action: "delete" }); }}>삭제하기{item.createdBy !== store.memberId && !admin ? " (만든 사람·관리자만)" : ""}</DropdownMenuItem>
           </DropdownMenuContent></DropdownMenu>
         </li>)}</ul>}
     </>}
-    <Dialog open={target !== null} onOpenChange={(open) => { if (!open && !busy) setTarget(null); }}><DialogContent role="alertdialog" opener={target?.opener ?? null} className="gap-3 p-4">
-      <DialogTitle>{target?.action === "delete" ? "팀 그림을 삭제할까요?" : "팀 그림을 신고할까요?"}</DialogTitle>
-      <DialogDescription>{target?.action === "delete" ? "지운 이름은 다시 쓸 수 없어요. 예전 메시지와 반응은 이름 문자열로 표시돼요." : "신고하면 팀 전체에서 즉시 숨겨져요. 신고자와 내용은 관리자만 볼 수 있어요."}</DialogDescription>
-      {target?.action === "report" && <label className="text-body">신고 사유<Select value={reason} onChange={(event) => setReason(event.target.value)}><option value="copyright">저작권</option><option value="face">사람 얼굴</option><option value="other">기타</option></Select></label>}
-      {error && <p role="alert" className="text-body text-danger">{error}</p>}
-      <div className="flex justify-end gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setTarget(null)}>취소</Button><Button type="button" variant="destructive" disabled={busy || offline} onClick={() => void confirm()}>{busy ? "처리 중" : target?.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
-    </DialogContent></Dialog>
   </div>;
 }
 
@@ -117,7 +176,7 @@ function ExpressionUploadForm({ onDone }: { onDone: () => void }) {
     const metadata: ExpressionMetadata = { name, displayName, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), subjectMemberId: face === "self" ? store.memberId : null };
     if (face === "other") { setError("내 얼굴 한 명인 그림만 승인할 수 있어요. 다른 사람이나 여러 사람 얼굴은 올리지 말아 주세요."); return; }
     if (!matchesExpressionContract("Metadata", metadata)) { setError("이름은 영문 소문자·숫자·밑줄·하이픈 2~30자, 표시 이름은 40자, 태그는 8개 이하로 써 주세요."); return; }
-    if (!url && (!file || !validExpressionFile(file))) { setError("5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."); return; }
+    if (!url && (!file || !validExpressionFile(file))) { setError("5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."); return; }
     if (url && !matchesExpressionContract("ImportRequest", { ...metadata, url })) { setError("공개 HTTPS 출처 링크를 넣어 주세요."); return; }
     lock.current = true; setBusy(true); setError(null);
     try {

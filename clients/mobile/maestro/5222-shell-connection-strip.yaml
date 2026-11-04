@@ -1,0 +1,96 @@
+appId: app.momo.ios
+name: 5222-shell-connection-strip
+---
+# 5222-shell-connection-strip - 폰 셸 띠(홈·받은함·에이전트 목록 위)와 대화 화면 띠가 서고 걷히는 장면 (#5222, #5201 결정 ②).
+#
+# 서버가 필요 없다: 표면 `-momoMeasure CONN-STRIP-<SCENE>`(라이트는 `LIGHT-` 를 앞에) 이 실제 연결 공급자·실제 띠를 스크립트된 기기·소켓
+# 사건 위에 세운다. Maestro 는 iOS 시뮬레이터의 네트워크를 끌 수 없어서(airplane mode 는 Android 만) 하네스가 NetInfo 를 덮어 쓴다.
+# 시각표는 `__tests__/connectionStripSurface.test.tsx` 가 같은 숫자로 잰다.
+#
+#   SCENE=flap         4초에 기기 오프라인 → 띠 「오프라인이에요」(마크 정지 · 단추 없음) → 12초에 돌아옴 → 「다시 연결됐어요」 2초 → 걷힘
+#   SCENE=offline      기기 오프라인이 계속된다: 띠 + 대화 화면 띠가 같은 원인을 말한다
+#   SCENE=unreachable  서로 다른 요청 셋이 응답 없이 실패: 띠 「서버에 닿지 못했어요」 + 「지금 다시 연결」 단추
+#   SCENE=realtime     실시간만 끊김: 홈 띠는 **없고** 대화 화면 띠만 「실시간 연결이 끊겼어요」 (결정 ②)
+#
+#   # 정적 장면(offline · unreachable · realtime): 앱을 켠 뒤 흐름을 돌린다.
+#   xcrun simctl launch <UDID> app.momo.ios --args -momoMeasure CONN-STRIP-OFFLINE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <UDID> test -e SCENE=offline -e SHOT=conn-strip-offline-dark clients/mobile/maestro/5222-shell-connection-strip.yaml
+#   # flap: 장면이 앱을 켠 순간부터 흐른다. Maestro 를 **먼저** 띄우고(첫 단계가 장면을 60초까지 기다린다) 드라이버가 준비된 뒤에 앱을 켠다.
+#   maestro --device <UDID> test -e SCENE=flap -e SHOT=conn-strip-flap-dark clients/mobile/maestro/5222-shell-connection-strip.yaml &
+#   xcrun simctl launch <UDID> app.momo.ios --args -momoMeasure CONN-STRIP-FLAP -RCT_jsLocation 127.0.0.1:$PORT
+#   # 사진: --test-output-dir 아래 takeScreenshot/ (`${SHOT}-offline` · `${SHOT}-recovered` · `${SHOT}-gone`)
+#
+# 느린 기계에서는 Maestro 가 첫 단계에 몇 초를 쓰므로 오프라인 구간을 8초로 넉넉히 뒀다. 그래도 2초짜리 확인 표시(`RECOVERED_FLASH_MS`)는 놓칠 수 있다:
+# 그 안에는 기다림 하나·사진 한 장만 두었으니 다시 돌리거나, 같은 장면을 `xcrun simctl io <UDID> recordVideo` 로 받아 ffmpeg 로 틀을 뽑는다(`100-attach-menu-capture` 와 같은 방법).
+# 처음의 침묵(건강한 연결은 말하지 않는다)은 이 흐름이 단정하지 않는다 - `connectionStripSurface.test.tsx` 가 첫 3초의 띠 없음을 잰다.
+- extendedWaitUntil:
+    visible:
+      id: "conn-strip-scene"
+    timeout: 60000
+# flap 의 기다림 시계(#5286). Maestro 2.8 은 `extendedWaitUntil`·`assertVisible` 의 timeout 을 그 단계가 시작한 때가 아니라 **마지막 상호작용부터** 센다
+# (`Orchestra.adjustedToLatestInteraction`: 남는 시간 = timeout - 마지막 상호작용 뒤 흐른 시간. 상호작용이 한 번도 없으면 흐름이 시작한 때부터 센다).
+# 이 흐름은 화면을 누르지 않으므로 아래 `timeout: 30000` 은 「30초 기다린다」가 아니라 「흐름이 시작하고 30초가 될 때까지」였다. flap 은 Maestro 를 먼저 띄우고
+# 앱을 나중에 켜므로(위 첫 단계가 표지를 최대 60초 기다린다) 표지가 보일 즈음 이미 15~28초를 쓴 뒤였고, 그 뒤의 기다림은 남은 몇 초만 기다리다 장면이 끝나기 전에
+# 붉어졌다(오프라인 띠를 기다리다 · 「다시 연결됐어요」를 기다리다 · 마지막 「걷힘」을 기다리다 — 시험마다 다른 단계에서). 표지가 보이는 순간 `waitForAnimationToEnd` 로
+# 시계를 다시 맞추면(화면을 가라앉히는 명령도 상호작용이다) 기다림 셋이 모두 장면이 시작한 때부터 30초를 쓴다. 장면은 14초면 끝난다.
+- runFlow:
+    when:
+      true: ${SCENE == 'flap'}
+    commands:
+      # 시계를 장면의 시작에 맞춘다(위 설명). 이 한 줄을 빼면 앱을 늦게 켠 시험이 다시 붉어진다.
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - extendedWaitUntil:
+          visible:
+            id: "shell-connection-strip"
+          timeout: 30000
+      - assertVisible: 오프라인이에요
+      - takeScreenshot: ${SHOT}-offline
+      # 돌아오면 「끊김」이 보였던 경우에만 2초 확인 표시가 선다. 2초 안에는 기다림 하나와 사진 한 장만 둔다(확인 마크의 id 는 jest 가 잰다).
+      - extendedWaitUntil:
+          visible: 다시 연결됐어요
+          timeout: 30000
+      - takeScreenshot: ${SHOT}-recovered
+      - extendedWaitUntil:
+          notVisible:
+            id: "shell-connection-strip"
+          timeout: 30000
+      - takeScreenshot: ${SHOT}-gone
+- runFlow:
+    when:
+      true: ${SCENE == 'offline'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "shell-connection-strip"
+          timeout: 20000
+      - assertVisible: 오프라인이에요
+      - assertVisible:
+          id: "connection-banner"
+      - takeScreenshot: ${SHOT}
+- runFlow:
+    when:
+      true: ${SCENE == 'unreachable'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "shell-connection-strip"
+          timeout: 20000
+      # 단추가 있는 띠는 이름(label)이 「지금 다시 연결」이고 지금 상태 문장은 값(value)으로 읽힌다(낭독은 둘 다 읽는다). Maestro 의 글자 찾기는 이름만
+      # 보므로 문장 「서버에 닿지 못했어요」는 사진과 jest(`connectionStripSurface.test.tsx`)가 잰다.
+      - assertVisible: 지금 다시 연결
+      - takeScreenshot: ${SHOT}
+- runFlow:
+    when:
+      true: ${SCENE == 'realtime'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "connection-banner"
+          timeout: 30000
+      # 끊김 띠는 단추다: 이름은 「지금 다시 연결」(문장 「실시간 연결이 끊겼어요」는 값이라 Maestro 가 못 본다 - 사진과 jest 가 잰다).
+      - assertVisible: 지금 다시 연결
+      # 실시간만 끊긴 것은 홈에서 말하지 않는다.
+      - assertNotVisible:
+          id: "shell-connection-strip"
+      - takeScreenshot: ${SHOT}

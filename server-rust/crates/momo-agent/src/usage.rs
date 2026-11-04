@@ -690,7 +690,7 @@ pub async fn provider_spend_in_tx(
     let rows = sqlx::query(
         "WITH l AS ( \
            SELECT u.model, u.prompt_tokens, u.completion_tokens, u.cached_tokens, \
-                  u.cost_micro_usd, u.created_at, \
+                  u.cost_micro_usd, u.created_at, COALESCE(u.run_id, u.id) AS run_key, \
                   CASE WHEN position('/' in u.model) > 0 THEN 'openrouter' \
                        WHEN lower(u.model) ~ '^claude' THEN 'anthropic' \
                        WHEN lower(u.model) ~ '^(gpt|o[0-9]|chatgpt|codex)' THEN 'openai' \
@@ -700,7 +700,7 @@ pub async fn provider_spend_in_tx(
              FROM usage_ledger u \
             WHERE u.workspace_id = $1 AND u.created_at >= $2), \
          priced AS ( \
-           SELECT l.company, l.model, l.prompt_tokens, l.completion_tokens, \
+           SELECT l.company, l.model, l.prompt_tokens, l.completion_tokens, l.run_key, \
                   CASE WHEN l.cost_micro_usd > 0 THEN l.cost_micro_usd::numeric \
                        WHEN p.id IS NOT NULL THEN \
                          GREATEST(l.prompt_tokens - l.cached_tokens, 0) * p.input_micro_usd_per_token \
@@ -716,7 +716,7 @@ pub async fn provider_spend_in_tx(
                 ORDER BY (mp.workspace_id IS NULL) ASC, length(mp.model) DESC, \
                          mp.effective_from DESC \
                 LIMIT 1) p ON true) \
-         SELECT company, model, count(*)::bigint AS runs, \
+         SELECT company, model, count(DISTINCT run_key)::bigint AS runs, \
                 COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
                 COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, \
                 round(COALESCE(sum(cost), 0))::bigint AS cost_micro_usd, \
@@ -787,16 +787,16 @@ pub async fn agent_usage_in_tx(
                 LIMIT 1) p ON true \
             WHERE u.workspace_id = $1 AND u.created_at >= $2 AND u.created_at <= $3 \
               AND u.agent_member_id = ANY($4)) \
-         SELECT agent_member_id, model, source, count(*)::bigint AS runs, \
-                count(*) FILTER (WHERE prompt_tokens > 0 OR completion_tokens > 0 \
+         SELECT agent_member_id, model, source, count(DISTINCT COALESCE(run_id, id))::bigint AS runs, \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE prompt_tokens > 0 OR completion_tokens > 0 \
                     OR cached_tokens > 0 OR reasoning_tokens > 0 \
                     OR (source = 'measured' AND NOT was_estimated))::bigint AS reported_runs, \
                 COALESCE(sum(GREATEST(prompt_tokens, 0)), 0)::bigint AS prompt_tokens, \
                 COALESCE(sum(GREATEST(completion_tokens, 0)), 0)::bigint AS completion_tokens, \
                 COALESCE(sum(LEAST(GREATEST(cached_tokens, 0), GREATEST(prompt_tokens, 0))), 0)::bigint AS cached_tokens, \
                 round(COALESCE(sum(list_cost), 0))::bigint AS cost_micro_usd, \
-                count(*) FILTER (WHERE price_id IS NULL)::bigint AS unpriced_runs, \
-                count(*) FILTER (WHERE was_estimated OR tier_uncertain OR prompt_tokens < 0 OR completion_tokens < 0 \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE price_id IS NULL)::bigint AS unpriced_runs, \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE was_estimated OR tier_uncertain OR prompt_tokens < 0 OR completion_tokens < 0 \
                     OR cached_tokens < 0 OR cached_tokens > prompt_tokens)::bigint AS estimated_runs \
            FROM priced GROUP BY agent_member_id, model, source \
           ORDER BY agent_member_id, model, source",
@@ -825,6 +825,109 @@ pub async fn agent_usage_in_tx(
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
         .map_err(DbError::from)
+}
+
+// ---------------------------------------------------------------------------
+// the team AI's limits (ADR-0201 증보 v3 B9, #4944)
+// ---------------------------------------------------------------------------
+
+/// What ONE agent has spent since the UTC calendar month began, as the **read-time list-price
+/// estimate** of ADR-0147 증보 2026-10-30 D4 — the very figure `GET …/usage/agents` shows, because
+/// it is computed by the same statement ([`agent_usage_in_tx`]). A monthly dollar limit and the
+/// screen that explains it therefore cannot disagree, and the pricing rules (workspace row over
+/// global, vendor prefix and dots normalised, longest prefix wins, a run on a model with no price
+/// counted in `unpriced_runs` and **not** in the dollars — B9-2) live in one place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AgentMonthSpend {
+    /// Σ list-price cost of the priced runs, in micro-dollars.
+    pub cost_micro_usd: i64,
+    /// Runs of the month: a task of many steps writes one ledger row per step and is **one** run
+    /// (`count(DISTINCT run_id)`, security review r1 L4c); a row with no run counts as its own.
+    pub runs: i64,
+    /// Runs whose model had no `model_pricing` row: in `runs`, not in `cost_micro_usd`.
+    pub unpriced_runs: i64,
+    /// Runs whose tokens or price are estimates (the figure is a lower bound, ADR-0147 D3).
+    pub estimated_runs: i64,
+}
+
+/// [`AgentMonthSpend`] of `agent_member_id` in `workspace_id`, from 00:00 UTC on the first of this
+/// month to now (both read from the database's clock, the one the ledger rows are stamped with).
+pub async fn agent_month_spend_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<AgentMonthSpend, DbError> {
+    let row = sqlx::query(
+        "SELECT date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS month_start, \
+                now() AS now",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    let from: DateTime<Utc> = row.try_get("month_start").map_err(DbError::from)?;
+    let to: DateTime<Utc> = row.try_get("now").map_err(DbError::from)?;
+    let rows = agent_usage_in_tx(
+        conn,
+        workspace_id,
+        UsageWindow {
+            from,
+            to,
+            bucket: UsageBucket::Month,
+        },
+        &[agent_member_id],
+    )
+    .await?;
+    Ok(rows
+        .iter()
+        .fold(AgentMonthSpend::default(), |sum, row| AgentMonthSpend {
+            cost_micro_usd: sum.cost_micro_usd.saturating_add(row.cost_micro_usd),
+            runs: sum.runs + row.runs,
+            unpriced_runs: sum.unpriced_runs + row.unpriced_runs,
+            estimated_runs: sum.estimated_runs + row.estimated_runs,
+        }))
+}
+
+/// The model of this agent's most recent ledger row — what it **actually** ran on last, which is
+/// the only tenant-readable record of the model a 「기본 AI」-following agent resolved to (the row
+/// that names the team's default model is instance-global and readable only after the
+/// instance-operator check). `None` = the agent has never been charged for a request.
+pub async fn latest_ledger_model_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    let model: Option<String> = sqlx::query_scalar(
+        "SELECT model FROM usage_ledger \
+          WHERE workspace_id = $1 AND agent_member_id = $2 \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(model)
+}
+
+/// Does `model` have a `model_pricing` row **now**? The same match [`agent_usage_in_tx`] makes
+/// (global or this workspace's row, USD, in effect, the model id lower-cased with a leading
+/// `vendor/` dropped and dots turned into dashes, the row's `model` a prefix of that) — a test
+/// holds the two together. A priced zero is priced; "no row" is not.
+pub async fn pricing_available_for_model_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    model: &str,
+) -> Result<bool, DbError> {
+    let found: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM model_pricing mp \
+            WHERE (mp.workspace_id IS NULL OR mp.workspace_id = $1) \
+              AND mp.currency = 'USD' AND mp.effective_from <= now() \
+              AND starts_with(replace(regexp_replace(lower($2), '^[^/]+/', ''), '.', '-'), mp.model))",
+    )
+    .bind(workspace_id)
+    .bind(model)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(found)
 }
 
 #[cfg(test)]

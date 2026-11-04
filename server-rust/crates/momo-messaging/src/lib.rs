@@ -51,6 +51,7 @@ pub mod agent_avatar;
 pub mod agent_card;
 pub mod approval_card;
 pub mod attachment;
+pub mod attachment_media;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
@@ -67,12 +68,14 @@ pub mod huddle_sweep;
 pub mod identity;
 pub mod inbox;
 pub mod interaction;
+pub mod invite_link;
 pub mod member_avatar;
 pub mod member_rename;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).
 pub mod memory;
 pub mod message;
 pub mod name_guard;
+pub mod notification_prefs;
 pub mod notification_rule;
 /// ADR-0208 — the owner-scope GUC (`app.member_id`) binders, shared by reminders and scheduled messages.
 pub mod owner_scope;
@@ -89,23 +92,29 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+/// ADR-0201 증보 v3 B10 / #4966 — the team AI's aliases follow its display name
+/// (`sync_team_ai_aliases_in_tx`, migration 166).
+pub mod team_ai_alias;
+/// ADR-0206 증보 1 / #4889 — who follows which thread (`thread_follow`, migration 164).
+pub mod thread_follow;
 pub mod workspace_avatar;
 
 pub use approval_card::settle_approval_card_in_tx;
 
 pub use agent_avatar::{
-    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,
-    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx,
-    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx,
-    find_visible_image_attachment_in_tx, image_attachments_for_messages_in_tx, is_avatar_preset,
-    process_avatar_image, purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx,
-    read_avatar_image_in_tx, read_current_avatar_image_in_tx, requester_of_run_in_tx,
-    stage_avatar_image_in_tx, staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage,
-    AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse,
-    AGENT_AVATAR_DECODE_ALLOC_LIMIT, AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT,
-    AGENT_AVATAR_IN_MAX_BYTES_GENERATED, AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS,
-    AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS,
-    AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
+    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, attachments_for_messages_in_tx,
+    bind_staged_image_to_approval_in_tx, clear_avatar_image_in_tx,
+    delete_staged_avatar_image_in_tx, find_requester_attachment_for_in_tx,
+    find_requester_attachment_in_tx, find_visible_image_attachment_in_tx,
+    image_attachments_for_messages_in_tx, is_avatar_preset, process_avatar_image,
+    purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
+    read_current_avatar_image_in_tx, requester_of_run_in_tx, stage_avatar_image_in_tx,
+    staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage, AvatarAttachmentSource,
+    AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse, AGENT_AVATAR_DECODE_ALLOC_LIMIT,
+    AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT, AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
+    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS, AGENT_AVATAR_OUT_MAX_BYTES,
+    AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES,
+    AGENT_AVATAR_STAGED_TTL_HOURS,
 };
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
@@ -115,18 +124,24 @@ pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
     load_attachment_in_tx, load_readable_attachment_in_tx, message_attachments_in_tx,
     settle_upload_in_tx, validate_attachment_id_list, validate_attachment_mime,
-    validate_attachment_name, Attachment, AttachmentLinkRejected, AttachmentSpecInvalid,
-    MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS, MAX_ATTACHMENTS_PER_MESSAGE,
-    MAX_ATTACHMENT_BYTES,
+    validate_attachment_name, Attachment, AttachmentLinkRejected, AttachmentMedia,
+    AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
+    MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MEDIA_KIND_VIDEO,
+};
+pub use attachment_media::{
+    load_poster_in_tx, may_hold_media, require_video_mime, set_attachment_media_in_tx,
+    validate_media_declaration, validate_poster, video_magic_matches, MediaDeclaration,
+    MediaRejected, Poster, PosterImage, VIDEO_PREFIX_BYTES,
 };
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
     create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
     list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
     normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
-    set_notification_pref_in_tx, Channel, ChannelKind, ChannelMembership, ChannelSpecInvalid,
-    ChannelSummary, CreatedChannel, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX,
-    CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
+    set_notification_pref_in_tx, validate_channel_mute, Channel, ChannelKind, ChannelMembership,
+    ChannelMute, ChannelMuteWrite, ChannelSpecInvalid, ChannelSummary, CreatedChannel,
+    MutedUntilInvalid, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX,
+    CHANNEL_MUTE_MAX_DAYS, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
 };
 pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
@@ -220,7 +235,13 @@ pub use message::{
     PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SendExtras,
     SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
     ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
-    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
+    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX, THREAD_SUMMARY_PARTICIPANTS,
+};
+pub use notification_prefs::{
+    get_prefs_in_tx, is_known_sound, kind_phone_switch_in_tx, parse_cells, parse_hhmm,
+    patch_prefs_in_tx, phone_switch_on, window_state, CellPatch, Cells, CellsPatch, KindSwitch,
+    NotificationKind, PrefsApplied, PrefsPatch, PrefsRejection, PrefsView, Quiet, Schedule,
+    WindowState, BUNDLED_SOUNDS, PHONE_DELAY_CHOICES, PHONE_DELAY_DEFAULT_SECS,
 };
 pub use notification_rule::{
     get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,
@@ -280,15 +301,23 @@ pub use search::{
     SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
 };
 pub use self_media::{
-    bytes_match_mime, canonical_origin, mint_for_run_in_tx, mint_with_ttl_in_tx,
-    redact_self_media_urls, redeem_in_tx, self_media_url, token_hash, token_is_well_formed,
-    trigger_photo_in_tx, SelfMediaGrant, SelfMediaSource, TriggerPhoto, SELF_MEDIA_MAX_BYTES,
-    SELF_MEDIA_PATH_PREFIX, SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
+    bytes_match_mime, canonical_origin, mint_for_attachment_in_tx,
+    mint_for_attachment_with_ttl_in_tx, mint_for_read_in_tx, mint_for_read_with_ttl_in_tx,
+    mint_for_run_in_tx, mint_with_ttl_in_tx, read_kind, redact_self_media_urls, redeem_in_tx,
+    self_media_url, token_hash, token_is_well_formed, trigger_photo_in_tx, ReadKind,
+    SelfMediaGrant, SelfMediaSource, TriggerPhoto, READ_IMAGE_MIMES, READ_MIMES, READ_PDF_MIME,
+    READ_TEXT_MIMES, SELF_MEDIA_INTERNAL_TTL_SECS, SELF_MEDIA_MAX_BYTES, SELF_MEDIA_PATH_PREFIX,
+    SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
 };
 pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,
     SidebarPrefsInvalid, SidebarSection, StoredSidebarPrefs, CHANNEL_REF_MAX, SECTION_ID_MAX_CHARS,
     SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
+};
+pub use thread_follow::{
+    attach_unread_reply_counts, is_following_thread_in_tx, mark_thread_read_in_tx,
+    set_thread_follow_in_tx, thread_follow_views_in_tx, FollowRefused, FollowView, ThreadReadState,
+    STATE_AUTO, STATE_FOLLOWED, STATE_UNFOLLOWED,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,

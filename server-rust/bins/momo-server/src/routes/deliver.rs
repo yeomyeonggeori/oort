@@ -158,6 +158,15 @@ pub(crate) struct DeliverRequest {
     /// `message.props.requestedApps`. Judged here, after the insert and only when it
     /// was new; empty for every sender that picked none (and for the scheduler).
     pub requested_apps: Vec<String>,
+    /// ADR-0148 증보 (#4887) — the sender chose 「대화에도 보내기」. Already shape-checked by the
+    /// REST route (a 400 without `rootId`); passed on as [`SendExtras::also_in_channel`], where the
+    /// table's CHECK is the second layer. `false` for the scheduler, whose timed send carries no
+    /// such choice yet.
+    pub also_in_channel: bool,
+    /// ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: plant the message's unfurl
+    /// tombstone in this transaction, on a real insert only (a `deduped` retry answers the stored
+    /// message). `false` for the scheduler, whose timed send carries no such choice yet.
+    pub suppress_unfurl: bool,
     pub gates: DeliverGates,
 }
 
@@ -224,6 +233,8 @@ pub(crate) async fn deliver_message_via_in_tx(
         author_is_human,
         requested_routing,
         requested_apps,
+        also_in_channel,
+        suppress_unfurl,
         gates,
     } = request;
     let channel_id = message.channel_id;
@@ -296,6 +307,7 @@ pub(crate) async fn deliver_message_via_in_tx(
             opens_stream,
             subscription_agents_disabled: !gates.subscription_agents_enabled,
             claude_subscription_agents_disabled: !gates.claude_subscription_agents_enabled,
+            also_in_channel,
         },
         sent_via,
     )
@@ -304,6 +316,16 @@ pub(crate) async fn deliver_message_via_in_tx(
         Ok(sent) => sent,
         Err(rejected) => return Ok(Err(DeliverRefusal::Send(rejected))),
     };
+
+    // ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」. The author's own choice,
+    // written in the transaction that writes the message and **only for a real insert** (a retry
+    // is not a second chance to decide). The tombstone is the row the unfurl worker already looks
+    // for before it fetches anything, so the message simply never gets cards; the trigger still
+    // queues its job and the worker ends it as `skipped`. Nothing else about the send changes.
+    if !sent.deduped && suppress_unfurl {
+        momo_unfurl::plant_tombstone_in_tx(conn, workspace_id, sent.message.id, author_member_id)
+            .await?;
+    }
 
     // ADR-0113 증보 3 F5 (#4313) — the sender's `apps`, judged in THIS transaction and **only on a
     // real insert**: a `deduped` retry answers the stored message (201) whatever `apps` says now,

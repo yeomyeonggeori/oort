@@ -85,6 +85,38 @@ const RESERVED_WHOLE_WORDS: [&str; 6] = ["here", "all", "모두", "전체", "cha
 /// Further words an agent may not wear (substring, by skeleton).
 const RESERVED_EXTRA: [&str; 4] = ["owner", "moderator", "staff", "official"];
 
+/// ADR-0201 증보 v3 B10-5 (#4966): the words the **team AI's** display name and its
+/// aliases may never be — the broadcast-mention words (`@here`, `@channel`,
+/// `@everyone`, `@all`, `@모두`, `@전체`), the two role words people read as authority
+/// (`admin`, `system`), and the helper's own handle (`oort-helper`).
+///
+/// This is the one server-side list for them. It is deliberately **not**
+/// [`RESERVED_NAMES`]: that list also holds `oort` and `오르트`, which are the helper's
+/// own default aliases, so reusing it would forbid naming the helper 「오르트」. The match
+/// is on the **whole** name (by [`light_skeleton`], so `ALL`, `A-l-l` and a Cyrillic look-alike
+/// are the same word), not a substring: `Allie` and `시스템 도우미` are not collateral.
+pub const RESERVED_MENTION_WORDS: [&str; 9] = [
+    "here",
+    "channel",
+    "everyone",
+    "all",
+    "admin",
+    "system",
+    "모두",
+    "전체",
+    "oort-helper",
+];
+
+/// Is `raw` — as a whole — one of [`RESERVED_MENTION_WORDS`]? Used for the team AI's
+/// display name (before the write) and for the alias derived from it.
+pub fn is_reserved_mention_word(raw: &str) -> bool {
+    let wanted = light_skeleton(raw);
+    !wanted.is_empty()
+        && RESERVED_MENTION_WORDS
+            .iter()
+            .any(|word| light_skeleton(word) == wanted)
+}
+
 /// One other member of the workspace, for the collision check.
 #[derive(Debug, Clone, Copy)]
 pub struct RosterName<'a> {
@@ -459,15 +491,22 @@ pub fn has_hidden_characters(raw: &str, allow_newlines: bool) -> bool {
 /// and in voice lines: control and format characters (zero-width, bidi, BOM,
 /// tags), line and paragraph separators, and the invisible Hangul fillers.
 pub fn has_invisible_or_control_characters(raw: &str) -> bool {
-    raw.chars().any(|c| {
-        c.is_control()
-            || is_line_break(c)
-            || is_invisible_letter(c)
-            || matches!(c as u32,
-                0x00AD | 0x034F | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E
-                | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F | 0xE0100..=0xE01EF
-                | 0x17B4..=0x17B5 | 0xFFF9..=0xFFFB | 0x1D173..=0x1D17A | 0x180B..=0x180F)
-    })
+    raw.chars()
+        .any(|c| c.is_control() || is_line_break(c) || is_invisible_format_char(c))
+}
+
+/// Whether `c` is a character no reader sees but a program (or a model) reads: zero-width and bidi
+/// marks, the BOM, the soft hyphen, the Unicode tag block and the variation-selector supplement, the
+/// invisible Hangul fillers, the combining grapheme joiner and the other default-ignorable formatters.
+/// **Not** a control character and **not** a line break — a caller that keeps lines (a document) asks
+/// this alone; a caller that refuses them (a name) asks [`has_invisible_or_control_characters`]. The
+/// basic variation selectors (U+FE00–U+FE0F) are not here: an emoji in a name may carry one.
+pub fn is_invisible_format_char(c: char) -> bool {
+    is_invisible_letter(c)
+        || matches!(c as u32,
+            0x00AD | 0x034F | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E
+            | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F | 0xE0100..=0xE01EF
+            | 0x17B4..=0x17B5 | 0xFFF9..=0xFFFB | 0x1D173..=0x1D17A | 0x180B..=0x180F)
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,6 +1105,48 @@ mod tests {
                 Err(NameRejected::Reserved),
                 "{reserved}"
             );
+        }
+    }
+
+    /// ADR-0201 증보 v3 B10-5 (#4966): the team AI's reserved words are matched as a whole
+    /// name, under the usual disguises — and the helper's own default aliases are not among them.
+    #[test]
+    fn the_team_ai_reserved_words_are_whole_names() {
+        for reserved in [
+            "here",
+            "Channel",
+            "EVERYONE",
+            "all",
+            "A-l-l",
+            "Admin",
+            "ａｄｍｉｎ",
+            "system",
+            "모두",
+            "전체",
+            "oort-helper",
+            "Oort Helper",
+            "аll", // Cyrillic а
+        ] {
+            assert!(is_reserved_mention_word(reserved), "{reserved}");
+        }
+        for ordinary in [
+            "oort",
+            "오르트",
+            "claude",
+            "Allie",
+            "Ali",
+            "allday",
+            "시스템 도우미",
+            "모두의 비서",
+            "oort 도우미",
+            "",
+            "   ",
+        ] {
+            assert!(!is_reserved_mention_word(ordinary), "{ordinary:?}");
+        }
+        // Every entry is a fixed point of its own check (a typo in the list cannot hide).
+        for word in RESERVED_MENTION_WORDS {
+            assert!(is_reserved_mention_word(word), "{word}");
         }
     }
 

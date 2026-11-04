@@ -38,6 +38,40 @@ use serde_json::json;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+/// The reason a **bulk-layer** push the relay rate-limited is settled with (status 429): the push
+/// was dropped on purpose, never retried and never mistaken for an APNs answer (ADR-0206 증보 1 F6).
+/// The notifier writes it (`bulk::DROPPED_REASON`) and the diagnostics skip such rows — a drop is
+/// the server's own choice to send fewer pushes, not a delivery failure.
+pub const RELAY_DROPPED_REASON: &str = "relay_http: dropped";
+
+/// The status a **test push** is settled with when the notifier did not send it because the
+/// server-wide per-minute budget was already spent (ADR-0206 증보 4 G2): 429, "too many requests".
+pub const BUDGET_SPENT_STATUS: i32 = 429;
+
+/// Its reason. Not `relay_http: …`: the relay was never called, and a row that reads like the relay
+/// answered 429 would be a lie — and would hide from whoever reads the log whether the relay pushed
+/// back ([`RELAY_DROPPED_REASON`]) or this server's own budget was full. No APNs reason looks like
+/// it either, and the token-health pass reads only 410 and two 400 reasons ([`dead_token_reason`]),
+/// so this row never touches a token.
+pub const BUDGET_SPENT_REASON: &str = "notifier_budget_spent";
+
+/// The status a **test push** is settled with when it was too old to send (ADR-0206 증보 4 G3):
+/// 408, it waited too long.
+pub const TEST_EXPIRED_STATUS: i32 = 408;
+
+/// Its reason, for the same reasons as [`BUDGET_SPENT_REASON`].
+pub const TEST_EXPIRED_REASON: &str = "notifier_test_expired";
+
+/// The reasons of the rows **this server chose** to settle without sending (or after the relay
+/// pushed back and it chose not to retry). The diagnostics skip them: they are the server's own
+/// decision to send fewer pushes — a fact about the server, not about the member's delivery path
+/// (ADR-0206 D11 ③) — so they must not become `last_delivery_failed`.
+pub const SERVER_DROP_REASONS: [&str; 3] = [
+    RELAY_DROPPED_REASON,
+    BUDGET_SPENT_REASON,
+    TEST_EXPIRED_REASON,
+];
+
 /// The outcome of claiming a dispatch slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchClaim {
@@ -55,6 +89,40 @@ pub async fn claim_dispatch(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     message_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<DispatchClaim, DbError> {
+    claim_dispatch_row(
+        conn,
+        workspace_id,
+        Some(message_id),
+        member_id,
+        token_id,
+        collapse_id,
+    )
+    .await
+}
+
+/// [`claim_dispatch`] for a push that names **no message** (ADR-0206 D15: the test notification).
+///
+/// The log row's `message_id` is NULL — the column allows it (`001_init.sql`) and the unique key
+/// is `(member, token, collapse id)`, which has no message in it. A nil UUID would not do: the
+/// column is a foreign key to `message`, and a row for a message that does not exist is refused.
+pub async fn claim_system_dispatch(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<DispatchClaim, DbError> {
+    claim_dispatch_row(conn, workspace_id, None, member_id, token_id, collapse_id).await
+}
+
+async fn claim_dispatch_row(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Option<Uuid>,
     member_id: Uuid,
     token_id: Uuid,
     collapse_id: &str,
@@ -100,6 +168,58 @@ pub async fn claim_dispatch(
     Ok(DispatchClaim::Claimed {
         log_id: row.get("id"),
     })
+}
+
+/// Claim and close, in one step, a system dispatch the notifier decided **not to send** — the
+/// test push that waited too long (ADR-0206 증보 4 G3). The row exists so the test's result does:
+/// without it `lastTest` would stay `queued` and then `stalled`. A dispatch that is already settled
+/// is left as it is (a redelivery); one that is claimed but unsettled (a crashed in-flight send) is
+/// taken over, exactly as [`claim_system_dispatch`] does, and closed with `status` / `reason`.
+pub async fn settle_system_dispatch_unsent(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+    status: i32,
+    reason: &str,
+) -> Result<(), DbError> {
+    match claim_system_dispatch(conn, workspace_id, member_id, token_id, collapse_id).await? {
+        DispatchClaim::AlreadySettled => Ok(()),
+        DispatchClaim::Claimed { log_id } => {
+            settle_dispatch(conn, log_id, status, Some(reason)).await
+        }
+    }
+}
+
+/// Has this (member, token, collapse id) already been dispatched and settled? A **read only** — it
+/// claims nothing and leaves no row. The bulk layer (ADR-0206 증보 1 F6) asks it before it counts a
+/// message against a window or spends the server budget, so a redelivered candidate and the messages
+/// folded under an already-sent representative cost neither. A claim that was taken but never settled
+/// (a crashed in-flight send) is *not* settled: [`claim_dispatch`] takes those over.
+pub async fn is_dispatch_settled(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<bool, DbError> {
+    let settled: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM push_dispatch_log \
+            WHERE workspace_id = $1 \
+              AND member_id = $2 \
+              AND push_token_id = $3 \
+              AND collapse_id = $4 \
+              AND apns_status IS NOT NULL)",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(token_id)
+    .bind(collapse_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(settled)
 }
 
 /// Record the APNs receipt against a claimed dispatch.

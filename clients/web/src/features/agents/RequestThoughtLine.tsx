@@ -1,19 +1,31 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { isOpenRunPhase, REQUEST_WORD, serverFactsOf } from "@momo/core/features/agents/runPhase";
 import { requestBundleState, runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 import { IDLE_CUTOFF_MS } from "@momo/core/features/agents/workingSignal";
 import { RUN_LEDGER_KEPT_SENTENCE } from "@momo/core/features/agents/runLedger";
+import { runReportChipParts, runReportChipText, type RunReportSummary } from "@momo/core/features/agents/workReport";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Popover, PopoverContent, PopoverTrigger } from "@/design/ui/popover";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { RespondingAvatar, RespondingDots } from "./RespondingIndicator";
 import { useRunLedger } from "./useRunLedger";
 import { useVisibleThoughtRun } from "./visibleThoughtRuns";
+import { openWorkPanel } from "./workLogStore";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 
-/** 24px 자리는 요청 때부터 남고, 과정은 팝오버로 열어 읽던 행과 바닥을 밀지 않아요. */
+/** 아직 원장을 못 읽었을 때의 요약 재료: 시간만 말하고 에이전트 보고 숫자는 지어내지 않아요. */
+const NO_REPORT: RunReportSummary = { stages: 0, kinds: [] };
+
+/**
+ * 24px 자리는 요청 때부터 남고, 과정은 팝오버로 열어 읽던 행과 바닥을 밀지 않아요.
+ *
+ * 끝난 요청은 한 줄 요약 칩이에요: 「13분 · 단계 6 · 명령 12 · 에이전트 보고」(#4657). 걸린 시간은 서버 시계의
+ * 사실이고 그 뒤 숫자는 에이전트가 스스로 알린 것이라 끝에 꼬리표가 붙어요. 칩을 누르면 팝오버가 아니라 그 run의
+ * 작업 패널이 열려요(과정은 패널에 있어요). 일하는 중에는 그대로 팝오버예요(흐르는 글을 펼쳐 볼 수 있어요).
+ */
 export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; directory: Directory }) {
   const { workspaceId, realtime, connStatus } = useSession();
   const [expanded, setExpanded] = useState(false);
@@ -26,7 +38,8 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
   const state = requestBundleState({ ...runBundleSnapshot(run), run: effectiveRun });
   const working = !terminalHere && open && (state === "thinking" || state === "executing");
   const live = connStatus === "connected";
-  const ledger = useRunLedger(run.id, serverFactsOf(effectiveRun), true);
+  const formatMessage = useFormatMessage();
+  const ledger = useRunLedger(run.id, serverFactsOf(effectiveRun));
   useVisibleThoughtRun(run.id);
   useEffect(() => {
     if (!working || !live) return;
@@ -60,9 +73,39 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
   const stage = Array.from(run.latestStage?.replace(/\s+/g, " ").trim() ?? "").slice(0, 40).join("");
   const name = memberFor(directory, run.agentMemberId)?.displayName ?? "에이전트";
   const duration = run.finishedAtMs === undefined ? undefined : Math.max(0, run.finishedAtMs - (run.startedAtMs ?? run.createdAtMs));
-  const counts = ledger.counts;
-  const summary = duration === undefined ? REQUEST_WORD[state] : `${duration < 60_000 ? "1분 미만" : `${Math.floor(duration / 60_000)}분`} 작업${counts?.tools === undefined ? "" : ` · 도구 ${counts.tools}`}${counts ? ` · 승인 ${counts.approvals}` : ""}`;
+  // 요약의 숫자는 에이전트가 말한 것만이에요(단계·활동 합계). oort가 잰 호출 수는 출처가 달라 섞지 않아요(#4654).
+  const summary = duration === undefined ? REQUEST_WORD[state] : runReportChipText(duration, ledger.report ?? NO_REPORT, formatMessage);
   const label = open ? `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}` : summary;
+  // 보이는 글은 몸과 꼬리표로 나눠 그린다: 좁은 칸에서 몸이 줄임표를 받아도 「에이전트 보고」(숫자가 누구의 말인지)는 남는다.
+  const chip = duration === undefined ? null : runReportChipParts(duration, ledger.report ?? NO_REPORT, formatMessage);
+  if (!open) {
+    return (
+      <div className="flex h-6 min-w-0 shrink-0 items-center" data-testid="request-thought-slot" data-run-id={run.id}>
+        <span role="status" aria-live="polite" className="sr-only">{name} {REQUEST_WORD[state]}</span>
+        <button
+          type="button"
+          aria-label={formatMessage("timeline.workSummary.openPanel", { name, summary: label })}
+          onClick={(event) => openWorkPanel({ runId: run.id, memberId: run.agentMemberId, channelId: run.channelId, origin: "message" }, event.currentTarget)}
+          // 좁은 칸에서는 이 칩이 열의 거의 전폭이다(390px에서 98%). 전폭은 폭이다(README §2.6): 눌림은 채움만이고
+          // `.press`의 축소(scale 0.98)는 없다. 칩 폭은 글에 달려 있어 폭마다 클래스를 가르지 않고 어디서나 채움이다.
+          className="flex h-full min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta text-ink-muted press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
+          data-testid="request-thought-line"
+        >
+          <RespondingAvatar directory={directory} memberId={run.agentMemberId} />
+          {state === "done" && <Check className="size-4 shrink-0 text-ok" aria-hidden="true" />}
+          {chip === null ? (
+            <span className="min-w-0 truncate" data-numeric>{name} · {label}</span>
+          ) : (
+            <span className="flex min-w-0 items-baseline">
+              <span className="min-w-0 truncate" data-numeric>{name} · {chip.body}</span>
+              {chip.tail !== null && <span className="shrink-0 whitespace-pre" data-testid="request-thought-tail">{" · "}{chip.tail}</span>}
+            </span>
+          )}
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex h-6 min-w-0 shrink-0 items-center" data-testid="request-thought-slot" data-run-id={run.id}>
       <span role="status" aria-live="polite" className="sr-only">{name} {REQUEST_WORD[state]}</span>

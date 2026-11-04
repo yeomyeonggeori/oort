@@ -967,6 +967,15 @@ pub async fn find_agent_run_by_trigger_in_tx(
 /// `NULL`, and `NOT (TRUE AND NULL)` is `NULL` — which `WHERE` drops, so every plain
 /// `awaiting_approval` run would have silently left the cap (the original `IS NOT DISTINCT FROM`
 /// was null-safe for the same reason).
+///
+/// A run in the team AI's **task mode** (a `team_ai_task` row exists, ADR-0201 증보 v3 B5-11, #4967)
+/// is not counted either. Between its steps the run reads `running` for up to an hour; counted, one
+/// long task would hold the helper's `max_concurrent_runs` (default 1) and every other member's quick
+/// request would be refused for as long. How many tasks may run is its own bound
+/// (`team_ai_task::TaskLimits`: three per workspace, one per requester), so the count only shrinks.
+/// The test is the row's **existence**, not a key in `input`: the run is `running`, not parked, and
+/// nothing writes a `hold` for it. **G3 (`agent.max_run_steps`) is a different counter** — see
+/// `team_ai_task`: a task step consumes one of the run's G3 steps and the run keeps its ceiling.
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -977,7 +986,10 @@ pub async fn live_run_count_in_tx(
           WHERE workspace_id = $1 AND agent_member_id = $2 \
             AND status IN ('queued','running','awaiting_approval','paused') \
             AND NOT (status = 'awaiting_approval' \
-                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated'))",
+                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated')) \
+            AND NOT EXISTS (SELECT 1 FROM team_ai_task t \
+                             WHERE t.workspace_id = agent_run.workspace_id \
+                               AND t.run_id = agent_run.id)",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -1759,6 +1771,22 @@ pub struct CancellableRun {
     /// requires a human principal, and repeating the test in SQL would suggest
     /// this predicate is the human gate when it is the *room* gate.
     pub caller_is_channel_member: bool,
+    /// The run has an **active** `team_ai_task` row (ADR-0201 증보 v3 B5, #4967/#5029): a task of
+    /// the team AI that is still going on. Read in the same statement as the row lock, like the
+    /// membership above ([`CancellableRun::is_stoppable`]).
+    pub task_active: bool,
+}
+
+impl CancellableRun {
+    /// May a person's stop act on this run? [`RunStatus::is_cancellable`] — and one more case:
+    /// a run that reads `failed` **while its task is still active**. `failed` is not the end of a
+    /// task that goes on (its next attempt turns the run `running` again), so a stop is taken
+    /// instead of answering "already failed" (#5029). Every other status keeps its contract: a
+    /// `failed` run with no task, or whose task has ended, a `succeeded` or `timed_out` run —
+    /// whatever a stray active row says — are still refused.
+    pub fn is_stoppable(&self) -> bool {
+        self.status.is_cancellable() || (self.status == RunStatus::Failed && self.task_active)
+    }
 }
 
 /// Lock the run for a cancel and read the two facts the decision needs.
@@ -1784,7 +1812,13 @@ pub async fn lock_run_for_cancel_in_tx(
                      AND ms.channel_id = r.channel_id \
                      AND ms.member_id = $3 \
                      AND ms.left_at IS NULL \
-                ) AS can_cancel \
+                ) AS can_cancel, \
+                EXISTS ( \
+                  SELECT 1 FROM team_ai_task t \
+                   WHERE t.workspace_id = $1 \
+                     AND t.run_id = r.id \
+                     AND t.state = 'active' \
+                ) AS task_active \
            FROM agent_run r \
           WHERE r.workspace_id = $1 AND r.id = $2 \
           FOR UPDATE",
@@ -1804,14 +1838,18 @@ pub async fn lock_run_for_cancel_in_tx(
         agent_member_id: row.try_get("agent_member_id")?,
         status,
         caller_is_channel_member: row.try_get("can_cancel")?,
+        task_active: row.try_get("task_active")?,
     }))
 }
 
-/// `queued|running|awaiting_approval|paused` → `cancelled` (Swift :489-503).
+/// `queued|running|awaiting_approval|paused` → `cancelled` (Swift :489-503), and a `failed` run
+/// whose team-AI task is still active (#5029, [`CancellableRun::is_stoppable`]).
 ///
 /// The status guard is in the `WHERE` even though the caller has already read it
 /// under the row lock: the lock makes the read authoritative, and the predicate
-/// makes the *statement* safe to call from anywhere. `deadline_at` is cleared
+/// makes the *statement* safe to call from anywhere. The `failed` arm carries its own
+/// condition (an active `team_ai_task` row of this very run) for the same reason: a `failed`
+/// run with no task, or with an ended one, stays out of this statement. `deadline_at` is cleared
 /// like [`end_parked_run_in_tx`] does — a cancelled run is not overdue, it is
 /// over — which is one column more than Swift writes and cannot change any
 /// answer, since nothing reads `deadline_at` on a terminal run.
@@ -1833,14 +1871,32 @@ pub async fn cancel_run_in_tx(
                 finished_at = now() \
           WHERE workspace_id = $1 \
             AND id = $2 \
-            AND status IN ('queued','running','awaiting_approval','paused')",
+            AND (status IN ('queued','running','awaiting_approval','paused') \
+                 OR (status = 'failed' \
+                     AND EXISTS (SELECT 1 FROM team_ai_task t \
+                                  WHERE t.workspace_id = agent_run.workspace_id \
+                                    AND t.run_id = agent_run.id \
+                                    AND t.state = 'active')))",
     )
     .bind(workspace_id)
     .bind(run_id)
     .bind(error)
     .execute(&mut *conn)
     .await?;
-    Ok(updated.rows_affected() > 0)
+    let cancelled = updated.rows_affected() > 0;
+    if cancelled {
+        // ADR-0201 증보 v3 B5-8 (#4967): a stop ends the run's task in the same transaction — its
+        // plan and note go with it, and no step job is left with anything to continue (the cancel
+        // route retires the pending one). A run that is not in task mode has no row: a no-op.
+        crate::team_ai_task::end_in_tx(
+            conn,
+            workspace_id,
+            run_id,
+            crate::team_ai_task::END_CANCELLED,
+        )
+        .await?;
+    }
+    Ok(cancelled)
 }
 
 /// The `work_session` ids this run's `work_control` records touched — Swift's
@@ -2295,6 +2351,45 @@ mod tests {
             .iter()
             .copied()
             .all(RunStatus::is_cancellable));
+    }
+
+    /// #5029: the stop's reach is `is_cancellable` plus exactly one case — a `failed` run whose team-AI
+    /// task is still active. Every other status keeps its contract whatever a stray active row says.
+    #[test]
+    fn a_failed_run_is_stoppable_only_while_its_task_is_active() {
+        let run = |status: RunStatus, task_active: bool| CancellableRun {
+            channel_id: Uuid::nil(),
+            agent_member_id: Uuid::nil(),
+            status,
+            caller_is_channel_member: true,
+            task_active,
+        };
+        for status in RunStatus::LIVE {
+            for task_active in [false, true] {
+                assert!(
+                    run(status, task_active).is_stoppable(),
+                    "{status:?} is stoppable with or without a task"
+                );
+            }
+        }
+        assert!(
+            run(RunStatus::Failed, true).is_stoppable(),
+            "a failed run whose task is still active is not over"
+        );
+        for (status, task_active) in [
+            (RunStatus::Failed, false),
+            (RunStatus::Succeeded, true),
+            (RunStatus::Succeeded, false),
+            (RunStatus::TimedOut, true),
+            (RunStatus::TimedOut, false),
+            (RunStatus::Cancelled, true),
+            (RunStatus::Cancelled, false),
+        ] {
+            assert!(
+                !run(status, task_active).is_stoppable(),
+                "{status:?} (task active: {task_active}) keeps its 409"
+            );
+        }
     }
 
     /// #1425 gave `Paused` a writer. It gave it nothing else, and this is the

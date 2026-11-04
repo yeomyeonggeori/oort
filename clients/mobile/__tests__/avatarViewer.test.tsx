@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {
   act,
   cleanup,
@@ -207,5 +208,16 @@ describe('프로필 사진 뷰어의 닫는 길 — 단추·쓸어 내리기·es
       });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('알림이 새 입구로 들어오면 (#4667)', () => {
+  it('뷰어가 걷힌다 — 단추·쓸어 내리기·escape 와 같은 `onClose` 로 한 번', () => {
+    const onClose = mount();
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

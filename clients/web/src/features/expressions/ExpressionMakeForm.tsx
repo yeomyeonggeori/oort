@@ -31,6 +31,7 @@ import { useExpressions } from "./context";
 import { ExpressionMakePreview } from "./ExpressionMakePreview";
 import { MakeStepError, makeFailureLine, resumeAttempt, runMakeAttempt, type MakeAttempt, type MakeStep } from "./makeFlow";
 import { useReduceMotion } from "./useReduceMotion";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「AI와 만들기」 양식 (#4820 B, ADR-0218 §7 G8의 B 줄).
@@ -48,8 +49,8 @@ type PhotoIssue = "empty" | "type" | "size" | "dimensions" | "unreadable";
 const PHOTO_LINES: Record<PhotoIssue | "missing", string> = {
   missing: "원본 사진을 골라 주세요.",
   empty: "비어 있는 파일이에요. 다른 사진을 골라 주세요.",
-  type: "PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요.",
-  size: "사진이 너무 커요. 5 MiB 이하로 골라 주세요.",
+  type: "PNG, JPG, WebP 또는 GIF 사진을 골라 주세요.",
+  size: "사진이 너무 커요. 5MB 이하로 골라 주세요.",
   dimensions: "사진의 가로세로가 너무 커요. 4096픽셀 이하, 1600만 화소 이하로 줄여 주세요.",
   unreadable: "이 사진을 열 수 없어요. 다른 사진을 골라 주세요.",
 };
@@ -287,7 +288,7 @@ export function ExpressionMakeForm({ onImport, onClose }: { onImport: () => void
           <p className="min-w-0 break-all text-meta text-ink-muted">{file.name}<span className="block" data-numeric>{(file.size / 1024).toFixed(file.size < 10240 ? 1 : 0)} KiB</span></p>
         </div>}
         <p id={ids.photoLine} role="alert" className="break-keep text-meta text-danger" data-testid="expression-make-photo-error">{invalid.photo ?? (photoIssue !== null ? PHOTO_LINES[photoIssue] : "")}</p>
-        <p className="break-keep text-meta text-ink-muted">5 MiB 이하의 움직이지 않는 PNG, JPEG, WebP, GIF를 쓸 수 있어요.</p>
+        <p className="break-keep text-meta text-ink-muted">5MB 이하의 움직이지 않는 PNG, JPG, WebP, GIF를 쓸 수 있어요.</p>
       </div>
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" aria-describedby={ids.motion}>
@@ -330,7 +331,7 @@ export function ExpressionMakeForm({ onImport, onClose }: { onImport: () => void
     </div>
 
     <div className="flex flex-col gap-2 border-t border-line pt-3" hidden={gated} data-testid="expression-make-footer">
-      {offline && <p id={ids.offline} role="status" className="break-keep text-meta text-ink-muted">연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요.</p>}
+      {offline && <p id={ids.offline} role="status" className="break-keep text-meta text-ink-muted"><BlockedReason frame="sendRequestLater" /></p>}
       {busy && <p role="status" className="text-meta text-ink-muted" data-testid="expression-make-status">{STEP_LINES[phase.step]}</p>}
       {phase.kind === "failed" && <p role="alert" className="break-keep text-meta text-danger" data-testid="expression-make-error">{phase.line}</p>}
       {sent && <p role="status" className="break-keep text-meta" data-testid="expression-make-sent">요청을 보냈어요. 에이전트의 답과 승인 카드는 대화에서 볼 수 있어요.</p>}

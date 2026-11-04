@@ -18,17 +18,22 @@ export function useAgentUsage(workspaceId: string) {
   return useQuery({queryKey: agentUsageKey(workspaceId), queryFn: () => fetchAgentUsage(workspaceId), staleTime: 30_000, retry: false});
 }
 
-export function AgentUsageStatus({agentId}: {agentId?: string}) {
+/**
+ * `causeSpoken`: 이 읽기가 실패한(또는 기기가 꺼져 멈춘) **원인을 화면 위의 셸 띠가 이미 말하고 있다**(#5285). 그동안 이 줄은 같은 원인을 되풀이하지 않는다 - 오류 문장도
+ * 「다시 불러오기」도 없이, 받아 둔 숫자(숨겨진 에이전트 수)가 있으면 그 한 줄만 남는다. 기본은 거짓이다: 띠가 없는 자리(에이전트 프로필)는 이전과 같다.
+ */
+export function AgentUsageStatus({agentId, causeSpoken = false}: {agentId?: string; causeSpoken?: boolean}) {
   const {workspaceId} = useSession();
   const query = useAgentUsage(workspaceId);
   const styles = useStyles(buildStyles);
   const {directory} = useDirectory(workspaceId);
   const row = query.data && agentId ? usageForAgent(query.data, agentId) : undefined;
   const failed = query.isError || query.fetchStatus === 'paused';
-  const label = query.fetchStatus === 'paused' ? COPY.offline : query.isError ? COPY.error : query.isPending ? COPY.loading : agentId ? `${COPY.title}: ${row ? agentUsageLine(row, memberFor(directory, agentId)?.brain) : COPY.unavailable}` : query.data && hiddenUsageLabel(query.data.hiddenPersonalAgents);
+  const quiet = failed && causeSpoken;
+  const label = quiet ? query.data && hiddenUsageLabel(query.data.hiddenPersonalAgents) : query.fetchStatus === 'paused' ? COPY.offline : query.isError ? COPY.error : query.isPending ? COPY.loading : agentId ? `${COPY.title}: ${row ? agentUsageLine(row, memberFor(directory, agentId)?.brain) : COPY.unavailable}` : query.data && hiddenUsageLabel(query.data.hiddenPersonalAgents);
   return label ? <View style={styles.status}>
     <Sentence style={styles.detail} testID="agent-usage-status">{label}</Sentence>
-    {failed && <OutlineButton label="다시 불러오기" onPress={() => {void query.refetch();}} />}
+    {failed && !quiet && <OutlineButton label="다시 불러오기" onPress={() => {void query.refetch();}} />}
   </View> : null;
 }
 
@@ -54,7 +59,7 @@ function SubscriptionEditor({workspaceId, row}: {workspaceId: string; row: Agent
     finally {setSaving(false);}
   };
   return <View style={styles.group}>
-    <Text style={styles.detail}>{COPY.subscription}</Text>
+    <Sentence style={styles.detail}>{COPY.subscription}</Sentence>
     <InputPill accessibilityLabel={COPY.subscription} value={value} onChangeText={setValue} keyboardType="decimal-pad" editable={!saving} testID={`subscription-${row.agentMemberId}`} />
     <OutlineButton label={saving ? '저장하고 있어요' : '저장'} onPress={() => {void save();}} accessibilityLabel="구독 정액 저장" />
     <Sentence style={styles.detail}>비워서 저장하면 정액을 지워요.</Sentence>
@@ -86,7 +91,7 @@ export function AgentMonthlyReport({workspaceId}: {workspaceId: string}) {
     {data.agents.map(row => {
       const member = memberFor(directory, row.agentMemberId);
       return <View key={row.agentMemberId} style={styles.row}>
-        <Text style={styles.name}>{member?.displayName ?? '에이전트'}{member?.handle ? ` (@${member.handle})` : ''}</Text>
+        <Sentence style={styles.name}>{member?.displayName ?? '에이전트'}{member?.handle ? ` (@${member.handle})` : ''}</Sentence>
         <Sentence style={styles.number}>{agentUsageLine(row, member?.brain)}</Sentence>
         {data.totals.workspace && member?.callableBy === 'everyone' && <SubscriptionEditor workspaceId={workspaceId} row={row} />}
       </View>;

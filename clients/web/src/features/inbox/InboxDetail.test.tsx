@@ -5,10 +5,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message } from "@momo/core/lib/api";
+import { ApiError, type Message } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { ConnectionContext } from "@/features/common/connectionContext";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
+import { koreanLocale } from "@/testing/koLocale";
+import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "@/features/timeline/spacing";
 import { InboxDetail } from "./InboxDetail";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -33,7 +40,10 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
   memberFor: (_d: unknown, id: string) => api.members.get(id) ?? null,
   useChannels: () => ({ groups: { channels: [], dms: [] } }),
 }));
-vi.mock("@/features/timeline/MessageRow", () => ({ Avatar: () => null }));
+// 아바타는 글자가 없는 표지만 낸다: 행 글자(`textContent`)를 재는 시험은 그대로이고, 「이 줄에 아바타가 있는가」는 값으로 잴 수 있다(#5128).
+vi.mock("@/features/timeline/MessageRow", () => ({
+  Avatar: () => createElement("i", { "data-testid": "context-avatar" }),
+}));
 vi.mock("@/features/timeline/MessageBody", () => ({
   MessageBody: ({ body }: { body: string }) => createElement("span", null, body),
 }));
@@ -87,22 +97,28 @@ function session(): SessionContextValue {
   } as SessionContextValue;
 }
 
-async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
+async function mount(e: MailboxEntry, offline = false, scene?: ConnectionScene): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const detail = createElement(InboxDetail, {
+    entry: e, directory, offline, onToggleRead: () => undefined,
+    onDecided: () => undefined, readBusy: false,
+  });
   await act(async () => {
     root?.render(
-      createElement(
-        QueryClientProvider, { client },
-        createElement(SessionProvider, { value: session() },
-          createElement(MemoryRouter, null,
-            createElement(InboxDetail, {
-              entry: e, directory, offline, onToggleRead: () => undefined,
-              onDecided: () => undefined, readBusy: false,
-            })))
-      )
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
+          QueryClientProvider, { client },
+          createElement(SessionProvider, { value: session() },
+            createElement(MemoryRouter, null,
+              scene === undefined
+                ? detail
+                : createElement(ConnectionContext.Provider, { value: connectionScene(scene) }, detail)))
+        ),
+      })
     );
   });
   for (let i = 0; i < 6; i += 1) {
@@ -113,7 +129,8 @@ async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => { env.IS_REACT_ACT_ENVIRONMENT = true; });
+let ko: AppLocale;
+beforeAll(async () => { ko = await koreanLocale(); env.IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   api.fetchMessages.mockResolvedValue({ messages: [msg(6, "둘째"), msg(5, "첫째")] });
   api.fetchThreadReplies.mockResolvedValue({ messages: [msg(9, "답글 하나")] });
@@ -220,16 +237,84 @@ describe("InboxDetail", () => {
     expect(h.querySelector('[data-testid="inbox-approval-offline"]')).not.toBeNull();
   });
 
+  // #5239: 승인 줄이 막은 원인을 말한다. 문장은 손으로 적는다(사전 값을 되풀이하면 코드와 시험이 함께 틀려도 초록이다).
+  it.each([
+    ["deviceOffline", "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+  ] as const)("처리할 일 + %s이면 승인 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true, scene);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
+  });
+
+  // #5294(화면 검수 5a M1): 받은함의 승인 줄도 입력창·승인 카드와 같은 원인 문장이라 어절에서 꺾는다(「연/결되면」으로 끊기지 않는다). 꺾이는
+  // 자리는 폭에 달려 jsdom 이 못 재므로 클래스로 지키고, 엔진이 계산한 `word-break` 는 capture-4888·5239 가 입력창·승인 카드에서 잰다.
+  it("처리할 일 + 오프라인이면 승인 줄이 어절에서 꺾인다(break-keep)", async () => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note).not.toBeNull();
+    expect(note?.classList.contains("break-keep")).toBe(true);
+  });
+
   it("오프라인에서는 답장 입력 대신 이유를 말한다", async () => {
     const h = await mount(entry({}), true);
     expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
     expect(h.querySelector('[data-testid="inbox-reply-offline"]')).not.toBeNull();
   });
 
+  // #5260: 답장 줄도 막은 원인을 말한다. 부모(`InboxRoute`)가 하는 대로 막았는지는 모델의 게이트(`canSend`)에서 읽는다.
+  it.each([
+    ["deviceOffline", "오프라인이라 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+  ] as const)("답장 + %s이면 답장 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
+    const note = h.querySelector('[data-testid="inbox-reply-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
+    if (scene === "serverUnreachable") expect(note?.textContent).not.toContain("오프라인");
+  });
+
+  it.each(["unknown", "realtimeDown"] as const)("답장 + %s이면 모델이 막지 않는다: 줄 없이 답장 입력이 열려 있다", async (scene) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-offline"]')).toBeNull();
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).not.toBeNull();
+  });
+
   it("맥락을 못 불러오면 오류와 다시 시도", async () => {
     api.fetchMessages.mockRejectedValue(new Error("boom"));
     const h = await mount(entry({}));
     expect(h.querySelector('[data-testid="inbox-context-error"]')).not.toBeNull();
+  });
+
+  // #5242: 옛 「대화를 불러오지 못했어요.」 배너는 원인 상자다. 이유가 원인을 따르고 다시 시도가 맥락을 다시 읽는다.
+  it("맥락을 못 불러오면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 다시 읽는다", async () => {
+    const cases: [Error, string, string][] = [
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      api.fetchMessages.mockReset();
+      api.fetchMessages.mockRejectedValue(error);
+      const h = await mount(entry({}));
+      const box = h.querySelector<HTMLElement>('[data-testid="inbox-context-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box?.textContent).toContain("대화를 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      const reads = api.fetchMessages.mock.calls.length;
+      await act(async () => {
+        box?.querySelector("button")?.click();
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(api.fetchMessages.mock.calls.length).toBeGreaterThan(reads);
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("전송이 실패하면 입력은 남고 이유가 보인다", async () => {
@@ -353,5 +438,200 @@ describe("InboxDetail: 글 없이 첨부만 보낸 메시지의 맥락 줄 (#429
     const row = contextRows(h)[0];
     expect(row.querySelector('[data-testid="inbox-context-attachments"]')).toBeNull();
     expect(row.textContent).not.toMatch(/사진|파일/);
+  });
+});
+
+// =============================================================================
+// 실행 중단 시스템 줄 (#5128, 타임라인 #5079·폰 #5067의 짝).
+//
+// 서버는 사람이 에이전트 실행을 멈추면 `type: system`·`props.kind = agent_run_cancelled` 줄을 **멈춘 사람의 이름으로** 남긴다
+// (`routes/agent_runs.rs`). 이 창은 `MessageRow` 가 아니라 자기 행(`ContextRow`)을 그려서 그 줄을 멈춘 사람이 쓴 글처럼 붙였다.
+// 진짜 `InboxDetail`·`SystemLine`·`isSystemLineMessage` 를 그려(API·명부·본문·스레드 입력만 가짜) 줄이 가운데의 조용한 줄로 서는지,
+// 그 줄이 항목 행의 신원(`aria-current`·스크롤 기준·착지 면)과 어떤 관계인지 잰다. 서버가 보내는 props 모양을 그대로 쓴다.
+// =============================================================================
+describe("InboxDetail: 실행 중단 시스템 줄 (#5128)", () => {
+  /** 서버가 중단 때 쓰는 문장 그대로(`CANCEL_SYSTEM_LINE`). 이 시험은 문장을 지어내지 않는다. */
+  const SERVER_LINE = "사람이 실행을 중단했어요.";
+  const OTHER = "00000000-0000-7000-8000-000000000102";
+
+  /** `agent_runs.rs` 가 싣는 props 모양 그대로. 작성자는 멈춘 사람(ME)이다. */
+  const cancelLine = (seq: number, over: Partial<Message> = {}): Message =>
+    msg(seq, SERVER_LINE, {
+      type: "system",
+      props: {
+        kind: "agent_run_cancelled",
+        run_id: "run-1",
+        agent_member_id: BOT,
+        cancelled_by: ME,
+        linked_work_session_ids: [],
+        work_sessions_terminated: false,
+      },
+      ...over,
+    });
+
+  /** 채널 기록 1~20. `lines` 에 든 seq 는 같은 자리의 중단 줄이다. */
+  const history = (lines: number[]): Message[] =>
+    Array.from({ length: 20 }, (_, i) => i + 1).map((seq) =>
+      lines.includes(seq) ? cancelLine(seq) : msg(seq, `기록 ${seq}`)
+    );
+
+  /** 맥락 목록의 칸을 위에서부터 「행」(글쓴이가 있는 행) / 「줄」(중단 시스템 줄)로 읽는다. */
+  const kindsOf = (h: HTMLElement): string[] =>
+    Array.from(h.querySelector('[data-testid="inbox-context"]')?.children ?? []).map((cell) =>
+      cell.querySelector('[data-testid="system-line"]') === null ? "행" : "줄"
+    );
+
+  const scrollTopOf = (h: HTMLElement): number =>
+    h.querySelector<HTMLElement>('[data-testid="inbox-detail-scroll"]')!.scrollTop;
+
+  /**
+   * jsdom 은 배치를 모른다: 항목 행의 위치(900)·패널 높이(400)·행 높이(40)·스크롤 길이(1234)를 값으로 준다
+   * (위의 「긴 채널 기록」 시험과 같은 방식). 항목 행(`data-target`)만 900에 있어서, 스크롤 기준이 엉뚱한 칸이면 값이 달라진다.
+   */
+  async function withLayout(run: () => Promise<void>): Promise<void> {
+    const names = ["offsetTop", "clientHeight", "scrollHeight"] as const;
+    const saved = names.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+    const isBox = (el: HTMLElement) => el.dataset.testid === "inbox-detail-scroll";
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get() { return (this as HTMLElement).dataset.target === "true" ? 900 : 0; },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() { return isBox(this as HTMLElement) ? 400 : 40; },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() { return isBox(this as HTMLElement) ? 1_234 : 0; },
+    });
+    try {
+      await run();
+    } finally {
+      names.forEach((name, i) => {
+        const before = saved[i];
+        if (before) Object.defineProperty(HTMLElement.prototype, name, before);
+        else Reflect.deleteProperty(HTMLElement.prototype, name);
+      });
+    }
+  }
+
+  beforeEach(() => {
+    api.members.set(ME, { id: ME, kind: "human", displayName: "정하윤", handle: "hayun" });
+    api.members.set(OTHER, { id: OTHER, kind: "human", displayName: "가영", handle: "gayoung" });
+  });
+
+  it("중단 줄은 행(아바타·이름·시각)이 아니라 가운데의 조용한 줄로, 서버 문장 그대로 제자리에 선다", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        msg(5, "배포 로그 한 번 봐 줄래요?", { authorMemberId: OTHER }),
+        msg(6, "@김인턴 canary 롤아웃 이어서 해 줘"),
+        cancelLine(7),
+        msg(8, "일단 멈췄어요. 롤백 먼저 확인할게요"),
+      ],
+    });
+    const h = await mount(entry({ seq: 8, messageId: "m8" }));
+
+    // seq 순서 그대로 행 · 행 · 줄 · 행. 줄은 글쓴이가 있는 행으로 세어지지 않는다(옛 판은 행 넷이었다).
+    expect(kindsOf(h)).toEqual(["행", "행", "줄", "행"]);
+    const rows = Array.from(h.querySelectorAll('[data-testid="inbox-context-row"]'));
+    expect(rows).toHaveLength(3);
+    // 하네스가 아바타를 실제로 재고 있다는 증거: 행 셋은 모두 아바타를 든다.
+    expect(rows.every((row) => row.querySelector('[data-testid="context-avatar"]') !== null)).toBe(true);
+
+    const lines = Array.from(h.querySelectorAll<HTMLElement>('[data-testid="system-line"]'));
+    expect(lines).toHaveLength(1);
+    const line = lines[0] as HTMLElement;
+    const cell = line.closest("li") as HTMLElement;
+    // 칸의 글자가 서버 문장 하나뿐이다: 멈춘 사람의 이름(정하윤)·시각이 없고 아바타도 없다.
+    expect(cell.textContent).toBe(SERVER_LINE);
+    expect(cell.querySelector('[data-testid="context-avatar"]')).toBeNull();
+    expect((h.textContent ?? "").split(SERVER_LINE).length - 1).toBe(1);
+    // 타임라인과 같은 부품이 같은 모양으로 선다: 가운데, 안 읽음·복구 표지와 같은 여백, 물러난 잉크의 보조 글씨.
+    expect(line.className).toContain("justify-center");
+    expect(line.className).toContain(MARKER_DIVIDER_PAD_CLASS);
+    const sentence = line.querySelector("p") as HTMLElement;
+    expect(sentence.className).toContain("text-center");
+    expect(sentence.className).toContain("text-meta");
+    expect(sentence.className).toContain("text-ink-muted");
+    // 이 창은 호버 툴바가 없다: 타임라인과 달리 툴바 straddle 띠를 비우는 여유를 받지 않는다(좁은 패널에서도 줄은 34 그대로, #5173).
+    expect((sentence.parentElement as HTMLElement).className).not.toContain(SYSTEM_LINE_STRADDLE_CLEAR_CLASS);
+    // 초점 정거장이 아니다: 칸 안에 단추·링크·입력·tabindex 가 하나도 없다(칸 자신도 포함).
+    const stops = [cell, ...Array.from(cell.querySelectorAll("*"))].filter((el) =>
+      el.matches('a, button, input, textarea, select, [tabindex], [role="button"]')
+    );
+    expect(stops).toEqual([]);
+    // 줄 바로 뒤가 항목이어도(DM의 마지막 말) 「현재」는 그 항목 행 하나다.
+    const current = Array.from(h.querySelectorAll("[aria-current]"));
+    expect(current).toHaveLength(1);
+    expect(current[0]?.textContent).toContain("롤백 먼저");
+    expect(cell.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("항목 행 옆의 줄은 항목 행의 신원을 건드리지 않는다: aria-current·스크롤 기준·착지 면은 항목 행 하나에만 있다", async () => {
+    api.fetchMessages.mockResolvedValue({ messages: history([14, 16]) });
+    await withLayout(async () => {
+      const h = await mount(
+        entry({ key: "inbox:r1", itemId: "r1", kind: "reply", messageId: "m15", seq: 15, typeLabel: "답글 · #agent-lab" })
+      );
+      // 앞 4·뒤 2 창에서 줄은 메시지 한 칸을 차지한다(자르기는 종류를 가리지 않는다): 11 12 13 [14] 15 [16] 17.
+      expect(kindsOf(h)).toEqual(["행", "행", "행", "줄", "행", "줄", "행"]);
+      // 「현재」는 항목 행(15) 하나뿐이다.
+      const current = Array.from(h.querySelectorAll<HTMLElement>("[aria-current]"));
+      expect(current).toHaveLength(1);
+      expect(current[0]?.dataset.testid).toBe("inbox-context-row");
+      expect(current[0]?.dataset.target).toBe("true");
+      expect(current[0]?.textContent).toContain("기록 15");
+      // 줄의 칸은 신원 속성이 하나도 없다.
+      for (const line of Array.from(h.querySelectorAll('[data-testid="system-line"]'))) {
+        const cell = line.closest("li") as HTMLElement;
+        expect(cell.hasAttribute("aria-current")).toBe(false);
+        expect(cell.hasAttribute("data-target")).toBe(false);
+        expect(cell.hasAttribute("data-highlighted")).toBe(false);
+      }
+      // 착지 면은 항목 행에만, 스크롤 기준도 항목 행이다(줄이 아니다): 900 - (400 - 40) / 2.
+      const flashed = Array.from(h.querySelectorAll('[data-highlighted="true"]'));
+      expect(flashed).toHaveLength(1);
+      expect(flashed[0]?.textContent).toContain("기록 15");
+      expect(flashed[0]?.classList.contains("landed-surface")).toBe(true);
+      expect(scrollTopOf(h)).toBe(900 - (400 - 40) / 2);
+    });
+  });
+
+  it("항목이 줄을 가리키는 방어 경로: 줄은 신원을 달지 않고, 패널은 없는 대상처럼 대화 끝으로 간다", async () => {
+    // 서버 투영은 이 줄을 항목으로 만들지 않는다(migration 126: text·artifact 만). 그래도 항목이 줄을 가리키면 일어나는 일을
+    // 못 박아 둔다: 눌릴 곳도 답할 곳도 없는 글줄에 「현재」 표식·착지 면을 얹지 않고, 대상을 못 찾은 때와 같은 길(끝)로 간다.
+    api.fetchMessages.mockResolvedValue({ messages: history([14]) });
+    await withLayout(async () => {
+      const h = await mount(
+        entry({ key: "inbox:r2", itemId: "r2", kind: "mention", messageId: "m14", seq: 14, typeLabel: "멘션 · #agent-lab" })
+      );
+      // 창은 줄을 가운데 두고 열린다(10 11 12 13 [14] 15 16), 줄은 줄로 선다.
+      expect(kindsOf(h)).toEqual(["행", "행", "행", "행", "줄", "행", "행"]);
+      expect(h.querySelectorAll("[aria-current], [data-target], [data-highlighted]")).toHaveLength(0);
+      expect(scrollTopOf(h)).toBe(1_234);
+    });
+  });
+
+  it("줄이 아닌 것은 줄로 그리지 않는다: 표식을 흉내 낸 사람 글·본문 없는 줄·지워진 줄은 글쓴이가 있는 일반 행이다", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        msg(5, SERVER_LINE, { type: "text", props: { kind: "agent_run_cancelled" } }),
+        cancelLine(6, { body: "" }),
+        cancelLine(7, { body: undefined, state: "deleted" }),
+        msg(8, "나머지는 내가 이어서 볼게요"),
+      ],
+    });
+    const h = await mount(entry({ seq: 8, messageId: "m8" }));
+
+    expect(h.querySelectorAll('[data-testid="system-line"]')).toHaveLength(0);
+    const rows = Array.from(h.querySelectorAll('[data-testid="inbox-context-row"]'));
+    expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.querySelector('[data-testid="context-avatar"]') !== null)).toBe(true);
+    // 사람이 쓴 글은 표식(props.kind)을 흉내 내도 줄이 아니다(코어 판정이 type 까지 본다): 글쓴이와 문장이 그대로 선다.
+    expect(rows[0]?.textContent).toContain("정하윤");
+    expect(rows[0]?.textContent).toContain(SERVER_LINE);
+    // 그릴 말이 없는 줄은 숨지 않고 행으로 남고, 지워진 줄은 삭제 문장이 이긴다(서버는 지울 때 본문을 비운다).
+    expect(rows[1]?.textContent).toContain("정하윤");
+    expect(rows[2]?.textContent).toContain("삭제된 메시지예요.");
   });
 });

@@ -39,27 +39,32 @@ export function initialOnboarding(input: {
 /**
  * Post-claim zero-base stages (ADR-0185 D-A (3), SH-12b-w / SH-12c).
  *
- * Order is the table. Counter text is derived from it, so S1 is `1/2` and
- * S2 is `2/2` while this list has two slots. Claim password is not a step.
- * Inserting a stage means adding it here; S2 does not fork.
+ * Order is the table. Counter text is derived from it, so S1 is `1/3`, S2 is
+ * `2/3` and the team-AI stage `3/3` while this list has three slots. Claim
+ * password is not a step. Inserting a stage means adding it here; S2 does not
+ * fork. The third slot (#4945, ADR-0201 증보 v3 B3·B10) is skippable: a team
+ * AI key, the helper's name and its roles; no key means 「나중에」 and the helper
+ * stays off.
  */
 export const OWNER_ONBOARDING_STAGES = [
   "workspace-profile",
   "invite",
+  "team-ai",
 ] as const;
 
 export type OwnerOnboardingStage = (typeof OWNER_ONBOARDING_STAGES)[number];
 
-/** Stages this checkout actually mounts. Claim → S1 (required) → S2 (skip). */
+/** Stages this checkout actually mounts. Claim → S1 (required) → S2 (skip) → team AI (skip). */
 export const OWNER_ONBOARDING_MOUNTED: readonly OwnerOnboardingStage[] = [
   "workspace-profile",
   "invite",
+  "team-ai",
 ];
 
 export function isOwnerOnboardingStage(
   value: string | null | undefined
 ): value is OwnerOnboardingStage {
-  return value === "workspace-profile" || value === "invite";
+  return value === "workspace-profile" || value === "invite" || value === "team-ai";
 }
 
 export function ownerOnboardingTotalSteps(): number {

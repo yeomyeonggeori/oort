@@ -34,7 +34,7 @@ describe("T-6 첫 왕복 표면은 위저드에 이어 붙기만 한다", () => 
 
   it("오프라인은 셸 배너에 맡기고 컨트롤만 잠근다", () => {
     expect(surface).not.toContain("first-mention-offline");
-    expect(surface).toContain("OFFLINE_LOCK_REASON");
+    expect(surface).toContain('useBlockedReason("doThis")');
     expect(surface).toContain("aria-disabled");
     expect(surface).toContain("row.status");
   });

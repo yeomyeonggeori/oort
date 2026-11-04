@@ -27,6 +27,7 @@ import {
   composeMailbox,
   dmEntry,
   isUnreadSeq,
+  mailboxFilterHasTasks,
   mentionEntry,
   orderMailbox,
   serverEntry,
@@ -75,6 +76,8 @@ const THREAD_CHANNEL_CAP = 12;
 const THREAD_PAGE = 50;
 const THREAD_ROOT_CAP = 10;
 const STALE_MS = 15_000;
+/** 메뉴 막대 「모두 읽음 처리」가 한 번에 보내는 요청 수(`markChannelsRead`). */
+const READ_ALL_CONCURRENCY = 4;
 
 /** `probing`: 아직 어느 서버인지 모른다. `server`: 투영 API. `composed`: 구 서버 후퇴. */
 export type MailboxSource = "probing" | "server" | "composed";
@@ -90,11 +93,32 @@ export interface Mailbox {
   /** 다음 쪽만 실패했다: 이미 받은 목록은 그대로다. */
   moreError: boolean;
   fetchMore: () => void;
+  /**
+   * 어떤 원천이 아직 첫 응답을 못 받았다. 서버 경로는 투영과 승인 원장을 함께 센다(#5092): 원장이
+   * 늦는 동안 투영만 비어 있다고 「비어 있어요」가 번쩍이지 않게 하는 값이다. 원장은 승인이 섞인
+   * 탭(`mailboxFilterHasTasks`)에서만 세고, 채널·디렉터리가 오는 중인 것은 세지 않는다(#5116).
+   */
   isLoading: boolean;
-  /** 모든 원천이 실패했을 때만. 일부만 실패하면 있는 만큼 그린다. */
+  /**
+   * 보여 줄 줄이 없을 때 「비어 있다」고 말하면 거짓이 되는 실패가 있다. 구 서버 경로는 시도한
+   * 원천이 모두 실패했을 때, 서버 경로는 투영이 실패했거나 승인 원장이 실패했을 때(#5092).
+   * 일부만 실패하면 있는 만큼 그린다: 화면은 이 탭에 보일 줄이 없을 때만 이 값을 읽는다. 원장의
+   * 실패도 승인이 섞인 탭에서만 센다(#5116).
+   */
   error: boolean;
+  /**
+   * 서버 경로가 답하지 못했을 때의 그 오류 객체(투영 탐지 → 목록 순). 화면이 실패의 원인 문장(오프라인 / 서버에 닿지 못함)을 정하는
+   * 데 쓴다(#5242). 구 서버 경로는 원천이 여럿이라 하나로 말할 수 없어 `null`이고, 그때 이유는 「문제가 생겼어요」다.
+   */
+  failure: unknown;
   /** 승인 원장이 없는 서버: 「처리할 일」 칸을 장애가 아닌 미제공으로 말한다. */
   tasksAbsent: boolean;
+  /**
+   * 승인 원장이 답했고 이 목록의 처리할 일 줄이 그 답에서 온다(#5116). 이때 목록에 없는 승인은 더 이상
+   * 결정을 기다리지 않는다 — 다른 기기에서 결정했거나 만료됐다. 원장이 아직 한 번도 답하지 않았거나
+   * (로딩·실패) 미제공이거나 투영이 실패해 목록을 비운 동안은 「없음」이 답이 아니므로 `false`다.
+   */
+  ledgerAnswered: boolean;
   /** 상한 때문에 일부 채널을 읽지 못했다. */
   capped: boolean;
   updatedAtMs: number;
@@ -173,6 +197,18 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
 
   const composed = useComposedMailbox(absent, needsAction, tasksProvided);
 
+  // 승인(처리할 일)은 투영에 저장되지 않아서(위 머리말) 승인 원장은 투영과 **따로** 오고 따로 실패한다.
+  // 원장이 늦거나 실패했는데 투영만 빈 채로 답했다고 「비어 있어요」라고 말하면 대기 중인 승인을
+  // 모르는 채 조용한 게 정상이라고 말하는 일이다(#5092). 구 서버 경로(`useComposedMailbox`)는 이미
+  // 승인 원장의 로딩과 실패를 센다: 서버 경로도 같은 원천을 센다.
+  //
+  // 그 말은 **승인이 섞인 탭에만** 건다(#5116): 멘션·답글·DM·스레드 탭의 내용은 원장과 무관하다. 로딩은 원장
+  // 자신의 첫 응답만 센다 — `needsAction.isLoading`은 채널·디렉터리가 오는 중인 것까지 세는 값이다.
+  const tasksInTab = tasksProvided && mailboxFilterHasTasks(filter);
+  const ledgerLoading = tasksInTab && needsAction.ledgerLoading;
+  // 404(`absent`)는 장애가 아니라 미제공이다: 화면이 「처리할 일」 탭에서 따로 말한다.
+  const ledgerFailed = tasksInTab && !needsAction.absent && needsAction.error;
+
   const serverFilter = toServerFilter(filter);
   const query = useInfiniteQuery({
     queryKey: ["inbox", workspaceId, serverFilter],
@@ -227,22 +263,31 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
 
   if (absent) return { ...composed, source: "composed" };
 
+  // 투영이 답하지 못했는데 승인만 그리면 그것이 인박스 전부로 읽힌다: 오류를 말한다.
+  const listed = serverOn && !(query.isError && !query.data);
+
   return {
     source: serverOn ? "server" : "probing",
-    // 투영이 답하지 못했는데 승인만 그리면 그것이 인박스 전부로 읽힌다: 오류를 말한다.
-    entries: serverOn && !(query.isError && !query.data) ? entries : [],
+    entries: listed ? entries : [],
     serverUnreadCount: query.data?.pages[0]?.unreadCount ?? null,
     hasMore: query.hasNextPage,
     isFetchingMore: query.isFetchingNextPage,
     moreError: query.isFetchNextPageError,
     fetchMore: () => void query.fetchNextPage(),
-    isLoading: surface.isPending || (serverOn && query.isLoading),
-    error: surface.isError || (serverOn && query.isError),
+    isLoading: surface.isPending || (serverOn && (query.isLoading || ledgerLoading)),
+    error: surface.isError || (serverOn && (query.isError || ledgerFailed)),
+    failure: surface.error ?? (serverOn ? query.error : null),
     tasksAbsent: !tasksProvided || needsAction.absent,
+    ledgerAnswered: listed && ledgerHasAnswered(tasksProvided, needsAction),
     capped: false,
     updatedAtMs: Math.max(query.dataUpdatedAt, needsAction.updatedAtMs),
     refetch: refetchServer,
   };
+}
+
+/** 승인 원장이 성공한 답을 한 번이라도 줬다(미제공이 아니다). 그 답이 처리할 일 줄의 원천이다. */
+function ledgerHasAnswered(tasksProvided: boolean, needsAction: Feed): boolean {
+  return tasksProvided && !needsAction.absent && needsAction.updatedAtMs > 0;
 }
 
 /** 구 서버 후퇴 경로: 이미 있는 읽기 계약을 클라이언트에서 모은다. */
@@ -480,7 +525,9 @@ function useComposedMailbox(
       channelResults.isLoading ||
       (tasksProvided && needsAction.isLoading)),
     error,
+    failure: null,
     tasksAbsent: !tasksProvided || needsAction.absent,
+    ledgerAnswered: ledgerHasAnswered(tasksProvided, needsAction),
     capped,
     updatedAtMs: Math.max(
       dmResults.updatedAtMs,
@@ -599,5 +646,46 @@ export function useMailboxReadActions() {
     [workspaceId, invalidate]
   );
 
-  return { markRead, markUnread, markAllRead };
+  /**
+   * 메뉴 막대 「모두 읽음 처리」(#5195): 받은 채널들의 읽음 위치를 올린다(`PUT read-state`, 사유 `mark_read_menu` =
+   * 「읽음 처리」 메뉴와 같은 명시 행동). **인박스의 `read-all`과 다르다**: 항목만 읽음이 되고 채널 위치와 `mention_count`가
+   * 그대로인 그 길(ADR-0199 D3)로는 독 배지와 메뉴 막대의 점이 안 꺼진다. 위치를 올리면 서버가 같은 트랜잭션에서
+   * `mention_count`를 다시 세고 그 채널의 인박스 항목을 읽음으로 채운다 — 점·배지·인박스가 한 규칙으로 바뀐다.
+   * 어느 채널을 올릴지는 호출부(`readAllTargets`)가 정한다.
+   *
+   * 채널마다 한 요청이고 `READ_ALL_CONCURRENCY`개씩 보낸다. 한 채널의 실패가 나머지를 멈추지 않는다 — 읽은 만큼은
+   * 읽힌 채로 남고, 실패는 수로 돌려준다. 실패한 채널은 위치가 그대로라 점이 남아 다시 누를 수 있다.
+   */
+  const markChannelsRead = useCallback(
+    async (targets: readonly { channelId: string; seq: number }[]) => {
+      let failed = 0;
+      let next = 0;
+      const worker = async () => {
+        for (;;) {
+          const target = targets[next++];
+          if (target === undefined) return;
+          try {
+            const state = await advertiseReadState(
+              workspaceId,
+              target.channelId,
+              target.seq,
+              "mark_read_menu"
+            );
+            applyReadStateToCache(client, workspaceId, state);
+          } catch {
+            failed += 1;
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(READ_ALL_CONCURRENCY, targets.length) }, worker)
+      );
+      void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
+      invalidate();
+      return { marked: targets.length - failed, failed };
+    },
+    [workspaceId, client, invalidate]
+  );
+
+  return { markRead, markUnread, markAllRead, markChannelsRead };
 }

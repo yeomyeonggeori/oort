@@ -131,7 +131,7 @@ security decision and is out of scope here. See
 `src/realtime/centrifugeTransport.ts`.
 
 **The lane now measures this rather than assuming it (#1051).** Nothing in the
-five Maestro flows distinguishes a frame that arrived over the socket from a row
+lane's Maestro flows distinguishes a frame that arrived over the socket from a row
 a re-fetch drew, so a lane could be green with the realtime rail entirely shut —
 which is how the QA stack rejected every phone handshake for weeks without one
 red run. `scripts/lane-realtime-probe.mjs` closes that: it drives the app's own
@@ -156,9 +156,17 @@ npm run build:sim           # xcodebuild for the simulator, ad-hoc signed
 npm run gate:session        # does a session survive a restart? (below)
 npm run install:maestro     # Maestro CLI into ~/.maestro (once)
 npm run lane:phone          # the whole phone check, unattended (below)
+npm run check:maestro-syntax  # `maestro check-syntax` over every flow file, no device (below)
 ```
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
+
+**Metro started by a script or an agent** runs with `CHROME_PATH=/usr/bin/false`
+(the lane, `measure.sh` and `gate/run.mjs` already do; by hand:
+`CHROME_PATH=/usr/bin/false npm start`). Otherwise a tap on the dev build's
+"Open debugger" toast makes Metro launch the real Google Chrome from that shell,
+where it aborts at once and macOS shows "Google Chrome quit unexpectedly" (#5083).
+Run `npm start` without it only when you want the debugger window.
 
 ### Writing a test
 
@@ -258,20 +266,69 @@ above all the shared keychain ACCESS GROUP the NSE will read
 ## The phone lane — `npm run lane:phone` (MAESTRO-1)
 
 One command, no person driving it: an isolated stack on its own ports with the
-**mock** provider, a disposable fixture member, the app installed on a simulator,
-five Maestro flows against the real UI, a PASS/FAIL table, and the stack torn
-down with its volumes. `npm run install:maestro` once first (`~/.maestro`; the
-lane puts it on PATH itself, so nothing is added to your shell profile).
+**mock** provider, a disposable fixture member, a realtime proof made with the
+phone's own Origin, the app built and installed on a simulator, six Maestro flows
+against the real UI, a PASS/FAIL table, and the stack torn down with its volumes.
+`npm run install:maestro` once first (`~/.maestro`; the lane puts it on PATH
+itself, so nothing is added to your shell profile).
+
+```
+npm run lane:phone                              # build, boot, the six flows, tear down
+npm run lane:phone -- --no-build                # reuse build/sim (needs an existing build)
+npm run lane:phone -- --flow 20-stop            # one flow only
+npm run lane:phone -- --device "iPhone 17"      # the simulator, by name (default iPhone 17 Pro)
+npm run lane:phone -- --keep                    # leave the stack up to debug
+npm run lane:phone -- --skip-flows              # stack + realtime proof only
+```
 
 | flow | what it proves about the SCREEN, not the API |
 |---|---|
 | `00-login` | 서버 주소 입력 → 로그인 → 채널 목록 + 탭 바, from cleared state |
 | `10-mention-working` | a turn in flight is **visible as one** — 「작업 중」 is on screen WHILE it runs (#839), then the reply lands |
-| `20-stop` | 중단 is two-tap and the confirm step says what it costs; the receipt AND the channel's system line both appear |
-| `30-approval` | 결정 대기 → 무장 → "되돌릴 수 없습니다" → 승인 → 영수증, and the approved call actually resumes and finishes |
-| `40-agents-tab` | 재우기 warns before it acts, and a mention to a sleeping agent gets a system line instead of silence |
+| `20-stop` | 중단 is two-tap and the confirm step says what it costs; the receipt AND the channel's system line both appear (the line is the server's own sentence; the flow accepts 「중지했어요」 and 「중단했어요」, #5079) |
+| `30-approval` | 결정 대기 → 승인 한 번(확정 단계 없음, #3819) → 영수증, and the approved call actually resumes and finishes |
+| `40-agents-tab` | the agent list opens from + 메뉴 → 「AI」 → 「에이전트 부르기」 and its profile screen is the fixture agent's (the 재우기 card left the phone in #3902, so the flow no longer pauses anything) |
+| `45-work-console` | + 메뉴 → 「작업」 opens the work list (`WorkJobsScreen`, ADR-0202 D6): 내 것 and 팀 전체 both list the fixture member's session, and a row opens the read-only detail sheet |
 
-Measured here, all five green: 90 + 46 + 37 + 49 + 42 seconds of flow time.
+When last measured (#5045) the six took 118 + 60 + 68 + 79 + 52 + 52 seconds of flow
+time; the first is the slowest because it starts from cleared state. Read that as a
+scale — the table every run prints is the measurement.
+
+**The simulator's system language has to be Korean.** The flows dismiss iOS's own
+sheets by their Korean labels (`지금 안 함`, `허용 안 함`, `열기`), and the one that
+matters is the keychain's 「암호를 저장하겠습니까?」: it rises as the first sign-in
+submits and hides the app's accessibility tree until someone dismisses it. A clone of
+the stock iPhone 17 Pro is English, so that sheet reads 「Save Password?」 / 「Not Now」,
+nothing taps it, and the run dies in `pass-notify-primer` ("Assert that id:
+notify-primer-continue|sidebar-list is visible... FAILED") with a screenshot of a
+healthy app under a dialog. Set the language once, on the clone, with the device shut
+down: in `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/Preferences/.GlobalPreferences.plist`
+run `plutil -replace AppleLanguages -json '["ko"]' <that file>` and
+`plutil -replace AppleLocale -string ko_KR <that file>`.
+
+**Not every flow in `maestro/` is a lane flow.** The lane runs the six above. The
+rest are measurement and capture flows for the app's `-momoMeasure` surfaces
+(`measure/`): each file's header says how its surface is launched, `measure/*.sh`
+and `measure/sheet-drag-run.mjs` wrap some of them, and the verification line runs
+them at each stack. The sheet-drag flows (115–118) are **templates**: the driver
+reads the live view hierarchy, pastes the geometry into every `${NAME}` and only
+then hands Maestro the result — which is why a value that never varies (the 60 ms
+flick) is a plain number there, not a placeholder (see the syntax check below).
+`4869-reply-swipe` does run through the lane, with `--flow 4869-reply-swipe`: the
+lane passes every flow `-e CHANNEL_ID` (#agent-lab) and `-e PEER_TEXT` (the mock's
+fixed reply), so that flow has a peer's row to swipe. After a stack is replaced the
+app still holds the old stack's login; with `--flow` the first flow signs in again
+before it starts (slower, still works) — `--flow 00-login` first gives a clean start.
+
+**A capture script asks the harness whether it knows the name first (#5172).** `-momoMeasure <NAME>`
+accepts any name, and a name the harness does not know renders the 「알 수 없는 표면」 page — which a
+screenshot records like any other. `measure.sh` kept capturing `WORK-CONSOLE` (deleted by #2864) that
+way, and the verification line took two `APPROVED` photos of that page as evidence of an approved card.
+`node measure/known-surface.cjs <NAME>…` exits 2 on an unknown name. It reads the top-level dispatch of
+`Surface()` in `measure/surfaces.tsx` (there is no second list to keep), `measure.sh` runs it for every
+`capture_surface` name before it touches the simulator, and any other capture script should run it
+before `xcrun simctl launch`. It cannot see inside a prefix family (`sheetkit-…`): the family judges its
+own `which`. `__tests__/measureSurfaces.test.tsx` checks the tool against what the harness really draws.
 
 **「작업 중」 is only observable because the mock is asked to be slow.** A default
 mock turn is about two tenths of a second end to end, so the indicator would be
@@ -284,30 +341,79 @@ takes that away and the flow must go RED at the 「작업 중」 assertion — t
 proof the assertion is load-bearing, and it is worth re-running if you ever
 change the mock.
 
-**The server under this lane is Swift, not the live one.**
-`infra/docker-compose.e2e.yml` builds `server/` (the port's original) for
-api/relay/worker; `server-rust` never enters this stack. So a green table is
-evidence about **the app's UI mechanics** — login, the working signal, the stop
-and approval controls, the agents tab — and not evidence that the two servers
-emit the same wire: frame patterns and card props can differ. When Swift is
-deleted at parity, this lane has to be moved onto a `server-rust` e2e stack.
-The runner prints this next to the 실기기 block every run so a green table is
-never read as "same as live".
+**The server under this lane is the deploy image.** Every run builds
+`server-rust/Dockerfile` and boots it from `infra/rust/docker-compose.rust.yml`
+(the deploy compose itself) plus one overlay, `infra/rust/docker-compose.lane-phone.yml`,
+that points the agent worker at the mock provider. So a green table is evidence
+about the app's UI mechanics against the same api, relay and worker a deployment
+runs; the one real difference is the mock provider — what a real model would answer
+is not proven here, and the runner prints that every time. `LANE_PHONE_RUST_IMAGE=<tag>`
+skips the build and boots a prebuilt image instead; the table is then evidence about
+THAT image, not about the server in this checkout, so say which one when you quote a
+result. (The Swift server this lane used to boot is gone.)
 
 **What a green table here does NOT cover.** The simulator has no APNs, so the
 lock-screen approval path — the one where a person decides without opening the
 app — is not exercised at all. The runner prints that as an explicit 실기기
-파이널 체크 block rather than letting five PASSes imply it. Same for the shared
+파이널 체크 block rather than letting the PASSes imply it. Same for the shared
 keychain access group (device signature only).
 
 **Isolation.** One dedicated compose project (`momo_maestro1`) on loopback ports
-nothing else uses, `down -v --remove-orphans` in a trap so teardown runs on
-failure and Ctrl-C too, and the same teardown at startup because the way stacks
-accumulate is a run that died before its own trap ([[momo-docker-resource-accumulation]]).
-A `mkdir` lock keeps two lanes off the same project — and the lock is taken
-**before** the trap is armed, because with that order reversed a second run that
-correctly refused the lock still ran cleanup on its way out and deleted the
-holder's stack.
+nothing else uses (api 24330, Centrifugo 24331, mock Hermes 24333),
+`down -v --remove-orphans` in a trap so teardown runs on failure and Ctrl-C too,
+and the same teardown at startup because the way stacks accumulate is a run that
+died before its own trap ([[momo-docker-resource-accumulation]]). Two lanes at once
+(two workers) each set their own `LANE_PHONE_PROJECT`, `LANE_PHONE_API_PORT`,
+`LANE_PHONE_CENT_PORT` and `LANE_PHONE_HERMES_PORT`. A `mkdir` lock keyed on the
+project keeps two lanes off the same project — and the lock is taken **before** the
+trap is armed, because with that order reversed a second run that correctly refused
+the lock still ran cleanup on its way out and deleted the holder's stack.
+
+**Nothing committed is a credential.** Every secret the stack needs — including
+the three `infra/rust/docker-compose.rust.yml` refuses to start without
+(`NOTIFIER_POSTGRES_PASSWORD`, `WEBHOOK_INGRESS_MASTER_KEY`,
+`OUTBOUND_WEBHOOK_MASTER_KEY`) — is drawn fresh per run into a 0600 file and goes
+with it. The compose file's two bind mounts (the mock provider's script and
+`infra/centrifugo.json`) are first copied to a staging folder under
+`~/.cache/momo-lane-phone/<project>` (`LANE_PHONE_STAGE_DIR` moves it), because
+Colima's VM does not see every host path (`/private/tmp` is one) and a checkout
+there would otherwise boot a stack with empty mounts. The staging folder is removed
+with the stack, unless `--keep`.
+
+**Metro and the watchdog.** The lane starts Metro on 8081 — the app's own default,
+since `launchApp.arguments` cannot take a `${...}` — with `CHROME_PATH=/usr/bin/false`,
+so a tap on the dev build's "Open debugger" toast cannot launch the real Chrome (#5083).
+It reuses a Metro that already serves THIS checkout and refuses one that serves
+another (it asks Metro for its project root): a Metro from another tree would hand
+the app that tree's JavaScript and the table would report on code it never built.
+Each flow also runs under a watchdog (`LANE_PHONE_FLOW_TIMEOUT`, 1800 s), because
+Maestro 2.8 sometimes sits in its own teardown after every step passed; a flow that
+blows the bound is a FAIL like any other. And `30-approval` is checked from outside
+the screen: the screen looks the same whether the approved tool ran or came back
+"this server cannot execute it", so after the flow the lane reads the work session's
+row and downgrades a screen-green run to FAIL unless it is `ended`.
+
+### Flow syntax check — `npm run check:maestro-syntax` (#5081)
+
+`maestro check-syntax <file>` parses a flow with Maestro's own reader: no device, no
+app, no stack. The script runs it over every `*.yaml` under `maestro/` (subflows
+included), four files at a time — about 2 s a file, nearly all of it JVM start-up, so
+the whole folder is a minute or less. PR CI runs the same script in the `node_mobile`
+job, with Maestro pinned there (`.github/workflows/pr-ci.yml`).
+
+It exists for what a simulator run only finds hours later: a missing `---` header
+(#4869, the config block running into the commands) and a `${...}` placeholder in a
+number field (#5081: `swipe.duration` in the three sheet-drag templates — `check-syntax`
+does not substitute the way a run does). Keep placeholders out of number fields; a
+value that never varies belongs in the file as a number. It does **not** know whether
+a testID still exists or a sentence still reads that way — only a run does (the lane
+for its six flows, the verification line for the rest).
+
+It cannot pass blind. Before the real files it runs a negative control — a minimal
+valid flow must be accepted, a flow with no `---` and a flow with a placeholder in a
+number field must be rejected — and fails if any of the three is answered wrongly
+(a Maestro that turned lenient, a JVM that cannot start). It also refuses to report
+a pass on zero files.
 
 ## iOS identity
 

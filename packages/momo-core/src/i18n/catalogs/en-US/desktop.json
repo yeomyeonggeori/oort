@@ -16,5 +16,18 @@
   "desktop.menu.fullscreen": "Enter full screen",
   "desktop.menu.hide": "Hide oort",
   "desktop.menu.hideOthers": "Hide others",
-  "desktop.menu.quit": "Quit oort"
+  "desktop.menu.quit": "Quit oort",
+  "desktop.tray.running": "Running",
+  "desktop.tray.none": "Nothing running",
+  "desktop.tray.newMessage": "New message",
+  "desktop.tray.readAll": "Mark all as read",
+  "desktop.tray.open": "Open oort",
+  "desktop.tray.stateWorking": "Working",
+  "desktop.tray.stateBlocked": "Waiting",
+  "desktop.tray.more": "{count, number} more",
+  "desktop.tray.remainApprovals": "{count, plural, one {# approval is still waiting for you} other {# approvals are still waiting for you}}",
+  "desktop.tray.remainPanes": "{count, plural, one {# pane is still waiting for you} other {# panes are still waiting for you}}",
+  "desktop.tray.remainBoth": "{approvals, plural, one {# approval} other {# approvals}} and {panes, plural, one {# pane} other {# panes}} are still waiting for you",
+  "desktop.tray.closeNotice": "Closing the window keeps oort in the menu bar, so you still get notifications",
+  "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}"
 }

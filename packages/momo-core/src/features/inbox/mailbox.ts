@@ -474,13 +474,32 @@ export function orderMailbox(entries: readonly MailboxEntry[]): MailboxEntry[] {
 }
 
 export function matchesMailboxFilter(
-  entry: MailboxEntry,
+  entry: Pick<MailboxEntry, "kind" | "unread" | "reasons">,
   filter: MailboxFilter
 ): boolean {
   if (filter === "all") return true;
   if (filter === "unread") return entry.unread;
   // 서버 항목은 사유가 여럿일 수 있다(멘션이면서 인용 답). 서버 필터와 같은 기준이다.
   return (entry.reasons ?? [entry.kind]).includes(filter);
+}
+
+/** `taskEntry`가 만드는 줄의 모양(종류·안 읽음·사유 없음)만. 필터가 이 줄을 담는지 묻는 데만 쓴다. */
+const TASK_PROBE: Pick<MailboxEntry, "kind" | "unread" | "reasons"> = {
+  kind: "task",
+  unread: true,
+};
+
+/**
+ * 이 필터의 목록에 **처리할 일(승인) 줄이 들어올 수 있는가** (#5116).
+ *
+ * 승인 원장은 인박스 투영과 따로 오고 따로 실패한다. 원장이 늦거나 실패했다는 말(로딩·오류)은 승인이
+ * 섞인 탭에만 걸어야 한다: 멘션·답글·DM·스레드 탭의 내용은 원장과 무관한데 그 탭이 원장 때문에 로딩이나
+ * 오류를 말하면 거짓이다. 어느 탭에 승인이 드는지를 호출자가 탭 이름으로 다시 적지 않도록, 처리할 일
+ * 줄이 이 필터를 통과하는지를 `matchesMailboxFilter` 한 벌에 묻는다(탭이 늘어도 판정이 따라간다).
+ * 필터 밖의 값(웹의 「나중에」 탭 같은 것)은 어느 줄도 담지 않으므로 `false`다.
+ */
+export function mailboxFilterHasTasks(filter: string): boolean {
+  return matchesMailboxFilter(TASK_PROBE, filter as MailboxFilter);
 }
 
 export function filterMailbox(

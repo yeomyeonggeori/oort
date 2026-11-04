@@ -43,7 +43,10 @@ src-tauri/
   src/lib.rs          # plugin registration, command table, deep-link wiring
   src/deeplink.rs     # oort://join parsing + pre-webview buffer
   src/discovery.rs    # _momo._tcp browse
-  src/notification.rs # permission + show
+  src/notification.rs # permission + show (+ show_clickable, #5059)
+  src/notification_click.rs # macOS: keep each banner's handle, report its click (#5059)
+  src/tray.rs         # macOS: the menu-bar icon + its menu, drawn from one command, `tray_status_set` (#5193, #5195)
+  src/main_window.rs  # what the red button does (put the window away; the app stays in the menu bar) and every way the window comes back (#5196)
   src/opener.rs       # hand one https URL to the OS browser
   src/downloads.rs    # save an attachment into Downloads; probe / reveal / open it by file name (#4587)
   src/detect.rs       # passive local hosted-agent signatures (T-5)
@@ -57,7 +60,9 @@ src-tauri/
   capabilities/       # core:default + core:window:allow-start-dragging for the
                       # web's data-tauri-drag-region top bars (#2671) +
                       # notification:allow-is-permission-granted for the
-                      # notification plugin's page script (#2676) + one
+                      # notification plugin's page script (#2676) + core:tray:deny-* for
+                      # every command of tauri's own JS tray API, which `core:default`
+                      # would open once the `tray-icon` feature is on (#5193) + one
                       # allow-<command> per app command. build.rs declares an
                       # app ACL manifest (#2772), so an app command without a
                       # grant is refused.
@@ -69,6 +74,8 @@ src-tauri/
                       # commands, same fence (D3-f, #2878)
                       # downloads.json: the five download_* commands, same fence (#4587)
   icons/              # generated via `cargo tauri icon app-icon.png`
+  icons/tray/         # the menu-bar icon's four template PNGs (18pt: @1x 18x18, @2x 36x36; black + alpha), made from the brand mark by
+                      # `scripts/desktop/render_tray_icons.sh` (`--check` compares them with the mark). `src/tray.rs` embeds the @2x pair.
 ```
 
 # Bridge contract
@@ -87,6 +94,8 @@ All payloads are camelCase. Commands are invoked by the exact names below.
 | `momo:deep-link` | `{ url: string, server: string, code: string }` | A `oort://join` link arrived while the app was running. |
 | `momo:discovery` | `{ servers: DiscoveredServer[], scanning: boolean }` | The known server set changed, and once more when a scan ends (`scanning: false`). |
 | `momo:update-progress` | `{ downloaded: number, total: number \| null }` | Bytes moved while `updater_install` runs. `total` is null when the server sent no Content-Length. |
+| `momo:notification-click` | `{ id: string, target: string }` | A banner shown through `notification_show_clickable` (`clickable`) was clicked — and only a click (#5059). Both fields are the request's, unchanged. The page must match them against its own record of shown banners (`features/notifications/bannerClicks.ts`) and never use the payload as a route as it arrives. macOS only. |
+| `momo:tray-action` | `{ action: "new-message" }` \| `{ action: "run", id: string }` \| `{ action: "read-all" }` \| `{ action: "window-hidden" }` | The menu-bar side tells the page something (#5193). A menu entry that needs the page was picked: 「새 메시지」 (`new-message`), a running job's row (`run`, with the row `id` the page sent in `tray_status_set`), or 「모두 읽음 처리」 (`read-all`, #5195: the page marks the unread mentions and DMs read — the one pick that does **not** bring the window forward). Not a pick: the red button put the window away into the menu bar and the app stays (`window-hidden`, #5196, `main_window.rs`: the page says so once, as an OS notification). 「oort 열기」 sends nothing: the shell brings the window forward by itself, and so does every other pick except `read-all`. The page must read the shape (`@momo/core/features/notifications/trayAction`), match `id` against the rows it last sent (`features/notifications/TrayStatus.tsx`) and never use the payload as a route as it arrives. macOS only. |
 
 ```ts
 interface DiscoveredServer {
@@ -112,7 +121,10 @@ interface HostedAgentProbe {
 | `notification_permission` | — | `"granted" \| "denied" \| "default"` | No prompt. Desktop: always `"granted"` — the plugin does not read the OS setting (#2676). |
 | `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
 | `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
+| `notification_click_supported` | — | `boolean` | `true` only on macOS, where the shell keeps each banner's handle and reports its click (#5059). The web bundle asks once per run; a shell build without this command is refused, which the bundle reads as `false` and keeps the old focus guess. Granted to the `main` window only. |
+| `notification_show_clickable` | `{ title: string, body?: string, id: string, target: string }` | `"clickable" \| "plain" \| "refused"` | Shows one banner and, where it can, reports its click as `momo:notification-click` carrying `{ id, target }` unchanged (#5059). `clickable` = a click will arrive as an event; `plain` = shown through the plugin as before and **no event will come** (another OS, more than 8 banners already waiting, a thread that could not start, a malformed `id` — `[A-Za-z0-9_-]`, ≤ 64 bytes — or `target` — an absolute app path starting with one `/`, ≤ 512 bytes, no scheme/backslash/control characters); `refused` = permission is not granted. A dismissed banner, or one cleared from Notification Center, emits nothing. Granted to the `main` window only. |
 | `dock_badge_set` | `{ count: number }` | `void` \| error | Dock badge = the web bundle's 「나에게 필요한 일」 count (`useNeedsMeCount`); `0` clears it, capped at 999. Granted to the `main` window only (#3339). |
+| `tray_status_set` | `{ status: { unread: number, compose: boolean, readAll: boolean, labels: { running, none, newMessage, readAll, open, quit }, running: { id, title, state }[], more: string \| null, remaining: string \| null } }` | `void` \| error | Draws the menu-bar icon and its menu (#5193). `unread` is the very number `dock_badge_set` gets (`useDockBadgeCount`): above 0 the icon is the mark with a dot, otherwise the mark. Both are macOS **template** images (the OS tints them for a light or a dark bar). `labels` and `state` are already in the person's language (the shell holds no copy); `compose` enables 「새 메시지」 and says someone is signed in (see below); `readAll` enables 「모두 읽음 처리」 (the page derives it from the very list its pick will mark, #5195); `remaining` is the dimmed line right under that item that says what it leaves — approvals and answers still waiting close only by a decision (`null`: no line); `running` is at most 6 rows (`MAX_RUN_ROWS`), most urgent first, each `id` `[A-Za-z0-9_-]` ≤ 64 bytes and unique, `title` cleaned of control/bidi characters and cut at 24 characters (the state after it is never cut), every label non-blank, ≤ 256 bytes, no control/bidi characters (`more` and `remaining` too); `more` is the dimmed 「외 N개」 line. Anything else is an error and the menu keeps what it had. Quit is macOS's own Quit item (the app menu's Cmd+Q path). The first valid call creates the icon; it lives until the app exits. **The red button (#5196):** while the icon is up and `compose` is true (someone is signed in) the red button / Cmd+W only puts the window away — the webview keeps running, so realtime banners, the Dock badge and the menu-bar dot keep following — and the app ends only by 「oort 종료」 or Cmd+Q. A fullscreen window first leaves fullscreen (the next press puts it away). With no icon yet, no one signed in, or on another OS than macOS, the red button ends the app as it always did (`main_window.rs` is the one place that decides; `rotation_hold.rs` still holds a close that ends the app for an open refresh rotation). The window comes back by 「oort 열기」 (and every pick but 「모두 읽음 처리」), a Dock icon click, a clicked banner or an invite link. Left and right click open the same menu. A pick that needs the page arrives as `momo:tray-action`. Other desktops answer `Ok(())` after the same validation. Granted to the `main` window only; tauri's own JS tray API (`plugin:tray\|*`) is **denied** in `capabilities/default.json` (`core:default` would otherwise open it once the `tray-icon` feature is on), which `shell_contract.rs` and `desktopShellContract.test.ts` pin. The wire shape is pinned by `tests/fixtures/tray_status.json`, read by the shell's test and by `trayModel.test.ts`. |
 | `window_vibrancy_set` | `{ enabled: boolean, material?: "sidebar" \| "under-window-background" \| "hud-window" }` | `void` \| error | 「유리 배경」의 창 쪽(ADR-0189 증보 3 D6, #4190). macOS: `enabled` 면 이전 블러 층을 지우고 `NSVisualEffectView`(기본 `sidebar`, 모르는 이름도 `sidebar`)를 웹뷰 뒤에 깐 **다음** 웹뷰 캔버스만 투명으로 만든다(wry `drawsBackground`, 비공개 API). 끄면 층만 지운다. 창은 처음부터 불투명이고 런타임에 투명으로 만들지 않는다. macOS가 아니면 `Ok(())`. 웹은 이 호출이 성공한 **뒤에** `data-glass`를 찍고, 끌 때는 `data-glass`를 **먼저** 걷는다. Granted to the `main` window only. |
 | `app_theme_set` | `{ scheme: "light" \| "dark" \| "system" }` | `void` | 앱 네이티브 appearance를 웹이 보여 주는 스킴에 맞춘다(`Sidebar` 재질은 페이지가 아니라 창의 effective appearance로 밝게·어둡게 흐려진다). 모르는 값은 `system`. 이 호출은 페이지의 `prefers-color-scheme`도 바꾸므로 웹은 유리가 켜져 있고 스킴이 고정일 때만 `light`·`dark`를 보내고 그 밖에는 `system`으로 돌려준다. Granted to the `main` window only (#4190). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
@@ -389,14 +401,32 @@ focus. Every other rule (mute, de-duplication, replay suppression, copy
 redaction) lives in that module's pure half and is unit-tested there. Nothing
 about that policy belongs in Rust.
 
-**Gap the bridge still has: the click.** `notification_show` is fire-and-forget —
+**The click (#5059).** `notification_show` is fire-and-forget —
 `tauri-plugin-notification`'s desktop path spawns the notification and drops the
-handle, so there is no way for the shell to report that a banner was clicked, and
-therefore no way for the web layer to know *which* one was. The web side
-approximates it (arm the channel at show time, consume it on the next window
-focus, expire after 20s) and says so in `notifications/model.ts`. Closing it
-properly means a Rust notification path that keeps the handle and emits an event
-with the app-supplied target.
+handle, so it can never say which banner was clicked. On macOS the shell has a
+second path: `notification_show_clickable` keeps the handle
+(`mac-notification-sys` `wait_for_click(true)`: one named thread per banner waits
+until the banner is clicked, closed, or leaves Notification Center) and emits
+`momo:notification-click` with the `{ id, target }` the web layer gave — on a
+click only. The web layer (`features/notifications/bannerClicks.ts`) records
+`id → route` before it shows the banner and goes to the **recorded** route when
+a matching click arrives; it never uses the payload as a route. In that mode
+"the window came to the front within 20 s" is no longer read as a click: someone
+who ignores the banner and comes back is not moved.
+
+The old guess (arm the channel at show time, consume it on the next window focus,
+expire after 20 s — `notifications/model.ts`) remains only where no click can be
+reported: another OS, a shell build without the command, and a single banner the
+shell shows plain because more than 8 are already waiting (it arms that banner's
+destination alone).
+
+Costs of the click path, none of them measured yet (`runtime-unverified`): a wait
+cannot be cancelled from outside, so a banner nobody touches keeps its thread and
+the library's 0.5 s timer on the main run loop (a read of Notification Center's
+delivered list) until it is clicked or cleared — hence the limit of 8
+(`MAX_PENDING_CLICKS`), to be adjusted from a measurement. A banner whose app
+restarted is clicked into an app that has forgotten it: the app comes forward and
+nothing navigates.
 
 ## External links (MOMO-620)
 
@@ -839,9 +869,11 @@ macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms re
   nothing to resume (see Keychain above), which removes it from a first launch;
   a developer machine carrying an old item clears it once with
   `security delete-generic-password -s app.momo.desktop -a refresh-token`.
-- Notification click routing: see the Notification section. The shell cannot
-  report a click, so "click the banner, land on the channel" is an approximation
-  on the web side rather than an OS-reported event.
+- Notification click routing: see the Notification section. On macOS the shell
+  reports a banner's click (#5059); on other OSes, in an older shell, and for a
+  banner shown plain past the limit of 8 waiting banners, "click the banner, land
+  on the channel" is still the web side's approximation. Not exercised on a real
+  banner click in this tree (`runtime-unverified`).
 - **The app cannot see a macOS notification denial (#2676).**
   `tauri-plugin-notification`'s desktop half answers `Granted` without asking
   the OS. After 허용 안 함 every banner is dropped silently (measured), while

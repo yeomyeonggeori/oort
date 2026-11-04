@@ -13,7 +13,13 @@ import {
   DesktopNotificationGroup,
   DesktopNotificationPermissionPanel,
 } from "./DesktopNotificationGroup";
-import { reloadDesktopNotificationKindsForTest } from "@/features/notifications/preference";
+import {
+  desktopNotificationKinds,
+  reloadDesktopNotificationKindsForTest,
+} from "@/features/notifications/preference";
+import { koreanLocale } from "@/testing/koLocale";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
 
 const readPermission = vi.hoisted(() => vi.fn());
 const requestPermission = vi.hoisted(() => vi.fn());
@@ -39,8 +45,10 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 beforeEach(() => {
@@ -298,7 +306,7 @@ describe("DesktopNotificationGroup", () => {
     });
     const box = (id: string) =>
       host.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement;
-    for (const id of ["approval", "pane-waiting", "mention", "work-mine-done"]) {
+    for (const id of ["approval", "pane-waiting", "mention", "thread-reply", "work-mine-done"]) {
       expect(box(`desktop-notification-kind-${id}`).getAttribute("aria-checked")).toBe("true");
     }
     expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("false");
@@ -306,16 +314,54 @@ describe("DesktopNotificationGroup", () => {
     expect(box("desktop-notification-dock-badge").getAttribute("aria-checked")).toBe("true");
     // 폰 푸시 열에는 입력이 없다(폰 설정은 폰 앱에서).
     const rows = host.querySelectorAll("tbody tr");
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(8);
     for (const row of rows) {
       expect(row.querySelectorAll('td:last-child input, td:last-child [role="switch"]')).toHaveLength(0);
     }
-    // OS 알림 열의 스위치는 스위치를 가진 여섯 종류(팀 작업 끝남은 「연결 전」)와 같다.
+    // OS 알림 열의 스위치는 스위치를 가진 일곱 종류(팀 작업 끝남은 「연결 전」)와 같다.
     expect(
       host.querySelectorAll('[data-testid="desktop-notification-kinds"] tbody td:nth-child(2) [role="switch"]')
-    ).toHaveLength(6);
+    ).toHaveLength(7);
     expect(host.textContent).toContain("팀 작업 끝남");
     act(() => box("desktop-notification-kind-dm").click());
     expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("true");
   });
 });
+
+describe("참여한 스레드의 새 답글 행 (#4890)", () => {
+  async function mountKorean(): Promise<HTMLElement> {
+    const host = mount(
+      createElement(LocaleProvider, { locale: ko, children: createElement(DesktopNotificationGroup) })
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    return host;
+  }
+  const row = (host: HTMLElement) =>
+    host.querySelector('[data-testid="desktop-notification-kind-thread-reply"]')!.closest("tr")!;
+
+  it("사전에서 읽은 이름·설명으로 서고, 기본은 켜짐이며, 독 배지는 세지 않고 폰 푸시 열은 「곧 열려요」다", async () => {
+    const host = await mountKorean();
+    const target = row(host);
+    expect(target.textContent).toContain("참여한 스레드의 새 답글");
+    expect(target.textContent).toContain("따라가는 스레드에 남이 쓴 새 답글이에요.");
+    const toggle = host.querySelector('[data-testid="desktop-notification-kind-thread-reply"]') as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("참여한 스레드의 새 답글 OS 알림");
+    const cells = target.querySelectorAll("td");
+    expect(cells[1]?.textContent).toBe("세지 않아요");
+    expect(cells[2]?.textContent).toBe("곧 열려요");
+  });
+
+  it("끄면 이 기기의 설정에만 저장된다 — 폰에는 스위치가 없다(서버 저장소가 생기기 전의 가짜 토글을 만들지 않는다)", async () => {
+    const host = await mountKorean();
+    const toggle = host.querySelector('[data-testid="desktop-notification-kind-thread-reply"]') as HTMLButtonElement;
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(desktopNotificationKinds()["thread-reply"]).toBe(false);
+    expect(JSON.parse(localStorage.getItem("momo.web.notifications.v1") ?? "{}")["thread-reply"]).toBe(false);
+    expect(row(host).querySelectorAll('td:last-child input, td:last-child [role="switch"]')).toHaveLength(0);
+  });
+});
+

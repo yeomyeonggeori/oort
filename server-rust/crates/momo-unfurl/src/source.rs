@@ -179,8 +179,10 @@ impl From<&FetchError> for SourceFailure {
             FetchError::OriginBlocked => SourceFailure::PrivateOrigin,
             FetchError::TooLarge => SourceFailure::TooLarge,
             FetchError::Timeout => SourceFailure::Timeout,
-            // `Failed` carries transport text. It is dropped here on purpose.
-            FetchError::Failed(_) => SourceFailure::Unavailable,
+            // `Failed` carries transport text. It is dropped here on purpose. A fetch this server
+            // had no room for is told the same way: the link is not at fault, and the member
+            // asks again.
+            FetchError::Failed(_) | FetchError::Capacity => SourceFailure::Unavailable,
         }
     }
 }
@@ -416,6 +418,7 @@ mod tests {
             (TooManyRedirects, SourceFailure::Blocked, "source_blocked"),
             (TooLarge, SourceFailure::TooLarge, "source_too_large"),
             (Timeout, SourceFailure::Timeout, "source_timeout"),
+            (Capacity, SourceFailure::Unavailable, "source_unavailable"),
             (
                 Failed("dns".into()),
                 SourceFailure::Unavailable,

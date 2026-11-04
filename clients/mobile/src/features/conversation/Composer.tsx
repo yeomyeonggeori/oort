@@ -1,5 +1,7 @@
 import {ExpressionComposerModal} from '../expressions/ExpressionComposerPicker';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
+import {insertExpressionToken} from '../expressions/expressionViews';
+import {useExpressionMessages} from '../expressions/useExpressionMessages';
 import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
 import {dmAdmissionCandidates, dmAdmissionHint} from '@momo/core/features/agents/dmAdmission';
 import type {Channel} from '@momo/core/lib/api';
@@ -65,6 +67,7 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {GlassSurface, useGlassMaterial} from '../../design/glass';
@@ -73,8 +76,9 @@ import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 import {DockFollowContext} from './dockFollow';
+import {useMakeLanding} from './makeLanding';
 import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from './useComposerInputLayout';
-import {clearDraft, readDraft, saveDraft} from './drafts';
+import {clearDraft, readDraft, saveDraft, subscribeDraftSeed} from './drafts';
 import {Avatar} from './Avatar';
 import {
   applyMention,
@@ -84,6 +88,13 @@ import {
 } from './mentionQuery';
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
+import {ReplyDraftCard} from './ReplyDraftCard';
+import {AlsoInChannelCheck} from './AlsoInChannelCheck';
+import {useReplyCopy} from './replyCopy';
+import type {ReplyTarget} from './replyTarget';
+import {ComposerLinkPreview} from './ComposerLinkPreview';
+import {useComposerLinkPreview} from './useComposerLinkPreview';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {AttachMenu} from '../attachments/AttachMenu';
 import {AttachmentTray} from '../attachments/AttachmentTray';
 import {
@@ -606,6 +617,13 @@ const PILL_EDGE = StyleSheet.hairlineWidth;
 const BAR_PAD_X = CONV.composerGap - PILL_EDGE;
 
 /**
+ * 입력창 **글자의 왼쪽**, 알약 안쪽 가장자리에서 잰다(#5067) — 줄 여백 + 입력창 테두리 + 입력창 안쪽 여백. 글 칸의 들여쓰기(`fieldInset` — 접힘 한 줄은 + 원 하나, 펼침은 0)는
+ * 이 값에 **더해진다**. 답글 머리말(`ReplyDraftCard`)이 글자 열을 여기서 읽는다: 머리말에 숫자를 따로 적으면 입력창이 접히고 펼칠 때마다 어긋난다
+ * (옛 값은 접힘 한 줄 기준이라 초점이 든 펼친 입력창과 36pt 갈렸다).
+ */
+const INPUT_TEXT_LEFT = BAR_PAD_X + INPUT_BORDER + INPUT_PAD_X;
+
+/**
  * 알약 위·아래 안쪽 여백(`styles.bar`). 위 여백에서 입력창 한 줄(엄지 바닥 44)이 원 둘레에
  * 이미 더하는 몫 `(44 − 36) / 2 = 4` 를 한 번 더 뺀 것이다 — 그래서 한 줄일 때 원의 위·아래
  * 여백이 좌·우와 같은 9 가 된다. 입력창을 44 로 두는 이유는 글 칸의 엄지 바닥이고, 글 세로
@@ -628,6 +646,13 @@ const AGENT_NOTICE_PAD_TOP = space.sm;
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
+/** 보내기 왼쪽 표현 단추(#4942)의 눌림 여유 — 칸(36)을 엄지 44 로 만든다. */
+const EXPRESSION_SLOP = slopTo(CONV.composerExpression);
+/**
+ * 접힌 알약에서 글 칸 **오른쪽**이 비우는 폭(#4942): 보내기 원 + 그 왼쪽 표현 단추의 칸. 왼쪽은 + 원 하나(`CONV.composerCircle`)다.
+ * 같은 합이 `COMPOSER_CHROME_X`(글 칸 산수)에도 들어 있다 — 시험(`composerPill.test.tsx`)이 둘을 묶는다.
+ */
+const RIGHT_RESERVE = CONV.composerCircle + CONV.composerExpression;
 
 // ---- 두 상태 (#4305 → #4456 → #4518) ------------------------------------------
 // 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
@@ -1069,7 +1094,17 @@ export function placeholderRoom(fontScale: number): number {
 export {COMPOSER_OFFLINE_COPY};
 
 export interface ComposerSendOptions {
-  attachments: MessageAttachment[];
+  attachments?: MessageAttachment[];
+  /**
+   * #5016 — 입력칸 위 링크 미리보기의 ✕로 이 메시지의 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01).
+   * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  suppressUnfurl?: boolean;
+  /**
+   * #4888 — 「대화에도 보내기」를 켜고 보낸다(ADR-0148 증보 2026-10-31). 스레드 답글(스레드 화면, 밀어서 답글)에서만 뜻이 있고, 켠 때만
+   * 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  alsoInChannel?: boolean;
 }
 
 /**
@@ -1100,14 +1135,18 @@ export function Composer({
   viewerHumanId,
   dmHint,
   offline,
+  offlineNote,
   draftKey,
   onSend,
   onTyping,
   quote,
   onCancelQuote,
+  replyTarget,
+  onCancelReply,
+  offerAlsoInChannel,
   attachmentTarget,
-  placeholder,
-  sendLabel = '보내기',
+  placeholder: placeholderProp,
+  sendLabel: sendLabelProp = '보내기',
   inputRef: externalInputRef,
   onSlashCommand,
   onKeyBlockedChange,
@@ -1169,6 +1208,12 @@ export function Composer({
    */
   offline?: boolean;
   /**
+   * `offline` 일 때 컴포저 위 한 줄(과 보내기·첨부 단추의 낭독 힌트)이 말하는 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이
+   * 문장을 가르므로(#5222, 연결 상태 모델의 `composerNote`) 화면이 사전에서 읽어 준다. 없으면 예전 한 문장
+   * (`COMPOSER_OFFLINE_COPY`)이다 — 연결 상태 모델이 없는 하네스·시험은 그대로 이 문장을 읽는다.
+   */
+  offlineNote?: string;
+  /**
    * 이 컴포저의 초안이 앉는 자리 (`drafts.ts`). 없으면 초안을 쓰지도 읽지도
    * 않는다 — 이름 없는 자리에 남긴 글은 나중에 누구의 것인지 답할 수 없다.
    */
@@ -1196,6 +1241,18 @@ export function Composer({
   /** 인용을 무른다. 인용이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelQuote?: () => void;
   /**
+   * 지금 스레드 답글을 쓰는 중이면 그 대상 (#4869). 있으면 입력 줄 위에 머리말이 붙어 알약이 **한 장의 카드**가 되고, 입력칸의
+   * 안내 글과 보내기의 이름이 「답글」이 된다. 인용과는 함께 걸리지 않는다(화면이 하나를 걸 때 다른 하나를 뗀다).
+   */
+  replyTarget?: ReplyTarget | null;
+  /** 답글 대상만 뗀다 — **쓴 글은 남는다**(글은 이 컴포저가 들고 있다). 대상이 있는데 이것이 없으면 나가는 길이 없다. */
+  onCancelReply?: () => void;
+  /**
+   * 「대화에도 보내기」 체크를 늘 세운다(스레드 화면 입력칸, #4888). 채널 입력칸은 주지 않고, 밀어서 건 답글 머리말(`replyTarget`)이 있는 동안에만
+   * 체크가 선다. 기본은 꺼짐이고 마지막 선택을 기억하지 않는다 — 보내면 꺼지고, 답글 대상이나 입력칸(`draftKey`)이 바뀌면 꺼진다.
+   */
+  offerAlsoInChannel?: boolean;
+  /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
    * raise the real software keyboard without a tap (a simulator cannot be
@@ -1219,6 +1276,22 @@ export function Composer({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 답글 대상이 걸려 있으면 입력칸의 안내 글이 「답글 입력」이 되고 보내기의 낭독 이름이 「답글 보내기」가 된다 — 위에 선
+  // 머리말이 말하는 곳으로 나간다(#4869). 안내 글은 넘겨받은 문장으로 취급되어 절 예산의 프로브도 서지 않는다.
+  const replyCopy = useReplyCopy(directory);
+  // 보내기 왼쪽 표현 단추의 낭독 이름(#4942) — 사전(ko·en)에서만 온다.
+  const expressionCopy = useExpressionMessages();
+  // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
+  const openMadeConversation = useMakeLanding();
+  const replying = !!replyTarget && onCancelReply !== undefined;
+  // 「대화에도 보내기」(#4888): 서는 자리는 스레드 입력칸과 답글 머리말이 걸린 동안이다. 상태는 여기서 들고, 기억하지 않는다.
+  const offersAlsoInChannel = offerAlsoInChannel === true || replying;
+  const [alsoInChannel, setAlsoInChannel] = useState(false);
+  const alsoInChannelScope = `${replyTarget?.messageId ?? ''}|${draftKey ?? ''}`;
+  useEffect(() => setAlsoInChannel(false), [alsoInChannelScope]);
+  const alsoInChannelOn = offersAlsoInChannel && alsoInChannel;
+  const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
+  const sendLabel = replying ? replyCopy.send() : sendLabelProp;
   const keyboardAppearance = useKeyboardAppearance();
   // 성장 상한은 **스타일시트에 못 박히지 않는다** (#1443). 글자 배수와 창 높이가
   // 정하고, 둘 다 사람이 설정에서 바꾸는 값이라 렌더마다 다시 읽는다 —
@@ -1329,6 +1402,23 @@ export function Composer({
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
   const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
 
+  // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 웹 입력칸 #5005 와 같은 규칙). 보낼 방은 첨부가 올라가는 방과
+  // 같다(워크스페이스·채널, 스레드면 뿌리 메시지까지) — 이 입력창은 채널과 스레드가 함께 쓰고, 방을 모르면(첨부 대상이
+  // 없는 하네스·시험) 아무것도 묻지 않는다. 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const formatMessage = useFormatMessage();
+  const linkPreview = useComposerLinkPreview({
+    workspaceId: attachmentWorkspaceId,
+    channelId: attachmentChannelId,
+    threadRootId: attachmentRootId,
+    text,
+    paused: offline === true,
+  });
+  const dismissLinkPreview = () => {
+    linkPreview.dismiss();
+    // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 — 결과를 소리로 알린다(`AttachmentTray` 와 같은 길).
+    AccessibilityInfo.announceForAccessibility(formatMessage('timeline.unfurl.previewDismissed'));
+  };
+
   // 메뉴가 **실제로 사라진 뒤에만** 네이티브 picker·카메라를 제시한다 (design-review
   // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
   // 제시를 거절할 수 있고, 그 실패는 catch에서 'unavailable'로 접혀 **picker가
@@ -1412,6 +1502,24 @@ export function Composer({
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
+  }, [draftKey]);
+
+  // 밖에서 심는 글 (`seedDraft`, 승인 카드의 「다시 요청」 #5171). 저장소에는 `seedDraft` 가 적고, 이미 마운트된 입력창은 이
+  // 알림으로만 안다. 쓰던 글이 있으면 덮지 않고 거절한다. 글을 놓는 몸은 위 `draftKey` 전환 효과와 같다.
+  useEffect(() => {
+    if (draftKey === undefined) return undefined;
+    return subscribeDraftSeed(draftKey, seeded => {
+      if (currentTextRef.current.trim() !== '') return false;
+      currentTextRef.current = seeded;
+      restedRef.current = false;
+      setRestedFlag(false);
+      restFromRef.current = null;
+      setRestFrom(null);
+      setText(seeded);
+      setCaret(seeded.length);
+      setMentionOpen(false);
+      return true;
+    });
   }, [draftKey]);
 
   // Derived during render, not in an effect: an effect would compute the list
@@ -1717,16 +1825,27 @@ export function Composer({
     if (draftKeyRef.current !== undefined) {
       clearDraft(draftKeyRef.current);
     }
+    // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
+    // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
+    const picked = {
+      ...(linkPreview.suppressed ? {suppressUnfurl: true} : {}),
+      // 켠 때만 키가 간다. 보냈으므로 체크는 꺼진다(마지막 선택을 기억하지 않는다).
+      ...(alsoInChannelOn ? {alsoInChannel: true} : {}),
+    };
+    const flags = Object.keys(picked).length === 0 ? null : picked;
+    setAlsoInChannel(false);
     if (attachmentKey === null) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
     const sent = takeSent(attachmentKey);
     if (sent.attachments.length === 0) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
-    onSend(body, {attachments: sent.attachments});
+    onSend(body, {attachments: sent.attachments, ...flags});
   }, [
     setKeyBlocked,
     text,
@@ -1740,6 +1859,8 @@ export function Composer({
     showSlash,
     slashRows,
     acceptSlash,
+    linkPreview.suppressed,
+    alsoInChannelOn,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -2008,15 +2129,30 @@ export function Composer({
   // 이 수리 뒤 8번 모두 정상). 스프링은 접히는 내내 `shown` 이 서서 보간이 끝까지 붙어 있고 끝난 뒤의 숫자가 네이티브 값과 같아서 어긋나지 않는다.
   // `reduceMotion` 은 ref 라서 **렌더 중에 읽는다** — `useReduceMotion.ts` 머리말은 읽는 곳이 누르는 순간뿐이라고 적지만 여기는 의도된 예외다: 값이 의미를 갖는 것은 상태가 바뀌는 렌더뿐이고
   // (앱 뿌리가 저장소를 붙들어 첫 렌더부터 안다), 설정이 바뀌어도 다시 그리지 않으니 다음 상태 전이부터 반영된다. 상태판 훅으로 바꾸면 첫 답이 올 때마다 컴포저가 다시 그려진다(그 훅 머리말이 피하려던 소음).
-  const inputInset =
+  //
+  // 입력창 **지금 배치**의 왼쪽 들여쓰기는 이 함수 하나가 정한다(#5067): `extra` 는 들여쓰기 위에 얹는 고정 폭이다. 글 칸 상자는 `extra = 0` 을, 같은 알약 안 답글 머리말은 글자의 왼쪽
+  // (`INPUT_TEXT_LEFT`)을 받는다 — 접힘·펼침·스프링 중이 **같은 진행값**에서 나와 머리말의 글자 열이 입력 글자와 한 프레임도 안 갈린다. 두 곳이 각자 조건문을 들면 한쪽만 고쳐지는 날 갈린다.
+  const fieldInset = (extra: number) =>
     shown && !reduceMotion.current
       ? progress.interpolate({
           inputRange: [0, 1],
-          outputRange: [CONV.composerCircle, 0],
+          outputRange: [CONV.composerCircle + extra, extra],
+        })
+      : expanded
+        ? extra
+        : CONV.composerCircle + extra;
+  const inputInset = fieldInset(0);
+  // 오른쪽은 한 칸 더 비운다(#4942): 보내기 원 왼쪽에 표현 단추의 칸이 서 있고(`styles.expression` — 접힘·펼침 모두 알약 바닥에
+  // 절대 배치) 글이 그 밑으로 흐르면 안 된다. 펼치면 글 칸이 두 원 **위**로 넓어지므로 양쪽 다 0 이다.
+  const inputInsetRight =
+    shown && !reduceMotion.current
+      ? progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [RIGHT_RESERVE, 0],
         })
       : expanded
         ? 0
-        : CONV.composerCircle;
+        : RIGHT_RESERVE;
   const toolsHeight = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, COMPOSER_TOOLS_HEIGHT],
@@ -2391,9 +2527,10 @@ export function Composer({
       ) : null}
 
       {offline ? (
-        <Text style={styles.offline} testID="composer-offline">
-          {COMPOSER_OFFLINE_COPY}
-        </Text>
+        // 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288).
+        <Sentence style={styles.offline} testID="composer-offline">
+          {offlineNote ?? COMPOSER_OFFLINE_COPY}
+        </Sentence>
       ) : null}
 
       {attachmentKey === null ? null : (
@@ -2409,6 +2546,14 @@ export function Composer({
           onClear={() => clearSurface(attachmentKey)}
         />
       )}
+
+      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이 바로 아래, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
+          가깝다). 알약 **밖**이라 ✕가 보내기를 일으키지 않는다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 —
+          첨부 트레이·인용 줄과 같은 취급이고, 줄 안 높이는 트레이와 같은 상한이 묶는다. */}
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        onDismiss={dismissLinkPreview}
+      />
 
       {/* 입력창 **바로 위**. 지금 쓰고 있는 글이 무엇을 가리키는지는 그 글을
           쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
@@ -2458,6 +2603,22 @@ export function Composer({
           {marginHorizontal: floatInset},
         ]}
         testID="composer-pill">
+      {/* 답글 머리말 (#4869) — 알약 **안**, 입력 줄 바로 위. 알약의 반경이 카드의 모서리이고 입력과 한 장을 이룬다. */}
+      {replyTarget && onCancelReply ? (
+        <ReplyDraftCard
+          target={replyTarget}
+          directory={directory}
+          textLeft={fieldInset(INPUT_TEXT_LEFT)}
+          onCancel={onCancelReply}
+        />
+      ) : null}
+      {offersAlsoInChannel ? (
+        <AlsoInChannelCheck
+          checked={alsoInChannel}
+          onChange={setAlsoInChannel}
+          textLeft={fieldInset(INPUT_TEXT_LEFT)}
+        />
+      ) : null}
       <View
         style={styles.bar}
         testID="composer-bar"
@@ -2472,7 +2633,7 @@ export function Composer({
             accessibilityLabel={ATTACH_COPY.attach}
             accessibilityHint={
               offline
-                ? COMPOSER_OFFLINE_COPY
+                ? offlineNote ?? COMPOSER_OFFLINE_COPY
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
                   ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
@@ -2498,7 +2659,7 @@ export function Composer({
           </Pressable>
         )}
         <Animated.View
-          style={[{marginLeft: inputInset, marginRight: inputInset}, restClipStyle]}
+          style={[{marginLeft: inputInset, marginRight: inputInsetRight}, restClipStyle]}
           testID="composer-field"
           // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
           onTouchStart={onFieldTouchStart}
@@ -2634,20 +2795,6 @@ export function Composer({
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
             testID="composer-tools">
-            <Pressable
-              ref={expressionTrigger}
-              accessibilityRole="button"
-              accessibilityLabel="이모지 고르기"
-              accessibilityState={{disabled: offline}}
-              disabled={offline}
-              onPress={() => {
-                Keyboard.dismiss();
-                setExpressionPickerOpen(true);
-              }}
-              style={styles.tool}
-              testID="composer-tool-emoji">
-              <Image source={EXPRESSION_ICONS.smile} style={[styles.attachGlyph, {tintColor: palette.icon}]} />
-            </Pressable>
             {TOOL_SLOTS.includes('mention') ? (
               <Pressable
                 accessibilityRole="button"
@@ -2661,6 +2808,29 @@ export function Composer({
             ) : null}
           </Animated.View>
         ) : null}
+        {/* 표현 단추 (#4942) — **보내기 바로 왼쪽**, 접힘·펼침·입력 중 모두 선다. 두 원과 같은 지름의 칸이고 글리프만
+            그린다(원 채움 없음 — 채운 원은 보내기 하나다). 도구 줄이 아니라 알약 바닥에 절대 배치라 도구 줄이 접혀도 안 움직인다. */}
+        <Pressable
+          ref={expressionTrigger}
+          accessibilityRole="button"
+          accessibilityLabel={expressionCopy('expressions.sheet.open')}
+          accessibilityState={{disabled: offline}}
+          disabled={offline}
+          hitSlop={EXPRESSION_SLOP}
+          onPress={() => {
+            Keyboard.dismiss();
+            setExpressionPickerOpen(true);
+          }}
+          style={({pressed}) => [styles.expression, pressed && styles.pressed]}
+          testID="composer-expression">
+          <Image
+            source={EXPRESSION_ICONS.smile}
+            style={[
+              styles.attachGlyph,
+              {tintColor: offline ? palette.textFaint : palette.icon},
+            ]}
+          />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={sendLabel}
@@ -2668,7 +2838,9 @@ export function Composer({
           // 안 들린다. 위의 문장은 별개의 요소라 순서대로 훑어야 닿는데, 버튼에
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
           accessibilityHint={
-            offline ? COMPOSER_OFFLINE_COPY : attachmentBlockCopy ?? undefined
+            offline
+              ? offlineNote ?? COMPOSER_OFFLINE_COPY
+              : attachmentBlockCopy ?? undefined
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
@@ -2696,7 +2868,17 @@ export function Composer({
               onChangeText(currentTextRef.current + glyph);
               inputRef.current?.focus();
             }}
-            onSend={body => { if (!offline) onSend(body); }}
+            onInsertExpression={token => {
+              onChangeText(insertExpressionToken(currentTextRef.current, token));
+              inputRef.current?.focus();
+            }}
+            onSend={body => {
+              if (offline) return;
+              // 이모티콘·GIF 도 보내기다 — 보내기 = light 한 번(`submit` 과 같은 규칙, `haptics.ts` 표). 입력칸의 글은 건드리지 않는다.
+              haptics.light();
+              onSend(body);
+            }}
+            onOpenConversation={openMadeConversation}
           />
       ) : null}
       <AttachMenu
@@ -2781,6 +2963,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.border,
   },
   attachDisabled: {backgroundColor: color.surfaceMuted},
+  /**
+   * 보내기 왼쪽 표현 단추의 칸(#4942) — 보내기 원의 **바로 왼쪽**, 같은 바닥선·같은 지름. 글리프만 서고 채움이 없다.
+   */
+  expression: {
+    position: 'absolute',
+    right: BAR_PAD_X + CONV.composerCircle,
+    bottom: BAR_PAD_Y + (TOUCH_TARGET - CONV.composerCircle) / 2,
+    width: CONV.composerExpression,
+    height: CONV.composerCircle,
+    borderRadius: CONV.composerCircle / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   attachGlyph: {width: CONV_ICON_SIZE.plus, height: CONV_ICON_SIZE.plus},
   placeholder: {
     position: 'absolute',

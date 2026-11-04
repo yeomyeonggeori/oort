@@ -15,11 +15,15 @@ export function idleTimelineMock(
   return {
     state: over.state ?? emptyTimeline(),
     status: "ready" as const,
+    loadCause: null,
     resume: { lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 },
     recoveryMarkers: [],
     pending: [],
     send: async () => undefined,
     resend: async () => undefined,
+    discard: () => null,
+    resendAll: async () => undefined,
+    failureKinds: new Map(),
     loadOlder: async () => undefined,
     reload: () => undefined,
     loadingOlder: false,
@@ -36,6 +40,7 @@ export function idleTimelineMock(
     removeUnfurls: async () => undefined,
     isPlayEntrance: () => false,
     consumeEntrance: () => undefined,
+    applyThreadRead: () => undefined,
     capUnmountedArrivals: () => undefined,
   } satisfies UseTimelineResult;
 }

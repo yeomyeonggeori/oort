@@ -13,7 +13,8 @@
     "build:sim": "bash scripts/build-sim.sh",
     "gate:session": "node gate/run.mjs",
     "lane:phone": "bash scripts/lane-phone.sh",
-    "install:maestro": "bash scripts/install_maestro.sh"
+    "install:maestro": "bash scripts/install_maestro.sh",
+    "check:maestro-syntax": "bash scripts/check-maestro-syntax.sh"
   },
   "dependencies": {
     "@formatjs/intl": "6.1.4",
@@ -37,6 +38,7 @@
     "expo-image-picker": "~57.0.7",
     "expo-media-library": "~57.0.3",
     "expo-notifications": "^57.0.8",
+    "expo-video": "~57.0.5",
     "react": "19.2.3",
     "react-native": "0.86.2",
     "react-native-get-random-values": "^2.0.0",

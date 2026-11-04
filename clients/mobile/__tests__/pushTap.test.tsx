@@ -14,6 +14,9 @@ import * as Notifications from 'expo-notifications';
 import React from 'react';
 import {AccessibilityInfo, AppState, FlatList} from 'react-native';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -23,7 +26,6 @@ import {
   jumpNoticeSpeech,
 } from '../src/features/conversation/jumpNotice';
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
-import {CHANNEL_LIST_FAILED} from '../src/features/sidebar/rows';
 import {PUSH_ACTION} from '../src/push/contract';
 import {
   NOTIFICATION_TAP_COPY,
@@ -35,9 +37,14 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
+// 목록 자리 상자의 제목이자 알림 탭이 막혔을 때의 낭독 문장(#5285): 손으로 적은 합쇼체 상수 대신 사전의 해요체 문장이다. 상자와 낭독이 **같은 키**를 읽는다.
+const CHANNEL_LIST_FAILED = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(
+  CONNECTION_KEYS.loadChannelListTitle,
+);
+
 // 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
-// 끝난 뒤 2초, #3921)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
-// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 2초를
+// 끝난 뒤 1.5초, #3921·#4949)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
+// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 1.5초를
 // 넘으면 착지가 정상이어도 틴트가 이미 물러나 있다 — 관측이 시한에 기대지 않게 시한만
 // 늘려 둔다. 나머지(결정·손가락)는 진짜 그대로다.
 jest.mock('../src/features/conversation/landedHighlight', () => ({
@@ -503,6 +510,18 @@ const TARGETS = {
     landsOn: REPLY,
     inThread: true,
   },
+  // ADR-0206 증보 1 F7 (#4889): 따라가는 스레드의 새 답글. 봉투의 `thread-id` 가 루트라서
+  // 탭은 그 스레드를 열고 그 답글에 착지한다 — 새 분기 없이 기존 `thread-id !== channel_id` 규칙이다.
+  '스레드 새 답글 알림': {
+    aim: {
+      messageId: REPLY,
+      threadId: ROOT,
+      category: 'momo.message',
+      reason: 'thread_reply',
+    } as Aim,
+    landsOn: REPLY,
+    inThread: true,
+  },
   '승인 카드': {
     aim: {
       messageId: APPROVAL_MSG,
@@ -720,6 +739,24 @@ describe('탭이 가리키는 곳 — 식별자만으로 짓는다 (순수)', ()
       WS,
     );
     expect(arrival?.kind === 'target' && arrival.target.threadRootId).toBe(ROOT);
+  });
+
+  it('thread_reply 알림은 받아들여지고 thread-id 가 스레드 루트다 (ADR-0206 증보 1 F7)', () => {
+    const arrival = tapArrival(
+      tapResponse(apnsPayload(TARGETS['스레드 새 답글 알림'].aim)),
+      WS,
+    );
+    expect(arrival).toEqual({
+      kind: 'target',
+      target: {
+        channelId: GENERAL,
+        messageId: REPLY,
+        threadRootId: ROOT,
+        approvalId: null,
+        category: 'momo.message',
+        reason: 'thread_reply',
+      },
+    });
   });
 
   it('승인 알림은 승인 id 를 들고, 착지는 그 카드 메시지다', () => {
@@ -971,6 +1008,39 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
       ([url]) => String(url).includes('/channels') && !String(url).includes('/messages'),
     );
     expect(channelReads.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('시험 알림은 대화가 없는 알림이라 「없어졌거나 볼 권한이 없다」를 말하지 않는다 (ADR-0206 D15, #4341)', async () => {
+    const fetchMock = installFetch();
+    renderShell();
+    await waitForSidebar();
+    const NIL = '00000000-0000-0000-0000-000000000000';
+    const channelReadsBefore = fetchMock.mock.calls.filter(
+      ([url]) => String(url).includes('/channels') && !String(url).includes('/messages'),
+    ).length;
+
+    // 봉투: 채널·메시지·스레드가 모두 nil 센티널, 이유 test_notification, 분류 momo.system.
+    await tapWhileRunning(
+      apnsPayload({
+        channelId: NIL,
+        messageId: NIL,
+        threadId: NIL,
+        category: 'momo.system',
+        reason: 'test_notification',
+      }),
+    );
+    // 목록에 없는 방의 탭은 서버에 다시 묻고(위 시험) 문장을 낸다. 시험 알림은 그 길을 타지 않는다.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    });
+
+    expect(screen.queryByTestId('notification-tap-notice')).toBeNull();
+    expect(announce).not.toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.channelGone);
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    const channelReadsAfter = fetchMock.mock.calls.filter(
+      ([url]) => String(url).includes('/channels') && !String(url).includes('/messages'),
+    ).length;
+    expect(channelReadsAfter).toBe(channelReadsBefore);
   });
 
   it('캐시에 없던 새 DM 은 다시 물어서 연다', async () => {

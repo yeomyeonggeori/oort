@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
+import { NetworkError } from "../../lib/http";
+import koConnection from "../../i18n/catalogs/ko-KR/connection.json";
 import {
   autoTargetLabel,
   buildInviteMailto,
   buildJoinLink,
   choiceLabel,
   eligibleAutoTargets,
+  ERROR_MESSAGE_EXPIRED,
   ERROR_MESSAGE_FALLBACK,
+  ERROR_MESSAGE_UNREACHABLE,
   errorMessage,
+  serverWireMessage,
   formatDay,
+  GUEST_INVITES_PAUSED_CODE,
   INVITE_ROLES,
   buildRoleLabelsPayload,
   draftFromRoleLabels,
   inviteCardText,
+  inviteRoleName,
   inviteRoles,
   inviteStatus,
   isWorkspaceOperator,
@@ -220,25 +227,37 @@ describe("catalogs match the server enums", () => {
     ]);
   });
 
-  it("offers exactly the three invite roles InviteRoutes allows", () => {
-    expect([...INVITE_ROLES.map((r) => r.id)].sort()).toEqual([
-      "admin",
-      "guest",
-      "member",
-    ]);
+  it("offers exactly the invite roles the server still accepts: guest invites are paused", () => {
+    // ADR-0128 D1 / ADR-0219 GS-0: the server answers a guest invite with a 400, so the
+    // screen does not offer it. Offering a role the server turns away is a form that
+    // cannot save.
+    expect([...INVITE_ROLES.map((r) => r.id)].sort()).toEqual(["admin", "member"]);
     expect(choiceLabel(INVITE_ROLES, "member")).toBe("멤버");
     expect(choiceLabel(INVITE_ROLES, "unknown")).toBe("unknown");
+    expect(GUEST_INVITES_PAUSED_CODE).toBe("guest_invites_paused");
   });
 
   it("overrides invite labels without changing role ids or details", () => {
     const roles = inviteRoles({ admin: "리드", member: "  ", guest: "손님" });
-    expect(roles.map((r) => r.id)).toEqual(["member", "admin", "guest"]);
+    expect(roles.map((r) => r.id)).toEqual(["member", "admin"]);
     expect(choiceLabel(roles, "member")).toBe("멤버");
     expect(choiceLabel(roles, "admin")).toBe("리드");
-    expect(choiceLabel(roles, "guest")).toBe("손님");
     expect(roles.find((r) => r.id === "admin")?.detail).toBe(
       INVITE_ROLES.find((r) => r.id === "admin")?.detail
     );
+  });
+
+  it("names every role in the list, the guest rows made before the pause included", () => {
+    // The list is not the picker: an invite made before the pause is still a guest row.
+    expect(inviteRoleName("guest")).toBe("게스트");
+    expect(inviteRoleName("guest", { guest: "손님" })).toBe("손님");
+    expect(inviteRoleName("guest", { guest: "  " })).toBe("게스트");
+    expect(inviteRoleName("member")).toBe("멤버");
+    expect(inviteRoleName("admin", { admin: "리드" })).toBe("리드");
+    expect(inviteRoleName("owner")).toBe("소유자");
+    expect(inviteRoleName("something-new")).toBe("something-new");
+    // `Object.prototype` names are not roles.
+    expect(inviteRoleName("constructor")).toBe("constructor");
   });
 
   it("leaves INVITE_ROLES unchanged when there are no overrides", () => {
@@ -607,11 +626,36 @@ describe("error mapping", () => {
     expect(isSlugConflict(new ApiError(400, "bad slug"))).toBe(false);
   });
 
-  it("prefers the server message and never invents one", () => {
-    expect(errorMessage(new ApiError(400, "engine must be one of opencode, goose, codex-local"))).toBe(
-      "engine must be one of opencode, goose, codex-local"
-    );
-    expect(errorMessage("string throw")).toContain("다시 시도");
+  // #5221: 서버 원문·오류 객체의 문장은 어떤 경우에도 화면에 나가지 않는다(감사 문서 §3: Buzz는 응답 코드·원문을 붉은 글로 그대로
+  // 냈다). 닫힌 분류로만 말한다. 서버 문장을 일부러 같이 보여 주는 자리는 `serverWireMessage` 를 명시해서 부른다.
+  it("never returns the server's or the error object's own sentence, only a closed classification", () => {
+    const wire = "engine must be one of opencode, goose, codex-local";
+    expect(errorMessage(new ApiError(400, wire))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(403, "forbidden: operator only"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(500, "pq: duplicate key value"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(503, "no archive", "archive_not_configured"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new Error("TypeError: x is undefined"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage("string throw")).toBe(ERROR_MESSAGE_FALLBACK);
+  });
+
+  it("says unreachable for no answer and gateway errors, and expired for a 401", () => {
+    expect(errorMessage(new NetworkError("unreachable", 15_000))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    expect(errorMessage(new NetworkError("timeout", 15_000))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    for (const status of [502, 503, 504]) {
+      expect(errorMessage(new ApiError(status, "gateway"))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    }
+    expect(errorMessage(new ApiError(401, "token expired"))).toBe(ERROR_MESSAGE_EXPIRED);
+  });
+
+  it("keeps the two classified sentences equal to the dictionary's ko sentences (one source of words)", () => {
+    expect(ERROR_MESSAGE_UNREACHABLE).toBe(koConnection["connection.load.reasonServer"]);
+    expect(ERROR_MESSAGE_EXPIRED).toBe(koConnection["connection.session.expired"]);
+  });
+
+  it("serverWireMessage is the explicit opt-in that still returns the server's sentence", () => {
+    expect(serverWireMessage(new ApiError(400, "engine must be one of opencode"))).toBe("engine must be one of opencode");
+    expect(serverWireMessage(new Error("boom"))).toBe("boom");
+    expect(serverWireMessage("string throw")).toBe(ERROR_MESSAGE_FALLBACK);
   });
 
   it("폴백은 해요체다 — 카드의 해요체 앞말 뒤에 붙는다 (#2988)", () => {
@@ -631,6 +675,20 @@ describe("invite list status", () => {
     expect(inviteStatus({ ...base, expiresAtMs: Date.now() - 1000 }).label).toBe(
       "만료됨"
     );
+  });
+
+  it("reads a live guest invite as 멈춤 and every dead state as itself", () => {
+    // Guest invites are paused (ADR-0128 D1 / ADR-0219 GS-0): a live guest code cannot
+    // be spent, so "사용 가능" would be a lie.
+    const guest = { ...base, role: "guest" };
+    expect(inviteStatus(guest)).toEqual({ tone: "muted", label: "멈춤" });
+    // A dead code is over whatever its role: the dead states come first.
+    expect(inviteStatus({ ...guest, revokedAtMs: Date.now() }).label).toBe("해지됨");
+    expect(inviteStatus({ ...guest, usedCount: 1 }).label).toBe("모두 사용됨");
+    expect(inviteStatus({ ...guest, expiresAtMs: Date.now() - 1000 }).label).toBe("만료됨");
+    // The other roles are untouched by the pause.
+    expect(inviteStatus({ ...base, role: "member" }).label).toBe("사용 가능");
+    expect(inviteStatus({ ...base, role: "admin" }).label).toBe("사용 가능");
   });
 
   it("formats an expiry as a local calendar day", () => {

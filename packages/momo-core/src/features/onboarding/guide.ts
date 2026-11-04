@@ -105,6 +105,7 @@ export type OnboardingScreen =
   | "claim" // D1″
   | "workspace-profile" // D2
   | "invite" // D3
+  | "team-ai" // D3′ 팀 AI 키·도우미 이름·역할 (건너뛰기 가능, #4945)
   | "ai-connect" // D4
   | "first-conversation"; // D5
 
@@ -124,7 +125,7 @@ export function onboardingDotScreens(
     case "invite":
       return ["join", "ai-connect"];
     case "claim":
-      return ["claim", "workspace-profile", "invite", "ai-connect"];
+      return ["claim", "workspace-profile", "invite", "team-ai", "ai-connect"];
   }
 }
 

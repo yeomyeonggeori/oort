@@ -122,6 +122,8 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         run_ended: false,
         // ADR-0216 D8 — a host's log line is never sent with a developer token.
         sent_via: None,
+        // ADR-0148 증보 — a host's log line is not a person's reply choosing the main flow.
+        also_in_channel: false,
     }
 }
 

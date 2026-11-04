@@ -11,15 +11,38 @@ import { Tooltip } from "@/design/ui/tooltip";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
-import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
+import {
+  huddleControlShown,
+  huddleNamesTarget,
+  huddleParticipantSummary,
+} from "@momo/core/features/huddles/huddleModel";
 import type { Huddle } from "@momo/core/lib/api";
 import { HuddleMicMenu } from "./HuddleMicMenu";
 import { useHuddle, type HuddleController } from "./useHuddle";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
-function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
-  const names = huddle
-    ? huddle.participants.map((participant) => participant.displayName).join(", ")
-    : undefined;
+/** 참가자 전원의 이름(쉼표로 이은 전문): 칩의 `title`과 이름 글의 `title`이 같은 글을 읽는다. */
+function participantNames(huddle: Huddle): string {
+  return huddle.participants
+    .map((participant) => participant.displayName)
+    .join(", ");
+}
+
+/**
+ * Live 칩: 점 + 낱말 + (폰 폭) 인원수. 컨트롤 묶음 안에서 **고정 폭**이다 — 참가자 이름 글은 칩 밖, 제목 칸의 꼬리
+ * (`HuddleHeaderNames`)로 옮겼다(#5184). 이름 글이 칩 안에 있을 때는 그 글 폭이 컨트롤 묶음의 기본 폭을 부풀려 제목이
+ * 먼저 깎였고(1440에서 313/443px), 좁은 판에서는 컨트롤이 3줄로 접혔다. 이제 이름 글은 폭 0에서 시작해 **제목이 다 선 뒤
+ * 남는 폭**만 받는다. 전문은 칩의 낭독(`sr-only`)과 `title`에 남는다. 참가 중에는 칩 래퍼가 머리가 좁을 때 양보해 `display: none`이
+ * 되므로(그 안의 `sr-only`도 접근성 트리에서 빠진다) 낭독은 칩 밖의 한 곳이 맡고, 칩은 `announce={false}`로 중복 낭독을 끈다.
+ */
+function HuddleLiveChip({
+  huddle,
+  announce = true,
+}: {
+  huddle: Huddle | null;
+  announce?: boolean;
+}) {
+  const names = huddle ? participantNames(huddle) : undefined;
   return (
     <div
       className="flex h-control min-w-0 items-center gap-1 overflow-hidden rounded-sm bg-ok-soft px-2 text-meta"
@@ -32,12 +55,9 @@ function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
       </span>
       {huddle && (
         <>
-          <span
-            className="min-w-0 truncate text-ink-muted wide-only"
-            data-testid="huddle-participants"
-          >
-            {huddleParticipantSummary(huddle)}
-          </span>
+          {announce && (
+            <span className="sr-only">{huddleParticipantSummary(huddle)}</span>
+          )}
           <span
             className="shrink-0 text-ink-muted mobile-only"
             data-numeric
@@ -48,6 +68,34 @@ function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * 참가자 이름 글(「Nadia, 곽성재 외 3명」): 제목 칸 꼬리(`channel-head-tail`)에 서는 장식 글이다. 칩이 같은 전문을 낭독하므로
+ * 여기는 `aria-hidden`이고, 칸이 8rem보다 좁으면 조각이 아니라 통째로 숨는다(tokens.css `channel-head-names`).
+ */
+export function HuddleHeaderNames({
+  huddle,
+  offline,
+}: {
+  huddle: HuddleController;
+  offline: boolean;
+}) {
+  const target = huddleNamesTarget(huddle, offline);
+  if (target === null) return null;
+  return (
+    <span
+      aria-hidden="true"
+      className="channel-head-names text-meta text-ink-muted"
+      // 참가 중에는 칩과 함께 머리가 좁으면 양보한다(tokens.css `channel-head-names`의 `[data-joined]`): 칩 없이 이름만 남지 않게.
+      data-joined={huddle.joined || undefined}
+      data-testid="huddle-participants"
+      // 말줄임된 이름 글 위에서도 전문이 뜬다(예전에는 이름이 칩 안에 있어 칩의 `title`이 떴다).
+      title={participantNames(target)}
+    >
+      {huddleParticipantSummary(target)}
+    </span>
   );
 }
 
@@ -108,6 +156,10 @@ export function HuddleHeaderControl({
 }) {
   const busy = huddle.busy !== null;
 
+  // 「아무것도 그리지 않는다」의 판단은 모델 한 곳이다(`huddleControlShown`): ChatShell이 ⋮를 이 컨트롤과 묶을지 같은 판단으로 정한다.
+  // 오프라인과 허들 없는 서버(unconfigured)는 여기서 걸러진다(아래 가지들은 그 둘을 다시 묻지 않는다).
+  if (!huddleControlShown(huddle, offline)) return null;
+
   // Audio and the REST projection are separate truth planes. Once audio joined,
   // its exit and microphone controls win over every projection state, including
   // a transient 500 or a later 503.
@@ -120,9 +172,15 @@ export function HuddleHeaderControl({
       >
         {/* 390 joined: Live and the picker caret yield so mute/leave stay
             inside the header without covering the member button (#1886 B-1). */}
-        <div className="wide-only min-w-0">
-          <HuddleLiveChip huddle={huddle.active} />
+        <div className="wide-only channel-head-live-joined min-w-0">
+          <HuddleLiveChip huddle={huddle.active} announce={false} />
         </div>
+        {/* 칩이 양보하거나(머리 안쪽 26rem 밑) 폰 폭에서 안 서도 참가자 전문은 낭독에 남는다: 칩 래퍼 밖의 sr-only 한 곳이 읽는다. */}
+        {huddle.active && (
+          <span className="sr-only">
+            {huddleParticipantSummary(huddle.active)}
+          </span>
+        )}
         {/* 마이크 묶음은 `overflow-hidden`이 아니다(#4591): 그 상자는 안의 툴팁을 잘라 버린다. 대신 양 끝 단추가 자기
             바깥 모서리를 둥글게 한다(`rounded-s-sm` · `rounded-e-sm`, 묶음의 `rounded-sm` 테두리와 같은 반경). */}
         <div
@@ -178,8 +236,6 @@ export function HuddleHeaderControl({
     );
   }
 
-  if (offline) return null;
-
   if (huddle.status === "loading") {
     return (
       <p
@@ -193,9 +249,8 @@ export function HuddleHeaderControl({
     );
   }
 
-  // 이 서버에 허들이 없다: 컨트롤도 배너도 없다 (goal B6). 아래 배너 쪽에 같은
-  // 판단의 나머지 절반이 적혀 있다.
-  if (huddle.status === "unconfigured") return null;
+  // 이 서버에 허들이 없다(unconfigured): 컨트롤도 배너도 없다 (goal B6). 위 `huddleControlShown`이 거른다.
+  // 아래 배너 쪽에 같은 판단의 나머지 절반이 적혀 있다.
 
   if (huddle.status === "error") {
     return (
@@ -254,7 +309,7 @@ export function HuddleHeaderBanner({
     return (
       <InlineBanner
         tone="neutral"
-        message="메시지 연결이 끊겼습니다. 오디오는 계속될 수 있으며 허들 나가기는 사용할 수 있습니다."
+        message={<BlockedReason frame="huddleJoined" />}
         testId="huddle-joined-offline"
       />
     );
@@ -263,7 +318,7 @@ export function HuddleHeaderBanner({
     return (
       <InlineBanner
         tone="neutral"
-        message="오프라인에서는 허들을 사용할 수 없습니다."
+        message={<BlockedReason frame="huddleUnavailable" />}
         testId="huddle-offline"
       />
     );

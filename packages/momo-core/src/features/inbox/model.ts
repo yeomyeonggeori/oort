@@ -1,4 +1,10 @@
-import { REQUEST_BUNDLE_FACE, requestBundleState, type RequestBundleStateInput } from "../timeline/requestBundle";
+import {
+  REQUEST_BUNDLE_FACE,
+  requestBundleState,
+  type DecisionMode,
+  type RequestBundleStateInput,
+} from "../timeline/requestBundle";
+import { parseApprovalStatus } from "../timeline/agentCardModel";
 import { REQUEST_WORD } from "../agents/runPhase";
 import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
@@ -216,6 +222,11 @@ export interface FeedItem {
    * 「보이는데 눌리지 않는 라디오」가 생긴다.
    */
   execution?: SpawnExecutionPlan;
+  /**
+   * 서버가 판정한 결정 자리(`inline`/`open`, ADR-0186 v6 R-f). 승인 행에만, **서버가 보냈을 때만** 있다.
+   * 화면은 이 값을 읽기만 하고 다시 계산하지 않는다. 없음은 `inline`이 아니다(옛 서버).
+   */
+  decisionMode?: DecisionMode;
 }
 
 // ---- time --------------------------------------------------------------
@@ -332,6 +343,9 @@ export function approvalItem(
   nowMs: number,
   context: Pick<RequestBundleStateInput, "run" | "result" | "code"> = {}
 ): FeedItem {
+  // 모르는 상태 낱말(서버가 새 상태를 더한 경우)은 닫힌 다섯 중 하나로 우기지 않는다: 결정 컨트롤도
+  // 결과 낱말도 없는 조용한 행이다. `requestBundleState`에 넘기면 「생각 중」으로 읽혀 거짓을 말한다.
+  const known = parseApprovalStatus(approval.status) !== null;
   const state = requestBundleState({
     ...context,
     status: approval.status,
@@ -364,6 +378,9 @@ export function approvalItem(
     ...(pending && approval.execution !== undefined
       ? { execution: approval.execution }
       : {}),
+    ...(approval.decisionMode !== undefined
+      ? { decisionMode: approval.decisionMode }
+      : {}),
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
@@ -373,8 +390,9 @@ export function approvalItem(
       approval.workspaceActionId
     )} 허가를 요청했어요`,
     detail: approval.decisionReason ?? undefined,
-    outcome: state === "approval" ? null : face.word,
-    outcomeTone: state === "approval" || face.tone === "working" ? "muted" : face.tone,
+    outcome: !known || state === "approval" ? null : face.word,
+    outcomeTone:
+      !known || state === "approval" || face.tone === "working" ? "muted" : face.tone,
     note: reversible ? undefined : "되돌릴 수 없음",
     reversible,
     ...(deadlinePassed ? { deadlinePassed: true } : {}),
@@ -532,6 +550,9 @@ const WORKSPACE_ACTION_LABELS: Record<string, string> = {
   "workspace.work_tier.update": "워크스페이스 기본 재개 정책 바꾸기",
   // H7: 계약만 있다. 설치 경로가 생기기 전까지 서버가 카드를 만들지 않는다(#3889).
   "plugin.install": "앱 설치",
+  // ADR-0201 증보 v3 B3-T (#4964): 「파일 역할 꺼 줘」가 되는 카드. 방향(켬/끔)은 인자라서
+  // 인박스 줄은 말하지 않는다 — 서버 레지스트리 title 과 같은 말.
+  "team_ai.roles.set": "도우미 역할 켜고 끄기",
 };
 
 export function workspaceActionLabel(actionId?: string): string {

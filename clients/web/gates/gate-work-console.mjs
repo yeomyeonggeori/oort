@@ -7,12 +7,13 @@
 // selected session survives in `?session=`, and the narrow layout swaps list
 // for the exact existing WorkSessionDetail/ObserverTerminal.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
+import { openWorkConsole } from "./work-openers.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_CONSOLE_GATE_PORT || 5192);
@@ -23,6 +24,31 @@ const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const otherMemberId = "00000000-0000-7000-8000-000000000102";
 const channelId = "00000000-0000-7000-8000-000000000201";
+
+// 사전에서 오는 문장은 한국어로 읽는다(#5304). Playwright 컨텍스트가 언어를 주지 않으면 Chromium 기본(en-US)이라 앱이 사전의
+// 영어 문장을 그린다 — 그래서 이 게이트의 모든 컨텍스트가 `locale: GATE_LOCALE`을 넘긴다.
+const GATE_LOCALE = "ko-KR";
+// 작업 콘솔 오프라인 띠의 두 문장(#5260이 원인별 틀 `blocked.workStateStale.*`·`blocked.workStateNone.*`로 옮겼다)은 한국어 사전
+// (blocked.json)이 정본이다. 손으로 적으면 이 게이트가 화면을 지키는 것이 아니라 문장이 고쳐지는 것을 막는 쪽이 된다
+// (gate-connection·capture-5260과 같은 규칙).
+const KO_BLOCKED = JSON.parse(
+  readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs", GATE_LOCALE, "blocked.json"),
+    "utf8"
+  )
+);
+function koBlockedLine(key) {
+  const text = KO_BLOCKED[key];
+  if (typeof text !== "string" || text === "") {
+    throw new Error(`한국어 사전(blocked.json)에 ${key}가 없다`);
+  }
+  return text;
+}
+// 이 게이트가 거는 것은 브라우저 `offline` 이벤트(기기 오프라인)이고 REST 실패는 주입하지 않는다 — 연결 모델이 기기 오프라인을
+// 서버 못 닿음보다 먼저 고르므로(`model.ts`) 두 장면 모두 `.offline` 쪽 문장이다. 「서버에 닿지 못했어요」 쪽은 이 장면의 원인이 아니다.
+const WORK_STATE_STALE_OFFLINE = koBlockedLine("blocked.workStateStale.offline");
+const WORK_STATE_NONE_OFFLINE = koBlockedLine("blocked.workStateNone.offline");
+
 // The hosts the two observation fixtures "dial". Their sockets are the ones
 // GateWebSocket never opens, which is the only way to hold a surface in 연결 중
 // long enough to leave it by a door the socket does not know about. They are
@@ -539,7 +565,10 @@ async function installRoutes(context, state) {
   });
 }
 
-async function openConsole(context, { displayProducer = false } = {}) {
+async function openConsole(
+  context,
+  { displayProducer = false, expectRoute = true } = {}
+) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   // After the realtime stub, never before: the producer socket subclasses
@@ -551,9 +580,18 @@ async function openConsole(context, { displayProducer = false } = {}) {
   await page.getByTestId("login-email").fill("gate@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-work-console").waitFor();
-  await page.getByTestId("nav-work-console").click();
-  await page.getByTestId("work-console-route").waitFor();
+  // 사이드바 「작업 콘솔」 줄(`nav-work-console`)은 ADR-0202 D6(#3842)이 「작업」 한 줄로 합치며 걷었다. 콘솔은
+  // 주소(`#/work?view=console`)로 열린다 — 입구가 없다는 사실은 workSurfaceEntryPoints 시험이 지킨다(#5048).
+  await page.getByTestId("channel-list").waitFor();
+  if (expectRoute) {
+    await openWorkConsole(page);
+  } else {
+    // 콘솔이 서지 않는 상태(호스트 목록을 처음부터 읽지 못함)를 재는 호출은 주소만 연다. 라우트는 서 있는 것이
+    // 아니라 표면 문이 대신 말한다 — `SurfaceRoute`(#2780).
+    await page.evaluate(() => {
+      window.location.hash = "#/work?view=console";
+    });
+  }
   return page;
 }
 
@@ -568,8 +606,10 @@ async function assertFocus(page, selector) {
 }
 
 async function remountSelectedConsole(page, sessionId, advanceMs) {
-  await page.getByTestId("nav-activity").click();
-  await page.getByTestId("nav-work-console").waitFor();
+  // 콘솔 밖으로 나갔다가 주소로 돌아와야 콘솔 서브트리가 새로 마운트된다. 옛 「활동」 줄은 걷혔으니(#3842) 살아 있는
+  // 사이드바 줄 「인박스」로 나간다(#5048).
+  await page.getByTestId("nav-inbox").click();
+  await page.getByTestId("inbox-route").waitFor();
   await page.evaluate(
     ({ selectedId, byMs }) => {
       window.__workConsoleGateAdvanceTime(byMs);
@@ -613,7 +653,11 @@ async function assertCachedRefetchFailure(page, state, kind) {
 
 async function assertConsole(context, state) {
   const page = await openConsole(context);
-  const skeletons = page.getByTestId("skeleton-row");
+  // 콘솔 안으로 한정한다. 사이드바 채널 섹션의 끝난 스켈레톤(`is-settled`, 숨은 막대)이 DOM 순서에서 앞서므로
+  // 페이지 전체의 `.first()`는 영영 보이지 않을 그 요소를 기다리며 30초를 보낸다(#5048).
+  const skeletons = page
+    .getByTestId("work-console-route")
+    .getByTestId("skeleton-row");
   await skeletons.first().waitFor();
   if ((await page.getByTestId("work-console-count").count()) !== 0) {
     throw new Error("initial loading rendered a settled session count");
@@ -925,7 +969,8 @@ async function assertConsole(context, state) {
   }
 
   await page.setViewportSize({ width: 760, height: 700 });
-  await page.goto(`${origin}/#/work`);
+  // `/work`만으로는 이제 「작업」 탭이 열린다(ADR-0202 U1). 콘솔 목록은 `?view=console` 주소다(#5048).
+  await page.goto(`${origin}/#/work?view=console`);
   await page.getByTestId("work-console-list").waitFor();
   if (!(await page.getByTestId("work-console-list").isVisible())) {
     throw new Error("narrow console did not start on the session list");
@@ -993,12 +1038,11 @@ async function assertConsole(context, state) {
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   const cachedOffline = page.getByTestId("work-console-offline");
   await cachedOffline.waitFor();
-  if (
-    (await cachedOffline.textContent())?.includes(
-      "아래는 마지막으로 확인된 작업 상태입니다."
-    ) !== true
-  ) {
-    throw new Error("cached offline state did not name its last-known projection");
+  const cachedOfflineText = ((await cachedOffline.textContent()) ?? "").trim();
+  if (!cachedOfflineText.includes(WORK_STATE_STALE_OFFLINE)) {
+    throw new Error(
+      `cached offline state did not name its last-known projection: expected "${WORK_STATE_STALE_OFFLINE}" in "${cachedOfflineText}"`
+    );
   }
   await page.waitForFunction(() => {
     const detail = document.querySelector('[data-testid="work-detail"]');
@@ -1007,14 +1051,21 @@ async function assertConsole(context, state) {
   await page.close();
 }
 
-async function assertTerminalState(browser, state, testId, expectedCopy = null) {
+async function assertTerminalState(
+  browser,
+  state,
+  testId,
+  expectedCopy = null,
+  { expectRoute = true } = {}
+) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, state);
-    const page = await openConsole(context);
+    const page = await openConsole(context, { expectRoute });
     const target = page.getByTestId(testId);
     await target.waitFor({ timeout: 10_000 });
     if (
@@ -1037,6 +1088,7 @@ async function assertMetadataFallback(
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, state);
@@ -1077,6 +1129,7 @@ async function assertDisplayConnectCleanup(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal" });
@@ -1153,6 +1206,7 @@ async function assertObserverConnectCleanup(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal" });
@@ -1266,6 +1320,7 @@ async function assertDisplayBusy(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", hangDisplayAttach: true });
@@ -1331,6 +1386,7 @@ async function assertDisplayFailed(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", displayAttachStatus: 409 });
@@ -1379,6 +1435,7 @@ async function assertDisplayWatching(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, { mode: "normal", displayLive: true });
@@ -1496,6 +1553,7 @@ async function assertColdOffline(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: GATE_LOCALE,
   });
   try {
     await installRoutes(context, {
@@ -1507,12 +1565,11 @@ async function assertColdOffline(browser) {
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));
     const banner = page.getByTestId("work-console-offline");
     await banner.waitFor();
-    if (
-      (await banner.textContent())?.includes(
-        "아직 표시할 저장된 작업 상태가 없습니다."
-      ) !== true
-    ) {
-      throw new Error("cold offline state claimed that a cached projection exists");
+    const coldOfflineText = ((await banner.textContent()) ?? "").trim();
+    if (!coldOfflineText.includes(WORK_STATE_NONE_OFFLINE)) {
+      throw new Error(
+        `cold offline state claimed that a cached projection exists: expected "${WORK_STATE_NONE_OFFLINE}" in "${coldOfflineText}"`
+      );
     }
   } finally {
     await context.close();
@@ -1534,6 +1591,7 @@ async function main() {
       const context = await browser.newContext({
         viewport: { width: 1280, height: 800 },
         reducedMotion: "reduce",
+        locale: GATE_LOCALE,
       });
       const state = {
         mode: "normal",
@@ -1560,11 +1618,15 @@ async function main() {
         "work-console-error",
         "작업 세션을 불러오지 못했습니다."
       );
+      // 호스트 목록을 처음부터 읽지 못하면 콘솔은 서지 않는다: 작업 콘솔은 온라인 호스트가 있을 때만 서는 표면이라
+      // (`SurfaceRoute`, #2780) 「없다」가 아니라 「읽지 못했다」를 표면 문이 말하고 다시 시도를 준다. 콘솔 자신의
+      // 「실행 위치를 불러오지 못했습니다」는 이미 서 있던 콘솔이 캐시로 버티는 경로(위 assertCachedRefetchFailure)에 남는다(#5048).
       await assertTerminalState(
         browser,
         { mode: "normal", failHosts: true },
-        "work-console-error",
-        "실행 위치를 불러오지 못했습니다."
+        "surface-route-error-banner",
+        "코드 실행 호스트 목록을 불러오지 못했습니다.",
+        { expectRoute: false }
       );
       await assertMetadataFallback(
         browser,

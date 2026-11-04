@@ -10,8 +10,14 @@ import React from 'react';
 
 import {resolveAppearance} from '../src/design/appearanceState';
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
-import {color, ds2Radius, SAFE_GUTTER} from '../src/design/tokens';
-import {bubbleFor, BUBBLE_MIN_CONTRAST, otherBubbleFill} from '../src/features/conversation/bubble';
+import {FixedScheme} from '../src/design/theme';
+import {color, darkPalette, ds2Radius, lightPalette, SAFE_GUTTER, type Palette} from '../src/design/tokens';
+import {
+  bubbleFor,
+  BUBBLE_MIN_CONTRAST,
+  failedBubbleFor,
+  otherBubbleFill,
+} from '../src/features/conversation/bubble';
 import {CONV} from '../src/features/conversation/convDesign';
 import {LandedTintFade} from '../src/features/conversation/LandedTintFade';
 import {
@@ -22,6 +28,9 @@ import {
 import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {
   blendOver,
+  landedFace,
+  LANDED_TINT_ALPHA,
+  LANDED_TINT_MAX_ALPHA,
   PRESS_FACE_MIN_CONTRAST,
   pressFace,
   ROW_FACE,
@@ -119,13 +128,10 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     // 서 있는 착지 = 그릇의 배경. 그릇이 화면 끝에서 outer 떨어진 둥근 상자다.
     expect(bowl.marginHorizontal).toBe(ROW_FACE.outer);
     expect(bowl.borderRadius).toBe(ROW_FACE.radius);
-    expect(bowl.backgroundColor).toBe(color.warnSurface);
-    // 서 있는 착지의 테두리 — 그릇을 꽉 채우는 절대 배치 + warnBorder 1px + 같은 모서리.
-    const edge = flat(screen.getByTestId('message-row-landed-edge').props.style);
-    expect(edge).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
-    expect(edge.borderRadius).toBe(bowl.borderRadius);
-    expect(edge.borderWidth).toBe(ROW_FACE.edge);
-    expect(edge.borderColor).toBe(color.warnBorder);
+    expect(bowl.backgroundColor).toBe(landedFace(color));
+    // 테두리는 없다(owner 2026-10-31, #4949) — 덧그림 뷰도, 그릇의 테두리도.
+    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
+    expect(bowl.borderWidth).toBeUndefined();
 
     // 눌림 = 그릇 안쪽 Pressable 이 같은 상자를 꽉 채운다(마진 없음 = 그릇과 같은 경계).
     const pressed = pressedStyle();
@@ -140,11 +146,9 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     expect(fade).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
     expect(fade.borderRadius).toBe(bowl.borderRadius);
     expect(fade.backgroundColor).toBe(bowl.backgroundColor);
-    // 덮개도 같은 테두리를 든 채 녹는다 — 테두리만 먼저 사라지거나 늦게 남지 않는다.
-    expect(fade.borderWidth).toBe(edge.borderWidth);
-    expect(fade.borderColor).toBe(edge.borderColor);
-    // 서 있는 착지가 끝나면 테두리 덧그림도 함께 빠진다(덮개가 이어받는다).
-    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
+    // 덮개도 테두리를 들지 않는다 — 서 있던 면과 같은 색·같은 상자로 이어받아 녹는다.
+    expect(fade.borderWidth).toBeUndefined();
+    expect(fade.borderColor).toBeUndefined();
     // 깨뜨리면(각각): 그릇 borderRadius 제거 · rowInner borderRadius 제거 · 덮개 borderRadius 제거
     //                 · 덮개를 다른 값으로 → 해당 줄만 빨개진다.
   });
@@ -224,6 +228,7 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
               surfacePressed: t.derived['surface-pressed'],
               text: t.color.ink,
               bg: t.canvas[1],
+              warn: t.color.warn,
               warnSurface: t.color['warn-soft'],
             },
           ] as const,
@@ -232,26 +237,20 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
     ),
   ];
 
+  /** 서 있는 착지 면이 바닥에서 이만큼은 갈려야 테두리 없이 면만으로 선다(`PRESS_FACE_MIN_CONTRAST` 와 같은 줄). */
   const LANDED_FACE_MIN_CONTRAST = 1.1;
-  /** 면(warnSurface)만으로는 바닥과 안 갈리는 테마 — 내장 3테마 라이트. 테두리가 경계를 세운다. */
-  const FACE_ALONE_WEAK = new Set([
-    'dawnsky/light/default',
-    'graphite/light/default',
-    'noeul/light/default',
-    ...Object.keys(SIGNAL_PRESETS).flatMap(id => [
-      `dawnsky/light/${id}`,
-      `graphite/light/${id}`,
-      `noeul/light/${id}`,
-    ]),
-  ]);
-  /** 테두리(warnBorder 1px)가 바닥에서 이만큼은 갈려야 면이 약한 테마에서도 경계가 선다. */
-  const LANDED_EDGE_MIN_CONTRAST = 1.2;
+  /**
+   * 내 말풍선(accent 채움)이 착지 면 위에서도 갈려야 하는 최소 대비. 이전 면(`warnSurface`)의 최저는 3.05 였다.
+   * 새 면(경고색 ≈9.8%)의 최저는 `noeul/light/default` 의 2.91 — 그 테마는 맨 바닥과도 3.0x 라 면이 깎은 것은
+   * 0.1 안쪽이다. 면을 더 옅게 하면 분리는 늘지만 가시성(1.10)이 깨진다(8% 에서 1.08) — 가시성을 지켰다.
+   */
+  const LANDED_OWN_BUBBLE_MIN_CONTRAST = 2.9;
 
   it('조합 수가 많다 — 내장 3 테마 × 2 모드 × (기본 + 프리셋) + 카탈로그 전체', () => {
     expect(COMBOS.length).toBeGreaterThan(60);
   });
 
-  it('모든 조합에서 눌림 면이 바닥에서 보이고, 내 말풍선 뒤에서도 착지 면이 갈린다', () => {
+  it('모든 조합에서 눌림 면이 바닥에서 보인다', () => {
     const fellBack: string[] = [];
     for (const [name, p] of COMBOS) {
       const face = pressFace(p);
@@ -263,27 +262,32 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
         const seen = blendOver(p.accent, p.bg, 0.1);
         expect(`${name} ${contrast(seen, p.bg) >= PRESS_FACE_MIN_CONTRAST}`).toBe(`${name} true`);
       }
-      // 착지 면: 바닥과 갈리고(경계가 보인다), 내 말풍선(강조색)과도 갈린다.
-      const warn = (p as {warnSurface?: string}).warnSurface;
-      if (warn !== undefined) {
-        // 착지 면은 내 말풍선(강조색)과 갈린다.
-        expect(`${name} ${contrast(p.accent, warn) >= 3}`).toBe(`${name} true`);
-        // 착지 면이 바닥에서 보이는가. 내장 3 테마의 라이트는 `warnSurface` 만으로는 바닥과
-        // 1.02~1.04:1 이라 경계가 안 선다 — planner 결정(2026-10-25): `warnBorder` 1px 헤어라인을
-        // 더한다. 면이 약한 조합의 목록은 고정하고(목록 밖에서 약해지면 빨강), 그 조합마다
-        // 테두리가 바닥에서 갈리는지를 잰다. 약점은 더 이상 「알려진 약점」이 아니다.
-        const weak = contrast(warn, p.bg) < LANDED_FACE_MIN_CONTRAST;
-        expect(`${name} weak=${weak}`).toBe(`${name} weak=${FACE_ALONE_WEAK.has(name)}`);
-        const edge = (p as {warnBorder?: string}).warnBorder;
-        if (weak) {
-          expect(edge).toBeDefined();
-          const c = contrast(edge as string, p.bg);
-          expect(`${name} edge=${c >= LANDED_EDGE_MIN_CONTRAST}`).toBe(`${name} edge=true`);
-        }
-      }
     }
     // 눈으로 볼 수 있게 이름을 남긴다 — 물러난 테마가 늘면 이 목록이 증거다.
     expect(fellBack.length).toBeLessThan(COMBOS.length / 4);
+  });
+
+  it('모든 조합에서 착지 면은 경고색 10% 이하이고, 테두리 없이 면만으로 바닥에서 보이며, 내 말풍선과 갈린다 (#4949)', () => {
+    expect(LANDED_TINT_ALPHA).toBeLessThanOrEqual(LANDED_TINT_MAX_ALPHA);
+    for (const [name, p] of COMBOS) {
+      const warn = (p as {warn?: string}).warn;
+      expect(`${name} warn=${warn !== undefined}`).toBe(`${name} warn=true`);
+      const face = landedFace({warn: warn as string});
+      // 실제로 칠해지는 색의 알파 바이트를 읽는다 — 상수가 아니라 결과를 잰다.
+      expect(face).toMatch(/^#[0-9a-f]{6}[0-9a-f]{2}$/i);
+      const alpha = parseInt(face.slice(7), 16) / 255;
+      expect(`${name} alpha<=${alpha <= LANDED_TINT_MAX_ALPHA}`).toBe(`${name} alpha<=true`);
+      // 알파 면이 바닥 위에 합성된 색.
+      const seen = blendOver(face.slice(0, 7), p.bg, alpha);
+      expect(`${name} visible=${contrast(seen, p.bg) >= LANDED_FACE_MIN_CONTRAST}`).toBe(
+        `${name} visible=true`,
+      );
+      expect(`${name} bubble=${contrast(p.accent, seen) >= LANDED_OWN_BUBBLE_MIN_CONTRAST}`).toBe(
+        `${name} bubble=true`,
+      );
+    }
+    // 깨뜨리면(각각): LANDED_TINT_ALPHA 를 0.2 로 → alpha 줄이 빨강 · 0.03 으로 → visible 줄이 빨강 ·
+    //                 warn 대신 accent 로 칠하면 → bubble 줄이 빨강.
   });
 });
 
@@ -394,7 +398,7 @@ describe('말풍선 — 토큰으로만 그린다', () => {
     expect(style.opacity).toBeUndefined();
   });
 
-  it('실패한 메아리만 흐리다 (실패 줄은 예전 그대로)', () => {
+  it('실패한 메아리만 옅다 — 채움만 옅고 불투명도 막은 없다 (실패 줄은 예전 그대로, #5294)', () => {
     render(
       <PendingRow
         pending={{
@@ -409,8 +413,13 @@ describe('말풍선 — 토큰으로만 그린다', () => {
       />,
     );
     const style = flat(screen.getByTestId('message-bubble').props.style);
-    expect(style.backgroundColor).toBe(color.accent);
-    expect(style.opacity).toBe(0.6);
+    const faded = failedBubbleFor(color, bubbleFor(color).mine);
+    expect(style.backgroundColor).toBe(faded.bg);
+    // 옅다: 정상 전송 메아리의 신호색 채움이 아니다.
+    expect(style.backgroundColor).not.toBe(color.accent);
+    // 옅기는 채움의 몫이다 — 말풍선 전체에 막(opacity)을 걸면 글자가 바탕으로 함께 녹는다(밝음 2.66:1 · 어두움 3.52:1).
+    expect(style.opacity).toBeUndefined();
+    // 깨뜨리면: MessageBody 가 muted 에 `opacity: 0.6` 을 되돌리면 → 마지막 단정이 빨갛다.
   });
 });
 
@@ -469,10 +478,52 @@ describe('말풍선 토큰 — 덮어쓰기와 대비', () => {
       const b = bubbleFor(p as never);
       if (contrast(b.mine.fg, b.mine.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} mine`);
       if (contrast(b.other.fg, b.other.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} other`);
+      // 보내지 못한 내 말풍선(#5294): 옅힌 채움 위에서도 글자 대비가 4.5:1 이상 — 모든 테마·신호색·모드에서.
+      const failed = failedBubbleFor(p as never, b.mine);
+      if (contrast(failed.fg, failed.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} mine-failed`);
     }
     expect(bad).toEqual([]);
     expect(all.length).toBeGreaterThan(60);
     // 깨뜨리면: 내 말풍선 글자를 text 로(onAccent 대신) → 다수 조합이 빨강.
+    // 깨뜨리면: failedBubbleFor 가 글자색을 tone.fg(onAccent) 그대로 두고 채움만 옅히면 → 모든 조합의 mine-failed 가 빨강.
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #5294 (화면 검수 5a M5) — 보내지 못한 내 말풍선의 글자는 두 스킴 모두 본문 AA(4.5:1)를 지킨다.
+//
+// 옛 판은 말풍선 전체에 `opacity: 0.6` 을 걸었다. RN 은 불투명도를 자식(글자)까지 한 장으로 합성하므로 채움과 글자가 함께 바탕(`bg`)으로
+// 녹아 밝음 2.66:1 · 어두움 3.52:1 이었다. 그래서 여기서는 **그려진 트리**의 채움·글자·불투명도를 읽어 바탕 위에 합성한 뒤 잰다.
+// -----------------------------------------------------------------------------
+
+const FAILED_ECHO = {
+  clientMsgId: 'c-1',
+  channelId: 'ch',
+  authorMemberId: SELF,
+  body: '못 보낸 글',
+  status: 'failed',
+} as never;
+
+describe.each([
+  ['light', lightPalette],
+  ['dark', darkPalette],
+] as ReadonlyArray<readonly ['light' | 'dark', Palette]>)('보내지 못한 내 말풍선 글자 대비 — %s (#5294)', (scheme, palette) => {
+  it('그려진 채움 위 글자가 바탕에 합성된 뒤에도 4.5:1 이상이고, 못 보냈다는 것은 채움으로 보인다', () => {
+    render(
+      <FixedScheme scheme={scheme}>
+        <PendingRow pending={FAILED_ECHO} startsGroup directory={DIRECTORY} />
+      </FixedScheme>,
+    );
+    const bubble = flat(screen.getByTestId('message-bubble').props.style);
+    const text = flat(screen.getByText('못 보낸 글').props.style);
+    const alpha = typeof bubble.opacity === 'number' ? bubble.opacity : 1;
+    // 불투명도는 자식까지 한 장으로 합성된다 — 채움도 글자도 같은 알파로 바탕(`bg`) 위에 얹힌다.
+    const fill = blendOver(String(bubble.backgroundColor), palette.bg, alpha);
+    const ink = blendOver(String(text.color), palette.bg, alpha);
+    expect(contrast(ink, fill)).toBeGreaterThanOrEqual(BUBBLE_MIN_CONTRAST);
+    // 옅기는 여전히 보인다 — 채움이 정상 전송의 신호색이 아니다(그냥 막을 걷어 낸 것이 아니다).
+    expect(String(bubble.backgroundColor).toLowerCase()).not.toBe(palette.accent.toLowerCase());
+    // 깨뜨리면: MessageBody 가 muted 에 `opacity: 0.6` 을 되돌리면 → 밝음 2.66 · 어두움 3.52 로 첫 단정이 빨갛다.
   });
 });
 

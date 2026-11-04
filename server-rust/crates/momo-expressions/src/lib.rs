@@ -2,6 +2,7 @@
 pub mod action;
 pub mod assemble;
 pub mod assembly;
+pub mod cutout;
 pub mod intake;
 pub mod media;
 pub mod model;

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "adr": "docs/adr/0218-workspace-expressions.md §10 J4",
+  "rule": "sticker when the large picture moves (frameCount > 1) or its longest edge is over emojiMaxEdge; otherwise emoji",
+  "emojiMaxEdge": 128,
+  "cases": [
+    { "name": "a 1x1 still", "width": 1, "height": 1, "frameCount": 1, "kind": "emoji" },
+    { "name": "an 8x4 still", "width": 8, "height": 4, "frameCount": 1, "kind": "emoji" },
+    { "name": "a square still exactly at the edge", "width": 128, "height": 128, "frameCount": 1, "kind": "emoji" },
+    { "name": "a wide still exactly at the edge", "width": 128, "height": 40, "frameCount": 1, "kind": "emoji" },
+    { "name": "a tall still exactly at the edge", "width": 40, "height": 128, "frameCount": 1, "kind": "emoji" },
+    { "name": "a still one pixel over in width", "width": 129, "height": 64, "frameCount": 1, "kind": "sticker" },
+    { "name": "a still one pixel over in height", "width": 64, "height": 129, "frameCount": 1, "kind": "sticker" },
+    { "name": "a large still", "width": 512, "height": 512, "frameCount": 1, "kind": "sticker" },
+    { "name": "a tiny two-frame animation", "width": 1, "height": 1, "frameCount": 2, "kind": "sticker" },
+    { "name": "a small animation exactly at the edge", "width": 128, "height": 128, "frameCount": 24, "kind": "sticker" },
+    { "name": "a large animation", "width": 360, "height": 360, "frameCount": 16, "kind": "sticker" }
+  ]
+}

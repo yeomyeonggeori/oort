@@ -2,6 +2,7 @@ import {ExpressionProvider} from '../features/expressions/ExpressionProvider';
 import type {Member} from '@momo/core/lib/api';
 import {canCreateChannelNow} from '@momo/core/features/channels/model';
 import {memberFor} from '@momo/core/features/workspace/directory';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import React, {
   useCallback,
   useEffect,
@@ -18,10 +19,13 @@ import {useReduceMotionRef} from '../lib/useReduceMotion';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
+import {ApprovalsLiveSync} from '../features/inbox/ApprovalsLiveSync';
 import {OnlineRollCall} from '../features/presence/OnlineRollCall';
+import {ShellStripAnnouncer} from '../features/connection/ShellStripAnnouncer';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
+import {ShareSheetTouchShield} from '../lib/ShareSheetTouchShield';
 import {
   INITIAL_NAV,
   navReducer,
@@ -46,6 +50,9 @@ import AppsScreen from '../screens/AppsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
+import type {SettingsPageName} from '../features/profile/SettingsPage';
+import {ReleaseNotesLaunchHost} from '../features/releaseNotes/ReleaseNotesSheet';
 import SidebarScreen from '../screens/SidebarScreen';
 import WorkJobsScreen from '../screens/WorkJobsScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
@@ -115,6 +122,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
       <PushProvider>
         <RealtimeProvider>
           <ExpressionProvider><Shell /></ExpressionProvider>
+          {/* iOS 공유 시트가 떠 있는 동안(과 막 걷힌 직후) 뒤 화면으로 새는 터치를 삼킨다 — 시트를 닫는 탭이 시트 뒤의 줄·단추를 누르지 않게(#5207). 평소엔 아무것도 그리지 않는다. */}
+          <ShareSheetTouchShield />
           {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
           <NotificationPrimerGate />
           {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}
@@ -162,10 +171,23 @@ export function Shell({
   const [askMac, setAskMac] = useState(false);
   // 「개인 에이전트」 줄이 고른 하네스. 일반 입구로 열면 없다.
   const [askHarness, setAskHarness] = useState<HarnessKey | undefined>(undefined);
+  // 도우미의 「작업 요청 열기」 카드가 미리 채운 글(#4972). 그 카드로 열 때만 있고, 다른 입구로 열면
+  // 늘 없다 — 지난 카드의 글이 다음 시트에 남지 않는다.
+  const [askPrompt, setAskPrompt] = useState<string | undefined>(undefined);
   // 「AI」 시트(N10 #3598). + 메뉴의 AI 줄이 연다. 줄을 고르면 닫히고 그 줄의 시트·목록이 선다.
   const [ai, setAi] = useState(false);
   const closeAi = useCallback(() => setAi(false), []);
-  const closeAskMac = useCallback(() => setAskMac(false), []);
+  const closeAskMac = useCallback(() => {
+    setAskMac(false);
+    setAskPrompt(undefined);
+  }, []);
+  // 대화 안의 도우미 카드가 「작업 요청」 시트를 미리 채워 연다(#4972). 하네스가 정해지지 않았거나 이
+  // 맥이 못 고르는 도구면 시트의 평소 기본값이 이긴다.
+  const onAskMacFromConversation = useCallback((prefill: WorkRequestOpen) => {
+    setAskHarness(prefill.harness ?? undefined);
+    setAskPrompt(prefill.prompt);
+    setAskMac(true);
+  }, []);
   const onDelegateWork = useCallback(
     (prefill: DelegatePrefill) => setDelegate(prefill),
     [],
@@ -216,16 +238,26 @@ export function Shell({
     () => dispatch({type: 'openAgentList'}),
     [],
   );
+  // 설정을 처음 어느 장으로 여는가(#4937). 보통은 첫 장이고, 「업데이트 소식」 시트의 「자세히 보기」만 소식 장으로 연다.
+  // 설정은 닫히면 언마운트되고 `initialPage` 는 마운트 때 한 번만 읽히므로, 다른 입구는 열기 전에 첫 장으로 되돌린다.
+  // `undefined` 가 첫 장이다(`SettingsPage` 의 기본값): 직접 문구 장부가 낱말 하나짜리 문자열을 문구로 세므로 이름을 다시 적지 않는다.
+  const [settingsEntry, setSettingsEntry] = useState<SettingsPageName | undefined>(undefined);
   // 홈 머리의 내 얼굴 → 「설정」 페이지(층, #4457).
-  const onOpenSettings = useCallback(
-    () => dispatch({type: 'openSettings'}),
-    [],
-  );
+  const onOpenSettings = useCallback(() => {
+    setSettingsEntry(undefined);
+    dispatch({type: 'openSettings'});
+  }, []);
   // 대화 안의 내 프로필 시트의 「설정 열기」(#4319). 설정 층은 대화 층 **밑**에 그려지므로 대화와 그 밑의 층을 걷고 연다(`navReducer`).
-  const onOpenSettingsFromConversation = useCallback(
-    () => dispatch({type: 'openSettingsFromConversation'}),
-    [],
-  );
+  const onOpenSettingsFromConversation = useCallback(() => {
+    setSettingsEntry(undefined);
+    dispatch({type: 'openSettingsFromConversation'});
+  }, []);
+  // 「업데이트 소식」 시트의 「자세히 보기」(#4937): 소식 장으로 연다. 시트가 뜬 뒤 알림 탭으로 층이 생겼어도 설정이 그 밑에
+  // 가려지지 않게 층을 모두 걷는 쪽의 동작(위)을 쓰고, 그 직후 처음 열 장만 소식 장으로 바꾼다(같은 렌더에 묶여 뒤의 값이 이긴다).
+  const onOpenReleaseNotes = useCallback(() => {
+    onOpenSettingsFromConversation();
+    setSettingsEntry(RELEASE_NOTES_SETTINGS_PAGE);
+  }, [onOpenSettingsFromConversation]);
   const onOpenAgent = useCallback(
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
@@ -350,9 +382,15 @@ export function Shell({
           you had not already opened. It detaches itself when the background
           policy parks the socket; see the file's own note on why. */}
       <AgentWorkingRail />
+      {/* Renders nothing. 승인 카드가 올라오면 승인 원장을 바로 다시 읽는다(#5125): 홈 「작업 중」 카드·에이전트 탭이
+          원장을 따라 제때 바뀐다. 구독은 위 레일이 이미 가진 채널 구독을 나눠 쓴다. */}
+      <ApprovalsLiveSync />
       {/* Renders nothing and receives nothing. 이 폰이 작업공간 출석부에 세어져서 동료의 점에 「온라인」으로
           보이게 한다(ADR-0160 ②, #4692). 구독 하나이고 소켓을 따라 오르내린다. */}
       <OnlineRollCall />
+      {/* Renders nothing. 셸 띠(홈·받은함·에이전트)가 서는 순간 VoiceOver 가 한 번 읽는다(#5262). 띠는 화면마다 서고 숨은 탭도 마운트돼 있어서
+          낭독은 띠 안이 아니라 셸에 하나만 둔다 - 띠마다 달면 한 번 끊김이 두세 번 들린다. */}
+      <ShellStripAnnouncer />
       {/* 탭 화면은 바닥 위에 투명하게 선다. 목록 끝은 탭바 밑에 숨지 않도록 시안의
           140 만큼 비운다(`useTabBarClearance`). */}
       <TabBarClearanceProvider>
@@ -425,7 +463,7 @@ export function Shell({
           onBack={onBack}
           enter="rise"
           testID="settings-pane">
-          <SettingsScreen onBack={onBack} />
+          <SettingsScreen onBack={onBack} initialPage={settingsEntry} />
         </EdgeSwipeBack>
       ) : null}
 
@@ -584,6 +622,7 @@ export function Shell({
             onOpenConversation={onOpenConversation}
             onOpenAgent={onOpenAgent}
             onDelegateWork={onDelegateWork}
+            onAskMac={onAskMacFromConversation}
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
             onOpenSettings={onOpenSettingsFromConversation}
@@ -621,6 +660,7 @@ export function Shell({
           onAskMac={harness => {
             setAi(false);
             setAskHarness(harness);
+            setAskPrompt(undefined);
             setAskMac(true);
           }}
         />
@@ -628,9 +668,10 @@ export function Shell({
       {askMac ? (
         <AskMacSheet
           initialHarness={askHarness}
+          initialPrompt={askPrompt}
           onClose={closeAskMac}
           onUseAgent={() => {
-            setAskMac(false);
+            closeAskMac();
             setDelegate({});
           }}
           onOpenSession={sessionId => {
@@ -649,6 +690,11 @@ export function Shell({
           onSubmitted={() => dispatch({type: 'openWorkList'})}
         />
       ) : null}
+      {/* 업데이트 뒤 처음 열 때 「업데이트 소식」을 한 번 올린다(#4937). 셸이 한가할 때만(층·다른 시트가 없을 때) 선다. */}
+      <ReleaseNotesLaunchHost
+        idle={!covered && create === null && !ai && !askMac && delegate === null}
+        onOpenDetails={onOpenReleaseNotes}
+      />
     </Canvas>
   );
 }

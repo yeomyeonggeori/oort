@@ -14,6 +14,7 @@ import {
 } from '@momo/core/features/attachments/model';
 import {ApiError} from '@momo/core/lib/api';
 import * as api from '@momo/core/lib/api';
+import {NetworkError} from '@momo/core/lib/http';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -49,6 +50,7 @@ import {
 import {putAttachmentBytes} from '../src/features/attachments/uploadTransport';
 import * as uploadTransport from '../src/features/attachments/uploadTransport';
 import {SessionProvider, useSession} from '../src/session/useSession';
+import {recordDeviceOnline} from '../src/features/connection/deviceOnline';
 import {installAppClock} from './fixtures/fakeClock';
 
 const EMPTY = makeDirectory([]);
@@ -811,8 +813,9 @@ describe('Composer 첨부 렌더·발송', () => {
     ]);
   });
 
-  it('보관소 미연결을 토스트 없이 트레이 안 코어 문장으로 남긴다', async () => {
-    createUpload.mockRejectedValue(new ApiError(503, 'archive unavailable'));
+  it('보관소 미연결을 토스트 없이 트레이 안 코어 문장으로 남긴다 - 서버가 이름(error.code)을 붙여 거절한 503만이다', async () => {
+    // #5222: 코드 없는 503 은 길 위의 장비가 낸 것일 수 있다(아래 장면). 우리 서버가 코드를 붙여 직접 낸 503 만 보관소 미연결이다.
+    createUpload.mockRejectedValue(new ApiError(503, 'archive unavailable', 'drive_error'));
     documentPicker.__state.result = {
       canceled: false,
       assets: [
@@ -836,6 +839,75 @@ describe('Composer 첨부 렌더·발송', () => {
     expect(
       screen.getByTestId('composer-send').props.accessibilityState,
     ).toEqual({disabled: true});
+  });
+
+  // ---- 올리기 실패는 상태 코드가 아니라 분류로 말한다 (#5222, #5201 S-D) -----------------------------------------------------
+  describe('올리기 실패의 분류', () => {
+    const pickBrief = () => {
+      documentPicker.__state.result = {
+        canceled: false,
+        assets: [
+          {uri: 'file:///docs/brief.pdf', name: 'brief.pdf', size: 8, mimeType: 'application/pdf'},
+        ],
+      };
+    };
+    const statusLine = () => screen.getByTestId('attachment-draft-status');
+    const retryButton = () => screen.queryByTestId('attachment-draft-retry');
+    afterEach(() => recordDeviceOnline(null));
+
+    it.each([
+      ['코드 없는 503', new ApiError(503, 'unavailable')],
+      ['502', new ApiError(502, 'bad gateway')],
+      ['504', new ApiError(504, 'gateway timeout')],
+    ])('%s 은 보관소 이야기가 아니라 「서버가 응답하지 않아」다 - 관리자를 부르지 않고 다시 올리기가 선다', async (_name, failure) => {
+      createUpload.mockRejectedValue(failure);
+      pickBrief();
+      renderComposer();
+      await openPicker('file');
+      await waitFor(() => expect(statusLine()).toHaveTextContent('서버가 응답하지 않아 올리지 못했어요', {exact: false}));
+      expect(statusLine()).not.toHaveTextContent('보관소', {exact: false});
+      expect(statusLine()).not.toHaveTextContent('관리자', {exact: false});
+      expect(statusLine()).not.toHaveTextContent('503', {exact: false});
+      expect(retryButton()).toBeTruthy();
+    });
+
+    it('응답이 없는 실패는 기기가 꺼져 있을 때 「오프라인이라」, 아니면 「서버가 응답하지 않아」다', async () => {
+      recordDeviceOnline(false);
+      createUpload.mockRejectedValue(new NetworkError('unreachable', 15_000));
+      pickBrief();
+      renderComposer();
+      await openPicker('file');
+      await waitFor(() => expect(statusLine()).toHaveTextContent('오프라인이라 올리지 못했어요', {exact: false}));
+      expect(retryButton()).toBeTruthy();
+    });
+
+    it('기기 온라인을 모르면(null) 오프라인이라 말하지 않는다', async () => {
+      recordDeviceOnline(null);
+      createUpload.mockRejectedValue(new NetworkError('timeout', 15_000));
+      pickBrief();
+      renderComposer();
+      await openPicker('file');
+      await waitFor(() => expect(statusLine()).toHaveTextContent('서버가 응답하지 않아 올리지 못했어요', {exact: false}));
+    });
+
+    it('바이트를 올리는 쪽(capability 주소)의 503도 같은 분류다 - 칩에 상태 코드가 없다', async () => {
+      successfulUploads('byte-503');
+      fileSystem.__state.uploadStatus = 503;
+      pickBrief();
+      renderComposer();
+      await openPicker('file');
+      await waitFor(() => expect(statusLine()).toHaveTextContent('서버가 응답하지 않아 올리지 못했어요', {exact: false}));
+      expect(statusLine()).not.toHaveTextContent('503', {exact: false});
+    });
+
+    it('서버가 직접 거절한 상태(413 너무 큼)는 분류로 접지 않고 기존 문장이다', async () => {
+      createUpload.mockRejectedValue(new ApiError(413, 'too large'));
+      pickBrief();
+      renderComposer();
+      await openPicker('file');
+      await waitFor(() => expect(statusLine()).toHaveTextContent(uploadIssueCopy('too-large'), {exact: false}));
+      expect(statusLine()).not.toHaveTextContent('응답하지 않아', {exact: false});
+    });
   });
 });
 

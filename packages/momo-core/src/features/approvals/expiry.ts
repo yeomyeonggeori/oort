@@ -1,4 +1,7 @@
+import type { RosterMember } from "../../lib/api";
 import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
+import { approvalCardNote } from "../timeline/approvalNote";
+import { memberFor, type Directory } from "../workspace/directory";
 
 // =============================================================================
 // 승인의 기한 — 「곧 만료」와 「이미 만료」를 클라이언트가 어떻게 아는가 (#3738)
@@ -42,15 +45,13 @@ export function expiryPhase(
   return remaining <= EXPIRY_WARN_MS ? "soon" : "none";
 }
 
-/** 올림한 남은 분. 59초 남았으면 「1분」이다 — 0분이라고 말하지 않는다. */
-export function minutesLeft(expiresAtMs: number, nowMs: number): number {
-  return Math.max(1, Math.ceil((expiresAtMs - nowMs) / 60_000));
-}
-
-/** 경고 줄. 숫자 하나만 움직이고 문장은 그대로다. */
-export function expirySoonCopy(expiresAtMs: number, nowMs: number): string {
-  return `${minutesLeft(expiresAtMs, nowMs)}분 안에 만료돼요. 결정하지 않으면 에이전트가 다시 제안해야 해요.`;
-}
+// ## 경고 줄은 시간을 말하지 않는다 (#5174 화면 검수 3회차 L7)
+//
+// 승인 카드가 남은 시간을 말하는 자리는 **조용한 줄 하나**다(`remainingTime`, 한 시간 안이면 분 단위, 10분 안이면
+// 「10분 안에 만료돼요」: 푸시·폰·결정 무대가 같은 문장을 쓴다). 이 파일이 경고 줄에 「N분 안에 만료돼요」를 따로
+// 짓던 때는 한 카드가 두 줄에서 다른 시간을 말했다(「1분 안에」 · 「10분 안에」). 경고 줄은 놓쳤을 때의 결과만
+// 말한다: 문장은 사전 `timeline.approvalExpiry.soon` 한 곳에 있고, 시간 말이 거기 다시 들어가면 카드 렌더 시험
+// (`approvalExpiry.test.tsx`)이 시간 말의 개수가 둘이 되어 붉어진다.
 
 /** 만료 뒤 카드가 컨트롤 대신 말하는 줄. */
 export const EXPIRED_CARD_COPY =
@@ -60,13 +61,94 @@ export const EXPIRED_CARD_COPY =
 export const REPROPOSE_LABEL = "다시 요청";
 
 /**
+ * 닫힌 카드가 「다시 요청」을 건네는 이유 (#4986). 요청 고리 상태표(agent-request-loop §2.2)에서
+ * 다음 행동이 「다시 요청」인 상태는 만료·거부·실패 셋이다. 초안 문장이 이유마다 다르다.
+ */
+export type ReproposeReason = "expired" | "declined" | "failed";
+
+/**
+ * 거부·실패로 닫힌 묶음 카드가 건네는 「다시 요청」의 이유. 그 밖의 상태는 null이다(만료는 제 푸터가 따로
+ * 맡고, 끝·취소·진행 중에는 다음 행동이 없다). 거부는 거부한 본인에게는 건네지 않는다: 다음 행동은 요청한
+ * 쪽의 몫이고, 방금 스스로 닫은 사람에게는 되돌릴 것이 없다. `state` 는 `RequestBundleState` 다.
+ */
+export function closedCardReproposeReason(
+  state: string,
+  viewerDecided: boolean
+): Exclude<ReproposeReason, "expired"> | null {
+  if (state === "failed") return "failed";
+  return state === "declined" && !viewerDecided ? "declined" : null;
+}
+
+/**
+ * 닫힌 묶음 카드가 「다시 요청」을 건네는 이유의 **한 표** (#5171) — 웹과 폰이 같은 함수를 읽는다.
+ *
+ * - **만료**: 보는 사람과 상관없이. 다만 카드가 이미 **영수증 줄**을 말하고 있으면(이 사람이 결정을 보냈다가 「이미 만료」로
+ *   따라잡은 카드 등) 서지 않는다: 그 카드의 푸터는 영수증 줄이 차지하고 만료 푸터(이유 문장 + 단추)는 그때 서지 않는다. 영수증 줄이
+ *   있는지는 카드가 컨트롤 대신 말할 줄을 정하는 그 함수(`approvalCardNote`)에게 묻는다 — 닫힌 카드에서 그 줄은 영수증뿐이고, 공백뿐인
+ *   줄은 줄이 아니다.
+ * - **실패**: 늘. 영수증 줄과 함께 서기도 한다(방금 내가 승인했다가 실패로 닫힌 카드, #4986).
+ * - **거부**: 거부한 본인을 빼고. 영수증 줄과 함께 서기도 한다.
+ * - 그 밖의 상태(끝·취소·실행 중·생각 중·결정 대기)에는 없다.
+ *
+ * `state` 는 `RequestBundleState`, `receiptNote` 는 이 기기·세션이 낸 결정 영수증의 문장이다(없으면 비워 둔다).
+ */
+export function cardReproposeReason(
+  state: string,
+  viewerDecided: boolean,
+  receiptNote?: string | null
+): ReproposeReason | null {
+  if (state === "expired") {
+    const spoken =
+      approvalCardNote({
+        receiptNote,
+        settled: true,
+        hasTarget: true,
+        pendingHere: false,
+        offline: false,
+      }) !== null;
+    return spoken ? null : "expired";
+  }
+  return closedCardReproposeReason(state, viewerDecided);
+}
+
+/**
+ * 「다시 요청」이 서는 곳 (#3738, #5171): 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가 에이전트로
+ * 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난 버튼으로 읽힌다. 웹과 폰이 같은 함수를
+ * 읽는다(원래 웹 `AgentCard` 안에 있던 판정을 옮겼다).
+ */
+export function reproposeTarget(
+  card: { requestedByMemberId?: string; channelId?: string },
+  directory: Directory
+): { agent: RosterMember; channelId: string } | null {
+  const requester =
+    card.requestedByMemberId !== undefined
+      ? memberFor(directory, card.requestedByMemberId)
+      : null;
+  const channelId = card.channelId;
+  return requester?.kind === "agent" && channelId !== undefined
+    ? { agent: requester, channelId }
+    : null;
+}
+
+/**
  * 「다시 제안해 달라고 하기」가 입력창에 넣는 초안.
  *
  * 멘션은 `@handle` 한 토큰이다(서버가 멘션을 판정한다 — 클라이언트는 본문에서
  * 이름을 해석하지 않는다). 뒤에 공백을 둬서 사람이 이어 쓸 수 있게 한다.
+ * 이유를 생략하면 만료다(이 함수의 처음 쓰임).
  */
-export function reproposeDraft(handle: string): string {
-  return `@${handle} 아까 올린 승인 요청이 만료됐어요. 다시 제안해 주세요. `;
+export function reproposeDraft(
+  handle: string,
+  reason: ReproposeReason = "expired"
+): string {
+  switch (reason) {
+    case "declined":
+      return `@${handle} 아까 올린 요청이 거부됐어요. 내용을 바꿔서 다시 제안해 주세요. `;
+    case "failed":
+      return `@${handle} 아까 요청한 일을 끝내지 못했어요. 다시 해 주세요. `;
+    default:
+      return `@${handle} 아까 올린 승인 요청이 만료됐어요. 다시 제안해 주세요. `;
+  }
 }
 
 /**

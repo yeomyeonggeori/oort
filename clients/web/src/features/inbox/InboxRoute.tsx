@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -10,6 +10,10 @@ import {
   Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { reminderIsOverdue } from "@momo/core/features/reminders/model";
@@ -20,7 +24,8 @@ import { isDesktop } from "@/lib/tauri";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { decisionNote, type DecisionNote } from "./approvalsPanel";
+import { decisionNote, receiptSaidInPane, settledStatusLine, type DecisionNote } from "./approvalsPanel";
+import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import {
   filterMailbox,
   mailboxCounts,
@@ -42,6 +47,7 @@ import {
   webMailboxPanelId,
   webMailboxTabId,
 } from "./mailboxTab";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 (#3663). 메일함·알림함처럼 **나와 관련된 것의 목록**과 오른쪽의 **맥락 패널**.
@@ -147,6 +153,7 @@ export function InboxRoute() {
   const mailbox = useMailbox(
     rawFilter === "reminders" ? "reminders" : parseMailboxFilter(rawFilter)
   );
+  const formatMessage = useFormatMessage();
   const isServer = mailbox.source === "server";
   const tabs = useMemo(
     () => mailboxTabs(tasksProvided, isServer),
@@ -183,14 +190,38 @@ export function InboxRoute() {
         : (mailbox.entries.find((entry) => entry.key === selected.key) ?? null),
     [mailbox.entries, selected]
   );
-  const active: MailboxEntry | null = live ?? selected;
+
+  // **승인은 예외다** (#5116). 승인 원장이 답했는데 고른 승인이 목록에 없으면 그 승인은 더 이상 결정을
+  // 기다리지 않는다: 이 클라이언트가 방금 결정했든, 다른 기기에서 결정됐든(원장은 카드의 `message.edited`
+  // 신호로 바로 다시 읽힌다, `ApprovalsLiveSync`) 같다. 스냅샷은 읽은 멘션 같은 줄을 손 밑에서 치우지
+  // 않으려는 장치이지 결정이 끝난 승인을 선택된 채 붙들어 두는 장치가 아니다 — 되돌릴 수 없는 액션이라
+  // 낡은 컨트롤이 남는 값이 다르다. 이 렌더부터 패널과 줄이 없고, 아래 효과가 선택을 놓고 초점을 잇는다.
+  const approvalGone =
+    selected !== null &&
+    selected.task !== undefined &&
+    live === null &&
+    mailbox.ledgerAnswered;
+  const active: MailboxEntry | null = approvalGone ? null : (live ?? selected);
+
+  // 결정 영수증이 눈에 보이는 자리는 하나다(#5174 L5). 상세 패널이 같은 승인의 같은 문장을 컨트롤 자리에서 이미 말하는
+  // 동안 배너 노드는 눈에서만 물러나고(낭독은 이 노드가 한 번 맡는다), 패널이 닫히면 같은 노드가 눈에 보이게 올라온다.
+  const paneApprovalId = active?.task?.approvalId;
+  const paneReceipt = useSettledApproval(paneApprovalId);
+  const bannerYields = receiptSaidInPane(note, {
+    approvalId: paneApprovalId,
+    line: paneReceipt === null ? null : settledStatusLine(paneReceipt.status),
+  });
 
   const counts = useMemo(() => mailboxCounts(mailbox.entries), [mailbox.entries]);
 
   const shown = useMemo(() => {
     if (filter === "reminders") return [];
     const filtered = filterMailbox(mailbox.entries, filter);
-    if (selected === null || filtered.some((e) => e.key === selected.key)) {
+    if (
+      selected === null ||
+      approvalGone ||
+      filtered.some((e) => e.key === selected.key)
+    ) {
       return filtered;
     }
     // 고른 줄이 필터 밖으로 빠졌다(읽음으로 바뀐 줄이 「안 읽음」에서 빠지는 식).
@@ -202,11 +233,44 @@ export function InboxRoute() {
           ? 1
           : b.atMs - a.atMs
     );
-  }, [mailbox.entries, filter, selected, active]);
+  }, [mailbox.entries, filter, selected, active, approvalGone]);
 
   useEffect(() => {
     setNote(null);
   }, [filter]);
+
+  // 원장이 뺀 승인의 자리를 이웃 줄로 잇는다(#5116). 디자인 시스템의 「행이 사라질 때 초점은 다음 행으로,
+  // 다음이 없으면 앞 행으로, 행이 하나도 없으면 목록으로」 규칙을 따른다. **줄을 대신 고르지는 않는다**:
+  // 초점은 줄에 앉을 뿐 선택이 아니다(Enter·클릭이 선택이다, `MailboxList`). 다음 줄을 자동으로 열면
+  // 안 읽은 줄이 읽음이 되고(열어서 읽는 것이 읽음이다), 되돌릴 수 없는 결정 컨트롤이 방금 누른 자리에
+  // 그대로 선다 — 누른 손이 다음 승인을 결정하게 된다.
+  const listPaneRef = useRef<HTMLDivElement | null>(null);
+  // 마지막으로 그린 목록의 줄 순서: 사라진 줄이 어디에 있었는지는 사라진 뒤에는 알 수 없다.
+  const shownKeys = useRef<string[]>([]);
+  useEffect(() => {
+    if (!approvalGone) shownKeys.current = shown.map((entry) => entry.key);
+  });
+  useEffect(() => {
+    if (!approvalGone || selected === null) return;
+    const before = shownKeys.current;
+    const at = before.indexOf(selected.key);
+    const remaining = new Set(shown.map((entry) => entry.key));
+    const neighbor = [
+      ...before.slice(at + 1),
+      ...before.slice(0, Math.max(at, 0)).reverse(),
+    ].find((key) => remaining.has(key));
+    setSelected(null);
+    // 초점이 패널·줄과 함께 사라졌을 때만 옮긴다. 사용자가 이미 다른 곳(사이드바, 다른 줄)에 있으면 뺏지 않는다.
+    const focused = document.activeElement;
+    if (focused !== null && focused !== document.body && document.body.contains(focused)) {
+      return;
+    }
+    const pane = listPaneRef.current;
+    const row = Array.from(
+      pane?.querySelectorAll<HTMLElement>("[data-mailbox-row]") ?? []
+    ).find((element) => element.getAttribute("data-entry-key") === neighbor);
+    (row ?? pane)?.focus();
+  }, [approvalGone, selected, shown]);
 
   const select = useCallback(
     (entry: MailboxEntry) => {
@@ -247,8 +311,8 @@ export function InboxRoute() {
   );
 
   const onDecided = useCallback(
-    (outcome: DecisionOutcome) => {
-      setNote(decisionNote(outcome));
+    (outcome: DecisionOutcome, approvalId: string) => {
+      setNote({ ...decisionNote(outcome), approvalId });
       invalidateApprovals();
     },
     [invalidateApprovals]
@@ -296,10 +360,13 @@ export function InboxRoute() {
   const showDetail = active !== null && filter !== "reminders";
   const listHidden = isMobile && showDetail;
 
+  // 로딩과 오류는 **이 탭에 보일 줄**이 없을 때만 말한다. 전체 항목 수(`entries`)로 가르면 투영에 줄이
+  // 있는 순간 「처리할 일」 탭이 원장의 실패·로딩을 가리고 「지금 처리할 일이 없어요」라고 말한다 —
+  // 그 탭의 내용은 승인 원장 하나다(#5092).
   const state =
-    mailbox.isLoading && mailbox.entries.length === 0
+    mailbox.isLoading && shown.length === 0
       ? "loading"
-      : mailbox.error && mailbox.entries.length === 0
+      : mailbox.error && shown.length === 0
         ? "error"
         : shown.length === 0
           ? "empty"
@@ -351,13 +418,21 @@ export function InboxRoute() {
       {isDesktop() ? <LocalPaneInbox /> : null}
 
       {note && (
-        <InlineBanner
-          tone={note.tone === "error" ? "error" : "neutral"}
-          message={note.text}
-          actionLabel="닫기"
-          onAction={() => setNote(null)}
-          testId="inbox-decision-note"
-        />
+        // 같은 노드가 두 모습을 가진다: 패널이 같은 문장을 말하는 동안은 `sr-only`(낭독만, 닫기 단추 없음: 보이지 않는
+        // 단추에 초점이 앉지 않게), 패널이 닫히면 눈에 보이는 배너. 노드를 갈아 끼우면 낭독이 두 번 된다.
+        // 클래스는 정적 문자열이고 모습은 `data-said-in-pane`이 고른다(직접 문구 장부가 JSX 식 안의 문자열을 세므로).
+        <div
+          className="data-said-in-pane:sr-only"
+          data-said-in-pane={bannerYields ? "" : undefined}
+        >
+          <InlineBanner
+            tone={note.tone === "error" ? "error" : "neutral"}
+            message={note.text}
+            actionLabel="닫기"
+            onAction={bannerYields ? undefined : () => setNote(null)}
+            testId="inbox-decision-note"
+          />
+        </div>
       )}
 
       {readError && (
@@ -374,12 +449,13 @@ export function InboxRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태예요.`
-              : "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+            <BlockedListLine
+              relativeTime={
+                (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
+                  ? relativeLabel(filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs, Date.now())
+                  : null
+              }
+            />
           }
           testId="inbox-offline"
         />
@@ -398,21 +474,23 @@ export function InboxRoute() {
         <div className="flex min-h-0 flex-1">
           {!listHidden && (
             <div
+              ref={listPaneRef}
+              tabIndex={-1}
               role="tabpanel"
               id={webMailboxPanelId(filter)}
               aria-labelledby={webMailboxTabId(filter)}
               data-testid="inbox-list-pane"
               className={
                 isMobile
-                  ? "min-h-0 flex-1 overflow-y-auto"
-                  : "min-h-0 w-[22rem] shrink-0 overflow-y-auto border-r border-line"
+                  ? "min-h-0 flex-1 overflow-y-auto focus-visible:focus-ring"
+                  : "min-h-0 w-[22rem] shrink-0 overflow-y-auto border-r border-line focus-visible:focus-ring"
               }
             >
               {state === "error" ? (
-                <InlineBanner
-                  message="인박스를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={mailbox.refetch}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadInboxTitle}
+                  cause={loadCauseOf(mailbox.failure)}
+                  onRetry={mailbox.refetch}
                   testId="inbox-error"
                 />
               ) : filter === "task" && mailbox.tasksAbsent ? (
@@ -462,7 +540,11 @@ export function InboxRoute() {
                               role="status"
                               data-testid="inbox-more-error"
                             >
-                              다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요.
+                              {loadFailureSentence(
+                                formatMessage,
+                                CONNECTION_KEYS.loadInboxMoreTitle,
+                                loadCauseOf(mailbox.failure)
+                              )}
                             </p>
                           )}
                         </div>
@@ -499,11 +581,14 @@ export function InboxRoute() {
         </div>
       )}
 
-      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다. */}
+      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다.
+          이 줄은 칼럼 전체 폭이라 눌림은 채움만 한다: `press`(0.98배)는 넓은 면을 줄여 가장자리가 흔들린다. `press-instant-fill`이
+          `:active`에 크기 없이 `--surface-pressed`를 칠한다(#5094, #5048 D7, 넓은 줄 규칙). 쉬는 면이 이미 `--surface-hover`라
+          호버(`--surface-pressed`)와 눌림이 같은 채움을 쓴다 — 손가락(호버 없음)에서는 쉼 → 눌림이 눈에 보인다. */}
       <Link
         to="/activity"
         data-testid="inbox-activity-link"
-        className="press mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+        className="press-instant-fill mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
       >
         <span>에이전트가 한 일 전체는 활동에서 봐요</span>
         <span className="flex items-center gap-1 text-ink">

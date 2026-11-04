@@ -218,6 +218,7 @@ export function InlineBanner({
   actionLabel,
   onAction,
   actionBusy = false,
+  actionClassName,
   separator = true,
   heading = false,
   className,
@@ -254,6 +255,13 @@ export function InlineBanner({
    * that shape for the consent dialog's confirm).
    */
   actionBusy?: boolean;
+  /**
+   * 액션 알약이 **서는 바탕**이 정하는 자(#5306). 기본 알약은 보조 채움(`--surface-muted`)이라 본문 판(`--surface`) 위에서는 읽히지만, 시트·회색 띠
+   * 위에서는 바탕과 같은 색(밝은 스킴 1.009:1)이라 사라지고 글자만 남는다. 그 자리의 호출부가 시트 위 문법(`band-surface bg-surface shadow-sm`,
+   * 사이드바 빈 상태 「채널 만들기」와 같은 한 벌)을 넘긴다. 같은 `bg-*` 그룹이라 `outline`의 채움은 이 클래스가 이긴다(`cn`). 색·역할은
+   * 호출부 것이고 여기서는 모양을 정하지 않는다.
+   */
+  actionClassName?: string;
   separator?: boolean;
   /**
    * This banner REPLACED the page, so its sentence is the page's heading.
@@ -277,6 +285,7 @@ export function InlineBanner({
   testId?: string;
 }) {
   const Message = heading ? "h1" : "span";
+  const actionClass = cn("shrink-0", actionClassName);
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
@@ -332,7 +341,7 @@ export function InlineBanner({
           type="button"
           variant="outline"
           size="sm"
-          className="shrink-0"
+          className={actionClass}
           aria-busy={actionBusy || undefined}
           onClick={onAction}
         >

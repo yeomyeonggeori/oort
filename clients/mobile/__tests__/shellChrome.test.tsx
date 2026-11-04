@@ -1,5 +1,6 @@
 import type {Member} from '@momo/core/lib/api';
 import {contrast} from '@momo/core/design/color';
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -20,6 +21,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {HOME_ICONS} from '../src/design/icons';
+import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {setHapticMode} from '../src/lib/haptics';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {GroupCard, InputPill} from '../src/design/sheetParts';
@@ -29,6 +31,8 @@ import {
   dragBody,
   imageSources,
   radioRows,
+  releaseReduceMotion,
+  setReduceMotion as setSheetReduceMotion,
 } from './fixtures/sheetContract';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
@@ -607,6 +611,27 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('new-channel-create-busy')).toBeTruthy();
     fireEvent.press(create);
     expect(posts()).toHaveLength(1);
+  });
+
+  // #5132(#5099 후속): 만드는 동안 이름 칸은 `editable={!pending}` 으로 잠기는데 알약이 평소 모양 그대로여서 눌러도 자판이 안 오르는 칸이
+  // 고칠 수 있는 칸처럼 보였다. 호출하는 쪽은 그대로(`NewChannelSheet` 무변경)이고 `InputPill` 이 잠김을 그린다 — 값은 부품 시험(`sheetKit`
+  // 「입력 알약」)이 잠긴 행과의 등식으로 재고, 여기서는 **실제 시트의 만드는 동안**에 그 길이 닿는지 잰다.
+  it('만드는 동안 이름 칸이 흐려지고 잠겼다고 말한다 — 보내기 전에는 평소 모양이다 (#5132)', async () => {
+    installFetch(0, undefined, 'hang');
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    const dimmed = () => StyleSheet.flatten(screen.getByTestId('new-channel-name-pill').props.style)?.opacity;
+    const announced = () => screen.getByTestId('new-channel-name').props.accessibilityState;
+    // 대조: 보내기 전의 같은 칸은 흐리지 않고 잠겼다고 말하지 않는다(아래가 알약의 평소 모양에서 온 값이 아니라는 증거).
+    expect(dimmed()).toBeUndefined();
+    expect(announced()).toBeUndefined();
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    await waitFor(() => expect(screen.getByTestId('new-channel-create-busy')).toBeTruthy());
+    expect(dimmed()).toBeLessThan(1);
+    expect(announced()).toMatchObject({disabled: true});
   });
 
   it('규칙 줄과 이름 오류 줄은 어절 단위로 접는다 — 「대 / 문자는」처럼 어절 가운데서 갈리지 않는다 (design-review r1a M1)', async () => {
@@ -1404,6 +1429,66 @@ describe('새 채널 시트 — 공용 부품 (#4458)', () => {
     const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
     expect(sheet.top).toBeUndefined();
     expect(sheet.height).toBeGreaterThan(0);
+  });
+});
+
+// 알림이 새 입구로 들어오면(#4667) + 가 연 시트도 걷힌다. 이름을 쓰던 시트라면 그 이름은 알림이 걷은 것이지 사람이 버린 것이 아니다.
+describe('새 채널 시트 — 알림이 걷어도 쓰던 이름은 남는다 (#4667)', () => {
+  beforeEach(async () => {
+    __resetEntryDrafts();
+    await setSheetReduceMotion(true); // 슬라이드 없이 바로 걷혀 「닫혔다」가 동기 단정이 된다
+  });
+  afterEach(() => {
+    releaseReduceMotion();
+  });
+
+  async function reopenNewChannel() {
+    openMenu();
+    fireEvent.press(await screen.findByTestId('plus-menu-channel'));
+    expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
+  }
+
+  it('이름과 공개 범위를 쓰던 중 시트가 걷히면, 다시 연 새 채널 시트가 그 이름과 범위로 선다', async () => {
+    await openNewChannel();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('ops-room');
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: false, checks: 0},
+      {testID: 'new-channel-kind-private', selected: true, checks: 1},
+    ]);
+  });
+
+  it('사람이 X 로 닫은 시트는 평소처럼 빈 채로 다시 선다 — 맡기는 것은 알림이 걷을 때뿐이다', async () => {
+    await openNewChannel();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-close'));
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+  });
+
+  it('이름을 쓰지 않았으면 맡길 것이 없다 — 공개 범위만 고친 시트는 기본값으로 다시 선다', async () => {
+    await openNewChannel();
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))[0]).toMatchObject({
+      testID: 'new-channel-kind-public',
+      selected: true,
+    });
   });
 });
 

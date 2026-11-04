@@ -10,6 +10,7 @@ import {
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
+import type {UnfurlMap} from '@momo/core/features/timeline/unfurl';
 import type {Directory, DmGroupFacts} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
@@ -31,10 +32,17 @@ import {
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {DockFollowContext} from './dockFollow';
+import {DRAG_REST_FOLLOW_HOLD_MS, joinTouchHandlers, useDragRest} from './dragRest';
 import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {
+  createRowViewability,
+  RowViewabilityContext,
+  type RowViewability,
+} from './rowViewability';
+import {NO_UNFURL_MAP, unfurlRowsFor} from './useMessageUnfurls';
 import {AnchoredScrollView, createNeutralAnchorStore} from './neutralAnchor';
 import {
   ARRIVAL_SURFACE_CHANNEL,
@@ -74,24 +82,65 @@ import {
   WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
+import {ResendAllBar} from './ResendAllBar';
+import type {SendFailureKind} from '@momo/core/features/connection/sendFailure';
+import {resendAllOffer} from './resendAllOffer';
+import {SystemLine} from './SystemLine';
+import {isSystemLineMessage, startGroupAfterSystemLine} from './systemLineRows';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
 import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
-import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
-import {shouldFoldBundleLine} from '@momo/core/features/timeline/requestBundle';
+import {nextUncollectedDeadlineMs} from '@momo/core/features/agents/runException';
+import {runAnswerMap, triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
+import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
+import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {hasRequestBundle, requestLoopIndex} from './requestLoop';
 import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
+import {useFireAt} from '../agents/railClock';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
 const noRefresh = async (): Promise<void> => {};
+
+/**
+ * 당김이 **꺼진 동안** 목록의 `refreshControl` 자리를 채우는 빈 요소 (#4949).
+ *
+ * 목록의 `refreshControl` prop 을 `undefined` 와 요소 사이로 오가게 하면 안 된다. RN 0.86 iOS 의
+ * `ScrollView` 는 컨트롤이 있을 때 `{refreshControl}{contentContainer}` 두 자식을, 없을 때
+ * `{contentContainer}` 하나를 그린다(`ScrollView.js` 1838~1858). 자식의 모양이 바뀌면 React 는 같은
+ * 자리의 첫 자식이 달라졌다고 보고 **내용 컨테이너를 통째로 내렸다 다시 세운다** — 모든 행이 다시
+ * 마운트되고 새 컨테이너는 높이 0 에서 다시 자란다. 목록은 바닥을 따라가는 중이었으므로 그 첫
+ * `onContentSizeChange` 에서 끝으로 활강한다: 앱에 돌아올 때마다 위에서 아래로 빠르게 훑는 현상이다
+ * (owner 10-31, v0.1.41).
+ *
+ * 방아쇠는 `pullEnabled` 가 연결 상태를 따라 뒤집히는 것이다 — 연결 복구 중에는 이력이 남은 방도
+ * 당겨서 다시 맞추게 열어 두기 때문이다(#4783). 앱 복귀는 소켓을 일부러 다시 여니(`resume`) 이력이 긴
+ * 방은 복귀 한 번에 두 번(복구 시작·끝) 뒤집혔다. 이력을 다 읽은 짧은 방은 늘 켜져 있어 겪지 않았고,
+ * 시험의 `ScrollView` 모형은 `[refreshControl, <View>]` 두 자리를 늘 고정해 그려서 이 차이를 보여 주지
+ * 못했다(`timelinePullStable.test.tsx` 가 실제 구조로 잰다).
+ *
+ * 그래서 꺼진 동안에는 **아무것도 그리지 않는 요소**를 같은 자리에 둔다. 자식은 늘 두 자리이고 바뀌는
+ * 것은 첫 자리의 내용뿐이라 내용 컨테이너는 그대로다. 네이티브에는 아무 뷰도 서지 않으므로 꺼진
+ * 목록은 예전처럼 당김 없이 그냥 튕긴다. iOS 전용이다(안드로이드는 컨트롤이 스크롤뷰를 감싸는
+ * 구조라 이 방법이 맞지 않는다 — 이 앱에는 안드로이드 대상이 없다).
+ */
+function NoPullSlot(): null {
+  return null;
+}
+const NO_PULL_SLOT = <NoPullSlot />;
 const NO_RUNS: readonly AgentRunProgress[] = [];
+
+/** 본류면 코어 판정(스레드로만 간 답글은 빠지고, 서버가 이 값을 모르면 오늘처럼 전부), 스레드 화면이면 든 행 전부 (#4888). */
+function drawnRows(rows: Message[], mainFlow: boolean): Message[] {
+  return mainFlow ? phoneMainFlowMessages(rows) : rows;
+}
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
+import {phoneMainFlowMessages} from '@momo/core/features/timeline/threadHome';
 // 접기는 이제 **코어 정본**이다 (U4-6, #1102). 이 파일이 부르던 폰 로컬 판은
 // 자기 머리말에 「정본 자리는 코어다」라고 적어 두고 폰에 있는 이유가 설계가
 // 아니라 동시 작업임을 밝혀 두었다(#1100 이탈 1). 그 배치가 끝나면서 규칙·문구·
@@ -723,6 +772,20 @@ const LANDING_HOLD_MS = 600;
 /** UIKit's animated `setContentOffset` is ~300ms; wait for it to be down. */
 const GLIDE_SETTLE_MS = 350;
 
+/**
+ * 따라가기가 낸 명령이 끝에 **앉았는지** 다시 묻는 시계 (#5310, `armSettle`).
+ *
+ * 창·콘텐츠·도크가 바뀐 **마지막** 사건 뒤 이만큼(ms) 조용하면 한 번 묻는다. 길게 잡을 까닭이 없다 — 묻는 일은 가볍고(끝에 있으면 명령이 안 나간다), 짧을수록 모자란 채 서 있는
+ * 시간이 짧다. 활강(`GLIDE_SETTLE_MS`)·핀이 아직 돌면 그동안은 미룬다.
+ */
+const SETTLE_CHECK_MS = 120;
+/** 아직 움직이는 중이라 미룬 횟수의 상한 — 끝나지 않는 움직임이 확인을 영원히 붙잡지 않는다(12 × `SETTLE_CHECK_MS` ≈ 1.4초). */
+const SETTLE_MAX_DEFERS = 12;
+/** 확인이 끝에 다시 붙인 횟수의 상한 — 붙여도 안 앉는 목록을 끝없이 두드리지 않는다. 새 사건(창·콘텐츠·도크)이 오면 다시 센다. */
+const SETTLE_MAX_FIXES = 3;
+/** 스크롤 보고가 이 안에 있었으면 목록은 아직 움직이는 중이다(관성·활강·되튐) — 그때는 확인하지 않는다. */
+const SETTLE_REST_MS = 100;
+
 // =============================================================================
 // ## 먼 「최신으로」가 가는 동안만 목록이 한 판에 그리는 양 (#4689 원인 B)
 //
@@ -852,6 +915,7 @@ function TimelineInner({
   status,
   channelId,
   channelKind,
+  viewingThreadId,
   peer,
   dmGroup,
   lastReadSeq,
@@ -861,6 +925,7 @@ function TimelineInner({
   working,
   reactions,
   pins,
+  unfurls,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -876,10 +941,14 @@ function TimelineInner({
   onRetry,
   onResend,
   onResendPending,
+  onResendAll,
+  onDiscardPending,
+  failureKinds,
   actions,
   emptyOverride,
   selfSendToken,
   markReplies = true,
+  mainFlow = true,
   showRollup = true,
   requestThoughts = false,
   requestRootId,
@@ -922,6 +991,13 @@ function TimelineInner({
    */
   channelId?: string;
   channelKind?: Channel['kind'];
+  /**
+   * 지금 이 화면이 **보고 있는** 스레드의 루트 id — 스레드 화면이 열려 있고 앱이 앞일 때만 준다(둘 중 하나라도 아니면
+   * `null`/생략). 그 루트의 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로 읽는다: 사람이 그 답글들을 지금 읽고 있고, 읽음
+   * 신호(`PUT …/read`)가 왕복하는 동안 칩이 깜빡 +1 되지 않게 한다(코어 `liveThreadRollup`의 `viewing`, #5032). 호스트가
+   * 읽음 신호를 보내는 조건과 같은 값이어야 한다(`ThreadPanel`의 `useAppForeground`).
+   */
+  viewingThreadId?: string | null;
   peer?: RosterMember | null;
   /** 셋 이상 DM 의 참여자 사실(ADR-0217). 빈 그룹이 「둘만 봅니다」라 말하지 않게 한다 — 웹 `Timeline` 과 같은 코어 문구. 1:1 이면 비운다. */
   dmGroup?: DmGroupFacts | null;
@@ -945,6 +1021,11 @@ function TimelineInner({
    * 통째로 들면 어디서 무엇이 고정되든 붙어 있는 행이 전부 다시 그려진다.
    */
   pins?: PinMap;
+  /**
+   * 링크 카드(ADR-0170 D5, #4883) — `message id -> 서버 투영`. 행마다의 카드는 여기서 유도한다(`unfurlRowsFor`): 행이
+   * 지도를 통째로 들면 어디서 카드가 바뀌든 붙어 있는 행이 전부 다시 그려진다. 없으면 카드는 그려지지 않는다.
+   */
+  unfurls?: UnfurlMap;
   /**
    * 결정 가능한 대기 승인, `approvalId` 로.
    *
@@ -973,6 +1054,12 @@ function TimelineInner({
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
+  /** 실패한 글 전부를 같은 멱등 키로 한 번씩 다시 보낸다(#5222). 없으면 「모두 다시 보내기」가 서지 않는다. */
+  onResendAll?: () => void;
+  /** 보내지 못한 메아리를 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
+  onDiscardPending?: (clientMsgId: string) => void;
+  /** 못 보낸 행마다 원인 한 줄의 종류(#5222). 키가 없는 행은 「전송 실패」만 말한다. */
+  failureKinds?: ReadonlyMap<string, SendFailureKind>;
   /**
    * What each row may do. Absent on read-only mounts — the measurement harness
    * renders this component with no session behind it, and a row that offered
@@ -996,6 +1083,12 @@ function TimelineInner({
    * where it is already true of every row on screen.
    */
   markReplies?: boolean;
+  /**
+   * 이 목록이 **채널 본류**인가(기본 참, #4888). 본류는 스레드로만 간 답글을 그리지 않는다 — 요약 줄(#4878)만 남고, 「대화에도 보내기」로 보낸
+   * 답글만 선다(코어 `phoneMainFlowMessages`, 서버가 이 값을 모르는 옛 서버에서는 오늘처럼 답글 전부). 스레드 화면은 `false`다: 거기 든
+   * 행은 루트와 그 답글 전부이고 하나도 가리면 안 된다. `showRollup`·`markReplies`와 다른 축이다(그 둘은 줄을 그릴지고, 이것은 행을 그릴지다).
+   */
+  mainFlow?: boolean;
   /**
    * 루트 행이 「답글 N개 · 마지막 …」을 그리는가 (goal RN-U2).
    *
@@ -1158,6 +1251,12 @@ function TimelineInner({
    * (`followGlide`).
    */
   const fingerOnListRef = useRef(false);
+  /** 마지막 스크롤 보고의 시각 — 안착 확인은 목록이 가만히 서 있을 때만 한다(`armSettle`, #5310). */
+  const lastScrollAtRef = useRef(0);
+  /** 안착 확인의 시계와, 미룬·붙인 횟수(`armSettle`, #5310). */
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const settleDefersRef = useRef(0);
+  const settleFixesRef = useRef(0);
   /** When a follow glide's pin lapses, its verdict is taken again (`followGlide`). */
   const followSettleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -1253,10 +1352,14 @@ function TimelineInner({
     [metricsRef],
   );
 
+  // 행으로 그릴 메시지는 코어 한 함수가 정한다(#4995): 끝난 도구 호출을 같은 `call_id` 의 결과로 닫고
+  // (서버는 호출 행을 다시 고치지 않아서 카드가 「생각 중」으로 계속 돈다) 종결 카드가 설명하는 옛 줄을
+  // 접는다. 두 판정은 **접기 전** 목록을 함께 봐야 하므로 여기서 짝짓기를 다시 구현하지 않는다.
+  // 웹의 본류·스레드와 같은 함수다. 요청 스레드도 이 목록을 그대로 쓴다(`ThreadPanel` → `Timeline`).
   const built = useMemo(
     () =>
-      buildTimelineItems(messages.filter(message => {
-        if (shouldFoldBundleLine(message, messages)) return false;
+      // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5067) — 이유는 `startGroupAfterSystemLine`.
+      startGroupAfterSystemLine(buildTimelineItems(drawnRows(presentableRows(messages), mainFlow).filter(message => {
         if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
           messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
           const card = agentCardModel(message);
@@ -1268,8 +1371,10 @@ function TimelineInner({
         unreadCount,
         recoveryMarkers,
         pending,
-      }),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind],
+        // 그리지 않는 답글(스레드로만 간 것)의 확정본도 에코를 정착시킨다 — 보내지 못해 남은 에코의 확정본이 나중에 도착하는 경우.
+        settleAgainst: messages,
+      })),
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind, mainFlow],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
   // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
@@ -1327,7 +1432,7 @@ function TimelineInner({
         // `showRollup` 이 거짓인 표면(스레드 패널)은 롤업을 아예 안 그리므로,
         // 그 표면에서 롤업은 접기를 막을 이유가 되지 못한다 — 없는 문은 문이
         // 아니다.
-        hasRollup: showRollup && rollupFor(item.message, threads) !== null,
+        hasRollup: showRollup && rollupFor(item.message, threads, myMemberId) !== null,
         hasReactions:
           chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)
             .length > 0,
@@ -1452,6 +1557,11 @@ function TimelineInner({
   /** 목록이 마지막으로 「보인다」고 한 행들. 콜백이 렌더보다 먼저 읽는다. */
   const viewableKeysRef = useRef<readonly string[]>(NO_KEYS);
   /**
+   * 「이 줄이 한 번이라도 보였는가」(#4883)의 저장소 — 방마다 하나다(`listKey` 아래에서 만든다). 줄 키가 `m-<seq>` 라
+   * 두 방이 같은 키를 갖는다: 방을 옮기고도 저장소가 남으면 새 방의 줄이 보이기 전에 「보였다」가 된다.
+   */
+  const rowViewabilityRef = useRef<{room: string; store: RowViewability} | null>(null);
+  /**
    * 목록이 **자기 출발점에 앉았는가** — 진입 수렴이 끝났거나, 사람이 목록을
    * 잡았거나, 끝 근처에서 쉬고 있는 것이 관측됐다.
    *
@@ -1571,6 +1681,12 @@ function TimelineInner({
     if (metricsRef) metricsRef.current = geometryRef.current;
   }
   const listKey = contentRoom ?? 'empty';
+  // 링크 카드의 사이트 아이콘을 보인 줄에만 켜는 데 쓴다 — 가상화 목록의 마운트됨은 보임이 아니다(`rowViewability.ts`). 상태가
+  // 아니라 외부 저장소라 이 목록은 다시 그려지지 않는다. 새 방(= 새 스크롤뷰, `listKey`)은 빈 저장소에서 시작한다.
+  if (rowViewabilityRef.current === null || rowViewabilityRef.current.room !== listKey) {
+    rowViewabilityRef.current = {room: listKey, store: createRowViewability()};
+  }
+  const rowViewability = rowViewabilityRef.current.store;
 
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
@@ -1651,7 +1767,11 @@ function TimelineInner({
    */
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
-      viewableKeysRef.current = viewableItems.map(token => token.key);
+      const keys = viewableItems.map(token => token.key);
+      // 링크 카드의 사이트 아이콘이 「한 번 보인 줄」을 알 수 있게 알린다(#4883). 이 콜백은 필이 있는 표면에만 걸린다 —
+      // 필이 없는 표면(스레드 패널·하네스)은 아래 `value` 가 `null` 이라 줄이 늘 보인 것으로 친다.
+      rowViewabilityRef.current?.store.update(keys);
+      viewableKeysRef.current = keys;
       setRelationState(relationFromKeys(itemsRef.current, viewableKeysRef.current));
       const day = floatingDayFor(itemsRef.current, viewableKeysRef.current);
       setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
@@ -1678,8 +1798,9 @@ function TimelineInner({
     () =>
       baselineSeq === null
         ? 0
-        : countNewerThan(messages, baselineSeq, myMemberId),
-    [messages, baselineSeq, myMemberId],
+        // 대화에 그려지는 행만 센다(#4888): 스레드로만 간 답글은 대화에 서지 않으므로 「새 메시지 N」을 올리면 안 된다.
+        : countNewerThan(drawnRows(messages, mainFlow), baselineSeq, myMemberId),
+    [messages, baselineSeq, myMemberId, mainFlow],
   );
   const showJumpLatest = jumpPills && !atBottom;
   if (pillsRef) {
@@ -1706,6 +1827,7 @@ function TimelineInner({
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
       const previous = geometryRef.current;
+      lastScrollAtRef.current = Date.now();
       scrollLogRef?.current?.push({
         k: 's',
         t: Date.now(),
@@ -2089,6 +2211,11 @@ function TimelineInner({
     if (followSettleTimerRef.current !== undefined) {
       clearTimeout(followSettleTimerRef.current);
       followSettleTimerRef.current = undefined;
+    }
+    // 안착 확인(`armSettle`, #5310)도 같다: 새 이동·손가락·방 전환이 거두고, 그 이동이 스스로 끝을 묻는다.
+    if (settleTimerRef.current !== undefined) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = undefined;
     }
     convergingRef.current = false;
     // 중립 앵커와 넓힘은 이동의 것이다 — 이동을 거두는 모든 길(손가락·방 전환·다른 이동·언마운트)이 함께 끈다(#4689). 앵커가 끄는 것은 보초의
@@ -2562,6 +2689,87 @@ function TimelineInner({
     letGoDayPill();
   }, [letGoDayPill]);
 
+  // 끌기로 입력창이 쉬기 시작한 시각 + `DRAG_REST_FOLLOW_HOLD_MS` (#4665). `restFromDrag` 가 건다. 시한이 있는 막이라 따로 풀 곳이 없다.
+  const dragRestHoldUntilRef = useRef(0);
+  // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
+  const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
+  /**
+   * 목록을 **네이티브** `scrollToEnd` 로 끝에 붙인다. 그 순간의 창과 콘텐츠 길이로 끝을 셈하므로 마지막 셀이 재졌는지와 무관하다 — `VirtualizedList.scrollToEnd` 는 끝을
+   * 셀 기록으로 **어림**하고, 안 잰 마지막 셀(방금 키가 바뀐 행)은 평균 높이로 센다(머리·위 여백은 어림에 없다) (#5284). 네이티브 응답자에 `scrollToEnd` 가 없으면(시험·하네스)
+   * 거짓을 돌려준다 — 부르는 쪽이 정한다.
+   */
+  const scrollToNativeEnd = useCallback((): boolean => {
+    // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
+    const scroller = listRef.current?.getScrollResponder() as unknown as
+      | {scrollToEnd?: (options?: {animated?: boolean}) => void}
+      | null
+      | undefined;
+    if (!scroller?.scrollToEnd) return false;
+    scroller.scrollToEnd({animated: false});
+    return true;
+  }, [listRef]);
+
+  // ===========================================================================
+  // ## 따라가기가 낸 명령이 끝에 **앉았는지** 아무도 다시 묻지 않았다 (#5310, 검증 5a·5b)
+  //
+  // 증상(검증 5a·5b, 같은 모양 셋): 못 보낸 글이 저절로 다시 나가 서버 사본으로 바뀐 뒤, 마지막 행이 입력창 위 목록 끝에서 **17~20pt 못 미쳐** 잘린 채 서 있었다. 55초 뒤에도, 작은 쓸기 뒤에도
+  // 그대로였고 「최신으로」 필도 없었다. 입력창 위의 빈 띠 108px(36pt)는 결함이 아니라 설계다: 에이전트 대화는 목록 → 알약 간격이 `listPillGap`(20) + 레일 칸(16) = 36 이다
+  // (`CONV.agentRailSlot`) — 기기에서 정상 상태도 같은 36pt 를 두고 목록 끝(창 아래 끝)이 선다. 결함은 **그 창 아래 끝에서 마지막 행이 잘린 것**이다.
+  //
+  // 이 목록은 창·콘텐츠·도크가 바뀔 때마다 끝으로 붙는 명령을 **한 번** 낸다(`onLayout` 의 네이티브 끝 · 도크 처리기 · `followGlide`). 낸 명령의 **결과는 아무도 확인하지 않는다**: 끝에
+  // 못 미쳐 앉아도 거리가 `FOLLOW_THRESHOLD_PX`(120pt) 안이면 「따라가는 중」이 켜진 채 남고(필도 안 선다), 다음 사건이 올 때까지 고쳐 줄 길이 없다. 사건이 더는 안 오는 일(같은 높이의
+  // 교체 — 실패 행 → 서버 사본)이면 그 상태가 끝까지 간다. 명령이 못 미쳐 앉는 길은 하나가 아니다(네이티브 `scrollToEnd`·활강이 읽는 창·콘텐츠 값이 한 칸 늦은 값이면 늦은 만큼 모자라다 —
+  // #5284 가 어림 길 하나를 막았지만 검증 5b 에서 같은 높이가 남았다). 그래서 길을 하나씩 막는 대신 **끝을 한 번 더 묻는다.**
+  //
+  // 시계: 따라가기 사건(창·콘텐츠·도크)마다 `armSettle` 이 `SETTLE_CHECK_MS` 짜리 시계를 다시 건다. 시계가 울릴 때 목록이
+  //   · 사람이 쥐었거나(손가락·끌기 쉼) 따라가는 중이 아니면 — 읽는 사람이다. 아무것도 안 한다.
+  //   · 다른 이동(끝 쫓기·점프)이 도는 중이면 — 그 이동이 스스로 끝을 묻는다. 아무것도 안 한다.
+  //   · 핀·최근 스크롤 보고(`SETTLE_REST_MS`)가 있으면 — 아직 움직이는 중(활강·관성)이다. 조금 뒤에 다시 본다(`SETTLE_MAX_DEFERS` 까지).
+  //   · 가만히 서 있고 끝까지의 거리가 `ARRIVED_PX` 를 넘으면(**모자라도, 넘쳐도**) 네이티브 `scrollToEnd` 를 한 번 더 내고 결과를 다시 본다(`SETTLE_MAX_FIXES` 까지).
+  // 끝에 앉아 있으면 명령이 아예 안 나가고, 네이티브 응답자가 없는 곳(시험·하네스)에서는 아무 일도 안 한다.
+  //
+  // 한계: 이 확인은 **오프셋이 모자란** 목록을 끝에 앉힌다. 5b 의 상태를 자연 순서로는 이 환경에서 못 잡았다(`maestro/5310-resend-tail-live.yaml` 로 HEAD 에서 여러 판) — 같은 끝 상태를 활강 목표를
+  // 20pt 낮춰 만들고, 이 확인이 앉히는 것을 시뮬레이터에서 쟀다. 5b 의 작은 쓸기가 목록을 안 움직였다면 그 상태는 오프셋 모자람이 아니라 마지막 행의 프레임이 그린 모양보다 작은 쪽일 수 있고, 그러면
+  // 이 확인으로는 안 고쳐진다 — `scripts/lane-tail-check.mjs` 가 프레임으로 잘린 양을 재서 가린다.
+  // ===========================================================================
+  const settleCheck = useCallback(() => {
+    settleTimerRef.current = undefined;
+    // 읽는 사람 · 다른 이동: 이 시계의 일이 아니다.
+    if (!followingRef.current || readerHoldsList()) return;
+    if (convergingRef.current || jumpTravelRef.current !== null) return;
+    const now = Date.now();
+    // 아직 움직이는 중(핀이 걸렸거나 스크롤 보고가 방금 있었다): 가라앉은 뒤에 본다. 끝나지 않는 움직임이 시계를 붙들지 않게 상한이 있다.
+    if (now < scrollPinUntilRef.current || now - lastScrollAtRef.current < SETTLE_REST_MS) {
+      if (settleDefersRef.current < SETTLE_MAX_DEFERS) {
+        settleDefersRef.current += 1;
+        settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+      }
+      return;
+    }
+    const left = distanceToEnd(geometryRef.current);
+    if (left === null || Math.abs(left) <= ARRIVED_PX) return; // 끝에 앉아 있다.
+    if (settleFixesRef.current >= SETTLE_MAX_FIXES) return;
+    // 네이티브 끝은 그 순간의 창·콘텐츠로 센다 — 앞 명령이 쓴 값이 늦은 값이었어도 지금 값으로 다시 센다. 응답자가 없으면 아무 일도 안 한다.
+    if (!scrollToNativeEnd()) return;
+    settleFixesRef.current += 1;
+    settleDefersRef.current = 0;
+    settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+  }, [readerHoldsList, scrollToNativeEnd]);
+  /** 따라가기 사건(창·콘텐츠·도크)이 있었다 — 가라앉은 뒤 끝에 앉았는지 한 번 묻도록 시계를 다시 건다. 센 횟수는 새 사건마다 0 에서 다시 센다. */
+  const armSettle = useCallback(() => {
+    if (settleTimerRef.current !== undefined) clearTimeout(settleTimerRef.current);
+    settleDefersRef.current = 0;
+    settleFixesRef.current = 0;
+    settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+  }, [settleCheck]);
+  // 언마운트: 걸린 시계를 거둔다.
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== undefined) clearTimeout(settleTimerRef.current);
+    },
+    [],
+  );
+
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
   //
@@ -2664,15 +2872,18 @@ function TimelineInner({
         // 300ms round trip per viewport, and there are as many rounds as there
         // are viewports between the reader and the end.
         if (convergingRef.current) listRef.current?.scrollToEnd({animated: false});
-        // Otherwise a glide, pinned and aimed at the content just reported (#2686).
-        else followGlide();
+        // Otherwise a glide, pinned and aimed at the content just reported (#2686) — and a second look at whether it landed (#5310).
+        else {
+          followGlide();
+          armSettle();
+        }
       }
       // `listRef` is listed because it can be the caller's ref object rather than
       // this component's own — a prop, so the linter is right that it is not
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [convergeToEnd, followGlide, listRef, noteGeometry, resolvePendingVerdict],
+    [armSettle, convergeToEnd, followGlide, listRef, noteGeometry, resolvePendingVerdict],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -2716,22 +2927,42 @@ function TimelineInner({
     if (dockFollow === null) return undefined;
     return dockFollow.register(() => {
       if (!followingRef.current) return;
-      // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
-      const scroller = listRef.current?.getScrollResponder() as unknown as
-        | {scrollToEnd?: (options?: {animated?: boolean}) => void}
-        | null
-        | undefined;
-      scroller?.scrollToEnd?.({animated: false});
+      // 읽는 사람이 목록을 쥔 동안은 바닥으로 끌어가지 않는다(#4665). 아래로 끌다가 입력창이 쉬면(`dragRest.ts`) 목록은 아직 바닥에서 120pt 안이라 「따라가는 중」으로 남아 있는데,
+      // 그때 네이티브 `scrollToEnd` 를 부르면 손가락 밑에서 목록이 끝으로 튀고 입력창이 줄어드는 프레임마다 다시 튄다. 손가락이 먼저다(`followGlide` 와 같은 원칙). 손을 뗀 직후의
+      // 접힘 꼬리(몇 프레임)도 같다 — 그 몇 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌린다(`DRAG_REST_FOLLOW_HOLD_MS`).
+      if (readerHoldsList()) return;
+      scrollToNativeEnd();
+      // 도크가 자라는 프레임마다 시계를 다시 건다 — 스프링이 끝난 뒤 한 번, 앉았는지 묻는다(#5310).
+      armSettle();
     });
-  }, [dockFollow, listRef]);
+  }, [armSettle, dockFollow, readerHoldsList, scrollToNativeEnd]);
 
-  // 목록의 탭 = 자판을 내리고 입력창을 쉬게 한다 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
-  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
-  const onListTap = useCallback(() => {
+  // 목록이 입력창에게 쉬라고 한다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
+  // 탭(#4614)과 끌기(#4665)가 **같은 함수**를 부른다 — 「쉬기」가 둘로 갈라지지 않는다.
+  const restDock = useCallback(() => {
     Keyboard.dismiss();
     dockFollow?.rest();
   }, [dockFollow]);
-  const tapTouch = useTapDismiss(onListTap);
+  // 목록의 탭 = 쉬기 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
+  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다.
+  const tapTouch = useTapDismiss(restDock);
+  // 끌기로 쉴 때만 목록이 잠시 바닥을 따라가지 않는다 — 손을 뗀 뒤 접힘 스프링의 꼬리가 방금 위로 읽으러 간 목록을 끝으로 되돌리지 않게(`DRAG_REST_FOLLOW_HOLD_MS`). 탭은 손가락이 없어서 이 막이 없다.
+  const restFromDrag = useCallback(() => {
+    dragRestHoldUntilRef.current = Date.now() + DRAG_REST_FOLLOW_HOLD_MS;
+    restDock();
+  }, [restDock]);
+  // 목록을 손가락으로 아래로 끌어 48pt 누적 = 같은 쉬기 (#4665, `dragRest.ts`). 같은 터치 이벤트를 읽는 탭 판정과 한 벌로 묶고, 목록이 손가락에 끌리는 동안(`onScrollBeginDrag` ~
+  // `onScrollEndDrag`)만 센다 — 손을 뗀 뒤의 관성·프로그램 이동은 손가락이 아니다. 그래서 아래 `keyboardDismissMode` 는 `none` 이다(`on-drag` 는 문턱보다 먼저 첫 1px 에 자판을 걷는다).
+  const dragRest = useDragRest(restFromDrag);
+  const listTouch = useMemo(() => joinTouchHandlers(tapTouch, dragRest), [tapTouch, dragRest]);
+  const onListDragBegin = useCallback(() => {
+    onScrollBeginDrag();
+    dragRest.onScrollBeginDrag();
+  }, [onScrollBeginDrag, dragRest]);
+  const onListDragEnd = useCallback(() => {
+    onScrollEndDrag();
+    dragRest.onScrollEndDrag();
+  }, [onScrollEndDrag, dragRest]);
 
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
@@ -2741,15 +2972,33 @@ function TimelineInner({
   // `ConversationLayout` moved from an animated `paddingBottom` to a transform,
   // so a raised keyboard SLIDES this list instead of shrinking it and the tail
   // keeps its distance to the composer with nothing to correct. What is left
-  // here is the case that still resizes a list — rotation, and a banner
-  // appearing above it — which is why it stays.
+  // here is the case that still resizes a list — rotation, a banner
+  // appearing above it, and (#5222) the one-line cause note that stands over the
+  // composer while a send cannot go out and goes away when the connection is back
+  // (+37pt of window) — which is why it stays.
+  //
+  // ## 창이 커지는 순간의 끝은 어림이 아니라 네이티브가 센다 (#5284)
+  //
+  // 연결이 돌아오면 저절로 다시 보낸 글의 실패 행(`p-…`)이 서버 사본(`m-…`)으로 바뀌고, 같은 때 원인 문장이 걷혀 창이 커진다. 키가 바뀐 마지막 셀은 레이아웃 보고가 오기
+  // 전까지 `VirtualizedList` 에게 안 잰 셀이고, 목록의 `scrollToEnd` 는 그런 셀을 평균 높이로 어림한다 — 어림에는 머리(16)·위 여백이 없다. 창 보고가 셀 보고보다 먼저 오면
+  // 그 어림으로 앉고, 두 행의 높이가 같아 콘텐츠 보고는 다시 오지 않으니 고칠 기회가 없다: 검증 5a 에서 마지막 행이 끝에서 17pt 못 미친 채(따라가는 중은 켜진 채라 필도
+  // 없이) 55초 뒤에도 그대로였고, 강제 순서 시험에서는 140pt 못 미쳐 따라가기가 꺼지고 필이 섰다. 그래서 목록이 앉은 뒤(진입이 끝난 뒤)의 창 변화는 도크 처리기(#4518)와
+  // 같은 **네이티브 `scrollToEnd`** 로 간다 — 그 순간의 창과 콘텐츠 길이로 끝을 센다. 진입·끝 쫓기 중에는 그 기계가 스스로 끝을 묻고 있으므로 그대로 두고, 네이티브 응답자가
+  // 없으면(시험·하네스) 예전처럼 목록의 어림으로 물러난다.
   const onLayout = useCallback(
     (event: LayoutChangeEvent) => {
       noteGeometry({viewportHeight: event.nativeEvent.layout.height});
       resolvePendingVerdict();
-      if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
+      // 읽는 사람이 목록을 쥔 동안은 끌어가지 않는다(#4665) — 아래로 끌다가 입력창이 쉬어 창이 늘어나는 프레임에 `scrollToEnd` 가 손가락 밑 목록을 끝으로 되돌리면 안 된다(위 도크 처리기와 같은 이유).
+      if (!followingRef.current || readerHoldsList()) return;
+      if (didInitialScrollRef.current && !convergingRef.current && scrollToNativeEnd()) {
+        // 한 번 낸 명령이 끝에 앉았는지 가라앉은 뒤 한 번 더 묻는다(#5310). 어림 길(진입·끝 쫓기·응답자 없음)은 그 기계가 스스로 끝을 묻는다.
+        armSettle();
+        return;
+      }
+      listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry, resolvePendingVerdict],
+    [armSettle, listRef, noteGeometry, readerHoldsList, resolvePendingVerdict, scrollToNativeEnd],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
@@ -2837,21 +3086,33 @@ function TimelineInner({
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
   const requests = useMemo(() => requestLoopIndex(messages, channelRuns), [messages, channelRuns]);
+  // 「답함 ✓」이 누르면 가는 답 메시지(#4620 B): 끝난 run마다 그 답을 **한 번** 색인해 칩에 넘긴다(정산된 턴 기록 > 트리거를 인용한 첫 글).
+  // 로드된 메시지에서만 찾으므로 알려진 답은 항상 이 목록 안에 있다 — 모르면 칩은 「답함」을 말하되 눌리지 않는다.
+  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
+  // 칩과 같은 행의 예외 줄(`MessageRunStatus`)은 유예 마감에 서므로, 칩도 **그 순간**에 「받음」에서 「아직 받지 않았어요」로 바뀌어야 한다 — `nowMs`는
+  // 분 단위 시계라 그대로 쓰면 칩이 최대 1분 늦어 같은 행의 두 자리가 다른 낱말을 말한다(웹 `useRerenderAt`과 같은 몫). 마감이 한 번 지난 뒤에만 실제
+  // 시각을 읽는다(그 전에는 부른 쪽의 `nowMs` 그대로: 시험과 하니스가 시각을 못 박는다).
+  const [graceTick, setGraceTick] = useState(0);
+  const bumpGrace = useCallback(() => setGraceTick(tick => tick + 1), []);
+  useFireAt(nextUncollectedDeadlineMs(channelRuns, Date.now()), bumpGrace);
+  const chipNowMs = graceTick === 0 ? nowMs : Math.max(nowMs, Date.now());
   const requestChips = useMemo(() => {
     const chips = new Map<string, TriggerChip>();
+    const context = {...requests, answerFor: (run: AgentRunProgress) => runAnswers.get(run.id.toLowerCase())};
     for (const [messageId, runs] of runsByMessage) {
-      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), nowMs, requests);
+      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), chipNowMs, context);
       if (chip) chips.set(messageId, chip);
     }
     return chips;
-  }, [runsByMessage, directory, nowMs, requests]);
+  }, [runsByMessage, directory, chipNowMs, requests, runAnswers]);
   const thoughtProgress = useMemo(() => {
     const byMessage = new Map<string, AgentRunProgress>();
     for (const [messageId, runs] of runsByMessage) {
       const run = runs[0];
       if (run) {
         const bundle = requests.bundleFor(run);
-        const progress = bundle === undefined ? run : {...run, bundle};
+        const progress: RunWithBundleSnapshot =
+          bundle === undefined ? run : {...run, bundleSnapshot: bundle};
         byMessage.set(messageId, progress);
       }
     }
@@ -2859,6 +3120,13 @@ function TimelineInner({
   }, [runsByMessage, requests]);
   // 에코가 확정본으로 바뀌어도 run 첫 읽기 전에 예약한 칸은 그대로 남아요.
   const reservedRequests = useRef(new Set<string>());
+
+  // 「모두 다시 보내기」(#5222): 실패한 글이 둘 이상이면 첫 실패 줄 위에 한 번만 선다. 단추가 줄에 붙은 것이 아니라 줄 **위**의 형제라
+  // 줄의 모양(#5210 아이콘 둘)과 서로 건드리지 않는다.
+  const resendAll = useMemo(
+    () => (onResendAll === undefined ? null : resendAllOffer(pending)),
+    [onResendAll, pending],
+  );
 
   const renderItem = useCallback(
     ({item}: {item: FoldedTimelineItem}) => {
@@ -2886,11 +3154,64 @@ function TimelineInner({
                 ? quoteLookup(item.pending.replyToId)?.attachments?.length ?? 0
                 : 0
             }
+            // 대화 목록의 에코만 어느 스레드의 것인지 말한다. 스레드 화면(`markReplies` 꺼짐)의 행은 전부 그 스레드의 답글이라 줄이 소음이다.
+            replyHome={
+              !markReplies || item.pending.rootId === undefined
+                ? undefined
+                : {
+                    rootId: item.pending.rootId,
+                    root: threads.byId.get(item.pending.rootId.toLowerCase()) ?? null,
+                  }
+            }
             onResend={onResendPending}
+            onDiscard={onDiscardPending}
+            failureKind={failureKinds?.get(item.pending.clientMsgId) ?? null}
             arrivalSurface={arrivalSurface}
           />
         );
-        return requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
+        const withThoughts =
+          requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
+        return resendAll !== null && onResendAll !== undefined && item.pending.clientMsgId === resendAll.anchorId ? (
+          <View>
+            <ResendAllBar count={resendAll.count} onPress={onResendAll} />
+            {withThoughts}
+          </View>
+        ) : (
+          withThoughts
+        );
+      }
+      // 앵커 행이면 측정 상자로 감싼다. 시스템 줄도 앵커가 될 수 있어서(첫 안 읽음·점프 대상) 두 길이 같은 래퍼를 쓴다.
+      const anchored = (seq: number, row: React.JSX.Element): React.JSX.Element => {
+        if (anchorSeq !== undefined && seq === anchorSeq) {
+          return (
+            <View
+              // The cleanup form, and it is the difference between a seam and a
+              // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
+              // and unmounts the old one, and React does not promise which order
+              // those land in; the plain `ref={node => ref.current = node}` form
+              // is therefore free to attach the new node and THEN null it out on
+              // the old one's behalf. That is a measurement that reports 「미측정」
+              // for a row which is on screen — the exact reading the last batch
+              // was left holding. Returning a cleanup makes the detach name the
+              // node it is detaching, so it can only clear its own.
+              ref={node => {
+                if (!anchorRef) return undefined;
+                anchorRef.current = node;
+                return () => {
+                  if (anchorRef.current === node) anchorRef.current = null;
+                };
+              }}
+              collapsable={false}>
+              {row}
+            </View>
+          );
+        }
+        return row;
+      };
+      // 서버가 방에 알리는 중단 줄(#5067)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 요청 칸·생각 줄·행 동작이 하나도 붙지 않는다.
+      // (작성자가 멈춘 사람이라 아래 「내 요청」 예약에 걸리면 이 줄 밑에 생각 줄이 설 수 있어서, 예약 앞에서 가른다.)
+      if (isSystemLineMessage(item.message)) {
+        return anchored(item.message.seq, <SystemLine text={item.message.body ?? ''} />);
       }
       const requestKey = item.message.id.toLowerCase();
       const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
@@ -2905,6 +3226,7 @@ function TimelineInner({
           directory={directory}
           chips={chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)}
           pinned={isPinned(pins ?? NO_PINS, item.message.id)}
+          unfurls={unfurlRowsFor(unfurls ?? NO_UNFURL_MAP, item.message.id)}
           pausedRepeat={item.pausedRepeat}
           deletedRepeat={item.deletedRepeat}
           landed={landedId !== null && uuidEq(item.message.id, landedId)}
@@ -2913,7 +3235,16 @@ function TimelineInner({
           actions={actions}
           // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 였다면 행이 서버의
           // 롤업으로 되돌아간다 — 끄려는 자리에서 정확히 반대가 된다.
-          rollup={showRollup ? rollupFor(item.message, threads) : null}
+          rollup={
+            showRollup
+              ? rollupFor(
+                  item.message,
+                  threads,
+                  myMemberId,
+                  viewingThreadId != null && uuidEq(item.message.id, viewingThreadId),
+                )
+              : null
+          }
           // `undefined` turns the marker off for the whole surface. A thread
           // panel passes `markReplies={false}`: every row in there is a reply,
           // and a 답글 line on each would be noise wearing the shape of
@@ -2949,40 +3280,21 @@ function TimelineInner({
           standby={isStandbyItem(item) ? true : undefined}
         />
       );
-      if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
-        return (
-          <View
-            // The cleanup form, and it is the difference between a seam and a
-            // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
-            // and unmounts the old one, and React does not promise which order
-            // those land in; the plain `ref={node => ref.current = node}` form
-            // is therefore free to attach the new node and THEN null it out on
-            // the old one's behalf. That is a measurement that reports 「미측정」
-            // for a row which is on screen — the exact reading the last batch
-            // was left holding. Returning a cleanup makes the detach name the
-            // node it is detaching, so it can only clear its own.
-            ref={node => {
-              if (!anchorRef) return undefined;
-              anchorRef.current = node;
-              return () => {
-                if (anchorRef.current === node) anchorRef.current = null;
-              };
-            }}
-            collapsable={false}>
-            {row}
-          </View>
-        );
-      }
-      return row;
+      return anchored(item.message.seq, row);
     },
     [
       directory,
       reactions,
       pins,
+      unfurls,
       myMemberId,
       nowMs,
       onResend,
       onResendPending,
+      onResendAll,
+      resendAll,
+      onDiscardPending,
+      failureKinds,
       actions,
       anchorSeq,
       anchorRef,
@@ -3010,6 +3322,7 @@ function TimelineInner({
       requestThoughts,
       requestRootId,
       channelKind,
+      viewingThreadId,
       // 둘 다 마운트 동안 바뀌지 않는다(`jumpPills` 는 규약, 등록 함수는 빈 의존성).
       jumpPills,
       registerRowNode,
@@ -3449,15 +3762,18 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      refreshControl={pullEnabled ? refreshControl : undefined}
+      // 당김이 꺼져도 자리는 비우지 않는다 — `NoPullSlot` 머리말. `onRefresh` 가 없는 표면(스레드 패널)은 처음부터 없다.
+      refreshControl={
+        onRefresh === undefined ? undefined : pullEnabled ? refreshControl : NO_PULL_SLOT
+      }
       onScroll={pullScroll.onScroll}
-      // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
-      onTouchStart={tapTouch.onTouchStart}
-      onTouchMove={tapTouch.onTouchMove}
-      onTouchEnd={tapTouch.onTouchEnd}
-      onTouchCancel={tapTouch.onTouchCancel}
-      onScrollBeginDrag={onScrollBeginDrag}
-      onScrollEndDrag={onScrollEndDrag}
+      // 탭 판정(#4614)과 끌기 판정(#4665): 읽기만 하는 터치 처리기 넷(둘을 한 벌로 묶었다). 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
+      onTouchStart={listTouch.onTouchStart}
+      onTouchMove={listTouch.onTouchMove}
+      onTouchEnd={listTouch.onTouchEnd}
+      onTouchCancel={listTouch.onTouchCancel}
+      onScrollBeginDrag={onListDragBegin}
+      onScrollEndDrag={onListDragEnd}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
       onMomentumScrollBegin={jumpPills ? onMomentumScrollBegin : undefined}
       onMomentumScrollEnd={jumpPills ? onMomentumScrollEnd : undefined}
@@ -3488,7 +3804,11 @@ function TimelineInner({
       // `on-drag` asks nothing of where the drag ends: moving the conversation at
       // all puts the keyboard away, which is the gesture people already make when
       // they want to read instead of type.
-      keyboardDismissMode="on-drag"
+      //
+      // **#4665 (owner 10-27): 첫 1px 에 걷지 않고 손가락이 아래로 48pt 누적될 때 걷는다.** `on-drag` 는 읽으려고 살짝 밀어도 자판을 걷었고, 그때 글이 남은 입력창은 펼친 채라(#4456)
+      // 「스크롤하면 입력창이 접힌다」가 안 됐다. 이제 끌기도 탭과 같은 쉬기(`restDock` — 자판 내림 + 글이 남은 입력창은 한 줄 알약)로 가고 **언제**는 `dragRest.ts` 가 정한다. 모드를
+      // `none` 으로 두는 이유: `on-drag` 로 두면 UIKit 이 그 문턱보다 먼저 첫 1px 에 자판을 걷는다. 위로 끌기는 더는 자판을 걷지 않는다(누적 0 — Buzz 와 같다).
+      keyboardDismissMode="none"
       // The other half of the rule is `handled`, and it is deliberately NOT
       // `never`. Both dismiss on a tap; they disagree about what else that tap
       // does, and `never` makes the scroll view swallow it — so while the
@@ -3515,8 +3835,12 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
-      {notice}
-      {list}
+      {/* 보이는 줄을 아는 표면(필이 있는 대화)만 줄이 제공자를 만난다. 스레드 패널·하네스는 `null` 이라 카드의 아이콘이
+          마운트 때 켜진다 — 짧은 목록이라 마운트됨이 곧 보임에 가깝다(`rowViewability.ts`). */}
+      <RowViewabilityContext.Provider value={jumpPills ? rowViewability : null}>
+        {notice}
+        {list}
+      </RowViewabilityContext.Provider>
     </ReduceMotionRefContext.Provider>
   );
 

@@ -19,6 +19,10 @@ import {
   LINKED_DEVICES_QUERY_KEY,
   linkedDevicesQuery,
 } from "./linkedDevicesQuery";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -32,18 +36,16 @@ const CURRENT_REASON =
   "지금 쓰는 기기는 여기서 끊을 수 없어요. 이 기기에서 나가려면 로그아웃하세요.";
 const SERVER_CURRENT_REASON =
   "서버가 이 기기를 지금 쓰는 기기로 봐요. 이 기기에서 나가려면 로그아웃하세요.";
-const OFFLINE_REASON =
-  "연결이 끊겨서 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요.";
+const OFFLINE_REASON: BlockedFrame = "unlinkDevice";
 const GONE_NOTICE = "그 기기는 이미 목록에 없어요.";
 const REVOKE_QUESTION =
   "이 기기 연결을 끊으면 그 기기에서 QR을 다시 찍어야 해요.";
 
-function listFailureCopy(error: unknown): string {
-  if (error instanceof NetworkError) return error.message;
-  if (error instanceof ApiError && error.status === 403) {
-    return "사람 계정만 연결된 기기를 볼 수 있어요.";
-  }
-  return "기기 목록을 불러오지 못했어요. 다시 시도해 주세요.";
+// 403은 읽기 실패가 아니라 이 계정에 닫힌 상태라 그 안내를 그대로 말하고, 그 밖의 실패는 원인을 말하는 한 줄이다(#5242).
+const LIST_FORBIDDEN_COPY = "사람 계정만 연결된 기기를 볼 수 있어요.";
+
+function isListForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
 }
 
 function revokeFailureCopy(error: unknown): string {
@@ -179,14 +181,25 @@ export function LinkedDevicesList({
 
       {list.isError && (
         <CardBody>
-          <InlineBanner
-            message={listFailureCopy(list.error)}
-            actionLabel="다시 시도"
-            onAction={() => void list.refetch()}
-            className="px-0"
-            separator={false}
-            testId="linked-devices-error"
-          />
+          {isListForbidden(list.error) ? (
+            <InlineBanner
+              message={LIST_FORBIDDEN_COPY}
+              actionLabel="다시 시도"
+              onAction={() => void list.refetch()}
+              className="px-0"
+              separator={false}
+              testId="linked-devices-error"
+            />
+          ) : (
+            <LoadFailureNote
+              titleKey={CONNECTION_KEYS.loadLinkedDevicesTitle}
+              cause={loadCauseOf(list.error)}
+              onRetry={() => void list.refetch()}
+              className="px-0"
+              separator={false}
+              testId="linked-devices-error"
+            />
+          )}
         </CardBody>
       )}
 
@@ -240,7 +253,7 @@ export function LinkedDevicesList({
               className="break-keep text-meta text-ink-muted"
               data-testid="linked-devices-offline"
             >
-              {OFFLINE_REASON}
+              <BlockedReason frame={OFFLINE_REASON} />
             </p>
           )}
           {unlinkNote && (

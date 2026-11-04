@@ -9,10 +9,8 @@ import {AccessibilityInfo, ActionSheetIOS, Dimensions, StyleSheet} from 'react-n
 import {darkPalette, font, lightPalette, slopTo, TOUCH_TARGET} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
 import {Composer} from '../src/features/conversation/Composer';
-import {
-  connectionBannerText,
-  ConversationHeader,
-} from '../src/features/conversation/ConversationHeader';
+import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
+import {connectingScene, realtimeDownScene} from './fixtures/connectionBand';
 import {CONV, composerFloat} from '../src/features/conversation/convDesign';
 import {
   headerSlotWidth,
@@ -188,14 +186,17 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
     calm.unmount();
-    header({memberCount: '6명', railStatus: 'disconnected'});
+    const down = header({memberCount: '6명', band: realtimeDownScene().band});
     // 띠의 오르트 로더가 「동작 줄이기」 첫 답을 받는다(#3961). 흘려보내 act 밖 갱신을 막는다.
     await act(async () => {});
-    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('실시간 연결이 끊겼어요');
     // 보조 글은 방의 정체를 그대로 말한다 — 연결 문장으로 바뀌지 않는다.
     expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
-    expect(connectionBannerText('connecting')).toBe('연결 중…');
-    expect(connectionBannerText('connected')).toBeNull();
+    down.unmount();
+    // 연결 중 문장은 같은 자리의 다른 띠다(#5222: 문장은 코어 모델이 정한다).
+    header({band: connectingScene().band});
+    await act(async () => {});
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
   });
 
   it('제목 앞 표지 — 채널은 #, 비공개는 자물쇠, DM 은 상대 얼굴', () => {
@@ -479,7 +480,7 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
     it('연결 띠가 서도 머리는 그대로이고 띠는 흐름 밖에 뜬다(#4292)', async () => {
       pillHeader(dm());
       const calm = metrics();
-      pillHeader(dm({railStatus: 'disconnected'}));
+      pillHeader(dm({band: realtimeDownScene().band}));
       await act(async () => {});
       const banner = flatten(screen.getByTestId('connection-banner-layer').props.style);
       expect(banner.position).toBe('absolute');

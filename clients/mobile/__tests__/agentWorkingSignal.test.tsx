@@ -3,6 +3,7 @@ import {
   IDLE_CUTOFF_MS,
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
+import {RAIL_WORD} from '@momo/core/features/agents/activityRail';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {centrifugoAgentChannelName} from '@momo/core/lib/realtimeEvents';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -30,6 +31,7 @@ import {
   sweepAgentWorking,
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
+import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {color} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -601,6 +603,67 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
     // 배지는 줄어들지 않는다 — 줄어들 수 있으면 「작업 중」이 「작…」이 된다.
     expect(badge.props.style?.flexShrink).toBeUndefined();
   });
+
+  // ---- 승인 원장이 레일보다 이긴다 (#5085, #5066 후속) ----------------------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만 레일 프레임으로는 알리지 않는다(중간 프레임은 늘 `running`). 그래서 레일만
+  // 읽는 이 목록은 사람을 기다리는 에이전트를 「작업 중」이라고 말했고, 같은 승인이 대화 화면에서는 「승인을 기다립니다」였다(#5066 은
+  // 대화 화면에만 원장 덮어쓰기를 더했다). 원장은 인박스·대화 화면과 같은 쿼리 캐시(`pendingApprovalsKey`)라서 시험은 거기에 승인을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5085)', () => {
+    const approval = (over: Record<string, unknown> = {}) => ({
+      id: 'ap-1',
+      workspaceId: WS,
+      runId: RUN,
+      channelId: GENERAL,
+      requestedBy: KIM_AGENT,
+      actionType: 'tool_call',
+      status: 'pending',
+      expiresAtMs: Date.now() + 3_600_000,
+      ...over,
+    });
+    const seedLedger = (approvals: unknown[]) =>
+      act(() => {
+        queryClient!.setQueryData(pendingApprovalsKey(WS), approvals);
+      });
+    // 원장이 바뀐 뒤 화면이 바뀌지 **않는** 것을 단정할 때는 한 박자 기다린 뒤에 잰다(#839).
+    const settle = () =>
+      act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+
+    it('행은 원장을 따른다: 대기가 아닌 승인은 그대로, 기다리는 승인이 서면 「승인 필요」, 결정돼 빠지면 다시 「작업 중」', async () => {
+      await openAgentsTab();
+      const row = () => screen.getByTestId(`agent-row-${KIM_AGENT}`);
+      const otherRow = () => screen.getByTestId(`agent-row-${HERMES}`);
+      await deliver(statusFrame(), 20);
+      await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+      await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+
+      // 이 에이전트를 기다림으로 세우지 못하는 승인 셋: 다른 에이전트의 승인 · 이미 결정된 승인 · 기한이 지난 승인(서버가 정리하기
+      // 전의 몇 초). 다른 에이전트의 승인은 **그 에이전트의** 기다림이라 그 행은 레일이 아무 턴도 모르는데도 「승인 필요」다.
+      const notWaiting = [
+        approval({id: 'ap-2', requestedBy: HERMES}),
+        approval({id: 'ap-3', status: 'approved'}),
+        approval({id: 'ap-4', expiresAtMs: Date.now() - 60_000}),
+      ];
+      seedLedger(notWaiting);
+      await waitFor(() => expect(otherRow()).toHaveTextContent(/승인 필요/));
+      await settle();
+      expect(row()).toHaveTextContent(/작업 중/);
+      expect(row()).not.toHaveTextContent(/승인 필요/);
+
+      // 이 에이전트가 올린 승인이 사람을 기다린다 → 같은 행이 「승인 필요」를 말한다.
+      seedLedger([...notWaiting, approval()]);
+      await waitFor(() => expect(row()).toHaveTextContent(/승인 필요/));
+      expect(row()).not.toHaveTextContent(/작업 중/);
+
+      // 다른 곳에서 결정돼 원장에서 빠지면 레일이 말하는 그대로 돌아오고, 승인이 세웠던 행도 함께 조용해진다.
+      seedLedger([]);
+      await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+      expect(row()).not.toHaveTextContent(/승인 필요/);
+      expect(otherRow()).not.toHaveTextContent(/승인 필요/);
+    });
+  });
 });
 
 describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () => {
@@ -646,8 +709,8 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     await waitFor(() =>
       expect(screen.getByTestId('composer-working')).toBeTruthy(),
     );
-    // 살아 있는 동안에는 경과 시계가 있다. `queued` 프레임이 시작 시각을 줬다.
-    expect(screen.getByTestId('composer-working')).toHaveTextContent(/\d+s/);
+    // 레일의 글자에는 시계가 없다(#4620): 살아 있는 동안에도 초 단위 숫자가 없다.
+    expect(screen.getByTestId('composer-working-text')).not.toHaveTextContent(/\d+\s*(s|초)/);
     expect(screen.queryByTestId('composer-working-stale')).toBeNull();
 
     await cutSocket();
@@ -656,8 +719,7 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     await waitFor(() =>
       expect(screen.getByTestId('composer-working-stale')).toBeTruthy(),
     );
-    // ② 시계는 멈추는 게 아니라 사라진다 — 죽은 소켓 위에서 세는 숫자는 우리의
-    //    낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
+    // ② 숫자는 애초에 없다(#4620) — 죽은 소켓 위에서 세는 숫자는 우리의 낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
     expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/\d+s/);
     // ②' 그리고 스크린리더도 같은 것을 듣는다.
     //
@@ -673,21 +735,23 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     // 그래서 라벨은 사라진 것이 아니라 **줄로 내려갔다**: 각 줄의 `Text`가 자기
     // 문장을 지고(Text는 기본이 접근 요소다), 스테일 줄도 자기 라벨을 지며, 중단
     // 버튼은 자기 요소다. 읽히지 않는 것은 없다.
+    // 레일 줄은 **누르는 한 원소**다(#4620): 중단 컨트롤은 줄이 아니라 눌러서 여는 시트 안에 있으므로 줄을 하나로 합쳐도 가려지는
+    // 행동이 없다. 라벨이 에이전트 상태와 끊김 이유를 함께 말한다.
     const bar = screen.getByTestId('composer-working');
-    expect(bar.props.accessible).not.toBe(true);
-    // 막대 **안**에서 찾는다: 홈의 「작업 중」 카드(DS2-3)가 대화 층 밑에 마운트된 채
-    // 같은 턴을 같은 낱말로 말하므로, 화면 전체에서 찾으면 둘이 걸린다.
-    expect(within(bar).getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*답하는 중/)).toBeTruthy();
-    expect(screen.getByLabelText(TURN_STALE_SENTENCE)).toBeTruthy();
+    expect(String(bar.props.accessibilityLabel)).toMatch(/김인턴/);
+    expect(String(bar.props.accessibilityLabel)).toContain(TURN_STALE_SENTENCE);
     // 끊긴 레일의 줄에는 얼굴도 움직이는 점도 없다(#4020): 아무도 일하는 중이 아니다.
     expect(
       within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
     ).toBeNull();
-    expect(within(bar).queryByTestId('responding-avatar')).toBeNull();
+    expect(within(bar).queryByTestId('composer-working-avatars')).toBeNull();
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).
     expect(screen.getByTestId('conversation-title').parent).toBeTruthy();
-    expect(screen.getByText('연결이 끊겼습니다')).toBeTruthy();
+    // 띠는 「끊김」 단계다(행동이 있다). 어떤 원인 문장인지는 이 시험의 주제가 아니다: 이 픽스처 서버는 일부 요청을 응답 없이 실패시켜 코어 모델이
+    // 「실시간 연결이 끊겼어요」 대신 「연결에 문제가 있어요」(알 수 없음)로 읽을 수 있다(#5222). 원인별 문장은 `connectionBannerReconnect` 가 잰다.
+    const banner = screen.getByTestId('connection-banner');
+    expect(within(banner).getByTestId('connection-banner-action')).toBeTruthy();
     expect(screen.queryByText('연결 중…')).toBeNull();
   });
 });
@@ -718,8 +782,8 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     // 「작업 중」 대신 「답하는 중」이고, 얼굴과 점이 붙는다.)
     const bar = screen.getByTestId('composer-working');
     expect(bar).toHaveTextContent(/김인턴/);
-    expect(bar).toHaveTextContent(/답하는 중/);
-    expect(within(bar).getByTestId('responding-avatar')).toBeTruthy();
+    expect(bar).toHaveTextContent(new RegExp(RAIL_WORD.working));
+    expect(within(bar).getByTestId('composer-working-avatars')).toBeTruthy();
     // 점은 보조기술에서 숨겨져 있다(문장이 상태를 말한다): 숨은 원소까지 찾는다.
     expect(
       within(bar).getByTestId('responding-dots', {includeHiddenElements: true}),
@@ -751,17 +815,140 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     );
     await waitFor(() =>
       expect(screen.getByTestId('composer-working')).toHaveTextContent(
-        /승인을 기다립니다/,
+        new RegExp(RAIL_WORD.approval),
       ),
     );
     const bar = screen.getByTestId('composer-working');
     expect(bar).not.toHaveTextContent(/작업 중/);
-    expect(bar).not.toHaveTextContent(/답하는 중/);
+    expect(bar).not.toHaveTextContent(new RegExp(RAIL_WORD.working));
     expect(
       within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
     ).toBeNull();
     // 기다리는 대상은 이미 타임라인의 메시지다. 상태 줄이 그것을 다시 인쇄하면
     // 화면이 자기 자신 위에 쌓인다.
     expect(bar).not.toHaveTextContent(/파일을 지울까요/);
+  });
+  it('소켓이 끊긴 채로도 아무도 가져가지 않은 요청이 유예(5분)를 넘으면 레일에서 빠진다 — 마감은 소켓이 아니라 서버가 알려 준 사실에서 온다 (#4620)', async () => {
+    await openGeneral();
+    // 마감까지 1.5초 남은 대기 run(서버 사실이 있는 신호: 우리 시계로 만료되지 않는다).
+    act(() =>
+      markAgentWorking({
+        memberId: KIM_AGENT,
+        channelId: GENERAL,
+        state: 'queued',
+        source: 'run',
+        runId: RUN,
+        headlines: [],
+        lastActivityAtMs: Date.now(),
+        server: {
+          phase: 'queued',
+          leaseState: 'none',
+          queuePosition: 1,
+          aheadTotal: 0,
+          queuedAtMs: Date.now() - 5 * 60_000 + 1_500,
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.received)),
+    );
+    await cutSocket();
+    await waitFor(() => expect(screen.getByTestId('composer-working-stale')).toBeTruthy());
+    // 아래 메시지의 예외 줄(소켓과 무관하게 마감에 선다)과 같은 순간에 레일도 이 run을 뺀다.
+    await waitFor(() => expect(screen.queryByTestId('composer-working')).toBeNull(), {timeout: 4_000});
+    expect(screen.getByTestId('composer-rail')).toBeTruthy();
+  });
+
+  // ---- 승인 원장이 레일보다 이긴다 (#5066, 검증 줄 1회차 H2) -----------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만(`park_run_for_approval_in_tx`) 레일 프레임으로는 알리지 않는다
+  // (중간 프레임은 늘 `phase: streaming|thinking, run_status: running`). 그래서 레일만 보면 그 에이전트는 계속 「일하는
+  // 중」이고, 한 화면에서 승인 카드는 「승인 필요」, 자리표시는 「작업 중…」, 레일은 「답하는 중」이라고 말했다(캡처
+  // `phone-live-batch1/30-approval-light-035.jpg`). 웹은 승인 원장을 레일 위에 덮는다(`applyApprovalWaits`). 폰도 같은 덮어쓰기를
+  // 한다. 원장 = 인박스와 같은 쿼리 캐시(`pendingApprovalsKey`)라 시험은 거기에 승인을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5066)', () => {
+    const farFuture = () => Date.now() + 3_600_000;
+    function pending(over: Record<string, unknown> = {}) {
+      return {
+        id: 'ap-1',
+        workspaceId: WS,
+        runId: RUN,
+        channelId: GENERAL,
+        requestedBy: KIM_AGENT,
+        actionType: 'tool_call',
+        status: 'pending',
+        expiresAtMs: farFuture(),
+        ...over,
+      };
+    }
+    async function workingByFrames() {
+      await openGeneral();
+      await deliver(statusFrame(), 20);
+      await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 40);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working)),
+      );
+      // 바탕: 프레임만 있으면 줄은 「답하는 중」이고 답이 나타날 자리에 「작업 중…」 자리표시가 선다.
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    }
+    const seedLedger = (approvals: unknown[]) =>
+      act(() => {
+        queryClient!.setQueryData(pendingApprovalsKey(WS), approvals);
+      });
+
+    it('이 에이전트가 이 채널에 올린 대기 승인이 있으면 줄은 승인을 기다린다고 말하고 자리표시는 서지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([pending()]);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.approval)),
+      );
+      const bar = screen.getByTestId('composer-working');
+      expect(bar).not.toHaveTextContent(new RegExp(RAIL_WORD.working));
+      expect(
+        within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
+      ).toBeNull();
+      expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
+    });
+
+    it('기한이 지난 승인은 기다림이 아니다: 서버가 정리하기 전의 몇 초도 사람을 기다린다고 말하지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([pending({expiresAtMs: Date.now() - 60_000})]);
+      // 원장이 바뀐 뒤에도 줄은 프레임이 말하는 그대로다.
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working));
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    });
+
+    it('기한이 지나는 순간 승인 낱말이 걷힌다 — 다른 사건이 없어도(예전 5초 격자 시계의 몫을 마감 시계가 이어받는다, #4620)', async () => {
+      await workingByFrames();
+      seedLedger([pending({expiresAtMs: Date.now() + 1_200})]);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.approval)),
+      );
+      // 기한이 지나면 프레임이 말하던 「작업 중」으로 돌아온다. 이 사이에 소켓 프레임도 원장 갱신도 없다.
+      await waitFor(
+        () => expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working)),
+        {timeout: 3_000},
+      );
+      expect(screen.getByTestId('composer-working')).not.toHaveTextContent(new RegExp(RAIL_WORD.approval));
+    });
+
+    it('다른 에이전트의 승인·다른 채널의 승인·대기가 아닌 승인은 이 에이전트의 턴을 바꾸지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([
+        pending({id: 'ap-2', requestedBy: HERMES}),
+        pending({id: 'ap-3', channelId: SECRET}),
+        pending({id: 'ap-4', status: 'approved'}),
+      ]);
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+      // 레일은 한 줄이라 다른 에이전트의 승인이 앞에 서고 이 에이전트(아직 일하는 중)는 「+1」로 합쳐진다. 이 에이전트의 턴은 그대로다:
+      // 답이 나타날 자리표시가 서 있다.
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(`${RAIL_WORD.approval} \\+1`));
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    });
   });
 });

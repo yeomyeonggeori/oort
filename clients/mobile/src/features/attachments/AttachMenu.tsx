@@ -45,6 +45,7 @@ import {
 } from '../../design/motion';
 import {usePalette, useStyles, useTheme} from '../../design/theme';
 import {font, line, space, type Palette} from '../../design/tokens';
+import {useDismissOnEntry} from '../../lib/useDismissOnEntry';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {PhotoGridCard} from './PhotoGridCard';
 import {PhotoMorphFrame} from './PhotoMorphFrame';
@@ -314,6 +315,10 @@ export function AttachMenu({
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
   const reduceMotion = useReduceMotionRef();
+  // 알림이 새 입구로 들어오면 접는다(#4667). 이 컴포넌트는 닫혀 있어도 마운트돼 있으므로 열려 있을 때만 닫아 달라고 한다.
+  useDismissOnEntry(() => {
+    if (visible) onClose();
+  });
 
   const progress = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(false);

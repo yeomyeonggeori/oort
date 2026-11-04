@@ -8,7 +8,10 @@ use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
 use crate::media::{Processed, Rendition};
-use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, QUOTA};
+use crate::{
+    hash, version, Choice, Error, Kind, Metadata, Origin, Patch, Report, LIVE_DRAFTS,
+    PHOTO_PROMPTS, QUOTA,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Actor {
@@ -187,6 +190,14 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     Ok(bytes)
 }
 
+/// What a draft becomes when it expires (the TTL sweep, and an approval that closes): its state, no
+/// reason code, and **no agent words** — `origin.prompt` is blanked to JSON null (#4900, migration
+/// 167). The row stays as a record; the kind, the source link and the original-photo pointer stay
+/// with it. One fragment for both statements, so the two ways to expire cannot drift apart: the
+/// immutability trigger lets `origin` change only into exactly this.
+pub(crate) const EXPIRED_DRAFT_SET: &str =
+    "state='expired',code=NULL,origin=jsonb_set(origin,'{prompt}','null'::jsonb)";
+
 /// Tenant-scoped sweep: byte reclamation only, never activated receipts/names.
 pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error> {
     catalog(conn, ws).await?;
@@ -194,7 +205,7 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).fetch_all(&mut *conn).await?;
     let n=sqlx::query("DELETE FROM expression_draft_image i USING expression_draft d WHERE (i.workspace_id,i.draft_id)=(d.workspace_id,d.id) AND d.workspace_id=$1 AND d.state <> 'activated' AND d.expires_at <= clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?.rows_affected();
-    sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()")
+    sqlx::query(&format!("UPDATE expression_draft SET {EXPIRED_DRAFT_SET} WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()"))
         .bind(ws).execute(&mut *conn).await?;
     // Held assemblies (G3.6) follow the same hour, but their header goes with the bytes (it holds the
     // agent's prompt; a draft's header is a record). See `assembly::sweep_in_tx`.
@@ -301,10 +312,34 @@ pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Res
     let status: String = row.try_get("status")?;
     let mut v = serde_json::to_value(metadata(row)?).map_err(|_| Error::Invalid)?;
     let created: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
+    // ADR-0218 §10 J6: the server always says the kind (the contract leaves the key optional only so
+    // that an older payload still reads).
     v.as_object_mut().ok_or(Error::Invalid)?.extend(json!({"id":id,"workspaceId":ws,"version":row.try_get::<i64,_>("version")?.to_string(),
         "origin":origin_json(row)?,"createdBy":row.try_get::<Uuid,_>("created_by")?,"createdAtMs":created.timestamp_millis(),"status":status,
+        "kind":row.try_get::<String,_>("kind")?,
         "media":if status=="active" {media_json(conn,ws,id,false).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
+}
+
+/// The kind a registration gets (ADR-0218 §10 J3): what the person chose, otherwise §10 J4 applied to
+/// the **stored** large picture — the one the server re-encoded and the person was shown, never the
+/// client's word about it. `large` is the `media_json` entry of the large rendition.
+pub(crate) fn resolve_kind(chosen: Option<Kind>, large: &Value) -> Result<Kind, Error> {
+    if let Some(kind) = chosen {
+        return Ok(kind);
+    }
+    let number = |key: &str| {
+        large
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(Error::Invalid)
+    };
+    Ok(Kind::recommended(
+        number("width")?,
+        number("height")?,
+        number("frameCount")?,
+    ))
 }
 async fn draft_row(conn: &mut PgConnection, actor: Actor, id: Uuid) -> Result<PgRow, Error> {
     let row=sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND id=$2 AND creator=$3 AND approval_id IS NULL FOR UPDATE")
@@ -328,6 +363,21 @@ pub async fn create_draft(
     media: Option<Processed>,
     code: Option<&str>,
 ) -> Result<Value, Error> {
+    create_draft_with(pool, actor, meta, origin, media, code, json!({})).await
+}
+
+/// [`create_draft`] with names and numbers of the caller's own added to the `expression.staged`
+/// audit row (ADR-0218 D6: never bytes, a prompt or a link). The photo route records which
+/// provider, branch and cut-out outcome produced the picture.
+pub async fn create_draft_with(
+    pool: &PgPool,
+    actor: Actor,
+    meta: Metadata,
+    origin: Origin,
+    media: Option<Processed>,
+    code: Option<&str>,
+    audit_extra: Value,
+) -> Result<Value, Error> {
     meta.validate()?;
     // This direct API never accepts caller-supplied prompts or cards; a link's origin
     // is accepted only in its storable form (no query, credentials or fragment).
@@ -348,7 +398,7 @@ pub async fn create_draft(
         if let Some(media)=media {put_images(conn,actor.workspace,id,Some(1),&media).await?;}
         // The reason code of a failed receive is recorded here as well: the TTL sweep
         // clears the draft's own `code` (ADR-0218 D6, `staged` carries the reason).
-        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,json!({})).await?;
+        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,audit_extra).await?;
         draft_json(conn,&row).await
     })).await
 }
@@ -370,6 +420,49 @@ pub async fn get_draft(pool: &PgPool, actor: Actor, id: Uuid) -> Result<Value, E
             }
             unexpired(&row)?;
             draft_json(conn, &row).await
+        })
+    })
+    .await
+}
+
+/// The caller's own **photo drafts** that are still alive (ADR-0218 §9 I1, #4992): what the photo
+/// route made, newest first. It is the way back to a picture the route finished after the screen
+/// that was waiting for it was gone — `GET /expression-drafts/{id}` needs an id nobody was left to
+/// receive.
+///
+/// A draft is listed when it is the caller's, a direct one (no approval owns it), `ready`, not
+/// expired, and its origin is `generated` with one of the sentences the photo route writes
+/// ([`PHOTO_PROMPTS`]; the direct API accepts no other `generated` origin, `draft_origin_ok`). Every
+/// item is what [`get_draft`] answers for it. At most [`LIVE_DRAFTS`] come back: a person holds no
+/// more live drafts than that (D2), and the same bound is in the query, so the answer is bounded
+/// however the rows came to be.
+///
+/// A plain read: the catalog row is not locked (unlike [`list`] it has no version to agree on),
+/// nothing is written or swept — an expired row is simply not selected, and one that cannot be
+/// shown any more is left out rather than failing the list — and the person is authorised by
+/// [`transaction`] like every other read here.
+pub async fn list_photo_drafts(pool: &PgPool, actor: Actor) -> Result<Vec<Value>, Error> {
+    let sentences: Vec<String> = PHOTO_PROMPTS
+        .iter()
+        .map(|(_, sentence)| (*sentence).to_owned())
+        .collect();
+    transaction(pool, actor, move |conn| {
+        Box::pin(async move {
+            let rows = sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state='ready' AND expires_at>clock_timestamp() AND origin->>'kind'='generated' AND origin->>'prompt'=ANY($3) ORDER BY id DESC LIMIT $4")
+                .bind(actor.workspace).bind(actor.member).bind(&sentences).bind(LIVE_DRAFTS)
+                .fetch_all(&mut *conn).await?;
+            let mut items = Vec::with_capacity(rows.len());
+            for row in &rows {
+                match draft_json(conn, row).await {
+                    Ok(item) => items.push(item),
+                    // A draft whose pictures are gone by now (it expired under a concurrent sweep
+                    // between the select and here) is not one to show: it must not turn the whole
+                    // list into a 404.
+                    Err(Error::NotFound) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(items)
         })
     })
     .await
@@ -472,9 +565,11 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
         let n:i64=sqlx::query_scalar("SELECT count(*) FROM expression WHERE workspace_id=$1 AND status <> 'deleted'").bind(actor.workspace).fetch_one(&mut *conn).await?;
         if n>=QUOTA {return Err(Error::Quota);}
         let id=choice.draft_id;
+        // The kind is decided here, at the one door every route registers through (§10 J3).
+        let kind=resolve_kind(choice.kind,&media["large"])?;
         let v=changed(conn,actor,id,"expression.created",None).await?;
-        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *")
-            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).fetch_one(&mut *conn).await?;
+        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *")
+            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).bind(kind.as_str()).fetch_one(&mut *conn).await?;
         sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
             .bind(actor.workspace).bind(id).execute(&mut *conn).await?;
         let receipt=json!({"workspaceId":actor.workspace,"version":v.to_string(),"expression":expression_json(conn,&e).await?});

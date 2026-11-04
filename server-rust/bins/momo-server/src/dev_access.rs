@@ -818,6 +818,25 @@ mod tests {
                 "/v1/workspaces/{ws}/channels/{ch}/messages/{msg}",
                 ws_path("/channels/c1/messages/m1"),
             ),
+            // ADR-0170 증보 2026-11-01 D16 (#4884): the composer's link preview makes this server
+            // fetch an address the caller names. A terminal tool has no composer and no use for
+            // it, so none of the three routes is on the table, and none is reachable with a
+            // developer token.
+            (
+                "POST",
+                "/v1/workspaces/{ws}/channels/{ch}/unfurl-previews",
+                ws_path("/channels/c1/unfurl-previews"),
+            ),
+            (
+                "GET",
+                "/v1/workspaces/{ws}/unfurl-previews/{id}/image",
+                ws_path("/unfurl-previews/p1/image"),
+            ),
+            (
+                "GET",
+                "/v1/workspaces/{ws}/unfurl-previews/{id}/icon",
+                ws_path("/unfurl-previews/p1/icon"),
+            ),
         ] {
             assert_eq!(
                 dev_route_scope(method, Some(template), &path, WS),

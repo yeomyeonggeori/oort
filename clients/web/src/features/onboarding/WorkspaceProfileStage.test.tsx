@@ -246,7 +246,7 @@ function mountOwner() {
 }
 
 describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
-  it("renders dot 2 of 4 and has no skip until a non-field failure", async () => {
+  it("renders dot 2 of 5 and has no skip until a non-field failure", async () => {
     const host = mountOwner();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
@@ -256,7 +256,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     ).toBe("2");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 2단계");
+    ).toBe("5단계 중 2단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s1-title"]')?.textContent).toBe(
       S1_TITLE
@@ -310,10 +310,10 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     ).toBe("3");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 3단계");
+    ).toBe("5단계 중 3단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
   });
 

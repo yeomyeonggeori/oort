@@ -69,7 +69,9 @@ const feedContext = {
 };
 const needsFeed = {
   items: [],
+  // `isLoading`은 채널·디렉터리가 오는 중인 것까지 센다. 원장 자신의 첫 응답 대기는 `ledgerLoading`이다.
   isLoading: false,
+  ledgerLoading: false,
   error: false,
   absent: false,
   updatedAtMs: 0,
@@ -223,11 +225,113 @@ describe("useMailbox: 서버 투영이 정본", () => {
   });
 
   it("5xx는 구 서버가 아니라 장애다: 후퇴하지 않고 오류를 말한다", async () => {
-    api.fetchInbox.mockRejectedValue(new ApiError(500, "boom"));
+    const boom = new ApiError(500, "boom");
+    api.fetchInbox.mockRejectedValue(boom);
     await render("all");
     expect(latest?.source).toBe("server");
     expect(latest?.error).toBe(true);
+    // #5242: 화면이 원인 문장(오프라인 / 서버에 닿지 못함 / 그 밖)을 정하도록 서버 경로의 오류 객체를 그대로 내놓는다.
+    expect(latest?.failure).toBe(boom);
     expect(api.fetchMessages).not.toHaveBeenCalled();
+  });
+});
+
+// 처리할 일(승인)은 투영에 저장되지 않아 승인 원장은 투영과 **따로** 오고 따로 실패하고 따로 늦다(#5092
+// D2·D3). 투영만 비어 있고 원장이 실패했거나 늦다면 「비어 있어요」는 대기 중인 승인을 모르는 채 하는 말이다.
+describe("useMailbox: 승인 원장은 투영과 따로 실패하고 따로 늦는다 (#5092)", () => {
+  beforeEach(() => {
+    api.fetchInbox.mockResolvedValue({ items: [], nextCursor: null, unreadCount: 0 });
+  });
+  afterEach(() => {
+    needsFeed.error = false;
+    needsFeed.isLoading = false;
+    needsFeed.ledgerLoading = false;
+    needsFeed.absent = false;
+    needsFeed.updatedAtMs = 0;
+  });
+
+  // 승인이 섞이는 탭(전체·안 읽음·처리할 일)과 아닌 탭. 원장의 말(오류·로딩)은 앞의 셋에만 걸린다(#5116).
+  const WITH_TASKS = ["all", "unread", "task"] as const;
+  const WITHOUT_TASKS = ["mention", "reply", "dm", "thread"] as const;
+
+  it("원장이 5xx이면 투영이 비어 있어도 서버 경로가 오류를 말한다", async () => {
+    needsFeed.error = true;
+    for (const filter of WITH_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.entries, filter).toEqual([]);
+      expect(latest?.error, filter).toBe(true);
+    }
+  });
+
+  it("승인이 섞이지 않는 탭은 원장이 실패해도 오류를 말하지 않는다 (#5116)", async () => {
+    needsFeed.error = true;
+    for (const filter of WITHOUT_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.error, filter).toBe(false);
+    }
+  });
+
+  it("원장 404(미제공)는 장애가 아니다: 오류가 아니라 tasksAbsent로 말한다", async () => {
+    needsFeed.error = true;
+    needsFeed.absent = true;
+    await render("task");
+    expect(latest?.error).toBe(false);
+    expect(latest?.tasksAbsent).toBe(true);
+  });
+
+  it("원장이 첫 응답을 기다리는 동안은 투영이 이미 답했어도 서버 경로가 로딩이다", async () => {
+    needsFeed.ledgerLoading = true;
+    for (const filter of WITH_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.isLoading, filter).toBe(true);
+    }
+  });
+
+  it("승인이 섞이지 않는 탭은 원장을 기다리지 않는다 (#5116)", async () => {
+    needsFeed.ledgerLoading = true;
+    for (const filter of WITHOUT_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.isLoading, filter).toBe(false);
+    }
+  });
+
+  it("채널·디렉터리가 오는 중인 것은 세지 않는다: 원장이 답했으면 로딩이 아니다 (#5116)", async () => {
+    needsFeed.isLoading = true; // 컨텍스트(채널·디렉터리)가 아직 온다. 원장 자신은 답했다.
+    needsFeed.ledgerLoading = false;
+    for (const filter of WITH_TASKS) {
+      await render(filter);
+      expect(latest?.isLoading, filter).toBe(false);
+    }
+  });
+
+  it("원장이 답했다는 사실(ledgerAnswered)은 성공한 응답이 있을 때만 참이다 (#5116)", async () => {
+    await render("all");
+    expect(latest?.ledgerAnswered, "아직 한 번도 답하지 않음").toBe(false);
+
+    needsFeed.updatedAtMs = 1_800_000_000_000;
+    await render("all");
+    expect(latest?.ledgerAnswered, "성공한 답이 있음").toBe(true);
+
+    needsFeed.absent = true;
+    await render("all");
+    expect(latest?.ledgerAnswered, "미제공(404)이면 없음이 답이 아니다").toBe(false);
+    needsFeed.absent = false;
+
+    // 투영이 답하지 못해 목록 자체를 비운 동안: 승인이 목록에 없는 것은 원장의 답이 아니다.
+    // (앞에서 받아 둔 투영 캐시가 목록을 살리지 않도록 새 캐시·새 루트로 다시 묻는다. 훅은 처음 만난
+    // QueryClient를 붙들어서 Provider의 client만 바꿔서는 캐시가 바뀌지 않는다.)
+    await act(async () => root?.unmount());
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    root = createRoot(host as HTMLElement);
+    api.fetchInbox.mockRejectedValue(new ApiError(500, "boom"));
+    await render("task");
+    expect(latest?.error).toBe(true);
+    expect(latest?.entries).toEqual([]);
+    expect(latest?.ledgerAnswered, "목록을 비운 동안").toBe(false);
   });
 });
 
@@ -244,6 +348,8 @@ describe("useMailbox: 구 서버(404) 후퇴", () => {
     expect(api.fetchInbox).toHaveBeenCalledTimes(1);
     expect(latest?.source).toBe("composed");
     expect(latest?.hasMore).toBe(false);
+    // 구 서버 경로는 원천이 여럿이라 오류 객체 하나로 말할 수 없다(#5242): 화면은 기기 상태만으로 원인을 정한다.
+    expect(latest?.failure).toBeNull();
     // 조합이 실제로 돈다: DM 채널의 최근 메시지를 읽는다.
     expect(api.fetchMessages).toHaveBeenCalledWith(WS, DM, { limit: 20 });
   });
@@ -284,5 +390,38 @@ describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커�
       await actions?.markAllRead("reply");
     });
     expect(api.markInboxReadAll).toHaveBeenCalledWith(WS, { filter: "reply" });
+  });
+
+  // 메뉴 막대 「모두 읽음 처리」(#5195). 인박스의 read-all은 항목만 읽음으로 하고 채널 위치와 `mention_count`를 그대로 두어서
+  // (ADR-0199 D3) 독 배지와 메뉴 막대의 점이 안 꺼진다. 그래서 채널마다 읽음 위치를 올린다 — 사유는 「읽음 처리」 메뉴와 같다.
+  it("채널마다 읽음 위치를 올리고, 한 채널의 실패는 나머지를 멈추지 않으며 실패를 센다. 동시에 4개까지다", async () => {
+    await render("all");
+    let inFlight = 0;
+    let peak = 0;
+    api.advertiseReadState.mockImplementation(async (_ws: string, channelId: string, seq: number) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await Promise.resolve();
+      await Promise.resolve();
+      inFlight -= 1;
+      if (channelId === "ch-bad") throw new Error("down");
+      return { channelId, lastReadSeq: seq, latestSeq: seq, unreadCount: 0, mentionCount: 0, markedUnreadBeforeSeq: null };
+    });
+    const targets = [
+      ...Array.from({ length: 7 }, (_, i) => ({ channelId: `ch-${i}`, seq: 10 + i })),
+      { channelId: "ch-bad", seq: 3 },
+    ];
+    let result: { marked: number; failed: number } | undefined;
+    await act(async () => {
+      result = await actions?.markChannelsRead(targets);
+    });
+    expect(api.advertiseReadState.mock.calls.map((c) => [c[1], c[2], c[3]]).sort()).toEqual(
+      targets.map((t) => [t.channelId, t.seq, "mark_read_menu"]).sort()
+    );
+    expect(result).toEqual({ marked: 7, failed: 1 });
+    expect(peak).toBe(4);
+    // 인박스 항목만 읽는 길이 아니다: 그 길은 점을 못 끈다.
+    expect(api.markInboxReadAll).not.toHaveBeenCalled();
+    expect(api.markInboxItemRead).not.toHaveBeenCalled();
   });
 });

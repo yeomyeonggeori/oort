@@ -36,6 +36,7 @@ import {
   StatusChip,
   Subsection,
 } from "./SettingsFields";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 > 이벤트 구독 (#1202 워커 V, macOS MomoEventSubscriptionSettingsView 이식).
@@ -317,7 +318,7 @@ export function EventSubscriptionSection({
 
 // --- 목록 --------------------------------------------------------------------
 
-const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 없어요.";
+const OFFLINE_ROW_REASON: BlockedFrame = "stopOrDelete";
 
 /**
  * 형제 쓰기로 잠긴 줄들이 가리키는 두 번째 사유 (#1542).
@@ -555,7 +556,7 @@ function SubscriptionRow({
             className="break-keep text-meta text-ink-muted"
             data-testid="event-subscription-row-offline"
           >
-            {OFFLINE_ROW_REASON}
+            <BlockedReason frame={OFFLINE_ROW_REASON} />
           </span>
         )}
         {!offline && busy && writesLockReason && (
@@ -830,9 +831,7 @@ function CreateForm({
           role="status"
           data-testid="event-subscription-create-offline"
         >
-          {offline
-            ? "서버와 연결이 끊겨 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
-            : ""}
+          {offline ? <BlockedReason frame="createThing" /> : ""}
         </span>
       </div>
     </form>

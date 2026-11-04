@@ -6,7 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
+import { NetworkError } from "@momo/core/lib/http";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { InboxRoute } from "./InboxRoute";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -71,11 +75,16 @@ const state = {
   entries: [] as MailboxEntry[],
   isLoading: false,
   error: false,
+  /** 서버 경로가 답하지 못한 그 오류 객체(원인 문장을 정한다). 구 서버 경로는 null (#5242). */
+  failure: null as unknown,
+  moreError: false,
   source: "composed" as "composed" | "server" | "probing",
   serverUnreadCount: null as number | null,
   hasMore: false,
+  ledgerAnswered: false,
 };
 const fetchMore = vi.fn();
+const refetchMailbox = vi.fn();
 const markAllRead = vi.fn((_filter: string) =>
   Promise.resolve({ marked: 2, unreadCount: 0 })
 );
@@ -90,15 +99,17 @@ vi.mock("./useMailbox", () => ({
     serverUnreadCount: state.serverUnreadCount,
     hasMore: state.hasMore,
     isFetchingMore: false,
-    moreError: false,
+    moreError: state.moreError,
+    failure: state.failure,
     fetchMore,
     entries: state.entries,
     isLoading: state.isLoading,
     error: state.error,
     tasksAbsent: false,
+    ledgerAnswered: state.ledgerAnswered,
     capped: false,
     updatedAtMs: NOW,
-    refetch: () => undefined,
+    refetch: refetchMailbox,
   }),
   useMailboxReadActions: () => ({ markRead, markUnread, markAllRead }),
 }));
@@ -161,20 +172,22 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). 켜면 뿌리가 달라지므로 다시 그리는 시험은 쓰지 않는다. */
+async function mount(path = "/inbox", options: { korean?: boolean } = {}): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const tree: ReactElement = createElement(
+  const page = createElement(
     SessionProvider,
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: ["/inbox"] },
+      { initialEntries: [path] },
       createElement(InboxRoute)
     )
   );
+  const tree: ReactElement = options.korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page;
   await act(async () => {
     mountedRoot?.render(tree);
     await Promise.resolve();
@@ -182,7 +195,9 @@ async function mount(): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -194,9 +209,13 @@ beforeEach(() => {
   ];
   state.isLoading = false;
   state.error = false;
+  state.failure = null;
+  state.moreError = false;
+  refetchMailbox.mockClear();
   state.source = "composed";
   state.serverUnreadCount = null;
   state.hasMore = false;
+  state.ledgerAnswered = false;
   fetchMore.mockClear();
   markAllRead.mockClear();
   approvalItems.value = [ITEM];
@@ -430,5 +449,210 @@ describe("InboxRoute mailbox: 서버 투영 경로", () => {
       await Promise.resolve();
     });
     expect(markAllRead).toHaveBeenCalledWith("all");
+  });
+});
+
+// 「처리할 일」 탭의 내용은 승인 원장 하나다(#5092 D2·D3). 서버 투영에 다른 종류의 줄이 있는 순간 전체
+// 항목 수로 로딩·오류를 가르면 그 탭이 원장의 실패와 로딩을 가리고 「지금 처리할 일이 없어요」라고
+// 말한다. 게이트의 투영 스텁은 비어 있어서 이 경우를 못 잡는다 — 여기서 투영에 줄을 둔 채 잰다.
+describe("InboxRoute mailbox: 처리할 일 탭은 원장의 실패와 로딩을 가리지 않는다 (#5092)", () => {
+  beforeEach(() => {
+    state.source = "server";
+    state.serverUnreadCount = 1;
+    state.entries = [
+      entry({
+        key: "inbox:1",
+        itemId: "i-1",
+        kind: "mention",
+        typeLabel: "멘션 · #workbench",
+      }),
+    ];
+  });
+
+  it("원장이 실패하면 투영에 줄이 있어도 「없어요」 대신 오류와 다시 시도를 말한다", async () => {
+    state.error = true;
+    const host = await mount("/inbox?filter=task", { korean: true });
+    expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
+    expect(host.querySelector('[data-testid="inbox-error"] button')?.textContent).toBe("다시 시도");
+    if (mountedRoot) act(() => mountedRoot?.unmount());
+    mountedHost?.remove();
+
+    // 대조: 같은 실패라도 보여 줄 줄이 있는 탭은 있는 만큼 그린다(부분 실패는 오류가 아니다).
+    const all = await mount("/inbox?filter=all");
+    expect(all.querySelector('[data-testid="inbox-error"]')).toBeNull();
+    expect(all.querySelectorAll('[data-testid="mailbox-row"]')).toHaveLength(1);
+  });
+
+  it("원장이 첫 응답을 기다리는 동안은 투영에 줄이 있어도 「없어요」 대신 로딩 막대를 말한다", async () => {
+    state.isLoading = true;
+    const host = await mount("/inbox?filter=task");
+    const skel = host.querySelector('[data-testid="inbox-route"] [data-testid="skeleton"]');
+    expect(skel?.getAttribute("data-ready")).toBe("false");
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
+  });
+});
+
+// 원장이 대기에서 뺀 승인은 고른 줄로 남지 않는다(#5116). 이 클라이언트가 방금 결정했든 다른 기기에서
+// 결정됐든 같은 길이다: 원장이 답했는데 목록에 없는 승인은 더 이상 결정을 기다리지 않는다. 컨트롤이 서는
+// 패널은 닫히고, 줄은 선택(`aria-current`)에서 풀리고, 초점은 디자인 시스템 규칙대로 이웃 줄로 간다.
+describe("InboxRoute mailbox: 원장이 뺀 승인은 선택된 채 남지 않는다 (#5116)", () => {
+  const rows = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>('[data-testid="mailbox-row"]'));
+  const keys = (host: HTMLElement) => rows(host).map((r) => r.getAttribute("data-entry-key"));
+  const task = (id: string) =>
+    entry({
+      key: `approval:${id}`,
+      kind: "task",
+      typeLabel: "처리할 일 · 승인 요청",
+      actor: "김인턴",
+      actorIsAgent: true,
+      preview: `허가 요청 ${id}`,
+      task: { ...ITEM, key: `approval:${id}`, approvalId: `ap-${id}` },
+    });
+
+  async function rerender(): Promise<void> {
+    await act(async () => {
+      mountedRoot?.render(
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(MemoryRouter, { initialEntries: ["/inbox"] }, createElement(InboxRoute))
+        )
+      );
+      await Promise.resolve();
+    });
+  }
+  async function open(host: HTMLElement, key: string): Promise<void> {
+    const row = rows(host).find((r) => r.getAttribute("data-entry-key") === key);
+    await act(async () => {
+      row?.click();
+      await Promise.resolve();
+    });
+    row?.focus();
+  }
+  /** 원장이 다시 답했다: 그 답에 이 승인들이 없다. */
+  async function ledgerDrops(...gone: string[]): Promise<void> {
+    state.entries = state.entries.filter((e) => !gone.includes(e.key));
+    await rerender();
+  }
+
+  beforeEach(() => {
+    state.source = "server";
+    state.ledgerAnswered = true;
+    state.entries = [task("a"), task("b"), entry({ key: "dm:a", kind: "dm" })];
+  });
+
+  it("고른 승인이 원장에서 빠지면 패널이 닫히고 줄은 선택에서 풀리며 초점은 다음 줄로 간다", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("approval:a");
+    expect(rows(host)[0]?.getAttribute("aria-current")).toBe("true");
+
+    await ledgerDrops("approval:a");
+
+    expect(host.querySelector('[data-testid="inbox-detail"]')).toBeNull();
+    expect(keys(host)).toEqual(["approval:b", "dm:a"]);
+    expect(rows(host).filter((r) => r.getAttribute("aria-current") === "true")).toHaveLength(0);
+    // 초점은 줄에 앉을 뿐 줄을 대신 열지 않는다: 다음 승인의 결정 컨트롤이 방금 누른 자리에 서면 안 된다.
+    expect((document.activeElement as HTMLElement | null)?.getAttribute("data-entry-key")).toBe("approval:b");
+    expect(host.querySelector('[data-testid="inbox-detail"]')).toBeNull();
+    expect(markRead).not.toHaveBeenCalled();
+  });
+
+  it("다음 줄이 없으면 앞 줄로, 줄이 하나도 없으면 목록 자체로 초점이 간다", async () => {
+    state.entries = [task("a"), task("b")];
+    const host = await mount();
+    await open(host, "approval:b");
+    await ledgerDrops("approval:b");
+    expect((document.activeElement as HTMLElement | null)?.getAttribute("data-entry-key")).toBe("approval:a");
+
+    await open(host, "approval:a");
+    await ledgerDrops("approval:a");
+    expect(host.querySelector('[data-testid="inbox-empty"]')).not.toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="inbox-list-pane"]'));
+  });
+
+  it("초점이 이미 다른 곳에 있으면 뺏지 않는다", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    const tab = host.querySelector<HTMLElement>('[data-testid="inbox-tab-dm"]');
+    tab?.focus();
+    await ledgerDrops("approval:a");
+    expect(document.activeElement).toBe(tab);
+  });
+
+  it("원장이 아직 답하지 않았으면 목록에 없어도 줄을 놓지 않는다(없음이 답이 아니다)", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    state.ledgerAnswered = false;
+    await ledgerDrops("approval:a");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("approval:a");
+    expect(keys(host)).toContain("approval:a");
+  });
+
+  it("승인이 아닌 줄은 원장이 답해도 그대로 남는다(읽은 멘션을 손 밑에서 치우지 않는다)", async () => {
+    state.entries = [task("a"), entry({ key: "mention:m1", kind: "mention", typeLabel: "멘션 · #workbench" })];
+    const host = await mount();
+    await open(host, "mention:m1");
+    await ledgerDrops("mention:m1");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("mention:m1");
+    expect(keys(host)).toContain("mention:m1");
+  });
+});
+
+// #5242: 인박스를 불러오지 못했을 때. 옛 「인박스를 불러오지 못했어요.」 배너는 원인 상자고, 「더 보기」가 실패하면 받아 둔 항목은
+// 그대로 둔 채 그 아래 한 줄만 원인과 함께 말한다.
+describe("InboxRoute: 불러오기 실패 (#5242)", () => {
+  // 지키는 것: 목록이 비면 상자(제목 + 이유 + 다시 시도). 이유는 훅이 준 오류 객체의 원인을 따라가고, 다시 시도가 목록을 다시 읽는다.
+  it("읽지 못하면 원인 상자가 서고 이유가 원인을 따라가며 다시 시도가 목록을 다시 읽는다", async () => {
+    const cases: [unknown, boolean, string, string][] = [
+      [new NetworkError("unreachable", 15_000), false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
+      [new NetworkError("unreachable", 15_000), true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [null, true, "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [failure, online, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);
+      state.entries = [];
+      state.error = true;
+      state.failure = failure;
+      refetchMailbox.mockClear();
+      const host = await mount("/inbox", { korean: true });
+      const box = host.querySelector<HTMLElement>('[data-testid="inbox-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box?.textContent).toContain("인박스를 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      expect(box?.textContent).not.toMatch(/\d{3}/);
+      await act(async () => {
+        box?.querySelector("button")?.click();
+        await Promise.resolve();
+      });
+      expect(refetchMailbox).toHaveBeenCalledTimes(1);
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      mountedRoot = null;
+      mountedHost = null;
+      vi.restoreAllMocks();
+    }
+  });
+
+  // 지키는 것: 다음 쪽만 실패하면 받아 둔 항목은 그대로 있고 상자는 없다. 한 줄이 원인과 함께 「이미 받은 항목은 그대로」라고 말한다.
+  it("더 보기가 실패하면 받아 둔 항목은 그대로 두고 아래 한 줄이 원인과 함께 말한다", async () => {
+    vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+    state.source = "server";
+    state.hasMore = true;
+    state.moreError = true;
+    state.failure = new NetworkError("unreachable", 15_000);
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelector('[data-testid="inbox-error"]')).toBeNull();
+    expect(host.querySelectorAll('[data-testid="mailbox-row"]').length).toBeGreaterThan(0);
+    const line = host.querySelector<HTMLElement>('[data-testid="inbox-more-error"]');
+    expect(line?.textContent).toBe(
+      "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    );
+    expect(host.querySelector('[data-testid="inbox-load-more"]')?.textContent).toBe("다시 시도");
+    vi.restoreAllMocks();
   });
 });

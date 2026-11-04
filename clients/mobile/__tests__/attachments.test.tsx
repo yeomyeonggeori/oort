@@ -14,11 +14,12 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import { Share } from 'react-native';
+import { AccessibilityInfo, Linking, Share } from 'react-native';
 
 import { TOUCH_TARGET } from '../src/design/tokens';
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
 import { resetAttachmentContentForTest } from '../src/features/attachments/content';
+import { SAVE_RECEIPT_MS } from '../src/features/attachments/useSaveAttachment';
 import {
   MessageRow,
   type MessageRowActions,
@@ -50,7 +51,20 @@ interface FileSystemMock {
   };
 }
 
+interface MediaLibraryMock {
+  __reset: () => void;
+  __state: {
+    addPermission: { status: string };
+    addAnswer: { status: string; accessPrivileges: string; granted: boolean; canAskAgain: boolean };
+    saved: string[];
+    saveFailure: Error | null;
+  };
+  requestPermissionsAsync: jest.Mock;
+  saveToLibraryAsync: jest.Mock;
+}
+
 const fileSystem = jest.requireMock('expo-file-system') as FileSystemMock;
+const mediaLibrary = jest.requireMock('expo-media-library/legacy') as MediaLibraryMock;
 
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -130,6 +144,10 @@ function flatten(style: unknown): Record<string, unknown> {
 
 beforeEach(() => {
   fileSystem.__reset();
+  mediaLibrary.__reset();
+  // `__reset` 은 상태만 되돌린다 — 목 함수의 호출 기록은 시험 사이로 흐른다(「부르지 않았다」 단정이 앞 시험의 호출에 빨개진다).
+  mediaLibrary.requestPermissionsAsync.mockClear();
+  mediaLibrary.saveToLibraryAsync.mockClear();
   resetAttachmentContentForTest();
   jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
 });
@@ -353,5 +371,221 @@ describe('Buzz 식 첨부 (#3820)', () => {
     fireEvent.press(screen.getAllByTestId('attachment-item')[1] as never);
     // #4775: position is in the controls that arrive after the opening hero.
     expect((await screen.findByTestId('attachment-viewer-position')).props.children).toBe('3장 중 2번');
+  });
+});
+
+// ---- 파일 카드의 「저장」 (#5209) ------------------------------------------------------------------------------------------
+describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 따로 눌린다', () => {
+  interface PickMock {
+    __files: Set<string>;
+    __state: {
+      pick: { directory: string; cancel: boolean; failure: Error | null };
+      pickCalls: number;
+      downloads: unknown[];
+    };
+    File: new (...parts: unknown[]) => { uri: string };
+  }
+  const fs = fileSystem as unknown as PickMock;
+  const save = () => screen.getByTestId('attachment-card-save');
+  const line = () => screen.queryByTestId('attachment-save-status')?.props.children;
+  // 8 MB 를 넘는 래스터 이미지는 인라인 그림이 아니라 파일 카드로 서지만 **사진 갈래**다(보관함이 받는다). 영상(mp4·mov)은 #5208 이후 재생 카드이고
+  // ↓ 가 없다 — 영상의 저장은 뷰어 [저장]이다(`attachmentVideoSave.test.tsx`).
+  const BIG_PHOTO = attachment({ id: 'b1', name: '큰사진.jpg', mime: 'image/jpeg', sizeBytes: 9 * 1024 * 1024 });
+  const SVG = attachment({ id: 's1', name: '로고.svg', mime: 'image/svg+xml', sizeBytes: 1024 });
+
+  it('PDF: ↓ 는 파일 앱에서 위치를 고르게 하고 첨부 이름으로 복사한다 — 공유 시트는 열리지 않는다', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+    expect(save().props.accessibilityLabel).toBe('파일에 저장');
+    expect(save().props.accessibilityRole).toBe('button');
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('파일에 저장했어요'));
+    expect(fs.__state.pickCalls).toBe(1);
+    // 사람의 폴더에는 캐시 이름(첨부 id 가 앞에 붙는다)이 아니라 사람이 보던 이름으로 선다.
+    const target = new fs.File(new fs.File('file:///picked'), '배포-결과.pdf');
+    expect(fs.__files.has(target.uri)).toBe(true);
+    expect(Share.share).not.toHaveBeenCalled();
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+    expect(announce).toHaveBeenCalledWith('파일에 저장했어요');
+    // 영수증은 걷힌 뒤 원래 줄(「첨부파일 내려받기」)로 돌아온다 — 실제 걷힘은 훅 시험이 시계로 잰다.
+  });
+
+  it('카드 탭은 지금처럼 공유 시트다 — ↓ 와 서로의 일을 하지 않는다', async () => {
+    render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+    fireEvent.press(screen.getByTestId('attachment-item'));
+    await waitFor(() => expect(Share.share).toHaveBeenCalledTimes(1));
+    expect(fs.__state.pickCalls).toBe(0);
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+  });
+
+  it('폴더 선택 창을 닫으면 실패가 아니다 — 줄은 그대로다', async () => {
+    fs.__state.pick.cancel = true;
+    render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+    fireEvent.press(save());
+    await waitFor(() => expect(fs.__state.pickCalls).toBe(1));
+    await act(async () => {});
+    expect(line()).toBeUndefined();
+    expect(screen.getByTestId('attachment-download-idle')).toBeTruthy();
+  });
+
+  it('큰 사진(파일 카드): ↓ 는 사진 보관함에 더한다 — 처음 한 번 추가 전용으로 묻고, 파일 앱 창은 열지 않는다', async () => {
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
+    expect(save().props.accessibilityLabel).toBe('사진에 저장');
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.requestPermissionsAsync.mock.calls).toEqual([[true]]);
+    expect(mediaLibrary.__state.saved).toEqual([expect.stringMatching(/^file:.*b1-큰사진\.jpg$/)]);
+    expect(fs.__state.pickCalls).toBe(0);
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it('SVG 는 보관함이 읽지 못한다 — 처음부터 파일 갈래다', async () => {
+    render(<AttachmentList channelId="ch" attachments={[SVG]} />);
+    expect(save().props.accessibilityLabel).toBe('파일에 저장');
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('파일에 저장했어요'));
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+    expect(mediaLibrary.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('거부: 내려받지 않고 「설정 열기」 줄이 서서 남고, 누르면 설정 앱으로 간다', async () => {
+    mediaLibrary.__state.addAnswer = { status: 'denied', accessPrivileges: 'none', granted: false, canAskAgain: false };
+    const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('사진 접근이 꺼져 있어요 · 설정 열기'));
+    expect(fs.__state.downloads).toHaveLength(0);
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('attachment-save-settings'));
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('실패: 줄이 말하고 ↓ 를 다시 누르면 다시 시도한다', async () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
+    mediaLibrary.__state.saveFailure = null;
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
+  });
+
+  it('실패 줄의 「다시 시도」를 누르면 저장을 다시 한다 — 카드가 쥔 탭(공유 시트)이 열리지 않는다 (#5273, 검수 4회차 M1)', async () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(1);
+    const role = screen.queryByTestId('attachment-save-retry')?.props.accessibilityRole;
+    mediaLibrary.__state.saveFailure = null;
+
+    // 줄의 글자를 누른다. 예전에는 이 탭이 카드의 것이라 저장을 다시 하려던 사람 앞에 공유 시트가 열렸다.
+    fireEvent.press(screen.getByTestId('attachment-save-status'));
+    await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(2);
+    expect(Share.share).not.toHaveBeenCalled();
+    expect(role).toBe('button');
+  });
+
+  it('실패 줄은 ↓ 와 같은 길게 누르기 배선을 쥔다 — 롱프레스는 메시지 메뉴이고 따라오는 탭은 저장을 시작하지 않는다 (#5273)', async () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    render(
+      <MessageRow
+        message={message({ attachments: [BIG_PHOTO] })}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions()}
+      />,
+    );
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
+    mediaLibrary.__state.saveFailure = null;
+    mediaLibrary.saveToLibraryAsync.mockClear();
+
+    // 안쪽 `Pressable` 은 닿음을 통째로 쥔다 — 길게 누르기를 넘기지 않으면 이 줄은 행에서 롱프레스가 먹지 않는 구멍이 된다. RNTL 의 이벤트는
+    // 조상으로 번져 구멍을 못 보므로, ↓ 와 같은 한 쌍(칠하기 지연 + 길게 누르기)과 같은 핸들러를 쥐었는지를 속성으로 잰다.
+    const pressable = (testID: string) => screen.UNSAFE_getAllByProps({ testID })[0];
+    const arrow = pressable('attachment-card-save');
+    const retry = pressable('attachment-save-retry');
+    expect(typeof retry?.props.onLongPress).toBe('function');
+    expect(retry?.props.onLongPress).toBe(arrow?.props.onLongPress);
+    expect(retry?.props.delayLongPress).toBe(arrow?.props.delayLongPress);
+    expect(retry?.props.unstable_pressDelay).toBe(arrow?.props.unstable_pressDelay);
+
+    const text = screen.getByTestId('attachment-save-status');
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', {
+      nativeEvent: { pageX: 10, pageY: 10 },
+    });
+    fireEvent(text, 'longPress');
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+    await act(async () => fireEvent.press(text));
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+  });
+
+  it('저장의 영수증이 걷히면 줄은 원래 말로 돌아온다 — 앞서 공유가 남긴 실패가 되살아나지 않는다', async () => {
+    jest.useFakeTimers();
+    try {
+      fileSystem.__state.failure = new Error('network');
+      render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+      // 공유가 실패했다 — 「내려받기 실패 · 다시 시도」가 서 있다.
+      fireEvent.press(screen.getByTestId('attachment-item'));
+      await waitFor(() => expect(screen.getByTestId('attachment-download-failed')).toBeTruthy());
+      // ↓ 로 저장한다 — 저장이 줄을 가져가고, 걷힌 뒤에는 공유의 묵은 실패가 아니라 원래 말이다.
+      fileSystem.__state.failure = null;
+      fireEvent.press(save());
+      await waitFor(() => expect(line()).toBe('파일에 저장했어요'));
+      act(() => {
+        jest.advanceTimersByTime(SAVE_RECEIPT_MS);
+      });
+      expect(line()).toBeUndefined();
+      expect(screen.queryByTestId('attachment-download-failed')).toBeNull();
+      expect(screen.getByTestId('attachment-download-idle')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('VoiceOver 는 카드 하나로 읽으므로 저장은 로터의 동작이다 — 같은 저장이다', async () => {
+    render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+    const card = screen.getByTestId('attachment-item');
+    expect(card.props.accessibilityActions).toEqual([{ name: 'save', label: '파일에 저장' }]);
+    await act(async () => {
+      card.props.onAccessibilityAction({ nativeEvent: { actionName: 'save' } });
+    });
+    await waitFor(() => expect(line()).toBe('파일에 저장했어요'));
+    expect(fs.__state.pickCalls).toBe(1);
+  });
+
+  it('누르는 면은 44 다 — 높이는 상자가, 가로는 hitSlop 이 채운다', () => {
+    render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+    const style = flatten(save().props.style);
+    const slop = save().props.hitSlop as { left: number; right: number };
+    expect(style.height).toBe(TOUCH_TARGET);
+    expect((style.width as number) + slop.left + slop.right).toBeGreaterThanOrEqual(TOUCH_TARGET);
+  });
+
+  it('↓ 위의 롱프레스는 메시지 액션시트를 열고, 따라오는 탭은 저장을 시작하지 않는다', async () => {
+    render(
+      <MessageRow
+        message={message({ attachments: [attachment()] })}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions()}
+      />,
+    );
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', {
+      nativeEvent: { pageX: 10, pageY: 10 },
+    });
+    fireEvent(save(), 'longPress');
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+    await act(async () => fireEvent.press(save()));
+    expect(fs.__state.pickCalls).toBe(0);
   });
 });

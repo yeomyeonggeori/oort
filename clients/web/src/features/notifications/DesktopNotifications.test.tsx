@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactElement } from "react";
+import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
+import { createMessageService } from "@momo/core/i18n";
 import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { DesktopNotifications } from "./DesktopNotifications";
@@ -33,9 +35,14 @@ const IDS = vi.hoisted(() => ({
 const showNotification = vi.hoisted(() => vi.fn());
 const fetchNotificationRules = vi.hoisted(() => vi.fn());
 
+// 이 파일은 **셸이 배너의 클릭을 알려 주지 못하는 곳**(다른 OS·옛 셸)의 옛 어림 경로를 잰다(#5059). 클릭을 알려 주는 셸의
+// 경로는 `DesktopNotifications.click.test.tsx` 가 잰다.
 vi.mock("@/lib/tauri", () => ({
   isDesktop: () => true,
   showNotification: (...args: unknown[]) => showNotification(...args),
+  notificationClickSupported: () => Promise.resolve(false),
+  showClickableNotification: () => Promise.resolve("refused"),
+  onNotificationClick: () => Promise.resolve(() => undefined),
 }));
 
 // 서버 규칙 읽기만 모듈 경계에서 가짜다(`PauseBanner.test.tsx` 와 같은 방식). 훅·판정·알림 묶음은 진짜다.
@@ -237,6 +244,38 @@ function mountRail(path = "/"): HTMLElement {
   return host;
 }
 
+
+/**
+ * 열려 있는 대화상자 하나를 **다른 뿌리**에 세운다(셸 위에 서는 전역 대화상자처럼). 알림 입구의 방송은 앱 하나의 것이라 어느 뿌리의
+ * 구독자든 받는다. 닫기 요청이 올 때의 경로를 `onOpenChange` 로 알려, 이동보다 **먼저** 걷히는지 잰다.
+ */
+function mountOpenDialog(onOpenChange: (open: boolean) => void): { host: HTMLElement; root: Root } {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  function Probe() {
+    const [open, setOpen] = useState(true);
+    return createElement(
+      Dialog,
+      {
+        open,
+        onOpenChange: (next: boolean) => {
+          onOpenChange(next);
+          setOpen(next);
+        },
+      },
+      createElement(
+        DialogContent,
+        null,
+        createElement(DialogTitle, null, "열려 있던 대화상자"),
+        createElement(DialogDescription, null, "알림이 걷는다")
+      )
+    );
+  }
+  act(() => root.render(createElement(Probe)));
+  return { host, root };
+}
+
 /**
  * 조건이 설 때까지 기다린다. 질의의 상태 알림(`notifyManager`)은 약속이 풀린 **뒤** 매크로태스크에 나가므로
  * 고정된 한 틱으로는 부하에서 어긋난다(전체 시험에서만 붉던 시험이 그 증거다). 타이머는 진짜다 — 아래
@@ -378,6 +417,42 @@ describe("DesktopNotifications", () => {
     const armed = armOpen(null, IDS.channel, 1_000, undefined, card);
     expect(openTarget(armed, 1_001)).toBe(messageAnchorPath(IDS.channel, card));
   });
+  it("#4667: 알림을 눌러 앞에 온 창은 열려 있던 대화상자를 먼저 걷고 그 카드로 간다", async () => {
+    const host = mountRail();
+    const routeOf = () => host.querySelector('[data-testid="notification-route"]')?.textContent;
+    const closedAt: Array<string | null | undefined> = [];
+    const dialog = mountOpenDialog((open) => {
+      if (!open) closedAt.push(routeOf());
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    const event = approvalEvent();
+    await act(async () => { onMessage?.(event); osNotifier().flush(); });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    expect(routeOf()).toBe(messageAnchorPath(IDS.channel, event.payload.id));
+    // 걷히는 순간 경로는 아직 떠나기 전의 자리(`/`)였다 — 이동 **전에** 걷었다.
+    expect(closedAt).toEqual(["/"]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    act(() => dialog.root.unmount());
+    dialog.host.remove();
+  });
+
+  it("알림이 없었으면(무장된 목적지가 없으면) 창이 앞에 와도 대화상자를 걷지 않는다 (#4667 대조)", async () => {
+    const host = mountRail();
+    const closed: boolean[] = [];
+    const dialog = mountOpenDialog((open) => closed.push(open));
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    expect(host.querySelector('[data-testid="notification-route"]')?.textContent).toBe("/");
+    expect(closed).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    act(() => dialog.root.unmount());
+    dialog.host.remove();
+  });
+
   it("요청 스레드의 알림은 질문을 말하고 창이 앞에 오면 root와 카드 둘 다 가진 주소로 간다", async () => {
     const host = mountRail();
     const event = approvalEvent();
@@ -587,5 +662,50 @@ describe("알림 일시 중지(서버 규칙)를 따른다 (#4197)", () => {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     expect(serverPauseActive()).toBe(false);
+  });
+});
+
+// =============================================================================
+// #5025 — 도우미 초대 링크 메시지(ADR-0201 증보 v3 B4-2)의 배너. 서버 본문은 「문장 + 링크」이고, 배너는
+// 본문 어디도 읽지 않는다: 표지가 있으면 서버가 링크 없이 써 준 `props.preview`, 못 쓰면 사전의 고정 문장.
+// =============================================================================
+
+describe("도우미 초대 링크 DM의 배너에는 링크가 없다 (#5025)", () => {
+  const LINK = "https://oort.test/join?code=Ab3-_xQ7zK9";
+  // 링크가 **첫 줄에 오는** 본문: 표지 분기가 빠지면 이 줄이 그대로 배너가 된다.
+  const linkEvent = (props: Record<string, unknown>): MessageNewEvent => {
+    const base = mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28320");
+    return {
+      ...base,
+      payload: { ...base.payload, channel_id: IDS.dm, props, body: `${LINK}\n초대 링크를 올렸어요` },
+    } as MessageNewEvent;
+  };
+  async function deliver(event: MessageNewEvent): Promise<void> {
+    setDesktopNotificationKind("dm", true, localStorage);
+    mountRail();
+    await act(async () => {
+      onMessage?.(event);
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+  }
+
+  it("서버 preview가 배너 본문이고, 링크는 제목에도 본문에도 없다", async () => {
+    await deliver(linkEvent({ kind: "team_ai_invite_link", preview: "초대 링크를 올렸어요" }));
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0]).toEqual(["곽성재", "초대 링크를 올렸어요"]);
+    expect(JSON.stringify(showNotification.mock.calls)).not.toContain("join?code");
+  });
+
+  it("preview가 없으면 사전의 고정 문장으로 말하고, 링크는 여전히 없다", async () => {
+    // 이 시험은 언어 provider 없이 마운트한다: 앱의 사전 읽기는 번들된 영어 사전이다(`useMessages`).
+    const dictionary = createMessageService({ messageLocale: "en-US" }).formatMessage(
+      "notifications.inviteLink.fallback"
+    );
+    expect(dictionary.trim()).not.toBe("");
+    await deliver(linkEvent({ kind: "team_ai_invite_link" }));
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0]).toEqual(["곽성재", dictionary]);
+    expect(JSON.stringify(showNotification.mock.calls)).not.toContain("join?code");
   });
 });

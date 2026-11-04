@@ -207,7 +207,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it("점은 claim 경로 넷 중 셋째다(ADR-0185 증보 §5-2)", () => {
+  it("점은 claim 경로 다섯 중 셋째다(ADR-0185 증보 §5-2, 팀 AI 단계 #4945)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
@@ -218,11 +218,11 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     const dots = host.querySelector('[data-testid="onboarding-dots"]');
     expect(dots, "dots").not.toBeNull();
-    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-total")).toBe("5");
     expect(dots?.getAttribute("data-current")).toBe("3");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 3단계");
+    ).toBe("5단계 중 3단계");
   });
 
   it("탈출구 문장이 재진입 위치를 말한다", () => {
@@ -302,6 +302,38 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(host.textContent).toContain("설정 › 멤버와 초대에서 다시");
     expect(host.textContent).toContain(INVITE_ISSUE_ERROR);
     expect(host.querySelector('[title="HTTP 503"]')).not.toBeNull();
+  });
+
+  // 게스트 초대는 멈춰 있다 (ADR-0128 D1, ADR-0219 GS-0). 이 단계는 늘 멤버 초대를 만들므로
+  // 닿는 길이 아니지만, 서버가 말하면 영어 문장이 아니라 사전 문구로 말한다.
+  it("says a paused guest invite from the dictionary, not in the server's English", async () => {
+    createInvite.mockRejectedValue(
+      new ApiError(
+        400,
+        "guest invites are paused until channel-scoped invites are available",
+        "guest_invites_paused"
+      )
+    );
+    const host = mount(
+      createElement(InviteStage, {
+        workspaceId: WS,
+        onSkip: vi.fn(),
+        onContinue: vi.fn(),
+      })
+    );
+    await act(async () => {
+      click("onboarding-s2-issue");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s2-error"]')).not.toBeNull();
+    });
+    const banner = host.querySelector('[data-testid="onboarding-s2-error"]')?.textContent ?? "";
+    // No provider here, so the English dictionary reads it.
+    expect(banner).toContain(
+      "Guest invites are paused until channel-specific invites are available."
+    );
+    expect(banner).not.toContain("guest invites are paused until channel-scoped");
+    expect(host.textContent).not.toContain(INVITE_ISSUE_ERROR);
   });
 
   it("issued state has one continue and one copy control (M-4)", async () => {

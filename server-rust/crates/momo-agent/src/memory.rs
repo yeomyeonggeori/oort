@@ -777,12 +777,19 @@ const SOURCE_COLS: &str = "m.id, m.seq, m.root_id, a.display_name AS author_name
 /// said to each other before is never read (`mem_apply_digest` refuses it as evidence too).
 /// A `streaming` marker older than 30 minutes is a crashed writer, not a live stream (M-5).
 ///
+/// **The team AI's invite-link message is never a source** (ADR-0201 증보 v3 B13-I2, #4965): its
+/// body is a live invite link, a summary or a digest that read it would send the link to the memory
+/// provider and could keep it as a memory item. It is found by the marker the server wrote
+/// (`props.kind`, `momo_messaging::invite_link::PROPS_KIND` — the unit test below holds the two
+/// spellings equal), in the one predicate every source read shares.
+///
 /// "Streaming" here is "not final yet": a stream that is open, and also one a retried turn froze
 /// between two attempts (`momo.stream.provisional`, ADR-0204 증보 1 D8-a) — the retry will
 /// rewrite that half answer, and a digest that took it as evidence would cite text the message
 /// no longer holds (a stream write stamps no `edited_at`, so nothing would invalidate the ref).
 const LIVE: &str = "m.type = 'text' AND m.deleted_at IS NULL AND m.state <> 'deleted' \
      AND m.body IS NOT NULL AND btrim(m.body) <> '' \
+     AND COALESCE(m.props ->> 'kind', '') <> 'team_ai_invite_link' \
      AND (NOT EXISTS (SELECT 1 FROM channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm') \
           OR m.created_at >= (SELECT max(dx.joined_at) FROM membership dx \
                                WHERE dx.channel_id = m.channel_id AND dx.workspace_id = m.workspace_id \
@@ -1295,6 +1302,14 @@ fn has_bearer_credential(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B13-I2: the one predicate every memory source read shares names the invite-link marker
+    /// exactly as the message writer spells it, so the two cannot drift apart unseen.
+    #[test]
+    fn the_shared_source_predicate_excludes_the_invite_link_marker() {
+        assert!(LIVE.contains(&format!("<> '{}'", momo_messaging::invite_link::PROPS_KIND)));
+        assert!(LIVE.contains("m.props ->> 'kind'"));
+    }
 
     #[test]
     fn a_local_day_is_cut_at_local_midnight() {

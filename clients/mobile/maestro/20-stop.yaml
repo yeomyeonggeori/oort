@@ -51,6 +51,26 @@ name: 20-stop
       id: "composer-working"
     timeout: 60000
 
+# #4620: the stop control moved from the old activity line into the sheet the rail
+# opens (the rail is one fixed-height line now — nothing with a button lives in it).
+# One extra tap opens that sheet; the control and its test ids are unchanged.
+- tapOn:
+    id: "composer-working"
+# The sheet is recognised by what is IN it, never by `composer-working-sheet` (#5286). That id is
+# PageSheet's `testID` prop, which PageSheet hands to React Native's <Modal>, and <Modal> puts it on
+# `RCTModalHostView` — a placeholder in the page's own hierarchy; the sheet's content is presented in a
+# view controller of its own. The placeholder is not an element in the accessibility tree XCUITest (and
+# so Maestro) reads, so the id never shows on a simulator however plainly the sheet is open (Jest finds
+# it because it walks the React tree, not the native one) and the 30s wait always ran out. With the sheet
+# up the native tree does hold `page-sheet` (named by the title), the close button, the scroll, the
+# agent's row and the stop control below. The close button exists only while this sheet is up; the
+# title is the sheet's own name (timeline.agentRail.sheetTitle).
+- extendedWaitUntil:
+    visible:
+      id: "composer-working-sheet-close"
+    timeout: 30000
+- assertVisible: "일하는 에이전트"
+
 # Arm. The control is two-tap on purpose, so the first tap must NOT cancel
 # anything — asserted by the fact that the confirm sentence is what appears next
 # and the turn is still running under it.
@@ -94,8 +114,17 @@ name: 20-stop
 # CHANNEL is told. Both are asserted because a stop that only the actor can see
 # is a different (and wrong) product — everyone reading the channel has to be
 # able to tell the run did not simply die.
+#
+# The line is the server's own sentence (`CANCEL_SYSTEM_LINE`,
+# server-rust/bins/momo-server/src/routes/agent_runs.rs) — it is not client copy,
+# so the wording here follows that constant. It has said three things: 「실행이
+# 사람에 의해 중지되었습니다.」 (gone; #5045 found this wait timing out on it),
+# 「사람이 실행을 중지했어요.」 (the server on track/uxui until #5079 reaches it) and
+# 「사람이 실행을 중단했어요.」 (#5079, track/engine). The pattern takes the last two
+# so this flow stays green on a server from before and from after that promotion
+# (#5081); once both tracks carry #5079 it can shrink to 중단 alone.
 - extendedWaitUntil:
-    visible: ".*실행이 사람에 의해 중지되었습니다.*"
+    visible: ".*사람이 실행을 (중지|중단)했어요.*"
     timeout: 60000
 
 # …and the turn is actually over: the working bar clears without the reply ever

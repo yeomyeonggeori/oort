@@ -5,6 +5,7 @@ import type {
 } from '@momo/core/features/timeline/agentCardModel';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {SecretOnce} from '@momo/core/features/approvals/secretOnce';
+import type {ApprovalWait} from '@momo/core/features/agents/workingSignal';
 
 // =============================================================================
 // 타임라인 승인 카드가 결정 가능한가
@@ -97,6 +98,54 @@ export function approvalGates(
 }
 
 /**
+ * 이 채널에서 **사람을 기다리는** 승인들 (읽는 쪽 덮어쓰기의 재료, #5066).
+ *
+ * 승인 원장이 레일보다 이긴다(#3738): 에이전트가 이 채널에 올린 대기 승인이 살아 있으면 그 에이전트의 다음 수는 사람에게
+ * 있다. 서버는 run 을 승인 대기로 세워도(`park_run_for_approval_in_tx`) 레일 프레임으로는 그것을 알리지 않고(중간 프레임은
+ * 늘 `running`, `status.rs` `progress_agent_status_payload`), 레일은 마지막으로 본 프레임인 「일하는 중」에 머문다. 웹은 이
+ * 덮어쓰기를 컴포저 레일과 사이드바에서 하는데(`useApprovalWaits`) 폰은 하지 않아서, 같은 승인이 한 화면에서 승인 카드는
+ * 「승인 필요」, 자리표시는 「작업 중…」, 레일은 「답하는 중」이라고 말했다. 이 목록을 `applyApprovalWaits` 에 넣는다.
+ *
+ * 「이 채널의 대기 승인」은 `approvalGates` 가 이미 정한 판정이다(채널로 거르고, 대기가 아닌 것은 대기로 읽지 않는다 — 「모르면
+ * 기다림으로 세우지 않는다」). 그 판정을 한 번 더 쓰지 않고 그 결과를 읽는다: 컨트롤이 서는 승인과 줄이 기다린다고 말하는 승인이
+ * 갈라질 길이 없다. 기한이 지난 승인을 거르는 것은 시계가 있는 쪽(`applyApprovalWaits`)의 일이다.
+ */
+export function approvalWaits(
+  approvals: readonly Approval[] | undefined,
+  channelId: string,
+): readonly ApprovalWait[] {
+  const waits: ApprovalWait[] = [];
+  const pending = approvalGates(approvals, channelId);
+  for (const approval of approvals ?? []) {
+    if (!pending.has(approval.id)) continue;
+    waits.push({
+      channelId: approval.channelId,
+      requestedBy: approval.requestedBy,
+      runId: approval.runId,
+      ...(approval.expiresAtMs !== undefined
+        ? {expiresAtMs: approval.expiresAtMs}
+        : {}),
+    });
+  }
+  return waits;
+}
+
+/**
+ * 워크스페이스 **전체**에서 사람을 기다리는 승인들 — 채널이 하나가 아닌 표면(홈 「작업 중」 카드·에이전트 탭)의 재료 (#5085).
+ *
+ * 대화 화면은 한 채널의 대기를 `approvalWaits(approvals, channelId)` 로 읽는다. 이 함수는 새 판정을 두지 않고 **그 함수를 승인이 있는
+ * 채널마다 한 번씩** 불러 이어 붙인다: 대화 화면의 줄과 홈 카드·에이전트 탭이 같은 승인을 두고 「기다린다」·「아니다」가 갈라질 길이
+ * 없다(대기가 아닌 것은 대기로 읽지 않는다는 `approvalGates` 의 규율이 그대로 따라온다).
+ */
+export function workspaceApprovalWaits(
+  approvals: readonly Approval[] | undefined,
+): readonly ApprovalWait[] {
+  const channelIds = new Set<string>();
+  for (const approval of approvals ?? []) channelIds.add(approval.channelId);
+  return [...channelIds].flatMap(channelId => approvalWaits(approvals, channelId));
+}
+
+/**
  * 이 카드에 컨트롤을 세울 수 있나. 세울 수 없으면 `null`.
  *
  * 네 문 중 ①②③ 을 여기서 지킨다(④ 오프라인은 화면이 안다).
@@ -141,6 +190,13 @@ export function deadlinePassed(gate: ApprovalGate, nowMs: number): boolean {
 export interface ApprovalReceipt {
   note: string;
   status?: ApprovalStatus;
+  /**
+   * 서버가 이 결정을 해 준 것으로 기록한 멤버(`DecisionOutcome.decidedByMemberId`) (#5171). 카드의 「다시 요청」이 **내가 방금
+   * 거부한 카드**에는 서지 않게 하는 근거다: 카드 스냅샷의 `decided_by` 는 서버가 패치 프레임을 보낼 때까지 없어서, 영수증이
+   * 이 값을 들지 않으면 거부를 누른 바로 그 사람에게 잠깐 「다시 요청」이 선다(웹은 `SettledReceipt.decidedByMemberId` 로 읽는다).
+   * 다른 기기가 먼저 결정한 `superseded` 도 영수증이라서 영수증이 있다는 사실만으로는 내가 결정했다고 말할 수 없다.
+   */
+  decidedByMemberId?: string;
   /**
    * 결정 응답이 한 번 실어 준 1회 값 (ADR-0186 D4 · D8 · 부록 C).
    *

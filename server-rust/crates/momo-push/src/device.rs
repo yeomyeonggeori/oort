@@ -56,6 +56,33 @@
 //!    the new owner's registration, and it answers 404 — not 403 — for a device
 //!    that someone else holds without a live registration: nobody's to revoke,
 //!    and no hint to a caller who merely knows the id that such a device exists.
+//!
+//! And one from #5091 (ADR-0206 증보 4 G1):
+//!
+//! 7. **A member keeps at most [`MEMBER_MAX_ACTIVE_TOKENS`] live registrations.**
+//!    Every push a member is owed is one relay call per live token, and a phone
+//!    makes a new `deviceId` (and so a new live registration) with every install,
+//!    so the number of live tokens is the requester's to choose. A registration
+//!    that leaves a member above the cap invalidates the **stalest** live tokens
+//!    (`updated_at`, the order [`crate::system_targets`] uses) — never the one just
+//!    registered, never a row delete (contract 3), never a rejection: the phone
+//!    that is being set up always works, and nothing about the response or its
+//!    errors changes. It runs on **every** successful registration, so a member
+//!    who was above the cap before this rule converges at the next one.
+//!    A member's registrations take a transaction-scoped advisory lock **before
+//!    any row lock** ([`MEMBER_REGISTRATION_LOCK_SQL`]), so the count each one
+//!    trims against includes everything an earlier one committed: without it K
+//!    concurrent registrations each trim a snapshot that excludes the others and
+//!    leave `cap + K - 1` live tokens, which only the member's next registration
+//!    would undo. Nothing else takes that lock and it is always the first one
+//!    taken, so it cannot be part of a lock cycle.
+//!    The wait is **bounded**: a registration waits at most
+//!    [`REGISTRATION_LOCK_WAIT_SECS`] for any lock (`lock_timeout`, local to the
+//!    transaction), and losing a lock race — `55P03` or a deadlock `40P01` — is the
+//!    409 the phone already retries ([`PushError::RegistrationConflict`]), nothing
+//!    committed. A queued request holds its pool connection while it waits, and one
+//!    member's burst is the requester's to size, so without the bound it would hold
+//!    the pool every other request shares (#5091 review M-1).
 
 use chrono::{DateTime, Utc};
 use momo_auth::{lock_session_for_registration, RegistrationSession};
@@ -64,7 +91,10 @@ use momo_messaging::active_workspace_role;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::error::{classify_registration_write, DeviceInputError, DeviceRejection, PushError};
+use crate::error::{
+    classify_registration_write, lock_race_is_a_conflict, DeviceInputError, DeviceRejection,
+    PushError,
+};
 
 // ---------------------------------------------------------------------------
 // Validated input
@@ -332,6 +362,57 @@ pub async fn list_devices(
 // Register
 // ---------------------------------------------------------------------------
 
+/// The most live (`invalidated_at IS NULL`) push tokens one member keeps — contract 7 above,
+/// ADR-0206 증보 4 G1.
+///
+/// Ten is room for a person's phones, tablet and Macs with a development and a store build among
+/// them, plus the dead registrations a reinstall leaves behind until APNs says 410; it is above
+/// [`crate::SYSTEM_PUSH_MAX_TARGETS`] on purpose (a test push still reaches the five freshest).
+/// Past it, the stalest registrations are invalidated by the registration that crossed the line.
+pub const MEMBER_MAX_ACTIVE_TOKENS: i64 = 10;
+
+/// How long one registration waits for a lock — the member's registration lock, a device row, a
+/// token row, the session row — before it gives up as a retryable 409 (ADR-0206 증보 4 G1, #5091
+/// review M-1). The bound is `lock_timeout`, set local to the registration's transaction; the same
+/// three seconds a scheduled-message request waits on the scheduler's locks.
+pub const REGISTRATION_LOCK_WAIT_SECS: u64 = 3;
+
+/// The statement every registration runs first: it queues a member's registrations behind one
+/// another until the transaction that holds the lock ends. Bound with
+/// [`member_registration_lock_key`]. `pub` (and hidden) only so a conformance test can hold the
+/// very same lock from a second connection and watch a registration wait on it.
+#[doc(hidden)]
+pub const MEMBER_REGISTRATION_LOCK_SQL: &str =
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
+
+/// The text [`MEMBER_REGISTRATION_LOCK_SQL`] hashes: one (workspace, member), nothing else — a
+/// lock keyed by the device would let two devices of one member each trim a stale count.
+#[doc(hidden)]
+pub fn member_registration_lock_key(workspace_id: Uuid, member_id: Uuid) -> String {
+    format!("momo.push_token.member:{workspace_id}:{member_id}")
+}
+
+/// Keep a member at [`MEMBER_MAX_ACTIVE_TOKENS`] live tokens by invalidating the stalest ones,
+/// sparing the token this registration just wrote. Binds: `$1` workspace, `$2` member, `$3` the
+/// token just written, `$4` the cap; the rows affected are the tokens it invalidated.
+///
+/// The order is `updated_at DESC, id DESC` — the one [`crate::system_targets`] picks the freshest
+/// devices by — so what a test push does not reach is what goes first. The registering token is
+/// ranked first **explicitly**: `updated_at` is the transaction's start time, and a registration
+/// that began earlier but committed later than another one would otherwise be ranked below it and
+/// could invalidate the very phone being set up. Rows are kept (contract 3). The tenant and the
+/// member are both named: the member predicate is what keeps one member's registration off
+/// another member's tokens, and the cap is per member.
+const EVICT_STALEST_SQL: &str = "UPDATE push_token \
+        SET invalidated_at = now(), updated_at = now() \
+      WHERE id IN ( \
+        SELECT id FROM push_token \
+         WHERE workspace_id = $1 \
+           AND member_id = $2 \
+           AND invalidated_at IS NULL \
+         ORDER BY (id = $3) DESC, updated_at DESC, id DESC \
+        OFFSET $4)";
+
 /// Register (or re-register) a device and rotate its push token.
 ///
 /// The whole sequence is one tenant transaction, which is what makes the
@@ -347,9 +428,28 @@ pub async fn register_device(
     let registration = registration.clone();
     tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // `lock_timeout` first, so that every lock this transaction waits for — the member's
+            // registration lock below, the session, device and token rows after it — is a bounded
+            // wait (contract 7). Local to the transaction: it ends with it.
+            sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+                .bind(format!("{REGISTRATION_LOCK_WAIT_SECS}s"))
+                .execute(&mut *conn)
+                .await
+                .map_err(DbError::from)?;
+
             if let Err(rejection) = require_active_member(conn, workspace_id, member_id).await? {
                 return Ok(Err(rejection));
             }
+
+            // 0a) #5091 — this member's registrations take turns, from here to the commit, so the
+            //     cap step at the end trims a count that includes every earlier registration
+            //     (contract 7). It is the first lock this transaction takes and nothing else ever
+            //     takes it, so it cannot sit in a cycle with the session, device or token locks.
+            sqlx::query(MEMBER_REGISTRATION_LOCK_SQL)
+                .bind(member_registration_lock_key(workspace_id, member_id))
+                .execute(&mut *conn)
+                .await
+                .map_err(DbError::from)?;
 
             // 0) #2677 — which session is this registration made under? The
             //    row is share-locked until commit, so a logout of that session
@@ -522,7 +622,7 @@ pub async fn register_device(
             .rows_affected();
 
             // 5) Upsert the incoming token.
-            match existing_token_id {
+            let incoming_token_id: Uuid = match existing_token_id {
                 Some(token_id) => {
                     // `session_id` is rewritten, never kept: a phone signing
                     // back in re-sends the same token, and the row must now
@@ -546,6 +646,7 @@ pub async fn register_device(
                     .execute(&mut *conn)
                     .await
                     .map_err(classify_registration_write)?;
+                    token_id
                 }
                 None => {
                     // ON CONFLICT DO NOTHING: a conflicting row that RLS hides
@@ -569,11 +670,24 @@ pub async fn register_device(
                     .fetch_optional(&mut *conn)
                     .await
                     .map_err(classify_registration_write)?;
-                    if inserted.is_none() {
+                    let Some(inserted) = inserted else {
                         return Err(PushError::RegistrationConflict);
-                    }
+                    };
+                    inserted.get("id")
                 }
-            }
+            };
+
+            // 5b) #5091 — contract 7: leave the member at no more than the cap, stalest first,
+            //     never the token written just above.
+            let evicted = sqlx::query(EVICT_STALEST_SQL)
+                .bind(workspace_id)
+                .bind(member_id)
+                .bind(incoming_token_id)
+                .bind(MEMBER_MAX_ACTIVE_TOKENS)
+                .execute(&mut *conn)
+                .await
+                .map_err(DbError::from)?
+                .rows_affected();
 
             // 6) Audit, same transaction. `right(..., 8)` keeps the raw token
             //    out of the audit row exactly as it stays out of the response.
@@ -591,7 +705,8 @@ pub async fn register_device(
                      'device_created', $9::boolean, \
                      'tokens_rotated', $10::bigint, \
                      'device_transferred', $11::boolean, \
-                     'previous_member_id', $12::uuid \
+                     'previous_member_id', $12::uuid, \
+                     'tokens_evicted', $13::bigint \
                    ))",
             )
             .bind(workspace_id)
@@ -606,6 +721,7 @@ pub async fn register_device(
             .bind(rotated as i64)
             .bind(previous_owner.is_some())
             .bind(previous_owner)
+            .bind(evicted as i64)
             .execute(&mut *conn)
             .await
             .map_err(DbError::from)?;
@@ -618,6 +734,9 @@ pub async fn register_device(
         })
     })
     .await
+    // A lock race (the bounded wait ran out, or the deadlock detector chose this transaction) is
+    // the retryable 409, not a 500: nothing was committed (#5091 review M-1).
+    .map_err(lock_race_is_a_conflict)
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +1036,32 @@ mod tests {
             validated_app_build(Some(&"9".repeat(65))),
             Err(DeviceInputError::AppBuild)
         );
+    }
+
+    /// ADR-0206 증보 4 G1 — the number the ADR states, and the lock's key: one (workspace, member),
+    /// the same text for the same pair and a different one for another member or workspace, with
+    /// no device in it (two devices of one member must queue on the same lock). The eviction never
+    /// deletes: a token row is kept so `push_dispatch_log` keeps resolving (contract 3).
+    #[test]
+    fn the_member_cap_is_ten_and_its_lock_names_one_member_and_the_eviction_never_deletes() {
+        assert_eq!(MEMBER_MAX_ACTIVE_TOKENS, 10, "the ADR's number");
+        assert_eq!(
+            REGISTRATION_LOCK_WAIT_SECS, 3,
+            "the ADR's bound, the scheduler's number"
+        );
+        let (workspace, member) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let key = member_registration_lock_key(workspace, member);
+        assert_eq!(key, member_registration_lock_key(workspace, member));
+        assert_ne!(
+            key,
+            member_registration_lock_key(workspace, Uuid::from_u128(3))
+        );
+        assert_ne!(
+            key,
+            member_registration_lock_key(Uuid::from_u128(4), member)
+        );
+        assert!(key.contains(&workspace.to_string()) && key.contains(&member.to_string()));
+        assert!(!EVICT_STALEST_SQL.contains("DELETE"));
     }
 
     /// #2677 — ending a session must reach only that session's registrations,

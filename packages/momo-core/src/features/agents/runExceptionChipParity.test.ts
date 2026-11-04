@@ -345,7 +345,7 @@ it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예�
     // 끝 코드가 아직 run에 없더라도 같은 bundle을 받으면 예외 줄은 서지 않아요.
     const stale = {
       ...run({ phase: "failed", status: "failed" }),
-      bundle: { status },
+      bundle: { approvalId: "approval", status, decisionMode: "open" as const, canDecide: false, actionType: "tool_call" },
     };
     expect(runException(stale, T)).toBeNull();
     expect(triggerChip([stale], nameFor, T)?.word).toBe(word);

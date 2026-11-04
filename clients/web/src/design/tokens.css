@@ -173,10 +173,19 @@
    * 블러 위에 까는 옅은 어둠이다. 다이얼로그 공용 스크림(`--scrim`)이 이미 뒤를 어둡게 하므로 **그 위에 한 겹 더**다
    * (합성하면 라이트 약 .47 · 다크 약 .60: 다크는 앱이 이미 어두워 스크림만으로 무겁고, 더 깔면 블러가 안 보인다).
    * `-solid`는 유리를 끈 무대(시스템 투명도 줄이기·고대비)의 불투명한 어두운 면이다. 둘 다 어느 스킴에서든 어두운 쪽이다:
-   * 사진을 보는 무대라 스킴을 따라 밝아지지 않는다. 글자·조작은 전부 `glass` 칩 위에 서므로(칩이 자기 면과 짝으로 대비를
-   * 진다) 이 값이 대비를 정하지 않는다. */
-  --lightbox-stage: light-dark(rgba(20,18,16,.2), rgba(0,0,0,.1));
+   * 사진을 보는 무대라 스킴을 따라 밝아지지 않는다.
+   *
+   * 2판(#5190): 라이트의 한 겹을 .2 → .46으로 올렸다(합성 라이트 약 .47 → .64, 다크는 그대로 .60). 밝은 앱 위에서는 .47이 칙칙한
+   * 회색이라 사진이 뜨지 않았고, 폰 뷰어는 어느 테마에서나 어두운 무대다(`photoStage`). 블러는 그대로 보인다: 앱의 큰 면과
+   * 색 덩어리가 어두운 톤으로 비친다. 글자·조작은 이제 **스킴과 무관한 어두운 유리**와 아래 `--lightbox-scrim` 위에 서고
+   * (`lightbox-chrome·side·foot`이 `color-scheme: dark`), 그 합성의 대비는 `tokens.contrast.test.ts`가 잰다. */
+  --lightbox-stage: light-dark(rgba(20,18,16,.46), rgba(0,0,0,.1));
   --lightbox-stage-solid: light-dark(rgb(31,29,27), rgb(14,15,18));
+  /* 위 줄·아래 줄 뒤의 어둠 (#5190). 머리 글자(보낸 사람·시각)는 칩이 아니라 무대 위에 바로 서므로, **확대해서** 밝은 사진이 줄 아래로
+   * 들어오면 읽히게 판(plateau)을 깔고 사진 쪽으로 풀어 준다(폰 뷰어의 `viewerScrimPlateau·Fade`와 같은 생각). 맞춤에서는 사진이 줄
+   * 밖(위·아래 여백)에 서므로 판이 없다: 띠가 무대에 남지 않는다. 한 색뿐이고 어느 스킴에서든 같다: 순흑이 아닌 무대 톤
+   * (`--lightbox-stage-solid` 다크 값)에 알파만 둔다. */
+  --lightbox-scrim: rgba(14,15,18,.64);
 
   /* --- 별칭 (이행 중, ADR-0189 D6) --------------------------------------
    * 옛 이름을 쓰는 소비처가 새 역할을 가리키게 한다. 새 코드는 오른쪽 이름을
@@ -493,6 +502,12 @@
   /* 공용 툴팁의 세로 여백 6px (#4324). 가로 12는 `px-3`이다. */
   --spacing-tooltip-y: 6px;
 
+  /* 스레드 요약 줄의 겹친 얼굴 (#4878, owner 10-31 규격). 한 변 20과 겹침 6은 격자(4의 배수) 밖이라 이름으로
+   * 들어온다: `size-5`·`-ml-1.5`는 컴파일되지 않는다. 폰은 22pt이고(코어 `THREAD_FACE_SIZE`), 두 수는
+   * `threadFaceTokens.test.ts`가 코어 상수와 대조한다. 바탕색 2px 링은 `ring-2`(스톡 유틸)다. */
+  --spacing-thread-face: 20px;
+  --spacing-thread-face-overlap: 6px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
@@ -770,6 +785,14 @@
    * 이 자리의 거짓이 된다. */
   --spacing-unfurl-hero: 336px;
 
+  /* 링크 카드 「작게」의 그림 칸 (#4882, owner 2026-10-31). 높이 64가 칸의 변이다:
+   * 아이콘 타일은 64×64, 작거나 정사각형인 그림은 자르지 않고 64×64 안에 통째로 넣고,
+   * 보통 그림만 가로를 넓혀 104×64로 자른다. 64는 4의 배수지만 리듬 스케일(최대 32)
+   * 밖이고 104는 4의 배수이되 그 위라서 이름으로 들어온다. 이전에는 이 칸이
+   * `--spacing-rail-tile`(44, 워크스페이스 레일 타일)을 빌려 쓰고 있었다. */
+  --spacing-unfurl-tile: 64px;
+  --spacing-unfurl-thumb: 104px;
+
   /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
    *
    * 상한 20개를 다 채우면 트레이가 803px 로 자라 타임라인이 화면에서 사라지고
@@ -785,12 +808,32 @@
    * 도착 순간에 자라지 않는다. 캔버스는 이 값의 두 배로 그린다(draftThumbnail.ts). */
   --spacing-tray-thumb: 64px;
 
+  /* 입력창 안 첨부 줄의 카드 높이, 곧 이미지 카드의 한 변 (#5200, owner 가 고른 Codex 입력창).
+   *
+   * 입력칸 테두리 안 위쪽에 둥근 카드가 **가로 한 줄**로 서고, 넘치면 가로로 민다. 줄 높이는
+   * 개수와 상관없이 이 값 하나다. 96 은 리듬 스케일(최대 32) 밖이고, 앞 판의 `--spacing-tray-thumb`
+   * (64)와 다른 축이다: 64 는 이름·상태·막대가 두 줄로 서는 칩에 맞춘 값이었고, 이 줄은 줄바꿈이
+   * 없어 그림이 알아볼 만큼 커야 한다. Codex 캡처의 카드는 134px(본문 13px 의 열 배)인데, 여기는 같은
+   * 창에서 대화를 읽어야 해서 그만큼 키우지 않는다. 96 이면 반경(rounded-md 10)·간격(8)·X(16)가 캡처의
+   * 비율(9% · 6% · 14%)과 거의 같다. 썸네일 캔버스는 이 값의 두 배로 그린다(draftThumbnail.ts). */
+  --spacing-tray-card: 96px;
+
+  /* 파일·영상·실패 카드의 가로 (#5200). 같은 높이(`--spacing-tray-card`)에 가로만 넓다. 160 이면
+   * 「58.4 MB · 업로드 중 42%」(약 133px)가 한 줄에 들고, 실패 이유(최장 23자)가 두 줄에 든다. Codex 의
+   * 파일 카드는 1.3:1 인데 거기는 이름 한 줄뿐이라 이 카드가 더 많이 말하는 만큼 넓다(5:3). */
+  --spacing-tray-card-wide: 160px;
+
   /* 타임라인 인라인 이미지의 상한 (#3820, Buzz 레퍼런스).
    *
-   * 한 장은 폭 360 · 높이 320 안에서 비율을 지킨다. 서버가 이미지 치수를 주지
-   * 않으므로 도착 전 자리는 높이 상한(`--spacing-inline-image-h`)의 상자로 잡고,
-   * 도착 뒤 세로로 긴 그림은 같은 높이 안에, 가로로 긴 그림은 그보다 낮게 선다
-   * (그 차이만큼만 아래 줄이 움직인다). 격자 타일은 정사각형이다. */
+   * 「보통 상자」는 폭 360 · 높이 320 이고, 한 장은 그 안에서 비율을 지킨다. 서버가 이미지
+   * 치수를 주지 않으므로 도착 전 자리는 높이 상한(`--spacing-inline-image-h`)의 상자로
+   * 잡는다. 격자 타일은 정사각형이다.
+   *
+   * **가로로 긴 그림은 보통 상자만으로 서지 않는다** (#5189, README §2.10). 폭 360 에 갇힌
+   * 2072×110 캡처는 360×19 가 되어 글자가 뭉개지고 모서리가 알약이 되었다. 그래서 「넓은
+   * 상자」(폭 제한 없음 · 높이 `--spacing-preview-frame` 180)가 더해져, 보통 상자와 넓은 상자
+   * 중 더 크게 서는 쪽을 따른다. 계산은 `inlineImageModel.ts`(숫자는 시험이 이 파일과 대조한다),
+   * 열이 상자보다 좁으면 CSS 가 비율대로 줄인다. */
   --spacing-inline-image-w: 360px;
   --spacing-inline-image-h: 320px;
   --spacing-inline-image-tile: 176px;
@@ -1229,6 +1272,14 @@
   :is(.peer:focus-visible ~ *, :has(:focus-visible)):not([data-focus-ring="always"]) {
   outline: none;
 }
+/* 첨부 카드에 키보드 초점이 있으면 그릇의 링은 접는다 (#5200). 그릇의 링(`focus-visible-within:focus-ring`)은
+ * 「이 입력창이 키를 받는다」를 말하는데, 카드 줄 안에서는 **어느 카드인가**가 더 중요하고, 그릇 링이 카드 링과
+ * 8px 간격으로 겹치면 한 컨트롤 안에 두 번째 상자가 생긴다(글 칸의 UA 아웃라인을 걷은 것과 같은 이유다).
+ * 글 칸·도구 단추에 초점이 있을 때는 그릇 링이 그대로 선다. **레이어 밖**이어야 유틸리티 레이어의 링을
+ * 이긴다(바로 위 포인터 모달리티 규칙과 같은 자리·같은 이유). */
+[data-composer-frame]:has([data-attachment-card]:focus-visible) {
+  outline: none;
+}
 /* `data-focus-ring="always"`: 캐럿이 있는 곳이 곧 **키가 가는 곳**이라 어떻게
  * 잡았든 보여야 하는 표면(원격 조작 화면, DisplayController design-review H-2). */
 
@@ -1498,6 +1549,29 @@
   @media (width >= 600px) {
     transition: grid-template-columns var(--duration-sidebar)
       var(--motion-ease-standard);
+
+    /* 사이드바 열은 본문 칸이 컴포저 바닥을 지키도록 양보한다 (#5093, #5048 D4).
+     * 사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤 펼친 셸의 컴포저는 `창 폭 − 390`이라 600px 창에서
+     * 210px였다. 바닥(gate-work-panel `MIN_COMPOSER_WIDTH` 240) 아래로 떨어진 폭은 **600~629px뿐**이고 630~719px는
+     * 수리 전에도 바닥 위였다(650 → 260 · 719 → 329).
+     *
+     * 문턱을 더하지 않고 열이 양보한다. 「주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다」는 이 파일의 문법
+     * (`route-region` · `chat-region` · `thread-pane`)을 사이드바 열에도 적용한 것이다. 600 문턱(`MOBILE_SHELL_QUERY`)은
+     * 열이 240이던 때의 값이지만 건드리지 않는다: 옮기면 `@media (width < 600px)` 블록 전부와 JS가 함께 움직인다.
+     * 새 문턱(630)도 만들지 않는다: 미디어 쿼리는 `var()`를 읽지 못해 파생값이 조용히 틀린다(`thread-pane` 주석).
+     * 아래 `min()`은 문턱 없이 이어진다: 630px 이상에서는 324 그대로이고, 600px에서 294(레일 56 + 목록 열 238)다.
+     *
+     * 306 = 컴포저 입력 바닥 240 + 판 오른쪽 인셋 8 + 입력 상자 밖의 58(폼 좌우 24×2 + 카드 안쪽 4×2 + 카드 테두리
+     * 1×2). 컴포저 크롬이 움직이면 이 숫자도 함께 움직인다: gate:work-panel `narrow-shell-*`이 렌더된 컴포저 폭으로 잰다.
+     * 목록 열은 `--spacing-pane-sm`(192)을 지킨다(창 600 이상이면 238).
+     *
+     * `100vw`인 이유: 값이 길이로 풀려야 접힘 전환(`useSidebarCollapsePaint`가 `grid-template-columns`의
+     * transitionend를 기다린다)이 그대로 돈다. 셸이 곧 창이다. 루트의 `--w-sidebar`(324)는 그대로이고, 이 선언은 셸에서만
+     * 그것을 덮는다: 아래 격자 열과 「내 작업」의 띠 폭(`--shell-band-w`)이 같은 실제 폭을 읽는다. */
+    --w-sidebar: min(
+      calc(var(--spacing-rail) + var(--w-sidebar-list)),
+      calc(100vw - 306px)
+    );
 
     /* 창 바닥 (DS2-6 #2718, 시안 A `.a-win`). 창 전체가 그라데이션이고, 사이드바는
      * 그 위에 녹아 자기 바탕이 없다. 본문은 그 위에 떠 있는 판 하나다(`app-pane`).
@@ -2267,6 +2341,8 @@
   gap: var(--spacing-3);
   padding-inline: var(--spacing-4);
   border-block-end: 1px solid var(--line);
+  /* 머리 폭에 따라 서고 숨는 것이 있다(`channel-head-live-joined`). 머리는 세로 flex의 자식이라 폭이 늘 부모에서 정해져 안전하다. */
+  container: channel-head / inline-size;
 
   @media (width >= 600px) {
     min-block-size: 60px;
@@ -2318,6 +2394,117 @@
   color: var(--ink-muted);
 }
 
+/* 본문 머리의 세 칸 (#4230). 머리(`channel-head`)는 `flex-wrap` 한 줄이 기본이고 안에 칸이 둘이다.
+ * 판이 `overflow: clip`이라 머리 밖으로 밀린 컨트롤은 스크롤로도 닿지 않는다. 그래서 순서는 **컨트롤이 먼저, 제목이 나중**이다.
+ *
+ *   channel-head-main   서랍 단추(폰)·종류 아이콘·제목 칸. 기본 폭은 `min-content`: 지금 줄일 수 없는 것(단추·아이콘·틈)과
+ *                       제목 칸의 바닥(아래)을 더한 값이다. 컨트롤 묶음이 그 옆에 못 서면 줄이 바뀌고, 서면 남는 폭을 전부 받는다.
+ *   channel-head-body   제목(+핸들·토픽)이 서는 칸. 기본 폭과 `inline-size`가 0이라 **긴 이름·토픽의 글 폭이 윗 칸의 기본 폭을
+ *                       부풀리지 못한다**(부풀리면 컨트롤이 밀리던 예전 결함이 그대로다). 바닥은 제목이 읽히는 최소 몫이다:
+ *                       폰 폭(600 미만)은 3rem(말줄임표와 글자 두어 개), **넓은 창(600 이상)은 제목 글자 8자 몫**(`--text-heading` × 8,
+ *                       글자 크기 설정을 따른다). 이보다 좁아져야 하면 제목을 더 깎는 대신 컨트롤 묶음이 아랫줄로 내려온다.
+ *                       (#5206: 바닥이 3rem이던 때는 데스크탑 최소 창 근처 720~768에서 긴 이름이 53~101px로, 한글 서너 자만 남았다.)
+ *   channel-head-tools  컨트롤 묶음. 안의 단추는 전부 `shrink-0`이라 줄지 않는다. 한 줄에 서면 그대로, 아랫줄로 내려오면 오른쪽 끝에
+ *                       붙는다(`margin-inline-start: auto`). 아랫줄에서도 줄 폭보다 넓을 때만(폰 320, 판이 좁은 600대) 줄 폭으로 줄어
+ *                       그 안의 `flex-wrap`이 단추를 다음 줄로 보낸다.
+ *
+ * `flex-basis: min-content`가 줄바꿈 판정에 쓰이는 방식은 크롬·웨빗이 같다(`gate:channel-header-fit`이 두 엔진에서 잰다). */
+@utility channel-head-main {
+  flex: 1 1 min-content;
+  min-inline-size: 0;
+}
+@utility channel-head-body {
+  flex: 1 1 0;
+  inline-size: 0;
+  min-inline-size: 3rem;
+
+  @media (width >= 600px) {
+    min-inline-size: calc(var(--text-heading) * 8);
+  }
+}
+@utility channel-head-tools {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+}
+
+/* 제목 칸 안에서 제목 뒤에 서는 것들은 전부 **제목이 먼저 폭을 가진 뒤 남는 폭**만 받는다 (#5206 · #5184).
+ * 제목(`h1`)은 글 폭이 기준(줄어도 되지만 남에게 폭을 주지 않는다), 아래 둘은 기준이 0이라 제목이 다 선 뒤의 남는 폭에서 시작한다.
+ *
+ *   channel-head-handle  같은 이름 DM의 구분용 핸들(`@dohyun`). **통째로 보이거나 통째로 숨는다**(「@」 조각 금지). 칸 안에 폭 0짜리 빈 조각과
+ *                        핸들이 `flex-wrap`으로 놓이고, 핸들이 칸 폭에 통째로 안 들어가면 둘째 줄로 가서 한 줄 높이(`overflow: hidden`)
+ *                        밖으로 숨는다. 말줄임(`text-overflow`)은 쓸 수 없다: 크로미엄·웨빗 모두 줄 끝의 인라인 상자를 조각내 남긴다(실측).
+ *                        숨은 핸들도 글(낭독)과 제목의 `title`에는 남는다. 칸의 폭은 핸들의 글 폭을 넘지 못한다.
+ *   channel-head-tail    토픽과 허들 참가자 이름이 서는 칸. 제목과 핸들 뒤 남는 폭 전부를 받는다. 이 칸 자신이 컨테이너(`channel-tail`)라
+ *                        안의 것이 칸 폭에 따라 서고 숨는다. 폰 폭(600 미만)에는 칸이 없다(안에 설 것이 전부 `wide-only`).
+ *   channel-head-names   허들 참가자 이름 글(`HuddleHeaderNames`). 칸이 8rem 이상일 때만 보이고(그 밑에서는 조각이 아니라 통째로 숨는다),
+ *                        칸 안에서 토픽보다 먼저 폭을 받는다(토픽이 나머지). 전문은 칩의 낭독·`title`에 남는다. 폰 폭(600 미만)에서는 서지 않는다. */
+@utility channel-head-handle {
+  flex: 100 1 0;
+  max-inline-size: max-content;
+  min-inline-size: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  overflow: hidden;
+  block-size: var(--text-meta--line-height);
+
+  /* 폭 0짜리 빈 조각이 첫 줄을 차지한다. 핸들은 그 뒤 둘째 칸이라 칸에 통째로 안 들어가면 둘째 줄로 간다. 조각에 높이가 없으면
+   * 줄이 비어 있다고 보아 핸들이 첫 줄에 남는다(크로미엄·웨빗 실측). */
+  &::before {
+    content: "";
+    flex: none;
+    inline-size: 0;
+    block-size: var(--text-meta--line-height);
+  }
+}
+@utility channel-head-tail {
+  flex: 1 1 0;
+  min-inline-size: 0;
+  /* 폰 폭(600 미만)에서는 토픽도 이름 글도 서지 않는다(`wide-only`). 빈 칸이 칸 틈 8을 제목에서 가져가지 않게 칸 자체를 두지 않는다. */
+  display: none;
+  align-items: center;
+  overflow: clip;
+  container: channel-tail / inline-size;
+
+  @media (width >= 600px) {
+    display: flex;
+  }
+}
+@utility channel-head-names {
+  display: none;
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  @media (width >= 600px) {
+    @container channel-tail (inline-size >= 8rem) {
+      display: block;
+    }
+  }
+
+  /* 참가 중(`data-joined`)에는 칩과 함께 머리가 좁으면 양보한다(아래 `channel-head-live-joined`와 같은 문턱): 칩 없이 이름만 남지
+   * 않게. 속성 선택자라 위의 `display: block`보다 특이도가 높아 소스 순서와 상관없이 늘 이긴다. */
+  &[data-joined] {
+    @container channel-head (inline-size < 26rem) {
+      display: none;
+    }
+  }
+}
+/* 참가 중의 Live 칩 (#5184): 마이크 묶음·나가기가 이미 「참가 중」을 말하므로 머리가 좁으면 칩이 먼저 양보한다(폰 폭 규칙과 같은 취지,
+ * #1886 B-1; 참가자 이름 글은 위 `channel-head-names`의 `[data-joined]`가 같은 문턱에서 함께 양보한다). 계획 독 + 참가 중의 컨트롤
+ * 묶음은 칩까지 한 줄에 387px(글자 크게 약 400)라 판 안쪽 폭 346(데스크탑 최소 창 720)에 안 들어가 머리가 세 줄로 접혔다. 머리 안쪽 폭이
+ * 26rem(416px) 밑이면 칩이 빠져 305px + 틈이라 두 줄 이내다. **서 있는 허들에 참가하기 전**의 칩(참가 단추 옆)은 이 규칙을 받지 않는다:
+ * 그 칩이 「지금 허들이 열려 있다」는 유일한 표지다. 컨테이너 폭은 머리의 안쪽(패딩 뺀) 폭이다. */
+@utility channel-head-live-joined {
+  @container channel-head (inline-size < 26rem) {
+    display: none;
+  }
+}
+
 /* 떠 있는 컴포저 (시안 `.a-dcomp`): 좌우 24 · 아래 18 · 반경 20 · float 그림자 +
  * 1px 선 고리 · 흰 면. 시안은 타임라인 위에 절대 위치로 얹지만 여기서는 흐름
  * 안에 선다(PR 차이 표: 높이가 트레이·라우팅 줄·줄바꿈으로 바뀌고, 타임라인의
@@ -2364,9 +2551,25 @@
     & > form {
       padding: var(--spacing-2) var(--spacing-6) 18px;
     }
+
+    /* 컴포저의 후보 목록(`@`·`#`·`:`)과 `/` 명령 목록은 폼 안에 절대 위치로 서고, 가로는 폰 폭의 폼 여백(`p-3`, 12)에
+     * 맞춘 `left-3`·`right-3`이다. 넓은 창의 폼 여백은 위에서 24라서 12에 두면 목록이 카드의 가장자리보다 12 바깥으로
+     * 튀어나온다(#5094, #5048 D6). 여백이 바뀌는 바로 이 블록에서 같은 값(`--spacing-6`)으로 따라간다 — 폼 여백과 목록
+     * 가장자리가 한 곳에서 같이 움직이므로 한쪽만 고쳐 어긋나지 않는다. 폰 폭은 그대로 12다.
+     * `ComposerAutocompleteList`의 세 뿌리(후보 목록 · 상태 상자 · 명령 목록)가 `data-composer-popover`를 달고, 양쪽 가장자리에
+     * 서는 명령 목록(`menu`)만 오른쪽도 맞춘다(너비가 정해진 목록은 오른쪽을 쓰지 않는다). 스레드 컴포저는 이 독 밖이라
+     * 자기 `left-0`을 그대로 쓴다. */
+    & > form > [data-composer-popover] {
+      left: var(--spacing-6);
+    }
+
+    & > form > [data-composer-popover="menu"] {
+      right: var(--spacing-6);
+    }
   }
 }
-/* 첨부 트레이 (ADR-0151 D2). 폰에서는 컴포저 그릇 위 경계선 한 줄로 나뉜
+/* 컴포저 그릇 위의 한 줄 (ADR-0151 D2 → 지금은 링크 미리보기 줄 `ComposerLinkPreview`가 쓴다. 첨부 줄은
+ * #5200 부터 입력 카드 안이라 `tray-strip`을 쓴다). 폰에서는 컴포저 그릇 위 경계선 한 줄로 나뉜
  * 띠이고, 넓은 창에서는 떠 있는 카드 위에 선도 바탕도 없이 카드 가장자리(좌우
  * 24)에 맞춰 선다 — 카드 위에 또 하나의 띠를 그으면 판 안에 층이 셋이 된다. */
 @utility attachment-tray {
@@ -2377,6 +2580,52 @@
     border-block-end: 0;
     padding: var(--spacing-2) var(--spacing-6) 0;
   }
+}
+
+/* 입력창 안 첨부 줄 (#5200). 카드가 가로 한 줄로 서고, 넘치면 가로로 민다. 스크롤바는 그리지
+ * 않는다: 더 있다는 신호는 막대가 아니라 **경계에서 잘린 카드와 넘치는 쪽 가장자리의 흐림**이
+ * 한다(Codex 캡처도 왼쪽 카드가 경계에서 잘려 보인다). 흐림은 **넘치는 쪽만**이다. 끝까지 밀었을
+ * 때 마지막 카드와 그 X 가 흐려지면 안 되기 때문이다. 어느 쪽이 넘치는지는 `data-fade`
+ * (start | end | both)가 말하고, AttachmentTray 가 스크롤 위치에서 쓴다. 스타일 속성이 아니라
+ * 데이터 속성이라 CSP 와 무관하다. `overscroll-behavior-x: contain` 은 끝까지 민 뒤의 가로
+ * 제스처가 뒤로 가기가 되지 않게 한다. */
+@utility tray-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  &[data-fade="start"] {
+    mask-image: linear-gradient(to right, transparent, var(--ink) var(--spacing-4));
+  }
+
+  &[data-fade="end"] {
+    mask-image: linear-gradient(to left, transparent, var(--ink) var(--spacing-4));
+  }
+
+  &[data-fade="both"] {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      var(--ink) var(--spacing-4),
+      var(--ink) calc(100% - var(--spacing-4)),
+      transparent
+    );
+  }
+}
+
+/* 이미지 모서리 (#5189, README §2.10). 반경은 `--radius-md`(10)를 넘지 않고, 그림의 짧은 변의
+ * 1/4 도 넘지 않는다. 퍼센트는 가로 반경을 폭으로, 세로 반경을 높이로 풀기 때문에 **렌더된**
+ * 높이가 줄면(열이 좁아져 비율대로 줄어든 가로 캡처) 반경이 같이 줄고, JS 가 열 폭을 재거나
+ * 높이를 추측할 필요가 없다. 높이 40 이상의 그림은 예전과 똑같이 반경 10 이다. 이 클래스가
+ * 없던 시절 `rounded-md`(10)는 높이 19 의 가로 캡처에서 반경이 높이의 절반을 넘어 양끝이
+ * 알약이 되었다. `--radius-*` 사다리에 값을 더하지 않는다(폰이 사다리를 대조한다). */
+@utility image-corner {
+  border-radius: min(var(--radius-md), 25%);
 }
 
 @utility composer-card {
@@ -2628,10 +2877,19 @@
  * 상단 패딩)만큼만 다시 내려 앉힌다. 하단 가장자리가 패딩 상자 안에 머물므로
  * 자기 행 본문 텍스트 Range와 교차 0이 된다(B11 R2 Blocker의 후계 자
  * `assertHoverToolbarClearsBodyText`). 나머지 높이는 행간·이전 행 하단 패딩
- * 위에 얹힌다. 임의 translate 값은 금지라 토큰으로 계산한다. */
+ * 위에 얹힌다. 임의 translate 값은 금지라 토큰으로 계산한다.
+ *
+ * `--hover-toolbar-slide`(단위 없는 px, 없으면 0)는 위·아래 경계가 모두 이웃 글자에
+ * 막힐 때 막대를 **행 안쪽의 글자 없는 창**으로 더 내려 앉히는 거리다(#5179,
+ * `hoverToolbarModel.placeToolbar`). 값은 마운트 때 잰 자리에서 JS가 CSSOM으로
+ * 건다(`tooltipFit`의 `--tooltip-shift`와 같은 방식 — 인라인 style 속성은 CSP가
+ * 막는다). 밀지 않는 막대는 이 규칙 그대로다.
+ *
+ * `--hover-toolbar-nudge`(단위 없는 px, 없으면 0)는 두 straddle이 모두 읽는 가로 비끼기다:
+ * 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계에서 막대를 오른쪽으로 비껴 세운다(#5179). */
 @utility hover-toolbar-straddle {
   top: 0;
-  translate: 0 calc(-100% + var(--spacing-row));
+  translate: calc(var(--hover-toolbar-nudge, 0) * 1px) calc(-100% + var(--spacing-row) + var(--hover-toolbar-slide, 0) * 1px);
 }
 
 /* 위쪽 여유가 없을 때의 대칭 (#1743 H-4).
@@ -2642,7 +2900,7 @@
 @utility hover-toolbar-straddle-below {
   top: auto;
   bottom: 0;
-  translate: 0 calc(100% - var(--spacing-row));
+  translate: calc(var(--hover-toolbar-nudge, 0) * 1px) calc(100% - var(--spacing-row));
 }
 
 /* 메시지 줄·인박스 줄의 옅은 호버 (#4324). 가리킨 줄과 키보드 초점 줄은 `--surface-hover`를
@@ -2733,6 +2991,22 @@
   padding: var(--spacing-tooltip-y) var(--spacing-3);
   white-space: nowrap;
   pointer-events: none;
+
+  /* 판 안에 머물기 (#4230): 툴팁은 판(`overflow: clip`) 안에 그려져서 가장자리를 넘으면 글자가 잘린다. `tooltipFit.ts`가 열릴 때
+   * 재서 `--tooltip-shift`(가로 이동, 오른쪽이 양수)와, 판보다 넓을 때만 `--tooltip-max`와 `[data-capped]`(그 폭에서 줄바꿈)를
+   * 넣는다. 없으면 0·상한 없음이라 가운데·오른쪽 끝 정렬 그대로다. 두 값은 단위 없는 px 숫자다(여기서 `* 1px`로 곱한다). 이동은 여백으로 한다: 가운데 정렬(`left` 기준)은 시작 여백이,
+   * 오른쪽 끝 정렬(`right` 기준)은 끝 여백의 음수가 같은 쪽으로 민다. */
+  margin-inline-start: calc(var(--tooltip-shift, 0) * 1px);
+  margin-inline-end: calc(var(--tooltip-shift, 0) * -1px);
+
+  /* 줄바꿈 상태: 한국어는 어절에서 꺾는다(`keep-all`, 「채/널」로 끊지 않는다). 끊을 곳 없는 긴 영문 이름은 앱 전체의 기본 규칙
+   * (`:where(p, span, …) { overflow-wrap: anywhere }`, 툴팁도 span이라 상속한다)이 어디서든 꺾는다: 여기서 다시 적지 않는다. */
+  &[data-capped] {
+    inline-size: max-content;
+    max-inline-size: calc(var(--tooltip-max) * 1px);
+    white-space: normal;
+    word-break: keep-all;
+  }
 }
 
 /* 컴포저 선택 서식 트레이 (#1902). 선택 영역 위(여유 없으면 아래)에 고정한다.
@@ -4101,20 +4375,64 @@
   }
 }
 
-/* 위 줄: 왼쪽에 보낸 사람 칩, 오른쪽에 받기·닫기. 줄 자체는 빈 무대라서 포인터를 받지 않는다(빈 곳을 누르면 무대가 받아
- * 닫는다). 칩과 버튼이 `pointer-events-auto`로 자기 자리를 되찾는다. 데스크탑 셸(`data-desktop-shell`)에서는 왼쪽 신호등
- * 자리(`--titlebar-inset`)를 비운다: 상단 줄·온보딩 스텝 줄과 같은 한 값을 읽고, 전체 화면에서는 그 값이 접힌다.
- * 위 여백 4는 40px 상단 줄 안에서 34px 아이콘 버튼의 중심이 신호등 중심(20)과 맞는 값이다(`app-titlebar` 토글과 같은 자리). */
+/* 위 줄 (#4751 → #5190). 40px 한 줄이고, 세로 가운데가 신호등 원 중심이다: 상단 줄(`app-titlebar`)과 같은 높이
+ * `--spacing-control-lg`에 가운데 맞춤이라, 신호등(y 22 − 2)·상단 줄 토글·여기의 단추와 글자 블록이 모두 20.0에 선다.
+ * 왼쪽에 보낸 사람·시각(칩 없이 글자만), 오른쪽에 받기·복사·닫기. 줄 자체는 빈 무대라서 포인터를 받지 않는다(빈 곳을 누르면
+ * 무대가 받아 닫는다). 글자 블록과 버튼이 `pointer-events-auto`로 자기 자리를 되찾는다.
+ * 데스크탑 셸(`data-desktop-shell`)에서는 왼쪽 신호등 자리(`--titlebar-inset`)를 비운다: 상단 줄·온보딩 스텝 줄과 같은 한 값을
+ * 읽고, 전체 화면에서는 그 값이 접힌다. 앞 판의 2줄 알약은 위 여백 4에서 시작해 신호등보다 키가 크고 가운데가 4px 아래라 오른쪽
+ * 단추 줄과 어긋났고, 신호등과 12px 간격으로 붙어 겹쳐 보였다(owner 데스크탑 검수 2026-11-02).
+ *
+ * 이 줄은 **스킴과 무관하게 어둡다**(`color-scheme: dark`: 유리·글자·테두리 토큰이 다크 값으로 읽힌다). 라이트 앱 위에서 흰 유리 알약이
+ * 어두운 무대에 뜨던 것이 폰 뷰어(어느 테마에서나 검은 무대)와 가장 크게 갈린 점이었다. 글자는 칩이 아니라 무대 위에 바로 서므로
+ * 확대하면(`data-zoomed`) 뒤에 `--lightbox-scrim` 판이 깔리고(`::before`, 줄 높이까지는 판이고 그 아래로 풀린다), 밝은 사진이 줄 아래로
+ * 들어와도 읽힌다. 맞춤에서는 사진이 줄 밖(위 여백 64)에 서서 판이 필요 없다. 판은 사진 위·글자 아래에 선다: `isolation`이 이 줄을 한
+ * 겹으로 묶고, 줄 안에서는 아래 `> *`가 글자·단추를 판 뒤가 아니라 앞에 그린다. */
 @utility lightbox-chrome {
   position: absolute;
   inset-block-start: 0;
   inset-inline: 0;
+  isolation: isolate;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--spacing-3);
-  padding: var(--spacing-1) var(--spacing-3) 0;
+  block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-3);
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    block-size: calc(var(--spacing-control-lg) * 2 + var(--spacing-6));
+    background-image: linear-gradient(
+      to bottom,
+      var(--lightbox-scrim) var(--spacing-control-lg),
+      color-mix(in srgb, var(--lightbox-scrim) 45%, transparent) calc(var(--spacing-control-lg) + var(--spacing-6)),
+      transparent
+    );
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease-standard);
+    pointer-events: none;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  &[data-zoomed]::before {
+    opacity: 1;
+  }
+
+  /* 판을 글자·단추 **뒤**에 세우는 길은 z-index가 아니라 그리기 차례다(이름 있는 층 말고는 z-index를 쓰지 않는다,
+   * overlayLayers.test.ts): `::before`는 위치를 가진 첫 자식이고, 위치를 가진 뒤 형제가 그 위에 그려진다. */
+  & > * {
+    position: relative;
+  }
 
   &[data-desktop-shell] {
     padding-inline-start: var(--titlebar-inset);
@@ -4125,7 +4443,10 @@
  * 위에, 사진(또는 불러오는 중·실패 칸)이 남는 높이에 선다. 둘레 여백: 가로 32, 세로 64(위 칩 줄 40 + 24: 칩이 두 줄이라 글자를 크게
  * 하면 52를 넘는데 52로 두면 가로 사진이 칩 아래 가장자리에 붙었다, 아래는 같은 값이라 사진이 창 가운데에 선다). 2장 이상이면
  * 양옆 이전/다음 버튼(34 + 바깥 8 + 사이 8)이 선 자리만큼 가로가 넓어지고(`data-multi`), 썸네일 줄이 있으면 그 높이(56 + 사진과의
- * 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600 미만)은 버튼이 44px 터치 타깃으로 자란다. */
+ * 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600 미만)은 버튼이 44px 터치 타깃으로 자란다.
+ * (#5190) 아래 덩어리는 썸네일 줄(40 + 안쪽 여백 8) · 사이 8 · 캡슐(34 + 안쪽 여백 8) · 바닥 여백 12 · 사진과의 사이 16 = 126이다. 썸네일
+ * 줄이 유리 상자에서 맨몸이 되었어도 높이는 같은 40 + 8로 서고, 두 줄(썸네일·캡슐) 말고는 아래에 아무것도 없다. 한 장이면 캡슐만
+ * 서서 캡슐(34 + 8) · 바닥 12 · 사이 16 = 70이다(위는 64 그대로: 사진이 3px 위로 앉을 뿐이다). */
 @utility lightbox-body {
   position: absolute;
   inset: 0;
@@ -4134,6 +4455,7 @@
   align-items: center;
   justify-content: center;
   padding-block: calc(var(--spacing-control-lg) + var(--spacing-6));
+  padding-block-end: calc(var(--spacing-icon-button) + var(--spacing-2) + var(--spacing-3) + var(--spacing-4));
   padding-inline: var(--spacing-8);
 
   &[data-multi] {
@@ -4142,7 +4464,8 @@
 
   &[data-thumbs] {
     padding-block-end: calc(
-      var(--spacing-control-lg) + var(--spacing-3) + var(--spacing-control-lg) + var(--spacing-4) + var(--spacing-4)
+      var(--spacing-control-lg) + var(--spacing-2) + var(--spacing-2) + var(--spacing-icon-button) + var(--spacing-2) +
+        var(--spacing-3) + var(--spacing-4)
     );
   }
 
@@ -4160,6 +4483,8 @@
   inset-block: 0;
   display: flex;
   align-items: center;
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
 
   &[data-side="start"] {
@@ -4170,17 +4495,82 @@
   }
 }
 
-/* 아래 가운데: 위에 썸네일 줄(있으면), 아래에 「N장 중 n번」 캡션. 칸은 포인터를 받지 않는다. */
+/* 아래 가운데 (#4751 → #5190): 위에 썸네일 줄(두 장 이상일 때만, 유리 상자 없이 맨몸), 아래에 한 캡슐 `[−] 맞춤 [+] │ 3장 중 2번`.
+ * 칸은 포인터를 받지 않는다. 위 줄과 같은 어두운 범위이고, 확대하면(`data-zoomed`) 같은 `--lightbox-scrim` 판이 뒤에 깔린다: 위 칸 32px에서
+ * 풀려 오르고(밝은 사진이 줄 아래에 들어와도 썸네일·캡슐이 읽힌다), 맞춤에서는 사진이 줄 밖(아래 여백)에 선다. */
 @utility lightbox-foot {
   position: absolute;
   inset-block-end: 0;
   inset-inline: 0;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-2);
-  padding: 0 var(--spacing-3) var(--spacing-3);
+  padding: var(--spacing-8) var(--spacing-3) var(--spacing-3);
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in srgb, var(--lightbox-scrim) 45%, transparent) var(--spacing-4),
+      var(--lightbox-scrim) var(--spacing-8)
+    );
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease-standard);
+    pointer-events: none;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  &[data-zoomed]::before {
+    opacity: 1;
+  }
+
+  /* 위 줄과 같다: 판은 위치를 가진 첫 자식이고 썸네일 줄·캡슐은 그 뒤에 위치를 가지고 그려진다(z-index 없이). */
+  & > * {
+    position: relative;
+  }
+}
+
+/* 확대 단추와 장 번호가 한 알약에 선다(Buzz의 아래 도구 줄 자리). 유리는 JSX의 `glass`다. 폭 600 미만(손가락)에서는 확대 묶음이
+ * 빠지고(핀치·두 번 탭이 그 길이다), 사진이 한 장이면 캡슐에 남는 것이 없어 통째로 빠진다(`data-solo`). */
+@utility lightbox-capsule {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
+  pointer-events: auto;
+
+  @media (width < 600px) {
+    &[data-solo] {
+      display: none;
+    }
+  }
+}
+
+@utility lightbox-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+
+  @media (width < 600px) {
+    display: none;
+  }
+}
+
+/* 배율 글자 칸. 「맞춤」과 「400%」가 같은 폭에 서서 − + 가 글자 길이에 따라 흔들리지 않는다(48 = 32 + 16). */
+@utility lightbox-readout {
+  min-inline-size: calc(var(--spacing-8) + var(--spacing-4));
+  text-align: center;
 }
 
 /* 확대한 사진 (#4770). 변환은 CSS 변수가 든다: `useImageLightboxZoom`이 CSSOM으로 `--lightbox-zoom`·`--lightbox-pan-x`·
@@ -4212,18 +4602,6 @@
       transition: none;
     }
   }
-}
-
-/* 확대 비율 칩이 서는 자리 (#4770). 아래 줄(`lightbox-foot`)의 윗변에 얹힌다: 썸네일 줄이 있든 없든 그 바로 위에 뜨고, 칩이
- * 서고 걷혀도 아래 줄의 자리를 밀지 않는다(흐름 밖). 칸은 포인터를 받지 않는다. */
-@utility lightbox-zoom-slot {
-  position: absolute;
-  inset-inline: 0;
-  inset-block-end: 100%;
-  display: flex;
-  justify-content: center;
-  padding-block-end: var(--spacing-2);
-  pointer-events: none;
 }
 
 /* Marketplace is a decision surface: on a wide viewport its chosen app must
@@ -5171,11 +5549,17 @@
   background-color: transparent;
 }
 
+/* 칸은 자식 순서에 맡기지 않고 못 박는다(#5101, 검증 줄 M1). 첫 화면(D0)에는 진행 점이 없어 줄의 자식이 둘뿐이고,
+ * 칸을 정하지 않으면 끝 칸의 자식(언어 칩)이 가운데 `auto` 칸에 들어가 D1에서 오른쪽 끝으로 옮겨 간다
+ * (`justify-self: end`는 칩 폭만 한 그 칸 안에서 아무 일도 못 한다). 점이 있든 없든 첫 자식은 첫 칸, 마지막
+ * 자식은 셋째 칸이고, 점은 그 사이(가운데)에 선다. */
 .onboarding-frame > .onboarding-step-chrome > :first-child {
+  grid-column: 1;
   justify-self: start;
 }
 
 .onboarding-frame > .onboarding-step-chrome > :last-child {
+  grid-column: 3;
   justify-self: end;
 }
 

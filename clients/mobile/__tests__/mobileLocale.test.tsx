@@ -330,7 +330,7 @@ it('blocks services on initialization failure and offers only English safe text 
   await waitFor(() => expect(diagnostic).toHaveBeenCalledTimes(2));
 });
 
-it('switches the whole mounted context immediately with system first, ko/en autonyms, beta and partial notice', async () => {
+it('switches the whole mounted context immediately with system first and ko/en autonyms — no beta tag, one notice line only in English', async () => {
   const current = await controller();
   const createController = async () => current;
   const mounted = jest.fn();
@@ -342,17 +342,53 @@ it('switches the whole mounted context immediately with system first, ko/en auto
   render(<ThemeProvider><MobileLocaleProvider createController={createController}>
     <ExistingAccount /><LanguageSettingRow onPress={() => {}} /><LanguageSettingsPage onBack={() => {}} />
   </MobileLocaleProvider></ThemeProvider>);
-  // The spoken label carries what the screen shows next to each autonym: the beta tag.
-  const en = await screen.findByRole('radio', {name: `${localeAutonyms['en-US']}, 베타`});
-  expect(screen.getAllByRole('radio').map(row => row.props.accessibilityLabel)).toEqual(['기기 언어 따르기', '한국어, 베타', 'English, 베타']);
-  expect(screen.getAllByText('베타')).toHaveLength(2);
+  // Owner 10-31 (#4936): no beta tag, neither on screen nor in the spoken label — a row is its autonym alone.
+  const en = await screen.findByRole('radio', {name: localeAutonyms['en-US']});
+  expect(screen.getAllByRole('radio').map(row => row.props.accessibilityLabel)).toEqual(['기기 언어 따르기', '한국어', 'English']);
+  expect(screen.queryByText(/베타|Beta/)).toBeNull();
+  // The four explanation lines are gone, and the Korean UI keeps none of them (nor the partial notice).
+  const ko = current.getSnapshot().locale;
+  for (const line of [
+    ko.formatMessage('settings.profile.languageCurrent', {languageName: localeAutonyms['ko-KR']}),
+    ko.formatMessage('settings.profile.languageHint'),
+    ko.formatMessage('settings.profile.languagePartialNotice'),
+  ]) expect(screen.queryByText(line)).toBeNull();
+  expect(screen.queryByTestId('language-partial-notice')).toBeNull();
   fireEvent.press(en);
   await waitFor(() => expect(screen.getByTestId('another-account')).toHaveTextContent('Language'));
   expect(en).toBeSelected();
-  expect(screen.getAllByRole('radio').map(row => row.props.accessibilityLabel)).toEqual(['Use device language', '한국어, Beta', 'English, Beta']);
-  expect(screen.getAllByText('Beta')).toHaveLength(2);
-  expect(screen.getByText('Screens that are not yet translated appear in Korean.')).toBeTruthy();
+  expect(screen.getAllByRole('radio').map(row => row.props.accessibilityLabel)).toEqual(['Use device language', '한국어', 'English']);
+  expect(screen.queryByText(/베타|Beta/)).toBeNull();
+  // English UI: exactly one line is left, and it is the partial-support note.
+  expect(screen.getByTestId('language-partial-notice')).toHaveTextContent('Some screens are still in Korean.');
+  const english = current.getSnapshot().locale;
+  for (const line of [
+    english.formatMessage('settings.profile.languageCurrent', {languageName: localeAutonyms['en-US']}),
+    english.formatMessage('settings.profile.languageHint'),
+  ]) expect(screen.queryByText(line)).toBeNull();
   expect(mounted).toHaveBeenCalledTimes(1);
+});
+
+const englishDevice: DeviceLocaleFacts = {languages: ['en-US'], timeZone: 'Asia/Seoul'};
+const partialNoticeCases: [string, LocalePreferencePort, 'ko-KR' | 'en-US'][] = [
+  ['system on a Korean device', port(), 'ko-KR'],
+  ['system on an English device', port(englishDevice), 'en-US'],
+  ['system on a device language the app has no catalog for (English fallback)', port({languages: ['ja-JP'], timeZone: 'Asia/Seoul'}), 'en-US'],
+  ['an explicit Korean choice on an English device', {...port(englishDevice), readPreference: (): unknown => 'ko-KR'}, 'ko-KR'],
+  ['an explicit English choice on a Korean device', {...port(), readPreference: (): unknown => 'en-US'}, 'en-US'],
+];
+it.each(partialNoticeCases)('shows the partial-support line only while the UI is English: %s', async (_name, preferencePort, uiLocale) => {
+  const current = await controller(preferencePort);
+  render(<ThemeProvider><MobileLocaleProvider createController={async () => current}>
+    <LanguageSettingsPage onBack={() => {}} />
+  </MobileLocaleProvider></ThemeProvider>);
+  await screen.findAllByRole('radio');
+  expect(current.getSnapshot().effectiveLocale).toBe(uiLocale);
+  if (uiLocale === 'en-US') {
+    expect(screen.getByTestId('language-partial-notice')).toHaveTextContent('Some screens are still in Korean.');
+  } else {
+    expect(screen.queryByTestId('language-partial-notice')).toBeNull();
+  }
 });
 
 it('retains the old language on storage failure and retries the original selection inline', async () => {
@@ -360,7 +396,7 @@ it('retains the old language on storage failure and retries the original selecti
   const current = await controller({...port(), writePreference: write});
   const createController = async () => current;
   render(<ThemeProvider><MobileLocaleProvider createController={createController}><LanguageSettingsPage onBack={() => {}} /></MobileLocaleProvider></ThemeProvider>);
-  fireEvent.press(await screen.findByRole('radio', {name: 'English, 베타'}));
+  fireEvent.press(await screen.findByRole('radio', {name: 'English'}));
   const retry = await screen.findByRole('button', {name: '다시 시도'});
   expect(current.getSnapshot().preference).toBe('system');
   expect(screen.queryByText('disk detail')).toBeNull();

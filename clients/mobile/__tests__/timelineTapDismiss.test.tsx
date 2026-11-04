@@ -189,7 +189,7 @@ describe('listTapDismiss (#4614)', () => {
     });
   });
 
-  describe('탭이 아니면 건드리지 않는다 — 끌기는 지금처럼 on-drag 의 몫이다', () => {
+  describe('탭이 아니면 건드리지 않는다 — 끌기는 48pt 누적 판정(#4665, `dragRest`)의 몫이다', () => {
     it('끌기: 시작점에서 TAP_SLOP_PT 이상 움직이면 뗀 자리가 가까워도 자판도 입력창도 그대로다', () => {
       renderTimeline(rowActions(), bridge);
       start(100, 300, 10_000);
@@ -226,10 +226,10 @@ describe('listTapDismiss (#4614)', () => {
       expect(rest).not.toHaveBeenCalled();
     });
 
-    it('목록은 지금처럼 끌면 자판을 내린다(on-drag) · 탭은 `handled` 라서 자기 동작이 있는 요소가 첫 탭에 죽지 않는다', () => {
+    it('목록은 끌기 즉시 자판을 걷지 않는다(`none` — 손가락 아래 48pt 누적은 `dragRest`, #4665) · 탭은 `handled` 라서 자기 동작이 있는 요소가 첫 탭에 죽지 않는다', () => {
       renderTimeline(rowActions(), bridge);
       // `never` 로 바꾸면 자판이 올라와 있는 동안 링크·칩·길게 누르기가 첫 탭을 스크롤뷰에 뺏긴다(`Timeline` 의 `keyboardShouldPersistTaps` 주석).
-      expect(list().props.keyboardDismissMode).toBe('on-drag');
+      expect(list().props.keyboardDismissMode).toBe('none');
       expect(list().props.keyboardShouldPersistTaps).toBe('handled');
     });
 
@@ -433,7 +433,7 @@ describe('conversationTapRest (#4614)', () => {
       expect(input().props.value).toBe('쓰던 글');
     });
 
-    it('끌기는 입력창도 자판도 건드리지 않는다 — 스크롤은 지금처럼 `on-drag` 의 몫이다', async () => {
+    it('탭이 아닌 끌기(10pt)는 입력창도 자판도 건드리지 않는다 — 48pt 에는 못 미친다(문턱은 `timelineDragRest.test.tsx`)', async () => {
       await typeSomething();
       start(100, 300, 10_000);
       moveTo(100, 300 + TAP_SLOP_PT, 10_030);

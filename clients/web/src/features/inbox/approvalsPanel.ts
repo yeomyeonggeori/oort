@@ -1,4 +1,5 @@
 import type { FeedItem } from "@momo/core/features/inbox/model";
+import type { ApprovalStatus } from "@momo/core/features/timeline/agentCardModel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 
 // =============================================================================
@@ -64,7 +65,7 @@ export function approvalsPanelState(input: PanelInput): PanelState {
 /**
  * 이 행이 지금 받을 컨트롤.
  *
- *   none    아무것도 붙지 않는다.
+ *   none    아무것도 붙지 않는다. 결정할 수 없는 행과, 이 클라이언트가 이미 결정한 승인(#5092).
  *   offline 자리는 지키고 왜 지금 결정할 수 없는지 말한다.
  *   decide  승인/거부 2단 컨트롤. 결정을 보낼 `approvalId`를 함께 싣는다.
  *
@@ -92,13 +93,26 @@ export type RowControl =
  *
  * 오프라인 갈래가 `none`이 아닌 이유: 끊긴 채로 버튼을 그대로 두면 15초 뒤
  * 실패로 반박당하고, 말없이 치우면 무엇이 사라졌는지 알 수 없다.
+ *
+ * `settled`는 **이 클라이언트가 이미 결정한 승인**이라는 사실이다(`settledApprovals`
+ * 저장소의 영수증, #3771; 호출자는 `settledStatusLine`이 줄을 내는지로 묻는다). 인박스
+ * 패널은 고른 줄을 스냅샷으로 들고 있어서(`InboxRoute`의 `live ?? selected`) 결정이 닿은
+ * 뒤 원장이 다시 답하기 전에도(오프라인·실패로 답이 오지 않는 동안도) 같은 `approvalId`를
+ * 가진 행이 그대로 선다(원장이 답한 뒤에는 `InboxRoute`가 그 승인을 선택에서 놓는다, #5116).
+ * 그 행에 승인/거부를 다시 세우면 이미 결정된 건에 두 번째 결정이 가능해진다(서버는 409로
+ * 막는다). 영수증은 서버의 답이므로 클라이언트가 행을 흉내 내서
+ * 치우는 것이 아니다. 끊김보다 먼저 보는 이유: 결정이 끝났다는 것은 지금 연결과 무관한
+ * 지난 사실이다. 컨트롤 자리에 무엇이 서는지는 이 판정이 아니라 호출자가 말한다.
  */
 export function approvalRowControl(
   item: FeedItem,
-  options: { offline: boolean }
+  options: { offline: boolean; settled?: boolean }
 ): RowControl {
   if (item.kind !== "approval") return { kind: "none" };
-  if (item.approvalId === undefined) return { kind: "none" };
+  // 결정할 수 있는 행이 아니거나(`approvalId` 없음), 이 클라이언트가 이미 결정한 승인이면 컨트롤은 없다.
+  if (item.approvalId === undefined || options.settled === true) {
+    return { kind: "none" };
+  }
   if (options.offline) return { kind: "offline" };
   return { kind: "decide", approvalId: item.approvalId };
 }
@@ -122,6 +136,31 @@ export interface DecisionNote {
    */
   tone: "neutral" | "unavailable" | "error";
   text: string;
+  /** 이 안내가 말하는 승인: 결정 응답이 닿은 순간 상세 패널이 보여 주던 승인이다(#5174 L5). 없으면 어느 승인에도 묶이지 않는다. */
+  approvalId?: string;
+}
+
+/**
+ * 결정 영수증 문장이 눈에 보이는 자리는 하나다 (#5174, 화면 검수 3회차 L5).
+ *
+ * 같은 사실을 두 곳이 따로 지었다: 위 배너는 결정 응답(이벤트)에서 `decisionNote`로, 컨트롤 자리의 줄은 영수증
+ * 저장소(상태)에서 `settledStatusLine`으로. 둘이 같은 상수를 읽어 글자가 같았고, 결정 직후에는 둘 다 섰다.
+ * 이 함수가 자리를 **한 곳에서** 정한다: 상세 패널이 **같은 승인에 대해 같은 문장**을 이미 말하고 있으면 `true`고,
+ * 그때 배너는 눈에서만 물러난다. 배너 노드는 없어지지 않는다: `role=status` 노드가 결과를 한 번 읽어 주고, 패널이
+ * 닫히면(원장이 답해 #5116이 선택을 놓으면) 같은 노드가 눈에 보이게 올라와 결과를 남긴다(#5092). 다른 승인이거나
+ * 문장이 다르면(이미 결정되어 있었다는 안내 등) 겹치지 않으므로 `false`다.
+ */
+export function receiptSaidInPane(
+  note: DecisionNote | null,
+  pane: { approvalId: string | undefined; line: string | null }
+): boolean {
+  return (
+    note !== null &&
+    note.approvalId !== undefined &&
+    note.approvalId === pane.approvalId &&
+    pane.line !== null &&
+    pane.line === note.text
+  );
 }
 
 /**
@@ -156,6 +195,10 @@ const SUPERSEDED_FALLBACK = "이 요청은 이미 결정되어 있었어요.";
 export const APPROVED_RECEIPT = "승인을 기록했어요.";
 export const REJECTED_RECEIPT = "거부를 기록했어요.";
 
+/** 만료·취소로 끝난 요청에 말하는 문장. `supersededCopy`와 `settledStatusLine`이 한 벌을 나눠 쓴다. */
+const EXPIRED_COPY = "결정 전에 만료되어 만료로 기록되었어요.";
+const CANCELLED_COPY = "이 요청은 취소되어 있었어요.";
+
 /**
  * 이미 결정돼 있던 요청에는 **원장에 적힌 방향**을 말한다 (2R M2).
  *
@@ -171,11 +214,28 @@ export const REJECTED_RECEIPT = "거부를 기록했어요.";
 function supersededCopy(outcome: DecisionOutcome): string {
   if (outcome.status === "approved") return "이미 승인으로 기록되어 있었어요.";
   if (outcome.status === "rejected") return "이미 거부로 기록되어 있었어요.";
-  if (outcome.status === "expired") {
-    return "결정 전에 만료되어 만료로 기록되었어요.";
-  }
-  if (outcome.status === "cancelled") return "이 요청은 취소되어 있었어요.";
+  if (outcome.status === "expired") return EXPIRED_COPY;
+  if (outcome.status === "cancelled") return CANCELLED_COPY;
   return outcome.note ?? SUPERSEDED_FALLBACK;
+}
+
+/**
+ * 결정이 끝난 행이 컨트롤 자리에 말하는 한 줄(#5092). 끝난 상태가 아니면(`pending`) `null`.
+ *
+ * 문장은 위의 영수증 한 벌 그대로다: 원장에 **무엇이 적혔는지**까지만 말하고, 누가
+ * 눌렀는지·그 뒤에 무엇이 일어나는지는 말하지 않는다. 같은 사실을 두 번째 문장으로
+ * 짓지 않으려고 새 문구를 만들지 않는다. 상태 이름을 하나씩 비교하지 않고 표 하나로
+ * 찾는 이유: 표에 없는 상태가 「끝났다」로 읽히는 길이 없다.
+ */
+const SETTLED_LINE: Readonly<Partial<Record<ApprovalStatus, string>>> = {
+  approved: APPROVED_RECEIPT,
+  rejected: REJECTED_RECEIPT,
+  expired: EXPIRED_COPY,
+  cancelled: CANCELLED_COPY,
+};
+
+export function settledStatusLine(status: ApprovalStatus): string | null {
+  return SETTLED_LINE[status] ?? null;
 }
 
 export function decisionNote(outcome: DecisionOutcome): DecisionNote {

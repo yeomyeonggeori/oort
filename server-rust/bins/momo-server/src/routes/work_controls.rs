@@ -689,7 +689,7 @@ async fn create_spawn_approval_in_tx(
     .await
     .map_err(T3Error::from)?;
 
-    let props = json!({
+    let mut props = json!({
         "kind": "work_control_approval",
         "approval_id": approval_id.to_string(),
         "control_id": control.id.to_string(),
@@ -703,7 +703,13 @@ async fn create_spawn_approval_in_tx(
         "expires_at_ms": expires_at.timestamp_millis(),
         "execution": execution,
     });
-    let body = format!("도구 「{tool}」로 {label} 작업을 시작해도 될까요?");
+    // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the `push_action`
+    // refusal give — a spawn asks which machine, so it is opened in the app.
+    momo_agent::actions::stamp_decision_mode(
+        &mut props,
+        momo_agent::actions::decision_mode(ACTION_TYPE_WORK_SPAWN, &payload),
+    );
+    let body = momo_agent::approval_sentence::spawn_request_body(&tool);
 
     let card = send_message_in_tx(
         conn,

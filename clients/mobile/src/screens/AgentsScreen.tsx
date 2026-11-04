@@ -4,13 +4,17 @@ import React, {useCallback, useMemo} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
-  ErrorState,
   LoadingState,
   NoticeBlock,
   Screen,
   ScreenHeader,
+  Sentence,
   TapRow,
 } from '../design/atoms';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {LoadFailureBox, LoadFailureLine} from '../features/connection/LoadFailureBox';
+import {useReadFailureOf} from '../features/connection/readFailure';
+import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {font, line, radius, slopTo, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
@@ -41,11 +45,12 @@ import {
 import {
   agentTurnsForMember,
   useAgentWorkingSignals,
+  withApprovalWaits,
 } from '../features/agents/workingSignal';
+import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
-import {queryFailureDetail} from './SidebarScreen';
 
 // =============================================================================
 // 에이전트 — everyone in this workspace who is not a person.
@@ -152,6 +157,25 @@ export default function AgentsScreen({
   const loading = directoryQuery.isLoading;
   const failed = directoryQuery.isError;
 
+  // ---- 읽기가 실패했을 때: 받아 둔 목록·숫자는 지우지 않고, 같은 원인은 한 곳(띠)만 말한다 (#5285, 검증 5a ⑤) -------------
+  // 예전에는 서버에 닿지 못하면 띠 + 사용량 카드의 오류 + 목록 자리의 오류 상자가 같은 원인을 세 겹으로 되풀이했고, 받아 둔 명부가 있어도 목록이 상자로 바뀌었다
+  // (react-query 는 다시 읽기가 실패해도 마지막 `data` 를 남긴다). 이제:
+  //   · 받아 둔 명부가 있다: 목록은 그대로(행의 사용량 줄도 받아 둔 숫자 그대로). 띠가 같은 원인을 말하면 더할 말이 없고, 띠가 침묵이면 목록 위 한 줄(제목 + 다시 시도).
+  //   · 받아 둔 명부가 없다: 상자(제목 + 다시 시도, 이유는 띠가 침묵일 때만). 기기가 꺼져 읽기가 **멈춘** 채라면 오류 객체가 없어도 그렇다 - 「아직 에이전트가 없습니다」는 거짓이다.
+  //   · 사용량 카드·세션 고지: 띠가 **같은 원인**을 말하는 동안은 서지 않는다(받아 둔 숫자가 있으면 그 줄은 그대로).
+  const rosterCached = directoryQuery.data !== undefined;
+  const rosterPaused = !rosterCached && directoryQuery.isPaused;
+  const showRosterFailure = !rosterCached && (failed || rosterPaused);
+  const readFailureOf = useReadFailureOf();
+  const rosterFailure = readFailureOf(directoryQuery.error ?? null);
+  const usageSpoken =
+    (usageQuery.isError || usageQuery.isPaused) &&
+    readFailureOf(usageQuery.isError ? usageQuery.error : null).spoken;
+  const sessionsSpoken = readFailureOf(sessionsQuery.error ?? null).spoken;
+  const retryRoster = () => {
+    void directoryQuery.refetch();
+  };
+
   // ---- the live half (goal RN-T2) ------------------------------------------
   // No ticking clock here, deliberately — unlike the conversation screen, which
   // prints an elapsed number and therefore needs one.
@@ -168,7 +192,8 @@ export default function AgentsScreen({
   // so a per-second re-render of the whole list would run forever, in the
   // background of a screen nobody is looking at, to shave a window off a word
   // that would not change.
-  const signals = useAgentWorkingSignals();
+  const railSignals = useAgentWorkingSignals();
+  const approvalWaitList = useWorkspaceApprovalWaits();
   const {status: railStatus} = useRealtime();
 
   // 당겨서 새로고침 (goal RN-B4b / #1026). 이 화면이 서 있는 세 조회를 그대로
@@ -194,6 +219,10 @@ export default function AgentsScreen({
     {active},
   );
   const nowMs = Date.now();
+  // 승인 원장이 레일보다 이긴다(#3738, 대화 화면의 자리표시·레일과 같은 덮어쓰기 — #5066·#5085). 서버는 승인에 걸린 run 을 레일 프레임으로
+  // 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 사람을 기다리는 에이전트도 「작업 중」이다. 이 목록은 에이전트 기준이라
+  // 열린 턴을 채널 너머로 읽으므로, 덮은 목록을 한 번 만들어 행마다 같은 것을 읽는다.
+  const signals = withApprovalWaits(railSignals, approvalWaitList, nowMs);
   const railLive = railStatus === 'connected';
 
   return (
@@ -217,12 +246,17 @@ export default function AgentsScreen({
         }
       />
 
+      {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈·받은함과 같은 문장·같은 단추로 여기서도 말한다. 바로 아래 `AgentTurnStaleNotice`
+          는 이 화면의 줄이다: 소켓이 붙어 있지 않으면 어떤 원인이든 「에이전트 진행이 낡았을 수 있다」는 **결과**를 말한다. 띠는 원인(오프라인·서버)을,
+          이 줄은 결과를 말한다. 실시간만 끊긴 원인은 이 줄만 말한다(셸 띠는 말하지 않는다). */}
+      <ShellConnectionStrip />
+
       {/* 끊긴 것을 화면에서 말한다 (2R H2). 배지가 회색으로 내려앉는 것만으로는
           부족하다 — 무색은 「열린 턴이 없음」의 모양이기도 해서, 끊긴 화면과
           조용한 화면이 구별되지 않았다. */}
       {railLive ? null : <AgentTurnStaleNotice testID="agents-offline" />}
 
-      {sessionsQuery.isError && !failed ? (
+      {sessionsQuery.isError && !failed && !sessionsSpoken ? (
         <NoticeBlock
           headline="작업 세션은 불러오지 못했습니다."
           detail="목록과 상태는 그대로입니다. 실행 중인 세션만 지금 알 수 없습니다."
@@ -232,20 +266,27 @@ export default function AgentsScreen({
 
       {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않는다. */}
       {notice}
-      <AgentUsageStatus />
+      <AgentUsageStatus causeSpoken={usageSpoken} />
+
+      {/* 받아 둔 명부가 있는데 다시 읽기가 실패했다: 목록은 그대로 두고, 띠가 같은 원인을 말하지 않을 때만 위에서 한 줄 말한다. */}
+      {failed && rosterCached && !rosterFailure.spoken ? (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadAgentRosterTitle}
+          onRetry={retryRoster}
+          testID="agents-error-line"
+        />
+      ) : null}
 
       {loading ? (
         <LoadingState
           label="에이전트 목록을 불러오는 중입니다."
           testID="agents-loading"
         />
-      ) : failed ? (
-        <ErrorState
-          headline="에이전트를 불러오지 못했습니다."
-          detail={queryFailureDetail(directoryQuery.error)}
-          onRetry={() => {
-            void directoryQuery.refetch();
-          }}
+      ) : showRosterFailure ? (
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadAgentRosterTitle}
+          failure={rosterFailure}
+          onRetry={retryRoster}
           testID="agents-error"
         />
       ) : rows.length === 0 ? (
@@ -263,7 +304,7 @@ export default function AgentsScreen({
           renderItem={({item}) => (
             <Row
               row={item}
-              usage={usageQuery.isError || !usageQuery.data ? null : (() => {
+              usage={!usageQuery.data ? null : (() => {
                 const row = usageForAgent(usageQuery.data, item.memberId);
                 return row ? agentUsageLine(row, directoryQuery.directory.members.find(member => member.id.toLowerCase() === item.memberId.toLowerCase())?.brain) : null;
               })()}
@@ -353,7 +394,7 @@ function Row({
         <Text style={styles.rowMeta} numberOfLines={2}>
           {agentRowMeta(row)}
         </Text>
-        {usage && <Text style={styles.rowMeta}>{AGENT_USAGE_COPY.title}: {usage}</Text>}
+        {usage && <Sentence style={styles.rowMeta}>{AGENT_USAGE_COPY.title}: {usage}</Sentence>}
         {/* 「활성」 같은 연결 상태가 아니라 지금 살아 있는가. 서버가 모르는 에이전트에는
             아무것도 서지 않는다. */}
         <AgentLivenessLabel

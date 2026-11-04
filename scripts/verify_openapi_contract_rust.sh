@@ -13,6 +13,8 @@
 #   server-rust/Dockerfile 이 만드는 **배포와 동일한 이미지**로,
 #   infra/rust/docker-compose.rust.yml 의 **부분집합 스택**(postgres·centrifugo·api)
 #   위에서 실제로 왕복시켜, 응답 모양을 같은 스펙과 대조한다.
+#   (#4900: 그 api 는 ADR-0169 local Drive 를 얹고 뜬다 — 아래 env 블록. 첨부가 필요한 표본이
+#   끝까지 돌게 하는 설정이고, 서비스 계정 키는 여전히 이 스택에 들어가지 않는다.)
 #
 # 매니페스트와 샘플은 양방향으로 강제된다: 등재됐는데 미샘플이면 실패하고,
 # 샘플인데 미등재여도 실패한다. "목록에만 있는 경로"도 "목록에 없는 초록"도 없다.
@@ -230,6 +232,37 @@ private_envelope_valid() {
     [[ "$value" =~ ^${prefix}\.[0-9a-f-]{36}\.[A-Za-z0-9._~-]+$ ]]
 }
 
+# ADR-0186 D1 / #2508 / #5269 — the secret scan of the action-catalog guard (the
+# `workspace-actions` sample below). One text, two users: the live guard runs it on the
+# real handler's response, and `--verify-cleanup-contract` runs the same text on fixed
+# inputs, so what is proved is what is run.
+#
+# No executor, no secret, no credential ever rides in the catalog, so the whole body is
+# searched for `code|secret|credential`. ONE place is excused, and only while it is what
+# it is meant to be: `code` is the NAME of a role bundle (ADR-0201 증보 v3 B3), and the
+# `team_ai.roles.set` row lists the six switchable bundle ids as the enum of its `bundle`
+# argument. That enum — and only that, only while it equals the bundle table in order — is
+# taken out of the scan. Everything else is still read: a `code` anywhere else (another
+# row's enum, another argument of the same row, a one-time code on a row), and any other
+# value in that enum.
+#
+# This is the shell twin of the Rust catalog test's exception
+# (server-rust/bins/momo-server/src/routes/actions.rs, the scan under "No executor, no
+# secret, no credential ever rides in the catalog": it takes the same enum out and asserts
+# it equals `momo_agent::team_ai_roles::SWITCHABLE_BUNDLES`). The six ids below are a COPY
+# of that table (server-rust/crates/momo-agent/src/team_ai_roles.rs). When the table
+# changes this gate goes RED here on purpose — update the list in the same change; the
+# exception follows the table consciously and never widens by itself.
+ACTION_CATALOG_SCAN_JQ='
+def catalog_secret_free:
+  ["workspace_admin","invite_access","long_research","files","memory","code"] as $bundles
+  | .actions |= map(if .id == "team_ai.roles.set"
+                       and .argsSchema.properties.bundle.enum == $bundles
+                    then del(.argsSchema.properties.bundle.enum)
+                    else . end)
+  | (tostring | test("code|secret|credential") | not);
+'
+
 if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   owned_binding_matches id1 id1 /name /name nonce nonce project project || exit 1
   for mutation in id name nonce project; do
@@ -421,6 +454,59 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
     echo "[openapi-rust] cleanup contract lost interrupted-build image acquisition" >&2
     exit 1
   }
+  # #5269 — the action-catalog secret scan on fixed inputs (no daemon). The filter under
+  # test is ACTION_CATALOG_SCAN_JQ, the text the live guard runs. jq exits 0 for "clean",
+  # 1 for "the scan said no", and 3/5 for a broken filter: only the exact code counts, so a
+  # filter that stops compiling cannot pass for a catch. Each leak input is the live shape
+  # plus ONE change, so a green on it means the exception swallowed exactly that change.
+  catalog_scan_expect() {
+    local want="$1" label="$2" fixture="$3" rc=0 err=''
+    err="$(jq -e "$ACTION_CATALOG_SCAN_JQ"' catalog_secret_free' <<<"$fixture" 2>&1 >/dev/null)" || rc=$?
+    [ "$rc" -eq "$want" ] || {
+      echo "[openapi-rust] catalog secret scan [$label]: expected jq exit $want, got $rc ${err%%$'\n'*}" >&2
+      exit 1
+    }
+  }
+  catalog_live='{"actions":[
+    {"id":"invite.create","title":"팀원 초대 링크 만들기","summary":"역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만들어요.",
+     "risk":"approval","requiredRole":"admin","agentDelivery":"always","executable":true,"unavailableReason":null,
+     "argsSchema":{"type":"object","additionalProperties":false,
+       "properties":{"role":{"type":"string","enum":["member","admin"]}}}},
+    {"id":"team_ai.roles.set","title":"도우미 역할 켜고 끄기","summary":"도우미가 할 수 있는 일의 묶음 하나를 켜거나 꺼요. 한 카드에 묶음 하나만 바꿔요.",
+     "risk":"approval","requiredRole":"admin","agentDelivery":"none","executable":true,"unavailableReason":null,
+     "argsSchema":{"type":"object","additionalProperties":false,"required":["bundle","enabled"],
+       "properties":{"bundle":{"type":"string","enum":["workspace_admin","invite_access","long_research","files","memory","code"]},
+                     "enabled":{"type":"boolean"}}}}]}'
+  # control: the scan as it was before #5269 reads this very input as a leak. Without it
+  # the green case below could be a fixture that never met the exception.
+  legacy_rc=0
+  jq -e 'tostring | test("code|secret|credential") | not' <<<"$catalog_live" >/dev/null 2>&1 || legacy_rc=$?
+  [ "$legacy_rc" -eq 1 ] || {
+    echo "[openapi-rust] catalog secret scan control: the live-shape fixture no longer trips the pre-#5269 scan (exit $legacy_rc)" >&2
+    exit 1
+  }
+  # 1) the live shape: the bundle name `code`, inside the six-bundle enum -> clean.
+  catalog_scan_expect 0 'live shape: code as a bundle name' "$catalog_live"
+  # 2) a seventh value in that enum is not the table, so the enum is read -> leak.
+  catalog_scan_expect 1 'seventh value in the bundle enum' \
+    "$(jq -c '.actions[1].argsSchema.properties.bundle.enum += ["credential"]' <<<"$catalog_live")"
+  # 3) another argument of the same row is not the enum -> leak.
+  catalog_scan_expect 1 'secret-shaped argument beside the bundle enum' \
+    "$(jq -c '.actions[1].argsSchema.properties.secret = {"type":"string"}' <<<"$catalog_live")"
+  # 4) the same word as another row's enum value is not this field -> leak.
+  catalog_scan_expect 1 'code in another row enum' \
+    "$(jq -c '.actions[0].argsSchema.properties.role.enum += ["code"]' <<<"$catalog_live")"
+  # 5) a one-time `code` carried on a row is the leak the scan exists for -> leak.
+  catalog_scan_expect 1 'code field on another row' \
+    "$(jq -c '.actions[0].code = "example"' <<<"$catalog_live")"
+  # The live guard must run this same text and call the scan, not carry a copy of its own.
+  # The `[J]` / `[e]` keep these lines from matching themselves.
+  if ! grep -Eq 'guard_jq "[$]ACTION_CATALOG_SCAN_[J]Q"' "$0" ||
+    ! grep -Eq "and catalog_secret_fre[e]'" "$0"; then
+    echo "[openapi-rust] the action-catalog guard no longer runs ACTION_CATALOG_SCAN_JQ" >&2
+    exit 1
+  fi
+  echo "[openapi-rust] PASS action-catalog secret scan: 1 live shape clean, 4 leaks caught, pre-#5269 scan red on the live shape"
   echo "[openapi-rust] PASS daemon-free foreign-resource and secret-argv contract"
   exit 0
 fi
@@ -604,7 +690,7 @@ redact_json() {
   walk(
     if type == "object" then
       with_entries(
-        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature|claimPath)$"))
+        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature|claimPath|claimUrl)$"))
         then .value = "[REDACTED]"
         else . end
       )
@@ -933,6 +1019,16 @@ MOMO_AGENT_SEED_MODE=e2e
 MIGRATE_IDEMPOTENCY_CHECK=1
 MOMO_INITIAL_OWNER_EMAIL=
 MOMO_INITIAL_OWNER_PASSWORD=
+
+# #4900: 첨부 보관소. Drive 설정이 비면 첨부 경로가 전부 503 이라 표현 표본(sample_expression_contract.py)이
+# 첫 첨부 업로드에서 끝났다 — 그 뒤 연산들은 이 게이트에서 한 번도 돌지 못했다. ADR-0169 의 local 백엔드는
+# 서비스 계정 키가 필요 없고(ADR-0004 와 부딪히지 않는다) 배포 환경에서도 허용되는 백엔드다. 디렉터리는
+# 컨테이너 안 임시 경로라 api 와 함께 사라진다: 볼륨도 초기화 컨테이너도 없어서 이 게이트가 회수할 자원이
+# 늘지 않는다. 업로드 주소는 요청의 Host 로 만든다(same-origin): 표본이 따라가는 주소가 BASE_URL 과 같은
+# 오리진이어야 하는데, 이 값이 없으면 컨테이너 안 포트(8080)가 박힌 주소가 나온다.
+MOMO_DRIVE_ARCHIVE_BACKEND=local
+MOMO_DRIVE_LOCAL_DIR=/tmp/oort-gate-drive
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin
 
 DB_VOLUME_NAME=$GATE_DB_VOLUME
 ENV
@@ -1984,10 +2080,12 @@ sample change-own-password patch \
   "/v1/workspaces/$WS/members/me/password" 403 \
   '{"currentPassword":"not-the-gate-password","newPassword":"unused-new-password"}' \
   "$ACCESS"
+# ADR-0215 D6 (#4596): the issuing operator proves their OWN password, so the body carries the
+# gate user's real one — read from the registered 0600 secret file, never from argv.
 sample issue-password-reset post \
   "/v1/workspaces/{workspaceId}/members/{memberId}/password-reset" \
   "/v1/workspaces/$WS/members/$GATE_PEER_ID/password-reset" 201 \
-  "" "$ACCESS"
+  "$(jq -cn --rawfile p "$LOGIN_PASSWORD_FILE" '{currentPassword:$p}')" "$ACCESS"
 RESET_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
 append_secret_with_derivatives "$RESET_TOKEN"
 [ -n "$RESET_TOKEN" ] || {
@@ -1995,8 +2093,16 @@ append_secret_with_derivatives "$RESET_TOKEN"
   redacted_body >&2
   exit 1
 }
-# sample() redacts the `token` key by name, but claimPath embeds the raw
-# token. Rewrite the evidence file now that the needle exists.
+# The link is named twice more besides `token`: `claimPath` (unchanged) and the absolute `claimUrl`
+# with whether its address can be trusted to open for the reader (ADR-0215 D6). jq reads the token
+# from the same body, so it never rides in argv.
+guard_jq '. as $r
+  | (.claimUrl | type == "string" and endswith("/claim/" + $r.token))
+  and (.claimUrlSecure | type == "boolean")
+  and (.claimPath == ("/claim/" + $r.token))' \
+  "password-reset 201 carries claimUrl and claimUrlSecure beside the unchanged claimPath"
+# sample() redacts the `token` key by name (and `claimPath`, `claimUrl`), but a string that merely
+# embeds the raw token is only caught once the needle exists. Rewrite the evidence file now.
 RESET_SAMPLE="$(jq -rs --arg name issue-password-reset \
   'map(select(.name==$name)) | last | .body_file // empty' "$MANIFEST")"
 [ -n "$RESET_SAMPLE" ] && [ -f "$RESET_SAMPLE" ] && [ ! -L "$RESET_SAMPLE" ] || {
@@ -3972,7 +4078,11 @@ guard_jq --arg id "$INVITE_ADMIN_ID" '
 # false` spec cannot catch a key the handler simply stopped sending.
 sample workspace-actions get "/v1/workspaces/{workspaceId}/actions" \
   "/v1/workspaces/$WS/actions" 200 "" "$ACCESS"
-guard_jq '
+# The last clause is the secret scan defined (and proved on fixed inputs) near the top of
+# this file: `code` is excused only as the `team_ai.roles.set` bundle enum, which must be
+# the six switchable role bundles — a seventh bundle makes this fail until that list is
+# updated (#5269).
+guard_jq "$ACTION_CATALOG_SCAN_JQ"'
   (.actions | type == "array")
   and (any(.actions[]; .id == "invite.create" and .executable == true
         and .risk == "approval" and .requiredRole == "admin"
@@ -3980,8 +4090,8 @@ guard_jq '
         and .unavailableReason == null))
   and (all(.actions[] | select(.executable == false);
         (.unavailableReason | type == "string") and (.unavailableReason | length > 0)))
-  and (tostring | test("code|secret|credential") | not)' \
-  "action catalog publishes executable rows with schemas and unavailable rows with reasons"
+  and catalog_secret_free' \
+  "action catalog publishes executable rows with schemas and unavailable rows with reasons, and no code/secret/credential outside the team_ai.roles.set bundle enum (exactly the six switchable role bundles)"
 
 sample invite-list get "/v1/workspaces/{workspaceId}/invites" \
   "/v1/workspaces/$WS/invites?limit=20" 200 "" "$ACCESS"
@@ -4018,13 +4128,20 @@ sample invite-revoke post "/v1/workspaces/{workspaceId}/invites/{inviteId}/revok
 guard_jq '.revokedAtMs != null and .revocationReason == "openapi rust gate"' \
   "POST revoke stamps revokedAtMs"
 
-api post "/v1/workspaces/$WS/invites" '{"role":"guest","maxUses":1}' "$ACCESS"
+api post "/v1/workspaces/$WS/invites" '{"role":"admin","maxUses":1}' "$ACCESS"
 [ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-delete-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
 register_invite_code || exit 1
 INVITE_DELETE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
 sample invite-delete delete "/v1/workspaces/{workspaceId}/invites/{inviteId}" \
   "/v1/workspaces/$WS/invites/$INVITE_DELETE_ID" 200 "" "$ACCESS"
 guard_jq '.revokedAtMs != null' "DELETE revoke stamps revokedAtMs"
+
+# 게스트 초대는 멈춰 있다 (ADR-0128 D1, ADR-0219 GS-0): 만들기는 400이고 자기 코드를 말한다.
+# 거절이므로 응답에 원문 코드가 없다.
+api post "/v1/workspaces/$WS/invites" '{"role":"guest","maxUses":1}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || gate_fail invite-guest-paused "expected HTTP 400, got $RESPONSE_STATUS" "$(redacted_body)"
+guard_jq '.error.code == "guest_invites_paused" and (has("code") | not)' \
+  "guest invites are paused: 400 with its own error.code and no one-time code"
 
 api post "/v1/workspaces/$WS/invites" '{"role":"member","maxUses":2}' "$ACCESS"
 [ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-redeem-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"

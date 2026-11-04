@@ -2224,6 +2224,58 @@ async fn a_retried_turn_that_runs_out_of_steps_announces_the_frozen_half_answer(
     assert_eq!(run_status(&su, run_id).await, "failed");
 }
 
+/// ADR-0204 증보 6 D6-2 · D6-3, from the worker's own tool-approval producer: a tool the model
+/// asks to run parks the run on a card that says **one question** — the tool quoted after it, no
+/// particle behind the name, never the English 「Approval required: …」 — and carries
+/// `props.decision_mode`, the word the one function gives the stored payload (`inline` for a tool
+/// of the catalog, which the lock screen may decide).
+///
+/// Revert: write the body from the old frame (`도구 「{name}」을 실행해도 될까요?`), or take
+/// `stamp_decision_mode` out of the worker's card props.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_tool_approval_card_asks_one_question_and_carries_the_decision_mode() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 작업 세션을 끝내 줘").await;
+    let asks_to_end_a_session =
+        MockChatProvider::echo().with_tool_calls([vec![ProviderToolCall {
+            id: "call-end-session".to_string(),
+            // The momo name, as the real provider adapters hand it over (`momo_tool_name` maps
+            // the wire spelling `work_session_end` on the way in; a mock bypasses that).
+            name: "work.session.end".to_string(),
+            arguments: json!({"session_id": Uuid::new_v4().to_string()}).to_string(),
+        }]]);
+    let worker = build_worker(Arc::new(asks_to_end_a_session), base_config()).await;
+    worker.drain_once().await.expect("drain");
+
+    assert_eq!(run_status(&su, run_id).await, "awaiting_approval");
+    let (body, props, approval_payload): (String, Value, Value) = sqlx::query_as(
+        "SELECT m.body, m.props, a.payload \
+           FROM message m JOIN approval a ON a.request_message_id = m.id \
+          WHERE m.run_id = $1 AND m.type = 'approval_request'",
+    )
+    .bind(run_id)
+    .fetch_one(&su)
+    .await
+    .expect("the approval card of the run");
+    assert_eq!(body, "도구를 실행해도 될까요? · 「work.session.end」");
+    assert!(
+        !body.contains("Approval required") && !body.contains("을 실행"),
+        "{body}"
+    );
+    assert_eq!(props["decision_mode"], "inline");
+    assert_eq!(
+        momo_agent::actions::decision_mode("tool_call", &approval_payload).as_str(),
+        "inline",
+        "the card carries the one function's own answer for the payload it stored"
+    );
+}
+
 /// **Review of #3987, M1.** The same half answer and freeze, and then the retry is REFUSED
 /// before it runs: the team key was removed while the job waited out its backoff, so the next
 /// worker to claim it has no model to call and closes the run with a refusal notice

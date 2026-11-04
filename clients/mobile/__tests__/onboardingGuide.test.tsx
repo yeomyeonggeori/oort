@@ -152,13 +152,13 @@ describe('OnboardingDots (폰)', () => {
   ] as const)('bar signal, done ink-muted, rest line-strong, hidden sentence (%s)', (scheme, palette) => {
     render(wrap(<OnboardingDots dots={onboardingDots('claim', 'workspace-profile')} />, scheme));
     const row = screen.getByTestId('onboarding-dots');
-    expect(row.props.accessibilityLabel).toBe('4단계 중 2단계');
+    expect(row.props.accessibilityLabel).toBe('5단계 중 2단계');
     const current = StyleSheet.flatten(screen.getByTestId('onboarding-dot-current').props.style);
     expect([current.width, current.height, current.backgroundColor]).toEqual([26, 6, palette.accent]);
     const done = StyleSheet.flatten(screen.getByTestId('onboarding-dot-done').props.style);
     expect([done.width, done.backgroundColor]).toEqual([6, palette.textMuted]);
     const todo = screen.getAllByTestId('onboarding-dot-todo');
-    expect(todo).toHaveLength(2);
+    expect(todo).toHaveLength(3);
     expect(StyleSheet.flatten(todo[0].props.style).backgroundColor).toBe(palette.textFaint);
     // 세 색이 core 표(ONBOARDING_DOT_ROLES)의 역할과 같다: accent=signal, textMuted=ink-muted, textFaint=line-strong.
     expect(DS2_ROLE_MAP.accent).toBe(ONBOARDING_DOT_ROLES.current);

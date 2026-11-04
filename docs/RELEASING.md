@@ -26,6 +26,10 @@ SELF_HOST 문면 확인.**
 릴리스는 **main 기준**이다. 태그는 승격 커밋에 앉힌다 — track 브랜치 HEAD가
 아니다.
 
+팀 서버의 공동 Hermes(`infra/hermes/lockgate.py`·`config.yaml`·`infra/railway/railway.json`의
+hermes `startCommand`)가 이 릴리스에서 바뀌었다면 이미지 발행과 **별개로** [§Hermes 단계](#hermes-단계-팀-서버-공동-hermes)를
+같은 배포 안에서 한다. 이미지 digest를 올려도 Hermes 서비스의 설정·게이트는 저절로 바뀌지 않는다.
+
 ---
 
 ## 1. 승격
@@ -37,6 +41,61 @@ SELF_HOST 문면 확인.**
 않는다.
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).
+
+승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에 바뀐 점」 주제별 한 줄)로 적는다(#4937, #5054). 글(ko·en)은 문구 사전 `releaseNotes.json`에 쓰고, `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에는 번호·빌드·사전 키 목록을 적어 `notes/index.ts`에 더한다(순서는 `notes/README.md`). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`, 다음 채널 빌드가 담으면 `0.1.0-next.N`도)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
+
+---
+
+## 1.2 승격 체크리스트 — 바뀐 점 모으기·전하기 (#5053)
+
+승격 때 통합자는 사용자에게 보이는 변화를 한 번에 모아 CHANGELOG·팀 채널·앱 안 소식으로 전한다. 재료는 PR 본문의
+**요약 칸**(`## 요약` 또는 `**요약**`)이다. 검증 줄이 회차마다 만든 초안([PIPELINE](planning/PIPELINE.md) §5 「바뀐 점」)을
+승격 때 한 번 더 모아 쓴다. 승격 한 번에 PR이 150건 안팎이므로 마지막에 한꺼번에 읽지 않는다.
+
+```sh
+git fetch origin
+scripts/collect_changes.py --since <지난 승격의 main 커밋> --output <결과 파일>
+```
+
+- 두 트랙의 첫째 부모 합치기(`Merge pull request #N`) 가운데 기준 커밋에 없는 PR만 모은다. PR 본문은 `gh`로 읽는다.
+  이 도구는 `git fetch`를 하지 않는다. 트랙별 직전 핀으로 좁힐 때는 `--since-engine`·`--since-uxui`와
+  `--engine-head`·`--uxui-head`를 쓴다.
+- 결과는 Markdown 파일 하나이고 저장소에 커밋하지 않는다: CHANGELOG `[Unreleased]` 영어 줄 초안, 사용자에게 보이는
+  변화 후보(주제별, 한국어), 요약 없는 PR 목록. 영어 문장은 도구가 만들 수 없다. 한국어 원문 옆의 `[en 번역 필요]`
+  표지를 영어로 옮겨 쓴 뒤 지운다. 주제는 낱말로 고른 후보이니 맞지 않으면 옮긴다.
+- **요약 없는 PR**(결과의 3절)은 경고일 뿐 막지 않는다. 승격 전에 그 PR 본문의 요약 칸을 채우고 다시 돌린다.
+  바뀐 것이 없으면 「N/A — 이유」를 적는다(경고에서 빠지고 4절에 센다). `scripts/goal_release.sh <issue> --review --pr <url>`도
+  같은 규칙으로 인계 때 먼저 알린다.
+
+순서대로 한다.
+
+1. **빌드 번호·버전을 먼저 정한 뒤** 앱 안 「업데이트 소식」 파일을 쓴다(#4937). 다음 폰 빌드 번호는
+   [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) §2의 규칙으로, 데스크탑 버전은 채널마다(release `0.1.N`,
+   next `0.1.0-next.N`) 정한다. 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에
+   바뀐 점」 주제별 한 줄)로 쓴다: 글(ko·en)은 문구 사전 `releaseNotes.json`에, 번호·빌드·사전 키 목록은
+   `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다. 순서와 키 이름은
+   `packages/momo-core/src/features/releaseNotes/notes/README.md`다.
+   `phoneBuild`·`desktopFrom`은 그 소식을 **처음 담는 빌드에 컴파일되어 들어가므로**, 빌드를 만든 뒤에 고치면 그 빌드는
+   이미 옛 값을 갖는다. 폰은 `phoneBuild`가 자기 번호 **이하**인 소식 중 가장 새 것을 보므로, 그 빌드가 실제로 받을
+   번호보다 큰 값을 적으면 그 빌드는 소식을 못 본다. 붙는 규칙의 정본은 `releaseNotes/model.ts` 머리말이다.
+2. **CHANGELOG 갈림을 합친다.** 트랙마다 머리가 갈려 있을 수 있다. 합치기 전에 세 곳의 `## [` 머리를 나란히 본다:
+   `for ref in origin/main origin/track/engine origin/track/uxui; do git show "$ref:CHANGELOG.md" | grep -n '^## \['; done`.
+   예(2026-11-01): `origin/track/engine`에는 `[0.1.41]` 칸이 잘려 있고(발행 기록 PR), `origin/main`·`origin/track/uxui`는
+   같은 내용이 아직 `[Unreleased]`에 있다(46줄 모두 `[0.1.41]` 안에 있고, 엔진 칸에만 5줄이 더 있다). 이미 발행한
+   버전 칸은 **엔진의 것이 정본**이고, 옛 `[Unreleased]`의 줄 가운데 그 칸에 있는 것은 지운다. 새 줄(수집 초안을
+   영어로 옮긴 것)은 두 트랙을 합친 **뒤에** 승격 PR에서 `[Unreleased]`에 쓴다. 트랙에서 미리 쓰지 않는다 — 두
+   트랙이 같은 자리를 고쳐 충돌한다.
+3. **같은 글로 두 곳에 낸다.** (a) 팀 `#qa`의 업데이트 소식 게시(#4793): 버전·날짜, 바뀐 것 3~7줄(사용자 말로), 시험해
+   볼 것, 알려진 문제. 이름·대화 원문은 넣지 않는다. (b) 데스크탑 업데이트 창의 한 문장: 매니페스트의 `notes`는 릴리스
+   노트가 아니라 앱의 업데이트 패널에 그대로 보이는 **한 문장**이다([`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §4). 1번 소식
+   파일의 ko `summary`를 그대로 쓰면 앱 안 소식·`#qa` 글·업데이트 창이 같은 말을 한다. 매니페스트에 싣는 발행은
+   owner 승인 경계이므로 여기서는 문장 준비까지다.
+4. **GitHub Release 본문 언어.** 지금은 한국어만이다(v0.1.41 본문, 2026-11-01 실측). 영어를 함께 쓸지는 **결정
+   대기(#5054)**. 정해질 때까지 §5의 digest 표 규칙은 그대로이고 본문 언어만 한국어를 따른다.
+5. **TestFlight 「What to Test」·App Store 「What's New」(로케일마다)의 규칙.** 무엇으로, 어느 로케일까지 채우는지는
+   문서 어디에도 없다(2026-11-01 실측: `docs/runbooks/ios-testflight.md`·`docs/cicd/03-store-readiness-gate.md`
+   포함). **결정 대기(#5054)**. 정해지면 `docs/runbooks/ios-testflight.md`에 한 절로 두고 여기서는 그 절을 가리킨다.
+   업로드·제출 자체는 M7 등급과 owner 승인 경계다([AGENTS](../AGENTS.md)).
 
 ---
 
@@ -344,9 +403,69 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
 
 ---
 
+## Hermes 단계 (팀 서버 공동 Hermes)
+
+팀 서버의 공동 Hermes(서비스 하나, api·agent-worker가 가리킨다)를 새 게이트로 올리는 절차다. 집행은 오케스트레이터이고
+owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는다). **이 절의 어떤 단계도 값을 적지 않는다**: 변수·`.env`·설정의
+값은 터미널 공유·이슈·PR·로그에 내지 않고, 이름·길이·sha256으로만 말한다. 근거는 [ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md)
+(#4950 허용 목록, #4935 설정 해시 목록·엄격 모드)다.
+
+**함께 바뀌는 것.** 게이트(`HERMES_LOCKGATE_B64`), 설정(`HERMES_CONFIG_B64`), 시작 명령의 체크섬, `HERMES_MEDIA_DELIVERY_STRICT=1`은
+**한 번에** 바꾼다. 새 게이트는 엄격 값이 없으면, 새 시작 명령은 자기 목록에 없는 설정이면 Hermes를 띄우지 않으므로 하나만 바꾸면 서비스가 멈춘다.
+
+1. **바꾸기 전 값 저장.** 서비스의 변수 전체와 시작 명령을 **값 그대로** 비공개 기록(planner 비공개 기록·시크릿 금고)에 저장한다. 저장소·이슈·PR에는
+   두지 않는다. 저장이 됐는지는 변수 **이름 목록과 각 값의 길이·sha256**으로만 확인한다. 이 저장본이 6단계의 되돌리기 재료다.
+2. **설정을 해시로 대조한다(값 미출력).** 운영 `HERMES_CONFIG_B64`를 디코드한 바이트의 sha256만 계산하고(`base64 -d | shasum -a 256`, 내용은 화면에 내지 않는다)
+   저장소가 같은 입력으로 다시 만드는 해시와 비교한다. 연결 모드 서비스는 운영이 쓰는 모델 선택으로
+   `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml --sha256`
+   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로 `HERMES_CONFIG_B64`를 만든다
+   (`… --connector-base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 네 가지 밖이면 멈춘다: 카탈로그에 더하는 결정(ADR 증보)이 먼저다.
+3. **볼륨 `.env`의 이름만 읽는다.** 새 게이트는 볼륨 `.env`에 허용 목록 밖의 이름이 있거나, 허용된 이름의 값에 줄바꿈이 있거나, `.op.env`가 있거나,
+   `/opt/data/profiles/` 아래에 항목이 하나라도 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
+   `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
+   값은 나오지 않는다), `/opt/data/.op.env`가 있는지, `/opt/data/profiles/`에 항목이 있는지(`ls -A /opt/data/profiles | wc -l`, 이름이 아니라 개수만 본다) 본다. 폴더가 없거나
+   비어 있는 것은 괜찮다. 프로필을 만들었다 지운 적이 있는 볼륨은 비어 있지 않다: Hermes가 지울 때 남기는 `profiles/.deleted/<이름>` 표식도 항목 하나라 시작이 거절된다
+   (`ls -A`가 숨김 항목도 센다). 공동 호스팅은 프로필을 쓰지 않으므로 그 `.deleted`를 지운다(지운 **개수**만 기록한다). 허용 이름은 `lockgate.py`의 `VOLUME_ENV_SECRETS`·`VOLUME_ENV_SEEDED`다(씨앗 줄은 값이 Hermes가
+   쓴 그대로여야 한다). 연결 모드 서비스의 `GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은 서비스 변수가 정본이라 허용 목록에 없다: 볼륨 `.env`에 같은 이름이 있으면
+   그 줄을 지운다(서비스 변수는 그대로 둔다). 이름만 읽어서는 값에 줄바꿈이 든 줄을 알 수 없으므로, 그런 줄은 5단계의 `problems`가 이름만 대고 알려 준다. 이름만 읽어서는 씨앗 줄의 값이 낡았는지 모르므로, 목록에 씨앗 이름이 있으면 그 줄만 열어(`grep '^<이름>=' /opt/data/.env`) 값이 `VOLUME_ENV_SEEDED`의 값과 같은지 본다. 이 값들은 Hermes
+   템플릿의 공개 상수라 비밀이 아니고, 다른 이름의 줄은 열지 않는다. 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 값이 다른 씨앗 줄도 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
+   지우기 전에는 4단계로 가지 않는다.
+4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② `HERMES_LOCKGATE_B64`를 `base64 < infra/hermes/lockgate.py | tr -d '\n'`로,
+   시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
+   `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
+   건드리지 않는다. 배포는 한 번이다.
+5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(`default` 또는 `connector/…`), `"media_strict": true`이고,
+   `selected_tools`·`resolved_tools`에 `memory`·`session_search`가 없고 `memory_config`가 `{"memory_enabled": false, "provider_set": false, "user_profile_enabled": false}`이고
+   (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
+   정상이다. `LOCKGATE`가 `"ok": false`이거나 서비스가 멈추면 `problems`(이름·해시만 나온다)를 이슈에 적고 6단계로 간다.
+6. **되돌린다.** 1단계에서 저장한 값으로 변수와 시작 명령을 되돌려 다시 배포한다(옛 게이트가 옛 설정을 받아들인다). 볼륨의 데이터·로그인(`auth.json`)은 그대로다.
+   되돌린 뒤 5단계의 `problems`에 맞춰 원인(보통 3단계에서 놓친 `.env` 이름)을 고치고 다시 4단계부터 간다.
+
+**세션 검색·기억 도구를 끄는 변경(#4898)과 함께 볼 것.** 새 설정은 `memory`·`session_search`와 기억 스위치(`memory.memory_enabled`·`memory.user_profile_enabled`)를 끈다
+([ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md#증보-2026-11-01--공동-호스팅-hermes의-세션-검색기억-도구는-끈다-4898)). 이미 도는 볼륨의
+`/opt/data/memories/`에 `MEMORY.md`·`USER.md`가 있으면 새 설정은 읽지 않지만 파일은 남는다: 5단계 뒤에 **이름과 크기만** 보고(`ls -l /opt/data/memories`, 내용은 열지 않는다)
+운영자가 비운다(기록에는 지운 파일의 개수만 적는다). 세션 기록(`/opt/data/state.db`)은 Hermes가 계속 쓰며 이 변경이 지우지도 보관 기간을 정하지도 않는다. 이 변경은 게이트(`HERMES_LOCKGATE_B64`)·설정
+다섯의 해시·시작 명령 체크섬을 함께 바꾸므로 위 「함께 바뀌는 것」과 한 번에 간다. 되돌리기(6단계)는 저장해 둔 이전 값이면 되고 새 게이트는 옛 설정(두 도구가 켜진 설정)을 받지 않는다.
+
+**Hermes 핀(이미지 digest)을 올릴 때.** 새 이미지의 `.env.example`이 바뀌면 씨앗 표가 낡는다. 이 절의 단계와 별개로, 핀을 올리는 변경 안에서 한 번에 함께 고친다. 새 digest를
+`infra/rust/docker-compose.rust.yml`과 `infra/railway/railway.json`에 같이 적고, `bash scripts/tests/test_hermes_image_guard_docker.sh`를 돌린다: `env-seed-template`이 표를 새 이미지의 `.env.example`과 대조하고,
+`env-loader-oracle`이 새 이미지의 로더와 줄 판독기를 게이트와 대조한다(이미지의 판독기가 바뀌면 `line_reader_mismatch`·`chain_mismatch`가 알려 준다). **줄 판독기 파일(`agent/secret_scope.py`)이
+바뀌었으면** `line_reader_mismatch`가 알려 준 뒤 새 태그 소스의 `_parse_env_text`·`load_env_file`을 읽어 `lockgate.py`의 `line_assignments` 복사본을 고치고, `test_lockgate_env.py`의 `LINE_TABLE`을
+**진짜 함수의 새 측정**으로 다시 만든다(표의 줄을 손으로 쓰지 않는다). 둘은 아래 ③의 새 sha256·`HERMES_LOCKGATE_B64`와 함께 바꾼다. `memory`·`session_search`의 이름이나 `memory.*` 스위치가 바뀌었으면
+`cross-run-tools-off`의 탐침(진짜 Hermes 모듈)이 알려 준다. `.env.example`이 바뀌었으면 ① `lockgate.py`의
+`VOLUME_ENV_SEEDED`, ② `env_loader_oracle.py`의 `SEEDED`(오라클의 독립 복사본), ③ `lockgate.py`의 새 sha256(`railway.json`의 hermes 시작 명령)과 `HERMES_LOCKGATE_B64`를 **함께** 고친다. 한쪽만 고치면
+두 표가 같다는 시험이나 카탈로그 검사(`check_railway_catalog.py`)가 깨진다. 표는 이름마다 값 하나만 받으므로 이미 도는 볼륨(옛 템플릿 줄)과 새 볼륨(새 줄)이 다를 수 있다: 값이 새 표와 다른 옛 줄은
+게이트가 거절한다(거절 방향이라 안전하고 가용성만 걸린다). 위 3단계처럼 그 줄만 열어 대조해서 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
+
+이 단계에 들어 있지 않은 것: 그림 도구를 어느 Hermes가 갖는지의 결정과 `OORT_SELF_MEDIA_ORIGIN`·`OORT_HOSTED_MEDIA_STRICT`(ADR-0218 증보와
+[리허설 런북](runbooks/hermes-photo-expression-rehearsal.md))는 이 단계의 다음 일이다. 연결 모드 Hermes에는 그림 도구가 없다(ADR-0203 I3).
+
+---
+
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.
+- 팀 서버 Hermes 서비스의 실제 변수·시작 명령 변경 — 오케스트레이터가 owner 사전 고지 뒤에 집행한다([§Hermes 단계](#hermes-단계-팀-서버-공동-hermes)).
 - 실발행 dispatch — owner 가 `release` Environment 에서 승인한다. 워크플로
   계약은 multi-arch 이지만 첫 arm64 digest 실측은 아직 없다.
   공개 dmg 업로드도 같다(`gh release upload` 는 사람이 실행).

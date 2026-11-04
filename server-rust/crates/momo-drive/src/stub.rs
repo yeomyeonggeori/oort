@@ -41,8 +41,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    interrupted_upload, refuse_before_body, DriveArchive, DriveContent, DriveError, DriveFile,
-    DriveUploadSession, ReceivedLength, UploadBody, MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
+    interrupted_upload, refuse_before_body, ByteRange, DriveArchive, DriveContent, DriveError,
+    DriveFile, DriveRangeContent, DriveUploadSession, ReceivedLength, UploadBody,
+    MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
 };
 
 /// A capability that has not been spent yet.
@@ -176,6 +177,33 @@ impl DriveArchive for StubDriveArchive {
             mime,
             size_bytes,
             body: Box::pin(futures::stream::once(async move { Ok(Bytes::from(bytes)) })),
+        })
+    }
+
+    /// A slice of the in-memory object (ADR-0151 증보 5 D3). The stub *is*
+    /// memory, so nothing streams — but it answers the same question every other
+    /// backend does, with the same refusals, which is what lets one route serve
+    /// all of them.
+    async fn file_range(
+        &self,
+        file_id: &str,
+        range: ByteRange,
+        max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
+        let state = self.state.lock().await;
+        let object = state.objects.get(file_id).ok_or(DriveError::FileNotFound)?;
+        let total = object.bytes.len() as u64;
+        if total as i64 > max_bytes {
+            return Err(DriveError::ContentTooLarge);
+        }
+        if range.end() >= total {
+            return Err(DriveError::UpstreamFailure);
+        }
+        let slice =
+            Bytes::copy_from_slice(&object.bytes[range.start() as usize..=range.end() as usize]);
+        Ok(DriveRangeContent {
+            total_size_bytes: total as i64,
+            body: Box::pin(futures::stream::once(async move { Ok(slice) })),
         })
     }
 

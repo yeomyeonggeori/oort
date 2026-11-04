@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import {
   ACTIVITY_FILTER_TABS,
@@ -20,6 +21,10 @@ import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useAgentFeed } from "@/features/inbox/useInbox";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 활동 (R-1 §1, the second global surface). One line per thing an agent did:
@@ -57,7 +62,7 @@ const EMPTY_COPY: Record<ActivityFilter, { headline: string; detail: string }> =
 };
 
 export function ActivityRoute() {
-  const { connStatus, session } = useSession();
+  const { session } = useSession();
   const [params, setParams] = useSearchParams();
   const filter = parseActivityFilter(params.get("filter"));
   // 이 표면의 두 원천이 **둘 다** 이 서버에 없다 (goal B12): 승인 원장(404)과
@@ -73,7 +78,7 @@ export function ActivityRoute() {
     () => feed.items.filter((item) => matchesActivityFilter(item, filter)),
     [feed.items, filter]
   );
-  const offline = connStatus === "disconnected";
+  const offline = useOffline();
 
   // 2R B2: 위 판정은 **둘 중 하나라도 있으면** 이 표면을 연다. 승인이 제공으로
   // 뒤집힌 지금 그 조건은 참이 되었고, 그래서 이 라우트는 다시 요청을 보낸다.
@@ -119,12 +124,9 @@ export function ActivityRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            feed.updatedAtMs > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  feed.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태입니다.`
-              : "오프라인. 아직 이 목록을 한 번도 받지 못했습니다."
+            <BlockedListLine
+              relativeTime={feed.updatedAtMs > 0 ? relativeLabel(feed.updatedAtMs, Date.now()) : null}
+            />
           }
           testId="activity-offline"
         />
@@ -153,10 +155,10 @@ export function ActivityRoute() {
           >
             {feed.isLoading && items.length === 0 ? null : feed.error &&
               items.length === 0 ? (
-              <InlineBanner
-                message="활동을 불러오지 못했습니다."
-                actionLabel="다시 시도"
-                onAction={feed.refetch}
+              <LoadFailureBox
+                titleKey={CONNECTION_KEYS.loadActivityTitle}
+                cause={loadCauseOf(null)}
+                onRetry={feed.refetch}
                 testId="activity-error"
               />
             ) : items.length === 0 ? (

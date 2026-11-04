@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {
   act,
   cleanup,
@@ -470,6 +471,21 @@ describe('항목과 닫는 길', () => {
     expect(view.onClose).toHaveBeenCalledTimes(2);
     screen.getByTestId('attach-menu-modal').props.onRequestClose();
     expect(view.onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it('알림이 새 입구로 들어오면 열린 메뉴만 닫아 달라고 한다 — 닫혀 있는 메뉴는 부모에게 아무것도 묻지 않는다 (#4667)', () => {
+    const open = renderMenu({visible: true});
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(open.onClose).toHaveBeenCalledTimes(1);
+    open.unmount();
+
+    const closed = renderMenu({visible: false});
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(closed.onClose).not.toHaveBeenCalled();
   });
 
   it('열린 동안에는 Modal 이 서 있고, 닫힌 채로 시작하면 아무것도 그리지 않는다', () => {

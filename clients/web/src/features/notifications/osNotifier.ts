@@ -1,5 +1,6 @@
-import { isDesktop, showNotification } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 import { showBrowserNotification, type BrowserNotifyTarget } from "./browserNotify";
+import { showDesktopBanner, type BannerArm } from "./bannerClicks";
 
 // =============================================================================
 // OS 알림의 마지막 관문: 같은 종류를 한 묶음으로 쌓는다 (#3339).
@@ -12,7 +13,7 @@ import { showBrowserNotification, type BrowserNotifyTarget } from "./browserNoti
 // 앱 안 토스트가 아니다. OS 알림이다(ADR-0182의 대상 밖, taste §8).
 // =============================================================================
 
-export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done";
+export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done" | "thread-reply";
 
 export interface OsNotifyItem {
   kind: OsNotifyKind;
@@ -22,19 +23,48 @@ export interface OsNotifyItem {
   label: string;
   /** 브라우저 알림을 눌렀을 때 갈 곳(채널 경로). 데스크탑은 포커스 때 따로 간다. */
   route?: string;
+  /**
+   * 묶였을 때의 제목을 호출부가 정한다(#4890). 새 문구는 사전으로만 들어오므로 이 모듈의 고정 표(`SUMMARY_TITLE`)에
+   * 한글을 더하지 않는다. 건수는 묶인 뒤에야 알아서 함수다. 없으면 표의 것이다.
+   */
+  summaryTitle?: (count: number) => string;
+  /**
+   * 이 알림이 어느 스레드의 답글인가(스레드 루트 id, #5017). 같은 스레드의 답글만 묶인 배너는 누르면 그 스레드로 간다:
+   * 답글마다 `route` 의 카드가 달라 「한 곳을 가리킴」으로 읽히지 않던 것을 이 값이 잇는다.
+   */
+  rootId?: string;
+  /**
+   * 옛 어림(창이 앞에 온 순간 이동)이 쓰는 재료(#5059). 데스크탑 셸이 이 배너의 클릭을 알려 주지 못한다고 답했을 때만
+   * 쓰인다 — 클릭이 오는 배너에는 필요 없다. 메시지에서 온 알림만 갖는다.
+   */
+  arm?: BannerArm;
 }
 
-/** 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). */
+/**
+ * 묶인 배너가 보내질 때 함께 가는 정보. 브라우저 배너는 `kind`·`route` 만 읽는다. `arms` 는 묶음에 든 알림들의 어림 재료이고,
+ * 하나라도 있을 때만 붙는다.
+ */
+export interface OsNotifyTarget extends BrowserNotifyTarget {
+  arms?: readonly BannerArm[];
+}
+
+/**
+ * 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). 같은 스레드의 답글만 묶였으면
+ * 카드는 달라도 그 스레드다 — 가장 늦은 답글의 주소로 간다(#5017).
+ */
 export const MIXED_ROUTE = "/inbox?filter=mentions";
 
 export function routeFor(items: readonly OsNotifyItem[]): string | undefined {
   const routes = items.map((i) => i.route);
   if (routes.some((r) => r === undefined)) return undefined;
-  return routes.every((r) => r === routes[0]) ? routes[0] : MIXED_ROUTE;
+  if (routes.every((r) => r === routes[0])) return routes[0];
+  const root = items[0]?.rootId?.toLowerCase();
+  if (root !== undefined && items.every((i) => i.rootId?.toLowerCase() === root)) return routes[routes.length - 1];
+  return MIXED_ROUTE;
 }
 
 /** 묶였을 때의 제목. 「무엇이 일어났나」가 먼저, 건수가 뒤다. */
-const SUMMARY_TITLE: Record<OsNotifyKind, string> = {
+const SUMMARY_TITLE: Record<Exclude<OsNotifyKind, "thread-reply">, string> = {
   approval: "승인 필요",
   mention: "멘션",
   dm: "새 메시지",
@@ -48,6 +78,13 @@ export const SUMMARY_NAMES = 3;
 /** 같은 종류를 한 묶음으로 보는 시간. */
 export const COALESCE_MS = 1200;
 
+/** 묶음 제목: 호출부가 준 것이 먼저, 없으면 표. 표에 없는 종류는 보낸 사람 이름으로 말한다(호출부가 늘 제목을 준다). */
+function summaryTitleFor(first: OsNotifyItem, count: number): string {
+  if (first.summaryTitle !== undefined) return first.summaryTitle(count);
+  const base = first.kind === "thread-reply" ? first.title : SUMMARY_TITLE[first.kind];
+  return `${base} ${count}건`;
+}
+
 /** 순수: 한 종류의 알림 여럿을 배너 하나로. 하나면 그대로다. */
 export function summarize(items: readonly OsNotifyItem[]): { title: string; body?: string } {
   const first = items[0]!;
@@ -57,13 +94,13 @@ export function summarize(items: readonly OsNotifyItem[]): { title: string; body
   const names = items.slice(0, SUMMARY_NAMES).map((i) => i.label);
   const rest = items.length - names.length;
   return {
-    title: `${SUMMARY_TITLE[first.kind]} ${items.length}건`,
+    title: summaryTitleFor(first, items.length),
     body: rest > 0 ? `${names.join(", ")} 외 ${rest}건` : names.join(", "),
   };
 }
 
 export interface OsNotifierDeps {
-  send: (title: string, body: string | undefined, target: BrowserNotifyTarget) => Promise<boolean>;
+  send: (title: string, body: string | undefined, target: OsNotifyTarget) => Promise<boolean>;
   windowMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -82,7 +119,14 @@ export function createOsNotifier(deps: OsNotifierDeps) {
     clearTimer(slot.timer);
     const { title, body } = summarize(slot.items);
     const route = routeFor(slot.items);
-    void deps.send(title, body, { kind, ...(route === undefined ? {} : { route }) }).catch(() => false);
+    const arms = slot.items.flatMap((item) => (item.arm === undefined ? [] : [item.arm]));
+    void deps
+      .send(title, body, {
+        kind,
+        ...(route === undefined ? {} : { route }),
+        ...(arms.length === 0 ? {} : { arms }),
+      })
+      .catch(() => false);
   }
 
   return {
@@ -112,9 +156,10 @@ let shared: OsNotifier | null = null;
 /** 앱에 하나다: 메시지 레일과 로컬 칸이 같은 묶음을 쓴다. */
 export function osNotifier(): OsNotifier {
   shared ??= createOsNotifier({
-    // 데스크탑은 셸로, 브라우저는 옵트인한 탭의 Notification API로(#3340). 같은 묶음 규칙이다.
+    // 데스크탑은 셸로, 브라우저는 옵트인한 탭의 Notification API로(#3340). 같은 묶음 규칙이다. 셸이 클릭을 알려 주면
+    // 배너의 클릭이 곧 이동이다(#5059, `bannerClicks.ts`).
     send: (title, body, target) =>
-      isDesktop() ? showNotification(title, body) : showBrowserNotification(title, body, target),
+      isDesktop() ? showDesktopBanner(title, body, target) : showBrowserNotification(title, body, target),
   });
   return shared;
 }

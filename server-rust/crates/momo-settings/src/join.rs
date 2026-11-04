@@ -160,7 +160,10 @@ use momo_db::DbError;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::invite::{read_invite, InviteCode};
+use crate::invite::{
+    invite_role_paused, read_invite, InviteCode, GUEST_INVITES_PAUSED_CODE,
+    GUEST_INVITES_PAUSED_MESSAGE,
+};
 use crate::workspace::try_share_membership_state;
 
 // ---------------------------------------------------------------------------
@@ -377,6 +380,13 @@ pub enum JoinRejection {
     /// here rather than mint an owner over a public route.
     #[error("public join cannot grant owner or platform admin")]
     RoleNotPubliclyJoinable,
+    /// `400` with [`GUEST_INVITES_PAUSED_CODE`] — the code is usable and its role is
+    /// paused ([`crate::invite::GUEST_INVITES_ENABLED`]). Judged on the code alone,
+    /// before the ban check and before the existing-account gate, so the answer is
+    /// the same for an address with an account, an address without one and a banned
+    /// one.
+    #[error("{}", GUEST_INVITES_PAUSED_MESSAGE)]
+    GuestInvitesPaused,
     /// `403`.
     #[error("member is banned from this workspace")]
     Banned,
@@ -448,6 +458,7 @@ impl JoinRejection {
             | JoinRejection::HandleTaken
             | JoinRejection::NoPublicChannels => 409,
             JoinRejection::PasswordGuessLimited { .. } => 429,
+            JoinRejection::GuestInvitesPaused => 400,
             JoinRejection::RoleNotPubliclyJoinable
             | JoinRejection::Banned
             | JoinRejection::RoleEscalation
@@ -465,6 +476,7 @@ impl JoinRejection {
         match self {
             JoinRejection::InvalidCredentials => Some("invalid_credentials"),
             JoinRejection::EmailUnavailable => Some("join_email_unavailable"),
+            JoinRejection::GuestInvitesPaused => Some(GUEST_INVITES_PAUSED_CODE),
             JoinRejection::InviteInvalid
             | JoinRejection::InviteExpired
             | JoinRejection::InviteRevoked
@@ -634,12 +646,14 @@ pub struct JoinOutcome {
 /// [`resolve_invite_workspace`] returned. Every refusal is an `Err`, so the
 /// caller's transaction rolls back on all of them.
 ///
-/// Order is Swift's, with one deliberate insertion (3b, #4625), and the order is
-/// the contract — a caller reading the response cannot tell a "banned" refusal
-/// from an "expired" one unless they are evaluated in the same sequence on both
-/// servers. What the insertion fixes is *where the account is first discussed*:
-/// the invite's own state and the ban come first (neither says anything about an
-/// account), then the existing-account gate, then every check that does.
+/// Order is Swift's, with two deliberate insertions (3b, #4625, and 2b, the paused
+/// role), and the order is the contract — a caller reading the response cannot tell
+/// a "banned" refusal from an "expired" one unless they are evaluated in the same
+/// sequence on both servers. What the 3b insertion fixes is *where the account is
+/// first discussed*: the invite's own state and the ban come first (neither says
+/// anything about an account), then the existing-account gate, then every check
+/// that does. The 2b refusal is judged on the code alone and comes before all of
+/// them that concern the caller.
 ///
 /// `guess_budget` is how the transport layer limits password guesses (see
 /// [`PasswordGuessBudget`]); it is a required argument, with no unbudgeted default.
@@ -705,6 +719,17 @@ pub async fn redeem_invite_in_tx(
     //    `membership_role` value cannot become self-service by default.
     if !matches!(invite_role.as_str(), "admin" | "member" | "guest") {
         return Err(JoinRejection::RoleNotPubliclyJoinable.into());
+    }
+
+    // 2b) A paused role (guest invites, until channel-scoped invites exist —
+    //     ADR-0128 D1, ADR-0219 GS-0) is refused on the code alone. It sits ahead of
+    //     the ban check (3) and the existing-account gate (3b) on purpose: the
+    //     answer then cannot depend on whether the address has an account, and a
+    //     code that is always refused never spends a password guess or says
+    //     anything about an account (#4625). A code that is already dead was
+    //     answered above (expired, revoked, exhausted) and keeps that answer.
+    if invite_role_paused(&invite_role) {
+        return Err(JoinRejection::GuestInvitesPaused.into());
     }
 
     // 3) Bans, by email OR handle (Swift `requireNotBanned` :533-552).
@@ -1563,6 +1588,11 @@ mod tests {
                 409,
                 "workspace has no joinable public channels",
             ),
+            (
+                JoinRejection::GuestInvitesPaused,
+                400,
+                GUEST_INVITES_PAUSED_MESSAGE,
+            ),
         ];
         for (rejection, status, message) in cases {
             assert_eq!(rejection.status_code(), status, "{rejection:?}");
@@ -1570,16 +1600,16 @@ mod tests {
         }
         assert_eq!(
             cases.len(),
-            15,
+            16,
             "a new refusal is a security decision: add it to this table too"
         );
     }
 
-    /// Only the two refusals #4625 added name themselves. The rest have always been
-    /// told by status and sentence, and a code appearing on one of them is a wire
-    /// change that has to be decided, not inherited.
+    /// Only the two refusals #4625 added and the paused role name themselves. The
+    /// rest have always been told by status and sentence, and a code appearing on
+    /// one of them is a wire change that has to be decided, not inherited.
     #[test]
-    fn exactly_the_two_account_refusals_carry_a_machine_code() {
+    fn exactly_the_named_refusals_carry_a_machine_code() {
         assert_eq!(
             JoinRejection::InvalidCredentials.code(),
             Some("invalid_credentials")
@@ -1587,6 +1617,10 @@ mod tests {
         assert_eq!(
             JoinRejection::EmailUnavailable.code(),
             Some("join_email_unavailable")
+        );
+        assert_eq!(
+            JoinRejection::GuestInvitesPaused.code(),
+            Some("guest_invites_paused")
         );
         for rejection in [
             JoinRejection::InviteInvalid,

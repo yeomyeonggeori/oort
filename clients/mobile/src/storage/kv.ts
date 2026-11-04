@@ -49,6 +49,13 @@ export const NON_SECRET_KEYS = {
   /** The API base this device chose. Not a secret; it is printed on screen. */
   serverBase: 'momo.mobile.server.v1',
   /**
+   * 「이메일 기억하기」(#4669): 서버 주소별로 로그인 때 쓴 이메일과 사람이 고른 켬·끔(`@momo/core` `rememberedLogin`).
+   * 이메일은 화면에 찍히는 값이라 비밀이 아니고, **비밀번호와 토큰은 이 키에 닿지 않는다** — 코어가 이메일 모양만
+   * 받는다. 로그아웃이 지우지 않는다(같은 서버에 다시 들어오면 채워지는 것이 이 기능이다). 끄면 코어가 이 키의
+   * 이메일을 그 자리에서 비운다.
+   */
+  rememberedLogin: 'momo.mobile.login.remembered.v1',
+  /**
    * Member identity + the login-returned websocket address (ADR-0110). Not a
    * secret, but the refresh response does not repeat them, so a restored
    * session has to read them from somewhere that survives a restart.
@@ -106,6 +113,15 @@ export const NON_SECRET_KEYS = {
    */
   composerDrafts: 'momo.mobile.composer.drafts.v1',
   /**
+   * 보내지 못한 글 (#5222, #5201 결정 ⑤). 열쇠 `워크스페이스:채널:멱등키` → 한 건의 JSON(코어 `serializeFailedSend`)인 지도 한 덩이이고,
+   * 수명·정원·비밀 키 거부·로그아웃 삭제는 `features/conversation/failedSends.ts` 가 진다. 위 초안과 같은 규칙이다.
+   *
+   * 여기 있어도 되는 이유도 초안과 같다: **사람이 자기 손으로 쓴 글**이 이 기기에 그대로 있는 것이고, 서버가 받았다는 증명이 없는(응답이
+   * 유실됐을 수 있는) 글이다. 행 전체(멱등 키 · 첨부 id · 인용)를 남기는 까닭은 웹과 같다 - 키가 살아야 다시 보내도 서버가 중복을 막는다.
+   * 토큰과는 다른 종류의 값이고, 잃으면 사람이 쓴 글이 없어진다.
+   */
+  failedSends: 'momo.mobile.composer.failed-sends.v1',
+  /**
    * 라이트/다크/시스템 중 사람이 고른 것 (U2, 옛 키 — 읽기 전용). 값은 `ThemeChoice` 세
    * 낱말 중 하나다. **키가 없다는 것과 「시스템」을 골랐다는 것은 다르다**: 이 키와 새 키
    * (`appearance`)가 모두 없을 때만 폰의 기본(라이트)이고, 하나라도 있으면 거기 적힌 선택이
@@ -157,8 +173,26 @@ export const NON_SECRET_KEYS = {
    * 편의일 뿐이고, 잃으면 기본값 「내 것」으로 열린다.
    */
   workFilter: 'momo.mobile.work.filter.v1',
-  /** Device preference: rich (default), basic or off. No account data. */
-  hapticMode: 'momo.mobile.haptics.v1',
+  /**
+   * 햅틱 단계(`lib/haptics.ts`): 없으면 풍부. **앱은 이 키에 쓰지 않는다** — 설정의 「햅틱」 선택은 owner 10-31(#4936)에
+   * 없앴고 앱 햅틱은 늘 「풍부」다. 이 키는 시험이 기본·끔 경로를 따로 재는 이음새일 뿐이다. 예전 판이 고른 「기본」·「끔」은
+   * `momo.mobile.haptics.v1` 에 남아 있을 수 있으나 **읽지 않는다**(키를 v2로 올려서 되살아나지 않게 했다). 계정 정보 없음.
+   */
+  hapticMode: 'momo.mobile.haptics.v2',
+  /**
+   * 마지막으로 닫은 「업데이트 소식」의 **소식 버전** 하나(`0.1.41`, #4937). 앱 버전·빌드 번호가 아니다: 폰은 빌드 번호로 소식을
+   * 고르지만(`@momo/core/features/releaseNotes/model`) 기기에는 소식의 이름을 적는다. 지금 소식이 이 값보다 새로울 때만
+   * 업데이트 뒤 처음 열 때 한 번 보인다. 이 폰의 취향이라 로그아웃·계정 전환에도 남는다(테마와 같은 종류). 잃으면 같은
+   * 소식을 한 번 더 볼 뿐이다. 계정 정보 없음.
+   */
+  releaseNotesSeen: 'momo.mobile.release-notes.seen.v1',
+  /**
+   * 「링크 미리보기」 — 이 폰이 대화의 링크 카드를 어떻게 그리는가 (#4883). 값은 `rich`(크게) ·
+   * `compact`(작게) · `off`(끄기) 세 낱말 중 하나이고, 웹의 `momo.web.link-preview.v1` 과 **같은 값 이름**이다.
+   * 키가 없거나 모르는 값이면 코어의 `DEFAULT_UNFURL_SIZE`(작게)다. 기기 취향이라 로그아웃에도 남고
+   * 서버·다른 멤버 화면과 무관하다. 비밀이 아니다.
+   */
+  linkPreview: 'momo.mobile.link-preview.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

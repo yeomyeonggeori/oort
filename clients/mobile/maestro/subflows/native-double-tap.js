@@ -1,3 +1,4 @@
+/* global http, PHOTO_STUB_PORT -- Maestro runScript globals: the `http` client and the `-e PHOTO_STUB_PORT=` env var. */
 // Host-native input, via the opt-in loopback photo fixture (no app/test-mode gesture bypass).
 // Foreground the dedicated Simulator and set PHOTO_NATIVE_TAP_X/Y when starting photo-stub.mjs.
 // Maestro supplies PHOTO_STUB_PORT; no separate XCTest request is made between taps.

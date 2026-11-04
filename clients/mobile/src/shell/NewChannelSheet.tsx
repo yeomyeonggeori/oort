@@ -14,11 +14,16 @@ import {StyleSheet, Text, View} from 'react-native';
 
 import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
-import {PageSheet, usePageSheetClose} from '../design/PageSheet';
+import {PageSheet, usePageSheetClose, usePageSheetGone} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
 import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, space, type Palette} from '../design/tokens';
+import {
+  newChannelDraftKey,
+  useHoldDraftOnEntry,
+  useRestoredEntryDraft,
+} from '../lib/entryDrafts';
 import {workspaceKeys} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 
@@ -43,6 +48,11 @@ import {useSession} from '../session/useSession';
 // **왼쪽 ✓ = 채널 만들기**(이름이 규칙을 어기거나 만드는 중이면 회색·눌리지 않음), **오른쪽 원형 X = 닫기**. 옛 오른쪽 글자
 // 「만들기」 단추는 없다. 이름은 앞 아이콘(#)이 선 입력 알약(`InputPill`), 공개 범위는 묶음 카드의 라디오 행이다.
 // =============================================================================
+
+interface NewChannelDraft {
+  name: string;
+  kind: 'public' | 'private';
+}
 
 const KINDS = [
   {
@@ -87,8 +97,13 @@ function SheetBody({
   const {workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<'public' | 'private'>('public');
+  const sheetGone = usePageSheetGone();
+  // 알림이 걷어 간 시트였다면 쓰던 이름과 공개 범위로 선다(#4667). 사람이 X 로 닫은 시트는 평소처럼 빈 채로 선다. 자리는 워크스페이스로
+  // 묶인다(`lib/entryDrafts.ts`) — 다른 사람이 같은 기기로 로그인해도 앞 사람의 이름이 나타나지 않는다.
+  const draftKey = newChannelDraftKey(workspaceId);
+  const restored = useRestoredEntryDraft<NewChannelDraft>(draftKey);
+  const [name, setName] = useState(restored?.name ?? '');
+  const [kind, setKind] = useState<'public' | 'private'>(restored?.kind ?? 'public');
   const [touched, setTouched] = useState(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<CreateChannelFailure | null>(null);
@@ -121,6 +136,10 @@ function SheetBody({
       void client.invalidateQueries({
         queryKey: workspaceKeys.channels(workspaceId),
       });
+      // 만드는 동안 시트가 걷혔으면(알림이 착지했거나 사람이 X 로 닫았다) 채널은 만들어졌고 목록에는 들어갔다 — 여기까지다.
+      // 요청이 끝났다고 사람을 새 채널로 끌고 가면 알림이 세운 목적지를 덮고, 늦은 `onClose()` 는 그 사이 사람이 새로 연
+      // 시트를 닫는다(#5058). 닫히는 슬라이드가 도는 동안도 걷힌 것으로 센다.
+      if (sheetGone()) return;
       onClose();
       onOpenConversation(
         created.channel.id,
@@ -134,6 +153,10 @@ function SheetBody({
   };
 
   const disabled = pending || issue !== null;
+  // 이름을 쓰던 중에 알림이 이 시트를 걷어도 그 이름은 남는다(#4667). 만드는 중(`pending`)은 곧 끝나는 일이라 맡기지 않는다.
+  useHoldDraftOnEntry<NewChannelDraft>(draftKey, () =>
+    !pending && name !== '' ? {name, kind} : undefined,
+  );
 
   return (
     <>

@@ -83,6 +83,8 @@ async function fill(view: RenderResult, { presets = ["bounce"], note = "", photo
 const send = (view: RenderResult) => fireEvent.click(view.getByTestId(SUBMIT));
 const errorText = (view: RenderResult) => view.getByTestId("expression-make-error").textContent;
 const hiddenOf = (view: RenderResult, id: string) => (view.getByTestId(id) as HTMLElement).hidden;
+/** 「AI와 만들기」는 사진 양식에서 시작한다(#4941): 에이전트에게 부탁하는 길은 그 안의 단추 하나다. 이 시험들의 서버는 사진 길을 모르는 고정 서버라 확인이 실패하는 쪽으로 서고, 그 줄에도 같은 단추가 있다. */
+const toAgentPath = async (view: RenderResult) => { fireEvent.click(await view.findByTestId("expression-photo-agent")); };
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -110,7 +112,7 @@ describe("원본 사진 검사", () => {
     const { view } = mount(form());
     await waitFor(() => expect(agentSelect(view).value).not.toBe(""));
     choose(view, makeFixturePhoto("logo.svg", "image/svg+xml"));
-    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요.");
+    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("PNG, JPG, WebP 또는 GIF 사진을 골라 주세요.");
     expect(view.queryByTestId("expression-make-photo-preview")).toBeNull();
     fireEvent.click(view.getByTestId(chip("bounce")));
     send(view);
@@ -120,7 +122,7 @@ describe("원본 사진 검사", () => {
     const { view } = mount(form());
     await waitFor(() => expect(agentSelect(view).value).not.toBe(""));
     choose(view, sizedFile(5 * 1024 * 1024 + 1));
-    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("사진이 너무 커요. 5 MiB 이하로 골라 주세요.");
+    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("사진이 너무 커요. 5MB 이하로 골라 주세요.");
     choose(view, sizedFile(5 * 1024 * 1024));
     await view.findByTestId("expression-make-photo-preview");
     expect(view.getByTestId("expression-make-photo-error").textContent).toBe("");
@@ -379,7 +381,7 @@ describe("보내는 순서", () => {
     await act(async () => { store.setOffline(true); });
     const button = view.getByTestId(SUBMIT) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(view.getByText("연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요.").id).toBe(button.getAttribute("aria-describedby"));
+    expect(view.getByText("You're offline. You can send the request once you're connected again.").id).toBe(button.getAttribute("aria-describedby"));
     fireEvent.submit(view.getByTestId("expression-make-form"));
     expect(api.openDirectMessage).not.toHaveBeenCalled();
     await act(async () => { store.setOffline(false); });
@@ -459,7 +461,10 @@ describe("단계별 실패와 다시 시도", () => {
   it("고칠 수 없는 원인은 그대로 말해요: 보관소 없음, 막힌 배포, 큰 파일", async () => {
     const { ApiError } = await vi.importActual<typeof import("@momo/core/lib/api")>("@momo/core/lib/api");
     const lines: [() => void, string][] = [
-      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      // 보관소 이야기는 우리 서버가 코드를 붙여 직접 낸 503에만 남는다(#5221). 코드 없는 502·503은 닿지 못함이라 기다리면 된다.
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive", "archive_not_configured")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "unavailable")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(502, "bad gateway")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "blocked" }), abort: vi.fn() })), "이 서버의 보안 설정이 파일 보관소 주소를 막았어요. 서버 관리자에게 알려 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "status", status: 413 }), abort: vi.fn() })), "사진이 너무 커서 올리지 못했어요. 더 작은 사진을 골라 주세요."],
     ];
@@ -656,6 +661,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     const back = view.getByRole("button", { name: "목록으로" });
     await waitFor(() => expect(document.activeElement).toBe(back));
@@ -669,6 +675,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-empty");
     fireEvent.click(view.getByRole("button", { name: "가져오기" }));
     expect(await view.findByLabelText("고정 이름")).toBeTruthy();
@@ -687,6 +694,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel(onClose);
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     await fill(view);
     send(view);
@@ -720,6 +728,7 @@ describe("이모지 고르개 안에서", () => {
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }
@@ -728,6 +737,29 @@ describe("이모지 고르개 안에서", () => {
     const { view } = await mountedMenuThenEscape(onOpenChange);
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(view.queryByRole("menu")).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+  it("삭제 확인 단계의 Escape는 단계만 취소하고 고르개를 닫지 않아요, 다음 Escape가 고르개를 닫아요 (#4986)", async () => {
+    // 실제 모달 팝오버 안에서: Radix 는 Escape 를 문서 캡처 단계에서 먼저 가져가므로, 확인 단계가 서 있는 동안
+    // 고르개가 단계의 취소를 부르지 않으면 한 번의 Escape 가 고르개를 통째로 닫는다(확인에서 길을 잃는다).
+    stubBrowserOnlyApis();
+    const onOpenChange = vi.fn();
+    const store = makeStore();
+    await store.refresh();
+    const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
+    fireEvent.click(await view.findByRole("button", { name: "우리 팀" }));
+    const manage = await view.findByRole("button", { name: "파티 앵무새 관리" });
+    fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
+    fireEvent.keyDown(manage, { key: "Enter" });
+    fireEvent.click(await view.findByRole("menuitem", { name: "삭제하기" }));
+    expect(view.getByTestId("expression-confirm")).toBeTruthy();
+    // 이 순간 열린 대화상자는 고르개 하나뿐이다: 두 번째 표면이 없다.
+    expect(document.querySelectorAll('[role="dialog"][data-state="open"], [role="alertdialog"]')).toHaveLength(1);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(view.queryByTestId("expression-confirm")).toBeNull());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "파티 앵무새 관리" }));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
@@ -756,6 +788,7 @@ describe("이모지 고르개 안에서", () => {
     // 이제 양식을 연 뒤 그 Escape 를 시험한다.
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }

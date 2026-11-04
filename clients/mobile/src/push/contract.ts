@@ -60,6 +60,10 @@ export const PUSH_CATEGORY = {
   approval: 'momo.approval',
   approvalOpen: 'momo.approval.open',
   work: 'momo.work',
+  /** ADR-0206 D14·D15 (#4341): a push that names no conversation — today the 시험 알림.
+   *  No buttons (nothing to reply to or decide). An app build without this value fails
+   *  open to the relay's static text. */
+  system: 'momo.system',
 } as const;
 
 export type PushCategory = (typeof PUSH_CATEGORY)[keyof typeof PUSH_CATEGORY];
@@ -97,7 +101,17 @@ export const PUSH_ENVELOPE_SCHEMA = 'momo.push.notification.v2';
  *  Six since ADR-0162 증보 3 D14 (#3517): `work_run_done` is the same push for a
  *  hosted agent's work run, sent to the person who asked for it. Same category,
  *  same label-only validation; a build without it fails open to the static
- *  placeholder (relay ships first, the app follows). */
+ *  placeholder (relay ships first, the app follows).
+ *
+ *  Seven since ADR-0206 증보 1 F5 (#4889): `thread_reply` is a new reply in a thread
+ *  the member follows. Category `momo.message` (the reply button stays), and the
+ *  envelope's `thread-id` is the thread's root — the tap opens that thread through
+ *  the existing `thread-id !== channel_id` rule, so nothing here branches on it.
+ *
+ *  Eight since ADR-0206 D11·D14 (#4341): `test_notification` is the test push a member
+ *  sends to their own devices, category `momo.system`. Its channel, message and thread
+ *  ids are the nil-UUID sentinel (the envelope names no conversation), so the tap lands
+ *  on no channel — the tap destination is the notification settings screen (#4342). */
 export const PUSH_REASONS = [
   'dm',
   'mention',
@@ -105,6 +119,8 @@ export const PUSH_REASONS = [
   'resume_offer',
   'work_session_idle',
   'work_run_done',
+  'thread_reply',
+  'test_notification',
 ] as const;
 
 export type PushReason = (typeof PUSH_REASONS)[number];

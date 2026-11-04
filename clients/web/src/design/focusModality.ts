@@ -89,12 +89,21 @@ export function isKeyboardNavigation(event: KeyboardEvent): boolean {
   return !isTextEntry(event.target);
 }
 
+/**
+ * 표지를 keyboard로 올린다. 키보드 탐색 키(위 `isKeyboardNavigation`)가 올리는 것과 같은 값이다. 키를 직접 보지 못하고 「키보드로
+ * 눌렀다」만 아는 곳이 쓴다: Enter·Space는 표지를 올리지 않으므로, 그 키로 연 라이트박스의 첫 초점에 링을 세우려면 열린 쪽이 올려야
+ * 한다(#5275).
+ */
+export function applyKeyboardModality(doc: ModalityDocument): void {
+  applyFocusModality(doc, "keyboard");
+}
+
 export function initFocusModality(doc: ModalityDocument): () => void {
   applyFocusModality(doc, "pointer");
   const onKeyDown = (event: Event) => {
     if (!("key" in event)) return;
     if (!isKeyboardNavigation(event as KeyboardEvent)) return;
-    applyFocusModality(doc, "keyboard");
+    applyKeyboardModality(doc);
   };
   const onPointerDown = () => applyFocusModality(doc, "pointer");
   doc.addEventListener("keydown", onKeyDown, true);

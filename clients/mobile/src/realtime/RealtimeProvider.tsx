@@ -4,8 +4,14 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import {
+  ConnectionProvider,
+  NO_FEED,
+  type SocketFeed,
+} from '../features/connection/ConnectionProvider';
 import {getPersistedSession} from '../storage/secureSession';
 import {socketWanted} from './backgroundPolicy';
 import {createChannelRail, type ChannelRail} from './channelRail';
@@ -94,17 +100,24 @@ export function RealtimeProvider({
 }): React.JSX.Element {
   const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
+  // 사람에게 말하는 판정(첫 1초 침묵·「연결 중」·「끊김」의 원인)은 코어 연결 상태 모델이 한다(#5222). 전송이 밖에서 받은
+  // 소켓 사건을 이 ref 를 거쳐 그 모델에 먹인다 — 아래 `ConnectionProvider` 가 채운다.
+  const feedRef = useRef<SocketFeed>(NO_FEED);
   const [rail, setRail] = useState<ChannelRail | null>(null);
   const [reconnect, setReconnect] = useState<(() => Promise<void>) | undefined>();
   const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
 
   useEffect(() => {
     if (url === '') return;
-    // The display keeps every recovery `connecting` for ten seconds. A retry
-    // loop cannot restart that deadline; a foreground return can (#4783).
+    // `status` reads `connecting` from the moment a socket leaves `connected` until a ten-second
+    // outage deadline; a retry loop cannot restart that deadline, a foreground return can (#4783).
+    // It answers "is the socket live" for the surfaces that ask. What the person is TOLD (a silent first
+    // second #4949, 「연결 중」, the cause of an outage) is the connection model's job (#5222): the same
+    // socket events are fed to it through `feedRef`.
     const transport = createRealtimeTransport({
       url,
       onStatus: setStatus,
+      onSocketEvent: event => feedRef.current(event),
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
@@ -127,10 +140,14 @@ export function RealtimeProvider({
     [rail, status, subscriptionsWanted, reconnect],
   );
 
+  // 연결 상태 모델은 이 소켓·기기·REST 를 한 번에 읽는 앱 하나의 사실이라 소켓을 만드는 이 공급자 안에 선다. 자식
+  // effect 가 먼저 돌아 `feedRef` 가 채워진 뒤에 전송이 시작한다.
   return (
-    <RealtimeContext.Provider value={value}>
-      {children}
-    </RealtimeContext.Provider>
+    <ConnectionProvider feedRef={feedRef}>
+      <RealtimeContext.Provider value={value}>
+        {children}
+      </RealtimeContext.Provider>
+    </ConnectionProvider>
   );
 }
 

@@ -91,6 +91,12 @@
 #                          reported FAIL (default: 1800 — Maestro 2.8 sometimes
 #                          hangs in its own teardown after every step passed)
 #   LANE_PHONE_RUST_IMAGE  reuse a prebuilt image instead of building one
+#   LANE_PHONE_LOCAL_DRIVE 1 = attachments get a local-volume archive (ADR-0169), so the
+#                          stack can hold bytes. Off by default (the other flows send none);
+#                          `5208-video-viewer-live` turns it on by itself (#5208).
+#   LANE_PHONE_RECORDER_PORT  the recording relay `5208-video-viewer-live` puts between the
+#                          app and the api (default: api port + 2, the slot the compose never
+#                          publishes — postgres)
 #   LANE_PHONE_OUT_DIR     artifact dir (default: under $TMPDIR)
 # =============================================================================
 set -euo pipefail
@@ -155,6 +161,15 @@ done
 if [ -n "$ONLY_FLOW" ]; then
   FLOWS=("$ONLY_FLOW")
 fi
+
+# #5208 — the video flow needs somewhere to keep attachment bytes. The lane's compose leaves the Drive
+# archive unconfigured (every attachment route answers 503 "Drive archive is not configured"), so the
+# flow that uploads a real video asks for the self-host default: ADR-0169's local volume. Only that flow
+# does — the others send no attachment and keep the stack as small as it was.
+LOCAL_DRIVE="${LANE_PHONE_LOCAL_DRIVE:-0}"
+for flow_name in "${FLOWS[@]}"; do
+  [ "$flow_name" = "5208-video-viewer-live" ] && LOCAL_DRIVE=1
+done
 
 # --------------------------------------------------------------------------
 # `--no-build` is refused HERE, before anything is started (#1035)
@@ -246,6 +261,20 @@ PG_PASSWORD="$(rand_hex)"
 APP_PASSWORD="$(rand_hex)"
 RELAY_PASSWORD="$(rand_hex)"
 WORKER_PASSWORD="$(rand_hex)"
+# Three more values are born here only because `infra/rust/docker-compose.rust.yml`
+# interpolates them with `${VAR:?}`, which makes compose refuse the WHOLE project
+# when one is missing — the 11-01 verification run could not boot this lane until
+# someone added them by hand (#5045):
+#   NOTIFIER_POSTGRES_PASSWORD   read by `runtime-roles` and `migrate`; no notifier
+#                                runs in this lane, but the roles script wants it.
+#   WEBHOOK_INGRESS_MASTER_KEY   `api`'s derivation root for inbound webhook secrets
+#                                (ADR-0004 증보 4, #2066).
+#   OUTBOUND_WEBHOOK_MASTER_KEY  the outbound one, read by `api` and `webhook-sender`.
+# The two webhook roots are separate draws on purpose: one value in both places
+# would make an inbound secret and an outbound one derivable from each other.
+NOTIFIER_PASSWORD="$(rand_hex)"
+WEBHOOK_INGRESS_KEY="$(rand_hex)"
+OUTBOUND_WEBHOOK_KEY="$(rand_hex)"
 CENT_API_KEY="$(rand_hex)"
 
 # The origins React Native's WebSocket can present (#1051). RN sends an `Origin`
@@ -300,6 +329,7 @@ MIGRATE_DATABASE_URL=postgres://$PG_USER:$PG_PASSWORD@postgres:5432/$PG_DB
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
 MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@postgres:5432/$PG_DB
 RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@postgres:5432/$PG_DB
 
@@ -308,6 +338,8 @@ CENT_TOKEN_HMAC=$(rand_hex)
 CENT_API_KEY=$CENT_API_KEY
 CENT_PROXY_SECRET=$(rand_hex)
 PROVIDER_LINK_MASTER_KEY=$(rand_hex)
+WEBHOOK_INGRESS_MASTER_KEY=$WEBHOOK_INGRESS_KEY
+OUTBOUND_WEBHOOK_MASTER_KEY=$OUTBOUND_WEBHOOK_KEY
 HERMES_API_KEY=$(rand_hex)
 
 # ADR-0110: the only authority for the realtime address handed to clients. The
@@ -331,14 +363,88 @@ MOCK_HERMES_MAESTRO_SLOW_SECONDS=$SLOW_SECONDS
 
 DB_VOLUME_NAME=$LANE_DB_VOLUME
 ENV
+if [ "$LOCAL_DRIVE" = "1" ]; then
+  # The upload address the server advertises must be one this host (the fixture script) and the
+  # simulator (the player) can both reach: the api's own published loopback port.
+  cat >>"$ENV_FILE" <<ENV
+
+MOMO_DRIVE_ARCHIVE_BACKEND=local
+MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://127.0.0.1:$API_PORT
+ENV
+fi
+
+# Where the two bind-mounted files are staged for the Docker daemon (see
+# stage_mounts below). Per compose project, so two lanes never share a directory.
+STAGE_DIR="${LANE_PHONE_STAGE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/momo-lane-phone/$PROJECT}"
+STAGE_MOCK_DIR="$STAGE_DIR/mock"
+STAGE_OVERRIDE="$STAGE_DIR/mounts.override.yml"
 
 COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$PROJECT" -f "$COMPOSE_BASE")
 [ "$BUILD_IMAGE" -eq 1 ] && COMPOSE_ARGS+=(-f "$COMPOSE_BUILD")
-COMPOSE_ARGS+=(-f "$COMPOSE_LANE")
+[ "$LOCAL_DRIVE" = "1" ] && COMPOSE_ARGS+=(-f "$REPO_ROOT/infra/rust/local.override.yml")
+COMPOSE_ARGS+=(-f "$COMPOSE_LANE" -f "$STAGE_OVERRIDE")
 
 compose() { docker compose "${COMPOSE_ARGS[@]}" "$@"; }
 
+# ---------------------------------------------------------------------------
+# bind-mount sources the Docker daemon can see (#5045)
+# ---------------------------------------------------------------------------
+# Two containers read a file out of the checkout through a bind mount: `mock-hermes`
+# mounts the repo root (it runs scripts/mock_hermes.py from there) and `centrifugo`
+# mounts infra/centrifugo.json. A bind mount names a path in the DAEMON's
+# filesystem, and under Colima the daemon is a VM that shares $HOME and nothing
+# else. A checkout under /private/tmp or $TMPDIR — where scratch worktrees live,
+# and where the 11-01 verification worktree was — is a path that does not exist
+# in there. Measured from such a checkout: the daemon does not refuse the mount,
+# it makes the missing source an empty directory, `mock-hermes` finds no
+# scripts/mock_hermes.py and exits 2, and `compose up` stops with "dependency
+# failed to start: container …-mock-hermes-1 exited (2)". The stack never comes up
+# for a reason that has nothing to do with the code under test, and the message
+# does not mention a path. (The centrifugo config mount has the same shape.)
+#
+# So the lane never mounts the checkout. It stages byte-for-byte copies of the two
+# files under $HOME (XDG_CACHE_HOME or ~/.cache, overridable with
+# LANE_PHONE_STAGE_DIR) and overrides both mounts to point there: same bytes, same
+# container paths, still read-only — only the host side of the mount changes. The
+# staging directory is per compose project and goes away with the stack, except
+# under --keep, which is leaving that stack up.
+#
+# This is done on EVERY run, including from a checkout under $HOME where the old
+# mounts would have worked: a path that is only taken when the checkout happens to
+# be somewhere unusual is a path nobody exercises until the day it matters.
+stage_mounts() {
+  mkdir -p "$STAGE_MOCK_DIR/scripts"
+  cp "$REPO_ROOT/scripts/mock_hermes.py" "$STAGE_MOCK_DIR/scripts/mock_hermes.py"
+  cp "$REPO_ROOT/infra/centrifugo.json" "$STAGE_DIR/centrifugo.json"
+  cat >"$STAGE_OVERRIDE" <<YAML
+services:
+  mock-hermes:
+    volumes:
+      - type: bind
+        source: "$STAGE_MOCK_DIR"
+        target: /workspace
+        read_only: true
+  centrifugo:
+    volumes:
+      - type: bind
+        source: "$STAGE_DIR/centrifugo.json"
+        target: /centrifugo/centrifugo.json
+        read_only: true
+YAML
+}
+
+# Only the files stage_mounts wrote, and `rmdir` (which refuses a directory that
+# still holds anything) rather than a recursive delete: LANE_PHONE_STAGE_DIR can
+# point at a directory this script did not create.
+unstage_mounts() {
+  rm -f "$STAGE_MOCK_DIR/scripts/mock_hermes.py" "$STAGE_DIR/centrifugo.json" "$STAGE_OVERRIDE"
+  rmdir "$STAGE_MOCK_DIR/scripts" "$STAGE_MOCK_DIR" "$STAGE_DIR" 2>/dev/null || true
+}
+
 METRO_PID=""
+# The request-recording relay of the video flow (#5208); empty when that flow is not run.
+RECORDER_PID=""
 LOCK_HELD=0
 LOCK_DIR=""
 # The currently-running flow and its watchdog, so a Ctrl-C or a kill takes them
@@ -408,11 +514,13 @@ cleanup() {
   if [ -n "$METRO_PID" ]; then
     kill -TERM "-$METRO_PID" 2>/dev/null || kill -TERM "$METRO_PID" 2>/dev/null || true
   fi
+  [ -n "$RECORDER_PID" ] && kill -TERM "$RECORDER_PID" 2>/dev/null || true
   if [ "$KEEP" = "1" ]; then
     say "--keep: leaving compose project '$PROJECT' up (tear down with:"
     say "        docker compose --env-file $ENV_FILE -p $PROJECT \\"
     say "          -f infra/rust/docker-compose.rust.yml \\"
     say "          -f infra/rust/docker-compose.lane-phone.yml down -v --remove-orphans)"
+    say "        (then delete the staged mount sources in $STAGE_DIR)"
   else
     say "tearing down compose project '$PROJECT' (containers, network, volumes)"
     compose down -v --remove-orphans >/dev/null 2>&1 || true
@@ -420,6 +528,8 @@ cleanup() {
     # supplied by us, so it is reclaimed by name too — resource accumulation is
     # a hard rule in this repo, not a preference.
     docker volume rm -f "$LANE_DB_VOLUME" >/dev/null 2>&1 || true
+    # After the containers are gone, never before: the mock still has its mount.
+    unstage_mounts
   fi
   exit "$rc"
 }
@@ -431,6 +541,11 @@ trap 'exit 143' TERM
 # its containers AND its volumes behind; the next run would then boot against a
 # database carrying the last run's messages, which is the difference between
 # "the reply arrived" and "a reply from twenty minutes ago is still on screen".
+# Before the first `compose` call, not just before `up`: every call loads
+# STAGE_OVERRIDE, and a missing file makes compose fail — which the reclaim below
+# would swallow, silently skipping the very cleanup it exists for.
+stage_mounts
+
 say "reclaiming any stack left behind by an earlier run"
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 docker volume rm -f "$LANE_DB_VOLUME" >/dev/null 2>&1 || true
@@ -555,9 +670,12 @@ VALUES ('$LANE_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$LANE_EMAIL', true,
 -- successfully and then shows "채널을 불러오지 못했습니다." — a 403 that reads as a
 -- broken channel list.
 --
--- 'admin', not 'member': 40-agents-tab toggles 재우기, which is restricted to a
--- workspace owner/admin or the agent's operator. A plain member gets
--- 'agent-state-forbidden', which is a correct screen and a useless test.
+-- 'admin', not 'member': 40-agents-tab used to toggle 재우기, which is restricted
+-- to a workspace owner/admin or the agent's operator (a plain member got
+-- 'agent-state-forbidden', a correct screen and a useless test). The toggle left
+-- the phone with #3902 and no flow here needs the role today; it stays because
+-- lowering it is a fixture change that wants its own proof, not a side effect of
+-- the flow cleanup in #5045.
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$LANE_MEMBER_ID', 'admin');
 
@@ -847,7 +965,16 @@ if [ -z "$owner" ]; then
   else
     say "starting Metro on :$METRO_PORT"
   fi
-  ( cd "$APP_ROOT" && exec node node_modules/react-native/cli.js "${metro_args[@]}" ) \
+  # CHROME_PATH=/usr/bin/false: a Maestro tap that lands on the dev build's
+  # "Open debugger" toast makes Metro's dev-middleware launch the real Google
+  # Chrome through chrome-launcher. Started from a sandboxed agent shell, that
+  # Chrome cannot register with the window server and aborts within 0.2s, and
+  # macOS puts a "Google Chrome quit unexpectedly" dialog on the owner's screen —
+  # five of them in one lane run (#5083). chrome-launcher reads CHROME_PATH first,
+  # so the launch now fails quietly in metro.log ("Failed to launch debugger app
+  # window") instead. Nothing in this lane uses the debugger.
+  ( cd "$APP_ROOT" && export CHROME_PATH=/usr/bin/false \
+      && exec node node_modules/react-native/cli.js "${metro_args[@]}" ) \
     >"$OUT_DIR/metro.log" 2>&1 &
   METRO_PID=$!
   deadline=$(( $(date -u +%s) + 120 ))
@@ -874,6 +1001,64 @@ fi
 RESULTS=()
 FAILED=0
 
+# ---------------------------------------------------------------------------
+# the video flow's inputs (#5208)
+# ---------------------------------------------------------------------------
+# `5208-video-viewer-live` plays real video from the stack, and the claim it exists for — "playback
+# starts by reading ranges, with the bearer the native player was handed" — happens between the
+# simulator's AVPlayer and the api, where nothing writes a log (the api has no HTTP trace layer).
+# So three things are set up here, only when that flow is asked for:
+#   1. test clips and posters are uploaded through the REAL attachment routes (upload → complete →
+#      `PUT …/media` → send), by `lane-video-fixture.mjs` (ffmpeg makes the clips; nothing binary is committed);
+#   2. a recording relay (`lane-request-recorder.cjs`) takes the app's place in front of the api and writes
+#      one line per attachment-bytes request — never a token's value, only whether a bearer rode along;
+#   3. after the flow, the record is checked (`verify`): the first read of each played clip was a ranged
+#      206, and the bearer reached the native player. A flow that went green on screen without those is FAIL.
+VIDEO_FLOW="5208-video-viewer-live"
+FLOW_SERVER_URL="$BASE_URL"
+VIDEO_IDS=""
+VIDEO_REQUESTS="$OUT_DIR/requests.jsonl"
+for flow_name in "${FLOWS[@]}"; do
+  if [ "$flow_name" = "$VIDEO_FLOW" ]; then
+    need ffmpeg
+    RECORDER_PORT="${LANE_PHONE_RECORDER_PORT:-$((API_PORT + 2))}"
+    if port_in_use "$RECORDER_PORT"; then
+      echo "[lane] host port $RECORDER_PORT (the request recorder's) is busy and is not this lane's." >&2
+      echo "[lane] Override with LANE_PHONE_RECORDER_PORT." >&2
+      exit 1
+    fi
+    say "seeding video attachments for $VIDEO_FLOW (real upload routes; log: $OUT_DIR/video-fixture.log)"
+    if ! VIDEO_IDS="$(node "$APP_ROOT/scripts/lane-video-fixture.mjs" \
+          --base-url "$BASE_URL" --email "$LANE_EMAIL" --password "$LANE_PASSWORD" \
+          --workspace "$DEMO_WORKSPACE_ID" --channel "$GENERAL_CHANNEL_ID" \
+          --out "$OUT_DIR/video-fixture" 2>"$OUT_DIR/video-fixture.log" | tail -n 1)"; then
+      tail -20 "$OUT_DIR/video-fixture.log" >&2
+      echo "[lane] the video fixture failed — full log: $OUT_DIR/video-fixture.log" >&2
+      exit 1
+    fi
+    case "$VIDEO_IDS" in '{'*'}') ;; *)
+      tail -20 "$OUT_DIR/video-fixture.log" >&2
+      echo "[lane] the video fixture did not answer its attachment ids (got: ${VIDEO_IDS:-nothing})" >&2
+      exit 1 ;;
+    esac
+    say "starting the request recorder on :$RECORDER_PORT -> api :$API_PORT (record: $VIDEO_REQUESTS)"
+    node "$APP_ROOT/scripts/lane-request-recorder.cjs" serve \
+      --listen "$RECORDER_PORT" --target "127.0.0.1:$API_PORT" --out "$VIDEO_REQUESTS" \
+      >"$OUT_DIR/recorder.log" 2>&1 &
+    RECORDER_PID=$!
+    recorder_deadline=$(( $(date -u +%s) + 15 ))
+    until grep -q '^listening ' "$OUT_DIR/recorder.log" 2>/dev/null; do
+      if [ "$(date -u +%s)" -ge "$recorder_deadline" ] || ! kill -0 "$RECORDER_PID" 2>/dev/null; then
+        cat "$OUT_DIR/recorder.log" >&2
+        echo "[lane] the request recorder did not start" >&2
+        exit 1
+      fi
+      sleep 0.2
+    done
+    FLOW_SERVER_URL="http://127.0.0.1:$RECORDER_PORT"
+  fi
+done
+
 for flow in "${FLOWS[@]}"; do
   flow_file="$APP_ROOT/maestro/$flow.yaml"
   [ -f "$flow_file" ] || { echo "[lane] no such flow: $flow_file" >&2; exit 2; }
@@ -892,14 +1077,23 @@ for flow in "${FLOWS[@]}"; do
   # teardown, so a bound tight enough to catch it quickly would also cut off
   # slow-but-healthy runs and report them as failures, which is the worse error.
   # macOS ships no coreutils `timeout`, hence the explicit watchdog.
+  # CHANNEL_ID and PEER_TEXT are 4869-reply-swipe's inputs (it is not in FLOWS;
+  # run it with `--flow 4869-reply-swipe`). #agent-lab holds, in order, the lane
+  # member's own warm-up mention, 김인턴's mock reply, and the realtime probe's
+  # message — so a reply swipe has a PEER's row to hit and two of the member's own
+  # rows to miss it onto, which is what that flow's 「…님에게 답글」 assertion needs.
+  # PEER_TEXT is the mock's fixed reply text (assert_provider_is_the_mock greps the
+  # same string), not something a real provider could be made to say.
   maestro --udid "$UDID" test --test-output-dir "$flow_out" "$flow_file" \
-      -e SERVER_URL="$BASE_URL" \
+      -e SERVER_URL="$FLOW_SERVER_URL" \
       -e EMAIL="$LANE_EMAIL" \
       -e PASSWORD="$LANE_PASSWORD" \
       -e GENERAL_CHANNEL_ID="$GENERAL_CHANNEL_ID" \
       -e AGENT_MEMBER_ID="$AGENT_MEMBER_ID" \
       -e AGENT_HANDLE="$AGENT_HANDLE" \
       -e WORK_SESSION_ID="$LANE_SESSION_ID" \
+      -e CHANNEL_ID="$AGENT_LAB_CHANNEL_ID" \
+      -e PEER_TEXT="mock reply" \
       >"$OUT_DIR/$flow.log" 2>&1 &
   FLOW_PID=$!
   ( sleep "$FLOW_TIMEOUT"; kill -TERM "$FLOW_PID" 2>/dev/null ) &
@@ -925,6 +1119,27 @@ for flow in "${FLOWS[@]}"; do
       flow_rc=90
     else
       say "  approved tool executed for real (work session ended)"
+    fi
+  fi
+
+  # #5208 — same idea as 30-approval above: the screen cannot show HOW the bytes came. The recorder's
+  # record can, so a flow that played on screen but did not start with a ranged 206 (or whose native
+  # player never carried the bearer) is downgraded to FAIL.
+  if [ "$flow" = "$VIDEO_FLOW" ] && [ "$flow_rc" = "0" ]; then
+    ids_of() { printf '%s' "$VIDEO_IDS" | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+print(",".join(d[k] for k in sys.argv[1:]))' "$@"; }
+    if node "$APP_ROOT/scripts/lane-request-recorder.cjs" verify \
+         --records "$VIDEO_REQUESTS" \
+         --played "$(ids_of poster mixedVideo noPoster)" \
+         --posters "$(ids_of poster mixedVideo)" \
+         --no-poster "$(ids_of noPoster)" >"$OUT_DIR/request-proof.log" 2>&1; then
+      say "  video bytes came by ranged reads with the bearer (record: $VIDEO_REQUESTS)"
+      sed 's/^/[lane]     /' "$OUT_DIR/request-proof.log"
+    else
+      say "  $flow passed on screen but the request record does not show ranged playback:"
+      sed 's/^/[lane]     /' "$OUT_DIR/request-proof.log"
+      flow_rc=91
     fi
   fi
 

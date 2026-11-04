@@ -1,10 +1,12 @@
 // =============================================================================
 // Post-claim owner onboarding pending flags (ADR-0185 §8, R3).
 //
-// Session is already in localStorage at claim success. The key holds TWO
-// independent flags: `workspace-profile` (S1) and `invite` (S2). A reload
+// Session is already in localStorage at claim success. The key holds three
+// independent flags: `workspace-profile` (S1), `invite` (S2) and `team-ai` (the
+// skippable team AI stage, #4945). A reload
 // during S1 must re-enter S1; after S1 it must re-enter S2 rather than the
-// first-run ladder. S2 complete/skip clears ONLY `invite`. `workspace-profile`
+// first-run ladder. S2 complete/skip clears ONLY `invite` and opens `team-ai`;
+// team AI complete/skip clears `team-ai`. `workspace-profile`
 // is cleared by S1 completion (both saves OK) or by both settings doors
 // succeeding later. The doc is durable per account+server (durableSlot.ts,
 // #3696) so quitting the desktop app mid-S1 still re-offers S1; a JS-heap
@@ -25,6 +27,7 @@ export const OWNER_ONBOARDING_KEY = "oort.onboarding.v1";
 type PendingDoc = {
   "workspace-profile"?: boolean;
   invite?: boolean;
+  "team-ai"?: boolean;
   "settings-workspace"?: boolean;
   "settings-profile"?: boolean;
 };
@@ -59,6 +62,7 @@ function readDoc(): PendingDoc {
     const doc: PendingDoc = {};
     if (record["workspace-profile"] === true) doc["workspace-profile"] = true;
     if (record.invite === true) doc.invite = true;
+    if (record["team-ai"] === true) doc["team-ai"] = true;
     if (record["settings-workspace"] === true) doc["settings-workspace"] = true;
     if (record["settings-profile"] === true) doc["settings-profile"] = true;
     return doc;
@@ -71,6 +75,7 @@ function writeDoc(doc: PendingDoc): void {
   const next: PendingDoc = {};
   if (doc["workspace-profile"]) next["workspace-profile"] = true;
   if (doc.invite) next.invite = true;
+  if (doc["team-ai"]) next["team-ai"] = true;
   if (doc["settings-workspace"]) next["settings-workspace"] = true;
   if (doc["settings-profile"]) next["settings-profile"] = true;
   if (Object.keys(next).length === 0) removeDurable(OWNER_ONBOARDING_KEY);
@@ -84,6 +89,7 @@ export function markOwnerOnboardingPending(): void {
   writeDoc({
     "workspace-profile": true,
     invite: true,
+    "team-ai": true,
   });
 }
 
@@ -93,11 +99,23 @@ function dropWorkspaceProfile(doc: PendingDoc): void {
   doc["settings-profile"] = false;
 }
 
-export function markOwnerOnboardingStage(stage: OwnerOnboardingStage): void {
+/**
+ * `stage` becomes the pending stage; the stages before it are done. S1's flag is
+ * dropped on the way (S1 completed) unless the caller says S1 was only skipped:
+ * a skipped S1 keeps its flag so a reload offers it again (ADR-0185 §5-1).
+ */
+export function markOwnerOnboardingStage(
+  stage: OwnerOnboardingStage,
+  options: { keepWorkspaceProfile?: boolean } = {}
+): void {
   const doc = readDoc();
   if (stage === "invite") {
-    dropWorkspaceProfile(doc);
+    if (!options.keepWorkspaceProfile) dropWorkspaceProfile(doc);
     doc.invite = true;
+  } else if (stage === "team-ai") {
+    if (!options.keepWorkspaceProfile) dropWorkspaceProfile(doc);
+    doc.invite = false;
+    doc["team-ai"] = true;
   } else {
     doc["workspace-profile"] = true;
   }
@@ -105,13 +123,13 @@ export function markOwnerOnboardingStage(stage: OwnerOnboardingStage): void {
 }
 
 export function hasOwnerOnboardingFlag(flag: OwnerOnboardingStage): boolean {
-  const doc = readDoc();
-  return flag === "invite" ? doc.invite === true : doc["workspace-profile"] === true;
+  return readDoc()[flag] === true;
 }
 
 export function clearOwnerOnboardingFlag(flag: OwnerOnboardingStage): void {
   const doc = readDoc();
   if (flag === "invite") doc.invite = false;
+  else if (flag === "team-ai") doc["team-ai"] = false;
   else {
     dropWorkspaceProfile(doc);
     clearS1Draft();
@@ -132,7 +150,20 @@ export function readOwnerOnboardingStage(): OwnerOnboardingStage | null {
   const doc = readDoc();
   if (doc["workspace-profile"]) return "workspace-profile";
   if (doc.invite) return "invite";
+  if (doc["team-ai"]) return "team-ai";
   return null;
+}
+
+/**
+ * 세 표지의 한 줄 요약(예: 「011」). 어느 표지가 바뀌어도 값이 달라져서, 이 값을 구독한 화면이 다시 그려진다.
+ * 「첫 표지가 무엇인가」(`readOwnerOnboardingStage`)만 구독하면, S1을 건너뛴 채 이어 가는 동안(S1 표지가 계속
+ * 첫 표지다) 뒤 단계의 표지가 바뀌어도 값이 그대로라 화면이 움직이지 않는다.
+ */
+export function readOwnerOnboardingFlagKey(): string {
+  const doc = readDoc();
+  return [doc["workspace-profile"], doc.invite, doc["team-ai"]]
+    .map((flag) => (flag ? 1 : 0))
+    .join("");
 }
 
 export function ownerOnboardingIsPending(): boolean {
@@ -148,8 +179,13 @@ export function dismissOwnerOnboardingThisLoad(): void {
   notify();
 }
 
+/**
+ * The end of the claim path: clears the stages after S1 (`invite`, `team-ai`) and dismisses
+ * this load. A skipped S1 keeps its own flag. The name is from when S2 was the last stage.
+ */
 export function finishOwnerOnboardingInvite(): void {
   clearOwnerOnboardingFlag("invite");
+  clearOwnerOnboardingFlag("team-ai");
   dismissOwnerOnboardingThisLoad();
 }
 

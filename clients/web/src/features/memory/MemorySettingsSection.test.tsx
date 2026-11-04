@@ -141,7 +141,7 @@ describe("설정 › 기억: 상태", () => {
     const { host } = await render("admin", true);
     expect(input(host, "memory-workspace-enabled").disabled).toBe(true);
     expect(input(host, "memory-me-paused").disabled).toBe(true);
-    expect(byTestId(host, "memory-offline-reason")?.textContent).toContain("연결이 끊겨");
+    expect(byTestId(host, "memory-offline-reason")?.textContent).toContain("You're offline, so you can't change this right now.");
   });
 
   it("내 일시정지 문장은 폰과 같은 상수이고, 켜져 있으면 지금 상태를 말한다", async () => {

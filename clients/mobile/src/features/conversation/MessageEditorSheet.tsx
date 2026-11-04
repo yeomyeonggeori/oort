@@ -6,6 +6,7 @@ import {SheetHeader} from '../../design/SheetChrome';
 import {SheetScroll} from '../../design/sheetParts';
 import {font, ds2Radius, space, type Palette} from '../../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
+import {useHoldDraftOnEntry, useRestoredEntryDraft} from '../../lib/entryDrafts';
 
 // =============================================================================
 // 메시지 고치기.
@@ -55,12 +56,18 @@ const MAX_HEIGHT = 176;
 
 export function MessageEditorSheet({
   initialBody,
+  draftKey,
   pending,
   error,
   onCancel,
   onSave,
 }: {
   initialBody: string;
+  /**
+   * 알림 입구가 이 시트를 걷을 때 쓰던 글을 맡기는 자리(`lib/entryDrafts.ts`, #4667) — 보통 메시지 id 로 짓는다. 같은 키로 다시 서면
+   * 원문이 아니라 그 글로 시작한다. 없으면 맡기지 않는다(키를 모르는 시트가 남의 글 자리에 쓰지 않는다).
+   */
+  draftKey?: string;
   pending?: boolean;
   /** 이미 한국어 문장으로 옮겨진 실패 사유(`actionCopy`). 와이어 문자열 아님. */
   error?: string | null;
@@ -70,8 +77,9 @@ export function MessageEditorSheet({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const keyboardAppearance = useKeyboardAppearance();
-  // 동기. 헤더 참조.
-  const [text, setText] = useState(initialBody);
+  // 동기. 헤더 참조. 알림이 걷어 간 같은 메시지의 고치기였다면 쓰던 글이 처음 값이다(#4667).
+  const restored = useRestoredEntryDraft<string>(draftKey);
+  const [text, setText] = useState(restored ?? initialBody);
   const inputRef = useRef<TextInput | null>(null);
 
   const onChangeText = useCallback((next: string) => setText(next), []);
@@ -86,6 +94,9 @@ export function MessageEditorSheet({
   // 사라지므로 시트가 「버릴까요?」를 먼저 묻는다(iOS `isModalInPresentation` 시트와 같다). 저장하는 동안(`pending`)은 이미 보내는
   // 중이라 묻지 않는다 — 「저장하지 않은 내용」이 아니다.
   const dirty = changed && !pending;
+  // 알림이 이 시트를 걷어도 쓰던 글은 남는다(#4667). 사람이 X 로 닫는 평소의 폐기(「버릴까요?」)는 그대로다 — 맡기는 것은
+  // 알림 방송이 올 때뿐이다. 저장하는 동안(`pending`)은 이미 보내는 글이라 맡기지 않는다.
+  useHoldDraftOnEntry(draftKey, () => (dirty ? text : undefined));
 
   return (
     <PageSheet

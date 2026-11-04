@@ -358,6 +358,20 @@ describe("컨트롤 대신 서는 줄", () => {
     });
   });
 
+  // #5260: 코어는 사전을 모르므로 막은 원인의 문장을 받기만 한다(웹이 `blocked.loginHandoff.*`를 읽어 넘긴다).
+  it("막은 원인의 문장을 받으면 그 문장이 선다. 없거나 비면 원인을 가리지 않는 문장이다", () => {
+    const cause = "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 재개하거나 중단할 수 있어요.";
+    expect(loginHandoffNote(noteInput({ offline: true, offlineText: cause }))).toEqual({
+      kind: "offline",
+      tone: "blocked",
+      text: cause,
+    });
+    expect(loginHandoffNote(noteInput({ offline: true, offlineText: null }))?.text).toBe(LOGIN_HANDOFF_OFFLINE_COPY);
+    expect(loginHandoffNote(noteInput({ offline: true, offlineText: "  " }))?.text).toBe(LOGIN_HANDOFF_OFFLINE_COPY);
+    // 막지 않았으면 문장이 있어도 줄은 서지 않는다.
+    expect(loginHandoffNote(noteInput({ offline: false, offlineText: cause }))).toBeNull();
+  });
+
   it("아무것도 막지 않으면 컨트롤이 선다", () => {
     expect(loginHandoffNote(noteInput())).toBeNull();
   });

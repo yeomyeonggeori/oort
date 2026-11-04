@@ -34,7 +34,6 @@ import {
 import {
   BAR_CONTROL_MAX_SCALE,
   EmptyState,
-  ErrorState,
   Sentence,
   FailureBanner,
   LoadingState,
@@ -57,8 +56,16 @@ import {
   type Palette,
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {LoadFailureBox, LoadFailureLine} from '../features/connection/LoadFailureBox';
+import {useReadFailureOf} from '../features/connection/readFailure';
+import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
-import {useAgentWorkingSignals} from '../features/agents/workingSignal';
+import {
+  useAgentWorkingSignals,
+  withApprovalWaits,
+} from '../features/agents/workingSignal';
+import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {StatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
@@ -72,10 +79,10 @@ import {WorkingCardStop} from '../features/home/WorkingCardStop';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
 import {
   buildSidebarSections,
-  CHANNEL_LIST_FAILED,
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
+import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -460,7 +467,8 @@ export default function SidebarScreen({
   // 시계는 두지 않는다 — 카드는 경과 숫자를 그리지 않고, 스토어가 발행·해제마다
   // 다시 그리게 하며, 90초가 지난 턴은 레일의 15초 청소가 지운다(에이전트 목록과
   // 같은 거래, `AgentsScreen` 의 주석). 렌더 때의 벽시계가 TTL 을 한 번 더 건다.
-  const signals = useAgentWorkingSignals();
+  const railSignals = useAgentWorkingSignals();
+  const approvalWaitList = useWorkspaceApprovalWaits();
   const railLive = realtime.status === 'connected';
   const allChannels = useMemo(
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
@@ -470,6 +478,10 @@ export default function SidebarScreen({
   // 줄 맨 앞에 싣는다(#4285). 누구를 읽을지는 카드를 만들기 전에 알아야 한다. 읽지 않는 때(다른
   // 상태의 카드)는 쿼리가 서지 않는다.
   const cardNowMs = Date.now();
+  // 승인 원장이 레일보다 이긴다(#3738, 대화 화면의 자리표시·레일과 같은 덮어쓰기 — #5066·#5085). 서버는 승인에 걸린 run 을 레일
+  // 프레임으로 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 사람을 기다리는 에이전트도 「작업 중」이다. 아래 두 호출이 **같은**
+  // 덮은 목록을 읽어야 한다: 근거 줄의 생존 판정을 카드와 다른 에이전트에게서 읽지 않게.
+  const signals = withApprovalWaits(railSignals, approvalWaitList, cardNowMs);
   const leadTurn = leadWorkingTurn(signals, cardNowMs);
   const waitingAgentId =
     leadTurn !== undefined && isUntakenHumanRun(leadTurn.server)
@@ -705,6 +717,24 @@ export default function SidebarScreen({
   const listFailed = channelsQuery.isError || directoryQuery.isError;
   const listError = channelsQuery.error ?? directoryQuery.error;
 
+  // ---- 읽기가 실패했을 때: 받아 둔 목록은 지우지 않는다 (#5285, 검증 5a ⑤) --------------------------------
+  // react-query 는 다시 읽기가 실패해도 마지막 `data` 를 남긴다. 예전에는 `isError` 만 보고 목록 자리를 오류 상자로 갈아 끼워, 띠(「서버에 닿지 못했어요」)는
+  // 「받아 둔 내용만 보여요」라는데 받아 둔 목록이 비었다. 이제 **채널과 명부가 둘 다 받아 둔 것**이면 실패해도 목록 그대로다 - 명부가 빠지면 DM 이 이름 없이 내려앉는
+  // 위의 이유가 그대로라 한쪽이라도 없으면 받아 둔 것이 아니다.
+  //   · 받아 둔 것이 있다: 목록 그대로. 띠가 같은 원인을 말하면 더할 말이 없고, 띠가 침묵이면(서버가 직접 답한 오류) 목록 위 한 줄(제목 + 다시 시도).
+  //   · 받아 둔 것이 없다: 상자(제목 + 다시 시도, 이유는 띠가 침묵일 때만). 기기가 꺼져 읽기가 **멈춘** 채라면 오류 객체가 없어도 그렇다 - 「참여한 채널이 없습니다」는 거짓이다.
+  // `listFailed` 는 아래 읽음 표시 고지의 가림 조건으로도 쓰여서 그대로 두고, 상자·한 줄의 판정은 따로 둔다.
+  const listCached = channelsQuery.data !== undefined && directoryQuery.data !== undefined;
+  const listPaused = !listCached && (channelsQuery.isPaused || directoryQuery.isPaused);
+  const showListFailure = !listCached && (listFailed || listPaused);
+  const readFailureOf = useReadFailureOf();
+  const listFailure = readFailureOf(listError);
+  const readStatesSpoken = readFailureOf(readStates.error).spoken;
+  const retryList = () => {
+    void channelsQuery.refetch();
+    void directoryQuery.refetch();
+  };
+
   const filterField = filterVisible ? (
     <View style={styles.filterWrap}>
       <TextInput
@@ -740,10 +770,23 @@ export default function SidebarScreen({
         />
       ) : null}
 
+      {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈에서도 말한다. 아래의 읽기 실패 고지는 대개 이 띠가 말하는 원인의 결과라
+          그 위에 선다. 실시간만 끊긴 것은 홈이 말하지 않는다(대화 화면 띠가 말한다). */}
+      <ShellConnectionStrip />
+
+      {/* 받아 둔 목록이 있는데 다시 읽기가 실패했다(#5285): 목록은 그대로 두고, 띠가 같은 원인을 말하지 않을 때만 위에서 한 줄 말한다. */}
+      {listFailed && listCached && !listFailure.spoken ? (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadChannelListTitle}
+          onRetry={retryList}
+          testID="channels-error-line"
+        />
+      ) : null}
+
       {/* Unread is server truth, so when the projection fails the badges simply
           are not there. Saying so is cheaper than letting someone conclude they
           have read everything. */}
-      {readStates.isError && !listFailed ? (
+      {readStates.isError && !listFailed && !readStatesSpoken ? (
         // 나간 멤버 DM 이 도로 보일 때는 새 문장이라 제목과 설명이 같은 말투(해요체)다. 그 밖에는 이 화면의 기존 문장 그대로다.
         <NoticeBlock
           headline={
@@ -807,19 +850,16 @@ export default function SidebarScreen({
       </View>
 
       {/* 고지는 목록 상태와 무관하게 선다 — 알림 탭이 막힌 이유는 목록이 실패했을 때
-          가장 필요하다(#2584 M-1, `CHANNEL_LIST_FAILED` 가 두 곳에서 말한다). */}
+          가장 필요하다(#2584 M-1, 목록 자리의 오류 상자 제목 `connection.load.channelListTitle` 이 두 곳에서 말한다). */}
       <View style={styles.noticeWrap}>{notices}</View>
 
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
-      ) : listFailed ? (
-        <ErrorState
-          headline={CHANNEL_LIST_FAILED}
-          detail={queryFailureDetail(listError)}
-          onRetry={() => {
-            void channelsQuery.refetch();
-            void directoryQuery.refetch();
-          }}
+      ) : showListFailure ? (
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadChannelListTitle}
+          failure={listFailure}
+          onRetry={retryList}
           testID="channels-error"
         />
       ) : nothingToShow && !searching ? (
@@ -1038,7 +1078,8 @@ function SectionHead({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const icon: HomeIconName = section.key === 'channels' ? 'hash' : 'dms';
+  // 머리의 아이콘은 줄의 아이콘(`#`·자물쇠, #4953)과 달라야 「채널 묶음」으로 읽힌다 (#4979). 한 줄이라 바꾸기 쉽다.
+  const icon: HomeIconName = section.key === 'channels' ? 'layers' : 'dms';
   return (
     <View style={styles.secHead} testID={`home-section-${section.key}`}>
       <Image
@@ -1203,13 +1244,14 @@ function Row({
       if (actionTarget !== null) onOpenActions(actionTarget);
     },
   });
-  const unread = row.unreadCount > 0 || row.mentionCount > 0;
+  // 이름·아이콘의 회색과 굵기, 오른쪽 칩은 `rows.ts` 가 줄마다 계산해 둔 한 값이다(`rowEmphasis.ts`).
+  const {emphasis} = row;
   let lead: React.ReactNode;
   if (row.kind === 'channel') {
     lead = (
       <Image
         source={row.isPrivate ? HOME_ICONS.lock : HOME_ICONS.hash}
-        style={[styles.icon22, {tintColor: unread ? palette.text : palette.icon}]}
+        style={[styles.icon22, {tintColor: emphasis.dim ? palette.textMuted : palette.text}]}
         testID={row.isPrivate ? 'home-row-lock' : 'home-row-hash'}
       />
     );
@@ -1258,7 +1300,7 @@ function Row({
         if (key !== null && actionTarget !== null) onRunAction(actionTarget, key);
       }}
       onPress={onPress}
-      delayLongPress={longPress.delayLongPress}
+      {...longPress.pressTiming}
       onLongPress={longPress.onLongPress}
       {...longPress.handlers}
       style={({pressed}) => [
@@ -1272,8 +1314,8 @@ function Row({
         <Text
           style={[
             styles.rowTitle,
-            unread && styles.rowTitleUnread,
-            row.muted && !unread && styles.rowTitleMuted,
+            emphasis.bold && styles.rowTitleUnread,
+            emphasis.dim && styles.rowTitleMuted,
           ]}
           numberOfLines={1}
           ellipsizeMode="tail">
@@ -1287,22 +1329,49 @@ function Row({
       </View>
       {busy ? (
         <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : row.mentionCount > 0 ? (
-        // 멘션이 있으면 잉크 `@N` 하나가 선다(시안 `.a-badge.at`). 안 읽은 수는
-        // 굵은 이름과 낭독 라벨이 함께 진다 — 배지 둘을 나란히 세우지 않는다.
-        <View style={[styles.badge, styles.badgeAt]} testID="home-badge-mention">
-          <Text style={[styles.badgeText, styles.badgeAtText]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            @{row.mentionCount > 99 ? '99+' : row.mentionCount}
-          </Text>
-        </View>
-      ) : row.unreadCount > 0 ? (
-        <View style={styles.badge} testID="home-badge-unread">
-          <Text style={styles.badgeText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {row.unreadCount > 99 ? '99+' : row.unreadCount}
-          </Text>
-        </View>
+      ) : emphasis.chip !== null ? (
+        <RowChipView chip={emphasis.chip} />
       ) : null}
     </Pressable>
+  );
+}
+
+/** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
+const CHIP_TEST_ID: Readonly<Record<ChipTone, string>> = {
+  [CHIP_TONE.mention]: 'home-badge-mention',
+  [CHIP_TONE.count]: 'home-badge-unread',
+  [CHIP_TONE.muted]: 'home-badge-muted',
+};
+
+/**
+ * 줄 오른쪽의 개수 칩(시안 `.a-badge`). 셋 중 하나다: 멘션은 잉크 `@N`(시안 `.a-badge.at`), 안 읽음은 신호색 `N`, 음소거는
+ * 중성으로 흐린 칩(`surfaceMuted` 위 `textMuted`) — 신호색·잉크를 입지 않는다. 칩 둘을 나란히 세우지 않는다: 멘션이 있으면
+ * 하나(`@N`)이고 안 읽은 수는 굵은 이름과 낭독 라벨이 함께 진다.
+ *
+ * 큰 글씨에서 잘리지 않는 이유(구조): 높이·너비는 `minHeight`·`minWidth` 뿐이라 글자가 크면 칩이 **자란다**, 줄어들지 않는
+ * flex 자식이라 모자란 폭은 이름(`flexShrink: 1`, 한 줄 말줄임)이 먼저 내준다, 글자는 이름 아닌 컨트롤 글자의 상한
+ * (`BAR_CONTROL_MAX_SCALE`)을 따른다.
+ */
+function RowChipView({chip}: {chip: RowChip}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const box =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAt
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMuted
+        : null;
+  const ink =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAtText
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMutedText
+        : null;
+  return (
+    <View style={[styles.badge, box]} testID={CHIP_TEST_ID[chip.tone]}>
+      <Text style={[styles.badgeText, ink]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {chip.glyphs}
+      </Text>
+    </View>
   );
 }
 
@@ -1365,12 +1434,14 @@ export function WorkingCard({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const reduceMotion = useReduceMotion();
-  // 승인 대기는 「사람을 보라」라서 신호색이다. 끊긴 레일 위의 낱말은 확인된 사실이
-  // 아니므로 색을 벗는다(에이전트 목록 `AgentTurnBadge live=false` 와 같은 규칙).
+  // 승인 대기는 사람 몫 상태라서 경고색(`warn`)이다 — 에이전트 탭 배지(`AgentTurnBadge`)·대화의 승인 카드 칩·웹 사이드바
+  // 카드·정본(`agent-work-display.md`·`agent-request-loop.md` §2.2)이 같은 한 톤으로 말한다. 신호색(`accentText`)은 안 읽음 수·
+  // 경계·커서의 색이라, 이 낱말에 칠하면 바로 아래 안 읽음 배지와 같은 계열이 되어 「새 글」 쪽으로 읽힌다(#5170 M1).
+  // 끊긴 레일 위의 낱말은 확인된 사실이 아니므로 색을 벗는다(에이전트 목록 `AgentTurnBadge live=false` 와 같은 규칙).
   const tone = !card.live
     ? palette.textMuted
     : card.state === 'awaiting_approval'
-      ? palette.accentText
+      ? palette.warn
       : card.state === 'queued'
         ? palette.textMuted
         : palette.agent;
@@ -1806,8 +1877,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.accent,
   },
   badgeAt: {backgroundColor: color.primary},
+  // 음소거한 줄의 칩: 신호색도 잉크도 아닌 중성 채움 위의 흐린 글자. 새 토큰 없이 기존 둘의 조합이라 대비(AA 4.5)는 `home.test.tsx` 의 음소거 시험이 두 스킴에서 잰다.
+  badgeMuted: {backgroundColor: color.surfaceMuted},
   badgeText: {fontSize: font.meta, fontWeight: '700', color: color.onAccent},
   badgeAtText: {color: color.onPrimary},
+  badgeMutedText: {color: color.textMuted},
 
   // ---- 카드 ------------------------------------------------------------------
   cardPress: {marginBottom: HOME.cardBelow, borderRadius: HOME.cardRadius},

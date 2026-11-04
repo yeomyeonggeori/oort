@@ -1,0 +1,18 @@
+{
+  "reply.card.headerOther": "Reply to {name}",
+  "reply.card.headerSelf": "Reply to my message",
+  "reply.card.cancel": "Cancel reply",
+  "reply.card.excerptPhoto": "Photo",
+  "reply.card.excerptFile": "File",
+  "reply.card.excerptExpression": "Emoticon",
+  "reply.card.excerptEmpty": "No message content",
+  "reply.home.header": "Replied in {name}'s thread",
+  "reply.home.headerSelf": "Replied in my thread",
+  "reply.home.headerUnknown": "Replied in a thread",
+  "reply.home.excerptDeleted": "Deleted message",
+  "reply.home.open": "Open the thread this reply is in",
+  "reply.alsoInChannel.label": "Also send to the conversation",
+  "reply.alsoInChannel.unsupported": "This server does not support “Also send to the conversation” yet. Turn it off and send again.",
+  "reply.composer.placeholder": "Write a reply",
+  "reply.composer.send": "Send reply"
+}

@@ -31,7 +31,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
-import { useChannelViewingBeat } from "@/features/chat/useChannelViewingBeat";
+import { useChannelViewingBeat, useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { indexFallbackChannelId } from "@/features/sidebar/sidebarDmClosure";
 import { useDmVisibility } from "@/features/sidebar/useDmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
@@ -78,12 +78,15 @@ import { TerminalDock } from "@/features/work/TerminalDock";
 import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
 import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
+import { WorkPlanDock } from "@/features/work/WorkPlanDock";
 import { usePersonalCall } from "@/features/chat/usePersonalCall";
 import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { HumanPresenceLabel } from "@/features/presence/HumanPresence";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
+import { EditRequestContext, useEditRequestChannel } from "@/features/timeline/editRequest";
+import { lastEditableMessage } from "@momo/core/features/timeline/model";
 import { useTypingReceive } from "@/features/chat/useTyping";
 import {
   makeStressRoster,
@@ -91,6 +94,11 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import {
+  huddleControlShown,
+  huddleNamesTarget,
+} from "@momo/core/features/huddles/huddleModel";
+import { threadsAreFollowable } from "@momo/core/features/timeline/threadFollow";
 import { useSurfaceProvidedWhileOpen } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
@@ -103,6 +111,7 @@ import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl"
 import {
   HuddleHeaderBanner,
   HuddleHeaderControl,
+  HuddleHeaderNames,
   HuddleHeaderState,
 } from "@/features/huddles/HuddleHeaderControl";
 import type { HuddleController } from "@/features/huddles/useHuddle";
@@ -111,6 +120,10 @@ import {
   InlineBanner,
   Skeleton,
 } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -447,6 +460,19 @@ export function ChatShell() {
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
+  // 열린 스레드의 루트는 **채널 타임라인의 그 줄**을 따른다(#5191). `thread` 는 연 순간의 사본이라, 패널 안에서 루트를 고쳐도
+  // 패널의 루트 줄은 옛 글 그대로였다. 타임라인에 그 줄이 없으면(알림·검색으로 연 스레드) 사본이 그대로 쓰인다.
+  const threadRoot = useMemo(
+    () =>
+      thread === null
+        ? null
+        : (timeline.state.messages.find((message) => uuidEq(message.id, thread.id)) ?? thread),
+    [thread, timeline.state.messages]
+  );
+  // 열린 스레드를 **보고 있는가**(패널이 떠 있고 창이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로
+  // 읽는다. 패널이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 창 앞 판정이다(#5032). 작업 패널이 덮으면 스레드 패널이 없다.
+  // 스레드가 열려 있을 때만 구독한다 — 열려 있지 않으면 이 컴포넌트는 창 앞뒤 전환에 다시 그려지지 않는다.
+  const windowForeground = useDocumentForeground(thread !== null);
 
   // ── 걸어 둔 인용 (ADR-0148) ────────────────────────────────────────────────
   //
@@ -972,6 +998,24 @@ export function ChatShell() {
     if (input instanceof HTMLTextAreaElement) input.focus();
   }, []);
 
+  // #5191 - 빈 입력칸의 ↑ = 이 대화에서 내 마지막 글 있는 메시지 고치기(Slack식). 고치는 중인지는 행이 쥐므로(`MessageRow`) 여기서는
+  // 대상을 정해 **요청 하나**를 내려 보내고, 요청으로 열린 편집기가 끝나면(저장·취소) 초점을 입력칸으로 돌려받는다.
+  const editRequest = useEditRequestChannel(focusComposer);
+  const requestEdit = editRequest.requestEdit;
+  const bringTimelineRowIntoView = useCallback((messageId: string) => {
+    // 가상 목록이라 대상 행이 마운트돼 있지 않을 수 있다(오래 안 쓴 방에서 내 마지막 글이 위에 있는 경우). 마운트돼 있으면
+    // 목록을 건드리지 않는다: 이미 보이는 줄을 가운데로 다시 맞추면 읽던 자리가 흔들린다.
+    const mounted = document.querySelector(`[data-testid="timeline-message"][data-message-id="${messageId.toLowerCase()}"]`);
+    if (mounted === null) timelineJump.current?.bringIntoView({ messageId });
+  }, []);
+  const editLastMessage = useCallback((): boolean => {
+    const target = lastEditableMessage(messages, session.member.id);
+    if (target === undefined) return false;
+    bringTimelineRowIntoView(target.id);
+    requestEdit(target.id);
+    return true;
+  }, [messages, session.member.id, bringTimelineRowIntoView, requestEdit]);
+
   useEffect(() => {
     applyFirstAgentFocus();
   }, [channelId]);
@@ -1082,17 +1126,83 @@ export function ChatShell() {
   const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
+  // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
+  // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,
+  // 허들 컨트롤이 아무것도 안 그리면(허들 없는 서버, 오프라인) 멤버 수다. 단추 순서(멤버 수 → 허들 → ⋮)와 크기는 그대로다.
+  // 멤버 수까지 한 덩어리로 묶으면 참가 중의 덩어리(멤버 수 + 칩 + 마이크 + 나가기 + ⋮)가 판 268의 줄(226)보다 넓어 덩어리 안에서
+  // 다시 ⋮가 외톨이가 된다(실측). 그래서 묶는 것은 둘뿐이다.
+  const renderControlsEnd = (huddle: HuddleController | null) => {
+    const members =
+      stressCount === 0 && channel && channel.kind !== "dm" ? (
+        <ChannelMemberPanel
+          channelName={channel.name ?? label}
+          members={channelMembers}
+          status={channelMemberListStatus}
+          offline={offline}
+          onRetry={() => void directoryQuery.refetch()}
+          onAddMember={() =>
+            openAddMember({ id: channel.id, name: channel.name ?? label })
+          }
+        />
+      ) : null;
+    const huddleControl = huddle ? (
+      <HuddleHeaderControl huddle={huddle} offline={offline} />
+    ) : null;
+    const menu =
+      stressCount === 0 && channel && channel.kind !== "dm" ? (
+        <ChannelHeaderMenu
+          workspaceId={workspaceId}
+          channel={channel}
+          title={labelParts?.text ?? label}
+          selfMemberId={session.member.id}
+          selfRole={memberFor(directory, session.member.id)?.role}
+        />
+      ) : null;
+    return huddle && huddleControlShown(huddle, offline) ? (
+      <>
+        {members}
+        <div className="flex shrink-0 items-center gap-1">
+          {huddleControl}
+          {menu}
+        </div>
+      </>
+    ) : members === null && menu === null ? null : (
+      <div className="flex shrink-0 items-center gap-1">
+        {members}
+        {menu}
+      </div>
+    );
+  };
+
+  // 머리에 서는 토픽 한 줄(채널만: DM·스트레스 픽스처는 없다). 꼬리 칸을 둘지와 토픽 글이 같은 값을 읽는다.
+  const headerTopic =
+    stressCount === 0 && channel && channel.kind !== "dm"
+      ? (channel.topic?.trim() ?? "")
+      : "";
+  // 제목 칸 꼬리에 설 것이 있나: 토픽(채널) 또는 허들 참가자 이름 글.
+  const headerTailShown = (huddle: HuddleController | null) =>
+    headerTopic !== "" ||
+    (stressCount === 0 &&
+      huddle !== null &&
+      huddleNamesTarget(huddle, offline) !== null);
+
   const renderChannelHeader = (huddle: HuddleController | null) => (
     <>
       {/* 1줄 헤더 (#1865). 넓은 창에서는 떠 있는 판의 머리(DS2-6, 시안 A
           `.a-mhd`: 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5)다. 폰에서는
           세로 여백이 py-row-fixed(6)×2다. `py-row`가 아닌 이유: 그것은 대화 밀도를 따르는 대화 행의 값이라 머리 키가
           밀도에 따라 변한다(#4189, 폰 폭에서 53/57/61px로 실측). */}
+      {/* #4230: 머리는 두 묶음이다. **컨트롤 묶음(`channel-head-tools`)이 제 폭을 먼저 갖는다.** 제목 묶음
+          (`channel-head-main`)은 그다음 남는 폭을 받고, 제목은 한 줄 말줄임이다(전문은 `title`과 글 그대로의 낭독).
+          예전에는 반대였다: 제목 묶음이 제 글 폭을 다 잡고 컨트롤 묶음이 남는 자리(기준 0)만 받아, 이름이 조금만 길어도
+          컨트롤이 판 밖으로 밀렸다(판이 `overflow: clip`이라 스크롤로도 못 닿는다). 제목 몫이 바닥(3rem)보다 좁아져야 하는
+          폭(폰 320, 단추가 다 선 대화의 390·600)에서는 컨트롤 묶음이 제목 아래 줄로 내려온다(`flex-wrap`).
+          단추를 줄이거나 숨기지 않는다. */}
       <header
         data-testid="channel-header"
-        className="channel-head flex min-w-0 items-center py-row-fixed"
+        className="channel-head flex min-w-0 flex-wrap items-center gap-y-1 py-row-fixed"
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="channel-head-main flex items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
@@ -1105,6 +1215,10 @@ export function ChatShell() {
               <Hash className="size-4" />
             )}
           </span>
+          {/* 제목 칸(`channel-head-body`): 서랍 단추·아이콘 뒤에서 남는 폭을 전부 받는다. 안에서는 제목이 글 폭만큼
+              서고 토픽이 그 뒤 남은 자리를 받는다. 칸의 기본 폭은 0이라 긴 이름·긴 토픽이 윗 묶음의 폭을 부풀리지
+              못한다(그래서 컨트롤 묶음을 밀어내지 못한다). */}
+          <div className="channel-head-body flex items-center gap-2">
           {/* 검수 피드백 #3 ② / #1865: 채널 이름은 한 줄 제목이다. 채널을 다루는
               메뉴는 우측 ⋮ 로 옮겼다. 진짜 채널(공개/비공개)에서만 그 메뉴가
               선다 — DM은 이름을 바꾸거나 나갈 대상이 아니고, 스트레스 픽스처는
@@ -1114,11 +1228,17 @@ export function ChatShell() {
             <h1
               tabIndex={-1}
               className="channel-head-title min-w-0 truncate text-ink outline-none focus-visible:focus-ring"
+              title={labelParts?.text ?? label}
             >
               {labelParts?.text ?? label}
             </h1>
           ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
-            <h1 className="channel-head-title flex min-w-0 items-center">
+            // DM 제목의 마우스 올림 글(`title`)은 핸들까지 담은 전체 이름(`label`)이다(#5206): 좁은 폭에서 구분용
+            // 핸들이 통째로 숨어도 같은 이름의 두 DM을 마우스로 구별할 수 있다. 낭독 이름(단추의 `aria-label`)도 `label`이다.
+            <h1
+              className="channel-head-title flex min-w-0 items-center"
+              title={label}
+            >
               <button
                 type="button"
                 data-testid="dm-profile-trigger"
@@ -1140,18 +1260,25 @@ export function ChatShell() {
                 "channel-head-title min-w-0 truncate",
                 labelParts?.isAgent && stressCount === 0 && "text-agent"
               )}
+              title={stressCount > 0 ? undefined : labelParts?.text ?? label}
             >
               {stressCount > 0
                 ? `스크롤 측정 (${stressCount})`
                 : labelParts?.text ?? label}
             </h1>
           )}
+          {/* 같은 이름 DM의 구분용 핸들 (#5206): 통째로 보이거나 통째로 숨는다(「@」 조각 금지). 칸(`channel-head-handle`)이
+              핸들의 글 폭까지만 자라고, 그 폭이 안 나오면 핸들은 보이지 않는 둘째 줄로 간다(tokens.css: 칸 맨 앞의 폭 0짜리 빈 조각이
+              첫 줄을 차지해, 핸들이 줄에서 첫 칸이 되어 칸보다 넓어도 억지로 남는 것을 막는다). 숨은 핸들도 글(낭독)과 제목의
+              `title`에는 남는다. */}
           {stressCount === 0 && labelParts?.handle && (
-            <span
-              className="shrink-0 text-meta text-ink-muted"
-              data-testid="channel-handle"
-            >
-              {labelParts.handle}
+            <span className="channel-head-handle" data-testid="channel-handle-slot">
+              <span
+                className="shrink-0 whitespace-nowrap text-meta text-ink-muted"
+                data-testid="channel-handle"
+              >
+                {labelParts.handle}
+              </span>
             </span>
           )}
           {/* 에이전트와의 DM 머리: 지금 살아 있는가(ADR-0200 D4). */}
@@ -1166,28 +1293,37 @@ export function ChatShell() {
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개
           </span>
+          {/* 제목 칸의 꼬리(`channel-head-tail`): 토픽 한 줄과 허들 참가자 이름 글이 서는 곳이다 (#5184).
+              **제목(과 핸들)이 다 선 뒤 남는 폭만** 받는다(기준 0, `flex: 1 1 0`): 제목이 칸을 다 쓰면 꼬리는 0이 되어 먼저
+              사라진다. 이 칸은 기준이 0이라 긴 토픽·긴 참가자 요약이 컨트롤 묶음을 밀어내지 못한다(#4230 이전에는 오른쪽 무리
+              안에 둬야 했다: 왼쪽 무리가 글 폭을 잡고 있어서, 실측 gate:channel-header). 꼬리가 비어 있으면 칸 자체를 두지
+              않는다(빈 칸도 칸 틈 8을 제목에서 가져간다). */}
+          {headerTailShown(huddle) && (
+            <div className="channel-head-tail">
+              {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
+                  토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
+                  선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`). `ms-1`은 칸 틈 8과 합쳐 예전 제목-토픽 틈 12를
+                  지킨다. 참가자 이름 글이 있으면 그 글이 먼저 폭을 받고 토픽이 나머지다. */}
+              {headerTopic && (
+                <span
+                  className="channel-head-topic wide-only ms-1 flex-1"
+                  data-testid="channel-header-topic"
+                  title={headerTopic}
+                >
+                  {headerTopic}
+                </span>
+              )}
+              {huddle && stressCount === 0 && (
+                <HuddleHeaderNames huddle={huddle} offline={offline} />
+              )}
+            </div>
+          )}
+          </div>
         </div>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-          {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
-              토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
-              선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`).
-
-              오른쪽 무리 **안의 첫 자리**인 이유: 왼쪽 무리에 두면 긴 토픽이 그
-              무리의 기본 폭을 부풀려 오른쪽 컨트롤이 창 밖으로 밀린다(실측,
-              gate:channel-header). 여기서는 기본 폭 0으로 남는 자리만 받아
-              먼저 잘린다. */}
-          {stressCount === 0 &&
-            channel &&
-            channel.kind !== "dm" &&
-            channel.topic?.trim() && (
-              <span
-                className="channel-head-topic wide-only flex-1"
-                data-testid="channel-header-topic"
-                title={channel.topic.trim()}
-              >
-                {channel.topic.trim()}
-              </span>
-            )}
+        {/* 컨트롤 묶음: 제 폭을 먼저 갖는다. 제목 바닥 옆에 못 서면 줄이 바뀌어 제목 아래로 내려오고, 그 줄에서도
+            모자라면(폰 320, 판이 좁은 600대에서 단추가 다 선 대화) 묶음 안에서 줄이 바뀐다(`flex-wrap`).
+            어느 쪽이든 단추는 뷰포트 안에 남는다. */}
+        <div className="channel-head-tools flex items-center justify-end gap-2">
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -1198,11 +1334,20 @@ export function ChatShell() {
             </span>
           )}
           <div
-            className="flex min-w-0 items-center gap-1"
+            className="flex min-w-0 flex-wrap items-center justify-end gap-1"
             role="group"
             aria-label="채널 도구"
             data-testid="channel-header-controls"
           >
+            {/* 계획 독 (#4578): 이 대화에서 지금 돌거나 마지막으로 돈 작업 세션의 계획이 있을 때만 선다.
+                없으면 자리도 남기지 않는다. 「모두 보기」는 기존 작업 세션 패널을 연다. */}
+            {stressCount === 0 && channelId !== null && (
+              <WorkPlanDock
+                workspaceId={workspaceId}
+                channelId={channelId}
+                onOpenSession={openWorkSession}
+              />
+            )}
             {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
                 채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
                 `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
@@ -1250,33 +1395,7 @@ export function ChatShell() {
               />
             )}
             {stressCount === 0 && channel?.kind === "dm" && <DmAgentsMenu workspaceId={workspaceId} channel={channel} directory={directory} onChanged={() => Promise.all([channelsQuery.refetch(), directoryQuery.refetch()])} />}
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelMemberPanel
-                channelName={channel.name ?? label}
-                members={channelMembers}
-                status={channelMemberListStatus}
-                offline={offline}
-                onRetry={() => void directoryQuery.refetch()}
-                onAddMember={() =>
-                  openAddMember({ id: channel.id, name: channel.name ?? label })
-                }
-              />
-            )}
-            {huddle && (
-              <HuddleHeaderControl
-                huddle={huddle}
-                offline={offline}
-              />
-            )}
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelHeaderMenu
-                workspaceId={workspaceId}
-                channel={channel}
-                title={labelParts?.text ?? label}
-                selfMemberId={session.member.id}
-                selfRole={memberFor(directory, session.member.id)?.role}
-              />
-            )}
+            {renderControlsEnd(huddle)}
           </div>
         </div>
       </header>
@@ -1344,7 +1463,7 @@ export function ChatShell() {
           renderChannelHeader(null)
         )}
 
-        {/* 연결 배너는 셸로 올라갔다 (goal B8 B2, AppShell.ConnectionBanner):
+        {/* 연결 표시는 셸로 올라갔다 (goal B8 B2; #5220 이후 연결 카드·위쪽 띠, AppShell):
             같은 사실을 채널에서만 말하면 인박스·활동·설정에서는 갱신이 멈춘 줄
             모른 채 조용한 화면을 읽게 된다. `offline`은 여전히 여기 남는다 —
             허들 컨트롤처럼 지금 쓸 수 있는지를 물어야 하는 것들이 읽는다. */}
@@ -1426,6 +1545,7 @@ export function ChatShell() {
         >
           {hasChannel ? (
             <ChannelAudienceContext.Provider value={channelAudience}>
+            <EditRequestContext.Provider value={editRequest.channel}>
             <Timeline
               tail={
                 openCard ? (
@@ -1476,7 +1596,12 @@ export function ChatShell() {
               onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
+              onDiscardPending={stressCount > 0 ? undefined : timeline.discard}
+              loadCause={timeline.loadCause}
+              failureKinds={timeline.failureKinds}
+              onResendAllPending={stressCount > 0 ? undefined : timeline.resendAll}
               channelKind={channel?.kind}
+              viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}
               channelName={label}
               channelTopic={channel?.topic}
               peer={peer}
@@ -1508,14 +1633,15 @@ export function ChatShell() {
               welcomePhase={welcome.phase}
               welcomeHoldWriteAction={welcome.holdWriteAction}
             />
+            </EditRequestContext.Provider>
             </ChannelAudienceContext.Provider>
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
               {channelsQuery.isLoading ? null : channelsQuery.error ? (
-                <InlineBanner
-                  message="채널을 불러오지 못했습니다."
-                  actionLabel="다시 시도"
-                  onAction={() => void channelsQuery.refetch()}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                  cause={causeOfFailure(channelsQuery.error, deviceOnlineNow())}
+                  onRetry={() => void channelsQuery.refetch()}
                   testId="chat-channels-error"
                 />
               ) : canCreate ? (
@@ -1587,6 +1713,7 @@ export function ChatShell() {
             onCancelQuote={() => setQuote(null)}
             onSend={timeline.send}
             personalCall={personalCall}
+            onEditLast={editLastMessage}
           />
         )}
       </div>
@@ -1596,7 +1723,7 @@ export function ChatShell() {
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
-          root={thread}
+          root={threadRoot}
           requestLanding={requestThreadLanding}
           realtime={realtime}
           directory={directory}
@@ -1613,6 +1740,8 @@ export function ChatShell() {
           onOpenWorkSession={openWorkSession}
           isPlayEntrance={timeline.isPlayEntrance}
           onEntranceConsumed={timeline.consumeEntrance}
+          onThreadRead={timeline.applyThreadRead}
+          followable={threadsAreFollowable(channel?.kind)}
           onClose={() => {
             // 작업 패널의 onClose와 같은 이유 (#1431 · 아래 993-1004 주석): 이 서랍이
             // 덮어 `inert`로 만든 표면(chat-region) 안에 opener(답글 앵커)가 산다.

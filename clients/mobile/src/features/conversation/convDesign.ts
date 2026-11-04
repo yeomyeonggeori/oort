@@ -124,6 +124,11 @@ export const CONV = {
   // `__tests__/composerPill.test.tsx` 가 잰다.
   /** + · ↑ 원의 지름. 두 원이 같다. */
   composerCircle: 36,
+  /**
+   * 보내기 **왼쪽** 표현 단추의 칸(#4942, owner 10-31) — 두 원과 같은 지름이고 글리프만 선다(채운 원은 보내기 하나다).
+   * 접힌 알약에서는 글 칸이 이만큼 더 비운다(`COMPOSER_CHROME_X`).
+   */
+  composerExpression: 36,
   /** 원 ↔ 알약 가장자리, 사방 같다(좌·우·위·아래). */
   composerGap: 9,
   /** 알약 반경 = 원 반경 18 + 사방 여백 9. 한 줄 높이는 2 × 27 = 54(Buzz 53.3). */
@@ -181,15 +186,24 @@ export const CONV = {
    * `space.sm` 과 같은 값이지만 **이 이름으로 한 번만** 적는다 — 시트 예산 산수와 「작성 중」 줄의 예약이 같은 수를 읽는다.
    */
   composerTopAir: 8,
+  /**
+   * 에이전트가 있는 대화에서 도크 맨 위(「작성 중」 줄 위)에 **미리 잡는** 입력창 레일 칸의 높이(#4620, 웹 `RAIL_SHELL_CLASS`와 같은
+   * 결정). 줄 상자 하나(`line.meta` 16)다: 레일이 서고 사라지고 단계가 바뀌고 합쳐져도 이 칸은 그대로라서 목록의 맨 아래 행이
+   * 움직이지 않는다(옛 활동 줄은 자리를 예약하지 않아 run 이 시작될 때 대화가 56pt 점프했다, #4757). 에이전트 대화의 마지막 행 →
+   * 알약 간격은 `listPillGap + agentRailSlot`(36)이고 **사람만 있는 대화는 20 그대로**다 — 웹이 에이전트 대화 24 대 사람 대화 8로
+   * 같은 16을 더하는 것과 같은 차이다. 글자 크기 배율은 `railSlotHeight`가 곱한다(상한은 바 단추와 같다).
+   */
+  agentRailSlot: 16,
 } as const;
 
 /**
- * 알약 안에서 글 칸이 **아닌** 가로 — 양쪽의 (원 + 원 ↔ 알약 가장자리 + 원 ↔ 글).
- * 108 = 2 × (9 + 36 + 9). 두 원이 있는 대화 컴포저의 값이다(작업 대화 알약은 이 거리를 안
- * 쓴다 — 바깥 여백이 위 안내 줄과 맞아야 해서 독의 12 그대로다).
+ * 알약 안에서 글 칸이 **아닌** 가로 — 양쪽의 (원 + 원 ↔ 알약 가장자리 + 원 ↔ 글) + 보내기 왼쪽 표현 단추의 칸.
+ * 144 = 2 × (9 + 36 + 9) + 36. 두 원과 표현 단추가 있는 대화 컴포저의 값이다(옛 108 은 표현 단추가 도구 줄에 있던 때의
+ * 값이다, #4942). 작업 대화 알약은 이 거리를 안 쓴다 — 바깥 여백이 위 안내 줄과 맞아야 해서 독의 12 그대로다.
  */
 export const COMPOSER_CHROME_X =
-  2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset);
+  2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset) +
+  CONV.composerExpression;
 
 /** #4790: 창 폭·글자 크기와 무관하게 도크 전체가 같은 8pt 선에 선다. */
 export function composerFloat(_windowWidth: number, _fontScale: number): number {

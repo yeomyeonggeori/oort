@@ -30,11 +30,14 @@ export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 // This-device desktop notification kinds (BF-A4 / #1887).
 //
 // Survey of the fire path (`notifiableKind` / `notifyDecision`):
-//   mention  — server-recorded `props.mention_member_ids`
-//   approval — pending `approval_request`
-// Ordinary channel traffic, a DM without a mention, a thread reply without a
-// mention, and an edit never become a banner. Reminder dues are a third kind
-// and ride the 30s poll, not message.new.
+//   mention      — server-recorded `props.mention_member_ids`
+//   approval     — pending `approval_request`
+//   thread-reply — a new reply from someone else in a thread the SERVER says this
+//                  member follows (#4890; `threadFollowStore.ts`). On by default,
+//                  and 「그만 따라가기」 is the per-thread off switch.
+// Ordinary channel traffic, a DM without a mention, a thread reply in a thread
+// this member does not follow, and an edit never become a banner. Reminder dues
+// are a further kind and ride the 30s poll, not message.new.
 //
 // Workspace DND and the mention-exception live on the server (DND is read by
 // `serverPause.ts` since #4197 and outranks the message and pane switches here;
@@ -49,6 +52,8 @@ export type DesktopNotificationKinds = Record<DesktopPrefKey, boolean>;
 export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   mention: true,
   approval: true,
+  // 기본 켬(#4890, owner 10-31): 「참여한 스레드의 새 답글」. 따라가는 스레드만이라 그 자체가 선택이다.
+  "thread-reply": true,
   reminder: true,
   // 기본 켬: 승인·응답 필요·멘션·내 작업 끝남. 기본 끔: 새 DM(성재 결정 2026-10-02).
   "pane-waiting": true,

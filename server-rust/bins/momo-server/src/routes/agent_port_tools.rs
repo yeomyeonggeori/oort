@@ -75,7 +75,7 @@ use crate::routes::agent_gateway::{
     complete_gateway_run_in_tx, record_gateway_event_in_tx, report_standing_in_tx,
     sanitized_gateway_error, validated_event_fields, validated_gateway_artifacts,
     validated_gateway_stage, write_report_rejected_audit, GatewayCompleteInput, GatewayEventInput,
-    ReportStanding,
+    ReportRejection, ReportStanding, ReportedViolation,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
 use crate::routes::app_notice::validated_app_notice;
@@ -835,16 +835,20 @@ async fn gated_channel_page(
         return Ok(None);
     }
     let page = list_channel_page(conn, channel_id, cursor, limit).await?;
-    // The **image** files attached to these messages (ADR-0186 증보 v3
-    // V3-2a): an agent can only propose a workspace file as its avatar if
-    // it can name one, and the attachment id is that name. Only complete
-    // PNG/JPEG/WebP rows of messages in a channel this read already
-    // authorised; the Drive file id is never projected.
+    // The **picture** files attached to these messages (ADR-0186 증보 v3
+    // V3-2a, X8-1): an agent can only propose a workspace file as an avatar
+    // or as the source of a team expression if it can name one, and the
+    // attachment id is that name. Complete PNG/JPEG/WebP rows, and since #4900
+    // the GIF and video (MP4/MOV/WebM) rows an expression may start from, of
+    // messages in a channel this read already authorised; the Drive file id
+    // is never projected. Listing a type is not accepting it: an avatar still
+    // takes PNG/JPEG/WebP only.
     let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
-    let images = momo_messaging::image_attachments_for_messages_in_tx(
+    let images = momo_messaging::attachments_for_messages_in_tx(
         conn,
         caller.workspace_id,
         &message_ids,
+        momo_messaging::RequesterAttachmentUse::ExpressionSource,
     )
     .await?;
     let messages: Vec<Value> = page
@@ -1037,6 +1041,9 @@ async fn message_post(
                     opens_stream: false,
                     subscription_agents_disabled: !subscription_agents_enabled,
                     claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
+                    // ADR-0148 증보 (#4887): an agent's `oort_message_post` chooses its own place
+                    // (`rootId`) and does not carry 「대화에도 보내기」 — a person's choice.
+                    also_in_channel: false,
                 },
             )
             .await?;
@@ -1449,6 +1456,7 @@ async fn job_start(
                     detail: None,
                     text_delta: None,
                     stage: Some(stage),
+                    report: momo_agent::ActivityReport::default(),
                     event_id: Uuid::new_v5(&job.lease_id, b"oort_job_start"),
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
@@ -1662,6 +1670,11 @@ async fn run_event(
         }
         Some(_) => return Err(ToolFailure::InvalidArguments),
     };
+    // ADR-0200 증보 7: the agent's activities and plan, read off arguments the schema layer
+    // already judged (types, closed words, counts, byte envelopes) and judged again for
+    // characters and ids inside the transaction, where a refusal may be audited.
+    let raw_activities = raw_activities_of(args)?;
+    let raw_plan = raw_plan_of(args)?;
     let secret = state.agent_port.envelope_secret().to_string();
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -1675,6 +1688,10 @@ async fn run_event(
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
             };
+            // One refusal at most per call, stage first: the whole call is refused and
+            // nothing is written (the judgement precedes every ledger write below).
+            let mut refused: Option<(ReportRejection, Option<ReportedViolation>, ToolFailure)> =
+                None;
             let stage = match raw_stage
                 .as_deref()
                 .map(validated_gateway_stage)
@@ -1682,38 +1699,55 @@ async fn run_event(
             {
                 Ok(stage) => stage,
                 Err(reason) => {
-                    let lease = GatewayLeaseBinding {
-                        job_id: handle.job_id,
-                        lease_id: handle.lease_id,
-                    };
-                    let standing = report_standing_in_tx(
+                    refused = Some((reason, None, ToolFailure::InvalidArguments));
+                    None
+                }
+            };
+            let report = if refused.is_some() {
+                momo_agent::ActivityReport::default()
+            } else {
+                match momo_agent::ActivityReport::validate(
+                    raw_activities.as_deref(),
+                    raw_plan.as_deref(),
+                ) {
+                    Ok(report) => report,
+                    Err(fault) => {
+                        refused = Some(report_refusal(fault));
+                        momo_agent::ActivityReport::default()
+                    }
+                }
+            };
+            if let Some((reason, violation, failure)) = refused {
+                let lease = GatewayLeaseBinding {
+                    job_id: handle.job_id,
+                    lease_id: handle.lease_id,
+                };
+                let standing = report_standing_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    handle.run_id,
+                    caller.agent_member_id,
+                    lease,
+                    true,
+                )
+                .await?;
+                if standing == ReportStanding::Live {
+                    write_report_rejected_audit(
                         conn,
                         caller.workspace_id,
                         handle.run_id,
                         caller.agent_member_id,
-                        lease,
-                        true,
+                        Some(caller.token_id),
+                        momo_mcp::TOOL_RUN_EVENT,
+                        reason,
+                        violation,
                     )
                     .await?;
-                    if standing == ReportStanding::Live {
-                        write_report_rejected_audit(
-                            conn,
-                            caller.workspace_id,
-                            handle.run_id,
-                            caller.agent_member_id,
-                            Some(caller.token_id),
-                            momo_mcp::TOOL_RUN_EVENT,
-                            reason,
-                            None,
-                        )
-                        .await?;
-                        return Ok(Err(ToolFailure::InvalidArguments));
-                    }
-                    // Not live: drop the marker and let the ordinary lease
-                    // verdict answer (no audit row for a dead handle).
-                    None
+                    return Ok(Err(failure));
                 }
-            };
+                // Not live: the refused part is dropped and the ordinary lease verdict
+                // answers (no audit row for a dead handle).
+            }
             let recorded = record_gateway_event_in_tx(
                 conn,
                 caller.workspace_id,
@@ -1727,6 +1761,7 @@ async fn run_event(
                     detail,
                     text_delta,
                     stage,
+                    report,
                     event_id,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
@@ -1742,6 +1777,90 @@ async fn run_event(
 
     outcome?;
     Ok(json!({"status": "accepted"}))
+}
+
+/// A string-or-null field of one report item. The schema layer has judged the type; a miss
+/// here is the plain refusal rather than a panic.
+fn report_text(object: &Map<String, Value>, key: &str) -> Result<Option<String>, ToolFailure> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(ToolFailure::InvalidArguments),
+    }
+}
+
+/// `oort_run_event.activities` as sent, before the character judgement (7-2).
+fn raw_activities_of(
+    args: &Map<String, Value>,
+) -> Result<Option<Vec<momo_agent::RawActivity>>, ToolFailure> {
+    let items = match args.get("activities") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err(ToolFailure::InvalidArguments),
+    };
+    items
+        .iter()
+        .map(|item| {
+            let object = item.as_object().ok_or(ToolFailure::InvalidArguments)?;
+            Ok(momo_agent::RawActivity {
+                id: report_text(object, "id")?.ok_or(ToolFailure::InvalidArguments)?,
+                kind: report_text(object, "kind")?.ok_or(ToolFailure::InvalidArguments)?,
+                label: report_text(object, "label")?,
+                status: report_text(object, "status")?.ok_or(ToolFailure::InvalidArguments)?,
+                n: match object.get("n") {
+                    None | Some(Value::Null) => None,
+                    Some(value) => Some(value.as_i64().ok_or(ToolFailure::InvalidArguments)?),
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// `oort_run_event.plan` as sent (`Some([])` clears the plan; `None` leaves it).
+fn raw_plan_of(
+    args: &Map<String, Value>,
+) -> Result<Option<Vec<momo_agent::RawPlanItem>>, ToolFailure> {
+    let items = match args.get("plan") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err(ToolFailure::InvalidArguments),
+    };
+    items
+        .iter()
+        .map(|item| {
+            let object = item.as_object().ok_or(ToolFailure::InvalidArguments)?;
+            Ok(momo_agent::RawPlanItem {
+                text: report_text(object, "text")?.ok_or(ToolFailure::InvalidArguments)?,
+                status: report_text(object, "status")?.ok_or(ToolFailure::InvalidArguments)?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// The refusal of one judged-and-failed report: the audit reason, the closed `{field, rule}`
+/// the audit row carries, and the wire failure. The wire and the audit name the same closed
+/// field and rule or neither (a name outside the closed lists falls back to the plain refusal).
+fn report_refusal(
+    fault: momo_agent::ReportFault,
+) -> (ReportRejection, Option<ReportedViolation>, ToolFailure) {
+    let reason = match fault.field.reason() {
+        "plan_invalid" => ReportRejection::Plan,
+        _ => ReportRejection::Activities,
+    };
+    match momo_mcp::RunEventViolation::from_names(
+        fault.field.as_str(),
+        fault.rule.as_str(),
+        fault.index,
+    ) {
+        Some(violation) => (
+            reason,
+            Some(violation.into()),
+            ToolFailure::InvalidRunEvent(violation),
+        ),
+        None => (reason, None, ToolFailure::InvalidArguments),
+    }
 }
 
 async fn run_complete(
@@ -1819,7 +1938,7 @@ async fn run_complete(
                             Some(caller.token_id),
                             momo_mcp::TOOL_RUN_COMPLETE,
                             refusal.reason,
-                            Some(refusal.violation),
+                            Some(refusal.violation.into()),
                         )
                         .await?;
                         // ADR-0162 증보 5 C3 — still -32602, now naming the field
@@ -2412,6 +2531,12 @@ async fn action_propose(
                 // The ids the names resolved to, for the decision to compare.
                 action_block.insert("pins".into(), resolved.pins.clone());
             }
+            // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the
+            // `push_action` refusal give, judged on the payload that is about to be stored.
+            let decision = momo_agent::actions::decision_mode(
+                momo_agent::ACTION_TYPE_WORKSPACE_ACTION,
+                &payload,
+            );
             let approval_id = momo_agent::create_pending_approval_in_tx(
                 conn,
                 caller.workspace_id,
@@ -2464,7 +2589,11 @@ async fn action_propose(
                     channel_id: run.channel_id,
                     author_member_id: caller.agent_member_id,
                     message_type: MessageType::ApprovalRequest,
-                    body: Some(momo_agent::workspace_action_request_body(action)),
+                    body: Some(momo_agent::actions::workspace_action_request_body_with(
+                        action,
+                        Some(&resolved.validated.normalized),
+                        false,
+                    )),
                     props: {
                         let mut props = momo_agent::workspace_action_request_props(
                             approval_id,
@@ -2501,6 +2630,7 @@ async fn action_propose(
                         {
                             object.insert("summary".into(), Value::String(summary.clone()));
                         }
+                        momo_agent::actions::stamp_decision_mode(&mut props, decision);
                         props
                     },
                     root_id: None,
@@ -2579,6 +2709,20 @@ async fn action_propose(
                     }
                 }
             }
+            // #5084 — the rail is told the run now waits on a person. Last, in the park's own
+            // transaction: the park above is guarded (a refusal returned before it), every `?`
+            // after it rolls the whole proposal back, and the frame queues behind the card.
+            crate::routes::shared::emit_awaiting_approval_agent_status(
+                conn,
+                momo_agent::AgentRunAddress {
+                    workspace_id: caller.workspace_id,
+                    channel_id: run.channel_id,
+                    agent_member_id: caller.agent_member_id,
+                    run_id: handle.run_id,
+                },
+                approval_id,
+            )
+            .await?;
             Ok(Ok(json!({
                 "approvalId": approval_id,
                 "status": "pending",
@@ -2611,10 +2755,17 @@ async fn action_propose(
 /// at most (`media::process_waiting`); (4) a link's fetch slot is given back as soon as the
 /// bytes are here, before any wait for the decoder.
 ///
+/// **What the request itself already shows comes before any candidate is touched** (#4900): the
+/// face is a live human of this conversation (the resolver's own function), every link parses and
+/// is not private from the start, every generated picture is strict base64 within 1 MiB and
+/// starts like a picture. A bad third candidate is refused before the first two cost a Drive read,
+/// a fetch or a decoder slot.
+///
 /// * `attachment`: the file from Drive, then the isolated decoder. A file that is not a
 ///   picture is the same `InvalidArguments` a stranger's photo is; a GIF takes the decoder's
 ///   full-frame check like any other source; a video is a manual card
-///   (`video_processing_unavailable`, D4 on hold).
+///   (`video_processing_unavailable`, D4 on hold) decided from its first bytes, with no decoder
+///   slot, no place in the line and no child process.
 /// * `url`: the link through `momo-unfurl`'s guard (HTTPS, 443, address pin, hops, 5 s, 5 MiB).
 ///   A link that is private **from the start** refuses the whole proposal; every other
 ///   failure is a manual card with its closed reason and the safe source link.
@@ -2633,9 +2784,15 @@ async fn prepare_expression(
     use crate::routes::actions::{ActionArgs, ExpressionImageSpec};
     use base64::Engine as _;
     use momo_expressions::{intake, media, Origin};
-    let ActionArgs::ExpressionCreate { candidates, .. } = args else {
+    let ActionArgs::ExpressionCreate {
+        candidates,
+        subject,
+        ..
+    } = args
+    else {
         return Ok(None);
     };
+    let face = *subject;
     let started = std::time::Instant::now();
     let remaining = || momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
     let secret = state.agent_port.envelope_secret().to_string();
@@ -2699,6 +2856,22 @@ async fn prepare_expression(
             else {
                 return Ok(Err(ToolFailure::InvalidArguments));
             };
+            // The face, if any, is a live human of THIS conversation: judged by the function the
+            // proposal's resolver calls, before a candidate is fetched or decoded for a card that
+            // would be refused. The same `InvalidArguments` the resolver gives, so nobody learns
+            // here whether a person outside the room exists.
+            if let Some(face) = face {
+                if !momo_workspace_actions::action_resolve::face_is_human_in_room_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    face,
+                    channel_id,
+                )
+                .await?
+                {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            }
             let mut sources = Vec::with_capacity(wanted.len());
             let mut kept: Option<momo_expressions::assembly::Held> = None;
             for want in &wanted {
@@ -2762,12 +2935,41 @@ async fn prepare_expression(
     .await
     .map_err(|error| internal("agent_port.expression_prepare", error))??;
 
+    // **What the request itself already shows, for every candidate, before any of them is touched**
+    // (#4900). A link the guard refuses from the start, base64 that does not decode, a picture
+    // over 1 MiB, bytes that are not a picture: none of these needs the network, Drive or the
+    // decoder to be known, so they are refused here, once, and what is fine is kept for the loop
+    // (no second parse, no second decode).
+    let mut checked = Vec::with_capacity(candidates.len());
+    for candidate in candidates.iter() {
+        checked.push(match &candidate.image {
+            ExpressionImageSpec::Url(raw) => Checked::Url(
+                momo_unfurl::parse_source_url(raw).map_err(|_| ToolFailure::InvalidArguments)?,
+            ),
+            ExpressionImageSpec::Generated { data_base64, .. } => {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(data_base64)
+                    .map_err(|_| ToolFailure::InvalidArguments)?;
+                if bytes.len() > 1024 * 1024 {
+                    return Err(ToolFailure::InvalidArguments);
+                }
+                // The bytes decide the format, never the declared mime; a page, a video, a
+                // broken picture is the agent's own bad input.
+                if media::sniff(&bytes) != media::Sniffed::Image {
+                    return Err(ToolFailure::InvalidArguments);
+                }
+                Checked::Bytes(bytes)
+            }
+            _ => Checked::Nothing,
+        });
+    }
+
     // One preparation per agent at a time: a second one (another run, a retry that did not wait
     // for the answer) is told to come back, and fetches nothing.
     let _preparing = Preparing::enter(caller.agent_member_id).ok_or(ToolFailure::Unavailable)?;
 
     let mut prepared = Vec::with_capacity(candidates.len());
-    for (candidate, source) in candidates.iter().zip(looked_up) {
+    for ((candidate, source), checked) in candidates.iter().zip(looked_up).zip(checked) {
         if remaining().is_zero() {
             return Err(ToolFailure::Unavailable);
         }
@@ -2813,11 +3015,12 @@ async fn prepare_expression(
                 };
                 (Origin::attachment(), picture, None)
             }
-            ExpressionImageSpec::Url(raw) => {
+            ExpressionImageSpec::Url(_) => {
                 // Malformed, credentialed, fragment, http, private-from-the-start (any spelling)
-                // or a port other than 443: the whole proposal is refused, nothing is stored.
-                let url = momo_unfurl::parse_source_url(raw)
-                    .map_err(|_| ToolFailure::InvalidArguments)?;
+                // or a port other than 443: the whole proposal was refused above, nothing stored.
+                let Checked::Url(url) = checked else {
+                    return Err(ToolFailure::InvalidArguments);
+                };
                 let origin = Origin::url(url.origin());
                 if !state.unfurl_enabled {
                     // The instance's outgoing-request switch is off: no request is made.
@@ -2854,22 +3057,12 @@ async fn prepare_expression(
                     (origin, outcome, None)
                 }
             }
-            ExpressionImageSpec::Generated {
-                data_base64,
-                prompt,
-                ..
-            } => {
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(data_base64)
-                    .map_err(|_| ToolFailure::InvalidArguments)?;
-                if bytes.len() > 1024 * 1024 {
+            ExpressionImageSpec::Generated { prompt, .. } => {
+                // Strict base64, at most 1 MiB, and a picture by its first bytes: all judged
+                // above, for every candidate, before any of them was fetched or decoded.
+                let Checked::Bytes(bytes) = checked else {
                     return Err(ToolFailure::InvalidArguments);
-                }
-                // The bytes decide the format, never the declared mime; a page, a video, a
-                // broken picture is the agent's own bad input.
-                if media::sniff(&bytes) != media::Sniffed::Image {
-                    return Err(ToolFailure::InvalidArguments);
-                }
+                };
                 let processed =
                     media::process_waiting(bytes, remaining())
                         .await
@@ -2908,6 +3101,16 @@ struct PreparedExpression {
     /// The one kept assembly the candidates draw on, if any. The transaction locks it, proves it
     /// is still this agent's and live, and reclaims its bytes once the drafts exist (G3.6).
     assembly: Option<Uuid>,
+}
+
+/// What the request itself showed about one candidate, judged before any candidate is fetched or
+/// decoded (#4900) and kept so the loop does not judge it twice.
+enum Checked {
+    Nothing,
+    /// A link that parsed: HTTPS, public from the start, no credential or fragment.
+    Url(momo_unfurl::SourceUrl),
+    /// Generated bytes that are strict base64 within 1 MiB and sniff as a picture.
+    Bytes(Vec<u8>),
 }
 
 /// What one candidate of `expression.create` needs from the read transaction.
@@ -4702,5 +4905,102 @@ mod tests {
         let held = preparing_agents().lock().unwrap().contains(&one)
             || preparing_agents().lock().unwrap().contains(&other);
         assert!(!held, "nothing is left behind, so the set cannot grow");
+    }
+}
+
+/// ADR-0200 증보 7 — `momo-mcp` is protocol-only and publishes its own copy of the report
+/// vocabulary; the domain (`momo-agent`) owns the real one. One test pins every list and number
+/// of the two together (the precedent is `ASSEMBLE_PARAMS`), so an edit on one side cannot ship
+/// alone: the schema an agent reads, the validator that judges it and the closed refusal field
+/// list are one vocabulary.
+#[cfg(test)]
+mod report_vocabulary_pin {
+    #[test]
+    fn the_published_report_vocabulary_is_the_domains() {
+        assert_eq!(momo_mcp::RUN_ACTIVITY_KINDS, momo_agent::ACTIVITY_KINDS);
+        assert_eq!(
+            momo_mcp::RUN_ACTIVITY_STATUSES,
+            momo_agent::ACTIVITY_STATUSES
+        );
+        assert_eq!(momo_mcp::RUN_PLAN_STATUSES, momo_agent::PLAN_STATUSES);
+        assert_eq!(
+            momo_mcp::MAX_RUN_ACTIVITIES as usize,
+            momo_agent::MAX_ACTIVITIES_PER_CALL
+        );
+        assert_eq!(
+            momo_mcp::MAX_RUN_PLAN_ITEMS as usize,
+            momo_agent::MAX_PLAN_ITEMS
+        );
+        assert_eq!(momo_mcp::MAX_REPORTED_COUNT, momo_agent::MAX_ACTIVITY_N);
+        // the byte envelopes are four bytes per character, the id's alphabet is one byte each
+        assert_eq!(
+            momo_mcp::MAX_ACTIVITY_LABEL_BYTES as usize,
+            4 * momo_agent::MAX_ACTIVITY_LABEL_CHARS
+        );
+        assert_eq!(
+            momo_mcp::MAX_PLAN_TEXT_BYTES as usize,
+            4 * momo_agent::MAX_PLAN_TEXT_CHARS
+        );
+        assert_eq!(
+            momo_mcp::MAX_ACTIVITY_ID_BYTES as usize,
+            momo_agent::MAX_ACTIVITY_ID_CHARS
+        );
+        // the first six kinds are the end-of-run `toolCounts` categories, in the same words
+        assert_eq!(
+            &momo_agent::ACTIVITY_KINDS[..6],
+            &momo_mcp::TOOL_COUNT_KEYS[..]
+        );
+        assert_eq!(momo_agent::ACTIVITY_KINDS[6], "delegate");
+        // the closed field list of a refusal is the validator's, word for word
+        let validator: Vec<&str> = momo_agent::ReportField::ALL
+            .iter()
+            .map(|field| field.as_str())
+            .collect();
+        assert_eq!(validator, momo_mcp::RUN_EVENT_REPORT_FIELDS);
+        // every field and rule the validator can say can be turned into a wire violation
+        for field in momo_agent::ReportField::ALL {
+            for rule in [
+                momo_agent::ReportRule::Enum,
+                momo_agent::ReportRule::Forbidden,
+                momo_agent::ReportRule::Range,
+                momo_agent::ReportRule::Format,
+            ] {
+                assert!(
+                    momo_mcp::RunEventViolation::from_names(field.as_str(), rule.as_str(), Some(0))
+                        .is_some(),
+                    "{} {}",
+                    field.as_str(),
+                    rule.as_str()
+                );
+            }
+        }
+        // the roll's numbers are the migration's: 100 activity rows, 10 plan rows (migration 168)
+        let migration = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../server/Migrations/168_agent_run_activity.sql"
+        ))
+        .expect("migration 168");
+        assert!(migration.contains(&format!("count(*) - {}", momo_agent::ACTIVITY_ROWS_PER_RUN)));
+        assert!(migration.contains(&format!("OFFSET {}", momo_agent::PLAN_ROWS_PER_RUN)));
+        assert!(migration.contains(&format!("<= {}", momo_agent::MAX_PLAN_ITEMS)));
+        assert!(migration.contains(&format!(
+            "agent_report_text_ok(label, {})",
+            momo_agent::MAX_ACTIVITY_LABEL_CHARS
+        )));
+        assert!(migration.contains(&format!(
+            "agent_report_text_ok(e.v ->> 'text', {})",
+            momo_agent::MAX_PLAN_TEXT_CHARS
+        )));
+        assert!(migration.contains(&format!("BETWEEN 1 AND {}", momo_agent::MAX_ACTIVITY_N)));
+        for word in momo_agent::ACTIVITY_KINDS
+            .iter()
+            .chain(momo_agent::ACTIVITY_STATUSES.iter())
+            .chain(momo_agent::PLAN_STATUSES.iter())
+        {
+            assert!(
+                migration.contains(&format!("'{word}'")),
+                "migration 168 does not name {word}"
+            );
+        }
     }
 }

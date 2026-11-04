@@ -608,14 +608,13 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
     expect(file).toContain("id={OFFLINE_NOTE_ID}");
     // 큐에 쌓이지 않는 발급이므로 「그대로 보내집니다」라고 약속하지 않는다.
     // 그 금지는 이제 이 파일만의 것이 아니다 — 아래 「회전 1」의 전 파일 스캔.
-    expect(file).toContain(
-      "연결이 끊겨 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
-    );
+    // 문장은 사전 틀(`blocked.createInviteLink.*`, #5260)이 원인별로 말한다. 이 파일에는 틀 이름만 남는다.
+    expect(file).toContain('const OFFLINE_CREATE_REASON: BlockedFrame = "createInviteLink";');
   });
 
   it("웹훅 목록 — 두 문장이 같은 자리에 서고 한 번에 하나만 그려진다", () => {
     const file = FILES["WebhookSection.tsx"];
-    expect(file).toContain("const OFFLINE_ROW_REASON =");
+    expect(file).toContain("const OFFLINE_ROW_REASON: BlockedFrame =");
     expect(file).toContain("const BUSY_ROW_REASON =");
     expect(file).toContain("if (offline) return offlineReasonId;");
     expect(file).toContain("return busy && !mine ? busyReasonId : undefined;");
@@ -696,7 +695,7 @@ describe("#1559 회전 1 · 웹훅 만들기가 사유를 든다 (#1595 H2)", ()
   const file = FILES["WebhookSection.tsx"];
 
   it("잠그는 사실 셋이 각자의 문장을 갖는다", () => {
-    expect(file).toContain("const OFFLINE_CREATE_REASON =");
+    expect(file).toContain("const OFFLINE_CREATE_REASON: BlockedFrame =");
     expect(file).toContain("const NO_CHANNEL_CREATE_REASON =");
     expect(file).toContain("const BUSY_CREATE_REASON =");
     expect(
@@ -738,11 +737,18 @@ describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
   // 「그대로 보내져요」 부재와 networkMode·onlineManager 부재(오프라인 큐가 없다는 사실의 보초)는
   // 린트 `offlineQueuePromise` 가 됐다. 남은 것은 세 표면이 같은 사실을 같은 문장으로 말하는지다.
   it("두 표면이 같은 잠금에 같은 사실을 말한다", () => {
-    expect(FILES["EventSubscriptionSection.tsx"]).toContain(
-      "서버와 연결이 끊겨 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
-    );
-    expect(FILES["InviteSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있어요.");
-    expect(FILES["WebhookSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있어요.");
+    // 세 표면의 문장은 사전 틀(#5260)이고, 틀마다 원인별로 「다시 연결되면 이어서 만들 수 있어요.」를 같은 말로 닫는다.
+    expect(FILES["EventSubscriptionSection.tsx"]).toContain('<BlockedReason frame="createThing" />');
+    expect(FILES["InviteSection.tsx"]).toContain('"createInviteLink"');
+    expect(FILES["WebhookSection.tsx"]).toContain('"createWebhookUrl"');
+    const dictionary = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../../../../../packages/momo-core/src/i18n/catalogs/ko-KR/blocked.json", import.meta.url)), "utf8")
+    ) as Record<string, string>;
+    for (const frame of ["createThing", "createInviteLink", "createWebhookUrl"]) {
+      for (const cause of ["offline", "serverUnreachable"]) {
+        expect(dictionary[`blocked.${frame}.${cause}`], `${frame}.${cause}`).toContain("다시 연결되면 이어서 만들 수 있어요.");
+      }
+    }
   });
 });
 

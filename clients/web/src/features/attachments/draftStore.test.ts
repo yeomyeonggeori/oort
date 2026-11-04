@@ -14,10 +14,12 @@ const putAttachmentBytes = vi.fn();
 
 class FakeApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
+  readonly code: string | undefined;
+  constructor(status: number, code?: string) {
     super(`HTTP ${status}`);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -194,13 +196,65 @@ describe("upload orchestration", () => {
     expect(readSurface(KEY).drafts[0].issue).toBe("blocked");
   });
 
-  it("turns the session refusal's status into the reason", async () => {
+  // #5221: 502·503(코드 없음)은 「보관소 없음」이 아니라 서버에 닿지 못함이다. 보관소 이야기는 우리 서버가 코드를 붙여 직접 낸
+  // 503에만 남는다. 상태 코드는 분류로 바뀌어 칩에 남고 어디에도 숫자가 없다.
+  it("turns the session refusal into a classification, not a status code", async () => {
     createAttachmentUpload.mockRejectedValueOnce(new FakeApiError(503));
     addFiles(KEY, TARGET, [file("a.log", 8)]);
     await settle();
-    expect(readSurface(KEY).drafts[0].issue).toBe("no-archive");
+    expect(readSurface(KEY).drafts[0]).toMatchObject({
+      status: "failed",
+      issue: "unavailable",
+      failureCause: "serverUnreachable",
+    });
     // 세션이 안 열렸으면 바이트는 한 번도 움직이지 않는다.
     expect(putAttachmentBytes).not.toHaveBeenCalled();
+  });
+
+  it("keeps 「no archive」 for a 503 the server named itself, and the other refusals as they were", async () => {
+    const cases: [number, string | undefined, string][] = [
+      [503, "archive_not_configured", "no-archive"],
+      [403, undefined, "forbidden"],
+      [413, undefined, "too-large"],
+      [409, undefined, "mismatch"],
+      [500, undefined, "unavailable"],
+    ];
+    for (const [status, code, issue] of cases) {
+      resetAttachmentDraftsForTest();
+      createAttachmentUpload.mockRejectedValueOnce(new FakeApiError(status, code));
+      addFiles(KEY, TARGET, [file("a.log", 8)]);
+      await settle();
+      expect(readSurface(KEY).drafts[0]).toMatchObject({ status: "failed", issue });
+      expect(readSurface(KEY).drafts[0].failureCause).toBeUndefined();
+    }
+  });
+
+  it("says offline or server for a failure with no answer, by what the device knew", async () => {
+    const { NetworkError } = await import("@momo/core/lib/http");
+    try {
+      for (const [online, cause] of [
+        [false, "deviceOffline"],
+        [true, "serverUnreachable"],
+      ] as const) {
+        resetAttachmentDraftsForTest();
+        vi.stubGlobal("navigator", { onLine: online });
+        createAttachmentUpload.mockRejectedValueOnce(new NetworkError("unreachable", 15_000));
+        addFiles(KEY, TARGET, [file("a.log", 8)]);
+        await settle();
+        expect(readSurface(KEY).drafts[0]).toMatchObject({ issue: "unavailable", failureCause: cause });
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("classifies a byte transfer that got no answer or a gateway error the same way", async () => {
+    const upload = manualUpload();
+    addFiles(KEY, TARGET, [file("a.log", 8)]);
+    await settle();
+    upload.fail("network");
+    await settle();
+    expect(readSurface(KEY).drafts[0]).toMatchObject({ issue: "unavailable", failureCause: "serverUnreachable" });
   });
 
   it("turns a verification mismatch into a retryable failure", async () => {

@@ -393,6 +393,23 @@ pub struct RateLimitConfig {
     /// refused. An operator who shortens the window to a second turns "5 a minute"
     /// into "5 a second", for this budget and for the rest.
     pub password_guess_per_account_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN` (default 5 per window). **No off
+    /// switch**: 0 and a value that is not a number both keep the default, because the
+    /// operator's reissue asks for the operator's own password and that is a guess at it
+    /// (ADR-0215 D6 — a knob on a guessable surface does not get an "off").
+    ///
+    /// Requests to `POST …/members/{member}/password-reset` per **operator** (the member
+    /// making the request), every request counted — a right password too, and a request
+    /// that is refused for any other reason. The budget is spent *before* anything else
+    /// about the request is looked at. The key is the member and nothing else: not a sign-in
+    /// lineage (a stolen session can start new lineages without limit, so a lineage key
+    /// would not limit guessing at all), not the target, not the caller's address. The price
+    /// is that whoever holds a stolen operator session can use up that operator's reissues
+    /// for the window; the other owners and admins can still issue. Guessing defences that
+    /// span login, the member's own change and this one are the account-axis throttle (E-5).
+    ///
+    /// The window is `RATE_LIMIT_WINDOW_SECONDS`, which every limiter in this file shares.
+    pub password_reset_issue_per_admin_limit: u32,
     /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
     /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers
     /// anyone who knows the path shape. Its own key, so upload traffic and the
@@ -472,6 +489,51 @@ pub struct RateLimitConfig {
     /// request. The gate runs before the Drive call. 60 is three full 20-file
     /// messages' worth of starts in one window.
     pub upload_start_per_member_limit: u32,
+    /// `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER` (default 60 per window). 0 disables.
+    /// Setting a video's length, size and poster (`PUT …/channels/{ch}/attachments/{id}/media`,
+    /// ADR-0151 증보 5 D5, #4673), which writes up to 256 KiB into Postgres per request (a replace
+    /// writes it again) and reads the object's first bytes from the archive. The gate runs before
+    /// the body is read and a refused request counts. The same size of budget as an upload start,
+    /// because it is the second half of the same act: a phone sends one write per video it uploads,
+    /// so 60 is three full 20-file messages' worth of videos in one window, while a loop that
+    /// replaces the same poster at request speed is held to about one a second.
+    pub media_write_per_member_limit: u32,
+    /// `RATE_LIMIT_UNFURL_PROXY_PER_MEMBER` (default 240 per window). 0 disables.
+    /// Link-card pictures and icons fetched through the proxy (`GET …/unfurls/{id}/image` and
+    /// `…/icon`), counted **only when the request makes this server fetch from the card's remote
+    /// site**: a picture already in memory, and an address that failed lately, cost the remote
+    /// site nothing and spend nothing. Each one that is spent is up to four GETs from this
+    /// server's address to a site a member chose, which is what the budget keeps from becoming a
+    /// probe of other people's servers. 240 is above what opening a channel cold needs (twenty
+    /// cards on a screen is forty fetches, a picture and an icon each, and every one that
+    /// succeeds is then kept) and four a second sustained; it is the figure a developer token
+    /// gets per window. A request refused here is retried by the client after `Retry-After` and
+    /// shows its fallback meanwhile. See ADR-0170 증보 D13.
+    pub unfurl_proxy_per_member_limit: u32,
+    /// `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` (default 10 per window). 0 disables.
+    /// Starting a picture from a photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H9/H11,
+    /// #4941), which can end in one call to the team's image model and so in a charge on the
+    /// team's own key. A short-window guard on **starts**, not an allowance: the owner's default
+    /// for how many pictures a team may draw is no cap (#4944), and a team that wants one sets it
+    /// there. A person works on one photo at a time (the route admits one per member) and every
+    /// finished one leaves a draft to look at (four may wait, `momo_expressions::LIVE_DRAFTS`),
+    /// so ordinary use is a few starts a minute. 10 is two full draft allowances plus two: a
+    /// person who fills their drafts and asks once more reaches the draft limit, not this. A start
+    /// the route then refuses (busy, over the draft limit) counts too, and the gate runs before
+    /// the body is read.
+    pub photo_draft_per_member_limit: u32,
+    /// `RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER` (default 60 per window). 0 disables.
+    /// A link a member typed into the composer, asked about before the message exists
+    /// (`POST …/channels/{ch}/unfurl-previews`), counted **only when the request makes this server
+    /// fetch the page**: an answer the server already holds for that member and address, a switch
+    /// that is off, and a request turned away for want of a place cost the remote site nothing and
+    /// spend nothing. This is the one request where the member names the address and the answer
+    /// comes straight back, so it is the proxy's other half of the same brake (the proxy's figure
+    /// is for pictures a page chose). 60 is a sustained one a second: the composer asks about a
+    /// link a moment after typing stops, once per address, and an address typed slowly leaves a
+    /// few half-written ones on the way; that fits with room to spare, and anything past it is
+    /// retried by the client after `Retry-After`. See ADR-0170 증보 2026-11-01 D20.
+    pub unfurl_preview_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -483,12 +545,17 @@ impl Default for RateLimitConfig {
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
             password_guess_per_account_limit: 5,
+            password_reset_issue_per_admin_limit: 5,
             drive_upload_per_ip_limit: 120,
             self_media_per_workspace_limit: 30,
             message_send_per_member_limit: 120,
             message_send_per_agent_limit: 600,
             scheduled_write_per_member_limit: 60,
             upload_start_per_member_limit: 60,
+            media_write_per_member_limit: 60,
+            unfurl_proxy_per_member_limit: 240,
+            photo_draft_per_member_limit: 10,
+            unfurl_preview_per_member_limit: 60,
         }
     }
 }
@@ -525,6 +592,13 @@ impl RateLimitConfig {
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .filter(|limit| *limit > 0)
                 .unwrap_or(defaults.password_guess_per_account_limit),
+            // No off switch (see the field): 0 is filtered out and falls to the default.
+            password_reset_issue_per_admin_limit: lookup(
+                "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+            )
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .filter(|limit| *limit > 0)
+            .unwrap_or(defaults.password_reset_issue_per_admin_limit),
             drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
@@ -543,6 +617,18 @@ impl RateLimitConfig {
             upload_start_per_member_limit: lookup("RATE_LIMIT_UPLOAD_START_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.upload_start_per_member_limit),
+            media_write_per_member_limit: lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.media_write_per_member_limit),
+            unfurl_proxy_per_member_limit: lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.unfurl_proxy_per_member_limit),
+            photo_draft_per_member_limit: lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.photo_draft_per_member_limit),
+            unfurl_preview_per_member_limit: lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.unfurl_preview_per_member_limit),
         }
     }
 }
@@ -989,6 +1075,29 @@ fn subscription_agents_from_env() -> bool {
 }
 
 /// #3397 — read the Claude subscription-agent opt-in. Off unless an exact `true`.
+/// The operator's team-AI ceilings as this process reads them (ADR-0201 증보 v3 B9-3, #4944) — the
+/// same rule the agent-worker enforces by (`parse_operator_cap`): unset or empty = no ceiling, `0` =
+/// off, a positive number = the ceiling. The api only **explains** the ceiling, so a value it cannot
+/// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
+/// loudly on the same value).
+pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+    use momo_workspace_actions::team_ai_limits::{parse_operator_cap, OperatorCaps};
+    let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
+        Ok(cap) => cap,
+        Err(invalid) => {
+            tracing::warn!(
+                variable = invalid.0,
+                "unreadable team AI ceiling; the settings screen will not show it"
+            );
+            None
+        }
+    };
+    OperatorCaps {
+        daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
+        daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
+    }
+}
+
 fn claude_subscription_agents_from_env() -> bool {
     claude_subscription_agents_switch_on(env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
 }
@@ -3859,6 +3968,7 @@ mod tests {
         assert_eq!(defaults.password_change_per_member_limit, 10);
         assert_eq!(defaults.password_change_per_ip_limit, 30);
         assert_eq!(defaults.password_guess_per_account_limit, 5);
+        assert_eq!(defaults.password_reset_issue_per_admin_limit, 5);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
@@ -3875,6 +3985,53 @@ mod tests {
             defaults.password_guess_per_account_limit > 0,
             "a default of 0 would ship the join door's password check unbudgeted"
         );
+        assert!(
+            defaults.password_reset_issue_per_admin_limit > 0,
+            "a default of 0 would ship the operator's reissue password check unbudgeted"
+        );
+    }
+
+    /// The operator's reissue budget (ADR-0215 D6): its own env name, moves only its own
+    /// field, and has no off switch.
+    #[test]
+    fn the_reset_issue_knob_is_named_moves_only_itself_and_cannot_be_switched_off() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup(
+                "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+                " 7 "
+            )),
+            RateLimitConfig {
+                password_reset_issue_per_admin_limit: 7,
+                ..defaults
+            },
+            "the documented name moves exactly its own field, whitespace trimmed"
+        );
+        for refused in ["0", "many", "-1", ""] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(
+                    "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+                    refused
+                )),
+                defaults,
+                "{refused:?} must keep the default: a guessable surface has no off value"
+            );
+        }
+        // the neighbouring password knobs do not leak into this one
+        for neighbour in [
+            "RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER",
+            "RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT",
+        ] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(neighbour, "2"))
+                    .password_reset_issue_per_admin_limit,
+                defaults.password_reset_issue_per_admin_limit,
+                "{neighbour} must not move the reissue budget"
+            );
+        }
     }
 
     /// The per-account password-guess knob (#4625): its own env name, moves only its
@@ -3970,9 +4127,13 @@ mod tests {
                 defaults.message_send_per_agent_limit,
                 defaults.scheduled_write_per_member_limit,
                 defaults.upload_start_per_member_limit,
+                defaults.unfurl_proxy_per_member_limit,
+                defaults.photo_draft_per_member_limit,
+                defaults.unfurl_preview_per_member_limit,
+                defaults.media_write_per_member_limit,
             ),
-            (120, 600, 60, 60),
-            "a default changed: update ADR-0208 증보 1, docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10, 60, 60),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one, ADR-0151 증보 5 D5 for the media write), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -3982,6 +4143,10 @@ mod tests {
             ("message send, agent", defaults.message_send_per_agent_limit),
             ("scheduled write", defaults.scheduled_write_per_member_limit),
             ("upload start", defaults.upload_start_per_member_limit),
+            ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
+            ("photo draft", defaults.photo_draft_per_member_limit),
+            ("unfurl preview", defaults.unfurl_preview_per_member_limit),
+            ("media write", defaults.media_write_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -3997,6 +4162,15 @@ mod tests {
             defaults.upload_start_per_member_limit as usize
                 >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
             "two full messages' worth of attachment uploads must fit in one window"
+        );
+        assert!(
+            defaults.media_write_per_member_limit as usize
+                >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
+            "a video per attachment of two full messages must fit in one window: one media write follows each upload"
+        );
+        assert!(
+            i64::from(defaults.photo_draft_per_member_limit) >= 2 * momo_expressions::LIVE_DRAFTS,
+            "a person who fills the live-draft allowance and asks once more must meet the draft limit, not the rate"
         );
         assert!(
             defaults.message_send_per_agent_limit >= AgentPortConfig::default().per_agent_limit,
@@ -4046,10 +4220,50 @@ mod tests {
             },
             "surrounding whitespace is trimmed, as for every other knob"
         );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER", "13")),
+            RateLimitConfig {
+                unfurl_proxy_per_member_limit: 13,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "12")),
+            RateLimitConfig {
+                photo_draft_per_member_limit: 12,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER", "7")),
+            RateLimitConfig {
+                unfurl_preview_per_member_limit: 7,
+                ..defaults
+            },
+            "the preview name moves the preview field and nothing else"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER", "14")),
+            RateLimitConfig {
+                media_write_per_member_limit: 14,
+                ..defaults
+            },
+            "the media write name moves the media write field and not the upload start's"
+        );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "0"))
                 .message_send_per_agent_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "0"))
+                .photo_draft_per_member_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER", "0"))
+                .media_write_per_member_limit,
             0
         );
         assert_eq!(

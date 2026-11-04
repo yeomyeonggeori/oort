@@ -55,7 +55,6 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import {HAPTIC_MODES, setHapticMode, useHapticMode} from '../../lib/haptics';
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
@@ -107,6 +106,24 @@ import {
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
+import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
+import {
+  ReleaseNotesSettingRow,
+  ReleaseNotesSettingsPage,
+} from '../releaseNotes/ReleaseNotesPage';
+import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
+import {TEAM_AI_HELPER_PAGE} from '@momo/core/features/settings/teamAiStageModel';
+import {
+  TeamAiHelperSettingRow,
+  TeamAiHelperSettingsPage,
+  useTeamAiHelperEntry,
+} from './TeamAiHelperSettings';
+import {
+  AI_LIMITS_PAGE,
+  TeamAiLimitsSettingRow,
+  TeamAiLimitsSettingsPage,
+} from './TeamAiLimitsSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -133,21 +150,29 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 //
 //   얼굴        큰 원형 아바타(→ 프로필 사진 장) · 이름 · @핸들 · 상태 알약
 //   [새 버전]   배너(있을 때만)
-//   ① 상태 설정 ›              → 바텀시트 「상태 설정」 (짧은 편집 = 시트)
-//   ② 내 상태 라디오 3줄       온라인 · 자리 비움 · 방해 금지(→ 기한 장). 한 번에 고르는 3택이라 같은 자리에서
-//   ③ 프로필 › 사진 바꾸기      Buzz 「Edit photo ›」 자리
-//   ④ 알림 토글들               푸시 · 일시 중지(→ 기한 장) · 작업 끝남 · 항상 오는 알림
-//   ⑤ 기억                      내 일시정지
-//   ⑥ 보기 › 테마               → 테마 장
+//   ① 보기 › 테마               → 테마 장 — **얼굴 영역(프로필) 바로 아래**(owner 10-31, #4936)
+//   ② 상태 설정 ›              → 바텀시트 「상태 설정」 (짧은 편집 = 시트)
+//   ③ 내 상태 라디오 3줄       온라인 · 자리 비움 · 방해 금지(→ 기한 장). 한 번에 고르는 3택이라 같은 자리에서
+//   ④ 프로필 › 사진 바꾸기·언어  Buzz 「Edit photo ›」 자리
+//   ⑤ 알림 토글들               푸시 · 일시 중지(→ 기한 장) · 작업 끝남 · 항상 오는 알림
+//   ⑥ 기억                      내 일시정지
 //   ⑦ 연결                      서버(보조 줄) · 지시 기기 ›(→ 지시 기기 장) · 명령줄·AI 도구 ›(→ 목록·지우기 장, 쓸 수
 //                               있는 사람에게만 선다: `devTools.ts` `useDevToolsEntry`)
-//   ⑧ 계정                      로그아웃 — **마지막, 위험 행**
+//   ⑧ 정보 › 업데이트 소식 · 연결 기록 복사     **계정 위**(owner 10-31, #4936). 「업데이트 소식」(#4937)은 이 카드의 첫 줄이다
+//   ⑨ 계정                      로그아웃 — **마지막, 위험 행**
 //   바닥        버전 줄(길게 누르면 연결 기록 복사)
 //
-// 순서의 근거: Buzz 는 「상태 → 프로필 → 알림 → 연결」이고, 매일 만지는 것(상태·알림)이 위, 한 번 고르면
-// 끝나는 것(테마·연결)이 아래, 되돌릴 수 없는 것(로그아웃)이 맨 끝이다. 우리 항목이 더 많아 Buzz 의 넷
-// 사이에 「기억」과 「보기」를 끼웠을 뿐 순서의 문법은 그대로다. 「표시 이름 ›」·「프로필 설명 ›」은 폰에
-// 지금 없는 기능이라(코어 `changeMyDisplayName` 은 있다) 빈 약속 행으로 그리지 않는다.
+// 순서의 근거: Buzz 는 「상태 → 프로필 → 알림 → 연결」이고, 매일 만지는 것(상태·알림)이 위, 되돌릴 수 없는
+// 것(로그아웃)이 맨 끝이다. 우리 항목이 더 많아 Buzz 의 넷 사이에 「기억」을 끼웠을 뿐 순서의 문법은 그대로다.
+// 「업데이트 소식」(#4937)을 「정보」 카드의 첫 줄에 둔 근거: ① 「정보」는 이 설치본 자신에 대한 카드이고 소식은 지금 쓰는 앱
+// 버전의 정보다(연결 기록 복사도 같은 종류). ② #4936 이 방금 정한 순서(정보 → 계정(마지막 위험 카드) → 바닥 버전 줄)를 건드리지
+// 않고 한 줄 카드를 새로 만들지도 않는다. ③ 바닥 버전 줄 바로 위라서 「내가 쓰는 버전 → 그 버전에서 바뀐 것」이 이웃한다.
+// ④ 페이지로 들어가는 행이라 셰브론 행 문법 그대로다. 물리친 자리: 맨 위 새 버전 배너 곁(그 배너는 「더 새 빌드가 있다」는
+// 알림이고 소식은 이미 깔린 빌드의 이야기라 한 덩어리로 읽힌다), 「보기」(화면 취향 카드), 「연결」(서버·기기 진단 카드).
+//
+// 예외 둘은 owner 10-31 지시다: 테마는 긴 「알림」 목록 밑에 있어 찾아 내려가야 했으므로 얼굴 영역(프로필) 바로
+// 아래로 올렸고, 연결 기록 복사는 위험 행인 로그아웃 위로 옮겨 로그아웃이 마지막 카드가 된다. 「표시 이름 ›」·「프로필
+// 설명 ›」은 폰에 지금 없는 기능이라(코어 `changeMyDisplayName` 은 있다) 빈 약속 행으로 그리지 않는다.
 //
 // ## 상태는 모르는 것을 말하지 않는다
 //
@@ -173,6 +198,11 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 /** 설정 페이지 위에 한 겹 더 쌓이는 장. `main` 은 설정 페이지 자신이다. */
 export type SettingsSubPage =
   | 'language'
+  | 'releaseNotes'
+  | 'linkPreview'
+  | typeof TEAM_AI_HELPER_PAGE
+  // 「사용 한도」 장(#5026). 이름은 `TeamAiLimitsSettings` 가 하이픈 낱말로 짓고 JSX 밖에서 선언한다(직접 문구 장부).
+  | typeof AI_LIMITS_PAGE
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -185,7 +215,13 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language'>, string> = {
+const SUB_PAGE_TITLE: Record<
+  Exclude<
+    SettingsSubPage,
+    'language' | 'releaseNotes' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
+  >,
+  string
+> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -266,6 +302,10 @@ export function SettingsPage({
             onOpenUsage={() => setPage('usage')}
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
+            onOpenReleaseNotes={() => setPage(RELEASE_NOTES_SETTINGS_PAGE)}
+            onOpenLinkPreview={() => setPage('linkPreview')}
+            onOpenTeamAiHelper={() => setPage(TEAM_AI_HELPER_PAGE)}
+            onOpenAiLimits={() => setPage(AI_LIMITS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -289,6 +329,18 @@ export function SettingsPage({
           testID="settings-sub-pane">
           {page === 'language' ? (
             <LanguageSettingsPage onBack={backToMain} />
+          ) : page === RELEASE_NOTES_SETTINGS_PAGE ? (
+            <ReleaseNotesSettingsPage onBack={backToMain} />
+          ) : page === 'linkPreview' ? (
+            <LinkPreviewSettingsPage onBack={backToMain} />
+          ) : page === TEAM_AI_HELPER_PAGE ? (
+            <TeamAiHelperSettingsPage
+              workspaceId={workspaceId}
+              directory={directory}
+              onBack={backToMain}
+            />
+          ) : page === AI_LIMITS_PAGE ? (
+            <TeamAiLimitsSettingsPage workspaceId={workspaceId} onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -321,7 +373,10 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language'>;
+  page: Exclude<
+    SettingsSubPage,
+    'language' | 'releaseNotes' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
+  >;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -431,6 +486,10 @@ export function SettingsContent({
   connected,
   onOpenTheme,
   onOpenLanguage,
+  onOpenReleaseNotes,
+  onOpenLinkPreview,
+  onOpenTeamAiHelper,
+  onOpenAiLimits,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -448,6 +507,14 @@ export function SettingsContent({
   connected: boolean;
   onOpenTheme: () => void;
   onOpenLanguage?: () => void;
+  /** 「업데이트 소식」 장을 연다(#4937). 없으면 행이 서지 않는다(캡처 하네스). */
+  onOpenReleaseNotes?: () => void;
+  /** 「링크 미리보기」 장(작게·크게·끄기, #4883)을 연다. 없으면 행이 서지 않는다(캡처 하네스). */
+  onOpenLinkPreview?: () => void;
+  /** 관리자의 「도우미」 장(이름·할 수 있는 일, #4945)을 연다. 없으면 행이 서지 않고 아무것도 읽지 않는다(캡처 하네스). */
+  onOpenTeamAiHelper?: () => void;
+  /** 「사용 한도」 장(#5026)을 연다. 없으면 행이 서지 않는다(캡처 하네스). 소유자·관리자에게만 선다. */
+  onOpenAiLimits?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -474,12 +541,14 @@ export function SettingsContent({
   covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 알림 카드·연결 카드의 안내 문장은 사전에서 읽는다(#5170 L2). 이름이 `formatMessage` 인 것은 일부러다 —
+  // 직접 문구 장부는 그 이름의 호출 안 키를 문구가 아닌 것으로 읽는다(`useFormatMessage` 머리말).
+  const formatMessage = useFormatMessage();
   const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
   // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
   // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
-  const hapticMode = useHapticMode();
   const previewOn = usePushPreview();
   const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
@@ -542,7 +611,7 @@ export function SettingsContent({
   const pauseDetail = pause.loadFailed
     ? NOTIFICATION_PAUSE_LOAD_FAILED
     : !pause.ready
-      ? '알림 설정을 확인하는 중입니다.'
+      ? formatMessage('settings.notifications.checking')
       : pause.paused
         ? PAUSE_ACTIVE_NOTE
         : NOTIFICATION_PAUSE_DESCRIPTION;
@@ -569,6 +638,13 @@ export function SettingsContent({
   const themeValue = themeSummary(themeId, choice);
   // 만들 수 있거나 이미 만든 연결이 있는 사람에게만 행이 선다(`useDevToolsEntry`). 정책이 오기 전에는 서지 않는다.
   const devTools = useDevToolsEntry(workspaceId, member.id, onOpenDevTools !== undefined);
+  // 관리자(소유자·관리자)에게만 「관리자 설정」 카드가 선다. 도우미 행은 설정 가방을 읽었고 도우미가 켜져 있을 때만 선다.
+  const isAdmin = memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin';
+  const teamAi = useTeamAiHelperEntry(workspaceId, directory, isAdmin && onOpenTeamAiHelper !== undefined);
+  const teamAiRow =
+    teamAi.visible && onOpenTeamAiHelper ? (
+      <TeamAiHelperSettingRow helperName={teamAi.helperName} onPress={onOpenTeamAiHelper} />
+    ) : null;
 
   return (
     <>
@@ -640,7 +716,22 @@ export function SettingsContent({
         <AppUpdateSheet offer={updateOffer} onClose={() => setUpdateSheetOpen(false)} />
       ) : null}
 
-      {/* ① 상태 설정 — 짧은 편집이라 시트가 연다. */}
+      {/* ① 보기 — 얼굴 영역(프로필: 얼굴·이름·상태 알약) 바로 아래(owner 10-31, #4936). 긴 「알림」 목록 밑에서 찾아 내려가던 것을
+          올렸다. 새 버전 배너는 알림이라 얼굴 바로 밑에 그대로 서고, 테마는 그 다음이다. */}
+      <GroupCard label="보기" testID="settings-view-card">
+        <ListRow
+          title="테마"
+          value={themeValue}
+          accessory="chevron"
+          onPress={onOpenTheme}
+          accessibilityLabel={`테마, ${themeValue}`}
+          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
+          testID="profile-theme-row"
+        />
+        {onOpenLinkPreview ? <LinkPreviewSettingRow onPress={onOpenLinkPreview} /> : null}
+      </GroupCard>
+
+      {/* ② 상태 설정 — 짧은 편집이라 시트가 연다. */}
       {self ? (
         <GroupCard testID="settings-status-card">
           <ListRow
@@ -655,7 +746,7 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ② 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. 앞 칸(상태 점)이 없다: 설정 페이지는 앞 칸 없는 쪽이고
+      {/* ③ 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. 앞 칸(상태 점)이 없다: 설정 페이지는 앞 칸 없는 쪽이고
           (`phone-sheets.md` §4), 점이 있으면 이 카드만 글자 열이 38pt 안으로 들어가 이웃 카드와 어긋난다(design-review
           r1 H1). 상태의 색은 머리의 알약이 말하고, 고른 줄은 강조색·굵게·✓ 세 신호가 말한다. */}
       {declared ? (
@@ -709,7 +800,7 @@ export function SettingsContent({
         </SettingsSection>
       ) : null}
 
-      {/* ③ 프로필 — Buzz 「Edit photo ›」. */}
+      {/* ④ 프로필 — Buzz 「Edit photo ›」. */}
       {onOpenAvatar || onOpenLanguage ? (
         <GroupCard label="프로필" testID="settings-profile-card">
           {onOpenAvatar ? (
@@ -725,7 +816,7 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ④ 알림. */}
+      {/* ⑤ 알림. */}
       <SettingsSection>
         <GroupCard label="알림" testID="settings-notify-card">
           {/* 이 폰의 스위치 (#3924, ADR-0204 D1). 켬 = OS 허용 + 사람이 끄지 않음. 끄면 이 기기의 서버
@@ -753,17 +844,6 @@ export function SettingsContent({
             }
             testID="profile-push-row"
           />
-          <View accessibilityRole="radiogroup" accessibilityLabel="햅틱" testID="settings-haptics">
-            {HAPTIC_MODES.map(option => (
-              <ChoiceRow
-                key={option.value}
-                title={`햅틱: ${option.label}`}
-                selected={hapticMode === option.value}
-                onPress={() => setHapticMode(option.value)}
-                testID={`haptics-${option.value}`}
-              />
-            ))}
-          </View>
           {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
               MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
               끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
@@ -859,7 +939,7 @@ export function SettingsContent({
                   ? NOTIFICATION_PAUSE_LOAD_FAILED
                   : kinds.ready
                     ? PUSH_WORK_COMPLETE_DESCRIPTION
-                    : '알림 설정을 확인하는 중입니다.'
+                    : formatMessage('settings.notifications.checking')
               }
               checked={kinds.workComplete}
               a11yDisabled={!kinds.ready || kinds.pending}
@@ -892,12 +972,11 @@ export function SettingsContent({
           {kinds.absent ? null : (
             <ListRow
               title="항상 오는 알림"
-              detail="승인 요청, 나를 부른 멘션, 다이렉트 메시지는 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
+              detail={formatMessage('settings.notifications.alwaysDetail')}
               testID="profile-always-row"
             />
           )}
         </GroupCard>
-        <SettingsNote testID="settings-haptics-note">끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
         {push.failed ? (
           <SettingsNote tone="danger" testID="push-failure">
             {PUSH_SWITCH_OFF_FAILED}
@@ -915,27 +994,14 @@ export function SettingsContent({
         ) : null}
       </SettingsSection>
 
-      {/* ⑤ 기억 — 내 일시정지 하나. */}
+      {/* ⑥ 기억 — 내 일시정지 하나. */}
       <MemoryPauseSection workspaceId={workspaceId} />
-
-      {/* ⑥ 보기 — 한 번 고르면 끝나는 것. */}
-      <GroupCard label="보기" testID="settings-view-card">
-        <ListRow
-          title="테마"
-          value={themeValue}
-          accessory="chevron"
-          onPress={onOpenTheme}
-          accessibilityLabel={`테마, ${themeValue}`}
-          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
-          testID="profile-theme-row"
-        />
-      </GroupCard>
 
       {/* ⑦ 연결. */}
       <GroupCard label="연결" testID="settings-connect-card">
         <ListRow
           title="서버"
-          detail={server ?? '이 기기에 저장된 서버 주소가 없습니다.'}
+          detail={server ?? formatMessage('settings.connection.noServer')}
           testID="profile-server-row"
         />
         <ListRow
@@ -959,13 +1025,27 @@ export function SettingsContent({
         ) : null}
       </GroupCard>
 
-      {onOpenUsage && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
+      {isAdmin && (onOpenUsage || teamAiRow || onOpenAiLimits) ? (
         <GroupCard label="관리자 설정">
-          <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          {onOpenUsage ? (
+            <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          ) : null}
+          {teamAiRow}
+          {onOpenAiLimits ? <TeamAiLimitsSettingRow onPress={onOpenAiLimits} /> : null}
         </GroupCard>
       ) : null}
 
-      {/* ⑧ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}
+      {/* ⑧ 정보 — 연결 기록 복사. 계정(로그아웃) 위다(owner 10-31, #4936): 위험 행이 마지막 카드로 선다. */}
+      <GroupCard label="정보" testID="settings-about-card">
+        {onOpenReleaseNotes ? <ReleaseNotesSettingRow onPress={onOpenReleaseNotes} /> : null}
+        <ListRow
+          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
+          onPress={copyDiagnostics}
+          testID="settings-copy-connection-log"
+        />
+      </GroupCard>
+
+      {/* ⑨ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}
       <GroupCard label="계정" testID="settings-account-card">
         {confirming ? (
           <View style={styles.confirm} testID="sign-out-confirm-block">
@@ -1012,14 +1092,6 @@ export function SettingsContent({
             testID="sign-out"
           />
         )}
-      </GroupCard>
-
-      <GroupCard label="정보" testID="settings-about-card">
-        <ListRow
-          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
-          onPress={copyDiagnostics}
-          testID="settings-copy-connection-log"
-        />
       </GroupCard>
 
       <Text

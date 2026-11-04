@@ -490,11 +490,23 @@ async fn usage_completion_limits_preserve_summary_reads() {
         assert_eq!(status, 200, "{body}");
     }
 
+    // The three ledger rows were stamped by the database's `now()`, and the summary's default
+    // window ends at the host's `Utc::now()`: two clocks. A database clock tens of milliseconds
+    // ahead (a Docker/Colima VM after sleep — +48 ms measured on 2026-11-02) puts the last
+    // completion's row after `to` and the total reads half (#5087; the trap #2950 fixed in
+    // `momo-agent/tests/conformance_pg.rs`). So ask the database what time it is — the clock
+    // that stamped the rows — and hand that to the route as `to`.
+    let to: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&su)
+        .await
+        .expect("read the database clock");
+    let to = to.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     let summary = http
         .get(format!(
             "{base}/v1/workspaces/{}/usage/summary",
             tenant.workspace
         ))
+        .query(&[("to", to.as_str())])
         .bearer_auth(&token)
         .send()
         .await

@@ -173,8 +173,16 @@ fn webhook_props(
     props.insert("webhook_label".into(), json!(label));
     for (key, value) in client_props {
         // #4054 — an external sender cannot print a blocked sentence or a 「쓴 앱」
-        // receipt: those keys are the server's (`messages::is_server_owned_props_key`).
-        if momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key.as_str()) {
+        // receipt, and (#4980) cannot write any other key the server writes: the one list is
+        // `messages::is_server_owned_props_key`, the same one a REST send is held to, so a key
+        // added there is closed here too.
+        if crate::routes::messages::is_server_owned_props_key(key) {
+            continue;
+        }
+        // #4965 (r1 Low-1) — nor can it write a marker only the server writes under an ordinary
+        // key (`kind: "team_ai_invite_link"`, the helper's invite-link message): the value half of
+        // the same rule, held in one place for the REST send and this route.
+        if crate::routes::messages::is_server_owned_props_entry(key, value) {
             continue;
         }
         // #4084 (ADR-0205 H-1) — nor can it draw a GitHub notification line (`source: "github"`
@@ -681,5 +689,83 @@ mod tests {
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             assert!(props.get(key).is_none(), "{key} must be dropped: {props}");
         }
+    }
+
+    /// #4980 — an external sender is held to the list a REST send is held to
+    /// (`messages::is_server_owned_props_key`), not to the app keys alone: every key the server
+    /// writes beside a message or a card stays the server's. Each key is named **literally** —
+    /// a loop over the function would pass silently if a key ever left it. The sender's ordinary
+    /// keys, and the four the webhook writes itself, are untouched.
+    #[test]
+    fn a_webhook_drops_every_key_the_server_owns_and_keeps_the_rest() {
+        let owned = [
+            "decision_mode",
+            "bundle_of",
+            "announce",
+            "origin",
+            "target_member_id",
+            "requested_for",
+            "dm_admission_id",
+            "mention_member_ids",
+            "answers_message_id",
+            "momo.stream",
+            "momo.harnessRefine",
+            "momo.instruction",
+            "action",
+            "result",
+            "expression",
+            "app_notice",
+            "appsUsed",
+            "apps_used",
+            "requestedApps",
+        ];
+        let mut client = BTreeMap::new();
+        client.insert("keep".to_string(), "me".to_string());
+        client.insert("channel".to_string(), "alerts".to_string());
+        for key in owned {
+            client.insert(key.to_string(), "forged".to_string());
+        }
+        let installation = Uuid::from_u128(0xA11CE);
+        let props = webhook_props(installation, WebhookMode::Native, "label", &client);
+        for key in owned {
+            assert!(props.get(key).is_none(), "{key} must be dropped: {props}");
+        }
+        assert_eq!(props["keep"], json!("me"));
+        assert_eq!(props["channel"], json!("alerts"));
+        assert_eq!(props["source"], json!("external_webhook"));
+        assert_eq!(
+            props["webhook_installation_id"],
+            json!(installation.to_string())
+        );
+        assert_eq!(props["webhook_label"], json!("label"));
+        assert_eq!(
+            props["webhook_mode"],
+            json!(WebhookMode::Native.as_db_label())
+        );
+    }
+
+    /// #4965 (r1 review Low-1) — an external sender cannot write the helper's invite-link marker
+    /// either: `kind` is an ordinary key, so the check is on the **value**
+    /// (`messages::is_server_owned_props_entry`, the half the list test above cannot see — it
+    /// feeds every key the value `"forged"`). What is stored must not read as a marked message;
+    /// the control is an ordinary `kind`, which a webhook may still send.
+    #[test]
+    fn a_webhook_cannot_write_the_helpers_invite_link_marker() {
+        let mut client = BTreeMap::new();
+        client.insert("kind".to_string(), "team_ai_invite_link".to_string());
+        client.insert("preview".to_string(), "forged preview".to_string());
+        client.insert("announce".to_string(), "true".to_string());
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert!(
+            !momo_messaging::invite_link::is_marked(&props),
+            "an external line must not read as the helper's link message: {props}"
+        );
+        assert!(props.get("kind").is_none(), "{props}");
+        assert!(props.get("announce").is_none(), "{props}");
+
+        let mut ordinary = BTreeMap::new();
+        ordinary.insert("kind".to_string(), "deploy_notice".to_string());
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &ordinary);
+        assert_eq!(props["kind"], json!("deploy_notice"));
     }
 }

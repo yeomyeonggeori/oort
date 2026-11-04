@@ -1,0 +1,148 @@
+appId: app.momo.ios
+name: 5112-expression-kind
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 5112-expression-kind — 팀 표현의 종류 값 (ADR-0218 증보 4 §10, #5112): 작은 정지 그림 → 「팀 이모지」로 등록 → 「팀 이모지」 탭에만 보인다.
+#
+# 스택 검증용이다(워커는 돌리지 않았다 — `runtime-unverified`, `maestro check-syntax` 만 통과시켰다). **서버에 쓴다**: 팀 보관함에 표현
+# 하나를 등록한다. 그래서 (1) 로그인할 수 있는 멤버가 든 **격리 스택**에서만 돌리고(70-composer-newline.yaml 의 머리말과 같다), (2) 이름은
+# 돌 때마다 새로 짓는다 — 지운 이름은 다시 못 쓰고 같은 이름은 `expression_name_reserved` 로 거절된다. 이 흐름은 지우지 않는다(표현 삭제는
+# 이 칸의 범위 밖이다): 격리 스택이라 그대로 두어도 된다.
+#
+# 폰 jest(`__tests__/expressionKind.test.tsx`)가 코어 fixture 서버로 재는 것(탭이 겹치지 않음·추천을 미리 고름·고른 값이 `Choice.kind` 로
+# 감)을 이 흐름은 **진짜 서버·진짜 사진 창(PHPicker)·진짜 시트**로 한 번 더 본다:
+#   · 사진 창이 뜨고 고른 그림이 가져오기 장에 돌아오는가
+#   · 초안 단계에 「종류」 묶음이 서고, 작은 정지 그림이라 「팀 이모지」가 미리 골라져 있는가(서버가 같은 규칙으로 정한다)
+#   · 등록하면 시트 목록에서 **팀 이모지 탭에만** 보이고, 이모티콘·GIF 탭에는 없는가
+#
+# 사진 창은 **사진첩에 이 그림 하나만** 있다고 보고 첫 칸을 누른다. 복제한 시뮬레이터에 다른 사진이 있으면 첫 칸이 다른 그림일 수 있다 —
+# 그래도 「팀 이모지」를 직접 골라 등록하므로 마지막 단정(팀 이모지 탭에만)은 그대로 성립하고, 미리 고른 값을 보는 단정만 달라진다(아래 표시).
+#
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 초안 단계의 「종류」 묶음(라벨 · 팀 이모지/이모티콘 두 줄 · 설명 · 「그림의 크기와 움직임에
+# 맞춰 골라 뒀어요」) · 등록 뒤 팀 이모지 탭. 캡처와 design-review 는 planner 몫이다.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# 이름은 돌 때마다 새로 짓는다(`^[a-z0-9_-]{2,30}$`).
+- evalScript: ${output.probeName = 'kind_' + Date.now().toString(36)}
+
+# 시뮬레이터 사진첩에 작은 정지 그림(64x64 PNG, 합성)을 넣는다.
+- addMedia:
+    - "assets/5112-kind-probe.png"
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 30000
+# 디버그 LogBox 띠가 컴포저 위를 덮고 첫 탭을 먹는다(4942-expression-sheet.yaml 의 같은 자리). 입력칸이 비어 있어 이 좌표 탭은 아무 일도 안 한다.
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# 시트 → 「팀 이모지」 탭 → 「＋ 추가하기」 → 가져오기 장.
+- tapOn:
+    id: "composer-expression"
+- tapOn:
+    id: "expression-sheet-tab-team"
+- tapOn:
+    id: "expression-add-menu"
+- tapOn:
+    id: "expression-add-import"
+- assertVisible:
+    id: "expression-import"
+
+# 이름·표시 이름을 쓰고 사진 창에서 그림을 고른다.
+- tapOn:
+    id: "expression-import-name"
+- inputText: ${output.probeName}
+- tapOn:
+    id: "expression-import-display-name"
+- inputText: "종류 시험"
+# 입력이 끝났으니 자판을 접는다(#5286). 자판이 올라온 채로는 사진 단추(`expression-import-photo`)가 자판 밑에 가려져, 그 자리를 누르면
+# 사진 창이 아니라 자판의 「ㅋ」 키가 눌렸다(표시 이름이 「종류 시험ㅋ」이 되고 사진 창 단정이 30초 뒤 붉어졌다).
+- hideKeyboard
+- tapOn:
+    id: "expression-import-photo"
+# 시스템 사진 창(PHPicker): 칸의 낭독 이름은 「Photo, <날짜>」(영어 기기) 또는 「사진, <날짜>」(한국어 기기)다.
+- extendedWaitUntil:
+    visible: "(Photo|사진), .*"
+    timeout: 20000
+- tapOn: "(Photo|사진), .*"
+- extendedWaitUntil:
+    visible:
+      id: "expression-import-photo-preview"
+    timeout: 20000
+- tapOn:
+    id: "expression-import-submit"
+
+# 초안 단계: 「종류」 묶음이 서고(팀 이모지·이모티콘 두 줄), 설명과 「골라 뒀어요」가 같이 선다.
+- extendedWaitUntil:
+    visible:
+      id: "expression-draft-kind"
+    timeout: 60000
+- assertVisible:
+    id: "expression-draft-kind-emoji"
+- assertVisible:
+    id: "expression-draft-kind-sticker"
+- assertVisible:
+    id: "expression-draft-kind-hint"
+- assertVisible:
+    id: "expression-draft-kind-auto"
+# 사진첩에 이 그림 하나뿐이면 작은 정지 그림의 추천 = 「팀 이모지」가 미리 골라져 있다(고른 줄은 selected).
+- assertVisible:
+    id: "expression-draft-kind-emoji"
+    selected: true
+
+# 사람이 「팀 이모지」를 고른다 → 「골라 뒀어요」가 걷힌다(사람이 정한 값이 됐다).
+- tapOn:
+    id: "expression-draft-kind-emoji"
+- assertNotVisible:
+    id: "expression-draft-kind-auto"
+- assertVisible:
+    id: "expression-draft-kind-emoji"
+    selected: true
+
+# 미리보기를 본 뒤 권한을 확인해야 등록 단추가 켜진다.
+- extendedWaitUntil:
+    visible:
+      id: "expression-draft-preview"
+    timeout: 30000
+- tapOn:
+    id: "expression-draft-rights"
+- extendedWaitUntil:
+    visible:
+      id: "expression-draft-approve"
+      enabled: true
+    timeout: 30000
+- tapOn:
+    id: "expression-draft-approve"
+
+# 등록하면 장이 닫히고 「팀 이모지」 목록으로 돌아온다 → 새 그림이 보인다.
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-${output.probeName}"
+    timeout: 30000
+
+# 다른 두 탭에는 없다 — 한 등록은 정확히 한 탭에만 선다(이모티콘 탭 = 정지한 큰 그림, GIF 탭 = 움직이는 큰 그림).
+- tapOn:
+    id: "expression-sheet-tab-emoticon"
+- assertNotVisible:
+    id: "expression-pick-${output.probeName}"
+- tapOn:
+    id: "expression-sheet-tab-gif"
+- assertNotVisible:
+    id: "expression-pick-${output.probeName}"
+- tapOn:
+    id: "expression-sheet-tab-team"
+- assertVisible:
+    id: "expression-pick-${output.probeName}"
+
+# 떠나기 전에 시트를 닫는다. 서버에 남는 것은 등록한 표현 하나뿐이고(위), 입력칸에는 아무것도 넣지 않았다.
+- tapOn:
+    id: "expression-sheet-close"
+- assertNotVisible:
+    id: "expression-sheet-search"
+- assertVisible:
+    id: "composer-expression"

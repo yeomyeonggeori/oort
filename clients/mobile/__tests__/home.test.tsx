@@ -14,14 +14,21 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, Image, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import type {SignalChoice} from '@momo/core/design/appearance';
+import {resolveAppearance} from '../src/design/appearanceState';
+import {BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
+import {DS2_COMBOS} from '../src/design/ds2Tokens';
+import {HOME_ICON_SIZE, HOME_ICONS} from '../src/design/icons';
+import {FixedScheme} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {GroupCard} from '../src/design/sheetParts';
 import {describeCloseContract} from './fixtures/sheetContract';
+import {AgentTurnBadge} from '../src/features/agents/turnSurfaces';
 import {
   markAgentWorking,
   resetAgentWorking,
@@ -31,6 +38,7 @@ import {
 } from '@momo/core/features/sidebar/dmVisibility';
 import {DM_REOPEN_FAILURE} from '@momo/core/features/channels/model';
 import {parseCollapsed, visibleRows} from '../src/features/home/collapsedSections';
+import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
 import {
@@ -138,6 +146,8 @@ interface Routes {
   channels?: unknown[];
   /** 서버 읽음 투영의 행(와이어 형상). 생략하면 기본 `READ_STATES`. */
   readStates?: unknown[];
+  /** 참이면 읽음 투영 요청이 500 으로 실패한다(안 읽음 수를 모르는 화면, #4953). */
+  readStatesFail?: boolean;
   workspace?: () => Response | Promise<Response>;
   /**
    * 에이전트 생존 판정(#3964): id → 상태. 적지 않은 에이전트는 404 다(= 「라벨 없음」, 호스티드가 아님).
@@ -149,6 +159,11 @@ interface Routes {
    * 길로 읽는다. `'fail'` 은 500, `'pending'` 은 응답이 오지 않는다.
    */
   messages?: unknown[] | 'fail' | 'pending';
+  /**
+   * 승인 원장(`status=pending`)의 행(와이어 형상). 생략하면 비어 있다. 배열을 **참조로** 읽으므로 시험이 나중에 행을 더하거나 빼고
+   * 원장을 무효화하면 다음 조회가 그것을 본다(#5085: 카드가 원장을 따라 바뀌는 순간을 재려고).
+   */
+  approvals?: unknown[];
 }
 
 function installFetch(routes: Routes = {}): jest.Mock {
@@ -168,6 +183,7 @@ function installFetch(routes: Routes = {}): jest.Mock {
       return jsonResponse(200, {members: routes.roster ?? ROSTER});
     }
     if (url.includes('/read-state')) {
+      if (routes.readStatesFail) return jsonResponse(500, {error: {message: 'boom'}});
       return jsonResponse(200, {read_states: routes.readStates ?? READ_STATES});
     }
     if (url.includes('/messages')) {
@@ -175,7 +191,9 @@ function installFetch(routes: Routes = {}): jest.Mock {
       if (routes.messages === 'fail') return jsonResponse(500, {error: {message: 'boom'}});
       return jsonResponse(200, {messages: routes.messages ?? []});
     }
-    if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
+    if (url.includes('/approvals')) {
+      return jsonResponse(200, {approvals: routes.approvals ?? []});
+    }
     if (url.includes('/work-sessions')) return jsonResponse(200, {sessions: []});
     if (url.includes('/dms')) {
       return jsonResponse(200, {
@@ -389,6 +407,7 @@ function row(over: Partial<SidebarRow>): SidebarRow {
     muted: false,
     unreadCount: 0,
     mentionCount: 0,
+    emphasis: {dim: false, bold: false, chip: null},
     accessibilityLabel: 'x',
     searchText: 'x',
     ...over,
@@ -880,6 +899,86 @@ describe('홈 — 「작업 중」 카드', () => {
     expect(screen.getByTestId('home-live-dot-still')).toBeTruthy();
   });
 
+  // ---- 승인 원장이 레일보다 이긴다 (#5085, #5066 후속) ----------------------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만 레일 프레임으로는 알리지 않는다(중간 프레임은 늘 `running`). 그래서 레일만
+  // 읽는 홈 카드는 사람을 기다리는 에이전트를 「작업 중」이라고 말했고, 같은 승인이 대화 화면에서는 「승인을 기다립니다」였다(#5066 은
+  // 대화 화면에만 원장 덮어쓰기를 더했다). 원장은 인박스·대화 화면과 같은 쿼리 캐시라서 시험은 원장 응답(`Routes.approvals`)에 행을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5085)', () => {
+    const wireApproval = (over: Record<string, unknown> = {}) => ({
+      id: 'ap-1',
+      workspaceId: WS,
+      runId: 'run-1',
+      channelId: 'ch-agent-lab',
+      requestedBy: AGENT_ID,
+      actionType: 'tool_call',
+      status: 'pending',
+      expiresAtMs: Date.now() + 3_600_000,
+      ...over,
+    });
+    // 카드가 원장을 읽기도 전에 「안 바뀐다」를 단정하면 아무것도 증명하지 못한다(#839). 원장이 캐시에 들어온 것을 보고 나서 잰다.
+    const ledgerRows = (rows: number) =>
+      waitFor(() =>
+        expect(
+          queryClient!.getQueryData<unknown[]>(pendingApprovalsKey(WS)),
+        ).toHaveLength(rows),
+      );
+    const reread = () =>
+      act(async () => {
+        await queryClient!.invalidateQueries({queryKey: pendingApprovalsKey(WS)});
+      });
+
+    it('카드는 원장을 따른다: 대기가 아닌 승인은 그대로, 기다리는 승인이 서면 「승인 필요」, 결정돼 빠지면 다시 「작업 중」', async () => {
+      const ledger: unknown[] = [
+        // 다른 에이전트의 승인: 그 에이전트의 기다림이고 이 카드의 에이전트는 아니다(그 에이전트는 따로 열린 턴으로 세어진다).
+        wireApproval({id: 'ap-2', requestedBy: HERMES_ID}),
+        wireApproval({id: 'ap-3', status: 'approved'}), // 이미 결정된 승인
+        wireApproval({id: 'ap-4', expiresAtMs: Date.now() - 60_000}), // 기한이 지난 승인(서버가 정리하기 전의 몇 초)
+      ];
+      await mountHome({approvals: ledger});
+      await ledgerRows(3);
+      act(() => markAgentWorking(signal()));
+      const state = () => screen.getByTestId('home-working-state');
+      const line = () => screen.getByTestId('home-working-line');
+      await waitFor(() => expect(state()).toHaveTextContent('작업 중'));
+      // 원장은 이미 읽혔는데도 카드는 레일이 말하는 그대로다. 세 승인 중 이 에이전트를 기다림으로 세우는 것은 없고(결정된 승인과
+      // 기한이 지난 승인은 턴도 만들지 못해서 「그 밖에」는 3건이 아니라 다른 에이전트의 기다림 1건이다).
+      expect(screen.getByTestId('home-working-steps-2')).toBeTruthy();
+      expect(line()).toHaveTextContent(/푸시 중복 수정 PR 초안 작성 중/);
+      expect(line()).toHaveTextContent(/그 밖에 1건/);
+
+      // 이 에이전트가 올린 승인이 사람을 기다린다 → 같은 카드가 「승인 필요」를 말하고 에이전트가 쓰던 한 줄은 버린다.
+      ledger.push(wireApproval());
+      await reread();
+      await waitFor(() => expect(state()).toHaveTextContent('승인 필요'));
+      expect(state()).not.toHaveTextContent('작업 중');
+      expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
+      expect(screen.getByTestId('home-live-dot-still')).toBeTruthy();
+      expect(line()).toHaveTextContent(/#agent-lab/);
+      expect(line()).not.toHaveTextContent(/푸시 중복 수정/);
+
+      // 다른 곳에서 결정돼 원장에서 빠지면 카드는 레일이 말하는 그대로 돌아온다.
+      ledger.pop();
+      await reread();
+      await waitFor(() => expect(state()).toHaveTextContent('작업 중'));
+      expect(screen.getByTestId('home-working-steps-2')).toBeTruthy();
+      expect(line()).toHaveTextContent(/푸시 중복 수정 PR 초안 작성 중/);
+    });
+
+    it('레일이 아무 턴도 모르는데 사람을 기다리는 승인이 있으면 승인이 카드를 세우고, 누르면 그 대화가 열린다', async () => {
+      await mountHome({approvals: [wireApproval({runId: 'run-9'})]});
+      const cardNode = await waitFor(() => screen.getByTestId('home-working-card'));
+      expect(cardNode).toHaveTextContent(/김인턴/);
+      expect(screen.getByTestId('home-working-state')).toHaveTextContent('승인 필요');
+      expect(screen.getByTestId('home-working-line')).toHaveTextContent('#agent-lab');
+      expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
+      fireEvent.press(cardNode);
+      await waitFor(() =>
+        expect(screen.getByTestId('conversation-title')).toHaveTextContent(/agent-lab/),
+      );
+    });
+  });
+
   it('동작 줄이기가 켜져 있으면 맥박이 멈춘다', async () => {
     jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
     await mountHome();
@@ -918,7 +1017,8 @@ describe.each([
 
   it('카드 안의 글자(이름·한 줄·작업 중·승인 필요)가 모든 유리 바탕에서 4.5 이상', () => {
     for (const ground of cardGrounds) {
-      for (const ink of [p.text, p.textMuted, p.agent, p.accentText]) {
+      // 「승인 필요」는 사람 몫 색(`warn`)이다 — 신호색(`accentText`)이 아니다(#5170 M1, 아래 시험이 그려진 값을 잰다).
+      for (const ink of [p.text, p.textMuted, p.agent, p.warn]) {
         expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);
       }
     }
@@ -1548,5 +1648,314 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     closeLabel: '닫은 대화 닫기',
     scrimTestID: 'dm-closed-backdrop',
     scrimLabel: '닫은 대화 닫기',
+  });
+});
+
+// =============================================================================
+// #4953 — 폰 홈 채널 줄의 네 상태를 **실제 화면**에서 잰다 (라이트·다크 둘 다).
+//
+// 판정(`rowEmphasis`)과 줄에 싣는 길은 `sidebarRowEmphasis.test.ts` 가 잰다. 여기서 재는 것은 그 판정이 **색 토큰으로
+// 옮겨져 화면에 나온다는 것**이다: 이름·아이콘의 색, 칩의 채움·글자 색, 칩 숫자. 기대값은 스킴마다 그 스킴의 팔레트
+// 낱값 그대로이고(「둘 중 하나」가 아니다), 두 스킴에서 같은 뜻 — 회색 ↔ 진한 글자 — 이어야 한다.
+//
+// 큰 글씨는 jest 가 레이아웃을 재지 못해 **구조**로 잰다(아래 마지막 둘). 눈으로 보는 캡처는 스택 검증의 몫이다.
+// =============================================================================
+
+const HUSH_CHANNEL = {id: 'ch-hush', workspaceId: WS, kind: 'public', name: 'hush', muted: true};
+const STATE_CHANNELS = [...CHANNELS, HUSH_CHANNEL];
+const STATE_READS = [
+  ...READ_STATES,
+  {channel_id: 'ch-hush', last_read_seq: 0, latest_seq: 4, unread_count: 4, mention_count: 0},
+];
+
+async function mountHomeIn(scheme: 'light' | 'dark', routes: Routes = {}) {
+  const fetchMock = installFetch(routes);
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {retry: false, gcTime: 0},
+      mutations: {retry: false, gcTime: 0},
+    },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <FixedScheme scheme={scheme}>
+        <AppShell member={SELF} />
+      </FixedScheme>
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  return fetchMock;
+}
+
+function channelRowEl(id: string) {
+  return screen.getByTestId(`sidebar-row-channel:${id}`);
+}
+
+function titleStyle(id: string, name: string): Record<string, unknown> {
+  return flat(within(channelRowEl(id)).getByText(name).props.style);
+}
+
+function chipIds(id: string): string[] {
+  return within(channelRowEl(id))
+    .queryAllByTestId(/^home-badge-/)
+    .map(node => node.props.testID as string);
+}
+
+describe.each([
+  ['라이트', 'light', lightPalette],
+  ['다크', 'dark', darkPalette],
+] as const)('홈 — 채널 줄의 네 상태, %s 스킴 (#4953)', (_name, scheme, p) => {
+  async function mountStates() {
+    await mountHomeIn(scheme, {channels: STATE_CHANNELS, readStates: STATE_READS});
+    await waitFor(() =>
+      expect(within(channelRowEl('ch-general')).getByTestId('home-badge-unread')).toBeTruthy(),
+    );
+  }
+
+  it('읽음 — 이름·아이콘이 회색(textMuted)이고 굵지 않고, 칩이 없다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-design', 'design-2.0');
+    expect(title.color).toBe(p.textMuted);
+    expect(title.fontWeight).not.toBe('700');
+    const icon = within(channelRowEl('ch-design')).getByTestId('home-row-lock');
+    expect(flat(icon.props.style).tintColor).toBe(p.textMuted);
+    expect(chipIds('ch-design')).toEqual([]);
+  });
+
+  it('안 읽음 — 이름·아이콘이 본문색(text)이고 굵고, 신호색 칩이 5 를 말한다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-general', 'general');
+    expect(title.color).toBe(p.text);
+    expect(title.fontWeight).toBe('700');
+    const icon = within(channelRowEl('ch-general')).getByTestId('home-row-hash');
+    expect(flat(icon.props.style).tintColor).toBe(p.text);
+    expect(chipIds('ch-general')).toEqual(['home-badge-unread']);
+    const chip = within(channelRowEl('ch-general')).getByTestId('home-badge-unread');
+    expect(flat(chip.props.style).backgroundColor).toBe(p.accent);
+    expect(flat(within(chip).getByText('5').props.style).color).toBe(p.onAccent);
+  });
+
+  it('멘션 — 칩 하나가 잉크 @2 이고(안 읽음 2 는 칩에 오르지 않는다), 이름은 본문색·굵게', async () => {
+    await mountStates();
+    const title = titleStyle('ch-agent-lab', 'agent-lab');
+    expect(title.color).toBe(p.text);
+    expect(title.fontWeight).toBe('700');
+    expect(chipIds('ch-agent-lab')).toEqual(['home-badge-mention']);
+    const chip = within(channelRowEl('ch-agent-lab')).getByTestId('home-badge-mention');
+    expect(flat(chip.props.style).backgroundColor).toBe(p.primary);
+    expect(flat(within(chip).getByText('@2').props.style).color).toBe(p.onPrimary);
+  });
+
+  it('음소거 — 새 글이 4 개 있어도 이름·아이콘이 회색·굵지 않음이고, 칩은 신호색도 잉크도 아닌 흐린 칩이다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-hush', 'hush');
+    expect(title.color).toBe(p.textMuted);
+    expect(title.fontWeight).not.toBe('700');
+    const icon = within(channelRowEl('ch-hush')).getByTestId('home-row-hash');
+    expect(flat(icon.props.style).tintColor).toBe(p.textMuted);
+    expect(chipIds('ch-hush')).toEqual(['home-badge-muted']);
+    const chip = within(channelRowEl('ch-hush')).getByTestId('home-badge-muted');
+    const fill = flat(chip.props.style).backgroundColor;
+    expect(fill).toBe(p.surfaceMuted);
+    expect([p.accent, p.primary]).not.toContain(fill);
+    expect(flat(within(chip).getByText('4').props.style).color).toBe(p.textMuted);
+    // 흐려도 읽혀야 한다: 이 짝(중성 채움 위 흐린 글자)은 새 토큰이 아니라 기존 둘의 조합이라, 대비는 여기서 잰다.
+    expect(contrast(p.textMuted, p.surfaceMuted)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('홈 — 채널 줄의 아이콘과 큰 글씨 (#4953)', () => {
+  it('아이콘 종류 — 공개는 #, 비공개는 자물쇠, DM 은 글리프 없이 상대 얼굴', async () => {
+    await mountHomeIn('light', {channels: STATE_CHANNELS, readStates: STATE_READS});
+    // testID 는 이미지와 따로 계산된다 — 그래서 **실제로 그려지는 자산**을 잰다. 두 자산이 구별되지 않으면 아래 단정은
+    // 아이콘이 뒤바뀌어도 초록이다(사보타주가 한 번 그렇게 통과했다).
+    expect(HOME_ICONS.hash).not.toEqual(HOME_ICONS.lock);
+    const general = channelRowEl('ch-general');
+    expect(within(general).getByTestId('home-row-hash').props.source).toBe(HOME_ICONS.hash);
+    expect(within(general).queryByTestId('home-row-lock')).toBeNull();
+    const design = channelRowEl('ch-design');
+    expect(within(design).getByTestId('home-row-lock').props.source).toBe(HOME_ICONS.lock);
+    expect(within(design).queryByTestId('home-row-hash')).toBeNull();
+    const dm = screen.getByTestId('sidebar-row-dm:ch-dm-human');
+    expect(within(dm).queryByTestId('home-row-hash')).toBeNull();
+    expect(within(dm).queryByTestId('home-row-lock')).toBeNull();
+    expect(within(dm).getByTestId('avatar-initial', {includeHiddenElements: true})).toBeTruthy();
+  });
+
+  it('큰 글씨에서 칩이 잘리지 않는 구조 — 칩은 자라고, 모자란 폭은 이름이 먼저 내준다, 아이콘은 줄 높이를 흔들지 않는다', async () => {
+    await mountHomeIn('light', {channels: STATE_CHANNELS, readStates: STATE_READS});
+    await waitFor(() =>
+      expect(within(channelRowEl('ch-general')).getByTestId('home-badge-unread')).toBeTruthy(),
+    );
+    const rowEl = channelRowEl('ch-general');
+    const chip = within(rowEl).getByTestId('home-badge-unread');
+    const box = flat(chip.props.style);
+    // 높이·너비는 하한뿐이다: 고정 높이였다면 글자가 커질 때 칩이 글자를 자른다.
+    expect(box.minWidth).toBe(HOME.badge);
+    expect(box.minHeight).toBe(HOME.badge);
+    for (const fixed of ['width', 'height', 'maxWidth', 'maxHeight', 'overflow']) {
+      expect(box[fixed]).toBeUndefined();
+    }
+    // 줄어들지 않는 flex 자식이다: 폭이 모자라면 칩이 아니라 이름이 줄어든다.
+    expect(box.flexShrink ?? 0).toBe(0);
+    const title = within(rowEl).getByText('general');
+    expect(flat(title.props.style).flexShrink).toBe(1);
+    expect(title.props.numberOfLines).toBe(1);
+    // 칩 글자는 컨트롤 글자의 상한을 따른다(이름만 끝까지 커진다).
+    expect(within(chip).getByText('5').props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    // 줄은 최소 높이뿐이고, 아이콘은 글자 배율과 무관한 고정 22 다.
+    const rowStyle = flat(rowEl.props.style);
+    expect(rowStyle.minHeight).toBe(HOME.row);
+    expect(rowStyle.height).toBeUndefined();
+    const icon = flat(within(rowEl).getByTestId('home-row-hash').props.style);
+    expect(icon.width).toBe(HOME_ICON_SIZE.hash);
+    expect(icon.height).toBe(HOME_ICON_SIZE.hash);
+  });
+
+  it('읽음 투영이 실패하면 새 글 없는 줄을 회색으로 칠하지 않는다 — 실패 안내가 선 채, 음소거만 회색이다', async () => {
+    await mountHomeIn('dark', {channels: STATE_CHANNELS, readStatesFail: true});
+    await screen.findByTestId('read-state-error');
+    // 안 읽음 수를 모르는 줄은 「다 읽었다」가 아니라 모름이다: 본문색.
+    expect(titleStyle('ch-design', 'design-2.0').color).toBe(darkPalette.text);
+    expect(titleStyle('ch-general', 'general').color).toBe(darkPalette.text);
+    expect(chipIds('ch-general')).toEqual([]);
+    // 음소거는 읽음 투영이 아니라 채널이 말하는 사실이다.
+    expect(titleStyle('ch-hush', 'hush').color).toBe(darkPalette.textMuted);
+  });
+});
+
+// 섹션 머리의 글리프는 [머리 아이콘, 메뉴(…), 접기(⌄)] 세 개다 (`SectionHead`).
+function headGlyphs(key: 'channels' | 'dms') {
+  return within(screen.getByTestId(`home-section-${key}`)).UNSAFE_queryAllByType(Image);
+}
+
+describe.each([
+  ['라이트', 'light', lightPalette],
+  ['다크', 'dark', darkPalette],
+] as const)('홈 — 섹션 머리 아이콘, %s 스킴 (#4979)', (_name, scheme, p) => {
+  it('채널 머리는 줄의 #·자물쇠가 아닌 layers, DM 머리는 dms 그대로다 — 실제로 그려지는 자산을 잰다', async () => {
+    // testID 는 이미지와 따로 계산된다(#4953) — 그래서 머리가 **실제로 그리는 자산**을 잰다. 등록한 자산이 옛 것과 구별되지
+    // 않으면 아래 단정은 머리가 옛 `#` 로 돌아가도 초록이다(`layers` 가 `hash.png` 를 가리키는 사보타주).
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.hash);
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.lock);
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.dms);
+    await mountHomeIn(scheme);
+    expect(headGlyphs('channels').map(node => node.props.source)).toEqual([
+      HOME_ICONS.layers,
+      HOME_ICONS.more,
+      HOME_ICONS.down,
+    ]);
+    // DM 머리는 손대지 않는다: 아이콘은 `dms`, 뒤의 두 글리프는 채널 머리와 같다.
+    expect(headGlyphs('dms').map(node => node.props.source)).toEqual([
+      HOME_ICONS.dms,
+      HOME_ICONS.more,
+      HOME_ICONS.down,
+    ]);
+  });
+
+  it('머리 아이콘은 22 이고 본문색(text)으로 칠한다 — tintColor 로 칠하는 PNG 라 색이 빠지면 검은 채로 남는다', async () => {
+    await mountHomeIn(scheme);
+    const icon = flat(headGlyphs('channels')[0].props.style);
+    expect(icon.width).toBe(HOME_ICON_SIZE.layers);
+    expect(icon.height).toBe(HOME_ICON_SIZE.layers);
+    expect(icon.tintColor).toBe(p.text);
+  });
+
+  it('접근성은 그대로다 — 이름은 머리 글자가 말하고 아이콘은 장식이다', async () => {
+    await mountHomeIn(scheme);
+    const head = screen.getByTestId('home-section-channels');
+    expect(within(head).getByRole('header')).toHaveTextContent('채널');
+    expect(screen.getByTestId('home-section-menu-channels').props.accessibilityLabel).toBe(
+      '채널 섹션 메뉴',
+    );
+    expect(screen.getByTestId('home-section-toggle-channels').props.accessibilityLabel).toBe(
+      '채널 섹션',
+    );
+    // 머리 아이콘에는 이름도 대체 글도 없고 보조기술이 따로 멈추는 자리도 아니다.
+    const props = headGlyphs('channels')[0].props;
+    expect(props.accessibilityLabel).toBeUndefined();
+    expect(props.alt).toBeUndefined();
+    expect(props.accessible).not.toBe(true);
+  });
+});
+
+// =============================================================================
+// #5170 M1 — 홈 「에이전트 작업」 카드의 「승인 필요」는 사람 몫 색(`warn`) 하나다.
+//
+// 같은 에이전트의 같은 상태를 에이전트 탭 배지(`AgentTurnBadge`)·대화의 승인 카드 칩·웹 사이드바 카드·정본(`agent-work-display.md` §5,
+// `agent-request-loop.md` §2.2)은 경고색(`--warn`)으로 말하는데, 홈 카드만 신호색(`accentText` — 안 읽음 수·경계·커서의 색)으로 칠했다.
+// 홈에서는 그 주황 낱말이 바로 아래 안 읽음 배지와 같은 계열이라 「새 글」 쪽으로 읽혔다(검증 줄 3회차 폰 화면 검수 M1).
+//
+// 이 시험은 소스의 이름이 아니라 **그려진 값**을 잰다: 카드를 여섯 테마×모드와 강조색 둘(신호색이 움직이는 조합)에서 그려, 낱말·점의 색이
+// (1) 그 조합의 `warn` 이고 (2) 같은 자리에 선 에이전트 탭 배지의 낱말 색과 같은지 읽는다. 강조색 조합이 중요한 까닭: 옛 판은 신호색을
+// 입어서 강조색을 고르면 이 낱말만 따라 움직였다 — `warn` 은 움직이지 않는다.
+// =============================================================================
+
+describe('#5170 M1 — 홈 카드의 「승인 필요」는 경고색이다', () => {
+  const CUSTOM: SignalChoice = {custom: '#3A6BD8'};
+  const VIEWS = [
+    ...DS2_COMBOS.map(([theme, mode]) => ({
+      key: `${theme}/${mode}`,
+      theme,
+      mode,
+      signal: null as SignalChoice,
+    })),
+    {key: 'dawnsky/light · 커스텀 강조색', theme: 'dawnsky' as const, mode: 'light' as const, signal: CUSTOM},
+    {key: 'dawnsky/dark · 커스텀 강조색', theme: 'dawnsky' as const, mode: 'dark' as const, signal: CUSTOM},
+  ];
+
+  /** 같은 조합 안에 카드와 에이전트 탭 배지를 나란히 그려 낱말 색·점 색을 읽는다. */
+  function drawn(view: (typeof VIEWS)[number], live: boolean) {
+    const model = card(keyed(signal({state: 'awaiting_approval'})), live);
+    if (model === null) throw new Error('승인 필요 카드가 서지 않았다');
+    const {unmount} = render(
+      <FixedScheme scheme={view.mode} theme={view.theme} signal={view.signal}>
+        <WorkingCard card={model} onPress={() => {}} />
+        <AgentTurnBadge
+          state="awaiting_approval"
+          text="승인 필요"
+          label="승인 필요"
+          live={live}
+          testID="agents-tab-badge"
+        />
+      </FixedScheme>,
+    );
+    const out = {
+      word: flat(screen.getByTestId('home-working-state').props.style).color,
+      // 승인 대기·끊긴 레일은 맥박이 없다 — 점은 늘 `home-live-dot-still` 이다.
+      dot: flat(screen.getByTestId('home-live-dot-still').props.style).backgroundColor,
+      badge: flat(within(screen.getByTestId('agents-tab-badge')).getByText('승인 필요').props.style).color,
+    };
+    unmount();
+    return out;
+  }
+
+  it('낱말과 점이 그 조합의 경고색(warn)이고, 에이전트 탭 배지와 같은 한 톤이다 — 신호색이 아니다', () => {
+    const wrong: string[] = [];
+    let separated = 0;
+    for (const view of VIEWS) {
+      const palette = resolveAppearance(view.theme, view.mode, view.signal).palette;
+      const {word, dot, badge} = drawn(view, true);
+      if (word !== palette.warn) wrong.push(`${view.key}: 낱말 ${String(word)} ≠ warn ${palette.warn}`);
+      if (dot !== palette.warn) wrong.push(`${view.key}: 점 ${String(dot)} ≠ warn ${palette.warn}`);
+      if (badge !== word) wrong.push(`${view.key}: 에이전트 탭 배지 ${String(badge)} ≠ 홈 카드 낱말 ${String(word)}`);
+      if (word === palette.accentText) wrong.push(`${view.key}: 낱말이 신호색(accentText) ${palette.accentText}`);
+      if (palette.warn !== palette.accentText) separated += 1;
+    }
+    expect(wrong).toEqual([]);
+    // 이 걸음이 헛돌지 않는다: 모든 조합에서 경고색과 신호색은 실제로 다른 값이었다(같으면 위 「신호색이 아니다」는 아무것도 못 잡는다).
+    expect(separated).toBe(VIEWS.length);
+  });
+
+  it('끊긴 레일 위의 낱말은 확인된 사실이 아니라서 색을 벗는다 — 경고색을 입지 않는다(에이전트 탭 배지와 같은 규칙)', () => {
+    const wrong: string[] = [];
+    for (const view of VIEWS) {
+      const palette = resolveAppearance(view.theme, view.mode, view.signal).palette;
+      const {word, dot, badge} = drawn(view, false);
+      if (word !== palette.textMuted) wrong.push(`${view.key}: 낱말 ${String(word)} ≠ textMuted ${palette.textMuted}`);
+      if (dot !== palette.textMuted) wrong.push(`${view.key}: 점 ${String(dot)} ≠ textMuted ${palette.textMuted}`);
+      if (badge === palette.warn) wrong.push(`${view.key}: 끊긴 레일의 배지가 경고색을 입는다`);
+    }
+    expect(wrong).toEqual([]);
   });
 });

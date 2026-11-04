@@ -46,7 +46,8 @@
 #
 # 스코프: 여전히 **전체 게이트가 아니다.** DB가 필요한 러스트 conformance
 # 테스트(`*_pg.rs`, 전부 `#[ignore]`)·런타임 검증기·Docker 스택·e2e·웹 e2e
-# 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 게이트 몫으로 남는다.
+# 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 게이트 몫으로 남는다. 웹 게이트 중 하나는
+# 예외다: `gate:channel-header-fit`은 머리를 건드린 PR에서 `header_fit` 잡이 돌린다(#5185).
 # 남은 휴면 워크플로(release-desktop)는 무접촉이다.
 # (W-S1 #1215: `ci-build`·`release-ios`·`release-macos` 셋은 Swift 클라 3트리와
 #  함께 삭제됐다 — 전부 `workflow_dispatch` 전용이었고 자동 실행 0이었다.)
@@ -87,6 +88,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       node: ${{ steps.filter.outputs.node }}
       policy: ${{ steps.filter.outputs.policy }}
+      header_fit: ${{ steps.filter.outputs.header_fit }}
     steps:
       - id: filter
         env:
@@ -97,11 +99,12 @@ jobs:
           set -uo pipefail
 
           run_all() {
-            echo "→ rust=true node=true policy=true ($1)"
+            echo "→ rust=true node=true policy=true header_fit=true ($1)"
             {
               echo "rust=true"
               echo "node=true"
               echo "policy=true"
+              echo "header_fit=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
           }
@@ -220,10 +223,17 @@ jobs:
           rust=false
           node=false
           lane_hit \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/sample_expression_contract\.py$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/hermes/self_media_vectors\.json$|infra/security-pack/|scripts/security_pack\.sh$|scripts/tests/test_security_pack\.sh$|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/approvals/settlement-copy\.json$|packages/momo-core/src/features/approvals/expression-failure-copy\.json$|packages/momo-core/src/features/emoji/emojiCatalog\.json$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/sample_expression_contract\.py$|scripts/openapi_sampled_on_rust\.txt$|scripts/verify_openapi_contract_rust\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/hermes/self_media_vectors\.json$|infra/security-pack/|scripts/security_pack\.sh$|scripts/tests/test_security_pack\.sh$|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/approvals/settlement-copy\.json$|packages/momo-core/src/features/approvals/expression-failure-copy\.json$|packages/momo-core/src/features/emoji/emojiCatalog\.json$|packages/momo-core/src/features/expressions/fixtureServer\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
+          # 반대 방향도 있다(#5193 후속): 웹 시험이 **데스크탑 셸 파일**을 읽는다. 그 파일만 바뀐 PR에서도 웹 짝 시험이
+          # 돌아야 해서 아래 두 디렉터리를 넣었다. 셸 트리 전체를 넣지 않은 이유: rust 레인이 이미 그 트리 전체를 보고,
+          # 웹이 읽지 않는 파일(소스 `.rs` 등)까지 넣으면 셸 PR마다 웹·폰·코어 잡이 도는 비용이 생긴다.
+          #   · `clients/desktop/src-tauri/tests/fixtures/` — 트레이 와이어·상한 정본(`tray_status.json`·`tray_limits.json`).
+          #     `clients/web/src/features/notifications/trayModel.test.ts`가 셸 시험과 같은 JSON을 읽어 맞춘다.
+          #   · `clients/desktop/src-tauri/capabilities/` — `clients/web/src/app/desktopShellContract.test.ts`가
+          #     `capabilities/default.json`을 읽어 번들이 기대는 권한(창 끌기·알림 확인 등)이 셸에 있는지 본다.
           lane_hit \
-            '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
+            '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|clients/desktop/src-tauri/tests/fixtures/|clients/desktop/src-tauri/capabilities/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
 
           # 정책 레인(#4696) — `policy` 잡의 시험 6개가 읽는 입력의 합집합이다.
@@ -247,11 +257,39 @@ jobs:
             '^(scripts/|\.github/|REVIEW\.md$|AGENTS\.md$|CONTRIBUTING\.md$|deny\.toml$|osv-scanner\.toml$|docs/security/claims\.yaml$|docs/GITHUB_OPS\.md$|docs/LOCAL_PR_GATE\.md$|docs/TRACKS\.md$|docs/adr/0153-ci-stack-selfhosted-runners\.md$)' \
             && policy=true
 
-          echo "→ rust=$rust node=$node policy=$policy"
+          # 채널 머리 맞춤 레인(#5185, #4230 후속) — `header_fit` 잡 하나가 읽는 입력이다. 그 잡은 `gate:channel-header-fit`
+          # (`vite build --mode huddle-gate` 뒤 크로미엄으로 장면 수천 개를 잰다)을 돌리는데 몇 분이 걸리고 브라우저를 받아야
+          # 해서, 웹 PR 전부가 아니라 **머리를 그리거나 그 폭·글자를 정하는 파일**이 바뀐 PR에서만 돈다. 목록은 게이트가 실제로
+          # 쓰는 것만이다(그 밖의 웹 파일을 넣으면 이 잡이 `node_web`처럼 모든 웹 PR의 상시 비용이 된다):
+          #   · 게이트와 그 입력: `gates/gate-channel-header-fit.mjs` 자신과 그것이 import하는 `gates/preview-guard.mjs`·
+          #     `e2e/advanceOnboarding.mjs`, 게이트 빌드(`huddle-gate` 모드)의 진입점 `huddleRuntimeLoader.ts`, 스크립트를
+          #     정의하는 `clients/web/package.json`.
+          #   · 머리를 그리는 컴포넌트: `ChatShell.tsx`(머리 마크업)와 그 안에 서는 컨트롤(`channelHeaderControl.ts`·
+          #     `ChannelHeaderMenu`·`ChannelContextControls`·`HuddleHeaderControl`·`HuddleMicMenu`·`WorkPlanDock`·`PinListMenu`·
+          #     `SidebarDrawerToggle`), 머리가 쓸 폭을 정하는 판(`.app-pane`)과 셸 격자의 `AppShell.tsx`.
+          #   · 툴팁(게이트의 12번 단정): `tooltip.tsx`·`tooltipFit.ts`·`tooltipGroup.ts`.
+          #   · 폭을 정하는 CSS: `tokens.css`(`channel-head-*`·`app-pane`·툴팁 면)와 `appearance/density.css`·
+          #     `appearance/typography-scale.css`(게이트가 글자 크기 3단계 × 밀도 3단계를 곱한다).
+          #   · 무엇이 서는지 정하는 코어: `huddleModel.ts`(`huddleControlShown`·`huddleNamesTarget`), `workPlan.ts`(계획 독 글),
+          #     `directory.ts`(`channelLabelParts`: 제목과 같은 이름 DM의 핸들).
+          #   · 이 파일 자신: 잡을 고친 PR이 그 잡으로 증명되도록 rust·node 레인과 같은 관례로 넣는다.
+          #   · 일부러 뺀 것: 게이트 장면이 그리지 않는 조각. 게이트의 모의 응답에는 에이전트 상대와 접속 정보가 없어서 에이전트
+          #     DM 머리(`DmAgentsMenu`·`AgentLivenessLabel`)와 접속 라벨(`HumanPresence`)은 이 잡이 돌아도 보지 못한다. 게이트가
+          #     그것을 그리게 되면 그때 목록에 더한다.
+          # 전부 `node` 레인 경로 안이라 header_fit ⊂ node 이다. 이 출력은 `gate`의 선택/결과 교차검증 밖에 있다: 필수 상태로
+          # 쓸지는 정책 결정이고(그때 `gate`의 `needs`·`*_RESULT`·`require_optional_lane`을 함께 늘린다), 그 전까지는 이 잡이
+          # 빨개도 `PR CI gate`를 막지 않는다.
+          header_fit=false
+          lane_hit \
+            '^(clients/web/gates/gate-channel-header-fit\.mjs$|clients/web/gates/preview-guard\.mjs$|clients/web/e2e/advanceOnboarding\.mjs$|clients/web/package\.json$|clients/web/src/features/huddles/huddleRuntimeLoader\.ts$|clients/web/src/features/chat/ChatShell\.tsx$|clients/web/src/features/chat/channelHeaderControl\.ts$|clients/web/src/features/chat/ChannelHeaderMenu\.tsx$|clients/web/src/features/channels/ChannelContextControls\.tsx$|clients/web/src/features/huddles/HuddleHeaderControl\.tsx$|clients/web/src/features/huddles/HuddleMicMenu\.tsx$|clients/web/src/features/work/WorkPlanDock\.tsx$|clients/web/src/features/timeline/PinListMenu\.tsx$|clients/web/src/app/SidebarDrawerToggle\.tsx$|clients/web/src/app/AppShell\.tsx$|clients/web/src/design/ui/tooltip\.tsx$|clients/web/src/design/ui/tooltipFit\.ts$|clients/web/src/design/ui/tooltipGroup\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/design/appearance/density\.css$|clients/web/src/design/appearance/typography-scale\.css$|packages/momo-core/src/features/huddles/huddleModel\.ts$|packages/momo-core/src/features/work/workPlan\.ts$|packages/momo-core/src/features/workspace/directory\.ts$|\.github/workflows/pr-ci\.yml$)' \
+            && header_fit=true
+
+          echo "→ rust=$rust node=$node policy=$policy header_fit=$header_fit"
           {
             echo "rust=$rust"
             echo "node=$node"
             echo "policy=$policy"
+            echo "header_fit=$header_fit"
           } >> "$GITHUB_OUTPUT"
 
   # Every PR gets a topology check, including documentation-only changes. For
@@ -527,6 +565,13 @@ jobs:
     # 러너 실측(이 PR): `cargo test --workspace` 콜드 107초 · 캐시 히트 77초,
     # 잡 전체 1분32초. 20분은 그 ~10배 여유다.
     timeout-minutes: 20
+    # 시험 빌드의 디버그 정보를 줄인다(#5182). 서버를 통째로 링크하는 시험 바이너리가
+    # 수십 개라 전체 디버그 정보로는 ubuntu-latest 러너 디스크가 거의 차서, 임시 폴더에
+    # 100MB를 쓰는 `momo-drive` 시험이 디스크 부족으로 깨졌다(#5180). `line-tables-only`는
+    # 패닉의 파일:줄을 남긴다.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -557,7 +602,11 @@ jobs:
       - name: cargo test --workspace (server-rust)
         # --locked: Cargo.lock을 고쳐야 하는 매니페스트 변경이 락 커밋 없이
         # 들어오면 여기서 빨강. 락 갱신은 리뷰 대상이지 CI의 부작용이 아니다.
-        run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
+        # 앞뒤 `df -h /`는 러너 디스크 여유의 증거다(#5182).
+        run: |
+          df -h /
+          cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
+          df -h /
 
       - name: cargo-deny 설치
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
@@ -714,7 +763,7 @@ jobs:
         run: npm --prefix clients/web run test
 
   node_mobile:
-    name: TS mobile — 타입체크 + 단위 시험
+    name: TS mobile — 타입체크 + 단위 시험 + Maestro 문법
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
@@ -744,6 +793,130 @@ jobs:
 
       - name: test — clients/mobile (jest)
         run: npm --prefix clients/mobile run test
+
+      # ── Maestro 흐름 문법 검사 (#5081) ─────────────────────────────────────
+      # 폰 흐름의 문법 오류 — 머리 `---` 누락(#4869), 숫자 칸의 자리표시자(#5081) — 는
+      # 시뮬레이터가 그 단계에 닿을 때까지 드러나지 않아 검증 줄에서 몇 시간 뒤에야 잡혔다.
+      # `maestro check-syntax` 는 기기·앱·서버 없이 Maestro 자신의 파서로 파일 하나를 읽는다.
+      # 폴더 전체(`clients/mobile/maestro/**`, 하위 흐름 포함)를 이 잡에서 건다.
+      #
+      # 단계를 `node` 레인 안에 둔 이유: clients/mobile/ 변경이 이미 이 레인을 고르므로
+      # 경로 선택이 공짜이고, 새 잡이 없어 `gate` 의 needs·선택/결과 교차검증이 그대로다.
+      # 검사 본체는 `clients/mobile/scripts/check-maestro-syntax.sh` 한 곳이다(로컬:
+      # `npm --prefix clients/mobile run check:maestro-syntax`). 그 스크립트는 시작할 때
+      # 음성 대조(머리 없는 흐름·숫자 칸의 자리표시자는 반드시 거부)를 먼저 돌려서, 눈먼
+      # 검사기가 초록을 내지 못하게 하고, 파일 0개도 통과로 세지 않는다. 이 단계는 Maestro
+      # 만 고정해서 깐다(아래 gitleaks 처럼 릴리스 파일 + sha256 검증, 서드파티 액션 없음).
+      # sha256 은 GitHub 가 릴리스 자산에 알려 주는 digest 와 내려받은 파일 계산값이 같은
+      # 것을 확인한 값이다. 버전을 올릴 때는 두 값을 함께 바꾸고 그 스크립트를 다시 돌린다.
+      # Java 는 러너 기본 `java` 를 쓴다 — Maestro 2.8.0 은 17 이상이면 되고(런처가 17 미만이면
+      # 스스로 거부한다) 개발 머신의 JDK 27 에서도 통과했다.
+      #
+      # 비용(실측): 이 두 단계를 파일에서 그대로 뽑아 Linux · Temurin 17 · 4 vCPU 컨테이너에서
+      # 돌렸을 때 설치 57초(배포본 314,743,119바이트 내려받기 + 풀기; 그 VM 의 NAT 를 거쳐 느린
+      # 편) + 84개 검사 51초(병렬 4, 음성 대조 포함; JVM 옵션 없이는 77~84초) = 108초. 개발
+      # 머신(M 시리즈, JDK 27)은 내려받기 13초 + 풀기 1.5초 + 검사 32~58초다. node_mobile(≈3.5분)이
+      # 약 1.8분 길어져 node_web(≈5분)보다 몇십 초 더 걸릴 수 있다 — PR 대기가 그만큼 늘 수 있다.
+      # 실제 GitHub 러너의 값은 이 PR 에서 처음 잴 수 있다. 행 방지 상한 15분은 그대로다.
+      - name: Maestro CLI 설치(버전·sha256 고정)
+        env:
+          MAESTRO_VERSION: 2.8.0
+          MAESTRO_SHA256: b3e561161904fb391875ca5834d5b22cf0b01c052dd1b408ad83e30d8f8951b3
+        run: |
+          set -euo pipefail
+          for tool in curl unzip java sha256sum; do
+            command -v "$tool" >/dev/null || {
+              echo "$tool is not installed; cannot install pinned Maestro" >&2
+              exit 1
+            }
+          done
+          [ -n "${RUNNER_TEMP:-}" ] || {
+            echo "RUNNER_TEMP is unset" >&2
+            exit 1
+          }
+          [ -n "${GITHUB_PATH:-}" ] || {
+            echo "GITHUB_PATH is unset; cannot export maestro" >&2
+            exit 1
+          }
+          tmp="$RUNNER_TEMP/maestro-install"
+          mkdir -p "$tmp"
+          url="https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 "$url" -o "$tmp/maestro.zip"
+          echo "${MAESTRO_SHA256}  $tmp/maestro.zip" | sha256sum -c -
+          unzip -q "$tmp/maestro.zip" -d "$tmp"
+          test -x "$tmp/maestro/bin/maestro" || {
+            echo "maestro launcher missing or not executable after unzip" >&2
+            exit 1
+          }
+          echo "$tmp/maestro/bin" >> "$GITHUB_PATH"
+          export PATH="$tmp/maestro/bin:$PATH"
+          java -version
+          got="$(MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_DISABLE_UPDATE_CHECK=true maestro --version 2>/dev/null | tail -n 1)"
+          test "$got" = "$MAESTRO_VERSION" || {
+            echo "maestro version drift: got '$got' want '$MAESTRO_VERSION'" >&2
+            exit 1
+          }
+
+      - name: check-syntax — clients/mobile/maestro (전 흐름 + 음성 대조)
+        run: bash clients/mobile/scripts/check-maestro-syntax.sh
+
+  # ── ③-b 채널 머리 맞춤 레인 (#5185, #4230 후속) ─────────────────────────
+  # `gate:channel-header-fit`: 채널 머리의 컨트롤·툴팁이 지원하는 모든 폭(320~1440)·글자 크기·밀도에서 뷰포트 안에
+  # 남고 서로 겹치지 않는지 크로미엄으로 잰다(실측 장면 5356개 + 툴팁 1000개). 판(`app-pane`)과 셸이 `overflow: clip`
+  # 이라 밀려난 단추는 스크롤로도 드러나지 않아서, 타입체크·단위 시험·`gate:channel-header`(390 문서 폭)로는 잡히지
+  # 않는다. 이 게이트는 지금까지 로컬 레인뿐이었다.
+  #
+  # `node_web`의 단계로 넣지 않고 별도 잡으로 뗀 이유: ① `node_web`은 브라우저를 받지 않는다
+  # (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`). 거기에 크로미엄과 몇 분짜리 게이트를 얹으면 모든 웹 PR의 대기가 늘어난다.
+  # ② 머리를 건드린 PR에서만 돌아야 한다: `changes`의 `header_fit` 출력(경로 목록과 근거는 그 잡의 주석). 이 잡은
+  # `node_web`과 나란히 돌아서, `node_web`보다 길어지지 않는 한 PR 대기를 늘리지 않는다.
+  #
+  # 이 잡은 `gate`의 `needs`에 없다: 필수 상태로 쓸지는 정책 결정이고, `gate`에 더하려면 고정된 환경 변수 집합으로
+  # 게이트 단계를 실행해 보는 `scripts/tests/test_pr_ci_guardrails.sh`도 함께 고쳐야 한다. 그 전에는 이 잡이 빨개도
+  # `PR CI gate`를 막지 않는다. 상태 이름은 아래 `name:`이 정본이다 — 필수 상태로 등록한 뒤에는 바꾸지 않는다.
+  header_fit:
+    name: TS web — 채널 머리 맞춤 게이트 (크로미엄)
+    needs: changes
+    if: needs.changes.outputs.header_fit == 'true'
+    runs-on: ubuntu-latest
+    # 행 방지용 상한. 로컬 실측(맥, `npm --prefix clients/web run gate:channel-header-fit`, 빌드 포함) 세 번: 2분 34초
+    # (부하 평균 25 안팎), 3분 8초(부하 평균이 50~280으로 튄 때), 7분 26초(부하 평균 43~67에 다른 시험을 병행). 평균 4분
+    # 23초, ×3 ≈ 13분. 러너의 설치(`npm ci` 둘)와 크로미엄·OS 의존 내려받기 몫(1~2분)을 더하고, 첫 러너 실행의 불확실성
+    # (리눅스 글꼴, 코어 수)을 남겨 15분으로 둔다.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            clients/web/package-lock.json
+
+      - name: npm ci (워크스페이스 루트 = packages/momo-core)
+        run: npm ci
+
+      - name: npm ci (clients/web)
+        # `node_web`과 같은 이유로 설치 중에는 브라우저를 받지 않는다. 필요한 크로미엄 하나는 아래 단계가 받는다.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm ci --prefix clients/web
+
+      - name: 크로미엄만 내려받기 (OS 의존 포함)
+        # 게이트의 기본 엔진이 크로미엄이다(`HEADER_FIT_ENGINES`로 웨빗을 켜는 것은 로컬 몫). `working-directory`가
+        # 있어야 `npx`가 `clients/web`에 설치된 playwright를 쓴다 — 루트에는 playwright가 없어서 레지스트리에서 다른
+        # 판을 받아 오면 게이트가 찾는 브라우저 판과 어긋난다.
+        working-directory: clients/web
+        run: npx playwright install --with-deps chromium
+
+      - name: gate:channel-header-fit
+        # 빌드는 이 스크립트가 `huddle-gate` 모드로 직접 한다(허들 접속을 가짜로 대신하는 컴파일 시점 분기라서, 일반
+        # 빌드를 먼저 돌리거나 `npm run build`로 갈음할 수 없다).
+        run: npm --prefix clients/web run gate:channel-header-fit
 
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.

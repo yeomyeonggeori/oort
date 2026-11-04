@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::cutout::Outcome;
 use crate::Error;
 
 pub const QUOTA: i64 = 1000;
@@ -118,6 +119,60 @@ pub struct Choice {
     pub draft_id: Uuid,
     pub revision: String,
     pub sha256: String,
+    /// ADR-0218 §10 J3: the kind the person chose. Absent — an older client, or an approval card
+    /// nobody chose on — means the server applies [`Kind::recommended`] to the stored large picture
+    /// at the moment it registers. A present `null` is not "absent": it is refused like any other
+    /// value outside the closed list, as the contract (`enum`) says.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<Kind>,
+}
+
+/// What a registration is for in the pickers (ADR-0218 §10 J1): `emoji` is the small team emoji that
+/// goes between words and into reactions, `sticker` the large emoticon that is sent on its own (a
+/// moving one is shown on the GIF tab). A **classification**, not a limit: message and reaction
+/// sizes (D1) do not read it, and no permission or add-policy decision does either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Emoji,
+    Sticker,
+}
+
+/// The longest edge, in pixels, of a still picture that still counts as small (§10 J4). The large
+/// picture is never enlarged (D3), so a picture at or under this is already the size of `small`.
+pub const EMOJI_MAX_EDGE: u32 = 128;
+
+impl Kind {
+    /// The value every row without a kind of its own has: migration 171's column default. The wire
+    /// reads a missing `kind` the same way (core `expressionKindOf`).
+    pub const LEGACY: Kind = Kind::Sticker;
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Kind::Emoji => "emoji",
+            Kind::Sticker => "sticker",
+        }
+    }
+
+    /// §10 J4: a picture that moves, or whose longest edge is over [`EMOJI_MAX_EDGE`], is a sticker;
+    /// a still one at or under it is an emoji. Core `recommendExpressionKind` is the same rule, and
+    /// `docs/api/expression-kind.vectors.json` is what both are tested against.
+    pub fn recommended(width: u32, height: u32, frame_count: u32) -> Kind {
+        if frame_count > 1 || width.max(height) > EMOJI_MAX_EDGE {
+            Kind::Sticker
+        } else {
+            Kind::Emoji
+        }
+    }
+
+    /// [`Kind::recommended`] for the stored large picture.
+    pub fn recommended_for(large: &ImageInfo) -> Kind {
+        Kind::recommended(large.width, large.height, large.frame_count)
+    }
 }
 
 pub fn version(s: &str) -> Result<i64, Error> {
@@ -221,7 +276,54 @@ impl Origin {
             ..Self::upload()
         }
     }
+    /// A picture the team's image model drew from a member's photo (ADR-0218 §8 H9): `generated`,
+    /// with the one sentence this server wrote for what was made. `cutout` is what the cut-out step
+    /// reported for the picture and belongs to the cut-out branch alone: a picture the step left
+    /// exactly as the model drew it ([`Outcome::Untouched`]) does not get the sentence that says its
+    /// background was erased (H9.7, #5133). `None` for a pair that is not one: a branch the route
+    /// does not have, a cut-out with no outcome, a caricature with one. The caller must say what
+    /// happened; there is no default sentence to fall back on.
+    pub fn photo(branch: &str, cutout: Option<Outcome>) -> Option<Self> {
+        let key = match (branch, cutout) {
+            // Matched on the outcome itself: a fourth outcome is a compile error here, not a
+            // picture that quietly carries a sentence that is not true of it.
+            ("cutout", Some(outcome)) => match outcome {
+                Outcome::Untouched => "cutout_unchanged",
+                Outcome::Erased | Outcome::Model => "cutout",
+            },
+            ("caricature", None) => "caricature",
+            _ => return None,
+        };
+        let (_, sentence) = PHOTO_PROMPTS.iter().find(|(name, _)| *name == key)?;
+        Some(Self {
+            kind: "generated".into(),
+            source_url: None,
+            prompt: Some((*sentence).into()),
+        })
+    }
 }
+
+/// The sentences a picture drawn by the team's image model carries as its `prompt` (ADR-0218 §8
+/// H9.7, #5133). They are written here: no member, agent or provider writes a word of them, which
+/// is why the direct API may accept a `generated` origin that carries exactly one of them and no
+/// other, and why the list of a member's photo drafts selects by them.
+///
+/// The first column is the key [`Origin::photo`] resolves `(branch, outcome)` to: the two branches'
+/// names, and `cutout_unchanged` for the cut-out branch whose picture the cut-out step left as the
+/// model drew it. A cut-out the model drew transparent (`Model`) or the server erased (`Erased`) has
+/// no background left, and says so; one that could not be erased does not say it.
+///
+/// Append, never reword or reorder: a stored draft holds its sentence verbatim and is never
+/// rewritten, so the earlier sentences must stay accepted for as long as such drafts exist, and the
+/// tests index them by position.
+pub const PHOTO_PROMPTS: [(&str, &str); 3] = [
+    ("cutout", "사진에서 피사체만 남기고 배경을 지운 그림"),
+    ("caricature", "사진을 바탕으로 새로 그린 캐리커처"),
+    (
+        "cutout_unchanged",
+        "사진에서 피사체를 살려 그렸지만 배경은 지우지 못한 그림",
+    ),
+];
 
 /// `Origin.sourceUrl` (contracts.schema.json) with the schema's slack removed:
 /// `https://host[:port][/path]`, ASCII only, host in lowercase `[a-z0-9.-]` or a
@@ -283,9 +385,21 @@ pub fn valid_source_url(link: &str) -> bool {
 
 /// Which `(origin, picture, reason)` combinations a direct draft may be created with.
 /// No caller-supplied prompts or cards: a `generated` origin belongs to the agent
+/// action, except the photo route's own (its fixed sentences, [`PHOTO_PROMPTS`]); the rest of this
+/// sentence is the old rule, unchanged: a `generated` origin belongs to the agent
 /// action, never to this API. A picture and a reason are mutually exclusive, and the
 /// `source_*` reasons exist only for a link import.
 pub fn draft_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>) -> bool {
+    // The one `generated` origin this API takes: the photo route's (ADR-0218 §8 H9). A picture, no
+    // reason code, no link, and one of the server's own sentences, verbatim.
+    if origin.kind == "generated" {
+        return has_media
+            && code.is_none()
+            && origin.source_url.is_none()
+            && PHOTO_PROMPTS
+                .iter()
+                .any(|(_, sentence)| origin.prompt.as_deref() == Some(*sentence));
+    }
     if origin.prompt.is_some() {
         return false;
     }
@@ -359,11 +473,214 @@ mod tests {
         }
     }
 
+    /// ADR-0218 §10 J4: the rule and its threshold are what `docs/api/expression-kind.vectors.json`
+    /// says — the file the shared core (`recommendExpressionKind`) is tested against too, so the two
+    /// implementations cannot drift apart. Read at run time, not compiled in (like the sentence test
+    /// below): a build that carries no `docs/` still compiles.
+    #[test]
+    fn the_recommendation_rule_is_the_one_the_shared_vectors_pin() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/expression-kind.vectors.json"
+        );
+        let vectors: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("the shared kind vectors"))
+                .expect("vectors are JSON");
+        assert_eq!(
+            vectors["emojiMaxEdge"].as_u64(),
+            Some(u64::from(EMOJI_MAX_EDGE)),
+            "the threshold in the vectors and in the server"
+        );
+        let cases = vectors["cases"].as_array().expect("cases");
+        assert!(
+            cases.len() >= 8,
+            "a table that is nearly empty pins nothing"
+        );
+        for case in cases {
+            let number = |key: &str| u32::try_from(case[key].as_u64().expect(key)).expect(key);
+            let got = Kind::recommended(number("width"), number("height"), number("frameCount"));
+            assert_eq!(
+                got.as_str(),
+                case["kind"].as_str().expect("kind"),
+                "{}: {case}",
+                case["name"]
+            );
+        }
+        // Each way a case can flip must have both sides in the table, or a mutation of the rule
+        // could pass: a small still, a large still, a small animation, a large animation, and the
+        // edge itself with the pixel past it.
+        let has = |kind: &str, moving: bool, over: bool| {
+            cases.iter().any(|case| {
+                let edge = case["width"]
+                    .as_u64()
+                    .unwrap()
+                    .max(case["height"].as_u64().unwrap());
+                case["kind"] == kind
+                    && (case["frameCount"].as_u64().unwrap() > 1) == moving
+                    && (edge > u64::from(EMOJI_MAX_EDGE)) == over
+            })
+        };
+        assert!(has("emoji", false, false), "a small still");
+        assert!(has("sticker", false, true), "a large still");
+        assert!(has("sticker", true, false), "a small animation");
+        assert!(has("sticker", true, true), "a large animation");
+        assert!(
+            cases
+                .iter()
+                .any(|case| case["width"] == 128 && case["frameCount"] == 1)
+                && cases
+                    .iter()
+                    .any(|case| case["width"] == 129 || case["height"] == 129),
+            "the edge itself and one pixel past it"
+        );
+    }
+
+    #[test]
+    fn a_choice_takes_a_kind_only_from_the_closed_list() {
+        let draft = "00000000-0000-4000-8000-000000000021";
+        let sha = "0".repeat(64);
+        let parse = |extra: &str| {
+            serde_json::from_str::<Choice>(&format!(
+                r#"{{"draftId":"{draft}","revision":"1","sha256":"{sha}"{extra}}}"#
+            ))
+        };
+        assert_eq!(
+            parse("").unwrap().kind,
+            None,
+            "an older client sends no kind"
+        );
+        assert_eq!(parse(r#","kind":"emoji""#).unwrap().kind, Some(Kind::Emoji));
+        assert_eq!(
+            parse(r#","kind":"sticker""#).unwrap().kind,
+            Some(Kind::Sticker)
+        );
+        for bad in [
+            r#","kind":"huge""#,
+            r#","kind":"Emoji""#,
+            r#","kind":"" "#,
+            r#","kind":null"#,
+            r#","kind":1"#,
+            r#","kind":["emoji"]"#,
+            r#","kinds":"emoji""#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad} must be refused");
+        }
+        // And what is serialized never grows a `kind: null`.
+        let choice = parse("").unwrap();
+        assert!(serde_json::to_value(&choice).unwrap().get("kind").is_none());
+    }
+
     fn origin(kind: &str, source_url: Option<&str>, prompt: Option<&str>) -> Origin {
         Origin {
             kind: kind.into(),
             source_url: source_url.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
+        }
+    }
+
+    /// The fixture server of the shared TypeScript core answers the photo route with these
+    /// sentences (`PHOTO_FIXTURE_PROMPTS`); a screen built on it must say what the real server says.
+    /// Read from the file, not compiled in: the release image carries no client sources.
+    #[test]
+    fn the_clients_fixture_server_speaks_the_same_sentences() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/momo-core/src/features/expressions/fixtureServer.ts"
+        );
+        let source = std::fs::read_to_string(path).expect("the core fixture server");
+        for (branch, sentence) in PHOTO_PROMPTS {
+            assert!(
+                source.contains(&format!("{branch}: \"{sentence}\"")),
+                "fixtureServer.ts PHOTO_FIXTURE_PROMPTS must carry {branch}: {sentence}"
+            );
+        }
+    }
+
+    /// #5133: the sentence says what was made. A cut-out the step could not erase is not written as
+    /// one whose background was erased; one that was erased or drawn transparent still is. The
+    /// wording is spelled out here on purpose: the first two are the sentences stored drafts already
+    /// carry, byte for byte, and a change to any of the three has to be made on purpose.
+    #[test]
+    fn a_cut_out_that_kept_its_background_does_not_say_it_was_erased() {
+        let erased = "사진에서 피사체만 남기고 배경을 지운 그림";
+        let caricature = "사진을 바탕으로 새로 그린 캐리커처";
+        let kept = "사진에서 피사체를 살려 그렸지만 배경은 지우지 못한 그림";
+        for (branch, cutout, want, why) in [
+            (
+                "cutout",
+                Some(Outcome::Erased),
+                erased,
+                "the server erased a flat background",
+            ),
+            (
+                "cutout",
+                Some(Outcome::Model),
+                erased,
+                "the model drew it transparent",
+            ),
+            (
+                "cutout",
+                Some(Outcome::Untouched),
+                kept,
+                "nothing could be erased",
+            ),
+            (
+                "caricature",
+                None,
+                caricature,
+                "a caricature has no background step",
+            ),
+        ] {
+            let origin = Origin::photo(branch, cutout).unwrap_or_else(|| panic!("{why}"));
+            assert_eq!(origin.kind, "generated", "{why}");
+            assert_eq!(origin.source_url, None, "{why}");
+            assert_eq!(origin.prompt.as_deref(), Some(want), "{why}");
+        }
+        // What the issue is about, measured on what the function returns and not on a literal of
+        // this test: the sentence of a picture that kept its background does not claim an erase.
+        let prompt = Origin::photo("cutout", Some(Outcome::Untouched))
+            .and_then(|origin| origin.prompt)
+            .unwrap();
+        assert!(!prompt.contains("배경을 지운"), "{prompt}");
+        assert!(prompt.contains("지우지 못한"), "{prompt}");
+
+        // A pair that is not one is `None`: the caller has to say what happened, and a key of the
+        // table is not a branch.
+        for (branch, cutout, why) in [
+            ("cutout", None, "a cut-out with no word on its background"),
+            (
+                "caricature",
+                Some(Outcome::Untouched),
+                "a caricature has no cut-out step",
+            ),
+            (
+                "cutout_unchanged",
+                None,
+                "a key of the table is not a branch",
+            ),
+            (
+                "cutout_unchanged",
+                Some(Outcome::Untouched),
+                "a key of the table is not a branch, with an outcome either",
+            ),
+            ("anything-else", None, "not a branch"),
+        ] {
+            assert!(Origin::photo(branch, cutout).is_none(), "{why}");
+        }
+
+        // The table itself: every sentence is its own, and the direct API takes each one.
+        let distinct: HashSet<&str> = PHOTO_PROMPTS
+            .iter()
+            .map(|(_, sentence)| *sentence)
+            .collect();
+        assert_eq!(distinct.len(), PHOTO_PROMPTS.len());
+        let keys: HashSet<&str> = PHOTO_PROMPTS.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys.len(), PHOTO_PROMPTS.len());
+        for (key, sentence) in PHOTO_PROMPTS {
+            assert!(
+                draft_origin_ok(&origin("generated", None, Some(sentence)), true, None),
+                "{key}"
+            );
         }
     }
 
@@ -575,7 +892,75 @@ mod tests {
                 false,
                 "unknown kind",
             ),
+            (
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's cut-out sentence",
+            ),
+            (
+                Origin::photo("cutout", Some(Outcome::Untouched)).unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's sentence for a cut-out that kept its background",
+            ),
+            (
+                Origin::photo("caricature", None).unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's caricature sentence",
+            ),
+            (
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
+                false,
+                Some("generation_failed"),
+                false,
+                "a photo origin without a picture",
+            ),
+            (
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
+                true,
+                Some("generation_failed"),
+                false,
+                "a photo origin with a reason code",
+            ),
+            (
+                origin("generated", link, Some(PHOTO_PROMPTS[0].1)),
+                true,
+                None,
+                false,
+                "the server's sentence with a link",
+            ),
+            (
+                origin(
+                    "generated",
+                    None,
+                    Some("사진에서 피사체만 남기고 배경을 지운 그림!"),
+                ),
+                true,
+                None,
+                false,
+                "a sentence that is not exactly the server's",
+            ),
+            (
+                origin("upload", None, Some(PHOTO_PROMPTS[1].1)),
+                true,
+                None,
+                false,
+                "the server's sentence on a kind that takes no prompt",
+            ),
+            (
+                origin("generated", None, None),
+                true,
+                None,
+                false,
+                "generated with no prompt at all",
+            ),
         ];
+        assert!(Origin::photo("anything-else", None).is_none());
         for (origin, has_media, code, allowed, why) in rows {
             assert_eq!(
                 draft_origin_ok(&origin, has_media, code),

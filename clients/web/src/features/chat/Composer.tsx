@@ -28,7 +28,6 @@ import {
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
   COMPOSER_KEYS_HINT,
-  COMPOSER_OFFLINE_COPY,
   HINT_SEPARATOR,
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
@@ -66,6 +65,7 @@ import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint
 import { COMPOSER_MAX_ROWS, useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
 import { useOffline } from "@/features/common/useOffline";
+import { useComposerBlockedLine } from "@/features/common/blockedLines";
 import {
   AttachButton,
   AttachmentTray,
@@ -106,6 +106,8 @@ import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
 import { ComposerContextBand, ComposerHostChip } from "@/features/chat/ComposerContextBand";
 import { ComposerFormatButton } from "@/features/chat/ComposerFormatButton";
+import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
+import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { composerContextBandShows, composerContextHost } from "@/features/chat/composerContext";
 import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
@@ -161,22 +163,6 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 const MIN_ROWS = 1;
 const MAX_ROWS = COMPOSER_MAX_ROWS;
-
-/**
- * 연결이 끊겨 있을 때 전송 자리에서 하는 말. **이름만 여기 있고 값은 코어에
- * 있다** (U4-6 리뷰 H-1).
- *
- * 이 파일이 들고 있던 문장은 "…쓰던 글은 그대로 남습니다."였고, 같은 주에 폰이
- * 자기 파일에 같은 이름으로 한 절이 더 있는 문장을 지었다. 리뷰가 그 갈라짐을
- * 실측했고, 값은 `APPROVAL_OFFLINE_COPY` 가 이미 걸어 둔 길로 올라갔다 —
- * 고른 문장과 고른 이유는 `@momo/core/features/chat/composerCopy` 가 적는다.
- * 요약하면 **이 앱의 오프라인 문장에는 모양이 있고**(지금 못 하는 것 → 다시
- * 연결되면 여기서 할 수 있는 것) 이 파일의 문장에는 그 뒷절이 없었다.
- *
- * 이름을 남기는 이유: 이 줄은 세 자리에서 쓰인다(버튼 `title` · 아래 한 줄 ·
- * 게이트가 찾는 `data-testid`). 값을 세 번 적는 대신 이름 하나를 쓴다.
- */
-export { COMPOSER_OFFLINE_COPY };
 
 /**
  * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 액션 슬롯이고, 폰 DM에서는 기존처럼
@@ -251,6 +237,7 @@ export function Composer({
   onCancelQuote,
   onSend,
   personalCall,
+  onEditLast,
 }: {
   /** ADR-0149 - 「작성 중」 발행은 워크스페이스로 스코프된 라우트다. */
   workspaceId: string;
@@ -298,6 +285,11 @@ export function Composer({
       attachments?: MessageAttachment[];
       /** 내 개인 에이전트를 불렀다(#3653): 메시지를 보낸 뒤 서명해 내 맥을 부른다. */
       personalCall?: PersonalCallSpec;
+      /**
+       * #5005 - 입력칸 위 링크 미리보기의 ✕(「이번 메시지는 미리보기 없이 보내기」). 켠 때(`true`)만 키가 간다.
+       * 이 메시지에는 링크 카드가 하나도 생기지 않는다(ADR-0170 증보 2026-11-01 D21).
+       */
+      suppressUnfurl?: boolean;
     }
   ) => Promise<void> | void;
   /**
@@ -305,6 +297,12 @@ export function Composer({
    * 싣는다. 없으면 이 컴포저는 예전 그대로 메시지만 보낸다. 판정은 안내용이고 문은 서버다.
    */
   personalCall?: PersonalCallController;
+  /**
+   * #5191 - 빈 입력칸에서 ↑: 이 대화에서 내 마지막 글 있는 메시지를 고치게 한다(Slack식). 열었으면 `true`, 고칠 메시지가
+   * 없어 아무것도 안 했으면 `false`(그때 ↑ 는 원래 키로 남는다). 없으면 이 컴포저는 예전 그대로다 — 이 prop 을 적지 않는
+   * 호출부는 코어에 `textEmpty` 도 보내지 않아, ↑ 의 동작이 한 글자도 다르지 않다. (스레드 입력칸은 별도 컴포넌트라 이 길이 없다.)
+   */
+  onEditLast?: () => boolean;
 }) {
   // 초안은 이 채널의 것이다. 첫 렌더에서 바로 읽는 이유는 한 프레임의 빈 입력창이
   // 「초안이 없다」로 읽히기 때문이다 — 그 프레임에 사람이 타이핑을 시작하면 복원이
@@ -376,11 +374,22 @@ export function Composer({
   const isMobile = useIsMobileShell();
   const railLive = connStatus === "connected";
   // 레일 상태와 **다른 질문**이다. `railLive`는 웹소켓이 붙어 있는가이고, 전송은
-  // REST POST로 나간다 — 레일이 재연결 중이어도 그 POST는 멀쩡히 성공한다. 여기서
-  // 필요한 것은 「이 요청이 나갈 수 있는가」이고, 그 답을 가장 잘 아는 것은 브라우저
-  // 자신(`navigator.onLine`)과 레일이 재연결을 포기한 종단 절단 둘의 합이다
-  // (`useOffline`, 승인 경로가 같은 판단을 한다).
+  // REST POST로 나간다 — 레일이 끊겨 있어도 그 POST는 멀쩡히 성공한다. 여기서
+  // 필요한 것은 「이 요청이 나갈 수 있는가」이고, 그 답은 연결 상태 모델의 게이트
+  // (`useOffline`, #5220)가 한다: 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
+  // 막고, 실시간(소켓)만 끊긴 것은 막지 않는다. 승인 경로가 같은 판단을 한다.
   const offline = useOffline();
+  // 막았을 때 위 한 줄과 보내기 단추의 설명이 말하는 문장(U4-6 리뷰 H-1, #5239). 문장은 이 파일에 없다: 막은 원인(기기 오프라인 ·
+  // 서버에 닿지 못함)에 따라 연결 상태 모델이 사전 키를 고르고(`connection.composer.*`), 이 파일은 읽기만 한다. 한 줄과 단추 `title`이
+  // 같은 값을 쓴다.
+  const blockedLine = useComposerBlockedLine();
+  // 링크를 넣고 멈추면 입력칸 위에 카드가 뜬다(#5005). 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const linkPreview = useComposerLinkPreview({
+    workspaceId,
+    channelId,
+    text,
+    paused: offline,
+  });
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
   const keysHintNeeded = useSendHintNeeded();
 
@@ -643,6 +652,8 @@ export function Composer({
       ...(callSpec ? { personalCall: callSpec } : {}),
       ...(payload ? { routing: payload } : {}),
       ...(replyToId === undefined ? {} : { replyToId }),
+      // ✕로 끈 채 보낸다. 값은 지금 렌더의 것이고(글을 비우기 전에 읽는다), 보낸 뒤에는 글이 비어 풀린다.
+      ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
       ...(sent.attachments.length === 0
         ? {}
         : { attachments: sent.attachments }),
@@ -716,6 +727,12 @@ export function Composer({
     return "sent";
   }
 
+  /** ✕·Esc: 이번 메시지는 미리보기 없이 보낸다. 눌린 버튼이 사라지므로 포커스는 입력칸이 받는다. */
+  function dismissLinkPreview() {
+    linkPreview.dismiss();
+    inputRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 일반 메시지와 예약으로 둘 다 나가면 안 된다.
@@ -751,6 +768,9 @@ export function Composer({
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
         quoteOpen: quote !== null,
+        previewOpen: linkPreview.cards.length > 0,
+        // #5191 - 입력칸이 한 글자도 없을 때만 ↑ 가 「내 마지막 메시지 고치기」가 된다. 이 키를 받을 곳이 없으면 적지 않는다.
+        ...(onEditLast !== undefined ? { textEmpty: text.length === 0 } : {}),
       }
     );
 
@@ -771,6 +791,15 @@ export function Composer({
         }
         return;
       }
+      case "preview-dismiss":
+        // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
+        event.preventDefault();
+        dismissLinkPreview();
+        return;
+      case "edit-last":
+        // 열었을 때만 키를 먹는다. 고칠 글이 없으면 ↑ 는 textarea 의 것으로 남는다(빈 입력칸이라 눈에 보이는 일이 없다).
+        if (onEditLast?.() === true) event.preventDefault();
+        return;
       case "quote-cancel":
         // Esc는 「지금 열려 있는 것을 닫는다」이고, 멘션 목록이 닫혀 있을 때 이
         // 컴포저에 열려 있는 것은 인용이다. 취소 버튼과 같은 일을 하는 두 번째
@@ -812,19 +841,8 @@ export function Composer({
       data-composer-shell=""
       data-testid="composer"
     >
-      {/* 첨부 트레이 (ADR-0151 D2). 인용 칩보다 **위**다: 순서는 여전히
-          맥락 → 처리 → 입력이고, 파일은 이 메시지가 무엇을 나르는가라서 인용보다
-          한 겹 바깥이다. 첨부가 없으면 서지 않는다. */}
-      <AttachmentTray
-        drafts={tray.drafts}
-        rejected={tray.rejected}
-        folders={tray.folders}
-        onRemove={(localId) => dropDraft(trayKey, localId)}
-        onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
-        onClear={() => clearSurface(trayKey)}
-        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
-      />
-      {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다. */}
+      {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다.
+          첨부 줄(ADR-0151 D2)도 이제 입력 카드 **안**, 글 칸 바로 위에 선다(#5200). */}
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
@@ -879,10 +897,10 @@ export function Composer({
       {offline && (
         <p
           role="status"
-          className="px-6 pb-2 text-meta text-warn"
+          className="px-6 pb-2 text-meta text-warn break-keep"
           data-testid="composer-offline"
         >
-          {COMPOSER_OFFLINE_COPY}
+          {blockedLine}
         </p>
       )}
 
@@ -924,6 +942,11 @@ export function Composer({
       )}
 
       <ExpressionSendPreview body={text} />
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        suppressed={linkPreview.suppressed}
+        onDismiss={dismissLinkPreview}
+      />
       <form
         onSubmit={onSubmit}
         className="relative p-3 data-rail:pt-0"
@@ -959,13 +982,16 @@ export function Composer({
           // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
           className="composer-card @container focus-visible-within:focus-ring data-warn:border-warn"
           data-testid="composer-frame"
+          data-composer-frame=""
           data-warn={secretBlocked ? "" : undefined}
           onClick={(event) => {
             // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
             // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
+            // 첨부 카드는 초점을 받는 자기 컨트롤이다(Backspace/Delete 로 뺀다). 눌러서 캐럿을 글 칸으로
+            // 돌려주면 방금 카드에 둔 초점이 튕겨 나간다.
             if (
               event.target instanceof Element &&
-              event.target.closest("button")
+              event.target.closest("button, [data-attachment-card]")
             ) {
               return;
             }
@@ -985,6 +1011,19 @@ export function Composer({
               {contextHost !== null && <ComposerHostChip host={contextHost} />}
             </ComposerContextBand>
           )}
+          {/* 첨부 줄 (ADR-0151 D2, #5200). 입력칸 테두리 **안**, 글 칸 위다(Codex 입력창). 맥락 띠 아래인 이유는
+              순서가 여전히 맥락 → 처리 → 입력이고, 파일은 이 메시지가 나르는 것이라 글에 가장 가깝기 때문이다.
+              첨부가 없으면 서지 않는다. 카드를 뺀 뒤 초점은 옆 카드나 이 글 칸으로 간다. */}
+          <AttachmentTray
+            drafts={tray.drafts}
+            rejected={tray.rejected}
+            folders={tray.folders}
+            onRemove={(localId) => dropDraft(trayKey, localId)}
+            onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
+            onClear={() => clearSurface(trayKey)}
+            onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
+            returnFocus={() => inputRef.current?.focus()}
+          />
           <label className="sr-only" htmlFor="composer-input">
             {composerFieldLabel(channelLabel, recipient)}
           </label>
@@ -1156,7 +1195,7 @@ export function Composer({
                 aria-label="메시지 보내기"
                 title={
                   offline
-                    ? COMPOSER_OFFLINE_COPY
+                    ? blockedLine
                     : (attachBlockCopy ??
                       (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
                 }

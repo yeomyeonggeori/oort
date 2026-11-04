@@ -465,9 +465,10 @@ describe('애니메이션 — 펼침과 포커스를 잃어서 접히는 것은 
     focus();
     expect(hasTools()).toBe(true);
     expect(toolsStyle()).toMatchObject({height: 0, opacity: 0});
+    // 오른쪽은 보내기 원 + 그 왼쪽 표현 단추의 칸(#4942)이고, 왼쪽은 + 원 하나다.
     expect(fieldStyle()).toMatchObject({
       marginLeft: CONV.composerCircle,
-      marginRight: CONV.composerCircle,
+      marginRight: CONV.composerCircle + CONV.composerExpression,
     });
     settle();
   });
@@ -1491,13 +1492,13 @@ describe('누름 (#4518) — 동작 줄이기는 즉시, 햅틱은 0', () => {
     // 아예 안 바뀐다. 여백이 상태에서만 나오면(진행값을 안 거치면) 어긋날 곳이 없어서 이 시험이 선다.
     jest.spyOn(Animated.Value.prototype, 'setValue').mockImplementation(() => {});
     await mountSettled();
-    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle + CONV.composerExpression});
     touchDown();
     expect(hasTools()).toBe(true); // 전제: 상태는 펼침이다
     expect(fieldStyle()).toMatchObject({marginLeft: 0, marginRight: 0});
     touchMoveTo(100, 130); // 끌기로 되돌림
     expect(hasTools()).toBe(false); // 전제: 접혔다
-    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle + CONV.composerExpression});
   });
 
   it('햅틱 0 — 닿고 · 떨고 · 끌고 · 취소하고 · 유예가 지나고 · 포커스가 넘겨받는 동안 한 번도 안 울린다(#4331)', async () => {

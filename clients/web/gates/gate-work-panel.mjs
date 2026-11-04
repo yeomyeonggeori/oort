@@ -2,8 +2,9 @@
 // GATE: WEB-WP1 「작업 패널」 v0 (결정 정본 docs/planning/2026-08-04-work-panel-design.md).
 //
 // TC-1 (#1758): 헤더 터미널은 도크다. 이 게이트의 WorkPanel(작업 세션 pane)
-// 진입은 작업 콘솔 경유(`openWorkPanelViaConsole`). agent-work-panel 은
-// 컴포저 경로 그대로다.
+// 진입은 제품이 받는 주소(`?work-panel=1`, `openWorkPanelByAddress`)다. 작업 콘솔은 온라인 호스트가 있을 때만
+// 서는 표면이고(`SurfaceRoute`, #2780) 이 게이트의 픽스처는 호스트가 없어 콘솔 경유 진입은 서지 않는다(#5048).
+// agent-work-panel 은 컴포저 경로 그대로다.
 //
 // 이 게이트가 지키는 것은 화면의 모양이 아니라 **패널이 하는 말이 참인가**이다.
 //
@@ -52,6 +53,8 @@
 //     expected failure: "Escape inside the reply composer did not close"
 //   WORK_PANEL_GATE_PROVE_RED_THREAD_FOCUS=1 npm run gate:work-panel
 //     expected failure: "left focus on ... instead of the control that opened it"
+//   WORK_PANEL_GATE_PROVE_RED_SIDEBAR=1 npm run gate:work-panel
+//     expected failure: "narrow-shell-600-expanded: the channel composer is 210px"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
@@ -69,7 +72,8 @@
 // window 캡처 단계에서 Escape를 삼켜(핸들러 없던 때처럼) 서랍이 닫히지 않게 하고,
 // THREAD_FOCUS는 닫힌 뒤 활성 요소를 blur해(포커스 반환 없던 때처럼) 캐럿을
 // document.body로 떨어뜨린다 — 둘 다 제품이 아니라 드라이버가 #1431 수리 이전의
-// **행동**을 그 자리에 되돌린다.
+// **행동**을 그 자리에 되돌린다. SIDEBAR는 `.app-shell`의 `--w-sidebar`를 한 겹 덮어써서 양보 없는 324(레일
+// 56 + 목록 열 268)로 되돌린다 — 사이드바 열이 본문 칸에 바닥을 내주지 않던 수리 이전의 렌더가 그 자리에 선다(#5093).
 // 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -77,7 +81,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
-import { openWorkPanelViaConsole } from "./work-openers.mjs";
+import { openWorkPanelByAddress } from "./work-openers.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -105,6 +109,7 @@ const proveRedThreadEscape =
   process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_ESCAPE === "1";
 const proveRedThreadFocus =
   process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_FOCUS === "1";
+const proveRedSidebar = process.env.WORK_PANEL_GATE_PROVE_RED_SIDEBAR === "1";
 const proveRedClause = process.env.WORK_PANEL_GATE_PROVE_RED_CLAUSE === "1";
 const proveRedKeepAll = process.env.WORK_PANEL_GATE_PROVE_RED_KEEPALL === "1";
 const proveRedRuler = process.env.WORK_PANEL_GATE_PROVE_RED_RULER === "1";
@@ -166,6 +171,21 @@ const REPLY_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M2";
  * 열렸을 때도 컴포저는 그 실패 폭 위에 있어야 한다.
  */
 const MIN_COMPOSER_WIDTH = 240;
+
+/**
+ * 셸 기하의 값 넷 (#5093). 전부 `tokens.css`에 선 값이고, 이 게이트는 그 값을 **눈앞에서 잰 컴포저 폭**과 맞춰 본다.
+ * 하나가 움직이면 이 숫자도 함께 고치라고 빨개지는 것이 맞다(「720 이상은 그대로」가 이 값들 위에 서 있다).
+ *
+ *   SIDEBAR_FULL   사이드바 전체 폭 = 레일 56 + 목록 열 268 (`--w-sidebar`, DS2-6).
+ *   SIDEBAR_RAIL   접히면 레일만 남는다(#3280).
+ *   PANE_INSET     본문 판 인셋 8: 오른쪽은 늘, 접히면 왼쪽도(`app-shell`의 `> main` 여백).
+ *   COMPOSER_BOX   본문 판 안에서 컴포저 입력 상자가 아닌 폭 58 = 폼 좌우 24×2 + 카드 안쪽 4×2 + 카드 테두리 1×2
+ *                  (`composer-dock`·`composer-card`, 넓은 창 계층).
+ */
+const SIDEBAR_FULL = 324;
+const SIDEBAR_RAIL = 56;
+const PANE_INSET = 8;
+const COMPOSER_BOX = 58;
 
 /**
  * 「작업 세션」 pane 의 두 측정값 (#1418).
@@ -736,7 +756,9 @@ async function exerciseScenario(browser, scenario) {
   const phases = await page
     .locator('[data-testid="agent-work-panel-phase"]')
     .evaluateAll((nodes) => nodes.map((node) => node.textContent?.trim() ?? ""));
-  const expectedPhases = ["생각 중", "답을 쓰는 중", "승인 대기"];
+  // 승인을 기다리는 말은 「승인 필요」다 — 요청 고리의 낱말 정본(`REQUEST_WORD.approval`, #4760)이 칩·카드·인박스와
+  // 한 벌로 읽는다. 옛 「승인 대기」는 이 패널만 따로 쓰던 낱말이다(#5048).
+  const expectedPhases = ["생각 중", "답을 쓰는 중", "승인 필요"];
   for (const phase of expectedPhases) {
     if (!phases.includes(phase)) {
       throw new Error(
@@ -753,9 +775,9 @@ async function exerciseScenario(browser, scenario) {
   const stateText = await page
     .getByTestId("agent-work-panel-state")
     .textContent();
-  if (stateText?.trim() !== "승인 대기") {
+  if (stateText?.trim() !== "승인 필요") {
     throw new Error(
-      `${label}: awaiting_approval was rendered as "${stateText}" instead of 승인 대기`
+      `${label}: awaiting_approval was rendered as "${stateText}" instead of 승인 필요`
     );
   }
 
@@ -872,7 +894,7 @@ async function captureWorkPaneShots(browser) {
       await installRealtimeSocket(page);
       await installRoutes(context, CO_OPEN_SCENARIO);
       await login(page);
-      await openWorkPanelViaConsole(page, { allowHashFallback: true });
+      await openWorkPanelByAddress(page, channelId);
       // 목록이 자리를 잡은 뒤에 찍는다. 골격 막대가 서 있는 순간을 찍으면 두 번
       // 돌릴 때마다 다른 판이 나오고, 전후 비교가 조명 비교가 된다.
       await page.getByTestId("work-panel-empty").waitFor();
@@ -1026,7 +1048,7 @@ async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARI
     });
   }
 
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   // red seam (#1422): 절 단위 생략을 **끄지 않고**, 그 결과를 되돌린다 — 상자에
@@ -1280,6 +1302,18 @@ async function exerciseThreadPaneNarrow(browser, width) {
     });
   }
 
+  // 스레드를 열기 **전**의 채널 컴포저 폭. 사이드바가 324px(레일 56 + 목록 268, DS2-6)가 된 뒤 600~629px 창은 스레드와
+  // 상관없이 컴포저가 바닥 240px 아래였다(#5048 D4: 600px에서 210). 그 구멍은 사이드바 열이 본문 칸에 바닥을 내주며 닫혔다
+  // (#5093, tokens.css `app-shell`). 그래서 이 게이트는 둘을 함께 잰다: **절대 바닥**(열기 전·후 모두 ≥ 240)과
+  // 「스레드가 열렸다고 채널이 좁아지는가」 — 덮는 패널은 채널을 건드리지 않고, 옆에 서는 패널(수리 이전)은 320px을 가져간다(#5048).
+  const channelComposerBefore = await page.evaluate(() =>
+    Math.round(document.getElementById("composer-input").getBoundingClientRect().width)
+  );
+  if (channelComposerBefore < MIN_COMPOSER_WIDTH) {
+    throw new Error(
+      `thread-pane-${width}: the channel composer is ${channelComposerBefore}px before the thread opened (floor ${MIN_COMPOSER_WIDTH}px). That is not the thread pane's doing: the sidebar column has to yield so the chat column keeps its floor (tokens.css app-shell, #5093).`
+    );
+  }
   await page.getByTestId("thread-anchor").first().click();
   await page.getByTestId("thread-panel").waitFor();
 
@@ -1326,16 +1360,21 @@ async function exerciseThreadPaneNarrow(browser, width) {
   );
 
   // 1. 두 컴포저 모두 바닥 위. 이 구간에서 실제로 쓰는 것은 답글 컴포저지만,
-  //    채널 컴포저가 먼저 좁아지므로 둘을 함께 잰다.
+  //    채널 컴포저가 먼저 좁아지므로 둘을 함께 잰다. 채널 컴포저는 열기 전이 이미 바닥
+  //    위이고(위), 열린 뒤에 그보다 좁아지지 않으므로 열린 뒤에도 바닥 위다.
   const squeezed =
-    geometry.channelComposerWidth < MIN_COMPOSER_WIDTH
-      ? ["channel", geometry.channelComposerWidth]
+    geometry.channelComposerWidth < channelComposerBefore
+      ? [
+          "channel",
+          geometry.channelComposerWidth,
+          `${channelComposerBefore}px before the thread opened`,
+        ]
       : geometry.threadComposerWidth < MIN_COMPOSER_WIDTH
-        ? ["thread", geometry.threadComposerWidth]
+        ? ["thread", geometry.threadComposerWidth, `floor ${MIN_COMPOSER_WIDTH}px`]
         : null;
   if (squeezed) {
     throw new Error(
-      `thread-pane-${width}: the ${squeezed[0]} composer was squeezed to ${squeezed[1]}px (floor ${MIN_COMPOSER_WIDTH}px). Between 600 and 899px the thread pane covers the channel instead of standing beside it as a 320px column, because standing beside it left the channel ${width - 240 - PANE_MEASURE}px (tokens.css thread-pane / chat-region).`
+      `thread-pane-${width}: the ${squeezed[0]} composer was squeezed to ${squeezed[1]}px (${squeezed[2]}). Between 600 and 899px the thread pane covers the channel instead of standing beside it as a 320px column, because standing beside it left the channel ${width - 240 - PANE_MEASURE}px (tokens.css thread-pane / chat-region).`
     );
   }
 
@@ -1432,6 +1471,207 @@ async function exerciseThreadPaneNarrow(browser, width) {
 }
 
 /**
+ * 좁은 웹 창의 채널 컴포저 바닥 (#5093, #5048 D4).
+ *
+ * 사이드바가 240에서 324(레일 56 + 목록 열 268, DS2-6)가 된 뒤 펼친 셸의 컴포저는 `창 폭 − 390`이다(사이드바 324 + 판
+ * 오른쪽 인셋 8 + 컴포저 입력 상자 밖의 58). 그래서 **바닥 240 아래로 떨어진 폭은 600~629px뿐이었다**(600px에서 210).
+ * 이슈 제목의 「600~719」는 그 위까지 넓게 부른 것이고, 630~719px는 수리 전에도 바닥 위였다(650 → 260 · 719 → 329).
+ * 수리는 문턱을 더하지 않았다: 본문 칸이 바닥을 갖고 사이드바 열이 모자란 폭을 낸다(tokens.css `app-shell`의
+ * `--w-sidebar`, `route-region`·`thread-pane`과 같은 문법). 그래서 이 시나리오는 한 값이 아니라 **격자**를 잰다.
+ *
+ *   창 폭   600 · 629 · 630 · 650 · 719 · 720 · 1024   (629·630은 양보가 시작하는 경계, 720은 데스크탑 minWidth)
+ *   사이드바  펼침(기본) · 접힘(제목줄 토글)
+ *   스레드   닫힘 · 열림
+ *
+ * 모든 칸에서 채널 컴포저가 바닥 240 위이고, 스레드가 열린 칸은 답글 컴포저도 바닥 위다. 문서는 가로로 스크롤하지 않는다
+ * (MOMO-610). 거기에 「수리가 닿지 않은 곳은 그대로」를 **값으로** 잰다:
+ *   - 접힘은 모든 폭에서 레일 56 · 컴포저 = 창 − 56 − 8×2 − 58 (수리가 접힘을 만지지 않았다).
+ *   - 펼침 630 이상(720 이상 포함)은 사이드바 324 · 컴포저 = 창 − 324 − 8 − 58 (양보가 시작하기 전).
+ *   - 펼침 630 미만은 사이드바가 펼쳐 선 채로(레일 + 목록 열) 줄어든다. 목록 열이 `--spacing-pane-sm`(192) 아래로
+ *     내려가면 양보가 아니라 파괴이므로 그 바닥을 함께 잰다.
+ *   - 스레드는 900 아래에서 채널을 덮을 뿐 좁히지 않고, 900 이상에서는 옆에서 320을 가져간다(이 이슈 이전과 같다).
+ * 칸마다 실패를 모아 한 번에 던진다: 붉으면 어느 폭·상태가 빠졌는지가 한 줄에 나온다.
+ */
+const NARROW_SHELL_WIDTHS = [600, 629, 630, 650, 719, 720, 1024];
+
+async function readShellComposerGeometry(page) {
+  return page.evaluate(() => {
+    const round = (value) => Math.round(value);
+    const input = document.getElementById("composer-input");
+    const reply = document.querySelector('[data-testid="thread-composer-input"]');
+    const sidebar = document.querySelector('[data-testid="sidebar"]');
+    return {
+      sidebarWidth: round(sidebar.getBoundingClientRect().width),
+      composerWidth: round(input.getBoundingClientRect().width),
+      replyWidth: reply ? round(reply.getBoundingClientRect().width) : null,
+      overflowX: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+}
+
+/** 접힘·펼침이 끝나 사이드바가 그 폭에 선다(reduced motion이라 곧바로 선다). */
+async function waitForSidebarWidth(page, want) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const width = await page.evaluate(() =>
+      Math.round(
+        document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width
+      )
+    );
+    if (width === want) return;
+    if (Date.now() > deadline) {
+      throw new Error(`the sidebar did not settle at ${want}px (still ${width}px)`);
+    }
+    await wait(50);
+  }
+}
+
+async function exerciseNarrowShellComposerFloor(browser) {
+  const failures = [];
+  const log = [];
+  for (const width of NARROW_SHELL_WIDTHS) {
+    const context = await browser.newContext({
+      viewport: { width, height: 800 },
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, CO_OPEN_SCENARIO);
+    await login(page);
+
+    // red seam: 스타일시트를 지우지 않고 한 겹 덮어써서 양보 없는 324(수리 이전)로 되돌린다. 층(layer) 밖
+    // 선언이라 `@utility`가 만든 규칙을 이긴다.
+    if (proveRedSidebar) {
+      await page.addStyleTag({
+        content:
+          ".app-shell { --w-sidebar: calc(var(--spacing-rail) + var(--w-sidebar-list)); }",
+      });
+    }
+
+    for (const sidebar of ["expanded", "collapsed"]) {
+      if (sidebar === "collapsed") {
+        await page.getByTestId("sidebar-toggle").click();
+        await waitForSidebarWidth(page, SIDEBAR_RAIL);
+      }
+      const closed = await readShellComposerGeometry(page);
+      await page.getByTestId("thread-anchor").first().click();
+      await page.getByTestId("thread-panel").waitFor();
+      const open = await readShellComposerGeometry(page);
+      await page.getByTestId("thread-close").click();
+      await page.getByTestId("thread-panel").waitFor({ state: "detached" });
+
+      const cell = `narrow-shell-${width}-${sidebar}`;
+      log.push(
+        `${cell}: 사이드바 ${closed.sidebarWidth}px · 채널 컴포저 ${closed.composerWidth}px · 스레드 열림 -> 채널 ${open.composerWidth}px · 답글 ${open.replyWidth}px`
+      );
+      const fail = (detail) => failures.push(`${cell}: ${detail}`);
+
+      // 1. 바닥. 모든 칸의 채널 컴포저, 스레드가 열린 칸의 답글 컴포저.
+      if (closed.composerWidth < MIN_COMPOSER_WIDTH) {
+        fail(
+          `the channel composer is ${closed.composerWidth}px (floor ${MIN_COMPOSER_WIDTH}px)`
+        );
+      }
+      if (open.composerWidth < MIN_COMPOSER_WIDTH) {
+        fail(
+          `the channel composer is ${open.composerWidth}px with a thread open (floor ${MIN_COMPOSER_WIDTH}px)`
+        );
+      }
+      if (open.replyWidth === null || open.replyWidth < MIN_COMPOSER_WIDTH) {
+        fail(
+          `the reply composer is ${open.replyWidth}px (floor ${MIN_COMPOSER_WIDTH}px)`
+        );
+      }
+      if (closed.overflowX > 0 || open.overflowX > 0) {
+        fail(
+          `the document scrolls sideways by ${Math.max(closed.overflowX, open.overflowX)}px (the shell is the window, MOMO-610)`
+        );
+      }
+
+      // 2. 수리가 닿지 않은 곳은 그대로 — 값으로.
+      if (sidebar === "collapsed") {
+        const want = width - SIDEBAR_RAIL - 2 * PANE_INSET - COMPOSER_BOX;
+        if (closed.sidebarWidth !== SIDEBAR_RAIL || closed.composerWidth !== want) {
+          fail(
+            `folded: want rail ${SIDEBAR_RAIL}px and composer ${want}px, got ${closed.sidebarWidth}px and ${closed.composerWidth}px`
+          );
+        }
+      } else if (width >= 630) {
+        const want = width - SIDEBAR_FULL - PANE_INSET - COMPOSER_BOX;
+        if (closed.sidebarWidth !== SIDEBAR_FULL || closed.composerWidth !== want) {
+          fail(
+            `unchanged above 630px: want sidebar ${SIDEBAR_FULL}px and composer ${want}px, got ${closed.sidebarWidth}px and ${closed.composerWidth}px`
+          );
+        }
+      } else if (
+        closed.sidebarWidth > SIDEBAR_FULL ||
+        closed.sidebarWidth - SIDEBAR_RAIL < PANE_FLOOR
+      ) {
+        fail(
+          `the yielding sidebar is ${closed.sidebarWidth}px: it must stay open (rail ${SIDEBAR_RAIL}px + a list column of at least ${PANE_FLOOR}px, ${SIDEBAR_FULL}px at most)`
+        );
+      }
+
+      // 3. 스레드는 900 아래에서 채널을 덮을 뿐 좁히지 않고, 위에서는 옆에서 320을 가져간다.
+      const wantOpen =
+        width < 900 ? closed.composerWidth : closed.composerWidth - PANE_MEASURE;
+      if (open.composerWidth !== wantOpen) {
+        fail(
+          `a thread must ${width < 900 ? "cover without narrowing" : `take ${PANE_MEASURE}px`}: want the channel composer at ${wantOpen}px, got ${open.composerWidth}px`
+        );
+      }
+    }
+    await context.close();
+  }
+  for (const line of log) console.log(`[narrow-shell] ${line}`);
+  if (failures.length > 0) {
+    throw new Error(
+      `narrow web windows broke the composer floor in ${failures.length} cell(s):\n  ${failures.join("\n  ")}\nThe chat column keeps a floor and the sidebar column yields (tokens.css app-shell, #5093); a sidebar that does not yield leaves 210px of composer at 600px.`
+    );
+  }
+}
+
+/**
+ * 양보하는 사이드바도 접힌다 (#5093). 접힘이 끝났다는 사실(트리 `hidden`)은 `grid-template-columns`의 `transitionend`가
+ * 알려 주는데(`useSidebarCollapsePaint`), 600~629px에서는 펼친 열의 폭이 창 폭에서 나온다. 그 폭이 길이로 풀려
+ * 전환이 평소처럼 도는지를 reduced motion **밖에서** 잰다. 이 구간만 전환이 안 돌면 접은 뒤에도 트리가 레이아웃에
+ * 남는다.
+ */
+async function exerciseNarrowShellCollapseMotion(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 600, height: 800 },
+    reducedMotion: "no-preference",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, CO_OPEN_SCENARIO);
+  await login(page);
+  await page.getByTestId("sidebar-toggle").click();
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const settled = await page.evaluate(() => {
+      const pane = document.getElementById("sidebar-channel-pane");
+      const sidebar = document.querySelector('[data-testid="sidebar"]');
+      return {
+        hidden: pane?.hasAttribute("hidden") === true,
+        width: Math.round(sidebar.getBoundingClientRect().width),
+      };
+    });
+    if (settled.hidden && settled.width === SIDEBAR_RAIL) break;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `narrow-shell-600-motion: the folded sidebar never settled (list hidden ${settled.hidden}, width ${settled.width}px). The fold waits for transitionend on grid-template-columns (useSidebarCollapsePaint); a yielding column width must still transition.`
+      );
+    }
+    await wait(50);
+  }
+  console.log(
+    `[narrow-shell] 600px 창, 모션 켬: 접으면 목록 열이 hidden이 되고 사이드바는 레일 ${SIDEBAR_RAIL}px에 선다`
+  );
+  await context.close();
+}
+
+/**
  * 좁은 구간 스레드 패널의 리뷰용 스크린샷 (#1421). 판정하지 않는다.
  *
  * 700px 은 이 티켓이 고친 판의 한가운데이고(고치기 전 채널 열 140px · 컴포저
@@ -1513,7 +1753,7 @@ async function exerciseHeadClauseBand(browser, width) {
     });
   }
 
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   const geometry = await page.evaluate(() => {
@@ -1641,7 +1881,7 @@ async function exerciseProbeRuler(browser, wideWidth, width) {
   await installRealtimeSocket(page);
   await installRoutes(context, CO_OPEN_SCENARIO);
   await login(page);
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   const before = await page.evaluate(() => {
@@ -1807,7 +2047,7 @@ async function captureClauseShots(browser) {
       // 900px 에서만 pane 을 연다: 그 판이 이 티켓이 물려받은 판이고(#1418),
       // 390 과 1200 은 pane 없이도 각각 「가장 좁은 상자」와 「넉넉한 상자」다.
       if (width === 900) {
-        await openWorkPanelViaConsole(page, { allowHashFallback: true });
+        await openWorkPanelByAddress(page, channelId);
       }
       await page.setViewportSize({ width, height: 800 });
       await page.locator("#composer-input").waitFor();
@@ -1893,6 +2133,10 @@ async function main() {
       // 글자를 키운 뒤 928 으로 좁힌다: 자를 늙게 하는 사건과 자를 쓰게 하는
       // 사건이 따로 오는 그 순서가 이 결함이 화면에 나오는 순서다.
       await exerciseProbeRuler(browser, 1280, 928);
+      // 좁은 웹 창의 채널 컴포저 바닥 (#5093, #5048 D4). 사이드바가 324가 된 뒤 600~629px에서
+      // 컴포저가 210px였다. 격자(폭 × 사이드바 × 스레드)와, 양보하는 열이 접힐 때의 전환.
+      await exerciseNarrowShellComposerFloor(browser);
+      await exerciseNarrowShellCollapseMotion(browser);
       // 문턱 아래의 스레드 패널 (#1421). 600 과 899 는 구간의 양 끝이고, 700 은
       // 티켓이 인용한 실측(컴포저 36px)이 난 폭이다. 양 끝만 재면 그 사이에서
       // 무엇이 달라지는지 아무도 모르고, 가운데만 재면 경계가 어디였는지 모른다.
@@ -1912,7 +2156,7 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: delta arrival order, phase transitions, 승인 대기 vocabulary,"
+    "GATE PASS: delta arrival order, phase transitions, 승인 필요 vocabulary,"
   );
   console.log(
     "           mid-run truncation notice, folded tool args, and volatile reopen"
@@ -1955,9 +2199,10 @@ async function main() {
     "           standing beside it, the covered column leaves the tab order"
   );
   console.log(
-    "           with it, and both composers stay above their floor at 600,"
+    "           with it, an open thread never narrows the channel composer and"
   );
-  console.log("           700 and 899px. In that same band the thread drawer escapes");
+  console.log("           the reply composer stays above its floor at 600, 700 and");
+  console.log("           899px. In that same band the thread drawer escapes");
   console.log(
     "           by keyboard like the 작업 세션 drawer: Escape inside the reply"
   );
@@ -1965,6 +2210,18 @@ async function main() {
     "           composer closes it, and the close button hands the caret back to"
   );
   console.log("           the control that opened it rather than dropping it on body.");
+  console.log(
+    "           The chat column keeps its composer floor in narrow web windows:"
+  );
+  console.log(
+    "           at 600, 629, 630, 650, 719, 720 and 1024px, sidebar open or folded,"
+  );
+  console.log(
+    "           thread closed or open, the composer stays at or above 240px while"
+  );
+  console.log(
+    "           the sidebar column yields below 630px and nothing at or above it moves."
+  );
 }
 
 main().catch((error) => {

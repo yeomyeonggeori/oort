@@ -3,7 +3,7 @@
   "description": "oort team instance on Railway: one GHCR image (api · relay · webhook-sender · agent-worker · notifier · push-relay), the same-server Hermes (official image, no public domain, tool-lock gate), Caddy public edge, Centrifugo, Postgres 18 + pgvector as an image service with a volume. LiveKit/huddle excluded.",
   "appImage": {
     "ref": "ghcr.io/yeomyeonggeori/oort",
-    "digest": "sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+    "digest": "sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
     "source": "releases/latest.json images.app"
   },
   "notes": {
@@ -14,7 +14,7 @@
     "preDeploy": "Pre-deploy is one `/bin/sh -c` string: `VAR=… cmd && …` needs a shell and Railway does not say how it executes the command. It runs in the api service's variables, which is why api carries MIGRATE_DATABASE_URL and the role passwords; the api start command drops them with `env -u` before the server starts, so the running api holds only momo_app (NOBYPASSRLS). Volumes are not mounted during pre-deploy. The api variables are the --claim variant (the team instance); the password variant swaps MOMO_BOOTSTRAP_CLAIM for MOMO_INITIAL_OWNER_PASSWORD, which the start command also drops. RAILWAY_RUN_UID=0 applies to pre-deploy too, so the string defines run(): as root it runs each momo-migrate through setpriv to uid 10001 (momo-migrate needs no root), as any other user it runs it as is.",
     "postgres": "An image service, not the Railway Postgres template: migrations need PG18 (uuidv7, 001) and pgvector (028), and Railway's default templates add no extensions. Same pin as infra/rust/docker-compose.rust.yml. An image service provides no DATABASE_URL; compose it by hand from a random hex password (README).",
     "centrifugo": "The generator writes the compose variable names (CENT_TOKEN_HMAC, CENT_API_KEY, CENTRIFUGO_ALLOWED_ORIGINS, CENT_PROXY_SECRET). Centrifugo v6 reads only its own names, so services.centrifugo.variables maps the four. Without them Centrifugo boots silently, every publish is 401 (API key is empty) and every browser/desktop WebSocket upgrade is 403 (empty allowed_origins).",
-    "drive": "api stores attachments under MOMO_DRIVE_LOCAL_DIR (/var/lib/oort/drive) on a Railway volume. Railway volumes mount root-owned and the image runs as uid 10001, so api sets RAILWAY_RUN_UID=0, creates the directory, chowns it recursively (files a root one-off left behind go back to momo; the walk is cheap at team scale), then drops to momo with setpriv. The init-and-drop step belongs in the image entrypoint long term (#2574).",
+    "drive": "api stores attachments under MOMO_DRIVE_LOCAL_DIR (/var/lib/oort/drive) on a Railway volume. Railway volumes mount root-owned and the image runs as uid 10001, so api sets RAILWAY_RUN_UID=0, creates the directory, chowns it recursively (files a root one-off left behind go back to momo; the walk is cheap at team scale), then drops to momo with setpriv. The init-and-drop step belongs in the image entrypoint long term (#2574). A Railway volume attaches to ONE service, so agent-worker cannot read it: a picture a person sent that the team AI turns into a profile image is read THROUGH the api instead (#4934, ADR-0151 증보 3) — agent-worker mints a single-use address in the database and spends it itself at OORT_API_INTERNAL_ORIGIN, the api's own private address (http://api.railway.internal:8080, derived from api privateHostname + port; never the public edge), so no MOMO_DRIVE_* variable is needed on agent-worker.",
     "push": "push-relay holds the APNs .p8, notifier holds the Ed25519 relay signing key. Railway has no file secrets, so each start command decodes one sealed base64 variable into /dev/shm with umask 077, unsets the variable, and passes the path. Unless /dev/shm is a writable tmpfs (stat -f -c %T) → boot refusal (exit 78), never a key on disk. MOMO_APNS_ENV=production: TestFlight and App Store builds register production tokens. The owner approved the APNs key as a sealed variable on 2026-09-23 (ADR-0187 §5).",
     "webhookSenderKeys": "webhook-sender must be given OUTBOUND_WEBHOOK_MASTER_KEY explicitly, with the same value as api (the same shared reference). #2066 deleted the binary's JWT_HMAC fallback, and this file is not a compose rendering — there is no `${VAR:?}` to catch a variable that reached api but not this service. Its DSN resolves WEBHOOK_SENDER_DATABASE_URL → RELAY_DATABASE_URL → DATABASE_URL, so the generator's RELAY_DATABASE_URL is enough when no dedicated credential is set.",
     "livekit": "Excluded (huddle deferred). Do not add a LiveKit service.",
@@ -61,7 +61,7 @@
     },
     "api": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "/bin/sh -c 'set -eu; [ \"$(id -u)\" = 0 ] || { echo \"api: RAILWAY_RUN_UID=0 이 필요하다 (드라이브 볼륨은 root 소유로 붙는다)\" >&2; exit 78; }; d=\"${MOMO_DRIVE_LOCAL_DIR:?MOMO_DRIVE_LOCAL_DIR is required}\"; mkdir -p \"$d\"; chown -R momo:momo \"$d\"; exec setpriv --reuid=momo --regid=momo --init-groups env -u MIGRATE_DATABASE_URL -u POSTGRES_PASSWORD -u MOMO_APP_POSTGRES_PASSWORD -u RELAY_POSTGRES_PASSWORD -u WORKER_POSTGRES_PASSWORD -u NOTIFIER_POSTGRES_PASSWORD -u MOMO_INITIAL_OWNER_PASSWORD HOME=/home/momo momo-rust-entrypoint api'",
       "preDeployCommand": [
         "/bin/sh -c 'set -eu; run() { if [ \"$(id -u)\" = 0 ]; then setpriv --reuid=momo --regid=momo --init-groups env HOME=/home/momo \"$@\"; else \"$@\"; fi; }; run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1 /usr/local/bin/momo-migrate && run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_BOOTSTRAP_RUNTIME_ROLES=0 MOMO_ENV=\"${MOMO_MIGRATE_ENV:-development}\" /usr/local/bin/momo-migrate'"
@@ -118,7 +118,7 @@
     },
     "relay": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "momo-rust-entrypoint relay",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -130,7 +130,7 @@
     },
     "webhook-sender": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "momo-rust-entrypoint webhook-sender",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -142,7 +142,7 @@
     },
     "agent-worker": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "momo-rust-entrypoint agent-worker",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -154,13 +154,14 @@
         "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK": "1",
         "AGENT_PROVIDER_LOCAL_HOSTS": "hermes.railway.internal",
         "OORT_SELF_MEDIA_ORIGIN": "https://${{shared.OORT_SITE_ADDRESS}}",
+        "OORT_API_INTERNAL_ORIGIN": "http://api.railway.internal:8080",
         "OORT_HOSTED_MEDIA_STRICT": ""
       }
     },
     "hermes": {
       "public": false,
       "image": "nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919",
-      "startCommand": "/bin/sh -c 'set -eu; umask 022; : \"${HERMES_CONFIG_B64:?}\" \"${HERMES_LOCKGATE_B64:?}\" \"${HERMES_IMAGE_GUARD_B64:?}\" \"${HERMES_IMAGE_GUARD_MANIFEST_B64:?}\" \"${API_SERVER_KEY:?}\"; mkdir -p /opt/data/plugins/oort-image-guard; printf %s \"$HERMES_CONFIG_B64\" | base64 -d > /opt/data/config.yaml; printf %s \"$HERMES_LOCKGATE_B64\" | base64 -d > /tmp/lockgate.py; printf %s \"$HERMES_IMAGE_GUARD_B64\" | base64 -d > /opt/data/plugins/oort-image-guard/__init__.py; printf %s \"$HERMES_IMAGE_GUARD_MANIFEST_B64\" | base64 -d > /opt/data/plugins/oort-image-guard/plugin.yaml; echo \"a48f95324ec631f1a84e0153d99f92eaa16bc7288486e45280b70c031b9a7ec1  /opt/data/config.yaml\" | sha256sum -c -; echo \"fa339e2a0a139b695ced12dab19364e86aa651b967c6ac5fa16007c5661105d0  /tmp/lockgate.py\" | sha256sum -c -; echo \"c84147c4bfdd15914b11447c39311225b21017e3f1e317c4329bb422f5be639f  /opt/data/plugins/oort-image-guard/__init__.py\" | sha256sum -c -; echo \"10d3fd436927cf819380016614edbe12d029d372a2bd995da128726d905bc936  /opt/data/plugins/oort-image-guard/plugin.yaml\" | sha256sum -c -; /opt/hermes/.venv/bin/python /tmp/lockgate.py gate /opt/data/config.yaml; [ -z \"${HERMES_LOGIN_RELAY_KEY:-}\" ] || { : \"${HERMES_LOGIN_RELAY_B64:?}\" \"${HERMES_LOGIN_PROBE_B64:?}\"; printf %s \"$HERMES_LOGIN_RELAY_B64\" | base64 -d > /tmp/login_relay.py; printf %s \"$HERMES_LOGIN_PROBE_B64\" | base64 -d > /tmp/mcp_login_probe.py; echo \"6970538b3d8c62d433fbc770bd7e23b9afaa5e9885803b1b091c72f9fbfe299d  /tmp/login_relay.py\" | sha256sum -c -; echo \"c1c4a79e49ac06aba376127e8cddbdfdf0da533087a2173557b12876ef95e634  /tmp/mcp_login_probe.py\" | sha256sum -c -; OORT_LOGIN_RELAY_PROBE=/tmp/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /tmp/login_relay.py launch & }; unset HERMES_LOGIN_RELAY_KEY HERMES_LOGIN_RELAY_B64 HERMES_LOGIN_PROBE_B64; /opt/hermes/.venv/bin/python /tmp/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run'",
+      "startCommand": "/bin/sh -c 'set -eu; umask 022; : \"${HERMES_CONFIG_B64:?}\" \"${HERMES_LOCKGATE_B64:?}\" \"${HERMES_IMAGE_GUARD_B64:?}\" \"${HERMES_IMAGE_GUARD_MANIFEST_B64:?}\" \"${API_SERVER_KEY:?}\"; mkdir -p /opt/data/plugins/oort-image-guard; printf %s \"$HERMES_CONFIG_B64\" | base64 -d > /opt/data/config.yaml; printf %s \"$HERMES_LOCKGATE_B64\" | base64 -d > /tmp/lockgate.py; printf %s \"$HERMES_IMAGE_GUARD_B64\" | base64 -d > /opt/data/plugins/oort-image-guard/__init__.py; printf %s \"$HERMES_IMAGE_GUARD_MANIFEST_B64\" | base64 -d > /opt/data/plugins/oort-image-guard/plugin.yaml; sha256sum /opt/data/config.yaml | cut -c1-64 | grep -qxF -e 619d1717d53167864221fa6d9c698376ef462dc75e7b03fc302ab1fffd4d7ad6 -e eb8a4b4227da0ca959efe6ccab2789063c326c781cf08b83efbb5afa7f04a5e3 -e b553b153bce1560ffdf8a8efabefc9bf1880daa71cf96eacb6e8979a493dbe32 -e 70098ae61b114bd1c14f1212ae434038ef502e2ecec370d934544a28a60fe186 -e 622775b63e7840d6a08a566fff57c07df13cd6bf542695d631e0ef1a7fc0ae2a || { echo \"config.yaml is not one of the accepted configs\" >&2; exit 78; }; echo \"bdbd10fce29788e4a6fcd345bf46bd068642b92d30928196a99d9087d5e0b95f  /tmp/lockgate.py\" | sha256sum -c -; echo \"c84147c4bfdd15914b11447c39311225b21017e3f1e317c4329bb422f5be639f  /opt/data/plugins/oort-image-guard/__init__.py\" | sha256sum -c -; echo \"10d3fd436927cf819380016614edbe12d029d372a2bd995da128726d905bc936  /opt/data/plugins/oort-image-guard/plugin.yaml\" | sha256sum -c -; /opt/hermes/.venv/bin/python /tmp/lockgate.py gate /opt/data/config.yaml; [ -z \"${HERMES_LOGIN_RELAY_KEY:-}\" ] || { : \"${HERMES_LOGIN_RELAY_B64:?}\" \"${HERMES_LOGIN_PROBE_B64:?}\"; printf %s \"$HERMES_LOGIN_RELAY_B64\" | base64 -d > /tmp/login_relay.py; printf %s \"$HERMES_LOGIN_PROBE_B64\" | base64 -d > /tmp/mcp_login_probe.py; echo \"6970538b3d8c62d433fbc770bd7e23b9afaa5e9885803b1b091c72f9fbfe299d  /tmp/login_relay.py\" | sha256sum -c -; echo \"c1c4a79e49ac06aba376127e8cddbdfdf0da533087a2173557b12876ef95e634  /tmp/mcp_login_probe.py\" | sha256sum -c -; OORT_LOGIN_RELAY_PROBE=/tmp/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /tmp/login_relay.py launch & }; unset HERMES_LOGIN_RELAY_KEY HERMES_LOGIN_RELAY_B64 HERMES_LOGIN_PROBE_B64; /opt/hermes/.venv/bin/python /tmp/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run'",
       "port": 8642,
       "privateHostname": "hermes.railway.internal",
       "volume": {
@@ -184,7 +185,7 @@
     },
     "notifier": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "/bin/sh -c 'set -eu; umask 077; [ -d /dev/shm ] && [ -w /dev/shm ] && [ \"$(stat -f -c %T /dev/shm)\" = tmpfs ] || { echo \"notifier: /dev/shm 가 쓰기 가능한 tmpfs 가 아니다 — 서명키를 디스크에 쓰지 않는다\" >&2; exit 78; }; : \"${RELAY_SIGNING_KEY_B64:?RELAY_SIGNING_KEY_B64 is required}\"; k=/dev/shm/relay-signing-key.pem; printf %s \"$RELAY_SIGNING_KEY_B64\" | base64 -d >\"$k\"; [ -s \"$k\" ]; unset RELAY_SIGNING_KEY_B64; export MOMO_PUSH_RELAY_PRIVATE_KEY_PATH=\"$k\"; exec momo-rust-entrypoint notifier'",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -202,7 +203,7 @@
     },
     "push-relay": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:a5b36e83090bbbe4764d272a6ab95a6cd686e6f9f4919ca64cae1e7212857200",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:14607c058bea57b43591422577bfa3c02cde3bf5d0dbccc1a3d03c68c7741288",
       "startCommand": "/bin/sh -c 'set -eu; umask 077; [ -d /dev/shm ] && [ -w /dev/shm ] && [ \"$(stat -f -c %T /dev/shm)\" = tmpfs ] || { echo \"push-relay: /dev/shm 가 쓰기 가능한 tmpfs 가 아니다 — APNs 키를 디스크에 쓰지 않는다\" >&2; exit 78; }; : \"${APNS_KEY_P8_B64:?APNS_KEY_P8_B64 is required}\"; k=/dev/shm/apns-key.p8; printf %s \"$APNS_KEY_P8_B64\" | base64 -d >\"$k\"; [ -s \"$k\" ]; unset APNS_KEY_P8_B64; export MOMO_APNS_KEY_PATH=\"$k\"; exec momo-rust-entrypoint push-relay'",
       "port": 28195,
       "privateHostname": "push-relay.railway.internal",
