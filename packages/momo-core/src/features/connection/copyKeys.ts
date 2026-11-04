@@ -55,9 +55,26 @@ export const CONNECTION_KEYS = {
   loadMembersTitle: "connection.load.membersTitle",
   /** 받아 둔 글이 있을 때 목록 위 한 줄(상자로 덮지 않는다). */
   loadNewerTitle: "connection.load.newerTitle",
+  loadInboxTitle: "connection.load.inboxTitle",
+  loadInboxMoreTitle: "connection.load.inboxMoreTitle",
+  loadMemberProfileTitle: "connection.load.memberProfileTitle",
+  loadAgentRosterTitle: "connection.load.agentRosterTitle",
+  loadAgentProfileTitle: "connection.load.agentProfileTitle",
+  loadAgentHistoryTitle: "connection.load.agentHistoryTitle",
+  loadAgentChannelsTitle: "connection.load.agentChannelsTitle",
+  loadAgentRunTitle: "connection.load.agentRunTitle",
+  loadActivityTitle: "connection.load.activityTitle",
+  loadDeviceKeysTitle: "connection.load.deviceKeysTitle",
+  loadLinkedDevicesTitle: "connection.load.linkedDevicesTitle",
+  loadNotificationRulesTitle: "connection.load.notificationRulesTitle",
+  loadLinkPreviewSettingTitle: "connection.load.linkPreviewSettingTitle",
+  loadHermesStatusTitle: "connection.load.hermesStatusTitle",
+  loadDmApprovalTitle: "connection.load.dmApprovalTitle",
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",
+  /** 값 `title`·`reason`(제목 문장과 이유 문장)을 받는다. 상자가 안 맞는 좁은 자리의 한 줄이 둘을 잇는다. */
+  loadSentence: "connection.load.sentence",
   // 보내기 실패
   sendFailed: "connection.send.failed",
   resend: "connection.send.resend",
@@ -74,5 +91,12 @@ export const CONNECTION_KEYS = {
   uploadFailedNoArchive: "connection.upload.failedNoArchive",
   // 앱 전체
   sessionExpired: "connection.session.expired",
+  /**
+   * 로그인 전 화면(`ConnectScreen`)의 오프라인 안내 상자 설명(#5262). 제목은 `offlineTitle`을 쓴다. 카드의 `offlineDetail`은 「받아 둔 내용만 보여요」라
+   * 받아 둔 것이 없는 로그인 전 화면에는 맞지 않는다.
+   */
+  bootOfflineDetail: "connection.boot.offlineDetail",
+  /** 환영 화면에서 오프라인일 때 QR을 찍을 수 없는 까닭 한 줄(#5262). */
+  bootOfflineQrDetail: "connection.boot.offlineQrDetail",
   bootUnreachable: "connection.boot.unreachable",
 } as const satisfies Record<string, ConnectionKey>;

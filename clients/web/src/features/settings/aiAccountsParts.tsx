@@ -3,6 +3,7 @@ import { Loader2, Lock, MoreHorizontal, WifiOff, X } from "lucide-react";
 import type { AiPillTone } from "@momo/core/features/settings/aiLinkPill";
 import { literalSegments } from "@momo/core/features/settings/teamKeyForm";
 import { cn } from "@/design/lib/cn";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // AI의 부품 (#2877). 시안: claudedocs/ai-accounts/mockups.html §1·§6.
@@ -332,7 +333,7 @@ export function AiOfflineBanner() {
     >
       <WifiOff className="mt-1 size-4 shrink-0 text-warn" aria-hidden="true" />
       <p className="min-w-0 break-keep">
-        <b className="font-semibold">서버와 연결이 끊겼어요.</b> 팀 AI 키는 마지막으로 받은 값을
+        <b className="font-semibold"><BlockedReason frame="aiKeysLead" /></b> 팀 AI 키는 마지막으로 받은 값을
         보여 주고, 바꾸기는 다시 연결된 뒤에 할 수 있어요. 내 계정(이 맥)은 그대로 쓸 수 있어요.
       </p>
     </div>

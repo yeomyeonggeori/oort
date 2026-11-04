@@ -37,3 +37,11 @@ export function causeOfFailure(failure: unknown, deviceOnline: boolean | null): 
   }
   return null;
 }
+
+/**
+ * 오류 객체를 **모르는** 자리의 원인(훅이 `isError`만 내놓거나 원천이 여럿이라 하나로 말할 수 없다). 기기가 아는 사실 하나만 안다:
+ * 꺼져 있으면 오프라인, 아니면 원인 없음(모르면 `null`, 오프라인이라 하지 않는다).
+ */
+export function causeOfUnknownFailure(deviceOnline: boolean | null): ConnectionCause | null {
+  return deviceOnline === false ? "deviceOffline" : null;
+}

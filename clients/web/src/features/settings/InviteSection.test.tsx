@@ -165,7 +165,7 @@ describe("설정 › 멤버와 초대", () => {
     const button = byId(h, "invite-create") as HTMLButtonElement;
     expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.getAttribute("aria-describedby")).toBe("invite-create-offline-note");
-    expect(byId(h, "invite-create-offline")?.textContent).toContain("다시 연결되면 이어서 만들 수 있어요");
+    expect(byId(h, "invite-create-offline")?.textContent).toContain("You can pick up where you left off once you're connected again");
     await act(async () => {
       button.click();
     });

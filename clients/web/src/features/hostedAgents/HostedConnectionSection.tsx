@@ -80,6 +80,7 @@ import {
   hostedConnectionDetailQueryKey,
   invalidateHostedConnection,
 } from "./hostedDisconnectScope";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 호스티드 연결의 해제 — 즉시 끊기는 것과 사람이 확인하는 것 (HAP-UX2 / #1362).
@@ -620,7 +621,7 @@ function StartPanel({
       {blocked && (
         <p id={blockedId} className="break-keep text-meta text-ink-muted">
           {gate.allowed
-            ? "연결이 끊겨 있어 지금은 해제를 시작할 수 없어요."
+            ? <BlockedReason frame="startDisconnect" />
             : gate.blockedCopy}
         </p>
       )}
@@ -936,7 +937,7 @@ function TerminalPanel({
           data-testid="hosted-terminal-blocked"
         >
           {gate.allowed
-            ? "연결이 끊겨 있어 지금은 해제를 확정할 수 없어요."
+            ? <BlockedReason frame="confirmDisconnect" />
             : gate.blockedCopy}
         </p>
       )}

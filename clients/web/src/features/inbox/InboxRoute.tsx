@@ -10,6 +10,10 @@ import {
   Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { reminderIsOverdue } from "@momo/core/features/reminders/model";
@@ -43,6 +47,7 @@ import {
   webMailboxPanelId,
   webMailboxTabId,
 } from "./mailboxTab";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 (#3663). 메일함·알림함처럼 **나와 관련된 것의 목록**과 오른쪽의 **맥락 패널**.
@@ -148,6 +153,7 @@ export function InboxRoute() {
   const mailbox = useMailbox(
     rawFilter === "reminders" ? "reminders" : parseMailboxFilter(rawFilter)
   );
+  const formatMessage = useFormatMessage();
   const isServer = mailbox.source === "server";
   const tabs = useMemo(
     () => mailboxTabs(tasksProvided, isServer),
@@ -443,12 +449,13 @@ export function InboxRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태예요.`
-              : "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+            <BlockedListLine
+              relativeTime={
+                (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
+                  ? relativeLabel(filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs, Date.now())
+                  : null
+              }
+            />
           }
           testId="inbox-offline"
         />
@@ -480,10 +487,10 @@ export function InboxRoute() {
               }
             >
               {state === "error" ? (
-                <InlineBanner
-                  message="인박스를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={mailbox.refetch}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadInboxTitle}
+                  cause={loadCauseOf(mailbox.failure)}
+                  onRetry={mailbox.refetch}
                   testId="inbox-error"
                 />
               ) : filter === "task" && mailbox.tasksAbsent ? (
@@ -533,7 +540,11 @@ export function InboxRoute() {
                               role="status"
                               data-testid="inbox-more-error"
                             >
-                              다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요.
+                              {loadFailureSentence(
+                                formatMessage,
+                                CONNECTION_KEYS.loadInboxMoreTitle,
+                                loadCauseOf(mailbox.failure)
+                              )}
                             </p>
                           )}
                         </div>

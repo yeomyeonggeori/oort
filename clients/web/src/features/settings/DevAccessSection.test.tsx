@@ -23,6 +23,9 @@ import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { chooseListbox } from "@/design/ui/listboxTestKit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { DevAccessSection } from "./DevAccessSection";
 import { devAccessPolicyQueryKey } from "./devAccessQuery";
 
@@ -176,22 +179,26 @@ function revokeCalls(): Call[] {
 
 let client: QueryClient;
 
-function mount(options: { offline?: boolean } = {}) {
+let ko: AppLocale;
+
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+function mount(options: { offline?: boolean; korean?: boolean } = {}) {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const page = (
     <QueryClientProvider client={client}>
       <DevAccessSection workspaceId={WS} memberId={ME} offline={options.offline ?? false} />
     </QueryClientProvider>
   );
+  return render(options.korean ? <LocaleProvider locale={ko}>{page}</LocaleProvider> : page);
 }
 
 const byId = (id: string) => screen.getByTestId(id);
 const maybe = (id: string) => screen.queryByTestId(id);
 const input = (id: string) => byId(id) as HTMLInputElement;
 
-async function mountReady(options: { offline?: boolean } = {}) {
+async function mountReady(options: { offline?: boolean; korean?: boolean } = {}) {
   const view = mount(options);
   await screen.findByTestId("dev-access-create-form");
   return view;
@@ -240,7 +247,8 @@ function cacheDump(): string {
   return JSON.stringify([queries, mutations]);
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  ko = await koreanLocale();
   // 이 클라이언트의 시험은 vitest 전역(`beforeAll`)을 쓰지 않아 RTL이 act 환경을 켜 주지 않는다.
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -1177,6 +1185,24 @@ describe("명령줄·AI 도구: 고른 채널", () => {
     await mountReady();
     fireEvent.click(byId("dev-access-restrict"));
     await screen.findByTestId("dev-access-channels-empty");
+  });
+
+  // #5242: 옛 「채널 목록을 불러오지 못했어요. 다시 시도해 주세요.」는 원인을 말하는 한 줄이다(서버에 닿지 못함 / 그 밖).
+  it("채널 목록을 못 받으면 제목 뒤에 원인이 붙은 한 줄이 선다", async () => {
+    const cases: [number, string][] = [
+      [502, "채널 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [500, "채널 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [status, sentence] of cases) {
+      routes[`GET /v1/workspaces/${WS}/channels`] = () => errorBody(null, status);
+      const view = await mountReady({ korean: true });
+      fireEvent.click(byId("dev-access-restrict"));
+      const banner = await screen.findByTestId("dev-access-channels-error");
+      expect(banner.getAttribute("role")).toBe("alert");
+      expect(banner.textContent).toContain(sentence);
+      expect(banner.textContent).not.toMatch(/\d{3}/);
+      view.unmount();
+    }
   });
 
   it("채널 목록을 못 받으면 다시 시도로 이어진다", async () => {

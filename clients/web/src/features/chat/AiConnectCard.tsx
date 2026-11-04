@@ -74,6 +74,7 @@ import {
   type RegisterPose,
 } from "@/features/welcome/harnessLogin/registerFixtures";
 import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
 // internal team users on web+Tauri, density 6/10, motion 2/10.
@@ -103,7 +104,7 @@ import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionR
 
 const TEAM_QUERY_KEY = ["settings", "provider-link"] as const;
 
-const OFFLINE_NOTE = "연결이 끊겨 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요.";
+const OFFLINE_NOTE: BlockedFrame = "changeTeamAiKey";
 const TEAM_DENIED_LINE = "팀 키는 운영자만 바꾸고 확인할 수 있어요.";
 const TEAM_EMPTY_SUB = "아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요";
 const OPERATOR_FOOT = "운영자만 보이는 입력이에요. 키는 서버 금고에 봉인되고 쓰기 전용이에요.";
@@ -1092,7 +1093,7 @@ function TeamSection({
         {body}
         {offline && operator && (
           <p id={`${headId}-offline`} className="break-keep pb-2 text-meta text-ink-muted" data-testid="ai-connect-card-offline">
-            {OFFLINE_NOTE}
+            <BlockedReason frame={OFFLINE_NOTE} />
           </p>
         )}
       </div>

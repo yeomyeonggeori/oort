@@ -21,6 +21,156 @@ export const messageKeys = [
   "attachments.video.unmute",
   "attachments.viewer.mixedCaption",
   "attachments.viewer.mixedCaptionLabel",
+  "blocked.addMemberLater.offline",
+  "blocked.addMemberLater.serverUnreachable",
+  "blocked.aiKeysLead.offline",
+  "blocked.aiKeysLead.serverUnreachable",
+  "blocked.approveOrDisconnect.offline",
+  "blocked.approveOrDisconnect.serverUnreachable",
+  "blocked.changeAiLink.offline",
+  "blocked.changeAiLink.serverUnreachable",
+  "blocked.changeHere.offline",
+  "blocked.changeHere.serverUnreachable",
+  "blocked.changeIt.offline",
+  "blocked.changeIt.serverUnreachable",
+  "blocked.changeLimits.offline",
+  "blocked.changeLimits.serverUnreachable",
+  "blocked.changeProfile.offline",
+  "blocked.changeProfile.serverUnreachable",
+  "blocked.changeRules.offline",
+  "blocked.changeRules.serverUnreachable",
+  "blocked.changeSetting.offline",
+  "blocked.changeSetting.serverUnreachable",
+  "blocked.changeStatus.offline",
+  "blocked.changeStatus.serverUnreachable",
+  "blocked.changeTeamAiKey.offline",
+  "blocked.changeTeamAiKey.serverUnreachable",
+  "blocked.confirmDisconnect.offline",
+  "blocked.confirmDisconnect.serverUnreachable",
+  "blocked.contentStale.offline",
+  "blocked.contentStale.serverUnreachable",
+  "blocked.createAgentLater.offline",
+  "blocked.createAgentLater.serverUnreachable",
+  "blocked.createChannelLater.offline",
+  "blocked.createChannelLater.serverUnreachable",
+  "blocked.createDevAccess.offline",
+  "blocked.createDevAccess.serverUnreachable",
+  "blocked.createInviteLink.offline",
+  "blocked.createInviteLink.serverUnreachable",
+  "blocked.createQrLater.offline",
+  "blocked.createQrLater.serverUnreachable",
+  "blocked.createThing.offline",
+  "blocked.createThing.serverUnreachable",
+  "blocked.createWebhookUrl.offline",
+  "blocked.createWebhookUrl.serverUnreachable",
+  "blocked.createWorkspace.offline",
+  "blocked.createWorkspace.serverUnreachable",
+  "blocked.createWorkspaceLater.offline",
+  "blocked.createWorkspaceLater.serverUnreachable",
+  "blocked.decideNow.offline",
+  "blocked.decideNow.serverUnreachable",
+  "blocked.decisionStage.offline",
+  "blocked.decisionStage.serverUnreachable",
+  "blocked.delegate.offline",
+  "blocked.delegate.serverUnreachable",
+  "blocked.deleteDevAccess.offline",
+  "blocked.deleteDevAccess.serverUnreachable",
+  "blocked.doThis.offline",
+  "blocked.doThis.serverUnreachable",
+  "blocked.doThisLater.offline",
+  "blocked.doThisLater.serverUnreachable",
+  "blocked.draftsOnDevice.offline",
+  "blocked.draftsOnDevice.serverUnreachable",
+  "blocked.huddleJoined.offline",
+  "blocked.huddleJoined.serverUnreachable",
+  "blocked.huddleUnavailable.offline",
+  "blocked.huddleUnavailable.serverUnreachable",
+  "blocked.inboxReply.offline",
+  "blocked.inboxReply.serverUnreachable",
+  "blocked.issueCredential.offline",
+  "blocked.issueCredential.serverUnreachable",
+  "blocked.issueKey.offline",
+  "blocked.issueKey.serverUnreachable",
+  "blocked.keepListIssueLater.offline",
+  "blocked.keepListIssueLater.serverUnreachable",
+  "blocked.keepViewChangeLater.offline",
+  "blocked.keepViewChangeLater.serverUnreachable",
+  "blocked.keepViewIssueLater.offline",
+  "blocked.keepViewIssueLater.serverUnreachable",
+  "blocked.lastSyncedList.offline",
+  "blocked.lastSyncedList.serverUnreachable",
+  "blocked.listStale.offline",
+  "blocked.listStale.serverUnreachable",
+  "blocked.loadHosts.offline",
+  "blocked.loadHosts.serverUnreachable",
+  "blocked.loadPolicy.offline",
+  "blocked.loadPolicy.serverUnreachable",
+  "blocked.loadWorkspaceDefaults.offline",
+  "blocked.loadWorkspaceDefaults.serverUnreachable",
+  "blocked.loginHandoff.offline",
+  "blocked.loginHandoff.serverUnreachable",
+  "blocked.memberListStale.offline",
+  "blocked.memberListStale.serverUnreachable",
+  "blocked.neverReceivedList.offline",
+  "blocked.neverReceivedList.serverUnreachable",
+  "blocked.openExistingDm.offline",
+  "blocked.openExistingDm.serverUnreachable",
+  "blocked.register.offline",
+  "blocked.register.serverUnreachable",
+  "blocked.relinkKey.offline",
+  "blocked.relinkKey.serverUnreachable",
+  "blocked.reloadPicturesLater.offline",
+  "blocked.reloadPicturesLater.serverUnreachable",
+  "blocked.revokeKey.offline",
+  "blocked.revokeKey.serverUnreachable",
+  "blocked.rotateOrRevoke.offline",
+  "blocked.rotateOrRevoke.serverUnreachable",
+  "blocked.saveAfterReconnect.offline",
+  "blocked.saveAfterReconnect.serverUnreachable",
+  "blocked.saveChangesLater.offline",
+  "blocked.saveChangesLater.serverUnreachable",
+  "blocked.saveDisplayName.offline",
+  "blocked.saveDisplayName.serverUnreachable",
+  "blocked.saveIt.offline",
+  "blocked.saveIt.serverUnreachable",
+  "blocked.saveName.offline",
+  "blocked.saveName.serverUnreachable",
+  "blocked.saveNameResume.offline",
+  "blocked.saveNameResume.serverUnreachable",
+  "blocked.saveReminder.offline",
+  "blocked.saveReminder.serverUnreachable",
+  "blocked.saveWelcome.offline",
+  "blocked.saveWelcome.serverUnreachable",
+  "blocked.sendRequestLater.offline",
+  "blocked.sendRequestLater.serverUnreachable",
+  "blocked.signIn.offline",
+  "blocked.signIn.serverUnreachable",
+  "blocked.startDisconnect.offline",
+  "blocked.startDisconnect.serverUnreachable",
+  "blocked.stopOrDelete.offline",
+  "blocked.stopOrDelete.serverUnreachable",
+  "blocked.subscribe.offline",
+  "blocked.subscribe.serverUnreachable",
+  "blocked.terminalStale.offline",
+  "blocked.terminalStale.serverUnreachable",
+  "blocked.turnOn.offline",
+  "blocked.turnOn.serverUnreachable",
+  "blocked.turnOnHelper.offline",
+  "blocked.turnOnHelper.serverUnreachable",
+  "blocked.unlinkDevice.offline",
+  "blocked.unlinkDevice.serverUnreachable",
+  "blocked.unlinkTeamAi.offline",
+  "blocked.unlinkTeamAi.serverUnreachable",
+  "blocked.unregister.offline",
+  "blocked.unregister.serverUnreachable",
+  "blocked.updatesPausedStale.offline",
+  "blocked.updatesPausedStale.serverUnreachable",
+  "blocked.waitAMoment.offline",
+  "blocked.waitAMoment.serverUnreachable",
+  "blocked.workStateNone.offline",
+  "blocked.workStateNone.serverUnreachable",
+  "blocked.workStateStale.offline",
+  "blocked.workStateStale.serverUnreachable",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -32,6 +182,8 @@ export const messageKeys = [
   "connection.action.retry",
   "connection.approval.offline",
   "connection.approval.serverUnreachable",
+  "connection.boot.offlineDetail",
+  "connection.boot.offlineQrDetail",
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
@@ -49,13 +201,29 @@ export const messageKeys = [
   "connection.card.unknownTitle",
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
+  "connection.load.activityTitle",
+  "connection.load.agentChannelsTitle",
+  "connection.load.agentHistoryTitle",
+  "connection.load.agentProfileTitle",
+  "connection.load.agentRosterTitle",
+  "connection.load.agentRunTitle",
   "connection.load.channelListTitle",
   "connection.load.conversationTitle",
+  "connection.load.deviceKeysTitle",
+  "connection.load.dmApprovalTitle",
+  "connection.load.hermesStatusTitle",
+  "connection.load.inboxMoreTitle",
+  "connection.load.inboxTitle",
+  "connection.load.linkedDevicesTitle",
+  "connection.load.linkPreviewSettingTitle",
+  "connection.load.memberProfileTitle",
   "connection.load.membersTitle",
   "connection.load.newerTitle",
+  "connection.load.notificationRulesTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
   "connection.load.reasonUnknown",
+  "connection.load.sentence",
   "connection.load.threadTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
@@ -788,6 +956,160 @@ export const argumentSpecs = {
     "position": "number",
     "total": "number"
   },
+  "blocked.addMemberLater.offline": {},
+  "blocked.addMemberLater.serverUnreachable": {},
+  "blocked.aiKeysLead.offline": {},
+  "blocked.aiKeysLead.serverUnreachable": {},
+  "blocked.approveOrDisconnect.offline": {},
+  "blocked.approveOrDisconnect.serverUnreachable": {},
+  "blocked.changeAiLink.offline": {},
+  "blocked.changeAiLink.serverUnreachable": {},
+  "blocked.changeHere.offline": {},
+  "blocked.changeHere.serverUnreachable": {},
+  "blocked.changeIt.offline": {},
+  "blocked.changeIt.serverUnreachable": {},
+  "blocked.changeLimits.offline": {},
+  "blocked.changeLimits.serverUnreachable": {},
+  "blocked.changeProfile.offline": {},
+  "blocked.changeProfile.serverUnreachable": {},
+  "blocked.changeRules.offline": {},
+  "blocked.changeRules.serverUnreachable": {},
+  "blocked.changeSetting.offline": {},
+  "blocked.changeSetting.serverUnreachable": {},
+  "blocked.changeStatus.offline": {},
+  "blocked.changeStatus.serverUnreachable": {},
+  "blocked.changeTeamAiKey.offline": {},
+  "blocked.changeTeamAiKey.serverUnreachable": {},
+  "blocked.confirmDisconnect.offline": {},
+  "blocked.confirmDisconnect.serverUnreachable": {},
+  "blocked.contentStale.offline": {},
+  "blocked.contentStale.serverUnreachable": {},
+  "blocked.createAgentLater.offline": {},
+  "blocked.createAgentLater.serverUnreachable": {},
+  "blocked.createChannelLater.offline": {},
+  "blocked.createChannelLater.serverUnreachable": {},
+  "blocked.createDevAccess.offline": {},
+  "blocked.createDevAccess.serverUnreachable": {},
+  "blocked.createInviteLink.offline": {},
+  "blocked.createInviteLink.serverUnreachable": {},
+  "blocked.createQrLater.offline": {},
+  "blocked.createQrLater.serverUnreachable": {},
+  "blocked.createThing.offline": {},
+  "blocked.createThing.serverUnreachable": {},
+  "blocked.createWebhookUrl.offline": {},
+  "blocked.createWebhookUrl.serverUnreachable": {},
+  "blocked.createWorkspace.offline": {},
+  "blocked.createWorkspace.serverUnreachable": {},
+  "blocked.createWorkspaceLater.offline": {},
+  "blocked.createWorkspaceLater.serverUnreachable": {},
+  "blocked.decideNow.offline": {},
+  "blocked.decideNow.serverUnreachable": {},
+  "blocked.decisionStage.offline": {},
+  "blocked.decisionStage.serverUnreachable": {},
+  "blocked.delegate.offline": {},
+  "blocked.delegate.serverUnreachable": {},
+  "blocked.deleteDevAccess.offline": {},
+  "blocked.deleteDevAccess.serverUnreachable": {},
+  "blocked.doThis.offline": {},
+  "blocked.doThis.serverUnreachable": {},
+  "blocked.doThisLater.offline": {},
+  "blocked.doThisLater.serverUnreachable": {},
+  "blocked.draftsOnDevice.offline": {},
+  "blocked.draftsOnDevice.serverUnreachable": {},
+  "blocked.huddleJoined.offline": {},
+  "blocked.huddleJoined.serverUnreachable": {},
+  "blocked.huddleUnavailable.offline": {},
+  "blocked.huddleUnavailable.serverUnreachable": {},
+  "blocked.inboxReply.offline": {},
+  "blocked.inboxReply.serverUnreachable": {},
+  "blocked.issueCredential.offline": {},
+  "blocked.issueCredential.serverUnreachable": {},
+  "blocked.issueKey.offline": {},
+  "blocked.issueKey.serverUnreachable": {},
+  "blocked.keepListIssueLater.offline": {},
+  "blocked.keepListIssueLater.serverUnreachable": {},
+  "blocked.keepViewChangeLater.offline": {},
+  "blocked.keepViewChangeLater.serverUnreachable": {},
+  "blocked.keepViewIssueLater.offline": {},
+  "blocked.keepViewIssueLater.serverUnreachable": {},
+  "blocked.lastSyncedList.offline": {
+    "relativeTime": "string"
+  },
+  "blocked.lastSyncedList.serverUnreachable": {
+    "relativeTime": "string"
+  },
+  "blocked.listStale.offline": {},
+  "blocked.listStale.serverUnreachable": {},
+  "blocked.loadHosts.offline": {},
+  "blocked.loadHosts.serverUnreachable": {},
+  "blocked.loadPolicy.offline": {},
+  "blocked.loadPolicy.serverUnreachable": {},
+  "blocked.loadWorkspaceDefaults.offline": {},
+  "blocked.loadWorkspaceDefaults.serverUnreachable": {},
+  "blocked.loginHandoff.offline": {},
+  "blocked.loginHandoff.serverUnreachable": {},
+  "blocked.memberListStale.offline": {},
+  "blocked.memberListStale.serverUnreachable": {},
+  "blocked.neverReceivedList.offline": {},
+  "blocked.neverReceivedList.serverUnreachable": {},
+  "blocked.openExistingDm.offline": {},
+  "blocked.openExistingDm.serverUnreachable": {},
+  "blocked.register.offline": {},
+  "blocked.register.serverUnreachable": {},
+  "blocked.relinkKey.offline": {},
+  "blocked.relinkKey.serverUnreachable": {},
+  "blocked.reloadPicturesLater.offline": {},
+  "blocked.reloadPicturesLater.serverUnreachable": {},
+  "blocked.revokeKey.offline": {},
+  "blocked.revokeKey.serverUnreachable": {},
+  "blocked.rotateOrRevoke.offline": {},
+  "blocked.rotateOrRevoke.serverUnreachable": {},
+  "blocked.saveAfterReconnect.offline": {},
+  "blocked.saveAfterReconnect.serverUnreachable": {},
+  "blocked.saveChangesLater.offline": {},
+  "blocked.saveChangesLater.serverUnreachable": {},
+  "blocked.saveDisplayName.offline": {},
+  "blocked.saveDisplayName.serverUnreachable": {},
+  "blocked.saveIt.offline": {},
+  "blocked.saveIt.serverUnreachable": {},
+  "blocked.saveName.offline": {},
+  "blocked.saveName.serverUnreachable": {},
+  "blocked.saveNameResume.offline": {},
+  "blocked.saveNameResume.serverUnreachable": {},
+  "blocked.saveReminder.offline": {},
+  "blocked.saveReminder.serverUnreachable": {},
+  "blocked.saveWelcome.offline": {},
+  "blocked.saveWelcome.serverUnreachable": {},
+  "blocked.sendRequestLater.offline": {},
+  "blocked.sendRequestLater.serverUnreachable": {},
+  "blocked.signIn.offline": {},
+  "blocked.signIn.serverUnreachable": {},
+  "blocked.startDisconnect.offline": {},
+  "blocked.startDisconnect.serverUnreachable": {},
+  "blocked.stopOrDelete.offline": {},
+  "blocked.stopOrDelete.serverUnreachable": {},
+  "blocked.subscribe.offline": {},
+  "blocked.subscribe.serverUnreachable": {},
+  "blocked.terminalStale.offline": {},
+  "blocked.terminalStale.serverUnreachable": {},
+  "blocked.turnOn.offline": {},
+  "blocked.turnOn.serverUnreachable": {},
+  "blocked.turnOnHelper.offline": {},
+  "blocked.turnOnHelper.serverUnreachable": {},
+  "blocked.unlinkDevice.offline": {},
+  "blocked.unlinkDevice.serverUnreachable": {},
+  "blocked.unlinkTeamAi.offline": {},
+  "blocked.unlinkTeamAi.serverUnreachable": {},
+  "blocked.unregister.offline": {},
+  "blocked.unregister.serverUnreachable": {},
+  "blocked.updatesPausedStale.offline": {},
+  "blocked.updatesPausedStale.serverUnreachable": {},
+  "blocked.waitAMoment.offline": {},
+  "blocked.waitAMoment.serverUnreachable": {},
+  "blocked.workStateNone.offline": {},
+  "blocked.workStateNone.serverUnreachable": {},
+  "blocked.workStateStale.offline": {},
+  "blocked.workStateStale.serverUnreachable": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -803,6 +1125,8 @@ export const argumentSpecs = {
   "connection.action.retry": {},
   "connection.approval.offline": {},
   "connection.approval.serverUnreachable": {},
+  "connection.boot.offlineDetail": {},
+  "connection.boot.offlineQrDetail": {},
   "connection.boot.unreachable": {},
   "connection.card.connecting": {},
   "connection.card.lastSynced": {
@@ -822,13 +1146,32 @@ export const argumentSpecs = {
   "connection.card.unknownTitle": {},
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
+  "connection.load.activityTitle": {},
+  "connection.load.agentChannelsTitle": {},
+  "connection.load.agentHistoryTitle": {},
+  "connection.load.agentProfileTitle": {},
+  "connection.load.agentRosterTitle": {},
+  "connection.load.agentRunTitle": {},
   "connection.load.channelListTitle": {},
   "connection.load.conversationTitle": {},
+  "connection.load.deviceKeysTitle": {},
+  "connection.load.dmApprovalTitle": {},
+  "connection.load.hermesStatusTitle": {},
+  "connection.load.inboxMoreTitle": {},
+  "connection.load.inboxTitle": {},
+  "connection.load.linkedDevicesTitle": {},
+  "connection.load.linkPreviewSettingTitle": {},
+  "connection.load.memberProfileTitle": {},
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
+  "connection.load.notificationRulesTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
   "connection.load.reasonUnknown": {},
+  "connection.load.sentence": {
+    "reason": "string",
+    "title": "string"
+  },
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
@@ -1726,6 +2069,156 @@ export interface MessageArgs {
   "attachments.video.unmute": Record<string, never>;
   "attachments.viewer.mixedCaption": { position: number; total: number };
   "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
+  "blocked.addMemberLater.offline": Record<string, never>;
+  "blocked.addMemberLater.serverUnreachable": Record<string, never>;
+  "blocked.aiKeysLead.offline": Record<string, never>;
+  "blocked.aiKeysLead.serverUnreachable": Record<string, never>;
+  "blocked.approveOrDisconnect.offline": Record<string, never>;
+  "blocked.approveOrDisconnect.serverUnreachable": Record<string, never>;
+  "blocked.changeAiLink.offline": Record<string, never>;
+  "blocked.changeAiLink.serverUnreachable": Record<string, never>;
+  "blocked.changeHere.offline": Record<string, never>;
+  "blocked.changeHere.serverUnreachable": Record<string, never>;
+  "blocked.changeIt.offline": Record<string, never>;
+  "blocked.changeIt.serverUnreachable": Record<string, never>;
+  "blocked.changeLimits.offline": Record<string, never>;
+  "blocked.changeLimits.serverUnreachable": Record<string, never>;
+  "blocked.changeProfile.offline": Record<string, never>;
+  "blocked.changeProfile.serverUnreachable": Record<string, never>;
+  "blocked.changeRules.offline": Record<string, never>;
+  "blocked.changeRules.serverUnreachable": Record<string, never>;
+  "blocked.changeSetting.offline": Record<string, never>;
+  "blocked.changeSetting.serverUnreachable": Record<string, never>;
+  "blocked.changeStatus.offline": Record<string, never>;
+  "blocked.changeStatus.serverUnreachable": Record<string, never>;
+  "blocked.changeTeamAiKey.offline": Record<string, never>;
+  "blocked.changeTeamAiKey.serverUnreachable": Record<string, never>;
+  "blocked.confirmDisconnect.offline": Record<string, never>;
+  "blocked.confirmDisconnect.serverUnreachable": Record<string, never>;
+  "blocked.contentStale.offline": Record<string, never>;
+  "blocked.contentStale.serverUnreachable": Record<string, never>;
+  "blocked.createAgentLater.offline": Record<string, never>;
+  "blocked.createAgentLater.serverUnreachable": Record<string, never>;
+  "blocked.createChannelLater.offline": Record<string, never>;
+  "blocked.createChannelLater.serverUnreachable": Record<string, never>;
+  "blocked.createDevAccess.offline": Record<string, never>;
+  "blocked.createDevAccess.serverUnreachable": Record<string, never>;
+  "blocked.createInviteLink.offline": Record<string, never>;
+  "blocked.createInviteLink.serverUnreachable": Record<string, never>;
+  "blocked.createQrLater.offline": Record<string, never>;
+  "blocked.createQrLater.serverUnreachable": Record<string, never>;
+  "blocked.createThing.offline": Record<string, never>;
+  "blocked.createThing.serverUnreachable": Record<string, never>;
+  "blocked.createWebhookUrl.offline": Record<string, never>;
+  "blocked.createWebhookUrl.serverUnreachable": Record<string, never>;
+  "blocked.createWorkspace.offline": Record<string, never>;
+  "blocked.createWorkspace.serverUnreachable": Record<string, never>;
+  "blocked.createWorkspaceLater.offline": Record<string, never>;
+  "blocked.createWorkspaceLater.serverUnreachable": Record<string, never>;
+  "blocked.decideNow.offline": Record<string, never>;
+  "blocked.decideNow.serverUnreachable": Record<string, never>;
+  "blocked.decisionStage.offline": Record<string, never>;
+  "blocked.decisionStage.serverUnreachable": Record<string, never>;
+  "blocked.delegate.offline": Record<string, never>;
+  "blocked.delegate.serverUnreachable": Record<string, never>;
+  "blocked.deleteDevAccess.offline": Record<string, never>;
+  "blocked.deleteDevAccess.serverUnreachable": Record<string, never>;
+  "blocked.doThis.offline": Record<string, never>;
+  "blocked.doThis.serverUnreachable": Record<string, never>;
+  "blocked.doThisLater.offline": Record<string, never>;
+  "blocked.doThisLater.serverUnreachable": Record<string, never>;
+  "blocked.draftsOnDevice.offline": Record<string, never>;
+  "blocked.draftsOnDevice.serverUnreachable": Record<string, never>;
+  "blocked.huddleJoined.offline": Record<string, never>;
+  "blocked.huddleJoined.serverUnreachable": Record<string, never>;
+  "blocked.huddleUnavailable.offline": Record<string, never>;
+  "blocked.huddleUnavailable.serverUnreachable": Record<string, never>;
+  "blocked.inboxReply.offline": Record<string, never>;
+  "blocked.inboxReply.serverUnreachable": Record<string, never>;
+  "blocked.issueCredential.offline": Record<string, never>;
+  "blocked.issueCredential.serverUnreachable": Record<string, never>;
+  "blocked.issueKey.offline": Record<string, never>;
+  "blocked.issueKey.serverUnreachable": Record<string, never>;
+  "blocked.keepListIssueLater.offline": Record<string, never>;
+  "blocked.keepListIssueLater.serverUnreachable": Record<string, never>;
+  "blocked.keepViewChangeLater.offline": Record<string, never>;
+  "blocked.keepViewChangeLater.serverUnreachable": Record<string, never>;
+  "blocked.keepViewIssueLater.offline": Record<string, never>;
+  "blocked.keepViewIssueLater.serverUnreachable": Record<string, never>;
+  "blocked.lastSyncedList.offline": { relativeTime: string };
+  "blocked.lastSyncedList.serverUnreachable": { relativeTime: string };
+  "blocked.listStale.offline": Record<string, never>;
+  "blocked.listStale.serverUnreachable": Record<string, never>;
+  "blocked.loadHosts.offline": Record<string, never>;
+  "blocked.loadHosts.serverUnreachable": Record<string, never>;
+  "blocked.loadPolicy.offline": Record<string, never>;
+  "blocked.loadPolicy.serverUnreachable": Record<string, never>;
+  "blocked.loadWorkspaceDefaults.offline": Record<string, never>;
+  "blocked.loadWorkspaceDefaults.serverUnreachable": Record<string, never>;
+  "blocked.loginHandoff.offline": Record<string, never>;
+  "blocked.loginHandoff.serverUnreachable": Record<string, never>;
+  "blocked.memberListStale.offline": Record<string, never>;
+  "blocked.memberListStale.serverUnreachable": Record<string, never>;
+  "blocked.neverReceivedList.offline": Record<string, never>;
+  "blocked.neverReceivedList.serverUnreachable": Record<string, never>;
+  "blocked.openExistingDm.offline": Record<string, never>;
+  "blocked.openExistingDm.serverUnreachable": Record<string, never>;
+  "blocked.register.offline": Record<string, never>;
+  "blocked.register.serverUnreachable": Record<string, never>;
+  "blocked.relinkKey.offline": Record<string, never>;
+  "blocked.relinkKey.serverUnreachable": Record<string, never>;
+  "blocked.reloadPicturesLater.offline": Record<string, never>;
+  "blocked.reloadPicturesLater.serverUnreachable": Record<string, never>;
+  "blocked.revokeKey.offline": Record<string, never>;
+  "blocked.revokeKey.serverUnreachable": Record<string, never>;
+  "blocked.rotateOrRevoke.offline": Record<string, never>;
+  "blocked.rotateOrRevoke.serverUnreachable": Record<string, never>;
+  "blocked.saveAfterReconnect.offline": Record<string, never>;
+  "blocked.saveAfterReconnect.serverUnreachable": Record<string, never>;
+  "blocked.saveChangesLater.offline": Record<string, never>;
+  "blocked.saveChangesLater.serverUnreachable": Record<string, never>;
+  "blocked.saveDisplayName.offline": Record<string, never>;
+  "blocked.saveDisplayName.serverUnreachable": Record<string, never>;
+  "blocked.saveIt.offline": Record<string, never>;
+  "blocked.saveIt.serverUnreachable": Record<string, never>;
+  "blocked.saveName.offline": Record<string, never>;
+  "blocked.saveName.serverUnreachable": Record<string, never>;
+  "blocked.saveNameResume.offline": Record<string, never>;
+  "blocked.saveNameResume.serverUnreachable": Record<string, never>;
+  "blocked.saveReminder.offline": Record<string, never>;
+  "blocked.saveReminder.serverUnreachable": Record<string, never>;
+  "blocked.saveWelcome.offline": Record<string, never>;
+  "blocked.saveWelcome.serverUnreachable": Record<string, never>;
+  "blocked.sendRequestLater.offline": Record<string, never>;
+  "blocked.sendRequestLater.serverUnreachable": Record<string, never>;
+  "blocked.signIn.offline": Record<string, never>;
+  "blocked.signIn.serverUnreachable": Record<string, never>;
+  "blocked.startDisconnect.offline": Record<string, never>;
+  "blocked.startDisconnect.serverUnreachable": Record<string, never>;
+  "blocked.stopOrDelete.offline": Record<string, never>;
+  "blocked.stopOrDelete.serverUnreachable": Record<string, never>;
+  "blocked.subscribe.offline": Record<string, never>;
+  "blocked.subscribe.serverUnreachable": Record<string, never>;
+  "blocked.terminalStale.offline": Record<string, never>;
+  "blocked.terminalStale.serverUnreachable": Record<string, never>;
+  "blocked.turnOn.offline": Record<string, never>;
+  "blocked.turnOn.serverUnreachable": Record<string, never>;
+  "blocked.turnOnHelper.offline": Record<string, never>;
+  "blocked.turnOnHelper.serverUnreachable": Record<string, never>;
+  "blocked.unlinkDevice.offline": Record<string, never>;
+  "blocked.unlinkDevice.serverUnreachable": Record<string, never>;
+  "blocked.unlinkTeamAi.offline": Record<string, never>;
+  "blocked.unlinkTeamAi.serverUnreachable": Record<string, never>;
+  "blocked.unregister.offline": Record<string, never>;
+  "blocked.unregister.serverUnreachable": Record<string, never>;
+  "blocked.updatesPausedStale.offline": Record<string, never>;
+  "blocked.updatesPausedStale.serverUnreachable": Record<string, never>;
+  "blocked.waitAMoment.offline": Record<string, never>;
+  "blocked.waitAMoment.serverUnreachable": Record<string, never>;
+  "blocked.workStateNone.offline": Record<string, never>;
+  "blocked.workStateNone.serverUnreachable": Record<string, never>;
+  "blocked.workStateStale.offline": Record<string, never>;
+  "blocked.workStateStale.serverUnreachable": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -1737,6 +2230,8 @@ export interface MessageArgs {
   "connection.action.retry": Record<string, never>;
   "connection.approval.offline": Record<string, never>;
   "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.offlineDetail": Record<string, never>;
+  "connection.boot.offlineQrDetail": Record<string, never>;
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
@@ -1754,13 +2249,29 @@ export interface MessageArgs {
   "connection.card.unknownTitle": Record<string, never>;
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.activityTitle": Record<string, never>;
+  "connection.load.agentChannelsTitle": Record<string, never>;
+  "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentProfileTitle": Record<string, never>;
+  "connection.load.agentRosterTitle": Record<string, never>;
+  "connection.load.agentRunTitle": Record<string, never>;
   "connection.load.channelListTitle": Record<string, never>;
   "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.deviceKeysTitle": Record<string, never>;
+  "connection.load.dmApprovalTitle": Record<string, never>;
+  "connection.load.hermesStatusTitle": Record<string, never>;
+  "connection.load.inboxMoreTitle": Record<string, never>;
+  "connection.load.inboxTitle": Record<string, never>;
+  "connection.load.linkedDevicesTitle": Record<string, never>;
+  "connection.load.linkPreviewSettingTitle": Record<string, never>;
+  "connection.load.memberProfileTitle": Record<string, never>;
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
+  "connection.load.notificationRulesTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.sentence": { reason: string; title: string };
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;

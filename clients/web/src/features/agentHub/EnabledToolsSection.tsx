@@ -19,6 +19,7 @@ import {
   toggleToolRow,
   type ToolRow,
 } from "./enabledToolsModel";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 export type ToolsSaveResult =
   | { ok: true }
@@ -37,7 +38,6 @@ export interface EnabledToolsSectionProps {
   save: (enabledTools: string[]) => Promise<ToolsSaveResult>;
 }
 
-const OFFLINE_REASON = "연결이 끊긴 동안에는 바꿀 수 없어요.";
 const SAVE_ERROR =
   "도구 허용을 저장하지 못했어요. 연결을 확인하고 다시 시도하세요.";
 const SAVE_IDLE_REASON = "바꿀 내용이 없어요.";
@@ -79,8 +79,10 @@ export function EnabledToolsSection({
     catalogStatus === "forbidden";
   const dirty = !sameToolSet(enabledToolsFromRows(rows), [...enabledTools]);
   const canSave = dirty && !readOnly && !saving;
+  // 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const offlineReason = useBlockedReason("changeIt");
   const sharedReason = offline
-    ? OFFLINE_REASON
+    ? offlineReason
     : forbidden
       ? forbidden
       : !editable
@@ -152,7 +154,7 @@ export function EnabledToolsSection({
           )}
           {offline && (
             <p id={sharedReasonId} className="sr-only">
-              {OFFLINE_REASON}
+              {offlineReason}
             </p>
           )}
           {!offline && !editable && editDisabledReason && !forbidden && (
