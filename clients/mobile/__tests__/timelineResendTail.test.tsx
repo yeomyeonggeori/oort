@@ -286,7 +286,12 @@ async function frames(count: number) {
   }
 }
 
-async function openRoom(): Promise<Room> {
+interface OpenOptions {
+  /** 진입 수렴이 도는 동안(첫 콘텐츠 보고 직후) 창을 이 높이로 바꾼다. */
+  windowDuringEntry?: number;
+}
+
+async function openRoom(options: OpenOptions = {}): Promise<Room> {
   const listRef = React.createRef<FlatList<TimelineStreamItem>>() as ListRef;
   const pillsRef = React.createRef<PillState>() as React.MutableRefObject<PillState | null>;
   const state = {failed: true};
@@ -359,6 +364,12 @@ async function openRoom(): Promise<Room> {
     native.resizeWindow(WINDOW_WITH_NOTE);
     native.announce();
   });
+  if (options.windowDuringEntry !== undefined) {
+    const during = options.windowDuringEntry;
+    await act(async () => {
+      native.resizeWindow(during);
+    });
+  }
   // 진입이 끝에 앉는다(기기에서는 진입 수렴이 한다). 앉은 뒤의 일상이 이 시험의 대상이다.
   await frames(80);
   await act(async () => {
@@ -467,6 +478,14 @@ describe('실패 행이 서버 사본으로 바뀔 때 목록이 바닥에 붙�
 
     expect(pt(room.native.offset - readingAt)).toBe(0);
     expect(room.pillsRef.current?.latest).toBe(true);
+  });
+
+  it('진입 수렴이 도는 동안의 창 변화는 예전 길(어림)로 간다 — 진입 기계가 스스로 끝을 묻고 있다', async () => {
+    // 마운트 때의 창 보고는 첫 콘텐츠 보고(`didInitialScrollRef`)보다 앞서고, 바로 뒤의 창 변화는 진입 수렴(`convergingRef`) 한가운데에 온다.
+    // 두 경우 모두 네이티브 끝을 부르면 안 된다: 진입의 앵커·착지 유지 계약(#1025·#2604)은 그 기계의 몫이다.
+    const room = await openRoom({windowDuringEntry: WINDOW_WITHOUT_NOTE});
+
+    expect(room.native.commands.filter(command => command.via === 'native')).toEqual([]);
   });
 
   it('손가락이 목록을 잡은 동안에는 창이 커져도 끌어가지 않는다', async () => {
