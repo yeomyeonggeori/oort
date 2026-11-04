@@ -4410,11 +4410,12 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText} testID="pending-failed-reason">
+            {/* 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288). */}
+            <Sentence style={styles.failedText} testID="pending-failed-reason">
               {failureKind === null
                 ? formatMessage('timeline.send.failed')
                 : formatMessage(sendFailureReasonKey(failureKind))}
-            </Text>
+            </Sentence>
             <SendFailureActions
               onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
               onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}
