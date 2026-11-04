@@ -24,6 +24,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
+import {BulletLine} from './BulletLine';
 import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 
 // =============================================================================
@@ -37,8 +38,8 @@ import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 // 목록은 새 소식이 맨 위이고, 이 빌드에 붙는 소식(`noteForPhoneBuild`)의 오른쪽 값이 「지금 쓰는 버전」이다(나머지는 공개일).
 // 이 빌드의 자기 소식이 아직 없으면 그 앞의 가장 새 소식에 선다(그 소식이 이 앱에 적용되는 가장 새 것이다).
 // 내용은 팀이 QA 와 써 보기에 쓴다: 항목마다 보이는 화면(폰·데스크탑) 표지, 「바뀐 점」, 「이렇게 써 보세요」.
-// 핵심 카드 뒤에는 「그 밖에 바뀐 점」(#5054)이 주제별 한 줄로 선다: 소식이 이 칸을 비워 두면 머리글도 서지 않는다. 이 장에만
-// 있다(올라오는 시트에는 없다). 글은 모두 사전의 키라서 언어마다 따로 고를 것이 없다.
+// 핵심 카드 뒤에는 「그 밖에 바뀐 점」(#5054)이 주제별 한 줄로 선다(줄마다 불릿, #5298 owner 11-04): 소식이 이 칸을 비워 두면
+// 머리글도 서지 않는다. 이 장에만 있다(올라오는 시트에는 없다). 글은 모두 사전의 키라서 언어마다 따로 고를 것이 없다.
 // =============================================================================
 
 const SURFACE_KEY = {
@@ -51,6 +52,7 @@ const rowTestId = (version: string) => 'release-notes-row-' + version;
 const itemTestId = (id: string) => 'release-notes-item-' + id;
 const surfacesTestId = (id: string) => itemTestId(id) + '-surfaces';
 const otherTestId = (id: string) => 'release-notes-other-' + id;
+const otherLineTestId = (id: string, index: number) => otherTestId(id) + '-line-' + index;
 // JSX 식 안의 글자 있는 문자열은 직접 문구 장부가 문구로 센다 — 머리의 ‹ 단추 속성은 식 밖에서 만든다.
 const LIST_BACK_TEST_ID = 'settings-back';
 const DETAIL_BACK_TEST_ID = 'release-notes-back';
@@ -261,10 +263,12 @@ function ReleaseNoteDetailPage({
                     label={messages.formatMessage(group.title)}
                     testID={otherTestId(group.id)}>
                     <View style={styles.lines}>
-                      {group.lines.map(lineKey => (
-                        <Sentence key={lineKey} style={styles.blockText}>
+                      {group.lines.map((lineKey, index) => (
+                        <BulletLine
+                          key={lineKey}
+                          testID={otherLineTestId(group.id, index)}>
                           {messages.formatMessage(lineKey)}
-                        </Sentence>
+                        </BulletLine>
                       ))}
                     </View>
                   </GroupCard>

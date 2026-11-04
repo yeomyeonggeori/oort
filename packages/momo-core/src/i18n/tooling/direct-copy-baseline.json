@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "abe416f1c7b699399977b7fbed86f4bee5b873d6",
+  "baselineHead": "9ccc9c10f6c72a333d1585f6810b1a6ca4232129",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -227,6 +227,7 @@
     "clients/mobile/src/features/profile/settingsRows.tsx": 12,
     "clients/mobile/src/features/profile/statusDraft.ts": 2,
     "clients/mobile/src/features/readState/useViewingBeat.ts": 3,
+    "clients/mobile/src/features/releaseNotes/BulletLine.tsx": 3,
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": 5,
     "clients/mobile/src/features/sidebar/DmClosedSheet.tsx": 2,
     "clients/mobile/src/features/sidebar/channelRowActions.ts": 3,

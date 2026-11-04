@@ -243,7 +243,7 @@ describe("소식의 글은 사전 키다", () => {
     // @ts-expect-error 사전에 없는 키
     const missing: ReleaseNoteKey = "releaseNotes.v0141.nope";
     // @ts-expect-error 값(`{count}`)을 받는 키는 값 없이 읽는 소식 글이 못 쓴다
-    const needsValue: ReleaseNoteKey = "releaseNotes.popup.more";
+    const needsValue: ReleaseNoteKey = "releaseNotes.version.label";
     expect([missing, needsValue]).toHaveLength(2);
   });
 
