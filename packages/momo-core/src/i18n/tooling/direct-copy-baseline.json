@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "f33e8efd429a328d951faa8c4be0f8ab7dc1cf16",
+  "baselineHead": "f8db339d804c3258f22683064d1809f93517b0db",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -63,7 +63,7 @@
     "clients/mobile/src/features/attachments/AttachMenu.tsx": 44,
     "clients/mobile/src/features/attachments/AttachmentList.tsx": 45,
     "clients/mobile/src/features/attachments/AttachmentTray.tsx": 33,
-    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 98,
+    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 97,
     "clients/mobile/src/features/attachments/PhotoGridCard.tsx": 62,
     "clients/mobile/src/features/attachments/PhotoMorphFrame.tsx": 24,
     "clients/mobile/src/features/attachments/StageHero.tsx": 2,
@@ -301,7 +301,7 @@
     "clients/mobile/src/screens/AgentsScreen.tsx": 11,
     "clients/mobile/src/screens/AppDetailScreen.tsx": 26,
     "clients/mobile/src/screens/AppsScreen.tsx": 20,
-    "clients/mobile/src/screens/ConnectScreen.tsx": 129,
+    "clients/mobile/src/screens/ConnectScreen.tsx": 128,
     "clients/mobile/src/screens/ConversationScreen.tsx": 53,
     "clients/mobile/src/screens/HostedConnectionDetailScreen.tsx": 23,
     "clients/mobile/src/screens/HostedConnectionsScreen.tsx": 17,

@@ -1194,6 +1194,18 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
     }
   ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,

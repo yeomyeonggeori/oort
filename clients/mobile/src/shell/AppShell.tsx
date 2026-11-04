@@ -21,6 +21,7 @@ import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
 import {ApprovalsLiveSync} from '../features/inbox/ApprovalsLiveSync';
 import {OnlineRollCall} from '../features/presence/OnlineRollCall';
+import {ShellStripAnnouncer} from '../features/connection/ShellStripAnnouncer';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
@@ -387,6 +388,9 @@ export function Shell({
       {/* Renders nothing and receives nothing. 이 폰이 작업공간 출석부에 세어져서 동료의 점에 「온라인」으로
           보이게 한다(ADR-0160 ②, #4692). 구독 하나이고 소켓을 따라 오르내린다. */}
       <OnlineRollCall />
+      {/* Renders nothing. 셸 띠(홈·받은함·에이전트)가 서는 순간 VoiceOver 가 한 번 읽는다(#5262). 띠는 화면마다 서고 숨은 탭도 마운트돼 있어서
+          낭독은 띠 안이 아니라 셸에 하나만 둔다 - 띠마다 달면 한 번 끊김이 두세 번 들린다. */}
+      <ShellStripAnnouncer />
       {/* 탭 화면은 바닥 위에 투명하게 선다. 목록 끝은 탭바 밑에 숨지 않도록 시안의
           140 만큼 비운다(`useTabBarClearance`). */}
       <TabBarClearanceProvider>
