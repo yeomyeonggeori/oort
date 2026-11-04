@@ -15,7 +15,7 @@
 // 본문 판(받은함) 위의 같은 상자는 보조 채움 그대로 읽혀야 한다. 사진에서 읽은 값(알약·바탕 색, 대비)은 결과 장부(results.json)에 남는다.
 //
 // 옵션: --dist(기본 dist) --out(기본 captures/5242/<label>) --label(기본 after) --port(기본 5542)
-//       --soft(실패해도 끝까지 돌고 종료 코드 0) --no-shots
+//       --soft(실패해도 끝까지 돌고 종료 코드 0) --no-shots --engine(chromium 기본 | webkit: 데스크탑 셸이 WKWebView 라 두 엔진으로 잰다)
 //       --combos(light-390,dark-390,light-720,dark-720,light-1440,dark-1440. 기본 전부. 390 은 사이드바가 서랍이라 열고 잰다)
 // 캡처는 저장소에 올리지 않는다: --out 을 스크래치로 준다.
 // =============================================================================
@@ -24,7 +24,7 @@ import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -41,6 +41,7 @@ const OUT = resolve(WEB_ROOT, String(arg("out", `captures/5242/${LABEL}`)));
 const PORT = Number(arg("port", 5542));
 const SOFT = arg("soft", false) === true;
 const SHOTS = arg("no-shots", false) !== true;
+const ENGINE = String(arg("engine", "chromium"));
 // 390 은 사이드바가 서랍(폭 600 미만), 720·1440 은 셸 바닥 위에 서는 열이다. 알약의 바탕이 서랍 시트냐 셸 바닥이냐가 달라 셋 다 잰다(#5306).
 const COMBO_SIZES = {
   "light-390": ["light", 390, 844],
@@ -143,12 +144,12 @@ const sameFill = (a, b) => a.every((value, i) => Math.abs(value - b[i]) <= 2);
  * 알약이 바탕에서 **읽히는** 바닥(스킴별). 3:1 은 아니다 — 이 문법으로는 구조상 나오지 않는다: 디자인 시스템은 보조 알약의 **채움 대비를 재지 않고**
  * (README §3.3, ADR-0189 D6) 글자 라벨이 컨트롤을 식별시킨다(WCAG 1.4.11). 바닥은 사진으로 잰 값 사이에 둔 것이다.
  *   - 시트 위 알약(`PILL_MIN`): 라이트는 사라지던 보조 채움이 1.009(390 서랍)~1.047(720·1440 셸 바닥), 시트 위 문법(`--surface` + rest 그림자)은
- *     1.109~1.171 → 1.08. 다크의 시트 위 문법은 안쪽 하이라이트 1px 에 기대 1.044~1.076(빈 상태 「채널 만들기」도 같다)이라 바닥은
- *     「시트와 같은 색이 아니다」만 막는 1.03 이다. 그 위에서 같은 문법인지는 아래 「빈 상태 기준과 같은 채움」 단정이 맡는다.
+ *     1.109~1.171 → 1.08. 다크의 시트 위 문법은 안쪽 하이라이트 1px 에 기대 1.033(WebKit 1440)~1.076(빈 상태 「채널 만들기」도 같다)이라 바닥은
+ *     「시트와 같은 색이 아니다」만 막는 1.02 이다. 그 위에서 같은 문법인지는 아래 「빈 상태 기준과 같은 채움」 단정이 맡는다.
  *   - 본문 판 위 보조 채움(`BODY_PILL_MIN`): 라이트 1.118~1.149, 다크 1.165~1.198 → 1.08 · 1.10. 시트 위 문법이 본문까지 번지면(판 위 `--surface` 알약은
  *     라이트 1.0, 다크 1.04) 이 바닥을 못 넘는다.
  */
-const PILL_MIN = { light: 1.08, dark: 1.03 };
+const PILL_MIN = { light: 1.08, dark: 1.02 };
 const BODY_PILL_MIN = { light: 1.08, dark: 1.10 };
 
 // ---- 정적 서버 (자기 PID 로만 끈다) -------------------------------------------------
@@ -497,7 +498,7 @@ async function sceneSettings(browser, combo, scheme, width, height) {
 // ---- 실행 -----------------------------------------------------------------------
 
 const server = await startStatic();
-const browser = await chromium.launch({ headless: true });
+const browser = await (ENGINE === "webkit" ? webkit : chromium).launch({ headless: true });
 try {
   for (const [combo, [scheme, width, height]] of Object.entries(COMBO_SIZES)) {
     if (!COMBOS.includes(combo)) continue;
