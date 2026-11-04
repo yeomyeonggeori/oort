@@ -897,7 +897,7 @@ export function Composer({
       {offline && (
         <p
           role="status"
-          className="px-6 pb-2 text-meta text-warn"
+          className="px-6 pb-2 text-meta text-warn break-keep"
           data-testid="composer-offline"
         >
           {blockedLine}

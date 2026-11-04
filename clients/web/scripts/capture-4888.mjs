@@ -14,7 +14,9 @@
 //
 //   flow   스레드 입력칸 → 체크는 기본 꺼짐 → 끄고 보낸 답글은 요청에 `alsoInChannel` 키가 없고 본류에 서지 않는다 → 켜고 보낸 답글은
 //          요청에 `alsoInChannel: true` 가 실리고 본류에 「↳ ○○님 스레드에 답글」 + 원문 한 줄로 선다 → 보낸 뒤 체크가 꺼진다 →
-//          스레드를 닫고 본류의 줄을 누르면 그 스레드가 열린다 → 키보드(Tab·Space).
+//          스레드를 닫고 본류의 줄을 누르면 그 스레드가 열린다 → 키보드(Tab·Space) → 본류 줄의 키보드 길(#5294: 채널 입력창에서
+//          Shift+Tab 첫 정거장이 행 정거장이고, 행에서 ←/→ 로 줄에 닿고, Enter 로 열린다 — 두 엔진) → 기기를 오프라인으로 두면
+//          채널 입력창(스레드를 닫은 동안)·스레드 입력창(연 동안)의 원인 문장이 어절에서 꺾인다(#5294: 계산된 word-break 가 keep-all).
 //   arrow  빈 입력칸 + ↑ : 「대화에도 보낸」 내 답글(본류에 선다)이 고칠 대상이다(#5191 판정을 맞춘다).
 //   old    옛 서버가 모르는 키로 400 을 주면 조용히 스레드로만 보내지 않고 이유를 말한다 → 체크를 끄면 보내진다.
 //
@@ -213,13 +215,43 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${String(detail).slice(0, 300)}`}`);
 }
 
-async function shot(page, tag, name) {
+async function shot(page, tag, name, { clearPointer = true } = {}) {
   if (!SHOTS) return;
   mkdirSync(OUT_DIR, { recursive: true });
-  // 직전 클릭이 남긴 호버(헤더 툴팁·행 호버 툴바)가 사진에 찍히지 않게 포인터를 치우고 가라앉힌다.
-  await page.mouse.move(2, 2);
-  await page.waitForTimeout(450);
+  // 직전 클릭이 남긴 호버(헤더 툴팁·행 호버 툴바)가 사진에 찍히지 않게 포인터를 치우고 가라앉힌다. 키보드 초점 장면은 치우지 않는다 —
+  // 포인터가 움직이면 초점 링의 모달리티가 바뀔 수 있어서다.
+  if (clearPointer) {
+    await page.mouse.move(2, 2);
+    await page.waitForTimeout(450);
+  }
   await page.screenshot({ path: resolve(OUT_DIR, `4888-${tag.replace(/\s+/g, "-")}-${name}.png`) });
+}
+
+/**
+ * 막힌 입력창의 원인 문장은 어절에서 꺾는다 (#5294, 화면 검수 5a M1). 기기를 오프라인으로 두면 막힌 입력창 위에 원인 문장이 선다.
+ * 꺾이는 자리는 폭에 달려 문자열로는 못 잰다 — 엔진이 **계산한** `word-break` 를 읽는다(`break-keep` 이 빠지면 `normal` 이다).
+ * 스레드 패널은 좁은 폭에서 채널 입력창을 덮으므로, 채널 입력창은 스레드를 닫은 동안·스레드 입력창은 연 동안 따로 잰다.
+ */
+async function expectBlockedLineKeepsWords(page, context, t, name, testId, shotName) {
+  await context.setOffline(true);
+  try {
+    const blockedLine = page.locator(`[data-testid="${testId}"]`);
+    const stood = await blockedLine.waitFor({ state: "attached", timeout: 8000 }).then(() => true, () => false);
+    const wordBreak = stood ? await blockedLine.evaluate((el) => getComputedStyle(el).wordBreak) : "(원인 문장이 서지 않았다)";
+    check(`${t} 막힌 ${name}: 원인 문장의 word-break 가 keep-all 이다`, wordBreak === "keep-all", wordBreak);
+    await shot(page, t, shotName);
+    await cropShot(blockedLine, t, `${shotName}-line`);
+  } finally {
+    await context.setOffline(false);
+  }
+}
+
+/** 보이는 요소 하나만 잘라 찍는다(줄바꿈 자리를 가까이서 본다). 안 보이면 건너뛴다. */
+async function cropShot(locator, tag, name) {
+  if (!SHOTS) return;
+  mkdirSync(OUT_DIR, { recursive: true });
+  if (!(await locator.isVisible().catch(() => false))) return;
+  await locator.screenshot({ path: resolve(OUT_DIR, `4888-${tag.replace(/\s+/g, "-")}-${name}.png`) });
 }
 
 const main = (page) => page.locator('[data-testid="timeline-virtuoso"]');
@@ -227,6 +259,12 @@ const panel = (page) => page.locator('[data-testid="thread-panel"]');
 const checkbox = (page) => page.locator('[data-testid="thread-composer-also-in-channel-input"]');
 const threadInput = (page) => page.locator('[data-testid="thread-composer-input"]');
 const activeId = (page) => page.evaluate(() => document.activeElement?.id || document.activeElement?.getAttribute("data-testid") || document.activeElement?.tagName || "");
+/** 지금 초점이 선 요소의 testid 와, 그것이 든 타임라인 행(`data-message-id`). 행 밖이면 `rowId` 는 null. */
+const focusInfo = (page) => page.evaluate(() => {
+  const el = document.activeElement;
+  const row = el?.closest('[data-testid="timeline-message"]');
+  return { testid: el?.getAttribute("data-testid") || el?.tagName || "", rowId: row?.getAttribute("data-message-id") ?? null };
+});
 
 async function openRootThread(page) {
   await main(page).locator(`[data-testid="timeline-message"][data-message-id="${ID.root.toLowerCase()}"] [data-testid="thread-anchor"]`).first().click();
@@ -311,11 +349,52 @@ async function runFlow(browserType, origin, scheme, tag, width) {
     check(`${t} 줄 누르기 전: 스레드가 닫혀 있다`, (await panel(page).count()) === 0);
     await alsoRow.scrollIntoViewIfNeeded().catch(() => null);
     await shot(page, t, "03-main-flow-reply-line");
+
+    // 키보드로 본류 줄에 닿는다 (#5294, 검수 5a H1). 줄은 행의 로빙 그룹(`data-row-action`)에 든다 — 형제 「답글 N개」·인용과 같다:
+    //   ① 채널 입력창에서 거꾸로 한 번 가면 첫 정거장이 그 행의 정거장이다. 줄이 그룹 밖이면 Chromium 은 줄이 **따로** 먼저 서서 행마다
+    //      정거장이 하나 늘고, WebKit 은 줄을 건너뛴다(tabindex 없는 단추를 Tab 순서에 넣지 않는다).
+    //   ② 그 행에서 ←/→ 로 줄에 닿는다. 줄이 그룹 밖이면 두 엔진 모두 한 번도 안 나온다.
+    //   ③ 닿은 줄에서 Enter 로 그 스레드가 열린다.
+    const alsoRowId = server.lastRow?.id.toLowerCase();
+    await page.mouse.move(2, 2);
+    await page.locator("#composer-input").focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForTimeout(250);
+    let stop = await focusInfo(page);
+    check(`${t} 키보드: 채널 입력창에서 Shift+Tab 첫 정거장이 그 행의 정거장이다(본류 줄이 따로 서지 않는다)`, stop.rowId === alsoRowId && stop.testid !== "reply-home", JSON.stringify(stop));
+    // 줄이 따로 선 판은 한 번 더 거슬러 행 정거장에 세운다 — 아래 ←/→ 가 줄이 따로 서 있어서가 아니라 **그룹 덕분에** 닿는지 가리려고.
+    if (stop.testid === "reply-home") {
+      await page.keyboard.press("Shift+Tab");
+      await page.waitForTimeout(250);
+      stop = await focusInfo(page);
+    }
+    const arrowSeen = [];
+    for (let i = 0; i < 10 && arrowSeen[arrowSeen.length - 1] !== "reply-home"; i += 1) {
+      await page.keyboard.press("ArrowLeft");
+      arrowSeen.push((await focusInfo(page)).testid);
+    }
+    check(`${t} 키보드: 답글 행에서 ←로 본류 줄에 닿는다`, arrowSeen.includes("reply-home"), `${stop.testid} > ${arrowSeen.join(" > ")}`);
+    if (arrowSeen.includes("reply-home")) {
+      await shot(page, t, "06-reply-home-keyboard-focus", { clearPointer: false });
+      await page.keyboard.press("Enter");
+      const openedByKey = await panel(page).waitFor({ timeout: 8000 }).then(() => true, () => false);
+      check(`${t} 키보드: 닿은 줄에서 Enter 로 그 스레드가 열린다`, openedByKey && (await panel(page).getByText(ROOT_TEXT).count()) >= 1);
+      await page.locator('[data-testid="thread-close"]').click();
+      await panel(page).waitFor({ state: "detached", timeout: 8000 }).catch(() => null);
+      await page.mouse.move(2, 2);
+    }
+
+    // 막힌 채널 입력창의 원인 문장(스레드가 닫혀 있어 채널 입력창이 보인다).
+    await expectBlockedLineKeepsWords(page, context, t, "채널 입력창", "composer-offline", "07-blocked-channel-composer");
+
     await alsoRow.locator('[data-testid="reply-home"]').click();
     const reopened = await panel(page).waitFor({ timeout: 8000 }).then(() => true, () => false);
     check(`${t} 줄 누르기: 그 스레드가 열린다`, reopened);
     check(`${t} 줄 누르기: 열린 스레드가 그 루트의 것이다`, (await panel(page).getByText(ROOT_TEXT).count()) >= 1);
     await shot(page, t, "05-thread-opened-from-line");
+
+    // 막힌 스레드 입력창의 원인 문장(스레드가 열려 있다).
+    await expectBlockedLineKeepsWords(page, context, t, "스레드 입력창", "thread-composer-offline", "08-blocked-thread-composer");
   } finally {
     await context.close();
     await browser.close();

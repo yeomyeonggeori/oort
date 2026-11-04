@@ -109,7 +109,9 @@ const buildStyles = (color: Palette) =>
       // 가장 짧은 판(「↳ 스레드에 답글」)도 슬롭과 더해 가로 44 가 되도록 바닥을 깐다(M-14).
       minWidth: TOUCH_TARGET - 2 * SLOP,
     },
-    excerpt: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
+    // 원문 발췌는 이 답글이 **어느 글의 스레드인지** 알려 주는 내용이라 뜻을 나르는 글자다 — `textFaint`(밝음 3.76:1·어두움 3.89:1)는 본문 AA 를
+    // 못 넘는다. 웹 짝(`ReplyHomeLine.tsx`)도 두 줄 모두 `ink-muted` 다(#5294, 화면 검수 5a H1).
+    excerpt: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     link: {alignSelf: 'flex-start', maxWidth: '100%'},
     pressed: {opacity: 0.6},
   });

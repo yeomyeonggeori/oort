@@ -33,7 +33,7 @@ import {
 import {headroomLineHeight} from '../../design/lineHeadroom';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
-import {bubbleFor} from './bubble';
+import {bubbleFor, failedBubbleFor} from './bubble';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
 // =============================================================================
@@ -667,7 +667,13 @@ export function MessageBody({
   const bubbleChoice = useBubbleChoice();
   // 개인 덮어쓰기(#4383): 줄 보기(`layout: 'row'`)·색·모서리. 대비가 모자란 색은 `bubbleFor` 가 버린다.
   const tokens = useMemo(() => bubbleFor(palette, bubbleChoice), [palette, bubbleChoice]);
-  const tone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
+  const baseTone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
+  // 보내지 못한 말풍선(`muted`, #5294 검수 5a M5): 옅기는 채움만 맡고 글자는 그 위에서 4.5:1 을 지키는 잉크다(`failedBubbleFor`). 말풍선 전체에
+  // 불투명도 막을 걸면 글자까지 바탕으로 녹아 밝음 2.66:1 · 어두움 3.52:1 이 됐다.
+  const tone = useMemo(
+    () => (baseTone !== null && muted ? failedBubbleFor(palette, baseTone) : baseTone),
+    [baseTone, muted, palette],
+  );
   const ink = useMemo(
     () => (tone !== null && bubble !== null ? {fg: tone.fg, mine: bubble === 'mine'} : null),
     [tone, bubble],
@@ -692,8 +698,6 @@ export function MessageBody({
             paddingHorizontal: tokens.padX,
             paddingVertical: tokens.padY,
           },
-          // 보내는 중 흐림은 글자색이 아니라 말풍선 전체의 막이다(채움 위 잉크 대비를 지킨다).
-          muted && styles.bubbleMuted,
         ]}>
         {children}
       </View>
@@ -809,7 +813,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   markdown: {gap: space.sm},
   // 말풍선은 내용 폭까지만 — 짧은 글(「네네」)은 좁다. 가장 넓어도 행 칸(본문 열)을 넘지 않는다.
   bubble: {alignSelf: 'flex-start', maxWidth: '100%'},
-  bubbleMuted: {opacity: 0.6},
   // 줄 높이에 여유(0.01pt)를 둔다(#5288·#4894): 두 줄로 접힌 글이 첫 줄만 그려지고 말풍선 오른쪽에서 잘리던 결함의 원인은 글 상자 높이가
   // float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다 — 정수 줄 높이 글은 매번 그 길에 든다. 근거·실측은 `design/lineHeadroom.ts`.
   paragraph: {fontSize: font.body, color: color.text, lineHeight: headroomLineHeight(line.body)},
