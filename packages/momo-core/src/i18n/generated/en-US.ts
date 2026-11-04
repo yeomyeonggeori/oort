@@ -1236,6 +1236,18 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here."
     }
   ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "Try again once you're connected to a network."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "Once you're connected to a network, you can scan the QR code."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,
@@ -5356,6 +5368,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Working agents"
+    }
+  ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "There's already text in the message box, so it wasn't added. Clear it and tap again."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "Added to the message box. Send it and the agent will propose it again."
     }
   ],
   "timeline.approvalExpiry.soon": [

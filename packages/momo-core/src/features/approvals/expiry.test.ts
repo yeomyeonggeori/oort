@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { makeDirectory } from "../workspace/directory";
+import type { RosterMember } from "../../lib/api";
 import { catalog as en } from "../../i18n/generated/en-US";
 import { catalog as ko } from "../../i18n/generated/ko-KR";
 import { createMessageCopy } from "../../testkit/i18n";
 import {
   EXPIRY_WARN_MS,
+  cardReproposeReason,
   expiryPhase,
   reproposeDraft,
+  reproposeTarget,
   closedCardReproposeReason,
   expiryLineSentence,
 } from "./expiry";
@@ -78,6 +82,57 @@ describe("승인 기한 국면 (#3738)", () => {
     for (const state of ["expired", "thinking", "approval", "executing", "done", "cancelled", "", "unknown"]) {
       expect(closedCardReproposeReason(state, false), state).toBeNull();
     }
+  });
+});
+
+// #5171. 폰 승인 카드에도 「다시 요청」이 서야 해서, 웹 `AgentCard` 안에 있던 서는 곳 판정(`reproposeTarget`)을 코어로 옮기고 만료까지
+// 한 표(`cardReproposeReason`)로 말한다. 웹과 폰은 이 두 함수를 읽고, 각 표면의 렌더 시험이 같은 상태 표를 화면에서 잰다.
+describe("「다시 요청」의 서는 조건 한 표 (#5171)", () => {
+  it("만료는 보는 사람과 상관없이, 실패는 늘, 거부는 거부한 본인을 빼고 건넨다 — 그 밖의 상태에는 없다", () => {
+    for (const decided of [false, true]) {
+      expect(cardReproposeReason("expired", decided)).toBe("expired");
+      expect(cardReproposeReason("failed", decided)).toBe("failed");
+    }
+    expect(cardReproposeReason("declined", false)).toBe("declined");
+    expect(cardReproposeReason("declined", true)).toBeNull();
+    for (const state of ["thinking", "approval", "executing", "done", "cancelled", "", "unknown"]) {
+      expect(cardReproposeReason(state, false), state).toBeNull();
+    }
+  });
+
+  // 웹 카드 푸터의 branch 순서(영수증 줄이 먼저)로만 있던 조건을 코어 표로 옮겼다. 만료 카드는 영수증 줄이 함께 있으면 서지 않고,
+  // 실패·거부 카드는 영수증 줄과 함께 선다(`AgentCard.nextAction.test.tsx` · 폰 `requestBundleRepropose.test.tsx` 가 화면에서 같은 표를 잰다).
+  it("만료 카드가 이미 영수증 줄을 말하면 서지 않고, 실패·거부 카드는 영수증 줄과 함께 선다", () => {
+    for (const decided of [false, true]) {
+      expect(cardReproposeReason("expired", decided, "기한이 지나 만료로 기록됐어요.")).toBeNull();
+    }
+    // 공백뿐이거나 없는 줄은 줄이 아니다(`approvalCardNote` 와 같은 규칙).
+    for (const blank of [undefined, null, "", "   "]) {
+      expect(cardReproposeReason("expired", false, blank)).toBe("expired");
+    }
+    expect(cardReproposeReason("failed", true, "승인을 기록했어요.")).toBe("failed");
+    expect(cardReproposeReason("declined", false, "다른 곳에서 먼저 결정됐어요.")).toBe("declined");
+    expect(cardReproposeReason("declined", true, "거부를 기록했어요.")).toBeNull();
+    // 영수증 줄이 있어도 다음 행동이 없는 상태는 그대로 없다.
+    for (const state of ["done", "cancelled", "executing", "approval"]) {
+      expect(cardReproposeReason(state, false, "기록했어요."), state).toBeNull();
+    }
+  });
+
+  const member = (id: string, kind: "human" | "agent"): RosterMember =>
+    ({ id, workspaceId: "ws", kind, status: "active", displayName: id, handle: `h-${id}`, channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 }) as RosterMember;
+  const directory = makeDirectory([member("AGENT-1", "agent"), member("human-1", "human")]);
+
+  it("카드를 올린 이가 에이전트로 풀리고 채널을 알 때만 대상이 있다 (아이디의 대소문자는 가리지 않는다)", () => {
+    expect(reproposeTarget({ requestedByMemberId: "agent-1", channelId: "ch" }, directory)).toMatchObject({
+      agent: { handle: "h-AGENT-1" },
+      channelId: "ch",
+    });
+    // 사람이 올린 카드 · 명부에 없는 이 · 올린 이를 모르는 카드 · 채널을 모르는 카드에는 단추를 세우지 않는다.
+    expect(reproposeTarget({ requestedByMemberId: "human-1", channelId: "ch" }, directory)).toBeNull();
+    expect(reproposeTarget({ requestedByMemberId: "ghost", channelId: "ch" }, directory)).toBeNull();
+    expect(reproposeTarget({ channelId: "ch" }, directory)).toBeNull();
+    expect(reproposeTarget({ requestedByMemberId: "AGENT-1" }, directory)).toBeNull();
   });
 });
 

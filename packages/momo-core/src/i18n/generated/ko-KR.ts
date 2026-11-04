@@ -1194,6 +1194,18 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
     }
   ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,
@@ -5118,6 +5130,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "일하는 에이전트"
+    }
+  ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "입력창에 넣어 뒀어요. 보내면 에이전트가 다시 제안해요."
     }
   ],
   "timeline.approvalExpiry.soon": [

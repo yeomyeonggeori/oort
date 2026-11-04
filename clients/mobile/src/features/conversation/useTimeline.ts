@@ -551,11 +551,10 @@ export function useTimeline(
           failuresRef.current.set(row.clientMsgId, record);
           syncFailureKinds();
           if (listed) updatePending(list => failPending(list, row.clientMsgId));
-          // 스레드 답글(`rootId` 가 있는 행)은 이 칸에서 남기지 않는다: 되살린 답글을 채널 목록의 「↳ ○○님 스레드에 답글」 줄과 스레드 화면에
-          // 어떻게 그릴지는 스레드 칸(#4888)의 몫이다. 행이 `rootId` 를 싣고 다니게 되어 기술적으로는 남길 수 있다 - 켜려면 이 조건 하나다.
-          if (row.rootId === undefined) {
-            rememberFailedSend(workspaceId, row, record.kind);
-          }
+          // 스레드 답글(`rootId` 가 있는 행)도 대화의 글과 똑같이 남긴다(#5262): 행이 뿌리(`rootId`)와 「대화에도 보내기」를 싣고 다녀서
+          // 되살린 행이 스스로 어느 스레드의 답글인지 안다. 돌아온 행은 스레드 화면(`repliesPending`)과 대화 목록(실패한 답글은 목록에도
+          // 선다, `isChannelListEcho`) 어느 쪽에서나 기존 실패 행 그대로 그려지고, 다시 보내기는 `post` 가 뿌리로 답글 길을 탄다.
+          rememberFailedSend(workspaceId, row, record.kind);
         }
         // 저절로 다시 보낸 시도가 실패한 것은 소리 없이 지나간다: 사람이 누르지 않은 일에 진동을 주지 않는다.
         if (!automatic) feedback('actionFailed');
@@ -697,7 +696,7 @@ export function useTimeline(
 
   // 이 채널을 떠날 때(채널 이동·화면 닫힘)와 앱이 뒤로 갈 때(프로세스가 죽을 수 있다): 아직 날아가는 요청의 결과는 알 수 없다. 그 글을
   // 이 기기에 「못 보낸 글」로 남겨 돌아왔을 때 같은 키의 실패 행이 되게 한다(서버가 이미 받았다면 채널을 열 때 확정 메시지와 만나 정리된다).
-  // 이미 실패한 행은 실패한 순간에 남겨 두었다. 스레드 답글의 행은 남기지 않는다(`post` 의 같은 이유).
+  // 이미 실패한 행은 실패한 순간에 남겨 두었다. 스레드 답글의 행도 같다(#5262, `post` 의 같은 이유).
   useEffect(() => {
     if (!channelId) return;
     // 장부는 한 번 만든 Map 하나를 끝까지 쓴다(다시 대입하지 않는다). 정리 함수가 같은 Map 을 읽는다.
@@ -705,7 +704,6 @@ export function useTimeline(
     const keepInFlight = (leaving: boolean) => {
       for (const row of pendingRef.current) {
         if (row.channelId !== channelId || !isSendingRow(row)) continue;
-        if (row.rootId !== undefined) continue;
         if (leaving) orphansRef.current.add(row.clientMsgId);
         rememberFailedSend(workspaceId, row, null);
       }

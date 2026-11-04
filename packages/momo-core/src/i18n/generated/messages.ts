@@ -182,6 +182,8 @@ export const messageKeys = [
   "connection.action.retry",
   "connection.approval.offline",
   "connection.approval.serverUnreachable",
+  "connection.boot.offlineDetail",
+  "connection.boot.offlineQrDetail",
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
@@ -772,6 +774,8 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.reproposeBusy",
+  "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
@@ -1121,6 +1125,8 @@ export const argumentSpecs = {
   "connection.action.retry": {},
   "connection.approval.offline": {},
   "connection.approval.serverUnreachable": {},
+  "connection.boot.offlineDetail": {},
+  "connection.boot.offlineQrDetail": {},
   "connection.boot.unreachable": {},
   "connection.card.connecting": {},
   "connection.card.lastSynced": {
@@ -1821,6 +1827,8 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.reproposeBusy": {},
+  "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
@@ -2222,6 +2230,8 @@ export interface MessageArgs {
   "connection.action.retry": Record<string, never>;
   "connection.approval.offline": Record<string, never>;
   "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.offlineDetail": Record<string, never>;
+  "connection.boot.offlineQrDetail": Record<string, never>;
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
@@ -2812,6 +2822,8 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.reproposeBusy": Record<string, never>;
+  "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;

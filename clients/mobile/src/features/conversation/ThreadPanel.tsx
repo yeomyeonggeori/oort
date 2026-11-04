@@ -18,8 +18,8 @@ import {Composer, type ComposerSendOptions} from './Composer';
 import {ConversationHeader} from './ConversationHeader';
 import {CONV} from './convDesign';
 import {ConversationLayout} from './ConversationLayout';
-import {threadDraftKey} from './drafts';
-import {useOnline} from '../inbox/useOnline';
+import {seedDraft, threadDraftKey} from './drafts';
+import {useConnectionGates} from '../connection/useConnectionGates';
 import {threadArrivalSurface} from './sendArrival';
 import {Timeline} from './Timeline';
 import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
@@ -341,6 +341,9 @@ export function ThreadPanel({
       workspaceId,
       onOpenMemoryEvidence: openEvidence,
       onOpenMessage,
+      // 닫힌 승인 카드의 「다시 요청」은 **이 스레드의** 입력창에 초안을 넣는다(#5171). 채널 입력창은 이 화면 뒤에 있어서 거기에 넣으면
+      // 결과가 눈에 안 보인다(바로 아래 `onQuote` 의 부재와 같은 이유).
+      onRepropose: (draft: string) => seedDraft(threadDraftKey(root.id), draft),
       ...(onOpenWorkRequest !== undefined ? {onOpenWorkRequest} : {}),
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
@@ -366,14 +369,19 @@ export function ThreadPanel({
       openEvidence,
       onOpenMessage,
       onOpenWorkRequest,
+      root.id,
     ],
   );
 
   const pending = timeline.repliesPending(root.id);
-  // 채널 컴포저와 **같은 신호**다 — 답글도 REST POST 로 나가고, 같은 앱의 두
-  // 입력창이 같은 상황에 다른 얼굴을 하면 그것은 어휘 분열이다
-  // (`features/inbox/useOnline.ts` 머리말이 승인 컨트롤에 대해 하는 말과 같다).
-  const online = useOnline();
+  // 채널 컴포저·승인 카드와 **같은 신호**다(#5262, #5201 결정 ③) — 답글도 REST POST 로 나가고, 같은 앱의 두 입력창이 같은 상황에 다른 얼굴을 하면
+  // 그것은 어휘 분열이다(`features/inbox/useOnline.ts` 머리말이 승인 컨트롤에 대해 하는 말과 같다). 막는 기준은 NetInfo 하나가 아니라 연결 상태
+  // 모델의 답이다: 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없는 곳(격리 하네스·시험)은
+  // NetInfo 만으로 같은 질문에 답한다(`useConnectionGates`).
+  const gates = useConnectionGates();
+  // 입력창을 막았을 때 위 한 줄이 말하는 원인 문장. 모델이 없으면 undefined 라 입력창의 기존 문장이 선다.
+  const composerNote =
+    gates.composerNote === null ? undefined : formatMessage(gates.composerNote);
   const {sendReply} = timeline;
   // A reply is my own send, and the same rule applies here as in the channel:
   // it comes to me regardless of where I had scrolled to.
@@ -536,7 +544,7 @@ export function ThreadPanel({
                 requestRootId={hasAgentRequest(liveRoot, directory) ? root.id : undefined}
                 approvalGates={approvalGates}
                 approvalReceipts={approvalReceipts}
-                approvalOffline={!online}
+                approvalOffline={!gates.canDecide}
                 approvalsProvided={approvalsProvided}
                 onApprovalSettled={onApprovalSettled}
                 // 답글의 메아리는 **이 목록에만** 선다(`useTimeline` 의 `channelPending`). 보낸 메시지의 등장 보류도 이 표면의 것이라,
@@ -566,7 +574,8 @@ export function ThreadPanel({
                   ? undefined
                   : {workspaceId, channelId, rootId: root.id}
               }
-              offline={!online}
+              offline={!gates.canSend}
+              offlineNote={composerNote}
               // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               sendLabel="답글 보내기"

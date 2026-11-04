@@ -266,13 +266,101 @@ describe('이 기기에 남고, 다시 열면 같은 키의 실패 행으로 돌
     expect(left[0].kind).toBe('server');
   });
 
-  it('스레드 답글의 실패 행은 이 칸에서 남기지 않는다 - 되살린 답글을 채널 줄(↳ 줄)과 스레드에 그리는 일은 스레드 칸(#4888)의 몫이다', async () => {
+  // ---- 스레드 답글 (#5262): 행이 `rootId` 를 싣고 다니므로(#4888) 대화의 글과 같은 저장소·같은 규칙으로 남는다 ----
+  it('스레드 답글의 실패 행도 이 기기에 남는다 - 뿌리와 「대화에도 보내기」를 행이 싣고 있다', async () => {
     const view = hook();
     await act(async () => {
-      await view.result.current.sendReply('root-1', '답글이에요');
+      await view.result.current.sendReply('root-1', '답글이에요', undefined, {alsoInChannel: true});
     });
     await settle();
     expect(view.result.current.repliesPending('root-1')).toHaveLength(1);
+    const stored = readFailedSends(WS, CH, ME, T0);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].row).toMatchObject({
+      rootId: 'root-1',
+      alsoInChannel: true,
+      body: '답글이에요',
+      status: 'failed',
+    });
+    expect(stored[0].kind).toBe('server');
+  });
+
+  it('채널을 다시 열면 답글 실패 행이 같은 키 · 같은 뿌리로 돌아오고(스레드와 대화 목록 둘 다), 다시 보내기는 답글 길로 나간다', async () => {
+    const first = hook();
+    await act(async () => {
+      await first.result.current.sendReply('root-1', '답글이에요', undefined, {alsoInChannel: true});
+    });
+    await settle();
+    const [failed] = first.result.current.repliesPending('root-1');
+    first.unmount();
+
+    const second = hook();
+    await settle();
+    // 스레드 화면이 읽는 자리(`repliesPending`)와, 실패한 답글이 서는 대화 목록의 자리(`pending`)에 모두 같은 행이 돌아왔다.
+    expect(second.result.current.repliesPending('root-1').map(p => p.clientMsgId)).toEqual([failed.clientMsgId]);
+    expect(second.result.current.pending.map(p => p.clientMsgId)).toEqual([failed.clientMsgId]);
+    expect(second.result.current.pending[0]).toMatchObject({status: 'failed', rootId: 'root-1', alsoInChannel: true});
+    expect(second.result.current.failureKinds.get(failed.clientMsgId)).toBe('server');
+
+    // 되살린 답글의 다시 보내기는 글 길(`sendMessage`)이 아니라 답글 길로, 같은 키 · 같은 뿌리 · 같은 옵션으로 나간다.
+    send.mockClear();
+    sendReply.mockReset();
+    sendReply.mockResolvedValue({...ok('r-1'), rootId: 'root-1'} as Message);
+    await act(async () => {
+      await second.result.current.resend(failed.clientMsgId);
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(sendReply).toHaveBeenCalledTimes(1);
+    expect(sendReply.mock.calls[0].slice(0, 5)).toEqual([WS, CH, 'root-1', failed.clientMsgId, '답글이에요']);
+    expect(sendReply.mock.calls[0][5]).toEqual({alsoInChannel: true});
+    expect(second.result.current.pending).toEqual([]);
+    second.unmount();
+    expect(readFailedSends(WS, CH, ME, T0)).toEqual([]);
+  });
+
+  it('채널을 떠날 때 날아가던 답글도 이 기기에 남는다 - 결과를 모르는 글은 실패 행으로 돌아온다', async () => {
+    sendReply.mockReset();
+    sendReply.mockImplementation(() => new Promise<Message>(() => undefined));
+    const view = hook();
+    await act(async () => {
+      void view.result.current.sendReply('root-1', '날아가는 답글');
+    });
+    expect(view.result.current.repliesPending('root-1').map(p => p.status)).toEqual(['sending']);
+    view.unmount();
+    const kept = readFailedSends(WS, CH, ME, T0);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].row).toMatchObject({rootId: 'root-1', body: '날아가는 답글', status: 'failed'});
+    expect(kept[0].kind).toBeNull();
+  });
+
+  it('API 키 모양이 든 답글은 저장소에 남기지 않는다 - 화면의 실패 행은 그대로 있다', async () => {
+    // 접두와 꼬리를 10자 아래 조각으로 이어 붙인다(저장소 비밀 검사가 시험 속 가짜 키를 진짜로 읽지 않게).
+    const keyLike = ['s', 'k-', 'ant-', 'api03-', 'aB3xK9mQ', '2vL7nR4t', 'Y8wZ1cD5', 'fG6hJ0pS'].join('');
+    const view = hook();
+    await act(async () => {
+      await view.result.current.sendReply('root-1', `키는 ${keyLike} 이에요`);
+    });
+    await settle();
+    expect(view.result.current.repliesPending('root-1')).toHaveLength(1);
+    expect(readFailedSends(WS, CH, ME, T0)).toEqual([]);
+  });
+
+  it('서버가 이미 받았던 답글(응답만 유실됐다)은 되살린 행이 확정 답글과 만나 행도 저장본도 스스로 사라진다', async () => {
+    const first = hook();
+    await act(async () => {
+      await first.result.current.sendReply('root-1', '응답을 못 받은 답글');
+    });
+    await settle();
+    first.unmount();
+    expect(readFailedSends(WS, CH, ME, T0)).toHaveLength(1);
+    jest.mocked(fetchMessages).mockResolvedValue({
+      messages: [{...ok('server-copy'), body: '응답을 못 받은 답글', seq: 9, rootId: 'root-1'}],
+      nextBefore: undefined,
+    } as never);
+    const again = hook();
+    await settle();
+    expect(again.result.current.repliesPending('root-1')).toEqual([]);
+    expect(again.result.current.pending).toEqual([]);
     expect(readFailedSends(WS, CH, ME, T0)).toEqual([]);
   });
 

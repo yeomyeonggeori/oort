@@ -293,6 +293,7 @@ import {RequestStatusChip} from '../agents/RequestStatusChip';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import {RequestBundleCard} from './RequestBundleCard';
 import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
+import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 
 // =============================================================================
 // One row of the conversation.
@@ -1589,6 +1590,7 @@ export function readApprovalCard(
     approvalGates,
     approvalReceipts,
     approvalOffline,
+    approvalOfflineText,
     approvalsProvided,
     viewerMemberId,
     nameFor,
@@ -1596,6 +1598,11 @@ export function readApprovalCard(
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
+    /**
+     * `approvalOffline` 일 때 줄이 말할 문장 - 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)을 가린 것(#5262, `useApprovalBlockedLine`). 없으면
+     * 원인을 가리지 않는 코어 문장이다.
+     */
+    approvalOfflineText?: string;
     approvalsProvided?: boolean;
     viewerMemberId?: string;
     /** 참여자 동의 카드의 결정자 이름을 푼다. 문장을 그리는 카드만 넘기면 돼요. */
@@ -1651,6 +1658,7 @@ export function readApprovalCard(
     hasTarget: card.approvalId !== null,
     pendingHere: approval !== null,
     offline: approvalOffline === true,
+    offlineText: approvalOfflineText,
     approvalsProvided,
   });
   return {approval, receipt, settledStatus, note};
@@ -1670,11 +1678,14 @@ function AgentCard({
   decisionRef,
   requestRun,
   onOpenDecision,
+  onRepropose,
 }: {
   card: AgentCardModel;
   viewerMemberId?: string;
   requestRun?: AgentRunProgress;
   onOpenDecision?: (approvalId: string) => void;
+  /** 닫힌 묶음 카드의 「다시 요청」이 이 화면의 입력창에 초안을 넣는다 (`MessageRowActions.onRepropose`). */
+  onRepropose?: (draft: string) => boolean;
   /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
@@ -1695,6 +1706,8 @@ function AgentCard({
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
+  // 승인을 막은 원인의 문장(#5262): 막을지는 화면이 `approvalOffline` 으로 정했고, 무슨 말을 할지는 연결 모델이 고른 사전 키가 정한다.
+  const approvalOfflineText = useApprovalBlockedLine();
   const avatarKey = card.kind === 'approval' && hasProfileAvatarPreview(card.action)
     ? `${card.approvalId}:${card.action?.preview?.sha256}` : null;
   const [avatarReady, setAvatarReady] = useState<{key: string | null; ready: boolean} | null>(null);
@@ -1709,6 +1722,7 @@ function AgentCard({
       approvalGates,
       approvalReceipts,
       approvalOffline,
+      approvalOfflineText,
       approvalsProvided,
       viewerMemberId,
       nameFor: id => memberFor(directory, id)?.displayName,
@@ -1716,7 +1730,8 @@ function AgentCard({
     if (hasRequestBundle(card)) {
       return <RequestBundleCard card={card} directory={directory} viewerMemberId={viewerMemberId}
         gate={approval} receipt={receipt} nowMs={nowMs} offline={approvalOffline} run={requestRun}
-        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision} />;
+        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision}
+        onRepropose={onRepropose} />;
     }
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
@@ -2215,6 +2230,12 @@ export interface MessageRowActions {
    * 서지 않는다: 열 곳을 모르는 표면에 눌러도 아무 일 없는 버튼을 두지 않는다.
    */
   onOpenMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * 닫힌 승인 카드(만료·거부·실패)의 「다시 요청」이 **이 화면의** 입력창에 초안을 넣는다 (#5171). 넣었으면 `true`, 입력창이 쓰던
+   * 글을 들고 있어서 거절했으면 `false`다(웹 `seedComposerText` 와 같은 규칙). 없으면(입력창이 없는 표면) 단추가 서지 않는다 —
+   * 눌러도 아무 일 없는 버튼을 두지 않는다.
+   */
+  onRepropose?: (draft: string) => boolean;
 }
 
 export interface MessageRowProps {
@@ -3395,6 +3416,7 @@ function MessageRowInner({
                 decisionRef={decisionRef}
                 requestRun={requestRun}
                 onOpenDecision={actions?.onOpenDecision}
+                onRepropose={actions?.onRepropose}
               />
             ) : null}
 
