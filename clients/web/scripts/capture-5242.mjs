@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // =============================================================================
-// 남은 「불러오지 못했습니다」 자리들 (#5242, #5221 후속): 사이드바 채널 목록의 원인 상자와 대표 두 자리(받은함 목록 = 상자,
-// 설정 알림 규칙 = 원인 한 줄)를 라이트·다크 1440으로 찍고 **화면의 문장과 서버로 나간 요청**을 잰다.
+// 남은 「불러오지 못했습니다」 자리들 (#5242, #5221 후속): 사이드바 채널 목록의 원인 상자·한 줄과 대표 두 자리(받은함 목록 = 상자,
+// 설정 알림 규칙 = 원인 한 줄)를 라이트·다크 × 390·720·1440으로 찍고 **화면의 문장과 서버로 나간 요청**을 잰다.
 //
 //   npm run build && node scripts/capture-5242.mjs --label after --out <스크래치>/cap5242
 //
@@ -9,14 +9,21 @@
 // 단정은 구현 이름이 아니라 **화면의 문장**을 잰다: 제목 + 원인 이유가 나오는가, 상태 코드가 한 글자도 없는가, 옛 「…불러오지
 // 못했습니다」 문장이 없는가, 다시 시도가 그 자리의 읽기를 다시 부르고 풀리는가.
 //
+// #5306 (화면 검수 5b M2): 시트·회색 띠 위에 서는 불러오기 실패의 「다시 시도」 알약이 시트와 같은 색이라 글자로만 읽히던 일(라이트 1.009:1)을
+// **그려진 픽셀**로 잰다(「단추 그릇 ↔ 바탕 대비」). 사이드바 상자·한 줄은 시트 위 문법(`--surface` 알약 + rest 그림자)으로 서야 하고, 그 기준은 같은
+// 사이드바 빈 상태의 「채널 만들기」다: 같은 조합에서 그 알약을 먼저 찍어 두고 「다시 시도」의 채움 색이 같은지, 그리고 바탕과의 대비가 바닥을 넘는지 잰다.
+// 본문 판(받은함) 위의 같은 상자는 보조 채움 그대로 읽혀야 한다. 사진에서 읽은 값(알약·바탕 색, 대비)은 결과 장부(results.json)에 남는다.
+//
 // 옵션: --dist(기본 dist) --out(기본 captures/5242/<label>) --label(기본 after) --port(기본 5542)
-//       --soft(실패해도 끝까지 돌고 종료 코드 0) --no-shots --combos(light-1440,dark-1440. 기본 둘)
+//       --soft(실패해도 끝까지 돌고 종료 코드 0) --no-shots
+//       --combos(light-390,dark-390,light-720,dark-720,light-1440,dark-1440. 기본 전부. 390 은 사이드바가 서랍이라 열고 잰다)
 // 캡처는 저장소에 올리지 않는다: --out 을 스크래치로 준다.
 // =============================================================================
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,8 +41,19 @@ const OUT = resolve(WEB_ROOT, String(arg("out", `captures/5242/${LABEL}`)));
 const PORT = Number(arg("port", 5542));
 const SOFT = arg("soft", false) === true;
 const SHOTS = arg("no-shots", false) !== true;
-const COMBOS = String(arg("combos", "light-1440,dark-1440")).split(",");
+// 390 은 사이드바가 서랍(폭 600 미만), 720·1440 은 셸 바닥 위에 서는 열이다. 알약의 바탕이 서랍 시트냐 셸 바닥이냐가 달라 셋 다 잰다(#5306).
+const COMBO_SIZES = {
+  "light-390": ["light", 390, 844],
+  "dark-390": ["dark", 390, 844],
+  "light-720": ["light", 720, 900],
+  "dark-720": ["dark", 720, 900],
+  "light-1440": ["light", 1440, 900],
+  "dark-1440": ["dark", 1440, 900],
+};
+const COMBOS = String(arg("combos", Object.keys(COMBO_SIZES).join(","))).split(",");
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/** 폭 600 미만에서 사이드바는 본문 위를 덮는 서랍이다(tokens.css `sidebar-drawer`). */
+const isPhoneWidth = (width) => width < 600;
 
 // ---- 결과 장부 ---------------------------------------------------------------
 
@@ -47,6 +65,91 @@ function check(id, ok, detail = "") {
 }
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const hasStatusCode = (text) => /(^|[^\d])\d{3}([^\d]|$)/.test(text);
+
+// ---- 그려진 픽셀 재기 (#5306) ---------------------------------------------------------
+// `getComputedStyle` 은 띠·테마가 `--surface` 같은 역할 변수를 다시 묶는 길(tokens.css 「띠 위의 글자」)과 `color-mix`·`light-dark` 를 거치므로
+// 실제로 그려진 색을 말하지 않는다. 그래서 스크린샷의 1x1 clip 을 풀어 읽는다(capture-5190.mjs 와 같은 복호기, 캔버스 흉내 없음).
+
+/** PNG(8비트 RGB·RGBA, 비인터레이스)를 푼다. 스크린샷 clip 전용이라 이 모양만 안다. */
+function decodePng(png) {
+  let at = 8, width = 0, height = 0, colorType = 0;
+  const idat = [];
+  while (at < png.length) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString("ascii", at + 4, at + 8);
+    const body = png.subarray(at + 8, at + 8 + length);
+    if (type === "IHDR") { width = body.readUInt32BE(0); height = body.readUInt32BE(4); colorType = body[9]; }
+    if (type === "IDAT") idat.push(body);
+    at += 12 + length;
+  }
+  const channels = colorType === 6 ? 4 : 3;
+  const stride = width * channels;
+  const raw = inflateSync(Buffer.concat(idat));
+  const data = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= channels ? data[y * stride + x - channels] : 0;
+      const up = y > 0 ? data[(y - 1) * stride + x] : 0;
+      const upLeft = y > 0 && x >= channels ? data[(y - 1) * stride + x - channels] : 0;
+      let value = line[x];
+      if (filter === 1) value += left;
+      else if (filter === 2) value += up;
+      else if (filter === 3) value += (left + up) >> 1;
+      else if (filter === 4) {
+        const guess = left + up - upLeft;
+        const dl = Math.abs(guess - left), du = Math.abs(guess - up), dul = Math.abs(guess - upLeft);
+        value += dl <= du && dl <= dul ? left : du <= dul ? up : upLeft;
+      }
+      data[y * stride + x] = value & 255;
+    }
+  }
+  return { width, height, channels, data };
+}
+async function pixelAt(page, x, y) {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 }, animations: "disabled", caret: "hide" });
+  const { data } = decodePng(png);
+  return [data[0], data[1], data[2]];
+}
+const srgbLuminance = ([r, g, b]) => {
+  const lin = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const contrastOf = (a, b) => {
+  const [hi, lo] = [srgbLuminance(a), srgbLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+/**
+ * 「단추 그릇 ↔ 바탕」: 알약 안 한 점과 그 오른쪽 바깥 바탕 한 점의 상대 휘도 대비를 **사진에서** 잰다.
+ * 알약 안은 왼쪽 끝에서 6px 들어간 세로 가운데(`size="sm"` 은 가로 여백 12px 라 글자가 없다, 둥근 끝 안쪽이다).
+ * 바탕은 오른쪽 끝에서 14px 바깥이다(상자 `px-4`·배너 `px-4` 안 여백이라 시트가 그대로 보이고, rest 그림자의 번짐은 닿지 않는다).
+ * 위·아래 가장자리는 피한다(다크의 `shadow-sm` 은 위 1px 안쪽 하이라이트를 둔다).
+ */
+async function pillVsBackdrop(page, button) {
+  await button.scrollIntoViewIfNeeded();
+  const box = await button.boundingBox();
+  if (box === null) return null;
+  const y = Math.round(box.y + box.height / 2);
+  const fill = await pixelAt(page, Math.round(box.x + 6), y);
+  const backdrop = await pixelAt(page, Math.round(box.x + box.width + 14), y);
+  const ratio = contrastOf(fill, backdrop);
+  return { fill, backdrop, ratio, detail: `알약 rgb(${fill.join(",")}) 바탕 rgb(${backdrop.join(",")}) 대비 ${ratio.toFixed(3)}:1` };
+}
+const sameFill = (a, b) => a.every((value, i) => Math.abs(value - b[i]) <= 2);
+
+/**
+ * 알약이 바탕에서 **읽히는** 바닥(스킴별). 3:1 은 아니다 — 이 문법으로는 구조상 나오지 않는다: 디자인 시스템은 보조 알약의 **채움 대비를 재지 않고**
+ * (README §3.3, ADR-0189 D6) 글자 라벨이 컨트롤을 식별시킨다(WCAG 1.4.11). 바닥은 사진으로 잰 값 사이에 둔 것이다.
+ *   - 시트 위 알약(`PILL_MIN`): 라이트는 사라지던 보조 채움이 1.009(390 서랍)~1.047(720·1440 셸 바닥), 시트 위 문법(`--surface` + rest 그림자)은
+ *     1.109~1.171 → 1.08. 다크의 시트 위 문법은 안쪽 하이라이트 1px 에 기대 1.044~1.076(빈 상태 「채널 만들기」도 같다)이라 바닥은
+ *     「시트와 같은 색이 아니다」만 막는 1.03 이다. 그 위에서 같은 문법인지는 아래 「빈 상태 기준과 같은 채움」 단정이 맡는다.
+ *   - 본문 판 위 보조 채움(`BODY_PILL_MIN`): 라이트 1.118~1.149, 다크 1.165~1.198 → 1.08 · 1.10. 시트 위 문법이 본문까지 번지면(판 위 `--surface` 알약은
+ *     라이트 1.0, 다크 1.04) 이 바닥을 못 넘는다.
+ */
+const PILL_MIN = { light: 1.08, dark: 1.03 };
+const BODY_PILL_MIN = { light: 1.08, dark: 1.10 };
 
 // ---- 정적 서버 (자기 PID 로만 끈다) -------------------------------------------------
 
@@ -111,7 +214,7 @@ const history = (channelId) => [
 ];
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-/** 모의 서버 상태. channels·inbox: ok | abort(응답 없음) · rules: ok | 500. reads 는 자리별로 읽기가 몇 번 나갔는지 센다. */
+/** 모의 서버 상태. channels: ok | empty(채널 0개) | abort(응답 없음) · inbox: ok | abort · rules: ok | 500. reads 는 자리별로 읽기가 몇 번 나갔는지 센다. */
 function makeServerState() {
   return { channels: "ok", inbox: "ok", rules: "ok", reads: { channels: 0, inbox: 0, rules: 0 } };
 }
@@ -139,6 +242,7 @@ async function installRoutes(context, state) {
     if (path.endsWith("/channels") && method === "GET") {
       state.reads.channels += 1;
       if (state.channels === "abort") return route.abort("failed");
+      if (state.channels === "empty") return json(route, { channels: [] });
       return json(route, { channels });
     }
     if (path.endsWith("/agent-dm-delivery")) return json(route, { agentMemberId: peerId, ownerMemberId: memberId, state: "open" });
@@ -229,10 +333,51 @@ async function shot(page, name) {
 }
 const textOf = async (locator) => ((await locator.textContent()) ?? "").replace(/\s+/g, " ").trim();
 
+/** 폰 폭(390)에서 사이드바는 닫힌 서랍이다: 헤더의 「채널 목록 열기」로 열고 자리를 잡은 뒤 잰다(열려 있을 때만 알약이 화면 안에 선다). */
+async function openDrawerIfPhone(page, width) {
+  if (!isPhoneWidth(width)) return;
+  await page.getByTestId("open-sidebar-drawer").first().click();
+  await page.locator('[data-testid="sidebar"][data-open]').waitFor({ timeout: 10_000 });
+  await wait(300);
+}
+
 // ---- 장면 ------------------------------------------------------------------------
 
 const TITLE_CHANNELS = "채널 목록을 불러오지 못했어요";
 const REASON_SERVER = "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+
+/**
+ * 시트 위 알약의 **기준**: 받아 둔 채널이 0개인 사이드바의 빈 상태 「채널 만들기」(`ghost` + `band-surface bg-surface shadow-sm`, 시안 A 시트 위 알약).
+ * 불러오기 실패의 「다시 시도」가 이 알약과 **같은 채움**으로 서는지를 아래 단정이 이 사진 값과 견준다(#5306). 조합마다 먼저 찍어 둔다.
+ */
+const sheetPillReference = new Map();
+
+async function sceneSidebarEmpty(browser, combo, scheme, width, height) {
+  scope = `사이드바 빈 상태(기준) ${combo}`;
+  const { context, page, state } = await newPage(browser, scheme, width, height);
+  state.channels = "empty";
+  await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+  const create = page.getByTestId("sidebar-create-channel");
+  await create.waitFor({ timeout: 25_000 });
+  await openDrawerIfPhone(page, width);
+  await wait(400);
+  const pill = await pillVsBackdrop(page, create);
+  if (pill !== null) sheetPillReference.set(combo, pill);
+  check(`사이드바 빈 상태 「채널 만들기」(시트 위 알약의 기준)가 시트 바탕에서 읽힌다(그릇 ↔ 바탕 대비 ${PILL_MIN[scheme]} 이상)`, pill !== null && pill.ratio >= PILL_MIN[scheme], pill?.detail);
+  await shot(page, `sidebar-channels-empty-${combo}`);
+  await context.close();
+}
+
+/** 불러오기 실패의 「다시 시도」 알약 단정 둘: 빈 상태 기준과 같은 채움(문법) + 시트 바탕에서 읽힘(대비). */
+function checkSheetPill(label, combo, scheme, pill) {
+  const reference = sheetPillReference.get(combo);
+  check(
+    `${label}: 「다시 시도」 알약이 빈 상태 「채널 만들기」와 같은 시트 위 문법(같은 채움 색)으로 선다`,
+    pill !== null && reference !== undefined && sameFill(pill.fill, reference.fill),
+    `${pill?.detail ?? "알약 없음"} · 기준 ${reference?.detail ?? "없음"}`
+  );
+  check(`${label}: 「다시 시도」 알약(단추 그릇)이 시트 바탕에서 읽힌다(그릇 ↔ 바탕 대비 ${PILL_MIN[scheme]} 이상)`, pill !== null && pill.ratio >= PILL_MIN[scheme], pill?.detail);
+}
 
 async function sceneSidebar(browser, combo, scheme, width, height) {
   scope = `사이드바 채널 목록 ${combo}`;
@@ -241,6 +386,7 @@ async function sceneSidebar(browser, combo, scheme, width, height) {
   await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
   const box = page.locator('[data-testid="channel-list"] [data-testid="channels-error"]');
   await box.waitFor({ timeout: 25_000 });
+  await openDrawerIfPhone(page, width);
   await wait(400);
   const text = await textOf(box);
   check("사이드바: 제목 + 원인 이유(서버에 닿지 못함)가 한 상자에 선다", text.includes(TITLE_CHANNELS) && text.includes(REASON_SERVER), text);
@@ -249,12 +395,54 @@ async function sceneSidebar(browser, combo, scheme, width, height) {
   check("옛 「채널을 불러오지 못했습니다.」 문장이 어디에도 없다", !(await page.locator("body").innerText()).includes("채널을 불러오지 못했습니다"));
   const sidebarBox = await box.boundingBox();
   check("사이드바 상자가 서랍 폭 안에 들어간다(가로 넘침 없음)", sidebarBox !== null && sidebarBox.x >= 0 && sidebarBox.width <= 340, JSON.stringify(sidebarBox));
+  const retryPill = await pillVsBackdrop(page, box.getByRole("button", { name: "다시 시도" }));
+  checkSheetPill("사이드바 상자", combo, scheme, retryPill);
   await shot(page, `sidebar-channels-failure-${combo}`);
   const before = state.reads.channels;
   state.channels = "ok";
   await box.getByRole("button", { name: "다시 시도" }).click();
   await page.locator('[data-testid="channel-list"]').getByText("release-2026-11").first().waitFor({ timeout: 15_000 }).catch(() => undefined);
   check("다시 시도가 채널 목록을 다시 읽고 풀린다", state.reads.channels > before && (await page.locator('[data-testid="channel-list"] [data-testid="channels-error"]').count()) === 0);
+  await context.close();
+}
+
+/**
+ * 받아 둔 채널이 **있는데** 다시 읽기가 실패한 사이드바의 한 줄(`LoadFailureLine`, #5306). 한 번 읽힌 목록이 있어야 서므로 사이드바를 정상으로 띄운 뒤
+ * 읽기를 끊고, `Date.now` 를 60초 앞으로 밀어 목록을 오래된 것(staleTime 30초)으로 만들고, 연결이 끊겼다 돌아온 일(`offline` → `online`)로 다시 읽게 한다.
+ * 시계만 밀므로 타이머는 진짜로 흐른다(`retry: 1` 의 1초 대기도 그대로).
+ */
+async function sceneSidebarLine(browser, combo, scheme, width, height) {
+  scope = `사이드바 한 줄 ${combo}`;
+  const { context, page, state } = await newPage(browser, scheme, width, height);
+  await page.addInitScript(() => {
+    const real = Date.now.bind(Date);
+    window.__skew5306 = 0;
+    Date.now = () => real() + window.__skew5306;
+  });
+  await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+  const list = page.locator('[data-testid="channel-list"]');
+  await list.getByText("release-2026-11").first().waitFor({ timeout: 25_000 });
+  state.channels = "abort";
+  await page.evaluate(() => {
+    window.__skew5306 = 60_000;
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+  });
+  const line = page.getByTestId("channels-error-line");
+  await line.waitFor({ timeout: 25_000 });
+  await openDrawerIfPhone(page, width);
+  await wait(400);
+  const text = await textOf(line);
+  check("사이드바 한 줄: 받아 둔 목록은 그대로 두고 제목만 위에 선다(상자 없음)", text.includes(TITLE_CHANNELS) && (await page.getByTestId("channels-error").count()) === 0 && (await list.getByText("release-2026-11").count()) > 0, text);
+  check("사이드바 한 줄: 역할 alert, 다시 시도 단추 하나, 상태 코드 없음", (await line.getAttribute("role")) === "alert" && (await line.locator("button").count()) === 1 && !hasStatusCode(text));
+  const retryPill = await pillVsBackdrop(page, line.getByRole("button", { name: "다시 시도" }));
+  checkSheetPill("사이드바 한 줄", combo, scheme, retryPill);
+  await shot(page, `sidebar-channels-failure-line-${combo}`);
+  const before = state.reads.channels;
+  state.channels = "ok";
+  await line.getByRole("button", { name: "다시 시도" }).click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="channels-error-line"]').length === 0, undefined, { timeout: 15_000 }).catch(() => undefined);
+  check("한 줄의 다시 시도가 채널 목록을 다시 읽고 풀린다", state.reads.channels > before && (await page.getByTestId("channels-error-line").count()) === 0);
   await context.close();
 }
 
@@ -272,6 +460,9 @@ async function sceneInbox(browser, combo, scheme, width, height) {
   check("받은함: 제목 + 원인 이유가 한 상자에 선다", text.includes("인박스를 불러오지 못했어요") && text.includes(REASON_SERVER), text);
   check("받은함 상자: 역할 alert, 다시 시도 단추 하나", (await box.getAttribute("role")) === "alert" && (await box.locator("button").count()) === 1);
   check("받은함 상자: 상태 코드가 없고 옛 문장이 없다", !hasStatusCode(text) && !(await page.locator("body").innerText()).includes("인박스를 불러오지 못했어요."));
+  // 본문 판 위의 같은 상자는 보조 채움 그대로여야 한다(시트 위 문법은 사이드바만의 것이다, #5306).
+  const bodyPill = await pillVsBackdrop(page, box.getByRole("button", { name: "다시 시도" }));
+  check(`받은함 상자(본문 판): 「다시 시도」 알약이 판 바탕에서 읽힌다(그릇 ↔ 바탕 대비 ${BODY_PILL_MIN[scheme]} 이상)`, bodyPill !== null && bodyPill.ratio >= BODY_PILL_MIN[scheme], bodyPill?.detail);
   await shot(page, `inbox-failure-${combo}`);
   const before = state.reads.inbox;
   state.inbox = "ok";
@@ -307,11 +498,12 @@ async function sceneSettings(browser, combo, scheme, width, height) {
 
 const server = await startStatic();
 const browser = await chromium.launch({ headless: true });
-const COMBO_SIZES = { "light-1440": ["light", 1440, 900], "dark-1440": ["dark", 1440, 900] };
 try {
   for (const [combo, [scheme, width, height]] of Object.entries(COMBO_SIZES)) {
     if (!COMBOS.includes(combo)) continue;
+    await sceneSidebarEmpty(browser, combo, scheme, width, height);
     await sceneSidebar(browser, combo, scheme, width, height);
+    await sceneSidebarLine(browser, combo, scheme, width, height);
     await sceneInbox(browser, combo, scheme, width, height);
     await sceneSettings(browser, combo, scheme, width, height);
   }
