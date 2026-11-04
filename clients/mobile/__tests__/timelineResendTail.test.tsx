@@ -5,6 +5,7 @@ import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-na
 import React, {Profiler, useState} from 'react';
 import type {FlatList} from 'react-native';
 
+import {createDockFollow, DockFollowContext, type DockFollow} from '../src/features/conversation/dockFollow';
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 import {installAppClock} from './fixtures/fakeClock';
 
@@ -36,6 +37,13 @@ import {installAppClock} from './fixtures/fakeClock';
 // 네이티브 이중은 `timelineEntryEnd.test.tsx` 의 규칙 5·9를 줄인 것이다: 커밋은 **그 자리에서** 새 프레임을 만들고, 레이아웃 보고(셀·콘텐츠)는 **따로** 낸다.
 // 그래서 「창 보고가 새 셀 보고보다 먼저 온다」는 순서를 시험이 정한다. `VirtualizedList.scrollToEnd` 는 가로채지 않고 진짜 코드가 셀 기록으로 셈하게 둔 뒤 한 단계
 // 아래(`VirtualizedList.scrollToOffset`)에서 명령을 받는다. 네이티브 `scrollToEnd` 는 응답자를 갈아 끼워 받고, 이중이 **실행 순간**의 콘텐츠·창으로 끝을 셈한다.
+//
+// ## 뒤에 더한 것 (#5310, 검증 5b)
+//
+// 위 고침 뒤에도 검증 5b 의 실제 끊김 흐름에서 같은 모양(마지막 행이 입력창 위 목록 끝에서 17~20pt 잘린 채 55초 뒤에도)이 남았다. 이 시험 이중으로 그 순서를 자연 그대로 만들지는 못했다.
+// 확인되는 빈틈은 하나다: **목록이 낸 따라가기 명령의 결과를 아무도 다시 묻지 않는다** — 끝에 못 미쳐 앉아도 120pt 문턱 안이면 「따라가는 중」으로 남고, 다음 사건이 없으면 그대로다.
+// 그래서 아래 마지막 절은 명령이 모자라게 앉는 모양(`skewNativeEnd` — 명령이 읽은 창·콘텐츠가 한 칸 늦은 값인 경우)을 이중에 주고, 가라앉은 뒤 한 번 더 묻는 것(`armSettle`)을 잠근다.
+//
 // =============================================================================
 
 const SELF = '11111111-5284-4000-8000-000000000001';
@@ -177,8 +185,19 @@ class NativeTail {
   private frames = new Map<string, {y: number; h: number}>();
   private announced = new Map<string, string>();
   private announcedContent = -1;
+  /** 앞으로 `times` 번의 네이티브 끝 명령이 `px` 만큼 **못 미쳐** 앉는다 — 명령이 읽은 창·콘텐츠 값이 한 칸 늦은 값이던 경우의 모양이다(#5310). */
+  private skew = {px: 0, times: 0};
 
   constructor(private readonly heightOf: (child: Child) => number) {}
+
+  skewNativeEnd(px: number, times = 1) {
+    this.skew = {px, times};
+  }
+
+  /** 받은 네이티브 끝 명령의 수. */
+  nativeEnds(): number {
+    return this.commands.filter(command => command.via === 'native').length;
+  }
 
   /** 커밋: 새 프레임을 **그 자리에서** 만든다(보고는 따로 낸다). */
   commit(children: Child[]) {
@@ -243,8 +262,10 @@ class NativeTail {
   /** 명령은 한 틱 뒤에 돈다. `end` 는 **그때의** 콘텐츠·창으로 끝을 셈한다(네이티브 `scrollToEnd`). 숫자는 부른 순간 고정이다(어림). */
   command(via: 'inner' | 'native', target: number | 'end') {
     this.commands.push({via, target});
+    const short = via === 'native' && target === 'end' && this.skew.times > 0 ? this.skew.px : 0;
+    if (short > 0) this.skew.times -= 1;
     setTimeout(() => {
-      this.offset = this.clamp(target === 'end' ? this.end() : target);
+      this.offset = this.clamp(target === 'end' ? this.end() - short : target);
       this.report();
     }, 0);
   }
@@ -272,8 +293,8 @@ type ListRef = React.MutableRefObject<FlatList<TimelineStreamItem> | null>;
 interface Room {
   native: NativeTail;
   pillsRef: React.MutableRefObject<PillState | null>;
-  /** 실패 행이 다시 보내는 중으로(자동 재전송의 첫 순간). */
-  retry: () => Promise<void>;
+  /** 실패 행이 다시 보내는 중으로(자동 재전송의 첫 순간). `settle` 프레임을 흘려 보낸다(기본 30). */
+  retry: (settle?: number) => Promise<void>;
   /** 서버 사본이 오고 실패 행이 걷힌다(`post` 의 성공 틱). */
   swap: () => Promise<void>;
 }
@@ -289,6 +310,8 @@ async function frames(count: number) {
 interface OpenOptions {
   /** 진입 수렴이 도는 동안(첫 콘텐츠 보고 직후) 창을 이 높이로 바꾼다. */
   windowDuringEntry?: number;
+  /** 도크 다리(`ConversationLayout` 이 만드는 것) — 주면 목록을 그 컨텍스트 안에 렌더한다(#5310). */
+  dock?: DockFollow;
 }
 
 async function openRoom(options: OpenOptions = {}): Promise<Room> {
@@ -318,7 +341,7 @@ async function openRoom(options: OpenOptions = {}): Promise<Room> {
       setMessages(current => [...current, SERVER_COPY]);
       setPending([]);
     };
-    return (
+    const timeline = (
       <Profiler
         id="room"
         onRender={() => {
@@ -340,6 +363,11 @@ async function openRoom(options: OpenOptions = {}): Promise<Room> {
           listRef={listRef}
         />
       </Profiler>
+    );
+    return options.dock === undefined ? (
+      timeline
+    ) : (
+      <DockFollowContext.Provider value={options.dock}>{timeline}</DockFollowContext.Provider>
     );
   }
 
@@ -380,7 +408,7 @@ async function openRoom(options: OpenOptions = {}): Promise<Room> {
   return {
     native,
     pillsRef,
-    retry: async () => {
+    retry: async (settle = 30) => {
       state.failed = false;
       await act(async () => {
         control.retry();
@@ -388,7 +416,7 @@ async function openRoom(options: OpenOptions = {}): Promise<Room> {
       await act(async () => {
         native.announce();
       });
-      await frames(30);
+      await frames(settle);
     },
     swap: async () => {
       await act(async () => {
@@ -510,5 +538,182 @@ describe('실패 행이 서버 사본으로 바뀔 때 목록이 바닥에 붙�
     // 손가락이 먼저다: 창이 커진 데 대한 따라가기 명령이 아예 나가지 않는다.
     expect(room.native.commands).toEqual([]);
     expect(pt(room.native.offset - heldAt)).toBe(0);
+  });
+});
+
+// 한 칸 늦은 값으로 센 명령이 모자라게 앉는 모양을 이중에 준다. 「한 번 낸 명령」 뒤에 아무 사건도 없으면(실패 행 → 서버 사본은 높이가 같다) 고칠 길이 없던 자리다.
+describe('따라가기가 낸 명령이 끝에 못 미쳐 앉아도 가라앉은 뒤 한 번 더 붙는다 (#5310)', () => {
+  /** 한 프레임씩 흘리며 매 프레임 스크롤 보고를 낸다 — 활강·관성처럼 목록이 아직 움직이는 중이다. */
+  async function movingFrames(room: Room, count: number) {
+    for (let frame = 0; frame < count; frame += 1) {
+      await act(async () => {
+        jest.advanceTimersByTime(FRAME_MS);
+        room.native.report();
+      });
+    }
+  }
+
+  it('창이 커지는 따라가기가 20pt 모자라게 앉아도 가라앉은 뒤 끝으로 다시 붙는다', async () => {
+    const room = await openRoom();
+    room.native.skewNativeEnd(20);
+
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(2);
+    // 대조: 첫 명령은 모자라게 앉았고, 목록은 따라가는 중으로 남았다(120pt 문턱 안이라 필도 없다).
+    expect(verdict(room)).toEqual({shortOfEnd: 20, latestPill: false});
+
+    await frames(60);
+
+    expect(verdict(room)).toEqual({shortOfEnd: 0, latestPill: false});
+    expect(room.native.nativeEnds()).toBe(2); // 따라가기 한 번 + 안착 확인이 붙인 한 번
+  });
+
+  it('끝에 앉아 있으면 확인은 명령을 더 내지 않는다', async () => {
+    const room = await openRoom();
+
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(60);
+
+    expect(verdict(room)).toEqual({shortOfEnd: 0, latestPill: false});
+    expect(room.native.nativeEnds()).toBe(1); // 따라가기 한 번뿐
+  });
+
+  it('확인이 오기 전에 위로 올라간 사람(따라가기가 꺼졌다)은 끌어가지 않는다', async () => {
+    const room = await openRoom();
+    room.native.skewNativeEnd(20);
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(2);
+    const issued = room.native.nativeEnds();
+
+    // 손가락 없는 이동(보조기술·상태 막대)으로 읽던 자리까지 올라갔다 — 따라가기 문턱 밖.
+    await act(async () => {
+      room.native.drag(room.native.end() - 600);
+    });
+    const readingAt = room.native.offset;
+    await frames(60);
+
+    expect(room.native.nativeEnds()).toBe(issued);
+    expect(pt(room.native.offset - readingAt)).toBe(0);
+  });
+
+  it('손가락이 목록을 쥔 동안에는 확인이 끌어가지 않는다', async () => {
+    const room = await openRoom();
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag'); // 손가락이 닿았다 — 따라가는 중은 켜진 채다
+    });
+    // 손가락이 쥔 채 콘텐츠가 바뀐다(실패 행의 「못 보냈어요」 줄이 걷힌다) — 따라가기 사건이라 확인 시계가 걸린다.
+    await room.retry(1);
+    // 시계가 울리기 전에 손가락이 목록을 조금 끌었다 — 바닥에서 30pt, 아직 따라가는 중.
+    await act(async () => {
+      room.native.drag(room.native.end() - 30);
+    });
+    const heldAt = room.native.offset;
+    room.native.commands.length = 0;
+
+    await frames(60);
+
+    // 손가락이 먼저다: 확인이 네이티브 끝을 부르지 않는다.
+    expect(room.native.nativeEnds()).toBe(0);
+    expect(pt(room.native.offset - heldAt)).toBe(0);
+  });
+
+  it('아직 움직이는 중이면(활강·관성의 스크롤 보고) 미루고, 가라앉은 뒤에 붙인다', async () => {
+    const room = await openRoom();
+    room.native.skewNativeEnd(20);
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(2);
+    const issued = room.native.nativeEnds();
+
+    // 400ms 동안 매 프레임 스크롤 보고가 온다 — 목록이 아직 움직이는 중이다. 시계가 몇 번 울려도 명령은 안 나간다.
+    await movingFrames(room, 25);
+    expect(room.native.nativeEnds()).toBe(issued);
+    expect(verdict(room).shortOfEnd).toBe(20);
+
+    // 보고가 그치면(가라앉으면) 한 번 붙인다.
+    await frames(30);
+    expect(verdict(room)).toEqual({shortOfEnd: 0, latestPill: false});
+    expect(room.native.nativeEnds()).toBe(issued + 1);
+  });
+
+  it('붙여도 안 앉는 목록은 끝없이 두드리지 않는다(상한 셋)', async () => {
+    const room = await openRoom();
+    room.native.skewNativeEnd(20, 99); // 이 목록의 네이티브 끝은 늘 20pt 못 미친다
+
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(200);
+
+    expect(room.native.nativeEnds()).toBe(1 + 3); // 따라가기 한 번 + 확인이 붙인 세 번(`SETTLE_MAX_FIXES`)
+    expect(verdict(room).shortOfEnd).toBe(20);
+  });
+
+  it('콘텐츠 변화의 활강이 낡은 창 값으로 목표를 세워 모자라게 앉아도 확인이 끝으로 붙인다', async () => {
+    const room = await openRoom();
+    // 목록이 아는 창 높이(JS 쪽 기록)가 실제보다 20pt 큰 채로 남아 있다 — 스크롤 보고 하나가 늦은 값을 실어 왔다.
+    await act(async () => {
+      fireEvent(list(), 'scroll', {
+        nativeEvent: {
+          contentOffset: {x: 0, y: room.native.offset},
+          contentSize: {width: 375, height: room.native.content()},
+          layoutMeasurement: {width: 375, height: room.native.window + 20},
+          zoomScale: 1,
+        },
+        timeStamp: Date.now(),
+      });
+    });
+    await frames(10); // 낡은 값을 낸 보고의 활강·핀이 가라앉게 둔다
+
+    // 콘텐츠가 바뀐다(실패 행의 「못 보냈어요」 줄이 걷힌다) — 활강은 낡은 창 값으로 목표를 세워 20pt 모자라게 앉는다.
+    await room.retry(2);
+    expect(verdict(room).shortOfEnd).toBe(20);
+
+    await frames(60);
+
+    expect(verdict(room)).toEqual({shortOfEnd: 0, latestPill: false});
+  });
+
+  it('확인 시계가 걸린 뒤 손가락이 목록을 끌기 시작하면 손을 뗀 뒤에도 되돌리지 않는다', async () => {
+    const room = await openRoom();
+    room.native.skewNativeEnd(20);
+    await act(async () => {
+      room.native.resizeWindow(WINDOW_WITHOUT_NOTE);
+    });
+    await frames(2); // 20pt 모자라게 앉았고 확인 시계가 걸려 있다
+    const issued = room.native.nativeEnds();
+
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag');
+      room.native.drag(room.native.end() - 60); // 읽으러 조금 끌었다 — 아직 따라가기 문턱(120pt) 안
+      fireEvent(list(), 'scrollEndDrag', LIFT);
+    });
+    const readingAt = room.native.offset;
+    await frames(60);
+
+    expect(room.native.nativeEnds()).toBe(issued);
+    expect(pt(room.native.offset - readingAt)).toBe(0);
+  });
+
+  it('입력창이 자라는 프레임(도크 다리)의 따라가기가 모자라게 앉아도 확인이 끝으로 붙인다', async () => {
+    const bridge = createDockFollow();
+    const room = await openRoom({dock: bridge});
+    room.native.skewNativeEnd(20);
+
+    act(() => bridge.notify());
+    await frames(2);
+    expect(verdict(room).shortOfEnd).toBe(20);
+
+    await frames(60);
+
+    expect(verdict(room)).toEqual({shortOfEnd: 0, latestPill: false});
+    expect(room.native.nativeEnds()).toBe(2);
   });
 });

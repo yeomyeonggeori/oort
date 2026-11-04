@@ -772,6 +772,20 @@ const LANDING_HOLD_MS = 600;
 /** UIKit's animated `setContentOffset` is ~300ms; wait for it to be down. */
 const GLIDE_SETTLE_MS = 350;
 
+/**
+ * 따라가기가 낸 명령이 끝에 **앉았는지** 다시 묻는 시계 (#5310, `armSettle`).
+ *
+ * 창·콘텐츠·도크가 바뀐 **마지막** 사건 뒤 이만큼(ms) 조용하면 한 번 묻는다. 길게 잡을 까닭이 없다 — 묻는 일은 가볍고(끝에 있으면 명령이 안 나간다), 짧을수록 모자란 채 서 있는
+ * 시간이 짧다. 활강(`GLIDE_SETTLE_MS`)·핀이 아직 돌면 그동안은 미룬다.
+ */
+const SETTLE_CHECK_MS = 120;
+/** 아직 움직이는 중이라 미룬 횟수의 상한 — 끝나지 않는 움직임이 확인을 영원히 붙잡지 않는다(12 × `SETTLE_CHECK_MS` ≈ 1.4초). */
+const SETTLE_MAX_DEFERS = 12;
+/** 확인이 끝에 다시 붙인 횟수의 상한 — 붙여도 안 앉는 목록을 끝없이 두드리지 않는다. 새 사건(창·콘텐츠·도크)이 오면 다시 센다. */
+const SETTLE_MAX_FIXES = 3;
+/** 스크롤 보고가 이 안에 있었으면 목록은 아직 움직이는 중이다(관성·활강·되튐) — 그때는 확인하지 않는다. */
+const SETTLE_REST_MS = 100;
+
 // =============================================================================
 // ## 먼 「최신으로」가 가는 동안만 목록이 한 판에 그리는 양 (#4689 원인 B)
 //
@@ -1237,6 +1251,12 @@ function TimelineInner({
    * (`followGlide`).
    */
   const fingerOnListRef = useRef(false);
+  /** 마지막 스크롤 보고의 시각 — 안착 확인은 목록이 가만히 서 있을 때만 한다(`armSettle`, #5310). */
+  const lastScrollAtRef = useRef(0);
+  /** 안착 확인의 시계와, 미룬·붙인 횟수(`armSettle`, #5310). */
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const settleDefersRef = useRef(0);
+  const settleFixesRef = useRef(0);
   /** When a follow glide's pin lapses, its verdict is taken again (`followGlide`). */
   const followSettleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -1807,6 +1827,7 @@ function TimelineInner({
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
       const previous = geometryRef.current;
+      lastScrollAtRef.current = Date.now();
       scrollLogRef?.current?.push({
         k: 's',
         t: Date.now(),
@@ -2190,6 +2211,11 @@ function TimelineInner({
     if (followSettleTimerRef.current !== undefined) {
       clearTimeout(followSettleTimerRef.current);
       followSettleTimerRef.current = undefined;
+    }
+    // 안착 확인(`armSettle`, #5310)도 같다: 새 이동·손가락·방 전환이 거두고, 그 이동이 스스로 끝을 묻는다.
+    if (settleTimerRef.current !== undefined) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = undefined;
     }
     convergingRef.current = false;
     // 중립 앵커와 넓힘은 이동의 것이다 — 이동을 거두는 모든 길(손가락·방 전환·다른 이동·언마운트)이 함께 끈다(#4689). 앵커가 끄는 것은 보초의
@@ -2663,6 +2689,87 @@ function TimelineInner({
     letGoDayPill();
   }, [letGoDayPill]);
 
+  // 끌기로 입력창이 쉬기 시작한 시각 + `DRAG_REST_FOLLOW_HOLD_MS` (#4665). `restFromDrag` 가 건다. 시한이 있는 막이라 따로 풀 곳이 없다.
+  const dragRestHoldUntilRef = useRef(0);
+  // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
+  const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
+  /**
+   * 목록을 **네이티브** `scrollToEnd` 로 끝에 붙인다. 그 순간의 창과 콘텐츠 길이로 끝을 셈하므로 마지막 셀이 재졌는지와 무관하다 — `VirtualizedList.scrollToEnd` 는 끝을
+   * 셀 기록으로 **어림**하고, 안 잰 마지막 셀(방금 키가 바뀐 행)은 평균 높이로 센다(머리·위 여백은 어림에 없다) (#5284). 네이티브 응답자에 `scrollToEnd` 가 없으면(시험·하네스)
+   * 거짓을 돌려준다 — 부르는 쪽이 정한다.
+   */
+  const scrollToNativeEnd = useCallback((): boolean => {
+    // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
+    const scroller = listRef.current?.getScrollResponder() as unknown as
+      | {scrollToEnd?: (options?: {animated?: boolean}) => void}
+      | null
+      | undefined;
+    if (!scroller?.scrollToEnd) return false;
+    scroller.scrollToEnd({animated: false});
+    return true;
+  }, [listRef]);
+
+  // ===========================================================================
+  // ## 따라가기가 낸 명령이 끝에 **앉았는지** 아무도 다시 묻지 않았다 (#5310, 검증 5a·5b)
+  //
+  // 증상(검증 5a·5b, 같은 모양 셋): 못 보낸 글이 저절로 다시 나가 서버 사본으로 바뀐 뒤, 마지막 행이 입력창 위 목록 끝에서 **17~20pt 못 미쳐** 잘린 채 서 있었다. 55초 뒤에도, 작은 쓸기 뒤에도
+  // 그대로였고 「최신으로」 필도 없었다. 입력창 위의 빈 띠 108px(36pt)는 결함이 아니라 설계다: 에이전트 대화는 목록 → 알약 간격이 `listPillGap`(20) + 레일 칸(16) = 36 이다
+  // (`CONV.agentRailSlot`) — 기기에서 정상 상태도 같은 36pt 를 두고 목록 끝(창 아래 끝)이 선다. 결함은 **그 창 아래 끝에서 마지막 행이 잘린 것**이다.
+  //
+  // 이 목록은 창·콘텐츠·도크가 바뀔 때마다 끝으로 붙는 명령을 **한 번** 낸다(`onLayout` 의 네이티브 끝 · 도크 처리기 · `followGlide`). 낸 명령의 **결과는 아무도 확인하지 않는다**: 끝에
+  // 못 미쳐 앉아도 거리가 `FOLLOW_THRESHOLD_PX`(120pt) 안이면 「따라가는 중」이 켜진 채 남고(필도 안 선다), 다음 사건이 올 때까지 고쳐 줄 길이 없다. 사건이 더는 안 오는 일(같은 높이의
+  // 교체 — 실패 행 → 서버 사본)이면 그 상태가 끝까지 간다. 명령이 못 미쳐 앉는 길은 하나가 아니다(네이티브 `scrollToEnd`·활강이 읽는 창·콘텐츠 값이 한 칸 늦은 값이면 늦은 만큼 모자라다 —
+  // #5284 가 어림 길 하나를 막았지만 검증 5b 에서 같은 높이가 남았다). 그래서 길을 하나씩 막는 대신 **끝을 한 번 더 묻는다.**
+  //
+  // 시계: 따라가기 사건(창·콘텐츠·도크)마다 `armSettle` 이 `SETTLE_CHECK_MS` 짜리 시계를 다시 건다. 시계가 울릴 때 목록이
+  //   · 사람이 쥐었거나(손가락·끌기 쉼) 따라가는 중이 아니면 — 읽는 사람이다. 아무것도 안 한다.
+  //   · 다른 이동(끝 쫓기·점프)이 도는 중이면 — 그 이동이 스스로 끝을 묻는다. 아무것도 안 한다.
+  //   · 핀·최근 스크롤 보고(`SETTLE_REST_MS`)가 있으면 — 아직 움직이는 중(활강·관성)이다. 조금 뒤에 다시 본다(`SETTLE_MAX_DEFERS` 까지).
+  //   · 가만히 서 있고 끝까지의 거리가 `ARRIVED_PX` 를 넘으면(**모자라도, 넘쳐도**) 네이티브 `scrollToEnd` 를 한 번 더 내고 결과를 다시 본다(`SETTLE_MAX_FIXES` 까지).
+  // 끝에 앉아 있으면 명령이 아예 안 나가고, 네이티브 응답자가 없는 곳(시험·하네스)에서는 아무 일도 안 한다.
+  //
+  // 한계: 이 확인은 **오프셋이 모자란** 목록을 끝에 앉힌다. 5b 의 상태를 자연 순서로는 이 환경에서 못 잡았다(`maestro/5310-resend-tail-live.yaml` 로 HEAD 에서 여러 판) — 같은 끝 상태를 활강 목표를
+  // 20pt 낮춰 만들고, 이 확인이 앉히는 것을 시뮬레이터에서 쟀다. 5b 의 작은 쓸기가 목록을 안 움직였다면 그 상태는 오프셋 모자람이 아니라 마지막 행의 프레임이 그린 모양보다 작은 쪽일 수 있고, 그러면
+  // 이 확인으로는 안 고쳐진다 — `scripts/lane-tail-check.mjs` 가 프레임으로 잘린 양을 재서 가린다.
+  // ===========================================================================
+  const settleCheck = useCallback(() => {
+    settleTimerRef.current = undefined;
+    // 읽는 사람 · 다른 이동: 이 시계의 일이 아니다.
+    if (!followingRef.current || readerHoldsList()) return;
+    if (convergingRef.current || jumpTravelRef.current !== null) return;
+    const now = Date.now();
+    // 아직 움직이는 중(핀이 걸렸거나 스크롤 보고가 방금 있었다): 가라앉은 뒤에 본다. 끝나지 않는 움직임이 시계를 붙들지 않게 상한이 있다.
+    if (now < scrollPinUntilRef.current || now - lastScrollAtRef.current < SETTLE_REST_MS) {
+      if (settleDefersRef.current < SETTLE_MAX_DEFERS) {
+        settleDefersRef.current += 1;
+        settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+      }
+      return;
+    }
+    const left = distanceToEnd(geometryRef.current);
+    if (left === null || Math.abs(left) <= ARRIVED_PX) return; // 끝에 앉아 있다.
+    if (settleFixesRef.current >= SETTLE_MAX_FIXES) return;
+    // 네이티브 끝은 그 순간의 창·콘텐츠로 센다 — 앞 명령이 쓴 값이 늦은 값이었어도 지금 값으로 다시 센다. 응답자가 없으면 아무 일도 안 한다.
+    if (!scrollToNativeEnd()) return;
+    settleFixesRef.current += 1;
+    settleDefersRef.current = 0;
+    settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+  }, [readerHoldsList, scrollToNativeEnd]);
+  /** 따라가기 사건(창·콘텐츠·도크)이 있었다 — 가라앉은 뒤 끝에 앉았는지 한 번 묻도록 시계를 다시 건다. 센 횟수는 새 사건마다 0 에서 다시 센다. */
+  const armSettle = useCallback(() => {
+    if (settleTimerRef.current !== undefined) clearTimeout(settleTimerRef.current);
+    settleDefersRef.current = 0;
+    settleFixesRef.current = 0;
+    settleTimerRef.current = setTimeout(settleCheck, SETTLE_CHECK_MS);
+  }, [settleCheck]);
+  // 언마운트: 걸린 시계를 거둔다.
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== undefined) clearTimeout(settleTimerRef.current);
+    },
+    [],
+  );
+
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
   //
@@ -2765,15 +2872,18 @@ function TimelineInner({
         // 300ms round trip per viewport, and there are as many rounds as there
         // are viewports between the reader and the end.
         if (convergingRef.current) listRef.current?.scrollToEnd({animated: false});
-        // Otherwise a glide, pinned and aimed at the content just reported (#2686).
-        else followGlide();
+        // Otherwise a glide, pinned and aimed at the content just reported (#2686) — and a second look at whether it landed (#5310).
+        else {
+          followGlide();
+          armSettle();
+        }
       }
       // `listRef` is listed because it can be the caller's ref object rather than
       // this component's own — a prop, so the linter is right that it is not
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [convergeToEnd, followGlide, listRef, noteGeometry, resolvePendingVerdict],
+    [armSettle, convergeToEnd, followGlide, listRef, noteGeometry, resolvePendingVerdict],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -2813,25 +2923,6 @@ function TimelineInner({
   // 부른다: JS 가 아는 길이(`VirtualizedList.scrollToEnd` 는 어림이다)가 아니라 **네이티브 `scrollToEnd`** — 그 순간의 창과 콘텐츠 길이로 끝을 셈한다. 바닥을 따라가는 중이 아니면(과거를 읽는 중,
   // 점프가 가는 중 — `beginJumpTravel` 이 따라가기를 붙든다) 아무것도 안 한다.
   const dockFollow = useContext(DockFollowContext);
-  // 끌기로 입력창이 쉬기 시작한 시각 + `DRAG_REST_FOLLOW_HOLD_MS` (#4665). `restFromDrag` 가 건다. 시한이 있는 막이라 따로 풀 곳이 없다.
-  const dragRestHoldUntilRef = useRef(0);
-  // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
-  const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
-  /**
-   * 목록을 **네이티브** `scrollToEnd` 로 끝에 붙인다. 그 순간의 창과 콘텐츠 길이로 끝을 셈하므로 마지막 셀이 재졌는지와 무관하다 — `VirtualizedList.scrollToEnd` 는 끝을
-   * 셀 기록으로 **어림**하고, 안 잰 마지막 셀(방금 키가 바뀐 행)은 평균 높이로 센다(머리·위 여백은 어림에 없다) (#5284). 네이티브 응답자에 `scrollToEnd` 가 없으면(시험·하네스)
-   * 거짓을 돌려준다 — 부르는 쪽이 정한다.
-   */
-  const scrollToNativeEnd = useCallback((): boolean => {
-    // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
-    const scroller = listRef.current?.getScrollResponder() as unknown as
-      | {scrollToEnd?: (options?: {animated?: boolean}) => void}
-      | null
-      | undefined;
-    if (!scroller?.scrollToEnd) return false;
-    scroller.scrollToEnd({animated: false});
-    return true;
-  }, [listRef]);
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.register(() => {
@@ -2841,8 +2932,10 @@ function TimelineInner({
       // 접힘 꼬리(몇 프레임)도 같다 — 그 몇 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌린다(`DRAG_REST_FOLLOW_HOLD_MS`).
       if (readerHoldsList()) return;
       scrollToNativeEnd();
+      // 도크가 자라는 프레임마다 시계를 다시 건다 — 스프링이 끝난 뒤 한 번, 앉았는지 묻는다(#5310).
+      armSettle();
     });
-  }, [dockFollow, readerHoldsList, scrollToNativeEnd]);
+  }, [armSettle, dockFollow, readerHoldsList, scrollToNativeEnd]);
 
   // 목록이 입력창에게 쉬라고 한다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
   // 탭(#4614)과 끌기(#4665)가 **같은 함수**를 부른다 — 「쉬기」가 둘로 갈라지지 않는다.
@@ -2898,10 +2991,14 @@ function TimelineInner({
       resolvePendingVerdict();
       // 읽는 사람이 목록을 쥔 동안은 끌어가지 않는다(#4665) — 아래로 끌다가 입력창이 쉬어 창이 늘어나는 프레임에 `scrollToEnd` 가 손가락 밑 목록을 끝으로 되돌리면 안 된다(위 도크 처리기와 같은 이유).
       if (!followingRef.current || readerHoldsList()) return;
-      if (didInitialScrollRef.current && !convergingRef.current && scrollToNativeEnd()) return;
+      if (didInitialScrollRef.current && !convergingRef.current && scrollToNativeEnd()) {
+        // 한 번 낸 명령이 끝에 앉았는지 가라앉은 뒤 한 번 더 묻는다(#5310). 어림 길(진입·끝 쫓기·응답자 없음)은 그 기계가 스스로 끝을 묻는다.
+        armSettle();
+        return;
+      }
       listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry, readerHoldsList, resolvePendingVerdict, scrollToNativeEnd],
+    [armSettle, listRef, noteGeometry, readerHoldsList, resolvePendingVerdict, scrollToNativeEnd],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
