@@ -162,7 +162,12 @@ export const LOGIN_HANDOFF_IN_CONTROL_COPY = `${LOGIN_HANDOFF_IN_CONTROL_LEAD} �
 export const LOGIN_HANDOFF_ELSEWHERE_COPY =
   "직접 조작은 데스크톱이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다.";
 
-/** 이 기기가 지금 결정을 보낼 수 없을 때. `approvalNote` 의 문장과 같은 꼴이다. */
+/**
+ * 이 기기가 지금 결정을 보낼 수 없을 때. `approvalNote` 의 문장과 같은 꼴이다.
+ *
+ * **원인을 가리지 않는 문장**이다. 웹은 막은 원인을 알면 그 원인의 문장을 `offlineText` 로 넘긴다(#5260):
+ * 서버에 닿지 못한 것을 「연결이 끊겨」라고만 말하지 않는다. 이 문장은 그 입력을 넘기지 않는 클라이언트(폰)의 몫이다.
+ */
 export const LOGIN_HANDOFF_OFFLINE_COPY =
   "연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 재개하거나 중단할 수 있습니다.";
 
@@ -418,6 +423,12 @@ export interface LoginHandoffNoteInput {
   decidableHere: boolean;
   /** 이 기기가 지금 결정을 보낼 수 있는가. */
   offline: boolean;
+  /**
+   * 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말하는 문장. 웹이 사전(`blocked.loginHandoff.*`)에서 원인에
+   * 맞게 골라 넘긴다(#5260). 코어는 사전을 모르므로 받기만 한다. 없거나 비면 원인을 가리지 않는
+   * `LOGIN_HANDOFF_OFFLINE_COPY` 이다 — 이 입력을 넘기지 않는 클라이언트(폰)는 동작이 같다.
+   */
+  offlineText?: string | null;
   /** 이 서버에 승인 원장 표면이 있는가. */
   approvalsProvided?: boolean;
   /** 표면 부재를 설명하는 문장. 화면이 들고 있다. */
@@ -473,10 +484,11 @@ export function loginHandoffNote(
     };
   }
   if (input.offline) {
+    const cause = input.offlineText?.trim();
     return {
       kind: "offline",
       tone: "blocked",
-      text: LOGIN_HANDOFF_OFFLINE_COPY,
+      text: cause ? cause : LOGIN_HANDOFF_OFFLINE_COPY,
     };
   }
   return null;

@@ -15,6 +15,7 @@ import {
 import { SHEET_ICON_SIZE, SHEET_ICONS } from '../../design/icons';
 import { useStyles } from '../../design/theme';
 import { radius, space, TOUCH_TARGET, type Palette } from '../../design/tokens';
+import { useDismissOnEntry } from '../../lib/useDismissOnEntry';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useViewerDismiss } from '../attachments/useViewerDismiss';
 import {
@@ -68,6 +69,8 @@ export function AvatarViewer({
   // 「동작 줄이기」면 Modal 이 시스템 페이드 없이 바로 서고 바로 내려간다. 첫 답이 오기 전에는 켜지 않은 것으로 본다(`false`):
   // Modal 은 첫 렌더의 값으로 이미 떠 버리므로, 모르는 동안 켜진 것으로 보면 모두의 첫 모습이 바뀐다(`AttachmentViewer` 와 같다).
   const reduceMotion = useReduceMotion(false);
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 같은 `onClose` 다 — 단추·쓸어 내리기·escape 와 닫는 길이 같다.
+  useDismissOnEntry(onClose);
   return (
     <Modal
       visible

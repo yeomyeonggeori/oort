@@ -144,6 +144,7 @@ pub mod app_notice;
 pub mod app_tool_grants;
 pub mod approval;
 pub mod approval_outcome;
+pub mod approval_sentence;
 pub mod card_suggest;
 pub mod connector_trial;
 pub mod decider;
@@ -167,11 +168,14 @@ pub mod personal;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod run_activity;
 pub mod run_event;
 pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
+pub mod team_ai_roles;
+pub mod team_ai_task;
 pub mod thread_wake;
 pub mod tools;
 pub mod usage;
@@ -326,16 +330,23 @@ pub use run::{
     RunBindingRejected, RunStatus, RunTrigger, WelcomeKind, PROP_ANSWERS_MESSAGE_ID,
     TRIGGER_SUMMARY_LIMIT,
 };
+pub use run_activity::{
+    id_alphabet_ok, record_run_activity_in_tx, ActivityReport, RawActivity, RawPlanItem,
+    ReportFault, ReportField, ReportRule, ACTIVITY_KINDS, ACTIVITY_ROWS_PER_RUN, ACTIVITY_STATUSES,
+    MAX_ACTIVITIES_PER_CALL, MAX_ACTIVITY_ID_CHARS, MAX_ACTIVITY_LABEL_CHARS, MAX_ACTIVITY_N,
+    MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, PLAN_ROWS_PER_RUN, PLAN_STATUSES,
+};
 pub use run_event::{
     append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,
     workspaces_with_expired_run_events, AppendedRunEvent, ToolCallRecord, RUN_EVENT_RETENTION_DAYS,
     TOOL_CALL_DURATION_MS_MAX, TOOL_CALL_ROWS_PER_RUN,
 };
 pub use run_progress::{
-    assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
-    list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
-    RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
-    ToolTallyRow,
+    approval_is_named_to_viewer, assemble_run_progress, list_channel_run_progress_base_in_tx,
+    list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approvals_in_tx,
+    visible_channels_in_tx, ActivityTallyRow, ActivityView, AheadRun, JobFacts, LeaseState,
+    PlanStepView, QueueEntry, RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase,
+    RunProgressRow, ToolTallyRow,
 };
 pub use woken::{
     active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,
@@ -355,9 +366,9 @@ pub use run_progress::{
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
-    opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,
-    terminal_phase, AgentPhase, AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE,
-    AGENT_STATUS_EVENT_VERSION,
+    awaiting_approval_agent_status_payload, opening_agent_status_payload,
+    progress_agent_status_payload, terminal_agent_status_payload, terminal_phase, AgentPhase,
+    AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE, AGENT_STATUS_EVENT_VERSION,
 };
 pub use subscription::{
     agent_claude_subscription_blocked_in_tx, agent_connector_owner_in_tx,
@@ -385,11 +396,13 @@ pub use thread_wake::{
     UnclaimedThreadTurn, THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
-    agent_usage_in_tx, budget_state, chain_usage_in_tx, provider_spend_in_tx,
+    agent_month_spend_in_tx, agent_usage_in_tx, budget_state, chain_usage_in_tx,
+    latest_ledger_model_in_tx, pricing_available_for_model_in_tx, provider_spend_in_tx,
     record_run_usage_in_tx, usage_summary_in_tx, usage_summary_visible_in_tx, validated_window,
-    AgentUsageRow, ChainUsage, ProviderModelSpend, ResolvedUsage, RunUsageReport, UsageAgentRow,
-    UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow, UsageSource, UsageSummary,
-    UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
+    AgentMonthSpend, AgentUsageRow, ChainUsage, ProviderModelSpend, ResolvedUsage, RunUsageReport,
+    UsageAgentRow, UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow, UsageSource,
+    UsageSummary, UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS,
+    MAX_RANGE_DAYS,
 };
 pub use welcome::{
     configure_welcome_hosted_signal_hours, ensure_agent_in_general_in_tx,

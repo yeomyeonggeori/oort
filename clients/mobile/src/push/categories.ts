@@ -71,7 +71,7 @@ const OPEN_APPROVAL_ACTION: Notifications.NotificationAction = {
 };
 
 /** Category id → its buttons. `work` intentionally has none: it reports that an
- *  agent moved, and there is no one-tap answer to that. */
+ *  agent moved, and there is no one-tap answer to that. `system` has none either. */
 export const PUSH_CATEGORY_ACTIONS: ReadonlyArray<
   readonly [string, Notifications.NotificationAction[]]
 > = [
@@ -80,6 +80,8 @@ export const PUSH_CATEGORY_ACTIONS: ReadonlyArray<
   [PUSH_CATEGORY.approval, [APPROVE_ACTION, REJECT_ACTION]],
   [PUSH_CATEGORY.approvalOpen, [OPEN_APPROVAL_ACTION]],
   [PUSH_CATEGORY.work, []],
+  // ADR-0206 D14·D15 (#4341): the test push names no conversation — nothing to reply to or decide.
+  [PUSH_CATEGORY.system, []],
 ];
 
 /**

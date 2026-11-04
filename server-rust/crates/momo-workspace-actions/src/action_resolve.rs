@@ -257,6 +257,15 @@ pub enum ActionArgs {
         plugin_id: &'static str,
         plugin: Option<ResolvedPlugin>,
     },
+    /// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T, #4964): ONE role bundle and the switch.
+    /// `bundle` is one of the six switchable ids (the table's own `&'static str` — `chat_read`
+    /// and anything unknown never get this far); `before` is the switch as
+    /// [`resolve_action_in_tx`] found it (an absent field reads as on).
+    TeamAiRolesSet {
+        bundle: &'static str,
+        enabled: bool,
+        before: Option<bool>,
+    },
     /// `agent.profile.update` (증보 v3 V3-2). `target` and `before` are filled by
     /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
     AgentProfileUpdate {
@@ -537,6 +546,7 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
         actions::ACTION_WORKSPACE_WORK_TIER_UPDATE => workspace_work_tier_update_args(args),
         actions::ACTION_PLUGIN_INSTALL => plugin_install_args(args),
+        actions::ACTION_TEAM_AI_ROLES_SET => team_ai_roles_set_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -959,6 +969,41 @@ pub fn plugin_install_args(args: &Value) -> Result<ValidatedActionArgs, ActionRe
         args: ActionArgs::PluginInstall {
             plugin_id,
             plugin: None,
+        },
+    })
+}
+
+/// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T): `{bundle, enabled}`, both required, nothing else.
+/// `bundle` is matched against the table's six switchable ids and the table's own
+/// `&'static str` is what is kept — `chat_read` (always on) and every unknown name are refused
+/// *here*, at the argument step, with the same answer (a refusal names no value, so it cannot be
+/// used to ask which bundles exist).
+pub fn team_ai_roles_set_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["bundle", "enabled"])?;
+    let raw = match object.get("bundle") {
+        Some(Value::String(raw)) => raw.as_str(),
+        Some(_) => return Err(ActionRejection::new("bundle must be a string")),
+        None => return Err(ActionRejection::new("bundle is required")),
+    };
+    let Some(bundle) = momo_agent::team_ai_roles::SWITCHABLE_BUNDLES
+        .iter()
+        .find(|id| **id == raw)
+    else {
+        return Err(ActionRejection::new("bundle is not a switchable role"));
+    };
+    let enabled = boolean_arg(object, "enabled")?
+        .ok_or_else(|| ActionRejection::new("enabled is required"))?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({ "bundle": bundle, "enabled": enabled }),
+        rows: Vec::new(),
+        args: ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before: None,
         },
     })
 }
@@ -2403,6 +2448,32 @@ pub async fn proposer_is_live_agent_in_tx(
     .await?)
 }
 
+/// Is `face` a live **human** of the conversation `channel_id` (`expression.create`'s one face,
+/// ADR-0186 X8-1)? Active, not deleted, a member of the channel who has not left.
+///
+/// The proposal's resolver asks this inside the proposal's transaction, and the Agent Port's
+/// preparation asks it **before it fetches or decodes a single candidate** (#4900): one function,
+/// so the cheap answer and the authoritative one cannot become two judgements.
+pub async fn face_is_human_in_room_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    face: Uuid,
+    channel_id: Uuid,
+) -> Result<bool, momo_db::DbError> {
+    Ok(momo_db::sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM member m \
+           JOIN membership c ON (c.workspace_id, c.member_id) = (m.workspace_id, m.id) \
+          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
+            AND m.status = 'active' AND m.deleted_at IS NULL \
+            AND c.channel_id = $3 AND c.left_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(face)
+    .bind(channel_id)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// Is `member_id` a live member of `channel_id`? (`membership.left_at IS NULL`.)
 pub async fn member_is_live_in_channel_in_tx(
     conn: &mut PgConnection,
@@ -2781,6 +2852,29 @@ pub async fn resolve_action_with_origin_in_tx(
             }
             *before = Some(current);
             validated.rows = actions::unfurl_update_rows(current, *enabled);
+            GateSubject::Workspace
+        }
+        ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let Some(bag) = read_workspace_settings(conn, workspace_id).await? else {
+                return Ok(Err(ActionRejection::new("workspace settings unavailable")));
+            };
+            let current = momo_agent::team_ai_roles::TeamAiRoles::from_settings(&bag).is_on(bundle);
+            // A proposal that changes nothing is not a proposal.
+            if current == *enabled {
+                return Ok(Err(ActionRejection::new("nothing to change")));
+            }
+            let Some(row) = momo_agent::team_ai_roles::bundle(bundle) else {
+                return Ok(Err(ActionRejection::new("bundle is not a switchable role")));
+            };
+            *before = Some(current);
+            validated.rows = momo_agent::team_ai_roles::roles_set_rows(row, current, *enabled);
             GateSubject::Workspace
         }
         ActionArgs::WorkspaceMemoryUpdate { .. } => {
@@ -3297,19 +3391,7 @@ pub async fn resolve_action_with_origin_in_tx(
                 // The face, if any, is a live human of THIS conversation: a card must never be
                 // the first to say that somebody outside the room exists.
                 if let Some(face) = *subject {
-                    let human_in_room: bool = momo_db::sqlx::query_scalar(
-                        "SELECT EXISTS (SELECT 1 FROM member m \
-                           JOIN membership c ON (c.workspace_id, c.member_id) = (m.workspace_id, m.id) \
-                          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
-                            AND m.status = 'active' AND m.deleted_at IS NULL \
-                            AND c.channel_id = $3 AND c.left_at IS NULL)",
-                    )
-                    .bind(workspace_id)
-                    .bind(face)
-                    .bind(run_channel)
-                    .fetch_one(&mut *conn)
-                    .await?;
-                    if !human_in_room {
+                    if !face_is_human_in_room_in_tx(conn, workspace_id, face, run_channel).await? {
                         return Ok(Err(unresolved()));
                     }
                 }
@@ -3623,6 +3705,10 @@ pub async fn resolve_action_with_origin_in_tx(
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
+        // Which switch, and what the card said it was: flipped in between, the card re-asks.
+        ActionArgs::TeamAiRolesSet { bundle, before, .. } => {
+            json!({"bundle": bundle, "before": before})
+        }
         ActionArgs::WorkspaceMemoryUpdate { .. } => Value::Null,
         ActionArgs::WorkspaceWorkTierUpdate { before, .. } => json!({
             "mode": before.as_ref().map(|(mode, _)| mode.clone()),
@@ -3795,6 +3881,69 @@ mod tests {
         advertised.sort();
         assert_eq!(advertised, ["roleLabels", "welcomePrompt"]);
         assert_eq!(schema["additionalProperties"], json!(false));
+    }
+
+    /// ADR-0201 증보 v3 B9 / B13-I9 (#4944): the limit that bounds the helper is not something the
+    /// helper can write. `team_ai_limits` — spelled as the bag spells it or as the wire would, alone
+    /// or beside a legal key, `null` included, and with a value the settings door **would** accept —
+    /// is refused, and the schema the tool advertises does not list it. (The settings door itself is
+    /// the administrator's: `PATCH …/settings`, `workspace_operator` only.)
+    #[test]
+    fn a_settings_proposal_cannot_name_the_team_ai_limits() {
+        let action =
+            actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered");
+        for args in [
+            json!({"team_ai_limits": {"dailyTokens": 100}}),
+            json!({"teamAiLimits": {"dailyTokens": 100}}),
+            json!({"team_ai_limits": {"monthlyUsd": 1.5, "dailySearches": 3}}),
+            json!({"team_ai_limits": null}),
+            json!({"welcomePrompt": "환영해요", "team_ai_limits": {"monthlyUsd": 1}}),
+            json!({"welcomePrompt": "환영해요", "teamAiLimits": {"dailySearches": 3}}),
+            json!({"roleLabels": {"owner": "대표"}, "team_ai_limits": {"dailyTokens": 5}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the same call with only the legal keys is accepted.
+        assert!(validated_action_args(action, &json!({"welcomePrompt": "환영해요"}), 0).is_ok());
+        let schema = action.args_schema();
+        let advertised: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("an object schema")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(
+            advertised
+                .iter()
+                .all(|key| !key.to_lowercase().contains("limit")),
+            "the tool the helper reads must not advertise a limits key: {advertised:?}"
+        );
+    }
+
+    /// B13-I9 (#4944): `team_ai.roles.set` — the other card the helper may raise about itself — names
+    /// one of the six bundles and a switch, nothing else. A limit is not a bundle, and a limits
+    /// object cannot ride beside one.
+    #[test]
+    fn the_roles_card_cannot_name_the_team_ai_limits() {
+        let action = actions::action_by_id(actions::ACTION_TEAM_AI_ROLES_SET).expect("registered");
+        for args in [
+            json!({"bundle": "team_ai_limits", "enabled": false}),
+            json!({"bundle": "dailyTokens", "enabled": true}),
+            json!({"bundle": "files", "enabled": false, "team_ai_limits": {"dailyTokens": 1}}),
+            json!({"bundle": "files", "enabled": false, "teamAiLimits": {"monthlyUsd": 1}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the legal card is accepted.
+        assert!(
+            validated_action_args(action, &json!({"bundle": "files", "enabled": false}), 0).is_ok()
+        );
     }
 
     /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id

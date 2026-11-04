@@ -182,6 +182,9 @@ jest.mock('expo-file-system', () => {
     downloadBytes: 0,
     // 호출 순서대로 하나씩 꺼내 던지는 실패(없으면 `failure` 규칙).
     failures: [],
+    // `Directory.pickDirectoryAsync` 의 답과 부른 횟수(#5209).
+    pick: {directory: 'file:///picked', cancel: false, failure: null},
+    pickCalls: 0,
   };
   const uriOf = value =>
     typeof value === 'string' ? value : value && typeof value.uri === 'string' ? value.uri : '';
@@ -195,6 +198,19 @@ jest.mock('expo-file-system', () => {
   class Directory {
     constructor(...parts) {
       this.uri = join(parts);
+    }
+    // 폴더 선택 창(#5209). 진짜는 시스템 창을 열고 고른 폴더를 준다 — 목은 `state.pick` 이 정한 답을 준다:
+    // `directory`(고른 폴더 주소), `cancel`(고르지 않고 닫음 → 진짜와 같은 코드의 예외), `failure`(그 밖의 실패).
+    static async pickDirectoryAsync() {
+      state.pickCalls += 1;
+      if (state.pick.failure) throw state.pick.failure;
+      if (state.pick.cancel) {
+        throw Object.assign(new Error('File picking was cancelled by the user'), {
+          code: 'ERR_FILE_PICKING_CANCELLED',
+        });
+      }
+      directories.add(state.pick.directory);
+      return new Directory(state.pick.directory);
     }
     get exists() {
       return directories.has(this.uri);
@@ -300,6 +316,8 @@ jest.mock('expo-file-system', () => {
       state.sizes.clear();
       state.downloadBytes = 0;
       state.failures = [];
+      state.pick = {directory: 'file:///picked', cancel: false, failure: null};
+      state.pickCalls = 0;
     },
   };
 });
@@ -366,6 +384,22 @@ jest.mock('expo-media-library/legacy', () => {
       granted: true,
       canAskAgain: true,
     },
+    // 추가 전용 권한(`writeOnly = true`, #5209) — 읽기 권한과 **따로** 산다. `answer` 와 같은 뜻의 `addAnswer` 가 사람의 답이다.
+    addPermission: {
+      status: 'undetermined',
+      accessPrivileges: 'none',
+      granted: false,
+      canAskAgain: true,
+    },
+    addAnswer: {
+      status: 'granted',
+      accessPrivileges: 'all',
+      granted: true,
+      canAskAgain: true,
+    },
+    // `saveToLibraryAsync` 에 넘어온 주소들(성공한 것만)과 그것이 던질 실패.
+    saved: [],
+    saveFailure: null,
     assets: [],
     info: new Map(),
     failure: null,
@@ -387,15 +421,40 @@ jest.mock('expo-media-library/legacy', () => {
         granted: true,
         canAskAgain: true,
       };
+      state.addPermission = fresh();
+      state.addAnswer = {
+        status: 'granted',
+        accessPrivileges: 'all',
+        granted: true,
+        canAskAgain: true,
+      };
+      state.saved = [];
+      state.saveFailure = null;
       state.assets = [];
       state.info = new Map();
       state.failure = null;
       state.listeners = new Set();
     },
-    getPermissionsAsync: jest.fn(async () => state.permission),
-    requestPermissionsAsync: jest.fn(async () => {
+    // 진짜 모듈처럼 `writeOnly` 인자로 두 권한 중 하나를 읽고 묻는다(기본은 읽기·쓰기).
+    getPermissionsAsync: jest.fn(async (writeOnly = false) =>
+      writeOnly ? state.addPermission : state.permission,
+    ),
+    requestPermissionsAsync: jest.fn(async (writeOnly = false) => {
+      if (writeOnly) {
+        state.addPermission = state.addAnswer;
+        return state.addPermission;
+      }
       state.permission = state.answer;
       return state.permission;
+    }),
+    // 진짜 `saveToLibraryAsync` 는 확장자가 없으면 던지고, 추가 권한(또는 읽기·쓰기 권한)이 없으면 저장하지 못한다.
+    saveToLibraryAsync: jest.fn(async uri => {
+      if (state.saveFailure) throw state.saveFailure;
+      if (!/\.[A-Za-z0-9]+$/.test(uri)) throw new Error('EmptyFileExtensionException');
+      if (state.addPermission.status !== 'granted' && state.permission.status !== 'granted') {
+        throw new Error('PermissionDenied');
+      }
+      state.saved.push(uri);
     }),
     presentPermissionsPickerAsync: jest.fn(async () => undefined),
     getAssetsAsync: jest.fn(async options => {
@@ -824,6 +883,101 @@ jest.mock('expo-glass-effect', () => {
   const {View} = require('react-native');
   const GlassView = props => React.createElement(View, props);
   return {GlassView};
+});
+
+// ---- expo-video ----------------------------------------------------------------
+// #5208. 영상 재생은 네이티브 AVPlayer 라 Jest 에 재생할 것이 없다. 이 대역이 하는 일은 **어디로 무엇이 갔는가**를 기록하는 것이다:
+// `replaceAsync` 에 간 소스(주소·헤더·`useCaching`), `play`/`pause`/`replay` 호출, 재생 위치(`currentTime` 쓰기), 해제 여부.
+// 플레이어의 사건(`statusChange`·`timeUpdate`·`playToEnd` …)은 시험이 `__emit` 으로 직접 일으킨다 — 실제 AVPlayer 의 타이밍을 흉내
+// 내지 않는다(그건 시뮬레이터 레인이 잰다). `useVideoPlayer` 는 진짜처럼 마운트마다 플레이어 하나를 만들고 언마운트에 해제한다.
+jest.mock('expo-video', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const players = [];
+  class FakeVideoPlayer {
+    constructor(source) {
+      this.sources = [source];
+      this.calls = [];
+      this.listeners = new Map();
+      this.released = false;
+      this.playing = false;
+      this.muted = false;
+      this.currentTime = 0;
+      this.duration = 0;
+      this.status = 'idle';
+      this.seeks = [];
+      players.push(this);
+    }
+    get source() {
+      return this.sources[this.sources.length - 1];
+    }
+    addListener(name, listener) {
+      const set = this.listeners.get(name) ?? new Set();
+      set.add(listener);
+      this.listeners.set(name, set);
+      return {remove: () => set.delete(listener)};
+    }
+    __emit(name, payload) {
+      for (const listener of [...(this.listeners.get(name) ?? [])]) listener(payload);
+    }
+    play() {
+      this.calls.push('play');
+      this.playing = true;
+      this.__emit('playingChange', {isPlaying: true, oldIsPlaying: false});
+    }
+    pause() {
+      this.calls.push('pause');
+      this.playing = false;
+      this.__emit('playingChange', {isPlaying: false, oldIsPlaying: true});
+    }
+    replay() {
+      this.calls.push('replay');
+      this.currentTime = 0;
+      this.play();
+    }
+    async replaceAsync(source) {
+      this.calls.push('replaceAsync');
+      this.sources.push(source);
+      this.status = 'readyToPlay';
+    }
+    seekBy(seconds) {
+      this.currentTime += seconds;
+    }
+  }
+  // `currentTime` 쓰기를 기록한다(위치 복원이 정말 일어났는지 시험이 본다).
+  Object.defineProperty(FakeVideoPlayer.prototype, 'currentTime', {
+    get() {
+      return this._currentTime ?? 0;
+    },
+    set(value) {
+      this._currentTime = value;
+      if (this.seeks) this.seeks.push(value);
+    },
+  });
+  const useVideoPlayer = (source, setup) => {
+    const ref = React.useRef(null);
+    if (ref.current === null) {
+      ref.current = new FakeVideoPlayer(source);
+      setup?.(ref.current);
+    }
+    React.useEffect(() => {
+      const player = ref.current;
+      return () => {
+        player.released = true;
+      };
+    }, []);
+    return ref.current;
+  };
+  const VideoView = props => React.createElement(View, props);
+  return {
+    useVideoPlayer,
+    VideoView,
+    createVideoPlayer: source => new FakeVideoPlayer(source),
+    __players: players,
+    __reset: () => {
+      players.length = 0;
+    },
+  };
 });
 
 // ---- 새 버전 배너 (#3905) ----------------------------------------------------

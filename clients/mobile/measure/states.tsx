@@ -125,7 +125,7 @@ export default function StatesHarness(): React.JSX.Element {
             />
           </Panel>
 
-          <Panel label="보내는 중 / 전송 실패 — 그 자리에서 다시 보내기">
+          <Panel label="보내는 중 / 전송 실패 — 새로고침(다시 보내기)·X(지우기)">
             <Timeline
               messages={[]}
               directory={DIRECTORY}
@@ -134,6 +134,7 @@ export default function StatesHarness(): React.JSX.Element {
               myMemberId={SELF_ID}
               nowMs={NOW}
               onResendPending={() => {}}
+              onDiscardPending={() => {}}
             />
           </Panel>
         </View>

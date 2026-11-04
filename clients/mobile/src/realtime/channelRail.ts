@@ -6,6 +6,7 @@ import {
   asPinFrame,
   asReactionFrame,
   asTypingFrame,
+  asUnfurlFrame,
   asWorkSessionACPFrame,
   asWorkSessionControlFrame,
   asWorkSessionLifecycleFrame,
@@ -27,6 +28,7 @@ import {
   type RealtimeHandle,
   type SubscribedRecoveryContext,
   type TypingFrame,
+  type UnfurlEvent,
 } from '@momo/core/lib/realtimeEvents';
 
 // =============================================================================
@@ -258,7 +260,14 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
             // `seq` too, so the pin list and the timeline can never disagree
             // about which message a frame is about.
             const pin: PinEvent | null = asPinFrame(ctx.data);
-            if (pin) handlers.onPin?.(pin);
+            if (pin) {
+              handlers.onPin?.(pin);
+              return;
+            }
+            // ADR-0170 D5 — 링크 카드의 전체 투영(`message.unfurl`)과 작성자의 지우기(`message.unfurl.removed`)도
+            // 같은 채널·같은 `seq` 를 쓴다. 모르는 프레임은 여기서 조용히 끝난다(옛 서버·새 종류).
+            const unfurl: UnfurlEvent | null = asUnfurlFrame(ctx.data);
+            if (unfurl) handlers.onUnfurl?.(unfurl);
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

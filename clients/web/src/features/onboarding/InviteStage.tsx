@@ -7,6 +7,7 @@ import { cn } from "@/design/lib/cn";
 import { IssuedInviteCard } from "@/features/settings/IssuedInviteCard";
 import { useIssueInvite } from "@/features/settings/useIssueInvite";
 import { inviteIssueErrorCopy } from "@/features/settings/inviteIssueError";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   OWNER_INVITE_MAX_USES,
   OWNER_INVITE_ROLE,
@@ -20,9 +21,7 @@ import {
   S2_DETAIL,
   S2_ISSUE_ERROR_ID,
   S2_ISSUED_LINE,
-  S2_OFFLINE_LINE,
   S2_OFFLINE_NOTE_ID,
-  S2_OFFLINE_REASON,
   S2_PRIMARY_BUSY,
   S2_PRIMARY_LABEL,
   S2_SKIP_LABEL,
@@ -30,6 +29,7 @@ import {
   S2_TITLE,
   S2_TROUBLE_LINE,
 } from "./s2Copy";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: onboarding S2 (팀원 초대, 온보딩 2.0 D3) for internal team
 // users on web+Tauri, density 5/10, motion 2/10.
@@ -68,6 +68,9 @@ export function InviteStage({
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const offline = useBrowserOffline();
+  // 막은 원인을 말하는 문장(#5260). 이 단계의 게이트는 브라우저 오프라인이라 원인은 기기 오프라인이다.
+  const offlineLine = useBlockedReason("waitAMoment");
+  const formatMessage = useFormatMessage();
   const { issued, issuedRef, create } = useIssueInvite(workspaceId);
   const issueError = create.isError ? inviteIssueErrorCopy(create.error) : null;
 
@@ -88,7 +91,7 @@ export function InviteStage({
       : "awaiting";
   const guide =
     state === "trouble" && offline && !issueError
-      ? { line: S2_OFFLINE_LINE }
+      ? { line: offlineLine }
       : s2Guide(state);
 
   return (
@@ -105,7 +108,7 @@ export function InviteStage({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message={S2_OFFLINE_REASON}
+          message={<BlockedReason frame="createInviteLink" />}
           messageId={S2_OFFLINE_NOTE_ID}
           testId="onboarding-s2-offline"
         />
@@ -115,7 +118,7 @@ export function InviteStage({
         <div title={issueError.detail}>
           <InlineBanner
             tone="error"
-            message={issueError.message}
+            message={issueError.key ? formatMessage(issueError.key) : issueError.message}
             messageId={S2_ISSUE_ERROR_ID}
             actionLabel="다시 시도"
             onAction={handleIssue}

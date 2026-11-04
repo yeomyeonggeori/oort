@@ -78,6 +78,8 @@ services:
     extra_hosts: !reset []
     environment:
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@127.0.0.1:5432/${POSTGRES_DB:?}
+      # #4934: with host networking `api` is not a name; the api is on the host's loopback at its own port.
+      OORT_API_INTERNAL_ORIGIN: ${OORT_API_INTERNAL_ORIGIN-http://127.0.0.1:${MOMO_RUST_API_PORT:-8080}}
 
   drive-init:
     network_mode: host

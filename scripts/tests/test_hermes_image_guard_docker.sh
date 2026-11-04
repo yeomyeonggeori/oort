@@ -14,7 +14,10 @@
 #                            the canary alone (the verdict comes from behavior, not from the hash)
 #   not-enabled ............ plugins.enabled missing: the plugin is not loaded and the canary says so
 #   safe-mode .............. HERMES_SAFE_MODE=1 makes real Hermes skip every plugin: refused
-#   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env
+#   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env; two marks in front
+#                            with a line the loader's clean-up rewrites (bom-env-file-double: Hermes drops both marks, the gate must
+#                            refuse) and two marks with nothing to rewrite (bom-env-file-kept: Hermes keeps one in the name and applies a
+#                            name with a mark in it, which the allow-list does not have either: the gate refuses it) (#4886 review, #4950)
 #   self-origin ............ the owner's 10-30 exception (#4820 C2a): OORT_SELF_MEDIA_ORIGIN set to a canonical origin boots,
 #                            and the canary accepts the one allowed address and refuses its 28 bypass variants through the
 #                            real Hermes dispatch path; unset keeps the exception off and adds one refused example
@@ -29,6 +32,46 @@
 #                            takes one spelling) or present in the volume's .env: refused before listening
 #   media-policy ........... the premise, measured with Hermes' own validate_media_delivery_path: strict keeps an old file
 #                            outside Hermes' cache dirs from being delivered (`true` too), unset delivers it
+#   env-shapes / env-inert-shapes  (#4886, #4950) the volume's .env read like Hermes' loader, by the REAL gate with this image's own
+#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment and names no
+#                            rule ever judged (media roots, the managed folder, the home folder, request forwarding ...) are refused, because
+#                            only the allow-list's names may stand in the file; a comment, an unterminated quote, a name with no value and the
+#                            like are not. The judge does not take the author's word for which are which: the same bytes go through THIS
+#                            image's real `hermes_cli.env_loader`, and the names it adds must be exactly the ones the shapes are said to apply
+#                            and all be named by the gate
+#   env-seed-template ...... (#4950) Hermes' first boot copies the image's own /opt/hermes/.env.example into a fresh volume's .env after the gate
+#                            ran: the gate's table of those eleven lines equals what the pinned image's file holds, the file as shipped passes
+#                            the gate, and the real loader ends with nothing the policy forbids when it loads it
+#   env-reference-shapes ... a name that is not allowed given `${...}` (a variable only Hermes' service slot has, HOME, an unset name with a
+#                            default): refused by name whatever it resolves to; the real loader applies every one (#4886 review, #4950)
+#   env-loader-oracle ...... the gate's reading against the REAL loader on the whole named table and 4000 seeded random inputs
+#                            (infra/hermes/env_loader_oracle.py): the loader runs on a copy in the service slot's environment, again on
+#                            the file it leaves until a load leaves it unchanged (at most 64 loads), and once more on each of those files
+#                            as it stands; the names it adds that the policy does not allow, in any of those loads, must all be named by
+#                            the gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
+#                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
+#   connector-configs ...... (#4935) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the default
+#                            config and the connector-mode config of each model fragment are each accepted by name; the connector ones
+#                            select no web search and no picture tool and carry no image_guard evidence, the default one the picture tool
+#   connector-config-edited / -nostrict / -apps-missing  the connector-mode config with one byte changed, without the strict flag, and without
+#                            the operator's attested app list: each refused before listening
+#   railway-start-connector / -connector-edited / -config-edited / -connector-nostrict  the real Railway start command with a connector-mode
+#                            config (its hash is in the command's list: it runs to the point where it would exec Hermes), with one byte
+#                            changed in a connector or the default config (stopped by the hash list before the gate prints anything), and
+#                            without the strict flag (every checksum passes, the gate refuses)
+#   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
+#   cross-run-tools-off .... (#4898, ADR-0203 augmentation of 2026-11-01) the shipped default config exposes no recall tool and loads no memory file,
+#                            measured on this image's own Hermes: the REAL gate accepts it with neither `memory` nor `session_search` selected or
+#                            resolved and both memory switches explicitly false; this image's real Hermes modules on the shipped config, with a
+#                            MEMORY.md on the volume that holds a marker, name neither tool and build no memory store (so no marker can reach a system
+#                            prompt); and the control: the same probe on a copy with the two tools switched on sees both tools, the store and the marker,
+#                            so a probe that was blind fails here
+#   cross-run-tools-on ..... the REAL gate (a copy that accepts the variant's bytes by hash, so only a rule can refuse) on single-fault copies of the
+#                            config: one toolset on, the memory switches on, an external memory provider named, everything on: each refused before
+#                            Hermes listens, by its OWN rule
+#   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
+#                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
+#                            reproduce every row, and nothing may be skipped (OORT_REQUIRE_DOTENV=1)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,6 +79,9 @@ COMPOSE="$ROOT/infra/rust/docker-compose.rust.yml"
 IMG="$(grep -o 'nousresearch/hermes-agent@sha256:[0-9a-f]*' "$COMPOSE" | head -1)"
 OUT="${1:-$(mktemp -d "${TMPDIR:-/tmp}/hermes-image-guard.XXXXXX")}"
 KEY="$(python3 -c 'print("fixture-api-key-" * 3)')"
+# python-dotenv in the pinned Hermes image: the uv.lock of Hermes v0.22.2 (the image's source) pins 1.2.2, and the input table of
+# infra/hermes/test_lockgate_env.py was measured on it. Moving the image to another version means measuring that table again.
+EXPECTED_DOTENV="1.2.2"
 fail() { echo "[hermes-image-guard] FAIL: $*" >&2; exit 1; }
 say() { echo "[hermes-image-guard] $*"; }
 
@@ -61,8 +107,10 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 }
 
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
-  safe-mode proxy-env private-env bom-env-file clean-env-file self-origin self-origin-bad self-origin-env-file \
-  prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy; do
+  safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
+  self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
+  env-line-reader-shapes profile-folder env-reference-shapes env-seed-template connector-configs connector-config-edited connector-config-nostrict connector-config-apps-missing \
+  hermes-home-other cross-run-tools-off cross-run-tools-on env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
 
@@ -128,6 +176,27 @@ say "scenario railway-start-guard-variable-missing"
 docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-missing.stdout" 2>"$OUT/railway-start-missing.stderr" && echo 0 >"$OUT/railway-start-missing.rc" || echo $? >"$OUT/railway-start-missing.rc"
 
+# --- the connector-mode config through the real Railway start command (#4935) ----------------------------------------------
+CONNECTOR_APPS="com.momo.plugins.gmail,com.momo.plugins.google-calendar,com.momo.plugins.google-drive"
+CONNECTOR_CONFIG="$OUT/connector-config.yaml"
+python3 "$ROOT/infra/hermes/render_model_config.py" --auth claude-oauth --fallback codex-oauth \
+  --connector-base "$ROOT/infra/hermes/google-connectors.config.yaml" >"$CONNECTOR_CONFIG"
+CONNECTOR_B64="$(b64 "$CONNECTOR_CONFIG")"
+CONNECTOR_EDITED_B64="$(python3 -c 'import base64, sys; print(base64.b64encode(open(sys.argv[1], "rb").read() + b"# edited\n").decode())' "$CONNECTOR_CONFIG")"
+DEFAULT_EDITED_B64="$(python3 -c 'import base64, sys; print(base64.b64encode(open(sys.argv[1], "rb").read() + b"# edited\n").decode())' "$ROOT/infra/hermes/config.yaml")"
+connector_start() {  # connector_start <name> <config b64> [strict value]
+  local name="$1" config_b64="$2" strict="${3-$STRICT_RAILWAY}"
+  say "scenario $name"
+  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+    -e "HERMES_MEDIA_DELIVERY_STRICT=$strict" -e "OORT_COHOSTED_AGENT_CONNECTOR_APPS=$CONNECTOR_APPS" \
+    -e GOOGLE_OAUTH_CLIENT_ID=oort-proof-id -e GOOGLE_OAUTH_CLIENT_SECRET=oort-proof-secret \
+    -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/$name.stdout" 2>"$OUT/$name.stderr" && echo 0 >"$OUT/$name.rc" || echo $? >"$OUT/$name.rc"
+}
+connector_start railway-start-connector "$CONNECTOR_B64"
+connector_start railway-start-connector-edited "$CONNECTOR_EDITED_B64"
+connector_start railway-start-config-edited "$DEFAULT_EDITED_B64"
+connector_start railway-start-connector-nostrict "$CONNECTOR_B64" ""
+
 # --- the real gateway: compose command in full (gate, report, s6 init, gateway) with no network ---------------------------
 say "scenario gateway-boot (real gateway + real lockgate report, no network)"
 NAME="oort-guardproof-$$"
@@ -149,14 +218,21 @@ done
 sleep 3
 docker logs "$NAME" >"$OUT/gateway-boot.log" 2>&1 || true
 docker exec "$NAME" ls -ln /opt/data/plugins/oort-image-guard >"$OUT/gateway-boot.ls" 2>&1 || true
+# #4950: the NAMES (never values) the real boot left in the volume's .env, and whether a .op.env exists: the report above judged that file with
+# the allow-list, and the judge below checks every name against it again (a fresh volume's .env is the template Hermes' stage2 seeds)
+docker exec "$NAME" /bin/sh -c 'if [ -f /opt/data/.env ]; then echo ENV_PRESENT; sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p" /opt/data/.env | sort -u; else echo ENV_ABSENT; fi; if [ -e /opt/data/.op.env ]; then echo OP_ENV_PRESENT; fi; if [ -d /opt/data/profiles ]; then if [ -z "$(ls -A /opt/data/profiles)" ]; then echo PROFILES_EMPTY; else echo PROFILES_NOT_EMPTY; fi; else echo PROFILES_ABSENT; fi' >"$OUT/gateway-boot.envnames" 2>&1 || true
 docker exec -u hermes "$NAME" /opt/hermes/.venv/bin/python /fx/hermes_image_guard_live_probe.py >"$OUT/gateway-boot.probe" 2>"$OUT/gateway-boot.probe.err" || true
 docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1 || true
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 # --- judge ---------------------------------------------------------------------------------------------------------------
-python3 - "$OUT" <<'PY'
+python3 - "$OUT" "$EXPECTED_DOTENV" "$ROOT" <<'PY'
 import json, sys
-out = sys.argv[1]
+out, expected_dotenv, root = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.dont_write_bytecode = True
+sys.path.insert(0, root + "/infra/hermes")
+import env_loader_oracle as oracle  # pure functions: the reading of the gate's problems, the same as the oracle scenario uses
+import render_model_config as renderer  # the config catalog the gate and the start command accept (#4935)
 failures = []
 
 
@@ -179,8 +255,43 @@ def expect(name, rc, fragments=(), absent=()):
     return r
 
 
+LOADER_PREFIX = "/opt/hermes/hermes_cli/env_loader"
+
+
+def against_loader(name, rc, fragments=(), absent=(), violated=None, line_violated=None):
+    """`expect` plus the verdict of this image's REAL readers on the very same file (the scenario recorded it, #4886 review): it has to
+    come from the image's own loader, every name the loader ends with a forbidden value for, and every name the image's line-by-line
+    reader (`agent.secret_scope.load_env_file`) yields that the policy does not allow, has to be named by a gate problem, and where the
+    scenario says which names those are (`violated`, `line_violated`) the readers have to agree: a shape its author calls applied that
+    the readers ignore is a wrong table, not a pass."""
+    r = expect(name, rc, fragments, absent)
+    o = (r["lockgate"] or {}).get("oracle") or {}
+    if not str(o.get("loader_file", "")).startswith(LOADER_PREFIX):
+        failures.append("%s: the loader's verdict is not from this image's own hermes_cli.env_loader: %r" % (name, o.get("loader_file")))
+    if o.get("error"):
+        failures.append("%s: the real loader raised %s on this file" % (name, o["error"]))
+    seen = set(o.get("violated", [])) | set(o.get("line_violated", []))
+    named, _ = oracle.named((r["lockgate"] or {}).get("problems", []), seen)
+    for missing in sorted(set(o.get("violated", [])) - named):
+        failures.append("%s: the real loader ends with a forbidden %s but no gate problem names it" % (name, missing))
+    for missing in sorted(set(o.get("line_violated", [])) - named):
+        failures.append("%s: the real line-by-line reader yields a forbidden %r but no gate problem names it" % (name, missing))
+    if violated is not None and sorted(o.get("violated", [])) != sorted(violated):
+        failures.append("%s: the real loader applies %r, the scenario says %r" % (name, sorted(o.get("violated", [])), sorted(violated)))
+    if line_violated is not None and sorted(o.get("line_violated", [])) != sorted(line_violated):
+        failures.append("%s: the real line-by-line reader yields %r, the scenario says %r" % (name, sorted(o.get("line_violated", [])), sorted(line_violated)))
+    return r
+
+
 h = expect("healthy", 0)
 guard = (h["lockgate"] or {}).get("image_guard") or {}
+# #4886: inside the image the gate reads the volume's .env with the image's own python-dotenv, not the fallback
+if (h["lockgate"] or {}).get("env_parser") != {"impl": "python-dotenv", "version": expected_dotenv}:
+    failures.append("healthy: the gate did not read the volume's .env with the image's python-dotenv %s: %r"
+                    % (expected_dotenv, (h["lockgate"] or {}).get("env_parser")))
+if (h["lockgate"] or {}).get("config_accepted_as") != "default" or (h["lockgate"] or {}).get("media_strict") is not True:
+    failures.append("healthy: the gate did not accept the default config by name with the strict flag recorded: %r"
+                    % ({k: (h["lockgate"] or {}).get(k) for k in ("config_accepted_as", "media_strict")},))
 canary = guard.get("canary") or {}
 if not guard.get("files_verified"):
     failures.append("healthy: files were not verified")
@@ -195,6 +306,14 @@ if not (isinstance(plugin, list) and len(plugin) == 1 and plugin[0].get("enabled
     failures.append("healthy: Hermes does not report the plugin as loaded: %r" % (plugin,))
 if "image_generate" not in (h["lockgate"] or {}).get("selected_tools", []):
     failures.append("healthy: image_generate was not even selected, so nothing was proven")
+RECALL = {"memory", "session_search"}  # #4898: what an earlier run left behind (ADR-0203 augmentation of 2026-11-01)
+MEMORY_OFF = {"memory_enabled": False, "user_profile_enabled": False, "provider_set": False}
+for key in ("selected_tools", "resolved_tools"):
+    if RECALL & set((h["lockgate"] or {}).get(key) or []):
+        failures.append("healthy: %s holds a recall tool: %r" % (key, (h["lockgate"] or {}).get(key)))
+if "todo_list" not in ((h["lockgate"] or {}).get("resolved_tools") or []) or (h["lockgate"] or {}).get("memory_config") != MEMORY_OFF:
+    failures.append("healthy: the positive control (todo_list) did not resolve or the gate did not see both memory switches false: %r"
+                    % ({k: (h["lockgate"] or {}).get(k) for k in ("resolved_tools", "memory_config")},))
 expect("no-plugin", 3, ["is not installed"])
 expect("edited-plugin", 3, ["does not match the pinned sha256"])
 w = expect("widened-plugin", 3, ["canary:"], absent=["pinned sha256"])
@@ -206,7 +325,11 @@ expect("security-private-urls", 3, ["security.allow_private_urls"])
 expect("safe-mode", 3, ["HERMES_SAFE_MODE", "canary:"])
 expect("proxy-env", 3, ["HTTPS_PROXY"], absent=["proxy.invalid"])
 expect("private-env", 3, ["HERMES_ALLOW_PRIVATE_URLS"])
-expect("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"])
+against_loader("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
+# two marks and a rewrite: the loader drops both and applies the proxy; two marks and nothing to rewrite: it keeps one in the name
+against_loader("bom-env-file-double", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
+# the other half: two marks, nothing to rewrite: the loader keeps one in the name, so it applies a name with a mark in it (not allowed either)
+against_loader("bom-env-file-kept", 3, ["the volume's .env sets \ufeffHERMES_SAFE_MODE"], violated=["\ufeffHERMES_SAFE_MODE"])
 expect("clean-env-file", 0)
 so = expect("self-origin", 0)
 so_canary = (((so["lockgate"] or {}).get("image_guard") or {}).get("canary")) or {}
@@ -224,6 +347,148 @@ if not any("did not refuse the example" in problem for problem in (p_only["lockg
 expect("strict-missing", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-wrong", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-env-file", 3, ["the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT"])
+# #4886, #4950: the volume's .env as Hermes' loader reads it. The REAL gate, the image's python-dotenv: every spelling the loader applies
+# of a name outside the allow-list is refused by name (never with its value), what it ignores is not, a HERMES_HOME that is not the folder
+# read is refused, and the tables of the changed test files pass in this image with python-dotenv present (nothing skipped).
+SHAPE_NAMES = ["HERMES_SAFE_MODE", "HERMES_ALLOW_PRIVATE_URLS", "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD",
+               "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT", "HTTPS_PROXY", "HERMES_MEDIA_ALLOW_DIRS", "HERMES_MANAGED_DIR",
+               "HERMES_HOME", "GATEWAY_PROXY_URL", "OPENROUTER_API_KEY", "hermes_safe_mode"]
+shapes = against_loader("env-shapes", 3, ["the volume's .env sets %s (" % name for name in SHAPE_NAMES],
+                        absent=["proxy.invalid", "oort.example.com", "relay.invalid", "oort-proof"],
+                        violated=SHAPE_NAMES)
+if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-dotenv":
+    failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
+against_loader("env-inert-shapes", 0, violated=[], line_violated=[])
+# what python-dotenv ignores and Hermes' line-by-line reader reads: refused by name, and the real readers agree on what each one does
+LINE_READ_NAMES = ["HERMES_SAFE_MODE", "HERMES_YOLO_MODE", "HERMES_DASHBOARD", "HERMES_ALLOW_PRIVATE_URLS", "HTTPS_PROXY"]
+against_loader("env-line-reader-shapes", 3, ["the volume's .env sets %s (" % name for name in LINE_READ_NAMES], absent=["proxy.invalid"],
+               violated=[], line_violated=LINE_READ_NAMES)
+# #4950: an empty `profiles` folder is fine, an entry under it refuses the start by number (never by name)
+pf = expect("profile-folder", 3, ["1 entry under profiles/"], absent=["oort-proof-profile"])
+pf_record = (pf["lockgate"] or {}).get("profiles") or {}
+if pf_record.get("empty_rc") != 0 or pf_record.get("empty_problems") != []:
+    failures.append("profile-folder: an empty profiles folder stopped the start: %r" % (pf_record,))
+# a judged name given a reference: refused for the reference itself (all five), whatever the real loader ends with. The loader
+# resolves them in the service slot's environment; what it ends with comes from the record (`violated` below).
+REFERENCE_NAMES = ["HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY"]
+against_loader("env-reference-shapes", 3, ["the volume's .env sets %s (" % name for name in REFERENCE_NAMES], absent=["k" * 40],
+               violated=REFERENCE_NAMES)
+# #4950: Hermes' first boot copies the image's .env.example into a fresh volume AFTER the gate: the table of its eleven lines is the image's
+# file, the file passes the gate as it is shipped, and the real loader ends with nothing the policy forbids when it loads it
+seed = against_loader("env-seed-template", 0, violated=[], line_violated=[])
+seed_record = (seed["lockgate"] or {}).get("seed") or {}
+if seed_record.get("image_has_the_file") is not True or seed_record.get("equal") is not True or len(seed_record.get("image_assignments") or {}) != 11:
+    failures.append("env-seed-template: the gate's table of Hermes' seeded lines is not what this image's .env.example holds: %r" % (seed_record,))
+expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"], absent=["not-the-volume"])
+# #4935: every config of the catalog through the real gate: accepted by name, the connector ones with no search and no picture tool
+cc = expect("connector-configs", 0)
+entries = (cc["lockgate"] or {}).get("entries") or {}
+want_names = ["default"] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
+if sorted(entries) != sorted(want_names):
+    failures.append("connector-configs: the catalog the scenario ran is not the renderer's: %r (want %r)" % (sorted(entries), sorted(want_names)))
+for config_name, entry in entries.items():
+    if entry.get("rc") != 0 or entry.get("accepted_as") != config_name or entry.get("problems") or entry.get("media_strict") is not True:
+        failures.append("connector-configs: %s was not accepted by the real gate: %r" % (config_name, entry))
+    tools = set(entry.get("selected_tools") or [])
+    if RECALL & (tools | set(entry.get("resolved_tools") or [])) or entry.get("memory_config") != MEMORY_OFF:
+        failures.append("connector-configs: %s exposes a recall tool or does not keep both memory switches false: %r" % (config_name, entry))
+    if config_name.startswith("connector/"):
+        if not tools or tools & {"web_search", "web_extract", "image_generate"} or entry.get("image_guard") is not None:
+            failures.append("connector-configs: %s selects a search or picture tool, or carries picture evidence: %r" % (config_name, entry))
+    elif "image_generate" not in tools:
+        failures.append("connector-configs: the default config no longer selects the picture tool: %r" % (entry,))
+edited = expect("connector-config-edited", 3, ["config.yaml is not one of the accepted configs"])
+if (edited["lockgate"] or {}).get("config_accepted_as") is not None:
+    failures.append("connector-config-edited: one changed byte was accepted as %r" % ((edited["lockgate"] or {}).get("config_accepted_as"),))
+expect("connector-config-nostrict", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"], absent=["accepted configs"])
+expect("connector-config-apps-missing", 3, ["OORT_COHOSTED_AGENT_CONNECTOR_APPS"], absent=["accepted configs"])
+# #4898: no recall tool and no memory file, measured on this image's own Hermes; and the control that proves the probe can see them
+off = expect("cross-run-tools-off", 0)
+off_record = off["lockgate"] or {}
+gate = off_record.get("gate") or {}
+if gate.get("rc") != 0 or gate.get("problems") or gate.get("config_accepted_as") != "default" or gate.get("memory_config") != MEMORY_OFF:
+    failures.append("cross-run-tools-off: the real gate did not accept the shipped config with both memory switches false: %r" % (gate,))
+for key in ("selected_tools", "resolved_tools"):
+    if RECALL & set(gate.get(key) or []) or "todo_list" not in set(gate.get("resolved_tools") or []):
+        failures.append("cross-run-tools-off: the gate's %s hold a recall tool, or the positive control did not resolve: %r" % (key, gate.get(key)))
+shipped, opened = off_record.get("real_shipped") or {}, off_record.get("real_opened") or {}
+if shipped.get("error") or opened.get("error"):
+    failures.append("cross-run-tools-off: the probe did not run in this image: %r" % ((shipped.get("error"), opened.get("error")),))
+else:
+    if (RECALL & (set(shipped.get("selected") or []) | set(shipped.get("resolved") or []) | set(shipped.get("enabled") or []))
+            or shipped.get("memory_flags") != [False, False] or shipped.get("memory_tool_available") is not False
+            or shipped.get("store_built") is not False or shipped.get("marker_in_prompt") is not None or shipped.get("provider_set") is not False
+            or "todo_list" not in set(shipped.get("resolved") or [])):
+        failures.append("cross-run-tools-off: this image's real Hermes still exposes a recall tool or would load the memory file on the shipped config: %r"
+                        % (shipped,))
+    if (not RECALL <= set(opened.get("selected") or []) or not RECALL <= set(opened.get("resolved") or [])
+            or opened.get("memory_flags") != [True, True] or opened.get("memory_tool_available") is not True
+            or opened.get("store_built") is not True or opened.get("marker_in_prompt") is not True):
+        failures.append("cross-run-tools-off: the control copy (both tools on) was not seen as open by the probe, so the probe proves nothing: %r"
+                        % (opened,))
+on = expect("cross-run-tools-on", 0)
+variants = (on["lockgate"] or {}).get("variants") or {}
+RECALL_MESSAGE = "cross-run recall tools would be exposed"
+SWITCH = "must be explicitly false"
+for name, wants, also_absent in (
+    ("session-search", [RECALL_MESSAGE, "): session_search"], [SWITCH, "memory.provider"]),
+    ("memory-tool", [RECALL_MESSAGE, "): memory"], [SWITCH, "session_search", "memory.provider"]),
+    ("memory-switches", ["memory.memory_enabled " + SWITCH, "memory.user_profile_enabled " + SWITCH], [RECALL_MESSAGE, "memory.provider"]),
+    ("provider", ["memory.provider must be empty"], [RECALL_MESSAGE, SWITCH]),
+    ("all-on", [RECALL_MESSAGE, "memory,session_search", "memory.memory_enabled " + SWITCH, "memory.user_profile_enabled " + SWITCH], []),
+):
+    variant = variants.get(name) or {}
+    text = " | ".join(variant.get("problems") or [])
+    if variant.get("rc") != 3 or variant.get("accepted_as") != "default" or "accepted configs" in text:
+        failures.append("cross-run-tools-on: %s: want rc 3 by a rule beside an accepted hash, got %r" % (name, {k: variant.get(k) for k in ("rc", "accepted_as", "tail")}))
+    for fragment in wants:
+        if fragment not in text:
+            failures.append("cross-run-tools-on: %s: no problem contains %r (%s)" % (name, fragment, text[:300]))
+    for fragment in also_absent:
+        if fragment in text:
+            failures.append("cross-run-tools-on: %s: problem text unexpectedly has %r (the rules must refuse separately)" % (name, fragment))
+expect("env-parser-parity", 0)
+unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
+if unit.get("rc") != 0 or not isinstance(unit.get("ran"), int) or unit["ran"] < 100 or unit.get("skipped"):
+    failures.append("env-parser-parity: the changed tests did not all run and pass here with python-dotenv: %r" % (unit,))
+# #4886 review: the gate against this image's REAL loader on the named table and seeded random inputs. A comparison of nothing against
+# nothing passes, so the judge also demands that it was not empty: enough inputs, enough the loader applied, enough both left alone,
+# every judged name violated and caught at least once, every designed reason for a refusal beyond the loader exercised.
+expect("env-loader-oracle", 0)
+orc = (result("env-loader-oracle")["lockgate"] or {}).get("oracle") or {}
+if not str(orc.get("loader_file", "")).startswith(LOADER_PREFIX):
+    failures.append("env-loader-oracle: the loader is not this image's own hermes_cli.env_loader: %r" % (orc.get("loader_file"),))
+for kind in ("missed", "missed_after", "unexplained", "wrong_labels", "chain_mismatch", "unsettled", "line_reader_mismatch"):
+    if orc.get(kind) != 0:
+        failures.append("env-loader-oracle: %s = %r (examples %r)" % (kind, orc.get(kind), (orc.get("examples") or {}).get(kind)))
+# the loads after the first, the files read as they stand and the gate's model of the loader's files were really compared: this image's
+# loader has the clean-up step that is switched off, some inputs needed several loads, enough of them applied something only later or only
+# as they stand, and the model was held to the loader's files on nearly every input
+if orc.get("cleanup_step_found") is not True:
+    failures.append("env-loader-oracle: this image's loader has no clean-up step to switch off: the files were not read as they stand")
+if not isinstance(orc.get("loads"), dict) or max([int(count) for count in orc["loads"]] or [0]) < 8:
+    failures.append("env-loader-oracle: no input needed 8 loads (the loads were not followed far enough): %r" % (orc.get("loads"),))
+if (orc.get("env_parser") or {}).get("version") != expected_dotenv:
+    failures.append("env-loader-oracle: not this image's python-dotenv %s: %r" % (expected_dotenv, orc.get("env_parser")))
+# Hermes' second reader of the file: the image's own `agent.secret_scope.load_env_file`, run on every file of every chain, and the gate's copy of it held to it
+if orc.get("line_reader") is not True or not str(orc.get("line_reader_file", "")).startswith("/opt/hermes/agent/secret_scope"):
+    failures.append("env-loader-oracle: the line-by-line reader is not this image's own agent.secret_scope: %r" % (orc.get("line_reader_file"),))
+for key, floor in (("cases", 4500), ("violating", 2500), ("clean", 700), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 4000),
+                   ("line_reader_only", 1000), ("line_states_compared", 5000)):
+    if not isinstance(orc.get(key), int) or orc[key] < floor:
+        failures.append("env-loader-oracle: only %r %s (at least %d wanted): the comparison was too thin" % (orc.get(key), key, floor))
+if orc.get("detected") != sorted(oracle.JUDGED_KEYS):
+    failures.append("env-loader-oracle: forbidden names the loader applied and the gate named: %r (want %r)" % (orc.get("detected"), sorted(oracle.JUDGED_KEYS)))
+if (orc.get("needless") or {}).get("NUL in the statement", 0) < 20:
+    failures.append("env-loader-oracle: the statements with a NUL (which the loader cannot export) were barely exercised: %r" % (orc.get("needless"),))
+if orc.get("loader_own_names") != 0:  # not a failure: the oracle sets such names aside (`ignore`) so they are never the file's doing; recorded for the reader
+    print("INFO env-loader-oracle: this image's loader adds %r name(s) of its own to the environment for an empty .env (set aside)" % (orc.get("loader_own_names"),))
+if (orc.get("needless") or {}).get("line break in an allowed value", 0) < 40:
+    failures.append("env-loader-oracle: the rule about a line break in an allowed value was barely exercised: %r" % (orc.get("needless"),))
+if set(orc.get("needless") or {}) - {"NUL in the statement", "name the slot already has", "line break in an allowed value"}:
+    failures.append("env-loader-oracle: refusals beyond the loader with no designed reason: %r" % (orc.get("needless"),))
+if not isinstance(orc.get("hermes_errors"), int) or orc["hermes_errors"] > 0.02 * (orc.get("cases") or 1):
+    failures.append("env-loader-oracle: the loader raised on %r inputs: it was not run as Hermes runs it" % (orc.get("hermes_errors"),))
 # the premise, from Hermes' own validate_media_delivery_path in the pinned image: strict (and `true`) keeps an old file outside
 # Hermes' cache dirs from being delivered, a file in a cache dir still goes out; unset delivers the outside file too.
 policy = ((result("media-policy")["lockgate"] or {}).get("media_policy")) or {}
@@ -259,6 +524,24 @@ for name in ("compose-start-nostrict", "railway-start-nostrict"):
     if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout \
             or '"ok": false' not in stdout:
         failures.append("%s: the gate did not refuse a start without the strict flag (rc %s, stdout tail %r)" % (name, rc, stdout[-300:]))
+# #4935: the real Railway start command with a connector-mode config. Its hash is in the command's list, so it reaches the point where it
+# would exec Hermes with the gate passed and the config named; one changed byte (connector or default) is stopped by the hash list before the
+# gate prints anything; without the strict flag every checksum passes and the gate refuses.
+rc = text("railway-start-connector", "rc").strip()
+stdout = text("railway-start-connector", "stdout")
+if rc != "0" or "START_COMMAND_REACHED_EXEC" not in stdout or '"ok": true' not in stdout \
+        or '"config_accepted_as": "connector/claude-oauth.fallback-codex-oauth"' not in stdout:
+    failures.append("railway-start-connector: rc %s, stdout tail %r" % (rc, stdout[-300:]))
+for name in ("railway-start-connector-edited", "railway-start-config-edited"):
+    rc = text(name, "rc").strip()
+    stdout, stderr = text(name, "stdout"), text(name, "stderr")
+    if rc != "78" or "START_COMMAND_REACHED_EXEC" in stdout or "LOCKGATE" in stdout \
+            or "config.yaml is not one of the accepted configs" not in stderr:
+        failures.append("%s: one changed byte did not stop the start command before the gate (rc %s, stderr tail %r)" % (name, rc, stderr[-200:]))
+rc = text("railway-start-connector-nostrict", "rc").strip()
+stdout = text("railway-start-connector-nostrict", "stdout")
+if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout or '"ok": false' not in stdout:
+    failures.append("railway-start-connector-nostrict: the gate did not refuse a connector start without the strict flag (rc %s, stdout tail %r)" % (rc, stdout[-300:]))
 # the live gateway: the gate passed before it listened, the report (which runs the same rules on the live volume) found
 # nothing to shut down, the container is still up, and the plugin is loaded for the hermes uid from the real volume
 log = text("gateway-boot", "log")
@@ -291,12 +574,34 @@ else:
     if not (p.get("origin_set") and p.get("self_address_is_none") and p.get("self_variant_is_block")
             and p.get("self_as_reference_is_block")):
         failures.append("gateway-boot: the live plugin does not judge the self-media address as designed: %r" % (p,))
+# #4950: the names the REAL boot left in the volume's .env are all on the allow-list (the report said so already; this names them), and no
+# .op.env appeared. A fresh volume's .env is Hermes' own seeded template.
+names_text = text("gateway-boot", "envnames").split()
+if "OP_ENV_PRESENT" in names_text:
+    failures.append("gateway-boot: the boot left a .op.env in the volume")
+# the gate refuses any entry under profiles/: the image's own boot must leave it absent or empty, or every second start would be refused
+if "PROFILES_NOT_EMPTY" in names_text:
+    failures.append("gateway-boot: the boot left an entry under profiles/ in the volume (the gate refuses the next start)")
+if not {"PROFILES_EMPTY", "PROFILES_ABSENT", "PROFILES_NOT_EMPTY"} & set(names_text):
+    failures.append("gateway-boot: the profiles folder was not looked at: %r" % (names_text[:5],))
+live_names = [n for n in names_text if n not in ("ENV_PRESENT", "ENV_ABSENT", "OP_ENV_PRESENT", "PROFILES_EMPTY", "PROFILES_ABSENT", "PROFILES_NOT_EMPTY")]
+unlisted = sorted(set(live_names) - set(oracle.SECRETS) - set(oracle.SEEDED))
+if unlisted:
+    failures.append("gateway-boot: the real boot left names in the volume's .env that the allow-list does not have: %r" % (unlisted,))
+if "ENV_PRESENT" not in names_text and "ENV_ABSENT" not in names_text:
+    failures.append("gateway-boot: the .env names were not read: %r" % (names_text[:5],))
+print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s), all on the allow-list: %s; profiles/: %s"
+      % ("present" if "ENV_PRESENT" in names_text else "absent", len(live_names), not unlisted,
+         [n for n in names_text if n.startswith("PROFILES_")]))
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
-print("OK: %d in-image scenarios (gate) + 6 start-command runs + the live gateway boot" % len(
+print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
-     "safe-mode", "proxy-env", "private-env", "bom-env-file", "clean-env-file", "self-origin", "self-origin-bad",
-     "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy"]))
+     "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
+     "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
+     "env-shapes", "env-inert-shapes", "env-line-reader-shapes", "profile-folder", "env-reference-shapes", "env-seed-template", "connector-configs", "connector-config-edited",
+     "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "cross-run-tools-off", "cross-run-tools-on", "env-parser-parity",
+     "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"

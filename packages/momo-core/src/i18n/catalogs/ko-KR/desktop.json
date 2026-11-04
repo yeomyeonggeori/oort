@@ -16,5 +16,18 @@
   "desktop.menu.fullscreen": "전체 화면",
   "desktop.menu.hide": "oort 가리기",
   "desktop.menu.hideOthers": "기타 가리기",
-  "desktop.menu.quit": "oort 종료"
+  "desktop.menu.quit": "oort 종료",
+  "desktop.tray.running": "실행 중",
+  "desktop.tray.none": "실행 중 없음",
+  "desktop.tray.newMessage": "새 메시지",
+  "desktop.tray.readAll": "모두 읽음 처리",
+  "desktop.tray.open": "oort 열기",
+  "desktop.tray.stateWorking": "작업 중",
+  "desktop.tray.stateBlocked": "대기",
+  "desktop.tray.more": "외 {count, number}개",
+  "desktop.tray.remainApprovals": "승인 {count, number}건은 남아 있어요",
+  "desktop.tray.remainPanes": "응답 필요 {count, number}칸은 남아 있어요",
+  "desktop.tray.remainBoth": "승인 {approvals, number}건, 응답 필요 {panes, number}칸은 남아 있어요",
+  "desktop.tray.closeNotice": "창을 닫아도 메뉴 막대에서 계속 알림을 받아요",
+  "desktop.notify.threadSummary": "스레드 답글 {count, number}건"
 }

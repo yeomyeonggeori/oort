@@ -2,9 +2,8 @@ import type {AgentRunProgress, Message, MessageAttachment, RosterMember} from '@
 import {RequestThinkingLine} from '../src/features/agents/RequestThinkingLine';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {parseTurnPlaceholderKey, turnPlaceholderKey, type AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
-import {activityDetail, activityLines, MAX_ACTIVITY_LINES, UNKNOWN_AGENT_NAME, type AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
 import {typingSegments} from '@momo/core/features/chat/typing';
-import {makeDirectory, memberNameParts} from '@momo/core/features/workspace/directory';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
 import React, {Profiler, useCallback, useEffect, useMemo, useRef, useState, type ProfilerOnRenderCallback} from 'react';
 import {
@@ -21,8 +20,7 @@ import {
 import {BAR_CONTROL_MAX_SCALE, Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
-import {useTickingNow} from '../src/features/agents/workingSignal';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
@@ -101,8 +99,8 @@ import {setServerBase} from '../src/storage/serverBase';
 //   #4613 「진입·입력 초반에 진동이 반복되는가」 — **마운트 첫 프레임부터** 재는 장면. 에이전트 DM 에 들어가(진입 수렴) · 입력창을 누르고(펼침+자판) ·
 //             첫 글자 1~5개를 치고 · 1분 동안 활동 줄의 「N초째」가 매초 바뀌는 채로 둔다(`maestro/112-enter-steady.yaml`).
 //             enter       기본 75초. 대기 중 run 의 나이는 3초에서 시작해 매초 글자가 바뀐다.
-//             `+age17h`   run 나이 17시간(글자는 고정, 1초 재렌더만 도는 대조군).   `+nobar` 활동 줄·1초 시계 없음(대조군).
-//             `+label`    에이전트 서버 생존 판정(D4 「깨웠지만 아직 안 가져감」)을 `livenessFor` 로 먹인다 — 실기 대화 화면이 근거 글 맨 앞에 싣는 문구(길다).
+//             `+age17h`   run 나이 17시간(#4620: 레일의 글에는 시간이 없어 `+age17h` 와 같은 글이다).   `+nobar` 레일 줄 없음(대조군).
+//             `+label`    (#4620 이후 아무 일도 안 한다: 레일은 서버 생존 판정 글을 싣지 않는다.)
 //             `+ahead2`   근거 글 끝에 「에이전트 앞에 2건」.   `+grok` 에이전트 이름을 짧게(grok). 글자 크기는 `xcrun simctl ui <udid> content_size <단계>` 로 바꾼다(활동 줄 줄바꿈은 폭 × 글자 크기 × 문구의 곱이다).
 //             `+T<초>`    재는 시간. 프레임마다 맨 아래 행 y·목록 높이·입력창 높이·도크 높이·알약·포커스를 남기고, 스크롤 보고마다 출처(손가락/목록이 낸 것)와
 //             `chasingTail` 전이를 `scrollLog` 로, 햅틱 호출을 `haptics` 로(`expo-haptics` 를 이 하네스가 감싼다 — 배포 코드 무영향) 싱크에 보낸다.
@@ -113,6 +111,11 @@ import {setServerBase} from '../src/storage/serverBase';
 //             `+nobar`    에이전트 DM 인데 활동 줄 없음.
 //             `+runafter<ms>` 보낼 때마다 <ms> 뒤에 활동 줄(대기)이 선다(6초 뒤 걷음).  `+runflow` 쉬는 에이전트에게 말한 길 전부(0.4초 대기 줄 → 1.8초 일하는 중 + 목록 끝 「작업 중」 자리 → 4.5초 답)를 보낼 때마다.
 //             `+runflowlong` 첫 보내기에서만 시작하고 답은 70초 뒤 — 두 번째 보내기가 이미 열린 턴 위에 겹친다.  `+d<ms>` 가짜 서버가 보내기에 답하는 시간(기본 250).
+//
+// #4620 「레일 칸 · 이동 0」 — 에이전트 대화의 「활동 줄」은 이제 **입력창 레일**(`TurnsActivityRail`, 배송되는 `ConversationActivityRail`)이다:
+//   - 칸이 예약돼 있어(`CONV.agentRailSlot` × 글자 배율) 줄이 서고 사라지고 단계가 바뀌어도(`bar`·`runflow`·`tick`) 맨 아래 행의 y 이동은 **0** 이어야 한다
+//     (사보타주: `railSlotHeight` 를 0 으로 하면 `bar` 에서 이동 > 0).
+//   - 1초 시계가 없다(`useTickingNow` 제거): `tick`·`enter` 에서 글자가 바뀌지 않는다. 사람 대화(`+human`)에는 칸이 없다.
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -1187,22 +1190,13 @@ function TimelineSteadySurface({which}: {which: string}): React.JSX.Element {
       : base === 'enter' && !mods.includes('age17h')
         ? 3_000
         : 17 * 3_600_000;
-  // `+label`: 대화 화면이 근거 글 맨 앞에 싣는 서버 생존 판정(D4)을 하네스도 먹인다 — 안 먹이면 짧은 문구만 재서 실기보다 줄 바꿈 여유가 크다.
-  const livenessFor = useMemo<AgentLivenessLookup | undefined>(
-    () =>
-      mods.includes('label')
-        ? memberId => ({agentMemberId: memberId, state: 'woken_not_collected', lastSignalAtMs: Date.now() - 3 * 3_600_000})
-        : undefined,
-    // `mods` 는 마운트 때의 값이다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
   const scrollLogRef = useRef<ScrollLogEntry[] | null>(base === 'enter' ? [] : null);
   const composerRef = useRef<View | null>(null);
   const [turns, setTurns] = useState<readonly AgentWorkingSignal[]>(() =>
     agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge, ahead)] : [],
   );
-  const turnNowMs = useTickingNow(turns.length > 0);
+  // 레일은 초 단위로 다시 그리지 않는다(#4620): 시각은 렌더가 한 번 읽을 뿐 1초 시계를 마운트하지 않는다 — 배송되는 화면과 같다.
+  const turnNowMs = Date.now();
   // `markRef` 는 아래 메아리·서버 사본 표식(#4455)과 같은 것이다 — 장면이 도는 동안 장면의 `mark` 를 가리킨다.
   const markRef = useRef<((what: string) => void) | null>(null);
   const [selfSendToken, setSelfSendToken] = useState(0);
@@ -1276,22 +1270,6 @@ function TimelineSteadySurface({which}: {which: string}): React.JSX.Element {
     if (base === 'enter') markRef.current?.(`status-${statusNow}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusNow]);
-  const barDetail =
-    base === 'enter' && turns.length > 0
-      ? activityDetail(
-          activityLines(
-            turns,
-            memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-            MAX_ACTIVITY_LINES,
-            livenessFor,
-          ).lines[0],
-          turnNowMs,
-        )
-      : undefined;
-  useEffect(() => {
-    if (base === 'enter' && barDetail !== undefined) markRef.current?.(`txt:${barDetail}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barDetail]);
   // 실제 화면과 같은 길: 열린 턴 중 `working` 인 것만 목록 끝 자리를 얻는다(키로 memo — 스트리밍 청크마다 새 배열이면 목록이 다시 그려진다).
   const workingKey = turnPlaceholderKey(turns);
   const workingFromTurns = useMemo(() => parseTurnPlaceholderKey(workingKey), [workingKey]);
@@ -1597,13 +1575,14 @@ function TimelineSteadySurface({which}: {which: string}): React.JSX.Element {
             onTouchEnd={onDockTouchEnd}
             onTouchCancel={onDockTouchCancel}>
             <View ref={barRef} collapsable={false}>
-              <AgentActivityBar
+              <TurnsActivityRail
                 turns={turns}
                 directory={directory}
                 nowMs={turnNowMs}
                 live
+                // 에이전트 대화는 칸을 미리 잡고(서고 사라져도 맨 아래 행이 움직이지 않는다), 사람 대화는 칸이 없다 — 대화 화면의 `isRailReserved`와 같다.
+                reserved={agentDm}
                 renderStop={renderStop}
-                livenessFor={livenessFor}
               />
             </View>
             <TypingBar segments={typingSegments([])} label={null} />

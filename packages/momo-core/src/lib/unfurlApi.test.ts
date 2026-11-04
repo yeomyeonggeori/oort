@@ -119,4 +119,50 @@ describe("unfurl API", () => {
       "Bearer access-token"
     );
   });
+
+  it("fetches a site icon through the same proxy gate and nothing else", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(new Uint8Array([0, 0, 1, 0]), {
+        status: 200,
+        headers: { "content-type": "image/x-icon" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of [
+      "https://remote.example/favicon.ico",
+      "/v1/workspaces/w-1/unfurls/u-1/icon.svg",
+      "/v1/workspaces/w-1/unfurls/u-1/icon?x=1",
+      "/v1/workspaces/w-1/unfurls/u-1/other",
+    ]) {
+      await expect(fetchUnfurlImage(bad)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(
+      fetchUnfurlImage("/v1/workspaces/w-1/unfurls/u-1/icon")
+    ).resolves.toBeInstanceOf(Blob);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://oort.test/v1/workspaces/w-1/unfurls/u-1/icon"
+    );
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Headers).get("Authorization")).toBe(
+      "Bearer access-token"
+    );
+  });
+
+  it("keeps the proxy's Retry-After seconds on a refusal, and none when it sent none", async () => {
+    installHost();
+    const answer = (status: number, headers: Record<string, string>) =>
+      vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("", { status, headers }));
+    vi.stubGlobal("fetch", answer(429, { "Retry-After": "42" }));
+    await expect(fetchUnfurlImage("/v1/workspaces/w-1/unfurls/u-1/icon")).rejects.toMatchObject({
+      status: 429,
+      retryAfterSeconds: 42,
+    });
+    vi.stubGlobal("fetch", answer(404, {}));
+    const missing = await fetchUnfurlImage("/v1/workspaces/w-1/unfurls/u-1/icon").catch((error: unknown) => error);
+    expect(missing).toMatchObject({ status: 404 });
+    expect((missing as { retryAfterSeconds?: number }).retryAfterSeconds).toBeUndefined();
+  });
 });

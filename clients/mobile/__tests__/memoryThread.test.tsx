@@ -87,7 +87,7 @@ function renderThread(replies: Message[], memory?: React.ComponentProps<typeof T
   const timeline = {
     state: {messages: [ROOT, ...replies], oldestSeq: 10, newestSeq: 99},
     status: 'ready', resume: {lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0},
-    recoveryMarkers: [], pending: [], send: async () => {}, resend: async () => {},
+    recoveryMarkers: [], pending: [], send: async () => {}, resend: async () => {}, discard: () => null,
     toggleReaction: async () => {}, editBody: async () => {}, removeMessage: async () => {},
     loadReplies: async () => {}, sendReply: async () => {}, repliesPending: () => [],
     loadOlder: async () => {}, reload: () => {}, loadingOlder: false, reachedStart: true,

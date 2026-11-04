@@ -100,6 +100,10 @@ reqwest = { version = "0.12", default-features = false, features = [
 # exchange, so pinning it here lets the stream cross momo-drive → momo-server
 # with no copy and no third buffer type in between.
 bytes = "1"
+# ADR-0170 증보 2026-10-31 D8 (#4881): a fetched page is decoded with the charset its
+# Content-Type / <meta> names (EUC-KR pages), not always as UTF-8. The WHATWG label table and
+# decoders, (Apache-2.0 OR MIT) AND BSD-3-Clause. Already in Cargo.lock through axum's multer.
+encoding_rs = "0.8"
 
 # errors / logging
 thiserror = "1"

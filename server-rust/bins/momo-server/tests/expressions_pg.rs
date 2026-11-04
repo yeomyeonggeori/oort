@@ -1,4 +1,9 @@
 //! Real HTTP/OpenAPI + existing message/reaction rail, ADR-0218 model (a).
+//!
+//! Needs the isolated decoder child beside the test binary: `cargo build -p momo-expressions
+//! --bins` first (`cargo test -p momo-server` builds no other package's bins). Without it every
+//! picture is invalid media and this test goes red without saying why (#4947);
+//! `require_decoder_4947` fails first and names the command.
 use momo_db::sqlx::{
     self,
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -104,9 +109,33 @@ fn sample(
     samples.push(json!({"method":method,"path":path,"status":status,"schema":schema,"body":body}));
 }
 
+/// The decoder child (`momo-expression-decoder`) must sit beside this test's target directory,
+/// found the way `momo_expressions::media` finds it: the `OORT_EXPRESSION_DECODER` override, else
+/// next to the test executable (one level above a `deps` directory). It belongs to
+/// `momo-expressions`, so building this test does not build it (#4947, header above). Fail here,
+/// first, and name the command: left to the server, a missing decoder is "every picture is
+/// invalid media". An explicit override is trusted.
+fn require_decoder_4947() {
+    if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
+        return;
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-decoder");
+    assert!(
+        path.is_file(),
+        "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
+         every picture is invalid media and an upload ends as a source_invalid_media card"
+    );
+}
+
 #[tokio::test]
 #[ignore = "real PG; security-nightly workspace ignored pass"]
 async fn expression_http_openapi_and_unchanged_send_reaction_spine() {
+    require_decoder_4947();
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
     momo_db::migrate::run_migrations(
         &url,

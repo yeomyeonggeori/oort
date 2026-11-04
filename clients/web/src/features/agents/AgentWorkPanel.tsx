@@ -33,6 +33,7 @@ import {
   runPhaseDetail,
 } from "@momo/core/features/agents/runPhase";
 import { runDurationBreakdown } from "@momo/core/features/agents/runDuration";
+import { workHealth, workHealthLine } from "@momo/core/features/agents/workHealth";
 import {
   agentLabel,
   TURN_STALE_SENTENCE,
@@ -42,13 +43,12 @@ import {
   RUN_LEDGER_KEPT_SENTENCE,
   RUN_LEDGER_LIMIT_SENTENCE,
   RUN_LOCAL_ONLY_SENTENCE,
-  RUN_STREAM_SENTENCE,
   runEmptyState,
   runList,
 } from "@momo/core/features/agents/runLedger";
 import type { AgentRunProgress, Channel, RosterMember } from "@momo/core/lib/api";
 import { cancelWordingFor } from "@momo/core/features/agents/runCancel";
-import { isOpenRunPhase } from "@momo/core/features/agents/runPhase";
+import { isOpenRunPhase, isQueuedPhase, isRunningPhase } from "@momo/core/features/agents/runPhase";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
 import {
@@ -62,10 +62,7 @@ import { useApprovalCardPath } from "@/features/inbox/useInbox";
 import { AgentLivenessBar } from "./AgentLivenessLabel";
 import { EmptyInvite, Skeleton } from "@/features/common/States";
 import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
-import {
-  restoreDialogOpenerFocus,
-  type DialogFocusTarget,
-} from "@/design/ui/dialog";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { MemberAvatar } from "@/features/common/MemberAvatar";
@@ -83,6 +80,8 @@ import {
   RunListView,
 } from "./AgentRunLedgerView";
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
+import { AgentReportSection, OortRecordSection } from "./WorkTimelineView";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
@@ -90,7 +89,13 @@ import {
   takeWorkPanelOpener,
   useWorkLog,
   useWorkPanelTarget,
+  workPanelSnapshot,
 } from "./workLogStore";
+import {
+  rememberPanelOpener,
+  returnFocusAfterWorkPanelClose,
+  type PanelOpenerMemo,
+} from "./workPanelFocus";
 
 // =============================================================================
 // 「작업 패널」 (goal WEB-WP1, 결정 정본 docs/planning/2026-08-04-work-panel-design.md).
@@ -167,6 +172,8 @@ export function AgentWorkPanel() {
 
   const asideRef = useRef<HTMLElement>(null);
   const openerRef = useRef<DialogFocusTarget | null>(null);
+  // 연 요소가 사라져도 같은 자리를 다시 찾는 열쇠(#5165). 열 때 적고 닫을 때 읽는다.
+  const openerMemoRef = useRef<PanelOpenerMemo | null>(null);
   // 연 횟수(`session`)와 `origin`을 키에 넣는다. 같은 run을 컴포저에서 열었다가
   // 허브에서 다시 열면 그것은 새로 연 것이고(openWorkPanel이 그렇게 판정한다),
   // 키가 그대로면 이 효과가 다시 돌지 않아 이미 사라진 컴포저 버튼을 가리킨 채로
@@ -182,19 +189,28 @@ export function AgentWorkPanel() {
   useEffect(() => {
     if (openKey === null) {
       openerRef.current = null;
+      openerMemoRef.current = null;
       return;
     }
     const handed = takeWorkPanelOpener();
     const active = document.activeElement;
     openerRef.current =
       handed ?? (active instanceof HTMLElement ? active : null);
+    openerMemoRef.current = rememberPanelOpener(
+      openerRef.current instanceof Element ? openerRef.current : null,
+      workPanelSnapshot()?.runId ?? null
+    );
     asideRef.current?.focus();
   }, [openKey]);
 
+  // 900px 아래에서는 패널이 라우트를 덮고 셸이 그 라우트를 inert로 둔다. React가 그 속성을 걷는 것은 이 커밋이
+  // 끝난 뒤라서, 그 전에 부르는 focus()는 거절당해 캐럿이 body로 갔다(#5165). 덮인 표면의 inert를 먼저 걷고 나서
+  // 돌려주는 순서와, 연 요소가 사라졌을 때의 이웃은 `workPanelFocus`에 있다.
   const close = useCallback(() => {
     const opener = openerRef.current;
+    const memo = openerMemoRef.current;
     closeWorkPanel();
-    restoreDialogOpenerFocus(opener);
+    returnFocusAfterWorkPanelClose(opener, memo);
   }, []);
 
   // Escape는 aside 안에 캐럿이 있을 때만 듣는 것으로는 부족하다. 600px 아래에서
@@ -453,6 +469,7 @@ function PanelBody({
   directory: Directory;
   selfMemberId: string;
 }) {
+  const formatMessage = useFormatMessage();
   if (log === null) {
     // 스토어가 구독을 걸기 전의 한 프레임. 높이를 지키는 중립 막대이고 shimmer는
     // 없다(SKILL §5). 한 프레임짜리 상태이지만 자리를 비워 두면 이 분기가 길어질
@@ -469,6 +486,17 @@ function PanelBody({
   // 않는다).
   const streamEntries =
     server === null ? log.entries : log.entries.filter((e) => e.kind !== "phase");
+  // 건강 줄(#4657): 서버가 적어 둔 사실만으로 말한다. 시간 신호는 연결이 살아 있을 때만 센다(끊긴 화면의 「n분 전」은
+  // 우리 시계가 혼자 흘러간 숫자다). 말할 신호가 없으면 줄이 서지 않는다.
+  const healthLine =
+    server === null
+      ? null
+      : workHealthLine(
+          workHealth({ facts: server, events: ledger.events, nowMs, live: railLive }),
+          formatMessage,
+          // 머리(한 run) 또는 run 목록(여러 run)이 이미 「마지막 보고 n분 전」을 말한다: 건강 줄은 그 시간을 되풀이하지 않는다.
+          { lastReportShownElsewhere: true }
+        );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -513,6 +541,16 @@ function PanelBody({
           data-testid="agent-work-panel-durations"
         >
           {runDurationBreakdown(server, nowMs)}
+        </p>
+      )}
+
+      {healthLine !== null && (
+        <p
+          className="break-keep border-b border-line px-4 py-2 text-timestamp text-ink-muted"
+          data-numeric
+          data-testid="agent-work-panel-health"
+        >
+          {healthLine}
         </p>
       )}
 
@@ -569,6 +607,28 @@ function PanelBody({
         </>
       )}
 
+      {/* 에이전트가 스스로 알린 활동·계획(#4657, ADR-0200 증보 7). 서버가 잰 줄과 **다른 칸**이고 항상 「에이전트
+          보고」 꼬리표가 달린다. 아직 아무도 가져가지 않은 요청에는 알릴 것이 없어 서지 않는다. 점은 서버가 지금
+          돈다고 말하고 연결도 살아 있을 때만 선다. */}
+      {server !== null && ledger.activity !== null && !isQueuedPhase(server.phase) && (
+        <AgentReportSection
+          record={ledger.activity}
+          open={isOpenRunPhase(server.phase)}
+          live={railLive && isRunningPhase(server.phase)}
+          nowMs={nowMs}
+        />
+      )}
+
+      {/* 서버가 직접 잰 도구 호출(#4654). 위 「기록」(수명주기·에이전트 단계)과 **다른 칸**이다: 출처가 달라
+          한 목록에 섞지 않는다. 서버가 아는 run에만 서고, 원장을 아직 못 읽었으면 서지 않는다. */}
+      {server !== null && ledger.tools !== null && (
+        <OortRecordSection
+          record={ledger.tools}
+          open={isOpenRunPhase(server.phase)}
+          nowMs={nowMs}
+        />
+      )}
+
       {log.droppedEntries > 0 && (
         <p
           className="break-keep px-4 pt-2 text-meta text-ink-muted"
@@ -588,7 +648,7 @@ function PanelBody({
                 className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
                 data-testid="agent-work-panel-stream-limit"
               >
-                {RUN_STREAM_SENTENCE}
+                {formatMessage("timeline.workStream.limit")}
               </p>
             </>
           )}

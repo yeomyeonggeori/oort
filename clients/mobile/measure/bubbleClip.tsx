@@ -24,6 +24,12 @@ import {ROW_FACE} from '../src/features/conversation/rowFace';
 //
 //   (선택) -momoClipWidths 375,390,430   칸 폭(pt) 목록 — 기본은 아래 `DEFAULT_WIDTHS`
 //   (선택) -momoClipSet ko|en|mix|emoji|url|odd|nl|ctx|agent|md|all|<칸 id 앞부분>   글 묶음 — 기본 all
+//   (선택) -momoClipBase 0,8000.3333   칸 위에 깔 빈 공간(pt) 목록 — 칸의 **절대 y** 를 키운다. 기본 0
+//   (선택) -momoClipReps 48   같은 칸을 48번 쌓는다. 칸마다 위 간격에 (0·1/3·2/3)pt 를 번갈아 더해 y 의 소수 부분을 훑는다. 기본 1
+//   (선택) -momoClipRepStart 32 -momoClipFreeze 1   눈으로 보는 캡처용: 첫 쪽만 세우고(보고·다음 쪽 없음) base 위치로 스크롤해 둔다.
+//          rep 가 32 부터 시작해 첫 칸의 위 간격이 보고 쪽의 rep 32 와 같으니, 쪽의 첫 칸이면 절대 y 도 같다(깎이는 칸을 그대로 다시 세운다).
+//          (#5288) 글 상자 높이가 float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 일은 **절대 y 가 크고 소수 부분이 1/3pt 단위일 때**
+//          난다 — 짧은 화면의 칸(y < 1000)에서는 안 나서 이 하네스가 처음에 못 잡았다. 단정 I(`bubble-clip-check.mjs`)가 그 증상을 센다.
 //
 // 칸 하나 = `width: W` 인 View 한 개 안에 `MessageRow` 한 개. 목록 셀이 화면 폭 W 를 가진다는 사실을 그대로 흉내 낸다
 // (진짜 목록 셀은 `TimelineCell` 의 평범한 View 다). 폭 W 는 기기 폭이 아니라 **칸 폭**이라, 한 기기에서 375·390·430 을 다 잰다.
@@ -40,12 +46,14 @@ import {ROW_FACE} from '../src/features/conversation/rowFace';
 //   D  줄 아래끝 ≤ text.height                   마지막 줄이 글 상자 아래로 잘리지 않는다
 //   G  글자가 있는 문단의 글 상자 폭 ≥ 4pt        글이 0 폭으로 접혀 안 보이지 않는다
 //   H  Σ(문단 높이) + 2·padY ≤ bubble.height     말풍선이 안의 글보다 낮아 글이 말풍선 밖으로 넘치지 않는다
+//   I  text.height − lines.bottom ≤ ½ 줄 높이    글 상자가 그린 줄들보다 반 줄 넘게 높지 않다 — 잰 줄 수보다 적게 그려져 줄이 빠지지 않는다(#5288)
 // 이름·문구는 가상이다.
 // =============================================================================
 
 const WS = '00000000-0000-7000-8000-0000000048c0';
 const ME = '00000000-0000-7000-8000-0000000048c1';
 const OTHER = '00000000-0000-7000-8000-0000000048c2';
+const INTERN = '00000000-0000-7000-8000-0000000048c3';
 const NOW = Date.now();
 
 function member(id: string, name: string): RosterMember {
@@ -54,7 +62,7 @@ function member(id: string, name: string): RosterMember {
     channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   } as RosterMember;
 }
-const DIRECTORY = makeDirectory([member(ME, '나'), member(OTHER, '이도현')]);
+const DIRECTORY = makeDirectory([member(ME, '나'), member(OTHER, '이도현'), member(INTERN, 'kim-intern')]);
 
 function msg(n: number, author: string, body: string, ctx?: string): Message {
   return {
@@ -179,6 +187,8 @@ const CASES: Case[] = [
     id: 'md-mention', set: 'md',
     body: '@이도현 이번 주 일정 확인했어요. 수요일 리허설 전에 체크리스트 한 번 더 돌려 보고 알려 드릴게요.',
   },
+  // 5a(L5d)에서 잘린 말풍선의 글: 영어 + 멘션이라 한글도 줄바꿈 전략도 없다(#4894). 멘션이 서려면 디렉터리에 `kim-intern` 이 있어야 한다.
+  {id: 'l5d-mention', set: 'md', body: '@kim-intern MAESTRO TEXT MAESTRO SLOW phone lane stop check'},
   {
     id: 'md-link', set: 'md',
     body: '링크는 [여기](https://example.com/docs/very/long/path/name)에 있어요. 읽어 보시고 의견 남겨 주세요 부탁드립니다.',
@@ -226,11 +236,25 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
   const widths = useMemo(() => (launchList('momoClipWidths') ?? DEFAULT_WIDTHS.map(String)).map(Number), []);
   const set = (launchList('momoClipSet') ?? ['all'])[0];
   const cases = useMemo(() => CASES.filter(c => set === 'all' || c.set === set || c.id.startsWith(set)), [set]);
-  const cells = useMemo(
-    () => cases.flatMap(c => widths.map(width => ({key: `${c.id}@${width}`, c, width}))),
-    [cases, widths],
-  );
-  const pages = Math.ceil(cells.length / PAGE);
+  const bases = useMemo(() => (launchList('momoClipBase') ?? ['0']).map(Number).filter(n => Number.isFinite(n) && n >= 0), []);
+  const reps = Math.max(1, Number((launchList('momoClipReps') ?? ['1'])[0]) || 1);
+  const repStart = Math.max(0, Number((launchList('momoClipRepStart') ?? ['0'])[0]) || 0);
+  const freeze = launchList('momoClipFreeze') !== undefined;
+  // 쪽 하나 = 위쪽 공간(base) 하나 + 칸 최대 PAGE 개. 같은 쪽의 칸은 모두 절대 y 가 base 이상이다.
+  const pageList = useMemo(() => {
+    const out: {base: number; cells: {key: string; c: Case; width: number; rep: number}[]}[] = [];
+    for (const base of bases) {
+      const all = cases.flatMap(c =>
+        widths.flatMap(width =>
+          Array.from({length: reps}, (_, i) => ({key: `${c.id}@${width}@${base}@${repStart + i}`, c, width, rep: repStart + i})),
+        ),
+      );
+      for (let i = 0; i < all.length; i += PAGE) out.push({base, cells: all.slice(i, i + PAGE)});
+    }
+    return out;
+  }, [bases, cases, widths, reps, repStart]);
+  const cells = useMemo(() => pageList.flatMap(p => p.cells), [pageList]);
+  const pages = pageList.length;
   const [page, setPage] = useState(0);
   const [bad, setBad] = useState(0);
   const seen = useRef(new Map<string, Seen>());
@@ -251,10 +275,12 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
     return fn;
   }, []);
 
-  const slice = useMemo(() => cells.slice(page * PAGE, page * PAGE + PAGE), [cells, page]);
+  const current = pageList[page] ?? {base: 0, cells: []};
+  const slice = current.cells;
 
-  // 한 쪽을 세우고 레이아웃 보고가 가라앉을 때까지 기다린 뒤 적고 다음 쪽으로 간다.
+  // 한 쪽을 세우고 레이아웃 보고가 가라앉을 때까지 기다린 뒤 적고 다음 쪽으로 간다. (`-momoClipFreeze` 는 보고 없이 첫 쪽에 머문다.)
   useEffect(() => {
+    if (freeze) return undefined;
     const timer = setTimeout(() => {
       for (const cell of slice) {
         const s = seen.current.get(cell.key);
@@ -273,6 +299,7 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
               chars: lines.reduce((sum, l) => sum + l.text.trim().length, 0),
               maxRight: lines.length > 0 ? round(Math.max(...lines.map(l => l.x + l.width))) : null,
               bottom: lines.length > 0 ? round(Math.max(...lines.map(l => l.y + l.height))) : null,
+              lineH: lines.length > 0 ? round(lines[0].height) : null,
             },
           };
         });
@@ -280,6 +307,8 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
           kind: 'case',
           id: cell.c.id,
           set: cell.c.set,
+          base: current.base,
+          rep: cell.rep,
           who: mine ? 'mine' : 'other',
           row: which.includes('row'),
           W: cell.width,
@@ -300,6 +329,7 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
                 p.text.w > (bubbles.find(b => b.key === p.key.split('.')[0])?.w ?? 0) - 2 * CONV.bubblePadX + 0.5)) ||
             (p.lines.maxRight ?? 0) > p.text.w + 0.5 ||
             (p.lines.bottom ?? 0) > p.text.h + 0.5 ||
+            p.text.h - (p.lines.bottom ?? 0) > (p.lines.lineH ?? 0) / 2 ||
             (p.lines.chars > 0 && p.text.w < 1),
         );
         if (squeezed || paras.length === 0 || bubbles.some(b => b.w > colW + 0.5)) badRef.current += 1;
@@ -309,7 +339,7 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
       else post({kind: 'done', total: cells.length, bad: badRef.current, fontScale: round(PixelRatio.getFontScale())});
     }, 1400);
     return () => clearTimeout(timer);
-  }, [cells.length, mine, page, pages, slice, which]);
+  }, [cells.length, current.base, freeze, mine, page, pages, slice, which]);
 
   return (
     <Screen>
@@ -318,9 +348,10 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
           {`bubble-clip p${page + 1}/${pages} · 칸 ${cells.length} · 위반 ${bad} · 글자배율 ${round(PixelRatio.getFontScale())}`}
         </Text>
       </View>
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} contentOffset={freeze ? {x: 0, y: current.base} : undefined}>
+        <View style={{height: current.base}} />
         {slice.map((cell, i) => (
-          <View key={cell.key} style={[styles.cell, {width: cell.width}]} testID={`clip-cell-${cell.key}`}>
+          <View key={cell.key} style={[styles.cell, {width: cell.width, marginTop: (cell.rep % 3) / 3}]} testID={`clip-cell-${cell.key}`}>
             <BubbleProbeContext.Provider value={probeFor(cell.key)}>
               <MessageRow
                 message={msg(page * PAGE + i + 1, mine ? ME : OTHER, cell.c.body, cell.c.ctx)}

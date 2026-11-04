@@ -1,6 +1,11 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import type {ReleaseNote} from '@momo/core/features/releaseNotes/model';
-import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
+import type {
+  ReleaseNote,
+  ReleaseNoteOtherGroup,
+} from '@momo/core/features/releaseNotes/model';
+import {RELEASE_NOTE_0_1_41} from '@momo/core/features/releaseNotes/notes/v0_1_41';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -13,6 +18,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -49,6 +55,18 @@ jest.mock('expo-application', () => ({
   nativeApplicationVersion: '1.0',
 }));
 
+// 제스트 렌더러에는 네이티브 태그가 없어 `findNodeHandle` 이 언제나 null 이다. 여기서는 **어느 노드**가 VoiceOver 초점을 받았는지를
+// 물어야 하므로 소식 화면 노드의 testID 를 손잡이로 돌려준다(`attachMenu.test.tsx` 와 같은 길). 다른 노드는 원래처럼 null 이다.
+jest.mock('react-native/Libraries/ReactNative/RendererProxy', () => ({
+  ...jest.requireActual('react-native/Libraries/ReactNative/RendererProxy'),
+  findNodeHandle: jest.fn((node: {props?: {testID?: string}} | null) => {
+    const id = node?.props?.testID;
+    return typeof id === 'string' && id.startsWith('release-notes-') ? id : null;
+  }),
+}));
+
+const a11y = AccessibilityInfo as unknown as {setAccessibilityFocus: jest.Mock};
+
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
 const BASE = 'https://api.example.com';
@@ -77,33 +95,61 @@ const ROSTER = [
 
 const mmkvStore = (jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}).__store;
 
-function note(version: string, phoneBuild: number): ReleaseNote {
-  const item = (id: string, surfaces: ReleaseNote['items'][number]['surfaces']) => ({
-    id,
-    surfaces,
-    copy: {
-      'ko-KR': {title: '제목 ' + id, changed: '바뀐 점 ' + id, tryIt: '써 보기 ' + id},
-      'en-US': {title: 'Title ' + id, changed: 'Changed ' + id, tryIt: 'Try ' + id},
-    },
-  });
+// 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 **진짜 키**를 쓴다(없는 키는 안전 문구로 나간다). 기대하는 글은 같은
+// 사전을 읽는 서비스에서 구해, 글이 바뀌어도 시험이 깨지지 않고 화면이 실제 사전 값을 그리는지만 잰다.
+// 고정값은 v0.1.41 **파일**에 못 박는다: 등록부의 맨 앞(`RELEASE_NOTES[0]`)은 승격 때 새 소식이 더해지면 바뀐다.
+const REAL = RELEASE_NOTE_0_1_41;
+const koText = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+const enText = createMessageService({messageLocale: 'en-US'});
+const realItem = (id: string) => {
+  const found = REAL.items.find(candidate => candidate.id === id);
+  if (!found) throw new Error('v0.1.41 항목이 없다: ' + id);
+  return found;
+};
+
+/** 「그 밖에 바뀐 점」 재료: 공용 주제 이름과, 한 줄로 읽히는 진짜 키들. */
+const OTHERS: readonly ReleaseNoteOtherGroup[] = [
+  {
+    id: 'conversations',
+    title: 'releaseNotes.topic.conversations',
+    lines: [realItem('typing').tryIt, realItem('phoneConversation').tryIt],
+  },
+  {
+    id: 'settings',
+    title: 'releaseNotes.topic.settings',
+    lines: [realItem('settings').tryIt],
+  },
+];
+
+function note(
+  version: string,
+  phoneBuild: number,
+  others: readonly ReleaseNoteOtherGroup[] = [],
+): ReleaseNote {
+  const item = (
+    id: string,
+    surfaces: ReleaseNote['items'][number]['surfaces'],
+  ) => ({...realItem(id), surfaces});
   return {
+    ...REAL,
     version,
     releasedOn: version === '0.1.42' ? '2026-11-05' : '2026-10-31',
     phoneBuild,
     desktopFrom: [version],
-    summary: {'ko-KR': '요약 ' + version, 'en-US': 'Summary ' + version},
+    // a=typing, b=channelNotifications, c=photoViewer(데스크탑 전용), d=composerHeight, e=phoneConversation, f=settings
     items: [
-      item('a', ['phone', 'desktop']),
-      item('b', ['phone']),
-      item('c', ['desktop']),
-      item('d', ['phone']),
-      item('e', ['phone', 'desktop']),
-      item('f', ['phone']),
+      item('typing', ['phone', 'desktop']),
+      item('channelNotifications', ['phone']),
+      item('photoViewer', ['desktop']),
+      item('composerHeight', ['phone']),
+      item('phoneConversation', ['phone', 'desktop']),
+      item('settings', ['phone']),
     ],
+    others,
   };
 }
 const V41 = note('0.1.41', 3058);
-const V42 = note('0.1.42', 3070);
+const V42 = note('0.1.42', 3070, OTHERS);
 
 const koreanController = () =>
   createMobileLocaleController({
@@ -122,10 +168,26 @@ const englishController = () =>
     },
   });
 
-function withLocale(children: React.ReactNode, english = false) {
+// 사전이 아직 없는 언어(ADR-0213 P2 전): 앱은 영어 사전으로 내려간다. 소식 쪽에 따로 고를 언어는 없다.
+const japaneseController = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'ja-JP',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['ja-JP'], timeZone: 'Asia/Tokyo'}),
+    },
+  });
+
+function withLocale(children: React.ReactNode, english: boolean | 'ja' = false) {
+  const createController =
+    english === 'ja'
+      ? japaneseController
+      : english
+        ? englishController
+        : koreanController;
   return (
     <ThemeProvider>
-      <MobileLocaleProvider createController={english ? englishController : koreanController}>
+      <MobileLocaleProvider createController={createController}>
         {children}
       </MobileLocaleProvider>
     </ThemeProvider>
@@ -135,6 +197,7 @@ function withLocale(children: React.ReactNode, english = false) {
 beforeEach(() => {
   mmkvStore.clear();
   resetReleaseNotesSeenForTest();
+  a11y.setAccessibilityFocus.mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -167,18 +230,104 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     const sheet = await screen.findByTestId('release-notes-sheet');
     expect(within(sheet).getByText('업데이트 소식')).toBeTruthy();
     expect(screen.getByTestId('release-notes-sheet-version')).toHaveTextContent('버전 0.1.41 · 2026-10-31');
-    expect(within(sheet).getByText('요약 0.1.41')).toBeTruthy();
-    // 이 화면(폰)에서 보이는 변화만 제목으로: 데스크탑 전용(c)은 없고, 네 줄까지 보이고 나머지는 접힌다.
+    expect(within(sheet).getByText(koText.formatMessage(REAL.summary))).toBeTruthy();
+    // 이 화면(폰)에서 보이는 변화만 제목으로: 데스크탑 전용(c)은 없고, 네 줄까지 불릿으로 보이고 나머지는 「더보기」 뒤에 있다.
     const titles = within(screen.getByTestId('release-notes-sheet-titles'));
-    for (const id of ['a', 'b', 'd', 'e']) expect(titles.getByText('제목 ' + id)).toBeTruthy();
-    expect(titles.queryByText('제목 c')).toBeNull();
-    expect(titles.getByText('그 밖에 1가지')).toBeTruthy();
+    for (const id of ['typing', 'channelNotifications', 'composerHeight', 'phoneConversation']) {
+      expect(titles.getByText(koText.formatMessage(realItem(id).title))).toBeTruthy();
+    }
+    expect(titles.queryByText(koText.formatMessage(realItem('photoViewer').title))).toBeNull();
+    expect(titles.queryByText(koText.formatMessage(realItem('settings').title))).toBeNull();
+    expect(titles.getAllByTestId('release-notes-bullet')).toHaveLength(4);
+    expect(within(screen.getByTestId('release-notes-more')).getByText('더보기')).toBeTruthy();
+    // 「그 밖에 N가지」 문장은 없다(#5298).
+    expect(within(sheet).queryByText(/그 밖에/)).toBeNull();
     expect(lastSeenReleaseNote()).toBeNull();
 
     fireEvent.press(screen.getByTestId('release-notes-close'));
     await waitFor(() => expect(screen.queryByTestId('release-notes-sheet')).toBeNull());
     expect(lastSeenReleaseNote()).toBe('0.1.41');
     expect(mmkvStore.get(NON_SECRET_KEYS.releaseNotesSeen)).toBe('0.1.41');
+  });
+
+  it('「더보기」를 누르면 나머지가 그 자리에서 이어서 펼쳐지고, 단추는 사라지며, VoiceOver 초점은 처음 새 항목으로 간다 (#5298)', async () => {
+    render(withLocale(host('3058')));
+    const sheet = await screen.findByTestId('release-notes-sheet');
+    const rows = () =>
+      within(screen.getByTestId('release-notes-sheet-titles'))
+        .getAllByTestId(/^release-notes-title-/)
+        .map(row => row.props.testID);
+    const first = ['typing', 'channelNotifications', 'composerHeight', 'phoneConversation'].map(
+      id => 'release-notes-title-' + id,
+    );
+    expect(rows()).toEqual(first);
+    // 눌리는 행이고 접힌 상태를 보조기술에 말한다. 낭독이 「더보기, 접힘, 버튼」으로 읽는다.
+    const more = screen.getByTestId('release-notes-more');
+    expect(more.props.accessibilityRole).toBe('button');
+    expect(more.props.accessibilityState).toMatchObject({expanded: false});
+    expect(a11y.setAccessibilityFocus).not.toHaveBeenCalled();
+
+    fireEvent.press(more);
+
+    // 나머지 한 줄(폰에서 보이는 5번째 항목)이 같은 목록 끝에 이어서 선다. 앞 네 줄은 그대로이고 모두 불릿이다.
+    expect(rows()).toEqual([...first, 'release-notes-title-settings']);
+    const titles = within(screen.getByTestId('release-notes-sheet-titles'));
+    expect(titles.getByText(koText.formatMessage(realItem('settings').title))).toBeTruthy();
+    expect(titles.getAllByTestId('release-notes-bullet')).toHaveLength(5);
+    expect(screen.queryByTestId('release-notes-more')).toBeNull();
+    expect(within(sheet).queryByText(/그 밖에/)).toBeNull();
+    // 눌린 단추가 사라져도 초점이 길을 잃지 않는다: 처음 새로 선 항목이 받아 낭독이 그 항목부터 읽는다(네이티브 뷰가 서는 한 틱 뒤).
+    await waitFor(() => expect(a11y.setAccessibilityFocus).toHaveBeenCalledTimes(1));
+    expect(a11y.setAccessibilityFocus).toHaveBeenCalledWith('release-notes-title-settings');
+    // 새 항목도 낭독 한 덩어리다(점이 따로 읽히지 않는다).
+    expect(screen.getByTestId('release-notes-title-settings').props.accessible).toBe(true);
+    // 시트는 그대로 열려 있고 「봤다」는 닫을 때만 남는다.
+    expect(screen.getByTestId('release-notes-sheet')).toBeTruthy();
+    expect(lastSeenReleaseNote()).toBeNull();
+  });
+
+  it('항목이 4개 이하이면 「더보기」는 서지 않고 네 줄이 모두 불릿으로 보인다 (경계 4개, #5298)', async () => {
+    // V41 의 앞 다섯 항목 중 데스크탑 전용(photoViewer)을 빼면 폰에서 보이는 것은 정확히 네 개다.
+    const four: ReleaseNote = {...V41, items: V41.items.slice(0, 5)};
+    render(
+      withLocale(
+        <ReleaseNotesLaunchHost idle build="3058" notes={[four]} onOpenDetails={() => {}} />,
+      ),
+    );
+    const sheet = await screen.findByTestId('release-notes-sheet');
+    const titles = within(screen.getByTestId('release-notes-sheet-titles'));
+    expect(titles.getAllByTestId('release-notes-bullet')).toHaveLength(4);
+    expect(titles.getAllByTestId(/^release-notes-title-/)).toHaveLength(4);
+    expect(screen.queryByTestId('release-notes-more')).toBeNull();
+    expect(within(sheet).queryByText('더보기')).toBeNull();
+    expect(within(sheet).queryByText(/그 밖에/)).toBeNull();
+    expect(a11y.setAccessibilityFocus).not.toHaveBeenCalled();
+  });
+
+  it('영어 UI에서는 「Show more」이고 「N more changes」 문장은 없다 (#5298)', async () => {
+    render(withLocale(host('3058'), true));
+    const sheet = await screen.findByTestId('release-notes-sheet');
+    expect(within(screen.getByTestId('release-notes-more')).getByText('Show more')).toBeTruthy();
+    expect(within(sheet).queryByText(/more change/i)).toBeNull();
+  });
+
+  it('불릿은 글자가 아니라 눈에 보이는 도형이다: 채움이 있는 4pt 원이고 글자 점이 섞이지 않는다 (#5298)', async () => {
+    render(withLocale(host('3058')));
+    await screen.findByTestId('release-notes-sheet');
+    const dots = screen.getAllByTestId('release-notes-bullet');
+    expect(dots).toHaveLength(4);
+    for (const dot of dots) {
+      const style = StyleSheet.flatten(dot.props.style);
+      // 크기 0 이거나 채움이 없는 점은 「있지만 안 보이는」 불릿이다: 값을 잰다.
+      expect(style).toMatchObject({width: 4, height: 4});
+      expect(style.borderRadius).toBeGreaterThanOrEqual(2);
+      expect(style.backgroundColor).toEqual(expect.any(String));
+      expect(String(style.backgroundColor)).not.toMatch(/^(transparent|rgba\(0, ?0, ?0, ?0\))$/);
+    }
+    // 점은 글자(`•`)가 아니다: 줄의 글에는 점 글자가 섞이지 않는다.
+    const row = within(screen.getByTestId('release-notes-title-typing'));
+    expect(row.getByText(koText.formatMessage(realItem('typing').title))).toBeTruthy();
+    expect(row.queryByText('•')).toBeNull();
   });
 
   it('닫은 소식은 같은 빌드에서 다시 안 올라온다 (앱을 다시 켜도)', async () => {
@@ -195,6 +344,11 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     resetReleaseNotesSeenForTest();
     render(withLocale(host('3070')));
     expect(await screen.findByTestId('release-notes-sheet-version')).toHaveTextContent('버전 0.1.42 · 2026-11-05');
+    // 「그 밖에 바뀐 점」은 설정의 버전 상세에만 선다: 올라오는 시트에는 머리글도 한 줄도 없다.
+    const sheet = within(screen.getByTestId('release-notes-sheet'));
+    expect(sheet.queryByText('그 밖에 바뀐 점')).toBeNull();
+    expect(sheet.queryByText(koText.formatMessage(realItem('settings').tryIt))).toBeNull();
+    expect(sheet.queryByText('대화')).toBeNull();
   });
 
   it('한가해질 때까지 기다리고, 빌드를 읽지 못하면 아무것도 하지 않으며, 더 새 소식을 본 기기의 값은 낮아지지 않는다', async () => {
@@ -269,14 +423,15 @@ describe('설정 › 업데이트 소식 장', () => {
     const detail = await screen.findByTestId('release-notes-detail');
     expect(within(detail).getByTestId('release-notes-detail-title')).toHaveTextContent('버전 0.1.42');
     expect(within(detail).getByText('2026-11-05 공개')).toBeTruthy();
-    const item = within(screen.getByTestId('release-notes-item-a'));
-    expect(item.getByText('제목 a')).toBeTruthy();
-    expect(item.getByText('바뀐 점 a')).toBeTruthy();
-    expect(item.getByText('써 보기 a')).toBeTruthy();
-    const surfaces = screen.getByTestId('release-notes-item-a-surfaces');
+    const typing = realItem('typing');
+    const item = within(screen.getByTestId('release-notes-item-typing'));
+    expect(item.getByText(koText.formatMessage(typing.title))).toBeTruthy();
+    expect(item.getByText(koText.formatMessage(typing.changed))).toBeTruthy();
+    expect(item.getByText(koText.formatMessage(typing.tryIt))).toBeTruthy();
+    const surfaces = screen.getByTestId('release-notes-item-typing-surfaces');
     expect(surfaces).toHaveTextContent('폰 · 데스크탑');
     expect(surfaces.props.accessibilityLabel).toBe('보이는 화면: 폰, 데스크탑');
-    expect(screen.getByTestId('release-notes-item-b-surfaces')).toHaveTextContent('폰');
+    expect(screen.getByTestId('release-notes-item-channelNotifications-surfaces')).toHaveTextContent('폰');
     for (const label of ['바뀐 점', '이렇게 써 보세요']) {
       expect(item.getByText(label).props.accessibilityRole).toBe('header');
     }
@@ -304,19 +459,94 @@ describe('설정 › 업데이트 소식 장', () => {
   });
 
   it('영어 UI에서는 같은 소식의 영어 글과 영어 문구가 선다 (실제 v0.1.41 소식)', async () => {
-    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" />, true));
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" notes={[REAL]} />, true));
     await screen.findByTestId('settings-release-notes-page');
     expect(screen.getByText('What\'s new')).toBeTruthy();
     const row = screen.getByTestId('release-notes-row-0.1.41');
     expect(within(row).getByText('Version 0.1.41')).toBeTruthy();
     expect(within(row).getByText('Your version')).toBeTruthy();
-    expect(within(row).getByText(RELEASE_NOTES[0].summary['en-US'])).toBeTruthy();
+    expect(within(row).getByText(enText.formatMessage(REAL.summary))).toBeTruthy();
     fireEvent.press(row);
-    const first = RELEASE_NOTES[0].items[0];
+    const first = REAL.items[0];
     const card = within(await screen.findByTestId('release-notes-item-' + first.id));
-    expect(card.getByText(first.copy['en-US'].title)).toBeTruthy();
+    expect(card.getByText(enText.formatMessage(first.title))).toBeTruthy();
     expect(card.getByText('What changed')).toBeTruthy();
     expect(card.getByText('Try it like this')).toBeTruthy();
+  });
+
+  it('버전 상세에는 핵심 카드 뒤에 「그 밖에 바뀐 점」이 주제별 한 줄로 서고, 목록에는 없다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V41, V42]} />));
+    await screen.findByTestId('settings-release-notes-page');
+    // 목록에는 없다.
+    expect(screen.queryByTestId('release-notes-others')).toBeNull();
+    fireEvent.press(screen.getByTestId('release-notes-row-0.1.42'));
+    const detail = within(await screen.findByTestId('release-notes-detail'));
+
+    const others = within(detail.getByTestId('release-notes-others'));
+    expect(others.getByText('그 밖에 바뀐 점').props.accessibilityRole).toBe('header');
+    // 핵심 카드들 뒤에 선다(문서 순서).
+    const html = JSON.stringify(screen.toJSON());
+    expect(html.indexOf('release-notes-item-settings')).toBeGreaterThan(-1);
+    expect(html.indexOf('release-notes-item-settings')).toBeLessThan(html.indexOf('release-notes-others'));
+    // 주제는 소식이 적은 순서이고, 주제 이름 아래에 한 줄씩이다.
+    const order = ['conversations', 'settings'].map(id => html.indexOf('release-notes-other-' + id + '"'));
+    expect(order[0]).toBeGreaterThan(-1);
+    expect(order[0]).toBeLessThan(order[1]);
+    const conversations = within(screen.getByTestId('release-notes-other-conversations'));
+    expect(conversations.getByText('대화')).toBeTruthy();
+    const lines = [realItem('typing').tryIt, realItem('phoneConversation').tryIt].map(key => koText.formatMessage(key));
+    for (const line of lines) expect(conversations.getByText(line)).toBeTruthy();
+    // 한 줄들은 소식이 적은 순서다. 같은 글이 위 핵심 카드에도 있어서(진짜 키를 쓰는 재료) 문서 전체가 아니라 이 주제의 카드
+    // 안에서 잰다: 카드의 글자는 이 주제의 줄들뿐이라 뒤집히면 이어 붙인 글이 달라진다.
+    expect(screen.getByTestId('release-notes-other-conversations-card')).toHaveTextContent(lines.join(''));
+    const settings = within(screen.getByTestId('release-notes-other-settings'));
+    expect(settings.getByText('설정')).toBeTruthy();
+    expect(settings.getByText(koText.formatMessage(realItem('settings').tryIt))).toBeTruthy();
+
+    // 묶음마다 줄을 불릿으로 구분한다(#5298): 줄마다 자기 불릿 한 개가 서고(점은 글자가 아니라 도형이라 위의 카드 글자에 섞이지
+    // 않는다), 줄의 글은 그 불릿 줄 안에 있다.
+    const lineTestId = (group: string, index: number) => 'release-notes-other-' + group + '-line-' + index;
+    [realItem('typing').tryIt, realItem('phoneConversation').tryIt].forEach((key, index) => {
+      const row = within(screen.getByTestId(lineTestId('conversations', index)));
+      expect(row.getAllByTestId('release-notes-bullet')).toHaveLength(1);
+      expect(row.getByText(koText.formatMessage(key))).toBeTruthy();
+    });
+    expect(within(screen.getByTestId(lineTestId('settings', 0))).getAllByTestId('release-notes-bullet')).toHaveLength(1);
+    expect(conversations.getAllByTestId('release-notes-bullet')).toHaveLength(2);
+    expect(settings.getAllByTestId('release-notes-bullet')).toHaveLength(1);
+    // 핵심 항목(제목·바뀐 점·써 보세요)의 모양은 그대로다: 불릿이 없다.
+    expect(within(screen.getByTestId('release-notes-item-typing')).queryAllByTestId('release-notes-bullet')).toHaveLength(0);
+  });
+
+  it('그 밖에 바뀐 점이 비어 있는 소식에는 머리글도 칸도 서지 않는다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V41, V42]} />));
+    fireEvent.press(await screen.findByTestId('release-notes-row-0.1.41'));
+    await screen.findByTestId('release-notes-detail');
+    expect(screen.queryByTestId('release-notes-others')).toBeNull();
+    expect(screen.queryByText('그 밖에 바뀐 점')).toBeNull();
+  });
+
+  it('영어 UI에서는 그 밖에 바뀐 점의 머리글·주제 이름도 영어다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V42]} />, true));
+    fireEvent.press(await screen.findByTestId('release-notes-row-0.1.42'));
+    const others = within(await screen.findByTestId('release-notes-others'));
+    expect(others.getByText('Other changes')).toBeTruthy();
+    expect(within(screen.getByTestId('release-notes-other-conversations')).getByText('Conversations')).toBeTruthy();
+  });
+
+  it('사전이 아직 없는 언어(일본어)는 사전의 영어 대체를 그대로 탄다: 소식 글도 한국어가 아니라 영어다 (ADR-0213)', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" notes={[REAL]} />, 'ja'));
+    await screen.findByTestId('settings-release-notes-page');
+    const row = within(screen.getByTestId('release-notes-row-0.1.41'));
+    expect(row.getByText('Version 0.1.41')).toBeTruthy();
+    expect(row.getByText(enText.formatMessage(REAL.summary))).toBeTruthy();
+    expect(row.queryByText(koText.formatMessage(REAL.summary))).toBeNull();
+    fireEvent.press(screen.getByTestId('release-notes-row-0.1.41'));
+    const first = REAL.items[0];
+    const card = within(await screen.findByTestId('release-notes-item-' + first.id));
+    expect(card.getByText(enText.formatMessage(first.title))).toBeTruthy();
+    expect(card.getByText(enText.formatMessage(first.changed))).toBeTruthy();
+    expect(card.queryByText(koText.formatMessage(first.title))).toBeNull();
   });
 });
 

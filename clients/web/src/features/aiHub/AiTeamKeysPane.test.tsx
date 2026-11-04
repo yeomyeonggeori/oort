@@ -54,6 +54,18 @@ vi.mock("@momo/core/features/settings/defaultAi", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/defaultAi")>();
   return { ...actual, fetchProviderDefaultAi: vi.fn(), putProviderDefaultAi: vi.fn() };
 });
+// 「사용 한도」 칸(#5026): 기본은 한도 읽기를 모르는 서버처럼 답해 칸이 서지 않게 한다(실제 네트워크로 가면 읽기 실패
+// 안내(role="alert")가 이 화면의 다른 경고보다 앞에 서서 단정을 가로챈다). 칸을 보는 시험만 답을 바꾼다. `vi.fn()` 이 아니라
+// 평범한 함수인 까닭: `resetAllMocks` 가 구현을 비우면 `undefined` 가 돌아와 칸이 오류로 읽는다.
+const limitsReply = vi.hoisted(() => ({ value: {} as unknown }));
+vi.mock("@momo/core/features/settings/teamAiLimits", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/settings/teamAiLimits")>();
+  return {
+    ...actual,
+    fetchTeamAiLimitsBag: () =>
+      limitsReply.value instanceof Error ? Promise.reject(limitsReply.value) : Promise.resolve(limitsReply.value),
+  };
+});
 
 vi.mock("@momo/core/features/ai/personalKeys", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/ai/personalKeys")>();
@@ -178,6 +190,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  limitsReply.value = {};
   vi.mocked(fetchRoster).mockReset();
   vi.mocked(fetchRoster).mockResolvedValue([human(ME, "곽성재", "member"), human(BOSS, "박운영", "owner"), AGENT_MEMBER]);
   vi.mocked(listChannels).mockReset();
@@ -315,6 +328,48 @@ describe("기본 AI 표: 평문 기능 이름, 누구를 위한지, 고르지 �
     await until("ai-link-empty");
     await rtlWaitFor(() => expect(q("ai-default-teamAgent-unset")?.textContent).toContain("모의 응답"));
     expect(q("ai-default-summary-unset")?.textContent).toContain("요약은 쉬고");
+  });
+});
+
+// 「사용 한도」 칸(#5026)은 이 구획 안에 서고, 소유자·관리자(서버가 한도 읽기에 403 을 주지 않는 사람)에게만 보인다. 칸 자체의
+// 동작은 `TeamAiLimitsSection.test.tsx` 가 잰다. 여기서는 구획에 **연결돼 있는가**만 잰다.
+describe("사용 한도 칸의 연결", () => {
+  const LIMITS_BAG = {
+    team_ai_limits_status: {
+      limits: { dailyTokens: null, dailySearches: null, monthlyUsd: null },
+      effective: { dailyTokens: null, dailySearches: null },
+      operatorCeiling: { dailyTokens: null, dailySearches: null, helperOff: false, searchOff: false },
+      usage: {
+        todayTokens: 0,
+        todaySearches: 0,
+        monthCostMicroUsd: 0,
+        monthRuns: 0,
+        monthUnpricedRuns: 0,
+        monthEstimatedRuns: 0,
+      },
+      monthlyUsdAvailable: false,
+      monthlyUsdUnavailableReason: "no_usage_yet",
+      dayResetsAtMs: 1_790_000_000_000,
+      monthResetsAtMs: 1_792_000_000_000,
+    },
+  };
+
+  it("운영자에게는 기본 AI 표 다음에 선다", async () => {
+    limitsReply.value = LIMITS_BAG;
+    mount();
+    const limits = await until("team-ai-limits");
+    const defaults = await until("ai-defaults");
+    expect(defaults.compareDocumentPosition(limits) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("비운영자에게는(읽기 403) 칸도 읽기 실패 안내도 없다", async () => {
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    limitsReply.value = new ApiError(403, "forbidden");
+    mount();
+    await until("operator-notice");
+    await until("ai-default-teamAgent");
+    expect(q("team-ai-limits")).toBeNull();
+    expect(q("team-ai-limits-load-error")).toBeNull();
   });
 });
 

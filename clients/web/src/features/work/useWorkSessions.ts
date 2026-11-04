@@ -204,7 +204,13 @@ export function sessionThreadKey(
 export function useSessionEvents(
   workspaceId: string,
   session: WorkSession | null,
-  live: readonly WorkSessionEvent[]
+  live: readonly WorkSessionEvent[],
+  /**
+   * `staleTimeMs`: 이 관측자가 읽은 스레드를 얼마나 새것으로 칠지. 대화 머리의 계획 독(#4578)은 채널에 들어갈
+   * 때마다 세션 스레드(최대 5×200행)를 다시 읽지 않으려고 넘긴다. 같은 키의 다른 관측자(세션 상세)는
+   * 자기 값을 그대로 쓴다.
+   */
+  options?: { staleTimeMs?: number }
 ) {
   const query = useQuery({
     queryKey: sessionThreadKey(
@@ -219,6 +225,7 @@ export function useSessionEvents(
         session?.rootMessageId ?? ""
       ),
     enabled: session !== null,
+    ...(options?.staleTimeMs === undefined ? {} : { staleTime: options.staleTimeMs }),
   });
 
   const events = useMemo(

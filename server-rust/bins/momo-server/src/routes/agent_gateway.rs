@@ -251,6 +251,7 @@ pub async fn event(
         detail,
         text_delta,
         stage: None,
+        report: momo_agent::ActivityReport::default(),
         event_id,
         actor_member_id,
         via_token_id,
@@ -313,6 +314,10 @@ pub(crate) struct GatewayEventInput {
     /// ([`validated_gateway_stage`]). Only the Agent Port tool carries one; the
     /// REST callback is not extended (`None`).
     pub stage: Option<String>,
+    /// ADR-0200 증보 7 — the agent's activities and plan, already judged
+    /// ([`momo_agent::ActivityReport::validate`]). Only the Agent Port tool carries one; the
+    /// REST callback is not extended (`ActivityReport::default()`, nothing to write).
+    pub report: momo_agent::ActivityReport,
     pub event_id: Uuid,
     /// `None` only for the deprecated process secret, which names no member.
     pub actor_member_id: Option<Uuid>,
@@ -343,6 +348,7 @@ pub(crate) async fn record_gateway_event_in_tx(
         detail,
         text_delta,
         stage,
+        report,
         event_id,
         actor_member_id,
         via_token_id,
@@ -472,6 +478,42 @@ pub(crate) async fn record_gateway_event_in_tx(
         }
     }
 
+    // ADR-0200 증보 7 — the agent's activities and plan, in the SAME transaction as the
+    // stage, the status and the frame. Hosted (Agent Port) runs only, and a settled run (the
+    // `cancelled` acknowledgement) takes none, like the stage above. This is not
+    // `record_stage_in_tx`: no `output.stages` entry and no step is spent, so a report every
+    // minute cannot fill `max_steps` (7-A14).
+    let mut reported = false;
+    if hosted_lease && !run.status.is_terminal() && !report.is_empty() {
+        momo_agent::record_run_activity_in_tx(
+            conn,
+            workspace_id,
+            run_id,
+            run.agent_member_id,
+            &report,
+        )
+        .await?;
+        reported = true;
+    }
+
+    let mut audit_detail = json!({
+        "status": status,
+        "detail": detail,
+        "event_id": event_id.to_string(),
+        "text_delta_bytes": text_delta.as_ref().map(|value| value.len()),
+        "run_id": run_id.to_string(),
+        "agent_member_id": run.agent_member_id.to_string(),
+        "source": "hermes_gateway",
+    });
+    // Counts only, never the text (7-2): the audit log is not a second copy of a label.
+    if reported {
+        if let Some(object) = audit_detail.as_object_mut() {
+            object.insert("activity_count".into(), json!(report.activity_count()));
+            if let Some(steps) = report.plan_steps() {
+                object.insert("plan_steps".into(), json!(steps));
+            }
+        }
+    }
     write_audit(
         conn,
         &AuditEntry::new(workspace_id, EVENT_AUDIT_ACTION)
@@ -479,18 +521,7 @@ pub(crate) async fn record_gateway_event_in_tx(
             .target("agent_run", run_id)
             .via_token(via_token_id)
             .run(run_id)
-            .with_schema(
-                "momo.agent_gateway.event.v0",
-                json!({
-                    "status": status,
-                    "detail": detail,
-                    "event_id": event_id.to_string(),
-                    "text_delta_bytes": text_delta.as_ref().map(|value| value.len()),
-                    "run_id": run_id.to_string(),
-                    "agent_member_id": run.agent_member_id.to_string(),
-                    "source": "hermes_gateway",
-                }),
-            ),
+            .with_schema("momo.agent_gateway.event.v0", audit_detail),
     )
     .await?;
     Ok(Ok(()))
@@ -1050,6 +1081,10 @@ pub(crate) enum ReportRejection {
     ArtifactsCount,
     /// ADR-0162 증보 5 C1/C2 — a result-contract field or cross rule.
     ArtifactsContract,
+    /// ADR-0200 증보 7 — an `oort_run_event` `activities` item broke a text or closed-word rule.
+    Activities,
+    /// ADR-0200 증보 7 — an `oort_run_event` `plan` step broke a text or closed-word rule.
+    Plan,
 }
 
 impl ReportRejection {
@@ -1061,6 +1096,8 @@ impl ReportRejection {
             Self::ArtifactsBranch => "artifacts_branch_invalid",
             Self::ArtifactsCount => "artifacts_count_invalid",
             Self::ArtifactsContract => "artifacts_contract_invalid",
+            Self::Activities => "activities_invalid",
+            Self::Plan => "plan_invalid",
         }
     }
 }
@@ -1676,11 +1713,37 @@ pub(crate) async fn report_standing_in_tx(
     Ok(ReportStanding::Live)
 }
 
+/// The closed `{field, rule}` a structured refusal is audited with: both are `'static`
+/// strings from a closed list, so no caller text can reach the audit row through them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReportedViolation {
+    pub field: &'static str,
+    pub rule: &'static str,
+}
+
+impl From<ArtifactViolation> for ReportedViolation {
+    fn from(violation: ArtifactViolation) -> Self {
+        Self {
+            field: violation.field,
+            rule: violation.rule.as_str(),
+        }
+    }
+}
+
+impl From<momo_mcp::RunEventViolation> for ReportedViolation {
+    fn from(violation: momo_mcp::RunEventViolation) -> Self {
+        Self {
+            field: violation.field,
+            rule: violation.rule.as_str(),
+        }
+    }
+}
+
 /// The audit row a refused report leaves (D15): the run, the tool and a reason
 /// code — no text from the report.
 ///
-/// ADR-0162 증보 5 C3: a refused `artifacts` also records the closed `field` and
-/// `rule` it broke and which refusal this is for the run (`attempt`, 1-based),
+/// ADR-0162 증보 5 C3 (and ADR-0200 증보 7 for `activities`/`plan`): a refused structured
+/// report also records the closed `field` and `rule` it broke and which refusal this is for the run (`attempt`, 1-based),
 /// so an operator can see an agent that retries the same mistake. Still no
 /// value. The server does not stop a retry by count — the lease and the rate
 /// limit bound it; the routine's "at most 2 corrections" rule is the agent's.
@@ -1695,7 +1758,7 @@ pub(crate) async fn write_report_rejected_audit(
     via_token_id: Option<Uuid>,
     tool: &'static str,
     reason: ReportRejection,
-    violation: Option<ArtifactViolation>,
+    violation: Option<ReportedViolation>,
 ) -> Result<(), momo_db::DbError> {
     let mut detail = json!({
         "run_id": run_id.to_string(),
@@ -1722,7 +1785,7 @@ pub(crate) async fn write_report_rejected_audit(
         .await?;
         if let Some(object) = detail.as_object_mut() {
             object.insert("field".into(), json!(violation.field));
-            object.insert("rule".into(), json!(violation.rule.as_str()));
+            object.insert("rule".into(), json!(violation.rule));
             object.insert("attempt".into(), json!(earlier + 1));
         }
     }

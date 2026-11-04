@@ -25,7 +25,10 @@ pub enum PushError {
     /// never `500` (review #422 L1). Also the outcome when this registration
     /// lost a race for a *new* `deviceId`: a concurrent registration of the same
     /// id in the same workspace committed between its first look and its insert
-    /// (#3978).
+    /// (#3978). And the outcome when it lost a **lock** race — waited past its
+    /// lock budget (`55P03`) or was chosen by the deadlock detector (`40P01`);
+    /// nothing was committed, and this is the answer the phone already retries
+    /// ([`lock_race_is_a_conflict`], #5091 review M-1).
     #[error("concurrent registration for this device — retry")]
     RegistrationConflict,
 }
@@ -48,6 +51,48 @@ pub(crate) fn classify_registration_write(error: sqlx::Error) -> PushError {
         }
     }
     PushError::from(error)
+}
+
+/// `lock_not_available`: a statement waited longer than the transaction's `lock_timeout`.
+const SQLSTATE_LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// `deadlock_detected`: the detector chose this transaction as the victim.
+const SQLSTATE_DEADLOCK_DETECTED: &str = "40P01";
+
+/// A registration that **lost a lock race** — it waited past the transaction's `lock_timeout`
+/// (`55P03`) or the deadlock detector chose it (`40P01`) — is the retryable
+/// [`PushError::RegistrationConflict`] (409), not a 500: the transaction rolled back, nothing was
+/// written, and the phone already asks again on exactly that answer. Anything else is returned
+/// as it came.
+///
+/// Why a registration can lose one at all: a member's registrations queue on one advisory lock
+/// (`device::MEMBER_REGISTRATION_LOCK_SQL`), and a queued request holds its pool connection while
+/// it waits. The wait is bounded (`device::REGISTRATION_LOCK_WAIT_SECS`) so that one member's burst
+/// cannot hold the connection pool every other request shares (#5091 review M-1). A deadlock is
+/// the signal that the lock order of `register_device` regressed, so it leaves a warning.
+pub(crate) fn lock_race_is_a_conflict(error: PushError) -> PushError {
+    let sqlstate = match &error {
+        PushError::Db(DbError::Sqlx(sqlx::Error::Database(db))) => db
+            .code()
+            .filter(|code| {
+                matches!(
+                    code.as_ref(),
+                    SQLSTATE_LOCK_NOT_AVAILABLE | SQLSTATE_DEADLOCK_DETECTED
+                )
+            })
+            .map(|code| code.into_owned()),
+        _ => None,
+    };
+    match sqlstate {
+        Some(sqlstate) => {
+            tracing::warn!(
+                %sqlstate,
+                "a device registration lost a lock race; answering 409 (the phone retries)"
+            );
+            PushError::RegistrationConflict
+        }
+        None => error,
+    }
 }
 
 /// Caller-fault outcomes. These are decided **before** any write, so they
@@ -125,4 +170,85 @@ pub enum DeviceInputError {
     Topic,
     #[error("appBuild must be at most 64 chars")]
     AppBuild,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    /// A database error that carries only an SQLSTATE — enough to drive the classification
+    /// without a database.
+    #[derive(Debug)]
+    struct Sqlstate(&'static str);
+
+    impl std::fmt::Display for Sqlstate {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "stub database error {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Sqlstate {}
+
+    impl sqlx::error::DatabaseError for Sqlstate {
+        fn message(&self) -> &str {
+            "stub"
+        }
+        fn code(&self) -> Option<Cow<'_, str>> {
+            Some(Cow::Borrowed(self.0))
+        }
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn database_error(sqlstate: &'static str) -> PushError {
+        PushError::Db(DbError::Sqlx(sqlx::Error::Database(Box::new(Sqlstate(
+            sqlstate,
+        )))))
+    }
+
+    /// #5091 review M-1: a registration that waited past its lock budget (`55P03`) or was the
+    /// deadlock victim (`40P01`) is the retryable 409. Any other database failure — a permission
+    /// error, a serialization failure, a plain connection error — stays what it was, a 500: a
+    /// mapping that swallowed every error into "retry" would hide real faults from the phone's retry
+    /// policy and from the operator.
+    #[test]
+    fn a_lock_race_is_a_retryable_conflict_and_nothing_else_is() {
+        for sqlstate in ["55P03", "40P01"] {
+            assert!(
+                matches!(
+                    lock_race_is_a_conflict(database_error(sqlstate)),
+                    PushError::RegistrationConflict
+                ),
+                "{sqlstate} must become the retryable 409"
+            );
+        }
+        for sqlstate in ["42501", "40001", "23503", "57014", "08006"] {
+            assert!(
+                matches!(
+                    lock_race_is_a_conflict(database_error(sqlstate)),
+                    PushError::Db(DbError::Sqlx(sqlx::Error::Database(_)))
+                ),
+                "{sqlstate} is a real failure and must stay one"
+            );
+        }
+        assert!(matches!(
+            lock_race_is_a_conflict(PushError::Db(DbError::Sqlx(sqlx::Error::RowNotFound))),
+            PushError::Db(DbError::Sqlx(sqlx::Error::RowNotFound))
+        ));
+        assert!(matches!(
+            lock_race_is_a_conflict(PushError::RegistrationConflict),
+            PushError::RegistrationConflict
+        ));
+    }
 }

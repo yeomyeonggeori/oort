@@ -103,11 +103,13 @@ pub use github_app::{
     GITHUB_DEFAULT_PERMISSIONS,
 };
 pub use invite::{
-    clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
-    normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
-    regenerate_invite, revoke_invite, validated_expires_at_ms, validated_max_uses, CreatedInvite,
-    InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption, InviteSpecInvalid,
-    RedeemedInvite, RevokedInvite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
+    clamp_invite_list_limit, create_invite, invite_role_paused, list_invite_redemptions,
+    list_invites, normalized_invite_role, normalized_revoke_reason, read_invite,
+    redeem_invite_for_member, regenerate_invite, revoke_invite, validated_expires_at_ms,
+    validated_max_uses, CreatedInvite, InviteCode, InviteMutationInvalid, InviteRedeemInvalid,
+    InviteRedemption, InviteSpecInvalid, RedeemedInvite, RevokedInvite, GUEST_INVITES_ENABLED,
+    GUEST_INVITES_PAUSED_CODE, GUEST_INVITES_PAUSED_MESSAGE, INVITE_CREATED_AUDIT_ACTION,
+    INVITE_CREATED_AUDIT_SCHEMA,
 };
 pub use join::{
     fallback_handle, is_handle_banned_in_tx, is_handle_unique_violation, is_identity_banned_in_tx,
@@ -167,8 +169,11 @@ pub use workspace::{
 };
 pub use workspace_settings::{
     merge_workspace_settings, project_role_labels, read_workspace_settings,
-    read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
-    ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
-    MAX_ROLE_LABEL_BYTES, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
-    ROLE_LABEL_KEYS,
+    read_workspace_settings_for_update, valid_limit_usd, write_workspace_settings,
+    WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS,
+    MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_ROLE_LABEL_BYTES, MAX_TEAM_AI_LIMIT_COUNT,
+    MAX_TEAM_AI_LIMIT_USD, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
+    MIN_TEAM_AI_LIMIT_USD, ROLE_LABEL_KEYS, TEAM_AI_LIMITS_SETTING, TEAM_AI_LIMIT_DAILY_SEARCHES,
+    TEAM_AI_LIMIT_DAILY_TOKENS, TEAM_AI_LIMIT_FIELDS, TEAM_AI_LIMIT_MONTHLY_USD,
+    TEAM_AI_ROLES_KEYS, TEAM_AI_ROLES_SETTING,
 };

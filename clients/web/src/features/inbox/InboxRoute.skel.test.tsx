@@ -6,7 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
+import { NetworkError } from "@momo/core/lib/http";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { InboxRoute } from "./InboxRoute";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -71,12 +75,16 @@ const state = {
   entries: [] as MailboxEntry[],
   isLoading: false,
   error: false,
+  /** 서버 경로가 답하지 못한 그 오류 객체(원인 문장을 정한다). 구 서버 경로는 null (#5242). */
+  failure: null as unknown,
+  moreError: false,
   source: "composed" as "composed" | "server" | "probing",
   serverUnreadCount: null as number | null,
   hasMore: false,
   ledgerAnswered: false,
 };
 const fetchMore = vi.fn();
+const refetchMailbox = vi.fn();
 const markAllRead = vi.fn((_filter: string) =>
   Promise.resolve({ marked: 2, unreadCount: 0 })
 );
@@ -91,7 +99,8 @@ vi.mock("./useMailbox", () => ({
     serverUnreadCount: state.serverUnreadCount,
     hasMore: state.hasMore,
     isFetchingMore: false,
-    moreError: false,
+    moreError: state.moreError,
+    failure: state.failure,
     fetchMore,
     entries: state.entries,
     isLoading: state.isLoading,
@@ -100,7 +109,7 @@ vi.mock("./useMailbox", () => ({
     ledgerAnswered: state.ledgerAnswered,
     capped: false,
     updatedAtMs: NOW,
-    refetch: () => undefined,
+    refetch: refetchMailbox,
   }),
   useMailboxReadActions: () => ({ markRead, markUnread, markAllRead }),
 }));
@@ -163,12 +172,13 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(path = "/inbox"): Promise<HTMLElement> {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). 켜면 뿌리가 달라지므로 다시 그리는 시험은 쓰지 않는다. */
+async function mount(path = "/inbox", options: { korean?: boolean } = {}): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const tree: ReactElement = createElement(
+  const page = createElement(
     SessionProvider,
     { value: sessionValue() },
     createElement(
@@ -177,6 +187,7 @@ async function mount(path = "/inbox"): Promise<HTMLElement> {
       createElement(InboxRoute)
     )
   );
+  const tree: ReactElement = options.korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page;
   await act(async () => {
     mountedRoot?.render(tree);
     await Promise.resolve();
@@ -184,7 +195,9 @@ async function mount(path = "/inbox"): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -196,6 +209,9 @@ beforeEach(() => {
   ];
   state.isLoading = false;
   state.error = false;
+  state.failure = null;
+  state.moreError = false;
+  refetchMailbox.mockClear();
   state.source = "composed";
   state.serverUnreadCount = null;
   state.hasMore = false;
@@ -455,7 +471,7 @@ describe("InboxRoute mailbox: 처리할 일 탭은 원장의 실패와 로딩을
 
   it("원장이 실패하면 투영에 줄이 있어도 「없어요」 대신 오류와 다시 시도를 말한다", async () => {
     state.error = true;
-    const host = await mount("/inbox?filter=task");
+    const host = await mount("/inbox?filter=task", { korean: true });
     expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
     expect(host.querySelector('[data-testid="inbox-error"] button')?.textContent).toBe("다시 시도");
@@ -582,5 +598,61 @@ describe("InboxRoute mailbox: 원장이 뺀 승인은 선택된 채 남지 않�
     await ledgerDrops("mention:m1");
     expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("mention:m1");
     expect(keys(host)).toContain("mention:m1");
+  });
+});
+
+// #5242: 인박스를 불러오지 못했을 때. 옛 「인박스를 불러오지 못했어요.」 배너는 원인 상자고, 「더 보기」가 실패하면 받아 둔 항목은
+// 그대로 둔 채 그 아래 한 줄만 원인과 함께 말한다.
+describe("InboxRoute: 불러오기 실패 (#5242)", () => {
+  // 지키는 것: 목록이 비면 상자(제목 + 이유 + 다시 시도). 이유는 훅이 준 오류 객체의 원인을 따라가고, 다시 시도가 목록을 다시 읽는다.
+  it("읽지 못하면 원인 상자가 서고 이유가 원인을 따라가며 다시 시도가 목록을 다시 읽는다", async () => {
+    const cases: [unknown, boolean, string, string][] = [
+      [new NetworkError("unreachable", 15_000), false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
+      [new NetworkError("unreachable", 15_000), true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [null, true, "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [failure, online, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);
+      state.entries = [];
+      state.error = true;
+      state.failure = failure;
+      refetchMailbox.mockClear();
+      const host = await mount("/inbox", { korean: true });
+      const box = host.querySelector<HTMLElement>('[data-testid="inbox-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box?.textContent).toContain("인박스를 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      expect(box?.textContent).not.toMatch(/\d{3}/);
+      await act(async () => {
+        box?.querySelector("button")?.click();
+        await Promise.resolve();
+      });
+      expect(refetchMailbox).toHaveBeenCalledTimes(1);
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      mountedRoot = null;
+      mountedHost = null;
+      vi.restoreAllMocks();
+    }
+  });
+
+  // 지키는 것: 다음 쪽만 실패하면 받아 둔 항목은 그대로 있고 상자는 없다. 한 줄이 원인과 함께 「이미 받은 항목은 그대로」라고 말한다.
+  it("더 보기가 실패하면 받아 둔 항목은 그대로 두고 아래 한 줄이 원인과 함께 말한다", async () => {
+    vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+    state.source = "server";
+    state.hasMore = true;
+    state.moreError = true;
+    state.failure = new NetworkError("unreachable", 15_000);
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelector('[data-testid="inbox-error"]')).toBeNull();
+    expect(host.querySelectorAll('[data-testid="mailbox-row"]').length).toBeGreaterThan(0);
+    const line = host.querySelector<HTMLElement>('[data-testid="inbox-more-error"]');
+    expect(line?.textContent).toBe(
+      "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    );
+    expect(host.querySelector('[data-testid="inbox-load-more"]')?.textContent).toBe("다시 시도");
+    vi.restoreAllMocks();
   });
 });

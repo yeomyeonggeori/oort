@@ -416,6 +416,9 @@ describe('R2 H-2 SAS offline and unreachable states', () => {
       netInfoMock.__emit({isConnected: false, isInternetReachable: false});
     });
     expect(screen.getByTestId('connect-offline')).toBeTruthy();
+    // 안내 상자의 글은 사전에서 온다(#5262): 제목은 연결 카드와 같은 「오프라인이에요」, 설명은 로그인 전 화면의 문장이다.
+    expect(screen.getByTestId('connect-offline')).toHaveTextContent('오프라인이에요', {exact: false});
+    expect(screen.getByTestId('connect-offline')).toHaveTextContent('네트워크가 연결되면 다시 시도해 주세요.', {exact: false});
   });
 
   it('keeps polling after one unreachable probe while online and activates on the next', async () => {

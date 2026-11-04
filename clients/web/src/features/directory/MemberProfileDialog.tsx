@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { MembershipRole, RosterMember } from "@momo/core/lib/api";
 import {
   canChangeWorkspaceRole,
+  canIssuePasswordReset,
   dmAvailability,
   ROLE_KEYS,
   roleKeyLabel,
@@ -12,6 +13,7 @@ import {
 import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
 import { ListboxSelect } from "@/design/ui/listbox-select";
@@ -22,6 +24,9 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
@@ -31,6 +36,13 @@ import {
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
+import { useMessages } from "@/i18n/useMessages";
+import { PasswordResetStage } from "@/features/recovery/PasswordResetStage";
+import {
+  PasswordResetPhase,
+  useIssuePasswordReset,
+  type IssuePasswordResetHandle,
+} from "@/features/recovery/useIssuePasswordReset";
 import { useChangeWorkspaceRole } from "./useChangeWorkspaceRole";
 import { useOpenDm } from "./useOpenDm";
 import {
@@ -38,6 +50,9 @@ import {
   type OpenMemberProfile,
 } from "./memberProfileContext";
 import { memberProfileViewState } from "./memberProfileModel";
+
+// 오프라인 사유를 말하는 배너 줄의 id. 잠긴 단추들이 이 줄을 `aria-describedby`로 가리킨다(#1559).
+const OFFLINE_REASON_ID = "member-profile-offline-reason";
 
 interface MemberProfileTarget {
   memberId: string;
@@ -141,12 +156,15 @@ function ReadyProfile({
   member,
   directory,
   close,
+  reset,
 }: {
   member: RosterMember;
   directory: Directory;
   close: () => void;
+  reset: IssuePasswordResetHandle;
 }) {
-  const { session, connStatus, workspaceId } = useSession();
+  const { session, workspaceId } = useSession();
+  const messages = useMessages();
   const labels = useRoleLabels(workspaceId);
   const { pendingMemberId, error, openDm } = useOpenDm();
   const roleChange = useChangeWorkspaceRole();
@@ -161,6 +179,14 @@ function ReadyProfile({
     session.member.id,
     member
   );
+  // 「재설정 링크 만들기」(ADR-0215 D6, #4603). 서버 사다리의 거울이고 권위는 서버다.
+  const canIssueReset = canIssuePasswordReset(viewer?.role, session.member.id, member);
+  const resetOpenRef = useRef<HTMLButtonElement | null>(null);
+  // 확인 단계를 취소하면 초점이 단계를 연 단추로 돌아온다(단추가 다시 그려진 뒤에).
+  useEffect(() => {
+    if (reset.cancelTick === 0) return;
+    resetOpenRef.current?.focus();
+  }, [reset.cancelTick]);
   const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";
   const { visible: custom } = useCustomStatusView(member);
@@ -169,7 +195,7 @@ function ReadyProfile({
   const presence = useHumanPresenceDot(member);
   const declared = presence?.label ?? null;
   const availability = dmAvailability(member, session.member.id);
-  const offline = connStatus === "disconnected";
+  const offline = useOffline();
   const opening = pendingMemberId === member.id;
 
   async function startDm() {
@@ -194,6 +220,16 @@ function ReadyProfile({
           testId="member-profile-offline"
         />
       )}
+      {reset.phase !== PasswordResetPhase.Idle ? (
+        <PasswordResetStage
+          member={member}
+          reset={reset}
+          offline={offline}
+          offlineReasonId={offline ? OFFLINE_REASON_ID : undefined}
+          close={close}
+        />
+      ) : (
+        <>
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
         <div className="flex items-center gap-3">
           {member.kind === "agent" ? (
@@ -245,6 +281,26 @@ function ReadyProfile({
               ) : (
                 role
               )}
+            </Fact>
+          )}
+          {canIssueReset && (
+            <Fact term={messages.formatMessage("recovery.issue.factTerm")}>
+              <div className="flex flex-col items-start gap-2">
+                <Button
+                  ref={resetOpenRef}
+                  type="button"
+                  variant="outline"
+                  disabled={offline}
+                  aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+                  data-testid="member-profile-reset-open"
+                  onClick={reset.begin}
+                >
+                  {messages.formatMessage("recovery.issue.entryAction")}
+                </Button>
+                <span className="break-keep text-meta text-ink-muted">
+                  {messages.formatMessage("recovery.issue.entryHint")}
+                </span>
+              </div>
             </Fact>
           )}
           {member.kind === "agent" && (
@@ -321,6 +377,8 @@ function ReadyProfile({
           </Button>
         )}
       </div>
+        </>
+      )}
     </>
   );
 }
@@ -332,7 +390,9 @@ function MemberProfilePanel({
   target: MemberProfileTarget;
   close: () => void;
 }) {
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId } = useSession();
+  const offline = useOffline();
+  const reset = useIssuePasswordReset();
   const query = useDirectory(workspaceId);
   const member = memberFor(query.directory, target.memberId);
   const hasNoCachedRoster = query.directory.members.length === 0;
@@ -341,7 +401,7 @@ function MemberProfilePanel({
     pending: query.isPending,
     failed: query.error !== null,
     hasCachedRoster: !hasNoCachedRoster,
-    offline: connStatus === "disconnected",
+    offline,
   });
   const title = member ? `${member.displayName} 프로필` : "멤버 프로필";
 
@@ -350,6 +410,19 @@ function MemberProfilePanel({
       opener={target.opener}
       data-testid="member-profile-dialog"
       className="gap-0"
+      // Esc는 가장 위 층의 것이다(§3.4): 확인 단계가 서 있으면 그 단계만 닫고, 요청이 나갔거나
+      // 링크가 선 뒤에는 아무것도 닫지 않는다. 링크는 다시 볼 길이 없는 값이라 Esc 한 번과
+      // 바깥 누름 한 번에 사라지게 두지 않고 「닫기」만 닫는다.
+      onEscapeKeyDown={(event) => {
+        if (reset.phase === PasswordResetPhase.Idle) return;
+        event.preventDefault();
+        reset.cancel();
+      }}
+      onInteractOutside={(event) => {
+        if (reset.phase === PasswordResetPhase.Issuing || reset.phase === PasswordResetPhase.Issued) {
+          event.preventDefault();
+        }
+      }}
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>{title}</DialogTitle>
@@ -359,19 +432,24 @@ function MemberProfilePanel({
       </div>
 
       {member ? (
-        <ReadyProfile member={member} directory={query.directory} close={close} />
+        <ReadyProfile
+          member={member}
+          directory={query.directory}
+          close={close}
+          reset={reset}
+        />
       ) : viewState === "loading" ? (
         <ProfileSkeleton />
       ) : viewState === "error" ? (
-        <InlineBanner
-          message="멤버 프로필을 불러오지 못했습니다."
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadMemberProfileTitle}
+          cause={loadCauseOf(query.error)}
+          onRetry={() => void query.refetch()}
           testId="member-profile-error"
         />
       ) : (
         <>
-          {connStatus === "disconnected" && (
+          {offline && (
             <InlineBanner
               tone="neutral"
               message="연결 끊김, 이 멤버의 마지막 프로필을 찾지 못했습니다."

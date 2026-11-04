@@ -1260,15 +1260,15 @@ describe("오프라인·목록 오류는 줄을 잠그고 주 행동을 잠근�
 });
 
 describe("틀 (ADR-0193 D10·D11)", () => {
-  it("새벽하늘 바닥 위 코메토 머리 + 진행 점(claim 경로 4단계 중 4단계)", async () => {
+  it("새벽하늘 바닥 위 코메토 머리 + 진행 점(claim 경로 5단계 중 5단계)", async () => {
     const host = mountStage();
     await waitFor(
-      () => q(host, "onboarding-dots-label")?.textContent === "4단계 중 4단계",
+      () => q(host, "onboarding-dots-label")?.textContent === "5단계 중 5단계",
       "dots"
     );
     expect(q(host, "onboarding-frame")).not.toBeNull();
     expect(q(host, "kometto-face")?.getAttribute("data-size")).toBe("head");
-    expect(q(host, "onboarding-dots-label")?.textContent).toBe("4단계 중 4단계");
+    expect(q(host, "onboarding-dots-label")?.textContent).toBe("5단계 중 5단계");
     expect(q(host, "first-agent-stage")?.getAttribute("aria-labelledby")).toBe(
       "first-agent-heading"
     );

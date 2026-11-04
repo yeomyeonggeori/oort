@@ -2,6 +2,1123 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "attachments.tray.noticeDismiss": [
+    {
+      "type": 0,
+      "value": "확인"
+    }
+  ],
+  "attachments.tray.overflow": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개는 한 메시지의 상한("
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개)을 넘어 넣지 못했습니다."
+    }
+  ],
+  "attachments.tray.removeNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부 빼기"
+    }
+  ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", 재생"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, 재생"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "영상을 재생하지 못했어요"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "이 영상은 더 이상 볼 수 없어요"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "영상을 불러오는 중"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "소리 끄기"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "일시정지"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "재생"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "처음부터 다시 재생"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "영상을 사진 보관함에 저장해요"
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "재생 위치"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "이 영상으로 이동"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째 영상"
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "소리 켜기"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "blocked.addMemberLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 멤버 추가는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.addMemberLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 멤버 추가는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.aiKeysLead.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요."
+    }
+  ],
+  "blocked.aiKeysLead.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요."
+    }
+  ],
+  "blocked.approveOrDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 승인하거나 끊을 수 없어요."
+    }
+  ],
+  "blocked.approveOrDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 승인하거나 끊을 수 없어요."
+    }
+  ],
+  "blocked.changeAiLink.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이 연결을 바꾸거나 확인할 수 없어요."
+    }
+  ],
+  "blocked.changeAiLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이 연결을 바꾸거나 확인할 수 없어요."
+    }
+  ],
+  "blocked.changeHere.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 바꿀 수 없어요. 다시 연결되면 여기서 바꿀 수 있어요."
+    }
+  ],
+  "blocked.changeHere.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 바꿀 수 없어요. 다시 연결되면 여기서 바꿀 수 있어요."
+    }
+  ],
+  "blocked.changeIt.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeLimits.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeLimits.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeProfile.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeProfile.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeRules.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 규칙을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeRules.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 규칙을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeSetting.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이 설정을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeSetting.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이 설정을 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeStatus.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 상태를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeStatus.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 상태를 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeTeamAiKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.changeTeamAiKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.confirmDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 해제를 확정할 수 없어요."
+    }
+  ],
+  "blocked.confirmDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 해제를 확정할 수 없어요."
+    }
+  ],
+  "blocked.contentStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 내용이에요."
+    }
+  ],
+  "blocked.contentStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 내용이에요."
+    }
+  ],
+  "blocked.createAgentLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createAgentLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createChannelLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createChannelLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결을 만들 수 없어요. 다시 연결된 뒤에 눌러 주세요."
+    }
+  ],
+  "blocked.createDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결을 만들 수 없어요. 다시 연결된 뒤에 눌러 주세요."
+    }
+  ],
+  "blocked.createInviteLink.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createInviteLink.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createQrLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 다시 연결되면 QR을 만들 수 있어요."
+    }
+  ],
+  "blocked.createQrLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 다시 연결되면 QR을 만들 수 있어요."
+    }
+  ],
+  "blocked.createThing.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createThing.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWebhookUrl.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWebhookUrl.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
+    }
+  ],
+  "blocked.createWorkspace.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 워크스페이스를 만들 수 없어요."
+    }
+  ],
+  "blocked.createWorkspace.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 워크스페이스를 만들 수 없어요."
+    }
+  ],
+  "blocked.createWorkspaceLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.createWorkspaceLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.decideNow.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요."
+    }
+  ],
+  "blocked.decideNow.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요."
+    }
+  ],
+  "blocked.decisionStage.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 내용을 살펴보고 다시 연결되면 결정해 주세요."
+    }
+  ],
+  "blocked.decisionStage.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 내용을 살펴보고 다시 연결되면 결정해 주세요."
+    }
+  ],
+  "blocked.delegate.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 맡길 수 없어요."
+    }
+  ],
+  "blocked.delegate.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 맡길 수 없어요."
+    }
+  ],
+  "blocked.deleteDevAccess.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결을 지울 수 없어요. 다시 연결되면 지울 수 있어요."
+    }
+  ],
+  "blocked.deleteDevAccess.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결을 지울 수 없어요. 다시 연결되면 지울 수 있어요."
+    }
+  ],
+  "blocked.doThis.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 할 수 없어요."
+    }
+  ],
+  "blocked.doThis.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 할 수 없어요."
+    }
+  ],
+  "blocked.doThisLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 할 수 없어요. 다시 연결되면 눌러 보세요."
+    }
+  ],
+  "blocked.doThisLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 할 수 없어요. 다시 연결되면 눌러 보세요."
+    }
+  ],
+  "blocked.draftsOnDevice.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 초안은 이 기기에 있어요."
+    }
+  ],
+  "blocked.draftsOnDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 초안은 이 기기에 있어요."
+    }
+  ],
+  "blocked.huddleJoined.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 메시지를 주고받을 수 없지만, 오디오는 계속될 수 있고 허들 나가기는 사용할 수 있어요."
+    }
+  ],
+  "blocked.huddleJoined.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 메시지를 주고받을 수 없지만, 오디오는 계속될 수 있고 허들 나가기는 사용할 수 있어요."
+    }
+  ],
+  "blocked.huddleUnavailable.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 허들을 사용할 수 없어요."
+    }
+  ],
+  "blocked.huddleUnavailable.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 허들을 사용할 수 없어요."
+    }
+  ],
+  "blocked.inboxReply.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."
+    }
+  ],
+  "blocked.inboxReply.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."
+    }
+  ],
+  "blocked.issueCredential.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 연결 값을 발급하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.issueCredential.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 연결 값을 발급하거나 바꿀 수 없어요."
+    }
+  ],
+  "blocked.issueKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 발급할 수 없어요."
+    }
+  ],
+  "blocked.issueKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 발급할 수 없어요."
+    }
+  ],
+  "blocked.keepListIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepListIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewChangeLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewChangeLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewIssueLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.keepViewIssueLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.lastSyncedList.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". 아래는 그때의 상태예요."
+    }
+  ],
+  "blocked.lastSyncedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    },
+    {
+      "type": 0,
+      "value": ". 아래는 그때의 상태예요."
+    }
+  ],
+  "blocked.listStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 목록이에요."
+    }
+  ],
+  "blocked.listStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 목록이에요."
+    }
+  ],
+  "blocked.loadHosts.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
+    }
+  ],
+  "blocked.loadHosts.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
+    }
+  ],
+  "blocked.loadPolicy.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
+    }
+  ],
+  "blocked.loadPolicy.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 워크스페이스 기본값을 불러올 수 없어요. 다시 연결되면 불러와요."
+    }
+  ],
+  "blocked.loadWorkspaceDefaults.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 워크스페이스 기본값을 불러올 수 없어요. 다시 연결되면 불러와요."
+    }
+  ],
+  "blocked.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 재개하거나 중단할 수 있어요."
+    }
+  ],
+  "blocked.loginHandoff.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 재개하거나 중단할 수 있어요."
+    }
+  ],
+  "blocked.memberListStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 마지막으로 받은 멤버 목록을 보여 줘요."
+    }
+  ],
+  "blocked.memberListStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 마지막으로 받은 멤버 목록을 보여 줘요."
+    }
+  ],
+  "blocked.neverReceivedList.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
+  "blocked.neverReceivedList.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
+  "blocked.openExistingDm.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 이미 대화 중인 사람에게는 이동할 수 있어요."
+    }
+  ],
+  "blocked.openExistingDm.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 이미 대화 중인 사람에게는 이동할 수 있어요."
+    }
+  ],
+  "blocked.register.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 등록할 수 없어요."
+    }
+  ],
+  "blocked.register.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 등록할 수 없어요."
+    }
+  ],
+  "blocked.relinkKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 다시 연결할 수 없어요."
+    }
+  ],
+  "blocked.relinkKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 다시 연결할 수 없어요."
+    }
+  ],
+  "blocked.reloadPicturesLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 그림을 다시 불러와요."
+    }
+  ],
+  "blocked.reloadPicturesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결되면 그림을 다시 불러와요."
+    }
+  ],
+  "blocked.revokeKey.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 회수할 수 없어요."
+    }
+  ],
+  "blocked.revokeKey.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 회수할 수 없어요."
+    }
+  ],
+  "blocked.rotateOrRevoke.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 회전하거나 폐기할 수 없어요."
+    }
+  ],
+  "blocked.rotateOrRevoke.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 회전하거나 폐기할 수 없어요."
+    }
+  ],
+  "blocked.saveAfterReconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 저장은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.saveAfterReconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 저장은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "blocked.saveChangesLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 변경은 다시 연결된 뒤에 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveChangesLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 변경은 다시 연결된 뒤에 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveDisplayName.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 표시 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveDisplayName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 표시 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveIt.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveIt.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveName.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveName.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이름을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveNameResume.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 이름을 저장할 수 없어요. 다시 연결되면 이어서 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveNameResume.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 이름을 저장할 수 없어요. 다시 연결되면 이어서 저장할 수 있어요."
+    }
+  ],
+  "blocked.saveReminder.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 알림을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveReminder.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 알림을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveWelcome.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 웰컴 설정을 저장할 수 없어요."
+    }
+  ],
+  "blocked.saveWelcome.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 웰컴 설정을 저장할 수 없어요."
+    }
+  ],
+  "blocked.sendRequestLater.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 요청을 보낼 수 있어요."
+    }
+  ],
+  "blocked.sendRequestLater.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결되면 요청을 보낼 수 있어요."
+    }
+  ],
+  "blocked.signIn.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 로그인할 수 없어요."
+    }
+  ],
+  "blocked.signIn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 로그인할 수 없어요."
+    }
+  ],
+  "blocked.startDisconnect.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 해제를 시작할 수 없어요."
+    }
+  ],
+  "blocked.startDisconnect.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 해제를 시작할 수 없어요."
+    }
+  ],
+  "blocked.stopOrDelete.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 멈추거나 지울 수 없어요."
+    }
+  ],
+  "blocked.stopOrDelete.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 멈추거나 지울 수 없어요."
+    }
+  ],
+  "blocked.subscribe.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 구독할 수 없어요."
+    }
+  ],
+  "blocked.subscribe.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 구독할 수 없어요."
+    }
+  ],
+  "blocked.terminalStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받아요."
+    }
+  ],
+  "blocked.terminalStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받아요."
+    }
+  ],
+  "blocked.turnOn.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 켤 수 없어요."
+    }
+  ],
+  "blocked.turnOn.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 켤 수 없어요."
+    }
+  ],
+  "blocked.turnOnHelper.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.turnOnHelper.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unlinkDevice.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요."
+    }
+  ],
+  "blocked.unlinkDevice.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요."
+    }
+  ],
+  "blocked.unlinkTeamAi.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unlinkTeamAi.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "blocked.unregister.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 등록을 해제할 수 없어요."
+    }
+  ],
+  "blocked.unregister.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 등록을 해제할 수 없어요."
+    }
+  ],
+  "blocked.updatesPausedStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 갱신이 멈췄어요. 아래는 마지막으로 확인된 상태예요."
+    }
+  ],
+  "blocked.updatesPausedStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 갱신이 멈췄어요. 아래는 마지막으로 확인된 상태예요."
+    }
+  ],
+  "blocked.waitAMoment.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 잠깐 기다려요."
+    }
+  ],
+  "blocked.waitAMoment.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 잠깐 기다려요."
+    }
+  ],
+  "blocked.workStateNone.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아직 보여 줄 저장된 작업 상태가 없어요."
+    }
+  ],
+  "blocked.workStateNone.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아직 보여 줄 저장된 작업 상태가 없어요."
+    }
+  ],
+  "blocked.workStateStale.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 아래는 마지막으로 확인된 작업 상태예요."
+    }
+  ],
+  "blocked.workStateStale.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -51,6 +1168,365 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이메일 기억하기"
+    }
+  ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 연결"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "연결 중…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "받아 둔 내용만 보여요. 연결되면 자동으로 이어져요."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "오프라인이에요"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "새 글이 늦게 보일 수 있어요."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "실시간 연결이 끊겼어요"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "다시 연결됐어요"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤 다시 시도할게요."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "곧 다시 연결돼요."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "서버를 업데이트하고 있어요"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "다시 시도해 주세요. 계속되면 연결 기록을 복사해 알려 주세요."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "연결에 문제가 있어요"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "활동을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 프로필을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "작업 상세를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "대화를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "기기 키 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "같은 서버의 Hermes 상태를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "인박스를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "기기 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "링크 확인 설정을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "새 글을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "알림 규칙을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 다시 불러올 수 있어요."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "서버가 받지 못했어요"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 보내지 못했어요"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 모두 다시 보내기"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "로그인이 만료됐어요. 다시 로그인해 주세요."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "이 서버에는 파일 보관소가 연결돼 있지 않아요"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 올리지 못했어요"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "서버가 응답하지 않아 올리지 못했어요"
     }
   ],
   "desktop.menu.close": [
@@ -159,6 +1635,138 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "윈도우"
+    }
+  ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 0,
+      "value": "스레드 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건"
+    }
+  ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "창을 닫아도 메뉴 막대에서 계속 알림을 받아요"
+    }
+  ],
+  "desktop.tray.more": [
+    {
+      "type": 0,
+      "value": "외 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "desktop.tray.newMessage": [
+    {
+      "type": 0,
+      "value": "새 메시지"
+    }
+  ],
+  "desktop.tray.none": [
+    {
+      "type": 0,
+      "value": "실행 중 없음"
+    }
+  ],
+  "desktop.tray.open": [
+    {
+      "type": 0,
+      "value": "oort 열기"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "모두 읽음 처리"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "approvals",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건, 응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "panes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 0,
+      "value": "응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
+    }
+  ],
+  "desktop.tray.running": [
+    {
+      "type": 0,
+      "value": "실행 중"
+    }
+  ],
+  "desktop.tray.stateBlocked": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "desktop.tray.stateWorking": [
+    {
+      "type": 0,
+      "value": "작업 중"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -453,6 +2061,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "https://giphy.com/gifs/…"
+    }
+  ],
+  "expressions.kind.autoNote": [
+    {
+      "type": 0,
+      "value": "그림의 크기와 움직임에 맞춰 골라 뒀어요. 바꿀 수 있어요."
+    }
+  ],
+  "expressions.kind.emoji": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
+    }
+  ],
+  "expressions.kind.hintEmoji": [
+    {
+      "type": 0,
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
+    }
+  ],
+  "expressions.kind.hintSticker": [
+    {
+      "type": 0,
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요."
+    }
+  ],
+  "expressions.kind.legend": [
+    {
+      "type": 0,
+      "value": "종류"
+    }
+  ],
+  "expressions.kind.sticker": [
+    {
+      "type": 0,
+      "value": "이모티콘"
     }
   ],
   "expressions.make.agent": [
@@ -808,6 +2452,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "요청 보내기"
+    }
+  ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "expressions.panel.viewEmpty": [
+    {
+      "type": 0,
+      "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "팀 표현 보기"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -1370,10 +3044,52 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
-  "mobile.connection.reconnectNow": [
+  "mobile.attachmentSave.failed": [
     {
       "type": 0,
-      "value": "지금 다시 연결"
+      "value": "저장하지 못했어요 · 다시 시도"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근이 꺼져 있어요 · 설정 열기"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "사진 보관함에 저장해요"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "저장하는 중이에요"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장"
     }
   ],
   "mobile.ios.cameraUsage": [
@@ -1403,13 +3119,121 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+      "value": "저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
     {
       "type": 0,
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
+    }
+  ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "링크 복사됨"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "링크 복사"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "링크를 복사하지 못했어요."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 불러오는 중"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "미리보기 지우기"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "이 메시지에 달린 링크 미리보기가 모두에게서 지워지고 다시 만들어지지 않아요. 메시지와 링크는 그대로 남아요."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 지우지 못했어요. 연결을 확인하고 다시 해 보세요."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "지우는 중…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 지울까요?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "공유"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "링크 동작 닫기"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "링크 동작"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "왼쪽에 작은 그림, 오른쪽에 주소와 제목을 보여줘요."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "큰 그림을 위에, 제목과 설명을 아래에 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "이 기기에서만 적용돼요. 웹과 데스크탑은 따로 골라요."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "링크 미리보기"
     }
   ],
   "mobile.locale.backToSettings": [
@@ -1428,6 +3252,428 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "초대 링크를 올렸어요"
+    }
+  ],
+  "recovery.claim.hostBody": [
+    {
+      "type": 0,
+      "value": "새 비밀번호를 아래 서버로 보내요. 관리자에게 받은 주소가 맞을 때만 계속하세요."
+    }
+  ],
+  "recovery.claim.hostConfirm": [
+    {
+      "type": 0,
+      "value": "맞아요, 계속하기"
+    }
+  ],
+  "recovery.claim.hostReject": [
+    {
+      "type": 0,
+      "value": "아니에요, 돌아가기"
+    }
+  ],
+  "recovery.claim.hostTitle": [
+    {
+      "type": 0,
+      "value": "이 서버가 맞나요?"
+    }
+  ],
+  "recovery.claim.invalidChar": [
+    {
+      "type": 0,
+      "value": "비밀번호에 사용할 수 없는 문자가 들어 있습니다."
+    }
+  ],
+  "recovery.claim.passwordHint": [
+    {
+      "type": 2,
+      "value": "min",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이상, "
+    },
+    {
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "바이트 이하로 정해요. 한글은 한 자에 3바이트라 한글만이면 "
+    },
+    {
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지예요."
+    }
+  ],
+  "recovery.claim.resetExpired": [
+    {
+      "type": 0,
+      "value": "이 링크는 24시간이 지나 만료되었습니다. 관리자에게 새 링크를 요청하세요."
+    }
+  ],
+  "recovery.claim.resetUsed": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용되었거나 새 링크로 바뀌었습니다. 비밀번호를 이미 정했다면 로그인하세요. 아니라면 관리자에게 새 링크를 요청하세요."
+    }
+  ],
+  "recovery.claim.title": [
+    {
+      "type": 0,
+      "value": "새 비밀번호를 정해요."
+    }
+  ],
+  "recovery.help.adminBody": [
+    {
+      "type": 0,
+      "value": "워크스페이스 관리자가 본인임을 확인한 뒤 1회용 재설정 링크를 보내 줘요. 아래 문구를 복사해서 전하세요."
+    }
+  ],
+  "recovery.help.adminTitle": [
+    {
+      "type": 0,
+      "value": "관리자에게 링크를 요청하세요"
+    }
+  ],
+  "recovery.help.back": [
+    {
+      "type": 0,
+      "value": "로그인으로 돌아가기"
+    }
+  ],
+  "recovery.help.guideDetail": [
+    {
+      "type": 0,
+      "value": "관리자가 새로 정할 수 있는 링크를 보내 줘요."
+    }
+  ],
+  "recovery.help.guideLine": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊어도 괜찮아요."
+    }
+  ],
+  "recovery.help.link": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊으셨나요?"
+    }
+  ],
+  "recovery.help.receivedEmpty": [
+    {
+      "type": 0,
+      "value": "받은 링크를 붙여 넣으세요."
+    }
+  ],
+  "recovery.help.receivedHint": [
+    {
+      "type": 0,
+      "value": "링크는 24시간 안에 한 번만 쓸 수 있어요. 새 비밀번호를 정하면 이 계정의 다른 기기는 모두 로그아웃돼요."
+    }
+  ],
+  "recovery.help.receivedInvalid": [
+    {
+      "type": 0,
+      "value": "재설정 링크로 읽을 수 없습니다. 관리자가 보낸 링크를 그대로 붙여 넣으세요."
+    }
+  ],
+  "recovery.help.receivedLabel": [
+    {
+      "type": 0,
+      "value": "재설정 링크"
+    }
+  ],
+  "recovery.help.receivedPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://team.example.com/claim/…"
+    }
+  ],
+  "recovery.help.receivedSubmit": [
+    {
+      "type": 0,
+      "value": "링크 열기"
+    }
+  ],
+  "recovery.help.receivedTitle": [
+    {
+      "type": 0,
+      "value": "링크를 받았어요"
+    }
+  ],
+  "recovery.help.requestCopied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "recovery.help.requestCopy": [
+    {
+      "type": 0,
+      "value": "문구 복사"
+    }
+  ],
+  "recovery.help.requestLabel": [
+    {
+      "type": 0,
+      "value": "요청 문구"
+    }
+  ],
+  "recovery.help.requestNoEmail": [
+    {
+      "type": 0,
+      "value": "oort 비밀번호를 잊어서 재설정 링크가 필요해요. 서버: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "recovery.help.requestWithEmail": [
+    {
+      "type": 0,
+      "value": "oort 비밀번호를 잊어서 재설정 링크가 필요해요. 서버: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 이메일: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "recovery.issue.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "recovery.issue.confirmLead": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 새 비밀번호를 정할 수 있는 링크예요. 만들기 전에 확인하세요."
+    }
+  ],
+  "recovery.issue.confirmTitle": [
+    {
+      "type": 0,
+      "value": "재설정 링크 만들기"
+    }
+  ],
+  "recovery.issue.entryAction": [
+    {
+      "type": 0,
+      "value": "재설정 링크 만들기"
+    }
+  ],
+  "recovery.issue.entryHint": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊은 멤버에게 1회용 링크를 전해요."
+    }
+  ],
+  "recovery.issue.errorBadTarget": [
+    {
+      "type": 0,
+      "value": "재설정 링크는 사람 멤버에게만 만들 수 있어요."
+    }
+  ],
+  "recovery.issue.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 멤버의 재설정 링크는 만들 수 없어요. 내 역할로는 권한이 없어요."
+    }
+  ],
+  "recovery.issue.errorGeneric": [
+    {
+      "type": 0,
+      "value": "링크를 만들지 못했어요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorInactive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 활성 상태가 아니라서 링크를 만들 수 없어요."
+    }
+  ],
+  "recovery.issue.errorNetwork": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결을 확인하고 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾지 못했어요. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRateLimitedAfter": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRequired": [
+    {
+      "type": 0,
+      "value": "내 비밀번호를 입력하세요."
+    }
+  ],
+  "recovery.issue.errorWrongPassword": [
+    {
+      "type": 0,
+      "value": "내 비밀번호가 맞지 않아요. 다시 입력하세요."
+    }
+  ],
+  "recovery.issue.factTerm": [
+    {
+      "type": 0,
+      "value": "비밀번호"
+    }
+  ],
+  "recovery.issue.issuedClose": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "recovery.issue.issuedCopied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "recovery.issue.issuedCopy": [
+    {
+      "type": 0,
+      "value": "링크 복사"
+    }
+  ],
+  "recovery.issue.issuedDeliver": [
+    {
+      "type": 0,
+      "value": "메신저로 보내거나 직접 전해 주세요."
+    }
+  ],
+  "recovery.issue.issuedExpires": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "까지 한 번만 쓸 수 있어요."
+    }
+  ],
+  "recovery.issue.issuedLead": [
+    {
+      "type": 0,
+      "value": "이 링크는 지금 이 화면에서만 볼 수 있어요. 닫으면 다시 볼 수 없으니 지금 전하세요."
+    }
+  ],
+  "recovery.issue.issuedLinkLabel": [
+    {
+      "type": 0,
+      "value": "재설정 링크"
+    }
+  ],
+  "recovery.issue.issuedLocalOnly": [
+    {
+      "type": 0,
+      "value": "이 주소는 이 컴퓨터(같은 네트워크)에서만 열릴 수 있어요."
+    }
+  ],
+  "recovery.issue.issuedTitle": [
+    {
+      "type": 0,
+      "value": "재설정 링크를 만들었어요"
+    }
+  ],
+  "recovery.issue.lineLogout": [
+    {
+      "type": 0,
+      "value": "받는 사람이 비밀번호를 정하면 그 사람의 모든 기기가 로그아웃돼요."
+    }
+  ],
+  "recovery.issue.lineOnce": [
+    {
+      "type": 0,
+      "value": "링크는 24시간 안에 한 번만 쓸 수 있어요."
+    }
+  ],
+  "recovery.issue.lineOrder": [
+    {
+      "type": 0,
+      "value": "이 멤버의 로그인을 끝낼 일이 있다면 먼저 끝내고 링크를 만드세요. 링크를 만든 뒤에 끝내면 링크도 함께 못 쓰게 돼요."
+    }
+  ],
+  "recovery.issue.lineReplace": [
+    {
+      "type": 0,
+      "value": "이전에 만든 링크는 못 쓰게 돼요."
+    }
+  ],
+  "recovery.issue.lineVerify": [
+    {
+      "type": 0,
+      "value": "본인 확인은 관리자가 해요. 직접 만나거나 통화로 확인한 사람에게만 보내고, 계정이 도용됐을 수 있는 같은 채팅으로는 보내지 마세요."
+    }
+  ],
+  "recovery.issue.passwordHint": [
+    {
+      "type": 0,
+      "value": "링크를 만드는 관리자 본인의 비밀번호예요."
+    }
+  ],
+  "recovery.issue.passwordLabel": [
+    {
+      "type": 0,
+      "value": "내 비밀번호"
+    }
+  ],
+  "recovery.issue.submit": [
+    {
+      "type": 0,
+      "value": "링크 만들기"
+    }
+  ],
+  "recovery.issue.submitBusy": [
+    {
+      "type": 0,
+      "value": "링크를 만드는 중"
     }
   ],
   "releaseNotes.action.close": [
@@ -1452,6 +3698,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "바뀐 점"
+    }
+  ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "그 밖에 바뀐 점"
     }
   ],
   "releaseNotes.detail.tryIt": [
@@ -1496,19 +3748,10 @@ export const catalog: MessageCatalog = {
       "value": "업데이트 소식 닫기"
     }
   ],
-  "releaseNotes.popup.more": [
+  "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "그 밖에 "
-    },
-    {
-      "type": 2,
-      "value": "count",
-      "style": null
-    },
-    {
-      "type": 0,
-      "value": "가지"
+      "value": "더보기"
     }
   ],
   "releaseNotes.popup.title": [
@@ -1535,6 +3778,642 @@ export const catalog: MessageCatalog = {
       "value": "폰"
     }
   ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "첨부"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "알림"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "설정"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필에 이번 달 비용이 보이고, 관리자는 월간 보고서를 볼 수 있어요. 사람끼리의 DM에서 에이전트를 부르면 모두에게 동의를 먼저 물어보고, 모두 동의하면 에이전트가 들어와요."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 비용과 DM에 에이전트 부르기"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필을 열어 보세요. 관리자라면 데스크탑은 설정 › 사용량, 폰은 설정 › 에이전트 월 보고를 열어 보세요. DM에서는 @로 에이전트를 불러 동의 카드가 뜨는지 봐 주세요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "채널 알림이 켜져 있는지 꺼져 있는지 종 아이콘과 글자로 보여 줘요. 누르면 바로 바뀌고, 저장하지 못하면 그 채널만 원래대로 돌아가요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "채널 알림 켜짐·꺼짐 표시"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 대화 정보 페이지, ⋮ 메뉴, 채널 행 메뉴에서 알림 줄을 눌러 보세요. 데스크탑은 채널 머리의 ⋮ 메뉴와 사이드바 행 메뉴에서 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "입력창이 폰은 4줄, 데스크탑은 5줄까지 늘어난 뒤 안에서 스크롤돼요. 긴 글을 붙여 넣어도 높이가 맞고, 마지막 줄이 잘리지 않아요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "입력창 높이"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "여러 줄을 입력해 보고, 긴 글을 붙여 넣어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "폰의 반응과 상태에서 표준 이모지를 모두 쓸 수 있어요. 이모지 고르개의 「우리 팀」 칸에서는 팀 이모지, 스티커, GIF를 쓰고 새로 등록해요."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "이모지와 팀 이모지"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 빠른 반응 줄의 +를 눌러 이름으로 찾아 보세요. 폰과 데스크탑 모두 이모지 고르개의 「우리 팀」 칸을 열어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "대화 맨 위 띠가 없어지고 뒤로, 이름, ⋮ 유리 단추 셋이 떠 있어요. 앱으로 돌아오거나 잠금을 풀면 연결이 더 빨리 돌아오고, 대화 맨 위에서 당기면 연결을 다시 확인해요. 메시지를 길게 누르거나 반응을 달 때 가벼운 진동도 와요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "폰 대화 머리와 다시 연결"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "대화를 열어 위로 올려 보고, 앱을 잠시 나갔다 돌아와 보세요. 연결이 끊긴 띠가 보이면 「지금 다시 연결」을 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "사진을 누르면 누른 자리에서 커지며 열리고, 닫으면 그 자리로 돌아가요. 뒤로 가기, Esc, 아래로 끌기로 닫을 수 있고, 동작 줄이기를 켜면 바로 열리고 닫혀요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "사진 열고 닫기"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "대화에 올라온 사진을 눌러 열고, 여러 방법으로 닫아 보세요."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "설정 › 프로필 › 언어에서 기기 언어 따르기, 한국어, English를 골라요. 바꾸면 바로 적용되지만 아직 모든 화면이 바뀌지는 않아요. 폰은 설정 › 테마 › 테마 스타일이 전체 화면 고르개를 열어요."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "언어 설정과 폰 테마 고르기"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "언어를 바꿔 설정 화면의 글자가 바뀌는지 보세요. 폰에서는 테마 스타일도 하나 골라 보세요."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "대화 화면이 더 보기 좋아지고, 언어 설정과 팀 이모지, 에이전트 비용이 들어왔어요."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "입력창 아래에서 누가 쓰고 있는지 이름을 굵게 보여 주고, 점 셋이 움직여요. 동작 줄이기를 켜면 점은 멈춰 있어요."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "작성 중 표시"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "대화에서 다른 사람이나 에이전트가 답을 쓰는 동안 입력창 아래를 봐 주세요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine1": [
+    {
+      "type": 0,
+      "value": "데스크탑은 에이전트가 계획을 알리면 대화 머리에 계획 단추가 서고, 남은 단계 수를 보여요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine10": [
+    {
+      "type": 0,
+      "value": "폰은 에이전트가 있는 대화에서 입력창 위 줄이 일하는 에이전트를 보여 주고, 누르면 시트가 열려요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine11": [
+    {
+      "type": 0,
+      "value": "폰의 요청 메시지에는 에이전트 상태 칩이 서고, 에이전트가 받지 않았거나 실패하면 아래 한 줄이 할 수 있는 일을 알려요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine12": [
+    {
+      "type": 0,
+      "value": "받은 편지함에서 결정한 직후 같은 영수증 문장이 두 번 나오지 않고, 승인 카드는 남은 시간을 한 곳에서만 말해요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine13": [
+    {
+      "type": 0,
+      "value": "폰은 끝난 요청 아래에 걸린 시간과 단계 수를 담은 한 줄 칩이 서고, 누르면 작업 기록이 열려요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine14": [
+    {
+      "type": 0,
+      "value": "관리자는 온보딩과 설정에서 팀 AI 키와 도우미의 이름, 할 수 있는 일을 정하고, 채팅으로 말해서도 켜고 꺼요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine15": [
+    {
+      "type": 0,
+      "value": "팀 AI 사용 한도는 기본이 제한 없음이고, 관리자가 설정의 사용 한도에서 하루나 한 달 한도를 켜요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine2": [
+    {
+      "type": 0,
+      "value": "데스크탑 작업 패널과 폰 작업 기록 시트는 에이전트가 스스로 알린 내용과 oort가 잰 기록을 다른 칸에 보여요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine3": [
+    {
+      "type": 0,
+      "value": "한 도구 호출에는 승인 카드 한 장만 서고, 거부·만료·취소된 승인은 호출 카드를 중단으로 닫아요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine4": [
+    {
+      "type": 0,
+      "value": "승인한 도구 호출은 승인 카드가 끝이나 실패 같은 결과까지 말하고, 결과 줄은 따로 서지 않아요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine5": [
+    {
+      "type": 0,
+      "value": "폰 승인 카드에도 「다시 요청」이 생겨, 누르면 입력창에 다시 요청할 초안이 들어가요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine6": [
+    {
+      "type": 0,
+      "value": "폰 홈의 작업 중 카드와 에이전트 탭이 승인을 기다리는 에이전트를 「승인 필요」로 알려요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine7": [
+    {
+      "type": 0,
+      "value": "받은 편지함에서 결정한 승인은 영수증 한 줄로 바뀌고, 다른 기기에서 결정된 승인의 단추는 사라져요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine8": [
+    {
+      "type": 0,
+      "value": "도우미는 코드 일에 「내 맥에 작업 맡기기」 카드를 주고, 글 파일, PDF, 이미지 첨부도 읽어요."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine9": [
+    {
+      "type": 0,
+      "value": "팀 서버에서도 대화로 보낸 사진을 에이전트가 읽어요."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "가로로 긴 화면 캡처는 대화 열 폭을 넉넉히 써서 열기 전에도 글자가 읽혀요."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "폰에서 공유 시트를 닫는 탭이 아래에 있는 스레드를 열지 않아요."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine3": [
+    {
+      "type": 0,
+      "value": "폰 사진 뷰어는 화면 어디서든 두 손가락으로 확대되고, 아주 긴 그림은 화면을 채울 때까지 키울 수 있으며 두 번 탭하면 원래 크기로 보여요."
+    }
+  ],
+  "releaseNotes.v0142.connectionChanged": [
+    {
+      "type": 0,
+      "value": "연결이 1초 넘게 걸릴 때만 「연결 중」으로 알리고, 연결이 안 되면 오프라인인지 서버에 닿지 못하는지 원인을 말해요. 보내지 못한 메시지와 첨부 옆에는 다시 보내기와 지우기 아이콘이 서고, 네트워크 때문에 못 간 글은 연결이 돌아오면 저절로 다시 가요."
+    }
+  ],
+  "releaseNotes.v0142.connectionTitle": [
+    {
+      "type": 0,
+      "value": "연결 표시와 보내지 못한 메시지"
+    }
+  ],
+  "releaseNotes.v0142.connectionTryIt": [
+    {
+      "type": 0,
+      "value": "연결이 불안정할 때 연결 표시가 언제 뜨는지 보세요. 보내지 못한 메시지가 있으면 옆의 아이콘으로 다시 보내거나 지워 보세요."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "반응 칩이 알약 모양이 되고, 내가 단 칩은 강조 테두리로 보여요."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "실행 중단 줄은 가운데의 조용한 시스템 줄로 보이고, 문장은 「중단했어요」로 통일됐어요."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "링크 카드는 한 메시지에 3개까지 붙고, 옛 글자 방식을 쓰는 한국 사이트도 글자가 깨지지 않아요."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine4": [
+    {
+      "type": 0,
+      "value": "스레드 답글을 쓸 때 「대화에도 보내기」를 체크하면 그 답글이 대화에도 한 줄로 서고, 누르면 스레드가 열려요."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine1": [
+    {
+      "type": 0,
+      "value": "긴 채널 이름에도 채널 머리의 단추들이 판 안에 들어오고, 제목은 한 줄로 줄여 보여요."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine2": [
+    {
+      "type": 0,
+      "value": "창이 좁아도 사이드바를 펼친 채 채널 입력창이 최소 폭을 지켜요."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine3": [
+    {
+      "type": 0,
+      "value": "툴팁이 더 빨리 뜨고, 맥에서 글자 위를 우클릭해도 메시지 메뉴가 열려요."
+    }
+  ],
+  "releaseNotes.v0142.desktopTopic": [
+    {
+      "type": 0,
+      "value": "데스크탑"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewChanged": [
+    {
+      "type": 0,
+      "value": "빈 입력칸에서 ↑를 누르면 내 마지막 메시지를 고치고, 메시지 ⋮ 메뉴는 짧아져 내 메시지는 고치기가 맨 위에 와요. 첨부는 입력창 안의 한 줄 카드에 최대 20개까지 붙고, 이미지 미리보기에는 축소, 맞춤, 확대와 이미지 복사 단추가 생겼어요."
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTitle": [
+    {
+      "type": 0,
+      "value": "메시지 고치기와 이미지 보기"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTryIt": [
+    {
+      "type": 0,
+      "value": "빈 입력칸에서 ↑를 눌러 보고, 파일 여러 개를 붙인 뒤 이미지를 눌러 크게 열어 보세요."
+    }
+  ],
+  "releaseNotes.v0142.expressionsChanged": [
+    {
+      "type": 0,
+      "value": "폰 입력창의 보내기 왼쪽에 표현 단추가 생겨, 이모티콘, 이모지, 팀 이모지, GIF를 한 시트에서 검색해 써요. 「추가하기」로 앨범이나 링크에서 가져오거나, 「AI와 만들기」로 사진 한 장을 팀의 이미지 모델에 맡겨 배경 지우기나 캐리커처 이모티콘을 만들어요."
+    }
+  ],
+  "releaseNotes.v0142.expressionsTitle": [
+    {
+      "type": 0,
+      "value": "표현 단추와 사진 이모티콘"
+    }
+  ],
+  "releaseNotes.v0142.expressionsTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 입력창 왼쪽의 표현 단추를 눌러 보세요. 「AI와 만들기」는 폰은 팀 이모지 탭에서, 데스크탑은 이모지 고르개의 「우리 팀」 칸에서 열고, 팀에 이미지 모델이 없으면 연결 안내가 나와요."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewChanged": [
+    {
+      "type": 0,
+      "value": "링크 카드는 기본 크기가 「작게」로 바뀌었고, 사이트 아이콘과 동영상 표시가 붙으며, 폰에서도 보여요. 링크를 입력하면 보내기 전에 입력칸 위에 카드가 뜨고, ✕를 누르면 이번 메시지만 미리보기 없이 가요."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTitle": [
+    {
+      "type": 0,
+      "value": "링크 미리보기"
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTryIt": [
+    {
+      "type": 0,
+      "value": "대화에 링크를 붙여 넣어 보세요. 크기는 폰은 설정 › 보기 › 링크 미리보기에서, 웹과 데스크탑은 설정 › 모양 › 대화 표시에서 「작게」, 「크게」, 「끄기」 중에 골라요."
+    }
+  ],
+  "releaseNotes.v0142.menuBarChanged": [
+    {
+      "type": 0,
+      "value": "맥의 메뉴 막대에 oort 아이콘이 서고, 안 읽은 알림이 있으면 점이 붙어요. 로그인한 동안은 창을 닫아도 앱이 메뉴 막대에 남아 알림을 계속 받아요."
+    }
+  ],
+  "releaseNotes.v0142.menuBarTitle": [
+    {
+      "type": 0,
+      "value": "맥 메뉴 막대와 창 닫기"
+    }
+  ],
+  "releaseNotes.v0142.menuBarTryIt": [
+    {
+      "type": 0,
+      "value": "메뉴 막대의 아이콘을 눌러 실행 중인 작업을 보세요. 앱을 끝내려면 메뉴의 「oort 종료」나 ⌘Q를 쓰고, 닫은 창은 「oort 열기」나 Dock으로 다시 열어요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine1": [
+    {
+      "type": 0,
+      "value": "폰은 기기가 오프라인이거나 서버에 닿지 못할 때 홈, 받은함, 에이전트 위에 연결 띠가 떠요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑은 사이드바 아래에 연결 카드가 서고, 실시간 연결만 끊겨도 보내기와 승인은 열려 있어요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine3": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑은 창이 30초 넘게 숨었다가 돌아오면 연결을 새로 열어요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine4": [
+    {
+      "type": 0,
+      "value": "못 보낸 글은 이 기기에 남아 채널을 옮기거나 다시 열어도 사라지지 않고, 둘 이상이면 「모두 다시 보내기」가 서요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine5": [
+    {
+      "type": 0,
+      "value": "불러오기와 올리기가 실패하면 원인 문장이 붙고, 로그인 만료와 서버 안 닿음은 로그인 화면이 알려요."
+    }
+  ],
+  "releaseNotes.v0142.networkLine6": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 입력창과 승인 줄이 막힐 때도 「오프라인이라」와 「서버에 닿지 못해」로 원인을 나눠 말해요."
+    }
+  ],
+  "releaseNotes.v0142.networkTopic": [
+    {
+      "type": 0,
+      "value": "연결"
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "알림을 누르면 겹쳐 있던 시트와 대화상자를 걷고 바로 그 메시지로 가며, 쓰던 글은 지켜요."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "답글을 달거나 멘션된 스레드는 저절로 따라가고, 알림 설정에서 그 새 답글 알림을 끌 수 있어요."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine3": [
+    {
+      "type": 0,
+      "value": "승인 알림은 질문 한 문장으로 오고, 결정한 뒤에는 한 줄 영수증이 남아요."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine4": [
+    {
+      "type": 0,
+      "value": "맥에서 알림 배너를 누르면 그 메시지로 정확히 가요."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetChanged": [
+    {
+      "type": 0,
+      "value": "관리자는 멤버 프로필의 「재설정 링크 만들기」로 24시간 안에 한 번만 쓸 수 있는 링크를 만들어 전하고, 받은 사람이 새 비밀번호를 정하면 그 사람의 다른 기기는 모두 로그아웃돼요. 로그인 화면의 「비밀번호를 잊으셨나요?」는 관리자에게 링크를 받으라고 안내하고, 보낼 요청 문구를 복사해 줘요."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTitle": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊었을 때"
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTryIt": [
+    {
+      "type": 0,
+      "value": "관리자라면 멤버 프로필에서 「재설정 링크 만들기」를 열어 보세요. 로그인 화면에서는 「비밀번호를 잊으셨나요?」를 눌러 안내를 읽어 보세요."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine1": [
+    {
+      "type": 0,
+      "value": "채널 목록에서 새 글이 없는 줄은 회색이고, 새 글이 있는 줄은 또렷하게 개수 칩과 함께 보여요."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine2": [
+    {
+      "type": 0,
+      "value": "스크롤하려고 손만 대도 행이 눌림 색으로 바뀌던 것을 고쳤어요."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine3": [
+    {
+      "type": 0,
+      "value": "입력 중에 대화 목록을 아래로 끌면 자판이 내려가고 입력창이 한 줄로 쉬어요."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine4": [
+    {
+      "type": 0,
+      "value": "앱으로 돌아올 때 목록이 위에서 아래로 훑던 것을 고쳤고, 알림으로 도착한 메시지의 강조는 옅고 짧아졌어요."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaChanged": [
+    {
+      "type": 0,
+      "value": "폰에서 영상 첨부를 누르면 앱 안에서 바로 재생돼요. 첨부 저장은 공유와 나뉘어, 사진과 영상은 사진 보관함에 바로 담기고 파일은 파일 앱에서 위치를 골라요."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTitle": [
+    {
+      "type": 0,
+      "value": "폰 영상 재생과 첨부 저장"
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTryIt": [
+    {
+      "type": 0,
+      "value": "영상 카드를 눌러 재생해 보세요. 사진 뷰어의 저장 단추나 파일 카드의 ↓를 눌러 사진 보관함과 파일 앱에 담아 보세요."
+    }
+  ],
+  "releaseNotes.v0142.phoneTopic": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.v0142.settingsLine1": [
+    {
+      "type": 0,
+      "value": "설정에 업데이트 소식이 생겨, 업데이트 뒤 처음 열 때 한 번 뜨고 버전별 글은 설정에서 다시 읽어요."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine2": [
+    {
+      "type": 0,
+      "value": "언어의 「베타」 표시가 없어졌고, 폰 햅틱은 고르는 줄 없이 풍부로 고정됐어요."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine3": [
+    {
+      "type": 0,
+      "value": "로그인 화면이 이메일을 서버 주소별로 기억하고, 첫 화면 오른쪽 위에 언어 칩이 생겼어요."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine4": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰, 초대 선택지에서 빠져요."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine5": [
+    {
+      "type": 0,
+      "value": "저장된 로그인이 지워진 채 웹이나 데스크탑을 열어도 「불러오는 중」에 머물지 않고 로그인 화면으로 가요."
+    }
+  ],
+  "releaseNotes.v0142.summary": [
+    {
+      "type": 0,
+      "value": "링크 미리보기와 스레드가 새로워지고, 폰 표현 단추와 맥 메뉴 막대 아이콘이 들어왔어요."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine1": [
+    {
+      "type": 0,
+      "value": "팀 표현을 등록할 때 팀 이모지와 이모티콘 중 종류를 고르거나 추천받아요."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine2": [
+    {
+      "type": 0,
+      "value": "표현 보기는 종류별로 겹치지 않게 나뉘고, 웹 패널의 세 보기는 「팀 이모지」, 「이모티콘」, 「GIF」로 이름이 바뀌었어요."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine3": [
+    {
+      "type": 0,
+      "value": "배경을 지우지 못한 사진 이모티콘에는 「배경을 지운 그림」이라고 적지 않아요."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsTopic": [
+    {
+      "type": 0,
+      "value": "팀 표현"
+    }
+  ],
+  "releaseNotes.v0142.threadsChanged": [
+    {
+      "type": 0,
+      "value": "메시지 아래 스레드 요약이 겹친 얼굴과 답글 수, 새 답글 칩으로 바뀌었고, 스레드를 따라가면 새 답글 알림이 와요. 폰에서는 메시지를 오른쪽에서 왼쪽으로 밀면 그 자리에서 스레드 답글을 써요."
+    }
+  ],
+  "releaseNotes.v0142.threadsTitle": [
+    {
+      "type": 0,
+      "value": "스레드 요약과 따라가기"
+    }
+  ],
+  "releaseNotes.v0142.threadsTryIt": [
+    {
+      "type": 0,
+      "value": "스레드가 달린 메시지의 요약 줄로 스레드를 열고, 머리의 「따라가기」를 골라 보세요. 폰에서는 메시지를 밀어 보세요."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -1559,6 +4438,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 공개"
+    }
+  ],
+  "reply.alsoInChannel.label": [
+    {
+      "type": 0,
+      "value": "대화에도 보내기"
+    }
+  ],
+  "reply.alsoInChannel.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
     }
   ],
   "reply.card.cancel": [
@@ -1619,6 +4510,579 @@ export const catalog: MessageCatalog = {
       "value": "답글 보내기"
     }
   ],
+  "reply.home.excerptDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "reply.home.header": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님 스레드에 답글"
+    }
+  ],
+  "reply.home.headerSelf": [
+    {
+      "type": 0,
+      "value": "내 글 스레드에 답글"
+    }
+  ],
+  "reply.home.headerUnknown": [
+    {
+      "type": 0,
+      "value": "스레드에 답글"
+    }
+  ],
+  "reply.home.open": [
+    {
+      "type": 0,
+      "value": "이 답글이 달린 스레드 열기"
+    }
+  ],
+  "settings.aiLimits.ceilingSearches": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.ceilingTokens": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.cleared": [
+    {
+      "type": 0,
+      "value": "한도를 껐어요."
+    }
+  ],
+  "settings.aiLimits.description": [
+    {
+      "type": 0,
+      "value": "도우미가 쓰는 양에 거는 한도예요. 기본은 제한 없음이고, 팀 키로 쓰는 만큼 팀이 정해요. 원하면 하루나 한 달 한도를 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorEmpty": [
+    {
+      "type": 0,
+      "value": "값을 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidCount": [
+    {
+      "type": 0,
+      "value": "1 이상의 정수로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidUsd": [
+    {
+      "type": 0,
+      "value": "0보다 큰 금액을 소수 여섯 자리까지 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorOverCeiling": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 정한 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "까지만 적을 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorTooLarge": [
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 이하로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorZero": [
+    {
+      "type": 0,
+      "value": "0은 한도로 쓸 수 없어요. 한도를 없애려면 스위치를 꺼 주세요."
+    }
+  ],
+  "settings.aiLimits.loadFailed": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오지 못했어요."
+    }
+  ],
+  "settings.aiLimits.loading": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오고 있어요."
+    }
+  ],
+  "settings.aiLimits.notAdmin": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 볼 수 있어요."
+    }
+  ],
+  "settings.aiLimits.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "settings.aiLimits.operatorOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 팀 AI를 멈춰 뒀어요."
+    }
+  ],
+  "settings.aiLimits.operatorSearchOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 웹 검색을 꺼 뒀어요."
+    }
+  ],
+  "settings.aiLimits.pricingNote": [
+    {
+      "type": 0,
+      "value": "공개 단가로 계산한 금액이에요. 공급사 청구서와 다를 수 있어요."
+    }
+  ],
+  "settings.aiLimits.resetsDate": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.resetsDay": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.aiLimits.rowHint": [
+    {
+      "type": 0,
+      "value": "도우미 사용량의 하루·한 달 한도를 정하고 사용량을 봐요."
+    }
+  ],
+  "settings.aiLimits.save": [
+    {
+      "type": 0,
+      "value": "저장"
+    }
+  ],
+  "settings.aiLimits.saved": [
+    {
+      "type": 0,
+      "value": "저장했어요."
+    }
+  ],
+  "settings.aiLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "한도를 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "settings.aiLimits.saveForbidden": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 한도를 바꿀 수 있어요."
+    }
+  ],
+  "settings.aiLimits.saving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "settings.aiLimits.searchesLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 한도"
+    }
+  ],
+  "settings.aiLimits.searchesOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회 사용"
+    }
+  ],
+  "settings.aiLimits.searchesUnit": [
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 횟수"
+    }
+  ],
+  "settings.aiLimits.searchHint": [
+    {
+      "type": 0,
+      "value": "넘으면 새로 시작할 때까지 도우미가 웹 검색 없이 답해요."
+    }
+  ],
+  "settings.aiLimits.stopHint": [
+    {
+      "type": 0,
+      "value": "넘으면 도우미가 멈추고 다른 에이전트에게 맡기는 버튼이 나와요."
+    }
+  ],
+  "settings.aiLimits.title": [
+    {
+      "type": 0,
+      "value": "사용 한도"
+    }
+  ],
+  "settings.aiLimits.tokensLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 한도"
+    }
+  ],
+  "settings.aiLimits.tokensOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰"
+    }
+  ],
+  "settings.aiLimits.tokensToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰 사용"
+    }
+  ],
+  "settings.aiLimits.tokensUnit": [
+    {
+      "type": 0,
+      "value": "토큰"
+    }
+  ],
+  "settings.aiLimits.tokensValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 수"
+    }
+  ],
+  "settings.aiLimits.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 사용 한도를 지원하지 않아요."
+    }
+  ],
+  "settings.aiLimits.usageMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usageToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usdApprox": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "amount"
+    },
+    {
+      "type": 0,
+      "value": " 이상"
+    }
+  ],
+  "settings.aiLimits.usdInactive": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 이 금액 한도는 걸리지 않아요. 토큰 한도를 함께 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액 한도"
+    }
+  ],
+  "settings.aiLimits.usdModelUnpriced": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 금액 한도를 켤 수 없어요. 토큰 한도를 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdNoUsageYet": [
+    {
+      "type": 0,
+      "value": "도우미가 한 번 답한 뒤에 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.usdOfLimit": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    }
+  ],
+  "settings.aiLimits.usdThisMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 1,
+      "value": "spent"
+    }
+  ],
+  "settings.aiLimits.usdUnavailableNow": [
+    {
+      "type": 0,
+      "value": "지금은 금액 한도를 켤 수 없어요."
+    }
+  ],
+  "settings.aiLimits.usdUnit": [
+    {
+      "type": 0,
+      "value": "달러"
+    }
+  ],
+  "settings.aiLimits.usdUnpricedRuns": [
+    {
+      "type": 0,
+      "value": "단가를 모르는 모델로 한 요청 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 금액에 넣지 않았어요."
+    }
+  ],
+  "settings.aiLimits.usdValueLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액(달러)"
+    }
+  ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "작게"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "왼쪽에 작은 그림을 두고, 오른쪽에 주소와 제목 한 줄, 설명 한 줄을 보여줘요."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "끄기"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "메시지 속 링크만 남기고 카드는 그리지 않아요."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "크게"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
+    }
+  ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 서버 주소가 없어요."
+    }
+  ],
+  "settings.invite.guestInvitesPaused": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "알림 설정을 확인하는 중이에요."
+    }
+  ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "따라가는 스레드에 남이 쓴 새 답글이에요."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "참여한 스레드의 새 답글"
+    }
+  ],
   "settings.profile.languageCurrent": [
     {
       "type": 0,
@@ -1669,6 +5133,1550 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "teamAi.helper.aliasesLine": [
+    {
+      "type": 0,
+      "value": "부르는 이름: "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "teamAi.helper.aliasNotDerivable": [
+    {
+      "type": 0,
+      "value": "이 이름은 짧은 부름 이름으로 만들 수 없어요. 대화에서는 @로 이름을 그대로 불러 주세요."
+    }
+  ],
+  "teamAi.helper.aliasReserved": [
+    {
+      "type": 0,
+      "value": "이 이름은 부름 이름으로 쓸 수 없어요."
+    }
+  ],
+  "teamAi.helper.description": [
+    {
+      "type": 0,
+      "value": "도우미의 이름과 할 수 있는 일을 정해요."
+    }
+  ],
+  "teamAi.helper.nameErrorForbidden": [
+    {
+      "type": 0,
+      "value": "이름은 소유자나 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.helper.nameErrorInvalid": [
+    {
+      "type": 0,
+      "value": "이름은 비어 있지 않아야 하고 100자를 넘을 수 없어요."
+    }
+  ],
+  "teamAi.helper.nameErrorOther": [
+    {
+      "type": 0,
+      "value": "이름을 바꾸지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "teamAi.helper.nameErrorReserved": [
+    {
+      "type": 0,
+      "value": "멘션에 쓸 수 없는 이름이에요. 다른 이름으로 적어 주세요."
+    }
+  ],
+  "teamAi.helper.nameErrorTaken": [
+    {
+      "type": 0,
+      "value": "다른 멤버가 쓰고 있거나 비슷해 보이는 이름이에요. 다른 이름으로 적어 주세요."
+    }
+  ],
+  "teamAi.helper.nameHint": [
+    {
+      "type": 0,
+      "value": "새 이름으로도 부를 수 있어요. 예전 부름 이름은 그대로 남고, 4개를 넘으면 오래된 것부터 빠져요."
+    }
+  ],
+  "teamAi.helper.nameLabel": [
+    {
+      "type": 0,
+      "value": "도우미 이름"
+    }
+  ],
+  "teamAi.helper.nameSave": [
+    {
+      "type": 0,
+      "value": "이름 저장"
+    }
+  ],
+  "teamAi.helper.nameSaved": [
+    {
+      "type": 0,
+      "value": "이름을 바꿨어요."
+    }
+  ],
+  "teamAi.helper.nameSaving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "teamAi.helper.rolesForbidden": [
+    {
+      "type": 0,
+      "value": "할 일은 소유자나 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.helper.rolesHeading": [
+    {
+      "type": 0,
+      "value": "할 수 있는 일"
+    }
+  ],
+  "teamAi.helper.rolesHint": [
+    {
+      "type": 0,
+      "value": "끄면 도우미가 그 일을 하지 않아요. 켜고 끄는 것은 관리자만 해요."
+    }
+  ],
+  "teamAi.helper.rolesMemoryOff": [
+    {
+      "type": 0,
+      "value": "팀 기억이 꺼져 있어요. 설정 › 기억에서 먼저 켜 주세요."
+    }
+  ],
+  "teamAi.helper.rolesOffline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 바꿀 수 없어요."
+    }
+  ],
+  "teamAi.helper.rolesSaveFailed": [
+    {
+      "type": 0,
+      "value": "할 일을 바꾸지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "teamAi.phone.loadFailed": [
+    {
+      "type": 0,
+      "value": "도우미 설정을 불러오지 못했어요."
+    }
+  ],
+  "teamAi.phone.loading": [
+    {
+      "type": 0,
+      "value": "도우미 설정을 불러오는 중이에요."
+    }
+  ],
+  "teamAi.phone.rowTitle": [
+    {
+      "type": 0,
+      "value": "도우미"
+    }
+  ],
+  "teamAi.roles.alwaysOn": [
+    {
+      "type": 0,
+      "value": "항상 켜져 있어요."
+    }
+  ],
+  "teamAi.roles.chatReadHint": [
+    {
+      "type": 0,
+      "value": "질문에 답하고, 부른 사람이 볼 수 있는 대화와 멤버를 읽고, 웹에서 찾아요."
+    }
+  ],
+  "teamAi.roles.chatReadName": [
+    {
+      "type": 0,
+      "value": "대화·읽기"
+    }
+  ],
+  "teamAi.roles.codeHint": [
+    {
+      "type": 0,
+      "value": "코드 일은 「작업 요청」 카드로 미리 채워 줘요. 도우미가 코드를 직접 돌리지는 않아요."
+    }
+  ],
+  "teamAi.roles.codeName": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "teamAi.roles.filesHint": [
+    {
+      "type": 0,
+      "value": "첨부한 파일을 읽어요."
+    }
+  ],
+  "teamAi.roles.filesName": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "teamAi.roles.inviteAccessHint": [
+    {
+      "type": 0,
+      "value": "초대 링크를 만들고 에이전트를 초대하는 일을 승인 카드로 올려요."
+    }
+  ],
+  "teamAi.roles.inviteAccessName": [
+    {
+      "type": 0,
+      "value": "초대·권한"
+    }
+  ],
+  "teamAi.roles.longResearchHint": [
+    {
+      "type": 0,
+      "value": "오래 걸리는 조사를 이어서 해요."
+    }
+  ],
+  "teamAi.roles.longResearchName": [
+    {
+      "type": 0,
+      "value": "긴 조사"
+    }
+  ],
+  "teamAi.roles.memoryHint": [
+    {
+      "type": 0,
+      "value": "팀 기억을 찾고, 기억할 만한 것을 제안해요."
+    }
+  ],
+  "teamAi.roles.memoryName": [
+    {
+      "type": 0,
+      "value": "기억"
+    }
+  ],
+  "teamAi.roles.noticeBoth": [
+    {
+      "type": 0,
+      "value": "파일과 기억을 켜면 도우미가 읽은 첨부 파일과 찾은 팀 기억의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.noticeFiles": [
+    {
+      "type": 0,
+      "value": "파일을 켜면 도우미가 읽은 첨부 파일의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.noticeMemory": [
+    {
+      "type": 0,
+      "value": "기억을 켜면 도우미가 찾은 팀 기억의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.workspaceAdminHint": [
+    {
+      "type": 0,
+      "value": "채널 만들기, 프로필과 이름 바꾸기, 설정과 앱 설치를 승인 카드로 올려요."
+    }
+  ],
+  "teamAi.roles.workspaceAdminName": [
+    {
+      "type": 0,
+      "value": "워크스페이스 관리"
+    }
+  ],
+  "teamAi.stage.checkingLine": [
+    {
+      "type": 0,
+      "value": "팀 AI를 확인하는 중이에요."
+    }
+  ],
+  "teamAi.stage.continue": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "teamAi.stage.doneDetail": [
+    {
+      "type": 0,
+      "value": "채팅에서 @로 불러 보세요."
+    }
+  ],
+  "teamAi.stage.doneLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켰어요."
+    }
+  ],
+  "teamAi.stage.enable": [
+    {
+      "type": 0,
+      "value": "도우미 켜기"
+    }
+  ],
+  "teamAi.stage.enableFailedDetail": [
+    {
+      "type": 0,
+      "value": "키는 저장돼 있어요. 다시 시도하거나 건너뛰고 나중에 설정 › AI에서 켤 수 있어요."
+    }
+  ],
+  "teamAi.stage.enableFailedLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켜지 못했어요."
+    }
+  ],
+  "teamAi.stage.enabling": [
+    {
+      "type": 0,
+      "value": "도우미 켜는 중"
+    }
+  ],
+  "teamAi.stage.enablingLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켜는 중이에요."
+    }
+  ],
+  "teamAi.stage.keyDetail": [
+    {
+      "type": 0,
+      "value": "키를 넣으면 채팅에서 도우미가 질문에 답하고, 바꿀 일은 승인 카드로 올려요. 건너뛰면 도우미는 꺼진 채예요."
+    }
+  ],
+  "teamAi.stage.keyFailedLine": [
+    {
+      "type": 0,
+      "value": "키를 확인하지 못했어요."
+    }
+  ],
+  "teamAi.stage.keyLine": [
+    {
+      "type": 0,
+      "value": "팀 AI 키를 넣어 볼까요?"
+    }
+  ],
+  "teamAi.stage.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
+  "teamAi.stage.loadErrorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인하고 다시 시도하거나, 나중에 설정 › AI에서 해도 돼요."
+    }
+  ],
+  "teamAi.stage.loadErrorLine": [
+    {
+      "type": 0,
+      "value": "팀 AI를 확인하지 못했어요."
+    }
+  ],
+  "teamAi.stage.nameRequired": [
+    {
+      "type": 0,
+      "value": "이름을 적어 주세요."
+    }
+  ],
+  "teamAi.stage.notOperatorDetail": [
+    {
+      "type": 0,
+      "value": "운영자가 설정 › AI에서 키를 넣으면 도우미를 켤 수 있어요. 지금은 건너뛰어도 돼요."
+    }
+  ],
+  "teamAi.stage.notOperatorLine": [
+    {
+      "type": 0,
+      "value": "팀 AI 키는 서버 운영자가 넣어요."
+    }
+  ],
+  "teamAi.stage.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "teamAi.stage.reentry": [
+    {
+      "type": 0,
+      "value": "건너뛰어도 돼요. 설정 › AI에서 언제든 키를 넣고 도우미를 켤 수 있어요."
+    }
+  ],
+  "teamAi.stage.renameFailedNote": [
+    {
+      "type": 0,
+      "value": "이름은 바꾸지 못했어요. 설정 › AI에서 다시 바꿔 보세요."
+    }
+  ],
+  "teamAi.stage.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "teamAi.stage.setupDetail": [
+    {
+      "type": 0,
+      "value": "키가 연결됐어요. 지금 정한 것은 나중에 설정 › AI에서 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.stage.setupLine": [
+    {
+      "type": 0,
+      "value": "도우미의 이름과 할 일을 골라요."
+    }
+  ],
+  "teamAi.stage.setupUnverifiedDetail": [
+    {
+      "type": 0,
+      "value": "이 서버는 키를 직접 확인하지 않아요. 도우미가 처음 답할 때 키가 맞는지 알 수 있어요."
+    }
+  ],
+  "teamAi.stage.verifyingLine": [
+    {
+      "type": 0,
+      "value": "키를 확인하는 중이에요."
+    }
+  ],
+  "timeline.agentRail.open": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 일하는 에이전트 보기"
+    }
+  ],
+  "timeline.agentRail.openActivity": [
+    {
+      "type": 0,
+      "value": "활동 보기"
+    }
+  ],
+  "timeline.agentRail.openRecord": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 작업 기록 열기"
+    }
+  ],
+  "timeline.agentRail.sheetClose": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트 닫기"
+    }
+  ],
+  "timeline.agentRail.sheetTitle": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트"
+    }
+  ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "입력창에 넣어 뒀어요. 보내면 에이전트가 다시 제안해요."
+    }
+  ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.lightbox.copied": [
+    {
+      "type": 0,
+      "value": "복사했어요"
+    }
+  ],
+  "timeline.lightbox.copy": [
+    {
+      "type": 0,
+      "value": "이미지 복사"
+    }
+  ],
+  "timeline.lightbox.copyFailed": [
+    {
+      "type": 0,
+      "value": "이미지를 복사하지 못했어요. 파일을 내려받아 쓰세요."
+    }
+  ],
+  "timeline.lightbox.zoomIn": [
+    {
+      "type": 0,
+      "value": "확대"
+    }
+  ],
+  "timeline.lightbox.zoomOut": [
+    {
+      "type": 0,
+      "value": "축소"
+    }
+  ],
+  "timeline.runException.open": [
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": ". 작업 기록 열기"
+    }
+  ],
+  "timeline.runException.settings": [
+    {
+      "type": 0,
+      "value": "에이전트 설정 열기"
+    }
+  ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "전송 실패"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "전송 중"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.thread.followHint": [
+    {
+      "type": 0,
+      "value": "답하면 이 스레드를 따라가요."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가지 않아요. 누르면 따라가요."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가고 있어요. 누르면 그만 따라가요."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "따라가기"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "그만 따라가기"
+    }
+  ],
+  "timeline.thread.open": [
+    {
+      "type": 0,
+      "value": "스레드 열기, 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.openUnread": [
+    {
+      "type": 0,
+      "value": "스레드 열기, 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 새 답글 "
+    },
+    {
+      "type": 2,
+      "value": "unread",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.replyCount": [
+    {
+      "type": 0,
+      "value": "답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.unreadChip": [
+    {
+      "type": 0,
+      "value": "새 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.triggerChip.jumpHint": [
+    {
+      "type": 0,
+      "value": "답 메시지로 이동"
+    }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "링크 미리보기: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 미리보기 없이 보내기"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 링크 미리보기 없이 보내요."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "보내기 전 링크 미리보기"
+    }
+  ],
+  "timeline.unfurl.video": [
+    {
+      "type": 0,
+      "value": "동영상"
+    }
+  ],
+  "timeline.workHealth.dwell": [
+    {
+      "type": 0,
+      "value": "같은 단계에 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
+  "timeline.workHealth.failedActivities": [
+    {
+      "type": 0,
+      "value": "실패한 활동 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.quiet": [
+    {
+      "type": 0,
+      "value": "조용해요 · 마지막 보고 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 전"
+    }
+  ],
+  "timeline.workHealth.quietShort": [
+    {
+      "type": 0,
+      "value": "조용해요"
+    }
+  ],
+  "timeline.workHealth.rejectedApprovals": [
+    {
+      "type": 0,
+      "value": "거부된 승인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.retries": [
+    {
+      "type": 0,
+      "value": "oort 호출 재시도 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workPlan.button": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 완료"
+    }
+  ],
+  "timeline.workPlan.buttonDone": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 모두 완료"
+    }
+  ],
+  "timeline.workPlan.maybeStale": [
+    {
+      "type": 0,
+      "value": "기록이 길어서 마지막 계획이 아닐 수 있어요."
+    }
+  ],
+  "timeline.workPlan.notLive": [
+    {
+      "type": 0,
+      "value": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요."
+    }
+  ],
+  "timeline.workPlan.openAll": [
+    {
+      "type": 0,
+      "value": "모두 보기"
+    }
+  ],
+  "timeline.workPlan.sessionLabel": [
+    {
+      "type": 0,
+      "value": "작업 세션"
+    }
+  ],
+  "timeline.workPlan.stepCurrent": [
+    {
+      "type": 0,
+      "value": "지금 단계"
+    }
+  ],
+  "timeline.workPlan.stepDone": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "timeline.workPlan.stepPending": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "timeline.workPlan.switching": [
+    {
+      "type": 0,
+      "value": "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요."
+    }
+  ],
+  "timeline.workPlan.title": [
+    {
+      "type": 0,
+      "value": "계획 · "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 완료"
+    }
+  ],
+  "timeline.workPlan.titleDone": [
+    {
+      "type": 0,
+      "value": "계획 · 모두 마쳤어요"
+    }
+  ],
+  "timeline.workRecord.bundleRead": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleReadSearch": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · 검색 "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleSearch": [
+    {
+      "type": 0,
+      "value": "검색 "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.capped": [
+    {
+      "type": 0,
+      "value": "처음 "
+    },
+    {
+      "type": 2,
+      "value": "shown",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "줄만 보여요. 위 합계는 모두 센 값이에요."
+    }
+  ],
+  "timeline.workRecord.durationMinutes": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.workRecord.durationSeconds": [
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.workRecord.durationUnderTenth": [
+    {
+      "type": 0,
+      "value": "0.1초 미만"
+    }
+  ],
+  "timeline.workRecord.emptyEnded": [
+    {
+      "type": 0,
+      "value": "이 일에서 oort가 잰 도구 호출은 없었어요."
+    }
+  ],
+  "timeline.workRecord.emptyOpen": [
+    {
+      "type": 0,
+      "value": "아직 oort가 잰 도구 호출이 없어요."
+    }
+  ],
+  "timeline.workRecord.failureAlreadyClaimed": [
+    {
+      "type": 0,
+      "value": "이미 다른 곳에서 가져갔어요"
+    }
+  ],
+  "timeline.workRecord.failureClaimExpired": [
+    {
+      "type": 0,
+      "value": "맡은 시간이 지나 있었어요"
+    }
+  ],
+  "timeline.workRecord.failureConflict": [
+    {
+      "type": 0,
+      "value": "다른 변경과 겹쳤어요"
+    }
+  ],
+  "timeline.workRecord.failureInternal": [
+    {
+      "type": 0,
+      "value": "서버 안쪽 문제였어요"
+    }
+  ],
+  "timeline.workRecord.failureInvalidArguments": [
+    {
+      "type": 0,
+      "value": "요청 형식이 맞지 않았어요"
+    }
+  ],
+  "timeline.workRecord.failureNotAuthorized": [
+    {
+      "type": 0,
+      "value": "권한이 없었어요"
+    }
+  ],
+  "timeline.workRecord.failureUnavailable": [
+    {
+      "type": 0,
+      "value": "지금은 처리할 수 없었어요"
+    }
+  ],
+  "timeline.workRecord.kindDelegate": [
+    {
+      "type": 0,
+      "value": "다른 에이전트에게 맡기기"
+    }
+  ],
+  "timeline.workRecord.kindEdit": [
+    {
+      "type": 0,
+      "value": "편집"
+    }
+  ],
+  "timeline.workRecord.kindOther": [
+    {
+      "type": 0,
+      "value": "그 밖의 일"
+    }
+  ],
+  "timeline.workRecord.kindRead": [
+    {
+      "type": 0,
+      "value": "읽기"
+    }
+  ],
+  "timeline.workRecord.kindRun": [
+    {
+      "type": 0,
+      "value": "명령 실행"
+    }
+  ],
+  "timeline.workRecord.kindSearch": [
+    {
+      "type": 0,
+      "value": "검색"
+    }
+  ],
+  "timeline.workRecord.kindWeb": [
+    {
+      "type": 0,
+      "value": "웹 요청"
+    }
+  ],
+  "timeline.workRecord.noteAgent": [
+    {
+      "type": 0,
+      "value": "에이전트가 스스로 알린 내용이에요. oort가 확인한 것은 아니에요."
+    }
+  ],
+  "timeline.workRecord.noteComputer": [
+    {
+      "type": 0,
+      "value": "내 컴퓨터에서 도는 작업이 보낸 내용이에요."
+    }
+  ],
+  "timeline.workRecord.noteOort": [
+    {
+      "type": 0,
+      "value": "oort가 직접 잰 도구 호출이에요. 인자와 내용은 기록하지 않아요."
+    }
+  ],
+  "timeline.workRecord.repeat": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.sourceAgent": [
+    {
+      "type": 0,
+      "value": "에이전트 보고"
+    }
+  ],
+  "timeline.workRecord.sourceComputer": [
+    {
+      "type": 0,
+      "value": "내 컴퓨터"
+    }
+  ],
+  "timeline.workRecord.sourceOort": [
+    {
+      "type": 0,
+      "value": "oort 기록"
+    }
+  ],
+  "timeline.workRecord.statusFailed": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "timeline.workRecord.statusRunning": [
+    {
+      "type": 0,
+      "value": "진행 중"
+    }
+  ],
+  "timeline.workRecord.statusUnclosed": [
+    {
+      "type": 0,
+      "value": "끝 보고 없음"
+    }
+  ],
+  "timeline.workRecord.summary": [
+    {
+      "type": 0,
+      "value": "도구 호출 "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.summaryFailed": [
+    {
+      "type": 0,
+      "value": "도구 호출 "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · 실패 "
+    },
+    {
+      "type": 2,
+      "value": "failed",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.unsupported": [
+    {
+      "type": 0,
+      "value": "oort 호출 기록은 서버 업데이트 뒤에 보여요."
+    }
+  ],
+  "timeline.workReport.emptyEnded": [
+    {
+      "type": 0,
+      "value": "이 일에서 에이전트가 알린 활동은 없었어요."
+    }
+  ],
+  "timeline.workReport.emptyOpen": [
+    {
+      "type": 0,
+      "value": "아직 에이전트가 알린 활동이 없어요."
+    }
+  ],
+  "timeline.workReport.planNotLive": [
+    {
+      "type": 0,
+      "value": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요."
+    }
+  ],
+  "timeline.workReport.tally": [
+    {
+      "type": 0,
+      "value": "끝낸 활동 합계 · "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.workReport.trimmed": [
+    {
+      "type": 0,
+      "value": "오래된 활동 일부는 합계로만 남았어요."
+    }
+  ],
+  "timeline.workReport.unsupported": [
+    {
+      "type": 0,
+      "value": "에이전트가 알린 활동은 서버 업데이트 뒤에 보여요."
+    }
+  ],
+  "timeline.workRequest.composerBusy": [
+    {
+      "type": 0,
+      "value": "쓰던 글이 있어 채우지 않았어요. 입력창을 비우고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.workRequest.fill": [
+    {
+      "type": 0,
+      "value": "입력창에 채우기"
+    }
+  ],
+  "timeline.workRequest.fillHint": [
+    {
+      "type": 0,
+      "value": "채운 글을 확인하고 직접 보내 주세요."
+    }
+  ],
+  "timeline.workRequest.fillLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 입력창에 채우기"
+    }
+  ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "이 대화는 DM이라 입력창에 채울 수 없어요. 채널에서 눌러 주세요."
+    }
+  ],
+  "timeline.workRequest.labelAny": [
+    {
+      "type": 0,
+      "value": "내 맥에 작업 맡기기"
+    }
+  ],
+  "timeline.workRequest.labelClaude": [
+    {
+      "type": 0,
+      "value": "내 맥의 Claude Code에 맡기기"
+    }
+  ],
+  "timeline.workRequest.labelCodex": [
+    {
+      "type": 0,
+      "value": "내 맥의 Codex에 맡기기"
+    }
+  ],
+  "timeline.workRequest.noPersonalAgent": [
+    {
+      "type": 0,
+      "value": "내 맥에 연결한 Claude Code·Codex가 아직 없어요. AI의 내 도구에서 먼저 연결해 주세요."
+    }
+  ],
+  "timeline.workRequest.openSheet": [
+    {
+      "type": 0,
+      "value": "작업 요청 열기"
+    }
+  ],
+  "timeline.workRequest.openSheetLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 작업 요청 열기"
+    }
+  ],
+  "timeline.workRequest.openTools": [
+    {
+      "type": 0,
+      "value": "내 도구 열기"
+    }
+  ],
+  "timeline.workRequest.sheetHint": [
+    {
+      "type": 0,
+      "value": "열린 시트에서 글을 확인하고 직접 보내 주세요."
+    }
+  ],
+  "timeline.workRequest.threadClosed": [
+    {
+      "type": 0,
+      "value": "스레드를 열고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.workStream.limit": [
+    {
+      "type": 0,
+      "value": "이 패널을 연 뒤에 도착한 흐르는 글과 도구 호출만 이 칸에 보이고, 이 칸의 내용은 저장하지 않아요."
+    }
+  ],
+  "timeline.workSummary.agentReported": [
+    {
+      "type": 0,
+      "value": "에이전트 보고"
+    }
+  ],
+  "timeline.workSummary.duration": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.workSummary.durationHours": [
+    {
+      "type": 2,
+      "value": "hours",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.workSummary.durationShort": [
+    {
+      "type": 0,
+      "value": "1분 미만"
+    }
+  ],
+  "timeline.workSummary.kindDelegate": [
+    {
+      "type": 0,
+      "value": "맡김 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindEdit": [
+    {
+      "type": 0,
+      "value": "편집 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindOther": [
+    {
+      "type": 0,
+      "value": "기타 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRead": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRun": [
+    {
+      "type": 0,
+      "value": "명령 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindSearch": [
+    {
+      "type": 0,
+      "value": "검색 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindWeb": [
+    {
+      "type": 0,
+      "value": "웹 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.openPanel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": ". 작업 패널 열기"
+    }
+  ],
+  "timeline.workSummary.stages": [
+    {
+      "type": 0,
+      "value": "단계 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workTool.actionClaimSecret": [
+    {
+      "type": 0,
+      "value": "비밀 받아가기"
+    }
+  ],
+  "timeline.workTool.actionInitiate": [
+    {
+      "type": 0,
+      "value": "먼저 승인 요청 올리기"
+    }
+  ],
+  "timeline.workTool.actionPropose": [
+    {
+      "type": 0,
+      "value": "승인 요청하기"
+    }
+  ],
+  "timeline.workTool.cardSuggest": [
+    {
+      "type": 0,
+      "value": "카드 제안하기"
+    }
+  ],
+  "timeline.workTool.conversationRead": [
+    {
+      "type": 0,
+      "value": "대화 읽기"
+    }
+  ],
+  "timeline.workTool.expressionAssemble": [
+    {
+      "type": 0,
+      "value": "표현 만들기"
+    }
+  ],
+  "timeline.workTool.inboxRead": [
+    {
+      "type": 0,
+      "value": "받은 일 읽기"
+    }
+  ],
+  "timeline.workTool.jobRelease": [
+    {
+      "type": 0,
+      "value": "일 돌려놓기"
+    }
+  ],
+  "timeline.workTool.jobRenew": [
+    {
+      "type": 0,
+      "value": "맡은 시간 늘리기"
+    }
+  ],
+  "timeline.workTool.jobsClaim": [
+    {
+      "type": 0,
+      "value": "일 가져가기"
+    }
+  ],
+  "timeline.workTool.jobStart": [
+    {
+      "type": 0,
+      "value": "작업 시작 알리기"
+    }
+  ],
+  "timeline.workTool.messagePost": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "timeline.workTool.ping": [
+    {
+      "type": 0,
+      "value": "살아 있다고 알리기"
+    }
+  ],
+  "timeline.workTool.runComplete": [
+    {
+      "type": 0,
+      "value": "끝 알리기"
+    }
+  ],
+  "timeline.workTool.runEvent": [
+    {
+      "type": 0,
+      "value": "진행 알리기"
+    }
+  ],
+  "timeline.workTool.unknown": [
+    {
+      "type": 0,
+      "value": "oort 도구"
     }
   ]
 };

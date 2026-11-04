@@ -82,6 +82,9 @@ pub struct DirectMessage {
     /// The **calling** member's push-suppression preference for this channel
     /// (`notification_pref`, migration 018) — not a channel-wide flag.
     pub muted: bool,
+    /// End of the calling member's timed mute, epoch ms — set only while a timed mute is in
+    /// progress (ADR-0206 D12, #4343); an open-ended or expired mute has none.
+    pub muted_until_ms: Option<i64>,
 }
 
 /// Outcome of [`open_direct_message_in_tx`].
@@ -161,6 +164,7 @@ fn decode_direct_message(row: &sqlx::postgres::PgRow) -> Result<DirectMessage, s
         member_ids: row.try_get("member_ids")?,
         created_by: row.try_get("created_by")?,
         muted: row.try_get("muted")?,
+        muted_until_ms: row.try_get("muted_until_ms")?,
     })
 }
 
@@ -268,7 +272,14 @@ pub async fn open_direct_message_in_tx(
                      AND np.channel_id = selected_channel.id \
                      AND np.member_id = $3 \
                      AND (np.muted_until IS NULL OR np.muted_until > now()) \
-                ) AS muted \
+                ) AS muted, \
+                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
+                    FROM notification_pref np \
+                   WHERE np.workspace_id = selected_channel.workspace_id \
+                     AND np.channel_id = selected_channel.id \
+                     AND np.member_id = $3 \
+                     AND np.muted_until > now() \
+                ) AS muted_until_ms \
            FROM selected_channel \
           WHERE ( \
                   EXISTS (SELECT 1 FROM channel_seq seq WHERE seq.channel_id = selected_channel.id) \
@@ -400,7 +411,14 @@ pub async fn list_direct_messages(
                      AND np.channel_id = c.id \
                      AND np.member_id = $2 \
                      AND (np.muted_until IS NULL OR np.muted_until > now()) \
-                ) AS muted \
+                ) AS muted, \
+                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
+                    FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND np.muted_until > now() \
+                ) AS muted_until_ms \
            FROM channel c \
            JOIN membership actor_membership \
              ON actor_membership.channel_id = c.id \

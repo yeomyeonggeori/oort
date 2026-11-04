@@ -577,6 +577,10 @@ async fn initiate_in_tx(
             momo_agent::initiative::card_bookkeeping(&key, identity.connection_id),
         );
     }
+    // ADR-0204 증보 6 D6-2: judged on the payload that is about to be stored — always `Open`
+    // for this card, which nobody asked for.
+    let decision =
+        momo_agent::actions::decision_mode(momo_agent::ACTION_TYPE_WORKSPACE_ACTION, &payload);
     let approval_id = momo_agent::create_pending_approval_in_tx(
         conn,
         workspace_id,
@@ -628,6 +632,7 @@ async fn initiate_in_tx(
             Value::String(momo_agent::initiative::initiative_summary(action)),
         );
     }
+    momo_agent::actions::stamp_decision_mode(&mut props, decision);
     let card = send_message_in_tx(
         conn,
         workspace_id,
@@ -635,7 +640,12 @@ async fn initiate_in_tx(
             channel_id: dm_channel,
             author_member_id: agent,
             message_type: MessageType::ApprovalRequest,
-            body: Some(momo_agent::workspace_action_request_body(action)),
+            // 「먼저 제안 · …」: nobody asked for this card (ADR-0204 증보 6 D6-3).
+            body: Some(momo_agent::actions::workspace_action_request_body_with(
+                action,
+                Some(&resolved.validated.normalized),
+                true,
+            )),
             props,
             root_id: None,
             reply_to_id: None,

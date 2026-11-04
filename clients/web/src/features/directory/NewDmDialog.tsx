@@ -22,16 +22,21 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
+import { newDmDraftKey, useHoldDraftOnEntry, useRestoredEntryDraft } from "@/lib/entryDrafts";
 import { existingDmChannelId, newDmCandidates, peerDot } from "./newDmModel";
 import {
   NewDmOpenContext,
   NewDmOpenStateContext,
 } from "./useNewDm";
 import { useOpenDm } from "./useOpenDm";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 새 다이렉트 메시지 (#3662, Buzz의 「To:」 선택 모달을 우리 문법으로).
@@ -118,7 +123,11 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   const navigate = useNavigate();
   const dm = useOpenDm();
   const offline = useOffline();
-  const [query, setQuery] = useState("");
+  // 알림 클릭이 닫은 대화상자였다면 쓰던 검색어로 선다(#5058). 사람이 닫기로 닫은 대화상자는 평소처럼 빈 채로 선다 —
+  // 이 모달은 열려 있는 동안에만 마운트돼 검색어가 따라오지 않는 것이 본래 약속이고, 맡기는 것은 방송이 올 때뿐이다.
+  const draftKey = newDmDraftKey(workspaceId);
+  const restoredQuery = useRestoredEntryDraft<string>(draftKey);
+  const [query, setQuery] = useState(restoredQuery ?? "");
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -128,6 +137,8 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   );
   const groups = useMemo(() => groupDirectory(candidates, query), [candidates, query]);
   const busy = dm.pendingMemberId !== null;
+  // 대화를 여는 요청이 나가 있으면 곧 끝나는 일이라(성공하면 검색어는 쓰임을 다했다) 맡기지 않는다.
+  useHoldDraftOnEntry<string>(draftKey, () => (!busy && query.trim() !== "" ? query : undefined));
 
   const pick = useCallback(
     async (member: RosterMember) => {
@@ -204,10 +215,10 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
     body = <Skeleton ready={false} rows={6} className="p-4" />;
   } else if (roster.error !== null && candidates.length === 0) {
     body = (
-      <InlineBanner
-        message="멤버 명부를 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={() => void roster.refetch()}
+      <LoadFailureBox
+        titleKey={CONNECTION_KEYS.loadMembersTitle}
+        cause={loadCauseOf(roster.error)}
+        onRetry={() => void roster.refetch()}
         testId="new-dm-roster-error"
       />
     );
@@ -276,7 +287,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 이미 대화 중인 사람에게는 이동할 수 있습니다."
+          message={<BlockedReason frame="openExistingDm" />}
           testId="new-dm-offline"
         />
       ) : null}

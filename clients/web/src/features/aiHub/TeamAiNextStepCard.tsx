@@ -12,6 +12,7 @@ import {
   probeTeamAiSwitch,
   readTeamAiSwitch,
   setTeamAiSwitch,
+  teamAiHelperName,
   teamAiSaveErrorCopy,
 } from "@momo/core/features/settings/teamAiSwitch";
 import {
@@ -29,6 +30,7 @@ import { seedComposerText } from "@/features/chat/draftStore";
 import { channelPath } from "@/features/inbox/anchor";
 import { teamAiSettingKey } from "@/features/settings/TeamAiSetting";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「팀 AI 키」 구획의 다음 단계 카드 (ADR-0201 증보 v2 H8, #3893).
@@ -133,6 +135,10 @@ export function TeamAiNextStepCard({
     if (enabledBag !== null) doneRef.current?.focus();
   }, [enabledBag]);
 
+  // 문구가 부르는 이름은 도우미 멤버의 표시 이름이다(ADR-0201 증보 v3 B10-7). 멤버가 아직 없으면 기본 이름.
+  const helperMemberId = (enabledBag !== null ? readTeamAiSwitch(enabledBag) : state)?.memberId ?? undefined;
+  const helperName = teamAiHelperName(memberFor(directory.directory, helperMemberId));
+
   const roomChannels = useMemo(
     () =>
       channels.groups.channels.filter((channel) => (channel.name ?? "") !== ""),
@@ -148,13 +154,17 @@ export function TeamAiNextStepCard({
     const helper = memberFor(directory.directory, savedState.memberId ?? undefined);
     const name = teamAiSeedName(aliasStatus, helper);
     const callable = teamAiCallableLine(aliasStatus);
-    const notices = teamAiAliasNotices(aliasStatus, (alias) => {
-      const holder = (directory.data ?? []).find(
-        (member) =>
-          member.status !== "deleted" && member.handle.toLowerCase() === alias
-      );
-      return holder?.displayName ?? null;
-    });
+    const notices = teamAiAliasNotices(
+      aliasStatus,
+      (alias) => {
+        const holder = (directory.data ?? []).find(
+          (member) =>
+            member.status !== "deleted" && member.handle.toLowerCase() === alias
+        );
+        return holder?.displayName ?? null;
+      },
+      helperName
+    );
     return (
       <section
         aria-labelledby={titleId}
@@ -173,7 +183,7 @@ export function TeamAiNextStepCard({
           data-testid="team-ai-next-step-enabled"
         >
           <Check aria-hidden="true" className="size-4 shrink-0 text-ok" />
-          {COPY.enabled}
+          {COPY.enabled(helperName)}
         </p>
         {callable !== null && (
           <p className="text-meta text-ink" data-testid="team-ai-next-step-aliases">
@@ -257,9 +267,9 @@ export function TeamAiNextStepCard({
     >
       <div className="flex min-w-0 flex-col gap-1">
         <h3 id={titleId} className="text-body font-bold text-ink">
-          {COPY.title}
+          {COPY.title(helperName)}
         </h3>
-        <p className="max-w-2xl break-keep text-meta text-ink-muted">{COPY.lead}</p>
+        <p className="max-w-2xl break-keep text-meta text-ink-muted">{COPY.lead(helperName)}</p>
       </div>
 
       <ol className="flex min-w-0 flex-col gap-3">
@@ -293,13 +303,13 @@ export function TeamAiNextStepCard({
         <Step
           index={2}
           done={false}
-          title={COPY.step2Title}
+          title={COPY.step2Title(helperName)}
           testId="team-ai-next-step-2"
           detail={
             blocked ? (
               <span id={blockedId}>{COPY.step2Blocked}</span>
             ) : offline ? (
-              <span id={offlineId}>{COPY.offline}</span>
+              <span id={offlineId}><BlockedReason frame="turnOn" /></span>
             ) : null
           }
           action={
@@ -317,7 +327,7 @@ export function TeamAiNextStepCard({
               data-testid="team-ai-next-step-enable"
             >
               {enable.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {enable.isPending ? COPY.step2Busy : COPY.step2Action}
+              {enable.isPending ? COPY.step2Busy : COPY.step2Action(helperName)}
             </Button>
           }
         />

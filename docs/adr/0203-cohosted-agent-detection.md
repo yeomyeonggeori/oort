@@ -11,6 +11,8 @@
 - 증보(**Accepted** 2026-10-20, owner 승인 인용): **2026-10-20 같은 서버 Hermes의 모델 고르기** (#4143) — 파일 끝. 핀에 Hermes 제공자(`provider`)와 모델을 한 쌍으로 저장하고, 서버가 Hermes `/api/model/options`의 「로그인된 제공자」 목록 안으로 선택을 제한하며, 워커가 `/v1/chat/completions`에 둘을 함께 보낸다. D2의 고정 요청 목록에 읽기 GET 하나가 늘고, migration 144가 핀 표에 열 두 개를 더한다. D1·D3~D9·K1~K7은 바뀌지 않는다.
 - 증보(**Accepted** 2026-10-25, planner 위임 결정 — owner 10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」): **2026-10-25 환경 사실 읽기(platform·loginRelay)와 호스팅 제안 문구** (#4336, 온보딩 r2 R2-00) — 파일 끝. 운영자 전용 상태 읽기(`GET …/cohosted-agent`)에 닫힌 열거형 `environment{platform, loginRelay}`를 더하고, 「선언 없음」에서 운영자에게 계획 표시 카드를 여는 것까지 정한다. D1의 마지막 문장(「아무것도 보이지 않는다」)만 좁혀지고, 나머지 D·K·A·L·M과 D2의 요청 목록은 바뀌지 않는다. 구현은 #4337·#4338·#4339·#4340과 새 이슈(제안 카드 등)다.
 - 증보(**Accepted** 2026-10-26, owner 결정 「권장으로 승인」 — 시크릿 출력 범위가 옵트인 한정으로 넓어진다): **2026-10-25 Railway 생성기의 Hermes 공유 변수 출력(옵트인), A4′** (#4461, 온보딩 r2 R2-11) — 파일 끝. 옵트인 플래그(`--platform railway --with-agents`)가 있을 때만 T2 stdout에 정본 키 집합 밖의 공유 변수 둘(`HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`)을 새로 만들어 더한다. A4의 「정본 키 집합에 넣지 않고 T2 stdout 불변」 중 「운영자가 손으로 만든다」와 `self_host_env.sh:277-278`(T2와 `--with-agents` 동시 금지)만 이 옵트인 경로에 한해 바뀌고, 기본 출력은 바이트 단위로 같다. 카탈로그의 서비스·변수·compose·서버는 바뀌지 않는다. D·K·A1·A2·A5·L·M·F(F3 마지막 항·F6 railway 계획 문구 제외)는 바뀌지 않고, A3의 「출력에 값을 내지 않는다」는 이 증보가 Accepted된 뒤 T1(compose 파일 경로) 한정으로 읽는다.
+- 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 2회차 B0·H0): **2026-11-01 볼륨 `.env`는 허용 이름만, 연결 모드 설정과 엄격 모드** (#4950, #4935) — 파일 끝. 게이트가 볼륨 `.env`를 거부 목록이 아니라 허용 목록으로 판정하고(부팅 게이트와 `report`가 같은 함수 하나), 시작 명령·게이트가 `config.yaml`을 정해진 해시 목록(기본 설정 + 연결 모드 조각 조합)으로 받으며, 엄격 모드를 모든 기동에서 요구한다. D6의 도구 허용 목록·K4·I1~I4는 바뀌지 않는다.
+- 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 1회차 B0·H0·M0, 고정 이미지 안 증명 PASS): **2026-11-01 공동 호스팅 Hermes의 세션 검색·기억 도구는 끈다** (#4898, #4820 C2a 보안 검수 Low 후속) — 파일 끝. 한 Hermes가 모든 워크스페이스를 `state.db` 하나와 `memories/` 하나로 처리해 `session_search`·`memory`가 다른 런의 기록을 읽거나 심는 길이 되므로, 두 설정에서 둘을 끄고(deny-list·`memory.*` 스위치) 게이트가 켜진 설정의 기동을 거절한다. 같은 증보가 #4950 2회차 Low 셋(시험 사례·`.deleted` 표식 문장·핀 올림 절차)도 닫는다. D6의 허용 표면이 `todo_list`·`web_search`·`image_generate`로 좁아지고(`memory`·`session_search` 제외) D1~D5·D7~D9·K1~K7은 바뀌지 않는다.
 - 역방향: 2026-10-25 D6(Hermes 도구 잠금)은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 바꾸지 않는다. 팀 박스는 Hermes와 별개의 컴퓨터이고 Hermes 컨테이너(`/opt/data`)에는 셸을 붙이지 않으며 Hermes `terminal` 백엔드를 박스로 향하게 하지 않는다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 A4′(Accepted 2026-10-26)는 [ADR-0184](0184-platform-neutral-agent-driven-selfhost.md) D3의 「정본 키에서만」을 옵트인 경로에 한해 좁힌다. Accepted 전에는 0184 본문을 고치지 않고, Accepted 뒤 구현 이슈가 D3에 한 줄 역참조를 더한다. 10-25 증보(#4336)의 「바뀌지 않는 것」이 적은 A4 불변은 그 증보 시점의 서술이고, A4′가 Accepted되면 A4의 해당 문장은 이 절이 대체한다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
@@ -1004,3 +1006,159 @@ D1~D9·K1~K7·A1·A2·A5·L0~L6(Q1~Q3 포함)·M1~M5·F1~F9(F3 마지막 항·F6
 - `runtime-unverified`: Codex 구독의 실제 이미지 응답·한도, 실제 모델이 거절 문구를 받고 도구를 다시 부르는 행동, `MEDIA` 표시의 인라인 변환, 원본이 `images/edits`로 전달되는 경로(owner 10-30 예외의 실제 내려받기: Hermes의 SSRF 필터가 공개 도메인의 자기 주소를 통과시키는지, 리디렉션 없이 받는지, 모델이 주소를 `image_url`에 넣는지 포함), Railway의 실제 기동(같은 시작 명령 본문을 같은 이미지에서 돌렸을 뿐이다). 사설 주소로 풀리는 환경(로컬 compose의 `localhost`·`*.railway.internal`)에서는 Hermes의 필터가 자기 주소를 막으므로 예외가 켜져 있어도 사진은 가지 않는다(사설 주소 스위치는 게이트가 계속 거절한다). 팀 인스턴스에는 `HERMES_CONFIG_B64`·`HERMES_LOCKGATE_B64`·`HERMES_IMAGE_GUARD_B64`·`HERMES_IMAGE_GUARD_MANIFEST_B64`와 기동 명령의 체크섬 넷이 **함께** 바뀌어야 뜨고(#4849 배포 메모와 같다), 사진 예외를 켜려면 거기에 더해 `agent-worker`와 `hermes` 두 서비스에 **같은 값의 `OORT_SELF_MEDIA_ORIGIN`**(서비스의 공개 출처)을 둔다. 둘 중 하나만 있거나 값이 다르면 사진 주소는 플러그인이 거절한다. 저장소 변경이 실행 중 설정을 갱신하거나 배포를 승인하지 않는다.
 - 되돌리기(owner 10-30 예외만): 두 서비스에서 `OORT_SELF_MEDIA_ORIGIN`을 지우면 예외가 꺼지고(플러그인·게이트는 그대로 안전하다), 워커는 주소를 만들지 않는다. 이미 만들어진 토큰은 5분 안에 죽는다.
 - 바뀌지 않는 것: D1~D9·K1~K7(K4-1에 `image_gen`이 더해지는 것 제외), 터미널·코드 실행·브라우저·파일·`web_extract` 금지, `google-connectors.config.yaml`(커넥터 모드는 그림 도구가 없으므로 플러그인도 요구하지 않는다), 승인·텔레메트리·업데이트 규칙, oort가 구독 OAuth 토큰·원본 provider 키를 받지도 저장하지도 않는다는 불변식.
+
+## 증보 2026-11-01 — 볼륨 `.env`는 허용 이름만, 연결 모드 설정과 엄격 모드 (#4950, #4935)
+
+- Status: **Accepted** (2026-11-01, planner). 보안 경계(게이트가 무엇을 받아들이는가)를 **좁히는** 증보다. 독립 보안 검수 1회차 B0·H1·M0·L4 → 수리 → 2회차 B0·H0·M0·L3, 고정 이미지 안 증명(시나리오 35 + 시작 명령 10 + 실제 게이트웨이 기동) PASS 뒤에 Accepted로 올렸다. 근거: [#4950](https://github.com/yeomyeonggeori/oort/issues/4950)(#4886 검수 H2, 선재), [#4935](https://github.com/yeomyeonggeori/oort/issues/4935)(v0.1.41 사전 점검). 독립 검수 1회차의 지적(허용 목록이 닫았다고 한 길의 사실 정정, `GOOGLE_OAUTH_CLIENT_*`의 위치, 보조 항목들)은 이 절의 E2·E3·E4·E6·E7에 반영했다.
+- 범위: 공동 호스팅 Hermes의 잠금 게이트(`infra/hermes/lockgate.py`)·검수용 오라클(`env_loader_oracle.py`)·시험·고정 이미지 안 증명·Railway 시작 명령과 카탈로그 검사기·RELEASING의 Hermes 단계. 운영 서비스의 환경변수·볼륨·로그인은 건드리지 않는다(배포 때 planner, owner 사전 고지).
+
+### E1. 문제 — 거부 목록은 끝나지 않는다
+
+Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적재하고, 그 파일의 **모든 이름**을 환경에 적용한다. 로더는 「받지 말아야 할 이름」을 모른다. #4886까지 게이트는 위험한 이름 열두 개를 값으로 판정했는데, 안전 설정을 넓히는 이름은 그 밖에도 있고(미디어를 내보낼 수 있는 폴더 범위, 관리 설정의 위치, 데이터 폴더, 요청 전달 같은 위치·전달 변수), Hermes 자신도 쓰기 금지 이름을 이름 하나씩 모은 목록으로 두면서 `.env`에 직접 적힌 값은 그대로 읽는다. 이름을 하나씩 더하는 방식은 목록 밖의 다음 이름이 항상 남는다. 같은 문이 `$HERMES_HOME/.op.env`(`.env` 바로 뒤에 적재)로도 열려 있다.
+
+### E2. 결정 — 허용 목록, 이름은 완전 일치
+
+볼륨 `.env`는 **허용된 이름만** 가질 수 있다. 허용 목록 밖의 이름은 어떤 철자로 적혀도(`export`·따옴표·표시 문자·소문자·다른 값) **이름만 대고 기동을 거절**한다(값은 출력하지 않는다). 목록은 `lockgate.py`의 두 표다.
+
+1. `VOLUME_ENV_SECRETS` — 운영자가 볼륨에 두는 비밀. **값은 무엇이든**(빈 값도) 받는다. 이름마다 쓰는 저장소 파일을 표에 적었고 시험이 그 파일에 이름이 실제로 있는지 대조한다. 지금은 둘이다: `OPENAI_API_KEY`·`ANTHROPIC_API_KEY`(`render_model_config.py`의 `api-key-openai`·`api-key-anthropic`와 `model-fragments/*`가 「서비스 변수 또는 볼륨 `.env`」로 적은 모델 키). `GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`(`google-connectors.config.yaml`의 `mcp_servers.*.oauth`가 `${…}`로 읽는 클라이언트 쌍)은 **넣지 않았다**: 저장소의 기록(스파이크 K-S1b, RELEASING의 「서비스가 이미 가진」, C5)이 모두 서비스 변수를 정본으로 두고, `.env`는 override로 적재되어 서비스 변수보다 이기므로 허용하면 볼륨이 OAuth 클라이언트를 바꿀 수 있는 길이 새로 열린다. 저장소가 「없으면 이긴다」고 경고만 하는 `ANTHROPIC_TOKEN`·`CLAUDE_CODE_OAUTH_TOKEN`은 넣지 않았다(볼륨 로그인보다 먼저 이겨 어느 자격이 쓰이는지를 바꾼다).
+2. `VOLUME_ENV_SEEDED` — **이미지가 스스로 쓰는 줄**. `docker/stage2-hook.sh`의 `seed_one ".env" ".env.example"`이 새 볼륨의 첫 기동에서 이미지의 `/opt/hermes/.env.example`을 `.env`로 **복사**하는데, 이 일은 게이트가 끝난 뒤라서 첫 기동의 게이트는 파일을 못 보고 `report`와 둘째 기동의 게이트가 그 파일을 읽는다. 고정 이미지(v0.22.2)의 파일은 주석이 아닌 11줄(`TERMINAL_*` 3·`BROWSERBASE_*` 2·`BROWSER_*_TIMEOUT` 2·`*_TOOLS_DEBUG` 4)을 갖는다. 이 줄들을 허용하지 않으면 **모든 새 설치가 `report`에서 PID 1이 꺼지고 재시작 루프**에 빠진다. 그래서 이 11개는 **이름과 값이 둘 다 그대로**일 때만 받는다(`*_TOOLS_DEBUG`가 `true`로 바뀌면 도구 호출 내용이 디스크에 남으므로 값까지 고정한다). 고정 이미지 안 증명의 `env-seed-template`이 이 표를 이미지의 파일과 대조하고, 파일 그대로를 게이트와 진짜 로더에 넣는다. 같은 stage2 훅이 컨테이너 환경에 `API_SERVER_KEY`가 없을 때 키를 붙이고 라우팅 이름 셋을 컨테이너 환경에서 옮겨 쓰지만, 템플릿은 키를 주고 그 이름들은 주지 않아 해당하지 않는다.
+
+일치 규칙은 이렇다. 이름은 **완전 일치**(대소문자·모든 문자, 접두사·패턴·「계열」 없음)이고, 같은 이름이 여러 번이면 마지막 대입이 정하며, 값 없는 `NAME` 줄은 아무것도 설정하지 않는다. 표시 문자(U+FEFF)가 이름 안에 남으면 그것은 **다른 이름**이라 마찬가지로 목록 밖이다. 값은 의미로 읽지 않는다. python-dotenv가 환경에 넣는 **이름**은 값에 달려 있지 않으므로 `${…}` 참조를 풀 필요가 없고(#4886의 보간 해석은 판정에서 빠진다. 파싱·정리 단계의 읽기 정합은 그대로 쓴다), 그 덕에 게이트와 Hermes의 환경이 달라서 생기던 우회 길(#4886 H3)은 이 판독기에 대해서는 판정 대상 자체가 없어졌다. 다만 **파일에서 어떤 이름이 읽히는지**는 값에 달려 있을 수 있다: Hermes는 같은 파일을 둘째 판독기로도 읽고, 그 판독기는 값 안의 줄 경계 뒤를 새 문장으로 본다. 그래서 값을 보는 규칙이 둘 있다(허용된 이름의 값에 줄 경계가 없을 것, 둘째 판독기가 읽는 모든 이름이 목록에 있을 것. 아래 E3). 시험이 이 목록이 정확한 이름들의 목록임을 직접 잰다: 모든 항목이 `[A-Z][A-Z0-9_]*`이고, 허용된 이름에 접두·접미를 붙이거나 소문자로 쓰거나 한 글자 뺀 이름은 모두 거절된다.
+
+### E3. 판정은 함수 하나, 판독기는 둘, `.op.env`와 `profiles/` 항목은 있으면 거절
+
+부팅 게이트와 `report()`는 **같은** `volume_env_problems(env_path)` 하나만 부른다(이전의 `image_volume_env_problems`와 값 규칙은 없어졌다). 그 때문에 프록시·사설 주소 끔·안전 모드·프로젝트 플러그인·FAL 키·`OORT_SELF_MEDIA_ORIGIN`·`HERMES_MEDIA_DELIVERY_STRICT`·`API_SERVER_*`·`HERMES_YOLO_MODE`·`HERMES_DASHBOARD` 같은 이름은 그림 도구가 노출됐는지와 상관없이 늘 거절이다. 시험이 두 진입점이 같은 함수를 같은 인자로 부르는지를 직접 잰다(함수를 대역으로 바꿔 둘 다 들었는지 본다).
+
+**판독기가 둘이다.** Hermes는 `.env`를 python-dotenv(로더)로 환경에 올리고, 별도로 **줄 단위 판독기**(`agent/secret_scope.py`의 `load_env_file`)로도 읽는다. 자격 풀·설정 읽기·프로필 범위 같은 소비자가 이 판독기를 쓰고, 다중화가 꺼진 기본 경로에서도 쓴다. 둘은 같은 파일에서 서로 다른 이름을 읽을 수 있다(로더가 끝내지 못하는 문장, 따옴표 안의 줄, 로더가 줄 끝으로 보지 않는 문자 등. 입력의 종류는 시험 표 `LINE_READ`가 갖는다). 그래서 게이트는 파일을 **둘의 눈으로** 판정한다. ① 줄 판독기의 복사본(`line_assignments`, 동작을 바꾸지 않은 이식)이 읽는 모든 이름도 허용 목록에 있어야 한다(철자가 달라 다른 키로 읽히는 `export<TAB>NAME`·따옴표 이름은 그 키가 거절된다). ② 허용된 이름의 값에는 줄 경계(`str.splitlines`가 줄을 끝내는 모든 문자)가 없어야 한다(허용된 비밀의 정당한 쓰임에는 줄바꿈이 없다). ②는 판독기의 세부를 몰라도 서는 구조 규칙이고, ①은 값에 줄 경계가 없어도 다르게 읽히는 입력까지 잡는다. 한쪽이 새도 다른 쪽이 막는다. 복사본은 이미지 안 증명에서 이미지 자신의 `load_env_file`과 입력마다 같아야 하고(`line_reader_mismatch`), 줄 경계 문자열은 파이썬 자신의 정의와 전 코드 공간에서 같아야 한다(시험).
+
+`.op.env`는 같은 폴더의 두 번째 파일이고 어떤 템플릿도 쓰지 않으므로 **존재만으로** 기동을 거절한다(내용은 읽지 않는다. 깨진 링크도 존재로 본다). **프로필 폴더도 같다.** 다중 프로필은 `config.yaml`이 아니라 `<HERMES_HOME>/profiles/` 아래 폴더가 켠다: Hermes는 거기서 찾은 폴더를 각각 자기 `.env`를 가진 프로필로 서빙하고, 그 `.env`는 이 게이트가 읽지 않는다. 고정 이미지(v0.22.2)의 기동은 이 폴더를 만들지 않고(`stage2`는 이미 있는 폴더의 소유권만 정리하고, 루트를 만드는 것은 프로필을 만들거나 가져오는 명령뿐이다. 소스 확인) 어떤 템플릿도 프로필을 만들지 않으므로, 게이트는 `profiles/` 아래 **항목이 하나라도** 있으면 기동을 거절한다. 폴더가 없거나 비어 있는 것은 정상이고(폴더가 아니라 항목을 본다), 링크이거나 폴더가 아니거나 읽을 수 없는 `profiles`는 어디로 이어지는지 알 수 없어 거절한다. **프로필을 만들었다 지운 볼륨은 비어 있지 않다**: Hermes는 프로필을 지울 때 `profiles/.deleted/<이름>` 표식을 남기고(`hermes_constants.py:309-310`·`:363-366`, 지우는 쪽은 `hermes_cli/profiles.py:1841`) 같은 이름을 다시 만들 때만 걷으므로, 그 `.deleted`도 항목 하나로 세어 거절한다(공동 호스팅은 프로필을 쓰지 않으므로 거절을 유지한다. 운영자가 `.deleted`를 한 번 지운다. 보안 위험이 아니라 가용성이다). 항목 이름은 출력하지 않고 개수만 낸다. 관리 폴더(`HERMES_MANAGED_DIR`)와 외부 비밀 소스는 프로세스 환경과 `config.yaml`(해시 고정, 아래 C절)이 정하고, `HERMES_MANAGED_DIR`은 이제 볼륨 `.env`에 적을 수 없다.
+
+### E4. 근거 — 진짜 로더를 정답으로
+
+`env_loader_oracle.py`의 정책은 게이트의 표를 읽지 않고 **자기 복사본**을 갖는다(두 목록이 같다는 시험이 따로 있다). 입력 하나마다 고정 이미지의 진짜 `hermes_cli.env_loader.load_hermes_dotenv`를 서비스 슬롯 모양의 환경에서 파일이 변하지 않을 때까지(상한 64) 적재하고, 각 상태를 정리 단계를 끈 채로 한 번 더 적재하고, 그 모든 상태를 이미지 자신의 줄 판독기(`agent.secret_scope.load_env_file`)로도 읽어, **로더가 환경에 더하거나 바꾼 이름과 줄 판독기가 읽은 이름 중 정책이 허용하지 않는 것**을 모아 게이트가 이름을 댔는지 대조한다. 게이트가 이름을 안 댄 것은 `missed`(있으면 안 된다), 어느 판독기도 안 건드렸는데 게이트가 거절한 것은 설계된 이유(NUL 때문에 로더가 예외를 내는 문장, 슬롯이 이미 가진 이름에 같은 값, 허용된 이름의 값에 줄 경계가 있는 것)가 아니면 `unexplained`다. 게이트의 줄 판독기 복사본이 같은 파일들에서 진짜 판독기와 다른 답을 내면 `line_reader_mismatch`다. 로더가 예외를 낸 파일도 줄 판독기 쪽은 대조한다. 이름 목록에는 H2의 형제·위치 변수 이름들, 서비스 변수로 남긴 연결 모드 클라이언트 쌍과, 허용된 이름에 접두·접미·대소문자만 다른 이름, 이전 규칙이 값으로 판정하던 열두 이름의 모든 철자·참조·표시 문자·여러 번 적재 모양이 들어간다. 로컬에서 **진짜 v0.22.2 `env_loader.py`와 `agent/secret_scope.py` 소스를 얇은 스텁 위에서** 돌린 결과: 이미지 안 증명과 같은 구성(표 1,445 + 무작위 4,000, 시드 4886) 5,445건에서 `missed` 0·`missed_after` 0·`unexplained` 0·`chain_mismatch` 0·`line_reader_mismatch` 0, 정책 위반 4,210·깨끗함 1,176(깨끗한 쪽이 비지 않아서 「전부 거절하는 게이트」는 통과하지 못한다), 줄 판독기만 읽은 입력 3,011. 시드 4950·7·31337 각 26,445건(합 79,335건)에서도 놓침 0·재적재 뒤 놓침 0·설명 안 됨 0·라벨 오류 0·연쇄 불일치 0·줄 판독기 불일치 0이다(아래 「검증 경계」). 이 오라클을 이미지 안에서 돌리는 일은 planner가 착륙 때 하며 그 전까지 `runtime-unverified`다.
+
+### E5. 기각한 대안
+
+- **거부 목록 확장.** 위 E1: 끝이 없다. 다음 위험 이름은 항상 목록 밖에 있다.
+- **위험 접두사 통째 거절**(`HERMES_`·`GATEWAY_`·`API_SERVER_`·`OORT_`…). Hermes 자신이 「`HERMES_*` 전체를 막지 않는다: 많은 통합 자격이 그 접두사를 쓴다」고 쓴다. 접두사는 안전한 이름을 못 받아들이고, 접두사 밖의 위험한 이름(실행 환경을 바꾸는 `PYTHONPATH`·로더 변수 등)을 못 막는다. 이름 완전 일치의 허용 목록이 둘 다 푼다.
+- **기동 때 `.env`를 비우거나 지우기.** 운영자가 넣은 모델 키를 지워 데이터를 파괴한다. 게이트는 판정만 하고 볼륨을 고치지 않는다(거절 메시지가 지울 줄을 이름으로 알려 준다).
+- **시작 명령이 빈 `.env`를 먼저 만들어 Hermes의 씨앗 복사를 막기.** 소유자·권한이 Hermes의 파일 소유 처리와 어떻게 맞물리는지 이 환경에서 못 쟀고, 이미 씨앗이 뿌려진 기존 볼륨은 못 푼다.
+- **씨앗 11줄을 이름만으로 허용.** 값이 바뀌어도 받게 되어 `*_TOOLS_DEBUG=true`가 검색어·그림 prompt를 디스크에 남기는 길이 열린다. 값까지 고정한다.
+
+### E6. 남는 위험과 배포 전 확인
+
+- **이미 도는 볼륨의 `.env`에 목록 밖 이름이 있으면 다음 기동이 거절된다**(예: 이전 Hermes 설정 마법사가 쓴 줄, `LLM_MODEL=` 같은 빈 값, `API_SERVER_KEY`). 새 게이트를 올리기 전에 **이름만** 읽어 대조한다(RELEASING의 「Hermes 단계」). 거절은 성공 기동처럼 보이지 않고 서비스가 멈추므로, 되돌리기(이전 `HERMES_LOCKGATE_B64`·시작 명령)가 같은 절에 있다.
+- **허용된 비밀의 값은 줄 경계가 있는지만 읽는다**(값은 출력하지 않는다). 키가 어느 서버를 가리키는지는 설정(`config.yaml`, 해시 고정)이 정하고 `.env`의 이름이 정하지 않는다. 허용된 모델 키 둘은 어떤 설정에서든 받으므로, 예컨대 `claude-oauth` 설정 서비스의 볼륨에 `ANTHROPIC_API_KEY`를 두면 자격 우선순위가 조용히 바뀐다. 그것은 운영자의 선택이고 이 증보의 범위 밖이다.
+- **`report`는 첫 `/health` 뒤 한 번 잰다.** Hermes는 `.env`를 턴마다 다시 적재하므로, 그 한 번 뒤에 고친 파일은 다음 시작까지 게이트가 못 본다(선재 구조. 주기 반복 판정은 이 증보의 범위 밖).
+- **Hermes가 기동 뒤 스스로 `.env`에 쓰는 이름**은 지금 알려진 경로(첫 기동 씨앗, 위 stage2 훅의 조건부 쓰기)가 모두 목록 안이거나 템플릿에서 일어나지 않는다. 대화형 `hermes setup`·`hermes model` 같은 흐름이 쓰는 이름은 목록 밖이면 다음 기동을 거절시킨다. 그 흐름은 이 이미지에서 쓰지 않으며(터미널·파일 도구가 꺼져 있다), 로그인 중계가 부르는 두 명령도 `.env`에 쓰지 않는다(소스 확인): `hermes auth add … --type oauth`는 자격 풀(`auth.json`)에 쓰고, 연결 앱 로그인(`hermes mcp login -- <서버>`와 Google 앱용 `mcp_login_probe.py`)은 OAuth 매니저를 거쳐 `mcp-tokens/`에 쓴다. `.env`에 쓰는 `MCP_<이름>_API_KEY`는 `hermes mcp add`의 베어러 토큰 분기이고(`mcp_config.py`의 `_save_bearer_auth_token`), 중계는 그 명령을 부르지 않으며 연결 모드 설정의 서버는 모두 `auth: oauth`다. 고정 이미지 안 증명의 `gateway-boot`가 실제 기동 뒤의 `.env` 이름 목록을 허용 목록과 다시 대조한다.
+- 허용 목록에 이름을 더하는 일은 결정이다: 표의 항목(쓰는 파일 포함)·오라클의 복사본·`HERMES_LOCKGATE_B64`와 시작 명령의 체크섬을 함께 바꾸고, 두 목록이 같다는 시험이 한쪽만 바꾸면 깨진다.
+- `runtime-unverified`: 고정 이미지 안 증명(`test_hermes_image_guard_docker.sh`의 `env-seed-template`·`env-loader-oracle`·`env-line-reader-shapes`·`profile-folder`·`gateway-boot`의 이름 목록과 `profiles/` 상태)은 도커가 필요해 이 칸에서 돌리지 못했다. 진짜 로더·줄 판독기 소스 대조는 얇은 스텁 위라서 `is_multiplex_active`·터미널 설정 다리 같은 이미지 쪽 차이는 못 본다. 줄 판독기를 쓰는 소비자(자격 풀·설정 읽기)의 실제 동작은 이미지 안에서 실행하지 않았다(소스 읽기와 판독기 자체의 대조까지).
+
+### E7. 검증 경계 (#4950)
+
+- **오프라인 단위 시험**: [`test_lockgate_env.py`](../../infra/hermes/test_lockgate_env.py)가 파서 일치 표(대체 파서와 진짜 python-dotenv가 같은 입력 표를 재현)와 적재 추적 표를 그대로 쓰면서 판정을 허용 목록으로 다시 잰다 — 이름을 금지한 모든 철자(23가지 철자 × 줄끝 3종 × 파서 2종)가 이름만 대고 한 번 거절되고, 어느 판독기도 읽지 않는 철자(주석·값 없는 이름)는 거절되지 않으며, 로더는 무시하지만 줄 판독기가 읽는 철자는 이름만 대고 한 번 거절되며, 다른 철자(소문자·`export`에 붙임·따옴표 이름)는 다른 이름으로 거절되고, 허용된 비밀은 어떤 값(빈 값·참조 포함, 줄바꿈 제외)도 통과하고, 씨앗 11줄은 값이 그대로일 때만 통과하고(참조·이스케이프로 같은 값을 만드는 것도 거절), 허용된 이름에 접두·접미·대소문자·한 글자 빼기를 한 이름은 모두 거절되고, 비밀의 근거 파일에 이름이 실제로 있고, `.op.env`(파일·디렉터리·깨진 링크)는 존재만으로 거절되고 내용은 읽지 않는다. 줄 판독기 복사본은 진짜 함수로 실측한 53행 표(`LINE_TABLE`)를 그대로 재현하고, 줄 경계 문자열은 파이썬의 `splitlines`와 전 코드 공간에서 같으며, 허용된 이름의 값에 줄 경계 문자 열 개가 어느 형태로 들어가도(마지막 대입이 아닌 앞선 대입이어도) 거절된다. `profiles/`는 없음·빔은 통과하고 항목(폴더·파일·숨김·깨진 링크)·링크·폴더 아님·읽을 수 없음은 거절되며 개수만 출력한다. 게이트가 해시한 바이트와 판정하는 설정 바이트는 같다(해시 뒤 파일이 바뀌어도). [`test_lockgate_image_guard.py`](../../infra/hermes/test_lockgate_image_guard.py)가 진짜 `gate()`·`report()`를 통과시키며, 두 진입점이 같은 함수를 같은 인자로 부르는지(함수를 대역으로 바꿔 둘 다 듣는지), 새 볼륨이 첫 기동에 받는 씨앗 파일이 부팅과 `report` 모두 통과하는지, 엄격 값 없이는 어떤 구성도 거절되는지를 잰다.
+- **사보타주(스크래치 복사본에서 하나씩 깨고 시험 네 파일로 확인, 모두 RED)** 20가지: 허용 목록에 접두 비교·`*` 항목·대소문자 접기 넣기, 씨앗 값 고정 빼기, 씨앗 표 비우기, 첫 읽기만 판정, 마지막 대입 대신 모든 대입 판정, 빈 값 통과, `.op.env` 무시, `report`가 다른 함수 쓰기·`report`·게이트에서 볼륨 판정 빼기, 엄격 요구 빼기(게이트·`report`)·`true` 허용, 적재 추적 끄기, 이름의 표시 문자 벗기기, 값 출력, 오라클 복사본 목록 바꾸기·씨앗 값 고정 빼기. 같은 게이트를 **진짜 로더 소스에 대한 오라클**로도 깨 봤다(여섯 가지 모두 `missed` 발생, `ok` 거짓): 허용 이름 하나 더, 첫 읽기만 판정, 씨앗 값 고정 빼기, 표시 문자 벗기기, 대소문자 접기, 접두 허용. 검수 1회차 수리에서 더한 17가지도 같은 방식으로 깼다(모두 RED): 줄 판독기 판정 빼기, 줄 판독기를 첫 텍스트에만 적용, 복사본의 줄 나누기·`export ` 처리·마지막 줄 우선·주석 처리 바꾸기, 값 규칙 빼기·마지막 대입만 보기·씨앗 이름 제외·줄 경계 문자 하나 빼기, 프로필 항목 개수·링크·폴더 아님·읽기 실패·검사 통째 빼기, `GOOGLE_OAUTH_CLIENT_*` 다시 허용, 설정을 두 번 읽기. 진짜 판독기 오라클로는 줄 판독기 빼기·첫 텍스트에만 적용(`missed`), 복사본 변형(`line_reader_mismatch`), `GOOGLE_OAUTH_CLIENT_*` 허용(`missed`)이 잡힌다. 값 규칙·프로필 폴더·설정 복사는 오라클이 모델하지 않는 길이라 단위 시험이 잡는다.
+- **진짜 Hermes 로더 소스 대조**(로컬, 위 E4): 입력은 이미지 안 증명과 같다. `needless`는 NUL 때문에 로더가 예외를 낸 파일(그 파일에 NUL이 있고 로더가 실제로 예외를 낸 경우만), 슬롯이 이미 가진 이름에 같은 값을 쓴 줄, 허용된 이름의 값에 줄 경계가 있는 파일 셋뿐이고, 셋 다 게이트가 더 엄격한 방향이다.
+- **고정 이미지 안**(`scripts/tests/test_hermes_image_guard_docker.sh`, 도커): `env-seed-template`(표 = 이미지의 `.env.example` 11줄, 파일 그대로 통과), `env-shapes`·`env-inert-shapes`·`env-reference-shapes`·`env-loader-oracle`(이미지 자신의 로더와 줄 판독기 `agent.secret_scope`), `env-line-reader-shapes`(로더는 무시하고 줄 판독기가 읽는 이름을 게이트가 거절), `profile-folder`(빈 폴더 통과, 항목 거절), `gateway-boot`(실제 기동 뒤 `.env`의 이름이 모두 목록 안, `.op.env` 없음, `profiles/`가 없거나 비어 있음)가 새로 바뀌거나 더해졌다. `runtime-unverified`(이 칸은 도커를 못 쓴다).
+
+### C1. 문제 (#4935) — 시작 명령이 기본 설정 해시 하나만 받는다
+
+팀 서버의 공동 Hermes는 저장소 기본 설정이 아니라 「연결 모드」(모델 선택 + Gmail·캘린더·드라이브 읽기 전용 `mcp_servers`)로 돈다. 새 시작 명령은 `config.yaml`을 기본 설정의 sha256 **하나**와 맞추라고 하므로 연결 모드 설정을 그대로 얹을 수 없고, 연결 모드를 지우고 기본 설정을 얹으면 모델 선택과 세 연결이 사라진다. v0.1.41에서 Hermes를 올리지 못한 이유다.
+
+### C2. 결정 — 설정의 바이트는 정해진 해시 목록으로만 받는다
+
+`config.yaml`은 모든 키가 Hermes의 동작을 바꾸는 파일이고 게이트가 판정하는 키는 그중 일부다. 그래서 바이트를 고정한다: 받는 설정은 **다섯 개**, 기본 설정 그대로(`default`)와 네 모델 조각(`codex-oauth.fallback-claude-oauth`·`claude-oauth.fallback-codex-oauth`·`api-key-openai.fallback-api-key-anthropic`·`api-key-anthropic`) 각각의 연결 모드 설정(`connector/<조각>`)이다. 임의 설정은 지금처럼 거절한다.
+
+- **연결 모드 설정은 저장소 재료로 다시 만든다.** 연결 모드의 잠금 구간은 기본 설정의 것이 아니다(`web`·`image_gen`을 통째로 금지하고 그림 플러그인이 없다. K4-1·I3). 그래서 기본 설정 위에 조각을 얹지 않고 `google-connectors.config.yaml`(기존 연결 모드 기준 사본, I3 때문에 바뀌지 않는다)의 자기 `model:`·`fallback_model:`을 고른 조각으로 **같은 자리에서** 바꾼다. 나머지는 바이트 그대로다. 명령은 `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml`이고 같은 입력이면 같은 바이트, 같은 sha256이다. `--sha256`은 해시만, `--catalog`는 위 다섯의 `이름  sha256` 목록을 낸다. 운영 값과 같은지는 해시로만 대조한다(값 미출력, RELEASING의 「Hermes 단계」).
+- **세 곳이 한 목록이다.** `lockgate.py`의 `ACCEPTED_CONFIG_SHA256`(게이트가 이름을 기록한다: LOCKGATE 줄의 `config_accepted_as`)·Railway 시작 명령의 `sha256sum <설정> | cut -c1-64 | grep -qxF -e <해시> … || { echo … >&2; exit 78; }`(정확한 한 줄 일치, 부분 일치 아님)·렌더러가 다시 만든 카탈로그. `scripts/tests/check_railway_catalog.py`가 렌더러에서 해시를 다시 계산해 시작 명령과 게이트 표가 그 목록과 같은지(이름·해시·순서) 매 PR에서 대조하고, 시작 명령의 해시를 하나 빼거나 낯선 해시를 더하거나 한 줄 일치를 부분 일치로 약화하거나 검사를 지우면 RED가 된다(변이 증명). compose는 읽기 전용으로 마운트한 저장소 파일(기본 설정)을 복사하고 확인은 게이트가 한다.
+- **`report`는 해시를 다시 재지 않는다.** 이미지의 자체 기동이 시작 명령이 끝난 뒤 볼륨의 `config.yaml` 사본에 설정 이주를 돌리고(`docker/stage2-hook.sh`가 `docker_config_migrate.py`를 부른다) 그 일은 파일을 다시 쓸 수 있으므로, 기동 뒤의 바이트가 받은 바이트와 같다고 가정할 수 없다(이주가 이 다섯 설정의 바이트를 실제로 바꾸는지는 재지 않았다. 바뀐다면 건강한 Hermes를 `report`가 PID 1 종료로 몰아내게 되므로 다시 재지 않는 쪽이 안전하다). 게이트가 같은 이주를 scratch 사본에 되풀이해 그 결과를 판정하는 것은 그대로다.
+
+### C3. 엄격 모드는 모든 기동에서, 연결 모드도 (#4935)
+
+`HERMES_MEDIA_DELIVERY_STRICT=1`은 그림 도구가 노출될 때만이 아니라 **모든 기동에서** 프로세스 환경에 정확히 `1`로 있어야 한다. 메일·드라이브를 읽는 연결 모드 Hermes도 답의 `MEDIA:` 줄이 읽을 수 있는 아무 파일을 내보내는 길이 열려 있기 때문이다(I2의 하드 컨트롤 설명과 같은 이유). 받는 설정이 다섯뿐이므로 「도구에 따라 요구」와 「항상 요구」는 받는 모든 설정에서 같고, 항상 요구가 분기가 없어 더 단순하다. 볼륨 `.env`에는 이 이름을 적을 수 없다(E2의 허용 목록에 없다). `report`가 같은 규칙을 다시 재고, LOCKGATE 줄에 최상위 `media_strict`를 남긴다(연결 모드에는 `image_guard` 증거가 없다). 템플릿(compose·Railway)은 이미 이 값을 `1` 리터럴로 준다.
+
+### C4. 기각한 대안 (#4935)
+
+- **기본 설정 해시 하나를 연결 모드 해시로 바꾸기.** 기본 모드가 못 뜬다.
+- **해시 대신 의미 검사만.** 게이트가 판정하는 키는 일부다. 나머지 키(공급자 주소·훅·플러그인·외부 비밀 소스 등)는 Hermes의 동작을 바꾸므로 바이트를 고정하는 편이 닫힌다.
+- **연결 모드를 기본 설정 + 조각으로 합성.** 기본 설정의 `platform_toolsets`(검색·그림)·`web`·`image_gen`·`plugins`는 연결 모드의 K4-1·I3(그림·검색 배타)과 충돌한다. 연결 모드의 잠금 구간을 가진 기준 사본에서 모델 구간만 바꾸는 편이 그 규칙을 그대로 둔다.
+- **기본 설정 + 모델 조각도 받기.** 이 이슈의 범위 밖이고 받는 설정을 넓힌다. 필요하면 `FRAGMENT_SPECS`를 쓰는 카탈로그에 한 줄(이름)을 더하고 두 곳의 목록과 체크섬을 바꾸면 된다.
+
+### C5. 남는 위험·배포·되돌리기 (#4935)
+
+- 운영의 현재 설정이 다섯 중 어느 것과도 같지 않으면(해시 대조로만 안다) 운영 설정을 저장소가 만든 연결 모드 설정으로 바꾸는 것이 배포의 일부가 된다. 모델 선택이 카탈로그 밖이면 배포가 멈추고 카탈로그를 먼저 넓히는 결정이 필요하다.
+- 연결 모드는 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`(K4의 운영자 증명)와 `GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`을 서비스에 두는 것을 전제한다(저장소 템플릿은 기본 모드라 이 변수들을 주지 않는다). 없으면 게이트가 K4 규칙으로 거절한다.
+- 게이트·설정·시작 명령 체크섬·엄격 값은 **한 번에** 바꾼다(하나만 바꾸면 서비스가 멈춘다). 되돌리기는 저장해 둔 이전 값으로 변수와 시작 명령을 되돌리는 것이다(RELEASING의 「Hermes 단계」 1·6).
+- `runtime-unverified`: 연결 모드 설정 다섯 개를 진짜 Hermes `load_config`·도구 해석으로 통과시키는 일, 진짜 시작 명령에 연결 모드 설정을 넣는 일(`connector-configs`·`railway-start-connector*`)은 도커가 필요해 이 칸에서 돌리지 못했다. Railway에서의 실제 기동과 연결 모드 서비스의 실제 변수는 확인하지 않았다.
+
+### E7 (이어서). #4935의 검증 경계
+
+- **오프라인**: [`test_render_model_config.py`](../../infra/hermes/test_render_model_config.py)가 연결 모드 렌더(자기 model 구간만 바뀌고 같은 자리, 나머지·`mcp_servers`는 기준 사본과 같은 바이트, 잠금 26개(#4898: 24개였다)·`web`·`image_gen` 금지·그림/검색 구간 없음, PyYAML이 있으면 `connector_problems` 통과), 같은 입력이면 같은 바이트와 `--sha256`, 카탈로그(다섯, 고정 순서)와 게이트 표의 일치, 한 바이트 바꾼 설정·해시처럼만 보이는 값(앞부분만 같은 해시, 대소문자, 한 글자 더·덜)의 거절, 거절 입력(model 구간 없는 기준, `mcp_servers` 없는 기준, 옵션 충돌)을 잰다. [`test_lockgate_image_guard.py`](../../infra/hermes/test_lockgate_image_guard.py)의 `AcceptedConfigs`가 진짜 `gate()`에 카탈로그의 다섯을 넣어 이름으로 받는지, 한 바이트 바꾼 모양 7가지가 거절되고 줄을 출력하지 않는지, 다른 규칙과 함께 보고되는지, 연결 모드가 엄격 값 없이는 뜨지 않는지를 잰다.
+- **카탈로그 검사기**: 시작 명령의 해시 목록·게이트 표·렌더러를 하나로 묶고, 변이 증명 94가지 중 네 가지(해시 하나 빼기·낯선 해시 더하기·부분 일치로 약화·검사 지우기)가 새로 RED다.
+- **사보타주(스크래치 복사본, 모두 RED)** 9가지: 게이트가 아무 설정이나 받기·해시 앞부분만 비교·검사 지우기·표에서 연결 모드 하나 빼기·표의 기본 해시를 낡게·렌더러가 조각을 마지막에 붙이기·렌더러가 기준 사본의 model 구간을 그대로 두기·`mcp_servers` 없는 기준도 받기·카탈로그에서 기본 설정 빼기.
+- **고정 이미지 안**(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`(진짜 게이트가 다섯 설정을 이름으로 받고 연결 모드는 검색·그림 도구가 선택되지 않음), `connector-config-edited`·`-nostrict`·`-apps-missing`, 진짜 Railway 시작 명령의 `railway-start-connector`(연결 모드 설정이 목록 안이라 exec 직전까지 간다)·`-connector-edited`·`-config-edited`(한 바이트가 게이트가 아무것도 찍기 전에 멈춘다. rc 78)·`-connector-nostrict`.
+
+
+## 증보 2026-11-01 — 공동 호스팅 Hermes의 세션 검색·기억 도구는 끈다 (#4898)
+
+- Status: **Accepted** (2026-11-01, planner 결재 — 독립 보안 검수 1회차 Blocker 0·High 0·Medium 0·Low 3(이 증보에 반영), 고정 이미지 안 증명 37 시나리오·시작 명령 10회·실제 게이트웨이 기동 PASS. 기안 Sonnet 5.5 worker). 근거: [#4898](https://github.com/yeomyeonggeori/oort/issues/4898)(#4820 C2a 보안 검수 Low 후속). [ADR-0218 G4 (e)](0218-workspace-expressions.md)가 「이 이미지에서 `session_search`가 꼭 필요한지(끄면 이 창이 닫힌다)는 후속으로 planner가 정한다」로 남긴 물음의 답이다. 권고는 **끄기**다: 경계를 넘을 수 있으면 끄는 쪽이 더 안전하고, 끄는 값이 oort에 없다(R1-11). 다른 선택(범위 제한·그대로 두기)을 고르려면 R2의 기각 이유를 뒤집는 근거가 먼저다. 승인되면 이 절이 Accepted로 올라가고, 거절되면 게이트·설정 변경은 되돌린다(R5).
+- 범위: 공동 호스팅 Hermes의 저장소 기본 설정·연결 모드 설정·잠금 게이트·시험·고정 이미지 안 증명·공개 보안 설명·RELEASING의 Hermes 단계. 운영 서비스의 환경변수·볼륨의 기존 파일·로그인은 건드리지 않는다(배포 때 planner, owner 사전 고지).
+- 바뀌는 기존 결정과 사실: D6의 허용 목록에서 `memory`·`session_search`가 빠진다(W2가 적은 `ALLOWED_TOOLS` 넷은 `todo_list`·`web_search`·`image_generate` 셋이 된다. 연결 모드의 허용은 `todo_list` 하나다). ADR-0218 G4 (e)의 「이 이미지는 `session_search`·`memory`를 켜 두므로」는 이 증보 뒤 사실이 아니다. E7의 「잠금 24개」는 연결 모드 설정 26개(기본 설정 24개)가 된다. 설정 다섯의 해시가 모두 바뀌고 게이트의 sha256·`HERMES_LOCKGATE_B64`도 바뀐다. 나머지는 바뀌지 않는다.
+
+### R1. 먼저 확인한 사실 [소스]
+
+고정 이미지는 W1과 같다(v0.22.2 index digest `sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919`, 태그 commit `d923a5eb487a17c0a68801bba9ef0f56c81040a8`). 아래 줄 번호는 이 태그 소스의 것이다(`H/` = [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent/tree/d923a5eb487a17c0a68801bba9ef0f56c81040a8)). 이미지 digest와 태그 소스의 직접 대조는 하지 못했고, 고정 이미지 안 증명(R3-3)이 이미지 자신의 모듈로 같은 물음을 다시 잰다.
+
+**세션 검색(`session_search`)**
+
+1. **범위는 한 `HERMES_HOME`의 `state.db` 전체다.** 에이전트가 받는 DB는 API 서버가 홈 하나에 하나 여는 `SessionDB`이고(`H/gateway/platforms/api_server.py:2402`·`:1904`), 도구는 그것을 그대로 쓴다(`H/tools/session_search_tool.py:619-640`).
+2. **걸러 주는 것은 활성 여부·출처·역할·시간뿐이다.** 검색의 조건절(`H/hermes_state_search.py:163-190` `_search_filter_clauses`)에는 워크스페이스·요청자·채널로 거르는 조건이 없다. `sessions` 표에 `user_id`·`session_key`·`chat_id` 열이 있어도 검색이 쓰지 않는다(`H/hermes_state_common.py:382-390`). 숨기는 출처는 `kanban`·`subagent`·`tool` 셋이고(`session_search_tool.py:23`, 호출 `:371`) API 서버의 세션은 `source='api_server'`(`api_server.py:1774`)라 **보인다**. 빼는 것은 지금 세션의 계보뿐이다(`:411`).
+3. **네 가지 모양이 모두 같은 범위다.** 검색어(`_discover` `:354`), `session_id`로 한 세션 통째 읽기(`:447`), 앵커 둘레 스크롤, 인자 없이 최근 세션 훑기(`:480`). `profile=`을 주면 **다른 프로필의 `state.db`**를 읽기 전용으로 바꿔 끼운다(`:434-444`·`:593`). 공동 호스팅은 프로필을 쓰지 않는다(게이트가 `profiles/` 항목을 거절한다, E3).
+4. **색인이 도구 호출 인자까지 덮는다.** `content`·`tool_name`·`tool_calls`(`H/hermes_state_schema.py:71`), 그리고 `role_filter=tool`은 도구 결과 본문까지 훑는다(`hermes_state_search.py:1110-1112`). 그래서 그림 도구의 인자(주소)와 결과가 다른 런의 검색에 걸린다(ADR-0218 G4 (e)의 창).
+5. **범위를 좁히는 설정은 없다.** 이 도구의 가용성 검사는 DB 폴더가 있는지뿐이고(`:642-648`), 켜고 끄는 단위는 toolset 하나다(`H/toolsets.py:131`).
+
+**기억(`memory`)**
+
+6. **저장은 홈 하나에 파일 둘이다.** `<HERMES_HOME>/memories/MEMORY.md`·`USER.md`(`H/tools/memory_tool.py:38-40`, `memory_tool_store.py:301`). 요청자·워크스페이스로 나누지 않는다.
+7. **내용은 모든 세션의 시스템 줄에 얼려서 들어간다**(`memory_tool.py:2-4`, `H/agent/system_prompt.py:516-523`). 한 런이 `memory`로 쓴 것을 다른 워크스페이스의 다음 런이 읽는다. 읽는 길이면서 지시문을 심는 길이다.
+8. **toolset을 빼는 것만으로는 읽는 쪽이 닫히지 않는다.** 에이전트 초기화는 `skip_memory`(기본 `False`, `H/run_agent.py:271`)가 아니면 `memory.memory_enabled`·`memory.user_profile_enabled`로 저장소를 만들어 파일을 읽고 toolset은 보지 않는다(`H/agent/agent_init.py:1297-1336`). API 서버는 `skip_memory`를 넘기지 않는다(`api_server.py:2338-2410`). 끄는 스위치는 이 둘이다(기본 둘 다 켜짐, `H/hermes_cli/config_defaults.py:1311-1313`). 둘 다 `false`이면 도구의 `check_fn`이 거짓이라 도구가 정의에서 빠지고(`memory_tool.py:306-318`), 저장소가 만들어지지 않아 파일이 프롬프트에 들어가지 않으며, 주기적 기억 점검은 `memory`가 도구 목록에 있을 때만 돈다(`H/agent/turn_context.py:757-767`). 외부 기억 제공자는 `memory.provider`가 정한다(비어 있으면 없음, `config_defaults.py:1325`).
+9. **`agent.disabled_toolsets`는 마지막에 도구 단위로 빼므로**(`H/hermes_cli/tools_config.py:626-632`, `H/model_tools.py:316-338`) 합성 toolset이 다시 켜도 막는다. `_AGENT_LOOP_TOOLS`(`model_tools.py:607`)는 실행을 가로채는 목록일 뿐 선택에 넣지 않는다.
+
+**oort 쪽 사실**
+
+10. **켜져 있었다.** 기본 설정의 `platform_toolsets.api_server`가 둘을 골랐고, 연결 모드 설정은 `platform_toolsets`가 없어 `hermes-api-server` 합성이 둘을 포함했으며, 게이트의 허용 목록도 둘을 허용했다. 태그 소스에 PyYAML 대역을 끼워 진짜 `load_config`·`_get_platform_tools`·`_select_tool_names`로 해석하면 이 증보 전 기본 설정은 `selected`에 `memory`·`session_search`를 담고(`image_generate`·`todo_list`·`web_search`와 함께) `get_builtin_memory_store_flags`가 `(True, True)`였다. 이 증보 뒤에는 기본 설정이 `[image_generate, todo_list, web_search]`, 연결 모드 설정이 `[todo_list]`이고 스위치가 `(False, False)`다(측정: 인계 기록).
+11. **oort는 이 둘에 기대지 않는다.** 런마다 대화 전체를 `messages`로 보내고, `X-Hermes-Session-Id` 헤더는 보내지 않는다. 헤더가 있을 때만 Hermes가 DB의 **대화 메시지**를 맥락으로 불러온다(`H/gateway/platforms/api_server_openai_routes.py:686-721`). 같은 파생 id의 행이 이미 있으면 헤더가 없어도 그 행의 저장된 시스템 줄과 도구 고정은 읽는다(R4). 팀 기억은 oort 자신의 기능이다. `todo_list`는 에이전트 한 대의 메모리 안 목록이라 남지 않는다(`H/tools/todo_tool.py:1-4`).
+
+### R2. 결정 — 끈다
+
+- **결정(권고).** 공동 호스팅 Hermes에서 `session_search`와 `memory`를 켜지 않는다. 두 설정(기본·연결 모드) 모두 두 toolset을 `agent.disabled_toolsets`에 더하고, 기본 설정은 api_server 선택에서도 뺀다. `memory.memory_enabled`·`memory.user_profile_enabled`는 둘 다 `false`, `memory.provider`는 비워 둔다. 남는 표면은 `todo_list`, (기본 설정만) Codex 구독 `web_search`와 `image_generate`다.
+- **범위 제한을 고르지 않는 이유.** v0.22.2에는 이 도구의 범위(워크스페이스·런)를 정하는 설정이 없다(R1-5). `profile=`로 나누려면 워크스페이스마다 Hermes 프로필을 만들어야 하는데 프로필마다 이 게이트가 읽지 않는 `.env`가 생겨 게이트가 `profiles/` 항목을 거절한다(E3). 코드로 좁히려면 oort 소유 플러그인이 결과를 가로채야 한다. 그림 가드는 호출 **전**에 값 모양으로 거절하지만, 검색은 DB 전체를 읽은 **뒤**에 워크스페이스를 가려야 하고 그 가림이 새는 것이 이 위험의 본질이다. 약속할 수 없는 필터를 게이트가 지켜 줄 수도 없다.
+- **그대로 두고 위험만 적지 않는 이유.** 위험은 워크스페이스 사이의 읽기와 쓰기이고(R1-1~7) 얻는 것이 없다(R1-11). 같은 워크스페이스 안에서도 요청자·채널·DM 구분이 없어, 한 멤버의 비공개 대화가 다른 멤버가 시킨 런에 보일 수 있다. 연결 모드에서는 메일·드라이브 도구 결과가 같은 기록에 남는다. `memory`는 한 번 심긴 지시문이 이후 모든 런의 시스템 줄에 들어가는 길이다. 이 위험은 사용자가 설정으로 다시 열 수 없게 게이트가 막는 쪽이 운영자 실수에 강하다.
+- **잃는 것.** Hermes가 지난 대화를 기억하는 편의가 없어진다. oort는 대화를 매번 모델에 보내므로 한 대화 안의 맥락은 그대로이고, 팀 기억은 별개다. 이미 나온 「짧은 주소가 기록에서 검색된다」(ADR-0218 G4 (e))의 창은 모델이 읽는 길이 닫혀 사라진다.
+- **다시 켜려면.** 새 증보로 격리 방식(워크스페이스별 Hermes 홈과 서버 쪽 강제 등)을 먼저 정하고 게이트를 그 방식에 맞게 바꾼다. 설정만 되돌리면 게이트가 기동을 거절한다.
+
+### R3. 강제 — 설정, 게이트, 보고, 증명
+
+1. **설정(받는 설정의 해시 목록).** `infra/hermes/config.yaml`과 `google-connectors.config.yaml`이 위 값을 갖는다. 연결 모드 설정 네 가지는 기준 사본에서 `render_model_config.py`가 만들므로 같은 값을 갖고, 다섯 설정의 해시가 모두 바뀐다(`render_model_config.py --catalog` → 게이트의 `ACCEPTED_CONFIG_SHA256` → Railway 시작 명령의 해시 목록. 카탈로그 검사기가 셋이 같은지 잰다).
+2. **게이트 규칙(`lockgate.py`).** (a) `ALLOWED_TOOLS`에서 둘을 빼고 `CROSS_RUN_TOOLS`가 이름으로 거절한다. toolset이 고른 도구(가용성 검사 전)와 모델에 건넬 정의(`resolved`)를 둘 다 본다. (b) `memory_problems`: 두 스위치가 YAML 불리언 `false`이고 `memory.provider`가 비어 있어야 한다(키가 없는 것도 거절한다. Hermes의 기본이 켜짐이다). 도구가 노출됐는지와 무관하게 늘 적용한다. (c) `report`도 같은 두 규칙을 살아 있는 설정·도구에 적용해 위반이면 PID 1에 종료를 요청한다. (d) 양성 대조 도구를 `memory`에서 `todo_list`로 옮긴다(자격증명 없이 늘 풀리는 허용 도구). LOCKGATE 줄에 `memory_config`(불리언만, 값 미출력)를 싣는다.
+3. **기동 카나리(고정 이미지 안 증명, 도커).** 새 시나리오 둘과 기존 둘의 판정 확장. `cross-run-tools-off`: 진짜 게이트가 기본 설정을 받고 `selected_tools`·`resolved_tools`에 두 도구가 없고 스위치를 불리언 `false`로 본다. 이 이미지의 진짜 Hermes 모듈(`load_config`·`_get_platform_tools`·`get_tool_definitions`·`get_builtin_memory_store_flags`·`MemoryStore`)이 기본 설정에서 두 도구를 내지 않고 저장소를 만들지 않는다(볼륨에 표식이 든 `MEMORY.md`가 있어도 프롬프트로 가지 않는다). **대조**: 두 도구를 켠 복사본에서 같은 탐침이 두 도구·저장소·표식을 보지 못하면 실패한다(눈먼 탐침은 아무것도 증명하지 않는다). `cross-run-tools-on`: 진짜 게이트가 단일 결함 변형 다섯(`session_search`만 켬, `memory` toolset만 켬, 스위치만 켬, 외부 기억 제공자, 전부 켬)을 각자의 규칙으로 거절한다(게이트 복사본이 변형의 바이트를 해시로 받으므로 해시 목록이 아니라 규칙이 거절한다). 기존 `healthy`·`connector-configs`의 판정은 두 도구가 어느 설정에서도 없다는 것까지 잰다.
+
+### R4. 남는 위험과 이 증보가 하지 않는 것
+
+- **기록은 계속 남는다.** Hermes는 세션(도구 호출 인자·결과 포함)을 `state.db`에 계속 쓴다. 이 증보 전에 쓰인 행의 저장된 시스템 줄(`sessions.system_prompt`)에는 그때 얼린 기억 블록(`MEMORY.md`·`USER.md`)이 들어 있다(소스 읽기: `agent/conversation_loop.py:874-879`·`system_prompt.py:779`, 실제 행은 미실측). 이 증보가 닫는 것은 **모델이 읽는 길**이다. 볼륨에 들어갈 수 있는 사람과 `API_SERVER_KEY` 소지자(`/api/sessions*` 경로, `api_server.py:91-98`)는 읽는다. oort는 그 경로를 부르지 않고(D2의 고정 요청 목록) 키는 운영자 신뢰 경계다. 기록의 보관 기간·삭제는 Hermes의 설정이고 이 증보가 정하지 않는다(후속 후보).
+- **이미 도는 볼륨의 `memories/*.md`는 남는다.** 스위치가 꺼지면 읽히지 않지만 파일은 그대로다. 배포 때 운영자가 파일을 지운다(RELEASING의 Hermes 단계, 이름·개수만 보고 내용은 열지 않는다).
+- **세션 id가 같을 수 있다.** 헤더가 없으면 Hermes는 세션 id를 시스템 줄과 첫 사용자 메시지의 해시로 만든다(`api_server_openai_routes.py:716-721`). 같은 입력의 두 런이 같은 세션 행을 쓸 수 있다. oort는 헤더를 보내지 않아 그 행의 대화 메시지는 맥락으로 불러오지 않지만(R1-11), 같은 id의 행이 있으면 Hermes는 그 행의 **저장된 시스템 줄과 도구 고정**을 읽는다(`agent/conversation_loop.py:742-797`·`:696-715`). oort의 시스템 줄에는 분 단위 시각 줄이 실려 파생 id가 매 분 달라지므로 거의 닿지 않고, 도구 고정은 게이트 규칙대로 두 도구를 되살리지 못한다. 검색 도구가 꺼져 다른 행을 읽는 길도 없다.
+- **이 증보는 새 창을 만들지 않는다.** 꺼진 도구가 모델의 선택지에서 사라질 뿐 Hermes의 다른 기능을 켜지 않는다. 연결 모드의 연결 규칙(K4)과 `web`·`image_gen` 금지는 그대로다. 남는 세 도구(`todo_list`, `web_search`의 `openai_native` 공급자, `image_generate`의 `openai-codex` 플러그인)의 구현은 `SessionDB`·`state.db`·`memories`를 참조하지 않는다(소스 검색, 각 파일 0건: `H/tools/todo_tool.py`·`H/plugins/web/openai_native/provider.py`·`H/plugins/image_gen/openai-codex/__init__.py`). `SessionDB`를 쓰는 나머지 도구(위임·kanban 등)는 이미 deny-list에 있다.
+- `runtime-unverified`: 고정 이미지 안 증명(R3-3)은 도커가 필요해 스택 검증에서 돈다. Railway에서의 실제 기동·실제 볼륨의 `memories/`·실제 모델이 이 도구 없이 하는 행동은 확인하지 않았다. 로컬에서는 태그 소스와 PyYAML 대역(`ruamel.yaml` 자리)으로 같은 시나리오와 판정부를 돌려 확인했다.
+
+### R5. 되돌리기와 검증 경계
+
+- **되돌리기.** 이 증보를 거절하면 두 설정에서 deny-list 줄·`memory:` 구간을 지우고 기본 설정의 api_server 목록에 두 toolset을 다시 적고, 게이트의 `ALLOWED_TOOLS`·`REQUIRED_TOOL`을 되돌리고 해시·체크섬을 다시 만든다. 서비스에서는 게이트·설정·시작 명령 체크섬을 한 번에 이전 값으로 되돌린다(RELEASING의 Hermes 단계 1·6).
+- **배포.** 게이트·설정·시작 명령 체크섬은 한 번에 바꾼다(하나만 바꾸면 서비스가 멈춘다). 운영 설정이 새 해시 다섯 중 하나와 같지 않으면 저장소가 만든 설정으로 바꾸는 것이 배포의 일부다.
+- **오프라인 시험**: [`test_lockgate_image_guard.py`](../../infra/hermes/test_lockgate_image_guard.py)의 `CrossRunRecall`(도구별 거절 문구가 하나, 정의에만 있는 도구, 모든 모드, 스위치 값 행렬, 외부 제공자, 값 미출력, 양성 대조, 살아 있는 `report`의 종료 요청, 진짜 설정 바이트), [`test_default_config.py`](../../infra/hermes/test_default_config.py)(두 설정의 deny-list·api_server 목록·스위치, 허용 목록), [`test_render_model_config.py`](../../infra/hermes/test_render_model_config.py)(24·26개)가 있다. 스크래치 복사본의 사보타주 21가지(허용 목록에 도구 되돌리기, 거절 규칙 지우기, 거절 문구 중복, 게이트·`report`에서 스위치 규칙 빼기, 스위치를 거짓 값도 통과시키기, 제공자 규칙 지우기, `resolved` 안 보기, 양성 대조 도구 되돌리기·지우기, 증거 숨기기, 두 설정에서 deny-list 줄·스위치·섹션 건드리기, 해시 표 낡게, 켜진 설정의 해시를 표에 섞기)가 모두 RED다.
+
+### #4950 2회차 Low 셋 (같은 이슈, 같은 `lockgate.py`)
+
+1. **시험 보호 틈 둘**: 줄 판독기 이름을 마지막 텍스트에만 판정하는 변이와 복사본의 `#` 주석 판정에 공백을 요구하는 변이가 307개 시험을 통과했다. `test_lockgate_env.py`에 앞선 텍스트에만 이름이 보이는 줄 판독기 사례(`LineReaderPort`)와 `LINE_TABLE` 두 행(`#A=1`·`#<TAB>A=1`, 진짜 `_parse_env_text`로 측정해 둘 다 `{}`)을 더했고, 두 변이는 이제 RED다.
+2. **`profiles/.deleted` 표식**: E3에 사실을 적었다(위). 거절을 유지하고 `_profile_problems`의 설명·RELEASING·운영 문서의 「비어 있는 것은 괜찮다」를 「Hermes가 지운 프로필의 표식 `.deleted`도 항목」으로 맞췄다. 시험에 그 표식 사례를 더했다.
+3. **문서 틈**: `lockgate.py` 머리 설명에 둘째 판독기·값의 줄 경계 규칙·`profiles/` 규칙과 「핀을 올릴 때 `agent/secret_scope.py`가 바뀌면 `line_reader_mismatch`가 알려 주고 `line_assignments`·`LINE_TABLE`을 새 측정으로 고친다」를, RELEASING의 핀 올림 절차에 같은 문장을 더했다.

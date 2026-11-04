@@ -32,6 +32,18 @@
 //!   query out).
 //! * Tool names, counts and token sums are recorded (audit `team_ai.turn`,
 //!   `via_ai` on a card); prompts, results and answers are not (H9-I10).
+//!
+//! ## ADR-0201 증보 v3 B5 (#4967): the task mode
+//!
+//! A request that cannot finish inside this short turn may end it with `task_continue {plan,
+//! note}` (offered only while the `long_research` bundle is on). That starts a **task**: the
+//! `team_ai_task` row and the first resume job are written in one transaction
+//! ([`AgentWorker::team_ai_task_begin`]), and every later step is a job of the same run
+//! ([`AgentWorker::run_team_ai_task_step`], in the child module). Whether a job is a first turn, a
+//! step to run or a duplicate to drop is the **row's** verdict (`decide_step`), read at the top of
+//! [`AgentWorker::run_team_ai_turn`].
+
+mod task;
 
 use std::time::Instant;
 
@@ -45,13 +57,20 @@ use momo_outbox::ClaimedAgentJob;
 use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
+use momo_workspace_actions::team_ai_attachments as team_ai_files;
+use momo_workspace_actions::team_ai_limits::{self, LimitHit, Usage};
 use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
-use crate::provider::{ChatMessage, ChatRequest, ChatUsage, ProviderWire};
-use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
+use crate::provider::{
+    ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderError, ProviderToolCall, ProviderWire,
+};
+use crate::{
+    emit_awaiting_approval_agent_status, emit_terminal_agent_status, AgentWorker,
+    ResolvedTransport, Settlement,
+};
 
 /// What the first read of a team-AI turn found.
 struct Gathered {
@@ -59,10 +78,17 @@ struct Gathered {
     requester: Option<momo_agent::card_suggest::SuggestionRequester>,
     trigger_text: String,
     used_today: i64,
+    /// This month's list-price spend in micro-dollars — read only when the workspace set a monthly
+    /// dollar limit (B9), otherwise `0` and never queried.
+    month_micro_usd: i64,
     roster: team_ai::Roster,
     candidates: Vec<(Uuid, String, String)>,
     recent_requests: i64,
     searches_today: i64,
+    /// B5-2 (#4967): the run's task row — **its existence is task mode** — and the run's status as
+    /// this job reads it (the cooperative cancel check).
+    task: Option<momo_agent::team_ai_task::TaskRow>,
+    run_status: Option<RunStatus>,
 }
 
 /// What one request did, for the audit row and `via_ai` (H9-I10). Names and
@@ -76,11 +102,22 @@ struct TurnTrace {
     model_calls: i32,
     web_searches: i32,
     latency_ms: i64,
+    /// The registry id of a card the helper refused to raise (a bundle that is off, a card after
+    /// a read). It comes from the registry's own `&'static str`, never from the model's text.
+    refused_action: Option<&'static str>,
+    /// B5 (#4967): the step of a task this request is (`None` for an ordinary request and for the
+    /// first turn that starts a task). A task's replies are answers the whole task read for, so
+    /// they never get link previews, whatever this one step called.
+    task_step: Option<i32>,
+    /// The `card_suggest` command id of the card this turn ended with (`work.request.open`): the
+    /// registry's `&'static str`, so a count of suggestions needs no text. **Never the prompt**
+    /// the card carries, and never the card's label or body (H9-I10).
+    suggested_command: Option<&'static str>,
 }
 
 impl TurnTrace {
     fn audit_detail(&self, spend: Option<Spend>, outcome: &str) -> Value {
-        json!({
+        let mut detail = json!({
             "schema": "momo.team_ai_turn.v1",
             "outcome": outcome,
             "model": self.model,
@@ -92,7 +129,17 @@ impl TurnTrace {
             "latency_ms": self.latency_ms,
             "prompt_tokens": spend.map(|s| s.usage.prompt_tokens),
             "completion_tokens": spend.map(|s| s.usage.completion_tokens),
-        })
+        });
+        if let Some(action) = self.refused_action {
+            detail["refused_action"] = json!(action);
+        }
+        if let Some(step) = self.task_step {
+            detail["task_step"] = json!(step);
+        }
+        if let Some(command) = self.suggested_command {
+            detail["suggested_command"] = json!(command);
+        }
+        detail
     }
 }
 
@@ -103,10 +150,28 @@ fn wire_searches(wire: ProviderWire) -> bool {
     matches!(wire, ProviderWire::AnthropicMessages)
 }
 
+/// `team_ai.turn`'s `outcome` for a card the helper refused to raise (B13-I5, B4-3): a reason
+/// code and nothing else, so refusals can be counted.
+const OUTCOME_REFUSED_ROLE_OFF: &str = "refused_role_off";
+const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
+/// B4-4 구현 확정 (#4965): an admin invite link, which a person makes on the screen.
+const OUTCOME_REFUSED_INVITE_ROLE: &str = "refused_invite_role";
+/// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
+const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
+
 /// How a settled team-AI turn ends the run.
 enum Ending {
     /// A reply was posted and the run succeeded.
     Answered,
+    /// A reply was posted and the run succeeded, and the reply is a refusal of the card the model
+    /// proposed: the audit row's `outcome` is this reason code.
+    Refused(&'static str),
+    /// A reply was posted with a `card_suggest` card — the payload is the command's registry id
+    /// (`work.request.open`) — and the run succeeded. **The finishing transaction judges the card
+    /// once more** against the role switches as they are by then (B13-I5, the wall a suggestion has
+    /// in place of the proposal transaction's): a bundle switched off while the model thought
+    /// turns the card into the refusal sentence, and the audit row says so.
+    Suggested(&'static str),
     /// The run ends as a hand-off / refusal (`failed` with a code), nothing else to do.
     Closed(&'static str),
 }
@@ -138,12 +203,36 @@ impl AgentWorker {
                     run_id,
                 )
                 .await?;
+                // #4970: the trigger turn lists the message's readable files — ids, types, sizes —
+                // only while the `files` bundle is on (no sentence, no id for a bundle that is off).
+                // A task step (#4967: no trigger in its payload) reads no attachments, so it lists none.
+                let files_on = state.roles.is_on(momo_agent::team_ai_roles::FILES)
+                    && trigger_message_id.is_some();
+                // A step job carries no trigger (B5-1: the requester and the request text come
+                // from the **run row**, the one place they are derived), so read it from there.
+                let trigger_message_id = match trigger_message_id {
+                    Some(id) => Some(id),
+                    None => {
+                        momo_agent::run_trigger_message_in_tx(conn, workspace_id, run_id).await?
+                    }
+                };
                 let trigger_text: String = match trigger_message_id {
-                    Some(id) => sqlx_body(conn, workspace_id, id).await?,
+                    Some(id) => sqlx_body(conn, workspace_id, id, files_on).await?,
                     None => String::new(),
                 };
+                let task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id).await?;
+                let run_status =
+                    momo_agent::team_ai_task::run_status_in_tx(conn, workspace_id, run_id).await?;
                 let used_today =
                     team_ai::tokens_used_today_in_tx(conn, workspace_id, agent).await?;
+                let month_micro_usd = team_ai_limits::month_spend_if_limited_in_tx(
+                    conn,
+                    workspace_id,
+                    agent,
+                    &state.limits,
+                )
+                .await?
+                .cost_micro_usd;
                 let (roster, candidates) = match &requester {
                     Some(requester) => (
                         team_ai::load_roster_in_tx(
@@ -179,8 +268,11 @@ impl AgentWorker {
                     requester,
                     trigger_text,
                     used_today,
+                    month_micro_usd,
                     roster,
                     candidates,
+                    task,
+                    run_status,
                 }))
             })
         })
@@ -200,6 +292,30 @@ impl AgentWorker {
             }
         };
 
+        // ADR-0201 증보 v3 B5-2 (#4967): is this job a first turn, a task step to run, or a job to
+        // drop? The row of the run decides — not the payload — so a re-claimed first-turn job
+        // (its task already started), a duplicated step job and a late job of an ended task read
+        // the same row and none of them runs a step twice.
+        match momo_agent::team_ai_task::decide_step(gathered.task.as_ref(), payload.task_step()) {
+            momo_agent::team_ai_task::StepDecision::FirstTurn => {}
+            momo_agent::team_ai_task::StepDecision::Skip(reason) => {
+                tracing::info!(
+                    run_id = %run_id,
+                    step = payload.task_step(),
+                    reason = reason.as_str(),
+                    "team ai task job dropped: the run's row says there is nothing to run"
+                );
+                self.settle_done(job.id, Some(reason.as_str())).await;
+                return Some(Settlement::Skipped);
+            }
+            momo_agent::team_ai_task::StepDecision::RunStep(step) => {
+                return Some(
+                    self.run_team_ai_task_step(job, payload, run_id, transport, gathered, step)
+                        .await,
+                );
+            }
+        }
+
         // The switch is off (or the job outlived it): the member is paused, so a
         // new mention never reaches here; a straggler is closed without a word.
         if !gathered.state.enabled {
@@ -217,18 +333,23 @@ impl AgentWorker {
                     .await,
             );
         };
-        let cap = self.config.team_ai_daily_token_cap;
-        if gathered.used_today >= cap {
+        // ADR-0201 증보 v3 B9 (#4944): BYOK — the team decides. With no limit set and no operator
+        // ceiling nothing here ever stops a turn; the limits are judged BEFORE the model is asked,
+        // so a limit that is hit means zero model calls.
+        let caps = self.config.team_ai_caps();
+        let usage = Usage {
+            tokens_today: gathered.used_today,
+            month_micro_usd: gathered.month_micro_usd,
+        };
+        if let Some(hit) = team_ai_limits::judge(&gathered.state.limits, &caps, &usage) {
             return Some(
-                self.team_ai_fallback(
+                self.team_ai_limit_reached(
                     job,
                     payload,
                     run_id,
                     &requester,
                     &gathered.candidates,
-                    FallbackReason::OverBudget,
-                    None,
-                    "",
+                    hit,
                 )
                 .await,
             );
@@ -277,7 +398,9 @@ impl AgentWorker {
             WebSearch::Off
         } else if !wire_searches(wire) {
             WebSearch::NotSupported
-        } else if gathered.searches_today >= self.config.team_ai_daily_search_cap {
+        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
+            .is_some_and(|cap| gathered.searches_today >= cap)
+        {
             WebSearch::DailyCapReached
         } else {
             WebSearch::Available
@@ -287,15 +410,50 @@ impl AgentWorker {
             wire: wire.as_str(),
             ..TurnTrace::default()
         };
+        // ADR-0201 증보 v3 B3: the workspace's role bundles, as this request read them. What the
+        // model is offered (the tool's `actionId` enum, the tool list, the prompt) is built from
+        // them; the proposal transaction and the decision read them again.
+        //
+        // The system prompt is built before anything is read from `advertised_action_ids(false)`.
+        // After the request has read something (B4-3) it is built ONCE more from the same function
+        // with `tainted = true`, and from nothing else: the sensitive sentences leave it and the one
+        // sentence to answer with takes their place (`team_ai::system_prompt_for`). The task-mode
+        // sentence stays: `task_continue` is reading work, not behind the read rule, so the rebuilt
+        // prompt gets the same `task_prompt` the first call got (merge of #4965 and #4967).
+        // `a10_text_inside_a_read_is_never_an_instruction` pins that nothing the read returned is in
+        // either prompt. The tool's enum, below, is cut by the same function on the same boolean.
+        let roles = gathered.state.roles;
+        // B5-3 / B15-A16: the task-mode sentences exist only while the bundle that owns the tool is on.
+        let task_prompt = if roles.tool_allowed(momo_agent::tools::TASK_CONTINUE) {
+            team_ai::TaskPrompt::Offer
+        } else {
+            team_ai::TaskPrompt::Off
+        };
+        // B8 C1: the `card_suggest` commands this request is offered (`code` on = the work-request
+        // card). The tool, the prompt and the check on what the model names all read this one list.
+        let card_commands = roles.advertised_command_ids();
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt(&gathered.roster, web)),
+            ChatMessage::system(team_ai::system_prompt_for(
+                &gathered.roster,
+                web,
+                &roles.advertised_action_ids(false),
+                &card_commands,
+                &[],
+                task_prompt,
+                roles.is_on(momo_agent::team_ai_roles::FILES),
+            )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
         let mut spend: Option<Spend> = None;
         let mut read_used = false;
+        // #4970: the one picture this request may hold. It rides **every** model call after the read
+        // (the call re-sends it), so there is at most one, and it is dropped with this function.
+        let mut attached: Vec<ModelImage> = Vec::new();
+        let mut prompt_after_read = false;
         let started = Instant::now();
         let deadline = self.config.team_ai_request_deadline;
 
+        let mut card_call: Option<ProviderToolCall> = None;
         let (completion, call) = loop {
             let elapsed = started.elapsed();
             if trace.model_calls as usize >= team_ai::MAX_MODEL_CALLS || elapsed >= deadline {
@@ -316,12 +474,40 @@ impl AgentWorker {
             }
             // The tools this call may use. Reads stop being offered once the read
             // budget is spent; web search is never offered after a read (H5).
-            let mut momo_tools = momo_agent::tools::enabled_tool_definitions(&[
-                momo_agent::tools::WORKSPACE_ACTION_PROPOSE.to_string(),
-            ]);
+            //
+            // B3 / B4-3: the proposal tool's `actionId` enum is the allow-list minus every
+            // bundle that is off, and — once this request has read anything (a workspace read, or
+            // a search the provider ran) — minus the sensitive ids too. A tool with nothing left
+            // to offer is not offered at all.
+            let tainted = read_used || trace.web_searches > 0;
+            let offered = roles.advertised_action_ids(tainted);
+            if tainted && !prompt_after_read {
+                messages[0] = ChatMessage::system(team_ai::system_prompt_for(
+                    &gathered.roster,
+                    web,
+                    &offered,
+                    &card_commands,
+                    &roles.withheld_by_read(),
+                    task_prompt,
+                    roles.is_on(momo_agent::team_ai_roles::FILES),
+                ));
+                prompt_after_read = true;
+            }
+            let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
+                momo_agent::tools::workspace_action_propose_definition(&offered)
+                    .into_iter()
+                    .collect();
             if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
+            // B5-3: the task-mode tool, owned by `long_research`.
+            momo_tools.push(momo_agent::tools::task_continue_definition());
+            // B8 C1: the work-request card, offered only while a bundle that owns it is on. Not
+            // behind the taint rule (B4-3): it changes no server state and a person sends what it
+            // fills in, so a request that read something may still give it.
+            momo_tools.extend(momo_agent::tools::card_suggest_definition(&card_commands));
+            // The seam later slices fill: a tool a bundle owns leaves with it.
+            momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
             if web == WebSearch::Available && !read_used {
                 tools.push(crate::anthropic::web_search_tool(
@@ -350,9 +536,16 @@ impl AgentWorker {
                 .team_ai_model_timeout
                 .min(deadline.saturating_sub(elapsed));
             let call_started = Instant::now();
-            let attempt =
-                tokio::time::timeout(cut, self.provider.complete(&transport.endpoint, &request))
-                    .await;
+            let attempt = tokio::time::timeout(cut, async {
+                if attached.is_empty() {
+                    self.provider.complete(&transport.endpoint, &request).await
+                } else {
+                    self.provider
+                        .complete_with_images(&transport.endpoint, &request, &attached)
+                        .await
+                }
+            })
+            .await;
             trace.model_calls += 1;
             let call_ms = millis(call_started);
             let completion = match attempt {
@@ -376,7 +569,9 @@ impl AgentWorker {
                     // ceiling still moves.
                     spend = Spend::add(spend, Spend::of(None, prompt_chars));
                     trace.latency_ms = millis(started);
-                    let reason = if started.elapsed() >= deadline && trace.model_calls > 1 {
+                    let reason = if !attached.is_empty() && image_was_refused(&other) {
+                        FallbackReason::ImageRefused
+                    } else if started.elapsed() >= deadline && trace.model_calls > 1 {
                         FallbackReason::TooLong
                     } else {
                         FallbackReason::Slow
@@ -409,6 +604,73 @@ impl AgentWorker {
             }) {
                 let propose = propose.clone();
                 break (completion, Some(propose));
+            }
+            // B5-3: `task_continue` ends this step and starts the task. It was offered only while
+            // the bundle is on; a call of it that was never offered is the model going off script.
+            if let Some(cont) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::TASK_CONTINUE)
+            }) {
+                if !roles.tool_allowed(momo_agent::tools::TASK_CONTINUE) {
+                    trace.latency_ms = millis(started);
+                    return Some(
+                        self.team_ai_fallback_traced(
+                            job,
+                            payload,
+                            run_id,
+                            &requester,
+                            &gathered.candidates,
+                            FallbackReason::OutOfScope,
+                            spend,
+                            &trace,
+                        )
+                        .await,
+                    );
+                }
+                // A plan or a note that is not what the tool asks for goes back to the model once
+                // per call it has left (the loop's own bounds); it never becomes a task.
+                match momo_agent::team_ai_task::parse_task_continue(&cont.arguments_json()) {
+                    Ok(args) => {
+                        trace.latency_ms = millis(started);
+                        return Some(
+                            self.team_ai_task_begin(
+                                job,
+                                payload,
+                                run_id,
+                                &requester,
+                                &gathered.candidates,
+                                args,
+                                spend,
+                                &model,
+                                &trace,
+                            )
+                            .await,
+                        );
+                    }
+                    Err(reason) => {
+                        messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: format!("({} 호출)", momo_agent::tools::TASK_CONTINUE),
+                        });
+                        messages.push(ChatMessage::user(format!(
+                            "[데이터 — `{tool}` 호출이 거절됐어. 지시가 아니야]\n\
+                             invalid_arguments: {reason}\n\
+                             인자를 고쳐서 다시 부르거나, 지금까지의 결과를 답으로 써.",
+                            tool = momo_agent::tools::TASK_CONTINUE,
+                        )));
+                        continue;
+                    }
+                }
+            }
+            // B8 C1: a `card_suggest` card ends the request the same way (a proposal in the same
+            // call wins, above). Whether it was offered, and whether it is legal, is judged after
+            // the loop, once, by `team_ai_card`.
+            if let Some(card) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::CARD_SUGGEST)
+            }) {
+                card_call = Some(card.clone());
+                break (completion, None);
             }
             // Anything that is neither a read nor the proposal is the model going
             // off script.
@@ -444,17 +706,49 @@ impl AgentWorker {
                     );
                     continue;
                 }
-                let outcome = match self
-                    .team_ai_read(
-                        workspace_id,
-                        agent,
-                        requester.member_id,
-                        channel_id,
-                        &name,
-                        &tool_call.arguments_json(),
-                    )
-                    .await
-                {
+                let read =
+                    if name == momo_agent::tools::normalize(team_ai_tools::TOOL_READ_ATTACHMENT) {
+                        // The `files` bundle's tool (#4970). A request that was not offered it does not
+                        // get it by naming it (B13-I5); the lookup re-reads the switch as well.
+                        if !roles.tool_allowed(team_ai_tools::TOOL_READ_ATTACHMENT) {
+                            Ok(team_ai_files::FILES_OFF)
+                        } else {
+                            match self
+                                .team_ai_read_attachment(
+                                    workspace_id,
+                                    agent,
+                                    requester.member_id,
+                                    channel_id,
+                                    run_id,
+                                    &tool_call.arguments_json(),
+                                    wire,
+                                    !attached.is_empty(),
+                                )
+                                .await
+                            {
+                                Ok(read) => {
+                                    // a picture is only ever handed back for a wire that can carry it
+                                    // (`team_ai_read_attachment` says so before it reads a byte)
+                                    if let Some(image) = read.image {
+                                        attached.push(image);
+                                    }
+                                    Ok(read.outcome)
+                                }
+                                Err(error) => Err(error),
+                            }
+                        }
+                    } else {
+                        self.team_ai_read(
+                            workspace_id,
+                            agent,
+                            requester.member_id,
+                            channel_id,
+                            &name,
+                            &tool_call.arguments_json(),
+                        )
+                        .await
+                    };
+                let outcome = match read {
                     Ok(outcome) => outcome,
                     Err(error) => {
                         return Some(
@@ -483,6 +777,24 @@ impl AgentWorker {
         };
         trace.latency_ms = millis(started);
         let latency_ms = trace.latency_ms;
+
+        if let Some(card) = card_call {
+            return Some(
+                self.team_ai_card(
+                    job,
+                    payload,
+                    run_id,
+                    &requester,
+                    &gathered.candidates,
+                    &card,
+                    &card_commands,
+                    spend,
+                    &model,
+                    &trace,
+                )
+                .await,
+            );
+        }
 
         let Some(call) = call else {
             // A plain answer. Bounded, posted as one message.
@@ -542,6 +854,31 @@ impl AgentWorker {
             );
         }
 
+        // ADR-0201 증보 v3 B13-I5: a card of a bundle that was off when this request began was not
+        // offered, so the model named an id it was not shown. Say no here, before any picture work
+        // (the lookup, the Drive read, the decode, the refusal row `prepare` writes); the proposal
+        // transaction below judges again with the switches as they are by then. The tokens this
+        // request spent are charged by this hand-off, like every refusal that comes before the
+        // transaction.
+        let proposed_action: Option<&'static str> =
+            momo_agent::actions::action_by_id(&action_id).map(|action| action.id);
+        if !roles.action_allowed(&action_id) {
+            return Some(
+                self.team_ai_refused(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::ROLE_OFF_SENTENCE,
+                    usage,
+                    &model,
+                    OUTCOME_REFUSED_ROLE_OFF,
+                    &trace,
+                    proposed_action,
+                )
+                .await,
+            );
+        }
+
         let prepared_avatar = if let Some(action) = momo_agent::actions::action_by_id(&action_id) {
             match momo_workspace_actions::action_resolve::validated_action_args(
                 action,
@@ -549,9 +886,12 @@ impl AgentWorker {
                 chrono::Utc::now().timestamp_millis(),
             ) {
                 Ok(validated) => {
-                    momo_workspace_actions::profile_avatar::prepare(
+                    // #4934: the source picture is read from the api when its private address is
+                    // configured, from the worker's own archive otherwise.
+                    let attachments = self.attachment_reader();
+                    momo_workspace_actions::profile_avatar::prepare_with(
                         &self.pool,
-                        self.drive.as_ref(),
+                        &attachments,
                         workspace_id,
                         run_id,
                         agent,
@@ -623,6 +963,22 @@ impl AgentWorker {
                     prepared_avatar.as_ref(),
                 )
                 .await?;
+                // #5084 — a raised card is a run parked on a person (the proposal parks the run
+                // before the card and either returns `ProposalOk` or errors, so `Ok` is exactly
+                // "parked"): the rail is told in this same transaction, after the card.
+                if let Ok(ok) = &outcome {
+                    emit_awaiting_approval_agent_status(
+                        conn,
+                        momo_agent::AgentRunAddress {
+                            workspace_id,
+                            channel_id,
+                            agent_member_id: agent,
+                            run_id,
+                        },
+                        ok.approval_id,
+                    )
+                    .await?;
+                }
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
                 let mut resolved =
@@ -672,6 +1028,24 @@ impl AgentWorker {
                         Some("같은 대상에 승인을 기다리는 카드가 있어요. 그 카드를 먼저 처리해 주세요.".to_string()),
                         json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
+                // B13-I5: the bundle that owns this card was switched off while the model was
+                // thinking (or the model named an id it was not offered). Say so, once.
+                ProposalRefusal::RoleOff => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::ROLE_OFF_SENTENCE, None,
+                        &model, OUTCOME_REFUSED_ROLE_OFF, &trace, proposed_action).await
+                }
+                // B4-3: this request read something, so this card is not one it may raise.
+                ProposalRefusal::AfterRead => {
+                    self.team_ai_refused(job, payload, run_id,
+                        team_ai::after_read_sentence(proposed_action.unwrap_or("")),
+                        None, &model, OUTCOME_REFUSED_AFTER_READ, &trace, proposed_action).await
+                }
+                // B4-4 구현 확정: the helper does not make an admin invite link — it says where a
+                // person does. No card, no hand-off to another agent (nobody else can raise it).
+                ProposalRefusal::InviteRoleNotOffered => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::ADMIN_INVITE_SENTENCE,
+                        None, &model, OUTCOME_REFUSED_INVITE_ROLE, &trace, proposed_action).await
+                }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await
                 }
@@ -717,6 +1091,129 @@ impl AgentWorker {
                 }),
             )
             .await
+    }
+
+    /// A reply that says no to the card the model proposed: the run succeeds with the sentence
+    /// posted, and the audit row's `outcome` is `outcome` (a reason code) with the registry id of
+    /// the refused card — never the text. `usage` is what is still to be charged: `None` when the
+    /// proposal transaction already wrote the ledger row.
+    #[allow(clippy::too_many_arguments)]
+    async fn team_ai_refused(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        sentence: &str,
+        usage: Option<Spend>,
+        model: &str,
+        outcome: &'static str,
+        trace: &TurnTrace,
+        refused_action: Option<&'static str>,
+    ) -> Settlement {
+        let mut trace = trace.clone();
+        trace.refused_action = refused_action;
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(sentence.to_string()),
+            json!({}),
+            usage,
+            model,
+            Ending::Refused(outcome),
+            Some(trace),
+        )
+        .await
+    }
+
+    /// The helper's `card_suggest` (ADR-0201 증보 v3 B8 C1, #4972): judge what the model named
+    /// against what this request **offered**, then post the card as the turn's one message.
+    ///
+    /// * a command of a bundle that was off when the request began was not on the tool's enum, so
+    ///   the model named one it was not shown: the same refusal sentence as a card of an off
+    ///   bundle, before anything else;
+    /// * anything else illegal (a command the helper never gives, an argument the normaliser
+    ///   refuses — the prompt included) is the model failing to build a card: the hand-off line;
+    /// * a legal card goes through [`Self::team_ai_finish`], whose transaction reads the switches
+    ///   once more ([`Ending::Suggested`]) and posts `command_suggest_props` — five server-built
+    ///   keys, `for_member_id` the run's requester — with the model's one sentence as the body.
+    ///
+    /// No approval row and no `action.*` audit row are written: a suggestion is a message. The
+    /// turn's own `team_ai.turn` row carries the command id, never the prompt (H9-I10).
+    #[allow(clippy::too_many_arguments)]
+    async fn team_ai_card(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        call: &ProviderToolCall,
+        offered: &[&'static str],
+        usage: Option<Spend>,
+        model: &str,
+        trace: &TurnTrace,
+    ) -> Settlement {
+        use momo_agent::card_suggest::{
+            command_suggest_props, validate_suggestion_among, TEAM_AI_SUGGESTABLE_COMMAND_IDS,
+        };
+        let arguments = call.arguments_json();
+        // The helper-list command the model named, as the registry spells it (`None` for any
+        // other id or a missing one — never the model's own string).
+        let named: Option<&'static str> = arguments
+            .get("commandId")
+            .and_then(Value::as_str)
+            .and_then(|id| {
+                TEAM_AI_SUGGESTABLE_COMMAND_IDS
+                    .iter()
+                    .copied()
+                    .find(|command| *command == id)
+            });
+        if let Some(command) = named.filter(|command| !offered.contains(command)) {
+            return self
+                .team_ai_refused(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::ROLE_OFF_SENTENCE,
+                    usage,
+                    model,
+                    OUTCOME_REFUSED_ROLE_OFF,
+                    trace,
+                    Some(command),
+                )
+                .await;
+        }
+        let suggestion = match validate_suggestion_among(&arguments, &[], Some(offered)) {
+            Ok(suggestion) => suggestion,
+            Err(_) => {
+                let reason = if named.is_some() {
+                    FallbackReason::CouldNotPropose
+                } else {
+                    FallbackReason::OutOfScope
+                };
+                return self
+                    .team_ai_fallback_traced(
+                        job, payload, run_id, requester, candidates, reason, usage, trace,
+                    )
+                    .await;
+            }
+        };
+        let mut trace = trace.clone();
+        trace.suggested_command = Some(suggestion.command_id);
+        let props = command_suggest_props(&suggestion, requester.member_id);
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(suggestion.body.clone()),
+            props,
+            usage,
+            model,
+            Ending::Suggested(suggestion.command_id),
+            Some(trace),
+        )
+        .await
     }
 
     /// End the run without posting anything (switch off, no human asked).
@@ -770,6 +1267,39 @@ impl AgentWorker {
             usage,
             model,
             Ending::Closed(reason.as_str()),
+            None,
+        )
+        .await
+    }
+
+    /// A usage limit was hit before the model was asked (B9): one honest sentence that says whose
+    /// limit it was, the ordinary 「맡기기」 buttons (D5), and no model call. The reason stays
+    /// `over_budget` — a code every client knows — and `props.limit` adds the source and window.
+    async fn team_ai_limit_reached(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        hit: LimitHit,
+    ) -> Settlement {
+        let props = team_ai_limits::limit_fallback_props(
+            hit,
+            payload.agent_member_id,
+            requester.member_id,
+            payload.trigger_message_id,
+            candidates,
+        );
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(hit.sentence().to_string()),
+            props,
+            None,
+            "",
+            Ending::Closed(FallbackReason::OverBudget.as_str()),
             None,
         )
         .await
@@ -831,9 +1361,17 @@ impl AgentWorker {
         let channel_id = payload.channel_id;
         let model = model.to_string();
         let ledger = usage.map(|usage| ledger_report(Some(usage), &model, payload));
-        let (succeeded, error_code) = match ending {
-            Ending::Answered => (true, None),
-            Ending::Closed(code) => (false, Some(code)),
+        // B13-I5 for a suggestion: the command the card names, so the transaction below can judge
+        // it against the switches as they are when it commits.
+        let suggested_command: Option<&'static str> = match &ending {
+            Ending::Suggested(command) => Some(*command),
+            _ => None,
+        };
+        let (succeeded, error_code, outcome) = match ending {
+            Ending::Answered => (true, None, "answered"),
+            Ending::Refused(reason) => (true, None, reason),
+            Ending::Suggested(_) => (true, None, OUTCOME_SUGGESTED_CARD),
+            Ending::Closed(code) => (false, Some(code), code),
         };
         // H2-8 / H9-I9: whoever answers to `@claude`, the line says which model on
         // which wire actually spoke (a plain id — no key, no URL).
@@ -843,16 +1381,39 @@ impl AgentWorker {
             .map(|trace| json!({"model": trace.model, "wire": trace.wire}));
         let audit_detail = trace
             .as_ref()
-            .map(|trace| trace.audit_detail(usage, error_code.unwrap_or("answered")));
+            .map(|trace| trace.audit_detail(usage, outcome));
+        // What the audit row says instead when the card is refused in the transaction.
+        let refused_audit_detail = suggested_command.and_then(|command| {
+            trace.as_ref().map(|trace| {
+                let mut trace = trace.clone();
+                trace.suggested_command = None;
+                trace.refused_action = Some(command);
+                trace.audit_detail(usage, OUTCOME_REFUSED_ROLE_OFF)
+            })
+        });
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
-        let withhold_previews = trace
+        let withhold_previews = trace.as_ref().is_some_and(|trace| {
+            !trace.tools.is_empty() || trace.web_searches > 0 || trace.task_step.is_some()
+        });
+        // B5 (#4968): the step this request is, and what it did — a task's last step reports its
+        // reads like every step before it (the ledger rows are per step, B5-7).
+        let task_progress = trace
             .as_ref()
-            .is_some_and(|trace| !trace.tools.is_empty() || trace.web_searches > 0);
+            .and_then(|trace| trace.task_step.map(|step| (step, task::step_counts(trace))));
+        // B5 (#4967): the code a task row is closed with — the run's own ending, by its word.
+        let task_end_reason: &'static str = match &ending {
+            // A `card_suggest` card is a first-turn ending (a step is offered no card tool), and it
+            // is a successful one: were a row ever open here, it would end done like an answer.
+            Ending::Answered | Ending::Suggested(_) => momo_agent::team_ai_task::END_DONE,
+            Ending::Refused(reason) => reason,
+            Ending::Closed(code) => code,
+        };
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let label = label.clone();
-            let audit_detail = audit_detail.clone();
+            let mut audit_detail = audit_detail.clone();
+            let refused_audit_detail = refused_audit_detail.clone();
             let body = body.clone();
             let props = props.clone();
             let ledger = ledger.clone();
@@ -860,11 +1421,68 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more (its helper left the room or was
+                    // deactivated) keeps no task row: the task ends with it (#5029). A run without
+                    // a task has no row, and this is then a no-op.
+                    momo_agent::team_ai_task::end_in_tx(
+                        conn,
+                        workspace_id,
+                        run_id,
+                        momo_agent::team_ai_task::END_AGENT_GONE,
+                    )
+                    .await?;
                     return Ok(false);
                 };
+                // B5-2: a run with a task row is in task mode — its ledger rows are per step and
+                // its row ends with it.
+                let in_task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id)
+                    .await?
+                    .is_some();
                 if snapshot.status == RunStatus::Cancelled {
+                    if in_task {
+                        // B5-8: a stop that lands while a step is finishing still leaves what the
+                        // step spent on the ledger, and the task ends (idempotent with the route's).
+                        if let Some(report) = ledger {
+                            let mut resolved =
+                                RunUsageReport::resolve(Some(&report), &model, None, None);
+                            resolved.source = momo_agent::UsageSource::Measured;
+                            momo_agent::team_ai_task::record_step_usage_in_tx(
+                                conn,
+                                workspace_id,
+                                run_id,
+                                agent,
+                                channel_id,
+                                &resolved,
+                                searches,
+                            )
+                            .await?;
+                        }
+                        momo_agent::team_ai_task::end_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            momo_agent::team_ai_task::END_CANCELLED,
+                        )
+                        .await?;
+                    }
                     return Ok(false);
                 }
+                // A suggestion is judged against the switches **as they are now**: the bundle that
+                // owns the command was on when the request began and may have been switched off
+                // while the model thought. Then the person gets the refusal sentence, not the
+                // card, and the audit row says `refused_role_off` with the command's id.
+                let (body, props) = match suggested_command {
+                    Some(command) => {
+                        let roles = team_ai::read_roles_in_tx(conn, workspace_id).await?;
+                        if roles.command_allowed(command) {
+                            (body, props)
+                        } else {
+                            audit_detail = refused_audit_detail;
+                            (Some(team_ai::ROLE_OFF_SENTENCE.to_string()), json!({}))
+                        }
+                    }
+                    None => (body, props),
+                };
                 let mut message_id: Option<Uuid> = None;
                 if let Some(text) = body {
                     let mut props = if props.is_object() { props } else { json!({}) };
@@ -931,17 +1549,57 @@ impl AgentWorker {
                 if let Some(report) = ledger {
                     let mut resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
                     resolved.source = momo_agent::UsageSource::Measured;
-                    record_run_usage_in_tx(
+                    if in_task {
+                        // One row per step: the run-level writer keeps one row per run, which the
+                        // task's earlier steps have already taken.
+                        momo_agent::team_ai_task::record_step_usage_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            channel_id,
+                            &resolved,
+                            searches,
+                        )
+                        .await?;
+                    } else {
+                        record_run_usage_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            channel_id,
+                            &resolved,
+                        )
+                        .await?;
+                        team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches)
+                            .await?;
+                    }
+                }
+                if in_task {
+                    // The step that ends the task reports its activities too. The visible plan is
+                    // left as the previous step wrote it: the ledger records what was said, and a
+                    // reader does not draw a finished run's plan as in progress (ADR-0200 증보 7 7-7).
+                    if let Some((step, counts)) = task_progress {
+                        task::record_step_progress(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            step,
+                            counts,
+                            None,
+                        )
+                        .await?;
+                    }
+                    // B13-I7: the task ends with the run, and its plan and note go with it.
+                    momo_agent::team_ai_task::end_in_tx(
                         conn,
                         workspace_id,
                         run_id,
-                        agent,
-                        channel_id,
-                        &resolved,
+                        task_end_reason,
                     )
                     .await?;
-                    team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches)
-                        .await?;
                 }
                 // H9-I10: which tools, how many calls and searches, tokens, ms.
                 // Never the prompt, a tool result or the answer.
@@ -1059,6 +1717,7 @@ async fn sqlx_body(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     message_id: Uuid,
+    files_on: bool,
 ) -> Result<String, DbError> {
     let body: Option<String> = momo_db::sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
@@ -1078,12 +1737,56 @@ async fn sqlx_body(
         })
         .take(20)
         .collect::<Vec<_>>();
-    Ok(trigger_turn_with_images(&body.unwrap_or_default(), &ids))
+    // #4970: the readable files of the message (ids, types, sizes — never a name) while `files` is on.
+    let listed = if files_on {
+        team_ai_files::attachment_list_block(
+            &team_ai_files::readable_attachments_of_message_in_tx(conn, workspace_id, message_id)
+                .await?,
+        )
+    } else {
+        String::new()
+    };
+    Ok(trigger_turn_with_attachments(
+        &body.unwrap_or_default(),
+        &ids,
+        &listed,
+    ))
 }
 
 // Reserve room for this trigger's server-owned image ids. The caller bounds the
 // final user turn again; appending after truncation would silently lose the ids.
+#[cfg(test)]
 fn trigger_turn_with_images(body: &str, ids: &[Uuid]) -> String {
+    trigger_turn_with_attachments(body, ids, "")
+}
+
+/// The least of the final turn that stays the person's own words, whatever is listed after them.
+const MIN_REQUEST_CHARS: usize = 600;
+
+/// The whole lines of `block` that fit in `room` characters (an empty string when not even one entry
+/// does: a header with nothing under it names no id).
+fn whole_lines_within(block: &str, room: usize) -> String {
+    if block.chars().count() <= room {
+        return block.to_string();
+    }
+    let mut kept = String::new();
+    for line in block.split_inclusive('\n') {
+        if kept.chars().count() + line.chars().count() > room {
+            break;
+        }
+        kept.push_str(line);
+    }
+    if kept.matches(" · ").count() == 0 {
+        return String::new();
+    }
+    kept
+}
+
+/// [`trigger_turn_with_images`] plus the readable-files block (#4970), which is server-owned too. The
+/// suffix is reserved **first**, so a long request is cut before an id is — but the files block yields
+/// to a floor of [`MIN_REQUEST_CHARS`] for the person's own words (a message with twenty pictures and a
+/// few documents must not squeeze its request down to a few characters): whole entries only.
+fn trigger_turn_with_attachments(body: &str, ids: &[Uuid], files_block: &str) -> String {
     let mut suffix = String::new();
     if !ids.is_empty() {
         suffix.push_str("\n[데이터: 이 메시지의 이미지 attachmentId]\n");
@@ -1091,10 +1794,29 @@ fn trigger_turn_with_images(body: &str, ids: &[Uuid]) -> String {
             suffix.push_str(&format!("{id}\n"));
         }
     }
+    let room = team_ai::MAX_TRIGGER_CHARS
+        .saturating_sub(MIN_REQUEST_CHARS)
+        .saturating_sub(suffix.chars().count());
+    suffix.push_str(&whole_lines_within(files_block, room));
     let body_budget = team_ai::MAX_TRIGGER_CHARS.saturating_sub(suffix.chars().count());
     let mut turn: String = body.chars().take(body_budget).collect();
     turn.push_str(&suffix);
     turn
+}
+
+/// Did the provider refuse a call **that carried a picture** because of the picture? The wire can carry one
+/// (`wire_sees_images`), but the model behind a compatible gateway may not read it, and then the provider
+/// answers the image block itself with a 4xx. Only the statuses that mean 「this request, as written, is
+/// not acceptable」 count — 400, 413, 415, 422: the same request without the picture had just been accepted
+/// (it is the call after the read that failed), so the picture is the difference. A 401/403 (the key),
+/// 404 (the model), 408 or 429 (time, rate) or any 5xx says nothing about pictures and stays what it was.
+fn image_was_refused<E>(
+    attempt: &Result<Result<crate::provider::ChatCompletion, ProviderError>, E>,
+) -> bool {
+    matches!(
+        attempt,
+        Ok(Err(ProviderError::HttpStatus(400 | 413 | 415 | 422, _)))
+    )
 }
 
 fn millis(since: Instant) -> i64 {
@@ -1114,5 +1836,97 @@ mod profile_tests_4791 {
             assert!(final_turn.contains(&id.to_string()));
         }
         assert_eq!(trigger_turn_with_images("짧은 부탁", &[]), "짧은 부탁");
+    }
+
+    /// #4970: the readable-files block is reserved **before** the request's own text is cut, like the
+    /// image ids, so a long request loses its tail and never an id; and a message with no files adds
+    /// nothing.
+    #[test]
+    fn a_long_request_keeps_its_file_list_inside_the_final_turn_budget() {
+        let files: Vec<(Uuid, String, i64)> = (1..=8)
+            .map(|i| (Uuid::from_u128(i), "application/pdf".to_string(), 123_456))
+            .collect();
+        let block = momo_workspace_actions::team_ai_attachments::attachment_list_block(&files);
+        let turn = trigger_turn_with_attachments(&"가".repeat(3000), &[], &block);
+        let final_turn = team_ai::user_turn(&turn);
+        assert_eq!(final_turn.chars().count(), team_ai::MAX_TRIGGER_CHARS);
+        for (id, _, _) in &files {
+            assert!(final_turn.contains(&id.to_string()), "{id} was cut");
+        }
+        assert!(final_turn.contains("read_attachment"));
+        // the person's own words still get most of the turn
+        assert!(
+            final_turn.chars().filter(|c| *c == '가').count() > 700,
+            "the request was squeezed out"
+        );
+        assert_eq!(
+            trigger_turn_with_attachments("짧은 부탁", &[], ""),
+            "짧은 부탁"
+        );
+    }
+
+    /// #4970: twenty pictures (the image-id block) and eight documents (the files block) in one message
+    /// still leave the person's request its floor; the pictures' ids are never cut, and the files block
+    /// keeps whole entries only.
+    #[test]
+    fn many_attachments_never_squeeze_the_request_below_its_floor() {
+        let ids: Vec<Uuid> = (1..=20).map(Uuid::from_u128).collect();
+        let files: Vec<(Uuid, String, i64)> = (101..=108)
+            .map(|i| (Uuid::from_u128(i), "application/pdf".to_string(), 123_456))
+            .collect();
+        let block = momo_workspace_actions::team_ai_attachments::attachment_list_block(&files);
+        let turn = trigger_turn_with_attachments(&"가".repeat(3000), &ids, &block);
+        let final_turn = team_ai::user_turn(&turn);
+        assert_eq!(final_turn.chars().count(), team_ai::MAX_TRIGGER_CHARS);
+        assert!(
+            final_turn.chars().filter(|c| *c == '가').count() >= MIN_REQUEST_CHARS,
+            "the request kept less than its floor"
+        );
+        for id in &ids {
+            assert!(
+                final_turn.contains(&id.to_string()),
+                "picture id {id} was cut"
+            );
+        }
+        // some entries fit, and each one that is there is whole
+        let listed = final_turn.matches("application/pdf · 123456바이트").count();
+        assert!(listed >= 1 && listed < files.len(), "{listed} entries");
+        for line in final_turn.lines().filter(|l| l.contains(" · ")) {
+            assert!(line.ends_with("바이트"), "a half-listed entry: {line}");
+        }
+        // room for nothing is no block, not a header over nothing
+        assert_eq!(whole_lines_within(&block, 10), "");
+        assert_eq!(whole_lines_within(&block, 10_000), block);
+    }
+
+    /// #4970 review L4: only a 4xx that says 「this request, as written, is not acceptable」 is the
+    /// picture's doing; the key, the model, time, rate and the provider's own faults are not.
+    #[test]
+    fn only_a_refusal_of_the_request_itself_counts_as_the_model_not_reading_pictures() {
+        use crate::provider::ChatCompletion;
+        type Attempt = Result<Result<ChatCompletion, ProviderError>, ()>;
+        let refused = |status: u16| -> Attempt {
+            Ok(Err(ProviderError::HttpStatus(
+                status,
+                "no images".to_string(),
+            )))
+        };
+        for status in [400, 413, 415, 422] {
+            assert!(image_was_refused(&refused(status)), "{status}");
+        }
+        for status in [401, 403, 404, 408, 429, 500, 502, 503] {
+            assert!(!image_was_refused(&refused(status)), "{status}");
+        }
+        let unreachable: Attempt = Ok(Err(ProviderError::Unreachable("down".into())));
+        assert!(!image_was_refused(&unreachable));
+        let timed_out: Attempt = Err(());
+        assert!(!image_was_refused(&timed_out));
+        let answered: Attempt = Ok(Ok(ChatCompletion {
+            text: "ok".into(),
+            usage: None,
+            tool_calls: Vec::new(),
+            web_search_requests: 0,
+        }));
+        assert!(!image_was_refused(&answered));
     }
 }

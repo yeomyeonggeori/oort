@@ -60,7 +60,8 @@ import {
 } from '../src/features/conversation/sendArrival';
 import {SEND_SLOW_MS, useSlowSend} from '../src/features/conversation/sendSlow';
 import {CONV} from '../src/features/conversation/convDesign';
-import {line} from '../src/design/tokens';
+import {darkPalette, line} from '../src/design/tokens';
+import {bubbleFor, failedBubbleFor} from '../src/features/conversation/bubble';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {resetAttachmentContentForTest} from '../src/features/attachments/content';
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
@@ -423,7 +424,7 @@ describe('sendArrival (#4455)', () => {
   });
 
   describe('실패한 메아리 — 예전 그대로', () => {
-    it('흐린 본문 + 「전송 실패」 + 「다시 보내기」', () => {
+    it('옅은 채움 + 「전송 실패」 + 「다시 보내기」', () => {
       const onResend = jest.fn();
       render(
         <FixedScheme scheme="dark">
@@ -436,7 +437,10 @@ describe('sendArrival (#4455)', () => {
         </FixedScheme>,
       );
       expect(screen.getByText('전송 실패')).toBeTruthy();
-      expect(flat(screen.getByTestId('message-bubble').props.style).opacity).toBe(0.6);
+      // 옅기는 채움의 몫이다(#5294): 말풍선 전체의 불투명도 막이 아니라 옅힌 채움이라 글자가 바탕으로 녹지 않는다(대비는 messageBubble.test.tsx).
+      const bubble = flat(screen.getByTestId('message-bubble').props.style);
+      expect(bubble.opacity).toBeUndefined();
+      expect(bubble.backgroundColor).toBe(failedBubbleFor(darkPalette, bubbleFor(darkPalette).mine).bg);
       fireEvent.press(screen.getByTestId('pending-resend'));
       expect(onResend).toHaveBeenCalledWith('c-1');
       // 실패한 줄에는 시계가 없다.

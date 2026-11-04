@@ -67,6 +67,7 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {GlassSurface, useGlassMaterial} from '../../design/glass';
@@ -77,7 +78,7 @@ import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from 
 import {DockFollowContext} from './dockFollow';
 import {useMakeLanding} from './makeLanding';
 import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from './useComposerInputLayout';
-import {clearDraft, readDraft, saveDraft} from './drafts';
+import {clearDraft, readDraft, saveDraft, subscribeDraftSeed} from './drafts';
 import {Avatar} from './Avatar';
 import {
   applyMention,
@@ -88,8 +89,12 @@ import {
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
 import {ReplyDraftCard} from './ReplyDraftCard';
+import {AlsoInChannelCheck} from './AlsoInChannelCheck';
 import {useReplyCopy} from './replyCopy';
 import type {ReplyTarget} from './replyTarget';
+import {ComposerLinkPreview} from './ComposerLinkPreview';
+import {useComposerLinkPreview} from './useComposerLinkPreview';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {AttachMenu} from '../attachments/AttachMenu';
 import {AttachmentTray} from '../attachments/AttachmentTray';
 import {
@@ -1089,7 +1094,17 @@ export function placeholderRoom(fontScale: number): number {
 export {COMPOSER_OFFLINE_COPY};
 
 export interface ComposerSendOptions {
-  attachments: MessageAttachment[];
+  attachments?: MessageAttachment[];
+  /**
+   * #5016 — 입력칸 위 링크 미리보기의 ✕로 이 메시지의 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01).
+   * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  suppressUnfurl?: boolean;
+  /**
+   * #4888 — 「대화에도 보내기」를 켜고 보낸다(ADR-0148 증보 2026-10-31). 스레드 답글(스레드 화면, 밀어서 답글)에서만 뜻이 있고, 켠 때만
+   * 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  alsoInChannel?: boolean;
 }
 
 /**
@@ -1120,6 +1135,7 @@ export function Composer({
   viewerHumanId,
   dmHint,
   offline,
+  offlineNote,
   draftKey,
   onSend,
   onTyping,
@@ -1127,6 +1143,7 @@ export function Composer({
   onCancelQuote,
   replyTarget,
   onCancelReply,
+  offerAlsoInChannel,
   attachmentTarget,
   placeholder: placeholderProp,
   sendLabel: sendLabelProp = '보내기',
@@ -1191,6 +1208,12 @@ export function Composer({
    */
   offline?: boolean;
   /**
+   * `offline` 일 때 컴포저 위 한 줄(과 보내기·첨부 단추의 낭독 힌트)이 말하는 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이
+   * 문장을 가르므로(#5222, 연결 상태 모델의 `composerNote`) 화면이 사전에서 읽어 준다. 없으면 예전 한 문장
+   * (`COMPOSER_OFFLINE_COPY`)이다 — 연결 상태 모델이 없는 하네스·시험은 그대로 이 문장을 읽는다.
+   */
+  offlineNote?: string;
+  /**
    * 이 컴포저의 초안이 앉는 자리 (`drafts.ts`). 없으면 초안을 쓰지도 읽지도
    * 않는다 — 이름 없는 자리에 남긴 글은 나중에 누구의 것인지 답할 수 없다.
    */
@@ -1225,6 +1248,11 @@ export function Composer({
   /** 답글 대상만 뗀다 — **쓴 글은 남는다**(글은 이 컴포저가 들고 있다). 대상이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelReply?: () => void;
   /**
+   * 「대화에도 보내기」 체크를 늘 세운다(스레드 화면 입력칸, #4888). 채널 입력칸은 주지 않고, 밀어서 건 답글 머리말(`replyTarget`)이 있는 동안에만
+   * 체크가 선다. 기본은 꺼짐이고 마지막 선택을 기억하지 않는다 — 보내면 꺼지고, 답글 대상이나 입력칸(`draftKey`)이 바뀌면 꺼진다.
+   */
+  offerAlsoInChannel?: boolean;
+  /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
    * raise the real software keyboard without a tap (a simulator cannot be
@@ -1256,6 +1284,12 @@ export function Composer({
   // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
   const openMadeConversation = useMakeLanding();
   const replying = !!replyTarget && onCancelReply !== undefined;
+  // 「대화에도 보내기」(#4888): 서는 자리는 스레드 입력칸과 답글 머리말이 걸린 동안이다. 상태는 여기서 들고, 기억하지 않는다.
+  const offersAlsoInChannel = offerAlsoInChannel === true || replying;
+  const [alsoInChannel, setAlsoInChannel] = useState(false);
+  const alsoInChannelScope = `${replyTarget?.messageId ?? ''}|${draftKey ?? ''}`;
+  useEffect(() => setAlsoInChannel(false), [alsoInChannelScope]);
+  const alsoInChannelOn = offersAlsoInChannel && alsoInChannel;
   const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
   const sendLabel = replying ? replyCopy.send() : sendLabelProp;
   const keyboardAppearance = useKeyboardAppearance();
@@ -1368,6 +1402,23 @@ export function Composer({
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
   const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
 
+  // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 웹 입력칸 #5005 와 같은 규칙). 보낼 방은 첨부가 올라가는 방과
+  // 같다(워크스페이스·채널, 스레드면 뿌리 메시지까지) — 이 입력창은 채널과 스레드가 함께 쓰고, 방을 모르면(첨부 대상이
+  // 없는 하네스·시험) 아무것도 묻지 않는다. 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const formatMessage = useFormatMessage();
+  const linkPreview = useComposerLinkPreview({
+    workspaceId: attachmentWorkspaceId,
+    channelId: attachmentChannelId,
+    threadRootId: attachmentRootId,
+    text,
+    paused: offline === true,
+  });
+  const dismissLinkPreview = () => {
+    linkPreview.dismiss();
+    // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 — 결과를 소리로 알린다(`AttachmentTray` 와 같은 길).
+    AccessibilityInfo.announceForAccessibility(formatMessage('timeline.unfurl.previewDismissed'));
+  };
+
   // 메뉴가 **실제로 사라진 뒤에만** 네이티브 picker·카메라를 제시한다 (design-review
   // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
   // 제시를 거절할 수 있고, 그 실패는 catch에서 'unavailable'로 접혀 **picker가
@@ -1451,6 +1502,24 @@ export function Composer({
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
+  }, [draftKey]);
+
+  // 밖에서 심는 글 (`seedDraft`, 승인 카드의 「다시 요청」 #5171). 저장소에는 `seedDraft` 가 적고, 이미 마운트된 입력창은 이
+  // 알림으로만 안다. 쓰던 글이 있으면 덮지 않고 거절한다. 글을 놓는 몸은 위 `draftKey` 전환 효과와 같다.
+  useEffect(() => {
+    if (draftKey === undefined) return undefined;
+    return subscribeDraftSeed(draftKey, seeded => {
+      if (currentTextRef.current.trim() !== '') return false;
+      currentTextRef.current = seeded;
+      restedRef.current = false;
+      setRestedFlag(false);
+      restFromRef.current = null;
+      setRestFrom(null);
+      setText(seeded);
+      setCaret(seeded.length);
+      setMentionOpen(false);
+      return true;
+    });
   }, [draftKey]);
 
   // Derived during render, not in an effect: an effect would compute the list
@@ -1756,16 +1825,27 @@ export function Composer({
     if (draftKeyRef.current !== undefined) {
       clearDraft(draftKeyRef.current);
     }
+    // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
+    // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
+    const picked = {
+      ...(linkPreview.suppressed ? {suppressUnfurl: true} : {}),
+      // 켠 때만 키가 간다. 보냈으므로 체크는 꺼진다(마지막 선택을 기억하지 않는다).
+      ...(alsoInChannelOn ? {alsoInChannel: true} : {}),
+    };
+    const flags = Object.keys(picked).length === 0 ? null : picked;
+    setAlsoInChannel(false);
     if (attachmentKey === null) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
     const sent = takeSent(attachmentKey);
     if (sent.attachments.length === 0) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
-    onSend(body, {attachments: sent.attachments});
+    onSend(body, {attachments: sent.attachments, ...flags});
   }, [
     setKeyBlocked,
     text,
@@ -1779,6 +1859,8 @@ export function Composer({
     showSlash,
     slashRows,
     acceptSlash,
+    linkPreview.suppressed,
+    alsoInChannelOn,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -2445,9 +2527,10 @@ export function Composer({
       ) : null}
 
       {offline ? (
-        <Text style={styles.offline} testID="composer-offline">
-          {COMPOSER_OFFLINE_COPY}
-        </Text>
+        // 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288).
+        <Sentence style={styles.offline} testID="composer-offline">
+          {offlineNote ?? COMPOSER_OFFLINE_COPY}
+        </Sentence>
       ) : null}
 
       {attachmentKey === null ? null : (
@@ -2463,6 +2546,14 @@ export function Composer({
           onClear={() => clearSurface(attachmentKey)}
         />
       )}
+
+      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이 바로 아래, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
+          가깝다). 알약 **밖**이라 ✕가 보내기를 일으키지 않는다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 —
+          첨부 트레이·인용 줄과 같은 취급이고, 줄 안 높이는 트레이와 같은 상한이 묶는다. */}
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        onDismiss={dismissLinkPreview}
+      />
 
       {/* 입력창 **바로 위**. 지금 쓰고 있는 글이 무엇을 가리키는지는 그 글을
           쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
@@ -2521,6 +2612,13 @@ export function Composer({
           onCancel={onCancelReply}
         />
       ) : null}
+      {offersAlsoInChannel ? (
+        <AlsoInChannelCheck
+          checked={alsoInChannel}
+          onChange={setAlsoInChannel}
+          textLeft={fieldInset(INPUT_TEXT_LEFT)}
+        />
+      ) : null}
       <View
         style={styles.bar}
         testID="composer-bar"
@@ -2535,7 +2633,7 @@ export function Composer({
             accessibilityLabel={ATTACH_COPY.attach}
             accessibilityHint={
               offline
-                ? COMPOSER_OFFLINE_COPY
+                ? offlineNote ?? COMPOSER_OFFLINE_COPY
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
                   ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
@@ -2740,7 +2838,9 @@ export function Composer({
           // 안 들린다. 위의 문장은 별개의 요소라 순서대로 훑어야 닿는데, 버튼에
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
           accessibilityHint={
-            offline ? COMPOSER_OFFLINE_COPY : attachmentBlockCopy ?? undefined
+            offline
+              ? offlineNote ?? COMPOSER_OFFLINE_COPY
+              : attachmentBlockCopy ?? undefined
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}

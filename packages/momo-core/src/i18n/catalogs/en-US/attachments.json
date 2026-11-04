@@ -1,0 +1,23 @@
+{
+  "attachments.tray.removeNamed": "Remove attachment {name}",
+  "attachments.video.cardLabel": "{name}, video, {duration}, play",
+  "attachments.video.cardLabelNoDuration": "{name}, video, play",
+  "attachments.video.play": "Play",
+  "attachments.video.pause": "Pause",
+  "attachments.video.replay": "Replay from the start",
+  "attachments.video.mute": "Mute",
+  "attachments.video.unmute": "Unmute",
+  "attachments.video.seekLabel": "Playback position",
+  "attachments.video.seekValue": "{position} of {total}",
+  "attachments.video.loading": "Loading video",
+  "attachments.video.failed": "Couldn't play this video",
+  "attachments.video.gone": "This video isn't available anymore",
+  "attachments.video.retry": "Try again",
+  "attachments.video.thumbLabel": "Video {position, number}",
+  "attachments.video.thumbHint": "Go to this video",
+  "attachments.video.saveHint": "Saves the video to your photo library",
+  "attachments.viewer.mixedCaption": "{position, number} of {total, number}",
+  "attachments.viewer.mixedCaptionLabel": "Item {position, number} of {total, number}",
+  "attachments.tray.overflow": "{count, plural, one {# file doesn't} other {# files don't}} fit: a message holds up to {max, number}.",
+  "attachments.tray.noticeDismiss": "Got it"
+}

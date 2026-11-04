@@ -115,6 +115,23 @@ pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update"
 /// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
+/// `team_ai.roles.set` — switch **one** role bundle of the team AI ("oort 도우미") on or off,
+/// as `PATCH …/settings` does for `team_ai_roles` (ADR-0201 증보 v3 B3-T, #4964). The one
+/// way the helper's reach changes from a chat; helper only, an admin approves, and it is on
+/// the sensitive list (`team_ai_roles::SENSITIVE_ACTION_IDS`): a request that has read anything
+/// never gets to propose it.
+pub const ACTION_TEAM_AI_ROLES_SET: &str = "team_ai.roles.set";
+
+/// `member.role.set` — declared, not executable yet ([`DECLARED_NOT_EXECUTABLE`]). Named here
+/// because ADR-0201 증보 v3 B4-3 puts it on the helper's sensitive list before it is ever opened:
+/// raising a person's workspace role must never come out of text the helper has read.
+pub const ACTION_MEMBER_ROLE_SET: &str = "member.role.set";
+
+/// `host.session.open` — Host Ops (ADR-0210), not in this registry yet. Named here for the same
+/// reason as [`ACTION_MEMBER_ROLE_SET`]: the sensitive list (B4-3) is a deny-list, so it can name
+/// an id before the action exists and the id is covered the day it is added.
+pub const ACTION_HOST_SESSION_OPEN: &str = "host.session.open";
+
 /// The requesting human's own avatar (ADR-0186 v4 + amendment v7, #4791).
 /// Sources are their image attachment in this conversation or generated/retrieved
 /// image bytes. The run supplies the subject and only that person may approve.
@@ -284,10 +301,18 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// never told an id the server refuses. A new id here is an ADR amendment, not a
 /// code change.
 ///
-/// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
-/// `hosted.channels.grant` (widens access), and everything declared but not
-/// executable (`webhook.create`, `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
+/// ADR-0201 증보 v3 B3-T adds `team_ai.roles.set` (#4964): the card that switches the
+/// helper's own role bundles. B4 adds `invite.create` and `agent.invite` (#4965, bundle
+/// `invite_access`): an invite link and an external agent's pairing code, **always** an admin's
+/// approval card, and the one-time value is delivered by the door that raised the card
+/// ([`SecretDelivery`], [`raised_by_team_ai`]). Which of these ids one request is actually offered
+/// is `team_ai_roles::TeamAiRoles::advertised_action_ids`; this list is the allow-list, not the
+/// advertisement.
+///
+/// Still outside: `hosted.channels.grant` (widens the proposing agent's own access, which the
+/// helper does not have, B4-6) and everything declared but not executable (`webhook.create`,
+/// `member.role.set`).
+pub const TEAM_AI_ACTION_IDS: [&str; 14] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -299,6 +324,9 @@ pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
     ACTION_PLUGIN_INSTALL,
     ACTION_MEMBER_AVATAR_SET,
     ACTION_MEMBER_DISPLAY_NAME_SET,
+    ACTION_INVITE_CREATE,
+    ACTION_AGENT_INVITE,
+    ACTION_TEAM_AI_ROLES_SET,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -327,6 +355,233 @@ impl SecretDelivery {
             SecretDelivery::Always => "always",
         }
     }
+}
+
+/// `payload.via_ai.source` of a card the **team AI door** raised (`workspace_action_propose`).
+pub const VIA_AI_SOURCE_TEAM_AI: &str = "team_ai";
+
+/// Did the team AI door raise this approval? **The one judgement of the door** (ADR-0201 증보 v3
+/// B4-2): it reads the stored approval payload's `via_ai.source`, which only the proposal
+/// transaction writes (`momo_workspace_actions::team_ai::propose_in_tx`). Neither the agent's tool
+/// call nor the decision request can set it — and a card the Agent Port raised carries no `via_ai`,
+/// so it reads as the other door. Every place that depends on the door calls this function: where
+/// the one-time value goes ([`secret_route`]), whether `deliverSecretToAgent` may be honoured, the
+/// card rows, and the audit provenance.
+pub fn raised_by_team_ai(payload: &Value) -> bool {
+    payload
+        .get("via_ai")
+        .and_then(|via| via.get("source"))
+        .and_then(Value::as_str)
+        == Some(VIA_AI_SOURCE_TEAM_AI)
+}
+
+/// Where a decision's one-time value goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretRoute {
+    /// The decision response's `secretOnce`, to the approver alone (ADR-0186 D4's original
+    /// shape). Also the route of an action that mints no value shown once.
+    Approver,
+    /// The proposing agent claims it once through the Agent Port (`payload.secretClaim`,
+    /// ADR-0186 증보 v3 V3-5). Never the team AI door's.
+    ProposerClaim,
+    /// The server writes it into the conversation as the team AI's one message (ADR-0201 증보 v3
+    /// B4-2). Only an `invite.create` the team AI door raised.
+    Conversation,
+}
+
+/// The route of this action's one-time value, by **door** (`team_ai_door`, from
+/// [`raised_by_team_ai`]) and — for the one action that lets the approver choose — the
+/// approver's `deliverSecretToAgent`. One function: the decision tail, the early
+/// `deliverSecretToAgent` guard and the executor all read it, so the three cannot disagree.
+///
+/// | action | Agent Port door | team AI door |
+/// |---|---|---|
+/// | `invite.create` (`Always`) | `ProposerClaim` | `Conversation` |
+/// | `agent.invite` (`OptIn`) | `ProposerClaim` if the approver ticked it, else `Approver` | `Approver` — the flag is not honoured (the route refuses it) |
+/// | anything else | `Approver` | `Approver` |
+pub fn secret_route(
+    action: &WorkspaceAction,
+    team_ai_door: bool,
+    deliver_to_agent_requested: bool,
+) -> SecretRoute {
+    match action.secret_delivery {
+        SecretDelivery::None => SecretRoute::Approver,
+        SecretDelivery::Always if team_ai_door => SecretRoute::Conversation,
+        SecretDelivery::Always => SecretRoute::ProposerClaim,
+        SecretDelivery::OptIn if team_ai_door => SecretRoute::Approver,
+        SecretDelivery::OptIn if deliver_to_agent_requested => SecretRoute::ProposerClaim,
+        SecretDelivery::OptIn => SecretRoute::Approver,
+    }
+}
+
+/// May the approver's `deliverSecretToAgent` be honoured on this card? Only where the action
+/// offers the choice **and** the card came through the Agent Port: a helper's `agent.invite` has no
+/// box to tick (B4-2), so a decision request that sends the flag is a malformed request.
+pub fn offers_opt_in_delivery(action: &WorkspaceAction, team_ai_door: bool) -> bool {
+    action.secret_delivery == SecretDelivery::OptIn && !team_ai_door
+}
+
+/// The label and the value of the row that says who receives the one-time value, when the **team
+/// AI door** raised the card (ADR-0201 증보 v3 B4-2). `None` for an action with no such row.
+fn team_ai_delivery_row(action_id: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match action_id {
+        ACTION_INVITE_CREATE => Some((
+            "초대 링크",
+            "링크 받는 곳",
+            "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요",
+        )),
+        ACTION_AGENT_INVITE => Some((
+            "연결 코드",
+            "연결 코드 받는 사람",
+            "승인한 분만 한 번 볼 수 있어요",
+        )),
+        _ => None,
+    }
+}
+
+/// The request card's rows for a card the team AI door raised: the Agent Port's delivery row
+/// (「에이전트가 이 링크를 받아 전달해요」, 「승인할 때 고르세요」) is replaced by the helper's
+/// (B4-2) — what the approver reads is what runs. Every other row, and every other action's rows,
+/// are returned as they were.
+pub fn team_ai_door_rows(action_id: &str, mut rows: Vec<Value>) -> Vec<Value> {
+    let Some((agent_port_label, label, text)) = team_ai_delivery_row(action_id) else {
+        return rows;
+    };
+    let replacement = action_row(label, text);
+    match rows
+        .iter_mut()
+        .find(|row| row.get("label").and_then(Value::as_str) == Some(agent_port_label))
+    {
+        Some(row) => *row = replacement,
+        None => rows.push(replacement),
+    }
+    rows
+}
+
+/// The roles the **helper's door** may put on an `invite.create` card (ADR-0201 증보 v3 B4-4,
+/// 「구현 확정 (#4965)」): below admin. An admin link is the strongest thing an invite can carry (it
+/// makes an admin account), and a card the helper raises is one a model wrote after a chat, so an
+/// admin link is made by a person on the screen (설정 › 멤버와 초대). A planner default (the r1
+/// security review's admin-link finding, 2026-11-01) that the owner can flip.
+///
+/// This is the helper's *policy*. What a proposal can name at all is the shared schema's
+/// ([`INVITE_PROPOSABLE_ROLES`]: `member` and `admin` today), so together they leave `member` — the
+/// Agent Port door is not narrowed by this list and keeps its schema as it was. `guest` is here
+/// because the policy is 「below admin」; it becomes reachable the day the schema offers it.
+pub const TEAM_AI_INVITE_ROLES: [&str; 2] = ["member", "guest"];
+
+/// May the helper's door raise an `invite.create` card for this (normalised) role? Asked at the
+/// proposal and again at the decision.
+pub fn team_ai_may_invite_as(role: &str) -> bool {
+    TEAM_AI_INVITE_ROLES.contains(&role)
+}
+
+/// The expiry the helper's door writes on an `invite.create` card when its proposal names none:
+/// **one day** (24 hours; the schema's own minimum). A planner default (owner 2026-10-31 「기본값을
+/// 짧게」, the r1 review's default-numbers finding) the owner can flip. A person's link and the Agent Port's keep
+/// [`DEFAULT_INVITE_EXPIRES_IN_DAYS`]; the single use is already everybody's default
+/// (`momo_settings::validated_max_uses`).
+pub const TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS: i64 = 1;
+
+/// The arguments a helper's proposal is validated as: `raw_args` with the **door's defaults**
+/// written in. Today that is one thing — an `invite.create` that names no expiry gets
+/// [`TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS`] — and it is filled in **before** the registry's
+/// validator runs, so the card's rows, the stored payload, the decision's re-validation, the
+/// invite row and the result line all read the same explicit number: what the approver is shown is
+/// what runs. A value the model did name (`expiresInDays: 7`) is never changed, and anything that
+/// is not an object is returned as it was for the validator to refuse.
+pub fn team_ai_door_args<'a>(action_id: &str, raw_args: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if action_id != ACTION_INVITE_CREATE {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let Some(object) = raw_args.as_object() else {
+        return std::borrow::Cow::Borrowed(raw_args);
+    };
+    if object
+        .get("expiresInDays")
+        .is_some_and(|value| !value.is_null())
+    {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let mut object = object.clone();
+    object.insert(
+        "expiresInDays".to_string(),
+        json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS),
+    );
+    std::borrow::Cow::Owned(Value::Object(object))
+}
+
+/// The result card's delivery row for an `invite.create` the team AI door raised: the link went
+/// to the conversation.
+pub const INVITE_CONVERSATION_RESULT_TEXT: &str = "도우미가 이 대화에 링크를 올렸어요";
+
+/// `client_msg_id` of the helper's invite-link message. A fourth key of its own
+/// (`invite_link:`), beside `card:` and `result:` — the spine's idempotency guard is
+/// `(channel, author, client_msg_id)` and the helper authors all of them in one channel. A
+/// retried decision posts the one message, not two.
+pub fn invite_link_client_msg_id(approval_id: Uuid) -> Uuid {
+    Uuid::new_v5(
+        &CARD_CLIENT_MSG_NAMESPACE,
+        format!("invite_link:{approval_id}").as_bytes(),
+    )
+}
+
+/// The provenance a helper card's audit rows carry (ADR-0201 증보 v3 B4-7): **tool names, call
+/// counts, token counts and milliseconds** — never text. Copied field by field from the stored
+/// `via_ai`, each only if it has the shape the proposal transaction wrote (a number, a short
+/// string, an array of short strings), so a payload that was tampered with cannot carry a
+/// sentence into the audit trail. `None` when the Agent Port raised the card.
+pub fn team_ai_audit_via(payload: &Value) -> Option<Value> {
+    if !raised_by_team_ai(payload) {
+        return None;
+    }
+    let via = payload.get("via_ai")?;
+    let number = |key: &str| {
+        via.get(key)
+            .filter(|value| value.is_i64() || value.is_u64())
+    };
+    let short = |value: &Value| {
+        value
+            .as_str()
+            .is_some_and(|text| text.chars().count() <= 64)
+    };
+    let mut out = serde_json::Map::new();
+    out.insert("source".into(), json!(VIA_AI_SOURCE_TEAM_AI));
+    if let Some(model) = via.get("model").filter(|model| short(model)) {
+        out.insert("model".into(), model.clone());
+    }
+    for key in [
+        "latency_ms",
+        "prompt_tokens",
+        "completion_tokens",
+        "model_calls",
+        "web_searches",
+    ] {
+        if let Some(value) = number(key) {
+            out.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(tools) = via.get("tools").and_then(Value::as_array) {
+        if tools.iter().all(short) {
+            out.insert("tools".into(), json!(tools));
+        }
+    }
+    Some(Value::Object(out))
+}
+
+/// `detail` with the helper's provenance added under `via_ai` when the card is a helper card of an
+/// action the `invite_access` bundle owns (B4-7). Any other card, from any door, is returned
+/// unchanged: this slice adds provenance to the two secret-bearing actions, not to every card.
+pub fn with_team_ai_audit_via(action_id: &str, payload: &Value, mut detail: Value) -> Value {
+    let owned_by_invites = crate::team_ai_roles::bundle_of_action(action_id)
+        .is_some_and(|bundle| bundle.id == crate::team_ai_roles::INVITE_ACCESS);
+    if !owned_by_invites {
+        return detail;
+    }
+    if let (Some(via), Some(object)) = (team_ai_audit_via(payload), detail.as_object_mut()) {
+        object.insert("via_ai".into(), via);
+    }
+    detail
 }
 
 /// The actions whose approval **mints a value that is shown once** — the invite
@@ -383,12 +638,83 @@ fn changes_display_name(payload: &Value) -> bool {
         .is_some_and(|args| args.contains_key("displayName"))
 }
 
-/// Must this approval be opened in the app to be decided — i.e. may its push
-/// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
-/// `momo.approval.open` instead of `momo.approval`.)
+/// How an approval is decided: where it is shown (`Inline`) or in the app (`Open`).
 ///
-/// The one list, in the one place; `momo_push::category_for` reads it and nothing
-/// else decides. Six kinds of approval belong on it:
+/// ADR-0204 증보 6 D6-2: the push category, the `push_action` token's refusal, the card's
+/// `props.decision_mode` and every client's decision button read **one** answer, from
+/// [`decision_mode`]. A client never works it out again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionMode {
+    /// Decided where it is shown — the banner's 승인·거부 behind Face ID, the card's buttons.
+    Inline,
+    /// Decided in the app, on the card: no lock-screen button, no inbox-row button, no chip
+    /// button (the push category is `momo.approval.open`).
+    Open,
+}
+
+impl DecisionMode {
+    /// The wire word of `props.decision_mode`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecisionMode::Inline => "inline",
+            DecisionMode::Open => "open",
+        }
+    }
+
+    pub fn is_open(self) -> bool {
+        self == DecisionMode::Open
+    }
+}
+
+/// Why an approval is decided the way it is — the criteria of ADR-0204 증보 6 D6-1/D6-2, one
+/// word each. It is the column the recorded tables carry
+/// (`every_registered_action_has_a_recorded_lock_screen_decision`,
+/// `every_catalog_tool_has_a_recorded_lock_screen_decision` and the push classification
+/// table), so that a new action cannot be registered without saying which side it is on, and
+/// why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionReason {
+    /// Approving it mints a value shown once (an invite link, a pairing code).
+    OneTimeValue,
+    /// It widens who may read or write: an agent asking for more channels.
+    Permission,
+    /// The server cannot say it can be undone: a tool outside the catalog, whose effect it does
+    /// not know. (No registered action is irreversible: each has an opposite action or a
+    /// settings screen.)
+    Irreversible,
+    /// A person cannot judge it from a banner: a picture, a message quoted from thousands of
+    /// characters, a name next to its old one, a host to pick, a login to do.
+    NeedsTheApp,
+    /// Nobody asked: an agent raised it on its own (「먼저 제안」).
+    Unasked,
+    /// A shape this build does not know — it opens (ADR-0204 「무엇인지 모르는 알림에는 버튼이
+    /// 없다」).
+    UnknownShape,
+    /// None of the above: the banner can show what is being approved.
+    None,
+}
+
+impl DecisionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecisionReason::OneTimeValue => "one_time_value",
+            DecisionReason::Permission => "permission",
+            DecisionReason::Irreversible => "irreversible",
+            DecisionReason::NeedsTheApp => "needs_the_app",
+            DecisionReason::Unasked => "unasked",
+            DecisionReason::UnknownShape => "unknown_shape",
+            DecisionReason::None => "none",
+        }
+    }
+}
+
+/// How this approval is decided — **the one function** (ADR-0204 증보 6 D6-2). The push
+/// category (`momo_push::category_for`), the `push_action` token's refusal (403
+/// `opens_in_app`, #3977), the approval card's `props.decision_mode` and every client's
+/// decision button read this answer; nothing else decides.
+///
+/// `Open` is for what a person has to look at in the app, and for what a banner must never
+/// approve on its own (ADR-0204 D6-1: 「되돌릴 수 없음 · 권한 · 1회 값 · 먼저 제안」):
 ///
 /// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
 /// 2. an approval whose card asks the approver to **choose a host**
@@ -402,90 +728,161 @@ fn changes_display_name(payload: &Value) -> bool {
 ///    sees the picture or the before/after name in the app (#4810);
 /// 5. every `message.pin` and `message.unpin` (ADR-0186 증보 v5 U-e): the card names a
 ///    message by its first 120 characters, and a pin endorses all of it;
-/// 6. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+/// 6. **a `hosted.channels.grant` an agent asked for** (D6-2: 권한 — the agent may read and
+///    write more than before). The card the server raised in place, because a person called
+///    the agent in that very channel (`origin = server_in_place`), is the exception: the
+///    person has just asked for that, so it is still decided from the banner;
+/// 7. **a tool call outside the catalog** — an operator's own `agent.tool_schema` function
+///    (`tools::momo_tool_name`). momo does not own its name and cannot say whether what it
+///    does can be undone, and 「모르면 연다」 (D6-2; this turns the earlier choice, 2026-10-17,
+///    around);
+/// 8. a card an agent raised unasked ([`crate::initiative::is_agent_initiated`]);
+/// 9. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
 ///    rows with no `approval` row and no `approval_request` message today, so
 ///    there is nothing here to classify; the producer that gives them one adds its
 ///    arm in this function.
 ///
-/// Everything else this build **knows** — any other *named* tool call, a workspace
-/// action it carries that mints nothing shown once and shows no picture — is decidable
-/// from the lock screen behind Face ID, as before (ADR-0204 D7: 「기본은 inline이고, open
-/// 목록은 서버 코드 한 곳에 둔다」).
+/// Everything else this build **knows** — a tool of the catalog, a workspace action it
+/// carries that mints nothing shown once, widens nothing and shows no picture — is decidable
+/// from the lock screen behind Face ID (ADR-0204 D7: 「기본은 inline이고, open 목록은 서버 코드
+/// 한 곳에 둔다」). `channel.member.add`, `plugin.install` and `workspace.work_tier.update` are
+/// **not** 「권한」 (D6-9 결재 3), and `member.role.set` is not registered yet — it reads as an
+/// unknown shape and opens, and it stays open when it is registered.
 ///
-/// **A tool name outside the catalog is such a named tool call, and it is inline.** It is
-/// not an unknown shape: an operator's own `agent.tool_schema` function reaches the
-/// approval inbox under a name momo does not own (`tools::momo_tool_name`), and opening
-/// every one of them would take the banner away from tools nobody asked to take it from.
-/// The price is the rolling-deploy window of a *new* open tool: until the notifier is as
-/// new as the server, the new name reads as an operator's tool. Deploy them together.
-///
-/// **What it does not understand it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
-/// 알림에는 버튼이 없다」. A workspace action this build's registry does not carry (the
-/// notifier is older than the server that wrote the card — a rolling deploy — or the
-/// action was retired), a workspace action whose payload names none, a tool call whose
-/// payload names no tool (a card with nothing to say what it is), and an `action_type`
-/// that is not one of the three producers write today all answer `true`: the cost of a
-/// wrong guess is a card opened in the app, the cost of the other wrong guess is an
-/// approval nobody could look at.
+/// **What it does not understand it opens.** A workspace action this build's registry does not
+/// carry (the notifier is older than the server that wrote the card — a rolling deploy — or the
+/// action was retired), a workspace action whose payload names none, a tool call whose payload
+/// names no tool (a card with nothing to say what it is), and an `action_type` that is not one
+/// of the three producers write today all answer `Open`: the cost of a wrong guess is a card
+/// opened in the app, the cost of the other wrong guess is an approval nobody could look at.
 ///
 /// ## What it may read
 ///
 /// Only `action.id`, whether `action.args` is an object with an `avatar` or `displayName` key,
-/// `tool_call.name`, `execution` — the paths the push judgment's payload projection
-/// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
-/// this function must say the same thing about the same card: the push judges the
+/// `tool_call.name`, `execution` and `origin` — the paths the push judgment's payload
+/// projection carries (`momo_push` `judgment.rs`). Never an argument's value. The projection
+/// and this function must say the same thing about the same card: the push judges the
 /// projection, the decision route (#3977) the whole payload.
-/// `push_conformance_pg::an_approval_that_must_be_opened_…` asserts exactly that for
-/// every card of its table, and `momo-push/tests/judgment_projection.rs` fails if the
-/// statement reads a path of the payload nobody listed.
+/// `push_conformance_pg::an_approval_that_must_be_opened_…` asserts exactly that for every card
+/// of its table, and `momo-push/tests/judgment_projection.rs` fails if the statement reads a
+/// path of the payload nobody listed.
+pub fn decision_mode(action_type: &str, payload: &Value) -> DecisionMode {
+    judge(action_type, payload).0
+}
+
+/// The reason behind [`decision_mode`]'s answer — the column of the recorded tables. Same
+/// judgment, so the two can never disagree.
+pub fn decision_reason(action_type: &str, payload: &Value) -> DecisionReason {
+    judge(action_type, payload).1
+}
+
+/// Write `props.decision_mode` on an approval card's props — `mode` is
+/// [`decision_mode`] answered for the card's own approval payload. Call it on the props
+/// **before** the card is inserted: the insert's own realtime frame carries the props, and an
+/// update after it would reach no client until a refresh.
+pub fn stamp_decision_mode(props: &mut Value, mode: DecisionMode) {
+    if let Some(object) = props.as_object_mut() {
+        object.insert(DECISION_MODE_PROPS_KEY.into(), json!(mode.as_str()));
+    }
+}
+
+/// The card props key [`stamp_decision_mode`] writes.
+pub const DECISION_MODE_PROPS_KEY: &str = "decision_mode";
+
+/// Must this approval be opened in the app to be decided — i.e. may its push **not** carry the
+/// lock-screen 승인·거부 buttons? (ADR-0204 D7: the category `momo.approval.open` instead of
+/// `momo.approval`.) Exactly `decision_mode(..) == Open`; kept as a one-line alias for the
+/// readers that ask a yes/no question.
 pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
+    decision_mode(action_type, payload).is_open()
+}
+
+fn judge(action_type: &str, payload: &Value) -> (DecisionMode, DecisionReason) {
+    use DecisionMode::{Inline, Open};
+    use DecisionReason as Why;
     if crate::approval::offers_host_choice(payload) {
-        return true;
+        return (Open, Why::NeedsTheApp);
     }
     match action_type {
-        // Decided where it is shown, behind Face ID — unless the card is one the lock
-        // screen cannot show.
-        crate::tools::ACTION_TYPE_TOOL_CALL => payload
-            .get("tool_call")
-            .and_then(|call| call.get("name"))
-            .and_then(Value::as_str)
-            .is_none_or(|name| {
-                let name = crate::tools::normalize(name);
-                OPEN_IN_APP_TOOL_NAMES
-                    .iter()
-                    .any(|open| crate::tools::normalize(open) == name)
-            }),
-        ACTION_TYPE_WORKSPACE_ACTION => payload
-            .get("action")
-            .and_then(|action| action.get("id"))
-            .and_then(Value::as_str)
-            .is_none_or(|id| {
-                action_by_id(id).is_none()
-                    // A card nobody asked for is never decided from a banner: the person did
-                    // not ask, so a 승인 button would consent to something they never looked at
-                    // (ADR-0186 증보 v5 U-c). Reads `origin`, a path the push projection carries.
-                    || crate::initiative::is_agent_initiated(payload)
-                    || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
-                    || (id == ACTION_AGENT_PROFILE_UPDATE
-                        && (changes_avatar(payload) || changes_display_name(payload)))
-                    // A name change is decided with the before/after name visible (#4810).
-                    || id == ACTION_MEMBER_DISPLAY_NAME_SET
-                    || id == ACTION_AGENT_RENAME
-                    // A picture cannot be judged from a banner — and this card has no
-                    // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
-                    || id == ACTION_MEMBER_AVATAR_SET
-                    || id == ACTION_DM_AGENT_ADMIT
-                    // A message cannot be judged from a banner either: the card shows the
-                    // first 120 characters of something that can be thousands (ADR-0186
-                    // 증보 v5 U-e, review M4), so the approver reads it in the app.
-                    || id == ACTION_MESSAGE_PIN
-                    || id == ACTION_MESSAGE_UNPIN
-                    // The picture is the whole point of the card, and the lock screen shows
-                    // none: the push says 「앱에서 확인」 and offers no 승인 button
-                    // (ADR-0186 증보 v8 X8-3).
-                    || id == ACTION_EXPRESSION_CREATE
-            }),
-        _ => true,
+        crate::tools::ACTION_TYPE_TOOL_CALL => {
+            let Some(name) = payload
+                .get("tool_call")
+                .and_then(|call| call.get("name"))
+                .and_then(Value::as_str)
+            else {
+                return (Open, Why::UnknownShape);
+            };
+            let normalized = crate::tools::normalize(name);
+            if OPEN_IN_APP_TOOL_NAMES
+                .iter()
+                .any(|open| crate::tools::normalize(open) == normalized)
+            {
+                (Open, Why::NeedsTheApp)
+            } else if !crate::tools::is_executable(name) {
+                // An operator's own tool: whether it can be undone is not something this
+                // server knows (ADR-0204 증보 6 D6-2 · D6-9 결재 1).
+                (Open, Why::Irreversible)
+            } else {
+                (Inline, Why::None)
+            }
+        }
+        ACTION_TYPE_WORKSPACE_ACTION => {
+            let Some(id) = payload
+                .get("action")
+                .and_then(|action| action.get("id"))
+                .and_then(Value::as_str)
+            else {
+                return (Open, Why::UnknownShape);
+            };
+            if action_by_id(id).is_none() {
+                return (Open, Why::UnknownShape);
+            }
+            // A card nobody asked for is never decided from a banner: the person did not ask,
+            // so a 승인 button would consent to something they never looked at (ADR-0186 증보
+            // v5 U-c). Reads `origin`, a path the push projection carries.
+            if crate::initiative::is_agent_initiated(payload) {
+                return (Open, Why::Unasked);
+            }
+            if ONE_TIME_SECRET_ACTION_IDS.contains(&id) {
+                return (Open, Why::OneTimeValue);
+            }
+            // The agent reads and writes more than before. Only the card the server itself
+            // raised in place — a person called the agent in that very channel — is the
+            // exception (ADR-0204 증보 6 D6-2).
+            if id == ACTION_HOSTED_CHANNELS_GRANT
+                && !crate::in_place_grant::is_in_place_grant(payload)
+            {
+                return (Open, Why::Permission);
+            }
+            let in_app = (id == ACTION_AGENT_PROFILE_UPDATE
+                && (changes_avatar(payload) || changes_display_name(payload)))
+                // A name change is decided with the before/after name visible (#4810).
+                || id == ACTION_MEMBER_DISPLAY_NAME_SET
+                || id == ACTION_AGENT_RENAME
+                // A picture cannot be judged from a banner — and this card has no
+                // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
+                || id == ACTION_MEMBER_AVATAR_SET
+                || id == ACTION_DM_AGENT_ADMIT
+                // A message cannot be judged from a banner either: the card shows the
+                // first 120 characters of something that can be thousands (ADR-0186
+                // 증보 v5 U-e, review M4), so the approver reads it in the app.
+                || id == ACTION_MESSAGE_PIN
+                || id == ACTION_MESSAGE_UNPIN
+                // The picture is the whole point of the card, and the lock screen shows
+                // none: the push says 「앱에서 확인」 and offers no 승인 button
+                // (ADR-0186 증보 v8 X8-3).
+                || id == ACTION_EXPRESSION_CREATE
+                // The card carries the 「공급자로 가는 내용」 line for `files` and `memory`;
+                // approving is the consent to it, so it is read in the app (ADR-0201 증보
+                // v3 B3-T). The id decides — an argument's value is never read here.
+                || id == ACTION_TEAM_AI_ROLES_SET;
+            if in_app {
+                (Open, Why::NeedsTheApp)
+            } else {
+                (Inline, Why::None)
+            }
+        }
+        _ => (Open, Why::UnknownShape),
     }
 }
 
@@ -569,6 +966,14 @@ pub struct WorkspaceAction {
     /// [`proposal_summary`]; it lives here so a new action cannot be added
     /// without writing the sentence a person reads before consenting.
     effect: &'static str,
+    /// The approval as **one question** a person answers on a lock screen (ADR-0204 증보 6
+    /// D6-3): the card's `body` and the push's text. No value and no particle after a value —
+    /// a value is quoted after it (`question · 「value」`, see
+    /// [`crate::approval_sentence`]).
+    pub question: &'static str,
+    /// What was done, past tense, for the decision's `receipt.line` (D6-4: 「✓ 소개를
+    /// 바꿨어요」 is `✓ ` + this). Value-free, like [`Self::question`].
+    pub done: &'static str,
     args_schema: fn() -> Value,
 }
 
@@ -599,9 +1004,10 @@ impl WorkspaceAction {
 
 /// The roles a **proposal** may ask for.
 ///
-/// `momo_settings::normalized_invite_role` also accepts `guest`; a proposal may
-/// not. Narrowing here rather than there is deliberate — the REST surface serves
-/// a human admin who can see the whole workspace, and this one serves a card
+/// `guest` is never one of them. Guest invites are paused for every door
+/// (`momo_settings::GUEST_INVITES_ENABLED`, ADR-0128 D1, ADR-0219 GS-0), and the
+/// day they open, a proposal still may not ask for one: the REST surface serves a
+/// human admin who can see the whole workspace, and this one serves a card
 /// somebody reads in a channel.
 pub const INVITE_PROPOSABLE_ROLES: [&str; 2] = ["member", "admin"];
 /// The proposal ceiling on `maxUses`. The REST validator allows 10,000.
@@ -1013,6 +1419,21 @@ fn hosted_channels_grant_args_schema() -> Value {
 
 /// A channel reference: `#` + the 80-character name.
 pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+
+/// `team_ai.roles.set` arguments (ADR-0201 증보 v3 B3-T, #4964): one bundle and the switch.
+/// The enum is the six **switchable** bundles — `chat_read` is not on it, and the
+/// normaliser refuses it by name as well (a schema is a hint to the model, not the gate).
+fn team_ai_roles_set_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bundle", "enabled"],
+        "properties": {
+            "bundle": {"type": "string", "enum": crate::team_ai_roles::SWITCHABLE_BUNDLES},
+            "enabled": {"type": "boolean"}
+        }
+    })
+}
 
 /// `workspace.unfurl.update` arguments (ADR-0201 증보 v2 H6-1): the one switch
 /// `PUT …/unfurl-settings` takes.
@@ -1438,6 +1859,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "초대 링크를 만들어요",
+        question: "팀원 초대 링크를 만들어도 될까요?",
+        done: "초대 링크를 만들었어요",
         args_schema: invite_create_args_schema,
     },
     WorkspaceAction {
@@ -1450,6 +1873,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: true,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
+        question: "채널을 만들어도 될까요?",
+        done: "채널을 만들었어요",
         args_schema: channel_create_args_schema,
     },
     WorkspaceAction {
@@ -1462,6 +1887,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: true,
         effect: "표시된 멤버를 그 채널에 넣어요",
+        question: "채널에 멤버를 추가해도 될까요?",
+        done: "멤버를 추가했어요",
         args_schema: channel_member_add_args_schema,
     },
     WorkspaceAction {
@@ -1474,6 +1901,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "대상 에이전트의 표시 이름을 바꿔요",
+        question: "에이전트 이름을 바꿔도 될까요?",
+        done: "에이전트 이름을 바꿨어요",
         args_schema: agent_rename_args_schema,
     },
     WorkspaceAction {
@@ -1486,6 +1915,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
+        question: "에이전트가 읽고 쓸 채널을 늘려도 될까요?",
+        done: "읽고 쓸 채널을 늘렸어요",
         args_schema: hosted_channels_grant_args_schema,
     },
     WorkspaceAction {
@@ -1498,6 +1929,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
+        question: "워크스페이스 문구 설정을 바꿔도 될까요?",
+        done: "문구 설정을 바꿨어요",
         args_schema: workspace_settings_update_args_schema,
     },
     WorkspaceAction {
@@ -1510,6 +1943,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
+        question: "에이전트 프로필을 바꿔도 될까요?",
+        done: "프로필을 바꿨어요",
         args_schema: agent_profile_update_args_schema,
     },
     WorkspaceAction {
@@ -1523,6 +1958,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "표시된 이름의 새 에이전트를 만들고, 승인한 사람이 소유자가 돼요",
+        question: "외부 에이전트를 데려와도 될까요?",
+        done: "에이전트를 만들었어요",
         args_schema: agent_invite_args_schema,
     },
     WorkspaceAction {
@@ -1535,6 +1972,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "카드에 보이는 이미지로 내 프로필 사진을 바꿔요",
+        question: "내 프로필 사진을 바꿔도 될까요?",
+        done: "프로필 사진을 바꿨어요",
         args_schema: member_avatar_set_args_schema,
     },
     WorkspaceAction {
@@ -1547,6 +1986,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "카드에 보이는 이름으로 내 표시 이름을 바꿔요",
+        question: "내 이름을 바꿔도 될까요?",
+        done: "이름을 바꿨어요",
         args_schema: member_display_name_set_args_schema,
     },
     // ADR-0186 증보 v5 U-e: the pin a person does by hand, done as the approver. Admin, not
@@ -1562,6 +2003,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: true,
         effect: "표시된 메시지를 그 채널에 고정해요",
+        question: "메시지 하나를 고정해도 될까요?",
+        done: "메시지를 고정했어요",
         args_schema: message_pin_args_schema,
     },
     WorkspaceAction {
@@ -1574,6 +2017,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: true,
         effect: "표시된 메시지의 고정을 풀어요",
+        question: "메시지 고정을 풀어도 될까요?",
+        done: "고정을 풀었어요",
         args_schema: message_pin_args_schema,
     },
     // ADR-0186 증보 v8: a team-library picture, chosen by a person who saw the stored pixels.
@@ -1587,6 +2032,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         initiative: false,
         effect: "카드에서 고른 그림 하나를 팀 보관함에 저장해요",
+        question: "팀 표현을 추가해도 될까요?",
+        done: "팀 표현을 추가했어요",
         args_schema: expression_create_args_schema,
     },
     WorkspaceAction {
@@ -1599,6 +2046,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::TeamAiOnly,
         initiative: false,
         effect: "워크스페이스의 링크 미리보기를 표시된 대로 바꿔요",
+        question: "링크 미리보기를 바꿔도 될까요?",
+        done: "링크 미리보기를 바꿨어요",
         args_schema: workspace_unfurl_update_args_schema,
     },
     WorkspaceAction {
@@ -1611,6 +2060,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::TeamAiOnly,
         initiative: false,
         effect: "워크스페이스의 팀 기억을 표시된 대로 끄거나 멈춰요",
+        question: "팀 기억을 끄거나 멈춰도 될까요?",
+        done: "팀 기억을 끄거나 멈췄어요",
         args_schema: workspace_memory_update_args_schema,
     },
     WorkspaceAction {
@@ -1623,6 +2074,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::TeamAiOnly,
         initiative: false,
         effect: "워크스페이스 기본 작업 이어가기 방식을 표시된 대로 바꿔요",
+        question: "작업 이어가기 방식을 바꿔도 될까요?",
+        done: "작업 이어가기 방식을 바꿨어요",
         args_schema: workspace_work_tier_update_args_schema,
     },
     // ADR-0201 증보 v2 H7, opened by #3889: the install route (ADR-0113 P3, #3914)
@@ -1638,7 +2091,26 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::TeamAiOnly,
         initiative: false,
         effect: PLUGIN_INSTALL_EFFECT,
+        question: "앱을 설치해도 될까요?",
+        done: "앱을 설치했어요",
         args_schema: plugin_install_args_schema,
+    },
+    // ADR-0201 증보 v3 B3-T: 「파일 역할 꺼 줘」 in a chat becomes this card, and an admin approves.
+    // Admin and not `WorkspaceOperator`: the people who may switch the helper's reach are the
+    // workspace's own owners and admins, not a platform-operator credential.
+    WorkspaceAction {
+        id: ACTION_TEAM_AI_ROLES_SET,
+        title: "도우미 역할 켜고 끄기",
+        summary: "도우미가 할 수 있는 일의 묶음 하나를 켜거나 꺼요. 한 카드에 묶음 하나만 바꿔요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        initiative: false,
+        effect: "도우미의 역할 묶음 하나를 표시된 대로 켜거나 꺼요",
+        question: "도우미 역할을 바꿔도 될까요?",
+        done: "도우미 역할을 바꿨어요",
+        args_schema: team_ai_roles_set_args_schema,
     },
     WorkspaceAction {
         id: ACTION_DM_AGENT_ADMIT,
@@ -1650,6 +2122,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::ServerOnly,
         initiative: false,
         effect: "대화의 다른 사람이 모두 허락하면 에이전트를 이 대화에 들여요",
+        question: "에이전트를 이 대화에 들여도 될까요?",
+        done: "에이전트를 들였어요",
         args_schema: || json!({"type": "object", "additionalProperties": false, "properties": {}}),
     },
 ];
@@ -1681,7 +2155,7 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         unavailable_reason: "웹훅 마스터키 분리(ADR-0004 증보 4)가 랜딩한 뒤에 열립니다.",
     },
     DeclaredAction {
-        id: "member.role.set",
+        id: ACTION_MEMBER_ROLE_SET,
         title: "멤버 역할 변경",
         summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
         unavailable_reason: "다음 배치에서 열립니다.",
@@ -2379,13 +2853,28 @@ pub fn proposal_summary(action: &WorkspaceAction) -> String {
     )
 }
 
-/// The one-line body of the `approval_request` message.
+/// The one-line body of the `approval_request` message: the action as **one question**
+/// (ADR-0204 증보 6 D6-3 — 「소개를 바꿔도 될까요?」, never the English 「Approval required」 and never
+/// the old 「승인 요청: {title}」).
 ///
 /// A body rather than props alone, because props are a *rendering* affordance:
 /// a client that does not know this card kind still shows the person a sentence
-/// (ADR-0186 D5's fallback rule).
+/// (ADR-0186 D5's fallback rule) — and it is what the push and the desktop notification say.
+/// No value is quoted here; [`workspace_action_request_body_with`] is the one that knows the
+/// arguments.
 pub fn workspace_action_request_body(action: &WorkspaceAction) -> String {
-    format!("승인 요청: {}", action.title)
+    crate::approval_sentence::action_request_body(action, None, false)
+}
+
+/// [`workspace_action_request_body`] with what the producer knows: the arguments the server
+/// validated (a `channel.create` quotes its short name and says 「비공개 채널을」 for a private one)
+/// and whether the card was raised **unasked** — 「먼저 제안 · …」 (D6-3).
+pub fn workspace_action_request_body_with(
+    action: &WorkspaceAction,
+    args: Option<&Value>,
+    unasked: bool,
+) -> String {
+    crate::approval_sentence::action_request_body(action, args, unasked)
 }
 
 /// `message.props` for the `approval_request` row of a workspace action —
@@ -2648,6 +3137,7 @@ mod tests {
                 "workspace.memory.update",
                 "workspace.work_tier.update",
                 "plugin.install",
+                "team_ai.roles.set",
                 "dm.agent.admit"
             ]
         );
@@ -2660,10 +3150,11 @@ mod tests {
         );
     }
 
-    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889): the helper's list is H6-1's
-    /// eight plus `plugin.install`, every one executable; the three settings
-    /// actions and `plugin.install` are the only team-AI-only rows, so the Agent
-    /// Port's list is still the eight v1 actions.
+    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889) + v3 B4 (#4965): the helper's list is H6-1's
+    /// eight plus `plugin.install`, the two invite actions (the `invite_access` bundle, B4) and the
+    /// roles card, every one executable; the three settings actions, `plugin.install` and the
+    /// roles card are the only team-AI-only rows, so the Agent Port's list is still the v1
+    /// actions — the two invites are on **both** lists, which is why the door has to be judged.
     #[test]
     fn the_team_ai_list_is_h6_plus_plugin_install_and_only_those_are_helper_only() {
         assert_eq!(
@@ -2680,6 +3171,9 @@ mod tests {
                 "plugin.install",
                 "member.avatar.set",
                 "member.display_name.set",
+                "invite.create",
+                "agent.invite",
+                "team_ai.roles.set",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -2688,11 +3182,25 @@ mod tests {
                 "{id} must be proposable by the team AI"
             );
         }
-        // Secrets and access stay out (H6-2).
+        // B15-A1: the invites are in; widening the helper's own access is not (B4-6), and
+        // neither is a declared-but-not-executable action or the box.
+        for id in [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE] {
+            assert!(TEAM_AI_ACTION_IDS.contains(&id), "{id}");
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::AgentPort).is_some(),
+                "{id}"
+            );
+            assert_eq!(
+                action_by_id(id).map(|a| a.proposers),
+                Some(Proposers::Any),
+                "{id}"
+            );
+        }
         for banned in [
-            ACTION_INVITE_CREATE,
-            ACTION_AGENT_INVITE,
             ACTION_HOSTED_CHANNELS_GRANT,
+            ACTION_MEMBER_ROLE_SET,
+            ACTION_HOST_SESSION_OPEN,
+            "webhook.create",
         ] {
             assert!(!TEAM_AI_ACTION_IDS.contains(&banned), "{banned}");
         }
@@ -2707,7 +3215,8 @@ mod tests {
                 ACTION_WORKSPACE_UNFURL_UPDATE,
                 ACTION_WORKSPACE_MEMORY_UPDATE,
                 ACTION_WORKSPACE_WORK_TIER_UPDATE,
-                ACTION_PLUGIN_INSTALL
+                ACTION_PLUGIN_INSTALL,
+                ACTION_TEAM_AI_ROLES_SET
             ]
         );
         assert_eq!(
@@ -2979,9 +3488,9 @@ mod tests {
             schema["properties"]["role"]["enum"],
             json!(INVITE_PROPOSABLE_ROLES)
         );
-        // `guest` is a role `momo_settings::normalized_invite_role` accepts and a
-        // proposal may not ask for; `owner` is refused by both. That the *REST*
-        // validator is genuinely wider is measured where both are in scope
+        // A proposal may not ask for `guest` or `owner`. That the domain validator
+        // refuses `guest` as well (the pause) and is genuinely wider on the other
+        // two numbers is measured where both are in scope
         // (`routes::actions::the_registry_ceilings_are_enforced_by_the_domain_as_well`)
         // — this crate cannot depend on `momo-settings`.
         assert!(!INVITE_PROPOSABLE_ROLES.contains(&"guest"));
@@ -3119,7 +3628,7 @@ mod tests {
         let action = action_by_id(ACTION_INVITE_CREATE).expect("v1");
         assert_eq!(
             workspace_action_request_body(action),
-            "승인 요청: 팀원 초대 링크 만들기"
+            "팀원 초대 링크를 만들어도 될까요?"
         );
     }
 
@@ -3584,6 +4093,12 @@ mod tests {
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
                 && action.id != ACTION_EXPRESSION_CREATE
+                // An agent asking for more channels is a permission (ADR-0204 증보 6 D6-2);
+                // pinned by `a_channel_grant_an_agent_asked_for_is_opened_and_the_one_a_person_called_for_is_not`.
+                && action.id != ACTION_HOSTED_CHANNELS_GRANT
+                // Opened so the 「공급자로 가는 내용」 line is read (pinned by
+                // `the_roles_card_is_always_opened_in_the_app`).
+                && action.id != ACTION_TEAM_AI_ROLES_SET
             {
                 assert!(
                     !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
@@ -3633,9 +4148,14 @@ mod tests {
             crate::tools::ACTION_TYPE_TOOL_CALL,
             &serde_json::json!({"tool_call": {"call_id": "c1"}})
         ));
-        // A named tool call stays decidable from the lock screen — whatever the name. (A
-        // name outside the catalog is an operator's own tool, not an unknown shape.)
+        // A named tool of the catalog stays decidable from the lock screen. A name outside
+        // the catalog is an operator's own tool: not an unknown *shape*, but one whose effect
+        // the server cannot say it can undo — it opens too (ADR-0204 증보 6 D6-2).
         assert!(!opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": crate::tools::WORK_SESSION_END}})
+        ));
+        assert!(opens_in_app(
             crate::tools::ACTION_TYPE_TOOL_CALL,
             &serde_json::json!({"tool_call": {"name": "x"}})
         ));
@@ -3645,63 +4165,203 @@ mod tests {
         ));
     }
 
-    /// The lock-screen decision for every registered action, written out. The question
-    /// each row answers: **does approving it show the approver a value once?** (an
-    /// invite link, a pairing code — a banner button has nowhere to show it). The table
-    /// is exhaustive on purpose: an action added to the registry fails here until
-    /// someone says which side it is on, instead of defaulting to a lock-screen 승인
-    /// that mints something nobody sees. (`SecretDelivery` cannot do this job — it says
-    /// whether the *proposing agent* may receive a value, which is a different fact.)
+    /// The lock-screen decision for every registered action, written out — **and why**
+    /// (ADR-0204 증보 6 D6-2). The questions each row answers: does approving it show the
+    /// approver a value once (an invite link, a pairing code — a banner button has nowhere to
+    /// show it)? does it widen who may read or write? can a person judge it from a banner at
+    /// all? The table is exhaustive on purpose: an action added to the registry fails here until
+    /// someone says which side it is on and for which reason, instead of defaulting to a
+    /// lock-screen 승인 that mints something nobody sees. (`SecretDelivery` cannot do this job —
+    /// it says whether the *proposing agent* may receive a value, which is a different fact.)
+    ///
+    /// The reason is not a comment: [`decision_reason`] answers it from the same judgment as
+    /// [`decision_mode`], so a row that opens for the wrong reason fails too.
     #[test]
     fn every_registered_action_has_a_recorded_lock_screen_decision() {
-        let recorded: &[(&str, bool)] = &[
-            (ACTION_DM_AGENT_ADMIT, true), // privacy consent is read in the conversation
-            (ACTION_INVITE_CREATE, true),  // the invite link is shown once
-            (ACTION_AGENT_INVITE, true),   // the pairing code is shown once
-            (ACTION_CHANNEL_CREATE, false),
-            (ACTION_CHANNEL_MEMBER_ADD, false),
-            (ACTION_AGENT_RENAME, true),
-            (ACTION_HOSTED_CHANNELS_GRANT, false),
-            (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
-            // False for a card with neither `avatar` nor `displayName`; see
+        use DecisionMode::{Inline, Open};
+        use DecisionReason as Why;
+        let recorded: &[(&str, DecisionMode, DecisionReason)] = &[
+            // Privacy consent is read in the conversation.
+            (ACTION_DM_AGENT_ADMIT, Open, Why::NeedsTheApp),
+            (ACTION_INVITE_CREATE, Open, Why::OneTimeValue), // the invite link is shown once
+            (ACTION_AGENT_INVITE, Open, Why::OneTimeValue),  // the pairing code is shown once
+            (ACTION_CHANNEL_CREATE, Inline, Why::None),
+            // Not a 「권한」 (ADR-0204 증보 6 D6-9 결재 3, 「전부 권장으로」): the members are named on
+            // the card and the role is fixed to member.
+            (ACTION_CHANNEL_MEMBER_ADD, Inline, Why::None),
+            (ACTION_AGENT_RENAME, Open, Why::NeedsTheApp),
+            // The card an agent **asked** for: the agent may read and write more than before
+            // (D6-2). The card the server raised in place is the exception, pinned by
+            // `a_channel_grant_an_agent_asked_for_is_opened_and_the_one_a_person_called_for_is_not`.
+            (ACTION_HOSTED_CHANNELS_GRANT, Open, Why::Permission),
+            (ACTION_WORKSPACE_SETTINGS_UPDATE, Inline, Why::None),
+            // Inline for a card with neither `avatar` nor `displayName`; see
             // `a_profile_update_that_changes_the_avatar_or_name_opens_in_the_app`.
-            (ACTION_AGENT_PROFILE_UPDATE, false),
+            (ACTION_AGENT_PROFILE_UPDATE, Inline, Why::None),
             // A picture on a lock-screen banner cannot be judged: always opened.
-            (ACTION_MEMBER_AVATAR_SET, true),
-            (ACTION_MEMBER_DISPLAY_NAME_SET, true),
+            (ACTION_MEMBER_AVATAR_SET, Open, Why::NeedsTheApp),
+            (ACTION_MEMBER_DISPLAY_NAME_SET, Open, Why::NeedsTheApp),
             // A message the card only quotes (120 characters of up to thousands): the approver
             // reads it in the app (ADR-0186 증보 v5 U-e, review M4).
-            (ACTION_MESSAGE_PIN, true),
-            (ACTION_MESSAGE_UNPIN, true),
-            (ACTION_WORKSPACE_UNFURL_UPDATE, false),
-            (ACTION_WORKSPACE_MEMORY_UPDATE, false),
-            (ACTION_WORKSPACE_WORK_TIER_UPDATE, false),
-            // Installs one official app; "the token is not stored in oort", so there is
-            // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
-            (ACTION_PLUGIN_INSTALL, false),
+            (ACTION_MESSAGE_PIN, Open, Why::NeedsTheApp),
+            (ACTION_MESSAGE_UNPIN, Open, Why::NeedsTheApp),
+            (ACTION_WORKSPACE_UNFURL_UPDATE, Inline, Why::None),
+            (ACTION_WORKSPACE_MEMORY_UPDATE, Inline, Why::None),
+            // Not a 「권한」 either (D6-9 결재 3).
+            (ACTION_WORKSPACE_WORK_TIER_UPDATE, Inline, Why::None),
+            // Installs one official app; "the token is not stored in oort", so there is no
+            // value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7) — and it is
+            // not a 「권한」 (D6-9 결재 3).
+            (ACTION_PLUGIN_INSTALL, Inline, Why::None),
+            // Switching the helper's reach: turning `files` or `memory` on is a consent to the
+            // 「공급자로 가는 내용」 line on the card, and a lock-screen 승인 would skip reading
+            // it. Decided by the id alone — the push projection never reads an argument's value
+            // (ADR-0201 증보 v3 B3-T, #4964).
+            (ACTION_TEAM_AI_ROLES_SET, Open, Why::NeedsTheApp),
             // The picture is the card, and a banner shows none: always opened in the app
             // (ADR-0186 증보 v8 X8-3; no 승인 button on the lock screen).
-            (ACTION_EXPRESSION_CREATE, true),
+            (ACTION_EXPRESSION_CREATE, Open, Why::NeedsTheApp),
         ];
         let registered: std::collections::BTreeSet<&str> =
             ACTIONS.iter().map(|action| action.id).collect();
         let written: std::collections::BTreeSet<&str> =
-            recorded.iter().map(|(id, _)| *id).collect();
+            recorded.iter().map(|(id, _, _)| *id).collect();
         assert_eq!(
             registered, written,
             "a registered action has no lock-screen decision recorded here (or a row \
              names an action that is gone): decide whether approving it shows the \
-             approver a value once, add it to ONE_TIME_SECRET_ACTION_IDS if so, and \
-             record the row"
+             approver a value once or widens what an agent may do, add it to \
+             ONE_TIME_SECRET_ACTION_IDS if so, and record the row with its reason"
         );
         let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
-        for (id, opens) in recorded {
+        for (id, mode, reason) in recorded {
             assert_eq!(
-                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
-                *opens,
+                decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *mode,
                 "{id}"
             );
+            assert_eq!(
+                decision_reason(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *reason,
+                "{id}: recorded reason"
+            );
+            // A row never opens for no reason, and never gives a reason for staying inline.
+            assert_eq!(
+                *mode == Inline,
+                *reason == Why::None,
+                "{id}: an inline row has no reason; an open row has one"
+            );
+            assert_eq!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *mode == Open,
+                "{id}: `opens_in_app` is the same answer"
+            );
         }
+        // Declared, not executable: not in the registry, so a card that names one reads as a
+        // shape this build does not know and opens — and stays open when the action is
+        // registered (`member.role.set` is a 권한; the row says so when it is opened).
+        for declared in DECLARED_NOT_EXECUTABLE {
+            assert_eq!(
+                (
+                    decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &card(declared.id)),
+                    decision_reason(ACTION_TYPE_WORKSPACE_ACTION, &card(declared.id)),
+                ),
+                (Open, Why::UnknownShape),
+                "{}",
+                declared.id
+            );
+        }
+    }
+
+    /// ADR-0204 증보 6 D6-2, the first changed row: `hosted.channels.grant` that an agent
+    /// **asked** for is a permission (the agent reads and writes more than before) and is
+    /// opened in the app. The card the server raised in place — because a person called the
+    /// agent in that very channel — is the exception and stays decided from the banner. Only
+    /// that one origin earns the exception.
+    #[test]
+    fn a_channel_grant_an_agent_asked_for_is_opened_and_the_one_a_person_called_for_is_not() {
+        let grant = |origin: Option<&str>| {
+            let mut payload = serde_json::json!({
+                "action": {"id": ACTION_HOSTED_CHANNELS_GRANT, "args": {}}
+            });
+            if let Some(origin) = origin {
+                payload["origin"] = serde_json::json!(origin);
+            }
+            payload
+        };
+        let both = |payload: &Value| {
+            (
+                decision_mode(ACTION_TYPE_WORKSPACE_ACTION, payload),
+                decision_reason(ACTION_TYPE_WORKSPACE_ACTION, payload),
+            )
+        };
+        assert_eq!(
+            both(&grant(None)),
+            (DecisionMode::Open, DecisionReason::Permission)
+        );
+        assert_eq!(
+            both(&grant(Some(
+                crate::in_place_grant::APPROVAL_ORIGIN_SERVER_IN_PLACE
+            ))),
+            (DecisionMode::Inline, DecisionReason::None)
+        );
+        // No other origin borrows the exception.
+        for origin in ["dm_agent_admission", "server", "Server_In_Place", ""] {
+            assert_eq!(
+                decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &grant(Some(origin))),
+                DecisionMode::Open,
+                "origin {origin:?}"
+            );
+        }
+        // Raised unasked it is still the stronger reason.
+        assert_eq!(
+            both(&grant(Some(
+                crate::initiative::APPROVAL_ORIGIN_AGENT_INITIATED
+            ))),
+            (DecisionMode::Open, DecisionReason::Unasked)
+        );
+        // The in-place origin is about this one action: it does not turn another action's
+        // card inline.
+        let mut pinned = serde_json::json!({
+            "action": {"id": ACTION_MESSAGE_PIN, "args": {}},
+            "origin": crate::in_place_grant::APPROVAL_ORIGIN_SERVER_IN_PLACE,
+        });
+        assert_eq!(
+            decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &pinned),
+            DecisionMode::Open
+        );
+        pinned["action"]["id"] = serde_json::json!(ACTION_INVITE_CREATE);
+        assert_eq!(
+            decision_reason(ACTION_TYPE_WORKSPACE_ACTION, &pinned),
+            DecisionReason::OneTimeValue
+        );
+    }
+
+    /// The card carries the answer the function gives, as the word the clients read; and the
+    /// props key is the one name everything reads.
+    #[test]
+    fn the_card_props_carry_the_decision_modes_own_word() {
+        let open = serde_json::json!({"action": {"id": ACTION_MESSAGE_PIN, "args": {}}});
+        let inline = serde_json::json!({"action": {"id": ACTION_CHANNEL_CREATE, "args": {}}});
+        for (payload, word) in [(&open, "open"), (&inline, "inline")] {
+            let mut props = serde_json::json!({"approval_id": "a1"});
+            stamp_decision_mode(
+                &mut props,
+                decision_mode(ACTION_TYPE_WORKSPACE_ACTION, payload),
+            );
+            assert_eq!(props[DECISION_MODE_PROPS_KEY], word);
+            assert_eq!(props["approval_id"], "a1", "the other keys are untouched");
+        }
+        assert_eq!(DECISION_MODE_PROPS_KEY, "decision_mode");
+        assert_eq!(DecisionMode::Open.as_str(), "open");
+        assert_eq!(DecisionMode::Inline.as_str(), "inline");
+        // A card nobody can read stays unread rather than becoming an object.
+        let mut not_an_object = serde_json::json!("props");
+        stamp_decision_mode(
+            &mut not_an_object,
+            decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &open),
+        );
+        assert_eq!(not_an_object, serde_json::json!("props"));
     }
 
     /// ADR-0186 증보 v4: a `member.avatar.set` card is a picture, so its push never
@@ -3766,6 +4426,229 @@ mod tests {
             assert_eq!(keys, ["messageId"], "{id}");
             assert!(proposal_summary(action).contains("관리자"), "{id}");
         }
+    }
+
+    /// B4-2: the door is read from the stored approval payload, and only from `via_ai.source`.
+    #[test]
+    fn the_door_is_the_stored_via_ai_source_and_nothing_else() {
+        assert!(raised_by_team_ai(&json!({"via_ai": {"source": "team_ai"}})));
+        for payload in [
+            json!({}),
+            json!({"via_ai": {}}),
+            json!({"via_ai": {"source": "team_ai "}}),
+            json!({"via_ai": {"source": "agent_port"}}),
+            json!({"via_ai": "team_ai"}),
+            json!({"via_ai": {"source": ["team_ai"]}}),
+            // Things an agent can write into a proposal are not the door.
+            json!({"action": {"id": "invite.create", "args": {"source": "team_ai"}}, "source": "team_ai"}),
+            json!({"action": {"via_ai": {"source": "team_ai"}}}),
+        ] {
+            assert!(!raised_by_team_ai(&payload), "{payload}");
+        }
+    }
+
+    /// B4-2's table, cell by cell: where the one-time value goes, by action, door and the
+    /// approver's `deliverSecretToAgent`.
+    #[test]
+    fn the_secret_route_is_the_b4_2_table() {
+        let invite = action_by_id(ACTION_INVITE_CREATE).expect("registered");
+        let pairing = action_by_id(ACTION_AGENT_INVITE).expect("registered");
+        let channel = action_by_id(ACTION_CHANNEL_CREATE).expect("registered");
+        for flag in [false, true] {
+            // invite.create: the Agent Port's proposer claims it; the helper's goes to the chat.
+            assert_eq!(
+                secret_route(invite, false, flag),
+                SecretRoute::ProposerClaim
+            );
+            assert_eq!(secret_route(invite, true, flag), SecretRoute::Conversation);
+            // agent.invite: the helper's code is the approver's alone, whatever the flag says.
+            assert_eq!(secret_route(pairing, true, flag), SecretRoute::Approver);
+            // Nothing else has a route but the approver.
+            assert_eq!(secret_route(channel, false, flag), SecretRoute::Approver);
+            assert_eq!(secret_route(channel, true, flag), SecretRoute::Approver);
+        }
+        // The Agent Port's agent.invite honours the approver's choice, as before.
+        assert_eq!(
+            secret_route(pairing, false, true),
+            SecretRoute::ProposerClaim
+        );
+        assert_eq!(secret_route(pairing, false, false), SecretRoute::Approver);
+        // Only the Agent Port's agent.invite has a box to tick.
+        assert!(offers_opt_in_delivery(pairing, false));
+        assert!(!offers_opt_in_delivery(pairing, true));
+        assert!(!offers_opt_in_delivery(invite, false));
+        assert!(!offers_opt_in_delivery(invite, true));
+        assert!(!offers_opt_in_delivery(channel, false));
+    }
+
+    /// B4-2's card rows, from the helper's door only: the Agent Port's sentence is replaced, not
+    /// added to, and every other row keeps its place.
+    #[test]
+    fn the_helper_door_swaps_the_delivery_row_and_only_that_row() {
+        let invite_rows = invite_create_rows("member", 5, Some(7));
+        let swapped = team_ai_door_rows(ACTION_INVITE_CREATE, invite_rows.clone());
+        assert_eq!(swapped.len(), invite_rows.len());
+        assert_eq!(swapped[..3], invite_rows[..3]);
+        assert_eq!(
+            swapped[3],
+            json!({
+                "label": "링크 받는 곳",
+                "value": "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요"
+            })
+        );
+        assert!(!swapped
+            .iter()
+            .any(|row| row["value"] == INVITE_DELIVERY_TEXT));
+
+        let pairing_rows = agent_invite_rows("Grok Bot", "그록봇", "grokbot");
+        let swapped = team_ai_door_rows(ACTION_AGENT_INVITE, pairing_rows.clone());
+        assert_eq!(swapped.len(), pairing_rows.len());
+        assert_eq!(swapped[1..], pairing_rows[1..]);
+        assert_eq!(
+            swapped[0],
+            json!({"label": "연결 코드 받는 사람", "value": "승인한 분만 한 번 볼 수 있어요"})
+        );
+        // An action with no delivery row is untouched, and a row set that lost the label still says it.
+        let other = vec![action_row("채널", "#a")];
+        assert_eq!(
+            team_ai_door_rows(ACTION_CHANNEL_CREATE, other.clone()),
+            other
+        );
+        let lost = team_ai_door_rows(ACTION_INVITE_CREATE, vec![action_row("역할", "member")]);
+        assert_eq!(lost.len(), 2);
+        assert_eq!(lost[1]["label"], "링크 받는 곳");
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 review: admin link): the helper's door never raises an admin link, and the
+    /// Agent Port's schema did not move for it. Each role is named literally — a loop over
+    /// [`INVITE_PROPOSABLE_ROLES`] would pass if a role left the policy.
+    #[test]
+    fn the_helper_door_raises_no_admin_link_and_the_shared_schema_did_not_move() {
+        assert!(team_ai_may_invite_as("member"));
+        assert!(team_ai_may_invite_as("guest"));
+        assert!(!team_ai_may_invite_as("admin"));
+        assert!(!team_ai_may_invite_as("owner"));
+        assert!(!team_ai_may_invite_as(""));
+        assert!(!TEAM_AI_INVITE_ROLES.contains(&"admin"));
+        // The Agent Port door keeps the schema it had: member and admin, no guest.
+        assert_eq!(INVITE_PROPOSABLE_ROLES, ["member", "admin"]);
+        assert_eq!(
+            invite_create_args_schema()["properties"]["role"]["enum"],
+            json!(["member", "admin"])
+        );
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 review: default numbers): the helper's door writes one day when no expiry is named
+    /// — and only then, and only for `invite.create`. The control cases are the ones the default
+    /// must not touch: an explicit number, another action, and arguments that are not an object.
+    #[test]
+    fn the_helper_door_fills_one_day_only_where_an_invite_names_no_expiry() {
+        let day = json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        assert_eq!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS, 1);
+        // Checked when the crate compiles: the helper's default must stay shorter than the week the
+        // other doors keep.
+        const {
+            assert!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS < DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        }
+        // Omitted, null, and the other keys left alone.
+        for omitted in [
+            json!({}),
+            json!({"expiresInDays": null}),
+            json!({"role": "member", "maxUses": 3}),
+        ] {
+            let filled = team_ai_door_args(ACTION_INVITE_CREATE, &omitted);
+            assert_eq!(filled["expiresInDays"], day, "{omitted}");
+            assert_eq!(filled["maxUses"], omitted["maxUses"], "{omitted}");
+            assert_eq!(filled["role"], omitted["role"], "{omitted}");
+        }
+        // A number the model named is never changed — in either direction.
+        for named in [1, 7, 30] {
+            let args = json!({"expiresInDays": named});
+            let kept = team_ai_door_args(ACTION_INVITE_CREATE, &args);
+            assert_eq!(kept["expiresInDays"], json!(named));
+            assert!(matches!(kept, std::borrow::Cow::Borrowed(_)));
+        }
+        // Another action is not an invite; non-objects are the validator's to refuse.
+        let other = json!({"name": "ideas"});
+        assert_eq!(
+            team_ai_door_args(ACTION_CHANNEL_CREATE, &other).as_ref(),
+            &other
+        );
+        for not_object in [json!(null), json!("7"), json!([1])] {
+            assert_eq!(
+                team_ai_door_args(ACTION_INVITE_CREATE, &not_object).as_ref(),
+                &not_object
+            );
+        }
+        // The Agent Port's own default is the SQL's seven days, unchanged.
+        assert_eq!(DEFAULT_INVITE_EXPIRES_IN_DAYS, 7);
+    }
+
+    /// B4-7: the helper card's audit provenance is names, counts and numbers — and an invented
+    /// field, a long string or a non-string in `tools` does not ride along.
+    #[test]
+    fn the_audit_provenance_is_text_free_and_only_for_the_helpers_invite_cards() {
+        let payload = json!({
+            "via_ai": {
+                "source": "team_ai", "requester_id": "u", "trigger_message_id": "m",
+                "model": "claude-x", "latency_ms": 812, "prompt_tokens": 120,
+                "completion_tokens": 40, "tools": ["read_channel"], "model_calls": 2,
+                "web_searches": 0, "note": "무엇이든 쓴 글", "rationale": "무엇이든 쓴 글"
+            }
+        });
+        let via = team_ai_audit_via(&payload).expect("a helper card");
+        assert_eq!(
+            via,
+            json!({"source": "team_ai", "model": "claude-x", "latency_ms": 812,
+                   "prompt_tokens": 120, "completion_tokens": 40, "model_calls": 2,
+                   "web_searches": 0, "tools": ["read_channel"]})
+        );
+        let tampered = json!({"via_ai": {"source": "team_ai", "model": "m".repeat(200),
+            "latency_ms": "빠름", "tools": ["x".repeat(300)], "model_calls": 1.5}});
+        assert_eq!(
+            team_ai_audit_via(&tampered),
+            Some(json!({"source": "team_ai"}))
+        );
+        assert_eq!(team_ai_audit_via(&json!({})), None);
+        assert_eq!(
+            team_ai_audit_via(&json!({"via_ai": {"source": "other"}})),
+            None
+        );
+
+        let detail = json!({"role": "member"});
+        for id in [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE] {
+            assert_eq!(
+                with_team_ai_audit_via(id, &payload, detail.clone())["via_ai"]["tools"],
+                json!(["read_channel"]),
+                "{id}"
+            );
+            assert_eq!(
+                with_team_ai_audit_via(id, &json!({}), detail.clone()),
+                detail,
+                "{id}"
+            );
+        }
+        // Another action's rows are left alone: this slice does not widen the audit shape.
+        assert_eq!(
+            with_team_ai_audit_via(ACTION_CHANNEL_CREATE, &payload, detail.clone()),
+            detail
+        );
+    }
+
+    /// The link message's idempotency key is its own: not the card's, not the result line's.
+    #[test]
+    fn the_invite_link_message_has_its_own_client_msg_id() {
+        let approval = Uuid::new_v4();
+        let ids = [
+            invite_link_client_msg_id(approval),
+            card_client_msg_id(approval),
+            result_client_msg_id(approval),
+        ];
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[0], ids[2]);
+        assert_ne!(ids[1], ids[2]);
+        assert_eq!(invite_link_client_msg_id(approval), ids[0]);
+        assert_ne!(invite_link_client_msg_id(Uuid::new_v4()), ids[0]);
     }
 
     fn pin_message(body: &str) -> PinCardMessage {
@@ -3852,6 +4735,44 @@ mod tests {
     /// approve, any hosted agent may propose, nothing is minted — and the arguments name
     /// **no target**. The one key is the attachment; a `memberId`, a `targetHandle`, a URL
     /// or a data field cannot be spelled at all (`additionalProperties: false`), which is
+    /// ADR-0201 증보 v3 B3-T (#4964): the roles card is a helper-only, admin-decided, secret-free
+    /// card whose arguments are exactly one bundle and one switch, and it is always opened in the
+    /// app whatever the arguments say (the push projection never reads a value).
+    #[test]
+    fn the_roles_card_is_always_opened_in_the_app() {
+        let action = action_by_id(ACTION_TEAM_AI_ROLES_SET).expect("registered");
+        assert_eq!(action.required_role, RequiredRole::Admin);
+        assert_eq!(action.proposers, Proposers::TeamAiOnly);
+        assert_eq!(action.secret_delivery, SecretDelivery::None);
+        assert_eq!(action.risk, Risk::Approval);
+        assert!(!action.initiative, "never raised unasked");
+        assert!(proposable_action_by_id(ACTION_TEAM_AI_ROLES_SET, ProposalDoor::TeamAi).is_some());
+        assert!(
+            proposable_action_by_id(ACTION_TEAM_AI_ROLES_SET, ProposalDoor::AgentPort).is_none(),
+            "an external agent cannot raise it"
+        );
+        assert!(TEAM_AI_ACTION_IDS.contains(&ACTION_TEAM_AI_ROLES_SET));
+        assert!(initiative_action_by_id(ACTION_TEAM_AI_ROLES_SET).is_none());
+        let schema = action.args_schema();
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(schema["required"], serde_json::json!(["bundle", "enabled"]));
+        assert_eq!(
+            schema["properties"]["bundle"]["enum"],
+            serde_json::json!(crate::team_ai_roles::SWITCHABLE_BUNDLES),
+            "the six switchable bundles, and no `chat_read`"
+        );
+        assert!(proposal_summary(action).contains("관리자"));
+        for args in [
+            serde_json::json!({"bundle": "files", "enabled": true}),
+            serde_json::json!({"bundle": "files", "enabled": false}),
+            serde_json::json!({}),
+        ] {
+            let card =
+                serde_json::json!({"action": {"id": ACTION_TEAM_AI_ROLES_SET, "args": args}});
+            assert!(opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card), "{card}");
+        }
+    }
+
     /// what keeps "only my own face" a property of the schema and not of a validator.
     #[test]
     fn member_avatar_set_names_a_picture_and_never_a_person() {
@@ -3898,16 +4819,23 @@ mod tests {
                 "{spelling:?}"
             );
         }
-        // The tools beside it are decided where they are shown.
+        // The catalog's tools beside it are decided where they are shown. A name that merely
+        // resembles it is outside the catalog, so it opens as an operator's tool does — not
+        // because it was mistaken for the handoff (`an_operators_own_tool_is_opened_in_the_app`).
         for name in [
             crate::tools::WORK_SESSION_END,
             crate::tools::WORK_SESSION_SPAWN,
-            "work.session.login",
-            "work.session.login_handoff.extra",
         ] {
             assert!(
                 !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
                 "{name:?}"
+            );
+        }
+        for name in ["work.session.login", "work.session.login_handoff.extra"] {
+            assert_eq!(
+                decision_reason(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                DecisionReason::Irreversible,
+                "{name:?} is an operator's tool, not the handoff"
             );
         }
         // And only as a tool call: the same name on a workspace action reads the id.
@@ -3921,12 +4849,12 @@ mod tests {
     }
 
     /// A tool the catalog does not carry is an operator's own (`agent.tool_schema`, see
-    /// `tools::momo_tool_name`): momo does not own its name and cannot say the lock screen
-    /// is unfit for it, so it keeps the default — inline. Pinned so that the asymmetry with
-    /// 「모르는 workspace action은 open」 is a recorded choice and not an accident. A name
-    /// that merely *resembles* the handoff is such a tool too.
+    /// `tools::momo_tool_name`): momo does not own its name and cannot say whether what it does
+    /// can be undone, so it is opened in the app and the banner never approves it
+    /// (ADR-0204 증보 6 D6-2 · D6-9 결재 1: 「모르면 연다」 — this turns the 2026-10-17 choice to keep
+    /// it inline around). A name that merely *resembles* the handoff is such a tool too.
     #[test]
-    fn an_operators_own_tool_is_decided_where_it_is_shown() {
+    fn an_operators_own_tool_is_opened_in_the_app() {
         let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
         for name in [
             "github.search_issues",
@@ -3939,11 +4867,39 @@ mod tests {
                 !crate::tools::is_executable(name),
                 "{name} is in the catalog after all"
             );
-            assert!(
-                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+            assert_eq!(
+                decision_mode(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                DecisionMode::Open,
+                "{name}"
+            );
+            assert_eq!(
+                decision_reason(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                DecisionReason::Irreversible,
                 "{name}"
             );
         }
+        // The catalog's own tools keep the default: a tool momo owns is judged by its name.
+        for name in [
+            crate::tools::WORK_SESSION_END,
+            crate::tools::WORK_SESSION_SPAWN,
+            crate::tools::CARD_SUGGEST,
+            crate::tools::MEMORY_SUGGEST,
+            crate::tools::WORKSPACE_ACTION_PROPOSE,
+        ] {
+            assert_eq!(
+                decision_mode(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                DecisionMode::Inline,
+                "{name}"
+            );
+        }
+        // The spelling does not matter: a catalog name is read the way `tools::normalize` reads it.
+        assert_eq!(
+            decision_mode(
+                crate::tools::ACTION_TYPE_TOOL_CALL,
+                &call("  Work.Session.End ")
+            ),
+            DecisionMode::Inline
+        );
     }
 
     /// The tools whose approval IS the human's act (`ApprovalReason::HumanIsTheAction`:
@@ -3974,43 +4930,55 @@ mod tests {
         );
     }
 
-    /// Every tool this server can execute has its lock-screen decision written down,
-    /// like the actions: adding one to the catalog fails here until someone says
+    /// Every tool this server can execute has its lock-screen decision written down, and the
+    /// reason, like the actions: adding one to the catalog fails here until someone says
     /// whether the lock screen can show what is being approved.
     #[test]
     fn every_catalog_tool_has_a_recorded_lock_screen_decision() {
-        let recorded: &[(&str, bool)] = &[
-            (crate::tools::WORK_SESSION_END, false),
+        use DecisionMode::{Inline, Open};
+        use DecisionReason as Why;
+        let recorded: &[(&str, DecisionMode, DecisionReason)] = &[
+            (crate::tools::WORK_SESSION_END, Inline, Why::None),
             // A spawn opens through the host picker it carries (`offers_host_choice`,
             // see `a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type`);
             // a spawn call that has no picker is decided where it is shown.
-            (crate::tools::WORK_SESSION_SPAWN, false),
-            (crate::tools::WORK_SESSION_LOGIN_HANDOFF, true), // planner 2026-10-17
+            (crate::tools::WORK_SESSION_SPAWN, Inline, Why::None),
+            // planner 2026-10-17: the approval IS the human's act, on the session's own screen.
+            (
+                crate::tools::WORK_SESSION_LOGIN_HANDOFF,
+                Open,
+                Why::NeedsTheApp,
+            ),
             // These run without a card of their own, or raise a workspace action whose
             // card is classified by that action's id.
-            (crate::tools::CARD_SUGGEST, false),
-            (crate::tools::MEMORY_SUGGEST, false),
-            (crate::tools::WORKSPACE_ACTION_PROPOSE, false),
+            (crate::tools::CARD_SUGGEST, Inline, Why::None),
+            (crate::tools::MEMORY_SUGGEST, Inline, Why::None),
+            (crate::tools::WORKSPACE_ACTION_PROPOSE, Inline, Why::None),
         ];
         let catalog: std::collections::BTreeSet<&str> =
             crate::tools::CATALOG.iter().copied().collect();
         let written: std::collections::BTreeSet<&str> =
-            recorded.iter().map(|(name, _)| *name).collect();
+            recorded.iter().map(|(name, _, _)| *name).collect();
         assert_eq!(
             catalog, written,
             "a tool in the catalog has no lock-screen decision recorded here (or a row \
              names a tool that is gone): decide whether the lock screen can show what \
-             is being approved, add it to OPEN_IN_APP_TOOL_NAMES if not, and record the row"
+             is being approved, add it to OPEN_IN_APP_TOOL_NAMES if not, and record the row \
+             with its reason"
         );
-        for (name, opens) in recorded {
+        for (name, mode, reason) in recorded {
+            let payload = serde_json::json!({"tool_call": {"name": name}});
             assert_eq!(
-                opens_in_app(
-                    crate::tools::ACTION_TYPE_TOOL_CALL,
-                    &serde_json::json!({"tool_call": {"name": name}})
-                ),
-                *opens,
+                decision_mode(crate::tools::ACTION_TYPE_TOOL_CALL, &payload),
+                *mode,
                 "{name}"
             );
+            assert_eq!(
+                decision_reason(crate::tools::ACTION_TYPE_TOOL_CALL, &payload),
+                *reason,
+                "{name}: recorded reason"
+            );
+            assert_eq!(*mode == Inline, *reason == Why::None, "{name}");
         }
     }
 
@@ -4089,10 +5057,10 @@ mod tests {
         });
         assert!(opens_in_app("work.spawn", &spawn));
         assert!(opens_in_app("tool_call", &spawn));
-        // A tool call with no picker is decided where it is shown.
+        // A tool call of the catalog with no picker is decided where it is shown.
         assert!(!opens_in_app(
             "tool_call",
-            &serde_json::json!({"tool_call": {"name": "x"}})
+            &serde_json::json!({"tool_call": {"name": crate::tools::WORK_SESSION_END}})
         ));
     }
 }

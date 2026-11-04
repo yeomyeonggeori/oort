@@ -45,6 +45,7 @@ import {
 import { SettingsNav } from "./shell/SettingsNav";
 import { SettingsPageHeader } from "./shell/SettingsPageHeader";
 import { SettingsShell } from "./shell/SettingsShell";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 셸 (R-1 §5 / #1867 / #3578 S1): 앱 사이드바·타이틀바를 대체하는 전면 레이아웃.
@@ -201,13 +202,10 @@ export function SettingsRoute() {
     navRefs.current[ids[(from + step) % ids.length]]?.focus();
   }
 
-  // 두 신호를 함께 읽는다 (`useOffline`). 레일의 `disconnected`는 centrifuge가
-  // 재연결을 **포기한** 종단 절단에서만 오기 때문에, 랜선을 뽑고 105초를 기다려도
-  // 상태는 `connecting`에 머문다 (useOffline.ts). 그 신호 하나만 보던 이 셸은
-  // 그래서 실제로 끊긴 사람에게 배너를 보여주지 못했고, 여기 달린 모든 섹션의
-  // 오프라인 문장·비활성 컨트롤이 코드에만 있고 화면에는 없었다 — 설정 표면에서
-  // 저장 가능 여부를 판단하는 다른 폼들이 이미 쓰고 있는 공용 답을 쓴다
-  // (PR 1203 design review H3: "오프라인 상태가 실물로 도달 불가").
+  // 쓰기를 막을지는 공용 게이트 한 곳이 답한다 (`useOffline`, 연결 상태 모델). 기기 오프라인이거나 서버에
+  // 닿지 못함이 확정일 때만 막고, 실시간(소켓)만 끊긴 것은 막지 않는다(#5201 결정 ③): 저장은 REST이고
+  // 소켓은 수신용이다. 여기 달린 모든 섹션의 오프라인 문장·비활성 컨트롤이 설정 표면에서 저장 가능 여부를
+  // 판단하는 다른 폼들과 같은 답을 읽는다 (PR 1203 design review H3: "오프라인 상태가 실물로 도달 불가").
   const offline = useOffline();
   const messages = useMessages();
 
@@ -243,7 +241,7 @@ export function SettingsRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 저장은 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="saveAfterReconnect" />}
           testId="settings-offline-banner"
         />
       )}

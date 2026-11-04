@@ -18,7 +18,8 @@
 //! an admin (`PATCH …/agents/{agent}`) or, after a person approves it, by the
 //! agent itself or an agent of the same owner (`agent.rename`, ADR-0186 증보 V4):
 //! both go through [`rename_agent_display_name_in_tx`], this module's one agent
-//! write, so the roster broadcast cannot differ between them.
+//! write, so the roster broadcast cannot differ between them. For the workspace's
+//! team AI that same write also moves its aliases (ADR-0201 증보 v3 B10, #4966).
 
 use chrono::Utc;
 use momo_db::DbError;
@@ -30,6 +31,8 @@ use uuid::Uuid;
 
 use crate::identity::{Member, MemberKind};
 use crate::message::cent_channel;
+use crate::name_guard::{is_reserved_mention_word, NameRejected};
+use crate::team_ai_alias::{self, AliasSync};
 use momo_settings::is_handle_banned_in_tx;
 
 /// The `data.type` of a self-rename broadcast. Same dotted family as
@@ -43,6 +46,10 @@ pub struct DisplayNameRename {
     pub member: Member,
     pub previous_display_name: String,
     pub broadcast_outbox_ids: Vec<i64>,
+    /// ADR-0201 증보 v3 B10-3 (#4966): what became of the team AI's alias for this name, written in
+    /// the same transaction. `None` for every other member, and for the helper while its switch is
+    /// off. The callers add [`AliasSync::audit_detail`] to their `member.renamed` audit row (B10-6).
+    pub alias_sync: Option<AliasSync>,
 }
 
 /// Outcome of a successful self handle change. Past `message.body` bytes that
@@ -187,6 +194,7 @@ pub async fn rename_own_display_name_in_tx(
         member,
         previous_display_name,
         broadcast_outbox_ids,
+        alias_sync: None,
     }))
 }
 
@@ -226,17 +234,34 @@ pub async fn load_roster_names_in_tx(
 
 /// Set an **agent's** display name and broadcast it, in the caller's transaction.
 ///
-/// The one agent write shared by the human route and the approved `agent.rename`
-/// action. It judges nothing about *who* may rename (the callers do) — only that
-/// `target` is a live agent of this workspace. `handle`, role, avatar and every
-/// profile field stay put. `Ok(None)` = no such live agent, returned before any
-/// broadcast.
+/// The one agent write shared by the human route and the approved `agent.rename` /
+/// `agent.profile.update` actions. It judges nothing about *who* may rename (the callers do) — only
+/// that `target` is a live agent of this workspace. `handle`, role, avatar and every profile field
+/// stay put. `Ok(Ok(None))` = no such live agent, returned before any broadcast.
+///
+/// ADR-0201 증보 v3 B10 (#4966) adds two things for the workspace's **team AI** (the helper), and
+/// nothing for any other agent:
+///
+/// * a name that is one of [`crate::name_guard::RESERVED_MENTION_WORDS`] is refused with
+///   `Ok(Err(NameRejected::Reserved))` **before** anything is written — a display name is a mention
+///   target (`@표시 이름`), so the helper may not wear `all`, `admin`, `모두`, …;
+/// * the helper's aliases follow the new name **in this same transaction**
+///   ([`team_ai_alias::sync_team_ai_aliases_in_tx`]). Every door — the settings route, the card
+///   `agent.rename`, the card `agent.profile.update` — comes through here, so none can rename the
+///   helper without its alias following, and a failure of either rolls back both.
 pub async fn rename_agent_display_name_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     target_agent: Uuid,
     display_name: &str,
-) -> Result<Option<DisplayNameRename>, DbError> {
+) -> Result<Result<Option<DisplayNameRename>, NameRejected>, DbError> {
+    // The team AI's alias lock comes before its member row, as in the switch-on and switch-off
+    // paths, so a rename racing a switch-on cannot deadlock with it.
+    let is_team_ai =
+        team_ai_alias::is_team_ai_member_in_tx(conn, workspace_id, target_agent).await?;
+    if is_team_ai {
+        team_ai_alias::lock_aliases_in_tx(conn, workspace_id).await?;
+    }
     let previous = sqlx::query(
         "SELECT display_name FROM member \
           WHERE id = $1 AND workspace_id = $2 AND kind = 'agent' \
@@ -248,9 +273,13 @@ pub async fn rename_agent_display_name_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(previous) = previous else {
-        return Ok(None);
+        return Ok(Ok(None));
     };
     let previous_display_name: String = previous.try_get("display_name")?;
+
+    if is_team_ai && is_reserved_mention_word(display_name) {
+        return Ok(Err(NameRejected::Reserved));
+    }
 
     let row = sqlx::query(
         "UPDATE member SET display_name = $1, updated_at = now() \
@@ -265,7 +294,7 @@ pub async fn rename_agent_display_name_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
-        return Ok(None);
+        return Ok(Ok(None));
     };
     let kind_label: String = row.try_get("kind")?;
     let kind = MemberKind::from_db_label(&kind_label)
@@ -286,11 +315,25 @@ pub async fn rename_agent_display_name_in_tx(
         &member.handle,
     )
     .await?;
-    Ok(Some(DisplayNameRename {
+    // Load-bearing name: the alias test names this call. Sabotage: delete it and the name changes
+    // while the aliases stay — on every door at once.
+    let alias_sync = if is_team_ai {
+        team_ai_alias::sync_team_ai_aliases_in_tx(
+            conn,
+            workspace_id,
+            target_agent,
+            &member.display_name,
+        )
+        .await?
+    } else {
+        None
+    };
+    Ok(Ok(Some(DisplayNameRename {
         member,
         previous_display_name,
         broadcast_outbox_ids,
-    }))
+        alias_sync,
+    })))
 }
 
 /// One `member.renamed` broadcast per live `ch:` channel the member is in.

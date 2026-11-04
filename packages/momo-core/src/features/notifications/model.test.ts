@@ -4,11 +4,13 @@ import { catalog as enCatalog } from "../../i18n/generated/en-US";
 import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
 import { createMessageService } from "../../i18n/service";
 import {
+  admitThreadBanner,
   ANNOUNCED_CAP,
   armOpen,
   BODY_MAX,
   INVITE_LINK_KIND,
   inviteLinkNotificationText,
+  EMPTY_THREAD_BANNER_LEDGER,
   notifiableKind,
   notificationBody,
   notifyDecision,
@@ -16,6 +18,8 @@ import {
   openTarget,
   OPEN_ARM_TTL_MS,
   rememberAnnounced,
+  THREAD_BANNER_CAP,
+  THREAD_BANNER_WINDOW_MS,
   type NotifyContext,
 } from "./model";
 import type { Message } from "../../lib/api";
@@ -772,5 +776,228 @@ describe("도우미 초대 링크 메시지의 배너 문장 (#5025, ADR-0201 �
       context({ inviteLinkSentence: () => FALLBACK })
     );
     expect(n).toMatchObject({ kind: "mention", body: PREVIEW });
+  });
+});
+
+// =============================================================================
+// 참여한 스레드의 새 답글 (#4890, ADR-0206 증보 1). 따라가는지는 서버가 알려 준 값을 `isFollowingThread` 로 받고, 이 모듈은
+// 그것을 **맨 끝에서** 읽는다. 아래 셋은 사보타주 대상이다: 「내가 쓴 답글 제외」·「그 스레드를 보고 있으면 안 띄움」·「끈 종류 무시」.
+// =============================================================================
+
+describe("참여한 스레드의 새 답글 (#4890)", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const reply = (over: Partial<MessageNewEvent["payload"]> = {}) =>
+    event({ root_id: ROOT, props: {}, body: "확인했어요", ...over });
+  const follows = (value: boolean | undefined) => ({ isFollowingThread: () => value });
+  const notOpen = { isThreadVisible: () => false };
+
+  it("따라가는 스레드에 남이 쓴 답글은 배너가 된다 — 보낸 사람이 제목, 본문 한 줄", () => {
+    const decision = notifyDecision(reply(), context({ ...follows(true), ...notOpen }));
+    expect(decision).toMatchObject({
+      show: true,
+      notification: { kind: "thread-reply", channelId: CHANNEL, title: "구민수", body: "확인했어요" },
+    });
+  });
+
+  it("에이전트가 쓴 글 답글도 남이 쓴 답글이다 — 보낸 사람이 @핸들로 나온다", () => {
+    const decision = notifyDecision(
+      reply({ author_member_id: AGENT }),
+      context({ ...follows(true), ...notOpen })
+    );
+    expect(decision.show && decision.notification.title).toBe("@hermes");
+  });
+
+  it("서버가 따라가지 않는다고 했으면 not-followed, 아직 모르면 follow-unknown, 답을 줄 길이 없는 표면은 예전 그대로 not-notifiable", () => {
+    expect(notifyDecision(reply(), context({ ...follows(false), ...notOpen }))).toEqual({
+      show: false,
+      skip: "not-followed",
+    });
+    expect(notifyDecision(reply(), context({ ...follows(undefined), ...notOpen }))).toEqual({
+      show: false,
+      skip: "follow-unknown",
+    });
+    expect(notifyDecision(reply(), context(notOpen))).toEqual({ show: false, skip: "not-notifiable" });
+  });
+
+  it("내가 쓴 답글은 따라가는 스레드여도 알리지 않는다 (사보타주: 이 제외를 빼면 RED)", () => {
+    const decision = notifyDecision(
+      reply({ author_member_id: SELF }),
+      context({ ...follows(true), ...notOpen })
+    );
+    expect(decision).toEqual({ show: false, skip: "self" });
+  });
+
+  it("그 스레드를 보고 있으면(창이 앞이고 그 루트의 패널이 열려 있으면) 안 띄운다 (사보타주: 이 억제를 빼면 RED)", () => {
+    const watching = context({ ...follows(true), windowFocused: true, isThreadVisible: (id) => id === ROOT });
+    expect(notifyDecision(reply(), watching)).toEqual({ show: false, skip: "focused" });
+    // 창이 뒤에 있으면 열려 있어도 안 보고 있는 것이다.
+    expect(
+      notifyDecision(reply(), { ...watching, windowFocused: false }).show
+    ).toBe(true);
+  });
+
+  it("채널이 화면에 있어도 그 스레드 패널이 닫혀 있으면 본 것이 아니다 — 답글은 본류 목록의 줄이 아니다", () => {
+    const channelOnly = context({
+      ...follows(true),
+      windowFocused: true,
+      isTargetVisible: () => true,
+      isThreadVisible: () => false,
+    });
+    expect(notifyDecision(reply(), channelOnly).show).toBe(true);
+    // 다른 스레드가 열려 있는 것도 같다.
+    expect(
+      notifyDecision(reply(), { ...channelOnly, isThreadVisible: (id) => id === "다른 루트" }).show
+    ).toBe(true);
+  });
+
+  it("「대화에도 보내기」 답글은 본류에도 서므로 채널이 앞에 있으면 본 것이다", () => {
+    const channelOnly = context({
+      ...follows(true),
+      windowFocused: true,
+      isTargetVisible: () => true,
+      isThreadVisible: () => false,
+    });
+    expect(notifyDecision(reply({ also_in_channel: true }), channelOnly)).toEqual({
+      show: false,
+      skip: "focused",
+    });
+    // 채널이 다른 화면이면 본 것이 아니다.
+    expect(
+      notifyDecision(reply({ also_in_channel: true }), { ...channelOnly, isTargetVisible: () => false }).show
+    ).toBe(true);
+  });
+
+  it("이 기기에서 이 종류를 끄면 안 띄운다 — 다른 종류 스위치와 상관없다 (사보타주: 끔을 무시하면 RED)", () => {
+    const off = context({
+      ...follows(true),
+      ...notOpen,
+      kindEnabled: (kind) => kind !== "thread-reply",
+    });
+    expect(notifyDecision(reply(), off)).toEqual({ show: false, skip: "kind-disabled" });
+    // 멘션은 같은 기기에서 그대로 온다.
+    expect(
+      notifyDecision(
+        event({ root_id: ROOT }),
+        context({ ...follows(false), ...notOpen, kindEnabled: (kind) => kind !== "thread-reply" })
+      )
+    ).toMatchObject({ show: true, notification: { kind: "mention" } });
+  });
+
+  it("알림 일시 중지·채널 음소거는 스레드 답글에도 선다", () => {
+    expect(notifyDecision(reply(), context({ ...follows(true), ...notOpen, paused: true }))).toEqual({
+      show: false,
+      skip: "paused",
+    });
+    expect(notifyDecision(reply(), context({ ...follows(true), ...notOpen, isMuted: () => true }))).toEqual({
+      show: false,
+      skip: "muted",
+    });
+  });
+
+  it("나를 멘션한 답글은 멘션이 이긴다 — 따라가는지 서버에 묻지도 않는다", () => {
+    const asked: string[] = [];
+    const decision = notifyDecision(
+      event({ root_id: ROOT, props: { mention_member_ids: [SELF] } }),
+      context({ ...notOpen, isFollowingThread: (id) => (asked.push(id), false) })
+    );
+    expect(decision).toMatchObject({ show: true, notification: { kind: "mention" } });
+    expect(asked).toEqual([]);
+  });
+
+  it("진행 줄·삭제된 줄·DM은 스레드 답글 후보가 아니다", () => {
+    expect(
+      notifyDecision(reply({ type: "tool_call" }), context({ ...follows(true), ...notOpen }))
+    ).toEqual({ show: false, skip: "not-notifiable" });
+    expect(
+      notifyDecision(reply({ state: "deleted" }), context({ ...follows(true), ...notOpen }))
+    ).toEqual({ show: false, skip: "not-notifiable" });
+    // DM 채널의 글은 `dm` 종류가 맡는다: 따라가기를 읽지 않는다.
+    const asked: string[] = [];
+    notifyDecision(
+      reply(),
+      context({ ...notOpen, isDirect: () => true, isFollowingThread: (id) => (asked.push(id), true) })
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it("서버에 묻는 일은 다른 이유로 걸러질 글에는 나가지 않는다 — 걸러진 글마다 요청이 가지 않게", () => {
+    const asked: string[] = [];
+    const ask = { isFollowingThread: (id: string) => (asked.push(id), undefined) };
+    notifyDecision(reply({ author_member_id: SELF }), context({ ...ask, ...notOpen }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, paused: true }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, isMuted: () => true }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, kindEnabled: () => false }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, isAnnounced: () => true }));
+    notifyDecision(reply({ hlc_ts: NOW - 10 * 60_000 }), context({ ...ask, ...notOpen }));
+    notifyDecision(reply(), context({ ...ask, windowFocused: true, isThreadVisible: () => true }));
+    expect(asked).toEqual([]);
+    // 걸러질 이유가 없으면 그때 한 번 묻는다.
+    notifyDecision(reply(), context({ ...ask, ...notOpen }));
+    expect(asked).toEqual([ROOT]);
+  });
+});
+
+describe("같은 스레드의 답글 여럿은 그 스레드로 착지한다 (#5017)", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const OTHER_ROOT = "019F96A4-E717-7F82-9750-58B2D7D28101";
+  const FIRST = "019F96A4-E717-7F82-9750-58B2D7D28201";
+  const SECOND = "019F96A4-E717-7F82-9750-58B2D7D28202";
+  const THIRD = "019F96A4-E717-7F82-9750-58B2D7D28203";
+
+  it("같은 채널·같은 스레드의 다른 답글이 쌓이면 스레드(rootId)를 지키고 가장 늦은 답글을 기억한다 — 채널로 물러나지 않는다", () => {
+    const armed = armOpen(
+      armOpen(armOpen(null, CHANNEL, NOW, undefined, FIRST, ROOT), CHANNEL, NOW + 300, undefined, SECOND, ROOT.toLowerCase()),
+      CHANNEL,
+      NOW + 600,
+      undefined,
+      THIRD,
+      ROOT
+    );
+    expect(armed).toMatchObject({ channelId: CHANNEL, messageId: THIRD, rootId: ROOT });
+    expect(openTarget(armed, NOW + 700)).toBe(`/c/${encodeURIComponent(CHANNEL)}?msg=${THIRD.toLowerCase()}`);
+  });
+
+  it("스레드가 다르거나, 스레드가 아닌 알림(멘션)이 끼면 예전처럼 채널이다 — 어느 스레드인지 추측하지 않는다", () => {
+    const first = armOpen(null, CHANNEL, NOW, undefined, FIRST, ROOT);
+    const otherThread = armOpen(first, CHANNEL, NOW + 300, undefined, SECOND, OTHER_ROOT);
+    expect(otherThread).toEqual({ channelId: CHANNEL, armedAtMs: NOW + 300 });
+    expect(openTarget(otherThread, NOW + 400)).toBe(`/c/${CHANNEL}`);
+    const mention = armOpen(first, CHANNEL, NOW + 300);
+    expect(mention).toEqual({ channelId: CHANNEL, armedAtMs: NOW + 300 });
+    // 스레드 알림이 먼저, 같은 스레드가 아닌 다른 채널이 끼면 둘 다 접힌다(멘션 인박스).
+    expect(openTarget(armOpen(first, OTHER_CHANNEL, NOW + 300, undefined, SECOND, ROOT), NOW + 400)).toBe(
+      "/inbox?filter=mentions"
+    );
+  });
+});
+
+describe("스레드 배너 상한 (#5017): 폰 푸시의 스레드당 분당 6건과 같은 값", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const OTHER_ROOT = "019F96A4-E717-7F82-9750-58B2D7D28101";
+
+  it("값은 한 곳에 못 박혀 있다: 60초에 6건 (서버 `bulk.rs` 의 INDIVIDUAL_PER_WINDOW·WINDOW_SECONDS 와 같다)", () => {
+    expect(THREAD_BANNER_CAP).toBe(6);
+    expect(THREAD_BANNER_WINDOW_MS).toBe(60_000);
+  });
+
+  it("한 스레드는 상한까지만 허락하고 넘으면 거절한다. 다른 스레드는 따로 세고, 창이 지나면 다시 허락하며, 장부는 늘어나지 않는다", () => {
+    let ledger = EMPTY_THREAD_BANNER_LEDGER;
+    const admit = (root: string, at: number): boolean => {
+      const verdict = admitThreadBanner(ledger, root, at);
+      ledger = verdict.ledger;
+      return verdict.admitted;
+    };
+    const first = Array.from({ length: 8 }, (_, n) => admit(ROOT, NOW + n * 1_000));
+    expect(first).toEqual([true, true, true, true, true, true, false, false]);
+    // 대소문자가 다른 같은 루트도 한 스레드다. 거절한 시도는 창을 밀지 않는다(시각을 적지 않는다).
+    expect(admit(ROOT.toLowerCase(), NOW + 30_000)).toBe(false);
+    // 다른 스레드의 첫 답글들은 이 스레드의 한도를 쓰지 않는다.
+    expect(admit(OTHER_ROOT, NOW + 31_000)).toBe(true);
+    // 첫 허락(NOW)에서 60초가 지난 뒤에는 그 자리가 비어 다시 한 건이 나간다(미끄러지는 창).
+    expect(admit(ROOT, NOW + THREAD_BANNER_WINDOW_MS)).toBe(true);
+    expect(admit(ROOT, NOW + THREAD_BANNER_WINDOW_MS + 1)).toBe(false);
+    // 창 밖의 항목은 다음 판정에서 버려진다: 한참 뒤에는 장부에 지난 스레드가 남지 않는다.
+    admit(OTHER_ROOT, NOW + 10 * THREAD_BANNER_WINDOW_MS);
+    expect([...ledger.keys()]).toEqual([OTHER_ROOT.toLowerCase()]);
   });
 });

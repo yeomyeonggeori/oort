@@ -414,15 +414,18 @@ scripts/self_host_env.sh --compose up -d --wait
 않아요.
 
 - `hermes` 서비스는 digest로 고정한 공식 이미지이고, 사설 네트워크에만 있으며 공개
-  포트가 없어요. Hermes 엔트리포인트 앞에서 `infra/hermes/lockgate.py gate`(대화·Codex
-  구독 검색·Codex 구독 그림 생성만 허용하는 허용목록, `web_extract`는 제외, 커넥터를
+  포트가 없어요. Hermes 엔트리포인트 앞에서 `infra/hermes/lockgate.py gate`(할 일 목록·Codex
+  구독 검색·Codex 구독 그림 생성만 허용하는 허용목록, `web_extract`는 제외하고 한 워크스페이스의 런이 다른
+  워크스페이스의 런이 남긴 것을 읽지 못하게 `memory`·`session_search`도 제외, 커넥터를
   켜면 `web`·`image_gen` 전부 끔)를 돌리고, 도구 실행 전에 그림 주소·파일 경로를 거절하는
   oort 그림 가드 플러그인도 점검해요. 게이트가 실패하면 컨테이너는 재시작만
   반복하고 listen하지 않아서, 프로브는 잠기지 않은 Hermes 대신 `unreachable`(연결 불가)을
   보고해요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 운영자 본인의 선언이고 여기서는 게이트가
-  뒷받침해요. `infra/hermes/config.yaml`이나 시작 명령을 고치면 그 뒷받침은 운영자가
-  직접 책임져요.
+  뒷받침해요. 게이트는 자기 표에 있는 설정 파일만 받아요(기본 설정과, 모델 조각마다 하나씩인
+  연결 모드 설정이에요. `infra/hermes/render_model_config.py --catalog`가 목록을 보여줘요, #4935).
+  바이트가 하나라도 다른 설정은 시작하지 않아요. `infra/hermes/config.yaml`이나 시작 명령을 고치면
+  그 뒷받침과 게이트의 표는 운영자가 직접 책임져요.
 - Hermes의 데이터(`hermesdata` 볼륨 → `/opt/data`)는 oort DB와 `oort backup` 밖에
   있어요. 백업은 직접 하세요. `down -v`는 이 볼륨도 지워요.
 - 모델 인증은 별도 단계예요(#4073). 없어도 카드는 보이고, 대화 한 번은 「Hermes가

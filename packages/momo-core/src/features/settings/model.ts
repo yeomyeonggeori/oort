@@ -11,9 +11,11 @@
 // =============================================================================
 
 import { ApiError, type MembershipRole } from "../../lib/api";
+import { causeOfFailure } from "../connection/failure";
 import {
   DEFAULT_ROLE_LABELS,
   ROLE_KEYS,
+  roleKeyLabel,
   type RoleKey,
   type RoleLabels,
 } from "../directory/model";
@@ -232,11 +234,24 @@ export function autoTargetLabel(
   return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
 }
 
-/** `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`. */
+/**
+ * `error.code` of the refusal the server gives, on every invite door, while guest
+ * invites are paused until invites can name the channels a guest may see
+ * (ADR-0128 D1, ADR-0219 GS-0). A 400 on create, regenerate, redeem and join.
+ */
+export const GUEST_INVITES_PAUSED_CODE = "guest_invites_paused";
+
+/**
+ * `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`.
+ *
+ * Guest is not offered: the server refuses it while guest invites are paused
+ * (`GUEST_INVITES_PAUSED_CODE`), and a role the server turns away must not be a
+ * choice on the screen. Invites made before the pause still list as guest rows
+ * (`inviteRoleName`, `inviteStatus`).
+ */
 export const INVITE_ROLES: Choice[] = [
   { id: "member", label: DEFAULT_ROLE_LABELS.member, detail: "채널을 읽고 써요." },
   { id: "admin", label: DEFAULT_ROLE_LABELS.admin, detail: "초대와 워크스페이스 설정을 다뤄요." },
-  { id: "guest", label: DEFAULT_ROLE_LABELS.guest, detail: "초대받은 채널만 봐요." },
 ];
 
 /**
@@ -253,6 +268,18 @@ export function inviteRoles(labels?: RoleLabels | null): Choice[] {
     if (trimmed === "") return choice;
     return { ...choice, label: trimmed };
   });
+}
+
+/**
+ * A role's name in the invite list. The list reads all four roles, not only the
+ * ones `inviteRoles` offers: an invite made before the pause is still a guest row
+ * and should read as 게스트 (or the workspace's own word for it), not as the raw
+ * wire value. A value no role table knows is shown as it is.
+ */
+export function inviteRoleName(role: string, labels?: RoleLabels | null): string {
+  return (ROLE_KEYS as readonly string[]).includes(role)
+    ? roleKeyLabel(role as RoleKey, labels)
+    : role;
 }
 
 export const INVITE_EXPIRY_DAYS = [1, 7, 30] as const;
@@ -516,7 +543,29 @@ export function isSlugConflict(error: unknown): boolean {
  */
 export const ERROR_MESSAGE_FALLBACK = "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
+/** 서버에 닿지 못했을 때(응답 없음·502·504·코드 없는 503). 사전 `connection.load.reasonServer`와 같은 문장이다(시험이 잠근다). */
+export const ERROR_MESSAGE_UNREACHABLE = "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+
+/** 로그인이 만료됐을 때(401). 사전 `connection.session.expired`와 같은 문장이다(시험이 잠근다). */
+export const ERROR_MESSAGE_EXPIRED = "로그인이 만료됐어요. 다시 로그인해 주세요.";
+
+/**
+ * 실패를 사람 문장으로(#5221, #5201 S-C 5번). **서버가 준 문장·오류 객체의 문장은 어떤 경우에도 돌려주지 않는다**:
+ * 서버 원문은 사용자가 할 수 있는 일이 없는 영어 문장이거나 내부 사정이고(ADR-0213 §4·§7), Buzz가 사이드바에 서버
+ * 응답 코드를 붉은 글로 그대로 낸 것과 같은 위험이다. 닫힌 분류로만 말한다: 서버에 닿지 못함 · 로그인 만료 · 그 밖
+ * (안전한 한 문장). 서버 문장을 일부러 같이 보여 주는 자리는 `serverWireMessage`를 명시해서 부른다.
+ */
 export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 401) return ERROR_MESSAGE_EXPIRED;
+  if (causeOfFailure(error, null) !== null) return ERROR_MESSAGE_UNREACHABLE;
+  return ERROR_MESSAGE_FALLBACK;
+}
+
+/**
+ * 서버가 준 문장 그대로(없으면 안전한 한 문장). **서버 원문을 일부러 같이 보여 주는 자리에서만** 쓴다(AI 연결의 loopback
+ * 거절 안내가 서버의 사유 줄을 안내 아래에 붙인다, #2204). 그 밖의 모든 실패 표시는 `errorMessage`다.
+ */
+export function serverWireMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return ERROR_MESSAGE_FALLBACK;
@@ -647,8 +696,15 @@ export function workHostRegistryMessage(): string {
   return "등록된 호스트 목록을 불러오지 못했어요. 잠시 뒤에 다시 불러오세요.";
 }
 
-/** Invite status for the list, derived from the server row (never guessed). */
+/**
+ * Invite status for the list, derived from the server row (never guessed).
+ *
+ * A guest invite that is otherwise live reads 멈춤: the server refuses to spend it
+ * while guest invites are paused (ADR-0128 D1, ADR-0219 GS-0). The dead states
+ * come first, because a revoked, spent or expired code is over whatever its role.
+ */
 export function inviteStatus(invite: {
+  role?: string;
   revokedAtMs?: number;
   expiresAtMs: number;
   usedCount: number;
@@ -657,5 +713,6 @@ export function inviteStatus(invite: {
   if (invite.revokedAtMs) return { tone: "muted", label: "해지됨" };
   if (invite.usedCount >= invite.maxUses) return { tone: "muted", label: "모두 사용됨" };
   if (invite.expiresAtMs <= Date.now()) return { tone: "warn", label: "만료됨" };
+  if (invite.role === "guest") return { tone: "muted", label: "멈춤" };
   return { tone: "ok", label: "사용 가능" };
 }

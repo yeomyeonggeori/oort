@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import type { AgentProgressEvent } from "@momo/core/lib/realtimeEvents";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { RequestThoughtLine } from "./RequestThoughtLine";
 
-const ledger = vi.hoisted(() => ({ rows: [{ key: "stage", kind: "stage", atMs: 1, text: "소개를 읽었어요", tone: "agent" }], counts: { tools: 2, approvals: 1 }, isLoading: false, isError: false }));
+const ledger = vi.hoisted(() => ({ rows: [{ key: "stage", kind: "stage", atMs: 1, text: "소개를 읽었어요", tone: "agent" }], report: { stages: 6, kinds: [{ toolKind: "run", count: 12 }] } as { stages: number; kinds: { toolKind: string; count: number }[] } | null, isLoading: false, isError: false }));
 vi.mock("./useRunLedger", () => ({ useRunLedger: () => ledger }));
+const panel = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("./workLogStore", async (original) => ({ ...await original<typeof import("./workLogStore")>(), openWorkPanel: panel.open }));
 vi.mock("./RespondingIndicator", async original => ({
   ...await original<typeof import("./RespondingIndicator")>(), RespondingAvatar: () => <span aria-hidden="true" />,
 }));
@@ -17,6 +22,8 @@ const directory = makeDirectory([{ id: "agent", kind: "agent", displayName: "달
 const subscribeAgent = vi.fn();
 let onEvent: ((event: AgentProgressEvent) => void) | undefined;
 const stop = vi.fn();
+let korean: AppLocale;
+beforeAll(async () => { korean = await koreanLocaleForTest(); });
 function run(phase: AgentRunProgress["phase"] = "running"): AgentRunProgress {
   return {
     id: "run", channelId: "channel", agentMemberId: "agent", triggerMessageId: "request", phase,
@@ -27,7 +34,7 @@ function run(phase: AgentRunProgress["phase"] = "running"): AgentRunProgress {
 }
 function tree(progress = run(), connStatus = "connected") {
   const value = { workspaceId: "workspace", session: { member: { id: "human", kind: "human" } }, realtime: { subscribeAgent }, connStatus } as unknown as SessionContextValue;
-  return <SessionProvider value={value}><RequestThoughtLine run={progress} directory={directory} /></SessionProvider>;
+  return <LocaleProvider locale={korean}><SessionProvider value={value}><RequestThoughtLine run={progress} directory={directory} /></SessionProvider></LocaleProvider>;
 }
 function delta(text: string, id = "run"): AgentProgressEvent {
   return { type: "agent.partial", v: 1, ts: Date.now(), payload: { run_id: id, channel_id: "channel", text_delta: text } };
@@ -36,6 +43,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   subscribeAgent.mockImplementation((_ws, _ch, _agent, handlers) => { onEvent = handlers.onEvent; return stop; });
   ledger.isLoading = false; ledger.isError = false;
+  ledger.report = { stages: 6, kinds: [{ toolKind: "run", count: 12 }] };
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
 });
@@ -49,9 +57,49 @@ describe("요청의 생각 줄", () => {
     expect(screen.getByTestId("responding-dots").getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByTestId("responding-dots").getAttribute("data-motion")).toBe("still");
     view.rerender(tree(run("succeeded")));
-    expect(screen.getByTestId("request-thought-line").textContent).toContain("2분 작업 · 도구 2 · 승인 1");
+    expect(screen.getByTestId("request-thought-line").textContent).toContain("2분 · 단계 6 · 명령 12 · 에이전트 보고");
     expect(screen.queryByTestId("responding-dots")).toBeNull();
     expect(screen.getByTestId("request-thought-line").textContent).not.toMatch(/\d+초/);
+  });
+
+  it("끝난 요청의 요약 칩은 누르면 팝오버가 아니라 그 run의 작업 패널을 열고, 아직 못 읽은 원장은 시간만 말한다 (#4657)", () => {
+    render(tree(run("succeeded")));
+    const chip = screen.getByTestId("request-thought-line");
+    expect(chip.getAttribute("aria-label")).toBe("달무리봇, 2분 · 단계 6 · 명령 12 · 에이전트 보고. 작업 패널 열기");
+    fireEvent.click(chip);
+    expect(panel.open).toHaveBeenCalledTimes(1);
+    expect(panel.open.mock.calls[0]?.[0]).toEqual({ runId: "run", memberId: "agent", channelId: "channel", origin: "message" });
+    expect(panel.open.mock.calls[0]?.[1]).toBe(chip);
+    expect(screen.queryByTestId("request-thought-process")).toBeNull();
+    // 원장을 아직 못 읽었으면 에이전트 보고 숫자를 지어내지 않고 시간만 남는다(꼬리표도 없다).
+    cleanup();
+    ledger.report = null;
+    render(tree(run("succeeded")));
+    expect(screen.getByTestId("request-thought-line").textContent).toContain("달무리봇 · 2분");
+    expect(screen.getByTestId("request-thought-line").textContent).not.toContain("에이전트 보고");
+  });
+
+  it("끝난 요청의 요약 칩은 눌림이 채움뿐이고, 꼬리표 「에이전트 보고」는 몸과 따로 서서 줄임표에 먹히지 않는다 (#5174 L6)", () => {
+    render(tree(run("succeeded")));
+    const chip = screen.getByTestId("request-thought-line");
+    // 좁은 칸에서는 이 칩이 열의 거의 전폭이다: `.press`의 축소 없이 채움만(README §2.6 「전폭은 폭이다」).
+    expect(chip.className).toContain("press-instant-fill");
+    expect(chip.className.split(/\s+/)).not.toContain("press");
+    const tail = screen.getByTestId("request-thought-tail");
+    expect(tail.textContent).toBe(" · 에이전트 보고");
+    expect(tail.className).toContain("shrink-0");
+    // 줄임표를 받는 것은 몸이고 꼬리표는 그 밖이다.
+    const body = tail.previousElementSibling as HTMLElement;
+    expect(body.className).toContain("truncate");
+    expect(body.contains(tail)).toBe(false);
+    expect(body.textContent).toBe("달무리봇 · 2분 · 단계 6 · 명령 12");
+    // 접근성 이름은 이은 글 그대로다.
+    expect(chip.getAttribute("aria-label")).toBe("달무리봇, 2분 · 단계 6 · 명령 12 · 에이전트 보고. 작업 패널 열기");
+    // 에이전트 보고 숫자가 없으면 꼬리표 자체가 없다.
+    cleanup();
+    ledger.report = null;
+    render(tree(run("succeeded")));
+    expect(screen.queryByTestId("request-thought-tail")).toBeNull();
   });
 
   it("펼친 뒤의 델타만 읽고 재접속·종결·다시 열기·재마운트 뒤에는 없으며 단계 메모는 남는다", () => {

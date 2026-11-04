@@ -76,8 +76,29 @@ fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// A plain `main`, not `#[tokio::main]`: the child branch below has to run **before** a runtime exists.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // #4970: the helper's PDF reader runs **this binary** as a supervised child with an empty
+    // environment. It must be the first thing `main` does — before logging, before any configuration
+    // is read — so the child never touches a secret it was not given. It is also before the async
+    // runtime (#4970 review R2-1): the child limits its own address space as its first act, and that
+    // ceiling counts every thread's stack and allocator arena. A multi-threaded runtime started first
+    // puts one worker per visible core under the ceiling (glibc reserves a virtual arena per thread), so
+    // on a host with many cores the child would be over it before it read a byte. This way the child is
+    // one thread (plus its own watchdog) however many cores there are.
+    if std::env::args().nth(1).as_deref() == Some(momo_agent_worker::attachment_text::CHILD_ARG) {
+        std::process::exit(momo_agent_worker::attachment_text::child_main(
+            momo_workspace_actions::team_ai_attachments::READ_MAX_BYTES as usize,
+        ));
+    }
+    // What `#[tokio::main]` expands to, minus the `expect`: the worker itself is the multi-threaded runtime.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--embed-check") {
         return embed_check();
     }
@@ -114,6 +135,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              no trailing slash); no picture address will be handed to the co-hosted Hermes"
         );
     }
+    // #4934: the same for the api's private address — a typo here is a worker that silently cannot read the
+    // picture a person sent. Name the variable, never print its value (a mistyped value may hold userinfo).
+    if std::env::var("OORT_API_INTERNAL_ORIGIN").is_ok_and(|raw| !raw.trim().is_empty())
+        && config.api_internal_origin.is_none()
+    {
+        tracing::warn!(
+            "OORT_API_INTERNAL_ORIGIN is set but is not an origin (http(s)://<lowercase host>[:port], nothing after \
+             it); attachments are read from this worker's own archive configuration instead"
+        );
+    }
+    // #4974: a well-formed value that is not shaped like a private-network address is accepted (the grammar says
+    // what an origin looks like, not where it may point), but the single-use token goes wherever it points — so one
+    // boot line says so. The variable's name only; the function never prints the value.
+    if let Some(origin) = config.api_internal_origin.as_deref() {
+        momo_agent_worker::self_media::warn_if_internal_origin_is_not_private(origin);
+    }
+    tracing::info!(
+        attachment_source = if config.api_internal_origin.is_some() {
+            "api"
+        } else {
+            "archive"
+        },
+        "첨부 읽기 경로 (attachment read path): `api` = through the api's private address, `archive` = this worker's own MOMO_DRIVE_* configuration"
+    );
     // #4820 C2b 3부: the hosted expression door opens only on an exact `OORT_HOSTED_MEDIA_STRICT=1`.
     // Without it the door is shut and a photo turn of the co-hosted Hermes is an ordinary turn — say so
     // once at boot (info, the name only, never the value), so an operator who expected the door can see why.

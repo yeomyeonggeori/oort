@@ -512,6 +512,12 @@
             },
             "media": {
               "$ref": "#/$defs/Media"
+            },
+            "kind": {
+              "enum": [
+                "emoji",
+                "sticker"
+              ]
             }
           }
         },
@@ -610,6 +616,12 @@
             },
             "media": {
               "type": "null"
+            },
+            "kind": {
+              "enum": [
+                "emoji",
+                "sticker"
+              ]
             }
           }
         }
@@ -1062,6 +1074,12 @@
           "minLength": 64,
           "maxLength": 64,
           "pattern": "^[a-f0-9]{64}$"
+        },
+        "kind": {
+          "enum": [
+            "emoji",
+            "sticker"
+          ]
         }
       }
     },

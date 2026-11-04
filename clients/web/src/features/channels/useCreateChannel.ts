@@ -23,8 +23,16 @@ export interface CreateChannelHandle {
   pending: boolean;
   /** The last rejection, addressed to a field or to the form. */
   failure: CreateChannelFailure | null;
-  /** Resolves true when the channel was created and the route changed. */
-  create: (input: CreateChannelInput) => Promise<boolean>;
+  /**
+   * Resolves true when the channel was created. It also moves the route to the new channel, unless `navigateIf`
+   * says no at the moment the answer arrives (#5058): a notification click that landed while the request was out
+   * closed the dialog and put the person on its own destination, and a late answer must not pull them off it.
+   * The channel is still in the list either way.
+   */
+  create: (
+    input: CreateChannelInput,
+    options?: { navigateIf?: () => boolean }
+  ) => Promise<boolean>;
   /** Drop the rejection because the input it was about has changed. */
   clearFailure: () => void;
 }
@@ -37,7 +45,10 @@ export function useCreateChannel(): CreateChannelHandle {
   const [failure, setFailure] = useState<CreateChannelFailure | null>(null);
 
   const create = useCallback(
-    async (input: CreateChannelInput): Promise<boolean> => {
+    async (
+      input: CreateChannelInput,
+      options?: { navigateIf?: () => boolean }
+    ): Promise<boolean> => {
       setPending(true);
       setFailure(null);
       try {
@@ -50,7 +61,7 @@ export function useCreateChannel(): CreateChannelHandle {
           current ? upsertChannel(current, created.channel) : [created.channel]
         );
         void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-        navigate(`/c/${created.channel.id}`);
+        if (options?.navigateIf?.() ?? true) navigate(`/c/${created.channel.id}`);
         return true;
       } catch (error) {
         setFailure(createChannelFailure(error));

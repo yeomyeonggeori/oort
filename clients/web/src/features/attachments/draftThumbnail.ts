@@ -17,7 +17,7 @@ import { draftFile } from "./draftStore";
 // data:` 라서 `URL.createObjectURL(file)` 의 `blob:` 은 깨진 상자가 된다. 그렇다고
 // 원본을 통째로 base64 로 만들면 20개 상한 × 8 MB × 1.33 이 문자열로 남는다.
 // 그래서 `createImageBitmap(file)` 로 디코드하고(주소가 필요 없다 — CSP 밖이다),
-// 표시 크기의 두 배 정사각형 캔버스에 가운데를 잘라 그린 뒤 그 작은 PNG 만
+// 표시 크기(카드 한 변)의 두 배 정사각형 캔버스에 가운데를 잘라 그린 뒤 그 작은 PNG 만
 // `data:` 로 만든다. 한 장에 수십 KB 다.
 //
 // ## 캐시
@@ -32,10 +32,10 @@ import { draftFile } from "./draftStore";
 // 멀쩡하고 올라가는 중이므로, 칩에 오류 문장을 얹지 않는다.
 // =============================================================================
 
-/** 트레이 칩의 썸네일 한 변(CSS px). tokens.css `--spacing-tray-thumb` 와 같은 값. */
-const THUMB_EDGE_PX = 64;
-/** 레티나에서 흐리지 않게 두 배로 그린다. */
-const THUMB_RENDER_PX = THUMB_EDGE_PX * 2;
+/** 첨부 줄 이미지 카드의 한 변(CSS px). tokens.css `--spacing-tray-card` 와 같은 값. */
+export const THUMB_EDGE_PX = 96;
+/** 레티나에서 흐리지 않게 두 배로 그린다(카드 × 2 이상). */
+export const THUMB_RENDER_PX = THUMB_EDGE_PX * 2;
 
 export type DraftThumbnailState =
   | { status: "none" }

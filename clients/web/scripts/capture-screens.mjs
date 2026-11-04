@@ -25,6 +25,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright";
+import { assertHoverToolbarClearsBodyText as assertHoverToolbarClearsNeighborText } from "./lib/hoverToolbarOverlap.mjs";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
@@ -46,6 +47,7 @@ import {
   sceneDispatchMouseEvent,
   sceneNameFromShotPath,
 } from "./capture-clock.mjs";
+import { withCaptureLocale } from "./capture-locale.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // 앵커 착지 행 클래스: 정본은 제품 소스(`inbox/anchor.ts`)다. 값을 베끼지 않는다(gates/landing-class.mjs, #5048).
@@ -138,8 +140,10 @@ function wrapContextShotGuard(context) {
 
 function wrapBrowserShotGuard(browser) {
   const origNewContext = browser.newContext.bind(browser);
-  browser.newContext = async (...args) => {
-    const context = await origNewContext(...args);
+  browser.newContext = async (options, ...rest) => {
+    // 컨텍스트마다 언어를 한 곳에서 준다(#5260): 안 주면 Chromium 기본(en-US)이라 사전 문장이 영어로 찍힌다.
+    // 호출이 직접 정한 `locale`은 그대로 두고, `CAPTURE_LOCALE`로 바꿀 수 있다.
+    const context = await origNewContext(withCaptureLocale(options), ...rest);
     wrapContextShotGuard(context);
     return context;
   };
@@ -348,11 +352,11 @@ const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
-// goal B8 B2: the shell's connection banner waits out a 15s dwell before it
-// claims the rail is down (features/common/connectionAlert.ts SUSTAINED_DOWN_MS).
-// Kept a second over it so the capture is not racing the threshold it is meant
-// to photograph.
-const SUSTAINED_DOWN_WAIT_MS = 16_000;
+// goal B8 B2 / #5220: the connection signal waits out the model's 10s grace
+// before it claims the rail is down (core features/connection/thresholds.ts
+// DISPLAY_GRACE_MS). Kept a second over it so the capture is not racing the
+// threshold it is meant to photograph.
+const SUSTAINED_DOWN_WAIT_MS = 11_000;
 
 /**
  * 폰에서 손가락으로 눌러야 하는 컨트롤과 그 최소 크기(px). 44px는 WCAG 2.5.5 /
@@ -5335,85 +5339,9 @@ async function assertHoverToolbarPlacement(page, where) {
  * 아래 뒤집기는 아래 행 윗단에 앉으므로 자기 행만이 아니라 바로 이웃도 본다.
  */
 async function assertHoverToolbarClearsBodyText(page, where) {
-  const info = await page.evaluate(`(() => {
-    function intersects(a, b) {
-      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-    }
-    function hitChars(barRect, body) {
-      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-      let chars = 0;
-      let area = 0;
-      let sample = "";
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        const text = node.textContent || "";
-        for (let i = 0; i < text.length; i++) {
-          if (text[i] === "\\n" || text[i] === " ") continue;
-          const range = document.createRange();
-          range.setStart(node, i);
-          range.setEnd(node, i + 1);
-          const r = range.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) continue;
-          if (!intersects(barRect, r)) continue;
-          chars += 1;
-          const w = Math.min(barRect.right, r.right) - Math.max(barRect.left, r.left);
-          const h = Math.min(barRect.bottom, r.bottom) - Math.max(barRect.top, r.top);
-          area += Math.max(0, w) * Math.max(0, h);
-          if (sample.length < 24) sample += text[i];
-        }
-      }
-      return { chars, area: Math.round(area), sample };
-    }
-    const allRows = Array.from(
-      document.querySelectorAll('[data-testid="timeline-message"]')
-    );
-    const bars = Array.from(
-      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
-    );
-    return bars.map((bar) => {
-      const row = bar.closest('[data-testid="timeline-message"]');
-      if (!row) return { seq: null, chars: -1, area: -1, neighbor: null };
-      const idx = allRows.indexOf(row);
-      const neighbors = [allRows[idx - 1], allRows[idx + 1]].filter(Boolean);
-      const t = bar.getBoundingClientRect();
-      const bodies = [
-        { seq: row.getAttribute("data-seq"), neighbor: "self", el: row.querySelector("[data-row-body]") },
-        ...neighbors.map((n) => ({
-          seq: n.getAttribute("data-seq"),
-          neighbor: n === allRows[idx - 1] ? "prev" : "next",
-          el: n.querySelector("[data-row-body]"),
-        })),
-      ].filter((item) => item.el);
-      let worst = {
-        seq: row.getAttribute("data-seq"),
-        neighbor: "self",
-        chars: 0,
-        area: 0,
-        sample: "",
-        fromTop: Math.round(t.top - row.getBoundingClientRect().top),
-        straddle: bar.getAttribute("data-straddle") || "",
-      };
-      for (const body of bodies) {
-        const hit = hitChars(t, body.el);
-        if (hit.chars > worst.chars) {
-          worst = { ...worst, ...hit, seq: body.seq, neighbor: body.neighbor };
-        }
-      }
-      return worst;
-    });
-  })()`);
-  if (info.length === 0) {
-    throw new Error(`[호버 툴바 본문 ${where}] 잴 툴바가 없다`);
-  }
-  const hit = info.find((item) => item.chars > 0);
-  if (hit) {
-    throw new Error(
-      `[호버 툴바 본문 ${where}] seq ${hit.seq}(${hit.neighbor}): 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
-    );
-  }
-  console.log(
-    `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0(자기+이웃) · 상단 ${info[0].fromTop}px · straddle ${info[0].straddle || "top"}`
-  );
+  // 자는 `./lib/hoverToolbarOverlap.mjs` 한 벌이다: 이웃은 행(`timeline-message`)과 시스템 줄(`system-line`)이다(#5173).
+  // 이슈 전용 레인 `capture-5173.mjs` 와 실제 엔진 시험 `SystemLine.straddle.browser.test.ts` 가 같은 자를 쓴다.
+  return assertHoverToolbarClearsNeighborText(page, where);
 }
 
 /**
@@ -7826,8 +7754,8 @@ async function captureScheme(browser, scheme) {
   // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
   //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
-  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
-  await sceneClick(login, login.getByTestId("menu-react-more"));
+  // 다른 반응 고르기는 도구 막대의 몫이다(#5192): ⋮ 메뉴 안에는 없다.
+  await sceneClick(login, login.getByTestId("toolbar-react-more").last());
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
@@ -9062,13 +8990,15 @@ async function captureScheme(browser, scheme) {
   await b8.screenshot({ path: hintShot });
   shots.push(hintShot);
 
-  // B8 B2: the connection banner. The capture's realtime URL is deliberately
-  // unreachable, which is EXACTLY the QA case (a socket that never came up), so
-  // this frame needs no mock: it needs the dwell. The wait is longer than the
-  // 15s threshold on purpose, because a banner that appears at 14.9s in a test
-  // and 15.1s in the product is a banner nobody can review.
+  // B8 B2 / #5220: the connection signal. At 1440 the list column is visible, so
+  // it is the sidebar connection card (the top strip only stands when the list
+  // column is collapsed or the sidebar is a drawer). The capture's realtime URL
+  // is deliberately unreachable, which is EXACTLY the QA case (a socket that
+  // never came up), so this frame needs no mock: it needs the dwell. The wait is
+  // longer than the 10s threshold on purpose, because a card that appears at
+  // 9.9s in a test and 10.1s in the product is a card nobody can review.
   await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
-  await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
+  await b8.getByTestId("connection-card").waitFor({ state: "visible" });
   const bannerShot = beginSceneFromShotPath(`${OUT_DIR}/b8-connection-banner-${scheme}.png`);
   await b8.screenshot({ path: bannerShot });
   shots.push(bannerShot);

@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { ArrowLeft, MoreHorizontal, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
+import type { MessageKey } from "@momo/core/i18n";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
+import { expressionsForTab, firstFilledShelf, type ExpressionShelf } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionMetadata } from "@momo/core/features/expressions/types";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -12,17 +14,27 @@ import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
-import { ExpressionMakeForm } from "./ExpressionMakeForm";
+import { ExpressionMakeEntry } from "./ExpressionMakeEntry";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { ExpressionImage } from "./ExpressionImage";
 import { useExpressions } from "./context";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // 「＋」는 메뉴다: 가져오기(직접 올리기·출처 링크)와 AI와 만들기. 두 길은 권한(canAdd)과 오프라인 규칙이 같다.
 type PanelMode = "list" | "import" | "make";
 // 잠금의 흐림은 잠금과 한 식이 켠다(#1486 문법). 클래스 글자는 상수로 둬서 JSX 식 안의 문자열로 세지 않는다.
 const DIM = "opacity-50";
+
+// 세 보기의 이름은 사전의 것이다: 폰 시트의 탭 이름(owner 10-31, #4942)과 같은 체계이고 카드의 종류 이름과 같은 말이다(팀 이모지 · 이모티콘 · GIF,
+// #5112 3단계). 값이 곧 코어의 칸 이름이다. 웹 패널에는 표준 유니코드 이모지 보기가 없어서 「팀 이모지」라 써도 다른 보기와 겹치지 않는다.
+const VIEW_OPTIONS = [
+  { value: "team", name: "expressions.panel.viewTeam" },
+  { value: "emoticon", name: "expressions.panel.viewEmoticon" },
+  { value: "gif", name: "expressions.panel.viewGif" },
+] as const satisfies readonly { value: ExpressionShelf; name: MessageKey }[];
 
 export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void;
   /**
@@ -31,8 +43,13 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
    */
   escapeClaim?: MutableRefObject<(() => void) | null> }) {
   const { store, cache, usage, status, offline } = useExpressions();
+  const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
-  const [view, setView] = useState("emoji");
+  // ADR-0218 §10 J2: 세 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`). 팀 이모지 = 작은 팀 이모지(움직여도),
+  // 이모티콘 = 움직이지 않는 큰 그림, GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 칸 이름이다.
+  // 사람이 고르기 전에는 등록이 있는 첫 칸을 연다: 옛 등록은 모두 이모티콘(`sticker`)이라 팀 이모지 칸만 열면 있는 그림이 안 보인다(J5).
+  const [picked, setPicked] = useState<ExpressionShelf | null>(null);
+  const view = picked ?? firstFilledShelf(cache.items);
   const [mode, setMode] = useState<PanelMode>("list");
   const addTrigger = useRef<HTMLButtonElement>(null);
   const backButton = useRef<HTMLButtonElement>(null);
@@ -93,7 +110,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
   }, [escapeClaim, confirming]);
   if (!store) return null;
   function backToList() { focusTrigger.current = true; setMode("list"); }
-  const items = searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage).filter((item) => view !== "gif" || item.media?.large.mime === "image/gif");
+  const items = expressionsForTab(searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage), view);
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
     lock.current = true; setBusy(true); setError(null);
@@ -112,7 +129,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
       </DropdownMenuContent></DropdownMenu> : <Button ref={backButton} type="button" variant="secondary" size="sm" onClick={backToList}><ArrowLeft aria-hidden="true" />목록으로</Button>}
     </div>
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
-    {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
+    {offline && <InlineBanner message={<BlockedReason frame="reloadPicturesLater" />} separator={false} />}
     {confirming ? <div role="group" aria-labelledby={confirmTitleId} aria-describedby={confirmBodyId} className="flex flex-col gap-3" data-testid="expression-confirm">
       <p id={confirmTitleId} className="text-title font-semibold text-ink">{target.action === "delete" ? "팀 그림을 삭제할까요?" : "팀 그림을 신고할까요?"}</p>
       <p id={confirmBodyId} className="text-body text-ink-muted">{target.action === "delete" ? "지운 이름은 다시 쓸 수 없어요. 예전 메시지와 반응은 이름 문자열로 표시돼요." : "신고하면 팀 전체에서 즉시 숨겨져요. 신고자와 내용은 관리자만 볼 수 있어요."}</p>
@@ -122,16 +139,16 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
           그 진행 때문에 잠기므로 aria-disabled + 흐림 + 가드(closeConfirm)다. 둘 다 네이티브 disabled가 아니라서 초점을 쥔 단추가
           disabled가 되어 초점이 body로 떨어지는 일이 없다(#4986). 연결이 없을 때만 보내는 단추도 잠긴다. */}
       <div className="flex justify-end gap-2"><Button ref={cancelRef} type="button" variant="secondary" aria-disabled={busy || undefined} className={cn(busy && DIM)} onClick={closeConfirm}>취소</Button><Button type="button" variant="destructive" aria-busy={busy || undefined} aria-disabled={offline || undefined} className={cn(offline && DIM)} onClick={() => void confirm()}>{busy ? "처리 중" : target.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
-    </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeForm onImport={() => setMode("import")} onClose={onClose} /> : <>
-      <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setView} options={[{ value: "emoji", label: "이모지" }, { value: "sticker", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
+    </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
+      <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />
       <Input ref={searchRef} type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
+      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
         <ul ref={listRef} className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);
             if (active?.status === "active") onPick(expressionToken(active.name));
-          }}><ExpressionImage item={item} size={view === "sticker" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
+          }}><ExpressionImage item={item} size={view === "emoticon" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
           <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`${item.displayName} 관리`} data-manage={item.id}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent>
             <DropdownMenuItem onSelect={() => { setError(null); setTarget({ item, action: "report" }); }}>신고하기</DropdownMenuItem>
             <DropdownMenuItem disabled={item.createdBy !== store.memberId && !admin} onSelect={() => { setError(null); setTarget({ item, action: "delete" }); }}>삭제하기{item.createdBy !== store.memberId && !admin ? " (만든 사람·관리자만)" : ""}</DropdownMenuItem>

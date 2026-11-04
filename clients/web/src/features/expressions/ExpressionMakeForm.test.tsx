@@ -83,6 +83,8 @@ async function fill(view: RenderResult, { presets = ["bounce"], note = "", photo
 const send = (view: RenderResult) => fireEvent.click(view.getByTestId(SUBMIT));
 const errorText = (view: RenderResult) => view.getByTestId("expression-make-error").textContent;
 const hiddenOf = (view: RenderResult, id: string) => (view.getByTestId(id) as HTMLElement).hidden;
+/** 「AI와 만들기」는 사진 양식에서 시작한다(#4941): 에이전트에게 부탁하는 길은 그 안의 단추 하나다. 이 시험들의 서버는 사진 길을 모르는 고정 서버라 확인이 실패하는 쪽으로 서고, 그 줄에도 같은 단추가 있다. */
+const toAgentPath = async (view: RenderResult) => { fireEvent.click(await view.findByTestId("expression-photo-agent")); };
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -379,7 +381,7 @@ describe("보내는 순서", () => {
     await act(async () => { store.setOffline(true); });
     const button = view.getByTestId(SUBMIT) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(view.getByText("연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요.").id).toBe(button.getAttribute("aria-describedby"));
+    expect(view.getByText("You're offline. You can send the request once you're connected again.").id).toBe(button.getAttribute("aria-describedby"));
     fireEvent.submit(view.getByTestId("expression-make-form"));
     expect(api.openDirectMessage).not.toHaveBeenCalled();
     await act(async () => { store.setOffline(false); });
@@ -459,7 +461,10 @@ describe("단계별 실패와 다시 시도", () => {
   it("고칠 수 없는 원인은 그대로 말해요: 보관소 없음, 막힌 배포, 큰 파일", async () => {
     const { ApiError } = await vi.importActual<typeof import("@momo/core/lib/api")>("@momo/core/lib/api");
     const lines: [() => void, string][] = [
-      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      // 보관소 이야기는 우리 서버가 코드를 붙여 직접 낸 503에만 남는다(#5221). 코드 없는 502·503은 닿지 못함이라 기다리면 된다.
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive", "archive_not_configured")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "unavailable")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(502, "bad gateway")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "blocked" }), abort: vi.fn() })), "이 서버의 보안 설정이 파일 보관소 주소를 막았어요. 서버 관리자에게 알려 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "status", status: 413 }), abort: vi.fn() })), "사진이 너무 커서 올리지 못했어요. 더 작은 사진을 골라 주세요."],
     ];
@@ -656,6 +661,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     const back = view.getByRole("button", { name: "목록으로" });
     await waitFor(() => expect(document.activeElement).toBe(back));
@@ -669,6 +675,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-empty");
     fireEvent.click(view.getByRole("button", { name: "가져오기" }));
     expect(await view.findByLabelText("고정 이름")).toBeTruthy();
@@ -687,6 +694,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel(onClose);
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     await fill(view);
     send(view);
@@ -720,6 +728,7 @@ describe("이모지 고르개 안에서", () => {
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }
@@ -779,6 +788,7 @@ describe("이모지 고르개 안에서", () => {
     // 이제 양식을 연 뒤 그 Escape 를 시험한다.
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }

@@ -17,7 +17,7 @@ vi.mock("@/lib/tauri", async (orig) => ({
 }));
 
 import { resetViewingBeatForTests } from "@momo/core/features/readState/viewingBeat";
-import { useChannelViewingBeat } from "./useChannelViewingBeat";
+import { useChannelViewingBeat, useDocumentForeground } from "./useChannelViewingBeat";
 
 let visibility: "visible" | "hidden" = "visible";
 let focused = true;
@@ -91,5 +91,32 @@ describe("useChannelViewingBeat", () => {
     expect(send).toHaveBeenCalledTimes(1);
     act(() => void window.dispatchEvent(new Event("focus")));
     expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useDocumentForeground (#5032)", () => {
+  it("스레드가 열려 있을 때만(enabled) 창 앞뒤를 따라간다 — 꺼 두면 구독이 없고 늘 앞이다", () => {
+    const windowAdd = vi.spyOn(window, "addEventListener");
+    const documentAdd = vi.spyOn(document, "addEventListener");
+    const listened = () => [...windowAdd.mock.calls, ...documentAdd.mock.calls].map(([name]) => name);
+    const { result, rerender } = renderHook(({ on }) => useDocumentForeground(on), { initialProps: { on: false } });
+    expect(listened()).not.toContain("blur");
+    expect(listened()).not.toContain("focus");
+    expect(listened()).not.toContain("visibilitychange");
+    expect(result.current).toBe(true);
+    // 창이 이미 뒤에 있는 채 켜면(알림에서 스레드가 열린다) 켜는 순간의 값으로 시작한다.
+    focused = false;
+    rerender({ on: true });
+    expect(listened()).toContain("blur");
+    expect(result.current).toBe(false);
+    focused = true;
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(result.current).toBe(true);
+    // 끄면 구독을 풀고 늘 앞이다.
+    focused = false;
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(result.current).toBe(false);
+    rerender({ on: false });
+    expect(result.current).toBe(true);
   });
 });

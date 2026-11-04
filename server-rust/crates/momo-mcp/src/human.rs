@@ -533,6 +533,8 @@ mod tests {
             "stream",
             "harnessRefine",
             "apps",
+            // ADR-0148 증보 (#4887): 「대화에도 보내기」 is not one of the five arguments.
+            "alsoInChannel",
             "type",
             "sentVia",
             "sent_via",

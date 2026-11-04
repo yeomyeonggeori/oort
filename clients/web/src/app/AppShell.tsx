@@ -25,6 +25,8 @@ import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
+import { ConnectionProvider } from "@/features/common/connectionModel";
+import { showsConnectionBanner } from "@momo/core/features/connection/screenState";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
 import { DownloadButton } from "@/features/downloads/DownloadButton";
@@ -49,6 +51,7 @@ import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
+import { TrayStatus } from "@/features/notifications/TrayStatus";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
 import { OnlineRollCall } from "@/features/presence/OnlineRollCall";
@@ -57,7 +60,7 @@ import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { ReleaseNotesHost } from "@/features/releaseNotes/ReleaseNotesHost";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
-import { useWorkPanelTarget } from "@/features/agents/workLogStore";
+import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentTurnFixture } from "@/features/agents/AgentTurnFixture";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import { AdeSummaryLine } from "@/features/ade/AdeSummaryLine";
@@ -68,6 +71,7 @@ import {
 } from "@/features/ade/adeDrawerStore";
 import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { IS_TAURI } from "@/lib/env";
+import { useDismissOnEntry } from "@/lib/useDismissOnEntry";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { WallpaperLayer } from "@/design/wallpaper/WallpaperLayer";
@@ -239,6 +243,17 @@ export function AppShell({
   // 닫았다(design-review ADE 2단계 H1 ①). 스택이 그 문장을 자료구조로 만든다.
   useEscapeLayer(drawerOpen, closeDrawer);
 
+  // 알림이 새 입구로 들어오면(#4667) 라우트를 덮는 표면과 팔레트를 걷는다. 위의 라우트 효과는 **경로가 바뀔 때만** 서랍을
+  // 닫는다 — 같은 채널의 다른 메시지로 오는 알림(`?msg=`)은 경로가 같아 서랍이 그 메시지를 덮은 채 남는다. 대화상자는
+  // `design/ui/dialog.tsx` 의 Root 가 스스로 받는다(여기는 그 Root 를 쓰지 않는 팔레트와 서랍 상태만 쥔다). 작업 패널은 넓은
+  // 창에서는 라우트 옆의 칸이라 걷지 않고, 라우트를 덮는 폭에서만(`paneDrawerWidth`) 걷는다.
+  useDismissOnEntry(() => {
+    setSwitcherOpen(false);
+    if (drawerOpen) closeDrawer();
+    closeAdeDrawer();
+    if (paneDrawerWidth && workPanelOpen) closeWorkPanel();
+  });
+
   const onDesktopToggleBlur = (event: FocusEvent<HTMLButtonElement>) => {
     const next = event.relatedTarget;
     if (
@@ -340,6 +355,9 @@ export function AppShell({
         replaceSessionMember,
       }}
     >
+      {/* 연결 상태 모델은 앱에 하나다(#5220). 위의 connStatus(`?agentwork=` 덮어쓰기까지 거친 값)를 읽으므로
+       * 세션 공급자 **안**에 서고, 쓰기 게이트(`useOffline`)와 연결 카드·띠가 모두 이 한 벌을 읽는다. */}
+      <ConnectionProvider>
       <TeamExpressionsProvider>
       {/* app-shell is the named two-pane grid from tokens.css (sidebar --w-sidebar,
        * viewport height), so the shell needs no arbitrary grid-cols value. The
@@ -423,7 +441,13 @@ export function AppShell({
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
-              {!isSettingsSurface && <ConnectionBanner />}
+              {/* 연결을 말하는 자리는 한 곳이다(#5220): 목록 열이 보이면 사이드바 아래 연결 카드가, 서랍이거나
+               * 목록 열이 접혔으면 이 띠가 같은 문장·같은 단추로 말한다. 가르는 규칙은 코어의 한 함수고,
+               * 사이드바가 같은 입력으로 반대쪽 답을 읽는다. */}
+              {!isSettingsSurface &&
+                showsConnectionBanner({ asDrawer: isMobile, listCollapsed: listColumnCollapsed }) && (
+                  <ConnectionBanner />
+                )}
               {/* ADE 관제 요약 한 줄 (ADR-0154 D2, 이슈 1135). 연결 배너와 같은
                * 자리에 있고 이유도 같다: 재료의 절반이 워크스페이스 전역이라
                * 채널 헤더에 두면 지금 보고 있는 방 밖의 작업이 화면에서 사라진다.
@@ -505,6 +529,8 @@ export function AppShell({
           {/* 새 승인 카드가 올라오면 처리할 일 목록을 바로 다시 읽는다(#3738). */}
           {!stress && <ApprovalsLiveSync />}
           {!stress && <DockBadge />}
+          {/* 메뉴 막대 아이콘(#5193): 독 배지와 같은 수에 실행 중인 작업을 얹어 셸에 보내고, 메뉴에서 고른 것을 받아 간다. 아무것도 그리지 않는다. */}
+          {!stress && <TrayStatus />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}
           {/* 출석부에 세어진다(ADR-0160 ②, #4692). 아무것도 그리지 않고 받는 것도 없다. */}
@@ -542,6 +568,7 @@ export function AppShell({
       </CreateChannelProvider>
       </ShellNavProvider>
       </TeamExpressionsProvider>
+      </ConnectionProvider>
     </SessionProvider>
   );
 }

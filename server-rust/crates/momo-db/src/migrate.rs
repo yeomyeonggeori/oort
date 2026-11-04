@@ -721,12 +721,77 @@ mod tests {
     /// 161 is #4820 C2b's original-photo pointer (ADR-0218 G1/G7): `origin_source_attachment_id` on
     /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
     /// draft's `code` CHECK. No new table.
+    ///
+    /// 162 is #4887's 「대화에도 보내기」 (ADR-0148 증보 2026-10-31): `message.also_in_channel boolean
+    /// NOT NULL DEFAULT false` and the CHECK `message_also_in_channel_reply_ck` that lets only a thread
+    /// reply (`root_id` set) turn it on. No new table, so no new RLS policy.
+    ///
+    /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
+    /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
+    /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
+    /// table.
+    ///
+    /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
+    /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
+    /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
+    ///
+    /// 165 is #4889 stage 2 (ADR-0206 증보 1): `thread_follow.last_read_reply_seq bigint NOT NULL
+    /// DEFAULT 0` (the read position behind the thread summary's `unread_reply_count`) with a
+    /// `NOT VALID` CHECK `>= 0`, and `GRANT SELECT ON thread_follow TO momo_notifier` — the one grant
+    /// the `thread_reply` push arm needs (no INSERT / UPDATE / DELETE, no new BYPASSRLS role). No new
+    /// table, so no new RLS policy.
+    ///
+    /// 166 is #4966's 「별칭이 이름을 따라가요」 (ADR-0201 증보 v3 B10, slice S3): the helper's alias
+    /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
+    /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
+    /// member only, and a workspace holds at most four. No new table, no new grant.
+    ///
+    /// 167 is #4900's expiry rule for expression drafts (ADR-0218 D2): `expression_immutable()` lets
+    /// `origin` change in exactly one way — when a draft is `expired`, its `prompt` (the agent's words)
+    /// becomes JSON null — and the migration blanks the prompts of drafts that expired before it. No new
+    /// table, so no new RLS policy.
+    ///
+    /// 168 is #4656's agent activity report (ADR-0200 증보 7): the two ledger kinds `activity` and
+    /// `plan` on `agent_run_event` (seven new columns, the SQL backstop CHECKs, the shared text
+    /// function), the per-run ended-unit total `agent_run_activity_tally` (tenant ENABLE + FORCE +
+    /// `ws_isolation`, `momo_notifier` SELECT for the retention sweep), the roll function
+    /// `agent_run_activity_trim`, the one writer `agent_run_activity_record`, and the stage trim /
+    /// append / frame-window functions made to look past the new kinds.
+    ///
+    /// 169 is #4967's 「도우미 작업 모드」 (ADR-0201 증보 v3 B5·B14-S4): the `team_ai_task` marker
+    /// table — one row per run, the row's existence is the task-mode judgement, `steps_done` and the
+    /// step claim keep a step from running twice, and the plan/note between steps are gone once the
+    /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
+    /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
+    /// and both role bootstraps).
+    ///
+    /// 170 is #4341's 「알림 진단과 시험 알림」 (ADR-0206 D11·D15): the `push_system` outbox label
+    /// (a value this file never uses, as 011 did), four `notification_rule` columns for the test
+    /// push's per-minute window and its last test, and the `push_dispatch_log (member_id,
+    /// created_at DESC)` index the diagnostics read. No new table, so no new RLS policy or grant.
+    ///
+    /// 171 is #4961's 「팀 표현의 종류 값」 (ADR-0218 증보 4 §10): `expression.kind` (`emoji` /
+    /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
+    /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
+    /// trigger of 158 keeps the new column immutable after INSERT without being touched.
+    ///
+    /// 172 is #4494's 「알림 설정 v2」 (ADR-0206 D5·D13, M-b2): six `notification_rule` columns
+    /// (`kinds`, `presentation`, `schedule`, `phone_delay_secs`, `keyword_overrides_mute`,
+    /// `approval_time_sensitive`) and the time-zone helper `notification_local_time` (a wrong zone
+    /// name is NULL, not an error; executable by `momo_app` only). No new table, so no new RLS
+    /// policy; the helper's grant is reasserted in both role bootstraps.
+    ///
+    /// 173 is #4673's video meta and poster (ADR-0151 증보 5 D5, C5): `attachment_media`, one row per
+    /// video attachment (length, size, an optional poster image), tenant ENABLE + FORCE +
+    /// `ws_isolation`, a composite FK into `attachment (workspace_id, id)` with CASCADE, and the
+    /// minimum grants (`attachment-media-lockdown`, the same text in the migration and both role
+    /// bootstraps; the team AI's read role may read every column but the poster bytes).
     #[test]
-    fn discovers_contiguous_migrations_001_to_161() {
+    fn discovers_contiguous_migrations_001_to_173() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=161).collect();
+        let expected: Vec<i64> = (1..=173).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -734,7 +799,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=161 under {}",
+            "expected contiguous 001..=173 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -742,7 +807,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("161_expression_origin_source"));
+            .starts_with("173_attachment_media"));
     }
 
     #[test]

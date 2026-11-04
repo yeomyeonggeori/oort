@@ -22,6 +22,11 @@
 
 import { ApiError } from "../../lib/api";
 import { settingsRequest } from "./api";
+import {
+  TEAM_AI_ROLES_NOTICE_KEY,
+  withNoticeFallback,
+  type TeamAiRolesNotice,
+} from "./teamAiRoles";
 
 export const TEAM_AI_SETTINGS_KEY = "team_ai_fast_path";
 export const TEAM_AI_MEMBER_SETTINGS_KEY = "team_ai_agent_member_id";
@@ -91,31 +96,61 @@ export async function probeTeamAiSwitch(workspaceId: string): Promise<TeamAiSupp
   }
 }
 
-/** 켜기/끄기. 응답은 저장된 가방 전체다. */
+/**
+ * 켜기/끄기. 응답은 저장된 가방 전체다. `notice`는 온보딩이 역할 단계의 고지 기록을 켜는 요청에
+ * 실을 때만 넘긴다(#5040): 없으면 본문은 `{team_ai_fast_path}` 하나로 예전과 같고, 고지 줄을 보이지
+ * 않는 켜기(설정의 스위치·다음 단계 카드)는 넘기지 않는다.
+ */
 export function setTeamAiSwitch(
   workspaceId: string,
-  enabled: boolean
+  enabled: boolean,
+  notice?: TeamAiRolesNotice | null
 ): Promise<unknown> {
-  return settingsRequest<unknown>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ [TEAM_AI_SETTINGS_KEY]: enabled }),
-    }
-  );
+  return withNoticeFallback(notice, (sent) => {
+    const body: Record<string, unknown> = { [TEAM_AI_SETTINGS_KEY]: enabled };
+    if (sent) body[TEAM_AI_ROLES_NOTICE_KEY] = sent;
+    return settingsRequest<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  });
 }
 
 // ---- 문구 ----------------------------------------------------------------------
 
-export const TEAM_AI_SECTION_TITLE = "oort 도우미";
+/**
+ * 서버가 도우미를 처음 만들 때 붙이는 표시 이름(`TEAM_AI_DEFAULT_DISPLAY_NAME`). 관리자가 바꾸면
+ * 이 이름이 아니라 멤버의 표시 이름이 정본이다(ADR-0201 증보 v3 B10). 이 상수는 멤버가 아직
+ * 없을 때와 온보딩 이름 칸의 처음 값에만 쓴다.
+ */
+export const TEAM_AI_DEFAULT_NAME = "oort 도우미";
+
+/**
+ * 화면이 도우미를 부르는 이름(B10-7 하드코딩 제거). 멤버가 있으면 그 표시 이름, 아직 없거나
+ * 이름이 비어 있으면 기본 이름이다. 문구는 이 값으로 채우고 「oort 도우미」를 글자로 쓰지 않는다.
+ */
+export function teamAiHelperName(
+  helper: { displayName?: string | null } | null | undefined
+): string {
+  const name = helper?.displayName?.trim();
+  return name ? name : TEAM_AI_DEFAULT_NAME;
+}
+
+export function teamAiSectionTitle(helperName: string): string {
+  return helperName;
+}
 
 export const TEAM_AI_SECTION_DESCRIPTION =
   "프로필 바꾸기, 에이전트 이름 바꾸기, 채널 만들기, 채널에 멤버 넣기처럼 간단한 부탁을 도우미가 바로 승인 카드로 올려요. 실행은 카드를 승인한 사람의 권한으로 해요.";
 
 export const TEAM_AI_SWITCH_LABEL = "도우미 쓰기";
 
-export const TEAM_AI_SWITCH_DESCRIPTION =
-  "켜면 「oort 도우미」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 하루 사용량에는 상한이 있어요.";
+export function teamAiSwitchDescription(helperName: string): string {
+  return `켜면 「${helperName}」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 사용량 한도는 정하지 않으면 없고, AI 허브 › 팀 AI 키의 「사용 한도」에서 정할 수 있어요.`;
+}
 
 export function teamAiSwitchBusyLabel(next: boolean): string {
   return next ? "도우미 켜는 중" : "도우미 끄는 중";

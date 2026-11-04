@@ -36,6 +36,8 @@ import {
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { LanguageChip } from "@/i18n/LanguageChip";
+import { useMessages } from "@/i18n/useMessages";
+import { PasswordHelpScreen } from "@/features/recovery/PasswordHelpScreen";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
 import {
@@ -84,7 +86,7 @@ import {
   releaseSessionRestore,
 } from "./onboardingSessionHold";
 import { classifyEntry } from "./entryInput";
-import { claimHandoff, navigateTo } from "./claimHandoff";
+import { claimHandoff, navigateTo, rememberServerBeforeClaim } from "./claimHandoff";
 import { connectGuide } from "./connectGuide";
 import { OnboardingFieldBlock, ServerChip } from "./connectParts";
 import { settleAfterJoin } from "./joinFollowUp";
@@ -99,7 +101,7 @@ import { WelcomeStep } from "./WelcomeStep";
 //   D1′ join    (#2810) 링크가 채운 서버·코드 + 이메일 + 새 비밀번호 + 표시 이름
 // 옛 S0·S1(gateway)·S2(account)·S3(profile) 네 화면을 이 셋으로 합쳤다.
 
-type Focus = "entry" | "email" | "password" | "profile-name" | "submit";
+type Focus = "entry" | "email" | "password" | "profile-name" | "submit" | "forgot-link";
 
 function subscribeOnline(onChange: () => void): () => void {
   window.addEventListener("online", onChange);
@@ -135,6 +137,7 @@ export function ConnectPage({
   onLoggedIn: (session: LoginResponse) => void;
 }) {
   const requiresServer = requiresServerUrl();
+  const messages = useMessages();
   const reducedMotion = usePrefersReducedMotion();
   const initialStep = useRef<OnboardingStep | null>(null);
   if (initialStep.current === null) initialStep.current = readInitialStep();
@@ -174,6 +177,8 @@ export function ConnectPage({
     message: string;
   } | null>(null);
   const [pendingFocus, setPendingFocus] = useState<Focus | null>(null);
+  // 「비밀번호를 잊으셨나요?」 안내가 로그인 폼을 대신 보이는 중(ADR-0215 D5). 서버를 부르지 않는 화면이다.
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   // 가입은 됐고 표시 이름 저장만 실패한 상태(fail-forward). 계정이 생겼으므로
   // 이 화면은 더 이상 가입 폼이 아니다: 뒤로가 없고 이메일·비밀번호는 잠긴다.
   const [joined, setJoined] = useState<JoinResponse | null>(null);
@@ -190,6 +195,7 @@ export function ConnectPage({
   const passwordRef = useRef<HTMLInputElement>(null);
   const profileNameRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
+  const forgotRef = useRef<HTMLButtonElement>(null);
   const profileBusyRef = useRef(false);
   // 요청이 나간 동안의 동기 자물쇠. `busy` state는 다음 렌더에야 서므로, 같은
   // 틱에 겹친 두 제출(더블클릭·Enter 반복)은 state만으로는 못 막는다.
@@ -215,6 +221,7 @@ export function ConnectPage({
       const move = transitionFor(stepRef.current, next, reducedMotion);
       setDirection(move.direction);
       setEffect(move.effect);
+      setRecoveryOpen(false);
       setStep(next);
     },
     [reducedMotion]
@@ -228,6 +235,7 @@ export function ConnectPage({
       password: passwordRef.current,
       "profile-name": profileNameRef.current,
       submit: submitRef.current,
+      "forgot-link": forgotRef.current,
     }[pendingFocus];
     // 그 칸을 가진 화면이 마운트될 때까지 기다린다.
     if (!node) return;
@@ -315,6 +323,25 @@ export function ConnectPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
 
+  /**
+   * 재설정·첫 주인 링크를 claim 화면으로 넘긴다(D0의 한 칸과 안내 화면의 입구가 같이 쓴다). 데스크탑은
+   * 링크의 서버를 먼저 저장하므로 바꾸기 전의 선택을 적어 둔다: claim 화면에서 서버를 거절하면 그것으로
+   * 되돌린다(`rejectHost`).
+   */
+  function openClaimLink(origin: string, token: string) {
+    const move = claimHandoff({
+      origin,
+      token,
+      pageOrigin: window.location.origin,
+      isTauri: IS_TAURI,
+    });
+    if (move.serverBase !== undefined) {
+      rememberServerBeforeClaim(getServerBase());
+      setServerBase(move.serverBase);
+    }
+    navigateTo(move.href);
+  }
+
   function onWelcomeSubmit() {
     setEntryError(null);
     const decision = classifyEntry(entry);
@@ -344,17 +371,9 @@ export function ConnectPage({
         enterJoin(base, decision.inviteCode);
         return;
       }
-      case "claim": {
-        const move = claimHandoff({
-          origin: decision.origin,
-          token: decision.token,
-          pageOrigin: window.location.origin,
-          isTauri: IS_TAURI,
-        });
-        if (move.serverBase !== undefined) setServerBase(move.serverBase);
-        navigateTo(move.href);
+      case "claim":
+        openClaimLink(decision.origin, decision.token);
         return;
-      }
       case "invalid":
         setEntryError(decision.message);
         focusLater("entry");
@@ -374,6 +393,17 @@ export function ConnectPage({
     setEntry(serverUrl);
     goTo("welcome");
     focusLater("entry");
+  }
+
+  function openRecovery() {
+    setFailure(null);
+    setFieldError(null);
+    setRecoveryOpen(true);
+  }
+
+  function closeRecovery() {
+    setRecoveryOpen(false);
+    focusLater("forgot-link");
   }
 
   async function signIn() {
@@ -650,6 +680,15 @@ export function ConnectPage({
               data-testid="login-password"
             />
           </OnboardingFieldBlock>
+          <button
+            type="button"
+            ref={forgotRef}
+            onClick={openRecovery}
+            className="tap-target press self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 hover:text-ink focus-visible:focus-ring"
+            data-testid="login-forgot"
+          >
+            {messages.formatMessage("recovery.help.link")}
+          </button>
           <RememberEmailToggle
             checked={rememberOn}
             onCheckedChange={(next) => {
@@ -710,6 +749,15 @@ export function ConnectPage({
         {footer}
       </div>
     </OnboardingColumn>
+  );
+
+  const recoveryScreen = (
+    <PasswordHelpScreen
+      serverBase={chipBase}
+      email={email}
+      onBack={closeRecovery}
+      onOpenClaimLink={(link) => openClaimLink(link.origin, link.token)}
+    />
   );
 
   const joinSubmitLabel = joined
@@ -914,7 +962,9 @@ export function ConnectPage({
               data-testid="onboarding-back"
               disabled={busy || profileBusy}
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => backToWelcome({ keepInvite: true })}
+              onClick={() =>
+                recoveryOpen ? closeRecovery() : backToWelcome({ keepInvite: true })
+              }
             >
               <ArrowLeft aria-hidden="true" />
               뒤로
@@ -936,7 +986,9 @@ export function ConnectPage({
         {step === "welcome"
           ? welcomeScreen
           : step === "sign-in"
-            ? signInScreen
+            ? recoveryOpen
+              ? recoveryScreen
+              : signInScreen
             : joinScreen}
       </OnboardingSlideTransition>
     </OnboardingFrame>

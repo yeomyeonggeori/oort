@@ -790,14 +790,23 @@ async fn an_unapproved_mention_holds_a_run_and_raises_one_card_with_no_job() {
     );
     assert_eq!(payload["requested_for"], json!(f.owner.id.to_string()));
 
-    let (card_type, card_author, card_root, props): (String, Uuid, Option<Uuid>, Value) =
-        sqlx::query_as(
-            "SELECT type::text, author_member_id, root_id, props FROM message WHERE id=$1",
-        )
-        .bind(card)
-        .fetch_one(&su)
-        .await
-        .unwrap();
+    let (card_type, card_author, card_root, props, card_body): (
+        String,
+        Uuid,
+        Option<Uuid>,
+        Value,
+        String,
+    ) = sqlx::query_as(
+        "SELECT type::text, author_member_id, root_id, props, body FROM message WHERE id=$1",
+    )
+    .bind(card)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    // ADR-0204 증보 6 D6-2 · D6-3: the card the server raised in place is the one
+    // `hosted.channels.grant` still decided from the banner, and it says one question.
+    assert_eq!(props["decision_mode"], json!("inline"));
+    assert_eq!(card_body, "이 채널에서 읽고 쓰게 해도 될까요?");
     assert_eq!(card_type, "approval_request");
     assert_eq!(card_author, f.agent);
     assert_eq!(

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactElement } from "react";
+import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
 import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
 import type { RealtimeHandle } from "@/lib/realtime";
@@ -185,6 +186,37 @@ function PathProbe() {
   return null;
 }
 
+/**
+ * 열려 있는 대화상자 하나를 **다른 뿌리**에 세운다(셸 위에 서는 전역 대화상자처럼). 알림 입구의 방송은 앱 하나의 것이라 어느 뿌리의
+ * 구독자든 받는다. 닫기 요청이 올 때의 경로를 `onOpenChange` 로 알려, 이동보다 **먼저** 걷히는지 잰다.
+ */
+function mountOpenDialog(onOpenChange: (open: boolean) => void): { host: HTMLElement; root: Root } {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  function Probe() {
+    const [open, setOpen] = useState(true);
+    return createElement(
+      Dialog,
+      {
+        open,
+        onOpenChange: (next: boolean) => {
+          onOpenChange(next);
+          setOpen(next);
+        },
+      },
+      createElement(
+        DialogContent,
+        null,
+        createElement(DialogTitle, null, "열려 있던 대화상자"),
+        createElement(DialogDescription, null, "알림이 걷는다")
+      )
+    );
+  }
+  act(() => root.render(createElement(Probe)));
+  return { host, root };
+}
+
 function mountRail(path = "/"): void {
   const host = document.createElement("div");
   document.body.append(host);
@@ -323,6 +355,31 @@ describe("DesktopNotifications in a browser tab (#3340)", () => {
       FakeNotification.instances[0]?.onclick?.();
     });
     expect(pathname).toBe("/c/" + IDS.channel);
+  });
+
+  it("배너를 누르면 열려 있던 대화상자를 먼저 걷고 그 채널로 간다 (#4667)", async () => {
+    visibility = "visible";
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(window, "focus").mockImplementation(() => undefined);
+    mountRail("/inbox");
+    const closedAt: string[] = [];
+    const dialog = mountOpenDialog((open) => {
+      if (!open) closedAt.push(pathname);
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await deliver(mention());
+    expect(FakeNotification.instances).toHaveLength(1);
+
+    await act(async () => {
+      FakeNotification.instances[0]?.onclick?.();
+    });
+
+    expect(pathname).toBe("/c/" + IDS.channel);
+    // 걷히는 순간 경로는 아직 떠나기 전의 자리였다 — 이동 **전에** 걷었다.
+    expect(closedAt).toEqual(["/inbox"]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    act(() => dialog.root.unmount());
+    dialog.host.remove();
   });
 
   it("honours the same kind toggle as the desktop", async () => {

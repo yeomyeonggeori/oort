@@ -35,6 +35,19 @@ export function isOpenRunPhase(phase: AgentRunPhase): boolean {
   );
 }
 
+/**
+ * 서버가 `running`이라고 말하는가: 에이전트가 **지금** 일한다. 진행 점과 계획의 「지금 단계」를 세울 자격이다
+ * (가져감·승인 대기·일시 정지는 열려 있어도 일하는 중이 아니다). 웹이 낱말을 직접 적지 않도록 코어가 비교한다.
+ */
+export function isRunningPhase(phase: AgentRunPhase): boolean {
+  return phase === "running";
+}
+
+/** 아직 아무도 가져가지 않은 요청인가. 에이전트가 알릴 것이 아직 없다. */
+export function isQueuedPhase(phase: AgentRunPhase): boolean {
+  return phase === "queued";
+}
+
 /** 열린 phase를 턴 상태로. 끝난 phase는 null. */
 export function turnStateOfPhase(phase: AgentRunPhase): AgentTurnState | null {
   switch (phase) {
@@ -224,11 +237,15 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
  *
  * lease 만료는 「끊김」이 아니다. 에이전트는 돌아올 수 있으므로 「소식이 없어요」
  * 까지만 말한다(ADR-0200 D1).
+ *
+ * `minutesOnly`: 초 시계가 없는 표면(폰 기록 시트, #4658)용이다. 1분이 안 된 구간은 「40초째」 대신 「방금 들어왔어요」·
+ * 「방금 시작」·「마지막 보고 방금」으로 말한다. 시계 없이 그린 초 숫자는 다음에 다시 그릴 때까지 그대로 서서 거짓이 된다.
+ * 끝난 run의 길이(`runTookText`)는 변하지 않으므로 이 옵션과 무관하다.
  */
 export function runPhaseDetail(
   facts: ServerRunFacts,
   nowMs: number,
-  options: { omitAhead?: boolean } = {}
+  options: { omitAhead?: boolean; minutesOnly?: boolean } = {}
 ): string | undefined {
   switch (facts.phase) {
     case "queued": {
@@ -236,7 +253,7 @@ export function runPhaseDetail(
       // 초부터 말한다(#3824): 보낸 지 10초 된 요청에 아무 말도 없으면 사람은 요청이
       // 닿았는지부터 의심한다.
       // 1초가 안 됐으면 「1초 미만째」가 아니라 「방금 들어왔어요」다.
-      const waited = ongoingSpan(nowMs - facts.queuedAtMs);
+      const waited = ongoingSpan(nowMs - facts.queuedAtMs, options.minutesOnly === true);
       parts.push(waited === undefined ? "방금 들어왔어요" : `${waited}째 기다려요`);
       if (
         options.omitAhead !== true &&
@@ -263,7 +280,7 @@ export function runPhaseDetail(
     }
     case "running":
       // 「12분째 · 마지막 보고 1분 전」(#3824). 모르는 시각은 「모름」이다.
-      return runWorkingText(facts, nowMs);
+      return runWorkingText(facts, nowMs, options.minutesOnly === true);
     case "awaiting_approval":
     case "paused":
       return undefined;

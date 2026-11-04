@@ -6,14 +6,18 @@ import {
 import {useExpressionItems} from '../expressions/ExpressionProvider';
 import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
-import {haptics, hapticScope} from '../../lib/haptics';
+import {messageEditDraftKey} from '../../lib/entryDrafts';
+import {haptics, hapticScope, type HapticEvent} from '../../lib/haptics';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
+import {ThreadSummaryContent, useThreadSummaryView} from './ThreadSummary';
 import {
   threadRollup,
+  uuidEq,
   type AgentRunProgress,
   type Message,
   type ThreadRollup,
 } from '@momo/core/lib/api';
+import type {MessageUnfurl} from '@momo/core/features/timeline/unfurl';
 import {
   dayDividerLabel,
   dayDividerSegments,
@@ -108,6 +112,7 @@ import {
   Image,
   Keyboard,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -124,13 +129,34 @@ import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet, timeLabel} from './MessageActionSheet';
+import {LinkActionSheet} from './LinkActionSheet';
+import {
+  cardModelsFor,
+  linkCardTarget,
+  unfurlSpokenParts,
+  UnfurlCards,
+  type LinkCardTarget,
+} from './UnfurlCards';
+import {useLinkPreviewPreference} from './linkPreviewPreference';
+import {messageRowKey} from './rowViewability';
+import {NO_UNFURLS} from './useMessageUnfurls';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {MessageEditorSheet} from './MessageEditorSheet';
+import {SendFailureActions} from './SendFailureActions';
+import {
+  sendFailureReasonKey,
+  type SendFailureKind,
+} from '@momo/core/features/connection/sendFailure';
+import {ReplyHomeLine} from './ReplyHomeLine';
+import {replyHomeCopy} from '@momo/core/features/timeline/replyHomeCopy';
+import {replyHomeLineOf} from '@momo/core/features/timeline/threadHome';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
+import {WorkRequestSuggestion} from './WorkRequestSuggestion';
 import {
   TEAM_AI_DELEGATE_ACTION_PREFIX,
   TeamAiDelegateStrip,
@@ -186,7 +212,10 @@ import {
 
 /** 도우미 줄이 아닐 때 넘기는 빈 이름 목록. 렌더마다 새 배열을 만들지 않는다. */
 const NO_NAMES: readonly string[] = [];
-import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
+import {
+  commandSuggestCard,
+  type WorkRequestOpen,
+} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
   gateFor,
@@ -257,13 +286,14 @@ import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
-import {MessageRunStatus} from '../agents/MessageRunStatus';
+import {MessageRunStatus, mayHaveException} from '../agents/MessageRunStatus';
 import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
 import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {RequestStatusChip} from '../agents/RequestStatusChip';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import {RequestBundleCard} from './RequestBundleCard';
 import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
+import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 
 // =============================================================================
 // One row of the conversation.
@@ -374,7 +404,7 @@ const CHIP_HIT_SLOP = {
  *
  * 14pt 씩 넓히면 답글 표식은 위로 작성자 줄에, 스레드 롤업은 위로 본문에 닿는다.
  * 그런데 그 자리들의 탭은 **같은 곳으로 간다**: 행 탭은 `threadTarget` 을 열고,
- * 두 표식이 여는 것도 같은 스레드다(위 `ReplyMarker` 머리말·아래 롤업 참조).
+ * 두 표식이 여는 것도 같은 스레드다(`ReplyHomeLine` 머리말·아래 롤업 참조).
  * 그리고 아래로 겹치는 반응 칩은 JSX 에서 **뒤에** 그려지므로 RN 의 히트 테스트가
  * 칩을 먼저 집는다 — 형제는 쓰인 순서대로 칠해지고 역순으로 눌린다.
  */
@@ -402,16 +432,6 @@ const AVATAR_HIT_SLOP = {
   left: AVATAR_SLOP,
   right: AVATAR_SLOP,
 } as const;
-
-function relativeLabel(atMs: number, nowMs: number): string {
-  const diff = Math.max(0, nowMs - atMs);
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
-}
 
 // ---- dividers ---------------------------------------------------------------
 
@@ -469,7 +489,7 @@ function DividerLabel({
  * 첫 판은 `${y}년 ${m}월 ${d}일` 절대 표기 **고정**이었다. 오늘 대화를 보면서
  * 「2026년 8월 5일」을 읽고 그게 오늘인지 계산해야 했고, 아픈 것은 상대 표기
  * 함수가 **같은 파일에 이미 있었다**는 점이다(`relativeLabel` — 스레드 롤업만
- * 그걸 썼다).
+ * 그걸 썼고, 요약 줄에서 시간 문구가 빠지며 #4878이 지웠다).
  *
  * 그리고 배치가 웹과 달랐다(폰=가운데 라벨+양쪽 rule, 웹=좌측 라벨+우측 rule).
  * 통일값은 **`leading`** 이고 그 판정은 `divider.ts` 가 든다 — 가운데 라벨은
@@ -685,7 +705,13 @@ function Author({
   const content = (
     <>
       <Text
-        style={[styles.authorName, isAgent && styles.authorNameAgent]}
+        style={[
+          styles.authorName,
+          isAgent && styles.authorNameAgent,
+          // 칩이 서는 머리 줄은 줄바꿈이 없다(웹 planner 결정 6): 긴 이름이 줄어들고 칩·시각은 줄지 않는다 — 칩이 혼자 다음 줄로 내려가
+          // 머리 줄 높이가 바뀌는 일이 없다.
+          requestChip ? styles.authorNameShrink : null,
+        ]}
         numberOfLines={1}>
         {parts.name}
       </Text>
@@ -722,7 +748,11 @@ function Author({
   // **이름은 누르는 것이 아니다**(#4666, owner 10-27 「프로필 이미지쪽을 눌러야만 열리게」). 작성자 줄은 행 전체
   // 폭이라 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다. 프로필 문은 얼굴
   // (`profile-avatar-target`)과 멘션뿐이고, 이 줄을 누르면 행 탭이 받는다(스레드·키보드 닫기·길게 누르기 시트).
-  return <View style={styles.authorRow}>{content}</View>;
+  return (
+    <View style={[styles.authorRow, requestChip ? styles.authorRowChip : null]}>
+      {content}
+    </View>
+  );
 }
 
 /**
@@ -786,86 +816,6 @@ function Chips({
         </Pressable>
       ))}
     </View>
-  );
-}
-
-/**
- * 「↳ ○○님에게 답글」 — the line that makes a reply readable as one.
- *
- * ## Why the row needs it at all
- *
- * A reply is a message in this channel with `rootId` set, and the server does
- * not filter replies out of channel history — so it lands in the timeline as an
- * ordinary row. Nothing about it said 답글, which is exactly the report: 답글을
- * 달았는데 답글 모양으로 별도로 보이지 않는다.
- *
- * ## Why it is a glyph and a name rather than a quoted parent
- *
- * The quote is the tempting version and it is wrong FOR THIS DEVICE: a thread
- * reply is about BELONGING (`root_id`), and belonging is answered by naming the
- * room and opening it. Drawing the parent's text here would double the height of
- * every reply and re-render text the reader can already scroll to. One
- * meta-sized line names the destination and opens it, which is the whole job —
- * and it keeps the density this product has.
- *
- * **This is not the argument against quoting** (ADR-0148 settled that: 인용 is a
- * different device and DOES draw the original). `reply_to_id` is AIM rather than
- * belonging, it stays in the main channel, and it exists precisely for the case
- * where the context has to come along. That block is `Quote.tsx`, it sits right
- * below this line, and the two are deliberately built to look nothing alike —
- * a line vs a block, an arrow vs a rule, 답글 vs 인용, another screen vs this one.
- * A row can carry both at once (ADR-0148 규칙 1: quoting one reply inside the
- * thread it belongs to), which is why they had to be told apart at a glance.
- *
- * ## Pressable only when there is a room to enter
- *
- * The same rule the thread rollup already follows here: with the root loaded and
- * a thread surface to open, this is a button onto that thread; with the root
- * above the oldest page this client has fetched, it is a sentence. A door to a
- * room that does not exist is worse than a sentence saying the room is there.
- *
- * This is not 「답글 달기」 and does not weaken the one-level rule: replying to a
- * reply is still refused by `canReplyToMessage`, so the action sheet on this row
- * offers no 답글. Opening the thread it already belongs to is navigation.
- */
-function ReplyMarker({
-  parent,
-  directory,
-  onOpen,
-}: {
-  parent: Message | null;
-  directory: Directory;
-  onOpen?: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const label =
-    parent === null
-      ? // 모르면 모른다고 말한다: the root is not loaded, so the row says that it
-        // is a reply and stops short of naming a message it cannot see.
-        '↳ 답글'
-      : `↳ ${
-          memberNameParts(directory, parent.authorMemberId, missingMemberLabel(directory)).name
-        }님에게 답글`;
-  if (!onOpen) {
-    return (
-      <Text style={styles.replyMark} numberOfLines={1} testID="reply-marker">
-        {label}
-      </Text>
-    );
-  }
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="이 답글이 달린 스레드 열기"
-      hitSlop={META_HIT_SLOP}
-      onPress={onOpen}
-      unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
-      style={({pressed}) => [pressed && styles.pressed]}
-      testID="reply-marker">
-      <Text style={styles.replyMarkLink} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1640,6 +1590,7 @@ export function readApprovalCard(
     approvalGates,
     approvalReceipts,
     approvalOffline,
+    approvalOfflineText,
     approvalsProvided,
     viewerMemberId,
     nameFor,
@@ -1647,6 +1598,11 @@ export function readApprovalCard(
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
+    /**
+     * `approvalOffline` 일 때 줄이 말할 문장 - 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)을 가린 것(#5262, `useApprovalBlockedLine`). 없으면
+     * 원인을 가리지 않는 코어 문장이다.
+     */
+    approvalOfflineText?: string;
     approvalsProvided?: boolean;
     viewerMemberId?: string;
     /** 참여자 동의 카드의 결정자 이름을 푼다. 문장을 그리는 카드만 넘기면 돼요. */
@@ -1702,6 +1658,7 @@ export function readApprovalCard(
     hasTarget: card.approvalId !== null,
     pendingHere: approval !== null,
     offline: approvalOffline === true,
+    offlineText: approvalOfflineText,
     approvalsProvided,
   });
   return {approval, receipt, settledStatus, note};
@@ -1721,11 +1678,14 @@ function AgentCard({
   decisionRef,
   requestRun,
   onOpenDecision,
+  onRepropose,
 }: {
   card: AgentCardModel;
   viewerMemberId?: string;
   requestRun?: AgentRunProgress;
   onOpenDecision?: (approvalId: string) => void;
+  /** 닫힌 묶음 카드의 「다시 요청」이 이 화면의 입력창에 초안을 넣는다 (`MessageRowActions.onRepropose`). */
+  onRepropose?: (draft: string) => boolean;
   /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
@@ -1746,6 +1706,8 @@ function AgentCard({
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
+  // 승인을 막은 원인의 문장(#5262): 막을지는 화면이 `approvalOffline` 으로 정했고, 무슨 말을 할지는 연결 모델이 고른 사전 키가 정한다.
+  const approvalOfflineText = useApprovalBlockedLine();
   const avatarKey = card.kind === 'approval' && hasProfileAvatarPreview(card.action)
     ? `${card.approvalId}:${card.action?.preview?.sha256}` : null;
   const [avatarReady, setAvatarReady] = useState<{key: string | null; ready: boolean} | null>(null);
@@ -1760,6 +1722,7 @@ function AgentCard({
       approvalGates,
       approvalReceipts,
       approvalOffline,
+      approvalOfflineText,
       approvalsProvided,
       viewerMemberId,
       nameFor: id => memberFor(directory, id)?.displayName,
@@ -1767,7 +1730,8 @@ function AgentCard({
     if (hasRequestBundle(card)) {
       return <RequestBundleCard card={card} directory={directory} viewerMemberId={viewerMemberId}
         gate={approval} receipt={receipt} nowMs={nowMs} offline={approvalOffline} run={requestRun}
-        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision} />;
+        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision}
+        onRepropose={onRepropose} />;
     }
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
@@ -2191,6 +2155,12 @@ export function resetMessageRowRenderCount(): void {
 export interface MessageRowActions {
   myMemberId: string;
   onOpenDecision?: (approvalId: string) => void;
+  /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)를 눌렀다: 「내 맥에 보내기」 시트를
+   * 작업 요청 모드로, 카드가 가진 글·도구로 미리 채워 연다. 보내는 것은 사람이다. 시트를 열 곳이 없는
+   * 표면은 이 줄을 주지 않고, 그때 카드는 누를 단추 없이 한 줄로 선다.
+   */
+  onOpenWorkRequest?: (prefill: WorkRequestOpen) => void;
   /** Optimistic in the hook; rejects with the error the row turns into a line. */
   onToggleReaction: (message: Message, emoji: string) => Promise<void>;
   onEdit: (message: Message, body: string) => Promise<void>;
@@ -2234,10 +2204,17 @@ export interface MessageRowActions {
    * the target off it, because the row does not know what the page holds.
    */
   onJumpToQuoted?: (message: Message) => void;
+  /** 「답함 ✓」 칩을 누르면 그 답 메시지로 간다(#4620 B). 답 메시지는 로드된 목록 안에 있다(칩이 거기서만 찾는다). */
+  onJumpToMessage?: (messageId: string, seq: number) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
   onOpenProfile?: (memberId: string) => void;
+  /**
+   * 이 메시지의 링크 미리보기를 **모두에게서** 지운다(#4883, 작성자 전용 — 서버가 403 으로 같은 규칙을 지킨다). 없으면
+   * 링크 시트에 지우기 행이 서지 않는다(채널이 없는 표면). 실패하면 던지고, 시트가 확인 단계 안에서 문장으로 말한다.
+   */
+  onRemoveUnfurls?: (message: Message) => Promise<void>;
   /**
    * 에이전트 답 밑의 「기억 n개 참고」 칩이 영수증을 읽을 워크스페이스 (#3166).
    * 없으면 칩을 세우지 않는다(측정 하네스처럼 서버가 없는 표면). 행 props가 아니라
@@ -2253,6 +2230,12 @@ export interface MessageRowActions {
    * 서지 않는다: 열 곳을 모르는 표면에 눌러도 아무 일 없는 버튼을 두지 않는다.
    */
   onOpenMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * 닫힌 승인 카드(만료·거부·실패)의 「다시 요청」이 **이 화면의** 입력창에 초안을 넣는다 (#5171). 넣었으면 `true`, 입력창이 쓰던
+   * 글을 들고 있어서 거절했으면 `false`다(웹 `seedComposerText` 와 같은 규칙). 없으면(입력창이 없는 표면) 단추가 서지 않는다 —
+   * 눌러도 아무 일 없는 버튼을 두지 않는다.
+   */
+  onRepropose?: (draft: string) => boolean;
 }
 
 export interface MessageRowProps {
@@ -2308,7 +2291,7 @@ export interface MessageRowProps {
    * The message this one QUOTES (ADR-0148 `reply_to_id`), already resolved.
    *
    * A different device from `replyParent` and never a substitute for it — see
-   * `ReplyMarker`'s header. `null`/`undefined` means this row quotes nothing.
+   * `ReplyHomeLine`'s header. `null`/`undefined` means this row quotes nothing.
    *
    * **The value rides the page.** The server LEFT JOINs the quoted row onto
    * every history page (`momo-messaging/src/message.rs:1062`), so the caller
@@ -2319,6 +2302,11 @@ export interface MessageRowProps {
   quote?: QuoteBlockModel | null;
   /** 로드된 인용 원본의 첨부 수. 인용 안에서는 바이트 대신 최소 표지만 그린다. */
   quoteAttachmentCount?: number;
+  /**
+   * 이 메시지의 링크 카드 투영(ADR-0170 D5, #4883). 목록이 `unfurlRowsFor` 로 건넨다 — 카드가 없는 모든 줄이 **같은 빈
+   * 배열**을 받아야 아래 비교자의 동일성 비교가 맞는다. 없으면(측정 하네스·검색 미리보기) 카드는 그려지지 않는다.
+   */
+  unfurls?: readonly MessageUnfurl[];
   /**
    * 이 행의 승인 카드를 **지금 결정할 수 있는가** (감사 H-1 / goal U4-g).
    *
@@ -2399,6 +2387,16 @@ export interface MessageRowProps {
 }
 
 /**
+ * 링크 카드의 로터 행동 이름(#4883). 행이 접근성 원소 하나라 카드 안의 `Pressable` 에 VoiceOver 가 닿지 않으므로,
+ * 카드마다 「열기」 하나(이름 = 카드의 낭독 문장)와 첫 카드의 시트(복사·공유·지우기) 하나를 올린다. 카드는 최대 셋이다.
+ */
+const UNFURL_OPEN_ACTION_PREFIX = 'momoUnfurlOpen:';
+/** 길게 눌러 시트를 여는 손맛 — 메시지 시트와 링크 시트가 같은 이벤트를 쓴다. */
+const MESSAGE_MENU_HAPTIC: HapticEvent = 'messageMenu';
+const UNFURL_MENU_ACTION_NAME = 'momoUnfurlMenu';
+const NO_CARD_MODELS: ReturnType<typeof cardModelsFor> = [];
+
+/**
  * 로터가 읽을 링크 라벨.
  *
  * 여럿이면 **첫 개만** 올린다 — 스무 개짜리 답에 액션 스무 개를 얹으면 로터가
@@ -2463,6 +2461,7 @@ function MessageRowInner({
   replyParent,
   quote,
   quoteAttachmentCount,
+  unfurls = NO_UNFURLS,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -2505,6 +2504,8 @@ function MessageRowInner({
     () => commandSuggestCard(message, directory),
     [message, directory],
   );
+  // 도우미의 「작업 요청 열기」 카드(#4972)는 시트를 미리 채워 여는 자기 컴포넌트를 쓴다.
+  const isWorkRequestCard = suggestion?.commandId === 'work.request.open';
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
@@ -2613,6 +2614,17 @@ function MessageRowInner({
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
+  // 요약 줄의 값과 문구(얼굴·「답글 N개」·「새 답글 M」)는 코어가 정한다 (#4878). 훅이라 롤업이 없어도 부른다.
+  const threadView = useThreadSummaryView(rollup);
+  // 스레드 요약 줄의 「작업 중」 칩(#4620 E): 루트 메시지가 일으킨 일이 지금 **진행 중**(가져감·작업 중)일 때만, 요청 묶음 카드가 아닐 때만 선다.
+  // 같은 모델·같은 칩이고 누르는 것이 아니며 폭은 예약하지 않는다(줄 맨 끝). 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어 닿지 못한다.
+  const threadWorkChip =
+    threadView !== null &&
+    !requestCardTarget &&
+    requestChip &&
+    (requestChip.kind === 'working' || requestChip.kind === 'claimed') ? (
+      <RequestStatusChip chip={requestChip} reserve={false} testID="thread-work-chip" />
+    ) : undefined;
   const body = message.body ?? '';
   // 살릴 본문이 실제로 있는가 (#1465 → #1478). 자격(`presentation.keepsBody`)과
   // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
@@ -2660,6 +2672,72 @@ function MessageRowInner({
   );
   const replyThread =
     actions?.onOpenThread !== undefined && canReplyToMessage(message);
+  // ===========================================================================
+  // 링크 카드 (ADR-0170 D5, #4883)
+  //
+  // 카드를 그리는 것은 `UnfurlCards` 이고 무엇을 그릴지는 코어 모델이 정한다. 이 행이 하는 일은 셋이다:
+  //   ① 카드가 서 있을 자리를 준다(본문 · 첨부 아래).
+  //   ② 카드의 낭독 문장(「링크 미리보기: 제목, 도메인」)을 **행의 문장**에 싣고 로터에 올린다 — 행이 접근성 원소 하나라
+  //      안쪽 `Pressable` 의 라벨은 VoiceOver 에 닿지 않는다(아래 `accessibilityLabel`·`accessibilityActions`).
+  //   ③ 카드를 길게 누르면 **링크 시트**를 연다(복사 · 공유 · 작성자만 「미리보기 지우기」). 행 전체의 길게 누르기(메시지
+  //      액션 시트)와 다른 문이고, 카드가 제 손가락을 먼저 받으므로 둘이 다투지 않는다.
+  // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
+  // ===========================================================================
+  const formatMessage = useFormatMessage();
+  // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).
+  const replyToSpoken =
+    isMarkedReply && !deleted && message.rootId !== undefined
+      ? replyHomeCopy(replyHomeLineOf(message.rootId, replyParent ?? undefined), {
+          directory,
+          myMemberId: actions?.myMemberId,
+          formatMessage,
+        }).header
+      : null;
+  const linkPreview = useLinkPreviewPreference();
+  const cardModels = useMemo(
+    () => (deleted ? NO_CARD_MODELS : cardModelsFor(unfurls, linkPreview)),
+    [deleted, unfurls, linkPreview],
+  );
+  const unfurlSpoken = useMemo(
+    () => cardModels.map(model => unfurlSpokenParts(model, formatMessage)),
+    [cardModels, formatMessage],
+  );
+  const [linkSheet, setLinkSheet] = useState<{
+    target: LinkCardTarget;
+    confirmRemove: boolean;
+  } | null>(null);
+  // 지우기는 작성자만 한다 — 서버가 403 으로 같은 규칙을 지키고, 화면은 처음부터 행을 세우지 않는다.
+  const canRemoveUnfurls =
+    !deleted &&
+    actions?.onRemoveUnfurls !== undefined &&
+    uuidEq(actions.myMemberId, message.authorMemberId);
+  const openLinkSheet = useCallback(
+    (target: LinkCardTarget) => {
+      setRowError(null);
+      haptics.event(MESSAGE_MENU_HAPTIC);
+      setLinkSheet({target, confirmRemove: false});
+      actions?.onLongPressUsed?.();
+    },
+    [actions],
+  );
+  const copyLink = useCallback(
+    (url: string) => {
+      setRowError(null);
+      void copyText(url).then(ok => {
+        if (ok) showReceipt(formatMessage('mobile.linkCard.copied'));
+        else setRowError(formatMessage('mobile.linkCard.copyFailed'));
+      });
+    },
+    [showReceipt, formatMessage],
+  );
+  const shareLink = useCallback((url: string) => {
+    // iOS 공유 시트가 결과를 맡는다. 시트를 못 띄우는 기기는 이 행이 할 말이 없다(사람이 누른 것은 공유이고, 실패한 것은 기기의 사정이다).
+    void Share.share({url}).catch(() => undefined);
+  }, []);
+  const removeUnfurls = useCallback(
+    () => actions?.onRemoveUnfurls?.(message) ?? Promise.resolve(),
+    [actions, message],
+  );
 
   // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
@@ -2706,7 +2784,7 @@ function MessageRowInner({
   const swipeGuard = useContext(ReplySwipeGuardContext);
   const openSheet = useCallback(() => {
     setRowError(null);
-    if (!sheetOpen) haptics.event('messageMenu');
+    if (!sheetOpen) haptics.event(MESSAGE_MENU_HAPTIC);
     if (swipeGuard !== null) swipeGuard.current = true;
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
@@ -2882,6 +2960,9 @@ function MessageRowInner({
             if (url) openLink(url);
           }
           return;
+        case UNFURL_MENU_ACTION_NAME:
+          if (cardModels[0] !== undefined) openLinkSheet(linkCardTarget(cardModels[0]));
+          return;
         case 'momoProfile':
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
@@ -2892,6 +2973,14 @@ function MessageRowInner({
           if (githubNoticeUrl !== null) openLink(githubNoticeUrl);
           return;
         default:
+          if (event.nativeEvent.actionName.startsWith(UNFURL_OPEN_ACTION_PREFIX)) {
+            const model =
+              cardModels[
+                Number(event.nativeEvent.actionName.slice(UNFURL_OPEN_ACTION_PREFIX.length))
+              ];
+            if (model !== undefined) openLink(model.url);
+            return;
+          }
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
             const index = Number(
               event.nativeEvent.actionName.slice(TEAM_AI_CITATION_ACTION_PREFIX.length),
@@ -2925,6 +3014,8 @@ function MessageRowInner({
       teamAiReply,
       appNoticeWebUrl,
       githubNoticeUrl,
+      cardModels,
+      openLinkSheet,
     ],
   );
 
@@ -2997,6 +3088,19 @@ function MessageRowInner({
           && presentation.artifact.url) {
         list.push({name: 'momoArtifactLink', label: '아티팩트 주소 열기'});
       }
+      // 링크 카드(#4883): 카드마다 열기 하나(이름이 곧 카드의 낭독 문장), 첫 카드의 시트 하나. 묘비에는 카드가 없다.
+      cardModels.forEach((_, index) => {
+        list.push({
+          name: `${UNFURL_OPEN_ACTION_PREFIX}${index}`,
+          label: unfurlSpoken[index],
+        });
+      });
+      if (cardModels.length > 0) {
+        list.push({
+          name: UNFURL_MENU_ACTION_NAME,
+          label: formatMessage('mobile.linkCard.sheetTitle'),
+        });
+      }
     }
     return list.length > 0 ? list : undefined;
   }, [
@@ -3019,6 +3123,9 @@ function MessageRowInner({
     appNotice,
     appNoticeWebUrl,
     githubNoticeUrl,
+    cardModels,
+    unfurlSpoken,
+    formatMessage,
   ]);
 
   const authorLabel = memberNameParts(
@@ -3058,12 +3165,7 @@ function MessageRowInner({
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
     // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
     showsPinMark ? PIN_ROW_MARK : null,
-    rollup
-      ? `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-          rollup.lastReplyAtMs,
-          nowMs,
-        )}`
-      : null,
+    threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
   return (
@@ -3073,7 +3175,9 @@ function MessageRowInner({
       // thread anchor and the resend button from each becoming their own stop —
       // the same count the web client cut from 6 to 1. Touch is unaffected:
       // grouping changes the accessibility tree, not the responder tree.
-      accessible={!(requestChip || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
+      // 칩이 **실제로 서는** 행(머리 줄이 있는 행)과 예외 줄이 설 수 있는 행(줄 안에 설정·취소 단추가 선다)은 한 덩이로 합치지 않는다 — 합치면 그 단추가
+      // 보조기술에서 사라진다. 이어지는 행의 칩은 그려지지 않으므로(#4620) 칩만으로는 합침을 풀지 않는다.
+      accessible={!((startsGroup && requestChip) || (runStatus !== undefined && runStatus.some(mayHaveException)) || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
       accessibilityLabel={[
         rowAccessibilityLabel({
         message: {...message, body: spokenExpression(message.body ?? '')},
@@ -3083,18 +3187,7 @@ function MessageRowInner({
         tail,
         deleted,
         tombstoneText,
-        replyTo:
-          isMarkedReply && !deleted
-            ? replyParent === null
-              ? '답글'
-              : `${
-                  memberNameParts(
-                    directory,
-                    replyParent.authorMemberId,
-                    missingMemberLabel(directory),
-                  ).name
-                }님에게 답글`
-            : null,
+        replyTo: replyToSpoken,
         quoted:
           quote && !deleted
             ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
@@ -3110,6 +3203,8 @@ function MessageRowInner({
         ...appNoticeSpoken(appNotice),
         ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
         ...teamAiReplySpoken(teamAiReply),
+        // 링크 카드(#4883): 「링크 미리보기: 제목, 도메인」(동영상이면 「, 동영상」). 행이 원소 하나라 귀에는 여기로만 닿는다.
+        ...unfurlSpoken,
       ].join(', ')}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -3185,14 +3280,17 @@ function MessageRowInner({
             )}
           </View>
         ) : null}
-        {startsGroup || requestChip ? (
+        {/* 칩은 머리 줄이 **이미 있는** 행에만 선다(#4620 B): 이어지는 행에 칩 때문에 머리 줄을 새로 세우면 run 이 생기는 순간 행이 자라 맨 아래 행이
+            움직인다. 이어지는 행의 상태는 입력창 레일과 예외 줄이 말한다(웹도 터치 기기에서는 같다). */}
+        {startsGroup ? (
           <Author
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
             requestChip={requestChip ? <RequestStatusChip chip={requestChip}
               sentence={requestSentence}
-              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
+              // 「답함 ✓」(#4620 B): 답 메시지를 알 때만 눌리고(누르면 그 답으로 간다), 모르면 같은 칩이 눌리지 않는다 — 죽은 단추를 세우지 않는다.
+              onOpen={!requestCardTarget && requestChip.kind === 'answered' ? (requestChip.answer !== undefined && actions?.onJumpToMessage ? () => actions.onJumpToMessage?.(requestChip.answer!.id, requestChip.answer!.seq) : undefined) : requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
@@ -3200,10 +3298,12 @@ function MessageRowInner({
             본문 **위**에 온다 — 맥락은 내용보다 먼저 읽혀야 이 줄이 무엇에 대한
             답인지 알고 본문을 읽는다. 삭제된 행에는 붙이지 않는다: 묘비는
             메시지에 대한 서술이지 메시지가 아니다. */}
-        {isMarkedReply && !deleted ? (
-          <ReplyMarker
-            parent={replyParent ?? null}
+        {isMarkedReply && !deleted && message.rootId !== undefined ? (
+          <ReplyHomeLine
+            rootId={message.rootId}
+            root={replyParent ?? null}
             directory={directory}
+            myMemberId={actions?.myMemberId}
             onOpen={
               replyParent && actions?.onOpenThread
                 ? () => {
@@ -3316,6 +3416,7 @@ function MessageRowInner({
                 decisionRef={decisionRef}
                 requestRun={requestRun}
                 onOpenDecision={actions?.onOpenDecision}
+                onRepropose={actions?.onRepropose}
               />
             ) : null}
 
@@ -3324,6 +3425,12 @@ function MessageRowInner({
               <SettingsOpenSuggestion
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
+              />
+            ) : isWorkRequestCard ? (
+              <WorkRequestSuggestion
+                card={suggestion}
+                viewerMemberId={actions?.myMemberId}
+                onOpen={actions?.onOpenWorkRequest}
               />
             ) : suggestion ? (
               <AiConnectSuggestion
@@ -3369,6 +3476,16 @@ function MessageRowInner({
               />
             ) : null}
 
+            {/* 링크 카드(#4883)는 첨부 **아래**다 — 파일은 작성자가 이 메시지에 직접 붙인 것이고, 카드는 그 메시지에
+                **대해** 서버가 말하는 것이다(웹과 같은 순서, ADR-0151 D2). 끄면(`off`) 카드는 아무것도 그리지 않는다. */}
+            {unfurls.length > 0 ? (
+              <UnfurlCards
+                unfurls={unfurls}
+                rowKey={messageRowKey(message.seq)}
+                onLongPressCard={openLinkSheet}
+              />
+            ) : null}
+
             {/* 위 갈래와 **같은 판정의 반대쪽**이다 (#1478). 여기만 `body === ''`
                 로 남겨 두면 공백만 있는 본문이 어느 쪽에도 안 걸려 행이 통째로
                 말이 없어진다 — 빈 본문에는 「내용 없는 메시지」라고 말해 놓고
@@ -3411,11 +3528,11 @@ function MessageRowInner({
                 {PIN_ROW_MARK}
               </Text>
             ) : null}
-            {rollup ? (
+            {rollup && threadView ? (
               actions?.onOpenThread ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="스레드 열기"
+                  accessibilityLabel={threadView.copy.open}
                   hitSlop={META_HIT_SLOP}
                   onPress={() => {
                     if (longPress.consumeTap()) return;
@@ -3425,22 +3542,19 @@ function MessageRowInner({
                   unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
                   style={({pressed}) => [pressed && styles.pressed]}
                   testID="thread-rollup">
-                  <Text style={styles.rollupLink}>
-                    {requestCardTarget ? `답글 ${rollup.replyCount}개 · ${requestSentence ?? requestChip?.word ?? ''}` : `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-                      rollup.lastReplyAtMs,
-                      nowMs,
-                    )}`}
-                  </Text>
+                  <ThreadSummaryContent
+                    view={threadView}
+                    directory={directory}
+                    suffix={requestCardTarget ? ` · ${requestSentence ?? requestChip?.word ?? ''}` : undefined}
+                    workChip={threadWorkChip}
+                  />
                 </Pressable>
               ) : (
                 // A label, not a button: a door to a room that does not exist is
                 // worse than a sentence saying the room is there.
-                <Text style={styles.rollup} testID="thread-rollup">
-                  {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-                    rollup.lastReplyAtMs,
-                    nowMs,
-                  )}`}
-                </Text>
+                <View testID="thread-rollup">
+                  <ThreadSummaryContent view={threadView} directory={directory} workChip={threadWorkChip} />
+                </View>
               )
             ) : null}
           </View>
@@ -3465,13 +3579,18 @@ function MessageRowInner({
         {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
             안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
         {requestThinking ? <RequestThinkingLine progress={requestRun ?? runStatus?.[0]} directory={directory} nowMs={nowMs} /> :
-        runStatus !== undefined && (!requestChip || ['failed', 'timed_out', 'uncollected'].includes(requestChip.kind)) ? (
+        // 예외 줄(#4620 D): 서는지는 코어 `runException`이 정한다(없으면 아무것도 그리지 않는다). 칩이 「받음」인데 깨우는 신호가
+        // 닿지 않은 run 도 줄이 서므로 칩의 종류로 미리 거르지 않는다.
+        runStatus !== undefined ? (
           <MessageRunStatus
             messageId={message.id}
             channelId={message.channelId}
             createdAtMs={message.createdAtMs}
             runs={runStatus}
             directory={directory}
+            requesterId={message.authorMemberId}
+            viewerId={actions?.myMemberId}
+            onOpenProfile={actions?.onOpenProfile}
           />
         ) : null}
 
@@ -3550,6 +3669,18 @@ function MessageRowInner({
         }
       </Pressable>
 
+      {linkSheet !== null ? (
+        <LinkActionSheet
+          target={linkSheet.target}
+          canRemove={canRemoveUnfurls}
+          startInRemoveConfirm={linkSheet.confirmRemove}
+          onClose={() => setLinkSheet(null)}
+          onCopy={() => copyLink(linkSheet.target.url)}
+          onShare={() => shareLink(linkSheet.target.url)}
+          onRemove={canRemoveUnfurls ? removeUnfurls : undefined}
+        />
+      ) : null}
+
       {sheetOpen && actions ? (
         <MessageActionSheet
           message={message}
@@ -3624,6 +3755,7 @@ function MessageRowInner({
       {editing && actions ? (
         <MessageEditorSheet
           initialBody={body}
+          draftKey={messageEditDraftKey(message.id)}
           pending={editPending}
           error={editError}
           onCancel={() => setEditing(false)}
@@ -3696,8 +3828,18 @@ function sameRollup(
   return (
     a.replyCount === b.replyCount &&
     a.lastReplySeq === b.lastReplySeq &&
-    a.lastReplyAtMs === b.lastReplyAtMs
+    a.lastReplyAtMs === b.lastReplyAtMs &&
+    // 요약 줄이 그리는 나머지 값(#4878): 얼굴·안 읽은 수가 바뀌면 행이 다시 그려져야 한다. 비교자가 이것을 못 보면
+    // 칩이 사라지지 않고 옛 얼굴이 남는다 — memo는 틀려도 조용하다. 그리지 않는 `participantCount`는 보지 않는다.
+    a.unreadReplyCount === b.unreadReplyCount &&
+    sameIds(a.participantIds, b.participantIds)
   );
+}
+
+function sameIds(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  return a.every((id, index) => id === b[index]);
 }
 
 /**
@@ -3733,6 +3875,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   replyParent: true,
   quote: true,
   quoteAttachmentCount: true,
+  unfurls: true,
   approvalGates: true,
   approvalReceipts: true,
   approvalOffline: true,
@@ -3807,6 +3950,9 @@ export function sameMessageRowProps(
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote) &&
     a.quoteAttachmentCount === b.quoteAttachmentCount &&
+    // #4883. 목록이 줄마다 코어 투영 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성으로 충분하다. 한 메시지의 카드가
+    // 바뀔 때(서버가 만들었다·작성자가 지웠다)만 그 줄이 다시 그려진다 — 채널의 다른 카드는 이 줄을 건드리지 않는다.
+    a.unfurls === b.unfurls &&
     // 두 표는 **동일성**으로 본다(`directory` 와 같은 취급). 화면이 `useMemo`
     // 로 붙잡고 있으므로 승인이 실제로 바뀔 때만 새 표가 되고, 그때는 붙어 있는
     // 행이 전부 다시 그려진다 — 승인은 드물어 감당할 수 있는 값이고, 대안은
@@ -4062,7 +4208,8 @@ export function WorkingRow({
  *   - 정상 전송: 서버 사본과 같은 해부·같은 색. 글자 한 줄도 더하지 않는다.
  *   - 오래 걸리는 전송(`SEND_SLOW_MS` 이상): 작은 시계 하나만. 흐름에 자리를 차지하지 않는다 —
  *     머리 행은 시각 바로 오른쪽(이름 줄 끝)에, 이어지는 행은 아바타 칸에 절대 배치로 앉는다.
- *   - 실패: 예전 그대로(흐린 본문 + 「전송 실패」 + 「다시 보내기」).
+ *   - 실패: 흐린 본문 + 짧은 「전송 실패」 + 아이콘 둘(#5210): 새로고침(다시 보내기, 같은 멱등키 재전송)과
+ *     빨간 X(지우기, 이 기기의 대기분만 — 코어 `discardPending`, 서버 호출 없음). 웹 `PendingRow` 와 같은 문법이다.
  *   - 글 없이 사진·파일만 보낸 메시지(#4294)는 서버 사본이 본문 칸을 접으므로(`hasRenderableBody`)
  *     메아리도 접는다. 빈 말풍선이 서 있다가 교체 때 사라지면 그것이 곧 높이 변화다.
  *   - **머리 행은 기기 시계의 보낸 시각을 그린다**(planner 결정 — #1083 「지어내지 않는다」를 메아리
@@ -4075,7 +4222,10 @@ export function PendingRow({
   directory,
   quote,
   quoteAttachmentCount,
+  replyHome,
   onResend,
+  onDiscard,
+  failureKind = null,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
@@ -4096,9 +4246,22 @@ export function PendingRow({
    */
   quote?: QuoteBlockModel | null;
   quoteAttachmentCount?: number;
+  /**
+   * 이 전송이 스레드 답글이면 그 스레드(#4888): 대화에 서는 답글의 에코 — 「대화에도 보내기」로 보낸 것, 또는 보내지 못해 실패를 여기서 알려야
+   * 하는 것 — 가 확정본과 같은 「↳ ○○님 스레드에 답글」 줄을 먼저 그린다. 없으면(`undefined`) 채널 글이다. 루트를 못 불러왔으면 `root` 가 `null`이다.
+   */
+  replyHome?: {rootId: string; root: Message | null};
   onResend?: (clientMsgId: string) => void;
+  /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
+  onDiscard?: (clientMsgId: string) => void;
+  /**
+   * 못 보낸 이유의 종류(#5222, 코어 `sendFailureKind`): 오프라인 · 서버에 닿지 못함 · 서버가 거절. 그 종류의 완결된 문장을 말한다. 종류를 모르면
+   * (`null`) 지금까지처럼 「전송 실패」만 말한다. 상태 코드·서버 원문은 어디에도 없다.
+   */
+  failureKind?: SendFailureKind | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
 
   // 오래 걸리는 전송만 시계 하나로 알린다(#4455). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
@@ -4195,6 +4358,14 @@ export function PendingRow({
             pendingMark={slowMark}
           />
         ) : null}
+        {replyHome ? (
+          <ReplyHomeLine
+            rootId={replyHome.rootId}
+            root={replyHome.root}
+            directory={directory}
+            myMemberId={pending.authorMemberId}
+          />
+        ) : null}
         {quote ? (
           <QuoteBlock
             block={quote}
@@ -4239,17 +4410,16 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText}>전송 실패</Text>
-            {onResend ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="다시 보내기"
-                onPress={() => onResend(pending.clientMsgId)}
-                style={({pressed}) => [styles.resend, pressed && styles.pressed]}
-                testID="pending-resend">
-                <Text style={styles.resendLabel}>다시 보내기</Text>
-              </Pressable>
-            ) : null}
+            {/* 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288). */}
+            <Sentence style={styles.failedText} testID="pending-failed-reason">
+              {failureKind === null
+                ? formatMessage('timeline.send.failed')
+                : formatMessage(sendFailureReasonKey(failureKind))}
+            </Sentence>
+            <SendFailureActions
+              onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
+              onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}
+            />
           </View>
         ) : null}
         {/* 이어지는 행에는 시각이 없다 — 시계는 아바타 칸에 절대 배치로 앉는다(레이아웃 비용 0). */}
@@ -4427,6 +4597,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     columnGap: CONV.whoGap,
     flexWrap: 'wrap',
   },
+  /** 칩이 서는 머리 줄: 줄바꿈 없음(칩 폭·높이는 고정이고 이름이 줄어든다, #4620 B). */
+  authorRowChip: {flexWrap: 'nowrap', alignItems: 'center'},
+  authorNameShrink: {flexShrink: 1},
   // 줄 상자를 **선언한다**: 행 시각이 이 줄 옆에 서므로(`rowTimeGroupHead`),
   // 이 값이 암묵적인 서체 자연값이면 그 정렬은 아무도 적어 둘 수 없는 값에
   // 기대게 된다 (u44 리뷰 M-2).
@@ -4468,27 +4641,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     flexWrap: 'wrap',
     paddingTop: 2,
   },
-  // 아래 넷은 전부 **누를 것의 라벨**이므로 줄 상자를 선언한다: 44pt 슬롭
+  // 아래 둘은 **누를 것의 라벨**이므로 줄 상자를 선언한다: 44pt 슬롭
   // (`META_SLOP`)이 그 줄 높이에서 도출되고, 선언하지 않으면 그 산수가 서체
-  // 자연값이라는 아무도 못 적는 숫자 위에 서게 된다 (감사 M-14).
-  rollup: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
-  rollupLink: {
-    fontSize: font.meta,
-    lineHeight: line.meta,
-    color: color.accentText,
-    fontWeight: '600',
-  },
+  // 자연값이라는 아무도 못 적는 숫자 위에 서게 된다 (감사 M-14). 스레드 롤업의 같은 선언은
+  // `ThreadSummary.tsx`의 `count`(`line.meta`)가 진다.
   // Meta size, like the tail: this is a statement ABOUT the message, and it must
   // not compete with the message for the eye.
-  replyMark: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
-  replyMarkLink: {
-    fontSize: font.meta,
-    lineHeight: line.meta,
-    color: color.textMuted,
-    // 「↳ 답글」(루트를 못 불러온 경우)이 이 라벨의 가장 짧은 판이다. 가로도
-    // 슬롭과 더해 44 가 되도록 바닥을 깐다 — 세로만 보증하던 것이 M-14 였다.
-    minWidth: TOUCH_TARGET - 2 * META_SLOP,
-  },
   rowFailure: {
     flexDirection: 'row',
     alignItems: 'center',

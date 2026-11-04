@@ -25,6 +25,7 @@ import { ProfileHero } from "./shell/ProfileHero";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { LanguageRow } from "./LanguageRow";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Design Read: settings / Profile for internal team users on web+Tauri,
 // density 7/10, motion 2/10.
@@ -174,7 +175,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+          message={<BlockedReason frame="changeProfile" />}
           messageId="profile-offline-reason"
           testId="profile-offline-banner"
         />

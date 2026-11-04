@@ -125,6 +125,15 @@ pub struct WorkerConfig {
     /// no address is ever minted. A separate variable on purpose: `MOMO_PUBLIC_BASE_URL` reaches the api
     /// only (ADR-0205 D1), and the same value goes to the Hermes service as the guard's one allowed origin.
     pub self_media_origin: Option<String>,
+    /// `OORT_API_INTERNAL_ORIGIN` (#4934, ADR-0151 증보 3) — where **this worker** reaches the api on the
+    /// private network (`http://api.railway.internal:8080`, compose's `http://api:8080`): a lowercase
+    /// `http(s)://host[:port]` and nothing after it ([`crate::self_media::internal_origin`]). Set, the team
+    /// AI's picture proposal reads a requester's attachment **through the api** (a single-use address the
+    /// worker mints and spends itself), which is the only way when the archive is a volume the api alone
+    /// mounts. Unset **or not an origin** it is `None` and the worker reads attachments from its own archive
+    /// configuration (`MOMO_DRIVE_*`), as before. Never the public origin: that is `self_media_origin`'s,
+    /// and it is the one value a model's tool sees an address under.
+    pub api_internal_origin: Option<String>,
     /// `OORT_HOSTED_MEDIA_STRICT` (#4820 C2b 2부, ADR-0218 증보 G3.7 (b)·G4) — the operator's attestation
     /// that the co-hosted Hermes behind this worker runs with `HERMES_MEDIA_DELIVERY_STRICT=1`, which is
     /// what keeps a `MEDIA:` mark in a final answer from being turned into the bytes of any file the
@@ -137,6 +146,10 @@ pub struct WorkerConfig {
     /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
     /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.
     pub assembler_program: Option<std::path::PathBuf>,
+    /// The program the helper's PDF reader runs as its child (#4970, ADR-0151 증보 4): `None` = **this
+    /// very executable** re-run with `--attachment-text-child`, which is what a deployment uses. A hook for
+    /// tests (whose own executable is not the worker), like [`assembler_program`](Self::assembler_program).
+    pub attachment_text_child: Option<std::path::PathBuf>,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
@@ -144,18 +157,38 @@ pub struct WorkerConfig {
     /// `AgentPortConfig`: only an exact `true` opens it. Off keeps the
     /// `work.session.spawn` tool from starting Claude Code on a shared host.
     pub claude_subscription_agents_enabled: bool,
-    /// `TEAM_AI_DAILY_TOKEN_CAP` (ADR-0201 D4): prompt + completion tokens the
-    /// team AI may spend per UTC day on the team key. `0` turns it off (every
-    /// request falls back at once).
-    pub team_ai_daily_token_cap: i64,
+    /// `TEAM_AI_DAILY_TOKEN_CAP` — the **operator's ceiling** on the prompt + completion tokens
+    /// the team AI may spend per UTC day on the team key (ADR-0201 증보 v3 B9-3, #4944). `None`
+    /// (unset or empty) = no ceiling: a team that set no limit of its own is never stopped. `Some(n)`
+    /// = no workspace value gets past `n`. `Some(0)` = the operator's emergency switch: every
+    /// request falls back at once.
+    pub team_ai_daily_token_cap: Option<i64>,
     /// ADR-0201 D7 hard cut for the team AI's model call (default 20 s). A field
     /// so a conformance test can prove the cut without waiting twenty seconds.
     pub team_ai_model_timeout: Duration,
     /// ADR-0201 증보 v2 H10: the whole tool path's wall clock (default 45 s).
     pub team_ai_request_deadline: Duration,
-    /// `TEAM_AI_DAILY_SEARCH_CAP` (ADR-0201 증보 v2 H5): provider-side web searches
-    /// the team AI may make per UTC day. `0` turns search off.
-    pub team_ai_daily_search_cap: i64,
+    /// `TEAM_AI_DAILY_SEARCH_CAP` — the operator's ceiling on the provider-side web searches the
+    /// team AI may make per UTC day (B9-3). Same reading as the token cap, except that `Some(0)`
+    /// turns web **search** off, not the helper.
+    pub team_ai_daily_search_cap: Option<i64>,
+    /// ADR-0201 증보 v3 B5-5 (#4967): the team AI's **task** bounds — steps, wall clock, model and
+    /// tool calls over the whole task, tasks running at once. Configuration values, not workspace
+    /// settings; the defaults are **[추정]** until measured. `TEAM_AI_TASK_MAX_STEPS`,
+    /// `TEAM_AI_TASK_MAX_WALL_SECS`, `TEAM_AI_TASK_MAX_MODEL_CALLS`, `TEAM_AI_TASK_MAX_TOOL_CALLS`,
+    /// `TEAM_AI_TASK_MAX_PER_WORKSPACE`, `TEAM_AI_TASK_MAX_PER_REQUESTER` (each at least 1).
+    pub team_ai_task: momo_agent::team_ai_task::TaskLimits,
+}
+
+impl WorkerConfig {
+    /// The two operator ceilings as one value (the shape `momo_workspace_actions::team_ai_limits`
+    /// judges with).
+    pub fn team_ai_caps(&self) -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+        momo_workspace_actions::team_ai_limits::OperatorCaps {
+            daily_tokens: self.team_ai_daily_token_cap,
+            daily_searches: self.team_ai_daily_search_cap,
+        }
+    }
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -629,6 +662,37 @@ fn env(key: &str) -> Option<String> {
     }
 }
 
+/// One operator ceiling (`TEAM_AI_DAILY_*_CAP`): unset or empty = none, `0` = off, a positive
+/// number = the ceiling. The same rule the api reads it by (`parse_operator_cap`).
+fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
+    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env(key).as_deref())
+        .map_err(|invalid| ConfigError::NotANumber(invalid.0))
+}
+
+/// The task bounds from the environment (ADR-0201 증보 v3 B5-5): every key optional, each value at
+/// least 1 — a `0` would end every task before its first step, which is the switch's job
+/// (`long_research` off), not a limit's.
+fn team_ai_task_limits_from_env() -> Result<momo_agent::team_ai_task::TaskLimits, ConfigError> {
+    let defaults = momo_agent::team_ai_task::TaskLimits::default();
+    Ok(momo_agent::team_ai_task::TaskLimits {
+        max_steps: env_number("TEAM_AI_TASK_MAX_STEPS", defaults.max_steps)?.max(1),
+        max_wall_secs: env_number("TEAM_AI_TASK_MAX_WALL_SECS", defaults.max_wall_secs)?.max(1),
+        max_model_calls: env_number("TEAM_AI_TASK_MAX_MODEL_CALLS", defaults.max_model_calls)?
+            .max(1),
+        max_tool_calls: env_number("TEAM_AI_TASK_MAX_TOOL_CALLS", defaults.max_tool_calls)?.max(1),
+        max_per_workspace: env_number(
+            "TEAM_AI_TASK_MAX_PER_WORKSPACE",
+            defaults.max_per_workspace,
+        )?
+        .max(1),
+        max_per_requester: env_number(
+            "TEAM_AI_TASK_MAX_PER_REQUESTER",
+            defaults.max_per_requester,
+        )?
+        .max(1),
+    })
+}
+
 fn env_number<T: std::str::FromStr>(key: &'static str, fallback: T) -> Result<T, ConfigError> {
     match env(key) {
         Some(raw) => raw
@@ -702,30 +766,26 @@ impl WorkerConfig {
             ),
             self_media_origin: env("OORT_SELF_MEDIA_ORIGIN")
                 .and_then(|raw| momo_messaging::canonical_origin(&raw).map(str::to_string)),
+            api_internal_origin: env("OORT_API_INTERNAL_ORIGIN")
+                .and_then(|raw| crate::self_media::internal_origin(&raw).map(str::to_string)),
             hosted_media_strict: hosted_media_strict_attested(
                 env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
             ),
             assembler_program: None,
+            attachment_text_child: None,
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
             ),
-            team_ai_daily_token_cap: env_number(
-                "TEAM_AI_DAILY_TOKEN_CAP",
-                momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
-            )?
-            .max(0),
+            team_ai_daily_token_cap: operator_cap("TEAM_AI_DAILY_TOKEN_CAP")?,
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
             team_ai_request_deadline: Duration::from_secs(
                 momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
             ),
-            team_ai_daily_search_cap: env_number(
-                "TEAM_AI_DAILY_SEARCH_CAP",
-                momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
-            )?
-            .max(0),
+            team_ai_daily_search_cap: operator_cap("TEAM_AI_DAILY_SEARCH_CAP")?,
+            team_ai_task: team_ai_task_limits_from_env()?,
         })
     }
 
@@ -752,18 +812,21 @@ impl WorkerConfig {
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
             self_media_origin: None,
+            api_internal_origin: None,
             hosted_media_strict: false,
             assembler_program: None,
+            attachment_text_child: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
-            team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
+            team_ai_daily_token_cap: None,
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
             team_ai_request_deadline: Duration::from_secs(
                 momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
             ),
-            team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
+            team_ai_daily_search_cap: None,
+            team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
         }
     }
 
@@ -774,10 +837,27 @@ impl WorkerConfig {
         self
     }
 
+    /// The same config with the api's private address set (#4934) — a value that is not an origin
+    /// ([`crate::self_media::internal_origin`]) leaves it off, exactly as the environment does.
+    pub fn with_api_internal_origin(mut self, origin: &str) -> WorkerConfig {
+        self.api_internal_origin = crate::self_media::internal_origin(origin).map(str::to_string);
+        self
+    }
+
     /// The same config with the operator's strict-media attestation (#4820 C2b 2부) — what an exact
     /// `OORT_HOSTED_MEDIA_STRICT=1` is in the environment.
     pub fn with_hosted_media_strict(mut self, strict: bool) -> WorkerConfig {
         self.hosted_media_strict = strict;
+        self
+    }
+
+    /// The same config with the PDF text child to run (#4970), for tests whose own executable is not
+    /// the worker (they pass `env!("CARGO_BIN_EXE_momo-agent-worker")`).
+    pub fn with_attachment_text_child(
+        mut self,
+        program: impl Into<std::path::PathBuf>,
+    ) -> WorkerConfig {
+        self.attachment_text_child = Some(program.into());
         self
     }
 

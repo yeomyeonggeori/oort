@@ -71,6 +71,21 @@ pub struct ClaimRequest {
     pub password: String,
 }
 
+/// `POST /v1/workspaces/{ws}/members/{memberId}/password-reset` body (ADR-0215 D6).
+///
+/// The handler reads the body **by hand** (`Bytes`, then this) instead of letting axum's
+/// `Json` do it: a missing body, a body that is not JSON, a missing field and a field of the
+/// wrong type are all one answer — 400 `current_password_required` — where the extractor's
+/// own refusals would be 415 and 422 (acceptance 4b). So nothing here is required; the
+/// handler judges.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuePasswordResetRequest {
+    /// The **issuing operator's own** current password — not the target's.
+    #[serde(default)]
+    pub current_password: Option<String>,
+}
+
 /// `PATCH /v1/workspaces/{ws}/members/me/password` (#1767).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +130,13 @@ pub struct PasswordResetClaimResponse {
     pub kind: &'static str,
     pub expires_at_ms: i64,
     pub claim_path: String,
+    /// `claimPath` made absolute against the origin the **recipient** can reach
+    /// (ADR-0215 D6): the configured public address when there is one, else the one
+    /// the request came in on.
+    pub claim_url: String,
+    /// `false` when that origin was derived from the request and is plain `http`, or
+    /// loopback / a private address — a link only this machine's network can open.
+    pub claim_url_secure: bool,
 }
 
 /// `POST /v1/auth/login` request (Swift `LoginRequest`). `platformAdminSecret`
@@ -139,6 +161,18 @@ pub struct LoginResponse {
     pub member: MemberDto,
     /// ADR-0110: the only authority for the realtime WebSocket address.
     pub realtime_web_socket_url: String,
+}
+
+/// `POST /v1/claim` 200: the session pair, and which kind of link was spent
+/// (ADR-0215 D6). A type of its own so `LoginResponse`, which login, refresh and join
+/// share, does not grow a field that only this route knows.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimResponse {
+    #[serde(flatten)]
+    pub login: LoginResponse,
+    /// `owner_bootstrap` or `password_reset`.
+    pub claim_kind: String,
 }
 
 /// `POST /v1/auth/refresh` request (Swift `RefreshRequest`, `DTOs.swift:49-51`).
@@ -307,6 +341,18 @@ pub struct SendMessageRequest {
     /// exclusive.
     #[serde(default)]
     pub reply_to_id: Option<Uuid>,
+    /// ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」: this thread reply is also part of the
+    /// channel's main flow.
+    ///
+    /// Optional and additive: absent and `false` are the same request, and a request shaped like
+    /// yesterday's still means what it meant. **Only a reply may turn it on**: `true` without
+    /// `rootId` is a 400, answered before any connection is taken (a shape error, so a retry of the
+    /// same request is the same 400), and the table's CHECK holds the rule for any path that skips
+    /// the route. The value is written once, at send; an idempotent retry answers the stored
+    /// message whatever this field says now. A developer token may not send it (R12's allow-list
+    /// names five keys and this is not one).
+    #[serde(default)]
+    pub also_in_channel: Option<bool>,
     #[serde(default, rename = "type")]
     pub message_type: Option<String>,
     #[serde(default)]
@@ -388,6 +434,21 @@ pub struct SendMessageRequest {
     /// has proved the surface.
     #[serde(default)]
     pub apps: Option<Vec<String>>,
+    /// ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: this message gets **no link
+    /// cards**, ever.
+    ///
+    /// Optional and additive: absent and `false` are the same request, and a client sends the key
+    /// **only when it is `true`** (this request is closed-world, so an older server refuses an
+    /// unknown key with a 400). A dedicated field and not a `props` key for the reason
+    /// [`SendMessageRequest::props`] gives: props is a flat string map any client writes, and
+    /// what it carries is not something the server can vouch for. What the server does with it is
+    /// its own: **in the send transaction, on a real insert only**, it plants the message's
+    /// tombstone (`message_unfurl_tombstone`, the row 「카드 제거」 already uses), which the unfurl
+    /// worker looks for before it fetches anything. An idempotent retry answers the stored message
+    /// whatever this field says now. It reaches only this message's own cards. A developer token
+    /// may not send it (R12's allow-list names five keys and this is not one).
+    #[serde(default)]
+    pub suppress_unfurl: Option<bool>,
 }
 
 /// The `harnessRefine` block on [`SendMessageRequest`] (ADR-0158 D1~D4).
@@ -447,6 +508,24 @@ pub struct ThreadRollupDto {
     /// Epoch milliseconds. Swift names this key `last_reply_at` (not `…AtMs`)
     /// even though the value is milliseconds; the client reads that spelling.
     pub last_reply_at: i64,
+    /// #4877 — who replied, **most recent replier first**, at most three, as lowercase UUID
+    /// strings. snake_case beside the keys above for the same reason they are: the core's
+    /// `threadRollup()` is the one place that turns this object into `participantIds`. A member who
+    /// left keeps an id here; the client draws its existing 「알 수 없는 사람」. Always present
+    /// (an empty list reads as "no faces"), so a client that checks the key is not racing the
+    /// server's version.
+    pub participant_ids: Vec<String>,
+    /// #4877 — every distinct member who has replied; the faces above are the newest
+    /// `min(count, 3)` of them.
+    pub participant_count: i32,
+    /// #4889 stage 2 (owner 10-31 23:49) — how many replies **the reader** has not read, never
+    /// counting their own. Present only on a page read for a reader who follows this thread
+    /// (`auto` or `followed`; `0` is "follows, nothing new"); absent for a thread they do not follow,
+    /// for an agent reader, and from every producer that is not a per-reader read — notably the
+    /// realtime `thread.updated` frame, which is one publication for the whole channel. snake_case
+    /// beside the keys above; the core's `threadRollup()` turns it into `unreadReplyCount`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// The quoted message carried beside a reply (ADR-0148 §3-2).
@@ -591,6 +670,16 @@ pub struct MessageDto {
     /// through the app answers exactly the bytes it did before the column existed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_via: Option<&'static str>,
+    /// ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」: this thread reply
+    /// is also part of the channel's main flow.
+    ///
+    /// **Only ever `true`, and only when it is** — omitted otherwise, the shape `runEnded` has,
+    /// so a message sent without the choice answers exactly the bytes it did before the column
+    /// existed and a client reads the key as `=== true`. It rides every projection built from the
+    /// stored row (send echo, history, thread replies, edits): the choice is made once at send, and
+    /// an edit frame or `PATCH` answer that said nothing would read as "off".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub also_in_channel: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -814,6 +903,40 @@ pub struct ThreadRepliesPage {
     /// client reads `nextCursor === undefined` as "no more".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<i64>,
+    /// Whether the **caller** follows this thread (ADR-0206 증보 1 F8): `auto` or
+    /// `followed`, never `unfollowed` or no row. Read in the same transaction as
+    /// the page, on every page. Not Swift's: an addition the old clients ignore.
+    pub following: bool,
+}
+
+/// `PUT` / `DELETE …/messages/{root}/follow` response (ADR-0206 증보 1 F8): the
+/// caller's effective follow state after the write. `auto` and `followed` are not
+/// told apart on purpose — no screen needs the difference yet.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadFollowDto {
+    pub following: bool,
+}
+
+/// `PUT …/messages/{root}/read` request (#4889 stage 2): how far the caller has read the thread.
+/// snake_case like the channel's `PUT read-state` body, and for the same reason one concept has one
+/// spelling on the wire (`last_read_reply_seq` / `unread_reply_count`, also the thread summary's).
+/// There is no member id: the cursor's owner is the bearer.
+#[derive(Debug, Deserialize)]
+pub struct ThreadReadRequestDto {
+    pub last_read_reply_seq: i64,
+}
+
+/// `PUT …/messages/{root}/read` response: the caller's read position **after** the write. For a thread
+/// the caller does not follow (no row, or stopped) it is `{following: false}` and nothing else — the
+/// signal wrote nothing and has no number to report.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadStateDto {
+    pub following: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_reply_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// Query string of the replies page. `limit` is lenient (a bad page size has a
@@ -2096,12 +2219,48 @@ pub struct AgentRunResponse {
     /// ignored rather than refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apps_used: Option<Value>,
+    /// ADR-0201 증보 v3 B12 (#4968) — what **this one run** has spent, read from the usage
+    /// ledger. Present only on the detail read of a team-AI task run; absent for every other
+    /// run (and on every other read of this DTO), so a run serializes exactly as before. A
+    /// deployed client builds its run from named fields, so the extra key is ignored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunSpent` — the sums of one run's usage-ledger rows (ADR-0201 증보 v3 B12).
+///
+/// **One run, never a person**: four numbers and a flag, no member, no requester, no
+/// grouping key. The ledger has no requester column, and ADR-0147 증보 2026-10-30 D6 says
+/// 「누가 팀 AI를 많이 불렀나」는 계산하지도 표시하지도 않는다. Money is not here: the dollar
+/// figure is read-time arithmetic over `model_pricing` (`usage/agents`), and a client that
+/// wants 「약 $x 이상」 has the tokens to do it with.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSpentDto {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// The provider's own web searches.
+    pub web_searches: i64,
+    /// Some of the tokens are oort's estimate (the provider reported none). ADR-0147 D3: a
+    /// figure that may be an estimate says so.
+    pub estimated: bool,
+}
+
+impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
+    fn from(spent: &momo_agent::team_ai_task::RunSpent) -> Self {
+        Self {
+            prompt_tokens: spent.prompt_tokens,
+            completion_tokens: spent.completion_tokens,
+            web_searches: spent.web_searches,
+            estimated: spent.estimated,
+        }
+    }
 }
 
 /// Swift `AgentRunPageDTO` (:1266) — the channel work-run list's envelope.
@@ -2216,6 +2375,14 @@ pub struct AgentRunProgressDto {
     pub approval_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_expires_at_ms: Option<i64>,
+    /// ADR-0186 v6 R-f: the request's bundle, as the viewer reads it. Absent when the
+    /// run never asked for an approval, or asked in a channel the viewer cannot see.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<AgentRunBundleDto>,
+    /// ADR-0201 증보 v3 B12 (#4968): what this run has spent. Present only for a team-AI task
+    /// run (the run read's field the task card and its end line refresh from); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
     /// 1 = next to be claimed. Absent unless the run is unclaimed and claimable.
@@ -2233,6 +2400,36 @@ pub struct AgentRunProgressDto {
     pub finished_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunProgress.bundle` (ADR-0186 v6 R-f) — one approval of the run, read
+/// for **the viewer**: the one the run is parked on, else the latest it asked.
+///
+/// The keys are the ones `packages/momo-core` `parseRequestBundleSnapshot` reads off a
+/// run's bundle (#4760), so the shipped chip and summary line can read it as it is.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunBundleDto {
+    pub approval_id: String,
+    /// `pending`, `approved`, `rejected`, `expired` or `cancelled`, as of now: a
+    /// `pending` approval past its deadline reads `expired` before the sweep writes it
+    /// down (ADR-0186 증보 v5 U-f).
+    pub status: String,
+    /// `inline` or `open`: see [`ApprovalDto::decision_mode`].
+    pub decision_mode: &'static str,
+    /// Whether **this viewer** may decide it right now: pending, in time, and a person
+    /// the decision route would let through. Never true for anyone else.
+    pub can_decide: bool,
+    /// The card's one sentence: the question while pending, the outcome once settled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+    /// While pending, the same sentence as `line`: the key the shipped summary line and
+    /// chip label read (`parseRequestBundleSnapshot`'s `intent`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    /// `tool_call`, `workspace_action`, …: the chip tells an approved tool call that is
+    /// still running from an approved action that is done by it.
+    pub action_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2309,7 +2506,48 @@ pub struct AgentRunEventDto {
     /// `tool_call` only: the server-measured duration of the call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i32>,
+    /// `activity` only (served behind `include=activity`, ADR-0200 증보 7 7-7): the newest
+    /// state of one activity id. Agent-reported plain text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<AgentRunActivityDto>,
+    /// `plan` only (served behind `include=activity`): the newest whole plan; `[]` means the
+    /// agent cleared it. Agent-reported plain text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Vec<AgentRunPlanStepDto>>,
+    /// On an `activity` row, the time of its last update.
     pub created_at_ms: i64,
+}
+
+/// openapi `AgentRunActivity` — one activity as its newest report left it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivityDto {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub status: String,
+    pub n: i32,
+    /// The id's first report.
+    pub started_at_ms: i64,
+}
+
+/// openapi `AgentRunPlanStep` — one step of the newest plan.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunPlanStepDto {
+    pub text: String,
+    pub status: String,
+}
+
+/// openapi `AgentRunActivityTally` — the units of ENDED activities of one kind: the agent's
+/// own report, not a count oort made.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivityTallyDto {
+    pub kind: String,
+    pub completed: i64,
+    pub failed: i64,
 }
 
 /// openapi `AgentRunToolTally` — one tool's totals on one run (ADR-0200 증보 T3).
@@ -2333,6 +2571,12 @@ pub struct AgentRunEventsResponse {
     /// Present only with `include=tools`: calls were counted past the 100-row cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_rows_capped: Option<bool>,
+    /// Present only with `include=activity` (ADR-0200 증보 7 7-7): the ended units per kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_tally: Option<Vec<AgentRunActivityTallyDto>>,
+    /// Present only with `include=activity`: part of the total survives only as a total.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_rows_trimmed: Option<bool>,
 }
 
 /// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).
@@ -2650,6 +2894,10 @@ pub struct ChannelDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
     pub muted: bool,
+    /// End of the caller's timed mute, epoch ms — present **only while a timed mute is in
+    /// progress** (ADR-0206 D12, #4343). An open-ended mute and an expired one omit the key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// Swift `WorkspaceChannelsResponse` (:471-473) — the body of `GET …/dms` and
@@ -2708,17 +2956,30 @@ pub struct CreateChannelResponse {
 
 /// `PUT …/channels/{ch}/notification-pref` request (Swift
 /// `UpdateNotificationPrefRequest`, `DTOs.swift:476-478`).
+///
+/// `mutedUntilMs` (ADR-0206 D12, #4343) gives a mute an end: epoch ms, only with `muted: true`,
+/// validated against the database clock by the route. Absent and `null` both mean open-ended, which
+/// is what the old `{muted: true}` body always meant. `level` is not part of this body yet — it is
+/// the channel-level slice's — so it is still refused as an unknown field.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateNotificationPrefRequest {
     pub muted: bool,
+    #[serde(default)]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// Swift `NotificationPrefResponse` (`DTOs.swift:480-482`) — the server's
 /// answer, not an echo: the caller re-reads its own state from this.
+///
+/// Both fields are **effective now** (ADR-0206 D12): `muted` is false once a timed mute has
+/// ended, and `mutedUntilMs` is present only while a timed mute is in progress.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotificationPrefResponse {
     pub muted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// `PUT …/notification-rules` request (ADR-0124 증보 1). The member-global rule
@@ -2767,6 +3028,233 @@ pub struct NotificationRulesResponse {
     /// ADR-0124 증보 2: epoch ms while a timed pause is running, else `null`.
     pub dnd_until_ms: Option<i64>,
     pub mention_overrides_mute: bool,
+}
+
+// ---------------------------------------------------------------------------
+// notification-prefs (ADR-0206 D5·D13, #4494 N3)
+// ---------------------------------------------------------------------------
+
+/// A closed confirmation token (D5). Today only `approval_push_off`; an unknown token is a 422 from
+/// the JSON extractor like any unknown field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationConfirmToken {
+    ApprovalPushOff,
+}
+
+/// One kind's cells in a `PATCH …/notification-prefs`. Per cell: omitted keeps what is stored,
+/// `null` resets to the kind's default, a boolean sets it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchNotificationSurfacesRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub phone: OptionalPatch<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub desktop: OptionalPatch<bool>,
+}
+
+/// `kinds` of a `PATCH …/notification-prefs`: the ten kinds of the closed table. An unknown kind is
+/// a 422 (`deny_unknown_fields`), which is also what keeps `workDone` and the rest the engine's list.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchNotificationKindsRequest {
+    #[serde(default)]
+    pub dm: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub mention_human: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub mention_agent: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub agent_answer: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub approval: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub work_done: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub keyword: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub channel_all: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub thread_reply: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub scheduled_failed: Option<PatchNotificationSurfacesRequest>,
+}
+
+/// `presentation` of a `PATCH …/notification-prefs`: sound slots per kind (a bundled id or `none`),
+/// `null` resets that kind to its default sound. The keys are kinds; an unknown key is a 400.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchNotificationPresentationRequest {
+    pub sounds: BTreeMap<String, Option<String>>,
+}
+
+/// 근무 시간 (D13) on the wire, request and response alike. Replaced whole, never merged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NotificationScheduleDto {
+    pub enabled: bool,
+    pub tz: String,
+    pub days: Vec<u8>,
+    pub start: String,
+    pub end: String,
+    pub pass_through: Vec<momo_messaging::NotificationKind>,
+}
+
+/// `PATCH …/notification-prefs` request. Every field optional; an omitted one keeps what is stored
+/// when the write lands (merged under the row lock). An empty body is a 400 and an unknown field a
+/// 422.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchNotificationPrefsRequest {
+    #[serde(default)]
+    pub kinds: Option<PatchNotificationKindsRequest>,
+    #[serde(default)]
+    pub presentation: Option<PatchNotificationPresentationRequest>,
+    /// Omitted = keep, `null` = remove the schedule, an object = replace it whole.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub schedule: OptionalPatch<NotificationScheduleDto>,
+    /// 0, 60 or 300 (400 `invalid_phone_delay` otherwise).
+    #[serde(default)]
+    pub phone_delay_secs: Option<i64>,
+    #[serde(default)]
+    pub keyword_overrides_mute: Option<bool>,
+    #[serde(default)]
+    pub approval_time_sensitive: Option<bool>,
+    #[serde(default)]
+    pub confirm: Option<Vec<NotificationConfirmToken>>,
+}
+
+/// One kind in the response: its switch on each surface that applies to it (`desktop` is absent
+/// where the surface does not apply to the kind).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSurfaceSwitchesDto {
+    pub phone: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPresentationDto {
+    /// Stored slots only; a kind that is absent plays its default sound.
+    pub sounds: BTreeMap<&'static str, String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationQuietDto {
+    pub active: bool,
+    pub resumes_at_ms: Option<i64>,
+}
+
+/// The server's own evaluation (D13): a client reads it and never redoes the time-zone math.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationEffectiveDto {
+    pub paused: bool,
+    pub paused_until_ms: Option<i64>,
+    pub quiet: NotificationQuietDto,
+}
+
+/// `GET|PATCH …/notification-prefs` response (ADR-0206 D13). Every kind is present with its stored
+/// value or its default, so no stored row answers today's behavior.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPrefsResponse {
+    pub kinds: BTreeMap<&'static str, NotificationSurfaceSwitchesDto>,
+    pub presentation: NotificationPresentationDto,
+    pub schedule: Option<NotificationScheduleDto>,
+    pub phone_delay_secs: i16,
+    pub keyword_overrides_mute: bool,
+    pub approval_time_sensitive: bool,
+    pub effective: NotificationEffectiveDto,
+    /// A patch response only: `["approval_push_off"]` when this write turned approval push off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<&'static str>,
+}
+
+/// `GET …/notification-diagnostics` query (ADR-0206 D11, #4341). Both fields optional and read as
+/// text so the route can answer its own 400 sentences: a `channelId` that is not a UUID, a `kind`
+/// that is not one of the closed kinds.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDiagnosticsQuery {
+    /// Also evaluate `channel_muted` for this channel (404 when the caller cannot see it).
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    /// A notification kind from the closed table (400 otherwise). `kind_off` reads it (N3); the
+    /// work-hours pass-through reads it when that slice lands (N7).
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// One blocker of `GET …/notification-diagnostics`: a closed `code` and only the values that go
+/// with it (ADR-0206 D11). `apnsReason` is a **code** (`BadDeviceToken`, `relay_vocabulary_refused`,
+/// …), never a relay's own words.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationBlockerDto {
+    pub code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_status: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_reason: Option<String>,
+    /// `kind_off`: the kind whose phone switch is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
+}
+
+/// `devices` of the diagnostics response: how many of the caller's push tokens are live and dead.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDevicesDto {
+    pub active: i64,
+    pub invalidated: i64,
+}
+
+/// `lastTest` of the diagnostics response: the latest test push the caller sent and what became of
+/// it (`queued`, `stalled`, `sent`, `relay_outdated`, `failed`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationLastTestDto {
+    pub id: Uuid,
+    pub status: &'static str,
+    pub at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_status: Option<i32>,
+}
+
+/// `GET …/notification-diagnostics` response (ADR-0206 D11). `ok` means "the server holds nothing
+/// back", **not** "the device shows it": the OS permission, the per-device switch and Focus are
+/// known only to the client.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDiagnosticsResponse {
+    pub checked_at_ms: i64,
+    pub ok: bool,
+    pub blockers: Vec<NotificationBlockerDto>,
+    pub devices: NotificationDevicesDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_test: Option<NotificationLastTestDto>,
+}
+
+/// `POST …/notification-diagnostics/test` response: the id of the test (its result is read from
+/// `lastTest`) and how many live tokens it goes to — capped at `momo_push::SYSTEM_PUSH_MAX_TARGETS`
+/// (5), so it is not the caller's real device count (that is the diagnostics' `devices.active`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTestNotificationResponse {
+    pub test_id: Uuid,
+    pub device_count: i64,
 }
 
 /// `PATCH …/notification-rules/push-kinds` request (ADR-0120 부록 A, #3341).
@@ -5440,6 +5928,26 @@ pub struct ApprovalDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at_ms: Option<i64>,
     pub created_at_ms: i64,
+    /// ADR-0186 v6 R-f: `inline` (decidable where it is shown) or `open` (must be
+    /// opened in the app). The answer of `momo_agent::actions::opens_in_app`, the one
+    /// list; the client never recomputes it.
+    pub decision_mode: &'static str,
+    /// ADR-0186 v6 R-f, where it lives: the approval's channel is a DM.
+    pub is_direct: bool,
+    /// ADR-0186 v6 R-f, where it lives: the thread the approval card sits in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    /// ADR-0186 v6 R-f: the card's outcome, once the approval is settled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ApprovalResultDto>,
+}
+
+/// `ApprovalProjection.result` — the card's `result` object, narrowed to the one
+/// sentence the inbox row needs.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalResultDto {
+    pub line: String,
 }
 
 /// Swift `ApprovalProjectionPageDTO` (:52).
@@ -5447,6 +5955,10 @@ pub struct ApprovalDto {
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalListResponse {
     pub approvals: Vec<ApprovalDto>,
+    /// ADR-0186 v6 R-f: present only when a further page exists, and only for a
+    /// read that is not `status=pending`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -5810,6 +6322,16 @@ pub struct ApprovalDecisionReceipt {
     /// struct's shape rather than by a caller remembering to strip a field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<ApprovalDecisionResult>,
+    /// ADR-0204 증보 6 D6-4 — the one line this decision says, written by the server so a
+    /// device can show it as it is (the lock screen's notification changes into it): 「✓ 소개를
+    /// 바꿨어요」, 「소개 바꾸기를 거부했어요」, 「이미 승인된 요청이에요 · 소개 바꾸기」.
+    ///
+    /// **Additive.** Absent from every refusal (the words of a failure are the device's), from
+    /// the receipts stored before it existed (a replay answers what the first call answered) and
+    /// from a decision no sentence is written for (a DM admission's vote). A client that does not
+    /// know the key keeps the sentence it always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// The `result` object of ADR-0186 부록 C.
@@ -5847,13 +6369,19 @@ pub struct SecretOnceDto {
     pub expires_at_ms: i64,
 }
 
-/// `GET …/approvals?status=&limit=`.
+/// `GET …/approvals?status=&scope=&limit=&cursor=`.
 #[derive(Debug, Default, Deserialize)]
 pub struct ApprovalListQuery {
     #[serde(default)]
     pub status: Option<String>,
+    /// `team` (default) or `mine` (ADR-0186 v6 R-f).
+    #[serde(default)]
+    pub scope: Option<String>,
     #[serde(default)]
     pub limit: Option<String>,
+    /// The `nextCursor` of the previous page (ADR-0186 v6 R-f).
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -6049,8 +6577,66 @@ pub struct MessageUnfurlDto {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/image`), never a remote address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    // ADR-0170 amendment 2026-10-31 D6: every key below is optional and absent when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/icon`), never a remote address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
+}
+
+/// `POST …/channels/{ch}/unfurl-previews` request (ADR-0170 증보 2026-11-01 D14, #4884).
+///
+/// Closed-world, and **one address only**: the draft's text never reaches the server (D2), and
+/// the address is in a body and not in a path or query because a link's query is often a token.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnfurlPreviewRequest {
+    pub url: String,
+}
+
+/// The card of a link that is still in the composer (ADR-0170 증보 2026-11-01 D15).
+///
+/// The keys of [`MessageUnfurlDto`] without `messageId` (there is no message yet), under the same
+/// rules: every optional key is absent when unknown, and `imageUrl`/`iconUrl` are proxy paths on
+/// this origin, never a remote address. `status` is `ok` or `failed` and nothing else: a preview
+/// does not say *why* there is none. `id` exists only for `ok`, as the handle of the two paths.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfurlPreviewDto {
+    pub url: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -6163,6 +6749,208 @@ mod tests {
         assert_usage_values(&request.usage.expect("usage"));
     }
 
+    /// The text of `docs/api/openapi.yaml`.
+    fn openapi_spec() -> String {
+        std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/openapi.yaml"
+        ))
+        .expect("read openapi.yaml")
+    }
+
+    /// The line after the key that ends `path` — each step a key and the indent it sits
+    /// at, searched forward from the step before. There is no YAML crate here: the spec
+    /// is indented by two, and the blocks these tests read are plain block mappings.
+    fn spec_key_line(lines: &[&str], path: &[(&str, usize)]) -> usize {
+        let mut at = 0;
+        for (key, indent) in path {
+            let header = format!("{}{key}:", " ".repeat(*indent));
+            at += lines[at..]
+                .iter()
+                .position(|line| line.trim_end() == header)
+                .unwrap_or_else(|| panic!("openapi.yaml has no `{header}` after line {at}"))
+                + 1;
+        }
+        at
+    }
+
+    /// The names under the `properties:` header at `path`'s end, sorted.
+    fn spec_properties(spec: &str, path: &[(&str, usize)]) -> Vec<String> {
+        let lines: Vec<&str> = spec.lines().collect();
+        let start = spec_key_line(&lines, path);
+        let header_indent = path.last().expect("a path").1;
+        let mut names = Vec::new();
+        for line in &lines[start..] {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            if indent <= header_indent {
+                break;
+            }
+            if indent == header_indent + 2 {
+                if let Some((name, _)) = line.trim().split_once(':') {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// The `required` list of the schema at `path`'s end — flow style (`required: [a, b]`)
+    /// or a block list — sorted.
+    fn spec_required(spec: &str, path: &[(&str, usize)]) -> Vec<String> {
+        let lines: Vec<&str> = spec.lines().collect();
+        let start = spec_key_line(&lines, path);
+        let indent = path.last().expect("a path").1 + 2;
+        let header = format!("{}required:", " ".repeat(indent));
+        let at = lines[start..]
+            .iter()
+            .position(|line| line.starts_with(&header))
+            .unwrap_or_else(|| panic!("no `required` under {path:?}"))
+            + start;
+        let mut names: Vec<String> = match lines[at][header.len()..].trim() {
+            "" => lines[at + 1..]
+                .iter()
+                .take_while(|line| line.trim_start().starts_with("- "))
+                .map(|line| line.trim_start()[2..].trim().to_string())
+                .collect(),
+            flow => flow
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|name| name.trim().to_string())
+                .collect(),
+        };
+        names.sort();
+        names
+    }
+
+    fn keys_of(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// **ADR-0186 v6 R-f, held to the spec in both directions.** The gate that samples
+    /// the live server (`verify_openapi_contract_rust.sh`) sees only the rows its
+    /// fixtures happen to make; this builds every optional key and holds the whole key
+    /// set of an approval row, of its `result`, and of a run's `bundle` to the spec's
+    /// properties (a key emitted but undeclared is drift, a key declared but never
+    /// emitted is a promise nothing keeps), and the always-present ones to `required`.
+    #[test]
+    fn the_request_loop_read_keys_are_the_specs_keys() {
+        let spec = openapi_spec();
+
+        let approval_full = serde_json::to_value(ApprovalDto {
+            id: "a".into(),
+            workspace_id: "w".into(),
+            run_id: "r".into(),
+            channel_id: "c".into(),
+            request_message_id: Some("m".into()),
+            requested_by: "b".into(),
+            action_type: "tool_call".into(),
+            payload: serde_json::json!({}),
+            status: "approved".into(),
+            decided_by: Some("h".into()),
+            decided_at_ms: Some(1),
+            decision_reason: Some("r".into()),
+            expires_at_ms: Some(2),
+            created_at_ms: 3,
+            decision_mode: "open",
+            is_direct: true,
+            root_id: Some("t".into()),
+            result: Some(ApprovalResultDto { line: "l".into() }),
+        })
+        .expect("serialize");
+        // The three keys this server never writes (the spec says so on each).
+        let never_emitted = ["estimatedMicroUsd", "isReversible", "onBehalfOf"];
+        let mut declared = spec_properties(&spec, &[("ApprovalProjection", 4), ("properties", 6)]);
+        declared.retain(|name| !never_emitted.contains(&name.as_str()));
+        assert_eq!(keys_of(&approval_full), declared);
+        assert_eq!(
+            keys_of(&approval_full["result"]),
+            spec_properties(
+                &spec,
+                &[
+                    ("ApprovalProjection", 4),
+                    ("properties", 6),
+                    ("result", 8),
+                    ("properties", 10)
+                ]
+            )
+        );
+
+        let approval_least = serde_json::to_value(ApprovalDto {
+            id: "a".into(),
+            workspace_id: "w".into(),
+            run_id: "r".into(),
+            channel_id: "c".into(),
+            request_message_id: None,
+            requested_by: "b".into(),
+            action_type: "tool_call".into(),
+            payload: serde_json::json!({}),
+            status: "pending".into(),
+            decided_by: None,
+            decided_at_ms: None,
+            decision_reason: None,
+            expires_at_ms: None,
+            created_at_ms: 3,
+            decision_mode: "inline",
+            is_direct: false,
+            root_id: None,
+            result: None,
+        })
+        .expect("serialize");
+        assert_eq!(
+            keys_of(&approval_least),
+            spec_required(&spec, &[("ApprovalProjection", 4)]),
+            "a row with nothing optional says exactly what the spec requires"
+        );
+
+        let bundle_path = [("AgentRunProgress", 4), ("bundle", 8)];
+        let bundle_full = serde_json::to_value(AgentRunBundleDto {
+            approval_id: "a".into(),
+            status: "pending".into(),
+            decision_mode: "inline",
+            can_decide: true,
+            line: Some("l".into()),
+            intent: Some("l".into()),
+            action_type: "tool_call".into(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            keys_of(&bundle_full),
+            spec_properties(&spec, &[bundle_path[0], bundle_path[1], ("properties", 10)])
+        );
+        let bundle_least = serde_json::to_value(AgentRunBundleDto {
+            approval_id: "a".into(),
+            status: "approved".into(),
+            decision_mode: "open",
+            can_decide: false,
+            line: None,
+            intent: None,
+            action_type: "tool_call".into(),
+        })
+        .expect("serialize");
+        assert_eq!(keys_of(&bundle_least), spec_required(&spec, &bundle_path));
+
+        // The page: `nextCursor` is the one key beside `approvals`, and absent when none.
+        let page = |next_cursor: Option<String>| {
+            serde_json::to_value(ApprovalListResponse {
+                approvals: Vec::new(),
+                next_cursor,
+            })
+            .expect("serialize")
+        };
+        assert_eq!(
+            keys_of(&page(Some("c".into()))),
+            spec_properties(&spec, &[("ApprovalProjectionPage", 4), ("properties", 6)])
+        );
+        assert_eq!(keys_of(&page(None)), vec!["approvals".to_string()]);
+    }
+
     /// **The approval wire's exact key set, pinned** (goal SRV-B5c).
     ///
     /// `docs/api/openapi.yaml` described these two schemas in snake_case for a
@@ -6198,6 +6986,10 @@ mod tests {
             decision_reason: None,
             expires_at_ms: None,
             created_at_ms: 7,
+            decision_mode: "inline",
+            is_direct: false,
+            root_id: Some("t".into()),
+            result: Some(ApprovalResultDto { line: "l".into() }),
         })
         .expect("serialize");
         let mut keys: Vec<&str> = projection
@@ -6213,10 +7005,14 @@ mod tests {
                 "actionType",
                 "channelId",
                 "createdAtMs",
+                "decisionMode",
                 "id",
+                "isDirect",
                 "payload",
                 "requestMessageId",
                 "requestedBy",
+                "result",
+                "rootId",
                 "runId",
                 "status",
                 "workspaceId",
@@ -6236,6 +7032,7 @@ mod tests {
             decided_at_ms: 9,
             decision_reason: None,
             result: None,
+            line: None,
         })
         .expect("serialize");
         let mut receipt_keys: Vec<&str> = receipt
@@ -6281,6 +7078,7 @@ mod tests {
                 },
                 secret_once: None,
             }),
+            line: None,
         };
         let stored = serde_json::to_value(&executed).expect("serialize");
         assert_eq!(stored["result"]["actionId"], "invite.create");
@@ -6473,6 +7271,7 @@ mod tests {
             thread: None,
             run_ended: false,
             sent_via: None,
+            also_in_channel: false,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["seq"], 3);
@@ -6496,6 +7295,9 @@ mod tests {
         assert!(json.get("runEnded").is_none(), "{json}");
         // ADR-0216 D8 — a message sent through the app carries no marker key at all.
         assert!(json.get("sentVia").is_none(), "{json}");
+        // ADR-0148 증보 — a message that was not also sent to the channel carries no
+        // `alsoInChannel` key: `false` never crosses the wire, and a client reads `=== true`.
+        assert!(json.get("alsoInChannel").is_none(), "{json}");
     }
 
     /// The two B11 keys, once they exist, are camelCase millisecond integers —
@@ -6525,6 +7327,7 @@ mod tests {
             thread: None,
             run_ended: false,
             sent_via: Some("dev"),
+            also_in_channel: true,
         })
         .expect("serialize");
         assert_eq!(json["state"], "edited");
@@ -6532,6 +7335,8 @@ mod tests {
         assert!(json.get("deletedAtMs").is_none());
         // ADR-0216 D8 — an edit keeps the marker, under its camelCase key.
         assert_eq!(json["sentVia"], "dev");
+        // ADR-0148 증보 — and keeps 「대화에도 보내기」, which is only ever `true` when present.
+        assert_eq!(json["alsoInChannel"], true);
     }
 
     #[test]

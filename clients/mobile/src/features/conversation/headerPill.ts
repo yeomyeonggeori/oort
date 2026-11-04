@@ -24,8 +24,17 @@ export const PILL_STATUS_WORD_MAX_EM = 8;
  * 양쪽 칸의 폭 — 둘이 **같아서** 가운데 알약이 정말 가운데에 선다. 오른쪽에 든 원(허들 자리·⋮)의 수로 정하고, 왼쪽(뒤로)은 같은 폭을 비워 둔다.
  * 오른쪽이 비어도(⋮ 가 없다) 원 하나 폭을 지킨다 — 알약이 한쪽으로 쏠리지 않게.
  */
-export function headerSlotWidth({huddle, menu}: {huddle: boolean; menu: boolean}): number {
-  const circles = Math.max(1, (huddle ? 1 : 0) + (menu ? 1 : 0));
+export function headerSlotWidth({
+  huddle,
+  menu,
+  follow = false,
+}: {
+  huddle: boolean;
+  menu: boolean;
+  /** 스레드 머리의 「따라가기」 원(#4890). 허들·⋮ 와 같은 원이라 같은 폭을 센다. */
+  follow?: boolean;
+}): number {
+  const circles = Math.max(1, (huddle ? 1 : 0) + (menu ? 1 : 0) + (follow ? 1 : 0));
   return circles * CONV.circle + (circles - 1) * CONV.headGap;
 }
 

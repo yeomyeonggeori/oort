@@ -106,11 +106,24 @@ import {
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
 import {
   ReleaseNotesSettingRow,
   ReleaseNotesSettingsPage,
 } from '../releaseNotes/ReleaseNotesPage';
+import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
+import {TEAM_AI_HELPER_PAGE} from '@momo/core/features/settings/teamAiStageModel';
+import {
+  TeamAiHelperSettingRow,
+  TeamAiHelperSettingsPage,
+  useTeamAiHelperEntry,
+} from './TeamAiHelperSettings';
+import {
+  AI_LIMITS_PAGE,
+  TeamAiLimitsSettingRow,
+  TeamAiLimitsSettingsPage,
+} from './TeamAiLimitsSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -186,6 +199,10 @@ import {
 export type SettingsSubPage =
   | 'language'
   | 'releaseNotes'
+  | 'linkPreview'
+  | typeof TEAM_AI_HELPER_PAGE
+  // 「사용 한도」 장(#5026). 이름은 `TeamAiLimitsSettings` 가 하이픈 낱말로 짓고 JSX 밖에서 선언한다(직접 문구 장부).
+  | typeof AI_LIMITS_PAGE
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -198,7 +215,13 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'releaseNotes'>, string> = {
+const SUB_PAGE_TITLE: Record<
+  Exclude<
+    SettingsSubPage,
+    'language' | 'releaseNotes' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
+  >,
+  string
+> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -280,6 +303,9 @@ export function SettingsPage({
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
             onOpenReleaseNotes={() => setPage(RELEASE_NOTES_SETTINGS_PAGE)}
+            onOpenLinkPreview={() => setPage('linkPreview')}
+            onOpenTeamAiHelper={() => setPage(TEAM_AI_HELPER_PAGE)}
+            onOpenAiLimits={() => setPage(AI_LIMITS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -305,6 +331,16 @@ export function SettingsPage({
             <LanguageSettingsPage onBack={backToMain} />
           ) : page === RELEASE_NOTES_SETTINGS_PAGE ? (
             <ReleaseNotesSettingsPage onBack={backToMain} />
+          ) : page === 'linkPreview' ? (
+            <LinkPreviewSettingsPage onBack={backToMain} />
+          ) : page === TEAM_AI_HELPER_PAGE ? (
+            <TeamAiHelperSettingsPage
+              workspaceId={workspaceId}
+              directory={directory}
+              onBack={backToMain}
+            />
+          ) : page === AI_LIMITS_PAGE ? (
+            <TeamAiLimitsSettingsPage workspaceId={workspaceId} onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -337,7 +373,10 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language' | 'releaseNotes'>;
+  page: Exclude<
+    SettingsSubPage,
+    'language' | 'releaseNotes' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
+  >;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -448,6 +487,9 @@ export function SettingsContent({
   onOpenTheme,
   onOpenLanguage,
   onOpenReleaseNotes,
+  onOpenLinkPreview,
+  onOpenTeamAiHelper,
+  onOpenAiLimits,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -467,6 +509,12 @@ export function SettingsContent({
   onOpenLanguage?: () => void;
   /** 「업데이트 소식」 장을 연다(#4937). 없으면 행이 서지 않는다(캡처 하네스). */
   onOpenReleaseNotes?: () => void;
+  /** 「링크 미리보기」 장(작게·크게·끄기, #4883)을 연다. 없으면 행이 서지 않는다(캡처 하네스). */
+  onOpenLinkPreview?: () => void;
+  /** 관리자의 「도우미」 장(이름·할 수 있는 일, #4945)을 연다. 없으면 행이 서지 않고 아무것도 읽지 않는다(캡처 하네스). */
+  onOpenTeamAiHelper?: () => void;
+  /** 「사용 한도」 장(#5026)을 연다. 없으면 행이 서지 않는다(캡처 하네스). 소유자·관리자에게만 선다. */
+  onOpenAiLimits?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -493,6 +541,9 @@ export function SettingsContent({
   covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 알림 카드·연결 카드의 안내 문장은 사전에서 읽는다(#5170 L2). 이름이 `formatMessage` 인 것은 일부러다 —
+  // 직접 문구 장부는 그 이름의 호출 안 키를 문구가 아닌 것으로 읽는다(`useFormatMessage` 머리말).
+  const formatMessage = useFormatMessage();
   const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
@@ -560,7 +611,7 @@ export function SettingsContent({
   const pauseDetail = pause.loadFailed
     ? NOTIFICATION_PAUSE_LOAD_FAILED
     : !pause.ready
-      ? '알림 설정을 확인하는 중입니다.'
+      ? formatMessage('settings.notifications.checking')
       : pause.paused
         ? PAUSE_ACTIVE_NOTE
         : NOTIFICATION_PAUSE_DESCRIPTION;
@@ -587,6 +638,13 @@ export function SettingsContent({
   const themeValue = themeSummary(themeId, choice);
   // 만들 수 있거나 이미 만든 연결이 있는 사람에게만 행이 선다(`useDevToolsEntry`). 정책이 오기 전에는 서지 않는다.
   const devTools = useDevToolsEntry(workspaceId, member.id, onOpenDevTools !== undefined);
+  // 관리자(소유자·관리자)에게만 「관리자 설정」 카드가 선다. 도우미 행은 설정 가방을 읽었고 도우미가 켜져 있을 때만 선다.
+  const isAdmin = memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin';
+  const teamAi = useTeamAiHelperEntry(workspaceId, directory, isAdmin && onOpenTeamAiHelper !== undefined);
+  const teamAiRow =
+    teamAi.visible && onOpenTeamAiHelper ? (
+      <TeamAiHelperSettingRow helperName={teamAi.helperName} onPress={onOpenTeamAiHelper} />
+    ) : null;
 
   return (
     <>
@@ -670,6 +728,7 @@ export function SettingsContent({
           accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
           testID="profile-theme-row"
         />
+        {onOpenLinkPreview ? <LinkPreviewSettingRow onPress={onOpenLinkPreview} /> : null}
       </GroupCard>
 
       {/* ② 상태 설정 — 짧은 편집이라 시트가 연다. */}
@@ -880,7 +939,7 @@ export function SettingsContent({
                   ? NOTIFICATION_PAUSE_LOAD_FAILED
                   : kinds.ready
                     ? PUSH_WORK_COMPLETE_DESCRIPTION
-                    : '알림 설정을 확인하는 중입니다.'
+                    : formatMessage('settings.notifications.checking')
               }
               checked={kinds.workComplete}
               a11yDisabled={!kinds.ready || kinds.pending}
@@ -913,7 +972,7 @@ export function SettingsContent({
           {kinds.absent ? null : (
             <ListRow
               title="항상 오는 알림"
-              detail="승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
+              detail={formatMessage('settings.notifications.alwaysDetail')}
               testID="profile-always-row"
             />
           )}
@@ -942,7 +1001,7 @@ export function SettingsContent({
       <GroupCard label="연결" testID="settings-connect-card">
         <ListRow
           title="서버"
-          detail={server ?? '이 기기에 저장된 서버 주소가 없습니다.'}
+          detail={server ?? formatMessage('settings.connection.noServer')}
           testID="profile-server-row"
         />
         <ListRow
@@ -966,9 +1025,13 @@ export function SettingsContent({
         ) : null}
       </GroupCard>
 
-      {onOpenUsage && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
+      {isAdmin && (onOpenUsage || teamAiRow || onOpenAiLimits) ? (
         <GroupCard label="관리자 설정">
-          <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          {onOpenUsage ? (
+            <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          ) : null}
+          {teamAiRow}
+          {onOpenAiLimits ? <TeamAiLimitsSettingRow onPress={onOpenAiLimits} /> : null}
         </GroupCard>
       ) : null}
 

@@ -1,10 +1,12 @@
 import {
   ATTACH_COPY,
   attachmentDisplayName,
+  isInAppPlayableVideo,
   type MessageAttachment,
 } from '@momo/core/features/attachments/model';
 import React, {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useReducer,
@@ -34,11 +36,13 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { BAR_CONTROL_MAX_SCALE } from '../../design/atoms';
-import { GlassSurface, LiquidGlassAllowed } from '../../design/glass';
+import { LiquidGlassAllowed } from '../../design/glass';
 import {
   ATTACH_MENU_ICONS,
   CONV_ICON_SIZE,
   CONV_ICONS,
+  VIDEO_ICON_SIZE,
+  VIDEO_ICONS,
   VIEWER_ICON_SIZE,
   VIEWER_ICONS,
 } from '../../design/icons';
@@ -49,13 +53,23 @@ import {
   MENU_CLOSE_WATCHDOG_MS,
   VIEWER_CHROME_SHOW_MS,
 } from '../../design/motion';
-import { font, line, radius, space, type Palette } from '../../design/tokens';
+import { font, line, radius, slopTo, space, type Palette } from '../../design/tokens';
 import { useStyles } from '../../design/theme';
+import { useFormatMessage } from '../../i18n/useFormatMessage';
+import { ReplySwipeGuardContext } from '../conversation/ReplySwipeContainer';
+import { useDismissOnEntry } from '../../lib/useDismissOnEntry';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview, measuredAttachmentSize, rememberAttachmentSize } from './content';
 import {initialStage, stageTransition, fitStageRect, stageExitRect, type StageRect} from '@momo/core/lib/stageTransition';
+import { GlassButton } from './GlassButton';
 import {StageHero} from './StageHero';
+import { VideoControls } from './VideoControls';
+import { VideoViewerPage, type ActiveVideoHandle } from './VideoViewerPage';
+import { PLAYBACK, useAttachmentPoster } from './videoContent';
+import { LAYOUT } from './videoDesign';
 import type {MeasureHeroSource} from './heroSource';
+import { ShareSheetTouchShield } from '../../lib/ShareSheetTouchShield';
+import { useSaveAttachment, saveNoticeKey } from './useSaveAttachment';
 import { useShareAttachment } from './useShareAttachment';
 import { useViewerDismiss, type ViewerProgressRef } from './useViewerDismiss';
 import {
@@ -66,6 +80,7 @@ import {
   type DragPoint,
 } from './viewerDismiss';
 import {
+  NOTICE_HEIGHT,
   VIEWER,
   VIEWER_GLASS_TONE,
   VIEWER_STAGE,
@@ -79,10 +94,11 @@ import {
 } from './viewerDesign';
 import {
   DOUBLE_TAP_MS,
+  doubleTapScale,
   fullRect,
   isDoubleTap,
   isZoomed,
-  ZOOM_MAX,
+  maxZoomScale,
   ZOOM_MIN,
   ZOOMED_A11Y_VALUE,
   zoomRectAt,
@@ -104,9 +120,13 @@ import {
 // 이 전체 화면은 앱의 「페이지」다 — 대화 위에 한 겹 쌓이고 한 겹만 벗기며 돌아가므로 나가는 문이 X 가 아니라 **‹ 뒤로(왼쪽)** 다
 // (`docs/design-system/phone-sheets.md` §3 「페이지 머리의 나가는 문은 둘 중 하나다」).
 //
-// [저장]과 [공유]는 **같은 일을 한다**: 내려받아 iOS 공유 시트를 연다(`useShareAttachment`). 사진 보관함에 직접 쓰는 길은
-// `projectShape.test.ts` 가 막고 Info.plist 가 「저장하지 않아요」라고 선언한다 — 그것을 바꾸는 것은 이 일의 결정이 아니다.
-// 시트의 「이미지 저장」이 저장이다. [저장]의 보조기술 힌트가 그 사실을 말한다.
+// [저장]과 [공유]는 **다른 일을 한다** (#5209, ADR-0168 증보 3, owner 2026-11-03):
+//   [저장]  사진·영상을 **사진 보관함에 바로 추가**한다(`useSaveAttachment` — 추가 전용 권한, 처음 한 번만 묻는다. 영상 쪽(#5208)도 같은 훅이다:
+//           지금 쪽(`current`)이 영상이면 그 영상을 통째로 받아 보관함에 더한다). 끝나면 아래 상태 알약이 「사진에 저장했어요」라고 말하고
+//           (곧 걷힌다), 사진 접근이 꺼져 있으면 「설정 열기」 알약이 서서 남는다.
+//   [공유]  내려받아 iOS 공유 시트를 연다(`useShareAttachment`) — 앞 판 그대로다.
+// 앞 판은 둘이 같은 일(공유 시트)이었고 사진 보관함에 직접 쓰는 길을 `projectShape.test.ts` 가 막았다. 이제 그 길은 하나로 열려 있고
+// 삭제·앨범 같은 나머지 쓰기는 계속 막힌다.
 //
 // ## 조작은 리퀴드 글래스를 쓰지 않는다 — 블러 + 어두운 틴트다
 //
@@ -140,11 +160,11 @@ import {
 //
 // ## 확대 (#4769) — 쪽 안의 스크롤뷰가 하고, 응답자는 그 **안**에 있다
 //
-// 쪽마다 iOS 스크롤뷰(`maximumZoomScale` 3 · `minimumZoomScale` 1 · `centerContent`)를 두고 사진을 그 안에 놓는다 — 두 손가락 확대·끌어 옮기기·
+// 쪽마다 iOS 스크롤뷰(`maximumZoomScale` 3 — 아주 긴 그림만 화면을 채우는 배율까지, #5224 · `minimumZoomScale` 1 · `centerContent`)를 두고 사진을 그 안에 놓는다 — 두 손가락 확대·끌어 옮기기·
 // 놓으면 1 로 돌아오기는 UIKit 이 한다(새 의존 없음). JS 가 하는 일은 셋이다(값과 계산은 `viewerZoom.ts`).
 //   ① 확대 상태를 `onScroll`·`onScrollEndDrag` 의 `zoomScale` 로 읽어, 확대 중이면 가로 넘기기(`scrollEnabled`)와 쓸어 닫기(`enabled`)를 끈다.
 //      원래 크기로 돌아오면 다시 켠다.
-//   ② 두 번 탭이면 `scrollResponderZoomTo` 로 탭한 곳 둘레 2배 ↔ 원래 크기(동작 줄이기면 움직임 없이 바로).
+//   ② 두 번 탭이면 `scrollResponderZoomTo` 로 탭한 곳 둘레 2배(아주 긴 그림은 높이·폭 맞춤) ↔ 원래 크기(동작 줄이기면 움직임 없이 바로).
 //   ③ 장이 바뀌면(썸네일·넘기기) 앞 장의 확대를 푼다.
 //
 // **응답자는 확대 스크롤뷰의 자손이어야 한다.** 위 「응답을 쥐는 자리」와 같은 까닭이다: iOS 스크롤뷰는 superview 사슬에 JS 응답자가 있으면 스크롤·확대를
@@ -155,12 +175,36 @@ import {
 //
 // **한 번 탭은 두 번 탭 문턱(`DOUBLE_TAP_MS`)만큼 늦다**: 두 번째 탭이 오는지 보고서야 조작을 숨긴다(안 그러면 두 번 탭이 조작을 깜박이게 한다).
 //
+// ## 화면 어디서든 확대 (#5224) — 빈 곳 받이는 확대 스크롤뷰의 **안**에 있다
+//
+// 팀 피드백: 가로로 엄청 긴 화면 캡처는 가운데 얇은 선처럼 보이고, **정확히 그 선 위에서만** 핀치가 확대됐다(카카오톡은 그림 밖 검은 빈 곳에서도 되고,
+// 엄지는 그림·검지는 빈 곳이어도 된다). 원인은 위 「응답은 확대 스크롤뷰의 자손이어야 한다」의 거울상이었다: 사진을 맞춤 크기로 줄이고(#4775) 나면
+// 그림 밖 빈 곳의 터치는 확대 스크롤뷰 **자신**이 맞는 대상이 되어, 응답이 그 **조상**으로 올라갔다 — 앞 판의 빈 곳 응답자(쪽을 감싼 View)와 그 위의 뿌리
+// (`frameHandlers`). 조상이 JS 응답자이면 iOS 는 확대·팬을 시작하지 못한다(`_shouldDisableScrollInteraction`). 시뮬레이터에서 손가락 자리를 정해 합성한 핀치로
+// 확정했다: 고치기 전에는 그림 밖 두 손가락도, 그림 위 한 손가락 + 빈 곳 한 손가락도 확대되지 않았다. 감싼 View 의 응답자만 빼도, 빈 곳에 받이만 두고 응답자를 안 달아도
+// 여전히 안 됐다 — 뿌리의 `frameHandlers` 가 사진 밖 빈 곳을 쥐는 것으로 보인다. 쥐는 뷰가 **스크롤뷰 안**에 있어야 한다. 같은 합성이 그림 위 두 손가락은 확대시켜서(고친 뒤 빌드)
+// 합성이 진짜 핀치라는 것은 대조로 확인했다.
+//
+// 그래서 **빈 곳 받이**(`attachment-viewer-blank`)를 확대 스크롤뷰의 내용 안, 사진 쪽 View 의 **뒤**에 둔다: 쪽 전체(창 크기)를 덮는 투명한 View 이고, 내용 컨테이너
+// (맞춤 사진 크기)의 좌상단에서 (-x, -y) 만큼 물러나 컨테이너 밖으로 넘친다. 내용 크기(확대·팬의 범위)는 그대로 맞춤 사진이다 — 검은 여백을 확대·팬하지 않는다(#4775).
+// Fabric 의 히트 테스트(`betterHitTest:`)는 넘침이 보이는(`overflow: visible`) 뷰의 범위 밖에 있는 자식도 맞추므로 넘친 받이도 맞는다(시뮬레이터에서 확인). 받이가 맞은 빈 곳의
+// 터치는 사진 위와 같은 응답자(`pageHandlers`)가 쥐고 같은 규칙을 쓴다 — 한 번 탭(조작 숨김)·두 번 탭(확대)·아래로 쓸어 닫기·가로 넘기기 양보·둘째 손가락 거절(방패).
+// 확대 중에도 받이는 내용과 함께 커져 창을 계속 덮는다(같은 중심에서 같은 배율).
+//
+// ## 그림 비율에 맞는 최대 배율 (#5224) — `viewerZoom.ts`
+//
+// 보통 사진은 그대로다(최대 3배·두 번 탭 2배). 채움 배율(창을 가득 채우는 배율)이 5 를 넘는 **아주 긴 그림**(세로 화면에서 약 2.3:1 이상 — 21:9 파노라마·긴 캡처)은
+//   · 최대 배율(핀치 상한)이 채움 배율까지(상한 48) 올라간다 — 2072×110 은 폭에 맞추면 높이 약 21pt 라 3배(62pt)로는 읽을 수 없고, 41배면 화면 높이를 채운다.
+//   · 두 번 탭은 **원본 글자가 또렷하게 남는 크기까지만** 키운다(owner 결정, 2단계): 원본 1픽셀 = 화면 1pt 가 되는 배율(2072×110 은 약 5.15배 — 보이는 높이 110pt)을
+//     `clamp(…, 2, 최대 배율)` 로 자른다. 더 크게는 두 손가락으로 벌린다. 원본 크기는 불러온 그림의 크기(`natural`)이고 모르면 높이·폭 맞춤까지 간다.
+//   다시 두 번 탭하면 처음 크기다. 가로로 긴 그림은 높이, 세로로 긴 그림은 폭이 기준이다 — 끌어서 읽는다.
+//
 // ## Hero와 확대의 경계 (#4775)
 //
 // Modal 자체의 전환은 없다. 썸네일을 잰 뒤 `StageHero`가 맞춤 사진 영역으로 자라고, 조작은 도착 후에 선다.
 // 닫기는 현재 첨부 ID를 다시 잰다. 확대 중이면 네이티브 맞춤 완료 후 hero가 시작하고, 끌어 닫기는 놓은 위치를 잇는다.
-// 확대 스크롤 내용도 실제 맞춤 사진 크기다(검은 여백을 확대·팬하지 않는다). 사진 밖의 손짓은 가로 pager 자손인
-// 전체 쪽 wrapper가 받으므로, 여백에서 시작한 옆 넘기기도 살아 있다. 상태 기계는 공용 `stageTransition`에 있다.
+// 확대 스크롤 내용도 실제 맞춤 사진 크기다(검은 여백을 확대·팬하지 않는다). 사진 밖의 손짓은 확대 스크롤뷰 안의
+// 빈 곳 받이가 받으므로(위 「화면 어디서든 확대」), 여백에서 시작한 옆 넘기기·핀치도 살아 있다. 상태 기계는 공용 `stageTransition`에 있다.
 //
 // ## 조작을 숨길 때 보조기술
 //
@@ -203,7 +247,6 @@ function ViewerPage({
   width,
   height,
   responder,
-  blankResponder,
   zoomPages,
   onZoomedChange,
 }: {
@@ -215,10 +258,11 @@ function ViewerPage({
   width: number;
   /** 쪽의 높이 — 사진은 화면 가득이라 창 높이다(두 번 탭이 키울 사각형의 크기). */
   height: number;
-  /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). */
+  /**
+   * 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). 사진 쪽 View 와 **빈 곳 받이** 둘에 같이 펼친다
+   * (파일 머리 「화면 어디서든 확대」) — 쪽 안의 어느 자리에 닿든 쥐는 뷰는 확대 스크롤뷰의 조상이 아니다.
+   */
   responder: GestureResponderHandlers;
-  /** Full-page blank margins remain descendants of the horizontal pager after zoom content is fitted. */
-  blankResponder: GestureResponderHandlers;
   /** 프레임이 쥔 확대 손잡이 모음. 쪽은 올라와 있는 동안 자기 자리를 채운다. */
   zoomPages: MutableRefObject<Array<PageZoom | null>>;
   /** 이 쪽의 확대 여부가 **바뀔 때만** 부른다. */
@@ -256,17 +300,20 @@ function ViewerPage({
     const zoomTo = (rect: ZoomRect, animated: boolean) =>
       zoomRef.current?.scrollResponderZoomTo({ ...rect, animated }, animated);
     const size = {width: fitted.width, height: fitted.height};
+    // 보통 사진은 2배, 아주 긴 그림은 원본 1픽셀 = 화면 1pt 까지(원본 크기 = 불러온 그림의 크기 `natural`, 모르면 높이·폭 맞춤까지 — `viewerZoom.ts`).
+    // 다시 두 번 탭하면 처음 크기다.
+    const scale = doubleTapScale(size, {width, height}, natural);
     return {
       toggleAt: (point, animated) => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
         // centerContent places the fitted content at the hero's window-space origin.
-        else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size), animated);
+        else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size, scale), animated);
       },
       reset: animated => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
       },
     };
-  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready]);
+  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready, width, height, natural]);
   useEffect(() => {
     const pages = zoomPages.current; // 모음 자체는 바뀌지 않는다 — 칸만 채우고 비운다
     pages[position] = handle;
@@ -276,13 +323,13 @@ function ViewerPage({
   }, [zoomPages, position, handle]);
 
   return (
-    <View style={{width, height}} {...blankResponder}>
     <ScrollView
       ref={zoomRef}
       style={[styles.zoomScroll, { width, height }]}
       contentContainerStyle={[styles.zoomContent, {width: fitted.width, height: fitted.height}]}
       // 사진이 아직 없으면 키울 것이 없다(「불러오는 중」 글자를 키우지 않는다) — 최소와 같으면 iOS 는 확대를 켜지 않는다.
-      maximumZoomScale={ready ? ZOOM_MAX : ZOOM_MIN}
+      // 보통 사진은 3배, 아주 긴 그림만 화면을 채우는 배율까지(#5224 — `viewerZoom.ts` 의 `maxZoomScale`).
+      maximumZoomScale={ready ? maxZoomScale({width: fitted.width, height: fitted.height}, {width, height}) : ZOOM_MIN}
       minimumZoomScale={ZOOM_MIN}
       bouncesZoom
       bounces={false}
@@ -298,6 +345,18 @@ function ViewerPage({
       onScrollEndDrag={report}
       testID="attachment-viewer-zoom"
     >
+      {/* 빈 곳 받이 (#5224): 쪽 전체를 덮는 투명한 View. 내용 컨테이너(맞춤 사진 크기)의 좌상단에서 (-x, -y) 만큼 물러나 창과 같은 크기로 서서 컨테이너 밖으로
+          넘친다 — 내용 크기(확대·팬의 범위)는 그대로 맞춤 사진이고, 넘친 자손도 맞추는 것은 Fabric 스크롤뷰의 히트 테스트다. 그림 밖 빈 곳의 터치는 확대 스크롤뷰 **자신**이
+          아니라 이 받이가 맞고 쥔다 — 응답자가 스크롤뷰의 조상이면 iOS 는 핀치를 시작하지 못한다(파일 머리 「화면 어디서든 확대」). 사진 쪽 View 보다 **먼저**
+          그려 사진 뒤에 선다(그림 위의 터치는 사진이, 나머지는 이 받이가 맞춘다). */}
+      <View
+        // `absoluteFill` 은 절대 위치의 바탕이고, 자리(left·top)와 크기는 쪽에서 준다(맞춤 사각형을 창 크기로 넓힌 만큼). 그 바탕의 right·bottom 0 은 크기가
+        // 정해져 있어 쓰이지 않는다 — 크기가 정해진 절대 위치 자식은 앞쪽 오프셋(left·top)을 따른다.
+        style={[StyleSheet.absoluteFill, {left: -fitted.x, top: -fitted.y, width, height}]}
+        collapsable={false}
+        testID="attachment-viewer-blank"
+        {...responder}
+      />
       <View
         style={[styles.viewerPage, {width: fitted.width, height: fitted.height}]}
         // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
@@ -326,7 +385,6 @@ function ViewerPage({
         )}
       </View>
     </ScrollView>
-    </View>
   );
 }
 
@@ -348,82 +406,41 @@ function ViewerThumb({
   onPress: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  // 영상의 바이트를 미리보기로 받지 않는다(#5208): 썸네일은 포스터다. 사진만 `useAttachmentPreview` 를 켠다.
+  const isVideo = isInAppPlayableVideo(attachment);
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
     attachment,
-    true,
+    !isVideo,
   );
+  const posterUri = useAttachmentPoster(workspaceId, channelId, attachment, isVideo);
+  const uri = isVideo ? posterUri : preview.status === 'ready' ? preview.uri : null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${position}번째 사진`}
-      accessibilityHint="이 사진으로 이동"
+      accessibilityLabel={isVideo ? formatMessage('attachments.video.thumbLabel', { position }) : `${position}번째 사진`}
+      accessibilityHint={isVideo ? formatMessage('attachments.video.thumbHint') : '이 사진으로 이동'}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={[styles.thumb, selected ? styles.thumbSelected : styles.thumbIdle]}
       testID="attachment-viewer-thumb"
     >
-      {preview.status === 'ready' ? (
+      {uri !== null ? (
         <Image
-          source={{ uri: preview.uri }}
+          source={{ uri }}
           resizeMode="cover"
           style={styles.thumbImage}
           testID="attachment-viewer-thumb-image"
         />
       ) : null}
+      {isVideo ? (
+        <View pointerEvents="none" style={styles.thumbBadge} testID="attachment-viewer-thumb-video">
+          <Image source={VIDEO_ICONS.video} style={styles.thumbBadgeGlyph} />
+        </View>
+      ) : null}
     </Pressable>
-  );
-}
-
-/**
- * 둥근 유리 단추. 누르는 면(`Pressable`)이 지름 44 를 다 채우고, 유리·가는 테두리는 그 뒤·위에 그려진다. 유리의 톤은 테마와
- * 무관하게 어둡다(`VIEWER_GLASS_TONE`) — 밝은 사진 위에서도 흰 글리프가 선다.
- */
-function GlassButton({
-  label,
-  hint,
-  onPress,
-  disabled,
-  testID,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  onPress: () => void;
-  disabled?: boolean;
-  testID: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <GlassSurface
-      radius={VIEWER.control / 2}
-      tone={VIEWER_GLASS_TONE}
-      style={styles.glassCircle}
-      testID={`${testID}-glass`}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint={hint}
-        accessibilityState={disabled ? { disabled: true } : undefined}
-        disabled={disabled}
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.glassHit,
-          pressed && styles.glassPressed,
-        ]}
-        testID={testID}
-      >
-        {children}
-      </Pressable>
-      {/* 가는 테두리 — 유리 위·누르는 면 위에 그려 눌림 채움이 테두리를 덮지 않는다. 닿지 않는다. */}
-      <View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.glassRing]}
-      />
-    </GlassSurface>
   );
 }
 
@@ -486,6 +503,9 @@ export function AttachmentViewer({
 }: AttachmentViewerProps): React.JSX.Element {
   const closeRequest = useRef(onClose);
   const [presented, setPresented] = useState(false);
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 쓸어 내리는 되돌아가기 모션(`closeRequest`)이 아니라 부모의 `onClose` 다 —
+  // 그 모션은 뷰어를 연 행으로 돌아가는 것인데, 알림은 그 행이 있는 자리에서 사람을 데려가는 입구다.
+  useDismissOnEntry(onClose);
   return (
     <Modal
       visible
@@ -508,9 +528,62 @@ export function AttachmentViewer({
           testID="attachment-viewer-shield"
         >
           <ViewerFrame onClose={onClose} {...frame} closeRequest={closeRequest} presented={presented} />
+          {/* 이 Modal 은 자기 네이티브 창이라 셸의 공유 시트 막이가 덮지 못한다 — 시트를 닫는 탭이 사진에 새어 조작을 숨기지 않게 여기에도 한 번 선다(#5207). */}
+          <ShareSheetTouchShield />
         </View>
       </SafeAreaProvider>
     </Modal>
+  );
+}
+
+interface NoticePillProps {
+  text: string;
+  /** 실패의 알약은 위험색 글자로 선다. */
+  failed: boolean;
+  /** 있으면 누르는 알약이다. 알약 안의 「· 동사」(「· 설정 열기」「· 다시 시도」)는 눌러서 그 일을 한다. */
+  onPress?: () => void;
+  /** 누르는 알약(`Pressable`)의 testID. 글자의 `attachment-viewer-status` 는 늘 그대로다. */
+  testID?: string;
+}
+
+/**
+ * 아래 조작 덩어리의 상태 알약(내려받는 중 · 사진에 저장했어요 · 저장하지 못했어요 · 사진 접근이 꺼져 있어요 …).
+ *
+ * `onPress` 가 없으면 읽기만 한다(`pointerEvents="none"` — 탭이 사진으로 내려가 조작 숨김·보임이 된다). `onPress` 가 있으면 눌린다: 같은 모양의
+ * 알약 둘이 하나는 눌리고 하나는 탭이 사진으로 새서 조작을 숨기는 일이 없게 눌리는 알약은 한 곳에서 선다(#5273). 알약은 글줄 높이라 누르는 면 44 는
+ * `hitSlop` 이 채운다(`NOTICE_HEIGHT`).
+ */
+function NoticePill({ text, failed, onPress, testID }: NoticePillProps): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  if (onPress === undefined) {
+    return (
+      <Text
+        pointerEvents="none"
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        style={[styles.notice, failed && styles.noticeFailed]}
+        testID="attachment-viewer-status"
+      >
+        {text}
+      </Text>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={text}
+      hitSlop={{ top: slopTo(NOTICE_HEIGHT), bottom: slopTo(NOTICE_HEIGHT) }}
+      onPress={onPress}
+      style={styles.noticeHit}
+      testID={testID}
+    >
+      <Text
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        style={[styles.notice, failed && styles.noticeFailed]}
+        testID="attachment-viewer-status"
+      >
+        {text}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -550,12 +623,40 @@ function ViewerFrame({
   const scrollRef = useRef<ScrollView>(null);
   const stripRef = useRef<ScrollView>(null);
   const current = images[index] ?? images[0];
+  // 영상 쪽(#5208): 지금 쪽이 앱 안에서 재생하는 영상인가, 그리고 그 쪽의 플레이어가 내민 손잡이. 자동 재생은 카드를 눌러 연
+  // 그 영상 하나뿐이고 옆으로 넘기면 꺼진다(`VideoViewerPage.tsx`).
+  const currentIsVideo = current !== undefined && isInAppPlayableVideo(current);
+  const [activeVideo, setActiveVideo] = useState<ActiveVideoHandle | null>(null);
+  // 지금 쪽의 손잡이. 쪽이 바뀌는 한 번의 그림에서 옛 플레이어를 읽지 않게 지금 쪽의 것일 때만 쥔다.
+  const videoHandle =
+    currentIsVideo && activeVideo !== null && activeVideo.attachmentId === current?.id ? activeVideo : null;
+  // 재생 실패·영상 사라짐(#5273, 화면 검수 4회차 B1): 틀(뒤로 · 썸네일 줄 · 위치)만 남고 영상 쪽이 오류 문장과 (실패면) 「다시 시도」 하나를 말한다.
+  //   · 재생 줄(▶ · 막대 · 소리)을 세우지 않는다 — 실패한 항목 위의 플레이어는 재생하지 않아서 ▶ 가 눌려도 아무 일이 없는 죽은 단추였다.
+  //   · [저장]·[공유]도 세우지 않는다 — 다음 행동이 「다시 시도」 하나로 읽혀야 하고(사라짐이면 행동이 없다), 두 단추는 재생과 같은 서버 길을 다시 부르는
+  //     것이라 대개 같은 이유로 같은 오류 알약만 돌려준다. 사진 쪽으로 넘기거나 「다시 시도」가 잘 열리면 두 단추가 다시 선다.
+  const videoBroken =
+    videoHandle !== null && (videoHandle.phase === PLAYBACK.FAILED || videoHandle.phase === PLAYBACK.GONE);
+  const autoPlayId = useRef<string | null>(images[startIndex]?.id ?? null);
+  const mixed = images.some(isInAppPlayableVideo);
+  const formatMessage = useFormatMessage();
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
     current as MessageAttachment,
   );
+  const saving = useSaveAttachment(workspaceId, channelId, current as MessageAttachment);
+  const { save: startSave } = saving;
   const toggleChrome = useCallback(() => setHidden(value => !value), []);
+
+  // 뷰어 안의 터치는 아래 행의 「밀어서 답글」(#4869)의 것이 아니다. 이 뷰어는 메시지 행의 React 자손이라(Modal 도 React 트리로는 행 안이다)
+  // 행의 밀기 컨테이너가 **capture 길**에서 오른쪽→왼쪽 쓸기를 먼저 가져간다 — 뷰어 안에서 다음 장으로 넘기는 바로 그 쓸기다. 가져가면
+  // 사진·영상을 넘기는 동시에 뒤 대화에 답글 입력칸이 열리고 자판이 올라와 아래 조작(영상 조작 줄)을 덮고, 그 자판을 내리는 첫 탭이 재생 단추를
+  // 삼킨다(#5208 시뮬레이터 실측). 길게 눌러 시트를 연 손가락에 세우는 것과 같은 표지(`ReplySwipeGuardContext`)를 뷰어의 모든 터치 시작에 세운다 —
+  // 컨테이너가 새 터치 시작에서 표지를 거두고(capture, 뿌리 먼저) 이 `onTouchStart` 가 그 **뒤에** 다시 세우므로 이 터치는 밀리지 않는다.
+  const replySwipeGuard = useContext(ReplySwipeGuardContext);
+  const holdReplySwipe = useCallback(() => {
+    if (replySwipeGuard !== null) replySwipeGuard.current = true;
+  }, [replySwipeGuard]);
 
   // ---- 확대 (#4769) -----------------------------------------------------------------------
   // 현재 쪽이 확대돼 있는가. 확대 중에는 가로 넘기기와 쓸어 닫기가 꺼진다. 쪽이 `zoomScale` 로 알려 온다(다른 쪽의 알림은 무시한다).
@@ -567,13 +668,16 @@ function ViewerFrame({
     if (position === indexRef.current) setZoomed(next);
   }, []);
 
-  const preview = useAttachmentPreview(workspaceId, channelId, current as MessageAttachment, true);
-  const natural = usePhotoSize(current?.id ?? '', preview.status === 'ready' ? preview.uri : null);
+  // 영상의 바이트를 사진 미리보기로 받지 않는다 — 켜면 영상 한 편(최대 수백 MB)을 통째로 캐시에 내려받는다(#5208).
+  const preview = useAttachmentPreview(workspaceId, channelId, current as MessageAttachment, !currentIsVideo);
+  const photoUri = preview.status === 'ready' ? preview.uri : null;
+  const natural = usePhotoSize(current?.id ?? '', currentIsVideo ? null : photoUri);
   const fitted = fitStageRect(natural, {width, height});
   const requestClose = useCallback(() => {
     if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
-    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || (!origin && !measureSource)});
-  }, [zoomed, reduceMotion, origin, measureSource]);
+    // 영상은 맞는 사진 모양이 없어 hero 로 돌아갈 곳이 없다 — 바로 닫는다.
+    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || currentIsVideo || (!origin && !measureSource)});
+  }, [zoomed, reduceMotion, origin, measureSource, currentIsVideo]);
   closeRequest.current = requestClose;
   useEffect(() => {
     if (origin && heroRect.current === null) heroRect.current = origin;
@@ -686,6 +790,7 @@ function ViewerFrame({
 
   // 다른 장으로 넘어가면(썸네일·넘기기) 앞 장의 확대가 풀린다. 이 장은 원래 크기에서 시작한다.
   useEffect(() => {
+    if (images[index]?.id !== autoPlayId.current) autoPlayId.current = null;
     setZoomed(false);
     zoomPages.current.forEach((page, position) => {
       if (position !== index) page?.reset(!reduceMotion);
@@ -788,15 +893,41 @@ function ViewerFrame({
     }
   }, [download.status]);
 
-  const busy = download.status === 'downloading';
+  const busy = download.status === 'downloading' || saving.state.status === 'working';
   const save = useCallback(() => {
     setPressedBy('save');
-    share();
-  }, [share]);
+    startSave();
+  }, [startSave]);
   const sendOut = useCallback(() => {
     setPressedBy('share');
     share();
   }, [share]);
+
+  // 저장 알약의 글. [공유]를 마지막으로 눌렀으면 저장의 알약은 서지 않는다(남은 영수증·실패가 공유의 알약을 가리지 않게).
+  const saveKey = pressedBy === 'save' ? saveNoticeKey(saving.state) : null;
+  const saveNotice = saveKey === null ? null : formatMessage(saveKey);
+  // 상태 알약은 마지막으로 누른 단추의 일을 말한다. 저장의 영수증만 걷히고, 실패·거부는 다음 저장이 지울 때까지 선다.
+  // 알약 안의 「· 동사」는 누르면 그 일을 한다(#5273): 거부 → 설정 앱, 저장 실패 → 다시 저장, 내려받기(공유) 실패 → 다시 공유.
+  // 같은 모양의 알약이 어떤 것은 눌리고 어떤 것은 탭이 사진으로 새서 조작을 숨기지 않는다. 하는 중·영수증은 읽기만 한다.
+  let pill: NoticePillProps | null = null;
+  if (saveNotice !== null) {
+    pill =
+      saving.state.status === 'denied'
+        ? { text: saveNotice, failed: false, onPress: saving.openSettings, testID: 'attachment-viewer-save-settings' }
+        : saving.state.status === 'failed'
+          ? { text: saveNotice, failed: true, onPress: save, testID: 'attachment-viewer-save-retry' }
+          : { text: saveNotice, failed: false };
+  } else if (pressedBy === 'share' && download.status !== 'idle') {
+    pill =
+      download.status === 'downloading'
+        ? { text: ATTACH_COPY.downloading, failed: false }
+        : {
+            text: `${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`,
+            failed: true,
+            onPress: sendOut,
+            testID: 'attachment-viewer-share-retry',
+          };
+  }
 
   const hasSender = senderName !== undefined && senderName.trim() !== '';
   const hasTime = sentAtMs !== undefined && Number.isFinite(sentAtMs);
@@ -825,6 +956,7 @@ function ViewerFrame({
       onAccessibilityEscape={requestClose}
       style={styles.viewer}
       testID={exiting ? "attachment-viewer-exit" : "attachment-viewer"}
+      onTouchStart={holdReplySwipe}
       // 사진 밖에 닿은 손가락만 쥔다(부분 집합). 사진 위는 쪽이 쥔다 — 위 「응답을 쥐는 자리」.
       {...frameHandlers}
     >
@@ -858,26 +990,42 @@ function ViewerFrame({
             setIndex(Math.round(event.nativeEvent.contentOffset.x / width))
           }
         >
-          {images.map((image, position) => (
-            <ViewerPage
-              key={image.id}
-              workspaceId={workspaceId}
-              channelId={channelId}
-              attachment={image}
-              position={position}
-              width={width}
-              height={height}
-              responder={pageHandlers}
-              blankResponder={frameHandlers}
-              zoomPages={zoomPages}
-              onZoomedChange={onZoomedChange}
-            />
-          ))}
+          {images.map((image, position) =>
+            isInAppPlayableVideo(image) ? (
+              <VideoViewerPage
+                key={image.id}
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={image}
+                width={width}
+                height={height}
+                responder={pageHandlers}
+                blankResponder={frameHandlers}
+                // 플레이어는 지금 보는 영상에만 선다. 닫으면 Modal 이 내려가며 플레이어가 풀려 소리가 멎는다.
+                active={position === index}
+                autoPlay={image.id === autoPlayId.current}
+                onActiveVideo={setActiveVideo}
+              />
+            ) : (
+              <ViewerPage
+                key={image.id}
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={image}
+                position={position}
+                width={width}
+                height={height}
+                responder={pageHandlers}
+                zoomPages={zoomPages}
+                onZoomedChange={onZoomedChange}
+              />
+            ),
+          )}
         </ScrollView>
       </Animated.View>
       {heroActive ? <StageHero
         key={transition.ticket}
-        uri={preview.status === 'ready' ? preview.uri : null}
+        uri={photoUri}
         from={closingFrame?.from ?? origin ?? fitted}
         to={closingFrame?.to ?? fitted}
         closing={transition.phase === 'closing'}
@@ -977,21 +1125,15 @@ function ViewerFrame({
             style={styles.scrimBottomFade}
             testID="attachment-viewer-scrim-bottom-fade"
           />
-          {download.status !== 'idle' ? (
-            <Text
-              pointerEvents="none"
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-              style={[
-                styles.notice,
-                download.status === 'failed' && styles.noticeFailed,
-              ]}
-              testID="attachment-viewer-status"
-            >
-              {download.status === 'downloading'
-                ? ATTACH_COPY.downloading
-                : `${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`}
-            </Text>
+          {videoHandle !== null && !videoBroken ? (
+            <VideoControls
+              key={videoHandle.attachmentId}
+              player={videoHandle.player}
+              controller={videoHandle.controller}
+              durationHintSeconds={videoHandle.durationHintSeconds}
+            />
           ) : null}
+          {pill !== null ? <NoticePill {...pill} /> : null}
           {total > 1 ? (
             <>
               <ScrollView
@@ -1020,53 +1162,68 @@ function ViewerFrame({
               </ScrollView>
               <View pointerEvents="none" style={styles.captionRow}>
                 <Image
-                  source={ATTACH_MENU_ICONS.photo}
+                  source={currentIsVideo ? VIDEO_ICONS.video : ATTACH_MENU_ICONS.photo}
                   style={styles.captionGlyph}
                 />
                 {/* 이름은 글자 자체에 둔다(행을 `accessible` 로 묶으면 안의 testID 가 접근성 트리에서 사라진다 — Maestro 가 이 글자를
                     id 로 짚는다). 보이는 글은 「3장 중 2번」, 읽히는 글은 「3장 중 2번째 사진」이다. */}
                 <Text
-                  accessibilityLabel={viewerCaptionLabel(index + 1, total)}
+                  accessibilityLabel={
+                    mixed
+                      ? formatMessage('attachments.viewer.mixedCaptionLabel', { position: index + 1, total })
+                      : viewerCaptionLabel(index + 1, total)
+                  }
                   maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
                   style={styles.caption}
                   testID="attachment-viewer-position"
                 >
-                  {viewerCaption(index + 1, total)}
+                  {mixed
+                    ? formatMessage('attachments.viewer.mixedCaption', { position: index + 1, total })
+                    : viewerCaption(index + 1, total)}
                 </Text>
               </View>
             </>
           ) : null}
-          <View pointerEvents="box-none" style={styles.actionRow}>
-            <GlassButton
-              label="저장"
-              // 사진 보관함에 직접 쓰지 않는다 — 공유 시트의 「이미지 저장」이 저장이다(파일 머리).
-              hint="공유 시트가 열려요. 「이미지 저장」을 고르세요"
-              onPress={save}
-              disabled={busy}
-              testID="attachment-viewer-save"
-            >
-              {busy && pressedBy === 'save' ? (
-                <ActivityIndicator color={VIEWER_STAGE.ink} />
-              ) : (
-                <Image
-                  source={VIEWER_ICONS.download}
-                  style={styles.actionGlyph}
-                />
-              )}
-            </GlassButton>
-            <GlassButton
-              label="공유"
-              onPress={sendOut}
-              disabled={busy}
-              testID="attachment-viewer-share"
-            >
-              {busy && pressedBy === 'share' ? (
-                <ActivityIndicator color={VIEWER_STAGE.ink} />
-              ) : (
-                <Image source={VIEWER_ICONS.share} style={styles.actionGlyph} />
-              )}
-            </GlassButton>
-          </View>
+          {/* 재생 실패·영상 사라짐에는 [저장]·[공유]가 없다 — 다음 행동은 「다시 시도」 하나다(위 `videoBroken`). */}
+          {videoBroken ? null : (
+            <View pointerEvents="box-none" style={styles.actionRow}>
+              <GlassButton
+                label="저장"
+                // 사진·영상은 사진 보관함에 바로 추가한다(파일 머리). 길이 파일 앱이면(보관함이 못 받는 형식이 뷰어에 들어온 경우) 그 말로.
+                hint={formatMessage(
+                  saving.route !== 'photos'
+                    ? 'mobile.attachmentSave.toFiles'
+                    : currentIsVideo
+                    ? 'attachments.video.saveHint'
+                    : 'mobile.attachmentSave.saveHintPhotos',
+                )}
+                onPress={save}
+                disabled={busy}
+                testID="attachment-viewer-save"
+              >
+                {busy && pressedBy === 'save' ? (
+                  <ActivityIndicator color={VIEWER_STAGE.ink} />
+                ) : (
+                  <Image
+                    source={VIEWER_ICONS.download}
+                    style={styles.actionGlyph}
+                  />
+                )}
+              </GlassButton>
+              <GlassButton
+                label="공유"
+                onPress={sendOut}
+                disabled={busy}
+                testID="attachment-viewer-share"
+              >
+                {busy && pressedBy === 'share' ? (
+                  <ActivityIndicator color={VIEWER_STAGE.ink} />
+                ) : (
+                  <Image source={VIEWER_ICONS.share} style={styles.actionGlyph} />
+                )}
+              </GlassButton>
+            </View>
+          )}
         </Animated.View>
       </LiquidGlassAllowed.Provider> : null}
     </View>
@@ -1187,6 +1344,17 @@ const buildStyles = (_color: Palette) =>
     // 같은 두께의 투명 테두리 — 고를 때 사진이 자리를 옮기지 않는다.
     thumbIdle: { borderColor: 'transparent', opacity: VIEWER.thumbDim },
     thumbImage: { width: '100%', height: '100%' },
+    // 영상 썸네일의 표지(#5208): 포스터를 가리지 않게 왼쪽 아래 모서리에 영상기만 얹는다.
+    thumbBadge: {
+      ...LAYOUT.floating,
+      left: space.xs,
+      bottom: space.xs,
+    },
+    thumbBadgeGlyph: {
+      width: VIDEO_ICON_SIZE.video,
+      height: VIDEO_ICON_SIZE.video,
+      tintColor: VIEWER_STAGE.ink,
+    },
     captionRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1220,29 +1388,14 @@ const buildStyles = (_color: Palette) =>
       textAlign: 'center',
     },
     noticeFailed: { color: VIEWER_STAGE.danger },
+    // 거부 알약은 눌린다(설정 열기) — 알약 자체는 글줄 높이라 44 는 `hitSlop` 이 채운다(`NOTICE_HEIGHT`).
+    noticeHit: { alignSelf: 'center' },
     actionRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
     },
 
-    // ---- 둥근 유리 단추 -------------------------------------------------------------
-    glassCircle: { width: VIEWER.control, height: VIEWER.control },
-    glassHit: {
-      width: VIEWER.control,
-      height: VIEWER.control,
-      minWidth: VIEWER.control,
-      minHeight: VIEWER.control,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.pill,
-    },
-    glassPressed: { backgroundColor: VIEWER_STAGE.pressedFill },
-    glassRing: {
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: VIEWER_STAGE.glassBorder,
-    },
     backGlyph: {
       width: CONV_ICON_SIZE.left,
       height: CONV_ICON_SIZE.left,

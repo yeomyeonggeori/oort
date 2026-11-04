@@ -117,6 +117,103 @@ printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Eq 'migrate|테이블' || \
 pass "missing outbox relation → skip migrate 대기"
 
 # -----------------------------------------------------------------------------
+# push_system (ADR-0206 D15, #4341): a push that names no message — the test push.
+# No relay configured → info (as push_candidate); relay configured → by age (as agent_job).
+# -----------------------------------------------------------------------------
+oort_doctor_classify_outbox 0 <<EOF
+$(printf 'push_system\tpending\t2\t900\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+  fail "push_system with no relay want info (nothing can drain it), got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_system|pending|2' || \
+  fail "push_system info detail must name the row: $OORT_DOCTOR_OUTBOX_DETAIL"
+if printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate'; then
+  fail "a push_system row must not be explained as push_candidate: $OORT_DOCTOR_OUTBOX_DETAIL"
+fi
+pass "fixture 4: no relay + old push_system pending → info (not the permanent FAIL)"
+
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_system\tpending\t1\t20\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+  fail "young push_system with a relay want info (in flight), got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+pass "fixture 5: relay + young push_system pending → info (in flight)"
+
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_system\tpending\t1\t600\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "stale push_system with a relay want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_system|pending|1 max_age=600s' || \
+  fail "stale push_system detail must list kind|status|count and its age: $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "fixture 6: relay + stale push_system pending → fail with the age listed"
+
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_system\tfailed\t1\t3600\nbroadcast\tdone\t9\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "an old failed push_system with a relay want fail, got $OORT_DOCTOR_OUTBOX_STATUS"
+pass "fixture 7: relay + old failed push_system → fail"
+
+# The two rules do not leak into each other: with a relay, a young push_system beside a
+# push_candidate is still the candidate's FAIL, and the candidate's own row is still named.
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_candidate\tpending\t3\nbroadcast\tdone\t9\npush_system\tpending\t1\t20\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "push_candidate pending with a relay is still fail, got $OORT_DOCTOR_OUTBOX_STATUS"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate|pending|3' || \
+  fail "the candidate row must still be listed: $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "fixture 8: relay + push_candidate pending + young push_system → still the candidate's fail"
+
+# -----------------------------------------------------------------------------
+# Sabotage: strip the push_system branch → fixture 4 goes RED (the generic rule fails it)
+# -----------------------------------------------------------------------------
+SAB2="$SANDBOX/oort_doctor_sabotaged_push_system.sh"
+cp "$DOCTOR" "$SAB2"
+python3 - "$SAB2" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+new, n = re.subn(
+    r"[ \t]*# BEGIN oort-doctor-push-system.*?#[ \t]*END oort-doctor-push-system\n",
+    "",
+    text,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit(f"expected 1 push-system block, stripped {n}")
+path.write_text(new, encoding="utf-8")
+PY
+if grep -F 'BEGIN oort-doctor-push-system' "$SAB2" >/dev/null 2>&1; then
+  fail "sabotage left the push-system markers in place"
+fi
+# shellcheck disable=SC1090
+. "$SAB2"
+oort_doctor_classify_outbox 0 <<EOF
+$(printf 'push_system\tpending\t2\t900\n')
+EOF
+if [ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ]; then
+  fail "push_system sabotage stayed green — the branch is not load-bearing"
+fi
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "push_system sabotage want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_system\tpending\t1\t20\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "young push_system sabotage want fail (the generic rule), got $OORT_DOCTOR_OUTBOX_STATUS"
+pass "sabotage: remove the push_system branch → RED (fail not info)"
+
+# The original sabotage below sources its own copy; load the real library again first.
+# shellcheck disable=SC1090
+. "$DOCTOR"
+
+# -----------------------------------------------------------------------------
 # Sabotage: strip the unconfigured-push branch → fixture 1 goes RED
 # -----------------------------------------------------------------------------
 SAB="$SANDBOX/oort_doctor_sabotaged.sh"

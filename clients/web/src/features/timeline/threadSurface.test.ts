@@ -5,6 +5,14 @@ const panelSource = readFileSync(
   new URL("./ThreadPanel.tsx", import.meta.url),
   "utf8"
 );
+const chatShellSource = readFileSync(
+  new URL("../chat/ChatShell.tsx", import.meta.url),
+  "utf8"
+);
+const useTimelineSource = readFileSync(
+  new URL("./useTimeline.ts", import.meta.url),
+  "utf8"
+);
 const captureSource = readFileSync(
   new URL("../../../scripts/capture-screens.mjs", import.meta.url),
   "utf8"
@@ -16,7 +24,30 @@ describe("스레드 표면 계약 (#1753)", () => {
       '<div className="mx-4 my-2 h-px bg-line" />'
     );
     expect(panelSource).toContain('data-testid="thread-replies"');
-    expect(panelSource).toContain('className="pt-8"');
+    // 띠의 값은 이름 붙은 상수다. 이유와 실제 엔진의 측정은 spacing.ts와 threadSurface.browser.test.ts에 있다(#4878):
+    // 손으로 `pt-*`를 다시 적으면 그 측정을 건너뛰게 된다.
+    expect(panelSource).toContain(
+      '<div className={THREAD_REPLIES_LEAD_CLASS} data-testid="thread-replies">'
+    );
+    expect(panelSource).not.toMatch(/data-testid="thread-replies"[^>]*className="pt-/);
+  });
+
+  it("읽음 신호의 응답이 타임라인 상태의 루트로 올라간다 (#4878)", () => {
+    // 「새 답글 M」 칩은 **타임라인 상태의 루트**가 그린다(ChatShell의 `thread` 스냅샷이 아니다). 패널은 신호를 보내고
+    // 응답을 호스트로 넘길 뿐이라, 호스트가 그것을 상태에 반영하지 않으면 칩은 영영 안 사라진다.
+    expect(chatShellSource).toContain("onThreadRead={timeline.applyThreadRead}");
+    expect(useTimelineSource).toContain("applyThreadReadState(s, rootId, read)");
+    expect(panelSource).toContain("readTarget.current.onThreadRead?.(rootId, state)");
+  });
+
+  it("열린 스레드를 보고 있는지 목록에 알린다 — 읽음 신호를 보내는 조건과 같은 창 앞 판정이다 (#5032)", () => {
+    // 패널이 열려 있고 창이 앞이면 그 루트의 요약 줄은 남의 새 답글에 칩이 +1 되지 않는다. 호스트가 이 값을 안 내리면 코어의
+    // `viewing`이 영영 안 켜지고, 패널과 목록이 서로 다른 「앞」을 읽으면 칩이 깜빡이거나 안 읽은 채로 사라진다.
+    expect(chatShellSource).toContain("const windowForeground = useDocumentForeground(thread !== null);");
+    expect(chatShellSource).toContain(
+      "viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}"
+    );
+    expect(panelSource).toContain("const foreground = useDocumentForeground();");
   });
 
   it("루트 툴바가 판정할 자체 스크롤 경계를 이름 붙인다", () => {

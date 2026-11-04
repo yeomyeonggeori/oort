@@ -4,7 +4,10 @@
 //
 //   deep link     momo://join arrives from the OS -> `momo:deep-link` event
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
-//   notification  mentions/approvals              -> commands
+//   notification  mentions/approvals              -> commands (+ a banner click -> `momo:notification-click`, macOS, #5059)
+//   menu bar      icon + menu, built here          -> one command `tray_status_set` (+ a pick -> `momo:tray-action`, macOS, #5193)
+//   main window   the red button puts it away, the app stays in the menu bar; the Dock icon, the menu,
+//                 a clicked banner and an invite link bring it back (`main_window.rs`, #5196)
 //   keychain      refresh token at rest           -> commands
 //   session       the refresh rotation + its proof -> commands (#3106; the
 //                 webview gets the access token and a handle, never the token)
@@ -59,15 +62,25 @@ mod keychain;
 #[cfg(desktop)]
 mod locale;
 mod notification;
+// A banner click reported to the web layer (#5059): the shell keeps the banner's handle and emits
+// `momo:notification-click` on a click. macOS only; elsewhere `notification_show_clickable`
+// shows a plain banner and the web layer keeps its focus approximation.
+#[cfg(target_os = "macos")]
+mod notification_click;
 // The shell's own refresh rotation with the refresh-key proof (#3106,
 // ADR-0146 D-7 증보 #3079): the webview asks for a rotation and gets the
 // access token and a handle, never the refresh token.
 #[cfg(desktop)]
 mod session_refresh;
-// A window close waits (bounded) for a refresh rotation in flight, so the
-// rotated token reaches the keychain (#3098).
+// A close that ENDS the app waits (bounded) for a refresh rotation in flight, so the
+// rotated token reaches the keychain (#3098). Whether a close ends the app is `main_window`'s call.
 #[cfg(desktop)]
 mod rotation_hold;
+// The main window's way back and way out (#5195 · #5196): what the red button does (put the window
+// away while the menu-bar icon keeps the app, otherwise end the app as before), and every way the window
+// comes back. The one place that decides a close.
+#[cfg(desktop)]
+mod main_window;
 // Harness hook signals for pane status dots (#2776, ADR-0190 D4-b): an
 // app-only Unix socket, a token per pane, a closed event table.
 #[cfg(desktop)]
@@ -107,6 +120,11 @@ mod shell_contract;
 mod terminal_app;
 #[cfg(desktop)]
 mod updater;
+// The menu-bar icon and its menu (#5193): drawn here from one narrow command, `tray_status_set`.
+// macOS only; the other desktops validate the status and draw nothing. Granted to the `main`
+// window by `capabilities/default.json`, which also denies tauri's own JS tray API.
+#[cfg(desktop)]
+mod tray;
 // 「유리 배경」의 셸 쪽(AP-3 #4190, ADR-0189 증보 3 D6): 창 뒤 블러(`window_vibrancy_set`)와 앱
 // 네이티브 appearance(`app_theme_set`). macOS가 아니면 둘 다 `Ok(())`다. 데스크탑 표에만 있다.
 #[cfg(desktop)]
@@ -170,18 +188,13 @@ pub fn run() {
         // a `dialog:*` permission to the webview.
         .plugin(tauri_plugin_dialog::init())
         .manage(updater::UpdaterState::default())
+        .manage(tray::TrayState::default())
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
         .manage(device_key::DeviceKeyState::default())
         .manage(rotation_hold::RotationHold::default())
         .manage(session_refresh::SessionShell::default())
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    rotation_hold::on_close_requested(window, api);
-                }
-            }
-        })
+        .on_window_event(main_window::on_window_event)
         .invoke_handler(tauri::generate_handler![
             locale::locale_preference_read,
             locale::locale_preference_write,
@@ -192,7 +205,10 @@ pub fn run() {
             notification::notification_permission,
             notification::notification_request_permission,
             notification::notification_show,
+            notification::notification_click_supported,
+            notification::notification_show_clickable,
             notification::dock_badge_set,
+            tray::tray_status_set,
             window_vibrancy::window_vibrancy_set,
             window_vibrancy::app_theme_set,
             keychain::keychain_available,
@@ -350,6 +366,16 @@ pub fn run() {
         .build(context())
         .expect("error while building momo desktop shell")
         .run(|_app, _event| {
+            // A click on the Dock icon while the window is put away (or minimized) brings it back (#5196).
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = _event
+            {
+                main_window::on_reopen(_app, has_visible_windows);
+                return;
+            }
             // Closing the app ends every local terminal's process group
             // (#2772). `Exit` rather than `ExitRequested`: the latter can be
             // vetoed, the former is the last event before the process ends.

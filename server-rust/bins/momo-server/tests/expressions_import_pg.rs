@@ -7,6 +7,11 @@
 //!
 //! DATABASE_URL=<dedicated DB> cargo test -p momo-server --test expressions_import_pg \
 //!   -- --ignored --test-threads=1
+//!
+//! Needs the isolated decoder child beside the test binary: `cargo build -p momo-expressions
+//! --bins` first (`cargo test -p momo-server` builds no other package's bins). Without it every
+//! import ends as a `source_invalid_media` card and six of these tests go red without saying why
+//! (#4947); `require_decoder_4947` fails first and names the command.
 use async_trait::async_trait;
 use momo_db::sqlx::{
     self,
@@ -187,6 +192,17 @@ fn multipart(file: &[u8]) -> Vec<u8> {
     b.extend_from_slice(b"\r\n--oort-import-test--\r\n");
     b
 }
+/// The direct upload's own body: the metadata part, then the file.
+fn multipart_with_metadata(metadata: &Value, file: &[u8]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(
+        format!("--oort-import-test\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes(),
+    );
+    b.extend_from_slice(b"--oort-import-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+    b.extend_from_slice(file);
+    b.extend_from_slice(b"\r\n--oort-import-test--\r\n");
+    b
+}
 fn html(body: &str) -> Vec<u8> {
     format!("<!doctype html><html><head><title>{body}</title></head><body></body></html>")
         .into_bytes()
@@ -306,11 +322,53 @@ async fn agent_bearer(su: &PgPool, ws: Uuid) -> String {
     token
 }
 
+/// The decoder child (`momo-expression-decoder`) must sit beside this test's target directory,
+/// found the way `momo_expressions::media` finds it: the `OORT_EXPRESSION_DECODER` override, else
+/// next to the test executable (one level above a `deps` directory). It belongs to
+/// `momo-expressions`, so building this test does not build it (#4947, header above). Fail here,
+/// first, and name the command: left to the server, a missing decoder is "every picture is
+/// invalid media". An explicit override is trusted.
+fn require_decoder_4947() {
+    if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
+        return;
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-decoder");
+    assert!(
+        path.is_file(),
+        "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
+         every picture is invalid media and an import ends as a source_invalid_media card"
+    );
+}
+
 async fn boot() -> World {
     boot_with(true).await
 }
 
+/// Which attachment archive the server under test is given.
+enum Drive {
+    /// The in-memory stub every other test in this file uses.
+    Stub,
+    /// Nothing configured: every attachment route answers 503 (the gate stack before #4900).
+    Unset,
+    /// The ADR-0169 local-volume archive in `dir`, with the capability-URL base the operator named
+    /// (`same-origin` or an absolute URL), built the way `main` builds it from `DriveSettings`.
+    Local {
+        dir: std::path::PathBuf,
+        base: String,
+    },
+}
+
 async fn boot_with(unfurl_enabled: bool) -> World {
+    boot_on(unfurl_enabled, Drive::Stub).await
+}
+
+async fn boot_on(unfurl_enabled: bool, drive: Drive) -> World {
+    require_decoder_4947();
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
     momo_db::migrate::run_migrations(
         &url,
@@ -354,22 +412,59 @@ async fn boot_with(unfurl_enabled: bool) -> World {
     assert!(!superuser && !bypass, "momo_app must be a plain role");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let archive = Arc::new(momo_drive::StubDriveArchive::new(&base));
     let mock = Mock::new();
     let state = AppState::new(
         api.clone(),
         SECRET.into(),
         "ws://localhost:8000/connection/websocket".to_string(),
-    )
-    .with_drive(archive)
-    .with_unfurl_http(mock.clone())
-    // The instance's outgoing-request switch is on for this suite (default off, ADR-0170 D3).
-    .with_unfurl_enabled(unfurl_enabled)
-    .with_realtime(RealtimeSettings {
-        cent_token_hmac: Some(SECRET.into()),
-        cent_proxy_secret: Some(SECRET.into()),
-        connection_token_ttl_seconds: 300,
-    });
+    );
+    let state = match drive {
+        Drive::Stub => state.with_drive(Arc::new(momo_drive::StubDriveArchive::new(&base))),
+        Drive::Unset => state,
+        Drive::Local {
+            dir,
+            base: advertised,
+        } => {
+            let port = listener.local_addr().unwrap().port();
+            let local_dir = dir.display().to_string();
+            let settings = momo_server::config::DriveSettings {
+                backend: "local".into(),
+                sa_key_path: None,
+                shared_drive_id: None,
+                local_dir: Some(local_dir.clone()),
+            };
+            assert_eq!(settings.boot_error("local"), None, "the archive boots");
+            // What `DriveSettings::backend_config` and `local_base` make of
+            // `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`, with the value handed in here instead of read
+            // from the process environment (a test does not change that for its neighbours).
+            let stub_base_url = format!("http://127.0.0.1:{port}");
+            let advert =
+                momo_server::DriveLocalBase::from_env_value(Some(&advertised), &stub_base_url);
+            let local_base_url = match &advert {
+                momo_server::DriveLocalBase::SameOrigin => stub_base_url.clone(),
+                momo_server::DriveLocalBase::Fixed(url) => url.clone(),
+            };
+            let archive = momo_drive::build_archive(&momo_drive::DriveBackendConfig {
+                mode: "local".into(),
+                sa_key_path: None,
+                shared_drive_id: None,
+                stub_base_url,
+                local_dir: Some(local_dir),
+                local_base_url,
+            })
+            .await;
+            state.with_drive(archive).with_drive_local_base(advert)
+        }
+    };
+    let state = state
+        .with_unfurl_http(mock.clone())
+        // The instance's outgoing-request switch is on for this suite (default off, ADR-0170 D3).
+        .with_unfurl_enabled(unfurl_enabled)
+        .with_realtime(RealtimeSettings {
+            cent_token_hmac: Some(SECRET.into()),
+            cent_proxy_secret: Some(SECRET.into()),
+            connection_token_ttl_seconds: 300,
+        });
     let server = tokio::spawn(async move {
         axum::serve(listener, build_app(state)).await.unwrap();
     });
@@ -459,6 +554,22 @@ impl World {
             .post(format!("{}/expressions", self.prefix))
             .bearer_auth(&who.token)
             .json(choice)
+            .send()
+            .await
+            .unwrap()
+    }
+    /// `POST …/expressions/uploads`: a picture of the person's own, no link involved.
+    async fn upload_new(&self, who: &Person, name: &str, file: &[u8]) -> reqwest::Response {
+        let metadata =
+            json!({"name":name,"displayName":"신나는 춤","tags":["춤"],"subjectMemberId":null});
+        self.http
+            .post(format!("{}/expressions/uploads", self.prefix))
+            .bearer_auth(&who.token)
+            .header(
+                "content-type",
+                "multipart/form-data; boundary=oort-import-test",
+            )
+            .body(multipart_with_metadata(&metadata, file))
             .send()
             .await
             .unwrap()
@@ -1519,4 +1630,475 @@ async fn an_instance_with_outgoing_requests_off_never_fetches_an_import() {
         "https://files.example.test/a.gif"
     );
     assert!(w.mock.calls().is_empty(), "no outbound request was made");
+}
+
+/// #4900: both decoder slots taken is the SERVER's retryable state. A person's own upload and a
+/// replacement answer it the way the link import does (503 with `Retry-After`, nothing written),
+/// never as a 415 that says their picture is the wrong format. A picture that really is the wrong
+/// format is still a 415, so the 503 is the busy state and not "every refusal".
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_busy_decoder_is_a_503_for_an_upload_and_a_replacement_never_a_415() {
+    let w = boot().await;
+    // A draft to replace, made while the decoder is free.
+    let draft = w
+        .json(w.upload_new(&w.member, &unique("first"), &png()).await, 201)
+        .await;
+    let id = draft["draftId"].as_str().unwrap().to_string();
+    let drafts_before = w.drafts_of(&w.member).await;
+    assert_eq!(drafts_before, 1);
+
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    // A new upload.
+    let busy = w.upload_new(&w.member, &unique("busy"), &png()).await;
+    assert_eq!(busy.status(), 503, "an upload met a busy decoder");
+    assert_eq!(
+        busy.headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok()),
+        Some("2"),
+        "and is told when to come back"
+    );
+    let body: Value = busy.json().await.unwrap();
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("busy")),
+        "{body}"
+    );
+    assert_ne!(body["error"]["code"], "expression_media_invalid", "{body}");
+    assert_eq!(
+        w.drafts_of(&w.member).await,
+        drafts_before,
+        "nothing written"
+    );
+    // A replacement.
+    let busy = w.upload_over(&w.member, &id, &png()).await;
+    assert_eq!(busy.status(), 503, "a replacement met a busy decoder");
+    assert!(busy.headers().contains_key("retry-after"));
+    let unchanged = w.json(w.get_draft(&w.member, &id).await, 200).await;
+    assert_eq!(
+        unchanged["revision"], "1",
+        "a refused replacement changed nothing"
+    );
+    drop(held);
+
+    // The slots are free again: the same two requests go through.
+    w.json(w.upload_new(&w.member, &unique("again"), &png()).await, 201)
+        .await;
+    let replaced = w
+        .json(w.upload_over(&w.member, &id, &png()).await, 200)
+        .await;
+    assert_eq!(replaced["revision"], "2");
+    // And a picture that really is the wrong format is still a 415 with the decoder free: the
+    // 503 above is the busy state, not "every refusal".
+    let wrong = w.upload_new(&w.member, &unique("heic"), &heic()).await;
+    assert_eq!(
+        w.code_of(wrong, 415).await,
+        "expression_media_invalid",
+        "a real format problem is still a 415"
+    );
+}
+
+/// #4900: a video source is a card because of what it IS, decided from its first bytes, so it is a
+/// card even when every decoder slot is taken: not a "busy", for something no slot could make.
+/// The control in the same breath: a picture meeting the same two taken slots IS busy (503).
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_video_is_a_card_even_when_every_decoder_slot_is_taken() {
+    let w = boot().await;
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    // A link whose body is a video: the card, immediately, with the link kept.
+    for (what, bytes) in [("mp4", mp4()), ("webm", webm())] {
+        w.clear_drafts(&w.member).await;
+        w.mock.set(move |_| Reply::Body {
+            content_type: "video/mp4",
+            bytes: bytes.clone(),
+        });
+        let started = Instant::now();
+        let card = w
+            .json(
+                w.import(
+                    &w.member,
+                    &request(&unique("clip"), "https://files.example.test/clip"),
+                )
+                .await,
+                200,
+            )
+            .await;
+        assert_eq!(card["state"], "manual_upload_required", "{what}");
+        assert_eq!(card["code"], "video_processing_unavailable", "{what}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{what}: a card is not a wait for a slot: {:?}",
+            started.elapsed()
+        );
+    }
+    // The same video as a person's own upload.
+    w.clear_drafts(&w.member).await;
+    let card = w
+        .json(
+            w.upload_new(&w.member, &unique("own_clip"), &mp4()).await,
+            200,
+        )
+        .await;
+    assert_eq!(card["state"], "manual_upload_required");
+    assert_eq!(card["code"], "video_processing_unavailable");
+    assert_eq!(card["media"], Value::Null);
+    // The control: a picture meets the same two taken slots and IS told to come back.
+    let picture = w.upload_new(&w.member, &unique("ctrl_pic"), &png()).await;
+    assert_eq!(
+        picture.status(),
+        503,
+        "control: a picture meets the busy decoder"
+    );
+    drop(held);
+    // Replacing a draft's file with a video is not a card and not retryable: 415, as ever.
+    let draft = w
+        .json(
+            w.upload_new(&w.member, &unique("to_replace"), &png()).await,
+            201,
+        )
+        .await;
+    let id = draft["draftId"].as_str().unwrap().to_string();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let refused = w.upload_over(&w.member, &id, &mp4()).await;
+    assert_eq!(
+        w.code_of(refused, 415).await,
+        "expression_media_invalid",
+        "a video cannot replace a picture, and waiting would not help it"
+    );
+    drop(held);
+}
+
+/// Removes its directory when the test ends, pass or fail. The directory is this test's own
+/// (a name made from the process and a fresh id under the system temp dir).
+struct OwnDir(std::path::PathBuf);
+impl Drop for OwnDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Run the OpenAPI gate's expression sampler against `w` as `w.member`, in `out`.
+async fn run_gate_sampler(w: &World, channel: Uuid, out: &std::path::Path) -> std::process::Output {
+    let auth = out.join("auth.conf");
+    std::fs::write(
+        &auth,
+        format!("header = \"Authorization: Bearer {}\"\n", w.member.token),
+    )
+    .unwrap();
+    // Not `std::process::Command`: the server under test runs on this very runtime, and a blocked
+    // test thread would be a server that never answers the sampler.
+    tokio::process::Command::new("python3")
+        .arg("-I")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../scripts/sample_expression_contract.py"
+        ))
+        .args(["--base-url", &w.base])
+        .args(["--workspace", &w.ws.to_string()])
+        .args(["--channel", &channel.to_string()])
+        .arg("--auth-config")
+        .arg(&auth)
+        .arg("--out-dir")
+        .arg(out.join("samples"))
+        .arg("--manifest")
+        .arg(out.join("manifest.jsonl"))
+        .output()
+        .await
+        .expect("python3 runs the sampler")
+}
+
+async fn channel_of(w: &World) -> Uuid {
+    momo_messaging::create_channel(
+        &w.api,
+        w.ws,
+        momo_messaging::NewChannel {
+            kind: momo_messaging::ChannelKind::Public,
+            name: unique("sampler"),
+            topic: None,
+            created_by: w.member.actor.member,
+        },
+    )
+    .await
+    .expect("a channel the sampler's person belongs to")
+    .id
+}
+
+/// #4900: the OpenAPI gate's runtime sample (`scripts/sample_expression_contract.py`) runs to its
+/// end on the Drive the gate stack is given. The stack's own lines are read out of
+/// `scripts/verify_openapi_contract_rust.sh` and turned into the server's configuration the way
+/// `main` does it, so changing those lines changes this test. The control is the stack as it was:
+/// without a Drive the sample ended at the first attachment, with a 503, and the operations after
+/// it were never measured by the gate.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_gates_expression_sampler_runs_to_its_end_on_the_drive_the_gate_stack_is_given() {
+    let gate_script = include_str!("../../../../scripts/verify_openapi_contract_rust.sh");
+    let gate_setting = |key: &str| {
+        let prefix = format!("{key}=");
+        let found: Vec<&str> = gate_script
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .collect();
+        assert_eq!(found.len(), 1, "the gate's env block sets {key} once");
+        found[0].to_string()
+    };
+    assert_eq!(
+        gate_setting("MOMO_DRIVE_ARCHIVE_BACKEND"),
+        "local",
+        "the gate stack runs the local archive: no credential, allowed in a deployed environment"
+    );
+    assert!(
+        gate_setting("MOMO_DRIVE_LOCAL_DIR").starts_with('/'),
+        "a path inside the container"
+    );
+    let advertised = gate_setting("MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL");
+
+    let work = std::env::temp_dir().join(format!(
+        "oort-gate-sampler-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&work).unwrap();
+    let _work = OwnDir(work.clone());
+
+    // The gate stack's Drive: the sample goes all the way through.
+    let drive_dir = work.join("drive");
+    let w = boot_on(
+        false,
+        Drive::Local {
+            dir: drive_dir,
+            base: advertised,
+        },
+    )
+    .await;
+    let channel = channel_of(&w).await;
+    let out = work.join("with-drive");
+    std::fs::create_dir_all(&out).unwrap();
+    let ran = run_gate_sampler(&w, channel, &out).await;
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&ran.stdout).to_string(),
+        String::from_utf8_lossy(&ran.stderr).to_string(),
+    );
+    assert!(
+        ran.status.success(),
+        "the sampler ran to its end: {stdout} {stderr}"
+    );
+    assert!(
+        stdout.contains("15 live storage operations passed"),
+        "every operation was measured: {stdout}"
+    );
+    // The gate checks the list both ways; this is that check for the expression operations.
+    let recorded: std::collections::BTreeSet<String> =
+        std::fs::read_to_string(out.join("manifest.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                format!(
+                    "{} {}",
+                    sample["method"].as_str().unwrap().to_uppercase(),
+                    sample["path"].as_str().unwrap()
+                )
+            })
+            .collect();
+    let listed: std::collections::BTreeSet<String> =
+        include_str!("../../../../scripts/openapi_sampled_on_rust.txt")
+            .lines()
+            .filter(|line| !line.starts_with('#') && line.contains("/expression"))
+            .map(str::to_string)
+            .collect();
+    assert_eq!(
+        recorded, listed,
+        "the sampler measures exactly the expression operations the gate lists"
+    );
+
+    // The control: the same sampler on a stack with no Drive ends at the first attachment.
+    let bare = boot_on(false, Drive::Unset).await;
+    let channel = channel_of(&bare).await;
+    let out = work.join("without-drive");
+    std::fs::create_dir_all(&out).unwrap();
+    let ran = run_gate_sampler(&bare, channel, &out).await;
+    let stderr = String::from_utf8_lossy(&ran.stderr).to_string();
+    assert!(!ran.status.success(), "no Drive, no sample: {stderr}");
+    assert!(
+        stderr.contains("attachments/uploads expected 201, got 503"),
+        "it ends where the gate used to end: {stderr}"
+    );
+}
+
+// ── ADR-0218 증보 4 §10 (#4961): the kind is chosen on the one registration door ───────────────
+
+/// The draft routes (upload, import) take no kind — it is decided where every route registers
+/// (`POST /expressions`), once the person has seen the server's own large picture. There the kind is
+/// the person's word, else the server's recommendation, and nothing outside the closed list gets in.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_kind_is_chosen_on_the_registration_door_and_the_draft_routes_take_none() {
+    let w = boot().await;
+    let upload = |who: &Person, metadata: Value, file: Vec<u8>| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions/uploads", w.prefix);
+        let token = who.token.clone();
+        async move {
+            http.post(url)
+                .bearer_auth(token)
+                .header(
+                    "content-type",
+                    "multipart/form-data; boundary=oort-import-test",
+                )
+                .body(multipart_with_metadata(&metadata, &file))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let meta =
+        |name: &str| json!({"name":name,"displayName":"그림","tags":[],"subjectMemberId":null});
+    let door = |who: &Person, body: Value| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions", w.prefix);
+        let token = who.token.clone();
+        async move {
+            http.post(url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let pin = |draft: &Value| json!({"draftId":draft["draftId"],"revision":draft["revision"],"sha256":draft["media"]["large"]["sha256"]});
+    let with_kind = |mut body: Value, kind: Value| {
+        body["kind"] = kind;
+        body
+    };
+
+    // A draft carries no kind, and the draft routes refuse one: it is not theirs to say.
+    let moving = unique("kind_moving");
+    let draft = w
+        .json(upload(&w.owner, meta(&moving), gif(3)).await, 201)
+        .await;
+    assert!(draft.get("kind").is_none(), "a draft has no kind: {draft}");
+    assert_eq!(
+        w.code_of(
+            upload(
+                &w.owner,
+                with_kind(meta(&unique("kind_in_upload")), json!("emoji")),
+                png()
+            )
+            .await,
+            400
+        )
+        .await,
+        "expression_invalid"
+    );
+    assert_eq!(
+        w.code_of(
+            w.import(
+                &w.owner,
+                &with_kind(
+                    request(&unique("kind_in_import"), "https://example.com/x.png"),
+                    json!("emoji")
+                )
+            )
+            .await,
+            400
+        )
+        .await,
+        "expression_invalid"
+    );
+
+    // The person's word beats the recommendation (a moving picture is recommended a sticker) …
+    let said_emoji = w
+        .json(
+            door(&w.owner, with_kind(pin(&draft), json!("emoji"))).await,
+            201,
+        )
+        .await;
+    assert_eq!(said_emoji["expression"]["kind"], "emoji");
+
+    // … and nothing outside the closed list is a kind: the refusal leaves the draft alone.
+    let big = unique("kind_big");
+    let draft = w
+        .json(upload(&w.owner, meta(&big), png_of(200, 100)).await, 201)
+        .await;
+    for bad in [
+        json!("huge"),
+        json!("Emoji"),
+        json!(""),
+        json!(null),
+        json!(1),
+        json!(["emoji"]),
+    ] {
+        assert_eq!(
+            w.code_of(
+                door(&w.owner, with_kind(pin(&draft), bad.clone())).await,
+                400
+            )
+            .await,
+            "expression_invalid",
+            "{bad}"
+        );
+    }
+    // Said nothing (an older client): the recommendation for the stored large picture — a still one
+    // over 128 px is a sticker — and the draft was still there to register.
+    let said_nothing = w.json(door(&w.owner, pin(&draft)).await, 201).await;
+    assert_eq!(said_nothing["expression"]["kind"], "sticker");
+    let small = unique("kind_small");
+    let draft = w
+        .json(upload(&w.owner, meta(&small), png_of(8, 6)).await, 201)
+        .await;
+    let small_receipt = w.json(door(&w.owner, pin(&draft)).await, 201).await;
+    assert_eq!(small_receipt["expression"]["kind"], "emoji");
+
+    // The list says what the receipts said, to every member; another workspace sees nothing.
+    let list = |who: &Person| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions", w.prefix);
+        let token = who.token.clone();
+        async move { http.get(url).bearer_auth(token).send().await.unwrap() }
+    };
+    for viewer in [&w.owner, &w.member] {
+        let listed = w.json(list(viewer).await, 200).await;
+        let kind_of = |name: &str| {
+            listed["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["name"] == name)
+                .map(|item| item["kind"].clone())
+        };
+        assert_eq!(kind_of(&moving), Some(json!("emoji")));
+        assert_eq!(kind_of(&big), Some(json!("sticker")));
+        assert_eq!(kind_of(&small), Some(json!("emoji")));
+    }
+    let theirs = w
+        .json(
+            w.http
+                .get(format!(
+                    "{}/v1/workspaces/{}/expressions",
+                    w.base, w.foreign_ws
+                ))
+                .bearer_auth(&w.foreign.token)
+                .send()
+                .await
+                .unwrap(),
+            200,
+        )
+        .await;
+    assert!(theirs["items"].as_array().unwrap().is_empty());
 }

@@ -33,6 +33,7 @@ import {
   CreateChannelOpenStateContext,
   useCreateChannel,
 } from "./useCreateChannel";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 채널 만들기 다이얼로그 (AX-1a / MOMO-614). The web sibling of
@@ -150,12 +151,19 @@ function CreateChannelPanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  // 이 다이얼로그가 닫힌 적이 있는가 — 마지막 제출 이후로(#5058). 만드는 동안 알림 클릭이 착지하면 다이얼로그는 걷히고(Esc 와 바깥
+  // 클릭을 막는 것은 Radix 의 입력이라 방송은 그 규칙을 지나지 않는다) 요청은 계속 간다. 늦은 응답이 알림이 세운 목적지를
+  // 덮어쓰지 않게 이 값으로 이동을 가른다. 다시 열렸어도 「닫힌 적 있음」은 남는다 — 새로 연 다이얼로그를 이 요청이 닫지 않는다.
+  const closedSinceSubmit = useRef(false);
 
   // Keep the panel mounted through close so Radix Presence can play the exit
   // (UX-R1a H-1). Reset attempt/rejection on open; the draft stays on the
   // provider, which is why this is not `{open && <Panel/>}`.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      closedSinceSubmit.current = true;
+      return;
+    }
     setAttempted(false);
     clearFailure();
   }, [open, clearFailure]);
@@ -199,15 +207,21 @@ function CreateChannelPanel({
       return;
     }
     const normalizedTopic = normalizeChannelTopic(topic);
-    const created = await create({
-      kind,
-      name: normalizeChannelName(name),
-      topic: normalizedTopic === "" ? undefined : normalizedTopic,
-    });
+    closedSinceSubmit.current = false;
+    const created = await create(
+      {
+        kind,
+        name: normalizeChannelName(name),
+        topic: normalizedTopic === "" ? undefined : normalizedTopic,
+      },
+      { navigateIf: () => !closedSinceSubmit.current }
+    );
     if (created) {
       // 만들어진 채널의 초안은 더 이상 초안이 아니다.
       setDraft(EMPTY_DRAFT);
-      onOpenChange(false);
+      // 이미 걷힌 다이얼로그를 다시 닫지 않는다 — 닫기는 열었던 자리로 초점을 돌려주는데(`onOpenChange`), 그 사이 사람은 알림의 대화로
+      // 가 있다.
+      if (!closedSinceSubmit.current) onOpenChange(false);
     }
   }
 
@@ -256,7 +270,7 @@ function CreateChannelPanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="createChannelLater" />}
           testId="create-channel-offline"
         />
       )}

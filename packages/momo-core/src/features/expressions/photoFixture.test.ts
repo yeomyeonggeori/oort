@@ -37,6 +37,29 @@ describe("가짜 서버의 사진 길 (스위치를 켠 쪽에서만 있다)", (
     }
   });
 
+  it("배경을 지우지 못한 그림은 「배경을 지운」이라고 말하지 않는다: 문장은 갈래가 아니라 결과를 따른다 (#5133)", () => {
+    const made = (photoCutout: "model" | "erased" | "unchanged", branch: "cutout" | "caricature" = "cutout") => {
+      const answer = createExpressionFixtureServer({ photoModel: "openai", photoCutout }).request(photo(branch, "openai"));
+      expect(answer.status).toBe(201);
+      const result = readPhotoDraftResult(answer.json, FIXTURE_WORKSPACE_ID);
+      return { cutout: result?.cutout, prompt: result?.draft.origin.prompt };
+    };
+    // 배경이 없어진 그림(모델이 투명하게 그렸거나 서버가 지웠다)은 지금까지의 그 문장이다.
+    expect(made("erased")).toEqual({ cutout: "erased", prompt: PHOTO_FIXTURE_PROMPTS.cutout });
+    expect(made("model")).toEqual({ cutout: "model", prompt: PHOTO_FIXTURE_PROMPTS.cutout });
+    // 못 지운 그림은 따로 쓴 문장이고, 이슈가 잡은 거짓(「배경을 지운 그림」)을 말하지 않는다.
+    const kept = made("unchanged");
+    expect(kept).toEqual({ cutout: "unchanged", prompt: PHOTO_FIXTURE_PROMPTS.cutout_unchanged });
+    expect(kept.prompt).not.toContain("배경을 지운");
+    expect(kept.prompt).toContain("지우지 못한");
+    // 캐리커처에는 배경 단계가 없다: 스위치가 무엇이든 자기 문장이다.
+    expect(made("unchanged", "caricature")).toEqual({ cutout: null, prompt: PHOTO_FIXTURE_PROMPTS.caricature });
+    // 스위치를 안 켜면 지금까지와 같다: 지웠다고 답한다.
+    const plain = readPhotoDraftResult(createExpressionFixtureServer({ photoModel: "openai" }).request(photo("cutout", "openai")).json, FIXTURE_WORKSPACE_ID);
+    expect(plain?.cutout).toBe("erased");
+    expect(plain?.draft.origin.prompt).toBe(PHOTO_FIXTURE_PROMPTS.cutout);
+  });
+
   it("모델이 없거나 동의한 회사가 다르거나 입력이 틀리면 닫힌 코드로 거절한다", () => {
     const code = (response: { json?: unknown }) => (response.json as { error: { code: string } }).error.code;
     expect(code(createExpressionFixtureServer({ photoModel: "none" }).request(photo("cutout", "openai")))).toBe("image_model_unavailable");

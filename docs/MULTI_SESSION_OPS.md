@@ -42,7 +42,7 @@ runtime은 전용 env/포트/Compose project와 폐기 가능한 DB를 사용한
 
 ## 7. PR 검수·통합
 1. 이슈와 실제 HEAD/파일·독립 검수·local evidence를 대조한다.
-2. 관련 실패는 같은 이슈에서 수정하고 영향을 받는 검증을 다시 실행한다. UI는 B0·H0 및 해당 표면 증거가 필요하다(스택 PR은 승격 전 스택 검증에서, [PIPELINE](planning/PIPELINE.md) §5).
+2. 관련 실패는 같은 이슈에서 수정하고 영향을 받는 검증을 다시 실행한다. UI는 B0·H0 및 해당 표면 증거가 필요하다(스택 PR은 승격 전 검증 줄 회차에서, [PIPELINE](planning/PIPELINE.md) §5).
 3. **현재 PR HEAD**의 PR CI gate·Policy integrity gate와 exact canonical base 출처를 [GITHUB_OPS](GITHUB_OPS.md)대로 검증한다. 정책 파일의 지정 owner exact-head audit/라벨 조건을 유지한다.
 4. 단일 integrator가 자기 track으로 순차 머지한다. 테스트한 HEAD·base/병합 결과와 실제 결과가 다르면 해당 차이를 검증한다.
 5. track→main은 TRACKS의 승인 범위에서 승격+양 트랙 sync로 수행한다. 다른 owner의 진행 중 PR을 임의로 인수하지 않는다.

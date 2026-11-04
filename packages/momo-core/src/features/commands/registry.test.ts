@@ -59,11 +59,13 @@ describe("명령 레지스트리", () => {
       (command) => command.id
     );
     expect(new Set(ids).size).toBe(ids.length);
-    // `settings.open`은 에이전트 제안 전용 등록이라 팔레트에 서지 않는다(#3939, 줄은 #3940).
-    for (const id of KNOWN_COMMAND_IDS.filter((known) => known !== "settings.open")) {
+    // `settings.open`·`work.request.open`은 에이전트 제안 전용 등록이라 팔레트에 서지 않는다
+    // (#3939·#4972, 줄은 카드가 누르는 자리에서 선다).
+    const suggestOnly = ["settings.open", "work.request.open"];
+    for (const id of KNOWN_COMMAND_IDS.filter((known) => !suggestOnly.includes(known))) {
       expect(ids).toContain(id);
     }
-    expect(ids).not.toContain("settings.open");
+    for (const id of suggestOnly) expect(ids).not.toContain(id);
   });
 
   it("client 명령은 ai.connect·ai.apps·view.sidebar 셋이다 — 나머지는 전부 navigate(#2943·#3299·#3950)", () => {
@@ -329,10 +331,11 @@ describe("agentSuggestable", () => {
     }
   });
 
-  it("제안 가능 명령은 ai.connect·settings.open 둘이다(서버 허용목록, #3939)", () => {
+  it("제안 가능 명령은 ai.connect·settings.open·work.request.open 셋이다(서버 허용목록, #3939·#4972)", () => {
     expect(AGENT_SUGGESTABLE_COMMANDS).toEqual([
       { id: "ai.connect", kind: "client" },
       { id: "settings.open", kind: "client" },
+      { id: "work.request.open", kind: "client" },
     ]);
   });
 });

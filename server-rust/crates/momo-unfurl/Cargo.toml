@@ -24,6 +24,7 @@ momo-webhook = { path = "../momo-webhook" }
 async-trait.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+encoding_rs.workspace = true
 futures.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 serde.workspace = true

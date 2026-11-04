@@ -310,6 +310,8 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
     expect(screen.getByTestId('composer-offline').props.children).toBe(
       COMPOSER_OFFLINE_COPY,
     );
+    // 완성된 문장이라 어절 가운데서 꺾이지 않는다(5a M1, #5288) — `Sentence` 로 그린다. 깨뜨리면(날 `Text` 로) 빨개진다.
+    expect(screen.getByTestId('composer-offline').props.lineBreakStrategyIOS).toBe('hangul-word');
     // 흐려진 버튼에 먼저 도착하는 길이 있다(로터·직접 탐색). 이유는 버튼도 든다.
     expect(screen.getByTestId('composer-send').props.accessibilityHint).toBe(
       COMPOSER_OFFLINE_COPY,
@@ -337,16 +339,21 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
     expect(COMPOSER_OFFLINE_COPY).not.toMatch(/[—–]/);
   });
 
-  it('레일이 아니라 네트워크를 읽는다 — 두 컴포저 모두', () => {
-    // 전송은 REST POST 다. 레일(웹소켓)이 재연결 중이어도 그 POST 는 나간다 —
-    // `useOnline.ts` 머리말이 승인 컨트롤에 대해 이미 적어 둔 판정이고, 컴포저는
-    // 그 수리를 못 받았을 뿐이다. 스레드 답글도 같은 POST 다.
-    const thread = fs.readFileSync(
-      path.resolve(__dirname, '../src/features/conversation/ThreadPanel.tsx'),
-      'utf8',
-    );
-    expect(thread).toMatch(/const online = useOnline\(\)/);
-    expect(thread).toMatch(/offline=\{!online\}/);
+  it('레일이 아니라 연결 모델의 게이트를 읽는다 — 두 컴포저 모두', () => {
+    // 전송은 REST POST 다. 레일(웹소켓)이 재연결 중이어도 그 POST 는 나간다 — `useOnline.ts` 머리말이 승인 컨트롤에 대해 이미 적어 둔 판정이고,
+    // 스레드 답글도 같은 POST 다. 막을지는 NetInfo 하나가 아니라 연결 상태 모델의 답이다(#5262): 서버에 닿지 못함도 막고, 실시간만 끊김은 열어 둔다.
+    // 동작은 `threadConnectionGates.test.tsx` 가 원인 셋으로 렌더해 재고, 여기는 옛 배선(NetInfo 만)으로 되돌아가지 않는지만 본다.
+    const code = (file: string) =>
+      fs
+        .readFileSync(path.resolve(__dirname, `../src/${file}`), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+    const thread = code('features/conversation/ThreadPanel.tsx');
+    expect(thread).toMatch(/const gates = useConnectionGates\(\)/);
+    expect(thread).toMatch(/offline=\{!gates\.canSend\}/);
+    expect(thread).toMatch(/offlineNote=\{composerNote\}/);
+    expect(thread).toMatch(/approvalOffline=\{!gates\.canDecide\}/);
+    expect(thread).not.toMatch(/useOnline/);
   });
 });
 

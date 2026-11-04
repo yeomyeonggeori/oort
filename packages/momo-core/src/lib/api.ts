@@ -25,17 +25,20 @@
 import {
   fetchWithDeadline,
   NetworkError,
+  parseRetryAfterSeconds,
   REQUEST_TIMEOUT_MS,
   type HttpResponse,
 } from "./http";
-import { apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
+import { absoluteApiBase, apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
 import {
-  isUnfurlImagePath,
+  isUnfurlProxyPath,
   messageUnfurlFromWire,
+  unfurlPreviewFromWire,
   type MessageUnfurl,
+  type UnfurlPreview,
   type WorkspaceUnfurlSettings,
 } from "../features/timeline/unfurl";
 import {
@@ -405,6 +408,27 @@ export interface ThreadRollup {
   replyCount: number;
   lastReplySeq: number;
   lastReplyAtMs: number;
+  /**
+   * #4877 — 답글 단 사람, **가장 최근에 단 사람 먼저**, 최대 3명(`participant_ids`). 나간 멤버·지운
+   * 멤버의 id도 그대로 온다 — 명부에서 못 푸는 id는 화면이 기존 「알 수 없는 사람」 규칙으로 그린다.
+   * 에이전트도 멤버라서 같은 규칙으로 들어 있다.
+   *
+   * 화면이 읽는 롤업은 두 길에서만 나오고 둘 다 이 값을 **항상** 채운다: `threadRollup()`(서버 요약 — 옛 서버는 두 키를 안
+   * 보내서 `[]`·0)과 코어 `liveThreadRollup()`(그 위에 든 새 답글을 얹은 값 — 웹·데스크탑·폰이 같은 함수다). 타입이 선택
+   * 필드인 것은 손으로 지은 값(시험·하니스)이 얼굴 없이 설 수 있게 해서일 뿐이다 — 없다는 것은 「얼굴 없음」이지 오류가 아니다.
+   */
+  participantIds?: string[];
+  /**
+   * #4877 — 답글 단 **서로 다른** 멤버 수(상한 없음). `participantIds`는 이 중 최근 `min(수, 3)`명이라
+   * 화면이 얼굴 뒤에 「+2」를 쓸 수 있다.
+   */
+  participantCount?: number;
+  /**
+   * #4889 2단계 — 보는 사람이 **따라가는** 스레드의 안 읽은 답글 수(본인 답글은 세지 않는다). 따라가지
+   * 않는 스레드·옛 서버·서버 요약이 없는 루트(방금 달린 첫 답글)에는 없다 — 화면은 값이 없으면 지금 모양 그대로 그린다
+   * (강조도 「새 답글 M」 칩도 없이). 0은 「따라가고 있고 새 답글이 없다」다.
+   */
+  unreadReplyCount?: number;
 }
 
 /**
@@ -461,6 +485,17 @@ export interface Message {
    */
   replyToId?: string;
   /**
+   * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다: 이 스레드 답글은
+   * 채널 본류에도 보인다. 본류에 보이는 규칙은 **`rootId`가 없는 메시지 + 이 값이 `true`인 답글**이고,
+   * 스레드 화면에는 그 root의 모든 답글이 이 값과 무관하게 보인다.
+   *
+   * **`true`일 때만 온다 — 켜지 않았으면 키 자체가 없다**(`runEnded`와 같은 모양, `=== true`로 읽는다).
+   * 답글(`rootId` 있음)에서만 켤 수 있다. 전송 응답·히스토리·답글 페이지·편집 응답, 그리고
+   * 실시간 `message.new`·`message.edited`(`also_in_channel`)에 실린다. 편집 프레임도 싣는다 —
+   * 말하지 않음을 「꺼짐」으로 읽어 본류의 행을 지우지 않게 하려는 것이다.
+   */
+  alsoInChannel?: boolean;
+  /**
    * 풀린 인용. 히스토리·답글 페이지에만 있고 전송 응답과 `message.new`에는 없다
    * (서버가 그 둘에서 일부러 뺀다 — 쓰기 경로 안에서 읽기를 한 번 더 하지 않기
    * 위해서다). 그래서 실시간으로 온 인용 답글은 이 값이 없고, 클라가 화면에 이미
@@ -514,13 +549,23 @@ export interface Message {
    * 편집 투영(`message.edited` 프레임·`PATCH` 응답)에는 없다. 거기서 없다는 것은 「답글 없음」이
    * 아니라 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 롤업을 잇는다(#4450,
    * `keepHeldProjection`). 서버는 답글마다 `thread.updated` 를 발행하지만 TS 클라는 그것을 소비하지
-   * 않는다(폰은 `threadContext` 가 본 답글 수를 따로 세어 렌더에서 합친다). 그래서 `message.thread`
+   * 않는다(이 화면이 든 답글을 코어 `liveThreadRollup` 이 읽을 때 이 요약 위에 얹는다). 그래서 `message.thread`
    * 는 페이지 읽기에서만 바뀐다.
    */
   thread?: {
     reply_count: number;
     last_reply_seq: number;
     last_reply_at: number;
+    /** #4877 — 최근에 답글 단 사람 먼저, 최대 3개. 옛 서버는 보내지 않는다. */
+    participant_ids?: string[];
+    /** #4877 — 답글 단 서로 다른 멤버 수. 옛 서버는 보내지 않는다. */
+    participant_count?: number;
+    /**
+     * #4889 2단계(owner 10-31 23:49) — **보는 사람 기준** 안 읽은 답글 수. 따라가는 스레드(자동·직접)의
+     * 요약에만 실리고(0이어도 실린다), 따라가지 않는 스레드·옛 서버·에이전트·실시간 `thread.updated`
+     * (채널 방송이라 사람마다 다른 값을 못 싣는다)에는 없다. 없다는 것은 「0」이 아니라 「말하지 않음」이다.
+     */
+    unread_reply_count?: number;
   };
   /**
    * #1166 — 이 반쪽 답을 쓴 run 이 **끝났다**고 서버가 말한 것.
@@ -557,10 +602,26 @@ function isMessage(value: unknown): value is Message {
 export function threadRollup(message: Message): ThreadRollup | null {
   const raw = message.thread;
   if (!raw || !raw.reply_count) return null;
+  // #4877 — 옛 서버는 두 키를 안 보낸다. 그때는 얼굴 없음(`[]`·0)으로 읽고, 새 서버는 항상 보낸다.
+  // 문자열이 아닌 항목은 버린다(형상이 어긋난 한 건이 나머지 얼굴을 지우지 않게).
+  const participantIds = Array.isArray(raw.participant_ids)
+    ? raw.participant_ids.filter((id): id is string => typeof id === "string")
+    : [];
+  // #4889 2단계 — 값이 올바른 정수일 때만 옮긴다. 음수·소수·문자열은 「말하지 않음」으로 읽는다(깨진 한
+  // 값이 칩에 `NaN`·음수를 그리지 않게). 0은 올바른 값이다.
+  const unread = raw.unread_reply_count;
+  const unreadReplyCount =
+    typeof unread === "number" && Number.isInteger(unread) && unread >= 0 ? unread : undefined;
   return {
     replyCount: raw.reply_count,
     lastReplySeq: raw.last_reply_seq,
     lastReplyAtMs: raw.last_reply_at,
+    participantIds,
+    participantCount:
+      typeof raw.participant_count === "number"
+        ? raw.participant_count
+        : participantIds.length,
+    ...(unreadReplyCount === undefined ? {} : { unreadReplyCount }),
   };
 }
 
@@ -1503,14 +1564,54 @@ export async function joinWithInvite(
 }
 
 /**
- * Consume a first-owner claim token and land signed in. Public route, mounted
- * outside AuthMiddleware: the token IS the only credential. Success returns a
- * LoginResponse, so applying it here is the spec'd claim-login path.
+ * Which kind of link `POST /v1/claim` spent (ADR-0215 D6, #4603). The server adds it to the 200, 409 and
+ * 410 bodies and to nothing else: a 404, 400 or 429 answers the same for every token, so a stranger cannot
+ * tell the kinds apart (the token is 256 bits, so the kind is not an oracle for the one who holds it).
+ * Absent means an older server or an answer that never carries it; a caller must not guess a kind.
+ */
+export type ClaimKind = "owner_bootstrap" | "password_reset";
+
+export function parseClaimKind(value: unknown): ClaimKind | undefined {
+  return value === "owner_bootstrap" || value === "password_reset" ? value : undefined;
+}
+
+/** A claim refusal (409 used, 410 expired) that says which kind of link it was. */
+export class ClaimApiError extends ApiError {
+  readonly claimKind: ClaimKind;
+  constructor(base: ApiError, claimKind: ClaimKind) {
+    super(base.status, base.message, base.code, base.retryAfterSeconds);
+    this.name = "ClaimApiError";
+    this.claimKind = claimKind;
+  }
+}
+
+/**
+ * The refusal, plus the kind when the server named one. Only 409 and 410 are read: the server puts
+ * `claimKind` beside `error` there, and this reader also accepts it inside `error` (E-4 #4596 had not
+ * landed when this was written, so the exact place is one thing to align after it does). Any other
+ * status stays a plain `ApiError`, so a body that grows the field on a 404 is not believed.
+ */
+function claimErrorFromResponse(res: HttpResponse): ApiError {
+  const base = parseError(res);
+  if (res.status !== 409 && res.status !== 410) return base;
+  const body = res.jsonOrNull<{ claimKind?: unknown; error?: { claimKind?: unknown } }>();
+  const kind = parseClaimKind(body?.claimKind) ?? parseClaimKind(body?.error?.claimKind);
+  return kind === undefined ? base : new ClaimApiError(base, kind);
+}
+
+/** A claim's session, plus the kind of link it spent when the server said (see `ClaimKind`). */
+export type ClaimedSession = LoginResponse & { claimKind?: ClaimKind };
+
+/**
+ * Consume a claim token (first owner, or a member's password reset) and land signed in. Public route,
+ * mounted outside AuthMiddleware: the token IS the only credential. Success returns a LoginResponse, so
+ * applying it here is the spec'd claim-login path. `claimKind` rides on the result only for the caller
+ * to route on; it never reaches the session store.
  */
 export async function claimOwnerPassword(
   token: string,
   password: string
-): Promise<LoginResponse> {
+): Promise<ClaimedSession> {
   const res = await rawRequest(
     "/v1/claim",
     {
@@ -1519,10 +1620,12 @@ export async function claimOwnerPassword(
     },
     null
   );
-  if (!res.ok) throw parseError(res);
-  const claimResponse = loginResponseFromWire(res.json<unknown>());
+  if (!res.ok) throw claimErrorFromResponse(res);
+  const body = res.json<unknown>();
+  const claimResponse = loginResponseFromWire(body);
   adoptSignIn(claimResponse);
-  return claimResponse;
+  const claimKind = parseClaimKind(str(responseRecord(body), "claimKind"));
+  return claimKind === undefined ? claimResponse : { ...claimResponse, claimKind };
 }
 
 // ---- device-link redeem (POST /v1/auth/device-link/redeem, ADR-0180 D3) -----
@@ -2832,14 +2935,48 @@ export async function updateWorkspaceUnfurlSettings(
 }
 
 /**
- * Fetch image bytes through the authenticated server proxy. The strict path
- * gate makes it impossible to attach a bearer to a remote image host.
+ * 보내기 전 입력칸에 있는 링크 한 개의 카드 (ADR-0170 증보 2026-11-01 D14, #4884).
+ *
+ * 본문이 아니라 **주소 하나**만 보낸다(주소는 쿼리·경로가 아니라 본문에 싣는다 — 링크의 쿼리는 흔히
+ * 토큰이다). 허용된 요청의 답은 늘 200이고, `failed`는 모든 실패(거절된 목적지·느리거나 없는 사이트·
+ * 보여 줄 것이 없는 페이지·꺼진 스위치)의 한 가지 모양이라 이유를 말하지 않는다 — 조용히 카드를
+ * 그리지 않으면 된다. 429(예산·자리)는 `ApiError.status`로 나오고, `Retry-After` 뒤에 한 번 다시 묻는다.
+ *
+ * 권고(서버가 강제하지 않는다): 주소가 끝났다고 볼 수 있을 때(붙여넣기 직후, 뒤에 공백) 입력을 멈추고
+ * 350ms 뒤에 한 입력칸에서 같은 주소는 한 번만 묻는다. `ok`의 `imageUrl`·`iconUrl`은 `fetchUnfurlImage`로만 받는다.
+ */
+export async function fetchUnfurlPreview(
+  workspaceId: string,
+  channelId: string,
+  url: string,
+  signal?: AbortSignal
+): Promise<UnfurlPreview> {
+  const source = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/unfurl-previews`,
+    {
+      method: "POST",
+      body: JSON.stringify({ url }),
+      ...(signal ? { signal } : {}),
+    }
+  );
+  const preview = unfurlPreviewFromWire(source);
+  if (preview === null) throw new WireShapeError();
+  return preview;
+}
+
+/**
+ * Fetch image bytes through the authenticated server proxy: a card's preview
+ * picture (`imageUrl`) or its site icon (`iconUrl`), stored card or composer
+ * preview alike. The strict path gate makes it impossible to attach a bearer
+ * to a remote image host.
  */
 export async function fetchUnfurlImage(
   imageUrl: string,
   signal?: AbortSignal
 ): Promise<Blob> {
-  if (!isUnfurlImagePath(imageUrl)) {
+  if (!isUnfurlProxyPath(imageUrl)) {
     throw new ApiError(400, "not an unfurl image proxy path");
   }
   const send = (token: string | null): Promise<Response> => {
@@ -2855,7 +2992,16 @@ export async function fetchUnfurlImage(
     if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
+  // instead of asking again on every remount.
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      `HTTP ${res.status}`,
+      undefined,
+      parseRetryAfterSeconds(res.headers.get("Retry-After"))
+    );
+  }
   return res.blob();
 }
 
@@ -2976,6 +3122,18 @@ export async function searchMessages(
 }
 
 /**
+ * One page of thread replies, oldest first. `following` is the **caller's own** follow state of this
+ * thread (ADR-0206 증보 1 F8, #4889): an automatic or a direct follow reads `true`; a thread they
+ * stopped following and one they never joined both read `false`. A server that predates the field
+ * omits the key — read a missing `following` as `false`, never as "unknown".
+ */
+export interface ThreadRepliesPage {
+  messages: Message[];
+  nextCursor?: number;
+  following?: boolean;
+}
+
+/**
  * One oldest-first page of thread replies (ascending channel seq). `limit` is
  * clamped to 1...200 by the server; the work session panel asks for the ceiling
  * because a session thread is an event log, not a conversation.
@@ -2986,18 +3144,115 @@ export function fetchThreadReplies(
   rootId: string,
   cursor?: number,
   limit?: number
-): Promise<{ messages: Message[]; nextCursor?: number }> {
+): Promise<ThreadRepliesPage> {
   const params = new URLSearchParams();
   if (cursor !== undefined) params.set("cursor", String(cursor));
   if (limit !== undefined) params.set("limit", String(limit));
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return request<{ messages: Message[]; nextCursor?: number }>(
+  return request<ThreadRepliesPage>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(
       rootId
     )}/replies${suffix}`
   );
+}
+
+function threadFollowPath(workspaceId: string, channelId: string, rootId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+    channelId
+  )}/messages/${encodeURIComponent(rootId)}/follow`;
+}
+
+/**
+ * 스레드를 직접 따라간다 (ADR-0206 증보 1 F8, #4889) — `PUT …/messages/{rootId}/follow`. 본문이 없고
+ * 멱등이다. 응답의 `following` 은 쓴 뒤의 **효과값**이다. 그만 따라간 스레드로 돌아오는 길은 이 호출
+ * 하나뿐이다(새 답글·멘션은 되돌리지 못한다). 채널 멤버가 아니면 403, 루트가 없으면 404, 루트가 답글이거나
+ * DM 채널이면 400(`thread_follow_not_applicable`). 옛 서버는 404·405 — 호출부가 「기능 없음」으로 보고
+ * 칸을 숨긴다.
+ */
+export async function followThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "PUT" }
+  );
+  return { following: res.following === true };
+}
+
+/**
+ * 스레드를 그만 따라간다 — `DELETE …/messages/{rootId}/follow`. 같은 가드·같은 오류·멱등이다. 이 선택은
+ * 유지된다: 뒤의 답글·멘션·루트 작성자라는 사실이 다시 따라가게 만들지 않는다. 막히는 것은 새 답글 알림
+ * (`thread_reply`)뿐이고, 나를 부른 멘션·키워드·채널 단계 `all` 은 각자의 규칙대로 온다.
+ */
+export async function unfollowThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "DELETE" }
+  );
+  return { following: res.following === true };
+}
+
+/**
+ * 스레드 읽음 신호의 응답 — 쓴 뒤의 **효과값**이다(#4889 2단계). 따라가지 않는 스레드(행이 없음·그만 따라감)는
+ * `following: false` 이고 두 수가 없다.
+ */
+export interface ThreadReadState {
+  following: boolean;
+  /** 읽은 위치(마지막으로 읽은 답글의 seq). 앞으로만 간다. 따라가는 스레드에만 있다. */
+  lastReadReplySeq?: number;
+  /** 지금 안 읽은 답글 수(본인 답글 제외). 따라가는 스레드에만 있다. */
+  unreadReplyCount?: number;
+}
+
+interface WireThreadReadState {
+  following?: unknown;
+  last_read_reply_seq?: unknown;
+  unread_reply_count?: unknown;
+}
+
+function nonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * 「여기까지 읽었어요」 — `PUT …/messages/{rootId}/read` (#4889 2단계, owner 10-31 23:49). 스레드를 열어 둔
+ * 화면이 보낸다: 열 때, 열려 있는 동안 새 답글이 그려질 때마다. 서버는 읽은 위치를
+ * `GREATEST(현재, LEAST(요청, 스레드의 마지막 답글 seq))` 로 **앞으로만** 올린다 — 뒤로 가는 요청은 무시되고
+ * 머리를 넘는 요청은 머리까지만 간다. 행을 만들지 않는다: 따라가지 않는 스레드에 보내면 아무것도 쓰지 않고
+ * `following: false` 가 돌아온다(보내도 해롭지 않아서 호출부가 따라가는지 먼저 알 필요가 없다).
+ *
+ * `GET …/replies` 는 읽음으로 치지 않는다 — 인박스·작업 세션 목록도 같은 읽기를 부르기 때문이다. 채널 읽음
+ * 커서(`updateReadState`)와도 별개다: 채널을 끝까지 읽어도 스레드 안의 답글은 읽은 것이 아니다.
+ * 채널 멤버가 아니면 403, 루트가 없으면 404, 루트가 답글이면 400. 옛 서버는 404·405 — 호출부가 「기능 없음」으로
+ * 보고 더 보내지 않는다.
+ */
+export async function markThreadRead(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  lastReadReplySeq: number
+): Promise<ThreadReadState> {
+  const res = await request<WireThreadReadState>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+      channelId
+    )}/messages/${encodeURIComponent(rootId)}/read`,
+    { method: "PUT", body: JSON.stringify({ last_read_reply_seq: lastReadReplySeq }) }
+  );
+  const position = nonNegativeInt(res.last_read_reply_seq);
+  const unread = nonNegativeInt(res.unread_reply_count);
+  return {
+    following: res.following === true,
+    ...(position === undefined ? {} : { lastReadReplySeq: position }),
+    ...(unread === undefined ? {} : { unreadReplyCount: unread }),
+  };
 }
 
 /**
@@ -3055,6 +3310,17 @@ export interface SendMessageOptions {
    * 보내지 않는다.
    */
   apps?: string[];
+  /**
+   * ADR-0170 증보 2026-11-01(#4884) - 「미리보기 없이 보내기」: 이 메시지에는 링크 카드가 **하나도** 생기지
+   * 않는다(서버가 같은 전송 트랜잭션에서 그 메시지의 묘비를 심고, 워커는 아무것도 받지 않고 끝낸다). 입력칸의
+   * ✕가 이번 메시지의 미리보기를 끈 채 보낼 때 쓴다. 보낸 뒤에 바꾸는 길은 없고(멱등 재시도도 저장된 메시지를
+   * 돌려줄 뿐이다), 보낸 뒤 카드 제거는 `removeMessageUnfurls`다.
+   *
+   * **켠 때(`true`)만 키가 간다.** 전송 요청은 closed-world라 옛 서버는 모르는 키를 400으로 거절하므로,
+   * 켜지 않은 전송은 이 필드 이전과 바이트 단위로 같은 요청이어야 하고, 미리보기 요청(`fetchUnfurlPreview`)이
+   * 통하는 서버에만 켠다.
+   */
+  suppressUnfurl?: boolean;
 }
 
 export function sendMessage(
@@ -3080,12 +3346,33 @@ export function sendMessage(
   if (options?.apps !== undefined && options.apps.length > 0) {
     body.apps = options.apps;
   }
+  if (options?.suppressUnfurl === true) body.suppressUnfurl = true;
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages`,
     { method: "POST", body: JSON.stringify(body) }
   );
+}
+
+/**
+ * 스레드 답글 전송(`sendThreadReply`)의 선택들.
+ *
+ * `alsoInChannel`이 `SendMessageOptions`가 아니라 여기에 있는 이유: 「대화에도 보내기」는 **답글에서만**
+ * 켤 수 있고, `sendMessage`는 `rootId`를 싣지 않는 전송이라 거기서 켜면 서버가 늘 400으로 거절한다.
+ * 켤 수 있는 자리에만 옵션이 있게 해서 그 실수가 타입에서 막히게 한다.
+ */
+export interface ThreadReplyOptions {
+  attachmentIds?: SendMessageOptions["attachmentIds"];
+  /**
+   * ADR-0148 증보 2026-10-31(#4887) — 「대화에도 보내기」: 이 답글을 채널 본류에도 보인다. 켠 때만
+   * 키가 간다(`true`). 끄거나 없으면 키 자체가 빠진다 — 전송 요청은 closed-world라 옛 서버는 모르는
+   * 키를 400으로 거절하므로, 켜지 않은 답글은 이 필드 이전과 바이트 단위로 같은 요청이어야 한다.
+   * 보낼 때 한 번 정해지고 이후에 바꾸는 길은 없다.
+   */
+  alsoInChannel?: boolean;
+  /** `SendMessageOptions.suppressUnfurl`와 같다 — 켠 때(`true`)만 키가 간다. */
+  suppressUnfurl?: SendMessageOptions["suppressUnfurl"];
 }
 
 /**
@@ -3102,7 +3389,7 @@ export function sendThreadReply(
   rootId: string,
   clientMsgId: string,
   bodyText: string,
-  options?: Pick<SendMessageOptions, "attachmentIds">
+  options?: ThreadReplyOptions
 ): Promise<Message> {
   const body: Record<string, unknown> = {
     clientMsgId,
@@ -3110,6 +3397,9 @@ export function sendThreadReply(
     type: "text",
     body: bodyText,
   };
+  // 이 함수가 `rootId`를 늘 싣는 유일한 전송이라 「대화에도 보내기」가 합법인 자리다(#4887).
+  if (options?.alsoInChannel === true) body.alsoInChannel = true;
+  if (options?.suppressUnfurl === true) body.suppressUnfurl = true;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;
   }
@@ -3137,12 +3427,33 @@ export function sendThreadReply(
 // 필요하고 코어는 그것을 들일 수 없다. 그 절반은
 // `clients/web/src/features/attachments/uploadTransport.ts`에 있다.
 
+/**
+ * openapi `AttachmentMedia` — 영상 첨부의 요약 (ADR-0151 증보 5 D5, #4673).
+ *
+ * **보내는 기기가 잰 선언**이다. 서버는 영상을 열어 보지 않고 범위만 본다(`durationMs` 1~86,400,000 정수,
+ * `width`·`height` 1~16,384 정수). 그래서 이 값으로 칸을 그리는 쪽이 한 번 더 거르고 칸을 가둔다
+ * (`attachmentMedia.ts` 의 `attachmentMediaFromWire`, `videoCardSize`). 포스터의 바이트는 어느 투영에도 실리지 않는다 —
+ * `hasPoster` 가 `GET …/attachments/{id}/poster` 에 줄 것이 있는지 알릴 뿐이다.
+ */
+export interface AttachmentMedia {
+  kind: "video";
+  durationMs: number;
+  width: number;
+  height: number;
+  hasPoster: boolean;
+}
+
 /** openapi `MessageAttachment` — 메시지에 묶인 첨부 한 건. */
 export interface MessageAttachment {
   id: string;
   name: string;
   mime: string;
   sizeBytes: number;
+  /**
+   * 영상 요약. 보내는 기기가 길이·치수를 재서 보냈을 때만 있다(사진·문서와 재지 않는 클라의 영상에는 **키가 없다**).
+   * 없다는 것은 「영상이 아님」이 아니라 「요약을 모름」일 수 있으니, 영상인지는 `mime` 으로 가른다(`isVideoAttachment`).
+   */
+  media?: AttachmentMedia;
 }
 
 /** openapi `AttachmentUploadResponse`. `uploadUrl`은 불투명한 capability다. */
@@ -3277,6 +3588,29 @@ export async function fetchAttachmentContent(
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return onProgress === undefined ? res.blob() : readBlobWithProgress(res, onProgress);
+}
+
+/**
+ * `HEAD …/attachments/{id}/content` — 바이트를 받지 않고 **지금 이 세션이 그 파일을 읽을 수 있는가**를 묻고 상태 숫자만 돌려준다
+ * (#5208, ADR-0151 증보 5 D3: `HEAD` 는 파일을 열지 않는다).
+ *
+ * 폰의 영상 플레이어는 소스(주소 + `Authorization` 머리)를 **에셋을 만들 때 고정**한다. 만료된 토큰으로 소스를 만들면 첫 구간 읽기가
+ * 401 이라 재생이 시작도 못 한다. 그래서 소스를 만들기 직전에 이 물음으로 토큰이 살아 있는지 확인한다 — 401 이면 코어의 단 한 번의
+ * 회전(`authedResponse`) 뒤 새 토큰으로 다시 묻고, 회전이 거절되거나 갱신 토큰이 없으면 세션 만료를 **여기서 한 번** 선언한 채 401 을
+ * 돌려준다. 서버에 닿지 못하면 `NetworkError` 로 던진다(만료로 읽지 않는다).
+ *
+ * 상태를 해석하지 않는다: 403·404 는 「더는 볼 수 없는 파일」, 2xx 는 읽을 수 있음 — 그 판단은 부르는 화면의 몫이다.
+ */
+export async function probeAttachmentContent(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string
+): Promise<number> {
+  const res = await authedResponse(
+    `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(attachmentId)}/content`,
+    { method: "HEAD" }
+  );
+  return res.status;
 }
 
 /**
@@ -3653,6 +3987,83 @@ export async function changeWorkspaceMemberRole(
       )}/members/${encodeURIComponent(memberId)}/role`,
       { method: "PATCH", body: JSON.stringify({ role }) }
     )
+  );
+}
+
+// ---- 관리자 재설정 링크 발급 (ADR-0215 D6, #4603) ----------------------------
+// POST /v1/workspaces/{ws}/members/{member}/password-reset  { currentPassword }
+//
+// 발급하는 **관리자 본인**의 현재 비밀번호가 필수다(E-4 #4596의 파괴적 변경): 없거나 비면 400
+// `current_password_required`, 틀리면 403 `current_password_incorrect`. 그 전의 서버는 본문을 읽지
+// 않고 201을 주므로 같은 요청이 양쪽에 간다. 비밀번호는 입력 그대로(다듬지 않음) 보내고 이 모듈
+// 어디에도 남기지 않는다.
+
+/**
+ * 발급 결과. 링크 원문은 `claimUrl` 하나로만 나가고 `token`을 따로 나르지 않는다: 이 값이 화면에
+ * 한 번 서고 닫으면 사라진다(서버도 원문을 보관하지 않는다).
+ */
+export interface PasswordResetIssue {
+  /** 받는 사람에게 전할 절대 링크. */
+  claimUrl: string;
+  /**
+   * 서버가 말한 「이 링크가 다른 곳에서도 열리는 주소인가」(E-4 `claimUrlSecure`). `false`면 요청 헤더로
+   * 도출한 `http://`·loopback·사설 주소라 이 컴퓨터(같은 네트워크)에서만 열릴 수 있다. 말하지 않은
+   * 서버는 `undefined`다 — 모름은 안전이 아니다.
+   */
+  claimUrlSecure: boolean | undefined;
+  expiresAtMs: number;
+}
+
+function absoluteHttpUrl(value: string | undefined): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 서버가 준 `claimUrl`이 이긴다(설정된 공개 주소가 요청 `Host`보다 먼저다, ADR-0215 D6). 없거나
+ * 절대 http(s) 주소가 아니면(E-4 전의 서버) `claimPath`를 이 클라이언트가 아는 서버 주소의 **출처**에
+ * 붙인다: claim 화면은 출처 루트의 `/claim/<token>`이라 경로 접두가 있는 API 주소(`/momo`)가 아니라
+ * 출처에 붙는다.
+ */
+export function passwordResetIssueFromWire(
+  value: unknown,
+  knownServerBase: string
+): PasswordResetIssue {
+  const source = responseRecord(value);
+  const expiresAtMs = num(source, "expiresAtMs");
+  const claimPath = str(source, "claimPath");
+  if (expiresAtMs === undefined || claimPath === undefined) throw new WireShapeError();
+  let claimUrl = absoluteHttpUrl(str(source, "claimUrl"));
+  if (claimUrl === undefined) {
+    // 이 클라이언트가 직접 링크를 짓는 갈래라서 모양을 확인한다: `/claim/<token>` 한 가지뿐이다.
+    if (!claimPath.startsWith("/claim/")) throw new WireShapeError();
+    try {
+      claimUrl = new URL(claimPath, knownServerBase).toString();
+    } catch {
+      throw new WireShapeError();
+    }
+  }
+  return { claimUrl, claimUrlSecure: bool(source, "claimUrlSecure"), expiresAtMs };
+}
+
+export async function issueMemberPasswordReset(
+  workspaceId: string,
+  memberId: string,
+  currentPassword: string
+): Promise<PasswordResetIssue> {
+  return passwordResetIssueFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/members/${encodeURIComponent(memberId)}/password-reset`,
+      { method: "POST", body: JSON.stringify({ currentPassword }) }
+    ),
+    absoluteApiBase()
   );
 }
 
@@ -6097,7 +6508,9 @@ export function agentRunProgressPageFromWire(value: unknown): AgentRunProgress[]
 
 /**
  * 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). `doorbell_rung`은
- * `?include=doorbell`로 읽을 때만 온다(ADR-0200 증보 2026-10-14, #3824).
+ * `?include=doorbell`로, `tool_call`은 `?include=tools`로, `activity`·`plan`은
+ * `?include=activity`로 읽을 때만 온다(ADR-0200 증보 2026-10-14 #3824, 증보 2026-10-15 T4 #4654,
+ * 증보 7 7-7 #4657).
  */
 export type AgentRunLedgerKnownKind =
   | "queued"
@@ -6112,7 +6525,10 @@ export type AgentRunLedgerKnownKind =
   | "failed"
   | "timed_out"
   | "cancelled"
-  | "doorbell_rung";
+  | "doorbell_rung"
+  | "tool_call"
+  | "activity"
+  | "plan";
 
 /**
  * 이 클라이언트가 아는 종류, 그리고 모르는 종류 하나(`unknown`). 서버는 클라이언트보다
@@ -6135,7 +6551,48 @@ const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKnownKind>([
   "timed_out",
   "cancelled",
   "doorbell_rung",
+  "tool_call",
+  "activity",
+  "plan",
 ]);
+
+/**
+ * 에이전트가 보고한 활동 하나의 최신 상태(ADR-0200 증보 7 7-7, openapi `AgentRunActivity`).
+ * 서버는 `?include=activity`일 때만 싣는다. **에이전트 자기 보고**이고 신뢰하지 않는 일반
+ * 텍스트다: 그릴 때는 항상 「에이전트 보고」 꼬리표와 함께, 이스케이프해서, 서버가 잰 줄
+ * (`tool_call`·`claimed`)과 한 칸에 섞지 않는다. `kind`·`status`는 서버의 닫힌 낱말이지만
+ * 클라이언트보다 서버가 먼저 낱말을 늘릴 수 있어 `string`으로 둔다(닫힌 목록과 모르는 낱말
+ * 처리는 UXUI 슬라이스 7-S4의 몫이다).
+ */
+export interface AgentRunActivity {
+  /** 에이전트가 붙인 뜻 없는 번호 이름(`a1`). 글자는 `A-Za-z0-9_-`뿐, 1~32자. */
+  id: string;
+  /** `run`·`edit`·`read`·`search`·`web`·`other`·`delegate`. */
+  kind: string;
+  /** 일의 이름(1~40자). 없으면 화면이 종류 낱말을 쓴다. */
+  label?: string;
+  /** `in_progress`·`completed`·`failed`. 끝난 run의 `in_progress`는 진행 중으로 그리지 않는다. */
+  status: string;
+  /** 그 항목이 묶은 일의 수(1~100000). */
+  n: number;
+  /** 그 id의 첫 보고 시각. 행의 `createdAtMs`는 마지막 갱신 시각이다. */
+  startedAtMs: number;
+}
+
+/** 에이전트가 보고한 계획의 한 단계(openapi `AgentRunPlanStep`). 에이전트 자기 보고다. */
+export interface AgentRunPlanStep {
+  /** 단계 이름(1~60자). */
+  text: string;
+  /** `pending`·`in_progress`·`completed`. */
+  status: string;
+}
+
+/** 종류별로 끝난 활동의 단위 합(openapi `AgentRunActivityTally`). 에이전트의 자기 보고 합이다. */
+export interface AgentRunActivityTally {
+  kind: string;
+  completed: number;
+  failed: number;
+}
 
 export interface AgentRunLedgerEvent {
   /** 읽는 순간의 1-기반 순번. 키로 쓰지 않는다(200행 상한이 오래된 stage를 지운다). */
@@ -6149,12 +6606,166 @@ export interface AgentRunLedgerEvent {
   code?: string;
   approvalId?: string;
   actorMemberId?: string;
+  /**
+   * `tool_call` 행에만(`?include=tools`, ADR-0200 증보 2026-10-15 T1): 서버가 기록한 oort 도구 이름.
+   * 닫힌 모양(`^oort_[a-z_]{1,40}$`)이 아니면 싣지 않는다. 인자·결과 본문은 서버가 애초에 안 준다.
+   * 결과는 `code`(`ok` 또는 닫힌 실패 코드)에 있다.
+   */
+  tool?: string;
+  /** `tool_call` 행에만: 서버가 자기 시계로 잰 처리 시간(ms, 0~600000). 범위 밖이면 싣지 않는다. */
+  durationMs?: number;
+  /**
+   * `activity` 행에만, 서버가 `?include=activity`일 때만 싣는다(ADR-0200 증보 7 7-7). id별 최신
+   * 상태 하나다. **에이전트 자기 보고**라 믿지 않는 일반 텍스트다. 모양이 틀린 `activity` 칸은 그 행을
+   * `unknown`으로 내리고 원장 전체를 거부하지 않는다.
+   */
+  activity?: AgentRunActivity;
+  /**
+   * `plan` 행에만(같은 조건): 최신 계획 전체. 빈 배열은 에이전트가 비웠다는 뜻이다. 한 단계라도 모양이
+   * 틀리면 그 행을 `unknown`으로 내린다: 일부만 남기면 「4단계 중 2단계」의 4가 조용히 줄어든다.
+   */
+  plan?: AgentRunPlanStep[];
   createdAtMs: number;
+}
+
+/**
+ * 한 도구의 이 run 합계(openapi `AgentRunToolTally`, ADR-0200 증보 2026-10-15 T3). 행 상한(100)을
+ * 넘은 호출까지 모두 센 값이다. `ok`+`error`가 그 도구의 호출 수다.
+ */
+export interface AgentRunToolTally {
+  /** 닫힌 oort 도구 이름(`^oort_[a-z_]{1,40}$`). */
+  tool: string;
+  ok: number;
+  error: number;
+  durationMsSum: number;
 }
 
 export interface AgentRunLedger {
   runId: string;
   events: AgentRunLedgerEvent[];
+  /**
+   * `?include=tools`에 **답한** 서버만 싣는다(빈 배열은 「물었고 호출이 없다」). 없으면 이 서버는
+   * `tools`를 모른다(구 서버·400으로 물러선 읽기): 호출이 0번이라는 뜻이 아니다. 모양이 틀린
+   * 합계도 「없음」으로 읽는다 — 파서는 전체를 거부하지 않는다.
+   */
+  toolTally?: AgentRunToolTally[];
+  /** `include=tools`일 때만: 호출이 `tool_call` 100행 상한 너머까지 세어졌다(합계가 행보다 많다). */
+  toolCallRowsCapped?: boolean;
+  /**
+   * `?include=activity`에 **답한** 서버만 싣는다(빈 배열은 「물었고 끝난 활동이 없다」). 없으면 이 서버는
+   * `activity`를 모른다(구 서버·400으로 물러선 읽기): 보고가 없다는 뜻이 아니다. `toolTally`와 같은
+   * 규칙으로 모양이 틀린 합계는 「없음」으로 읽고 원장을 거부하지 않는다. **에이전트의 자기 보고 합**이다.
+   */
+  activityTally?: AgentRunActivityTally[];
+  /** `?include=activity`일 때만: 합계가 보이는 끝난 활동보다 커서 일부는 합계로만 남았다. */
+  activityRowsTrimmed?: boolean;
+}
+
+/** 서버가 `tool`에 쓰는 닫힌 모양(openapi `AgentRunEvent.tool`, migration CHECK와 같다). */
+const OORT_TOOL_NAME = /^oort_[a-z_]{1,40}$/;
+
+/** 서버가 잰 처리 시간의 천장(openapi `AgentRunEvent.durationMs`). */
+const MAX_TOOL_DURATION_MS = 600_000;
+
+function nonNegativeInteger(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `toolTally`는 배열이고 모든 칸이 닫힌 모양일 때만 읽는다. 하나라도 틀리면 **전체를 없음으로** 둔다:
+ * 일부만 남기면 합계가 조용히 줄어든다. 던지지 않는 이유는 합계가 덤이어서다 — 합계 때문에
+ * 같은 응답의 수명주기 줄까지 잃지 않는다.
+ */
+function toolTallyFromWire(value: unknown): AgentRunToolTally[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tally: AgentRunToolTally[] = [];
+  for (const entry of value) {
+    const tool = str(entry, "tool");
+    const ok = nonNegativeInteger(num(entry, "ok"));
+    const error = nonNegativeInteger(num(entry, "error"));
+    const durationMsSum = nonNegativeInteger(num(entry, "durationMsSum"));
+    if (
+      tool === undefined ||
+      !OORT_TOOL_NAME.test(tool) ||
+      ok === undefined ||
+      error === undefined ||
+      durationMsSum === undefined
+    ) {
+      return undefined;
+    }
+    tally.push({ tool, ok, error, durationMsSum });
+  }
+  return tally;
+}
+
+/** 활동 식별자의 닫힌 모양(openapi `AgentRunActivity.id`). */
+const ACTIVITY_ID = /^[A-Za-z0-9_-]{1,32}$/;
+
+/** 한 활동이 묶는 일의 수 천장(openapi `AgentRunActivity.n`, `toolCounts`와 같은 값). */
+const MAX_ACTIVITY_N = 100_000;
+
+/**
+ * `activity` 행의 본문. 식별자·종류·상태·시작 시각 중 하나라도 없거나 틀리면 undefined(그 행은 모르는
+ * 종류가 된다). `n`이 틀리면 「보고하지 않음」의 1이다: 서버는 항상 1 이상을 쓰므로 틀린 값은 서버가 앞서
+ * 간 것이고, 거기서 큰 수를 짓지 않는다. 종류·상태는 닫힌 낱말이지만 서버가 먼저 늘릴 수 있어 문자열로 둔다.
+ */
+function activityFromWire(value: unknown): AgentRunActivity | undefined {
+  const id = str(value, "id");
+  const kind = str(value, "kind");
+  const status = str(value, "status");
+  const startedAtMs = num(value, "startedAtMs");
+  if (
+    id === undefined ||
+    !ACTIVITY_ID.test(id) ||
+    kind === undefined ||
+    kind === "" ||
+    status === undefined ||
+    status === "" ||
+    startedAtMs === undefined
+  ) {
+    return undefined;
+  }
+  const label = str(value, "label");
+  const n = num(value, "n");
+  return {
+    id,
+    kind,
+    status,
+    startedAtMs,
+    n: n !== undefined && Number.isInteger(n) && n >= 1 && n <= MAX_ACTIVITY_N ? n : 1,
+    ...(label === undefined || label.trim() === "" ? {} : { label }),
+  };
+}
+
+/** `plan` 행의 본문. 배열이고 모든 단계가 글과 상태를 가질 때만 읽는다(`[]`는 비웠다는 뜻으로 읽는다). */
+function planFromWire(value: unknown): AgentRunPlanStep[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const steps: AgentRunPlanStep[] = [];
+  for (const entry of value) {
+    const text = str(entry, "text");
+    const status = str(entry, "status");
+    if (text === undefined || text.trim() === "" || status === undefined || status === "") {
+      return undefined;
+    }
+    steps.push({ text, status });
+  }
+  return steps;
+}
+
+/** `toolTallyFromWire`와 같은 규칙: 하나라도 틀리면 전체를 없음으로(일부만 남기면 합계가 조용히 줄어든다). */
+function activityTallyFromWire(value: unknown): AgentRunActivityTally[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tally: AgentRunActivityTally[] = [];
+  for (const entry of value) {
+    const kind = str(entry, "kind");
+    const completed = nonNegativeInteger(num(entry, "completed"));
+    const failed = nonNegativeInteger(num(entry, "failed"));
+    if (kind === undefined || kind === "" || completed === undefined || failed === undefined) {
+      return undefined;
+    }
+    tally.push({ kind, completed, failed });
+  }
+  return tally;
 }
 
 export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
@@ -6162,8 +6773,17 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
   const runId = str(source, "runId");
   const events = arrayField(source, "events");
   if (runId === undefined || events === null) throw new WireShapeError();
+  const toolTally = toolTallyFromWire(record(source)?.toolTally);
+  const toolCallRowsCapped = toolTally === undefined ? undefined : bool(source, "toolCallRowsCapped");
+  const activityTally = activityTallyFromWire(record(source)?.activityTally);
+  const activityRowsTrimmed =
+    activityTally === undefined ? undefined : bool(source, "activityRowsTrimmed");
   return {
     runId: runId.toLowerCase(),
+    ...(toolTally === undefined ? {} : { toolTally }),
+    ...(toolCallRowsCapped === undefined ? {} : { toolCallRowsCapped }),
+    ...(activityTally === undefined ? {} : { activityTally }),
+    ...(activityRowsTrimmed === undefined ? {} : { activityRowsTrimmed }),
     events: events.map((entry) => {
       const row = record(entry);
       if (row === null) throw new WireShapeError();
@@ -6175,11 +6795,24 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
       }
       // 모르는 종류는 원장을 거부하지 않고 `unknown` 한 줄로 남긴다(#3824). 행의
       // 모양(순번·시각) 자체가 틀린 것은 여전히 거부한다.
-      const known = AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKnownKind);
+      // `activity`·`plan`은 자기 종류의 행에만 본문이 있다. 본문이 틀린 행은 모르는 종류로 내리고
+      // 원장은 그대로 읽는다(위 `unknown`과 같은 이유: 행 하나 때문에 기록이 통째로 사라지지 않게).
+      const activity = kind === "activity" ? activityFromWire(row.activity) : undefined;
+      const plan = kind === "plan" ? planFromWire(row.plan) : undefined;
+      const known =
+        AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKnownKind) &&
+        !(kind === "activity" && activity === undefined) &&
+        !(kind === "plan" && plan === undefined);
       const stage = optionalString(row, "stage");
       const code = optionalString(row, "code");
       const approvalId = optionalString(row, "approvalId");
       const actorMemberId = optionalString(row, "actorMemberId");
+      // `tool`·`durationMs`는 `tool_call` 행의 열이다. 다른 종류 행에 실려 와도 읽지 않는다.
+      const rawTool = kind === "tool_call" ? optionalString(row, "tool") : undefined;
+      const tool = rawTool !== undefined && OORT_TOOL_NAME.test(rawTool) ? rawTool : undefined;
+      const rawDuration = kind === "tool_call" ? nonNegativeInteger(num(row, "durationMs")) : undefined;
+      const durationMs =
+        rawDuration !== undefined && rawDuration <= MAX_TOOL_DURATION_MS ? rawDuration : undefined;
       return {
         ordinal,
         kind: known ? (kind as AgentRunLedgerKnownKind) : "unknown",
@@ -6187,6 +6820,10 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
         createdAtMs,
         ...(stage === undefined ? {} : { stage }),
         ...(code === undefined ? {} : { code }),
+        ...(tool === undefined ? {} : { tool }),
+        ...(durationMs === undefined ? {} : { durationMs }),
+        ...(activity === undefined ? {} : { activity }),
+        ...(plan === undefined ? {} : { plan }),
         ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
         ...(actorMemberId === undefined
           ? {}
@@ -6223,41 +6860,73 @@ export async function fetchAgentRunProgress(
 /**
  * run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다.
  *
- * `?include=doorbell`(#3824): 깨우는 신호 행(`doorbell_rung`)을 함께 달라는 요청이다.
- * 그 행을 아는 서버(#3830)만 싣고, 모르는 서버(v0.1.24 이전)는 쿼리를 읽지 않으므로
- * 그냥 예전 원장을 준다 — 그것이 옛 서버의 폴백이다. 다만 쿼리를 읽고 모르는 값이면
- * 400을 내는 서버가 생길 수 있어, 400이면 쿼리 없이 한 번 더 읽는다(`absentInclude`).
- * 이 클라이언트는 `doorbell` 외의 값을 보내지 않는다.
+ * `include`는 쉼표로 나눈 닫힌 집합이다(openapi `listAgentRunEvents`). 이 읽기가 묻는 값은 둘이다.
+ *
+ * - `doorbell`(#3824): 깨우는 신호 행(`doorbell_rung`). 그 행을 아는 서버(#3830)만 싣고, 모르는
+ *   서버(v0.1.24 이전)는 쿼리를 읽지 않으므로 그냥 예전 원장을 준다 — 그것이 옛 서버의 폴백이다.
+ * - `tools`(#4654, ADR-0200 증보 2026-10-15 T4): oort가 직접 잰 도구 호출 행(`tool_call`)과 합계
+ *   (`toolTally`·`toolCallRowsCapped`). 쿼리를 무시하는 서버는 합계 없이 200을 주고(호출 0번이 아니라
+ *   「모름」이다: `toolTally` 부재), 쿼리를 읽고 모르는 값에 400을 내는 서버는 아래 사다리로 간다.
+ * - `activity`(#4657, 증보 7 7-7): 에이전트가 스스로 알린 활동·계획 행(`activity`·`plan`)과 합계
+ *   (`activityTally`·`activityRowsTrimmed`). `tools`와 같은 모양이다: 합계 부재 = 「모름」.
+ *
+ * **한 번만 물러서기.** 400이면 물을 것을 **가장 새로 생긴 것부터** 한 칸씩 줄여 다시 읽는다:
+ * `doorbell,tools,activity` → `doorbell,tools` → `doorbell` → 쿼리 없음(서버가 늘린 순서의 거꾸로라서
+ * 「doorbell은 알고 tools는 모르는」 서버에는 가운데 칸이 맞는 읽기다: 깨움 줄을 잃지 않는다). 물러선 읽기가
+ * **성공했을 때만** 빠진 값을 거절로 기억하고 다음부터는 묻지 않는다 — 같은 경로가 틀린 run id에도 400을
+ * 내므로, 끝칸(쿼리 없음)까지 400이면 아무것도 기억하지 않고 던진다. 기억하지 않으면 30초 폴링마다
+ * 400 왕복이 영원히 붙는다.
  */
 export async function fetchAgentRunEvents(
   workspaceId: string,
   runId: string,
-  options: { includeDoorbell?: boolean } = {}
+  options: { includeDoorbell?: boolean; includeTools?: boolean; includeActivity?: boolean } = {}
 ): Promise<AgentRunLedger> {
   const base = `/v1/workspaces/${encodeURIComponent(
     workspaceId.toLowerCase()
   )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}/events`;
-  if (options.includeDoorbell !== true || ledgerIncludeRejected) {
-    return agentRunLedgerFromWire(await request<unknown>(base));
+  const asked: string[] = [
+    ...(options.includeDoorbell === true && !ledgerDoorbellRejected ? ["doorbell"] : []),
+    ...(options.includeTools === true && !ledgerToolsRejected ? ["tools"] : []),
+    ...(options.includeActivity === true && !ledgerActivityRejected ? ["activity"] : []),
+  ];
+  // 물어볼 값은 서버가 늘린 순서(doorbell, tools, activity)로 줄을 서 있으므로 앞쪽 접두를 차례로 시도하면
+  // 가장 새 값부터 물러선다. 물은 것이 없으면 한 칸(쿼리 없음)뿐이다.
+  const rungs: string[][] = asked.map((_, cut) => asked.slice(0, asked.length - cut));
+  rungs.push([]);
+  for (const [index, include] of rungs.entries()) {
+    try {
+      const ledger = agentRunLedgerFromWire(
+        await request<unknown>(include.length === 0 ? base : `${base}?include=${include.join(",")}`)
+      );
+      if (index > 0) {
+        if (asked.includes("activity") && !include.includes("activity")) ledgerActivityRejected = true;
+        if (asked.includes("tools") && !include.includes("tools")) ledgerToolsRejected = true;
+        if (asked.includes("doorbell") && !include.includes("doorbell")) ledgerDoorbellRejected = true;
+      }
+      return ledger;
+    } catch (error) {
+      if (index === rungs.length - 1 || !(error instanceof ApiError) || error.status !== 400) throw error;
+    }
   }
-  try {
-    return agentRunLedgerFromWire(await request<unknown>(`${base}?include=doorbell`));
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 400) throw error;
-    // 같은 경로가 틀린 run id에도 400을 낸다. 쿼리 없이 읽기가 **성공했을 때만** 이 서버가
-    // 쿼리를 거절한다고 기억한다 — 그렇지 않으면 400 한 번이 세션 내내 깨움 줄을 끈다.
-    const ledger = agentRunLedgerFromWire(await request<unknown>(base));
-    ledgerIncludeRejected = true;
-    return ledger;
-  }
+  // `rungs`는 비지 않고 마지막 칸은 위에서 던진다.
+  throw new WireShapeError();
 }
 
 /** 이 서버가 `?include=doorbell`을 400으로 거절했는가. 거절했으면 다시 묻지 않는다. */
-let ledgerIncludeRejected = false;
+let ledgerDoorbellRejected = false;
+
+/** 이 서버가 `include=tools`를 400으로 거절했는가(`doorbell`은 알아도). 거절했으면 다시 묻지 않는다. */
+let ledgerToolsRejected = false;
+
+/** 이 서버가 `include=activity`를 400으로 거절했는가(`doorbell`·`tools`는 알아도). 거절했으면 다시 묻지 않는다. */
+let ledgerActivityRejected = false;
 
 /** 세션·워크스페이스가 바뀌면 다시 물어본다(다른 서버일 수 있다). 시험 seam이기도 하다. */
 export function resetRunLedgerIncludeProbe(): void {
-  ledgerIncludeRejected = false;
+  ledgerDoorbellRejected = false;
+  ledgerToolsRejected = false;
+  ledgerActivityRejected = false;
 }
 
 // ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------

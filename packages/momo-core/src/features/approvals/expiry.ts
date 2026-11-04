@@ -1,4 +1,7 @@
+import type { RosterMember } from "../../lib/api";
 import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
+import { approvalCardNote } from "../timeline/approvalNote";
+import { memberFor, type Directory } from "../workspace/directory";
 
 // =============================================================================
 // 승인의 기한 — 「곧 만료」와 「이미 만료」를 클라이언트가 어떻게 아는가 (#3738)
@@ -42,15 +45,13 @@ export function expiryPhase(
   return remaining <= EXPIRY_WARN_MS ? "soon" : "none";
 }
 
-/** 올림한 남은 분. 59초 남았으면 「1분」이다 — 0분이라고 말하지 않는다. */
-export function minutesLeft(expiresAtMs: number, nowMs: number): number {
-  return Math.max(1, Math.ceil((expiresAtMs - nowMs) / 60_000));
-}
-
-/** 경고 줄. 숫자 하나만 움직이고 문장은 그대로다. */
-export function expirySoonCopy(expiresAtMs: number, nowMs: number): string {
-  return `${minutesLeft(expiresAtMs, nowMs)}분 안에 만료돼요. 결정하지 않으면 에이전트가 다시 제안해야 해요.`;
-}
+// ## 경고 줄은 시간을 말하지 않는다 (#5174 화면 검수 3회차 L7)
+//
+// 승인 카드가 남은 시간을 말하는 자리는 **조용한 줄 하나**다(`remainingTime`, 한 시간 안이면 분 단위, 10분 안이면
+// 「10분 안에 만료돼요」: 푸시·폰·결정 무대가 같은 문장을 쓴다). 이 파일이 경고 줄에 「N분 안에 만료돼요」를 따로
+// 짓던 때는 한 카드가 두 줄에서 다른 시간을 말했다(「1분 안에」 · 「10분 안에」). 경고 줄은 놓쳤을 때의 결과만
+// 말한다: 문장은 사전 `timeline.approvalExpiry.soon` 한 곳에 있고, 시간 말이 거기 다시 들어가면 카드 렌더 시험
+// (`approvalExpiry.test.tsx`)이 시간 말의 개수가 둘이 되어 붉어진다.
 
 /** 만료 뒤 카드가 컨트롤 대신 말하는 줄. */
 export const EXPIRED_CARD_COPY =
@@ -76,6 +77,57 @@ export function closedCardReproposeReason(
 ): Exclude<ReproposeReason, "expired"> | null {
   if (state === "failed") return "failed";
   return state === "declined" && !viewerDecided ? "declined" : null;
+}
+
+/**
+ * 닫힌 묶음 카드가 「다시 요청」을 건네는 이유의 **한 표** (#5171) — 웹과 폰이 같은 함수를 읽는다.
+ *
+ * - **만료**: 보는 사람과 상관없이. 다만 카드가 이미 **영수증 줄**을 말하고 있으면(이 사람이 결정을 보냈다가 「이미 만료」로
+ *   따라잡은 카드 등) 서지 않는다: 그 카드의 푸터는 영수증 줄이 차지하고 만료 푸터(이유 문장 + 단추)는 그때 서지 않는다. 영수증 줄이
+ *   있는지는 카드가 컨트롤 대신 말할 줄을 정하는 그 함수(`approvalCardNote`)에게 묻는다 — 닫힌 카드에서 그 줄은 영수증뿐이고, 공백뿐인
+ *   줄은 줄이 아니다.
+ * - **실패**: 늘. 영수증 줄과 함께 서기도 한다(방금 내가 승인했다가 실패로 닫힌 카드, #4986).
+ * - **거부**: 거부한 본인을 빼고. 영수증 줄과 함께 서기도 한다.
+ * - 그 밖의 상태(끝·취소·실행 중·생각 중·결정 대기)에는 없다.
+ *
+ * `state` 는 `RequestBundleState`, `receiptNote` 는 이 기기·세션이 낸 결정 영수증의 문장이다(없으면 비워 둔다).
+ */
+export function cardReproposeReason(
+  state: string,
+  viewerDecided: boolean,
+  receiptNote?: string | null
+): ReproposeReason | null {
+  if (state === "expired") {
+    const spoken =
+      approvalCardNote({
+        receiptNote,
+        settled: true,
+        hasTarget: true,
+        pendingHere: false,
+        offline: false,
+      }) !== null;
+    return spoken ? null : "expired";
+  }
+  return closedCardReproposeReason(state, viewerDecided);
+}
+
+/**
+ * 「다시 요청」이 서는 곳 (#3738, #5171): 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가 에이전트로
+ * 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난 버튼으로 읽힌다. 웹과 폰이 같은 함수를
+ * 읽는다(원래 웹 `AgentCard` 안에 있던 판정을 옮겼다).
+ */
+export function reproposeTarget(
+  card: { requestedByMemberId?: string; channelId?: string },
+  directory: Directory
+): { agent: RosterMember; channelId: string } | null {
+  const requester =
+    card.requestedByMemberId !== undefined
+      ? memberFor(directory, card.requestedByMemberId)
+      : null;
+  const channelId = card.channelId;
+  return requester?.kind === "agent" && channelId !== undefined
+    ? { agent: requester, channelId }
+    : null;
 }
 
 /**

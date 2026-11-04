@@ -6,6 +6,9 @@
 //!     production does), and
 //!   * redeems as `momo_app` (`rolsuper=false`, `rolbypassrls=false` — what the api route does).
 //!
+//! #4934 adds the worker's own read address (`mint_for_attachment_*`, the agent-worker spending its
+//! own single-use token against the api's private address): the last three tests.
+//!
 //! Run: `DATABASE_URL=… cargo test -p momo-messaging --test self_media_pg -- --ignored --test-threads=1`
 
 use std::path::PathBuf;
@@ -16,7 +19,9 @@ use std::time::Duration;
 use momo_db::migrate::{run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::{
-    mint_for_run_in_tx, mint_with_ttl_in_tx, redeem_in_tx, token_hash, SELF_MEDIA_MAX_BYTES,
+    mint_for_attachment_in_tx, mint_for_attachment_with_ttl_in_tx, mint_for_run_in_tx,
+    mint_with_ttl_in_tx, redeem_in_tx, token_hash, SELF_MEDIA_INTERNAL_TTL_SECS,
+    SELF_MEDIA_MAX_BYTES,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -1068,5 +1073,485 @@ async fn a_parent_delete_still_clears_the_tokens_though_the_deleting_role_holds_
         rows(by_notifier.ws).await,
         0,
         "the cascade cleared the token"
+    );
+}
+
+// --- #4934: the worker's own read address (ADR-0151 증보 3) -------------------------------------
+
+async fn mint_attachment(
+    pools: &Pools,
+    tenant: &Tenant,
+    attachment: Uuid,
+    ttl_secs: i64,
+) -> Option<String> {
+    let (ws, run, agent) = (tenant.ws, tenant.run, tenant.agent);
+    with_tenant_tx(&pools.worker, ws, move |conn| {
+        Box::pin(async move {
+            mint_for_attachment_with_ttl_in_tx(conn, ws, run, agent, attachment, ttl_secs).await
+        })
+    })
+    .await
+    .expect("mint transaction")
+    .map(|grant| grant.token)
+}
+
+async fn token_rows(pools: &Pools, ws: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM self_media_token WHERE workspace_id = $1")
+        .bind(ws)
+        .fetch_one(&pools.su)
+        .await
+        .unwrap()
+}
+
+/// The worker's read address names **the attachment the proposal carries**, not the trigger's photo:
+/// any complete image alice wrote in the run's conversation. It lives the read TTL (60 s), is stored as a
+/// hash only, is spent by one redeem, and the redeem names exactly that file.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_workers_read_address_names_any_image_the_requester_wrote_in_the_conversation() {
+    let pools = pools().await;
+    let tenant = seed_tenant(&pools.su).await;
+    // a later message of alice's, not the one the run was raised by, with a different file
+    let later = seed_message(&pools.su, tenant.ws, tenant.channel, tenant.alice).await;
+    let (jpeg, jpeg_file) = seed_attachment(
+        &pools.su,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        later,
+        "image/jpeg",
+        2048,
+        "complete",
+    )
+    .await;
+    assert_ne!(
+        jpeg, tenant.attachment,
+        "the premise: not the trigger's photo"
+    );
+
+    let (ws, run, agent) = (tenant.ws, tenant.run, tenant.agent);
+    let grant = with_tenant_tx(&pools.worker, ws, move |conn| {
+        Box::pin(async move { mint_for_attachment_in_tx(conn, ws, run, agent, jpeg).await })
+    })
+    .await
+    .expect("mint transaction")
+    .expect("a grant");
+    assert_eq!(grant.token.len(), 43);
+
+    let (bound, lifetime, stored): ((Uuid, Uuid, Uuid, Uuid, Uuid), f64, String) = {
+        let row: (Uuid, Uuid, Uuid, Uuid, Uuid, f64, String) = sqlx::query_as(
+            "SELECT run_id, agent_member_id, requester_member_id, channel_id, attachment_id, \
+                    EXTRACT(EPOCH FROM (expires_at - created_at))::float8, to_jsonb(t)::text \
+               FROM self_media_token t WHERE workspace_id = $1",
+        )
+        .bind(tenant.ws)
+        .fetch_one(&pools.su)
+        .await
+        .unwrap();
+        ((row.0, row.1, row.2, row.3, row.4), row.5, row.6)
+    };
+    assert_eq!(
+        bound,
+        (tenant.run, tenant.agent, tenant.alice, tenant.channel, jpeg),
+        "bound to the run, the agent, the requester, the conversation and the ONE attachment named"
+    );
+    assert_eq!(
+        lifetime.round() as i64,
+        60,
+        "the read address lives 60 seconds (ADR-0151 증보 3 D4), measured on the row"
+    );
+    assert_eq!(
+        SELF_MEDIA_INTERNAL_TTL_SECS, 60,
+        "and that is what the constant says"
+    );
+    assert!(!stored.contains(&grant.token), "hash only: {stored}");
+    assert!(
+        !stored.contains(&jpeg_file),
+        "no Drive id in the row: {stored}"
+    );
+
+    let source = redeem(&pools, tenant.ws, &grant.token)
+        .await
+        .expect("redeemed");
+    assert_eq!(source.drive_file_id, jpeg_file);
+    assert_eq!(
+        (source.size_bytes, source.mime.as_str()),
+        (2048, "image/jpeg")
+    );
+    assert!(
+        redeem(&pools, tenant.ws, &grant.token).await.is_none(),
+        "a spent address is spent"
+    );
+}
+
+/// RED proof (#4934, 소유 재판정): nothing but the requester's own complete image **in this run's
+/// conversation** gets an address — and every other id is the same `None` that writes nothing. The
+/// control at the end keeps the table from being a dead path.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_workers_read_address_is_refused_for_everything_that_is_not_the_requesters_image_here()
+{
+    let pools = pools().await;
+    let su = &pools.su;
+
+    // somebody else's file in the same conversation (the model names the id; the rule is whose it is)
+    let tenant = seed_tenant(su).await;
+    let bobs_message = seed_message(su, tenant.ws, tenant.channel, tenant.bob).await;
+    let (bobs, _) = seed_attachment(
+        su,
+        tenant.ws,
+        tenant.channel,
+        tenant.bob,
+        bobs_message,
+        "image/png",
+        100,
+        "complete",
+    )
+    .await;
+    assert!(
+        mint_attachment(&pools, &tenant, bobs, 60).await.is_none(),
+        "bob's file"
+    );
+    assert_eq!(
+        token_rows(&pools, tenant.ws).await,
+        0,
+        "a refusal writes nothing"
+    );
+
+    // a deleted message's file (state and deleted_at are each enough)
+    for (label, sql) in [
+        (
+            "state deleted",
+            "UPDATE message SET state = 'deleted'::message_state WHERE id = $1",
+        ),
+        (
+            "deleted_at set",
+            "UPDATE message SET deleted_at = now() WHERE id = $1",
+        ),
+    ] {
+        let tenant = seed_tenant(su).await;
+        let message = seed_message(su, tenant.ws, tenant.channel, tenant.alice).await;
+        let (file, _) = seed_attachment(
+            su,
+            tenant.ws,
+            tenant.channel,
+            tenant.alice,
+            message,
+            "image/png",
+            100,
+            "complete",
+        )
+        .await;
+        sqlx::query(sql).bind(message).execute(su).await.unwrap();
+        assert!(
+            mint_attachment(&pools, &tenant, file, 60).await.is_none(),
+            "{label}"
+        );
+        assert_eq!(token_rows(&pools, tenant.ws).await, 0, "{label}");
+    }
+
+    // alice's own file in ANOTHER conversation (she is a member there; the run is not)
+    let tenant = seed_tenant(su).await;
+    let elsewhere = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, created_by) VALUES ($1, $2, 'public', 'elsewhere', $3)",
+    )
+    .bind(elsewhere).bind(tenant.ws).bind(tenant.alice).execute(su).await.unwrap();
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(elsewhere)
+        .bind(tenant.ws)
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO membership(workspace_id,channel_id,member_id) VALUES($1,$2,$3)")
+        .bind(tenant.ws)
+        .bind(elsewhere)
+        .bind(tenant.alice)
+        .execute(su)
+        .await
+        .unwrap();
+    let there = seed_message(su, tenant.ws, elsewhere, tenant.alice).await;
+    let (other_channel, _) = seed_attachment(
+        su,
+        tenant.ws,
+        elsewhere,
+        tenant.alice,
+        there,
+        "image/png",
+        100,
+        "complete",
+    )
+    .await;
+    assert!(
+        mint_attachment(&pools, &tenant, other_channel, 60)
+            .await
+            .is_none(),
+        "another conversation"
+    );
+    assert_eq!(token_rows(&pools, tenant.ws).await, 0);
+
+    // ANOTHER TENANT's file: tenant two's attachment id under tenant one's run
+    let one = seed_tenant(su).await;
+    let two = seed_tenant(su).await;
+    assert!(
+        mint_attachment(&pools, &one, two.attachment, 60)
+            .await
+            .is_none(),
+        "another workspace's file"
+    );
+    assert_eq!(token_rows(&pools, one.ws).await, 0);
+    assert_eq!(token_rows(&pools, two.ws).await, 0);
+
+    // not a picture the rule takes: type, upload state, size, an id that does not exist
+    for (label, mime, size, status) in [
+        ("gif", "image/gif", 100_i64, "complete"),
+        ("pdf", "application/pdf", 100, "complete"),
+        ("pending", "image/png", 100, "pending"),
+        ("empty", "image/png", 0, "complete"),
+        (
+            "over the ceiling",
+            "image/png",
+            SELF_MEDIA_MAX_BYTES + 1,
+            "complete",
+        ),
+    ] {
+        let tenant = seed_tenant(su).await;
+        let message = seed_message(su, tenant.ws, tenant.channel, tenant.alice).await;
+        let (file, _) = seed_attachment(
+            su,
+            tenant.ws,
+            tenant.channel,
+            tenant.alice,
+            message,
+            mime,
+            size,
+            status,
+        )
+        .await;
+        assert!(
+            mint_attachment(&pools, &tenant, file, 60).await.is_none(),
+            "{label}"
+        );
+        assert_eq!(token_rows(&pools, tenant.ws).await, 0, "{label}");
+    }
+    let tenant = seed_tenant(su).await;
+    assert!(
+        mint_attachment(&pools, &tenant, Uuid::new_v4(), 60)
+            .await
+            .is_none(),
+        "an id that does not exist"
+    );
+
+    // the run side: another agent's run, a run nobody addressed, a person or the agent gone from the
+    // conversation, an archived conversation
+    let tenant = seed_tenant(su).await;
+    let (ws, run, attachment) = (tenant.ws, tenant.run, tenant.attachment);
+    let someone_else = tenant.bob;
+    let foreign = with_tenant_tx(&pools.worker, ws, move |conn| {
+        Box::pin(async move {
+            mint_for_attachment_with_ttl_in_tx(conn, ws, run, someone_else, attachment, 60).await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(foreign.is_none(), "not this run's agent");
+
+    let tenant = seed_tenant(su).await;
+    let agent_message = seed_message(su, tenant.ws, tenant.channel, tenant.agent).await;
+    let by_agent = Tenant {
+        run: seed_run(su, tenant.ws, tenant.channel, tenant.agent, agent_message).await,
+        ..tenant
+    };
+    assert!(
+        mint_attachment(&pools, &by_agent, by_agent.attachment, 60)
+            .await
+            .is_none(),
+        "a run raised by an agent has no human requester"
+    );
+
+    for (label, who) in [("requester left", "alice"), ("agent left", "agent")] {
+        let tenant = seed_tenant(su).await;
+        let member = if who == "alice" {
+            tenant.alice
+        } else {
+            tenant.agent
+        };
+        sqlx::query(
+            "UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2",
+        )
+        .bind(tenant.channel)
+        .bind(member)
+        .execute(su)
+        .await
+        .unwrap();
+        assert!(
+            mint_attachment(&pools, &tenant, tenant.attachment, 60)
+                .await
+                .is_none(),
+            "{label}"
+        );
+    }
+    let tenant = seed_tenant(su).await;
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id = $1")
+        .bind(tenant.channel)
+        .execute(su)
+        .await
+        .unwrap();
+    assert!(
+        mint_attachment(&pools, &tenant, tenant.attachment, 60)
+            .await
+            .is_none(),
+        "archived conversation"
+    );
+
+    // control: the same call on an untouched tenant mints
+    let tenant = seed_tenant(su).await;
+    assert!(mint_attachment(&pools, &tenant, tenant.attachment, 60)
+        .await
+        .is_some());
+    assert_eq!(token_rows(&pools, tenant.ws).await, 1);
+}
+
+/// RED proof (#4934, 만료·1회용·소유 재판정): the worker's read address stops working when its second
+/// is over, when it was spent, when it is presented under another workspace, when the run ends, when the
+/// message is deleted after the mint, when the requester leaves, and for a hand-written row that names
+/// somebody else's file — all the same `None`, and a wrong-workspace attempt spends nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_workers_read_address_stops_working_when_it_expires_is_spent_or_stops_holding() {
+    let pools = pools().await;
+    let su = &pools.su;
+
+    // expired
+    let tenant = seed_tenant(su).await;
+    let token = mint_attachment(&pools, &tenant, tenant.attachment, 1)
+        .await
+        .expect("a token");
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    assert!(redeem(&pools, tenant.ws, &token).await.is_none(), "expired");
+
+    // spent
+    let tenant = seed_tenant(su).await;
+    let token = mint_attachment(&pools, &tenant, tenant.attachment, 60)
+        .await
+        .expect("a token");
+    assert!(redeem(&pools, tenant.ws, &token).await.is_some());
+    assert!(redeem(&pools, tenant.ws, &token).await.is_none(), "spent");
+
+    // another workspace's path: refused, and the row stays unspent for its own workspace
+    let one = seed_tenant(su).await;
+    let two = seed_tenant(su).await;
+    let token = mint_attachment(&pools, &one, one.attachment, 60)
+        .await
+        .expect("a token");
+    assert!(
+        redeem(&pools, two.ws, &token).await.is_none(),
+        "wrong workspace"
+    );
+    let spent: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM self_media_token WHERE used_at IS NOT NULL AND workspace_id = ANY($1)",
+    )
+    .bind(vec![one.ws, two.ws])
+    .fetch_one(su)
+    .await
+    .unwrap();
+    assert_eq!(spent, 0, "a wrong-workspace attempt spends nothing");
+    assert!(
+        redeem(&pools, one.ws, &token).await.is_some(),
+        "its own workspace still can"
+    );
+
+    // the binding stops holding after the mint
+    //  (a) the run is over
+    let tenant = seed_tenant(su).await;
+    let token = mint_attachment(&pools, &tenant, tenant.attachment, 60)
+        .await
+        .expect("a token");
+    sqlx::query("UPDATE agent_run SET status = 'succeeded'::run_status WHERE id = $1")
+        .bind(tenant.run)
+        .execute(su)
+        .await
+        .unwrap();
+    assert!(
+        redeem(&pools, tenant.ws, &token).await.is_none(),
+        "run over"
+    );
+    //  (b) the message carrying the file is deleted
+    let tenant = seed_tenant(su).await;
+    let message = seed_message(su, tenant.ws, tenant.channel, tenant.alice).await;
+    let (file, _) = seed_attachment(
+        su,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        message,
+        "image/png",
+        100,
+        "complete",
+    )
+    .await;
+    let token = mint_attachment(&pools, &tenant, file, 60)
+        .await
+        .expect("a token");
+    sqlx::query(
+        "UPDATE message SET state = 'deleted'::message_state, deleted_at = now() WHERE id = $1",
+    )
+    .bind(message)
+    .execute(su)
+    .await
+    .unwrap();
+    assert!(
+        redeem(&pools, tenant.ws, &token).await.is_none(),
+        "message deleted"
+    );
+    //  (c) the requester left the conversation
+    let tenant = seed_tenant(su).await;
+    let token = mint_attachment(&pools, &tenant, tenant.attachment, 60)
+        .await
+        .expect("a token");
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(tenant.channel)
+        .bind(tenant.alice)
+        .execute(su)
+        .await
+        .unwrap();
+    assert!(
+        redeem(&pools, tenant.ws, &token).await.is_none(),
+        "requester left"
+    );
+
+    // a hand-written row (what a compromised writer could produce) that names bob's file for alice
+    let tenant = seed_tenant(su).await;
+    let bobs_message = seed_message(su, tenant.ws, tenant.channel, tenant.bob).await;
+    let (bobs, _) = seed_attachment(
+        su,
+        tenant.ws,
+        tenant.channel,
+        tenant.bob,
+        bobs_message,
+        "image/png",
+        100,
+        "complete",
+    )
+    .await;
+    let forged = "W".repeat(43);
+    sqlx::query(
+        "INSERT INTO self_media_token (workspace_id, token_hash, run_id, agent_member_id, \
+         requester_member_id, channel_id, attachment_id, expires_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7, clock_timestamp() + interval '60 seconds')",
+    )
+    .bind(tenant.ws)
+    .bind(token_hash(&forged).to_vec())
+    .bind(tenant.run)
+    .bind(tenant.agent)
+    .bind(tenant.alice)
+    .bind(tenant.channel)
+    .bind(bobs)
+    .execute(su)
+    .await
+    .unwrap();
+    assert!(
+        redeem(&pools, tenant.ws, &forged).await.is_none(),
+        "somebody else's file, redeemed against alice's request"
     );
 }

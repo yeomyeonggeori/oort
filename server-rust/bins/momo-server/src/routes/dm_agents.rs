@@ -107,6 +107,10 @@ pub(crate) async fn propose_in_tx(
         payload["origin"] = json!(ORIGIN);
         payload["dm_admission_id"] = json!(id);
         payload["action"]["pins"] = json!({"target": person});
+        // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the
+        // `push_action` refusal give (a consent is read in the conversation: always `Open`).
+        let decision =
+            momo_agent::actions::decision_mode(momo_agent::ACTION_TYPE_WORKSPACE_ACTION, &payload);
         let approval_id = momo_agent::create_pending_approval_in_tx(
             conn,
             send.workspace_id,
@@ -137,6 +141,7 @@ pub(crate) async fn propose_in_tx(
         props["target_member_id"] = json!(person);
         props["requested_for"] = json!(send.author_member_id);
         props["summary"] = json!(format!("모두 허락하면 {}이 이 대화에 들어와 이후 대화를 보고 답해요. 허락하지 않거나 15분이 지나면 들어오지 않아요.", agent.display_name));
+        momo_agent::actions::stamp_decision_mode(&mut props, decision);
         let card = send_message_in_tx(
             conn,
             send.workspace_id,
@@ -144,7 +149,9 @@ pub(crate) async fn propose_in_tx(
                 channel_id: send.channel_id,
                 author_member_id: send.author_member_id,
                 message_type: MessageType::ApprovalRequest,
-                body: Some(format!("{} 들이기 허락을 기다려요", agent.display_name)),
+                body: Some(momo_agent::approval_sentence::dm_admission_request_body(
+                    &agent.display_name,
+                )),
                 props,
                 root_id: None,
                 reply_to_id: None,

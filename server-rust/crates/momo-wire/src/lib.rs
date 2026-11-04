@@ -16,12 +16,16 @@
 //! * [`provenance`] — ADR-0146 action provenance (Accepted): the per-surface
 //!   signing payloads and `record_provenance`, the **only** `action_signature`
 //!   writer in the workspace (migration 060).
+//! * [`report_text`] — ADR-0200 증보 7 7-3: the one character rule for short text an agent
+//!   writes and people read (stage marker, activity label, plan step, activity id), shared by
+//!   `momo-t3` and `momo-agent`, which may not depend on each other.
 
 pub mod folder_name;
 pub mod human_control;
 pub mod payload;
 pub mod permission_preview;
 pub mod provenance;
+pub mod report_text;
 pub mod signing;
 pub mod work_host_online;
 

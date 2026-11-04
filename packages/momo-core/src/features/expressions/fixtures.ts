@@ -15,10 +15,12 @@ export const FIXTURE_MEDIA_SET: ExpressionMedia = {
   thumb: { ...FIXTURE_MEDIA.png.image },
 };
 
+// 세 등록이 모두 움직이는 GIF라서(미디어는 옛 시험이 기대는 그대로다) 종류가 칸을 가른다(ADR-0218 §10 J2):
+// 움직이는 팀 이모지 하나는 팀 이모지에, 움직이는 이모티콘 둘은 GIF에 있다.
 export const FIXTURE_EXPRESSIONS: Expression[] = [
-  { id: "00000000-0000-4000-8000-000000000011", name: "party_parrot", displayName: "파티 앵무새", tags: ["축하", "🎉"] },
-  { id: "00000000-0000-4000-8000-000000000012", name: "ki_jeol", displayName: "기절", tags: ["놀람"] },
-  { id: "00000000-0000-4000-8000-000000000013", name: "thumbs_up", displayName: "엄지척", tags: ["좋아요", "👍"] },
+  { id: "00000000-0000-4000-8000-000000000011", name: "party_parrot", displayName: "파티 앵무새", tags: ["축하", "🎉"], kind: "emoji" as const },
+  { id: "00000000-0000-4000-8000-000000000012", name: "ki_jeol", displayName: "기절", tags: ["놀람"], kind: "sticker" as const },
+  { id: "00000000-0000-4000-8000-000000000013", name: "thumbs_up", displayName: "엄지척", tags: ["좋아요", "👍"], kind: "sticker" as const },
 ].map((item, index) => ({
   ...item, workspaceId: FIXTURE_WORKSPACE_ID, version: String(index + 1),
   status: "active", media: FIXTURE_MEDIA_SET, origin: { kind: "upload", sourceUrl: null, prompt: null },

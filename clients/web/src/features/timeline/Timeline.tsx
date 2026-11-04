@@ -30,7 +30,6 @@ function TimelineTail() {
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
 import {
-  threadRollup,
   type AgentRunProgress,
   type Channel,
   type Message,
@@ -40,7 +39,7 @@ import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { DmGroupFacts } from "@momo/core/features/workspace/directory";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { InlineBanner, Skeleton } from "@/features/common/States";
+import { Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
   type PendingMessage,
@@ -60,6 +59,9 @@ import {
   type DeletedFoldFields,
 } from "@momo/core/features/timeline/deletedFold";
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
+import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
+import { mainFlowMessages, replyHomeLine } from "@momo/core/features/timeline/threadHome";
+import { useExpressions } from "@/features/expressions/context";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
@@ -76,6 +78,12 @@ import {
 } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
+import { isFailedRow, type SendFailureKind } from "@momo/core/features/connection/sendFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import type { ConnectionCause } from "@momo/core/features/connection/model";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { SystemLine } from "./SystemLine";
+import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
@@ -127,6 +135,9 @@ import {
 // shift is measured against the anchor row itself, the oldest message that was
 // already on screen, by how far it moved.
 const START_INDEX = 1_000_000;
+
+/** 답글이 없는 루트가 부르는 빈 배열 — 렌더마다 새 배열을 만들지 않는다. */
+const NO_REPLIES: readonly Message[] = [];
 
 /**
  * 이 목록이 그리는 항목. 코어 스트림에 삭제 접기의 두 필드가 얹힌 것이다
@@ -233,6 +244,7 @@ export function Timeline({
   directory,
   status,
   channelKind,
+  viewingThreadId,
   peer,
   dmGroup,
   lastReadSeq,
@@ -252,6 +264,10 @@ export function Timeline({
   onOpenWorkSession,
   onResend,
   onResendPending,
+  onDiscardPending,
+  failureKinds,
+  onResendAllPending,
+  loadCause = null,
   onAddMember,
   canConnectAgent = false,
   onConnectAgent,
@@ -272,6 +288,13 @@ export function Timeline({
   status: "loading" | "ready" | "error";
   /** Decides what "empty" means here: a channel gains members, a DM cannot. */
   channelKind?: Channel["kind"];
+  /**
+   * 지금 이 화면이 **보고 있는** 스레드의 루트 id — 스레드 패널이 열려 있고 창이 앞일 때만 준다(아니면 `null`/생략). 그 루트의 요약
+   * 줄은 남의 새 답글에도 안 읽은 수를 0으로 읽는다: 사람이 그 답글들을 지금 읽고 있고, 읽음 신호(`PUT …/read`)가 왕복하는 동안
+   * 칩이 깜빡 +1 되지 않게 한다(코어 `liveThreadRollup`의 `viewing`, #5032). 패널이 읽음 신호를 보내는 조건과 같은 값이어야 한다
+   * (`useDocumentForeground`).
+   */
+  viewingThreadId?: string | null;
   /** Visible channel / DM name. The intro titles itself from this. */
   channelName?: string;
   /** Channel topic, quoted as the intro body when present. */
@@ -325,6 +348,14 @@ export function Timeline({
   onOpenWorkSession?: OpenWorkSession;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
+  /** 보내지 못한 echo 행을 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
+  onDiscardPending?: (clientMsgId: string) => void;
+  /** 실패한 행마다 원인 한 줄의 종류(#5221). 항목이 없으면 원인 없이 「전송 실패」만 말한다. */
+  failureKinds?: ReadonlyMap<string, SendFailureKind>;
+  /** 실패한 행이 둘 이상일 때 마지막 실패 행 아래 「모두 다시 보내기」가 부른다(#5221). 없으면 단추를 그리지 않는다. */
+  onResendAllPending?: () => Promise<void> | void;
+  /** `status` 가 `error` 일 때 그 실패가 말하는 원인(#5221). 연결 쪽 원인이 아니면 `null`. */
+  loadCause?: ConnectionCause | null;
   /**
    * 이 채널에 워크스페이스 멤버를 넣는다. 빈 채널의 보조 행동 (#1536). 이름이
    * 초대가 아니라 추가인 이유는 코어 라벨 상수의 머리말 (#1573): 이 손잡이가
@@ -388,8 +419,25 @@ export function Timeline({
   // 의존성에 넣으면 스트림이 매 렌더 새로 만들어지고, 그 동일성은 이 목록의
   // 앵커 보정이 기대는 것이다.
   const myMemberIdForFold = actions?.myMemberId;
-  // 서버가 소속 root를 준 답글만 본류에서 빼요. 옛 서버의 root 없는 카드는 그대로예요.
-  const mainMessages = useMemo(() => messages.filter((message) => !message.rootId), [messages]);
+  // 본류에는 root 없는 메시지와 「대화에도 보낸」 답글만 서요(ADR-0148 증보 결정 4 — 코어 `isMainFlowRow` 한 곳, 폰과 같은 규칙).
+  // 서버가 소속 root를 준 답글 중 켜지 않은 것만 빠져요. 옛 서버는 `alsoInChannel`을 안 보내서 화면이 오늘과 같고, root 없는 카드는 그대로예요.
+  const mainMessages = useMemo(() => mainFlowMessages(messages), [messages]);
+  // 본류에 선 답글 줄의 원문 한 줄: 이미 든 행에서 root를 푼다(요청 없음). 이모티콘만 보낸 root를 알아보려고 명부를 건넨다.
+  const { cache: expressionCache } = useExpressions();
+  const expressionItems = expressionCache.items;
+
+  // 루트 아래 요약 줄(#5008): 서버가 페이지에서 준 요약은 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글의 수·얼굴·안 읽은 수는
+  // 이 목록이 이미 든 답글(`messages`에는 답글 프레임도 들어 있다 — 본류에서만 `mainMessages`가 뺀다)로 그 위에 얹는다.
+  // 규칙은 코어 `liveThreadRollup` 한 곳이다. 든 배열에서 파생하므로 되쏘기에도 같은 답이다.
+  const repliesByRoot = useMemo(() => groupRepliesByRoot(messages), [messages]);
+  // `viewing`은 그리는 쪽만 켠다(아래 행 렌더): 열린 스레드가 바뀌어도 이 함수의 동일성은 그대로여야 삭제 접기(`items`)의 스트림이
+  // 다시 지어지지 않는다 — 접기가 묻는 것은 「요약이 있는가」뿐이고 그것은 `viewing`과 상관없다.
+  const viewingKey = viewingThreadId == null ? null : viewingThreadId.toLowerCase();
+  const rollupFor = useCallback(
+    (message: Message, viewing = false) =>
+      liveThreadRollup(message, repliesByRoot.get(message.id.toLowerCase()) ?? NO_REPLIES, myMemberIdForFold, viewing),
+    [repliesByRoot, myMemberIdForFold]
+  );
 
   // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 폰이 먼저 고쳤고, 코어 승격과
   // 함께 실측한 결과 **웹도 같은 결함을 갖고 있었다**: 이 스트림은
@@ -447,6 +495,11 @@ export function Timeline({
     ]
   );
 
+  // 「모두 다시 보내기」는 실패한 행이 둘 이상일 때 **마지막** 실패 행 아래에 한 번만 선다(#5221).
+  const failedPendingIds = useMemo(
+    () => (pending ?? []).filter(isFailedRow).map((p) => p.clientMsgId),
+    [pending]
+  );
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
       buildTimelineItems(presentableRows(mainMessages), {
@@ -456,13 +509,16 @@ export function Timeline({
         pending,
       }),
       (item) => ({
-        hasRollup: threadRollup(item.message) !== null,
+        hasRollup: rollupFor(item.message) !== null,
         hasReactions:
           chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
             .length > 0,
       })
     );
-    return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+    // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5079) — 이유는 `startGroupAfterSystemLine`.
+    // 접기 뒤에 건다: 시스템 줄은 살아 있는 메시지라 묘비 접기가 줄을 건너 이어 접는 일이 없어서, 줄 바로 다음 행은 접기 앞뒤로 같은 행이다.
+    const grouped = startGroupAfterSystemLine(folded);
+    return showIntro ? [CHANNEL_INTRO_ITEM, ...grouped] : grouped;
   }, [
     mainMessages,
     lastReadSeq,
@@ -471,6 +527,7 @@ export function Timeline({
     pending,
     reactions,
     myMemberIdForFold,
+    rollupFor,
     showIntro,
   ]);
 
@@ -768,12 +825,15 @@ export function Timeline({
     setScrollerEl(node instanceof HTMLElement ? node : null);
   }, []);
 
-  if (status === "error") {
+  // 불러오기가 실패했다(#5221). 받아 둔 글이 **없으면** 제목 + 이유 한 줄 + 다시 시도 상자, **있으면** 상자로 덮지 않고
+  // 목록은 그대로 두고 위에 한 줄만 건다(읽을 것이 있는데 화면을 비우면 정보를 버리는 일이다). 이유는 실패가 말하는
+  // 원인의 닫힌 분류 문장이고 상태 코드·서버 원문은 없다.
+  if (status === "error" && empty) {
     return (
-      <InlineBanner
-        message="이 구간을 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={() => onRetry?.()}
+      <LoadFailureBox
+        titleKey={CONNECTION_KEYS.loadConversationTitle}
+        cause={loadCause}
+        onRetry={() => onRetry?.()}
         testId="timeline-error"
       />
     );
@@ -790,6 +850,14 @@ export function Timeline({
     // `relative`는 아래 항법 컨트롤이 붙을 자리다. 컨트롤이 타임라인 **안**에
     // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
     <div className="relative h-full">
+      {status === "error" && (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadNewerTitle}
+          onRetry={() => onRetry?.()}
+          testId="timeline-error-line"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
+        />
+      )}
       <TimelineLiveRegionProvider>
       <TimelineTailContext.Provider value={tail}>
       <Virtuoso
@@ -882,8 +950,22 @@ export function Timeline({
                 directory={directory}
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}
+                onDiscard={onDiscardPending}
+                failureKind={failureKinds?.get(item.pending.clientMsgId) ?? null}
+                resendAllCount={
+                  failedPendingIds.length >= 2 &&
+                  failedPendingIds[failedPendingIds.length - 1] === item.pending.clientMsgId
+                    ? failedPendingIds.length
+                    : undefined
+                }
+                onResendAll={onResendAllPending}
               />
             );
+          }
+          // 서버가 방에 알리는 중단 줄(#5079)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 반응·답글·행 동작이
+          // 하나도 붙지 않는다. 판정은 코어 `isRunCancelledNotice` 하나(폰과 같다).
+          if (isSystemLineMessage(item.message)) {
+            return <SystemLine message={item.message} clearsToolbarBand />;
           }
           return (
             <MessageRow
@@ -911,6 +993,8 @@ export function Timeline({
               pausedRepeat={item.pausedRepeat}
               deletedRepeat={item.deletedRepeat}
               deletedFoldedIds={item.deletedFoldedIds}
+              rollup={rollupFor(item.message, viewingKey !== null && item.message.id.toLowerCase() === viewingKey)}
+              replyHome={replyHomeLine(item.message, quoteLookup, expressionItems)}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}

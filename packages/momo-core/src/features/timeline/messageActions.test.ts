@@ -12,6 +12,7 @@ import {
   emptyTimeline,
   hasAnyAction,
   isStrictlyOrdered,
+  lastEditableMessage,
   reconcileMessages,
 } from "./model";
 import { canQuoteMessage } from "./quote";
@@ -196,5 +197,104 @@ describe("action affordances", () => {
         delete: false,
       })
     ).toBe(false);
+  });
+});
+
+// #5191 - 빈 입력칸의 ↑ 가 고칠 메시지. 「이 대화에서 **내** 마지막 **글 있는** 고칠 수 있는 메시지」.
+describe("lastEditableMessage", () => {
+  const ROOT = "0000000a-0000-4000-8000-000000000000";
+  const PHOTO = { id: "f1", name: "a.png", mime: "image/png", sizeBytes: 1 };
+
+  it("returns my newest live message that has text", () => {
+    const rows = [msg(1), msg(2, { authorMemberId: OTHER }), msg(3)];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(3);
+  });
+
+  it("skips other people's and agents' messages, however recent", () => {
+    const rows = [msg(1), msg(2, { authorMemberId: OTHER }), msg(3, { authorMemberId: OTHER })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+  });
+
+  it("skips a message with no text (attachments only): there is nothing to fix, and the editor would open empty", () => {
+    const rows = [msg(1), msg(2, { body: "", attachments: [PHOTO] }), msg(3, { body: undefined, attachments: [PHOTO] })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+    // A caption that is only whitespace is no text either.
+    expect(lastEditableMessage([msg(1), msg(2, { body: "  \n " })], ME)?.seq).toBe(1);
+  });
+
+  it("keeps a message that has text and attachments", () => {
+    const rows = [msg(1), msg(2, { attachments: [PHOTO] })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(2);
+  });
+
+  it("skips tombstones, failed sends and non-text rows", () => {
+    const rows = [
+      msg(1),
+      msg(2, { state: "deleted", body: undefined }),
+      msg(3, { state: "failed" }),
+      msg(4, { type: "tool_result" }),
+    ];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+  });
+
+  it("keeps an already edited message editable", () => {
+    expect(lastEditableMessage([msg(1), msg(2, { state: "edited" })], ME)?.seq).toBe(2);
+  });
+
+  it("is the channel's main flow by default: a thread reply is not the channel's last message", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+  });
+
+  // #4888 - 「대화에도 보낸」 답글은 본류에 서므로 ↑ 의 대상이다. 판정이 그리는 규칙과 같은 한 함수(`isMainFlowRow`)여야 한다.
+  it("includes my reply that was also sent to the conversation: it is drawn in the main flow", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(2);
+  });
+
+  it("still skips a thread-only reply of mine when a later also-sent reply is someone else's", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true, authorMemberId: OTHER }), msg(3, { rootId: ROOT })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+  });
+
+  it("returns nothing for an unknown viewer or when none of mine can be edited", () => {
+    expect(lastEditableMessage([msg(1)], undefined)).toBeUndefined();
+    expect(lastEditableMessage([msg(1, { authorMemberId: OTHER })], ME)).toBeUndefined();
+    expect(lastEditableMessage([], ME)).toBeUndefined();
+  });
+});
+
+// #5191 - 「메시지 고치기가 안 된다」 재현 표를 판정 수준에서 못 박는다. 가설 ①(첨부가 든 메시지는 `type` 이 `text` 가 아니라 고치기가
+// 안 뜬다)은 거짓이었다: 클라이언트는 첨부를 `type: "text"` + `attachmentIds` 로 보내고(`sendMessage`), 서버는 보낸 `type` 을 그대로
+// 저장하며(`routes/messages.rs`), 예약 보냄도 `MessageType::Text` 로 같은 길에 넣는다(`scheduler.rs`). 그래서 작성자의 글이 있는
+// 메시지는 첨부·예약·답글·스레드 루트 어느 것이든 같은 판정을 지난다. 이 표가 그 사실을 고정해 첨부를 이유로 고치기를 닫는 변경이 빨갛게 한다.
+describe("고치기 재현 표 (#5191)", () => {
+  const PHOTO = { id: "f1", name: "lunch.png", mime: "image/png", sizeBytes: 48_000 };
+  const OWN: ReadonlyArray<[string, Partial<Message>]> = [
+    ["글", {}],
+    ["첨부 든 글", { attachments: [PHOTO] }],
+    ["첨부만(글 없음)", { body: "", attachments: [PHOTO] }],
+    ["예약해서 보낸 글", { body: "예약해서 보낸 글이에요" }],
+    ["답글", { rootId: "0000000a-0000-4000-8000-000000000000" }],
+    ["대화에도 보낸 답글", { rootId: "0000000a-0000-4000-8000-000000000000", alsoInChannel: true }],
+    ["스레드 루트", { thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: 1 } }],
+    ["이미 고친 글", { state: "edited", editedAtMs: 5 }],
+  ];
+
+  it.each(OWN)("내 %s: 고칠 수 있다", (_name, over) => {
+    expect(canEditMessage(msg(1, over), ME)).toBe(true);
+  });
+
+  const NOT_EDITABLE: ReadonlyArray<[string, Partial<Message>]> = [
+    ["남의 글", { authorMemberId: OTHER }],
+    ["남의 첨부 든 글", { authorMemberId: OTHER, attachments: [PHOTO] }],
+    ["에이전트 글", { authorMemberId: "cccccccc-1111-4111-8111-cccccccccccc" }],
+    ["지운 글", { state: "deleted", body: undefined }],
+    ["보내지 못한 글", { state: "failed" }],
+    ["승인 카드", { type: "approval_request" }],
+  ];
+
+  it.each(NOT_EDITABLE)("%s: 고칠 수 없다", (_name, over) => {
+    expect(canEditMessage(msg(1, over), ME)).toBe(false);
   });
 });

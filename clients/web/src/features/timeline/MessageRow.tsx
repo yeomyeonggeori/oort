@@ -1,17 +1,13 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import {
-  threadRollup,
-  type Message,
-  type RosterMember,
-  type ThreadRollup,
-} from "@momo/core/lib/api";
+import { threadRollup, uuidEq, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { openRunDecisionStage } from "@/features/decisionStage/stageEntry";
 import { AgentCard } from "./AgentCard";
 import { ThreadRequestSummary } from "./ThreadRequestSummary";
+import { ThreadSummaryLine } from "./ThreadSummary";
 import { RequestThoughtLine } from "@/features/agents/RequestThoughtLine";
 import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
@@ -96,6 +92,8 @@ import {
   resolveQuote,
 } from "@momo/core/features/timeline/quote";
 import { QuoteBlock } from "./QuoteBlock";
+import { ReplyHomeLine } from "./ReplyHomeLine";
+import { replyHomeRoot, type ReplyHomeLine as ReplyHomeLineModel } from "@momo/core/features/timeline/threadHome";
 import {
   DeleteMessageDialog,
   MessageActionContextMenu,
@@ -115,6 +113,8 @@ import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
+import { EditRequestContext } from "./editRequest";
+import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import {
@@ -129,6 +129,7 @@ import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 import { selectionIsWithinRow } from "./messageContextMenuModel";
+import { useContextMenuYield } from "./useContextMenuYield";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
@@ -167,6 +168,11 @@ const AGENT_TEXT = "text-agent";
  * Radix's trigger is disabled before the contextmenu event reaches it, so it
  * never calls preventDefault in this branch. That preserves the browser's own
  * selection copy commands instead of replacing them with whole-message actions.
+ *
+ * "Selected" means the person's own selection. A selection the engine makes
+ * by itself for the right-click (macOS WebKit selects the clicked word before
+ * `contextmenu`) must not count: `useContextMenuYield` tells them apart, and
+ * clears the engine's (#5192).
  */
 function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
   const [selected, setSelected] = useState(false);
@@ -187,27 +193,6 @@ function timeLabel(atMs: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(
     d.getMinutes()
   ).padStart(2, "0")}`;
-}
-
-function relativeLabel(atMs: number, nowMs: number): string {
-  const minutes = Math.max(0, Math.round((nowMs - atMs) / 60_000));
-  if (minutes < 1) return "방금";
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.round(hours / 24)}일 전`;
-}
-
-/**
- * 「답글 3개 · 마지막 5분 전」. 버튼으로도 글로도 그려지므로 문구는 한 곳에서
- * 나온다 (goal P3 1-1): 스레드를 열 수 있는 자리와 이미 열어 둔 자리가 같은 값을
- * 읽어야 두 표면이 서로 다른 말을 하지 않는다.
- */
-function rollupLabel(rollup: ThreadRollup): string {
-  return `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-    rollup.lastReplyAtMs,
-    Date.now()
-  )}`;
 }
 
 /**
@@ -238,8 +223,11 @@ function rollupLabel(rollup: ThreadRollup): string {
 export function Avatar({
   member,
   className,
+  testId = "row-avatar",
 }: {
   member: RosterMember | null;
+  /** 같은 얼굴을 다른 자리(스레드 요약 줄의 겹친 얼굴)에서 세는 시험이 행 아바타와 섞이지 않게 한다. */
+  testId?: string;
   /**
    * 크기를 바꾸는 호출처용(타임라인 행이 대화 밀도의 아바타 크기를 넘긴다, AP-2a #4189).
    * 기본은 `size-8`(32)이고 같은 `size` 그룹의 클래스가 오면 `cn`이 나중 것을 남긴다.
@@ -257,7 +245,7 @@ export function Avatar({
   return (
     <span
       aria-hidden="true"
-      data-testid="row-avatar"
+      data-testid={testId}
       data-avatar-kind={identity.kind}
       className={cn(
         // size-8 = AVATAR_SIZE(32). 두 값이 갈라지면 `avatarSize.test.ts`가 붉다.
@@ -333,6 +321,8 @@ export function MessageRow({
   onOpenWorkSession,
   onResend,
   showRollup = true,
+  rollup: listRollup,
+  replyHome,
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
@@ -418,6 +408,18 @@ export function MessageRow({
    */
   showRollup?: boolean;
   /**
+   * 목록이 이미 든 새 답글을 서버 요약 위에 얹어 만든 요약 줄의 값(#5008, 코어 `liveThreadRollup`).
+   * 서버 요약(`message.thread`)은 페이지를 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글은 이 값으로만 줄에 닿는다.
+   * 생략하면(`undefined`) 서버 요약을 그대로 읽는다 — 목록 밖의 마운트(받은 편지함 등)는 지금 그대로이고, `null`은
+   * 「이 루트에는 요약이 없다」로 읽는다. 그릴지는 여전히 `showRollup`이 정한다.
+   */
+  rollup?: ThreadRollup | null;
+  /**
+   * 본류에 선 답글 줄(「↳ ○○님 스레드에 답글」 + 원문 한 줄, #4888). 목록이 넣는다(`Timeline`) — 본류에 선 답글(「대화에도 보낸」)에만
+   * 값이 있고, 답글이 아닌 행·스레드 패널·받은 편지함 같은 목록 밖 마운트는 넣지 않아 줄이 없다. 누르면 그 스레드가 열린다(`onOpenThread`).
+   */
+  replyHome?: ReplyHomeLineModel | null;
+  /**
    * ADR-0179 D3. True only when this row entered as a live other-user
    * arrival. Default false: REST, work log, fixtures.
    */
@@ -443,6 +445,11 @@ export function MessageRow({
   const [editing, setEditing] = useState(false);
   const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // #5191 — 밖(입력칸의 ↑ 키)에서 온 「고쳐 줘」 요청: 이 행을 가리키면 이 행이 받아 자기 편집기를 연다(`editRequest.ts`).
+  const editRequests = useContext(EditRequestContext);
+  const handledEditNonce = useRef<number | null>(null);
+  // 지금 열린 편집기를 연 요청. 끝날 때(저장·취소) 요청한 쪽에 알려 초점을 돌려주게 한다. 메뉴로 연 편집기는 null이다.
+  const editOpenedBy = useRef<number | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   // One slot for the failures that have nowhere else to sit (a reaction, a
   // delete). B8: a Korean sentence, never the wire string, and never a toast —
@@ -519,7 +526,9 @@ export function MessageRow({
   // 목록에서 다시 보이므로 한 번 잘못 말하면 그 말이 남는다.
   const previewText =
     message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
-  const rollup = showRollup ? threadRollup(message) : null;
+  const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
+  // 본류 답글 줄이 눌려 열 스레드의 루트(#4888). 열 곳이 없으면(핸들러 없음·루트를 못 불러옴) 줄은 글이다.
+  const replyHomeRoot_ = replyHome && onOpenThread && quoteLookup ? replyHomeRoot(replyHome, quoteLookup) : undefined;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
@@ -611,6 +620,30 @@ export function MessageRow({
   const actionable =
     Boolean(actions) &&
     (hasAnyAction(available) || canCopy || canCopyLink);
+
+  // #5191 — 요청이 이 행을 가리키면 편집기를 연다. 요청은 받는 즉시 비운다(같은 요청이 두 번 열리지 않게). 그 사이 이 행이
+  // 지워졌거나 고칠 수 없게 됐다면 열지 않고 요청만 비운다 — 편집기가 열릴 자격은 메뉴의 「고치기」와 같은 판정이다.
+  useEffect(() => {
+    const request = editRequests?.request;
+    if (!request || !actions) return;
+    if (!uuidEq(request.messageId, message.id)) return;
+    if (handledEditNonce.current === request.nonce) return;
+    handledEditNonce.current = request.nonce;
+    editRequests.consume(request.nonce);
+    if (!canEditMessage(message, actions.myMemberId)) return;
+    editOpenedBy.current = request.nonce;
+    setEditError(null);
+    setEditing(true);
+  }, [editRequests, actions, message]);
+
+  /** 편집기를 닫는 문은 하나다: 저장 성공과 취소가 같이 지난다. 요청으로 열린 편집기였다면 요청한 쪽에 끝났다고 알린다. */
+  const finishEdit = () => {
+    setEditing(false);
+    setEditError(null);
+    const nonce = editOpenedBy.current;
+    editOpenedBy.current = null;
+    if (nonce !== null) editRequests?.finished(nonce);
+  };
 
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
@@ -715,6 +748,36 @@ export function MessageRow({
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
+  const contextMenuYield = useContextMenuYield(rowRef);
+  // 편집이 끝나면 호버 툴바를 붙들던 두 상태를 **실제 값**으로 되돌린다(실측 #5191, Chromium·WebKit 공통: 저장 뒤 포인터를 치워도
+  // 그 행의 툴바가 남았다). ① 지워진 입력칸은 `blur` 를 내지 않아 「초점 있음」이 남는다. ② 「고치기」는 포털 메뉴에서 눌렀고, 그 항목(또는
+  // 편집기)이 포인터 밑에서 사라지면 이 행은 `mouseleave` 를 받지 못해 「호버 중」이 남는다.
+  // ①은 DOM 이 아는 사실(`contains(activeElement)`)을 바로 읽는다. ②는 `:hover` 자체가 낡을 수 있어(WebKit 은 포인터 밑 요소가 사라지면 다음
+  // 포인터 이동의 hit-test 때까지 옛 값을 쥔다) **다음 포인터 이동 뒤 한 번** 읽는다 — 포인터가 아직 행 위면 호버는 그대로 두므로 맞는 값은
+  // 건드리지 않고, 한 번이면 된다: 그 뒤의 `mouseenter`·`mouseleave` 는 다시 이 행에 정상으로 닿는다. 편집이 막 끝났을 때만 건다(행마다
+  // 마운트 때 거는 리스너가 아니다).
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (editing) {
+      wasEditing.current = true;
+      return undefined;
+    }
+    if (!wasEditing.current) return undefined;
+    wasEditing.current = false;
+    const node = rowRef.current;
+    if (!node) return undefined;
+    if (!node.contains(document.activeElement)) setRowFocused(false);
+    let frame = 0;
+    const release = onNextPointerMove(() => {
+      frame = requestAnimationFrame(() => {
+        if (!node.matches(":hover")) setRowHovered(false);
+      });
+    });
+    return () => {
+      release();
+      cancelAnimationFrame(frame);
+    };
+  }, [editing]);
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
     // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
@@ -812,14 +875,12 @@ export function MessageRow({
         if (next instanceof Node && event.currentTarget.contains(next)) return;
         setRowFocused(false);
       }}
-      // State disables the Radix trigger before a normal right-click. The
-      // capture guard covers the same gesture synchronously if React has not
-      // committed the immediately preceding selectionchange yet.
-      onContextMenuCapture={(event) => {
-        if (selectionIsWithinRow(rowRef.current, document.getSelection())) {
-          event.stopPropagation();
-        }
-      }}
+      // State disables the Radix trigger before a normal right-click on the
+      // person's own selection. The capture guard covers the same gesture
+      // synchronously if React has not committed the immediately preceding
+      // selectionchange yet, and keeps the engine's own right-click word
+      // selection from yielding the app menu (macOS WebKit, #5192).
+      {...contextMenuYield}
       {...(actionable ? longPress : {})}
       className={cn(
         // `group` lets the gutter clock react to a hover anywhere on the row.
@@ -996,6 +1057,14 @@ export function MessageRow({
             대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
             tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
             지워지지 않는다. */}
+        {replyHome && !deleted && (
+          <ReplyHomeLine
+            line={replyHome}
+            directory={directory}
+            myMemberId={actions?.myMemberId}
+            onOpen={replyHomeRoot_ ? () => onOpenThread?.(replyHomeRoot_) : undefined}
+          />
+        )}
         {quote && (
           <QuoteBlock
             block={quote}
@@ -1030,16 +1099,13 @@ export function MessageRow({
               initialBody={message.body ?? ""}
               pending={editPending}
               error={editError}
-              onCancel={() => {
-                setEditing(false);
-                setEditError(null);
-              }}
+              onCancel={finishEdit}
               onSave={(body) => {
                 setEditPending(true);
                 setEditError(null);
                 void actions
                   .onEditMessage(message, body)
-                  .then(() => setEditing(false))
+                  .then(finishEdit)
                   .catch((error: unknown) =>
                     setEditError(editFailureMessage(error))
                   )
@@ -1198,36 +1264,17 @@ export function MessageRow({
             {repeatLabel && (
               <span data-testid="paused-notice-repeat">{repeatLabel}</span>
             )}
-            {rollup &&
-              // 죽은 컨트롤을 만들지 않는다 (goal P3 1-1). 스레드 패널은
-              // `onOpenThread`를 넘기지 않는데 — 이미 그 스레드를 열어 둔 자리라
-              // "여는" 동작 자체가 없다 — R1은 그래도 <button>을 그렸다. 포커스가
-              // 잡히고 hover에 반응하면서 눌러도 아무 일이 없는 버튼이었다.
-              //
-              // **그리고 스레드 패널은 이제 이 줄을 아예 그리지 않는다**
-              // (goal RN-U2, `showRollup`). 위 `rollup` 이 그 자리에서 `null` 이므로
-              // 여기까지 오지 않는다. 아래 <span> 갈래는 여전히 남는데, 롤업은
-              // 있으나 열 곳이 없는 다른 표면(읽기 전용 마운트)이 그것이다 — 거기서
-              // 「답글 3개 · 마지막 5분 전」은 읽을 값이 있는 문장이다.
-              //
-              // 행이 이미 쓰고 있는 규칙을 그대로 따른다: 위의 `available.reply`는
-              // 핸들러가 없으면 답글 액션을 아예 내놓지 않는다("갈 곳 없는 답글은
-              // 막다른 길이다"). 같은 이유로 여기서도 갈 곳이 있을 때만 버튼이고,
-              // 없으면 읽는 글이다. 「답글 3개 · 마지막 5분 전」은 그 자체로 읽을
-              // 값이므로 정보는 그대로 남고 없어지는 것은 가짜 어포던스뿐이다.
-              (onOpenThread ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenThread(message)}
-                  data-testid="thread-anchor"
-                  data-row-action=""
-                  className="rounded-sm press hover:text-ink focus-visible:focus-ring"
-                >
-                  {rollupLabel(rollup)}
-                </button>
-              ) : (
-                <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
-              ))}
+            {rollup && (
+              // 요약 줄은 얼굴·「답글 N개」·「새 답글 M」 칩이고, 무엇을 보일지는 코어(`threadSummary`)가 정한다 (#4878).
+              // 죽은 컨트롤을 만들지 않는다 (goal P3 1-1): 열 곳이 없으면(`onOpenThread` 없음 — 읽기 전용 마운트) 같은
+              // 모양의 글이고, 스레드 패널은 이 줄을 아예 그리지 않는다(`showRollup`, goal RN-U2: 위 `rollup`이 그 자리에서
+              // `null`이다). 행이 이미 쓰는 규칙과 같다: 위의 `available.reply`도 핸들러가 없으면 답글 액션을 내놓지 않는다.
+              <ThreadSummaryLine
+                rollup={rollup}
+                directory={directory}
+                onOpen={onOpenThread ? () => onOpenThread(message) : undefined}
+              />
+            )}
             {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **누가 불렀든** 그 일이 지금
                 진행 중이면 요약 줄에 같은 칩이 선다. 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어
                 (진행 읽기에 rootId가 없다) 여기 서지 않는다. */}
@@ -1476,7 +1523,7 @@ function DividerRow({
  * **`nowMs`를 받는 것이 H-4의 수리다.** 「오늘」인지 아는 데는 그 행의 시각만으로
  * 부족하고, 그것이 1차가 절대 표기만 그린 이유였다 — 오늘 대화를 보면서 「2026년 8월
  * 5일」을 읽고 그게 오늘인지 스스로 계산해야 했다. 상대 표기 함수는 이 파일에 이미
- * 있었고(`relativeLabel`) 스레드 롤업만 그것을 쓰고 있었다.
+ * 있었다(`relativeLabel`, 스레드 롤업이 쓰던 것 — 요약 줄에서 시간 문구가 빠지며 #4878이 지웠다).
  */
 export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
   return (

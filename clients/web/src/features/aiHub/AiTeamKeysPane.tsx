@@ -50,11 +50,14 @@ import { LoopbackRefusalBanner, ProbeAnswer } from "@/features/settings/AiLinkSe
 import { AiOfflineBanner, AiPill } from "@/features/settings/aiAccountsParts";
 import { myAccountsBrowserTab } from "@/features/settings/aiMyAccountsModel";
 import { formatMoment } from "@/features/settings/oauthGrant";
+import { TeamAiLimitsSection } from "@/features/settings/TeamAiLimitsSection";
 import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
 import { KeyConsoleLink } from "./KeyConsoleLink";
+import { TeamAiHelperCard } from "./TeamAiHelperCard";
 import { TeamAiNextStepCard } from "./TeamAiNextStepCard";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 「팀 AI 키」 구획 (AIH-6, #3400, 플랜 §8-6, 시안 panel-team-keys).
@@ -73,7 +76,7 @@ import { TeamAiNextStepCard } from "./TeamAiNextStepCard";
 // =============================================================================
 
 const OFFLINE_NOTE_ID = "ai-team-keys-offline-note";
-const OFFLINE_REASON = "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없어요.";
+const OFFLINE_REASON: BlockedFrame = "changeAiLink";
 const COLS = "sm:grid-cols-[minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,1.6fr)_minmax(0,1.1fr)]";
 
 function loopbackHint(error: unknown, url: string): string | null {
@@ -430,7 +433,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
 
             {offline && (
               <p id={OFFLINE_NOTE_ID} className="break-keep pt-2 text-meta text-ink-muted" data-testid="ai-link-offline">
-                {OFFLINE_REASON}
+                <BlockedReason frame={OFFLINE_REASON} />
               </p>
             )}
             {!editing && !offline && check.isError &&
@@ -498,6 +501,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
       </div>
 
       <TeamAiNextStepCard workspaceId={workspaceId} offline={offline} />
+      <TeamAiHelperCard workspaceId={workspaceId} />
       <section aria-labelledby="ai-team-defaults-title" className="flex min-w-0 flex-col" data-testid="ai-defaults">
         <div className="flex min-w-0 flex-wrap items-baseline gap-3 border-b border-line pb-2">
           <h3 id="ai-team-defaults-title" className="text-body font-bold text-ink">
@@ -513,6 +517,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
           team={teamDefaults}
         />
       </section>
+
+      <TeamAiLimitsSection workspaceId={workspaceId} offline={offline} />
 
       {link && !denied && !linkQuery.isError && !linkQuery.isPending && (
         <PersonalKeysOperatorSection workspaceId={workspaceId} offline={offline} link={link} />

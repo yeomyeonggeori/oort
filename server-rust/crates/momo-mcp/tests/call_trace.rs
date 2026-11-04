@@ -16,10 +16,10 @@
 
 use momo_mcp::{
     call_shape, dispatch, outcome_code, response_rpc_code, result_counts, ArtifactRule,
-    ArtifactViolation, AssembleParams, CallShape, HttpRequest, ResultCounts, ToolFailure,
-    CALL_METHODS, CALL_METHOD_NONE, CALL_METHOD_OTHER, CALL_METHOD_UNPARSED, CALL_TOOL_UNKNOWN,
-    JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION, TOOL_CATALOG,
-    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_START, TOOL_PING,
+    ArtifactViolation, AssembleParams, CallShape, HttpRequest, ResultCounts, RunEventViolation,
+    ToolFailure, CALL_METHODS, CALL_METHOD_NONE, CALL_METHOD_OTHER, CALL_METHOD_UNPARSED,
+    CALL_TOOL_UNKNOWN, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION,
+    TOOL_CATALOG, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_START, TOOL_PING,
 };
 use serde_json::{json, Value};
 
@@ -197,6 +197,7 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidArtifacts(_)
             | ToolFailure::InvalidAssembleParams(_)
+            | ToolFailure::InvalidRunEvent(_)
             | ToolFailure::NotAuthorized
             | ToolFailure::HandleRefused
             | ToolFailure::Unavailable
@@ -217,6 +218,10 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
         }),
         ToolFailure::InvalidAssembleParams(
             AssembleParams::from_names(["frameMs", "size"]).expect("two closed names"),
+        ),
+        ToolFailure::InvalidRunEvent(
+            RunEventViolation::on("plan.text", ArtifactRule::Range, Some(3))
+                .expect("a closed field"),
         ),
         ToolFailure::NotAuthorized,
         ToolFailure::HandleRefused,

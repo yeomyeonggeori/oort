@@ -7,9 +7,9 @@ import {
   EXPIRED_CARD_COPY,
   REPROPOSE_LABEL,
   expiryPhase,
-  expirySoonCopy,
   reproposeDraft,
-  closedCardReproposeReason,
+  reproposeTarget,
+  cardReproposeReason,
   type ReproposeReason,
 } from "@momo/core/features/approvals/expiry";
 import {
@@ -23,6 +23,7 @@ import {
 import { uuidEq } from "@momo/core/lib/api";
 import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { useExpiryNow } from "./useExpiryNow";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   Check,
   ClipboardCheck,
@@ -34,6 +35,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
+import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import {
@@ -130,6 +132,7 @@ import { approvalBundleCard, approvalBundleContext, openApprovalDecisionStage } 
 import { requestBundleModel, requestBundleState, runBundleCanDecide, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { RequestBundleCard } from "./RequestBundleCard";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status
@@ -342,22 +345,6 @@ function ApprovalNoteLine({
 }
 
 /**
- * 「다시 요청」이 서는 곳: 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가
- * 에이전트로 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난
- * 버튼으로 읽힌다.
- */
-function reproposeTarget(card: AgentApprovalCard, directory: Directory) {
-  const requester =
-    card.requestedByMemberId !== undefined
-      ? memberFor(directory, card.requestedByMemberId)
-      : null;
-  const channelId = card.channelId;
-  return requester?.kind === "agent" && channelId !== undefined
-    ? { agent: requester, channelId }
-    : null;
-}
-
-/**
  * 「다시 요청」 단추 (#3738, #4986). 승인이 죽었거나 일이 안 됐을 때 사람이 할 수 있는 일은 하나다: 그
  * 에이전트에게 다시 해 달라고 청하는 것. 버튼은 **입력창에 초안을 넣을 뿐 보내지 않는다** — 멘션 한 줄이라도
  * 사람의 이름으로 나가는 메시지이고, 보내기 전에 한 줄을 덧붙일 수 있어야 한다. 입력창에 쓰던 글이 있으면
@@ -425,15 +412,18 @@ function ReproposeButton({
 function ExpiredApprovalFooter({
   card,
   directory,
+  repropose,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
+  /** 코어 한 표(`cardReproposeReason`)가 이 만료 카드에 「다시 요청」을 건네는가(만료 카드의 이유는 만료뿐이라 null 이 아니면 건넨다). */
+  repropose: boolean;
 }) {
   const target = reproposeTarget(card, directory);
   return (
     <div className="border-t border-line" data-testid="approval-expired">
       <p className="px-3 py-2 text-meta text-ink-muted">{EXPIRED_CARD_COPY}</p>
-      {target !== null && (
+      {repropose && target !== null && (
         <ReproposeButton target={target} className="flex flex-col gap-1 px-3 pb-2" />
       )}
     </div>
@@ -475,6 +465,7 @@ function ApprovalBody({
   viewerMemberId?: string;
 }) {
   const { session, workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -509,6 +500,7 @@ function ApprovalBody({
   // 끊겼다는 이유로 컨트롤을 감추면 할 수 있는 결정을 못 하고 만료될 수 있다.
   // 폰의 `useOnline.ts` 가 같은 판단을 NetInfo로 한다.
   const offline = useOffline();
+  const blockedLine = useApprovalBlockedLine();
 
   const resolvedStatus = resolveApprovalStatus(receipt?.status ?? null, card.status);
   // 기한 (#3738). 카드 메시지는 스냅샷이라 서버가 승인을 만료시켜도 이 카드의
@@ -558,13 +550,14 @@ function ApprovalBody({
   const decidedAtMs = receipt?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
-  // 거부·실패로 닫힌 카드의 다음 행동은 「다시 요청」이다 (#4986, 요청 고리 상태표 §2.2). 거부는 거부한
-  // 사람 본인에게는 세우지 않는다: 다음 행동은 요청한 쪽의 몫이고, 방금 스스로 닫은 사람에게는 되돌릴 것이 없다.
+  // 닫힌 카드의 다음 행동은 「다시 요청」이다 (#4986, 요청 고리 상태표 §2.2). 서는 조건의 표는 코어 한 곳(`cardReproposeReason`)이고 폰이
+  // 같은 함수를 읽는다 (#5171): 만료는 영수증 줄이 없을 때만, 실패는 늘, 거부는 거부한 본인을 빼고. 거부는 방금 스스로 닫은 사람에게
+  // 되돌릴 것이 없다(다음 행동은 요청한 쪽의 몫이다).
   const iDecided = decidedById !== undefined && uuidEq(decidedById, session.member.id);
-  const closedReason = bundle ? closedCardReproposeReason(bundle.state, iDecided) : null;
+  const reproposeReason = bundle ? cardReproposeReason(bundle.state, iDecided, receipt?.note) : null;
   const nextAction =
-    closedReason !== null ? (
-      <ClosedCardNextAction card={card} directory={directory} reason={closedReason} />
+    reproposeReason !== null ? (
+      <ClosedCardNextAction card={card} directory={directory} reason={reproposeReason} />
     ) : null;
 
   // 카드가 컨트롤 대신 말할 줄. 판정도 순서도 코어가 진다 (design-review M-3).
@@ -585,6 +578,7 @@ function ApprovalBody({
     // 아는 것이 스냅샷뿐이므로, 스냅샷이 대기이면 여기서는 대기다.
     pendingHere: !settled,
     offline,
+    offlineText: blockedLine,
     approvalsProvided,
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback
@@ -653,7 +647,7 @@ function ApprovalBody({
             {nextAction}
           </>
         ) : expired ? (
-          <ExpiredApprovalFooter card={card} directory={directory} />
+          <ExpiredApprovalFooter card={card} directory={directory} repropose={reproposeReason !== null} />
         ) : settled ? (
           // #3818: 서버가 이미 결정을 적은 카드(`props.status`·`decided_by`)는 영수증
           // 저장소가 몰라도 컨트롤이 서지 않는다. 결정 사실은 아래 원장 줄이 말한다.
@@ -668,7 +662,8 @@ function ApprovalBody({
                 note={{
                   kind: "expiry-soon",
                   tone: "blocked",
-                  text: expirySoonCopy(card.expiresAtMs, nowMs),
+                  // 경고 줄은 결과만 말한다. 남은 시간은 같은 카드의 조용한 줄이 한 번 말한다(#5174 L7, `expiry.ts`).
+                  text: formatMessage("timeline.approvalExpiry.soon"),
                 }}
               />
             )}
@@ -872,6 +867,8 @@ function LoginHandoffBody({
   const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   const offline = useOffline();
+  // 막았을 때의 문장: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const blockedText = useBlockedReason("loginHandoff");
 
   // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
   // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
@@ -895,6 +892,7 @@ function LoginHandoffBody({
     underControl,
     decidableHere: true,
     offline,
+    offlineText: blockedText,
     approvalsProvided,
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback

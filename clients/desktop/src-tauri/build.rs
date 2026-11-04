@@ -36,9 +36,19 @@ const APP_COMMANDS: &[&str] = &[
     "notification_permission",
     "notification_request_permission",
     "notification_show",
+    // A banner whose click is reported (#5059): whether this shell can, and the show that
+    // answers `clickable | plain | refused`. Desktop only; granted to the main window in
+    // capabilities/default.json. The click itself is the `momo:notification-click` event,
+    // which needs no grant (`core:default` carries `core:event:allow-listen`).
+    "notification_click_supported",
+    "notification_show_clickable",
     // Dock badge = the web side's needs-me count (#3339). Desktop only;
     // granted to the main window in capabilities/default.json.
     "dock_badge_set",
+    // The menu-bar icon and its menu (#5193): the web side's Dock number, running work and the menu's
+    // words in one status. Desktop only; granted to the main window in capabilities/default.json.
+    // A pick in the menu is the `momo:tray-action` event, which needs no grant.
+    "tray_status_set",
     // Window glass (AP-3 #4190): blur-behind layer and the app's native appearance.
     // Desktop only; granted to the main window in capabilities/default.json.
     "window_vibrancy_set",

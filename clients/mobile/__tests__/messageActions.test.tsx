@@ -1,4 +1,6 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {haptics} from '../src/lib/haptics';
+import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {ApiError} from '@momo/core/lib/api';
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -11,6 +13,7 @@ import {
   MessageRow,
   type MessageRowActions,
 } from '../src/features/conversation/MessageRow';
+import {releaseReduceMotion, setReduceMotion as setSheetReduceMotion} from './fixtures/sheetContract';
 
 // =============================================================================
 // 메시지 액션의 규칙, 화면에서.
@@ -547,5 +550,30 @@ describe('메시지 사건 햅틱 (#4298)', () => {
     await act(async () => { fireEvent.press(screen.getByTestId('delete-confirm-button')); });
     expect(pulse.mock.calls).toEqual([['deleteConfirmed']]);
     pulse.mockRestore();
+  });
+});
+
+describe('알림이 새 입구로 들어오면 — 행 안에서 열린 고치기 시트 (#4667)', () => {
+  // 같은 방으로 오는 두 번째 알림은 방을 갈아 끼우지 않으므로 행이 그대로 살아 있다 — 행이 쥔 편집기는 방송이 걷어야 한다.
+  it('고치던 글이 든 편집기는 걷히고, 같은 메시지를 다시 고치면 그 글로 선다 — 행이 메시지 id 로 키를 짓는다', async () => {
+    __resetEntryDrafts();
+    await setSheetReduceMotion(true); // 슬라이드 없이 바로 걷혀 「걷혔다」가 시계를 기다리지 않는다
+    try {
+      renderRow();
+      longPress();
+      fireEvent.press(screen.getByTestId('sheet-edit'));
+      fireEvent.changeText(await screen.findByTestId('editor-input'), '고치던 문장, 아직 저장 전');
+
+      act(() => {
+        dismissTemporarySurfaces();
+      });
+      await waitFor(() => expect(screen.queryByTestId('message-editor')).toBeNull());
+
+      longPress();
+      fireEvent.press(screen.getByTestId('sheet-edit'));
+      expect((await screen.findByTestId('editor-input')).props.value).toBe('고치던 문장, 아직 저장 전');
+    } finally {
+      releaseReduceMotion();
+    }
   });
 });

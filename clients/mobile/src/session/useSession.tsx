@@ -20,8 +20,10 @@ import {
 import {authGate, type AuthGate} from './authGate';
 import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
 import {clearAllDrafts} from '../features/conversation/drafts';
+import {clearAllFailedSends} from '../features/conversation/failedSends';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
+import {clearEntryDrafts} from '../lib/entryDrafts';
 import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
 import {revokeDevice} from '../push/devices';
 import {dismissDeliveredNotifications} from '../push/dismissDelivered';
@@ -194,6 +196,17 @@ export function useAuthGate(): AuthGateState {
     [member, hasAccessToken, authExpired, restoreSettled, restoreUnreachable],
   );
 
+  // 로그인 화면으로 돌아오는 순간은 모두 같은 경계다 — 로그아웃, 토큰 만료, 복원이 거절된 시작(#5058). 알림에 밀려 시트가 걷히며 맡겨
+  // 둔 글(`lib/entryDrafts.ts`)은 앞 사람의 것이므로, 같은 실행에서 같은 워크스페이스로 다음 사람이 들어와도 보이지 않게 여기서도
+  // 비운다. `signOut` 안의 같은 호출은 사람이 나가는 즉시 비우는 길이고, 이것은 `signOut` 을 거치지 않는 길(만료)까지 덮는다.
+  // 게이트의 종류(`gate.kind`)가 아니라 그 재료로 가른다: 종류를 문자열로 견주면 문구 장부(`direct-copy`)가 영어 낱말 하나를 더 센다.
+  // 세션이 없거나(`member` 없음 — 로그아웃·복원 거절) 만료됐으면 사람은 로그인 화면에 있다. `restoring`(세션이 살아 있는 동안)은
+  // 둘 다 아니라 지우지 않는다. `SessionProvider` 의 언마운트에 걸지 않은 까닭: 그 트리가 내려가는 일이 모두 세션의 끝은 아니다.
+  const leftSession = member === null || authExpired;
+  useEffect(() => {
+    if (leftSession) clearEntryDrafts();
+  }, [leftSession]);
+
   return useMemo(() => ({gate, retry: retryRestore}), [gate, retryRestore]);
 }
 
@@ -272,6 +285,11 @@ export function SessionProvider({
     // 지워도 원장에 남지만 안 보낸 글은 이 기기에만 있다. 웹이 같은 자리에서 같은
     // 일을 한다(`clients/web/src/app/session.tsx`).
     clearAllDrafts();
+    // 보내지 못한 글도 같은 이유로 지운다(#5222): 안 보낸 글은 보낸 메시지보다 사적이고 이 기기에만 있다. 다음 사람의 같은 채널에서 되살아나지 않게.
+    clearAllFailedSends();
+    // 알림이 걷어 간 시트의 글(`lib/entryDrafts.ts`)도 같은 이유로 지운다 (#5058). 메모리에만 있어 프로세스와 함께 사라지지만,
+    // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 새 채널 이름·내 맥 질문이 그 사람의 시트에 나타난다.
+    clearEntryDrafts();
     // 지시 기기 키도 지운다 (#3026, ADR-0146 개정 D-7). 서버는 이 로그인 계보가
     // 끝나며 키 행을 폐기하고, 어떤 행도 받아 주지 않는 키가 다음 사람의 로그인까지
     // 남을 까닭이 없다. 다음 QR 연결이 새 키를 만들고 맥이 다시 승인한다.

@@ -98,10 +98,36 @@ export type TeamAiFallbackReason =
 const REASON_LABEL: ReadonlyMap<string, string> = new Map([
   ["out_of_scope", "도우미가 바로 하기엔 큰 일"],
   ["slow", "도우미가 제때 답하지 못함"],
+  // `props.limit` 가 없는 줄(한도가 하루 하나뿐이던 서버)의 말. 있으면 아래 `OVER_BUDGET_LIMIT_LABEL` 이 고른다.
   ["over_budget", "오늘 도우미 사용량을 다 씀"],
   ["could_not_propose", "승인 카드로 만들지 못함"],
   ["rate_limited", "요청이 너무 잦음"],
 ]);
+
+/**
+ * `over_budget` 줄이 싣는 `props.limit = {source, window}` (서버 `limit_fallback_props`, #4944, ADR-0201 증보 v3 B9).
+ * 누구의 한도인지(`team` 관리자 / `operator` 서버 운영자)와 어느 창인지(`day` / `month` / `off` = 운영자의 끔 스위치)가
+ * 이 넷으로만 짝지어진다. 「오늘」이라고만 말하면 월 한도와 운영자 끔에는 틀린 말이다.
+ */
+const OVER_BUDGET_LIMIT_LABEL: ReadonlyMap<string, string> = new Map([
+  ["team:day", "오늘 도우미 사용량을 다 씀"],
+  ["team:month", "이번 달 도우미 사용량을 다 씀"],
+  ["operator:day", "서버 운영자가 정한 오늘 사용량을 다 씀"],
+  ["operator:off", "서버 운영자가 도우미를 멈춰 둠"],
+]);
+
+/** `limit` 은 있는데 이 클라이언트가 모르는 짝(앞으로 생길 한도): 창을 지어내지 않고 어느 창에도 맞는 말만 한다. */
+const OVER_BUDGET_UNKNOWN_LIMIT_LABEL = "도우미 사용량 한도에 닿음";
+
+function overBudgetLabel(limit: unknown): string {
+  // 없는 `limit`(옛 서버, null)은 옛 줄이다. 한도가 하루 하나뿐이던 때의 `over_budget` 은 늘 「오늘」이었다.
+  if (limit === undefined || limit === null) return REASON_LABEL.get("over_budget") as string;
+  const raw = record(limit);
+  const source = raw !== null ? raw["source"] : undefined;
+  const window = raw !== null ? raw["window"] : undefined;
+  if (typeof source !== "string" || typeof window !== "string") return OVER_BUDGET_UNKNOWN_LIMIT_LABEL;
+  return OVER_BUDGET_LIMIT_LABEL.get(`${source}:${window}`) ?? OVER_BUDGET_UNKNOWN_LIMIT_LABEL;
+}
 
 export interface TeamAiDelegateCandidate {
   memberId: string;
@@ -147,8 +173,13 @@ function parseCandidate(value: unknown): TeamAiDelegateCandidate | null {
 export function parseTeamAiDelegate(props: Props): TeamAiDelegate | null {
   if (!props || props["kind"] !== TEAM_AI_DELEGATE_KIND) return null;
   const rawReason = props["reason"];
-  const reasonLabel =
+  const baseLabel =
     typeof rawReason === "string" ? REASON_LABEL.get(rawReason) : undefined;
+  // 한도에 닿은 줄은 이유 코드가 같아도 누구의 한도·어느 창인지에 따라 말이 다르다(`props.limit`).
+  const reasonLabel =
+    baseLabel !== undefined && rawReason === "over_budget"
+      ? overBudgetLabel(props["limit"])
+      : baseLabel;
   const reason =
     reasonLabel !== undefined ? (rawReason as TeamAiFallbackReason) : null;
   const delegate = record(props["delegate"]);
