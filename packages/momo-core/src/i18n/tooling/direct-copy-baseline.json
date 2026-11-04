@@ -227,6 +227,7 @@
     "clients/mobile/src/features/profile/settingsRows.tsx": 12,
     "clients/mobile/src/features/profile/statusDraft.ts": 2,
     "clients/mobile/src/features/readState/useViewingBeat.ts": 3,
+    "clients/mobile/src/features/releaseNotes/BulletLine.tsx": 3,
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": 5,
     "clients/mobile/src/features/sidebar/DmClosedSheet.tsx": 2,
     "clients/mobile/src/features/sidebar/channelRowActions.ts": 3,

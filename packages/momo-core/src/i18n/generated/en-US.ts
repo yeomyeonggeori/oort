@@ -3924,36 +3924,10 @@ export const catalog: MessageCatalog = {
       "value": "Close What's new"
     }
   ],
-  "releaseNotes.popup.more": [
+  "releaseNotes.popup.showMore": [
     {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more change"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more changes"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "Show more"
     }
   ],
   "releaseNotes.popup.title": [

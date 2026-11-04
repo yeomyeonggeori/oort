@@ -575,7 +575,7 @@ export const messageKeys = [
   "releaseNotes.page.openHint",
   "releaseNotes.page.title",
   "releaseNotes.popup.close",
-  "releaseNotes.popup.more",
+  "releaseNotes.popup.showMore",
   "releaseNotes.popup.title",
   "releaseNotes.surface.desktop",
   "releaseNotes.surface.label",
@@ -1573,9 +1573,7 @@ export const argumentSpecs = {
   "releaseNotes.page.openHint": {},
   "releaseNotes.page.title": {},
   "releaseNotes.popup.close": {},
-  "releaseNotes.popup.more": {
-    "count": "number"
-  },
+  "releaseNotes.popup.showMore": {},
   "releaseNotes.popup.title": {},
   "releaseNotes.surface.desktop": {},
   "releaseNotes.surface.label": {},
@@ -2623,7 +2621,7 @@ export interface MessageArgs {
   "releaseNotes.page.openHint": Record<string, never>;
   "releaseNotes.page.title": Record<string, never>;
   "releaseNotes.popup.close": Record<string, never>;
-  "releaseNotes.popup.more": { count: number };
+  "releaseNotes.popup.showMore": Record<string, never>;
   "releaseNotes.popup.title": Record<string, never>;
   "releaseNotes.surface.desktop": Record<string, never>;
   "releaseNotes.surface.label": Record<string, never>;
