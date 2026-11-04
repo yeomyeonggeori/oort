@@ -5,7 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message } from "@momo/core/lib/api";
+import { ApiError, type Message } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -246,16 +247,74 @@ describe("InboxDetail", () => {
     expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
   });
 
+  // #5294(화면 검수 5a M1): 받은함의 승인 줄도 입력창·승인 카드와 같은 원인 문장이라 어절에서 꺾는다(「연/결되면」으로 끊기지 않는다). 꺾이는
+  // 자리는 폭에 달려 jsdom 이 못 재므로 클래스로 지키고, 엔진이 계산한 `word-break` 는 capture-4888·5239 가 입력창·승인 카드에서 잰다.
+  it("처리할 일 + 오프라인이면 승인 줄이 어절에서 꺾인다(break-keep)", async () => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note).not.toBeNull();
+    expect(note?.classList.contains("break-keep")).toBe(true);
+  });
+
   it("오프라인에서는 답장 입력 대신 이유를 말한다", async () => {
     const h = await mount(entry({}), true);
     expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
     expect(h.querySelector('[data-testid="inbox-reply-offline"]')).not.toBeNull();
   });
 
+  // #5260: 답장 줄도 막은 원인을 말한다. 부모(`InboxRoute`)가 하는 대로 막았는지는 모델의 게이트(`canSend`)에서 읽는다.
+  it.each([
+    ["deviceOffline", "오프라인이라 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+  ] as const)("답장 + %s이면 답장 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
+    const note = h.querySelector('[data-testid="inbox-reply-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
+    if (scene === "serverUnreachable") expect(note?.textContent).not.toContain("오프라인");
+  });
+
+  it.each(["unknown", "realtimeDown"] as const)("답장 + %s이면 모델이 막지 않는다: 줄 없이 답장 입력이 열려 있다", async (scene) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-offline"]')).toBeNull();
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).not.toBeNull();
+  });
+
   it("맥락을 못 불러오면 오류와 다시 시도", async () => {
     api.fetchMessages.mockRejectedValue(new Error("boom"));
     const h = await mount(entry({}));
     expect(h.querySelector('[data-testid="inbox-context-error"]')).not.toBeNull();
+  });
+
+  // #5242: 옛 「대화를 불러오지 못했어요.」 배너는 원인 상자다. 이유가 원인을 따르고 다시 시도가 맥락을 다시 읽는다.
+  it("맥락을 못 불러오면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 다시 읽는다", async () => {
+    const cases: [Error, string, string][] = [
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      api.fetchMessages.mockReset();
+      api.fetchMessages.mockRejectedValue(error);
+      const h = await mount(entry({}));
+      const box = h.querySelector<HTMLElement>('[data-testid="inbox-context-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box?.textContent).toContain("대화를 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      const reads = api.fetchMessages.mock.calls.length;
+      await act(async () => {
+        box?.querySelector("button")?.click();
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(api.fetchMessages.mock.calls.length).toBeGreaterThan(reads);
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("전송이 실패하면 입력은 남고 이유가 보인다", async () => {

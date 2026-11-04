@@ -200,6 +200,7 @@ import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
+import {SentenceWrapSurface} from './sentenceWrap';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {JumpLatestSurface} from './jumpLatest';
@@ -2298,6 +2299,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4894: 말풍선 글 잘림 — 여러 폭의 칸에 실제 MessageRow 를 세우고 네이티브가 낸 틀을 숫자로 적는다(`bubbleClip.tsx`).
   if (name.startsWith('bubble-clip')) {
     return <BubbleClipSurface which={name.slice('bubble-clip'.length).replace(/^-/, '')} />;
+  }
+  // #5288: 줄바꿈 전략별 잰 줄 수 ↔ 그린 줄 수 — 같은 글을 `hangul-word`·`standard`·지정 없음으로 그려 어긋남을 숫자로 적는다(`sentenceWrap.tsx`).
+  if (name.startsWith('sentence-wrap')) {
+    return <SentenceWrapSurface which={name.slice('sentence-wrap'.length).replace(/^-/, '')} />;
   }
   if (name.startsWith('bubble-')) return <BubbleSurface which={name.slice('bubble-'.length)} />;
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).

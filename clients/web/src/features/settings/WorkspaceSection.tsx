@@ -6,6 +6,9 @@ import { Input } from "@/design/ui/input";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
 import { useWorkspaceAvatar } from "@/features/sidebar/useWorkspaceAvatar";
 import { useSession } from "@/app/session";
@@ -68,6 +71,7 @@ import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
 import { TeamAiSetting } from "./TeamAiSetting";
 import { AgentInitiativeSetting } from "./AgentInitiativeSetting";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 워크스페이스 (R-1 §5 / ADR-0117 · ADR-0161): read the current tenant, set its
@@ -145,10 +149,10 @@ function WorkspaceUnfurlSetting({
       )}
       {query.isError && !denied && (
         <CardBody>
-          <InlineBanner
-            message="링크 확인 설정을 불러오지 못했어요."
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
+          <LoadFailureNote
+            titleKey={CONNECTION_KEYS.loadLinkPreviewSettingTitle}
+            cause={loadCauseOf(query.error)}
+            onRetry={() => void query.refetch()}
             separator={false}
             className="px-0"
             testId="workspace-unfurls-error"
@@ -188,7 +192,7 @@ function WorkspaceUnfurlSetting({
       {offline && query.data && !denied && (
         <CardBody>
           <p id={offlineId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.
+            <BlockedReason frame="changeSetting" />
           </p>
         </CardBody>
       )}
@@ -586,7 +590,7 @@ function RoleLabelsEditor({
                 className="text-meta text-ink-muted"
                 id="workspace-role-labels-offline"
               >
-                연결이 끊겨 지금은 표시 이름을 저장할 수 없어요.
+                <BlockedReason frame="saveDisplayName" />
               </p>
             </div>
           )}
@@ -814,7 +818,7 @@ function WelcomeKickoffEditor({
                 className="text-meta text-ink-muted"
                 id="workspace-welcome-offline"
               >
-                연결이 끊겨 지금은 웰컴 설정을 저장할 수 없어요.
+                <BlockedReason frame="saveWelcome" />
               </p>
             </div>
           )}
@@ -1055,7 +1059,7 @@ function WorkspaceRenameField({
       )}
       {offline && canEdit && (
         <p className="text-meta text-ink-muted">
-          연결이 끊겨 지금은 이름을 저장할 수 없어요.
+          <BlockedReason frame="saveName" />
         </p>
       )}
       {canEdit && !staleName && (
@@ -1339,7 +1343,7 @@ export function WorkspaceSection({
                   className="text-meta text-ink-muted"
                   data-testid="workspace-create-offline"
                 >
-                  연결이 끊겨 지금은 워크스페이스를 만들 수 없어요.
+                  <BlockedReason frame="createWorkspace" />
                 </p>
               </div>
             )}

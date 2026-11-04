@@ -28,6 +28,7 @@ import { choiceRadiosHintId } from "./fieldIds";
 import { registryState, type RegistryState } from "./workHostsQuery";
 import { ChoiceRadios, OperatorNotice, SaveButton, SelectField } from "./SettingsFields";
 import { SettingsSection } from "./shell/SettingsSection";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 호스트 상실 시 재개 (ADR-0125 D11), 두 범위가 두 페이지에 산다 (#3578 S4).
@@ -97,7 +98,7 @@ export function MyTierPolicySection({
             />
           ) : offline ? (
             <InlineBanner
-              message="연결이 끊겨 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
+              message={<BlockedReason frame="loadPolicy" />}
               separator={false}
               className="px-0"
               testId="work-tier-policy-error"
@@ -173,7 +174,7 @@ export function WorkspaceTierPolicySection({
             </p>
           ) : offline ? (
             <InlineBanner
-              message="연결이 끊겨 워크스페이스 기본값을 불러올 수 없어요. 다시 연결되면 불러와요."
+              message={<BlockedReason frame="loadWorkspaceDefaults" />}
               separator={false}
               className="px-0"
               testId="work-tier-workspace-error"
@@ -238,6 +239,8 @@ function TierPolicyScope({
   // radio groups in one panel must not have opposite commit models either, and
   // the engine block already had a save button, so this one gets one too.
   const [draft, setDraft] = useState<WorkTierPolicyInput | null>(null);
+  // 막았을 때의 문장: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const offlineHint = useBlockedReason("changeIt");
 
   // Nothing is disabled while a save is in flight (a keyboard user would lose
   // focus on every change), so two PUTs can overlap. Only the newest one is
@@ -319,7 +322,7 @@ function TierPolicyScope({
       : dirty
         ? "아직 저장되지 않았어요. 저장 버튼을 눌러야 적용돼요."
         : offline
-          ? "연결이 끊겨 지금은 바꿀 수 없어요."
+          ? offlineHint
           : scope === "member" && policy.inherited
             ? "워크스페이스 기본값을 상속 중이에요. 다른 값을 골라 저장하면 내 정책이 돼요."
             : undefined;

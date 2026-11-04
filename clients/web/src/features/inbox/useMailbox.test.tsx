@@ -225,10 +225,13 @@ describe("useMailbox: 서버 투영이 정본", () => {
   });
 
   it("5xx는 구 서버가 아니라 장애다: 후퇴하지 않고 오류를 말한다", async () => {
-    api.fetchInbox.mockRejectedValue(new ApiError(500, "boom"));
+    const boom = new ApiError(500, "boom");
+    api.fetchInbox.mockRejectedValue(boom);
     await render("all");
     expect(latest?.source).toBe("server");
     expect(latest?.error).toBe(true);
+    // #5242: 화면이 원인 문장(오프라인 / 서버에 닿지 못함 / 그 밖)을 정하도록 서버 경로의 오류 객체를 그대로 내놓는다.
+    expect(latest?.failure).toBe(boom);
     expect(api.fetchMessages).not.toHaveBeenCalled();
   });
 });
@@ -345,6 +348,8 @@ describe("useMailbox: 구 서버(404) 후퇴", () => {
     expect(api.fetchInbox).toHaveBeenCalledTimes(1);
     expect(latest?.source).toBe("composed");
     expect(latest?.hasMore).toBe(false);
+    // 구 서버 경로는 원천이 여럿이라 오류 객체 하나로 말할 수 없다(#5242): 화면은 기기 상태만으로 원인을 정한다.
+    expect(latest?.failure).toBeNull();
     // 조합이 실제로 돈다: DM 채널의 최근 메시지를 읽는다.
     expect(api.fetchMessages).toHaveBeenCalledWith(WS, DM, { limit: 20 });
   });

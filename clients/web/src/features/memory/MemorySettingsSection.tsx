@@ -41,6 +41,7 @@ import {
   useMyMemoryMutation,
   useWorkspaceMemoryMutation,
 } from "./useMemory";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › 기억 (ADR-0196 D9, #3165).
@@ -169,7 +170,7 @@ export function MemorySettingsSection({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 있어서 지금은 바꿀 수 없어요."
+          message={<BlockedReason frame="changeIt" />}
           messageId={offlineReasonId}
           testId="memory-offline-reason"
         />

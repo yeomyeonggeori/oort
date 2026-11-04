@@ -293,6 +293,7 @@ import {RequestStatusChip} from '../agents/RequestStatusChip';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import {RequestBundleCard} from './RequestBundleCard';
 import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
+import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 
 // =============================================================================
 // One row of the conversation.
@@ -1589,6 +1590,7 @@ export function readApprovalCard(
     approvalGates,
     approvalReceipts,
     approvalOffline,
+    approvalOfflineText,
     approvalsProvided,
     viewerMemberId,
     nameFor,
@@ -1596,6 +1598,11 @@ export function readApprovalCard(
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
+    /**
+     * `approvalOffline` 일 때 줄이 말할 문장 - 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)을 가린 것(#5262, `useApprovalBlockedLine`). 없으면
+     * 원인을 가리지 않는 코어 문장이다.
+     */
+    approvalOfflineText?: string;
     approvalsProvided?: boolean;
     viewerMemberId?: string;
     /** 참여자 동의 카드의 결정자 이름을 푼다. 문장을 그리는 카드만 넘기면 돼요. */
@@ -1651,6 +1658,7 @@ export function readApprovalCard(
     hasTarget: card.approvalId !== null,
     pendingHere: approval !== null,
     offline: approvalOffline === true,
+    offlineText: approvalOfflineText,
     approvalsProvided,
   });
   return {approval, receipt, settledStatus, note};
@@ -1698,6 +1706,8 @@ function AgentCard({
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
+  // 승인을 막은 원인의 문장(#5262): 막을지는 화면이 `approvalOffline` 으로 정했고, 무슨 말을 할지는 연결 모델이 고른 사전 키가 정한다.
+  const approvalOfflineText = useApprovalBlockedLine();
   const avatarKey = card.kind === 'approval' && hasProfileAvatarPreview(card.action)
     ? `${card.approvalId}:${card.action?.preview?.sha256}` : null;
   const [avatarReady, setAvatarReady] = useState<{key: string | null; ready: boolean} | null>(null);
@@ -1712,6 +1722,7 @@ function AgentCard({
       approvalGates,
       approvalReceipts,
       approvalOffline,
+      approvalOfflineText,
       approvalsProvided,
       viewerMemberId,
       nameFor: id => memberFor(directory, id)?.displayName,
@@ -4399,11 +4410,12 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText} testID="pending-failed-reason">
+            {/* 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288). */}
+            <Sentence style={styles.failedText} testID="pending-failed-reason">
               {failureKind === null
                 ? formatMessage('timeline.send.failed')
                 : formatMessage(sendFailureReasonKey(failureKind))}
-            </Text>
+            </Sentence>
             <SendFailureActions
               onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
               onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}

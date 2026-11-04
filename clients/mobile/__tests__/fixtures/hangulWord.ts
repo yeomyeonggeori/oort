@@ -1,3 +1,5 @@
+import {PixelRatio, StyleSheet, type StyleProp, type TextStyle} from 'react-native';
+
 /** 렌더 트리 노드의 모양 - `screen.getByTestId` 가 돌려주는 인스턴스가 이 모양이다(타입 선언을 따로 끌어오지 않는다). */
 export interface Walkable {
   type: unknown;
@@ -43,6 +45,48 @@ export function sweepHangulWord(root: Walkable): HangulWordSweep {
         if (node.props.lineBreakStrategyIOS !== 'hangul-word') {
           sweep.missing.push(content.slice(0, 40));
         }
+      }
+    }
+    for (const child of node.children) {
+      if (typeof child !== 'string') visit(child, insideText || isText);
+    }
+  };
+  visit(root, false);
+  return sweep;
+}
+
+// -----------------------------------------------------------------------------------------------------------------
+// 줄 높이 여유 (#5288, #4894) — 영어 문장·말풍선까지 같은 훑기로 센다
+// -----------------------------------------------------------------------------------------------------------------
+
+export interface LineHeadroomSweep {
+  /** 줄 높이를 **숫자로** 가진 가장 바깥 글자 노드의 수. 0 이면 훑은 곳에 대상이 없었다는 뜻이라 빈 훑기(실패할 수 없는 가드)다. */
+  checked: number;
+  /** 줄 높이가 화소 격자의 정수배라 깎임에 맨몸인 글자(앞 40자 + 줄 높이). */
+  exposed: string[];
+}
+
+/**
+ * 줄 높이가 **화소 격자의 정수배**인 글자 노드를 센다(= 여유가 빠진 글자).
+ *
+ * 여러 줄로 접힌 글이 첫 줄만 그려지고 잘리는 결함은 글 상자 높이가 float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다
+ * (`src/design/lineHeadroom.ts` 머리말의 실측). 줄 높이가 정수(23·18…)인 글은 N 줄의 높이가 늘 화소의 정수배라 매번 그 길에 든다.
+ * 고친 부품(`Sentence`·`NoticeBlock`·말풍선 글)은 줄 높이를 0.01pt 낮춰 정수배에서 벗어난다. 이 훑기는 그 사실을 **영어든 한국어든**
+ * 렌더 트리의 모든 글자 노드에서 센다 — 한글 유무(`sweepHangulWord`)와 상관없다.
+ *
+ * 앱의 판정 함수를 부르지 않고 자기 계산을 쓴다(앱의 판정이 틀려도 같이 틀리지 않게). `scale` 은 기기 화소 배율(jest 는 2).
+ * 호출하는 쪽은 `checked` 의 하한도 함께 단정한다.
+ */
+export function sweepLineHeadroom(root: Walkable, scale: number = PixelRatio.get()): LineHeadroomSweep {
+  const sweep: LineHeadroomSweep = {checked: 0, exposed: []};
+  const visit = (node: Walkable, insideText: boolean) => {
+    const isText = node.type === 'Text';
+    if (isText && !insideText) {
+      const lineHeight = StyleSheet.flatten(node.props.style as StyleProp<TextStyle>)?.lineHeight;
+      if (typeof lineHeight === 'number') {
+        sweep.checked += 1;
+        const px = lineHeight * scale;
+        if (Math.abs(px - Math.round(px)) < 1e-6) sweep.exposed.push(`${textOf(node).slice(0, 40)} (${lineHeight})`);
       }
     }
     for (const child of node.children) {

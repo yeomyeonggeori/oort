@@ -17,6 +17,7 @@ import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurface
 import { hostedListQuery } from "./hostedCredentialScope";
 import type { HostedWizardLaunch } from "./hostedWizardLaunch";
 import { useHostedAgentProbe } from "./useHostedAgentProbe";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 데스크탑에서 Grok Bot 이 보이면 한 줄 초대 (T-5 / #1655).
@@ -104,6 +105,8 @@ function InviteRow({
   offline: boolean;
   onLaunch: (launch: HostedWizardLaunch, opener: HTMLButtonElement) => void;
 }) {
+  // 잠긴 이유: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const lockReason = useBlockedReason("doThis");
   const launch: HostedWizardLaunch = {
     presetId: "grok",
     displayName: plan.displayName,
@@ -125,7 +128,7 @@ function InviteRow({
         aria-disabled={offline || undefined}
         aria-label={
           offline
-            ? `${plan.actionLabel}. 연결이 끊겨 지금은 할 수 없어요`
+            ? `${plan.actionLabel}. ${lockReason}`
             : undefined
         }
         className={cn(offline && "opacity-50")}

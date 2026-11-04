@@ -25,6 +25,8 @@ import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
 import { CohostedModelSection, loggedInFrom, useCohostedModels } from "./CohostedModelSection";
 import { ModelLoginPanel } from "./ModelLoginPanel";
 import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } from "./cohostedPrompt";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Reading this as: AI hub (top of every pane) card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
@@ -59,10 +61,12 @@ export function CohostedAgentCard({ offline, workspaceId }: { offline: boolean; 
     return (
       <AiSection labelledBy={HEADING_ID} testId="ai-cohosted">
         <AiSectionHead id={HEADING_ID} title={COPY.title} scope="이 서버" locked />
-        <InlineBanner
-          message="같은 서버의 Hermes 상태를 불러오지 못했어요."
-          actionLabel="다시 시도"
-          onAction={() => void status.refetch()}
+        {/* `fetchCohostedStatus`가 오류를 접어 돌려준다(서버가 답한 5xx·읽을 수 없는 답 = `unknown`): 이 카드의 실패는 서버가 직접 답한
+            것이라 연결 쪽 원인이 없다(이유는 「문제가 생겼어요」). 연결이 끊긴 쪽은 페이지의 다른 절이 말한다. */}
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadHermesStatusTitle}
+          cause={null}
+          onRetry={() => void status.refetch()}
           testId="ai-cohosted-error"
         />
       </AiSection>

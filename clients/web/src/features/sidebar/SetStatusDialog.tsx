@@ -51,6 +51,7 @@ import {
   takeEntryDraft,
   useHoldDraftOnEntry,
 } from "@/lib/entryDrafts";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings dialog (sidebar profile card) for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
@@ -325,7 +326,7 @@ export function SetStatusDialog({
           {offline && (
             <InlineBanner
               tone="neutral"
-              message="연결이 끊겨 지금은 상태를 바꿀 수 없습니다."
+              message={<BlockedReason frame="changeStatus" />}
               testId="set-status-offline"
             />
           )}

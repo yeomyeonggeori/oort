@@ -27,10 +27,19 @@ name: 5222-shell-connection-strip
     visible:
       id: "conn-strip-scene"
     timeout: 60000
+# flap 의 기다림 시계(#5286). Maestro 2.8 은 `extendedWaitUntil`·`assertVisible` 의 timeout 을 그 단계가 시작한 때가 아니라 **마지막 상호작용부터** 센다
+# (`Orchestra.adjustedToLatestInteraction`: 남는 시간 = timeout - 마지막 상호작용 뒤 흐른 시간. 상호작용이 한 번도 없으면 흐름이 시작한 때부터 센다).
+# 이 흐름은 화면을 누르지 않으므로 아래 `timeout: 30000` 은 「30초 기다린다」가 아니라 「흐름이 시작하고 30초가 될 때까지」였다. flap 은 Maestro 를 먼저 띄우고
+# 앱을 나중에 켜므로(위 첫 단계가 표지를 최대 60초 기다린다) 표지가 보일 즈음 이미 15~28초를 쓴 뒤였고, 그 뒤의 기다림은 남은 몇 초만 기다리다 장면이 끝나기 전에
+# 붉어졌다(오프라인 띠를 기다리다 · 「다시 연결됐어요」를 기다리다 · 마지막 「걷힘」을 기다리다 — 시험마다 다른 단계에서). 표지가 보이는 순간 `waitForAnimationToEnd` 로
+# 시계를 다시 맞추면(화면을 가라앉히는 명령도 상호작용이다) 기다림 셋이 모두 장면이 시작한 때부터 30초를 쓴다. 장면은 14초면 끝난다.
 - runFlow:
     when:
       true: ${SCENE == 'flap'}
     commands:
+      # 시계를 장면의 시작에 맞춘다(위 설명). 이 한 줄을 빼면 앱을 늦게 켠 시험이 다시 붉어진다.
+      - waitForAnimationToEnd:
+          timeout: 3000
       - extendedWaitUntil:
           visible:
             id: "shell-connection-strip"

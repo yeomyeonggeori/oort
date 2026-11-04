@@ -36,6 +36,7 @@ import {
   type ChipTone,
 } from "./SettingsFields";
 import { formatMoment } from "./oauthGrant";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › 연결 › 에이전트 자격 (#2204).
@@ -49,8 +50,7 @@ import { formatMoment } from "./oauthGrant";
 // =============================================================================
 
 const CREDENTIALS_OFFLINE_NOTE_ID = "agent-credentials-offline-note";
-const CREDENTIALS_OFFLINE_REASON =
-  "연결이 끊겨 지금은 연결 값을 발급하거나 바꿀 수 없어요.";
+const CREDENTIALS_OFFLINE_REASON: BlockedFrame = "issueCredential";
 
 export type CredentialsRowAction = "disconnect" | "doorbell" | "record";
 
@@ -270,7 +270,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
       className="break-keep text-meta text-ink-muted"
       data-testid="agent-credentials-offline"
     >
-      {CREDENTIALS_OFFLINE_REASON}
+      <BlockedReason frame={CREDENTIALS_OFFLINE_REASON} />
     </p>
   );
 
@@ -387,7 +387,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                       wide ? "col-span-full" : "basis-full"
                     )}
                   >
-                    {CREDENTIALS_OFFLINE_REASON}
+                    <BlockedReason frame={CREDENTIALS_OFFLINE_REASON} />
                   </p>
                 );
                 return (

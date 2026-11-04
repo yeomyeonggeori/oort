@@ -61,6 +61,11 @@ export function ReplyHomeLine({
       aria-label={copy.spoken}
       title={copy.openLabel}
       data-testid="reply-home"
+      // 행의 로빙 포커스 그룹에 속한다 (rowFocus.ts) — 형제 `QuoteBlock`·`ThreadSummary`와 같다. 빠지면 줄이 행 정거장과 별도인 두 번째
+      // 탭 정거장이 되어(Chromium) 「대화에도 보낸」 답글마다 컴포저까지 가는 Tab 이 하나씩 늘고, tabindex 없는 단추를 Tab 순서에 넣지
+      // 않는 엔진(WebKit = 데스크탑 웹뷰)에서는 키보드로 닿지 않는다. 답글 행에는 「답글 달기」도 없어 이 줄이 그 스레드를 여는 유일한
+      // 컨트롤이다(#5294, 검수 5a H1).
+      data-row-action=""
       className="press tap-target -mx-1 flex min-w-0 max-w-full flex-col items-start rounded-md px-1 text-left text-meta text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
     >
       {content}

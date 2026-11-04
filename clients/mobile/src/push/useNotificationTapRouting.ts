@@ -7,7 +7,8 @@ import {AccessibilityInfo} from 'react-native';
 
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import {teamBoardKey} from '../features/work/teamBoard/useTeamBoard';
-import {CHANNEL_LIST_FAILED} from '../features/sidebar/rows';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import type {NavAction, OpenConversation, Tab} from '../nav/state';
 import {useSession} from '../session/useSession';
@@ -104,6 +105,10 @@ export function useNotificationTapRouting(
   const invalidateApprovals = useInvalidateApprovals();
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
+  // 낭독은 목록 자리 상자의 제목과 같은 사전 문장이다(#5285). 효과의 의존에 넣지 않으려고 ref 로 읽는다(언어가 바뀌어도 효과를 다시 돌리지 않는다).
+  const formatMessage = useFormatMessage();
+  const formatMessageRef = useRef(formatMessage);
+  formatMessageRef.current = formatMessage;
   // 세션 조회가 끝났음을 효과에 알리는 박동. 값은 읽지 않고, 바뀐다는 사실이 전부다.
   const [resolveTick, setResolveTick] = useState(0);
 
@@ -272,7 +277,9 @@ export function useNotificationTapRouting(
         enter({type: 'selectTab', tab: 'home'});
         // 방금의 자리 옮김은 사람의 선택이 아니다. 그것을 기준점으로 삼는다.
         pending.nav = {tab: 'home', conversation: null};
-        AccessibilityInfo.announceForAccessibility(CHANNEL_LIST_FAILED);
+        AccessibilityInfo.announceForAccessibility(
+          formatMessageRef.current(CONNECTION_KEYS.loadChannelListTitle),
+        );
       }
       return;
     }

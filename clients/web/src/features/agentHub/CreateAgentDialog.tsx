@@ -32,6 +32,7 @@ import {
   type AgentDraft,
 } from "./createModel";
 import { useCreateAgent } from "./useCreateAgent";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 에이전트 만들기 다이얼로그 (goal B5.3b, D-4).
@@ -243,7 +244,7 @@ function CreateAgentPanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="createAgentLater" />}
           testId="create-agent-offline"
         />
       )}
