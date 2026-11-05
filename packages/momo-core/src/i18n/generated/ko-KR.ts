@@ -1330,6 +1330,22 @@ export const catalog: MessageCatalog = {
       "value": "에이전트 작업 이력을 불러오지 못했어요"
     }
   ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": "의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
+    }
+  ],
   "connection.load.agentProfileTitle": [
     {
       "type": 0,
@@ -1370,6 +1386,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 초안 대상을 확인할 수 없어요"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1426,6 +1454,12 @@ export const catalog: MessageCatalog = {
       "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1468,6 +1502,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "reason"
+    }
+  ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요"
     }
   ],
   "connection.load.threadTitle": [

@@ -51,7 +51,8 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { LoadFailureLine, LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { UpdateButton } from "@/features/updates/UpdateButton";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -1376,13 +1377,15 @@ export function Sidebar({
                   </>
                 }
               >
-                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). */}
+                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). 결과(대화 이름을 알 수
+                    없다)가 제목이고 원인(오프라인 / 서버에 닿지 못함)이 뒤에 붙는다(#5279 A). 사이드바 시트 위라 알약은 시트 위 문법을 받는다(#5306). */}
                 {dmNamesStuck && (
                   <li>
-                    <InlineBanner
-                      message="멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요."
-                      actionLabel="다시 시도"
-                      onAction={() => void directoryQuery.refetch()}
+                    <LoadFailureNote
+                      titleKey={CONNECTION_KEYS.loadDmNamesTitle}
+                      cause={loadCauseOf(directoryQuery.error)}
+                      onRetry={() => void directoryQuery.refetch()}
+                      retryClassName="band-surface bg-surface shadow-sm"
                       separator={false}
                       // 배너 첫 글자가 행의 아바타 왼쪽 끝(아이콘 칸 10 - 번짐 3 = 7)과 거의 같은 자에서 시작한다: 이 간격표의 가장 가까운 칸이 2(8px)다.
                       className="px-2"
@@ -1391,14 +1394,15 @@ export function Sidebar({
                   </li>
                 )}
                 {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 숨길 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
-                    쪽이 최악이다). 그 이유를 말한다(#4252). */}
+                    쪽이 최악이다). 그 이유를 말한다(#4252). 목록은 그대로 보이므로 조용한 상태 알림(`status`)이다. */}
                 {goneUnfoldedByReadFailure && (
                   <li>
-                    <InlineBanner
+                    <LoadFailureNote
                       tone="neutral"
-                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요."
-                      actionLabel="다시 시도"
-                      onAction={() => void readStates.refetch()}
+                      titleKey={CONNECTION_KEYS.loadReadMarkersTitle}
+                      cause={loadCauseOf(readStates.error)}
+                      onRetry={() => void readStates.refetch()}
+                      retryClassName="band-surface bg-surface shadow-sm"
                       separator={false}
                       className="px-2"
                       testId="read-state-error"

@@ -70,6 +70,14 @@ export const CONNECTION_KEYS = {
   loadLinkPreviewSettingTitle: "connection.load.linkPreviewSettingTitle",
   loadHermesStatusTitle: "connection.load.hermesStatusTitle",
   loadDmApprovalTitle: "connection.load.dmApprovalTitle",
+  // 결과 문장이 정보인 자리(#5279 A): 제목이 **무엇을 못 불러와서 무엇이 어떻게 되었는지**까지 말한다. 이유(원인)는 `loadSentence`가 뒤에 붙인다.
+  loadDmNamesTitle: "connection.load.dmNamesTitle",
+  loadReadMarkersTitle: "connection.load.readMarkersTitle",
+  loadDraftTargetsTitle: "connection.load.draftTargetsTitle",
+  loadTeamBoardStaleTitle: "connection.load.teamBoardStaleTitle",
+  loadAgentProfileAppliesTitle: "connection.load.agentProfileAppliesTitle",
+  /** 값 `names`(못 읽은 에이전트 이름들)를 받는다. */
+  loadAgentProfilesApplyTitle: "connection.load.agentProfilesApplyTitle",
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",

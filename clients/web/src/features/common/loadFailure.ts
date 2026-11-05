@@ -31,6 +31,22 @@ export function loadReasonKeyOf(cause: ConnectionCause | null, withAction: boole
 }
 
 /**
+ * 이미 만들어 둔 제목 문장(값이 든 키를 `formatMessage(key, values)`로 푼 것)에 이유를 붙여 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀).
+ * `withAction`은 곁에 「다시 시도」 단추가 서 있는가: 있으면 이유가 다음 행동을 되풀이하지 않는다(#5307 L2).
+ */
+export function loadFailureSentenceOf(
+  formatMessage: FormatMessage,
+  title: string,
+  cause: ConnectionCause | null,
+  withAction = true
+): string {
+  return formatMessage(CONNECTION_KEYS.loadSentence, {
+    title,
+    reason: formatMessage(loadReasonKeyOf(cause, withAction)),
+  });
+}
+
+/**
  * 제목 + 이유를 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀). 문자열만 받는 자리(설명·aria)에도 쓴다. `withAction`은 곁에 「다시 시도」 단추가
  * 서 있는가(기본 있음): 있으면 이유가 다음 행동을 되풀이하지 않는다.
  */
@@ -40,8 +56,5 @@ export function loadFailureSentence(
   cause: ConnectionCause | null,
   withAction = true
 ): string {
-  return formatMessage(CONNECTION_KEYS.loadSentence, {
-    title: formatMessage(titleKey),
-    reason: formatMessage(loadReasonKeyOf(cause, withAction)),
-  });
+  return loadFailureSentenceOf(formatMessage, formatMessage(titleKey), cause, withAction);
 }

@@ -75,6 +75,7 @@ export function LoadFailureNote({
   cause,
   onRetry,
   actionBusy,
+  retryClassName,
   separator,
   tone,
   className,
@@ -84,6 +85,8 @@ export function LoadFailureNote({
   cause: ConnectionCause | null;
   onRetry?: () => void;
   actionBusy?: boolean;
+  /** 「다시 시도」 알약이 서는 바탕이 정하는 자: 시트·회색 띠 위(사이드바)면 시트 위 문법을 넘긴다. 기본은 보조 채움(본문 판·카드 위). */
+  retryClassName?: string;
   separator?: boolean;
   /** 기본(생략)은 상자와 같은 조용한 잉크. 회색 띠로 서는 자리(사이드바)만 `neutral`(알림 역할도 `status`)을 넘긴다. */
   tone?: "neutral";
@@ -100,6 +103,7 @@ export function LoadFailureNote({
       actionLabel={onRetry ? formatMessage(CONNECTION_KEYS.retry) : undefined}
       onAction={onRetry}
       actionBusy={actionBusy}
+      actionClassName={retryClassName}
       separator={separator}
       className={className}
       testId={testId}
