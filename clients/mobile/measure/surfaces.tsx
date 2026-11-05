@@ -131,6 +131,7 @@ import {ExpressionSheetSurface} from './expressionSheet';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
+import {ConversationSearchSurface} from './conversationSearch';
 import {ConversationInfoPageSurface} from './conversationInfoPage';
 import {
   DelegateWorkSheet,
@@ -2290,6 +2291,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4319: 대화 머리 가운데 이름·상태 알약(`measure/conversationHeader.tsx`, 배송되는 머리 + 고정 데이터, 가상 인물).
   if (name === 'convheader' || name.startsWith('convheader-')) {
     return <ConversationHeaderSurface which={name.slice('convheader'.length).replace(/^-/, '')} />;
+  }
+  // #5364: 대화 안 검색(`measure/conversationSearch.tsx`, 배송되는 머리 돋보기·검색 줄·결과 면·이동 막대 + 고정 데이터, 가상 인물).
+  if (name === 'convsearch' || name.startsWith('convsearch-')) {
+    return <ConversationSearchSurface which={name.slice('convsearch'.length).replace(/^-/, '')} />;
   }
   // #4319: 대화·채널 정보 페이지(`measure/conversationInfoPage.tsx`, 배송되는 페이지 + 고정 데이터·합성 사진, 가상 인물).
   if (name === 'infopage' || name.startsWith('infopage-')) {

@@ -127,6 +127,11 @@ import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {ConversationHeader} from '../features/conversation/ConversationHeader';
 import {ConversationMenuSheet} from '../features/conversation/ConversationMenuSheet';
+import {COMPOSER_HIDDEN, ConversationSearchBar} from '../features/conversation/ConversationSearchBar';
+import {ConversationSearchPanel} from '../features/conversation/ConversationSearchPanel';
+import {ConversationSearchRow} from '../features/conversation/ConversationSearchRow';
+import {isDirectConversation} from '../features/conversation/conversationSearchModel';
+import {useConversationSearch} from '../features/conversation/useConversationSearch';
 import {
   conversationInfoActionItems,
   conversationMenuActionItems,
@@ -1345,6 +1350,21 @@ export default function ConversationScreen({
     [requestJump],
   );
 
+  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
+  //
+  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
+  // 결과·「답함 ✓」 칩과 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
+  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
+  const onSearchJump = useCallback(
+    (hit: {messageId: string; seq: number}) => {
+      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
+      Keyboard.dismiss();
+      onJumpToMessage(hit.messageId, hit.seq);
+    },
+    [onJumpToMessage],
+  );
+  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -2078,7 +2098,7 @@ export default function ConversationScreen({
           것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
           않는다.
           =================================================== */}
-      {jumpMissed ? (
+      {jumpMissed && !convSearch.active ? (
         <View style={styles.notice}>
           <NoticeBlock
             headline={jumpMissed.headline}
@@ -2114,7 +2134,7 @@ export default function ConversationScreen({
         />
       ) : null}
     </>
-  ), [jumpMissed, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
+  ), [jumpMissed, convSearch.active, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
 
   const requestRuns = useChannelRuns(channelId);
   const railTurns = useMemo(() => {
@@ -2175,6 +2195,20 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
+        // 돋보기는 종류를 알 때만 선다 — 안내문이 「이 채널에서」인지 「이 대화에서」인지 모른다(⋮ 시트의 정보 행과 같은 규칙).
+        onOpenSearch={channel !== null ? convSearch.open : undefined}
+        searchRow={
+          convSearch.active ? (
+            <ConversationSearchRow
+              query={convSearch.query}
+              onChangeQuery={convSearch.setQuery}
+              onSubmit={convSearch.submit}
+              onFocus={convSearch.editing}
+              onClose={convSearch.close}
+              isDm={isDirectConversation(channel?.kind)}
+            />
+          ) : undefined
+        }
         band={band}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
@@ -2251,6 +2285,33 @@ export default function ConversationScreen({
         }
         composer={
           <>
+            {/* 결과로 이동한 동안 컴포저 **자리**에 이동 막대가 선다(#5364). 컴포저는 걷지 않고 **숨긴다**(`display: 'none'`) — 마운트가 유지돼서 쓰던 글·첨부·답글
+                머리말이 그대로고, 검색을 끝내면 그 자리에서 돌아온다. */}
+            {/* 결과가 이미 불러온 범위 밖이면 이동 문이 「위쪽에 있다」고 말한다(`jumpMissed`) — 그 말은 목록의 **맨 위**에 서는데 사람은 아래에 있으니, 검색 중에는
+                막대 바로 위에 같은 상자를 세운다(같은 문장·같은 닫기·같은 기다림, 두 군데에 동시에 서지 않는다: 위의 `topNotice` 는 검색 중에 이 상자를 비운다). */}
+            {convSearch.active && jumpMissed ? (
+              <View style={styles.notice}>
+                <NoticeBlock
+                  headline={jumpMissed.headline}
+                  detail={jumpMissed.detail}
+                  onDismiss={cancelJump}
+                  testID="jump-missed"
+                />
+              </View>
+            ) : null}
+            {convSearch.active && convSearch.position !== null ? (
+              <ConversationSearchBar
+                position={convSearch.position}
+                query={convSearch.settledQuery}
+                canOlder={convSearch.canOlder}
+                canNewer={convSearch.canNewer}
+                loadingMore={convSearch.loadingMore}
+                onList={convSearch.backToList}
+                onOlder={convSearch.older}
+                onNewer={convSearch.newer}
+              />
+            ) : null}
+            <View style={convSearch.active ? COMPOSER_HIDDEN : undefined} testID="conversation-composer-stack">
             {/* 입력창 위, 모든 줄의 맨 위 (#2945, Q1 「입력창 위 채널당 한 장」).
                 타임라인 꼬리가 아니라 여기인 이유는 PR 「시안과의 차이」 표. */}
             {aiCard !== null && aiCard.channelId === channelId ? (
@@ -2347,9 +2408,22 @@ export default function ConversationScreen({
               onSlashCommand={onSlashCommand}
               onKeyBlockedChange={setComposerKeyBlocked}
             />
+            </View>
           </>
         }
       />
+      {/* 결과 목록 보기일 때만 대화를 덮는다. 머리(`zIndex` 1)는 이 면 **위**에 서서 검색 줄이 보인다. 이 틀 안에 두는 이유는 머리와 같다 — 덮개들(스레드 ·
+          고정 목록)이 이 틀 **뒤** 형제라 그 위에 서야 할 것은 위에 선다. */}
+      {convSearch.listOpen ? (
+        <ConversationSearchPanel
+          search={convSearch}
+          directory={directory}
+          selfMemberId={member.id}
+          isDm={isDirectConversation(channel?.kind)}
+          topInset={headerInset}
+          nowMs={nowMs}
+        />
+      ) : null}
       </View>
 
       {thread ? (
