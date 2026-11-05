@@ -39,8 +39,8 @@ use momo_agent::tools::{
 };
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
-    cent_channel, find_client_message_in_tx, send_message_in_tx, send_thread_notice_in_tx,
-    MessageType, NewMessage,
+    cent_channel, find_client_message_in_tx, send_message_in_tx, send_run_line_in_tx,
+    send_thread_notice_in_tx, MessageType, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
@@ -1185,7 +1185,8 @@ pub(crate) async fn write_result(
                         .await?
                 }
             };
-            send_thread_notice_in_tx(
+            // In the thread, uncounted (`counts_as_thread_reply`): like the call card, it is a trace.
+            send_run_line_in_tx(
                 conn,
                 context.workspace_id,
                 NewMessage {

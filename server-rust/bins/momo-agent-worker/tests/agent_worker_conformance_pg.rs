@@ -2438,7 +2438,9 @@ async fn a_tool_approval_card_asks_one_question_and_carries_the_decision_mode() 
     );
 
     // #4646: the call card and the approval card stand where the run's answer will — in a new thread
-    // under the request, which counts both as replies — and neither quotes the request.
+    // under the request — and neither quotes the request. The thread counts the approval card only
+    // (`counts_as_thread_reply`: `text` and `approval_request`, the client's own rule); the call card is a
+    // trace that stands in the thread uncounted.
     let cards: Vec<(String, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
         "SELECT type::text, root_id, reply_to_id FROM message \
           WHERE run_id = $1 AND type IN ('tool_call', 'approval_request') ORDER BY seq",
@@ -2457,8 +2459,8 @@ async fn a_tool_approval_card_asks_one_question_and_carries_the_decision_mode() 
     );
     assert_eq!(
         thread_rollup(&su, trigger).await.0,
-        2,
-        "both cards are replies the thread counts"
+        1,
+        "the approval card is a reply the thread counts; the call card is not"
     );
 }
 
@@ -2502,6 +2504,14 @@ async fn t4646_a_tool_result_line_stands_in_the_thread_of_its_call_card() {
         ],
         "the result stands in the thread of its call card, under the request"
     );
+    // …and neither line is a reply the thread counts: a trace is not a conversation (the client's
+    // `countsAsReply` is `text` and `approval_request` only), so the request has no 「답글 N개」 at all.
+    let rollups: i64 = sqlx::query_scalar("SELECT count(*) FROM thread WHERE root_id = $1")
+        .bind(trigger)
+        .fetch_one(&su)
+        .await
+        .expect("count rollups");
+    assert_eq!(rollups, 0, "tool lines do not make a rollup");
 }
 
 /// **Review of #3987, M1.** The same half answer and freeze, and then the retry is REFUSED

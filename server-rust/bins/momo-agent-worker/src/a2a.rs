@@ -58,7 +58,7 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
     agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
-    contains_mention_with_aliases, send_thread_notice_in_tx, MessageType, NewMessage,
+    contains_mention_with_aliases, send_run_line_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -488,9 +488,9 @@ async fn blocked(
     if !block.is_visible() {
         return skip(conn, send, trigger, agent, block).await;
     }
-    // #4646: the refusal stands beside the reply that carried the mention — in its thread — on the
-    // spine that keeps the thread's rollup.
-    let sent = send_thread_notice_in_tx(
+    // #4646: the refusal stands beside the reply that carried the mention — in its thread, uncounted
+    // like every `system` line (`counts_as_thread_reply`).
+    let sent = send_run_line_in_tx(
         &mut *conn,
         send.workspace_id,
         NewMessage {
@@ -619,7 +619,7 @@ async fn paused(
     trigger: &MentionTrigger<'_>,
     agent: &MentionCandidate,
 ) -> Result<(), DbError> {
-    let sent = send_thread_notice_in_tx(
+    let sent = send_run_line_in_tx(
         &mut *conn,
         send.workspace_id,
         NewMessage {

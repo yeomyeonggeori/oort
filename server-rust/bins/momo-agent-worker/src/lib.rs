@@ -140,7 +140,7 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{
-    patch_message_props_in_tx, send_message_in_tx, send_thread_notice_in_tx,
+    patch_message_props_in_tx, send_message_in_tx, send_run_line_in_tx, send_thread_notice_in_tx,
     stream_message_body_in_tx, MessageType, NewMessage, StreamCloseOutcome, StreamEdit,
     STREAM_PROPS_KEY,
 };
@@ -1723,13 +1723,15 @@ impl AgentWorker {
                 // by the call card, the approval card below and (off the stored call card) the
                 // result line, so one tool call is one bundle in one place.
                 let place = momo_agent::run_answer_root_in_tx(conn, workspace_id, run_id).await?;
-                // (1) the call itself, on the spine that keeps the thread's rollup.
+                // (1) the call itself. `send_run_line_in_tx` puts it in the thread without
+                // counting it: the product counts only `text` and `approval_request` as replies
+                // (`counts_as_thread_reply`), and the approval card below is the counted one.
                 // `client_msg_id` from the provider's `call_id` makes a re-claimed turn
                 // re-post nothing. Its *result* takes `tool_exec::result_message_id`, a
                 // separate key space on purpose (#1133): the guard this key buys is
                 // `(channel, author, client_msg_id)`, and the card and the result already
                 // agree on the first two.
-                send_thread_notice_in_tx(
+                send_run_line_in_tx(
                     conn,
                     workspace_id,
                     NewMessage {
@@ -3449,7 +3451,7 @@ impl AgentWorker {
                     } else {
                         hosted_skip_notice_body(reason, &name)
                     };
-                    let sent = send_thread_notice_in_tx(
+                    let sent = send_run_line_in_tx(
                         conn,
                         workspace_id,
                         NewMessage {

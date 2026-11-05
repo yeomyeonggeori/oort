@@ -217,7 +217,7 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 
 - **「1:1 DM만 예외」로 쓴다.** 「DM이 아니면 스레드」가 아니라 「1:1 DM이 아니면 스레드」다. 그룹 DM은 `channel.kind = 'dm'`을 그대로 쓰므로(ADR-0221 D1, 이미 있는 ADR-0217의 입장한 DM도 같다) 종류만 묻으면 그룹 대화가 본류에 남는다. 1:1 판정은 ADR-0221 D1의 `dm_is_group`을 거울로 읽는다: `dm_key`가 `group:`·`admitted:`로 시작하거나 활성 참여자(`membership.left_at IS NULL`)가 3명 이상이면 그룹이다. 그 SQL 함수가 착륙하면 `momo_agent::is_one_to_one_dm` 본문을 함수 호출로 바꾼다. 인원을 알 수 없으면 1:1이 아니다(스레드 쪽으로 실패해요 — 본류에 두는 것이 예외다).
 - **한 곳에서 정한다.** `momo_agent::answer_place_root`(순수 함수, 진리표 시험)가 정하고, 사실은 한 문장으로 읽는다. `GatewayRunSnapshot::trigger_root_id`가 값은 같고 뜻이 넓어졌다(스레드 root | 트리거 자신 | 본류, 이름은 첫 뜻을 유지했어요). 스냅샷을 못 가진 쓰기는 `momo_agent::run_answer_root_in_tx`가 같은 사실을 잠금 없이 읽는다.
-- **롤업은 지킨다.** 이 줄들은 모두 `send_thread_notice_in_tx`(롤업과 `thread.updated`를 지키는 쓰기)로 쓴다. `root_id`만 붙이고 롤업을 건너뛰는 쓰기는 요약 줄의 클라이언트 수와 서버 `reply_count`를 갈라요(#5032 착륙 메모).
+- **롤업은 세는 규칙을 따른다.** 제품이 답글로 세는 종류는 하나다: `text`와 `approval_request`(코어 `countsAsReply`, 서버 `momo_messaging::counts_as_thread_reply`). 센 줄(최종 답·카드·명령 제안 칩)은 `send_thread_notice_in_tx`로 써서 롤업과 `thread.updated`를 올리고, 세지 않는 줄(`tool_call`·`tool_result`·`system` 안내)은 같은 `root_id`로 스레드에 서되 롤업을 올리지 않는 `send_run_line_in_tx`로 쓴다. 한 쪽만 틀리면 새로 고친 수와 실시간 수가 갈려요: `root_id`만 붙이고 센 줄의 롤업을 건너뛰면 클라이언트는 세는데 서버는 안 세고(#5032 착륙 메모), 세지 않는 줄을 롤업으로 쓰면 서버는 세는데 클라이언트는 안 세요(도구 호출 열 번이 「답글 21개」가 되는 모양이에요).
 
 ### 이 규칙을 따르는 쓰기
 
@@ -227,12 +227,12 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 | 최종 답 — 관리형 워커의 커밋과 **스트림 열기** | 잠근 스냅샷(열기는 run 시작 때 한 번 읽어 커밋과 공유) | 열기 쓰기가 메시지를 만들고 커밋은 dedupe라서 열기가 자리를 정해야 해요 |
 | 최종 답 — 팀 AI | 잠근 스냅샷 | |
 | 승인 카드 — 외부 Agent Port 행동 제안 | 잠근 스냅샷 | `send_message_in_tx` → `send_thread_notice_in_tx` |
-| `tool_call` 카드 · 도구 승인 카드 — 관리형 | `run_answer_root_in_tx`(한 트랜잭션에서 한 번) | |
+| `tool_call` 줄 · 도구 승인 카드 — 관리형 | `run_answer_root_in_tx`(한 트랜잭션에서 한 번) | 승인 카드만 세고, `tool_call` 줄은 스레드에 서되 세지 않아요 |
 | 팀 AI 도우미 카드 · 호스티드 이모티콘 승인 카드와 실패 카드 | `run_answer_root_in_tx` | |
 | 관리형 명령 제안 칩(`card_suggest`) | `run_answer_root_in_tx` | 서버가 정하는 자리라서 같이 옮겨요. 외부 `oort_card_suggest`는 에이전트가 고르는 자리 그대로예요 |
-| **카드가 선 뒤의 줄** — `tool_result`, 승인 뒤의 초대 링크 줄 | **카드 행의 `root_id`** | 요청이 지워져도 한 묶음이 한 스레드에 남아요. 결과·거부·만료 문장은 R-b가 카드 안에서 고쳐 쓰고 더는 줄을 쓰지 않아요 |
-| 못 돌 때의 안내 줄(`settle_refused_turn`) | 잠근 스냅샷 | 답을 대신하는 줄이라서 답이 설 자리에 서요. **스로틀은 그대로 채널 단위**예요(`notice_thread_key`의 뜻: 채널 최상위는 한 대화) |
-| A2A 막힘 줄·멈춤 줄(`a2a.rs`) | 줄을 부른 **답의 `root_id`**(`A2aSend.root_id`) | 위임한 에이전트의 답이 스레드 안이면 줄도 거기에 서요 |
+| **카드가 선 뒤의 줄** — `tool_result`(세지 않음), 승인 뒤의 초대 링크 줄(`text`, 셈) | **카드 행의 `root_id`** | 요청이 지워져도 한 묶음이 한 스레드에 남아요. 결과·거부·만료 문장은 R-b가 카드 안에서 고쳐 쓰고 더는 줄을 쓰지 않아요 |
+| 못 돌 때의 안내 줄(`settle_refused_turn`, `system`) | 잠근 스냅샷 | 답을 대신하는 줄이라서 답이 설 자리에 서요(세지 않음). **스로틀은 그대로 채널 단위**예요(`notice_thread_key`의 뜻: 채널 최상위는 한 대화) |
+| A2A 막힘 줄·멈춤 줄(`a2a.rs`, `system`) | 줄을 부른 **답의 `root_id`**(`A2aSend.root_id`) | 위임한 에이전트의 답이 스레드 안이면 줄도 거기에 서요(세지 않음) |
 
 카드와 도구 줄의 `reply_to_id`는 바뀌지 않아요(없음). 이들은 답이 아니라 일의 흔적이고, 인용을 붙이면 한 턴의 모든 줄에 같은 인용 블록이 붙어요.
 
