@@ -54,6 +54,7 @@ import { DockBadge } from "@/features/notifications/DockBadge";
 import { TrayStatus } from "@/features/notifications/TrayStatus";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
+import { ActivityBeat } from "@/features/presence/ActivityBeat";
 import { OnlineRollCall } from "@/features/presence/OnlineRollCall";
 import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAgentPortCleanup";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
@@ -535,6 +536,8 @@ export function AppShell({
           {!stress && <WorkHostNotices />}
           {/* 출석부에 세어진다(ADR-0160 ②, #4692). 아무것도 그리지 않고 받는 것도 없다. */}
           {!stress && <OnlineRollCall />}
+          {/* 이 창을 쓰는 동안 서버가 폰 푸시를 늦추게 하는 신호(ADR-0206 D4, #4508). 아무것도 그리지 않는다. */}
+          {!stress && <ActivityBeat />}
           {!stress && <LegacyAgentPortCleanup />}
           {!stress && <ReminderDueWatcher />}
           {/* 업데이트 뒤 처음 열 때 「업데이트 소식」을 한 번 보인다(#4937). 데스크탑 셸만 앱 버전을 안다. */}

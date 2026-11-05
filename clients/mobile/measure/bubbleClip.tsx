@@ -300,6 +300,8 @@ export function BubbleClipSurface({which}: {which: string}): React.JSX.Element {
               maxRight: lines.length > 0 ? round(Math.max(...lines.map(l => l.x + l.width))) : null,
               bottom: lines.length > 0 ? round(Math.max(...lines.map(l => l.y + l.height))) : null,
               lineH: lines.length > 0 ? round(lines[0].height) : null,
+              // 줄마다의 폭과 글(#5313): 한 글자 고아 줄·낱말 가운데 꺾임·줄 채움을 `bubble-clip-check.mjs stats|compare` 가 센다.
+              rows: lines.map(l => ({w: round(l.width), t: l.text})),
             },
           };
         });
