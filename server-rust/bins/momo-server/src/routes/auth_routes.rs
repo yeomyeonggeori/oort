@@ -81,11 +81,14 @@
 //! push registrations and device keys end with it, in the transaction that
 //! answers the 401 (it commits). The next rotation by whoever won is refused.
 //!
-//! **Which lineages.** A QR-linked (phone) lineage always; a password
-//! sign-in's only with `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default
-//! off): browser tabs rotate without cross-tab coordination, so a tab opened
-//! later spends the token an older tab still holds, and that is
-//! indistinguishable from theft (review H2). See `end_reused_lineage`.
+//! **Which lineages.** Every sign-in by default (#5339, ADR-0188 §4 R1): a
+//! password sign-in (desktop, web) and a QR-linked phone alike. The operator's
+//! off switch `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false` spares password
+//! sign-ins only — a QR-linked lineage is always swept. It used to be off for
+//! password sign-ins (review H2): browser tabs rotated without cross-tab
+//! coordination, so a tab opened later spent the token an older tab still held,
+//! indistinguishable from theft. The web client serialises rotation across tabs
+//! now (#3067). See `end_reused_lineage`.
 //!
 //! **Grace.** A token spent less than 30 seconds ago is never swept
 //! (`REFRESH_REUSE_GRACE_SECONDS`): web tabs share one refresh token, and a
@@ -823,16 +826,17 @@ const REFRESH_REUSE_GRACE_SECONDS: f64 = 30.0;
 /// itself signs (`crate::session_end`). A row with no lineage (spent before 088 and never
 /// rotated since) names nothing else to revoke.
 ///
-/// **Which lineages.** A QR-linked lineage (the row carries an ADR-0180
-/// `device_label`) is a phone app: one process, rotations single-flight in
-/// momo-core. That is the device ADR-0188 R1 names (「재사용이 보이면 그
-/// 기기의 세션 계열을 전부 폐기」), and it is swept always. A password
-/// sign-in may be a browser with several tabs, which rotate without cross-tab
-/// coordination: a tab opened later rotates at boot and spends the token an
-/// older tab still holds, and the older tab presents it minutes later — a
-/// shape the server cannot tell from theft (#3022 review H2). Those lineages
-/// are swept only when `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`, off until
-/// the web client coordinates rotation across tabs.
+/// **Which lineages.** Every sign-in by default (#5339): ADR-0188 R1 names
+/// 「재사용이 보이면 그 기기의 세션 계열을 전부 폐기」 for every device, and the
+/// web client serialises rotation across tabs now (#3067). A QR-linked lineage
+/// (the row carries an ADR-0180 `device_label`) is a phone app — one process,
+/// rotations single-flight in momo-core — and is swept always. A password
+/// sign-in may be a browser with several tabs: before #3067 a tab opened later
+/// rotated at boot and spent the token an older tab still held, and the older
+/// tab presented it minutes later, a shape the server cannot tell from theft
+/// (#3022 review H2). The operator's emergency switch
+/// `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false` (`sweep_all`) spares those
+/// password lineages again; it never spares a linked one.
 async fn end_reused_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -857,6 +861,12 @@ async fn end_reused_lineage(
     if within_grace || !(linked || sweep_all) {
         return Ok(());
     }
+    // The line an operator greps for after #5339 to see how often a sweep fires (no ids).
+    tracing::warn!(
+        linked,
+        sweep_all,
+        "auth.refresh: a spent refresh token came back after the grace window; ending its lineage"
+    );
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
         .await
         .map_err(DbError::from)?;
