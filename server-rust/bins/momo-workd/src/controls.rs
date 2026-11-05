@@ -9,11 +9,15 @@
 //!
 //! Kinds:
 //! * `spawn` — the host owner's only (see below), then
-//!   [`SessionManager::spawn`] (all D6 checks). The first prompt (the spawn
-//!   label) is sent only after the ack landed: the server accepts a spawn ack
-//!   only while the session is still `running`. A refused spawn that arrived
-//!   with a session the server already allocated for it (a resume) ends that
-//!   session, so the ledger is not left with a `running` session nothing runs.
+//!   [`SessionManager::spawn`] (all D6 checks). The first prompt is sent only
+//!   after the ack landed: the server accepts a spawn ack only while the
+//!   session is still `running`. For a resume it is the host's fixed sentence,
+//!   not the label the server relays (#5338, ADR-0188 §8.12): the label is the
+//!   title its session's creator gave it — possibly another member's — and is
+//!   the first prompt only when this host verified the owner's signature over
+//!   it. A refused spawn that arrived with a session the server already
+//!   allocated for it (a resume) ends that session, so the ledger is not left
+//!   with a `running` session nothing runs.
 //! * `input` — the host owner's instruction. `queue` (the default, and every
 //!   unsigned input) is the next turn after the running one and anything
 //!   already queued; `interrupt` (#3027, only from a signed statement's
@@ -179,12 +183,20 @@ impl ControlLoop {
         }
     }
 
+    /// Whether [`Self::check_signature`] verifies a signature on `control`: R2
+    /// is on here and this kind of control needs the owner's signature. When
+    /// the control passed `check_signature` and this is `true`, the owner's
+    /// signature over exactly this control was verified a moment ago.
+    fn verifies_signature(&self, control: &WorkControl) -> bool {
+        self.human.is_some() && self.signatures_required() && requires_signature(control)
+    }
+
     /// R2 on the host: the owner's signature, fresh, unrevoked, once.
     fn check_signature(&self, control: &WorkControl) -> Result<(), Refusal> {
         let Some(trust) = &self.human else {
             return Ok(());
         };
-        if !self.signatures_required() || !requires_signature(control) {
+        if !self.verifies_signature(control) {
             return Ok(());
         }
         // #3118: an allow is checked against the preview this host relayed
@@ -364,7 +376,14 @@ impl ControlLoop {
     /// rules (a resume, or the host's own configured folder).
     async fn spawn_verified(&mut self, control: &WorkControl) -> Result<Uuid, Refusal> {
         if !is_new_work_spawn(control) {
-            return self.sessions.spawn(control, None).await;
+            // #5338: a resume's label counts as the owner's confirmed text only
+            // when `authorized` verified their signature over it (its statement
+            // binds the label as the first prompt); unsigned, it never does.
+            let owner_confirmed_label = self.verifies_signature(control);
+            return self
+                .sessions
+                .spawn(control, None, owner_confirmed_label)
+                .await;
         }
         let Some(trust) = &self.human else {
             return Err(Refusal::DeviceSignatureRequired);
@@ -374,7 +393,7 @@ impl ControlLoop {
             .unwrap_or_else(|p| p.into_inner())
             .check_control_with_preview(control, None, now_ms())?;
         let folder_id = verified_folder_id(control).ok_or(Refusal::DeviceSignatureInvalid)?;
-        self.sessions.spawn(control, Some(&folder_id)).await
+        self.sessions.spawn(control, Some(&folder_id), false).await
     }
 
     /// ADR-0188 D3 on the host: a spawn or an input is its owner's or nothing.
