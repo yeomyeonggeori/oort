@@ -865,6 +865,8 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.quote.head",
+  "timeline.quote.headUnnamed",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
@@ -2009,6 +2011,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.quote.head": {
+    "name": "string"
+  },
+  "timeline.quote.headUnnamed": {},
   "timeline.runException.open": {
     "text": "string"
   },
@@ -3087,6 +3093,8 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.quote.head": { name: string };
+  "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;

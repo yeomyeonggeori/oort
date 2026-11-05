@@ -5701,6 +5701,22 @@ export const catalog: MessageCatalog = {
       "value": "축소"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 답장"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "메시지에 답장"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
