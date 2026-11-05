@@ -32,6 +32,8 @@
   "mobile.convSearch.recentRow": "Search again: {query}",
   "mobile.convSearch.resultsChannel": "Results in this channel · newest first",
   "mobile.convSearch.resultsDm": "Results in this conversation · newest first",
+  "mobile.convSearch.searchAll": "All conversations",
+  "mobile.convSearch.searchAllLabel": "Search all conversations for ‘{query}’",
   "mobile.convSearch.authorSelf": "Me",
   "mobile.convSearch.dayYesterday": "Yesterday",
   "mobile.convSearch.resultLabel": "Message from {author}, {when}: {snippet}",

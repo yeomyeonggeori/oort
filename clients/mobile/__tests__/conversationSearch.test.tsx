@@ -404,7 +404,7 @@ describe('#5364 대화 안 검색 — 이동', () => {
     expect(positionText()).toBe('2 / 3');
   });
 
-  it('이미 불러온 범위 밖의 오래된 결과가 읽어도 닿지 못하면(쪽 상한) 이동 문의 고지가 막대 위에 서고(목록 맨 위에 묻히지 않는다), 검색을 끝내면 목록 머리로 돌아간다', async () => {
+  it('이미 불러온 범위 밖의 오래된 결과가 읽어도 닿지 못하면(쪽 상한) 이동 문의 고지가 막대 위에 서고(목록 맨 위에 묻히지 않는다), 검색을 끝내도 같은 자리(입력창 위)에 선다', async () => {
     // #5383: 범위 밖 결과는 이제 화면이 그 자리까지 읽는다. 서버가 한 쪽에 5줄만 주면 60줄 위의 결과(40)는 2쪽(상한)에 못 닿아 지금의 고지로 물러난다.
     installFetch({firstPage: [HIT_OLD], hasSecondPage: false, olderExists: true, olderPageRows: 5});
     await search();
@@ -421,8 +421,10 @@ describe('#5364 대화 안 검색 — 이동', () => {
 
     fireEvent.press(screen.getByTestId('conversation-search-close'));
     await waitFor(() => expect(screen.getByTestId('conversation-menu')).toBeTruthy());
+    // #5384: 고지는 검색이 끝나도 목록 맨 위로 돌아가지 않는다 - 입력창 바로 위, 같은 자리에 한 벌만 선다(바닥에 있는 사람에게 보이는 자리).
     expect(screen.getAllByTestId('jump-missed')).toHaveLength(1);
-    expect(within(screen.getByTestId('composer-dock')).queryByTestId('jump-missed')).toBeNull();
+    expect(within(screen.getByTestId('composer-dock')).getByTestId('jump-missed')).toBeTruthy();
+    expect(within(screen.getByTestId('conversation-list')).queryByTestId('jump-missed')).toBeNull();
   });
 
   it('#5383 범위 밖 결과를 누르면 읽는 줄이 막대 위(숨은 컴포저 밖)에 서고, 읽고 나면 그 메시지로 점프가 다시 걸리며 줄이 걷힌다', async () => {
@@ -504,6 +506,43 @@ describe('#5364 대화 안 검색 — 이동', () => {
     await waitFor(() => expect(screen.queryByTestId('conversation-search-row')).toBeNull());
     expect(screen.queryByTestId('conversation-search-bar')).toBeNull();
     expect(StyleSheet.flatten(screen.getByTestId('conversation-composer-stack').props.style)?.display).not.toBe('none');
+  });
+});
+
+describe('#5384 대화 안 검색 — 「모든 대화에서 ›」', () => {
+  it('결과 머리의 「모든 대화에서 ›」가 같은 말로 홈 검색 탭을 연다 - 대화는 걷히고 검색칸에 말이 들어 있으며, 이번 요청에는 channel= 이 없다', async () => {
+    const fetchMock = installFetch();
+    await search('배포');
+    const searchCalls = () =>
+      fetchMock.mock.calls.map(call => call[0] as string).filter(url => url.includes('/search/messages'));
+    // 이 대화 안의 검색이 먼저 나갔다(범위가 있다).
+    expect(searchCalls()).toHaveLength(1);
+    expect(searchCalls()[0]).toContain(`channel=${GENERAL}`);
+
+    // 결과 머리의 오른쪽 문. 눌림 이름이 어떤 말로 넘어가는지도 말한다.
+    const door = screen.getByTestId('conversation-search-all');
+    expect(door).toHaveTextContent('모든 대화에서');
+    expect(door.props.accessibilityLabel).toBe('모든 대화에서 ‘배포’ 찾기');
+    fireEvent.press(door);
+
+    // 셸이 탭을 검색으로 옮겼다: 이 대화는 걷히고, 검색칸에 같은 말이 들어 있다(다시 치지 않는다).
+    await waitFor(() => expect(screen.getByTestId('search-input')).toBeTruthy());
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    expect(screen.getByTestId('search-input').props.value).toBe('배포');
+    // 이미 다 친 말이라 디바운스를 기다리지 않고 이 대화 밖까지 찾는다 - 범위(`channel=`)가 빠진 요청이다.
+    await waitFor(() => expect(searchCalls()).toHaveLength(2), {timeout: 5_000});
+    expect(searchCalls()[1]).not.toContain('channel=');
+    expect(searchCalls()[1]).toContain(`q=${encodeURIComponent('배포')}`);
+    await waitFor(() => expect(screen.getByTestId('search-results')).toBeTruthy(), {timeout: 5_000});
+  });
+
+  it('입력칸의 말을 다듬어(앞뒤 공백 없이) 넘긴다', async () => {
+    installFetch();
+    await openSearch();
+    await typeQuery('  배포  ');
+    fireEvent.press(screen.getByTestId('conversation-search-all'));
+    await waitFor(() => expect(screen.getByTestId('search-input')).toBeTruthy());
+    expect(screen.getByTestId('search-input').props.value).toBe('배포');
   });
 });
 

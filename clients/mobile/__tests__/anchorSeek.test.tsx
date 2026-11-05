@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 
@@ -526,6 +527,25 @@ describe('#5383 — 상한: 넘으면 지금의 고지로 물러난다', () => {
       new RegExp(jumpMissedNotice('older', 'search').headline),
     );
     expect(screen.queryByTestId('jump-seek')).toBeNull();
+  });
+
+  // #5384 — 읽기 상한에서 물러난 고지는 입력창 위 도크에 선다. 옛 자리(목록 맨 위)는 스크롤 안이라, 바닥에서 대화를 연 사람(홈 검색 결과를 누른 사람)에게는 안 보였다.
+  it('물러난 고지는 목록 맨 위가 아니라 입력창 위 도크에 선다 - 홈 검색 길에서도 바닥에서 보인다', async () => {
+    installServer({headSeq: 5000});
+    await openFromSearch();
+
+    await waitFor(() => expect(screen.getByTestId('jump-missed')).toBeTruthy());
+    // 읽는 줄(`jump-seek`)과 같은 자리인 도크 안이다.
+    const dock = within(screen.getByTestId('composer-dock'));
+    expect(dock.getByTestId('jump-missed-dock')).toBeTruthy();
+    expect(dock.getByTestId('jump-missed')).toHaveTextContent(
+      new RegExp(jumpMissedNotice('older', 'search').headline),
+    );
+    // 목록(스크롤 안) 쪽에는 같은 고지의 두 번째 사본이 없다 - 같은 사실을 두 군데서 말하지 않는다.
+    expect(within(screen.getByTestId('conversation-list')).queryByTestId('jump-missed')).toBeNull();
+    // 닫으면 도크에서 걷힌다.
+    fireEvent.press(dock.getByTestId('jump-missed-dismiss'));
+    await waitFor(() => expect(screen.queryByTestId('jump-missed')).toBeNull());
   });
 
   it('채널의 처음까지 읽었는데 없으면 「더 위쪽」이 아니라 「찾지 못했습니다」라고 말한다', async () => {

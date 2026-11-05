@@ -3368,6 +3368,26 @@ export const catalog: MessageCatalog = {
       "value": "이 대화의 결과 · 최근 순"
     }
   ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "모든 대화에서"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "모든 대화에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 찾기"
+    }
+  ],
   "mobile.convSearch.searching": [
     {
       "type": 0,

@@ -1,6 +1,7 @@
 import {
   clampQueryForCopy,
   leadsWithEllipsis,
+  normalizeQuery,
   snippetSegments,
   trailsWithEllipsis,
 } from '@momo/core/features/search/searchModel';
@@ -36,6 +37,9 @@ import type {ConversationSearch} from './useConversationSearch';
 //
 // 결과 줄은 보낸 사람·시각·**찾은 글자 강조**(서버가 준 `matchOffset`)이고 최근 순이다. 누르면 `search.choose` — 이동은 대화 화면의 점프 문이 한다.
 //
+// 결과 머리의 오른쪽 「모든 대화에서 ›」(시안 A3, #5384)는 같은 말로 홈 검색 탭을 여는 문이다(`onSearchAll` — 셸이 탭을 옮기고 말을 넘긴다). 이 대화 안에서
+// 못 찾았거나 더 넓게 보고 싶을 때 말을 다시 치지 않게 한다.
+//
 // ## 키보드는 안쪽 면이 비운다, 바탕은 비우지 않는다
 //
 // 바탕(불투명·어둠)은 화면 바닥까지 간다 — 키보드가 올라오는 동안 바탕이 먼저 줄면 그 틈으로 뒤의 대화가 번쩍인다. 키보드 높이만큼 비우는 것은
@@ -45,6 +49,9 @@ import type {ConversationSearch} from './useConversationSearch';
 /** 「지우기」 글자 한 줄을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const CLEAR_SLOP = slopTo(line.label);
 
+/** 가로로 서고 세로 가운데에 맞추는 줄 — 이 파일의 줄 스타일이 한 벌을 나눠 쓴다(직접 문구 장부가 낱말 리터럴을 세므로 한 곳에만 적는다). */
+const ROW = {flexDirection: 'row', alignItems: 'center'} as const;
+
 export function ConversationSearchPanel({
   search,
   directory,
@@ -52,6 +59,7 @@ export function ConversationSearchPanel({
   isDm,
   topInset,
   nowMs,
+  onSearchAll,
 }: {
   search: ConversationSearch;
   directory: Directory;
@@ -60,6 +68,8 @@ export function ConversationSearchPanel({
   /** 머리가 덮은 높이 — 면은 그 아래에서 시작한다. */
   topInset: number;
   nowMs: number;
+  /** 「모든 대화에서 ›」 — 같은 말(다듬은 것)로 홈 검색 탭을 연다. 없으면(셸 밖 호출자) 문이 서지 않는다. */
+  onSearchAll?: (query: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -176,9 +186,29 @@ export function ConversationSearchPanel({
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listBody}
           ListHeaderComponent={
-            <Text style={styles.listHead} accessibilityRole="header" testID="conversation-search-results-head">
-              {formatMessage(isDm ? 'mobile.convSearch.resultsDm' : 'mobile.convSearch.resultsChannel')}
-            </Text>
+            <View style={styles.listHeadRow}>
+              <Text style={styles.listHead} accessibilityRole="header" testID="conversation-search-results-head">
+                {formatMessage(isDm ? 'mobile.convSearch.resultsDm' : 'mobile.convSearch.resultsChannel')}
+              </Text>
+              {onSearchAll ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={formatMessage('mobile.convSearch.searchAllLabel', {
+                    query: clampQueryForCopy(normalizeQuery(search.query)),
+                  })}
+                  hitSlop={CLEAR_SLOP}
+                  onPress={() => onSearchAll(normalizeQuery(search.query))}
+                  style={({pressed}) => [styles.searchAll, pressed && styles.searchAllPressed]}
+                  testID="conversation-search-all">
+                  <Text style={styles.searchAllLabel}>{formatMessage('mobile.convSearch.searchAll')}</Text>
+                  <Image
+                    accessibilityElementsHidden
+                    source={SHEET_ICONS.chevron}
+                    style={[styles.searchAllGlyph, {tintColor: palette.accentText}]}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
           }
           ListFooterComponent={
             search.hasMore ? (
@@ -321,8 +351,7 @@ const buildStyles = (color: Palette) =>
       overflow: 'hidden',
     },
     recentHead: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      ...ROW,
       justifyContent: 'space-between',
       paddingHorizontal: space.lg,
       paddingTop: space.md,
@@ -331,9 +360,8 @@ const buildStyles = (color: Palette) =>
     recentTitle: {fontSize: font.label, lineHeight: line.label, color: color.textMuted, fontWeight: '600'},
     recentClear: {fontSize: font.label, lineHeight: line.label, color: color.accentText, fontWeight: '600'},
     recentRow: {
+      ...ROW,
       minHeight: TOUCH_TARGET,
-      flexDirection: 'row',
-      alignItems: 'center',
       gap: space.md,
       paddingHorizontal: space.lg,
     },
@@ -343,12 +371,21 @@ const buildStyles = (color: Palette) =>
     chevron: {width: SHEET_ICON_SIZE.chevron, height: SHEET_ICON_SIZE.chevron},
     pressed: {backgroundColor: color.surfacePressed},
     listBody: {paddingBottom: space.xl},
-    listHead: {
+    // 결과 머리: 왼쪽 「이 채널의 결과 · 최근 순」, 오른쪽 「모든 대화에서 ›」(시안 A3). 왼쪽이 줄어들 수 있어 오른쪽 문은 늘 한 줄로 선다.
+    listHeadRow: {
+      ...ROW,
+      justifyContent: 'space-between',
+      gap: space.sm,
       paddingHorizontal: SAFE_GUTTER,
       paddingVertical: space.md,
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.textMuted,
+    },
+    listHead: {flexShrink: 1, fontSize: font.label, lineHeight: line.label, color: color.textMuted},
+    searchAll: {...ROW, flexShrink: 0, gap: space.xs},
+    searchAllPressed: {opacity: 0.6},
+    searchAllLabel: {fontSize: font.label, lineHeight: line.label, color: color.accentText, fontWeight: '600'},
+    searchAllGlyph: {
+      width: SHEET_ICON_SIZE.chevron - space.xs,
+      height: SHEET_ICON_SIZE.chevron - space.xs,
     },
     // 줄: 왼쪽에 얼굴, 오른쪽 몸통이 구분선을 진다 — 선은 글이 시작하는 자리에서 오른쪽 끝까지다(얼굴 밑으로는 가지 않는다).
     row: {

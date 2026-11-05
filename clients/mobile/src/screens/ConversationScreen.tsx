@@ -346,6 +346,7 @@ export default function ConversationScreen({
   onOpenWorkSession,
   onOpenWorkList,
   onOpenSettings,
+  onOpenSearch,
 }: {
   channelId: string;
   title: string;
@@ -404,6 +405,11 @@ export default function ConversationScreen({
    * 없으면 자기 프로필에 그 타일이 서지 않는다(측정 하네스처럼 셸이 아닌 곳에서 쓰는 호출자).
    */
   onOpenSettings?: () => void;
+  /**
+   * 대화 안 검색 결과의 「모든 대화에서 ›」가 부른다(#5384): 같은 검색어로 홈 검색 탭을 연다. 셸의 `openSearch` 라서 탭이 검색으로 옮겨 가고 이 대화는 걷힌다
+   * (뒤로가기는 검색 탭에서 홈 탭으로 돌아가는 X 와 같은 길). 없으면(셸이 아닌 곳에서 쓰는 호출자) 문이 서지 않는다.
+   */
+  onOpenSearch?: (initialQuery: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -2172,53 +2178,10 @@ export default function ConversationScreen({
   // 고지·요약도 스크롤 안에 둔다. 카드가 null 이거나 닫히면 별도 머리 여백이 남지 않는다.
   const topNotice = useMemo(() => (
     <>
-      {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
-          인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
-          사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
-          이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
-          두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
-          (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
-
-          옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
-          아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
-          바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
-          거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
-          (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
-          그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
-      {/* ===================================================
-          실패가 아니라 **사실 진술**이다 (design-review H-5).
-
-          사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다.
-          빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는
-          「내가 뭔가 잘못했다」를 말한다. `atoms` 에 이 경우를 위한
-          컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로
-          *"A statement of fact that is not a failure … Deliberately has
-          no retry and no danger colour."*
-
-          닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인
-          알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이
-          방금 한 동작(인용 탭)에 대한 답이고, 한 번 읽으면 목록 아래에
-          영영 붙어 있을 이유가 없다. 서버가 못 하는 일에 대한 고지가
-          아니다.
-
-          점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
-
-          그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
-          리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
-          의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
-          것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
-          않는다.
-          =================================================== */}
-      {jumpMissed && !convSearch.active ? (
-        <View style={styles.notice}>
-          <NoticeBlock
-            headline={jumpMissed.headline}
-            detail={jumpMissed.detail}
-            onDismiss={cancelJump}
-            testID="jump-missed"
-          />
-        </View>
-      ) : null}
+      {/* 점프가 빈손으로 돌아온 고지(「더 위쪽에 있습니다」 등)는 **여기 서지 않는다** (#5384). 이 자리는 목록의 맨 위라 스크롤 안에 있고, 점프를 건 사람은
+          거의 언제나 바닥에 있다 — 300줄을 넘어 읽기에서 물러난 점프가 「눌렀는데 아무 일도 없다」가 되는 길이었다. 고지는 입력창 바로 위 도크에 선다(아래
+          `jump-missed-dock`, 읽는 줄 `JumpSeekLine` 과 같은 자리). 같은 사실을 두 군데서 말하지 않는다(#1196)는 규율은 그대로이고 자리만 하나로 모였다. 닫기·기다림을
+          접는 규율(`cancelJump`)과 문장은 그대로다(`NoticeBlock` 의 `onDismiss` 독스트링, #1209 리뷰 High). */}
       {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
           (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
           말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
@@ -2245,7 +2208,7 @@ export default function ConversationScreen({
         />
       ) : null}
     </>
-  ), [jumpMissed, convSearch.active, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
+  ), [notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
 
   const requestRuns = useChannelRuns(channelId);
   const railTurns = useMemo(() => {
@@ -2404,10 +2367,25 @@ export default function ConversationScreen({
           <>
             {/* 결과로 이동한 동안 컴포저 **자리**에 이동 막대가 선다(#5364). 컴포저는 걷지 않고 **숨긴다**(`display: 'none'`) — 마운트가 유지돼서 쓰던 글·첨부·답글
                 머리말이 그대로고, 검색을 끝내면 그 자리에서 돌아온다. */}
-            {/* 결과가 이미 불러온 범위 밖이면 이동 문이 「위쪽에 있다」고 말한다(`jumpMissed`) — 그 말은 목록의 **맨 위**에 서는데 사람은 아래에 있으니, 검색 중에는
-                막대 바로 위에 같은 상자를 세운다(같은 문장·같은 닫기·같은 기다림, 두 군데에 동시에 서지 않는다: 위의 `topNotice` 는 검색 중에 이 상자를 비운다). */}
-            {convSearch.active && jumpMissed ? (
-              <View style={styles.notice}>
+            {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196). 인용·고정·세션 앵커·검색 진입 넷이 같은 고지를 쓴다 — 같은 사실("이 화면에 그 줄이 없다")을
+                두 가지 모양으로 말할 이유가 없고, 두 벌을 그릴 수도 없다(같은 한 번에 같은 문장이 **두 줄** 선다).
+
+                ## 자리는 입력창 바로 위다 (#5384)
+                이 고지는 목록의 **맨 위**(스크롤 안)에 서 있었다. 그런데 점프를 건 사람은 거의 언제나 **바닥**에 있다 — 홈 검색 결과를 눌러 대화가 바닥에서 열렸거나, 대화 안
+                검색 목록에서 돌아왔다. 읽기 상한(300줄, `jumpSeek.ts`)을 넘어 물러난 점프의 끝 고지가 안 보이면 「오래된 결과를 눌렀는데 아무 일도 없다」가 된다. 그래서 읽는
+                줄(`JumpSeekLine`)과 **같은 자리**, 곧 입력창 바로 위 도크다. 이 자리는 컴포저 묶음을 숨기는 틀 **밖**이라(`COMPOSER_HIDDEN`) 대화 안 검색 중에도 이동 막대 바로
+                위에 보인다. 읽는 줄과 동시에 서지 않는다(읽는 동안은 고지가 없고, 끝난 뒤에는 줄이 없다).
+
+                ## 실패가 아니라 **사실 진술**이다 (design-review H-5)
+                사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다. 빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는 「내가 뭔가 잘못했다」를 말한다.
+                `atoms` 에 이 경우를 위한 컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로 *"A statement of fact that is not a failure … Deliberately has no retry and no
+                danger colour."*
+
+                닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인 알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이 방금 한 동작(결과·인용 탭)에
+                대한 답이고, 한 번 읽으면 영영 붙어 있을 이유가 없다. 점프가 성공하면 스스로도 물러난다(`clearJumpNotice`). 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`,
+                #1209 리뷰 Medium): 이 상자는 「그 줄이 오면 데려간다」는 의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는 것이다. */}
+            {jumpMissed ? (
+              <View style={styles.notice} testID="jump-missed-dock">
                 <NoticeBlock
                   headline={jumpMissed.headline}
                   detail={jumpMissed.detail}
@@ -2551,6 +2529,7 @@ export default function ConversationScreen({
           isDm={isDirectConversation(channel?.kind)}
           topInset={headerInset}
           nowMs={nowMs}
+          onSearchAll={onOpenSearch}
         />
       ) : null}
       </View>

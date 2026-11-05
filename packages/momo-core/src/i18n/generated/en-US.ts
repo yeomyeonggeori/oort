@@ -3532,6 +3532,26 @@ export const catalog: MessageCatalog = {
       "value": "Results in this conversation · newest first"
     }
   ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "Search all conversations for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’"
+    }
+  ],
   "mobile.convSearch.searching": [
     {
       "type": 0,

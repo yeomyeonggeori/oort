@@ -507,6 +507,8 @@ export const messageKeys = [
   "mobile.convSearch.resultLabel",
   "mobile.convSearch.resultsChannel",
   "mobile.convSearch.resultsDm",
+  "mobile.convSearch.searchAll",
+  "mobile.convSearch.searchAllLabel",
   "mobile.convSearch.searching",
   "mobile.convSearch.tooShort",
   "mobile.ios.cameraUsage",
@@ -1688,6 +1690,10 @@ export const argumentSpecs = {
   },
   "mobile.convSearch.resultsChannel": {},
   "mobile.convSearch.resultsDm": {},
+  "mobile.convSearch.searchAll": {},
+  "mobile.convSearch.searchAllLabel": {
+    "query": "string"
+  },
   "mobile.convSearch.searching": {},
   "mobile.convSearch.tooShort": {},
   "mobile.ios.cameraUsage": {},
@@ -2968,6 +2974,8 @@ export interface MessageArgs {
   "mobile.convSearch.resultLabel": { author: string; snippet: string; when: string };
   "mobile.convSearch.resultsChannel": Record<string, never>;
   "mobile.convSearch.resultsDm": Record<string, never>;
+  "mobile.convSearch.searchAll": Record<string, never>;
+  "mobile.convSearch.searchAllLabel": { query: string };
   "mobile.convSearch.searching": Record<string, never>;
   "mobile.convSearch.tooShort": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;

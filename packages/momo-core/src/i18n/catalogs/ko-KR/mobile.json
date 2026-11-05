@@ -32,6 +32,8 @@
   "mobile.convSearch.recentRow": "다시 찾기: {query}",
   "mobile.convSearch.resultsChannel": "이 채널의 결과 · 최근 순",
   "mobile.convSearch.resultsDm": "이 대화의 결과 · 최근 순",
+  "mobile.convSearch.searchAll": "모든 대화에서",
+  "mobile.convSearch.searchAllLabel": "모든 대화에서 ‘{query}’ 찾기",
   "mobile.convSearch.authorSelf": "나",
   "mobile.convSearch.dayYesterday": "어제",
   "mobile.convSearch.resultLabel": "{author}의 메시지, {when}: {snippet}",
