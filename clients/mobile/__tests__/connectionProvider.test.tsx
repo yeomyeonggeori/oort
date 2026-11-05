@@ -8,7 +8,7 @@ import {fetchWithDeadline} from '@momo/core/lib/http';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React, {useRef} from 'react';
-import {Text} from 'react-native';
+import {AppState, type AppStateStatus, Text} from 'react-native';
 
 import {FixedScheme} from '../src/design/theme';
 import {
@@ -376,5 +376,163 @@ describe('수명', () => {
     view.unmount();
     expect(feedRef.current).toBe(NO_FEED);
     expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+// =============================================================================
+// #5403 - 정상 재연결은 조용히, 복구 표시는 끊김을 본 경우에만 짧게 서고 저절로 걷힌다.
+//
+// 사람이 끊김 띠를 본 적이 없는 재연결(대화 열기 · 앱 복귀)은 아무것도 보이지 않는다. 「다시 연결됐어요」는 이 띠가 끊김을 실제로 그린 뒤에만
+// 서고, 사람 행동(보내기 같은 다음 사건) 없이 2초 안에 걷힌다 - 깨움 시계가 늦거나 사라져도 다음 렌더 · 앱 복귀에서 거둔다.
+// =============================================================================
+
+describe('#5403 — 사람이 본 적 없는 재연결은 아무것도 보이지 않는다', () => {
+  let appState: AppStateStatus = 'active';
+  let appHandlers: Array<(state: AppStateStatus) => void> = [];
+  const appStateDescriptor = Object.getOwnPropertyDescriptor(AppState, 'currentState');
+  const goTo = (state: AppStateStatus) =>
+    act(() => {
+      appState = state;
+      for (const handler of appHandlers) handler(state);
+    });
+
+  /** 대화 화면 띠는 `open` 일 때만 선다(대화를 연 순간 새로 마운트된다). 셸 띠는 늘 선다. */
+  function Opening({open}: {open: boolean}): React.JSX.Element {
+    return (
+      <FixedScheme scheme="light">
+        <RealtimeContext.Provider
+          value={{rail: null, status: 'connected', subscriptionsWanted: true, reconnect}}>
+          <ConnectionProvider feedRef={feedRef}>
+            {open ? <Band /> : null}
+            <ShellConnectionStrip />
+          </ConnectionProvider>
+        </RealtimeContext.Provider>
+      </FixedScheme>
+    );
+  }
+  function Band(): React.JSX.Element {
+    const {band} = useConnectionBand();
+    return (
+      <ConversationHeader
+        title="대화"
+        kind="dm"
+        directory={makeDirectory([])}
+        onBack={() => {}}
+        band={band}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    appState = 'active';
+    appHandlers = [];
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      appHandlers.push(handler as (state: AppStateStatus) => void);
+      return {
+        remove: () => {
+          appHandlers = appHandlers.filter(h => h !== handler);
+        },
+      };
+    });
+    Object.defineProperty(AppState, 'currentState', {configurable: true, get: () => appState});
+  });
+  afterEach(() => {
+    if (appStateDescriptor) Object.defineProperty(AppState, 'currentState', appStateDescriptor);
+    jest.restoreAllMocks();
+  });
+
+  it('앱이 뒤에 있는 동안 끊긴 소켓: 돌아온 순간 띠가 서지 않고, 붙으면 복구 표시도 없다 (앱 알림이 먼저)', async () => {
+    render(<Opening open />);
+    await healthy();
+    await goTo('background');
+    await raw('disconnected');
+    // 뒤에서 흐른 5분: 멈춘 JS 가 늦게 깨어나도 아무도 못 본 시간이다.
+    await tick(300_000);
+    // 시뮬레이터 실측(2026-11-06): 늦은 깨움은 앱 상태 알림(`active`)보다 **먼저** 돌아오고, 그 사이 화면은 이미 앞에 있다. 이 순간 띠가 낡은 「끊김」을
+    // 그리면 안 된다(실측: 약 360ms 동안 「끊김」 띠가 떴다 걷혔다).
+    expect(header()).toBeNull();
+    await goTo('active');
+    await feed({kind: 'resume'});
+    expect(header()).toBeNull();
+    await tick(500);
+    await raw('connected');
+    expect(header()).toBeNull();
+    await tick(RECOVERED_FLASH_MS + 100);
+    expect(header()).toBeNull();
+    expect(strip()).toBeNull();
+  });
+
+  it('전송의 다시 열기가 앱 알림보다 먼저 와도 같다', async () => {
+    render(<Opening open />);
+    await healthy();
+    await goTo('background');
+    await raw('disconnected');
+    await tick(300_000);
+    // 전송이 먼저 듣고 소켓을 다시 연다. 앱 알림은 같은 순간 뒤따른다.
+    await feed({kind: 'resume'});
+    await goTo('active');
+    expect(header()).toBeNull();
+    await tick(500);
+    await raw('connected');
+    expect(header()).toBeNull();
+    await tick(RECOVERED_FLASH_MS + 100);
+    expect(header()).toBeNull();
+  });
+
+  it('끊김이 홈에 있는 동안 지나간 것이면, 막 연 대화의 띠는 복구 표시를 말하지 않는다', async () => {
+    const view = render(<Opening open={false} />);
+    await healthy();
+    await raw('disconnected');
+    await tick(DISPLAY_GRACE_MS + 100);
+    // 셸은 실시간만 끊긴 것을 말하지 않는다 - 사람은 본 적이 없다.
+    expect(strip()).toBeNull();
+    await raw('connected');
+    // 복구 2초가 서 있는 사이에 대화를 연다.
+    await tick(400);
+    view.rerender(<Opening open />);
+    expect(header()).toBeNull();
+    await tick(RECOVERED_FLASH_MS);
+    expect(header()).toBeNull();
+  });
+
+  it('끊김을 이 띠가 실제로 그렸으면 「다시 연결됐어요」가 서고, 사람 행동 없이 2초에 걷힌다', async () => {
+    render(<Opening open />);
+    await healthy();
+    await raw('disconnected');
+    await tick(DISPLAY_GRACE_MS + 100);
+    expect(header()).toHaveTextContent('실시간 연결이 끊겼어요', {exact: false});
+    await raw('connected');
+    expect(header()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    await tick(RECOVERED_FLASH_MS - 1);
+    expect(header()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    await tick(1);
+    expect(header()).toBeNull();
+  });
+
+  it('깨움 시계가 사라져도 다음 렌더에서 거둔다 (보내기 같은 다음 사건을 기다리지 않는다)', async () => {
+    const view = render(<Opening open />);
+    await healthy();
+    await raw('disconnected');
+    await tick(DISPLAY_GRACE_MS + 100);
+    await raw('connected');
+    expect(header()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    // 깨움이 오지 않은 채 시각만 5분 흐른다(멈춘 타이머): 상태는 그대로인데 읽는 시각이 지났다.
+    jest.setSystemTime(Date.now() + 300_000);
+    expect(header()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    view.rerender(<Opening open />);
+    expect(header()).toBeNull();
+  });
+
+  it('깨움 시계가 사라져도 앱 복귀(inactive → active)에서 거둔다', async () => {
+    render(<Opening open />);
+    await healthy();
+    await raw('disconnected');
+    await tick(DISPLAY_GRACE_MS + 100);
+    await raw('connected');
+    expect(header()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    await goTo('inactive');
+    jest.setSystemTime(Date.now() + 300_000);
+    await goTo('active');
+    expect(header()).toBeNull();
   });
 });
