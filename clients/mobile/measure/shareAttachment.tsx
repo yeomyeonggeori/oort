@@ -14,7 +14,7 @@ import {Timeline} from '../src/features/conversation/Timeline';
 import {ShareSheetTouchShield} from '../src/lib/ShareSheetTouchShield';
 import {isShareSheetHeld, useShareSheetHeld} from '../src/lib/shareSheet';
 import type {ScrollLogEntry} from '../src/features/conversation/Timeline';
-import {setServerBase} from '../src/storage/serverBase';
+import {usePinnedServerBase} from './stubServerBase';
 
 // =============================================================================
 // 첨부 내려받기 공유 시트 캡처·계측 표면 (#5207). 진짜 머리·타임라인·컴포저가 선 대화에 파일 카드(WebM 영상)가 맨 끝에 있고, 카드를 누르는 것도
@@ -272,14 +272,13 @@ export function ShareAttachSurface({which}: {which: string}): React.JSX.Element 
     sink({k: 'shield', up: shieldUp});
   }, [shieldUp, sink]);
 
-  // 첫 렌더 전에 한 번: 파일 카드는 눌릴 때 내려받기를 시작한다. 서버 주소를 스텁으로 가리킨다(주소는 MMKV 에 남으므로 표면이 내려갈 때 지운다).
+  // 첫 렌더 전에 한 번: 파일 카드는 눌릴 때 내려받기를 시작한다. 서버 주소를 스텁으로 가리킨다(이 프로세스의 메모리에만 — 저장소에는 스텁이 남지 않는다, #5313).
+  usePinnedServerBase(`http://${stubHost()}`);
   useState(() => {
-    setServerBase(`http://${stubHost()}`);
     probe = {app: AppState.currentState, flips: 0, share: 'never', thread: 0, touch: 0, base: null, y: null, drift: 0, moves: 0, flaps: 0};
     baseline = null;
     return null;
   });
-  useEffect(() => () => setServerBase(null), []);
 
   // 연결 흔들림 한 번 = 끊겼다(복구 시작) 이어짐(복구 끝) — `realtimeConnected` 가 두 번 뒤집힌다. 목록은 이력이 더 남은 방(`reachedStart` 거짓)이라 이 값을 따라 당김 문이 열렸다 닫힌다(#4783·#4949).
   // `flip` 일 때만, 시뮬레이터의 시트는 앱 상태를 바꾸지 않으므로(flips=0) 실기기에서 일어날 수 있는 흔들림을 **모형으로 얹는다**: 시트가 닫힐 때와 앱이 비활성→활성으로 돌아올 때

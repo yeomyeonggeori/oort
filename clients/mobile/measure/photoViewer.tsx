@@ -1,6 +1,6 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import {Settings, Text, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
@@ -9,7 +9,7 @@ import {ConversationHeader} from '../src/features/conversation/ConversationHeade
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {EdgeSwipeBack} from '../src/nav/EdgeSwipeBack';
-import {setServerBase} from '../src/storage/serverBase';
+import {usePinnedServerBase} from './stubServerBase';
 
 // =============================================================================
 // 사진 뷰어 캡처 표면 (#4293). 진짜 머리·타임라인·컴포저가 선 대화에 사진 메시지가 있고, 뷰어를
@@ -33,7 +33,7 @@ import {setServerBase} from '../src/storage/serverBase';
 // 회사 「달무리 스튜디오」)이다 — 공개 저장소의 캡처에 실제 팀원·대화를 쓰지 않는다.
 //
 // 내려받기는 배송되는 코드(`content.ts`)가 그대로 한다. 이 표면이 하는 일은 서버 주소를 스텁으로
-// 가리키는 것 하나다. 주소는 MMKV 에 남으므로 표면이 내려갈 때 지운다.
+// 가리키는 것 하나다. 주소는 **이 프로세스의 메모리에만** 둔다 — 저장소(MMKV)에는 남기지 않는다(`stubServerBase.ts`, #5313).
 // =============================================================================
 
 /**
@@ -166,12 +166,8 @@ function WentBack(): React.JSX.Element {
 }
 
 export function PhotoViewerSurface({which}: {which: string}): React.JSX.Element {
-  // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다.
-  useState(() => {
-    setServerBase(stubBase());
-    return null;
-  });
-  useEffect(() => () => setServerBase(null), []);
+  // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다. 저장소에는 스텁이 남지 않는다(#5313).
+  usePinnedServerBase(stubBase());
   const [wentBack, setWentBack] = useState(false);
   if (wentBack) return <WentBack />;
   // 앱의 셸처럼 대화를 가장자리 뒤로가기로 감싼다 — 뷰어를 연 채 좌측 가장자리에서 쓸어도 그대로

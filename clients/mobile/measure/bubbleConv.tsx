@@ -7,7 +7,7 @@ import {usePalette} from '../src/design/theme';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {ROW_FACE} from '../src/features/conversation/rowFace';
-import {setServerBase} from '../src/storage/serverBase';
+import {usePinnedServerBase} from './stubServerBase';
 
 // =============================================================================
 // 말풍선 대화 + 눌림·착지 강조 면 캡처 표면 (#4300). 실제 `MessageRow` 를 세운다.
@@ -150,17 +150,8 @@ export function BubbleSurface({which}: {which: string}): React.JSX.Element {
   const pressIdx = which === 'press' ? [2] : which === 'press-pair' ? [2, 3] : [];
   const landIdx = which === 'landed' || which === 'fade' ? 2 : -1;
   const photo = which === 'photo' || which === 'photo-sheet';
-  // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다. 주소는 MMKV 에 남으므로 내려갈 때 지운다.
-  useState(() => {
-    if (photo) setServerBase(photoStubBase());
-    return null;
-  });
-  useEffect(
-    () => () => {
-      if (photo) setServerBase(null);
-    },
-    [photo],
-  );
+  // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다. 주소는 이 프로세스의 메모리에만 둔다 — 저장소에는 스텁이 남지 않는다(#5313).
+  usePinnedServerBase(photo ? photoStubBase() : null);
   const entries = photo ? PHOTO_ENTRIES : which.startsWith('arrive') ? ENTRIES.slice(-3) : ENTRIES;
   return (
     <Screen>
