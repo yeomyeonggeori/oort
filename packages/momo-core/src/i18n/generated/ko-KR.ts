@@ -4560,6 +4560,438 @@ export const catalog: MessageCatalog = {
       "value": "이 답글이 달린 스레드 열기"
     }
   ],
+  "search.group.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.group.loadingMore": [
+    {
+      "type": 0,
+      "value": "불러오는 중"
+    }
+  ],
+  "search.group.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.group.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "search.group.moreLabel": [
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " 더 보기"
+    }
+  ],
+  "search.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.input.clearLabel": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "search.input.exitLabel": [
+    {
+      "type": 0,
+      "value": "홈으로 돌아가기"
+    }
+  ],
+  "search.input.placeholder": [
+    {
+      "type": 0,
+      "value": "사람·채널·메시지 찾기"
+    }
+  ],
+  "search.kind.all": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "search.kind.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.kind.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 종류"
+    }
+  ],
+  "search.kind.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.kind.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.picker.agent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "search.picker.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.picker.channelPrivate": [
+    {
+      "type": 0,
+      "value": "비공개 채널"
+    }
+  ],
+  "search.picker.channelPublic": [
+    {
+      "type": 0,
+      "value": "공개 채널"
+    }
+  ],
+  "search.picker.close": [
+    {
+      "type": 0,
+      "value": "대화 고르기 닫기"
+    }
+  ],
+  "search.picker.dm": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지"
+    }
+  ],
+  "search.picker.empty": [
+    {
+      "type": 0,
+      "value": "맞는 대화가 없어요."
+    }
+  ],
+  "search.picker.filterLabel": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.title": [
+    {
+      "type": 0,
+      "value": "어느 대화에서 찾을까요"
+    }
+  ],
+  "search.recent.clearAll": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "search.recent.clearAllLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 모두 지우기"
+    }
+  ],
+  "search.recent.conversations": [
+    {
+      "type": 0,
+      "value": "최근 연 대화"
+    }
+  ],
+  "search.recent.empty": [
+    {
+      "type": 0,
+      "value": "찾고 싶은 사람·채널·메시지를 입력해 보세요."
+    }
+  ],
+  "search.recent.openLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 열기"
+    }
+  ],
+  "search.recent.searches": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "search.recent.searchLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " 다시 찾기"
+    }
+  ],
+  "search.row.agentLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 에이전트"
+    }
+  ],
+  "search.row.agentSubtitle": [
+    {
+      "type": 0,
+      "value": "에이전트 · @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.channelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널"
+    }
+  ],
+  "search.row.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "search.row.messageLabel": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": "의 "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": " 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "search.row.openChannelHint": [
+    {
+      "type": 0,
+      "value": "채널을 열어요."
+    }
+  ],
+  "search.row.openDmHint": [
+    {
+      "type": 0,
+      "value": "대화를 열어요."
+    }
+  ],
+  "search.row.personLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 사람"
+    }
+  ],
+  "search.row.personSubtitle": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.privateChannelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 비공개 채널"
+    }
+  ],
+  "search.scope.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.scope.chosenLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서만 찾는 중, 누르면 범위를 풀어요"
+    }
+  ],
+  "search.scope.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 범위"
+    }
+  ],
+  "search.scope.pick": [
+    {
+      "type": 0,
+      "value": "대화 고르기"
+    }
+  ],
+  "search.scope.pickLabel": [
+    {
+      "type": 0,
+      "value": "찾을 대화 고르기"
+    }
+  ],
+  "search.state.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "search.state.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "search.state.loading": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "search.state.noResults": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.noResultsIn": [
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.pendingChannels": [
+    {
+      "type": 0,
+      "value": "채널과 사람을 불러오는 중이에요."
+    }
+  ],
+  "search.state.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "search.state.scopeNote": [
+    {
+      "type": 0,
+      "value": "내가 속한 채널의 메시지만 찾아요. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요."
+    }
+  ],
+  "search.state.shortHint": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
+  "search.state.shortHintMessages": [
+    {
+      "type": 0,
+      "value": "메시지는 2자 이상 입력하면 찾아요."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,

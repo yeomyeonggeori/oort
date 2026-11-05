@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "70dab75751347947ae6d7ceee82616e90880869d",
+  "baselineHead": "3207897db0a8513361e692a1fa6a75bd282d7e82",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -226,6 +226,10 @@
     "clients/mobile/src/features/profile/statusDraft.ts": 2,
     "clients/mobile/src/features/readState/useViewingBeat.ts": 3,
     "clients/mobile/src/features/releaseNotes/BulletLine.tsx": 3,
+    "clients/mobile/src/features/search/ConversationPickerSheet.tsx": 4,
+    "clients/mobile/src/features/search/SearchRows.tsx": 34,
+    "clients/mobile/src/features/search/localSearch.ts": 9,
+    "clients/mobile/src/features/search/searchRecents.ts": 3,
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": 5,
     "clients/mobile/src/features/sidebar/DmClosedSheet.tsx": 2,
     "clients/mobile/src/features/sidebar/channelRowActions.ts": 3,
@@ -305,7 +309,7 @@
     "clients/mobile/src/screens/HostedConnectionDetailScreen.tsx": 23,
     "clients/mobile/src/screens/HostedConnectionsScreen.tsx": 17,
     "clients/mobile/src/screens/InboxScreen.tsx": 89,
-    "clients/mobile/src/screens/SearchScreen.tsx": 20,
+    "clients/mobile/src/screens/SearchScreen.tsx": 48,
     "clients/mobile/src/screens/SettingsScreen.tsx": 1,
     "clients/mobile/src/screens/SidebarScreen.tsx": 107,
     "clients/mobile/src/screens/TeamBoardScreen.tsx": 27,
