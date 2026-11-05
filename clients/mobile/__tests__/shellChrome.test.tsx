@@ -867,7 +867,7 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     spy.mockRestore();
   });
 
-  it('+ 메뉴: 좌우 20 · 탭바 위 8 · 잉크 그릇 반경 20 · 안 여백 8 · 행 최소 54 (≥44)', async () => {
+  it('+ 메뉴: 좌우 20 · 탭바 위 8 · 표면(surface) 그릇 반경 20 · 안 여백 8 · 행 최소 54 (≥44)', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -881,7 +881,9 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
       gap: 8,
       borderRadius: 20,
     });
-    expect([lightPalette.primary, darkPalette.primary]).toContain(menu.backgroundColor);
+    // 떠 있는 판은 surface 다 — 주 행동 색(primary, 다크에서 밝은 잉크)이 아니다(#5329, `menuTheme5329.test.tsx` 가 전 테마·모드를 잰다).
+    expect([lightPalette.surface, darkPalette.surface]).toContain(menu.backgroundColor);
+    expect([lightPalette.primary, darkPalette.primary]).not.toContain(menu.backgroundColor);
     for (const key of ['dm', 'ai']) {
       const row = flat(`plus-menu-${key}`);
       expect([key, row.minHeight]).toEqual([key, PLUS_MENU.rowHeight]);
@@ -1092,13 +1094,13 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
     expect(contrast(p.onPrimary, p.primary)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('메뉴 글자·아이콘(onPrimary)이 **렌더된** 행 채움과 눌림 위에서 4.5:1', async () => {
+  it('메뉴 글자·아이콘(text)이 **렌더된** 행 채움과 눌림 위에서 4.5:1', async () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('shell-plus'));
     // 렌더된 행의 채움을 읽는다(팔레트는 시험이 고른 모드와 다를 수 있어, 채움의
-    // 알파만 가져와 이 조합의 onPrimary·primary 로 다시 합성한다).
+    // 알파만 가져와 이 조합의 text·surface 로 다시 합성한다).
     // 합성 `Pressable` 의 style 함수를 두 상태로 불러 읽는다.
     const pressable = screen
       .UNSAFE_getAllByProps({testID: 'plus-menu-dm'})
@@ -1114,8 +1116,8 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
     ] as const) {
       const alpha = String(fill).slice(7, 9);
       expect(alpha).toMatch(/^[0-9a-f]{2}$/i);
-      const bg = over(`${p.onPrimary}${alpha}`, p.primary);
-      expect([state, contrast(p.onPrimary, bg) >= 4.5]).toEqual([state, true]);
+      const bg = over(`${p.text}${alpha}`, p.surface);
+      expect([state, contrast(p.text, bg) >= 4.5]).toEqual([state, true]);
     }
   });
 });
