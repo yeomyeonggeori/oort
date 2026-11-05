@@ -2794,6 +2794,9 @@ export function Composer({
         {shown ? (
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
+            // 터치는 자식(「@」)만 받는다 (#5325). 이 줄은 펼침(자판이 올라온 때)에만 서고 알약 폭 전체인데, 알약 바닥에 절대 배치된 + 원은 이 줄보다 **앞** 형제라 그 위에 그려진 이 줄이 + 의
+            // 터치를 삼켰다 — 자판이 올라온 채 +를 누르면 아무 일도 안 났다(시뮬레이터 실측: Maestro 탭은 COMPLETED 인데 첨부 메뉴가 안 열림, 이 한 줄로 열림). 보내기·표현 단추는 이 줄 **뒤**에 있어 멀쩡했다.
+            pointerEvents="box-none"
             testID="composer-tools">
             {TOOL_SLOTS.includes('mention') ? (
               <Pressable
