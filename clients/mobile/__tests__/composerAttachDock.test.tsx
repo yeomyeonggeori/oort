@@ -152,12 +152,13 @@ describe('미리보기는 입력창(알약) 안, 글 줄 위 (#5325 ②)', () =>
     expect(pill.getByTestId('attachment-draft-thumb')).toBeTruthy();
   });
 
-  it('여러 장이면 가로 한 줄이다 — 줄바꿈 없이 밀어서 넘기고, 자판이 올라온 채로도 ✕ 가 첫 탭에 눌리도록 `always` 다', () => {
+  it('여러 장이면 가로 한 줄이다 — 줄바꿈 없이 밀어서 넘기고, 자판이 올라온 채로도 ✕ 가 첫 탭에 눌리게 `never`(기본)가 아니다', () => {
     mount();
     pickPhotos(3);
     const list = screen.getByTestId('attachment-tray-list');
     expect(list.props.horizontal).toBe(true);
-    expect(list.props.keyboardShouldPersistTaps).toBe('always');
+    // 기본(`never`)이면 자판이 올라온 때의 첫 탭은 자판만 내리고 자식(✕)에게 오지 않는다. `always`·`handled` 는 ✕ 가 탭을 처리하므로 둘 다 첫 탭에 눌린다.
+    expect(['always', 'handled']).toContain(list.props.keyboardShouldPersistTaps);
     expect(flat(list.props.contentContainerStyle).flexWrap).toBeUndefined();
     expect(within(screen.getByTestId('composer-pill')).getAllByTestId('attachment-draft')).toHaveLength(3);
   });

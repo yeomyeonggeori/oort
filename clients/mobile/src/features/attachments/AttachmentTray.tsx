@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -69,6 +70,12 @@ export function AttachmentTray({
   const styles = useStyles(buildStyles);
   const blocked = sendBlockCopy(drafts);
   const blockReason = sendBlockReason(drafts);
+  // 파일·실패 칩은 가로 줄 안에서도 **줄 폭 하나**를 쓴다(이름·상태 문장이 좁은 칸에서 네 줄로 접히지 않게). 줄 폭 = 창 − 알약의 바깥 여백(도크 가장자리) − 안쪽 좌우 `inset`. 다음 칩은 오른쪽에서 비쳐 민다.
+  const {width: windowWidth} = useWindowDimensions();
+  const fileWidth = Math.max(
+    PILL_THUMB,
+    windowWidth - 2 * CONV.composerDockInset - 2 * inset,
+  );
 
   // 보조기술이 듣는 줄 (design-review High-2). `accessibilityLiveRegion`은
   // Android 전용이라 이 앱의 1차 플랫폼(iOS)에서는 어떤 전이도 낭독되지
@@ -140,6 +147,7 @@ export function AttachmentTray({
               <DraftRow
                 key={draft.localId}
                 draft={draft}
+                fileWidth={fileWidth}
                 onRemove={onRemove}
                 onRetry={onRetry}
               />
@@ -204,10 +212,12 @@ export function AttachmentTray({
  */
 function DraftRow({
   draft,
+  fileWidth,
   onRemove,
   onRetry,
 }: {
   draft: AttachmentDraft;
+  fileWidth: number;
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }): React.JSX.Element {
@@ -302,7 +312,11 @@ function DraftRow({
   return (
     <View
       accessibilityLabel={`${label}. ${statusText}`}
-      style={[styles.fileChip, draft.status === 'failed' && styles.fileChipFailed]}
+      style={[
+        styles.fileChip,
+        {width: fileWidth},
+        draft.status === 'failed' && styles.fileChipFailed,
+      ]}
       testID="attachment-draft"
     >
       <View style={styles.icon}>
@@ -362,8 +376,6 @@ function useUploadReasonFor(): UploadReasonFor {
 const PILL_THUMB = ATTACHMENT_CHIP_THUMB - space.sm;
 /** 썸네일 모서리 ✕ 의 보이는 지름(옛 28). 누르는 면은 `slopTo` 가 44 로 채운다. */
 const REMOVE_FACE = space.lg + space.xs;
-/** 가로 줄 안 파일 칩의 폭 — 줄이 한없이 늘지 않게 못 박고, 이름은 한 줄로 줄인다(옆 칩이 비쳐 밀 수 있음을 알린다). */
-const FILE_CHIP_WIDTH = ATTACHMENT_CHIP_THUMB * 4;
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
@@ -408,11 +420,12 @@ const buildStyles = (color: Palette) =>
     thumbBusy: {opacity: 0.7},
     fileChip: {
       minHeight: PILL_THUMB,
-      width: FILE_CHIP_WIDTH,
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
       overflow: 'hidden',
+      // 알약 안의 둥근 칩이라 글이 테두리에 붙지 않게 위아래 숨을 둔다(옛 도크 줄에서는 이름 줄이 윗선에 닿아 있었다).
+      paddingVertical: space.xs,
       paddingLeft: space.sm,
       borderRadius: radius.md,
       backgroundColor: color.surface,
