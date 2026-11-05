@@ -315,6 +315,16 @@ describe("앱이 뒤에 갔다 온 틈은 사람이 본 끊김이 아니다 (#54
     expect(state.recoveredUntil).toBeNull();
   });
 
+  it("뒤에 있는 동안은 시계가 멈춘다: 늦은 깨움이 앞으로 돌아온 순간(앱 알림보다 먼저) 읽어도 낡은 「끊김」을 그리지 않는다", () => {
+    // 시뮬레이터 실측: 뒤에서 14초 있다 돌아오면 늦은 깨움이 앱 상태 알림보다 먼저 울려, 화면이 앞에 온 약 360ms 동안 「끊김」 띠가 떴다 걷혔다.
+    const state = step(leftWhileDisconnected(), tick(T0 + 300_000));
+    expect(state.view.phase).toBe("quiet");
+    expect(presentConnection(state.view, isRecovered(state))).toBeNull();
+    // 뒤로 가기 전에 보던 것은 그대로 얼어 있다: 이미 「연결 중」이 서 있었다면 돌아온 순간까지 그 모습이다.
+    const seen = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 2_500), visibility(T0 + 3_000, false), tick(T0 + 300_000));
+    expect(seen.view.phase).toBe("connecting");
+  });
+
   it("전송의 resume 이 앱 상태 알림보다 먼저 와도 결과가 같다 (순서 무관)", () => {
     const base = leftWhileDisconnected();
     const a = step(base, tick(T0 + 300_000), visibility(T0 + 300_010, true), resume(T0 + 300_010));

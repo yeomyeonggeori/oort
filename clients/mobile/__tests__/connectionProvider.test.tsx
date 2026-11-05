@@ -448,6 +448,9 @@ describe('#5403 — 사람이 본 적 없는 재연결은 아무것도 보이지
     await raw('disconnected');
     // 뒤에서 흐른 5분: 멈춘 JS 가 늦게 깨어나도 아무도 못 본 시간이다.
     await tick(300_000);
+    // 시뮬레이터 실측(2026-11-06): 늦은 깨움은 앱 상태 알림(`active`)보다 **먼저** 돌아오고, 그 사이 화면은 이미 앞에 있다. 이 순간 띠가 낡은 「끊김」을
+    // 그리면 안 된다(실측: 약 360ms 동안 「끊김」 띠가 떴다 걷혔다).
+    expect(header()).toBeNull();
     await goTo('active');
     await feed({kind: 'resume'});
     expect(header()).toBeNull();

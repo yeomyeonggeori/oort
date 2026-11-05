@@ -25,9 +25,10 @@ import { CONNECTING_BAND_DELAY_MS, RECOVERED_FLASH_MS } from "./thresholds";
 //      「연결 중」만 보였거나 침묵이던 틈은 말없이 사라진다.
 //   3. 카드와 띠 중 어느 쪽이 말하나(`showsConnectionCard`·`showsConnectionBanner`).
 //   4. **사람이 보지 못한 끊김은 끊김이 아니다**(#5403). 앱이 뒤에 가 있는 동안(`visibility`)은 화면을 보는 사람이 없다. 그
-//      시간의 판정은 「끊김이 보였다」 기억도 복구 표시도 만들지 않고, 돌아온 순간 소켓이 붙어 있지 않으면 틈을 **새 침묵**으로
-//      다시 시작한다(뒤에서 보낸 시간은 복구에 쓴 시간이 아니다). 복구 표시는 읽는 쪽이 시각을 건네면 깨움 없이도 거둔다
-//      (`isRecovered(state, now)`): 깨움이 늦거나 사라져도 보내기 같은 다음 사건을 기다리지 않는다.
+//      시간의 판정은 「끊김이 보였다」 기억도 복구 표시도 만들지 않고, **시계가 뒤로 간 시각에서 멈춘다**(`hiddenAt`: 늦게 깨어난 시계가 오래된
+//      틈을 「끊김」으로 읽어도, 앱이 앞에 온 순간 앱 상태 알림이 오기까지 낡은 띠가 그려지지 않는다 - 시뮬레이터 실측). 돌아온 순간 소켓이 붙어
+//      있지 않으면 틈을 **새 침묵**으로 다시 시작한다(뒤에서 보낸 시간은 복구에 쓴 시간이 아니다). 복구 표시는 읽는 쪽이 시각을 건네면 깨움
+//      없이도 거둔다(`isRecovered(state, now)`): 깨움이 늦거나 사라져도 보내기 같은 다음 사건을 기다리지 않는다.
 //
 // 화면이 읽는 것은 `view`와 `isRecovered`뿐이다. 보이는 것이 달라지지 않은 사건(대부분의 REST 응답)은 이전 상태
 // 객체를 그대로 돌려줘서, 이 값을 읽는 소비자가 응답 한 건마다 다시 그려지지 않는다.
@@ -40,8 +41,12 @@ export interface ConnectionState {
   readonly sawDown: boolean;
   /** 「다시 연결됐어요」가 이 시각(epoch ms)까지 선다. 서 있지 않으면 null. */
   readonly recoveredUntil: number | null;
-  /** 사람이 화면을 보고 있나. 앱이 뒤에 가 있는 동안은 아니다(#5403). 알리지 않는 호출자(웹)는 늘 참이다. */
-  readonly visible: boolean;
+  /**
+   * 앱이 뒤로 간 시각(epoch ms). 앞에 있으면 null이고, 알리지 않는 호출자(웹)는 늘 null이다(#5403). 뒤에 있는 동안은 화면을 보는 사람이 없어서 판정의
+   * 시계가 이 시각에서 멈춘다: 늦게 깨어난 시계가 「틈이 오래됐다」로 읽어도 모습은 뒤로 가던 순간 그대로다(앱이 앞에 오는 순간 화면은 이미 보이는데 앱
+   * 상태 알림은 한 박자 늦게 온다 - 그 사이에 낡은 「끊김」이 그려지지 않게).
+   */
+  readonly hiddenAt: number | null;
 }
 
 export type ConnectionAction =
@@ -69,11 +74,12 @@ function evaluate(
   at: number,
   sawDown: boolean,
   recoveredUntil: number | null,
-  visible: boolean
+  hiddenAt: number | null
 ): ConnectionState {
-  const view = deriveConnectionState(input, at);
+  // 뒤에 있는 동안은 시계가 멈춘다: 뒤로 간 시각 이후로 흐른 시간은 아무도 보지 않았다.
+  const view = deriveConnectionState(input, hiddenAt === null ? at : Math.min(at, hiddenAt));
   // 아무도 보지 않는 동안의 판정은 「끊김이 보였다」가 아니다. 기억도 복구 표시도 만들지 않는다.
-  if (!visible) return { input, view, sawDown: false, recoveredUntil: null, visible };
+  if (hiddenAt !== null) return { input, view, sawDown: false, recoveredUntil: null, hiddenAt };
   let nextSawDown = sawDown;
   let until = recoveredUntil !== null && at < recoveredUntil ? recoveredUntil : null;
   switch (view.phase) {
@@ -98,11 +104,11 @@ function evaluate(
     case "quiet":
       break;
   }
-  return { input, view, sawDown: nextSawDown, recoveredUntil: until, visible };
+  return { input, view, sawDown: nextSawDown, recoveredUntil: until, hiddenAt };
 }
 
 export function initialConnectionState(at: number, deviceOnline: boolean | null): ConnectionState {
-  return evaluate(initialConnectionInput(at, deviceOnline), at, false, null, true);
+  return evaluate(initialConnectionInput(at, deviceOnline), at, false, null, null);
 }
 
 /** 화면에 보이는 것이 같은가. 시각(`nextChangeAt`)도 보이는 것의 일부다: 같으면 타이머를 다시 걸 일이 없다. */
@@ -127,7 +133,7 @@ function keepIfSame(state: ConnectionState, next: ConnectionState): ConnectionSt
   return next.input === state.input &&
     next.sawDown === state.sawDown &&
     next.recoveredUntil === state.recoveredUntil &&
-    next.visible === state.visible &&
+    next.hiddenAt === state.hiddenAt &&
     sameView(next.view, state.view)
     ? state
     : next;
@@ -146,18 +152,18 @@ function restartedForReturn(input: ConnectionInput, at: number): ConnectionInput
 export function reduceConnection(state: ConnectionState, action: ConnectionAction): ConnectionState {
   if (action.kind === "visibility") {
     if (!action.visible) {
-      // 사람이 앱을 떠났다. 이 시각부터의 판정은 아무도 보지 않는다.
-      return keepIfSame(state, evaluate(state.input, action.at, false, null, false));
+      // 사람이 앱을 떠났다. 이 시각부터의 판정은 아무도 보지 않고 시계는 여기서 멈춘다(이미 뒤에 있었다면 처음 떠난 시각이 이어진다).
+      return keepIfSame(state, evaluate(state.input, action.at, false, null, state.hiddenAt ?? action.at));
     }
-    if (state.visible) {
+    if (state.hiddenAt === null) {
       // 뒤로 간 적이 없다(알림 센터를 당긴 정도): 아무것도 다시 시작하지 않고 시각만 따라간다.
-      return keepIfSame(state, evaluate(state.input, action.at, state.sawDown, state.recoveredUntil, true));
+      return keepIfSame(state, evaluate(state.input, action.at, state.sawDown, state.recoveredUntil, null));
     }
     // 돌아왔다: 새 시작이다. 뒤에서 본 적 없는 끊김 기억·복구 표시는 이미 비어 있고, 틈은 새 침묵으로 시작한다.
-    return keepIfSame(state, evaluate(restartedForReturn(state.input, action.at), action.at, false, null, true));
+    return keepIfSame(state, evaluate(restartedForReturn(state.input, action.at), action.at, false, null, null));
   }
   const input = action.kind === "event" ? foldConnectionEvent(state.input, action.event) : state.input;
-  return keepIfSame(state, evaluate(input, action.at, state.sawDown, state.recoveredUntil, state.visible));
+  return keepIfSame(state, evaluate(input, action.at, state.sawDown, state.recoveredUntil, state.hiddenAt));
 }
 
 /**
