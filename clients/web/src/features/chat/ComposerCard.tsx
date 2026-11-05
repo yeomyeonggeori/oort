@@ -143,8 +143,8 @@ export function ComposerTools({
         size="icon"
         className={cn("tap-target shrink-0", settled)}
         disabled={toolsDisabled}
-        aria-label="이모지 넣기"
-        title="이모지 넣기"
+        aria-label="이모티콘 넣기"
+        title="이모티콘 넣기"
         data-testid={`${testIdPrefix}-emoji-trigger`}
         onClick={(event) => onOpenEmoji(event.currentTarget)}
       >

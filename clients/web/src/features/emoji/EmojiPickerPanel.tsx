@@ -267,7 +267,7 @@ export function EmojiPickerPanel({
           autoCorrect="off"
           spellCheck={false}
           autoFocus={false}
-          aria-label="이모지 검색"
+          aria-label="이모티콘 검색"
           data-testid="emoji-search"
           className="min-w-0 flex-1"
           {...(searching
@@ -350,7 +350,7 @@ export function EmojiPickerPanel({
         // 끌리는 상자로 바꾸려면 컴포넌트가 data-scroll-x를 선언해야 한다.
         <div
           role="tablist"
-          aria-label="이모지 분류"
+          aria-label="이모티콘 분류"
           id={tablistId}
           onKeyDown={onTabKeyDown}
           className="flex flex-wrap gap-1"
@@ -432,7 +432,7 @@ export function EmojiPickerPanel({
           // 오늘은 도달 불가(빈도 탭은 32종 시드로 폴백)지만, 빈 목록이 문장
           // 없는 상자로 출하되지 않게 자리를 지킨다.
           <EmptyInvite
-            headline="표시할 이모지가 없습니다"
+            headline="표시할 이모티콘이 없습니다"
             className="px-0 py-4"
             testId="emoji-grid-empty"
           />
@@ -440,7 +440,7 @@ export function EmojiPickerPanel({
           <div
             id={listId}
             role={searching ? "listbox" : "menu"}
-            aria-label={searching ? "검색 결과" : "이모지"}
+            aria-label={searching ? "검색 결과" : "이모티콘"}
             onKeyDown={onGridKeyDown}
             className="emoji-grid"
           >
@@ -511,7 +511,7 @@ export function EmojiPickerPanel({
             ) : null}
           </>
         ) : (
-          <span className="text-meta text-ink-muted">이모지를 고르세요</span>
+          <span className="text-meta text-ink-muted">이모티콘을 고르세요</span>
         )}
       </div>
     </div>
