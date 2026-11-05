@@ -201,6 +201,27 @@ describe("documentActivity 입력 구독", () => {
     expect(seen).toHaveBeenCalledTimes(2);
   });
 
+  it("멈춰 있는 포인터 자리의 이동(레이아웃·스크롤이 바뀔 때 브라우저가 쏘는 가짜 이동)은 입력이 아니고, 좌표가 바뀐 이동만 센다", async () => {
+    const seen = vi.fn();
+    const off = documentActivity.subscribeInput(seen);
+    const move = (screenX: number, screenY: number) =>
+      window.dispatchEvent(new MouseEvent("pointermove", { screenX, screenY }));
+    move(10, 10);
+    expect(seen).toHaveBeenCalledTimes(1);
+    // 간격(1초)이 지나도 같은 자리면 사람이 움직인 것이 아니다: 스트리밍 답이 목록을 밀 때마다 「쓰는 중」이 되면 안 된다.
+    await vi.advanceTimersByTimeAsync(ACTIVITY_INPUT_THROTTLE_MS * 3);
+    move(10, 10);
+    move(10, 10);
+    expect(seen).toHaveBeenCalledTimes(1);
+    move(11, 10);
+    expect(seen).toHaveBeenCalledTimes(2);
+    // 같은 자리에서도 키·클릭은 사람의 손이다.
+    await vi.advanceTimersByTimeAsync(ACTIVITY_INPUT_THROTTLE_MS);
+    window.dispatchEvent(new KeyboardEvent("keydown"));
+    expect(seen).toHaveBeenCalledTimes(3);
+    off();
+  });
+
   it("안쪽 핸들러가 전파를 끊어도 입력으로 센다(capture)", () => {
     const seen = vi.fn();
     const off = documentActivity.subscribeInput(seen);

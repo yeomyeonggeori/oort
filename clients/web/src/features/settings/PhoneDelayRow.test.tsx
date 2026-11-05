@@ -202,6 +202,20 @@ describe("PhoneDelayRow", () => {
     expect(q("phone-delay-save-error")).toBeNull();
   });
 
+  it("저장이 실패하고 서버 값을 다시 읽는 것도 실패해도 칸은 마지막으로 아는 값으로 남는다", async () => {
+    savePhoneDelay.mockRejectedValue(new ApiError(500, "boom"));
+    await mount();
+    await settled();
+    fetchPhoneDelay.mockRejectedValue(new ApiError(503, "busy"));
+    await choose(300);
+    await vi.waitFor(() => expect(q("phone-delay-save-error")).not.toBeNull());
+    // 되돌린 뒤 서버 값을 다시 읽으려다 실패했다: 읽기 실패 줄이 칸을 대신하지 않는다.
+    await vi.waitFor(() => expect(fetchPhoneDelay).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(q("phone-delay-error")).toBeNull();
+    expect(radio(60).checked).toBe(true);
+  });
+
   it("옛 서버(404·405)면 칸을 그리지 않는다. 403(열 수 없는 계정)도 같다", async () => {
     for (const status of [404, 405, 403]) {
       fetchPhoneDelay.mockRejectedValue(new ApiError(status, "no such route"));

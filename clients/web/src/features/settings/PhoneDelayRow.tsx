@@ -105,27 +105,28 @@ export function PhoneDelayRow({
   // 옛 서버(404·405)와 이 계정에 닫힌 설정(403)은 고칠 수 있는 실패가 아니라 열 수 없는 칸이다.
   if (delay.isError && hidesPhoneDelayRow(delay.error)) return null;
 
-  if (delay.isPending) {
+  // 아는 값이 아직 없을 때만 막대·실패 줄이다. 값이 있는 채 다시 읽기가 실패하면(저장 실패 뒤의 맞추기·창 포커스 복귀) 마지막으로 아는 값을 그대로 보인다.
+  const value = delay.data;
+  if (value === undefined) {
+    if (delay.isError) {
+      return (
+        <CardBody>
+          <InlineBanner
+            separator={false}
+            className="px-0"
+            message={formatMessage("settings.notifications.phoneDelayLoadFailed")}
+            actionLabel={formatMessage("settings.notifications.phoneDelayRetry")}
+            onAction={() => void delay.refetch()}
+            testId="phone-delay-error"
+          />
+        </CardBody>
+      );
+    }
     return (
       <CardBody>
         <div data-testid="phone-delay-loading">
           <Skeleton ready={false} rows={1} />
         </div>
-      </CardBody>
-    );
-  }
-
-  if (delay.isError) {
-    return (
-      <CardBody>
-        <InlineBanner
-          separator={false}
-          className="px-0"
-          message={formatMessage("settings.notifications.phoneDelayLoadFailed")}
-          actionLabel={formatMessage("settings.notifications.phoneDelayRetry")}
-          onAction={() => void delay.refetch()}
-          testId="phone-delay-error"
-        />
       </CardBody>
     );
   }
@@ -148,7 +149,7 @@ export function PhoneDelayRow({
           legend={label}
           name="phone-delay"
           options={options}
-          value={toChoice(delay.data)}
+          value={toChoice(value)}
           disabled={offline}
           describedBy={offline ? `${descriptionId} ${offlineReasonId}` : descriptionId}
           onValueChange={(choice) => save.mutate(fromChoice(choice))}
