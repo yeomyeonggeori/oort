@@ -1130,8 +1130,8 @@ export function Composer({
                 variant="ghost"
                 size="icon"
                 className="tap-target shrink-0"
-                aria-label="이모지 넣기"
-                title="이모지 넣기"
+                aria-label="이모티콘 넣기"
+                title="이모티콘 넣기"
                 data-testid="composer-emoji-trigger"
                 onClick={(event) => {
                   autocomplete.close();

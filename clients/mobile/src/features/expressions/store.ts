@@ -111,18 +111,26 @@ export function createPhoneExpressionStore(
     images.clear();
     pending.clear();
   };
+  /**
+   * 목록을 읽는다. **이미 읽은 목록이 있으면 읽는 동안에도 그대로 보인다**(#5330): 앞 판은 앞서 비우고 `loading` 을 내보내서
+   * 앱이 앞으로 돌아올 때·연결이 다시 이어질 때·변경 알림이 올 때마다 모든 탭이 「불러오는 중이에요」로 바뀌었다. 지금은
+   * 읽은 목록(`cache`)이 곧 캐시이고, 답이 오면 한 번에 바꿔 끼운다(코어 `applyExpressionList` — 전체 읽기는 `reset` 목록이라
+   * 쌓인 캐시 위에서도 그대로 적용되고, 지워지거나 그림이 바뀐 등록의 id 를 `evictImageIds` 로 돌려준다).
+   * 비어 있는 채로 처음 읽을 때(앱을 막 켰을 때·오류 뒤 다시 시도)만 `loading` 이다.
+   *
+   * 실패는 그대로 닫힌다: 틀린 답·실패는 목록을 비우고 `error` 다. 고르는 순간(`choose`)이 이 상태로 「지금도 있는 표현인가」를
+   * 확인하므로, 읽지 못했는데 낡은 목록으로 보내는 일은 없다.
+   */
   const refresh = async (full = false): Promise<void> => {
     if (disposed || !online) return;
-    if (full) {
-      evict();
-      cache = emptyExpressionCache(workspaceId, memberId);
-      publish('loading');
-    }
+    if (cache.version === null && snapshot.state !== 'loading') publish('loading');
     const started = epoch;
     try {
+      // 전체 읽기는 `since` 없이 — 서버가 `reset` 목록을 준다. 부분 읽기는 읽은 버전 뒤의 변경만 받는다.
+      const since = !full && cache.version !== null ? `?since=${cache.version}` : '';
       const response = await transport.request({
         method: 'GET',
-        path: base + (cache.version === null ? '' : `?since=${cache.version}`),
+        path: base + since,
       });
       if (disposed || started !== epoch) return;
       if (
@@ -178,11 +186,14 @@ export function createPhoneExpressionStore(
       }
       publish();
     },
-    /** A change notice revokes media immediately, before the delta arrives. */
+    /**
+     * A change notice revokes media immediately, before the delta arrives. 목록은 그대로 두고(#5330) 그림 파일만 걷는다 —
+     * 숨겨진 등록의 그림은 걷힌 뒤 서버가 다시 주지 않으므로 거기서 닫히고, 이름 목록이 `loading` 으로 비는 일은 없다.
+     */
     changed() {
       if (disposed || !online) return;
       evict();
-      publish('loading');
+      publish();
       void refresh();
     },
     setOnline(value: boolean) {

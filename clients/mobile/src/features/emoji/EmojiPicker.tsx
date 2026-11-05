@@ -51,6 +51,7 @@ import {emojiHaptic} from './haptics';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {loadPhoneEmojiCatalog} from './catalog';
+import {rememberedEmojiCatalog, rememberEmojiCatalog} from './catalogMemory';
 import {emojiFrequency, emojiSkinTone} from './preferences';
 
 /**
@@ -84,7 +85,8 @@ export interface EmojiPickerProps {
 
 type Tab = (typeof EMOJI_CATEGORIES)[number]['id'] | 'team';
 const TABS = [...EMOJI_CATEGORIES, {id: 'team', label: '우리 팀'}] as const;
-const ROW_HEIGHT = TOUCH_TARGET + space.xs;
+// 줄 사이 틈은 `space.sm`(8) — 앞 판의 `space.xs`(4)는 이모티콘 칸이 위아래로 붙어 보였다(#5330).
+const ROW_HEIGHT = TOUCH_TARGET + space.sm;
 
 /** Sheet body shared by reactions and status. The caller owns the one PageSheet. */
 export function EmojiPicker({
@@ -107,7 +109,10 @@ export function EmojiPicker({
   // 검색어를 가진 쪽이 지운다: 독립 고르개는 제 상태, 시트에 끼워진 본문은 시트의 검색어(#5065).
   const clearQuery = embedded ? embedded.onClearQuery : () => setQuery('');
   const [tab, setTab] = useState<Tab>('frequent');
-  const [catalog, setCatalog] = useState<CatalogEmoji[] | null>(null);
+  // 이미 푼 목록이 있으면 첫 그림부터 격자가 선다(#5330) — 탭을 옮겼다 돌아오거나 시트를 다시 열 때 「불러오는 중」을 그리지 않는다.
+  const [catalog, setCatalog] = useState<CatalogEmoji[] | null>(
+    rememberedEmojiCatalog,
+  );
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const ranking = useSyncExternalStore(
@@ -127,6 +132,7 @@ export function EmojiPicker({
     setFailed(false);
     loadPhoneEmojiCatalog()
       .then(entries => {
+        rememberEmojiCatalog(entries);
         if (alive) setCatalog(entries);
       })
       .catch(() => {
@@ -168,13 +174,14 @@ export function EmojiPicker({
   };
   // 같은 시트의 다른 탭(`expressions.sheet.noMatch` 「찾는 표현이 없어요」)과 말씨를 맞춘다: 해요체(#5065, design-review L1).
   // 네 문장이 한 삼항식이라 하나만 바꾸면 같은 탭 안에서 말씨가 다시 갈린다.
+  // 「이모티콘」 한 이름(owner 11-05 #5330): 이 본문은 표현 시트의 「기본」 탭에도 서므로 시트 안에서 「이모지」가 다시 보이지 않게 한다.
   const empty = failed
-    ? '이모지 목록을 불러오지 못했어요.'
+    ? '이모티콘 목록을 불러오지 못했어요.'
     : catalog === null
-    ? '이모지 목록을 불러오는 중이에요.'
+    ? '이모티콘 목록을 불러오는 중이에요.'
     : catalog.length === 0
-    ? '이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.'
-    : '찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.';
+    ? '이 기기에서 쓸 수 있는 이모티콘이 없어요. OS를 업데이트해 주세요.'
+    : '찾는 이모티콘이 없어요. 다른 이름으로 검색해 보세요.';
 
   return (
     <>
@@ -364,7 +371,12 @@ export function EmojiPicker({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    controls: {paddingHorizontal: SAFE_GUTTER, gap: space.xs},
+    // 분류 칩·피부색 줄·격자 사이의 틈: 칩 줄과 피부색 줄은 `space.sm`, 줄 전체와 격자 사이도 `space.sm`(#5330, owner 캡처에서 붙어 보였다).
+    controls: {
+      paddingHorizontal: SAFE_GUTTER,
+      paddingBottom: space.sm,
+      gap: space.sm,
+    },
     placeholder: {color: color.textMuted},
     search: {
       minHeight: TOUCH_TARGET,

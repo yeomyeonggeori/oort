@@ -1778,7 +1778,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.backLabel": [
     {
       "type": 0,
-      "value": "팀 이모지 목록으로 돌아가기"
+      "value": "이모티콘 목록으로 돌아가기"
     }
   ],
   "expressions.add.import": [
@@ -1790,7 +1790,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.importDetail": [
     {
       "type": 0,
-      "value": "내 사진이나 링크로 팀 이모지를 등록해요"
+      "value": "내 사진이나 링크로 이모티콘을 등록해요"
     }
   ],
   "expressions.add.make": [
@@ -1966,7 +1966,7 @@ export const catalog: MessageCatalog = {
   "expressions.import.nameTaken": [
     {
       "type": 0,
-      "value": "표준 이모지와 겹치는 이름이에요. 다른 이름을 써 주세요."
+      "value": "기본 이모티콘과 겹치는 이름이에요. 다른 이름을 써 주세요."
     }
   ],
   "expressions.import.offline": [
@@ -2072,13 +2072,13 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "팀 이모지"
+      "value": "작은 이모티콘"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 작은 이모티콘이에요."
     }
   ],
   "expressions.kind.hintSticker": [
@@ -2096,7 +2096,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "이모티콘"
+      "value": "큰 이모티콘"
     }
   ],
   "expressions.make.agent": [
@@ -2478,12 +2478,6 @@ export const catalog: MessageCatalog = {
       "value": "팀 표현 보기"
     }
   ],
-  "expressions.panel.viewTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지"
-    }
-  ],
   "expressions.photo.agentInstead": [
     {
       "type": 0,
@@ -2645,7 +2639,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.errorName": [
     {
       "type": 0,
-      "value": "이름을 확인해 주세요. 표준 이모지와 겹치는 이름은 쓸 수 없어요."
+      "value": "이름을 확인해 주세요. 기본 이모티콘과 겹치는 이름은 쓸 수 없어요."
     }
   ],
   "expressions.photo.errorOffline": [
@@ -2861,37 +2855,31 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.a11y": [
     {
       "type": 0,
-      "value": "이모티콘, 이모지, GIF 고르기"
+      "value": "이모티콘 고르기"
     }
   ],
   "expressions.sheet.close": [
     {
       "type": 0,
-      "value": "이모티콘·이모지·GIF 닫기"
+      "value": "이모티콘 닫기"
     }
   ],
   "expressions.sheet.emptyEmoticon": [
     {
       "type": 0,
-      "value": "아직 팀 이모티콘이 없어요. 위의 「추가하기」로 만들거나 가져와 보세요."
+      "value": "아직 이모티콘이 없어요. 위의 「추가하기」로 만들거나 가져와 보세요."
     }
   ],
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 표현이 없어요. 이모티콘 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 이모티콘 탭의 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
     {
       "type": 0,
-      "value": "아직 우리 팀 이모지가 없습니다."
-    }
-  ],
-  "expressions.sheet.emptyTeam": [
-    {
-      "type": 0,
-      "value": "아직 팀 이모지가 없어요. 위의 「추가하기」로 가져와 보세요."
+      "value": "아직 팀 이모티콘이 없어요."
     }
   ],
   "expressions.sheet.error": [
@@ -2939,7 +2927,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.open": [
     {
       "type": 0,
-      "value": "이모티콘, 이모지, GIF 고르기"
+      "value": "이모티콘 고르기"
     }
   ],
   "expressions.sheet.pickAgain": [
@@ -2969,7 +2957,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "이모지 검색"
+      "value": "기본 이모티콘 검색"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -2982,12 +2970,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "GIF 검색"
-    }
-  ],
-  "expressions.sheet.searchTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지 검색"
     }
   ],
   "expressions.sheet.send": [
@@ -3005,7 +2987,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoji": [
     {
       "type": 0,
-      "value": "이모지"
+      "value": "기본"
     }
   ],
   "expressions.sheet.tabEmoticon": [
@@ -3026,16 +3008,10 @@ export const catalog: MessageCatalog = {
       "value": "표현 종류"
     }
   ],
-  "expressions.sheet.tabTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지"
-    }
-  ],
   "expressions.sheet.title": [
     {
       "type": 0,
-      "value": "이모티콘·이모지·GIF"
+      "value": "이모티콘"
     }
   ],
   "expressions.sheet.unavailable": [

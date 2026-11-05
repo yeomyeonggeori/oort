@@ -599,8 +599,8 @@ export function ThreadComposer({
                   size="icon"
                   className="tap-target shrink-0 disabled:opacity-100"
                   disabled={sending}
-                  aria-label="이모지 넣기"
-                  title="이모지 넣기"
+                  aria-label="이모티콘 넣기"
+                  title="이모티콘 넣기"
                   data-testid="thread-composer-emoji-trigger"
                   onClick={(event) => {
                     autocomplete.close();
