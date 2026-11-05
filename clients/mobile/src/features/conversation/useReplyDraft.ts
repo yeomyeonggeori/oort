@@ -38,10 +38,7 @@ export interface UseReplyDraftResult {
    * 보내기. 대상이 걸려 있으면 그 스레드(`rootId`)에 달고 **`true`**, 대상을 뗀다(보낸 순간 떨어진다 — 남겨 두면 다음 줄까지
    * 같은 스레드로 간다). 없으면 `false` — 부른 쪽이 평소대로 보낸다.
    */
-  sendReply: (
-    body: string,
-    options?: {attachments?: MessageAttachment[]; alsoInChannel?: boolean},
-  ) => boolean;
+  sendReply: (body: string, options?: {attachments?: MessageAttachment[]}) => boolean;
 }
 
 export function useReplyDraft({
@@ -103,19 +100,11 @@ export function useReplyDraft({
   const cancelReply = useCallback(() => setReplyTarget(null), []);
 
   const sendReply = useCallback(
-    (
-      body: string,
-      options?: {attachments?: MessageAttachment[]; alsoInChannel?: boolean},
-    ) => {
+    (body: string, options?: {attachments?: MessageAttachment[]}) => {
       const target = targetRef.current;
       if (target === null) return false;
       setReplyTarget(null);
-      // 「대화에도 보내기」(#4888): 켠 때만 네 번째 인자가 간다 — 켜지 않은 답글은 이 인자 이전과 같은 호출이다.
-      if (options?.alsoInChannel === true) {
-        void sendRef.current(target.rootId, body, options.attachments, {alsoInChannel: true});
-      } else {
-        void sendRef.current(target.rootId, body, options?.attachments);
-      }
+      void sendRef.current(target.rootId, body, options?.attachments);
       return true;
     },
     [],

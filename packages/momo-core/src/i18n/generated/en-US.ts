@@ -4592,18 +4592,6 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "Also send to the conversation"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "This server does not support “Also send to the conversation” yet. Turn it off and send again."
-    }
-  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -5792,6 +5780,64 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.edited.atDate": [
+    {
+      "type": 0,
+      "value": "Edited on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atDay": [
+    {
+      "type": 0,
+      "value": "Edited "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atTime": [
+    {
+      "type": 0,
+      "value": "Edited at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.mark": [
+    {
+      "type": 0,
+      "value": "Edited"
+    }
+  ],
+  "timeline.edited.pressHint": [
+    {
+      "type": 0,
+      "value": "Shows when it was edited"
     }
   ],
   "timeline.lightbox.copied": [

@@ -11,8 +11,6 @@
   "reply.home.headerUnknown": "Replied in a thread",
   "reply.home.excerptDeleted": "Deleted message",
   "reply.home.open": "Open the thread this reply is in",
-  "reply.alsoInChannel.label": "Also send to the conversation",
-  "reply.alsoInChannel.unsupported": "This server does not support “Also send to the conversation” yet. Turn it off and send again.",
   "reply.composer.placeholder": "Write a reply",
   "reply.composer.send": "Send reply"
 }

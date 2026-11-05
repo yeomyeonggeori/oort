@@ -1659,14 +1659,19 @@ function DecisionStub({
 function Row({
   pinned = false,
   edited = false,
-}: {pinned?: boolean; edited?: boolean} = {}) {
+  editedAtMs,
+}: {pinned?: boolean; edited?: boolean; editedAtMs?: number} = {}) {
   return (
     <MessageRow
       // 이슈 #1149 M2 — 「수정됨」을 켤 수 있어야 한다. 아래 `pin-mark` 프레임의
       // 주석은 처음부터 「같은 줄에 나란히 설 때만 보인다」고 말했는데, 정작 씨앗
       // 메시지가 `sent` 라 그 프레임에 「수정됨」이 한 번도 서지 않았다. 주장만
       // 있고 사진이 없던 자리다.
-      message={edited ? {...MESSAGE, state: 'edited'} : MESSAGE}
+      message={
+        edited
+          ? {...MESSAGE, state: 'edited', ...(editedAtMs === undefined ? {} : {editedAtMs})}
+          : MESSAGE
+      }
       startsGroup
       directory={DIRECTORY}
       chips={CHIPS}
@@ -2595,10 +2600,48 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'sheet':
       return (
-        <Frame label="길게 누르기 시트 — 반응·답글·인용·복사·고정·고치기·지우기·닫기">
+        <Frame label="길게 누르기 시트 — 고치기(맨 위 줄)·답글·인용·복사·고정·지우기·닫기">
           <Row />
           {sheet(false)}
         </Frame>
+      );
+    // ---- 이슈 #5326: 「수정됨」과 고친 시각 ------------------------------------
+    //
+    // 꼬리의 「수정됨」(누르면 고친 시각 문장으로 펼쳐진다 — 누르기는 시험이 재고 이 사진은 접힌 모양이다)과, 길게 누르기 시트 머리의
+    // 「오전 6:53에 수정됨」·맨 위 줄 「고치기」를 한 프레임에 본다. 시트는 `Modal` 이라 행 위에 겹쳐 서고 행 꼬리는 가려지므로(전면) 행은 아래
+    // `edited-time-row` 가 따로 보여 준다. 시계는 행과 시트가 같은 값(`NOW + 900_000`)을 쓴다 — 고친 시각이 「오늘」로 읽히는 까닭이다.
+    case 'edited-time':
+      return (
+        // 앱은 늘 `MobileLocaleProvider` 아래라 시각이 기기 시간대로 읽힌다. 제공자 없는 하네스는 UTC 로 읽어 시트 머리의 두 시각(만든 시각은 기기
+        // 시계, 고친 시각은 언어 서비스)이 어긋나 보이므로 서울 시간대의 기존 공장(`releaseNotesKo`)을 세운다.
+        <MobileLocaleProvider createController={releaseNotesKo}>
+        <Frame label="고친 글의 길게 누르기 시트 — 머리의 고친 시각 · 맨 위 줄 고치기">
+          <Row edited editedAtMs={NOW - 20 * 60_000} />
+          <MessageActionSheet
+            message={{...MESSAGE, state: 'edited', editedAtMs: NOW - 20 * 60_000}}
+            chips={CHIPS}
+            availability={AVAILABILITY}
+            authorLabel="이도현"
+            nowMs={NOW + 900_000}
+            onClose={() => {}}
+            onToggleReaction={() => {}}
+            onReply={() => {}}
+            onQuote={() => {}}
+            onCopy={() => {}}
+            onPin={() => {}}
+            onEdit={() => {}}
+            onDelete={() => {}}
+          />
+        </Frame>
+        </MobileLocaleProvider>
+      );
+    case 'edited-time-row':
+      return (
+        <MobileLocaleProvider createController={releaseNotesKo}>
+        <Frame label="고친 글 꼬리의 「수정됨」(접힘) — 눌러서 시각이 펼쳐지는 자리">
+          <Row edited editedAtMs={NOW - 20 * 60_000} />
+        </Frame>
+        </MobileLocaleProvider>
       );
     // ---- 이슈 #1112: 고정 -----------------------------------------------
     //

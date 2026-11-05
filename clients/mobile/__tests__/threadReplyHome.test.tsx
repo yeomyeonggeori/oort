@@ -6,17 +6,13 @@ import {act, cleanup, fireEvent, render, renderHook, screen} from '@testing-libr
 import React from 'react';
 
 import '../src/boot/polyfills';
-import {
-  ALSO_IN_CHANNEL_ROW_HEIGHT,
-  AlsoInChannelCheck,
-} from '../src/features/conversation/AlsoInChannelCheck';
-import {TOUCH_TARGET} from '../src/design/tokens';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 
 // =============================================================================
-// #4888 — 폰: 대화에는 「대화에도 보내기」로 보낸 답글만 선다(웹과 같은 규칙), 옛 서버에서는 오늘 동작, 스레드 화면은 전부,
-// 밀어서 보낸 답글이 실패하면 대화 화면에서 알린다(같은 `client_msg_id` 로 다시 보내기).
+// #4888 → #5324 — 폰: 대화(본류)에는 스레드 답글이 서지 않는다. 「대화에도 보내기」는 화면에서 빠졌고, 옛날에 켜고 보낸 답글(서버 필드는 그대로
+// 온다)도 **스레드에만** 보인다 — 본류의 행도 「↳ ○○님 스레드에 답글」 한 줄 요약도 없다. 서버가 스레드 요약을 모르는 옛 서버에서는 오늘 동작
+// (답글 전부)을 지킨다. 스레드 화면은 전부. 밀어서 보낸 답글이 실패하면 대화 화면에서 알린다(같은 `client_msg_id` 로 다시 보내기).
 // 규칙의 단위 시험은 코어 `threadHome.test.ts`; 여기서는 진짜 `Timeline`·`useTimeline` 이 그 규칙을 **따르는지**를 잰다.
 // =============================================================================
 
@@ -98,15 +94,21 @@ function channel(messages: Message[], extra: Record<string, unknown> = {}) {
 
 afterEach(cleanup);
 
-describe('대화(본류)에 서는 답글', () => {
-  it('새 서버: 켜지 않은 답글은 서지 않고 켠 답글만 선다 — 켠 답글은 어느 스레드의 것인지 말한다', () => {
-    channel([rootWith(SUMMARY_NEW), reply(11, '스레드로만 가요'), reply(12, '대화에도 보여요', {alsoInChannel: true})]);
+describe('대화(본류)에 서는 행', () => {
+  // 사보타주: 코어 `isMainFlowRow` 에 `|| message.alsoInChannel === true` 를 되살리면 이 시험이 RED 여야 한다.
+  it('새 서버: 스레드 답글은 하나도 서지 않는다 — 옛날에 「대화에도 보내기」로 보낸 답글도 스레드에만 있고, 답글 줄도 없다', () => {
+    channel([rootWith(SUMMARY_NEW), reply(11, '스레드로만 가요'), reply(12, '옛날에 대화에도 보낸 답글', {alsoInChannel: true})]);
+    expect(screen.getByText('그건 배포 뒤에 봅시다')).toBeTruthy();
     expect(screen.queryByText('스레드로만 가요')).toBeNull();
-    expect(screen.getByText('대화에도 보여요')).toBeTruthy();
-    expect(screen.getAllByTestId('reply-marker')).toHaveLength(1);
-    expect(screen.getByText('↳ 김인턴님 스레드에 답글')).toBeTruthy();
-    // 둘째 줄은 루트의 글 한 줄이다.
-    expect(screen.getByTestId('reply-marker-excerpt').props.children).toBe('그건 배포 뒤에 봅시다');
+    expect(screen.queryByText('옛날에 대화에도 보낸 답글')).toBeNull();
+    expect(screen.queryByTestId('reply-marker')).toBeNull();
+    expect(screen.queryByText('↳ 김인턴님 스레드에 답글')).toBeNull();
+  });
+
+  it('서버에 남은 옛 「대화에도 보낸」 답글만 있는 창(요약 없음)도 새 서버의 증거라서 그 답글은 본류에 서지 않는다', () => {
+    channel([reply(12, '루트는 위에 있는 옛 답글', {alsoInChannel: true})]);
+    expect(screen.queryByText('루트는 위에 있는 옛 답글')).toBeNull();
+    expect(screen.queryByTestId('reply-marker')).toBeNull();
   });
 
   it('옛 서버(요약에 참여자 키 없음, 켠 값 없음): 오늘처럼 답글이 전부 남는다 — 사라져 보이면 안 된다', () => {
@@ -116,22 +118,22 @@ describe('대화(본류)에 서는 답글', () => {
     expect(screen.getAllByTestId('reply-marker')).toHaveLength(2);
   });
 
-  it('스레드 화면(mainFlow=false)은 서버가 아는 서버여도 답글 전부가 선다', () => {
-    channel([rootWith(SUMMARY_NEW), reply(11, '스레드로만 가요'), reply(12, '대화에도 보여요', {alsoInChannel: true})], {
+  it('스레드 화면(mainFlow=false)은 서버가 아는 서버여도 답글 전부가 선다 — 옛 「대화에도 보낸」 답글 포함', () => {
+    channel([rootWith(SUMMARY_NEW), reply(11, '스레드로만 가요'), reply(12, '옛날에 대화에도 보낸 답글', {alsoInChannel: true})], {
       mainFlow: false,
       markReplies: false,
       showRollup: false,
     });
     expect(screen.getByText('스레드로만 가요')).toBeTruthy();
-    expect(screen.getByText('대화에도 보여요')).toBeTruthy();
+    expect(screen.getByText('옛날에 대화에도 보낸 답글')).toBeTruthy();
     expect(screen.queryByTestId('reply-marker')).toBeNull();
   });
 
-  it('줄을 누르면 그 스레드(루트)가 열린다', () => {
+  it('옛 서버의 본류 답글 줄을 누르면 그 스레드(루트)가 열린다', () => {
     const onOpenThread = jest.fn();
     render(
       <Timeline
-        messages={[rootWith(SUMMARY_NEW), reply(12, '대화에도 보여요', {alsoInChannel: true})]}
+        messages={[rootWith(SUMMARY_OLD), reply(12, '옛 서버의 답글')]}
         directory={DIRECTORY}
         status="ready"
         myMemberId={SELF}
@@ -148,8 +150,8 @@ describe('대화(본류)에 서는 답글', () => {
     expect(onOpenThread.mock.calls[0][0]).toMatchObject({id: ROOT_ID});
   });
 
-  it('루트가 불러온 범위 위에 있으면 이름도 원문도 지어내지 않고, 눌리지 않는다', () => {
-    channel([reply(12, '루트는 위에 있어요', {alsoInChannel: true})]);
+  it('루트가 불러온 범위 위에 있으면 이름도 원문도 지어내지 않고, 눌리지 않는다(옛 서버 경로)', () => {
+    channel([reply(12, '루트는 위에 있어요')]);
     expect(screen.getByText('↳ 스레드에 답글')).toBeTruthy();
     expect(screen.queryByTestId('reply-marker-excerpt')).toBeNull();
     expect(screen.getByTestId('reply-marker').props.accessibilityRole).not.toBe('button');
@@ -197,32 +199,31 @@ describe('보내지 못한 스레드 답글의 에코', () => {
   });
 });
 
-// ---- 훅: 에코가 「대화에도」 값을 싣고, 실패하면 같은 멱등키로 다시 보낸다 ------------------------------------------------
+// ---- 훅: 답글의 요청에는 「대화에도 보내기」 키가 없고, 실패하면 같은 멱등키로 다시 보낸다 -------------------------------------------
 
 function hook() {
   return renderHook(() => useTimeline(null, 'workspace', 'channel', 'self'));
 }
 
-function confirmed(clientMsgId: string, over: Partial<Message> = {}): Message {
-  void clientMsgId;
+function confirmed(over: Partial<Message> = {}): Message {
   return message({
     id: 'dddddddd-1111-4111-8111-dddddddddddd',
     channelId: 'channel',
     seq: 50,
     authorMemberId: 'self',
     rootId: ROOT_ID,
-    body: '대화에도 보낼 답글',
+    body: '스레드로 보낼 답글',
     ...over,
   });
 }
 
-describe('useTimeline — 「대화에도 보내기」 답글의 에코와 다시 보내기', () => {
+describe('useTimeline — 스레드 답글의 에코와 다시 보내기', () => {
   beforeEach(() => {
     jest.mocked(sendMessage).mockReset();
     jest.mocked(sendThreadReply).mockReset();
   });
 
-  it('켜지 않은 답글: 보내는 중에는 스레드의 것이고(대화 목록에 없다), 호출은 예전과 같은 모양이다', async () => {
+  it('보내는 중에는 스레드의 것이고(대화 목록에 없다), 호출은 옵션 자리가 비어 있다', async () => {
     let finish: (m: Message) => void = () => undefined;
     jest.mocked(sendThreadReply).mockImplementation(
       () => new Promise<Message>(done => { finish = done; }),
@@ -238,41 +239,35 @@ describe('useTimeline — 「대화에도 보내기」 답글의 에코와 다�
     expect(call[2]).toBe(ROOT_ID);
     expect(call[5]).toBeUndefined();
     await act(async () => {
-      finish(confirmed('x', {body: '스레드로만'}));
+      finish(confirmed({body: '스레드로만'}));
       await sending;
     });
   });
 
-  it('켠 답글: 에코가 대화 목록에 서고 요청에 alsoInChannel: true 가 실린다', async () => {
-    let finish: (m: Message) => void = () => undefined;
-    jest.mocked(sendThreadReply).mockImplementation(
-      () => new Promise<Message>(done => { finish = done; }),
-    );
+  // 사보타주: `useTimeline` 의 `sendReply` 가 에코 행에 `alsoInChannel` 을 싣거나(`...(flags?.alsoInChannel ...)`) `post` 가 그 값을 요청에 실으면 이 시험이 RED 여야 한다.
+  it('옛 호출자가 alsoInChannel 을 억지로 넘겨도 에코에도 요청에도 실리지 않는다', () => {
+    jest.mocked(sendThreadReply).mockImplementation(() => new Promise<Message>(() => undefined));
     const view = hook();
-    let sending: Promise<void> = Promise.resolve();
     act(() => {
-      sending = view.result.current.sendReply(ROOT_ID, '대화에도 보낼 답글', undefined, {alsoInChannel: true});
+      void view.result.current.sendReply(ROOT_ID, '스레드로 보낼 답글', undefined, {alsoInChannel: true} as never);
     });
-    expect(view.result.current.pending).toHaveLength(1);
-    expect(view.result.current.pending[0]).toMatchObject({status: 'sending', rootId: ROOT_ID, alsoInChannel: true});
-    expect(jest.mocked(sendThreadReply).mock.calls[0][5]).toEqual({alsoInChannel: true});
-    await act(async () => {
-      finish(confirmed('x', {alsoInChannel: true}));
-      await sending;
-    });
-    expect(view.result.current.pending).toEqual([]);
+    const echo = view.result.current.repliesPending(ROOT_ID)[0];
+    expect(echo).toBeDefined();
+    expect(echo).not.toHaveProperty('alsoInChannel');
+    expect(jest.mocked(sendThreadReply).mock.calls[0][5]).toBeUndefined();
   });
 
-  it('실패 → 대화에 보임 → 다시 보내기: 같은 client_msg_id·같은 alsoInChannel 로 한 번 더 가고, 한 메시지로 모인다', async () => {
+  it('실패 → 대화에 보임 → 다시 보내기: 같은 client_msg_id 로 한 번 더 가고, 한 메시지로 모인다', async () => {
     jest.mocked(sendThreadReply)
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce(confirmed('x', {alsoInChannel: true}));
+      .mockResolvedValueOnce(confirmed());
     const view = hook();
     await act(async () => {
-      await view.result.current.sendReply(ROOT_ID, '대화에도 보낼 답글', undefined, {alsoInChannel: true});
+      await view.result.current.sendReply(ROOT_ID, '스레드로 보낼 답글');
     });
     expect(view.result.current.pending).toHaveLength(1);
     expect(view.result.current.pending[0].status).toBe('failed');
+    expect(view.result.current.pending[0]).not.toHaveProperty('alsoInChannel');
     const id = view.result.current.pending[0].clientMsgId;
 
     await act(async () => {
@@ -282,19 +277,8 @@ describe('useTimeline — 「대화에도 보내기」 답글의 에코와 다�
     expect(calls).toHaveLength(2);
     expect(calls[1][3]).toBe(calls[0][3]); // 같은 멱등키
     expect(calls[1][3]).toBe(id);
-    expect(calls[1][5]).toEqual({alsoInChannel: true}); // 같은 요청
+    expect(calls[1][5]).toBeUndefined(); // 같은 요청 — 옵션 자리가 비어 있다
     expect(view.result.current.pending).toEqual([]);
     expect(view.result.current.state.messages.filter(m => m.rootId === ROOT_ID)).toHaveLength(1);
-  });
-});
-
-// M-14 — 누를 것은 전부 44pt 다. 체크 줄은 얇게 서고(알약이 자라지 않게) 눌림 영역은 슬롭이 채운다. 그려진 트리에서 값을 읽는다.
-describe('「대화에도 보내기」 체크의 눌림 영역 (M-14)', () => {
-  it('세로는 슬롭과 더해 44pt 이상이고, 슬롭이 줄 높이를 훔치지 않는다', () => {
-    render(<AlsoInChannelCheck checked={false} onChange={jest.fn()} textLeft={0} />);
-    const slop = screen.getByTestId('also-in-channel-check').props.hitSlop as {top: number; bottom: number; left: number; right: number};
-    expect(ALSO_IN_CHANNEL_ROW_HEIGHT + slop.top + slop.bottom).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    // 올림 1pt 넘치는 것은 괜찮지만 그 이상은 이웃(답글 머리말의 ✕·입력 줄)을 훔친다.
-    expect(ALSO_IN_CHANNEL_ROW_HEIGHT + slop.top + slop.bottom).toBeLessThanOrEqual(TOUCH_TARGET + 1);
   });
 });
