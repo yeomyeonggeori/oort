@@ -190,7 +190,11 @@ export type RealtimeAction =
   /** The socket ENDED for a reason a new token can fix: reopen after `delayMs`. */
   | {kind: 'terminal-retry'; code: number; delayMs: number}
   /** The socket ENDED and nothing here reopens it: show it, do not try. */
-  | {kind: 'terminal-hold'; code: number};
+  | {kind: 'terminal-hold'; code: number}
+  /** An explicit recovery gave up a token request that had been out for 3 s or more, so a new attempt can
+   *  open (#4895). The TRANSPORT decides this (only it knows when a request left), so `policyStep` never
+   *  returns it; it is an action kind so that it lands in the connection record like the others. */
+  | {kind: 'stuck-attempt-cut'};
 
 export function initialPolicyState(
   foreground: boolean = true,

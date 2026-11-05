@@ -184,7 +184,7 @@ export function ExpressionPhotoForm({ onImport, onAgent, onDone, onClose }: { on
       if (!isPhotoMetadata(metadata)) problems.fields = formatMessage("expressions.photo.fieldsInvalid");
       if (!consent) problems.consent = formatMessage("expressions.photo.consentMissing");
       if (Object.keys(problems).length === 0) {
-        // 표준 이모지 이름과 겹치면 서버가 거절하니, 모델을 부르기 전에 먼저 알려 준다.
+        // 기본 이모티콘(표준 그림 문자) 이름과 겹치면 서버가 거절하니, 모델을 부르기 전에 먼저 알려 준다.
         const standard = await loadCatalog();
         if (standard.some((entry) => entry.shortcodes.includes(name))) problems.fields = formatMessage("expressions.photo.errorName");
       }

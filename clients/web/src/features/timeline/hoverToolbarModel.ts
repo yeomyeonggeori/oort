@@ -14,6 +14,8 @@
 // A line end that grazes the toolbar's left edge by 1-2px is dodged by nudging the bar right (#5179).
 // =============================================================================
 
+import { POINTER_MODALITY_SELECTOR } from "@/design/focusModality";
+
 /** Curated seed. Must stay inside `PICKER_EMOJI`. Frequency then promotes. */
 export const HOVER_TOOLBAR_REACTION_SEED = ["👍", "✅", "🙏"] as const;
 
@@ -34,6 +36,26 @@ export function shouldShowHoverToolbar(input: {
   if (input.overlayOpen) return true;
   if (input.selecting) return false;
   return input.rowHovered || input.rowFocused;
+}
+
+/**
+ * 이 초점은 키보드로 닿은 것인가 (#5328). 막대를 붙드는 「행에 초점 있음」은 키보드 초점만이다.
+ *
+ * 마우스 흐름이 남긴 초점은 막대를 붙들지 않는다: ⋮ 메뉴에서 행동을 고르면 Radix 가 닫으며 초점을 ⋮ 단추(막대 안)로 돌려주는데, 이것을
+ * 세면 포인터가 그 행을 떠난 뒤에도 막대가 남아 다른 곳을 눌러야 꺼졌다. **`:focus-visible` 만으로는 가려지지 않는다**: Radix 메뉴는 초점이
+ * body 에 있는 채로 열리므로 그 뒤 스크립트가 옮기는 초점이 마우스 흐름에서도 `:focus-visible` 이다(Chromium 실측, `capture-5328.mjs`).
+ * 그래서 앱이 이미 쥔 입력 방식 스탬프(`focusModality.ts`: 포인터 누름이 `pointer` 로, 캐럿을 옮기는 키가 `keyboard` 로)가 포인터이면
+ * 키보드 초점이 아니다. 키보드 사용자는 그대로다: 초점이 ⋮ 로 돌아오면 막대가 남아 자리를 잃지 않는다. 스탬프가 없는 환경(시험)은
+ * `:focus-visible` 로만 가르고, 셀렉터를 모르는 환경은 키보드로 본다(막대를 지우면 초점이 body 로 떨어진다).
+ */
+export function isKeyboardFocusTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  try {
+    if (target.ownerDocument.documentElement.matches(POINTER_MODALITY_SELECTOR)) return false;
+    return target.matches(":focus-visible");
+  } catch {
+    return true;
+  }
 }
 
 export function rectsIntersect(

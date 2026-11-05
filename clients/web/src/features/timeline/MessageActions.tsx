@@ -362,6 +362,7 @@ export function MessageHoverToolbar({
   onOpenPicker,
   menuOpen,
   onMenuOpenChange,
+  onMenuSettled,
   triggerRef,
   mineEmojis,
 }: {
@@ -371,6 +372,11 @@ export function MessageHoverToolbar({
   onOpenPicker: (opener?: HTMLElement | null) => void;
   menuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
+  /**
+   * 메뉴 내용이 사라지고 Radix 가 초점을 정리한 **뒤** 한 번(#5328). 행이 「키보드 초점 있음」을 DOM 의 사실로 다시 읽는 자리다:
+   * 초점을 쥔 채 사라진 메뉴는 `blur` 를 못 쏜다.
+   */
+  onMenuSettled?: () => void;
   /** Surviving ⋯ trigger used as the reaction picker fallback anchor (H-4). */
   triggerRef?: Ref<HTMLButtonElement>;
   mineEmojis: ReadonlySet<string>;
@@ -527,6 +533,10 @@ export function MessageHoverToolbar({
             align="end"
             data-testid="message-action-menu"
             aria-label="메시지 액션"
+            // Radix 는 이 핸들러 **뒤에** 초점을 ⋮ 로 돌려준다(바깥을 눌러 닫았으면 돌려주지 않는다). 마이크로태스크로 그 뒤에 읽는다.
+            onCloseAutoFocus={() => {
+              if (onMenuSettled) queueMicrotask(onMenuSettled);
+            }}
           >
             <MessageActionMenuItems
               surface="dropdown"
