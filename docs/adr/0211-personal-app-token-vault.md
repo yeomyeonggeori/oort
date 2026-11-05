@@ -5,7 +5,7 @@
 - Deciders: owner
 - 기안: Sonnet 5.5 문서 워커 ([#4238](https://github.com/yeomyeonggeori/oort/issues/4238), 리서치 r3 P1-7)
 - 번호 확인 [V, 2026-11-05]: 0211은 #4213·#4238이 예약했다. `origin/main`·`origin/track/engine`·`origin/track/uxui`의 `docs/adr/`에 0211이 없고, 열린 PR 중 `docs/adr/0211`·`0212`를 만드는 것도 없다.
-- 표기: [V] 이 세션에서 저장소 코드·문서로 직접 확인(track/engine `17bcee4ff`) · [추정] 해석 · [확인 필요: 슬라이스] 닫는 슬라이스를 적는다 · `runtime-unverified` 실행하지 않음. 표·열·환경변수·역할 이름은 **후보**이고 구현 슬라이스가 확정한다.
+- 표기: [V] 이 세션에서 저장소 코드·문서로 직접 확인(track/engine `17bcee4ff`) · [추정] 해석 · [확인 필요: 슬라이스] 닫는 슬라이스를 적는다 · `runtime-unverified` 실행하지 않음. 표·열·환경변수·역할 이름은 **후보**이고 구현 슬라이스가 확정한다. 인용한 로컬 리서치 둘(`claudedocs/resume-2026-09-23/handoff-1021/research-1021/r3-plugins-org-report.md`, `claudedocs/research/2026-11-05-image-integration.md`)은 `claudedocs/`가 gitignore 대상이라 저장소에 없다(ADR-0192와 같은 사정). 벤더 사실은 그 문서가 읽은 날짜 그대로 옮긴 것이고 이 ADR이 다시 열람하지 않았다.
 
 ## 번복·증보 (머리)
 
