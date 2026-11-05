@@ -204,6 +204,8 @@ export const messageKeys = [
   "connection.load.activityTitle",
   "connection.load.agentChannelsTitle",
   "connection.load.agentHistoryTitle",
+  "connection.load.agentProfileAppliesTitle",
+  "connection.load.agentProfilesApplyTitle",
   "connection.load.agentProfileTitle",
   "connection.load.agentRosterTitle",
   "connection.load.agentRunTitle",
@@ -211,6 +213,8 @@ export const messageKeys = [
   "connection.load.conversationTitle",
   "connection.load.deviceKeysTitle",
   "connection.load.dmApprovalTitle",
+  "connection.load.dmNamesTitle",
+  "connection.load.draftTargetsTitle",
   "connection.load.hermesStatusTitle",
   "connection.load.inboxMoreTitle",
   "connection.load.inboxTitle",
@@ -220,10 +224,14 @@ export const messageKeys = [
   "connection.load.membersTitle",
   "connection.load.newerTitle",
   "connection.load.notificationRulesTitle",
+  "connection.load.readMarkersTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
+  "connection.load.reasonServerBare",
   "connection.load.reasonUnknown",
+  "connection.load.reasonUnknownBare",
   "connection.load.sentence",
+  "connection.load.teamBoardStaleTitle",
   "connection.load.threadTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
@@ -1254,6 +1262,10 @@ export const argumentSpecs = {
   "connection.load.activityTitle": {},
   "connection.load.agentChannelsTitle": {},
   "connection.load.agentHistoryTitle": {},
+  "connection.load.agentProfileAppliesTitle": {},
+  "connection.load.agentProfilesApplyTitle": {
+    "names": "string"
+  },
   "connection.load.agentProfileTitle": {},
   "connection.load.agentRosterTitle": {},
   "connection.load.agentRunTitle": {},
@@ -1261,6 +1273,8 @@ export const argumentSpecs = {
   "connection.load.conversationTitle": {},
   "connection.load.deviceKeysTitle": {},
   "connection.load.dmApprovalTitle": {},
+  "connection.load.dmNamesTitle": {},
+  "connection.load.draftTargetsTitle": {},
   "connection.load.hermesStatusTitle": {},
   "connection.load.inboxMoreTitle": {},
   "connection.load.inboxTitle": {},
@@ -1270,13 +1284,17 @@ export const argumentSpecs = {
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
   "connection.load.notificationRulesTitle": {},
+  "connection.load.readMarkersTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
+  "connection.load.reasonServerBare": {},
   "connection.load.reasonUnknown": {},
+  "connection.load.reasonUnknownBare": {},
   "connection.load.sentence": {
     "reason": "string",
     "title": "string"
   },
+  "connection.load.teamBoardStaleTitle": {},
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
@@ -2488,6 +2506,8 @@ export interface MessageArgs {
   "connection.load.activityTitle": Record<string, never>;
   "connection.load.agentChannelsTitle": Record<string, never>;
   "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentProfileAppliesTitle": Record<string, never>;
+  "connection.load.agentProfilesApplyTitle": { names: string };
   "connection.load.agentProfileTitle": Record<string, never>;
   "connection.load.agentRosterTitle": Record<string, never>;
   "connection.load.agentRunTitle": Record<string, never>;
@@ -2495,6 +2515,8 @@ export interface MessageArgs {
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.deviceKeysTitle": Record<string, never>;
   "connection.load.dmApprovalTitle": Record<string, never>;
+  "connection.load.dmNamesTitle": Record<string, never>;
+  "connection.load.draftTargetsTitle": Record<string, never>;
   "connection.load.hermesStatusTitle": Record<string, never>;
   "connection.load.inboxMoreTitle": Record<string, never>;
   "connection.load.inboxTitle": Record<string, never>;
@@ -2504,10 +2526,14 @@ export interface MessageArgs {
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
   "connection.load.notificationRulesTitle": Record<string, never>;
+  "connection.load.readMarkersTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonServerBare": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.reasonUnknownBare": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
+  "connection.load.teamBoardStaleTitle": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;

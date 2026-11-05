@@ -676,8 +676,8 @@ describe("멤버 프로필: 불러오기 실패 (#5242)", () => {
     const ko = await koreanLocale();
     // 기기가 꺼져 있으면 이 대화상자는 자기 「연결 끊김」 줄을 먼저 말하므로(`memberProfileViewState`), 상자의 원인은 둘이다.
     const cases: [Error, string, string][] = [
-      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요."],
     ];
     for (const [error, cause, reason] of cases) {
       fetchRoster.mockReset();

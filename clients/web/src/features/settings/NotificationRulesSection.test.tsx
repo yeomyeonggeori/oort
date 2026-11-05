@@ -526,8 +526,8 @@ describe("NotificationRulesSection DND regression", () => {
   // #5242: 옛 「알림 규칙을 불러오지 못했어요.」는 원인을 말하는 한 줄이다. 403(사람 멤버만)은 그대로 안내 톤이다.
   it("다른 실패는 제목 뒤에 원인이 붙은 한 줄과 다시 시도를 준다", async () => {
     const cases: [Error, string][] = [
-      [new NetworkError("unreachable", 15_000), "알림 규칙을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "알림 규칙을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "알림 규칙을 불러오지 못했어요. 서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "알림 규칙을 불러오지 못했어요. 문제가 생겼어요."],
     ];
     for (const [error, sentence] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);

@@ -289,8 +289,8 @@ describe("InboxDetail", () => {
   // #5242: 옛 「대화를 불러오지 못했어요.」 배너는 원인 상자다. 이유가 원인을 따르고 다시 시도가 맥락을 다시 읽는다.
   it("맥락을 못 불러오면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 다시 읽는다", async () => {
     const cases: [Error, string, string][] = [
-      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요."],
     ];
     for (const [error, cause, reason] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);

@@ -22,8 +22,10 @@ vi.mock("@/app/SidebarDrawerToggle", () => ({
   SidebarDrawerToggle: () => null,
 }));
 
+/** 오프라인 띠 시험(#5307 L4)이 켠다. 나머지 시험은 늘 온라인이다. */
+const offlineFlag = { value: false };
 vi.mock("@/features/common/useOffline", () => ({
-  useOffline: () => false,
+  useOffline: () => offlineFlag.value,
 }));
 
 vi.mock("@/features/reminders/useReminders", () => ({
@@ -216,6 +218,7 @@ beforeEach(() => {
   state.serverUnreadCount = null;
   state.hasMore = false;
   state.ledgerAnswered = false;
+  offlineFlag.value = false;
   fetchMore.mockClear();
   markAllRead.mockClear();
   approvalItems.value = [ITEM];
@@ -608,8 +611,8 @@ describe("InboxRoute: 불러오기 실패 (#5242)", () => {
   it("읽지 못하면 원인 상자가 서고 이유가 원인을 따라가며 다시 시도가 목록을 다시 읽는다", async () => {
     const cases: [unknown, boolean, string, string][] = [
       [new NetworkError("unreachable", 15_000), false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-      [new NetworkError("unreachable", 15_000), true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [null, true, "", "문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), true, "serverUnreachable", "서버에 닿지 못했어요."],
+      [null, true, "", "문제가 생겼어요."],
     ];
     for (const [failure, online, cause, reason] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);
@@ -650,9 +653,55 @@ describe("InboxRoute: 불러오기 실패 (#5242)", () => {
     expect(host.querySelectorAll('[data-testid="mailbox-row"]').length).toBeGreaterThan(0);
     const line = host.querySelector<HTMLElement>('[data-testid="inbox-more-error"]');
     expect(line?.textContent).toBe(
-      "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+      "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요. 서버에 닿지 못했어요."
     );
     expect(host.querySelector('[data-testid="inbox-load-more"]')?.textContent).toBe("다시 시도");
     vi.restoreAllMocks();
+  });
+});
+
+describe("InboxRoute: 오프라인 띠는 아래에 받아 둔 목록이 있을 때만 「그때의 상태」라고 말한다 (#5307 L4)", () => {
+  const band = (host: HTMLElement) => host.querySelector('[data-testid="inbox-offline"]')?.textContent ?? "";
+  const NEVER = "아직 이 목록을 한 번도 받지 못했어요";
+  const STALE_TAIL = "아래는 그때의 상태예요";
+
+  beforeEach(() => {
+    offlineFlag.value = true;
+  });
+
+  it("스켈레톤이 아래에 서 있으면 「한 번도 받지 못했어요」라고 말하고 「그때의 상태」는 말하지 않는다", async () => {
+    // 목록은 한 번도 안 왔는데(스켈레톤) 시각 값은 있다(승인 원장이 갱신된 시각이 섞인다): 옛 띠는 「마지막 동기화 방금. 아래는 그때의 상태예요」였다.
+    state.entries = [];
+    state.isLoading = true;
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelector('[data-testid="skeleton"]')?.getAttribute("data-ready")).toBe("false");
+    expect(band(host)).toContain(NEVER);
+    expect(band(host)).not.toContain(STALE_TAIL);
+    expect(band(host)).not.toContain("마지막 동기화");
+  });
+
+  it("오류 상자가 아래에 서 있어도 같다", async () => {
+    state.entries = [];
+    state.error = true;
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
+    expect(band(host)).toContain(NEVER);
+    expect(band(host)).not.toContain(STALE_TAIL);
+  });
+
+  it("받아 둔 목록이 아래에 있으면 마지막 동기화 시각과 「그때의 상태」를 말한다", async () => {
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelectorAll('[data-testid="mailbox-row"]').length).toBeGreaterThan(0);
+    expect(band(host)).toContain("마지막 동기화");
+    expect(band(host)).toContain(STALE_TAIL);
+    expect(band(host)).not.toContain(NEVER);
+  });
+
+  it("받아 둔 목록이 비어 있어도(받은 적은 있다) 마지막 동기화를 말한다", async () => {
+    state.entries = [];
+    const host = await mount("/inbox", { korean: true });
+    expect(host.querySelector('[data-testid="inbox-empty"]')).not.toBeNull();
+    expect(band(host)).toContain("마지막 동기화");
+    expect(band(host)).not.toContain(NEVER);
   });
 });
