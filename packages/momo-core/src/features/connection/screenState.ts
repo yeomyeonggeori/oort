@@ -9,6 +9,7 @@ import {
   type ConnectionView,
 } from "./model";
 import { INITIAL_REST_SIGNAL } from "./restSignal";
+import { openingSocketGap } from "./socketGap";
 import { CONNECTING_BAND_DELAY_MS, RECOVERED_FLASH_MS } from "./thresholds";
 
 // =============================================================================
@@ -23,6 +24,10 @@ import { CONNECTING_BAND_DELAY_MS, RECOVERED_FLASH_MS } from "./thresholds";
 //   2. 「다시 연결됐어요」: **「끊김」이 화면에 섰던 경우에만** 정상으로 돌아올 때 2초(감사 문서 §4 원칙 7).
 //      「연결 중」만 보였거나 침묵이던 틈은 말없이 사라진다.
 //   3. 카드와 띠 중 어느 쪽이 말하나(`showsConnectionCard`·`showsConnectionBanner`).
+//   4. **사람이 보지 못한 끊김은 끊김이 아니다**(#5403). 앱이 뒤에 가 있는 동안(`visibility`)은 화면을 보는 사람이 없다. 그
+//      시간의 판정은 「끊김이 보였다」 기억도 복구 표시도 만들지 않고, 돌아온 순간 소켓이 붙어 있지 않으면 틈을 **새 침묵**으로
+//      다시 시작한다(뒤에서 보낸 시간은 복구에 쓴 시간이 아니다). 복구 표시는 읽는 쪽이 시각을 건네면 깨움 없이도 거둔다
+//      (`isRecovered(state, now)`): 깨움이 늦거나 사라져도 보내기 같은 다음 사건을 기다리지 않는다.
 //
 // 화면이 읽는 것은 `view`와 `isRecovered`뿐이다. 보이는 것이 달라지지 않은 사건(대부분의 REST 응답)은 이전 상태
 // 객체를 그대로 돌려줘서, 이 값을 읽는 소비자가 응답 한 건마다 다시 그려지지 않는다.
@@ -35,12 +40,16 @@ export interface ConnectionState {
   readonly sawDown: boolean;
   /** 「다시 연결됐어요」가 이 시각(epoch ms)까지 선다. 서 있지 않으면 null. */
   readonly recoveredUntil: number | null;
+  /** 사람이 화면을 보고 있나. 앱이 뒤에 가 있는 동안은 아니다(#5403). 알리지 않는 호출자(웹)는 늘 참이다. */
+  readonly visible: boolean;
 }
 
 export type ConnectionAction =
   | { readonly kind: "event"; readonly at: number; readonly event: ConnectionEvent }
   /** 시간이 흘러 판정이 달라질 때(`quiet`→`connecting`→`down`, 복구 표시 끝)의 재판정. */
-  | { readonly kind: "tick"; readonly at: number };
+  | { readonly kind: "tick"; readonly at: number }
+  /** 앱이 뒤로 갔다(`visible: false`)/앞으로 돌아왔다(`visible: true`). 화면을 보는 사람이 없던 시간은 끊김을 본 시간이 아니다(#5403). */
+  | { readonly kind: "visibility"; readonly at: number; readonly visible: boolean };
 
 // 사건·행동의 생성자. 화면 코드가 `kind` 문자열을 손으로 적지 않게 한다(오타가 컴파일에서 막히고, 웹의 직접
 // 문구 장부에 기술 낱말이 쌓이지 않는다).
@@ -53,14 +62,18 @@ export const restEvent = (outcome: RestOutcome): ConnectionEvent => ({ kind: "re
 export const sessionEvent = (expired: boolean): ConnectionEvent => ({ kind: "session", expired });
 export const eventAction = (at: number, event: ConnectionEvent): ConnectionAction => ({ kind: "event", at, event });
 export const tickAction = (at: number): ConnectionAction => ({ kind: "tick", at });
+export const visibilityAction = (at: number, visible: boolean): ConnectionAction => ({ kind: "visibility", at, visible });
 
 function evaluate(
   input: ConnectionInput,
   at: number,
   sawDown: boolean,
-  recoveredUntil: number | null
+  recoveredUntil: number | null,
+  visible: boolean
 ): ConnectionState {
   const view = deriveConnectionState(input, at);
+  // 아무도 보지 않는 동안의 판정은 「끊김이 보였다」가 아니다. 기억도 복구 표시도 만들지 않는다.
+  if (!visible) return { input, view, sawDown: false, recoveredUntil: null, visible };
   let nextSawDown = sawDown;
   let until = recoveredUntil !== null && at < recoveredUntil ? recoveredUntil : null;
   switch (view.phase) {
@@ -85,11 +98,11 @@ function evaluate(
     case "quiet":
       break;
   }
-  return { input, view, sawDown: nextSawDown, recoveredUntil: until };
+  return { input, view, sawDown: nextSawDown, recoveredUntil: until, visible };
 }
 
 export function initialConnectionState(at: number, deviceOnline: boolean | null): ConnectionState {
-  return evaluate(initialConnectionInput(at, deviceOnline), at, false, null);
+  return evaluate(initialConnectionInput(at, deviceOnline), at, false, null, true);
 }
 
 /** 화면에 보이는 것이 같은가. 시각(`nextChangeAt`)도 보이는 것의 일부다: 같으면 타이머를 다시 걸 일이 없다. */
@@ -109,20 +122,55 @@ function sameView(a: ConnectionView, b: ConnectionView): boolean {
   );
 }
 
-export function reduceConnection(state: ConnectionState, action: ConnectionAction): ConnectionState {
-  const input = action.kind === "event" ? foldConnectionEvent(state.input, action.event) : state.input;
-  const next = evaluate(input, action.at, state.sawDown, state.recoveredUntil);
+/** 같은 상태인가: 바뀌지 않았으면 이전 객체를 그대로 돌려줘 소비자가 다시 그려지지 않게 한다. */
+function keepIfSame(state: ConnectionState, next: ConnectionState): ConnectionState {
   return next.input === state.input &&
     next.sawDown === state.sawDown &&
     next.recoveredUntil === state.recoveredUntil &&
+    next.visible === state.visible &&
     sameView(next.view, state.view)
     ? state
     : next;
 }
 
-/** 「다시 연결됐어요」를 지금 그려야 하나. 새 틈이 말을 시작했거나 끊겼으면 그 모습이 이긴다. */
-export function isRecovered(state: ConnectionState): boolean {
-  return state.recoveredUntil !== null && (state.view.phase === "ok" || state.view.phase === "quiet");
+/**
+ * 앞으로 돌아온 사람에게 소켓 틈은 **지금 시작한** 틈이다. 붙어 있지 않은 틈(끝난 소켓은 빼고: 아무도 다시 열지 않으니
+ * 기다릴 틈이 없다)은 새 침묵 1초로 다시 시작한다. 이미 붙어 있으면 건드릴 것이 없다.
+ */
+function restartedForReturn(input: ConnectionInput, at: number): ConnectionInput {
+  const socket = input.socket;
+  if (socket.status === "connected" || socket.open === null || socket.ended) return input;
+  return { ...input, socket: { ...socket, open: openingSocketGap(at).open } };
+}
+
+export function reduceConnection(state: ConnectionState, action: ConnectionAction): ConnectionState {
+  if (action.kind === "visibility") {
+    if (!action.visible) {
+      // 사람이 앱을 떠났다. 이 시각부터의 판정은 아무도 보지 않는다.
+      return keepIfSame(state, evaluate(state.input, action.at, false, null, false));
+    }
+    if (state.visible) {
+      // 뒤로 간 적이 없다(알림 센터를 당긴 정도): 아무것도 다시 시작하지 않고 시각만 따라간다.
+      return keepIfSame(state, evaluate(state.input, action.at, state.sawDown, state.recoveredUntil, true));
+    }
+    // 돌아왔다: 새 시작이다. 뒤에서 본 적 없는 끊김 기억·복구 표시는 이미 비어 있고, 틈은 새 침묵으로 시작한다.
+    return keepIfSame(state, evaluate(restartedForReturn(state.input, action.at), action.at, false, null, true));
+  }
+  const input = action.kind === "event" ? foldConnectionEvent(state.input, action.event) : state.input;
+  return keepIfSame(state, evaluate(input, action.at, state.sawDown, state.recoveredUntil, state.visible));
+}
+
+/**
+ * 「다시 연결됐어요」를 지금 그려야 하나. 새 틈이 말을 시작했거나 끊겼으면 그 모습이 이긴다.
+ *
+ * `now` 를 건네면(epoch ms) 깨움이 늦었거나 사라져도 표시가 끝난 시각 이후에는 거둔다. 상태 객체는 깨움이 와야 바뀌므로, 시각을
+ * 모르는 읽기는 낡은 상태를 영원히 참으로 읽을 수 있다(보내기 같은 다음 사건이 와야 지는 옛 모양, #5403). 건네지 않으면 예전과
+ * 같다(웹이 그대로 쓰는 호출).
+ */
+export function isRecovered(state: ConnectionState, now?: number): boolean {
+  if (state.recoveredUntil === null) return false;
+  if (now !== undefined && now >= state.recoveredUntil) return false;
+  return state.view.phase === "ok" || state.view.phase === "quiet";
 }
 
 /** 다음에 판정을 다시 해야 하는 시각(epoch ms). 시간으로 바뀔 일이 없으면 null. */

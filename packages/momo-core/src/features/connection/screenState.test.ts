@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RestOutcome } from "../../lib/http";
 import { CONNECTION_KEYS as K } from "./copyKeys";
-import { CONNECTION_MARK, CONNECTION_TONE, presentConnection } from "./presentation";
+import { CONNECTION_MARK, CONNECTION_TONE, nextBandStood, presentBand, presentConnection } from "./presentation";
 import {
   deviceEvent,
   eventAction,
@@ -17,6 +17,7 @@ import {
   socketEvent,
   tickAction,
   viewWithoutRest,
+  visibilityAction,
   type ConnectionAction,
   type ConnectionState,
 } from "./screenState";
@@ -35,6 +36,7 @@ const socket = (at: number, status: "connected" | "connecting" | "disconnected")
 const device = (at: number, online: boolean) => eventAction(at, deviceEvent(at, online));
 const resume = (at: number) => eventAction(at, resumeEvent(at));
 const tick = (at: number) => tickAction(at);
+const visibility = (at: number, visible: boolean) => visibilityAction(at, visible);
 
 function failure(path: string, at: number): ConnectionAction {
   const outcome: RestOutcome = {
@@ -284,5 +286,152 @@ describe("무엇을 그리나 (카드와 띠가 같이 읽는다)", () => {
   it("로그인 만료는 카드·띠가 말하지 않는다(로그인 화면이 말한다)", () => {
     const state = step(healthy(), eventAction(T0 + 1_000, sessionEvent(true)));
     expect(present(state)).toBeNull();
+  });
+});
+
+// ---- #5403: 사람이 끊김 띠를 본 적이 없는 재연결은 아무것도 보이지 않는다 ------------------------------------
+// 앱이 뒤에 가 있던 시간은 화면을 보는 사람이 없던 시간이다. 그 사이 소켓이 끊겨도(`disconnected`) 시계는 멈춘 JS 와 함께
+// 서 있다가 앞으로 돌아온 순간 늦게 깨어난다: 그 늦은 깨움이 「틈이 오래됐다」 = 「끊김」으로 읽고, 곧이어 소켓이 붙으면
+// 아무도 못 본 끊김의 「다시 연결됐어요」가 선다. 전송의 `resume` 은 오래된 틈을 「말하던 띠」로 보고 침묵 1초 없이 곧바로
+// 「연결 중」을 세운다. 둘 다 사람이 본 적 없는 일이다.
+
+describe("앱이 뒤에 갔다 온 틈은 사람이 본 끊김이 아니다 (#5403)", () => {
+  /** 소켓이 앞에 있을 때 끊긴 채 앱이 뒤로 갔다: 깨움 시계는 JS 와 함께 멈춰 있다. */
+  function leftWhileDisconnected(): ConnectionState {
+    return step(healthy(), socket(T0 + 1_000, "disconnected"), visibility(T0 + 1_500, false));
+  }
+
+  it("뒤에 있던 동안의 늦은 깨움은 「끊김」으로 치지 않고, 돌아와 붙으면 복구 표시도 없다 (깨움이 먼저 오는 순서)", () => {
+    let state = leftWhileDisconnected();
+    state = step(state, tick(T0 + 300_000));
+    expect(state.sawDown).toBe(false);
+    state = step(state, visibility(T0 + 300_010, true), resume(T0 + 300_010));
+    // 돌아온 순간은 새 침묵 1초다: 「연결 중」이 곧바로 서지 않는다.
+    expect(state.view.phase).toBe("quiet");
+    expect(state.view.nextChangeAt).toBe(T0 + 301_010);
+    state = step(state, socket(T0 + 300_500, "connected"));
+    expect(state.view.phase).toBe("ok");
+    expect(isRecovered(state)).toBe(false);
+    expect(state.recoveredUntil).toBeNull();
+  });
+
+  it("전송의 resume 이 앱 상태 알림보다 먼저 와도 결과가 같다 (순서 무관)", () => {
+    const base = leftWhileDisconnected();
+    const a = step(base, tick(T0 + 300_000), visibility(T0 + 300_010, true), resume(T0 + 300_010));
+    const b = step(base, tick(T0 + 300_000), resume(T0 + 300_010), visibility(T0 + 300_010, true));
+    for (const state of [a, b]) {
+      expect(state.view.phase).toBe("quiet");
+      expect(state.view.nextChangeAt).toBe(T0 + 301_010);
+      expect(state.sawDown).toBe(false);
+    }
+    expect(b.input.socket.open).toEqual(a.input.socket.open);
+  });
+
+  it("뒤에 있는 동안 붙은 소켓도 복구 표시를 남기지 않는다", () => {
+    let state = leftWhileDisconnected();
+    state = step(state, socket(T0 + 20_000, "connected"));
+    expect(state.view.phase).toBe("ok");
+    expect(isRecovered(state)).toBe(false);
+    state = step(state, visibility(T0 + 40_000, true));
+    expect(isRecovered(state)).toBe(false);
+  });
+
+  it("앞에서 사람이 끊김을 본 경우는 그대로다: 오프라인이 서 있다가 돌아와 붙으면 2초 선다", () => {
+    let state = step(healthy(), device(T0 + 1_000, false));
+    expect(state.sawDown).toBe(true);
+    // 알림 센터를 당긴 정도(`inactive`)는 뒤로 간 것이 아니다 - 알리지 않는다. 그냥 시간이 흐르고 기기가 돌아온다.
+    state = step(state, device(T0 + 5_000, true), socket(T0 + 5_500, "connected"));
+    expect(state.view.phase).toBe("ok");
+    expect(isRecovered(state)).toBe(true);
+  });
+
+  it("끊김이 서 있는 채 앱이 뒤에 갔다 와도 기기 오프라인은 돌아온 순간부터 다시 끊김이고, 풀리면 2초 선다", () => {
+    let state = step(healthy(), device(T0 + 1_000, false), visibility(T0 + 2_000, false));
+    state = step(state, visibility(T0 + 60_000, true));
+    expect(state.view.phase).toBe("down");
+    expect(state.view.cause).toBe("deviceOffline");
+    expect(state.sawDown).toBe(true);
+    state = step(state, device(T0 + 70_000, true), socket(T0 + 70_400, "connected"));
+    expect(isRecovered(state)).toBe(true);
+  });
+
+  it("앞에 있다는 알림만 되풀이되면(뒤로 간 적 없음) 아무것도 다시 시작하지 않는다", () => {
+    const before = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 2_500));
+    expect(before.view.phase).toBe("connecting");
+    const after = step(before, visibility(T0 + 3_000, true));
+    expect(after.view.phase).toBe("connecting");
+    expect(after.input.socket.open).toEqual(before.input.socket.open);
+  });
+
+  it("앞으로 돌아왔을 때 소켓이 이미 붙어 있으면 아무 일도 없다", () => {
+    const state = step(healthy(), visibility(T0 + 1_000, false), visibility(T0 + 50_000, true));
+    expect(state.view.phase).toBe("ok");
+    expect(isRecovered(state)).toBe(false);
+  });
+});
+
+describe("복구 표시는 시계가 늦어도 읽는 시각이 지나면 거둔다 (#5403)", () => {
+  const recovered = () =>
+    step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000), socket(T0 + 20_000, "connected"));
+
+  it("깨움 없이 시각만 지나도 읽는 쪽이 시각을 건네면 정확히 2초에 거둔다", () => {
+    const state = recovered();
+    expect(state.recoveredUntil).toBe(T0 + 22_000);
+    expect(isRecovered(state, T0 + 21_999)).toBe(true);
+    expect(isRecovered(state, T0 + 22_000)).toBe(false);
+    expect(isRecovered(state, T0 + 600_000)).toBe(false);
+  });
+
+  it("시각을 건네지 않으면 예전과 같다(웹이 그대로 쓰는 호출)", () => {
+    expect(isRecovered(recovered())).toBe(true);
+  });
+
+  it("늦은 깨움도 다음 판정에서 지운다: 5분 뒤의 깨움 하나로 복구 표시가 거두어진다", () => {
+    const state = step(recovered(), tick(T0 + 300_000));
+    expect(isRecovered(state)).toBe(false);
+    expect(state.recoveredUntil).toBeNull();
+  });
+});
+
+describe("대화 띠는 자기가 끊김을 그린 적이 있을 때만 「다시 연결됐어요」를 말한다 (#5403)", () => {
+  /** 띠가 새로 선 곳(대화를 막 열었다)에서 화면이 도는 방식: 상태가 바뀔 때마다 기억을 한 칸 옮기고 그 기억으로 그린다. */
+  function shownAcross(states: ConnectionState[]): Array<string | null> {
+    let stood = false;
+    return states.map((state) => {
+      const recovered = isRecovered(state);
+      const shown = presentBand(state.view, recovered, stood);
+      stood = nextBandStood(state.view, recovered, stood);
+      return shown === null ? null : shown.tone;
+    });
+  }
+
+  it("끊김이 다른 화면(홈)에 있는 동안 모델만 읽었다면, 대화를 열었을 때의 재연결은 아무것도 말하지 않는다", () => {
+    const down = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000));
+    expect(down.sawDown).toBe(true);
+    const back = step(down, socket(T0 + 20_000, "connected"));
+    expect(isRecovered(back)).toBe(true);
+    // 띠가 처음 그려지는 때가 바로 복구 순간이다: 띠는 끊김을 그린 적이 없다.
+    expect(shownAcross([back])).toEqual([null]);
+  });
+
+  it("띠가 끊김을 그렸으면 복구 2초를 말하고, 거두어진 뒤에는 기억도 잊는다", () => {
+    const down = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000));
+    const back = step(down, socket(T0 + 20_000, "connected"));
+    const gone = step(back, tick(T0 + 22_000));
+    expect(shownAcross([down, back, gone])).toEqual([CONNECTION_TONE.down, CONNECTION_TONE.recovered, null]);
+    // 잊었는지: 거둔 뒤에 새로 끊겼다 곧바로 돌아오면(연결 중만 보였다) 다시 말하지 않는다.
+    const again = step(gone, socket(T0 + 30_000, "disconnected"), tick(T0 + 31_500), socket(T0 + 33_000, "connected"));
+    expect(shownAcross([down, back, gone, again])).toEqual([CONNECTION_TONE.down, CONNECTION_TONE.recovered, null, null]);
+  });
+
+  it("눌러서 다시 연결한 동안의 「연결 중」은 기억을 지우지 않는다", () => {
+    const down = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000));
+    const pressed = step(down, resume(T0 + 12_000));
+    const back = step(pressed, socket(T0 + 13_000, "connected"));
+    expect(shownAcross([down, pressed, back])).toEqual([
+      CONNECTION_TONE.down,
+      CONNECTION_TONE.connecting,
+      CONNECTION_TONE.recovered,
+    ]);
   });
 });
