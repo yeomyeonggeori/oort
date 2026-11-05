@@ -399,6 +399,19 @@ const PROGRESS_PX = 1;
 const ENTRY_QUIET_MS = 150;
 
 /**
+ * 진입 베일이 목록을 가리는 시간의 상한 (#5403). 진입이 앉기(`settleEntry`)를 기다리다 이 시간이 지나면 어떤 이유로든 목록을 보인다 - 앉음의 신호가
+ * 오지 않는 길(진입이 앉기 전에 끊긴 수렴, 짧아서 움직일 것이 없는 목록)이 있어도 베일이 목록을 영영 가리지 않는다. 시뮬레이터 실측으로 진입이 앉는 데
+ * 걸린 시간은 약 0.2초(`chasingTail` 이 켜져 있는 동안)이고, 느린 기기의 수렴은 0.5초 안쪽이다.
+ */
+const ENTRY_VEIL_MAX_MS = 500;
+
+/** 베일이 서 있는 동안 목록의 스타일: 그리지 않는다(자리·크기·네이티브 보고는 그대로 - 진입 수렴은 보이지 않는 채로 한다). */
+const ENTRY_VEILED_STYLE = {opacity: 0} as const;
+
+/** 대화를 불러오는 중이라는 말. 불러오는 화면과 진입 베일이 같은 한 줄을 쓴다(베일이 서는 동안 사람은 불러오는 화면이 이어진다고 본다). */
+const LOADING_LABEL = '대화를 불러오는 중입니다.';
+
+/**
  * The prepend correction, as one stable object so the prop does not churn.
  *
  * See the header for why `minIndexForVisible` is 0 and why that 0 is
@@ -1692,6 +1705,22 @@ function TimelineInner({
   }
   const rowViewability = rowViewabilityRef.current.store;
 
+  // ---- 진입 베일 (#5403) ------------------------------------------------------
+  // 마운트한 목록은 오프셋 0(대화의 맨 위)에 서고 곧 끝으로 간다(진입 수렴, 위 `olderReady` 의 설명). 시뮬레이터 녹화로 잰 그 몇 프레임 -
+  // 「대화의 시작입니다」·옛 날짜가 4프레임(약 70ms), 중간 자리 한 프레임, 바닥 - 이 사람에게는 「들어온 직후 위에서 아래로 훑는」 움직임이다(owner
+  // 11-05, 10-31). 그래서 진입이 앉을 때까지(`settleEntry`) 목록을 그리지 않고 그 자리에 「불러오는 중」을 이어 둔다: 사람은 바닥에 앉은 첫 프레임만
+  // 본다. 상한(`ENTRY_VEIL_MAX_MS`)이 지나면 무슨 일이 있어도 보인다. 필이 있는 대화 화면(`jumpPills`)만 쓴다 - 스레드 패널과 하네스는 목록이
+  // 부모의 직접 자식인 채다. 목록의 정체성(`listKey`)마다 한 번이다: 새 스크롤뷰(방 진입)는 다시 베일을 쓰고, 같은 목록에 메시지가 붙는 것은 건드리지 않는다.
+  const [unveiledKey, setUnveiledKey] = useState<string | null>(null);
+  const listKeyRef = useRef(listKey);
+  listKeyRef.current = listKey;
+  const entryVeiled = jumpPills && holdsChannelContent && unveiledKey !== listKey;
+  useEffect(() => {
+    if (!entryVeiled) return undefined;
+    const timer = setTimeout(() => setUnveiledKey(listKey), ENTRY_VEIL_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [entryVeiled, listKey]);
+
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
     if (!entrySettledRef.current) return;
@@ -1712,6 +1741,8 @@ function TimelineInner({
    * 으로 맨 위 → 옛 페이지 부름 0).
    */
   const settleEntry = useCallback(() => {
+    // 앉았다: 진입 베일을 걷는다(#5403). 이미 앉은 뒤의 호출은 값이 같아 아무 일도 하지 않는다.
+    setUnveiledKey(listKeyRef.current);
     if (entrySettledRef.current) return;
     entrySettledRef.current = true;
     // 이제부터 맨 위에 닿는 것은 사람이 올라간 것이다 — 옛 페이지를 불러도 된다(#2604).
@@ -3708,7 +3739,7 @@ function TimelineInner({
   const empty = messages.length === 0 && items.length === 0;
 
   if (status === 'loading' && empty) {
-    return withNotices(<LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />);
+    return withNotices(<LoadingState label={LOADING_LABEL} testID="timeline-loading" />);
   }
 
   if (status === 'ready' && empty) {
@@ -3755,6 +3786,8 @@ function TimelineInner({
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
       // the bottom, because the keyboard lifts this list's top edge out of sight.
       contentContainerStyle={contentStyle}
+      // 진입이 앉기 전의 목록은 그리지 않는다(진입 베일, 위 `entryVeiled`).
+      style={entryVeiled ? ENTRY_VEILED_STYLE : undefined}
       // `renderItem` closes over these, and a `FlatList` cell will happily keep
       // rendering with a stale closure otherwise. The measurement seam found
       // this the hard way: moving `anchorSeq` to another row left the wrapper on
@@ -3867,6 +3900,12 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {motionScope}
+      {/* 진입 베일이 서 있는 동안 목록 자리에 불러오는 화면을 잇는다(#5403) - 같은 문장이라 사람에게는 불러오는 중이 끝나고 목록이 바닥에 앉은 채 나타난다. */}
+      {entryVeiled ? (
+        <View style={styles.entryCover}>
+          <LoadingState label={LOADING_LABEL} testID="timeline-entry-veil" />
+        </View>
+      ) : null}
       {/* 위쪽 필 둘의 자리. 연결 띠가 목록 위에 뜨면 `topPillInset` 만큼 내려 띠 밑에 쌓인다(#4292). 필 둘은 이
           틀의 위 가장자리에서 각자 `top` 을 지므로, 틀을 내리면 둘이 함께 내려간다. 틀은 손을 받지 않는다. */}
       <View pointerEvents="box-none" style={[styles.topPills, {top: topPillInset}]} testID="timeline-top-pills">
@@ -3929,6 +3968,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   footer: {height: space.sm},
   /** 필이 떠 있을 틀. 목록과 같은 자리·같은 크기다. */
   pillFrame: {flex: 1},
+  /** 진입 베일이 서 있는 동안 목록을 덮는 불러오는 화면(#5403). 목록과 같은 자리·같은 크기이고, 손을 받는다: 보이지 않는 목록의 행이 눌리지 않게 한다. */
+  entryCover: {...StyleSheet.absoluteFill},
   /** 위쪽 필 둘의 틀. 틀의 `top` 이 연결 띠 밑으로 내려가는 양이고(#4292), 필은 이 틀 안에서 자기 `top` 을 진다. */
   topPills: {position: 'absolute', left: 0, right: 0, bottom: 0},
 });
