@@ -22,7 +22,8 @@ import { DISPLAY_GRACE_MS } from "./thresholds";
 // ## 입력
 //   deviceOnline    기기가 아는 사실. `true`/`false`, 플랫폼이 모르면 `null`(모르면 막지 않는다).
 //   socket          소켓 틈의 시계(`socketGap.ts`).
-//   rest            REST 결과를 접은 한 줄(`restSignal.ts`) — 서버에 닿았나.
+//   rest            REST 결과를 접은 한 줄(`restSignal.ts`) — 서버에 닿았나. 응답 한 건이 풀고, 끊겨 있던 소켓이 다시 붙어도
+//                   푼다(같은 서버에 닿았다, #5407). 앱이 스스로 보내는 확인 요청은 `restProbe.ts`.
 //   sessionExpired  로그인이 만료됐다(리프레시가 거절된 뒤에만 선다. 5xx·429·408로 회전이 끝나지 못한
 //                   것은 만료가 아니라 서버 오류다 — 그 규칙은 `lib/api.ts`가 그대로 갖는다).
 //
@@ -266,16 +267,23 @@ export function initialConnectionInput(at: number, deviceOnline: boolean | null 
 
 export function foldConnectionEvent(input: ConnectionInput, event: ConnectionEvent): ConnectionInput {
   switch (event.kind) {
-    case "socket":
+    case "socket": {
+      const socket = foldSocketEvent(input.socket, {
+        kind: "status",
+        at: event.at,
+        status: event.status,
+        ...(event.ended === undefined ? {} : { ended: event.ended }),
+      });
+      // 실시간이 (다시) 붙었다 = 같은 서버에 닿았다(#5407). 「서버에 닿지 못함」·「알 수 없음」은 마지막 응답 뒤에 쌓인 실패에서 오는데, 서버가
+      // 돌아온 뒤에도 사람이 요청을 하나 보내 응답을 받기 전에는 그 기억이 남았다. 끊겨 있던 소켓이 붙는 그 순간(이미 붙어 있던 소켓의 되풀이 알림은
+      // 아니다)에 기억을 거둔다. 서버가 아직 안 돌아왔다면 다음 서로 다른 요청 3건의 실패가 다시 선언한다.
+      const attached = event.status === "connected" && input.socket.status !== "connected";
       return {
         ...input,
-        socket: foldSocketEvent(input.socket, {
-          kind: "status",
-          at: event.at,
-          status: event.status,
-          ...(event.ended === undefined ? {} : { ended: event.ended }),
-        }),
+        socket,
+        ...(attached && restHasUnansweredFailure(input.rest) ? { rest: INITIAL_REST_SIGNAL } : {}),
       };
+    }
     case "resume":
       return { ...input, socket: foldSocketEvent(input.socket, { kind: "resume", at: event.at }) };
     case "device": {

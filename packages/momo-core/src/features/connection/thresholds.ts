@@ -60,3 +60,14 @@ export const RESUME_AFTER_HIDDEN_MS = 30_000;
 
 /** 「끊김」이 보였던 뒤 다시 붙으면 「다시 연결됐어요」를 이만큼(2초) 보인다(#5201, 감사 문서 §4 원칙 7). */
 export const RECOVERED_FLASH_MS = 2_000;
+
+/**
+ * 「서버에 닿지 못함」·「알 수 없음」 띠가 앞에서 서 있는 동안 앱이 스스로 보내는 가벼운 확인 요청(`restProbe.ts`, #5407)의 간격: 첫 확인은 띠가 선 지
+ * 이만큼(2초) 뒤이고, 확인이 끝날 때마다 두 배로 늘다가(2·4·8·16초) 상한(30초)에서 멈춘다. 서버가 돌아온 뒤 띠가 걷히기까지의 최악은 이 상한에 확인
+ * 요청 하나의 시간을 더한 만큼이고, 사람의 요청은 필요 없다.
+ */
+export const REST_PROBE_FIRST_DELAY_MS = 2_000;
+export const REST_PROBE_MAX_DELAY_MS = 30_000;
+
+/** 확인 요청 하나의 마감. 보통 요청(15초)보다 짧다 - 죽은 길에서 한 번의 확인이 다음 확인을 오래 붙잡지 않게. */
+export const REST_PROBE_TIMEOUT_MS = 8_000;
