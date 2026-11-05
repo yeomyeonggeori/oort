@@ -1153,6 +1153,13 @@ export default function ConversationScreen({
   const [quote, setQuote] = useState<QuoteDraft | null>(null);
   useEffect(() => setQuote(null), [channelId]);
   const composerInputRef = useRef<TextInput | null>(null);
+  // 대화 안 검색이 열려 있는 동안 사람이 글쓰기를 시작하면(인용·답글 대상을 걸면) 검색을 끝낸다(#5364): 컴포저가 숨어 있어서 그대로 두면 자판만 뜨고 입력칸이 안 보인다.
+  // 검색 훅은 아래에서 만들어지므로 닫는 문을 ref 로 받는다(`jumpTargetRef` 와 같은 거울).
+  const endSearchForWriting = useRef<() => void>(() => {});
+  const focusComposer = useCallback(() => {
+    composerInputRef.current?.focus();
+    endSearchForWriting.current();
+  }, []);
 
   const messages = timeline.state.messages;
   const membershipRevision = dmMembershipRevision(messages);
@@ -1169,8 +1176,8 @@ export default function ConversationScreen({
   const onReplyStarted = useCallback(() => {
     setQuote(null);
     // 답글을 건 사람의 다음 동작도 100% 글쓰기다 — 인용과 같다.
-    composerInputRef.current?.focus();
-  }, []);
+    focusComposer();
+  }, [focusComposer]);
   const {replyTarget, startReply, cancelReply, sendReply: sendReplyDraft} =
     useReplyDraft({
       channelId,
@@ -1196,8 +1203,8 @@ export default function ConversationScreen({
     cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
-    composerInputRef.current?.focus();
-  }, [cancelReply]);
+    focusComposer();
+  }, [cancelReply, focusComposer]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
@@ -1364,6 +1371,12 @@ export default function ConversationScreen({
     [onJumpToMessage],
   );
   const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+  endSearchForWriting.current = () => {
+    if (!convSearch.active) return;
+    convSearch.close();
+    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  };
 
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {

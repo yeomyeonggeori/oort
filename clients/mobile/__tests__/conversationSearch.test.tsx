@@ -381,7 +381,7 @@ describe('#5364 대화 안 검색 — 이동', () => {
     expect(within(screen.getByTestId('composer-dock')).queryByTestId('jump-missed')).toBeNull();
   });
 
-  it('「목록」은 결과 목록으로 돌아가고, 같은 목록에서 다른 결과를 고를 수 있다', async () => {
+  it('「목록」은 결과 목록으로 돌아가고, 같은 목록에서 다른 결과를 고를 수 있으며, 이동한 뒤 인용을 걸면(글쓰기 시작) 검색이 끝나고 컴포저가 돌아온다', async () => {
     installFetch();
     await search();
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
@@ -395,6 +395,16 @@ describe('#5364 대화 안 검색 — 이동', () => {
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[1]);
     await waitFor(() => expect(jumpTargetOf()?.messageId).toBe('msg-102'));
     expect(positionText()).toBe('2 / 2+');
+
+    // 이동한 뒤 대화는 손으로 만질 수 있다. 메시지를 길게 눌러 「인용」을 걸면 글쓰기가 시작된 것이다 — 컴포저가 숨은 채로 자판만 뜨지 않도록 검색이 끝난다.
+    const point = {nativeEvent: {pageX: 100, pageY: 200, locationX: 100, locationY: 200}};
+    fireEvent(screen.getAllByTestId('message-row')[0], 'touchStart', point);
+    fireEvent(screen.getAllByTestId('message-press')[0], 'longPress');
+    await waitFor(() => expect(screen.getByTestId('message-action-sheet')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sheet-quote'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-search-row')).toBeNull());
+    expect(screen.queryByTestId('conversation-search-bar')).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('conversation-composer-stack').props.style)?.display).not.toBe('none');
   });
 });
 
