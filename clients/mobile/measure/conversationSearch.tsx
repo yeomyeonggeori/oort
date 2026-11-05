@@ -147,7 +147,10 @@ function Conversation({landedRow}: {landedRow?: number}): React.JSX.Element {
 
 export function ConversationSearchSurface({which}: {which: string}): React.JSX.Element {
   // `live`: 진짜 키보드 틀·목록·컴포저에 검색 부품을 얹은 손으로 누르는 장면(`conversationSearchLive.tsx`).
-  if (which === 'live') return <ConversationSearchLiveSurface />;
+  // `live-<장면>`(idle · results · landed · landed-other)은 같은 표면을 손 없이 그 장면까지 몰고 간다(캡처용, #5384).
+  if (which === 'live' || which.startsWith('live-')) {
+    return <ConversationSearchLiveSurface auto={which.slice('live'.length).replace(/^-/, '')} />;
+  }
   return <ConversationSearchStatic which={which} />;
 }
 

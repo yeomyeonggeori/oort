@@ -4,7 +4,9 @@ import type {ReactionMap} from '@momo/core/features/timeline/reactions';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useRef, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {Screen} from '../src/design/atoms';
+import {NoticeBlock, Screen} from '../src/design/atoms';
+import {space} from '../src/design/tokens';
+import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
@@ -22,6 +24,7 @@ import {Timeline} from '../src/features/conversation/Timeline';
 //
 //   reading  머리 30줄만 든 방에서 입력창 위 「찾는 중 · 취소」(정지)
 //   failed   읽다가 실패 - 「다시 시도 · 닫기」(정지)
+//   missed   읽기 상한(300줄)에서 물러난 「더 위쪽에 있습니다」 고지가 입력창 바로 위 도크에 선 모양(#5384, 정지) — 옛 자리(목록 맨 위)가 아니다
 //   landed   읽은 쪽이 합쳐진 방(목적지 위 20줄 포함)에서 같은 목적지로 점프가 4초마다 다시 걸려 **착지·강조**(틴트는 1.5초 남짓 서고 물러난다)
 //   run      reading → 3초 뒤 읽은 쪽이 합쳐지고 같은 목적지로 점프가 다시 걸려 착지(실제 화면의 두 발과 같은 순서). `run-fast` 는 300ms 뒤 -
 //            진입 수렴이 끝나기 전에 읽은 쪽이 붙는 경우(옛 페이지가 진입 수렴 중에 붙으면 목록이 밀리던 #2604 의 자리)
@@ -110,6 +113,8 @@ function range(from: number, to: number, room: Room): Message[] {
 }
 
 const probeStyles = StyleSheet.create({
+  // 대화 화면의 도크 고지 칸(`ConversationScreen` 의 `styles.notice`)과 같은 안쪽 여백.
+  notice: {padding: space.md},
   probe: {position: 'absolute', top: 54, left: 150, zIndex: 999, fontSize: 28, fontWeight: '700', color: '#ffffff', backgroundColor: '#000000'},
 });
 
@@ -219,6 +224,16 @@ export function JumpSeekSurface({which}: {which: string}): React.JSX.Element {
         }
         composer={
           <>
+            {kind === 'missed' ? (
+              <View style={probeStyles.notice}>
+                <NoticeBlock
+                  headline={jumpMissedNotice('older', 'search').headline}
+                  detail={jumpMissedNotice('older', 'search').detail}
+                  onDismiss={NOOP}
+                  testID="jump-missed"
+                />
+              </View>
+            ) : null}
             {failed || (run && reading) || which === 'reading' ? (
               <JumpSeekLine failed={failed} onCancel={NOOP} onRetry={NOOP} onDismiss={NOOP} />
             ) : null}

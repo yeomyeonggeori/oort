@@ -1,7 +1,7 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import type {Message, MessageSearchHit, RosterMember} from '@momo/core/lib/api';
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Keyboard, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
@@ -202,7 +202,11 @@ function useLiveSearch(onJump: (hit: MessageSearchHit) => void): ConversationSea
   };
 }
 
-export function ConversationSearchLiveSurface(): React.JSX.Element {
+/**
+ * `auto`(캡처용, 손 없이 장면을 만든다): `idle` 열기만 · `results` 열고 `deploy` 를 침 · `landed`/`landed-other` 열고 쳐서 결과를 고름(내 말풍선 · 남 말풍선).
+ * 없으면 Maestro 가 손으로 누른다(`maestro/5364-conv-search-live.yaml`).
+ */
+export function ConversationSearchLiveSurface({auto}: {auto?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const [headerHeight, setHeaderHeight] = useState<number>(CONV.headHeight);
@@ -215,6 +219,17 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
     setJump(current => ({messageId: hit.messageId, seq: hit.seq, token: (current?.token ?? 0) + 1}));
   }, []);
   const search = useLiveSearch(onJump);
+  const searchRef = useRef(search);
+  searchRef.current = search;
+  useEffect(() => {
+    if (auto === undefined || auto === '') return undefined;
+    const timers: ReturnType<typeof setTimeout>[] = [setTimeout(() => searchRef.current.open(), 900)];
+    if (auto !== 'idle') timers.push(setTimeout(() => searchRef.current.setQuery('deploy'), 1500));
+    // 결과 목록의 2번(seq 52, 내 글) · 1번(seq 58, 남의 글).
+    if (auto === 'landed') timers.push(setTimeout(() => searchRef.current.choose(1), 2400));
+    if (auto === 'landed-other') timers.push(setTimeout(() => searchRef.current.choose(0), 2400));
+    return () => timers.forEach(clearTimeout);
+  }, [auto]);
   // 고른 결과의 말풍선 안에서 찾은 글자를 칠한다(#5384) — 진짜 화면(`ConversationScreen`)과 같은 값이다.
   const selectedId = search.selected === null ? null : (HITS[search.selected]?.messageId ?? null);
   const settled = search.settledQuery;
