@@ -244,15 +244,17 @@ describe('useTimeline — 스레드 답글의 에코와 다시 보내기', () =>
     });
   });
 
-  // 사보타주: `useTimeline` 의 `sendReply` 에 `...(flags?.alsoInChannel === true ? {alsoInChannel: true} : {})` 를 되살리면 이 시험이 RED 여야 한다.
-  it('옛 호출자가 alsoInChannel 을 억지로 넘겨도 에코에도 요청에도 실리지 않는다', async () => {
-    jest.mocked(sendThreadReply).mockResolvedValue(confirmed());
+  // 사보타주: `useTimeline` 의 `sendReply` 가 에코 행에 `alsoInChannel` 을 싣거나(`...(flags?.alsoInChannel ...)`) `post` 가 그 값을 요청에 실으면 이 시험이 RED 여야 한다.
+  it('옛 호출자가 alsoInChannel 을 억지로 넘겨도 에코에도 요청에도 실리지 않는다', () => {
+    jest.mocked(sendThreadReply).mockImplementation(() => new Promise<Message>(() => undefined));
     const view = hook();
-    await act(async () => {
-      await view.result.current.sendReply(ROOT_ID, '스레드로 보낼 답글', undefined, {alsoInChannel: true} as never);
+    act(() => {
+      void view.result.current.sendReply(ROOT_ID, '스레드로 보낼 답글', undefined, {alsoInChannel: true} as never);
     });
-    const call = jest.mocked(sendThreadReply).mock.calls[0];
-    expect(call[5]).toBeUndefined();
+    const echo = view.result.current.repliesPending(ROOT_ID)[0];
+    expect(echo).toBeDefined();
+    expect(echo).not.toHaveProperty('alsoInChannel');
+    expect(jest.mocked(sendThreadReply).mock.calls[0][5]).toBeUndefined();
   });
 
   it('실패 → 대화에 보임 → 다시 보내기: 같은 client_msg_id 로 한 번 더 가고, 한 메시지로 모인다', async () => {

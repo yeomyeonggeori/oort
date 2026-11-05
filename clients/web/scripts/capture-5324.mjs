@@ -16,7 +16,8 @@
 //   입력칸    스레드 입력창에 「대화에도 보내기」 체크가 없고, 보내기 요청 본문에 `alsoInChannel` 키가 없다(루트 `rootId` 는 간다).
 //   같은 카드 스레드 입력창 그릇이 본 입력창 그릇과 **계산된 값**으로 같다 — 테두리 두께·색, 둥글기, 그림자, 바탕, 안쪽 여백. 도구 줄의 단추
 //             묶음(첨부·멘션·이모지·서식·보내기·예약 ▾)도 같고, 보내기 단추의 둥글기·바탕이 같다. 다른 것은 자리표시 글뿐이다.
-//   오프라인  막힌 스레드 입력창의 원인 문장은 어절에서 꺾인다(#5294: 계산된 word-break 가 keep-all).
+//   오프라인  막힌 채널 입력창(스레드를 닫은 동안)·스레드 입력창(연 동안)의 원인 문장은 어절에서 꺾인다(#5294: 계산된 word-break 가 keep-all —
+//             이 검사는 지워진 `capture-4888.mjs` 가 하던 것이라 이 하네스가 이어받는다).
 //
 // 백엔드는 없다: `/v1/**` 는 이 파일 안의 메모리 서버다(POST 가 행을 만들고 받은 본문을 기록한다). 인물은 전부 가상이다(레포는 공개).
 // =============================================================================
@@ -230,6 +231,22 @@ const toolLabels = (page, actionsId) =>
     return Array.from(row.querySelectorAll("button")).map((b) => (b.getAttribute("aria-label") || "").replace(/^(메시지|답글) 보내기$/, "보내기"));
   }, actionsId);
 
+/**
+ * 막힌 입력창의 원인 문장은 어절에서 꺾는다 (#5294). 기기를 오프라인으로 두면 막힌 입력창 위에 원인 문장이 서고, 꺾이는 자리는 폭에 달려 문자열로는
+ * 못 잰다 — 엔진이 **계산한** `word-break` 를 읽는다(`break-keep` 이 빠지면 `normal` 이다).
+ */
+async function expectBlockedLineKeepsWords(context, page, t, name, testId) {
+  await context.setOffline(true);
+  try {
+    const line = page.locator(`[data-testid="${testId}"]`);
+    const stood = await line.waitFor({ state: "attached", timeout: 8000 }).then(() => true, () => false);
+    const wordBreak = stood ? await line.evaluate((el) => getComputedStyle(el).wordBreak) : "(원인 문장이 서지 않았다)";
+    check(`${t} 막힌 ${name}: 원인 문장의 word-break 가 keep-all 이다`, wordBreak === "keep-all", wordBreak);
+  } finally {
+    await context.setOffline(false);
+  }
+}
+
 async function runThread(browserType, origin, scheme, tag, width) {
   const server = makeServer();
   const { browser, context, page } = await open(browserType, origin, scheme, server, { width, height: 800 });
@@ -238,6 +255,8 @@ async function runThread(browserType, origin, scheme, tag, width) {
     // 본류: 옛 「대화에도 보낸」 답글은 본류에 서지 않고 한 줄 요약도 없다.
     check(`${t} 본류: 옛 「대화에도 보낸」 답글은 본류에 서지 않는다`, (await main(page).getByText(OLD_ALSO_TEXT).count()) === 0);
     check(`${t} 본류: 「↳ ○○님 스레드에 답글」 줄이 없다`, (await page.locator('[data-testid="reply-home"]').count()) === 0);
+    // 스레드를 닫은 동안은 채널 입력창이 보인다: 그 원인 문장을 먼저 잰다.
+    await expectBlockedLineKeepsWords(context, page, t, "채널 입력창", "composer-offline");
     await openRootThread(page);
     check(`${t} 스레드: 옛 답글은 스레드에 보인다`, (await panel(page).getByText(OLD_ALSO_TEXT).count()) >= 1);
 
@@ -283,16 +302,8 @@ async function runThread(browserType, origin, scheme, tag, width) {
     check(`${t} 보내기: 스레드에는 보인다`, (await panel(page).getByText("저도 국밥 좋아요").count()) >= 1);
     check(`${t} 보내기: 본류에는 서지 않는다`, (await main(page).getByText("저도 국밥 좋아요").count()) === 0);
 
-    // 오프라인: 막힌 스레드 입력창의 원인 문장은 어절에서 꺾인다(#5294).
-    await context.setOffline(true);
-    try {
-      const line = page.locator('[data-testid="thread-composer-offline"]');
-      const stood = await line.waitFor({ state: "attached", timeout: 8000 }).then(() => true, () => false);
-      const wordBreak = stood ? await line.evaluate((el) => getComputedStyle(el).wordBreak) : "(원인 문장이 서지 않았다)";
-      check(`${t} 막힌 스레드 입력창: 원인 문장의 word-break 가 keep-all 이다`, wordBreak === "keep-all", wordBreak);
-    } finally {
-      await context.setOffline(false);
-    }
+    // 오프라인: 막힌 스레드 입력창의 원인 문장도 어절에서 꺾인다(#5294).
+    await expectBlockedLineKeepsWords(context, page, t, "스레드 입력창", "thread-composer-offline");
   } finally {
     await context.close();
     await browser.close();
