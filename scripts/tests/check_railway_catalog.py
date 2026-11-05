@@ -317,13 +317,45 @@ def hermes_config_shas(repo_root: Path, errors: list[str]) -> list[str]:
     return list(shas.values())
 
 
+def hermes_extra_model_errors(repo_root: Path) -> list[str]:
+    """#5323 (ADR-0203 증보 2026-11-05, N4/N5): the model ids the renderer accepts BEYOND the pinned image's static list are a table of the ADR as
+    well, one row per (provider, id), and the vendor page the code line names is in the row. An id or a row on one side only is the drift the rule
+    forbids (the table is read from `### N5.` to the next heading). It lives here, and not in a unit test of infra/hermes, because the in-image
+    proof runs those tests with only that folder mounted: the ADR is outside it."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location("catalog_check_extra_models", repo_root / "infra" / "hermes" / "render_model_config.py")
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        extras = {(provider, model): source for provider, models in renderer.EXTRA_MODELS.items() for model, source in models.items()}
+        text = (repo_root / "docs" / "adr" / "0203-cohosted-agent-detection.md").read_text(encoding="utf-8")
+        start = text.index("### N5. ")
+        section = text[start:text.index("\n### ", start + 1)]
+    except Exception as exc:  # no table to compare is no comparison
+        return ["ADR-0203 N5 table or infra/hermes/render_model_config.py EXTRA_MODELS cannot be read: %s" % exc.__class__.__name__]
+    rows = re.findall(r"(?m)^\|[^|\n]*\|\s*`([^`\n]+)`\s*\|\s*`([^`\n]+)`\s*\|([^\n]*)\|\s*$", section)
+    errors = []
+    if len(rows) != len(extras) or {(provider, model) for provider, model, _ in rows} != set(extras):
+        errors.append(
+            "ADR-0203 N5 table and infra/hermes/render_model_config.py EXTRA_MODELS are not the same set of (provider, id) pairs: "
+            "one row per id, in both places (rows %s, code %s)" % (sorted((p, m) for p, m, _ in rows), sorted(extras))
+        )
+    for provider, model, line in rows:
+        source = extras.get((provider, model))
+        pages = re.findall(r"[a-z0-9.-]+\.[a-z]{2,}/[^\s)]+", source or "")
+        if source is not None and (not pages or not all(page in line for page in pages)):
+            errors.append("ADR-0203 N5 row of %s %s does not name the vendor page of its EXTRA_MODELS line (%s)" % (provider, model, ", ".join(pages) or "none"))
+    return errors
+
+
 def hermes_canonical(
     config_shas: list[str], gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
 
-    #4935: the config is pinned to a LIST of sha256 values, not one: the default config and the connector-mode config of each model
-    fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
+    #4935, #5323: the config is pinned to a LIST of sha256 values, not one: the default config, the default config with the team model
+    fragment and the connector-mode config of each model fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
     decoded file's hash is exactly one of them (whole-line, fixed-string match), and `|| { echo ... >&2; exit 78; }` says why it stopped.
 
     The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
@@ -779,12 +811,13 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
     config_shas = hermes_config_shas(repo_root, errors)
+    errors.extend(hermes_extra_model_errors(repo_root))
     if len(shas) == 5 and config_shas:
         diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(config_shas, *shas))
         if diff:
             errors.append(
                 "hermes start command is not the canonical command list (gate-first, fail-closed, config pinned to the sha256 LIST of "
-                "`render_model_config.py --catalog` (the default config and a connector-mode config for each model fragment), gate and "
+                "`render_model_config.py --catalog` (the default config, the default config with the team model fragment and a connector-mode config for each model fragment), gate and "
                 "the two image-guard plugin files pinned to the sha256 of lockgate.py and plugins/oort-image-guard/*, the plugin "
                 "installed before the gate; the login relay block only with a key, its two files pinned the same way, key variables "
                 "unset before exec): %s" % diff
@@ -1366,6 +1399,18 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + "0" * 64 + " -e ", kind
         )
+    elif kind == "hermes-config-hash-pre55":  # #5323: the list still names the hash the team default had before Claude was sonnet 5.5
+        import importlib.util
+
+        hermes_dir = Path(__file__).resolve().parents[2] / "infra" / "hermes"
+        spec = importlib.util.spec_from_file_location("catalog_mutation_renderer", hermes_dir / "render_model_config.py")
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        current = renderer.sha256_of(renderer.repo_catalog(str(hermes_dir))["default/claude-oauth.fallback-codex-oauth"])
+        stale = renderer.sha256_of(renderer.render(renderer.read_text(str(hermes_dir / "config.yaml")), "claude-oauth", "codex-oauth", model="claude-sonnet-5"))
+        if stale == current:
+            raise SystemExit("mutation %s: the pre-5.5 config is the current one" % kind)
+        services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], current, stale, kind)
     elif kind == "hermes-config-substring":  # #4935: whole-line match weakened to a substring match
         services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qF -e ", kind)
     elif kind == "hermes-config-check-dropped":  # #4935: the config is not checked at all
@@ -1588,6 +1633,7 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-dropped", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-foreign", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-pre55", "hermes start command is not the canonical command list"),
     ("hermes-config-substring", "hermes start command is not the canonical command list"),
     ("hermes-config-check-dropped", "hermes start command is not the canonical command list"),
     ("hermes-no-guard-install", "hermes start command is not the canonical command list"),

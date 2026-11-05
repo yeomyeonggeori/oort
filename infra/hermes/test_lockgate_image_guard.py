@@ -1042,17 +1042,20 @@ class EnvFileThroughTheGate(GateHarness):
 
 
 class AcceptedConfigs(GateHarness):
-    """#4935: the bytes of config.yaml are pinned. The default config and the connector-mode config of each model fragment (rebuilt from the
-    repo's pieces by render_model_config.py) are accepted by name; any other bytes are refused whatever they say, beside every other rule. The
-    other tests of this file boot a fixture file and accept exactly that fixture (see `GateHarness.boot`)."""
+    """#4935, #5323: the bytes of config.yaml are pinned. The default config, the default config with the team model fragment and the
+    connector-mode config of each model fragment (rebuilt from the repo's pieces by render_model_config.py) are accepted by name; any other
+    bytes are refused whatever they say, beside every other rule. The other tests of this file boot a fixture file and accept exactly that
+    fixture (see `GateHarness.boot`)."""
 
     @classmethod
     def setUpClass(cls):
         module = load(os.path.join(HERE, "render_model_config.py"), "render_model_config_for_accepted_configs")
+        cls.renderer = module
         cls.catalog = {name: text.encode("utf-8") for name, text in module.repo_catalog(HERE).items()}
 
-    def test_the_default_and_every_connector_config_are_accepted_by_name(self):
-        self.assertEqual(len(self.catalog), 5)
+    def test_the_default_the_team_default_and_every_connector_config_are_accepted_by_name(self):
+        self.assertEqual(len(self.catalog), 6)
+        self.assertIn("default/claude-oauth.fallback-codex-oauth", self.catalog)
         for name, raw in self.catalog.items():
             with self.subTest(config=name):
                 rc, record, _ = self.boot(config_bytes=raw)
@@ -1074,6 +1077,21 @@ class AcceptedConfigs(GateHarness):
                     text = " ".join(record["problems"])
                     self.assertIn(hashlib.sha256(changed).hexdigest(), text)
                     self.assertNotIn("max_turn", text.replace("max_turns", ""), "no line of the file is printed")
+
+    def test_configs_that_still_name_the_pre_5_5_claude_id_are_refused_by_the_real_gate(self):
+        # #5323: the table holds the 5.5 hashes and not the old ones beside them. The old id is still a name in Hermes' own static list, so the
+        # renderer can still make these bytes; they are other bytes than any accepted config, so the gate refuses them like any edited file.
+        render, base = self.renderer, open(os.path.join(HERE, "config.yaml")).read()
+        google = open(os.path.join(HERE, "google-connectors.config.yaml")).read()
+        for label, text in (("team default", render.render(base, "claude-oauth", "codex-oauth", model="claude-sonnet-5")),
+                            ("connector, claude primary", render.render_connector(google, "claude-oauth", "codex-oauth", model="claude-sonnet-5")),
+                            ("connector, claude fallback", render.render_connector(google, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"))):
+            with self.subTest(config=label):
+                self.assertIn(b"claude-sonnet-5\n", text.encode("utf-8"))
+                self.assertNotIn(text.encode("utf-8"), self.catalog.values())
+                rc, record, _ = self.boot(config_bytes=text.encode("utf-8"))
+                self.assertRefused(rc, record, "config.yaml is not one of the accepted configs")
+                self.assertIsNone(record["config_accepted_as"])
 
     def test_what_is_judged_is_the_file_that_was_hashed_and_not_a_second_read_of_it(self):
         # the file changes between the hash and the copy the judgement is made on (a writer of the volume, a gap of milliseconds): the scratch
@@ -1256,7 +1274,7 @@ class CrossRunRecall(GateHarness):
                 self.assertTrue(any(fragment in p for p in record["problems"]), record["problems"])
 
     def test_the_shipped_configs_pass_the_rule_through_the_gate_with_their_real_bytes(self):
-        # the five accepted configs, hashed as bytes and judged as what the doubled loader says they are: the switches in the files themselves
+        # the accepted configs, hashed as bytes and judged as what the doubled loader says they are: the switches in the files themselves
         # are read by test_default_config.py; here the gate's own table has to accept exactly these bytes and nothing is left to a fixture
         module = load(os.path.join(HERE, "render_model_config.py"), "render_model_config_for_cross_run")
         for name, text in module.repo_catalog(HERE).items():
