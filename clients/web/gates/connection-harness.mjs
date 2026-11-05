@@ -6,6 +6,10 @@
 //   backend.rest("ok" | "abort" | "503")   REST를 정상으로, 응답 없이 끊김으로, 코드 없는 503으로
 //   backend.socket("ok" | "refuse")        새 실시간 연결을 받아 줄지(refuse: 열자마자 닫는다)
 //   backend.dropSockets()                  붙어 있는 실시간 연결을 서버 쪽에서 끊는다(다시 붙는 건 socket 모드가 정한다)
+//   backend.state.probes                   앱이 스스로 보낸 확인 요청(`GET /healthz`, #5407)의 수. 기본은 REST 모드를 `/v1` 과 똑같이 따른다
+//                                          (가로채지 않으면 미리보기 서버가 답해 「서버에 닿지 못함」 카드가 2초 만에 걷힌다)
+//   backend.healthz("ok" | "abort" | "503" | null)   확인 요청만 따로 정한다(null: REST 모드를 따른다). `/v1` 은 죽어 있는데 확인만 살아난 장면에서
+//                                          카드를 걷는 것이 정말 확인 요청인지(백그라운드 `/v1` 요청이 아니라) 가른다
 //
 // 게이트(`gate-connection.mjs`)가 단정하고 캡처(`scripts/capture-5220.mjs`)가 같은 장면을 찍는다. 자격 증명은
 // 없다: `/v1`은 아래 픽스처로만 답한다.
@@ -112,6 +116,10 @@ export async function installBackend(context, port) {
   };
   const state = {
     restMode: "ok",
+    /** 앱이 스스로 보낸 확인 요청(`GET /healthz`)의 수. */
+    probes: 0,
+    /** 확인 요청만의 모드. null 이면 `restMode` 를 따른다. */
+    healthzMode: null,
     socketMode: "ok",
     sends: [],
     /** 연 적이 있는 실시간 연결의 수(다시 연결 시도가 실제로 나갔는지 센다). */
@@ -157,6 +165,15 @@ export async function installBackend(context, port) {
   });
 
   // 센트리퓨고 JSON 프로토콜의 최소판: connect·subscribe·그 밖의 명령에 답한다. 서버가 먼저 보내는 것은 없다.
+  // 저절로 다시 확인(#5407): 앱이 「서버에 닿지 못함」 카드가 서 있는 동안 보내는 `GET /healthz` 도 같은 REST 모드를 따른다.
+  await context.route("**/healthz", async (route) => {
+    state.probes += 1;
+    const mode = state.healthzMode ?? state.restMode;
+    if (mode === "abort") return route.abort("connectionrefused");
+    if (mode === "503") return json(route, { error: { message: "service unavailable" } }, 503);
+    return json(route, { status: "ok" });
+  });
+
   await context.routeWebSocket(/\/connection\/websocket/, (ws) => {
     if (state.socketMode === "refuse") {
       ws.close({ code: 4000, reason: "gate-refuse" });
@@ -191,6 +208,9 @@ export async function installBackend(context, port) {
     session,
     rest: (mode) => {
       state.restMode = mode;
+    },
+    healthz: (mode) => {
+      state.healthzMode = mode;
     },
     socket: (mode) => {
       state.socketMode = mode;

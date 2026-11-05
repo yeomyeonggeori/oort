@@ -454,3 +454,82 @@ describe("대화 띠는 자기가 끊김을 그린 적이 있을 때만 「다�
     ]);
   });
 });
+
+describe("끊겨 있던 실시간이 다시 붙으면 서버에 닿은 것이다 (#5407)", () => {
+  /** 소켓은 멀쩡하게 붙어 있는데 서로 다른 요청 셋이 닿지 못했다: 서버에 닿지 못함이 선언된 상태. */
+  const declared = () =>
+    step(healthy(), failure("/v1/a", T0 + 1_000), failure("/v1/b", T0 + 1_100), failure("/v1/c", T0 + 1_200));
+
+  it("서버에 닿지 못함: 소켓이 끊겼다 붙는 순간 요청 없이 걷히고, 쓰기가 열리며, 끊김이 보였으니 2초 선다", () => {
+    let state = declared();
+    expect(state.view.cause).toBe("serverUnreachable");
+    expect(state.view.canSend).toBe(false);
+    state = step(state, socket(T0 + 5_000, "disconnected"));
+    expect(state.view.cause).toBe("serverUnreachable");
+    state = step(state, socket(T0 + 6_000, "connected"));
+    expect(state.input.rest.unanswered).toEqual([]);
+    expect(state.view.phase).toBe("ok");
+    expect(state.view.canSend).toBe(true);
+    expect(isRecovered(state)).toBe(true);
+    expect(isRecovered(state, T0 + 7_999)).toBe(true);
+    expect(isRecovered(state, T0 + 8_000)).toBe(false);
+  });
+
+  it("알 수 없음(소켓이 10초 넘게 끊긴 채 실패가 쌓인 띠)도 같다 - 쌓인 실패는 잊어서, 다음 끊김은 다시 「실시간만 끊김」이다", () => {
+    let state = step(healthy(), socket(T0 + 1_000, "disconnected"), failure("/v1/a", T0 + 2_000), tick(T0 + 11_000));
+    expect(state.view.cause).toBe("unknown");
+    state = step(state, socket(T0 + 20_000, "connected"));
+    expect(state.view.phase).toBe("ok");
+    expect(state.input.rest.unanswered).toEqual([]);
+    state = step(state, tick(T0 + 40_000), socket(T0 + 40_000, "disconnected"), tick(T0 + 51_000));
+    expect(state.view.cause).toBe("realtimeDown");
+  });
+
+  it("이미 붙어 있던 소켓의 되풀이 알림이나 붙지 않은 알림은 거두지 않는다(서버는 아직 안 돌아왔을 수 있다)", () => {
+    expect(step(declared(), socket(T0 + 5_000, "connected")).view.cause).toBe("serverUnreachable");
+    const notAttached = step(declared(), socket(T0 + 5_000, "disconnected"), socket(T0 + 5_500, "connecting"));
+    expect(notAttached.view.cause).toBe("serverUnreachable");
+  });
+
+  it("거둔 뒤에 서버가 아직 죽어 있으면 서로 다른 요청 3건의 실패가 다시 선언한다", () => {
+    let state = step(declared(), socket(T0 + 5_000, "disconnected"), socket(T0 + 6_000, "connected"));
+    expect(state.view.phase).toBe("ok");
+    state = step(state, failure("/v1/a", T0 + 7_000), failure("/v1/b", T0 + 7_100));
+    expect(state.view.cause).toBeNull();
+    state = step(state, failure("/v1/c", T0 + 7_200));
+    expect(state.view.cause).toBe("serverUnreachable");
+  });
+});
+
+describe("확인 요청(GET /healthz)의 결과 (#5407)", () => {
+  it("닿지 못해도 실패 기억에 쌓이지 않는다: 「알 수 없음」이 「서버에 닿지 못함」으로 올라가 보내기를 막지 않는다", () => {
+    let state = step(
+      healthy(),
+      socket(T0 + 1_000, "disconnected"),
+      failure("/v1/a", T0 + 2_000),
+      failure("/v1/b", T0 + 3_000),
+      tick(T0 + 11_000)
+    );
+    expect(state.view.cause).toBe("unknown");
+    state = step(state, failure("/healthz", T0 + 13_000), failure("/healthz", T0 + 17_000));
+    expect(state.view.cause).toBe("unknown");
+    expect(state.view.canSend).toBe(true);
+    expect(state.input.rest.unanswered).toEqual(["GET http://server.test/v1/a", "GET http://server.test/v1/b"]);
+  });
+
+  it("서버가 답하면(응답이면 무엇이든) 서 있던 띠를 푼다 - 풀린 뒤 2초는 모델의 규칙이다", () => {
+    let state = step(
+      healthy(),
+      failure("/v1/a", T0 + 1_000),
+      failure("/v1/b", T0 + 1_100),
+      failure("/v1/c", T0 + 1_200),
+      failure("/healthz", T0 + 3_000)
+    );
+    expect(state.view.cause).toBe("serverUnreachable");
+    state = step(state, success("/healthz", T0 + 9_000));
+    expect(state.view.phase).toBe("ok");
+    expect(isRecovered(state, T0 + 9_000)).toBe(true);
+    state = step(state, tick(T0 + 11_000));
+    expect(isRecovered(state)).toBe(false);
+  });
+});
