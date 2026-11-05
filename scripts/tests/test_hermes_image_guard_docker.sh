@@ -50,9 +50,10 @@
 #                            as it stands; the names it adds that the policy does not allow, in any of those loads, must all be named by
 #                            the gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
 #                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
-#   connector-configs ...... (#4935) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the default
-#                            config and the connector-mode config of each model fragment are each accepted by name; the connector ones
-#                            select no web search and no picture tool and carry no image_guard evidence, the default one the picture tool
+#   connector-configs ...... (#4935, #5323) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the
+#                            default config, the default config with the team model fragment and the connector-mode config of each model
+#                            fragment are each accepted by name; the connector ones select no web search and no picture tool and carry no
+#                            image_guard evidence, the two default ones the picture tool
 #   connector-config-edited / -nostrict / -apps-missing  the connector-mode config with one byte changed, without the strict flag, and without
 #                            the operator's attested app list: each refused before listening
 #   railway-start-connector / -connector-edited / -config-edited / -connector-nostrict  the real Railway start command with a connector-mode
@@ -196,6 +197,26 @@ connector_start railway-start-connector "$CONNECTOR_B64"
 connector_start railway-start-connector-edited "$CONNECTOR_EDITED_B64"
 connector_start railway-start-config-edited "$DEFAULT_EDITED_B64"
 connector_start railway-start-connector-nostrict "$CONNECTOR_B64" ""
+
+# --- the team default through the real Railway start command (#5323) -------------------------------------------------------
+# The default config with the Codex primary / Claude fallback fragment is in the command's hash list, so it reaches the point where it would
+# exec Hermes with the gate passed and the config named. The same fragment with the pre-5.5 Claude id (`claude-sonnet-5`, still a name in
+# Hermes' own static list and so still renderable) is on no list, and neither is the Claude primary / Codex fallback line the first revision of
+# #5323 carried (the owner turned the direction round on 2026-11-05 16:01; the default-mode list is one line long): the hash check stops the
+# command before the gate prints anything.
+default_model_start() {  # default_model_start <name> <config b64>
+  local name="$1" config_b64="$2"
+  say "scenario $name"
+  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+    -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_RAILWAY" \
+    -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/$name.stdout" 2>"$OUT/$name.stderr" && echo 0 >"$OUT/$name.rc" || echo $? >"$OUT/$name.rc"
+}
+DEFAULT_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth codex-oauth --fallback claude-oauth --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+STALE_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth codex-oauth --fallback claude-oauth --fallback-model claude-sonnet-5 --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+PREVIOUS_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth claude-oauth --fallback codex-oauth --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+default_model_start railway-start-default-model "$DEFAULT_MODEL_B64"
+default_model_start railway-start-stale-model "$STALE_MODEL_B64"
+default_model_start railway-start-previous-team-default "$PREVIOUS_MODEL_B64"
 
 # --- the real gateway: compose command in full (gate, report, s6 init, gateway) with no network ---------------------------
 say "scenario gateway-boot (real gateway + real lockgate report, no network)"
@@ -383,7 +404,7 @@ expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"]
 # #4935: every config of the catalog through the real gate: accepted by name, the connector ones with no search and no picture tool
 cc = expect("connector-configs", 0)
 entries = (cc["lockgate"] or {}).get("entries") or {}
-want_names = ["default"] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
+want_names = ["default"] + ["default/" + name for name in renderer.DEFAULT_MODEL_CONFIGS] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
 if sorted(entries) != sorted(want_names):
     failures.append("connector-configs: the catalog the scenario ran is not the renderer's: %r (want %r)" % (sorted(entries), sorted(want_names)))
 for config_name, entry in entries.items():
@@ -396,7 +417,7 @@ for config_name, entry in entries.items():
         if not tools or tools & {"web_search", "web_extract", "image_generate"} or entry.get("image_guard") is not None:
             failures.append("connector-configs: %s selects a search or picture tool, or carries picture evidence: %r" % (config_name, entry))
     elif "image_generate" not in tools:
-        failures.append("connector-configs: the default config no longer selects the picture tool: %r" % (entry,))
+        failures.append("connector-configs: the default config %s no longer selects the picture tool: %r" % (config_name, entry))
 edited = expect("connector-config-edited", 3, ["config.yaml is not one of the accepted configs"])
 if (edited["lockgate"] or {}).get("config_accepted_as") is not None:
     failures.append("connector-config-edited: one changed byte was accepted as %r" % ((edited["lockgate"] or {}).get("config_accepted_as"),))
@@ -542,6 +563,19 @@ rc = text("railway-start-connector-nostrict", "rc").strip()
 stdout = text("railway-start-connector-nostrict", "stdout")
 if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout or '"ok": false' not in stdout:
     failures.append("railway-start-connector-nostrict: the gate did not refuse a connector start without the strict flag (rc %s, stdout tail %r)" % (rc, stdout[-300:]))
+# #5323: the team default (default config + Codex primary / Claude fallback) reaches exec through the real start command with the gate passed and
+# the config named; the same fragment with the pre-5.5 Claude id, and the earlier Claude-primary line, are stopped by the hash list before the
+# gate prints anything
+rc = text("railway-start-default-model", "rc").strip()
+stdout = text("railway-start-default-model", "stdout")
+if rc != "0" or "START_COMMAND_REACHED_EXEC" not in stdout or '"ok": true' not in stdout \
+        or '"config_accepted_as": "default/codex-oauth.fallback-claude-oauth"' not in stdout or '"image_generate"' not in stdout:
+    failures.append("railway-start-default-model: rc %s, stdout tail %r" % (rc, stdout[-300:]))
+for name, why in (("railway-start-stale-model", "the pre-5.5 Claude id"), ("railway-start-previous-team-default", "the earlier Claude-primary default-mode line")):
+    rc = text(name, "rc").strip()
+    stdout, stderr = text(name, "stdout"), text(name, "stderr")
+    if rc != "78" or "START_COMMAND_REACHED_EXEC" in stdout or "LOCKGATE" in stdout or "config.yaml is not one of the accepted configs" not in stderr:
+        failures.append("%s: %s was not stopped by the hash list before the gate (rc %s, stderr tail %r)" % (name, why, rc, stderr[-200:]))
 # the live gateway: the gate passed before it listened, the report (which runs the same rules on the live volume) found
 # nothing to shut down, the container is still up, and the plugin is loaded for the hermes uid from the real volume
 log = text("gateway-boot", "log")
@@ -596,7 +630,7 @@ print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s),
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
-print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gateway boot" % len(
+print("OK: %d in-image scenarios (gate) + 13 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",

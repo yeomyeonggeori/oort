@@ -22,7 +22,7 @@ import {
   type InboxFilter,
 } from '@momo/core/features/inbox/model';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
-import {useMutation} from '@tanstack/react-query';
+import {focusManager, useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
@@ -52,7 +52,11 @@ import {
 import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
-import {useMailbox, useMarkInboxItemRead} from '../features/inbox/useMailbox';
+import {
+  useInvalidateMailbox,
+  useMailbox,
+  useMarkInboxItemRead,
+} from '../features/inbox/useMailbox';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -337,6 +341,15 @@ export default function InboxScreen({
   const invalidateLedgers = useInvalidateInboxLedgers();
   const feedStateRef = useRef({isLoading: feed.isLoading, absent: feed.absent});
   feedStateRef.current = {isLoading: feed.isLoading, absent: feed.absent};
+
+  // 서버 목록(「전체」·DM·답글·스레드 칩)은 서버가 아는 읽음을 **받아 둔** 값이다 (#5331). 채널 읽음 위치로 읽은 것은
+  // 점이 그 위치와 합쳐져(`serverEntry`의 `lastReadSeq`) 목록이 낡아도 맞는다. 그러나 다른 기기가 항목 하나만 읽음으로
+  // 누른 것(채널 위치는 안 움직인다)과 새로 생긴 항목은 목록을 다시 읽어야만 온다 — 이 숨은 탭의 쿼리는 그럴 계기가
+  // 없었다(탭을 여는 것은 마운트가 아니고, 폰은 `refetchOnWindowFocus`를 꺼 두었다). 그래서 탭이 보이게 되는 순간과 앱이
+  // 앞으로 돌아오는 순간에 서버 답으로 맞춘다. 첫 조회가 나는 중이면 그 조회에 합쳐지고(첫 조회는 끊기지 않는다),
+  // 서버 투영이 아닌 경로(구 서버 조합)는 쿼리가 꺼져 있어서 무효화가 아무것도 다시 읽지 않는다.
+  const refreshMailbox = useInvalidateMailbox();
+
   const wasActiveRef = useRef(false);
   useEffect(() => {
     if (!active) {
@@ -345,9 +358,18 @@ export default function InboxScreen({
     }
     if (wasActiveRef.current) return;
     wasActiveRef.current = true;
+    void refreshMailbox();
     if (feedStateRef.current.isLoading || feedStateRef.current.absent) return;
     invalidateLedgers();
-  }, [active, invalidateLedgers]);
+  }, [active, invalidateLedgers, refreshMailbox]);
+
+  // `focusManager`는 `installReactQueryBridges`가 앱 상태에 이어 둔다(앞으로 = 포커스).
+  useEffect(() => {
+    if (!active) return undefined;
+    return focusManager.subscribe(focused => {
+      if (focused) void refreshMailbox();
+    });
+  }, [active, refreshMailbox]);
 
   const markRead = useMarkRead();
   const marking = useMutation({
