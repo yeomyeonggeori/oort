@@ -199,6 +199,7 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {JumpSeekSurface} from './jumpSeek';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
 import {SentenceWrapSurface} from './sentenceWrap';
@@ -2320,6 +2321,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
+  }
+  // #5383: 불러온 범위 밖 점프 - 찾는 중·실패·읽고 나서 착지(실제 `Timeline`·`JumpSeekLine`·`Composer`).
+  if (name.startsWith('jump-seek')) {
+    return <JumpSeekSurface which={name.slice('jump-seek'.length).replace(/^-/, '')} />;
   }
   // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
