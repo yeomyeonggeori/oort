@@ -7,6 +7,7 @@ import {
   isSearchable,
   normalizeQuery,
   searchPhase,
+  searchQueryKey,
   type SearchPhase,
 } from '@momo/core/features/search/searchModel';
 import {useInfiniteQuery} from '@tanstack/react-query';
@@ -35,6 +36,13 @@ import {useEffect, useMemo, useState} from 'react';
 // 그리면 사람은 자기가 뭔가 잘못했다고 읽는다. 글자 수는 코어가 서버와 같은
 // 방식으로 센다(코드포인트 — `"..".length` 로 세면 이모지 한 글자가 둘이 된다).
 //
+// ## 범위와 종류는 화면이 정하고, 이 훅은 그 값을 받아 부를 뿐이다 (#5365)
+//
+// `channelId` 가 있으면 서버가 그 대화 하나만 훑는다(`channel=`, #1931). 커서는 자기가 걷던 결과 집합에서만 뜻이 있어서
+// 캐시 키에 대화 id 를 넣는다(코어 `searchQueryKey`) — 범위를 바꾸면 페이지와 커서가 함께 버려진다.
+// `enabled: false` 는 화면이 「채널」·「사람」 칩에 있을 때다: 그때 메시지 서버는 부르지 않는다. 입력값과 250ms 디바운스는
+// 그대로 돌아서, 칩을 「메시지」로 옮기면 이미 친 말로 바로 찾는다.
+//
 // ## 마지막 페이지는 `nextCursor` 키가 아예 없다
 //
 // `null` 이 아니라 키 자체가 빠진다(서버 테스트 `a_last_page_omits_the_cursor_key`).
@@ -61,11 +69,20 @@ export interface MessageSearch {
   retry: () => void;
 }
 
+export interface MessageSearchOptions {
+  /** 이 대화 하나로 좁혀 찾는다. 없으면 내가 든 모든 대화. */
+  channelId?: string;
+  /** `false` 면 서버를 부르지 않는다(기본은 켜짐). */
+  enabled?: boolean;
+}
+
 export function useMessageSearch(
   workspaceId: string,
   /** 사이드바에서 이미 친 말. 사람이 두 번 타이핑하지 않게 들고 온다. */
   initialQuery = '',
+  options: MessageSearchOptions = {},
 ): MessageSearch {
+  const {channelId, enabled: allowed = true} = options;
   // 동기. 헤더 참조.
   const [query, setQuery] = useState(initialQuery);
   // 넘겨받은 질의는 기다릴 이유가 없다 — 디바운스는 「치는 중」을 위한 것이지
@@ -83,16 +100,17 @@ export function useMessageSearch(
     return () => clearTimeout(timer);
   }, [query]);
 
-  const enabled = isSearchable(debounced);
+  const enabled = allowed && isSearchable(debounced);
   const normalized = normalizeQuery(debounced);
 
   const result = useInfiniteQuery<MessageSearchPage>({
     // 워크스페이스 id 는 대소문자가 섞여 오므로 키에서 접는다. 같은 검색이 두
-    // 캐시 항목으로 갈라지는 것을 막는다.
-    queryKey: ['message-search', workspaceId.toLowerCase(), normalized],
+    // 캐시 항목으로 갈라지는 것을 막는다. 범위(대화 id)도 키의 일부다 — 위 머리말.
+    queryKey: searchQueryKey(workspaceId, normalized, channelId),
     queryFn: ({pageParam}) =>
       searchMessages(workspaceId, normalized, {
         cursor: pageParam as string | undefined,
+        ...(channelId === undefined ? {} : {channelId}),
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: last => last.nextCursor,

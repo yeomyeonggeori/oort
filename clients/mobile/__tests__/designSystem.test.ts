@@ -538,7 +538,7 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
 
   /**
    * 오늘의 잔량 (`lineHeight`). `line` 이 생긴 것이 u44 이고, 그 배치는 대화 표면만
-   * 옮겼다 — 목록의 화면들(`ConnectScreen`·`InboxScreen`·`SearchScreen` 등)은 아직
+   * 옮겼다 — 목록의 화면들(`ConnectScreen`·`InboxScreen` 등)은 아직
    * 자기 숫자를 든다. 감사가 「같은 규칙을 두 표면이 다른 강도로 지킨다」고 부른 자리다.
    */
   const LINE_REMAINING: Readonly<Record<string, number>> = {
@@ -546,7 +546,6 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
     'features/conversation/MessageEditorSheet.tsx': 2,
     'screens/AgentDetailScreen.tsx': 2,
     'screens/InboxScreen.tsx': 1,
-    'screens/SearchScreen.tsx': 1,
   };
 
   it('fontSize 가 font.<역할> 이 아닌 자리가 허용 목록 안에 있다', () => {
