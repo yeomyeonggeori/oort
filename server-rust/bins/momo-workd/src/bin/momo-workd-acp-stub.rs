@@ -50,6 +50,11 @@
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
 //!
+//! `cli features list` (#2647) is not an ACP session: the host runs it before
+//! every Codex session, as it would `codex-acp cli features list`, and the stub
+//! prints the feature table of the `CODEX_HOME` it is given (see [`codex_cli`]).
+//! It records nothing.
+//!
 //! At start it records the NAMES (never the values) of its environment, and
 //! of the environment a command it starts sees (`/usr/bin/env`, the way an
 //! agent's own tool inherits the agent's environment) — #2630 F1.
@@ -536,11 +541,74 @@ fn grandchild_helper(path: &str) {
     }
 }
 
+/// `codex-acp cli features list` (#2647): what the real adapter does is run the
+/// codex it bundles under the `CODEX_HOME` it is given, and codex prints one
+/// `name  stage  state` row per feature. The stub reads the `[features]` keys of
+/// that home's `config.toml` as codex would honour them, so a key the host
+/// stops writing is a row the table no longer has. It also prints rows the host
+/// does not care about, one with a two-word stage.
+///
+/// `$CODEX_HOME/zz-stub-features` is the drift hook for tests: a line
+/// `name stage state` forces that row (a codex that ignores the key), and
+/// `-name` removes it (a codex that renamed the feature).
+fn codex_cli(args: &[String]) {
+    if args != ["features", "list"] {
+        eprintln!("stub codex-acp: unsupported cli arguments {args:?}");
+        std::process::exit(64);
+    }
+    let home = std::path::PathBuf::from(std::env::var("CODEX_HOME").unwrap_or_default());
+    let mut rows: Vec<(String, String, String)> = vec![
+        ("fast_mode".into(), "stable".into(), "true".into()),
+        (
+            "code_mode".into(),
+            "under development".into(),
+            "false".into(),
+        ),
+    ];
+    let mut in_features = false;
+    for line in std::fs::read_to_string(home.join("config.toml"))
+        .unwrap_or_default()
+        .lines()
+    {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_features = line == "[features]";
+        } else if let (true, Some((name, state))) = (in_features, line.split_once('=')) {
+            rows.push((name.trim().into(), "stable".into(), state.trim().into()));
+        }
+    }
+    for line in std::fs::read_to_string(home.join("zz-stub-features"))
+        .unwrap_or_default()
+        .lines()
+    {
+        let mut tokens = line.split_whitespace();
+        let Some(first) = tokens.next() else { continue };
+        if let Some(gone) = first.strip_prefix('-') {
+            rows.retain(|(name, _, _)| name != gone);
+            continue;
+        }
+        let state = tokens.next_back().unwrap_or("true").to_string();
+        rows.retain(|(name, _, _)| name != first);
+        rows.push((first.to_string(), "stable".into(), state));
+    }
+    rows.sort();
+    for (name, stage, state) in rows {
+        println!("{name:<40} {stage:<18} {state}");
+    }
+}
+
 fn main() {
     let mut raw = std::env::args().skip(1);
-    if raw.next().as_deref() == Some("--grandchild-helper") {
-        grandchild_helper(&raw.next().unwrap_or_default());
-        return;
+    match raw.next().as_deref() {
+        Some("--grandchild-helper") => {
+            grandchild_helper(&raw.next().unwrap_or_default());
+            return;
+        }
+        Some("cli") => {
+            codex_cli(&raw.collect::<Vec<_>>());
+            return;
+        }
+        _ => {}
     }
     let options = parse();
     // Kept alive (never waited for) so the helper stays this process's child.

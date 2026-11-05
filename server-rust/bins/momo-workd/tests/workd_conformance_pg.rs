@@ -43,7 +43,7 @@
 //! | test | what it proves |
 //! |---|---|
 //! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; no request, from `register` to the last ack, carries the host key's seed in any encoding; and fake credentials planted in `run`'s environment reach neither the agent nor a command it runs (#2630 F1) |
-//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
+//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630), after `run` read Codex's effective feature switches back at start; a Codex that stops honouring a switch while the host runs is refused at its next session (`codex_config_unverified`, #2647); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can` | ADR-0188 D5 (#3000): the agent's request becomes a `work_permission_request` row (FORCE RLS); an agent bearer (the owner's own agent), a teammate, an `allow_always` (by kind or by an option id relabelled `allow_once`), an instruction and an unknown request are refused and the agent keeps waiting; the owner's `allow_once` becomes a `permission` control the host acks, the agent gets exactly that option, the server's `approval.decided` and an audit row are written; the same decision again is 200 with one control, a different one 409; a lapsed request is 409 and `expired`; ending the session cancels what is pending and answers the agent `cancelled` |
@@ -1624,6 +1624,67 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
         "the host's config confines what Codex's commands see (#2630 F1): {config}"
     );
     eprintln!("wdc_2: Codex resume {codex_spawn} ran from the host's own CODEX_HOME and HOME");
+
+    // ---- #2647 L1: a codex that drifts while the host runs ------------------
+    // `run` read Codex's effective settings back once at start, and every
+    // Codex session repeats the read before it starts anything.
+    assert!(
+        std::fs::read_to_string(&workd.log)
+            .unwrap_or_default()
+            .contains("Codex reports every feature the host switched off as off"),
+        "run checked Codex's effective settings at start: {}",
+        workd.log_tail()
+    );
+    let codex_runs = workd.record("codex").len();
+    // The stub's drift hook: from now on the fake codex ignores the key.
+    std::fs::write(
+        workd.codex_home().join("zz-stub-features"),
+        "shell_snapshot stable true\n",
+    )
+    .unwrap();
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "codex",
+        "after the update",
+    )
+    .await;
+    let (drifted, drifted_spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the drifted Codex spawn to be refused", &workd, || async {
+        (control_state(&su, drifted_spawn).await.0 == "failed").then_some(())
+    })
+    .await;
+    assert_eq!(
+        ack_error_label(&su, &fixture, drifted_spawn)
+            .await
+            .as_deref(),
+        Some("codex_config_unverified"),
+        "the refusal reaches the room with its reason"
+    );
+    wait_until("the host to end the allocated session", &workd, || async {
+        (session_status(&su, drifted).await == "ended").then_some(())
+    })
+    .await;
+    assert_eq!(
+        workd.record("codex").len(),
+        codex_runs,
+        "no Codex session was started"
+    );
+    assert!(
+        std::fs::read_to_string(&workd.log)
+            .unwrap_or_default()
+            .contains("shell_snapshot reads"),
+        "the host's log says which feature drifted: {}",
+        workd.log_tail()
+    );
+    std::fs::remove_file(workd.codex_home().join("zz-stub-features")).unwrap();
+    eprintln!(
+        "wdc_2: Codex resume {drifted_spawn} refused → codex_config_unverified, session {drifted} ended by the host"
+    );
 
     // ---- shell: refused at the resume, never delivered ----------------------
     let resumed = owner_resume(
