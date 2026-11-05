@@ -1399,18 +1399,28 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + "0" * 64 + " -e ", kind
         )
-    elif kind == "hermes-config-hash-pre55":  # #5323: the list still names the hash the team default had before Claude was sonnet 5.5
+    elif kind in ("hermes-config-hash-pre55", "hermes-config-hash-old-team-default"):  # #5323: the list is not the one the catalog rebuilds
         import importlib.util
 
         hermes_dir = Path(__file__).resolve().parents[2] / "infra" / "hermes"
         spec = importlib.util.spec_from_file_location("catalog_mutation_renderer", hermes_dir / "render_model_config.py")
         renderer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(renderer)
-        current = renderer.sha256_of(renderer.repo_catalog(str(hermes_dir))["default/claude-oauth.fallback-codex-oauth"])
-        stale = renderer.sha256_of(renderer.render(renderer.read_text(str(hermes_dir / "config.yaml")), "claude-oauth", "codex-oauth", model="claude-sonnet-5"))
-        if stale == current:
-            raise SystemExit("mutation %s: the pre-5.5 config is the current one" % kind)
-        services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], current, stale, kind)
+        base = renderer.read_text(str(hermes_dir / "config.yaml"))
+        current = renderer.sha256_of(renderer.repo_catalog(str(hermes_dir))["default/codex-oauth.fallback-claude-oauth"])
+        if kind == "hermes-config-hash-pre55":
+            # the team default with the id Hermes' static list ends at (claude-sonnet-5) in place of 5.5: a list nobody refreshed
+            stale = renderer.sha256_of(renderer.render(base, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"))
+            if stale == current:
+                raise SystemExit("mutation %s: the pre-5.5 config is the current one" % kind)
+            services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], current, stale, kind)
+        else:
+            # the Claude-primary / Codex-fallback line the first revision of #5323 accepted (owner 2026-11-05 16:01 turned it round): kept beside the
+            # new one, which the one-line default-mode rule forbids
+            previous = renderer.sha256_of(renderer.render(base, "claude-oauth", "codex-oauth"))
+            if previous == current:
+                raise SystemExit("mutation %s: the previous team default is the current one" % kind)
+            services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + previous + " -e ", kind)
     elif kind == "hermes-config-substring":  # #4935: whole-line match weakened to a substring match
         services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qF -e ", kind)
     elif kind == "hermes-config-check-dropped":  # #4935: the config is not checked at all
@@ -1634,6 +1644,7 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-config-hash-dropped", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-foreign", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-pre55", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-old-team-default", "hermes start command is not the canonical command list"),
     ("hermes-config-substring", "hermes start command is not the canonical command list"),
     ("hermes-config-check-dropped", "hermes start command is not the canonical command list"),
     ("hermes-no-guard-install", "hermes start command is not the canonical command list"),

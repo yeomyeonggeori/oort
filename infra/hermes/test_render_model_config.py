@@ -227,27 +227,29 @@ class ConnectorConfig(unittest.TestCase):
                 call()
 
 
-TEAM_DEFAULT = "default/claude-oauth.fallback-codex-oauth"
+TEAM_DEFAULT = "default/codex-oauth.fallback-claude-oauth"
+# the combination the first revision of #5323 accepted (Claude primary, Codex fallback) until the owner turned it round on 2026-11-05 16:01
+PREVIOUS_TEAM_DEFAULT_SPEC = dict(auth="claude-oauth", fallback="codex-oauth")
 
 
 class Catalog(unittest.TestCase):
     """#4935, #5323: the configs `lockgate.py` and the Railway start command accept are exactly the default config, the default config with the
-    team model fragment (Claude primary, Codex fallback) and one connector config per fragment."""
+    team model fragment (Codex primary, Claude fallback) and one connector config per fragment."""
 
     def test_the_catalog_has_the_default_the_team_default_and_four_connector_configs_in_a_fixed_order(self):
         cat = R.repo_catalog(HERE)
-        self.assertEqual(R.DEFAULT_MODEL_CONFIGS, ("claude-oauth.fallback-codex-oauth",), "one default-mode model fragment, on purpose")
+        self.assertEqual(R.DEFAULT_MODEL_CONFIGS, ("codex-oauth.fallback-claude-oauth",), "one default-mode model fragment, on purpose")
         self.assertEqual(list(cat), ["default", TEAM_DEFAULT] + ["connector/" + name for name in R.FRAGMENT_SPECS])
         with open(os.path.join(HERE, "config.yaml"), "rb") as handle:
             self.assertEqual(R.sha256_of(cat["default"]), hashlib.sha256(handle.read()).hexdigest())
         hashes = [R.sha256_of(text) for text in cat.values()]
         self.assertEqual(len(set(hashes)), 6, "six different configs")
 
-    def test_the_team_default_is_the_default_config_and_exactly_the_claude_codex_fragment(self):
+    def test_the_team_default_is_the_default_config_and_exactly_the_codex_claude_fragment(self):
         cat = R.repo_catalog(HERE)
-        self.assertEqual(cat[TEAM_DEFAULT], BASE + R.fragment("claude-oauth", "codex-oauth"))
-        self.assertEqual(section(cat[TEAM_DEFAULT], "model"), {"provider": "anthropic", "default": "claude-sonnet-5-5"})
-        self.assertEqual(section(cat[TEAM_DEFAULT], "fallback_model"), {"provider": "openai-codex", "model": "gpt-5.6-sol"})
+        self.assertEqual(cat[TEAM_DEFAULT], BASE + R.fragment("codex-oauth", "claude-oauth"))
+        self.assertEqual(section(cat[TEAM_DEFAULT], "model"), {"provider": "openai-codex", "default": "gpt-5.6-sol"})
+        self.assertEqual(section(cat[TEAM_DEFAULT], "fallback_model"), {"provider": "anthropic", "model": "claude-sonnet-5-5"})
         # nothing of the lock moved: the default's text first, then only the two model keys
         self.assertTrue(cat[TEAM_DEFAULT].startswith(cat["default"]))
         self.assertEqual(DEFAULT.top_level_keys(cat[TEAM_DEFAULT]) - DEFAULT.top_level_keys(cat["default"]), {"model", "fallback_model"})
@@ -256,7 +258,7 @@ class Catalog(unittest.TestCase):
 
     def test_the_command_that_builds_the_team_default_gives_the_catalog_bytes_and_hash(self):
         # the operator's step 2 and step 4 (RELEASING, Hermes stage): the same command, once for the hash and once for the variable
-        argv = ("--auth", "claude-oauth", "--fallback", "codex-oauth", "--base", os.path.join(HERE, "config.yaml"))
+        argv = ("--auth", "codex-oauth", "--fallback", "claude-oauth", "--base", os.path.join(HERE, "config.yaml"))
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(R.main(list(argv)), 0)
@@ -278,7 +280,8 @@ class Catalog(unittest.TestCase):
         # the same pieces rendered with the id the table held before #5323: other bytes, so on no list (the old hashes are gone, not kept beside the new)
         old = dict(model="claude-sonnet-5")
         stale = {
-            "team default": R.render(BASE, "claude-oauth", "codex-oauth", **old),
+            "team default": R.render(BASE, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"),
+            "the previous team default": R.render(BASE, "claude-oauth", "codex-oauth", **old),
             "connector, claude primary": R.render_connector(GOOGLE, "claude-oauth", "codex-oauth", **old),
             "connector, claude fallback": R.render_connector(GOOGLE, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"),
             "connector, api keys": R.render_connector(GOOGLE, "api-key-openai", "api-key-anthropic", fallback_model="claude-sonnet-5"),
@@ -300,6 +303,17 @@ class Catalog(unittest.TestCase):
                 continue
             with self.subTest(fragment=name):
                 self.assertNotIn(R.sha256_of(R.render(BASE, **spec)), LOCK.ACCEPTED_CONFIG_SHA256)
+
+    def test_the_previous_team_default_is_gone_from_every_list(self):
+        # 2026-11-05 16:01: the owner turned the direction round (Codex primary, Claude fallback). The Claude-primary line the first revision of
+        # #5323 carried is not kept beside the new one: its bytes, as rendered today, are on no list and no catalog name says it
+        previous = R.render(BASE, **PREVIOUS_TEAM_DEFAULT_SPEC)
+        self.assertNotIn(previous, R.repo_catalog(HERE).values())
+        self.assertNotIn("default/claude-oauth.fallback-codex-oauth", R.repo_catalog(HERE))
+        self.assertNotIn("default/claude-oauth.fallback-codex-oauth", LOCK.ACCEPTED_CONFIG_SHA256.values())
+        problems, accepted = LOCK.config_problems(R.sha256_of(previous))
+        self.assertEqual((len(problems), accepted), (1, None))
+        self.assertIn("not one of the accepted configs", problems[0])
 
     def test_the_gates_table_is_the_catalog(self):
         cat = R.repo_catalog(HERE)
@@ -338,7 +352,7 @@ class Catalog(unittest.TestCase):
         # the default config is accepted as it is; a default with another model section than the team default's is another file, another hash
         with_model = R.render(BASE, "codex-oauth")
         self.assertNotIn(R.sha256_of(with_model), LOCK.ACCEPTED_CONFIG_SHA256)
-        with_other_model = R.render(BASE, "claude-oauth", "codex-oauth", model="claude-opus-5-5")
+        with_other_model = R.render(BASE, "codex-oauth", "claude-oauth", fallback_model="claude-opus-5-5")
         self.assertNotIn(R.sha256_of(with_other_model), LOCK.ACCEPTED_CONFIG_SHA256)
 
 

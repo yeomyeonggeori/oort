@@ -71,7 +71,7 @@ values. The data folder this gate reads must be Hermes' own `$HERMES_HOME`, writ
 Hermes' HOME than under this gate's), or the file judged is not the file loaded. The LOCKGATE line names the parser used.
 
 Accepted configs (#4935, #5323). The bytes of `config.yaml` are pinned: its sha256 has to be one of `ACCEPTED_CONFIG_SHA256`, the default config,
-the default config with the team model fragment (Claude primary, Codex fallback), or the connector-mode config of one of the four model fragments
+the default config with the team model fragment (Codex primary, Claude fallback), or the connector-mode config of one of the four model fragments
 (`infra/hermes/render_model_config.py --catalog` rebuilds the list from the repo's own pieces). Anything else is refused whatever it says, a
 config that still names the pre-5.5 Claude id included; the LOCKGATE line names the accepted config (`config_accepted_as`) and its sha256.
 
@@ -1095,7 +1095,7 @@ def hermes_image_guard_canary(origin=None):
 # of a 64-digit hex value on one line is what secret scanners report as a leaked credential, and these hashes are public pins.
 ACCEPTED_CONFIG_SHA256 = {  # sha256 of the bytes -> the name of the config
     "619d1717d53167864221fa6d9c698376ef462dc75e7b03fc302ab1fffd4d7ad6": "default",
-    "ba91fbe7eb276abd052b5087f3ae936128aecd96f817707e289c6f908f978f27": "default/claude-oauth.fallback-codex-oauth",
+    "9397c8121dab255b0583e2f8ae6dc1e1ca16da0d0bde476b4c76d96449846c4f": "default/codex-oauth.fallback-claude-oauth",
     "f3390335c99129dff077fd41a4cc9b130d05fcd083b0b0763a7b7efb740b216d": "connector/codex-oauth.fallback-claude-oauth",
     "d0d59cec016e9f712b518295a77c443a6260f8a8b69d6910277ff96c4cd37c9b": "connector/claude-oauth.fallback-codex-oauth",
     "b9c9e87a23a75fa5153e6a22f464f3e213278875347f9c43bf4767bb630b6bdd": "connector/api-key-openai.fallback-api-key-anthropic",

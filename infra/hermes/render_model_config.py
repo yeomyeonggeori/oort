@@ -32,7 +32,7 @@ never prints a value.
 
 Team default (#5323). The default config has no `model:` section, so a team Hermes running in default mode (picture and search tools, no connectors)
 could not pin its model. `--base infra/hermes/config.yaml` appends a fragment to it (`render`), and DEFAULT_MODEL_CONFIGS names the one fragment
-that result is accepted with: Claude primary, Codex fallback (`default/claude-oauth.fallback-codex-oauth`). Another combination is another
+that result is accepted with: Codex primary, Claude fallback (`default/codex-oauth.fallback-claude-oauth`, owner 2026-11-05 16:01). Another combination is another
 catalog line, decided and written down one at a time (ADR-0203 증보 2026-11-05).
 
 Usage (stdlib only, no PyYAML on purpose):
@@ -79,7 +79,7 @@ EXTRA_MODELS = {
 }
 # The one model fragment accepted on top of the default config (the default config has no model section of its own): see "Team default" above.
 # Names are keys of FRAGMENT_SPECS; each becomes the catalog line `default/<name>`.
-DEFAULT_MODEL_CONFIGS = ("claude-oauth.fallback-codex-oauth",)
+DEFAULT_MODEL_CONFIGS = ("codex-oauth.fallback-claude-oauth",)
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # one plain YAML scalar: no quoting, no injection
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONNECTOR_REFERENCE = "google-connectors.config.yaml"  # the connector-mode lock section and `mcp_servers` (K-S1b, #3952)

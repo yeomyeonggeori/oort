@@ -1055,7 +1055,8 @@ class AcceptedConfigs(GateHarness):
 
     def test_the_default_the_team_default_and_every_connector_config_are_accepted_by_name(self):
         self.assertEqual(len(self.catalog), 6)
-        self.assertIn("default/claude-oauth.fallback-codex-oauth", self.catalog)
+        self.assertIn("default/codex-oauth.fallback-claude-oauth", self.catalog)
+        self.assertNotIn("default/claude-oauth.fallback-codex-oauth", self.catalog, "one default-mode line: the Claude-primary one of the first revision is gone")
         for name, raw in self.catalog.items():
             with self.subTest(config=name):
                 rc, record, _ = self.boot(config_bytes=raw)
@@ -1083,7 +1084,8 @@ class AcceptedConfigs(GateHarness):
         # renderer can still make these bytes; they are other bytes than any accepted config, so the gate refuses them like any edited file.
         render, base = self.renderer, open(os.path.join(HERE, "config.yaml")).read()
         google = open(os.path.join(HERE, "google-connectors.config.yaml")).read()
-        for label, text in (("team default", render.render(base, "claude-oauth", "codex-oauth", model="claude-sonnet-5")),
+        for label, text in (("team default", render.render(base, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5")),
+                            ("the previous team default", render.render(base, "claude-oauth", "codex-oauth", model="claude-sonnet-5")),
                             ("connector, claude primary", render.render_connector(google, "claude-oauth", "codex-oauth", model="claude-sonnet-5")),
                             ("connector, claude fallback", render.render_connector(google, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"))):
             with self.subTest(config=label):
@@ -1092,6 +1094,16 @@ class AcceptedConfigs(GateHarness):
                 rc, record, _ = self.boot(config_bytes=text.encode("utf-8"))
                 self.assertRefused(rc, record, "config.yaml is not one of the accepted configs")
                 self.assertIsNone(record["config_accepted_as"])
+
+    def test_the_previous_team_default_is_refused_by_the_real_gate(self):
+        # 2026-11-05 16:01 (#5323): Codex primary, Claude fallback replaced Claude primary, Codex fallback as the one default-mode line. The earlier
+        # line is not kept beside it: its bytes, with the 5.5 id it had, are on no list, so the real gate refuses them like any other file.
+        render, base = self.renderer, open(os.path.join(HERE, "config.yaml")).read()
+        raw = render.render(base, "claude-oauth", "codex-oauth").encode("utf-8")
+        self.assertNotIn(raw, self.catalog.values())
+        rc, record, _ = self.boot(config_bytes=raw)
+        self.assertRefused(rc, record, "config.yaml is not one of the accepted configs")
+        self.assertIsNone(record["config_accepted_as"])
 
     def test_what_is_judged_is_the_file_that_was_hashed_and_not_a_second_read_of_it(self):
         # the file changes between the hash and the copy the judgement is made on (a writer of the volume, a gap of milliseconds): the scratch
