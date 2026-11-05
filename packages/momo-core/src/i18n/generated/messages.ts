@@ -699,6 +699,62 @@ export const messageKeys = [
   "reply.home.headerSelf",
   "reply.home.headerUnknown",
   "reply.home.open",
+  "search.group.channels",
+  "search.group.loadingMore",
+  "search.group.messages",
+  "search.group.more",
+  "search.group.moreLabel",
+  "search.group.people",
+  "search.input.clearLabel",
+  "search.input.exitLabel",
+  "search.input.placeholder",
+  "search.kind.all",
+  "search.kind.channels",
+  "search.kind.groupLabel",
+  "search.kind.messages",
+  "search.kind.people",
+  "search.picker.agent",
+  "search.picker.all",
+  "search.picker.channelPrivate",
+  "search.picker.channelPublic",
+  "search.picker.close",
+  "search.picker.dm",
+  "search.picker.empty",
+  "search.picker.filterLabel",
+  "search.picker.filterPlaceholder",
+  "search.picker.title",
+  "search.recent.clearAll",
+  "search.recent.clearAllLabel",
+  "search.recent.conversations",
+  "search.recent.empty",
+  "search.recent.openLabel",
+  "search.recent.searches",
+  "search.recent.searchLabel",
+  "search.row.agentLabel",
+  "search.row.agentSubtitle",
+  "search.row.channelLabel",
+  "search.row.fallbackTitle",
+  "search.row.messageLabel",
+  "search.row.openChannelHint",
+  "search.row.openDmHint",
+  "search.row.personLabel",
+  "search.row.personSubtitle",
+  "search.row.privateChannelLabel",
+  "search.scope.all",
+  "search.scope.chosenLabel",
+  "search.scope.groupLabel",
+  "search.scope.pick",
+  "search.scope.pickLabel",
+  "search.state.errorDetail",
+  "search.state.errorHeadline",
+  "search.state.loading",
+  "search.state.noResults",
+  "search.state.noResultsIn",
+  "search.state.pendingChannels",
+  "search.state.retry",
+  "search.state.scopeNote",
+  "search.state.shortHint",
+  "search.state.shortHintMessages",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -1780,6 +1836,93 @@ export const argumentSpecs = {
   "reply.home.headerSelf": {},
   "reply.home.headerUnknown": {},
   "reply.home.open": {},
+  "search.group.channels": {},
+  "search.group.loadingMore": {},
+  "search.group.messages": {},
+  "search.group.more": {},
+  "search.group.moreLabel": {
+    "group": "string"
+  },
+  "search.group.people": {},
+  "search.input.clearLabel": {},
+  "search.input.exitLabel": {},
+  "search.input.placeholder": {},
+  "search.kind.all": {},
+  "search.kind.channels": {},
+  "search.kind.groupLabel": {},
+  "search.kind.messages": {},
+  "search.kind.people": {},
+  "search.picker.agent": {},
+  "search.picker.all": {},
+  "search.picker.channelPrivate": {},
+  "search.picker.channelPublic": {},
+  "search.picker.close": {},
+  "search.picker.dm": {},
+  "search.picker.empty": {},
+  "search.picker.filterLabel": {},
+  "search.picker.filterPlaceholder": {},
+  "search.picker.title": {},
+  "search.recent.clearAll": {},
+  "search.recent.clearAllLabel": {},
+  "search.recent.conversations": {},
+  "search.recent.empty": {},
+  "search.recent.openLabel": {
+    "name": "string"
+  },
+  "search.recent.searches": {},
+  "search.recent.searchLabel": {
+    "query": "string"
+  },
+  "search.row.agentLabel": {
+    "handle": "string",
+    "name": "string"
+  },
+  "search.row.agentSubtitle": {
+    "handle": "string"
+  },
+  "search.row.channelLabel": {
+    "name": "string"
+  },
+  "search.row.fallbackTitle": {},
+  "search.row.messageLabel": {
+    "author": "string",
+    "channel": "string",
+    "snippet": "string"
+  },
+  "search.row.openChannelHint": {},
+  "search.row.openDmHint": {},
+  "search.row.personLabel": {
+    "handle": "string",
+    "name": "string"
+  },
+  "search.row.personSubtitle": {
+    "handle": "string"
+  },
+  "search.row.privateChannelLabel": {
+    "name": "string"
+  },
+  "search.scope.all": {},
+  "search.scope.chosenLabel": {
+    "name": "string"
+  },
+  "search.scope.groupLabel": {},
+  "search.scope.pick": {},
+  "search.scope.pickLabel": {},
+  "search.state.errorDetail": {},
+  "search.state.errorHeadline": {},
+  "search.state.loading": {},
+  "search.state.noResults": {
+    "query": "string"
+  },
+  "search.state.noResultsIn": {
+    "query": "string",
+    "where": "string"
+  },
+  "search.state.pendingChannels": {},
+  "search.state.retry": {},
+  "search.state.scopeNote": {},
+  "search.state.shortHint": {},
+  "search.state.shortHintMessages": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -2903,6 +3046,62 @@ export interface MessageArgs {
   "reply.home.headerSelf": Record<string, never>;
   "reply.home.headerUnknown": Record<string, never>;
   "reply.home.open": Record<string, never>;
+  "search.group.channels": Record<string, never>;
+  "search.group.loadingMore": Record<string, never>;
+  "search.group.messages": Record<string, never>;
+  "search.group.more": Record<string, never>;
+  "search.group.moreLabel": { group: string };
+  "search.group.people": Record<string, never>;
+  "search.input.clearLabel": Record<string, never>;
+  "search.input.exitLabel": Record<string, never>;
+  "search.input.placeholder": Record<string, never>;
+  "search.kind.all": Record<string, never>;
+  "search.kind.channels": Record<string, never>;
+  "search.kind.groupLabel": Record<string, never>;
+  "search.kind.messages": Record<string, never>;
+  "search.kind.people": Record<string, never>;
+  "search.picker.agent": Record<string, never>;
+  "search.picker.all": Record<string, never>;
+  "search.picker.channelPrivate": Record<string, never>;
+  "search.picker.channelPublic": Record<string, never>;
+  "search.picker.close": Record<string, never>;
+  "search.picker.dm": Record<string, never>;
+  "search.picker.empty": Record<string, never>;
+  "search.picker.filterLabel": Record<string, never>;
+  "search.picker.filterPlaceholder": Record<string, never>;
+  "search.picker.title": Record<string, never>;
+  "search.recent.clearAll": Record<string, never>;
+  "search.recent.clearAllLabel": Record<string, never>;
+  "search.recent.conversations": Record<string, never>;
+  "search.recent.empty": Record<string, never>;
+  "search.recent.openLabel": { name: string };
+  "search.recent.searches": Record<string, never>;
+  "search.recent.searchLabel": { query: string };
+  "search.row.agentLabel": { handle: string; name: string };
+  "search.row.agentSubtitle": { handle: string };
+  "search.row.channelLabel": { name: string };
+  "search.row.fallbackTitle": Record<string, never>;
+  "search.row.messageLabel": { author: string; channel: string; snippet: string };
+  "search.row.openChannelHint": Record<string, never>;
+  "search.row.openDmHint": Record<string, never>;
+  "search.row.personLabel": { handle: string; name: string };
+  "search.row.personSubtitle": { handle: string };
+  "search.row.privateChannelLabel": { name: string };
+  "search.scope.all": Record<string, never>;
+  "search.scope.chosenLabel": { name: string };
+  "search.scope.groupLabel": Record<string, never>;
+  "search.scope.pick": Record<string, never>;
+  "search.scope.pickLabel": Record<string, never>;
+  "search.state.errorDetail": Record<string, never>;
+  "search.state.errorHeadline": Record<string, never>;
+  "search.state.loading": Record<string, never>;
+  "search.state.noResults": { query: string };
+  "search.state.noResultsIn": { query: string; where: string };
+  "search.state.pendingChannels": Record<string, never>;
+  "search.state.retry": Record<string, never>;
+  "search.state.scopeNote": Record<string, never>;
+  "search.state.shortHint": Record<string, never>;
+  "search.state.shortHintMessages": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;
