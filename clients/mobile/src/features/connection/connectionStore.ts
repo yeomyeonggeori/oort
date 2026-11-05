@@ -5,6 +5,7 @@ import {
   nextWakeAt,
   reduceConnection,
   tickAction,
+  visibilityAction,
   type ConnectionAction,
   type ConnectionState,
 } from '@momo/core/features/connection/screenState';
@@ -38,6 +39,13 @@ export interface ConnectionStore {
   start(): void;
   /** 깨움 시계를 거둔다. 상태와 구독은 그대로다. */
   stop(): void;
+  /**
+   * 앱이 뒤로 갔다(`false`)/앞으로 돌아왔다(`true`) (#5403). 뒤에 가 있던 시간은 화면을 보는 사람이 없던 시간이라, 돌아온 순간 소켓이 붙어
+   * 있지 않으면 틈을 새 침묵으로 다시 시작하고 그동안 쌓인 「끊김이 보였다」 기억·복구 표시를 남기지 않는다. 이미 앞에 있는데 `true` 가 오면
+   * (`inactive` → `active`) 아무것도 다시 시작하지 않고 **지금 시각으로 판정만 한 번 다시 한다** - 멈춘 깨움 시계가 낡은 복구 표시를 남기지
+   * 않게(보내기 같은 다음 사건을 기다리지 않는다).
+   */
+  setVisible(visible: boolean): void;
 }
 
 export function createConnectionStore(
@@ -99,6 +107,9 @@ export function createConnectionStore(
     stop() {
       active = false;
       clearTimer();
+    },
+    setVisible(visible) {
+      dispatch(visibilityAction(now(), visible));
     },
   };
 }
