@@ -752,7 +752,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 
 1. **api는 종료 신호 뒤 새 요청에 답하지 않는다.** `main.rs`의 `with_graceful_shutdown`(axum 0.8.9 `serve/mod.rs` 287-297: 신호를 받으면 수신 소켓을 닫고 새 연결을 받지 않는다; 408-409: 열린 연결마다 `graceful_shutdown`)은 hyper 1.11(`proto/h1/conn.rs` 876-884)에서 놀고 있는 연결을 곧바로 닫고 처리 중인 요청만 끝낸다. 그래서 api 안에 「종료 중이면 503 `Retry-After`」를 답하는 층을 두어도 거기에 닿는 새 요청이 없다(발동하지 않는 가드가 된다).
 2. **교체 중 클라이언트가 받는 502는 api가 만들지 않는다.** api 앞의 장비가 만든다(Railway 템플릿의 Caddy `reverse_proxy api.railway.internal:8080`, `handle_errors` 없음: `infra/railway/Caddyfile.railway`; 셀프호스트 `infra/rust/Caddyfile`도 같다). api가 내려가 있는 틈(종료 뒤 새 api가 뜨기까지)은 api가 아니라 이 장비만 덮을 수 있다.
-3. **api가 살아서 「잠시 뒤」를 말하는 503은 둘뿐이다**: `ApiError::busy`(`Retry-After` 있음, 코드 없음)와 이 증보의 `drive_upstream_failed`(502). DB가 내려가 있으면 `/health`·`/healthz`는 503 `database unavailable`(코드·`Retry-After` 없음)이고 라우트들은 불투명한 500이다. 이 증보는 이 셋을 바꾸지 않는다.
+3. **api가 살아서 `Retry-After`로 「잠시 뒤」를 말하는 5xx는 둘뿐이다**: `ApiError::busy`(503, 코드 없음)와 이 증보의 `drive_upstream_failed`(502). DB가 내려가 있으면 `/health`·`/healthz`는 503 `database unavailable`(코드·`Retry-After` 없음)이고 라우트들은 불투명한 500이다. 이 증보는 이 셋을 바꾸지 않는다.
 
 결정: ① 점검·재시작을 알리는 답의 모양을 **`503` + `error.code` `server_restarting` + `Retry-After`(정수 초)**로 예약한다. 아직 어떤 길도 보내지 않으므로 OpenAPI의 「현재 코드」 목록에는 넣지 않는다(보내기 시작하는 PR이 넣는다). ② 보내는 곳은 **엣지**를 권한다(후속 이슈): Caddy의 `handle_errors`가 `reverse_proxy`의 도달 실패(502·503·504)에 위 모양을 답한다. api가 내려가 있는 전 구간을 덮고, api 코드와 종료 순서를 바꾸지 않는다. `handle_errors`는 Caddy 자신이 만든 오류에만 걸리고 api가 직접 답한 502·503(`drive_*`)은 지나가므로 둘이 섞이지 않는다(Caddy 설명서 기준이며 돌려 보지 않았다: `runtime-unverified`). ③ api 안의 대기 구간(lame-duck: 신호 뒤에도 수신 소켓을 N초 더 열고 503 `server_restarting`)은 **보류**한다. 종료가 N초 늘어 플랫폼의 종료 유예(Railway)·`stop_grace_period`와 맞물리고, 신호 뒤 틈의 앞부분만 덮는다. 엣지로 부족하다고 확인될 때만 다시 연다.
 
