@@ -663,6 +663,7 @@ CREATE TABLE outbox (
   kind text NOT NULL,
   status text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
+  available_at timestamptz NOT NULL DEFAULT now(),
   lease_acquired_at timestamptz
 );
 -- the two tables stack.scheduler reads (only the columns its query names)

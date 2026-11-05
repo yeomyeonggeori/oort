@@ -90,7 +90,7 @@ export function ThreadSummaryContent({
   suffix?: string;
   /**
    * 이 스레드에서 지금 에이전트가 일하는 중이라는 작은 칩(#4620 E, 웹 `ThreadWorkChip`과 같은 칩). 줄 맨 끝에 서고 누르는 것이 아니다.
-   * 일이 **진행 중**(가져감·작업 중)일 때만 호출하는 쪽이 넘긴다 — 끝난 일의 「답함」·실패는 머리 줄의 칩과 예외 줄이 말한다.
+   * 일이 **진행 중**(가져감·작업 중)일 때만 호출하는 쪽이 넘긴다 — 끝난 일의 실패는 머리 줄의 칩과 예외 줄이 말하고, 성공은 칩이 없다(#5382).
    */
   workChip?: React.ReactNode;
 }): React.JSX.Element {

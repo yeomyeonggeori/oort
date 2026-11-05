@@ -1,16 +1,16 @@
 // 트리거 메시지의 상태 칩 — 에이전트 작업 표시 v2의 폰 판 (#4620 B). 낱말·표지·급한 순서는 코어 `triggerChip`이 정하고
 // (`packages/momo-core/.../triggerChip.test.ts`가 붙든다), 여기서는 폰이 그 칩을 **어떻게 세우는가**를 붙든다:
-// 어떤 낱말이 서도 같은 크기, 「답함 ✓」 이동, 머리 줄이 이미 있는 행에만 서고 줄바꿈이 없다.
+// 어떤 낱말이 서도 같은 크기, 머리 줄이 이미 있는 행에만 서고 줄바꿈이 없다, 성공으로 끝나면 칩이 없고(#5382) 칩 자리가 비어도
+// 머리 줄의 모양이 그대로다.
 
 import {
   TRIGGER_CHIP_FACES,
   triggerChip,
-  type AnswerRef,
   type TriggerChip,
 } from '@momo/core/features/agents/triggerChip';
 import type {AgentRunProgress, Message, RosterMember, ThreadRollup} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {Dimensions, StyleSheet} from 'react-native';
 
@@ -60,8 +60,8 @@ const run = (extra: Partial<AgentRunProgress> = {}): AgentRunProgress =>
   }) as unknown as AgentRunProgress;
 
 const nameFor = () => ({name: '달무리봇'});
-const chipOf = (extra: Partial<AgentRunProgress>, answer?: AnswerRef): TriggerChip => {
-  const chip = triggerChip([run(extra)], nameFor, NOW, answer === undefined ? {} : {answerFor: () => answer});
+const chipOf = (extra: Partial<AgentRunProgress>): TriggerChip => {
+  const chip = triggerChip([run(extra)], nameFor, NOW);
   if (chip === null) throw new Error('chip');
   return chip;
 };
@@ -85,17 +85,19 @@ afterEach(async () => {
   cleanup();
 });
 
+// 시각 글자는 보조기술에 숨겨져(행 라벨이 이미 말한다) 기본 질의에 잡히지 않는다.
+const HIDDEN = {includeHiddenElements: true} as const;
+
 const box = (testID = 'request-status-chip') =>
   StyleSheet.flatten(screen.getByTestId(testID).props.style) as {width: number; height: number};
 
 describe('칩의 크기는 고정이다 (#4620 B)', () => {
-  it('받음 · 가져감 · 작업 중 · 승인 · 답함 · 아직 받지 않았어요 · 시간 초과 · 실패 — 어떤 낱말이 서도 상자 폭·높이가 같다', () => {
+  it('받음 · 가져감 · 작업 중 · 승인 · 아직 받지 않았어요 · 시간 초과 · 실패 — 어떤 낱말이 서도 상자 폭·높이가 같다', () => {
     const phases: [string, Partial<AgentRunProgress>][] = [
       ['received', {status: 'queued', phase: 'queued', leaseState: 'none', createdAtMs: NOW - 1_000}],
       ['claimed', {status: 'running', phase: 'claimed'}],
       ['working', {}],
       ['approval', {status: 'awaiting_approval', phase: 'awaiting_approval'}],
-      ['answered', {status: 'succeeded', phase: 'succeeded'}],
       ['uncollected', {status: 'queued', phase: 'queued', leaseState: 'none', createdAtMs: NOW - 10 * 60_000}],
       ['timed_out', {status: 'timed_out', phase: 'timed_out', endReason: 'lease_abandoned'}],
       ['failed', {status: 'failed', phase: 'failed'}],
@@ -119,9 +121,8 @@ describe('칩의 크기는 고정이다 (#4620 B)', () => {
   });
 });
 
-describe('「답함 ✓」 이동 (#4620 B)', () => {
-  const answer: AnswerRef = {id: 'answer-9', seq: 9};
-  const mount = (chip: TriggerChip, actions: Partial<MessageRowActions>, startsGroup = true) =>
+describe('성공으로 끝나면 칩이 없다 (#5382)', () => {
+  const mount = (runs: AgentRunProgress[], chip: TriggerChip | null, startsGroup = true) =>
     render(
       <MessageRow
         message={message()}
@@ -130,31 +131,65 @@ describe('「답함 ✓」 이동 (#4620 B)', () => {
         chips={[]}
         nowMs={NOW}
         requestChip={chip}
-        runStatus={[]}
-        actions={{myMemberId: SELF, ...actions} as unknown as MessageRowActions}
+        runStatus={runs}
+        actions={{myMemberId: SELF, onOpenThread: jest.fn()} as unknown as MessageRowActions}
       />,
     );
+  const succeeded = () => run({status: 'succeeded', phase: 'succeeded'});
+  const failed = () => run({id: 'run-2', status: 'failed', phase: 'failed'});
+  /** 시각에서 올라가며 처음 만나는 「줄바꿈을 정하는」 상자 = 머리 줄의 모양. */
+  const headShape = () => {
+    let node: ReturnType<typeof screen.getByTestId> | null = screen.getByTestId('row-time', HIDDEN).parent;
+    while (node !== null) {
+      const style = StyleSheet.flatten(node.props.style) as {flexWrap?: string; alignItems?: string} | undefined;
+      if (style?.flexWrap !== undefined) return {flexWrap: style.flexWrap, alignItems: style.alignItems};
+      node = node.parent;
+    }
+    throw new Error('머리 줄을 찾지 못했다');
+  };
+  const nameShrinks = () =>
+    (StyleSheet.flatten(screen.getByText('이도현').props.style) as {flexShrink?: number}).flexShrink === 1;
 
-  it('답 메시지를 알면 칩이 눌리고, 누르면 그 답으로 간다', () => {
-    const jump = jest.fn();
-    mount(chipOf({status: 'succeeded', phase: 'succeeded'}, answer), {onJumpToMessage: jump});
-    const chip = screen.getByTestId('request-status-chip');
-    expect(chip.props.accessibilityRole).toBe('button');
-    expect(String(chip.props.accessibilityHint)).toMatch(/답/);
-    fireEvent.press(chip);
-    expect(jump).toHaveBeenCalledWith('answer-9', 9);
+  it('모든 run이 성공이면 코어가 칩을 주지 않고, 행에도 칩이 서지 않는다', () => {
+    expect(triggerChip([succeeded()], nameFor, NOW)).toBeNull();
+    mount([succeeded()], triggerChip([succeeded()], nameFor, NOW));
+    expect(screen.queryByTestId('request-status-chip')).toBeNull();
+    expect(screen.getByTestId('row-time', HIDDEN)).toBeTruthy();
   });
 
-  it('답을 모르면 같은 칩이 눌리지 않는다 — 죽은 단추를 세우지 않는다', () => {
-    const jump = jest.fn();
-    mount(chipOf({status: 'succeeded', phase: 'succeeded'}), {
-      onJumpToMessage: jump,
-      onOpenThread: jest.fn(),
-    });
-    const chip = screen.getByTestId('request-status-chip');
-    expect(chip.props.accessibilityRole).not.toBe('button');
-    fireEvent.press(chip);
-    expect(jump).not.toHaveBeenCalled();
+  it('성공한 run 곁에 다른 상태의 run이 하나라도 있으면 그 상태의 칩이 선다', () => {
+    const chip = triggerChip([succeeded(), failed()], nameFor, NOW);
+    expect(chip?.kind).toBe('failed');
+    mount([succeeded(), failed()], chip);
+    expect(screen.getByTestId('request-status-chip')).toHaveTextContent('실패');
+  });
+
+  it('칩 자리가 비어도 머리 줄은 칩이 있을 때와 같은 모양이다: 줄바꿈 없음·가운데 정렬·이름만 줄어듦', () => {
+    const view = mount([run()], chipOf({}));
+    expect(screen.getByTestId('request-status-chip')).toBeTruthy();
+    const withChip = headShape();
+    const shrinksWithChip = nameShrinks();
+    expect(withChip).toEqual({flexWrap: 'nowrap', alignItems: 'center'});
+    expect(shrinksWithChip).toBe(true);
+    view.unmount();
+
+    // 같은 메시지가 성공으로 끝났다: 칩만 사라지고 머리 줄은 그대로다(줄이 다시 흐르면 높이가 바뀐다).
+    const done = mount([succeeded()], triggerChip([succeeded()], nameFor, NOW));
+    expect(screen.queryByTestId('request-status-chip')).toBeNull();
+    expect(headShape()).toEqual(withChip);
+    expect(nameShrinks()).toBe(true);
+    done.unmount();
+
+    // 대조: run을 부르지 않은 메시지의 머리 줄은 여전히 줄바꿈이 있는 줄이다(칩이 없다는 이유만으로 모양이 바뀌지 않는다는 뜻이 아니다).
+    mount([], null);
+    expect(headShape().flexWrap).toBe('wrap');
+    expect(nameShrinks()).toBe(false);
+  });
+
+  it('이어지는 행에는 성공 뒤에도 칩도 머리 줄도 서지 않는다', () => {
+    mount([succeeded()], triggerChip([succeeded()], nameFor, NOW), false);
+    expect(screen.queryByTestId('request-status-chip')).toBeNull();
+    expect(screen.queryByTestId('row-time', HIDDEN)).toBeNull();
   });
 });
 
@@ -200,7 +235,7 @@ describe('칩이 서는 머리 줄 (#4620 B)', () => {
 
 describe('스레드 요약 줄의 「작업 중」 칩 (#4620 E)', () => {
   const rollup = {replyCount: 3, lastReplySeq: 9, lastReplyAtMs: NOW - 5_000, participantIds: [BOT]} as ThreadRollup;
-  const mount = (chip: TriggerChip, extra: Partial<React.ComponentProps<typeof MessageRow>> = {}) =>
+  const mount = (chip: TriggerChip | null, extra: Partial<React.ComponentProps<typeof MessageRow>> = {}) =>
     render(
       <MessageRow
         message={message()}
@@ -230,13 +265,13 @@ describe('스레드 요약 줄의 「작업 중」 칩 (#4620 E)', () => {
     expect(screen.getByTestId('thread-work-chip')).toBeTruthy();
   });
 
-  it('끝난 일(답함·실패)과 아직 안 가져간 일에는 서지 않는다 — 그것은 머리 줄의 칩과 예외 줄이 말한다', () => {
+  it('끝난 일(성공·실패)과 아직 안 가져간 일에는 서지 않는다 — 성공은 칩이 없고, 나머지는 머리 줄의 칩과 예외 줄이 말한다', () => {
     for (const extra of [
       {status: 'succeeded', phase: 'succeeded'},
       {status: 'failed', phase: 'failed'},
       {status: 'queued', phase: 'queued', leaseState: 'none', createdAtMs: NOW - 1_000},
     ] as Partial<AgentRunProgress>[]) {
-      const view = mount(chipOf(extra));
+      const view = mount(triggerChip([run(extra)], nameFor, NOW));
       expect(screen.queryByTestId('thread-work-chip')).toBeNull();
       view.unmount();
     }

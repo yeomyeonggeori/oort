@@ -361,7 +361,7 @@ export function MemorySettingsSection({
       <SettingsSection title="채널마다">
         <SettingsRow
           label="채널에서 제외하거나 멈추기"
-          description="채널 헤더의 더보기 메뉴(⋮)에서 기억 설정을 열어요."
+          description="채널 헤더의 더 보기 메뉴(⋮)에서 기억 설정을 열어요."
           testId="memory-channel-hint"
         />
       </SettingsSection>

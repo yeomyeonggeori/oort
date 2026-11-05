@@ -9,7 +9,6 @@ import type { TriggerChipTone } from "@momo/core/features/agents/triggerChip";
 export const TRIGGER_CHIP_TONE_CLASS: Readonly<Record<TriggerChipTone, string>> = {
   muted: "bg-muted-soft text-ink-muted",
   working: "bg-muted-soft text-warn",
-  ok: "bg-ok-soft text-ok",
   warn: "bg-warn-soft text-warn",
   danger: "bg-danger-soft text-danger",
 };
