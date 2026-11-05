@@ -13,7 +13,7 @@
 - 증보(**Accepted** 2026-10-26, owner 결정 「권장으로 승인」 — 시크릿 출력 범위가 옵트인 한정으로 넓어진다): **2026-10-25 Railway 생성기의 Hermes 공유 변수 출력(옵트인), A4′** (#4461, 온보딩 r2 R2-11) — 파일 끝. 옵트인 플래그(`--platform railway --with-agents`)가 있을 때만 T2 stdout에 정본 키 집합 밖의 공유 변수 둘(`HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`)을 새로 만들어 더한다. A4의 「정본 키 집합에 넣지 않고 T2 stdout 불변」 중 「운영자가 손으로 만든다」와 `self_host_env.sh:277-278`(T2와 `--with-agents` 동시 금지)만 이 옵트인 경로에 한해 바뀌고, 기본 출력은 바이트 단위로 같다. 카탈로그의 서비스·변수·compose·서버는 바뀌지 않는다. D·K·A1·A2·A5·L·M·F(F3 마지막 항·F6 railway 계획 문구 제외)는 바뀌지 않고, A3의 「출력에 값을 내지 않는다」는 이 증보가 Accepted된 뒤 T1(compose 파일 경로) 한정으로 읽는다.
 - 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 2회차 B0·H0): **2026-11-01 볼륨 `.env`는 허용 이름만, 연결 모드 설정과 엄격 모드** (#4950, #4935) — 파일 끝. 게이트가 볼륨 `.env`를 거부 목록이 아니라 허용 목록으로 판정하고(부팅 게이트와 `report`가 같은 함수 하나), 시작 명령·게이트가 `config.yaml`을 정해진 해시 목록(기본 설정 + 연결 모드 조각 조합)으로 받으며, 엄격 모드를 모든 기동에서 요구한다. D6의 도구 허용 목록·K4·I1~I4는 바뀌지 않는다.
 - 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 1회차 B0·H0·M0, 고정 이미지 안 증명 PASS): **2026-11-01 공동 호스팅 Hermes의 세션 검색·기억 도구는 끈다** (#4898, #4820 C2a 보안 검수 Low 후속) — 파일 끝. 한 Hermes가 모든 워크스페이스를 `state.db` 하나와 `memories/` 하나로 처리해 `session_search`·`memory`가 다른 런의 기록을 읽거나 심는 길이 되므로, 두 설정에서 둘을 끄고(deny-list·`memory.*` 스위치) 게이트가 켜진 설정의 기동을 거절한다. 같은 증보가 #4950 2회차 Low 셋(시험 사례·`.deleted` 표식 문장·핀 올림 절차)도 닫는다. D6의 허용 표면이 `todo_list`·`web_search`·`image_generate`로 좁아지고(`memory`·`session_search` 제외) D1~D5·D7~D9·K1~K7은 바뀌지 않는다.
-- 증보(**Proposed** 2026-11-05, 독립 보안 검수 전 — owner 11-05 「에르메스 기본 모델은 sonnet 5.5로.」·「일단 가의 형태가 생각중인 형태야. 그리고 실제로 켜줘 그러면.」): **2026-11-05 팀 공동 Hermes의 기본값은 기본 모드(팀 공용), 정적 목록 밖 모델 id는 판마다 근거 한 줄로 허용한다** (#5323, #5317 선행) — 파일 끝. 게이트가 받는 설정에 「기본 설정 + Claude 주·Codex 예비 모델 조각」 한 줄이 더해져 다섯에서 여섯이 되고, 렌더러가 Hermes 고정 판의 정적 목록 밖 id(`claude-sonnet-5-5`)를 근거 한 줄과 함께 받으며, 연결 모드는 팀 Hermes가 아니라 owner 전용 연결 Hermes를 위해 남는다. D6·K4·I3·W·R의 도구 허용 목록과 엄격 모드·볼륨 `.env` 허용 이름은 바뀌지 않는다.
+- 증보(**Proposed** 2026-11-05, 독립 보안 검수 전 — owner 11-05 「에르메스 기본 모델은 sonnet 5.5로.」·「일단 가의 형태가 생각중인 형태야. 그리고 실제로 켜줘 그러면.」·「그러면 hermes는 GPT고정에 폴백으로 claude」): **2026-11-05 팀 공동 Hermes의 기본값은 기본 모드(팀 공용), 정적 목록 밖 모델 id는 판마다 근거 한 줄로 허용한다** (#5323, #5317 선행) — 파일 끝. 게이트가 받는 설정에 「기본 설정 + Codex 주·Claude 예비 모델 조각」 한 줄이 더해져 다섯에서 여섯이 되고, 렌더러가 Hermes 고정 판의 정적 목록 밖 id(`claude-sonnet-5-5`)를 근거 한 줄과 함께 받으며, 연결 모드는 팀 Hermes가 아니라 owner 전용 연결 Hermes를 위해 남는다. D6·K4·I3·W·R의 도구 허용 목록과 엄격 모드·볼륨 `.env` 허용 이름은 바뀌지 않는다.
 - 역방향: 2026-10-25 D6(Hermes 도구 잠금)은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 바꾸지 않는다. 팀 박스는 Hermes와 별개의 컴퓨터이고 Hermes 컨테이너(`/opt/data`)에는 셸을 붙이지 않으며 Hermes `terminal` 백엔드를 박스로 향하게 하지 않는다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 A4′(Accepted 2026-10-26)는 [ADR-0184](0184-platform-neutral-agent-driven-selfhost.md) D3의 「정본 키에서만」을 옵트인 경로에 한해 좁힌다. Accepted 전에는 0184 본문을 고치지 않고, Accepted 뒤 구현 이슈가 D3에 한 줄 역참조를 더한다. 10-25 증보(#4336)의 「바뀌지 않는 것」이 적은 A4 불변은 그 증보 시점의 서술이고, A4′가 Accepted되면 A4의 해당 문장은 이 절이 대체한다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
@@ -1166,15 +1166,17 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 
 ## 증보 2026-11-05 — 팀 공동 Hermes의 기본값은 기본 모드(팀 공용), 정적 목록 밖 모델 id는 판마다 근거 한 줄로 허용한다 (#5323)
 
-- Status: **Proposed** (2026-11-05, 기안 Sonnet 5.5 worker). 독립 보안 검수(등급 2: 잠금 게이트) 1회 뒤 planner가 Accepted로 바꾼다. 근거: [#5323](https://github.com/yeomyeonggeori/oort/issues/5323)(owner 2026-11-05 「에르메스 기본 모델은 sonnet 5.5로.」), 선행 운영 작업 [#5317](https://github.com/yeomyeonggeori/oort/issues/5317)이 RELEASING의 Hermes 단계 2(설정 해시 대조)에서 「카탈로그 밖」으로 멈춘 일.
+- Status: **Proposed** (2026-11-05, 기안 Sonnet 5.5 worker). 독립 보안 검수(등급 2: 잠금 게이트) 1회 뒤 planner가 Accepted로 바꾼다. 근거: [#5323](https://github.com/yeomyeonggeori/oort/issues/5323)(owner 2026-11-05 「에르메스 기본 모델은 sonnet 5.5로.」, 같은 날 16:01 「그러면 hermes는 GPT고정에 폴백으로 claude」로 방향이 바뀌었다: N1), 선행 운영 작업 [#5317](https://github.com/yeomyeonggeori/oort/issues/5317)이 RELEASING의 Hermes 단계 2(설정 해시 대조)에서 「카탈로그 밖」으로 멈춘 일.
 - 범위: 렌더러·모델 조각·연결 모드 기준 사본의 모델 줄·게이트의 설정 표·Railway 시작 명령의 해시 목록과 게이트 체크섬·카탈로그 검사기·시험·고정 이미지 안 증명. 운영 서비스의 변수·시작 명령·볼륨·로그인은 건드리지 않는다(#5317에서 planner, owner 사전 고지).
-- 바뀌는 기존 결정과 사실: C2의 「받는 설정은 다섯 개」가 **여섯 개**가 된다(`default/claude-oauth.fallback-codex-oauth` 하나가 더해진다). C4의 「기본 설정 + 모델 조각도 받기」(기각)는 이 한 조합에 한해 뒤집는다. 연결 모드 넷의 해시가 바뀌고(기본 설정은 그대로) 게이트의 sha256·`HERMES_LOCKGATE_B64`도 바뀐다. D6·K4·I3·W·R의 도구 허용 목록, 엄격 모드(C3), 볼륨 `.env` 허용 이름(E2)은 바뀌지 않는다.
+- 바뀌는 기존 결정과 사실: C2의 「받는 설정은 다섯 개」가 **여섯 개**가 된다(`default/codex-oauth.fallback-claude-oauth` 하나가 더해진다). C4의 「기본 설정 + 모델 조각도 받기」(기각)는 이 한 조합에 한해 뒤집는다. 연결 모드 넷의 해시가 바뀌고(기본 설정은 그대로) 게이트의 sha256·`HERMES_LOCKGATE_B64`도 바뀐다. D6·K4·I3·W·R의 도구 허용 목록, 엄격 모드(C3), 볼륨 `.env` 허용 이름(E2)은 바뀌지 않는다.
 
 ### N1. owner 결정 (2026-11-05)
 
 - 모델: 「에르메스 기본 모델은 sonnet 5.5로.」(이슈 #5323 본문의 인용)
 - 모드(14:25, planner 전달): 「일단 가의 형태가 생각중인 형태야. 그리고 실제로 켜줘 그러면.」 (가)는 **팀 공용 기본 모드**다: 그림·검색 도구가 있고 메일·드라이브 연결은 없으며 기억·세션 검색은 끈다.
-- 이 증보가 적는 결정: **팀 공동 Hermes(서비스 하나, 모든 워크스페이스가 쓴다)의 기본값은 기본 모드 + 주 모델 Claude `claude-sonnet-5-5` + 예비 모델 Codex `gpt-5.6-sol`이다.** 연결 모드(Gmail·캘린더·드라이브 읽기 전용)는 팀 Hermes가 아니라 **owner 전용 연결 Hermes**(K1: 1인 워크스페이스·본인 토큰)가 필요해질 때를 위해 카탈로그에 남기고, 그 Claude 모델도 5.5로 맞춘다.
+- 방향(16:01, planner 전달): 「그러면 hermes는 GPT고정에 폴백으로 claude」, 검색은 「나 방향」(= Codex 주 모델: 서버 쪽 검색은 Codex Responses 전송에서만 선다, W1). 앞선 「sonnet 5.5」는 이로써 **예비 모델**의 id가 된다.
+- 이 증보가 적는 결정: **팀 공동 Hermes(서비스 하나, 모든 워크스페이스가 쓴다)의 기본값은 기본 모드 + 주 모델 Codex `gpt-5.6-sol` + 예비 모델 Claude `claude-sonnet-5-5`이다.** 연결 모드(Gmail·캘린더·드라이브 읽기 전용)는 팀 Hermes가 아니라 **owner 전용 연결 Hermes**(K1: 1인 워크스페이스·본인 토큰)가 필요해질 때를 위해 카탈로그에 남기고, 그 Claude 모델도 5.5로 맞춘다.
+- 이 증보의 첫 판(PR #5336의 앞선 커밋들)은 「Claude 주·Codex 예비」 한 줄이었고 위 방향 결정으로 뒤집혔다. 기본 모드 줄은 계속 **하나**이고 앞의 줄은 어느 목록에도 남기지 않았다(N6).
 
 ### N2. 문제
 
@@ -1216,20 +1218,21 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 | 이름 | 내용 |
 |---|---|
 | `default` | 기본 설정 그대로(모델 구간 없음, 변함 없음) |
-| `default/claude-oauth.fallback-codex-oauth` | 기본 설정 바이트 뒤에 모델 조각을 붙인 것: 주 `anthropic`·`claude-sonnet-5-5`, 예비 `openai-codex`·`gpt-5.6-sol` (**팀 공용 기본값**) |
+| `default/codex-oauth.fallback-claude-oauth` | 기본 설정 바이트 뒤에 모델 조각을 붙인 것: 주 `openai-codex`·`gpt-5.6-sol`, 예비 `anthropic`·`claude-sonnet-5-5` (**팀 공용 기본값**) |
 | `connector/<조각>` 넷 | 연결 모드 설정. Claude가 들어간 곳은 모두 `claude-sonnet-5-5`, Codex 모델은 그대로 |
 
 - **새 줄은 기본 설정과 모델 구간만 다르다.** `render`가 기본 설정 바이트 **뒤에** `model:`·`fallback_model:`만 붙인다(시험이 앞부분 일치, 새 최상위 키가 그 둘뿐임, deny-list 24개·`mcp_servers` 없음을 잰다). 도구 허용 목록(`todo_list`·`web_search`·`image_generate`)·`platform_toolsets`·`web`·`image_gen`·`plugins`·`memory` 스위치·`approvals`는 `default`와 같은 바이트이고, 게이트가 보는 선택 도구도 같다(고정 이미지 안 증명이 진짜 게이트로 잰다).
-- **한 줄만 더한다.** 받는 설정이 늘 때마다 게이트가 받는 바이트가 늘고 지금 필요한 조합은 하나다. 다른 조합(예: Codex 주·Claude 예비)이 기본 모드에서 필요하면 `DEFAULT_MODEL_CONFIGS`에 한 줄을 더하고 같은 PR에서 해시 세 곳(게이트 표·시작 명령·카탈로그)을 바꾸며, 조합마다 이유를 이 ADR 증보에 적는다. 시험은 다른 조합이 목록에 없음을 잰다.
-- **낡은 `claude-sonnet-5` 설정은 받지 않는다.** 표에는 5.5 해시만 있고 옛 해시를 곁에 두지 않는다. `claude-sonnet-5`는 정적 목록의 이름이라 렌더러는 `--model claude-sonnet-5`로 여전히 만들 수 있지만 그 바이트는 어느 목록에도 없어 게이트와 시작 명령이 거절한다(시험·고정 이미지 안 증명). 이행 구간은 두지 않는다 — 되돌리기 재료는 RELEASING 1단계의 저장본이다.
+- **한 줄만 더한다.** 받는 설정이 늘 때마다 게이트가 받는 바이트가 늘고 지금 필요한 조합은 하나다. 다른 조합(예: 앞선 Claude 주·Codex 예비)이 기본 모드에서 필요하면 `DEFAULT_MODEL_CONFIGS`에 한 줄을 더하고 같은 PR에서 해시 세 곳(게이트 표·시작 명령·카탈로그)을 바꾸며, 조합마다 이유를 이 ADR 증보에 적는다. 시험은 다른 조합이 목록에 없음을 잰다.
+- **낡은 `claude-sonnet-5` 설정은 받지 않는다.** 표에는 5.5 해시만 있고 옛 해시를 곁에 두지 않는다. `claude-sonnet-5`는 정적 목록의 이름이라 렌더러는 `--model claude-sonnet-5`로 여전히 만들 수 있지만 그 바이트는 어느 목록에도 없어 게이트와 시작 명령이 거절한다(시험·고정 이미지 안 증명). 앞서 이 증보의 첫 판이 받던 Claude 주·Codex 예비 줄도 같은 이유로 남기지 않는다(카탈로그·게이트 표·시작 명령 어디에도 없고, 그 바이트는 시험과 고정 이미지 안 증명이 거절을 잰다). 이행 구간은 두지 않는다 — 되돌리기 재료는 RELEASING 1단계의 저장본이다.
 - 연결 모드 기준 사본 `google-connectors.config.yaml`의 `fallback_model` 줄도 5.5로 맞췄다(렌더러가 그 구간을 통째로 바꾸므로 카탈로그 해시는 변하지 않는다).
 
 ### N7. 연결 모드에서 팀 기본 모드로 갈 때 달라지는 것
 
 - **게이트.** `mcp_servers`가 비어 있으면 `connector_problems`는 아무것도 보지 않는다. 서비스에 남은 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은 게이트가 읽지 않는 변수이므로 지운다(쓰지 않는 비밀을 서비스에 두지 않는다).
 - **서버 선언.** 연결이 없는 Hermes에 연결 선언을 두는 것은 거짓 선언이다. api의 `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED`·`OORT_COHOSTED_AGENT_CONNECTOR_APPS`는 지우고 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 둔다. 서버는 「시험 에이전트」(`connector_owner_human_id` 표시 + `operator_env` 핀)에 한해 매 배달마다 세 선언을 다시 재므로(`momo-agent`의 `connector_trial_stop`), 지우면 그 에이전트의 배달이 `connector_trial_attest`로 멈추고 owner에게 안내가 나간다. 표시 없는 에이전트는 영향이 없다. 시험 에이전트를 어떻게 할지(핀 해제·보관)는 이 증보 밖이고 데이터 변경이라 owner가 정한다.
-- **그림.** `image_generate`는 `image_gen.provider: openai-codex`이고 provider의 가용성은 Codex 로그인 유무다(`H/plugins/image_gen/openai-codex/__init__.py:244`). 주 모델이 Claude여도 Codex 로그인이 있으면 서고, 없으면 도구가 모델에 보이지 않는다.
-- **검색.** `web_search`는 `web.search_backend: openai-native`이고 가용성은 Codex 로그인 유무다(`H/plugins/web/openai_native/provider.py:35·71`, 도구의 `check_fn` `H/tools/web_tools.py:479`). 서버 쪽 검색으로 바뀌는 것은 Codex Responses 전송뿐이다(W1-2·3). 그래서 주 모델이 Claude인 턴에서는 도구가 모델에 보여도 호출이 「client-side로 못 돌린다」는 오류(`_UNSUPPORTED_MSG`)로 끝난다 — 조용히 다른 검색으로 가지 않고(`keyless_fallback: false`) 검색은 예비 Codex가 답하는 턴에서만 된다. [소스 읽기, 실행 미확인] 이 증보는 이 제약을 풀지 않는다. 검색이 필요한 팀이 Claude 주 모델을 고르면 이 제약을 받아들이는 것이다.
+- **주 모델 전환.** 운영의 현재 설정은 Claude 주·Codex 예비다. 이 증보의 기본값은 그 반대라 전환은 모델 줄 하나가 아니라 대화의 주 공급자를 바꾸는 일이다: Codex 로그인(`openai-codex`)이 먼저 있어야 하고, Claude 로그인(`anthropic`)은 예비를 위해 계속 필요하다. Codex 로그인이 없으면 주 모델 호출이 실패해 Hermes가 예비(Claude)로 넘어가고, 그 대화에는 아래 그림·검색 도구가 없다(가용성이 Codex 로그인이다).
+- **그림.** `image_generate`는 `image_gen.provider: openai-codex`이고 provider의 가용성은 Codex 로그인 유무다(`H/plugins/image_gen/openai-codex/__init__.py:244`). 주 모델이 Codex이므로 같은 로그인이 대화와 그림 모두의 전제다. 로그인이 없으면 도구가 모델에 보이지 않는다.
+- **검색.** `web_search`는 `web.search_backend: openai-native`이고 가용성은 Codex 로그인 유무다(`H/plugins/web/openai_native/provider.py:35·71`, 도구의 `check_fn` `H/tools/web_tools.py:479`). 서버 쪽 검색으로 바뀌는 것은 Codex Responses 전송뿐이다(W1-2·3). 그래서 **주 모델(Codex) 턴에서 검색이 된다**(owner 「나 방향」). 예비 Claude가 답하는 턴(Codex 호출이 실패했을 때)에서는 도구가 모델에 보여도 호출이 「client-side로 못 돌린다」는 오류(`_UNSUPPORTED_MSG`)로 끝난다 — 조용히 다른 검색으로 가지 않는다(`keyless_fallback: false`). [소스 읽기, 실행 미확인]
 
 ### N8. 되돌리기
 
@@ -1240,6 +1243,6 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 ### N9. 남는 위험과 검증 경계
 
 - **소스가 보장하지 않는 것.** N3은 고정 이미지의 소스 읽기이고, `claude-sonnet-5-5`를 벤더가 지금 받아들이는지는 소스가 아니라 N5의 벤더 문서와 운영 사실(10-20부터)이 근거다. 이 칸은 네트워크·로그인을 쓰지 않았으므로 **실제 API 왕복은 `runtime-unverified`**다.
-- **받는 설정이 하나 늘었다.** 새 줄은 기본 설정과 모델 구간 말고 같은 바이트이고 도구 판정이 같지만, 게이트가 받는 바이트는 늘었다. 늘어난 폭은 한 줄(Claude 주·Codex 예비)이다.
-- **Claude 주 모델에서는 검색이 거의 안 된다**(N7). 팀이 검색을 쓰려면 Codex 주 모델이 필요하고 그것은 다른 줄이다(N6).
-- **시험.** 오프라인: `test_render_model_config.py`(표의 모양·목록·낡은 id 거절), `test_lockgate_image_guard.py`의 `AcceptedConfigs`(진짜 `gate()`가 여섯을 이름으로 받고 낡은 id를 거절), `check_railway_catalog.py`(코드의 `EXTRA_MODELS`와 이 문서 N5 표의 대조 — 고정 이미지 안 시험이 `infra/hermes`만 마운트해 단위 시험은 `docs/`를 읽지 못해 검사기에 둔다 — 와 변이 증명 `hermes-config-hash-pre55` 추가). 고정 이미지 안(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`가 여섯 설정을 진짜 게이트에 넣고, 시작 명령 시나리오 `railway-start-default-model`(새 설정이 exec 직전까지 감)·`railway-start-stale-model`(낡은 id가 게이트 전에 멈춘다, rc 78)가 새로 있다. 사보타주 표는 PR 본문이 정본이다.
+- **받는 설정이 하나 늘었다.** 새 줄은 기본 설정과 모델 구간 말고 같은 바이트이고 도구 판정이 같지만, 게이트가 받는 바이트는 늘었다. 늘어난 폭은 한 줄(Codex 주·Claude 예비)이다.
+- **검색은 Codex 턴에서만 된다**(N7). 주 모델이 Codex라 평소에는 되고, 예비 Claude가 답하는 턴에서만 안 된다. Codex 로그인이 없으면 그림·검색 도구가 모두 빠진다(N7 주 모델 전환).
+- **시험.** 오프라인: `test_render_model_config.py`(표의 모양·목록·낡은 id 거절), `test_lockgate_image_guard.py`의 `AcceptedConfigs`(진짜 `gate()`가 여섯을 이름으로 받고 낡은 id를 거절), `check_railway_catalog.py`(코드의 `EXTRA_MODELS`와 이 문서 N5 표의 대조 — 고정 이미지 안 시험이 `infra/hermes`만 마운트해 단위 시험은 `docs/`를 읽지 못해 검사기에 둔다 — 와 변이 증명 `hermes-config-hash-pre55`·`hermes-config-hash-old-team-default` 추가). 고정 이미지 안(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`가 여섯 설정을 진짜 게이트에 넣고, 시작 명령 시나리오 `railway-start-default-model`(새 설정이 exec 직전까지 감)·`railway-start-stale-model`(낡은 id가 게이트 전에 멈춘다, rc 78)·`railway-start-previous-team-default`(앞선 Claude 주 줄도 같은 방식으로 멈춘다)가 새로 있다. 사보타주 표는 PR 본문이 정본이다.
