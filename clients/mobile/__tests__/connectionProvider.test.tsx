@@ -536,3 +536,163 @@ describe('#5403 — 사람이 본 적 없는 재연결은 아무것도 보이지
     expect(header()).toBeNull();
   });
 });
+
+// =============================================================================
+// #5407 — 「서버에 닿지 못했어요」·「연결에 문제가 있어요」 띠는 응답 한 건이 와야 걷혀서, 서버가 돌아와도 사람이 보내기 같은 요청을 하기 전까지 남았다.
+// 이제 이 띠가 **앞에서** 서 있는 동안 앱이 스스로 가볍게 다시 확인한다(2 · 4 · 8 · 16 · 30초). 사람이 하는 요청은 띠를 세우는 `hit` 뿐이고, 서버가 돌아온 뒤에는
+// 한 건도 없다. 서버는 `serverUp` 하나로 켜고 끄고, 확인 요청은 `GET …/healthz` 로 세어 단정한다.
+// =============================================================================
+
+describe('#5407 — 서버에 닿지 못함 띠는 앱이 스스로 다시 확인한다', () => {
+  let serverUp = false;
+  let appState: AppStateStatus = 'active';
+  let appHandlers: Array<(state: AppStateStatus) => void> = [];
+  const appStateDescriptor = Object.getOwnPropertyDescriptor(AppState, 'currentState');
+  const goTo = (state: AppStateStatus) =>
+    act(() => {
+      appState = state;
+      for (const handler of appHandlers) handler(state);
+    });
+
+  /** 요청이 어디로 갔나(확인 요청은 주소가 `/healthz` 로 끝난다). */
+  const urls = () => (globalThis.fetch as jest.Mock).mock.calls.map(([url]) => String(url));
+  const probes = () => urls().filter(url => url.endsWith('/healthz'));
+  const humanRequests = () => urls().filter(url => !url.endsWith('/healthz'));
+  /** 사람(화면)이 한 요청. 서버가 꺼져 있으면 닿지 못한다. */
+  async function hit(path: string) {
+    await act(async () => {
+      await fetchWithDeadline(`https://api.example.com/v1${path}`).catch(() => undefined);
+    });
+  }
+  const declareUnreachable = async () => {
+    for (const path of ['/channels', '/roster', '/read-state']) await hit(path);
+    expect(strip()).toHaveTextContent('서버에 닿지 못했어요', {exact: false});
+  };
+
+  beforeEach(() => {
+    serverUp = false;
+    appState = 'active';
+    appHandlers = [];
+    (globalThis.fetch as jest.Mock).mockImplementation(async () => {
+      if (!serverUp) throw new TypeError('Network request failed');
+      return REST_OK;
+    });
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      appHandlers.push(handler as (state: AppStateStatus) => void);
+      return {
+        remove: () => {
+          appHandlers = appHandlers.filter(h => h !== handler);
+        },
+      };
+    });
+    Object.defineProperty(AppState, 'currentState', {configurable: true, get: () => appState});
+  });
+  afterEach(() => {
+    if (appStateDescriptor) Object.defineProperty(AppState, 'currentState', appStateDescriptor);
+    jest.restoreAllMocks();
+  });
+
+  it('서버가 돌아오면 사람의 요청 없이 띠가 걷힌다: 2초에 첫 확인, 돌아온 뒤 다음 확인(6초)에 「다시 연결됐어요」를 거쳐 비워진다', async () => {
+    mountHost();
+    await healthy();
+    await declareUnreachable();
+    expect(humanRequests()).toHaveLength(3);
+    await tick(1_999);
+    expect(probes()).toHaveLength(0);
+    await tick(1);
+    expect(probes()).toHaveLength(1);
+    expect(probes()[0]).toMatch(/\/healthz$/);
+    // 서버가 아직 안 돌아왔다: 띠는 그대로이고 보내기도 막혀 있다.
+    expect(strip()).toHaveTextContent('서버에 닿지 못했어요', {exact: false});
+    expect(screen.getByTestId('gate-probe').props.children).toContain('false|false|false');
+
+    serverUp = true;
+    await tick(3_999);
+    expect(probes()).toHaveLength(1);
+    expect(strip()).toHaveTextContent('서버에 닿지 못했어요', {exact: false});
+    await tick(1); // 첫 확인이 끝난 때부터 4초
+    expect(probes()).toHaveLength(2);
+    expect(strip()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    expect(screen.getByTestId('gate-probe').props.children).toContain('true|true|true');
+    await tick(RECOVERED_FLASH_MS);
+    expect(strip()).toBeNull();
+    expect(header()).toBeNull();
+    // 걷혔으면 더는 보내지 않고, 그동안 사람이 보낸 요청은 한 건도 없다.
+    await tick(300_000);
+    expect(probes()).toHaveLength(2);
+    expect(humanRequests()).toHaveLength(3);
+  });
+
+  it('뒤에 있는 동안은 확인을 한 건도 보내지 않고, 앞으로 돌아오면 2초부터 다시 시작한다', async () => {
+    mountHost();
+    await healthy();
+    await declareUnreachable();
+    await goTo('background');
+    await tick(300_000);
+    expect(probes()).toHaveLength(0);
+    await goTo('active');
+    await tick(1_999);
+    expect(probes()).toHaveLength(0);
+    await tick(1);
+    expect(probes()).toHaveLength(1);
+  });
+
+  it('알림 센터를 당긴 동안(inactive)도 보내지 않는다 - 앞(active)에 있을 때만이다', async () => {
+    mountHost();
+    await healthy();
+    await declareUnreachable();
+    await goTo('inactive');
+    await tick(60_000);
+    expect(probes()).toHaveLength(0);
+    await goTo('active');
+    await tick(2_000);
+    expect(probes()).toHaveLength(1);
+  });
+
+  it('실시간이 다시 붙으면 요청 없이 걷히고, 확인도 멈춘다', async () => {
+    mountHost();
+    await healthy();
+    await declareUnreachable();
+    await tick(2_000);
+    expect(probes()).toHaveLength(1);
+    await raw('disconnected');
+    await raw('connected');
+    expect(strip()).toHaveTextContent('다시 연결됐어요', {exact: false});
+    await tick(RECOVERED_FLASH_MS);
+    expect(strip()).toBeNull();
+    await tick(300_000);
+    expect(probes()).toHaveLength(1);
+    expect(humanRequests()).toHaveLength(3);
+  });
+
+  it('「연결에 문제가 있어요」(알 수 없음)도 확인한다 - 서버가 답하면 실시간만 끊긴 띠로 좁혀지고 확인은 멈춘다', async () => {
+    mountHost();
+    await healthy();
+    await raw('connecting');
+    await hit('/channels');
+    await tick(DISPLAY_GRACE_MS);
+    expect(header()).toHaveTextContent('연결에 문제가 있어요', {exact: false});
+    expect(strip()).toBeNull();
+    await tick(2_000);
+    expect(probes()).toHaveLength(1);
+    // 확인이 닿지 못해도 띠는 「서버에 닿지 못했어요」로 올라가지 않는다.
+    expect(header()).toHaveTextContent('연결에 문제가 있어요', {exact: false});
+    expect(strip()).toBeNull();
+    serverUp = true;
+    await tick(4_000);
+    expect(probes()).toHaveLength(2);
+    expect(header()).toHaveTextContent('실시간 연결이 끊겼어요', {exact: false});
+    await tick(300_000);
+    expect(probes()).toHaveLength(2);
+  });
+
+  it('공급자가 사라지면 날아갈 확인의 시계도 남지 않는다', async () => {
+    const view = mountHost();
+    await healthy();
+    await declareUnreachable();
+    view.unmount();
+    // 효과의 거둠이 빠지면 2초 뒤 확인이 나간다(띠 애니메이션 같은 화면 쪽 시계는 이 시험이 세지 않는다).
+    await tick(300_000);
+    expect(probes()).toHaveLength(0);
+  });
+});

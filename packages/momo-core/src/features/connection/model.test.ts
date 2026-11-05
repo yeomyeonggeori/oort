@@ -223,6 +223,9 @@ describe("문턱의 정본", () => {
       AUTO_RESEND_WINDOW_MS: 300_000,
       RESUME_AFTER_HIDDEN_MS: 30_000,
       RECOVERED_FLASH_MS: 2_000,
+      REST_PROBE_FIRST_DELAY_MS: 2_000,
+      REST_PROBE_MAX_DELAY_MS: 30_000,
+      REST_PROBE_TIMEOUT_MS: 8_000,
     });
   });
 });
