@@ -480,6 +480,9 @@ function ThreadPanelFrame({
                 key={reply.seq}
                 message={reply}
                 startsGroup={startsAuthorGroup(replies[index - 1], reply)}
+                // 스레드 목록은 루트 다음에 답글이 줄줄이 이어지고(구분선도 사이의 벽도 없다) 바로 위는 앞 답글이거나 첫 답글의 루트다. 에이전트의 답이
+                // 이 메시지를 가리키면 인용을 그리지 않는다(#5357 — 판정은 본류와 같은 코어 `isQuoteRedundant`, 행이 한다).
+                aboveMessageId={(index === 0 ? root : replies[index - 1])?.id}
                 directory={directory}
                 actions={rowActions(reply)}
                 onOpenWorkSession={onOpenWorkSession}
