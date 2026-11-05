@@ -31,10 +31,12 @@ export type MessageActionItemKey =
  *   copy         메시지 복사 · 링크 복사
  *   destructive  지우기(내 메시지만). 구분선 아래 혼자 맨 아래에 서서 자주 쓰는 고치기와 붙어 있지 않다.
  *
- * 고치기는 **메뉴 첫 줄**이고 도구 막대에는 올리지 않는다: Buzz(`MessageActionBar.tsx`)도 도구 막대는 반응·답글·링크 복사·⋮이고 고치기는
- * 내 메시지에서만 ⋮ 메뉴의 맨 첫 줄이며(지우기는 구분선 아래), Slack도 ⋮ 안의 「Edit message」와 빈 입력칸 ↑로 둔다. 찾기 어렵다는 지적은
- * 첫 줄 승격(옛 15~16번째)과 빈 입력칸 ↑(#5191)로 닫는다. 도구 막대에 연필을 올리면 내 행의 막대만 34px 늘어 좁은 판 겹침(#4231 1번)이
- * 커지고 내·남의 행의 막대 모양이 달라진다(인계 문서에 측정값).
+ * 고치기는 **메뉴 첫 줄**이다(Buzz `MessageActionBar.tsx`도 내 메시지에서만 ⋮ 메뉴의 맨 첫 줄이고, 지우기는 구분선 아래). 그 위에 **내 메시지의 호버
+ * 도구 막대에도 연필 단추로 선다**(owner 2026-11-05, #5326): #5192가 고치기를 도구 막대에 올리지 않기로 한 근거는 「Buzz·Slack 모두 ⋮ 안」과
+ * 「내 행의 막대만 34px 늘어 좁은 판 겹침(#4231 1번)이 커진다」였고, 그 결정으로 v0.1.42를 낸 뒤에도 팀이 고치기를 찾지 못했다. 찾기 쉬움이
+ * 막대 모양의 일관보다 앞선다는 것이 owner 판단이라 이 결정을 뒤집는다. 겹침 비용은 `placeToolbar`(#5179)가 이미 진 길이다: 막대가 늘면
+ * 위 이웃 글자·내 글자를 피해 아래 경계로 뒤집히거나 행 안의 빈 창으로 밀린다. 메뉴의 첫 줄은 그대로 둔다(우클릭 사람·v0.1.42 소식이 말한 자리).
+ * 도구 막대 ∩ 메뉴는 정확히 이 하나(항목의 `toolbarCopy` 표지가 선 것)이고 시험이 잠근다.
  *
  * 값이 문자열이 아니라 숫자인 이유: 문구 장부(`direct-copy`)가 코드 안의 영어 낱말 문자열을 사용자 문구 후보로 세기 때문이다.
  * 기술 식별자에 장부 칸을 쓰지 않는다(이름은 식별자라 세지 않는다).
@@ -62,7 +64,7 @@ export type MessageActionPlace =
  *   menu     ⋯ 와 우클릭이 같이 쓰는 목록(두 표면은 늘 같은 목록이다).
  *
  * 길게 누르기 시트(`sheet`)는 도구 막대가 없는 터치 표면이라 **전부** 낸다(반응·답글도). 그래서 어떤 동작도 포인터에서
- * 사라지지 않는다: 도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리(시험이 잠근다).
+ * 사라지지 않는다: 도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리(시험이 잠근다). 겹침은 `toolbarCopy` 표지가 선 항목(고치기) 하나뿐이다.
  *
  * 답글을 메뉴에도 두고 싶으면(우클릭 한 번에 답글) 그 묶음의 배열에 `MESSAGE_ACTION_PLACE.menu`를 더하는 한 줄이다. 그때는
  * 시험의 「겹침 없음」 한 줄이 Buzz 규칙(되풀이하지 않는다)을 지키는 단정이라 함께 바꾸는 결정이 된다.
@@ -84,6 +86,13 @@ export interface MessageActionItem {
   accessibleLabel?: string;
   tone?: "danger";
   group: MessageActionGroup;
+  /**
+   * 묶음 표(`MESSAGE_ACTION_GROUP_PLACEMENT`)가 메뉴에만 세운 항목 중 **도구 막대에도 복사본이 서는 것**의 표지 (#5326). 묶음 표는 묶음 하나가 한
+   * 표면에 서는 규칙이고, 이 표지는 그 규칙의 의도된 예외를 항목에 직접 붙인다: 연필(고치기)은 메뉴 첫 줄에도 남는다. 예외를 표에 섞지 않는
+   * 이유는 메뉴의 묶음(고치기 | 인용 · 고정 · …)이 한 묶음이어야 구분선이 고치기만 따로 떼지 않기 때문이다. 표지가 문자열 목록이 아니라
+   * 항목의 값인 이유는 문구 장부(`direct-copy`)가 코드 안의 영어 낱말 문자열을 사용자 문구 후보로 세기 때문이다.
+   */
+  toolbarCopy?: true;
 }
 
 export const MESSAGE_ACTION_SURFACES = ["menu", "context", "sheet"] as const;
@@ -151,6 +160,7 @@ export function messageActionItems(
       testKey: "edit",
       label: "고치기",
       group: MESSAGE_ACTION_GROUP.message,
+      toolbarCopy: true,
     });
   }
   if (available.quote) {
@@ -234,15 +244,18 @@ export function messageActionItemsForSurface(
 }
 
 /**
- * 호버 도구 막대가 직접 보여 주는 항목(반응·답글). 도구 막대는 이 목록으로 자기 단추를 정한다: 표와 화면이 따로 놀 수 없다.
- * 반응 **칸**은 빈도 저장소가 정한다(`HOVER_TOOLBAR_SLOT_COUNT`). 여기서는 반응이 서는지 여부만 말한다.
+ * 호버 도구 막대가 직접 보여 주는 항목(반응·답글, 내 메시지에는 연필). 도구 막대는 이 목록으로 자기 단추를 정한다: 표와 화면이 따로 놀 수 없다.
+ * 반응 **칸**은 빈도 저장소가 정한다(`HOVER_TOOLBAR_SLOT_COUNT`). 여기서는 반응이 서는지 여부만 말한다. 연필은 `available.edit`(작성자
+ * 본인·살아 있는 글 — `canEditMessage`)가 그대로 문이라 남의 메시지·묘비·보내지 못한 글에는 서지 않는다.
  */
 export function messageToolbarItems(
   available: MessageActionAvailability,
   state: MessageActionCopyState
 ): MessageActionItem[] {
-  return messageActionItems(available, state).filter((item) =>
-    MESSAGE_ACTION_GROUP_PLACEMENT[item.group].includes(MESSAGE_ACTION_PLACE.toolbar)
+  return messageActionItems(available, state).filter(
+    (item) =>
+      MESSAGE_ACTION_GROUP_PLACEMENT[item.group].includes(MESSAGE_ACTION_PLACE.toolbar) ||
+      item.toolbarCopy === true
   );
 }
 
