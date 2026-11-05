@@ -7,17 +7,19 @@
 //!
 //! | 시험 | 자리 | 고정하는 것 |
 //! |---|---|---|
-//! | `a_dm_answer_lands_in_the_main_flow_quoting_the_message` | 본류 + 인용 | E도 DM은 본류예요 |
-//! | `a_top_level_channel_mention_is_answered_in_the_main_flow_quoting_it` | **본류 + 인용** | **현행**이에요. 규칙 E는 트리거 아래 새 스레드를 원하고, 그 정렬 2차는 #4646이에요. 그 PR이 이 시험을 먼저 빨갛게 만들어요 |
-//! | `a_mention_inside_a_thread_is_answered_inside_that_thread` | **같은 스레드 + 인용**, root의 「답글 N개」·`thread.updated`가 같이 움직여요 | #4622 정렬 1차(ADR-0148 증보). 이전에는 스레드 밖 본류였어요 |
-//! | `a_thread_whose_root_was_deleted_since_is_answered_in_the_main_flow` | 본류 + 인용, 롤업 불변 | 사람이 못 올릴 자리(지워진 root)에는 답도 안 올려요. 턴을 실패시키지 않고 예전 자리로 돌아가요 |
+//! | `a_dm_answer_lands_in_the_main_flow_quoting_the_message` | 1:1 DM: 본류 + 인용 | 「1:1 DM만 예외」(owner 11-05 R1). 이 시험이 붉으면 DM 예외 줄이 깨진 거예요 |
+//! | `a_top_level_channel_mention_is_answered_in_a_new_thread_under_it` | **채널 최상위: 트리거 자신이 root인 새 스레드 + 인용**, 요청의 「답글 N개」·참여자·`thread.updated`가 같이 움직여요 | #4646(ADR-0148 증보 2026-11-05, ADR-0186 증보 v6 R-c). 구현 전에 `(None, Some(asked))`로 붉었어요 |
+//! | `a_mention_inside_a_thread_is_answered_inside_that_thread` | 같은 스레드 + 인용, root의 롤업·`thread.updated` | #4622 정렬 1차(ADR-0148 증보 2026-10-27) |
+//! | `a_thread_whose_root_was_deleted_since_is_answered_in_the_main_flow` | 본류 + 인용, 롤업 불변 | 사람이 못 올릴 자리(지워진 root)에는 답도 안 올려요. 턴을 실패시키지 않고 본류로 돌아가요 |
+//! | `an_approval_card_stands_where_the_runs_answer_would` | 카드가 답과 같은 세 자리(최상위→트리거 아래, 스레드→그 스레드, 1:1 DM→본류), `reply_to_id` 없음, 롤업이 같이 움직여요 | R-c: 한 run의 모든 줄이 한 규칙을 따라요 |
+//! | `a_plain_reply_in_the_thread_the_answer_opened_wakes_the_agent_that_answered` | 답 아래 멘션 없는 사람 답글 → 답한 에이전트가 깨요(W1), 본류의 평문은 아무도 안 깨요 | ADR-0162 증보 5 W1이 의도대로인지 |
+//! | `the_asker_follows_the_thread_and_the_answer_is_unread_in_it` | 요청한 사람만 `auto` 팔로우, 위치는 답 바로 앞 → 답이 안 읽음 1 | ADR-0206 증보 1 F2 (푸시 `thread_reply` arm·안 읽음 점이 읽는 사실) |
 //!
-//! **표의 DM·채널 최상위 두 줄은 현행 계약(ADR-0148 규칙 6, 「인용은 본류에 두고 맥락만 끌어온다」)을 고정하는
-//! 것이지 그 자리가 옳다는 선언이 아니다.** 같은 결정을 쓰는 곳은 넷(여기 외부 `oort_run_complete`, REST 콜백
-//! `gateway_mode_conformance_pg.rs`, 관리형 워커 `agent_worker_conformance_pg.rs`, 팀 AI
-//! `team_ai_conformance_pg.rs`)이고 모두 `GatewayRunSnapshot::trigger_root_id` 한 곳에서 자리를 받아요.
-//! 보충으로, 외부 에이전트가 직접 올리는 메시지로 같은 자리를 따를 수 있는 근거(트리거의 `rootId`가 job 시작
-//! 답의 대화에 실린다)도 같은 시험에서 확인한다(지시문 `SELF_HOST_AGENT.md` §3.3.17.4 4번이 기대는 사실).
+//! 같은 결정을 쓰는 곳은 넷(여기 외부 `oort_run_complete`, REST 콜백 `gateway_mode_conformance_pg.rs`, 관리형 워커
+//! `agent_worker_conformance_pg.rs`, 팀 AI `team_ai_conformance_pg.rs`)이고 모두 `GatewayRunSnapshot::trigger_root_id`
+//! 한 곳에서 자리를 받아요(스냅샷 표는 `momo-agent/tests/conformance_pg.rs`). 보충으로, 외부 에이전트가 직접 올리는
+//! 메시지로 같은 자리를 따를 수 있는 근거(트리거의 `rootId`가 job 시작 답의 대화에 실린다)도 같은 시험에서
+//! 확인한다(지시문 `SELF_HOST_AGENT.md` §3.3.17.4 4번이 기대는 사실).
 //!
 //! 격리 DB에서만:
 //!

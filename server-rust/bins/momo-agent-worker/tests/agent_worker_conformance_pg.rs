@@ -43,6 +43,10 @@
 //! | `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error` | remove `redact_secrets`, or start logging/persisting the resolved endpoint |
 //! | `t4622_a_turn_raised_inside_a_thread_answers_inside_that_thread` | write the commit's answer with `root_id: None` (it leaves the thread the person is watching), or on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving) |
 //! | `t4622_a_streamed_turn_raised_inside_a_thread_is_opened_inside_that_thread` | open the stream without the thread (the commit dedupes onto that row, so the answer is outside the thread for good — only this test goes red, the non-streaming one stays green), drop the rollup from the opening write, or let the dedupe bump the rollup a second time |
+//! | `t4646_a_turn_raised_at_a_channels_top_level_answers_in_a_new_thread_under_it` | decide the place only for a request made inside a thread (the top-level answer goes back to the main flow), or write it on the spine that skips the rollup (the request's 「답글 N개」 stays 0) |
+//! | `t4646_a_streamed_turn_raised_at_a_channels_top_level_is_opened_in_a_new_thread_under_it` | read the place only at the commit (the streamed answer is created by the opening write, so it stays in the main flow) |
+//! | `t4646_a_turn_raised_in_a_one_to_one_dm_answers_in_the_main_flow` | drop the 1:1 DM exception from `answer_place_root` (the DM answer opens a thread) |
+//! | `t4646_a_tool_result_line_stands_in_the_thread_of_its_call_card` | write the result with `root_id: None` (it leaves its call card's thread), or count a tool line as a thread reply (the request gets a rollup) |
 //! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
 //! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
 //! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
@@ -2505,13 +2509,23 @@ async fn t4646_a_tool_result_line_stands_in_the_thread_of_its_call_card() {
         "the result stands in the thread of its call card, under the request"
     );
     // …and neither line is a reply the thread counts: a trace is not a conversation (the client's
-    // `countsAsReply` is `text` and `approval_request` only), so the request has no 「답글 N개」 at all.
-    let rollups: i64 = sqlx::query_scalar("SELECT count(*) FROM thread WHERE root_id = $1")
-        .bind(trigger)
-        .fetch_one(&su)
-        .await
-        .expect("count rollups");
-    assert_eq!(rollups, 0, "tool lines do not make a rollup");
+    // `countsAsReply` is `text` and `approval_request` only). The thread holds three rows — the call, its
+    // result and the turn's answer after them — and the request's 「답글 N개」 is 1: the answer.
+    let under_the_request: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM message WHERE root_id = $1")
+            .bind(trigger)
+            .fetch_one(&su)
+            .await
+            .expect("count the thread's rows");
+    assert_eq!(
+        under_the_request, 3,
+        "call, result and answer all stand in the thread"
+    );
+    assert_eq!(
+        thread_rollup(&su, trigger).await.0,
+        1,
+        "only the answer is a reply the thread counts"
+    );
 }
 
 /// **Review of #3987, M1.** The same half answer and freeze, and then the retry is REFUSED

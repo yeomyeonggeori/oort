@@ -255,6 +255,7 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 - **멘션 때 서는 카드·안내 줄**(`agent_mentions.rs`)은 run이 서기 전의 줄이라 지금처럼 「말한 자리」를 따른다(최상위는 본류). 후속에서 같은 규칙으로 옮길 수 있다.
 - **먼저 제안**(소유자 1:1 DM의 본류), 에이전트가 고르는 자리(`oort_message_post`, 외부 `oort_card_suggest`), 트리거 없는 run은 그대로다.
 - **환영 줄**(트리거 없음)은 그대로다.
+- **알려진 틈(이 증보가 만들지 않았고 건드리지 않아요)**: 실패로 끝난 완료의 답(`MessageType::System`)은 `complete_gateway_run_in_tx`가 롤업을 올리는 길로 쓴다. 서버는 세고 클라이언트 `countsAsReply`는 `system`을 안 센다(코어 `threadSummary.ts`가 「알려진 틈」으로 적어 둔 것). #4622부터 스레드 안에서 있었고, 이제 채널 최상위 실패에서도 새 스레드의 수가 1 어긋날 수 있다. 최종 답 경로는 이번에 손대지 않는다.
 
 ### 불변식 대조
 

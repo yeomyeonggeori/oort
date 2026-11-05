@@ -26,7 +26,7 @@
 //! |---|---|
 //! | `b6_1_a_work_run_reaches_a_gateway_and_comes_back` | drop gateway mode from the route guard, stop carrying tools on the work payload (#1037), drop the lease from the claim, or stop `complete` from writing the message/ledger/terminal-status trio |
 //! | `b6_2_a_gateway_event_moves_the_run_and_publishes_progress` | drop the `mark_run_started` transition from `events`, or drop the progress/partial frames it emits (#1013) |
-//! | `t4622_the_rest_callback_answers_inside_the_thread_it_was_asked_in` | write the callback's answer with `root_id: None` (it leaves the thread the person is watching), or write it on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving), or give a main-flow request a thread it never had |
+//! | `t4622_the_rest_callback_answers_inside_the_thread_it_was_asked_in` (also #4646: a top-level request opens a thread under it, a 1:1 DM stays in the main flow) | write the callback's answer with `root_id: None` (it leaves the thread the person is watching), or write it on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving), or give a main-flow request a thread it never had |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
