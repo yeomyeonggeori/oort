@@ -22,12 +22,24 @@
 //     bidi characters, runs of blanks) and cut at `MAX_TITLE_CHARS`, so one odd name cannot widen the
 //     menu or reorder its text.
 //
-// The icon is a macOS TEMPLATE image: only its alpha counts and AppKit tints it for a light or a dark
-// menu bar. Two bitmaps, the mark and the mark with a dot (`icons/tray/`, made from the brand mark by
-// `scripts/desktop/render_tray_icons.sh`). tray-icon takes one bitmap and fixes the image height to
-// 18pt, so the @2x (36x36) files are the ones embedded. The dot means "the Dock badge would show a
-// number": the page sends the very number it gives `dock_badge_set`, and this module only reads
-// `> 0`.
+// Nothing unread: the mark as a macOS TEMPLATE image — only its alpha counts and AppKit tints it for a
+// light or a dark menu bar. Unread means "the Dock badge would show a number": the page sends the very
+// number it gives `dock_badge_set`, and this module only reads `> 0`. Then (#5358) the icon is a COLOR
+// image, not a template: the same mark with only its upper-right planet in the signal orange and no dot
+// added. AppKit does not tint a color image, so there are two of them, a dark ring for a light bar and a
+// light ring for a dark bar, and `icon_kind` picks the pair by how the bar looks. That look is read from
+// the status item's own button (`bar_look_macos`) and watched, so a bar that turns dark swaps the bitmap
+// at once. When the look cannot be read the unread icon falls back to the safe one, which is right on
+// either bar: the template mark with a dot. All four bitmaps are in `icons/tray/`, made from the brand
+// mark by `scripts/desktop/render_tray_icons.sh`. tray-icon takes one bitmap and fixes the image height
+// to 18pt, so the @2x (36x36) files are the ones embedded.
+//
+// Why the button's look and not the window's theme: `app_theme_set` (`window_vibrancy.rs`) pins the APP's
+// appearance to the scheme the page shows, and tauri's `Window::theme()` and `ThemeChanged` follow that
+// pin (tao reads `NSApp.effectiveAppearance`), while the menu bar does not. The button's own effective
+// appearance stayed on the bar's look when the app's was pinned to the opposite one (measured on macOS 27
+// with a scratch program: system Dark, pin Light -> app Light, button Dark), and a key-value observer on
+// its `effectiveAppearance` fires when it changes.
 //
 // Quit is macOS's own Quit item (`PredefinedMenuItem::quit`, AppKit `terminate:`) — the item the
 // app menu's Cmd+Q is. So the tray quits exactly the way Cmd+Q does, with the same scope
@@ -46,9 +58,11 @@
 // the dot may stay after the pick, and that line (already in the person's language, like every word
 // here) is the reason.
 //
-// `runtime-unverified`: the status item itself, the template rendering on light and dark bars, the
-// menu on screen and the quit click need a real Mac. The tests below measure everything that does
-// not: the menu model, the input limits, the menu ids, the event payload and the two bitmaps.
+// `runtime-unverified`: the status item itself, the template and the color icons on real light and dark
+// bars, the swap when the system (or the wallpaper behind the bar) turns the bar light or dark, the menu
+// on screen and the quit click need a real Mac. The tests below measure everything that does not: the
+// menu model, the input limits, the menu ids, the event payload, which bitmap goes with which state,
+// what each of the four bitmaps holds, and how AppKit's appearance names map to a bar look.
 
 // Off macOS only the validation half is reachable, which leaves the model's fields unread.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -159,10 +173,11 @@ pub enum Entry {
     Quit(String),
 }
 
-/// The menu and which of the two icons goes with it.
+/// The menu and whether the icon says something is unread (which bitmap says it depends on the bar's
+/// look too: `icon_kind`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuModel {
-    /// The icon with the dot.
+    /// The Dock badge would show a number: the icon says so.
     pub unread: bool,
     /// The page's app shell is up (someone is signed in): 「새 메시지」 and 「모두 읽음 처리」 can act, and
     /// closing the window may leave the app running (`TrayState::keeps_app_running`).
@@ -375,6 +390,51 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
+// ---- which icon --------------------------------------------------------------------------------
+
+/// How the menu bar looks to AppKit: the appearance its status item's button is drawn in (the system's
+/// light or dark, and on a light system a dark wallpaper behind the bar turns it dark too).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarLook {
+    /// A light bar: dark ink reads on it.
+    Light,
+    /// A dark bar: light ink reads on it.
+    Dark,
+}
+
+/// The four bitmaps (`icons/tray/`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconKind {
+    /// Nothing unread: the mark, a template image (AppKit paints it for the bar).
+    Plain,
+    /// Unread and the bar's look is not known: the template mark with a dot. A template is right on
+    /// either bar, which is what makes this the safe side.
+    UnreadDot,
+    /// Unread on a light bar: dark ring, orange planet. A color image.
+    UnreadOnLight,
+    /// Unread on a dark bar: light ring, orange planet. A color image.
+    UnreadOnDark,
+}
+
+impl IconKind {
+    /// Whether AppKit tints the bitmap (alpha only) instead of drawing its colors. A color image marked as
+    /// a template would be painted one flat ink and lose its orange planet.
+    pub fn is_template(self) -> bool {
+        matches!(self, IconKind::Plain | IconKind::UnreadDot)
+    }
+}
+
+/// Which bitmap goes with the state. Nothing unread is the plain template whatever the bar looks like;
+/// unread takes the pair that reads on the bar, and a bar that cannot be read takes the dot.
+pub fn icon_kind(unread: bool, look: Option<BarLook>) -> IconKind {
+    match (unread, look) {
+        (false, _) => IconKind::Plain,
+        (true, Some(BarLook::Light)) => IconKind::UnreadOnLight,
+        (true, Some(BarLook::Dark)) => IconKind::UnreadOnDark,
+        (true, None) => IconKind::UnreadDot,
+    }
+}
+
 // ---- what a new status changes -----------------------------------------------------------------
 
 /// What a new model asks of the status item that already shows `last`. Decided apart from AppKit so it
@@ -384,20 +444,26 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 pub struct Change {
     /// The menu's rows or words differ.
     pub menu: bool,
-    /// The dot appeared or went.
+    /// The bitmap differs: the unread state changed, or the bar's look did while something is unread.
     pub icon: bool,
 }
 
-/// `last` is `None` before the first status: everything is new.
-pub fn change_for(last: Option<&MenuModel>, next: &MenuModel) -> Change {
+/// `last` is what the status item shows: the model it was drawn from and the bitmap drawn with it (`None`
+/// before the first status: everything is new). `icon` is the bitmap `next` wants now (`icon_kind`, with
+/// the bar's look as it is now).
+pub fn change_for(
+    last: Option<(&MenuModel, IconKind)>,
+    next: &MenuModel,
+    icon: IconKind,
+) -> Change {
     match last {
         None => Change {
             menu: true,
             icon: true,
         },
-        Some(last) => Change {
+        Some((last, last_icon)) => Change {
             menu: last.entries != next.entries,
-            icon: last.unread != next.unread,
+            icon: last_icon != icon,
         },
     }
 }
@@ -405,8 +471,8 @@ pub fn change_for(last: Option<&MenuModel>, next: &MenuModel) -> Change {
 // ---- the command -------------------------------------------------------------------------------
 
 /// The icon and the menu this shell last drew, so the same status twice changes nothing on screen
-/// (replacing a menu the person has open would be felt) and the icon is swapped only when the dot
-/// appears or goes.
+/// (replacing a menu the person has open would be felt) and the icon is swapped only when its bitmap
+/// changes: something unread appeared or went, or the bar's look turned.
 #[derive(Default)]
 pub struct TrayState {
     #[cfg(target_os = "macos")]
@@ -436,6 +502,8 @@ impl TrayState {
 struct Applied {
     tray: Option<tauri::tray::TrayIcon>,
     last: Option<MenuModel>,
+    /// The bitmap on screen, written together with `last`.
+    icon: Option<IconKind>,
 }
 
 /// Draws the menu-bar icon and its menu from the page's state (#5193). The icon is created by the
@@ -466,11 +534,30 @@ pub fn tray_status_set(
 #[cfg(target_os = "macos")]
 const TRAY_ID: &str = "oort";
 
-// The two template bitmaps (36x36, black + alpha). `tests` also reads the 18x18 pair.
+// The four bitmaps (36x36). The two templates are black + alpha, the two color ones are the mark with its
+// planet in the signal orange. `icon_tests` also reads the 18x18 files.
 #[cfg(target_os = "macos")]
 const ICON_PLAIN: &[u8] = include_bytes!("../icons/tray/oort-tray@2x.png");
 #[cfg(target_os = "macos")]
-const ICON_UNREAD: &[u8] = include_bytes!("../icons/tray/oort-tray-unread@2x.png");
+const ICON_UNREAD_DOT: &[u8] = include_bytes!("../icons/tray/oort-tray-unread@2x.png");
+#[cfg(target_os = "macos")]
+const ICON_UNREAD_ON_LIGHT: &[u8] =
+    include_bytes!("../icons/tray/oort-tray-unread-on-light@2x.png");
+#[cfg(target_os = "macos")]
+const ICON_UNREAD_ON_DARK: &[u8] = include_bytes!("../icons/tray/oort-tray-unread-on-dark@2x.png");
+
+#[cfg(target_os = "macos")]
+impl IconKind {
+    /// The embedded @2x file for this bitmap.
+    fn bytes(self) -> &'static [u8] {
+        match self {
+            IconKind::Plain => ICON_PLAIN,
+            IconKind::UnreadDot => ICON_UNREAD_DOT,
+            IconKind::UnreadOnLight => ICON_UNREAD_ON_LIGHT,
+            IconKind::UnreadOnDark => ICON_UNREAD_ON_DARK,
+        }
+    }
+}
 
 /// One embedded PNG as straight RGBA. The bitmaps are made by `render_tray_icons.sh` as 8-bit RGBA;
 /// anything else is a build mistake and is refused rather than drawn wrong.
@@ -494,9 +581,163 @@ fn decode_png(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn icon(unread: bool) -> Result<tauri::image::Image<'static>, String> {
-    let (rgba, width, height) = decode_png(if unread { ICON_UNREAD } else { ICON_PLAIN })?;
+fn icon(kind: IconKind) -> Result<tauri::image::Image<'static>, String> {
+    let (rgba, width, height) = decode_png(kind.bytes())?;
     Ok(tauri::image::Image::new_owned(rgba, width, height))
+}
+
+/// Puts the bitmap on the status item, with the template flag that goes with it, in one call: a color
+/// image left flagged as a template (or the reverse) would be drawn wrong for a moment.
+#[cfg(target_os = "macos")]
+fn draw_icon(tray: &tauri::tray::TrayIcon, kind: IconKind) -> Result<(), String> {
+    tray.set_icon_with_as_template(Some(icon(kind)?), kind.is_template())
+        .map_err(|_| "tray-icon-failed".to_owned())
+}
+
+/// How the bar looks now, read from the status item's own button; `None` when it cannot be read (the
+/// item is not up, no button, not the main thread, an appearance that is neither Aqua nor Dark Aqua). The
+/// caller then takes the safe bitmap (`icon_kind`).
+#[cfg(target_os = "macos")]
+fn bar_look(tray: &tauri::tray::TrayIcon) -> Option<BarLook> {
+    bar_look_macos::read(tray)
+}
+
+/// A look change the observer saw: if something is unread and the bitmap for the new look differs from the
+/// one on screen, swap it. Nothing else is touched (the menu is never rebuilt here).
+#[cfg(target_os = "macos")]
+fn bar_look_changed(state: &TrayState) {
+    // A callback that lands while `apply` holds the lock came from inside it, and `apply` reads the look
+    // itself: skipping is right, waiting would deadlock.
+    let mut applied = match state.applied.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    let Applied {
+        tray: Some(tray),
+        last: Some(model),
+        icon: Some(on_screen),
+    } = &mut *applied
+    else {
+        return;
+    };
+    let wanted = icon_kind(model.unread, bar_look(tray));
+    if wanted != *on_screen && draw_icon(tray, wanted).is_ok() {
+        *on_screen = wanted;
+    }
+}
+
+/// Reading and watching the bar's look: the AppKit half, which no test can run on a status item.
+#[cfg(target_os = "macos")]
+mod bar_look_macos {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass, MainThreadMarker};
+    use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+    };
+    use objc2_foundation::{
+        ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueObservingOptions,
+        NSObject, NSObjectNSKeyValueObserverRegistration, NSString,
+    };
+    use tauri::{AppHandle, Manager};
+
+    use super::{bar_look_changed, BarLook, TrayState};
+
+    /// The bar's look from an appearance: the better match of light Aqua and Dark Aqua (the high contrast
+    /// and vibrant variants resolve to one of the two). `None` for anything that matches neither.
+    pub fn look_of(appearance: &NSAppearance) -> Option<BarLook> {
+        // SAFETY: both are AppKit's constant name strings, valid for the life of the process.
+        let (aqua, dark) = unsafe { (NSAppearanceNameAqua, NSAppearanceNameDarkAqua) };
+        let best =
+            appearance.bestMatchFromAppearancesWithNames(&NSArray::from_slice(&[aqua, dark]))?;
+        if &*best == dark {
+            Some(BarLook::Dark)
+        } else if &*best == aqua {
+            Some(BarLook::Light)
+        } else {
+            None
+        }
+    }
+
+    struct WatchIvars {
+        app: AppHandle,
+    }
+
+    define_class!(
+        /// The key-value observer of the button's `effectiveAppearance`.
+        #[unsafe(super(NSObject))]
+        #[name = "OortTrayBarLookWatch"]
+        #[ivars = WatchIvars]
+        struct BarLookWatch;
+
+        impl BarLookWatch {
+            #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
+            fn observe(
+                &self,
+                _key_path: Option<&NSString>,
+                _object: Option<&AnyObject>,
+                _change: Option<&NSDictionary<NSKeyValueChangeKey, AnyObject>>,
+                _context: *mut c_void,
+            ) {
+                // No panic may leave this method: `try_state` instead of `state`.
+                if let Some(state) = self.ivars().app.try_state::<TrayState>() {
+                    bar_look_changed(&state);
+                }
+            }
+        }
+    );
+
+    impl BarLookWatch {
+        fn new(app: AppHandle) -> Retained<Self> {
+            let this = Self::alloc().set_ivars(WatchIvars { app });
+            // SAFETY: `init` on an NSObject subclass allocated just above.
+            unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    /// How the bar looks now: the effective appearance of `tray`'s status item button. `None` when there is
+    /// no button to ask or its appearance matches neither Aqua nor Dark Aqua.
+    pub fn read(tray: &tauri::tray::TrayIcon) -> Option<BarLook> {
+        tray.with_inner_tray_icon(|inner| {
+            let mtm = MainThreadMarker::new()?;
+            let button = inner.ns_status_item()?.button(mtm)?;
+            look_of(&button.effectiveAppearance())
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// Starts watching the button of `tray`'s status item. Does nothing when there is no button (the bar's
+    /// look is then never read either, and the icon stays on the safe side).
+    pub fn watch(app: &AppHandle, tray: &tauri::tray::TrayIcon) {
+        let app = app.clone();
+        let _ = tray.with_inner_tray_icon(move |inner| {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let Some(button) = inner.ns_status_item().and_then(|item| item.button(mtm)) else {
+                return;
+            };
+            let watch = BarLookWatch::new(app);
+            // SAFETY: the observer implements `observeValueForKeyPath:ofObject:change:context:`, the key
+            // path names a property of the button, and `context` is not read.
+            unsafe {
+                button.addObserver_forKeyPath_options_context(
+                    &watch,
+                    ns_string!("effectiveAppearance"),
+                    NSKeyValueObservingOptions::New,
+                    null_mut(),
+                );
+            }
+            // KVO does not retain its observer, and the status item lives until the app exits (it is
+            // created once and never removed): so does this one.
+            std::mem::forget(watch);
+        });
+    }
 }
 
 /// The menu as native items, in the model's order. The text of a model entry is the text drawn.
@@ -536,11 +777,14 @@ fn apply(app: &AppHandle, state: &TrayState, model: MenuModel) -> Result<(), Str
         .applied
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let change = change_for(applied.last.as_ref(), &model);
+    // The bar's look is read at every push (cheap): it decides the bitmap, and a push is also what
+    // catches a look change the observer did not. Before the item exists there is nothing to read.
+    let wanted = icon_kind(model.unread, applied.tray.as_ref().and_then(bar_look));
+    let change = change_for(applied.last.as_ref().zip(applied.icon), &model, wanted);
     if !change.menu && !change.icon {
         return Ok(());
     }
-    match &applied.tray {
+    let drawn = match &applied.tray {
         Some(tray) => {
             if change.menu {
                 let menu = build_menu(app, &model).map_err(|_| "tray-menu-failed".to_owned())?;
@@ -548,27 +792,44 @@ fn apply(app: &AppHandle, state: &TrayState, model: MenuModel) -> Result<(), Str
                     .map_err(|_| "tray-menu-failed".to_owned())?;
             }
             if change.icon {
-                tray.set_icon_with_as_template(Some(icon(model.unread)?), true)
-                    .map_err(|_| "tray-icon-failed".to_owned())?;
+                draw_icon(tray, wanted)?;
             }
+            wanted
         }
         None => {
             let menu = build_menu(app, &model).map_err(|_| "tray-menu-failed".to_owned())?;
+            // The bar's look cannot be read before the item exists, so it is born with the safe bitmap
+            // and the bitmap for the look read right below is put on in the same turn of the main
+            // thread. That first read is provisional: until the run loop turns, the button still
+            // reports the app's own appearance (measured), which `app_theme_set` can pin opposite to
+            // the bar. The observer registered below delivers the correction when the real look
+            // differs, and every later push reads again.
+            let born = icon_kind(model.unread, None);
             // Left and right click open the same menu: the status item's own menu (tray-icon opens it
             // for both buttons by default).
             let tray = TrayIconBuilder::with_id(TRAY_ID)
-                .icon(icon(model.unread)?)
-                .icon_as_template(true)
+                .icon(icon(born)?)
+                .icon_as_template(born.is_template())
                 .tooltip(&app.package_info().name)
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
                 .build(app)
                 .map_err(|_| "tray-create-failed".to_owned())?;
+            bar_look_macos::watch(app, &tray);
+            let now = icon_kind(model.unread, bar_look(&tray));
+            // A failed swap leaves the safe bitmap up, which is a working icon: not worth losing the item.
+            let drawn = if now != born && draw_icon(&tray, now).is_ok() {
+                now
+            } else {
+                born
+            };
             applied.tray = Some(tray);
+            drawn
         }
-    }
+    };
     state.staying.store(model.compose, Ordering::SeqCst);
+    applied.icon = Some(drawn);
     applied.last = Some(model);
     Ok(())
 }
@@ -962,14 +1223,48 @@ mod tests {
         );
     }
 
-    // ---- what a new status changes ----
+    // ---- which icon, and what a new status changes ----
+
+    /// The whole choice, cell by cell: nothing unread is the plain template on any bar (even one that
+    /// cannot be read); unread takes the bitmap that reads on the bar, and the dot only when the bar is
+    /// not known. Only the plain mark and the dot mark are templates: AppKit would paint a color bitmap
+    /// one flat ink and the orange planet would be gone.
+    #[test]
+    fn the_icon_follows_unread_and_the_bars_look_and_an_unreadable_bar_takes_the_dot() {
+        use BarLook::{Dark, Light};
+        use IconKind::{Plain, UnreadDot, UnreadOnDark, UnreadOnLight};
+        for (unread, look, kind, template) in [
+            (false, None, Plain, true),
+            (false, Some(Light), Plain, true),
+            (false, Some(Dark), Plain, true),
+            (true, Some(Light), UnreadOnLight, false),
+            (true, Some(Dark), UnreadOnDark, false),
+            (true, None, UnreadDot, true),
+        ] {
+            let picked = icon_kind(unread, look);
+            assert_eq!(picked, kind, "unread={unread} look={look:?}");
+            assert_eq!(picked.is_template(), template, "{kind:?}");
+        }
+    }
+
+    /// What `apply` asks: the new model and the bar's look as read now, against what is on screen — the
+    /// model that was drawn and the bar's look at the time (which decided its bitmap).
+    fn ask(
+        on_screen: Option<(&MenuModel, Option<BarLook>)>,
+        next: &MenuModel,
+        look: Option<BarLook>,
+    ) -> Change {
+        let last = on_screen.map(|(model, look)| (model, icon_kind(model.unread, look)));
+        change_for(last, next, icon_kind(next.unread, look))
+    }
 
     #[test]
     fn the_same_status_twice_changes_nothing_and_a_dot_or_a_row_changes_only_its_own_part() {
+        use BarLook::Dark;
         let a = build_model(&status(0, vec![row("0", "a", "s")])).unwrap();
         // First status: everything is new.
         assert_eq!(
-            change_for(None, &a),
+            ask(None, &a, Some(Dark)),
             Change {
                 menu: true,
                 icon: true
@@ -977,7 +1272,7 @@ mod tests {
         );
         // The same again: nothing is touched (an open menu is not replaced).
         assert_eq!(
-            change_for(Some(&a), &a.clone()),
+            ask(Some((&a, Some(Dark))), &a.clone(), Some(Dark)),
             Change {
                 menu: false,
                 icon: false
@@ -986,16 +1281,16 @@ mod tests {
         // A row came: the menu changes, the icon does not.
         let more = build_model(&status(0, vec![row("0", "a", "s"), row("1", "b", "s")])).unwrap();
         assert_eq!(
-            change_for(Some(&a), &more),
+            ask(Some((&a, Some(Dark))), &more, Some(Dark)),
             Change {
                 menu: true,
                 icon: false
             }
         );
-        // The dot appeared with the same rows: the icon changes, the menu does not.
+        // Something unread appeared with the same rows: the icon changes, the menu does not.
         let dotted = build_model(&status(5, vec![row("0", "a", "s")])).unwrap();
         assert_eq!(
-            change_for(Some(&a), &dotted),
+            ask(Some((&a, Some(Dark))), &dotted, Some(Dark)),
             Change {
                 menu: false,
                 icon: true
@@ -1004,12 +1299,45 @@ mod tests {
         // A different number above zero is not a different icon.
         let more_unread = build_model(&status(9, vec![row("0", "a", "s")])).unwrap();
         assert_eq!(
-            change_for(Some(&dotted), &more_unread),
+            ask(Some((&dotted, Some(Dark))), &more_unread, Some(Dark)),
             Change {
                 menu: false,
                 icon: false
             }
         );
+    }
+
+    /// The bar turning light or dark is a reason to swap the bitmap, only while something is unread (the
+    /// plain template is the same on either bar), and it never touches the menu.
+    #[test]
+    fn a_bar_that_turns_swaps_the_color_icon_only_and_only_while_something_is_unread() {
+        use BarLook::{Dark, Light};
+        let quiet = build_model(&status(0, vec![row("0", "a", "s")])).unwrap();
+        let loud = build_model(&status(3, vec![row("0", "a", "s")])).unwrap();
+        let icon_only = Change {
+            menu: false,
+            icon: true,
+        };
+        let nothing = Change {
+            menu: false,
+            icon: false,
+        };
+        // Unread, drawn for a dark bar. The bar turns light: the other pair.
+        assert_eq!(
+            ask(Some((&loud, Some(Dark))), &loud, Some(Light)),
+            icon_only
+        );
+        // The same look again: nothing.
+        assert_eq!(ask(Some((&loud, Some(Dark))), &loud, Some(Dark)), nothing);
+        // The look can no longer be read: back to the dot. And read again: the pair.
+        assert_eq!(ask(Some((&loud, Some(Dark))), &loud, None), icon_only);
+        assert_eq!(ask(Some((&loud, None)), &loud, Some(Dark)), icon_only);
+        // Nothing unread: the bar turning, or going unreadable, changes nothing.
+        assert_eq!(
+            ask(Some((&quiet, Some(Dark))), &quiet, Some(Light)),
+            nothing
+        );
+        assert_eq!(ask(Some((&quiet, Some(Dark))), &quiet, None), nothing);
     }
 
     // ---- the wire ----
@@ -1226,6 +1554,40 @@ mod icon_tests {
     const PLAIN_2X: &[u8] = include_bytes!("../icons/tray/oort-tray@2x.png");
     const UNREAD_1X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread.png");
     const UNREAD_2X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread@2x.png");
+    const ON_LIGHT_1X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread-on-light.png");
+    const ON_LIGHT_2X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread-on-light@2x.png");
+    const ON_DARK_1X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread-on-dark.png");
+    const ON_DARK_2X: &[u8] = include_bytes!("../icons/tray/oort-tray-unread-on-dark@2x.png");
+
+    // The colors the script paints (`render_tray_icons.sh`): the ring is the mark's own ink on a light bar
+    // and white on a dark one; the planet is `--signal` from the web tokens, its light value on a light bar
+    // and its dark value on a dark one.
+    const INK: [u8; 3] = [0x17, 0x16, 0x1a];
+    const WHITE: [u8; 3] = [0xff, 0xff, 0xff];
+    const TOKENS: &str = include_str!("../../../web/src/design/tokens.css");
+
+    /// `--signal: light-dark(#light, #dark);` read from the web tokens, where the design system keeps the
+    /// color: not a copy of it here. A token that moves while the files are not made again fails the
+    /// bitmap test below (the script reads the very same line).
+    fn signal() -> ([u8; 3], [u8; 3]) {
+        let line = TOKENS
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("--signal: light-dark("))
+            .expect("`--signal: light-dark(…)` in tokens.css");
+        let (light, dark) = line
+            .strip_prefix("--signal: light-dark(")
+            .and_then(|rest| rest.strip_suffix(");"))
+            .and_then(|pair| pair.split_once(", "))
+            .expect("`--signal` is `light-dark(#light, #dark);`");
+        let hex = |color: &str| {
+            let digits = color.strip_prefix('#').expect("a #rrggbb color");
+            assert_eq!(digits.len(), 6, "{color}");
+            let byte = |at: usize| u8::from_str_radix(&digits[at..at + 2], 16).expect("hex");
+            [byte(0), byte(2), byte(4)]
+        };
+        (hex(light), hex(dark))
+    }
 
     fn pixels(bytes: &[u8], side: u32) -> Vec<[u8; 4]> {
         let (rgba, width, height) = decode_png(bytes).unwrap();
@@ -1236,9 +1598,10 @@ mod icon_tests {
     }
 
     /// A template image is read by its alpha alone, and the mark must be there at all: black ink
-    /// (RGB 0 wherever there is any), some of the canvas covered and some left clear.
+    /// (RGB 0 wherever there is any), some of the canvas covered and some left clear. The two template
+    /// bitmaps only: the color ones are not black ink by design (the next tests measure those).
     #[test]
-    fn both_densities_of_both_icons_are_black_ink_with_alpha_and_not_blank_or_solid() {
+    fn both_densities_of_both_template_icons_are_black_ink_with_alpha_and_not_blank_or_solid() {
         for (bytes, side) in [
             (PLAIN_1X, 18),
             (PLAIN_2X, 36),
@@ -1290,12 +1653,108 @@ mod icon_tests {
         }
     }
 
+    /// The color icons are the mark itself with colors changed, nothing drawn: the alpha channel is
+    /// byte for byte the plain mark's (so no dot, nothing added, nothing lost), the fully covered pixels
+    /// carry exactly two colors (the ring's and the planet's), and the planet's color is only inside the
+    /// planet's disc (24 grid: center (18, 6), radius 3) while the ring's never is. Only fully covered
+    /// pixels are judged by color: the edge pixels' RGB is rounded by the renderer.
+    #[test]
+    fn the_color_icons_are_the_marks_shape_with_only_the_upper_right_planet_orange() {
+        let (signal_light, signal_dark) = signal();
+        for (name, color, plain, side, ring, planet) in [
+            (
+                "on-light 1x",
+                ON_LIGHT_1X,
+                PLAIN_1X,
+                18usize,
+                INK,
+                signal_light,
+            ),
+            ("on-light 2x", ON_LIGHT_2X, PLAIN_2X, 36, INK, signal_light),
+            ("on-dark 1x", ON_DARK_1X, PLAIN_1X, 18, WHITE, signal_dark),
+            ("on-dark 2x", ON_DARK_2X, PLAIN_2X, 36, WHITE, signal_dark),
+        ] {
+            let plain = pixels(plain, side as u32);
+            let color = pixels(color, side as u32);
+            for (i, (p, c)) in plain.iter().zip(&color).enumerate() {
+                assert_eq!(p[3], c[3], "{name}: alpha differs at pixel {i}");
+            }
+            let scale = side as f64 / 24.0;
+            let (cx, cy, r) = (18.0 * scale, 6.0 * scale, 3.0 * scale);
+            let mut colors = std::collections::BTreeSet::new();
+            let mut planet_pixels = 0u32;
+            for (i, c) in color.iter().enumerate().filter(|(_, c)| c[3] == 255) {
+                let rgb = [c[0], c[1], c[2]];
+                colors.insert(rgb);
+                let (x, y) = ((i % side) as f64 + 0.5, (i / side) as f64 + 0.5);
+                let from_planet = (x - cx).hypot(y - cy);
+                if rgb == planet {
+                    assert!(
+                        from_planet <= r,
+                        "{name}: orange outside the planet at {x},{y}"
+                    );
+                    planet_pixels += 1;
+                } else {
+                    assert_eq!(rgb, ring, "{name}: a third color at {x},{y}");
+                    assert!(
+                        from_planet >= r,
+                        "{name}: ring ink inside the planet at {x},{y}"
+                    );
+                }
+            }
+            assert_eq!(colors, [ring, planet].into(), "{name}: the two colors");
+            assert!(
+                f64::from(planet_pixels) >= std::f64::consts::PI * r * r / 3.0,
+                "{name}: the planet is there ({planet_pixels} px)"
+            );
+        }
+    }
+
+    /// Each state draws its own file: a kind wired to the other bar's pair would put a white ring on a
+    /// light bar.
+    #[test]
+    fn each_icon_kind_draws_its_own_file() {
+        assert_eq!(IconKind::Plain.bytes(), PLAIN_2X);
+        assert_eq!(IconKind::UnreadDot.bytes(), UNREAD_2X);
+        assert_eq!(IconKind::UnreadOnLight.bytes(), ON_LIGHT_2X);
+        assert_eq!(IconKind::UnreadOnDark.bytes(), ON_DARK_2X);
+    }
+
+    /// AppKit's appearance names, as the real appearance objects answer them (they are plain value
+    /// objects, no window needed): light is Aqua, dark is Dark Aqua, and the variants resolve to their base.
+    #[test]
+    fn appearance_names_map_to_a_bar_look() {
+        use objc2_app_kit::{
+            NSAppearance, NSAppearanceNameAccessibilityHighContrastAqua,
+            NSAppearanceNameAccessibilityHighContrastDarkAqua, NSAppearanceNameAqua,
+            NSAppearanceNameDarkAqua,
+        };
+        let look = |name: &objc2_app_kit::NSAppearanceName| {
+            let appearance = NSAppearance::appearanceNamed(name).expect("a system appearance");
+            bar_look_macos::look_of(&appearance)
+        };
+        // SAFETY: AppKit's constant name strings.
+        unsafe {
+            assert_eq!(look(NSAppearanceNameAqua), Some(BarLook::Light));
+            assert_eq!(look(NSAppearanceNameDarkAqua), Some(BarLook::Dark));
+            assert_eq!(
+                look(NSAppearanceNameAccessibilityHighContrastAqua),
+                Some(BarLook::Light)
+            );
+            assert_eq!(
+                look(NSAppearanceNameAccessibilityHighContrastDarkAqua),
+                Some(BarLook::Dark)
+            );
+        }
+    }
+
     /// `tray_status_set` decodes the @2x files, so the same decode must accept them and must refuse
     /// what is not 8-bit RGBA.
     #[test]
     fn the_decoder_reads_the_embedded_files_and_refuses_anything_else() {
-        assert!(decode_png(PLAIN_2X).is_ok());
-        assert!(decode_png(UNREAD_2X).is_ok());
+        for file in [PLAIN_2X, UNREAD_2X, ON_LIGHT_2X, ON_DARK_2X] {
+            assert!(decode_png(file).is_ok());
+        }
         assert_eq!(
             decode_png(b"not a png"),
             Err("tray-icon-invalid".to_owned())
