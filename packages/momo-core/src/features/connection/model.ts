@@ -104,8 +104,10 @@ export interface CauseCopy {
   readonly composer: ConnectionPlainKey | null;
   /** 승인 줄. 이 원인이 승인을 막을 때만. */
   readonly approval: ConnectionPlainKey | null;
-  /** 불러오기가 실패했을 때의 이유 한 줄. */
+  /** 불러오기가 실패했을 때의 이유 한 줄. 문장이 다음 행동(다시 시도)까지 말한다. 곁에 단추가 없는 자리가 쓴다. */
   readonly loadReason: ConnectionPlainKey;
+  /** 같은 이유에서 다음 행동을 뺀 한 줄: 곁에 「다시 시도」 단추가 서 있는 자리가 쓴다(#5307 L2). 오프라인은 `loadReason`과 같다(조건이지 되풀이가 아니다). */
+  readonly loadReasonBare: ConnectionPlainKey;
   /** 올리기가 실패했을 때의 이유. 이 원인이 올리기 실패를 설명할 때만(아니면 null — 화면의 기존 문장을 쓴다). */
   readonly uploadFailed: ConnectionPlainKey | null;
 }
@@ -120,6 +122,7 @@ const CAUSES = {
       composer: K.composerOffline,
       approval: K.approvalOffline,
       loadReason: K.loadReasonOffline,
+      loadReasonBare: K.loadReasonOffline,
       uploadFailed: K.uploadFailedOffline,
     },
   },
@@ -132,6 +135,7 @@ const CAUSES = {
       composer: K.composerServerUnreachable,
       approval: K.approvalServerUnreachable,
       loadReason: K.loadReasonServer,
+      loadReasonBare: K.loadReasonServerBare,
       uploadFailed: K.uploadFailedServer,
     },
   },
@@ -144,6 +148,7 @@ const CAUSES = {
       composer: null,
       approval: null,
       loadReason: K.loadReasonUnknown,
+      loadReasonBare: K.loadReasonUnknownBare,
       uploadFailed: null,
     },
   },
@@ -156,6 +161,7 @@ const CAUSES = {
       composer: null,
       approval: null,
       loadReason: K.loadReasonUnknown,
+      loadReasonBare: K.loadReasonUnknownBare,
       uploadFailed: null,
     },
   },

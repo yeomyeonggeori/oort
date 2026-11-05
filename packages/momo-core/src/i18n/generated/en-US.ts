@@ -1372,6 +1372,26 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the agent's work history"
     }
   ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load this agent's profile, so we can't tell what will apply"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the profiles of "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", so we can't tell what will apply"
+    }
+  ],
   "connection.load.agentProfileTitle": [
     {
       "type": 0,
@@ -1412,6 +1432,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list, so we can't show conversation names"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't check where your drafts belong"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1468,6 +1500,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the notification rules"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load unread markers, so conversations with members who left are still showing"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1480,10 +1518,22 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Try again in a moment."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "Something went wrong."
     }
   ],
   "connection.load.sentence": [
@@ -1498,6 +1548,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "reason"
+    }
+  ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't refresh team work. Showing the last list we have"
     }
   ],
   "connection.load.threadTitle": [

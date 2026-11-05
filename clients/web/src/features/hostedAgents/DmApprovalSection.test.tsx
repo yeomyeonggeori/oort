@@ -117,8 +117,8 @@ describe("DmApprovalSection", () => {
   // #5242: 옛 「1:1 대화 목록을 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.」는 원인을 말하는 한 줄이다.
   it("목록을 못 읽으면 제목 뒤에 원인이 붙은 한 줄이 서고, 다시 시도가 목록을 다시 읽는다", async () => {
     const cases: [Error, string][] = [
-      [new NetworkError("unreachable", 15_000), "1:1 대화 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "1:1 대화 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "1:1 대화 목록을 불러오지 못했어요. 서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "1:1 대화 목록을 불러오지 못했어요. 문제가 생겼어요."],
     ];
     for (const [error, sentence] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
