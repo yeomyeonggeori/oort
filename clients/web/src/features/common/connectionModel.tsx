@@ -22,6 +22,7 @@ import {
   socketEvent,
   tickAction,
 } from "@momo/core/features/connection/screenState";
+import { startRestProbe, wantsRestProbe } from "@momo/core/features/connection/restProbe";
 import { RESUME_AFTER_HIDDEN_MS } from "@momo/core/features/connection/thresholds";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
 import { readBrowserOnline, useBrowserOffline } from "./browserOffline";
@@ -34,7 +35,21 @@ import { ConnectionContext, type ConnectionContextValue } from "./connectionCont
 // 거쳐 `connStatus`로 내리는 값), REST 결과(`subscribeRestOutcome`, 앱 전체에서 한 번), 만료. 앱에 **하나**만
 // 서고(셸과 첫 실행 세션이 각자 한 벌), 화면은 `useConnection()`(connectionContext.ts)으로 같은 모습을 읽는다.
 // 쓰기 게이트는 `useOffline()`이, 사이드바 카드·위쪽 띠는 `view`가 읽는다.
+//
+// 저절로 다시 확인(#5407): 「서버에 닿지 못했어요」·「연결에 문제가 있어요」는 REST 실패가 쌓여 선 띠라 응답 한 건이 와야 걷혔다. 창이 **보이는 동안** 이 띠가
+// 서 있으면 코어 `restProbe`가 늘려 가는 간격(2·4·8·16·30초)으로 가벼운 확인 요청을 보낸다. 결과는 위 REST 구독으로 들어와 서버가 답하면 띠가 걷히고 확인도
+// 멈춘다. 숨은 창에서는 보내지 않는다. 폰과 같은 코어 규칙이다.
 // =============================================================================
+
+// 창이 보이는가(저절로 다시 확인은 보이는 동안만 보낸다). 포커스는 보지 않는다: 보이는 창의 띠가 걷히지 않으면 안 되고(옆 창을 쓰는 중에도 이 창은 보인다),
+// 데스크탑 웹뷰의 `document.hasFocus()`는 창이 앞인데도 거짓일 수 있다(`useChannelViewingBeat`의 같은 이유). `useSyncExternalStore`가 구독 함수의 동일성이 바뀌면
+// 다시 구독하므로 모듈에 하나씩 둔다.
+const subscribeVisible = (notify: () => void) => {
+  document.addEventListener("visibilitychange", notify);
+  return () => document.removeEventListener("visibilitychange", notify);
+};
+const readVisible = () => document.visibilityState !== "hidden";
+const assumeVisible = () => true;
 
 /**
  * 모델을 돌리는 공급자. `SessionProvider` **안에** 서고 앱에 하나다(셸, 첫 실행 세션). 하는 일은 사건을
@@ -88,6 +103,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     arm();
     return () => clearTimeout(timer);
   }, [wake]);
+
+  // 저절로 다시 확인: REST 실패에서 온 띠가 보이는 창에 서 있는 동안만 켜 두고, 띠가 걷히거나 창이 숨으면 거둔다. 켜진 채 상태만 바뀌는 렌더에서는 시계를
+  // 다시 시작하지 않는다(`probing`이 바뀔 때만 효과가 돈다).
+  const visible = useSyncExternalStore(subscribeVisible, readVisible, assumeVisible);
+  const probing = wantsRestProbe(state.view, visible);
+  useEffect(() => (probing ? startRestProbe() : undefined), [probing]);
 
   const reconnectNow = useCallback(() => {
     emit((at) => resumeEvent(at));
