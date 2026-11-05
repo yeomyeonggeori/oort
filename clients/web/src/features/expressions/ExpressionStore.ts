@@ -21,7 +21,7 @@ export class ExpressionStore {
     let usage = emptyExpressionUsage(workspaceId, memberId);
     try { usage = restoreExpressionUsage(JSON.parse(localStorage.getItem(this.usageKey) ?? "null"), workspaceId, memberId); } catch { /* Storage is optional. */ }
     this.base = `/v1/workspaces/${encodeURIComponent(workspaceId)}`;
-    this.snapshot = { usage, cache: emptyExpressionCache(workspaceId, memberId), status: "loading" as "loading" | "ready" | "error", epoch: 0, offline: false };
+    this.snapshot = { usage, cache: emptyExpressionCache(workspaceId, memberId), status: "loading" as "loading" | "ready" | "error", epoch: 0, offline: false, failure: null as unknown };
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
@@ -49,9 +49,11 @@ export class ExpressionStore {
       if (!next.applied) throw new Error("expression snapshot");
       this.snapshot.cache = next.cache;
       this.snapshot.status = "ready";
+      this.snapshot.failure = null;
       if (next.evictImageIds.length > 0) this.clearImages();
-    } catch {
-      if (serial === this.refreshSerial) { this.snapshot.status = "error"; this.clearImages(); }
+    } catch (error) {
+      // 오류 객체를 버리지 않는다(#5279 C): 화면이 이 실패가 연결 쪽인지(오프라인 / 서버에 닿지 못함)를 말하려면 객체가 있어야 한다.
+      if (serial === this.refreshSerial) { this.snapshot.status = "error"; this.snapshot.failure = error; this.clearImages(); }
     }
     if (serial === this.refreshSerial) this.emit();
   }

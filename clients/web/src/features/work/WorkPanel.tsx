@@ -32,6 +32,10 @@ import {
 import { useTickingNow } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   useSessionEvents,
   useSessionVerification,
@@ -572,6 +576,7 @@ function SessionPeek({
   liveEvents: readonly WorkSessionEvent[];
   onOpen: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { workspaceId } = useSession();
   const mine = useMemo(
     () => eventsForSession(liveEvents, session.id),
@@ -603,8 +608,14 @@ function SessionPeek({
       {query.isPending ? (
         <Skeleton ready={false} rows={2} className="p-0" />
       ) : query.error !== null ? (
-        <p className="text-meta text-danger" role="alert">
-          진행 내역을 불러오지 못했습니다.
+        // 단추가 없는 한 줄이라 이유가 다음 행동까지 말한다(`withAction` 거짓). 불러오기 실패의 한 톤인 조용한 잉크다(#5307 L2, #5279 B).
+        <p className="text-meta text-ink" role="alert">
+          {loadFailureSentence(
+            formatMessage,
+            CONNECTION_KEYS.loadWorkStepsTitle,
+            loadCauseOf(query.error),
+            false
+          )}
         </p>
       ) : tail.length === 0 ? (
         // Fail-closed here too (X-11 / MOMO-546). An empty stream from a remote
@@ -1111,14 +1122,14 @@ export function WorkPanel({
             <Skeleton ready={false} rows={4} className="p-4" />
           )}
           {projectionError !== null && (
-            <InlineBanner
-              message={
+            <LoadFailureNote
+              titleKey={
                 sessionsQuery.error !== null
-                  ? "세션 목록을 불러오지 못했습니다."
-                  : "호스트 상태를 불러오지 못했습니다."
+                  ? CONNECTION_KEYS.loadWorkSessionsTitle
+                  : CONNECTION_KEYS.loadWorkLocationsTitle
               }
-              actionLabel="다시 시도"
-              onAction={() => {
+              cause={loadCauseOf(projectionError)}
+              onRetry={() => {
                 if (sessionsQuery.error !== null) void sessionsQuery.refetch();
                 if (hostsQuery.error !== null) void hostsQuery.refetch();
               }}
