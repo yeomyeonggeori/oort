@@ -11,7 +11,6 @@ import {ConversationLayout} from '../src/features/conversation/ConversationLayou
 import {CONV} from '../src/features/conversation/convDesign';
 import {clearDraft} from '../src/features/conversation/drafts';
 import {JumpSeekLine} from '../src/features/conversation/JumpSeekLine';
-import {seekSettleMs} from '../src/features/conversation/jumpSeek';
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 
@@ -26,11 +25,11 @@ import {Timeline} from '../src/features/conversation/Timeline';
 //   landed   읽은 쪽이 합쳐진 방(목적지 위 20줄 포함)에서 같은 목적지로 점프가 4초마다 다시 걸려 **착지·강조**(틴트는 1.5초 남짓 서고 물러난다)
 //   run      reading → 3초 뒤 읽은 쪽이 합쳐지고 같은 목적지로 점프가 다시 걸려 착지(실제 화면의 두 발과 같은 순서). `run-fast` 는 300ms 뒤 -
 //            진입 수렴이 끝나기 전에 읽은 쪽이 붙는 경우(옛 페이지가 진입 수렴 중에 붙으면 목록이 밀리던 #2604 의 자리)
-//   `-far`   `landed`·`run`·`run-fast` 의 끝에 붙인다(`landed-far`·`run-far`·`run-fast-far`). **상한 가까운 거리**: 머리 30줄 위
-//            1,800줄에 목적지가 있고 합쳐지는 줄이 1,820개다(한 번의 읽기가 닿는 가장 먼 쪽에 가깝다 - `jumpSeek.ts` 의 2,000줄).
-//            먼 이동이 목적지에 앉는지 보는 표면이다. `-far<줄 수>` 는 그 거리를 바꾼다(`run-fast-far800`).
+//   `-far`   `landed`·`run`·`run-fast` 의 끝에 붙인다(`landed-far`·`run-far`·`run-fast-far`). 머리 30줄 위 1,800줄에 목적지가 있는 방 -
+//            대화 화면은 이 거리를 읽지 않는다(상한 300줄). 먼 이동이 목적지에 앉는지 재는 실험 표면이다. `-far<줄 수>` 는 그 거리를
+//            바꾼다(`run-far300` 은 앉고 `run-far500` 은 앉지 못한다 - 6초 뒤 화면 위 표식이 `NONE` 이면 목적지 줄이 그려져 있지 않은 것).
 //   `-d<ms>` 맨 끝에 붙이면 쪽이 합쳐진 뒤 점프를 **다른 커밋에서** 그만큼 늦게 건다 - 합친 직후의 먼 점프가 앉는지 재는 손잡이.
-//            없으면 대화 화면과 같다: 합친 줄이 300줄 이하면 같은 커밋, 넘으면 `seekSettleMs` 만큼 늦게(`jumpSeek.ts` 머리말의 실측).
+//            없으면 대화 화면과 같다(같은 커밋). 실측으로는 기다려도 먼 점프가 앉지 않았다(`jumpSeek.ts` 머리말).
 //
 // 전부 지어낸 인물·문구다.
 // =============================================================================
@@ -166,10 +165,9 @@ export function JumpSeekSurface({which}: {which: string}): React.JSX.Element {
       setReading(false);
       setMessages(range(room.target - 20, room.last, room));
       const fire = () => setJump({messageId: row(room.target, room).id, seq: room.target, token: 1});
-      // 대화 화면과 같은 규칙: 합친 줄 수(머리 맨 위 줄에서 목적지까지)에 따라 기다린다. `-d<ms>` 가 있으면 그 값(0 이어도 다른 커밋).
-      const wait = jumpDelay ?? seekSettleMs(room.headFirst - room.target);
-      if (jumpDelay === null && wait === 0) fire();
-      else second = setTimeout(fire, wait);
+      // 대화 화면과 같다: 합친 같은 커밋에서 다시 쏜다. `-d<ms>` 가 있으면 다른 커밋에서 그만큼 늦게(0 이어도 다른 커밋).
+      if (jumpDelay === null) fire();
+      else second = setTimeout(fire, jumpDelay);
     }, kind === 'run-fast' ? 300 : 3000);
     return () => {
       clearTimeout(timer);

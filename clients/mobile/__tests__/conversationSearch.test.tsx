@@ -405,7 +405,7 @@ describe('#5364 대화 안 검색 — 이동', () => {
   });
 
   it('이미 불러온 범위 밖의 오래된 결과가 읽어도 닿지 못하면(쪽 상한) 이동 문의 고지가 막대 위에 서고(목록 맨 위에 묻히지 않는다), 검색을 끝내면 목록 머리로 돌아간다', async () => {
-    // #5383: 범위 밖 결과는 이제 화면이 그 자리까지 읽는다. 서버가 한 쪽에 5줄만 주면 60줄 위의 결과(40)는 3쪽(상한)에 못 닿아 지금의 고지로 물러난다.
+    // #5383: 범위 밖 결과는 이제 화면이 그 자리까지 읽는다. 서버가 한 쪽에 5줄만 주면 60줄 위의 결과(40)는 2쪽(상한)에 못 닿아 지금의 고지로 물러난다.
     installFetch({firstPage: [HIT_OLD], hasSecondPage: false, olderExists: true, olderPageRows: 5});
     await search();
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);

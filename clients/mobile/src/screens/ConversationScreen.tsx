@@ -104,7 +104,7 @@ import {useConnectionBand} from '../features/connection/useConnectionBand';
 import {useConnectionGates} from '../features/connection/useConnectionGates';
 import {useFormatMessage} from '../i18n/useFormatMessage';
 import {JumpSeekLine} from '../features/conversation/JumpSeekLine';
-import {planSeek, SeekOutcome, SeekPlan, seekSettleMs} from '../features/conversation/jumpSeek';
+import {planSeek, SeekOutcome, SeekPlan} from '../features/conversation/jumpSeek';
 import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -1646,8 +1646,6 @@ export default function ConversationScreen({
     if (plan !== SeekPlan.Read) return false;
     seekRunRef.current += 1;
     const run = seekRunRef.current;
-    // 합치게 될 줄 수 = 읽기 전의 거리. 많이 합칠수록 점프를 늦게 건다(`seekSettleMs`).
-    const rows = (timeline.state.oldestSeq ?? target.seq) - target.seq;
     setSeek({...target, failed: false});
     AccessibilityInfo.announceForAccessibility(formatMessage('mobile.jumpSeek.reading'));
     void timeline
@@ -1662,20 +1660,12 @@ export default function ConversationScreen({
         }
         // 닿았거나(합쳤다), 처음까지 갔거나(합쳤다), 상한에 닿았다(합치지 않았다). 어느 쪽이든 목록이 판정한다 -
         // 있으면 착지하고, 없으면 `seekTriedRef` 때문에 읽지 않고 사실 진술 고지로 간다.
-        const fireAgain = () => {
-          // 기다리는 사이 접었거나 새 요청이 왔거나 화면이 사라졌다 - 번호가 달라졌다.
-          if (seekRunRef.current !== run) return;
-          setSeek(null);
-          setJumpTarget(current => ({
-            messageId: target.messageId,
-            seq: target.seq,
-            token: (current?.token ?? 0) + 1,
-          }));
-        };
-        // 합쳤으면 많이 합친 만큼 목록이 앉을 시간을 준다. 그동안 읽는 줄(과 취소)이 그대로 선다 - 합치지 않았으면(상한) 기다릴 이유가 없다.
-        const settle = outcome === SeekOutcome.Capped ? 0 : seekSettleMs(rows);
-        if (settle === 0) fireAgain();
-        else setTimeout(fireAgain, settle);
+        setSeek(null);
+        setJumpTarget(current => ({
+          messageId: target.messageId,
+          seq: target.seq,
+          token: (current?.token ?? 0) + 1,
+        }));
       });
     return true;
   };
