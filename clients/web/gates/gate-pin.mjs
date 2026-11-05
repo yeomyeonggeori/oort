@@ -996,12 +996,14 @@ async function exercise(browser) {
     }, PLAIN_MSG);
   }
   const tailText = (await tails.textContent()) ?? "";
-  if (!tailText.includes("수정됨")) {
+  // 「수정됨」은 사전 낱말이라 브라우저 언어를 따른다(영어는 「Edited」, #5326). 어느 쪽이든 그 낱말의 자리를 잰다.
+  const editedWord = ["수정됨", "Edited"].find((word) => tailText.includes(word));
+  if (editedWord === undefined) {
     throw new Error(
       `fixture is vacuous: the pinned row must also be an edited row, read "${tailText}"`
     );
   }
-  if (tailText.indexOf("수정됨") > tailText.indexOf(PIN_ROW_MARK_TEXT)) {
+  if (tailText.indexOf(editedWord) > tailText.indexOf(PIN_ROW_MARK_TEXT)) {
     throw new Error(
       `the pinned mark jumped ahead of 「수정됨」 — the tail reads inside-out, "${tailText}"`
     );

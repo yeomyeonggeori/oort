@@ -1,0 +1,150 @@
+appId: app.momo.ios
+name: "5325-attach-in-pill"
+# No `env:` block — see the note at the top of 00-login.yaml.
+#
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 5325-attach-in-pill — 자판이 올라온 채 + 가 눌리고, 고른 사진이 입력창(알약) 안에 작게 서고, ✕ 로 지운다 (#5325, owner 11-05).
+#
+# owner 의 폰 캡처 둘:
+#   ① 「키보드가 열렸을 때 + 버튼이 안눌려서 첨부가 안돼」   ② 「사진 첨부를 하고 채팅창을 누르면 채팅창 안에 사진 미리보기가 없네」(+ ✕ 가 너무 크다)
+#
+# ① 의 원인(시뮬레이터 실측): 펼침(자판이 올라온 상태)에서만 서는 도구 줄(`composer-tools`)이 알약 폭 전체이고, 알약 바닥에 절대 배치된 + 원보다 **뒤**에 그려져 + 의 터치를
+#    삼켰다. Maestro `tapOn id: composer-attach` 는 COMPLETED 인데 첨부 메뉴가 안 열렸다 — 이 흐름의 ② 단계가 수리 전에는 붉다. 도구 줄에 `pointerEvents="box-none"` 로 열린다.
+#
+# 이 흐름은 혼자 돌지 않는다: 레인(`npm run lane:phone -- --flow 5325-attach-in-pill`)이 로컬 보관소(ADR-0169)가 달린 스택을 세운다(레인이 이 흐름 이름을 보고 켠다).
+# 올리기가 진짜로 끝나야 썸네일이 선다 — 서버 없이 올리기가 실패하면 칩은 썸네일이 아니라 파일 칩이다(`AttachmentTray`).
+# 사진은 시뮬레이터 사진첩에 합성 그림 하나를 넣고(`addMedia`), 사진 카드의 맨 앞 칸(가장 최근 = 이 그림)을 고른다.
+#
+# 단정:
+#   · ② 자판이 올라온 채 + **첫 탭**에 `attachment-pick-photo` 가 선다.
+#   · ③ 첨부하면 `attachment-draft` 와 썸네일(`attachment-draft-thumb`)이 서고 **글 줄(`composer-input`) 위**다. 「알약 안」인지는 이 흐름이 못 가린다 — Maestro 의 접근성 계층은 알약
+#     (`composer-pill`)과 미리보기(`attachment-tray`)를 부모-자식이 아니라 **형제**로 편다(`maestro hierarchy`: 알약 [8,313][394,535] ⊃ 미리보기 [8,313][393,437] · 글 줄 [8,437][393,534]).
+#     그래서 `childOf: composer-pill` 은 안 맞는다. 알약 포함은 jest(`composerAttachDock.test.tsx`)가 렌더 트리로, 이 흐름의 사진이 눈으로 보인다.
+#   · ④ 자판을 내려도·다시 올려도 미리보기가 그대로 있다.
+#   · ⑤ ✕ 를 **자판이 올라온 채** 한 번 눌러 지운다(가로 줄의 `keyboardShouldPersistTaps="always"` — 아니면 첫 탭은 자판만 내린다).
+#
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): ③ 알약 안 썸네일 줄(글 줄 위) · ④ 자판 위에서도 보이는 미리보기. 캡처와 design-review 는 planner 몫이다.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# 시뮬레이터 사진첩에 합성 그림(600x450)을 넣는다.
+- addMedia:
+    - "assets/5325-photo-probe.png"
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 처음 들어간 채널은 입력창 위에 길게 누르기 안내가 서서 탭을 먹는다(10-mention-working 과 같다).
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ① 자판을 올린다: 입력창을 누르면 펼침이고 도구 줄이 선다(이 줄이 + 위를 덮던 그것이다).
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "composer-tools"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: 5325-1-keyboard-up
+
+# ② 자판이 올라온 채 + 의 첫 탭. 수리 전에는 여기서 메뉴가 안 열려 붉다.
+- tapOn:
+    id: "composer-attach"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-pick-photo"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: 5325-2-menu-open
+- tapOn:
+    id: "attachment-pick-photo"
+- extendedWaitUntil:
+    visible:
+      id: "photo-back"
+    timeout: 10000
+- waitForAnimationToEnd
+# 권한이 미결정이면 카드가 먼저 묻는다(101-photo-card-capture 와 같은 길).
+- runFlow:
+    when:
+      visible:
+        id: "photo-allow"
+    commands:
+      - tapOn:
+          id: "photo-allow"
+      - extendedWaitUntil:
+          visible: "전체 접근 허용|Allow Full Access"
+          timeout: 20000
+      - tapOn: "전체 접근 허용|Allow Full Access"
+- extendedWaitUntil:
+    visible:
+      id: "photo-grid"
+    timeout: 20000
+- waitForAnimationToEnd
+# 가장 최근 사진(= 방금 넣은 그림) 한 장을 골라 첨부한다.
+- tapOn:
+    id: "photo-cell-.*"
+    index: 0
+- tapOn:
+    id: "photo-pill"
+- extendedWaitUntil:
+    visible:
+      id: "composer-attach"
+    timeout: 30000
+
+# ③ 미리보기: 글 줄 위에 썸네일이 선다. 올리기가 끝나도 썸네일은 그대로다(실패하면 파일 칩이라 `attachment-draft-thumb` 단정이 붉다 — 보관소가 꺼진 스택).
+- extendedWaitUntil:
+    visible:
+      id: "attachment-draft"
+      above:
+        id: "composer-input"
+    timeout: 30000
+- assertVisible:
+    id: "attachment-draft-thumb"
+- waitForAnimationToEnd
+- takeScreenshot: 5325-3-preview-in-pill
+
+# ④ 자판을 내려도, 다시 올려도 미리보기는 그대로다. 자판은 대화 목록의 빈 자리를 눌러 내린다(#4614 — `hideKeyboard` 는 이 입력창에서 Maestro 가 닫을 곳을 못 찾아 붉다:
+#    줄바꿈 키뿐인 자판이라 「완료」 키가 없다). 위쪽 20% 는 머리와 첫 줄 사이의 빈 목록 자리다.
+- tapOn:
+    point: "50%,20%"
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-draft"
+    above:
+      id: "composer-input"
+- takeScreenshot: 5325-4-preview-keyboard-down
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "composer-tools"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-draft"
+    above:
+      id: "composer-input"
+- takeScreenshot: 5325-5-preview-keyboard-up
+
+# ⑤ ✕ 를 자판이 올라온 채 누른다: 첫 탭에 지워지고 미리보기 줄이 걷힌다.
+- tapOn:
+    id: "attachment-draft-remove"
+- extendedWaitUntil:
+    notVisible:
+      id: "attachment-draft"
+    timeout: 10000
+- assertNotVisible:
+    id: "attachment-tray"
+- takeScreenshot: 5325-6-removed

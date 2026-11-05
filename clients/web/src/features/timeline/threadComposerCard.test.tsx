@@ -13,9 +13,10 @@ import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 
 // =============================================================================
-// #4888: 웹·데스크탑 스레드 입력칸의 「대화에도 보내기」 체크. 진짜 `ThreadComposer`를 올리고 서버 호출(`sendThreadReply`)만 손으로 연다.
-// 지키는 것: 기본 꺼짐 · 켠 때만 키가 간다 · 마지막 선택을 기억하지 않는다(성공하면 꺼지고 스레드를 옮겨도 꺼진다) · 실패하면 같은
-// 선택이 남는다 · 옛 서버의 거절은 조용히 스레드로만 보내지 않고 이유를 말한다 · 키보드와 이름.
+// #5324: 웹·데스크탑 스레드 입력칸에서 「대화에도 보내기」를 뺐고, 본 입력창과 **같은 카드**(`ComposerCard`)로 맞췄다. 진짜 `ThreadComposer`를 올리고
+// 서버 호출(`sendThreadReply`)만 손으로 연다. 지키는 것: 체크도 안내 글도 없다 · 보내기 요청에는 `alsoInChannel` 키가 없고 `rootId` 는 간다 ·
+// 실패는 평소 문장으로 말한다(옛 서버 안내 문장은 없다) · 그릇은 채널 입력창과 같은 카드이고 도구 줄·보내기 알약도 같은 부품이다.
+// (jsdom 은 CSS 를 계산하지 않는다 — 두 그릇이 **계산된 값**으로 같은지는 `scripts/capture-5324.mjs` 가 실제 엔진에서 잰다.)
 // =============================================================================
 
 const scheduledApi = vi.hoisted(() => ({
@@ -173,18 +174,12 @@ function need(id: string): HTMLElement {
   return el;
 }
 const textarea = () => need("thread-composer-input") as HTMLTextAreaElement;
-const check = () => need("thread-composer-also-in-channel-input") as HTMLInputElement;
 
 async function type(value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
   await act(async () => {
     setter?.call(textarea(), value);
     textarea().dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-async function toggle() {
-  await act(async () => {
-    check().click();
   });
 }
 async function send() {
@@ -194,98 +189,112 @@ async function send() {
   await flush();
 }
 
-describe("스레드 입력칸의 「대화에도 보내기」 (#4888)", () => {
-  it("기본은 꺼져 있고, 보이는 글이 이름이다", async () => {
+describe("스레드 입력칸에는 「대화에도 보내기」가 없다 (#5324)", () => {
+  it("체크도 안내 글도 없다 — 보이는 이름도 낭독 이름도", async () => {
     await mount();
-    expect(check().type).toBe("checkbox");
-    expect(check().checked).toBe(false);
-    // 이름은 보이는 글(label)에서 온다 — 별도 aria-label 이 아니라 label 안의 글이 곧 이름이다.
-    expect(need("thread-composer-also-in-channel").textContent).toBe("대화에도 보내기");
-    expect(check().closest("label")?.textContent).toBe("대화에도 보내기");
+    expect(byId("thread-composer-also-in-channel")).toBeNull();
+    expect(byId("thread-composer-also-in-channel-input")).toBeNull();
+    expect(document.body.textContent ?? "").not.toContain("대화에도 보내기");
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
-  it("꺼진 채 보내면 이 칸 이전과 같은 요청이다: alsoInChannel 키가 없다", async () => {
+  // 사보타주: `sendThreadReply` 호출에 `...(true ? { alsoInChannel: true } : {})` 를 되살리면 이 시험이 RED 여야 한다.
+  it("보내기 요청에는 alsoInChannel 키가 없고, 답글의 rootId 는 간다", async () => {
     await mount();
-    await type("꺼진 채로 보내요");
+    await type("스레드에만 가는 답글");
     await send();
     expect(sends).toHaveLength(1);
-    expect(sends[0]?.rootId).toBe(ROOT);
-    expect(sends[0]?.options === undefined || !("alsoInChannel" in sends[0].options)).toBe(true);
+    expect(sends[0]).toMatchObject({ rootId: ROOT, body: "스레드에만 가는 답글" });
+    expect(Object.keys(sends[0]!.options ?? {})).not.toContain("alsoInChannel");
   });
 
-  it("켠 채 보내면 alsoInChannel: true 가 같은 요청에 실린다", async () => {
+  it("글을 보내면 입력칸이 비고, 다음 답글의 요청에도 그 키는 없다", async () => {
     await mount();
-    await type("대화에도 보여 주세요");
-    await toggle();
-    expect(check().checked).toBe(true);
+    await type("첫 답글");
     await send();
-    expect(sends).toHaveLength(1);
-    expect(sends[0]?.options?.alsoInChannel).toBe(true);
-    expect(sends[0]?.body).toBe("대화에도 보여 주세요");
-  });
-
-  it("마지막 선택을 기억하지 않는다: 보내고 나면 꺼지고, 다음 답글은 키 없이 나간다", async () => {
-    await mount();
-    await type("첫 번째");
-    await toggle();
-    await send();
-    expect(check().checked).toBe(false);
-    await type("두 번째");
+    expect(textarea().value).toBe("");
+    await type("둘째 답글");
     await send();
     expect(sends).toHaveLength(2);
-    expect(sends[0]?.options?.alsoInChannel).toBe(true);
-    expect(sends[1]?.options === undefined || !("alsoInChannel" in sends[1].options)).toBe(true);
+    for (const sent of sends) expect(Object.keys(sent.options ?? {})).not.toContain("alsoInChannel");
   });
 
-  it("보내지 못하면 글과 함께 체크가 남아 다시 보내도 같은 선택이다", async () => {
+  it("거절(400)은 평소 문장으로 말한다 — 옛 서버 안내 문장은 없고, 글은 남는다", async () => {
+    nextFailure = new ApiError(400, "bad request");
     await mount();
-    await type("실패할 답글");
-    await toggle();
-    nextFailure = new ApiError(503, "unavailable");
+    await type("거절될 답글");
     await send();
-    expect(check().checked).toBe(true);
-    expect(textarea().value).toBe("실패할 답글");
-    nextFailure = null;
-    await send();
-    expect(sends).toHaveLength(2);
-    expect(sends[1]?.options?.alsoInChannel).toBe(true);
-    expect(check().checked).toBe(false);
+    const message = need("thread-composer-error").textContent ?? "";
+    expect(message).toContain("이 메시지에는 답글을 달 수 없습니다");
+    expect(message).not.toContain("지원하지 않아요");
+    expect(textarea().value).toBe("거절될 답글");
   });
 
-  it("다른 스레드로 옮기면 꺼진다", async () => {
-    await mount();
-    await toggle();
-    expect(check().checked).toBe(true);
+  it("스레드를 옮겨도 체크 상태 같은 것이 새지 않는다 — 입력칸은 여전히 체크 없이 선다", async () => {
+    await mount(ROOT);
     await showThread(OTHER_ROOT);
-    expect(check().checked).toBe(false);
+    expect(byId("thread-composer-also-in-channel")).toBeNull();
+  });
+});
+
+describe("스레드 입력창은 채널 입력창과 같은 카드다 (#5324)", () => {
+  const classes = (el: HTMLElement) => Array.from(el.classList);
+
+  // 사보타주: 그릇을 `rounded-md border border-line-strong bg-surface-raised` 로 되돌리면 이 시험이 RED 여야 한다.
+  it("그릇이 `composer-card` 이고, 예전 따로 그리던 상자의 클래스는 없다", async () => {
+    await mount();
+    const frame = need("thread-composer-frame");
+    expect(frame.hasAttribute("data-composer-frame")).toBe(true);
+    expect(classes(frame)).toEqual(expect.arrayContaining(["composer-card", "@container"]));
+    for (const own of ["rounded-md", "border", "border-line-strong", "bg-surface-raised"]) {
+      expect(classes(frame)).not.toContain(own);
+    }
   });
 
-  it("옛 서버가 모르는 키로 거절하면 이유를 말한다 — 조용히 스레드로만 보내지 않는다", async () => {
+  it("독이 채널 입력창과 같다: `composer-dock` 이고 항상 있는 위 경계선(`border-t`)이 없다", async () => {
     await mount();
-    await type("옛 서버에 보내요");
-    await toggle();
-    nextFailure = new ApiError(400, "unknown field");
-    await send();
-    expect(need("thread-composer-error").textContent).toContain("대화에도 보내기");
-    expect(need("thread-composer-error").textContent).toContain("지원하지 않아요");
-    expect(sends).toHaveLength(1);
+    const shell = need("thread-composer");
+    expect(classes(shell)).toContain("composer-dock");
+    expect(classes(shell)).not.toContain("border-t");
   });
 
-  it("체크를 끈 채의 400 은 평소 문장이다(지워진 원본 등) — 모르는 서버 탓으로 돌리지 않는다", async () => {
+  it("글 칸이 채널 입력창과 같은 옷이다(안내 문구 색·줄 간격·인셋)", async () => {
     await mount();
-    await type("끈 채로 보내요");
-    nextFailure = new ApiError(400, "thread root must be a top-level message");
-    await send();
-    expect(need("thread-composer-error").textContent).toContain("답글을 달 수 없습니다");
-    expect(need("thread-composer-error").textContent).not.toContain("지원하지 않아요");
+    expect(classes(textarea())).toEqual(
+      expect.arrayContaining(["composer-placeholder", "placeholder:text-ink-muted", "leading-relaxed", "px-3", "py-2", "focus-visible:outline-none"])
+    );
   });
 
-  it("키보드: 글 칸 다음에, 첨부 단추 앞에 서고 Space 로 켠다(네이티브 체크)", async () => {
+  it("도구 줄이 같은 묶음이다: +·@·이모지에 서식이 더해지고, 보내기는 `Button size=icon` 알약이다", async () => {
     await mount();
-    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(textarea(), check())).toBe(true);
-    expect(follows(check(), need("thread-composer-mention-trigger"))).toBe(true);
-    expect(check().tabIndex).toBe(0);
-    expect(check().disabled).toBe(false);
+    const actions = need("thread-composer-actions");
+    const labels = Array.from(actions.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
+    expect(labels.slice(0, 3)).toEqual(["파일 첨부", "멘션 넣기", "이모지 넣기"]);
+    // 서식 단추는 채널 입력창의 그것과 같은 부품이다(jsdom 은 터치 기기가 아니라 `useComposerFormat` 이 가능하다고 답한다). 이름이 같다.
+    const format = need("thread-composer-format-trigger");
+    expect(format.getAttribute("aria-label")).toBe("서식");
+    expect(labels).toContain("서식");
+    const sendButton = need("thread-composer-send");
+    expect(sendButton.getAttribute("aria-label")).toBe("답글 보내기");
+    expect(classes(sendButton)).toEqual(expect.arrayContaining(["size-icon-button", "rounded-full", "bg-primary"]));
+  });
+
+  it("보내는 중에는 그릇 전체가 흐려지고 단추는 더 흐려지지 않는다(이중 흐림 금지)", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    api.sendThreadReply.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await mount();
+    await type("느리게 가는 답글");
+    await act(async () => {
+      need("thread-composer-send").click();
+    });
+    const frame = need("thread-composer-frame");
+    expect(classes(frame)).toContain("opacity-50");
+    expect(frame.getAttribute("aria-busy")).toBe("true");
+    expect(classes(need("thread-composer-send"))).toContain("disabled:opacity-100");
+    await act(async () => {
+      finish({ id: "reply-slow" });
+    });
+    await flush();
+    expect(classes(need("thread-composer-frame"))).not.toContain("opacity-50");
   });
 });

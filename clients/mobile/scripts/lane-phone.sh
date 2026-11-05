@@ -168,7 +168,10 @@ fi
 # does — the others send no attachment and keep the stack as small as it was.
 LOCAL_DRIVE="${LANE_PHONE_LOCAL_DRIVE:-0}"
 for flow_name in "${FLOWS[@]}"; do
-  [ "$flow_name" = "5208-video-viewer-live" ] && LOCAL_DRIVE=1
+  case "$flow_name" in
+    # 5325-attach-in-pill: 고른 사진이 **진짜로 올라가야** 입력창 안 썸네일이 선다(올리기가 실패하면 칩이 썸네일이 아니라 파일 칩이 된다 — AttachmentTray).
+    5208-video-viewer-live|5325-attach-in-pill) LOCAL_DRIVE=1 ;;
+  esac
 done
 
 # --------------------------------------------------------------------------

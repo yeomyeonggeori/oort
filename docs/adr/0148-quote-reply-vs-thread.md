@@ -184,3 +184,7 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 
 - 행동 시험(실 PG, 비우회 역할 `momo_app`, 두 워크스페이스): `momo-messaging/tests/thread_reply_home_conformance_pg.rs`(#4877 첫 답글·같은 사람 반복·4명 이상·순서 바뀜·다른 워크스페이스 격리, #4887 DB 제약·기록/스레드/실시간에 값·멱등)와 `momo-server/tests/thread_reply_home_rest_pg.rs`(REST 400·응답 모양). 사보타주 결과는 PR 본문에 있어요.
 - `runtime-unverified`: 화면(#4888·#4878)이 본류와 스레드를 어떻게 그리는지, 실기기·폰 푸시, **N1 판정**(코드가 없어서 이 증보의 알림 규칙은 시험으로 고정할 수 없어요 — N1 구현이 이 규칙을 시험으로 가져가요).
+
+### 화면에서 뺌 (2026-11-05, #5324)
+
+- 2026-11-05 owner: 화면에서 뺌, 서버 필드는 호환을 위해 유지. 웹·데스크탑·폰은 「대화에도 보내기」 체크·단추·안내와 밀어서 보낸 답글의 그 길을 그리지 않고 요청에 `alsoInChannel` 을 싣지 않으며, 이미 켜고 보낸 답글도 **스레드에만** 보인다(본류의 행도 한 줄 요약도 없다 — 결정 4의 본류 규칙은 클라이언트가 `root_id` 없는 메시지만으로 읽는다). 위 결정 3·4·7의 서버 계약(열·필드·`rootId` 없는 요청의 400·알림 규칙)과 API는 바뀌지 않는다.

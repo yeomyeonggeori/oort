@@ -14,9 +14,9 @@ import type { AppLocale } from "@/i18n/localeStore";
 import { Timeline } from "./Timeline";
 
 // =============================================================================
-// #4888: 본류에는 root 없는 메시지와 「대화에도 보낸」 답글만 선다(ADR-0148 증보 결정 4). 켜지 않은 답글은 스레드로만 간다. 서 있는
-// 답글은 「↳ ○○님 스레드에 답글」 + 원문 한 줄로 어느 스레드의 것인지 말하고, 누르면 그 스레드(루트)가 열린다. 실제 Timeline·MessageRow를
-// 올려 화면에 서는 것을 잰다(서버·소켓 없음).
+// #5324: 웹·데스크탑 본류에는 root 없는 메시지만 선다(ADR-0148 증보 2026-11-05). 「대화에도 보내기」는 화면에서 빠졌고, 옛날에 켜고 보낸 답글
+// (서버 필드 `alsoInChannel: true` 는 그대로 온다)도 **스레드에만** 보인다 — 본류의 행도 「↳ ○○님 스레드에 답글」 한 줄 요약도 없다.
+// 실제 Timeline·MessageRow를 올려 화면에 서는 것을 잰다(서버·소켓 없음).
 // =============================================================================
 
 const virtuoso = vi.hoisted(() => ({ data: [] as { kind: string; key: string }[] }));
@@ -196,63 +196,41 @@ function show(messages: Message[], onOpenThread: (message: Message) => void = ()
 const q = (id: string) => host?.querySelector<HTMLElement>(`[data-testid="${id}"]`) ?? null;
 const text = () => host?.textContent ?? "";
 
-describe("본류에 서는 행 (#4888)", () => {
-  it("스레드로만 보낸 답글은 본류에 서지 않는다 — 요약 줄만 남는다", () => {
-    show([{ ...root, thread: { reply_count: 1, last_reply_seq: 11, last_reply_at: 1, participant_ids: [B], participant_count: 1 } }, reply(11)]);
+describe("본류에 서는 행 (#5324)", () => {
+  const summary = { reply_count: 1, last_reply_seq: 11, last_reply_at: 1, participant_ids: [B], participant_count: 1 };
+
+  it("스레드 답글은 본류에 서지 않는다 — 요약 줄만 남는다", () => {
+    show([{ ...root, thread: summary }, reply(11)]);
     expect(text()).toContain("배포는 금요일에 합니다.");
     expect(text()).not.toContain("답글 11");
-    expect(q("reply-home")).toBeNull();
     expect(q("thread-count")?.textContent).toBe("답글 1개");
   });
 
-  it("옛 서버(요약에 참여자 키 없음, 켠 값 없음)의 화면은 오늘 웹과 같다: 답글은 본류에 서지 않는다", () => {
+  it("옛 서버(요약에 참여자 키 없음, 켠 값 없음)의 화면도 같다: 답글은 본류에 서지 않는다", () => {
     show([{ ...root, thread: { reply_count: 1, last_reply_seq: 11, last_reply_at: 1 } }, reply(11)]);
     expect(text()).not.toContain("답글 11");
     expect(q("reply-home")).toBeNull();
   });
 
-  it("대화에도 보낸 답글은 본류에 서고, 어느 스레드의 답글인지 말한다", () => {
-    show([root, reply(11, { alsoInChannel: true })]);
-    expect(text()).toContain("답글 11");
-    expect(q("reply-home-header")?.textContent).toBe("↳ 가영님 스레드에 답글");
-    expect(q("reply-home-excerpt")?.textContent).toBe("배포는 금요일에 합니다.");
-  });
-
-  it("내 글에 단 답글은 이름 대신 「내 글」이라 말한다", () => {
-    show([{ ...root, authorMemberId: ME }, reply(11, { alsoInChannel: true })]);
-    expect(q("reply-home-header")?.textContent).toBe("↳ 내 글 스레드에 답글");
-  });
-
-  it("줄을 누르면 그 스레드(루트)가 열린다", () => {
-    const opened: Message[] = [];
-    show([root, reply(11, { alsoInChannel: true })], (message) => opened.push(message));
-    const button = q("reply-home");
-    expect(button?.tagName).toBe("BUTTON");
-    act(() => button?.click());
-    expect(opened.map((message) => message.id)).toEqual([ROOT]);
-    // 이름은 「머리, 원문」 한 문장이고(화살표는 낭독에서 빠진다), 열린다는 말은 title 이 진다.
-    expect(button?.getAttribute("aria-label")).toBe("가영님 스레드에 답글, 배포는 금요일에 합니다.");
-    expect(button?.title).toBe("이 답글이 달린 스레드 열기");
-    expect(button?.querySelector('[aria-hidden="true"]')?.textContent).toBe("↳ ");
-  });
-
-  it("루트가 불러온 범위 위에 있으면 모른다고 말하고 누를 수 없다", () => {
-    show([reply(11, { alsoInChannel: true })]);
-    expect(q("reply-home-header")?.textContent).toBe("↳ 스레드에 답글");
-    expect(q("reply-home-excerpt")).toBeNull();
-    expect(q("reply-home")?.tagName).toBe("P");
-  });
-
-  it("지워진 루트는 「삭제된 메시지」라 말하지만 스레드는 열린다", () => {
-    const opened: Message[] = [];
-    show([{ ...root, state: "deleted", body: undefined }, reply(11, { alsoInChannel: true })], (message) => opened.push(message));
-    expect(q("reply-home-excerpt")?.textContent).toBe("삭제된 메시지");
-    act(() => q("reply-home")?.click());
-    expect(opened).toHaveLength(1);
-  });
-
-  it("답글이 아닌 행에는 줄이 없다", () => {
-    show([root]);
+  // 사보타주: `Timeline` 이 코어 `mainFlowMessages` 를 거치지 않거나 코어 `isMainFlowRow` 가 `alsoInChannel` 을 되살리면 이 시험이 RED 여야 한다.
+  it("옛날에 「대화에도 보내기」로 보낸 답글도 본류에 서지 않는다 — 행도 한 줄 요약도 없다", () => {
+    show([{ ...root, thread: summary }, reply(11, { alsoInChannel: true })]);
+    expect(text()).toContain("배포는 금요일에 합니다.");
+    expect(text()).not.toContain("답글 11");
     expect(q("reply-home")).toBeNull();
+    expect(q("reply-home-header")).toBeNull();
+    expect(host?.querySelectorAll('[data-testid="timeline-message"]').length).toBe(1);
+  });
+
+  it("루트가 불러온 범위 위에 있는 옛 켠 답글도 본류에 서지 않는다(루트를 몰라도 스레드의 것이다)", () => {
+    show([reply(11, { alsoInChannel: true })]);
+    expect(text()).not.toContain("답글 11");
+    expect(q("reply-home")).toBeNull();
+  });
+
+  it("루트 없는 메시지는 본류에 선다 — 위 단정이 「아무것도 안 그린다」가 아님을 못 박는다", () => {
+    show([{ ...root, thread: summary }, reply(11, { alsoInChannel: true }), { ...root, id: "0199eeee-0000-7000-8000-000000000999", seq: 12, body: "본류 글" }]);
+    expect(text()).toContain("본류 글");
+    expect(text()).not.toContain("답글 11");
   });
 });

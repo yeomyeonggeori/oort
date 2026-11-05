@@ -1,5 +1,4 @@
 import {measureComposerText} from './fixtures/composerMeasurement';
-import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
 import {QuoteDraftBar} from '../src/features/conversation/Quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {contrast} from '@momo/core/design/color';
@@ -351,11 +350,7 @@ describe('작업 대화 입력 알약 — 같은 자', () => {
 });
 
 describe('#4790 도크 8pt', () => {
-  it('첨부 트레이와 인용 바도 알약의 8pt 가장자리에서 시작한다', () => {
-    const tray = render(<AttachmentTray drafts={[]} pickerIssue="permission-denied"
-      onRemove={() => {}} onRetry={() => {}} onClear={() => {}} />);
-    expect(flat(screen.getByTestId('attachment-tray').props.style).paddingHorizontal).toBe(8);
-    tray.unmount();
+  it('인용 바도 알약의 8pt 가장자리에서 시작한다 (첨부 미리보기는 #5325 로 알약 안에 들어가 `inset` 을 따른다 — composerAttachDock.test.tsx)', () => {
     render(<QuoteDraftBar block={{kind: 'unresolved', targetId: 'quoted', targetSeq: null}}
       directory={DIRECTORY} onCancel={() => {}} />);
     expect(flat(screen.getByTestId('quote-draft').props.style).paddingLeft).toBe(8);
