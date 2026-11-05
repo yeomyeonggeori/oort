@@ -127,6 +127,7 @@ import {Shell} from '../src/shell/AppShell';
 import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
 import {ExpressionPhotoSurface} from './expressionPhoto';
+import {ExpressionSheetSurface} from './expressionSheet';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
@@ -2269,6 +2270,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name === 'expressionphoto' || name.startsWith('expressionphoto-')) {
     return (
       <ExpressionPhotoSurface which={name.slice('expressionphoto'.length).replace(/^-/, '')} />
+    );
+  }
+  // #5330: 표현 시트(이모티콘 · 기본 · GIF, `measure/expressionSheet.tsx`, 배송되는 시트 + 코어 가짜 서버, 합성 그림·가상 이름).
+  if (name === 'expressionsheet' || name.startsWith('expressionsheet-')) {
+    return (
+      <ExpressionSheetSurface which={name.slice('expressionsheet'.length).replace(/^-/, '')} />
     );
   }
   // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).

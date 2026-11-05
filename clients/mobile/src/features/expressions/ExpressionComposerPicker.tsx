@@ -64,8 +64,11 @@ export function ExpressionComposerPicker({
   onInsertExpression,
   onSend,
   onOpenConversation,
+  initialTab = DEFAULT_EXPRESSION_TAB,
 }: {
   onClose: () => void;
+  /** 처음 여는 탭(기본값은 「기본」 — 옛 이모지 고르개가 열던 표준 목록). 캡처 표면이 탭마다 한 장면을 찍는 데 쓴다. */
+  initialTab?: ExpressionTab;
   /** 기본 탭의 표준 그림 문자를 입력칸에 넣는다. */
   onInsert: (glyph: string) => void;
   /** 작은 이모티콘의 `:이름:` 을 입력칸에 넣는다 — 앞뒤 띄어쓰기는 호스트(입력칸)가 안다. */
@@ -81,7 +84,7 @@ export function ExpressionComposerPicker({
   const closePicker = usePageSheetClose() ?? onClose;
   const formatMessage = useExpressionMessages();
   const styles = useStyles(buildStyles);
-  const [tab, setTab] = useState<ExpressionTab>(DEFAULT_EXPRESSION_TAB);
+  const [tab, setTab] = useState<ExpressionTab>(initialTab);
   const [query, setQuery] = useState('');
   const [chapterOpen, setChapterOpen] = useState(false);
 
