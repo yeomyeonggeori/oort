@@ -1730,10 +1730,18 @@ async fn an_unconfigured_archive_answers_503_from_a_mounted_route() {
         503,
         "the route exists; the archive does not"
     );
+    // ADR-0151 증보 7: an operator has to configure the archive, so the 503 names itself and
+    // does not pretend that waiting helps.
+    assert!(
+        response.headers().get("retry-after").is_none(),
+        "no Retry-After on a state only an operator can change"
+    );
+    let body = response.json::<Value>().await.expect("body");
     assert_eq!(
-        response.json::<Value>().await.expect("body")["error"]["message"],
+        body["error"]["message"],
         json!("Drive archive is not configured")
     );
+    assert_eq!(body["error"]["code"], json!("drive_not_configured"));
 
     // …and the stub upload endpoint is not mounted at all on such an instance.
     let stub = http

@@ -4,6 +4,9 @@ import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { loadCauseOf, loadFailureSentence, loadFailureSentenceOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useAgentProfile, useOpenAgentProfile } from "./useAgentProfile";
 import { useCalledAgentsRouting } from "./useMentionRouting";
 import { RoutingFields } from "./RoutingFields";
@@ -276,6 +279,7 @@ function OneTargetRow({
   draft: RoutingDraft;
   onDraftChange: (next: RoutingDraft) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [expanded, setExpanded] = useState(false);
   const [cleared, setCleared] = useState<string | null>(null);
   const { workspaceId } = useSession();
@@ -305,8 +309,10 @@ function OneTargetRow({
   // 마지막이고, 결론이 난 사유가 있으면 그것을 먼저 말한다.
   const agentName = agent.displayName;
   const inheritSuffix = `지금 보내면 ${agentName}의 프로필 값이 그대로 적용됩니다.`;
+  // 결과(무엇이 적용될지 모른다)가 제목이고 원인(오프라인 / 서버에 닿지 못함)이 뒤에 붙는다(#5279 A). 곁에 「다시 시도」 단추(`composer-routing-retry`)가 서 있으므로
+  // 이유는 다음 행동을 되풀이하지 않는다.
   const reason: string | null = profileFailed
-    ? "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했습니다."
+    ? loadFailureSentence(formatMessage, CONNECTION_KEYS.loadAgentProfileAppliesTitle, loadCauseOf(profileHandle.error))
     : serverReason(capability, sendTier, inheritSuffix) ??
       (profileHandle.isPending
         ? "이 에이전트에 지금 무엇이 걸려 있는지 확인하는 중입니다."
@@ -485,6 +491,7 @@ function ManyTargetRow({
   draft: RoutingDraft;
   onDraftChange: (next: RoutingDraft) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [expanded, setExpanded] = useState(false);
   const [cleared, setCleared] = useState<string | null>(null);
   const { workspaceId } = useSession();
@@ -514,9 +521,14 @@ function ManyTargetRow({
     sharedEfforts(table, called.agents, modelOverride);
 
   const unreadable = called.unreadable;
+  // 못 읽은 에이전트마다 오류 객체가 따로 있어 하나로 말할 수 없다: 원인은 기기가 아는 사실 하나뿐이다(꺼져 있으면 오프라인). 곁의 「다시 시도」 단추가 다음 행동을 말한다.
   const unreadableReason =
     unreadable.length > 0
-      ? `${unreadable.join(", ")}의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했습니다.`
+      ? loadFailureSentenceOf(
+          formatMessage,
+          formatMessage(CONNECTION_KEYS.loadAgentProfilesApplyTitle, { names: unreadable.join(", ") }),
+          loadCauseOf(null)
+        )
       : null;
   const inheritSuffix = `지금 보내면 부른 ${count}명의 프로필 값이 각자 그대로 적용됩니다.`;
   const reason: string | null =

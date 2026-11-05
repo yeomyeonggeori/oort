@@ -345,7 +345,7 @@ async function openDrawerIfPhone(page, width) {
 // ---- 장면 ------------------------------------------------------------------------
 
 const TITLE_CHANNELS = "채널 목록을 불러오지 못했어요";
-const REASON_SERVER = "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+const REASON_SERVER = "서버에 닿지 못했어요.";
 
 /**
  * 시트 위 알약의 **기준**: 받아 둔 채널이 0개인 사이드바의 빈 상태 「채널 만들기」(`ghost` + `band-surface bg-surface shadow-sm`, 시안 A 시트 위 알약).
@@ -385,25 +385,33 @@ async function sceneSidebar(browser, combo, scheme, width, height) {
   const { context, page, state } = await newPage(browser, scheme, width, height);
   state.channels = "abort";
   await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
-  const box = page.locator('[data-testid="channel-list"] [data-testid="channels-error"]');
-  await box.waitFor({ timeout: 25_000 });
+  // 받아 둔 채널이 없을 때(#5307 L1): 사이드바는 상자 대신 **한 줄**(회색 띠 + status)로 말하고, 본문 상자(chat-channels-error, alert)가 같은 실패의 원인 이유를 말한다.
+  const line = page.locator('[data-testid="channel-list"] [data-testid="channels-error-line"]');
+  const body = page.getByTestId("chat-channels-error");
+  await line.waitFor({ timeout: 25_000 });
+  await body.waitFor({ timeout: 25_000 });
   await openDrawerIfPhone(page, width);
   await wait(400);
-  const text = await textOf(box);
-  check("사이드바: 제목 + 원인 이유(서버에 닿지 못함)가 한 상자에 선다", text.includes(TITLE_CHANNELS) && text.includes(REASON_SERVER), text);
-  check("사이드바 상자: 역할 alert, 다시 시도 단추 하나, 원인 표시", (await box.getAttribute("role")) === "alert" && (await box.locator("button").count()) === 1 && (await box.getAttribute("data-cause")) === "serverUnreachable");
-  check("사이드바 상자: 상태 코드가 한 글자도 없다", !hasStatusCode(text));
+  const text = await textOf(line);
+  check("사이드바: 받아 둔 채널이 없어도 상자 없이 제목 한 줄이 선다", text.includes(TITLE_CHANNELS) && (await page.locator('[data-testid="channel-list"] [data-testid="channels-error"]').count()) === 0, text);
+  check("사이드바 한 줄: 역할 status(낭독 한 번은 본문 상자 몫), 다시 시도 단추 하나", (await line.getAttribute("role")) === "status" && (await line.locator("button").count()) === 1);
+  check("사이드바 한 줄: 이유 문장은 말하지 않는다(본문 상자가 말한다)", !text.includes(REASON_SERVER), text);
+  check("사이드바 한 줄: 상태 코드가 한 글자도 없다", !hasStatusCode(text));
+  const bodyText = await textOf(body);
+  check("본문 상자: 제목 + 원인 이유(서버에 닿지 못함), 역할 alert, 단추 하나", bodyText.includes(TITLE_CHANNELS) && bodyText.includes(REASON_SERVER) && (await body.getAttribute("role")) === "alert" && (await body.locator("button").count()) === 1, bodyText);
+  check("이유 문장에 다음 행동(다시 시도해 주세요)이 없다: 단추가 말한다", !bodyText.includes("다시 시도해 주세요"), bodyText);
+  check("같은 실패의 alert 는 페이지에 하나다(낭독이 두 번 말하지 않는다)", (await page.locator('[role="alert"]').filter({ hasText: TITLE_CHANNELS }).count()) === 1);
   check("옛 「채널을 불러오지 못했습니다.」 문장이 어디에도 없다", !(await page.locator("body").innerText()).includes("채널을 불러오지 못했습니다"));
-  const sidebarBox = await box.boundingBox();
-  check("사이드바 상자가 서랍 폭 안에 들어간다(가로 넘침 없음)", sidebarBox !== null && sidebarBox.x >= 0 && sidebarBox.width <= 340, JSON.stringify(sidebarBox));
-  const retryPill = await pillVsBackdrop(page, box.getByRole("button", { name: "다시 시도" }));
-  checkSheetPill("사이드바 상자", combo, scheme, retryPill);
+  const lineBox = await line.boundingBox();
+  check("사이드바 한 줄이 서랍 폭 안에 들어간다(가로 넘침 없음)", lineBox !== null && lineBox.x >= 0 && lineBox.width <= 340, JSON.stringify(lineBox));
+  const retryPill = await pillVsBackdrop(page, line.getByRole("button", { name: "다시 시도" }));
+  checkSheetPill("사이드바 한 줄(채널 없음)", combo, scheme, retryPill);
   await shot(page, `sidebar-channels-failure-${combo}`);
   const before = state.reads.channels;
   state.channels = "ok";
-  await box.getByRole("button", { name: "다시 시도" }).click();
+  await line.getByRole("button", { name: "다시 시도" }).click();
   await page.locator('[data-testid="channel-list"]').getByText("release-2026-11").first().waitFor({ timeout: 15_000 }).catch(() => undefined);
-  check("다시 시도가 채널 목록을 다시 읽고 풀린다", state.reads.channels > before && (await page.locator('[data-testid="channel-list"] [data-testid="channels-error"]').count()) === 0);
+  check("다시 시도가 채널 목록을 다시 읽고 풀린다", state.reads.channels > before && (await page.locator('[data-testid="channel-list"] [data-testid="channels-error-line"]').count()) === 0);
   await context.close();
 }
 
@@ -435,7 +443,7 @@ async function sceneSidebarLine(browser, combo, scheme, width, height) {
   await wait(400);
   const text = await textOf(line);
   check("사이드바 한 줄: 받아 둔 목록은 그대로 두고 제목만 위에 선다(상자 없음)", text.includes(TITLE_CHANNELS) && (await page.getByTestId("channels-error").count()) === 0 && (await list.getByText("release-2026-11").count()) > 0, text);
-  check("사이드바 한 줄: 역할 alert, 다시 시도 단추 하나, 상태 코드 없음", (await line.getAttribute("role")) === "alert" && (await line.locator("button").count()) === 1 && !hasStatusCode(text));
+  check("사이드바 한 줄: 역할 status, 다시 시도 단추 하나, 상태 코드 없음", (await line.getAttribute("role")) === "status" && (await line.locator("button").count()) === 1 && !hasStatusCode(text));
   const retryPill = await pillVsBackdrop(page, line.getByRole("button", { name: "다시 시도" }));
   checkSheetPill("사이드바 한 줄", combo, scheme, retryPill);
   await shot(page, `sidebar-channels-failure-line-${combo}`);
@@ -484,8 +492,23 @@ async function sceneSettings(browser, combo, scheme, width, height) {
   await note.waitFor({ timeout: 25_000 });
   await wait(400);
   const text = await textOf(note);
-  check("설정 알림 규칙: 제목 뒤에 원인 이유가 붙은 한 줄이 선다", text.includes("알림 규칙을 불러오지 못했어요") && text.includes("문제가 생겼어요. 다시 시도해 주세요."), text);
+  check("설정 알림 규칙: 제목 뒤에 원인 이유가 붙은 한 줄이 선다", text.includes("알림 규칙을 불러오지 못했어요") && text.includes("문제가 생겼어요."), text);
   check("설정 한 줄: 역할 alert, 다시 시도 단추 하나, 상태 코드 없음", (await note.getAttribute("role")) === "alert" && (await note.locator("button").count()) === 1 && !hasStatusCode(text));
+  // #5307 L2: 같은 실패의 한 톤. 한 줄의 글자색은 잉크(상자의 제목과 같은 색)이고 빨강(--danger)이 아니다. 이유 문장은 곁의 「다시 시도」 단추의 말을 되풀이하지 않는다.
+  const tone = await page.evaluate(() => {
+    const resolve = (name) => {
+      const probe = document.createElement("span");
+      probe.style.color = `var(${name})`;
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    };
+    const el = document.querySelector('[data-testid="notification-rules-error"]');
+    return { note: el ? getComputedStyle(el).color : null, ink: resolve("--ink"), danger: resolve("--danger") };
+  });
+  check("설정 한 줄: 글자색이 잉크(상자와 같은 톤)이고 빨강이 아니다", tone.note === tone.ink && tone.note !== tone.danger, JSON.stringify(tone));
+  check("설정 한 줄: 이유 문장이 곁의 단추의 말(다시 시도해 주세요)을 되풀이하지 않는다", !text.includes("다시 시도해 주세요"), text);
   await shot(page, `settings-notification-rules-failure-${combo}`);
   const before = state.reads.rules;
   state.rules = "ok";

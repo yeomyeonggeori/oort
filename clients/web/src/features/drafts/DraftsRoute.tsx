@@ -37,6 +37,9 @@ import {
 } from "./model";
 import { useDraftsPanel } from "./useDraftsPanel";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // =============================================================================
 // 크로스채널 초안 패널 (#1901). 쓰다 만 글은 이미 draftStore에 있고, 여기는
@@ -277,10 +280,10 @@ export function DraftsRoute() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Skeleton ready={!panel.isPending} rows={4} className="p-4">
           {panel.isPending ? null : panel.isError ? (
-            <InlineBanner
-              message="채널 목록을 불러오지 못해 초안 대상을 확인할 수 없습니다."
-              actionLabel="다시 시도"
-              onAction={panel.refetch}
+            <LoadFailureNote
+              titleKey={CONNECTION_KEYS.loadDraftTargetsTitle}
+              cause={loadCauseOf(panel.error)}
+              onRetry={panel.refetch}
               testId="drafts-error"
             />
           ) : panel.items.length === 0 ? (
