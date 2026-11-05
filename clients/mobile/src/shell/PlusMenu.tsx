@@ -21,14 +21,21 @@ import {PLUS_LABEL, SHELL} from './ShellChrome';
 //   |-------------|-----------------------------------|--------------------------------------|
 //   | 가로        | 좌우 ≈20 여백(폭 ≈354)            | 좌우 20                              |
 //   | 탭바와 틈   | ≈8                                | 8                                    |
-//   | 그릇        | 검정 · 반경 ≈17 · 안 여백 ≈8      | primary(잉크) · 반경 20(card) · 8    |
+//   | 그릇        | 검정 · 반경 ≈17 · 안 여백 ≈8      | surface · 반경 20(card) · 8          |
 //   | 행          | 높이 ≈60 · 반경 ≈13 · 틈 ≈8       | 최소 54 · 반경 14(row) · 틈 8        |
-//   | 행 채움     | 그릇보다 한 단 밝은 회색          | onPrimary 8%                         |
-//   | 아이콘·글자 | ≈21 · 17 semibold · 흰색          | 22 · 17(headline) 600 · onPrimary    |
+//   | 행 채움     | 그릇보다 한 단 밝은 회색          | text(잉크) 8% — 눌림 16%             |
+//   | 아이콘·글자 | ≈21 · 17 semibold · 흰색          | 22 · 17(headline) 600 · text         |
 //
-// 색은 시안 A 의 잉크 반전(`.a-fab` 의 primary/onPrimary)이다. 라이트에서는 Buzz 처럼
-// 어두운 카드이고, 다크에서는 primary 가 밝은 잉크라 밝은 카드가 된다 — FAB 이
-// 다크에서 밝은 원이었던 것과 같은 문법이다.
+// ## 색은 고른 테마를 따른다 (#5329)
+//
+// 처음에는 Buzz 의 검은 그릇을 시안 A 의 잉크 반전(`.a-fab` 의 primary/onPrimary)으로 옮겼다. 라이트에서는
+// Buzz 처럼 어두운 카드였지만, 다크에서는 primary 가 밝은 잉크(`#F1F1F3`)라 어두운 화면 위에 흰 판이 떴다
+// (owner 2026-11-05 피드백: 다크에서 + 메뉴가 너무 밝다, 테마가 안 입혀진 듯하다, 레퍼런스를 그대로 옮긴 것 같다). primary/onPrimary 는
+// **주 행동**(FAB·보내기·주 버튼, `docs/design-system/README.md` §2.2)의 역할이지 떠 있는 판의 역할이 아니다 —
+// 떠 있는 판은 `surface` 다. 그래서 그릇은 `surface`, 행 타일은 `text`(잉크) 8%(탭바 선택 캡슐 `ShellChrome.capsule` 과
+// 같은 8%), 글자·아이콘은 `text`, 그림자는 `elevationFloat` 다. 라이트에서는 밝은 카드, 다크에서는 어두운 카드이고
+// Buzz 에서 잰 치수(폭·반경·행 간격)는 그대로다. 옆의 + 단추(FAB)는 주 행동이라 계속 primary 다 —
+// 다크에서 밝은 원이 어두운 메뉴 옆에 서는 것은 의도다.
 //
 // 행 높이를 60 에서 54 로 줄인 것은 행이 Buzz 의 셋보다 많기 때문이다(최대 넷: 새 DM · 새 채널 · AI · 작업).
 // 54 는 터치 44 를 넉넉히 넘는다.
@@ -133,7 +140,7 @@ export function PlusMenu({
               style={{
                 width: MENU_ICON_SIZE,
                 height: MENU_ICON_SIZE,
-                tintColor: palette.onPrimary,
+                tintColor: palette.text,
               }}
               testID={`plus-menu-${item.key}-icon`}
             />
@@ -160,7 +167,8 @@ const buildStyles = (color: Palette) =>
       padding: PLUS_MENU.padding,
       gap: PLUS_MENU.rowGap,
       borderRadius: ds2Radius.card,
-      backgroundColor: color.primary,
+      // 떠 있는 판은 `surface` 다(위 「색은 고른 테마를 따른다」) — 주 행동 색(`primary`)이 아니다.
+      backgroundColor: color.surface,
       boxShadow: color.elevationFloat,
     },
     row: {
@@ -171,15 +179,15 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: PLUS_MENU.rowPadding,
       paddingVertical: 8,
       borderRadius: ds2Radius.row,
-      // onPrimary 8%(0x14) — 그릇보다 한 단 떨어진 행 타일.
-      backgroundColor: `${color.onPrimary}14`,
+      // text(잉크) 8%(0x14) — 그릇보다 한 단 떨어진 행 타일. 라이트에서는 살짝 어둡게, 다크에서는 살짝 밝게.
+      backgroundColor: `${color.text}14`,
     },
     // 눌림은 한 단 더(16%, 0x29).
-    rowPressed: {backgroundColor: `${color.onPrimary}29`},
+    rowPressed: {backgroundColor: `${color.text}29`},
     label: {
       flex: 1,
       fontSize: font.heading,
       fontWeight: '600',
-      color: color.onPrimary,
+      color: color.text,
     },
   });
