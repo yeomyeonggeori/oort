@@ -78,6 +78,7 @@ pub use judgment::{
 pub use refine::{
     decide, delay_applies, has_delayable_targets, is_delayable_reason, refine_targets,
     DelayVerdict, MemberFacts, Refined, ACTIVITY_WINDOW_SECS, PHONE_DELAY_DEFAULT_SECS,
+    PHONE_DELAY_MAX_SECS,
 };
 pub use system::{
     system_dispatch_target, system_targets, test_notification_collapse_id,

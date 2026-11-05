@@ -6470,6 +6470,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            The beat could not get the caller's row within 3 seconds (a burst of beats
+            from one member queues on it). Nothing was recorded; send again at the next
+            beat, or after the `Retry-After` seconds. Not a sign that the route is
+            missing: unlike 404 and 405, it never makes a client stop sending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/members/me/app-runtimes:
     get:
