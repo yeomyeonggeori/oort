@@ -414,14 +414,14 @@ describe('#5383 — 범위 밖 결과는 그 자리까지 읽어서 착지한다
 
 describe('#5383 — 많이 합친 점프는 목록이 앉을 시간을 준다', () => {
   // 시뮬레이터 실측(`jumpSeek.ts` 머리말): 1,800줄을 합친 같은 커밋에서 점프를 걸면 목적지에서 1,500줄 넘게 떨어진 곳에서 멈췄다.
-  const FAR_HEAD = 1100; // 목적지(42)는 1,058줄 위 → 6쪽, 합친 줄 > 300
+  const FAR_HEAD = 500; // 목적지(42)는 458줄 위 → 3쪽(상한), 합친 줄 > 300
 
   it(`${SEEK_SETTLE_FREE_ROWS}줄을 넘게 합치면 합친 직후가 아니라 기다린 뒤에 다시 쏘고, 그동안 읽는 줄이 선다`, async () => {
     const server = installServer({headSeq: FAR_HEAD});
     await openFromSearch();
 
     await waitFor(() => expect(holdsHit()).toBe(true));
-    expect(server.beforeCalls).toHaveLength(6);
+    expect(server.beforeCalls).toHaveLength(3);
     expect(seekSettleMs(FAR_HEAD - HIT_SEQ)).toBeGreaterThan(0);
     // 합쳐졌지만 점프는 아직이다 - 토큰이 그대로이고 읽는 줄(과 취소)이 서 있다.
     const tokenAtMerge = jumpToken();
@@ -544,7 +544,7 @@ describe('#5383 — 실패하면 다시 시도할 수 있다', () => {
 describe('#5383 — 상한: 넘으면 지금의 고지로 물러난다', () => {
   it(`쪽 상한(${SEEK_MAX_PAGES}쪽)에 닿으면 읽기를 멈추고 아무것도 합치지 않은 채 고지가 선다`, async () => {
     const server = installServer();
-    // 서버가 5줄씩만 준다: 목적지는 58줄 위라 12쪽이 필요하고, 상한은 10쪽이다.
+    // 서버가 5줄씩만 준다: 목적지는 58줄 위라 12쪽이 필요하고, 상한은 3쪽이다.
     server.pageRows = 5;
     await openFromSearch();
 
