@@ -250,7 +250,7 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 
 ### 바뀌지 않는 것 · 이번에 따르지 않는 것
 
-- **정지 줄**(`momo-notifier`의 `run_stall_sweep`): **본류 그대로**예요. `momo_notifier`는 `thread`·`thread_follow` 쓰기 권한이 없다(`infra/rust/sql/bootstrap_runtime_roles.sql`, migration 164의 설명대로 notifier의 쓰기 줄은 롤업을 건너뛰는 쓰기였어요). 롤업을 지키는 쓰기로 바꾸면 개발용 풀(전권)에서는 통과하고 운영 역할에서는 `permission denied for table thread`로 스윕 트랜잭션이 되돌려져요. 권한 부여와 운영 역할 시험(`scripts/verify_notifier_prod_roles.sh`)은 보안 경계 변경이라 이 증보가 정하지 않고 planner 결정으로 남긴다. 승인 만료는 R-b 이후 카드를 제자리에서 고치므로 줄이 없다.
+- **정지 줄**(`momo-notifier`의 `run_stall_sweep`): **이번에는 본류 그대로**다. 정지 줄은 `system`이라 세지 않는 줄이므로 롤업이 필요 없고, `send_run_line_in_tx`의 세지 않는 길(`send_message_in_tx` + `root_id`)로 쓰면 `thread`·`thread_follow` 권한(notifier에는 없다 — `infra/rust/sql/bootstrap_runtime_roles.sql`, migration 164)도 필요 없다. 남은 것은 그 길이 **운영 역할**(`momo_notifier`, 표 단위 권한)에서 통과하는지 — 자리를 읽는 SELECT(`message`·`channel`·`membership`)와 `root_id`가 붙은 `message` INSERT — 이고, 개발용 풀(전권)은 이 틈을 못 본다. 그래서 `bins/momo-notifier/tests/prod_role_conformance_pg.rs`(새 DB를 운영 방식으로 만든다)의 정지 스윕 시험으로 확인한 뒤 적용하는 후속 한 칸으로 남긴다(권한 부여는 필요 없어 보이지만 시험으로 확정해요). 승인 만료는 R-b 이후 카드를 제자리에서 고치므로 줄이 없다.
 - **사람이 멈춘 줄**(`agent_runs.rs`의 취소 줄)은 사람 명의의 줄이라 이번 범위 밖이다(본류).
 - **멘션 때 서는 카드·안내 줄**(`agent_mentions.rs`)은 run이 서기 전의 줄이라 지금처럼 「말한 자리」를 따른다(최상위는 본류). 후속에서 같은 규칙으로 옮길 수 있다.
 - **먼저 제안**(소유자 1:1 DM의 본류), 에이전트가 고르는 자리(`oort_message_post`, 외부 `oort_card_suggest`), 트리거 없는 run은 그대로다.
