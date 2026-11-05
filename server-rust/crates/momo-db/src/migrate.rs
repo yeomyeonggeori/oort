@@ -786,12 +786,18 @@ mod tests {
     /// `ws_isolation`, a composite FK into `attachment (workspace_id, id)` with CASCADE, and the
     /// minimum grants (`attachment-media-lockdown`, the same text in the migration and both role
     /// bootstraps; the team AI's read role may read every column but the poster bytes).
+    ///
+    /// 174 is #4497's 「데스크탑이 쓰이는 중이면 폰 푸시 미루기」 (ADR-0206 D4, DB 계약 M-e): `member_activity`,
+    /// one `(workspace_id, member_id, seen_at)` row per member — the last time a web or desktop client of
+    /// theirs was in use. Tenant ENABLE + FORCE + `ws_isolation`, a composite FK into `member (workspace_id,
+    /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
+    /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
     #[test]
-    fn discovers_contiguous_migrations_001_to_173() {
+    fn discovers_contiguous_migrations_001_to_174() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=173).collect();
+        let expected: Vec<i64> = (1..=174).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -799,7 +805,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=173 under {}",
+            "expected contiguous 001..=174 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -807,7 +813,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("173_attachment_media"));
+            .starts_with("174_member_activity"));
     }
 
     #[test]
