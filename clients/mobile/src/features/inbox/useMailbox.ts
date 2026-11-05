@@ -56,8 +56,17 @@ import {
 //
 // 어느 쪽인지는 세션 동안 **한 번만** 묻는다. 404만 「없는 서버」고 5xx·네트워크 오류는
 // 장애로 보여 준다. 폰은 개인 채널 구독이 아직 없다(`subscribeInbox` 미연결): 화면이
-// 보이게 될 때와 당겨서 새로고침할 때 다시 읽는다. 대기 중 승인은 어느 쪽에서나 따로
-// 합친다(서버 투영에 저장되지 않는 상태 사실, D2).
+// 보이게 될 때·앱이 앞으로 돌아올 때(`InboxScreen`)와 당겨서 새로고침할 때 다시 읽는다.
+// 대기 중 승인은 어느 쪽에서나 따로 합친다(서버 투영에 저장되지 않는 상태 사실, D2).
+//
+// ## 점은 두 사실을 합쳐 정한다 (#5331)
+//
+// 항목의 안 읽음은 목록이 말하는 `readAt`과 **그 채널의 읽음 위치**를 함께 본다(`serverEntry`의
+// `lastReadSeq`). 서버는 위치가 전진하는 트랜잭션에서 그 채널의 `seq <= 위치` 항목을 읽음으로 채우지만(D3)
+// 폰은 그 일을 따로 듣지 못한다. 목록은 그 전의 스냅샷으로 남는다 — 항목을 눌러 대화를 열면 그 항목의
+// 읽음 PUT 직후에 목록을 다시 읽는데 그때 위치는 아직 안 갔고, 홈에서 연 대화·알림 탭에서 읽은 것은 목록이
+// 다시 읽히지도 않는다. 읽음 위치(read-state 투영)는 이 폰이 위치를 보낼 때마다 바로, 그 밖에는 30초마다
+// 다시 읽힌다. 다른 기기가 항목 하나만 읽음으로 누른 것(채널 위치는 안 움직인다)만 목록을 다시 읽어야 온다.
 //
 // 폰은 「목록 + 이동」이 범위다: 줄을 누르면 그 대화가 열리고 대화를 여는 것이 채널
 // 읽음 광고(`channel_open`)다. 서버 항목은 누를 때 그 항목의 읽음도 함께 보낸다.
@@ -126,6 +135,7 @@ export function useMailbox(
   const absent = surface.data === 'absent';
   const serverOn = enabled && !absent && (surface.data === 'present' || surface.isError);
   const nowMs = useNow();
+  const readStates = useReadStates(workspaceId);
 
   const composed = useComposedMailbox(enabled && absent, needsAction, tasksProvided);
 
@@ -173,13 +183,15 @@ export function useMailbox(
                 : resolved,
             actor: context.actorFor(item.actorMemberId),
             nowMs,
+            lastReadSeq: readStates.byChannel.get(item.channel.id.toLowerCase())
+              ?.lastReadSeq,
           }),
         );
       }
     }
     // 서버가 준 순서가 정본이다. 처리할 일만 맨 위에 둔다.
     return [...orderMailbox(tasks), ...server];
-  }, [needsAction.items, query.data, context, nowMs]);
+  }, [needsAction.items, query.data, context, nowMs, readStates.byChannel]);
 
   const refetch = useCallback((): Promise<unknown> => {
     return Promise.all([
@@ -208,20 +220,34 @@ export function useMailbox(
 }
 
 /**
+ * 서버 목록을 서버 답으로 다시 맞춘다(탭이 보이게 될 때·앱이 앞으로 돌아올 때, 항목 읽음 PUT 뒤). 날아가는
+ * 조회가 있으면 끊고 새로 보낸다. 다른 기기가 **항목 하나만** 읽음으로 누른 것(채널 위치는 안 움직인다)은
+ * 이 길로만 폰에 온다. 서버 투영이 아닌 경로(구 서버 조합)는 쿼리가 꺼져 있어 다시 읽을 것이 없다.
+ */
+export function useInvalidateMailbox() {
+  const {workspaceId} = useSession();
+  const client = useQueryClient();
+  return useCallback(
+    () => client.invalidateQueries({queryKey: ['inbox', workspaceId]}),
+    [workspaceId, client],
+  );
+}
+
+/**
  * 서버 항목을 눌렀을 때 그 항목을 읽음으로 보낸다(채널 읽음 위치는 안 움직인다).
  * 실패해도 대화는 열린다: 읽음은 다음 조회가 바로잡는다.
  */
 export function useMarkInboxItemRead() {
   const {workspaceId} = useSession();
-  const client = useQueryClient();
+  const invalidateMailbox = useInvalidateMailbox();
   return useCallback(
     (entry: MailboxEntry) => {
       if (entry.itemId === undefined || !entry.unread) return;
       void markInboxItemRead(workspaceId, entry.itemId)
-        .then(() => client.invalidateQueries({queryKey: ['inbox', workspaceId]}))
+        .then(() => invalidateMailbox())
         .catch(() => undefined);
     },
-    [workspaceId, client],
+    [workspaceId, invalidateMailbox],
   );
 }
 

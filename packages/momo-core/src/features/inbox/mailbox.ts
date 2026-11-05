@@ -354,8 +354,29 @@ export function mailboxKindOfWire(kind: InboxWireKind): MailboxKind {
 }
 
 /**
- * 서버 투영 한 건. 안 읽음은 `readAt`이 비었는지로만 판정한다(손으로 seq를 비교하지
- * 않는다). 읽은 항목도 그대로 항목이다 — 목록에서 사라지지 않는다.
+ * 서버 항목이 아직 안 읽음인가 (#5331). 항목의 `readAt`이 비었고 **그 채널의 읽음 위치가 항목을 지나지
+ * 않았을 때**만이다.
+ *
+ * 서버는 채널 읽음 위치가 전진하는 트랜잭션에서 그 채널의 `seq <= 위치` 안 읽은 항목을 읽음으로 채운다
+ * (ADR-0199 D3, 위치 → 항목 한 방향). 그 일은 서버 안에서 끝나서 목록 응답은 그 전의 스냅샷으로 남을 수
+ * 있다 — 항목을 눌러 대화를 연 직후의 재조회가 그렇고(그때 위치는 아직 안 갔다), 홈에서 연 대화·알림 탭·다른
+ * 기기에서 읽은 것은 목록이 다시 읽히지도 않는다. 클라이언트는 읽음 위치(read-state 투영)를 이미 따로 들고 있고
+ * 그것은 위치가 움직일 때마다 다시 읽힌다. 그래서 두 사실을 합친다: 목록이 읽음이라 하거나 위치가 항목을
+ * 지났으면 안 읽음이 아니다. 점을 켜는 방향은 없다(항목 → 위치 방향이 없는 것과 같은 규칙).
+ *
+ * `lastReadSeq`를 모르면(투영이 아직 안 왔다) 항목의 `readAt`만 본다.
+ */
+export function isServerItemUnread(
+  item: ServerInboxItem,
+  lastReadSeq: number | undefined
+): boolean {
+  if (item.readAtMs !== null) return false;
+  return lastReadSeq === undefined || item.message.seq > lastReadSeq;
+}
+
+/**
+ * 서버 투영 한 건. 안 읽음은 `isServerItemUnread` 한 곳이 정한다(항목의 `readAt`, 그리고 채널 읽음
+ * 위치를 아는 호출자는 `lastReadSeq`로). 읽은 항목도 그대로 항목이다 — 목록에서 사라지지 않는다.
  */
 export function serverEntry(
   item: ServerInboxItem,
@@ -363,6 +384,8 @@ export function serverEntry(
     channelLabel: string;
     actor: ActorNames;
     nowMs: number;
+    /** 이 항목의 채널에 대한 서버 읽음 위치(`read_state.last_read_seq`). 모르면 생략. */
+    lastReadSeq?: number;
   }
 ): MailboxEntry {
   const kind = SERVER_KIND[item.kind];
@@ -381,7 +404,7 @@ export function serverEntry(
     preview: previewLine(item.message.preview, item.message.deleted),
     atMs: item.createdAtMs,
     timeLabel: relativeLabel(item.createdAtMs, input.nowMs),
-    unread: item.readAtMs === null,
+    unread: isServerItemUnread(item, input.lastReadSeq),
     unreadCount: 0,
     seq: item.message.seq,
     messageId: item.message.id,
