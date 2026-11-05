@@ -970,6 +970,7 @@ function TimelineInner({
   anchorSeq,
   anchorRef,
   jumpTarget,
+  searchHighlight,
   onJumpMissed,
   onJumpLanded,
   onReaderTookList,
@@ -1152,6 +1153,11 @@ function TimelineInner({
    * 사건마다 다른 값이 필요하다.
    */
   jumpTarget?: {messageId: string; seq: number | null; token: number};
+  /**
+   * 대화 안 검색에서 **고른 결과**의 메시지와 찾은 말(#5384). 그 행의 말풍선 본문에서 찾은 글자가 칠해진다(`MessageRow.searchMatch`). 착지 틴트(`landed`, 1.5초)와 달리 검색 막대가 서
+   * 있는 동안(호출부가 값을 주는 동안) 남는다. 호출부는 값이 바뀔 때만 새 객체를 건넨다 — 이 값은 `renderItem` 의 의존성이라 매 렌더 새 객체면 붙어 있는 행이 전부 다시 그려진다.
+   */
+  searchHighlight?: {messageId: string; query: string} | null;
   /**
    * 그 행이 이 화면에 없다. 「더 위쪽이라 아직 안 불러왔다」와 「모르겠다」를
    * 가른 채로 돌려준다 — 인용은 원본의 `seq` 를 들고 오므로 그 구별이 추측이
@@ -3278,6 +3284,12 @@ function TimelineInner({
           pausedRepeat={item.pausedRepeat}
           deletedRepeat={item.deletedRepeat}
           landed={landedId !== null && uuidEq(item.message.id, landedId)}
+          // 대화 안 검색에서 고른 결과의 행에만 찾은 말을 건넨다(#5384) — 한 번에 한 행이라 선택을 옮길 때 다시 그려지는 것은 앞 행과 새 행 둘뿐이다.
+          searchMatch={
+            searchHighlight != null && uuidEq(item.message.id, searchHighlight.messageId)
+              ? searchHighlight.query
+              : undefined
+          }
           nowMs={nowMs}
           onResend={onResend}
           actions={actions}
@@ -3348,6 +3360,7 @@ function TimelineInner({
       anchorSeq,
       anchorRef,
       landedId,
+      searchHighlight,
       threads,
       markReplies,
       showRollup,
@@ -3652,8 +3665,8 @@ function TimelineInner({
    * 그러면 이 목록은 「아무것도 안 바뀌었다」를 말할 방법을 잃는다.
    */
   const extraData = useMemo(
-    () => ({anchorSeq, landedId}),
-    [anchorSeq, landedId],
+    () => ({anchorSeq, landedId, searchHighlight}),
+    [anchorSeq, landedId, searchHighlight],
   );
 
   // ---- 목록의 머리와 꼬리는 **엘리먼트**이므로 동일성이 값이다 ----------------

@@ -514,10 +514,13 @@ export const messageKeys = [
   "mobile.convSearch.recentClear",
   "mobile.convSearch.recentClearLabel",
   "mobile.convSearch.recentRow",
+  "mobile.convSearch.recentRowIn",
   "mobile.convSearch.recentTitle",
   "mobile.convSearch.resultLabel",
   "mobile.convSearch.resultsChannel",
   "mobile.convSearch.resultsDm",
+  "mobile.convSearch.searchAll",
+  "mobile.convSearch.searchAllLabel",
   "mobile.convSearch.searching",
   "mobile.convSearch.tooShort",
   "mobile.ios.cameraUsage",
@@ -783,6 +786,7 @@ export const messageKeys = [
   "search.recent.empty",
   "search.recent.openLabel",
   "search.recent.searches",
+  "search.recent.searchInLabel",
   "search.recent.searchLabel",
   "search.row.agentLabel",
   "search.row.agentSubtitle",
@@ -1709,6 +1713,10 @@ export const argumentSpecs = {
   "mobile.convSearch.recentRow": {
     "query": "string"
   },
+  "mobile.convSearch.recentRowIn": {
+    "query": "string",
+    "where": "string"
+  },
   "mobile.convSearch.recentTitle": {},
   "mobile.convSearch.resultLabel": {
     "author": "string",
@@ -1717,6 +1725,10 @@ export const argumentSpecs = {
   },
   "mobile.convSearch.resultsChannel": {},
   "mobile.convSearch.resultsDm": {},
+  "mobile.convSearch.searchAll": {},
+  "mobile.convSearch.searchAllLabel": {
+    "query": "string"
+  },
   "mobile.convSearch.searching": {},
   "mobile.convSearch.tooShort": {},
   "mobile.ios.cameraUsage": {},
@@ -2009,6 +2021,10 @@ export const argumentSpecs = {
     "name": "string"
   },
   "search.recent.searches": {},
+  "search.recent.searchInLabel": {
+    "query": "string",
+    "where": "string"
+  },
   "search.recent.searchLabel": {
     "query": "string"
   },
@@ -3011,10 +3027,13 @@ export interface MessageArgs {
   "mobile.convSearch.recentClear": Record<string, never>;
   "mobile.convSearch.recentClearLabel": Record<string, never>;
   "mobile.convSearch.recentRow": { query: string };
+  "mobile.convSearch.recentRowIn": { query: string; where: string };
   "mobile.convSearch.recentTitle": Record<string, never>;
   "mobile.convSearch.resultLabel": { author: string; snippet: string; when: string };
   "mobile.convSearch.resultsChannel": Record<string, never>;
   "mobile.convSearch.resultsDm": Record<string, never>;
+  "mobile.convSearch.searchAll": Record<string, never>;
+  "mobile.convSearch.searchAllLabel": { query: string };
   "mobile.convSearch.searching": Record<string, never>;
   "mobile.convSearch.tooShort": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
@@ -3280,6 +3299,7 @@ export interface MessageArgs {
   "search.recent.empty": Record<string, never>;
   "search.recent.openLabel": { name: string };
   "search.recent.searches": Record<string, never>;
+  "search.recent.searchInLabel": { query: string; where: string };
   "search.recent.searchLabel": { query: string };
   "search.row.agentLabel": { handle: string; name: string };
   "search.row.agentSubtitle": { handle: string };

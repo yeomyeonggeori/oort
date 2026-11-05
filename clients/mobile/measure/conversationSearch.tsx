@@ -94,6 +94,8 @@ const LINES: {who: string; text: string}[] = [
 ];
 
 const noop = () => {};
+/** 최근 검색 한 줄이 들고 있는 다른 대화(범위 칩이 붙는 줄). */
+const OTHER_CHANNEL = 'measure-other-channel';
 
 function fakeSearch(over: Partial<ConversationSearch>): ConversationSearch {
   return {
@@ -145,7 +147,10 @@ function Conversation({landedRow}: {landedRow?: number}): React.JSX.Element {
 
 export function ConversationSearchSurface({which}: {which: string}): React.JSX.Element {
   // `live`: 진짜 키보드 틀·목록·컴포저에 검색 부품을 얹은 손으로 누르는 장면(`conversationSearchLive.tsx`).
-  if (which === 'live') return <ConversationSearchLiveSurface />;
+  // `live-<장면>`(idle · results · landed · landed-other)은 같은 표면을 손 없이 그 장면까지 몰고 간다(캡처용, #5384).
+  if (which === 'live' || which.startsWith('live-')) {
+    return <ConversationSearchLiveSurface auto={which.slice('live'.length).replace(/^-/, '')} />;
+  }
   return <ConversationSearchStatic which={which} />;
 }
 
@@ -165,7 +170,10 @@ function ConversationSearchStatic({which}: {which: string}): React.JSX.Element {
   const query = which === 'idle' || entry ? '' : '배포';
   const search =
     which === 'idle'
-      ? fakeSearch({recent: ['배포 일정', '루나', '롤백 계획']})
+      ? fakeSearch({
+          // 홈 검색과 한 목록(#5384): 다른 대화 안에서 찾은 줄은 범위 칩이 붙는다.
+          recent: [{query: '배포 일정'}, {query: '루나', channelId: OTHER_CHANNEL}, {query: '롤백 계획'}],
+        })
       : which === 'results'
         ? fakeSearch({query, phase: 'results', settledQuery: query, hits: HITS, hasMore: true})
         : fakeSearch({
@@ -193,6 +201,8 @@ function ConversationSearchStatic({which}: {which: string}): React.JSX.Element {
           isDm={false}
           topInset={headerInset}
           nowMs={NOW}
+          onSearchAll={noop}
+          recentScope={saved => (saved.channelId === OTHER_CHANNEL ? {title: '루나-프로젝트', isPrivate: false} : null)}
         />
       ) : null}
       <View style={styles.headerOverlay} pointerEvents="box-none">

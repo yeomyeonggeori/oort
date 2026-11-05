@@ -167,3 +167,47 @@ export function quoteHeadFor(
   const ink = inks.find(candidate => contrast(candidate, tone.bg) >= BUBBLE_MIN_CONTRAST) ?? tone.fg;
   return {fill: tone.bg, line: line(tone.bg), label: ink, excerpt: ink};
 }
+
+// =============================================================================
+// 찾은 글자 강조의 색 (#5384 — 대화 안 검색으로 착지한 메시지의 말풍선 **본문 안**)
+//
+// 결과 목록의 강조(`accentSurfaceStrong` 채움 + 굵게)와 같은 말이되, 말풍선이 어떤 색이든 읽혀야 한다: 남 말풍선(표면)과 평면 행 위에서는 같은 신호색 채움이 그대로 서고,
+// 내 말풍선(신호색 채움)에서는 같은 채움이 바탕에 묻히므로 **말풍선 채움을 글자색과 반대로 한 단 옮긴 칩**이 선다 — 밝은 글자(신호색 위 흰 글자)면 어둡게, 어두운 글자면 밝게. 반대로 옮기는
+// 이유는 글자 대비가 오히려 **오르기** 때문이다(글자 쪽으로 옮기면 라이트 테마의 흰 글자가 4.5:1 아래로 내려간다 — 실측). 검정·흰 리터럴은 쓰지 않는다(OKLCH 밝기만 옮긴다).
+//
+// 칩이 말풍선과 갈려 보이는 가장 작은 단계를 쓴다. 어느 후보도 눈에 보이면서 4.5:1 을 지키지 못하면(깨진 개인 색) 채움 없이 굵게만 남는다 — 대비가 먼저다
+// (`failedBubbleFor`·`quoteHeadFor` 와 같은 규율). 글자색은 말풍선 본래 잉크를 그대로 이어받는다(중첩 글자가 상속한다).
+// =============================================================================
+
+export interface SearchMatchColors {
+  /** 칩의 채움. 칩을 세울 수 없으면 `null`(굵게만 남는다). */
+  fill: string | null;
+}
+
+/** 칩이 말풍선과 갈려 보이는 가장 작은 대비(`QUOTE_HEAD_VISIBLE_STEP` 1.08 보다 한 걸음 더 — 강조는 띠보다 눈에 띄어야 한다). */
+const SEARCH_MATCH_VISIBLE_STEP = 1.12;
+/** 칩을 말풍선에서 글자 반대쪽으로 옮기는 밝기의 비율. 작은 쪽부터 시도해 보이는 첫 단계에서 멈춘다. */
+const SEARCH_MATCH_SHIFTS = [0.1, 0.14, 0.18, 0.22, 0.26, 0.3] as const;
+
+/** 색의 OKLCH 밝기를 `shift`(음수면 어둡게, 양수면 밝게) 비율만큼 옮긴다 — 채도와 색조는 그대로다. */
+function shifted(hex: string, shift: number): string {
+  const {L, C, h} = toOklch(hex);
+  return fromOklch({L: shift < 0 ? L * (1 + shift) : L + (1 - L) * shift, C, h});
+}
+
+export function searchMatchFor(
+  p: Pick<Palette, 'accentSurfaceStrong'>,
+  tone: {bg: string; fg: string},
+  mine: boolean,
+): SearchMatchColors {
+  const lightInk = toOklch(tone.fg).L > toOklch(tone.bg).L;
+  // 남 말풍선·평면 행: 결과 목록과 같은 신호색 채움이 먼저다(내 말풍선은 신호색 위라 건너뛴다).
+  const candidates = mine ? [] : [p.accentSurfaceStrong];
+  for (const shift of SEARCH_MATCH_SHIFTS) candidates.push(shifted(tone.bg, lightInk ? -shift : shift));
+  const fill = candidates.find(
+    candidate =>
+      contrast(candidate, tone.bg) >= SEARCH_MATCH_VISIBLE_STEP &&
+      contrast(tone.fg, candidate) >= BUBBLE_MIN_CONTRAST,
+  );
+  return {fill: fill ?? null};
+}

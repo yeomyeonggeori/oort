@@ -452,7 +452,39 @@ export function RecentConversations({
   );
 }
 
-/** 최근 검색: 눌러서 다시 찾고, 「모두 지우기」로 비운다. */
+/** 범위 칩 — 한 대화 안에서 찾은 줄에 붙는 작은 알약(누를 수 없다, 줄 전체가 눌린다). 홈 검색과 대화 안 검색의 「최근 검색」이 함께 쓴다(#5384). */
+export function ScopeTag({
+  title,
+  isPrivate,
+}: {
+  title: string;
+  isPrivate: boolean | null;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.scopeTag} testID="search-recent-scope">
+      {isPrivate === null ? null : (
+        <Image
+          source={isPrivate ? HOME_ICONS.lock : HOME_ICONS.hash}
+          style={styles.scopeTagGlyph}
+          accessibilityElementsHidden
+        />
+      )}
+      <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.scopeTagLabel} numberOfLines={1}>
+        {title}
+      </Text>
+    </View>
+  );
+}
+
+/** 최근 검색 한 줄 — 말과(있으면) 그 말을 찾은 대화. `channelId` 는 저장된 범위이고 `scope` 는 그것을 내가 든 목록에서 푼 이름이다(못 풀면 `null` — 범위 없는 말로 선다). */
+export interface RecentSearchRow {
+  query: string;
+  channelId: string | null;
+  scope: {title: string; isPrivate: boolean | null} | null;
+}
+
+/** 최근 검색: 눌러서 다시 찾고(범위가 있는 줄은 그 범위로), 「모두 지우기」로 비운다. */
 export function RecentSearches({
   title,
   clearLabel,
@@ -465,9 +497,9 @@ export function RecentSearches({
   title: string;
   clearLabel: string;
   clearAccessibilityLabel: string;
-  items: readonly string[];
-  rowLabel: (query: string) => string;
-  onPick: (query: string) => void;
+  items: readonly RecentSearchRow[];
+  rowLabel: (row: RecentSearchRow) => string;
+  onPick: (row: RecentSearchRow) => void;
   onClear: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -489,7 +521,7 @@ export function RecentSearches({
       </View>
       {items.map(item => (
         <Pressable
-          key={item}
+          key={`${item.query}\u0000${item.channelId ?? ''}`}
           accessibilityRole="button"
           accessibilityLabel={rowLabel(item)}
           onPress={() => onPick(item)}
@@ -498,9 +530,12 @@ export function RecentSearches({
           <View style={styles.rowLead}>
             <Image source={SEARCH_ICONS.clock} style={styles.clock} accessibilityElementsHidden />
           </View>
-          <Text style={styles.rowTitleFill} numberOfLines={1}>
-            {item}
-          </Text>
+          <View style={styles.recentBody}>
+            <Text style={styles.recentTerm} numberOfLines={1}>
+              {item.query}
+            </Text>
+            {item.scope === null ? null : <ScopeTag title={item.scope.title} isPrivate={item.scope.isPrivate} />}
+          </View>
           <Image source={SHEET_ICONS.chevron} style={styles.recentChevron} accessibilityElementsHidden />
         </Pressable>
       ))}
@@ -612,6 +647,26 @@ const buildStyles = (color: Palette) =>
     rowText: {flex: 1, gap: space.xs},
     rowTitle: {flexShrink: 1, fontSize: font.body, color: color.text},
     rowTitleFill: {flex: 1, fontSize: font.body, color: color.text},
+    // 최근 검색 줄: 말은 줄어들 수 있고(말줄임), 범위 칩은 이름이 길면 칩 안에서 줄어든다.
+    recentBody: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm},
+    recentTerm: {flexShrink: 1, fontSize: font.body, color: color.text},
+    scopeTag: {
+      flexShrink: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.xs,
+      maxWidth: '55%',
+      paddingHorizontal: space.sm,
+      paddingVertical: space.xs,
+      borderRadius: radius.pill,
+      backgroundColor: color.accentSurface,
+    },
+    scopeTagGlyph: {
+      width: HOME_ICON_SIZE.hash - space.sm,
+      height: HOME_ICON_SIZE.hash - space.sm,
+      tintColor: color.accentText,
+    },
+    scopeTagLabel: {flexShrink: 1, fontSize: font.meta, fontWeight: '600', color: color.accentText},
     rowDetail: {fontSize: font.meta, color: color.textMuted},
     match: {color: color.text, fontWeight: '700', backgroundColor: color.accentSurfaceStrong},
     messageRow: {

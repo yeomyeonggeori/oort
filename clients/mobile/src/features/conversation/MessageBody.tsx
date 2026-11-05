@@ -34,7 +34,8 @@ import {headroomLineHeight} from '../../design/lineHeadroom';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
-import {bubbleFor, failedBubbleFor, otherBubbleFill, quoteHeadFor} from './bubble';
+import {MatchScope, type SearchMatchSpec} from '../search/MatchedText';
+import {bubbleFor, failedBubbleFor, otherBubbleFill, quoteHeadFor, searchMatchFor} from './bubble';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {QuoteBlock} from './Quote';
 
@@ -704,6 +705,7 @@ export function MessageBody({
   bubble = null,
   mentionTap,
   quoteHead,
+  searchMatch,
 }: {
   body: string;
   /**
@@ -736,6 +738,11 @@ export function MessageBody({
    * 첫 블록 · 이모티콘만 · 줄 보기 배치)에서는 머리가 자기 말풍선으로 본문 **위**에 선다(`QuoteHeadBubble`) — 인용을 그리지 않는 길은 없다.
    */
   quoteHead?: QuoteHeadSpec | undefined;
+  /**
+   * 대화 안 검색으로 착지한 메시지의 **찾은 말**(#5384). 주면 본문의 글자 조각 중 이 말과 같은 곳이 말풍선 안에서 칠해진다(`MatchedText`). 인용 머리·코드 블록·인라인 코드·멘션은
+   * 본문 글자 잎을 거치지 않아 칠해지지 않는다. 안 주면(기본) 행은 평소와 같다.
+   */
+  searchMatch?: string | undefined;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const expressions = useExpressionItems();
@@ -753,6 +760,12 @@ export function MessageBody({
     () => (tone !== null && bubble !== null ? {fg: tone.fg, mine} : null),
     [tone, bubble, mine],
   );
+  // 찾은 글자 강조(#5384): 칩 색은 말풍선에서 유도한다(내 말풍선이 신호색이어도 읽힌다). 말풍선이 없는 평면 행은 바탕 위 본문 글자색이 기준이다.
+  const matchSpec = useMemo<SearchMatchSpec | null>(() => {
+    if (searchMatch === undefined || searchMatch.trim() === '') return null;
+    const {fill} = searchMatchFor(palette, tone ?? {bg: palette.bg, fg: palette.text}, mine);
+    return {query: searchMatch, style: fill === null ? styles.match : [styles.match, {backgroundColor: fill}]};
+  }, [searchMatch, palette, tone, mine, styles.match]);
   // 인용 머리 (#5381). 말풍선 안 윗칸(`inBubbleHead`)과 단독 말풍선(`standaloneHead`)은 같은 재료에서 나온다. 단독은 줄 보기 배치·첫 블록이 코드인 글·
   // 이모티콘에서 말풍선 대신 선다 — 그 자리에서 머리를 빼면 인용이 말없이 사라진다.
   const headTone = useMemo(
@@ -848,6 +861,7 @@ export function MessageBody({
 
   if (blocks === null || blocks.length === 0) {
     return (
+      <MatchScope spec={matchSpec}>
       <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <BubbleInk.Provider value={ink}>
         {wrapProse(
@@ -863,11 +877,13 @@ export function MessageBody({
         )}
       </BubbleInk.Provider>
       </ExpressionTextContext.Provider>
+      </MatchScope>
     );
   }
 
   if (tone === null) {
     return (
+      <MatchScope spec={matchSpec}>
       <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <View style={styles.markdown} testID="message-markdown">
         {standaloneHead}
@@ -884,6 +900,7 @@ export function MessageBody({
         ))}
       </View>
       </ExpressionTextContext.Provider>
+      </MatchScope>
     );
   }
 
@@ -928,6 +945,7 @@ export function MessageBody({
   flush();
 
   return (
+    <MatchScope spec={matchSpec}>
     <ExpressionTextContext.Provider value={expressionBody.replacements}>
     <BubbleInk.Provider value={ink}>
       <View style={styles.markdown} testID="message-markdown">
@@ -935,6 +953,7 @@ export function MessageBody({
       </View>
     </BubbleInk.Provider>
     </ExpressionTextContext.Provider>
+    </MatchScope>
   );
 }
 
@@ -948,6 +967,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   paragraph: {fontSize: font.body, color: color.text, lineHeight: headroomLineHeight(line.body)},
   muted: {color: color.textMuted},
   strong: {fontWeight: '700'},
+  // 찾은 글자(#5384). 채움은 말풍선에서 유도한 값이라 스타일에 못 박지 않고 `matchSpec` 이 얹는다. 글자색은 두지 않는다 — 말풍선 잉크를 상속한다.
+  match: {fontWeight: '700'},
   em: {fontStyle: 'italic'},
   // 인라인 코드와 코드 블록은 한 얼굴을 쓴다: 인용된 글자이지 카드가 아니다.
   // 색을 따로 박지 않는다 — **상속**되어야 보내는 중인 행의 흐린 색이 그 안의

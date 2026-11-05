@@ -640,6 +640,8 @@ export function Shell({
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
             onOpenSettings={onOpenSettingsFromConversation}
+            // 대화 안 검색의 「모든 대화에서 ›」(#5384): 같은 말로 검색 탭을 연다.
+            onOpenSearch={onOpenSearch}
           />
         </EdgeSwipeBack>
       ) : null}

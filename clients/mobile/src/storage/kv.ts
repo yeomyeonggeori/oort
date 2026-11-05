@@ -122,11 +122,9 @@ export const NON_SECRET_KEYS = {
    */
   failedSends: 'momo.mobile.composer.failed-sends.v1',
   /**
-   * 대화 안 검색의 최근 검색어 (#5364). 열쇠 `워크스페이스:채널` → 말 목록(최근이 앞, 한 대화에 최대 6개)인 지도 한 덩이이고, 수명·정원은
-   * `features/conversation/conversationSearchRecent.ts` 가 진다. **서버로 가지 않는다** — 이 폰에서 이 대화를 찾은 말이 남을 뿐이다.
-   *
-   * 여기 있어도 되는 이유: 사람이 자기 손으로 친 검색어가 이 기기에 그대로 있는 것이고 토큰과는 다른 종류의 값이다. 그리고 안 보낸 글(초안)과
-   * 같은 이유로 **로그아웃이 지운다**(`clearAllConversationSearchRecent`, `session/useSession.tsx`) — 무엇을 찾았는지는 다음 사람에게 보일 일이 아니다.
+   * **옛 키 — 읽어서 옮기고 지우기만 한다** (#5384). 대화 안 검색이 따로 들던 최근 검색어(#5364)다: 열쇠 `워크스페이스:채널` → 말 목록(최근이 앞)인 지도 한 덩이. 홈 검색과 **한 목록**이 되면서
+   * (`searchRecents` 키) 이 키에는 더 쓰지 않는다. `features/search/searchRecents.ts` 가 처음 읽는 열쇠(작업공간:멤버)로 옮기고 이 키를 지운다(다른 워크스페이스의 줄은 그 워크스페이스를 처음 읽을 때까지 남는다).
+   * 로그아웃(`clearAllSearchRecents`)이 아직 남은 이 키도 함께 지운다 — 무엇을 찾았는지는 다음 사람에게 보일 일이 아니다. 서버로 가지 않는다.
    */
   conversationSearchRecent: 'momo.mobile.conversation-search.recent.v1',
   /**
@@ -202,8 +200,9 @@ export const NON_SECRET_KEYS = {
    */
   linkPreview: 'momo.mobile.link-preview.v1',
   /**
-   * 검색 탭의 「최근 검색」과 「최근 연 대화」 (#5365). 열쇠 `작업공간:멤버` → {검색어 최대 6개, 채널 id 최대 10개}인 지도 한 덩이의
-   * JSON 이고, 정원·중복·길이 규칙과 로그아웃 삭제는 `features/search/searchRecents.ts` 가 진다. 서버는 이 목록을 본 적이 없다.
+   * 검색의 「최근 검색」과 「최근 연 대화」 (#5365). 열쇠 `작업공간:멤버` → {검색 최대 6줄, 채널 id 최대 10개}인 지도 한 덩이의
+   * JSON 이다. 최근 검색은 홈 검색과 대화 안 검색이 **한 목록**이고(#5384) 한 줄은 `{query, channelId?}` — 한 대화 안에서 찾은 말은 그 대화 id 를 들고 범위 칩과 함께 보인다.
+   * 정원·중복·길이 규칙과 옛 저장 옮기기·로그아웃 삭제는 `features/search/searchRecents.ts` 가 진다. 서버는 이 목록을 본 적이 없다.
    *
    * 여기 있어도 되는 이유: 사람이 방금 화면에서 친 글자와 채널 id 일 뿐이다(토큰·본문 없음). 잃으면 목록이 비어 시작할 뿐이다.
    * 다만 타인이 이 폰에 들어왔을 때 앞사람의 검색어가 비치면 안 되므로, 열쇠에 멤버를 넣고 로그아웃이 통째로 비운다.

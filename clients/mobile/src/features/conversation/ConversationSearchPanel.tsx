@@ -1,6 +1,7 @@
 import {
   clampQueryForCopy,
   leadsWithEllipsis,
+  normalizeQuery,
   snippetSegments,
   trailsWithEllipsis,
 } from '@momo/core/features/search/searchModel';
@@ -21,6 +22,8 @@ import {ds2Radius, font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Pa
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
+import type {RecentSearch} from '../search/searchRecents';
+import {ScopeTag} from '../search/SearchRows';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import type {ConversationSearch} from './useConversationSearch';
@@ -31,10 +34,14 @@ import type {ConversationSearch} from './useConversationSearch';
 // 두 얼굴이다. 상태는 코어가 판정한 `search.phase` 하나만 보고 그린다(`SearchScreen` 과 같은 규율 — 「로딩이면서 오류」 같은 조합을 화면에서
 // 조립하지 않는다):
 //
-//   입력 전(`idle`)  뒤의 대화를 **어둡게 눌러 둔 채** 최근 검색 카드가 선다(A2). 어둠 아무 데나 누르면 검색이 닫힌다.
+//   입력 전(`idle`)  뒤의 대화를 **어둡게 눌러 둔 채** 최근 검색 카드가 선다(A2). 어둠 아무 데나 누르면 검색이 닫힌다. 카드의 목록은 홈 검색과 **한 목록**이다(#5384) —
+//                    다른 대화 안에서 찾은 줄은 그 대화가 범위 칩으로 붙고(`recentScope`), 이 대화 것은 칩 없이 선다(이 화면이 곧 그 범위다).
 //   그 밖            불투명한 면이 대화를 덮고 한 상태가 선다: 두 글자 미만 안내 · 찾는 중 · 오류(+다시 시도) · 결과 없음 · 결과 목록(A3).
 //
 // 결과 줄은 보낸 사람·시각·**찾은 글자 강조**(서버가 준 `matchOffset`)이고 최근 순이다. 누르면 `search.choose` — 이동은 대화 화면의 점프 문이 한다.
+//
+// 결과 머리의 오른쪽 「모든 대화에서 ›」(시안 A3, #5384)는 같은 말로 홈 검색 탭을 여는 문이다(`onSearchAll` — 셸이 탭을 옮기고 말을 넘긴다). 이 대화 안에서
+// 못 찾았거나 더 넓게 보고 싶을 때 말을 다시 치지 않게 한다.
 //
 // ## 키보드는 안쪽 면이 비운다, 바탕은 비우지 않는다
 //
@@ -45,6 +52,9 @@ import type {ConversationSearch} from './useConversationSearch';
 /** 「지우기」 글자 한 줄을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const CLEAR_SLOP = slopTo(line.label);
 
+/** 가로로 서고 세로 가운데에 맞추는 줄 — 이 파일의 줄 스타일이 한 벌을 나눠 쓴다(직접 문구 장부가 낱말 리터럴을 세므로 한 곳에만 적는다). */
+const ROW = {flexDirection: 'row', alignItems: 'center'} as const;
+
 export function ConversationSearchPanel({
   search,
   directory,
@@ -52,6 +62,8 @@ export function ConversationSearchPanel({
   isDm,
   topInset,
   nowMs,
+  onSearchAll,
+  recentScope,
 }: {
   search: ConversationSearch;
   directory: Directory;
@@ -60,6 +72,13 @@ export function ConversationSearchPanel({
   /** 머리가 덮은 높이 — 면은 그 아래에서 시작한다. */
   topInset: number;
   nowMs: number;
+  /** 「모든 대화에서 ›」 — 같은 말(다듬은 것)로 홈 검색 탭을 연다. 없으면(셸 밖 호출자) 문이 서지 않는다. */
+  onSearchAll?: (query: string) => void;
+  /**
+   * 최근 검색 줄이 범위 칩을 달아야 하는가 — **다른 대화** 안에서 찾은 줄이면 그 대화의 칩 정보, 아니면(범위 없는 말·이 대화 것·내가 든 목록에 없는 대화) `null`.
+   * 화면이 정한다: 대화 목록과 이름 규칙은 화면이 안다.
+   */
+  recentScope: (saved: RecentSearch) => {title: string; isPrivate: boolean | null} | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -105,33 +124,43 @@ export function ConversationSearchPanel({
                   <Text style={styles.recentClear}>{formatMessage('mobile.convSearch.recentClear')}</Text>
                 </Pressable>
               </View>
-              {search.recent.map((term, index) => (
-                <Pressable
-                  key={term}
-                  accessibilityRole="button"
-                  accessibilityLabel={formatMessage('mobile.convSearch.recentRow', {query: term})}
-                  onPress={() => search.pickRecent(term)}
-                  style={({pressed}) => [
-                    styles.recentRow,
-                    index > 0 && styles.recentRowRule,
-                    pressed && styles.pressed,
-                  ]}
-                  testID="conversation-search-recent-row">
-                  <Image
-                    accessibilityElementsHidden
-                    source={CONV_ICONS.recent}
-                    style={[styles.recentGlyph, {tintColor: palette.textMuted}]}
-                  />
-                  <Text style={styles.recentTerm} numberOfLines={1}>
-                    {term}
-                  </Text>
-                  <Image
-                    accessibilityElementsHidden
-                    source={SHEET_ICONS.chevron}
-                    style={[styles.chevron, {tintColor: palette.textFaint}]}
-                  />
-                </Pressable>
-              ))}
+              {search.recent.map((saved, index) => {
+                const scope = recentScope(saved);
+                return (
+                  <Pressable
+                    key={`${saved.query}\u0000${saved.channelId ?? ''}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      scope === null
+                        ? formatMessage('mobile.convSearch.recentRow', {query: saved.query})
+                        : formatMessage('mobile.convSearch.recentRowIn', {query: saved.query, where: scope.title})
+                    }
+                    onPress={() => search.pickRecent(saved)}
+                    style={({pressed}) => [
+                      styles.recentRow,
+                      index > 0 && styles.recentRowRule,
+                      pressed && styles.pressed,
+                    ]}
+                    testID="conversation-search-recent-row">
+                    <Image
+                      accessibilityElementsHidden
+                      source={CONV_ICONS.recent}
+                      style={[styles.recentGlyph, {tintColor: palette.textMuted}]}
+                    />
+                    <View style={styles.recentBody}>
+                      <Text style={styles.recentTerm} numberOfLines={1}>
+                        {saved.query}
+                      </Text>
+                      {scope === null ? null : <ScopeTag title={scope.title} isPrivate={scope.isPrivate} />}
+                    </View>
+                    <Image
+                      accessibilityElementsHidden
+                      source={SHEET_ICONS.chevron}
+                      style={[styles.chevron, {tintColor: palette.textFaint}]}
+                    />
+                  </Pressable>
+                );
+              })}
             </>
           )}
         </View>
@@ -176,9 +205,29 @@ export function ConversationSearchPanel({
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listBody}
           ListHeaderComponent={
-            <Text style={styles.listHead} accessibilityRole="header" testID="conversation-search-results-head">
-              {formatMessage(isDm ? 'mobile.convSearch.resultsDm' : 'mobile.convSearch.resultsChannel')}
-            </Text>
+            <View style={styles.listHeadRow}>
+              <Text style={styles.listHead} accessibilityRole="header" testID="conversation-search-results-head">
+                {formatMessage(isDm ? 'mobile.convSearch.resultsDm' : 'mobile.convSearch.resultsChannel')}
+              </Text>
+              {onSearchAll ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={formatMessage('mobile.convSearch.searchAllLabel', {
+                    query: clampQueryForCopy(normalizeQuery(search.query)),
+                  })}
+                  hitSlop={CLEAR_SLOP}
+                  onPress={() => onSearchAll(normalizeQuery(search.query))}
+                  style={({pressed}) => [styles.searchAll, pressed && styles.searchAllPressed]}
+                  testID="conversation-search-all">
+                  <Text style={styles.searchAllLabel}>{formatMessage('mobile.convSearch.searchAll')}</Text>
+                  <Image
+                    accessibilityElementsHidden
+                    source={SHEET_ICONS.chevron}
+                    style={[styles.searchAllGlyph, {tintColor: palette.accentText}]}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
           }
           ListFooterComponent={
             search.hasMore ? (
@@ -321,8 +370,7 @@ const buildStyles = (color: Palette) =>
       overflow: 'hidden',
     },
     recentHead: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      ...ROW,
       justifyContent: 'space-between',
       paddingHorizontal: space.lg,
       paddingTop: space.md,
@@ -331,24 +379,34 @@ const buildStyles = (color: Palette) =>
     recentTitle: {fontSize: font.label, lineHeight: line.label, color: color.textMuted, fontWeight: '600'},
     recentClear: {fontSize: font.label, lineHeight: line.label, color: color.accentText, fontWeight: '600'},
     recentRow: {
+      ...ROW,
       minHeight: TOUCH_TARGET,
-      flexDirection: 'row',
-      alignItems: 'center',
       gap: space.md,
       paddingHorizontal: space.lg,
     },
     recentRowRule: {borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.border},
     recentGlyph: {width: CONV_ICON_SIZE.recent, height: CONV_ICON_SIZE.recent},
-    recentTerm: {flex: 1, fontSize: font.body, color: color.text},
+    // 말은 줄어들 수 있고(말줄임), 범위 칩은 말 뒤에 붙는다(칩은 이름이 길면 칩 안에서 줄어든다).
+    recentBody: {...ROW, flex: 1, gap: space.sm},
+    recentTerm: {flexShrink: 1, fontSize: font.body, color: color.text},
     chevron: {width: SHEET_ICON_SIZE.chevron, height: SHEET_ICON_SIZE.chevron},
     pressed: {backgroundColor: color.surfacePressed},
     listBody: {paddingBottom: space.xl},
-    listHead: {
+    // 결과 머리: 왼쪽 「이 채널의 결과 · 최근 순」, 오른쪽 「모든 대화에서 ›」(시안 A3). 왼쪽이 줄어들 수 있어 오른쪽 문은 늘 한 줄로 선다.
+    listHeadRow: {
+      ...ROW,
+      justifyContent: 'space-between',
+      gap: space.sm,
       paddingHorizontal: SAFE_GUTTER,
       paddingVertical: space.md,
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.textMuted,
+    },
+    listHead: {flexShrink: 1, fontSize: font.label, lineHeight: line.label, color: color.textMuted},
+    searchAll: {...ROW, flexShrink: 0, gap: space.xs},
+    searchAllPressed: {opacity: 0.6},
+    searchAllLabel: {fontSize: font.label, lineHeight: line.label, color: color.accentText, fontWeight: '600'},
+    searchAllGlyph: {
+      width: SHEET_ICON_SIZE.chevron - space.xs,
+      height: SHEET_ICON_SIZE.chevron - space.xs,
     },
     // 줄: 왼쪽에 얼굴, 오른쪽 몸통이 구분선을 진다 — 선은 글이 시작하는 자리에서 오른쪽 끝까지다(얼굴 밑으로는 가지 않는다).
     row: {

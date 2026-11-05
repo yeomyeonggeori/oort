@@ -18,6 +18,7 @@
   "search.recent.clearAll": "Clear all",
   "search.recent.clearAllLabel": "Clear all recent searches",
   "search.recent.searchLabel": "Search again for recent search {query}",
+  "search.recent.searchInLabel": "Search again for recent search {query}, {where}",
   "search.recent.openLabel": "Open {name}",
   "search.recent.empty": "Type a person, channel, or message you want to find.",
   "search.scope.groupLabel": "Where to search",

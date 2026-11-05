@@ -3535,13 +3535,13 @@ export const catalog: MessageCatalog = {
   "mobile.convSearch.recentClear": [
     {
       "type": 0,
-      "value": "Clear"
+      "value": "Clear all"
     }
   ],
   "mobile.convSearch.recentClearLabel": [
     {
       "type": 0,
-      "value": "Clear recent searches"
+      "value": "Clear all recent searches"
     }
   ],
   "mobile.convSearch.recentRow": [
@@ -3552,6 +3552,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "Search again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "where"
     }
   ],
   "mobile.convSearch.recentTitle": [
@@ -3596,6 +3614,26 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Results in this conversation · newest first"
+    }
+  ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "Search all conversations for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’"
     }
   ],
   "mobile.convSearch.searching": [
@@ -5282,6 +5320,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Recent searches"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "Search again for recent search "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
     }
   ],
   "search.recent.searchLabel": [

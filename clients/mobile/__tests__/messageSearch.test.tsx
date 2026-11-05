@@ -172,6 +172,17 @@ describe('입력은 동기, 요청만 늦다', () => {
     expect(searchMessages).not.toHaveBeenCalled();
   });
 
+  it('#5384 setQueryNow 는 이미 다 친 말을 디바운스 없이 바로 찾는다 — 최근 검색을 고른 것', async () => {
+    searchMessages.mockResolvedValue(page(2));
+    mount();
+    // 디바운스를 흘리지 않는다(`setQuery` 였다면 250ms 뒤에야 나갔을 요청이다).
+    act(() => {
+      probe.setQueryNow('배포 일정');
+    });
+    expect(probe.query).toBe('배포 일정');
+    await waitFor(() => expect(searchMessages).toHaveBeenCalledWith(WS, '배포 일정', expect.anything()));
+  });
+
   it('지우는 것은 기다리지 않는다', () => {
     mount();
     act(() => {
@@ -465,6 +476,55 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
     expect(searchMessages.mock.lastCall?.[2]).not.toHaveProperty('channelId');
   });
 
+  it('#5384 한 대화 안에서 찾은 말은 범위와 함께 남고, 최근 검색에 범위 칩으로 서며, 누르면 「메시지」 칩 + 그 대화로 다시 찾는다', async () => {
+    searchMessages.mockResolvedValue({hits: [hit(1, CH_PROJECT.id)]});
+    await mountSearch();
+    press('search-kind-messages');
+    press('search-scope-pick');
+    press(`search-picker-item-${CH_PROJECT.id}`);
+    await settle(600);
+    enter('롤백');
+    await searched();
+    // 결과를 눌러 남긴다 - 고른 대화 하나 안에서 찾은 말이라 범위(채널 id)가 함께 저장된다.
+    press('search-result');
+    expect(recentsFor(scope).searches).toEqual([{query: '롤백', channelId: CH_PROJECT.id}]);
+
+    // 입력을 비우고 범위도 풀어 처음 모양으로 돌아오면 그 줄이 범위 칩(대화 이름)과 함께 선다.
+    press('search-exit');
+    press('search-scope-all');
+    press('search-kind-all');
+    expect(screen.getByTestId('search-recent-search')).toHaveTextContent(/롤백/);
+    expect(within(screen.getByTestId('search-recent-search')).getByTestId('search-recent-scope')).toHaveTextContent(
+      CH_PROJECT.name as string,
+    );
+    expect(screen.getByTestId('search-recent-search')).toHaveProp(
+      'accessibilityLabel',
+      t('search.recent.searchInLabel', {query: '롤백', where: CH_PROJECT.name as string}),
+    );
+
+    // 누르면 말이 들어가고, 「메시지」 칩 + 그 대화로 다시 찾는다(디바운스를 기다리지 않는다 — 같은 말·같은 범위라 방금 받은 결과가 캐시에서 바로 선다).
+    fireEvent.press(screen.getByTestId('search-recent-search'));
+    expect(input().props.value).toBe('롤백');
+    expect(selected('messages')).toBe(true);
+    expect(screen.getByTestId('search-scope-chosen')).toHaveTextContent(CH_PROJECT.name as string);
+    await settle(100);
+    expect(screen.getAllByTestId('search-result')).toHaveLength(1);
+    expect(searchMessages.mock.lastCall?.[2]).toEqual(expect.objectContaining({channelId: CH_PROJECT.id}));
+  });
+
+  it('#5384 내가 든 목록에 없는 대화의 줄은 범위 칩 없이 말만 선다 - 이름을 지어내지도, 못 찾을 범위를 되살리지도 않는다', async () => {
+    rememberSearch(scope, '나간 대화의 말', 'ffffffff-9999-4999-8999-ffffffffffff');
+    searchMessages.mockResolvedValue({hits: []});
+    await mountSearch();
+    expect(screen.getByTestId('search-recent-search')).toHaveTextContent(/나간 대화의 말/);
+    expect(screen.queryByTestId('search-recent-scope')).toBeNull();
+    fireEvent.press(screen.getByTestId('search-recent-search'));
+    expect(input().props.value).toBe('나간 대화의 말');
+    // 범위를 되살리지 않는다 - 「전체」 칩 그대로다.
+    expect(selected('all')).toBe(true);
+    expect(screen.queryByTestId('search-scope-chosen')).toBeNull();
+  });
+
   it('X 는 입력이 있으면 입력을 지우고, 비어 있으면 홈으로 돌려보낸다', async () => {
     const {onClose} = await mountSearch();
     enter('루나');
@@ -498,7 +558,7 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
     await settle(100);
     expect(callsTo(network, '/dms')).toBe(1);
     expect(onOpenResult).toHaveBeenLastCalledWith(DM_LUNA.id, '루나');
-    expect(recentsFor(scope).searches).toEqual(['루나']);
+    expect(recentsFor(scope).searches).toEqual([{query: '루나'}]);
 
     // DM 이 열리는 동안 다른 결과를 눌렀다면, 늦게 도착한 DM 이 그 길을 가로채지 않는다.
     let release: () => void = () => {};

@@ -4,7 +4,7 @@ import React from 'react';
 import {Screen} from '../src/design/atoms';
 import {ConversationPickerSheet, type PickerItem} from '../src/features/search/ConversationPickerSheet';
 import {matchChannels, matchPeople, type SearchKind} from '../src/features/search/localSearch';
-import {ResultRow, type RecentTile} from '../src/features/search/SearchRows';
+import {ResultRow, type RecentSearchRow, type RecentTile} from '../src/features/search/SearchRows';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import {SearchView} from '../src/screens/SearchScreen';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
@@ -86,7 +86,13 @@ const RECENT_TILES: RecentTile[] = [
   {channelId: LUNA_PROJECT.id, title: LUNA_PROJECT.name ?? '', kind: 'channel', peerId: null},
   {channelId: LUNCH.id, title: LUNCH.name ?? '', kind: 'channel', peerId: null},
 ];
-const RECENT_SEARCHES = ['배포 일정', '루나', '롤백 계획', '점심 메뉴'];
+// 최근 검색은 대화 안 검색과 한 목록이다(#5384): 한 대화 안에서 찾은 줄은 범위 칩과 함께 선다.
+const RECENT_SEARCHES: RecentSearchRow[] = [
+  {query: '배포 일정', channelId: LAUNCH.id, scope: {title: LAUNCH.name ?? '', isPrivate: false}},
+  {query: '루나', channelId: null, scope: null},
+  {query: '롤백 계획', channelId: LUNA_PROJECT.id, scope: {title: LUNA_PROJECT.name ?? '', isPrivate: false}},
+  {query: '점심 메뉴', channelId: null, scope: null},
+];
 
 const NOW = 1_730_800_000_000;
 const DAY = 86_400_000;
@@ -130,6 +136,7 @@ function messageSearch(
   return {
     query,
     setQuery: () => {},
+    setQueryNow: () => {},
     phase,
     settledQuery: query,
     hits,
