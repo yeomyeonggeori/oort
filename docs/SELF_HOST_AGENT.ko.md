@@ -1492,10 +1492,11 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    답 자리: 최종 답은 oort_run_complete 의 body 이다. oort 가 대신 올리고 자리는
    고르지 않으므로 같은 내용을 oort_message_post 로 또 보내지 않는다. 직접
    oort_message_post 로 올리는 메시지는 물어본 자리에 답한다: 1:1 DM 은
-   본류(rootId 없이), 채널 최상위 멘션은 그 메시지 id 를 rootId 로, 스레드
-   안은 그 스레드의 root 를 rootId 로 쓴다(oort_job_start·oort_conversation_read
-   의 모든 메시지에 rootId 가 있고, 부른 메시지는 work.triggerMessageId 다).
-   최상위 메시지가 DM 일 수도 있는데 구분이 안 되면 rootId 를 넣지 않는다.
+   본류(rootId 없이), 스레드 안은 그 스레드의 root 를 rootId 로 쓴다
+   (oort_job_start·oort_conversation_read 의 모든 메시지에 rootId 가 있고,
+   부른 메시지는 work.triggerMessageId 다). 그 밖(채널 최상위 멘션, 그룹 DM)은
+   부른 메시지 id 를 rootId 로 써서 그 밑에 새 스레드를 연다. 최상위 메시지가
+   1:1 DM 인지 구분이 안 되면 rootId 를 넣지 않는다.
 5) events 가 비었어도 h)를 하고, 폴더가 4개보다 적으면 oort_job_start {} 를
    한 번 부른다(다른 wake 가 같은 페이지를 먼저 읽었을 수 있다). job 이 오면
    3 a)처럼 이어 간다. job 이 null 이고 h)에서 넘겨받은 폴더도 없으면 아무

@@ -227,6 +227,10 @@ const MESSAGE_POST_RULES: &[Rule] = &[
             &["thread's root"],
             &["no rootId"],
             &["leave rootId out"],
+            // #4646: only a 1:1 DM keeps the main flow; a group DM is a thread like a channel.
+            &["1:1 direct message"],
+            &["group direct message"],
+            &["opens a thread"],
         ],
     },
 ];
@@ -364,6 +368,10 @@ const DOC_EN_RULES: &[Rule] = &[
             &["rootId"],
             &["leave rootId out"],
             &["work.triggerMessageId"],
+            // #4646: only a 1:1 DM keeps the main flow; a group DM is a thread like a channel.
+            &["1:1 direct message"],
+            &["group direct message"],
+            &["opens a thread"],
         ],
     },
 ];
@@ -418,6 +426,9 @@ const DOC_KO_RULES: &[Rule] = &[
             &["rootId"],
             &["구분이 안 되면"],
             &["work.triggerMessageId"],
+            // #4646: 1:1 DM 만 본류에 남고, 그룹 DM 은 채널처럼 스레드다.
+            &["그룹 DM"],
+            &["새 스레드"],
         ],
     },
 ];
@@ -500,11 +511,12 @@ fn the_initiate_tool_carries_its_four_rules() {
 }
 
 /// ADR-0200 증보 5 「답 자리」: a run's final answer is placed by the server, never chosen by the
-/// agent — inside the thread the request was made in (#4622, ADR-0148 증보), otherwise in the main
-/// flow quoting the message (a channel's top level moves under it in #4646). The tool that delivers
-/// it therefore stays **place-free**: it tells the agent that oort posts `body` for it, and a place
-/// word here would be a promise about server behaviour that is about to change again. The place is
-/// pinned where it lives — `agent_answer_place_pg.rs` and the three sibling PG suites — not here.
+/// agent — inside the thread the request was made in (#4622), under the request itself when it was made
+/// at a channel's top level or in a group DM (#4646, ADR-0148 증보 2026-11-05), and in the main flow,
+/// quoting the message, only in a 1:1 DM. The tool that delivers it therefore stays **place-free**: it
+/// tells the agent that oort posts `body` for it, and a place word here would be a promise about server
+/// behaviour that the server, not the text, keeps. The place is pinned where it lives —
+/// `agent_answer_place_pg.rs` and the three sibling PG suites — not here.
 #[test]
 fn the_final_answers_tool_promises_no_place() {
     let complete = lower(description(TOOL_RUN_COMPLETE));

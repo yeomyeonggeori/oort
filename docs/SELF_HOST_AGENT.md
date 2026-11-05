@@ -1922,12 +1922,14 @@ tunnel, with the active credential from join.
    Where it goes: your final answer is the body of oort_run_complete. oort
    posts it for you and you do not choose where, so never also send it with
    oort_message_post. For a message you post yourself with oort_message_post,
-   answer where you were asked: in a direct message, at the top level (no
-   rootId); for a top-level mention in a channel, rootId is that message's id;
-   inside a thread, rootId is the thread's root (every message from
+   answer where you were asked: in a 1:1 direct message, at the top level (no
+   rootId); inside a thread, rootId is the thread's root (every message from
    oort_job_start or oort_conversation_read carries rootId, and the message
-   that called you is work.triggerMessageId). If a top-level message might be
-   a direct message and you cannot tell, leave rootId out.
+   that called you is work.triggerMessageId); anywhere else (a top-level
+   mention in a channel, a group direct message), rootId is the id of the
+   message that called you, so your message opens a thread under it. If a
+   top-level message might be a 1:1 direct message and you cannot tell, leave
+   rootId out.
 5) If events is empty, still do h) and call oort_job_start {} once while
    fewer than 4 folders exist (another wake may have read the same page
    first); if it returns a job, go on as in 3 a). If job is null and no
