@@ -150,7 +150,9 @@ describe("UnfurlCards", () => {
   it("입력칸 미리보기의 ✕ 와 타임라인의 제거 ✕ 는 같은 클래스 한 벌이다(같은 자리·같은 모양, #5328)", () => {
     // 두 단추는 서로 다른 파일에 있지만 같은 규칙(카드 호버·키보드 초점에서만 서는 테두리 없는 원)을 지킨다. 한쪽만 고치면 갈라진다.
     const composerSource = readFileSync(new URL("../chat/ComposerLinkPreview.tsx", import.meta.url), "utf8");
-    const pick = (source: string) => [...source.matchAll(/className="(tap-target absolute right-1 top-1.*?)"/g)].map((m) => m[1]);
+    const pick = (source: string) =>
+      [...source.matchAll(/className="(tap-target absolute right-1 top-1[^"]*)"/g)]
+        .map((m) => m[1]);
     const timeline = pick(componentSource);
     const composer = pick(composerSource);
     expect(timeline).toHaveLength(1);
