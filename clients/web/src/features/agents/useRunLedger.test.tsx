@@ -155,6 +155,8 @@ describe("useRunLedger", () => {
     mount(RUN, facts());
     await settle();
     expect(latest?.isError).toBe(true);
+    // 오류 객체를 버리지 않는다(#5279 B): 기록 줄이 원인(오프라인 / 서버에 닿지 못함 / 그 밖)을 말하는 재료다.
+    expect(latest?.error).toBeInstanceOf(ApiError);
     expect(fetchEvents).toHaveBeenCalledTimes(1);
   });
   it("활동 include를 모르는 읽기에서 에이전트 보고를 0으로 지어내지 않는다: 「모름」이고 요약은 단계만 센다 (#4657)", async () => {

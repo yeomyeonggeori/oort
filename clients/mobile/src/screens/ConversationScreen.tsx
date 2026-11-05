@@ -1374,6 +1374,27 @@ export default function ConversationScreen({
     setAwaitingJump(null);
   }, []);
 
+  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
+  //
+  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
+  // 결과와 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
+  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
+  const onSearchJump = useCallback(
+    (hit: {messageId: string; seq: number}) => {
+      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
+      Keyboard.dismiss();
+      requestJump('search', hit.messageId, hit.seq);
+    },
+    [requestJump],
+  );
+  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+  endSearchForWriting.current = () => {
+    if (!convSearch.active) return;
+    convSearch.close();
+    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  };
+
   /**
    * 고정 목록에서 원본으로 (이슈 #1112).
    *
@@ -1386,36 +1407,6 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  /**
-   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
-   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
-   */
-  const onJumpToMessage = useCallback(
-    (messageId: string, seq: number) => requestJump('search', messageId, seq),
-    [requestJump],
-  );
-
-  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
-  //
-  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
-  // 결과·「답함 ✓」 칩과 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
-  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
-  const onSearchJump = useCallback(
-    (hit: {messageId: string; seq: number}) => {
-      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
-      Keyboard.dismiss();
-      onJumpToMessage(hit.messageId, hit.seq);
-    },
-    [onJumpToMessage],
-  );
-  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
-  endSearchForWriting.current = () => {
-    if (!convSearch.active) return;
-    convSearch.close();
-    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
-    requestAnimationFrame(() => composerInputRef.current?.focus());
-  };
-
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1859,7 +1850,6 @@ export default function ConversationScreen({
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
@@ -1888,7 +1878,6 @@ export default function ConversationScreen({
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],

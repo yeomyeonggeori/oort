@@ -115,8 +115,8 @@ describe("replyHomeLineOf — 「어느 스레드의 답글인가」(폰: 옛 �
       excerpt: { kind: "text", text: "점심 뭐 먹을까요?" },
     });
   });
-  it("글이 여러 줄이면 인용과 같은 규칙으로 자른다(두 줄까지, 한 줄로 이어 붙임)", () => {
-    expect(messageExcerpt(root({ body: "첫 줄\n\n둘째 줄\n셋째 줄" }))).toEqual({ kind: "text", text: "첫 줄 둘째 줄" });
+  it("글이 여러 줄이면 인용과 같은 규칙으로 자른다(한 줄까지 — 인용이 카드 윗칸 머리가 되며 2→1, #5381)", () => {
+    expect(messageExcerpt(root({ body: "첫 줄\n\n둘째 줄\n셋째 줄" }))).toEqual({ kind: "text", text: "첫 줄" });
   });
   it("글이 없는 루트는 종류로 말한다(사진·파일·빈 글)", () => {
     const photo = { id: "f1", name: "a.png", mime: "image/png", sizeBytes: 1 };

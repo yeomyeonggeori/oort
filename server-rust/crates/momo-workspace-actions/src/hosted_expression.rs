@@ -35,7 +35,7 @@ use momo_expressions::action::{self as expression_action, Candidate};
 use momo_expressions::assemble::{self, AssembleError, AssembleRequest, Motion, SourceFrom};
 use momo_expressions::media::{self, Processed, Rejected, Sniffed};
 use momo_expressions::{Metadata, Origin, FAILURE_CODES, INPUT_BYTES};
-use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{send_thread_notice_in_tx, MessageType, NewMessage};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Semaphore;
@@ -1019,7 +1019,10 @@ pub async fn propose_in_tx(
         object.insert("summary".into(), Value::String(summary.clone()));
     }
     actions::stamp_decision_mode(&mut props, decision);
-    let sent = send_message_in_tx(
+    // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): the card stands where the run's answer will, on the
+    // spine that keeps the thread's rollup.
+    let place = momo_agent::run_answer_root_in_tx(conn, workspace_id, run.run_id).await?;
+    let sent = send_thread_notice_in_tx(
         conn,
         workspace_id,
         NewMessage {
@@ -1028,7 +1031,7 @@ pub async fn propose_in_tx(
             message_type: MessageType::ApprovalRequest,
             body: Some(actions::workspace_action_request_body(action)),
             props,
-            root_id: None,
+            root_id: place,
             reply_to_id: None,
             // Derived from the approval id, never the id itself (see `card_client_msg_id`).
             client_msg_id: Some(actions::card_client_msg_id(approval_id)),
@@ -1157,7 +1160,9 @@ pub async fn failure_card_in_tx(
             object.insert("bytes".into(), json!(bytes));
         }
     }
-    let sent = send_message_in_tx(
+    // #4646: the failure card is the run's answer in card form, so it stands with it.
+    let place = momo_agent::run_answer_root_in_tx(conn, workspace_id, run.run_id).await?;
+    let sent = send_thread_notice_in_tx(
         conn,
         workspace_id,
         NewMessage {
@@ -1166,7 +1171,7 @@ pub async fn failure_card_in_tx(
             message_type: MessageType::ApprovalRequest,
             body: Some(line.to_owned()),
             props,
-            root_id: None,
+            root_id: place,
             reply_to_id: None,
             client_msg_id: Some(actions::card_client_msg_id(approval_id)),
             run_id: Some(run.run_id),
