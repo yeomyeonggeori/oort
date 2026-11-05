@@ -90,8 +90,8 @@ describe("loadCauseOf", () => {
 describe("LoadFailureNote", () => {
   const reasons: [ConnectionCause | null, string][] = [
     ["deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-    ["serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-    [null, "문제가 생겼어요. 다시 시도해 주세요."],
+    ["serverUnreachable", "서버에 닿지 못했어요."],
+    [null, "문제가 생겼어요."],
   ];
 
   it("제목 + 이유 한 벌을 한 줄로 말하고, 원인마다 이유가 다르다. 상태 코드는 없다", () => {
@@ -255,5 +255,86 @@ describe("LoadFailureLine: 시트 위 알약", () => {
     expect(classes).toContain("bg-surface-muted");
     expect(classes).not.toContain("shadow-sm");
     expect(classes).not.toContain("bg-surface");
+  });
+});
+
+// =============================================================================
+// #5307 L2 (검수 5b): 같은 실패를 상자는 조용한 잉크로, 한 줄은 빨간 글자로 말하던 갈림과, 한 줄 끝 「다시 시도해 주세요.」가 곁의 「다시 시도」 단추와
+// 같은 말을 되풀이하던 것. 한 톤(잉크)과, 단추가 있는 자리의 이유는 다음 행동을 빼고 말한다. 단추가 없는 자리는 문장이 다음 행동까지 말한다.
+// =============================================================================
+describe("불러오기 실패의 톤과 문장 (#5307 L2)", () => {
+  const classesOf = (el: Element | null) => (el?.className ?? "").toString().split(/\s+/);
+  const NEXT_ACTION = "다시 시도해 주세요";
+
+  it("한 줄(Note)은 상자와 같은 잉크 톤이다: 빨간 글자·빨간 선이 아니다", () => {
+    const root = mount(
+      createElement(LoadFailureNote, { titleKey: CONNECTION_KEYS.loadActivityTitle, cause: "serverUnreachable", onRetry: () => undefined, testId: "note" }),
+      true
+    );
+    const classes = classesOf(root.querySelector('[data-testid="note"]'));
+    expect(classes).toContain("text-ink");
+    expect(classes).not.toContain("text-danger");
+    expect(classes).not.toContain("border-danger");
+    act(() => mountedRoot?.unmount());
+    host?.remove();
+    const box = mount(
+      createElement(LoadFailureBox, { titleKey: CONNECTION_KEYS.loadActivityTitle, cause: "serverUnreachable", onRetry: () => undefined, testId: "box" }),
+      true
+    );
+    const title = box.querySelector('[data-testid="box"] > p');
+    expect(classesOf(title)).toContain("text-ink");
+    expect(classesOf(title)).not.toContain("text-danger");
+  });
+
+  it("한 줄(Line)도 같은 잉크 톤이고, 회색 띠로 서는 자리(사이드바)만 상태 알림 `status`로 내려간다", () => {
+    const plain = mount(createElement(LoadFailureLine, { titleKey: CONNECTION_KEYS.loadChannelListTitle, onRetry: () => undefined, testId: "line" }), true);
+    const quiet = plain.querySelector('[data-testid="line"]');
+    expect(quiet?.getAttribute("role")).toBe("alert");
+    expect(classesOf(quiet)).toContain("text-ink");
+    expect(classesOf(quiet)).not.toContain("text-danger");
+    act(() => mountedRoot?.unmount());
+    host?.remove();
+    const band = mount(
+      createElement(LoadFailureLine, { titleKey: CONNECTION_KEYS.loadChannelListTitle, onRetry: () => undefined, tone: "neutral", testId: "line" }),
+      true
+    );
+    expect(band.querySelector('[data-testid="line"]')?.getAttribute("role")).toBe("status");
+  });
+
+  it("단추가 있는 자리의 이유는 다음 행동(다시 시도해 주세요)을 되풀이하지 않는다: 상자·한 줄 모두", () => {
+    for (const cause of ["serverUnreachable", null, "deviceOffline"] as const) {
+      const note = mount(
+        createElement(LoadFailureNote, { titleKey: CONNECTION_KEYS.loadActivityTitle, cause, onRetry: () => undefined, testId: "note" }),
+        true
+      );
+      const noteText = note.querySelector('[data-testid="note"] > div')?.textContent ?? "";
+      expect(noteText, String(cause)).toContain("활동을 불러오지 못했어요");
+      expect(noteText, String(cause)).not.toContain(NEXT_ACTION);
+      act(() => mountedRoot?.unmount());
+      host?.remove();
+      const box = mount(
+        createElement(LoadFailureBox, { titleKey: CONNECTION_KEYS.loadActivityTitle, cause, onRetry: () => undefined, testId: "box" }),
+        true
+      );
+      expect(box.querySelector('[data-testid="load-failure-reason"]')?.textContent, String(cause)).not.toContain(NEXT_ACTION);
+      // 다음 행동은 단추 하나가 말한다.
+      expect(box.querySelectorAll("button")).toHaveLength(1);
+      act(() => mountedRoot?.unmount());
+      host?.remove();
+    }
+  });
+
+  it("단추가 없는 자리의 문장은 다음 행동까지 말한다(말할 곳이 문장뿐이다)", () => {
+    const cases: [ConnectionCause | null, string][] = [
+      ["serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [null, "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [cause, reason] of cases) {
+      const note = mount(createElement(LoadFailureNote, { titleKey: CONNECTION_KEYS.loadActivityTitle, cause, testId: "note" }), true);
+      expect(note.querySelector("button")).toBeNull();
+      expect(note.querySelector('[data-testid="note"]')?.textContent).toContain(`활동을 불러오지 못했어요. ${reason}`);
+      act(() => mountedRoot?.unmount());
+      host?.remove();
+    }
   });
 });

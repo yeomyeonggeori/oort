@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import { resetEmojiFrequencyForTests } from "@/features/emoji/frequencyStore";
 import { MessageHoverToolbar, type MessageActionCallbacks } from "./MessageActions";
+import { belowStraddleRect } from "./hoverToolbarModel";
 
 // =============================================================================
 // 뒤집기 배선 시험 (#5179). 순수 규칙(`hoverToolbarModel.test.ts`)이 아니라 **마운트된 막대가** 이웃 글자를 읽어 자리를 정하는가:
@@ -13,14 +14,19 @@ import { MessageHoverToolbar, type MessageActionCallbacks } from "./MessageActio
 // (jsdom 은 레이아웃이 없다). 숫자는 390 열 레인 실측이다: 막대 x 151~374 y 329~371, 행 y 365~399, 앞 행 마지막 줄 x 56~214 y 337~355.
 // 실제 엔진에서 같은 일이 되는지는 캡처 레인 `scripts/capture-5179.mjs` 가 잰다(이 시험은 배선이 끊기면 CI 에서 붉게 하는 몫이다).
 // 뒤집기(`data-straddle`)와 행 안쪽으로 밀기(막대의 `--hover-toolbar-slide` 변수, 위 자리에서 아래로 px)를 모두 잰다.
+//
+// 다시 재기 (#5307 M1): 포인터가 행 위에 머문 채 레이아웃이 바뀌면(입력창 위에 작업 띠가 서서 스크롤러가 줄어든다) 막대는 마운트 때 정한 자리를 붙들면 안 된다.
+// `ResizeObserver` 는 jsdom 에 없으므로 이 파일이 손으로 알림을 보내는 대역을 세운다. 막대 상자의 대역은 막대가 **지금 서 있는 자리**(`data-straddle` · 밀림 · 비낌)를
+// 따라가야 다시 잴 때 위 자리 상자를 되돌리는 계산이 실제처럼 돈다.
 // =============================================================================
 
 type Box = { left: number; right: number; top: number; bottom: number };
-const BOXES: Record<string, Box> = {
+const DEFAULT_BOXES: Record<string, Box> = {
   scroller: { left: 0, right: 390, top: 120, bottom: 800 },
   row: { left: 4, right: 386, top: 365, bottom: 399 },
   toolbar: { left: 151, right: 374, top: 329, bottom: 371 },
 };
+const BOXES: Record<string, Box> = structuredClone(DEFAULT_BOXES);
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 const memory = new Map<string, string>();
@@ -34,12 +40,61 @@ function rectOf(box: Box): DOMRect {
   return { ...box, x: box.left, y: box.top, width, height, toJSON: () => box } as DOMRect;
 }
 
+/** 막대가 지금 서 있는 상자: 위 자리 상자(`BOXES.toolbar`)에서 아래로 뒤집혔으면 아래 자리로, 아니면 밀림만큼 내리고, 비낌만큼 오른쪽으로 민다. */
+function placedToolbarBox(bar: Element): Box {
+  const el = bar as HTMLElement;
+  const below = el.getAttribute("data-straddle") === "below";
+  const slide = Number.parseFloat(el.style.getPropertyValue("--hover-toolbar-slide")) || 0;
+  const nudge = Number.parseFloat(el.style.getPropertyValue("--hover-toolbar-nudge")) || 0;
+  const rest = BOXES.toolbar!;
+  const base = below ? belowStraddleRect(rest, BOXES.row!) : { ...rest, top: rest.top + slide, bottom: rest.bottom + slide };
+  return { left: base.left + nudge, right: base.right + nudge, top: base.top, bottom: base.bottom };
+}
+
+/** `ResizeObserver` 대역: 관찰 칸을 기억하고, 테스트가 `notifyResize` 로 알림을 손으로 보낸다. */
+interface StubObserver {
+  callback: ResizeObserverCallback;
+  targets: Set<Element>;
+}
+const observers = new Set<StubObserver>();
+function stubResizeObserver(): void {
+  class Stub {
+    private readonly record: StubObserver;
+    constructor(callback: ResizeObserverCallback) {
+      this.record = { callback, targets: new Set() };
+      observers.add(this.record);
+    }
+    observe(target: Element): void {
+      this.record.targets.add(target);
+    }
+    unobserve(target: Element): void {
+      this.record.targets.delete(target);
+    }
+    disconnect(): void {
+      this.record.targets.clear();
+      observers.delete(this.record);
+    }
+  }
+  vi.stubGlobal("ResizeObserver", Stub);
+}
+/** 관찰 중인 칸마다 지금 크기를 알린다. 스크롤러는 `BOXES.scroller` 의 높이, 나머지는 고정 크기다. */
+function notifyResize(): void {
+  const sizeOf = (target: Element) =>
+    target.hasAttribute("data-virtuoso-scroller")
+      ? { width: 390, height: BOXES.scroller!.bottom - BOXES.scroller!.top }
+      : { width: 382, height: 34 };
+  for (const record of Array.from(observers)) {
+    const entries = Array.from(record.targets).map((target) => ({ target, contentRect: sizeOf(target) }));
+    act(() => record.callback(entries as unknown as ResizeObserverEntry[], record as unknown as ResizeObserver));
+  }
+}
+
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   // 상자는 요소가 어느 칸인지로 정한다: 스크롤러(속성) · 막대(role) · 포인터 행(id).
   Element.prototype.getBoundingClientRect = function stub(this: Element): DOMRect {
     if (this.hasAttribute("data-virtuoso-scroller")) return rectOf(BOXES.scroller!);
-    if (this.getAttribute("role") === "toolbar") return rectOf(BOXES.toolbar!);
+    if (this.getAttribute("role") === "toolbar") return rectOf(placedToolbarBox(this));
     if (this.id === "row") return rectOf(BOXES.row!);
     return rectOf({ left: 0, right: 0, top: 0, bottom: 0 });
   };
@@ -61,6 +116,7 @@ afterAll(() => {
 });
 beforeEach(() => {
   memory.clear();
+  stubResizeObserver();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => memory.get(key) ?? null,
     setItem: (key: string, value: string) => void memory.set(key, value),
@@ -69,6 +125,8 @@ beforeEach(() => {
   resetEmojiFrequencyForTests();
 });
 afterEach(() => {
+  observers.clear();
+  BOXES.scroller = { ...DEFAULT_BOXES.scroller! };
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -95,7 +153,7 @@ const copyState = { canCopy: true, copied: false, canCopyLink: true, copiedLink:
  * 앞 이웃 · (막대가 서는) 행 · 뒤 이웃을 스크롤러 안에 세우고 막대를 행 안에 마운트한다. `own` 은 포인터 행 본문의 줄 조각(`data-rect`)이다 —
  * 막대는 본문 상자(`data-row-body`) 밖에 서므로 막대 자신의 글은 이웃으로 세지 않는다.
  */
-function mount(neighbors: { prev: string; next: string }, own?: string): HTMLElement {
+function mount(neighbors: { prev: string; next: string }, own?: string, menuOpen = false): HTMLElement {
   const scroller = document.createElement("div");
   scroller.setAttribute("data-virtuoso-scroller", "");
   const row = (id: string, rect: string) =>
@@ -115,7 +173,7 @@ function mount(neighbors: { prev: string; next: string }, own?: string): HTMLEle
         copyState,
         callbacks,
         onOpenPicker: () => undefined,
-        menuOpen: false,
+        menuOpen,
         onMenuOpenChange: () => undefined,
         mineEmojis: new Set<string>(),
       })
@@ -210,5 +268,54 @@ describe("MessageHoverToolbar 밀기 배선 (#5179 남은 경우 C·F)", () => {
     // 막대 자신의 글이 포인터 행의 글로 읽히지 않는지는 실제 엔진 레인(`capture-5179.mjs` C·F)이 잰다: 읽혔다면 막대 이모지 글줄이 자기 위치를 막아 창이 없다.
     const host = mount({ prev: REACHING, next: NEXT_LONG });
     expect(slideOf(host)).toBe("28");
+  });
+});
+
+describe("MessageHoverToolbar 다시 재기 (#5307 M1): 포인터가 머문 채 레이아웃이 바뀐다", () => {
+  it("마운트 때 아래 자리가 스크롤러 안이었어도, 스크롤러가 줄어 밖이 되면 아래로 두지 않고 행 안쪽으로 다시 앉는다", () => {
+    const host = mount({ prev: REACHING, next: NEXT_HEAD }, OWN_SHORT);
+    expect(straddleOf(host)).toBe("below");
+    notifyResize(); // 관찰을 시작할 때의 처음 알림: 같은 자리가 나오므로 아무것도 바뀌지 않는다
+    expect(straddleOf(host)).toBe("below");
+    expect(slideOf(host)).toBe("");
+    // 입력창 위에 작업 띠가 서서 스크롤러 바닥이 올라온다. 아래 자리 밑단(399 − 6 + 42 = 435)이 바닥(420)을 넘는다.
+    BOXES.scroller!.bottom = 420;
+    notifyResize();
+    expect(straddleOf(host)).toBe("top");
+    expect(slideOf(host)).toBe("28");
+    // 막대 상자(위 자리 329 + 밀림 28 = 357 ~ 399)가 스크롤러(120 ~ 420) 안이다.
+    const rect = barOf(host).getBoundingClientRect();
+    expect(rect.top).toBeGreaterThanOrEqual(BOXES.scroller!.top);
+    expect(rect.bottom).toBeLessThanOrEqual(BOXES.scroller!.bottom);
+  });
+
+  it("스크롤러가 다시 커지면 처음 정한 자리로 돌아온다(밀림 변수는 지운다)", () => {
+    const host = mount({ prev: REACHING, next: NEXT_HEAD }, OWN_SHORT);
+    notifyResize();
+    BOXES.scroller!.bottom = 420;
+    notifyResize();
+    expect(slideOf(host)).toBe("28");
+    BOXES.scroller!.bottom = 800;
+    notifyResize();
+    expect(straddleOf(host)).toBe("below");
+    expect(slideOf(host)).toBe("");
+  });
+
+  it("메뉴가 열려 있는 동안은 얼린다: 열린 메뉴가 붙든 막대가 옮겨 다니지 않는다", () => {
+    const host = mount({ prev: REACHING, next: NEXT_HEAD }, OWN_SHORT, true);
+    expect(straddleOf(host)).toBe("below");
+    notifyResize();
+    BOXES.scroller!.bottom = 420;
+    notifyResize();
+    expect(straddleOf(host)).toBe("below");
+    expect(slideOf(host)).toBe("");
+  });
+
+  it("언마운트하면 관찰을 끊는다", () => {
+    mount({ prev: REACHING, next: NEXT_HEAD }, OWN_SHORT);
+    expect(observers.size).toBe(1);
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    expect(observers.size).toBe(0);
   });
 });

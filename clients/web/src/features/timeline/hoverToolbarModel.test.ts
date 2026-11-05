@@ -11,6 +11,7 @@ import {
   HOVER_TOOLBAR_SLOT_COUNT,
   placeToolbar,
   rectsIntersect,
+  restToolbarRect,
   shouldFlipToolbarBelow,
   shouldShowHoverToolbar,
   slideToolbarDown,
@@ -383,6 +384,67 @@ describe("placeToolbar (#5179): 위 → 아래로 뒤집기 → 행 안쪽으로
       nextText: () => ((nextReads += 1), [nextLong]),
     });
     expect([prevReads, nextReads]).toEqual([1, 1]);
+  });
+});
+
+describe("restToolbarRect (#5307 M1): 서 있는 자리에서 위 자리 상자를 되돌린다", () => {
+  const rest = { left: 151, right: 374, top: 329, bottom: 371 };
+  const row = { top: 365, bottom: 399 };
+  const scroller = { top: 57, bottom: 709, height: 652 };
+  const shift = (r: typeof rest, dx: number, dy: number) => ({ left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
+  const reaching = { left: 56, right: 214, top: 337, bottom: 355 };
+  const nextHead = { left: 56, right: 82, top: 415, bottom: 433 };
+  const nextLong = { left: 56, right: 360, top: 410, bottom: 428 };
+  const ownShort = { left: 56, right: 116, top: 374, bottom: 392 };
+
+  it("위 자리 그대로(밀림·비낌 없음)면 서 있는 상자가 곧 위 자리 상자다", () => {
+    expect(restToolbarRect({ bar: rest, row, placed: { below: false, slide: 0, nudge: 0 } })).toEqual(rest);
+  });
+
+  it("밀려 앉고 비껴 선 자리에서도 위 자리 상자를 되돌린다(밀림 28 · 비낌 1)", () => {
+    expect(restToolbarRect({ bar: shift(rest, 1, 28), row, placed: { below: false, slide: 28, nudge: 1 } })).toEqual(rest);
+  });
+
+  it("아래로 뒤집힌 자리에서도 되돌린다: `belowStraddleRect`의 역이다", () => {
+    const below = shift(belowStraddleRect(rest, row), 2, 0);
+    expect(restToolbarRect({ bar: below, row, placed: { below: true, slide: 0, nudge: 2 } })).toEqual(rest);
+  });
+
+  it("행 밑단이 움직여도(행이 자라거나 줄어도) 위 자리 상자는 행 윗단에 매인다 — 다시 잴 때 옛 깊이를 끌고 가지 않는다", () => {
+    const grown = { top: 365, bottom: 480 };
+    const below = belowStraddleRect(rest, grown);
+    expect(restToolbarRect({ bar: below, row: grown, placed: { below: true, slide: 0, nudge: 0 } })).toEqual(rest);
+  });
+
+  // 다시 재도 흔들리지 않는다: 어느 자리가 나오든 그 자리에 선 상자에서 되돌려 다시 재면 같은 자리다(깜빡임·핑퐁이 없다는 뜻).
+  it.each([
+    ["A·B 아래로 뒤집힘", { prev: [reaching], self: [], next: [nextHead] }],
+    ["C 행 안쪽으로 밀림", { prev: [reaching], self: [ownShort], next: [nextLong] }],
+    ["D 위 그대로", { prev: [], self: [], next: [] }],
+  ])("%s: 되돌려 다시 재면 같은 자리다", (_name, text) => {
+    const input = { row, scroller, prevText: () => text.prev, selfText: () => text.self, nextText: () => text.next };
+    const first = placeToolbar({ ...input, bar: rest });
+    const placedRect = shift(first.below ? belowStraddleRect(rest, row) : shift(rest, 0, first.slide), first.nudge, 0);
+    const back = restToolbarRect({ bar: placedRect, row, placed: first });
+    expect(back).toEqual(rest);
+    expect(placeToolbar({ ...input, bar: back })).toEqual(first);
+  });
+
+  it("레이아웃이 바뀐 뒤에는 자리가 바뀐다: 마운트 때 아래 자리가 스크롤러 안이었어도 스크롤러가 줄어 밖이 되면 아래로 두지 않는다(M1)", () => {
+    const text = { prevText: () => [reaching], selfText: () => [ownShort], nextText: () => [nextHead] };
+    const mounted = placeToolbar({ bar: rest, row, scroller, ...text });
+    expect(mounted).toEqual({ below: true, slide: 0, nudge: 0 });
+    // 입력창 위에 작업 띠가 서서 스크롤러 바닥이 행 밑단(399) 근처로 올라온다. 아래 자리 밑단(399 − 6 + 42 = 435)이 바닥(420)을 넘는다.
+    const shrunk = { top: 57, bottom: 420, height: 363 };
+    const placedRect = belowStraddleRect(rest, row);
+    const back = restToolbarRect({ bar: placedRect, row, placed: mounted });
+    const again = placeToolbar({ bar: back, row, scroller: shrunk, ...text });
+    expect(again.below).toBe(false);
+    // 아래로 둔 채였다면 막대 밑단이 스크롤러 밖이다 — 이것이 검수가 본 「단추 0/6」이다.
+    expect(placedRect.bottom).toBeGreaterThan(shrunk.bottom);
+    const settled = shift(rest, again.nudge, again.slide);
+    expect(settled.bottom).toBeLessThanOrEqual(shrunk.bottom);
+    expect(settled.top).toBeGreaterThanOrEqual(shrunk.top);
   });
 });
 

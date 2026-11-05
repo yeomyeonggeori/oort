@@ -288,8 +288,8 @@ describe("Timeline: 불러오기 실패", () => {
   it("받아 둔 글이 없으면 상자가 서고 이유 한 줄이 원인을 따라간다. 다시 시도가 부른다", async () => {
     const reasons: [ConnectionCause | null, string][] = [
       ["deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-      ["serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [null, "문제가 생겼어요. 다시 시도해 주세요."],
+      ["serverUnreachable", "서버에 닿지 못했어요."],
+      [null, "문제가 생겼어요."],
     ];
     for (const [cause, reason] of reasons) {
       const onRetry = vi.fn();

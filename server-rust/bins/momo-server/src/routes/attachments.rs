@@ -65,6 +65,22 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
+/// `error.code` of the 503 an instance without a usable archive answers (ADR-0151 증보 7 D1).
+/// An operator has to fix it, so it never carries a `Retry-After`.
+pub(crate) const CODE_DRIVE_NOT_CONFIGURED: &str = "drive_not_configured";
+
+/// `error.code` of the 502 for the archive refusing *this instance's own* credentials (증보 7 D1).
+/// Also an operator's to fix, so no `Retry-After`.
+pub(crate) const CODE_DRIVE_ACCESS_DENIED: &str = "drive_access_denied";
+
+/// `error.code` of the 502 for an archive request that failed, or whose bytes disagree with the
+/// row (증보 7 D1). The one archive answer that may clear by waiting.
+pub(crate) const CODE_DRIVE_UPSTREAM_FAILED: &str = "drive_upstream_failed";
+
+/// `Retry-After` (whole seconds) on [`CODE_DRIVE_UPSTREAM_FAILED`] (증보 7 D3): a hint, not a
+/// promise — a client may back off on its own schedule.
+pub(crate) const DRIVE_UPSTREAM_RETRY_AFTER_SECONDS: u64 = 5;
+
 /// Swift `AttachmentRoutes.httpError` (:470-479) — the archive's vocabulary
 /// mapped onto status codes, one for one.
 ///
@@ -72,15 +88,29 @@ use crate::AppState;
 /// account is an upstream problem with the instance's configuration, not the
 /// caller lacking permission. Answering 403 would tell a member who is perfectly
 /// entitled to the file that they are not.
+///
+/// The 502s and the 503 also name themselves (ADR-0151 증보 7 D1): a client can then tell "this
+/// server has no archive" and "the archive failed" from a 502/503 that something in front of the
+/// server produced, which carries no `error.code`. The 400, 404 and 413 stay exactly as they were —
+/// the 404 above all, which amendments 1 and 2 keep byte-identical to an unknown id.
 pub(crate) fn drive_error(error: DriveError) -> ApiError {
     let message = error.safe_message();
     match error {
-        DriveError::Unavailable => ApiError::new(StatusCode::SERVICE_UNAVAILABLE, message),
+        DriveError::Unavailable => ApiError::coded(
+            StatusCode::SERVICE_UNAVAILABLE,
+            CODE_DRIVE_NOT_CONFIGURED,
+            message,
+        ),
         DriveError::InvalidArguments(_) => ApiError::bad_request(message),
-        DriveError::AccessDenied => ApiError::new(StatusCode::BAD_GATEWAY, message),
+        DriveError::AccessDenied => {
+            ApiError::coded(StatusCode::BAD_GATEWAY, CODE_DRIVE_ACCESS_DENIED, message)
+        }
         DriveError::FileNotFound => ApiError::not_found(message),
         DriveError::ContentTooLarge => ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, message),
-        DriveError::UpstreamFailure => ApiError::new(StatusCode::BAD_GATEWAY, message),
+        DriveError::UpstreamFailure => {
+            ApiError::coded(StatusCode::BAD_GATEWAY, CODE_DRIVE_UPSTREAM_FAILED, message)
+                .with_retry_after(DRIVE_UPSTREAM_RETRY_AFTER_SECONDS)
+        }
     }
 }
 
@@ -522,6 +552,134 @@ mod tests {
             drive_error(DriveError::InvalidArguments("bad".into())).status,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    /// ADR-0151 증보 7 D1·D3: the archive faults that are 502/503 name themselves with a stable
+    /// `error.code`, and only the one that clears by waiting says when to come back. The rest of the
+    /// table (400/404/413) keeps the exact envelope it always had — the 404 above all, which
+    /// amendments 1 and 2 pin as byte-identical to an unknown id. Read off the real response, so the
+    /// header and the body are what a client gets.
+    #[tokio::test]
+    async fn an_archive_fault_names_itself_and_only_a_passing_one_says_when_to_come_back() {
+        use serde_json::{json, Value};
+
+        // (fault, status, code, Retry-After)
+        let table: [(DriveError, StatusCode, Option<&str>, Option<&str>); 6] = [
+            (
+                DriveError::Unavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some("drive_not_configured"),
+                None,
+            ),
+            (
+                DriveError::AccessDenied,
+                StatusCode::BAD_GATEWAY,
+                Some("drive_access_denied"),
+                None,
+            ),
+            (
+                DriveError::UpstreamFailure,
+                StatusCode::BAD_GATEWAY,
+                Some("drive_upstream_failed"),
+                Some("5"),
+            ),
+            (
+                DriveError::InvalidArguments("bad".into()),
+                StatusCode::BAD_REQUEST,
+                None,
+                None,
+            ),
+            (DriveError::FileNotFound, StatusCode::NOT_FOUND, None, None),
+            (
+                DriveError::ContentTooLarge,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                None,
+                None,
+            ),
+        ];
+        // Every row is judged before the test fails, so one run names every row that is wrong.
+        let mut mismatches: Vec<String> = Vec::new();
+        for (fault, status, code, retry_after) in table {
+            let message = fault.safe_message();
+            let response = drive_error(fault).into_response();
+            let got_status = response.status();
+            let got_retry_after = response
+                .headers()
+                .get(header::RETRY_AFTER)
+                .map(|value| value.to_str().expect("an ascii header").to_string());
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .expect("a small body");
+            let body: Value = serde_json::from_slice(&bytes).expect("a json body");
+            let mut expected = json!({"error": {"message": message}});
+            if let Some(code) = code {
+                expected["error"]["code"] = json!(code);
+            }
+            if got_status != status {
+                mismatches.push(format!("{message}: status {got_status}, wanted {status}"));
+            }
+            if got_retry_after.as_deref() != retry_after {
+                mismatches.push(format!(
+                    "{message}: Retry-After {got_retry_after:?}, wanted {retry_after:?}"
+                ));
+            }
+            if body != expected {
+                mismatches.push(format!("{message}: body {body}, wanted {expected}"));
+            }
+        }
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
+    }
+
+    /// The wire contract names what the server sends (ADR-0151 증보 7): the registry of error codes
+    /// lists the three archive codes, and every operation that reaches the archive documents them and
+    /// the `Retry-After` header of its 502. There is no YAML crate here, so an operation is the stretch
+    /// from its `operationId:` line to the next one (the reading
+    /// `invites::tests::the_openapi_names_the_paused_code_on_every_door_that_answers_it` makes); if
+    /// the spec stops naming a code on a door, this goes red with the door's name.
+    #[test]
+    fn the_openapi_names_the_archive_codes_where_the_server_sends_them() {
+        let spec = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/openapi.yaml"
+        ))
+        .expect("read openapi.yaml");
+        let codes = [
+            CODE_DRIVE_NOT_CONFIGURED,
+            CODE_DRIVE_ACCESS_DENIED,
+            CODE_DRIVE_UPSTREAM_FAILED,
+        ];
+        for operation in [
+            "createAttachmentUpload",
+            "completeAttachmentUpload",
+            "getAttachmentContent",
+        ] {
+            let header = format!("operationId: {operation}\n");
+            let start = spec
+                .find(&header)
+                .unwrap_or_else(|| panic!("openapi.yaml has no `{operation}`"));
+            let rest = &spec[start + header.len()..];
+            let end = rest.find("operationId:").unwrap_or(rest.len());
+            let stretch = &rest[..end];
+            for code in codes {
+                assert!(stretch.contains(code), "`{operation}` must name `{code}`");
+            }
+            assert!(
+                stretch.contains("Retry-After:"),
+                "`{operation}` must document the `Retry-After` header of its 502"
+            );
+        }
+        let registry = spec
+            .find("Stable machine code for a refusal a client branches on")
+            .expect("openapi.yaml has the error-code registry");
+        let end = spec[registry..]
+            .find("dev_cannot_decide")
+            .map_or(spec.len(), |at| registry + at);
+        for code in codes {
+            assert!(
+                spec[registry..end].contains(code),
+                "the error-code registry must list `{code}`"
+            );
+        }
     }
 
     /// No archive error message may carry upstream detail into a response body.
