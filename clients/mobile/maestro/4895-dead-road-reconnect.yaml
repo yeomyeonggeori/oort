@@ -1,0 +1,79 @@
+appId: app.momo.ios
+name: 4895-dead-road-reconnect
+---
+# 4895-dead-road-reconnect - 죽은 길에서 「지금 다시 연결」을 눌렀는데 길이 돌아와도 한참 안 붙는가 (#4895, 팀 QA 10-31 「앞에 둔 채 30초 넘게 남고 잠금 해제 뒤에야 복구」).
+#
+# 원인(인계 맨 위): 다시 붙는 시도 하나는 ① 토큰 요청(REST, 기한 15초 · 세션 갱신이 끼면 30초) ② 웹소켓 핸드셰이크(centrifuge-js 의 5초 기한)이고, **① 에는 라이브러리의 기한이 없다.** ① 은 우리가
+# `resume()`(복귀 · 종류 바뀜 · 온라인 회복 · 「지금 다시 연결」)으로 토큰을 비웠을 때 매 시도의 앞에 붙는다. 길이 쓸 만하지 않은 순간에 `resume()` 이 불리면 토큰 요청이 **얼음**에 걸려 기한이 다
+# 되도록 소식이 없고, 그 시도는 「이미 나간 시도」라 길이 돌아와도 다른 복구 신호가 건드리지 못했다 — 얼린 요청이 죽을 때까지, 그리고 백오프 한 번 더.
+#
+# 장면(서버는 멀쩡하고 길만 죽는다): ① 길 죽음 = `scripts/lane-dead-road.mjs` 의 hole-on(열린 연결·새 연결이 전부 얼음) + 소켓(centrifugo)을 내려 끊는다 → 10초 뒤 띠(단추) ② 사람이 단추를 누른다
+# (길은 아직 죽어 있다: 새 시도의 토큰 요청이 얼음에 걸린다) ③ 1.5초 뒤 길이 돌아온다(hole-off + centrifugo 올림; **얼린 연결은 끝내 풀리지 않는다**) ④ 「다시 연결됐어요」(`connection-check`)가
+# 뜰 때까지의 시간을 잰다. 수리 전에는 얼린 요청이 15초에 죽은 뒤 백오프를 기다려서 15초쯤, 수리 뒤에는 요청 기한(6초)에 끝나 6초쯤이다.
+#
+#   # 1) 레인 스택: `LANE_PHONE_PROJECT=<프로젝트> LANE_PHONE_API_PORT=<api> … bash clients/mobile/scripts/lane-phone.sh --keep --skip-flows` (앱은 Metro 에 물려 있고 하드웨어 키보드는 꺼져 있어야 한다).
+#   # 2) 죽은 길 중계(api 앞에 선다. 앱은 이 중계 주소로 로그인한다):
+#   node clients/mobile/scripts/lane-dead-road.mjs --listen <중계 포트> --target <api 포트> &        # 제어 포트 = 중계 포트 + 1
+#   # 3) 소켓 컨트롤러(centrifugo 컨테이너 하나만 내렸다 올린다):
+#   node clients/mobile/scripts/lane-api-ctl.mjs --project <compose 프로젝트> --port <포트> --service centrifugo &
+#   # 4) 흐름. LIMIT_MS(기본 9000)는 길이 돌아온 뒤 「다시 연결됐어요」까지의 상한이다:
+#   maestro --udid <UDID> test -e SERVER_URL=http://127.0.0.1:<중계 포트> -e EMAIL=<레인 이메일> -e PASSWORD=<레인 비밀번호> -e CHANNEL_ID=<#general 채널 id> \
+#     -e HOLE=http://127.0.0.1:<중계 포트 + 1> -e SOCK=http://127.0.0.1:<소켓 컨트롤러 포트> -e PREFIX=<사진 이름 머리> [-e LIMIT_MS=9000] --test-output-dir <폴더> clients/mobile/maestro/4895-dead-road-reconnect.yaml
+#   # 5) 중계와 컨트롤러를 PID 로 끝낸다(컨트롤러는 끝낼 때 컨테이너를 올려 두고 나간다).
+#
+# 두 번 되풀이하고 가장 느린 것을 단정한다. 사진 이름 끝에 두 번의 시간이 남는다. Maestro 2.8 의 기다림 timeout 은 마지막 상호작용부터 센다 — 기다림은 모두 넉넉한 240초다.
+- evalScript: "${output.limitMs = (typeof LIMIT_MS === 'undefined') ? 9000 : Number(LIMIT_MS)}"
+- evalScript: "${output.clears = []}"
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+# 건강한 연결은 말하지 않는다. 띠가 이미 서 있으면 아래 단정이 아무것도 증명하지 못한다.
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible:
+    id: "connection-banner"
+- takeScreenshot: ${PREFIX}-D0-healthy
+- repeat:
+    times: 2
+    commands:
+      # 길이 죽는다: 열린 연결과 새 연결이 얼고, 소켓이 끊긴다.
+      - evalScript: ${http.get(HOLE + '/hole-on').status}
+      - evalScript: ${http.get(SOCK + '/stop').status}
+      # 10초 뒤 「끊김」 띠(단추).
+      - extendedWaitUntil:
+          visible:
+            id: "connection-banner-action"
+          timeout: 240000
+      - takeScreenshot: ${PREFIX}-D1-band
+      # 사람이 단추를 누른다. 길은 아직 죽어 있다.
+      - tapOn:
+          id: "connection-banner-action"
+      - evalScript: ${(function () { var end = new Date().getTime() + 1500; while (new Date().getTime() < end) {} return 0; })()}
+      # 길이 돌아온다. 얼린 연결은 풀리지 않는다.
+      - evalScript: ${http.get(HOLE + '/hole-off').status}
+      - evalScript: ${http.get(SOCK + '/start').status}
+      - evalScript: ${output.backAt = new Date().getTime()}
+      # 「다시 연결됐어요」(확인 표시)가 뜨면 소켓이 다시 붙은 것이다.
+      - extendedWaitUntil:
+          visible:
+            id: "connection-check"
+          timeout: 240000
+      - evalScript: ${output.clears.push(new Date().getTime() - output.backAt)}
+      - extendedWaitUntil:
+          notVisible:
+            id: "connection-banner"
+          timeout: 60000
+      # 다음 번이 앞 번의 복구 표시와 겹치지 않게 건강한 채로 잠시 둔다.
+      - evalScript: ${(function () { var end = new Date().getTime() + 6000; while (new Date().getTime() < end) {} return 0; })()}
+- evalScript: ${console.log('4895 dead-road clear-after-road-back ms ' + output.clears.join(',') + ' (limit ' + output.limitMs + ')')}
+- takeScreenshot: ${PREFIX}-D2-clears-${output.clears.join('_')}ms
+- assertTrue:
+    condition: ${Math.max.apply(null, output.clears) <= output.limitMs}
+    label: "길이 돌아온 뒤 연결이 두 번 모두 LIMIT_MS 안에 다시 붙는다 (#4895)"

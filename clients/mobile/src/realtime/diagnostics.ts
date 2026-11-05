@@ -35,6 +35,10 @@
 // reachability changes, so a same-kind outage is visible as
 // `network cellular->cellular unreachable` followed by `network cellular->cellular`.
 //
+// `policy stuck-attempt-cut` (#4895) says a token request that had been out for 3 s or more was given up
+// by an explicit recovery (a return, a kind change, reachability coming back, the "reconnect now" tap) so a new
+// attempt could open. An `error connectToken` that follows a quiet 6 s is the request's own budget running out.
+//
 // Each `connected` → not-connected transition carries `lifetimeMs`, which is the
 // number the RCA could only reconstruct from edge logs.
 //
@@ -89,6 +93,7 @@ const SAFE_DETAILS: Partial<Record<RealtimeDiagnosticKind, readonly string[]>> =
     'manual-reconnect',
     'terminal-retry',
     'terminal-hold',
+    'stuck-attempt-cut',
   ],
   'app-state': ['active', 'inactive', 'background', 'unknown', 'extension'],
   error: ['connectToken', 'refreshToken', 'transport', 'timeout', 'refresh', 'connect'],
