@@ -5,7 +5,7 @@ import { cn } from "@/design/lib/cn";
 import { Avatar } from "./MessageRow";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
-import { QuoteBlock } from "./QuoteBlock";
+import { QuoteCardAround } from "./QuoteBlock";
 import { SendFailureActions } from "./SendFailureActions";
 import { useSlowSend } from "./sendSlow";
 import { timeLabel } from "./timeLabel";
@@ -184,17 +184,20 @@ export function PendingRow({
             )}
           </div>
         )}
-        {quote && <QuoteBlock block={quote} directory={directory} />}
-        {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
-            showed raw asterisks and then re-flowed into bold the moment its seq
-            landed would move the text under the reader's eye. */}
-        <MessageBody
-          body={pending.body}
-          directory={directory}
-          // 흐림은 실패한 행만(#4468). 정상 전송이 흐렸다가 서버 사본에서 진해지면 그것이 색 깜빡임이다.
-          muted={failed}
-          selfMemberId={pending.authorMemberId}
-        />
+        {/* 인용은 본문을 싸는 카드의 윗칸이다(#5381 Q4) — 확정된 행과 같은 카드다. 에코가 카드를 안 그렸다가 seq가
+            도착하는 순간 모양이 바뀌면 읽는 사람 눈 아래에서 본문이 움직인다. */}
+        <QuoteCardAround quote={quote} directory={directory}>
+          {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
+              showed raw asterisks and then re-flowed into bold the moment its seq
+              landed would move the text under the reader's eye. */}
+          <MessageBody
+            body={pending.body}
+            directory={directory}
+            // 흐림은 실패한 행만(#4468). 정상 전송이 흐렸다가 서버 사본에서 진해지면 그것이 색 깜빡임이다.
+            muted={failed}
+            selfMemberId={pending.authorMemberId}
+          />
+        </QuoteCardAround>
         {/* 확정된 행과 **같은 카드**를 그린다 (ADR-0151). 바이트는 전송을 누르기
             전에 이미 보관소에 올라가 있으므로, 이 카드는 seq 를 기다리는 동안에도
             거짓이 아니다 — 내려받기 버튼조차 진짜로 동작한다. 인용을 echo 에도
