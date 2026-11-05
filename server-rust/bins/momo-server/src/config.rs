@@ -2011,12 +2011,18 @@ fn cloud_box_gate_open(value: Option<&str>) -> bool {
 ///   signs yet (E5 #3025), and ADR-0146 D-11 keeps the R2 switches closed
 ///   until the R1 security re-review PASS. A signature that IS sent is verified
 ///   either way.
-/// * `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` — `true` makes a refresh-token
-///   reuse end the lineage of every session (ADR-0188 §4 R1). Default **off**:
-///   QR-linked (phone) lineages are swept regardless; password sign-ins wait
-///   until the web client coordinates rotation across tabs, because a tab
-///   opened later spends the token an older tab holds and the server cannot
-///   tell that from theft (#3022 review H2).
+/// * `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` — whether a refresh-token reuse
+///   ends the lineage of a **password** sign-in too (ADR-0188 §4 R1). Default
+///   **on** (#5339, owner decision 2026-11-05): a spent token that comes back
+///   after the 30 s grace ends the lineage of every sign-in — desktop and web
+///   as well as a QR-linked phone. Only the exact word `false` turns it off, an
+///   operator's emergency switch should a client turn out to present spent
+///   tokens legitimately; unset, blank and anything else (`False`, `0`, `off`)
+///   leave it on, because a sweep restricts and a typo must not weaken it. A
+///   QR-linked (phone) lineage is swept whatever this says. It was off by
+///   default (#3022 review H2: a tab opened later spends the token an older tab
+///   holds, and the server cannot tell that from theft) until the web client
+///   serialised rotation across tabs (#3067).
 /// * `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` — `true` makes a person's
 ///   instruction to a member-scoped host (a permission **allow** today; the
 ///   signed `input`/`spawn` route is E7 #3027) without a verified
@@ -2036,7 +2042,7 @@ fn cloud_box_gate_open(value: Option<&str>) -> bool {
 ///   back without one (inside the 30 s window too). Lineages bound under
 ///   `observe` are enforced the moment the mode flips. `off` ignores proofs.
 ///   Any other value is a boot error.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceKeySettings {
     pub instance_id: Option<String>,
     pub host_register_signature_required: bool,
@@ -2047,19 +2053,54 @@ pub struct DeviceKeySettings {
     pub refresh_proof_mode_invalid: bool,
 }
 
+/// What an instance runs when `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` is not set (#5339).
+const REFRESH_REUSE_SWEEP_ALL_SESSIONS_DEFAULT: bool = true;
+
+/// The parse of `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS`, separated from the environment so
+/// the table is a test. Unset and blank are the default (on); only the exact word `false`
+/// (trimmed) turns the sweep off; every other value — a typo included — keeps it on.
+fn refresh_reuse_sweep_all_sessions_on(value: Option<&str>) -> bool {
+    match value.map(str::trim) {
+        None | Some("") => REFRESH_REUSE_SWEEP_ALL_SESSIONS_DEFAULT,
+        Some("false") => false,
+        Some(_) => true,
+    }
+}
+
+impl Default for DeviceKeySettings {
+    fn default() -> Self {
+        DeviceKeySettings {
+            instance_id: None,
+            host_register_signature_required: false,
+            refresh_reuse_sweep_all_sessions: REFRESH_REUSE_SWEEP_ALL_SESSIONS_DEFAULT,
+            human_control_signature_required: false,
+            refresh_proof_mode: RefreshProofMode::default(),
+            refresh_proof_mode_invalid: false,
+        }
+    }
+}
+
 impl DeviceKeySettings {
     pub fn from_env() -> DeviceKeySettings {
-        let refresh_proof_mode = match env("MOMO_REFRESH_PROOF_MODE") {
+        DeviceKeySettings::from_lookup(env)
+    }
+
+    /// [`DeviceKeySettings::from_env`] with the lookup handed in, so a test proves what an
+    /// instance with nothing set runs, and that each variable's name reaches its field,
+    /// without touching the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> DeviceKeySettings {
+        let refresh_proof_mode = match lookup("MOMO_REFRESH_PROOF_MODE") {
             None => Some(RefreshProofMode::default()),
             Some(raw) => RefreshProofMode::parse(&raw),
         };
         DeviceKeySettings {
-            instance_id: env("MOMO_INSTANCE_ID").map(|value| value.trim().to_string()),
-            host_register_signature_required: env("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
+            instance_id: lookup("MOMO_INSTANCE_ID").map(|value| value.trim().to_string()),
+            host_register_signature_required: lookup("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
                 .is_some_and(|value| value.trim() == "true"),
-            refresh_reuse_sweep_all_sessions: env("MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS")
-                .is_some_and(|value| value.trim() == "true"),
-            human_control_signature_required: env("MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED")
+            refresh_reuse_sweep_all_sessions: refresh_reuse_sweep_all_sessions_on(
+                lookup("MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS").as_deref(),
+            ),
+            human_control_signature_required: lookup("MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED")
                 .is_some_and(|value| value.trim() == "true"),
             refresh_proof_mode: refresh_proof_mode.unwrap_or_default(),
             refresh_proof_mode_invalid: refresh_proof_mode.is_none(),
@@ -3562,8 +3603,8 @@ mod tests {
         let default = DeviceKeySettings::default();
         assert!(!default.host_register_signature_required);
         assert!(
-            !default.refresh_reuse_sweep_all_sessions,
-            "password sign-ins are not swept until the web client coordinates tabs"
+            default.refresh_reuse_sweep_all_sessions,
+            "#5339: a reuse ends the lineage of a password sign-in by default too"
         );
         assert_eq!(default.boot_error(), None);
         assert!(
@@ -3609,6 +3650,53 @@ mod tests {
             ..DeviceKeySettings::default()
         };
         assert!(oversized.boot_error().is_some());
+    }
+
+    /// #5339: an instance with nothing set sweeps a reuse of EVERY sign-in's lineage; only the
+    /// exact word `false` is the off switch, and a typo never weakens it.
+    #[test]
+    fn refresh_reuse_sweep_defaults_on_and_only_the_exact_word_false_turns_it_off() {
+        // What the boot path builds from an empty environment IS the default.
+        let empty = DeviceKeySettings::from_lookup(|_| None);
+        assert!(empty.refresh_reuse_sweep_all_sessions, "unset is on");
+        assert_eq!(empty, DeviceKeySettings::default());
+        assert!(DeviceKeySettings::default().refresh_reuse_sweep_all_sessions);
+
+        let sweep = |value: Option<&str>| {
+            DeviceKeySettings::from_lookup(|key| {
+                if key == "MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS" {
+                    value.map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .refresh_reuse_sweep_all_sessions
+        };
+        for on in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("true"),
+            Some("TRUE"),
+            Some("False"),
+            Some("FALSE"),
+            Some("0"),
+            Some("off"),
+            Some("no"),
+            Some("fals"),
+            Some("false!"),
+        ] {
+            assert!(sweep(on), "{on:?} leaves the sweep on");
+        }
+        for off in [Some("false"), Some(" false "), Some("false\n")] {
+            assert!(!sweep(off), "{off:?} is the off switch");
+        }
+
+        // The off switch is read from ITS variable: a misspelt name changes nothing.
+        let misspelt = DeviceKeySettings::from_lookup(|key| {
+            (key == "MOMO_REFRESH_REUSE_SWEEP_ALL_SESSION").then(|| "false".to_string())
+        });
+        assert!(misspelt.refresh_reuse_sweep_all_sessions);
     }
 
     #[test]
