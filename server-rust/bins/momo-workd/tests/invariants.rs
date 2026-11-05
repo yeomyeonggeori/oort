@@ -28,7 +28,7 @@
 //! | `inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits` | #3118 (R2 H1): `SessionManager::permission_preview_sha256` looked up in `ControlLoop::check_signature` and `HumanTrust::check_control_with_preview` rebuilding the allow with the host's own hash; the preview relayed with the request is the tool call the agent asked about |
 //! | `inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands` | `policy::AGENT_ENV_ALLOWLIST` in `policy::launch_spec` (#2630 F1); `HOME` in Codex's isolation environment (#2630 F5) |
 //! | `inv_55_a_resume_never_hands_the_relayed_label_to_the_agent` | the resume arm of the first prompt in `SessionManager::spawn` and `policy::RESUME_FIRST_PROMPT` (#5338, ADR-0188 §8.12): a session the server pre-allocated starts with the host's sentence, not the label |
-//! | `inv_56_r2_a_resume_runs_the_label_only_when_the_host_verified_the_owners_signature` | `ControlLoop::verifies_signature` handing `owner_confirmed_label` to `SessionManager::spawn` (#5338): a verified signature keeps the signed label, an unverified one gets the sentence |
+//! | `inv_56_r2_a_resume_runs_the_label_only_when_the_host_verified_the_owners_signature` | `ControlLoop::check_signature` reporting `Ok(true)` only after it verified the signature, handed on as `owner_confirmed_label` to `SessionManager::spawn` (#5338): a verified signature keeps the signed label, an unverified one gets the sentence |
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
