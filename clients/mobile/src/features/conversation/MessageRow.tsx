@@ -2306,6 +2306,14 @@ export interface MessageRowProps {
    * hardest exactly when the conversation is busy.
    */
   quote?: QuoteBlockModel | null;
+  /**
+   * 위 `quote` 를 **그리지 않는다** — 에이전트의 답이 같은 목록의 바로 위 메시지를 가리킨다(#5357, 코어 `isQuoteRedundant`).
+   *
+   * `quote` 를 `null` 로 비우지 않고 이 플래그를 따로 두는 까닭: 걸러지기 전의 블록이 아직 일을 한다. 도우미가 넘기는 줄은 실시간으로 온 행이면
+   * 원래 요청의 본문을 이 블록에서 읽는다(`delegateSourceBody`) — 요청이 바로 위에 있는 때가 정확히 이 플래그가 켜지는 때다. 그리는 자리(블록)와
+   * 말하는 자리(화면 낭독의 「인용」 문장·「인용한 원본으로 이동」 동작)만 이 플래그를 따른다. 없으면 `false` 다.
+   */
+  quoteRedundant?: boolean;
   /** 로드된 인용 원본의 첨부 수. 인용 안에서는 바이트 대신 최소 표지만 그린다. */
   quoteAttachmentCount?: number;
   /**
@@ -2466,6 +2474,7 @@ function MessageRowInner({
   rollup: rollupOverride,
   replyParent,
   quote,
+  quoteRedundant = false,
   quoteAttachmentCount,
   unfurls = NO_UNFURLS,
   approvalGates,
@@ -2498,6 +2507,8 @@ function MessageRowInner({
         : undefined,
     [registerRowNode, messageId],
   );
+  // 이 행이 **그리고 말하는** 인용. 걸러지기 전의 `quote` 는 위임 줄의 원문 읽기(`delegateSourceBody`)만 쓴다 — 이유는 `quoteRedundant` 의 prop 주석.
+  const drawnQuote = quoteRedundant ? null : quote;
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const requestSentence = useMemo(() => {
     if (!requestCardTarget) return undefined;
@@ -3076,7 +3087,7 @@ function MessageRowInner({
     // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
     // 메시지에는 열 링크도 복사할 코드도 없다.
     if (!deleted) {
-      if (quote && quote.kind !== 'unresolved' && actions?.onJumpToQuoted) {
+      if (drawnQuote && drawnQuote.kind !== 'unresolved' && actions?.onJumpToQuoted) {
         list.push({name: 'momoQuoteJump', label: '인용한 원본으로 이동'});
       }
       if (affordances.firstLink) {
@@ -3117,7 +3128,7 @@ function MessageRowInner({
     actionable,
     threadTarget,
     deleted,
-    quote,
+    drawnQuote,
     actions,
     affordances,
     presentation.artifact,
@@ -3204,8 +3215,8 @@ function MessageRowInner({
         tombstoneText,
         replyTo: replyToSpoken,
         quoted:
-          quote && !deleted
-            ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
+          drawnQuote && !deleted
+            ? quoteAccessibilityPhrase(drawnQuote, directory, quoteAttachmentCount)
             : null,
         }),
         // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
@@ -3335,9 +3346,9 @@ function MessageRowInner({
             「무엇을 가리키는가」 → 「무슨 말인가」다. 묘비에는 붙이지 않는다:
             지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지
             묘비에 대한 사실이 아니다. */}
-        {quote && !deleted ? (
+        {drawnQuote && !deleted ? (
           <QuoteBlock
-            block={quote}
+            block={drawnQuote}
             directory={directory}
             attachmentCount={quoteAttachmentCount}
             // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
@@ -3909,6 +3920,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   rollup: true,
   replyParent: true,
   quote: true,
+  quoteRedundant: true,
   quoteAttachmentCount: true,
   unfurls: true,
   approvalGates: true,
@@ -3984,6 +3996,8 @@ export function sameMessageRowProps(
     sameChips(a.chips, b.chips) &&
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote) &&
+    // #5357. 스칼라다. 없음과 거짓은 같은 말이다(그린다). 빠지면 질문 바로 아래로 옮겨 온 행이 인용을 든 채 서 있다.
+    (a.quoteRedundant ?? false) === (b.quoteRedundant ?? false) &&
     a.quoteAttachmentCount === b.quoteAttachmentCount &&
     // #4883. 목록이 줄마다 코어 투영 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성으로 충분하다. 한 메시지의 카드가
     // 바뀔 때(서버가 만들었다·작성자가 지웠다)만 그 줄이 다시 그려진다 — 채널의 다른 카드는 이 줄을 건드리지 않는다.

@@ -103,8 +103,12 @@ security-framework-sys = { version = "2", features = ["OSX_10_15"] }
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "objc2-core-foundation"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView", "NSScrollView", "NSTextView", "NSText", "NSClipView", "NSGraphics", "objc2-core-foundation"] }
+# The menu-bar icon's bar-look read and watch (#5358, `src/tray.rs`): the status item button's
+# `effectiveAppearance` (NSAppearance, NSStatusItem, NSStatusBarButton) and a key-value observer on it
+# (NSKeyValueObserving, NSDictionary, NSArray). Feature flags only: no crate is added and Cargo.lock does
+# not change (the build and the tests run with --locked).
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSArray", "NSDictionary", "NSKeyValueObserving", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView", "NSScrollView", "NSTextView", "NSText", "NSClipView", "NSGraphics", "NSAppearance", "NSStatusItem", "NSStatusBarButton", "objc2-core-foundation"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 unicode-normalization = "0.1"
 
