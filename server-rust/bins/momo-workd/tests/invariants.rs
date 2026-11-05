@@ -1285,6 +1285,68 @@ async fn inv_6_codex_runs_only_from_the_hosts_own_home() {
 }
 
 #[tokio::test]
+async fn inv_6b_a_codex_session_starts_only_when_its_effective_features_read_off() {
+    // #2647 L1 (#2644 security review): the host's switches are keys in its
+    // `config.toml`. A codex that ignores or renamed one would run the
+    // feature on its default — `shell_snapshot` brings the owner's `.zshrc`
+    // exports back into every command. So the host reads the effective table
+    // back from the codex the adapter runs before it starts a Codex session
+    // (ADR-0188 §8.10), and refuses the session when it differs.
+    let mut h = harness_with(&[(
+        "codex",
+        AdapterKind::Codex,
+        &["--codex-modes", "--mode", "read-only"],
+    )]);
+    sign_in_codex(&h);
+    // The fake codex-acp's drift hook (`momo-workd-acp-stub`, `cli features
+    // list`): a row forced to a state is a codex that ignores the key, a
+    // `-name` line is a codex that no longer lists the feature.
+    let hook = h.codex.home.join("zz-stub-features");
+    for (what, line) in [
+        (
+            "codex ignores the shell_snapshot key",
+            "shell_snapshot stable true",
+        ),
+        (
+            "codex renamed the shell_snapshot feature",
+            "-shell_snapshot",
+        ),
+        ("codex ignores the memories key", "memories stable true"),
+    ] {
+        std::fs::write(&hook, format!("{line}\n")).unwrap();
+        let request = spawn(&h, "codex", "look around");
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        assert_eq!(
+            ack_for(&h, request.id),
+            ControlAck::refused("codex_config_unverified"),
+            "{what}"
+        );
+        assert!(
+            !h.record.exists(),
+            "{what}: no adapter session was launched: {:?}",
+            stub_log(&h)
+        );
+        assert!(h.server.creates().is_empty(), "{what}: no server session");
+    }
+
+    // The hook is the only difference: without it the same spawn runs, so the
+    // refusals above are the check's, not something else's.
+    std::fs::remove_file(&hook).unwrap();
+    let request = spawn(&h, "codex", "summarise the repo");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the first turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    assert!(h.record.exists(), "the session launched the adapter");
+}
+
+#[tokio::test]
 async fn inv_7_a_lost_spawn_ack_response_still_starts_the_session() {
     let mut h = harness(&[("claude", &[])]);
     *h.server.lose_next_ack_response.lock().unwrap() = true;
