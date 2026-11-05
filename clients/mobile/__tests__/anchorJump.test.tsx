@@ -14,6 +14,11 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {
+  __resetSearchRecentsCache,
+  recentsFor,
+  recentsScope,
+} from '../src/features/search/searchRecents';
 import AppShell from '../src/shell/AppShell';
 import {sessionPort} from '../src/storage/secureSession';
 import {setServerBase} from '../src/storage/serverBase';
@@ -498,5 +503,15 @@ describe('#1196 — 고정 목록 점프는 자기 낱말로 말한다', () => {
     expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(/인용한 원본/);
     // 검색 주어를 빌려 쓰지도 않는다 — 셋은 서로 다른 것을 찾고 있다.
     expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(/찾던 메시지/);
+  });
+});
+
+describe('#5365 — 연 대화는 검색 탭의 「최근 연 대화」에 남는다', () => {
+  it('어느 문으로 열었든 대화 층이 서면 그 채널 id 가 이 기기의 최근 목록 맨 앞에 선다', async () => {
+    __resetSearchRecentsCache();
+    installFetch();
+    await openConversation();
+    // 목록·검색·알림이 모두 대화 층 하나로 모이므로 셸이 그 자리에서 한 번 남긴다.
+    expect(recentsFor(recentsScope(WS, SELF_ID)).conversations).toEqual([GENERAL]);
   });
 });

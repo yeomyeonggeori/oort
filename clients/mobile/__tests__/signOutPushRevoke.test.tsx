@@ -8,6 +8,13 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {isPushPreviewOn, isPushShowSenderOn, setPushPreview, setPushShowSender} from '../src/push/presentation';
+import {
+  __resetSearchRecentsCache,
+  recentsFor,
+  recentsScope,
+  rememberConversation,
+  rememberSearch,
+} from '../src/features/search/searchRecents';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -247,6 +254,21 @@ describe('로그아웃 — 알림 확장에게 건넨 것을 지운다 (#4316)',
     expect(isPushShowSenderOn()).toBe(false);
     expect(store.map.get(NON_SECRET_KEYS.pushPreview)).toBe('0');
     expect(store.map.get(NON_SECRET_KEYS.pushShowSender)).toBe('0');
+  });
+});
+
+describe('로그아웃 — 검색 탭의 최근 목록을 지운다 (#5365)', () => {
+  it('최근 검색·최근 연 대화는 사람이 나갈 때 통째로 비워진다 — 다음 사람의 첫 화면에 앞 사람의 검색어가 비치지 않는다', () => {
+    __resetSearchRecentsCache();
+    const scope = recentsScope(WS, LOGIN_BODY.member.id);
+    rememberSearch(scope, '앞 사람의 검색어');
+    rememberConversation(scope, 'ch-a');
+    expect(store.map.has(NON_SECRET_KEYS.searchRecents)).toBe(true);
+
+    signOutFromApp()();
+
+    expect(store.map.has(NON_SECRET_KEYS.searchRecents)).toBe(false);
+    expect(recentsFor(scope)).toEqual({searches: [], conversations: []});
   });
 });
 

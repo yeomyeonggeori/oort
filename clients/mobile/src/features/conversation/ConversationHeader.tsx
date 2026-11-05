@@ -72,6 +72,8 @@ export function ConversationHeader({
   onBack,
   onOpenMenu,
   onOpenInfo,
+  onOpenSearch,
+  searchRow,
   huddle,
   follow,
   band,
@@ -107,6 +109,16 @@ export function ConversationHeader({
    * 이름만 선다(누르면 아무 일도 없는 단추는 없다 — ⋮·허들 자리와 같은 규칙).
    */
   onOpenInfo?: () => void;
+  /**
+   * 돋보기 원을 누르면 부른다(#5364) — ⋮ 바로 왼쪽에 선다(카카오톡과 같은 자리, owner 11-05). 무엇이 열리는가(머리가 검색 줄로 바뀌고 결과가 이 대화를
+   * 덮는다)는 화면의 일이다. 없으면 원을 세우지 않는다: 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다(⋮·허들 자리와 같은 규칙).
+   */
+  onOpenSearch?: () => void;
+  /**
+   * 주면 머리 줄(뒤로 · 이름 알약 · 원들)의 **자리에** 이 줄이 선다(#5364, 대화 안 검색의 검색 줄). 안전 영역·연결 띠·요약 줄은 그대로 이 머리가 지고
+   * (그래서 목록이 비키는 높이가 안 움직인다), 줄만 바뀐다. 줄의 높이는 `CONV.headHeight` 다.
+   */
+  searchRow?: React.ReactNode;
   huddle?: HuddleSlot;
   /** 스레드 화면의 「따라가기」 원(#4890). 없으면 서지 않는다 — 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다. */
   follow?: FollowSlot;
@@ -206,6 +218,7 @@ export function ConversationHeader({
     huddle: huddle !== undefined,
     menu: onOpenMenu !== undefined,
     follow: follow !== undefined,
+    search: onOpenSearch !== undefined,
   });
   // 보조 글: DM 은 상태 낱말, 채널은 멤버 수. 줄이 모자라면 이름이 이기고 보조 글이 통째로 숨는다(`headerPill.ts`).
   const secondaryText = isDm ? (hasStatus ? pillStatusWord(peerStatusLabel) : null) : isChannel ? (memberCount ?? null) : null;
@@ -271,6 +284,7 @@ export function ConversationHeader({
     <View testID="conversation-header" pointerEvents="box-none" onLayout={onHeaderLayout} style={[styles.root, {paddingTop: insets.top}]}>
       {/* 정적인 공간 페이드다. 불투명도 애니메이션은 유리 조상에 걸지 않는다. */}
       <View pointerEvents="none" style={[styles.statusFade, {height: insets.top + CONV.headHeight}]} testID="conversation-status-fade" />
+      {searchRow ?? (
       <View pointerEvents="box-none" style={styles.row} testID="conversation-header-row">
         <View pointerEvents="box-none" style={[styles.slot, {width: slotWidth}]} testID="conversation-header-start">
           <Pressable
@@ -338,6 +352,21 @@ export function ConversationHeader({
               />
             </Pressable>
           ) : null}
+          {onOpenSearch ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={formatMessage('mobile.convSearch.open')}
+              onPress={onOpenSearch}
+              hitSlop={CIRCLE_SLOP}
+              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+              testID="conversation-search">
+              <GlassSurface radius={CONV.circle / 2} style={StyleSheet.absoluteFill} testID="conversation-search-glass" />
+              <Image
+                source={CONV_ICONS.search}
+                style={[styles.icon20, {tintColor: palette.text}]}
+              />
+            </Pressable>
+          ) : null}
           {onOpenMenu ? (
             <Pressable
               accessibilityRole="button"
@@ -355,6 +384,7 @@ export function ConversationHeader({
           ) : null}
         </View>
       </View>
+      )}
       {children}
       {shown !== null ? (
         // 머리 밑 가장자리에 매달려 목록 위에 뜬다. 문장이 아닌 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가
