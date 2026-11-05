@@ -577,6 +577,13 @@ impl Reply {
             .and_then(|parsed| parsed["error"]["message"].as_str().map(str::to_string))
             .unwrap_or_default()
     }
+
+    /// `error.code` of a refusal's body (`None` when the body names none).
+    fn refusal_code(&self) -> Option<String> {
+        serde_json::from_slice::<Value>(&self.body)
+            .ok()
+            .and_then(|parsed| parsed["error"]["code"].as_str().map(str::to_string))
+    }
 }
 
 /// One request to the content route. `extra` are added verbatim (so a test can
@@ -1466,6 +1473,18 @@ async fn an_archive_that_disagrees_with_the_row_is_refused_before_any_byte() {
             let refused = get(&http, &url, Some(&bob), range).await;
             assert_eq!(refused.status, 502, "skew {skew}, {range:?}");
             assert!(refused.header("content-range").is_none());
+            // ADR-0151 증보 7: the 502 names itself and says when to come back, read off the
+            // response the real router sent (after every layer), not off the error value.
+            assert_eq!(
+                refused.refusal_code().as_deref(),
+                Some("drive_upstream_failed"),
+                "skew {skew}, {range:?}"
+            );
+            assert_eq!(
+                refused.header("retry-after"),
+                Some("5"),
+                "skew {skew}, {range:?}"
+            );
             let message = refused.refusal();
             assert!(
                 !message.contains("stub") && !message.contains("local-") && !message.is_empty(),
