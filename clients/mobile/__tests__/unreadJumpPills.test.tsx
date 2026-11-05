@@ -425,7 +425,7 @@ describe('위 필 「안읽음으로」', () => {
     expect(topPill()).toBeNull();
   });
 
-  it('대화에 서지 않는 스레드 답글은 아래 필의 새 메시지 수에 들지 않는다 (#4888)', async () => {
+  it('대화에 서지 않는 스레드 답글은(옛 「대화에도 보낸」 답글 포함) 아래 필의 새 메시지 수에 들지 않는다 (#4888 · #5324)', async () => {
     // 새 서버(요약에 참여자 키)에서 남이 스레드로만 단 답글은 대화에 그려지지 않는다 — 안 보이는 행을 세면 「새 메시지 1개」가 헛 신호다.
     const root = {...HISTORY[0], thread: {reply_count: 1, last_reply_seq: 9, last_reply_at: 1, participant_ids: [OTHER], participant_count: 1}};
     const base = [root, ...HISTORY.slice(1)];
@@ -435,8 +435,11 @@ describe('위 필 「안읽음으로」', () => {
     expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
     rerender({messages: [...base, {...message(9), rootId: root.id}]});
     expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
-    // 같은 자리에 대화에도 보낸 답글이면 대화에 서므로 센다.
+    // 옛날에 「대화에도 보내기」로 보낸 답글도 이제 스레드에만 보이므로 세지 않는다(#5324) — 서버 필드가 true 여도 같다.
     rerender({messages: [...base, {...message(9), rootId: root.id, alsoInChannel: true}]});
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+    // 같은 자리의 본류 메시지(루트 없음)는 센다 — 위 두 단정이 「필 자체가 안 선다」가 아니라 「세지 않는다」임을 못 박는다.
+    rerender({messages: [...base, {...message(9), rootId: root.id, alsoInChannel: true}, message(10)]});
     expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
   });
 

@@ -485,14 +485,12 @@ export interface Message {
    */
   replyToId?: string;
   /**
-   * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다: 이 스레드 답글은
-   * 채널 본류에도 보인다. 본류에 보이는 규칙은 **`rootId`가 없는 메시지 + 이 값이 `true`인 답글**이고,
-   * 스레드 화면에는 그 root의 모든 답글이 이 값과 무관하게 보인다.
+   * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐던 스레드 답글이다. **2026-11-05부터 화면은 이 값을
+   * 읽지 않는다**: 이 클라이언트는 더는 켜지 못하고(서버 필드는 호환을 위해 유지), 이미 켜고 보낸 답글도 **스레드에만** 보인다
+   * (본류의 행도 한 줄 요약도 없다). 읽는 곳은 「서버가 스레드 요약을 아는가」의 증거(`serverSpeaksThreadHome`)뿐이다.
    *
-   * **`true`일 때만 온다 — 켜지 않았으면 키 자체가 없다**(`runEnded`와 같은 모양, `=== true`로 읽는다).
-   * 답글(`rootId` 있음)에서만 켤 수 있다. 전송 응답·히스토리·답글 페이지·편집 응답, 그리고
-   * 실시간 `message.new`·`message.edited`(`also_in_channel`)에 실린다. 편집 프레임도 싣는다 —
-   * 말하지 않음을 「꺼짐」으로 읽어 본류의 행을 지우지 않게 하려는 것이다.
+   * **`true`일 때만 온다 — 켜지 않았으면 키 자체가 없다**(`runEnded`와 같은 모양, `=== true`로 읽는다). 전송 응답·히스토리·답글 페이지·
+   * 편집 응답, 그리고 실시간 `message.new`·`message.edited`(`also_in_channel`)에 실린다.
    */
   alsoInChannel?: boolean;
   /**
@@ -3358,19 +3356,11 @@ export function sendMessage(
 /**
  * 스레드 답글 전송(`sendThreadReply`)의 선택들.
  *
- * `alsoInChannel`이 `SendMessageOptions`가 아니라 여기에 있는 이유: 「대화에도 보내기」는 **답글에서만**
- * 켤 수 있고, `sendMessage`는 `rootId`를 싣지 않는 전송이라 거기서 켜면 서버가 늘 400으로 거절한다.
- * 켤 수 있는 자리에만 옵션이 있게 해서 그 실수가 타입에서 막히게 한다.
+ * 서버의 `alsoInChannel`(ADR-0148 증보 2026-10-31)은 호환을 위해 서버에 남아 있지만, 2026-11-05 owner 결정으로 **이 클라이언트는 더는
+ * 보내지 않는다** — 옵션도 없다. 답글은 스레드에만 선다.
  */
 export interface ThreadReplyOptions {
   attachmentIds?: SendMessageOptions["attachmentIds"];
-  /**
-   * ADR-0148 증보 2026-10-31(#4887) — 「대화에도 보내기」: 이 답글을 채널 본류에도 보인다. 켠 때만
-   * 키가 간다(`true`). 끄거나 없으면 키 자체가 빠진다 — 전송 요청은 closed-world라 옛 서버는 모르는
-   * 키를 400으로 거절하므로, 켜지 않은 답글은 이 필드 이전과 바이트 단위로 같은 요청이어야 한다.
-   * 보낼 때 한 번 정해지고 이후에 바꾸는 길은 없다.
-   */
-  alsoInChannel?: boolean;
   /** `SendMessageOptions.suppressUnfurl`와 같다 — 켠 때(`true`)만 키가 간다. */
   suppressUnfurl?: SendMessageOptions["suppressUnfurl"];
 }
@@ -3397,8 +3387,6 @@ export function sendThreadReply(
     type: "text",
     body: bodyText,
   };
-  // 이 함수가 `rootId`를 늘 싣는 유일한 전송이라 「대화에도 보내기」가 합법인 자리다(#4887).
-  if (options?.alsoInChannel === true) body.alsoInChannel = true;
   if (options?.suppressUnfurl === true) body.suppressUnfurl = true;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;

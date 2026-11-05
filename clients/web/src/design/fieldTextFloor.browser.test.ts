@@ -124,9 +124,18 @@ function textareaClasses(file: string): string {
   const source = readFileSync(join(SRC, file), "utf8");
   const start = source.indexOf("<textarea");
   if (start < 0) throw new Error(`${file}: no <textarea`);
-  const match = source.slice(start).match(/className="([^"]+)"/);
-  if (!match) throw new Error(`${file}: <textarea without a literal className`);
-  return match[1]!;
+  const tail = source.slice(start);
+  const literal = tail.match(/className="([^"]+)"/);
+  const shared = tail.match(/className=\{COMPOSER_TEXTAREA_CLASS\}/);
+  // 두 입력창의 글 칸 옷은 한 상수다(#5324): 상수가 선 자리의 글자 그대로를 잰다. 상수를 못 풀면 던진다(조용히 다른 칸의 클래스를 재지 않는다).
+  if (shared !== null && (literal === null || shared.index! < literal.index!)) {
+    const card = readFileSync(join(SRC, "features/chat/ComposerCard.tsx"), "utf8");
+    const constant = card.match(/COMPOSER_TEXTAREA_CLASS =\s*"([^"]+)"/);
+    if (!constant) throw new Error(`${file}: COMPOSER_TEXTAREA_CLASS 의 글자를 ComposerCard.tsx 에서 못 읽었다`);
+    return constant[1]!;
+  }
+  if (!literal) throw new Error(`${file}: <textarea without a literal className`);
+  return literal[1]!;
 }
 
 interface Field {
