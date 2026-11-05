@@ -307,8 +307,9 @@ async function runToolbarButton(page) {
 
 /** 4) 키보드: 행에 키보드로 닿으면 막대가 서고, ⋮ 에서 Enter 로 열어 항목에서 Enter 로 고르면 초점이 ⋮ 로 돌아와 막대가 남는다. */
 async function runToolbarKeyboard(page) {
-  await page.keyboard.press("Shift"); // 입력 방식을 키보드로 넘긴다(그 뒤 스크립트가 옮기는 초점이 `:focus-visible` 이다)
   await page.evaluate((rowId) => document.querySelector(`[data-testid="timeline-message"][data-message-id="${rowId}"]`)?.focus(), idOf("0007"));
+  // 캐럿을 옮기는 키가 앱의 입력 방식 스탬프(`data-focus-modality`)를 keyboard 로 올린다. 그 뒤 행 안으로 옮긴 초점이 키보드 초점이다.
+  await page.keyboard.press("ArrowRight");
   await rowOf(page, "0007").locator('[data-testid="message-hover-toolbar"]').waitFor({ state: "visible", timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(250);
   const trigger = rowOf(page, "0007").locator('[data-testid="message-actions-trigger"]');

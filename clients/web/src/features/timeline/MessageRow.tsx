@@ -880,7 +880,12 @@ export function MessageRow({
       data-row-banner={rowError ? "open" : undefined}
       data-entrance-play={entrance.playing ? "1" : undefined}
       onAnimationEnd={entrance.onAnimationEnd}
-      onKeyDown={onRowKeyDown}
+      onKeyDown={(event) => {
+        onRowKeyDown(event);
+        // 캐럿을 옮기는 키가 입력 방식 스탬프를 keyboard 로 올린 **뒤** 행 안의 초점을 다시 읽는다(#5328): 스크립트가 먼저 옮긴 초점(받은
+        // 편지함에서 이 행으로 착지)도 그때부터 키보드 초점이다. 포털 메뉴 안의 키(행 DOM 밖)는 읽지 않는다 — 메뉴가 열려 있는 동안은 막대가 닻이다.
+        if (event.target instanceof Node && event.currentTarget.contains(event.target)) settleRowFocus();
+      }}
       // 호버는 DOM 포함 관계로 듣고(위 `onRowPointerOver`·`onRowPointerOut`), 초점은 **키보드 초점만** 센다(#5328, `isKeyboardFocusTarget`).
       onMouseOver={onRowPointerOver}
       onMouseOut={onRowPointerOut}

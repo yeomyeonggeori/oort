@@ -6,7 +6,8 @@
 //      React 의 `onMouseLeave` 는 포털 자손을 행 안으로 쳐서 이 이동에 leave 를 주지 않는다(SidebarRow 가 같은 이유로 네이티브를 쓴다, #3963).
 //   ② 행동을 고르면 메뉴 항목이 포인터 밑에서 사라진다. 사라진 노드는 `mouseout` 을 쏘지 못한다: 브라우저는 포인터 밑의 새 요소에
 //      `relatedTarget: null` 인 `mouseover`(와 `mouseenter`)만 쏜다.
-//   ③ Radix 가 닫으며 초점을 ⋮ 단추(도구 막대 안)로 돌려준다. 마우스로 시작한 흐름의 이 초점은 `:focus-visible` 이 아니다.
+//   ③ Radix 가 닫으며 초점을 ⋮ 단추(도구 막대 안)로 돌려준다. Radix 메뉴는 초점이 body 에 있는 채로 열려서, 마우스로 시작한 흐름에서도 이
+//      스크립트 초점이 두 엔진 모두 `:focus-visible` 이다(Chromium 실측). 마우스 흐름인지는 앱의 입력 방식 스탬프(`focusModality.ts`)가 가른다.
 // 옛 구현은 ①에서 「호버 중」을 못 내리고(②에서도 못 내리고), ③의 초점을 「행에 초점 있음」으로 세어 포인터가 떠난 행의 막대를 붙들었다.
 
 import { act, createElement, type ReactElement } from "react";
@@ -17,6 +18,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { applyFocusModality } from "@/design/focusModality";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { MessageRow } from "./MessageRow";
 
@@ -33,8 +35,11 @@ vi.mock("@/features/emoji/EmojiPickerDialog", () => ({ EmojiPickerDialog: () => 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
-/** 브라우저의 입력 방식 판정을 시험이 쥔다: 마우스로 시작한 흐름이면 거짓, 키보드로 시작했으면 참. */
-let focusVisible = false;
+/**
+ * `:focus-visible` 판정을 시험이 쥔다. 기본은 참이다: Radix 메뉴가 열고 닫으며 스크립트로 옮기는 초점은 마우스 흐름에서도 `:focus-visible` 이다
+ * (Chromium 실측). 그래서 마우스 흐름인지는 이 값이 아니라 앱의 입력 방식 스탬프가 가른다(`applyFocusModality`).
+ */
+let focusVisible = true;
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
@@ -73,7 +78,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  focusVisible = false;
+  focusVisible = true;
+  applyFocusModality(document, "pointer");
   const original = Element.prototype.matches;
   vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) {
     if (selector === ":focus-visible") return focusVisible && document.activeElement === this;
@@ -325,7 +331,7 @@ describe("막대 단추를 마우스로 누른 뒤", () => {
 
 describe("키보드로 고른 뒤", () => {
   it("초점이 ⋮ 로 돌아오면 막대는 남는다(키보드 사용자가 자리를 잃지 않는다)", async () => {
-    focusVisible = true;
+    applyFocusModality(document, "keyboard"); // Tab 으로 닿았다(캐럿을 옮기는 키가 스탬프를 올린다)
     const root = mountPair();
     const a = rowOf(root, 7);
     // 키보드로 행에 닿으면 막대가 서고 초점은 ⋮ 로 넘어간다.
@@ -351,9 +357,28 @@ describe("키보드로 고른 뒤", () => {
   });
 });
 
+describe("스크립트가 먼저 초점을 옮긴 행", () => {
+  it("입력 방식이 포인터인 동안은 막대를 세우지 않고, 캐럿을 옮기는 키가 오면 그때부터 키보드 초점이라 선다", async () => {
+    const root = mountPair();
+    const a = rowOf(root, 7);
+    await vi.waitFor(() => expect(a.tabIndex).toBe(0));
+    // 받은 편지함에서 이 행으로 착지하듯 스크립트가 초점을 옮긴다. 마지막 입력이 마우스라 키보드 초점이 아니다.
+    act(() => a.focus());
+    await tick();
+    expect(toolbarOf(a), "마우스 입력 방식에서는 스크립트 초점이 막대를 세우지 않는다").toBeNull();
+    // 앱의 문서 단위 리스너가 스탬프를 올린 뒤(캡처 단계) 행의 키 처리가 초점을 다시 읽는다.
+    applyFocusModality(document, "keyboard");
+    act(() => {
+      a.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    await tick();
+    expect(toolbarOf(a), "키보드 입력이 오면 그 행의 막대가 선다").not.toBeNull();
+  });
+});
+
 describe("키보드로 연 메뉴를 마우스로 닫을 때", () => {
   it("초점을 쥔 채 사라진 메뉴가 낡은 초점을 남기지 않는다: 바깥을 누르면 막대가 내려간다", async () => {
-    focusVisible = true;
+    applyFocusModality(document, "keyboard"); // Tab 으로 닿았다(캐럿을 옮기는 키가 스탬프를 올린다)
     const root = mountPair();
     const a = rowOf(root, 7);
     await vi.waitFor(() => expect(a.tabIndex).toBe(0));
@@ -368,7 +393,7 @@ describe("키보드로 연 메뉴를 마우스로 닫을 때", () => {
     await tick();
     expect(menu(), "메뉴가 열린다(초점은 메뉴 안이다)").not.toBeNull();
     // 사람이 마우스로 바꿔 B 를 누른다: Radix 는 바깥 누름으로 닫으면 초점을 ⋮ 로 돌려주지 않고, 메뉴는 초점을 쥔 채 사라진다(blur 없음).
-    focusVisible = false;
+    applyFocusModality(document, "pointer"); // 포인터 누름이 스탬프를 되돌린다
     const b = rowOf(root, 8);
     act(() => {
       b.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
