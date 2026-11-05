@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Channel, ReadState, RosterMember } from "@momo/core/lib/api";
 import { emptySidebarPrefs } from "@momo/core/features/sidebar/sidebarSections";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { NetworkError } from "@momo/core/lib/http";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ShellNavProvider } from "@/app/shellNav";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
@@ -152,6 +153,8 @@ const readStatesQuery = {
   byChannel: new Map<string, ReadState>(),
   isPending: false,
   isError: false,
+  /** 읽음 투영이 실패했을 때의 그 오류 객체(원인 문장을 정한다, #5279 A). */
+  error: null as unknown,
   data: [] as ReadState[] | undefined,
   refetch: (() => undefined) as () => unknown,
 };
@@ -247,7 +250,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
  * 명부(roster) 쿼리의 국면(#4252). `pending` 이면 명부가 비어 있고 아직 도착하지 않았다. `failed` 이면 한 번도 못 받은 채
  * 실패했다(`isError`, 데이터 없음). 둘 다 명부는 비어 있다.
  */
-const rosterPhase = vi.hoisted(() => ({ pending: false, failed: false }));
+const rosterPhase = vi.hoisted(() => ({ pending: false, failed: false, error: null as unknown }));
 /** 「다시 시도」가 다시 부르는 쿼리의 대역(#4252, design-review H2·M1). */
 const refetchers = vi.hoisted(() => ({ roster: vi.fn(), read: vi.fn() }));
 
@@ -262,6 +265,7 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
       isPending: rosterPhase.pending,
       isLoading: rosterPhase.pending,
       isError: rosterPhase.failed,
+      error: rosterPhase.failed ? rosterPhase.error : null,
       data: undefined,
       refetch: refetchers.roster,
     }),
@@ -396,6 +400,7 @@ beforeAll(() => {
 beforeEach(() => {
   rosterPhase.pending = false;
   rosterPhase.failed = false;
+  rosterPhase.error = null;
   roster.splice(0, roster.length, ...ROSTER_FIXTURE);
   liveness.byAgent.clear();
   revival.pages.clear();
@@ -410,6 +415,7 @@ beforeEach(() => {
   reloadClosedDmsForTest(null);
   readStatesQuery.isPending = false;
   readStatesQuery.isError = false;
+  readStatesQuery.error = null;
   readStatesQuery.refetch = refetchers.read;
   refetchers.roster.mockClear();
   refetchers.read.mockClear();
@@ -1727,6 +1733,35 @@ describe("나간 멤버와의 대화 줄: 캐럿과 실패의 이유 (#4252)", (
     rosterPhase.failed = false;
     await rerender();
     expect(host.querySelector('[data-testid="roster-error"]')).toBeNull();
+  });
+
+  // 원인은 그 쿼리의 오류 객체가 정한다(#5279 A): 응답이 없으면 기기가 켜져 있을 때 서버에 닿지 못함, 꺼져 있을 때 오프라인. 서버가 직접 답한 오류는 원인 없음.
+  it("DM 이름 줄의 원인은 명부 조회의 오류 객체가 정한다 (서버에 닿지 못함 · 오프라인)", async () => {
+    for (const [online, reason] of [
+      [true, "서버에 닿지 못했어요."],
+      [false, "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
+    ] as const) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);
+      rosterPhase.failed = true;
+      rosterPhase.error = new NetworkError("unreachable", 15_000);
+      const host = await mount();
+      expect(host.querySelector('[data-testid="roster-error"]')?.textContent, reason).toContain(`멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요. ${reason}`);
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      mountedRoot = null;
+      mountedHost = null;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("안 읽음 줄의 원인은 읽음 투영의 오류 객체가 정한다 (서버에 닿지 못함)", async () => {
+    vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+    readStatesQuery.isError = true;
+    readStatesQuery.data = undefined;
+    readStatesQuery.error = new NetworkError("unreachable", 15_000);
+    const host = await mount();
+    expect(host.querySelector('[data-testid="read-state-error"]')?.textContent).toContain("안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요. 서버에 닿지 못했어요.");
+    vi.restoreAllMocks();
   });
 
   it("명부가 오는 중일 때는 실패했다고 말하지 않는다 (아직 실패가 아니다)", async () => {
