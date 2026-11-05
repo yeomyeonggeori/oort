@@ -10,6 +10,9 @@
 //   C 서버에 닿지 못함: 서로 다른 요청 3건이 실패하면 카드(단추 있음), 보내기가 막힌다. 응답 한 건에 풀린다. 입력창 위
 //     줄이 「서버에 닿지 못해 …」를 말하고 오프라인이라고 말하지 않는다(#5239).
 //   D 한 자리에서만: 목록 열이 보이면 카드(띠 없음), ⌘B로 접으면 띠(카드 없음), 폰 폭에서도 띠.
+//   E 저절로 다시 확인(#5407): 서버에 닿지 못함 카드가 서 있는 동안 앱이 스스로 확인 요청을 보내고(죽어 있는 동안은 카드 그대로),
+//     확인 요청만 살아나면(나머지 `/v1` 은 아직 503) 사람이 아무것도 하지 않아도 카드가 걷히고 컴포저의 막힘 줄이 사라진다.
+//     `/v1` 을 계속 죽여 두는 까닭: 백그라운드 `/v1` 요청(「보고 있음」 신호 등)의 응답이 카드를 걷는 길을 막아, 걷은 것이 확인 요청임을 가른다.
 //
 // 번들은 `clients/web/dist`다. 다른 워크트리가 같은 포트를 쥐고 있으면 가드가 요란하게 죽는다.
 
@@ -215,6 +218,33 @@ async function scenarioServerUnreachable(browser) {
   }
 }
 
+async function scenarioSelfHeal(browser) {
+  const { context, backend, page } = await fresh(browser);
+  try {
+    await until(async () => (await pageSocketStatus(page)) === "connected", "소켓 연결");
+    await sleep(6_000);
+    backend.rest("503");
+    for (const channel of CHANNELS.slice(1)) {
+      await page.locator(`[data-channel-id="${channel.id}"]`).first().click();
+      await sleep(250);
+    }
+    await waitTone(page, "unreachable", 6_000);
+    // 서 있는 동안 앱이 스스로 확인을 보낸다. 서버가 아직 죽어 있으니 카드는 그대로다(확인 실패가 카드를 걷거나 바꾸지 않는다).
+    await until(async () => backend.state.probes >= 1, "앱이 스스로 보내는 확인 요청", { timeout: 6_000 });
+    check((await tone(page)) === "unreachable", "죽어 있는 서버에 확인이 나갔는데 카드가 바뀌었다");
+
+    // 확인 요청만 살아난다(나머지 `/v1` 은 계속 503). 이 뒤로 사람은 아무것도 하지 않는다(클릭도 보내기도 없다).
+    const probesAtRecovery = backend.state.probes;
+    backend.healthz("ok");
+    await until(async () => (await tone(page)) !== "unreachable", "사람 손 없이 서버에 닿지 못함 카드가 내려감", { timeout: 40_000 });
+    check(backend.state.probes > probesAtRecovery, "확인 요청이 살아난 뒤 나간 확인 없이 카드가 내려갔다(확인 요청이 걷은 것이 아니다)");
+    await until(async () => (await page.getByTestId("composer-offline").count()) === 0, "컴포저의 막힘 줄이 사라짐", { timeout: 6_000 });
+    results.push("E 저절로 다시 확인: 서 있는 동안 확인 요청이 나가고(죽어 있으면 카드 그대로) · 확인 요청만 살아나면 사람 손 없이 카드가 걷히고 막힘 줄이 사라짐");
+  } finally {
+    await context.close();
+  }
+}
+
 async function scenarioPlacement(browser) {
   const { context, page } = await fresh(browser);
   try {
@@ -259,6 +289,7 @@ async function main() {
       await scenarioRealtimeOnly(browser);
       await scenarioDeviceOffline(browser);
       await scenarioServerUnreachable(browser);
+      await scenarioSelfHeal(browser);
       await scenarioPlacement(browser);
     } finally {
       await browser.close();
