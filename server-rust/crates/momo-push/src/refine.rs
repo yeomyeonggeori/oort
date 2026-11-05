@@ -17,7 +17,7 @@
 //!
 //! | outcome | when | what happens |
 //! |---|---|---|
-//! | **cancel** | active at `T − 30 s` **and** the channel cursor covers the message | no push, **no dispatch row** (they read it) — first judgment or re-judgment alike |
+//! | **cancel** | active at `T − 30 s` **and** read (below) | no push, **no dispatch row** (they read it) — first judgment or re-judgment alike |
 //! | **hold** | active within the last 30 s, not read, and `now() < T + phoneDelaySecs` | not sent this pass, no dispatch row; the caller defers the candidate to the earliest expiry |
 //! | **send** | anything else | sent now, exactly as before |
 //!
@@ -25,24 +25,48 @@
 //! so a person who is still active and still has not read it gets the push (one delay only), and a
 //! re-judged target that was already sent is skipped by `claim_dispatch`, not here.
 //!
+//! # What "read" means (D4, and ADR-0204 증보 1 D8-a for a streamed line)
+//!
+//! For an ordinary message: the member's cursor in the channel covers the message's `seq`.
+//!
+//! A **streamed** line (`props` carries the `momo.stream` block — the same test the judgment's
+//! answer arm makes) spends its `seq` when its *first words* arrive, so a cursor that covers it says
+//! "they saw it begin", not "they are still there": the judgment deliberately gives such a line no
+//! `last_read_seq >= seq` shortcut (D8-a, `judgment.rs`). The cancel follows that exception: for a
+//! streamed line the cursor covering the `seq` is necessary but **not sufficient** — the person must
+//! also have been reading the channel in the 30 s window before `T` (the cursor moved
+//! in it, or the channel-viewing beat is inside it: a stream spends no further `seq`, so the beat
+//! is the only thing that says someone watched it to its end). `T` of a stream-closed candidate is the
+//! closed time, so this is "reading when the answer closed", and — like the rest of the cancel — it
+//! is anchored on `T`, not on `now()`, so a person who read it inside the delay is still cancelled at
+//! the expiry. Without the window a person who walked away mid-stream would be cancelled on a cursor
+//! that only ever saw the first words, and the closed answer's push would never go out (#5353).
+//!
+//! # The delay is capped at five minutes
+//!
+//! The settings API only accepts 0, 60 and 300, but `notification_rule.phone_delay_secs` is a bare
+//! `smallint` with no CHECK, so "a delay can never lock a push out for good" must not rest on the
+//! writer: the tail reads every stored value through [`PHONE_DELAY_MAX_SECS`] (and a negative one as 0).
+//!
 //! `phoneDelaySecs = 0` is "no delay and no read-cancel" — today's behavior. No row in
 //! `member_activity` (an old client, a phone-only person) is "not active" — also today's behavior.
 //! Urgent reasons (an approval, the work reasons, `resume_offer`, the test notification, anything a
 //! later slice adds) are **not on the allow-list** and so are never delayed: the safe default of a
 //! new reason is "now". `macos` tokens are never delayed.
 //!
-//! The tail only **reads** (`member_activity`, `notification_rule`, `read_state`, `message`). Nothing
+//! The tail only **reads** (`member_activity`, `notification_rule`, `read_state`, `channel_viewing`, `message`). Nothing
 //! in the dispatch log, nothing in the outbox: the outbox is [`momo_outbox`]'s, and the caller turns
 //! [`Refined::hold_until`] into `defer_push_candidate`.
 
 use chrono::{DateTime, Utc};
 use momo_db::DbError;
+use momo_messaging::STREAM_PROPS_KEY;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::candidate::PushCandidate;
 use crate::dispatch::PushReason;
-use crate::judgment::JudgedTarget;
+use crate::judgment::{JudgedTarget, WORK_COMPLETE_FOREGROUND_WINDOW_SECS};
 
 /// A `member_activity.seen_at` younger than this is "my desktop is active" (ADR-0206 D4). The writer
 /// refreshes at least every 5 s while a client beats every ≤ 20 s, so a present user never reads as
@@ -52,6 +76,18 @@ pub const ACTIVITY_WINDOW_SECS: f64 = 30.0;
 /// What a NULL `notification_rule.phone_delay_secs` reads as (ADR-0206 D4 「기본 60」, D13). A person
 /// with no `notification_rule` row at all reads the same way.
 pub const PHONE_DELAY_DEFAULT_SECS: i32 = 60;
+
+/// The longest a phone push is held back (ADR-0206 D4 「최대 300초」, the top of the settings API's
+/// {0, 60, 300}). Every stored `phone_delay_secs` is read through it: the column is a bare
+/// `smallint`, so a value written any way but the API (a later writer, a direct write) would
+/// otherwise hold a push for up to nine hours (#5353).
+pub const PHONE_DELAY_MAX_SECS: i32 = 300;
+
+/// The window a *streamed* line's read is measured in, before `T`: the judgment's answer-arm reading
+/// window itself (ADR-0204 D8, 「30초 안에 움직였으면」), bound from the same constant so the two cannot
+/// drift apart by accident. It is deliberately not [`ACTIVITY_WINDOW_SECS`]: the desktop-activity
+/// window and the reading window are different questions that happen to share a number today.
+const STREAM_READ_WINDOW_SECS: f64 = WORK_COMPLETE_FOREGROUND_WINDOW_SECS;
 
 /// The only device platform the delay applies to: the phone (`device.platform = 'ios'`). A `macos`
 /// token is the desktop's own and is left as it is.
@@ -76,13 +112,15 @@ fn is_subject(target: &JudgedTarget) -> bool {
 /// What the database said about one member, on its own clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemberFacts {
-    /// The member's `phoneDelaySecs` (0, 60 or 300; NULL read as [`PHONE_DELAY_DEFAULT_SECS`]).
+    /// The member's `phoneDelaySecs` (0, 60 or 300; NULL read as [`PHONE_DELAY_DEFAULT_SECS`], any
+    /// other stored value cut into `0..=`[`PHONE_DELAY_MAX_SECS`]).
     pub delay_secs: i32,
     /// `member_activity.seen_at >= T − 30 s`.
     pub active_at_t: bool,
     /// `member_activity.seen_at >= now() − 30 s`.
     pub active_now: bool,
-    /// The member's cursor in the message's channel covers the message's `seq`.
+    /// The member's cursor in the message's channel covers the message's `seq` — and, for a
+    /// streamed line, they were also reading the channel in the window before `T` (module docs).
     pub read: bool,
     /// `now() < T + phoneDelaySecs`.
     pub before_expiry: bool,
@@ -181,20 +219,36 @@ pub async fn refine_targets(
     members.sort_unstable();
     members.dedup();
 
+    // `d.secs` is the member's delay after the cap: the default for a NULL, 0 at the bottom (a
+    // negative stored value is "no delay"), `PHONE_DELAY_MAX_SECS` at the top. Every use below
+    // reads it, so the hold, the expiry and the `defer` the caller derives from it agree.
+    //
+    // `is_read`: the cursor covering `m.seq` is D4's rule. A streamed line (the `momo.stream` key,
+    // the judgment's own test) needs more — the cursor covered it when its first words arrived — so
+    // it must also have been reading in the window before `T` (cursor moved, or a viewing beat).
     let rows = sqlx::query(
         "SELECT mem.member_id, \
-                COALESCE(nr.phone_delay_secs::int, $7::int) AS delay_secs, \
+                d.secs AS delay_secs, \
                 COALESCE(ma.seen_at >= $5 - make_interval(secs => $6::double precision), false) \
                     AS active_at_t, \
                 COALESCE(ma.seen_at >= now() - make_interval(secs => $6::double precision), false) \
                     AS active_now, \
-                COALESCE(rs.last_read_seq >= m.seq, false) AS is_read, \
-                now() < $5 + make_interval( \
-                    secs => COALESCE(nr.phone_delay_secs::int, $7::int)::double precision) \
-                    AS before_expiry, \
-                $5 + make_interval( \
-                    secs => COALESCE(nr.phone_delay_secs::int, $7::int)::double precision) \
-                    AS expires_at \
+                CASE WHEN jsonb_exists(m.props, $8::text) \
+                     THEN COALESCE(rs.last_read_seq >= m.seq, false) \
+                          AND (COALESCE(rs.last_read_at \
+                                        >= $5 - make_interval(secs => $9::double precision), \
+                                        false) \
+                               OR EXISTS ( \
+                                 SELECT 1 FROM channel_viewing cv \
+                                  WHERE cv.workspace_id = $1 \
+                                    AND cv.channel_id = $3 \
+                                    AND cv.member_id = mem.member_id \
+                                    AND cv.seen_at \
+                                        >= $5 - make_interval(secs => $9::double precision))) \
+                     ELSE COALESCE(rs.last_read_seq >= m.seq, false) \
+                END AS is_read, \
+                now() < $5 + make_interval(secs => d.secs::double precision) AS before_expiry, \
+                $5 + make_interval(secs => d.secs::double precision) AS expires_at \
            FROM unnest($2::uuid[]) AS mem(member_id) \
            JOIN message m \
              ON m.workspace_id = $1 \
@@ -205,6 +259,9 @@ pub async fn refine_targets(
            LEFT JOIN notification_rule nr \
              ON nr.workspace_id = $1 \
             AND nr.member_id = mem.member_id \
+           CROSS JOIN LATERAL ( \
+             SELECT LEAST(GREATEST(COALESCE(nr.phone_delay_secs::int, $7::int), 0), $10::int) \
+                    AS secs) d \
            LEFT JOIN read_state rs \
              ON rs.workspace_id = $1 \
             AND rs.channel_id = $3 \
@@ -217,6 +274,9 @@ pub async fn refine_targets(
     .bind(candidate_created_at)
     .bind(ACTIVITY_WINDOW_SECS)
     .bind(PHONE_DELAY_DEFAULT_SECS)
+    .bind(STREAM_PROPS_KEY)
+    .bind(STREAM_READ_WINDOW_SECS)
+    .bind(PHONE_DELAY_MAX_SECS)
     .fetch_all(&mut *conn)
     .await?;
 
