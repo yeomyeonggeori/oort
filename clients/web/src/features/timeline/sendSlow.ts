@@ -38,31 +38,32 @@ export const SEND_SLOW_MS = 1500;
 const elapsedMs = (startedAtMs: number): number => Math.max(0, Date.now() - startedAtMs);
 
 /**
- * 이 메아리의 지금 시도가 느린가. 실패한 행에는 거짓이다(실패는 자기 줄이 있다).
+ * 이 메아리의 지금 시도가 느린가. 실패한 행(`failed`)에는 거짓이다(실패는 자기 줄이 있다).
+ *
+ * 폰 훅(`useSlowSend(createdAtMs, status)`)과 달리 상태 글자 대신 `failed` 불리언을 받는다 — 직접 문구 장부(`direct-copy.mjs`)가
+ * `"sending"`·`"failed"` 같은 한 낱말 글자를 문구로 세므로, 상태 비교는 이미 그 비교를 지고 있는 `PendingRow` 한 곳에만 둔다.
  *
  * `createdAtMs` 가 유한한 수가 아니면(알 수 없으면) 마운트 시각부터 센다.
  */
-export function useSlowSend(createdAtMs: number, status: "sending" | "failed"): boolean {
+export function useSlowSend(createdAtMs: number, failed: boolean): boolean {
   // 이번 시도가 시작된 시각. 렌더 중에는 처음 한 번만 채운다(지연 초기화).
   const startedAt = useRef<number | null>(null);
   if (startedAt.current === null) {
     startedAt.current = Number.isFinite(createdAtMs) ? createdAtMs : Date.now();
   }
-  const previous = useRef(status);
+  const wasFailed = useRef(failed);
 
-  const [slow, setSlow] = useState(
-    () => status === "sending" && elapsedMs(startedAt.current ?? 0) >= SEND_SLOW_MS
-  );
+  const [slow, setSlow] = useState(() => !failed && elapsedMs(startedAt.current ?? 0) >= SEND_SLOW_MS);
 
   useEffect(() => {
-    if (status !== "sending") {
-      previous.current = status;
+    if (failed) {
+      wasFailed.current = true;
       setSlow(false);
       return undefined;
     }
     // 실패했다가 다시 보내기: 새 시도.
-    if (previous.current === "failed") startedAt.current = Date.now();
-    previous.current = status;
+    if (wasFailed.current) startedAt.current = Date.now();
+    wasFailed.current = false;
     const left = SEND_SLOW_MS - elapsedMs(startedAt.current ?? 0);
     if (left <= 0) {
       setSlow(true);
@@ -71,7 +72,7 @@ export function useSlowSend(createdAtMs: number, status: "sending" | "failed"): 
     setSlow(false);
     const timer = setTimeout(() => setSlow(true), left);
     return () => clearTimeout(timer);
-  }, [status]);
+  }, [failed]);
 
   return slow;
 }

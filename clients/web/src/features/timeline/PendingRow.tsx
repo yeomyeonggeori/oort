@@ -56,6 +56,30 @@ import {
 //     (`message.seq`). 이어지는 행은 시각을 그리지 않는다(서버 사본도 같다).
 // =============================================================================
 
+/**
+ * 느린 전송의 시계 하나(#4468). 자리는 부르는 쪽이 `className`으로 정한다: 머리 행은 시각 바로 오른쪽(`left-full`), 이어지는 행은
+ * 거터의 시각 자리(`right-0`). 어느 쪽이든 `absolute`라서 서고 져도 행 높이도 글자 자리도 움직이지 않는다.
+ *
+ * 낭독은 「전송 중」이다 — 정상 전송에는 낭독이 없다(곧 서버 사본으로 교체된다). 시계 글리프는 레포의 Lucide 한 벌이고 16px은 시각 줄
+ * (`text-timestamp`의 줄 높이 16)과 같은 키라 글자 줄을 밀지 않는다.
+ *
+ * 부품으로 뺀 이유: 클래스를 `className` 속성값으로만 적게 하려는 것이다. `cn()` 인자나 상수 안의 클래스 목록은 직접 문구 장부
+ * (`direct-copy.mjs`)가 영어 문구로 센다(`SendFailureActions` 머리말과 같은 함정).
+ */
+function SlowMark({ className }: { className: string }) {
+  const formatMessage = useFormatMessage();
+  return (
+    <span
+      role="img"
+      aria-label={formatMessage("timeline.send.sending")}
+      data-testid="pending-slow"
+      className={className}
+    >
+      <Clock aria-hidden="true" className="size-4" />
+    </span>
+  );
+}
+
 export function PendingRow({
   pending,
   startsGroup,
@@ -91,24 +115,9 @@ export function PendingRow({
   const name = author?.displayName ?? "나";
   const failed = pending.status === "failed";
   // 오래 걸리는 전송만 시계 하나로 알린다(#4468). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
-  const slow = useSlowSend(pending.createdAtMs, pending.status);
+  const slow = useSlowSend(pending.createdAtMs, failed);
   // 보낸 시각을 알 수 없으면(유한한 수가 아니면) 시각 글자를 지어내지 않는다.
   const sentAtMs = Number.isFinite(pending.createdAtMs) ? pending.createdAtMs : null;
-  // 시계는 **흐름 밖**이다(`absolute`): 서고 져도 행 높이도 글자 자리도 움직이지 않는다. 낭독은 「전송 중」 — 정상 전송에는 낭독이
-  // 없다(곧 서버 사본으로 교체된다). 16px은 시각 줄(`text-timestamp`의 줄 높이 16)과 같은 키라 글자 줄을 밀지 않는다.
-  const slowMark = slow ? (
-    <span
-      role="img"
-      aria-label={formatMessage("timeline.send.sending")}
-      data-testid="pending-slow"
-      className={cn(
-        "pointer-events-none absolute top-0 flex text-ink-muted",
-        startsGroup ? "left-full ml-1" : "right-0"
-      )}
-    >
-      <Clock aria-hidden="true" className="size-4" />
-    </span>
-  ) : null;
   // 확정된 행과 **같은 것**을 그린다 (ADR-0148). echo가 인용을 안 그렸다가 seq가
   // 도착하는 순간 하나 자라면, 읽는 사람 눈 아래에서 본문이 아래로 밀린다 - 이
   // 파일이 마크다운을 echo에도 그리기로 한 것과 같은 이유다(goal B8 H6).
@@ -142,7 +151,9 @@ export function PendingRow({
         {startsGroup ? (
           <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
         ) : (
-          slowMark
+          slow && (
+            <SlowMark className="pointer-events-none absolute right-0 top-0 flex text-ink-muted" />
+          )
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -150,9 +161,12 @@ export function PendingRow({
           // 확정된 행과 **같은 머리 줄**(`MESSAGE_HEAD_CLASS`, 이름 묶음의 `truncate`까지)이다: 줄바꿈 판정이 다르면 이름이 긴
           // 폭에서 시각이 다음 줄로 꺾이는 쪽이 갈려 교체 때 행 높이가 달라진다.
           <div className={MESSAGE_HEAD_CLASS}>
-            <span className={cn("flex min-w-0 items-baseline gap-1", sentAtMs === null && "relative")}>
+            {/* `relative`는 보낸 시각을 알 수 없을 때(아래 분기) 시계가 이 묶음 오른쪽에 매달릴 기준 상자다. 오프셋이 없어 배치는 그대로다. */}
+            <span className="relative flex min-w-0 items-baseline gap-1">
               <span className="truncate text-body font-semibold text-ink">{name}</span>
-              {sentAtMs === null && slowMark}
+              {sentAtMs === null && slow && (
+                <SlowMark className="pointer-events-none absolute left-full top-0 ml-1 flex text-ink-muted" />
+              )}
             </span>
             {sentAtMs !== null && (
               <time
@@ -163,7 +177,9 @@ export function PendingRow({
                 className="relative text-timestamp text-ink-muted"
               >
                 {timeLabel(sentAtMs)}
-                {slowMark}
+                {slow && (
+                  <SlowMark className="pointer-events-none absolute left-full top-0 ml-1 flex text-ink-muted" />
+                )}
               </time>
             )}
           </div>
