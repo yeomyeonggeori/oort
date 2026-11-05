@@ -90,3 +90,62 @@ export function expressionsForTab<T extends Pick<Expression, "kind" | "media">>(
   if (tab === "emoji") return [];
   return items.filter((item) => expressionShelfOf(item) === tab);
 }
+
+// -----------------------------------------------------------------------------
+// 화면의 보기 (owner 2026-11-05, #5330): 사용자에게 보이는 이름은 「이모티콘」 하나다.
+//
+// 위 네 탭(J2)은 **보관함을 겹치지 않게 나누는 분류**이고 그대로다(고른 뒤의 동작도 이 칸이 정한다: 팀 이모지 칸은 입력칸에
+// 넣고, 이모티콘·GIF 칸은 크게 보낸다). 화면은 그 가운데 팀 이모지 칸과 이모티콘 칸을 **한 탭 「이모티콘」** 으로 합쳐 보인다.
+// 그래서 화면의 보기는 둘이다: 이모티콘(= 팀 이모지 칸 + 이모티콘 칸) · GIF. 표준 유니코드 목록(「기본」)은 보관함이 아니다.
+// 서버 `kind` 값(`emoji`·`sticker`)·API 이름·J2의 칸은 바뀌지 않는다 — 합치는 곳은 이 몇 줄뿐이다.
+// -----------------------------------------------------------------------------
+
+/** 화면의 보기가 모으는 칸. 이모티콘 보기 = 작은 것(`emoji` 종류)과 큰 것(움직이지 않는 `sticker`)이 함께 선다. */
+export const EXPRESSION_VIEW_SHELVES = {
+  emoticon: ["team", "emoticon"],
+  gif: ["gif"],
+} as const satisfies Record<string, readonly ExpressionShelf[]>;
+export type ExpressionView = keyof typeof EXPRESSION_VIEW_SHELVES;
+export const EXPRESSION_VIEWS = Object.keys(EXPRESSION_VIEW_SHELVES) as readonly ExpressionView[];
+
+/** 여러 칸의 합(차례는 `items` 그대로). 칸이 서로 겹치지 않으므로 한 등록이 두 번 서는 일은 없다. */
+export function expressionsForShelves<T extends Pick<Expression, "kind" | "media">>(items: readonly T[], shelves: readonly ExpressionShelf[]): T[] {
+  return items.filter((item) => shelves.includes(expressionShelfOf(item)));
+}
+
+/** 한 보기에 보이는 보관함의 등록(차례는 `items` 그대로). 이모티콘 보기와 GIF 보기의 합은 `items` 전체이고 겹치지 않는다(시험이 센다). */
+export function expressionsForView<T extends Pick<Expression, "kind" | "media">>(items: readonly T[], view: ExpressionView): T[] {
+  return expressionsForShelves(items, EXPRESSION_VIEW_SHELVES[view]);
+}
+
+/**
+ * 폰 시트와 웹 고르개의 세 탭(순서 그대로): 이모티콘 · 기본 · GIF. 탭 이름 `emoji` 는 표준 그림 문자 표(화면의 이름은 「기본」)이고 보관함의 등록이
+ * 없다 — 서버 종류 `emoji`(작은 이모티콘)와 다른 물건이다. 두 클라이언트가 같은 목록을 쓴다(따로 적으면 한쪽만 바뀐다).
+ */
+export const EXPRESSION_PICKER_TABS = ["emoticon", "emoji", "gif"] as const;
+export type ExpressionPickerTab = (typeof EXPRESSION_PICKER_TABS)[number];
+/** 처음 여는 탭 — 옛 이모지 고르개가 열던 표준 표(자주 쓰는 것 먼저)다. */
+export const DEFAULT_EXPRESSION_PICKER_TAB: ExpressionPickerTab = "emoji";
+/** 탭이 보이는 보관함의 보기. 표준 표(`emoji`)는 보관함이 아니라 `null`. */
+export function expressionViewOfPickerTab(tab: ExpressionPickerTab): ExpressionView | null {
+  return tab === "emoji" ? null : tab;
+}
+
+/** 하나를 고르면 하는 일: 대화에 보낸다(미리보기 뒤) / 입력칸에 넣는다. */
+export type ExpressionAction = "send" | "insert";
+/**
+ * 한 등록을 고르면 하는 일. 등록이 선 칸(J2)이 정한다: 작은 팀 이모지 칸은 입력칸에 넣고(글 사이 = inline), 이모티콘·GIF 칸은 미리 보고 보낸다
+ * (단독 전송 = large). 한 보기 안에 두 동작이 함께 설 수 있다(이모티콘 보기).
+ */
+export function expressionActionOf(item: Pick<Expression, "kind" | "media">): ExpressionAction {
+  return expressionShelfOf(item) === "team" ? "insert" : "send";
+}
+
+/**
+ * 보관함을 처음 열 때의 보기. 이모티콘부터 보되, 거기가 비고 GIF에만 등록이 있으면 GIF다(그 보기를 열어 두면 있는 그림이 한 장도
+ * 안 보인다). 사람이 보기를 고른 뒤에는 쓰이지 않는다. 지운·숨긴 등록은 세지 않는다.
+ */
+export function firstFilledView(items: readonly Pick<Expression, "kind" | "media" | "status">[]): ExpressionView {
+  const active = items.filter((item) => item.status === "active");
+  return EXPRESSION_VIEWS.find((view) => expressionsForView(active, view).length > 0) ?? "emoticon";
+}

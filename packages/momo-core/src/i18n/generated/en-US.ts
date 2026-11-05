@@ -1942,7 +1942,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.backLabel": [
     {
       "type": 0,
-      "value": "Back to the team emoji list"
+      "value": "Back to the emoticon list"
     }
   ],
   "expressions.add.import": [
@@ -1954,7 +1954,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.importDetail": [
     {
       "type": 0,
-      "value": "Register your own picture or link as a team emoji"
+      "value": "Register your own picture or link as an emoticon"
     }
   ],
   "expressions.add.make": [
@@ -2236,13 +2236,13 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "Team emoji"
+      "value": "Small emoticon"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves."
+      "value": "A small picture. Use it between words and in reactions. It stays a small emoticon even when it moves."
     }
   ],
   "expressions.kind.hintSticker": [
@@ -2260,7 +2260,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "Emoticon"
+      "value": "Large emoticon"
     }
   ],
   "expressions.make.agent": [
@@ -2640,12 +2640,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Team expression views"
-    }
-  ],
-  "expressions.panel.viewTeam": [
-    {
-      "type": 0,
-      "value": "Team emoji"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -3037,7 +3031,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyEmoticon": [
     {
       "type": 0,
-      "value": "No team emoticons yet. Use “Add” above to make or import one."
+      "value": "No emoticons yet. Use “Add” above to make or import one."
     }
   ],
   "expressions.sheet.emptyGif": [
@@ -3049,13 +3043,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyLegacy": [
     {
       "type": 0,
-      "value": "No team emoji yet."
-    }
-  ],
-  "expressions.sheet.emptyTeam": [
-    {
-      "type": 0,
-      "value": "No team emoji yet. Use “Add” above to import one."
+      "value": "No team emoticons yet."
     }
   ],
   "expressions.sheet.error": [
@@ -3148,12 +3136,6 @@ export const catalog: MessageCatalog = {
       "value": "Search GIFs"
     }
   ],
-  "expressions.sheet.searchTeam": [
-    {
-      "type": 0,
-      "value": "Search team emoji"
-    }
-  ],
   "expressions.sheet.send": [
     {
       "type": 0,
@@ -3188,12 +3170,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Kinds"
-    }
-  ],
-  "expressions.sheet.tabTeam": [
-    {
-      "type": 0,
-      "value": "Team emoji"
     }
   ],
   "expressions.sheet.title": [

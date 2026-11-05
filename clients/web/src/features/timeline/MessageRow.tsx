@@ -1,5 +1,5 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
-import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { threadRollup, uuidEq, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
@@ -103,6 +103,7 @@ import {
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
+  isKeyboardFocusTarget,
   previousMessageRowHasOpenBanner,
   shouldShowHoverToolbar,
 } from "./hoverToolbarModel";
@@ -793,6 +794,28 @@ export function MessageRow({
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
+  // 호버는 **DOM 이 아는 사실**로 센다(#5328, SidebarRow #3963 과 같은 문제). React 의 `onMouseEnter`/`onMouseLeave` 는 포털 자손을 행 안으로
+  // 친다: 포인터가 행에서 ⋮ 메뉴(포털, DOM 으로는 행 밖)로 건너가도 leave 가 오지 않고, 행동을 고르면 메뉴 항목이 포인터 밑에서 사라져(사라진
+  // 노드는 `mouseout` 을 못 쏜다) 그 leave 가 영영 오지 않아 「호버 중」이 남았다. 막대는 그 행에 남고, 포인터가 선 행의 막대와 함께 두 메시지에
+  // 동시에 떴다. 그래서 버블링하는 `onMouseOver`/`onMouseOut` 에서 **DOM 포함 관계**를 직접 본다: 행 DOM 안의 요소를 가리키면 호버, 나가는 곳
+  // (`relatedTarget`)이 행 DOM 밖이면(포털 메뉴·다른 행·창 밖) 호버가 아니다. 열린 메뉴·선택기는 `overlayOpen` 이 막대를 붙들고, 닫히면 포인터의
+  // 실제 자리가 정한다.
+  const onRowPointerOver = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.target instanceof Node && event.currentTarget.contains(event.target)) setRowHovered(true);
+  };
+  const onRowPointerOut = (event: ReactMouseEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || !event.currentTarget.contains(next)) setRowHovered(false);
+  };
+  // 메뉴가 닫혀 내용이 사라진 **뒤** 행의 「키보드 초점 있음」을 DOM 의 사실로 다시 읽는다(#5328). 초점을 쥔 채 사라진 노드는 `blur` 를 못
+  // 쏘므로(키보드로 연 메뉴를 마우스 바깥 누름으로 닫으면 Radix 는 초점을 ⋮ 로 돌려주지 않는다) 「초점 있음」이 낡은 채 남았다. 키보드로 고르면
+  // Radix 가 ⋮ 로 돌려준 초점이 키보드 초점이라 그대로 남는다. 호출은 Radix 가 초점을 돌려준 **뒤**(마이크로태스크)다.
+  const settleRowFocus = () => {
+    const row = rowRef.current;
+    const active = document.activeElement;
+    setRowFocused(row !== null && active !== null && row.contains(active) && isKeyboardFocusTarget(active));
+  };
+
   useEffect(() => {
     if (!rowHovered && !rowFocused) return undefined;
     const node = rowRef.current;
@@ -851,10 +874,16 @@ export function MessageRow({
       data-row-banner={rowError ? "open" : undefined}
       data-entrance-play={entrance.playing ? "1" : undefined}
       onAnimationEnd={entrance.onAnimationEnd}
-      onKeyDown={onRowKeyDown}
-      onMouseEnter={() => setRowHovered(true)}
-      onMouseLeave={() => setRowHovered(false)}
-      onFocusCapture={() => setRowFocused(true)}
+      onKeyDown={(event) => {
+        onRowKeyDown(event);
+        // 캐럿을 옮기는 키가 입력 방식 스탬프를 keyboard 로 올린 **뒤** 행 안의 초점을 다시 읽는다(#5328): 스크립트가 먼저 옮긴 초점(받은
+        // 편지함에서 이 행으로 착지)도 그때부터 키보드 초점이다. 포털 메뉴 안의 키(행 DOM 밖)는 읽지 않는다 — 메뉴가 열려 있는 동안은 막대가 닻이다.
+        if (event.target instanceof Node && event.currentTarget.contains(event.target)) settleRowFocus();
+      }}
+      // 호버는 DOM 포함 관계로 듣고(위 `onRowPointerOver`·`onRowPointerOut`), 초점은 **키보드 초점만** 센다(#5328, `isKeyboardFocusTarget`).
+      onMouseOver={onRowPointerOver}
+      onMouseOut={onRowPointerOut}
+      onFocusCapture={(event) => setRowFocused(isKeyboardFocusTarget(event.target))}
       onBlurCapture={(event) => {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget.contains(next)) return;
@@ -908,6 +937,7 @@ export function MessageRow({
           }
           menuOpen={actionMenuOpen}
           onMenuOpenChange={setActionMenuOpen}
+          onMenuSettled={settleRowFocus}
           triggerRef={actionTriggerRef}
           mineEmojis={mineEmojis}
         />
