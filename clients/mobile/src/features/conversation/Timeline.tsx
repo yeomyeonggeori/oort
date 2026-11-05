@@ -949,6 +949,7 @@ function TimelineInner({
   selfSendToken,
   markReplies = true,
   mainFlow = true,
+  threadRootId,
   showRollup = true,
   requestThoughts = false,
   requestRootId,
@@ -1089,6 +1090,12 @@ function TimelineInner({
    * 행은 루트와 그 답글 전부이고 하나도 가리면 안 된다. `showRollup`·`markReplies`와 다른 축이다(그 둘은 줄을 그릴지고, 이것은 행을 그릴지다).
    */
   mainFlow?: boolean;
+  /**
+   * 이 목록이 **스레드 화면**이면 그 스레드의 루트 id (#5381). 그 안의 답이 루트를 가리키는 인용은 그리지 않는다 — 루트는 맨 위 행으로 이미 서 있다(요청 고리
+   * §4.2, 코어 `isQuoteRedundant`: 웹 `ThreadSurfaceRoot` 와 같은 값). 본류 목록은 넘기지 않는다. `mainFlow` 와 다른 축이다(그것은 어느 행을 그릴지, 이것은
+   * 인용을 그릴지).
+   */
+  threadRootId?: string;
   /**
    * 루트 행이 「답글 N개 · 마지막 …」을 그리는가 (goal RN-U2).
    *
@@ -3224,6 +3231,8 @@ function TimelineInner({
         directory,
         authorMemberId: item.message.authorMemberId,
         aboveMessageId: aboveIds.get(requestKey),
+        // 스레드 화면이면 루트를 가리키는 인용도 거른다(#5381, 웹 `MessageRow` 와 같은 함수·같은 값).
+        ...(threadRootId !== undefined ? {threadRootId} : {}),
       });
       const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
       const leadingRun = requestRuns.find(run => run.id === requestChips.get(requestKey)?.runIds[0]) ?? requestRuns[0];
@@ -3317,6 +3326,7 @@ function TimelineInner({
       arrivalSurface,
       quoteLookup,
       aboveIds,
+      threadRootId,
       // 승인 표가 바뀌면 `renderItem` 의 동일성도 바뀌어야 한다 — 안 그러면
       // 결정한 뒤에도 목록이 옛 표를 든 클로저를 계속 쓴다. 붙어 있는 행이
       // 전부 다시 그려지는 값이지만 승인은 드물고, 대안은 결정이 화면에
