@@ -51,36 +51,36 @@ function run(extra: Partial<AgentRunProgress>): AgentRunProgress {
 interface Face {
   name: string;
   chip: TriggerChip;
+  /** 요청 묶음을 여는 길이 있는 칩은 단추다(`onOpenBundle`): 누르는 면 `after:-inset-1`이 붙는다. */
+  opensBundle: boolean;
 }
 
-function face(name: string, extra: Partial<AgentRunProgress>, now = T): Face {
-  const chip = triggerChip([run(extra)], nameFor, now, {
-    answerFor: () => ({ id: "answer-1", seq: 42 }),
-  });
+function face(name: string, extra: Partial<AgentRunProgress>, now = T, opensBundle = false): Face {
+  const chip = triggerChip([run(extra)], nameFor, now);
   if (chip === null) throw new Error(`칩이 없다: ${name}`);
-  return { name, chip };
+  return { name, chip, opensBundle };
 }
 
 const FACES: Face[] = [
   face("받음", {}),
   face("가져감", { phase: "claimed", leaseState: "live", claimedAtMs: T }),
   face("작업 중", { phase: "running", status: "running", leaseState: "live", startedAtMs: T - MIN }),
-  face("승인 필요", { phase: "awaiting_approval", status: "awaiting_approval" }),
+  face("승인 필요", { phase: "awaiting_approval", status: "awaiting_approval" }, T, true),
   face("일시 정지", { phase: "paused", status: "paused" }),
-  face("답함(눌리는 단추)", { phase: "succeeded", status: "succeeded", finishedAtMs: T - SEC }),
   face("아직 받지 않았어요", {}, T + 10 * MIN),
   face("실패", { phase: "failed", status: "failed", endReason: "agent_error", finishedAtMs: T - SEC }),
-  face("끝(묶음)", { phase: "succeeded", status: "succeeded", bundle: { approvalId: "approval", status: "approved", decisionMode: "open", canDecide: false, actionType: "workspace_action" } }),
-  face("거부", { phase: "cancelled", status: "cancelled", endReason: "approval_rejected" }),
-  face("만료", { phase: "timed_out", status: "timed_out", endReason: "approval_expired" }),
+  face("거부", { phase: "cancelled", status: "cancelled", endReason: "approval_rejected" }, T, true),
+  face("만료", { phase: "timed_out", status: "timed_out", endReason: "approval_expired" }, T, true),
 ];
 
-function markupOf(chip: TriggerChip): string {
+function markupOf(chip: TriggerChip, opensBundle = false): string {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  act(() => root.render(createElement(TriggerChipView, { chip, onJump: () => undefined })));
+  act(() =>
+    root.render(createElement(TriggerChipView, { chip, ...(opensBundle ? { onOpenBundle: () => undefined } : {}) }))
+  );
   const html = host.innerHTML;
   act(() => root.unmount());
   host.remove();
@@ -163,7 +163,7 @@ describe("트리거 칩의 크기 고정 (#4619 B)", () => {
   it.skipIf(ENGINES.length === 0)(
     "칩이 서고 낱말이 갈려도 머리 줄 높이·이름·시각 자리·칩 크기가 변하지 않는다 — 낱말 칩과 아이콘 칩 모두",
     async () => {
-      const markups = FACES.map((f) => ({ ...f, html: markupOf(f.chip) }));
+      const markups = FACES.map((f) => ({ ...f, html: markupOf(f.chip, f.opensBundle) }));
       const css = await compileTokensCss([
         ...MESSAGE_HEAD_CHIP_CLASS.split(/\s+/),
         ...NAME_CLASSES.split(/\s+/),
@@ -251,10 +251,10 @@ describe("트리거 칩의 크기 고정 (#4619 B)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "「답함 ✓」 단추의 누르는 면은 그려진 칩보다 4px씩 크다(28 ≥ 24, WCAG 2.5.8): 낱말 칩·아이콘 칩 모두, 줄 높이는 그대로",
+    "요청 묶음을 여는 칩(승인 필요) 단추의 누르는 면은 그려진 칩보다 4px씩 크다(28 ≥ 24, WCAG 2.5.8): 낱말 칩·아이콘 칩 모두, 줄 높이는 그대로",
     async () => {
-      const answered = FACES.find((f) => f.name.startsWith("답함"))!;
-      const html = markupOf(answered.chip);
+      const approval = FACES.find((f) => f.name === "승인 필요")!;
+      const html = markupOf(approval.chip, true);
       const css = await compileTokensCss([
         ...MESSAGE_HEAD_CHIP_CLASS.split(/\s+/),
         ...NAME_CLASSES.split(/\s+/),
@@ -287,7 +287,7 @@ describe("트리거 칩의 크기 고정 (#4619 B)", () => {
                 };
               });
               const at = `${engine} ${label}`;
-              if (g.tag !== "BUTTON") problems.push(`${at}: 답함 칩이 단추가 아니다(${g.tag})`);
+              if (g.tag !== "BUTTON") problems.push(`${at}: 승인 필요 칩이 단추가 아니다(${g.tag})`);
               if (g.position !== "absolute") problems.push(`${at}: 누르는 면이 absolute가 아니다(${g.position}) — 칩 상자를 키운다`);
               if (!(g.hitH >= 24 && g.hitW >= 24)) problems.push(`${at}: 누르는 면 ${g.hitW}×${g.hitH}가 24에 못 미친다`);
               if (Math.abs(g.hitH - (g.chipH + 8)) > 0.51 || Math.abs(g.hitW - (g.chipW + 8)) > 0.51) {

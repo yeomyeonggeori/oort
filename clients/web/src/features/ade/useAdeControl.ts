@@ -60,6 +60,8 @@ export interface AdeControl {
    * 세는 것이 아니라 모른다) — 서랍이 그 사실을 한 줄로 말하고 다시 시도를 준다.
    */
   sessionsFailed: boolean;
+  /** 그 읽기가 던진 오류 객체(#5279 B): 서랍이 실패의 원인(오프라인 / 서버에 닿지 못함 / 그 밖)을 말하는 데 쓴다. 실패가 아니면 `null`. */
+  sessionsError: unknown;
   retrySessions: () => void;
 }
 
@@ -119,6 +121,7 @@ export function useAdeControl(
     counts: adeCounts(items),
     nowMs,
     sessionsFailed: sessionsEnabled && sessionsQuery.isError,
+    sessionsError: sessionsEnabled ? (sessionsQuery.error ?? null) : null,
     retrySessions,
   };
 }

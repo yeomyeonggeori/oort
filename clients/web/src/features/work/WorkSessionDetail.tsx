@@ -16,6 +16,9 @@ import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
 import { DisplayObserver } from "./DisplayObserver";
 import { ControlInvite, DisplayController } from "./DisplayController";
@@ -1233,10 +1236,11 @@ export function WorkSessionDetail({
 
         {query.isPending && <Skeleton ready={false} rows={5} className="p-4" />}
         {query.error !== null && (
-          <InlineBanner
-            message="진행 내역을 불러오지 못했습니다."
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
+          // 받아 둔 단계가 아래에 그대로 서 있을 수 있다: 상자로 덮지 않고 한 줄만 말한다(#5279 B, #5242 규칙).
+          <LoadFailureNote
+            titleKey={CONNECTION_KEYS.loadWorkStepsTitle}
+            cause={loadCauseOf(query.error)}
+            onRetry={() => void query.refetch()}
             testId="work-detail-error"
           />
         )}

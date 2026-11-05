@@ -11,7 +11,11 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { CHIP_CLASS } from "@/features/common/chip";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import {
   EmptyInvite,
   InlineBanner,
@@ -182,6 +186,7 @@ function WorkConsoleRow({
 }
 
 export function WorkConsoleRoute() {
+  const formatMessage = useFormatMessage();
   const { session: auth, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const offline = useOffline();
@@ -437,14 +442,15 @@ export function WorkConsoleRoute() {
           {projectionsPending ? (
             <Skeleton ready={false} rows={6} className="p-4" />
           ) : blockingProjectionError ? (
-            <InlineBanner
-              message={
+            // 목록 자리가 통째로 비었다(받아 둔 것 없음): 무엇을 못 불러왔는지 + 원인 + 다시 시도(#5279 B).
+            <LoadFailureBox
+              titleKey={
                 sessionsQuery.error !== null
-                  ? "작업 세션을 불러오지 못했습니다."
-                  : "실행 위치를 불러오지 못했습니다."
+                  ? CONNECTION_KEYS.loadWorkSessionsTitle
+                  : CONNECTION_KEYS.loadWorkLocationsTitle
               }
-              actionLabel="다시 시도"
-              onAction={() => {
+              cause={loadCauseOf(projectionError)}
+              onRetry={() => {
                 if (sessionsQuery.error !== null) void sessionsQuery.refetch();
                 if (hostsQuery.error !== null) void hostsQuery.refetch();
               }}
@@ -486,8 +492,15 @@ export function WorkConsoleRoute() {
           {projectionsPending && showingDetail ? (
             <Skeleton ready={false} rows={7} className="p-4" />
           ) : blockingProjectionError && showingDetail ? (
+            // 단추가 「목록으로」라 다시 시도가 아니다: 문장은 다음 행동까지 말한다(`withAction` 거짓). 좁은 폭에서는 목록 칸이 숨어 이 줄이 이유를 홀로 진다.
             <InlineBanner
-              message="선택한 작업 세션을 불러오지 못했습니다."
+              quiet
+              message={loadFailureSentence(
+                formatMessage,
+                CONNECTION_KEYS.loadWorkSelectedSessionTitle,
+                loadCauseOf(projectionError),
+                false
+              )}
               actionLabel="목록으로"
               onAction={clearSelection}
               testId="work-console-detail-error"

@@ -27,7 +27,6 @@
   "timeline.agentRail.openActivity": "활동 보기",
   "timeline.runException.open": "{text}. 작업 기록 열기",
   "timeline.runException.settings": "에이전트 설정 열기",
-  "timeline.triggerChip.jumpHint": "답 메시지로 이동",
   "timeline.send.sending": "전송 중",
   "timeline.send.failed": "전송 실패",
   "timeline.send.resend": "다시 보내기",

@@ -8,6 +8,11 @@
 //! 5. nothing reads the stamp: `GET` on the path is not served
 //! 6. the new tenant table is RLS-bound: another tenant cannot read it, and a row for another
 //!    workspace cannot be written under this tenant's GUC (`momo_app` is NOBYPASSRLS)
+//! 7. (#5353) a member who is no longer active - suspended, or soft-deleted - and still holds a live
+//!    token is refused with 403 and writes nothing: the handler's membership check is the only state
+//!    gate the route has, because the auth middleware looks at the token and not at the member
+//! 8. (#5353) a beat that cannot get the member's row lock gives up after the bounded wait with a
+//!    retryable 503 + `Retry-After` (never 404/405, which tell a client to stop) and writes nothing
 //!
 //! `#[ignore]` - needs a real Postgres:
 //!
@@ -550,4 +555,207 @@ async fn the_table_is_row_level_isolated_per_workspace() {
         1,
         "the row exists: RLS hid it, not emptiness"
     );
+}
+
+/// A member who is no longer active - suspended, then (separately) soft-deleted - still holds a
+/// token the auth middleware accepts (it checks the signature and that the token row is not revoked,
+/// not the member's state). The beat is refused with the handler's own 403 and writes nothing; the
+/// same token works again when the member is active, so the refusal is the member's state and not
+/// the token. The message pins *which* layer said no: the membership check, not a generic gate.
+///
+/// Sabotage: delete the `active_workspace_role` check from `touch_member_activity_in_tx` - a
+/// suspended member's beat answers 204 and stamps a row.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_suspended_or_deleted_member_with_a_live_token_is_refused_and_writes_nothing() {
+    let _guard = test_lock().await;
+    let w = World::new().await;
+    let ws = seed_workspace(&w.su, "activity-inactive").await;
+    let me = seed_human(&w.su, ws, "me-inactive").await;
+    let token = login(&w.http, &w.base, ws, &me.email).await;
+
+    // Control: while active, the same token is accepted.
+    let ok = w
+        .http
+        .put(activity_url(&w.base, ws))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("beat while active");
+    assert_eq!(ok.status(), 204, "an active member's beat is accepted");
+    sqlx::query("DELETE FROM member_activity WHERE workspace_id = $1")
+        .bind(ws)
+        .execute(&w.su)
+        .await
+        .expect("clear the stamp");
+
+    for (label, down, up) in [
+        (
+            "suspended",
+            "UPDATE member SET status = 'suspended' WHERE workspace_id = $1 AND id = $2",
+            "UPDATE member SET status = 'active' WHERE workspace_id = $1 AND id = $2",
+        ),
+        (
+            "soft-deleted",
+            "UPDATE member SET deleted_at = now() WHERE workspace_id = $1 AND id = $2",
+            "UPDATE member SET deleted_at = NULL WHERE workspace_id = $1 AND id = $2",
+        ),
+    ] {
+        sqlx::query(down)
+            .bind(ws)
+            .bind(me.id)
+            .execute(&w.su)
+            .await
+            .expect("take the member out of service");
+        let refused = w
+            .http
+            .put(activity_url(&w.base, ws))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("beat from an inactive member");
+        assert_eq!(
+            refused.status(),
+            403,
+            "a {label} member with a live token is refused"
+        );
+        let body: Value = refused.json().await.unwrap_or(Value::Null);
+        assert_eq!(
+            body["error"]["message"].as_str().unwrap_or_default(),
+            "not an active member of this workspace",
+            "refused by the handler's membership check ({label}), not by another layer"
+        );
+        assert!(
+            stamps(&w.su, ws).await.is_empty(),
+            "a {label} member's beat wrote nothing"
+        );
+        sqlx::query(up)
+            .bind(ws)
+            .bind(me.id)
+            .execute(&w.su)
+            .await
+            .expect("put the member back in service");
+    }
+
+    // Back in service, the very same token is accepted again.
+    let back = w
+        .http
+        .put(activity_url(&w.base, ws))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("beat after reinstatement");
+    assert_eq!(back.status(), 204, "the refusal was the member's state");
+    assert_eq!(stamps(&w.su, ws).await.len(), 1, "and it stamps again");
+}
+
+/// One member's burst queues on one row: `ON CONFLICT DO UPDATE` locks the row before it looks at its
+/// `WHERE`, so even a no-op beat waits behind whoever holds it, and a queued request holds a pool
+/// connection. The wait is bounded (3 s, `lock_timeout`): a beat that loses it answers **503** with
+/// `Retry-After` - not 404/405, which make a client stop beating for good - and writes nothing. Once
+/// the lock is released the same request is a 204.
+///
+/// The hold is a superuser transaction that never ends until the assertions are done, so a beat with
+/// no bound would sit there: the 12 s guard turns that into a failure instead of a hung test.
+///
+/// Sabotage: delete the `set_config('lock_timeout', ..)` statement from `touch_member_activity_in_tx`
+/// - the beat waits for the lock and the guard trips; or answer 404 for the lost wait (the status).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_beat_that_cannot_get_the_row_lock_gives_up_with_a_retryable_503() {
+    let _guard = test_lock().await;
+    let w = World::new().await;
+    let ws = seed_workspace(&w.su, "activity-lock").await;
+    let me = seed_human(&w.su, ws, "me-lock").await;
+    let token = login(&w.http, &w.base, ws, &me.email).await;
+
+    // The row exists (a first beat), so the next beat reaches the `DO UPDATE` and its row lock.
+    assert_eq!(
+        w.http
+            .put(activity_url(&w.base, ws))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("first beat")
+            .status(),
+        204
+    );
+    let before = stamps(&w.su, ws).await;
+    assert_eq!(before.len(), 1);
+
+    // Someone else holds that row.
+    let mut holder = w.su.begin().await.expect("begin the lock holder");
+    sqlx::query(
+        "SELECT 1 FROM member_activity WHERE workspace_id = $1 AND member_id = $2 FOR UPDATE",
+    )
+    .bind(ws)
+    .bind(me.id)
+    .fetch_one(&mut *holder)
+    .await
+    .expect("hold the member's row");
+
+    let started = std::time::Instant::now();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(12),
+        w.http
+            .put(activity_url(&w.base, ws))
+            .bearer_auth(&token)
+            .send(),
+    )
+    .await
+    .expect("the beat must give up on its own; it is still waiting for the row lock")
+    .expect("beat while the row is held");
+    let waited = started.elapsed();
+
+    assert_eq!(
+        response.status(),
+        503,
+        "a beat that lost the lock wait is a retryable 503"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok()),
+        Some("2"),
+        "and says when to come back"
+    );
+    assert!(
+        waited >= std::time::Duration::from_millis(2_500),
+        "it waited its bound (3 s) instead of failing for another reason: {waited:?}"
+    );
+    assert!(
+        waited < std::time::Duration::from_secs(8),
+        "and no longer than the bound: {waited:?}"
+    );
+
+    holder.rollback().await.expect("release the row");
+    let after = stamps(&w.su, ws).await;
+    assert_eq!(after.len(), 1);
+    assert!(
+        after[0].1 >= before[0].1,
+        "the lost beat wrote nothing (age {} -> {})",
+        before[0].1,
+        after[0].1
+    );
+
+    // Released, the same request is accepted.
+    sqlx::query(
+        "UPDATE member_activity SET seen_at = now() - interval '10 seconds' \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(ws)
+    .bind(me.id)
+    .execute(&w.su)
+    .await
+    .expect("age the stamp");
+    let again = w
+        .http
+        .put(activity_url(&w.base, ws))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("beat after the release");
+    assert_eq!(again.status(), 204, "nothing else was wrong with the beat");
+    assert!(stamps(&w.su, ws).await[0].1 < 5.0, "and it stamps again");
 }
