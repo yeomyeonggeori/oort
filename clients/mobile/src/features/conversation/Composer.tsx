@@ -2533,23 +2533,9 @@ export function Composer({
         </Sentence>
       ) : null}
 
-      {attachmentKey === null ? null : (
-        <AttachmentTray
-          drafts={attachmentSurface.drafts}
-          pickerIssue={attachmentSurface.pickerIssue}
-          onRemove={localId => dropDraft(attachmentKey, localId)}
-          onRetry={localId => {
-            if (stableAttachmentTarget !== null) {
-              retryDraft(attachmentKey, stableAttachmentTarget, localId);
-            }
-          }}
-          onClear={() => clearSurface(attachmentKey)}
-        />
-      )}
-
-      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이 바로 아래, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
+      {/* 보내기 전 링크 미리보기(#5016): 알약 바로 위, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
           가깝다). 알약 **밖**이라 ✕가 보내기를 일으키지 않는다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 —
-          첨부 트레이·인용 줄과 같은 취급이고, 줄 안 높이는 트레이와 같은 상한이 묶는다. */}
+          인용 줄과 같은 취급이다(첨부 미리보기는 #5325 로 알약 **안**에 들어갔다 — 아래 알약 머리). */}
       <ComposerLinkPreview
         cards={linkPreview.cards}
         onDismiss={dismissLinkPreview}
@@ -2619,6 +2605,22 @@ export function Composer({
           textLeft={fieldInset(INPUT_TEXT_LEFT)}
         />
       ) : null}
+      {/* 첨부 미리보기 (#5325) — 알약 **안**, 글 줄 바로 위: 사진은 작은 썸네일 한 줄, 파일·실패는 같은 줄의 칩이다. 옛 판은 알약 밖(입력창 위 도크 줄)이라 입력창을 눌러도 입력창 안에는 없었다.
+          좌우 여백은 글 칸의 글자 왼쪽(`INPUT_TEXT_LEFT`)에 맞춘다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 — 답글 머리말과 같은 취급이다. */}
+      {attachmentKey === null ? null : (
+        <AttachmentTray
+          inset={INPUT_TEXT_LEFT}
+          drafts={attachmentSurface.drafts}
+          pickerIssue={attachmentSurface.pickerIssue}
+          onRemove={localId => dropDraft(attachmentKey, localId)}
+          onRetry={localId => {
+            if (stableAttachmentTarget !== null) {
+              retryDraft(attachmentKey, stableAttachmentTarget, localId);
+            }
+          }}
+          onClear={() => clearSurface(attachmentKey)}
+        />
+      )}
       <View
         style={styles.bar}
         testID="composer-bar"
