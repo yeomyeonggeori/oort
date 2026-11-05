@@ -6684,6 +6684,22 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 0,
+      "value": "Replying to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "Replying to a message"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,

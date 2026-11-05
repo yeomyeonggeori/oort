@@ -127,7 +127,7 @@ import {landedFace, pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
-import {MessageBody, bodyAffordances, openLink} from './MessageBody';
+import {MessageBody, QuoteHeadBubble, bodyAffordances, openLink, type QuoteHeadSpec} from './MessageBody';
 import {MessageActionSheet, timeLabel} from './MessageActionSheet';
 import {LinkActionSheet} from './LinkActionSheet';
 import {
@@ -283,7 +283,7 @@ import {
   type CompletionReportCard,
   type CompletionTone,
 } from '@momo/core/features/timeline/completionReportCard';
-import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
+import {quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
@@ -3194,6 +3194,40 @@ function MessageRowInner({
     threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
+  // 인용 머리의 재료 (#5381 Q4). 머리는 말풍선 **안** 윗칸이라 `MessageBody` 가 그린다 — 본문이 없는 행만 아래에서 단독 말풍선으로 세운다.
+  // 묘비에는 붙이지 않는다: 지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지 묘비에 대한 사실이 아니다.
+  const quoteHeadSpec: QuoteHeadSpec | undefined =
+    drawnQuote && !deleted
+      ? {
+          block: drawnQuote,
+          directory,
+          attachmentCount: quoteAttachmentCount,
+          // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
+          // 범위 안에 있든 없든.
+          //
+          // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
+          // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
+          // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
+          // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
+          // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
+          // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
+          //
+          // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
+          // `QuoteBlock` 이 자기 갈래로 직접 한다.
+          onJump: actions?.onJumpToQuoted
+            ? () => {
+                if (longPress.consumeTap()) return;
+                actions.onJumpToQuoted?.(message);
+              }
+            : undefined,
+        }
+      : undefined;
+  // 이 행의 말풍선 종류. 본문 말풍선과 단독 머리 말풍선이 같은 색을 읽는다.
+  const rowBubble =
+    actions?.myMemberId !== undefined && message.authorMemberId === actions.myMemberId
+      ? 'mine'
+      : 'other';
+
   return (
     <View
       ref={rowNodeRef}
@@ -3216,7 +3250,7 @@ function MessageRowInner({
         replyTo: replyToSpoken,
         quoted:
           drawnQuote && !deleted
-            ? quoteAccessibilityPhrase(drawnQuote, directory, quoteAttachmentCount)
+            ? quoteAccessibilityPhrase(drawnQuote, directory, formatMessage, quoteAttachmentCount)
             : null,
         }),
         // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
@@ -3341,37 +3375,12 @@ function MessageRowInner({
           />
         ) : null}
 
-        {/* 인용 블록 (ADR-0148). 표식 **아래**, 본문 **위** — 한 행이 둘 다 가질
-            수 있고(규칙 1), 그때 읽히는 순서는 「어느 대화에 속하는가」 →
-            「무엇을 가리키는가」 → 「무슨 말인가」다. 묘비에는 붙이지 않는다:
-            지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지
-            묘비에 대한 사실이 아니다. */}
-        {drawnQuote && !deleted ? (
-          <QuoteBlock
-            block={drawnQuote}
-            directory={directory}
-            attachmentCount={quoteAttachmentCount}
-            // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
-            // 범위 안에 있든 없든.
-            //
-            // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
-            // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
-            // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
-            // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
-            // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
-            // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
-            //
-            // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
-            // `QuoteBlock` 이 자기 갈래로 직접 한다.
-            onJump={
-              actions?.onJumpToQuoted
-                ? () => {
-                    if (longPress.consumeTap()) return;
-                    actions.onJumpToQuoted?.(message);
-                  }
-                : undefined
-            }
-          />
+        {/* 인용 머리 (ADR-0148 · #5381 Q4). 말풍선 **안** 윗칸이다 — 아래 `MessageBody` 가 `quoteHead` 로 받아 자기 첫 말풍선에
+            그린다. 표식 **아래**, 본문 **위**: 한 행이 둘 다 가질 수 있고(규칙 1), 그때 읽히는 순서는 「어느 대화에 속하는가」 →
+            「무엇을 가리키는가」 → 「무슨 말인가」다. 보일 본문이 없는 행(카드·첨부만 보낸 답장)만 여기서 머리를 **자기 말풍선**으로 세운다 —
+            본문이 있는 행에서 여기까지 그리면 머리가 두 번 선다. */}
+        {quoteHeadSpec && !(presentation.keepsBody && hasBody) ? (
+          <QuoteHeadBubble quoteHead={quoteHeadSpec} bubble={rowBubble} />
         ) : null}
 
         {deleted ? (
@@ -3413,12 +3422,9 @@ function MessageRowInner({
                 selectable={!actionable}
                 // 말풍선 (#4300): 내 글은 신호색, 남·에이전트 글은 표면. 카드·첨부는 아래에서
                 // 말풍선 밖 전체 폭으로 선다.
-                bubble={
-                  actions?.myMemberId !== undefined &&
-                  message.authorMemberId === actions.myMemberId
-                    ? 'mine'
-                    : 'other'
-                }
+                bubble={rowBubble}
+                // 인용 머리(#5381): 이 본문의 첫 말풍선 안 윗칸.
+                quoteHead={quoteHeadSpec}
               />
             ) : null}
 
@@ -4312,6 +4318,11 @@ export function PendingRow({
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
+  // 인용 머리의 재료(#5381 Q4). 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을 때 그 글이 어디 있는지 아무도
+  // 보장하지 못한다(웹 `PendingRow` 와 같은 규칙).
+  const echoQuoteHead: QuoteHeadSpec | undefined = quote
+    ? {block: quote, directory, attachmentCount: quoteAttachmentCount}
+    : undefined;
 
   // 오래 걸리는 전송만 시계 하나로 알린다(#4455). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
   const slow = useSlowSend(pending.createdAtMs, pending.status);
@@ -4415,12 +4426,10 @@ export function PendingRow({
             myMemberId={pending.authorMemberId}
           />
         ) : null}
-        {quote ? (
-          <QuoteBlock
-            block={quote}
-            directory={directory}
-            attachmentCount={quoteAttachmentCount}
-          />
+        {/* 인용 머리(#5381 Q4): 확정된 행과 같은 말풍선 안 윗칸이다 — 아래 `MessageBody` 가 그린다. 보낼 본문이 없는 메아리(사진만 보낸 답장)만 여기서
+            머리를 자기 말풍선으로 세운다. 에코가 머리를 안 그렸다가 서버 사본이 오는 순간 모양이 바뀌면 글이 움직인다. */}
+        {echoQuoteHead && !hasRenderableBody(pending.body) ? (
+          <QuoteHeadBubble quoteHead={echoQuoteHead} bubble="mine" muted={failed} />
         ) : null}
         {/* Same anatomy as a confirmed row: the text must not re-flow when the
             server's copy replaces this one — which is exactly why the echo goes
@@ -4439,6 +4448,7 @@ export function PendingRow({
             selfMemberId={pending.authorMemberId}
             // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
             bubble="mine"
+            quoteHead={echoQuoteHead}
           />
         ) : null}
         {pending.attachments && pending.attachments.length > 0 ? (

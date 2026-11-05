@@ -26,6 +26,7 @@ import {ApiError} from '@momo/core/lib/api';
 import type {ProviderLink} from '@momo/core/features/settings/api';
 import {AiConnectCard, TEAM_QUERY_KEY} from '../src/features/aiConnect/AiConnectCard';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
+import {QuoteDraftBar} from '../src/features/conversation/Quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {
   Composer,
@@ -2396,14 +2397,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         body: '릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.',
       });
       return (
-        <Frame label="인용 · 정상 — 중성 규정선, 배경 없음 (H-2)">
+        <Frame label="인용 · 정상 — 말풍선 안 머리, 세로선 없음 (#5381 Q4)">
           {draft ? quoted(draft.block) : <View />}
         </Frame>
       );
     }
     case 'quote-deleted':
       return (
-        <Frame label="인용 · 삭제된 원본 — 사본을 남기지 않는다">
+        <Frame label="인용 · 삭제된 원본 — 같은 머리 자리, 사본을 남기지 않는다">
           {/* 인용 원본의 저자는 **타인**이다 (design-review N-7). 첫 판은
               `SELF` 였고, 그래서 사진에서 행 저자와 인용 저자가 둘 다 같은
               이름으로 나왔다 — 자기 말을 자기가 인용하는 화면은 이 기능이
@@ -2423,6 +2424,40 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           {quoted({kind: 'unresolved', targetId: 'orig-1', targetSeq: null})}
         </Frame>
       );
+    // #5381 Q4: 말풍선 안 윗칸 머리의 네 장면을 한 화면에 — 남 말풍선(긴 원문은 1줄 말줄임) · 내 말풍선(신호색 위) · 지워진 원본 · 입력창 초안.
+    case 'quote-q4': {
+      const original = (body: string) =>
+        quoteDraftFor({...MESSAGE, id: 'orig-1', seq: 4, authorMemberId: OTHER, body})?.block;
+      const long = original(
+        '배포 되돌리기 절차 정리해 줄래요? 릴리스 태그 확인, 이전 이미지 롤백, 헬스체크까지 순서대로 알려 주면 좋겠어요.\n둘째 줄은 보이지 않아요',
+      );
+      const short = original('릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.');
+      const row = (author: string, body: string, block: QuoteBlockModel | undefined, id: string) =>
+        block === undefined ? null : (
+          <MessageRow
+            message={{...MESSAGE, id, authorMemberId: author, body, thread: undefined}}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            quote={block}
+            actions={{
+              myMemberId: SELF,
+              onToggleReaction: async () => {},
+              onEdit: async () => {},
+              onDelete: async () => {},
+            }}
+          />
+        );
+      return (
+        <Frame label="인용 · 말풍선 안 머리 (#5381 Q4) — 남 · 내 · 지워진 원본 · 입력창">
+          {row(AGENT, '세 단계예요. 릴리스 태그를 확인하고, 이전 이미지로 롤백한 뒤, 헬스체크를 돌려요.', long, 'row-other')}
+          {row(SELF, '재시작할게요. 끝나면 알려 드릴게요.', short, 'row-mine')}
+          {row(OTHER, '확인했어요.', {kind: 'deleted', targetId: 'orig-1', targetSeq: 4, authorMemberId: OTHER}, 'row-gone')}
+          {long ? <QuoteDraftBar block={long} directory={DIRECTORY} onCancel={() => {}} /> : null}
+        </Frame>
+      );
+    }
     // ---- U4-3 (#1079): 최종 리뷰가 지목한 잔여 위상 --------------------------
     case 'typing-empty':
       return (

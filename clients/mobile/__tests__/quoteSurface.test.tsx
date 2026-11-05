@@ -7,12 +7,17 @@ import {
   type QuoteBlock as QuoteBlockModel,
 } from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {appNote} from '../src/features/conversation/appVoice';
 import React from 'react';
+import {Image} from 'react-native';
 
+import {contrast} from '@momo/core/design/color';
 import {
   MessageRow,
+  PendingRow,
   type MessageRowActions,
 } from '../src/features/conversation/MessageRow';
 import {
@@ -41,6 +46,9 @@ import {
 // `resolveQuote` 가 화면에 있는 행에서 못 찾으면 `unresolved` 를 돌려주는데, 그
 // 갈래를 `deleted` 로 접으면 **멀쩡한 메시지를 지워졌다고 말하는 화면**이 된다.
 // =============================================================================
+
+/** 사전의 한국어 판 — 화면이 읽는 것과 같은 문장을 짓는다(`useFormatMessage` 가 제공자 없이 읽는 판). */
+const FORMAT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
@@ -117,6 +125,28 @@ const UNRESOLVED_BLOCK: QuoteBlockModel = {
 
 afterEach(cleanup);
 
+/** 스타일 배열·중첩을 한 객체로. */
+function flat(style: unknown): Record<string, any> {
+  if (Array.isArray(style)) return Object.assign({}, ...style.map(flat));
+  return style && typeof style === 'object' ? (style as Record<string, any>) : {};
+}
+
+/** 그려진 트리의 모든 노드 스타일. 「세로 규칙이 없다」를 **그려진 값**으로 잰다. */
+function styleNodes(tree: unknown): Record<string, any>[] {
+  const out: Record<string, any>[] = [];
+  const walk = (node: any): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (node.props?.style !== undefined) out.push(flat(node.props.style));
+    (node.children ?? []).forEach(walk);
+  };
+  walk(tree);
+  return out;
+}
+
 describe('인용 블록', () => {
   it('지워진 원본을 「삭제된 메시지」로 말한다 — 코어의 낱말로', () => {
     render(<QuoteBlock block={DELETED_BLOCK} directory={DIRECTORY} />);
@@ -188,18 +218,19 @@ describe('인용 블록', () => {
     expect(screen.getByTestId('quote-edited')).toBeTruthy();
   });
 
-  it('발췌는 코어가 자른 그대로 그린다 — 두 번째 자름을 만들지 않는다', () => {
+  it('발췌는 코어가 자른 한 줄이고, 폭은 화면의 한 줄 말줄임이 맡는다 (#5381)', () => {
     const block = readyBlock({body: '한 줄\n두 줄\n세 줄\n네 줄'});
     if (block.kind !== 'ready') throw new Error('ready');
     render(<QuoteBlock block={block} directory={DIRECTORY} />);
+    // 코어가 한 줄로 자르고(`QUOTE_EXCERPT_MAX_LINES`), 잘렸다는 사실은 「…」로 남는다.
+    expect(block.lines).toEqual(['한 줄']);
+    expect(block.truncated).toBe(true);
     expect(screen.getByTestId('quote-body').props.children).toEqual([
-      block.lines.join('\n'),
+      '한 줄',
       '…',
     ]);
-    expect(block.truncated).toBe(true);
-    // 여기서 `numberOfLines` 를 또 걸면 잘림이 두 곳에서 결정되고, 화면과
-    // `truncated` 플래그가 어긋나는 순간이 생긴다.
-    expect(screen.getByTestId('quote-body').props.numberOfLines).toBeUndefined();
+    // 한 줄이 좁은 폭을 넘치는 것은 줄 수가 아니라 폭의 문제라 화면이 자른다. 코어의 글자 예산과 다른 예산이다.
+    expect(screen.getByTestId('quote-body').props.numberOfLines).toBe(1);
   });
 
   it('본문이 공백뿐인 원본을 빈 칸으로 두지 않는다', () => {
@@ -215,8 +246,8 @@ describe('인용 블록', () => {
       '',
     ]);
     expect(screen.queryByTestId('quote-tombstone')).toBeNull();
-    expect(quoteAccessibilityPhrase(block, DIRECTORY)).toBe(
-      '김인턴 인용, 내용 없는 메시지',
+    expect(quoteAccessibilityPhrase(block, DIRECTORY, FORMAT)).toBe(
+      '김인턴에게 답장, 내용 없는 메시지',
     );
   });
 
@@ -230,16 +261,56 @@ describe('인용 블록', () => {
     ]);
   });
 
-  it('VoiceOver 문장은 「인용」이라고 말하고 「답글」이라 하지 않는다', () => {
-    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY)).toBe(
-      '김인턴 인용, 배포 로그 확인했습니다',
+  it('VoiceOver 문장은 눈이 보는 머리와 같은 「{이름}에게 답장」이고 「답글」이라 하지 않는다 (#5381)', () => {
+    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY, FORMAT)).toBe(
+      '김인턴에게 답장, 배포 로그 확인했습니다',
     );
-    expect(quoteAccessibilityPhrase(DELETED_BLOCK, DIRECTORY)).toBe(
-      `김인턴 인용, ${QUOTE_DELETED_TEXT}`,
+    expect(quoteAccessibilityPhrase(DELETED_BLOCK, DIRECTORY, FORMAT)).toBe(
+      `김인턴에게 답장, ${QUOTE_DELETED_TEXT}`,
     );
-    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY)).not.toContain(
-      '답글',
+    // 이름을 모르면 이름을 지어내지 않는다.
+    expect(quoteAccessibilityPhrase(UNRESOLVED_BLOCK, DIRECTORY, FORMAT)).toBe(
+      '메시지에 답장, 원본을 아직 불러오지 않음',
     );
+    expect(
+      quoteAccessibilityPhrase(readyBlock(), DIRECTORY, FORMAT),
+    ).not.toContain('답글');
+    // 첨부 수는 문장 끝에 붙는다.
+    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY, FORMAT, 2)).toBe(
+      '김인턴에게 답장, 배포 로그 확인했습니다, 첨부 파일 2개',
+    );
+  });
+
+  it('머리 문장이 눈과 귀에서 같다 — 눈이 보는 낱말이 귀의 문장 앞머리다', () => {
+    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} />);
+    const seen = screen.getByTestId('quote-head-label').props.children;
+    expect(seen).toBe('김인턴에게 답장');
+    expect(
+      quoteAccessibilityPhrase(readyBlock(), DIRECTORY, FORMAT).startsWith(seen),
+    ).toBe(true);
+  });
+
+  it('머리는 아이콘 + 이름 문장 + 원문 한 줄이고, 세로 규칙이 없다 (#5381 Q4)', () => {
+    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} divider />);
+    const head = screen.getByTestId('quote-block');
+    // 아이콘(옮겨 담은 Lucide corner-up-left) · 이름 문장 · 원문 한 줄.
+    expect(within(head).UNSAFE_getAllByType(Image)).toHaveLength(1);
+    expect(within(head).getByTestId('quote-head-label')).toBeTruthy();
+    expect(within(head).getByTestId('quote-body').props.numberOfLines).toBe(1);
+    // 머리 아래에 본문이 서면(divider) 가는 선 하나가 선다.
+    expect(flat(head.props.style).borderBottomWidth).toBeGreaterThan(0);
+    // 세로 규칙: 그려진 트리 어디에도 한쪽 변 테두리나 폭 2짜리 막대가 없다.
+    for (const node of styleNodes(screen.toJSON())) {
+      expect(node.borderLeftWidth ?? 0).toBe(0);
+      expect(node.borderRightWidth ?? 0).toBe(0);
+      expect(node.borderStartWidth ?? 0).toBe(0);
+      expect(node.width).not.toBe(2);
+    }
+  });
+
+  it('본문이 없는 자리(구분선 없음)에는 선이 서지 않는다', () => {
+    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} />);
+    expect(flat(screen.getByTestId('quote-block').props.style).borderBottomWidth).toBeUndefined();
   });
 });
 
@@ -260,6 +331,26 @@ describe('컴포저의 인용 초안', () => {
     expect(style.minHeight).toBeGreaterThanOrEqual(44);
     fireEvent.press(cancel);
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('행의 머리와 같은 문법이다 — 아이콘 + 「{이름}에게 답장」 + 원문 한 줄 + 닫기, 세로 규칙 없음 (#5381)', () => {
+    render(
+      <QuoteDraftBar
+        block={readyBlock({body: '한 줄\n두 줄'})}
+        directory={DIRECTORY}
+        onCancel={() => {}}
+      />,
+    );
+    const bar = screen.getByTestId('quote-draft');
+    expect(screen.getByTestId('quote-draft-label').props.children).toBe('김인턴에게 답장');
+    expect(screen.getByTestId('quote-draft-body').props.children).toBe('한 줄');
+    // 아이콘(이름 줄 앞)과 닫기(✕): 이미지가 둘이다.
+    expect(within(bar).UNSAFE_getAllByType(Image)).toHaveLength(2);
+    expect(screen.getByTestId('quote-draft-cancel').props.accessibilityLabel).toBe('인용 취소');
+    for (const node of styleNodes(screen.toJSON())) {
+      expect(node.borderLeftWidth ?? 0).toBe(0);
+      expect(node.width).not.toBe(2);
+    }
   });
 
   it('한 줄이다 — 키보드가 올라온 폰에서 입력창을 밀어내지 않는다', () => {
@@ -408,8 +499,107 @@ describe('행 위의 인용', () => {
     );
     const label: string = screen.getByTestId('message-row').props
       .accessibilityLabel;
-    expect(label).toContain('김인턴 인용, 배포 로그 확인했습니다');
-    expect(label.indexOf('인용')).toBeLessThan(label.indexOf('그건 배포 뒤에'));
+    expect(label).toContain('김인턴에게 답장, 배포 로그 확인했습니다');
+    expect(label.indexOf('답장')).toBeLessThan(label.indexOf('그건 배포 뒤에'));
+  });
+});
+
+describe('인용 머리는 말풍선 안 윗칸이다 (#5381 Q4)', () => {
+  function row(over: Partial<Message> = {}, mine = false, quote: QuoteBlockModel = readyBlock()) {
+    render(
+      <MessageRow
+        message={message({authorMemberId: mine ? SELF : OTHER, ...over})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote}
+        actions={actions()}
+      />,
+    );
+  }
+
+  it('본문이 있으면 머리는 그 말풍선 **안**에 서고, 머리가 두 번 서지 않는다', () => {
+    row();
+    const bubble = screen.getByTestId('message-bubble');
+    const head = within(bubble).getByTestId('quote-block');
+    // 머리 아래 가는 선 하나, 그 아래가 본문이다.
+    expect(flat(head.props.style).borderBottomWidth).toBeGreaterThan(0);
+    expect(within(bubble).getByText('그건 배포 뒤에 봅시다')).toBeTruthy();
+    expect(screen.queryByTestId('quote-head-bubble')).toBeNull();
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+    // 머리가 말풍선 가장자리까지 차므로 위쪽 두 모서리가 말풍선과 같은 반경을 따라간다(둥근 모서리 밖으로 삐져나오지 않는다).
+    const radius = flat(bubble.props.style).borderRadius;
+    expect(radius).toBeGreaterThan(0);
+    expect(flat(head.props.style).borderTopLeftRadius).toBe(radius);
+    expect(flat(head.props.style).borderTopRightRadius).toBe(radius);
+    // 아래 두 모서리는 본문 칸으로 이어지므로 각져 있다.
+    expect(flat(head.props.style).borderBottomLeftRadius).toBeUndefined();
+  });
+
+  it('내 말풍선(오른쪽)에서도 같은 머리가 서고, 글자가 띠 위에서 4.5:1 이다', () => {
+    row({}, true);
+    const bubble = screen.getByTestId('message-bubble');
+    const head = within(bubble).getByTestId('quote-block');
+    const fill = flat(head.props.style).backgroundColor;
+    const labelInk = flat(within(head).getByTestId('quote-head-label').props.style).color;
+    const excerptInk = flat(within(head).getByTestId('quote-body').props.style).color;
+    expect(contrast(labelInk, fill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(excerptInk, fill)).toBeGreaterThanOrEqual(4.5);
+    // 띠는 말풍선 채움과 갈려 보인다(같은 색이면 머리가 말풍선에 묻는다).
+    expect(fill).not.toBe(flat(bubble.props.style).backgroundColor);
+  });
+
+  it('본문이 없는 답장은 머리가 자기 말풍선으로 선다 — 인용을 지우지 않는다', () => {
+    row({body: ''});
+    expect(screen.queryByTestId('message-bubble')).toBeNull();
+    const standalone = screen.getByTestId('quote-head-bubble');
+    expect(within(standalone).getByTestId('quote-block')).toBeTruthy();
+    // 본문이 없으니 구분선도 없다.
+    expect(flat(within(standalone).getByTestId('quote-block').props.style).borderBottomWidth).toBeUndefined();
+  });
+
+  it('코드 블록이 첫 블록인 글은 머리가 코드 위에 단독 말풍선으로 서고, 뒤 말풍선에는 서지 않는다', () => {
+    row({body: ['```sh', 'ls -la', '```', '그 뒤에 설명이에요'].join('\n')});
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+    const standalone = screen.getByTestId('quote-head-bubble');
+    expect(within(standalone).getByTestId('quote-block')).toBeTruthy();
+    // 설명이 든 말풍선에는 머리가 없다.
+    const bubble = screen.getByTestId('message-bubble');
+    expect(within(bubble).queryByTestId('quote-block')).toBeNull();
+    expect(within(bubble).getByText('그 뒤에 설명이에요')).toBeTruthy();
+  });
+
+  it('산문이 먼저이면 머리는 첫 말풍선에만 선다 (코드 뒤 두 번째 말풍선에는 서지 않는다)', () => {
+    row({body: ['앞 설명이에요', '', '```sh', 'ls -la', '```', '', '뒤 설명이에요'].join('\n')});
+    const bubbles = screen.getAllByTestId('message-bubble');
+    expect(bubbles).toHaveLength(2);
+    expect(within(bubbles[0]).getByTestId('quote-block')).toBeTruthy();
+    expect(within(bubbles[1]).queryByTestId('quote-block')).toBeNull();
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+  });
+
+  it('보내는 중인 내 글도 같은 말풍선 안 머리다 — 서버 사본이 오는 순간 모양이 바뀌지 않는다', () => {
+    render(
+      <PendingRow
+        pending={
+          {
+            clientMsgId: 'c-1',
+            channelId: 'ch',
+            authorMemberId: SELF,
+            body: '보내는 중인 글',
+            status: 'sending',
+            createdAtMs: BASE_MS,
+          } as never
+        }
+        startsGroup
+        directory={DIRECTORY}
+        quote={readyBlock()}
+      />,
+    );
+    const bubble = screen.getByTestId('message-bubble');
+    expect(within(bubble).getByTestId('quote-block')).toBeTruthy();
+    expect(within(bubble).getByText('보내는 중인 글')).toBeTruthy();
   });
 });
 

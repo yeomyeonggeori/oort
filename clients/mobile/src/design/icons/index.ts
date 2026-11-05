@@ -95,6 +95,10 @@ export const CONV_ICONS = {
   // 밀어서 답글(#4869)의 문턱 표지. Lucide `reply`(ISC, 웹 `lucide-react` 0.454.0 의 경로 그대로 — polyline `9 17 4 12 9 7` +
   // path `M20 18v-2a4 4 0 0 0-4-4H4`), 같은 레시피(선 1.8, viewBox 24, 20pt 의 1·2·3배: `rsvg-convert -w <20|40|60>`).
   reply: require('./reply20.png') as ImageSourcePropType,
+  // 인용 머리 「{이름}에게 답장」의 표지(#5381 Q4). Lucide `corner-up-left`(ISC, 웹 `lucide-react` 0.454.0 의 `CornerUpLeft` 경로 그대로 —
+  // polyline `9 14 4 9 9 4` + path `M20 20v-7a4 4 0 0 0-4-4H4`)를 같은 레시피(선 1.8, viewBox 24, 12pt 의 1·2·3배: `rsvg-convert -w <12|24|36>`)로
+  // **옮겨 담았다**. 새로 그린 것이 아니다. 웹 인용 머리와 같은 도형이라 두 기기가 같은 표지를 쓴다(`reply` 는 밀어서 답글의 문턱 표지다).
+  quoteReply: require('./corner-up-left12.png') as ImageSourcePropType,
   // 스레드 머리의 「따라가기」 단추(#4890). Lucide `bell`·`bell-off`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로)를
   // 같은 레시피(선 1.8, viewBox 24, `rsvg-convert`, 20pt 의 1·2·3배)로 **옮겨 담았다**. 새로 그린 것이 아니다. 켜짐은 `bell`,
   // 꺼짐은 빗금이 있는 `bell-off`.
@@ -126,6 +130,7 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   file: 18,
   clock: 12,
   reply: 20,
+  quoteReply: 12,
   bell: 20,
   bellOff: 20,
   search: 20,
