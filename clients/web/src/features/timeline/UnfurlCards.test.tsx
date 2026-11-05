@@ -120,14 +120,31 @@ describe("UnfurlCards", () => {
     expect(output).not.toContain('data-testid="unfurl-image"');
   });
 
-  it("gives the remove control an opaque token chip", () => {
+  it("gives the remove control a borderless opaque circle that shows on card hover or keyboard focus (#5328)", () => {
     const output = html([base], { canRemove: true });
     const remove = output.match(
       /<button(?=[^>]*data-testid="unfurl-remove")[^>]*>/
     )?.[0];
     expect(remove).toBeDefined();
+    // 면은 불투명 토큰(OG 배경이 임의 색이라 반투명 스크림은 대비 상한이 없다), 모양은 테두리 없는 원이다.
     expect(remove).toContain("bg-surface-raised");
-    expect(remove).toContain("border-line-strong");
+    expect(remove).toContain("rounded-full");
+    expect(remove).not.toMatch(/(^|[\s"])border(-[a-z-]+)?([\s"]|$)/);
+    // 호버가 되는 입력에서만 숨기고(터치는 늘 보인다), 카드 호버·카드 안 키보드 초점·자기 키보드 초점에서 선다.
+    for (const rule of [
+      "pointer-hover:opacity-0",
+      "pointer-hover:group-hover/unfurl:opacity-100",
+      "pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100",
+      "pointer-hover:focus-visible:opacity-100",
+    ]) {
+      expect(remove, rule).toContain(rule);
+    }
+    // 키보드로 닿고 이름이 있다: 탭 순서에서 빠지지 않고(tabindex 없음), 행의 로빙 그룹에 든다.
+    expect(remove).toContain('aria-label="링크 미리보기 제거"');
+    expect(remove).not.toContain("tabindex");
+    expect(remove).toContain("data-row-action");
+    // 카드 묶음이 이름 있는 그룹(`group/unfurl`)이라 위 규칙이 그 카드 하나에만 걸린다.
+    expect(output).toMatch(/class="group\/unfurl relative isolate flex rounded-md bg-surface-muted"/);
   });
 
   it("withholds removal from non-authors", () => {
