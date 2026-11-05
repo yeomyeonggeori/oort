@@ -251,7 +251,7 @@ describe('「AI와 만들기」 요청 뒤 (#4962)', () => {
     const buttons = screen.getAllByTestId('composer-expression');
     expect(buttons).toHaveLength(2);
     fireEvent.press(buttons[buttons.length - 1]);
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-team'));
+    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
     await screen.findByTestId('expression-add-menu');
     await press('expression-add-menu');
     await press('expression-add-make');
