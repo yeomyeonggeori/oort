@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -41,15 +42,9 @@ import { ConnectionContext, type ConnectionContextValue } from "./connectionCont
 // 멈춘다. 숨은 창에서는 보내지 않는다. 폰과 같은 코어 규칙이다.
 // =============================================================================
 
-// 창이 보이는가(저절로 다시 확인은 보이는 동안만 보낸다). 포커스는 보지 않는다: 보이는 창의 띠가 걷히지 않으면 안 되고(옆 창을 쓰는 중에도 이 창은 보인다),
-// 데스크탑 웹뷰의 `document.hasFocus()`는 창이 앞인데도 거짓일 수 있다(`useChannelViewingBeat`의 같은 이유). `useSyncExternalStore`가 구독 함수의 동일성이 바뀌면
-// 다시 구독하므로 모듈에 하나씩 둔다.
-const subscribeVisible = (notify: () => void) => {
-  document.addEventListener("visibilitychange", notify);
-  return () => document.removeEventListener("visibilitychange", notify);
-};
-const readVisible = () => document.visibilityState !== "hidden";
-const assumeVisible = () => true;
+// 창이 숨었는가(저절로 다시 확인은 보이는 동안만 보낸다). 포커스는 보지 않는다: 보이는 창의 띠가 걷히지 않으면 안 되고(옆 창을 쓰는 중에도 이 창은 보인다),
+// 데스크탑 웹뷰의 `document.hasFocus()`는 창이 앞인데도 거짓일 수 있다(`useChannelViewingBeat`의 같은 이유). 창 숨김 이벤트는 아래 자리 비움 효과가 이미 듣는다.
+const pageHidden = () => document.visibilityState === "hidden";
 
 /**
  * 모델을 돌리는 공급자. `SessionProvider` **안에** 서고 앱에 하나다(셸, 첫 실행 세션). 하는 일은 사건을
@@ -106,8 +101,8 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 
   // 저절로 다시 확인: REST 실패에서 온 띠가 보이는 창에 서 있는 동안만 켜 두고, 띠가 걷히거나 창이 숨으면 거둔다. 켜진 채 상태만 바뀌는 렌더에서는 시계를
   // 다시 시작하지 않는다(`probing`이 바뀔 때만 효과가 돈다).
-  const visible = useSyncExternalStore(subscribeVisible, readVisible, assumeVisible);
-  const probing = wantsRestProbe(state.view, visible);
+  const [hidden, setHidden] = useState(pageHidden);
+  const probing = wantsRestProbe(state.view, !hidden);
   useEffect(() => (probing ? startRestProbe() : undefined), [probing]);
 
   const reconnectNow = useCallback(() => {
@@ -120,9 +115,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   // 포커스 중 먼저 오는 것에서 끝난다. 세 이벤트가 같은 판정(`지금 자리에 없나`)을 다시 읽는다. 현재 상태가
   // 무엇이든 연다: 멀쩡해 보이는 소켓이 바로 그 대상이다.
   useEffect(() => {
-    const away = () => document.visibilityState === "hidden" || !document.hasFocus();
+    const away = () => pageHidden() || !document.hasFocus();
     let awaySince: number | null = away() ? Date.now() : null;
+    setHidden(pageHidden());
     const sync = () => {
+      setHidden(pageHidden());
       if (away()) {
         awaySince ??= Date.now();
         return;
