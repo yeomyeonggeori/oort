@@ -104,6 +104,7 @@ import {
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
+  isKeyboardFocusTarget,
   previousMessageRowHasOpenBanner,
   shouldShowHoverToolbar,
 } from "./hoverToolbarModel";
@@ -808,6 +809,36 @@ export function MessageRow({
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
+  // 호버는 **네이티브** mouseenter/leave 로 듣는다(#5328, SidebarRow #3963 과 같은 이유). React 의 `onMouseLeave` 는 포털 자손을 행 안으로
+  // 친다: 포인터가 행에서 ⋮ 메뉴(포털, DOM 으로는 행 밖)로 건너가도 leave 가 오지 않고, 행동을 고르면 메뉴 항목이 포인터 밑에서 사라져(사라진
+  // 노드는 `mouseout` 을 못 쏜다) 그 leave 가 영영 오지 않아 「호버 중」이 남았다. 막대는 그 행에 남고, 포인터가 선 행의 막대와 함께
+  // 두 메시지에 동시에 떴다. 열린 메뉴·선택기는 `overlayOpen` 이 막대를 붙들고, 닫히면 포인터의 실제 자리가 정한다.
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return undefined;
+    const enter = () => setRowHovered(true);
+    const leave = () => setRowHovered(false);
+    row.addEventListener("mouseenter", enter);
+    row.addEventListener("mouseleave", leave);
+    return () => {
+      row.removeEventListener("mouseenter", enter);
+      row.removeEventListener("mouseleave", leave);
+    };
+  }, []);
+
+  // 키보드 초점이 막대를 붙든 채 포인터가 행 밖을 누르면 포인터 흐름으로 넘어간다(#5328). 열린 메뉴가 초점을 쥔 채 사라지면 `blur` 가
+  // 오지 않아 「초점 있음」이 낡은 채 남는데, 바깥 누름이 그 값을 바로잡는다. 행 안을 누르면 그대로다(⋮ 를 마우스로 눌러도 막대는 선다).
+  useEffect(() => {
+    if (!rowFocused) return undefined;
+    const release = (event: PointerEvent) => {
+      const row = rowRef.current;
+      if (row && event.target instanceof Node && row.contains(event.target)) return;
+      setRowFocused(false);
+    };
+    document.addEventListener("pointerdown", release, true);
+    return () => document.removeEventListener("pointerdown", release, true);
+  }, [rowFocused]);
+
   useEffect(() => {
     if (!rowHovered && !rowFocused) return undefined;
     const node = rowRef.current;
@@ -867,9 +898,8 @@ export function MessageRow({
       data-entrance-play={entrance.playing ? "1" : undefined}
       onAnimationEnd={entrance.onAnimationEnd}
       onKeyDown={onRowKeyDown}
-      onMouseEnter={() => setRowHovered(true)}
-      onMouseLeave={() => setRowHovered(false)}
-      onFocusCapture={() => setRowFocused(true)}
+      // 호버는 아래 효과의 네이티브 mouseenter/leave 가 듣고, 초점은 **키보드 초점만** 센다(#5328, `isKeyboardFocusTarget`).
+      onFocusCapture={(event) => setRowFocused(isKeyboardFocusTarget(event.target))}
       onBlurCapture={(event) => {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget.contains(next)) return;

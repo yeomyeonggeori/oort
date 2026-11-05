@@ -36,6 +36,23 @@ export function shouldShowHoverToolbar(input: {
   return input.rowHovered || input.rowFocused;
 }
 
+/**
+ * 이 초점은 키보드로 닿은 것인가 (#5328). 막대를 붙드는 「행에 초점 있음」은 키보드 초점만이다.
+ *
+ * 마우스 흐름이 남긴 초점은 막대를 붙들지 않는다: ⋮ 메뉴에서 행동을 고르면 Radix 가 닫으며 초점을 ⋮ 단추(막대 안)로 돌려주는데,
+ * 이것을 세면 포인터가 그 행을 떠난 뒤에도 막대가 남아 다른 곳을 눌러야 꺼졌다. 브라우저의 `:focus-visible` 이 입력 방식을 이미
+ * 알고 있다(마우스로 시작한 흐름에서 스크립트가 옮긴 초점은 거짓, 키보드로 시작한 흐름은 참). 키보드 사용자는 그대로다: 초점이
+ * ⋮ 로 돌아오면 막대가 남아 자리를 잃지 않는다. 셀렉터를 모르는 환경은 키보드로 본다(막대를 지우면 초점이 body 로 떨어진다).
+ */
+export function isKeyboardFocusTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  try {
+    return target.matches(":focus-visible");
+  } catch {
+    return true;
+  }
+}
+
 export function rectsIntersect(
   a: Pick<DOMRect, "left" | "right" | "top" | "bottom">,
   b: Pick<DOMRect, "left" | "right" | "top" | "bottom">
