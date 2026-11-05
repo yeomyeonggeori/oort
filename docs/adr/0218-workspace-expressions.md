@@ -8,6 +8,7 @@
 > 증보 3: §9 (2026-11-01, #4992, **Accepted** 2026-11-02 planner) — 사진 초안 되찾기·돈이 든 그림 지키기: 내 사진 초안 목록 읽기 하나, 호출 뒤 디코더 바쁨 재시도, 격리 디코더 `--prepare` 출력 모양, 키 여는 문 시험. H9~H12의 결정은 바꾸지 않는다.
 > 증보 4: §10 (2026-11-02, #4961, **Accepted** 2026-11-02 planner) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
 > 증보 5: §11 (2026-11-02, #5133, **Accepted** 2026-11-02 planner) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
+> 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)가 §8 H9.2가 팀 AI 도우미의 같은 능력 사용(ADR-0201 증보 v3 B6의 「그림」)을 이 증보 위에서 따로 정한다고 한 그 「따로」다. 도우미의 그림은 Hermes 도구(`ask_hermes`)로 하고, 이모티콘 사진 길(H9의 팀 이미지 키)은 그대로다. H9~H12의 결정은 바꾸지 않았다.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301).
 
 ## 1. 결정의 근거와 범위
