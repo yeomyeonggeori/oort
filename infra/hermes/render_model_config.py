@@ -67,7 +67,7 @@ METHODS = {
 }
 # Ids this pin's static list does not carry but the renderer accepts anyway, per provider, ONE LINE EACH (ADR-0203 증보 2026-11-05, rule N4):
 # what was read in the pinned image to show its provider path forwards an id outside the list untouched, which vendor page lists the id,
-# and what ran on it. The ADR's table repeats these lines, test_render_model_config.py holds table and code to each other, and a new Hermes
+# and what ran on it. The ADR's table repeats these lines, scripts/tests/check_railway_catalog.py holds table and code to each other, and a new Hermes
 # pin means reading each line again (N4): an id the new static list carries moves out of here, one the path now filters is deleted.
 HERMES_PIN = "v0.22.2"
 EXTRA_MODELS = {

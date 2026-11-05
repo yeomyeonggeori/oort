@@ -1201,7 +1201,7 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 2. **벤더 확인.** 벤더 공식 모델 문서가 그 id를 그 철자로 싣는다(줄에 문서 주소를 적는다).
 3. **운영 사실.** 그 id로 실제 돈 기록이 있으면 적고, 없으면 줄에 `runtime-unverified`라고 쓴다.
 
-덧붙이는 규칙: 항목은 `(provider, id)` 쌍이라 다른 provider에는 통하지 않는다. 정적 목록에 이미 있는 id는 넣지 않는다(시험이 잰다). 새 Hermes 판의 정적 목록이 id를 갖게 되면 항목을 지우고, 경로가 id를 거르게 바뀌었으면 항목과 그 id를 쓰는 설정을 지운다. 이 표는 렌더러가 **만들 수 있는** id의 범위일 뿐이고 게이트가 받는 설정의 범위가 아니다: 게이트는 해시 목록의 설정만 받고, id가 설정에 쓰이려면 N6처럼 카탈로그에 줄이 따로 올라와야 한다. 표를 넓히는 변경은 한 PR에서 렌더러·조각·카탈로그 해시·게이트 표·시작 명령 체크섬·이 표를 함께 바꾼다(`check_railway_catalog.py`와 시험이 어긋나면 RED이고, 코드의 표와 아래 N5의 표가 같은 `(provider, id)` 집합인지도 시험이 잰다).
+덧붙이는 규칙: 항목은 `(provider, id)` 쌍이라 다른 provider에는 통하지 않는다. 정적 목록에 이미 있는 id는 넣지 않는다(시험이 잰다). 새 Hermes 판의 정적 목록이 id를 갖게 되면 항목을 지우고, 경로가 id를 거르게 바뀌었으면 항목과 그 id를 쓰는 설정을 지운다. 이 표는 렌더러가 **만들 수 있는** id의 범위일 뿐이고 게이트가 받는 설정의 범위가 아니다: 게이트는 해시 목록의 설정만 받고, id가 설정에 쓰이려면 N6처럼 카탈로그에 줄이 따로 올라와야 한다. 표를 넓히는 변경은 한 PR에서 렌더러·조각·카탈로그 해시·게이트 표·시작 명령 체크섬·이 표를 함께 바꾼다(`check_railway_catalog.py`와 시험이 어긋나면 RED이고, 코드의 표와 아래 N5의 표가 같은 `(provider, id)` 집합이고 행이 코드 줄의 벤더 문서 주소를 적는지도 같은 검사기가 잰다).
 
 ### N5. 이번 표 (판마다 한 줄)
 
@@ -1242,4 +1242,4 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 - **소스가 보장하지 않는 것.** N3은 고정 이미지의 소스 읽기이고, `claude-sonnet-5-5`를 벤더가 지금 받아들이는지는 소스가 아니라 N5의 벤더 문서와 운영 사실(10-20부터)이 근거다. 이 칸은 네트워크·로그인을 쓰지 않았으므로 **실제 API 왕복은 `runtime-unverified`**다.
 - **받는 설정이 하나 늘었다.** 새 줄은 기본 설정과 모델 구간 말고 같은 바이트이고 도구 판정이 같지만, 게이트가 받는 바이트는 늘었다. 늘어난 폭은 한 줄(Claude 주·Codex 예비)이다.
 - **Claude 주 모델에서는 검색이 거의 안 된다**(N7). 팀이 검색을 쓰려면 Codex 주 모델이 필요하고 그것은 다른 줄이다(N6).
-- **시험.** 오프라인: `test_render_model_config.py`(표·목록·낡은 id 거절·표와 이 문서의 표 대조), `test_lockgate_image_guard.py`의 `AcceptedConfigs`(진짜 `gate()`가 여섯을 이름으로 받고 낡은 id를 거절), `check_railway_catalog.py`(변이 증명 `hermes-config-hash-pre55` 추가). 고정 이미지 안(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`가 여섯 설정을 진짜 게이트에 넣고, 시작 명령 시나리오 `railway-start-default-model`(새 설정이 exec 직전까지 감)·`railway-start-stale-model`(낡은 id가 게이트 전에 멈춘다, rc 78)가 새로 있다. 사보타주 표는 PR 본문이 정본이다.
+- **시험.** 오프라인: `test_render_model_config.py`(표의 모양·목록·낡은 id 거절), `test_lockgate_image_guard.py`의 `AcceptedConfigs`(진짜 `gate()`가 여섯을 이름으로 받고 낡은 id를 거절), `check_railway_catalog.py`(코드의 `EXTRA_MODELS`와 이 문서 N5 표의 대조 — 고정 이미지 안 시험이 `infra/hermes`만 마운트해 단위 시험은 `docs/`를 읽지 못해 검사기에 둔다 — 와 변이 증명 `hermes-config-hash-pre55` 추가). 고정 이미지 안(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`가 여섯 설정을 진짜 게이트에 넣고, 시작 명령 시나리오 `railway-start-default-model`(새 설정이 exec 직전까지 감)·`railway-start-stale-model`(낡은 id가 게이트 전에 멈춘다, rc 78)가 새로 있다. 사보타주 표는 PR 본문이 정본이다.
