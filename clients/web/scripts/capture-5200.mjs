@@ -490,6 +490,7 @@ function measure(page, ids = CHANNEL_IDS) {
       listMask: maskOf(list),
       listFade: list?.dataset.fade ?? null,
       input: rect(q(`[data-testid="${ids.input}"]`)),
+      inputPadTop: (() => { const el = q(`[data-testid="${ids.input}"]`); return el === null ? 0 : parseFloat(getComputedStyle(el).paddingTop) || 0; })(),
       send: rect(q(`[data-testid="${ids.send}"]`)),
       actions: rect(q(`[data-testid="${ids.actions}"]`)),
       blocked: rect(q('[data-testid="attachment-blocked"]')),
@@ -801,7 +802,8 @@ async function runCombo(browser, { scheme, width }) {
     const m = await measure(page);
     const bars = await page.locator('[data-testid="attachment-chip-progress"]').count();
     check("올리는 중: 진행 막대가 서 있고 카드가 같은 높이를 지킨다", bars >= 1 && m.cards.every((c) => near(c.box.h, m.cards[0].box.h, 1)), `막대 ${bars}개 · 높이 ${m.cards.map((c) => Math.round(c.box.h)).join("/")}`);
-    check("올리는 중: 막힘 안내가 줄 아래에 있다", (m.blockedText ?? "").trim() !== "" && m.blocked !== null && m.input !== null && m.blocked.b <= m.input.y + 1, (m.blockedText ?? "").trim());
+    // 안내 줄은 글 칸의 위쪽 안여백과 겹쳐 선다(#5328, 카드 줄과 글 사이 간격). 글자는 안여백 밑에서 시작하므로, 「안내가 글자를 덮지 않는다」는 상자 윗단이 아니라 **글자 윗단**(상자 윗단 + 안여백)에 대어 잰다.
+    check("올리는 중: 막힘 안내가 줄 아래에 있다", (m.blockedText ?? "").trim() !== "" && m.blocked !== null && m.input !== null && m.blocked.b <= m.input.y + m.inputPadTop + 1, (m.blockedText ?? "").trim());
     await shot(page, prefix("uploading"), width);
     useSink = false;
   }

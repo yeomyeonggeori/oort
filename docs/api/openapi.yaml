@@ -845,10 +845,11 @@ paths:
         session lineage is revoked, with its push registrations; its device
         keys are kept (#3097). Inside 30 seconds (a retried lost response) the
         replay is answered with the pair that rotation already issued, while
-        nobody has rotated it (#3074). The lineage ending applies to QR-linked
-        (phone) sessions always, and to password sign-ins only when the
-        instance sets `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default
-        off: browser tabs rotate without cross-tab coordination).
+        nobody has rotated it (#3074). The lineage ending applies to every
+        sign-in by default (#5339): password sign-ins (desktop, web) and
+        QR-linked (phone) sessions alike. An operator can stop it for password
+        sign-ins only, with `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false`;
+        a QR-linked session's lineage always ends.
 
 
         **Sender constraint (#3079, ADR-0146 D-7 증보).** A native client

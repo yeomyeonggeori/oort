@@ -29,10 +29,15 @@ export class ExpressionStore {
   clearImages() { this.generation++; this.images.clear(); this.snapshot.epoch++; this.emit(); }
   dispose() { this.disposed = true; this.refreshSerial++; this.clearImages(); this.snapshot.cache = emptyExpressionCache(this.workspaceId, this.memberId); this.listeners.clear(); }
   setOffline(offline: boolean) { this.snapshot.offline = offline; if (offline) this.clearImages(); else this.emit(); }
+  /**
+   * 목록을 읽는다. **그림은 목록이 실제로 바뀐 만큼만 걷는다**(#5330): 앞 판은 읽기를 시작할 때마다 그림을 전부 걷어서(`clearImages`) 창 초점이 돌아올 때와
+   * 30초마다 보이는 그림이 모두 다시 내려받아졌다(깜빡임). 지금은 답이 와서 목록을 바꿔 끼울 때 코어 `applyExpressionList` 가 돌려주는 `evictImageIds`
+   * (지워지거나 그림이 바뀐 등록)가 있을 때만 걷는다. 숨김·삭제를 **즉시** 걷는 길은 그대로다: 실시간 변경 알림(`ExpressionsProvider`)·`mutate`·오프라인·
+   * 오류가 각자 `clearImages` 를 부른다. 읽는 동안에도 `status` 는 `ready` 그대로라 이미 읽은 목록이 서 있다(스켈레톤은 맨 처음 읽을 때만).
+   */
   async refresh(full = true) {
     this.disposed = false;
     const serial = ++this.refreshSerial;
-    this.clearImages();
     try {
       const since = !full && this.snapshot.cache.version !== null ? `?since=${this.snapshot.cache.version}` : "";
       const value = await this.transport.json({ method: "GET", path: `${this.base}/expressions${since}` });
@@ -44,7 +49,10 @@ export class ExpressionStore {
       if (!next.applied) throw new Error("expression snapshot");
       this.snapshot.cache = next.cache;
       this.snapshot.status = "ready";
-    } catch { if (serial === this.refreshSerial) this.snapshot.status = "error"; }
+      if (next.evictImageIds.length > 0) this.clearImages();
+    } catch {
+      if (serial === this.refreshSerial) { this.snapshot.status = "error"; this.clearImages(); }
+    }
     if (serial === this.refreshSerial) this.emit();
   }
   async draft(request: ExpressionRequest): Promise<ExpressionDraft> {

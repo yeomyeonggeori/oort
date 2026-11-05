@@ -16,6 +16,7 @@ import {Keyboard, StyleSheet} from 'react-native';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {EmojiPicker} from '../src/features/emoji/EmojiPicker';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
+import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
 import {PageSheet} from '../src/design/PageSheet';
 import {TOUCH_TARGET} from '../src/design/tokens';
@@ -68,6 +69,7 @@ function picker(props: Partial<React.ComponentProps<typeof EmojiPicker>> = {}) {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  rememberEmojiCatalog(null); // 푼 목록의 기억은 모듈 값이다 — 시험마다 비워 「읽는 중」 장면을 다시 만든다.
   emojiFrequency.reset();
   emojiSkinTone.reset();
   load.mockResolvedValue([waving, party]);
@@ -100,6 +102,25 @@ it('searches Korean, selects the global skin tone, and shares frequency on reope
   expect(screen.getByText('👋🏽')).toBeTruthy();
 });
 
+// #5330 owner 11-05 「자꾸 불러오는중이 뜨는데」: 기본 탭(표준 그림 문자 격자)은 탭을 옮겼다 돌아올 때와 시트를 다시 열 때마다 새로 서고,
+// 새로 설 때마다 목록 상태가 `null` 이라 한 번은 「불러오는 중이에요」를 그렸다. 앱에 실린 파일이라 기다릴 것이 없다.
+it('shows the grid on the very first frame once the list was read — no loading notice on reopen or on returning to the tab (#5330)', async () => {
+  picker();
+  // 처음(기억 없음): 읽는 동안 안내가 서고, 읽고 나면 격자가 선다.
+  expect(screen.getByText('이모티콘 목록을 불러오는 중이에요.')).toBeTruthy();
+  await screen.findByTestId('emoji-pick-🎉');
+  await act(async () => {
+    cleanup();
+  });
+  // 다시 연다: 기다리지 않고(`getBy`, 같은 렌더 안에서) 격자가 서 있고 안내는 한 번도 그려지지 않는다.
+  picker();
+  expect(screen.queryByText('이모티콘 목록을 불러오는 중이에요.')).toBeNull();
+  expect(screen.getByTestId('emoji-pick-🎉')).toBeTruthy();
+  await act(async () => {});
+  expect(screen.getByTestId('emoji-pick-🎉')).toBeTruthy();
+  expect(screen.queryByText('이모티콘 목록을 불러오는 중이에요.')).toBeNull();
+});
+
 it('loads, fails inline, retries, then offers a search-clear action on no matches', async () => {
   let reject!: (reason: Error) => void;
   load.mockImplementationOnce(
@@ -109,14 +130,14 @@ it('loads, fails inline, retries, then offers a search-clear action on no matche
       }),
   );
   picker();
-  expect(screen.getByText('이모지 목록을 불러오는 중이에요.')).toBeTruthy();
+  expect(screen.getByText('이모티콘 목록을 불러오는 중이에요.')).toBeTruthy();
   await act(async () => reject(new Error('bad bundle')));
-  expect(screen.getByText('이모지 목록을 불러오지 못했어요.')).toBeTruthy();
+  expect(screen.getByText('이모티콘 목록을 불러오지 못했어요.')).toBeTruthy();
   fireEvent.press(screen.getByTestId('emoji-retry'));
   await screen.findByTestId('emoji-pick-🎉');
   fireEvent.changeText(screen.getByTestId('emoji-search'), '없는 이름');
   expect(
-    screen.getByText('찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.'),
+    screen.getByText('찾는 이모티콘이 없어요. 다른 이름으로 검색해 보세요.'),
   ).toBeTruthy();
   fireEvent.press(screen.getByText('검색 지우기'));
   expect(screen.getByTestId('emoji-pick-🎉')).toBeTruthy();
@@ -136,13 +157,13 @@ it('draws the loading, failed, no-catalog and no-match sentences with word-prior
   picker();
   const breaks = (sentence: string) =>
     screen.getByText(sentence).props.lineBreakStrategyIOS;
-  expect(breaks('이모지 목록을 불러오는 중이에요.')).toBe('hangul-word');
+  expect(breaks('이모티콘 목록을 불러오는 중이에요.')).toBe('hangul-word');
   await act(async () => reject(new Error('bad bundle')));
-  expect(breaks('이모지 목록을 불러오지 못했어요.')).toBe('hangul-word');
+  expect(breaks('이모티콘 목록을 불러오지 못했어요.')).toBe('hangul-word');
   fireEvent.press(screen.getByTestId('emoji-retry'));
   await screen.findByTestId('emoji-pick-🎉');
   fireEvent.changeText(screen.getByTestId('emoji-search'), '없는 이름');
-  expect(breaks('찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.')).toBe(
+  expect(breaks('찾는 이모티콘이 없어요. 다른 이름으로 검색해 보세요.')).toBe(
     'hangul-word',
   );
   await act(async () => {
@@ -151,10 +172,10 @@ it('draws the loading, failed, no-catalog and no-match sentences with word-prior
   load.mockResolvedValueOnce([]);
   picker();
   await screen.findByText(
-    '이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.',
+    '이 기기에서 쓸 수 있는 이모티콘이 없어요. OS를 업데이트해 주세요.',
   );
   expect(
-    breaks('이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.'),
+    breaks('이 기기에서 쓸 수 있는 이모티콘이 없어요. OS를 업데이트해 주세요.'),
   ).toBe('hangul-word');
 });
 
