@@ -5015,19 +5015,19 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.agentsLine1": [
     {
       "type": 0,
-      "value": "In the work console and emoticon lists, a failed load now says if you are offline or the server is unreachable."
+      "value": "Web and desktop work console and emoticon lists now say if a failed load is offline or an unreachable server."
     }
   ],
   "releaseNotes.v0143.agentsLine2": [
     {
       "type": 0,
-      "value": "The work panel now calls its session list “Work sessions” and its host status “Where it runs”."
+      "value": "The web and desktop work panel now calls its session list “Work sessions” and its host status “Where it runs”."
     }
   ],
   "releaseNotes.v0143.agentThreadsChanged": [
     {
       "type": 0,
-      "value": "When you call an agent in a channel, its answer, approval cards and tool lines gather in a thread under your message. A 1:1 DM still answers in the conversation itself. The tick chip that marked a finished job is gone, and a chip shows only while the agent is working, waiting for approval or has failed."
+      "value": "When you call an agent in a channel, its answer, approval cards and tool lines gather in a thread under your message. A 1:1 DM between you and an agent still answers in the conversation itself. The tick chip that marked a finished job is gone, while chips for other states, such as working, waiting for approval or failed, stay."
     }
   ],
   "releaseNotes.v0143.agentThreadsTitle": [
@@ -5051,13 +5051,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.attachmentsLine2": [
     {
       "type": 0,
-      "value": "The ✕ on a link card shows only on hover or focus, and always on touch screens."
+      "value": "On web and desktop, the ✕ on a link card shows only on hover or keyboard selection, and always on touch screens."
     }
   ],
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The expression picker now has three tabs, Emoticons, Emoji and GIF, and the “Loading” that kept repeating each time you opened it is fixed."
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The expression picker now has three tabs, Emoticons, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [
@@ -5082,6 +5082,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "On web and desktop, sending no longer flashes a Sending line that shifts rows, and only a slow send shows a small clock."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "In a thread, a quote that points at the top message is no longer shown, so the same words are not repeated."
     }
   ],
   "releaseNotes.v0143.desktopLine1": [
@@ -5111,7 +5117,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.editMessageChanged": [
     {
       "type": 0,
-      "value": "Your own messages get a pencil button in the hover toolbar, and on the phone Edit is now the top row of the long-press sheet. The Edited mark now shows when you edited, as a tooltip on hover on web and desktop and when you tap the message on the phone."
+      "value": "Your own messages get a pencil button in the hover toolbar, and on the phone Edit is now the top row of the long-press sheet. The Edited mark now shows when you edited, as a tooltip on hover on web and desktop and when you tap it on the phone."
     }
   ],
   "releaseNotes.v0143.editMessageTitle": [
@@ -5123,7 +5129,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.editMessageTryIt": [
     {
       "type": 0,
-      "value": "Hover over one of your messages, click the pencil and edit it, then point at Edited. On the phone, long-press your message and tap Edit at the top."
+      "value": "Hover over one of your messages, click the pencil and edit it, then point at Edited. On the phone, long-press your message, tap Edit at the top, then tap Edited."
     }
   ],
   "releaseNotes.v0143.expressionsLine1": [
@@ -5165,19 +5171,19 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.networkLine2": [
     {
       "type": 0,
-      "value": "A failed load is no longer announced twice: the sidebar shows one line and the main pane shows one box."
+      "value": "On web and desktop, a failed load is no longer announced twice: one sidebar line and one box in the main pane."
     }
   ],
   "releaseNotes.v0143.networkLine3": [
     {
       "type": 0,
-      "value": "Failed loads in sidebar DMs, drafts, mentions and the team board also say why, without covering what is already shown."
+      "value": "On web and desktop, failed loads in sidebar DMs, drafts, mentions and the team board say why and keep saved content."
     }
   ],
   "releaseNotes.v0143.networkLine4": [
     {
       "type": 0,
-      "value": "The inbox offline band calls the list a snapshot only when a saved list is actually shown below it."
+      "value": "On web and desktop, the inbox offline band calls the list a snapshot only when a saved list shows below it."
     }
   ],
   "releaseNotes.v0143.networkTopic": [
@@ -5195,7 +5201,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.notificationsLine2": [
     {
       "type": 0,
-      "value": "When remote work on a Mac asks for approval, the phone alert goes only to the session owner who can decide."
+      "value": "When remote work asks for approval, the phone alert goes only to the session owner who can decide."
     }
   ],
   "releaseNotes.v0143.phoneDelayChanged": [
@@ -5213,7 +5219,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.phoneDelayTryIt": [
     {
       "type": 0,
-      "value": "Open “Delay phone alerts while I use the desktop” in Settings › Notifications and choose Off, 1 min or 5 min."
+      "value": "In the web or desktop app, open “Delay phone alerts while I use the desktop” in Settings › Notifications and choose Off, 1 min or 5 min."
     }
   ],
   "releaseNotes.v0143.phoneLine1": [
@@ -5225,13 +5231,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.phoneLine2": [
     {
       "type": 0,
-      "value": "Korean text in message bubbles now wraps between words instead of in the middle of a word."
+      "value": "Korean text in message bubbles now wraps at spaces, so words are far less often cut in the middle."
     }
   ],
   "releaseNotes.v0143.phoneSearchChanged": [
     {
       "type": 0,
-      "value": "The search screen now finds people, channels and messages from one box, and opens with your recently opened chats and recent searches. The magnifier in a conversation header searches only that conversation, and tapping a result jumps to the message with your words highlighted in the bubble."
+      "value": "The search screen now finds people, channels and messages from one box, and opens with your recently opened chats and recent searches. The magnifier in a conversation header searches only that conversation, and tapping one of its results jumps to the message with your words highlighted in the bubble."
     }
   ],
   "releaseNotes.v0143.phoneSearchTitle": [
@@ -5303,13 +5309,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.searchLine3": [
     {
       "type": 0,
-      "value": "An older found message is reached by loading earlier chat, which you can cancel, and one too far back only shows a note."
+      "value": "Going to an older message from search, a pin or a quote loads earlier chat (you can cancel), or shows a note if too far."
     }
   ],
   "releaseNotes.v0143.searchTopic": [
     {
       "type": 0,
-      "value": "Search"
+      "value": "Phone search"
     }
   ],
   "releaseNotes.v0143.summary": [

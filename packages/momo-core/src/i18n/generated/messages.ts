@@ -751,6 +751,7 @@ export const messageKeys = [
   "releaseNotes.v0143.composerPickerTryIt",
   "releaseNotes.v0143.conversationsLine1",
   "releaseNotes.v0143.conversationsLine2",
+  "releaseNotes.v0143.conversationsLine3",
   "releaseNotes.v0143.desktopLine1",
   "releaseNotes.v0143.desktopLine2",
   "releaseNotes.v0143.desktopLine3",
@@ -2025,6 +2026,7 @@ export const argumentSpecs = {
   "releaseNotes.v0143.composerPickerTryIt": {},
   "releaseNotes.v0143.conversationsLine1": {},
   "releaseNotes.v0143.conversationsLine2": {},
+  "releaseNotes.v0143.conversationsLine3": {},
   "releaseNotes.v0143.desktopLine1": {},
   "releaseNotes.v0143.desktopLine2": {},
   "releaseNotes.v0143.desktopLine3": {},
@@ -3366,6 +3368,7 @@ export interface MessageArgs {
   "releaseNotes.v0143.composerPickerTryIt": Record<string, never>;
   "releaseNotes.v0143.conversationsLine1": Record<string, never>;
   "releaseNotes.v0143.conversationsLine2": Record<string, never>;
+  "releaseNotes.v0143.conversationsLine3": Record<string, never>;
   "releaseNotes.v0143.desktopLine1": Record<string, never>;
   "releaseNotes.v0143.desktopLine2": Record<string, never>;
   "releaseNotes.v0143.desktopLine3": Record<string, never>;

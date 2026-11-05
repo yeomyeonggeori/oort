@@ -20,8 +20,8 @@ import type { ReleaseNote } from "../model";
 //   7. composerPicker: #5343 #5350
 //   8. menuBarPlanet: #5386
 // 그 밖에 바뀐 점(others)은 위 항목에 못 든 변화를 주제별 한 줄로 썼다:
-//   search(검색): #5385 #5410 #5414
-//   conversations(대화): #5341 #5354
+//   search(폰 검색): #5385 #5410 #5414
+//   conversations(대화): #5341 #5354 #5409
 //   attachments(첨부): #5349
 //   expressions(표현): #5350
 //   notifications(알림): #5346 #5356 #5347
@@ -119,7 +119,11 @@ export const RELEASE_NOTE_0_1_43: ReleaseNote = {
     {
       id: "conversations",
       title: "releaseNotes.topic.conversations",
-      lines: ["releaseNotes.v0143.conversationsLine1", "releaseNotes.v0143.conversationsLine2"],
+      lines: [
+        "releaseNotes.v0143.conversationsLine1",
+        "releaseNotes.v0143.conversationsLine2",
+        "releaseNotes.v0143.conversationsLine3",
+      ],
     },
     {
       id: "attachments",

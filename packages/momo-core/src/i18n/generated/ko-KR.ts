@@ -4839,19 +4839,19 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.agentsLine1": [
     {
       "type": 0,
-      "value": "작업 콘솔과 이모티콘 목록의 「불러오지 못했어요」는 오프라인인지 서버에 닿지 못한 것인지 나눠 말해요."
+      "value": "웹과 데스크탑의 작업 콘솔과 이모티콘 목록은 「불러오지 못했어요」가 오프라인인지 서버에 닿지 못한 것인지 나눠 말해요."
     }
   ],
   "releaseNotes.v0143.agentsLine2": [
     {
       "type": 0,
-      "value": "작업 패널의 「세션 목록」은 「작업 세션」으로, 「호스트 상태」는 「실행 위치」로 이름이 바뀌었어요."
+      "value": "웹과 데스크탑 작업 패널의 「세션 목록」은 「작업 세션」으로, 「호스트 상태」는 「실행 위치」로 이름이 바뀌었어요."
     }
   ],
   "releaseNotes.v0143.agentThreadsChanged": [
     {
       "type": 0,
-      "value": "채널에서 에이전트를 부르면 답과 승인 카드, 도구 줄이 부른 메시지 아래 스레드에 모여요. 1:1 DM은 지금처럼 대화에 바로 답해요. 일이 잘 끝났을 때 붙던 「답함 ✓」 칩은 없어지고, 작업 중이거나 승인을 기다리거나 실패했을 때만 칩이 보여요."
+      "value": "채널에서 에이전트를 부르면 답과 승인 카드, 도구 줄이 부른 메시지 아래 스레드에 모여요. 나와 에이전트 둘뿐인 1:1 DM은 지금처럼 대화에 바로 답해요. 일이 잘 끝났을 때 붙던 「답함 ✓」 칩은 없어지고, 작업 중, 승인 대기, 실패 같은 다른 상태의 칩은 그대로 보여요."
     }
   ],
   "releaseNotes.v0143.agentThreadsTitle": [
@@ -4875,13 +4875,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.attachmentsLine2": [
     {
       "type": 0,
-      "value": "링크 카드의 ✕는 카드에 마우스를 올리거나 초점을 둘 때만 서고, 터치 화면에서는 늘 보여요."
+      "value": "웹과 데스크탑에서 링크 카드의 ✕는 마우스를 올리거나 키보드로 골랐을 때만 서고, 터치 화면에서는 늘 보여요."
     }
   ],
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 표현 고르개는 이름이 「이모티콘」 하나로 모여 이모티콘, 기본, GIF 세 탭이 되었고, 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
+      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 표현 고르개는 이름이 「이모티콘」 하나로 모여 이모티콘, 기본, GIF 세 탭이 되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [
@@ -4906,6 +4906,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "웹과 데스크탑에서 보낼 때 「전송 중」 줄이 잠깐 서고 사라지며 줄이 흔들리던 것을 고쳤고, 오래 걸릴 때만 작은 시계가 서요."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "스레드 안에서 맨 위 글을 가리키는 인용은 같은 말이 되풀이되지 않도록 보여 주지 않아요."
     }
   ],
   "releaseNotes.v0143.desktopLine1": [
@@ -4935,7 +4941,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.editMessageChanged": [
     {
       "type": 0,
-      "value": "내 메시지에 마우스를 올리면 도구 막대에 연필 단추가 생겼고, 폰은 길게 눌러 뜨는 시트의 맨 위 줄이 「고치기」가 되었어요. 고친 메시지의 「수정됨」은 웹에서 마우스를 올리면, 폰에서는 메시지를 탭하면 「오후 2:05에 수정됨」처럼 고친 시각을 보여 줘요."
+      "value": "내 메시지에 마우스를 올리면 도구 막대에 연필 단추가 생겼고, 폰은 길게 눌러 뜨는 시트의 맨 위 줄이 「고치기」가 되었어요. 고친 메시지의 「수정됨」은 웹에서 마우스를 올리면, 폰에서는 탭하면 「오후 2:05에 수정됨」처럼 고친 시각을 보여 줘요."
     }
   ],
   "releaseNotes.v0143.editMessageTitle": [
@@ -4947,7 +4953,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.editMessageTryIt": [
     {
       "type": 0,
-      "value": "내 메시지에 마우스를 올려 연필로 고친 뒤 「수정됨」에 마우스를 올려 보세요. 폰은 내 메시지를 길게 눌러 맨 위의 「고치기」를 눌러 보세요."
+      "value": "내 메시지에 마우스를 올려 연필로 고친 뒤 「수정됨」에 마우스를 올려 보세요. 폰은 내 메시지를 길게 눌러 맨 위의 「고치기」를 누르고, 고친 뒤 「수정됨」을 탭해 보세요."
     }
   ],
   "releaseNotes.v0143.expressionsLine1": [
@@ -4989,19 +4995,19 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.networkLine2": [
     {
       "type": 0,
-      "value": "같은 불러오기 실패를 사이드바와 본문이 두 번 말하지 않고, 사이드바는 한 줄, 본문은 상자 하나로 말해요."
+      "value": "웹과 데스크탑은 같은 불러오기 실패를 사이드바와 본문이 두 번 말하지 않고, 사이드바는 한 줄, 본문은 상자 하나로 말해요."
     }
   ],
   "releaseNotes.v0143.networkLine3": [
     {
       "type": 0,
-      "value": "사이드바 DM, 임시 저장, 멘션 줄, 팀 보드의 불러오기 실패도 원인을 말하고, 받아 둔 내용은 가리지 않아요."
+      "value": "웹과 데스크탑은 사이드바 DM, 임시 저장, 멘션 줄, 팀 보드의 불러오기 실패도 원인을 말하고, 받아 둔 내용은 가리지 않아요."
     }
   ],
   "releaseNotes.v0143.networkLine4": [
     {
       "type": 0,
-      "value": "받은함의 오프라인 띠는 받아 둔 목록이 아래에 보일 때만 「그때의 상태」라고 말해요."
+      "value": "웹과 데스크탑 받은함의 오프라인 띠는 저장해 둔 목록이 아래에 보일 때만 「그때의 상태」라고 알려 줘요."
     }
   ],
   "releaseNotes.v0143.networkTopic": [
@@ -5019,7 +5025,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.notificationsLine2": [
     {
       "type": 0,
-      "value": "맥에서 도는 원격 작업이 승인을 물으면 폰 알림은 결정할 수 있는 세션 주인에게만 가요."
+      "value": "원격 작업이 승인을 물으면 폰 알림은 결정할 수 있는 세션 주인에게만 가요."
     }
   ],
   "releaseNotes.v0143.phoneDelayChanged": [
@@ -5037,7 +5043,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.phoneDelayTryIt": [
     {
       "type": 0,
-      "value": "설정 › 알림에서 「데스크탑을 쓰는 동안 폰 알림 늦추기」를 열어 끔, 1분, 5분 중에 골라 보세요."
+      "value": "웹이나 데스크탑 앱의 설정 › 알림에서 「데스크탑을 쓰는 동안 폰 알림 늦추기」를 열어 끔, 1분, 5분 중에 골라 보세요."
     }
   ],
   "releaseNotes.v0143.phoneLine1": [
@@ -5049,13 +5055,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.phoneLine2": [
     {
       "type": 0,
-      "value": "말풍선의 한국어가 낱말 가운데서 끊기지 않고 어절 단위로 줄이 바뀌어요."
+      "value": "말풍선의 한국어는 띄어쓰기에서 줄이 바뀌어, 낱말 가운데서 끊기는 일이 크게 줄었어요."
     }
   ],
   "releaseNotes.v0143.phoneSearchChanged": [
     {
       "type": 0,
-      "value": "검색 화면이 입력칸 하나로 사람, 채널, 메시지를 함께 찾도록 바뀌었고, 열면 최근 연 대화와 최근 검색이 먼저 보여요. 대화 머리의 돋보기로 그 대화 안만 찾을 수 있고, 결과를 누르면 말풍선 속 찾은 글자가 강조된 채 그 메시지로 이동해요."
+      "value": "검색 화면이 입력칸 하나로 사람, 채널, 메시지를 함께 찾도록 바뀌었고, 열면 최근 연 대화와 최근 검색이 먼저 보여요. 대화 머리의 돋보기로 그 대화 안만 찾을 수 있고, 그 결과를 누르면 말풍선 속 찾은 글자가 강조된 채 그 메시지로 이동해요."
     }
   ],
   "releaseNotes.v0143.phoneSearchTitle": [
@@ -5127,13 +5133,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.searchLine3": [
     {
       "type": 0,
-      "value": "찾은 메시지가 오래됐어도 가까우면 이전 대화를 읽어 그 자리로 가고, 읽는 동안 취소할 수 있으며 너무 멀면 안내만 서요."
+      "value": "검색 결과, 고정한 메시지, 인용에서 오래된 메시지로 가면 이전 대화를 읽어 그 자리로 가고(취소할 수 있어요), 너무 멀면 안내만 서요."
     }
   ],
   "releaseNotes.v0143.searchTopic": [
     {
       "type": 0,
-      "value": "검색"
+      "value": "폰 검색"
     }
   ],
   "releaseNotes.v0143.summary": [
