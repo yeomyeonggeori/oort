@@ -9,7 +9,6 @@ import {
   type ThreadComposerSeed,
 } from "@/features/chat/draftStore";
 import { BEFORE_RELAUNCH_EVENT } from "@/features/updates/relaunchFlush";
-import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import { sendThreadReply, type Channel } from "@momo/core/lib/api";
 import {
   composerKeyIntent,
@@ -17,20 +16,15 @@ import {
   type ComposerKeyIntent,
 } from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
-import { isClosedBodyRejection, replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/mentionTargets";
 import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
-import { Button } from "@/design/ui/button";
 import { useIsMobileShell } from "@/app/shellNav";
-import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { Directory } from "@/features/workspace/useWorkspace";
-import {
-  AttachButton,
-  AttachmentTray,
-} from "@/features/attachments/AttachmentTray";
+import { AttachmentTray } from "@/features/attachments/AttachmentTray";
 import {
   acknowledgeNotices,
   addFiles,
@@ -47,6 +41,12 @@ import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
+import {
+  COMPOSER_TEXTAREA_CLASS,
+  ComposerCard,
+  ComposerSend,
+  ComposerTools,
+} from "@/features/chat/ComposerCard";
 import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
 import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
@@ -62,7 +62,6 @@ import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { useOffline } from "@/features/common/useOffline";
 import { useComposerBlockedLine } from "@/features/common/blockedLines";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
-import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
 import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 
@@ -132,11 +131,6 @@ export function ThreadComposer({
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 「대화에도 보내기」(#4888, ADR-0148 증보): 켠 답글은 대화(본류)에도 보인다. **기본은 꺼짐이고 마지막 선택을 기억하지 않는다**(Slack
-  // 기본) — 저장소에 쓰지 않고, 보내기에 성공하면 꺼지고, 스레드를 옮기면 꺼진다. 실패하면 글이 남아 이 체크도 남는다(다시 보내도 같은 선택).
-  const formatMessage = useFormatMessage();
-  const [alsoInChannel, setAlsoInChannel] = useState(false);
-  useEffect(() => setAlsoInChannel(false), [rootId]);
   // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
@@ -259,7 +253,7 @@ export function ThreadComposer({
 
   // ── 예약해서 보내기 (ADR-0208, #4215) ────────────────────────────────────────
   //
-  // 채널 입력창과 같은 훅이다. 이 호스트에는 보이는 3초 상태줄 자리가 없어서(액션 행은 아이콘 셋과 보내기뿐이고
+  // 채널 입력창과 같은 훅이다. 이 호스트에는 보이는 3초 상태줄 자리가 없어서(액션 행은 도구 단추 묶음과 보내기뿐이고
   // 위의 `p-3` 블록은 조건부로 생기고 지워지는 줄들이다) 확인은 ③ 지속 배너가 맡고, 낭독은 늘 붙어 있는 안 보이는
   // `role="status"` 노드가 읽는다. 예약에 `rootId`가 실린다. 예약은 **서버가 201을 준 뒤에만** 비운다.
   const schedule = useComposerSchedule({
@@ -283,8 +277,6 @@ export function ThreadComposer({
       clearThreadDraft(workspaceId, rootId);
       draftRef.current = "";
       setDraft("");
-      // 예약은 「대화에도 보내기」를 싣지 않는다(ADR-0148 증보: 후속). 글이 예약으로 떠났으니 체크도 풀어서 다음 답글로 새지 않게 한다.
-      setAlsoInChannel(false);
       autocomplete.close();
       format.dismiss();
     },
@@ -322,13 +314,10 @@ export function ThreadComposer({
       // ✕로 끈 채 보낸다(켠 때만 키가 간다). 값은 이 렌더의 것이고, 실패하면 글이 남아 ✕도 남으므로 다시
       // 보내도 같은 선택이다. 성공하면 글이 비어 저절로 풀린다.
       ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
-      // 켠 때만 키가 간다(코어가 false 를 떨군다). 옛 서버는 모르는 키를 400 으로 거절하므로 끈 답글은 이 칸 이전과 같은 요청이다.
-      ...(alsoInChannel ? { alsoInChannel: true } : {}),
     })
       .then((message) => {
         expressionStore?.recordSuccess(body, message.id);
         clearThreadDraft(workspaceId, rootId);
-        setAlsoInChannel(false);
         setDraft("");
         autocomplete.close();
         format.dismiss();
@@ -336,14 +325,7 @@ export function ThreadComposer({
         onSent();
         ref.current?.focus();
       })
-      .catch((cause: unknown) =>
-        // 서버가 이 값을 모르면(옛 서버, 닫힌 본문 규칙의 400) 조용히 스레드로만 보내지 않고 이유를 말한다(ADR-0148 호환 표).
-        setError(
-          alsoInChannel && isClosedBodyRejection(cause)
-            ? formatMessage("reply.alsoInChannel.unsupported")
-            : replyFailureMessage(cause)
-        )
-      )
+      .catch((cause: unknown) => setError(replyFailureMessage(cause)))
       .finally(() => setSending(false));
   };
 
@@ -355,7 +337,10 @@ export function ThreadComposer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        "safe-area-bottom border-t border-line",
+        // 채널 입력창과 같은 독이다(`composer-dock`): 폰 폭(<600)은 위 경계선 한 줄이 셸의 마지막 줄이고, 넓은 창에서는 선 없이 카드가 뜬다.
+        // 위 경계선이 항상 있던 예전 판이 카드 테두리와 겹쳐 「보더가 둘」로 보였다(#5324). 패널의 좌우 여백은 아래 `p-3` 이 쥔다 — 독의
+        // `> form` 인셋(24)과 후보 목록의 `left-6` 규칙은 자식이 `<form>` 일 때만 닿으므로 이 `div` 에는 닿지 않고, 목록은 자기 `left-0` 을 쓴다.
+        "composer-dock safe-area-bottom",
         drop.dragging && "bg-accent-soft"
       )}
       data-composer-shell=""
@@ -430,26 +415,46 @@ export function ThreadComposer({
             onRetry={autocomplete.retryCatalog}
             className="left-0"
           />
-          <div
-            className={cn(
-              "rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring data-warn:border-warn",
-              sending && "opacity-50"
-            )}
-            aria-busy={sending}
-            data-sending={sending ? "" : undefined}
-            data-warn={secretBlocked ? "" : undefined}
-            data-testid="thread-composer-frame"
-            data-composer-frame=""
-            onClick={(event) => {
-              // 첨부 카드는 초점을 받는 자기 컨트롤이다(Backspace/Delete 로 뺀다).
-              if (
-                event.target instanceof Element &&
-                event.target.closest("button, [data-attachment-card]")
-              ) {
-                return;
-              }
-              ref.current?.focus();
-            }}
+          <ComposerCard
+            testIdPrefix="thread-composer"
+            inputRef={ref}
+            warn={secretBlocked}
+            sending={sending}
+            tools={
+              <ComposerTools
+                testIdPrefix="thread-composer"
+                onPickFiles={onFiles}
+                attachDisabled={sending}
+                toolsDisabled={sending}
+                settledWhenDisabled
+                onInsertMention={autocomplete.insertTrigger}
+                onOpenEmoji={(opener) => {
+                  autocomplete.close();
+                  emoji.openPicker(opener);
+                }}
+                format={{
+                  available: format.available,
+                  open: format.open,
+                  hasText: draft.trim().length > 0,
+                  onPress: format.openForSelection,
+                }}
+              />
+            }
+            send={
+              <ComposerSend
+                testIdPrefix="thread-composer"
+                type="button"
+                onClick={submit}
+                disabled={!canSend}
+                busy={schedule.busy}
+                // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
+                settledWhenDisabled={sending}
+                label="답글 보내기"
+                title={offline ? blockedLine : (attachBlockCopy ?? "답글 보내기")}
+                showsSchedule={showsSchedule}
+                schedule={schedule.menuProps}
+              />
+            }
           >
             {/* 첨부 줄(ADR-0151 D2, #5200): 채널 입력창과 같은 컴포넌트가 그릇 **안**, 글 칸 위에 선다. 카드를 뺀 뒤
                 초점은 옆 카드나 이 글 칸으로 간다. */}
@@ -551,90 +556,10 @@ export function ThreadComposer({
                 event.preventDefault();
                 submit();
               }}
-              // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
-              // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
-              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink outline-none focus-visible:outline-none"
+              // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다(글 칸의 옷은 채널 입력창과 한 벌이다).
+              className={COMPOSER_TEXTAREA_CLASS}
             />
-            {/* 「대화에도 보내기」: 입력 칸 바로 아래, 도구 줄 위. Tab 은 글 칸 다음에 여기로 오고 Space 로 켠다. 이름은 보이는 글이 진다. */}
-            <label
-              className="tap-target mx-3 mb-1 flex w-fit cursor-pointer items-center gap-2 rounded-sm text-meta text-ink-muted active:bg-surface-pressed has-[:focus-visible]:focus-ring"
-              data-testid="thread-composer-also-in-channel"
-            >
-              <input
-                type="checkbox"
-                checked={alsoInChannel}
-                disabled={sending}
-                onChange={(event) => setAlsoInChannel(event.target.checked)}
-                className="size-4 shrink-0 rounded-sm accent-accent focus-visible:focus-ring"
-                data-testid="thread-composer-also-in-channel-input"
-              />
-              {formatMessage("reply.alsoInChannel.label")}
-            </label>
-            <div
-              className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
-              data-testid="thread-composer-actions"
-            >
-              <div className="flex items-center gap-1">
-                <AttachButton
-                  onPick={onFiles}
-                  disabled={sending}
-                  className="disabled:opacity-100"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="tap-target shrink-0 disabled:opacity-100"
-                  disabled={sending}
-                  aria-label="멘션 넣기"
-                  title="멘션 넣기"
-                  data-testid="thread-composer-mention-trigger"
-                  onClick={autocomplete.insertTrigger}
-                >
-                  <AtSign aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="tap-target shrink-0 disabled:opacity-100"
-                  disabled={sending}
-                  aria-label="이모지 넣기"
-                  title="이모지 넣기"
-                  data-testid="thread-composer-emoji-trigger"
-                  onClick={(event) => {
-                    autocomplete.close();
-                    emoji.openPicker(event.currentTarget);
-                  }}
-                >
-                  <Smile aria-hidden="true" />
-                </Button>
-              </div>
-              {/* 보내기 반쪽 + ▾ 반쪽이 알약 하나다(UI 명세 1.1). ▾는 서버에 예약이 있으면 늘 그려져(자리가 움직이지 않는다)
-                  막힌 동안 흐리고 이유는 `title`·`aria-describedby`에 실린다. */}
-              <div className="flex shrink-0 items-center gap-px">
-                <button
-                  type="button"
-                  disabled={!canSend}
-                  onClick={submit}
-                  aria-busy={schedule.busy || undefined}
-                  aria-label="답글 보내기"
-                  title={offline ? blockedLine : (attachBlockCopy ?? "답글 보내기")}
-                  data-testid="thread-composer-send"
-                  className={cn(
-                    "tap-target flex size-icon-button shrink-0 items-center justify-center bg-primary text-on-primary press hover:opacity-90 focus-visible:focus-ring focus-ring-on-primary",
-                    showsSchedule ? "rounded-l-full rounded-r-none" : "rounded-full",
-                    // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은
-                    // 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
-                    sending ? "disabled:opacity-100" : "disabled:opacity-50"
-                  )}
-                >
-                  <SendHorizontal className="size-4" aria-hidden="true" />
-                </button>
-                <ScheduleSendMenu {...schedule.menuProps} />
-              </div>
-            </div>
-          </div>
+          </ComposerCard>
         </div>
         {followHint !== undefined && (
           <p

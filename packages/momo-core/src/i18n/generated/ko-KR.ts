@@ -4440,18 +4440,6 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "대화에도 보내기"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
-    }
-  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -5595,6 +5583,64 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.edited.atDate": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.atDay": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.atTime": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.mark": [
+    {
+      "type": 0,
+      "value": "수정됨"
+    }
+  ],
+  "timeline.edited.pressHint": [
+    {
+      "type": 0,
+      "value": "누르면 고친 시각을 보여 줘요"
     }
   ],
   "timeline.lightbox.copied": [
