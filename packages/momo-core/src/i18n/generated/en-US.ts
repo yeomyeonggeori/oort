@@ -6936,12 +6936,6 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "Go to the reply"
-    }
-  ],
   "timeline.unfurl.label": [
     {
       "type": 0,

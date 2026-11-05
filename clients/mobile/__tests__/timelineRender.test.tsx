@@ -137,10 +137,10 @@ describe('요청 묶음의 채널 칩과 스레드 자리', () => {
     expect(screen.getAllByTestId('message-row')).toHaveLength(1);
     expect(screen.getByText('소개를 바꿨어요')).toBeTruthy();
   });
-  it('승인·거부·만료·끝으로 바뀌어도 칩의 상자 크기는 같아요', () => {
+  it('승인·거부·만료·실패로 바뀌어도 칩의 상자 크기는 같아요', () => {
     const view = render(<RequestStatusChip chip={triggerChip([run], () => ({name: '에이전트'}), BASE_MS)!} />);
     const box = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
-    for (const [phase, endReason] of [['cancelled', 'approval_rejected'], ['timed_out', 'approval_expired'], ['succeeded', undefined]] as const) {
+    for (const [phase, endReason] of [['cancelled', 'approval_rejected'], ['timed_out', 'approval_expired'], ['failed', undefined]] as const) {
       const chip = triggerChip([{...run, phase, endReason}], () => ({name: '에이전트'}), BASE_MS)!;
       view.rerender(<RequestStatusChip chip={chip} />);
       const next = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
