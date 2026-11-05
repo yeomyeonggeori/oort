@@ -73,6 +73,7 @@ import {
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
 } from "./spacing";
+import { timeLabel } from "./timeLabel";
 import {
   canDeleteMessage,
   canEditMessage,
@@ -186,13 +187,6 @@ function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 
-
-function timeLabel(atMs: number): string {
-  const d = new Date(atMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes()
-  ).padStart(2, "0")}`;
-}
 
 /**
  * 발화자의 얼굴 (진단 H-11). Shared with the pending row so an optimistic echo
