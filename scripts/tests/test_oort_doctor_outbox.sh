@@ -3,6 +3,13 @@
 #
 # Fixture-driven classify + one sabotage: delete the unconfigured-push
 # branch and the no-relay pending case must go RED (fail instead of info).
+#
+# #5353 (ADR-0206 D4): a push_candidate the notifier handed back to wait out a member's phone delay
+# (pending, available_at still in the future) is labelled pending_deferred by the SQL and is info, not
+# FAIL, even with a push relay configured. The classifier is checked by fixtures and a sabotage
+# below; the label itself is checked against a real Postgres when OORT_DOCTOR_TEST_PG_URL names one
+# (any database: the probe uses a TEMP table called outbox, so it reads and writes nothing real),
+# and is skipped with a message otherwise.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -165,6 +172,158 @@ EOF
 printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate|pending|3' || \
   fail "the candidate row must still be listed: $OORT_DOCTOR_OUTBOX_DETAIL"
 pass "fixture 8: relay + push_candidate pending + young push_system → still the candidate's fail"
+
+# -----------------------------------------------------------------------------
+# push_candidate waiting out a phone delay (ADR-0206 D4, #5353): the SQL labels a pending
+# push_candidate whose available_at is still in the future `pending_deferred`.
+# -----------------------------------------------------------------------------
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_candidate\tpending_deferred\t2\t45\nbroadcast\tdone\t9\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+  fail "a delayed push_candidate with a relay want info, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+[ "$OORT_DOCTOR_OUTBOX_SEVERITY" = "minor" ] || \
+  fail "a delayed push_candidate severity want minor, got $OORT_DOCTOR_OUTBOX_SEVERITY"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate|pending_deferred|2' || \
+  fail "the delayed row must still be named: $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "fixture 9: relay + delayed push_candidate → info (a phone delay is not a stuck notifier)"
+
+oort_doctor_classify_outbox 0 <<EOF
+$(printf 'push_candidate\tpending_deferred\t2\t45\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+  fail "a delayed push_candidate with no relay want info, got $OORT_DOCTOR_OUTBOX_STATUS"
+if printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fqi 'no push relay'; then
+  fail "a delayed row is not 'pending with no relay' and must not be explained that way: $OORT_DOCTOR_OUTBOX_DETAIL"
+fi
+pass "fixture 10: no relay + delayed push_candidate → info without the no-relay explanation"
+
+# A delayed row never hides a due one: a pending row whose time has come and that nobody took is
+# the notifier not draining, and keeps its FAIL; the delayed rows beside it are not counted as pending.
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_candidate\tpending\t1\t400\npush_candidate\tpending_deferred\t3\t20\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "a due pending push_candidate beside delayed ones with a relay want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate|pending|1' || \
+  fail "the due row must be listed: $OORT_DOCTOR_OUTBOX_DETAIL"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Fq 'push_candidate pending=1' || \
+  fail "only the due row counts as pending (not the 3 delayed): $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "fixture 11: relay + due pending beside delayed → still fail, counting only the due row"
+
+# The label comes from the SQL: a structural check that runs everywhere (the real-Postgres probe
+# below runs where OORT_DOCTOR_TEST_PG_URL is set).
+SQL_TEXT="$(oort_doctor_outbox_sql)"
+printf '%s' "$SQL_TEXT" | grep -Fq "available_at > now()" || \
+  fail "the outbox SQL must separate rows whose available_at is in the future: $SQL_TEXT"
+printf '%s' "$SQL_TEXT" | grep -Fq "'pending_deferred'" || \
+  fail "the outbox SQL must label them pending_deferred: $SQL_TEXT"
+pass "the outbox SQL labels future-available pending push_candidate rows pending_deferred"
+
+# The previous SQL, kept to show the probe below can fail: no label, so a delayed row is `pending`.
+OLD_OUTBOX_SQL="SELECT kind::text, status::text, count(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - min(COALESCE(lease_acquired_at, created_at))))::bigint, 0) FROM outbox GROUP BY 1, 2 ORDER BY 1, 2;"
+
+# $1 = the SQL to run, $2 = with_due to add a pending row that is already due. Prints the grouped
+# rows the doctor would read, from a TEMP outbox holding two delayed push_candidate rows, the due one
+# when asked, and one done broadcast. TEMP: it shadows the real table for this session only.
+oort_probe_outbox_rows() {
+  local sql="$1" with_due="${2:-}"
+  local due_row=""
+  if [ "$with_due" = "with_due" ]; then
+    due_row="('push_candidate', 'pending', now() - interval '1 minute', now() - interval '400 seconds', NULL),"
+  fi
+  psql "$OORT_DOCTOR_TEST_PG_URL" -v ON_ERROR_STOP=1 -X -q -At -F $'\t' -f - <<SQL
+CREATE TEMP TABLE outbox (kind text, status text, available_at timestamptz, created_at timestamptz, lease_acquired_at timestamptz);
+INSERT INTO outbox VALUES
+  ${due_row}
+  ('push_candidate', 'pending', now() + interval '1 minute', now() - interval '10 seconds', NULL),
+  ('push_candidate', 'pending', now() + interval '50 seconds', now() - interval '20 seconds', NULL),
+  ('broadcast', 'done', now(), now(), NULL);
+${sql}
+SQL
+}
+
+TAB=$'\t'
+if [ -n "${OORT_DOCTOR_TEST_PG_URL:-}" ] && command -v psql >/dev/null 2>&1; then
+  ROWS="$(oort_probe_outbox_rows "$SQL_TEXT")"
+  printf '%s\n' "$ROWS" | grep -Fq "push_candidate${TAB}pending_deferred${TAB}2${TAB}" || \
+    fail "real Postgres: two future-available pending rows must read pending_deferred|2: $ROWS"
+  if printf '%s\n' "$ROWS" | grep -Fq "push_candidate${TAB}pending${TAB}"; then
+    fail "real Postgres: no due row was inserted, so no bare pending row is expected: $ROWS"
+  fi
+  oort_doctor_classify_outbox 1 <<EOF
+$ROWS
+EOF
+  [ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+    fail "real Postgres: delayed rows read through the real SQL want info, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+  pass "real Postgres: delayed rows → pending_deferred → info"
+
+  ROWS="$(oort_probe_outbox_rows "$SQL_TEXT" with_due)"
+  printf '%s\n' "$ROWS" | grep -Fq "push_candidate${TAB}pending${TAB}1${TAB}" || \
+    fail "real Postgres: the due row must read as a bare pending|1: $ROWS"
+  oort_doctor_classify_outbox 1 <<EOF
+$ROWS
+EOF
+  [ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+    fail "real Postgres: a due pending row beside delayed ones want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+  pass "real Postgres: a due pending row beside delayed ones still fails"
+
+  # Sabotage: the SQL without the label reads the delayed rows as plain pending - FAIL with a relay.
+  ROWS="$(oort_probe_outbox_rows "$OLD_OUTBOX_SQL")"
+  oort_doctor_classify_outbox 1 <<EOF
+$ROWS
+EOF
+  if [ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ]; then
+    fail "real Postgres sabotage stayed green - the label in the SQL is not load-bearing"
+  fi
+  [ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+    fail "real Postgres sabotage want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+  pass "sabotage: the SQL without the pending_deferred label → RED (the delayed rows fail)"
+else
+  echo "[oort-doctor-outbox] skip: real-Postgres probe of the pending_deferred label (set OORT_DOCTOR_TEST_PG_URL to run it)"
+fi
+
+# -----------------------------------------------------------------------------
+# Sabotage: strip the deferred-push branch → fixture 9 goes RED (the generic rule fails it)
+# -----------------------------------------------------------------------------
+SAB3="$SANDBOX/oort_doctor_sabotaged_deferred_push.sh"
+cp "$DOCTOR" "$SAB3"
+python3 - "$SAB3" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+new, n = re.subn(
+    r"[ \t]*# BEGIN oort-doctor-deferred-push.*?#[ \t]*END oort-doctor-deferred-push\n",
+    "",
+    text,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit(f"expected 1 deferred-push block, stripped {n}")
+path.write_text(new, encoding="utf-8")
+PY
+if grep -F 'BEGIN oort-doctor-deferred-push' "$SAB3" >/dev/null 2>&1; then
+  fail "sabotage left the deferred-push markers in place"
+fi
+# shellcheck disable=SC1090
+. "$SAB3"
+oort_doctor_classify_outbox 1 <<EOF
+$(printf 'push_candidate\tpending_deferred\t2\t45\nbroadcast\tdone\t9\n')
+EOF
+if [ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ]; then
+  fail "deferred-push sabotage stayed green - the branch is not load-bearing"
+fi
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "deferred-push sabotage want fail, got $OORT_DOCTOR_OUTBOX_STATUS ($OORT_DOCTOR_OUTBOX_DETAIL)"
+pass "sabotage: remove the deferred-push branch → RED (fail not info)"
+
+# The sabotages below source their own copies; load the real library again first.
+# shellcheck disable=SC1090
+. "$DOCTOR"
 
 # -----------------------------------------------------------------------------
 # Sabotage: strip the push_system branch → fixture 4 goes RED (the generic rule fails it)
