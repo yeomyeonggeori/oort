@@ -1,0 +1,95 @@
+appId: app.momo.ios
+name: 5364-conv-search-live
+---
+# 5364-conv-search-live — 대화 안 검색을 **손으로 누른다**(#5364). 로그인도 서버도 필요 없고, 앱을 다시 띄우지 않으므로 `launchApp` 이 없다
+# (`119-jump-latest` 와 같은 모양: 표면을 먼저 띄운 뒤 이 흐름이 누르기만 한다).
+#
+#   export CHROME_PATH=/usr/bin/false            # Metro 를 띄우는 셸에서(#5083)
+#   (cd clients/mobile && npx react-native start --port <포트>)
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure CONVSEARCH-LIVE -RCT_jsLocation 127.0.0.1:<포트>   # 라이트: LIGHT-CONVSEARCH-LIVE
+#   maestro --udid <udid> test --test-output-dir <폴더> clients/mobile/maestro/5364-conv-search-live.yaml
+#
+# 표면은 `measure/conversationSearchLive.tsx` — **진짜 `ConversationLayout`(네이티브 키보드 틀)·`Timeline`(진짜 점프·착지)·`Composer`·머리** 위에 배송되는 검색 줄·결과 면·
+# 이동 막대를 얹고, 검색 상태만 작은 상태 기계가 쥔다(진짜 훅은 서버가 필요하다 — 훅의 전이는 `__tests__/conversationSearch.test.tsx` 가 잰다).
+# 검색어는 ASCII `deploy` 다: Maestro 의 `inputText` 는 한글을 못 친다. 결과는 5건(최근 순 58·52·47·33·12번 메시지).
+#
+# 재는 것(jest 가 못 보는 것): ① 자판이 올라와도 결과 면이 자판 위에서 끝나는가(사진) ② 결과를 누르면 자판이 접히고 진짜 목록이 그 메시지로 가서 착지한다(막대가 서고 결과 면이
+# 물러난다) ③ 컴포저는 숨은 동안 안 보이고(`composer-send` 없음) 검색을 끝내면 돌아온다. 사진은 `--test-output-dir` 아래 `takeScreenshot/` 에 쌓인다.
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search"
+    timeout: 90000
+- assertVisible:
+    id: "composer-send"
+- takeScreenshot: 0-entry
+- tapOn:
+    id: "conversation-search"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search-input"
+    timeout: 20000
+# 입력 전: 최근 검색 카드가 서고 컴포저는 숨는다.
+- assertVisible:
+    id: "conversation-search-recent"
+- assertNotVisible:
+    id: "composer-send"
+- takeScreenshot: 1-open
+- inputText: "deploy"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search-result"
+    timeout: 20000
+- takeScreenshot: 2-results
+# 가장 최근 결과(58번)를 누른다 — 결과 면이 물러나고 막대가 선다.
+- tapOn:
+    id: "conversation-search-result"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search-bar"
+    timeout: 20000
+- assertNotVisible:
+    id: "conversation-search-panel"
+- assertNotVisible:
+    id: "composer-send"
+- takeScreenshot: 3-landed-first
+# ↑ 두 번 — 더 오래된 결과(52·47번)로 가서 번호가 「3 / 5」가 된다.
+- tapOn:
+    id: "conversation-search-older"
+- takeScreenshot: 4-older
+- tapOn:
+    id: "conversation-search-older"
+- assertVisible:
+    text: "3 / 5"
+- takeScreenshot: 5-older2
+- tapOn:
+    id: "conversation-search-newer"
+# 「목록」 — 결과 목록으로 돌아가고 막대는 걷힌다.
+- tapOn:
+    id: "conversation-search-list"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search-results"
+    timeout: 20000
+- assertNotVisible:
+    id: "conversation-search-bar"
+- takeScreenshot: 6-list
+- tapOn:
+    id: "conversation-search-result"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search-bar"
+    timeout: 20000
+- takeScreenshot: 7-landed-second
+# X — 머리와 컴포저가 돌아온다.
+- tapOn:
+    id: "conversation-search-close"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-search"
+    timeout: 20000
+- assertNotVisible:
+    id: "conversation-search-bar"
+- assertVisible:
+    id: "composer-send"
+- takeScreenshot: 8-closed
