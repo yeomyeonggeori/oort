@@ -33,7 +33,7 @@
 
 ### D4. self-service
 - `DELETE .../channels/:ch/members/me` (채널 leave — private/dm 규칙: dm은 불가, private은 가능하되 마지막 멤버면 채널 archive).
-  - 증보(Accepted, 2026-11-05 owner 결정, #5332): 「dm은 불가」는 1:1에만 남는다. 그룹 DM은 참여자 누구나 나갈 수 있고 같은 트랜잭션에서 키 은퇴·대기 중 입장 요청 취소·시스템 줄을 함께 한다([ADR-0221](0221-group-dm.md) D9).
+  - 증보(Accepted, 2026-11-05 owner 결정, #5332): 「dm은 불가」는 1:1에만 남는다. 그룹 DM은 참여자 누구나 나갈 수 있고 같은 트랜잭션에서 대기 중 입장 요청 취소·시스템 줄을 함께 한다. 그룹은 만들 때마다 새 방이라 나가기가 방 키를 바꾸지 않는다([ADR-0221](0221-group-dm.md) D2·D9).
 - `DELETE .../members/me` (워크스페이스 leave — 마지막 owner 409).
 
 ### D5. audit 일관화
