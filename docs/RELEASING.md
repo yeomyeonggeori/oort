@@ -433,10 +433,10 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    그 줄을 지운다(서비스 변수는 그대로 둔다). 이름만 읽어서는 값에 줄바꿈이 든 줄을 알 수 없으므로, 그런 줄은 5단계의 `problems`가 이름만 대고 알려 준다. 이름만 읽어서는 씨앗 줄의 값이 낡았는지 모르므로, 목록에 씨앗 이름이 있으면 그 줄만 열어(`grep '^<이름>=' /opt/data/.env`) 값이 `VOLUME_ENV_SEEDED`의 값과 같은지 본다. 이 값들은 Hermes
    템플릿의 공개 상수라 비밀이 아니고, 다른 이름의 줄은 열지 않는다. 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 값이 다른 씨앗 줄도 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
    지우기 전에는 4단계로 가지 않는다.
-4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② `HERMES_LOCKGATE_B64`를 `base64 < infra/hermes/lockgate.py | tr -d '\n'`로,
+4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② 게이트는 값이 길어 한 변수에 들어가지 않는다(Railway는 값이 32,768자를 넘는 변수를 거절한다, #5348): `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000`의 줄을 차례로 `HERMES_LOCKGATE_B64`, `HERMES_LOCKGATE_B64_2`, … `_5`에 넣고 줄이 없는 이름은 비운다. 이어서
    시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
    `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
-   건드리지 않는다. 배포는 한 번이다.
+   건드리지 않는다. 배포는 한 번이다. **변수 저장은 한꺼번에 적용되지 않는다**: 여러 변수를 한 번에 보내도 한 값이 길이로 거절되면 그 앞 변수는 이미 써져 있다(2026-11-05 실측). 보내기 전에 모든 값이 32,768자 이하인지 보고, 거절되면 곧바로 1단계 저장본과 대조해 되돌린다. 배포 전이라 도는 서비스는 그대로지만, 재시작되면 어긋난 값으로 뜬다.
 5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(팀 공용 기본 모드는 `default/codex-oauth.fallback-claude-oauth`, 그 밖에 `default` 또는 `connector/…`)이고, 팀 공용 기본 모드에서는 `resolved_tools`에 `image_generate`·`web_search`가 있어 Codex 로그인이 볼륨에 있음을 확인하고, `"media_strict": true`이고,
    `selected_tools`·`resolved_tools`에 `memory`·`session_search`가 없고 `memory_config`가 `{"memory_enabled": false, "provider_set": false, "user_profile_enabled": false}`이고
    (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
