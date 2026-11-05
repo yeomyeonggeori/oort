@@ -81,11 +81,12 @@ export function presentConnection(view: ConnectionView, recovered: boolean): Con
 // 셸 띠의 `nextShellStood`/`presentShellStrip` 과 같은 문법이다(셸은 말하는 원인이 둘뿐이라 따로 있다).
 
 /**
- * 「띠가 끊김을 그린 적이 있다」의 다음 값. 끊김이 그려지면 서고, 틈이 완전히 가라앉으면(정상이고 복구 표시도 없다) 잊는다.
- * 「연결 중」과 복구 표시 2초는 그대로 둔다(눌러서 다시 연결해도, 붙은 뒤의 확인이 끝날 때까지 기억이 간다).
+ * 「띠가 끊김을 그린 적이 있다」의 다음 값. 끊김이 **앞에서** 그려지면 서고(`foreground`: 앱이 앞에 있다 - 뒤에 있는 동안 그려진 띠는 아무도
+ * 보지 않았다), 틈이 완전히 가라앉으면(정상이고 복구 표시도 없다) 잊는다. 「연결 중」과 복구 표시 2초는 그대로 둔다(눌러서 다시
+ * 연결해도, 붙은 뒤의 확인이 끝날 때까지 기억이 간다).
  */
-export function nextBandStood(view: ConnectionView, recovered: boolean, stood: boolean): boolean {
-  if (view.phase === "down") return true;
+export function nextBandStood(view: ConnectionView, recovered: boolean, stood: boolean, foreground = true): boolean {
+  if (view.phase === "down") return foreground ? true : stood;
   if (view.phase === "ok" && !recovered) return false;
   return stood;
 }

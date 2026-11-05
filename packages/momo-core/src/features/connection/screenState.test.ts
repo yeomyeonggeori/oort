@@ -424,6 +424,15 @@ describe("대화 띠는 자기가 끊김을 그린 적이 있을 때만 「다�
     expect(shownAcross([down, back, gone, again])).toEqual([CONNECTION_TONE.down, CONNECTION_TONE.recovered, null, null]);
   });
 
+  it("앱이 뒤에 있는 동안 그려진 끊김은 본 것이 아니다: 기억이 서지 않아 돌아온 복구가 말하지 않는다", () => {
+    const down = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000));
+    // 뒤에서 그려진 끊김(`foreground: false`): 기억을 세우지 않는다. 앞에서는 선다.
+    expect(nextBandStood(down.view, false, false, false)).toBe(false);
+    expect(nextBandStood(down.view, false, false, true)).toBe(true);
+    // 이미 서 있던 기억은 뒤로 간다고 지워지지 않는다(앞에서 본 끊김은 본 것이다).
+    expect(nextBandStood(down.view, false, true, false)).toBe(true);
+  });
+
   it("눌러서 다시 연결한 동안의 「연결 중」은 기억을 지우지 않는다", () => {
     const down = step(healthy(), socket(T0 + 1_000, "disconnected"), tick(T0 + 11_000));
     const pressed = step(down, resume(T0 + 12_000));

@@ -5,7 +5,7 @@ import {
   type ConnectionPresentation,
 } from '@momo/core/features/connection/presentation';
 import {useEffect, useMemo, useState} from 'react';
-import {AppState} from 'react-native';
+import {appStateForeground} from '../readState/useViewingBeat';
 import {useConnection} from './ConnectionProvider';
 
 // =============================================================================
@@ -50,9 +50,8 @@ export function useConnectionBand(): ConnectionBand {
   const [stood, setStood] = useState(false);
   useEffect(() => {
     if (view === null) return;
-    // 뒤에 있는 동안 그려진 끊김은 본 것이 아니다. 기억을 세우지 않는다.
-    const unseen = view.phase === 'down' && AppState.currentState !== 'active';
-    const next = unseen ? stood : nextBandStood(view, recovered, stood);
+    // 뒤에 있는 동안 그려진 끊김은 본 것이 아니다(`foreground`): 기억을 세우지 않는다.
+    const next = nextBandStood(view, recovered, stood, appStateForeground.isForeground());
     if (next !== stood) setStood(next);
   }, [view, recovered, stood]);
 

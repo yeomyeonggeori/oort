@@ -14,10 +14,11 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import {AppState, type AppStateStatus} from 'react-native';
 import {isOnlineFromNetInfo} from '../../query/queryClient';
+import {appStateForeground} from '../readState/useViewingBeat';
 import type {DisplayEvent} from '../../realtime/connectionDisplay';
 import {createConnectionStore} from './connectionStore';
+import {onAppBackground} from './appBackground';
 import {connectionEventOf} from './connectionEvents';
 import {recordDeviceOnline} from './deviceOnline';
 
@@ -104,16 +105,19 @@ export function ConnectionProvider({
     };
   }, [store, feedRef]);
 
-  // 앱: 뒤로 가면 아무도 보지 않는다. 돌아오면 새로 시작하고, `inactive` → `active` 는 시각만 따라간다(스토어 `setVisible`). 마운트
-  // 시점에 이미 뒤에 있으면(푸시로 깨어난 앱) 뒤에 있는 것으로 시작한다.
+  // 앱: 뒤로 가면 아무도 보지 않는다. 돌아오면 새로 시작하고, `inactive` → `active` 는 시각만 따라간다(스토어 `setVisible`). 뒤로 가는 것은
+  // `onAppBackground`(앞에 있는 동안의 `inactive` 는 뒤로 간 것이 아니다), 앞으로 돌아오는 것은 「보고 있음」 신호와 같은 어댑터(`appStateForeground`)가
+  // 알린다. 마운트 시점에 앞이 아니면(푸시로 깨어난 앱) 뒤에 있는 것으로 시작한다.
   useEffect(() => {
-    const apply = (status: AppStateStatus) => {
-      if (status === 'background') store.setVisible(false);
-      else if (status === 'active') store.setVisible(true);
+    if (!appStateForeground.isForeground()) store.setVisible(false);
+    const stopBackground = onAppBackground(() => store.setVisible(false));
+    const stopForeground = appStateForeground.subscribe(active => {
+      if (active) store.setVisible(true);
+    });
+    return () => {
+      stopBackground();
+      stopForeground();
     };
-    if (AppState.currentState === 'background') apply('background');
-    const subscription = AppState.addEventListener('change', apply);
-    return () => subscription.remove();
   }, [store]);
 
   // 기기: NetInfo 는 구독 즉시 현재 상태를 한 번 보고한다. 모름(`null`)은 막지 않는 쪽이라 첫 보고 전의 기본이다.
