@@ -39,7 +39,7 @@ use momo_agent::tools::{
 };
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
-    cent_channel, send_message_in_tx, send_thread_notice_in_tx, validate_thread_root_in_tx,
+    cent_channel, find_client_message_in_tx, send_message_in_tx, send_thread_notice_in_tx,
     MessageType, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind};
@@ -197,27 +197,17 @@ async fn card_suggest(
             else {
                 return Ok(Err(SuggestionRefusal::NoHumanRequester));
             };
-            // The trigger's thread belongs to the trigger's channel. A trigger
-            // in another channel (not a shape any producer writes today) has no
-            // thread here to join, so the card goes to the run's top level
-            // rather than guessing.
+            // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): the chip stands where the run's answer
+            // stands, decided in one place (`momo_agent::answer_place_root`): the request's thread,
+            // a new thread under the request at a channel's top level, the main flow in a 1:1 DM
+            // or when the thread's root (or the request) was deleted since (#2959 M1). A trigger
+            // in another channel (not a shape any producer writes today) has no thread here, so
+            // the place function, which only reads a trigger of the run's own channel, says
+            // main flow rather than guessing.
             let root_id = if requester.channel_id == channel_id {
-                requester.thread_root_id
+                momo_agent::run_answer_root_in_tx(conn, workspace_id, run_id).await?
             } else {
                 None
-            };
-            // The trigger's root may have been deleted since (#2959 M1). A
-            // root that no longer stands has no thread to join; the card goes
-            // to the channel's top level instead of into a dead thread.
-            let root_id = match root_id {
-                Some(root)
-                    if validate_thread_root_in_tx(conn, channel_id, root)
-                        .await?
-                        .is_ok() =>
-                {
-                    Some(root)
-                }
-                _ => None,
             };
             // With the thread rollup + `thread.updated` when it is a reply.
             send_thread_notice_in_tx(
@@ -1173,9 +1163,29 @@ pub(crate) async fn write_result(
     let context = context.clone();
     let stored = result.clone();
 
+    let call_key = call_message_id(context.run_id, &stored.call_id);
     momo_db::with_tenant_tx(pool, context.workspace_id, move |conn| {
         Box::pin(async move {
-            send_message_in_tx(
+            // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): a line written after the card stood
+            // follows the **card row's** `root_id`, not a fresh reading of the request — so a
+            // request deleted while the tool ran does not split one call across two rooms. The call
+            // card is always written first (`record_tool_call`), so its row is the bundle's place;
+            // a result with no card on file (not a shape any path writes) asks for the run's place.
+            let root_id = match find_client_message_in_tx(
+                conn,
+                context.channel_id,
+                context.agent_member_id,
+                call_key,
+            )
+            .await?
+            {
+                Some(card) => card.root_id,
+                None => {
+                    momo_agent::run_answer_root_in_tx(conn, context.workspace_id, context.run_id)
+                        .await?
+                }
+            };
+            send_thread_notice_in_tx(
                 conn,
                 context.workspace_id,
                 NewMessage {
@@ -1184,7 +1194,7 @@ pub(crate) async fn write_result(
                     message_type: MessageType::ToolResult,
                     body: Some(body),
                     props,
-                    root_id: None,
+                    root_id,
                     reply_to_id: None,
                     client_msg_id: Some(client_msg_id),
                     run_id: Some(context.run_id),

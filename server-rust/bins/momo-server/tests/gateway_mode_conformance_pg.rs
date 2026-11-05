@@ -1256,8 +1256,8 @@ async fn the_answer_of(su: &PgPool, run: Uuid) -> (i64, Option<Uuid>, Option<Uui
 ///
 /// A request made inside a thread is answered inside it — the same place, the same rollup, the same
 /// `thread.updated` as the managed worker, the team AI and the Agent Port's `oort_run_complete` — and a
-/// request made at the channel's top level is answered at the top level, quoting it. The second half is
-/// what keeps the first from being "always thread": #4646 owns the day that changes.
+/// request made at a channel's top level is answered in a new thread under it (#4646), while a 1:1 DM keeps the
+/// main flow. The DM half is what keeps "under the request" from being "always thread".
 ///
 /// The rollup assertions are the ones a bare `root_id: Some(_)` on the raw spine fails: it would leave
 /// the root's `reply_count` at 1 and publish no `thread.updated`.
@@ -1324,13 +1324,68 @@ async fn t4622_the_rest_callback_answers_inside_the_thread_it_was_asked_in() {
         "{announced}"
     );
 
-    // A request made at the channel's top level stays where it was: the main flow, quoting it.
+    // A request made at the channel's top level (#4646): the request is the root of a new thread and the
+    // answer is its first reply — quoting it, and counted by the thread like any reply.
     let top = say(&http, &base, &token, &tenant, "@hermes 새 질문이에요", None).await;
     let run = claim_and_complete(&http, &base, &tenant, agent, "새 답이에요").await;
+    let (top_answer_seq, answer_root, answer_quote) = the_answer_of(&su, run).await;
+    assert_eq!(
+        (answer_root, answer_quote),
+        (Some(top), Some(top)),
+        "a top-level request is answered in a new thread under it"
+    );
+    let rollup: (i32, Option<i64>) = sqlx::query_as(
+        "SELECT reply_count, last_reply_seq FROM thread WHERE workspace_id = $1 AND root_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(top)
+    .fetch_one(&su)
+    .await
+    .expect("the new thread's rollup");
+    assert_eq!(
+        rollup,
+        (1, Some(top_answer_seq)),
+        "the answer is the new thread's first reply, and the request's 「답글 N개」 counts it"
+    );
+
+    // A request made in a 1:1 DM stays in the main flow, quoting it: the DM is the work room.
+    let dm = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, dm_key) VALUES ($1, $2, 'dm', $3)")
+        .bind(dm)
+        .bind(tenant.workspace)
+        .bind(format!("dm-{}", dm.simple()))
+        .execute(&su)
+        .await
+        .expect("seed the dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(tenant.workspace)
+        .execute(&su)
+        .await
+        .expect("seed the dm's seq");
+    for member in [tenant.human, agent] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(tenant.workspace)
+        .bind(dm)
+        .bind(member)
+        .execute(&su)
+        .await
+        .expect("seed the dm's membership");
+    }
+    let in_dm = Tenant {
+        workspace: tenant.workspace,
+        human: tenant.human,
+        email: tenant.email.clone(),
+        channel: dm,
+    };
+    let asked_in_dm = say(&http, &base, &token, &in_dm, "@hermes 여기서 물어요", None).await;
+    let run = claim_and_complete(&http, &base, &in_dm, agent, "여기서 답해요").await;
     let (_, answer_root, answer_quote) = the_answer_of(&su, run).await;
     assert_eq!(
         (answer_root, answer_quote),
-        (None, Some(top)),
-        "a top-level request is answered in the main flow (the thread-under-it step is #4646)"
+        (None, Some(asked_in_dm)),
+        "a 1:1 DM request is answered in the main flow, quoting it"
     );
 }

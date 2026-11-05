@@ -824,6 +824,168 @@ async fn t4622_a_streamed_turn_raised_inside_a_thread_is_opened_inside_that_thre
 }
 
 // ---------------------------------------------------------------------------
+// #4646 — a request at a channel's top level is answered in a new thread under it
+// ---------------------------------------------------------------------------
+
+/// **A top-level request is answered in a new thread rooted at the request** (#4646, ADR-0148 증보
+/// 2026-11-05) — the non-streaming commit. The answer carries both columns (the thread it belongs to and
+/// the message it answers are the same message here), the request's 「답글 N개」 goes from nothing to one
+/// and `thread.updated` is published for it: the pair a bare `root_id: Some(_)` on the raw spine splits.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4646_a_turn_raised_at_a_channels_top_level_answers_in_a_new_thread_under_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 이번 주 일정 모아줘").await;
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = build_worker(provider, base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "exactly one agent reply");
+    let (message_id, seq, _, _) = messages.into_iter().next().unwrap();
+    assert_eq!(
+        place_of(&su, message_id).await,
+        (Some(trigger), Some(trigger)),
+        "the answer is the first reply of a thread rooted at the request, and quotes it"
+    );
+    assert_eq!(
+        thread_rollup(&su, trigger).await,
+        (1, Some(seq)),
+        "the request's 「답글 N개」 counts the answer"
+    );
+    let stats = broadcast_stats(&su, tenant.channel_id).await;
+    assert_eq!(
+        count_of(&stats, "thread.updated"),
+        1,
+        "one `thread.updated`, for the answer: {stats:?}"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+}
+
+/// **The streamed twin: the opening write must open the new thread.** The pump creates the answer at its
+/// first slice and the commit dedupes onto it, so a place decided only at the commit never reaches a
+/// streamed answer (the same reason as #4622's streamed test, now for the request's own thread).
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4646_a_streamed_turn_raised_at_a_channels_top_level_is_opened_in_a_new_thread_under_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger, _job_id) = enqueue_mention_turn(
+        &su,
+        &tenant,
+        tenant.agent_id,
+        "@hermes 길게 이번 주 일정 모아줘",
+    )
+    .await;
+
+    let provider = Arc::new(MockChatProvider::echo().streaming(4, Duration::from_millis(900)));
+    let worker = build_worker(provider, base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "one turn is one message");
+    let (message_id, seq, _, props) = messages.into_iter().next().unwrap();
+    assert!(
+        props.get(momo_messaging::STREAM_PROPS_KEY).is_some(),
+        "the answer was streamed (opened by the pump): {props}"
+    );
+    assert_eq!(
+        place_of(&su, message_id).await,
+        (Some(trigger), Some(trigger)),
+        "the streamed answer was OPENED in the new thread under the request"
+    );
+    assert_eq!(
+        thread_rollup(&su, trigger).await,
+        (1, Some(seq)),
+        "counted once, at the opening write"
+    );
+    let stats = broadcast_stats(&su, tenant.channel_id).await;
+    assert_eq!(
+        count_of(&stats, "thread.updated"),
+        1,
+        "the commit's dedupe publishes no second `thread.updated`: {stats:?}"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+}
+
+/// **A 1:1 DM is the one place the answer stays in the main flow** — the contrast that keeps "under the
+/// request" from being "always a thread". Same worker, same provider; only the conversation differs.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4646_a_turn_raised_in_a_one_to_one_dm_answers_in_the_main_flow() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let channel = seed_tenant(&su).await;
+
+    let dm = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, dm_key) VALUES ($1, $2, 'dm', $3)")
+        .bind(dm)
+        .bind(channel.workspace_id)
+        .bind(format!("dm-{}", dm.simple()))
+        .execute(&su)
+        .await
+        .expect("seed the dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(channel.workspace_id)
+        .execute(&su)
+        .await
+        .expect("seed the dm's seq");
+    for member in [channel.human_id, channel.agent_id] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(channel.workspace_id)
+        .bind(dm)
+        .bind(member)
+        .execute(&su)
+        .await
+        .expect("seed the dm's membership");
+    }
+    let tenant = Tenant {
+        workspace_id: channel.workspace_id,
+        human_id: channel.human_id,
+        agent_id: channel.agent_id,
+        channel_id: dm,
+    };
+
+    let (run_id, trigger, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 여기서 정리해줘").await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = build_worker(provider, base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "exactly one agent reply");
+    let (message_id, _, _, _) = messages.into_iter().next().unwrap();
+    assert_eq!(
+        place_of(&su, message_id).await,
+        (None, Some(trigger)),
+        "the DM is the work room: main flow, quoting the request"
+    );
+    let rollups: i64 = sqlx::query_scalar("SELECT count(*) FROM thread WHERE workspace_id = $1")
+        .bind(tenant.workspace_id)
+        .fetch_one(&su)
+        .await
+        .expect("count rollups");
+    assert_eq!(rollups, 0, "no thread was opened");
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+}
+
+// ---------------------------------------------------------------------------
 // b51_2 — failure is visible, and retried only when retrying can help
 // ---------------------------------------------------------------------------
 
@@ -2240,7 +2402,7 @@ async fn a_tool_approval_card_asks_one_question_and_carries_the_decision_mode() 
     settle_residual_worker_jobs(&su).await;
     let tenant = seed_tenant(&su).await;
 
-    let (run_id, _trigger_message_id, _job_id) =
+    let (run_id, trigger, _job_id) =
         enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 작업 세션을 끝내 줘").await;
     let asks_to_end_a_session =
         MockChatProvider::echo().with_tool_calls([vec![ProviderToolCall {
@@ -2273,6 +2435,72 @@ async fn a_tool_approval_card_asks_one_question_and_carries_the_decision_mode() 
         momo_agent::actions::decision_mode("tool_call", &approval_payload).as_str(),
         "inline",
         "the card carries the one function's own answer for the payload it stored"
+    );
+
+    // #4646: the call card and the approval card stand where the run's answer will — in a new thread
+    // under the request, which counts both as replies — and neither quotes the request.
+    let cards: Vec<(String, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT type::text, root_id, reply_to_id FROM message \
+          WHERE run_id = $1 AND type IN ('tool_call', 'approval_request') ORDER BY seq",
+    )
+    .bind(run_id)
+    .fetch_all(&su)
+    .await
+    .expect("the run's cards");
+    assert_eq!(
+        cards,
+        vec![
+            ("tool_call".to_string(), Some(trigger), None),
+            ("approval_request".to_string(), Some(trigger), None),
+        ],
+        "a top-level request's cards are the first replies of the thread it roots"
+    );
+    assert_eq!(
+        thread_rollup(&su, trigger).await.0,
+        2,
+        "both cards are replies the thread counts"
+    );
+}
+
+/// **A line written after the card stands with the card (#4646).** A tool the profile did not enable is
+/// refused before anything runs, and the refusal is a `tool_result` line beside the call card. It takes its
+/// place from the stored call card's row (`write_result` reads the card, not the request again), so the
+/// call and its result are one bundle in one thread. What this pins is the pair's place at a channel's top
+/// level; the "request deleted meanwhile" half is the code's reading of the card row, which a deleted
+/// request cannot move, and is not exercised here.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4646_a_tool_result_line_stands_in_the_thread_of_its_call_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 기억해 둘 일 있어").await;
+    let asks_for_a_tool_nobody_enabled =
+        MockChatProvider::echo().with_tool_calls([vec![ProviderToolCall {
+            id: "call-not-enabled".to_string(),
+            name: "memory_suggest".to_string(),
+            arguments: json!({"kind": "decision", "text": "x", "evidence": [1]}).to_string(),
+        }]]);
+    let worker = build_worker(Arc::new(asks_for_a_tool_nobody_enabled), base_config()).await;
+    worker.drain_once().await.expect("drain");
+    let lines: Vec<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT type::text, root_id FROM message \
+          WHERE run_id = $1 AND type IN ('tool_call', 'tool_result') ORDER BY seq",
+    )
+    .bind(run_id)
+    .fetch_all(&su)
+    .await
+    .expect("the run's tool lines");
+    assert_eq!(
+        lines,
+        vec![
+            ("tool_call".to_string(), Some(trigger)),
+            ("tool_result".to_string(), Some(trigger)),
+        ],
+        "the result stands in the thread of its call card, under the request"
     );
 }
 
@@ -2499,6 +2727,7 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
                         channel_id,
                         message_id: reply.message.id,
                         message_seq: reply.message.seq,
+                        root_id: reply.message.root_id,
                         author_agent_member_id: author_id,
                         source_run_id,
                         body: &body,

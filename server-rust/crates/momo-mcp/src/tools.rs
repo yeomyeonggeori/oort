@@ -1465,20 +1465,24 @@ pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
     ToolDescriptor {
         name: TOOL_MESSAGE_POST,
         title: "Post a message",
-        // #4622 (ADR-0200 증보 5): what a message may carry, and where it goes. The
-        // golden in `bins/momo-server/tests/agent_conversation_rules.rs` holds the key
-        // words of each rule; keep the two in step.
+        // #4622 (ADR-0200 증보 5): what a message may carry, and where it goes — #4646
+        // (ADR-0148 증보 2026-11-05) made the place one rule: a 1:1 DM stays in the main
+        // flow, a thread stays its thread, anything else opens a thread under the message
+        // that called the agent. The golden in
+        // `bins/momo-server/tests/agent_conversation_rules.rs` holds the key words of each
+        // rule; keep the two in step.
         description: "Post one message into an approved channel through the canonical send \
                       path. Post only what a person must read: a result, a blocker (what \
                       stopped you and what you need) or what a person must do. Never post a \
                       bare acknowledgement (\"got it\", \"on it\", \"확인했어요\") or progress \
                       (report steps with oort_run_event stage), and do not repeat a run's \
                       final answer here: oort_run_complete body is posted for you. Answer \
-                      where you were asked: in a direct message, at the top level (no \
-                      rootId); for a top-level mention in a channel, rootId is that message's \
-                      id; inside a thread, rootId is the thread's root (the rootId of the \
-                      message you answer). If a top-level message might be a direct message \
-                      and you cannot tell, leave rootId out.",
+                      where you were asked: in a 1:1 direct message, at the top level (no \
+                      rootId); inside a thread, rootId is the thread's root (the rootId of the \
+                      message you answer); anywhere else (a top-level mention in a channel, a \
+                      group direct message), rootId is the id of the message that called you, \
+                      so your message opens a thread under it. If a top-level message might \
+                      be a 1:1 direct message and you cannot tell, leave rootId out.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: message_post_schema,
         annotations: None,
