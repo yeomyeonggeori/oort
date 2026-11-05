@@ -91,8 +91,8 @@ function mount() {
 }
 
 const byId = (id: string) => document.querySelector<HTMLElement>(`[data-testid='${id}']`);
-const REASON_SERVER = "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요.";
-const REASON_UNKNOWN = "문제가 생겼어요. 다시 시도해 주세요.";
+const REASON_SERVER = "서버에 닿지 못했어요.";
+const REASON_UNKNOWN = "문제가 생겼어요.";
 
 beforeAll(async () => {
   ko = await koreanLocale();

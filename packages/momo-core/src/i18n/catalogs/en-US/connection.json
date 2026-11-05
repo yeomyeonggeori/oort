@@ -42,6 +42,8 @@
   "connection.load.reasonOffline": "You're offline. You can try again once you're connected.",
   "connection.load.reasonServer": "We can't reach the server. Try again in a moment.",
   "connection.load.reasonUnknown": "Something went wrong. Try again.",
+  "connection.load.reasonServerBare": "We can't reach the server.",
+  "connection.load.reasonUnknownBare": "Something went wrong.",
   "connection.load.sentence": "{title}. {reason}",
   "connection.send.failed": "Couldn't send",
   "connection.send.resend": "Resend",

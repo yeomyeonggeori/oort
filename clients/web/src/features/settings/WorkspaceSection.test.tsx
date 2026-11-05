@@ -674,8 +674,8 @@ describe("링크 확인(서버) 스위치 (S5b)", () => {
   // #5242: 옛 「링크 확인 설정을 불러오지 못했어요.」 배너는 원인을 말하는 한 줄이다. 이유가 원인을 따라가고 다시 시도가 다시 읽는다.
   it("GET이 실패하면 제목 뒤에 원인이 붙고, 다시 시도가 설정을 다시 읽는다", async () => {
     const cases: [Error, string][] = [
-      [new NetworkError("unreachable", 15_000), "링크 확인 설정을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "링크 확인 설정을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "링크 확인 설정을 불러오지 못했어요. 서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "링크 확인 설정을 불러오지 못했어요. 문제가 생겼어요."],
     ];
     for (const [error, sentence] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);

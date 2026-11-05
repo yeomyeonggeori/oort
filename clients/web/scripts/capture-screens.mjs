@@ -13108,7 +13108,8 @@ async function captureShellScenes(_sharedBrowser, scheme) {
       await page.goto(ORIGIN, { waitUntil: "networkidle" });
       await signIn(page);
       await page
-        .getByTestId(variant === "empty" ? "sidebar-create-channel" : "channels-error")
+        // 오류 변형은 사이드바의 한 줄(`channels-error-line`)이다: 받아 둔 채널이 없어도 사이드바는 상자 대신 한 줄로 말하고 본문이 상자를 맡는다(#5307 L1).
+        .getByTestId(variant === "empty" ? "sidebar-create-channel" : "channels-error-line")
         .waitFor({ state: "visible" });
       await page.evaluate(() => {
         document.documentElement.setAttribute("data-palette", "noeul");

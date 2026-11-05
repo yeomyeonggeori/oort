@@ -73,6 +73,12 @@ export const CONNECTION_KEYS = {
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",
+  /**
+   * 같은 이유에서 **다음 행동(다시 시도해 주세요)을 뺀** 문장. 곁에 「다시 시도」 단추가 서 있는 자리가 쓴다: 단추와 문장이 같은 말을 되풀이하지 않는다(#5307 L2).
+   * 오프라인 이유(`loadReasonOffline`)는 「연결되면 다시 불러올 수 있어요」라는 조건이지 단추의 되풀이가 아니라 둘이 같은 문장이다.
+   */
+  loadReasonServerBare: "connection.load.reasonServerBare",
+  loadReasonUnknownBare: "connection.load.reasonUnknownBare",
   /** 값 `title`·`reason`(제목 문장과 이유 문장)을 받는다. 상자가 안 맞는 좁은 자리의 한 줄이 둘을 잇는다. */
   loadSentence: "connection.load.sentence",
   // 보내기 실패

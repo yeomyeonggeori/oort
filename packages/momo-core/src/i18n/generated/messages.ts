@@ -222,7 +222,9 @@ export const messageKeys = [
   "connection.load.notificationRulesTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
+  "connection.load.reasonServerBare",
   "connection.load.reasonUnknown",
+  "connection.load.reasonUnknownBare",
   "connection.load.sentence",
   "connection.load.threadTitle",
   "connection.send.failed",
@@ -1246,7 +1248,9 @@ export const argumentSpecs = {
   "connection.load.notificationRulesTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
+  "connection.load.reasonServerBare": {},
   "connection.load.reasonUnknown": {},
+  "connection.load.reasonUnknownBare": {},
   "connection.load.sentence": {
     "reason": "string",
     "title": "string"
@@ -2434,7 +2438,9 @@ export interface MessageArgs {
   "connection.load.notificationRulesTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonServerBare": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.reasonUnknownBare": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;

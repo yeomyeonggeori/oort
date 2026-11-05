@@ -1438,10 +1438,22 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요."
     }
   ],
   "connection.load.sentence": [

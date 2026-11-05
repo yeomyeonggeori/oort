@@ -1,8 +1,8 @@
 import { Button } from "@/design/ui/button";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { CONNECTION_KEYS, type ConnectionPlainKey } from "@momo/core/features/connection/copyKeys";
-import { copyForCause, type ConnectionCause } from "@momo/core/features/connection/model";
-import { loadFailureSentence } from "./loadFailure";
+import type { ConnectionCause } from "@momo/core/features/connection/model";
+import { loadFailureSentence, loadReasonKeyOf } from "./loadFailure";
 import { InlineBanner } from "./States";
 
 // =============================================================================
@@ -48,7 +48,7 @@ export function LoadFailureBox({
     >
       <p className="text-body font-medium text-ink">{formatMessage(titleKey)}</p>
       <p className="text-body text-ink-muted" data-testid="load-failure-reason">
-        {formatMessage(copyForCause(cause).loadReason)}
+        {formatMessage(loadReasonKeyOf(cause, true))}
       </p>
       <Button type="button" variant="outline" size="sm" className={retryClassName} onClick={onRetry}>
         {formatMessage(CONNECTION_KEYS.retry)}
@@ -76,6 +76,7 @@ export function LoadFailureNote({
   onRetry,
   actionBusy,
   separator,
+  tone,
   className,
   testId,
 }: {
@@ -84,13 +85,18 @@ export function LoadFailureNote({
   onRetry?: () => void;
   actionBusy?: boolean;
   separator?: boolean;
+  /** 기본(생략)은 상자와 같은 조용한 잉크. 회색 띠로 서는 자리(사이드바)만 `neutral`(알림 역할도 `status`)을 넘긴다. */
+  tone?: "neutral";
   className?: string;
   testId?: string;
 }) {
   const formatMessage = useFormatMessage();
   return (
     <InlineBanner
-      message={loadFailureSentence(formatMessage, titleKey, cause)}
+      tone={tone}
+      quiet={tone === undefined}
+      // 단추가 있으면 이유는 다음 행동을 되풀이하지 않는다(#5307 L2). 단추가 없는 자리는 문장이 다음 행동까지 말한다.
+      message={loadFailureSentence(formatMessage, titleKey, cause, onRetry !== undefined)}
       actionLabel={onRetry ? formatMessage(CONNECTION_KEYS.retry) : undefined}
       onAction={onRetry}
       actionBusy={actionBusy}
@@ -106,11 +112,14 @@ export function LoadFailureLine({
   titleKey,
   onRetry,
   retryClassName,
+  tone,
   testId,
   className,
 }: {
   titleKey: ConnectionPlainKey;
   onRetry: () => void;
+  /** 기본(생략)은 상자와 같은 조용한 잉크. 사이드바처럼 회색 띠로 서는 자리만 `neutral`(알림 역할도 `status`)을 넘긴다. */
+  tone?: "neutral";
   /** 「다시 시도」 알약이 서는 바탕이 정하는 자: 시트·회색 띠 위(사이드바)면 시트 위 문법을 넘긴다. 기본은 보조 채움(본문 판 위). */
   retryClassName?: string;
   testId?: string;
@@ -119,6 +128,8 @@ export function LoadFailureLine({
   const formatMessage = useFormatMessage();
   return (
     <InlineBanner
+      tone={tone}
+      quiet={tone === undefined}
       message={formatMessage(titleKey)}
       actionLabel={formatMessage(CONNECTION_KEYS.retry)}
       onAction={onRetry}

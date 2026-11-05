@@ -1480,10 +1480,22 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Try again in a moment."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "Something went wrong."
     }
   ],
   "connection.load.sentence": [
