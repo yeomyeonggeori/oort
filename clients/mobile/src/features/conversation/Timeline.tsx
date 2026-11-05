@@ -87,7 +87,7 @@ import type {SendFailureKind} from '@momo/core/features/connection/sendFailure';
 import {resendAllOffer} from './resendAllOffer';
 import {SystemLine} from './SystemLine';
 import {isSystemLineMessage, startGroupAfterSystemLine} from './systemLineRows';
-import {resolveQuote} from '@momo/core/features/timeline/quote';
+import {isQuoteRedundant, messageAboveIds, resolveQuote} from '@momo/core/features/timeline/quote';
 import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
@@ -1439,6 +1439,10 @@ function TimelineInner({
       })),
     [stream, threads, reactions, myMemberId, showRollup],
   );
+
+  // 각 메시지 바로 위에 **그려진** 메시지(#5357). 접기를 다 거친 `items` 에서 한 번 센다 — 메시지 배열에서 세면 화면이 가린 행과 접은 묘비를
+  // 잘못 센다. 에이전트의 답이 이 표의 이웃을 가리키면 그 행은 인용을 그리지 않는다(코어 `isQuoteRedundant`, 웹과 같은 함수).
+  const aboveIds = useMemo(() => messageAboveIds(items), [items]);
 
   // ===========================================================================
   // 점프 필의 상태 (#1892 — 웹 `Timeline.tsx` 「항법 상태」의 폰판)
@@ -3214,6 +3218,13 @@ function TimelineInner({
         return anchored(item.message.seq, <SystemLine text={item.message.body ?? ''} />);
       }
       const requestKey = item.message.id.toLowerCase();
+      // 걸러지기 전의 블록은 그대로 내려 보낸다(위임 줄이 원문을 읽는다). 그릴지는 행이 `quoteRedundant` 로 정한다.
+      const quote = resolveQuote(item.message, quoteLookup);
+      const quoteRedundant = isQuoteRedundant(quote, {
+        directory,
+        authorMemberId: item.message.authorMemberId,
+        aboveMessageId: aboveIds.get(requestKey),
+      });
       const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
       const leadingRun = requestRuns.find(run => run.id === requestChips.get(requestKey)?.runIds[0]) ?? requestRuns[0];
       if (requestThoughts && channelKind === 'dm' && uuidEq(item.message.authorMemberId, myMemberId) &&
@@ -3252,7 +3263,8 @@ function TimelineInner({
           replyParent={
             markReplies ? parentOf(item.message, threads) : undefined
           }
-          quote={resolveQuote(item.message, quoteLookup)}
+          quote={quote}
+          quoteRedundant={quoteRedundant}
           quoteAttachmentCount={
             item.message.replyToId
               ? quoteLookup(item.message.replyToId)?.attachments?.length ?? 0
@@ -3304,6 +3316,7 @@ function TimelineInner({
       showRollup,
       arrivalSurface,
       quoteLookup,
+      aboveIds,
       // 승인 표가 바뀌면 `renderItem` 의 동일성도 바뀌어야 한다 — 안 그러면
       // 결정한 뒤에도 목록이 옛 표를 든 클로저를 계속 쓴다. 붙어 있는 행이
       // 전부 다시 그려지는 값이지만 승인은 드물고, 대안은 결정이 화면에

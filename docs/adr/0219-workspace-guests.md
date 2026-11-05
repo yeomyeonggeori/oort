@@ -4,6 +4,7 @@
 > Date: 2026-11-02
 > Revised: 2026-11-03 — 독립 보안 검수 r1(High 5·Medium 9·Low 11)과 r2(High 2·Medium 2·Low 10), GS-0 구현 검수가 문서 쪽에 남긴 Low 둘, owner 결정(§7 기록)과 새 요구(D12·GS-18) 반영. 무엇을 어디서 고쳤는지는 §10. 검수 판정 원문에는 재현 세부가 있어 이 저장소에 두지 않는다.
 > Scope: #5187(base `track/engine`): 설계만이다. 구현·migration·openapi 변경은 §8의 슬라이스를 Accept 뒤에 이슈로 만들어 한다. 공유 채널(Slack Connect식)은 D10의 스케치까지만 한다.
+> 증보 2026-11-05: [ADR-0221](0221-group-dm.md)이 그룹 만들기 API를 더한다. O6·감사 D-3의 「그룹 DM에 사람을 더하는 API는 없다」 전제는 「대화 중에 사람을 더하는 API는 없다」로 좁혀지고, 그룹 만들기는 모든 참가자 쌍에 `visible_person`을, 에이전트 후보에는 D-4 규칙을 요구한다(ADR-0221 D11).
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0128](0128-membership-permission-lifecycle.md), [ADR-0214](0214-security-claims-need-tests.md), [ADR-0215](0215-login-recovery-v2-password-change-and-reset.md), [ADR-0208](0208-scheduled-messages.md), [ADR-0216](0216-oort-cli-terminal-access.md), [ADR-0217](0217-consented-agent-group-dm.md), [ADR-0186](0186-agent-workspace-actions.md), [ADR-0196](0196-team-memory-v2.md), [ADR-0194](0194-work-links-team-tracking.md), [ADR-0195](0195-passkey-login.md), [ADR-0181](0181-welcome-kickoff-agent-opener.md), [ADR-0213](0213-internationalization-foundation.md), [ADR-0117](0117-multi-workspace-creation-membership.md), [ADR-0132](0132-agent-interaction-safety-contract.md), [ADR-0162](0162-external-agent-reception-agent-port.md), [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md), [ADR-0204](0204-phone-notifications-v2.md)
 
 ## 1. 결정의 근거와 범위

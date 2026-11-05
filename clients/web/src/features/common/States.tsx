@@ -211,6 +211,7 @@ export function Skeleton({
  */
 export function InlineBanner({
   tone = "error",
+  quiet = false,
   message,
   messageId,
   items,
@@ -225,6 +226,12 @@ export function InlineBanner({
   testId,
 }: {
   tone?: "error" | "neutral";
+  /**
+   * 조용한 잉크(#5307 L2): 빨간 글자도 회색 띠도 아니고, 서 있는 바탕(시트·카드·본문 판)의 색 위에 잉크 글자 한 줄이다(알림 역할은 `alert`).
+   * 불러오기 실패의 한 톤이다: 같은 실패를 상자는 조용한 잉크로, 한 줄은 빨간 글자로 말하던 갈림을 없앤다. `tone`을 이긴다. 「다시 시도」 알약은 그
+   * 바탕에 맞춰 호출부가 모양을 넘긴다(`actionClassName`).
+   */
+  quiet?: boolean;
   message: ReactNode;
   /**
    * id on the SENTENCE, so a control this banner explains can point at it with
@@ -286,9 +293,11 @@ export function InlineBanner({
 }) {
   const Message = heading ? "h1" : "span";
   const actionClass = cn("shrink-0", actionClassName);
+  // 빨강은 `error`이면서 조용히 말하라고 하지 않았을 때만이다.
+  const loud = tone === "error" && !quiet;
   return (
     <div
-      role={tone === "error" ? "alert" : "status"}
+      role={loud || quiet ? "alert" : "status"}
       data-testid={testId}
       className={cn(
         // 한국어 산문 표면이므로 음절이 아니라 어절에서 끊는다(MOMO-676 M-5).
@@ -298,9 +307,11 @@ export function InlineBanner({
         // keep-all을, 자식이 break-words를 갖는다.
         "flex items-start justify-between gap-3 break-keep px-4 py-2 text-body",
         separator && "border-b",
-        tone === "error"
+        loud
           ? "border-danger text-danger"
-          : "border-line bg-surface-hover text-ink",
+          : quiet
+            ? "border-line text-ink"
+            : "border-line bg-surface-hover text-ink",
         className
       )}
     >
