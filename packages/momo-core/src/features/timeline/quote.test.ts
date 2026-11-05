@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Message, QuotedMessage } from "../../lib/api";
+import type { Message, QuotedMessage, RosterMember } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
+import { makeDirectory } from "../workspace/directory";
 import { hasRenderableBody } from "./bodySlot";
 import { COMPLETION_REPORT_TITLE } from "./completionReportCard";
 import { hasAnyAction } from "./model";
 import {
   canQuoteMessage,
+  isQuoteRedundant,
+  messageAboveIds,
   quoteBlockFrom,
   quoteDraftFor,
   quoteDraftStillValid,
@@ -582,5 +585,247 @@ describe("the two devices stay separate in the action set", () => {
     // The label is ours, not the author's, so it must not carry markup that a
     // body renderer would interpret.
     expect(QUOTE_DELETED_TEXT).not.toMatch(/[*_`[\]]/);
+  });
+});
+
+// =============================================================================
+// #5357 — 에이전트의 답이 바로 위 메시지를 가리키면 인용 블록은 정보를 더하지 못한다.
+//
+// 거르는 조건은 셋이 모두 참일 때뿐이다(에이전트가 썼다 · `ready` 블록이다 · 대상이
+// 같은 목록의 바로 위 메시지다). 아래 시험은 그 셋을 하나씩 거짓으로 만들어 블록이
+// 그대로 남는 것을 본다 — 「바로 위」 하나만 보고 통과하는 구현이 빨개지도록.
+// =============================================================================
+
+const HUMAN_ID = "00000000-0000-7000-8000-000000000101";
+const AGENT_ID = "00000000-0000-7000-8000-000000000102";
+
+function rosterMember(
+  id: string,
+  kind: "human" | "agent",
+  displayName: string
+): RosterMember {
+  return {
+    id,
+    workspaceId: "ws",
+    kind,
+    status: "active",
+    displayName,
+    handle: kind === "agent" ? "kim-intern" : "intern-kim",
+    channelCount: 0,
+    channelIds: [],
+    capabilities: [],
+  } as unknown as RosterMember;
+}
+
+const ROSTER = makeDirectory([
+  rosterMember(HUMAN_ID, "human", "사람"),
+  rosterMember(AGENT_ID, "agent", "에이전트"),
+]);
+
+/** 사람이 보낸 질문. */
+const QUESTION = message({
+  id: "0199aaaa-0000-7000-8000-00000000q001",
+  seq: 10,
+  authorMemberId: HUMAN_ID,
+  body: "배포 되돌리기 절차부터 확인해 줘.",
+});
+
+/** 질문을 가리키며 답하는 메시지. 저자만 바꿔 쓴다. */
+function replyTo(target: Message, over: Partial<Message> = {}): Message {
+  return message({
+    id: "0199aaaa-0000-7000-8000-00000000a001",
+    seq: target.seq + 1,
+    authorMemberId: AGENT_ID,
+    body: "확인했어요.",
+    replyToId: target.id,
+    ...over,
+  });
+}
+
+/** 목록 항목 하나. 시험은 구조만 읽는다(`kind`, `message`). */
+function row(m: Message) {
+  return { kind: "message", message: m };
+}
+
+function redundant(
+  reply: Message,
+  items: readonly { kind: string; message?: Message }[],
+  lookup: (id: string) => Message | undefined
+): boolean {
+  const block = resolveQuote(reply, lookup);
+  return isQuoteRedundant(block, {
+    directory: ROSTER,
+    authorMemberId: reply.authorMemberId,
+    aboveMessageId: messageAboveIds(items).get(reply.id.toLowerCase()),
+  });
+}
+
+describe("#5357 — isQuoteRedundant", () => {
+  const find = (rows: Message[]) => (id: string) =>
+    rows.find((m) => m.id.toLowerCase() === id.toLowerCase());
+
+  it("hides an agent's quote of the message directly above", () => {
+    const answer = replyTo(QUESTION);
+    expect(
+      redundant(answer, [row(QUESTION), row(answer)], find([QUESTION, answer]))
+    ).toBe(true);
+  });
+
+  it("shows the quote once another message sits between question and answer", () => {
+    const between = message({
+      id: "0199aaaa-0000-7000-8000-00000000b001",
+      seq: 11,
+      authorMemberId: HUMAN_ID,
+      body: "아 그리고 로그도.",
+    });
+    const answer = replyTo(QUESTION, { seq: 12 });
+    expect(
+      redundant(
+        answer,
+        [row(QUESTION), row(between), row(answer)],
+        find([QUESTION, between, answer])
+      )
+    ).toBe(false);
+  });
+
+  it("keeps a quote a human picked, even when its target is directly above", () => {
+    const humanReply = replyTo(QUESTION, { authorMemberId: HUMAN_ID });
+    expect(
+      redundant(
+        humanReply,
+        [row(QUESTION), row(humanReply)],
+        find([QUESTION, humanReply])
+      )
+    ).toBe(false);
+  });
+
+  it("keeps the deleted-original branch even when the tombstone is directly above", () => {
+    const gone = message({
+      id: "0199aaaa-0000-7000-8000-00000000d001",
+      seq: 10,
+      authorMemberId: HUMAN_ID,
+      state: "deleted",
+      body: undefined,
+    });
+    const answer = replyTo(gone);
+    const block = resolveQuote(answer, find([gone, answer]));
+    expect(block?.kind).toBe("deleted");
+    expect(
+      redundant(answer, [row(gone), row(answer)], find([gone, answer]))
+    ).toBe(false);
+  });
+
+  it("keeps the unresolved branch (original not on screen)", () => {
+    const answer = replyTo(QUESTION);
+    // 원본이 화면에 없다 → 풀리지 않은 블록. 바로 위 id가 같다고 우겨도 그린다.
+    const block = resolveQuote(answer, () => undefined);
+    expect(block?.kind).toBe("unresolved");
+    expect(
+      isQuoteRedundant(block, {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID,
+        aboveMessageId: QUESTION.id,
+      })
+    ).toBe(false);
+  });
+
+  it("applies inside a thread: the agent reply under the reply it quotes", () => {
+    const root = message({
+      id: "0199aaaa-0000-7000-8000-00000000r001",
+      seq: 5,
+      authorMemberId: HUMAN_ID,
+      body: "스레드 시작",
+    });
+    const humanReply = message({
+      id: "0199aaaa-0000-7000-8000-00000000r002",
+      seq: 20,
+      rootId: root.id,
+      authorMemberId: HUMAN_ID,
+      body: "여기서 확인해 줘.",
+    });
+    const answer = replyTo(humanReply, { rootId: root.id, seq: 21 });
+    // 스레드 목록은 루트 다음에 답글이 이어진다. 인용 대상(답글)이 바로 위다.
+    const list = [row(root), row(humanReply), row(answer)];
+    expect(redundant(answer, list, find([root, humanReply, answer]))).toBe(true);
+    // 같은 답이 루트를 가리키면 사이에 답글이 끼어 있으므로 그린다.
+    const rootAnswer = replyTo(root, { rootId: root.id, seq: 21 });
+    expect(
+      redundant(
+        rootAnswer,
+        [row(root), row(humanReply), row(rootAnswer)],
+        find([root, humanReply, rootAnswer])
+      )
+    ).toBe(false);
+  });
+
+  it("compares ids case-insensitively (the wire mixes case)", () => {
+    const answer = replyTo(QUESTION);
+    const block = resolveQuote(answer, find([QUESTION, answer]));
+    expect(
+      isQuoteRedundant(block, {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID.toUpperCase(),
+        aboveMessageId: QUESTION.id.toUpperCase(),
+      })
+    ).toBe(true);
+  });
+
+  it("does not call an author the roster does not know an agent", () => {
+    const answer = replyTo(QUESTION, {
+      authorMemberId: "00000000-0000-7000-8000-0000000009ff",
+    });
+    expect(
+      redundant(answer, [row(QUESTION), row(answer)], find([QUESTION, answer]))
+    ).toBe(false);
+  });
+
+  it("has nothing to hide when there is no quote or no row above", () => {
+    expect(
+      isQuoteRedundant(null, {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID,
+        aboveMessageId: QUESTION.id,
+      })
+    ).toBe(false);
+    const answer = replyTo(QUESTION);
+    expect(
+      isQuoteRedundant(resolveQuote(answer, find([QUESTION, answer])), {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID,
+        aboveMessageId: undefined,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("#5357 — messageAboveIds", () => {
+  const a = message({ id: "0199aaaa-0000-7000-8000-00000000A001", seq: 1 });
+  const b = message({ id: "0199aaaa-0000-7000-8000-00000000b002", seq: 2 });
+  const c = message({ id: "0199aaaa-0000-7000-8000-00000000c003", seq: 3 });
+
+  it("maps each message to the message drawn right above it, by lowercase id", () => {
+    const above = messageAboveIds([row(a), row(b), row(c)]);
+    expect(above.get(b.id.toLowerCase())).toBe(a.id.toLowerCase());
+    expect(above.get(c.id.toLowerCase())).toBe(b.id.toLowerCase());
+    // 맨 위 메시지는 이웃이 없다.
+    expect(above.has(a.id.toLowerCase())).toBe(false);
+  });
+
+  it("sees through dividers: a day or unread line is not a message", () => {
+    const above = messageAboveIds([
+      row(a),
+      { kind: "day" },
+      { kind: "unread" },
+      { kind: "recovery" },
+      row(b),
+    ]);
+    expect(above.get(b.id.toLowerCase())).toBe(a.id.toLowerCase());
+  });
+
+  it("stops at anything else drawn between: an echo or a working row is a wall", () => {
+    for (const wall of ["pending", "working", "intro"]) {
+      const above = messageAboveIds([row(a), { kind: wall }, row(b)]);
+      expect(above.has(b.id.toLowerCase())).toBe(false);
+    }
   });
 });

@@ -14,8 +14,6 @@ import {
 } from "lucide-react";
 import {
   Fragment,
-  useLayoutEffect,
-  useRef,
   useState,
   type Ref,
 } from "react";
@@ -25,15 +23,10 @@ import {
   useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
 import {
-  closestToolbarScrollContainer,
   HOVER_TOOLBAR_REACTION_SEED,
-  HOVER_TOOLBAR_NUDGE_VAR,
-  HOVER_TOOLBAR_SLIDE_VAR,
   HOVER_TOOLBAR_SLOT_COUNT,
-  neighborTextRects,
-  placeToolbar,
-  toolbarNeighbors,
 } from "./hoverToolbarModel";
+import { useHoverToolbarPlacement } from "./useHoverToolbarPlacement";
 import {
   Dialog,
   DialogContent,
@@ -389,8 +382,9 @@ export function MessageHoverToolbar({
   mineEmojis: ReadonlySet<string>;
 }) {
   useEscapeLayer(menuOpen, () => onMenuOpenChange(false));
-  const barRef = useRef<HTMLDivElement>(null);
-  const [straddleBelow, setStraddleBelow] = useState(false);
+  // 막대가 설 쪽(위 경계 걸침 / 아래 경계로 뒤집기 / 행 안쪽으로 밀기)은 마운트 때 재고, 그 뒤 레이아웃이 바뀌면 다시 잰다(#5307 M1). 열린 메뉴가 막대를
+  // 붙들고 있는 동안은 얼린다. 규칙은 `hoverToolbarModel.placeToolbar`(#5179), 언제 재는가는 `useHoverToolbarPlacement`.
+  const { barRef, straddleBelow } = useHoverToolbarPlacement(menuOpen);
   const liveSlots = useFrequentEmojis(
     HOVER_TOOLBAR_REACTION_SEED,
     HOVER_TOOLBAR_SLOT_COUNT
@@ -400,32 +394,6 @@ export function MessageHoverToolbar({
   // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
   // still follows live `mineEmojis`.
   const [slots] = useState(liveSlots);
-  // 설 쪽은 마운트 때 한 번 잰다(열린 메뉴가 막대를 붙들고 있는 동안 자리가 옮겨 다니지 않는다). 스크롤러를 못 찾으면 — 레이아웃을 못
-  // 재는 jsdom 시험이 그렇다 — 이웃 글자에는 손도 대지 않는다. 규칙은 `hoverToolbarModel.placeToolbar`(#5179): 아래 경계로 뒤집거나, 위·아래가 모두
-  // 글자에 막히면 위 자리에서 아래로 밀어 행 안쪽의 빈 창에 앉힌다(밀림은 CSS 변수로 건다 — 인라인 style 속성은 CSP가 막는다).
-  useLayoutEffect(() => {
-    if (straddleBelow) return;
-    const bar = barRef.current;
-    if (!bar) return;
-    const scroller = closestToolbarScrollContainer(bar);
-    if (!scroller) return;
-    const row = bar.closest('[data-testid="timeline-message"]');
-    const neighbors = row ? toolbarNeighbors(row, scroller) : null;
-    const placement = placeToolbar({
-      bar: bar.getBoundingClientRect(),
-      row: row ? row.getBoundingClientRect() : null,
-      scroller: scroller.getBoundingClientRect(),
-      prevText: () => neighborTextRects(neighbors?.prev ?? null),
-      selfText: () => neighborTextRects(row),
-      nextText: () => neighborTextRects(neighbors?.next ?? null),
-    });
-    // 비껴 서기(가로 1~2px)는 위·아래 어느 자리에서도 같다. 변수는 막대 요소에 걸려 자리 이름이 바뀌어도(`straddleBelow`) 남는다.
-    if (placement.nudge > 0) bar.style.setProperty(HOVER_TOOLBAR_NUDGE_VAR, String(placement.nudge));
-    if (placement.below) setStraddleBelow(true);
-    else if (placement.slide > 0) {
-      bar.style.setProperty(HOVER_TOOLBAR_SLIDE_VAR, String(Number(placement.slide.toFixed(2))));
-    }
-  }, [straddleBelow]);
   // 도구 막대의 단추는 모델의 표가 정한다(`MESSAGE_ACTION_GROUP_PLACEMENT`): 표와 화면이 따로 놀지 않는다.
   const toolbarItems = messageToolbarItems(available, copyState);
   const hasReact = toolbarItems.some((item) => item.key.startsWith("react:"));

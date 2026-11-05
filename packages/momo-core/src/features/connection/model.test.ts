@@ -295,6 +295,47 @@ describe("문구 키 전수", () => {
   });
 });
 
+describe("불러오기 이유: 단추 곁 문장은 다음 행동을 되풀이하지 않는다 (#5307 L2)", () => {
+  // 지키는 것: 곁에 「다시 시도」 단추가 서 있는 자리(상자·한 줄)가 쓰는 이유(`loadReasonBare`)에는 다음 행동(다시 시도해 주세요)이 없고, 단추가 없는 자리의
+  // 이유(`loadReason`)는 다음 행동까지 말한다. 서버 못 닿음·원인 없음만 다르고 오프라인은 「연결되면 다시 불러올 수 있어요」라는 조건이라 둘이 같다.
+  const causes = ["deviceOffline", "serverUnreachable", "realtimeDown", "unknown", null] as const;
+  const say = async (locale: "ko-KR" | "en-US") => {
+    const copy = createMessageCopy({
+      messageLocale: locale,
+      catalog: await loadMessageCatalog(locale),
+    }) as unknown as (key: string) => string;
+    return copy;
+  };
+
+  it("ko: 서버 못 닿음·원인 없음의 bare 문장에는 「다시 시도」가 없고, 단추 없는 문장에는 있다", async () => {
+    const ko = await say("ko-KR");
+    for (const cause of ["serverUnreachable", "realtimeDown", "unknown", null] as const) {
+      const { loadReason, loadReasonBare } = copyForCause(cause);
+      expect(ko(loadReasonBare), String(cause)).not.toContain("다시 시도");
+      expect(ko(loadReason), String(cause)).toContain("다시 시도해 주세요");
+      expect(loadReasonBare, String(cause)).not.toBe(loadReason);
+    }
+  });
+
+  it("en: 같은 짝이 영어에서도 선다", async () => {
+    const en = await say("en-US");
+    for (const cause of ["serverUnreachable", "realtimeDown", "unknown", null] as const) {
+      const { loadReason, loadReasonBare } = copyForCause(cause);
+      expect(en(loadReasonBare), String(cause)).not.toMatch(/try again/i);
+      expect(en(loadReason), String(cause)).toMatch(/try again/i);
+    }
+  });
+
+  it("오프라인은 둘이 같다(「연결되면 다시 불러올 수 있어요」는 단추의 되풀이가 아니라 조건이다)", () => {
+    const { loadReason, loadReasonBare } = copyForCause("deviceOffline");
+    expect(loadReasonBare).toBe(loadReason);
+  });
+
+  it("모든 원인이 bare 문장을 갖는다", () => {
+    for (const cause of causes) expect(copyForCause(cause).loadReasonBare, String(cause)).toMatch(/^connection\.load\./);
+  });
+});
+
 describe("처음 입력", () => {
   it("앱이 뜨는 순간의 입력은 첫 핸드셰이크를 틈으로 세어 1초 침묵 뒤 「연결 중」이다", () => {
     const input = initialConnectionInput(T0);

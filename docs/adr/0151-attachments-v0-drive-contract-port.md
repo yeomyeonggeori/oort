@@ -722,3 +722,77 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | B3 로그 | `a_child_that_could_not_confine_itself_is_named_by_one_warning_line_and_by_nothing_it_made_up`, `attachment_text::tests::the_step_a_child_names_is_a_word_of_the_closed_list_and_nothing_else` | 감독자가 단계를 남기지 않으면, 자식이 만든 글을 그대로 남기면 |
 
 사보타주를 실제로 돌린 결과(어떤 되돌림이 어떤 시험을 빨갛게 했는지, 어느 것이 권한 없는 사용자의 실행에서만 빨간지)는 PR 본문이 정본이다.
+
+## 증보 7 (2026-11-05, #5223): 보관소 오류에 구분 코드를 싣는다 · 점검·재시작 신호가 닿는 곳
+
+연결 끊김 UX 감사(#5201 1단계, [감사 문서](../planning/research/2026-11-03-connection-lost-ux-audit.md) §2.3·§4·§8 S-E)가 서버에 남긴 두 가지를 정한다. ① 보관소(Drive) 오류의 502·503에 코드가 없어 클라이언트가 「이 인스턴스에 보관소가 없다」와 「길 위의 장비가 낸 502·503」을 가르지 못한다. ② 서버가 점검·재시작 중임을 알리는 신호가 없다. ①은 `error.code`([ADR-0188](0188-phone-remote-work-host.md) R0가 연 칸)에 `drive_` 접두의 닫힌 낱말 셋을 싣고, 기다리면 풀리는 한 경우에만 `Retry-After`를 더한다. ②는 **api가 보낼 수 없다**는 것을 소스로 확인했고, 보낼 수 있는 곳과 쓸 낱말을 정해 두되 보내는 일은 후속으로 넘긴다. 새 라우트·새 상태 코드·새 비밀·migration은 없고, 상태와 문장은 그대로다.
+
+- Status: **Accepted** (2026-11-05, #5223 worker 기안, planner 확인. 점검·재시작 신호는 api가 보낼 수 없어 이름만 예약하고 엣지 후속으로 넘긴 판단을 받아들였다). 등급 1: 공개 API의 가산이다(ADR-0100). **owner 결정(인용): 2026-11-03 「나머진 권장이고」** — #5201에서 고를 것 다섯을 감사 문서의 권장대로 가기로 한 결정이다. 감사 문서가 S-E를 독립 슬라이스(없어도 S-A~S-D는 「서버에 닿지 못했어요」로 동작)로 편성했고, 이 증보는 그 편성을 서버에서 구현하는 기록이다. 아래 코드 낱말과 `Retry-After` 초는 worker의 제안이고 owner가 고른 값이 아니다. 구현은 #5223이다.
+- **변경 전**: `drive_error`(`routes/attachments.rs`)는 `DriveError`를 상태 코드로만 옮겼다(`Unavailable`→503, `AccessDenied`·`UpstreamFailure`→502, 그 밖은 400·404·413). 코드도 `Retry-After`도 없었고(`ApiError::new`), 이 한 함수를 쓰는 길은 모두 같았다: 업로드 시작·완료, 내용 읽기(전체·구간·스트림 주소), 멤버·워크스페이스 아바타. 그래서 클라이언트 코어는 502·503을 상태만 보고 한 문장(「파일 보관소가 연결돼 있지 않습니다… 서버 관리자에게 알리세요」)으로 말했고(`attachments/model.ts` `issueForStatus`), 배포 중 길 위의 장비가 낸 502도 같은 문장이 되었다(감사 §2.3). 코어의 「서버에 닿지 못함」 판정(`connection/restSignal.ts` `isUnreachableOutcome`)은 502·504와 **코드 없는** 503을 세므로, 코드가 붙은 503은 서버가 직접 답한 것으로 읽힌다.
+
+### 결정
+
+**D1 · 구분 코드 셋.** `drive_error`가 `error.code`를 싣는다.
+
+| `DriveError` | 상태 | `error.code` | 뜻 | `Retry-After` |
+|---|---|---|---|---|
+| `Unavailable` | 503 | `drive_not_configured` | 이 인스턴스에 쓸 수 있는 보관소가 없다(설정하지 않았거나 시작할 때 열지 못해 닫혔다). 운영자가 고쳐야 풀린다 | 없음 |
+| `AccessDenied` | 502 | `drive_access_denied` | 보관소가 인스턴스 **자신의** 자격을 거절했다(Google 403, 로컬 볼륨의 경로·읽기 전용 가드). 호출자 잘못이 아니고 운영자가 고쳐야 풀린다 | 없음 |
+| `UpstreamFailure` | 502 | `drive_upstream_failed` | 보관소 요청이 실패했다(Google의 그 밖의 오류 상태·429·연결 끊김, 행의 길이와 보관소 바이트가 어긋남). 기다리면 풀릴 수 있다 | 5초 |
+
+그 밖의 보관소 답(`InvalidArguments` 400, `FileNotFound` 404, `ContentTooLarge` 413)은 코드를 받지 않는다. 특히 404는 증보 1·2가 「없는 id와 바이트까지 같은 404」로 못 박았으므로 키 하나도 더하지 않는다. 문장(`safe_message`)과 상태는 그대로다.
+
+**D2 · 코드가 있다는 것의 뜻.** 502·503에 코드가 있으면 그 답은 **자기 원인에 이름을 붙인 것**이다(지금은 api가 낸 것이고, D5 ②의 엣지 응답 `server_restarting`도 후속에서 같은 뜻으로 더해진다). 코드가 없으면 api가 낸 것일 수도, 길 위의 장비가 낸 것일 수도 있고 원인을 말하지 않는다. 클라이언트는 코드 있는 502·503을 「서버에 닿지 못함」 증거로 세지 않는다(이름 붙은 원인은 그 이름으로 말한다). 이 증보부터 api가 **새로** 내는 502·503은 코드를 붙인다. 이미 있는 코드 없는 5xx(허들 미구성 503, T3 비활성 503, 실시간 미구성 503, 건강 확인 503, `ApiError::busy`의 503, 워커용 `self_media` 502 …)는 건드리지 않는다. 그 허용 범위는 코어의 「서로 다른 요청 3건 연속」 규칙이 가린다(감사 §4). 코어의 `isUnreachableOutcome`은 지금 502를 코드와 무관하게 세므로, 이 규칙대로 502에도 코드 없음을 요구하는 한 줄이 후속이다(아래 「후속」).
+
+**D3 · `Retry-After`.** 정수 초이고 `drive_upstream_failed`에만 싣는다(5초). 서버가 「기다리면 풀릴 수 있다」고 아는 유일한 보관소 답이다. `drive_not_configured`·`drive_access_denied`에 싣는 것은 거짓이다(운영자가 고칠 때까지 풀리지 않는다). RFC 9110은 이 헤더를 503·429·3xx에 정의하고 다른 상태에서의 사용을 금하지 않는다. 502에 싣는 것은 이 증보의 선택이다. 상태를 503으로 바꾸지 않는다. 502·503 한 쌍은 본 ADR D1(와이어 무변경 이식)이 굳힌 모양이고 코어도 그 둘을 안다. 값은 권고다: 클라이언트는 자기 백오프를 써도 된다. 길이가 어긋난 행은 기다려도 안 풀릴 수 있는데 같은 값이 붙는다(남는 위험 3).
+
+**D4 · 이름.** 워커의 감사 이유 `drive_unavailable`(증보 3 D6, 증보 6 A4)은 같은 원인(`UpstreamFailure`)을 다른 곳(워커의 감사 이유)에서 부르는 낱말이다. 이 증보의 REST 코드는 그것을 대신하지도 따르지도 않는다(`drive_unavailable` ≙ `drive_upstream_failed`). 503의 「미구성」이 `drive_unavailable`을 빌리지 않는 것은 그 이름이 「일시적」으로 읽혀 클라이언트가 기다리게 만들기 때문이다.
+
+**D5 · 점검·재시작 신호: api는 보낼 수 없고, 보낼 곳은 엣지다.** 감사가 재지 못했다고 적은 질문(§9.2 「서버가 점검·재시작 중 `Retry-After`나 구분 코드를 주는지」)을 소스로 닫는다.
+
+1. **api는 종료 신호 뒤 새 요청에 답하지 않는다.** `main.rs`의 `with_graceful_shutdown`(axum 0.8.9 `serve/mod.rs` 287-297: 신호를 받으면 수신 소켓을 닫고 새 연결을 받지 않는다; 408-409: 열린 연결마다 `graceful_shutdown`)은 hyper 1.11(`proto/h1/conn.rs` 876-884)에서 놀고 있는 연결을 곧바로 닫고 처리 중인 요청만 끝낸다. 그래서 api 안에 「종료 중이면 503 `Retry-After`」를 답하는 층을 두어도 거기에 닿는 새 요청이 없다(발동하지 않는 가드가 된다).
+2. **교체 중 클라이언트가 받는 502는 api가 만들지 않는다.** api 앞의 장비가 만든다(Railway 템플릿의 Caddy `reverse_proxy api.railway.internal:8080`, `handle_errors` 없음: `infra/railway/Caddyfile.railway`; 셀프호스트 `infra/rust/Caddyfile`도 같다). api가 내려가 있는 틈(종료 뒤 새 api가 뜨기까지)은 api가 아니라 이 장비만 덮을 수 있다.
+3. **api가 살아서 `Retry-After`로 「잠시 뒤」를 말하는 5xx는 둘뿐이다**: `ApiError::busy`(503, 코드 없음)와 이 증보의 `drive_upstream_failed`(502). DB가 내려가 있으면 `/health`·`/healthz`는 503 `database unavailable`(코드·`Retry-After` 없음)이고 라우트들은 불투명한 500이다. 이 증보는 이 셋을 바꾸지 않는다.
+
+결정: ① 점검·재시작을 알리는 답의 모양을 **`503` + `error.code` `server_restarting` + `Retry-After`(정수 초)**로 예약한다. 아직 어떤 길도 보내지 않으므로 OpenAPI의 「현재 코드」 목록에는 넣지 않는다(보내기 시작하는 PR이 넣는다). ② 보내는 곳은 **엣지**를 권한다(후속 이슈): Caddy의 `handle_errors`가 `reverse_proxy`의 도달 실패(502·503·504)에 위 모양을 답한다. api가 내려가 있는 전 구간을 덮고, api 코드와 종료 순서를 바꾸지 않는다. `handle_errors`는 Caddy 자신이 만든 오류에만 걸리고 api가 직접 답한 502·503(`drive_*`)은 지나가므로 둘이 섞이지 않는다(Caddy 설명서 기준이며 돌려 보지 않았다: `runtime-unverified`). ③ api 안의 대기 구간(lame-duck: 신호 뒤에도 수신 소켓을 N초 더 열고 503 `server_restarting`)은 **보류**한다. 종료가 N초 늘어 플랫폼의 종료 유예(Railway)·`stop_grace_period`와 맞물리고, 신호 뒤 틈의 앞부분만 덮는다. 엣지로 부족하다고 확인될 때만 다시 연다.
+
+### 바뀌지 않는 것
+
+- 상태 코드와 문장(`safe_message`). 시험이 못 박는다(`the_archive_error_table_matches_swift`, `an_unconfigured_archive_answers_503_from_a_mounted_route`).
+- 코드 없는 기존 클라이언트의 동작. 코드 없는 답의 바이트는 그대로이고(`error::tests::an_uncoded_error_keeps_the_original_envelope`: 키 생략 규칙), 코드가 있는 답은 `error` 객체에 키 하나가 늘 뿐이다.
+- 400·404·413의 보관소 답(위 D1), `self_media`의 502(워커가 404 밖의 모든 상태를 같은 이유로 읽는다: 증보 3 D6, 증보 6 A), `ApiError::busy`와 그 밖의 코드 없는 5xx.
+- 이 길들의 권한·RLS·멤버십 검사 순서와 거절의 모양(증보 1·2). 코드는 보관소를 부른 **뒤**의 실패에만 붙는다.
+- 이 한 함수를 쓰는 모든 길이 코드를 상속한다: 업로드 시작·완료, 내용 읽기(전체·구간·스트림 주소·미디어 앞부분), 멤버·워크스페이스 아바타. 행과 보관소의 길이가 어긋나 내는 502(`attachment_bytes`·`attachment_media`)도 `UpstreamFailure`라 `drive_upstream_failed`를 받는다.
+
+### 이슈·감사 문구와 다른 곳
+
+- 이슈는 「점검·재시작 신호를 `Retry-After`와 코드로 보내요」라 적었다. 위 D5가 보인 대로 **api는 그 신호를 보낼 수 없고**, 이 증보는 모양과 낱말만 정하고 보내는 일을 엣지 후속으로 넘겼다. api가 낼 수 있는 `Retry-After`는 D3의 한 경우뿐이다. 이 차이는 planner의 결정이 필요하다(엣지 후속을 열지, 보류로 둘지).
+- 감사 §4의 판정(`NetworkError`·502·504·코드 없는 503)은 502에 코드 조건이 없다. 이 증보 전에는 api가 코드 붙은 502를 낸 적이 없어 맞았고, 이 증보 뒤에는 D2와 어긋나므로 한 줄 후속이 된다(아래 「후속」).
+
+### 남는 위험
+
+1. **엣지가 502·504 본문을 바꿔치기할 수 있다.** 일부 CDN·프록시는 원본의 502·504를 자기 오류 페이지로 바꾼다. 그러면 클라이언트는 코드를 못 보고 이 증보 전과 같은 동작(상태만)으로 떨어진다. 안전한 방향이다. Railway 엣지·Caddy를 지난 도착은 돌려 보지 않았다.
+2. **코어가 코드 있는 502를 아직 세는 것.** 보관소가 서로 다른 세 요청에서 연달아 502를 내면 「서버에 닿지 못함」이 선언되어 보내기·올리기가 잠긴다(감사 §4의 게이트). 후속 한 줄이 닫는다.
+3. **`Retry-After`가 기다려도 안 풀리는 502에 붙는다.** 행과 보관소의 길이 불일치는 `UpstreamFailure`와 같은 코드·같은 5초를 받는다. 값은 권고이고 클라이언트의 자동 재시도가 한도를 가져야 한다(감사 선택 5: 한 글 3회·5분).
+4. **코드 없는 기존 5xx가 길게 남는다**(D2). 이 증보는 새 502·503의 규칙을 세울 뿐 옛것을 고치지 않는다.
+
+### runtime-unverified
+
+- Railway에서 교체 중 클라이언트가 실제로 받는 응답(Caddy·플랫폼 엣지)과, `handle_errors`가 위 모양을 낼 수 있는지. 둘 다 재지 못했다.
+- `drive_upstream_failed`의 코드와 `Retry-After`가 Railway 엣지를 지나 그대로 도착하는지. 시험은 api의 응답(단위·실제 HTTP)까지다.
+- Google을 실제로 장애 상태로 만들어 이 코드를 내 본 일. 시험은 가짜 보관소가 `UpstreamFailure`를 내는 것까지다.
+
+### red proof
+
+| 결정 | 시험 | 이 분기를 바꾸면 빨개질 곳 (실제로 깬 줄과 결과는 PR 본문이 정본) |
+|---|---|---|
+| D1 코드 | `routes::attachments::tests::an_archive_fault_names_itself_and_only_a_passing_one_says_when_to_come_back` | `drive_error`의 세 코드 중 하나를 지우거나 `AccessDenied`와 `UpstreamFailure`의 코드를 바꾸면 |
+| D1 400·404·413 | 같은 시험(코드 없음, 404 본문 바이트) | 404에 코드를 달면 |
+| D3 헤더 | 같은 시험(`into_response`로 헤더를 읽는다) + `error::tests::a_retry_after_rides_with_a_code_and_only_when_asked` | `drive_upstream_failed`의 `with_retry_after`를 지우면, `into_response`의 헤더 넣기를 지우면, 「미구성」에 붙이면 |
+| 실제 HTTP | `attachment_conformance_pg::an_unconfigured_archive_answers_503_from_a_mounted_route`(코드, `Retry-After` 없음), `attachment_range_conformance_pg::an_archive_that_disagrees_with_the_row_is_refused_before_any_byte`(코드, `Retry-After` 5) | 같은 분기를 지우면(라우터와 미들웨어를 지난 뒤의 값을 잰다) |
+| 스펙의 이름 | `routes::attachments::tests::the_openapi_names_the_archive_codes_where_the_server_sends_them` | 오류 코드 등록부에서 세 코드 중 하나를 지우면, 세 연산 중 하나의 `Retry-After` 헤더 줄을 지우면 |
+
+### 후속 (범위 밖, 인계)
+
+- **엣지 후속 이슈**(D5 ②): `infra/railway/Caddyfile.railway`·`infra/rust/Caddyfile`의 `handle_errors`와 `caddy validate`, 그 뒤 OpenAPI `error.code` 목록에 `server_restarting`을 더한다. 엔진 트랙이다(`infra/**`).
+- **코어 한 줄 둘**(UXUI 표면, 이 증보는 고치지 않는다): `packages/momo-core/src/features/connection/restSignal.ts`의 `isUnreachableOutcome`이 502에도 `outcome.code === undefined`를 요구한다. `packages/momo-core/src/features/attachments/model.ts`의 `issueForStatus`와 `connection/uploadFailure.ts`가 코드를 보고 가른다: `drive_not_configured`·`drive_access_denied`는 지금의 `no-archive`(관리자에게 알리세요), `drive_upstream_failed`는 `unavailable`(잠시 뒤 다시 올리기), 코드 없는 502·503은 연결 원인 분류(지금처럼).

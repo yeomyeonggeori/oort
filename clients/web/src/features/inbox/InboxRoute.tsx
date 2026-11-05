@@ -372,6 +372,13 @@ export function InboxRoute() {
           ? "empty"
           : "list";
 
+  // 오프라인 띠의 「마지막 동기화 …. 아래는 그때의 상태예요」는 **아래에 받아 둔 목록이 서 있을 때만** 참이다(#5307 L4, 검수 5b). 스켈레톤이나 오류 상자
+  // 위에서는 그때의 상태가 아래에 없으므로 「아직 이 목록을 한 번도 받지 못했어요」로 말한다. 시각은 값이 없으면(0) 같은 갈래다.
+  // 「나중에」 탭은 자기 목록(`RemindersPanel`)이 자기 로딩을 말하므로 그 목록의 시각을 그대로 쓴다.
+  const bandSyncedAtMs = filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs;
+  const bandListBelow = filter === "reminders" || shown.length > 0 || !(mailbox.isLoading || mailbox.error);
+  const bandRelativeTime = bandListBelow && bandSyncedAtMs > 0 ? relativeLabel(bandSyncedAtMs, Date.now()) : null;
+
   const emptyCopy =
     filter === "task" && localWaiting > 0
       ? EMPTY_WITH_LOCAL_WAITING
@@ -448,15 +455,7 @@ export function InboxRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message={
-            <BlockedListLine
-              relativeTime={
-                (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
-                  ? relativeLabel(filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs, Date.now())
-                  : null
-              }
-            />
-          }
+          message={<BlockedListLine relativeTime={bandRelativeTime} />}
           testId="inbox-offline"
         />
       )}
