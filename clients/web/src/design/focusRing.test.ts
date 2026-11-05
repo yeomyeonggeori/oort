@@ -176,20 +176,24 @@ describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review 
     ] as const) {
       expect(button, `button.tsx ${fill} 변형`).toMatch(line);
     }
-    // 손으로 그린 보내기 버튼도(ThreadComposer). DS2-1 에서 잉크 원형이 됐다.
+    // 보내기 버튼은 손으로 그리지 않는다: 두 입력창이 같은 `ComposerSend`(= `Button size="icon"`, 위의 변형 문자열이 링을 진다)를 쓴다(#5324).
+    // 예전에는 ThreadComposer 가 잉크 원형을 손으로 그려 이 시험이 그 한 줄을 지켰다 — 이제는 손으로 그린 채움이 다시 나타나면 빨개진다.
     const thread = readFileSync(
       `${HERE}/../features/timeline/ThreadComposer.tsx`,
       "utf8"
     );
-    let sends = 0;
-    for (const line of thread.split("\n")) {
-      if (/\bbg-(?:accent|primary)\b/.test(line) && line.includes("focus-visible:focus-ring")) {
-        sends += 1;
-        expect(line, "ThreadComposer 보내기 버튼").toContain("focus-ring-on-primary");
-        expect(line, "ThreadComposer 보내기 버튼").toContain("bg-primary");
-      }
+    const card = readFileSync(`${HERE}/../features/chat/ComposerCard.tsx`, "utf8");
+    for (const [name, source] of [
+      ["ThreadComposer", thread],
+      ["ComposerCard", card],
+    ] as const) {
+      const handDrawn = source
+        .split("\n")
+        .filter((line) => /\bbg-(?:accent|primary)\b/.test(line) && line.includes("focus-visible:focus-ring"));
+      expect(handDrawn, `${name}: 손으로 그린 채움 보내기 버튼`).toEqual([]);
     }
-    expect(sends, "ThreadComposer 보내기 버튼을 찾았다").toBe(1);
+    expect(thread, "ThreadComposer 는 공용 보내기 알약을 쓴다").toContain("<ComposerSend");
+    expect(card, "공용 보내기 알약은 Button 이다").toMatch(/<Button\s+type=\{type\}\s+size="icon"/);
   });
 
   it("N-10: every focus-ring-on-fill is paired with a ring and an accent fill, or named in residue", () => {
@@ -273,13 +277,22 @@ describe("검수 #1 — 전면 치환", () => {
   });
 
   it("텍스트 입력 그릇은 포인터 :focus-within 링이 아니라 focus-visible-within 이다", () => {
+    // 두 입력창의 그릇은 한 부품(`ComposerCard`)이고 링이 거기 산다(#5324) — 입력창 파일은 그 부품을 쓰면서 옛 문법을 적지 않는다.
     for (const file of [
-      "../features/chat/Composer.tsx",
-      "../features/timeline/ThreadComposer.tsx",
+      "../features/chat/ComposerCard.tsx",
       "../features/work/ObserverTerminal.tsx",
     ]) {
       const source = readFileSync(`${HERE}/${file}`, "utf8");
       expect(source, file).toContain("focus-visible-within:focus-ring");
+      expect(source, file).not.toContain("focus-within:focus-ring");
+      expect(source, file).not.toMatch(/focus:border/);
+    }
+    for (const file of [
+      "../features/chat/Composer.tsx",
+      "../features/timeline/ThreadComposer.tsx",
+    ]) {
+      const source = readFileSync(`${HERE}/${file}`, "utf8");
+      expect(source, file).toContain("<ComposerCard");
       expect(source, file).not.toContain("focus-within:focus-ring");
       expect(source, file).not.toMatch(/focus:border/);
     }

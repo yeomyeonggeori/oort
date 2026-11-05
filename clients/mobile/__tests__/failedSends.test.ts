@@ -101,9 +101,9 @@ describe('남기고 되살린다', () => {
 
 describe('스레드 답글의 행 (#5262)', () => {
   const reply = (id: string, over: Partial<PendingMessage> = {}): PendingMessage =>
-    row(id, {rootId: 'root-1', alsoInChannel: true, ...over});
+    row(id, {rootId: 'root-1', ...over});
 
-  it('뿌리와 「대화에도 보내기」가 그대로 돌아오고, 같은 채널의 글과 한 지도에 섞여 있어도 서로를 해치지 않는다', () => {
+  it('뿌리가 그대로 돌아오고, 같은 채널의 글과 한 지도에 섞여 있어도 서로를 해치지 않는다', () => {
     rememberFailedSend(WS, row('m1'), 'server', NOW);
     rememberFailedSend(WS, reply('m2'), 'offline', NOW + 1);
     const back = readFailedSends(WS, CH, ME, NOW + 10);

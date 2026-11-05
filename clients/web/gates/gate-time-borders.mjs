@@ -737,6 +737,8 @@ async function exercise(browser) {
       metaTop: Math.round(meta.getBoundingClientRect().top),
       chipsTop: Math.round(chips.getBoundingClientRect().top),
       metaText: (meta.textContent ?? "").trim(),
+      // 「수정됨」은 사전 낱말이라 브라우저 언어를 따른다(영어는 「Edited」, #5326). 글자가 아니라 표지의 testid 로 묻는다.
+      hasEditedMark: meta.querySelector('[data-testid="edited-mark"]') !== null,
     };
   }, TAIL_MSG);
   if (order === null || !order.meta || !order.chips) {
@@ -754,7 +756,7 @@ async function exercise(browser) {
         "되짚지 않는다 (진단 H-6)"
     );
   }
-  if (!order.metaText.includes("수정됨")) {
+  if (!order.hasEditedMark) {
     throw new Error(`꼬리가 「수정됨」을 담지 않았다: "${order.metaText}"`);
   }
 

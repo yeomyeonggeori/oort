@@ -689,8 +689,6 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
-  "reply.alsoInChannel.label",
-  "reply.alsoInChannel.unsupported",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -853,6 +851,11 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.edited.atDate",
+  "timeline.edited.atDay",
+  "timeline.edited.atTime",
+  "timeline.edited.mark",
+  "timeline.edited.pressHint",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
@@ -1767,8 +1770,6 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
-  "reply.alsoInChannel.label": {},
-  "reply.alsoInChannel.unsupported": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -1980,6 +1981,19 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.edited.atDate": {
+    "date": "string",
+    "time": "string"
+  },
+  "timeline.edited.atDay": {
+    "day": "string",
+    "time": "string"
+  },
+  "timeline.edited.atTime": {
+    "time": "string"
+  },
+  "timeline.edited.mark": {},
+  "timeline.edited.pressHint": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
@@ -2887,8 +2901,6 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
-  "reply.alsoInChannel.label": Record<string, never>;
-  "reply.alsoInChannel.unsupported": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;
@@ -3051,6 +3063,11 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.edited.atDate": { date: string; time: string };
+  "timeline.edited.atDay": { day: string; time: string };
+  "timeline.edited.atTime": { time: string };
+  "timeline.edited.mark": Record<string, never>;
+  "timeline.edited.pressHint": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;
