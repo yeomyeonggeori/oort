@@ -3232,6 +3232,262 @@ export const catalog: MessageCatalog = {
       "value": "Save to Photos"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "Me"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "Results list"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "Newer result"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "Older result"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "Clear text"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "Close search"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "Yesterday"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Try a different word."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "No results for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn’t search."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "Type something to look for."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "Load more"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "Loading…"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "Search conversation"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "Search this channel"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "Search this conversation"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of at least "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "Clear"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "Clear recent searches"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "Search again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "Recent searches"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 0,
+      "value": "Message from "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "Results in this channel · newest first"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "Results in this conversation · newest first"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "Searching…"
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "Type at least 2 characters to start searching."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,

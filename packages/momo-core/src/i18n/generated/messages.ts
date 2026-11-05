@@ -471,6 +471,36 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
+  "mobile.convSearch.authorSelf",
+  "mobile.convSearch.barList",
+  "mobile.convSearch.barNewer",
+  "mobile.convSearch.barOlder",
+  "mobile.convSearch.clearInput",
+  "mobile.convSearch.close",
+  "mobile.convSearch.dayYesterday",
+  "mobile.convSearch.emptyDetail",
+  "mobile.convSearch.emptyHeadline",
+  "mobile.convSearch.errorDetail",
+  "mobile.convSearch.errorHeadline",
+  "mobile.convSearch.idleHint",
+  "mobile.convSearch.more",
+  "mobile.convSearch.moreLoading",
+  "mobile.convSearch.open",
+  "mobile.convSearch.placeholderChannel",
+  "mobile.convSearch.placeholderDm",
+  "mobile.convSearch.position",
+  "mobile.convSearch.positionMore",
+  "mobile.convSearch.positionSpoken",
+  "mobile.convSearch.positionSpokenMore",
+  "mobile.convSearch.recentClear",
+  "mobile.convSearch.recentClearLabel",
+  "mobile.convSearch.recentRow",
+  "mobile.convSearch.recentTitle",
+  "mobile.convSearch.resultLabel",
+  "mobile.convSearch.resultsChannel",
+  "mobile.convSearch.resultsDm",
+  "mobile.convSearch.searching",
+  "mobile.convSearch.tooShort",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -1529,6 +1559,56 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
+  "mobile.convSearch.authorSelf": {},
+  "mobile.convSearch.barList": {},
+  "mobile.convSearch.barNewer": {},
+  "mobile.convSearch.barOlder": {},
+  "mobile.convSearch.clearInput": {},
+  "mobile.convSearch.close": {},
+  "mobile.convSearch.dayYesterday": {},
+  "mobile.convSearch.emptyDetail": {},
+  "mobile.convSearch.emptyHeadline": {
+    "query": "string"
+  },
+  "mobile.convSearch.errorDetail": {},
+  "mobile.convSearch.errorHeadline": {},
+  "mobile.convSearch.idleHint": {},
+  "mobile.convSearch.more": {},
+  "mobile.convSearch.moreLoading": {},
+  "mobile.convSearch.open": {},
+  "mobile.convSearch.placeholderChannel": {},
+  "mobile.convSearch.placeholderDm": {},
+  "mobile.convSearch.position": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpoken": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpokenMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.recentClear": {},
+  "mobile.convSearch.recentClearLabel": {},
+  "mobile.convSearch.recentRow": {
+    "query": "string"
+  },
+  "mobile.convSearch.recentTitle": {},
+  "mobile.convSearch.resultLabel": {
+    "author": "string",
+    "snippet": "string",
+    "when": "string"
+  },
+  "mobile.convSearch.resultsChannel": {},
+  "mobile.convSearch.resultsDm": {},
+  "mobile.convSearch.searching": {},
+  "mobile.convSearch.tooShort": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -2675,6 +2755,36 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
+  "mobile.convSearch.authorSelf": Record<string, never>;
+  "mobile.convSearch.barList": Record<string, never>;
+  "mobile.convSearch.barNewer": Record<string, never>;
+  "mobile.convSearch.barOlder": Record<string, never>;
+  "mobile.convSearch.clearInput": Record<string, never>;
+  "mobile.convSearch.close": Record<string, never>;
+  "mobile.convSearch.dayYesterday": Record<string, never>;
+  "mobile.convSearch.emptyDetail": Record<string, never>;
+  "mobile.convSearch.emptyHeadline": { query: string };
+  "mobile.convSearch.errorDetail": Record<string, never>;
+  "mobile.convSearch.errorHeadline": Record<string, never>;
+  "mobile.convSearch.idleHint": Record<string, never>;
+  "mobile.convSearch.more": Record<string, never>;
+  "mobile.convSearch.moreLoading": Record<string, never>;
+  "mobile.convSearch.open": Record<string, never>;
+  "mobile.convSearch.placeholderChannel": Record<string, never>;
+  "mobile.convSearch.placeholderDm": Record<string, never>;
+  "mobile.convSearch.position": { index: string; total: string };
+  "mobile.convSearch.positionMore": { index: string; total: string };
+  "mobile.convSearch.positionSpoken": { index: string; total: string };
+  "mobile.convSearch.positionSpokenMore": { index: string; total: string };
+  "mobile.convSearch.recentClear": Record<string, never>;
+  "mobile.convSearch.recentClearLabel": Record<string, never>;
+  "mobile.convSearch.recentRow": { query: string };
+  "mobile.convSearch.recentTitle": Record<string, never>;
+  "mobile.convSearch.resultLabel": { author: string; snippet: string; when: string };
+  "mobile.convSearch.resultsChannel": Record<string, never>;
+  "mobile.convSearch.resultsDm": Record<string, never>;
+  "mobile.convSearch.searching": Record<string, never>;
+  "mobile.convSearch.tooShort": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;

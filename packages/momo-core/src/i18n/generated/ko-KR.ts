@@ -3068,6 +3068,266 @@ export const catalog: MessageCatalog = {
       "value": "사진에 저장"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "결과 목록"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "더 최근 결과"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "더 오래된 결과"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "검색 닫기"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "어제"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "다른 말로 다시 찾아 보세요."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "찾을 말을 입력해 보세요."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "불러오는 중이에요"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "대화 검색"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 찾기"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 찾기"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 이상 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 지우기"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": "의 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "이 채널의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "이 대화의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,

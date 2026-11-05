@@ -126,6 +126,8 @@
     "clients/mobile/src/features/conversation/appsTail.ts": 8,
     "clients/mobile/src/features/conversation/bubble.ts": 3,
     "clients/mobile/src/features/conversation/conversationMenu.ts": 11,
+    "clients/mobile/src/features/conversation/conversationSearchModel.ts": 1,
+    "clients/mobile/src/features/conversation/conversationSearchRecent.ts": 2,
     "clients/mobile/src/features/conversation/drafts.ts": 4,
     "clients/mobile/src/features/conversation/jumpNotice.ts": 21,
     "clients/mobile/src/features/conversation/jumpPills.ts": 18,
