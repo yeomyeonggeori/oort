@@ -3482,6 +3482,36 @@ export const catalog: MessageCatalog = {
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
     }
   ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "이전 대화를 불러오지 못했어요"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "이전 대화에서 메시지를 찾는 중이에요"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
   "mobile.linkCard.cancel": [
     {
       "type": 0,

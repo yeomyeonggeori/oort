@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "875ab1e5a43bf00adf98761c0ec12066f07a5910",
+  "baselineHead": "3339fb231972d6d5f5f4b517f3e498f69f4d4762",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -102,6 +102,7 @@
     "clients/mobile/src/features/conversation/ConversationSearchRow.tsx": 8,
     "clients/mobile/src/features/conversation/GithubNoticeLine.tsx": 8,
     "clients/mobile/src/features/conversation/JumpPill.tsx": 14,
+    "clients/mobile/src/features/conversation/JumpSeekLine.tsx": 5,
     "clients/mobile/src/features/conversation/LandedTintFade.tsx": 1,
     "clients/mobile/src/features/conversation/LinkOnce.tsx": 12,
     "clients/mobile/src/features/conversation/LongPressHint.tsx": 6,
@@ -311,7 +312,7 @@
     "clients/mobile/src/screens/AppDetailScreen.tsx": 26,
     "clients/mobile/src/screens/AppsScreen.tsx": 20,
     "clients/mobile/src/screens/ConnectScreen.tsx": 128,
-    "clients/mobile/src/screens/ConversationScreen.tsx": 53,
+    "clients/mobile/src/screens/ConversationScreen.tsx": 55,
     "clients/mobile/src/screens/HostedConnectionDetailScreen.tsx": 23,
     "clients/mobile/src/screens/HostedConnectionsScreen.tsx": 17,
     "clients/mobile/src/screens/InboxScreen.tsx": 89,
