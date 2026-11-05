@@ -1360,6 +1360,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load activity"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions, so the list below only has agent turns"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1370,6 +1376,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "Reopen the panel to read it again."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "We'll read it again in a moment."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the record"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load progress"
     }
   ],
   "connection.load.agentProfileAppliesTitle": [
@@ -1556,10 +1586,46 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't refresh team work. Showing the last list we have"
     }
   ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the team pictures"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the code execution hosts"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load where sessions run"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the selected work session"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the progress steps"
     }
   ],
   "connection.send.failed": [
@@ -3578,6 +3644,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load earlier messages"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "Looking for the message in earlier messages…"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
     }
   ],
   "mobile.linkCard.cancel": [
@@ -6000,6 +6096,54 @@ export const catalog: MessageCatalog = {
       "value": "Checking your notification settings."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts wait for the time you choose, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed. The server only learns that you are active, and other members can't see it."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5 min"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "Delay phone alerts while I use the desktop"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the phone alert delay."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1 min"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the phone alert delay. Try again in a moment."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -6618,6 +6762,22 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 0,
+      "value": "Replying to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "Replying to a message"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -6868,12 +7028,6 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { catalog as enCatalog } from "../../i18n/generated/en-US";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n/service";
 import type { Message, QuotedMessage, RosterMember } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
 import { makeDirectory } from "../workspace/directory";
@@ -7,8 +10,10 @@ import { COMPLETION_REPORT_TITLE } from "./completionReportCard";
 import { hasAnyAction } from "./model";
 import {
   canQuoteMessage,
+  isQuoteOfThreadRoot,
   isQuoteRedundant,
   messageAboveIds,
+  quoteHeadAuthorId,
   quoteBlockFrom,
   quoteDraftFor,
   quoteDraftStillValid,
@@ -57,10 +62,21 @@ describe("quoteExcerpt", () => {
     });
   });
 
-  it("drops blank lines rather than spending the two-line budget on them", () => {
-    const { lines, truncated } = quoteExcerpt("첫 줄\n\n\n둘째 줄\n셋째 줄");
-    expect(lines).toEqual(["첫 줄", "둘째 줄"]);
+  it("drops blank lines rather than spending the one-line budget on them", () => {
+    // 빈 줄이 예산을 먹으면 첫 줄이 빈 줄인 메시지의 인용은 빈 머리가 된다.
+    const { lines, truncated } = quoteExcerpt("\n\n첫 줄\n\n\n둘째 줄\n셋째 줄");
+    expect(lines).toEqual(["첫 줄"]);
     expect(truncated).toBe(true);
+  });
+
+  it("shows one line of a multi-line body, and says the rest was cut (#5381 Q4)", () => {
+    // 인용은 카드 윗칸 머리라 원문은 **한 줄**이다. 두 줄째부터는 잘리고, 잘렸다는 사실은 남는다.
+    expect(quoteExcerpt("첫 줄\n둘째 줄")).toEqual({
+      lines: ["첫 줄"],
+      truncated: true,
+    });
+    // 한 줄짜리는 그대로이고 잘렸다고 말하지 않는다.
+    expect(quoteExcerpt("첫 줄만")).toEqual({ lines: ["첫 줄만"], truncated: false });
   });
 
   it("cuts one very long line even though the line count is under the cap", () => {
@@ -747,7 +763,8 @@ describe("#5357 — isQuoteRedundant", () => {
     // 스레드 목록은 루트 다음에 답글이 이어진다. 인용 대상(답글)이 바로 위다.
     const list = [row(root), row(humanReply), row(answer)];
     expect(redundant(answer, list, find([root, humanReply, answer]))).toBe(true);
-    // 같은 답이 루트를 가리키면 사이에 답글이 끼어 있으므로 그린다.
+    // 같은 답이 루트를 가리키면 사이에 답글이 끼어 있으므로 **바로 위 규칙은** 걸리지 않는다.
+    // (스레드 화면이 `threadRootId`를 넘기면 root 규칙이 따로 걸린다 — 아래 #5381.)
     const rootAnswer = replyTo(root, { rootId: root.id, seq: 21 });
     expect(
       redundant(
@@ -827,5 +844,243 @@ describe("#5357 — messageAboveIds", () => {
       const above = messageAboveIds([row(a), { kind: wall }, row(b)]);
       expect(above.has(b.id.toLowerCase())).toBe(false);
     }
+  });
+});
+
+// =============================================================================
+// #5381 — 인용은 카드 윗칸 머리(Q4): 스레드 root 인용 생략 · 머리의 저자 · 사전 낱말.
+// =============================================================================
+
+describe("#5381 — 스레드 root를 가리키는 인용은 그리지 않는다", () => {
+  const ROOT = message({
+    id: "0199aaaa-0000-7000-8000-00000000r001",
+    seq: 5,
+    authorMemberId: HUMAN_ID,
+    body: "배포 되돌리기 절차 정리해 줄래요?",
+  });
+  const find = (rows: Message[]) => (id: string) =>
+    rows.find((m) => m.id.toLowerCase() === id.toLowerCase());
+  function decide(
+    reply: Message,
+    items: readonly { kind: string; message?: Message }[],
+    lookup: (id: string) => Message | undefined,
+    threadRootId?: string
+  ): boolean {
+    return isQuoteRedundant(resolveQuote(reply, lookup), {
+      directory: ROSTER,
+      authorMemberId: reply.authorMemberId,
+      aboveMessageId: messageAboveIds(items).get(reply.id.toLowerCase()),
+      ...(threadRootId === undefined ? {} : { threadRootId }),
+    });
+  }
+  /** 스레드 화면의 한 행: root id를 넘겨 판정한다. */
+  const inThread = (
+    reply: Message,
+    items: readonly { kind: string; message?: Message }[],
+    lookup: (id: string) => Message | undefined
+  ) => decide(reply, items, lookup, ROOT.id);
+  /** 같은 행을 스레드 밖(본류)에서 읽을 때: root id를 넘기지 않는다. */
+  const inMainFlow = (
+    reply: Message,
+    items: readonly { kind: string; message?: Message }[],
+    lookup: (id: string) => Message | undefined
+  ) => decide(reply, items, lookup);
+
+  it("hides the root quote on every reply of the thread, not only the first one", () => {
+    const first = message({
+      id: "0199aaaa-0000-7000-8000-00000000r002",
+      seq: 20,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: ROOT.id,
+      body: "세 단계예요.",
+    });
+    const between = message({
+      id: "0199aaaa-0000-7000-8000-00000000r003",
+      seq: 21,
+      rootId: ROOT.id,
+      authorMemberId: HUMAN_ID,
+      body: "고마워요.",
+    });
+    // 사이에 사람의 답글이 끼어 있어도 root 인용은 root가 맨 위에 있으므로 군더더기다.
+    const later = message({
+      id: "0199aaaa-0000-7000-8000-00000000r004",
+      seq: 22,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: ROOT.id,
+      body: "하나 더 있어요.",
+    });
+    const rows = [ROOT, first, between, later];
+    const list = rows.map(row);
+    expect(inThread(first, list, find(rows))).toBe(true);
+    expect(inThread(later, list, find(rows))).toBe(true);
+  });
+
+  it("does not ask who wrote it: a human's root quote is hidden too", () => {
+    const humanReply = message({
+      id: "0199aaaa-0000-7000-8000-00000000r005",
+      seq: 20,
+      rootId: ROOT.id,
+      authorMemberId: HUMAN_ID,
+      replyToId: ROOT.id,
+      body: "저도요.",
+    });
+    const rows = [ROOT, humanReply];
+    expect(inThread(humanReply, rows.map(row), find(rows))).toBe(true);
+    // 같은 사람 답이 스레드 밖(본류)에서 읽히면 이 규칙은 걸리지 않는다.
+    expect(inMainFlow(humanReply, rows.map(row), find(rows))).toBe(false);
+  });
+
+  it("hides it for the unresolved and deleted branches as well: the root is on screen", () => {
+    const reply = message({
+      id: "0199aaaa-0000-7000-8000-00000000r006",
+      seq: 20,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: ROOT.id,
+      body: "확인했어요.",
+    });
+    // 실시간 프레임: `reply_to` 가 없고 스레드 목록이 원본을 못 찾는다 → unresolved.
+    const live = resolveQuote(reply, () => undefined);
+    expect(live?.kind).toBe("unresolved");
+    expect(
+      isQuoteRedundant(live, {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID,
+        aboveMessageId: undefined,
+        threadRootId: ROOT.id,
+      })
+    ).toBe(true);
+    // 지워진 root: 첫 행이 이미 묘비로 말한다.
+    const goneRoot = message({ ...ROOT, state: "deleted", body: undefined });
+    const deleted = resolveQuote(reply, find([goneRoot, reply]));
+    expect(deleted?.kind).toBe("deleted");
+    expect(
+      isQuoteRedundant(deleted, {
+        directory: ROSTER,
+        authorMemberId: AGENT_ID,
+        aboveMessageId: undefined,
+        threadRootId: ROOT.id,
+      })
+    ).toBe(true);
+  });
+
+  it("keeps a quote of another message of the thread (that one still adds information)", () => {
+    const answered = message({
+      id: "0199aaaa-0000-7000-8000-00000000r007",
+      seq: 20,
+      rootId: ROOT.id,
+      authorMemberId: HUMAN_ID,
+      body: "로그도 확인해 줘.",
+    });
+    const between = message({
+      id: "0199aaaa-0000-7000-8000-00000000r008",
+      seq: 21,
+      rootId: ROOT.id,
+      authorMemberId: HUMAN_ID,
+      body: "아 그리고요.",
+    });
+    const answer = message({
+      id: "0199aaaa-0000-7000-8000-00000000r009",
+      seq: 22,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: answered.id,
+      body: "마지막 50줄이에요.",
+    });
+    const rows = [ROOT, answered, between, answer];
+    // 사이에 말이 끼었고 root가 아니다 → 그린다.
+    expect(inThread(answer, rows.map(row), find(rows))).toBe(false);
+  });
+
+  it("composes with the directly-above rule: either one hides, neither is needed twice", () => {
+    const first = message({
+      id: "0199aaaa-0000-7000-8000-00000000r010",
+      seq: 20,
+      rootId: ROOT.id,
+      authorMemberId: HUMAN_ID,
+      body: "여기서 확인해 줘.",
+    });
+    const answerToFirst = message({
+      id: "0199aaaa-0000-7000-8000-00000000r011",
+      seq: 21,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: first.id,
+      body: "확인했어요.",
+    });
+    const rows = [ROOT, first, answerToFirst];
+    // 바로 위(#5357)만 걸린다: 대상이 root가 아니다.
+    expect(inThread(answerToFirst, rows.map(row), find(rows))).toBe(true);
+    // 같은 행이 본류에서도 바로 위 규칙은 그대로다.
+    expect(inMainFlow(answerToFirst, rows.map(row), find(rows))).toBe(true);
+    // root 규칙만 걸린다: 대상은 root이고 바로 위는 다른 말이다.
+    const answerToRoot = message({
+      id: "0199aaaa-0000-7000-8000-00000000r012",
+      seq: 22,
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: ROOT.id,
+      body: "처음 질문에 대한 답이에요.",
+    });
+    const rows2 = [ROOT, first, answerToRoot];
+    expect(inThread(answerToRoot, rows2.map(row), find(rows2))).toBe(true);
+    expect(inMainFlow(answerToRoot, rows2.map(row), find(rows2))).toBe(false);
+  });
+
+  it("compares the root id case-insensitively and says false without a root or a quote", () => {
+    const reply = message({
+      id: "0199aaaa-0000-7000-8000-00000000r013",
+      rootId: ROOT.id,
+      authorMemberId: AGENT_ID,
+      replyToId: ROOT.id,
+    });
+    const block = resolveQuote(reply, find([ROOT, reply]));
+    expect(isQuoteOfThreadRoot(block, ROOT.id.toUpperCase())).toBe(true);
+    expect(isQuoteOfThreadRoot(block, undefined)).toBe(false);
+    expect(isQuoteOfThreadRoot(null, ROOT.id)).toBe(false);
+    expect(isQuoteOfThreadRoot(block, "0199aaaa-0000-7000-8000-00000000zzzz")).toBe(false);
+  });
+});
+
+describe("#5381 — 머리 「{이름}에게 답장」이 부를 저자", () => {
+  it("names the author of a ready or deleted quote", () => {
+    const ready = quoteBlockFrom(quoted({ authorMemberId: HUMAN_ID }));
+    expect(ready.kind).toBe("ready");
+    expect(quoteHeadAuthorId(ready)).toBe(HUMAN_ID);
+    const deleted = quoteBlockFrom(
+      quoted({ authorMemberId: HUMAN_ID, state: "deleted", body: undefined })
+    );
+    expect(deleted.kind).toBe("deleted");
+    expect(quoteHeadAuthorId(deleted)).toBe(HUMAN_ID);
+  });
+
+  it("names nobody when the author is lost or the quote is unresolved", () => {
+    const lost = quoteBlockFrom(
+      quoted({ state: "deleted", body: undefined, authorMemberId: null as unknown as string })
+    );
+    expect(lost.kind).toBe("deleted");
+    expect(quoteHeadAuthorId(lost)).toBeNull();
+    const reply = message({ replyToId: "0199aaaa-0000-7000-8000-00000000u001" });
+    const unresolved = resolveQuote(reply, () => undefined);
+    expect(unresolved?.kind).toBe("unresolved");
+    expect(quoteHeadAuthorId(unresolved!)).toBeNull();
+  });
+});
+
+describe("#5381 — 머리 문장은 코어 사전에 있다", () => {
+  it("says 「{이름}에게 답장」 in ko, with and without a name", () => {
+    const ko = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+    expect(ko.formatMessage("timeline.quote.head", { name: "하늘" })).toBe("하늘에게 답장");
+    expect(ko.formatMessage("timeline.quote.headUnnamed")).toBe("메시지에 답장");
+  });
+
+  it("has an English sentence for the same two keys (ko and en ship together)", () => {
+    const en = createMessageService({ messageLocale: "en-US", catalog: enCatalog });
+    expect(en.formatMessage("timeline.quote.head", { name: "Haneul" })).toBe(
+      "Replying to Haneul"
+    );
+    expect(en.formatMessage("timeline.quote.headUnnamed")).toBe("Replying to a message");
   });
 });

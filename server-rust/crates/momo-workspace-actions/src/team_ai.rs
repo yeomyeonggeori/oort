@@ -24,7 +24,7 @@
 
 use chrono::{DateTime, Utc};
 use momo_db::{audit, DbError, PgConnection};
-use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{send_thread_notice_in_tx, MessageType, NewMessage};
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
@@ -1628,8 +1628,12 @@ pub async fn propose_with_avatar_in_tx(
         );
     }
     actions::stamp_decision_mode(&mut props, decision);
+    // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): the card stands where the run's answer will — the
+    // request's thread, or a new thread under the request at a channel's top level, the main flow in
+    // a 1:1 DM — on the spine that keeps the thread's rollup.
+    let place = momo_agent::run_answer_root_in_tx(conn, workspace_id, context.run_id).await?;
     // The card is authored by the team AI; the body says so in words.
-    let card = send_message_in_tx(
+    let card = send_thread_notice_in_tx(
         conn,
         workspace_id,
         NewMessage {
@@ -1642,7 +1646,7 @@ pub async fn propose_with_avatar_in_tx(
                 false,
             )),
             props,
-            root_id: None,
+            root_id: place,
             reply_to_id: None,
             client_msg_id: Some(actions::card_client_msg_id(approval_id)),
             run_id: Some(context.run_id),

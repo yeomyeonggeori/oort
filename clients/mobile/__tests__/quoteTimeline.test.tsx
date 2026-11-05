@@ -285,8 +285,8 @@ describe('에이전트 답의 인용 (#5357)', () => {
   it('질문 바로 아래 에이전트 답은 인용 블록도, 낭독 문장도, 로터 동작도 없다', () => {
     timeline([ORIGINAL, AGENT_REPLY], [], ACTIONS);
     expect(screen.queryByTestId('quote-block')).toBeNull();
-    // 낭독: 답의 문장에 「인용」이 없다(질문의 문장은 질문 행의 것이다).
-    expect(rowLabels()[1]).not.toContain('인용');
+    // 낭독: 답의 문장에 「에게 답장」(인용 머리의 문장, #5381)이 없다(질문의 문장은 질문 행의 것이다).
+    expect(rowLabels()[1]).not.toContain('에게 답장');
     expect(rowLabels()[1]).toContain('확인했어요');
     // 로터: 눈에 안 보이는 블록으로 가는 동작이 남지 않는다.
     expect(rowActionNames(1)).not.toContain('momoQuoteJump');
@@ -303,7 +303,7 @@ describe('에이전트 답의 인용 (#5357)', () => {
       ACTIONS,
     );
     expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
-    expect(rowLabels()[2]).toContain('인용');
+    expect(rowLabels()[2]).toContain('에게 답장');
     expect(rowActionNames(2)).toContain('momoQuoteJump');
   });
 
@@ -314,7 +314,7 @@ describe('에이전트 답의 인용 (#5357)', () => {
       ACTIONS,
     );
     expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
-    expect(rowLabels()[1]).toContain('인용');
+    expect(rowLabels()[1]).toContain('에게 답장');
     expect(rowActionNames(1)).toContain('momoQuoteJump');
   });
 

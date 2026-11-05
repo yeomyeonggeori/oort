@@ -78,6 +78,20 @@ export const CONNECTION_KEYS = {
   loadAgentProfileAppliesTitle: "connection.load.agentProfileAppliesTitle",
   /** 값 `names`(못 읽은 에이전트 이름들)를 받는다. */
   loadAgentProfilesApplyTitle: "connection.load.agentProfilesApplyTitle",
+  // 작업 콘솔·작업 패널·표현(#5279 B·C): 제목이 **무엇을 못 불러왔는지**(필요하면 그래서 무엇이 어떻게 되었는지)를 말하고, 이유(원인)는 `loadSentence`가 뒤에 붙인다.
+  loadWorkHostsTitle: "connection.load.workHostsTitle",
+  loadWorkSessionsTitle: "connection.load.workSessionsTitle",
+  loadWorkLocationsTitle: "connection.load.workLocationsTitle",
+  loadWorkSelectedSessionTitle: "connection.load.workSelectedSessionTitle",
+  loadWorkStepsTitle: "connection.load.workStepsTitle",
+  /** 결과가 정보다: 목록이 에이전트 턴뿐이라는 사실까지 제목이 말한다. */
+  loadAdeSessionsTitle: "connection.load.adeSessionsTitle",
+  loadAgentLedgerTitle: "connection.load.agentLedgerTitle",
+  /** 단추가 없는 기록 줄의 꼬리: 열린 run은 스스로 다시 읽고, 끝난 run은 패널을 다시 열어야 읽는다. */
+  loadAgentLedgerRetryTail: "connection.load.agentLedgerRetryTail",
+  loadAgentLedgerReopenTail: "connection.load.agentLedgerReopenTail",
+  loadAgentPaneProgressTitle: "connection.load.agentPaneProgressTitle",
+  loadTeamExpressionsTitle: "connection.load.teamExpressionsTitle",
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",

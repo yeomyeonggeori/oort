@@ -1318,6 +1318,12 @@ export const catalog: MessageCatalog = {
       "value": "활동을 불러오지 못했어요"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션 목록을 불러오지 못해 아래 목록에는 에이전트 턴만 있어요"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1328,6 +1334,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "패널을 다시 열면 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "기록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "진행을 불러오지 못했어요"
     }
   ],
   "connection.load.agentProfileAppliesTitle": [
@@ -1510,10 +1540,46 @@ export const catalog: MessageCatalog = {
       "value": "팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요"
     }
   ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "팀 그림을 불러오지 못했어요"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "실행 위치를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "선택한 작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "진행 내역을 불러오지 못했어요"
     }
   ],
   "connection.send.failed": [
@@ -3416,6 +3482,36 @@ export const catalog: MessageCatalog = {
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
     }
   ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "이전 대화를 불러오지 못했어요"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "이전 대화에서 메시지를 찾는 중이에요"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
   "mobile.linkCard.cancel": [
     {
       "type": 0,
@@ -4039,7 +4135,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "더보기"
+      "value": "더 보기"
     }
   ],
   "releaseNotes.popup.title": [
@@ -5779,6 +5875,54 @@ export const catalog: MessageCatalog = {
       "value": "알림 설정을 확인하는 중이에요."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱을 쓰는 동안은 폰 알림을 정한 시간만큼 늦춰요. 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않아요. 서버가 아는 것은 쓰고 있다는 사실뿐이고, 다른 멤버에게는 보이지 않아요."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5분"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "데스크탑을 쓰는 동안 폰 알림 늦추기"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기 설정을 불러오지 못했어요."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1분"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -6393,6 +6537,22 @@ export const catalog: MessageCatalog = {
       "value": "축소"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 답장"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "메시지에 답장"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -6538,12 +6698,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [

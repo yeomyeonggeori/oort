@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useRef, useState } from "react";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { FIXTURE_LIST, FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { expressionChoice } from "@momo/core/features/expressions/cards";
 import { MANUAL_UPLOAD_CODES, type ExpressionDraft } from "@momo/core/features/expressions/types";
@@ -251,7 +251,7 @@ describe("team expressions web/desktop port", () => {
     const store = makeStore(); const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     expect(view.queryByTestId("team-expressions")).toBeTruthy();
     store.transport.json = vi.fn().mockRejectedValue(new Error("unreachable"));
-    await act(() => store.refresh()); expect(view.getByRole("button", { name: "다시 시도" })).toBeTruthy();
+    await act(() => store.refresh()); expect(within(view.getByTestId("team-expressions-error")).getByRole("button")).toBeTruthy();
     await act(async () => { store.setOffline(true); }); expect(view.getByText(/You're offline\. We'll reload the pictures/)).toBeTruthy();
     const fresh = makeStore(); await fresh.refresh();
     for (const item of fresh.getSnapshot().cache.items) await fresh.mutate({ method: "DELETE", path: `${fresh.base}/expressions/${item.id}` });

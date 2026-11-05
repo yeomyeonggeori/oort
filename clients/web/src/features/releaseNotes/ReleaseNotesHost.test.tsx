@@ -58,7 +58,7 @@ function Probe() {
   return createElement("div", { "data-testid": "where" }, location.pathname + location.search);
 }
 
-/** 첫 실행 창의 제목 목록(`ul`)과 지금 서 있는 줄의 글. 「더보기」 단추는 목록 항목이 아니다. */
+/** 첫 실행 창의 제목 목록(`ul`)과 지금 서 있는 줄의 글. 「더 보기」 단추는 목록 항목이 아니다. */
 const titleList = () => screen.getByTestId("release-notes-dialog-titles");
 const shownTitles = () => [...titleList().querySelectorAll("li")].map((li) => li.textContent);
 
@@ -102,14 +102,14 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(screen.getByRole("dialog", { name: "업데이트 소식" })).toBe(dialog);
     expect(dialog.textContent).toContain("버전 0.1.41");
     expect(dialog.textContent).toContain(koText.formatMessage(PINNED.summary));
-    // 이 화면(데스크탑)에서 보이는 변화만 제목으로: 폰 전용 항목(c)은 없고, 네 줄까지 보이고 나머지는 「더보기」 뒤에 있다.
+    // 이 화면(데스크탑)에서 보이는 변화만 제목으로: 폰 전용 항목(c)은 없고, 네 줄까지 보이고 나머지는 「더 보기」 뒤에 있다.
     expect(shownTitles()).toEqual([
       koText.formatMessage(REAL[0].title),
       koText.formatMessage(REAL[1].title),
       koText.formatMessage(REAL[3].title),
       koText.formatMessage(REAL[4].title),
     ]);
-    expect(screen.getByRole("button", { name: "더보기" })).toBe(screen.getByTestId("release-notes-dialog-more"));
+    expect(screen.getByRole("button", { name: "더 보기" })).toBe(screen.getByTestId("release-notes-dialog-more"));
     // 「그 밖에 N가지」 문장은 없다(#5298). 「그 밖에 바뀐 점」은 자동 창에 없다(설정의 버전 상세에만 선다).
     expect(dialog.textContent).not.toContain("그 밖에");
     expect(dialog.textContent).not.toContain(koText.formatMessage(REAL[6].tryIt));
@@ -130,7 +130,7 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(screen.queryByTestId("release-notes-dialog")).toBeNull();
   });
 
-  it("「더보기」는 나머지를 같은 불릿 목록에 이어서 펼치고, 단추는 사라지며, 초점은 처음 새로 선 항목으로 간다 (#5298)", async () => {
+  it("「더 보기」는 나머지를 같은 불릿 목록에 이어서 펼치고, 단추는 사라지며, 초점은 처음 새로 선 항목으로 간다 (#5298)", async () => {
     app.version = "0.1.41";
     const locale = await koreanLocale();
     mountHost([V41], (children) => createElement(LocaleContext.Provider, { value: locale }, children));
@@ -184,7 +184,7 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(lastSeenReleaseNote()).toBe("0.1.41");
   });
 
-  it("항목이 네 개 이하이면 「더보기」는 서지 않고 네 줄이 모두 보인다 (경계 4개, #5298)", async () => {
+  it("항목이 네 개 이하이면 「더 보기」는 서지 않고 네 줄이 모두 보인다 (경계 4개, #5298)", async () => {
     app.version = "0.1.41";
     const locale = await koreanLocale();
     // 폰 전용 제목을 하나 줄이면 데스크탑 항목은 정확히 네 개다.
