@@ -4,8 +4,12 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { WorkHost } from "@momo/core/lib/api";
+import { ApiError, type WorkHost } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { SurfaceGate, SurfaceRoute } from "./SurfaceGate";
 import { WORK_HOST_OFFLINE_GRACE_MS } from "./useSurfaceProvided";
 
@@ -61,7 +65,8 @@ async function mount(
   body: ReactElement = createElement(SurfaceRoute, {
     surface: "workConsole",
     children: createElement("div", { "data-testid": "console-body" }),
-  })
+  }),
+  locale?: AppLocale
 ): Promise<{ el: HTMLElement; client: QueryClient }> {
   host = document.createElement("div");
   document.body.append(host);
@@ -69,7 +74,7 @@ async function mount(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const tree: ReactElement = createElement(
+  const page: ReactElement = createElement(
     QueryClientProvider,
     { client },
     createElement(
@@ -78,6 +83,8 @@ async function mount(
       body
     )
   );
+  // `locale`은 사전 문장을 한국어로 단정하는 시험만 준다(공급자가 없으면 번들된 영어로 물러난다).
+  const tree: ReactElement = locale ? createElement(LocaleProvider, { locale, children: page }) : page;
   await act(async () => {
     root?.render(tree);
     await Promise.resolve();
@@ -161,6 +168,65 @@ describe("SurfaceRoute (#2780)", () => {
     expect(el.querySelector('[data-testid="surface-route-pending"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="surface-unavailable-route"]')).toBeNull();
     expect(el.querySelector("h1")?.textContent).toBe("작업 콘솔");
+  });
+});
+
+// #5279 B: 못 읽은 이유를 말한다. 「호스트가 없다」가 아니라 못 읽었다는 사실은 그대로이고(위 첫 시험), 이제 그 실패 줄이 원인(닫힌 분류)마다 다른 이유를
+// 말한다. 위 시험의 `new Error("503")`은 연결 쪽 원인이 아니라 「그 밖」이 되는 경우일 뿐이다: 여기서는 진짜 오류 종류를 던진다.
+describe("호스트 목록을 못 읽은 줄의 이유 (#5279 B)", () => {
+  it("원인마다 다른 이유를 말한다: 오프라인 / 서버에 닿지 못함 / 그 밖. 상태 코드는 없다", async () => {
+    const ko = await koreanLocale();
+    const onLine = vi.spyOn(globalThis.navigator, "onLine", "get");
+    const cases: [string, () => unknown, boolean, string][] = [
+      ["오프라인", () => new NetworkError("unreachable", 15_000), false, "오프라인이에요."],
+      ["서버에 닿지 못함", () => new NetworkError("unreachable", 15_000), true, "서버에 닿지 못했어요."],
+      ["그 밖", () => new ApiError(500, "boom", "internal"), true, "문제가 생겼어요."],
+    ];
+    try {
+      for (const [name, failure, online, reason] of cases) {
+        onLine.mockReturnValue(online);
+        hostsAnswer.run = async () => {
+          throw failure();
+        };
+        const { el, client } = await mount(undefined, ko);
+        await settled(client);
+        await vi.waitFor(() => {
+          expect(el.querySelector('[data-testid="surface-route-error-banner"]'), name).not.toBeNull();
+        });
+        const text = el.querySelector('[data-testid="surface-route-error-banner"]')?.textContent ?? "";
+        expect(text, name).toContain(`코드 실행 호스트 목록을 불러오지 못했어요. ${reason}`);
+        expect(text, name).not.toMatch(/\d{3}/);
+        act(() => root?.unmount());
+        root = null;
+        host?.remove();
+        host = null;
+      }
+    } finally {
+      onLine.mockRestore();
+    }
+  });
+
+  it("다시 시도는 호스트 목록을 다시 읽고, 읽히면 줄이 걷힌다", async () => {
+    const ko = await koreanLocale();
+    let calls = 0;
+    hostsAnswer.run = async () => {
+      calls += 1;
+      if (calls === 1) throw new ApiError(500, "boom", "internal");
+      return [onlineHost()];
+    };
+    const { el, client } = await mount(undefined, ko);
+    await settled(client);
+    await vi.waitFor(() => {
+      expect(el.querySelector('[data-testid="surface-route-error-banner"]')).not.toBeNull();
+    });
+    const retry = el.querySelector<HTMLButtonElement>('[data-testid="surface-route-error-banner"] button');
+    expect(retry?.textContent).toBe("다시 시도");
+    act(() => retry?.click());
+    await vi.waitFor(() => {
+      expect(el.querySelector('[data-testid="console-body"]')).not.toBeNull();
+    });
+    expect(calls).toBe(2);
+    expect(el.querySelector('[data-testid="surface-route-error-banner"]')).toBeNull();
   });
 });
 
