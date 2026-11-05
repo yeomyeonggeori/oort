@@ -2459,7 +2459,7 @@ paths:
           description: Too many unfinished upload sessions.
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
 
   /v1/workspaces/{workspaceId}/members/me/avatar/{mediaId}/complete:
@@ -11578,8 +11578,23 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "502":
+          description: >
+            The archive refused the instance's own credentials (`error.code`
+            `drive_access_denied`, no `Retry-After`) or the archive request failed
+            (`drive_upstream_failed`, with `Retry-After`). Nothing was written
+            (ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -11625,6 +11640,27 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "413":
           description: Measured archive size exceeds 100 MB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >
+            The archive refused the instance's own credentials (`error.code`
+            `drive_access_denied`, no `Retry-After`) or the archive request failed
+            (`drive_upstream_failed`, with `Retry-After`). The attachment stays
+            pending (ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -11782,13 +11818,21 @@ paths:
         "502":
           description: >
             The archive failed, was refused by the instance's own credentials, or reported a
-            different length than the attachment's row. Nothing of the file was sent.
+            different length than the attachment's row. Nothing of the file was sent. The
+            `error.code` says which: `drive_access_denied` (refused; no `Retry-After`) or
+            `drive_upstream_failed` (failed or disagreed with the row; with `Retry-After`;
+            ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -17946,9 +17990,18 @@ components:
                 invites can name channels): 400 `guest_invites_paused` (the
                 `guest` role asked for by `POST …/invites`, or carried by a usable
                 code given to `POST …/invites/{inviteId}/regenerate`, `POST
-                …/invites/redeem` or `POST /v1/join`). The
-                approval receipt status `dev_cannot_decide` is a receipt's `status`,
-                not an `error.code`.
+                …/invites/redeem` or `POST /v1/join`); ADR-0151 amendment 7 (#5223,
+                a refusal that comes from the file archive, on every route that
+                reads or writes it): 503 `drive_not_configured` (this instance has
+                no usable archive; an operator has to fix it, so no `Retry-After`),
+                502 `drive_access_denied` (the archive refused the instance's own
+                credentials; no `Retry-After`) and 502 `drive_upstream_failed` (the
+                archive request failed, or its bytes disagree with the row; sent
+                with `Retry-After`). A 502 or 503 that carries an `error.code`
+                was answered by this server itself; one without a code may have
+                been produced by something in front of it. The approval receipt
+                status `dev_cannot_decide` is a receipt's `status`, not an
+                `error.code`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:

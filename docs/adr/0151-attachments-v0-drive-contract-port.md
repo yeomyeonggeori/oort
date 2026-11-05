@@ -737,7 +737,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | `DriveError` | 상태 | `error.code` | 뜻 | `Retry-After` |
 |---|---|---|---|---|
 | `Unavailable` | 503 | `drive_not_configured` | 이 인스턴스에 쓸 수 있는 보관소가 없다(설정하지 않았거나 시작할 때 열지 못해 닫혔다). 운영자가 고쳐야 풀린다 | 없음 |
-| `AccessDenied` | 502 | `drive_access_denied` | 보관소가 인스턴스 **자신의** 자격을 거절했다(Google 403, 로컬 볼륨의 경로 가드). 호출자 잘못이 아니고 운영자가 고쳐야 풀린다 | 없음 |
+| `AccessDenied` | 502 | `drive_access_denied` | 보관소가 인스턴스 **자신의** 자격을 거절했다(Google 403, 로컬 볼륨의 경로·읽기 전용 가드). 호출자 잘못이 아니고 운영자가 고쳐야 풀린다 | 없음 |
 | `UpstreamFailure` | 502 | `drive_upstream_failed` | 보관소 요청이 실패했다(Google의 그 밖의 오류 상태·429·연결 끊김, 행의 길이와 보관소 바이트가 어긋남). 기다리면 풀릴 수 있다 | 5초 |
 
 그 밖의 보관소 답(`InvalidArguments` 400, `FileNotFound` 404, `ContentTooLarge` 413)은 코드를 받지 않는다. 특히 404는 증보 1·2가 「없는 id와 바이트까지 같은 404」로 못 박았으므로 키 하나도 더하지 않는다. 문장(`safe_message`)과 상태는 그대로다.
