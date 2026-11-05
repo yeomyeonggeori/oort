@@ -56,6 +56,7 @@ import {isOnlineFromNetInfo} from '../../query/queryClient';
 import {onAppBackground} from '../connection/appBackground';
 import {deviceOnlineNow} from '../connection/deviceOnline';
 import {forgetFailedSend, readFailedSends, rememberFailedSend} from './failedSends';
+import {SEEK_MAX_PAGES, seekPageLimit, SeekOutcome} from './jumpSeek';
 import {
   addPending,
   applyEditedMessage,
@@ -283,6 +284,17 @@ export interface UseTimelineResult {
   /** The echoes belonging to one thread (never shown in the channel list). */
   repliesPending: (rootId: string) => PendingMessage[];
   loadOlder: () => Promise<void>;
+  /**
+   * 점프의 목적지(`untilSeq`)가 불러온 범위 위에 있을 때, 그 seq 에 닿을 때까지 `before` 쪽 넘김을 **이어서** 읽는다 (#5383).
+   *
+   * `loadOlder` 와 다른 점 셋. ① 실패를 말한다(`loadOlder` 는 조용히 삼킨다 - 손으로 다시 올리면 되기 때문이다). ② 쪽을 읽는 동안
+   * 목록에 합치지 않고 모았다가 **닿았을 때 한 번에** 합친다 - 사람은 바닥에 서 있고, 위에 쪽이 하나씩 붙을 때마다 목록이 흔들릴
+   * 이유가 없다. 닿지 못한 끝(상한·실패·접음)은 아무것도 합치지 않아 화면이 읽기 전 그대로다. ③ 사람이 접을 수 있다
+   * (`isCancelled` 가 참이 되면 다음 쪽을 읽지 않고, 늦게 온 답은 버린다).
+   *
+   * 수치(쪽 크기·쪽 상한·맥락 줄)와 그 이유는 `jumpSeek.ts` 머리말이다. 읽는 동안 `loadingOlder` 가 서서 손으로 올리는 읽기와 겹치지 않는다.
+   */
+  seekOlder: (untilSeq: number, isCancelled: () => boolean) => Promise<SeekOutcome>;
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
@@ -1280,6 +1292,61 @@ export function useTimeline(
     hydrateUnfurls,
   ]);
 
+  const seekOlder = useCallback(
+    async (untilSeq: number, isCancelled: () => boolean): Promise<SeekOutcome> => {
+      const startedIn = channelId;
+      const from = state.oldestSeq;
+      if (!startedIn || from === null) return SeekOutcome.Failed;
+      if (reachedStart) return SeekOutcome.Start;
+      // 읽는 동안 손으로 올리는 읽기(`loadOlder`)가 같은 쪽을 또 읽지 않게 한다.
+      setLoadingOlder(true);
+      try {
+        const pages: Message[] = [];
+        let cursor = from;
+        let outcome: SeekOutcome = SeekOutcome.Capped;
+        let atStart = false;
+        for (let turn = 0; turn < SEEK_MAX_PAGES; turn += 1) {
+          if (isCancelled() || channelRef.current !== startedIn) return SeekOutcome.Cancelled;
+          const page = await fetchMessages(workspaceId, startedIn, {
+            before: cursor,
+            limit: seekPageLimit(cursor, untilSeq),
+          });
+          // 늦게 온 답은 버린다: 접었거나 방을 옮겼다.
+          if (isCancelled() || channelRef.current !== startedIn) return SeekOutcome.Cancelled;
+          pages.push(...page.messages);
+          const lowest = page.messages.reduce<number | null>(
+            (min, message) => (min === null || message.seq < min ? message.seq : min),
+            null,
+          );
+          // 서버는 비어 있지 않은 쪽에는 언제나 `nextBefore`(그 쪽의 가장 작은 seq)를 싣는다. 없으면 더 오래된 줄이 없다(`loadOlder` 와 같은 판정).
+          atStart = page.nextBefore === undefined;
+          if (lowest !== null && lowest <= untilSeq) {
+            outcome = SeekOutcome.Arrived;
+            break;
+          }
+          if (atStart) {
+            outcome = SeekOutcome.Start;
+            break;
+          }
+          cursor = page.nextBefore ?? cursor;
+        }
+        if (outcome === SeekOutcome.Arrived || outcome === SeekOutcome.Start) {
+          // 닿은 끝만 합친다. 위로 읽은 쪽은 `applyBatch` 를 지나지 않는다 - `loadOlder` 와 같은 이유다.
+          for (const message of pages) knownIdsRef.current.add(messageIdKey(message.id));
+          setState(s => reconcileMessages(s, pages));
+          hydrateUnfurls(pages, startedIn);
+          if (atStart) setReachedStart(true);
+        }
+        return outcome;
+      } catch {
+        return SeekOutcome.Failed;
+      } finally {
+        setLoadingOlder(false);
+      }
+    },
+    [workspaceId, channelId, state.oldestSeq, reachedStart, hydrateUnfurls],
+  );
+
   const reload = useCallback(() => setReloadNonce(n => n + 1), []);
 
   const applyThreadRead = useCallback((rootId: string, read: ThreadReadState) => {
@@ -1308,6 +1375,7 @@ export function useTimeline(
     sendReply,
     repliesPending,
     loadOlder,
+    seekOlder,
     reload,
     loadingOlder,
     reachedStart,
