@@ -2219,6 +2219,13 @@ export default function ConversationScreen({
       {isSurfaceProvided('ade') ? <AdeSummaryLine onPress={openAde} /> : null}
       </ConversationHeader>
       </View>
+      {/* 결과 목록 면이 대화를 덮는 동안 대화(목록·컴포저)는 화면 낭독에서 뺀다(#5364): 불투명한 면 뒤의 보이지 않는 행에 낭독 초점이 닿지 않게. 머리(검색 줄)는 이 틀 **밖**
+          형제라 그대로 닿는다 — 그래서 면에 `accessibilityViewIsModal` 을 걸지 않는다(그러면 형제인 검색 줄까지 낭독에서 빠진다). 레이아웃에는 영향이 없다(`flex: 1`). */}
+      <View
+        style={styles.layoutFill}
+        accessibilityElementsHidden={convSearch.listOpen}
+        importantForAccessibility={convSearch.listOpen ? 'no-hide-descendants' : 'auto'}
+        testID="conversation-layout-wrap">
       <ConversationLayout
         list={
           <>
@@ -2412,6 +2419,7 @@ export default function ConversationScreen({
           </>
         }
       />
+      </View>
       {/* 결과 목록 보기일 때만 대화를 덮는다. 머리(`zIndex` 1)는 이 면 **위**에 서서 검색 줄이 보인다. 이 틀 안에 두는 이유는 머리와 같다 — 덮개들(스레드 ·
           고정 목록)이 이 틀 **뒤** 형제라 그 위에 서야 할 것은 위에 선다. */}
       {convSearch.listOpen ? (
@@ -2603,6 +2611,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
   /** 머리 · 요약 줄 · 목록의 틀(#4292). `Screen` 의 남은 높이를 다 쓴다 — 이 틀 안에서만 머리의 `zIndex` 가 겨룬다. */
   column: {flex: 1},
+  /** 대화 틀(목록 + 컴포저)을 낭독에서 뺄 수 있게 감싼 한 겹 — 레이아웃은 그대로다(#5364). */
+  layoutFill: {flex: 1},
   headerOverlay: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1},
   /**
    * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`

@@ -254,6 +254,8 @@ describe('#5364 대화 안 검색 — 진입', () => {
     expect(screen.queryByTestId('conversation-composer-stack')).toBeNull();
     const hidden = screen.getByTestId('conversation-composer-stack', {includeHiddenElements: true});
     expect(StyleSheet.flatten(hidden.props.style)?.display).toBe('none');
+    // 결과 목록 면이 덮는 동안 대화(목록·컴포저)는 화면 낭독에서 빠진다 — 보이지 않는 행에 초점이 닿지 않게.
+    expect(screen.getByTestId('conversation-layout-wrap', {includeHiddenElements: true}).props.accessibilityElementsHidden).toBe(true);
     // 입력 전: 최근 검색이 없으면 한 줄 안내가 서고, 아직 아무 검색도 나가지 않았다.
     expect(screen.getByTestId('conversation-search-idle-hint')).toBeTruthy();
     expect(screen.queryByTestId('conversation-search-results')).toBeNull();
@@ -327,6 +329,8 @@ describe('#5364 대화 안 검색 — 이동', () => {
     expect(jumpTargetOf()?.seq).toBe(103);
     // 목록 면은 물러나고 대화가 보인다. 막대는 최근 결과가 1번이고, 다음 쪽이 남았으니 총 건수에 +가 붙는다.
     expect(screen.queryByTestId('conversation-search-panel')).toBeNull();
+    // 대화가 다시 보이니 낭독에도 돌아온다.
+    expect(screen.getByTestId('conversation-layout-wrap').props.accessibilityElementsHidden).toBe(false);
     expect(positionText()).toBe('1 / 2+');
     // 가장 최근 결과라 ↓ 는 꺼져 있다.
     expect(screen.getByTestId('conversation-search-newer').props.accessibilityState.disabled).toBe(true);

@@ -256,6 +256,10 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
             railStatus="connected"
           />
         </View>
+        <View
+          style={styles.layoutFill}
+          accessibilityElementsHidden={search.listOpen}
+          importantForAccessibility={search.listOpen ? 'no-hide-descendants' : 'auto'}>
         <ConversationLayout
           list={
             <Timeline
@@ -288,6 +292,7 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
             </>
           }
         />
+        </View>
         {search.listOpen ? (
           <ConversationSearchPanel
             search={search}
@@ -306,5 +311,6 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
 const buildStyles = (_color: Palette) =>
   StyleSheet.create({
     column: {flex: 1},
+    layoutFill: {flex: 1},
     headerOverlay: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1},
   });
