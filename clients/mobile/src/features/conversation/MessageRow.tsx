@@ -141,6 +141,8 @@ import {useLinkPreviewPreference} from './linkPreviewPreference';
 import {messageRowKey} from './rowViewability';
 import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
+import {useLocaleService} from '../../i18n/useLocaleService';
+import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {SendFailureActions} from './SendFailureActions';
 import {
@@ -2638,6 +2640,8 @@ function MessageRowInner({
     replyParent !== undefined && message.rootId !== undefined;
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  // 꼬리의 「수정됨」을 눌러 고친 시각 문장을 펼쳤는가(#5326). 행이 가진 화면 상태 하나이고 서버에는 가지 않는다.
+  const [editedOpen, setEditedOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -2684,6 +2688,8 @@ function MessageRowInner({
   // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
   // ===========================================================================
   const formatMessage = useFormatMessage();
+  // 시각을 문장으로 짓는 화면은 언어 서비스를 통째로 읽는다(`useFormatMessage` 는 `formatMessage` 만 준다, #5026).
+  const locale = useLocaleService();
   // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).
   const replyToSpoken =
     isMarkedReply && !deleted && message.rootId !== undefined
@@ -3155,12 +3161,17 @@ function MessageRowInner({
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
   const stopMark = deleted ? null : streamStopMark(message, runEnded === true);
 
+  // 「수정됨」과 고친 시각 (#5326). 낱말은 사전, 시각 문장은 웹과 같은 코어 함수다. 지워진 행에는 없다.
+  const editedTail = deleted ? null : editedMark(locale, message, nowMs);
+
   const tail = [
     // 「수정됨」보다 **앞**이다. 안쪽에서 바깥쪽 규칙에서 이보다 안쪽인 서술은
     // 없다 — 이 낱말은 본문이 여기서 끝났다고 말하고, 나머지는 그 본문에
     // **대해** 말한다. 이 배열이 낭독 라벨의 재료이므로 순서는 귀에도 그대로 간다.
     stopMark,
-    !deleted && message.state === 'edited' ? '수정됨' : null,
+    // 낭독은 낱말이 아니라 시각 문장이다: 행이 접근성 원소 하나라 안쪽 `Pressable` 의 누르기는 VoiceOver 에 닿지 않으므로,
+    // 시각은 행의 문장에 실려야 귀에 닿는다(시각을 모르는 줄은 낱말만).
+    editedTail === null ? null : editedTail.full,
     // 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥 스레드로
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
     // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
@@ -3518,11 +3529,30 @@ function MessageRowInner({
                 {stopMark}
               </Text>
             ) : null}
-            {!deleted && message.state === 'edited' ? (
+            {editedTail === null ? null : editedTail.hasTime ? (
+              // 누르면 고친 시각 문장으로 펼쳐지고 다시 누르면 낱말로 접힌다(#5326). 길게 누르기 시트 머리도 같은 문장을 말한다.
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={editedTail.full}
+                accessibilityHint={formatMessage('timeline.edited.pressHint')}
+                accessibilityState={{expanded: editedOpen}}
+                hitSlop={META_HIT_SLOP}
+                onPress={() => {
+                  if (longPress.consumeTap()) return;
+                  setEditedOpen(open => !open);
+                }}
+                unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
+                style={({pressed}) => [pressed && styles.pressed]}
+                testID="edited-mark">
+                <Text style={styles.tailMark}>
+                  {editedOpen ? editedTail.full : editedTail.mark}
+                </Text>
+              </Pressable>
+            ) : (
               <Text style={styles.tailMark} testID="edited-mark">
-                수정됨
+                {editedTail.mark}
               </Text>
-            ) : null}
+            )}
             {showsPinMark ? (
               <Text style={styles.tailMark} testID="pin-mark">
                 {PIN_ROW_MARK}
@@ -3689,6 +3719,7 @@ function MessageRowInner({
           pinned={pinned}
           authorLabel={authorLabel}
           deletePending={deletePending}
+          nowMs={nowMs}
           onClose={() => setSheetOpen(false)}
           onToggleReaction={emoji => {
             setSheetOpen(false);

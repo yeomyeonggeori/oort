@@ -853,6 +853,11 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.edited.atDate",
+  "timeline.edited.atDay",
+  "timeline.edited.atTime",
+  "timeline.edited.mark",
+  "timeline.edited.pressHint",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
@@ -1980,6 +1985,19 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.edited.atDate": {
+    "date": "string",
+    "time": "string"
+  },
+  "timeline.edited.atDay": {
+    "day": "string",
+    "time": "string"
+  },
+  "timeline.edited.atTime": {
+    "time": "string"
+  },
+  "timeline.edited.mark": {},
+  "timeline.edited.pressHint": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
@@ -3051,6 +3069,11 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.edited.atDate": { date: string; time: string };
+  "timeline.edited.atDay": { day: string; time: string };
+  "timeline.edited.atTime": { time: string };
+  "timeline.edited.mark": Record<string, never>;
+  "timeline.edited.pressHint": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;

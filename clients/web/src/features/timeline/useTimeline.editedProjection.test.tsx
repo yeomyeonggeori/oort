@@ -716,3 +716,42 @@ describe("useTimeline — 수정 표시 없는 투영(스트림 조각)도 같�
     expect(out.newestSeq).toBe(11);
   });
 });
+
+describe("useTimeline — 고친 시각도 실시간으로 바뀐다 (#5326)", () => {
+  // 「수정됨」 옆의 고친 시각은 행의 `editedAtMs` 에서 나온다. 다른 사람의 화면에서 그 값이 바뀌는 길은 `message.edited` 프레임의
+  // `edited_at_ms` → `payloadToMessage` → `applyEditedMessage` 하나다(이미 있는 길). 이 시험이 그 길을 못 박는다: 값이 없던 줄에 세우고,
+  // 두 번째 고침이 새 값으로 바꾸고, 고친 시각이 없는 프레임(스트림 조각)은 사람이 고친 표지를 만들지 않는다.
+  it("첫 편집 프레임이 고친 시각을 세우고, 두 번째 프레임이 새 시각으로 바꾼다", async () => {
+    rest.head = [rootRow()];
+    await mount();
+    expect(out.messages[0].editedAtMs).toBeUndefined();
+
+    await act(async () => {
+      rail.handlers?.onMessage(editedFrame(rootRow(), ROOT_EDITED));
+    });
+    expect(out.messages[0].editedAtMs).toBe(1_700_000_099_000);
+
+    await act(async () => {
+      rail.handlers?.onMessage(
+        editedFrame(rootRow(), `${ROOT_EDITED} (다시 고침)`, { edited_at_ms: 1_700_000_199_000 })
+      );
+    });
+    expect(out.messages[0].editedAtMs).toBe(1_700_000_199_000);
+    expect(out.messages[0].body).toBe(`${ROOT_EDITED} (다시 고침)`);
+    expect(out.messages[0].state).toBe("edited");
+  });
+
+  it("고친 시각이 비어 온 프레임(스트림 조각)은 사람이 고친 표지를 만들지 않는다", async () => {
+    rest.head = [rootRow()];
+    await mount();
+
+    await act(async () => {
+      rail.handlers?.onMessage(
+        editedFrame(rootRow(), "조각이 자란 본문", { state: "sent", edited_at_ms: null })
+      );
+    });
+    expect(out.messages[0].body).toBe("조각이 자란 본문");
+    expect(out.messages[0].state).toBe("sent");
+    expect(out.messages[0].editedAtMs).toBeUndefined();
+  });
+});

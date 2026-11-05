@@ -62,8 +62,11 @@ const MENU_AUTHOR_KEYS: MessageActionItemKey[] = [
   "delete",
 ];
 
-/** 도구 막대가 직접 보여 주는 항목(반응 여섯 + 더 고르기 + 답글). 반응 칸 수는 빈도 저장소가 정한다. */
+/** 묶음 표가 도구 막대에 세운 항목(반응 여섯 + 더 고르기 + 답글). 반응 칸 수는 빈도 저장소가 정한다. */
 const TOOLBAR_KEYS: MessageActionItemKey[] = [...REACTION_KEYS, "reply"];
+
+/** 내 메시지의 도구 막대: 위 항목에 연필(고치기)이 답글 다음에 더해진다(#5326). 남의 메시지는 `TOOLBAR_KEYS` 그대로다. */
+const TOOLBAR_AUTHOR_KEYS: MessageActionItemKey[] = [...TOOLBAR_KEYS, "edit"];
 
 /** 길게 누르기 시트는 도구 막대가 없는 터치 표면이라 전부다: 반응 · 답글 · 메뉴 목록. */
 const SHEET_AUTHOR_KEYS: MessageActionItemKey[] = [
@@ -89,10 +92,12 @@ describe("메시지 액션 세 표면", () => {
     const menu = keysOf(messageActionItemsForSurface("menu", available, copyReady));
     expect(menu.filter((key) => key.startsWith("react"))).toEqual([]);
     expect(menu).not.toContain("reply");
-    expect(keysOf(messageToolbarItems(available, copyReady))).toEqual(TOOLBAR_KEYS);
+    expect(keysOf(messageToolbarItems(available, copyReady))).toEqual(TOOLBAR_AUTHOR_KEYS);
+    // 남의 메시지의 막대에는 연필이 없다: 고치기는 작성자만이다.
+    expect(keysOf(messageToolbarItems({ ...available, edit: false, delete: false }, copyReady))).toEqual(TOOLBAR_KEYS);
   });
 
-  it("도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리: 어떤 동작도 포인터에서 사라지지 않고 두 곳에 겹치지도 않는다", () => {
+  it("도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리: 어떤 동작도 포인터에서 사라지지 않고, 두 곳에 겹치는 것은 연필(고치기) 하나뿐이다", () => {
     const scenarios: Array<[string, Partial<MessageActionAvailability>, Partial<MessageActionCopyState>]> = [
       ["내 글 메시지", {}, {}],
       ["남의 메시지", { edit: false, delete: false }, {}],
@@ -106,9 +111,10 @@ describe("메시지 액션 세 표면", () => {
       const all = keysOf(messageActionItems(a, c)).sort();
       const toolbar = keysOf(messageToolbarItems(a, c));
       const menu = keysOf(messageActionItemsForSurface("menu", a, c));
-      expect([...toolbar, ...menu].sort(), name).toEqual(all);
+      expect([...new Set([...toolbar, ...menu])].sort(), name).toEqual(all);
       expect(keysOf(messageActionItemsForSurface("sheet", a, c)).sort(), name).toEqual(all);
-      expect(toolbar.filter((key) => menu.includes(key)), `${name}: 겹침`).toEqual([]);
+      // 겹침은 도구 막대 복사본 표지(`toolbarCopy`)가 선 항목뿐이고, 그것은 고칠 수 있는 메시지에만 있다(#5326).
+      expect(toolbar.filter((key) => menu.includes(key)), `${name}: 겹침`).toEqual(a.edit ? ["edit"] : []);
     }
   });
 
@@ -153,12 +159,16 @@ describe("메시지 액션 세 표면", () => {
     expect(other[0].key).toBe("quote");
   });
 
-  it("고치기·지우기는 어떤 행에서도 도구 막대에 올리지 않는다(결정: Buzz·Slack 모두 ⋮ 안), 시트에는 있다", () => {
+  it("연필(고치기)은 내 메시지의 도구 막대에도 선다(owner 2026-11-05, #5326). 지우기는 올리지 않는다. 메뉴 첫 줄·시트에도 그대로 있다", () => {
     const toolbar = keysOf(messageToolbarItems(available, copyReady));
-    expect(toolbar).not.toContain("edit");
+    expect(toolbar).toContain("edit");
     expect(toolbar).not.toContain("delete");
+    // 묶음 표는 그대로다(고치기가 든 묶음은 메뉴 한 곳): 연필은 표의 예외가 아니라 항목의 복사본 표지다.
     expect(MESSAGE_ACTION_GROUP_PLACEMENT[MESSAGE_ACTION_GROUP.message]).toEqual([MESSAGE_ACTION_PLACE.menu]);
     expect(MESSAGE_ACTION_GROUP_PLACEMENT[MESSAGE_ACTION_GROUP.destructive]).toEqual([MESSAGE_ACTION_PLACE.menu]);
+    const copies = messageActionItems(available, copyReady).filter((item) => item.toolbarCopy === true);
+    expect(keysOf(copies)).toEqual(["edit"]);
+    expect(keysOf(messageActionItemsForSurface("menu", available, copyReady))[0]).toBe("edit");
     const sheet = keysOf(messageActionItemsForSurface("sheet", available, copyReady));
     expect(sheet).toContain("edit");
     expect(sheet).toContain("delete");
