@@ -18,14 +18,22 @@ may win over the volume login). `--model` accepts only the names listed in METHO
 catalog: no -900k / -pro variants).
 
 Nothing here is a secret: only provider ids and model names. Both come from the Hermes v0.22.2 catalog
-(image nousresearch/hermes-agent@sha256:36099926..., hermes_cli/models_catalog_static.py `_PROVIDER_MODELS`);
-note `claude-sonnet-5` is the catalog name (`claude-sonnet-5-5` is not in it).
+(image nousresearch/hermes-agent@sha256:36099926..., hermes_cli/models_catalog_static.py `_PROVIDER_MODELS`), plus the few ids of EXTRA_MODELS
+that this pin's list lacks and whose provider path forwards them untouched (ADR-0203 증보 2026-11-05, #5323). `claude-sonnet-5-5` is one of them:
+the static list stops at `claude-sonnet-5`, Anthropic's id for Sonnet 5.5 is `claude-sonnet-5-5`, and it is now the default of both
+anthropic methods (the static `claude-sonnet-5` is still accepted by `--model`, but no config of the catalog names it any more).
 
 Connector mode (#4935). A connector Hermes (Gmail, calendar, drive read-only) is not the default config plus a few lines: it denies the whole `web` and
 `image_gen` toolsets and has no picture plugin, so its lock section is the one of `google-connectors.config.yaml`. `--connector-base` takes that file,
 swaps its own `model:` / `fallback_model:` for the chosen model fragment (in the same place) and keeps everything else byte for byte: same input,
 same bytes, same sha256. The Railway start command and `lockgate.py` accept `config.yaml` only when its sha256 is one of the `--catalog` lines
-(the default config, and a connector config for each of the four model fragments); the operator compares by hash and never prints a value.
+(the default config, the team default below, and a connector config for each of the four model fragments); the operator compares by hash and
+never prints a value.
+
+Team default (#5323). The default config has no `model:` section, so a team Hermes running in default mode (picture and search tools, no connectors)
+could not pin its model. `--base infra/hermes/config.yaml` appends a fragment to it (`render`), and DEFAULT_MODEL_CONFIGS names the one fragment
+that result is accepted with: Codex primary, Claude fallback (`default/codex-oauth.fallback-claude-oauth`, owner 2026-11-05 16:01). Another combination is another
+catalog line, decided and written down one at a time (ADR-0203 증보 2026-11-05).
 
 Usage (stdlib only, no PyYAML on purpose):
   render_model_config.py --auth codex-oauth [--fallback claude-oauth] [--model M] [--fallback-model M]
@@ -41,21 +49,37 @@ import os
 import re
 import sys
 
-# method -> (hermes provider id, models in the catalog for that provider, default model, how it signs in)
+# method -> (hermes provider id, models in the pinned image's static catalog for that provider (a curated subset), default model, how it signs in).
+# A default may be an id of EXTRA_MODELS below instead (the two anthropic methods: #5323).
 METHODS = {
     "codex-oauth": ("openai-codex", ("gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5",
                                      "gpt-5.4-mini", "gpt-5.4", "gpt-5.3-codex-spark"), "gpt-5.6-sol",
                     "login: hermes auth add openai-codex --type oauth --no-browser (device code; credentials stay in the Hermes volume)"),
     "claude-oauth": ("anthropic", ("claude-fable-5.1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
-                                   "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"), "claude-sonnet-5",
+                                   "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"), "claude-sonnet-5-5",
                      "login: hermes auth add anthropic --type oauth --no-browser (paste code#state; credentials stay in the Hermes volume)"),
     "api-key-openai": ("openai-api", ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
                                       "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5-mini"), "gpt-5.6-sol",
                        "secret: OPENAI_API_KEY as a service variable or in the volume .env, never in this file"),
     "api-key-anthropic": ("anthropic", ("claude-fable-5.1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
-                                        "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"), "claude-sonnet-5",
+                                        "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"), "claude-sonnet-5-5",
                           "secret: ANTHROPIC_API_KEY as a service variable or in the volume .env, never in this file"),
 }
+# Ids this pin's static list does not carry but the renderer accepts anyway, per provider, ONE LINE EACH (ADR-0203 증보 2026-11-05, rule N4):
+# what was read in the pinned image to show its provider path forwards an id outside the list untouched, which vendor page lists the id,
+# and what ran on it. The ADR's table repeats these lines, scripts/tests/check_railway_catalog.py holds table and code to each other, and a new Hermes
+# pin means reading each line again (N4): an id the new static list carries moves out of here, one the path now filters is deleted.
+HERMES_PIN = "v0.22.2"
+EXTRA_MODELS = {
+    "anthropic": {
+        "claude-sonnet-5-5": "gateway/run.py reads model.default unchecked, hermes_cli/model_normalize.py only turns dots into hyphens for anthropic, "
+                             "agent/anthropic_adapter.py names the id itself (_BETWEEN_TOOLS_OFF_CLAUDE_SUBSTRINGS) and sends it as is; Anthropic's models "
+                             "overview (platform.claude.com/docs/en/about-claude/models/overview) lists it; the team Hermes ran on it from 2026-10-20",
+    },
+}
+# The one model fragment accepted on top of the default config (the default config has no model section of its own): see "Team default" above.
+# Names are keys of FRAGMENT_SPECS; each becomes the catalog line `default/<name>`.
+DEFAULT_MODEL_CONFIGS = ("codex-oauth.fallback-claude-oauth",)
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # one plain YAML scalar: no quoting, no injection
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONNECTOR_REFERENCE = "google-connectors.config.yaml"  # the connector-mode lock section and `mcp_servers` (K-S1b, #3952)
@@ -72,13 +96,19 @@ class RenderError(ValueError):
     pass
 
 
+def allowed_models(method):
+    """The models `--model` accepts for a method: the curated part of the pinned static catalog, then the provider's EXTRA_MODELS."""
+    provider, catalog, _default, _note = METHODS[method]
+    return tuple(catalog) + tuple(model for model in EXTRA_MODELS.get(provider, {}) if model not in catalog)
+
+
 def _pick(method, model, role):
     if method not in METHODS:
         raise RenderError("unknown %s auth method %r (choose: %s)" % (role, method, ", ".join(sorted(METHODS))))
-    provider, catalog, default, note = METHODS[method]
+    provider, _catalog, default, note = METHODS[method]
     model = default if model is None else model
-    if not MODEL_RE.fullmatch(model) or model not in catalog:
-        raise RenderError("%s model %r is not in the Hermes v0.22.2 catalog for provider %s" % (role, model, provider))
+    if not MODEL_RE.fullmatch(model) or model not in allowed_models(method):
+        raise RenderError("%s model %r is not in the Hermes %s catalog (nor in EXTRA_MODELS) for provider %s" % (role, model, HERMES_PIN, provider))
     return provider, model, note
 
 
@@ -144,9 +174,12 @@ def read_text(path):
 
 
 def catalog(base_text, connector_reference_text):
-    """`{name: text}` of every config the gate accepts, in a fixed order: the default config as it is, and the connector-mode config for each
-    of the four model fragments (`connector/<fragment>`). lockgate.py's `ACCEPTED_CONFIG_SHA256` and the Railway start command carry their sha256."""
+    """`{name: text}` of every config the gate accepts, in a fixed order: the default config as it is, the default config with the team model
+    fragment appended (`default/<fragment>`, #5323), and the connector-mode config for each of the four model fragments (`connector/<fragment>`).
+    lockgate.py's `ACCEPTED_CONFIG_SHA256` and the Railway start command carry their sha256."""
     out = {"default": base_text}
+    for name in DEFAULT_MODEL_CONFIGS:
+        out["default/" + name] = render(base_text, **FRAGMENT_SPECS[name])
     for name, spec in FRAGMENT_SPECS.items():
         out["connector/" + name] = render_connector(connector_reference_text, **spec)
     return out

@@ -466,8 +466,8 @@ it none of these exist and no Hermes is started.
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
   backs it. The gate also accepts only the config files of its own table (the
-  default config, and a connector-mode config per model fragment that
-  `infra/hermes/render_model_config.py --catalog` lists, #4935): a config with any other
+  default config, the default config with the team model fragment, and a connector-mode config per model fragment that
+  `infra/hermes/render_model_config.py --catalog` lists, #4935, #5323): a config with any other
   byte does not start. Editing `infra/hermes/config.yaml` or the start command takes the
   backing back on yourself, and the gate's table with it.
 - Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
