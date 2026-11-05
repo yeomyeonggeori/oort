@@ -571,7 +571,7 @@ R1 진입 조건 「알림 확장(NSE) 토큰은 알림 읽기 전용으로 좁�
 
 ### 8.10 R1.4 — Codex 유효 설정을 세션마다 되읽는다, RR-6 보강 (2026-11-05, #2647)
 
-- Status: **§8.1 결재 범위 안의 보강 — planner 확인 필요.** 성재 2026-09-24 「샌드박스 자동 실행 수용」(§8.1)의 조건 2·8을 런타임에서 지키는 장치이고 새 능력이나 완화가 아니다. Accepted 표시는 planner가 한다(ADR-0203 「위임 결재」 절, §8.9와 같은 방식). #2644(R1.3) 독립 보안 검수는 PASS(Blocker 0·High 0)였고, 남은 Low 1(L1)·Info 2(I1·I3)를 이 절이 닫는다. D5·D6 본문과 §3 불변식은 바꾸지 않았다. 새 ADR 번호는 쓰지 않는다.
+- Status: **Accepted (2026-11-05, planner 위임 결재 — §8.1 결재 범위 안의 보강, 독립 보안 검수 PASS: Blocker 0·High 0·Medium 0·Low 0).** 성재 2026-09-24 「샌드박스 자동 실행 수용」(§8.1)의 조건 2·8을 런타임에서 지키는 장치이고 새 능력이나 완화가 아니다. Accepted 표시는 planner가 한다(ADR-0203 「위임 결재」 절, §8.9와 같은 방식). #2644(R1.3) 독립 보안 검수는 PASS(Blocker 0·High 0)였고, 남은 Low 1(L1)·Info 2(I1·I3)를 이 절이 닫는다. D5·D6 본문과 §3 불변식은 바꾸지 않았다. 새 ADR 번호는 쓰지 않는다.
 
 **L1 — 조건 2·8의 키를 codex가 지금도 알아듣는지 되읽는다.**
 - 문제: 조건 2의 features 15개 `false`와 `shell_snapshot = false`는 host `config.toml`(과 `CODEX_CONFIG`)에 적힌 **키**일 뿐이다. codex가 그 키를 무시하거나 이름을 바꾸면 기능은 기본값으로 돌아간다. `shell_snapshot`이 켜지면 소유자 `.zshrc`의 export가 명령에 다시 걸려 조건 8이 무너진다(fail-open). 실제 codex로 재는 시험(`codex_isolation_real.rs`)은 `#[ignore]`라 CI에 없고, 완화는 codex-acp 1.13.0의 `^0.155.1`(patch만)뿐이었다.
