@@ -18,6 +18,7 @@ import {SEEK_MAX_PAGES, SEEK_MAX_ROWS} from '../src/features/conversation/jumpSe
 import AppShell from '../src/shell/AppShell';
 import {sessionPort} from '../src/storage/secureSession';
 import {setServerBase} from '../src/storage/serverBase';
+import {openPinList} from './fixtures/conversationMenu';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {resetSession} from './testkit';
 
@@ -32,7 +33,7 @@ import {resetSession} from './testkit';
 //
 // ## 이 파일의 red proof
 //
-//   1. **착지** - 쪽을 읽어 닿으면 목록이 그 줄을 들고 점프가 다시 걸리고, 줄이 물든다(`landed`). 읽기를 시작하는 줄을 지우면 첫 단정이 깨진다.
+//   1. **착지** - 쪽을 읽어 닿으면 목록이 그 줄을 들고 점프가 다시 걸리고, 줄이 물든다(`landed`). 읽기를 시작하는 줄을 지우면 첫 단정들이 깨진다.
 //   2. **취소** - 접은 뒤에는 늦게 온 답이 합쳐지지도, 점프를 다시 걸지도 않는다. 번호 비교(`seekRunRef`)를 지우면 깨진다.
 //   3. **상한** - 쪽 상한에 닿으면 읽기를 멈추고 지금의 고지로 물러난다. 상한 비교를 풀면 깨진다.
 // =============================================================================
@@ -123,6 +124,20 @@ const QUOTING_MESSAGE = message(HEAD_SEQ + 2, {
   replyTo: {seq: HIT_SEQ},
 });
 
+/** 고정 목록 한 건. 가리키는 메시지는 **로드된 페이지에 없다** - 고정은 대개 오래된 줄이다. */
+const PINNED_WIRE = {
+  messageId: HIT_ID,
+  channelId: GENERAL,
+  seq: HIT_SEQ,
+  authorMemberId: OTHER_ID,
+  type: 'text',
+  state: 'sent',
+  body: '배포 순서는 이 문서가 정본입니다.',
+  createdAtMs: T0,
+  pinnedBy: SELF_ID,
+  pinnedAtMs: T0 + 1_000,
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -168,7 +183,12 @@ interface Server {
  * seq 가 N 보다 작은 줄을 최근 순으로 `limit`(최대 200) 줄 내준다. 비어 있으면 `nextBefore` 가 없다 - 기록의 처음이다.
  */
 function installServer(
-  options: {headSeq?: number; headExtra?: unknown[]; firstSeq?: number} = {},
+  options: {
+    headSeq?: number;
+    headExtra?: unknown[];
+    firstSeq?: number;
+    pins?: unknown[];
+  } = {},
 ): Server {
   const firstSeq = options.firstSeq ?? 1;
   const headSeq = options.headSeq ?? HEAD_SEQ;
@@ -183,7 +203,7 @@ function installServer(
     if (url.includes('/search/messages')) {
       return jsonResponse(200, {hits: [SEARCH_HIT]});
     }
-    if (url.includes('/pins')) return jsonResponse(200, {pins: []});
+    if (url.includes('/pins')) return jsonResponse(200, {pins: options.pins ?? []});
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
     }
@@ -340,7 +360,7 @@ afterEach(() => {
 });
 
 describe('#5383 — 범위 밖 결과는 그 자리까지 읽어서 착지한다', () => {
-  it('RED PROOF — 한 쪽이면 닿는다: 읽고, 합치고, 다시 쏘고, 줄이 물든다', async () => {
+  it('RED PROOF — 한 쪽이면 닿는다: 읽고, 합치고, 같은 문으로 다시 쏜다', async () => {
     const server = installServer();
     await openFromSearch();
 
@@ -357,7 +377,7 @@ describe('#5383 — 범위 밖 결과는 그 자리까지 읽어서 착지한다
     expect(screen.queryByTestId('jump-missed')).toBeNull();
   });
 
-  it('여러 쪽도 이어 읽는다 - 쪽마다 직전 쪽의 끝에서 이어 받는다', async () => {
+  it('여러 쪽도 이어 읽는다 - 쪽마다 직전 쪽의 끝에서 이어 받고, 닿으면 줄이 물든다', async () => {
     const server = installServer();
     server.pageRows = 20; // 서버가 한 쪽에 20줄까지만 준다.
     await openFromSearch();
@@ -378,6 +398,23 @@ describe('#5383 — 범위 밖 결과는 그 자리까지 읽어서 착지한다
     await waitFor(() => expect(screen.getByTestId('quote-block')).toBeTruthy());
     expect(server.beforeCalls).toHaveLength(0);
     fireEvent.press(screen.getByTestId('quote-block'));
+
+    await waitFor(() => expect(holdsHit()).toBe(true));
+    await waitFor(() => expect(jumpToken()).toBeGreaterThan(1));
+    expect(timelineView().jumpTarget?.messageId).toBe(HIT_ID);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(server.beforeCalls).toHaveLength(1);
+  });
+});
+
+describe('#5383 — 다른 입구도 같은 문이다', () => {
+  it('고정 목록 - 고정한 메시지가 범위 밖이면 읽어서 착지한다', async () => {
+    const server = installServer({pins: [PINNED_WIRE]});
+    await openConversation();
+
+    await openPinList();
+    await waitFor(() => expect(screen.getByTestId('pin-list')).toBeTruthy());
+    fireEvent.press(screen.getAllByTestId('pin-list-item')[0]);
 
     await waitFor(() => expect(holdsHit()).toBe(true));
     await waitFor(() => expect(jumpToken()).toBeGreaterThan(1));
