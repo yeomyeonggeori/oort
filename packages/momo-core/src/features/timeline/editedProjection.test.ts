@@ -298,6 +298,8 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
     expect(state.messages).toHaveLength(1);
     expect(threadRollup(state.messages[0])?.replyCount).toBe(3);
     expect(state.messages[0].body).toBe(second);
+    // 「수정됨」 옆의 고친 시각(#5326)이 이 값에서 나온다: 두 번째 프레임이 말한 시각이 이긴다(응답·첫 프레임의 시각이 아니다).
+    expect(state.messages[0].editedAtMs).toBe(1_700_000_199_000);
   });
 
   it("수정 표시가 없는 message.edited(스트림 조각·props 만 바꾼 갱신)도 롤업과 인용을 지우지 않는다", () => {

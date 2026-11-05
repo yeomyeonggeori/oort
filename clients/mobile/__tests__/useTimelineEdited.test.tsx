@@ -1031,4 +1031,53 @@ describe('editedProjection (#4450)', () => {
       expect(result.current.state.newestSeq).toBe(11);
     });
   });
+
+  describe('고친 시각도 실시간으로 바뀐다 (#5326, 폰)', () => {
+    // 「수정됨」 옆의 고친 시각은 행의 `editedAtMs` 에서 나온다. 다른 사람의 화면에서 그 값이 바뀌는 길은 `message.edited` 프레임의
+    // `edited_at_ms` → `payloadToMessage` → `applyEditedMessage` 하나다(이미 있는 길). 이 시험이 그 길을 못 박는다: 값이 없던 줄에 세우고,
+    // 두 번째 고침이 새 값으로 바꾸고, 고친 시각이 없는 프레임(스트림 조각)은 지우지 않고 그대로 둔다.
+    it('첫 편집 프레임이 고친 시각을 세우고, 두 번째 프레임이 새 시각으로 바꾼다', async () => {
+      installFetch({head: [rootRow()]});
+      const {result, subscription} = await openChannel();
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+      expect(result.current.state.messages[0].editedAtMs).toBeUndefined();
+
+      act(() => {
+        subscription().__emit('publication', {data: editedFrame(rootRow(), ROOT_EDITED)});
+      });
+      expect(result.current.state.messages[0].editedAtMs).toBe(1_700_000_099_000);
+
+      act(() => {
+        subscription().__emit('publication', {
+          data: editedFrame(rootRow(), `${ROOT_EDITED} (다시 고침)`, {edited_at_ms: 1_700_000_199_000}),
+        });
+      });
+      const row = result.current.state.messages[0];
+      expect(row.editedAtMs).toBe(1_700_000_199_000);
+      expect(row.body).toBe(`${ROOT_EDITED} (다시 고침)`);
+      expect(row.state).toBe('edited');
+    });
+
+    it('고친 시각이 비어 온 프레임(스트림 조각)은 사람이 고친 표지를 만들지 않는다', async () => {
+      installFetch({head: [rootRow()]});
+      const {result, subscription} = await openChannel();
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+
+      act(() => {
+        subscription().__emit('publication', {
+          data: editedFrame(rootRow(), '조각이 자란 본문', {state: 'sent', edited_at_ms: null}),
+        });
+      });
+      const row = result.current.state.messages[0];
+      expect(row.body).toBe('조각이 자란 본문');
+      expect(row.state).toBe('sent');
+      expect(row.editedAtMs).toBeUndefined();
+    });
+  });
 });

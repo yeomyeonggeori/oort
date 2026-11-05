@@ -147,8 +147,8 @@ import {hapticScope} from '../../lib/haptics';
 // settle rule and the reaction map — three things that must not be able to
 // disagree with what the channel is showing one screen away.
 //
-// Echoes carry their root (`PendingMessage.rootId`) and 「대화에도 보내기」 choice with them, so one settle effect still
-// covers both surfaces and the channel list can draw a reply's echo with its 「↳ ○○님 스레드에 답글」 line (#4888).
+// Echoes carry their root (`PendingMessage.rootId`) with them, so one settle effect still covers both surfaces and the
+// channel list can draw a FAILED reply's echo with its 「↳ ○○님 스레드에 답글」 line (#4888, #5324).
 // =============================================================================
 
 const HEAD_LIMIT = 50;
@@ -174,8 +174,6 @@ export interface ThreadRepliesLoad {
 export interface TimelineSendFlags {
   /** 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01). */
   suppressUnfurl?: boolean;
-  /** 스레드 답글을 「대화에도 보내기」로 보낸다(ADR-0148 증보 2026-10-31, #4888). 답글(`sendReply`)에서만 뜻이 있다. */
-  alsoInChannel?: boolean;
 }
 
 export interface UseTimelineResult {
@@ -461,9 +459,9 @@ export function useTimeline(
     remove: removeUnfurls,
   } = useMessageUnfurls(workspaceId, currentChannel);
 
-  // Which echoes are thread replies: the echo carries its own `rootId` (and `alsoInChannel`), the way `replyToId`
-  // rides the row — the channel list needs both to draw a failed or also-sent reply with its 「↳ ○○님 스레드에 답글」
-  // line (#4888), and both surfaces still share one array and one settle effect.
+  // Which echoes are thread replies: the echo carries its own `rootId`, the way `replyToId` rides the row — the channel
+  // list needs it to draw a failed reply with its 「↳ ○○님 스레드에 답글」 line (#4888), and both surfaces still share
+  // one array and one settle effect.
 
   // 보내지 못한 글의 장부(#5222). 코어 `PendingMessage` 는 웹과 나눠 쓰므로 건드리지 않고 행 곁에 clientMsgId 로 둔다(`replyToId` 같은 칸과 달리
   // 행에 싣지 않는다). 자동 재전송의 판정(어떤 실패를 몇 번 얼마 동안)은 코어 `pickAutoResends` 하나다 - 웹 `useTimeline` 과 같은 길이다.
@@ -504,9 +502,7 @@ export function useTimeline(
         const suppress = row.suppressUnfurl === true ? {suppressUnfurl: true as const} : {};
         const attached =
           attachmentIds === undefined || attachmentIds.length === 0 ? {} : {attachmentIds};
-        // 「대화에도 보내기」도 행을 타고 다닌다: 첫 요청이 서버에 닿지 못했다면 재시도가 같은 멱등키로 **같은 요청**이어야 한다.
-        const also = row.alsoInChannel === true ? {alsoInChannel: true as const} : {};
-        const replyOptions = {...attached, ...suppress, ...also};
+        const replyOptions = {...attached, ...suppress};
         const confirmed = await (rootId === undefined
           ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
               ...(row.replyToId === undefined
@@ -551,7 +547,7 @@ export function useTimeline(
           failuresRef.current.set(row.clientMsgId, record);
           syncFailureKinds();
           if (listed) updatePending(list => failPending(list, row.clientMsgId));
-          // 스레드 답글(`rootId` 가 있는 행)도 대화의 글과 똑같이 남긴다(#5262): 행이 뿌리(`rootId`)와 「대화에도 보내기」를 싣고 다녀서
+          // 스레드 답글(`rootId` 가 있는 행)도 대화의 글과 똑같이 남긴다(#5262): 행이 뿌리(`rootId`)를 싣고 다녀서
           // 되살린 행이 스스로 어느 스레드의 답글인지 안다. 돌아온 행은 스레드 화면(`repliesPending`)과 대화 목록(실패한 답글은 목록에도
           // 선다, `isChannelListEcho`) 어느 쪽에서나 기존 실패 행 그대로 그려지고, 다시 보내기는 `post` 가 뿌리로 답글 길을 탄다.
           rememberFailedSend(workspaceId, row, record.kind);
@@ -911,7 +907,6 @@ export function useTimeline(
           ? {}
           : {attachments}),
         ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
-        ...(flags?.alsoInChannel === true ? {alsoInChannel: true} : {}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
