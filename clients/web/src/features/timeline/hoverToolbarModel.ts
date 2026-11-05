@@ -287,6 +287,61 @@ export function placeToolbar(input: {
   return { below: false, slide: 0, nudge: 0 };
 }
 
+// =============================================================================
+// 레이아웃이 바뀐 뒤 다시 재기 (#5307 M1, 검수 5b)
+//
+// 막대의 자리는 마운트 때 한 번 정했다. 포인터가 행 위에 머문 채 레이아웃이 자리를 잡으면(대화가 바닥으로 붙고 입력창 위에 작업 띠가 서는 사이)
+// 마운트 때는 스크롤러 안에 들던 아래 자리가 스크롤러 밖이 되어 막대가 띠 밑에 숨은 채 남았다(검수가 본 장면: 단추 0/6). 다시 재면 되지만 `placeToolbar`는
+// **위 자리의 상자**를 받는다. 다시 잴 때 막대는 이미 아래로 뒤집혔거나 밀리거나 비껴 서 있으므로, 서 있는 상자에서 위 자리 상자를 CSS 산식을 거꾸로 풀어 되돌린다.
+// =============================================================================
+
+/** 막대가 지금 서 있는 자리: 아래로 뒤집혔는가, 위 자리에서 아래로 민 px, 오른쪽으로 비껴 선 px. `placeToolbar`가 돌려주는 모양과 같다. */
+export interface ToolbarPlacement {
+  below: boolean;
+  slide: number;
+  nudge: number;
+}
+
+/**
+ * 지금 서 있는 막대의 상자(`bar`)에서 **위 자리(밀림·비낌 없음)의 상자**를 되돌린다. `belowStraddleRect`의 역이다.
+ * 위 자리는 막대 밑단이 행 안으로 `깊이`(= `--spacing-row`)만 들어오고(`top: 0` + `translate: -100% + row`) 밀림만큼 더 내려앉는다. 아래 자리는 막대 윗단이
+ * 행 밑단에서 `깊이`만큼 위에 선다(`bottom: 0` + `translate: 100% − row`). 깊이는 CSS 변수를 읽지 않고 서 있는 상자에서 잰다(`belowStraddleRect`와 같은 방식).
+ */
+export function restToolbarRect(input: {
+  bar: ToolbarRect;
+  row: Pick<DOMRect, "top" | "bottom">;
+  placed: ToolbarPlacement;
+}): ToolbarRect {
+  const { bar, row, placed } = input;
+  const height = bar.bottom - bar.top;
+  const intoRow = placed.below ? row.bottom - bar.top : bar.bottom - placed.slide - row.top;
+  const bottom = row.top + intoRow;
+  return { left: bar.left - placed.nudge, right: bar.right - placed.nudge, top: bottom - height, bottom };
+}
+
+/**
+ * 막대 요소에 걸린 자리 변수(CSSOM)와 위·아래 유틸리티 클래스에서 지금 서 있는 자리를 읽는다. 렌더 상태를 따로 들고 있지 않으므로 다시 마운트돼도 어긋나지 않는다.
+ * 클래스로 읽는 이유: 웹의 직접 문구 장부(`direct-copy`)가 「below」 같은 낱말 리터럴을 세므로 자리 이름 문자열을 새로 두지 않는다.
+ */
+export function readToolbarPlacement(bar: HTMLElement): ToolbarPlacement {
+  return {
+    below: bar.classList.contains("hover-toolbar-straddle-below"),
+    slide: Number.parseFloat(bar.style.getPropertyValue(HOVER_TOOLBAR_SLIDE_VAR)) || 0,
+    nudge: Number.parseFloat(bar.style.getPropertyValue(HOVER_TOOLBAR_NUDGE_VAR)) || 0,
+  };
+}
+
+/** `placeToolbar`의 결과를 막대의 변수로 건다. 안 밀고 안 비끼면 변수를 지운다(다시 잴 때 옛 값이 남지 않게). `below`는 렌더 상태(`data-straddle`·클래스)가 말한다. */
+export function applyToolbarPlacement(bar: HTMLElement, placement: ToolbarPlacement): void {
+  if (placement.nudge > 0) bar.style.setProperty(HOVER_TOOLBAR_NUDGE_VAR, String(placement.nudge));
+  else bar.style.removeProperty(HOVER_TOOLBAR_NUDGE_VAR);
+  if (!placement.below && placement.slide > 0) {
+    bar.style.setProperty(HOVER_TOOLBAR_SLIDE_VAR, String(Number(placement.slide.toFixed(2))));
+  } else {
+    bar.style.removeProperty(HOVER_TOOLBAR_SLIDE_VAR);
+  }
+}
+
 /** 같은 목록(`root`) 안에서 문서 순서로 센 앞·뒤 한 칸(행·시스템 줄). */
 export function toolbarNeighbors(
   row: Element,
