@@ -485,6 +485,11 @@ export const messageKeys = [
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.jumpSeek.cancel",
+  "mobile.jumpSeek.dismiss",
+  "mobile.jumpSeek.failed",
+  "mobile.jumpSeek.reading",
+  "mobile.jumpSeek.retry",
   "mobile.linkCard.cancel",
   "mobile.linkCard.copied",
   "mobile.linkCard.copy",
@@ -1553,6 +1558,11 @@ export const argumentSpecs = {
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.jumpSeek.cancel": {},
+  "mobile.jumpSeek.dismiss": {},
+  "mobile.jumpSeek.failed": {},
+  "mobile.jumpSeek.reading": {},
+  "mobile.jumpSeek.retry": {},
   "mobile.linkCard.cancel": {},
   "mobile.linkCard.copied": {},
   "mobile.linkCard.copy": {},
@@ -2707,6 +2717,11 @@ export interface MessageArgs {
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.jumpSeek.cancel": Record<string, never>;
+  "mobile.jumpSeek.dismiss": Record<string, never>;
+  "mobile.jumpSeek.failed": Record<string, never>;
+  "mobile.jumpSeek.reading": Record<string, never>;
+  "mobile.jumpSeek.retry": Record<string, never>;
   "mobile.linkCard.cancel": Record<string, never>;
   "mobile.linkCard.copied": Record<string, never>;
   "mobile.linkCard.copy": Record<string, never>;

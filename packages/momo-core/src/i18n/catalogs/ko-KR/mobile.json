@@ -1,6 +1,11 @@
 {
   "mobile.locale.backToSettings": "설정으로 돌아가기",
   "mobile.locale.saving": "언어를 적용하는 중이에요.",
+  "mobile.jumpSeek.reading": "이전 대화에서 메시지를 찾는 중이에요",
+  "mobile.jumpSeek.cancel": "취소",
+  "mobile.jumpSeek.failed": "이전 대화를 불러오지 못했어요",
+  "mobile.jumpSeek.retry": "다시 시도",
+  "mobile.jumpSeek.dismiss": "닫기",
   "mobile.ios.cameraUsage": "사진을 찍어 대화에 첨부하거나 QR 코드로 이 기기를 워크스페이스에 연결할 때 카메라를 써요.",
   "mobile.ios.faceIdUsage": "에이전트에게 보내는 지시를 이 기기에서 확인할 때 Face ID를 써요.",
   "mobile.ios.localNetworkUsage": "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요.",

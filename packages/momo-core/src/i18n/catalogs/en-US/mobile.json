@@ -1,6 +1,11 @@
 {
   "mobile.locale.backToSettings": "Back to settings",
   "mobile.locale.saving": "Applying language…",
+  "mobile.jumpSeek.reading": "Looking for the message in earlier messages…",
+  "mobile.jumpSeek.cancel": "Cancel",
+  "mobile.jumpSeek.failed": "Couldn’t load earlier messages",
+  "mobile.jumpSeek.retry": "Try again",
+  "mobile.jumpSeek.dismiss": "Dismiss",
   "mobile.ios.cameraUsage": "Use the camera to attach photos to conversations or scan a QR code to connect this device to a workspace.",
   "mobile.ios.faceIdUsage": "Use Face ID to confirm instructions sent to agents from this device.",
   "mobile.ios.localNetworkUsage": "Use the local network to connect to an oort server on the same network.",
