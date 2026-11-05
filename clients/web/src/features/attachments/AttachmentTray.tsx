@@ -79,6 +79,11 @@ import {
 // 막대를 그리지 않는다(B-3), 이름은 가운데에서 생략한다(N-A), 20개를 채워도 창을
 // 먹지 않는다(B-2: 이제 한 줄이라 구조로 지켜진다), 발치 안내 줄은 비어도 자리를 지킨다(M-3).
 //
+// ## 입력창이 필요 이상 자라지 않는다 (#5328, owner 2026-11-05)
+//
+// 카드 한 변은 80(`--spacing-tray-card`, 처음 96), 카드 줄과 글 사이는 안내 줄 하나(16)다(카드 줄 아래 여백 없음,
+// 안내 줄 아래는 글 칸 안여백과 겹침). 첨부를 넣으면 입력창이 126 → 96(css px) 자란다.
+//
 // ## 제거 ×
 //
 // 작은 원(눈에 보이는 것은 16px, 누르는 면은 24px)이 카드 오른쪽 위 **모서리에 걸친다** —
@@ -625,7 +630,7 @@ export function AttachmentTray({
           data-testid="attachment-list-scroll"
           data-fade={fade}
           onScroll={syncFade}
-          className="tray-strip flex gap-2 px-3 pb-1 pt-2"
+          className="tray-strip flex gap-2 px-3 pt-2"
         >
           {drafts.map((draft) => (
             <DraftCard
@@ -673,9 +678,13 @@ export function AttachmentTray({
       {/* 이 줄은 **비어 있어도 자리를 지킨다** (design-review M-3). 앞 판은
           마지막 파일이 끝나는 순간 이 문장이 사라지면서 대화 전체를 22px 위로
           당겼다. 「모두 지우기」는 이 줄의 오른쪽 끝이다(Codex 입력창에는 없다: 카드 줄은 한 줄이라
-          카드 위에 얹을 자리가 없고, 넷 이상일 때만 선다). */}
+          카드 위에 얹을 자리가 없고, 넷 이상일 때만 선다).
+          #5328: 카드 줄과 글 사이 간격은 **이 줄 하나(16)** 다. 카드 줄 아래 여백(4)을 걷고, 이 줄 아래를 글 칸의
+          위쪽 안여백(8)과 겹친다(`-mb-2`): 글 칸의 첫 글자는 이 줄 바로 밑에서 시작하므로 글자와는 겹치지 않고, 줄이
+          더 위(`relative`)라 「모두 지우기」는 겹친 8px 에서도 눌린다. 그 밖의 겹친 면은 글 칸의 빈 안여백이라 눌러도
+          그릇의 클릭 규칙이 글 칸에 초점을 돌려준다. 비어 있어도 자리를 지키는 약속(M-3)은 그대로다. */}
       {hasCards && (
-        <div className="flex items-start justify-between gap-2 px-3">
+        <div className="relative -mb-2 flex items-start justify-between gap-2 px-3">
           <p
             className="min-w-0 text-meta text-ink-muted data-[block-reason=failed]:text-warn"
             data-testid="attachment-blocked"
