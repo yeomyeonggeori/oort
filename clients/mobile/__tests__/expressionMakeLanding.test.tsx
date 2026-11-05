@@ -245,7 +245,7 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
     const landing = jest.fn();
     withLanding(store, landing, composer());
     fireEvent.press(screen.getByTestId('composer-expression'));
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-team'));
+    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
     await screen.findByTestId('expression-add-menu');
     await fillAndSend();
     // 길에 나간 것은 openDirectMessage 가 돌려준 그 채널이다.
@@ -263,7 +263,7 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
     const landing = jest.fn();
     withLanding(store, landing, composer());
     fireEvent.press(screen.getByTestId('composer-expression'));
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-team'));
+    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
     await screen.findByTestId('expression-add-menu');
     await fillAndSend();
     await waitFor(() =>

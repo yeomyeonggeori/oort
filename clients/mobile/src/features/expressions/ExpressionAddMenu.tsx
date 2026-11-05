@@ -19,7 +19,7 @@ import {useExpressions} from './ExpressionProvider';
 import {useExpressionMessages} from './useExpressionMessages';
 
 // =============================================================================
-// 팀 이모지 고르개의 「＋」 (#4891) — 웹 패널의 「추가하기」 메뉴와 같은 두 갈래: 가져오기 · AI와 만들기.
+// 이모티콘 고르개의 「＋」 (#4891) — 웹 패널의 「추가하기」 메뉴와 같은 두 갈래: 가져오기 · AI와 만들기.
 //
 // 누가 쓸 수 있는가도 웹과 같다(`TeamExpressionsPanel` 의 `canAdd`): 서버가 준 추가 정책이 `members` 이거나,
 // 정책이 `admins` 인데 내가 관리자·소유자일 때. 정책이 `members` 인 흔한 경우에는 명단을 부르지 않는다.
@@ -135,7 +135,8 @@ export function ExpressionAddMenu({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    root: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
+    // 「추가하기」 알약 아래에 틈(`space.sm`)을 둔다 — 빈 안내·격자가 알약에 붙지 않는다(#5330, owner 캡처: 탭 줄과 「+ 추가하기」가 붙어 보였다).
+    root: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm, gap: space.sm},
     // 시트(`sheet`) 위에 서는 보조 알약은 시트 위 문법이다: `surface` 채움 + `elevationRest` 그림자(phone-sheets.md §4, README
     // §3.3). 옛 판은 `surfaceMuted` 였는데 라이트에서 그 값이 시트와 1.009 라 알약 안팎이 같은 색이었다 — 팀 이모지를 늘리는
     // 유일한 입구가 글리프와 글자로만 보였다(#5099, 검증 줄 2회차 화면 M4). 채움·가장자리는 시트 머리의 원과 같은 규칙
