@@ -5806,6 +5806,64 @@ export const catalog: MessageCatalog = {
       "value": "If you do not decide, the agent has to propose it again."
     }
   ],
+  "timeline.edited.atDate": [
+    {
+      "type": 0,
+      "value": "Edited on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atDay": [
+    {
+      "type": 0,
+      "value": "Edited "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atTime": [
+    {
+      "type": 0,
+      "value": "Edited at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.mark": [
+    {
+      "type": 0,
+      "value": "Edited"
+    }
+  ],
+  "timeline.edited.pressHint": [
+    {
+      "type": 0,
+      "value": "Shows when it was edited"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,

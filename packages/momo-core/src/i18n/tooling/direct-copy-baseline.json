@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "a9e4988f64a0b657c6a4892a3b3f8f2f72dc1886",
+  "baselineHead": "dd5edb2db92331a15811819d0a63b3c9c1880783",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -105,7 +105,7 @@
     "clients/mobile/src/features/conversation/MessageActionSheet.tsx": 21,
     "clients/mobile/src/features/conversation/MessageBody.tsx": 45,
     "clients/mobile/src/features/conversation/MessageEditorSheet.tsx": 8,
-    "clients/mobile/src/features/conversation/MessageRow.tsx": 270,
+    "clients/mobile/src/features/conversation/MessageRow.tsx": 266,
     "clients/mobile/src/features/conversation/PinListPanel.tsx": 9,
     "clients/mobile/src/features/conversation/Quote.tsx": 34,
     "clients/mobile/src/features/conversation/ReplyDraftCard.tsx": 4,
@@ -831,7 +831,7 @@
     "clients/web/src/features/timeline/MessageActions.tsx": 60,
     "clients/web/src/features/timeline/MessageBody.tsx": 33,
     "clients/web/src/features/timeline/MessageEditor.tsx": 6,
-    "clients/web/src/features/timeline/MessageRow.tsx": 56,
+    "clients/web/src/features/timeline/MessageRow.tsx": 55,
     "clients/web/src/features/timeline/PendingRow.tsx": 4,
     "clients/web/src/features/timeline/PinListMenu.tsx": 10,
     "clients/web/src/features/timeline/QuoteBlock.tsx": 20,

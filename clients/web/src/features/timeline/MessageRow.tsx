@@ -111,6 +111,7 @@ import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
+import { EditedMark } from "./EditedMark";
 import { EditRequestContext } from "./editRequest";
 import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
@@ -1234,7 +1235,7 @@ export function MessageRow({
                 안쪽인 서술은 없다 — 이 낱말은 본문이 여기서 끝났다고 말한다.
                 꼬리의 다른 조각들은 그 본문에 **대해** 말한다. */}
             {stopMark && <span data-testid="stream-stop-mark">{stopMark}</span>}
-            {showsEditedMark && <span>수정됨</span>}
+            {showsEditedMark && <EditedMark message={message} />}
             {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
                 스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}
             {showsPinMark && (
