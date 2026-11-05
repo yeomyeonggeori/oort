@@ -14,7 +14,12 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
-import {SEEK_MAX_PAGES, SEEK_MAX_ROWS} from '../src/features/conversation/jumpSeek';
+import {
+  SEEK_MAX_PAGES,
+  SEEK_MAX_ROWS,
+  SEEK_SETTLE_FREE_ROWS,
+  seekSettleMs,
+} from '../src/features/conversation/jumpSeek';
 import AppShell from '../src/shell/AppShell';
 import {sessionPort} from '../src/storage/secureSession';
 import {setServerBase} from '../src/storage/serverBase';
@@ -404,6 +409,46 @@ describe('#5383 — 범위 밖 결과는 그 자리까지 읽어서 착지한다
     expect(timelineView().jumpTarget?.messageId).toBe(HIT_ID);
     expect(screen.queryByTestId('jump-missed')).toBeNull();
     expect(server.beforeCalls).toHaveLength(1);
+  });
+});
+
+describe('#5383 — 많이 합친 점프는 목록이 앉을 시간을 준다', () => {
+  // 시뮬레이터 실측(`jumpSeek.ts` 머리말): 1,800줄을 합친 같은 커밋에서 점프를 걸면 목적지에서 1,500줄 넘게 떨어진 곳에서 멈췄다.
+  const FAR_HEAD = 1100; // 목적지(42)는 1,058줄 위 → 6쪽, 합친 줄 > 300
+
+  it(`${SEEK_SETTLE_FREE_ROWS}줄을 넘게 합치면 합친 직후가 아니라 기다린 뒤에 다시 쏘고, 그동안 읽는 줄이 선다`, async () => {
+    const server = installServer({headSeq: FAR_HEAD});
+    await openFromSearch();
+
+    await waitFor(() => expect(holdsHit()).toBe(true));
+    expect(server.beforeCalls).toHaveLength(6);
+    expect(seekSettleMs(FAR_HEAD - HIT_SEQ)).toBeGreaterThan(0);
+    // 합쳐졌지만 점프는 아직이다 - 토큰이 그대로이고 읽는 줄(과 취소)이 서 있다.
+    const tokenAtMerge = jumpToken();
+    expect(screen.getByTestId('jump-seek-cancel')).toBeTruthy();
+
+    // 기다림이 끝나면 같은 문으로 다시 쏘고 줄이 걷힌다.
+    await waitFor(() => expect(jumpToken()).toBeGreaterThan(tokenAtMerge));
+    expect(timelineView().jumpTarget?.messageId).toBe(HIT_ID);
+    expect(screen.queryByTestId('jump-seek')).toBeNull();
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+  });
+
+  it('기다리는 동안 취소하면 점프를 다시 걸지 않는다', async () => {
+    installServer({headSeq: FAR_HEAD});
+    await openFromSearch();
+
+    await waitFor(() => expect(holdsHit()).toBe(true));
+    const tokenAtMerge = jumpToken();
+    fireEvent.press(screen.getByTestId('jump-seek-cancel'));
+    expect(screen.queryByTestId('jump-seek')).toBeNull();
+
+    // 기다림이 다 지나도 데려가지 않는다 - 합친 줄은 남아 있고 목록은 읽던 자리 그대로다.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2_000);
+    });
+    expect(jumpToken()).toBe(tokenAtMerge);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
   });
 });
 
