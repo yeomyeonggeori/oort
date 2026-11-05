@@ -437,7 +437,7 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
    `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
    건드리지 않는다. 배포는 한 번이다.
-5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(`default` 또는 `connector/…`), `"media_strict": true`이고,
+5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(팀 공용 기본 모드는 `default/codex-oauth.fallback-claude-oauth`, 그 밖에 `default` 또는 `connector/…`)이고, 팀 공용 기본 모드에서는 `resolved_tools`에 `image_generate`·`web_search`가 있어 Codex 로그인이 볼륨에 있음을 확인하고, `"media_strict": true`이고,
    `selected_tools`·`resolved_tools`에 `memory`·`session_search`가 없고 `memory_config`가 `{"memory_enabled": false, "provider_set": false, "user_profile_enabled": false}`이고
    (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
    정상이다. `LOCKGATE`가 `"ok": false`이거나 서비스가 멈추면 `problems`(이름·해시만 나온다)를 이슈에 적고 6단계로 간다.
