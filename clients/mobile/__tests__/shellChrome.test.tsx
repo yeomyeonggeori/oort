@@ -345,14 +345,29 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
   it('검색 탭은 누르기 전에는 마운트되지 않고, 누르면 검색 화면이 탭으로 선다', async () => {
     installFetch();
     await renderReady();
-    expect(screen.queryByTestId('search-title')).toBeNull();
+    expect(screen.queryByTestId('search-input')).toBeNull();
     fireEvent.press(screen.getByTestId('tab-search'));
-    expect(screen.getByTestId('search-title')).toBeTruthy();
-    // 탭이라 돌아갈 곳이 없다 — 뒤로 글리프가 없다.
+    expect(screen.getByTestId('search-input')).toBeTruthy();
+    // 탭이라 「닫는」 층이 없다 — 머리의 원형 X 는 입력이 비면 홈 탭으로 돌아가는 문이고 이름도 「닫기」가 아니다(#5365).
     expect(screen.queryByLabelText(/닫기$/)).toBeNull();
     expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({
       selected: true,
     });
+  });
+
+  it('검색 탭의 X 는 입력이 있으면 입력을 지우고, 비어 있으면 홈 탭으로 돌려보낸다 — 탭바는 그대로다 (#5365)', async () => {
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('tab-search'));
+    fireEvent.changeText(screen.getByTestId('search-input'), '배포');
+
+    fireEvent.press(screen.getByTestId('search-exit'));
+    expect(screen.getByTestId('search-input').props.value).toBe('');
+    expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({selected: true});
+
+    fireEvent.press(screen.getByTestId('search-exit'));
+    expect(screen.getByTestId('tab-home').props.accessibilityState).toEqual({selected: true});
+    expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({selected: false});
   });
 
   it('+ → 「AI」가 AI 시트를 열고, 시트의 「에이전트 부르기」가 에이전트 목록을 연다 (사라진 에이전트 탭의 문)', async () => {

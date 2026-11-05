@@ -189,6 +189,7 @@ const afterClose = usePageSheetAction();
 | 링크 행동 | `LinkActionSheet`(링크 카드를 길게 누르면) | `PageSheet` fit | 링크 복사·공유(`closesSheet`) + 파괴 행 「미리보기 지우기」(작성자만)는 따로 선 카드이고 확인 단계(`ConfirmStep`)를 한 번 거친다. 실패는 확인 단계 안에서 말하고 시트를 닫지 않는다. 대상이 메시지가 아니라 링크 하나라 `MessageActionSheet` 에 행을 더하지 않고 같은 문법으로 따로 둔다 | 시트 | #4883 |
 | 대화 행 행동 | `ChannelActionSheet` | `PageSheet` fit | 코어 표가 준 짧은 행동 묶음 + 나가기 확인. 시트가 진행·영수증·실패를 보이므로 `closesSheet` 를 쓰지 않는다 | 시트 | #4318 |
 | 새 DM | `NewMessageSheet` | `PageSheet` large | 입력 1칸 + 사람 고르기 | 시트(선택기 예외) | #4318 |
+| 대화 고르기 | `ConversationPickerSheet`(검색 탭 「메시지」 칩의 둘째 줄 「대화 고르기」 칩이 연다) | `PageSheet` large | 입력 알약 1칸 + 라디오 1묶음(맨 위 「모든 대화」, 그 아래 내 채널·DM, 늘 스크롤). 서버가 대화 **하나**만 받아서 하나만 고른다. 고르면 시트가 먼저 내려간 뒤(`usePageSheetAction`) 고른 값이 올라가고, 검색 화면에는 「# 이름 ×」 칩 하나로 남는다 | 시트(고르고 곧 닫히는 선택기, §1 규칙 4) | #5365 |
 | 지시 기기 | `DeviceKeyLinkSheet` | `PageSheet` large | QR 연결 직후 한 번 뜨는 상태 안내와 확인. `DeviceKeyPanel`(새 `GroupCard`)은 **두 호스트**를 가진다 — 이 시트와 설정 페이지의 안쪽 장. 패널이 카드의 가로 여백을 스스로 진다 | 시트 | #4318 |
 | 새 채널 | `NewChannelSheet` | `PageSheet` **medium** | 입력 1 + 라디오 1묶음(2행). ✓ = 채널 만들기 | 시트 | #4458 |
 | AI | `AiSheet` | `PageSheet` **fit** | 행 ≤ 5, 모두 「다른 곳으로 가는 문」 — 누르면 시트가 먼저 내려간 뒤 이동(`usePageSheetAction`). 「개인」 표식·「내 맥 켜짐/꺼짐」 칩은 행의 오른쪽 노드(`ListRow trailing`)이고 글자는 행의 이름에도 든다. **큰 글씨(`STACK_PILL_SCALE` 1.5 부터)에서는 오른쪽 노드를 그리지 않고** 그 글자를 보조 줄 아래 제 줄로 내린다 — 칩이 폭을 먹어 이름 칸이 한 글자 폭으로 접히던 것(AX5·SE) | 시트(문 모음) | #4458 |

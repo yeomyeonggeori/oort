@@ -1,7 +1,6 @@
-import type {Message, MessageSearchHit, RosterMember} from '@momo/core/lib/api';
+import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
 import {
   LogBox,
@@ -170,7 +169,7 @@ import type {DeviceKeyView} from '../src/deviceKey/enrollment';
 import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
-import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
+import {SearchSurface} from './searchSurfaces';
 import SidebarScreen, {
   SearchEntryAction,
   SearchFallthrough,
@@ -180,7 +179,6 @@ import {
   unreadDividerCursorSeq,
 } from '@momo/core/features/readState/model';
 import {markAt3Cursor10} from '@momo/core/features/readState/proof';
-import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import {
   font,
   // `line` 이라는 이름은 이 파일에서 이미 「초안 한 줄」로 쓰이고 있다
@@ -504,43 +502,6 @@ const AVAILABILITY = {
   edit: true,
   delete: true,
 };
-
-const HITS: MessageSearchHit[] = [
-  {
-    channelId: 'ch-1',
-    messageId: 'm-1',
-    seq: 41,
-    authorMemberId: SELF,
-    createdAtMs: NOW,
-    snippet:
-      '어제 이야기한 대로 금요일 배포는 오전 10시에 시작합니다. 롤백 절차는 문서에 적어 뒀고, 확인 부탁드립니다.',
-    matchOffset: 16,
-  },
-  {
-    channelId: 'ch-2',
-    messageId: 'm-2',
-    seq: 12,
-    authorMemberId: SELF,
-    createdAtMs: NOW - 86_400_000,
-    snippet: '배포 전에 스테이징에서 한 번 더 돌려 보죠.',
-    matchOffset: 0,
-  },
-];
-
-function search(phase: SearchPhase, hits: MessageSearchHit[] = []): MessageSearch {
-  return {
-    query: '배포',
-    setQuery: () => {},
-    phase,
-    settledQuery: '배포',
-    hits,
-    hasMore: false,
-    loadingMore: false,
-    loadMore: () => {},
-    retry: () => {},
-  };
-}
-
 
 // =============================================================================
 // ADE 관제 픽스처 (이슈 1137).
@@ -4768,30 +4729,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SearchFallthrough query="배포" onPress={() => {}} />
         </Frame>
       );
+    // #5365: 검색 탭은 한 화면(`SearchView`)이고 장면마다 데이터만 다르다 — 서버가 못 주는 상태(빈 결과·오류)도 이 화면 그대로 찍는다.
     case 'search-idle':
-      return (
-        <Frame label="검색 · 입력 전">
-          <SearchBody search={search('idle')} renderItem={() => <View />} />
-        </Frame>
-      );
+    case 'search-home':
+      return <SearchSurface which="home" />;
+    case 'search-all':
+    case 'search-results':
+      return <SearchSurface which="all" />;
+    case 'search-messages':
+      return <SearchSurface which="messages" />;
+    case 'search-picker':
+      return <SearchSurface which="picker" />;
     case 'search-searching':
-      return (
-        <Frame label="검색 · 찾는 중">
-          <SearchBody search={search('searching')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="searching" />;
     case 'search-empty':
-      return (
-        <Frame label="검색 · 결과 없음 — 범위를 함께 말한다">
-          <SearchBody search={search('empty')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="empty" />;
     case 'search-error':
-      return (
-        <Frame label="검색 · 오류 — 다시 시도가 있다">
-          <SearchBody search={search('error')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="error" />;
     // ---- #1210 D2: 되돌릴 수 없는 확정 버튼 ----------------------------------
     //
     // 이 제품에서 **파괴 채움이 실제로 그려지는 유일한 화면**이고, 그동안 한 번도
@@ -4826,12 +4780,6 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               testIDPrefix="measure-stop"
             />
           </View>
-        </Frame>
-      );
-    case 'search-results':
-      return (
-        <Frame label="검색 · 결과">
-          <SearchResults />
         </Frame>
       );
     // ---- #1503: 에이전트 상세의 세션 행과 수명주기 칩 한 벌 ------------------
@@ -5870,24 +5818,6 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
         )}
       </PageSheet>
     </View>
-  );
-}
-
-/** The results phase draws the shipping row, handed fixture hits. */
-function SearchResults(): React.JSX.Element {
-  return (
-    <SearchBody
-      search={search('results', HITS)}
-      renderItem={({item}) => (
-        <ResultRow
-          hit={item}
-          query="배포"
-          channelTitle={item.channelId === 'ch-1' ? '#배포' : '#일반'}
-          authorName="이도현"
-          onPress={() => {}}
-        />
-      )}
-    />
   );
 }
 

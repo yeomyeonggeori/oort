@@ -201,6 +201,14 @@ export const NON_SECRET_KEYS = {
    * 서버·다른 멤버 화면과 무관하다. 비밀이 아니다.
    */
   linkPreview: 'momo.mobile.link-preview.v1',
+  /**
+   * 검색 탭의 「최근 검색」과 「최근 연 대화」 (#5365). 열쇠 `작업공간:멤버` → {검색어 최대 6개, 채널 id 최대 10개}인 지도 한 덩이의
+   * JSON 이고, 정원·중복·길이 규칙과 로그아웃 삭제는 `features/search/searchRecents.ts` 가 진다. 서버는 이 목록을 본 적이 없다.
+   *
+   * 여기 있어도 되는 이유: 사람이 방금 화면에서 친 글자와 채널 id 일 뿐이다(토큰·본문 없음). 잃으면 목록이 비어 시작할 뿐이다.
+   * 다만 타인이 이 폰에 들어왔을 때 앞사람의 검색어가 비치면 안 되므로, 열쇠에 멤버를 넣고 로그아웃이 통째로 비운다.
+   */
+  searchRecents: 'momo.mobile.search.recents.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];
