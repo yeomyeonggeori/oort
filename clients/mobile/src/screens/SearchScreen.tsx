@@ -9,7 +9,7 @@ import {
 } from '@momo/core/features/workspace/directory';
 import {openDirectMessage, uuidEq, type MessageSearchHit} from '@momo/core/lib/api';
 import {useMutation} from '@tanstack/react-query';
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
@@ -214,9 +214,15 @@ export default function SearchScreen({
     if (isSearchable(search.query)) rememberSearch(scopeKey, search.query);
   }, [search.query, scopeKey]);
 
+  // 사람을 눌러 DM 이 열리는 동안 다른 곳을 눌렀다면, 늦게 도착한 DM 이 그 길을 가로채지 않는다(`NewMessageSheet` 가 시트가 걷혔는지 묻는 것과 같은 이유).
+  // 다른 결과로 간 횟수를 세어 두고, DM 을 시작할 때의 값과 달라졌으면 도착해도 열지 않는다(채널 캐시에는 넣는다).
+  const navigations = useRef(0);
+  const dmStartedAt = useRef(0);
+
   const openChannel = useCallback(
     (channelId: string, title: string) => {
       remember();
+      navigations.current += 1;
       onOpenResult(channelId, title);
     },
     [remember, onOpenResult],
@@ -225,6 +231,7 @@ export default function SearchScreen({
   const openMessage = useCallback(
     (hit: MessageSearchHit) => {
       remember();
+      navigations.current += 1;
       onOpenResult(hit.channelId, titleFor(hit.channelId), {
         messageId: hit.messageId,
         seq: hit.seq,
@@ -239,6 +246,7 @@ export default function SearchScreen({
     mutationFn: (memberId: string) => openDirectMessage(workspaceId, memberId),
     onSuccess: opened => {
       rememberOpenedDm(opened.channel);
+      if (dmStartedAt.current !== navigations.current) return;
       onOpenResult(opened.channel.id, channelLabel(opened.channel, directory, member.id));
     },
   });
@@ -286,7 +294,10 @@ export default function SearchScreen({
         localPending={channelsQuery.isPending || directoryQuery.isPending}
         recentTiles={recentTiles}
         recentSearches={recents.searches}
-        onOpenRecent={tile => onOpenResult(tile.channelId, tile.title)}
+        onOpenRecent={tile => {
+          navigations.current += 1;
+          onOpenResult(tile.channelId, tile.title);
+        }}
         onPickRecentSearch={text => {
           search.setQuery(text);
           rememberSearch(scopeKey, text);
@@ -297,6 +308,7 @@ export default function SearchScreen({
           // 열리는 중에 다른 사람을 또 누르면 DM 이 둘 열린다 — 한 번에 하나다.
           if (openDm.isPending) return;
           remember();
+          dmStartedAt.current = navigations.current;
           openDm.mutate(match.member.id);
         }}
         renderMessage={messageRow}

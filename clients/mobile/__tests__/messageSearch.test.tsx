@@ -310,14 +310,19 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
   };
 
   let network: jest.Mock;
+  // 「DM 열기」 응답을 붙잡아 두는 문 — 기본은 열려 있다.
+  let dmGate: Promise<void>;
 
   beforeEach(() => {
     resetSession();
     signIn(ME);
     __resetSearchRecentsCache();
+    dmGate = Promise.resolve();
     network = installFetch(url => {
       if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
-      if (url.endsWith('/dms')) return jsonResponse(200, {channel: DM_LUNA, created: false});
+      if (url.endsWith('/dms')) {
+        return dmGate.then(() => jsonResponse(200, {channel: DM_LUNA, created: false}));
+      }
       if (url.includes('/channels')) {
         return jsonResponse(200, {channels: [CH_PROJECT, CH_DESIGN, CH_LAUNCH]});
       }
@@ -494,6 +499,18 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
     expect(callsTo(network, '/dms')).toBe(1);
     expect(onOpenResult).toHaveBeenLastCalledWith(DM_LUNA.id, '루나');
     expect(recentsFor(scope).searches).toEqual(['루나']);
+
+    // DM 이 열리는 동안 다른 결과를 눌렀다면, 늦게 도착한 DM 이 그 길을 가로채지 않는다.
+    let release: () => void = () => {};
+    dmGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    press('search-person-luna');
+    press(`search-channel-${CH_PROJECT.id}`);
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name);
+    release();
+    await settle(100);
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name);
   });
 
   it('메시지 쪽 상태: 한 글자는 안내, 실패는 다시 시도, 결과 없음은 친 말을 인용한다', async () => {
