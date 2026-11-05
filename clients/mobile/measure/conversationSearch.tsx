@@ -13,12 +13,14 @@ import {ConversationSearchBar} from '../src/features/conversation/ConversationSe
 import {ConversationSearchPanel} from '../src/features/conversation/ConversationSearchPanel';
 import {ConversationSearchRow} from '../src/features/conversation/ConversationSearchRow';
 import type {ConversationSearch} from '../src/features/conversation/useConversationSearch';
+import {ConversationSearchLiveSurface} from './conversationSearchLive';
 
 // =============================================================================
 // 대화 안 검색의 캡처 표면 (#5364). 배송되는 머리·검색 줄·결과 면·이동 막대를 그 자리 그대로 세운다 — 서버 없이, 고정 데이터·가상 인물로.
 //
 //   -momoMeasure CONVSEARCH-<이름>   (라이트: LIGHT-CONVSEARCH-<이름>)
 //
+//   live           진짜 키보드 틀·목록·컴포저 위에서 **손으로 누르는** 장면(`conversationSearchLive.tsx`, Maestro 가 누른다)
 //   entry          머리의 ⋮ 옆 돋보기 원(검색 전) — 에이전트 DM. 양쪽 칸이 원 둘 폭이 되어 알약이 좁아지는 가장 흔한 경우다(상태 낱말은 숨고 점은 남는다)
 //   entry-channel  같은 자리, 채널 머리
 //   idle      머리가 검색 줄로 바뀜 + 입력 전: 대화는 어둡게 눌려 있고 최근 검색 카드(시안 A2)
@@ -142,6 +144,12 @@ function Conversation({landedRow}: {landedRow?: number}): React.JSX.Element {
 }
 
 export function ConversationSearchSurface({which}: {which: string}): React.JSX.Element {
+  // `live`: 진짜 키보드 틀·목록·컴포저에 검색 부품을 얹은 손으로 누르는 장면(`conversationSearchLive.tsx`).
+  if (which === 'live') return <ConversationSearchLiveSurface />;
+  return <ConversationSearchStatic which={which} />;
+}
+
+function ConversationSearchStatic({which}: {which: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const headerInset = insets.top + CONV.headHeight;
