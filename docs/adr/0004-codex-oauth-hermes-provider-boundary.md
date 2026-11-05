@@ -2,6 +2,7 @@
 
 > Status: Accepted for MOMO-234
 > Date: 2026-07-01
+> 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)의 도우미 위임(`ask_hermes`)은 증보 6이 쓰는 env 전송의 두 번째 호출자다. 불투명 bearer만 쓰고 Codex/Claude 구독 토큰이 oort를 지나지 않는 경계는 바뀌지 않는다. 본문 결정은 바꾸지 않았다.
 
 ## Decision
 
