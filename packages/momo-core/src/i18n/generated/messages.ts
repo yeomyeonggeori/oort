@@ -202,8 +202,13 @@ export const messageKeys = [
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
   "connection.load.activityTitle",
+  "connection.load.adeSessionsTitle",
   "connection.load.agentChannelsTitle",
   "connection.load.agentHistoryTitle",
+  "connection.load.agentLedgerReopenTail",
+  "connection.load.agentLedgerRetryTail",
+  "connection.load.agentLedgerTitle",
+  "connection.load.agentPaneProgressTitle",
   "connection.load.agentProfileAppliesTitle",
   "connection.load.agentProfilesApplyTitle",
   "connection.load.agentProfileTitle",
@@ -232,7 +237,13 @@ export const messageKeys = [
   "connection.load.reasonUnknownBare",
   "connection.load.sentence",
   "connection.load.teamBoardStaleTitle",
+  "connection.load.teamExpressionsTitle",
   "connection.load.threadTitle",
+  "connection.load.workHostsTitle",
+  "connection.load.workLocationsTitle",
+  "connection.load.workSelectedSessionTitle",
+  "connection.load.workSessionsTitle",
+  "connection.load.workStepsTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
   "connection.send.reasonRejected",
@@ -479,6 +490,36 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
+  "mobile.convSearch.authorSelf",
+  "mobile.convSearch.barList",
+  "mobile.convSearch.barNewer",
+  "mobile.convSearch.barOlder",
+  "mobile.convSearch.clearInput",
+  "mobile.convSearch.close",
+  "mobile.convSearch.dayYesterday",
+  "mobile.convSearch.emptyDetail",
+  "mobile.convSearch.emptyHeadline",
+  "mobile.convSearch.errorDetail",
+  "mobile.convSearch.errorHeadline",
+  "mobile.convSearch.idleHint",
+  "mobile.convSearch.more",
+  "mobile.convSearch.moreLoading",
+  "mobile.convSearch.open",
+  "mobile.convSearch.placeholderChannel",
+  "mobile.convSearch.placeholderDm",
+  "mobile.convSearch.position",
+  "mobile.convSearch.positionMore",
+  "mobile.convSearch.positionSpoken",
+  "mobile.convSearch.positionSpokenMore",
+  "mobile.convSearch.recentClear",
+  "mobile.convSearch.recentClearLabel",
+  "mobile.convSearch.recentRow",
+  "mobile.convSearch.recentTitle",
+  "mobile.convSearch.resultLabel",
+  "mobile.convSearch.resultsChannel",
+  "mobile.convSearch.resultsDm",
+  "mobile.convSearch.searching",
+  "mobile.convSearch.tooShort",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -1286,8 +1327,13 @@ export const argumentSpecs = {
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
   "connection.load.activityTitle": {},
+  "connection.load.adeSessionsTitle": {},
   "connection.load.agentChannelsTitle": {},
   "connection.load.agentHistoryTitle": {},
+  "connection.load.agentLedgerReopenTail": {},
+  "connection.load.agentLedgerRetryTail": {},
+  "connection.load.agentLedgerTitle": {},
+  "connection.load.agentPaneProgressTitle": {},
   "connection.load.agentProfileAppliesTitle": {},
   "connection.load.agentProfilesApplyTitle": {
     "names": "string"
@@ -1321,7 +1367,13 @@ export const argumentSpecs = {
     "title": "string"
   },
   "connection.load.teamBoardStaleTitle": {},
+  "connection.load.teamExpressionsTitle": {},
   "connection.load.threadTitle": {},
+  "connection.load.workHostsTitle": {},
+  "connection.load.workLocationsTitle": {},
+  "connection.load.workSelectedSessionTitle": {},
+  "connection.load.workSessionsTitle": {},
+  "connection.load.workStepsTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
   "connection.send.reasonRejected": {},
@@ -1603,6 +1655,56 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
+  "mobile.convSearch.authorSelf": {},
+  "mobile.convSearch.barList": {},
+  "mobile.convSearch.barNewer": {},
+  "mobile.convSearch.barOlder": {},
+  "mobile.convSearch.clearInput": {},
+  "mobile.convSearch.close": {},
+  "mobile.convSearch.dayYesterday": {},
+  "mobile.convSearch.emptyDetail": {},
+  "mobile.convSearch.emptyHeadline": {
+    "query": "string"
+  },
+  "mobile.convSearch.errorDetail": {},
+  "mobile.convSearch.errorHeadline": {},
+  "mobile.convSearch.idleHint": {},
+  "mobile.convSearch.more": {},
+  "mobile.convSearch.moreLoading": {},
+  "mobile.convSearch.open": {},
+  "mobile.convSearch.placeholderChannel": {},
+  "mobile.convSearch.placeholderDm": {},
+  "mobile.convSearch.position": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpoken": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpokenMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.recentClear": {},
+  "mobile.convSearch.recentClearLabel": {},
+  "mobile.convSearch.recentRow": {
+    "query": "string"
+  },
+  "mobile.convSearch.recentTitle": {},
+  "mobile.convSearch.resultLabel": {
+    "author": "string",
+    "snippet": "string",
+    "when": "string"
+  },
+  "mobile.convSearch.resultsChannel": {},
+  "mobile.convSearch.resultsDm": {},
+  "mobile.convSearch.searching": {},
+  "mobile.convSearch.tooShort": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -2567,8 +2669,13 @@ export interface MessageArgs {
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
   "connection.load.activityTitle": Record<string, never>;
+  "connection.load.adeSessionsTitle": Record<string, never>;
   "connection.load.agentChannelsTitle": Record<string, never>;
   "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentLedgerReopenTail": Record<string, never>;
+  "connection.load.agentLedgerRetryTail": Record<string, never>;
+  "connection.load.agentLedgerTitle": Record<string, never>;
+  "connection.load.agentPaneProgressTitle": Record<string, never>;
   "connection.load.agentProfileAppliesTitle": Record<string, never>;
   "connection.load.agentProfilesApplyTitle": { names: string };
   "connection.load.agentProfileTitle": Record<string, never>;
@@ -2597,7 +2704,13 @@ export interface MessageArgs {
   "connection.load.reasonUnknownBare": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
   "connection.load.teamBoardStaleTitle": Record<string, never>;
+  "connection.load.teamExpressionsTitle": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
+  "connection.load.workHostsTitle": Record<string, never>;
+  "connection.load.workLocationsTitle": Record<string, never>;
+  "connection.load.workSelectedSessionTitle": Record<string, never>;
+  "connection.load.workSessionsTitle": Record<string, never>;
+  "connection.load.workStepsTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;
   "connection.send.reasonRejected": Record<string, never>;
@@ -2844,6 +2957,36 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
+  "mobile.convSearch.authorSelf": Record<string, never>;
+  "mobile.convSearch.barList": Record<string, never>;
+  "mobile.convSearch.barNewer": Record<string, never>;
+  "mobile.convSearch.barOlder": Record<string, never>;
+  "mobile.convSearch.clearInput": Record<string, never>;
+  "mobile.convSearch.close": Record<string, never>;
+  "mobile.convSearch.dayYesterday": Record<string, never>;
+  "mobile.convSearch.emptyDetail": Record<string, never>;
+  "mobile.convSearch.emptyHeadline": { query: string };
+  "mobile.convSearch.errorDetail": Record<string, never>;
+  "mobile.convSearch.errorHeadline": Record<string, never>;
+  "mobile.convSearch.idleHint": Record<string, never>;
+  "mobile.convSearch.more": Record<string, never>;
+  "mobile.convSearch.moreLoading": Record<string, never>;
+  "mobile.convSearch.open": Record<string, never>;
+  "mobile.convSearch.placeholderChannel": Record<string, never>;
+  "mobile.convSearch.placeholderDm": Record<string, never>;
+  "mobile.convSearch.position": { index: string; total: string };
+  "mobile.convSearch.positionMore": { index: string; total: string };
+  "mobile.convSearch.positionSpoken": { index: string; total: string };
+  "mobile.convSearch.positionSpokenMore": { index: string; total: string };
+  "mobile.convSearch.recentClear": Record<string, never>;
+  "mobile.convSearch.recentClearLabel": Record<string, never>;
+  "mobile.convSearch.recentRow": { query: string };
+  "mobile.convSearch.recentTitle": Record<string, never>;
+  "mobile.convSearch.resultLabel": { author: string; snippet: string; when: string };
+  "mobile.convSearch.resultsChannel": Record<string, never>;
+  "mobile.convSearch.resultsDm": Record<string, never>;
+  "mobile.convSearch.searching": Record<string, never>;
+  "mobile.convSearch.tooShort": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;

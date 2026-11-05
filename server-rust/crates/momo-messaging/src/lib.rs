@@ -194,7 +194,8 @@ pub use interaction::{
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
 };
 pub use member_activity::{
-    touch_member_activity_in_tx, ActivityOutcome, ACTIVITY_MIN_REFRESH_SECS,
+    touch_member_activity_in_tx, ActivityOutcome, ACTIVITY_LOCK_WAIT_SECS,
+    ACTIVITY_MIN_REFRESH_SECS,
 };
 pub use member_avatar::{
     activate_member_avatar_upload_in_tx, clear_own_member_avatar_in_tx, image_dimensions,
