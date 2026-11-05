@@ -90,6 +90,7 @@ import {
 } from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
+  isQuoteRedundant,
   resolveQuote,
 } from "@momo/core/features/timeline/quote";
 import { QuoteBlock } from "./QuoteBlock";
@@ -312,6 +313,7 @@ export function MessageRow({
   onQuoteMessage,
   onJumpToMessage,
   quoteLookup,
+  aboveMessageId,
   onOpenWorkSession,
   onResend,
   showRollup = true,
@@ -379,6 +381,14 @@ export function MessageRow({
    * 네트워크를 다시 때리지 않는다.
    */
   quoteLookup?: (messageId: string) => Message | undefined;
+  /**
+   * 같은 목록에서 이 행 **바로 위에 그려진** 메시지의 id (#5357, 코어 `messageAboveIds`).
+   *
+   * 에이전트의 답이 이 메시지를 가리키면 인용 블록은 바로 위의 말을 한 번 더 보여 줄 뿐이라 그리지 않는다(코어 `isQuoteRedundant`가
+   * 판정하고 폰이 같은 함수를 쓴다). 목록이 넣는다 — 이웃은 접기·가리기를 다 거친 목록에서 세야 맞아서 행이 혼자 알 수 없다. 넣지 않으면
+   * (갤러리·받은 편지함·작업 로그) 「모른다」이고 인용은 늘 그린다.
+   */
+  aboveMessageId?: string;
   onOpenWorkSession?: OpenWorkSession;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
@@ -585,6 +595,12 @@ export function MessageRow({
   // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
   // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
   const quote = resolveQuote(message, quoteLookup);
+  // #5357 — 에이전트의 답이 바로 위 메시지를 가리키면 그 인용은 정보를 더하지 못한다. 그리는 마지막 걸음에서만 거르고 데이터는 건드리지 않는다.
+  const quoteRedundant = isQuoteRedundant(quote, {
+    directory,
+    authorMemberId: message.authorMemberId,
+    aboveMessageId,
+  });
 
   // What this row is allowed to offer. The server decides for real (403/400);
   // these only decide what to draw, and `onOpenThread` gates 답글 because a
@@ -1072,7 +1088,7 @@ export function MessageRow({
             대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
             tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
             지워지지 않는다. */}
-        {quote && (
+        {quote && !quoteRedundant && (
           <QuoteBlock
             block={quote}
             directory={directory}
