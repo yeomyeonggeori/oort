@@ -16,6 +16,7 @@
 - 증보: 2026-10-16 **ADR-0204 D6** — 잠금 화면 승인·거절용 `push_action` 토큰: §8.7 `push_fetch`와 같은 모양(typ JWT, 세션 계열 생존 규칙, 6시간, 계열당 4개)이고 허용 경로는 승인 결정 하나, 앱 전용 키체인 그룹에만 둔다. 작업 호스트 권한은 여전히 잠금 화면에서 결정하지 않는다(D7 open 카테고리). 정본은 ADR-0204. 본문 결정은 바꾸지 않았다.
 - 증보: 2026-10-18 **§8.9 [확인 필요] 3개 닫음**(M-S0 #3941 실측, `docs/planning/research/2026-10-18-mcp-oauth-injection-spike-m-s0.md`): 주입 위치 = Claude는 `session/new` `mcpServers`만(`settings.json` 아님), 토큰 = 기본 키체인(Claude는 프로필 해시로 분리), client id = Codex `oauth.client_id`·Claude `oauth.clientId`. 4번(claude.ai 계정 커넥터)은 runtime-unverified.
 - 증보: 2026-10-16 **§8.9** — 앱(커넥터) 원격 MCP를 내 맥 세션에 싣는 모양(ADR-0113 증보 2의 workd 경로). ADR-0192 D3 설정 묶음의 MCP 항목에 「앱 항목」을 더한다. 읽기 도구의 host 자동 허락(R) 한 가지는 Proposed로 적었고 별도 확인 전에는 열지 않는다. 결재 인용: 성재 2026-10-16 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」, 「코덱스 앱이나 다른 그록봇류 앱처럼 …」. **D5·D6 본문과 §3 불변식은 바꾸지 않았다.**
+- 증보: 2026-11-05 **§8.10** — R1.4(#2647, #2644 보안 검수 후속): Codex 유효 설정을 세션마다 되읽어 확인한다(L1: codex가 키를 무시·개명하면 거부). RR-6에 시스템 시작 파일 `/etc/zsh*`를 적는다(I1). §3 불변식과 D5·D6 본문은 바꾸지 않았다.
 - Deciders: 성재
 - 발제: ADR-0187 D3 — 성재 「그 정도 수준의 원격 작업 그리고 알림 시스템 그리고 데스크탑에서 사용자들이 했던 걸 트래킹하고 온전히 독까지 요청할 수 있는 마치 코덱스나 클라우드에 iOS 앱 같은 느낌」, D2 「테이스케일 안 쓰고 iOS 앱을 쓰는 걸 목표로」
 - 승계(Accepted, 이 ADR은 현행 스택 위에 다시 세운다):
@@ -377,6 +378,7 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
     - 허용목록의 값(`HOME`·`USER`·`PATH` 등)은 에이전트와 명령이 본다. 자격은 아니다.
     - 파일에 적힌 비밀은 RR-1(디스크 전체 읽기)로 여전히 읽힌다. 소유자 셸 시작 파일도 파일로는 읽힌다. 닫은 것은 환경 경로다.
     - 소유자의 기본 셸이 bash면 Codex 명령의 로그인 셸이 `~/.bash_profile`·`~/.profile`을 읽는다(`ZDOTDIR`은 zsh에만 적용). 이 Mac은 zsh다.
+    - 시스템 시작 파일 `/etc/zsh*`(`/etc/zshenv`·`/etc/zprofile`·`/etc/zshrc`·`/etc/zlogin`)는 `ZDOTDIR`과 상관없이, 셸 종류에 따라(예: `zshrc`는 대화형일 때만) 명령의 zsh가 읽는다(`ZDOTDIR`은 `$HOME`의 `.z*`만 옮긴다). root 소유라 소유자 계정이 고칠 수 없어 위협 모델 밖이다(#2647 I1, §8.10).
     - Claude 명령
       - `default` 모드에서 `env`·`printenv`·`echo $X`·`ps -E`/`ps e…`는 내장 읽기 전용 집합 밖이다. 그래서 승인을 물어 권한 다리에 오고, R1 동안 거부된다.
       - 판정 근거는 Claude Code 2.1.280 코드와 내장 문서다(읽기 전용 목록, `echo` 정규식은 `$` 제외, `ps`는 `e` 포함 인자를 위험으로 봄). `autoAllowBashIfSandboxed: false`(§8.3)도 걸려 있다.
@@ -566,3 +568,35 @@ R1 진입 조건 「알림 확장(NSE) 토큰은 알림 읽기 전용으로 좁�
 7. B 등급 도구의 `scope=session` 허락 → host가 적용하지 않고 다음 호출에 다시 카드. A 등급은 적용.
 8. C 등급 이름이 든 서명 항목 → 거부.
 9. (R 연 뒤) `risk: read`이고 grant 안인 도구만 자동 허락, 쓰기 도구·grant 밖 읽기 도구는 카드. 자동 허락마다 `approval.auto` 이벤트 1개.
+
+### 8.10 R1.4 — Codex 유효 설정을 세션마다 되읽는다, RR-6 보강 (2026-11-05, #2647)
+
+- Status: **§8.1 결재 범위 안의 보강 — planner 확인 필요.** 성재 2026-09-24 「샌드박스 자동 실행 수용」(§8.1)의 조건 2·8을 런타임에서 지키는 장치이고 새 능력이나 완화가 아니다. Accepted 표시는 planner가 한다(ADR-0203 「위임 결재」 절, §8.9와 같은 방식). #2644(R1.3) 독립 보안 검수는 PASS(Blocker 0·High 0)였고, 남은 Low 1(L1)·Info 2(I1·I3)를 이 절이 닫는다. D5·D6 본문과 §3 불변식은 바꾸지 않았다. 새 ADR 번호는 쓰지 않는다.
+
+**L1 — 조건 2·8의 키를 codex가 지금도 알아듣는지 되읽는다.**
+- 문제: 조건 2의 features 15개 `false`와 `shell_snapshot = false`는 host `config.toml`(과 `CODEX_CONFIG`)에 적힌 **키**일 뿐이다. codex가 그 키를 무시하거나 이름을 바꾸면 기능은 기본값으로 돌아간다. `shell_snapshot`이 켜지면 소유자 `.zshrc`의 export가 명령에 다시 걸려 조건 8이 무너진다(fail-open). 실제 codex로 재는 시험(`codex_isolation_real.rs`)은 `#[ignore]`라 CI에 없고, 완화는 codex-acp 1.13.0의 `^0.155.1`(patch만)뿐이었다.
+- 확인: host는 **Codex 세션을 시작하기 전마다** 허용목록 항목의 어댑터 실행 파일에 `cli features list`를 준다.
+  - codex-acp 1.13.0의 `cli` 하위 명령은 어댑터가 `app-server`로 띄우는 바로 그 codex를 돌린다. host가 `CODEX_PATH`를 넘기지 않으므로 어댑터에 번들된 `@openai/codex`다.
+  - 환경은 세션과 같다(`launch_spec`의 허용목록 + `CODEX_HOME`·`HOME`·`TMPDIR`). 그래서 codex는 host의 `config.toml`을 읽는다. 소유자의 `args`는 주지 않고, 작업 폴더가 아니라 host 임시 폴더에서 돌린다(저장소가 결과를 바꿀 수 없다). stdin은 닫고 stderr는 버린다.
+  - 출력 표(`이름  단계  상태`)에서 조건 2의 15개가 **모두 있고 모두 `false`**여야 한다. 하나라도 `true`이거나 표에 없으면(이름이 바뀌었거나 사라짐), 표를 읽을 수 없거나, 어댑터가 시작되지 않거나 실패 상태로 끝나거나, `acp_start_timeout_ms` 안에 끝나지 않거나, 출력이 256 KiB를 넘으면 세션을 거부한다. 기본값은 거부다.
+  - 거부 라벨은 `codex_config_unverified`다(방에 `work.control.acked`로 보인다). 어떤 feature가 어떻게 읽혔는지는 host 로그에만 남는다.
+  - `run`을 시작할 때 Codex 항목마다 같은 확인을 한 번 하고 결과를 로그에 남긴다(첫 원격 세션 전에 소유자가 알 수 있게). 세션을 막는 것은 세션 직전의 확인이다. 그래서 `run` 도중 어댑터를 바꿔도 다음 세션에서 잡히고, 계정 프로필(ADR-0191 D1)의 Codex는 그 프로필 폴더의 `CODEX_HOME`으로 확인한다.
+- 실측(2026-11-05, codex-acp 1.13.0이 번들한 codex 0.155.1, 모델 호출 없음, 임시 `CODEX_HOME`): host의 `config.toml` 그대로이면 15개 모두 `false`다. `shell_snapshot` 키를 지우면 그 줄이 `true`로 읽힌다(대조). 확인 한 번은 0.1~0.2초다.
+- `features list`에는 `--json`이 없다(0.155.1은 `unexpected argument '--json'`, 0.165.0 도움말에도 없다). 그래서 표를 읽는다. 단계 칸이 두 단어일 수 있어(`under development`) 이름은 첫 토큰, 상태는 마지막 토큰으로 읽는다.
+- codex 버전은 고정하지 않는다. 지키려는 것은 「그 키를 지금 codex가 알아듣는가」이고, 버전 고정은 patch마다 host를 새로 내야 하면서 그 성질을 재지 못한다.
+
+**L1의 한계(이름을 붙여 둔다).**
+- `cli`는 `CODEX_CONFIG`(thread별 override)를 적용하지 않는다. 읽는 층은 `config.toml`이다. 두 층에 같은 키가 있어 이름이 바뀌면 함께 어긋나 이 확인이 잡지만, 한 층만 어긋나는 변화는 못 잡는다.
+- 15개 밖의 feature가 새로 생겨 기본값이 켜지는 변화는 못 잡는다. 어댑터를 올릴 때 `codex features list` 전체를 훑는 일은 사람이 한다.
+- `[shell_environment_policy]`(`inherit = "core"`·`set.*`)는 feature가 아니라 표에 없다. 이 키가 무시되는 변화는 이 확인이 못 본다. 그 위험의 완화는 `^0.155.1`과 `codex_isolation_real.rs`의 수동 실측(`MOMO_WORKD_CODEX_BIN`)이다.
+- `cli` 하위 명령이 없는 다른 어댑터 구현은 Codex 세션이 거부된다(안전한 쪽).
+
+**I1 — RR-6에 시스템 시작 파일.** 위 RR-6 「수리 뒤 남는 범위」에 `/etc/zsh*` 한 줄을 더했다. zsh는 `ZDOTDIR`과 상관없이 시스템 시작 파일을 읽고, 이 Mac(2026-11-05)에는 `/etc/zprofile`(`LANG` 기본값, `path_helper`로 `PATH` 추가)과 `/etc/zshrc`(대화형 전용, root 소유 0444)가 있고 `/etc/zshenv`·`/etc/zlogin`은 없다. 이 Mac 밖의 내용은 읽지 않았다.
+
+**I3 — `LC_` 경계 시험.** 환경 허용목록의 접두 `LC_`를 `is_passed_env` 단위 단정으로 고정했다(`LESS`·`LD_PRELOAD`·`LANGUAGE`는 거부, `LC_ALL` 등은 통과). 접두를 `L`로 줄이면 lib 시험이 RED다. 전에는 inv_20이 곁의 `L*` 변수로만 간접 고정했다.
+
+**red proof (해당 분기를 지우면 실패해야 한다).**
+1. 비교(`policy::check_codex_features`)를 지우거나 기대 상태를 바꾸면 lib 시험과 `inv_6b`가 실패한다.
+2. 세션 직전의 확인 호출(`SessionManager::spawn`)을 지우면 `inv_6b`가 실패한다.
+3. 확인이 host의 환경을 걸러 주지 않으면 `codex_check` 시험이 실패한다.
+4. `LC_`를 `L`로 줄이면 I3 단정이 실패한다.
