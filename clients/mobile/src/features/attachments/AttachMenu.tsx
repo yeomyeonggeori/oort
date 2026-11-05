@@ -21,7 +21,6 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {ATTACH_COPY} from '@momo/core/features/attachments/model';
-import {GLASS_FALLBACK_OPACITY} from '@momo/core/design/themes';
 
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {
@@ -73,7 +72,7 @@ import type {PickedAttachmentFile} from './picker';
 //   | 아이콘        | 글리프 ≈ 15pt, 선 1.7pt              | 22pt 래스터(선 1.65pt), `MENU_ICON_SIZE`  |
 //   | 글자          | 캡 높이 14.6pt → ≈ 20.7pt, 보통 굵기  | `font.title` 22 · 400                     |
 //   | 글자 위치     | 아이콘 왼쪽 ≈ 39, 글자 왼쪽 ≈ 73     | 카드 12 + 행 16 = 28, 아이콘 22, 사이 16  |
-//   | 재질          | 어두운 반투명(뒤 말풍선이 흐리게 비침)| 잉크(`primary`) 86% + 흐림, 아래 「재질」   |
+//   | 재질          | 어두운 반투명(뒤 말풍선이 흐리게 비침)| 유리(`glass`) + 흐림 — 테마를 따른다, 아래 「재질」 |
 //
 // ## 모서리 — 이슈의 「~27pt」가 아니라 연속 곡선 34
 //
@@ -87,19 +86,23 @@ import type {PickedAttachmentFile} from './picker';
 // 항목은 Buzz 의 다섯(카메라·사진·동영상·음성 메모·파일) 중 **셋**이다 — 동영상·음성 메모는 지원하지
 // 않아 넣지 않는다(이슈 Goal). 그래서 높이는 5행이 아니라 3행이다.
 //
-// ## 재질
+// ## 재질 — 고른 테마를 따른다 (#5329)
 //
-// Buzz 의 카드는 라이트에서도 어둡다. 이 앱에는 이미 같은 결정이 있다 — `PlusMenu`(DS2-2b)가 시안 A
-// `.a-fab` 의 잉크 반전(`primary`/`onPrimary`)으로 「라이트에서는 어두운 카드, 다크에서는 밝은 카드」를
-// 골랐다. 같은 문법을 따르므로 새 색 토큰이 없다(`docs/design-system/README.md` §6 을 밟지 않는다).
-// `PlusMenu` 와 다른 한 가지가 Buzz 의 **반투명**이다: 잉크 86% 를 흐림(`expo-blur`) 위에 얹어 뒤의
-// 말풍선이 흐리게 비친다. `GlassSurface` 와 같은 세 갈래다 — 투명도 줄이기가 켜져 있으면 불투명 잉크,
-// 흐림 모듈이 없으면 94%(`GLASS_FALLBACK_OPACITY`와 같은 값), 그 밖에는 흐림 + 86%. 흐림의 틴트는 앱
-// 스킴을 따른다(`GlassSurface` 와 같다).
+// Buzz 의 카드는 라이트에서도 어둡다. 처음에는 `PlusMenu`(DS2-2b)와 같은 잉크 반전(`primary`/`onPrimary`)으로
+// 「라이트에서는 어두운 카드, 다크에서는 밝은 카드」를 골랐고, 잉크 86% 를 흐림(`expo-blur`) 위에 얹어 뒤의
+// 말풍선이 흐리게 비치게 했다(Buzz 에서 잰 값: 흰 바닥 위 카드 (54,54,55), 잉크 (28,26,23) → α ≈ 0.86~0.9).
+// 다크에서 밝은 카드가 어두운 대화 위에 뜨는 것이 결함이었다(owner 2026-11-05 피드백: 다크에서 + 메뉴가 너무 밝다,
+// 테마가 안 입혀진 듯하다, 레퍼런스를 그대로 옮긴 것 같다): `primary`/`onPrimary` 는 **주 행동**(FAB·보내기·주 버튼,
+// `docs/design-system/README.md` §2.2)의 역할이지 떠 있는 판의 역할이 아니다.
 //
-// 86% 는 Buzz 에서 잰 값이다: 흰 바닥 위 카드가 (54,54,55)이고 잉크가 (28,26,23)이면
-// α = (255 − 54) / (255 − 28) ≈ 0.885, 가장 어두운 자리가 (47,48,48)이라 상한은 ≈ 0.92 — 가운데로 0.86~0.9.
-// 글자(`onPrimary`)는 그 위에서 라이트 ≈ 10.8:1 · 다크 ≈ 11.6:1(둘 다 AA 를 크게 넘는다).
+// 떠 있는 판은 이 앱의 **유리**다 — 탭바가 서는 `GlassSurface` 와 같은 세 갈래이고, 값은 테마 토큰이다:
+// 투명도 줄이기가 켜져 있으면 불투명 `surface`, 흐림 모듈이 없으면 `glassFallback`(`surface` 94%), 그 밖에는
+// 흐림 + `glass` 틴트(새벽하늘 라이트 74% · 다크 72%). 흐림의 틴트도 앱 스킴을 따른다(`GlassSurface` 와 같다).
+// 글자·아이콘은 `text` 다. 그래서 라이트에서는 밝은 유리 카드, 다크에서는 어두운 유리 카드이고, 뒤의 말풍선이
+// 흐리게 비치는 것(Buzz 의 반투명)과 치수·모서리·움직임은 그대로다. 새 색 토큰이 없다(README §6 을 밟지 않는다).
+//
+// 글자(`text`)의 대비: 94% 대체값 위에서는 core 가 쟀다(`themes-2.0.md` 「유리」 — 새벽하늘 라이트 ≈ 17.6 · 다크
+// ≈ 14.8). 흐림 위의 실제 대비는 뒤 내용에 달려 렌더 캡처로만 잰다(`runtime-unverified`).
 //
 // ## 기점과 움직임
 //
@@ -154,8 +157,6 @@ export const ATTACH_MENU = {
   belowCenter: 11,
   /** 아이콘과 글자 사이. */
   iconGap: 16,
-  /** 재질의 잉크 불투명도 — 위 「재질」. */
-  materialAlpha: 0.86,
   /**
    * 진행값에서 카드(재질)가 다 서는 지점. 임계감쇠 스프링은 앞이 빨라(50ms 에 0.26, 100ms 에 0.58)
    * 0.3 으로 두면 글자 없는 밝은 네모가 35ms 동안 또렷이 섰다(첫 캡처 `t=50ms`) — 0.35 로 늦춰
@@ -180,7 +181,7 @@ export const ATTACH_MENU = {
 /** 항목 수. 높이 산수가 읽는다. */
 const ROW_COUNT = 3;
 
-/** 눌림 채움(`PlusMenu` 의 눌림과 같은 16%, 0x29). */
+/** 눌림 채움 — `text`(잉크) 16%(`PlusMenu` 의 눌림과 같은 0x29). */
 const PRESSED_ALPHA_HEX = '29';
 
 export interface Rect {
@@ -266,13 +267,6 @@ function measureAnchor(
       [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0;
     done(ok ? {x, y, width, height} : null);
   });
-}
-
-/** `#rrggbb` 에 불투명도(0~1)를 `#rrggbbaa` 로 단다. 팔레트 색은 언제나 6자리다. */
-function withAlpha(hex: string, alpha: number): string {
-  return `${hex}${Math.round(alpha * 255)
-    .toString(16)
-    .padStart(2, '0')}`;
 }
 
 /**
@@ -753,7 +747,10 @@ function menuClip(
   );
 }
 
-/** 카드의 재질 — 위 「재질」. 어느 갈래를 탔는지는 testID 가 말한다. */
+/**
+ * 카드의 재질 — 위 「재질」. 어느 갈래를 탔는지는 testID 가 말한다. 색은 전부 테마 토큰이다:
+ * 불투명 `surface` · 대체 `glassFallback`(`surface` 94%) · 흐림 위 `glass` 틴트.
+ */
 function MenuMaterial(): React.JSX.Element {
   const palette = usePalette();
   const {scheme} = useTheme();
@@ -762,9 +759,7 @@ function MenuMaterial(): React.JSX.Element {
   const fill = StyleSheet.absoluteFill;
   if (material === 'blur') {
     // 모듈이 있을 때만 불러온다(`GlassSurface` 와 같은 이유). 흐림의 틴트는 앱 스킴을 따른다 —
-    // 잉크의 반대가 아니다. 라이트에서 어두운 흐림을 깔면 카드가 (38,39,42) 로 Buzz 의
-    // (54,54,55) 보다 한 단 더 어두웠다(첫 시뮬레이터 캡처 실측): 밝은 흐림이 뒤 페이지를 밝게
-    // 비쳐 주고 그 위에 잉크 86% 가 얹혀야 Buzz 의 「짙지만 투명한」 값에 닿는다.
+    // 라이트에서는 밝은 흐림 위에 밝은 유리, 다크에서는 어두운 흐림 위에 어두운 유리다.
     const {BlurView} = require('expo-blur') as typeof import('expo-blur');
     return (
       <>
@@ -775,7 +770,7 @@ function MenuMaterial(): React.JSX.Element {
         />
         <View
           pointerEvents="none"
-          style={[fill, {backgroundColor: withAlpha(palette.primary, ATTACH_MENU.materialAlpha)}]}
+          style={[fill, {backgroundColor: palette.glass}]}
           testID="attach-menu-material-blur"
         />
       </>
@@ -788,9 +783,7 @@ function MenuMaterial(): React.JSX.Element {
         fill,
         {
           backgroundColor:
-            material === 'opaque'
-              ? palette.primary
-              : withAlpha(palette.primary, GLASS_FALLBACK_OPACITY),
+            material === 'opaque' ? palette.surface : palette.glassFallback,
         },
       ]}
       testID={`attach-menu-material-${material}`}
@@ -815,6 +808,8 @@ function MenuRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // JSX 밖에서 만든다 — `{`${testID}-icon`}` 모양은 직접 문구 장부(`direct-copy`)가 글자로 센다.
+  const iconTestID = `${testID}-icon`;
   return (
     <Pressable
       ref={rowRef}
@@ -829,8 +824,9 @@ function MenuRow({
         style={{
           width: MENU_ICON_SIZE,
           height: MENU_ICON_SIZE,
-          tintColor: palette.onPrimary,
+          tintColor: palette.text,
         }}
+        testID={iconTestID}
       />
       <Text
         style={styles.label}
@@ -883,12 +879,12 @@ const buildStyles = (color: Palette) =>
       borderRadius: ATTACH_MENU.radius - space.md,
       borderCurve: 'continuous',
     },
-    rowPressed: {backgroundColor: `${color.onPrimary}${PRESSED_ALPHA_HEX}`},
+    rowPressed: {backgroundColor: `${color.text}${PRESSED_ALPHA_HEX}`},
     label: {
       flex: 1,
       fontSize: font.title,
       lineHeight: line.title,
       fontWeight: '400',
-      color: color.onPrimary,
+      color: color.text,
     },
   });

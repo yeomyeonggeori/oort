@@ -17,7 +17,8 @@ import { UnfurlCard } from "@/features/timeline/UnfurlCards";
 // 자라므로, 줄 높이는 트레이와 같은 상한으로 묶고 넘치면 줄 안에서 스크롤한다.
 //
 // ✕는 첫 카드에 한 개다. 끄는 범위는 카드 한 장이 아니라 **이번 메시지의 미리보기 전체**이기 때문이다
-// (타임라인의 제거 칩과 같은 자리·같은 모양).
+// (타임라인의 제거 칩과 같은 자리·같은 모양). 카드에 호버하거나 키보드 초점이 들 때만 서는 테두리 없는 원이다(#5328,
+// 터치는 호버가 없어 늘 보인다). 클래스 한 벌은 `UnfurlCards.tsx` 의 ✕와 같다 — 둘이 갈라지지 않게 같이 고친다.
 // =============================================================================
 
 export function ComposerLinkPreview({
@@ -75,7 +76,7 @@ export function ComposerLinkPreview({
             {cards.map((card, index) => (
               <div
                 key={card.id}
-                className="relative isolate flex shrink-0 rounded-md bg-surface-muted"
+                className="group/unfurl relative isolate flex shrink-0 rounded-md bg-surface-muted"
               >
                 <UnfurlCard unfurl={card} preference={preference} />
                 {index === 0 ? (
@@ -83,7 +84,7 @@ export function ComposerLinkPreview({
                     type="button"
                     aria-label={dismissLabel}
                     title={dismissLabel}
-                    className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+                    className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
                     onClick={onDismiss}
                     data-testid={dismissTestId}
                   >
