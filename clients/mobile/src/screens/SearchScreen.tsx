@@ -370,8 +370,8 @@ export interface SearchViewProps {
  * 머리(X·입력칸)부터 아래 전부. 화면이 서버 없이는 못 보이는 상태(빈 결과·오류·최근 목록이 찬 첫 화면)를 `measure/surfaces.tsx` 가
  * 이 컴포넌트 그대로 찍을 수 있도록, 데이터는 모두 props 로 받는다 — 옛 `SearchBody` 가 하던 일이다.
  */
-export function SearchView(props: SearchViewProps): React.JSX.Element {
-  const {search, kind, onKind, inputLabel} = props;
+export function SearchView(view: SearchViewProps): React.JSX.Element {
+  const {search, kind, onKind, inputLabel} = view;
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const trimmed = search.query.trim();
@@ -388,7 +388,7 @@ export function SearchView(props: SearchViewProps): React.JSX.Element {
       <View style={styles.topRow}>
         <CloseCircle
           label={formatMessage(trimmed === '' && search.query === '' ? 'search.input.exitLabel' : 'search.input.clearLabel')}
-          onPress={props.onExit}
+          onPress={view.onExit}
           testID="search-exit"
         />
         <View style={styles.pillSlot}>
@@ -405,7 +405,7 @@ export function SearchView(props: SearchViewProps): React.JSX.Element {
             autoCorrect={false}
             clearButtonMode="while-editing"
             returnKeyType="search"
-            onSubmitEditing={props.onSubmit}
+            onSubmitEditing={view.onSubmit}
             testID="search-input"
           />
         </View>
@@ -418,54 +418,54 @@ export function SearchView(props: SearchViewProps): React.JSX.Element {
       />
       {kind === 'messages' ? (
         <ScopeChips
-          scope={props.scope}
+          scope={view.scope}
           groupLabel={formatMessage('search.scope.groupLabel')}
           allLabel={formatMessage('search.scope.all')}
           pickLabel={formatMessage('search.scope.pick')}
           pickAccessibilityLabel={formatMessage('search.scope.pickLabel')}
           chosenAccessibilityLabel={formatMessage('search.scope.chosenLabel', {
-            name: props.scope?.title ?? '',
+            name: view.scope?.title ?? '',
           })}
-          onClear={props.onClearScope}
-          onPick={props.onPickScope}
+          onClear={view.onClearScope}
+          onPick={view.onPickScope}
         />
       ) : null}
       <View style={styles.body}>
-        {props.dmFailure ? (
+        {view.dmFailure ? (
           <View style={styles.failure}>
             <FailureBanner
-              message={props.dmFailure.message}
+              message={view.dmFailure.message}
               retryLabel={formatMessage('search.state.retry')}
-              onRetry={props.dmFailure.retry}
+              onRetry={view.dmFailure.retry}
               testID="search-dm-error"
             />
           </View>
         ) : null}
-        {trimmed === '' ? <HomeBody {...props} /> : <ResultsBody {...props} />}
+        {trimmed === '' ? <HomeBody {...view} /> : <ResultsBody {...view} />}
       </View>
     </>
   );
 }
 
 /** 입력 전: 최근 연 대화와 최근 검색. 둘 다 없으면 한 줄 안내. */
-function HomeBody(props: SearchViewProps): React.JSX.Element {
+function HomeBody(view: SearchViewProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
-  const hasTiles = props.recentTiles.length > 0;
-  const hasSearches = props.recentSearches.length > 0;
+  const hasTiles = view.recentTiles.length > 0;
+  const hasSearches = view.recentSearches.length > 0;
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerStyle={{paddingBottom: props.clearance}}
+      contentContainerStyle={{paddingBottom: view.clearance}}
       testID="search-home">
       {hasTiles ? (
         <RecentConversations
           title={formatMessage('search.recent.conversations')}
-          tiles={props.recentTiles}
-          directory={props.directory}
+          tiles={view.recentTiles}
+          directory={view.directory}
           openLabel={name => formatMessage('search.recent.openLabel', {name})}
-          onOpen={props.onOpenRecent}
+          onOpen={view.onOpenRecent}
         />
       ) : null}
       {hasSearches ? (
@@ -473,10 +473,10 @@ function HomeBody(props: SearchViewProps): React.JSX.Element {
           title={formatMessage('search.recent.searches')}
           clearLabel={formatMessage('search.recent.clearAll')}
           clearAccessibilityLabel={formatMessage('search.recent.clearAllLabel')}
-          items={props.recentSearches}
+          items={view.recentSearches}
           rowLabel={query => formatMessage('search.recent.searchLabel', {query})}
-          onPick={props.onPickRecentSearch}
-          onClear={props.onClearRecentSearches}
+          onPick={view.onPickRecentSearch}
+          onClear={view.onClearRecentSearches}
         />
       ) : null}
       {!hasTiles && !hasSearches ? (
@@ -489,16 +489,16 @@ function HomeBody(props: SearchViewProps): React.JSX.Element {
 }
 
 /** 입력 뒤: 칩이 정한 종류만, 「전체」면 채널 → 사람 → 메시지 묶음으로. */
-function ResultsBody(props: SearchViewProps): React.JSX.Element {
-  switch (props.kind) {
+function ResultsBody(view: SearchViewProps): React.JSX.Element {
+  switch (view.kind) {
     case 'all':
-      return <AllBody {...props} />;
+      return <AllBody {...view} />;
     case 'messages':
-      return <MessagesBody {...props} />;
+      return <MessagesBody {...view} />;
     case 'channels':
-      return <ChannelsBody {...props} />;
+      return <ChannelsBody {...view} />;
     case 'people':
-      return <PeopleBody {...props} />;
+      return <PeopleBody {...view} />;
   }
 }
 
@@ -512,16 +512,16 @@ function noResultsCopy(
     : formatMessage('search.state.noResultsIn', {query, where: scopeTitle});
 }
 
-function AllBody(props: SearchViewProps): React.JSX.Element {
+function AllBody(view: SearchViewProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
-  const {search} = props;
-  const channels = previewOf(props.channels, PREVIEW_COUNT.channels);
-  const people = previewOf(props.people, PREVIEW_COUNT.people);
+  const {search} = view;
+  const channels = previewOf(view.channels, PREVIEW_COUNT.channels);
+  const people = previewOf(view.people, PREVIEW_COUNT.people);
   const hits = previewOf(search.hits, PREVIEW_COUNT.messages);
   const messagesMore = hits.more || search.hasMore;
   const nothing =
-    props.channels.length === 0 && props.people.length === 0 && search.phase === 'empty';
+    view.channels.length === 0 && view.people.length === 0 && search.phase === 'empty';
   if (nothing) {
     return (
       <EmptyState
@@ -532,12 +532,12 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
     );
   }
   const loadingLocal =
-    props.localPending && props.channels.length === 0 && props.people.length === 0;
+    view.localPending && view.channels.length === 0 && view.people.length === 0;
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerStyle={{paddingBottom: props.clearance}}
+      contentContainerStyle={{paddingBottom: view.clearance}}
       testID="search-all">
       {channels.shown.length > 0 ? (
         <View testID="search-group-channels">
@@ -547,7 +547,7 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
             moreAccessibilityLabel={formatMessage('search.group.moreLabel', {
               group: formatMessage('search.group.channels'),
             })}
-            onMore={channels.more ? () => props.onKind('channels') : undefined}
+            onMore={channels.more ? () => view.onKind('channels') : undefined}
             testID="search-head-channels"
           />
           {channels.shown.map(match => (
@@ -557,7 +557,7 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
               name={match.name}
               isPrivate={match.channel.kind === 'private'}
               ranges={match.ranges}
-              onPress={() => props.onOpenChannel(match)}
+              onPress={() => view.onOpenChannel(match)}
             />
           ))}
         </View>
@@ -570,17 +570,17 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
             moreAccessibilityLabel={formatMessage('search.group.moreLabel', {
               group: formatMessage('search.group.people'),
             })}
-            onMore={people.more ? () => props.onKind('people') : undefined}
+            onMore={people.more ? () => view.onKind('people') : undefined}
             testID="search-head-people"
           />
           {people.shown.map(match => (
             <PersonRow
               key={match.member.id}
               member={match.member}
-              directory={props.directory}
+              directory={view.directory}
               nameRanges={match.nameRanges}
               handleRanges={match.handleRanges}
-              onPress={() => props.onOpenPerson(match)}
+              onPress={() => view.onOpenPerson(match)}
             />
           ))}
         </View>
@@ -598,7 +598,7 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
             moreAccessibilityLabel={formatMessage('search.group.moreLabel', {
               group: formatMessage('search.group.messages'),
             })}
-            onMore={search.phase === 'results' && messagesMore ? () => props.onKind('messages') : undefined}
+            onMore={search.phase === 'results' && messagesMore ? () => view.onKind('messages') : undefined}
             testID="search-head-messages"
           />
           {search.phase === 'tooShort' ? (
@@ -618,7 +618,7 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
             />
           ) : null}
           {search.phase === 'results' ? (
-            <View testID="search-results">{hits.shown.map(props.renderMessage)}</View>
+            <View testID="search-results">{hits.shown.map(view.renderMessage)}</View>
           ) : null}
         </View>
       ) : null}
@@ -626,13 +626,13 @@ function AllBody(props: SearchViewProps): React.JSX.Element {
   );
 }
 
-function MessagesBody(props: SearchViewProps): React.JSX.Element {
+function MessagesBody(view: SearchViewProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
-  const {search} = props;
+  const {search} = view;
   switch (search.phase) {
     case 'idle':
-      return <HomeBody {...props} />;
+      return <HomeBody {...view} />;
     case 'tooShort':
       return <EmptyState headline={formatMessage('search.state.shortHint')} testID="search-too-short" />;
     case 'searching':
@@ -649,8 +649,8 @@ function MessagesBody(props: SearchViewProps): React.JSX.Element {
     case 'empty':
       return (
         <EmptyState
-          headline={noResultsCopy(formatMessage, search.settledQuery, props.scope?.title ?? null)}
-          detail={props.scope === null ? formatMessage('search.state.scopeNote') : undefined}
+          headline={noResultsCopy(formatMessage, search.settledQuery, view.scope?.title ?? null)}
+          detail={view.scope === null ? formatMessage('search.state.scopeNote') : undefined}
           testID="search-empty"
         />
       );
@@ -658,13 +658,13 @@ function MessagesBody(props: SearchViewProps): React.JSX.Element {
       return (
         <FlatList
           data={search.hits}
-          renderItem={({item}) => props.renderMessage(item)}
+          renderItem={({item}) => view.renderMessage(item)}
           keyExtractor={hit => hit.messageId}
           testID="search-results"
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{paddingBottom: props.clearance}}
+          contentContainerStyle={{paddingBottom: view.clearance}}
           ListFooterComponent={
             search.hasMore ? (
               <Pressable
@@ -688,32 +688,32 @@ function MessagesBody(props: SearchViewProps): React.JSX.Element {
   }
 }
 
-function ChannelsBody(props: SearchViewProps): React.JSX.Element {
+function ChannelsBody(view: SearchViewProps): React.JSX.Element {
   const formatMessage = useFormatMessage();
-  if (props.channels.length === 0) {
-    return props.localPending ? (
+  if (view.channels.length === 0) {
+    return view.localPending ? (
       <EmptyState headline={formatMessage('search.state.pendingChannels')} testID="search-local-pending" />
     ) : (
       <EmptyState
-        headline={noResultsCopy(formatMessage, props.search.query.trim(), null)}
+        headline={noResultsCopy(formatMessage, view.search.query.trim(), null)}
         testID="search-empty"
       />
     );
   }
   return (
     <FlatList
-      data={props.channels}
+      data={view.channels}
       keyExtractor={match => match.channel.id}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerStyle={{paddingBottom: props.clearance}}
+      contentContainerStyle={{paddingBottom: view.clearance}}
       renderItem={({item}) => (
         <ChannelRow
           id={item.channel.id}
           name={item.name}
           isPrivate={item.channel.kind === 'private'}
           ranges={item.ranges}
-          onPress={() => props.onOpenChannel(item)}
+          onPress={() => view.onOpenChannel(item)}
         />
       )}
       testID="search-channels"
@@ -721,32 +721,32 @@ function ChannelsBody(props: SearchViewProps): React.JSX.Element {
   );
 }
 
-function PeopleBody(props: SearchViewProps): React.JSX.Element {
+function PeopleBody(view: SearchViewProps): React.JSX.Element {
   const formatMessage = useFormatMessage();
-  if (props.people.length === 0) {
-    return props.localPending ? (
+  if (view.people.length === 0) {
+    return view.localPending ? (
       <EmptyState headline={formatMessage('search.state.pendingChannels')} testID="search-local-pending" />
     ) : (
       <EmptyState
-        headline={noResultsCopy(formatMessage, props.search.query.trim(), null)}
+        headline={noResultsCopy(formatMessage, view.search.query.trim(), null)}
         testID="search-empty"
       />
     );
   }
   return (
     <FlatList
-      data={props.people}
+      data={view.people}
       keyExtractor={match => match.member.id}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerStyle={{paddingBottom: props.clearance}}
+      contentContainerStyle={{paddingBottom: view.clearance}}
       renderItem={({item}) => (
         <PersonRow
           member={item.member}
-          directory={props.directory}
+          directory={view.directory}
           nameRanges={item.nameRanges}
           handleRanges={item.handleRanges}
-          onPress={() => props.onOpenPerson(item)}
+          onPress={() => view.onOpenPerson(item)}
         />
       )}
       testID="search-people"
