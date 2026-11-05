@@ -2224,7 +2224,6 @@ export default function ConversationScreen({
       <View
         style={styles.layoutFill}
         accessibilityElementsHidden={convSearch.listOpen}
-        importantForAccessibility={convSearch.listOpen ? 'no-hide-descendants' : 'auto'}
         testID="conversation-layout-wrap">
       <ConversationLayout
         list={

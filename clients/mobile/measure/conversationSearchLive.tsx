@@ -258,8 +258,7 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
         </View>
         <View
           style={styles.layoutFill}
-          accessibilityElementsHidden={search.listOpen}
-          importantForAccessibility={search.listOpen ? 'no-hide-descendants' : 'auto'}>
+          accessibilityElementsHidden={search.listOpen}>
         <ConversationLayout
           list={
             <Timeline
