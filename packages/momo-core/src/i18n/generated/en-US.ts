@@ -3580,6 +3580,36 @@ export const catalog: MessageCatalog = {
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
     }
   ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load earlier messages"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "Looking for the message in earlier messages…"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
   "mobile.linkCard.cancel": [
     {
       "type": 0,
