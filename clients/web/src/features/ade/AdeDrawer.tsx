@@ -18,7 +18,10 @@ import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner } from "@/features/common/States";
+import { EmptyInvite } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import { messageAnchorPath, workSessionPath } from "@/features/inbox/anchor";
 import {
@@ -325,7 +328,7 @@ function AdeCard({
 
 export function AdeDrawer() {
   const { workspaceId, session } = useSession();
-  const { items, nowMs, sessionsFailed, retrySessions } = useAdeControl(true);
+  const { items, nowMs, sessionsFailed, sessionsError, retrySessions } = useAdeControl(true);
   const navigate = useNavigate();
   const channelsQuery = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
@@ -459,10 +462,11 @@ export function AdeDrawer() {
         </button>
       </header>
       {sessionsFailed && (
-        <InlineBanner
-          message="작업 세션 목록을 불러오지 못했습니다. 아래 목록에는 에이전트 턴만 있습니다."
-          actionLabel="다시 시도"
-          onAction={retrySessions}
+        // 결과(아래 목록에는 에이전트 턴만 있다)가 정보라 제목 키가 그것까지 말하고, 원인은 뒤에 붙는다. 아래 턴 목록은 그대로 선다(#5279 B).
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadAdeSessionsTitle}
+          cause={loadCauseOf(sessionsError)}
+          onRetry={retrySessions}
           testId="ade-sessions-error"
         />
       )}

@@ -940,8 +940,15 @@ oort_doctor_postgres_line() {
   printf '%s\n' "${1:-}" | awk '$1 == "postgres" { print; exit }'
 }
 
+# A pending push_candidate whose available_at is still in the future is not stuck: the notifier handed
+# it back on purpose, to wait out a member's phone delay (ADR-0206 D4, at most 300 s) or a retry
+# backoff, and the claim does not take it before then. It is reported under the label
+# pending_deferred so the classifier can tell it from a pending row that is already due (a notifier
+# that is not draining), which keeps its FAIL. Known limit (ADR-0206 D4): a row waiting out a retry
+# backoff reads the same way, so a relay outage shows here once the row has failed, not while it
+# retries.
 oort_doctor_outbox_sql() {
-  printf '%s' "SELECT kind::text, status::text, count(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - min(COALESCE(lease_acquired_at, created_at))))::bigint, 0) FROM outbox GROUP BY 1, 2 ORDER BY 1, 2;"
+  printf '%s' "SELECT kind::text, CASE WHEN kind::text = 'push_candidate' AND status::text = 'pending' AND available_at > now() THEN 'pending_deferred' ELSE status::text END AS status, count(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - min(COALESCE(lease_acquired_at, created_at))))::bigint, 0) FROM outbox GROUP BY 1, 2 ORDER BY 1, 2;"
 }
 
 oort_doctor_int_or_zero() {
@@ -981,6 +988,22 @@ oort_doctor_classify_outbox() {
     if [ "$kind" = "agent_job" ] || [ "$kind" = "push_system" ]; then
       row="${row} max_age=${age}s"
     fi
+
+    # BEGIN oort-doctor-deferred-push
+    if [ "$kind" = "push_candidate" ] && [ "$status" = "pending_deferred" ]; then
+      # ADR-0206 D4 (#5353): a candidate the notifier handed back until a later available_at (the
+      # phone delay of a person whose desktop is in use) is healthy whether or not a push relay is
+      # configured, so it is info, never FAIL, and it is not counted in push_pending (that count
+      # names rows that should already have been taken). A pending row that is due stays below.
+      info_n=$((info_n + 1))
+      if [ -n "$info_bits" ]; then
+        info_bits="${info_bits}; ${row}"
+      else
+        info_bits="$row"
+      fi
+      continue
+    fi
+    # END oort-doctor-deferred-push
 
     if [ "$kind" = "push_candidate" ]; then
       push_pending=$((push_pending + count))

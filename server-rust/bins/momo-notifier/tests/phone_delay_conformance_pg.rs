@@ -32,6 +32,9 @@
 //! | `a_retry_wins_over_a_deferral_in_the_same_candidate` | let `defer_candidate` run before the `transient` check |
 //! | `a_failed_look_at_the_clock_sends_instead_of_losing_the_push` | return the error instead of `Refined::untouched` (the push is lost) |
 //! | `two_workspaces_are_judged_apart` | read `member_activity` without `workspace_id` (members collide only across a forged key, so this pins the explicit predicate by behaviour: one workspace's active person never holds another's push) |
+//! | `a_streamed_answer_the_asker_walked_away_from_is_held_not_cancelled_as_read` | give a streamed line the plain `last_read_seq >= seq` read in `refine_targets` (#5353, ADR-0204 D8-a): the asker whose cursor only saw the first words is cancelled and never pushed |
+//! | `a_streamed_line_is_cancelled_only_for_someone_who_was_reading_when_it_closed` | same revert (cat is cancelled); drop the `channel_viewing` clause (dan is held); drop the cursor-covers term from the streamed read (eve is cancelled); apply the stream rule to a line that never streamed (the plain control is held) |
+//! | `a_stored_delay_beyond_five_minutes_is_cut_to_five_minutes` | drop the `LEAST(.., PHONE_DELAY_MAX_SECS)` cap (#5353): the hold waits for the stored 30000 s |
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -40,7 +43,11 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
-use momo_db::PgPool;
+use momo_db::{with_tenant_tx, DbError, PgPool};
+use momo_messaging::{
+    opening_stream_props, send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage,
+    StreamEdit, StreamOutcome, STREAM_PROPS_KEY,
+};
 use momo_notifier::{DrainStats, PushConfig, PushDrain};
 use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher, RELAY_RATE_LIMITED};
 use serde_json::json;
@@ -1113,4 +1120,403 @@ async fn two_workspaces_are_judged_apart() {
         .all(|d| d.workspace_id == idle.ws.to_string()));
     assert_eq!(idle.heard(&relay.sent(), now), strings(&["bob:ios"]));
     assert!(active.heard(&relay.sent(), held).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// #5353 — a streamed line's read, and the cap on the delay
+// ---------------------------------------------------------------------------
+
+/// `who`'s cursor covers `seq` but moved `secs_ago` seconds ago (`read_up_to` stamps it now).
+async fn read_up_to_at(su: &PgPool, room: &Room, who: &str, seq: i64, secs_ago: f64) {
+    sqlx::query(
+        "INSERT INTO read_state (workspace_id, channel_id, member_id, last_read_seq, last_read_at) \
+         VALUES ($1, $2, $3, $4, now() - make_interval(secs => $5::double precision)) \
+         ON CONFLICT (channel_id, member_id) DO UPDATE \
+            SET last_read_seq = EXCLUDED.last_read_seq, last_read_at = EXCLUDED.last_read_at",
+    )
+    .bind(room.ws)
+    .bind(room.channel)
+    .bind(room.id(who))
+    .bind(seq)
+    .bind(secs_ago)
+    .execute(su)
+    .await
+    .expect("set the read cursor at a time");
+}
+
+/// `who`'s client had the channel on screen `secs_ago` seconds ago (`channel_viewing.seen_at`): the
+/// beat that says someone watched a stream, which spends no `seq` of its own.
+async fn watched_at(su: &PgPool, room: &Room, who: &str, secs_ago: f64) {
+    sqlx::query(
+        "INSERT INTO channel_viewing (workspace_id, channel_id, member_id, seen_at) \
+         VALUES ($1, $2, $3, now() - make_interval(secs => $4::double precision)) \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET seen_at = EXCLUDED.seen_at",
+    )
+    .bind(room.ws)
+    .bind(room.channel)
+    .bind(room.id(who))
+    .bind(secs_ago)
+    .execute(su)
+    .await
+    .expect("set the viewing beat");
+}
+
+/// [`say`] for a line that carries the `momo.stream` block (closed: `streaming: false`), the test
+/// the judgment and the refinement tail both make for "this line streamed".
+async fn say_streamed(su: &PgPool, room: &Room, author: &str, mentions: &[&str]) -> Uuid {
+    let ids: Vec<String> = mentions.iter().map(|m| room.id(m).to_string()).collect();
+    let seq = room.next_seq();
+    sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'text', 'phone-delay streamed fixture', \
+                 jsonb_build_object('mention_member_ids', $5::jsonb, $6::text, $7::jsonb)) \
+         RETURNING id",
+    )
+    .bind(room.ws)
+    .bind(room.channel)
+    .bind(seq)
+    .bind(room.id(author))
+    .bind(json!(ids))
+    .bind(STREAM_PROPS_KEY)
+    .bind(json!({"rev": 1, "streaming": false}))
+    .fetch_one(su)
+    .await
+    .expect("insert a streamed message (fires push_candidate_enqueue_trg)")
+}
+
+/// The candidate a stream's closing write enqueued (`source: stream_closed`) — `candidate()` reads
+/// the first row by id, which for a streamed answer is the opening one.
+async fn closing_candidate(su: &PgPool, message: Uuid) -> Candidate {
+    let row = sqlx::query(
+        "SELECT status::text AS status, attempts, \
+                EXTRACT(EPOCH FROM (available_at - created_at))::float8 AS hold_secs \
+           FROM outbox \
+          WHERE kind = 'push_candidate' AND payload->>'message_id' = $1 \
+            AND payload->>'source' = 'stream_closed' \
+          ORDER BY id",
+    )
+    .bind(message.to_string())
+    .fetch_one(su)
+    .await
+    .expect("read the stream's closing candidate");
+    Candidate {
+        status: row.get("status"),
+        attempts: row.get("attempts"),
+        hold_secs: row.get("hold_secs"),
+    }
+}
+
+/// ADR-0204 증보 1 D8-a through the real producers: an agent answers a question by streaming. The
+/// asker watched it begin — their cursor covers the line's `seq`, which is spent by the first words —
+/// and then went to another place on the desktop (still active), long enough ago that nothing says
+/// they were there at the close. The answer closes. The judgment selects them (D8-a gives a streamed
+/// line no `last_read_seq >= seq` shortcut), and the delay must not undo that by reading the same
+/// cursor as "read": the push is **held** for the delay and then **sent**, once.
+///
+/// Sabotage: read a streamed line with the plain `rs.last_read_seq >= m.seq` in `refine_targets` —
+/// the closing candidate is cancelled (`activity_cancelled = 1`) and the asker's phone is never told.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_streamed_answer_the_asker_walked_away_from_is_held_not_cancelled_as_read() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_room(&su, "public", &["asker"]).await;
+    let relay = Relay::accepting();
+
+    // An agent in the channel, and the question it answers.
+    let agent = seed_member(&su, room.ws, "agent", "helper").await;
+    sqlx::query(
+        "INSERT INTO agent \
+           (member_id, workspace_id, model, base_url, max_concurrent_runs, max_run_steps, \
+            owner_human_id) \
+         VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', 2, 50, $3)",
+    )
+    .bind(agent)
+    .bind(room.ws)
+    .bind(room.id("asker"))
+    .execute(&su)
+    .await
+    .expect("seed agent");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(room.ws)
+        .bind(room.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .expect("seed the agent's channel membership");
+    let question = say(&su, &room, "asker", &[]).await;
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, trigger_message_id, status, input, \
+            idempotency_key) \
+         VALUES ($1, $2, $3, $4, $5, 'running'::run_status, $6, $7)",
+    )
+    .bind(run)
+    .bind(room.ws)
+    .bind(agent)
+    .bind(room.channel)
+    .bind(question)
+    .bind(json!({"type": "chat"}))
+    .bind(format!("phone-delay-stream:{run}"))
+    .execute(&su)
+    .await
+    .expect("seed agent run");
+
+    // The opening slice: the first words, `momo.stream.streaming = true`, written by the real send path.
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
+          WHERE channel_id = $1",
+    )
+    .bind(room.channel)
+    .execute(&su)
+    .await
+    .expect("channel_seq catch-up");
+    let (ws, channel, question_id) = (room.ws, room.channel, question);
+    let answer: Uuid = with_tenant_tx(&su, ws, move |conn| {
+        Box::pin(async move {
+            let input = NewMessage {
+                channel_id: channel,
+                author_member_id: agent,
+                message_type: MessageType::Text,
+                body: Some("네, 확인해 볼게요".to_string()),
+                props: json!({
+                    "source": "agent_worker.final_text.v0",
+                    "run_id": run,
+                    STREAM_PROPS_KEY.to_string(): opening_stream_props(),
+                }),
+                root_id: None,
+                reply_to_id: Some(question_id),
+                client_msg_id: Some(run),
+                run_id: Some(run),
+                hlc_ts: None,
+                hlc_count: None,
+            };
+            Ok::<_, DbError>(send_message_in_tx(conn, ws, input).await?.message.id)
+        })
+    })
+    .await
+    .expect("open the streamed answer");
+
+    // The asker's cursor reached the first words, a hundred seconds ago, and has not moved since;
+    // their desktop has been in use the whole time.
+    let seq = seq_of(&su, answer).await;
+    assert!(seq > 1, "the answer comes after the question");
+    read_up_to_at(&su, &room, "asker", seq, 100.0).await;
+    beat(&su, &room, "asker", 0.0).await;
+
+    // The opening candidate is judged while the line streams: the answer arm holds it, so nobody is
+    // pushed and the candidate completes — it is not what this test is about.
+    let opening = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (
+            opening.dispatched,
+            opening.deferred,
+            opening.activity_cancelled
+        ),
+        (0, 0, 0),
+        "an open stream is held by the judgment, not by the delay: {opening:?}"
+    );
+
+    // The close: the real closing write enqueues the second candidate (`T` is this moment).
+    let closed = with_tenant_tx(&su, ws, move |conn| {
+        Box::pin(async move {
+            let applied = stream_message_body_in_tx(
+                conn,
+                ws,
+                answer,
+                agent,
+                "네, 확인했어요. 결과는 이래요.",
+                StreamEdit {
+                    rev: 1,
+                    is_final: true,
+                    outcome: None,
+                    provisional: false,
+                },
+            )
+            .await?;
+            Ok::<_, DbError>(applied.expect("the domain did not refuse the closing slice"))
+        })
+    })
+    .await
+    .expect("close the stream");
+    assert!(
+        matches!(closed, StreamOutcome::Applied(_)),
+        "the closing write was not applied: {closed:?}"
+    );
+
+    let first = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (
+            first.dispatched,
+            first.deferred,
+            first.activity_held,
+            first.activity_cancelled
+        ),
+        (0, 1, 1, 0),
+        "they walked away from the stream: held for the delay, not cancelled as read: {first:?}"
+    );
+    assert!(relay.sent().is_empty(), "nothing yet: {:?}", relay.sent());
+    assert_eq!(
+        dispatch_rows(&su, answer).await,
+        0,
+        "a hold records nothing"
+    );
+    let held = closing_candidate(&su, answer).await;
+    assert_eq!(held.status, "pending");
+    assert!(
+        (held.hold_secs - 60.0).abs() < 0.01,
+        "it waits until the closed time + 60 s, got {}",
+        held.hold_secs
+    );
+
+    // The delay runs out; the person is still at the desktop and still has not read the answer.
+    let_time_pass(&su, answer, 61.0).await;
+    beat(&su, &room, "asker", 0.0).await;
+    let second = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (
+            second.dispatched,
+            second.deferred,
+            second.activity_cancelled
+        ),
+        (1, 0, 0),
+        "the closed answer is pushed once: {second:?}"
+    );
+    assert_eq!(room.heard(&relay.sent(), answer), strings(&["asker:ios"]));
+    assert_eq!(dispatch_rows(&su, answer).await, 1);
+    assert_eq!(closing_candidate(&su, answer).await.status, "done");
+}
+
+/// Who a streamed line counts as **read by** when its candidate is judged — four people with their
+/// desktops active, all mentioned by one streamed line whose `seq` every cursor but one covers:
+///
+/// | | cursor | last moved | channel on screen | verdict |
+/// |---|---|---|---|---|
+/// | bob | covers | just now | — | read: cancelled |
+/// | cat | covers | 100 s ago | no | saw it begin and left: **held** |
+/// | dan | covers | 100 s ago | yes, a fresh beat | watched it to the end: cancelled |
+/// | eve | one short | just now | — | has not read **this** line: **held** (the cursor must cover it) |
+///
+/// and the control, a plain message (no `momo.stream`) that mentions cat: her cursor covers it, so
+/// the old rule stands and she is cancelled — the exception is for streamed lines only. The held ones
+/// then go once, when the delay runs out, and the cancelled ones never.
+///
+/// Sabotage: read a streamed line with the plain `last_read_seq >= seq` (cat is cancelled); drop the
+/// `channel_viewing` clause (dan is held); drop the cursor-covers term (eve is cancelled); apply the
+/// streamed rule to every line (the plain control is held).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_streamed_line_is_cancelled_only_for_someone_who_was_reading_when_it_closed() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_room(&su, "public", &["ann", "bob", "cat", "dan", "eve"]).await;
+    let relay = Relay::accepting();
+
+    // eve read an earlier line a moment ago (seq 1 is `earlier`); the streamed line and the control
+    // come after it.
+    let earlier = say(&su, &room, "ann", &[]).await;
+    let streamed = say_streamed(&su, &room, "ann", &["bob", "cat", "dan", "eve"]).await;
+    let plain = say(&su, &room, "ann", &["cat"]).await;
+    let streamed_seq = seq_of(&su, streamed).await;
+    let plain_seq = seq_of(&su, plain).await;
+    assert!(seq_of(&su, earlier).await < streamed_seq && streamed_seq < plain_seq);
+
+    // Everyone's cursor but eve's covers both the streamed line and the plain one.
+    read_up_to_at(&su, &room, "bob", plain_seq, 0.0).await;
+    read_up_to_at(&su, &room, "cat", plain_seq, 100.0).await;
+    read_up_to_at(&su, &room, "dan", plain_seq, 100.0).await;
+    watched_at(&su, &room, "dan", 1.0).await;
+    read_up_to_at(&su, &room, "eve", seq_of(&su, earlier).await, 0.0).await;
+    for who in ["bob", "cat", "dan", "eve"] {
+        beat(&su, &room, who, 0.0).await;
+    }
+
+    let first = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (first.dispatched, first.deferred),
+        (0, 1),
+        "nobody is pushed yet; the streamed line's candidate waits for cat and eve: {first:?}"
+    );
+    assert_eq!(
+        (first.activity_cancelled, first.activity_held),
+        (3, 2),
+        "bob and dan read the streamed line, cat read the plain one; cat and eve are held: {first:?}"
+    );
+    assert!(relay.sent().is_empty(), "{:?}", relay.sent());
+    assert_eq!(candidate(&su, streamed).await.status, "pending");
+    assert_eq!(
+        candidate(&su, plain).await.status,
+        "done",
+        "the control candidate was cancelled whole"
+    );
+
+    // The delay runs out for the held pair; the cancelled never hear it.
+    let_time_pass(&su, streamed, 61.0).await;
+    for who in ["bob", "cat", "dan", "eve"] {
+        beat(&su, &room, who, 0.0).await;
+    }
+    let second = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (second.dispatched, second.deferred, second.activity_cancelled),
+        (2, 0, 2),
+        "cat and eve are pushed; bob and dan are cancelled again (their reading is still on record): {second:?}"
+    );
+    assert_eq!(
+        room.heard(&relay.sent(), streamed),
+        strings(&["cat:ios", "eve:ios"])
+    );
+    assert!(room.heard(&relay.sent(), plain).is_empty());
+    assert_eq!(dispatch_rows(&su, streamed).await, 2);
+}
+
+// ---------------------------------------------------------------------------
+// #5353 — the delay is capped at five minutes
+// ---------------------------------------------------------------------------
+
+/// `notification_rule.phone_delay_secs` is a bare `smallint` with no CHECK (migration 172); only the
+/// settings API narrows it to {0, 60, 300}. A value stored any other way — here 30000 s, more than
+/// eight hours — must not hold the push for that long: the tail reads it as 300 s. The hold waits
+/// until `T + 300 s`, and the push goes once that has passed.
+///
+/// Sabotage: drop the `LEAST(.., PHONE_DELAY_MAX_SECS)` — the candidate waits `T + 30000 s`
+/// (`hold_secs` assertion), and 301 s later the push is still being held (`dispatched` assertion).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_stored_delay_beyond_five_minutes_is_cut_to_five_minutes() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_room(&su, "dm", &["ann", "bob"]).await;
+    let relay = Relay::accepting();
+
+    set_delay(&su, &room, "bob", 30_000).await;
+    beat(&su, &room, "bob", 0.0).await;
+    let dm = say(&su, &room, "ann", &[]).await;
+
+    let first = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (first.dispatched, first.deferred, first.activity_held),
+        (0, 1, 1),
+        "held for the active desktop: {first:?}"
+    );
+    let held = candidate(&su, dm).await;
+    assert!(
+        (held.hold_secs - 300.0).abs() < 0.01,
+        "a stored 30000 s waits no longer than five minutes, got {}",
+        held.hold_secs
+    );
+
+    let_time_pass(&su, dm, 301.0).await;
+    beat(&su, &room, "bob", 0.0).await;
+    let second = drain(&su, &[room.ws], config(), &relay).await;
+    assert_eq!(
+        (second.dispatched, second.deferred),
+        (1, 0),
+        "five minutes on, the push goes: {second:?}"
+    );
+    assert_eq!(room.heard(&relay.sent(), dm), strings(&["bob:ios"]));
 }

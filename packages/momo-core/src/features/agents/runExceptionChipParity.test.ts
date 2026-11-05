@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentRunPhase, AgentRunProgress } from "../../lib/api";
 import { activityRail } from "./activityRail";
 import { runException, UNCLAIMED_END_REASONS } from "./runException";
-import { serverFactsOf, signalFromProgress } from "./runPhase";
+import { approvalEndState, serverFactsOf, signalFromProgress } from "./runPhase";
 import { RUN_STATUS_WOKEN_FAILED } from "./runStatusLine";
 import {
   isUncollected,
@@ -279,14 +279,22 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     expect(seen).toBeGreaterThan(20);
   });
 
-  it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 필요뿐이다", () => {
+  it("줄도 칩도 없는 상태: 취소·성공은 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·승인 필요·거부·만료뿐이다", () => {
     for (const { where, exception, chip } of rows) {
       if (exception !== null) continue;
       if (chip === null) continue;
       expect(
-        ["received", "claimed", "working", "approval", "answered", "declined", "expired"],
+        ["received", "claimed", "working", "approval", "declined", "expired"],
         where
       ).toContain(chip.kind);
+    }
+    // 성공으로 끝난 run은 어느 시각·어느 종료 코드에서도 칩이 없다(#5382): 「답함」이 어디서 되살아나지 않는다.
+    // (승인 종결 코드 — 거부·만료 — 를 단 run은 그 코드가 낱말을 정하므로 성공이 아니다.)
+    const succeeded = rows.filter((row) => row.run.phase === "succeeded" && approvalEndState(row.run.endReason) === null);
+    expect(succeeded.length).toBeGreaterThan(20);
+    for (const { where, exception, chip } of succeeded) {
+      expect(chip, where).toBeNull();
+      expect(exception, where).toBeNull();
     }
     const cancelled = run({ phase: "cancelled", status: "cancelled" });
     expect(runException(cancelled, T + HOUR)).toBeNull();
@@ -356,9 +364,10 @@ it.each([
   { name: "승인 직후(run 미수신)", status: "approved", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
   { name: "승인 직후(대기 run)", status: "approved", phase: "awaiting_approval", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
   { name: "실행 중", status: "approved", phase: "running", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
-  { name: "성공", status: "approved", phase: "succeeded", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  // 성공(「끝」)은 카드·인박스가 말하고 칩은 없다(#5382).
+  { name: "성공", status: "approved", phase: "succeeded", state: "done", word: "끝", chipKind: null, chipWord: null },
   { name: "실패", status: "approved", phase: "failed", endReason: "agent_error", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
-  { name: "결과 성공(run 미수신)", status: "approved", resultStatus: "executed", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  { name: "결과 성공(run 미수신)", status: "approved", resultStatus: "executed", state: "done", word: "끝", chipKind: null, chipWord: null },
   { name: "결과 실패(run 미수신)", status: "approved", resultStatus: "failed", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
   { name: "만료", status: "expired", phase: "timed_out", endReason: "approval_expired", state: "expired", word: "만료", chipKind: "expired", chipWord: "만료" },
 ] as const)("도구 승인 $name: 카드·인박스·칩이 같은 상태를 말한다", (row) => {
@@ -381,5 +390,6 @@ it.each([
   expect(card.state).toBe(row.state);
   expect(card.word).toBe(row.word);
   expect(inbox.outcome).toBe(row.word);
-  expect(chip).toMatchObject({ kind: row.chipKind, word: row.chipWord });
+  if (row.chipKind === null) expect(chip).toBeNull();
+  else expect(chip).toMatchObject({ kind: row.chipKind, word: row.chipWord });
 });

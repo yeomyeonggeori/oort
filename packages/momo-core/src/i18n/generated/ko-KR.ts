@@ -1318,6 +1318,12 @@ export const catalog: MessageCatalog = {
       "value": "활동을 불러오지 못했어요"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션 목록을 불러오지 못해 아래 목록에는 에이전트 턴만 있어요"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1328,6 +1334,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "패널을 다시 열면 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "기록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "진행을 불러오지 못했어요"
     }
   ],
   "connection.load.agentProfileAppliesTitle": [
@@ -1510,10 +1540,46 @@ export const catalog: MessageCatalog = {
       "value": "팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요"
     }
   ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "팀 그림을 불러오지 못했어요"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "실행 위치를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "선택한 작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "진행 내역을 불러오지 못했어요"
     }
   ],
   "connection.send.failed": [
@@ -4039,7 +4105,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "더보기"
+      "value": "더 보기"
     }
   ],
   "releaseNotes.popup.title": [
@@ -6554,12 +6620,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [

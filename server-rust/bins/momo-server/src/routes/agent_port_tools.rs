@@ -62,9 +62,8 @@ use momo_mcp::{
 };
 use momo_messaging::{
     clamp_history_limit, is_channel_member, list_channel_page, list_hosted_inbox_in_tx,
-    send_message_in_tx, send_thread_notice_in_tx, validate_quote_target_in_tx,
-    validate_thread_root_in_tx, HistoryCursor, MessageType, NewMessage, SendExtras,
-    HOSTED_INBOX_LIMIT_DEFAULT,
+    send_thread_notice_in_tx, validate_quote_target_in_tx, validate_thread_root_in_tx,
+    HistoryCursor, MessageType, NewMessage, SendExtras, HOSTED_INBOX_LIMIT_DEFAULT,
 };
 use momo_outbox::GatewayLeaseBinding;
 use serde_json::{json, Map, Value};
@@ -2582,7 +2581,11 @@ async fn action_propose(
                         .map_err(crate::routes::approvals::expression_db_error)?,
                 );
             }
-            let card = send_message_in_tx(
+            // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): the card stands where the run's answer will
+            // — under the request's thread, or under the request itself at a channel's top level —
+            // on the spine that keeps the thread's rollup. `run.trigger_root_id` is decided once,
+            // in the statement that locked the run.
+            let card = send_thread_notice_in_tx(
                 conn,
                 caller.workspace_id,
                 NewMessage {
@@ -2633,7 +2636,7 @@ async fn action_propose(
                         momo_agent::actions::stamp_decision_mode(&mut props, decision);
                         props
                     },
-                    root_id: None,
+                    root_id: run.trigger_root_id,
                     reply_to_id: None,
                     // A key **derived from** the approval id, not the approval
                     // id itself — see `momo_agent::card_client_msg_id`. The

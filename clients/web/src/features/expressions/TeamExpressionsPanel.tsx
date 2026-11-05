@@ -14,6 +14,9 @@ import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
@@ -50,7 +53,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, vi
    * 이 ref를 읽어 확인 단계 취소를 부른다. 확인이 없으면 null이다. 확인 단계에서 Esc가 고르개 통째로 닫으면 안 된다(#4986).
    */
   escapeClaim?: MutableRefObject<(() => void) | null> }) {
-  const { store, cache, usage, status, offline } = useExpressions();
+  const { store, cache, usage, status, offline, failure } = useExpressions();
   const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
   // ADR-0218 §10 J2 + 2026-11-05 증보: 두 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForView`). 이모티콘 = 작은 이모티콘(움직여도)과
@@ -151,7 +154,9 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, vi
       {fixedView ? null : <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />}
       <Input ref={searchRef} type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
+      {/* 다시 읽기가 실패해도 이미 받아 둔 목록은 지우지 않는다(#5279 C, #5242 규칙): 한 줄이 위에서 원인과 함께 말하고 목록은 그대로 서 있다. 받아 둔 것이 없을 때만 한 줄뿐이다. */}
+      {status === "error" && <LoadFailureNote titleKey={CONNECTION_KEYS.loadTeamExpressionsTitle} cause={loadCauseOf(failure)} onRetry={() => void store.refresh()} separator={false} testId="team-expressions-error" />}
+      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" && cache.items.length === 0 ? null : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
         <ul ref={listRef} className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);

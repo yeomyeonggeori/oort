@@ -50,12 +50,12 @@ export const REQUEST_BUNDLE_FACE = {
   { word: string; icon: string; tone: RequestBundleTone }
 >;
 
-/** 칩·레일은 상위 낱말, 카드·생각 줄은 하위 낱말이에요. 취소는 칩에 세지 않아요. */
+/** 칩·레일은 상위 낱말, 카드·생각 줄은 하위 낱말이에요. 끝(성공)과 취소는 칩에 세지 않아요(#5382). */
 export const REQUEST_BUNDLE_CHIP_KIND = {
   thinking: "working",
   executing: "working",
   approval: "approval",
-  done: "answered",
+  done: null,
   declined: "declined",
   expired: "expired",
   failed: "failed",

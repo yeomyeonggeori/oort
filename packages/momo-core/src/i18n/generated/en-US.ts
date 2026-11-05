@@ -1360,6 +1360,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load activity"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions, so the list below only has agent turns"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1370,6 +1376,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "Reopen the panel to read it again."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "We'll read it again in a moment."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the record"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load progress"
     }
   ],
   "connection.load.agentProfileAppliesTitle": [
@@ -1556,10 +1586,46 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't refresh team work. Showing the last list we have"
     }
   ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the team pictures"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the code execution hosts"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load where sessions run"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the selected work session"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the progress steps"
     }
   ],
   "connection.send.failed": [
@@ -6884,12 +6950,6 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [

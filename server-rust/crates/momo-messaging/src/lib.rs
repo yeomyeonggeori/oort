@@ -194,7 +194,8 @@ pub use interaction::{
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
 };
 pub use member_activity::{
-    touch_member_activity_in_tx, ActivityOutcome, ACTIVITY_MIN_REFRESH_SECS,
+    touch_member_activity_in_tx, ActivityOutcome, ACTIVITY_LOCK_WAIT_SECS,
+    ACTIVITY_MIN_REFRESH_SECS,
 };
 pub use member_avatar::{
     activate_member_avatar_upload_in_tx, clear_own_member_avatar_in_tx, image_dimensions,
@@ -230,14 +231,15 @@ pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
     agent_context_window_in_tx, build_broadcast_payload, build_thread_updated_payload,
     cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
-    fetch_thread_rollup_in_tx, find_client_message_in_tx, find_message_in_tx, list_channel_page,
-    list_messages, list_thread_replies, parse_replies_cursor, patch_and_prune_message_props_in_tx,
-    patch_message_props_in_tx, send_message, send_message_in_tx, send_message_with_mentions_in_tx,
-    send_message_with_mentions_via_in_tx, send_signed_message_in_tx, send_thread_notice_in_tx,
-    thread_root_state_in_tx, validate_quote_target_in_tx, validate_replies_root_in_tx,
-    validate_thread_root_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
-    PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SendExtras,
-    SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
+    counts_as_thread_reply, fetch_thread_rollup_in_tx, find_client_message_in_tx,
+    find_message_in_tx, list_channel_page, list_messages, list_thread_replies,
+    parse_replies_cursor, patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
+    send_message, send_message_in_tx, send_message_with_mentions_in_tx,
+    send_message_with_mentions_via_in_tx, send_run_line_in_tx, send_signed_message_in_tx,
+    send_thread_notice_in_tx, thread_root_state_in_tx, validate_quote_target_in_tx,
+    validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageSignature,
+    MessageType, NewMessage, PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid,
+    SendExtras, SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
     ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
     REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX, THREAD_SUMMARY_PARTICIPANTS,
 };

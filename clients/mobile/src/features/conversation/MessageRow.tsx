@@ -673,6 +673,7 @@ function Author({
   time,
   pendingMark,
   requestChip,
+  chipHead = requestChip != null,
 }: {
   directory: Directory;
   memberId: string;
@@ -695,6 +696,11 @@ function Author({
    */
   pendingMark?: React.ReactNode;
   requestChip?: React.ReactNode;
+  /**
+   * 머리 줄이 칩이 서는 줄의 모양(줄바꿈 없음·가운데 정렬)인가. 칩이 지금 서 있는지가 아니라 **이 메시지가 에이전트를 불렀는지**가 정한다
+   * (#5382): 성공으로 끝나 칩이 비어도 줄이 다시 흐르지 않아서 높이와 정렬이 그대로다(웹 `hasRunChip`과 같은 몫). 기본은 칩이 있느냐다.
+   */
+  chipHead?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
@@ -712,7 +718,7 @@ function Author({
           isAgent && styles.authorNameAgent,
           // 칩이 서는 머리 줄은 줄바꿈이 없다(웹 planner 결정 6): 긴 이름이 줄어들고 칩·시각은 줄지 않는다 — 칩이 혼자 다음 줄로 내려가
           // 머리 줄 높이가 바뀌는 일이 없다.
-          requestChip ? styles.authorNameShrink : null,
+          chipHead ? styles.authorNameShrink : null,
         ]}
         numberOfLines={1}>
         {parts.name}
@@ -751,7 +757,7 @@ function Author({
   // 폭이라 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다. 프로필 문은 얼굴
   // (`profile-avatar-target`)과 멘션뿐이고, 이 줄을 누르면 행 탭이 받는다(스레드·키보드 닫기·길게 누르기 시트).
   return (
-    <View style={[styles.authorRow, requestChip ? styles.authorRowChip : null]}>
+    <View style={[styles.authorRow, chipHead ? styles.authorRowChip : null]}>
       {content}
     </View>
   );
@@ -2206,8 +2212,6 @@ export interface MessageRowActions {
    * the target off it, because the row does not know what the page holds.
    */
   onJumpToQuoted?: (message: Message) => void;
-  /** 「답함 ✓」 칩을 누르면 그 답 메시지로 간다(#4620 B). 답 메시지는 로드된 목록 안에 있다(칩이 거기서만 찾는다). */
-  onJumpToMessage?: (messageId: string, seq: number) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
@@ -3343,10 +3347,10 @@ function MessageRowInner({
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
+            chipHead={requestChip != null || (runStatus?.length ?? 0) > 0}
             requestChip={requestChip ? <RequestStatusChip chip={requestChip}
               sentence={requestSentence}
-              // 「답함 ✓」(#4620 B): 답 메시지를 알 때만 눌리고(누르면 그 답으로 간다), 모르면 같은 칩이 눌리지 않는다 — 죽은 단추를 세우지 않는다.
-              onOpen={!requestCardTarget && requestChip.kind === 'answered' ? (requestChip.answer !== undefined && actions?.onJumpToMessage ? () => actions.onJumpToMessage?.(requestChip.answer!.id, requestChip.answer!.seq) : undefined) : requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
+              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
@@ -3592,7 +3596,7 @@ function MessageRowInner({
                   <ThreadSummaryContent
                     view={threadView}
                     directory={directory}
-                    suffix={requestCardTarget ? ` · ${requestSentence ?? requestChip?.word ?? ''}` : undefined}
+                    suffix={requestCardTarget && (requestSentence ?? requestChip?.word) ? ` · ${requestSentence ?? requestChip?.word}` : undefined}
                     workChip={threadWorkChip}
                   />
                 </Pressable>
