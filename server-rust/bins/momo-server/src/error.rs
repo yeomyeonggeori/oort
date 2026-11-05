@@ -51,7 +51,8 @@ pub struct ApiError {
     /// `error.code` on the wire; `None` omits the key.
     pub code: Option<&'static str>,
     /// `Retry-After` (whole seconds) on the response; `None` sends no header. Only a
-    /// refusal that tells the client when to come back carries one ([`ApiError::busy`]).
+    /// refusal that tells the client when to come back carries one ([`ApiError::busy`],
+    /// [`ApiError::with_retry_after`]).
     pub retry_after_seconds: Option<u64>,
     /// `claimKind` at the top of the body, beside `error` (ADR-0215 D6). Set only by
     /// [`ApiError::with_claim_kind`], which only the claim route's 409 and 410 call.
@@ -91,6 +92,15 @@ impl ApiError {
             retry_after_seconds: Some(retry_after_seconds),
             claim_kind: None,
         }
+    }
+
+    /// Tell the client when to come back: whole seconds, sent as `Retry-After`. Only a refusal
+    /// that *knows* waiting can help asks for one — a passing fault, never a state an operator has
+    /// to fix, where the header would be a lie (ADR-0151 증보 7 D3). It adds the header and
+    /// nothing else: the status, the sentence and the `code` stay as they were built.
+    pub fn with_retry_after(mut self, seconds: u64) -> Self {
+        self.retry_after_seconds = Some(seconds);
+        self
     }
 
     /// Name the kind of the claim token this refusal is about (ADR-0215 D6). Called only for
@@ -256,6 +266,60 @@ mod tests {
             serde_json::to_value(empty.envelope()).unwrap(),
             serde_json::json!({"error": {"message": "password is required"}}),
             "the empty password keeps its code-less envelope"
+        );
+    }
+
+    /// ADR-0151 증보 7 D3 on the wire: a coded refusal can also say when to come back, and only
+    /// when it asked. The header is read off the real response (`into_response`), so a refusal that
+    /// never asked keeps the response it always had, and `busy` keeps its header without growing a
+    /// code.
+    #[tokio::test]
+    async fn a_retry_after_rides_with_a_code_and_only_when_asked() {
+        async fn answer(error: ApiError) -> (StatusCode, Option<String>, serde_json::Value) {
+            let response = error.into_response();
+            let status = response.status();
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .map(|value| value.to_str().expect("an ascii header").to_string());
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .expect("a small body");
+            (
+                status,
+                retry_after,
+                serde_json::from_slice(&bytes).expect("a json body"),
+            )
+        }
+
+        let asked = ApiError::coded(StatusCode::BAD_GATEWAY, "wait_for_it", "try later")
+            .with_retry_after(5);
+        assert_eq!(
+            answer(asked).await,
+            (
+                StatusCode::BAD_GATEWAY,
+                Some("5".to_string()),
+                serde_json::json!({"error": {"message": "try later", "code": "wait_for_it"}})
+            )
+        );
+
+        let silent = ApiError::coded(StatusCode::SERVICE_UNAVAILABLE, "fix_it", "operator");
+        assert_eq!(
+            answer(silent).await,
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                None,
+                serde_json::json!({"error": {"message": "operator", "code": "fix_it"}})
+            )
+        );
+
+        let busy = answer(ApiError::busy(2)).await;
+        assert_eq!(busy.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(busy.1.as_deref(), Some("2"));
+        assert!(
+            busy.2["error"].get("code").is_none(),
+            "adding the builder does not name the older busy refusal: {}",
+            busy.2
         );
     }
 

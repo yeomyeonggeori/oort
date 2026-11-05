@@ -133,6 +133,9 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
       onDelete: async () => {},
     },
   },
+  // #5357. 에이전트의 답이 바로 위 메시지를 가리키면 인용을 그리지 않는다(스칼라). 비교자가 이것을 안 보면, 질문 바로 아래로 옮겨 온 행이
+  // 인용을 든 채 서 있거나 반대로 인용이 영영 돌아오지 않는다.
+  quoteRedundant: {quoteRedundant: true},
   quoteAttachmentCount: {quoteAttachmentCount: 2},
   // #4883. 서버가 카드를 만들거나 작성자가 지우면 한 메시지의 투영 배열이 새것이 된다(`replaceMessageUnfurls`). 목록이 줄마다
   // 그 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성이 곧 값이다. 비교자가 이것을 안 보면, 카드가 도착한 뒤에도 붙어 있는
