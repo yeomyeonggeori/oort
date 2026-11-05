@@ -770,6 +770,8 @@ pub async fn run(
     // get the owner's HOME back.
     let codex = CodexHome::beside(&config.state_path)
         .with_owner_home(std::env::var_os("HOME").map(PathBuf::from));
+    // Filtered per launch to `policy::AGENT_ENV_ALLOWLIST` (#2630 F1).
+    let parent_env: Vec<(String, String)> = std::env::vars().collect();
     if config
         .tools
         .values()
@@ -793,6 +795,11 @@ pub async fn run(
                  (toolchains under the owner's home, such as rustup, will not be found)"
             );
         }
+        // #2647 L1: read the codex the adapter runs back once now, so a drifted
+        // one is in the log before the first remote session. Each Codex
+        // session repeats the check and is the one that refuses
+        // (`SessionManager::spawn`).
+        crate::codex_check::log_codex_checks(&config, &codex, &parent_env).await;
     }
     let sessions = SessionManager::new(
         api.clone(),
@@ -800,8 +807,7 @@ pub async fn run(
             tools: config.tools.clone(),
             working_directory: config.working_directory.clone(),
             acp_start_timeout: Duration::from_millis(config.acp_start_timeout_ms),
-            // Filtered per launch to `policy::AGENT_ENV_ALLOWLIST` (#2630 F1).
-            parent_env: std::env::vars().collect(),
+            parent_env,
             max_sessions: config.max_sessions,
             permission_wait: crate::session::DEFAULT_PERMISSION_WAIT,
             codex,

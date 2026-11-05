@@ -15,6 +15,7 @@
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
 //! | the host's environment reaches an agent, and the commands it runs, only through an allowlist (#2630 F1) | [`AGENT_ENV_ALLOWLIST`] in [`launch_spec`]; for Codex's commands also [`codex_home_config`] |
 //! | the owner's user skill layer is not loaded into a remote Codex session (#2630 F5) | `HOME` in [`AdapterKind::isolation_env`], [`prepare_codex_home`] |
+//! | the features the host switched off are read back off from the codex the adapter runs, before every Codex session, or there is no session (#2647 L1) | [`check_codex_features`] in `crate::codex_check` |
 //! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
 //!
 //! ## How each adapter is isolated (measured 2026-09-23 against the published sources)
@@ -117,6 +118,10 @@ pub enum Refusal {
     /// sits inside the allowed folder, or carries configuration beyond the
     /// sign-in (instructions, rules, hooks, prompts).
     CodexHomeRefused,
+    /// ADR-0188 §8.10 (#2647 L1): the codex the adapter runs did not report
+    /// the host's switched-off features as off (it ignores or renamed a key),
+    /// or the check itself could not be completed. Refused closed.
+    CodexConfigUnverified,
     /// ADR-0188 D6: the folder carries project agent configuration the adapter
     /// would apply and the host cannot switch off.
     ProjectConfigRefused,
@@ -215,6 +220,7 @@ impl Refusal {
             Self::AdapterMismatch => "adapter_mismatch",
             Self::CodexLoginRequired => "codex_login_required",
             Self::CodexHomeRefused => "codex_home_refused",
+            Self::CodexConfigUnverified => "codex_config_unverified",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
             Self::FolderUnknown => "folder_unknown",
@@ -588,6 +594,11 @@ pub fn check_project_config(adapter: AdapterKind, cwd: &Path) -> Result<(), Refu
 /// every later command in `. <snapshot>`, which re-exports everything that
 /// shell had — Codex's whole environment and the owner's startup-file exports
 /// — past `[shell_environment_policy]` (measured, `tests/codex_isolation_real.rs`).
+///
+/// #2647 L1: these are keys, and a key only means something while codex still
+/// reads it. Before every Codex session the host reads the effective table
+/// back from the codex the adapter runs and refuses the session unless every
+/// feature here reads `false` ([`check_codex_features`], `crate::codex_check`).
 pub const CODEX_DISABLED_FEATURES: &[&str] = &[
     "hooks",
     "plugins",
@@ -613,6 +624,83 @@ fn codex_disabled_features() -> Value {
             .map(|feature| (feature.to_string(), Value::Bool(false)))
             .collect(),
     )
+}
+
+/// The arguments the host gives the adapter's executable to read Codex's
+/// effective feature table (#2647 L1). codex-acp 1.13.0's `cli` subcommand runs
+/// the very codex the adapter starts as `app-server` — the `@openai/codex` it
+/// bundles, since the host never passes `CODEX_PATH` — with the environment it
+/// is given, and `features list` prints one `name  stage  state` row per
+/// feature under the `CODEX_HOME` it reads (measured with codex 0.155.1; it has
+/// no `--json`).
+pub const CODEX_FEATURES_PROBE: [&str; 3] = ["cli", "features", "list"];
+
+/// One way the table `codex features list` printed is not what the host needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeatureDrift {
+    /// The feature is not in the table: codex renamed or dropped it, so the
+    /// host's `false` key reaches nothing and the feature runs on its default.
+    Missing(&'static str),
+    /// The feature is listed and does not read `false` (the table's last
+    /// column; escaped and cut short, for a log line).
+    NotOff {
+        feature: &'static str,
+        state: String,
+    },
+}
+
+impl std::fmt::Display for FeatureDrift {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing(feature) => write!(f, "{feature} is not in the table"),
+            Self::NotOff { feature, state } => write!(f, "{feature} reads {state:?}"),
+        }
+    }
+}
+
+/// #2647 L1 — whether a `codex features list` table says every feature in
+/// [`CODEX_DISABLED_FEATURES`] is off. The only `Ok` is every one of them
+/// listed, and listed as `false`: a feature that is missing, one that reads
+/// anything else, and a table that cannot be read at all all fail.
+///
+/// A row is `name  stage  state`, and the stage may be two words (`under
+/// development`), so the name is the row's first token and the state its last.
+/// A feature listed twice must read `false` every time.
+pub fn check_codex_features(table: &str) -> Result<(), Vec<FeatureDrift>> {
+    let rows: Vec<(&str, &str)> = table
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line.split_whitespace();
+            let name = tokens.next()?;
+            let state = tokens.last()?;
+            Some((name, state))
+        })
+        .collect();
+    let mut drift = Vec::new();
+    for &feature in CODEX_DISABLED_FEATURES {
+        let states: Vec<&str> = rows
+            .iter()
+            .filter(|(name, _)| *name == feature)
+            .map(|(_, state)| *state)
+            .collect();
+        if states.is_empty() {
+            drift.push(FeatureDrift::Missing(feature));
+        } else if let Some(state) = states.iter().find(|state| **state != "false") {
+            drift.push(FeatureDrift::NotOff {
+                feature,
+                state: state
+                    .chars()
+                    .take(24)
+                    .flat_map(char::escape_debug)
+                    .collect(),
+            });
+        }
+    }
+    if drift.is_empty() {
+        Ok(())
+    } else {
+        Err(drift)
+    }
 }
 
 /// A path as a TOML basic string, or `None` when it is not one (not UTF-8,
@@ -1374,6 +1462,11 @@ mod tests {
             ("TMPDIR", "/var/folders/xx/T/"),
             ("LANG", "ko_KR.UTF-8"),
             ("LC_CTYPE", "UTF-8"),
+            // #2647 I3: `L…` names that are not locale categories. With a
+            // prefix of `L` instead of `LC_` they would pass — and
+            // `LD_PRELOAD` is code the agent loads.
+            ("LESS", "-R"),
+            ("LD_PRELOAD", "/tmp/evil.dylib"),
             ("MOMO_WORKD_REGISTER_TOKEN", "secret"),
             ("OORT_ANYTHING", "secret"),
             ("ZZ_TEST_TOKEN", "zz-fake-token-2630"),
@@ -1423,6 +1516,140 @@ mod tests {
         let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
         assert_eq!(params["mcpServers"], json!([]));
         assert_eq!(params["cwd"], "/work/repo");
+    }
+
+    #[test]
+    fn the_locale_prefix_passes_locale_categories_and_no_other_name_that_starts_with_l() {
+        // #2647 I3: the boundary of `LC_`, pinned by name. It used to be held
+        // only by the `L…` variables a fixture happened to carry: with the
+        // prefix cut to `L` this crate's unit tests stayed green.
+        for key in ["LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_NUMERIC"] {
+            assert!(is_passed_env(key), "{key} is a locale variable");
+        }
+        for key in [
+            "LESS",
+            "LSCOLORS",
+            "LS_COLORS",
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",
+            "LANGUAGE",
+            "LC",
+            "LCALL",
+            "lc_all",
+            "XLC_ALL",
+        ] {
+            assert!(!is_passed_env(key), "{key} must not reach an agent");
+        }
+    }
+
+    /// One row of `codex features list`: `name  stage  state`.
+    fn feature_row(name: &str, stage: &str, state: &str) -> String {
+        format!("{name:<40} {stage:<18} {state}\n")
+    }
+
+    fn all_features_off() -> String {
+        CODEX_DISABLED_FEATURES
+            .iter()
+            .map(|feature| feature_row(feature, "stable", "false"))
+            .collect()
+    }
+
+    #[test]
+    fn the_effective_feature_table_must_show_every_switched_off_feature_off() {
+        // #2647 L1. Every one listed and `false` passes, whatever else the
+        // table says and whatever the stage column looks like.
+        let others = feature_row("fast_mode", "stable", "true")
+            + &feature_row("code_mode", "under development", "false");
+        assert_eq!(
+            check_codex_features(&format!("{others}{}", all_features_off())),
+            Ok(())
+        );
+        assert_eq!(
+            check_codex_features(&all_features_off().replace('\n', "\r\n")),
+            Ok(())
+        );
+
+        // Each of the fifteen, alone, is caught when it reads on, and when its
+        // row is gone (codex renamed or dropped the feature).
+        for &feature in CODEX_DISABLED_FEATURES {
+            let on: String = CODEX_DISABLED_FEATURES
+                .iter()
+                .map(|&f| feature_row(f, "stable", if f == feature { "true" } else { "false" }))
+                .collect();
+            assert_eq!(
+                check_codex_features(&on),
+                Err(vec![FeatureDrift::NotOff {
+                    feature,
+                    state: "true".to_string()
+                }]),
+                "{feature} reads on"
+            );
+            let gone: String = CODEX_DISABLED_FEATURES
+                .iter()
+                .filter(|&&f| f != feature)
+                .map(|&f| feature_row(f, "stable", "false"))
+                .collect();
+            assert_eq!(
+                check_codex_features(&gone),
+                Err(vec![FeatureDrift::Missing(feature)]),
+                "{feature} is gone"
+            );
+        }
+
+        // Listed twice, it must read off both times.
+        assert_eq!(
+            check_codex_features(&format!(
+                "{}{}",
+                all_features_off(),
+                feature_row("shell_snapshot", "removed", "true")
+            )),
+            Err(vec![FeatureDrift::NotOff {
+                feature: "shell_snapshot",
+                state: "true".to_string()
+            }])
+        );
+
+        // A table that cannot be read is never a pass: nothing is listed, so
+        // every feature is missing.
+        for garbage in [
+            "",
+            "\n  \n",
+            "error: unrecognized subcommand 'cli'\n",
+            "hooks\nplugins\n",
+        ] {
+            let drift = check_codex_features(garbage).unwrap_err();
+            assert_eq!(drift.len(), CODEX_DISABLED_FEATURES.len(), "{garbage:?}");
+            assert!(drift
+                .iter()
+                .all(|one| matches!(one, FeatureDrift::Missing(_))));
+        }
+        // A state that is not in the last column is read as what it is.
+        let reordered: String = CODEX_DISABLED_FEATURES
+            .iter()
+            .filter(|&&f| f != "hooks")
+            .map(|&f| feature_row(f, "stable", "false"))
+            .chain(std::iter::once("hooks false stable\n".to_string()))
+            .collect();
+        assert_eq!(
+            check_codex_features(&reordered),
+            Err(vec![FeatureDrift::NotOff {
+                feature: "hooks",
+                state: "stable".to_string()
+            }])
+        );
+        // Escaped and cut short, so a log line holds it.
+        let odd = format!("{}hooks stable \u{1b}[32mfalse\n", all_features_off());
+        assert_eq!(
+            check_codex_features(&odd),
+            Err(vec![FeatureDrift::NotOff {
+                feature: "hooks",
+                state: "\\u{1b}[32mfalse".to_string()
+            }])
+        );
+        assert_eq!(
+            FeatureDrift::Missing("hooks").to_string(),
+            "hooks is not in the table"
+        );
     }
 
     /// The account and credential-store redirects a host's environment may
