@@ -996,6 +996,43 @@ pub async fn send_thread_notice_in_tx(
     .await
 }
 
+/// Does a reply of this type count toward its thread's 「답글 N개」? The product's one counting rule:
+/// `text` and `approval_request` do, every other type does not. Core `countsAsReply`
+/// (`packages/momo-core/src/features/timeline/threadSummary.ts`) is this rule on the client, and the
+/// two have to agree or a reload shows a different number than the live view did — a `system` or
+/// tool line the server counted and the client did not (the work-session event lines are the standing
+/// example: they carry a `root_id` on the Skip spine for exactly this reason).
+pub fn counts_as_thread_reply(message_type: MessageType) -> bool {
+    matches!(
+        message_type,
+        MessageType::Text | MessageType::ApprovalRequest
+    )
+}
+
+/// One **line of an agent run** in its place (#4646, ADR-0148 증보 2026-11-05): a server-written line that
+/// may stand under a thread root, on the spine whose rollup follows the counting rule above.
+///
+/// * a `text` or `approval_request` line (the answer, a card) goes through [`send_thread_notice_in_tx`]:
+///   the root's rollup moves and `thread.updated` is published, so the number a reload reads is the
+///   number the live view showed;
+/// * any other line (`tool_call`, `tool_result`, a `system` notice) goes through [`send_message_in_tx`]
+///   with the same `root_id`: it belongs to the thread and shows in it, but is not counted, exactly as
+///   the client does not count it.
+///
+/// With no `root_id` the two spines are the same write, so a caller that may or may not have a place
+/// does not branch.
+pub async fn send_run_line_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+) -> Result<SentMessage, DbError> {
+    if counts_as_thread_reply(input.message_type) {
+        send_thread_notice_in_tx(conn, workspace_id, input).await
+    } else {
+        send_message_in_tx(conn, workspace_id, input).await
+    }
+}
+
 /// The REST send path's spine (B1.2): [`send_message_in_tx`] plus the mention
 /// pass, with an optional provenance assertion — one function because Swift's
 /// `MessageRoutes.send` is one path, and because the three steps have an order
@@ -2421,6 +2458,30 @@ pub fn context_message_body(message_type: &str, body: Option<&str>, props: &Valu
 
 #[cfg(test)]
 mod tests {
+    /// #4646 — the thread-counting rule, as a table over every type: only `text` and `approval_request`
+    /// are replies the thread counts (core `countsAsReply` says the same on the client). Each row is a
+    /// type a server-written line can have; moving one flips the number a reload shows against the live one.
+    #[test]
+    fn only_text_and_approval_request_count_as_thread_replies() {
+        use super::{counts_as_thread_reply, MessageType};
+        for (message_type, counted) in [
+            (MessageType::Text, true),
+            (MessageType::ApprovalRequest, true),
+            (MessageType::ToolCall, false),
+            (MessageType::ToolResult, false),
+            (MessageType::System, false),
+            (MessageType::Diff, false),
+            (MessageType::Artifact, false),
+        ] {
+            assert_eq!(
+                counts_as_thread_reply(message_type),
+                counted,
+                "{}",
+                message_type.as_db_label()
+            );
+        }
+    }
+
     use super::*;
 
     /// ADR-0201 증보 v3 B13-I2: the team AI's invite-link message reaches a model as a

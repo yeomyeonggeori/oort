@@ -103,6 +103,8 @@ import {useOnline} from '../features/inbox/useOnline';
 import {useConnectionBand} from '../features/connection/useConnectionBand';
 import {useConnectionGates} from '../features/connection/useConnectionGates';
 import {useFormatMessage} from '../i18n/useFormatMessage';
+import {JumpSeekLine} from '../features/conversation/JumpSeekLine';
+import {planSeek, SeekOutcome, SeekPlan} from '../features/conversation/jumpSeek';
 import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -1265,6 +1267,37 @@ export default function ConversationScreen({
    */
   const refiredRef = useRef<string | null>(null);
 
+  // ---- 불러온 범위 밖의 목적지는 그 자리까지 거슬러 읽는다 (#5383) --------------------------------
+  //
+  // 점프가 빈손으로 돌아오면(`onJumpMissed`) 목적지 `seq` 를 아는 경우에 한해 「위로 올려 이전 대화를 더 불러오세요」를 사람에게
+  // 시키는 대신 화면이 그 일을 한다: `timeline.seekOlder` 가 `before` 쪽 넘김을 목적지 seq 에 닿을 때까지 이어 읽고, 합친 뒤
+  // 같은 문으로 **한 번 더** 쏜다. 읽는 동안은 입력창 위 한 줄(`JumpSeekLine`)이 「찾는 중 · 취소」를, 실패하면 「다시 시도 · 닫기」를 말한다.
+  // 그 줄이 곧 이 기다림의 컨트롤이다 - 보이지 않는 의도는 두지 않는다(`cancelJump` 머리말과 같은 규율).
+  //
+  // 한 번의 이동은 **한 번만** 읽는다(`seekTriedRef`). 읽고 다시 쐈는데도 없으면(상한·채널의 처음·목록에 그려지지 않는 줄) 아래의
+  // 사실 진술 고지로 간다 - 새 요청(`requestJump`)이 들어오면 이 기억은 지워진다. 상한(쪽 수·거리)과 그 이유는 `jumpSeek.ts`.
+  const [seek, setSeek] = useState<{
+    messageId: string;
+    seq: number;
+    failed: boolean;
+  } | null>(null);
+  /** 읽기마다 하나 오르는 번호. 접거나(`cancelSeek`) 새 요청이 오면 오르고, 늦게 온 답은 번호가 달라 버려진다. */
+  const seekRunRef = useRef(0);
+  /** 이 요청(`requestJump` 한 번)은 이미 위로 읽어 보았다. */
+  const seekTriedRef = useRef(false);
+  /** 읽기를 접는다 - 이미 나간 쪽 요청의 답은 번호가 달라 버려지고, 아직 안 읽은 쪽은 읽지 않는다. */
+  const cancelSeek = useCallback(() => {
+    seekRunRef.current += 1;
+    setSeek(null);
+  }, []);
+  // 화면이 사라지면 읽기도 끝난다 - 늦게 온 답이 없는 화면에 상태를 쓰지 않는다.
+  useEffect(
+    () => () => {
+      seekRunRef.current += 1;
+    },
+    [],
+  );
+
   // 방을 옮기면 앞선 방의 점프도, 그 방에서 기다리던 줄도 이 화면의 사실이 아니다.
   //
   // **아래의 세션 앵커 효과보다 먼저** 선언돼 있는 것이 load-bearing 이다: 같은
@@ -1275,7 +1308,9 @@ export default function ConversationScreen({
     setJumpMissed(null);
     setAwaitingJump(null);
     refiredRef.current = null;
-  }, [channelId]);
+    cancelSeek();
+    seekTriedRef.current = false;
+  }, [channelId, cancelSeek]);
 
   /**
    * 점프 한 번을 건다 — **네 갈래가 전부 이 문을 통과한다** (#1209 리뷰 High).
@@ -1293,13 +1328,16 @@ export default function ConversationScreen({
       setJumpMissed(null);
       setAwaitingJump(null);
       refiredRef.current = null;
+      // 새 요청은 앞선 읽기를 접고, 이 요청이 위로 읽어 볼 기회를 새로 준다(#5383).
+      cancelSeek();
+      seekTriedRef.current = false;
       setJumpTarget(current => ({
         messageId,
         seq,
         token: (current?.token ?? 0) + 1,
       }));
     },
-    [],
+    [cancelSeek],
   );
 
   const onJumpToQuoted = useCallback(
@@ -1336,6 +1374,27 @@ export default function ConversationScreen({
     setAwaitingJump(null);
   }, []);
 
+  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
+  //
+  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
+  // 결과와 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
+  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
+  const onSearchJump = useCallback(
+    (hit: {messageId: string; seq: number}) => {
+      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
+      Keyboard.dismiss();
+      requestJump('search', hit.messageId, hit.seq);
+    },
+    [requestJump],
+  );
+  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+  endSearchForWriting.current = () => {
+    if (!convSearch.active) return;
+    convSearch.close();
+    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  };
+
   /**
    * 고정 목록에서 원본으로 (이슈 #1112).
    *
@@ -1348,36 +1407,6 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  /**
-   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
-   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
-   */
-  const onJumpToMessage = useCallback(
-    (messageId: string, seq: number) => requestJump('search', messageId, seq),
-    [requestJump],
-  );
-
-  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
-  //
-  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
-  // 결과·「답함 ✓」 칩과 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
-  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
-  const onSearchJump = useCallback(
-    (hit: {messageId: string; seq: number}) => {
-      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
-      Keyboard.dismiss();
-      onJumpToMessage(hit.messageId, hit.seq);
-    },
-    [onJumpToMessage],
-  );
-  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
-  endSearchForWriting.current = () => {
-    if (!convSearch.active) return;
-    convSearch.close();
-    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
-    requestAnimationFrame(() => composerInputRef.current?.focus());
-  };
-
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1593,7 +1622,68 @@ export default function ConversationScreen({
   // 타고 「붙어 있는 모든 행을 다시 그려라」가 된다(`jumpSubjectRef` 와 같은 이유).
   const jumpTargetRef = useRef<typeof jumpTarget>(null);
   jumpTargetRef.current = jumpTarget;
-  const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
+  // 위로 읽기를 시작하는 함수는 매 렌더 새로 쓴다(최신 `timeline` 을 닫고 있다) - `onJumpMissed` 의 동일성은 위 이유로 고정이라
+  // 거울(ref)로 부른다. 읽기를 **시작했으면** 참이다.
+  const startSeekRef = useRef<(target: {messageId: string; seq: number}) => boolean>(
+    () => false,
+  );
+  startSeekRef.current = target => {
+    // 읽을 만한가는 훅이 든 범위로 묻는다(`planSeek`) - 목록(`items`)의 최솟값이 아니다.
+    const plan = planSeek({
+      heldOldestSeq: timeline.state.oldestSeq,
+      targetSeq: target.seq,
+      reachedStart: timeline.reachedStart,
+    });
+    if (plan !== SeekPlan.Read) return false;
+    seekRunRef.current += 1;
+    const run = seekRunRef.current;
+    setSeek({...target, failed: false});
+    AccessibilityInfo.announceForAccessibility(formatMessage('mobile.jumpSeek.reading'));
+    void timeline
+      .seekOlder(target.seq, () => seekRunRef.current !== run)
+      .then(outcome => {
+        if (seekRunRef.current !== run || outcome === SeekOutcome.Cancelled) return;
+        if (outcome === SeekOutcome.Failed) {
+          // 합친 것이 없다 - 화면은 읽기 전 그대로이고, 줄이 다시 시도를 말한다.
+          setSeek({...target, failed: true});
+          AccessibilityInfo.announceForAccessibility(formatMessage('mobile.jumpSeek.failed'));
+          return;
+        }
+        // 닿았거나(합쳤다), 처음까지 갔거나(합쳤다), 상한에 닿았다(합치지 않았다). 어느 쪽이든 목록이 판정한다 -
+        // 있으면 착지하고, 없으면 `seekTriedRef` 때문에 읽지 않고 사실 진술 고지로 간다.
+        setSeek(null);
+        setJumpTarget(current => ({
+          messageId: target.messageId,
+          seq: target.seq,
+          token: (current?.token ?? 0) + 1,
+        }));
+      });
+    return true;
+  };
+  const onSeekRetry = useCallback(() => {
+    if (seek === null) return;
+    const target = {messageId: seek.messageId, seq: seek.seq};
+    if (startSeekRef.current(target)) return;
+    // 그 사이 사람이 손으로 올려 범위가 목적지를 덮었다 - 읽을 것이 없으니 목록이 판정하게 한다.
+    cancelSeek();
+    setJumpTarget(current => ({
+      ...target,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [seek, cancelSeek]);
+  const seekView = useRef({reachedStart: timeline.reachedStart});
+  seekView.current = {reachedStart: timeline.reachedStart};
+  const onJumpMissed = useCallback((missed: 'older' | 'unknown') => {
+    const target = jumpTargetRef.current;
+    const olderMiss = missed === 'older';
+    if (olderMiss && target !== null && target.seq !== null && !seekTriedRef.current) {
+      if (startSeekRef.current({messageId: target.messageId, seq: target.seq})) {
+        seekTriedRef.current = true;
+        return;
+      }
+    }
+    // 채널의 처음까지 읽은 목록에 「더 위쪽」은 없다 - 그때의 빈손은 위가 아니라 **모르겠다**다.
+    const reason = olderMiss && seekView.current.reachedStart ? 'unknown' : missed;
     const notice = jumpMissedNotice(reason, jumpSubjectRef.current);
     setJumpMissed(notice);
     // 알림으로 온 점프만 소리를 낸다 (#2584 리뷰 M-2). 다른 넷(인용·고정·검색·세션)은
@@ -1603,7 +1693,6 @@ export default function ConversationScreen({
     if (jumpSubjectRef.current === 'notification') {
       AccessibilityInfo.announceForAccessibility(jumpNoticeSpeech(notice));
     }
-    const target = jumpTargetRef.current;
     if (target === null) return;
     setAwaitingJump({messageId: target.messageId, seq: target.seq});
   }, []);
@@ -1761,7 +1850,6 @@ export default function ConversationScreen({
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
@@ -1790,7 +1878,6 @@ export default function ConversationScreen({
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],
@@ -2317,6 +2404,17 @@ export default function ConversationScreen({
                   testID="jump-missed"
                 />
               </View>
+            ) : null}
+            {/* 불러온 범위 밖 점프가 그 자리까지 읽는 동안의 한 줄(#5383): 「찾는 중 · 취소」/「다시 시도 · 닫기」. **숨기는 틀 밖**에 둔다 - 대화 안 검색에서
+                결과(또는 ↑ ↓)를 눌러 읽는 동안에도 보여야 하고, 컴포저 묶음은 그때 숨는다. 위의 `jump-missed` 와 동시에 서지 않는다(읽는 동안은 고지가 없고,
+                끝난 뒤에는 줄이 없다). 검색 중이 아니면 컴포저 묶음 맨 위, 곧 입력창 바로 위다. */}
+            {seek !== null ? (
+              <JumpSeekLine
+                failed={seek.failed}
+                onCancel={cancelSeek}
+                onRetry={onSeekRetry}
+                onDismiss={cancelSeek}
+              />
             ) : null}
             {convSearch.active && convSearch.position !== null ? (
               <ConversationSearchBar

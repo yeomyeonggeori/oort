@@ -1058,8 +1058,18 @@ async fn trigger_and_root_of_a_run_raised_by(
     tenant: &Tenant,
     trigger: Option<Uuid>,
 ) -> (Option<Uuid>, Option<Uuid>) {
-    let (workspace_id, channel_id, agent_id) =
-        (tenant.workspace_id, tenant.channel_id, tenant.agent_id);
+    trigger_and_root_in(app, tenant, tenant.channel_id, trigger).await
+}
+
+/// [`trigger_and_root_of_a_run_raised_by`] for a run in `channel_id` (a DM, say) rather than the tenant's
+/// public channel.
+async fn trigger_and_root_in(
+    app: &PgPool,
+    tenant: &Tenant,
+    channel_id: Uuid,
+    trigger: Option<Uuid>,
+) -> (Option<Uuid>, Option<Uuid>) {
+    let (workspace_id, agent_id) = (tenant.workspace_id, tenant.agent_id);
     let run_trigger = match trigger {
         Some(message_id) => RunTrigger::Mention {
             message_id,
@@ -1114,12 +1124,12 @@ async fn t4622_the_snapshot_names_the_live_thread_the_trigger_sits_in() {
 
     let root = say(&app, &tenant, here, None, "다음 주 배포 일정").await;
 
-    // A request at the top level: no thread.
+    // A request at a channel's top level (#4646): the request is the root of the thread its answer opens.
     let top = say(&app, &tenant, here, None, "@hermes 정리해줘").await;
     assert_eq!(
         trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(top)).await,
-        (Some(top), None),
-        "a top-level trigger belongs to no thread"
+        (Some(top), Some(top)),
+        "a top-level channel trigger roots its own thread"
     );
 
     // A request inside a live thread: that thread's root.
@@ -1192,5 +1202,163 @@ async fn t4622_the_snapshot_names_the_live_thread_the_trigger_sits_in() {
         trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(again)).await,
         (Some(again), Some(root)),
         "the live thread is still named"
+    );
+}
+
+/// A DM channel with the tenant's human and agent (a 1:1 DM), plus `extra_humans` more people and the
+/// given `dm_key`. `left_extras` marks the extras as having left (so they are not active).
+async fn seed_dm(
+    su: &PgPool,
+    tenant: &Tenant,
+    dm_key: &str,
+    extra_humans: usize,
+    left_extras: bool,
+) -> Uuid {
+    let channel_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, dm_key) VALUES ($1, $2, 'dm', $3)")
+        .bind(channel_id)
+        .bind(tenant.workspace_id)
+        .bind(dm_key.replace("{id}", &channel_id.simple().to_string()))
+        .execute(su)
+        .await
+        .expect("seed the dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel_id)
+        .bind(tenant.workspace_id)
+        .execute(su)
+        .await
+        .expect("seed the dm's seq");
+    for member_id in [tenant.human_id, tenant.agent_id] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(tenant.workspace_id)
+        .bind(channel_id)
+        .bind(member_id)
+        .execute(su)
+        .await
+        .expect("seed the dm's membership");
+    }
+    for _ in 0..extra_humans {
+        let other = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ($1, $2, 'human'::member_kind, $3, $3)",
+        )
+        .bind(other)
+        .bind(tenant.workspace_id)
+        .bind(other.to_string())
+        .execute(su)
+        .await
+        .expect("seed another person");
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id, left_at) \
+             VALUES ($1, $2, $3, CASE WHEN $4 THEN now() END)",
+        )
+        .bind(tenant.workspace_id)
+        .bind(channel_id)
+        .bind(other)
+        .bind(left_extras)
+        .execute(su)
+        .await
+        .expect("seed another person's membership");
+    }
+    channel_id
+}
+
+/// **The place table (#4646, ADR-0148 증보 2026-11-05 · ADR-0186 증보 v6 R-c).** One row per kind of
+/// conversation the request can be made in, read off the locked snapshot every writer shares.
+///
+/// The DM rows are the ones the pure-function test cannot prove: whether the SQL really counts the
+/// active roster and reads the key. A group DM keeps `kind = 'dm'` (ADR-0217's admitted DM exists today,
+/// ADR-0221's `group:` is next), so each of those spellings has its own row and none of them is the
+/// exception. A deleted trigger is a root nobody can reply under — both spellings of "deleted".
+#[tokio::test]
+#[ignore = "requires a live pgvector/pg18 database (docker gate)"]
+async fn t4646_the_snapshot_names_where_the_runs_lines_belong() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+
+    // (what the conversation is, the DM it is spoken in) -> the root, or None for the main flow.
+    let one_to_one = seed_dm(&su, &tenant, "dm-{id}", 0, false).await;
+    let admitted = seed_dm(&su, &tenant, "admitted:{id}", 1, false).await;
+    let grouped_by_key = seed_dm(&su, &tenant, "group:{id}", 0, false).await;
+    let grouped_by_count = seed_dm(&su, &tenant, "dm-{id}", 1, false).await;
+    let after_the_third_left = seed_dm(&su, &tenant, "dm-{id}", 1, true).await;
+
+    for (label, channel, expect_thread) in [
+        ("1:1 DM", one_to_one, false),
+        (
+            "a plain DM whose third person already left",
+            after_the_third_left,
+            false,
+        ),
+        (
+            "an agent admitted into a human DM (ADR-0217)",
+            admitted,
+            true,
+        ),
+        (
+            "a group DM by key (ADR-0221 `group:`)",
+            grouped_by_key,
+            true,
+        ),
+        ("a DM that has three active members", grouped_by_count, true),
+    ] {
+        let top = say(&app, &tenant, channel, None, "@hermes 정리해줘").await;
+        let expected = expect_thread.then_some(top);
+        assert_eq!(
+            trigger_and_root_in(&app, &tenant, channel, Some(top)).await,
+            (Some(top), expected),
+            "{label}: a top-level request is {}",
+            if expect_thread {
+                "the root of a new thread"
+            } else {
+                "answered in the main flow"
+            }
+        );
+    }
+
+    // A thread inside a 1:1 DM is still a thread: its root, never the main flow.
+    let dm_root = say(&app, &tenant, one_to_one, None, "DM 안의 글").await;
+    let dm_asked = say(&app, &tenant, one_to_one, Some(dm_root), "@hermes 이어서").await;
+    assert_eq!(
+        trigger_and_root_in(&app, &tenant, one_to_one, Some(dm_asked)).await,
+        (Some(dm_asked), Some(dm_root)),
+        "a request made inside a DM's thread is answered in that thread"
+    );
+
+    // A top-level request that was deleted while the agent worked is no root: main flow, either spelling.
+    for (spelling, set) in [
+        ("deleted_at only", "deleted_at = now()"),
+        ("state only", "state = 'deleted'"),
+    ] {
+        let gone = say(
+            &app,
+            &tenant,
+            tenant.channel_id,
+            None,
+            "@hermes 곧 지울 요청",
+        )
+        .await;
+        sqlx::query(&format!("UPDATE message SET {set} WHERE id = $1"))
+            .bind(gone)
+            .execute(&su)
+            .await
+            .expect("delete the request");
+        assert_eq!(
+            trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(gone)).await,
+            (Some(gone), None),
+            "a request deleted ({spelling}) is not a thread an answer may open"
+        );
+    }
+
+    // A run nobody said anything to raise has no place, whatever room it is in.
+    assert_eq!(
+        trigger_and_root_in(&app, &tenant, admitted, None).await,
+        (None, None),
+        "a work run has no trigger to root a thread at"
     );
 }

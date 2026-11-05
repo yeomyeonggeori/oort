@@ -29,6 +29,17 @@ import {
 } from './fixtures/fakeClock';
 import {resetSession} from './testkit';
 
+// 이 파일은 **화면이 읽을 수 없는 점프**의 길을 잰다 (#5383).
+//
+// 목적지 seq 를 알고 불러온 범위 위에 있으면 화면이 그 자리까지 거슬러 읽는다(`anchorSeek.test.tsx` 가 그 길을 잰다). 그러면 아래 시험들이 전제하는
+// 「첫 발은 빈손이고, 사람이 위로 올려 줄이 도착하면 두 번째 발이 데려간다」는 길은 **읽기가 끝내 닿지 못한 뒤**(상한·거리)의 길로 남는다.
+// 그 길은 여전히 참이어야 하므로(고지 문장 · 주어 · 닫기 · 두 번째 발), 여기서는 거리 판정만 「언제나 너무 멀다」로 고정해 같은 시험이 같은 것을
+// 잰다. 거리·상한 판정 자체는 `anchorSeek.test.tsx` 가 진짜 수치로 잰다.
+jest.mock('../src/features/conversation/jumpSeek', () => {
+  const actual = jest.requireActual('../src/features/conversation/jumpSeek');
+  return {...actual, planSeek: () => actual.SeekPlan.TooFar};
+});
+
 // =============================================================================
 // 폰의 점프 앵커 둘 (#1196) — 검색 진입은 **착지**하고, 고정은 **자기 낱말**로 말한다
 //

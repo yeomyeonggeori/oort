@@ -1,6 +1,7 @@
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -128,7 +129,35 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
-function installFetch(options: {searchStatus?: number; firstPage?: unknown[]; hasSecondPage?: boolean} = {}) {
+/** 가짜 서버가 `before=` 요청을 붙들어 둘 때의 열쇠(#5383 읽는 동안 줄을 보려고). */
+interface Hold {
+  promise: Promise<void>;
+  release: () => void;
+}
+
+function hold(): Hold {
+  let release: () => void = () => undefined;
+  const promise = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  return {promise, release};
+}
+
+function installFetch(
+  options: {
+    searchStatus?: number;
+    firstPage?: unknown[];
+    hasSecondPage?: boolean;
+    /**
+     * #5383: 첫 페이지 뒤에 **더 오래된 줄이 있는** 방(서버는 그럴 때 첫 페이지에 `nextBefore` 를 싣는다). 기본은 없는 방이라 타임라인이 「처음까지 읽었다」로
+     * 알고, 그 방에서는 이동 문이 위로 읽지 않는다 - 위로 읽는 시험만 켠다.
+     */
+    olderExists?: boolean;
+    /** 불러온 범위 위(`before=`)를 읽는 요청. 한 쪽에 내주는 줄 수의 상한(없으면 요청한 `limit` 대로)과, 답을 붙들어 둘 열쇠. */
+    olderPageRows?: number;
+    olderHold?: Hold;
+  } = {},
+) {
   const mock = jest.fn(async (url: string) => {
     if (url.includes('/search/messages')) {
       if (options.searchStatus !== undefined && options.searchStatus >= 400) {
@@ -149,7 +178,21 @@ function installFetch(options: {searchStatus?: number; firstPage?: unknown[]; ha
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
     if (url.includes('/work-sessions')) return jsonResponse(200, {workSessions: []});
     if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
-    if (url.includes('/messages')) return jsonResponse(200, {messages: LOADED});
+    if (url.includes('/messages')) {
+      const before = /[?&]before=(\d+)/.exec(url);
+      if (before === null) {
+        return jsonResponse(200, options.olderExists === true ? {messages: LOADED, nextBefore: 100} : {messages: LOADED});
+      }
+      // 위로 읽기: seq 가 `before` 보다 작은 줄을 최근 순으로(서버처럼 연속·빠짐없이) 내준다. 비면 `nextBefore` 가 없다.
+      if (options.olderHold !== undefined) await options.olderHold.promise;
+      const asked = /[?&]limit=(\d+)/.exec(url);
+      const rows = Math.min(asked === null ? 50 : Number(asked[1]), 200, options.olderPageRows ?? 200);
+      const cursor = Number(before[1]);
+      const lowest = Math.max(1, cursor - rows);
+      const page = [];
+      for (let seq = cursor - 1; seq >= lowest; seq -= 1) page.push(message(seq));
+      return jsonResponse(200, page.length === 0 ? {messages: []} : {messages: page, nextBefore: lowest});
+    }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     throw new Error(`unrouted request: ${url}`);
@@ -361,8 +404,9 @@ describe('#5364 대화 안 검색 — 이동', () => {
     expect(positionText()).toBe('2 / 3');
   });
 
-  it('이미 불러온 범위 밖의 오래된 결과는 이동 문의 고지가 막대 위에 서고(목록 맨 위에 묻히지 않는다), 검색을 끝내면 목록 머리로 돌아간다', async () => {
-    installFetch({firstPage: [HIT_OLD], hasSecondPage: false});
+  it('이미 불러온 범위 밖의 오래된 결과가 읽어도 닿지 못하면(쪽 상한) 이동 문의 고지가 막대 위에 서고(목록 맨 위에 묻히지 않는다), 검색을 끝내면 목록 머리로 돌아간다', async () => {
+    // #5383: 범위 밖 결과는 이제 화면이 그 자리까지 읽는다. 서버가 한 쪽에 5줄만 주면 60줄 위의 결과(40)는 2쪽(상한)에 못 닿아 지금의 고지로 물러난다.
+    installFetch({firstPage: [HIT_OLD], hasSecondPage: false, olderExists: true, olderPageRows: 5});
     await search();
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
 
@@ -379,6 +423,61 @@ describe('#5364 대화 안 검색 — 이동', () => {
     await waitFor(() => expect(screen.getByTestId('conversation-menu')).toBeTruthy());
     expect(screen.getAllByTestId('jump-missed')).toHaveLength(1);
     expect(within(screen.getByTestId('composer-dock')).queryByTestId('jump-missed')).toBeNull();
+  });
+
+  it('#5383 범위 밖 결과를 누르면 읽는 줄이 막대 위(숨은 컴포저 밖)에 서고, 읽고 나면 그 메시지로 점프가 다시 걸리며 줄이 걷힌다', async () => {
+    const gate = hold();
+    installFetch({firstPage: [HIT_OLD], hasSecondPage: false, olderExists: true, olderHold: gate});
+    await search();
+    fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
+
+    // 읽는 동안: 검색 중이라 컴포저 묶음은 숨어 있지만 읽는 줄은 그 밖(도크 위)에 보인다. 고지는 아직 없다.
+    await waitFor(() => expect(screen.getByTestId('jump-seek')).toBeTruthy());
+    expect(within(screen.getByTestId('composer-dock')).getByTestId('jump-seek-cancel')).toBeTruthy();
+    // 숨은 틀은 기본 조회에서 빠진다(`display: none`) - 숨겨졌다는 사실 자체를 재려고 숨은 것도 보는 조회를 쓴다.
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId('conversation-composer-stack', {includeHiddenElements: true}).props.style,
+      )?.display,
+    ).toBe('none');
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(positionText()).toBe('1 / 1');
+    const tokenWhileReading = jumpTargetOf()?.token ?? 0;
+
+    await act(async () => {
+      gate.release();
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // 닿았다: 같은 문으로 다시 쏘고(토큰이 오른다) 줄이 걷히며 고지는 서지 않는다.
+    await waitFor(() => expect(jumpTargetOf()?.token ?? 0).toBeGreaterThan(tokenWhileReading));
+    expect(jumpTargetOf()?.messageId).toBe('msg-40');
+    expect(screen.queryByTestId('jump-seek')).toBeNull();
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    // 막대는 그대로 선다.
+    expect(screen.getByTestId('conversation-search-bar')).toBeTruthy();
+  });
+
+  it('#5383 ↑ 로 범위 밖의 더 오래된 결과로 가면 읽어서 착지한다', async () => {
+    const fetchMock = installFetch({firstPage: [HIT_103, HIT_OLD], hasSecondPage: false, olderExists: true});
+    await search();
+    fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe('msg-103'));
+    // 첫 결과는 불러온 범위 안이라 읽지 않았다.
+    const olderReads = () =>
+      fetchMock.mock.calls.filter(call => /[?&]before=/.test(call[0] as string)).length;
+    expect(olderReads()).toBe(0);
+    const tokenBeforeUp = jumpTargetOf()?.token ?? 0;
+
+    fireEvent.press(screen.getByTestId('conversation-search-older'));
+
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe('msg-40'));
+    // 읽고 난 뒤 같은 문으로 한 번 더 쐈다(처음 쏜 한 발 + 두 번째 발).
+    await waitFor(() => expect(jumpTargetOf()?.token ?? 0).toBeGreaterThan(tokenBeforeUp + 1));
+    expect(olderReads()).toBeGreaterThan(0);
+    expect(positionText()).toBe('2 / 2');
+    expect(screen.queryByTestId('jump-seek')).toBeNull();
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
   });
 
   it('「목록」은 결과 목록으로 돌아가고, 같은 목록에서 다른 결과를 고를 수 있으며, 이동한 뒤 인용을 걸면(글쓰기 시작) 검색이 끝나고 컴포저가 돌아온다', async () => {

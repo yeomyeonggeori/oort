@@ -202,8 +202,13 @@ export const messageKeys = [
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
   "connection.load.activityTitle",
+  "connection.load.adeSessionsTitle",
   "connection.load.agentChannelsTitle",
   "connection.load.agentHistoryTitle",
+  "connection.load.agentLedgerReopenTail",
+  "connection.load.agentLedgerRetryTail",
+  "connection.load.agentLedgerTitle",
+  "connection.load.agentPaneProgressTitle",
   "connection.load.agentProfileAppliesTitle",
   "connection.load.agentProfilesApplyTitle",
   "connection.load.agentProfileTitle",
@@ -232,7 +237,13 @@ export const messageKeys = [
   "connection.load.reasonUnknownBare",
   "connection.load.sentence",
   "connection.load.teamBoardStaleTitle",
+  "connection.load.teamExpressionsTitle",
   "connection.load.threadTitle",
+  "connection.load.workHostsTitle",
+  "connection.load.workLocationsTitle",
+  "connection.load.workSelectedSessionTitle",
+  "connection.load.workSessionsTitle",
+  "connection.load.workStepsTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
   "connection.send.reasonRejected",
@@ -515,6 +526,11 @@ export const messageKeys = [
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.jumpSeek.cancel",
+  "mobile.jumpSeek.dismiss",
+  "mobile.jumpSeek.failed",
+  "mobile.jumpSeek.reading",
+  "mobile.jumpSeek.retry",
   "mobile.linkCard.cancel",
   "mobile.linkCard.copied",
   "mobile.linkCard.copy",
@@ -959,6 +975,8 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.quote.head",
+  "timeline.quote.headUnnamed",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
@@ -976,7 +994,6 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
-  "timeline.triggerChip.jumpHint",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -1324,8 +1341,13 @@ export const argumentSpecs = {
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
   "connection.load.activityTitle": {},
+  "connection.load.adeSessionsTitle": {},
   "connection.load.agentChannelsTitle": {},
   "connection.load.agentHistoryTitle": {},
+  "connection.load.agentLedgerReopenTail": {},
+  "connection.load.agentLedgerRetryTail": {},
+  "connection.load.agentLedgerTitle": {},
+  "connection.load.agentPaneProgressTitle": {},
   "connection.load.agentProfileAppliesTitle": {},
   "connection.load.agentProfilesApplyTitle": {
     "names": "string"
@@ -1359,7 +1381,13 @@ export const argumentSpecs = {
     "title": "string"
   },
   "connection.load.teamBoardStaleTitle": {},
+  "connection.load.teamExpressionsTitle": {},
   "connection.load.threadTitle": {},
+  "connection.load.workHostsTitle": {},
+  "connection.load.workLocationsTitle": {},
+  "connection.load.workSelectedSessionTitle": {},
+  "connection.load.workSessionsTitle": {},
+  "connection.load.workStepsTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
   "connection.send.reasonRejected": {},
@@ -1697,6 +1725,11 @@ export const argumentSpecs = {
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.jumpSeek.cancel": {},
+  "mobile.jumpSeek.dismiss": {},
+  "mobile.jumpSeek.failed": {},
+  "mobile.jumpSeek.reading": {},
+  "mobile.jumpSeek.retry": {},
   "mobile.linkCard.cancel": {},
   "mobile.linkCard.copied": {},
   "mobile.linkCard.copy": {},
@@ -2248,6 +2281,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.quote.head": {
+    "name": "string"
+  },
+  "timeline.quote.headUnnamed": {},
   "timeline.runException.open": {
     "text": "string"
   },
@@ -2276,7 +2313,6 @@ export const argumentSpecs = {
   "timeline.thread.unreadChip": {
     "count": "number"
   },
-  "timeline.triggerChip.jumpHint": {},
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -2663,8 +2699,13 @@ export interface MessageArgs {
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
   "connection.load.activityTitle": Record<string, never>;
+  "connection.load.adeSessionsTitle": Record<string, never>;
   "connection.load.agentChannelsTitle": Record<string, never>;
   "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentLedgerReopenTail": Record<string, never>;
+  "connection.load.agentLedgerRetryTail": Record<string, never>;
+  "connection.load.agentLedgerTitle": Record<string, never>;
+  "connection.load.agentPaneProgressTitle": Record<string, never>;
   "connection.load.agentProfileAppliesTitle": Record<string, never>;
   "connection.load.agentProfilesApplyTitle": { names: string };
   "connection.load.agentProfileTitle": Record<string, never>;
@@ -2693,7 +2734,13 @@ export interface MessageArgs {
   "connection.load.reasonUnknownBare": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
   "connection.load.teamBoardStaleTitle": Record<string, never>;
+  "connection.load.teamExpressionsTitle": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
+  "connection.load.workHostsTitle": Record<string, never>;
+  "connection.load.workLocationsTitle": Record<string, never>;
+  "connection.load.workSelectedSessionTitle": Record<string, never>;
+  "connection.load.workSessionsTitle": Record<string, never>;
+  "connection.load.workStepsTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;
   "connection.send.reasonRejected": Record<string, never>;
@@ -2976,6 +3023,11 @@ export interface MessageArgs {
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.jumpSeek.cancel": Record<string, never>;
+  "mobile.jumpSeek.dismiss": Record<string, never>;
+  "mobile.jumpSeek.failed": Record<string, never>;
+  "mobile.jumpSeek.reading": Record<string, never>;
+  "mobile.jumpSeek.retry": Record<string, never>;
   "mobile.linkCard.cancel": Record<string, never>;
   "mobile.linkCard.copied": Record<string, never>;
   "mobile.linkCard.copy": Record<string, never>;
@@ -3420,6 +3472,8 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.quote.head": { name: string };
+  "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
@@ -3437,7 +3491,6 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
-  "timeline.triggerChip.jumpHint": Record<string, never>;
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;
