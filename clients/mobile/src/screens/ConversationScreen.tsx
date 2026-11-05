@@ -1336,15 +1336,6 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  /**
-   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
-   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
-   */
-  const onJumpToMessage = useCallback(
-    (messageId: string, seq: number) => requestJump('search', messageId, seq),
-    [requestJump],
-  );
-
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1728,7 +1719,6 @@ export default function ConversationScreen({
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
@@ -1757,7 +1747,6 @@ export default function ConversationScreen({
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],

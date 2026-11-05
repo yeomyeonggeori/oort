@@ -93,7 +93,7 @@ import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {nextUncollectedDeadlineMs} from '@momo/core/features/agents/runException';
-import {runAnswerMap, triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
 import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
 import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
@@ -3086,9 +3086,6 @@ function TimelineInner({
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
   const requests = useMemo(() => requestLoopIndex(messages, channelRuns), [messages, channelRuns]);
-  // 「답함 ✓」이 누르면 가는 답 메시지(#4620 B): 끝난 run마다 그 답을 **한 번** 색인해 칩에 넘긴다(정산된 턴 기록 > 트리거를 인용한 첫 글).
-  // 로드된 메시지에서만 찾으므로 알려진 답은 항상 이 목록 안에 있다 — 모르면 칩은 「답함」을 말하되 눌리지 않는다.
-  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
   // 칩과 같은 행의 예외 줄(`MessageRunStatus`)은 유예 마감에 서므로, 칩도 **그 순간**에 「받음」에서 「아직 받지 않았어요」로 바뀌어야 한다 — `nowMs`는
   // 분 단위 시계라 그대로 쓰면 칩이 최대 1분 늦어 같은 행의 두 자리가 다른 낱말을 말한다(웹 `useRerenderAt`과 같은 몫). 마감이 한 번 지난 뒤에만 실제
   // 시각을 읽는다(그 전에는 부른 쪽의 `nowMs` 그대로: 시험과 하니스가 시각을 못 박는다).
@@ -3096,15 +3093,15 @@ function TimelineInner({
   const bumpGrace = useCallback(() => setGraceTick(tick => tick + 1), []);
   useFireAt(nextUncollectedDeadlineMs(channelRuns, Date.now()), bumpGrace);
   const chipNowMs = graceTick === 0 ? nowMs : Math.max(nowMs, Date.now());
+  // 성공으로 끝난 일은 칩이 없다(#5382): `triggerChip`이 null을 돌려주면 그 메시지는 지도에 들지 않는다.
   const requestChips = useMemo(() => {
     const chips = new Map<string, TriggerChip>();
-    const context = {...requests, answerFor: (run: AgentRunProgress) => runAnswers.get(run.id.toLowerCase())};
     for (const [messageId, runs] of runsByMessage) {
-      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), chipNowMs, context);
+      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), chipNowMs, requests);
       if (chip) chips.set(messageId, chip);
     }
     return chips;
-  }, [runsByMessage, directory, chipNowMs, requests, runAnswers]);
+  }, [runsByMessage, directory, chipNowMs, requests]);
   const thoughtProgress = useMemo(() => {
     const byMessage = new Map<string, AgentRunProgress>();
     for (const [messageId, runs] of runsByMessage) {

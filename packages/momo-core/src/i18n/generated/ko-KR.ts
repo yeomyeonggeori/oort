@@ -5848,12 +5848,6 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
-    }
-  ],
   "timeline.unfurl.label": [
     {
       "type": 0,

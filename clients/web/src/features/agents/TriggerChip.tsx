@@ -1,11 +1,10 @@
-import { Ban, Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion, type LucideIcon } from "lucide-react";
+import { Ban, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion, type LucideIcon } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { nextUncollectedDeadlineMs } from "@momo/core/features/agents/runException";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
 import {
   TRIGGER_CHIP_FACES,
   triggerChip,
-  type AnswerRef,
   type TriggerChip,
   type TriggerChipKind,
   type TriggerChipMark,
@@ -20,11 +19,16 @@ import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 // =============================================================================
 // 에이전트를 부른 메시지의 상태 칩 (#4619, #4577 권장 B).
 //
-//   이도현 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]  →  [✓ 답함]   [! 아직 받지 않았어요]  [◷ 시간 초과]  [✕ 실패]
+//   이도현 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]     [! 아직 받지 않았어요]  [◷ 시간 초과]  [✕ 실패]
 //
 // 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다. 예전의 문장 행
 // (「받았어요 → 깨우는 신호 보냄 → 가져감 → …」)을 대신한다. 누가 불렀든 선다(planner 결정 2). 한 낱말이라
 // 상태가 바뀌어도 줄의 높이도 칩의 폭도 변하지 않는다.
+//
+// **성공으로 끝나면 칩이 사라진다**(#5382): 코어 `triggerChip`이 null을 돌려주면 `MessageTriggerChip`은 아무것도 그리지 않는다.
+// 칩 자리가 비어도 머리 줄은 그대로다 — 칩이 있는 줄의 모양(`MESSAGE_HEAD_CHIP_CLASS`: 줄바꿈 없음, 시각은 줄지 않음)은
+// 칩의 유무가 아니라 **그 메시지에 run이 있느냐**(`hasRunChip`)가 정하므로, 칩이 지는 순간 이름·시각이 다시 흘러가지 않는다.
+// 칩은 줄 가운데(`self-center`)에 앉아 줄 높이를 정하지 않으므로 지고 나서도 줄 높이는 같다.
 //
 // ## 크기 고정은 어떻게
 //
@@ -40,18 +44,18 @@ import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 //     없으므로(`MESSAGE_HEAD_CHIP_CLASS`) 칩이 클수록 이름이 줄어든다.
 //   - 머리 줄이 없는 **이어지는 행**(같은 사람의 연속 메시지)의 거터: 시각이 서는 그 자리에 선다(`GutterTriggerChip`).
 //     거터(32px + 행 여백 16px)에 낱말은 들어가지 않는다.
-// 아이콘 칩은 글자 없이 모양만으로 여덟 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
+// 아이콘 칩은 글자 없이 모양만으로 아홉 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
 // (`MarkGlyph`). 그릇 높이는 낱말 칩과 같다: 폭 0으로 접은 낱말이 줄 상자의 높이를 지킨다.
 //
 // ## 낱말과 모양
 //
 // 낱말과 상태 판정은 코어 `triggerChip`이 정한다(레일과 같은 낱말). 모양은 색에만 기대지 않는다:
-// 점(작업 중)·체크(답함)·느낌표(아직 받지 않았어요)·시계(시간 초과·신호 소실)·가위표(실패, 위험 톤). 느낌표와 시계는 경고
+// 점(작업 중)·느낌표(아직 받지 않았어요)·시계(시간 초과·신호 소실)·가위표(실패, 위험 톤). 느낌표와 시계는 경고
 // 톤이다. 서버가 일을 끝내지
 // 못한 것은 오류가 아니라서(ADR-0132) 위험 톤·가위표는 서버가 `failed`로 끝낸 것에만 쓴다. 그릇은 칩 그릇 규칙
-// (`chipVessel.test`)의 넷(`muted/ok/warn/danger-soft`)만 쓴다.
+// (`chipVessel.test`)의 셋(`muted/warn/danger-soft`)만 쓴다(초록 `ok` 그릇은 성공의 칩이 없어져 이 칩에서 쓰지 않는다).
 //
-// 「답함 ✓」은 답 메시지를 알 때만 눌리는 단추다(눌러도 갈 곳이 없는 단추를 세우지 않는다). 거터의 칩은
+// 칩은 요청 묶음(승인 카드)을 알 때만 눌리는 단추다(눌러도 갈 곳이 없는 단추를 세우지 않는다). 거터의 칩은
 // 눌리지 않는다: 행에 포인터가 오면 그 자리가 시각으로 바뀌므로(아래) 누를 수 있는 단추를 거기 둘 수 없다.
 // =============================================================================
 
@@ -59,7 +63,6 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
   return (
     <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
       {mark === "dot" && <span aria-hidden="true" className="size-1 rounded-full bg-warn" />}
-      {mark === "check" && <Check aria-hidden="true" className="size-3" />}
       {mark === "alert" && <CircleAlert aria-hidden="true" className="size-3" />}
       {mark === "clock" && <Clock aria-hidden="true" className="size-3" />}
       {mark === "cross" && <CircleX aria-hidden="true" className="size-3" />}
@@ -82,7 +85,6 @@ const MARK_GLYPH: Record<TriggerChipKind, LucideIcon> = {
   // SVG 대체 요소가 다른 글리프와 같은 기준선·줄 높이를 지켜요.
   working: CircleDot,
   approval: ShieldQuestion,
-  answered: Check,
   uncollected: CircleAlert,
   timed_out: Clock,
   failed: CircleX,
@@ -135,13 +137,11 @@ function MarkLayer({ chip, className }: { chip: TriggerChip; className: string }
  */
 export function TriggerChipView({
   chip,
-  onJump,
   variant = "word",
   reserve = true,
   onOpenBundle,
 }: {
   chip: TriggerChip;
-  onJump?: (answer: AnswerRef) => void;
   variant?: "word" | "mark";
   reserve?: boolean;
   onOpenBundle?: (opener: HTMLButtonElement) => void;
@@ -172,17 +172,15 @@ export function TriggerChipView({
         <MarkLayer chip={chip} className="hidden @max-sm:inline-grid" />
       </>
     );
-  const answer = chip.answer;
-  const opensBundle = onOpenBundle !== undefined;
-  if (variant === "word" && (opensBundle || (answer !== undefined && onJump !== undefined))) {
+  if (variant === "word" && onOpenBundle !== undefined) {
     return (
       <button
         type="button"
         data-testid="trigger-chip"
         data-kind={chip.kind}
         data-row-action=""
-        aria-label={opensBundle ? `${chip.label} ${chip.kind === "approval" ? "결정 보기" : "요청 스레드 열기"}` : `${chip.label} 답 메시지로 이동`}
-        onClick={(event) => opensBundle ? onOpenBundle(event.currentTarget) : onJump?.(answer!)}
+        aria-label={`${chip.label} ${chip.kind === "approval" ? "결정 보기" : "요청 스레드 열기"}`}
+        onClick={(event) => onOpenBundle(event.currentTarget)}
         // 누를 수 있는 면적만 4px씩 키운다(`after`): 20px 칩이 머리 줄에 끼어 있어 칩 자체를 키우면 행 높이가 변한다.
         // 28px로 WCAG 2.5.8의 24 바닥(웹 인라인 컨트롤)을 지키고, 그려지는 칩과 줄 높이는 그대로다.
         className={cn(className, "relative after:absolute after:-inset-1", "press hover:opacity-80 focus-visible:focus-ring")}
@@ -211,37 +209,22 @@ export function TriggerChipView({
  * 「받음」이 「아직 받지 않았어요」로 넘어가는 유예 마감에 **한 번만** 다시 그린다(`useRerenderAt`): 칩은
  * 경과를 말하지 않으므로 매초 도는 시계가 필요 없다.
  */
-function useTriggerChip(
-  runs: readonly AgentRunProgress[],
-  directory: Directory,
-  runAnswers?: ReadonlyMap<string, AnswerRef>
-): TriggerChip | null {
+function useTriggerChip(runs: readonly AgentRunProgress[], directory: Directory): TriggerChip | null {
   const nowMs = useRerenderAt(nextUncollectedDeadlineMs(runs, Date.now()));
-  return triggerChip(
-    runs,
-    (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-    nowMs,
-    runAnswers === undefined ? {} : { answerFor: (run) => runAnswers.get(run.id.toLowerCase()) }
-  );
+  return triggerChip(runs, (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME), nowMs);
 }
 
-/** 머리 줄(이름 · 시각 옆)의 칩. 좁은 줄에서는 아이콘만 남는다. */
+/** 머리 줄(이름 · 시각 옆)의 칩. 좁은 줄에서는 아이콘만 남는다. 모든 run이 성공이면 칩이 없다(null). */
 export function MessageTriggerChip({
   runs,
   directory,
-  runAnswers,
-  onJump,
   onOpenBundle,
 }: {
   runs: readonly AgentRunProgress[];
   directory: Directory;
-  /** run id(소문자) → 그 run의 답 메시지. 목록이 한 번 계산해 행에 넘긴다. */
-  runAnswers?: ReadonlyMap<string, AnswerRef>;
-  /** 「답함」을 눌렀을 때 답 메시지로 간다(`onJumpToMessage`). */
-  onJump?: (messageId: string, seq: number | null) => void;
   onOpenBundle?: (opener: HTMLButtonElement, runIds: readonly string[]) => void;
 }) {
-  const chip = useTriggerChip(runs, directory, runAnswers);
+  const chip = useTriggerChip(runs, directory);
   if (chip === null) return null;
   const selectedRun = runs.find((run) => chip.runIds.includes(run.id));
   const bundle = selectedRun ? runBundleSnapshot(selectedRun) : undefined;
@@ -250,9 +233,6 @@ export function MessageTriggerChip({
     <TriggerChipView
       chip={namedChip}
       {...((bundle || chip.kind === "approval") && onOpenBundle ? { onOpenBundle: (opener: HTMLButtonElement) => onOpenBundle(opener, chip.runIds) } : {})}
-      {...(onJump !== undefined
-        ? { onJump: (answer: AnswerRef) => onJump(answer.id, answer.seq) }
-        : {})}
     />
   );
 }
@@ -297,7 +277,7 @@ export function GutterTriggerChip({
 /**
  * 스레드 요약 줄(「답글 N개 · 마지막 …」) 곁의 「작업 중」 칩 (#4619 E). 같은 모델·같은 칩이다. 루트 메시지가 일으킨 run에만
  * 서고(누가 불렀든), 답글이 일으킨 run은 진행 읽기에 루트 id가 없어 닿지 못한다.
- * 일이 **진행 중**(가져감·작업 중)일 때만 선다: 끝난 일의 「답함」이나 실패는 머리 줄의 칩이 말하고,
+ * 일이 **진행 중**(가져감·작업 중)일 때만 선다: 끝난 일의 실패는 머리 줄의 칩이 말하고(성공은 칩이 없다, #5382),
  * 이 줄은 「이 스레드에서 지금 에이전트가 일하는 중」만 말한다. 누르는 것이 아니다. 폭은 고정하지 않는다
  * (`reserve={false}`): 이 줄의 칩은 맨 끝이라 서고 져도 이웃 글자가 움직이지 않는다.
  */

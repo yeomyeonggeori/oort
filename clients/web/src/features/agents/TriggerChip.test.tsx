@@ -12,7 +12,6 @@ import {
   TRIGGER_CHIP_FACES,
   TRIGGER_CHIP_KINDS,
   triggerChip,
-  type AnswerRef,
   type TriggerChipKind,
 } from "@momo/core/features/agents/triggerChip";
 import {
@@ -25,8 +24,8 @@ import { TRIGGER_CHIP_TONE_CLASS } from "./triggerChipClasses";
 
 // =============================================================================
 // 트리거 메시지의 칩 (#4619 B)과 스레드 요약 줄의 「작업 중」 칩 (E). 칩이 낱말을 갈아 끼워도 폭이 변하지 않는
-// 구조(모든 낱말을 같은 칸에 겹친다), 「답함 ✓」만 눌리는 단추라는 것, 「받음」이 유예 마감에 한 번만 다시
-// 그려진다는 것을 잰다. 칩의 **픽셀** 크기는 jsdom이 잴 수 없어 `TriggerChip.browser.test.tsx`가 잰다.
+// 구조(모든 낱말을 같은 칸에 겹친다), 요청 묶음을 여는 길이 있을 때만 눌리는 단추라는 것, 성공은 칩이 없다는 것(#5382),
+// 「받음」이 유예 마감에 한 번만 다시 그려진다는 것을 잰다. 칩의 **픽셀** 크기는 jsdom이 잴 수 없어 `TriggerChip.browser.test.tsx`가 잰다.
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -115,13 +114,12 @@ describe("칩의 그림", () => {
   const chipOf = (extra: Partial<AgentRunProgress>, at = now) =>
     triggerChip([run(now, extra)], nameFor, at)!;
 
-  it("낱말과 표지: 점(작업 중) · 체크(답함) · 느낌표(아직 받지 않았어요) · 시계(시간 초과·신호 소실) · 가위표(실패) · 표지 없음(받음·가져감·승인 필요)", () => {
-    const cases: [Partial<AgentRunProgress>, number, string, "dot" | "check" | "alert" | "clock" | "cross" | "none"][] = [
+  it("낱말과 표지: 점(작업 중) · 느낌표(아직 받지 않았어요) · 시계(시간 초과·신호 소실) · 가위표(실패) · 표지 없음(받음·가져감·승인 필요)", () => {
+    const cases: [Partial<AgentRunProgress>, number, string, "dot" | "alert" | "clock" | "cross" | "none"][] = [
       [{}, now, "받음", "none"],
       [{ phase: "claimed", leaseState: "live" }, now, "가져감", "none"],
       [RUNNING(now), now, "작업 중", "dot"],
       [{ phase: "awaiting_approval", status: "awaiting_approval" }, now, "승인 필요", "none"],
-      [DONE(now), now, "답함", "check"],
       [{}, now + 10 * MIN, UNCOLLECTED_WORD, "alert"],
       [{ phase: "timed_out", status: "timed_out" }, now, "시간 초과", "clock"],
       [{ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" }, now, "신호 소실", "clock"],
@@ -133,7 +131,7 @@ describe("칩의 그림", () => {
       expect(visible?.textContent, word).toBe(word);
       // 보이는 낱말 쪽의 표지만 센다(유령 낱말들도 자기 표지를 안고 있다).
       expect(visible?.querySelectorAll("svg").length, `${word} 표지`).toBe(
-        mark === "check" || mark === "alert" || mark === "clock" || mark === "cross" ? 1 : 0
+        mark === "alert" || mark === "clock" || mark === "cross" ? 1 : 0
       );
       // 아직 받지 않았어요(주의)와 실패(오류)는 같은 모양이 아니다: 색을 못 보는 사람에게 둘이 같은 말이 되지 않게.
       if (mark === "alert") expect(visible?.querySelector("svg")?.getAttribute("class")).toContain("circle-alert");
@@ -181,9 +179,9 @@ describe("칩의 그림", () => {
     expect(q(el, "trigger-chip")?.className).toContain("inline-grid");
   });
 
-  it("낱말이 바뀌어도 유령의 집합은 같다(받음 → 작업 중 → 답함)", () => {
+  it("낱말이 바뀌어도 유령의 집합은 같다(받음 → 작업 중 → 실패)", () => {
     const sets: string[] = [];
-    for (const extra of [{}, RUNNING(now), DONE(now)] as Partial<AgentRunProgress>[]) {
+    for (const extra of [{}, RUNNING(now), FAILED(now)] as Partial<AgentRunProgress>[]) {
       const el = render(createElement(TriggerChipView, { chip: chipOf(extra) }));
       const all = [
         q(el, "trigger-chip-word")?.textContent,
@@ -195,48 +193,39 @@ describe("칩의 그림", () => {
     expect(new Set(sets).size).toBe(1);
   });
 
-  it("그릇은 칩 그릇 규칙의 넷뿐이다(muted·ok·warn·danger-soft)", () => {
+  it("그릇은 칩 그릇 규칙 중 셋뿐이다(muted·warn·danger-soft): 성공의 초록 그릇은 칩이 없어져 쓰지 않는다 (#5382)", () => {
     const fills = Object.values(TRIGGER_CHIP_TONE_CLASS).flatMap((cls) => cls.match(/\bbg-[a-z-]+/g) ?? []);
-    expect(new Set(fills)).toEqual(new Set(["bg-muted-soft", "bg-ok-soft", "bg-warn-soft", "bg-danger-soft"]));
+    expect(new Set(fills)).toEqual(new Set(["bg-muted-soft", "bg-warn-soft", "bg-danger-soft"]));
   });
 
-  it("「답함 ✓」은 답을 알 때만 눌리는 단추다. 누르면 답을 넘긴다", () => {
-    const answer: AnswerRef = { id: "answer-1", seq: 42 };
-    const chip = triggerChip([run(now, DONE(now))], nameFor, now, { answerFor: () => answer })!;
-    const jump = vi.fn();
-    const el = render(createElement(TriggerChipView, { chip, onJump: jump }));
+  it("요청 묶음을 여는 길(onOpenBundle)이 있을 때만 눌리는 단추다. 없으면 같은 칩이 눌리지 않는다", () => {
+    const approval = chipOf({ phase: "awaiting_approval", status: "awaiting_approval" });
+    const open = vi.fn();
+    const el = render(createElement(TriggerChipView, { chip: approval, onOpenBundle: open }));
     const button = q(el, "trigger-chip");
     expect(button?.tagName).toBe("BUTTON");
-    expect(button?.getAttribute("aria-label")).toBe("달무리봇 에이전트가 답했어요. 답 메시지로 이동");
+    expect(button?.getAttribute("aria-label")).toBe(`${approval.label} 결정 보기`);
     act(() => button?.click());
-    expect(jump).toHaveBeenCalledWith(answer);
+    expect(open).toHaveBeenCalledTimes(1);
     unmount();
 
-    // 답을 모르면 같은 칩이 눌리지 않는다(죽은 단추를 세우지 않는다).
-    const unknown = triggerChip([run(now, DONE(now))], nameFor, now)!;
-    const plain = render(createElement(TriggerChipView, { chip: unknown, onJump: jump }));
+    const working = chipOf(RUNNING(now));
+    const thread = render(createElement(TriggerChipView, { chip: working, onOpenBundle: open }));
+    expect(q(thread, "trigger-chip")?.getAttribute("aria-label")).toBe(`${working.label} 요청 스레드 열기`);
+    unmount();
+
+    // 갈 곳(onOpenBundle)이 없으면 단추가 되지 않는다(죽은 단추를 세우지 않는다).
+    const plain = render(createElement(TriggerChipView, { chip: approval }));
     expect(q(plain, "trigger-chip")?.tagName).toBe("SPAN");
     expect(q(plain, "trigger-chip")?.getAttribute("role")).toBe("img");
-    expect(q(plain, "trigger-chip")?.getAttribute("aria-label")).toBe("달무리봇 에이전트가 답했어요.");
-    unmount();
-
-    // 갈 곳(onJump)이 없어도 단추가 되지 않는다.
-    const noHandler = render(createElement(TriggerChipView, { chip }));
-    expect(q(noHandler, "trigger-chip")?.tagName).toBe("SPAN");
-  });
-
-  it("「답함」이 아닌 칩은 답을 알아도 눌리지 않는다", () => {
-    const answer: AnswerRef = { id: "answer-1", seq: 42 };
-    const chip = triggerChip([run(now, RUNNING(now))], nameFor, now, { answerFor: () => answer })!;
-    const el = render(createElement(TriggerChipView, { chip, onJump: vi.fn() }));
-    expect(q(el, "trigger-chip")?.tagName).toBe("SPAN");
+    expect(q(plain, "trigger-chip")?.getAttribute("aria-label")).toBe(approval.label);
   });
 });
 
 describe("메시지가 일으킨 run → 칩", () => {
   const now = T0;
 
-  it("run이 없거나 전부 취소면 아무것도 그리지 않는다", () => {
+  it("run이 없거나 전부 취소·성공이면 아무것도 그리지 않는다 (#5382: 「답함 ✓」은 서지 않는다)", () => {
     const empty = render(createElement(MessageTriggerChip, { runs: [], directory }));
     expect(empty.childElementCount).toBe(0);
     unmount();
@@ -247,21 +236,27 @@ describe("메시지가 일으킨 run → 칩", () => {
       })
     );
     expect(cancelled.childElementCount).toBe(0);
+    unmount();
+    const done = render(createElement(MessageTriggerChip, { runs: [run(now, DONE(now))], directory }));
+    expect(done.childElementCount).toBe(0);
+    expect(q(done, "trigger-chip")).toBeNull();
+    unmount();
+    const twoDone = render(
+      createElement(MessageTriggerChip, { runs: [run(now, DONE(now)), run(now, DONE(now))], directory })
+    );
+    expect(twoDone.childElementCount).toBe(0);
   });
 
-  it("「답함 ✓」을 누르면 그 run의 답 id와 seq로 onJump를 부른다", () => {
-    const done = run(now, DONE(now));
-    const jump = vi.fn();
-    const el = render(
-      createElement(MessageTriggerChip, {
-        runs: [done],
-        directory,
-        runAnswers: new Map([[done.id.toLowerCase(), { id: "answer-1", seq: 42 }]]),
-        onJump: jump,
-      })
+  it("성공한 run 곁에 다른 상태의 run이 하나라도 있으면 그 상태의 칩이 선다(실패 > 작업 중)", () => {
+    const failed = render(
+      createElement(MessageTriggerChip, { runs: [run(now, DONE(now)), run(now, FAILED(now))], directory })
     );
-    act(() => q(el, "trigger-chip")?.click());
-    expect(jump).toHaveBeenCalledWith("answer-1", 42);
+    expect(q(failed, "trigger-chip")?.getAttribute("data-kind")).toBe("failed");
+    unmount();
+    const working = render(
+      createElement(MessageTriggerChip, { runs: [run(now, DONE(now)), run(now, RUNNING(now))], directory })
+    );
+    expect(q(working, "trigger-chip")?.getAttribute("data-kind")).toBe("working");
   });
 
   it("「받음」은 유예 마감에 한 번 다시 그려져 「아직 받지 않았어요」가 된다 — 매초 도는 시계 없이", () => {
@@ -295,7 +290,7 @@ describe("스레드 요약 줄의 「작업 중」 칩 (E)", () => {
     unmount();
   });
 
-  it("받음·승인 필요·답함·실패·아직 받지 않았어요에는 서지 않는다(그 말은 머리 줄의 칩이 한다)", () => {
+  it("받음·승인 필요·성공·실패·아직 받지 않았어요에는 서지 않는다(그 말은 머리 줄의 칩이 한다)", () => {
     for (const extra of [
       {},
       { phase: "awaiting_approval", status: "awaiting_approval" },
@@ -331,7 +326,6 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     ["가져감", { phase: "claimed", leaseState: "live" }, now],
     ["작업 중", RUNNING(now), now],
     ["승인 필요", { phase: "awaiting_approval", status: "awaiting_approval" }, now],
-    ["답함", DONE(now), now],
     [UNCOLLECTED_WORD, {}, now + 10 * MIN],
     ["시간 초과", { phase: "timed_out", status: "timed_out" }, now],
     ["실패", FAILED(now), now],
@@ -344,7 +338,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
   it("모든 kind는 좁은 머리 줄·거터에서 글리프와 접근성 이름을 갖는다", () => {
     const expected = {
       received: "eye", claimed: "hand", working: "circle-dot",
-      approval: "shield-question", answered: "check", uncollected: "circle-alert",
+      approval: "shield-question", uncollected: "circle-alert",
       timed_out: "clock", failed: "circle-x", declined: "ban", expired: "clock",
     } satisfies Record<TriggerChipKind, string>;
     for (const kind of TRIGGER_CHIP_KINDS) {
@@ -390,7 +384,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     expect(mark?.getAttribute("title")).toBe("작업 중");
   });
 
-  it("여덟 상태가 아이콘 모양만으로 갈린다(글자 없이)", () => {
+  it("일곱 상태가 아이콘 모양만으로 갈린다(글자 없이)", () => {
     const glyphs = new Map<string, string>();
     for (const [name, extra, at] of STATES) {
       const el = render(createElement(TriggerChipView, { chip: chipOf(extra, at) }));
@@ -402,18 +396,16 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     // 손으로 그린 `<svg>`가 아니라 lucide의 원 안의 점이다(ADR-0172 아이콘 경계, design-review r1 H1).
     expect(glyphs.get("작업 중")).toContain("lucide-circle-dot");
     expect(glyphs.get("승인 필요")).toContain("lucide-shield-question");
-    expect(glyphs.get("답함")).toContain("lucide-check");
     expect(glyphs.get(UNCOLLECTED_WORD)).toContain("lucide-circle-alert");
     expect(glyphs.get("시간 초과")).toContain("lucide-clock");
     expect(glyphs.get("실패")).toContain("lucide-circle-x");
     expect(new Set(glyphs.values()).size).toBe(STATES.length);
   });
 
-  it("variant=mark: 아이콘 층만 있고 낱말 층도 유령도 없으며, 답을 알아도 눌리지 않는다", () => {
-    const answer: AnswerRef = { id: "answer-1", seq: 42 };
-    const chip = triggerChip([run(now, DONE(now))], nameFor, now, { answerFor: () => answer })!;
+  it("variant=mark: 아이콘 층만 있고 낱말 층도 유령도 없으며, 묶음을 여는 길이 있어도 눌리지 않는다", () => {
+    const chip = chipOf({ phase: "awaiting_approval", status: "awaiting_approval" });
     const jump = vi.fn();
-    const el = render(createElement(TriggerChipView, { chip, onJump: jump, variant: "mark" }));
+    const el = render(createElement(TriggerChipView, { chip, onOpenBundle: jump, variant: "mark" }));
     expect(q(el, "trigger-chip")?.tagName).toBe("SPAN");
     expect(q(el, "trigger-chip")?.getAttribute("role")).toBe("img");
     expect(q(el, "trigger-chip-word")).toBeNull();
