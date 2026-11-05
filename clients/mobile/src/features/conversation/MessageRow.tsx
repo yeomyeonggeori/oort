@@ -4278,8 +4278,8 @@ export function PendingRow({
   quote?: QuoteBlockModel | null;
   quoteAttachmentCount?: number;
   /**
-   * 이 전송이 스레드 답글이면 그 스레드(#4888): 대화에 서는 답글의 에코 — 「대화에도 보내기」로 보낸 것, 또는 보내지 못해 실패를 여기서 알려야
-   * 하는 것 — 가 확정본과 같은 「↳ ○○님 스레드에 답글」 줄을 먼저 그린다. 없으면(`undefined`) 채널 글이다. 루트를 못 불러왔으면 `root` 가 `null`이다.
+   * 이 전송이 스레드 답글이면 그 스레드(#4888): 대화에 서는 답글의 에코 — 보내지 못해 실패를 여기서 알려야
+   * 하는 것(밀어서 보낸 답글) — 가 확정본과 같은 「↳ ○○님 스레드에 답글」 줄을 먼저 그린다. 없으면(`undefined`) 채널 글이다. 루트를 못 불러왔으면 `root` 가 `null`이다.
    */
   replyHome?: {rootId: string; root: Message | null};
   onResend?: (clientMsgId: string) => void;

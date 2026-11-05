@@ -4440,18 +4440,6 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "대화에도 보내기"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
-    }
-  ],
   "reply.card.cancel": [
     {
       "type": 0,

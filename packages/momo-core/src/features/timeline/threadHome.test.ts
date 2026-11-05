@@ -11,11 +11,11 @@ import {
   mainFlowMessages,
   messageExcerpt,
   phoneMainFlowMessages,
-  replyHomeLine,
+  replyHomeLineOf,
   serverSpeaksThreadHome,
 } from "./threadHome";
 
-// 이슈 #4888 — 본류에 그릴 행의 판정(웹·데스크탑·폰이 같은 함수), 옛 서버 대체(폰), 답글 줄의 모양과 문구.
+// 이슈 #4888 → #5324 — 본류에 그릴 행의 판정(웹·데스크탑·폰이 같은 함수: `root_id` 없는 메시지만, 「대화에도 보내기」는 화면에서 빠졌다), 옛 서버 대체(폰), 폰 답글 줄의 모양과 문구.
 
 const ME = "11111111-1111-4111-8111-111111111111";
 const SEO = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
@@ -41,24 +41,22 @@ const reply = (seq: number, over: Partial<Message> = {}) => msg(seq, { rootId: R
 const SUMMARY_NEW = { reply_count: 2, last_reply_seq: 3, last_reply_at: 3, participant_ids: [ME], participant_count: 1 };
 const SUMMARY_OLD = { reply_count: 2, last_reply_seq: 3, last_reply_at: 3 };
 
-describe("isMainFlowRow — ADR-0148 결정 4 한 문장", () => {
+describe("isMainFlowRow — 본류에는 root_id 가 없는 메시지만 (ADR-0148 증보 2026-11-05)", () => {
   it("루트 없는 메시지는 본류에 선다", () => {
     expect(isMainFlowRow(msg(1))).toBe(true);
   });
-  it("스레드로만 간 답글은 본류에 서지 않는다", () => {
+  it("스레드 답글은 본류에 서지 않는다", () => {
     expect(isMainFlowRow(reply(2))).toBe(false);
     expect(isMainFlowRow(reply(2, { alsoInChannel: false }))).toBe(false);
   });
-  it("대화에도 보낸 답글은 본류에 선다", () => {
-    expect(isMainFlowRow(reply(2, { alsoInChannel: true }))).toBe(true);
-  });
-  it("true 가 아닌 값은 켜짐으로 읽지 않는다(문자열·1)", () => {
+  // 사보타주: `|| message.alsoInChannel === true` 를 되살리면 이 시험이 RED 여야 한다.
+  it("옛날에 「대화에도 보내기」로 보낸 답글도 본류에 서지 않는다 — 서버 필드가 true 여도 스레드에만 보인다", () => {
+    expect(isMainFlowRow(reply(2, { alsoInChannel: true }))).toBe(false);
     expect(isMainFlowRow(reply(2, { alsoInChannel: "true" as unknown as boolean }))).toBe(false);
-    expect(isMainFlowRow(reply(2, { alsoInChannel: 1 as unknown as boolean }))).toBe(false);
   });
-  it("mainFlowMessages 는 순서를 지키며 걸러 낸다", () => {
+  it("mainFlowMessages 는 순서를 지키며 걸러 낸다 — 켠 옛 답글도 뺀다", () => {
     const rows = [root(), reply(2), reply(3, { alsoInChannel: true }), msg(4)];
-    expect(mainFlowMessages(rows).map((m) => m.seq)).toEqual([1, 3, 4]);
+    expect(mainFlowMessages(rows).map((m) => m.seq)).toEqual([1, 4]);
   });
 });
 
@@ -66,7 +64,7 @@ describe("serverSpeaksThreadHome — 서버가 이 값을 아는가(와이어에
   it("스레드도 켠 답글도 없으면 모른다", () => {
     expect(serverSpeaksThreadHome([msg(1), reply(2)])).toBe(false);
   });
-  it("켠 답글이 하나라도 있으면 안다", () => {
+  it("서버에 남은 옛 「대화에도 보낸」 답글이 하나라도 있으면 안다(옛 서버는 이 키를 영영 안 보낸다)", () => {
     expect(serverSpeaksThreadHome([root(), reply(2, { alsoInChannel: true })])).toBe(true);
   });
   it("요약에 participant_count 가 있으면 안다(같은 커밋이 함께 들여온 값)", () => {
@@ -88,33 +86,29 @@ describe("phoneMainFlowMessages — 새 서버는 규칙대로, 옛 서버는 �
     expect(shown).toBe(rows);
     expect(shown.map((m) => m.seq)).toEqual([1, 2, 3]);
   });
-  it("새 서버(요약에 participant_count): 켠 답글만 남는다", () => {
+  it("새 서버(요약에 participant_count): 답글은 모두 빠진다 — 옛 「대화에도 보낸」 답글도 스레드에만 있다", () => {
     const rows = [root({ thread: SUMMARY_NEW }), reply(2), reply(3, { alsoInChannel: true }), msg(4)];
-    expect(phoneMainFlowMessages(rows).map((m) => m.seq)).toEqual([1, 3, 4]);
+    expect(phoneMainFlowMessages(rows).map((m) => m.seq)).toEqual([1, 4]);
   });
-  it("새 서버(켠 답글이 증거): 켜지 않은 답글은 빠진다", () => {
+  it("새 서버(옛 켠 답글이 증거): 그 답글을 포함해 답글은 모두 빠진다", () => {
     const rows = [root(), reply(2), reply(3, { alsoInChannel: true })];
-    expect(phoneMainFlowMessages(rows).map((m) => m.seq)).toEqual([1, 3]);
+    expect(phoneMainFlowMessages(rows).map((m) => m.seq)).toEqual([1]);
   });
   it("알려진 틈: 요약도 켠 답글도 없는 창의 첫 답글은 새 서버여도 보인다(숨기는 쪽의 오류보다 낫다)", () => {
     expect(phoneMainFlowMessages([root(), reply(2)]).map((m) => m.seq)).toEqual([1, 2]);
   });
 });
 
-describe("replyHomeLine — 「어느 스레드의 답글인가」", () => {
-  const byId = (rows: Message[]) => (id: string) => rows.find((m) => m.id === id);
-  it("답글이 아닌 행에는 없다", () => {
-    expect(replyHomeLine(msg(2), byId([root()]))).toBeNull();
-  });
+describe("replyHomeLineOf — 「어느 스레드의 답글인가」(폰: 옛 서버의 본류 답글·보내지 못한 답글의 에코)", () => {
   it("루트가 불러온 범위에 없으면 모른다고 말한다", () => {
-    expect(replyHomeLine(reply(2), byId([]))).toEqual({ kind: "unloaded", rootId: ROOT });
+    expect(replyHomeLineOf(ROOT, undefined)).toEqual({ kind: "unloaded", rootId: ROOT });
   });
   it("지워진 루트는 지워졌다고 말한다(스레드는 열린다)", () => {
-    const line = replyHomeLine(reply(2), byId([root({ state: "deleted", body: undefined })]));
+    const line = replyHomeLineOf(ROOT, root({ state: "deleted", body: undefined }));
     expect(line).toEqual({ kind: "deleted", rootId: ROOT, rootAuthorMemberId: SEO });
   });
   it("루트의 글을 한 줄 발췌로 싣는다", () => {
-    expect(replyHomeLine(reply(2), byId([root()]))).toEqual({
+    expect(replyHomeLineOf(ROOT, root())).toEqual({
       kind: "ready",
       rootId: ROOT,
       rootAuthorMemberId: SEO,
@@ -199,13 +193,13 @@ describe("buildTimelineItems.settleAgainst — 걸러 낸 확정본도 에코를
     expect(pendingKeys(buildTimelineItems(drawn, { pending, settleAgainst: all }))).toEqual([]);
   });
   it("한 번만 대조한다: 같은 글을 두 번 보낸 에코 둘을 확정본 하나가 모두 삼키지 않는다", () => {
-    const all = [root(), reply(2, { body: "네", alsoInChannel: true })];
-    const pending = [echo("k1", "네", { alsoInChannel: true }), echo("k2", "네", { alsoInChannel: true })];
+    const all = [root(), reply(2, { body: "네" })];
+    const pending = [echo("k1", "네"), echo("k2", "네")];
     expect(pendingKeys(buildTimelineItems(mainFlowMessages(all), { pending, settleAgainst: all }))).toEqual(["k2"]);
   });
 });
 
-// 대화(채널) 목록이 에코를 그리는 규칙 — 스레드 답글의 에코는 스레드의 것이고, 예외는 「대화에도 보낸」 것과 보내지 못한 것이다.
+// 대화(채널) 목록이 에코를 그리는 규칙 — 스레드 답글의 에코는 스레드의 것이고, 예외는 보내지 못한 것 하나다(「대화에도 보내기」는 화면에서 빠졌다).
 describe("isChannelListEcho", () => {
   const row = (over: Partial<PendingMessage> = {}): PendingMessage => ({
     clientMsgId: "k",
@@ -227,7 +221,8 @@ describe("isChannelListEcho", () => {
   it("스레드 답글이 보내지 못했으면 대화 목록에 선다 — 밀어서 보낸 답글은 스레드를 열지 않는다", () => {
     expect(isChannelListEcho(row({ rootId: ROOT, status: "failed" }))).toBe(true);
   });
-  it("「대화에도 보내기」 답글은 보내는 중에도 선다 — 확정되면 본류의 행이 된다", () => {
-    expect(isChannelListEcho(row({ rootId: ROOT, alsoInChannel: true }))).toBe(true);
+  // 사보타주: `|| row.alsoInChannel === true` 를 되살리면 이 시험은 컴파일부터 깨진다(필드가 없다) — 규칙은 rootId·status 둘뿐이다.
+  it("스레드 답글은 보내는 중이든 서버에 닿았든 대화 목록에 서지 않는다(`alsoInChannel` 이 실려 와도 읽지 않는다)", () => {
+    expect(isChannelListEcho({ ...row({ rootId: ROOT }), alsoInChannel: true } as PendingMessage)).toBe(false);
   });
 });

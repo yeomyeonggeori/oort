@@ -402,18 +402,16 @@ function notificationSource(
 
 /**
  * 이 메시지가 지금 화면에 있는가 — 배너가 소음이 되는 때. 일반 메시지는 **채널**이 화면에 있으면 있다(#3339). 스레드 답글은
- * 본류 목록의 줄이 아니므로 **그 스레드 패널이 열려 있어야** 보인다(`isThreadVisible`). 「대화에도 보내기」(#4887)를 고른
- * 답글은 본류에도 한 줄로 서므로 채널이 화면에 있어도 본 것이다.
+ * 본류 목록의 줄이 아니므로 **그 스레드 패널이 열려 있어야** 보인다(`isThreadVisible`). 옛날에 「대화에도 보내기」(#4887)로 보낸
+ * 답글도 마찬가지다: 2026-11-05부터 화면은 그 답글을 스레드에만 그리므로, 채널이 화면에 있어도 본 것이 아니다.
  */
 function onScreen(
   message: Message,
   threadRootId: string | undefined,
   context: NotifyContext
 ): boolean {
-  const channelVisible = context.isTargetVisible?.(message.channelId) ?? true;
-  if (threadRootId === undefined) return channelVisible;
-  if (context.isThreadVisible?.(threadRootId) ?? true) return true;
-  return message.alsoInChannel === true && channelVisible;
+  if (threadRootId === undefined) return context.isTargetVisible?.(message.channelId) ?? true;
+  return context.isThreadVisible?.(threadRootId) ?? true;
 }
 
 /**
