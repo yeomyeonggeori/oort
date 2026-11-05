@@ -44,7 +44,7 @@ import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 //     없으므로(`MESSAGE_HEAD_CHIP_CLASS`) 칩이 클수록 이름이 줄어든다.
 //   - 머리 줄이 없는 **이어지는 행**(같은 사람의 연속 메시지)의 거터: 시각이 서는 그 자리에 선다(`GutterTriggerChip`).
 //     거터(32px + 행 여백 16px)에 낱말은 들어가지 않는다.
-// 아이콘 칩은 글자 없이 모양만으로 아홉 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
+// 아이콘 칩은 글자 없이 모양만으로 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
 // (`MarkGlyph`). 그릇 높이는 낱말 칩과 같다: 폭 0으로 접은 낱말이 줄 상자의 높이를 지킨다.
 //
 // ## 낱말과 모양
