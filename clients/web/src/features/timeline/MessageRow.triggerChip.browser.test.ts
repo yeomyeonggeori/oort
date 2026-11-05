@@ -19,6 +19,8 @@ import { MessageRow } from "./MessageRow";
 //       없애는 수리(이름 폭 0, 칩 숨김)가 이 시험을 통과하지 못하게 하려는 단정이다.
 //   (2) 이어지는 행의 거터 칩은 행 높이도 본문 자리도 움직이지 않고, 거터와 행 여백 안에 들어가며, 행에 포인터가
 //       오면 시각에 자리를 내준다. hover가 없는 기기에서는 서지 않는다.
+//   (3) 성공으로 끝나 칩이 없어져도(#5382) 머리 줄은 칩이 있던 때와 같다: 높이가 같고 줄바꿈이 없으며 이름·시각의 세로
+//       정렬이 같다. 줄의 모양을 정하는 것은 칩이 아니라 「이 메시지에 run이 있다」라서 칩이 지는 순간 줄이 다시 흐르지 않는다.
 // 마크업은 jsdom에서 진짜 `MessageRow`가 그린 것이고 시험이 따로 적은 사본이 아니다.
 // =============================================================================
 
@@ -214,6 +216,11 @@ interface HeadGeometry {
   nameText: { width: number; clientWidth: number; scrollWidth: number };
   timeLeft: number;
   timeRight: number;
+  /** 이름 글자와 시각의 세로 자리: 정렬(기준선)이 그대로인지 본다. */
+  nameTop: number;
+  nameBottom: number;
+  timeTop: number;
+  timeBottom: number;
   chip: { left: number; right: number; top: number; bottom: number; width: number } | null;
   layer: "word" | "mark" | null;
 }
@@ -238,6 +245,10 @@ async function measureHead(p: Page): Promise<HeadGeometry> {
       nameText: { width: rect(nameText).width, clientWidth: nameText.clientWidth, scrollWidth: nameText.scrollWidth },
       timeLeft: rect(time).left,
       timeRight: rect(time).right,
+      nameTop: rect(nameText).top,
+      nameBottom: rect(nameText).bottom,
+      timeTop: rect(time).top,
+      timeBottom: rect(time).bottom,
       chip:
         chip === null
           ? null
@@ -329,6 +340,73 @@ describe("칩이 있는 머리 줄은 이름이 아무리 길어도 줄바꿈이
       expect(problems).toEqual([]);
     },
     280_000
+  );
+});
+
+describe("성공으로 끝나 칩 자리가 비어도 머리 줄은 그대로다 (#5382)", () => {
+  it.skipIf(ENGINES.length === 0)(
+    "이름 길이 × 열 폭 6종: 칩이 없는 줄이 칩이 있던 줄과 높이·세로 정렬이 같고, 줄바꿈이 없으며, 짧은 이름은 자리도 같다",
+    async () => {
+      const DONE = { status: "succeeded", phase: "succeeded", finishedAtMs: T0 - 1_000 } as const;
+      const lengths = [2, 6, 10, 14, 20, 28, 40];
+      const widths = [320, 368, 420, 460, 480, 720];
+      const rows = lengths.map((length) => ({
+        length,
+        plain: rowHtml({ name: nameOf(length), startsGroup: true }),
+        working: rowHtml({ name: nameOf(length), startsGroup: true, runs: [run()] }),
+        done: rowHtml({ name: nameOf(length), startsGroup: true, runs: [run(DONE)] }),
+      }));
+      const css = await compileTokensCss(rows.flatMap((r) => [r.plain, r.working, r.done]).flatMap(classesOf));
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      let compared = 0;
+
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 800, height: 600 } });
+          try {
+            const p = await ctx.newPage();
+            for (const width of widths) {
+              // 한 줄의 높이: 이름이 짧은 칩 없는 줄이다.
+              await p.setContent(page(css, width, rows[0]!.plain));
+              const oneLine = (await measureHead(p)).headHeight;
+              for (const r of rows) {
+                const at = `${engine} 열 ${width} 이름 ${r.length}자`;
+                await p.setContent(page(css, width, r.working));
+                const withChip = await measureHead(p);
+                await p.setContent(page(css, width, r.done));
+                const done = await measureHead(p);
+                compared += 1;
+                if (withChip.chip === null) problems.push(`${at}: 대조군(작업 중)에 칩이 없다`);
+                if (done.chip !== null) problems.push(`${at}: 성공으로 끝났는데 칩이 있다`);
+                // 줄바꿈이 없다: 칩이 없다고 줄이 다시 흘러 시각이 다음 줄로 내려가면 높이가 한 줄을 넘는다.
+                if (Math.abs(done.headHeight - oneLine) > 0.5) problems.push(`${at}: 머리 줄 높이 ${done.headHeight}, 한 줄 ${oneLine} — 줄바꿈이 생겼다`);
+                if (Math.abs(done.headHeight - withChip.headHeight) > 0.5) problems.push(`${at}: 칩이 질 때 머리 줄 높이가 ${withChip.headHeight} → ${done.headHeight}`);
+                // 세로 정렬: 이름 글자와 시각이 칩이 있던 줄과 같은 높이에 앉는다(기준선 정렬이 그대로다).
+                if (Math.abs(done.timeBottom - withChip.timeBottom) > 0.5) problems.push(`${at}: 시각의 세로 자리가 움직였다(${withChip.timeBottom} → ${done.timeBottom})`);
+                if (Math.abs(done.nameBottom - withChip.nameBottom) > 0.5) problems.push(`${at}: 이름의 세로 자리가 움직였다(${withChip.nameBottom} → ${done.nameBottom})`);
+                if (Math.abs((done.nameBottom - done.timeBottom) - (withChip.nameBottom - withChip.timeBottom)) > 0.5) problems.push(`${at}: 이름과 시각의 세로 어긋남이 달라졌다`);
+                // 이름이 열 글자 이하면 칩이 있을 때도 잘리지 않으므로(위 시험) 칩이 져도 이름·시각의 가로 자리가 같다.
+                if (r.length <= 10) {
+                  if (Math.abs(done.nameRight - withChip.nameRight) > 0.5) problems.push(`${at}: 이름의 오른쪽이 움직였다`);
+                  if (Math.abs(done.timeLeft - withChip.timeLeft) > 0.5) problems.push(`${at}: 시각의 왼쪽이 움직였다`);
+                }
+                // 이름은 열 글자 이상 보인다(칩이 없는 줄이 이름을 더 잘라 먹는 수리를 막는다).
+                if (r.length <= 10 && done.nameText.scrollWidth > done.nameText.clientWidth + 0.5) problems.push(`${at}: 이름이 잘렸다`);
+              }
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(compared).toBe(ENGINES.length * widths.length * lengths.length);
+      expect(problems).toEqual([]);
+    },
+    240_000
   );
 });
 
