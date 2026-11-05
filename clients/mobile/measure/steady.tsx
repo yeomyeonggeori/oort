@@ -33,7 +33,7 @@ import {TypingBar} from '../src/features/conversation/TypingBar';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 import type {ChannelRail} from '../src/realtime/channelRail';
 import {useNow} from '../src/lib/useNow';
-import {setServerBase} from '../src/storage/serverBase';
+import {pinServerBase} from './stubServerBase';
 
 // =============================================================================
 // 「대화 목록이 제자리를 지키는가」 — 실시간 이벤트를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다 (#4292).
@@ -425,7 +425,8 @@ export function ensureFakeFetch(): void {
 /** 서버 주소·네트워크 도달성 설정. 모듈 몸통에서 한 번(`surfaces.tsx`). */
 export function seedSteady(): void {
   const stub = photoStubHost();
-  setServerBase(stub !== null ? `http://${stub}` : 'https://oort.example');
+  // 이 프로세스의 메모리에만 건다 — 정리 없이 끝나도(`simctl terminate`) 저장소에는 `oort.example`·스텁이 남지 않는다(#5313).
+  pinServerBase(stub !== null ? `http://${stub}` : 'https://oort.example');
   const metro = String(Settings.get('RCT_jsLocation') ?? '127.0.0.1:8081');
   // 시뮬레이터의 NetInfo 는 바깥 도달성 검사에 실패해 오프라인으로 읽힌다(컴포저가 잠긴다) — 이 기기가 늘 닿는 곳으로 돌린다.
   NetInfo.configure({

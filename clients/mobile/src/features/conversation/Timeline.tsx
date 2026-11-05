@@ -93,7 +93,7 @@ import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {nextUncollectedDeadlineMs} from '@momo/core/features/agents/runException';
-import {runAnswerMap, triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
 import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
 import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
@@ -397,6 +397,19 @@ const PROGRESS_PX = 1;
  * that reason (see there).
  */
 const ENTRY_QUIET_MS = 150;
+
+/**
+ * 진입 베일이 목록을 가리는 시간의 상한 (#5403). 진입이 앉기(`settleEntry`)를 기다리다 이 시간이 지나면 어떤 이유로든 목록을 보인다 - 앉음의 신호가
+ * 오지 않는 길(진입이 앉기 전에 끊긴 수렴, 짧아서 움직일 것이 없는 목록)이 있어도 베일이 목록을 영영 가리지 않는다. 시뮬레이터 실측(`DM-STEADY-ENTER`, 영상):
+ * 목록이 마운트해 베일이 걷힐 때까지 약 0.27초(진입 수렴 `chasingTail` 이 켜져 있는 동안은 약 0.2초)이고, 느린 기기의 수렴은 0.5초 안쪽이다.
+ */
+const ENTRY_VEIL_MAX_MS = 500;
+
+/** 베일이 서 있는 동안 목록의 스타일: 그리지 않는다(자리·크기·네이티브 보고는 그대로 - 진입 수렴은 보이지 않는 채로 한다). */
+const ENTRY_VEILED_STYLE = {opacity: 0} as const;
+
+/** 대화를 불러오는 중이라는 말. 불러오는 화면과 진입 베일이 같은 한 줄을 쓴다(베일이 서는 동안 사람은 불러오는 화면이 이어진다고 본다). */
+const LOADING_LABEL = '대화를 불러오는 중입니다.';
 
 /**
  * The prepend correction, as one stable object so the prop does not churn.
@@ -1705,6 +1718,22 @@ function TimelineInner({
   }
   const rowViewability = rowViewabilityRef.current.store;
 
+  // ---- 진입 베일 (#5403) ------------------------------------------------------
+  // 마운트한 목록은 오프셋 0(대화의 맨 위)에 서고 곧 끝으로 간다(진입 수렴, 위 `olderReady` 의 설명). 시뮬레이터 녹화로 잰 그 몇 프레임 -
+  // 「대화의 시작입니다」·옛 날짜가 4프레임(약 70ms), 중간 자리 한 프레임, 바닥 - 이 사람에게는 「들어온 직후 위에서 아래로 훑는」 움직임이다(owner
+  // 11-05, 10-31). 그래서 진입이 앉을 때까지(`settleEntry`) 목록을 그리지 않고 그 자리에 「불러오는 중」을 이어 둔다: 사람은 바닥에 앉은 첫 프레임만
+  // 본다. 상한(`ENTRY_VEIL_MAX_MS`)이 지나면 무슨 일이 있어도 보인다. 필이 있는 대화 화면(`jumpPills`)만 쓴다 - 스레드 패널과 하네스는 목록이
+  // 부모의 직접 자식인 채다. 목록의 정체성(`listKey`)마다 한 번이다: 새 스크롤뷰(방 진입)는 다시 베일을 쓰고, 같은 목록에 메시지가 붙는 것은 건드리지 않는다.
+  const [unveiledKey, setUnveiledKey] = useState<string | null>(null);
+  const listKeyRef = useRef(listKey);
+  listKeyRef.current = listKey;
+  const entryVeiled = jumpPills && holdsChannelContent && unveiledKey !== listKey;
+  useEffect(() => {
+    if (!entryVeiled) return undefined;
+    const timer = setTimeout(() => setUnveiledKey(listKey), ENTRY_VEIL_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [entryVeiled, listKey]);
+
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
     if (!entrySettledRef.current) return;
@@ -1725,6 +1754,8 @@ function TimelineInner({
    * 으로 맨 위 → 옛 페이지 부름 0).
    */
   const settleEntry = useCallback(() => {
+    // 앉았다: 진입 베일을 걷는다(#5403). 이미 앉은 뒤의 호출은 값이 같아 아무 일도 하지 않는다.
+    setUnveiledKey(listKeyRef.current);
     if (entrySettledRef.current) return;
     entrySettledRef.current = true;
     // 이제부터 맨 위에 닿는 것은 사람이 올라간 것이다 — 옛 페이지를 불러도 된다(#2604).
@@ -3103,9 +3134,6 @@ function TimelineInner({
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
   const requests = useMemo(() => requestLoopIndex(messages, channelRuns), [messages, channelRuns]);
-  // 「답함 ✓」이 누르면 가는 답 메시지(#4620 B): 끝난 run마다 그 답을 **한 번** 색인해 칩에 넘긴다(정산된 턴 기록 > 트리거를 인용한 첫 글).
-  // 로드된 메시지에서만 찾으므로 알려진 답은 항상 이 목록 안에 있다 — 모르면 칩은 「답함」을 말하되 눌리지 않는다.
-  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
   // 칩과 같은 행의 예외 줄(`MessageRunStatus`)은 유예 마감에 서므로, 칩도 **그 순간**에 「받음」에서 「아직 받지 않았어요」로 바뀌어야 한다 — `nowMs`는
   // 분 단위 시계라 그대로 쓰면 칩이 최대 1분 늦어 같은 행의 두 자리가 다른 낱말을 말한다(웹 `useRerenderAt`과 같은 몫). 마감이 한 번 지난 뒤에만 실제
   // 시각을 읽는다(그 전에는 부른 쪽의 `nowMs` 그대로: 시험과 하니스가 시각을 못 박는다).
@@ -3113,15 +3141,15 @@ function TimelineInner({
   const bumpGrace = useCallback(() => setGraceTick(tick => tick + 1), []);
   useFireAt(nextUncollectedDeadlineMs(channelRuns, Date.now()), bumpGrace);
   const chipNowMs = graceTick === 0 ? nowMs : Math.max(nowMs, Date.now());
+  // 성공으로 끝난 일은 칩이 없다(#5382): `triggerChip`이 null을 돌려주면 그 메시지는 지도에 들지 않는다.
   const requestChips = useMemo(() => {
     const chips = new Map<string, TriggerChip>();
-    const context = {...requests, answerFor: (run: AgentRunProgress) => runAnswers.get(run.id.toLowerCase())};
     for (const [messageId, runs] of runsByMessage) {
-      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), chipNowMs, context);
+      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), chipNowMs, requests);
       if (chip) chips.set(messageId, chip);
     }
     return chips;
-  }, [runsByMessage, directory, chipNowMs, requests, runAnswers]);
+  }, [runsByMessage, directory, chipNowMs, requests]);
   const thoughtProgress = useMemo(() => {
     const byMessage = new Map<string, AgentRunProgress>();
     for (const [messageId, runs] of runsByMessage) {
@@ -3733,7 +3761,7 @@ function TimelineInner({
   const empty = messages.length === 0 && items.length === 0;
 
   if (status === 'loading' && empty) {
-    return withNotices(<LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />);
+    return withNotices(<LoadingState label={LOADING_LABEL} testID="timeline-loading" />);
   }
 
   if (status === 'ready' && empty) {
@@ -3780,6 +3808,8 @@ function TimelineInner({
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
       // the bottom, because the keyboard lifts this list's top edge out of sight.
       contentContainerStyle={contentStyle}
+      // 진입이 앉기 전의 목록은 그리지 않는다(진입 베일, 위 `entryVeiled`).
+      style={entryVeiled ? ENTRY_VEILED_STYLE : undefined}
       // `renderItem` closes over these, and a `FlatList` cell will happily keep
       // rendering with a stale closure otherwise. The measurement seam found
       // this the hard way: moving `anchorSeq` to another row left the wrapper on
@@ -3892,6 +3922,12 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {motionScope}
+      {/* 진입 베일이 서 있는 동안 목록 자리에 불러오는 화면을 잇는다(#5403) - 같은 문장이라 사람에게는 불러오는 중이 끝나고 목록이 바닥에 앉은 채 나타난다. */}
+      {entryVeiled ? (
+        <View style={styles.entryCover}>
+          <LoadingState label={LOADING_LABEL} testID="timeline-entry-veil" />
+        </View>
+      ) : null}
       {/* 위쪽 필 둘의 자리. 연결 띠가 목록 위에 뜨면 `topPillInset` 만큼 내려 띠 밑에 쌓인다(#4292). 필 둘은 이
           틀의 위 가장자리에서 각자 `top` 을 지므로, 틀을 내리면 둘이 함께 내려간다. 틀은 손을 받지 않는다. */}
       <View pointerEvents="box-none" style={[styles.topPills, {top: topPillInset}]} testID="timeline-top-pills">
@@ -3954,6 +3990,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   footer: {height: space.sm},
   /** 필이 떠 있을 틀. 목록과 같은 자리·같은 크기다. */
   pillFrame: {flex: 1},
+  /** 진입 베일이 서 있는 동안 목록을 덮는 불러오는 화면(#5403). 목록과 같은 자리·같은 크기이고, 손을 받는다: 보이지 않는 목록의 행이 눌리지 않게 한다. */
+  entryCover: {...StyleSheet.absoluteFill},
   /** 위쪽 필 둘의 틀. 틀의 `top` 이 연결 띠 밑으로 내려가는 양이고(#4292), 필은 이 틀 안에서 자기 `top` 을 진다. */
   topPills: {position: 'absolute', left: 0, right: 0, bottom: 0},
 });

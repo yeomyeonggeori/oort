@@ -876,6 +876,14 @@ export const messageKeys = [
   "settings.invite.guestInvitesPaused",
   "settings.notifications.alwaysDetail",
   "settings.notifications.checking",
+  "settings.notifications.phoneDelayDescription",
+  "settings.notifications.phoneDelayFiveMinutes",
+  "settings.notifications.phoneDelayLabel",
+  "settings.notifications.phoneDelayLoadFailed",
+  "settings.notifications.phoneDelayOff",
+  "settings.notifications.phoneDelayOneMinute",
+  "settings.notifications.phoneDelayRetry",
+  "settings.notifications.phoneDelaySaveFailed",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -990,7 +998,6 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
-  "timeline.triggerChip.jumpHint",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -2171,6 +2178,14 @@ export const argumentSpecs = {
   "settings.invite.guestInvitesPaused": {},
   "settings.notifications.alwaysDetail": {},
   "settings.notifications.checking": {},
+  "settings.notifications.phoneDelayDescription": {},
+  "settings.notifications.phoneDelayFiveMinutes": {},
+  "settings.notifications.phoneDelayLabel": {},
+  "settings.notifications.phoneDelayLoadFailed": {},
+  "settings.notifications.phoneDelayOff": {},
+  "settings.notifications.phoneDelayOneMinute": {},
+  "settings.notifications.phoneDelayRetry": {},
+  "settings.notifications.phoneDelaySaveFailed": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -2314,7 +2329,6 @@ export const argumentSpecs = {
   "timeline.thread.unreadChip": {
     "count": "number"
   },
-  "timeline.triggerChip.jumpHint": {},
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -3375,6 +3389,14 @@ export interface MessageArgs {
   "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.alwaysDetail": Record<string, never>;
   "settings.notifications.checking": Record<string, never>;
+  "settings.notifications.phoneDelayDescription": Record<string, never>;
+  "settings.notifications.phoneDelayFiveMinutes": Record<string, never>;
+  "settings.notifications.phoneDelayLabel": Record<string, never>;
+  "settings.notifications.phoneDelayLoadFailed": Record<string, never>;
+  "settings.notifications.phoneDelayOff": Record<string, never>;
+  "settings.notifications.phoneDelayOneMinute": Record<string, never>;
+  "settings.notifications.phoneDelayRetry": Record<string, never>;
+  "settings.notifications.phoneDelaySaveFailed": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
@@ -3489,7 +3511,6 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
-  "timeline.triggerChip.jumpHint": Record<string, never>;
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

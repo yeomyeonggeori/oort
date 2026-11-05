@@ -137,7 +137,7 @@ export function parseHostedRoutineLabel(
  * 넣는 지시문이라 화면 문장(해요체)이 아니다. 낱말 집합은 presets.test.ts 가 잠근다.
  */
 export const HOSTED_ROUTINE_TEMPLATE =
-  "oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 진행은 oort_run_event의 stage로 남기고 결과는 oort_run_complete의 body로 보낸다. 대화에는 결과, 막힌 점, 사람이 할 일만 쓰고 「확인했어요」 같은 빈 인사와 진행 중계는 쓰지 않는다. 직접 메시지를 올릴 때는 물어본 자리에 답한다(1:1 DM은 본류, 채널 최상위 멘션은 그 메시지의 thread, thread 안은 같은 thread).";
+  "oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 진행은 oort_run_event의 stage로 남기고 결과는 oort_run_complete의 body로 보낸다. 대화에는 결과, 막힌 점, 사람이 할 일만 쓰고 「확인했어요」 같은 빈 인사와 진행 중계는 쓰지 않는다. 직접 메시지를 올릴 때는 물어본 자리에 답한다(1:1 DM은 본류, thread 안은 같은 thread, 채널 최상위 멘션과 그룹 DM은 그 메시지 밑의 새 thread).";
 
 export const HOSTED_PRESETS: readonly HostedPreset[] = [
   {

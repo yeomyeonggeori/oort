@@ -147,6 +147,7 @@ async fn reset_instance(su: &PgPool) {
     }
 }
 
+#[derive(Clone)]
 struct Tenant {
     workspace_id: Uuid,
     owner_id: Uuid,
@@ -774,8 +775,9 @@ async fn say_at_top_level(pool: &PgPool, t: &Tenant, author: Uuid, text: &str) -
 ///
 /// The same place and the same rollup as the managed worker, the REST callback and the Agent Port's
 /// `oort_run_complete`: `root_id` is the thread's root, `reply_to_id` the message answered, and the answer
-/// counts as a reply (the root's 「답글 N개」 moves, `thread.updated` is published). A request made at the
-/// top level is answered at the top level — the control that keeps this from being "always thread".
+/// counts as a reply (the root's 「답글 N개」 moves, `thread.updated` is published). A request made at a
+/// channel's top level is answered in a new thread under it (#4646), and one made in a 1:1 DM stays in the
+/// main flow — the control that keeps this from being "always thread".
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn an_answer_to_a_request_made_in_a_thread_lands_in_that_thread() {
@@ -869,8 +871,77 @@ async fn an_answer_to_a_request_made_in_a_thread_lands_in_that_thread() {
     .unwrap();
     assert_eq!(
         place,
-        (None, Some(top)),
-        "a top-level request is answered in the main flow (the thread-under-it step is #4646)"
+        (Some(top), Some(top)),
+        "a top-level request is answered in a new thread under it (#4646)"
+    );
+    let rollup: (i32, Option<i64>) = sqlx::query_as(
+        "SELECT reply_count, last_reply_seq FROM thread WHERE workspace_id = $1 AND root_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(top)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        rollup.0, 1,
+        "the answer is the new thread's first reply, and the request's 「답글 N개」 counts it"
+    );
+
+    // A request in a 1:1 DM stays in the main flow, quoting it: the DM is the work room.
+    let dm = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, dm_key) VALUES ($1, $2, 'dm', $3)")
+        .bind(dm)
+        .bind(t.workspace_id)
+        .bind(format!("dm-{}", dm.simple()))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(t.workspace_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    for member in [t.owner_id, t.agent_id] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3) \
+             ON CONFLICT (channel_id, member_id) DO NOTHING",
+        )
+        .bind(t.workspace_id)
+        .bind(dm)
+        .bind(member)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    let in_dm = Tenant {
+        channel_id: dm,
+        ..t.clone()
+    };
+    let (_, asked_in_dm) = enqueue(
+        &pool,
+        &in_dm,
+        t.owner_id,
+        "human",
+        "@oort-helper 여기서 물어요",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    let place: (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT root_id, reply_to_id FROM message \
+          WHERE workspace_id = $1 AND author_member_id = $2 AND reply_to_id = $3",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .bind(asked_in_dm)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        place,
+        (None, Some(asked_in_dm)),
+        "a 1:1 DM request is answered in the main flow, quoting it"
     );
 }
 

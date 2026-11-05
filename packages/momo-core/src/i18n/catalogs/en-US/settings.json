@@ -70,6 +70,14 @@
   "settings.aiLimits.loading": "Loading usage limits.",
   "settings.notifications.alwaysDetail": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications.",
   "settings.notifications.checking": "Checking your notification settings.",
+  "settings.notifications.phoneDelayLabel": "Delay phone alerts while I use the desktop",
+  "settings.notifications.phoneDelayDescription": "While you use the web or desktop app, phone alerts wait for the time you choose, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed. The server only learns that you are active, and other members can't see it.",
+  "settings.notifications.phoneDelayOff": "Off",
+  "settings.notifications.phoneDelayOneMinute": "1 min",
+  "settings.notifications.phoneDelayFiveMinutes": "5 min",
+  "settings.notifications.phoneDelayLoadFailed": "Couldn't load the phone alert delay.",
+  "settings.notifications.phoneDelayRetry": "Try again",
+  "settings.notifications.phoneDelaySaveFailed": "Couldn't save the phone alert delay. Try again in a moment.",
   "settings.notifications.threadReplyName": "New replies in followed threads",
   "settings.notifications.threadReplyDescription": "New replies from others in threads you follow."
 }

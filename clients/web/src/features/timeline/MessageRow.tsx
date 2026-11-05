@@ -149,7 +149,6 @@ import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest"
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
 import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
-import type { AnswerRef } from "@momo/core/features/agents/triggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -321,7 +320,6 @@ export function MessageRow({
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
-  runAnswers,
   showThought = false,
 }: {
   message: Message;
@@ -430,11 +428,6 @@ export function MessageRow({
    * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
    */
   runStatus?: readonly AgentRunProgress[];
-  /**
-   * #4619 — 위 run들의 **답 메시지**(run id 소문자 → id·seq). 「답함 ✓」 칩이 누르면 답으로 가는 길이다.
-   * 목록이 한 번 색인해 넣는다(`Timeline`). 없거나 모르는 run이면 칩은 누르는 것이 아니다.
-   */
-  runAnswers?: ReadonlyMap<string, AnswerRef>;
   /** 요청 스레드 또는 에이전트 1:1 DM에서만 생각 줄을 세워요. */
   showThought?: boolean;
 }) {
@@ -1084,8 +1077,6 @@ export function MessageRow({
               <MessageTriggerChip
                 runs={runStatus}
                 directory={directory}
-                {...(runAnswers !== undefined ? { runAnswers } : {})}
-                {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
                 onOpenBundle={onOpenThread || runStatus.some((run) => run.phase === "awaiting_approval" || run.phase === "paused") ? (opener, runIds) => {
                   const awaiting = runStatus.some((run) => runIds.includes(run.id) && (run.phase === "awaiting_approval" || run.phase === "paused"));
                   if (awaiting) openRunStage(opener, runIds);

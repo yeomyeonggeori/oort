@@ -5935,6 +5935,54 @@ export const catalog: MessageCatalog = {
       "value": "알림 설정을 확인하는 중이에요."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱을 쓰는 동안은 폰 알림을 정한 시간만큼 늦춰요. 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않아요. 서버가 아는 것은 쓰고 있다는 사실뿐이고, 다른 멤버에게는 보이지 않아요."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5분"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "데스크탑을 쓰는 동안 폰 알림 늦추기"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기 설정을 불러오지 못했어요."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1분"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -6710,12 +6758,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [

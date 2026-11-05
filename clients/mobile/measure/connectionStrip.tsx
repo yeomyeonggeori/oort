@@ -18,7 +18,7 @@ import {fetchWithDeadline} from '@momo/core/lib/http';
 import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useRef, useState} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {AppState, Settings, StyleSheet, Text, View} from 'react-native';
 import {useStyles} from '../src/design/theme';
 import {font, space, type Palette} from '../src/design/tokens';
 import {
@@ -40,6 +40,10 @@ import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 //   unreachable   서버에 닿지 못함: 서로 다른 요청 셋이 응답 없이 실패 → 홈 띠 + 「지금 다시 연결」 단추
 //   realtime      실시간만 끊김: 홈에는 띠가 **없고** 대화 화면 띠만 「실시간 연결이 끊겼어요」 (결정 ②)
 //   flap          4초에 오프라인 → 12초에 돌아옴: 띠가 서고(오프라인) → 확인 표시 2초 → 걷힌다 (Maestro `5222-shell-connection-strip`)
+//   return        (#5403) 앱이 뒤에 가 있는 동안 소켓이 끊기고, 돌아오면 전송이 하는 일(`resume` → 0.4초 뒤 `connected`)을 흉내 낸다. 띠가 한 번이라도
+//                 그려지면 안 된다. 진짜 AppState 로 재려고 사람이 앱을 뒤로 보냈다 가져온다:
+//                   xcrun simctl launch <UDID> com.apple.Preferences   (뒤로)  →  14초 뒤  xcrun simctl launch <UDID> app.momo.ios   (앞으로)
+//                 장면이 40초에 `-momoGapSink` 로 띠가 서 있던 구간(없으면 빈 배열)과 앱 상태 전이를 보낸다(`scenario: 'return'`).
 //
 // 위쪽은 홈 화면의 머리·목록 자리를 흉내 낸 틀이고 그 안의 띠가 진짜다. 아래쪽은 진짜 대화 머리다. 이 표면은 서버도 소켓도 없다: 소켓은
 // 전송이 부르는 `feedRef` 로 먹이고 기기는 NetInfo 를 덮어 쓴다. 홈·받은함·에이전트 목록에 띠가 실제로 서는지는 시험
@@ -109,6 +113,8 @@ function Scene({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {band} = useConnectionBand();
+  const bandRef = useRef(band);
+  bandRef.current = band;
   const started = useRef(false);
 
   // 공급자의 효과(`feedRef` 를 채운다)는 이 자식의 효과보다 **나중에** 돈다: 사건은 한 박자 뒤에 보낸다.
@@ -116,6 +122,7 @@ function Scene({
     if (started.current) return;
     started.current = true;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const cleanups: Array<() => void> = [];
     const later = (ms: number, run: () => void) => timers.push(setTimeout(run, ms));
     later(50, () => feedRef.current({kind: 'raw', status: 'connected'}));
     if (which === 'offline') later(150, () => network.emit(false));
@@ -138,6 +145,44 @@ function Scene({
         feedRef.current({kind: 'terminal'});
       });
     }
+    if (which === 'return') {
+      // 전송이 하는 일을 흉내 낸다: 뒤로 가면 소켓이 끊기고, 앞으로 돌아오면 다시 열어(`resume`) 곧 붙는다. 띠에 그려진 톤의 **전이**만 적는다.
+      const t0 = Date.now();
+      const marks: Array<{t: number; what: string}> = [];
+      const bandLog: Array<{t: number; tone: string | null}> = [];
+      let lastTone: string | null = null;
+      let wentBack = false;
+      const sampler = setInterval(() => {
+        const tone = bandRef.current?.tone ?? null;
+        if (tone !== lastTone) {
+          lastTone = tone;
+          bandLog.push({t: Date.now() - t0, tone});
+        }
+      }, 25);
+      const subscription = AppState.addEventListener('change', status => {
+        marks.push({t: Date.now() - t0, what: `app-${status}`});
+        if (status === 'background') {
+          wentBack = true;
+          feedRef.current({kind: 'raw', status: 'disconnected'});
+        } else if (status === 'active' && wentBack) {
+          wentBack = false;
+          feedRef.current({kind: 'resume'});
+          later(400, () => feedRef.current({kind: 'raw', status: 'connected'}));
+        }
+      });
+      later(40_000, () => {
+        clearInterval(sampler);
+        const sink = Settings.get('momoGapSink');
+        if (typeof sink === 'string' && sink !== '') {
+          void fetch(`http://${sink}/return`, {
+            method: 'POST',
+            body: JSON.stringify({scenario: 'return', marks, bandLog, bandShown: bandLog.filter(entry => entry.tone !== null).length}),
+          }).catch(() => undefined);
+        }
+      });
+      cleanups.push(() => clearInterval(sampler));
+      cleanups.push(() => subscription.remove());
+    }
     if (which === 'flap') {
       later(FLAP_OFFLINE_AT_MS, () => network.emit(false));
       later(FLAP_BACK_AT_MS, () => {
@@ -149,6 +194,7 @@ function Scene({
     }
     return () => {
       for (const timer of timers) clearTimeout(timer);
+      for (const cleanup of cleanups) cleanup();
     };
   }, [which, network]);
 

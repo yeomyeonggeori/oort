@@ -182,6 +182,22 @@ describe("② 「끊김」이 보였다가 돌아오면 정확히 2초 「다시
     advance(1);
     expect(card()).toBeNull();
   });
+
+  // #5403: 폰과 같은 규칙인지 확인한다 - 깨움이 늦게 울려도(절전·멈춘 타이머) 복구 표시는 보내기 같은 사람의 행동을 기다리지 않고 거두어진다.
+  it("깨움이 5분 늦게 울려도 복구 표시는 저절로 거두어진다(다음 사건을 기다리지 않는다)", () => {
+    mountHealthy();
+    setStatus("disconnected");
+    advance(10_000);
+    expect(card()!.dataset.tone).toBe("down");
+    setStatus("connected");
+    expect(card()!.dataset.tone).toBe("recovered");
+    // 시각만 5분 뛴다(깨움 타이머는 아직 울리지 않았다). 상태는 그대로이고, 타이머가 울리는 순간 한 번의 판정으로 거둔다.
+    vi.setSystemTime(Date.now() + 300_000);
+    expect(card()!.dataset.tone).toBe("recovered");
+    advance(2_000);
+    expect(card()).toBeNull();
+    expect(probe().dataset.recovered).toBe("false");
+  });
 });
 
 describe("③ 기기 오프라인은 즉시, 그리고 막는다", () => {
