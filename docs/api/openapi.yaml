@@ -17991,8 +17991,9 @@ components:
                 `guest` role asked for by `POST …/invites`, or carried by a usable
                 code given to `POST …/invites/{inviteId}/regenerate`, `POST
                 …/invites/redeem` or `POST /v1/join`); ADR-0151 amendment 7 (#5223,
-                a refusal that comes from the file archive, on every route that
-                reads or writes it): 503 `drive_not_configured` (this instance has
+                a refusal that comes from the file archive, on the attachment and
+                avatar routes, which answer through one archive error table): 503
+                `drive_not_configured` (this instance has
                 no usable archive; an operator has to fix it, so no `Retry-After`),
                 502 `drive_access_denied` (the archive refused the instance's own
                 credentials; no `Retry-After`) and 502 `drive_upstream_failed` (the
