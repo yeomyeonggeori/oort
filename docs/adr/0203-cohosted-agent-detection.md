@@ -1192,8 +1192,9 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 3. **이름 정규화는 문자열 변환뿐이다.** `H/agent/agent_init.py:474`가 부르는 `normalize_model_for_provider`는 `anthropic`에 대해 `H/hermes_cli/model_normalize.py:35·225-227`(`_DOT_TO_HYPHEN_PROVIDERS`)로 접두를 벗기고 점을 하이픈으로 바꿀 뿐 목록과 견주지 않는다(목록으로 접두를 고치는 길 `_CATALOGUE_PREFIX_REPAIR_PROVIDERS`는 `nvidia` 하나다).
 4. **그대로 API에 보낸다.** `H/agent/anthropic_adapter.py:668·676`의 `build_anthropic_kwargs`가 `normalize_model_name`(접두 `anthropic/`를 벗기고 점을 하이픈으로)의 결과를 `kwargs["model"]`에 넣는다.
 5. **Hermes가 이 id를 직접 안다.** `H/agent/anthropic_adapter.py:106`의 `_BETWEEN_TOOLS_OFF_CLAUDE_SUBSTRINGS = ("claude-sonnet-5-5", "claude-sonnet-5.5")`이고, `_thinking_kwargs`(`:616`)는 사고를 끌 때 이 계열에 `{"thinking": {"type": "between_tools"}}`를 보낸다(Anthropic의 Sonnet 5.5 문서가 정한 형식이다: `disabled`는 400). 최대 출력(128K)과 문맥 길이(1M)는 접두 `claude-sonnet-5`로 풀린다(`:123-143`, `H/agent/model_metadata.py:294`).
+6. **예비 경로도 같다.** 예비로 넘어가는 `H/agent/chat_completion_helpers.py:2055`의 `try_activate_fallback`은 `H/agent/route_binding.py:18-52`의 `bind_route_entry`로 클라이언트를 바꾸고, `model`을 `normalize_model_for_provider`(위 3)로만 고쳐 `agent.model`에 넣는다(`resolve_provider_client`가 돌려주는 기본 모델은 버린다). 후보를 건너뛰는 규칙 `_should_skip_fallback_candidate`(`:1944`)는 이미 못 쓰는 것으로 표시된 후보·자격 거절·풀 소진·방금 실패한 것과 같은 백엔드만 보고 정적 목록을 보지 않는다. 이어지는 요청은 위 4의 `build_anthropic_kwargs`를 지난다. 이 증보에서 `claude-sonnet-5-5`는 예비 모델이라 이 길이 실제로 쓰는 경로다.
 
-결론: provider `anthropic`은 정적 목록 밖 id를 받아 그대로 API에 보낸다. 거르는 곳이 없고 이 id는 Hermes가 직접 다룬다. [V: 소스 읽기. 실제 API 왕복은 확인하지 않았다 — N9]
+결론: provider `anthropic`은 정적 목록 밖 id를 받아 그대로 API에 보낸다(주 모델로도 예비로도). 거르는 곳이 없고 이 id는 Hermes가 직접 다룬다. [V: 소스 읽기. 실제 API 왕복은 확인하지 않았다 — N9]
 
 ### N4. 결정 — 목록 밖 id는 이 규칙으로만 렌더러에 더한다
 
