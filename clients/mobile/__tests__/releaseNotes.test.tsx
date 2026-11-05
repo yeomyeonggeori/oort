@@ -231,7 +231,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     expect(within(sheet).getByText('업데이트 소식')).toBeTruthy();
     expect(screen.getByTestId('release-notes-sheet-version')).toHaveTextContent('버전 0.1.41 · 2026-10-31');
     expect(within(sheet).getByText(koText.formatMessage(REAL.summary))).toBeTruthy();
-    // 이 화면(폰)에서 보이는 변화만 제목으로: 데스크탑 전용(c)은 없고, 네 줄까지 불릿으로 보이고 나머지는 「더보기」 뒤에 있다.
+    // 이 화면(폰)에서 보이는 변화만 제목으로: 데스크탑 전용(c)은 없고, 네 줄까지 불릿으로 보이고 나머지는 「더 보기」 뒤에 있다.
     const titles = within(screen.getByTestId('release-notes-sheet-titles'));
     for (const id of ['typing', 'channelNotifications', 'composerHeight', 'phoneConversation']) {
       expect(titles.getByText(koText.formatMessage(realItem(id).title))).toBeTruthy();
@@ -239,7 +239,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     expect(titles.queryByText(koText.formatMessage(realItem('photoViewer').title))).toBeNull();
     expect(titles.queryByText(koText.formatMessage(realItem('settings').title))).toBeNull();
     expect(titles.getAllByTestId('release-notes-bullet')).toHaveLength(4);
-    expect(within(screen.getByTestId('release-notes-more')).getByText('더보기')).toBeTruthy();
+    expect(within(screen.getByTestId('release-notes-more')).getByText('더 보기')).toBeTruthy();
     // 「그 밖에 N가지」 문장은 없다(#5298).
     expect(within(sheet).queryByText(/그 밖에/)).toBeNull();
     expect(lastSeenReleaseNote()).toBeNull();
@@ -250,7 +250,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     expect(mmkvStore.get(NON_SECRET_KEYS.releaseNotesSeen)).toBe('0.1.41');
   });
 
-  it('「더보기」를 누르면 나머지가 그 자리에서 이어서 펼쳐지고, 단추는 사라지며, VoiceOver 초점은 처음 새 항목으로 간다 (#5298)', async () => {
+  it('「더 보기」를 누르면 나머지가 그 자리에서 이어서 펼쳐지고, 단추는 사라지며, VoiceOver 초점은 처음 새 항목으로 간다 (#5298)', async () => {
     render(withLocale(host('3058')));
     const sheet = await screen.findByTestId('release-notes-sheet');
     const rows = () =>
@@ -261,7 +261,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
       id => 'release-notes-title-' + id,
     );
     expect(rows()).toEqual(first);
-    // 눌리는 행이고 접힌 상태를 보조기술에 말한다. 낭독이 「더보기, 접힘, 버튼」으로 읽는다.
+    // 눌리는 행이고 접힌 상태를 보조기술에 말한다. 낭독이 「더 보기, 접힘, 버튼」으로 읽는다.
     const more = screen.getByTestId('release-notes-more');
     expect(more.props.accessibilityRole).toBe('button');
     expect(more.props.accessibilityState).toMatchObject({expanded: false});
@@ -286,7 +286,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     expect(lastSeenReleaseNote()).toBeNull();
   });
 
-  it('항목이 4개 이하이면 「더보기」는 서지 않고 네 줄이 모두 불릿으로 보인다 (경계 4개, #5298)', async () => {
+  it('항목이 4개 이하이면 「더 보기」는 서지 않고 네 줄이 모두 불릿으로 보인다 (경계 4개, #5298)', async () => {
     // V41 의 앞 다섯 항목 중 데스크탑 전용(photoViewer)을 빼면 폰에서 보이는 것은 정확히 네 개다.
     const four: ReleaseNote = {...V41, items: V41.items.slice(0, 5)};
     render(
@@ -299,7 +299,7 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     expect(titles.getAllByTestId('release-notes-bullet')).toHaveLength(4);
     expect(titles.getAllByTestId(/^release-notes-title-/)).toHaveLength(4);
     expect(screen.queryByTestId('release-notes-more')).toBeNull();
-    expect(within(sheet).queryByText('더보기')).toBeNull();
+    expect(within(sheet).queryByText('더 보기')).toBeNull();
     expect(within(sheet).queryByText(/그 밖에/)).toBeNull();
     expect(a11y.setAccessibilityFocus).not.toHaveBeenCalled();
   });
