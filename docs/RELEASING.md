@@ -418,8 +418,11 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
 2. **설정을 해시로 대조한다(값 미출력).** 운영 `HERMES_CONFIG_B64`를 디코드한 바이트의 sha256만 계산하고(`base64 -d | shasum -a 256`, 내용은 화면에 내지 않는다)
    저장소가 같은 입력으로 다시 만드는 해시와 비교한다. 연결 모드 서비스는 운영이 쓰는 모델 선택으로
    `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml --sha256`
-   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로 `HERMES_CONFIG_B64`를 만든다
-   (`… --connector-base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 네 가지 밖이면 멈춘다: 카탈로그에 더하는 결정(ADR 증보)이 먼저다.
+   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 팀 공용 기본 모드 서비스(#5323)는
+   `python3 infra/hermes/render_model_config.py --auth claude-oauth --fallback codex-oauth --base infra/hermes/config.yaml --sha256`
+   (`--catalog`의 `default/…` 줄. 모델 구간 없는 기본 설정은 `config.yaml`의 해시 그대로)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로
+   `HERMES_CONFIG_B64`를 만든다(`… --connector-base … | base64 | tr -d '\n'`, 기본 모드는 `… --base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 밖이면 멈춘다:
+   카탈로그에 더하는 결정(ADR 증보)이 먼저다([ADR-0203 증보 2026-11-05](adr/0203-cohosted-agent-detection.md)가 팀 공용 기본값과 정적 목록 밖 id의 규칙을 적는다).
 3. **볼륨 `.env`의 이름만 읽는다.** 새 게이트는 볼륨 `.env`에 허용 목록 밖의 이름이 있거나, 허용된 이름의 값에 줄바꿈이 있거나, `.op.env`가 있거나,
    `/opt/data/profiles/` 아래에 항목이 하나라도 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
    `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
