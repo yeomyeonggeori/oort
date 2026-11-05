@@ -44,14 +44,14 @@ use std::sync::Arc;
 use momo_db::sqlx;
 use momo_db::{with_tenant_tx, PgPool};
 use momo_outbox::{
-    backoff_seconds, claim_push_candidate_batch, mark_done, mark_failed,
+    backoff_seconds, claim_push_candidate_batch, defer_push_candidate, mark_done, mark_failed,
     reclaim_stuck_push_candidates, requeue, ClaimedPushCandidate,
 };
 use momo_push::{
-    claim_dispatch, is_dispatch_settled, judge_candidate_targets, settle_dispatch,
-    settle_dispatch_and_invalidate, settle_relay_refusal, unread_badge, DispatchClaim,
-    DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate, PushDispatch, PushDispatcher,
-    RefusalOutcome, RelayRefusal, SettleOutcome,
+    claim_dispatch, delay_applies, is_dispatch_settled, judge_candidate_targets, refine_targets,
+    settle_dispatch, settle_dispatch_and_invalidate, settle_relay_refusal, unread_badge,
+    DispatchClaim, DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate, PushDispatch,
+    PushDispatcher, Refined, RefusalOutcome, RelayRefusal, SettleOutcome,
 };
 use uuid::Uuid;
 
@@ -106,6 +106,15 @@ pub struct DrainStats {
     /// the relay, that found the server-wide budget spent or that waited too long to be sent
     /// (ADR-0206 D11 and 증보 4 G2·G3, [`PushDrain::drain_system_once`]).
     pub held_back: usize,
+    /// Candidates handed back to `pending` until a later `available_at` because some target was held
+    /// for the member's desktop activity (ADR-0206 D4). A deferral is not a retry: `attempts` is given
+    /// back ([`momo_outbox::defer_push_candidate`]).
+    pub deferred: usize,
+    /// Targets held for desktop activity this pass.
+    pub activity_held: usize,
+    /// Targets dropped because the member read the message while their desktop was in use: no push,
+    /// no dispatch row (ADR-0206 D4, 「취소」).
+    pub activity_cancelled: usize,
 }
 
 /// What became of one target.
@@ -231,6 +240,9 @@ impl PushDrain {
                     total.requeued += stats.requeued;
                     total.failed += stats.failed;
                     total.held_back += stats.held_back;
+                    total.deferred += stats.deferred;
+                    total.activity_held += stats.activity_held;
+                    total.activity_cancelled += stats.activity_cancelled;
                     if claimed < batch_size as usize {
                         self.log_bulk_changes();
                         return (total, None);
@@ -284,10 +296,24 @@ impl PushDrain {
             return;
         }
 
+        // The judgment's tail (ADR-0206 D4, D16 step 6): a phone push for a person whose desktop is in
+        // use is held for their delay, and cancelled if they read it meanwhile.
+        let refined = self.apply_phone_delay(&row, &candidate, targets).await;
+        stats.activity_held += refined.held;
+        stats.activity_cancelled += refined.cancelled;
+        if refined.held > 0 || refined.cancelled > 0 {
+            tracing::info!(
+                outbox_id = row.id,
+                held = refined.held,
+                cancelled = refined.cancelled,
+                "phone push held or cancelled for the member's desktop activity"
+            );
+        }
+
         let collapse = candidate.collapse_id();
         let mut transient: Vec<String> = Vec::new();
 
-        for target in targets {
+        for target in refined.send {
             match self
                 .dispatch_one(workspace_id, &candidate, &collapse, &target)
                 .await
@@ -299,13 +325,89 @@ impl PushDrain {
             }
         }
 
-        if transient.is_empty() {
-            self.settle_outbox_done(row.id, stats).await;
-        } else {
+        if !transient.is_empty() {
             // Retry the whole candidate: settled targets are skipped on
-            // redelivery, so only the genuinely failed ones are re-sent.
+            // redelivery, so only the genuinely failed ones are re-sent. A retry **wins over a
+            // deferral** (ADR-0206 D4): the held targets are not recorded anywhere, so the same
+            // redelivery judges them again on its own clock.
             self.requeue_candidate(&row, &transient.join("; "), stats)
                 .await;
+        } else if let Some(until) = refined.hold_until {
+            self.defer_candidate(&row, until, stats).await;
+        } else {
+            self.settle_outbox_done(row.id, stats).await;
+        }
+    }
+
+    /// The phone delay (ADR-0206 D4) on one candidate's judged targets. **Fails open**: if the tail
+    /// cannot read its facts, every target goes out now (a delayed push must never be a lost one) and
+    /// the failure is a warning with the candidate's id. No transaction is opened when no target is a
+    /// phone push of a delayable reason.
+    async fn apply_phone_delay(
+        &self,
+        row: &ClaimedPushCandidate,
+        candidate: &PushCandidate,
+        targets: Vec<JudgedTarget>,
+    ) -> Refined {
+        if !delay_applies(candidate, &targets) {
+            return Refined::untouched(targets);
+        }
+        let workspace_id = row.workspace_id;
+        let created_at = row.created_at;
+        let tail_candidate = candidate.clone();
+        let tail_targets = targets.clone();
+        match with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                refine_targets(
+                    conn,
+                    workspace_id,
+                    &tail_candidate,
+                    created_at,
+                    &tail_targets,
+                )
+                .await
+            })
+        })
+        .await
+        {
+            Ok(refined) => refined,
+            Err(error) => {
+                tracing::warn!(
+                    outbox_id = row.id,
+                    error = %error,
+                    "phone delay could not read its facts; sending without a delay"
+                );
+                Refined::untouched(targets)
+            }
+        }
+    }
+
+    /// Hand the candidate back to `pending` until the earliest hold expires, without spending a retry
+    /// ([`momo_outbox::defer_push_candidate`]).
+    async fn defer_candidate(
+        &self,
+        row: &ClaimedPushCandidate,
+        until: chrono::DateTime<chrono::Utc>,
+        stats: &mut DrainStats,
+    ) {
+        match defer_push_candidate(&self.pool, row.id, until).await {
+            Ok(true) => {
+                stats.deferred += 1;
+                tracing::info!(
+                    outbox_id = row.id,
+                    available_at = %until,
+                    "push candidate deferred for the member's desktop activity"
+                );
+            }
+            Ok(false) => tracing::warn!(
+                outbox_id = row.id,
+                "push candidate was no longer ours to defer"
+            ),
+            Err(error) => tracing::error!(
+                outbox_id = row.id,
+                error = %error,
+                "failed to defer push candidate"
+            ),
         }
     }
 

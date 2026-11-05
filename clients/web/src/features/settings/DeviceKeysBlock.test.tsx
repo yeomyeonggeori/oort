@@ -247,8 +247,8 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
   // #5242: 기기 키 목록을 못 읽으면 옛 「기기 키 목록을 불러오지 못했어요. 다시 시도해 주세요.」 대신 원인을 말하는 한 줄이 선다.
   it("기기 키 목록을 못 읽으면 제목 뒤에 원인이 붙은 한 줄이 서고, 다시 시도가 목록을 다시 읽는다", async () => {
     const cases: [Error, string][] = [
-      [new NetworkError("unreachable", 15_000), "기기 키 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "기기 키 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "기기 키 목록을 불러오지 못했어요. 서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "기기 키 목록을 불러오지 못했어요. 문제가 생겼어요."],
     ];
     for (const [error, sentence] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);

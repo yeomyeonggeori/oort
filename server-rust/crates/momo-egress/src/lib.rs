@@ -235,4 +235,70 @@ mod tests {
         );
         assert_eq!(guard.precheck_host("fast.example").await, Ok(()));
     }
+
+    /// A lookup that gives the same answer every time.
+    struct FixedLookup(IpAddr);
+
+    impl HostLookup for FixedLookup {
+        fn lookup(
+            &self,
+            _host: String,
+        ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<IpAddr>>> + Send>> {
+            let answer = self.0;
+            Box::pin(async move { Ok(vec![answer]) })
+        }
+    }
+
+    fn guard_answering(address: &str) -> EgressGuard {
+        EgressGuard::new(
+            EgressPolicy::default(),
+            Arc::new(FixedLookup(address.parse().unwrap())),
+            Duration::from_secs(2),
+        )
+    }
+
+    /// #4874: the registry-aligned IPv6 list reaches both paths a provider call
+    /// can take. A literal never meets a resolver, so `precheck_host` decides
+    /// it; a name is decided by what it resolves to, through the same
+    /// `resolve_vetted` the connect-time resolver runs. What the registry marks
+    /// globally reachable is not wrongly refused on either path.
+    #[tokio::test]
+    async fn the_ipv6_registry_list_holds_on_the_literal_and_the_resolved_path() {
+        let refused = [
+            "3fff::1",
+            "5f00::1",
+            "100:0:0:1::1",
+            "2001:2::1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a9fe:a9fe",
+        ];
+        for address in refused {
+            assert_eq!(
+                guard_answering("93.184.216.34")
+                    .precheck_host(&format!("[{address}]"))
+                    .await,
+                Err(EgressDenied::NonPublicAddress),
+                "literal [{address}]"
+            );
+            assert_eq!(
+                guard_answering(address).precheck_host("llm.example").await,
+                Err(EgressDenied::NonPublicAddress),
+                "llm.example resolving to {address}"
+            );
+        }
+        for address in ["2001:4:112::1", "2001:20::1", "64:ff9b::808:808"] {
+            assert_eq!(
+                guard_answering("93.184.216.34")
+                    .precheck_host(&format!("[{address}]"))
+                    .await,
+                Ok(()),
+                "literal [{address}]"
+            );
+            assert_eq!(
+                guard_answering(address).precheck_host("llm.example").await,
+                Ok(()),
+                "llm.example resolving to {address}"
+            );
+        }
+    }
 }

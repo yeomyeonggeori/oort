@@ -690,6 +690,32 @@ mod tests {
         );
     }
 
+    /// ADR-0206 D4 (#4497): the activity heartbeat says "a web or desktop client of *mine* is in use",
+    /// an act an agent does not have. The path is absent from the table for every verb, so the
+    /// middleware refuses an agent bearer before routing — the *first* of the route's two layers (the
+    /// handler's `require_human` is the second, with its own test in
+    /// `momo-server/tests/presence_activity_conformance_pg.rs`).
+    #[test]
+    fn the_activity_heartbeat_route_is_closed_to_agents() {
+        let path = format!("/v1/workspaces/{WS}/presence/activity");
+        for method in ["PUT", "DELETE", "POST", "GET", "PATCH"] {
+            assert_eq!(
+                required_agent_scope(method, &path),
+                None,
+                "{method} {path} must stay closed to agents"
+            );
+        }
+        // Control: an open sibling resolves, so the `None`s above are the table's answer for
+        // `presence/activity`, not a shape the matcher can no longer read.
+        assert_eq!(
+            required_agent_scope(
+                "POST",
+                &format!("/v1/workspaces/{WS}/channels/{RUN}/messages")
+            ),
+            Some(SCOPE_MESSAGES_WRITE)
+        );
+    }
+
     #[test]
     fn the_method_comparison_is_case_insensitive_like_swift() {
         assert_eq!(

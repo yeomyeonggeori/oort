@@ -4,9 +4,12 @@
 //! started until each earlier check passed** (the owner check,
 //! `ControlLoop::require_owner`, comes before all of them):
 //!
-//! 1. the label, which becomes the first prompt, is not an adapter command
-//!    ([`policy::check_prompt`]); the host is under its session limit; a
-//!    resume does not name a session this host already runs;
+//! 1. the first prompt — a new task's signed prompt, an old-style spawn's
+//!    label, or for a resume the host's own fixed sentence
+//!    ([`policy::RESUME_FIRST_PROMPT`], #5338; the label only when the owner
+//!    signed it) — is not an adapter command ([`policy::check_prompt`]); the
+//!    host is under its session limit; a resume does not name a session this
+//!    host already runs;
 //! 2. `shell` refused ([`policy::check_remote_tool`]);
 //! 3. the tool must be in the host allowlist, which alone decides the binary
 //!    and its arguments ([`policy::launch_spec`]);
@@ -223,7 +226,8 @@ struct PendingPermission {
 struct SessionHandle {
     commands: mpsc::Sender<Command>,
     task: JoinHandle<()>,
-    /// The spawn label, sent as the first prompt once the spawn ack landed.
+    /// The first prompt (see [`SessionManager::spawn`]), sent once the spawn
+    /// ack landed.
     initial_prompt: Option<String>,
 }
 
@@ -326,25 +330,37 @@ impl SessionManager {
 
     /// Open a session for a dispatched spawn. On success the server session
     /// exists and is `running`, the agent is in its fixed mode, and **no prompt
-    /// has been sent**: [`Self::activate`] sends the spawn label once the spawn
+    /// has been sent**: [`Self::activate`] sends the first prompt once the spawn
     /// ack has landed (the server only accepts that ack while the session is
     /// still `running`).
     pub async fn spawn(
         &mut self,
         control: &WorkControl,
         signed_folder: Option<&str>,
+        owner_confirmed_label: bool,
     ) -> Result<Uuid, Refusal> {
         let (Some(tool), Some(label)) = (control.payload_str("tool"), control.payload_str("label"))
         else {
             return Err(Refusal::InvalidControl);
         };
-        // The first prompt: the owner's whole prompt for a new task (T5), the
-        // label for a resume. Never an adapter command either way.
+        // The first prompt (never an adapter command, whichever it is):
+        //  * a new task (T5): the owner's whole signed prompt;
+        //  * a resume — the server pre-allocated its session, `new_work` is
+        //    off — #5338 (ADR-0188 §8.12): the host's own fixed sentence. The
+        //    label a resume carries is the title its session's creator gave
+        //    it, which can be another member's text, so it is the first
+        //    prompt only when the owner signed it and this host verified the
+        //    signature (`owner_confirmed_label`, set by the control loop);
+        //  * an old-style spawn with no session yet: its label, which is the
+        //    owner's own — the server withholds every other requester's.
         let new_work = control.payload.get("prompt").is_some();
+        let resume = !new_work && control.session_id.is_some();
         let first_prompt = if new_work {
             control
                 .payload_str("prompt")
                 .ok_or(Refusal::InvalidControl)?
+        } else if resume && !owner_confirmed_label {
+            policy::RESUME_FIRST_PROMPT
         } else {
             label
         };
@@ -530,7 +546,7 @@ impl SessionManager {
         Ok(session_id)
     }
 
-    /// Send the spawn label as the first prompt (once).
+    /// Send the first prompt chosen at [`Self::spawn`] (once).
     pub async fn activate(&mut self, session_id: Uuid) {
         let Some(handle) = self.sessions.get_mut(&session_id) else {
             return;

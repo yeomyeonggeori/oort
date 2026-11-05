@@ -1509,6 +1509,100 @@ async fn the_production_notifier_role_reads_thread_follow_and_writes_nothing_the
     db.finish().await;
 }
 
+/// ADR-0206 D4 / #4497 (migration 174): the judgment's Rust tail reads `member_activity`, so the
+/// production notifier holds **SELECT and nothing else** on it. The write is the API's (`momo_app`'s
+/// heartbeat), never the notifier's.
+///
+/// This is the one test that can see a missing grant. The tail **fails open** by design (a push must
+/// not be lost to a failed look at the clock): without `GRANT SELECT ON member_activity TO
+/// momo_notifier` every delay silently turns off and no behaviour test notices. So the tail's own
+/// statement is run here as the production notifier and must come back `Ok`, not `permission denied`.
+///
+/// Sabotage: delete the `member_activity` grant line from `bootstrap_runtime_roles.sql` — the first
+/// read and the tail's statement fail.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_production_notifier_role_reads_member_activity_and_writes_nothing_there() {
+    let db = ProdDb::create().await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+
+    sqlx::query("SELECT seen_at FROM member_activity WHERE false")
+        .fetch_all(&notifier)
+        .await
+        .expect("the notifier reads member_activity (migration 174 + bootstrap_runtime_roles.sql)");
+
+    for (verb, sql) in [
+        (
+            "INSERT",
+            "INSERT INTO member_activity (workspace_id, member_id) \
+             SELECT gen_random_uuid(), gen_random_uuid() WHERE false",
+        ),
+        (
+            "UPDATE",
+            "UPDATE member_activity SET seen_at = now() WHERE false",
+        ),
+        ("DELETE", "DELETE FROM member_activity WHERE false"),
+    ] {
+        match sqlx::query(sql).execute(&notifier).await {
+            Ok(_) => panic!("the production notifier must not {verb} member_activity"),
+            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42501") => {}
+            Err(error) => {
+                panic!("{verb} member_activity failed for a reason other than permission: {error}")
+            }
+        }
+    }
+
+    // The tail's real statement, as the production notifier. A phone target with a delayable reason
+    // makes it read `member_activity`, `notification_rule`, `read_state` and `message` (an unknown
+    // message id is enough: Postgres checks table privileges when the statement starts).
+    {
+        let workspace = Uuid::new_v4();
+        let candidate = momo_push::PushCandidate::decode(
+            &serde_json::json!({
+                "message_id": Uuid::new_v4(),
+                "channel_id": Uuid::new_v4(),
+            })
+            .to_string(),
+        )
+        .expect("decode a candidate");
+        let target = momo_push::JudgedTarget {
+            member_id: Uuid::new_v4(),
+            token_id: Uuid::new_v4(),
+            device_id: Uuid::new_v4(),
+            device_platform: "ios".to_string(),
+            apns_token: "t".repeat(64),
+            apns_env: "sandbox".to_string(),
+            apns_topic: "kim.dawn.momo.e2e".to_string(),
+            reason: momo_push::PushReason::Mention,
+            kind: None,
+            thread_id: Uuid::new_v4(),
+            category: momo_push::PushCategory::Mention,
+            approval_id: None,
+        };
+        assert!(momo_push::has_delayable_targets(std::slice::from_ref(
+            &target
+        )));
+        let mut conn = notifier.acquire().await.expect("acquire");
+        let refined = momo_push::refine_targets(
+            &mut conn,
+            workspace,
+            &candidate,
+            chrono::Utc::now(),
+            std::slice::from_ref(&target),
+        )
+        .await
+        .expect("the judgment's tail reads its four tables as the production notifier");
+        assert_eq!(
+            refined.send.len(),
+            1,
+            "an unknown message holds nothing back"
+        );
+    }
+
+    notifier.close().await;
+    db.finish().await;
+}
+
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {

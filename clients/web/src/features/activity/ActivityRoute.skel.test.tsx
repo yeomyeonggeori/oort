@@ -167,7 +167,7 @@ describe("ActivityRoute: 불러오기 실패 (#5242)", () => {
   it("줄이 없으면 원인 상자가 서고 이유가 기기 상태를 따라가며, 다시 시도가 피드를 다시 읽는다", async () => {
     const cases: [boolean, string, string][] = [
       [false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-      [true, "", "문제가 생겼어요. 다시 시도해 주세요."],
+      [true, "", "문제가 생겼어요."],
     ];
     for (const [online, cause, reason] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);

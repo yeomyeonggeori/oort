@@ -69,6 +69,7 @@ pub mod identity;
 pub mod inbox;
 pub mod interaction;
 pub mod invite_link;
+pub mod member_activity;
 pub mod member_avatar;
 pub mod member_rename;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).
@@ -191,6 +192,9 @@ pub use interaction::{
     PinnedMessage, ReactionAction, ReactionDelta, ReactionEmojiInvalid, ReactionSnapshot,
     StreamCloseOutcome, StreamEdit, StreamOutcome, CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT,
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
+};
+pub use member_activity::{
+    touch_member_activity_in_tx, ActivityOutcome, ACTIVITY_MIN_REFRESH_SECS,
 };
 pub use member_avatar::{
     activate_member_avatar_upload_in_tx, clear_own_member_avatar_in_tx, image_dimensions,

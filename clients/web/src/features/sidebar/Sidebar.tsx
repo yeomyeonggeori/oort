@@ -51,7 +51,7 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { LoadFailureLine, LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { UpdateButton } from "@/features/updates/UpdateButton";
@@ -1187,31 +1187,23 @@ export function Sidebar({
                 }
               >
                 <Skeleton ready={!channelsQuery.isLoading} rows={4}>
-                  {/* 읽기 실패(#5242, #5221 후속): 받아 둔 채널이 하나도 없으면 원인
-                      상자, 있으면 목록은 그대로 두고 위에 한 줄만. 읽을 것이 있는데
-                      240px 서랍의 위쪽을 상자가 밀어내면 정보를 버리는 일이다.
+                  {/* 읽기 실패(#5242, #5221 후속): 사이드바는 받아 둔 채널이 있든 없든 **한 줄**로만 말한다(#5307 L1, 검수 5b). 받아 둔 채널이 하나도
+                      없을 때 본문(`ChatShell`의 `chat-channels-error`)이 원인 상자로 이미 말하는데, 사이드바가 같은 상자를 또 세우면 한 사건을 두 목소리가
+                      두 번 말하고 낭독(`alert`)도 두 번이 된다. 그래서 본문이 상자일 때 사이드바는 한 줄이고, 그 한 줄은 회색 띠 + 상태 알림(`status`)이라
+                      낭독은 본문의 `alert` 한 번이다. 받아 둔 채널이 있으면 본문은 말하지 않고 목록은 그대로 두고 이 한 줄만 위에 선다. 240px 서랍의 위쪽을
+                      상자가 밀어내지도 않는다.
 
-                      둘 다 사이드바 시트 위에 서므로 「다시 시도」 알약이 시트 위 문법을
-                      받는다(#5306): 보조 채움은 시트와 같은 색(밝은 스킴 1.009:1)이라
-                      알약이 사라지고 글자만 남았다. 아래 빈 상태 「채널 만들기」가 쓰는
-                      한 벌(`band-surface bg-surface shadow-sm`)이다. */}
-                  {channelsQuery.error &&
-                    (channels.length + dms.length === 0 ? (
-                      <LoadFailureBox
-                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
-                        cause={loadCauseOf(channelsQuery.error)}
-                        onRetry={() => void channelsQuery.refetch()}
-                        retryClassName="band-surface bg-surface shadow-sm"
-                        testId="channels-error"
-                      />
-                    ) : (
-                      <LoadFailureLine
-                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
-                        onRetry={() => void channelsQuery.refetch()}
-                        retryClassName="band-surface bg-surface shadow-sm"
-                        testId="channels-error-line"
-                      />
-                    ))}
+                      회색 띠 위라 「다시 시도」 알약은 시트 위 문법을 받는다(#5306): 보조 채움은 시트와 같은 색(밝은 스킴 1.009:1)이라 알약이 사라지고 글자만
+                      남았다. 아래 빈 상태 「채널 만들기」가 쓰는 한 벌(`band-surface bg-surface shadow-sm`)이다. */}
+                  {channelsQuery.error && (
+                    <LoadFailureLine
+                      titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                      onRetry={() => void channelsQuery.refetch()}
+                      tone="neutral"
+                      retryClassName="band-surface bg-surface shadow-sm"
+                      testId="channels-error-line"
+                    />
+                  )}
                   {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
                       본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
                       좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
@@ -1385,13 +1377,15 @@ export function Sidebar({
                   </>
                 }
               >
-                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). */}
+                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). 결과(대화 이름을 알 수
+                    없다)가 제목이고 원인(오프라인 / 서버에 닿지 못함)이 뒤에 붙는다(#5279 A). 사이드바 시트 위라 알약은 시트 위 문법을 받는다(#5306). */}
                 {dmNamesStuck && (
                   <li>
-                    <InlineBanner
-                      message="멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요."
-                      actionLabel="다시 시도"
-                      onAction={() => void directoryQuery.refetch()}
+                    <LoadFailureNote
+                      titleKey={CONNECTION_KEYS.loadDmNamesTitle}
+                      cause={loadCauseOf(directoryQuery.error)}
+                      onRetry={() => void directoryQuery.refetch()}
+                      retryClassName="band-surface bg-surface shadow-sm"
                       separator={false}
                       // 배너 첫 글자가 행의 아바타 왼쪽 끝(아이콘 칸 10 - 번짐 3 = 7)과 거의 같은 자에서 시작한다: 이 간격표의 가장 가까운 칸이 2(8px)다.
                       className="px-2"
@@ -1400,14 +1394,15 @@ export function Sidebar({
                   </li>
                 )}
                 {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 숨길 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
-                    쪽이 최악이다). 그 이유를 말한다(#4252). */}
+                    쪽이 최악이다). 그 이유를 말한다(#4252). 목록은 그대로 보이므로 조용한 상태 알림(`status`)이다. */}
                 {goneUnfoldedByReadFailure && (
                   <li>
-                    <InlineBanner
+                    <LoadFailureNote
                       tone="neutral"
-                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요."
-                      actionLabel="다시 시도"
-                      onAction={() => void readStates.refetch()}
+                      titleKey={CONNECTION_KEYS.loadReadMarkersTitle}
+                      cause={loadCauseOf(readStates.error)}
+                      onRetry={() => void readStates.refetch()}
+                      retryClassName="band-surface bg-surface shadow-sm"
                       separator={false}
                       className="px-2"
                       testId="read-state-error"

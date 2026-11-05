@@ -2503,7 +2503,6 @@ const CONTRACT_WITHOUT_MOUNT: Drift = &[
             ("GET", "/v1/workspaces/{}/context-packets/{}"),
             ("POST", "/v1/workspaces/{}/huddles/{}/recording-consent"),
             ("POST", "/v1/workspaces/{}/huddles/{}/recordings"),
-            ("PUT", "/v1/workspaces/{}/presence/activity"),
             ("DELETE", "/v1/workspaces/{}/work-hosts/{}/cloud"),
             ("POST", "/v1/workspaces/{}/work-hosts/{}/cloud/pause"),
             ("POST", "/v1/workspaces/{}/work-hosts/{}/cloud/resume"),
