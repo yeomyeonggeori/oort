@@ -351,29 +351,33 @@ describe("키보드로 고른 뒤", () => {
   });
 });
 
-describe("키보드 초점이 붙든 막대", () => {
-  it("포인터가 그 행 밖을 누르면 포인터 흐름으로 넘어가 막대가 내려간다(열린 메뉴가 쥔 낡은 초점이 남지 않는다)", async () => {
+describe("키보드로 연 메뉴를 마우스로 닫을 때", () => {
+  it("초점을 쥔 채 사라진 메뉴가 낡은 초점을 남기지 않는다: 바깥을 누르면 막대가 내려간다", async () => {
     focusVisible = true;
     const root = mountPair();
     const a = rowOf(root, 7);
     await vi.waitFor(() => expect(a.tabIndex).toBe(0));
     act(() => a.focus());
     await tick();
-    expect(toolbarOf(a), "키보드 초점으로 막대가 선다").not.toBeNull();
+    const trigger = a.querySelector<HTMLElement>('[data-testid="message-actions-trigger"]');
+    expect(trigger, "키보드 초점으로 막대가 선다").not.toBeNull();
+    act(() => trigger?.focus());
+    act(() => {
+      trigger?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await tick();
+    expect(menu(), "메뉴가 열린다(초점은 메뉴 안이다)").not.toBeNull();
+    // 사람이 마우스로 바꿔 B 를 누른다: Radix 는 바깥 누름으로 닫으면 초점을 ⋮ 로 돌려주지 않고, 메뉴는 초점을 쥔 채 사라진다(blur 없음).
+    focusVisible = false;
     const b = rowOf(root, 8);
     act(() => {
       b.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      b.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true }));
+      b.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
-    expect(toolbarOf(a), "행 밖을 누르면 키보드 초점이 막대를 붙들지 않는다").toBeNull();
-    // 행 안을 누르면 그대로다.
-    act(() => a.focus());
     await tick();
-    expect(toolbarOf(a)).not.toBeNull();
-    act(() => {
-      a.querySelector('[data-testid="message-actions-trigger"]')?.dispatchEvent(
-        new MouseEvent("pointerdown", { bubbles: true, cancelable: true })
-      );
-    });
-    expect(toolbarOf(a), "행 안의 누름은 막대를 내리지 않는다").not.toBeNull();
+    expect(menu()).toBeNull();
+    expect(document.activeElement, "초점이 ⋮ 로 돌아오지 않았다").not.toBe(a.querySelector('[data-testid="message-actions-trigger"]'));
+    expect(toolbarOf(a), "낡은 「초점 있음」 때문에 막대가 남지 않는다").toBeNull();
   });
 });
