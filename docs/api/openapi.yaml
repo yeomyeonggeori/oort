@@ -18000,8 +18000,9 @@ components:
                 credentials; no `Retry-After`) and 502 `drive_upstream_failed` (the
                 archive request failed, or its bytes disagree with the row; sent
                 with `Retry-After`). A 502 or 503 that carries an `error.code`
-                was answered by this server itself; one without a code may have
-                been produced by something in front of it. The approval receipt
+                names its own cause; one without a code may have been produced by
+                something in front of this server and says nothing about the
+                cause. The approval receipt
                 status `dev_cannot_decide` is a receipt's `status`, not an
                 `error.code`.
 

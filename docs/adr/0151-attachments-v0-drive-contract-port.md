@@ -742,7 +742,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 
 그 밖의 보관소 답(`InvalidArguments` 400, `FileNotFound` 404, `ContentTooLarge` 413)은 코드를 받지 않는다. 특히 404는 증보 1·2가 「없는 id와 바이트까지 같은 404」로 못 박았으므로 키 하나도 더하지 않는다. 문장(`safe_message`)과 상태는 그대로다.
 
-**D2 · 코드가 있다는 것의 뜻.** 502·503에 코드가 있으면 api가 직접 답한 것이다. 코드가 없으면 api가 낸 것일 수도, 길 위의 장비가 낸 것일 수도 있다. 클라이언트는 코드 있는 502·503을 「서버에 닿지 못함」 증거로 세지 않는다. 이 증보부터 api가 **새로** 내는 502·503은 코드를 붙인다. 이미 있는 코드 없는 5xx(허들 미구성 503, T3 비활성 503, 실시간 미구성 503, 건강 확인 503, `ApiError::busy`의 503, 워커용 `self_media` 502 …)는 건드리지 않는다. 그 허용 범위는 코어의 「서로 다른 요청 3건 연속」 규칙이 가린다(감사 §4). 코어의 `isUnreachableOutcome`은 지금 502를 코드와 무관하게 세므로, 이 규칙대로 502에도 코드 없음을 요구하는 한 줄이 후속이다(아래 「후속」).
+**D2 · 코드가 있다는 것의 뜻.** 502·503에 코드가 있으면 그 답은 **자기 원인에 이름을 붙인 것**이다(지금은 api가 낸 것이고, D5 ②의 엣지 응답 `server_restarting`도 후속에서 같은 뜻으로 더해진다). 코드가 없으면 api가 낸 것일 수도, 길 위의 장비가 낸 것일 수도 있고 원인을 말하지 않는다. 클라이언트는 코드 있는 502·503을 「서버에 닿지 못함」 증거로 세지 않는다(이름 붙은 원인은 그 이름으로 말한다). 이 증보부터 api가 **새로** 내는 502·503은 코드를 붙인다. 이미 있는 코드 없는 5xx(허들 미구성 503, T3 비활성 503, 실시간 미구성 503, 건강 확인 503, `ApiError::busy`의 503, 워커용 `self_media` 502 …)는 건드리지 않는다. 그 허용 범위는 코어의 「서로 다른 요청 3건 연속」 규칙이 가린다(감사 §4). 코어의 `isUnreachableOutcome`은 지금 502를 코드와 무관하게 세므로, 이 규칙대로 502에도 코드 없음을 요구하는 한 줄이 후속이다(아래 「후속」).
 
 **D3 · `Retry-After`.** 정수 초이고 `drive_upstream_failed`에만 싣는다(5초). 서버가 「기다리면 풀릴 수 있다」고 아는 유일한 보관소 답이다. `drive_not_configured`·`drive_access_denied`에 싣는 것은 거짓이다(운영자가 고칠 때까지 풀리지 않는다). RFC 9110은 이 헤더를 503·429·3xx에 정의하고 다른 상태에서의 사용을 금하지 않는다. 502에 싣는 것은 이 증보의 선택이다. 상태를 503으로 바꾸지 않는다. 502·503 한 쌍은 본 ADR D1(와이어 무변경 이식)이 굳힌 모양이고 코어도 그 둘을 안다. 값은 권고다: 클라이언트는 자기 백오프를 써도 된다. 길이가 어긋난 행은 기다려도 안 풀릴 수 있는데 같은 값이 붙는다(남는 위험 3).
 
@@ -784,12 +784,13 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 
 ### red proof
 
-| 결정 | 시험 | 분기를 지우면 빨강 (사보타주 결과는 PR 본문이 정본) |
+| 결정 | 시험 | 이 분기를 바꾸면 빨개질 곳 (실제로 깬 줄과 결과는 PR 본문이 정본) |
 |---|---|---|
 | D1 코드 | `routes::attachments::tests::an_archive_fault_names_itself_and_only_a_passing_one_says_when_to_come_back` | `drive_error`의 세 코드 중 하나를 지우거나 `AccessDenied`와 `UpstreamFailure`의 코드를 바꾸면 |
 | D1 400·404·413 | 같은 시험(코드 없음, 404 본문 바이트) | 404에 코드를 달면 |
 | D3 헤더 | 같은 시험(`into_response`로 헤더를 읽는다) + `error::tests::a_retry_after_rides_with_a_code_and_only_when_asked` | `drive_upstream_failed`의 `with_retry_after`를 지우면, `into_response`의 헤더 넣기를 지우면, 「미구성」에 붙이면 |
 | 실제 HTTP | `attachment_conformance_pg::an_unconfigured_archive_answers_503_from_a_mounted_route`(코드, `Retry-After` 없음), `attachment_range_conformance_pg::an_archive_that_disagrees_with_the_row_is_refused_before_any_byte`(코드, `Retry-After` 5) | 같은 분기를 지우면(라우터와 미들웨어를 지난 뒤의 값을 잰다) |
+| 스펙의 이름 | `routes::attachments::tests::the_openapi_names_the_archive_codes_where_the_server_sends_them` | 오류 코드 등록부에서 세 코드 중 하나를 지우면, 세 연산 중 하나의 `Retry-After` 헤더 줄을 지우면 |
 
 ### 후속 (범위 밖, 인계)
 
