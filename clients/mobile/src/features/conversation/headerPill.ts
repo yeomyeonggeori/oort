@@ -28,13 +28,16 @@ export function headerSlotWidth({
   huddle,
   menu,
   follow = false,
+  search = false,
 }: {
   huddle: boolean;
   menu: boolean;
   /** 스레드 머리의 「따라가기」 원(#4890). 허들·⋮ 와 같은 원이라 같은 폭을 센다. */
   follow?: boolean;
+  /** 대화 머리의 돋보기 원(#5364, ⋮ 바로 왼쪽). 같은 원이라 같은 폭을 센다 — 양쪽 칸이 같아야 알약이 가운데에 선다. */
+  search?: boolean;
 }): number {
-  const circles = Math.max(1, (huddle ? 1 : 0) + (menu ? 1 : 0) + (follow ? 1 : 0));
+  const circles = Math.max(1, (huddle ? 1 : 0) + (menu ? 1 : 0) + (follow ? 1 : 0) + (search ? 1 : 0));
   return circles * CONV.circle + (circles - 1) * CONV.headGap;
 }
 
