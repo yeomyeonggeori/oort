@@ -24,6 +24,8 @@ export interface DraftsPanelState {
   showNav: boolean;
   isPending: boolean;
   isError: boolean;
+  /** 채널 목록 읽기가 실패했을 때의 그 오류 객체(원인 문장을 정한다, #5279 A). */
+  error: unknown;
   refetch: () => void;
 }
 
@@ -89,6 +91,7 @@ export function useDraftsPanel(): DraftsPanelState {
     showNav: shouldShowDraftsNav(drafts, liveIds, channelsReady),
     isPending: channelsQuery.isPending && channelsQuery.data === undefined,
     isError: channelsQuery.isError && channelsQuery.data === undefined,
+    error: channelsQuery.error,
     refetch: () => {
       void channelsQuery.refetch();
     },

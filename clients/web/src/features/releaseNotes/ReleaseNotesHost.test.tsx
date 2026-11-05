@@ -146,6 +146,8 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(more.tagName).toBe("BUTTON");
     expect(more.getAttribute("aria-expanded")).toBe("false");
     expect(more.getAttribute("aria-controls")).toBe(list.id);
+    // 390 폭에서 손가락 크기(44)로 자란다(`tap-target`은 폭 600 미만에서만 커진다 — jsdom은 그리지 못하니 클래스로 잠그고 크기는 캡처가 잰다, #5307 L3).
+    expect(more.className).toMatch(/\btap-target\b/);
     // 단추는 목록 항목이 아니다: 항목 마커가 서지 않고, 항목 수(낭독의 「5개 항목」)에 섞이지 않는다.
     expect(list.contains(more)).toBe(false);
 
@@ -163,10 +165,20 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(screen.queryByTestId("release-notes-dialog-more")).toBeNull();
     expect(dialog.textContent).not.toContain("그 밖에");
     // 단추가 사라져도 초점이 <body>로 떨어지지 않는다: 처음 새로 선 항목이 받아서 낭독이 그 항목부터 읽는다.
-    expect(document.activeElement).toBe(items[4]);
-    // 그 항목은 Tab 순서에 끼지 않는다(프로그램만 옮길 수 있다). 앞의 네 줄은 원래대로 초점을 받지 않는다.
-    expect(items[4].getAttribute("tabindex")).toBe("-1");
-    expect(items.slice(0, 4).some((li) => li.hasAttribute("tabindex"))).toBe(false);
+    // 초점은 항목 안의 글자 줄(span)이 받는다 — 링이 글자를 감싸고 숨 쉴 자리를 가진다(#5307 L3).
+    const focused = document.activeElement as HTMLElement;
+    expect(items[4].contains(focused)).toBe(true);
+    expect(focused.textContent).toBe(koText.formatMessage(REAL[5].title));
+    // 그 줄은 Tab 순서에 끼지 않는다(프로그램만 옮길 수 있다). 앞의 네 줄은 원래대로 초점을 받지 않는다.
+    expect(focused.getAttribute("tabindex")).toBe("-1");
+    expect(items.slice(0, 4).some((li) => li.querySelector("[tabindex]") !== null)).toBe(false);
+    // 링(안쪽 2px)이 글자에 붙지 않는다: 글자 줄은 좌우로 8px 안쪽 여백을 갖고(바깥 여백으로 되돌려 자리는 그대로), 둥근 모서리다.
+    // 간격은 고정 눈금이다(반 칸 `px-1.5`는 눈금에 없어 스타일이 만들어지지 않는다): 실제로 그려진 간격은 캡처가 잰다.
+    expect(focused.className.split(/\s+/)).toContain("px-2");
+    expect(focused.className.split(/\s+/)).toContain("-mx-2");
+    expect(focused.className).toMatch(/\brounded-sm\b/);
+    expect(focused.className).toMatch(/\bfocus-visible:focus-ring\b/);
+    expect(items[4].className).not.toMatch(/focus-ring/);
     // 펼친 뒤에도 닫는 길은 그대로다.
     fireEvent.click(screen.getByTestId("release-notes-close"));
     expect(lastSeenReleaseNote()).toBe("0.1.41");

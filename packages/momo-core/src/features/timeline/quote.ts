@@ -1,4 +1,5 @@
 import { uuidEq, type Message, type QuotedMessage } from "../../lib/api";
+import { memberFor, type Directory } from "../workspace/directory";
 import { hasRenderableBody } from "./bodySlot";
 import {
   COMPLETION_REPORT_KIND,
@@ -374,6 +375,103 @@ export function resolveQuote(
   const local = loaded?.(targetId);
   if (local !== undefined) return quoteBlockFromLocal(local);
   return { kind: "unresolved", targetId, targetSeq: null };
+}
+
+// =============================================================================
+// 바로 위를 가리키는 에이전트의 인용은 그리지 않는다 (#5357, owner 2026-11-05).
+//
+// 에이전트가 본류에서 답하면 답한 메시지를 `reply_to_id`로 가리킨다(ADR-0148 규칙 6).
+// 1:1 DM처럼 답이 질문 바로 다음에 놓이면, 인용 블록은 **바로 위에 보이는 말을 한 번 더
+// 보여 줄 뿐**이다. 인용은 「저기서 저 말을 했다」를 주장하는 장치인데, 저기가 바로
+// 위이면 주장할 거리가 없다 — 정보를 더할 때만 보여야 한다.
+//
+// **그리는 쪽의 규칙이다. 데이터는 그대로다.** `reply_to_id`도 서버가 풀어 주는
+// `replyTo`도 건드리지 않고, 알림(규칙 5)·점프·「답함」 연결은 그 id를 계속 읽는다.
+// 지우는 것은 블록을 그리는 마지막 한 걸음뿐이라서 [`resolveQuote`]는 그대로이고,
+// 걸러 내지 않은 블록이 필요한 길(폰의 위임 줄이 원문을 읽는 자리)이 그대로 산다.
+//
+// 거르는 조건은 **셋이 모두 참일 때뿐**이다 — 하나라도 거짓이면 지금 그대로 그린다:
+//
+//   1. 이 행을 쓴 쪽이 에이전트다. 사람이 직접 고른 인용은 「이 말에 답한다」는 뜻을
+//      사람이 골라서 정한 것이므로, 바로 위여도 그 선택을 지우지 않는다.
+//   2. 블록이 `ready`다. 지워진 원본(`deleted`)과 못 푼 인용(`unresolved`)은 **원본이
+//      말해 줄 수 없는 자리**를 인용이 대신 말하는 갈래라서, 바로 위에 무엇이 서 있든
+//      이 블록이 가진 정보가 다르다.
+//   3. 인용 대상이 **같은 목록에서 이 행 바로 위에 그려진 메시지**다. 사이에 다른 말이
+//      하나라도 끼면 인용은 다시 정보를 더하므로 그대로 보인다.
+//
+// 「바로 위」는 목록 하나가 정한다 — 본류는 본류 목록에서, 스레드는 루트와 답글을 이은
+// 목록에서 센다. 그 계산이 [`messageAboveIds`]이고, 웹·폰의 목록이 같은 함수를 쓴다.
+// =============================================================================
+
+/**
+ * 이 행의 인용을 그리지 않아도 되는가 — 에이전트의 답이 바로 위 메시지를 가리킨다.
+ *
+ * `true`이면 호출자는 인용 블록을 그리지 **않고**, 그 블록을 말하던 자리(화면 낭독의
+ * 「인용」 문장·「인용한 원본으로 이동」 동작)도 함께 내려야 한다 — 그리지 않는 블록을
+ * 읽어 주면 귀로는 보이지 않는 것이 들린다.
+ *
+ * 에이전트인지는 여기서 정한다. 호출자가 각자 `kind === "agent"`를 적으면 두 기기가
+ * 「에이전트」를 다르게 읽을 길이 열리고, 이 규칙이 갈리는 곳은 그 한 줄이다. 명부에
+ * 없는 저자(아직 못 불러왔거나 나간 멤버)는 에이전트라고 말할 수 없으므로 거르지 않는다.
+ */
+export function isQuoteRedundant(
+  block: QuoteBlock | null,
+  row: {
+    directory: Directory;
+    authorMemberId: string;
+    /** 같은 목록에서 이 행 바로 위에 그려진 메시지의 id. 없으면 `undefined`. */
+    aboveMessageId: string | undefined;
+  }
+): boolean {
+  if (block === null || block.kind !== "ready") return false;
+  if (row.aboveMessageId === undefined) return false;
+  if (memberFor(row.directory, row.authorMemberId)?.kind !== "agent") {
+    return false;
+  }
+  return isQuoteTarget(block, row.aboveMessageId);
+}
+
+/** 이웃을 끊지 않는 목록 항목: 말이 아니라 구분선이다. */
+const TRANSPARENT_ITEM_KINDS: ReadonlySet<string> = new Set([
+  "day",
+  "unread",
+  "recovery",
+]);
+
+/**
+ * 목록의 각 메시지 행 **바로 위에 그려진 메시지**의 id (소문자 id → 소문자 id).
+ *
+ * `items`는 **그리는 목록 그대로**여야 한다 — 접기·가리기를 다 거친 뒤의 배열이다.
+ * 메시지 배열에서 이웃을 세면 화면이 가린 행(접힌 알림, 닫힌 도구 호출)을 사이의
+ * 말로 세어 버리고, 화면이 접은 묘비를 건너뛴다. 「바로 위」는 눈이 본 이웃이다.
+ *
+ * 세는 법은 셋이다:
+ * - **메시지**(`kind: "message"`)가 이웃이다. 시스템 줄과 접힌 묘비도 메시지다 — 사이에
+ *   말이 하나 끼어 있다는 사실은 줄의 종류와 상관이 없다.
+ * - **구분선**(날짜·안 읽음·재연결)은 투명하다. 구분선은 말이 아니어서, 질문과 답 사이에
+ *   「새 메시지」 선이 서도 답은 여전히 질문 바로 다음 말이다.
+ * - 그 밖의 행(보내는 중인 에코·작업 중 자리·채널 소개)은 **벽**이다. 사이에 눈에 보이는
+ *   무언가가 서 있는데 「바로 위」라고 말하면 인용을 지운 자리가 비어 보인다. 벽 다음의
+ *   메시지는 이웃이 없다.
+ *
+ * 맨 위 메시지는 표에 오르지 않는다(`get`이 `undefined`).
+ */
+export function messageAboveIds(
+  items: readonly { kind: string; message?: Pick<Message, "id"> }[]
+): ReadonlyMap<string, string> {
+  const above = new Map<string, string>();
+  let previous: string | undefined;
+  for (const item of items) {
+    if (item.kind === "message" && item.message !== undefined) {
+      const id = item.message.id.toLowerCase();
+      if (previous !== undefined) above.set(id, previous);
+      previous = id;
+    } else if (!TRANSPARENT_ITEM_KINDS.has(item.kind)) {
+      previous = undefined;
+    }
+  }
+  return above;
 }
 
 /**

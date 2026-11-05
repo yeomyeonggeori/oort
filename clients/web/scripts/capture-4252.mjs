@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
+import { withCaptureLocale } from "./capture-locale.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/gone-dm-4252");
@@ -187,7 +188,8 @@ async function login(page) {
 const [VIEWPORT_W, VIEWPORT_H] = (process.env.VIEWPORT || "1440x900").split("x").map(Number);
 async function open(browserType, origin, scheme, viewport = { width: VIEWPORT_W, height: VIEWPORT_H }) {
   const browser = await browserType.launch();
-  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
+  // 실패 문장은 사전에서 온다(#5279 A): 컨텍스트 언어가 없으면 영어로 찍힌다.
+  const context = await browser.newContext(withCaptureLocale({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" }));
   await installMocks(context);
   await context.addInitScript((server) => { try { if (!localStorage.getItem("momo.web.server.v1")) localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   const page = await context.newPage();
@@ -347,7 +349,9 @@ async function runRosterFail(browserType, engine, origin) {
         const banner = page.getByTestId("roster-error");
         await banner.waitFor({ timeout: 30_000 });
         const names = await dmNames();
-        check(engine, scheme, "R0 DM 구역이 이유를 말한다", (await banner.innerText()).includes("멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요."), await banner.innerText());
+        // #5279 A: 결과 문장이 제목이고 원인 이유(오프라인 / 서버에 닿지 못함 / 그 밖)가 뒤에 붙는다. 다음 행동은 곁의 「다시 시도」 단추가 말한다(문장에 되풀이하지 않는다).
+        const rosterText = await banner.innerText();
+        check(engine, scheme, "R0 DM 구역이 이유를 말한다", rosterText.includes("멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요. ") && !rosterText.includes("다시 시도해 주세요"), rosterText);
         check(engine, scheme, "R1 「다시 시도」 버튼이 있다", (await banner.getByRole("button", { name: "다시 시도" }).count()) === 1, null);
         check(engine, scheme, "R2 DM 이름은 「불러오는 중」이지 「나간 멤버」가 아니다", names.length > 0 && names.every((name) => name.includes("불러오는 중") && !name.includes("나간 멤버")), names);
         check(engine, scheme, "R3 접힌 줄이 없다(명부를 못 믿는데 접지 않는다)", (await page.getByTestId("gone-dm-toggle").count()) === 0, null);
@@ -385,7 +389,8 @@ async function runReadFail(browserType, engine, origin) {
         }
         const notice = page.getByTestId("read-state-error");
         await notice.waitFor({ timeout: 30_000 });
-        check(engine, scheme, "F0 DM 구역이 접지 못한 이유를 말한다", (await notice.innerText()).includes("안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요."), await notice.innerText());
+        const noticeText = await notice.innerText();
+        check(engine, scheme, "F0 DM 구역이 접지 못한 이유를 말한다", noticeText.includes("안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요. ") && !noticeText.includes("다시 시도해 주세요"), noticeText);
         check(engine, scheme, "F1 「다시 시도」 버튼이 있다", (await notice.getByRole("button", { name: "다시 시도" }).count()) === 1, null);
         check(engine, scheme, "F2 접지 않는다: 나간 멤버 넷이 모두 목록에 있다(안 읽은 것이 있는지 모를 때 숨기는 쪽이 최악이다)", (await shown(GONE_READ_A)) && (await shown(GONE_READ_B)) && (await shown(GONE_UNREAD)) && (await shown(GONE_MACHINE)), null);
         check(engine, scheme, "F3 접힌 줄이 없다", (await page.getByTestId("gone-dm-toggle").count()) === 0, null);

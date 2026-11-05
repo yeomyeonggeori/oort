@@ -6,6 +6,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type SharedWorkSession } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { RealtimeHandle } from "@/lib/realtime";
@@ -72,9 +76,9 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-function mount(entry = "/work?view=team"): { client: QueryClient; ui: ReactNode } {
+function mount(entry = "/work?view=team", locale?: AppLocale): { client: QueryClient; ui: ReactNode } {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const ui = (
+  const page = (
     <QueryClientProvider client={client}>
       <SessionProvider value={sessionValue()}>
         <MemoryRouter initialEntries={[entry]}>
@@ -87,6 +91,8 @@ function mount(entry = "/work?view=team"): { client: QueryClient; ui: ReactNode 
       </SessionProvider>
     </QueryClientProvider>
   );
+  // `locale`은 사전 문장을 한국어로 단정하는 시험만 준다(공급자가 없으면 번들된 영어로 물러난다).
+  const ui = locale ? <LocaleProvider locale={locale}>{page}</LocaleProvider> : page;
   return { client, ui };
 }
 
@@ -218,6 +224,33 @@ describe("팀 보드: 네 상태", () => {
     api.fetchSharedWorkSessions.mockReturnValue(new Promise(() => undefined));
     render(mount().ui);
     expect((await screen.findByTestId("team-board-offline")).textContent).toContain("오프라인");
+  });
+});
+
+describe("팀 보드: 받아 둔 목록이 있는데 새로 읽기가 실패했다 (#5279 A)", () => {
+  it("마지막 목록은 그대로 두고 위에 결과 문장 + 원인 이유 한 줄이 서며, 다음 행동은 단추가 말한다", async () => {
+    vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+    const ko = await koreanLocale();
+    board([sharedRow()]);
+    render(mount("/work?view=team", ko).ui);
+    await screen.findByTestId("team-board-row");
+    api.fetchSharedWorkSessions.mockRejectedValue(new NetworkError("unreachable", 15_000));
+    act(() => {
+      subscriptions[0]!.handlers.onResync();
+    });
+    const note = await screen.findByTestId("team-board-stale-error");
+    expect(note.textContent).toContain("팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요. 서버에 닿지 못했어요.");
+    expect(note.textContent).not.toContain("다시 시도해 주세요");
+    expect(note.getAttribute("role")).toBe("alert");
+    // 받아 둔 목록은 그대로다.
+    expect(screen.getAllByTestId("team-board-row")).toHaveLength(1);
+    // 다음 행동은 단추 하나가 말하고, 누르면 다시 읽는다.
+    const buttons = note.querySelectorAll("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.textContent).toBe("다시 시도");
+    api.fetchSharedWorkSessions.mockResolvedValue({ sessions: [sharedRow()], nextCursor: null });
+    fireEvent.click(buttons[0]!);
+    await waitFor(() => expect(screen.queryByTestId("team-board-stale-error")).toBeNull());
   });
 });
 
