@@ -2426,6 +2426,17 @@ export default function ConversationScreen({
                 />
               </View>
             ) : null}
+            {/* 불러온 범위 밖 점프가 그 자리까지 읽는 동안의 한 줄(#5383): 「찾는 중 · 취소」/「다시 시도 · 닫기」. **숨기는 틀 밖**에 둔다 - 대화 안 검색에서
+                결과(또는 ↑ ↓)를 눌러 읽는 동안에도 보여야 하고, 컴포저 묶음은 그때 숨는다. 위의 `jump-missed` 와 동시에 서지 않는다(읽는 동안은 고지가 없고,
+                끝난 뒤에는 줄이 없다). 검색 중이 아니면 컴포저 묶음 맨 위, 곧 입력창 바로 위다. */}
+            {seek !== null ? (
+              <JumpSeekLine
+                failed={seek.failed}
+                onCancel={cancelSeek}
+                onRetry={onSeekRetry}
+                onDismiss={cancelSeek}
+              />
+            ) : null}
             {convSearch.active && convSearch.position !== null ? (
               <ConversationSearchBar
                 position={convSearch.position}
@@ -2502,14 +2513,6 @@ export default function ConversationScreen({
                 testID={`personal-call-notice-${personalCall.notice.tone}`}>
                 {personalCall.notice.text}
               </Text>
-            ) : null}
-            {seek !== null ? (
-              <JumpSeekLine
-                failed={seek.failed}
-                onCancel={cancelSeek}
-                onRetry={onSeekRetry}
-                onDismiss={cancelSeek}
-              />
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
