@@ -552,3 +552,160 @@ describe('the connection record keeps free text out', () => {
     ]);
   });
 });
+
+// =============================================================================
+// (d) 죽은 길 위의 토큰 요청 (#4895, 네 번째 길)
+//
+// 처음 수리(위 (a)~(c))는 **기다림**(백오프)을 끊었다. 그런데 다시 붙는 시도 하나는 두 단계다: ① 토큰 요청(REST, 기한 15초 — 세션 갱신이 끼면 연달아 둘, 30초)
+// ② 웹소켓 핸드셰이크(centrifuge-js 자신의 5초 기한). **① 에는 라이브러리의 기한이 없다.** 그리고 ① 은 우리가 `resume()` 으로 토큰을 비웠을 때(복귀·종류 바뀜·
+// 온라인 회복·「지금 다시 연결」) 매 시도의 앞에 붙는다 — 그냥 끊겼다 붙는 시도는 남은 토큰으로 곧장 ② 만 한다. 길이 아직 쓸 만하지 않은 순간에 `resume()` 이
+// 불리면(Wi-Fi ↔ 셀룰러가 넘어가는 순간·신호가 끊긴 상위 회선) 토큰 요청이 얼음에 걸려 기한이 다 되도록 소식이 없고, 그 시도는 「이미 나간 시도」라 그 뒤의
+// 온라인 회복·「지금 다시 연결」이 모두 건드리지 않았다(#4783 검수 M2: 시도 하나를 두 번 열지 않는다). 길이 돌아와도 얼음에 걸린 요청이 죽을 때까지 기다린 뒤
+// 백오프를 한 번 더 기다렸다 — 앞에 둔 채 30초 넘게, 잠금을 풀어 `resume()` 이 얼음 없는 시도를 새로 열어야 나았다.
+// =============================================================================
+
+describe('(d) a token request stuck on a dead road', () => {
+  /**
+   * 요청이 **나간 순간의 길**이 운명을 정한다: 길이 죽어 있을 때 나간 요청은 길이 살아나도 답을 못 받고(얼음) `lateAfterMs`(기본: REST 기한 15초)에 죽는다.
+   * 길이 살아 있을 때 나간 요청은 `freshAfterMs`(기본 0) 뒤에 답을 받는다. `lateAnswer` 가 있으면 얼음에 걸린 요청이 죽는 대신 그 값으로 늦게 답한다
+   * (늦게 도착한 토큰이 다음 시도를 망치지 않는지 재는 시험용).
+   */
+  function deadRoadTokens(options: {lateAnswer?: string; lateAfterMs?: number; freshAfterMs?: number} = {}) {
+    const {lateAnswer, lateAfterMs = 15_000} = options;
+    let freshAfterMs = options.freshAfterMs ?? 0;
+    const calls: {at: number; onDeadRoad: boolean}[] = [];
+    const getToken = (): Promise<string> => {
+      const onDeadRoad = wire.route === 'down';
+      calls.push({at: Date.now(), onDeadRoad});
+      if (!onDeadRoad) {
+        const token = `token-${++tokensMinted}`;
+        return freshAfterMs === 0
+          ? Promise.resolve(token)
+          : new Promise<string>(resolve => setTimeout(() => resolve(token), freshAfterMs));
+      }
+      return new Promise<string>((resolve, reject) =>
+        setTimeout(
+          () => (lateAnswer === undefined ? reject(new Error('Network request timed out')) : resolve(lateAnswer)),
+          lateAfterMs,
+        ),
+      );
+    };
+    return {
+      calls,
+      getToken,
+      /** 길이 살아 있을 때 나간 요청이 걸리는 시간을 지금부터 바꾼다(처음 연결이 끝난 뒤에 느려지게). */
+      setFreshDelay(ms: number): void {
+        freshAfterMs = ms;
+      },
+    };
+  }
+
+  /**
+   * 붙어 있던 소켓의 길이 죽고, 라디오가 Wi-Fi 로 넘어간다(종류 바뀜 = `force-reconnect` → `resume()` 이 토큰을 비운다). 새 길은 아직 쓸 만하지 않아서 그 시도의
+   * 토큰 요청이 얼음에 걸린 채 `ageMs` 나이를 먹는다.
+   */
+  async function stuckAttempt(road: ReturnType<typeof deadRoadTokens>, ageMs: number): Promise<RealtimeTransport> {
+    const current = await connected({getToken: road.getToken});
+    netInfo.__emit({type: 'cellular', isConnected: true, isInternetReachable: true});
+    routeDies();
+    await advance(500); // 라이브러리 자신의 재시도: 남은 토큰으로 핸드셰이크만 한다(토큰 요청 없음)
+    const before = road.calls.length;
+    netInfo.__emit({type: 'wifi', isConnected: true, isInternetReachable: true});
+    await advance(100);
+    expect(road.calls.length).toBe(before + 1);
+    expect(road.calls[road.calls.length - 1].onDeadRoad).toBe(true);
+    await advance(ageMs);
+    return current;
+  }
+
+  it('without any signal: a token request is given up after its budget (6 s), not after the 15 s REST deadline', async () => {
+    const road = deadRoadTokens();
+    await stuckAttempt(road, 100);
+    wire.route = 'up'; // 길이 돌아왔다. 이미 나간 요청은 그것을 모른다.
+    const waited = await until(() => last(statuses) === 'connected', 60_000);
+    // 수리 전: 얼음에 걸린 요청이 15초에 죽고 백오프를 한 번 더 기다렸다(16.5초). 6초 기한이면 7.5초.
+    expect(waited).toBeLessThanOrEqual(9_000);
+  });
+
+  it('online recovery cuts a token request that has been stuck for 3 s or more — the road is back, do not wait for the dead request', async () => {
+    const road = deadRoadTokens();
+    await stuckAttempt(road, 2_000);
+    netInfo.__emit({type: 'wifi', isConnected: true, isInternetReachable: false}); // 상위 회선이 끊겼다는 읽기
+    await advance(1_500); // 요청은 이제 3.5초째 걸려 있다
+    wire.route = 'up';
+    netInfo.__emit({type: 'wifi', isConnected: true, isInternetReachable: true}); // 같은 종류 안의 회복
+    const waited = await until(() => last(statuses) === 'connected', 60_000);
+    expect(waited).toBeLessThanOrEqual(1_500);
+    expect(formatRealtimeDiagnostics()).toMatch(/policy online-reconnect/);
+    expect(formatRealtimeDiagnostics()).toMatch(/policy stuck-attempt-cut/);
+  });
+
+  it('「지금 다시 연결」 cuts it too — the button must do something while an attempt hangs', async () => {
+    const road = deadRoadTokens();
+    const current = await stuckAttempt(road, 3_500);
+    wire.route = 'up';
+    void current.reconnect().catch(() => undefined);
+    const waited = await until(() => last(statuses) === 'connected', 60_000);
+    expect(waited).toBeLessThanOrEqual(1_500);
+    expect(formatRealtimeDiagnostics()).toMatch(/policy manual-reconnect/);
+  });
+
+  it('a young attempt is left alone: an explicit recovery inside the first 3 s does not open a second request', async () => {
+    const road = deadRoadTokens();
+    const current = await stuckAttempt(road, 800);
+    const requests = road.calls.length;
+    const sockets = wire.sockets.length;
+    wire.route = 'up';
+    void current.reconnect().catch(() => undefined);
+    netInfo.__emit({type: 'wifi', isConnected: true, isInternetReachable: false});
+    netInfo.__emit({type: 'wifi', isConnected: true, isInternetReachable: true});
+    await advance(500);
+    expect(road.calls.length).toBe(requests);
+    expect(wire.sockets.length).toBe(sockets);
+    expect(formatRealtimeDiagnostics()).not.toMatch(/stuck-attempt-cut/);
+  });
+
+  it('the answer of a request that was cut never reaches the library — it arrives while the new attempt is still waiting for its own token', async () => {
+    // 얼음에 걸린 요청이 나간 지 4.5초에(예산 6초 안) 늦은 토큰으로 답한다. 사람은 3.5초에 눌렀고, 새 시도의 토큰은 3초 걸린다 — 늦은 답은 새 시도가 기다리는 동안 도착한다.
+    const road = deadRoadTokens({lateAnswer: 'token-from-the-dead-request', lateAfterMs: 4_500});
+    const current = await stuckAttempt(road, 3_400);
+    road.setFreshDelay(3_000);
+    wire.route = 'up';
+    void current.reconnect().catch(() => undefined); // 3.5초: 끊는다. 새 시도의 토큰 요청은 길이 살아 있으니 3초 뒤에 답한다
+    await until(() => last(statuses) === 'connected', 20_000);
+    await advance(20_000);
+    expect(wire.connects.map(c => c.token)).not.toContain('token-from-the-dead-request');
+    expect(last(statuses)).toBe('connected');
+  });
+
+  it('the late FAILURE of a request that was cut does not open a second attempt either', async () => {
+    const road = deadRoadTokens({lateAfterMs: 4_500});
+    const current = await stuckAttempt(road, 3_400);
+    road.setFreshDelay(3_000);
+    wire.route = 'up';
+    const before = road.calls.length;
+    void current.reconnect().catch(() => undefined); // 끊고 새 시도(요청 하나)를 연다
+    // 끊긴 요청이 1초 뒤(4.5초)에 실패로 죽는다. 새 시도는 아직 자기 토큰(3초)을 기다리는 중이다.
+    await until(() => last(statuses) === 'connected', 20_000);
+    await advance(10_000);
+    // 요청은 새 시도의 하나뿐이다. 끊긴 요청의 늦은 실패가 라이브러리에 닿으면 재시도 시계가 생겨 요청이 하나 더 나간다.
+    expect(road.calls.length - before).toBe(1);
+    expect(last(statuses)).toBe('connected');
+  });
+
+  it('a healthy token request is not rushed: 5.5 s of slow answer still connects', async () => {
+    let slow = false;
+    const slowToken = (): Promise<string> =>
+      slow
+        ? new Promise(resolve => setTimeout(() => resolve(`token-${++tokensMinted}`), 5_500))
+        : Promise.resolve(`token-${++tokensMinted}`);
+    await connected({getToken: slowToken});
+    slow = true;
+    routeDies();
+    await advance(1_000);
+    wire.route = 'up';
+    const waited = await until(() => last(statuses) === 'connected', 60_000);
+    expect(waited).toBeLessThanOrEqual(9_000);
+    expect(formatRealtimeDiagnostics()).not.toMatch(/stuck-attempt-cut/);
+  });
+});
