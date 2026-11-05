@@ -16,7 +16,7 @@
 | ADR-0113 D5 | **번복** | 「oort 서버 자신의 egress는 현행 유지」가 깨진다. 서버가 벤더 MCP·OAuth 호스트를 직접 부른다(D4·D6) |
 | ADR-0113 증보 2 E6 | **번복** | 「서버가 클라이언트 값을 쥐지 않는다」가 깨진다. 서버가 OAuth 클라이언트가 되므로 `client_secret`을 **운영자 급 봉인값**으로 쥔다(D4). 매니페스트·응답에 값을 싣지 않고 값을 나눠 주는 API도 만들지 않는 규칙(`FORBIDDEN_KEY_FRAGMENTS`)은 그대로다 |
 | [ADR-0004](0004-codex-oauth-hermes-provider-boundary.md) | 무변경 | 모델 인증 OAuth(Codex·Claude)와 provider 키는 oort가 소유하지 않는다(본문·증보 6·7 그대로). 이 ADR의 토큰은 **앱 토큰**이라는 다른 급이다. 증보 1·4의 봉인 틀(독립 마스터키·재사용 거부)만 빌린다 |
-| [ADR-0147](0147-chat-agent-oauth-provider.md) 증보 2026-09-26·10-19 | 무변경 | 금고에 구독 OAuth kind를 더하지 않는다. 이 금고는 provider·구독 kind를 받지 않는다(수용 기준 12) |
+| [ADR-0147](0147-chat-agent-oauth-provider.md) 증보 2026-09-26·10-19, 결정 4 | 무변경·준수 | 금고에 구독 OAuth kind를 더하지 않는다. 이 금고는 provider·구독 kind를 받지 않는다(수용 기준 12). 결정 4(「OAuth 호출·갱신은 전부 agent-worker」)를 따른다: 벤더 discovery·등록·code 교환·갱신·회수는 전부 agent-worker가 하고, 이 기능으로 api에 바깥 HTTP를 **더하지 않는다**(D3·D4). 결정 4의 「momo-server HTTP 0」은 증보 2026-09-27(연결 확인, `momo-provider-probe`)이 이미 좁혔고 이 ADR은 그 범위를 넓히지 않는다 [V] |
 | [ADR-0192](0192-remote-host-onboarding.md) D7 Q9 | **번복** | 「서버가 사람 토큰을 쥐는 MCP 카탈로그(A5)는 목표 A 뒤」를 owner 10-21 「개인 연결까지」가 앞당겼다. 행동 명령 #2785가 기다리던 A5의 전제가 이 문서로 채워진다 |
 | [ADR-0203](0203-cohosted-agent-detection.md) K1·K2·K6 | 좁힘 | 1인 Hermes 연결 모드는 **owner 본인 시험 전용**으로 남는다(2026-11-05 증보 N1). 팀 경로는 이 ADR이다. 팀 Hermes는 기본 모드(메일·드라이브 연결 없음)를 유지한다 |
 | [ADR-0186](0186-agent-workspace-actions.md) D2 · ADR-0113 E4 | 확장·구분 | 쓰기 승인은 `workspace_action` 폐곡선을 타되 **서버가 실행**한다(D8). 「실행 없음·결정 전달」인 `connector_tool`이 아니다. 결정자는 `required_role`이 아니라 **요청자 = 토큰 주인 본인**이다(E4 문장 그대로) |
@@ -48,7 +48,7 @@
 - **금고가 보관하는 것**: 공식 카탈로그 앱 가운데 매니페스트가 금고 연결을 선언한 것에 대한 **멤버 개인의 OAuth 토큰**(갱신·접근), 그리고 그 연결을 맺기 위한 **운영자 급 OAuth 클라이언트 값**(D4).
 - **받지 않는 것**: 모델 provider 키·구독 OAuth(ADR-0004·0147), 인스턴스 통합 자격(ADR-0205), 사람용 oort 토큰(ADR-0216 — oort 자신의 자격이다), 팀 단위 연결(서비스 계정·관리자가 한 번 연결, r3 §6-1 (b) — 병행하는 별도 결정).
 - **I1 기본 불변식 — 사람 토큰은 oort 밖으로 나가지 않는다.** 에이전트(Hermes·팀 AI·호스팅·외부)·박스·work host·클라이언트(웹·데스크탑·폰)·도우미·로그·응답·감사·메시지·Context Packet·outbox 어디에도 토큰 바이트가 가지 않는다. 에이전트는 「이 요청을 한 사람의 연결로 이 도구를 실행해 달라」고 **요청만** 하고 **결과만** 받는다. 외부 에이전트도 같다: 토큰을 받지 않고 oort에 실행을 요청한다(그 규칙은 ADR-0212가 소비한다).
-- **I2** 토큰은 요청자 본인의 요청에서만, 본인의 연결로만 쓰인다(D5). **I3** 서버가 쥐는 동안 멤버 토큰의 평문은 실행기와 회수 worker, 두 모듈의 메모리에만 있다(D3). **I4** 사람은 언제든 끊고, 끊으면 서버는 즉시 쓰지 못한다(D9).
+- **I2** 토큰은 요청자 본인의 요청에서만, 본인의 연결로만 쓰인다(D5). **I3** 서버가 쥐는 동안 멤버 토큰 봉투를 **여는** 곳은 agent-worker 안의 실행기와 회수 worker, 두 모듈뿐이다. 벤더가 방금 준 토큰은 연결 흐름이 봉인하는 순간까지만 메모리에 있다. **api 바이너리는 봉인만 하고 어떤 봉투도 열지 못하며, 이 기능으로 벤더에 바깥 HTTP를 하지 않는다**(D3 복호 지점 표, D4). **I4** 사람은 언제든 끊고, 끊으면 서버는 즉시 쓰지 못한다(D9).
 - 설치(관리자) · 연결(멤버 본인) · 동의(grant, 멤버 본인)는 별개 단계다. 설치만으로 접근이 늘지 않는다.
 
 ### D2. 데이터 — 표, RLS, 역할
@@ -56,29 +56,55 @@
 | 표(후보) | 종류 | 내용 |
 |---|---|---|
 | `app_connection` | tenant, 메타 | workspace·member(사람, 게스트 아님)·plugin, 가린 벤더 계정 표시, 벤더 주체 HMAC 지문, **벤더가 실제로 준 scope**, `client_ref`, 상태(`pending`·`active`·`needs_reconnect`·`revoked`), 시각, 폐기 사유(닫힌 열거). `ws_isolation` RLS ENABLE + FORCE. 활성 연결은 (워크스페이스, 멤버, 앱)당 하나. 같은 벤더 주체를 한 워크스페이스의 두 멤버가 활성으로 쓰는 것은 거절 |
-| `app_connection_secret` | tenant, **봉인** | 봉인된 갱신 토큰, 봉인된 접근 토큰과 만료 시각, `key_id`, 봉인 버전, `revoke_deadline`(끊긴 뒤 이 행이 살 수 있는 마지막 시각, 평소 NULL). **암호문은 이 표에만 있다** — 목록·상태 API가 읽는 표에는 암호문 열이 없다 |
-| `app_oauth_client` | 전역, 운영자 | 앱별 client_id, 봉인된 `client_secret`(DCR 벤더는 등록 응답). 운영자 GUC로만 열림(`039 provider_link` 선례) |
-| `app_oauth_state` | tenant | 일회용 state 해시, 멤버, 앱, 봉인된 PKCE verifier, 만료(멤버당 시작 횟수 상한, 만료분 청소) |
-| `app_execution` | tenant | `approval_id` UNIQUE, 연결, 상태(`executing`·`succeeded`·`failed`·`outcome_unknown`), `args_digest`, 리스 만료, 결과 요약(본문 없음) |
+| `app_connection_secret` | tenant, **봉인** | 봉인된 갱신 토큰(`refresh`), 봉인된 접근 토큰(`access`)과 만료 시각, `key_id`, 봉인 버전, `revoke_deadline`(끊긴 뒤 이 행이 살 수 있는 마지막 시각, 평소 NULL). **멤버 토큰 암호문은 이 표에만 있다** — 목록·상태 API가 읽는 표에는 암호문 열이 없다 |
+| `app_oauth_client` | 전역, 운영자 | 앱별 client_id, 봉인된 `client_secret`(기밀 클라이언트만 — Google. DCR로 등록한 공개 클라이언트는 비밀이 없고, 등록 응답에 비밀이 오면 같은 방식으로 봉인한다), discovery로 확인하고 호스트 고정을 통과한 엔드포인트 넷(authorization·token·registration·revocation)과 `redirect_uri`·확인 시각(비봉인 열). 운영자 GUC로만 열림(`039 provider_link` 선례) |
+| `app_oauth_state` | tenant | 일회용 state 해시, 멤버, 앱, 봉인된 PKCE verifier, 단계(`started`·`code_received`·`exchanged`·`failed`), 완료 호출이 넘긴 code를 **봉인한 일회용 교환 작업**(`auth_code`, 만료 2분)과 리스, 만료(멤버당 시작 횟수 상한). 교환이 끝나거나 만료되면 봉인 열을 비우고 행을 지운다 |
+| `app_execution` | tenant | `approval_id` UNIQUE, 연결, 상태(`executing`·`succeeded`·`failed`·`outcome_unknown`), `args_digest`, `execute_by`(집기 기한), `lease_token`·리스 만료, 결과 요약(본문 없음) |
 
-- **RLS가 두 겹으로 묶는다.** 비밀 표의 정책은 `workspace_id = app.workspace_id`와 `member_id = app.vault_member_id`를 **둘 다** 요구한다. 두 GUC는 실행기가 tx마다 `SET LOCAL`로 건다. `app.vault_member_id`는 서버가 정한 요청자이고 모델 인자가 아니다. 실행기 쿼리가 `WHERE member_id`를 빠뜨려도 그 tx에서는 다른 멤버의 행이 0행이다.
-- **역할(ADR-0201 H4-2 `momo_helper_read` 선례).** `momo_worker`는 BYPASSRLS라 [V, `bootstrap_roles.sql` 머리 주석] 그 테이블 권한이 곧 경계다. 그래서 비밀 표에 `momo_worker`·`momo_relay`·`momo_notifier`의 테이블 권한을 **주지 않는다**. 실행기·회수 worker tx는 `SET LOCAL ROLE momo_vault_exec`(후보: NOLOGIN·NOSUPERUSER·NOBYPASSRLS, 연결 비밀 표 SELECT·UPDATE·DELETE만)로 연다. api(`momo_app`)는 연결 비밀 표에 INSERT·DELETE와 **암호문 열을 뺀** SELECT·UPDATE 열 권한만 갖는다(열 단위 GRANT는 ADR-0219 `momo_guest_definer`·`145` 선례, 상태 표식·기한 청소·`WHERE`에 필요한 열만) — **멤버 토큰은 봉인과 폐기만 하고 열지 못한다**(ADR-0147·0205의 「api 봉인·worker 복호화」). api가 여는 것은 연결 흐름의 운영자 클라이언트 secret과 일회용 PKCE verifier뿐이다(D4). `bootstrap_roles.sql` 자기검사에 새 역할을 더한다. 새 BYPASSRLS 역할은 만들지 않는다. [확인 필요: V-1 — 정확한 GRANT 모양, 독립 검수]
+- **RLS가 두 겹으로 묶는다.** 비밀 표의 정책은 `workspace_id = app.workspace_id`와 `member_id = app.vault_member_id`를 **둘 다** 요구한다. 두 GUC는 실행기·회수 worker·연결 흐름이 tx마다 `SET LOCAL`로 건다. `app.vault_member_id`는 서버가 정한 요청자(회수 worker는 연결 주인)이고 모델 인자가 아니다. 실행기 쿼리가 `WHERE member_id`를 빠뜨려도 그 tx에서는 다른 멤버의 행이 0행이다.
+- **역할(ADR-0201 H4-2 `momo_helper_read` 선례).** `momo_worker`는 BYPASSRLS라 [V, `bootstrap_roles.sql` 머리 주석] RLS가 소용없고 **표 권한이 곧 경계**다. 그래서 다섯 표에서 `momo_worker`·`momo_relay`·`momo_notifier`·`momo_platform_admin`의 표 권한을 회수하고, 일감을 찾는 데 쓰는 비봉인 열의 SELECT만 `momo_worker`에 남긴다(`momo_notifier`의 `expression_draft` 열 단위 SELECT 선례 [V, `bootstrap_runtime_roles.sql`]). worker의 vault tx(연결 흐름·실행기·회수 worker·벤더 OAuth 모듈)는 `SET LOCAL ROLE momo_vault_exec`(후보: NOLOGIN·NOSUPERUSER·**NOBYPASSRLS**)로 열어 RLS가 두 GUC로 적용되게 한다. `momo_worker`는 이 역할을 `GRANT momo_vault_exec TO momo_worker WITH INHERIT FALSE, SET TRUE`로 **SET만** 할 수 있고 다른 런타임 역할은 멤버가 아니다(`helper-read` 블록과 같은 모양 [V]). 새 BYPASSRLS 역할은 만들지 않는다.
+
+**열 단위 권한표(후보).** 봉인 열은 암호문 열이다: `app_connection_secret`의 갱신·접근 토큰, `app_oauth_client`의 client secret, `app_oauth_state`의 verifier·code. 나머지는 비봉인 열이다. 봉인 열은 어떤 `WHERE`·RLS 정책식·인덱스 식에도 쓰지 않는다. 일감 열은 `workspace_id`·상태/단계·`execute_by`·`revoke_deadline`·`code_expires_at` 같은 시각·상태 열이다(암호문·인자 없음).
+
+| 표 | `momo_app` (api) | `momo_vault_exec` (worker의 vault tx) | `momo_worker` (SET 전) | relay · notifier · platform_admin |
+|---|---|---|---|---|
+| `app_connection` | SELECT·INSERT·UPDATE | SELECT·UPDATE | 일감 열 SELECT | 없음 |
+| `app_connection_secret` | **비봉인 열 SELECT와 `revoke_deadline` UPDATE만.** 봉인 열 접근·INSERT·DELETE 없음 | 전체 SELECT·INSERT·UPDATE·DELETE | 일감 열 SELECT | 없음 |
+| `app_oauth_client` | 비봉인 열 SELECT·INSERT·UPDATE. 봉인 열은 **INSERT·UPDATE만**(운영자 입력을 봉인해 쓰기, 읽기·`RETURNING` 없음) | 전체 SELECT·UPDATE | 없음 | 없음 |
+| `app_oauth_state` | 비봉인 열 SELECT·INSERT·UPDATE. 봉인 열은 **INSERT·UPDATE만**(verifier·code를 봉인해 쓰기) | 전체 SELECT·UPDATE·DELETE | 일감 열 SELECT | 없음 |
+| `app_execution` | SELECT·INSERT(결정 tx) | SELECT·UPDATE | 일감 열 SELECT | 없음 |
+
+비밀 행을 **지우는 일은 `momo_vault_exec`(회수 worker)뿐**이다. api가 비밀 행을 지우면 벤더 회수 없이 권한만 고아가 되므로(D9) api의 끊기 tx는 `revoke_deadline`만 표시한다. 열 단위 GRANT의 선례는 `145_scheduled_message.sql`의 `momo_sched_definer`와 `momo_helper_read`이고, `momo_guest_definer`는 ADR-0219가 설계한 같은 모양의 이름이다(migration에 아직 없다) [V]. `UPDATE`·`DELETE`의 `WHERE`와 RLS 정책식이 참조하는 열에 SELECT가 필요한지의 정확한 규칙은 실 PG로 재야 한다(`runtime-unverified`) — 위 표는 그 열이 모두 비봉인 열이라는 설계 제약으로 받는다. [확인 필요: V-1 — 정확한 GRANT 모양, 독립 검수]
+
+**잠금 블록(표 권한이 곧 경계이므로).** 새 표는 기본 권한 때문에 만들어지는 순간 `momo_app`·`momo_relay`·`momo_worker`(compose용 `bootstrap_roles.sql`에서는 `momo_notifier`도)에 SELECT·INSERT·UPDATE·DELETE가 붙고 [V, `bootstrap_runtime_roles.sql` 52–59행·`bootstrap_roles.sql` 44–52행], 운영 부트스트랩은 매 설치·업그레이드 때 마이그레이션 전후 두 번 돌며 `GRANT … ON ALL TABLES`를 다시 한다 [V, 같은 파일 머리 주석]. 그래서 다섯 표 모두를 `self-media-token-lockdown`(ADR-0218 G4) 모양의 잠금 블록 `app-vault-lockdown`(후보) 대상으로 둔다. ① `REVOKE ALL … FROM PUBLIC`. ② 대상 역할마다 `REVOKE ALL` 뒤 위 표의 허용분만 `GRANT` — 봉인 열이 있는 표는 table 단위 SELECT를 **먼저 회수**한 뒤 비봉인 열에만 열 단위 SELECT를 준다(table 단위 SELECT가 남아 있으면 열 단위 권한은 아무것도 막지 못한다). ③ `has_table_privilege`·`has_column_privilege`로 결과가 적은 그대로인지 자기검사하고 어긋나면 예외. ④ 대상 역할은 `momo_app`·`momo_relay`·`momo_worker`·`momo_notifier`·`momo_platform_admin`·`momo_helper_read`·`momo_vault_exec`이고 허용분 밖은 0이다. ⑤ **같은 글자가 마이그레이션·`bootstrap_roles.sql`·`bootstrap_runtime_roles.sql` 세 곳에 있고 시험이 마커 사이 글자를 비교한다**(선례: `self_media_static_guards.rs`·`prod_role_conformance_pg.rs`). 운영은 `bootstrap_runtime_roles.sql`이고 `bootstrap_roles.sql`은 compose e2e용 결정적 SQL이다 [V, 두 파일의 머리 주석] — 시험은 운영과 같은 부트스트랩으로 만든 DB에서 돈다. 셋 중 하나에 블록이 없으면 시험이 실패한다.
+
 - 모든 쓰기는 `with_tenant_tx` + `SET LOCAL app.workspace_id`다. 새 테이블은 RLS 정책 대상이고 `schema_v0.sql`은 건드리지 않는다. migration 번호는 구현 착수 때 planner가 받는다.
 
 ### D3. 봉인 · 키 · 회전
 
-- **봉투 v2**: AES-256-GCM, 무작위 96비트 nonce, **AAD = (workspace, member, connection, plugin, `key_id`, 봉인 버전)**. 암호문을 다른 연결·멤버·워크스페이스의 행으로 옮기면 열리지 않는다. 기존 `provider_link` 봉투는 AAD가 없다 [V, `momo-settings/src/crypto.rs`: `seal_bearer`가 AAD 없이 암호화한다] — 사람별 표에는 부족해서 새 봉투를 쓴다. 행별 부분 키는 HKDF-SHA256(마스터, 도메인 `momo.app_vault.v1`, connection id)로 만든다.
+- **봉투 v2**: AES-256-GCM, 무작위 96비트 nonce, **AAD = (workspace, member, connection, plugin, `key_id`, 봉인 버전, 열 용도 라벨)**. 암호문을 다른 연결·멤버·워크스페이스의 행으로 옮기면 열리지 않고, 같은 행의 갱신 토큰과 접근 토큰 암호문을 서로 바꿔 끼워도 열리지 않는다(용도 라벨: `refresh`·`access`·`client_secret`·`pkce_verifier`·`auth_code`). 기존 `provider_link` 봉투는 AAD가 없다 [V, `momo-settings/src/crypto.rs`: `seal_bearer`가 AAD 없이 암호화한다] — 사람별 표에는 부족해서 새 봉투를 쓴다. 행별 부분 키는 HKDF-SHA256(마스터, 도메인 `momo.app_vault.v1`, connection id)로 만든다.
 - **독립 마스터키**(후보 `APP_VAULT_MASTER_KEY`, ADR-0205 D1과 같은 규율): 없으면 **연결 표면만 503**이고 나머지 서버는 뜬다. JWT·OUTBOUND·INGRESS·PROVIDER_LINK·GITHUB_APP 키 중 하나와 같으면 **기동 거부**(`GithubAppSettings::boot_error` 모양 [V, `config.rs`]). 기존 다섯 키의 가드도 새 키를 막도록 넓힌다(CFG-2 확장). `scripts/self_host_env.sh` 키 수 계약 +1과 관련 시험 갱신은 같은 커밋이다(ADR-0004 증보 4 D1). Hermes·도우미·박스·클라이언트 env에 걸지 않는다(ADR-0203 D6-2, ADR-0210 I6).
-- **멤버 토큰의 평문은 두 모듈에만**: 멤버 토큰 봉투(연결 비밀 표)의 복호 함수 호출 지점을 grep 가드로 고정한다(ADR-0205 수용 기준 7 모양) — 실행기·회수 worker 모듈 둘, api 바이너리 0. 클라이언트 secret·PKCE verifier 봉투를 여는 함수는 연결 흐름 모듈 하나로 따로 고정한다. 평문은 Debug·Display가 없는 가림 타입에 담고 쓴 뒤 지운다. 로그·trace·에러에 나가지 않는다.
+
+**복호 지점 표.** 봉투를 **여는** 함수의 호출 지점은 봉투 종류마다 정해져 있고(grep 가드, ADR-0205 수용 기준 7 모양) api 바이너리는 어느 것도 열지 못한다. api는 봉인해 쓰기만 한다.
+
+| 봉투 (용도 라벨) | 표 | 여는 곳 | api |
+|---|---|---|---|
+| 멤버 갱신·접근 토큰 (`refresh`·`access`) | `app_connection_secret` | agent-worker의 **실행기**와 **회수 worker** (모듈 둘) | 열기 0 · 쓰기 0 (교환 결과는 worker가 봉인해 넣는다) |
+| OAuth 클라이언트 secret (`client_secret`, 기밀 클라이언트만) | `app_oauth_client` | agent-worker의 **벤더 OAuth 모듈** 한 곳 — 교환·갱신·회수 호출을 할 때만 | 운영자 입력을 봉인해 쓰기만 |
+| PKCE verifier · 교환 대기 code (`pkce_verifier`·`auth_code`) | `app_oauth_state` | 같은 **벤더 OAuth 모듈** | 봉인해 쓰기만 |
+
+**벤더 OAuth 모듈**은 token 엔드포인트(교환·갱신·회수)와 discovery·DCR 호출을 하는 agent-worker 안의 한 모듈이다. 실행기·회수 worker·연결 흐름은 이 모듈을 불러 쓰고(갱신·회수는 호출자가 연 갱신 토큰을 넘긴다), 모듈이 돌려준 새 토큰은 호출자가 봉인해 커밋한다. 이렇게 모든 벤더 HTTP가 agent-worker에 있고(ADR-0147 결정 4) api에는 토큰 교환용 바깥 HTTP도 클라이언트 secret 복호도 생기지 않는다. 클라이언트 secret 복호 지점은 기밀 클라이언트(Google 등) 경로에만 있다: PKCE만 쓰는 공개 클라이언트(DCR 벤더)는 secret이 없다. 평문은 Debug·Display가 없는 가림 타입에 담고 쓴 뒤 지운다. 로그·trace·에러에 나가지 않는다.
+
 - **회전**: 마스터키는 이전 키를 `…_PREVIOUS`로 두고 **재봉인 명령**(행마다 tx, 옛 키로 열고 새 `key_id`로 봉인)을 돌린 뒤 `oort doctor`가 옛 `key_id` 행 0을 확인하면 이전 키를 지운다. 벤더 주체 지문도 재봉인 때 다시 찍는다(ADR-0147 개인 키 D5와 같다). 벤더가 갱신 토큰을 돌리면 새 값을 **봉인해 커밋한 뒤에만** 접근 토큰을 쓰고, 갱신은 연결별 advisory lock으로 직렬화한다. 커밋이 실패하면 연결은 `needs_reconnect`다(조용한 실패 없음). 키가 **유출**된 경우 재봉인은 의미가 없다 — D9의 전량 회수가 답이다.
 
 ### D4. 연결 흐름 (OAuth 클라이언트는 서버다)
 
-1. **시작**: 멤버가 「앱」 화면에서 연결한다. 서버가 인가 요청을 만든다 — PKCE S256, 일회용 `state`(멤버·워크스페이스·앱에 묶임, 10분, 해시만 저장), 인스턴스 공개 HTTPS 주소의 고정 `redirect_uri`(ADR-0205 D2와 같은 요건), 벤더가 지원하면 `iss` 확인.
-2. **완료**: 벤더가 돌려보내는 주소(`redirect_uri`)는 서버 API 라우트가 아니라 **oort 웹 화면**이다. 그 화면이 `code`·`state`를 **시작한 멤버의 인증된 완료 호출**로 넘기고, 서버가 그때 code를 교환해 봉인한다 — 콜백 한 번만으로 자격이 붙지 않고, 서버는 콜백에서 code를 저장하지 않는다. code는 ADR-0004 증보 7의 일회용 code와 같이 마스킹 타입으로만 다루고 저장·로그·감사에 쓰지 않는다. 주소의 query는 프록시·정적 서버 접근 로그에 남을 수 있으므로(일회용이고 PKCE verifier는 서버에만 있어 단독으로는 쓸 수 없다) 그 로그에서 query를 지우는 설정을 둔다 [확인 필요: V-2 — 폰·데스크탑 복귀 경로 포함].
-3. **클라이언트 값**: 운영자가 벤더별 OAuth 클라이언트를 쓰기 전용 화면(ADR-0171 모양)으로 등록하고 `client_secret`은 봉인한다. DCR 벤더(Notion·Linear)는 서버가 한 번 등록하고 응답을 같은 방식으로 봉인한다. Google은 dawn.kim 조직 프로젝트의 **Internal** 동의 화면이다(ADR-0113 증보 2 E2, owner 10-17 결재) — 연결할 수 있는 계정은 그 조직으로 한정된다. 클라이언트를 바꾸면 옛 토큰은 새 클라이언트에서 쓸 수 없으므로(E6 「교체」) 연결이 `client_ref`를 갖고 재연결을 안내한다.
-4. **호스트 고정**: discovery 문서(RFC 9728·8414)가 알려 준 authorization·token·registration·revocation 엔드포인트의 호스트가 매니페스트가 선언한 허용 호스트(`egressDomains`) 안이 아니면 연결을 거절한다 — 침해된 메타데이터가 code·verifier를 다른 곳으로 보내지 못한다. 모든 벤더 호출은 `momo-egress` 경유(사설 주소·redirect 거절)다.
-5. **scope**: 연결은 읽기 scope부터 요청하고 쓰기 scope는 별도 동의(벤더가 지원하면 증분 동의)다. 벤더가 실제로 준 scope가 요청보다 좁으면 연결은 **교집합만** 쓴다. 한 사람·한 앱당 계정은 하나다(Q6).
+1. **클라이언트 등록(운영자, 한 번)**: 운영자가 벤더별 OAuth 클라이언트를 쓰기 전용 화면(ADR-0171 모양)으로 등록하면 api는 입력을 검증해 `client_secret`을 **봉인해 쓰기만** 하고 등록 요청 표식을 남긴다. **discovery(RFC 9728·8414)·DCR·호스트 고정 검사는 agent-worker의 벤더 OAuth 모듈이 하고**, 확인된 네 엔드포인트를 `app_oauth_client`의 비봉인 열에 저장한다(재발견도 worker의 일이고 실패하면 기존 값을 유지한다). DCR 벤더(Notion·Linear)는 worker가 한 번 등록하고 응답의 비밀을 같은 방식으로 봉인한다. Google은 dawn.kim 조직 프로젝트의 **Internal** 동의 화면이다(ADR-0113 증보 2 E2, owner 10-17 결재) — 연결할 수 있는 계정은 그 조직으로 한정된다. 클라이언트를 바꾸면 옛 토큰은 새 클라이언트에서 쓸 수 없으므로(E6 「교체」) 연결이 `client_ref`를 갖고 재연결을 안내한다.
+2. **시작(api, 바깥 HTTP 없음)**: 멤버가 「앱」 화면에서 연결한다. api가 인가 요청을 **저장된 엔드포인트로** 만든다 — PKCE S256(verifier는 봉인해 쓰기만 하고 api가 다시 열지 않는다), 일회용 `state`(멤버·워크스페이스·앱에 묶임, 10분, 해시만 저장), 서버 설정에서 오는 고정 `redirect_uri`(요청 헤더로 만들지 않는다 — ADR-0205 D2와 같은 요건), 벤더가 지원하면 `iss` 확인.
+3. **완료(접수와 교환을 가른다)**: 벤더가 돌려보내는 주소(`redirect_uri`)는 서버 API 라우트가 아니라 **oort 웹 화면**이다. 그 화면이 `code`·`state`를 **시작한 멤버의 인증된 완료 호출**로 넘긴다 — 호출자는 `state`에 묶인 멤버이고 일회용 `state`를 제시해야 한다(세션이 아니라 멤버: 폰·데스크탑 복귀 경로는 다른 세션일 수 있다). api는 한 tx에서 `state`·멤버·만료·단계(`started`)를 확인하고 단계를 `code_received`로 바꾸고(일회용) code를 **봉인해 교환 작업으로만** 적은 뒤 「교환 중」으로 답한다. 웹 화면의 복귀 자체는 아무것도 저장하지 않고, code의 평문은 어떤 표·로그·감사·응답에도 없다(ADR-0004 증보 7의 일회용 code와 같이 마스킹 타입으로만 다룬다). **교환은 worker**의 연결 흐름이 한다: 작업을 집어 vault tx에서 벤더 OAuth 모듈로 verifier·code(와 기밀 클라이언트면 client secret)를 열어 token 엔드포인트에 한 번 교환하고, 받은 토큰을 봉인해 `app_connection_secret`에 넣고 봉인 열을 비운다. 접수 단계에는 벤더 호출이 없고 화면은 연결 상태가 바뀌기를 기다린다. 주소의 query는 프록시·정적 서버 접근 로그에 남을 수 있으므로(일회용이고 verifier는 봉인돼 서버에만 있어 단독으로는 쓸 수 없다) 그 로그에서 query를 지우는 설정을 둔다 [확인 필요: V-2 — 폰·데스크탑 복귀 경로 포함].
+4. **계정 확인**: 교환이 끝난 연결은 `pending`에 머물고, 화면이 **가린 벤더 계정 표시**로 「이 계정으로 연결할까요?」를 한 번 묻는다. 본인이 확인해야 `active`가 되고 그 전에 실행기는 이 연결을 쓰지 않는다. 확인하지 않고 두면 기한(`revoke_deadline`) 뒤 회수 worker가 벤더 회수와 폐기를 한다. 다른 사람의 벤더 계정이 내 oort에 붙는 계정 혼동을 줄인다.
+5. **호스트 고정**: discovery 문서가 알려 준 authorization·token·registration·revocation 엔드포인트의 호스트가 매니페스트가 선언한 허용 호스트(`egressDomains`) 안이 아니면 연결을 거절한다 — 침해된 메타데이터가 code·verifier를 다른 곳으로 보내지 못한다. 이 넷 밖의 discovery 항목(`jwks_uri`·`userinfo` 등)은 쓰지 않는다. 모든 벤더 호출은 `momo-egress` 경유(연결 시점 DNS 고정·redirect 거절·프록시 무시, 사설 주소 거절)다.
+6. **scope**: 연결은 읽기 scope부터 요청하고 쓰기 scope는 별도 동의(벤더가 지원하면 증분 동의)다. 벤더가 실제로 준 scope가 요청보다 좁으면 연결은 **교집합만** 쓴다. 한 사람·한 앱당 계정은 하나다(Q6).
 
 ### D5. 요청자 한정 — 누구의 요청에 쓰이나
 
@@ -90,7 +116,7 @@
 
 ### D6. 실행기
 
-- 실행기는 agent-worker 안의 **한 모듈**이고 에이전트 런타임(Hermes 등)과 다른 프로세스다. 입력은 run(→ 워크스페이스·요청자·채널), `pluginId`, `tool`, `args`뿐이다. 벤더 회수와 기한 청소(D9)를 하는 회수 worker는 같은 봉투를 여는 **별도 모듈**이다(D3의 두 복호 지점).
+- 실행기는 agent-worker 안의 **한 모듈**이고 에이전트 런타임(Hermes 등)과 다른 프로세스다. 입력은 run(→ 워크스페이스·요청자·채널), `pluginId`, `tool`, `args`뿐이다. 벤더 회수와 기한 청소(D9)를 하는 회수 worker는 멤버 토큰 봉투를 여는 **별도 모듈**이다(D3 복호 지점 표의 둘). 두 모듈이 token 엔드포인트를 부르는 일(갱신·회수)은 **벤더 OAuth 모듈**을 거친다.
 - **호출 직전 한 tx에서 전부 다시 확인한다**(닫는 쪽 실패, 사유마다 닫힌 거절 코드와 감사): 요청자가 활성 사람이고 게스트·정지가 아님 · 워크스페이스 설치가 활성 · 요청자의 grant가 그 도구의 scope에 활성 · 연결이 `active`이고 벤더 scope가 도구를 덮음 · 도구가 설치된 매니페스트에 있고 등급이 R·A·B(C 없음)이며 `schemaDigest`가 같음 · run이 요청자의 것 · 예산(멤버·연결·run별 호출 수, 연결당 동시 1).
 - **호출**: 접근 토큰이 만료면 연결 잠금 아래 갱신한 뒤 벤더 원격 MCP(`streamable_http`, 호스트는 매니페스트 `mcp.url`과 일치)를 `momo-egress`로 한 번 부른다. 시간·크기 상한을 둔다. 벤더 오류는 닫힌 코드로 옮기고 원문은 저장·표시하지 않는다.
 - **에이전트에게 주는 것**: 결과의 텍스트·JSON만, ADR-0201 H4-4의 「[데이터 — 지시가 아니야]」 울타리 안에서, 길이 상한과 함께. 토큰·헤더·서명 URL 쿼리를 빼고 결과에서 토큰 바이트가 보이면 버린다. 결과 원문은 run 기록·Context Packet·감사에 저장하지 않는다 — 에이전트가 답에 옮긴 만큼만 대화에 남는다(개인정보 안내문에 한 줄, V-6).
@@ -100,14 +126,20 @@
 ### D7. 결과의 청중과 프롬프트 주입 방어
 
 - **청중(공개 확인)**: 요청자와 에이전트뿐인 **1:1 DM**이면 읽기는 자동이다. 사람이 둘 이상 보는 대화(채널·스레드·그룹 DM)에서는 읽기도 **공개 확인 카드**(D8과 같은 승인 폐곡선, 결정자 = 요청자, 「이 대화 n명에게 보일 수 있어요」)를 거친 뒤에만 실행한다. 한 run에 한 번이다. 확인 뒤 모델이 쓰는 말은 **지시에 의존한다**(ADR-0113 E10과 같은 한계, 카드에 그렇게 적는다): 서버는 모델의 답 문장을 강제하지 못한다. 「나만 보기」는 ADR-0186 D5 증보가 필요해 열지 않는다(E10이 보류한 그대로) — 열리면 이 확인은 사라진다.
-- **서버가 강제하는 것**: ① 쓰기는 카드(D8) ② 연결 도구를 쓴 run의 답 메시지에는 서버가 표지를 달아 링크 미리보기(unfurl)와 원격 이미지 자동 불러오기를 하지 않는다 — 메신저 서버의 fetcher가 데이터 유출 경로가 되지 않게 한다 [확인 필요: V-3 — 클라이언트의 원격 이미지 처리] ③ run당 연결 호출 상한 ④ 앱에서 읽은 내용을 본 뒤에 나온 쓰기 제안의 카드에는 그 표지를 붙인다 [추정].
+- **서버가 강제하는 것**: ① 쓰기는 카드(D8) ② 연결 도구를 쓴 run의 답 메시지에는 서버가 표지를 달아 링크 미리보기(unfurl)를 하지 않는다 — 메신저 서버의 fetcher가 데이터 유출 경로가 되지 않게 한다. 원격 이미지 자동 불러오기 금지는 클라이언트 몫인데, 웹은 Caddy의 CSP `img-src 'self' data:`(`infra/railway/Caddyfile.railway`·`infra/rust/Caddyfile`)가, 데스크탑은 `tauri.conf.json`의 같은 CSP가 이미 막는다 [V]. 폰만 [확인 필요: V-3 — 폰 클라이언트의 원격 이미지 처리] ③ run당 연결 호출 상한 ④ **오염 규칙(서버 소유 표지)**: 연결 도구로 읽은 run에는 서버가 표지를 세우고(모델이 정하지 못한다), 표지가 선 run에서는 (a) 외부로 나가는 도구(웹 검색·URL 가져오기·이미지 생성 prompt)를 막고 (b) 민감한 `workspace_action` 제안을 거절하며(`is_sensitive_action` 재사용) (c) 그 뒤 쓰기 제안의 카드에 표지를 붙인다(D8 카드 규칙 5). 도우미 문에는 이미 같은 서버 규칙이 있다 [V, `momo-workspace-actions/src/team_ai.rs`의 `AfterRead`·`momo-agent/src/team_ai_roles.rs`의 `is_sensitive_action`·`agent-worker/src/team_ai/task.rs`] — 이를 실행기 도구를 받는 **모든 에이전트로 일반화**한다. 요청별로 끌 수 없는 도구가 있는 에이전트(기본 모드 Hermes)는 이 규칙을 채울 수 없으므로 Q1대로 닫아 둔다.
 - **지시에 기대는 것(강제 아님)**: 모델이 읽은 내용을 채널에 옮기는지, 읽은 글 속 숨은 지시를 따르는지. 이는 위협 모델 T7에 남는 위험으로 적는다.
 - **모델 공급자로 가는 내용**: 읽은 메일·문서 내용은 그 에이전트의 모델 공급자(팀 AI 키의 회사, Hermes의 Codex 등)로 간다. 이것은 기능이라 구조로 막지 않는다. 연결 동의 화면과 공개 확인 카드가 **어느 에이전트가 읽고 어느 공급자로 가는지**를 숨기지 않는다(ADR-0218 H9 동의 문장이 회사 이름을 넣는 방식).
 
 ### D8. 쓰기 승인
 
 - 등급은 ADR-0113 E4 그대로다: **R 자동, A·B는 호출마다 카드, C(삭제·공유·병합·푸시·Gmail 보내기)는 매니페스트에 없다.** 「항상 허용」은 v1에 없다.
-- 새 행동(후보 `app.tool.call`)은 ADR-0186 D2의 `workspace_action` 폐곡선을 탄다. 다른 점 셋: ① 결정자는 **요청자 = 연결 주인 본인**뿐(관리자·채널 멤버·에이전트 불가) ② 카드의 인자 요약은 **서버가 검증된 인자로 그린다**(모델의 설명문이 아니다) — 받는 사람·참석자·대상 폴더처럼 결과를 정하는 필드를 고정 자리에 ③ 승인은 `args_digest`와 `connection_id`를 묶어 소비하고, 실행 때 둘이 다르면 거절한다(승인 뒤 인자·연결 바꿔치기 방지).
+- 새 행동(후보 `app.tool.call`)은 ADR-0186 D2의 `workspace_action` 폐곡선을 탄다. 다른 점 셋: ① 결정자는 **요청자 = 연결 주인 본인**뿐(관리자·채널 멤버·에이전트 불가 — `requesting_member` 결정자의 선례 [V, `routes/approvals.rs`]) ② 카드는 아래 **카드 규칙**대로 서버가 그린다(모델의 설명문이 아니다) ③ 승인은 아래 **digest 입력 집합**을 묶어 소비하고, 실행 때 하나라도 다르면 거절한다(승인 뒤 인자·연결 바꿔치기 방지).
+- **카드 규칙 (카드가 보여 주는 것 = 승인이 소비하는 것 = 실행되는 것).**
+  1. 쓰기 도구는 매니페스트에 인자 스키마를 **닫힌 형태**로 선언한다(추가 필드 금지 — 현재 검증기가 루트·중첩 객체 모두 `additionalProperties: false`를 이미 요구한다 [V, `plugin_manifest.rs`의 `validate_input_schema`]). 여기에 **필드마다 표시 규칙**을 더한다: `effect`(결과를 정하는 필드 — 받는 사람·참석자·공유 대상·알림 발송 여부·대상 폴더·첨부: 카드 본문에 항상 보인다), `text`(자유 텍스트 — 본문·설명·파일 내용: 전체를 펼쳐 볼 수 있고 `maxLength`가 필수다), `detail`(그 밖의 값: 접힌 줄에라도 보인다). **표시 규칙이 없는 필드가 하나라도 있는 쓰기 도구는 매니페스트 로드·설치를 거절한다.** 지금 검증기의 속성 키 허용목록에는 표시 규칙과 배열 상한(`maxItems`)이 없다 [V] — 검증기 확장이 V-4 몫이다.
+  2. **카드가 담지 못하는 인자는 제안 단계에서 거절한다**: 필드별 상한(`maxLength`·`maxItems`)이나 카드 직렬화 전체 크기 상한을 넘으면 닫힌 코드로 제안이 거절되고 벤더 호출은 0이다. 잘라서 보여 주고 전체를 실행하는 길은 없다.
+  3. **한 값**: 서버가 모델 인자를 스키마로 검증·정규화한 정규 값 하나를 만들고, 카드 직렬화 = `args_digest` 입력 = 벤더로 보내는 인자가 이 값이다. 실행기는 모델의 원래 인자가 아니라 저장된 정규 값을 보낸다.
+  4. **digest 입력 집합**: (워크스페이스, `pluginId`, `tool`, `schemaDigest`, 정규 인자, `connection_id`, 요청자, run, 채널)과 도메인 태그. 다른 run·채널·연결·스키마로 옮겨 쓸 수 없다.
+  5. 연결 도구로 읽은 run에서 나온 쓰기 제안의 카드에는 D7 ④의 서버 표지가 붙는다.
 - **「서버 tx 안」의 뜻(이슈 수용기준의 정정)**: 벤더 HTTP를 DB tx 안에서 하면 행 잠금을 네트워크 시간만큼 쥔다(ADR-0205 D4가 수신 tx를 「쓰기만」으로 둔 이유). 그래서 이렇게 정한다. **결정 tx가 승인을 소비하고 `app_execution`을 `executing`으로 만든다 — 둘은 한 tx이고 갈라지지 않는다.** 벤더 호출은 그 뒤 tx 밖에서 **한 번**, 완료 tx가 결과 카드와 `succeeded|failed`를 쓴다. 호출은 `executing` 행을 리스로 집어 가는 worker가 한다 — 결정 HTTP 요청이 중간에 끊겨도 실행이 이어지고, 같은 행을 두 worker가 집지 못한다 [확인 필요: V-4 — 결정 요청 안에서 커밋 직후 부르는 방식과 비교]. 실행 주체는 항상 서버다(클라이언트·호스트가 아니다). 이중 실행은 `approval_id` UNIQUE로 막고, 벤더가 멱등 키를 받으면 approval id를 쓴다. 호출 뒤 완료 전에 프로세스가 죽으면 리스 만료 뒤 `outcome_unknown`으로 두고 **자동 재시도하지 않는다**(카드: 「결과를 확인하지 못했어요 — 직접 확인해 주세요」).
 - 결과는 REST send 단일 쓰기 경로(`send_message_in_tx`)로 에이전트 명의 메시지와 `momo.action_result.v1`로 돌아온다. TTL 기본 15분(ADR-0217과 같은 짧은 창) [확인 필요: V-4]. 거절·만료는 실행 0이다.
 - 승인 뒤 run을 이어 갈지는 구현이 정한다 [확인 필요: V-4]. `workspace_action`은 결과 카드로 끝나고(resume job 없음) 기존 worker `tool_call` 승인은 resume 경로(`approval.rs`)로 이어 간다. 쓰기는 어느 쪽이든 되지만, **공개 확인(D7)은 승인 뒤 같은 run이 읽기 결과로 답해야 하므로 resume 쪽**이다.
@@ -116,9 +148,12 @@
 
 | 일 | 연결·토큰에 일어나는 일 |
 |---|---|
-| 멤버가 끊기 | **한 tx**: 연결 `revoked`, 그 앱의 내 grant 회수(동의는 새로 — ADR-0113 증보 2026-10-16(#3914) W3와 같다), 비밀 행에 `revoke_deadline`(짧게, 예 15분) 표식. 이 커밋 뒤 실행기는 이 연결을 쓰지 않는다(D6 재확인). 회수 worker가 갱신 토큰을 열어 벤더 회수 호출(RFC 7009 형태)을 하고, **성공하거나 기한이 지나면 행을 지운다**(기한 청소는 암호문 열을 읽지 않는 `DELETE`라 api 역할이 할 수 있다). 암호문이 서버에 남는 시간의 상한은 이 기한이다. 벤더 회수가 실패해도 로컬은 이미 못 쓴다. 화면은 「oort는 지웠어요 · 벤더 쪽 확인은 …」로 정직하게 말한다 |
+| 멤버가 끊기 | **한 tx**: 연결 `revoked`, 그 앱의 내 grant 회수(동의는 새로 — ADR-0113 증보 2026-10-16(#3914) W3와 같다), 비밀 행에 `revoke_deadline`(짧게, 예 15분) 표식. 이 커밋 뒤 실행기는 이 연결을 쓰지 않는다(D6 재확인). **회수 worker가 같은 연결 잠금(D3) 아래에서** 갱신 토큰을 열어 벤더 회수 호출(RFC 7009 형태)을 하고, **성공하거나 기한이 지나면 행을 지운다**(비밀 행을 지우는 것은 회수 worker뿐이다 — api가 지우면 벤더 권한이 고아가 된다, D2). 실패하면 `revoke_deadline` 안에서 백오프로 다시 시도한다. 결과는 감사 `app.connection.revoked`의 닫힌 필드 `vendor_revoke`(`ok`·`failed`·`expired` 중 하나)로 남기고, 화면은 이를 읽어 「oort는 지웠어요 · 벤더 쪽 확인은 …」로 정직하게 말한다. 암호문이 서버에 남는 시간의 상한은 이 기한이고, 기한을 넘긴 행 수는 `oort doctor`가 센다. 벤더 회수가 실패해도 로컬은 이미 못 쓴다 |
 | grant 일부 회수 | 그 scope의 도구만 막힌다. **마지막 grant가 회수되면 연결도 끊는다**(쓸 수 없는 자격을 쥐지 않는다) |
 | 관리자 | 누가 어떤 앱을 연결했는지 **메타(가린 계정 표시)만** 본다. 토큰 열람·사용·대신 연결은 못 한다. **강제 해제**는 된다(감사) |
+| 앱 설치 해제(관리자) | `uninstall`의 grant 일괄 UPDATE와 **같은 tx**에서 그 앱의 모든 활성 연결을 `revoked` + `revoke_deadline` 표식으로 닫고 회수 worker가 벤더 회수를 한다. 지금 `uninstall`은 grant만 일괄 회수하고 연결에 닿지 않는다 [V, `plugin_writes.rs`]. 재설치해도 되살아나지 않고 새 연결이 필요하다 |
+| 카탈로그 철회(레지스트리가 앱을 철회) | 같은 경로. 철회된 앱도 해제할 수 있어야 하므로 `uninstall`은 레지스트리 행을 보지 않는다 [V]. 서버 코드에 레지스트리의 `revoked_at`을 쓰는 경로가 없어 [V: 검색 0건] 철회를 표시하는 쪽(마이그레이션·운영 갱신)이 같은 폐기 함수를 부르거나, 그 전까지 회수 worker의 주기 대조(철회·해제된 앱의 활성 연결을 찾아 폐기)가 닫는다 [확인 필요: V-2] |
+| 워크스페이스 정지·삭제·보관 | 지금 Rust에는 이 경로가 없다 [V: 검색 0건]. ADR-0197은 워크스페이스 삭제를 soft + tombstone으로 설계한다. **tombstone·실제 삭제의 선행 조건**: 모든 연결이 `revoked`이고 벤더 회수가 끝났거나 기한이 지났다. 그리고 `app_connection_secret`의 부모 FK(워크스페이스·멤버·연결)는 모두 **`ON DELETE RESTRICT`**다 — 기존 표(`145`·`160`)의 `ON DELETE CASCADE`는 따르지 않는다: 연쇄 삭제는 표 소유자 권한으로 돌아 암호문만 지우고 벤더 쪽 권한을 고아로 만든다. 암호문 행이 남아 있는 동안은 어떤 부모도 삭제되지 않는다 |
 | 멤버 탈퇴·제거·정지·만료·게스트로 바뀜 | 같은 tx에서 전부 `revoked`와 기한 표식, 그 멤버의 grant 회수(위 「끊기」와 같은 경로, ADR-0219 GUEST-5·GS-10 만료 tx와 같은 자리). 다시 들어와도 되살아나지 않는다 |
 | 세션 종료·로그아웃 | **연결과 무관**하다(장기 자격이고 실행은 요청마다 위 재확인을 거친다). 단 계정을 본인 증명 없이 되찾는 일(관리자가 발급한 비밀번호 재설정 링크의 사용, ADR-0215)과 관리자가 멤버의 모든 세션을 끝내는 일은 연결도 끊는다 [확인 필요: V-2 — 현재 코드의 해당 경로 목록]. 본인 비밀번호 변경은 끊지 않는다(Q5) |
 | 벤더가 거부(`invalid_grant`·벤더에서 해제) | `needs_reconnect`: 읽기·쓰기 모두 즉시 거절, 본인에게만 「연결이 풀렸어요 · 다시 연결」(앱 화면·인박스), 자동 재시도 루프 없음 |
@@ -146,8 +181,8 @@
 | T3 인스턴스 운영자 | — | **막지 못한다.** 운영자는 DB와 마스터키를 함께 쥘 수 있다(LIM-4와 같은 종류). 구현이 별도 한계 문장을 공개 문서에 더한다(V-6). 키와 DB를 다른 곳에 두기를 권고한다 |
 | T4 DB 덤프·백업만 유출 | AES-256-GCM 암호문 + AAD, 마스터키는 DB·백업 밖 | 없음. 키까지 함께 복원한 인스턴스는 T5와 같다 |
 | T5 DB 덤프 + 마스터키 | 독립 키(다른 키의 유출로는 안 열림), 전량 회수 런북, 읽기 scope 최소·증분 동의로 반경 축소 | 연결한 모든 사람의 읽기 범위가 열린다(쓰기 scope가 있으면 초안·파일 생성까지) |
-| T6 서버 프로세스 침해 | 복호 지점 둘(실행기·회수 worker)뿐, 가림 타입·사용 뒤 지움, api 역할은 암호문 열 SELECT 불가 | 열린 순간의 토큰과 메모리의 마스터키는 막지 못한다 |
-| T7 에이전트 프롬프트 주입(메일·문서 속 지시) | 쓰기=카드(서버가 인자 렌더·digest 소비), C 등급 없음, run당 호출 상한, 공개 확인, unfurl 0 | **읽기 연쇄와 모델이 쓰는 말은 지시 의존**(채널에 옮기기·요약). 기본 모드 Hermes는 `web_search`·`image_generate`가 같은 문맥에 있다(ADR-0203 I2의 「남는 위험은 그림 prompt」) — oort가 요청별로 끌 수 없으면 Q1 때문에 닫아 둔다 |
+| T6 서버 프로세스 침해 | 멤버 토큰 복호 지점 둘(실행기·회수 worker)과 클라이언트 자격·verifier·code 복호 지점 하나(벤더 OAuth 모듈)뿐, 가림 타입·사용 뒤 지움, **api 역할은 어떤 봉인 열도 읽지 못함**(D2 열 단위 권한표), BYPASSRLS 역할은 비밀 표 권한 없음 | 열린 순간의 토큰과 메모리의 마스터키는 막지 못한다. 같은 worker 프로세스 안의 악의적 코드(`RESET ROLE`·GUC 직접 설정)는 역할 경계로 막지 못한다 |
+| T7 에이전트 프롬프트 주입(메일·문서 속 지시) | 쓰기=카드(서버가 정규 인자로 그리고 같은 값의 digest로 소비 — 표시 규칙 없는 필드는 매니페스트 거절, 상한 초과는 제안 거절, D8), C 등급 없음, run당 호출 상한, 공개 확인, unfurl 0, **읽은 뒤 외부 도구 차단·민감 제안 거절(D7 ④)** | **읽기 연쇄와 모델이 쓰는 말은 지시 의존**(채널에 옮기기·요약). 기본 모드 Hermes는 `web_search`·`image_generate`가 같은 문맥에 있다(ADR-0203 I2의 「남는 위험은 그림 prompt」) — oort가 요청별로 끌 수 없으면 Q1 때문에 닫아 둔다 |
 | T8 에이전트가 열쇠를 봄 | 평문이 실행기 밖으로 안 나감, 결과만 울타리 안으로, 결과 속 토큰 바이트 폐기 | 벤더 내용 속 비밀(메일 본문의 비밀번호 등)은 데이터이고 막지 못한다 |
 | T9 악성·침해된 벤더 메타데이터·MCP 응답 | 호스트 고정(D4), `schemaDigest` 불일치 도구 거절, 결과는 데이터 울타리 | 벤더 자체의 침해는 막지 못한다 |
 | T10 동의 피싱(남을 속여 내 oort 연결로 그 사람 계정을 승인시킴) | 완료는 시작한 세션만, 같은 벤더 주체는 한 멤버만, Internal 앱은 조직 계정만 | **막지 못한다** — 관리자 목록의 가린 계정 표시로 탐지하고 강제 해제한다 |
@@ -203,20 +238,20 @@
 
 ## 수용 기준 (red proof — 해당 분기를 지우면 실패해야 한다)
 
-1. **평문 0**: 표식 토큰으로 연결 → 실행 → 갱신 → 끊기를 돌리면 표식 바이트가 로그(TRACE)·모든 표의 평문 열·HTTP 응답·감사 행·메시지·outbox·Context Packet·에이전트 입력에 0이다. 비밀 표에는 봉투만 있다. 봉인을 지우고 평문을 저장하면 실패한다.
+1. **평문 0**: 표식 토큰으로 연결 → 실행 → 갱신 → 끊기를 돌리면 표식 바이트가 로그(TRACE)·모든 표의 평문 열·HTTP 응답·감사 행·메시지·outbox·Context Packet·에이전트 입력에 0이다. client secret·PKCE verifier·code에 심은 표식도 같다. 비밀 표에는 봉투만 있다. 봉인을 지우고 평문을 저장하면 실패한다.
 2. **독립 키**: `APP_VAULT_MASTER_KEY`가 JWT·OUTBOUND·INGRESS·PROVIDER_LINK·GITHUB_APP 키 중 어느 것과 같아도 기동을 거부한다(각각). 없으면 연결 표면만 503이다. 기존 다섯 가드도 새 키를 막는다. 가드 하나를 지우면 실패한다.
 3. **AAD**: 한 연결의 암호문을 다른 연결·멤버·워크스페이스 행으로 옮기면 열리지 않는다. AAD를 빼면 실패한다.
-4. **복호 지점**: 멤버 토큰 봉투의 복호 함수 호출 지점이 실행기·회수 worker 모듈 둘뿐이고 api 바이너리에는 0이다(grep 가드, 호출을 하나 더하면 실패). 클라이언트 secret·PKCE verifier를 여는 함수는 연결 흐름 모듈 하나다.
-5. **RLS·역할**(비우회 역할·두 테넌트 실 PG): `momo_app`의 비밀 표 암호문 열 SELECT 거절(열 단위 GRANT), `SET LOCAL ROLE momo_vault_exec` 없는 `momo_worker` 접근 거절, 다른 워크스페이스·다른 멤버 id를 걸면 0행. 새 BYPASSRLS 역할이 없음을 자기검사가 잰다.
+4. **복호 지점**: 멤버 토큰 봉투의 복호 함수 호출 지점이 실행기·회수 worker 모듈 둘뿐이고, client secret·verifier·code 봉투의 복호 지점은 벤더 OAuth 모듈 하나이며, api 바이너리에는 셋 모두 0이다(grep 가드, 호출을 하나 더하면 실패). api 바이너리에는 이 기능의 벤더 바깥 HTTP도 0이다(링크 의존·호출 점검). **실행기의 갱신 경로에서 클라이언트 자격 복호를 지우면 갱신 시험이 실패한다.**
+5. **RLS·역할**(비우회 역할·두 테넌트 실 PG, **운영과 같은 부트스트랩으로 만든 DB**): `momo_app`·`momo_worker`·`momo_relay`·`momo_notifier`·`momo_platform_admin`이 세 봉인 표의 봉인 열을 읽지 못한다(D2 권한표의 칸마다 `has_column_privilege`로 재고, 칸 하나를 바꾸면 실패한다). `SET LOCAL ROLE momo_vault_exec` 없는 `momo_worker` 접근 거절, 다른 워크스페이스·다른 멤버 id를 걸면 0행. 새 BYPASSRLS 역할이 없음을 자기검사가 잰다. 잠금 블록 세 곳의 글자 비교 시험이 있고, 부트스트랩을 두 번 돌린(업그레이드) 뒤에도 권한이 같다.
 6. **요청자**: 다른 멤버·관리자·A2A·웹훅·시스템·예약·에이전트가 연 일에서 연결 호출이 0이다(모의 벤더의 수신 요청 계수). 인자에 멤버 필드를 넣으면 400이다.
 7. **재확인과 즉시 거절**: grant 회수·연결 끊기·멤버 정지·탈퇴·게스트화·설치 해제 뒤 다음 호출은 벤더 요청 0과 닫힌 코드다(사례마다). 재확인 항목 하나를 지우면 그 사례가 실패한다.
-8. **쓰기 승인**: 승인 전 벤더 호출 0, 결정자가 요청자가 아니면 403이고 소비 0, 승인 뒤 인자·연결을 바꾸면 실행 0, 같은 승인 두 번에 벤더 호출 1(UNIQUE), 거절·만료는 0이다.
+8. **쓰기 승인**: 승인 전 벤더 호출 0, 결정자가 요청자가 아니면 403이고 소비 0, 승인 뒤 인자·연결·run·채널·스키마를 바꾸면 실행 0, 같은 승인 두 번에 벤더 호출 1(UNIQUE), 거절·만료는 0이다. **표시 규칙에서 필드 하나를 빼면 매니페스트 검증이 실패하고, 카드 상한을 넘는 인자는 제안이 거절되어 벤더 호출이 0이며, 카드가 그린 값의 필드 경로 집합이 벤더 모의 서버가 받은 인자의 필드 경로 집합과 같다(카드 직렬화 = digest 입력 = 실행 입력).**
 9. **소비·기록의 원자성**: 결정 tx에서 승인 소비와 `executing` 행이 함께 커밋되거나 함께 롤백된다(중간 실패 주입). 호출 뒤 완료 전 프로세스 종료는 `outcome_unknown`이고 재시도 0이다.
 10. **청중**: 1:1 DM이 아닌 대화에서 공개 확인 전 읽기 0, 확인 뒤 run당 읽기 허용. 연결 도구를 쓴 run의 답에 unfurl이 0이다.
 11. **호스트 고정**: discovery가 허용 밖 호스트를 가리키면 연결을 거절하고, 모든 벤더 호출이 `momo-egress`를 지난다(사설 주소·redirect 거절).
 12. **provider kind 불가**: 금고 연결을 선언하지 않은 매니페스트(provider·구독 OAuth 포함)로는 연결이 생기지 않는다(CHECK + 라우트).
 13. **게스트·에이전트 멤버**: 게스트와 `kind='agent'`는 연결을 만들 수 없다(403, 트리거). ADR-0219 GUEST-5의 분류 행에 더한다.
-14. **끊기**: 끊기 tx 안에서 연결 `revoked`, grant 회수, `revoke_deadline` 표식이 함께 일어나고 그 뒤 실행기 호출은 벤더 요청 0이다. 벤더 회수 호출이 실패해도 로컬은 거절하고, 기한이 지나면 비밀 행이 0이다(기한 청소는 암호문 열을 읽지 않는다). 멤버 이벤트(탈퇴·정지·만료·게스트화)도 같다.
+14. **끊기와 수명주기**: 끊기 tx 안에서 연결 `revoked`, grant 회수, `revoke_deadline` 표식이 함께 일어나고 그 뒤 실행기 호출은 벤더 요청 0이다. 벤더 회수 호출이 실패해도 로컬은 거절하고, 기한이 지나면 비밀 행이 0이다(지우는 것은 회수 worker뿐이고 api 역할은 비밀 행을 지울 수 없다). **앱 설치 해제는 같은 tx에서 그 앱의 활성 연결을 `revoked`로 닫고, 비밀 행은 회수 성공 또는 기한 뒤 0이며 벤더 회수 호출이 1이다. 워크스페이스 삭제 시도는 비밀 행이 남아 있는 동안 FK로 거부된다(`ON DELETE RESTRICT`) — 시험 정리는 연결 행을 먼저 지운다.** 멤버 이벤트(탈퇴·정지·제거·게스트화·만료)도 같다(D9).
 15. **회전**: 이전 키로 봉인한 행이 재봉인 뒤 새 키로 열리고, 이전 키를 지운 뒤 옛 `key_id` 행은 `needs_reconnect`로 닫힌다. `oort doctor`가 옛 행 수를 센다.
 16. **ADR-0214**: 1·2·6·7·8을 `claims.yaml` 주장(`VAULT-*`)으로 시험과 함께 더하고, 경계 자체를 지키는 1·5·6은 P0로 저장소 안 사보타주 음성 대조를 둔다. 공개 문서의 위 두 문장(귀결 마지막 줄)을 V-2 착륙 전에(늦어도 같은 PR에서) 고친다. 지금은 주장 파일에 더하지 않는다(시험 없는 선택자는 린트 E2가 빨강으로 본다).
 
