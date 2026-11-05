@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
+import type { PhoneDelaySecs } from "@momo/core/features/settings/notificationPrefs";
 import { ApiError } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { NetworkError } from "@momo/core/lib/http";
@@ -40,6 +41,22 @@ vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal)
       putNotificationRules(workspaceId, rules) as Promise<NotificationRules>,
     patchNotificationRules: (workspaceId: string, patch: Partial<NotificationRules>) =>
       patchNotificationRules(workspaceId, patch) as Promise<NotificationRules>,
+  };
+});
+
+// 「폰 알림 늦추기」 칸(ADR-0206 D4, #4508)은 자기 질의로 `notification-prefs` 를 읽는다. 이 파일의 시험은 규칙 두 줄을
+// 보므로, 그 읽기는 가짜로 고정해서 실제 네트워크로 나가지 않게 한다(칸 자체의 시험은 PhoneDelayRow.test.tsx).
+const fetchPhoneDelay = vi.hoisted(() => vi.fn());
+const savePhoneDelay = vi.hoisted(() => vi.fn());
+
+vi.mock("@momo/core/features/settings/notificationPrefs", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/notificationPrefs")>();
+  return {
+    ...actual,
+    fetchPhoneDelay: (workspaceId: string) => fetchPhoneDelay(workspaceId) as Promise<PhoneDelaySecs>,
+    savePhoneDelay: (workspaceId: string, secs: PhoneDelaySecs) =>
+      savePhoneDelay(workspaceId, secs) as Promise<PhoneDelaySecs>,
   };
 });
 
@@ -79,6 +96,10 @@ beforeEach(() => {
   fetchNotificationRules.mockReset();
   putNotificationRules.mockReset();
   patchNotificationRules.mockReset();
+  fetchPhoneDelay.mockReset();
+  savePhoneDelay.mockReset();
+  fetchPhoneDelay.mockResolvedValue(60);
+  savePhoneDelay.mockImplementation(async (_workspaceId: string, secs: PhoneDelaySecs) => secs);
   stored = { dnd: false, mentionOverridesMute: false };
   fetchNotificationRules.mockImplementation(async () => ({ ...stored }));
   putNotificationRules.mockImplementation(
@@ -624,5 +645,41 @@ describe("NotificationRulesSection DND regression", () => {
     expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
     // 되돌린 켜짐에는 기한 줄도 함께 돌아와 있다.
     expect(q("notification-rules-until")!.textContent).toContain("오후 9:30까지");
+  });
+});
+
+describe("NotificationRulesSection 폰 알림 늦추기 칸 (ADR-0206 D4, #4508)", () => {
+  it("규칙 카드의 한 줄로 서고, 고르면 서버에 그 필드만 쓰고 두 스위치는 건드리지 않는다", async () => {
+    const host = await mountSection(false, true);
+    await vi.waitFor(() => expect(q("phone-delay-row")).not.toBeNull());
+    // 규칙 목록 안, 두 스위치 뒤에 선다.
+    const list = q("notification-rules")!;
+    expect(list.contains(q("phone-delay-row"))).toBe(true);
+    expect([...list.children].map((el) => el.getAttribute("data-testid"))).toEqual([
+      null,
+      null,
+      "phone-delay-row",
+    ]);
+    expect(host.textContent).toContain("데스크탑을 쓰는 동안 폰 알림 늦추기");
+    await act(async () => {
+      q<HTMLInputElement>("phone-delay-choice-300")!.click();
+    });
+    expect(savePhoneDelay).toHaveBeenCalledWith(WS, 300);
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+    expect(putNotificationRules).not.toHaveBeenCalled();
+  });
+
+  it("옛 서버(404)면 그 칸만 숨고 규칙 두 줄은 그대로다", async () => {
+    fetchPhoneDelay.mockRejectedValue(new ApiError(404, "no such route"));
+    const host = await mountSection(false, true);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-mention"]')).not.toBeNull();
+    });
+    await vi.waitFor(() => expect(fetchPhoneDelay).toHaveBeenCalled());
+    await vi.waitFor(() => expect(q("phone-delay-loading")).toBeNull());
+    expect(q("phone-delay-row")).toBeNull();
+    expect(q("phone-delay-error")).toBeNull();
+    expect(q("notification-rules-dnd")).not.toBeNull();
+    expect(host.textContent).not.toContain("폰 알림 늦추기");
   });
 });
