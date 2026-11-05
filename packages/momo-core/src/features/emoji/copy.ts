@@ -13,11 +13,11 @@
 
 export const EMOJI_CATALOG_COPY = {
   /** 카탈로그 청크를 못 실었다. */
-  error: "이모지 목록을 불러오지 못했습니다.",
+  error: "이모티콘 목록을 불러오지 못했습니다.",
   /** 브라우저가 오프라인이라고 말한다 — 이 실패는 그 사실로 설명된다. */
   offline: "지금 오프라인입니다. 연결되면 다시 여세요.",
   retry: "다시 시도",
   /** 카탈로그는 있는데 질의가 아무것도 못 맞췄다. */
-  emptyHeadline: "찾는 이모지가 없습니다",
+  emptyHeadline: "찾는 이모티콘이 없습니다",
   emptyDetail: "다른 이름이나 :code:로 검색하세요.",
 } as const;

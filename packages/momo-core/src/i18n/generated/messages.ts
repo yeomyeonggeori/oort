@@ -374,7 +374,6 @@ export const messageKeys = [
   "expressions.panel.viewEmpty",
   "expressions.panel.viewGif",
   "expressions.panel.viewsLegend",
-  "expressions.panel.viewTeam",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -441,7 +440,6 @@ export const messageKeys = [
   "expressions.sheet.emptyEmoticon",
   "expressions.sheet.emptyGif",
   "expressions.sheet.emptyLegacy",
-  "expressions.sheet.emptyTeam",
   "expressions.sheet.error",
   "expressions.sheet.hintInsert",
   "expressions.sheet.hintPreview",
@@ -457,14 +455,12 @@ export const messageKeys = [
   "expressions.sheet.searchEmoji",
   "expressions.sheet.searchEmoticon",
   "expressions.sheet.searchGif",
-  "expressions.sheet.searchTeam",
   "expressions.sheet.send",
   "expressions.sheet.sending",
   "expressions.sheet.tabEmoji",
   "expressions.sheet.tabEmoticon",
   "expressions.sheet.tabGif",
   "expressions.sheet.tabs",
-  "expressions.sheet.tabTeam",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
   "mobile.attachmentSave.failed",
@@ -1434,7 +1430,6 @@ export const argumentSpecs = {
   "expressions.panel.viewEmpty": {},
   "expressions.panel.viewGif": {},
   "expressions.panel.viewsLegend": {},
-  "expressions.panel.viewTeam": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -1503,7 +1498,6 @@ export const argumentSpecs = {
   "expressions.sheet.emptyEmoticon": {},
   "expressions.sheet.emptyGif": {},
   "expressions.sheet.emptyLegacy": {},
-  "expressions.sheet.emptyTeam": {},
   "expressions.sheet.error": {},
   "expressions.sheet.hintInsert": {},
   "expressions.sheet.hintPreview": {},
@@ -1519,14 +1513,12 @@ export const argumentSpecs = {
   "expressions.sheet.searchEmoji": {},
   "expressions.sheet.searchEmoticon": {},
   "expressions.sheet.searchGif": {},
-  "expressions.sheet.searchTeam": {},
   "expressions.sheet.send": {},
   "expressions.sheet.sending": {},
   "expressions.sheet.tabEmoji": {},
   "expressions.sheet.tabEmoticon": {},
   "expressions.sheet.tabGif": {},
   "expressions.sheet.tabs": {},
-  "expressions.sheet.tabTeam": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
   "mobile.attachmentSave.failed": {},
@@ -2586,7 +2578,6 @@ export interface MessageArgs {
   "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.panel.viewGif": Record<string, never>;
   "expressions.panel.viewsLegend": Record<string, never>;
-  "expressions.panel.viewTeam": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
@@ -2653,7 +2644,6 @@ export interface MessageArgs {
   "expressions.sheet.emptyEmoticon": Record<string, never>;
   "expressions.sheet.emptyGif": Record<string, never>;
   "expressions.sheet.emptyLegacy": Record<string, never>;
-  "expressions.sheet.emptyTeam": Record<string, never>;
   "expressions.sheet.error": Record<string, never>;
   "expressions.sheet.hintInsert": Record<string, never>;
   "expressions.sheet.hintPreview": Record<string, never>;
@@ -2669,14 +2659,12 @@ export interface MessageArgs {
   "expressions.sheet.searchEmoji": Record<string, never>;
   "expressions.sheet.searchEmoticon": Record<string, never>;
   "expressions.sheet.searchGif": Record<string, never>;
-  "expressions.sheet.searchTeam": Record<string, never>;
   "expressions.sheet.send": Record<string, never>;
   "expressions.sheet.sending": Record<string, never>;
   "expressions.sheet.tabEmoji": Record<string, never>;
   "expressions.sheet.tabEmoticon": Record<string, never>;
   "expressions.sheet.tabGif": Record<string, never>;
   "expressions.sheet.tabs": Record<string, never>;
-  "expressions.sheet.tabTeam": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;

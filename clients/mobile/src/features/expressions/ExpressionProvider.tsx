@@ -16,6 +16,7 @@ import {
 } from './store';
 import {expressionTransport} from './transport';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
+import {warmEmojiCatalog} from '../emoji/catalogMemory';
 
 export const PhoneExpressions = createContext<PhoneExpressionStore | null>(
   null,
@@ -92,6 +93,10 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
       },
     );
   }, [workspaceId, member.id]);
+  // 표준 목록(「기본」 탭)을 시트가 열리기 전에 한 번 풀어 둔다 — 처음 열 때도 격자가 바로 선다(#5330).
+  useEffect(() => {
+    void warmEmojiCatalog();
+  }, []);
   useEffect(() => {
     store.start();
     store.setOnline(onlineManager.isOnline());

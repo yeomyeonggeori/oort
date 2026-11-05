@@ -33,7 +33,7 @@ import { draftFile } from "./draftStore";
 // =============================================================================
 
 /** 첨부 줄 이미지 카드의 한 변(CSS px). tokens.css `--spacing-tray-card` 와 같은 값. */
-export const THUMB_EDGE_PX = 96;
+export const THUMB_EDGE_PX = 80;
 /** 레티나에서 흐리지 않게 두 배로 그린다(카드 × 2 이상). */
 export const THUMB_RENDER_PX = THUMB_EDGE_PX * 2;
 
