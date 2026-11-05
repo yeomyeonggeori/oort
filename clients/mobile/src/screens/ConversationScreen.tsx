@@ -134,6 +134,8 @@ import {ConversationSearchPanel} from '../features/conversation/ConversationSear
 import {ConversationSearchRow} from '../features/conversation/ConversationSearchRow';
 import {isDirectConversation} from '../features/conversation/conversationSearchModel';
 import {useConversationSearch} from '../features/conversation/useConversationSearch';
+import {recentScopeOf} from '../features/search/recentScope';
+import type {RecentSearch} from '../features/search/searchRecents';
 import {
   conversationInfoActionItems,
   conversationMenuActionItems,
@@ -1414,7 +1416,7 @@ export default function ConversationScreen({
     },
     [onJumpToMessage],
   );
-  const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+  const convSearch = useConversationSearch({workspaceId, memberId: member.id, channelId, onJump: onSearchJump});
   // 고른 결과의 말풍선 안에 찾은 글자를 칠한다(#5384). 결과를 골라 이동한 동안(`selected` 가 서 있고 막대가 선 동안)만 값이 있다 — 목록 보기로 돌아가거나 검색을 끝내면 `null`.
   // 착지 틴트(1.5초)와 달리 막대가 서 있는 동안 남는다. 값이 바뀔 때만 새 객체다(`Timeline` 의 `renderItem` 의존성).
   const searchSelectedId =
@@ -1590,6 +1592,15 @@ export default function ConversationScreen({
   // 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없으면 NetInfo 만으로 같은 질문에 답한다.
   const gates = useConnectionGates();
   const formatMessage = useFormatMessage();
+  // 최근 검색은 홈 검색과 한 목록이다(#5384): 다른 대화 안에서 찾은 줄에만 그 대화의 범위 칩이 붙는다(이 대화 것은 이 화면이 곧 범위라 칩이 없다).
+  const fallbackScopeTitle = formatMessage('search.row.fallbackTitle');
+  const recentScope = useCallback(
+    (saved: RecentSearch) =>
+      saved.channelId === undefined || uuidEq(saved.channelId, channelId)
+        ? null
+        : recentScopeOf(groups, directory, member.id, saved.channelId, fallbackScopeTitle),
+    [channelId, groups, directory, member.id, fallbackScopeTitle],
+  );
   const composerNote =
     gates.composerNote === null ? undefined : formatMessage(gates.composerNote);
   const invalidateApprovals = useInvalidateApprovals();
@@ -2543,6 +2554,7 @@ export default function ConversationScreen({
           topInset={headerInset}
           nowMs={nowMs}
           onSearchAll={onOpenSearch}
+          recentScope={recentScope}
         />
       ) : null}
       </View>

@@ -1,5 +1,3 @@
-import {isSearchable, normalizeQuery} from '@momo/core/features/search/searchModel';
-
 // =============================================================================
 // 대화 안 검색의 순수 규칙 (#5364) — 화면도 저장소도 모르는 셈만 모은다.
 //
@@ -14,25 +12,6 @@ import {isSearchable, normalizeQuery} from '@momo/core/features/search/searchMod
 // 서버는 한 쪽(기본 20)과 `nextCursor` 만 준다. 다 불러오기 전의 「총」은 지금까지 불러온 수이고, 뒤에 더 있다는 사실은 `+` 로 말한다
 // (「3 / 20+」). 다 불러오면(`nextCursor` 없음) `+` 가 떨어지고 정확한 수가 된다 — 거짓 수를 지어내지 않는다.
 // =============================================================================
-
-/** 한 대화에 남기는 최근 검색의 정원. Buzz 의 최근 검색과 같은 6개다. */
-export const RECENT_LIMIT = 6;
-
-/** 최근 검색을 들고 있는 대화의 정원. 넘으면 가장 오래 안 쓴 대화부터 버린다. */
-export const RECENT_CONVERSATION_LIMIT = 40;
-
-/**
- * 최근 검색 목록에 한 말을 더한다. 순수 — 입력을 바꾸지 않는다.
- *
- * - 서버가 받아 주는 말만 남긴다(다듬은 뒤 2자 이상). 두 글자 미만은 검색이 한 번도 나가지 않은 말이라 「최근 검색」이 아니다.
- * - 이미 있으면 **하나로** 합치고 맨 앞으로 올린다(Buzz 와 같다). 같은 말을 두 줄로 세우지 않는다.
- * - 정원(`RECENT_LIMIT`)을 넘는 꼬리는 버린다.
- */
-export function foldRecent(list: readonly string[], raw: string): string[] {
-  if (!isSearchable(raw)) return [...list];
-  const term = normalizeQuery(raw);
-  return [term, ...list.filter(existing => existing !== term)].slice(0, RECENT_LIMIT);
-}
 
 /** 위 화살표(더 오래된 결과)가 가는 번호. 불러온 끝이면 `null` — 다음 쪽이 있으면 부르는 쪽이 더 불러온다. */
 export function olderIndex(selected: number, hitCount: number): number | null {

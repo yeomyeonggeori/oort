@@ -22,6 +22,8 @@ import {ds2Radius, font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Pa
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
+import type {RecentSearch} from '../search/searchRecents';
+import {ScopeTag} from '../search/SearchRows';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import type {ConversationSearch} from './useConversationSearch';
@@ -32,7 +34,8 @@ import type {ConversationSearch} from './useConversationSearch';
 // 두 얼굴이다. 상태는 코어가 판정한 `search.phase` 하나만 보고 그린다(`SearchScreen` 과 같은 규율 — 「로딩이면서 오류」 같은 조합을 화면에서
 // 조립하지 않는다):
 //
-//   입력 전(`idle`)  뒤의 대화를 **어둡게 눌러 둔 채** 최근 검색 카드가 선다(A2). 어둠 아무 데나 누르면 검색이 닫힌다.
+//   입력 전(`idle`)  뒤의 대화를 **어둡게 눌러 둔 채** 최근 검색 카드가 선다(A2). 어둠 아무 데나 누르면 검색이 닫힌다. 카드의 목록은 홈 검색과 **한 목록**이다(#5384) —
+//                    다른 대화 안에서 찾은 줄은 그 대화가 범위 칩으로 붙고(`recentScope`), 이 대화 것은 칩 없이 선다(이 화면이 곧 그 범위다).
 //   그 밖            불투명한 면이 대화를 덮고 한 상태가 선다: 두 글자 미만 안내 · 찾는 중 · 오류(+다시 시도) · 결과 없음 · 결과 목록(A3).
 //
 // 결과 줄은 보낸 사람·시각·**찾은 글자 강조**(서버가 준 `matchOffset`)이고 최근 순이다. 누르면 `search.choose` — 이동은 대화 화면의 점프 문이 한다.
@@ -60,6 +63,7 @@ export function ConversationSearchPanel({
   topInset,
   nowMs,
   onSearchAll,
+  recentScope,
 }: {
   search: ConversationSearch;
   directory: Directory;
@@ -70,6 +74,11 @@ export function ConversationSearchPanel({
   nowMs: number;
   /** 「모든 대화에서 ›」 — 같은 말(다듬은 것)로 홈 검색 탭을 연다. 없으면(셸 밖 호출자) 문이 서지 않는다. */
   onSearchAll?: (query: string) => void;
+  /**
+   * 최근 검색 줄이 범위 칩을 달아야 하는가 — **다른 대화** 안에서 찾은 줄이면 그 대화의 칩 정보, 아니면(범위 없는 말·이 대화 것·내가 든 목록에 없는 대화) `null`.
+   * 화면이 정한다: 대화 목록과 이름 규칙은 화면이 안다.
+   */
+  recentScope: (saved: RecentSearch) => {title: string; isPrivate: boolean | null} | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -115,33 +124,43 @@ export function ConversationSearchPanel({
                   <Text style={styles.recentClear}>{formatMessage('mobile.convSearch.recentClear')}</Text>
                 </Pressable>
               </View>
-              {search.recent.map((term, index) => (
-                <Pressable
-                  key={term}
-                  accessibilityRole="button"
-                  accessibilityLabel={formatMessage('mobile.convSearch.recentRow', {query: term})}
-                  onPress={() => search.pickRecent(term)}
-                  style={({pressed}) => [
-                    styles.recentRow,
-                    index > 0 && styles.recentRowRule,
-                    pressed && styles.pressed,
-                  ]}
-                  testID="conversation-search-recent-row">
-                  <Image
-                    accessibilityElementsHidden
-                    source={CONV_ICONS.recent}
-                    style={[styles.recentGlyph, {tintColor: palette.textMuted}]}
-                  />
-                  <Text style={styles.recentTerm} numberOfLines={1}>
-                    {term}
-                  </Text>
-                  <Image
-                    accessibilityElementsHidden
-                    source={SHEET_ICONS.chevron}
-                    style={[styles.chevron, {tintColor: palette.textFaint}]}
-                  />
-                </Pressable>
-              ))}
+              {search.recent.map((saved, index) => {
+                const scope = recentScope(saved);
+                return (
+                  <Pressable
+                    key={`${saved.query}\u0000${saved.channelId ?? ''}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      scope === null
+                        ? formatMessage('mobile.convSearch.recentRow', {query: saved.query})
+                        : formatMessage('mobile.convSearch.recentRowIn', {query: saved.query, where: scope.title})
+                    }
+                    onPress={() => search.pickRecent(saved)}
+                    style={({pressed}) => [
+                      styles.recentRow,
+                      index > 0 && styles.recentRowRule,
+                      pressed && styles.pressed,
+                    ]}
+                    testID="conversation-search-recent-row">
+                    <Image
+                      accessibilityElementsHidden
+                      source={CONV_ICONS.recent}
+                      style={[styles.recentGlyph, {tintColor: palette.textMuted}]}
+                    />
+                    <View style={styles.recentBody}>
+                      <Text style={styles.recentTerm} numberOfLines={1}>
+                        {saved.query}
+                      </Text>
+                      {scope === null ? null : <ScopeTag title={scope.title} isPrivate={scope.isPrivate} />}
+                    </View>
+                    <Image
+                      accessibilityElementsHidden
+                      source={SHEET_ICONS.chevron}
+                      style={[styles.chevron, {tintColor: palette.textFaint}]}
+                    />
+                  </Pressable>
+                );
+              })}
             </>
           )}
         </View>
@@ -367,7 +386,9 @@ const buildStyles = (color: Palette) =>
     },
     recentRowRule: {borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.border},
     recentGlyph: {width: CONV_ICON_SIZE.recent, height: CONV_ICON_SIZE.recent},
-    recentTerm: {flex: 1, fontSize: font.body, color: color.text},
+    // 말은 줄어들 수 있고(말줄임), 범위 칩은 말 뒤에 붙는다(칩은 이름이 길면 칩 안에서 줄어든다).
+    recentBody: {...ROW, flex: 1, gap: space.sm},
+    recentTerm: {flexShrink: 1, fontSize: font.body, color: color.text},
     chevron: {width: SHEET_ICON_SIZE.chevron, height: SHEET_ICON_SIZE.chevron},
     pressed: {backgroundColor: color.surfacePressed},
     listBody: {paddingBottom: space.xl},

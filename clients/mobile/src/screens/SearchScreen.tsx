@@ -34,6 +34,7 @@ import {
   type PersonMatch,
   type SearchKind,
 } from '../features/search/localSearch';
+import {recentScopeOf} from '../features/search/recentScope';
 import {
   forgetSearches,
   recentsScope,
@@ -50,6 +51,7 @@ import {
   ResultRow,
   ScopeChips,
   SkeletonRows,
+  type RecentSearchRow,
   type RecentTile,
 } from '../features/search/SearchRows';
 import {useMessageSearch, type MessageSearch} from '../features/search/useMessageSearch';
@@ -65,7 +67,7 @@ import {openDmFailureCopy} from './SidebarScreen';
 //
 //   채널·사람   폰이 이미 받아 둔 목록(`useChannels`·`useDirectory`)에서 글자마다 바로 거른다. 규칙은 순수 모듈 `localSearch`.
 //   메시지      서버(`useMessageSearch`, 250ms 뒤). 규칙·판정은 코어 `searchModel` 이다.
-//   최근        이 기기에만 남긴다(`searchRecents`). 서버는 모른다.
+//   최근        이 기기에만 남긴다(`searchRecents`). 서버는 모른다. 최근 검색은 대화 안 검색과 **한 목록**이고, 한 대화 안에서 찾은 줄은 범위 칩과 함께 서며 누르면 그 범위로 다시 찾는다(#5384).
 //
 // 화면은 **상태를 조립하지 않는다.** 메시지 쪽 상태는 코어 `searchPhase` 가 돌려준 값 하나만 보고 그린다: 조건문을 화면에서
 // 모으면 「로딩이면서 오류」 같은 조합이 생기고 그중 몇은 화면에서만 재현된다. 오류를 로딩보다 먼저 보지 않는 순서도 그 판정에
@@ -209,10 +211,30 @@ export default function SearchScreen({
     };
   }, [scopeId, pickerItems, titleFor]);
 
-  // 지금 친 말을 최근 검색에 남긴다. 서버가 받아 줄 수 있는 말(두 글자 이상)만 남는다.
+  // 지금 효과가 있는 범위: 「메시지」 칩에서 고른 대화 하나(칩을 옮기면 고른 대화는 남아도 「전체」 검색에는 걸리지 않는다).
+  const activeScopeId = kind === 'messages' && scopeId !== null ? scopeId : undefined;
+  // 지금 친 말을 최근 검색에 남긴다. 서버가 받아 줄 수 있는 말(두 글자 이상)만 남고, 한 대화 안에서 찾은 말이면 그 범위와 함께 남는다.
   const remember = useCallback(() => {
-    if (isSearchable(search.query)) rememberSearch(scopeKey, search.query);
-  }, [search.query, scopeKey]);
+    if (isSearchable(search.query)) rememberSearch(scopeKey, search.query, activeScopeId);
+  }, [search.query, scopeKey, activeScopeId]);
+
+  // 최근 검색 줄: 저장된 범위(대화 id)를 내가 든 목록에서 풀어 범위 칩의 이름을 만든다. 못 풀면(나간 대화) 범위 없는 말로 선다.
+  const fallbackScopeTitle = formatMessage('search.row.fallbackTitle');
+  const recentSearchRows = useMemo<RecentSearchRow[]>(
+    () =>
+      recents.searches.map(line => {
+        const scoped =
+          line.channelId === undefined
+            ? null
+            : recentScopeOf(groups, directory, member.id, line.channelId, fallbackScopeTitle);
+        return {
+          query: line.query,
+          channelId: line.channelId ?? null,
+          scope: scoped === null ? null : {title: scoped.title, isPrivate: scoped.isPrivate},
+        };
+      }),
+    [recents.searches, groups, directory, member.id, fallbackScopeTitle],
+  );
 
   // 사람을 눌러 DM 이 열리는 동안 다른 곳을 눌렀다면, 늦게 도착한 DM 이 그 길을 가로채지 않는다(`NewMessageSheet` 가 시트가 걷혔는지 묻는 것과 같은 이유).
   // 다른 결과로 간 횟수를 세어 두고, DM 을 시작할 때의 값과 달라졌으면 도착해도 열지 않는다(채널 캐시에는 넣는다).
@@ -293,14 +315,20 @@ export default function SearchScreen({
         people={peopleMatches}
         localPending={channelsQuery.isPending || directoryQuery.isPending}
         recentTiles={recentTiles}
-        recentSearches={recents.searches}
+        recentSearches={recentSearchRows}
         onOpenRecent={tile => {
           navigations.current += 1;
           onOpenResult(tile.channelId, tile.title);
         }}
-        onPickRecentSearch={text => {
-          search.setQuery(text);
-          rememberSearch(scopeKey, text);
+        onPickRecentSearch={row => {
+          // 이미 다 친 말이라 디바운스를 기다리지 않는다. 범위가 있는 줄은 「메시지」 칩 + 그 대화로 다시 찾는다(범위 칩이 말하던 그대로).
+          search.setQueryNow(row.query);
+          const scoped = row.scope !== null && row.channelId !== null ? row.channelId : null;
+          if (scoped !== null) {
+            setKind('messages');
+            setScopeId(scoped);
+          }
+          rememberSearch(scopeKey, row.query, scoped ?? undefined);
         }}
         onClearRecentSearches={() => forgetSearches(scopeKey)}
         onOpenChannel={match => openChannel(match.channel.id, match.name)}
@@ -354,9 +382,9 @@ export interface SearchViewProps {
   /** 채널·사람 목록을 아직 못 받았다. 받기 전에 「없다」고 말하지 않는다. */
   localPending: boolean;
   recentTiles: readonly RecentTile[];
-  recentSearches: readonly string[];
+  recentSearches: readonly RecentSearchRow[];
   onOpenRecent: (tile: RecentTile) => void;
-  onPickRecentSearch: (query: string) => void;
+  onPickRecentSearch: (row: RecentSearchRow) => void;
   onClearRecentSearches: () => void;
   onOpenChannel: (match: ChannelMatch) => void;
   onOpenPerson: (match: PersonMatch) => void;
@@ -474,7 +502,11 @@ function HomeBody(view: SearchViewProps): React.JSX.Element {
           clearLabel={formatMessage('search.recent.clearAll')}
           clearAccessibilityLabel={formatMessage('search.recent.clearAllLabel')}
           items={view.recentSearches}
-          rowLabel={query => formatMessage('search.recent.searchLabel', {query})}
+          rowLabel={row =>
+            row.scope === null
+              ? formatMessage('search.recent.searchLabel', {query: row.query})
+              : formatMessage('search.recent.searchInLabel', {query: row.query, where: row.scope.title})
+          }
           onPick={view.onPickRecentSearch}
           onClear={view.onClearRecentSearches}
         />

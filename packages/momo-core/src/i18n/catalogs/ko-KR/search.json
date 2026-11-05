@@ -18,6 +18,7 @@
   "search.recent.clearAll": "모두 지우기",
   "search.recent.clearAllLabel": "최근 검색 모두 지우기",
   "search.recent.searchLabel": "최근 검색 {query} 다시 찾기",
+  "search.recent.searchInLabel": "최근 검색 {query}, {where}, 다시 찾기",
   "search.recent.openLabel": "{name} 열기",
   "search.recent.empty": "찾고 싶은 사람·채널·메시지를 입력해 보세요.",
   "search.scope.groupLabel": "찾을 범위",

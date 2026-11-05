@@ -25,6 +25,7 @@ import {ConversationSearchPanel} from '../src/features/conversation/Conversation
 import {ConversationSearchRow} from '../src/features/conversation/ConversationSearchRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 import type {ConversationSearch} from '../src/features/conversation/useConversationSearch';
+import type {RecentSearch} from '../src/features/search/searchRecents';
 
 // =============================================================================
 // 대화 안 검색의 **살아 있는** 캡처 표면 (#5364) — 서버 없이, 손으로 누른다.
@@ -110,6 +111,8 @@ const HITS: MessageSearchHit[] = HIT_SEQS.map(seq => ({
 
 const noop = () => {};
 const NO_TOP = {paddingTop: 0} as const;
+/** 최근 검색 한 줄이 들고 있는 다른 대화(범위 칩이 붙는 줄). */
+const OTHER_CHANNEL = 'measure-other-channel';
 
 /** 진짜 훅과 같은 얼굴(`ConversationSearch`)을 주는 로컬 상태 기계 — 서버 없이 `deploy` 만 찾는다. */
 function useLiveSearch(onJump: (hit: MessageSearchHit) => void): ConversationSearch {
@@ -117,7 +120,11 @@ function useLiveSearch(onJump: (hit: MessageSearchHit) => void): ConversationSea
   const [view, setView] = useState<'list' | 'conversation'>('list');
   const [query, setQueryState] = useState('');
   const [selected, setSelected] = useState<number | null>(null);
-  const [recent, setRecent] = useState<string[]>(['deploy 일정', '롤백 계획']);
+  // 홈 검색과 한 목록(#5384): 다른 대화 안에서 찾은 줄(`OTHER_CHANNEL`)은 범위 칩이 붙는다.
+  const [recent, setRecent] = useState<RecentSearch[]>([
+    {query: 'deploy 일정'},
+    {query: '롤백 계획', channelId: OTHER_CHANNEL},
+  ]);
 
   const trimmed = query.trim();
   const phase: SearchPhase =
@@ -172,8 +179,8 @@ function useLiveSearch(onJump: (hit: MessageSearchHit) => void): ConversationSea
     loadMore: noop,
     retry: noop,
     recent,
-    pickRecent: term => {
-      setQueryState(term);
+    pickRecent: saved => {
+      setQueryState(saved.query);
       setView('list');
     },
     clearRecent: () => setRecent([]),
@@ -208,6 +215,13 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
     setJump(current => ({messageId: hit.messageId, seq: hit.seq, token: (current?.token ?? 0) + 1}));
   }, []);
   const search = useLiveSearch(onJump);
+  // 고른 결과의 말풍선 안에서 찾은 글자를 칠한다(#5384) — 진짜 화면(`ConversationScreen`)과 같은 값이다.
+  const selectedId = search.selected === null ? null : (HITS[search.selected]?.messageId ?? null);
+  const settled = search.settledQuery;
+  const searchHighlight = useMemo(
+    () => (selectedId === null || settled === '' ? null : {messageId: selectedId, query: settled}),
+    [selectedId, settled],
+  );
   const bar = useMemo(
     () =>
       search.active && search.position !== null ? (
@@ -273,6 +287,7 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
               contentTopInset={headerInset}
               topPillInset={headerInset}
               jumpTarget={jump ?? undefined}
+              searchHighlight={searchHighlight}
             />
           }
           composer={
@@ -300,6 +315,8 @@ export function ConversationSearchLiveSurface(): React.JSX.Element {
             isDm={false}
             topInset={headerInset}
             nowMs={NOW}
+            onSearchAll={noop}
+            recentScope={saved => (saved.channelId === OTHER_CHANNEL ? {title: '디자인', isPrivate: false} : null)}
           />
         ) : null}
       </View>

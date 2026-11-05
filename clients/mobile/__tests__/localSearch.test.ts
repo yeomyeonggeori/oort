@@ -20,6 +20,7 @@ import {
   rememberSearch,
   withConversation,
   withSearch,
+  type RecentSearch,
 } from '../src/features/search/searchRecents';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {mmkvStore, OTHER_ID, SELF_ID, WS_ID} from './testkit';
@@ -137,18 +138,18 @@ describe('최근 검색·최근 연 대화는 이 기기에만, 열쇠마다 따
   });
 
   it('검색어는 맨 앞에 쌓여 같은 글은 하나로 합쳐지고 정원을 넘지 않으며, 저장소에 남아 열쇠마다 따로 보이고, 로그아웃이 전부 비운다', () => {
-    let list: readonly string[] = [];
+    let list: readonly RecentSearch[] = [];
     for (const query of ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱']) {
       list = withSearch(list, query);
     }
     expect(list).toHaveLength(RECENT_SEARCH_MAX);
-    expect(list[0]).toBe('일곱');
-    expect(list).not.toContain('하나');
+    expect(list[0]).toEqual({query: '일곱'});
+    expect(list.map(line => line.query)).not.toContain('하나');
     // 대소문자만 다른 같은 글은 하나이고, 다시 쓰면 맨 앞으로 온다.
-    expect(withSearch(['Deploy', '둘'], '  deploy ')).toEqual(['deploy', '둘']);
-    expect(withSearch(['둘'], '   ')).toEqual(['둘']);
+    expect(withSearch([{query: 'Deploy'}, {query: '둘'}], '  deploy ')).toEqual([{query: 'deploy'}, {query: '둘'}]);
+    expect(withSearch([{query: '둘'}], '   ')).toEqual([{query: '둘'}]);
     // 붙여넣은 문단은 한 줄을 차지하지 않게 잘린다.
-    expect(Array.from(withSearch([], '가'.repeat(300))[0])).toHaveLength(80);
+    expect(Array.from(withSearch([], '가'.repeat(300))[0].query)).toHaveLength(80);
 
     let convs: readonly string[] = [];
     for (let i = 0; i < RECENT_CONVERSATION_MAX + 3; i += 1) convs = withConversation(convs, `CH-${i}`);
@@ -165,8 +166,8 @@ describe('최근 검색·최근 연 대화는 이 기기에만, 열쇠마다 따
 
     // 메모리를 버리고 저장소에서 다시 읽어도 남아 있다.
     __resetSearchRecentsCache();
-    expect(recentsFor(mine)).toEqual({searches: ['배포 일정'], conversations: ['ch-a']});
-    expect(recentsFor(theirs).searches).toEqual(['비밀 검색어']);
+    expect(recentsFor(mine)).toEqual({searches: [{query: '배포 일정'}], conversations: ['ch-a']});
+    expect(recentsFor(theirs).searches).toEqual([{query: '비밀 검색어'}]);
     expect(recentsFor(recentsScope(WS_ID, 'someone-else')).searches).toEqual([]);
 
     forgetSearches(mine);

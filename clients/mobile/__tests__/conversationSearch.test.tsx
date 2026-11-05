@@ -20,7 +20,13 @@ import {FixedScheme} from '../src/design/theme';
 import {ConversationSearchPanel} from '../src/features/conversation/ConversationSearchPanel';
 import {ConversationSearchRow} from '../src/features/conversation/ConversationSearchRow';
 import type {ConversationSearch} from '../src/features/conversation/useConversationSearch';
-import {readRecent, rememberRecent} from '../src/features/conversation/conversationSearchRecent';
+import {
+  __resetSearchRecentsCache,
+  recentsFor,
+  recentsScope,
+  rememberSearch,
+} from '../src/features/search/searchRecents';
+import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import AppShell from '../src/shell/AppShell';
 import {sessionPort} from '../src/storage/secureSession';
@@ -78,7 +84,14 @@ const ROSTER = [
   rosterMember({id: OTHER_ID, displayName: '김민수', handle: 'minsu'}),
 ];
 
-const CHANNELS = [{id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false}];
+const DESIGN = 'ch-design';
+const CHANNELS = [
+  {id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false},
+  {id: DESIGN, workspaceId: WS, kind: 'public', name: 'design', muted: false},
+];
+/** 이 폰·이 멤버의 최근 검색 목록(홈 검색과 대화 안 검색이 한 목록이다, #5384). */
+const RECENT_SCOPE = recentsScope(WS, SELF_ID);
+const recentLines = () => recentsFor(RECENT_SCOPE).searches;
 
 function message(seq: number, over: Record<string, unknown> = {}) {
   return {
@@ -274,6 +287,7 @@ jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 beforeEach(() => {
   installAppClock();
   resetSession();
+  __resetSearchRecentsCache();
   setServerBase(BASE);
   centrifugeMock.__reset();
   sessionPort.applyLogin(LOGIN_BODY);
@@ -599,11 +613,11 @@ describe('#5384 대화 안 검색 — 「모든 대화에서 ›」', () => {
 });
 
 describe('#5364 대화 안 검색 — 최근 검색(이 폰에만)', () => {
-  it('결과를 고르면 그 말이 이 대화의 최근 검색에 남고, 다시 열면 한 줄로 서며 누르면 바로 찾고, 「지우기」가 모두 지운다', async () => {
+  it('결과를 고르면 그 말이 이 대화 범위의 최근 검색에 남고, 다시 열면 한 줄로 서며 누르면 바로 찾고, 「모두 지우기」가 모두 지운다', async () => {
     const fetchMock = installFetch();
     await search();
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
-    await waitFor(() => expect(readRecent(WS, GENERAL)).toEqual(['배포']));
+    await waitFor(() => expect(recentLines()).toEqual([{query: '배포', channelId: GENERAL}]));
     // 서버로는 가지 않는다 — 기기 저장소에만 있다.
     expect(fetchMock.mock.calls.every(call => !(call[0] as string).includes('recent'))).toBe(true);
 
@@ -617,13 +631,39 @@ describe('#5364 대화 안 검색 — 최근 검색(이 폰에만)', () => {
     await waitFor(() => expect(screen.getByTestId('conversation-search-results')).toBeTruthy(), {timeout: 5_000});
     expect((screen.getByTestId('conversation-search-input').props as {value: string}).value).toBe('배포');
 
-    // 입력칸의 지우기 → 입력 전으로 돌아가 최근 검색이 다시 서고, 「지우기」가 이 대화의 기억을 모두 지운다(키 자체가 없어진다).
+    // 입력칸의 지우기 → 입력 전으로 돌아가 최근 검색이 다시 서고, 「모두 지우기」가 한 목록을 모두 지운다.
     fireEvent.press(screen.getByTestId('conversation-search-clear'));
     await waitFor(() => expect(screen.getByTestId('conversation-search-recent-clear')).toBeTruthy());
+    expect(screen.getByTestId('conversation-search-recent-clear')).toHaveTextContent('모두 지우기');
     fireEvent.press(screen.getByTestId('conversation-search-recent-clear'));
     await waitFor(() => expect(screen.getByTestId('conversation-search-idle-hint')).toBeTruthy());
-    expect(readRecent(WS, GENERAL)).toEqual([]);
-    expect(mmkvStore.has('momo.mobile.conversation-search.recent.v1')).toBe(false);
+    expect(recentLines()).toEqual([]);
+  });
+
+  it('#5384 한 목록: 홈 검색에서 남긴 말·다른 대화 안에서 찾은 말·이 대화에서 찾은 말이 함께 서고, 다른 대화의 줄에만 범위 칩이 붙으며, 누르면 이 대화 안에서 찾는다', async () => {
+    // 오래된 것부터: 홈 검색(범위 없음) → 다른 대화(design) 안 → 이 대화 안. 가장 최근이 맨 앞이다.
+    rememberSearch(RECENT_SCOPE, '루나');
+    rememberSearch(RECENT_SCOPE, '롤백', DESIGN);
+    rememberSearch(RECENT_SCOPE, '배포', GENERAL);
+    const fetchMock = installFetch();
+    await openSearch();
+    await waitFor(() => expect(screen.getAllByTestId('conversation-search-recent-row')).toHaveLength(3));
+
+    const rows = screen.getAllByTestId('conversation-search-recent-row');
+    expect(rows.map(row => within(row).getByText(/루나|롤백|배포/).props.children)).toEqual(['배포', '롤백', '루나']);
+    // 범위 칩은 **다른 대화**(design) 줄에만 있다 - 범위 없는 줄과 이 대화(general) 줄은 칩이 없다(이 화면이 곧 그 범위다).
+    expect(within(rows[0]).queryByTestId('search-recent-scope')).toBeNull();
+    expect(within(rows[1]).getByTestId('search-recent-scope')).toHaveTextContent('design');
+    expect(within(rows[2]).queryByTestId('search-recent-scope')).toBeNull();
+    expect(rows[1].props.accessibilityLabel).toBe('다시 찾기: 롤백 · design');
+
+    // 다른 대화의 줄을 눌러도 이 대화 안에서 찾는다(말만 가져온다).
+    fireEvent.press(rows[1]);
+    await waitFor(() => expect(screen.getByTestId('conversation-search-results')).toBeTruthy(), {timeout: 5_000});
+    const calls = fetchMock.mock.calls.map(call => call[0] as string).filter(url => url.includes('/search/messages'));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain(`q=${encodeURIComponent('롤백')}`);
+    expect(calls[0]).toContain(`channel=${GENERAL}`);
   });
 
   it('결과를 고르면 그 결과를 낳은 말이 남는다 — 고르기 직전에 더 친 글자는 남기지 않는다', async () => {
@@ -632,7 +672,7 @@ describe('#5364 대화 안 검색 — 최근 검색(이 폰에만)', () => {
     // 디바운스(250ms)가 지나기 전에 한 글자를 더 쳤다 — 화면의 결과는 아직 「배포」의 것이다.
     fireEvent.changeText(screen.getByTestId('conversation-search-input'), '배포 일');
     fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
-    await waitFor(() => expect(readRecent(WS, GENERAL)).toEqual(['배포']));
+    await waitFor(() => expect(recentLines()).toEqual([{query: '배포', channelId: GENERAL}]));
   });
 
 });
@@ -676,7 +716,7 @@ describe('#5364 대화 안 검색 — DM 은 「이 대화」로 말한다', () 
     const view = (isDm: boolean) => (
       <FixedScheme scheme="dark">
         <ConversationSearchRow query="" onChangeQuery={noop} onSubmit={noop} onFocus={noop} onClose={noop} isDm={isDm} />
-        <ConversationSearchPanel search={fake({})} directory={directory} selfMemberId={SELF_ID} isDm={isDm} topInset={0} nowMs={T0 + 200_000} />
+        <ConversationSearchPanel search={fake({})} directory={directory} selfMemberId={SELF_ID} isDm={isDm} topInset={0} nowMs={T0 + 200_000} recentScope={() => null} />
       </FixedScheme>
     );
     const mounted = render(view(true));
@@ -689,10 +729,12 @@ describe('#5364 대화 안 검색 — DM 은 「이 대화」로 말한다', () 
 });
 
 describe('#5364 대화 안 검색 — 로그아웃', () => {
-  it('로그아웃하면 이 기기에 남은 모든 대화의 최근 검색이 지워진다(다음 사람에게 보일 일이 아니다)', () => {
-    rememberRecent(WS, GENERAL, '배포');
-    rememberRecent(WS, 'ch-other', '루나');
-    expect(readRecent(WS, GENERAL)).toEqual(['배포']);
+  it('로그아웃하면 이 기기에 남은 최근 검색이 지워진다 - 한 목록과, 옮기기 전의 옛 대화 안 검색 저장까지(다음 사람에게 보일 일이 아니다)', () => {
+    rememberSearch(RECENT_SCOPE, '배포', GENERAL);
+    rememberSearch(RECENT_SCOPE, '루나');
+    expect(recentLines()).toHaveLength(2);
+    // 옮기기 전에 나가는 사람: 다른 워크스페이스의 옛 저장이 남아 있어도 같은 호출이 함께 지운다.
+    mmkvStore.set(NON_SECRET_KEYS.conversationSearchRecent, JSON.stringify({'other-ws:ch': ['비밀']}));
 
     // 앱이 실제로 쓰는 `signOut` 을 그 provider 에서 그대로 꺼내 온다.
     let signOut: (() => void) | null = null;
@@ -711,8 +753,8 @@ describe('#5364 대화 안 검색 — 로그아웃', () => {
     if (signOut === null) throw new Error('signOut 을 잡지 못했다');
     (signOut as () => void)();
 
-    expect(readRecent(WS, GENERAL)).toEqual([]);
-    expect(readRecent(WS, 'ch-other')).toEqual([]);
-    expect(mmkvStore.has('momo.mobile.conversation-search.recent.v1')).toBe(false);
+    expect(recentLines()).toEqual([]);
+    expect(mmkvStore.has(NON_SECRET_KEYS.searchRecents)).toBe(false);
+    expect(mmkvStore.has(NON_SECRET_KEYS.conversationSearchRecent)).toBe(false);
   });
 });

@@ -3309,13 +3309,13 @@ export const catalog: MessageCatalog = {
   "mobile.convSearch.recentClear": [
     {
       "type": 0,
-      "value": "지우기"
+      "value": "모두 지우기"
     }
   ],
   "mobile.convSearch.recentClearLabel": [
     {
       "type": 0,
-      "value": "최근 검색 지우기"
+      "value": "최근 검색 모두 지우기"
     }
   ],
   "mobile.convSearch.recentRow": [
@@ -3326,6 +3326,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "where"
     }
   ],
   "mobile.convSearch.recentTitle": [
@@ -5056,6 +5074,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "최근 검색"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ", 다시 찾기"
     }
   ],
   "search.recent.searchLabel": [
