@@ -2065,7 +2065,8 @@ Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
   운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
   닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
   게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
-  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`(조각 `_2`…`_5` 포함, `infra/railway/README.md` 참고)와 시작
+  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`(조각 `_2`…`_5` 포함. Railway는 값이 32,768자를 넘는 변수를 거절해서,
+  `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000`의 한 줄이 변수 하나예요)와 시작
   명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
   하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서
   `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.

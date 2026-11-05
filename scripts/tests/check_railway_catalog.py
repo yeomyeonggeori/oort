@@ -128,18 +128,18 @@ HERMES_B64_FILES = (
 )
 
 
-def hermes_part_names(name: str, parts: int) -> list[str]:
+def hermes_part_names(name: str) -> list[str]:
+    parts = next(count for var, _, count in HERMES_B64_FILES if var == name)
     return [name] + ["%s_%d" % (name, n) for n in range(2, parts + 1)]
 
 
 def hermes_b64_names() -> list[str]:
-    return [part for name, _, parts in HERMES_B64_FILES for part in hermes_part_names(name, parts)]
+    return [part for name, _, _ in HERMES_B64_FILES for part in hermes_part_names(name)]
 
 
 def hermes_printf_words(name: str) -> list[str]:
     """`printf %s` of the first part (required) and the later ones (unset when the file needs fewer)."""
-    parts = next(count for var, _, count in HERMES_B64_FILES if var == name)
-    return ["printf", "%s", "$" + name] + ["${%s:-}" % part for part in hermes_part_names(name, parts)[1:]]
+    return ["printf", "%s", "$" + name] + ["${%s:-}" % part for part in hermes_part_names(name)[1:]]
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
 SHARED_RE = re.compile(r"^shared\.([A-Za-z_][A-Za-z0-9_]*)$")
 PLACEHOLDER_PREFIXES = ("<sealed:", "<operator:")
@@ -437,7 +437,7 @@ def hermes_canonical(
         (";", ["echo", "%s  %s" % (probe_sha, "/tmp/mcp_login_probe.py")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["OORT_LOGIN_RELAY_PROBE=/tmp/mcp_login_probe.py", HERMES_PY, "-B", "/tmp/login_relay.py", "launch", "&", "}"]),
-        (";", ["unset", "HERMES_LOGIN_RELAY_KEY", *hermes_part_names("HERMES_LOGIN_RELAY_B64", 3), "HERMES_LOGIN_PROBE_B64"]),
+        (";", ["unset", "HERMES_LOGIN_RELAY_KEY", *hermes_part_names("HERMES_LOGIN_RELAY_B64"), "HERMES_LOGIN_PROBE_B64"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
                "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
     ]
@@ -873,12 +873,14 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     for name in hermes_b64_names():
         if not str(variables.get(name, "")).startswith("<operator:"):
             errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
-    for name, rel, parts in HERMES_B64_FILES:
+    if HERMES_PART_CHARS > RAILWAY_VARIABLE_MAX:
+        errors.append("HERMES_PART_CHARS %d is over the Railway limit %d" % (HERMES_PART_CHARS, RAILWAY_VARIABLE_MAX))
+    for name, rel, _ in HERMES_B64_FILES:
         try:
             chars = 4 * ((len((repo_root / "infra" / "hermes" / rel).read_bytes()) + 2) // 3)
         except OSError:
             continue  # named above: the sha256 pass already reported the unreadable file
-        declared = sum(1 for part in hermes_part_names(name, parts) if part in variables)
+        declared = sum(1 for part in hermes_part_names(name) if part in variables)
         if chars > declared * HERMES_PART_CHARS:
             errors.append(
                 "hermes %s does not fit: infra/hermes/%s is %d base64 characters and the catalog has %d variable(s) of %d (Railway refuses "

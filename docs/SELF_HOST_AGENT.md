@@ -2565,7 +2565,8 @@ generator now do for you; you still read the lock, and the model key stays yours
   is shut and a photo message is an ordinary conversation turn (no error card). Set it
   only after the Hermes service runs the new gate, and update an existing Railway project
   in this order: (1) add `HERMES_MEDIA_DELIVERY_STRICT=1` to hermes; (2) redeploy
-  `HERMES_LOCKGATE_B64` (with its parts `_2`…`_5`, see `infra/railway/README.md`) and the start command's checksum together (the new gate refuses
+  `HERMES_LOCKGATE_B64` (with its parts `_2`…`_5`: Railway refuses a value over 32,768 characters, and each line of
+  `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000` is one variable) and the start command's checksum together (the new gate refuses
   to start Hermes without (1), so (2) alone stops the agent); (3) when the `LOCKGATE` line
   of the deploy log shows `"media_strict": true`, set
   `OORT_HOSTED_MEDIA_STRICT=1` last. Only an exact `1` opens the door. In both

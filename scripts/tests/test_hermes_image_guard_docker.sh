@@ -561,6 +561,8 @@ if "FAILED" not in text("railway-start-edited", "stdout") + text("railway-start-
     failures.append("railway-start-edited: sha256sum did not report the edited file")
 if text("railway-start-relay", "rc").strip() != "0" or "/tmp/login_relay.py: OK" not in text("railway-start-relay", "stdout"):
     failures.append("railway-start-relay: the joined relay parts did not pass the checksum (rc %s)" % text("railway-start-relay", "rc").strip())
+if "/tmp/lockgate.py: FAILED" not in text("railway-start-part", "stdout") + text("railway-start-part", "stderr"):
+    failures.append("railway-start-part: sha256sum did not report the short gate")
 if "HERMES_IMAGE_GUARD_B64" not in text("railway-start-missing", "stderr"):
     failures.append("railway-start-missing: the shell did not name the missing variable")
 # the shipped templates carry the flag (the runs above passed it from them); without it the SAME start command is refused by the
@@ -656,7 +658,7 @@ print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s),
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
-print("OK: %d in-image scenarios (gate) + 13 start-command runs + the live gateway boot" % len(
+print("OK: %d in-image scenarios (gate) + 15 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
