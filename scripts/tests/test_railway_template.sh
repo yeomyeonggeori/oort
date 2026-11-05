@@ -272,7 +272,7 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   hermes-config-check-dropped hermes-no-guard-install hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
-  hermes-relay-key-not-unset hermes-relay-unconditional \
+  hermes-relay-key-not-unset hermes-relay-part-not-unset hermes-gate-part-not-joined hermes-gate-parts-too-few hermes-relay-unconditional \
   api-github-key-dropped worker-github-key hermes-github-key worker-github-key-renamed \
   extra-service-github-key api-public-base-dropped api-public-base-http \
   api-public-base-wrong-host worker-public-base \

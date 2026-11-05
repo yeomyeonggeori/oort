@@ -38,17 +38,22 @@ import {ExpressionImage} from './ExpressionImage';
 import {ExpressionImportForm} from './ExpressionImportForm';
 import {ExpressionMakeEntry} from './ExpressionMakeEntry';
 import {useExpressions} from './ExpressionProvider';
-import {browseExpressions, type ExpressionView} from './expressionViews';
+import {
+  browseExpressions,
+  expressionActionOf,
+  type ExpressionView,
+} from './expressionViews';
 import {
   useExpressionMessages,
   type PlainMessageKey,
 } from './useExpressionMessages';
 
-type Filter = 'emoji' | 'sticker' | 'gif' | 'recent' | 'frequent';
+// 반응 고르개의 「우리 팀」 칸이 쓰는 옛 모양의 거르기 줄. 「이모티콘」 하나로 모았다(owner 11-05 #5330): 앞 판의 「이모지」·「스티커」는
+// 둘 다 거르지 않는 칸(전체)이었으므로 하나로 합쳤고, 「우리 팀 GIF」는 「GIF」다.
+type Filter = 'emoji' | 'gif' | 'recent' | 'frequent';
 const FILTERS = [
-  {id: 'emoji', label: '이모지'},
-  {id: 'sticker', label: '스티커'},
-  {id: 'gif', label: '우리 팀 GIF'},
+  {id: 'emoji', label: '이모티콘'},
+  {id: 'gif', label: 'GIF'},
   {id: 'recent', label: '최근'},
   {id: 'frequent', label: '자주'},
 ] as const;
@@ -61,7 +66,6 @@ const TILE_CELL = 72;
 /** 탭마다의 빈 보관함 안내 — 어디서 채우는지까지 한 줄로 말한다. */
 const EMPTY_COPY: Readonly<Record<ExpressionView, PlainMessageKey>> = {
   emoticon: 'expressions.sheet.emptyEmoticon',
-  team: 'expressions.sheet.emptyTeam',
   gif: 'expressions.sheet.emptyGif',
 };
 
@@ -74,15 +78,18 @@ export function TeamExpressionPicker({
   onChapterChange,
 }: {
   query: string;
-  onSelect: (token: string) => void;
+  /** 고른 등록의 `:이름:` 과 그 등록. 시트(`view`)는 등록이 정하는 일(`expressionActionOf`)로 길을 가른다. */
+  onSelect: (token: string, item: Expression) => void;
   /**
-   * `reaction`: 고르면 바로 넘긴다. `message`: 큰 그림을 먼저 미리 보고 「보내기」를 한 번 더 눌러야 넘긴다(ADR-0218 D1).
-   * `insert`: 고르면 바로 넘긴다 — 호스트가 그 이름을 입력칸에 넣는다(미리보기 없음, #4942).
+   * 옛 모양(`view` 없음, 반응 고르개)의 동작. `reaction`: 고르면 바로 넘긴다. `message`: 큰 그림을 먼저 미리 보고 「보내기」를 한 번 더
+   * 눌러야 넘긴다(ADR-0218 D1). `insert`: 고르면 바로 넘긴다 — 호스트가 그 이름을 입력칸에 넣는다(미리보기 없음, #4942).
+   * **`view` 가 있으면 이 값을 읽지 않는다**: 한 보기 안에 두 동작이 함께 서므로 등록 하나가 정한다(큰 것은 미리 보고 보낸다 ·
+   * 작은 것은 입력칸에 넣는다, `expressionActionOf`).
    */
   mode?: 'reaction' | 'message' | 'insert';
   /**
    * 입력창 표현 시트의 탭(#4942): 안쪽 필터 줄 없이 이 보기 하나만 그린다(`expressionViews.ts` 머리말). 주지 않으면
-   * 옛 모양(이모지·스티커·GIF·최근·자주 필터 줄)이고 반응 고르개가 그렇게 쓴다.
+   * 옛 모양(이모티콘·GIF·최근·자주 필터 줄)이고 반응 고르개가 그렇게 쓴다.
    */
   view?: ExpressionView;
   /** 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 간다. 호스트가 대화로 가는 길을 줄 때만 서고, 시트를 먼저 내린다. */
@@ -110,9 +117,13 @@ export function TeamExpressionPicker({
   const [selectionError, setSelectionError] = useState(false);
   const selection = useRef(0);
   const locked = useRef(false);
-  const tiles = view === 'emoticon' || view === 'gif';
-  // 이름 줄은 옛 모양에서는 이모지 필터만 빼고, 시트에서는 작은 칸(팀 이모지)만 뺀다.
-  const captioned = view ? view !== 'team' : filter !== 'emoji';
+  // 시트의 두 보기는 모두 큰 칸(`tile`)이다 — 작은 것과 큰 것이 한 보기에 서도 칸 크기를 하나로 맞춘다(`expressionViews.ts` 머리말).
+  const tiles = view !== undefined;
+  // 이름 줄은 옛 모양에서는 전체(이모티콘) 필터만 빼고, 시트에서는 늘 둔다.
+  const captioned = view ? true : filter !== 'emoji';
+  /** 한 등록을 고르면 하는 일. 시트(`view`)는 등록이 정하고, 옛 모양은 `mode` 가 정한다. */
+  const modeOf = (item: Expression): 'reaction' | 'message' | 'insert' =>
+    view ? (expressionActionOf(item) === 'send' ? 'message' : 'insert') : mode;
   const columns = Math.max(
     1,
     Math.floor(
@@ -185,7 +196,7 @@ export function TeamExpressionPicker({
       return;
     }
     Keyboard.dismiss();
-    onSelect(buildExpressionMessage(active).body);
+    onSelect(buildExpressionMessage(active).body, active);
   };
   const notice =
     state === 'offline'
@@ -241,7 +252,7 @@ export function TeamExpressionPicker({
           ))}
         </View>
       )}
-      {store && view !== 'gif' && !(current && mode === 'message') ? (
+      {store && view !== 'gif' && !current ? (
         <ExpressionAddMenu
           canAdd={canAdd}
           offline={state === 'offline'}
@@ -249,7 +260,7 @@ export function TeamExpressionPicker({
           onMake={() => setChapter('make')}
         />
       ) : null}
-      {current && mode === 'message' ? (
+      {current ? (
         <View style={styles.preview} testID="expression-send-preview">
           {/* 미리보기는 서 있는 동안 늘 보인다 — `visible` 이라 동작 줄이기만 정지 그림(thumb)으로 가르고, 움직이면 4회 뒤 멈춘다. */}
           <ExpressionImage expression={current} size="large" visible />
@@ -295,6 +306,10 @@ export function TeamExpressionPicker({
           windowSize={5}
           keyboardShouldPersistTaps="handled"
           style={styles.list}
+          // 마지막 줄이 시트 바닥·홈 표시 줄에 붙지 않게 한다(기본 탭의 격자와 같은 바닥 여백, #5330).
+          contentContainerStyle={{
+            paddingBottom: Math.max(insets.bottom, space.lg),
+          }}
           ListEmptyComponent={
             <View
               style={styles.notice}
@@ -329,15 +344,15 @@ export function TeamExpressionPicker({
                   accessibilityRole="button"
                   accessibilityLabel={expressionAltText(item)}
                   accessibilityHint={formatMessage(
-                    mode === 'message'
+                    modeOf(item) === 'message'
                       ? 'expressions.sheet.hintPreview'
-                      : mode === 'insert'
+                      : modeOf(item) === 'insert'
                       ? 'expressions.sheet.hintInsert'
                       : 'expressions.sheet.hintReact',
                   )}
                   disabled={selecting}
                   onPress={() => {
-                    if (mode === 'message') setPreview(item);
+                    if (modeOf(item) === 'message') setPreview(item);
                     else void choose(item);
                   }}
                   style={[

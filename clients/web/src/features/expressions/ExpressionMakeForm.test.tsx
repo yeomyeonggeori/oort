@@ -703,7 +703,7 @@ describe("＋ 메뉴", () => {
   });
 });
 
-describe("이모지 고르개 안에서", () => {
+describe("이모티콘 고르개 안에서", () => {
   // 실제 호스트: 포인터 기기에서는 모달 팝오버다. Radix 가 ResizeObserver 를 부르므로 jsdom 에 빈 구현을 둔다.
   function Host({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
     const [open, setOpen] = useState(true);
@@ -713,7 +713,7 @@ describe("이모지 고르개 안에서", () => {
       <EmojiPickerDialog open={open} onOpenChange={(next) => { setOpen(next); onOpenChange(next); }} onPick={() => {}} opener={opener} anchor={opener} purpose="insert" testId="picker" />
     </>;
   }
-  // 기본 이모지 표가 선택 칸을 스크롤해 보이게 하는데 jsdom 에는 그 함수가 없다.
+  // 기본 그림 문자 표가 선택 칸을 스크롤해 보이게 하는데 jsdom 에는 그 함수가 없다.
   const stubBrowserOnlyApis = () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     Object.defineProperty(Element.prototype, "scrollIntoView", { value: () => {}, configurable: true, writable: true });
@@ -724,7 +724,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Emoticons" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
@@ -748,7 +748,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await view.findByRole("button", { name: "Emoticons" }));
     const manage = await view.findByRole("button", { name: "파티 앵무새 관리" });
     fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
     fireEvent.keyDown(manage, { key: "Enter" });
@@ -777,7 +777,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Emoticons" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown(await mounted.view.findByRole("menu"), { key: "Escape" });

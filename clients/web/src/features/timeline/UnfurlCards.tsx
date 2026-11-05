@@ -418,17 +418,17 @@ export function UnfurlCards({
 
   const removeControl = (index: number) =>
     index === 0 && canRemove && onRemove ? (
-      // X는 상시 노출이 의도다: hover 표출은 카드 이미지 위에서 발견 불가능하고,
-      // 제거는 이 카드의 유일한 소유자 액션이라 숨길 이유가 없다(리뷰 Nit-1 기록).
-      // 사진 위에 설 때도 불투명 토큰 칩(bg-surface-raised + line-strong)을 든다.
-      // 반투명 스크림은 OG 배경이 임의 색이라 대비 상한이 없고, hover 그릇은
-      // (hover: none)에 구제가 없다 (B-1).
+      // ✕는 카드에 호버하거나 키보드 초점이 들 때만 선다(owner 2026-11-05, #5328). 이 칸에서 `상시 노출`을 뒤집었다: 이전 판의
+      // 근거(리뷰 Nit-1·B-1)는 hover 표출이 (hover: none)에 구제가 없다는 것이었고, 그 구제가 `pointer-hover`다 — 호버가 되는 입력에서만
+      // 숨기고 터치는 늘 보인다(손가락에는 호버가 없다). 키보드는 그대로 닿고(방향키·Tab) 닿는 순간 드러난다(`focus-visible`·카드 안
+      // `:focus-visible`). 테두리 없는 원이고, 면은 불투명 토큰(bg-surface-raised) + 옅은 그림자다: 반투명 스크림은 OG 배경이 임의 색이라
+      // 대비 상한이 없다. ✕는 글 쪽 끝 여백(`pr-control-lg`)에 서서 그림 위에 서지 않는다.
       <button
         type="button"
         data-row-action=""
         aria-label="링크 미리보기 제거"
         title="링크 미리보기 제거"
-        className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
         onClick={(event) => {
           setOpener(event.currentTarget);
           setError(false);
@@ -448,7 +448,7 @@ export function UnfurlCards({
           // 자체가 없으므로 이 자리는 실제 불러오는 기록만 나타낸다.
           <div
             key={unfurl.id}
-            className="relative isolate rounded-md bg-surface-muted p-2"
+            className="group/unfurl relative isolate rounded-md bg-surface-muted p-2"
             role="status"
             aria-label="링크 미리보기를 불러오는 중"
             data-testid="unfurl-pending"
@@ -468,7 +468,7 @@ export function UnfurlCards({
           // 테두리 없는 카드(#4882): 면은 보조 채움 하나이고, 눌림·호버는 안쪽 링크가 입힌다.
           <div
             key={unfurl.id}
-            className="relative isolate flex rounded-md bg-surface-muted"
+            className="group/unfurl relative isolate flex rounded-md bg-surface-muted"
           >
             <UnfurlCard unfurl={unfurl} preference={preference} />
             {removeControl(index)}

@@ -269,7 +269,7 @@ describe("스레드 입력창은 채널 입력창과 같은 카드다 (#5324)", 
     await mount();
     const actions = need("thread-composer-actions");
     const labels = Array.from(actions.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels.slice(0, 3)).toEqual(["파일 첨부", "멘션 넣기", "이모지 넣기"]);
+    expect(labels.slice(0, 3)).toEqual(["파일 첨부", "멘션 넣기", "이모티콘 넣기"]);
     // 서식 단추는 채널 입력창의 그것과 같은 부품이다(jsdom 은 터치 기기가 아니라 `useComposerFormat` 이 가능하다고 답한다). 이름이 같다.
     const format = need("thread-composer-format-trigger");
     expect(format.getAttribute("aria-label")).toBe("서식");
