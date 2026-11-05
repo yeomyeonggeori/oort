@@ -122,6 +122,14 @@ export const NON_SECRET_KEYS = {
    */
   failedSends: 'momo.mobile.composer.failed-sends.v1',
   /**
+   * 대화 안 검색의 최근 검색어 (#5364). 열쇠 `워크스페이스:채널` → 말 목록(최근이 앞, 한 대화에 최대 6개)인 지도 한 덩이이고, 수명·정원은
+   * `features/conversation/conversationSearchRecent.ts` 가 진다. **서버로 가지 않는다** — 이 폰에서 이 대화를 찾은 말이 남을 뿐이다.
+   *
+   * 여기 있어도 되는 이유: 사람이 자기 손으로 친 검색어가 이 기기에 그대로 있는 것이고 토큰과는 다른 종류의 값이다. 그리고 안 보낸 글(초안)과
+   * 같은 이유로 **로그아웃이 지운다**(`clearAllConversationSearchRecent`, `session/useSession.tsx`) — 무엇을 찾았는지는 다음 사람에게 보일 일이 아니다.
+   */
+  conversationSearchRecent: 'momo.mobile.conversation-search.recent.v1',
+  /**
    * 라이트/다크/시스템 중 사람이 고른 것 (U2, 옛 키 — 읽기 전용). 값은 `ThemeChoice` 세
    * 낱말 중 하나다. **키가 없다는 것과 「시스템」을 골랐다는 것은 다르다**: 이 키와 새 키
    * (`appearance`)가 모두 없을 때만 폰의 기본(라이트)이고, 하나라도 있으면 거기 적힌 선택이
@@ -193,6 +201,14 @@ export const NON_SECRET_KEYS = {
    * 서버·다른 멤버 화면과 무관하다. 비밀이 아니다.
    */
   linkPreview: 'momo.mobile.link-preview.v1',
+  /**
+   * 검색 탭의 「최근 검색」과 「최근 연 대화」 (#5365). 열쇠 `작업공간:멤버` → {검색어 최대 6개, 채널 id 최대 10개}인 지도 한 덩이의
+   * JSON 이고, 정원·중복·길이 규칙과 로그아웃 삭제는 `features/search/searchRecents.ts` 가 진다. 서버는 이 목록을 본 적이 없다.
+   *
+   * 여기 있어도 되는 이유: 사람이 방금 화면에서 친 글자와 채널 id 일 뿐이다(토큰·본문 없음). 잃으면 목록이 비어 시작할 뿐이다.
+   * 다만 타인이 이 폰에 들어왔을 때 앞사람의 검색어가 비치면 안 되므로, 열쇠에 멤버를 넣고 로그아웃이 통째로 비운다.
+   */
+  searchRecents: 'momo.mobile.search.recents.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

@@ -553,6 +553,8 @@ describe('머리 알약의 한 줄 규칙 — 순수 판정 (#4319)', () => {
     expect(headerSlotWidth({huddle: true, menu: true})).toBe(2 * CONV.circle + CONV.headGap);
     expect(headerSlotWidth({huddle: true, menu: false})).toBe(CONV.circle);
     expect(headerSlotWidth({huddle: false, menu: false})).toBe(CONV.circle);
+    // 대화 안 검색의 돋보기(#5364)도 같은 원이다 — ⋮ 옆에 서면 양쪽 칸이 원 둘 폭이 되어 알약이 가운데에 선다.
+    expect(headerSlotWidth({huddle: false, menu: true, search: true})).toBe(2 * CONV.circle + CONV.headGap);
   });
 
   it('알약이 쓸 수 있는 가로: 창 폭 − 좌우 여백 − 양쪽 칸 − 칸 사이 간격 둘', () => {
