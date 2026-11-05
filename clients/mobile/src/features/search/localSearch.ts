@@ -85,6 +85,28 @@ export function matchName(query: string, text: string): NameMatch | null {
   return {rank: 4, ranges};
 }
 
+/**
+ * `text` 안에서 `query` 가 나오는 곳 **전부**(왼쪽부터, 서로 겹치지 않게). 말풍선 안 찾은 글자 강조(#5384)가 쓴다 — 서버 검색(ILIKE)이 대소문자를 접어 찾으므로 여기서도 접는다.
+ * 위치는 코드포인트다(`highlightParts` 와 같은 단위). 질의가 비었거나 글에 없으면 `[]`.
+ */
+export function queryRanges(text: string, query: string): MatchRanges {
+  const needle = foldedChars(query.trim());
+  const hay = foldedChars(text);
+  const size = needle.length;
+  if (size === 0 || hay.length < size) return [];
+  const ranges: Array<[number, number]> = [];
+  let from = 0;
+  while (from + size <= hay.length) {
+    if (needle.every((char, i) => hay[from + i] === char)) {
+      ranges.push([from, from + size]);
+      from += size;
+    } else {
+      from += 1;
+    }
+  }
+  return ranges;
+}
+
 export interface HighlightPart {
   text: string;
   match: boolean;

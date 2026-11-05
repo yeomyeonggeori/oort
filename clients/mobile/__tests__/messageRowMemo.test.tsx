@@ -123,6 +123,8 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // 동일성이고, 둘 다 **화면에 보이는 것**을 바꾸므로 비교자가 반드시 봐야 한다.
   deletedRepeat: {deletedRepeat: 3},
   landed: {landed: true},
+  // #5384. 대화 안 검색으로 착지한 행의 찾은 말. 문자열이라 값이 곧 동일성이고, 비교자가 이것을 안 보면 선택을 옮겨도 이전 결과의 칠이 남는다.
+  searchMatch: {searchMatch: '배포'},
   nowMs: {nowMs: BASE_MS + 60_000},
   onResend: {onResend: () => {}},
   actions: {

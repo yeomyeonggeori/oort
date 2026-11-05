@@ -2270,6 +2270,11 @@ export interface MessageRowProps {
    * `LandedTintFade` 가 든다 — 이 prop 이 참에서 거짓이 되는 순간에만 일한다.
    */
   landed?: boolean;
+  /**
+   * 대화 안 검색으로 착지한 메시지라면 **찾은 말**(#5384). 목록이 선택한 결과의 행에만 건넨다. 본문 말풍선 안에서 이 말과 같은 글자가 칠해진다(`MessageBody.searchMatch`) —
+   * 착지 틴트(`landed`, 1.5초)와 달리 검색 막대가 서 있는 동안 남는다. 문자열 하나라 동일성 비교로 충분하다.
+   */
+  searchMatch?: string;
   nowMs: number;
   /** A server-stored `failed` row offers a fresh send, not a replay. */
   onResend?: (message: Message) => void;
@@ -2464,6 +2469,7 @@ function MessageRowInner({
   pausedRepeat,
   deletedRepeat,
   landed,
+  searchMatch,
   nowMs,
   onResend,
   actions,
@@ -3421,6 +3427,8 @@ function MessageRowInner({
                 bubble={rowBubble}
                 // 인용 머리(#5381): 이 본문의 첫 말풍선 안 윗칸.
                 quoteHead={quoteHeadSpec}
+                // 대화 안 검색으로 착지한 행이면 찾은 글자(#5384). 본문 글자 조각에서만 칠해지고 인용 머리는 칠하지 않는다.
+                searchMatch={searchMatch}
               />
             ) : null}
 
@@ -3916,6 +3924,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   pausedRepeat: true,
   deletedRepeat: true,
   landed: true,
+  searchMatch: true,
   nowMs: true,
   onResend: true,
   actions: true,
@@ -3991,6 +4000,8 @@ export function sameMessageRowProps(
     // 그 행이 다시 그려진다 — 채널의 다른 고정은 이 행을 건드리지 않는다.
     a.pinned === b.pinned &&
     a.landed === b.landed &&
+    // #5384. 문자열(없음 포함)이라 동일성으로 충분하다. 선택한 결과가 바뀔 때 그 행과 앞 행 둘만 다시 그려진다.
+    a.searchMatch === b.searchMatch &&
     a.nowMs === b.nowMs &&
     a.onResend === b.onResend &&
     a.actions === b.actions &&

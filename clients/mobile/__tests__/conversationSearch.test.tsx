@@ -89,7 +89,8 @@ function message(seq: number, over: Record<string, unknown> = {}) {
     hlcCount: 0,
     authorMemberId: OTHER_ID,
     type: 'text',
-    body: `${seq}번째 메시지`,
+    // 불러온 창(100~103)의 글은 검색 결과의 스니펫과 같은 말이다 - 착지한 말풍선 안에서 찾은 글자가 실제로 칠해지는지(#5384) 잰다.
+    body: seq >= 101 && seq <= 103 ? `${seq}번 배포 일정 확인` : `${seq}번째 메시지`,
     state: 'sent',
     createdAtMs: T0 + seq * 1000,
     ...over,
@@ -226,6 +227,19 @@ function jumpTargetOf(): {messageId: string; seq: number | null; token: number} 
   );
   const found = nodes[0]?.props?.jumpTarget;
   return (found as {messageId: string; seq: number | null; token: number}) ?? null;
+}
+
+/** 찾은 글자를 칠하라고 건네받은 행들(`MessageRow` 의 `searchMatch`) - 고른 결과 하나뿐이어야 한다. */
+function highlightedIds(): string[] {
+  type PropsNode = {props?: Record<string, unknown>};
+  const ids: string[] = screen.UNSAFE_root
+    .findAll(
+      (node: PropsNode) =>
+        typeof node.props?.searchMatch === 'string' &&
+        typeof (node.props?.message as {id?: unknown})?.id === 'string',
+    )
+    .map((node: PropsNode) => (node.props?.message as {id: string}).id);
+  return Array.from(new Set<string>(ids));
 }
 
 async function openConversation(): Promise<void> {
@@ -506,6 +520,44 @@ describe('#5364 대화 안 검색 — 이동', () => {
     await waitFor(() => expect(screen.queryByTestId('conversation-search-row')).toBeNull());
     expect(screen.queryByTestId('conversation-search-bar')).toBeNull();
     expect(StyleSheet.flatten(screen.getByTestId('conversation-composer-stack').props.style)?.display).not.toBe('none');
+  });
+});
+
+describe('#5384 대화 안 검색 — 말풍선 안 찾은 글자 강조', () => {
+  it('고른 결과의 말풍선 본문 안에서 찾은 글자가 칠해지고, ↑ 로 옮기면 따라가며, 목록으로 돌아가면 걷힌다', async () => {
+    installFetch();
+    await search('배포');
+    // 결과 목록을 보는 동안에는 대화 쪽에 찾은 글자를 건네지 않는다.
+    expect(highlightedIds()).toEqual([]);
+
+    fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe('msg-103'));
+    // 고른 결과(103)의 행에만 찾은 말이 건너가고, 말풍선 안에서 그 글자가 칠해진다(착지 틴트가 물러난 뒤에도 막대가 서 있는 동안 남는다).
+    await waitFor(() => expect(highlightedIds()).toEqual(['msg-103']));
+    expect(screen.getAllByTestId('message-search-match').map(node => node.props.children)).toEqual(['배포']);
+
+    // ↑ — 더 오래된 결과(102)로 옮기면 강조도 따라간다(앞 행은 걷힌다).
+    fireEvent.press(screen.getByTestId('conversation-search-older'));
+    await waitFor(() => expect(highlightedIds()).toEqual(['msg-102']));
+    expect(screen.getAllByTestId('message-search-match')).toHaveLength(1);
+
+    // 「목록」으로 돌아가면 대화에서는 걷힌다.
+    fireEvent.press(screen.getByTestId('conversation-search-list'));
+    await waitFor(() => expect(screen.getByTestId('conversation-search-results')).toBeTruthy());
+    expect(highlightedIds()).toEqual([]);
+    expect(screen.queryAllByTestId('message-search-match')).toHaveLength(0);
+  });
+
+  it('검색을 끝내면 칠이 남지 않는다', async () => {
+    installFetch();
+    await search('배포');
+    fireEvent.press(screen.getAllByTestId('conversation-search-result')[0]);
+    await waitFor(() => expect(highlightedIds()).toEqual(['msg-103']));
+
+    fireEvent.press(screen.getByTestId('conversation-search-close'));
+    await waitFor(() => expect(screen.getByTestId('conversation-menu')).toBeTruthy());
+    expect(highlightedIds()).toEqual([]);
+    expect(screen.queryAllByTestId('message-search-match')).toHaveLength(0);
   });
 });
 

@@ -1415,6 +1415,18 @@ export default function ConversationScreen({
     [onJumpToMessage],
   );
   const convSearch = useConversationSearch({workspaceId, channelId, onJump: onSearchJump});
+  // 고른 결과의 말풍선 안에 찾은 글자를 칠한다(#5384). 결과를 골라 이동한 동안(`selected` 가 서 있고 막대가 선 동안)만 값이 있다 — 목록 보기로 돌아가거나 검색을 끝내면 `null`.
+  // 착지 틴트(1.5초)와 달리 막대가 서 있는 동안 남는다. 값이 바뀔 때만 새 객체다(`Timeline` 의 `renderItem` 의존성).
+  const searchSelectedId =
+    convSearch.selected === null ? null : (convSearch.hits[convSearch.selected]?.messageId ?? null);
+  const searchSelectedQuery = convSearch.settledQuery;
+  const searchHighlight = useMemo(
+    () =>
+      searchSelectedId === null || searchSelectedQuery === ''
+        ? null
+        : {messageId: searchSelectedId, query: searchSelectedQuery},
+    [searchSelectedId, searchSelectedQuery],
+  );
   endSearchForWriting.current = () => {
     if (!convSearch.active) return;
     convSearch.close();
@@ -2345,6 +2357,7 @@ export default function ConversationScreen({
               onDiscardPending={onDiscardPending}
               failureKinds={failureKinds}
               jumpTarget={jumpTarget ?? undefined}
+              searchHighlight={searchHighlight}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
               onReaderTookList={onReaderTookList}
