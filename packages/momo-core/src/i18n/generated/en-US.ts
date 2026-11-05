@@ -5308,6 +5308,54 @@ export const catalog: MessageCatalog = {
       "value": "Checking your notification settings."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts wait for the time you choose, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed. The server only learns that you are active, and other members can't see it."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5 min"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "Delay phone alerts while I use the desktop"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the phone alert delay."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1 min"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the phone alert delay. Try again in a moment."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
