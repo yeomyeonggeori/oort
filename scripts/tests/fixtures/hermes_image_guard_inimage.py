@@ -448,7 +448,8 @@ CONNECTOR_ENV = {"OORT_COHOSTED_AGENT_CONNECTOR_APPS": CONNECTOR_APPS, "GOOGLE_O
 
 def catalog_configs():
     """`{name: text}` of every config the gate accepts, rebuilt from the repo's own pieces by the repo's own renderer (stdlib only, mounted
-    read-only at /oort): the default config and the connector-mode config of each model fragment (#4935)."""
+    read-only at /oort): the default config, the default config with the team model fragment (#5323) and the connector-mode config of each
+    model fragment (#4935)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("render_model_config", os.path.join(OORT, "render_model_config.py"))
     renderer = importlib.util.module_from_spec(spec)
@@ -458,9 +459,10 @@ def catalog_configs():
 
 def scenario_connector_configs():
     """#4935: the REAL gate on every config of the catalog, in this image, with the connector rules of the real Hermes `load_config` and
-    tool resolution: the default config and the connector-mode config of each of the four model fragments must each be accepted by name
-    (`config_accepted_as`), the connector ones with no web search and no picture tool selected and no `image_guard` evidence (they have
-    no picture plugin), the default one with the picture tool. Not one gate run: the record carries one result per config."""
+    tool resolution: the default config, the default config with the team model fragment and the connector-mode config of each of the four
+    model fragments must each be accepted by name (`config_accepted_as`), the connector ones with no web search and no picture tool selected
+    and no `image_guard` evidence (they have no picture plugin), the two default ones with the picture tool. Not one gate run: the record
+    carries one result per config."""
     configs, _sha = catalog_configs()
     entries = {}
     for name, raw in configs.items():

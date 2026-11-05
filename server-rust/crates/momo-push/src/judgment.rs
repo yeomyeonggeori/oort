@@ -48,6 +48,33 @@
 //!   fails any of these selects NO reason — like the idle card it must not fall
 //!   through to `dm`, so turning the switch off really silences it. Everyone else
 //!   in the channel is judged as for any message.
+//! * **Work permission request (`work_permission`, ADR-0188 D5·D8, #5340)** — a member host's ACP
+//!   permission request is recorded in the session's thread as a System message
+//!   (`props.kind = work_session_event`, `props.event_type = approval.requested`) and is always
+//!   pushed — to the one person who can decide it: the session's owner, who is the host's owner
+//!   (ADR-0188 D3; the decision route's own two conditions), and nobody else. Not the room's other
+//!   humans, and not through the `dm` arm: a request that fails any condition below selects NO
+//!   reason, so a DM never turns it into a plain DM push. The owner is a recipient even when they
+//!   wrote the event (the session speaks as the owner unless a personal agent was called), which is
+//!   why the author exemption of the recipients join covers this one event and no other session
+//!   event. The conditions: a System message written by the session's owner or its persona; the
+//!   session is still `running`, on a host that is the owner's own and not revoked; the request
+//!   offers an `allow_once`/`reject_once` option (the only ones the bridge records,
+//!   `momo_t3::work_permission::bridgeable_options`); and it is younger than its own deadline
+//!   ([`WORK_PERMISSION_PUSH_WINDOW_SECS`]). The wire reason is `approval_request` and the category
+//!   `momo.approval.open` (「열어서 결정」: no lock-screen allow, the app opens on the request, D5), so
+//!   no app, relay or NSE needs a new word. `approval_id` is the request's own id — the host-issued
+//!   `event_id` that the decision route and the owner-only preview are keyed by; `thread_id` is the
+//!   session's root and `message_id` the event, so a tap can find the session and the request
+//!   with ids alone. Nothing of the request's content is read: the option **kinds** only (a JSON-path
+//!   existence test), never their names, the tool's title or the preview — those are the owner's to
+//!   read in the app. The member's own switches apply as for any approval (ADR-0206 D5): the
+//!   `approval` phone switch off, DND and a channel mute each suppress it, and it is not delayed or
+//!   held back by the reading windows the work-complete pushes have. It reads only tables the
+//!   notifier role already reads (`work_session`, `work_host`, `message`): the request's pending
+//!   status is not read from `work_permission_request`, so a request that was already decided or
+//!   cancelled before the candidate is judged can still push (the window above bounds that to the
+//!   request's deadline, and the app's card is the authority on what is still open).
 //! * **An agent's answer to you (ADR-0204 D8, #3929)** — a run's closing line pushes
 //!   the person whose message the run answered: the final answer, the approval-expiry
 //!   result, the stall notice. "Answers" is a fact the line carries — `reply_to_id`
@@ -195,7 +222,8 @@
 //!
 //! Reason precedence per member is the `CASE` arm order below: the three work
 //! reasons (`resume_offer`, `work_session_idle`, `work_run_done` — each claims its
-//! message for the one person it names) > `approval_request` > `mention` > `dm` > an
+//! message for the one person it names) > `work_permission` (the same: its message is claimed for
+//! the session's owner) > `approval_request` > `mention` > `dm` > an
 //! agent's answer to you > a reply in a thread you follow. The last two never outrank a
 //! mention or a DM, and only a person nothing else selected reaches them, so one message
 //! carries one reason.
@@ -213,8 +241,8 @@
 //! hand-edited `kinds` cannot silence a push by accident. Where a switched-off arm sends the message
 //! depends on what the arm is *about*:
 //!
-//! * An arm about the **message's shape** — the three work reasons, `approval`, and a DM channel's
-//!   `dm` — claims the message whether or not its switch is on, and an off switch **suppresses**. It
+//! * An arm about the **message's shape** — the three work reasons, `approval`, `work_permission`, and a
+//!   DM channel's `dm` — claims the message whether or not its switch is on, and an off switch **suppresses**. It
 //!   must never fall through to a weaker reason that would push the same card as something else: an
 //!   approval card in an agent DM does not come back as a `dm` push, a work answer does not come back as
 //!   a `dm`, and turning `dm` off silences the agent's answer in that DM too.
@@ -264,6 +292,18 @@ pub const WORK_COMPLETE_MIN_RAN_MS: i64 = 60_000;
 /// when their read cursor in its channel advanced within this many seconds
 /// before the idle card, or already covers the card.
 pub const WORK_COMPLETE_FOREGROUND_WINDOW_SECS: f64 = 30.0;
+
+/// How long a permission request stays worth a push (seconds): the request's own deadline
+/// (ADR-0188 D7 「짧은 TTL」, `momo_t3::work_permission::PERMISSION_REQUEST_TTL_SECONDS`, pinned
+/// equal by `work_permission_push_conformance_pg`). A candidate judged later than this — the
+/// notifier was down, or the candidate kept failing — is for a request the host has already
+/// refused, so it wakes nobody.
+pub const WORK_PERMISSION_PUSH_WINDOW_SECS: i64 = 600;
+
+/// The arm label of a work-session permission request (ADR-0188 D5·D8, #5340): the same wire
+/// reason and notification kind as an `approval`, but a different arm, because its person, its
+/// category and its id are not an `approval` row's.
+pub(crate) const WORK_PERMISSION_ARM: &str = "work_permission";
 
 /// One (member, active token) pair to notify, with the reason that selected it.
 #[derive(Debug, Clone)]
@@ -327,6 +367,7 @@ pub async fn judge_candidate_targets(
 /// | `resume_offer` | `resume_offer` | — (always sent) |
 /// | `work_session_idle`, `work_run_done` | the same | `workDone` |
 /// | `approval` | `approval_request` | `approval` |
+/// | `work_permission` | `approval_request` | `approval` (a work-session permission request, to the session's owner; ADR-0188 D5·D8) |
 /// | `mentionHuman`, `mentionAgent` | `mention` | the same (by the author's kind) |
 /// | `agentAnswer` | `mention` | `agentAnswer` (the agent's answer to you, and the settled-approval
 /// notice to the person who asked) |
@@ -345,6 +386,10 @@ pub(crate) fn decode_arm(label: &str) -> Option<(PushReason, Option<Notification
         ),
         "work_run_done" => (PushReason::WorkRunDone, Some(NotificationKind::WorkDone)),
         "approval" => (
+            PushReason::ApprovalRequest,
+            Some(NotificationKind::Approval),
+        ),
+        WORK_PERMISSION_ARM => (
             PushReason::ApprovalRequest,
             Some(NotificationKind::Approval),
         ),
@@ -374,6 +419,14 @@ async fn judge_targets_for_source(
                   m.props#>>'{result,status}' AS result_status, \
                   m.props->>'owner_member_id' AS owner_member_id, \
                   m.props->>'session_id' AS session_id, \
+                  m.props->>'event_type' AS event_type, \
+                  CASE WHEN m.props->>'event_id' \
+                            ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+                       THEN (m.props->>'event_id')::uuid END AS event_id, \
+                  m.props#>>'{event,work_session_id}' AS event_session_id, \
+                  jsonb_path_exists(m.props, \
+                    '$.event.options[*] ? (@.kind == \"allow_once\" || @.kind == \"reject_once\")') \
+                    AS decidable, \
                   m.props->'turn_started_ms' AS turn_started_ms, \
                   CASE WHEN jsonb_typeof(m.props->'ran_ms') = 'number' \
                        THEN (m.props->>'ran_ms')::numeric END AS ran_ms, \
@@ -537,6 +590,30 @@ async fn judge_targets_for_source(
                                             - make_interval(secs => $4::double precision) ) \
                             ) \
                         THEN 'work_run_done' END \
+                    WHEN (SELECT props_kind FROM msg) = 'work_session_event' \
+                         AND (SELECT event_type FROM msg) = 'approval.requested' THEN \
+                      CASE WHEN (SELECT message_type FROM msg) = 'system' \
+                            AND (SELECT event_id FROM msg) IS NOT NULL \
+                            AND (SELECT decidable FROM msg) \
+                            AND (SELECT created_at FROM msg) \
+                                  >= now() - make_interval(secs => $9::bigint) \
+                            AND EXISTS ( \
+                              SELECT 1 FROM work_session pws \
+                                JOIN work_host pwh \
+                                  ON pwh.workspace_id = $1 AND pwh.id = pws.host_id \
+                               WHERE pws.workspace_id = $1 \
+                                 AND lower(pws.id::text) = lower((SELECT event_session_id FROM msg)) \
+                                 AND pws.channel_id = (SELECT channel_id FROM msg) \
+                                 AND pws.root_message_id = (SELECT root_id FROM msg) \
+                                 AND pws.status = 'running' \
+                                 AND pws.member_id = mem.id \
+                                 AND pwh.owner_member_id = pws.member_id \
+                                 AND pwh.revoked_at IS NULL \
+                                 AND ( pws.member_id = (SELECT author_member_id FROM msg) \
+                                       OR pws.persona_member_id = (SELECT author_member_id FROM msg) ) \
+                            ) \
+                            AND nr0.kinds->'approval'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                        THEN 'work_permission' END \
                     WHEN (SELECT message_type FROM msg) = 'approval_request' \
                          AND mem.kind = 'human' THEN \
                       CASE WHEN EXISTS (SELECT 1 FROM card WHERE status = 'pending') \
@@ -635,6 +712,8 @@ async fn judge_targets_for_source(
               AND ( \
                 ms.member_id <> (SELECT author_member_id FROM msg) \
                 OR (SELECT props_kind FROM msg) IN ('resume_offer', 'work_session_idle') \
+                OR ((SELECT props_kind FROM msg) = 'work_session_event' \
+                    AND (SELECT event_type FROM msg) = 'approval.requested') \
               ) \
          ) \
          SELECT r.member_id, \
@@ -648,6 +727,7 @@ async fn judge_targets_for_source(
                 COALESCE((SELECT root_id FROM msg), (SELECT channel_id FROM msg)) AS thread_id, \
                 (SELECT message_type FROM msg) AS message_type, \
                 (SELECT props_kind FROM msg) AS props_kind, \
+                (SELECT event_id FROM msg) AS event_id, \
                 a.id AS approval_id, \
                 a.action_type AS approval_action_type, \
                 a.approval_payload AS approval_payload \
@@ -690,6 +770,7 @@ async fn judge_targets_for_source(
     .bind(STREAM_PROPS_KEY)
     .bind(approval_settled)
     .bind(channel_id)
+    .bind(WORK_PERMISSION_PUSH_WINDOW_SECS)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -715,6 +796,24 @@ async fn judge_targets_for_source(
         let message_type: String = row.get("message_type");
         let props_kind: Option<String> = row.get("props_kind");
         let member_id: Uuid = row.get("member_id");
+        let work_permission = arm_label == WORK_PERMISSION_ARM;
+        // A work-session permission request is named by the host-issued id of its
+        // `approval.requested` event (the one the decision route and the owner's preview take).
+        // The SQL arm already required it; a missing one would make the relay refuse the pair.
+        let permission_request_id: Option<Uuid> = if work_permission {
+            let id: Option<Uuid> = row.get("event_id");
+            if id.is_none() {
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    message_id = %message_id,
+                    "work permission request has no event id; nobody is pushed"
+                );
+                continue;
+            }
+            id
+        } else {
+            None
+        };
 
         // The approval this message is the card of, when it is one.
         let card = row
@@ -730,8 +829,11 @@ async fn judge_targets_for_source(
         // role/owner conditions narrow that here, through the functions the route
         // calls (`crate::approvers`). Only the `approval_request` reason is
         // narrowed: a resume offer, a work card or a mention on the same message
-        // were chosen by their own rules.
-        if reason == PushReason::ApprovalRequest {
+        // were chosen by their own rules. A work-session permission request is
+        // not an `approval` card: the person it names is the session's owner and
+        // the SQL arm has already applied that rule (ADR-0188 D3), so there is no
+        // card to resolve an audience from.
+        if reason == PushReason::ApprovalRequest && !work_permission {
             let Some(card) = card.as_ref() else {
                 // A card with no `approval` row has nobody to ask. Silent in the
                 // result, loud in the log: this used to surface as the relay's 400.
@@ -773,6 +875,10 @@ async fn judge_targets_for_source(
         });
         let category = if approval_settled {
             PushCategory::Mention
+        } else if work_permission {
+            // ADR-0188 D5: the push's action does not allow from the lock screen; after the
+            // unlock it opens the app on the request. That is the open-in-app category.
+            PushCategory::ApprovalOpen
         } else {
             category_for(&message_type, props_kind.as_deref(), reason, decision)
         };
@@ -791,7 +897,9 @@ async fn judge_targets_for_source(
             category,
             // An approval id is meaningful only for the two approval categories —
             // the relay and the NSE both reject the pair otherwise.
-            approval_id: if category.carries_approval_id() {
+            approval_id: if work_permission {
+                permission_request_id
+            } else if category.carries_approval_id() {
                 card.as_ref().map(|card| card.approval_id)
             } else {
                 None
@@ -850,11 +958,12 @@ mod tests {
     /// Every arm label the statement can produce. A new `THEN '<label>'` in the `recipients` CASE
     /// must be a row of [`decode_arm`] (an unknown label fails the decode so the candidate retries),
     /// and a row of [`decode_arm`] the statement no longer produces is dead.
-    const ARM_LABELS: [&str; 9] = [
+    const ARM_LABELS: [&str; 10] = [
         "resume_offer",
         "work_session_idle",
         "work_run_done",
         "approval",
+        "work_permission",
         "mentionHuman",
         "mentionAgent",
         "agentAnswer",
