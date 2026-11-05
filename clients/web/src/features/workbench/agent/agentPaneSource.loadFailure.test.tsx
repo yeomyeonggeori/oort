@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
-import { ApiError, type WorkSession } from "@momo/core/lib/api";
+import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
