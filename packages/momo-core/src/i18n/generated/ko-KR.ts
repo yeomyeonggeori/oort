@@ -3779,7 +3779,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "더보기"
+      "value": "더 보기"
     }
   ],
   "releaseNotes.popup.title": [

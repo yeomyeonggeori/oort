@@ -34,19 +34,19 @@ import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 // 보는 방법은 설정의 버전별 내용에 있다. 닫는 길은 공용 시트의 것 그대로다(오른쪽 위 원형 X · 스크림 · 끌어내리기 ·
 // VoiceOver escape).
 //
-// 제목은 네 개까지 보이고, 넘치면 카드 안 맨 아래의 「더보기」 행(제자리 펼침 행 `ListRow accessory="expand"`)이 나머지를 **그
+// 제목은 네 개까지 보이고, 넘치면 카드 안 맨 아래의 「더 보기」 행(제자리 펼침 행 `ListRow accessory="expand"`)이 나머지를 **그
 // 자리에서** 펼친다(owner 11-04, #5298: 「그 밖에 N가지」로 접지 않는다). 다시 접지는 않는다: 행은 펼치는 순간 사라지므로
 // VoiceOver 초점이 길을 잃지 않게 처음 새로 선 항목으로 옮긴다(웹 대화상자와 같은 약속). 「더 들어간다」(›)는 아래 「자세히
-// 보기」 행이고, 「더보기」(⌄)는 이 자리에서 고르는 행이다(`ListRow` 가 둘을 가른다).
+// 보기」 행이고, 「더 보기」(⌄)는 이 자리에서 고르는 행이다(`ListRow` 가 둘을 가른다).
 //
 // 「자세히 보기」는 **시트를 먼저 내리고** 설정 페이지를 연다(`closesSheet`, §1 규칙 2: Modal 위에 화면을 쌓지 않는다).
 // 닫는 길이 하나(`onClose`)라서 「봤다」 기록은 거기서만 한다: X 로 닫든 「자세히 보기」로 닫든 같은 소식은 다시 안 뜬다.
 // =============================================================================
 
-/** 작은 시트에 제목을 몇 줄까지 처음 보일까. 넘치는 것은 「더보기」가 한 번에 펼친다. */
+/** 작은 시트에 제목을 몇 줄까지 처음 보일까. 넘치는 것은 「더 보기」가 한 번에 펼친다. */
 const SHOWN_TITLES = 4;
 
-/** 「더보기」가 사라진 뒤 VoiceOver 초점을 처음 새 항목으로 옮기기까지: 네이티브 뷰가 서는 한 틱(`AttachMenu` 의 `focusDelayMs` 와 같다). */
+/** 「더 보기」가 사라진 뒤 VoiceOver 초점을 처음 새 항목으로 옮기기까지: 네이티브 뷰가 서는 한 틱(`AttachMenu` 의 `focusDelayMs` 와 같다). */
 const FOCUS_AFTER_EXPAND_MS = 60;
 
 // testID 는 템플릿 문자열로 짓지 않는다: 직접 문구 장부(`direct-copy.mjs`)가 JSX 안의 템플릿 조각을 문구로 센다.
@@ -76,7 +76,7 @@ export function ReleaseNotesSheet({
   const items = itemsForSurface(note, PHONE_SURFACE);
   const folded = items.length > SHOWN_TITLES && !expanded;
   const shown = folded ? items.slice(0, SHOWN_TITLES) : items;
-  // 눌린 「더보기」 행은 펼치는 순간 사라진다: 초점이 길을 잃지 않게 처음 새로 선 항목이 받는다(낭독이 그 항목부터 읽는다).
+  // 눌린 「더 보기」 행은 펼치는 순간 사라진다: 초점이 길을 잃지 않게 처음 새로 선 항목이 받는다(낭독이 그 항목부터 읽는다).
   useEffect(() => {
     if (!expanded) return undefined;
     const timer = setTimeout(() => {
