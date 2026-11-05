@@ -358,11 +358,11 @@ describe("sending without a preview", () => {
     });
     await sendThreadReply(WS, CH, "root-1", "c-3", "https://news.example/story", {
       suppressUnfurl: true,
-      alsoInChannel: true,
     });
     const [plain, off, on] = bodies();
     expect(plain).not.toHaveProperty("suppressUnfurl");
     expect(off).not.toHaveProperty("suppressUnfurl");
-    expect(on).toMatchObject({ suppressUnfurl: true, alsoInChannel: true, rootId: "root-1" });
+    expect(on).toMatchObject({ suppressUnfurl: true, rootId: "root-1" });
+    expect(on).not.toHaveProperty("alsoInChannel");
   });
 });

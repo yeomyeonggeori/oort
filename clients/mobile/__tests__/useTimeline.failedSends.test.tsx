@@ -15,7 +15,7 @@ import {AppState} from 'react-native';
 
 import '../src/boot/polyfills';
 import {recordDeviceOnline} from '../src/features/connection/deviceOnline';
-import {readFailedSends} from '../src/features/conversation/failedSends';
+import {readFailedSends, rememberFailedSend} from '../src/features/conversation/failedSends';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 import type {ChannelRail} from '../src/realtime/channelRail';
 import {__setNonSecretStore} from '../src/storage/kv';
@@ -267,10 +267,10 @@ describe('이 기기에 남고, 다시 열면 같은 키의 실패 행으로 돌
   });
 
   // ---- 스레드 답글 (#5262): 행이 `rootId` 를 싣고 다니므로(#4888) 대화의 글과 같은 저장소·같은 규칙으로 남는다 ----
-  it('스레드 답글의 실패 행도 이 기기에 남는다 - 뿌리와 「대화에도 보내기」를 행이 싣고 있다', async () => {
+  it('스레드 답글의 실패 행도 이 기기에 남는다 - 뿌리를 행이 싣고 있다', async () => {
     const view = hook();
     await act(async () => {
-      await view.result.current.sendReply('root-1', '답글이에요', undefined, {alsoInChannel: true});
+      await view.result.current.sendReply('root-1', '답글이에요');
     });
     await settle();
     expect(view.result.current.repliesPending('root-1')).toHaveLength(1);
@@ -278,17 +278,17 @@ describe('이 기기에 남고, 다시 열면 같은 키의 실패 행으로 돌
     expect(stored).toHaveLength(1);
     expect(stored[0].row).toMatchObject({
       rootId: 'root-1',
-      alsoInChannel: true,
       body: '답글이에요',
       status: 'failed',
     });
+    expect(stored[0].row).not.toHaveProperty('alsoInChannel');
     expect(stored[0].kind).toBe('server');
   });
 
   it('채널을 다시 열면 답글 실패 행이 같은 키 · 같은 뿌리로 돌아오고(스레드와 대화 목록 둘 다), 다시 보내기는 답글 길로 나간다', async () => {
     const first = hook();
     await act(async () => {
-      await first.result.current.sendReply('root-1', '답글이에요', undefined, {alsoInChannel: true});
+      await first.result.current.sendReply('root-1', '답글이에요');
     });
     await settle();
     const [failed] = first.result.current.repliesPending('root-1');
@@ -299,7 +299,7 @@ describe('이 기기에 남고, 다시 열면 같은 키의 실패 행으로 돌
     // 스레드 화면이 읽는 자리(`repliesPending`)와, 실패한 답글이 서는 대화 목록의 자리(`pending`)에 모두 같은 행이 돌아왔다.
     expect(second.result.current.repliesPending('root-1').map(p => p.clientMsgId)).toEqual([failed.clientMsgId]);
     expect(second.result.current.pending.map(p => p.clientMsgId)).toEqual([failed.clientMsgId]);
-    expect(second.result.current.pending[0]).toMatchObject({status: 'failed', rootId: 'root-1', alsoInChannel: true});
+    expect(second.result.current.pending[0]).toMatchObject({status: 'failed', rootId: 'root-1'});
     expect(second.result.current.failureKinds.get(failed.clientMsgId)).toBe('server');
 
     // 되살린 답글의 다시 보내기는 글 길(`sendMessage`)이 아니라 답글 길로, 같은 키 · 같은 뿌리 · 같은 옵션으로 나간다.
@@ -312,10 +312,38 @@ describe('이 기기에 남고, 다시 열면 같은 키의 실패 행으로 돌
     expect(send).not.toHaveBeenCalled();
     expect(sendReply).toHaveBeenCalledTimes(1);
     expect(sendReply.mock.calls[0].slice(0, 5)).toEqual([WS, CH, 'root-1', failed.clientMsgId, '답글이에요']);
-    expect(sendReply.mock.calls[0][5]).toEqual({alsoInChannel: true});
+    expect(sendReply.mock.calls[0][5]).toBeUndefined();
     expect(second.result.current.pending).toEqual([]);
     second.unmount();
     expect(readFailedSends(WS, CH, ME, T0)).toEqual([]);
+  });
+
+  // 사보타주: `post` 에 `...(row.alsoInChannel === true ? {alsoInChannel: true} : {})` 를 되살리면 이 시험이 RED 여야 한다(옛 판이 남긴 저장본도 키를 싣지 않는다).
+  it('옛 판이 「대화에도 보내기」를 켠 채 남긴 저장본도 다시 보낼 때 그 키를 싣지 않는다 - 답글은 스레드에만 간다 (#5324)', async () => {
+    const stale = {
+      clientMsgId: 'stale-1',
+      channelId: CH,
+      authorMemberId: ME,
+      body: '옛 판의 답글',
+      createdAtMs: T0,
+      sinceSeq: 0,
+      status: 'failed',
+      rootId: 'root-1',
+      alsoInChannel: true,
+    };
+    rememberFailedSend(WS, stale as never, 'server', T0);
+    const view = hook();
+    await settle();
+    expect(view.result.current.repliesPending('root-1').map(p => p.clientMsgId)).toEqual(['stale-1']);
+    sendReply.mockReset();
+    sendReply.mockResolvedValue({...ok('r-stale'), rootId: 'root-1'} as Message);
+    await act(async () => {
+      await view.result.current.resend('stale-1');
+    });
+    expect(sendReply).toHaveBeenCalledTimes(1);
+    expect(sendReply.mock.calls[0].slice(0, 5)).toEqual([WS, CH, 'root-1', 'stale-1', '옛 판의 답글']);
+    expect(sendReply.mock.calls[0][5]).toBeUndefined();
+    view.unmount();
   });
 
   it('채널을 떠날 때 날아가던 답글도 이 기기에 남는다 - 결과를 모르는 글은 실패 행으로 돌아온다', async () => {

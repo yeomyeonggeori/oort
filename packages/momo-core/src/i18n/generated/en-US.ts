@@ -4616,18 +4616,6 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "Also send to the conversation"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "This server does not support “Also send to the conversation” yet. Turn it off and send again."
-    }
-  ],
   "reply.card.cancel": [
     {
       "type": 0,
