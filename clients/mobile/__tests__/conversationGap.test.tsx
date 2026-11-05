@@ -279,6 +279,18 @@ function hostChildren(node: TestNode): TestNode[] {
   return out;
 }
 
+/**
+ * 도크가 흐름에 세우는 줄들. 대화 안 검색(#5364)이 컴포저 묶음을 숨기려고 한 겹 감싸므로(`conversation-composer-stack`) 그 안으로 들어가 센다.
+ * 감싼 틀은 **높이를 더하지 않는다** — 쉬는 상태에서 스타일이 없어서(`display: 'none'` 은 검색이 열린 동안만이다) 패딩·마진이 못 붙는다. 그 사실도 여기서 단정한다.
+ */
+function dockRows(): TestNode[] {
+  const children = hostChildren(screen.getByTestId('composer-dock'));
+  const stack = children.find(node => node.props.testID === 'conversation-composer-stack');
+  if (stack === undefined) return children;
+  expect(stack.props.style).toBeUndefined();
+  return [...hostChildren(stack), ...children.filter(node => node !== stack)];
+}
+
 /** 마지막 행 아래(= 목록 꼬리 위 끝)에서 알약 위 끝까지, 흐름에서 먹는 조각들. */
 function gapPieces() {
   const pieces = {
@@ -340,7 +352,7 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
 
   it('레일 칸은 도크 흐름의 맨 위 한 줄이다 — 에이전트 대화에서 「작성 중」 위에 선다 (#4620)', async () => {
     await openConversation(0, GENERAL);
-    const inFlow = hostChildren(screen.getByTestId('composer-dock')).filter(
+    const inFlow = dockRows().filter(
       node => flat(node.props.style).position !== 'absolute',
     );
     expect(inFlow.map(node => node.props.testID)).toEqual(['composer-rail', 'composer-typing', 'composer-root']);
@@ -380,7 +392,7 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
 
   it('도크의 쉬는 상태에서 흐름 안의 줄은 (에이전트 대화의 레일 칸 ·) 「작성 중」 예약 줄과 컴포저뿐이다 — 새 상시 줄이 생기면 합을 다시 정해야 한다', async () => {
     await openConversation(0, ROOM);
-    const children = hostChildren(screen.getByTestId('composer-dock'));
+    const children = dockRows();
     // 첫 1회 코치마크(`long-press-hint`)처럼 도크 위에 **뜨는** 것은 절대 배치라 흐름의 높이를 안 먹는다 —
     // 이 단정은 흐름 안의 줄만 센다. 뜨는 것이 흐름에 들어오면(`position` 이 사라지면) 여기가 빨개진다.
     const inFlow = children.filter(node => flat(node.props.style).position !== 'absolute');
