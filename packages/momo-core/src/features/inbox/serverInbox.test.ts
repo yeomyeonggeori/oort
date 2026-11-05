@@ -9,7 +9,7 @@ import {
   parseInboxTimeMs,
   readStateRailChannelName,
 } from "./serverInbox";
-import { matchesMailboxFilter, mailboxCounts, serverEntry } from "./mailbox";
+import { isServerItemUnread, matchesMailboxFilter, mailboxCounts, serverEntry } from "./mailbox";
 
 const ME = "00000000-0000-7000-8000-000000000101";
 const BOT = "00000000-0000-7000-8000-000000000301";
@@ -230,5 +230,42 @@ describe("API 클라이언트", () => {
     expect(outage).toBeInstanceOf(ApiError);
     expect(isInboxAbsent(outage)).toBe(false);
     expect(isInboxAbsent(new TypeError("network"))).toBe(false);
+  });
+});
+
+// ---- 점은 항목의 readAt과 채널 읽음 위치를 합쳐 정한다 (#5331) ----------------------
+
+describe("isServerItemUnread: 위치가 항목을 지났으면 목록이 낡았어도 안 읽음이 아니다(ADR-0199 D3)", () => {
+  const at = (seq: number, readAt: string | null = null) =>
+    parseInboxItem({ ...WIRE_ITEM, message: { ...WIRE_ITEM.message, seq }, readAt })!;
+  const READ = "2026-11-05T05:00:00.000000Z";
+
+  it("위치를 모르면(읽음 투영이 아직 안 왔다) 항목의 readAt만 본다", () => {
+    expect(isServerItemUnread(at(5), undefined)).toBe(true);
+    expect(isServerItemUnread(at(5, READ), undefined)).toBe(false);
+  });
+
+  it("목록은 안 읽음이라 해도 위치가 항목에 닿았거나 지났으면 안 읽음이 아니다(같은 seq 포함)", () => {
+    expect(isServerItemUnread(at(5), 5)).toBe(false);
+    expect(isServerItemUnread(at(5), 9)).toBe(false);
+    expect(isServerItemUnread(at(5), 0)).toBe(true);
+  });
+
+  it("위치가 항목에 한 칸 못 미치면 안 읽음이다", () => {
+    expect(isServerItemUnread(at(5), 4)).toBe(true);
+  });
+
+  it("목록이 읽음이라 하면 위치가 어디든 읽음이다 — 점을 켜는 방향은 없다", () => {
+    expect(isServerItemUnread(at(5, READ), 0)).toBe(false);
+    expect(isServerItemUnread(at(5, READ), 2)).toBe(false);
+  });
+
+  it("serverEntry는 그 판정을 쓰고 안 읽음 말고는 아무것도 바꾸지 않는다", () => {
+    const input = { channelLabel: "#agent-lab", actor: { name: "그록봇", isAgent: false }, nowMs: 0 };
+    const plain = serverEntry(at(5), input);
+    const passed = serverEntry(at(5), { ...input, lastReadSeq: 5 });
+    expect(plain.unread).toBe(true);
+    expect(passed.unread).toBe(false);
+    expect({ ...passed, unread: true }).toEqual(plain);
   });
 });
