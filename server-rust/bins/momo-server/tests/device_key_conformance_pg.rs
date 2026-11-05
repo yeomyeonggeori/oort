@@ -18,6 +18,8 @@
 //! | `a_member_wide_session_end_revokes_every_key` | drop the key half of `end_member_sessions_in_tx` |
 //! | `an_access_token_outliving_its_logout_cannot_register_a_key` | check the access row instead of a live refresh of the lineage |
 //! | `a_reused_refresh_token_ends_the_whole_lineage` | **R1** — drop `end_reused_lineage` from the `Revoked` arm; **#3097** — revoke the lineage's keys on a reuse |
+//! | `by_default_a_reuse_ends_every_sign_in_lineage_password_and_phone` | **#5339** — default the sweep of password sign-ins back to off, narrow it to linked phones, revoke only part of the lineage, or only observe the reuse |
+//! | `the_off_switch_spares_a_password_sign_in_but_never_a_phone` | **#5339** — let the off switch spare a linked phone too, or ignore the off switch |
 //! | `a_lost_rotation_response_is_answered_again_with_the_same_pair` | **#3074** — drop the reissue, or mint a fresh pair on it |
 //! | `a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window_closed` | drop the successor-live, the grace or the member check of the reissue |
 //! | `concurrent_presentations_of_one_token_get_one_pair` | drop the reissue from the non-linked single-use gate's losing arm |
@@ -182,16 +184,27 @@ fn flag(required: bool) -> DeviceKeySettings {
     DeviceKeySettings {
         instance_id: Some(INSTANCE_ID.to_string()),
         host_register_signature_required: required,
-        refresh_reuse_sweep_all_sessions: false,
         human_control_signature_required: false,
+        // The reuse sweep is left at the instance default on purpose (#5339): `world()` runs
+        // what an instance with no `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` runs.
         ..DeviceKeySettings::default()
     }
 }
 
-/// `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`: password sign-ins are swept too.
+/// `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`, spelled out: password sign-ins are swept too.
+/// Since #5339 this is also the default; the tests that need it say so rather than lean on that.
 fn sweep_all() -> DeviceKeySettings {
     DeviceKeySettings {
         refresh_reuse_sweep_all_sessions: true,
+        ..flag(false)
+    }
+}
+
+/// `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false` (#5339): the operator's off switch. A password
+/// sign-in is only refused on a reuse; a QR-linked phone is still swept.
+fn sweep_off() -> DeviceKeySettings {
+    DeviceKeySettings {
+        refresh_reuse_sweep_all_sessions: false,
         ..flag(false)
     }
 }
@@ -504,6 +517,31 @@ impl World {
         .fetch_one(&self.su)
         .await
         .expect("count lineage rows")
+    }
+
+    /// How many `token` rows of the lineage `raw` belongs to are still live (not revoked).
+    async fn live_lineage_rows(&self, raw: &str) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM token WHERE revoked_at IS NULL AND session_id = \
+               (SELECT session_id FROM token WHERE token_hash = digest($1::text, 'sha256'))",
+        )
+        .bind(raw)
+        .fetch_one(&self.su)
+        .await
+        .expect("count live lineage rows")
+    }
+
+    /// Whether the refresh row of `raw` carries a QR-link `device_label` — the one thing that
+    /// makes a lineage a "linked phone" to the reuse sweep.
+    async fn is_qr_linked(&self, raw: &str) -> bool {
+        sqlx::query_scalar(
+            "SELECT device_label IS NOT NULL FROM token \
+              WHERE token_hash = digest($1::text, 'sha256')",
+        )
+        .bind(raw)
+        .fetch_one(&self.su)
+        .await
+        .expect("read the token's device label")
     }
 
     /// Revoke one token row out of band (no cascade).
@@ -1910,13 +1948,98 @@ async fn a_root_whose_sign_in_expired_signs_nothing() {
     assert_eq!(body["deviceKey"]["state"], "endorsed");
 }
 
-/// H2: by default only a QR-linked (phone) lineage is swept; a password
-/// sign-in — possibly a browser with several tabs — is only refused.
+/// #5339 (owner decision 2026-11-05) · ADR-0188 §4 R1 「재사용이 보이면 그 기기의 세션 계열을 전부
+/// 폐기」: with the instance's DEFAULT settings (no `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS`) a reuse
+/// ends the lineage of every kind of sign-in — a password sign-in (the desktop app, a browser) as
+/// well as a QR-linked phone. The password sign-in below is asserted not to be a QR link, so the
+/// phone branch cannot be what ends it.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn by_default_a_reuse_ends_a_linked_phone_lineage_but_not_a_password_sign_in() {
+async fn by_default_a_reuse_ends_every_sign_in_lineage_password_and_phone() {
     let _lock = test_lock().await;
     let w = world().await;
+    let bystander = w.person().await;
+
+    // A password sign-in.
+    let desktop = w.person().await;
+    assert!(
+        !w.is_qr_linked(&desktop.refresh).await,
+        "precondition: a password sign-in, not a QR link"
+    );
+    let (status, current) = w.rotate(&desktop).await;
+    assert_eq!(status, 200);
+    let current = current.unwrap();
+
+    // Inside the grace window a replay is a lost response's retry (#3074): answered with the
+    // pair already issued, nothing ends — the default did not touch the window.
+    let (status, again) = w.rotate(&desktop).await;
+    assert_eq!(status, 200, "a replay inside the window is answered");
+    assert_eq!(again.unwrap().refresh, current.refresh);
+    assert!(
+        w.access_works(&current.access).await,
+        "a replay inside the grace window ends nothing"
+    );
+
+    // Past the window the same replay is a second holder: the WHOLE lineage ends.
+    w.age_spent(&desktop.refresh).await;
+    let (status, _) = w.rotate(&desktop).await;
+    assert_eq!(status, 401, "a spent refresh token is refused");
+    assert_eq!(
+        w.live_lineage_rows(&current.refresh).await,
+        0,
+        "no token of the password sign-in's lineage is left alive"
+    );
+    let (status, _) = w.rotate(&current).await;
+    assert_eq!(
+        status, 401,
+        "the newer refresh is dead too: a password sign-in is swept by default (ADR-0188 R1)"
+    );
+    assert!(
+        !w.access_works(&current.access).await,
+        "and so is the newer access token"
+    );
+    assert!(
+        !w.access_works(&desktop.access).await,
+        "and the older access half"
+    );
+    assert!(
+        w.access_works(&bystander.access).await,
+        "another sign-in of the same person is untouched"
+    );
+    let (status, _) = w.rotate(&bystander).await;
+    assert_eq!(status, 200);
+
+    // A QR-linked phone: the same ending (it always had it).
+    let mac = w.person().await;
+    let phone = w.link_phone(&mac, "Reuse 5339").await;
+    assert!(
+        w.is_qr_linked(&phone.refresh).await,
+        "precondition: a QR link"
+    );
+    let (status, held) = w.rotate(&phone).await;
+    assert_eq!(status, 200);
+    let held = held.unwrap();
+    w.age_spent(&phone.refresh).await;
+    let (status, _) = w.rotate(&phone).await;
+    assert_eq!(status, 401);
+    assert_eq!(w.live_lineage_rows(&held.refresh).await, 0);
+    let (status, _) = w.rotate(&held).await;
+    assert_eq!(status, 401, "a linked lineage is swept by default too");
+    assert!(
+        w.access_works(&mac.access).await,
+        "the sign-in that issued the link is untouched"
+    );
+}
+
+/// #5339: the operator's off switch (`MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false`) spares a
+/// password sign-in — possibly a browser with several tabs, the original H2 worry — which is only
+/// refused. It never spares a QR-linked (phone) lineage: one process, so a stale presentation
+/// is a second holder.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_off_switch_spares_a_password_sign_in_but_never_a_phone() {
+    let _lock = test_lock().await;
+    let w = world_with(sweep_off()).await;
 
     // A password sign-in (a second browser tab rotated minutes ago).
     let tab_a = w.person().await;
@@ -1968,7 +2091,7 @@ async fn by_default_a_reuse_ends_a_linked_phone_lineage_but_not_a_password_sign_
     let (status, _) = w.rotate(&thief).await;
     assert_eq!(
         status, 401,
-        "a linked lineage is swept by default (ADR-0188 R1)"
+        "a linked lineage is swept whatever the switch says (ADR-0188 R1)"
     );
     assert_eq!(
         w.key_row(key_id).await,
@@ -2406,9 +2529,9 @@ async fn a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key()
     let (status, body) = w.rebind(&mac2, &root, "macos", letter.clone()).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["deviceKey"]["id"], root_id.to_string());
-    // Once mac2's lineage ends by reuse (sweep off: a password sign-in is not
-    // swept, so end it out of band), the old letter moves nothing into a
-    // third sign-in.
+    // Once mac2's lineage has ended (out of band here: only its dead tokens
+    // matter, not the side effects of a reuse), the old letter moves nothing
+    // into a third sign-in.
     sqlx::query(
         "UPDATE token SET revoked_at = now() \
           WHERE session_id = $1 AND revoked_at IS NULL",
