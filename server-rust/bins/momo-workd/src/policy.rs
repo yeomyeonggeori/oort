@@ -1038,6 +1038,21 @@ pub fn check_prompt(text: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// The first prompt of a resumed session whose label the owner did not sign
+/// (#5338, #5327 F-10, ADR-0188 §8.12; D3 「소유자 지시 판별」).
+///
+/// A resume's `label` is the title its session's creator gave it, and resuming
+/// needs only membership of the room (ADR-0143) — so it can be another
+/// member's text. With signatures off (R1) nobody confirmed it, and it must
+/// not be what the owner's agent is started with. This is the host's own
+/// sentence: no member's words, no interpolation, and it asks the agent to do
+/// nothing until the owner's next instruction (an `input`, which is the
+/// owner's own). With signatures required, the owner signed the label they
+/// were shown and the host verified it ([`crate::controls::ControlLoop`]), so
+/// that label is the owner-confirmed text and is sent as it always was.
+pub const RESUME_FIRST_PROMPT: &str = "This session was resumed on this computer. \
+     Do not start any task. Wait for the owner's next instruction.";
+
 /// ADR-0188 D6: a remote spawn of `shell` is refused, before the allowlist is
 /// even consulted — an owner who allowlisted something called `shell` still
 /// does not get a remote shell.
