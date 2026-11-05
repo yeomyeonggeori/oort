@@ -9,11 +9,15 @@
 //!
 //! Kinds:
 //! * `spawn` — the host owner's only (see below), then
-//!   [`SessionManager::spawn`] (all D6 checks). The first prompt (the spawn
-//!   label) is sent only after the ack landed: the server accepts a spawn ack
-//!   only while the session is still `running`. A refused spawn that arrived
-//!   with a session the server already allocated for it (a resume) ends that
-//!   session, so the ledger is not left with a `running` session nothing runs.
+//!   [`SessionManager::spawn`] (all D6 checks). The first prompt is sent only
+//!   after the ack landed: the server accepts a spawn ack only while the
+//!   session is still `running`. For a resume it is the host's fixed sentence,
+//!   not the label the server relays (#5338, ADR-0188 §8.12): the label is the
+//!   title its session's creator gave it — possibly another member's — and is
+//!   the first prompt only when this host verified the owner's signature over
+//!   it. A refused spawn that arrived with a session the server already
+//!   allocated for it (a resume) ends that session, so the ledger is not left
+//!   with a `running` session nothing runs.
 //! * `input` — the host owner's instruction. `queue` (the default, and every
 //!   unsigned input) is the next turn after the running one and anything
 //!   already queued; `interrupt` (#3027, only from a signed statement's
@@ -180,12 +184,18 @@ impl ControlLoop {
     }
 
     /// R2 on the host: the owner's signature, fresh, unrevoked, once.
-    fn check_signature(&self, control: &WorkControl) -> Result<(), Refusal> {
+    ///
+    /// `Ok(true)`: a signature was required here and **verified** for exactly
+    /// this control. `Ok(false)`: none was required (R2 off, or a kind that
+    /// needs none), so nothing was verified — a signature that came along is
+    /// not looked at. #5338 reads this to tell a resume whose label the owner
+    /// confirmed from one whose label nobody did.
+    fn check_signature(&self, control: &WorkControl) -> Result<bool, Refusal> {
         let Some(trust) = &self.human else {
-            return Ok(());
+            return Ok(false);
         };
         if !self.signatures_required() || !requires_signature(control) {
-            return Ok(());
+            return Ok(false);
         }
         // #3118: an allow is checked against the preview this host relayed
         // for its request — looked up here, never read from the control.
@@ -199,7 +209,8 @@ impl ControlLoop {
         trust
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .check_control_with_preview(control, preview.as_deref(), now_ms())
+            .check_control_with_preview(control, preview.as_deref(), now_ms())?;
+        Ok(true)
     }
 
     pub fn sessions(&mut self) -> &mut SessionManager {
@@ -297,12 +308,14 @@ impl ControlLoop {
                 // A new-work spawn is verified once, inside `spawn_verified`
                 // (the nonce is spent there); it only needs its owner first.
                 let allowed = if is_new_work_spawn(control) {
-                    self.require_owner(control)
+                    self.require_owner(control).map(|()| false)
                 } else {
                     authorized(self)
                 };
                 let spawned = match allowed {
-                    Ok(()) => self.spawn_verified(control).await,
+                    Ok(signature_verified) => {
+                        self.spawn_verified(control, signature_verified).await
+                    }
                     Err(refusal) => Err(refusal),
                 };
                 match spawned {
@@ -323,7 +336,7 @@ impl ControlLoop {
             }
             "input" => match authorized(self) {
                 Err(refusal) => refused(refusal),
-                Ok(()) => match self.input(control).await {
+                Ok(_) => match self.input(control).await {
                     Ok(()) => Verdict {
                         ack: ControlAck::ok(control.session_id),
                         activate: None,
@@ -333,7 +346,7 @@ impl ControlLoop {
             },
             "permission" => match authorized(self) {
                 Err(refusal) => refused(refusal),
-                Ok(()) => match self.permission(control).await {
+                Ok(_) => match self.permission(control).await {
                     Ok(()) => Verdict {
                         ack: ControlAck::ok(control.session_id),
                         activate: None,
@@ -362,9 +375,17 @@ impl ControlLoop {
     /// verified here — R2 on or off — because its folder id is read only from a
     /// signature this host verified; an old-style spawn keeps `check_signature`'s
     /// rules (a resume, or the host's own configured folder).
-    async fn spawn_verified(&mut self, control: &WorkControl) -> Result<Uuid, Refusal> {
+    async fn spawn_verified(
+        &mut self,
+        control: &WorkControl,
+        signature_verified: bool,
+    ) -> Result<Uuid, Refusal> {
         if !is_new_work_spawn(control) {
-            return self.sessions.spawn(control, None).await;
+            // #5338: a resume's label counts as the owner's confirmed text only
+            // when `check_signature` verified their signature over it (its
+            // statement binds the label as the first prompt); unverified, it
+            // never does.
+            return self.sessions.spawn(control, None, signature_verified).await;
         }
         let Some(trust) = &self.human else {
             return Err(Refusal::DeviceSignatureRequired);
@@ -374,7 +395,7 @@ impl ControlLoop {
             .unwrap_or_else(|p| p.into_inner())
             .check_control_with_preview(control, None, now_ms())?;
         let folder_id = verified_folder_id(control).ok_or(Refusal::DeviceSignatureInvalid)?;
-        self.sessions.spawn(control, Some(&folder_id)).await
+        self.sessions.spawn(control, Some(&folder_id), false).await
     }
 
     /// ADR-0188 D3 on the host: a spawn or an input is its owner's or nothing.

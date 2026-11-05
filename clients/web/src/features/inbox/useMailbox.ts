@@ -23,9 +23,11 @@ import type {
   InboxServerFilter,
   ServerInboxPage,
 } from "@momo/core/features/inbox/serverInbox";
+import { idKey } from "@momo/core/features/workspace/directory";
 import {
   composeMailbox,
   dmEntry,
+  isServerItemUnread,
   isUnreadSeq,
   mailboxFilterHasTasks,
   mentionEntry,
@@ -68,6 +70,20 @@ import {
 //
 // 팬아웃은 상한이 있다(구 서버 경로). 채널이 많은 워크스페이스에서 인박스를 연 순간
 // 수백 요청이 나가는 것은 기능이 아니라 사고다. 잘렸는지는 `capped`로 화면에 말한다.
+//
+// ## 점은 항목 읽음과 채널 읽음 위치를 합쳐 정한다 (#5345, #5331의 웹 판)
+//
+// 서버는 채널 읽음 위치가 전진하는 트랜잭션에서 그 채널의 `seq <= 위치` 항목을 읽음으로 채운다(D3). 그런데 그 일은 서버
+// 안에서 끝나서 이미 받아 둔 목록은 그 전의 스냅샷으로 남고, 위치에 의한 자동 읽음은 인박스 이벤트를 내지 않는다.
+// 웹의 다시 읽는 길은 이벤트(`inbox_item.*`), 항목 읽음 직후, 마운트 때 낡았을 때(`STALE_MS`) 뿐이라 — 사이드바의 예약 훅이
+// 같은 개인 채널을 앱이 사는 동안 쥐고 있어 받은함이 다시 마운트되어도 재구독 신호(`onResync`)가 오지 않는다 — 대화를
+// 읽고 15초 안에 돌아오거나 다른 기기가 대화를 읽으면 같은 대화의 다른 항목이 점을 단 채 남았다.
+//
+// 그래서 규칙은 코어 `isServerItemUnread` 한 곳이다(폰과 같다): 항목의 `readAt`이 비었고 **그 채널의 읽음 위치(read-state
+// 투영)가 항목의 `seq`를 지나지 않았을 때만** 안 읽음이다. 읽음 위치 투영은 이미 사이드바가 들고 있고(`useReadStates`)
+// 위치를 보낼 때마다 바로, 그 밖에는 30초마다 다시 읽힌다. 점을 켜는 방향은 없다.
+// 목록이 낡았다는 것을 알아챈 순간(`readAt`은 비었는데 위치가 지났다)에는 서버의 `readAt`·`unreadCount`를 되찾으려고 목록을
+// 한 번 다시 읽는다(`useStaleListReread`).
 // =============================================================================
 
 const DM_CHANNEL_CAP = 30;
@@ -127,6 +143,11 @@ export interface Mailbox {
 
 const PAGE_SIZE = 30;
 
+/** 서버가 센 안 읽음 수에서, 읽음 위치가 이미 지나서 점이 꺼진 낡은 항목 수를 뺀다. 수가 점보다 많이 남지 않게 한다. */
+function serverUnreadOf(counted: number | undefined, staleItems: number): number | null {
+  return counted === undefined ? null : Math.max(0, counted - staleItems);
+}
+
 function toServerFilter(filter: MailboxFilter | "reminders"): InboxServerFilter {
   return filter === "task" || filter === "reminders" ? "all" : filter;
 }
@@ -185,6 +206,32 @@ function useInboxRealtime(enabled: boolean) {
   }, [enabled, realtime, selfId, workspaceId, client]);
 }
 
+/**
+ * 목록이 낡았다는 것을 알아챈 순간 한 번 다시 읽는다 (#5345). 항목의 `readAt`은 비었는데 채널 읽음 위치가 이미 항목을 지났다:
+ * 서버는 위치가 전진한 트랜잭션에서 그 항목을 읽음으로 채웠으니 우리가 가진 목록(그리고 그 `unreadCount`)이 그 전 스냅샷이라는 뜻이다.
+ * 점은 규칙(`isServerItemUnread`)이 이미 바로잡았으므로 이 읽기는 서버의 `readAt`·수를 되찾는 일이다.
+ *
+ * 같은 낡음으로는 한 번만 요청한다: 항목 낱낱의 id 모음이 열쇠라서, 다시 읽은 답에도 그 항목이 여전히 비어 있으면(서버가 채우지
+ * 않았다) 같은 요청을 되풀이하지 않고, 위치가 더 전진해 낡은 항목이 늘면 그때 다시 읽는다. 다른 읽기가 오는 중이면 그 답을 기다린다 —
+ * 지금 막 마운트로 시작된 읽기를 끊고 다시 시작하지 않는다.
+ */
+function useStaleListReread(args: {
+  enabled: boolean;
+  staleItemIds: string;
+  fetching: boolean;
+  /** 이 화면의 목록 쿼리를 다시 읽는다(쿼리 키를 여기서 다시 적지 않는다). */
+  reread: () => void;
+}): void {
+  const askedFor = useRef("");
+  const { enabled, staleItemIds, fetching, reread } = args;
+  useEffect(() => {
+    if (!enabled || staleItemIds === "" || fetching) return;
+    if (askedFor.current === staleItemIds) return;
+    askedFor.current = staleItemIds;
+    reread();
+  }, [enabled, staleItemIds, fetching, reread]);
+}
+
 export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox {
   const { workspaceId } = useSession();
   const context = useFeedContext();
@@ -209,6 +256,8 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
   // 404(`absent`)는 장애가 아니라 미제공이다: 화면이 「처리할 일」 탭에서 따로 말한다.
   const ledgerFailed = tasksInTab && !needsAction.absent && needsAction.error;
 
+  // 읽음 위치(read-state 투영): 사이드바가 이미 든 같은 쿼리라 요청이 늘지 않는다. 항목의 점은 이 위치와 합쳐 정한다.
+  const readStates = useReadStates(workspaceId);
   const serverFilter = toServerFilter(filter);
   const query = useInfiniteQuery({
     queryKey: ["inbox", workspaceId, serverFilter],
@@ -239,13 +288,39 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
                 : resolved,
             actor: context.actorFor(item.actorMemberId),
             nowMs,
+            lastReadSeq: readStates.byChannel.get(idKey(item.channel.id))?.lastReadSeq,
           })
         );
       }
     }
     return out;
     // 시각 라벨은 데이터가 바뀔 때 다시 그려진다(now는 의존에 넣지 않는다).
-  }, [query.data, context]);
+  }, [query.data, context, readStates.byChannel]);
+
+  // 목록은 안 읽음이라는데 읽음 위치는 이미 지난 항목: 목록이 위치 전진 전의 스냅샷이다. 점은 위 규칙이 이미 껐고, 서버가 센
+  // 안 읽음 수에서는 이 항목들을 뺀다(같은 사실을 수에도 쓴다). 다시 읽으면 서버가 둘 다 맞게 돌려준다.
+  const staleItems = useMemo(() => {
+    const ids: string[] = [];
+    for (const page of query.data?.pages ?? []) {
+      for (const item of page.items) {
+        if (
+          item.readAtMs === null &&
+          !isServerItemUnread(item, readStates.byChannel.get(idKey(item.channel.id))?.lastReadSeq)
+        ) {
+          ids.push(item.id);
+        }
+      }
+    }
+    return ids;
+  }, [query.data, readStates.byChannel]);
+  const { refetch: rereadList } = query;
+  const rereadStale = useCallback(() => void rereadList(), [rereadList]);
+  useStaleListReread({
+    enabled: serverOn,
+    staleItemIds: staleItems.join(","),
+    fetching: query.isFetching,
+    reread: rereadStale,
+  });
 
   const entries = useMemo(() => {
     const tasks = needsAction.items
@@ -269,7 +344,7 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
   return {
     source: serverOn ? "server" : "probing",
     entries: listed ? entries : [],
-    serverUnreadCount: query.data?.pages[0]?.unreadCount ?? null,
+    serverUnreadCount: serverUnreadOf(query.data?.pages[0]?.unreadCount, staleItems.length),
     hasMore: query.hasNextPage,
     isFetchingMore: query.isFetchingNextPage,
     moreError: query.isFetchNextPageError,

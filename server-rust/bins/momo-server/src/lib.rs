@@ -1560,6 +1560,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/viewing",
             put(routes::viewing::touch),
         )
+        // activity heartbeat (ADR-0206 D4, #4497): "a web or desktop client of mine is in use". Human-only
+        // twice over (absent from `required_agent_scope`, `require_human` first); no body, no member id,
+        // no read API: the owner is the bearer.
+        .route(
+            "/v1/workspaces/{ws}/presence/activity",
+            put(routes::presence_activity::touch),
+        )
         // DM closure (ADR-0177 증보 D7, #4227): the caller's own "I closed this DM" watermark.
         // Human-only twice over — the path is absent from `required_agent_scope` and the handlers
         // `require_human` first. The owner is the bearer; there is no member in the request. No event

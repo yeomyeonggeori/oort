@@ -845,10 +845,11 @@ paths:
         session lineage is revoked, with its push registrations; its device
         keys are kept (#3097). Inside 30 seconds (a retried lost response) the
         replay is answered with the pair that rotation already issued, while
-        nobody has rotated it (#3074). The lineage ending applies to QR-linked
-        (phone) sessions always, and to password sign-ins only when the
-        instance sets `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default
-        off: browser tabs rotate without cross-tab coordination).
+        nobody has rotated it (#3074). The lineage ending applies to every
+        sign-in by default (#5339): password sign-ins (desktop, web) and
+        QR-linked (phone) sessions alike. An operator can stop it for password
+        sign-ins only, with `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false`;
+        a QR-linked session's lineage always ends.
 
 
         **Sender constraint (#3079, ADR-0146 D-7 증보).** A native client
@@ -6433,18 +6434,21 @@ paths:
       operationId: touchPresenceActivity
       summary: Presence heartbeat - "a desktop or web client of mine is in use".
       description: >
-        ADR-0206 D4 contract draft (served from the activity slice; 404 until
-        then). A web or desktop client that is in front and was used in the last
-        5 minutes sends this at most every 20 seconds. The server treats a stamp
-        younger than 30 seconds as "my desktop is active" and, for the caller's
-        phone tokens only, holds the push reasons `mention`, `dm`,
-        `channel_message` and `keyword` for the caller's `phoneDelaySecs`
-        (default 60) and drops them if the message is read in that time.
-        Approval requests and the work reasons are never held. The phone does not
-        send this. No body and no member id: the owner is the bearer, no other
-        member can read the stamp, and a beat younger than 5 seconds after the
-        previous one is accepted and not rewritten. A client that never sends it
-        keeps today's behavior. Human bearer only (an agent bearer is 403).
+        ADR-0206 D4 (served since #4497, migration 174). A web or desktop client
+        that is in front and was used in the last 5 minutes sends this at most
+        every 20 seconds. The server treats a stamp younger than 30 seconds as
+        "my desktop is active" and, for the caller's phone tokens only
+        (`device.platform = ios`), holds the push reasons `mention`, `dm` and
+        `thread_reply` for the caller's `phoneDelaySecs` (default 60; 0 turns the
+        delay and the read-cancel off) and drops them if the message is read in
+        that time. The reasons `channel_message` and `keyword` join the same
+        allow-list when they ship. Approval requests, the work reasons, system
+        pushes and `macos` tokens are never held. The phone does not send this.
+        No body and no member id: the owner is the bearer, no endpoint reads the
+        stamp, and a beat younger than 5 seconds after the previous one is
+        accepted and not rewritten. A client that never sends it keeps today's
+        behavior. A client that gets 404 or 405 (an older server) stops sending to
+        that server. Human bearer only (an agent bearer or a work host is 403).
       security:
         - bearerAuth: []
       parameters:
