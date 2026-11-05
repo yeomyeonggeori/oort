@@ -698,58 +698,63 @@ describe('치수·재질 — Buzz 캡처 기준', () => {
     ) as Record<string, unknown>;
     expect(label.fontSize).toBe(font.title);
     expect(label.fontWeight).toBe('400');
-    expect(label.color).toBe(lightPalette.onPrimary);
+    expect(label.color).toBe(lightPalette.text);
   });
 
-  it('라이트: 어두운 잉크 카드(primary)에 밝은 글자 — 다크: 밝은 잉크 카드에 어두운 글자', () => {
+  it('라이트: 밝은 면에 어두운 글자(text) — 다크: 어두운 면에 밝은 글자 — 주 행동 색(primary)이 면에 새지 않는다 (#5329)', () => {
     const light = renderMenu({scheme: 'light'});
-    expect(
-      (flat('attach-menu-material-fallback').backgroundColor as string).slice(
-        0,
-        7,
-      ),
-    ).toBe(lightPalette.primary);
+    expect(flat('attach-menu-material-fallback').backgroundColor).toBe(
+      lightPalette.glassFallback,
+    );
     expect(
       (StyleSheet.flatten(screen.getByText('카메라').props.style) as {color: string})
         .color,
-    ).toBe(lightPalette.onPrimary);
+    ).toBe(lightPalette.text);
+    expect(flat('attachment-pick-camera-icon').tintColor).toBe(lightPalette.text);
     light.unmount();
     renderMenu({scheme: 'dark'});
-    expect(
-      (flat('attach-menu-material-fallback').backgroundColor as string).slice(
-        0,
-        7,
-      ),
-    ).toBe(darkPalette.primary);
+    expect(flat('attach-menu-material-fallback').backgroundColor).toBe(
+      darkPalette.glassFallback,
+    );
     expect(
       (StyleSheet.flatten(screen.getByText('카메라').props.style) as {color: string})
         .color,
-    ).toBe(darkPalette.onPrimary);
+    ).toBe(darkPalette.text);
+    expect(flat('attachment-pick-camera-icon').tintColor).toBe(darkPalette.text);
+    // 눌림도 text 위의 한 단(16%)이다 — onPrimary 가 아니다.
+    const pressed = screen
+      .UNSAFE_getAllByProps({testID: 'attachment-pick-camera'})
+      .find(node => typeof node.props.style === 'function');
+    expect(
+      StyleSheet.flatten(pressed!.props.style({pressed: true})).backgroundColor,
+    ).toBe(`${darkPalette.text}29`);
   });
 
-  it('흐림이 있으면 흐림 위에 잉크 86%: 흐림의 틴트는 앱 스킴을 따른다(GlassSurface 와 같다)', () => {
+  it('흐림이 있으면 흐림 위에 유리(glass) 틴트: 흐림의 틴트는 앱 스킴을 따른다(GlassSurface 와 같다)', () => {
     resetBlurSupportForTests(true);
     expect(blurSupported()).toBe(true);
     const light = renderMenu({scheme: 'light'});
     expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'light');
-    const tint = flat('attach-menu-material-blur').backgroundColor as string;
-    expect(tint.slice(0, 7)).toBe(lightPalette.primary);
-    expect(parseInt(tint.slice(7, 9), 16)).toBe(
-      Math.round(ATTACH_MENU.materialAlpha * 255),
+    expect(flat('attach-menu-material-blur').backgroundColor).toBe(
+      lightPalette.glass,
     );
     light.unmount();
     renderMenu({scheme: 'dark'});
     expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'dark');
+    expect(flat('attach-menu-material-blur').backgroundColor).toBe(
+      darkPalette.glass,
+    );
   });
 
-  it('흐림 모듈이 없으면 잉크 94%(GlassSurface 의 폴백과 같은 값)', () => {
+  it('흐림 모듈이 없으면 glassFallback(surface 94%, GlassSurface 의 폴백과 같은 값)', () => {
     renderMenu();
     const fill = flat('attach-menu-material-fallback').backgroundColor as string;
+    expect(fill).toBe(lightPalette.glassFallback);
     expect(parseInt(fill.slice(7, 9), 16)).toBe(Math.round(0.94 * 255));
     expect(screen.queryByTestId('blur-view')).toBeNull();
   });
 
-  it('투명도 줄이기가 켜지면 흐림이 있어도 불투명 잉크다 — 반투명은 읽기 어려운 것이다', async () => {
+  it('투명도 줄이기가 켜지면 흐림이 있어도 불투명 surface 다 — 반투명은 읽기 어려운 것이다', async () => {
     resetBlurSupportForTests(true);
     a11y.isReduceTransparencyEnabled.mockImplementation(() =>
       Promise.resolve(true),
@@ -758,7 +763,7 @@ describe('치수·재질 — Buzz 캡처 기준', () => {
     await act(async () => {});
     expect(screen.queryByTestId('blur-view')).toBeNull();
     expect(flat('attach-menu-material-opaque').backgroundColor).toBe(
-      lightPalette.primary,
+      lightPalette.surface,
     );
   });
 });

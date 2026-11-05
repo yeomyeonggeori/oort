@@ -14,7 +14,9 @@
 //!    project agent configuration the adapter would apply regardless
 //!    ([`policy::check_project_config`]); for Codex, the host's own home is
 //!    ready and signed in, and Codex's own `HOME` holds no skill layer
-//!    ([`policy::prepare_codex_home`], ADR-0188 §8, #2630 F5); the agent gets
+//!    ([`policy::prepare_codex_home`], ADR-0188 §8, #2630 F5) and the codex the
+//!    adapter runs reports every switched-off feature as off
+//!    ([`crate::codex_check`], ADR-0188 §8.10, #2647); the agent gets
 //!    the allowlisted part of the host's environment only (#2630 F1); if this
 //!    Mac chose an account for remote work, its profile folder is checked and
 //!    becomes `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, or the spawn is refused
@@ -408,6 +410,28 @@ impl SessionManager {
                     }
                 }
                 return Err(refusal);
+            }
+            // #2647 L1: the switches in the host's `config.toml` are keys, and
+            // only mean something while the codex this adapter runs still reads
+            // them. Read the effective table back, from that codex and under
+            // this home, before anything is started; a drifted codex would
+            // bring the shell snapshot (the owner's `.zshrc`) back (ADR-0188
+            // §8.10).
+            if let Err(error) = crate::codex_check::verify_codex_features(
+                &entry,
+                &codex,
+                &self.settings.parent_env,
+                self.settings.acp_start_timeout,
+            )
+            .await
+            {
+                tracing::warn!(
+                    tool,
+                    reason = %error,
+                    "Codex's effective settings are not the ones ADR-0188 §8 requires; \
+                     no Codex session is started (ADR-0188 §8.10)"
+                );
+                return Err(Refusal::CodexConfigUnverified);
             }
         }
         let claude_config_dir = match entry.adapter {

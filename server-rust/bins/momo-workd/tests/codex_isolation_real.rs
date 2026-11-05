@@ -17,6 +17,11 @@
 //! |---|---|
 //! | `a_codex_command_sees_no_credential_from_the_host_or_the_owners_shell_files` | the agent environment allowlist (`policy::launch_spec`), `[shell_environment_policy]` and `shell_snapshot = false` in the host `config.toml` (`policy::codex_home_config`) |
 //! | `codex_loads_no_skill_from_the_owners_home` | `HOME` in Codex's isolation environment (`policy::AdapterKind::isolation_env`, F5) |
+//! | `the_real_adapters_codex_reads_every_switched_off_feature_off` | the runtime read-back before every Codex session (`codex_check`, #2647 L1): the real adapter's own codex under the host's `config.toml` |
+//!
+//! The last one runs the **adapter** (codex-acp 1.13.0, whose `cli` subcommand
+//! runs the codex it bundles), so it takes `MOMO_WORKD_CODEX_ACP_BIN=/path/to/codex-acp`
+//! and needs `node` on `PATH` (the adapter is a `#!/usr/bin/env node` script).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -25,8 +30,9 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use momo_workd::codex_check::{verify_codex_features, CodexConfigError};
 use momo_workd::config::ToolEntry;
-use momo_workd::policy::{self, AdapterKind, CodexHome, Refusal};
+use momo_workd::policy::{self, AdapterKind, CodexHome, FeatureDrift, Refusal};
 use serde_json::{json, Value};
 
 fn codex_bin() -> PathBuf {
@@ -448,4 +454,52 @@ fn codex_loads_no_skill_from_the_owners_home() {
             .any(|(name, _)| name == "zz-owner-skill"),
         "control: with the owner's HOME the owner layer is loaded"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs MOMO_WORKD_CODEX_ACP_BIN (codex-acp 1.13.0, bundling codex 0.155.1) and node on PATH"]
+async fn the_real_adapters_codex_reads_every_switched_off_feature_off() {
+    // #2647 L1: the host's `config.toml` switches 15 features off by key. The
+    // read-back runs the real adapter's own codex (`codex-acp cli features
+    // list`) under that config and accepts only a table with every one off.
+    let f = fixture();
+    let adapter = std::env::var_os("MOMO_WORKD_CODEX_ACP_BIN")
+        .map(PathBuf::from)
+        .expect("set MOMO_WORKD_CODEX_ACP_BIN to the codex-acp executable (1.13.0)");
+    let entry = ToolEntry {
+        adapter: AdapterKind::Codex,
+        executable: adapter,
+        args: Vec::new(),
+    };
+    // Only what the adapter's `#!/usr/bin/env node` launcher needs of the
+    // host's environment: the rest is the allowlist the session gets anyway.
+    let host_env = vec![(
+        "PATH".to_string(),
+        std::env::var("PATH").expect("PATH names node"),
+    )];
+    let timeout = Duration::from_secs(60);
+    assert_eq!(
+        verify_codex_features(&entry, &f.codex, &host_env, timeout).await,
+        Ok(()),
+        "the real codex reads every switched-off feature off under the host's config.toml"
+    );
+
+    // The probe can fail: the same codex, its config without the
+    // `shell_snapshot` key (what a codex that ignored or renamed the key
+    // would see), runs the snapshot on its default.
+    let config = f.codex.home.join("config.toml");
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(written.contains("shell_snapshot = false\n"));
+    std::fs::write(&config, written.replace("shell_snapshot = false\n", "")).unwrap();
+    match verify_codex_features(&entry, &f.codex, &host_env, timeout).await {
+        Err(CodexConfigError::Drift(drift)) => assert_eq!(
+            drift,
+            vec![FeatureDrift::NotOff {
+                feature: "shell_snapshot",
+                state: "true".to_string()
+            }],
+            "control: without its key the snapshot reads on"
+        ),
+        other => panic!("control: expected the snapshot to read on, got {other:?}"),
+    }
 }
