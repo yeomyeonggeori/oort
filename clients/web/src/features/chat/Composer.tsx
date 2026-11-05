@@ -9,14 +9,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import type {
   Channel,
   MessageAttachment,
   RequestRouting,
   RosterMember,
 } from "@momo/core/lib/api";
-import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
@@ -66,10 +64,7 @@ import { COMPOSER_MAX_ROWS, useAutoGrow } from "@/features/timeline/useAutoGrow"
 import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
 import { useOffline } from "@/features/common/useOffline";
 import { useComposerBlockedLine } from "@/features/common/blockedLines";
-import {
-  AttachButton,
-  AttachmentTray,
-} from "@/features/attachments/AttachmentTray";
+import { AttachmentTray } from "@/features/attachments/AttachmentTray";
 import {
   acknowledgeNotices,
   addFiles,
@@ -105,11 +100,15 @@ import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
 import { ComposerContextBand, ComposerHostChip } from "@/features/chat/ComposerContextBand";
-import { ComposerFormatButton } from "@/features/chat/ComposerFormatButton";
+import {
+  COMPOSER_TEXTAREA_CLASS,
+  ComposerCard,
+  ComposerSend,
+  ComposerTools,
+} from "@/features/chat/ComposerCard";
 import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
 import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { composerContextBandShows, composerContextHost } from "@/features/chat/composerContext";
-import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
 import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 import { PersonalCallNotice, PersonalCallPreview } from "@/features/chat/PersonalCallLine";
@@ -976,27 +975,79 @@ export function Composer({
           offline={autocomplete.offline}
           onRetry={autocomplete.retryCatalog}
         />
-        <div
-          // 입력 그릇이 곧 떠 있는 카드다. 폰에서는 3:1 경계(--line-strong)의
-          // 그릇이고, 넓은 창에서는 반경 20 · float 그림자 · 1px 선 고리다(시안).
-          // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
-          className="composer-card @container focus-visible-within:focus-ring data-warn:border-warn"
-          data-testid="composer-frame"
-          data-composer-frame=""
-          data-warn={secretBlocked ? "" : undefined}
-          onClick={(event) => {
-            // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
-            // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
-            // 첨부 카드는 초점을 받는 자기 컨트롤이다(Backspace/Delete 로 뺀다). 눌러서 캐럿을 글 칸으로
-            // 돌려주면 방금 카드에 둔 초점이 튕겨 나간다.
-            if (
-              event.target instanceof Element &&
-              event.target.closest("button, [data-attachment-card]")
-            ) {
-              return;
-            }
-            inputRef.current?.focus();
-          }}
+        <ComposerCard
+          testIdPrefix="composer"
+          inputRef={inputRef}
+          warn={secretBlocked}
+          tools={
+            <ComposerTools
+              testIdPrefix="composer"
+              onPickFiles={onFiles}
+              attachDisabled={offline}
+              onInsertMention={autocomplete.insertTrigger}
+              onOpenEmoji={(opener) => {
+                autocomplete.close();
+                emoji.openPicker(opener);
+              }}
+              format={{
+                available: format.available,
+                open: format.open,
+                hasText: text.trim().length > 0,
+                onPress: format.openForSelection,
+              }}
+            />
+          }
+          meta={
+            <>
+              {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
+                  원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은
+                  늘 붙어 있는 안 보이는 `role="status"` 노드가 맡는다: 조건부로 처음 생기는 라이브 리전은 낭독이
+                  보장되지 않는다. */}
+              <p role="status" className="sr-only" data-testid="composer-status">
+                {schedule.statusText}
+              </p>
+              {schedule.statusText !== null && !isMobile ? (
+                <p
+                  aria-hidden="true"
+                  className="min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
+                  data-composer-meta-slot=""
+                  data-testid="composer-status-line"
+                >
+                  {schedule.statusText}
+                </p>
+              ) : metaMode === "hint" ? (
+                <ComposerHint
+                  dmHint={dmHint}
+                  keysHintNeeded={keysHintNeeded}
+                  pendingLink={pendingLink}
+                  sharedRow
+                />
+              ) : (
+                <TypingLine
+                  memberIds={metaMode === "typing" ? typists : []}
+                  threshold={typingThreshold}
+                  directory={directory}
+                />
+              )}
+            </>
+          }
+          send={
+            <ComposerSend
+              testIdPrefix="composer"
+              type="submit"
+              disabled={!canSend}
+              busy={schedule.busy}
+              label="메시지 보내기"
+              title={
+                offline
+                  ? blockedLine
+                  : (attachBlockCopy ??
+                    (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
+              }
+              showsSchedule={showsSchedule}
+              schedule={schedule.menuProps}
+            />
+          }
         >
           {bandShows && (
             <ComposerContextBand>
@@ -1101,112 +1152,10 @@ export function Composer({
                   : undefined
             }
             data-testid="composer-input"
-            // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
-            // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
-            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed outline-none placeholder:text-ink-muted focus-visible:outline-none"
+            // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다(글 칸의 옷은 스레드 입력창과 한 벌이다).
+            className={COMPOSER_TEXTAREA_CLASS}
           />
-          <div
-            className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
-            data-testid="composer-actions"
-          >
-            <div className="flex items-center gap-1">
-              {/* 「+」는 도구 줄의 맨 왼쪽이다(Codex 입력창·폰 #4305와 같은 순서). 첨부이고, 앱 피커(#4315)가
-                  서면 이 자리의 메뉴가 된다. 마이크는 #4306 이 오른쪽에 붙고, 그 전에는 자리도 그리지 않는다. */}
-              <AttachButton onPick={onFiles} disabled={offline} />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="tap-target shrink-0"
-                aria-label="멘션 넣기"
-                title="멘션 넣기"
-                data-testid="composer-mention-trigger"
-                onClick={autocomplete.insertTrigger}
-              >
-                <AtSign aria-hidden="true" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="tap-target shrink-0"
-                aria-label="이모지 넣기"
-                title="이모지 넣기"
-                data-testid="composer-emoji-trigger"
-                onClick={(event) => {
-                  autocomplete.close();
-                  emoji.openPicker(event.currentTarget);
-                }}
-              >
-                <Smile aria-hidden="true" />
-              </Button>
-              <ComposerFormatButton
-                available={format.available}
-                open={format.open}
-                hasText={text.trim().length > 0}
-                onPress={format.openForSelection}
-                testId="composer-format-trigger"
-                // 카드가 xs(320px)보다 좁으면(접히지 않은 사이드바 옆 600폭) 서식 단추부터 접는다:
-                // 단추를 더 얹으면 ▾가 카드 밖으로 나간다. 서식은 ⌘B·⌘I 로도 닿는다.
-                className="@max-xs:hidden"
-              />
-            </div>
-            {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
-                원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은
-                늘 붙어 있는 안 보이는 `role="status"` 노드가 맡는다: 조건부로 처음 생기는 라이브 리전은 낭독이
-                보장되지 않는다. */}
-            <p role="status" className="sr-only" data-testid="composer-status">
-              {schedule.statusText}
-            </p>
-            {schedule.statusText !== null && !isMobile ? (
-              <p
-                aria-hidden="true"
-                className="min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
-                data-composer-meta-slot=""
-                data-testid="composer-status-line"
-              >
-                {schedule.statusText}
-              </p>
-            ) : metaMode === "hint" ? (
-              <ComposerHint
-                dmHint={dmHint}
-                keysHintNeeded={keysHintNeeded}
-                pendingLink={pendingLink}
-                sharedRow
-              />
-            ) : (
-              <TypingLine
-                memberIds={metaMode === "typing" ? typists : []}
-                threshold={typingThreshold}
-                directory={directory}
-              />
-            )}
-            {/* 보내기 반쪽 + ▾ 반쪽이 알약 하나다(UI 명세 1.1). ▾가 없는 서버에서는 예전 그대로 원 하나다. */}
-            <div className="flex shrink-0 items-center gap-px">
-              <Button
-                type="submit"
-                size="icon"
-                className={cn("tap-target shrink-0", showsSchedule && "rounded-r-none")}
-                // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
-                // 끝나므로, 막고 **왜**를 위 한 줄이 말한다. 입력창은 잠그지 않는다:
-                // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
-                disabled={!canSend}
-                aria-busy={schedule.busy || undefined}
-                aria-label="메시지 보내기"
-                title={
-                  offline
-                    ? blockedLine
-                    : (attachBlockCopy ??
-                      (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
-                }
-                data-testid="composer-send"
-              >
-                <SendHorizontal />
-              </Button>
-              <ScheduleSendMenu {...schedule.menuProps} />
-            </div>
-          </div>
-        </div>
+        </ComposerCard>
       </form>
 
       <ComposerFormatTray

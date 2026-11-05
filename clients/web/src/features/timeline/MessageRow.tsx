@@ -92,8 +92,6 @@ import {
   resolveQuote,
 } from "@momo/core/features/timeline/quote";
 import { QuoteBlock } from "./QuoteBlock";
-import { ReplyHomeLine } from "./ReplyHomeLine";
-import { replyHomeRoot, type ReplyHomeLine as ReplyHomeLineModel } from "@momo/core/features/timeline/threadHome";
 import {
   DeleteMessageDialog,
   MessageActionContextMenu,
@@ -114,6 +112,7 @@ import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
+import { EditedMark } from "./EditedMark";
 import { EditRequestContext } from "./editRequest";
 import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
@@ -323,7 +322,6 @@ export function MessageRow({
   onResend,
   showRollup = true,
   rollup: listRollup,
-  replyHome,
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
@@ -415,11 +413,6 @@ export function MessageRow({
    * 「이 루트에는 요약이 없다」로 읽는다. 그릴지는 여전히 `showRollup`이 정한다.
    */
   rollup?: ThreadRollup | null;
-  /**
-   * 본류에 선 답글 줄(「↳ ○○님 스레드에 답글」 + 원문 한 줄, #4888). 목록이 넣는다(`Timeline`) — 본류에 선 답글(「대화에도 보낸」)에만
-   * 값이 있고, 답글이 아닌 행·스레드 패널·받은 편지함 같은 목록 밖 마운트는 넣지 않아 줄이 없다. 누르면 그 스레드가 열린다(`onOpenThread`).
-   */
-  replyHome?: ReplyHomeLineModel | null;
   /**
    * ADR-0179 D3. True only when this row entered as a live other-user
    * arrival. Default false: REST, work log, fixtures.
@@ -528,8 +521,6 @@ export function MessageRow({
   const previewText =
     message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
   const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
-  // 본류 답글 줄이 눌려 열 스레드의 루트(#4888). 열 곳이 없으면(핸들러 없음·루트를 못 불러옴) 줄은 글이다.
-  const replyHomeRoot_ = replyHome && onOpenThread && quoteLookup ? replyHomeRoot(replyHome, quoteLookup) : undefined;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
@@ -1087,14 +1078,6 @@ export function MessageRow({
             대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
             tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
             지워지지 않는다. */}
-        {replyHome && !deleted && (
-          <ReplyHomeLine
-            line={replyHome}
-            directory={directory}
-            myMemberId={actions?.myMemberId}
-            onOpen={replyHomeRoot_ ? () => onOpenThread?.(replyHomeRoot_) : undefined}
-          />
-        )}
         {quote && (
           <QuoteBlock
             block={quote}
@@ -1282,7 +1265,7 @@ export function MessageRow({
                 안쪽인 서술은 없다 — 이 낱말은 본문이 여기서 끝났다고 말한다.
                 꼬리의 다른 조각들은 그 본문에 **대해** 말한다. */}
             {stopMark && <span data-testid="stream-stop-mark">{stopMark}</span>}
-            {showsEditedMark && <span>수정됨</span>}
+            {showsEditedMark && <EditedMark message={message} />}
             {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
                 스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}
             {showsPinMark && (

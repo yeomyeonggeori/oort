@@ -66,10 +66,11 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 //
 //   * **a pointer that can hover** - on row hover or focus-within, a floating
 //     toolbar straddles the top-right (16px gutter, no own-row body overlap):
-//     frequency slots, React, Reply, and ⋯. Right-click still opens the same
-//     inventory at the pointer. A text selection yields to the browser's
-//     native menu and unmounts the toolbar so a drag is not stolen.
-//     Edit/Delete stay in the overflow menu.
+//     frequency slots, React, Reply, a pencil on **my** messages (#5326, owner
+//     2026-11-05: people could not find 고치기), and ⋯. Right-click still opens
+//     the same inventory at the pointer. A text selection yields to the
+//     browser's native menu and unmounts the toolbar so a drag is not stolen.
+//     Edit stays the first row of the overflow menu too; Delete is menu-only.
 //
 //     R1 shipped a six-button bar and failed twice: `opacity-0` hides a button
 //     from the eye but not from Tab (up to ~150 tab stops in a virtualized
@@ -424,6 +425,9 @@ export function MessageHoverToolbar({
   const hasReact = toolbarItems.some((item) => item.key.startsWith("react:"));
   const hasReactMore = toolbarItems.some((item) => item.key === "react-more");
   const hasReply = toolbarItems.some((item) => item.key === "reply");
+  // 도구 막대에도 복사본이 서는 메뉴 항목(`toolbarCopy`): 연필(고치기, #5326) 하나다. 내 메시지에만 선다(`available.edit`가 작성자 문이다).
+  // 이름은 메뉴의 같은 항목에서 읽는다: 메뉴의 첫 줄과 같은 낱말이고 이 파일이 낱말을 두 번 적지 않는다.
+  const editCopy = toolbarItems.find((item) => item.toolbarCopy === true);
   const hasMenu =
     messageActionItemsForSurface("menu", available, copyState).length > 0;
   if (toolbarItems.length === 0 && !hasMenu) return null;
@@ -506,6 +510,21 @@ export function MessageHoverToolbar({
               className={toolbarIconClass}
               aria-hidden="true"
             />
+          </button>
+        </Tooltip>
+      )}
+      {editCopy && (
+        <Tooltip label={editCopy.label} side={tipSide}>
+          <button
+            type="button"
+            data-toolbar-item=""
+            data-row-action=""
+            data-testid="toolbar-edit"
+            aria-label={editCopy.label}
+            onClick={() => callbacks.onEdit()}
+            className={toolbarItemClass}
+          >
+            <Pencil className={toolbarIconClass} aria-hidden="true" />
           </button>
         </Tooltip>
       )}

@@ -271,7 +271,8 @@ async function installMocks(context, server) {
 
 async function open(browserType, origin, scheme, server, viewport = { width: 1280, height: 800 }) {
   const browser = await browserType.launch();
-  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
+  // 한국어 문맥으로 연다(#5326): 「수정됨」이 사전 낱말로 옮겨져 영어 브라우저에서는 「Edited」다. 이 레인의 단정은 한국어 글자를 읽는다.
+  const context = await browser.newContext({ viewport, colorScheme: scheme, locale: "ko-KR", serviceWorkers: "block", reducedMotion: "reduce" });
   await installMocks(context, server);
   await context.addInitScript((serverBase) => { try { localStorage.setItem("momo.web.server.v1", serverBase); } catch { /* 저장소 없는 캡처 */ } }, origin);
   const page = await context.newPage();
