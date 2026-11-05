@@ -254,6 +254,14 @@ export type BubbleProbeEvent =
 export type BubbleProbe = (event: BubbleProbeEvent, body: string) => void;
 export const BubbleProbeContext = React.createContext<BubbleProbe | null>(null);
 
+/**
+ * 말풍선 산문(평문 · 문단 · 목록 항목)의 한국어는 **어절 단위로** 꺾는다 (#5313) - iOS 기본은 글자 단위라 「두었으/니」·「오/전 9시」처럼 낱말 가운데서 끊긴다.
+ * 앱 안의 다른 글(`Sentence`·`NoticeBlock`·입력창)이 이미 같은 규칙이다(#4982·#5288). 줄 높이 여유(`headroomLineHeight`)가 이 전략을 실제로 켠다 -
+ * 컨테이너 높이가 줄 수의 요구와 정확히 같으면 전략이 꺼져 있었다(`design/lineHeadroom.ts` 5번). 공백이 없는 긴 낱말·주소는 여전히 글자 단위로 꺾이고 넘치지
+ * 않는다(`measure/bubbleClip.tsx` url 묶음). 속성은 문단 단위라 안쪽에 겹친 `Text`(굵게·인라인 코드·멘션·링크)는 바깥을 따르고, 코드 블록은 가로 스크롤이라 대상이 아니다.
+ */
+const WORD_WRAP = 'hangul-word' as const;
+
 const NO_PROBE_PROPS = {} as const;
 
 /** 문단 `Text` 에 펼치는 핸들러. 하네스가 없으면 상수 빈 객체라 앱의 Text 에는 아무것도 붙지 않는다. */
@@ -578,6 +586,7 @@ function BlockNode({
             )}
             <Text
               selectable={selectable}
+              lineBreakStrategyIOS={WORD_WRAP}
               style={[styles.listText, muted && styles.muted, inkStyle]}
               {...paragraphProbeProps(probe, `${probeKey}.${index}`, probeBody)}>
               <InlineNodes nodes={item} mentions={mentions} />
@@ -591,6 +600,7 @@ function BlockNode({
   return (
     <Text
       selectable={selectable}
+      lineBreakStrategyIOS={WORD_WRAP}
       style={[styles.paragraph, muted && styles.muted, inkStyle]}
       {...paragraphProbeProps(probe, probeKey, probeBody)}>
       {block.lines.map((line, index) => (
@@ -736,6 +746,7 @@ export function MessageBody({
           <Text
             style={[styles.paragraph, muted && styles.muted, ink && {color: ink.fg}]}
             selectable={selectable}
+            lineBreakStrategyIOS={WORD_WRAP}
             {...paragraphProbeProps(probe, '0.0', body)}>
             <ExpressionText text={expressionBody.markdown} />
           </Text>,
