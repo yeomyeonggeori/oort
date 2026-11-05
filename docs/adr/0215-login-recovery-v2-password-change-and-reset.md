@@ -657,7 +657,7 @@ momo.human.password_reset.v1
 - 이 증보가 정하는 것: 복구 코드의 모양(L2)·보관(L3)·만들기(L4)·쓰기(L5)·폐기와 소각(L6)·세션 처리(L7)·시도 제한(L8)·다른 복구 길과의 우선순위(L9)·감사(L10)·사용자 흐름(L11)·위협(L12).
 - **새 공개(비인증) 엔드포인트가 1개 생긴다**: `POST /v1/auth/password-recovery`(L5). D1의 「0개」를 깨는 첫 예외라서 owner 질문 Q1로 올린다. 코드를 만들고 상태를 보는 문(L4)은 인증된 경로이고 공개가 아니다.
 - **서버 스위치 `MOMO_PASSWORD_RECOVERY_CODE`(기본 꺼짐)**가 켜져 있을 때만 세 경로(만들기·바꾸기 겸용 POST, 상태 GET, 공개 쓰기)가 열린다. 꺼져 있으면 모두 404다. 「구현 머지 ≠ 켜기」(D7과 같은 규율).
-  - **값 해석**: 기존 기본 꺼짐 스위치와 같이 `trim() == "true"`일 때만 켜진다(`MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`·`MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS`와 같은 해석, `config.rs`의 `DeviceKeySettings::from_env`). `True`·`1`·`yes`·빈 값·오타는 모두 꺼짐이다. 오타에도 닫히는 쪽이 안전한 방향이다.
+  - **값 해석**: 기존 기본 꺼짐 스위치와 같이 `trim() == "true"`일 때만 켜진다(`MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`·`MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`와 같은 해석, `config.rs`의 `DeviceKeySettings`). `True`·`1`·`yes`·빈 값·오타는 모두 꺼짐이다. 같은 원리가 반대 방향에도 적용된다: 제한을 거는 `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS`는 기본 켜짐이고 정확히 `false`만 끈다(#5339). 오타가 약한 쪽으로 가면 안 되므로, 표면을 여는 이 스위치는 오타가 닫힘으로 간다.
   - **꺼짐 응답은 추출기 앞에서 나온다**: 공개 경로가 claim처럼 `Json<T>` 추출기를 쓰면 꺼짐 상태에서도 잘못된 `Content-Type`·깨진 본문이 핸들러 전에 415·422로 거절되어 「라우트가 없다」와 달라진다. 스위치 확인을 `route_layer`로 추출기 앞에 두거나 본문을 직접 읽는다(D6의 `Bytes` 선례).
   - 켜는 조건: ① 독립 보안 검수 Blocker 0·High 0 ② owner 승인(운영 값 변경 전 판단, #4488과 같은 절차) ③ 격리 스택에서 만들기 → 복구 → 이전 세션·개발자 토큰 거절 → 새 코드까지의 e2e 증거(O-1). `MOMO_INSTANCE_ID`는 필요 없다(서명이 없다).
 - 메일·알림·워크스페이스별 정책(관리자가 끄는 스위치)은 이 증보가 만들지 않는다(후속).
