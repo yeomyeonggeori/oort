@@ -205,6 +205,7 @@ import {BubbleClipSurface} from './bubbleClip';
 import {SentenceWrapSurface} from './sentenceWrap';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
+import {EditLiveSurface} from './editLive';
 import {JumpLatestSurface} from './jumpLatest';
 import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
@@ -2305,6 +2306,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4614: 대화 목록을 눌러 자판·입력창을 내린다. 대화 화면 그대로(행이 눌리는 `actions` 포함) + 터치·자판 기록.
   if (name === 'tap' || name.startsWith('tap-')) {
     return <TapDismissSurface which={name.slice('tap'.length).replace(/^-/, '')} />;
+  }
+  // #5417: 길게 눌러 「고치기」 -> 편집 시트 -> 저장 -> 「수정됨」. 대화 화면 그대로 + 저장이 글을 바꾸는 행 동작(`measure/editLive.tsx`).
+  if (name === 'edit-live' || name.startsWith('edit-live-')) {
+    return <EditLiveSurface />;
   }
   // #4689: 멀리 올라간 채 아래 알약 「최신으로」를 누르면 마지막 메시지가 보이기까지 얼마나 걸리고 몇 번에 나눠 내려가는가. 진짜 대화 화면 + 스크롤 기록(`measure/jumpLatest.tsx`).
   if (name === 'jump-latest' || name.startsWith('jump-latest-') || name.startsWith('jump-latest+')) {
