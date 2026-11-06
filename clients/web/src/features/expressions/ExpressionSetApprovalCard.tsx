@@ -1,4 +1,3 @@
-import "./expressionSet.css";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Check, ImageOff } from "lucide-react";
 import { isAnimatedExpression, LEGACY_EXPRESSION_KIND, recommendExpressionKind } from "@momo/core/features/expressions/kind";
@@ -211,7 +210,7 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
 /**
  * 격자의 한 칸. 준비된 칸은 눌러서 고르고 빼는 단추(`aria-pressed`)이고, 회색 칸은 같은 자리를 차지하되 `aria-disabled`다:
  * 방향키가 건너뛰지 않게 포커스는 받고(사유를 읽어 주려고), 눌러도 아무 일도 없다. 구분은 색에만 기대지 않는다(점선·아이콘·글).
- * 고른 상태는 체크 상자와 굵은 테두리가 말하고(`expressionSet.css`가 `aria-pressed`를 읽는다), 읽는 쪽에는 `aria-pressed`와 칸의 `aria-selected`가 말한다.
+ * 고른 상태는 체크 상자와 3:1 테두리가 말하고(`expressionSet.css`가 `aria-pressed`를 읽는다), 읽는 쪽에는 `aria-pressed`와 칸의 `aria-selected`가 말한다.
  */
 function SetTile({ slot, position, active, checked, editable, draft, onToggle, onFocusTile, buttonRef }: {
   slot: ExpressionSetSlot; position: number; active: boolean; checked: boolean; editable: boolean; draft: ReturnType<typeof expressionSetSlotDraft> | null;

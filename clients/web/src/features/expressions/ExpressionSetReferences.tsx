@@ -1,4 +1,3 @@
-import "./expressionSet.css";
 import { ImageOff, X } from "lucide-react";
 import { useAttachmentPreview } from "@/features/attachments/content";
 import { useFormatMessage } from "@/i18n/useFormatMessage";

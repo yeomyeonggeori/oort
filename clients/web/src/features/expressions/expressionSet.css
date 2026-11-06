@@ -1,6 +1,9 @@
 /*
  * 계획 카드·세트 카드 (ADR-0218 §12 L2.5·L5~L7, #5462). 색은 토큰만 읽는다(`--surface`, `--line`, `--primary`…): 이 파일에 값이 없다.
  * 고른 칸·회색 칸의 모양을 클래스 이름이 아니라 **읽는 쪽이 이미 보는 속성**(`aria-pressed`, `data-gray`)으로 정한다: 화면과 보조기술이 같은 사실에서 나온다.
+ *
+ * 이 파일은 `main.tsx`가 `expressions.css` 옆에서 **한 번만** 불러온다. 카드 컴포넌트가 직접 `import "./expressionSet.css"` 하면 안 된다: 카드는 타임라인 모듈 그래프 안에 있고,
+ * 그 그래프를 esbuild 로 묶는 브라우저 시험 하네스(`Timeline.burst.chromium.test.ts`·`WelcomeKickoff.chromium.test.ts`)가 「CSS 를 JS 에 가져올 수 없다」로 깨진다(#5462 전체 시험에서 확인).
  */
 
 /* 참조 그림 썸네일. 크기는 사람이 얼굴 유무를 알아볼 수 있는 최소로 한 곳에서 정한다. */
