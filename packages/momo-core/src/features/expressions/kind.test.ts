@@ -6,6 +6,7 @@ import {
   DEFAULT_EXPRESSION_PICKER_TAB,
   EXPRESSION_EMOJI_MAX_EDGE,
   EXPRESSION_PICKER_TABS,
+  EXPRESSION_TAB_SHELVES,
   EXPRESSION_TABS,
   EXPRESSION_VIEW_SHELVES,
   EXPRESSION_VIEWS,
@@ -13,7 +14,9 @@ import {
   expressionActionOf,
   expressionKindOf,
   expressionShelfOf,
+  expressionShelvesOfPickerTab,
   expressionViewOfPickerTab,
+  expressionsForPickerTab,
   expressionsForShelves,
   expressionsForTab,
   expressionsForView,
@@ -167,30 +170,21 @@ describe("네 탭이 겹치지 않는 규칙 (J2)", () => {
   });
 });
 
-// owner 2026-11-05(#5330): 사용자에게 보이는 이름은 「이모티콘」 하나다. J2의 네 칸(서버 종류·API·칸의 분류)은 그대로이고, 화면이 팀 이모지 칸과 이모티콘 칸을
-// 한 보기 「이모티콘」으로 합친다. 합치는 곳은 코어의 이 몇 줄뿐이고 폰도 웹도 같은 함수를 쓴다.
-describe("화면의 두 보기 — 팀 이모지 칸과 이모티콘 칸이 한 보기다 (owner 2026-11-05)", () => {
+// owner 2026-11-05(#5330) → 2026-11-07(#5453): J2의 네 칸(서버 종류·API·칸의 분류)은 그대로이고, 창의 탭이 그 칸들을 모은다.
+// 옛 「보관함 한 보기」 길(`expressionsForView`)은 폰 시트가 아직 써서 남아 있다 — 이제 이모티콘 보기는 움직이지 않는 큰 그림 칸 하나다.
+describe("옛 두 보기 — 폰 시트가 옮겨 가기 전까지 남는 길 (이모티콘 = 큰 그림 칸, GIF = GIF 칸)", () => {
   const every = [undefined, "emoji", "sticker", "unknown-future-kind"].flatMap((kind) =>
     [["still", still(8, 8)], ["moving", moving(8, 8)], ["bigstill", still(300, 300)], ["bigmoving", moving(300, 300, 5)]].map(([motion, large]) =>
       item(kind, large as ExpressionImage, `${String(kind ?? "none").replace(/[^a-z]/g, "_")}_${motion as string}`)));
-  it("보기는 이모티콘(= 팀 이모지 칸 + 이모티콘 칸)과 GIF 둘이다 — 합치는 표는 한 곳", () => {
+  it("보기는 이모티콘과 GIF 둘이고 각각 J2 칸 하나다 — 팀 이모지 칸은 어느 보기도 아니다", () => {
     expect([...EXPRESSION_VIEWS]).toEqual(["emoticon", "gif"]);
-    expect(EXPRESSION_VIEW_SHELVES).toEqual({ emoticon: ["team", "emoticon"], gif: ["gif"] });
-  });
-  it("모든 등록은 이모티콘·GIF 중 정확히 한 보기에 있다: 합집합은 전체, 교집합은 비어 있고, 각 보기는 J2 칸의 합과 같다", () => {
-    const emoticon = expressionsForView(every, "emoticon");
-    const gif = expressionsForView(every, "gif");
-    expect(emoticon.length + gif.length).toBe(every.length);
-    expect(new Set([...emoticon, ...gif]).size).toBe(every.length);
-    expect(emoticon.filter((entry) => gif.includes(entry))).toEqual([]);
-    // 둘 다 비어 있지 않아야 이 시험이 잰다.
-    expect(emoticon.length).toBeGreaterThan(0);
-    expect(gif.length).toBeGreaterThan(0);
-    // 보기는 J2 칸의 합이다: 이모티콘 = 팀 이모지 칸 ∪ 이모티콘 칸, GIF = GIF 칸(분류 자체는 바뀌지 않았다).
-    expect(new Set(emoticon)).toEqual(new Set([...expressionsForTab(every, "team"), ...expressionsForTab(every, "emoticon")]));
-    expect(gif).toEqual(expressionsForTab(every, "gif"));
-    // 작은 이모티콘(emoji 종류)은 움직여도 이모티콘 보기에 선다.
-    expect(emoticon).toContainEqual(item("emoji", moving(8, 8), "emoji_moving"));
+    expect(EXPRESSION_VIEW_SHELVES).toEqual({ emoticon: ["emoticon"], gif: ["gif"] });
+    expect(expressionsForView(every, "emoticon")).toEqual(expressionsForTab(every, "emoticon"));
+    expect(expressionsForView(every, "gif")).toEqual(expressionsForTab(every, "gif"));
+    // 작은 이모지(emoji 종류)는 움직여도 두 보기 어디에도 없다 — 이모지 탭의 것이다.
+    const views = [...expressionsForView(every, "emoticon"), ...expressionsForView(every, "gif")];
+    expect(views.some((entry) => entry.kind === "emoji")).toBe(false);
+    expect(views.length + expressionsForTab(every, "team").length).toBe(every.length);
   });
   it("여러 칸의 합은 들어온 차례 그대로이고 같은 객체다", () => {
     const [first, second, third] = [item("sticker", still(8, 8), "first_one"), item("emoji", still(8, 8), "second_one"), item("sticker", moving(8, 8), "third_one")];
@@ -201,25 +195,68 @@ describe("화면의 두 보기 — 팀 이모지 칸과 이모티콘 칸이 한 
   });
   it("처음 여는 보기는 이모티콘, 거기가 비고 GIF에만 등록이 있으면 GIF다 — 지운·숨긴 등록은 세지 않는다", () => {
     expect(firstFilledView([])).toBe("emoticon");
-    expect(firstFilledView([item("emoji", still(8, 8)), item("sticker", moving(8, 8))])).toBe("emoticon");
+    expect(firstFilledView([item("sticker", still(8, 8)), item("sticker", moving(8, 8))])).toBe("emoticon");
     expect(firstFilledView([item(undefined, still(8, 8))])).toBe("emoticon");
     expect(firstFilledView([item("sticker", moving(8, 8))])).toBe("gif");
-    expect(firstFilledView([{ ...item("emoji", still(8, 8)), status: "hidden" as const, media: null }, item("sticker", moving(8, 8))])).toBe("gif");
+    // 작은 이모지는 어느 보기도 채우지 않는다: 그 팀의 첫 보기는 있는 그림이 없는 이모티콘이 아니라 GIF다.
+    expect(firstFilledView([item("emoji", still(8, 8)), item("sticker", moving(8, 8))])).toBe("gif");
+    expect(firstFilledView([{ ...item("sticker", still(8, 8)), status: "hidden" as const, media: null }, item("sticker", moving(8, 8))])).toBe("gif");
     expect(firstFilledView([{ ...item("sticker", still(8, 8)), status: "deleted" as const, media: null }])).toBe("emoticon");
   });
-  it("탭은 이모티콘 · 기본 · GIF 이고 처음 여는 탭은 기본이며, 기본(표준 표)은 보관함의 보기가 아니다", () => {
+  it("탭은 이모티콘 · 이모지 · GIF 이고 처음 여는 탭은 이모지이며, 이모지(표준 표 바탕)는 보관함의 한 보기가 아니다", () => {
     expect([...EXPRESSION_PICKER_TABS]).toEqual(["emoticon", "emoji", "gif"]);
     expect(DEFAULT_EXPRESSION_PICKER_TAB).toBe("emoji");
     expect(expressionViewOfPickerTab("emoji")).toBeNull();
     expect(expressionViewOfPickerTab("emoticon")).toBe("emoticon");
     expect(expressionViewOfPickerTab("gif")).toBe("gif");
-    // 보관함을 보는 탭은 정확히 보기들이다.
     expect(EXPRESSION_PICKER_TABS.flatMap((tab) => expressionViewOfPickerTab(tab) ?? [])).toEqual([...EXPRESSION_VIEWS]);
   });
-  it("고른 뒤의 동작은 등록이 선 칸이 정한다: 작은 팀 이모지 칸은 입력칸에 넣고, 이모티콘·GIF 칸은 보낸다 — 한 보기 안에 둘이 함께 선다", () => {
-    for (const entry of every) expect(expressionActionOf(entry), `${entry.kind ?? "none"} ${entry.name}`).toBe(expressionShelfOf(entry) === "team" ? "insert" : "send");
-    const emoticon = expressionsForView(every, "emoticon").map(expressionActionOf);
-    expect(new Set(emoticon)).toEqual(new Set(["insert", "send"]));
-    expect(new Set(expressionsForView(every, "gif").map(expressionActionOf))).toEqual(new Set(["send"]));
+});
+
+// owner 2026-11-07(#5453): 이모티콘 · 이모지 · GIF. 우리 팀이 올린 것과 기본을 가르지 않는다. 폰(#5452)이 같은 표를 읽는다.
+describe("세 탭이 보관함을 모으는 규칙 (이모티콘 · 이모지 · GIF)", () => {
+  const every = [undefined, "emoji", "sticker", "unknown-future-kind"].flatMap((kind) =>
+    [["still", still(8, 8)], ["moving", moving(8, 8)], ["bigstill", still(300, 300)], ["bigmoving", moving(300, 300, 5)]].map(([motion, large]) =>
+      item(kind, large as ExpressionImage, `${String(kind ?? "none").replace(/[^a-z]/g, "_")}_${motion as string}`)));
+  const TABS = ["emoticon", "emoji", "gif"] as const;
+  it("표는 한 곳이다: 이모티콘 = 큰 그림 칸, 이모지 = 팀 이모지 칸(+ 표준 표), GIF = GIF 칸", () => {
+    expect(EXPRESSION_TAB_SHELVES).toEqual({ emoticon: ["emoticon"], emoji: ["team"], gif: ["gif"] });
+    for (const tab of TABS) expect(expressionShelvesOfPickerTab(tab)).toBe(EXPRESSION_TAB_SHELVES[tab]);
+    // 칸은 정확히 한 탭에 있다: 세 칸이 세 탭에 하나씩, 겹침도 빠짐도 없다.
+    expect(TABS.flatMap((tab) => [...EXPRESSION_TAB_SHELVES[tab]]).sort()).toEqual(["emoticon", "gif", "team"]);
+  });
+  it("모든 등록은 세 탭 중 정확히 한 곳에 있다: 합집합은 전체, 교집합은 비어 있고, 각 탭은 J2 칸과 같다", () => {
+    const placed = TABS.map((tab) => expressionsForPickerTab(every, tab));
+    expect(placed.flat().length).toBe(every.length);
+    expect(new Set(placed.flat()).size).toBe(every.length);
+    for (const original of every) expect(placed.filter((list) => list.includes(original))).toHaveLength(1);
+    for (const list of placed) expect(list.length).toBeGreaterThan(0);
+    expect(placed[0]).toEqual(expressionsForTab(every, "emoticon"));
+    expect(placed[1]).toEqual(expressionsForTab(every, "team"));
+    expect(placed[2]).toEqual(expressionsForTab(every, "gif"));
+  });
+  it("작은 이모지(emoji 종류)는 움직여도 이모지 탭이고, 움직이는 큰 그림만 GIF 탭이다 — 움직임이 곧 GIF가 아니다", () => {
+    const movingEmoji = item("emoji", moving(8, 8), "party_parrot");
+    const movingSticker = item("sticker", moving(300, 300), "dance_loop");
+    const stillSticker = item("sticker", still(300, 300), "thumbs_up");
+    const list = [movingEmoji, movingSticker, stillSticker];
+    expect(expressionsForPickerTab(list, "emoji")).toEqual([movingEmoji]);
+    expect(expressionsForPickerTab(list, "gif")).toEqual([movingSticker]);
+    expect(expressionsForPickerTab(list, "emoticon")).toEqual([stillSticker]);
+  });
+  it("출처를 읽지 않는다: 우리 팀이 올린 큰 그림과 기본(내장) 큰 그림이 같은 이모티콘 탭에 섞여 서고, 차례는 들어온 그대로다", () => {
+    // 내장 큰 그림 목록은 아직 없다. 생기면 같은 모양(kind·media)을 갖추는 것만으로 이 탭에 선다 — 이 시험이 그 약속이다.
+    const team = item("sticker", still(300, 300), "team_cheers");
+    const builtIn = { ...item("sticker", still(300, 300), "base_cheers"), id: "builtin:cheers", createdBy: "system" };
+    const emoticon = expressionsForPickerTab([builtIn, team], "emoticon");
+    expect(emoticon).toEqual([builtIn, team]);
+    expect(emoticon[0]).toBe(builtIn);
+    expect(expressionsForPickerTab([builtIn, team], "gif")).toEqual([]);
+  });
+  it("고른 뒤의 동작은 탭마다 하나다: 이모티콘·GIF는 미리 보고 보내고, 이모지는 입력칸에 넣는다", () => {
+    for (const entry of expressionsForPickerTab(every, "emoticon")) expect(expressionActionOf(entry), entry.name).toBe("send");
+    for (const entry of expressionsForPickerTab(every, "gif")) expect(expressionActionOf(entry), entry.name).toBe("send");
+    for (const entry of expressionsForPickerTab(every, "emoji")) expect(expressionActionOf(entry), entry.name).toBe("insert");
+    expect(expressionsForPickerTab(every, "emoji").length).toBeGreaterThan(0);
   });
 });

@@ -454,6 +454,17 @@ export const messageKeys = [
   "expressions.photo.submit",
   "expressions.photo.tagsLabel",
   "expressions.photo.tagsPlaceholder",
+  "expressions.picker.add",
+  "expressions.picker.favoriteAdd",
+  "expressions.picker.favoriteRemove",
+  "expressions.picker.grid",
+  "expressions.picker.sectionFavorites",
+  "expressions.picker.sectionOther",
+  "expressions.picker.sectionRecent",
+  "expressions.picker.setStrip",
+  "expressions.picker.teamGroup",
+  "expressions.preview.cancel",
+  "expressions.preview.group",
   "expressions.sheet.a11y",
   "expressions.sheet.close",
   "expressions.sheet.emptyEmoticon",
@@ -1689,6 +1700,19 @@ export const argumentSpecs = {
   "expressions.photo.submit": {},
   "expressions.photo.tagsLabel": {},
   "expressions.photo.tagsPlaceholder": {},
+  "expressions.picker.add": {},
+  "expressions.picker.favoriteAdd": {},
+  "expressions.picker.favoriteRemove": {},
+  "expressions.picker.grid": {},
+  "expressions.picker.sectionFavorites": {},
+  "expressions.picker.sectionOther": {},
+  "expressions.picker.sectionRecent": {},
+  "expressions.picker.setStrip": {},
+  "expressions.picker.teamGroup": {},
+  "expressions.preview.cancel": {
+    "name": "string"
+  },
+  "expressions.preview.group": {},
   "expressions.sheet.a11y": {},
   "expressions.sheet.close": {},
   "expressions.sheet.emptyEmoticon": {},
@@ -3071,6 +3095,17 @@ export interface MessageArgs {
   "expressions.photo.submit": Record<string, never>;
   "expressions.photo.tagsLabel": Record<string, never>;
   "expressions.photo.tagsPlaceholder": Record<string, never>;
+  "expressions.picker.add": Record<string, never>;
+  "expressions.picker.favoriteAdd": Record<string, never>;
+  "expressions.picker.favoriteRemove": Record<string, never>;
+  "expressions.picker.grid": Record<string, never>;
+  "expressions.picker.sectionFavorites": Record<string, never>;
+  "expressions.picker.sectionOther": Record<string, never>;
+  "expressions.picker.sectionRecent": Record<string, never>;
+  "expressions.picker.setStrip": Record<string, never>;
+  "expressions.picker.teamGroup": Record<string, never>;
+  "expressions.preview.cancel": { name: string };
+  "expressions.preview.group": Record<string, never>;
   "expressions.sheet.a11y": Record<string, never>;
   "expressions.sheet.close": Record<string, never>;
   "expressions.sheet.emptyEmoticon": Record<string, never>;

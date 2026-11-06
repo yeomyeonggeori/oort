@@ -1,4 +1,6 @@
-import { ExpressionSendPreview } from "@/features/expressions/ExpressionSendPreview";
+import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpressionPreview";
+import { useExpressions } from "@/features/expressions/context";
+import type { Expression } from "@momo/core/features/expressions/types";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
   useEffect,
@@ -289,6 +291,11 @@ export function Composer({
        * 이 메시지에는 링크 카드가 하나도 생기지 않는다(ADR-0170 증보 2026-11-01 D21).
        */
       suppressUnfurl?: boolean;
+      /**
+       * #5453 - 입력창 위에서 미리 본 이모티콘·GIF. 있으면 보내기 한 번이 표현 메시지 → 글 메시지 둘을 나간다(순서와 멱등은 `useTimeline`이 코어
+       * `sendBundle`로 지킨다). 글이 비어도 표현만 나간다.
+       */
+      expression?: Expression;
     }
   ) => Promise<void> | void;
   /**
@@ -339,6 +346,16 @@ export function Composer({
     inputRef,
     onValueChange: autocomplete.replaceValue,
   });
+  // 이모티콘 창에서 고른 큰 그림(이모티콘·GIF)은 글에 `:이름:`으로 들어가지 않고 입력창 위에 미리 서 있다(#5453). 보내기 한 번이 그림 → 글 순서로 둘을
+  // 보낸다. 고른 뒤 그 표현이 숨겨졌거나 지워졌으면(`expressionGone`) 보내지 않고 미리 보기가 한 문장으로 말한다 - 몰래 그림만 빼고 보내지 않는다.
+  const { cache: expressionCache } = useExpressions();
+  const [pendingExpression, setPendingExpression] = useState<Expression | null>(null);
+  // 고를 때 활성이었으므로, 지금도 같은 상태인 등록이 보관함에 있으면 살아 있는 것이다(숨김·삭제로 바뀌었으면 없다). 최신 객체를 보낸다.
+  const livePending =
+    pendingExpression === null
+      ? null
+      : (expressionCache.items.find((entry) => entry.id === pendingExpression.id && entry.status === pendingExpression.status) ?? null);
+  const expressionGone = pendingExpression !== null && livePending === null;
   const format = useComposerFormat({
     value: text,
     inputRef,
@@ -537,6 +554,8 @@ export function Composer({
     setAutocompleteCaret(restored.length);
     closeAutocomplete();
     setSecretBlocks(0);
+    // 미리 보기는 이 대화에서 고른 것이다: 대화를 옮기면 따라가지 않는다(글 초안은 대화마다 따로 남지만 고른 그림은 저장하지 않는다).
+    setPendingExpression(null);
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
     // 업데이트로 앱이 스스로 다시 실행하기 직전(#3904)에도 같은 마지막 저장을 한다.
@@ -578,7 +597,8 @@ export function Composer({
   const canSend =
     !offline &&
     attachBlock === null &&
-    (text.trim().length > 0 || hasReadyAttachments);
+    !expressionGone &&
+    (text.trim().length > 0 || hasReadyAttachments || livePending !== null);
 
   // ── 예약해서 보내기 (ADR-0208, #4215) ────────────────────────────────────────
   //
@@ -634,6 +654,7 @@ export function Composer({
     // including its failure state and its retry, so there is nothing left for
     // the composer to hold on to.
     setText("");
+    setPendingExpression(null);
     autocomplete.close();
     format.dismiss();
     routing.reset();
@@ -653,6 +674,8 @@ export function Composer({
       ...(replyToId === undefined ? {} : { replyToId }),
       // ✕로 끈 채 보낸다. 값은 지금 렌더의 것이고(글을 비우기 전에 읽는다), 보낸 뒤에는 글이 비어 풀린다.
       ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
+      // 미리 본 그림이 있으면 표현 메시지가 먼저 나가고 글이 이어진다. 살아 있는 최신 표현을 보낸다(`canSend`가 사라진 표현은 이미 막았다).
+      ...(livePending === null ? {} : { expression: livePending }),
       ...(sent.attachments.length === 0
         ? {}
         : { attachments: sent.attachments }),
@@ -732,6 +755,12 @@ export function Composer({
     inputRef.current?.focus();
   }
 
+  /** 미리 본 이모티콘을 치운다(✕·Esc). 눌린 ✕가 사라지므로 포커스는 입력칸이 받는다. */
+  function dismissExpressionPreview() {
+    setPendingExpression(null);
+    inputRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 일반 메시지와 예약으로 둘 다 나가면 안 된다.
@@ -767,7 +796,8 @@ export function Composer({
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
         quoteOpen: quote !== null,
-        previewOpen: linkPreview.cards.length > 0,
+        // 입력칸 위에 지울 것이 있다: 링크 카드(저절로 떴다) 또는 미리 본 이모티콘(일부러 골랐다). Esc 는 링크 카드 → 이모티콘 → 인용 차례로 하나씩 치운다.
+        previewOpen: linkPreview.cards.length > 0 || pendingExpression !== null,
         // #5191 - 입력칸이 한 글자도 없을 때만 ↑ 가 「내 마지막 메시지 고치기」가 된다. 이 키를 받을 곳이 없으면 적지 않는다.
         ...(onEditLast !== undefined ? { textEmpty: text.length === 0 } : {}),
       }
@@ -791,9 +821,10 @@ export function Composer({
         return;
       }
       case "preview-dismiss":
-        // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
+        // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다. 링크 카드가 먼저, 없으면 미리 본 이모티콘이다.
         event.preventDefault();
-        dismissLinkPreview();
+        if (linkPreview.cards.length > 0) dismissLinkPreview();
+        else dismissExpressionPreview();
         return;
       case "edit-last":
         // 열었을 때만 키를 먹는다. 고칠 글이 없으면 ↑ 는 textarea 의 것으로 남는다(빈 입력칸이라 눈에 보이는 일이 없다).
@@ -940,12 +971,18 @@ export function Composer({
         </p>
       )}
 
-      <ExpressionSendPreview body={text} />
       <ComposerLinkPreview
         cards={linkPreview.cards}
         suppressed={linkPreview.suppressed}
         onDismiss={dismissLinkPreview}
       />
+      {pendingExpression !== null && (
+        <ComposerExpressionPreview
+          expression={livePending ?? pendingExpression}
+          gone={expressionGone}
+          onCancel={dismissExpressionPreview}
+        />
+      )}
       <form
         onSubmit={onSubmit}
         className="relative p-3 data-rail:pt-0"
@@ -1176,6 +1213,7 @@ export function Composer({
         anchor={emoji.anchor}
         purpose="insert"
         testId="composer-emoji-picker"
+        onPickExpression={setPendingExpression}
       />
       <ScheduleDialog {...schedule.dialogProps} />
     </div>
