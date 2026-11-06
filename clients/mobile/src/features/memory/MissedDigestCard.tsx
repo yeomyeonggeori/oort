@@ -140,6 +140,8 @@ export function MissedDigestCardView({
             {action?.onPress ? (
               <Pressable
                 accessibilityRole="button"
+                // 보이는 높이는 알약(`PILL_HEIGHT` 28)이지만 눌림은 44 다 — 위아래만 넓히므로 오른쪽 ✕ 의 눌림 상자(`dismiss`, 44×44)와 가로로 겹치지 않는다(재검수 H2).
+                hitSlop={{top: slopTo(PILL_HEIGHT), bottom: slopTo(PILL_HEIGHT)}}
                 onPress={action.onPress}
                 style={({pressed}) => [styles.more, pressed && styles.pressed]}
                 testID={action.testID}>

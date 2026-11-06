@@ -22,6 +22,7 @@ import {Image, StyleSheet, type StyleProp, type ViewStyle} from 'react-native';
 
 import {SHEET_ICONS} from '../src/design/icons';
 import {TOUCH_TARGET} from '../src/design/tokens';
+import {PILL_HEIGHT} from '../src/features/memory/EvidencePills';
 import {GroupCard} from '../src/design/sheetParts';
 import {describeCloseContract} from './fixtures/sheetContract';
 import * as copy from '../src/features/memory/copy';
@@ -235,6 +236,32 @@ describe('요약 카드 — 한 줄 띠 (#5436)', () => {
     expect(StyleSheet.flatten(within(back).getByTestId('missed-digest-band-end').props.style)).toMatchObject({position: 'absolute', bottom: 0, height: 1});
     fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['ready', 'missed-digest-more'],
+    ['error', 'missed-digest-retry'],
+  ] as const)('%s 의 단추: 눌림은 보이는 28pt 가 아니라 44pt 이고 ✕ 의 눌림 상자와 겹치지 않는다 (재검수 H2)', (kind, id) => {
+    band(
+      kind === 'ready' ? {kind: 'ready', digests: [digest()], partial: false} : {kind: 'error'},
+      {onMore: noop, onRetry: noop},
+    );
+    const button = screen.getByTestId(id);
+    const hit = (button.props.hitSlop ?? {}) as {top?: number; bottom?: number; left?: number; right?: number};
+    const visible = StyleSheet.flatten(button.props.style).minHeight;
+    // 보이는 크기는 알약 그대로, 눌림 높이 = 보이는 높이 + 위아래 hitSlop >= 44.
+    expect(visible).toBe(PILL_HEIGHT);
+    expect((visible ?? 0) + (hit.top ?? 0) + (hit.bottom ?? 0)).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 가로는 안 넓힌다: 같은 줄에서 ✕ 바로 앞 형제이고(틈 = 줄 안 배치 ≥ 0) 어느 쪽도 가로 slop 이 없어 눌림 상자 사이 틈이 0 이상이다.
+    expect((hit.left ?? 0) + (hit.right ?? 0)).toBe(0);
+    const dismiss = screen.getByTestId('missed-digest-dismiss');
+    expect(dismiss.props.hitSlop).toBeUndefined();
+    expect(StyleSheet.flatten(dismiss.props.style).minWidth).toBe(TOUCH_TARGET);
+    expect(
+      within(screen.getByTestId('missed-digest-card'))
+        .getAllByTestId(new RegExp(`^(${id}|missed-digest-dismiss)$`))
+        .map(node => node.props.testID),
+    ).toEqual([id, 'missed-digest-dismiss']);
   });
 
   it('긴 요약 첫 줄도 줄바꿈하지 않는다 — numberOfLines 1 이 높이를 한 줄로 못 박는다', () => {
