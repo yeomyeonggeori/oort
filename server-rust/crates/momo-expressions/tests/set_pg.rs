@@ -1985,6 +1985,21 @@ async fn a29_the_sweep_touches_staging_only_and_the_confirmation_restarts_the_tw
     )
     .await;
     backdate(&w.su, proposed, 400).await;
+    // The sweep only visits a tenant that has a due STAGING set, so give that tenant one (its other
+    // agent's): the proposed head is then in the sweep's hands and only the `staging` condition,
+    // not discovery, keeps it out of them.
+    let visit_run = run_of(&w.su, tp.ws, tp.channel, tp.agent2, tp.alice).await;
+    let visit = Owner {
+        agent: tp.agent2,
+        run: visit_run,
+        ..tp.owner()
+    };
+    let visiting = begin_as(&w, visit, plan("vv"))
+        .await
+        .unwrap()
+        .expect("the second agent's set")
+        .set_id;
+    backdate(&w.su, visiting, 121).await;
     // a staging head 119 minutes in, then confirmed now: it has two hours from the confirmation
     let tc = tenant(&w.su).await;
     let confirmed = begun(&w, tc, plan("cc")).await;
@@ -2022,6 +2037,11 @@ async fn a29_the_sweep_touches_staging_only_and_the_confirmation_restarts_the_tw
         state(proposed).await,
         "proposed",
         "a proposed head is not swept, however old"
+    );
+    assert_eq!(
+        state(visiting).await,
+        "expired",
+        "the tenant WAS visited: its due staging set is reclaimed"
     );
     assert_eq!(
         images_of(&w.su, proposed).await,
