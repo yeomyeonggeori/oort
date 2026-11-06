@@ -121,6 +121,9 @@ describe("인용 카드 그릇의 계산된 값 (#5421)", () => {
               await page.mouse.move(outsideCard.x, outsideCard.y);
               const hover = await read(page);
               same("가리킴", hover.card, refs.soft);
+              // 합성의 재료가 진짜인지부터: 바닥(`bg-pane`)이 불투명하고 줄 호버 면이 알파 .5 여야 아래 두 자가 의미를 갖는다(바닥이 안 칠해지면 합성이 어두워져 두 자가 거저 통과한다).
+              if (parseColor(hover.pane)[3] !== 1) problems.push(`${at} 바닥(bg-pane)이 불투명하지 않다: ${hover.pane}`);
+              if (Math.abs(parseColor(hover.row)[3] - 0.5) > 0.01) problems.push(`${at} 가리킴 줄 면 알파가 .5 가 아니다: ${hover.row}`);
               const hoverRow = over(parseColor(hover.row), parseColor(hover.pane));
               if (!survives(hex(parseColor(hover.card)), hoverRow)) {
                 problems.push(
@@ -143,6 +146,7 @@ describe("인용 카드 그릇의 계산된 값 (#5421)", () => {
                 await page.evaluate(() => document.getElementById("row")!.focus());
                 const focus = await read(page);
                 same("키보드 초점", focus.card, refs.soft);
+                if (Math.abs(parseColor(focus.row)[3] - 0.5) > 0.01) problems.push(`${at} 키보드 초점 줄 면 알파가 .5 가 아니다: ${focus.row}`);
                 const focusRow = over(parseColor(focus.row), parseColor(focus.pane));
                 if (!survives(hex(parseColor(focus.card)), focusRow)) {
                   problems.push(`${at} 키보드 초점: 카드 ↔ 줄 ${focusRow} 두 자 미달`);
