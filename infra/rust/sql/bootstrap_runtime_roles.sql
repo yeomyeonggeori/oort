@@ -585,6 +585,49 @@ BEGIN
 END $$;
 -- END attachment-media-lockdown
 
+-- BEGIN attachment-write-token-lockdown (#5371; ADR-0151 증보 8 W1, security review M2). Identical in
+-- 175_attachment_write_token.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the
+-- text between the markers. A row of this table lets whoever presents the token write one re-encoded
+-- picture into an in-flight run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so
+-- their table privileges are what keeps a forged row away from a role with no business writing one. Each
+-- runtime role gets exactly what the flow uses: momo_worker mints (INSERT), sweeps day-old rows (DELETE)
+-- and reads what it writes and the attachment ids a run recorded (SELECT); momo_app spends a token and
+-- records the attachment it made (UPDATE ... RETURNING, so SELECT too) and never creates or deletes one;
+-- relay, notifier and platform_admin do not touch it at all. A foreign-key cascade (run, workspace) runs
+-- as the table's owner, so deleting a parent still clears its rows. Idempotent and order-proof (a pass
+-- before the table or the roles exist finishes what it can, the pass after lands the rest), and it fails
+-- loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.attachment_write_token') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.attachment_write_token FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.attachment_write_token FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.attachment_write_token TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.attachment_write_token', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on attachment_write_token',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END attachment-write-token-lockdown
+
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
 -- of this file is what actually lands these grants (#2193).

@@ -792,12 +792,19 @@ mod tests {
     /// theirs was in use. Tenant ENABLE + FORCE + `ws_isolation`, a composite FK into `member (workspace_id,
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
+    ///
+    /// 175 is #5371's `attachment_write_token` (ADR-0151 증보 8): the hash of a single-use, 60-second
+    /// address through which the agent-worker writes ONE picture into an in-flight run's conversation
+    /// as that run's agent. No requester or channel column (both are derived from the run when the
+    /// token is spent), `UNIQUE (workspace, run, slot)`, a guard trigger (one spend, one attachment
+    /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
+    /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
     #[test]
-    fn discovers_contiguous_migrations_001_to_174() {
+    fn discovers_contiguous_migrations_001_to_175() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=174).collect();
+        let expected: Vec<i64> = (1..=175).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -805,7 +812,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=174 under {}",
+            "expected contiguous 001..=175 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -813,7 +820,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("174_member_activity"));
+            .starts_with("175_attachment_write_token"));
     }
 
     #[test]

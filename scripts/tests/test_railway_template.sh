@@ -539,16 +539,21 @@ done
 pass "sabotage strip X-Forwarded-Proto line → adapt JSON 0/4 (RED); strip X-Forwarded-For line → 0/4 (RED)"
 
 assert_403_order() {
-  local file="$1"
-  local deny_count deny_line api_line
-  deny_count="$(grep -Ec '^[[:space:]]*handle /v1/centrifugo/\* \{[[:space:]]*$' "$file" || true)"
+  # $2 is the path the exclusive 403 guards (default: the Centrifugo subscribe callback, ADR-0002;
+  # ADR-0151 증보 8 adds the agent-worker's picture write address, /v1/agent-media/*).
+  local file="$1" path="${2:-/v1/centrifugo/*}"
+  local deny_count deny_line api_line pattern
+  pattern="^[[:space:]]*handle $(printf '%s' "$path" | sed 's/[.*]/\\&/g') \\{[[:space:]]*\$"
+  deny_count="$(grep -Ec "$pattern" "$file" || true)"
   [ "$deny_count" = "1" ] || return 1
-  deny_line="$(grep -En '^[[:space:]]*handle /v1/centrifugo/\* \{[[:space:]]*$' "$file" | cut -d: -f1)"
+  deny_line="$(grep -En "$pattern" "$file" | cut -d: -f1)"
   api_line="$(grep -En '^[[:space:]]*handle /v1/\* \{[[:space:]]*$' "$file" | cut -d: -f1 | head -1)"
   [ -n "$deny_line" ] && [ -n "$api_line" ] || return 1
   [ "$deny_line" -lt "$api_line" ] || return 1
-  awk '
-    /^[[:space:]]*handle \/v1\/centrifugo\/\* \{[[:space:]]*$/ {
+  # The pattern travels in the environment: `awk -v` would process its backslash escapes (`\*`, `\{`)
+  # and turn the escaped metacharacters into live ones.
+  PATTERN="$pattern" awk '
+    $0 ~ ENVIRON["PATTERN"] {
       if (seen) exit 2
       seen = 1
       state = 1
@@ -580,6 +585,34 @@ assert_403_order() {
 
 assert_403_order "$CADDYFILE_RAILWAY" || fail "Caddyfile.railway 403 order/shape"
 pass "Caddyfile.railway /v1/centrifugo/* exclusive 403 before /v1/*"
+assert_403_order "$CADDYFILE_RAILWAY" '/v1/agent-media/*' || fail "Caddyfile.railway agent-media 403 order/shape"
+pass "Caddyfile.railway /v1/agent-media/* exclusive 403 before /v1/*"
+
+# The agent-media assertion must be able to fail: the block removed, or its body turned into a proxy.
+no_media="$TMP_ROOT/Caddyfile.no-agent-media"
+proxy_media="$TMP_ROOT/Caddyfile.proxy-agent-media"
+python3 - "$CADDYFILE_RAILWAY" "$no_media" "$proxy_media" <<'PY'
+from pathlib import Path
+import sys
+src, gone, proxied = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+text = src.read_text()
+block = "\thandle /v1/agent-media/* {\n\t\trespond 403\n\t}\n"
+if text.count(block) != 1:
+    raise SystemExit("could not locate the agent-media 403 block to sabotage")
+gone.write_text(text.replace(block, "", 1))
+proxied.write_text(text.replace(
+    block,
+    "\thandle /v1/agent-media/* {\n\t\treverse_proxy api.railway.internal:8080\n\t}\n",
+    1,
+))
+PY
+if assert_403_order "$no_media" '/v1/agent-media/*'; then
+  fail "agent-media block removed still asserted PASS — the check is not load-bearing"
+fi
+if assert_403_order "$proxy_media" '/v1/agent-media/*'; then
+  fail "agent-media block proxied still asserted PASS — the body check is not load-bearing"
+fi
+pass "sabotage agent-media 403 removed / turned into a proxy → assertion RED"
 
 broken="$TMP_ROOT/Caddyfile.broken"
 python3 - "$CADDYFILE_RAILWAY" "$broken" <<'PY'

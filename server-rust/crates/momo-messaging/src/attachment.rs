@@ -574,14 +574,17 @@ pub async fn link_attachments_in_tx(
     for attachment_id in attachment_ids {
         let row = sqlx::query(
             "SELECT status, uploader_member_id, channel_id, message_id \
-               FROM attachment WHERE id = $1 FOR UPDATE",
+               FROM attachment WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
         )
         .bind(attachment_id)
+        .bind(workspace_id)
         .fetch_optional(&mut *conn)
         .await?;
-        // An id in another tenant is invisible under RLS and lands here as
-        // "not found" — the same answer as an id that never existed, so a
-        // sender cannot probe for attachments outside their workspace.
+        // An id in another tenant is "not found" — the same answer as an id that never existed,
+        // so a sender cannot probe for attachments outside their workspace. Two layers say so:
+        // RLS hides the row from the api's non-bypass role, and the `workspace_id` condition above
+        // does the same for a BYPASSRLS caller (the agent-worker's picture answer, ADR-0151 증보 8
+        // L1), which RLS does not bind.
         let Some(row) = row else {
             return Ok(Err(AttachmentLinkRejected::NotFound));
         };
@@ -603,9 +606,10 @@ pub async fn link_attachments_in_tx(
             return Ok(Err(AttachmentLinkRejected::AlreadyLinked));
         }
 
-        sqlx::query("UPDATE attachment SET message_id = $2 WHERE id = $1")
+        sqlx::query("UPDATE attachment SET message_id = $2 WHERE id = $1 AND workspace_id = $3")
             .bind(attachment_id)
             .bind(message_id)
+            .bind(workspace_id)
             .execute(&mut *conn)
             .await?;
         write_audit(

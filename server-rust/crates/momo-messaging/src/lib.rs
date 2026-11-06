@@ -49,6 +49,7 @@
 
 pub mod agent_avatar;
 pub mod agent_card;
+pub mod agent_picture;
 pub mod approval_card;
 pub mod attachment;
 pub mod attachment_media;
@@ -120,6 +121,15 @@ pub use agent_avatar::{
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
     AgentCardPatch, CardStatusPatch, FieldPatch,
+};
+pub use agent_picture::{
+    agent_picture_binding_in_tx, mint_in_tx as mint_agent_picture_in_tx,
+    mint_with_ttl_in_tx as mint_agent_picture_with_ttl_in_tx, picture_name,
+    record_picture_refused_in_tx, redeem_in_tx as redeem_agent_picture_in_tx,
+    run_picture_ids_in_tx, write_picture_in_tx, AgentPictureBinding, AgentPictureGrant,
+    AgentPictureTarget, PictureWriteRefused, StoredPicture, AGENT_MEDIA_PATH_PREFIX,
+    AGENT_MEDIA_TTL_SECS, AGENT_PICTURES_DAILY_CEILING, AGENT_PICTURES_PER_RUN,
+    AGENT_PICTURE_MAX_INPUT_BYTES,
 };
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
@@ -236,12 +246,13 @@ pub use message::{
     parse_replies_cursor, patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
     send_message, send_message_in_tx, send_message_with_mentions_in_tx,
     send_message_with_mentions_via_in_tx, send_run_line_in_tx, send_signed_message_in_tx,
-    send_thread_notice_in_tx, thread_root_state_in_tx, validate_quote_target_in_tx,
-    validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageSignature,
-    MessageType, NewMessage, PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid,
-    SendExtras, SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
-    ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
-    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX, THREAD_SUMMARY_PARTICIPANTS,
+    send_thread_notice_in_tx, send_thread_notice_with_run_pictures_in_tx, thread_root_state_in_tx,
+    validate_quote_target_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
+    HistoryCursor, MessageSignature, MessageType, NewMessage, PagedMessage, QuoteTargetInvalid,
+    QuotedMessage, RepliesCursorInvalid, SendExtras, SendRejected, SentMessage, SentVia,
+    StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState,
+    HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
+    THREAD_SUMMARY_PARTICIPANTS,
 };
 pub use notification_prefs::{
     get_prefs_in_tx, is_known_sound, kind_phone_switch_in_tx, parse_cells, parse_hhmm,

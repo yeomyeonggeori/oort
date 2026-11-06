@@ -50,8 +50,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    nonempty, slice_body, upload_content_length_header_value, valid_drive_id, ByteRange,
-    DriveArchive, DriveContent, DriveError, DriveFile, DriveRangeContent, DriveUploadSession,
+    nonempty, received_size_within_ceiling, slice_body, upload_content_length_header_value,
+    valid_drive_id, ByteRange, DriveArchive, DriveContent, DriveError, DriveFile,
+    DriveRangeContent, DriveUploadSession,
 };
 
 const DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
@@ -275,6 +276,35 @@ impl GoogleDriveArchive {
         .expect("a client with only timeouts builds")
     }
 
+    /// Send `bytes` to an already-pinned resumable session with one `PUT` (ADR-0151 증보 8 W7, L6).
+    /// A client of its own so that **no redirect is followed** (a 3xx is an answer, not a place to
+    /// send the bytes) and no bearer is attached. `200` and `201` are the only successes: `308`
+    /// (resume incomplete) means the object is not whole, and everything else maps to the archive's
+    /// closed words.
+    async fn put_to_session(
+        &self,
+        url: reqwest::Url,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), DriveError> {
+        let client = http_client_builder(self.limits)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        let response = client
+            .put(url)
+            .header(reqwest::header::CONTENT_TYPE, mime)
+            .timeout(CONTENT_TIMEOUT)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        match response.status().as_u16() {
+            200 | 201 => Ok(()),
+            status => Err(mapped_error(status)),
+        }
+    }
+
     /// A live access token, minted on demand and reused until a minute before it
     /// expires (Swift's `> 60` guard).
     async fn access_token(&self) -> Result<String, DriveError> {
@@ -453,6 +483,10 @@ impl GoogleDriveArchive {
 
 #[async_trait]
 impl DriveArchive for GoogleDriveArchive {
+    fn backend_kind(&self) -> &'static str {
+        "google"
+    }
+
     async fn create_resumable_upload(
         &self,
         channel_id: Uuid,
@@ -547,6 +581,43 @@ impl DriveArchive for GoogleDriveArchive {
             // route cannot leak which.
             _ => Err(DriveError::AccessDenied),
         }
+    }
+
+    /// ADR-0151 증보 8 W7 (#5371): the server writes one object it holds. A resumable session is created
+    /// the ordinary way, then **this process** sends the bytes to it with one `PUT`.
+    ///
+    /// Review L6: the session address is the first address this process ever sends bytes to that
+    /// Google chose, so it is **pinned** ([`pinned_session_url`]: https, `www.googleapis.com`, an
+    /// `/upload/` path, no userinfo and no port) and the `PUT` follows no redirect and carries no
+    /// bearer (the address is its own capability). Whatever the archive then holds is read back and
+    /// must be what was sent; otherwise the object is removed and the write fails. Errors are the
+    /// archive's closed words only — nothing Google said, nothing of the address.
+    async fn put_object(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> Result<DriveFile, DriveError> {
+        let size = i64::try_from(bytes.len()).map_err(|_| DriveError::ContentTooLarge)?;
+        if !received_size_within_ceiling(size) {
+            return Err(DriveError::ContentTooLarge);
+        }
+        let session = self
+            .create_resumable_upload(channel_id, name, mime, size)
+            .await?;
+        let url = pinned_session_url(&session.upload_url)?;
+        self.put_to_session(url, mime, bytes).await?;
+        let file = self.file_metadata(&session.drive_file_id).await?;
+        if file.drive_file_id != session.drive_file_id
+            || file.size_bytes != size
+            || file.mime != mime
+        {
+            // The archive holds something other than what was sent: take it back, fail closed.
+            let _ = self.delete_file(&session.drive_file_id).await;
+            return Err(DriveError::UpstreamFailure);
+        }
+        Ok(file)
     }
 
     async fn delete_file(&self, file_id: &str) -> Result<(), DriveError> {
@@ -813,6 +884,25 @@ fn delete_outcome_of_probe_error(error: DriveError) -> Result<(), DriveError> {
     }
 }
 
+/// The one place a resumable **session address** is judged before bytes go to it (ADR-0151 증보 8 W7,
+/// review L6): `https`, host exactly `www.googleapis.com`, no userinfo, no explicit port, a path under
+/// `/upload/`. Anything else — another host, `http`, a look-alike such as `www.googleapis.com.evil.test`
+/// or `www.googleapis.com@evil.test`, a port, another path — is the archive failing, and no byte is sent.
+fn pinned_session_url(raw: &str) -> Result<reqwest::Url, DriveError> {
+    let url = reqwest::Url::parse(raw).map_err(|_| DriveError::UpstreamFailure)?;
+    let pinned = url.scheme() == "https"
+        && url.host_str() == Some("www.googleapis.com")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/upload/");
+    if pinned {
+        Ok(url)
+    } else {
+        Err(DriveError::UpstreamFailure)
+    }
+}
+
 fn mapped_error(status: u16) -> DriveError {
     match status {
         403 => DriveError::AccessDenied,
@@ -843,6 +933,182 @@ fn escape_query(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0151 증보 8 L6 (WA10): only Google's own upload endpoint is a place the server's picture
+    /// bytes may go. Every look-alike is refused before a byte is sent.
+    #[test]
+    fn a_session_address_is_pinned_to_googles_upload_endpoint() {
+        for good in [
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=AbC",
+            "https://www.googleapis.com/upload/drive/v3/files",
+        ] {
+            assert!(pinned_session_url(good).is_ok(), "{good}");
+        }
+        for bad in [
+            "http://www.googleapis.com/upload/drive/v3/files?upload_id=x",
+            "https://www.googleapis.com.evil.test/upload/drive/v3/files",
+            "https://www.googleapis.com@evil.test/upload/drive/v3/files",
+            "https://user:pw@www.googleapis.com/upload/drive/v3/files",
+            "https://www.googleapis.com:8443/upload/drive/v3/files",
+            "https://www.googleapis.com/drive/v3/files",
+            "https://www.googleapis.com/UPLOAD/drive/v3/files",
+            "https://evil.test/upload/drive/v3/files",
+            "https://upload.googleapis.com/upload/drive/v3/files",
+            "https://127.0.0.1/upload/drive/v3/files",
+            "file:///upload/x",
+            "not a url",
+            "",
+        ] {
+            assert_eq!(
+                pinned_session_url(bad).expect_err(bad),
+                DriveError::UpstreamFailure,
+                "{bad}"
+            );
+        }
+    }
+
+    /// A one-request-at-a-time loopback server that records what a `PUT` looked like and answers a
+    /// scripted status (with an optional `Location`). Hand-rolled over `tokio::net`: this crate has no
+    /// HTTP-server dependency by contract.
+    struct PutStandIn {
+        address: std::net::SocketAddr,
+        seen: Arc<std::sync::Mutex<Vec<SeenPut>>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct SeenPut {
+        method: String,
+        path: String,
+        content_type: Option<String>,
+        authorization: bool,
+        body_len: usize,
+    }
+
+    async fn put_stand_in(status: u16, location: Option<String>) -> PutStandIn {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let log = log.clone();
+                let location = location.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        match socket.read(&mut byte).await {
+                            Ok(1) => head.push(byte[0]),
+                            _ => return,
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&head).into_owned();
+                    let mut lines = text.split("\r\n");
+                    let request_line = lines.next().unwrap_or_default().to_string();
+                    let mut parts = request_line.split(' ');
+                    let method = parts.next().unwrap_or_default().to_string();
+                    let path = parts.next().unwrap_or_default().to_string();
+                    let mut content_type = None;
+                    let mut authorization = false;
+                    let mut length = 0usize;
+                    for line in lines {
+                        if let Some((name, value)) = line.split_once(':') {
+                            match name.trim().to_ascii_lowercase().as_str() {
+                                "content-type" => content_type = Some(value.trim().to_string()),
+                                "authorization" => authorization = true,
+                                "content-length" => length = value.trim().parse().unwrap_or(0),
+                                _ => {}
+                            }
+                        }
+                    }
+                    let mut body = vec![0u8; length];
+                    if socket.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    log.lock().expect("log").push(SeenPut {
+                        method,
+                        path,
+                        content_type,
+                        authorization,
+                        body_len: body.len(),
+                    });
+                    let mut reply = format!(
+                        "HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n"
+                    );
+                    if let Some(location) = location {
+                        reply.push_str(&format!("Location: {location}\r\n"));
+                    }
+                    reply.push_str("\r\n");
+                    let _ = socket.write_all(reply.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        PutStandIn { address, seen }
+    }
+
+    fn archive_for_put() -> GoogleDriveArchive {
+        GoogleDriveArchive::against_stand_in("http://127.0.0.1:9/drive/v3", Duration::from_secs(5))
+    }
+
+    /// WA10 (Google gate): the bytes go to the session in one `PUT` with the picture's own type and
+    /// length, and **no bearer**; only 200 and 201 are a stored object; 308 (not whole), a refusal and
+    /// a failure are the archive's closed words; a redirect is an answer, not a place to send the bytes.
+    #[tokio::test]
+    async fn the_bytes_go_to_the_session_in_one_put_without_a_bearer_and_follow_nothing() {
+        let bytes = vec![7u8; 1234];
+        for (status, expected) in [
+            (200u16, Ok(())),
+            (201, Ok(())),
+            (308, Err(DriveError::UpstreamFailure)),
+            (403, Err(DriveError::AccessDenied)),
+            (404, Err(DriveError::FileNotFound)),
+            (500, Err(DriveError::UpstreamFailure)),
+        ] {
+            let server = put_stand_in(status, None).await;
+            let url: reqwest::Url = format!(
+                "http://{}/upload/drive/v3/files?upload_id=z",
+                server.address
+            )
+            .parse()
+            .expect("url");
+            let got = archive_for_put()
+                .put_to_session(url, "image/png", bytes.clone())
+                .await;
+            assert_eq!(got, expected, "status {status}");
+            let seen = server.seen.lock().expect("log").clone();
+            assert_eq!(seen.len(), 1, "status {status}: one PUT and no more");
+            assert_eq!(seen[0].method, "PUT");
+            assert_eq!(seen[0].path, "/upload/drive/v3/files?upload_id=z");
+            assert_eq!(seen[0].content_type.as_deref(), Some("image/png"));
+            assert_eq!(seen[0].body_len, bytes.len());
+            assert!(
+                !seen[0].authorization,
+                "the session address is its own capability"
+            );
+        }
+        // a redirect: the second server must see nothing
+        let second = put_stand_in(200, None).await;
+        let first = put_stand_in(302, Some(format!("http://{}/elsewhere", second.address))).await;
+        let url: reqwest::Url = format!("http://{}/upload/x", first.address)
+            .parse()
+            .expect("url");
+        let got = archive_for_put()
+            .put_to_session(url, "image/png", bytes.clone())
+            .await;
+        assert_eq!(got, Err(DriveError::UpstreamFailure));
+        assert_eq!(first.seen.lock().expect("log").len(), 1);
+        assert!(
+            second.seen.lock().expect("log").is_empty(),
+            "the bytes were sent to wherever a redirect pointed"
+        );
+    }
 
     #[test]
     fn a_missing_or_malformed_configuration_never_yields_a_client() {

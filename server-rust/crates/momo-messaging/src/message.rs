@@ -996,6 +996,62 @@ pub async fn send_thread_notice_in_tx(
     .await
 }
 
+/// An agent's **final answer carrying the pictures its run wrote** (ADR-0151 증보 8 W9, #5371):
+/// [`send_thread_notice_in_tx`] plus the one thing that spine never did — bind attachments and project
+/// them, **before** the broadcast, so the `message.new` payload and the history carry `attachments`.
+///
+/// The attachment ids are **not the caller's**: they are the ids this run's write tokens recorded
+/// ([`crate::agent_picture::run_picture_ids_in_tx`], keyed by `input.run_id`), in slot order. A picture
+/// another run wrote, in the same channel by the same agent and still unbound, is not in that record
+/// and is not bound (security review L2). A run that wrote none behaves exactly like
+/// [`send_thread_notice_in_tx`] apart from the projection.
+///
+/// A refusal of the binding travels in the `Ok` half; **the caller must roll back** (a savepoint taken
+/// before this call) and send the answer again without pictures — a message that shipped without the
+/// picture it promised is worse than one that says the picture failed. A retried send (`deduped`)
+/// binds nothing again.
+pub async fn send_thread_notice_with_run_pictures_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+) -> Result<Result<SentMessage, AttachmentLinkRejected>, DbError> {
+    let run_id = input.run_id;
+    let channel_id = input.channel_id;
+    let author_member_id = input.author_member_id;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
+    if !deduped {
+        if let Some(run_id) = run_id {
+            let attachment_ids =
+                crate::agent_picture::run_picture_ids_in_tx(conn, workspace_id, run_id).await?;
+            if !attachment_ids.is_empty() {
+                if let Err(rejected) = link_attachments_in_tx(
+                    &mut *conn,
+                    workspace_id,
+                    channel_id,
+                    message.id,
+                    author_member_id,
+                    None,
+                    &attachment_ids,
+                )
+                .await?
+                {
+                    return Ok(Err(rejected));
+                }
+            }
+        }
+    }
+    Ok(Ok(finish_send_in_tx(
+        conn,
+        workspace_id,
+        message,
+        deduped,
+        MentionPolicy::Skip,
+        ThreadPolicy::Maintain,
+        AttachmentPolicy::Project,
+    )
+    .await?))
+}
+
 /// Does a reply of this type count toward its thread's 「답글 N개」? The product's one counting rule:
 /// `text` and `approval_request` do, every other type does not. Core `countsAsReply`
 /// (`packages/momo-core/src/features/timeline/threadSummary.ts`) is this rule on the client, and the
