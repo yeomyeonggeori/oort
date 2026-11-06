@@ -43,6 +43,19 @@ export interface NonSecretStore {
 export const NON_SECRET_KEYS = {
   /** Scoped device expression usage; metadata only, never media or credentials (#4678). */
   expressionUsage: 'momo.mobile.expressions.usage.v1',
+  /**
+   * 대화 행 미디어의 **잰 크기** (#5451): 첨부 id → [그림 가로, 세로](`attachmentSizes`), 메시지 id → [링크 카드 묶음 높이](`unfurlHeights`).
+   * 숫자뿐이다 — 키는 서버가 만든 uuid 이고 글·주소·바이트가 없다. 앱을 다시 켠 뒤에도 사진이 제 비율로 첫 프레임부터 서고(16:9 자리표시로 섰다가
+   * 바뀌지 않고), 링크 카드가 늦게 와도 그 자리를 미리 비워 두려는 것이다. 잃으면 한 번 더 재면 된다. 계정 정보 없음(`storage/measureMemory.ts`).
+   */
+  attachmentSizes: 'momo.mobile.timeline.attachment-sizes.v1',
+  /**
+   * 팀 표현 보관함의 **마지막으로 읽은 목록**(이름·그림 크기·그림 해시 — 그림 파일은 없다, #5451). 대화가 열릴 때 보관함이 아직 안 와도 큰 이모티콘의 칸이
+   * 첫 프레임부터 서게 한다. 읽을 때 워크스페이스·멤버와 계약 검사를 지난 것만 받고, 로그아웃·세션 끝이 지운다(`features/expressions/store.ts`).
+   * 비밀이 아니다(팀원이면 누구나 보는 이름·태그). 잃으면 한 번 늦게 서고 다음 읽기가 채운다.
+   */
+  expressionShelf: 'momo.mobile.expressions.shelf.v1',
+  unfurlHeights: 'momo.mobile.timeline.unfurl-heights.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',

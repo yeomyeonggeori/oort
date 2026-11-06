@@ -21,17 +21,23 @@ import {warmEmojiCatalog} from '../emoji/catalogMemory';
 export const PhoneExpressions = createContext<PhoneExpressionStore | null>(
   null,
 );
-const EMPTY: ExpressionSnapshot = {items: [], state: 'ready', revision: 0};
+const EMPTY: ExpressionSnapshot = {
+  items: [],
+  shelf: [],
+  state: 'ready',
+  revision: 0,
+};
 const subscribeEmpty = () => () => {};
 const emptySnapshot = () => EMPTY;
 export function useExpressionStore() {
   return useContext(PhoneExpressions);
 }
+/** 대화 줄이 그릴 표현 목록(`ExpressionSnapshot.shelf`) — 처음 읽는 동안에도 마지막으로 읽은 목록이 있다(#5451). */
 export function useExpressionItems() {
   const store = useExpressionStore();
   return useSyncExternalStore(
     store?.subscribe ?? subscribeEmpty,
-    () => store?.snapshot().items ?? EMPTY.items,
+    () => store?.snapshot().shelf ?? EMPTY.shelf,
   );
 }
 export function useExpressions() {
@@ -89,6 +95,27 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
             NON_SECRET_KEYS.expressionUsage,
             JSON.stringify(value),
           );
+        },
+      },
+      {
+        read() {
+          try {
+            const raw = nonSecretStore().getString(
+              NON_SECRET_KEYS.expressionShelf,
+            );
+            return raw === undefined ? null : JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        },
+        write(value) {
+          nonSecretStore().set(
+            NON_SECRET_KEYS.expressionShelf,
+            JSON.stringify(value),
+          );
+        },
+        clear() {
+          nonSecretStore().remove(NON_SECRET_KEYS.expressionShelf);
         },
       },
     );

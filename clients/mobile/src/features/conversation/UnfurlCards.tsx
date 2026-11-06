@@ -21,6 +21,7 @@ import {LINK_CARD} from './linkCardDesign';
 import {useLinkPreviewPreference} from './linkPreviewPreference';
 import {openLink} from './MessageBody';
 import {useRowSeen} from './rowViewability';
+import {rememberUnfurlHeight, useUnfurlReserve} from './unfurlReserve';
 import {hasFailed, readyUri, useUnfurlImage} from './unfurlImage';
 
 // =============================================================================
@@ -341,12 +342,21 @@ function PendingCard(): React.JSX.Element {
 export function UnfurlCards({
   unfurls,
   rowKey,
+  messageId,
+  mayHaveCard = false,
   preference: preferenceOverride,
   onLongPressCard,
 }: {
   unfurls: readonly MessageUnfurl[];
   /** 이 카드들이 선 목록 줄의 키 — 「줄이 한 번 보였는가」(`rowViewability.ts`)를 묻는 열쇠. */
   rowKey: string;
+  /**
+   * 이 카드들의 메시지 id. 주면 카드 묶음이 차지한 높이를 기억하고(`unfurlReserve.ts`, #5451), 카드가 오기 전(`mayHaveCard`)에는 그 높이만큼 자리를
+   * 비워 둔다 — 카드가 늦게 와도 줄이 자라지 않는다.
+   */
+  messageId?: string;
+  /** 본문에 링크가 있어 카드가 올 수 있다(아직 못 읽었거나 읽는 중이다). 기억한 높이가 있을 때만 자리를 비운다. */
+  mayHaveCard?: boolean;
   /** 시험·하네스가 고정하는 값. 실제 화면은 이 기기의 선택(`useLinkPreviewPreference`)을 읽어 바로 따라간다. */
   preference?: UnfurlSize;
   /** 카드를 길게 눌렀다. 링크 시트를 여는 것은 부른 쪽이다. */
@@ -354,13 +364,30 @@ export function UnfurlCards({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const stored = useLinkPreviewPreference();
+  const reserve = useUnfurlReserve(mayHaveCard ? messageId : undefined);
   const preference = preferenceOverride ?? stored;
   if (preference === 'off') return null;
   // 앞의 서로 다른 링크 3개까지, 불러오는 중이거나 보여 줄 것이 있는 것만(코어가 정한다).
   const visible = visibleUnfurls(unfurls);
-  if (visible.length === 0) return null;
+  if (visible.length === 0) {
+    // 아직 못 읽은 줄: 지난번에 카드 묶음이 차지한 높이만큼 비워 둔다. 읽었더니 카드가 없으면 기억이 지워져(`forgetUnfurlHeight`) 자리도 사라진다.
+    return reserve === null ? null : (
+      <View
+        pointerEvents="none"
+        style={[styles.group, {height: reserve}]}
+        testID="unfurl-reserve"
+      />
+    );
+  }
   return (
-    <View style={styles.group} testID="unfurl-group">
+    <View
+      onLayout={
+        messageId === undefined
+          ? undefined
+          : event => rememberUnfurlHeight(messageId, event.nativeEvent.layout.height)
+      }
+      style={styles.group}
+      testID="unfurl-group">
       {visible.map(unfurl =>
         isUnfurlPending(unfurl) ? (
           <PendingCard key={unfurl.id} />
