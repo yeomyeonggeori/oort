@@ -28,6 +28,8 @@
 #                            exec Hermes, with an edited guard variable stopping it before any gate output; the strict media
 #                            flag is passed exactly as the SHIPPED template carries it, and without it the same command is
 #                            refused by the gate before it would exec Hermes (#4820 C2b 3부)
+#   railway-start-part / -relay-parts  #5348: the gate reaches the command in parts under Railway's 32,768-character limit; a dropped
+#                            part stops it at the checksum, and the login relay's parts join into the pinned file
 #   strict-missing / -wrong / -env-file  HERMES_MEDIA_DELIVERY_STRICT absent, `true` (strict to Hermes itself, but the gate
 #                            takes one spelling) or present in the volume's .env: refused before listening
 #   media-policy ........... the premise, measured with Hermes' own validate_media_delivery_path: strict keeps an old file
@@ -50,9 +52,10 @@
 #                            as it stands; the names it adds that the policy does not allow, in any of those loads, must all be named by
 #                            the gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
 #                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
-#   connector-configs ...... (#4935) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the default
-#                            config and the connector-mode config of each model fragment are each accepted by name; the connector ones
-#                            select no web search and no picture tool and carry no image_guard evidence, the default one the picture tool
+#   connector-configs ...... (#4935, #5323) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the
+#                            default config, the default config with the team model fragment and the connector-mode config of each model
+#                            fragment are each accepted by name; the connector ones select no web search and no picture tool and carry no
+#                            image_guard evidence, the two default ones the picture tool
 #   connector-config-edited / -nostrict / -apps-missing  the connector-mode config with one byte changed, without the strict flag, and without
 #                            the operator's attested app list: each refused before listening
 #   railway-start-connector / -connector-edited / -config-edited / -connector-nostrict  the real Railway start command with a connector-mode
@@ -135,9 +138,17 @@ open(out + "/compose-full.sh", "w").write(command)
 PY
 
 b64() { base64 < "$1" | tr -d '\n'; }
-export HERMES_CONFIG_B64 HERMES_LOCKGATE_B64 HERMES_IMAGE_GUARD_B64 HERMES_IMAGE_GUARD_MANIFEST_B64
+export HERMES_CONFIG_B64 HERMES_LOCKGATE_B64 HERMES_LOCKGATE_B64_2 HERMES_LOCKGATE_B64_3 HERMES_LOCKGATE_B64_4 HERMES_LOCKGATE_B64_5 HERMES_IMAGE_GUARD_B64 HERMES_IMAGE_GUARD_MANIFEST_B64
 HERMES_CONFIG_B64="$(b64 "$ROOT/infra/hermes/config.yaml")"
-HERMES_LOCKGATE_B64="$(b64 "$ROOT/infra/hermes/lockgate.py")"
+# #5348: Railway refuses a value over 32,768 characters, so the gate reaches the start command in parts, as an operator must set them.
+GATE_B64="$(b64 "$ROOT/infra/hermes/lockgate.py")"
+HERMES_LOCKGATE_B64="${GATE_B64:0:32000}"
+HERMES_LOCKGATE_B64_2="${GATE_B64:32000:32000}"
+HERMES_LOCKGATE_B64_3="${GATE_B64:64000:32000}"
+HERMES_LOCKGATE_B64_4="${GATE_B64:96000:32000}"
+HERMES_LOCKGATE_B64_5="${GATE_B64:128000:32000}"
+[ -z "${GATE_B64:160000}" ] || fail "lockgate.py no longer fits the five variables the start command joins"
+GATE_ENV=(-e HERMES_LOCKGATE_B64 -e HERMES_LOCKGATE_B64_2 -e HERMES_LOCKGATE_B64_3 -e HERMES_LOCKGATE_B64_4 -e HERMES_LOCKGATE_B64_5)
 HERMES_IMAGE_GUARD_B64="$(b64 "$ROOT/infra/hermes/plugins/oort-image-guard/__init__.py")"
 HERMES_IMAGE_GUARD_MANIFEST_B64="$(b64 "$ROOT/infra/hermes/plugins/oort-image-guard/plugin.yaml")"
 
@@ -159,21 +170,35 @@ say "scenario compose-start-no-strict (the same command without the flag must be
 docker_run --entrypoint /bin/sh -- -c "$(cat "$OUT/compose-start.sh")" >"$OUT/compose-start-nostrict.stdout" 2>"$OUT/compose-start-nostrict.stderr" && echo 0 >"$OUT/compose-start-nostrict.rc" || echo $? >"$OUT/compose-start-nostrict.rc"
 
 say "scenario railway-start"
-docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_RAILWAY" \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start.stdout" 2>"$OUT/railway-start.stderr" && echo 0 >"$OUT/railway-start.rc" || echo $? >"$OUT/railway-start.rc"
 
 say "scenario railway-start-no-strict (every checksum passes, the flag is missing: the gate must refuse before it would exec Hermes)"
-docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-nostrict.stdout" 2>"$OUT/railway-start-nostrict.stderr" && echo 0 >"$OUT/railway-start-nostrict.rc" || echo $? >"$OUT/railway-start-nostrict.rc"
 
 say "scenario railway-start-edited-guard (a swapped variable must stop the command before the gate prints anything)"
 EDITED="$(python3 -c 'import base64, os; print(base64.b64encode(base64.b64decode(os.environ["HERMES_IMAGE_GUARD_B64"]) + b"\n# edited\n").decode())')"
-docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e "HERMES_IMAGE_GUARD_B64=$EDITED" -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 "${GATE_ENV[@]}" -e "HERMES_IMAGE_GUARD_B64=$EDITED" -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-edited.stdout" 2>"$OUT/railway-start-edited.stderr" && echo 0 >"$OUT/railway-start-edited.rc" || echo $? >"$OUT/railway-start-edited.rc"
 
+say "scenario railway-start-gate-part-missing (a dropped part must stop the command at the checksum, before the gate prints anything)"
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_LOCKGATE_B64_3 -e HERMES_LOCKGATE_B64_4 -e HERMES_LOCKGATE_B64_5 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+  -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_RAILWAY" \
+  -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-part.stdout" 2>"$OUT/railway-start-part.stderr" && echo 0 >"$OUT/railway-start-part.rc" || echo $? >"$OUT/railway-start-part.rc"
+
+say "scenario railway-start-relay-parts (the relay block joins its parts into the pinned file)"
+RELAY_B64="$(b64 "$ROOT/infra/hermes/login_relay.py")"
+export HERMES_LOGIN_RELAY_B64="${RELAY_B64:0:32000}" HERMES_LOGIN_RELAY_B64_2="${RELAY_B64:32000:32000}" HERMES_LOGIN_RELAY_B64_3="${RELAY_B64:64000:32000}"
+export HERMES_LOGIN_PROBE_B64="$(b64 "$ROOT/infra/hermes/mcp_login_probe.py")"
+[ -z "${RELAY_B64:96000}" ] || fail "login_relay.py no longer fits the three variables the start command joins"
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+  -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_RAILWAY" -e "HERMES_LOGIN_RELAY_KEY=$KEY" -e HERMES_LOGIN_RELAY_B64 -e HERMES_LOGIN_RELAY_B64_2 -e HERMES_LOGIN_RELAY_B64_3 -e HERMES_LOGIN_PROBE_B64 \
+  -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-relay.stdout" 2>"$OUT/railway-start-relay.stderr" && echo 0 >"$OUT/railway-start-relay.rc" || echo $? >"$OUT/railway-start-relay.rc"
+
 say "scenario railway-start-guard-variable-missing"
-docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-missing.stdout" 2>"$OUT/railway-start-missing.stderr" && echo 0 >"$OUT/railway-start-missing.rc" || echo $? >"$OUT/railway-start-missing.rc"
 
 # --- the connector-mode config through the real Railway start command (#4935) ----------------------------------------------
@@ -187,7 +212,7 @@ DEFAULT_EDITED_B64="$(python3 -c 'import base64, sys; print(base64.b64encode(ope
 connector_start() {  # connector_start <name> <config b64> [strict value]
   local name="$1" config_b64="$2" strict="${3-$STRICT_RAILWAY}"
   say "scenario $name"
-  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
     -e "HERMES_MEDIA_DELIVERY_STRICT=$strict" -e "OORT_COHOSTED_AGENT_CONNECTOR_APPS=$CONNECTOR_APPS" \
     -e GOOGLE_OAUTH_CLIENT_ID=oort-proof-id -e GOOGLE_OAUTH_CLIENT_SECRET=oort-proof-secret \
     -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/$name.stdout" 2>"$OUT/$name.stderr" && echo 0 >"$OUT/$name.rc" || echo $? >"$OUT/$name.rc"
@@ -196,6 +221,26 @@ connector_start railway-start-connector "$CONNECTOR_B64"
 connector_start railway-start-connector-edited "$CONNECTOR_EDITED_B64"
 connector_start railway-start-config-edited "$DEFAULT_EDITED_B64"
 connector_start railway-start-connector-nostrict "$CONNECTOR_B64" ""
+
+# --- the team default through the real Railway start command (#5323) -------------------------------------------------------
+# The default config with the Codex primary / Claude fallback fragment is in the command's hash list, so it reaches the point where it would
+# exec Hermes with the gate passed and the config named. The same fragment with the pre-5.5 Claude id (`claude-sonnet-5`, still a name in
+# Hermes' own static list and so still renderable) is on no list, and neither is the Claude primary / Codex fallback line the first revision of
+# #5323 carried (the owner turned the direction round on 2026-11-05 16:01; the default-mode list is one line long): the hash check stops the
+# command before the gate prints anything.
+default_model_start() {  # default_model_start <name> <config b64>
+  local name="$1" config_b64="$2"
+  say "scenario $name"
+  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" "${GATE_ENV[@]}" -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+    -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_RAILWAY" \
+    -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/$name.stdout" 2>"$OUT/$name.stderr" && echo 0 >"$OUT/$name.rc" || echo $? >"$OUT/$name.rc"
+}
+DEFAULT_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth codex-oauth --fallback claude-oauth --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+STALE_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth codex-oauth --fallback claude-oauth --fallback-model claude-sonnet-5 --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+PREVIOUS_MODEL_B64="$(python3 "$ROOT/infra/hermes/render_model_config.py" --auth claude-oauth --fallback codex-oauth --base "$ROOT/infra/hermes/config.yaml" | base64 | tr -d '\n')"
+default_model_start railway-start-default-model "$DEFAULT_MODEL_B64"
+default_model_start railway-start-stale-model "$STALE_MODEL_B64"
+default_model_start railway-start-previous-team-default "$PREVIOUS_MODEL_B64"
 
 # --- the real gateway: compose command in full (gate, report, s6 init, gateway) with no network ---------------------------
 say "scenario gateway-boot (real gateway + real lockgate report, no network)"
@@ -383,7 +428,7 @@ expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"]
 # #4935: every config of the catalog through the real gate: accepted by name, the connector ones with no search and no picture tool
 cc = expect("connector-configs", 0)
 entries = (cc["lockgate"] or {}).get("entries") or {}
-want_names = ["default"] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
+want_names = ["default"] + ["default/" + name for name in renderer.DEFAULT_MODEL_CONFIGS] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
 if sorted(entries) != sorted(want_names):
     failures.append("connector-configs: the catalog the scenario ran is not the renderer's: %r (want %r)" % (sorted(entries), sorted(want_names)))
 for config_name, entry in entries.items():
@@ -396,7 +441,7 @@ for config_name, entry in entries.items():
         if not tools or tools & {"web_search", "web_extract", "image_generate"} or entry.get("image_guard") is not None:
             failures.append("connector-configs: %s selects a search or picture tool, or carries picture evidence: %r" % (config_name, entry))
     elif "image_generate" not in tools:
-        failures.append("connector-configs: the default config no longer selects the picture tool: %r" % (entry,))
+        failures.append("connector-configs: the default config %s no longer selects the picture tool: %r" % (config_name, entry))
 edited = expect("connector-config-edited", 3, ["config.yaml is not one of the accepted configs"])
 if (edited["lockgate"] or {}).get("config_accepted_as") is not None:
     failures.append("connector-config-edited: one changed byte was accepted as %r" % ((edited["lockgate"] or {}).get("config_accepted_as"),))
@@ -507,13 +552,17 @@ for name in ("compose-start", "railway-start"):
     stdout = text(name, "stdout")
     if rc != "0" or "START_COMMAND_REACHED_EXEC" not in stdout or '"ok": true' not in stdout:
         failures.append("%s: rc %s, stdout tail %r" % (name, rc, stdout[-300:]))
-for name, why in (("railway-start-edited", "an edited guard variable"), ("railway-start-missing", "a missing guard variable")):
+for name, why in (("railway-start-edited", "an edited guard variable"), ("railway-start-part", "a dropped gate part"), ("railway-start-missing", "a missing guard variable")):
     rc = text(name, "rc").strip()
     stdout, stderr = text(name, "stdout"), text(name, "stderr")
     if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "LOCKGATE" in stdout:
         failures.append("%s: %s did not stop the start command before the gate (rc %s)" % (name, why, rc))
 if "FAILED" not in text("railway-start-edited", "stdout") + text("railway-start-edited", "stderr"):
     failures.append("railway-start-edited: sha256sum did not report the edited file")
+if text("railway-start-relay", "rc").strip() != "0" or "/tmp/login_relay.py: OK" not in text("railway-start-relay", "stdout"):
+    failures.append("railway-start-relay: the joined relay parts did not pass the checksum (rc %s)" % text("railway-start-relay", "rc").strip())
+if "/tmp/lockgate.py: FAILED" not in text("railway-start-part", "stdout") + text("railway-start-part", "stderr"):
+    failures.append("railway-start-part: sha256sum did not report the short gate")
 if "HERMES_IMAGE_GUARD_B64" not in text("railway-start-missing", "stderr"):
     failures.append("railway-start-missing: the shell did not name the missing variable")
 # the shipped templates carry the flag (the runs above passed it from them); without it the SAME start command is refused by the
@@ -542,6 +591,19 @@ rc = text("railway-start-connector-nostrict", "rc").strip()
 stdout = text("railway-start-connector-nostrict", "stdout")
 if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout or '"ok": false' not in stdout:
     failures.append("railway-start-connector-nostrict: the gate did not refuse a connector start without the strict flag (rc %s, stdout tail %r)" % (rc, stdout[-300:]))
+# #5323: the team default (default config + Codex primary / Claude fallback) reaches exec through the real start command with the gate passed and
+# the config named; the same fragment with the pre-5.5 Claude id, and the earlier Claude-primary line, are stopped by the hash list before the
+# gate prints anything
+rc = text("railway-start-default-model", "rc").strip()
+stdout = text("railway-start-default-model", "stdout")
+if rc != "0" or "START_COMMAND_REACHED_EXEC" not in stdout or '"ok": true' not in stdout \
+        or '"config_accepted_as": "default/codex-oauth.fallback-claude-oauth"' not in stdout or '"image_generate"' not in stdout:
+    failures.append("railway-start-default-model: rc %s, stdout tail %r" % (rc, stdout[-300:]))
+for name, why in (("railway-start-stale-model", "the pre-5.5 Claude id"), ("railway-start-previous-team-default", "the earlier Claude-primary default-mode line")):
+    rc = text(name, "rc").strip()
+    stdout, stderr = text(name, "stdout"), text(name, "stderr")
+    if rc != "78" or "START_COMMAND_REACHED_EXEC" in stdout or "LOCKGATE" in stdout or "config.yaml is not one of the accepted configs" not in stderr:
+        failures.append("%s: %s was not stopped by the hash list before the gate (rc %s, stderr tail %r)" % (name, why, rc, stderr[-200:]))
 # the live gateway: the gate passed before it listened, the report (which runs the same rules on the live volume) found
 # nothing to shut down, the container is still up, and the plugin is loaded for the hermes uid from the real volume
 log = text("gateway-boot", "log")
@@ -596,7 +658,7 @@ print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s),
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
-print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gateway boot" % len(
+print("OK: %d in-image scenarios (gate) + 15 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",

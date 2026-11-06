@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useRef, useState } from "react";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { FIXTURE_LIST, FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { expressionChoice } from "@momo/core/features/expressions/cards";
 import { MANUAL_UPLOAD_CODES, type ExpressionDraft } from "@momo/core/features/expressions/types";
@@ -207,18 +207,16 @@ describe("team expressions web/desktop port", () => {
     await waitFor(() => expect(image).toHaveBeenCalled());
     expect(image.mock.calls.every(([path]) => path.includes("size=thumb"))).toBe(true);
   });
-  it("shares emoji/sticker/GIF views and confirmation gates destructive mutations", async () => {
+  it("shares emoticon/GIF views and confirmation gates destructive mutations", async () => {
     const store = makeStore(); await store.refresh(); const mutation = vi.spyOn(store, "mutate"); const pick = vi.fn();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="reaction" onPick={pick} />));
-    // ADR-0218 §10 J2: 세 보기는 겹치지 않는다. 파티 앵무새는 움직이는 팀 이모지라 팀 이모지 보기에, 움직이는 이모티콘 둘은
-    // GIF 보기에 있고 움직이지 않는 이모티콘이 없는 이모티콘 보기는 비어 있다(자세한 분포는 ExpressionKind.test.tsx).
-    // 보기 이름은 사전의 것이고(폰 시트의 탭 이름과 같은 체계, #5112 3단계) 이 시험은 제공자 없는 고정 영어 사전으로 돈다:
-    // 「Team emoji」 · 「Emoticon」 · 「GIF」. 기대값은 사전에서 읽지 않고 글자로 적는다.
+    // ADR-0218 §10 J2 + 2026-11-05 증보: 두 보기는 겹치지 않는다. 파티 앵무새는 움직이는 작은 이모티콘(`emoji` 종류)이라 이모티콘 보기에, 움직이는 큰 이모티콘
+    // 둘은 GIF 보기에 있다(자세한 분포는 ExpressionKind.test.tsx). 보기 이름은 사전의 것이고(폰 시트의 탭 이름과 같은 체계, #5330) 이 시험은 제공자 없는
+    // 고정 영어 사전으로 돈다: 「Emoticon」 · 「GIF」. 기대값은 사전에서 읽지 않고 글자로 적는다.
     const labels = () => view.queryAllByRole("button", { name: /반응으로 고르기$/ }).map((button) => button.getAttribute("aria-label")).sort();
     expect(labels()).toEqual(["파티 앵무새 반응으로 고르기"]);
-    fireEvent.click(view.getByLabelText("Emoticon")); expect(labels()).toEqual([]);
     fireEvent.click(view.getByLabelText("GIF")); expect(labels()).toEqual(["기절 반응으로 고르기", "엄지척 반응으로 고르기"]);
-    fireEvent.click(view.getByLabelText("Team emoji"));
+    fireEvent.click(view.getByLabelText("Emoticon"));
     fireEvent.change(view.getByLabelText("우리 팀 표현 검색"), { target: { value: "ㅍㅌ" } });
     fireEvent.click(view.getByRole("button", { name: "파티 앵무새 반응으로 고르기" })); expect(pick).toHaveBeenCalledWith(":party_parrot:");
     const trigger = view.getByRole("button", { name: "파티 앵무새 관리" });
@@ -253,12 +251,57 @@ describe("team expressions web/desktop port", () => {
     const store = makeStore(); const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     expect(view.queryByTestId("team-expressions")).toBeTruthy();
     store.transport.json = vi.fn().mockRejectedValue(new Error("unreachable"));
-    await act(() => store.refresh()); expect(view.getByRole("button", { name: "다시 시도" })).toBeTruthy();
+    await act(() => store.refresh()); expect(within(view.getByTestId("team-expressions-error")).getByRole("button")).toBeTruthy();
     await act(async () => { store.setOffline(true); }); expect(view.getByText(/You're offline\. We'll reload the pictures/)).toBeTruthy();
     const fresh = makeStore(); await fresh.refresh();
     for (const item of fresh.getSnapshot().cache.items) await fresh.mutate({ method: "DELETE", path: `${fresh.base}/expressions/${item.id}` });
     await act(async () => { view.rerender(wrapper(fresh, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />)); });
     expect(view.getByRole("button", { name: "첫 그림 올리기" })).toBeTruthy();
+  });
+  // #5330 owner 11-05 「자꾸 불러오는중이 뜨는데」 — 웹 쪽 원인: 새로 읽기마다(창 초점·30초) 그림 캐시를 전부 걷어서 보이는 그림이 모두 다시 내려받아졌다.
+  it("a routine refresh of an unchanged list neither re-downloads the pictures nor changes the image epoch (#5330)", async () => {
+    const store = makeStore(); await store.refresh();
+    store.transport.image = vi.fn(async () => "data:image/png;base64,AA==");
+    await store.image("/p1");
+    const epoch = store.getSnapshot().epoch;
+    expect(store.transport.image).toHaveBeenCalledTimes(1);
+    for (let round = 0; round < 3; round += 1) await store.refresh(); // 창 초점·30초마다의 전체 읽기
+    await store.refresh(false); // 부분 읽기
+    await store.image("/p1");
+    expect(store.transport.image).toHaveBeenCalledTimes(1); // 메모리 캐시에서 나온다
+    expect(store.getSnapshot().epoch).toBe(epoch);
+    expect(store.getSnapshot().status).toBe("ready");
+  });
+  it("a refresh whose list drops or changes an item still revokes the cached pictures (#5330)", async () => {
+    const store = makeStore(); await store.refresh();
+    store.transport.image = vi.fn(async () => "data:image/png;base64,AA==");
+    await store.image("/p1");
+    const epoch = store.getSnapshot().epoch;
+    // 서버가 한 등록을 숨긴 뒤의 전체 목록(버전이 올랐고 한 장이 없다)
+    store.transport.json = vi.fn().mockResolvedValue({ ...FIXTURE_LIST, version: "4", items: FIXTURE_EXPRESSIONS.slice(0, 2) });
+    await store.refresh();
+    expect(store.getSnapshot().cache.items).toHaveLength(2);
+    expect(store.getSnapshot().epoch).toBeGreaterThan(epoch); // 걷었다
+    await store.image("/p1");
+    expect(store.transport.image).toHaveBeenCalledTimes(2); // 다시 내려받는다(걷힌 캐시)
+  });
+  it("keeps the list on screen and the status 'ready' while a background refresh is in flight (#5330)", async () => {
+    const store = makeStore(); await store.refresh();
+    const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
+    await act(async () => {});
+    const rows = () => view.queryAllByRole("button", { name: /메시지에 넣기$/ }).length;
+    const before = rows();
+    expect(before).toBeGreaterThan(0);
+    const real = store.transport.json; let release!: () => void;
+    store.transport.json = vi.fn(async (request) => { await new Promise<void>((resolve) => { release = resolve; }); return real(request); });
+    let reading!: Promise<void>;
+    act(() => { reading = store.refresh(); });
+    // 읽는 중: 이미 읽은 목록이 그대로 서 있고 스켈레톤으로 바뀌지 않는다.
+    expect(store.getSnapshot().status).toBe("ready");
+    expect(rows()).toBe(before);
+    await act(async () => { release(); await reading; });
+    expect(store.getSnapshot().status).toBe("ready");
+    expect(rows()).toBe(before);
   });
   it("requests deltas, recovers a mismatched base with a full read and ignores late versions", async () => {
     const store = makeStore(); await store.refresh();

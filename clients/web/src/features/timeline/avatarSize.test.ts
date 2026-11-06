@@ -69,7 +69,8 @@ describe("아바타 크기 다리", () => {
     // 공용 Avatar의 기본은 그대로 size-8이다(디렉터리·받은편지함 등 대화 밖의 얼굴은 밀도를 따르지 않는다).
     expect(messageRow).toContain("flex size-8 items-center");
     expect(messageRow).toContain('cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
-    expect(pendingRow).toContain('cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    // 대기행의 거터도 `relative`다(#4468): 느린 전송의 시계가 거터의 시각 자리에 `absolute`로 앉으려면 기준 상자가 있어야 한다. 확정된 행과 같은 상자다.
+    expect(pendingRow).toContain('cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
     expect(messageRow).toContain("className={MESSAGE_AVATAR_SIZE_CLASS}");
     expect(pendingRow).toContain("className={MESSAGE_AVATAR_SIZE_CLASS}");
     // 손으로 적은 `w-8` 거터로 되돌아오면 밀도를 바꿔도 거터만 32에 남는다.

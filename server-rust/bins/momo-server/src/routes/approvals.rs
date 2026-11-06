@@ -122,9 +122,9 @@ use momo_messaging::{
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
     lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
-    rename_agent_display_name_in_tx, send_message_in_tx, set_pin_in_tx, settle_approval_card_in_tx,
-    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
-    MessageType, NewChannel, NewMessage, PinAction,
+    rename_agent_display_name_in_tx, send_thread_notice_in_tx, set_pin_in_tx,
+    settle_approval_card_in_tx, staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch,
+    CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -2836,7 +2836,7 @@ async fn execute_workspace_action(
     // its own wake-up, and writes no outcome line — and the grant executor has just
     // covered its channel in this very transaction, so the early return above is the
     // only thing that keeps a second wake from being written for it. Before
-    // `send_message_in_tx` below for the lock order `wake_proposer_in_tx` states.
+    // `send_thread_notice_in_tx` below for the lock order `wake_proposer_in_tx` states.
     wake_proposer_in_tx(conn, approval).await?;
 
     // ADR-0186 v6 R-b: the existing card is the durable result. Wake the
@@ -4787,7 +4787,17 @@ async fn post_invite_link_message_in_tx(
     approval: &LockedApproval,
     link: &str,
 ) -> Result<(), momo_db::DbError> {
-    let sent = send_message_in_tx(
+    // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): a line written after the card stood follows the
+    // **card row's** `root_id`, so the link lands in the thread the approval was decided in even when
+    // the request that raised it was deleted since. A card with no row on file (the approval has no
+    // `request_message_id`) leaves it in the main flow, where it always went.
+    let card_root = match approval.request_message_id {
+        Some(card) => momo_messaging::find_message_in_tx(conn, approval.channel_id, card)
+            .await?
+            .and_then(|card| card.root_id),
+        None => None,
+    };
+    let sent = send_thread_notice_in_tx(
         conn,
         approval.workspace_id,
         NewMessage {
@@ -4796,7 +4806,7 @@ async fn post_invite_link_message_in_tx(
             message_type: MessageType::Text,
             body: Some(momo_messaging::invite_link::body(link)),
             props: momo_messaging::invite_link::props(),
-            root_id: None,
+            root_id: card_root,
             reply_to_id: None,
             client_msg_id: Some(invite_link_client_msg_id(approval.id)),
             run_id: Some(approval.run_id),

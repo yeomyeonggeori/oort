@@ -61,6 +61,8 @@ export interface RunLedgerView {
   isLoading: boolean;
   /** 읽지 못했다(네트워크·5xx). 직전에 읽은 줄이 있으면 그대로 남는다. */
   isError: boolean;
+  /** 그 읽기가 던진 오류 객체(#5279 B): 기록 줄이 실패의 원인(오프라인 / 서버에 닿지 못함 / 그 밖)을 말하는 데 쓴다. 실패가 아니면 `null`. */
+  error?: unknown;
 }
 
 /** 진행 읽기에서 원장이 바뀌었음을 알려 주는 사실들의 지문. */
@@ -165,6 +167,6 @@ export function useRunLedger(
   );
   return {
     rows, events: query.data?.events ?? [], doorbell, tools, activity, report,
-    isLoading: enabled && query.isLoading, isError: query.isError,
+    isLoading: enabled && query.isLoading, isError: query.isError, error: query.error ?? null,
   };
 }

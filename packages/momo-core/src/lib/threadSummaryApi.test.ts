@@ -8,7 +8,7 @@ import {
 } from "./api";
 import { payloadToMessage, type MessageNewEvent } from "./realtimeEvents";
 
-// #4877 (스레드 요약의 참여자) · #4887 (대화에도 보내기) — 코어가 와이어를 읽고 쓰는 모양.
+// #4877 (스레드 요약의 참여자) · #4887 (대화에도 보내기, 화면에서는 #5324 에서 뺐다) — 코어가 와이어를 읽고 쓰는 모양.
 // 서버 쪽 정본은 ADR-0148 증보 2026-10-31이고, 서버 시험이 같은 키를 단정한다.
 
 function installHost(): void {
@@ -158,30 +158,21 @@ describe("threadRollup — 안 읽은 답글 수 (#4889 2단계)", () => {
   });
 });
 
-describe("대화에도 보내기 (#4887) — 보내는 쪽", () => {
-  it("스레드 답글을 켜면 alsoInChannel: true 가 rootId 와 함께 간다", async () => {
+describe("대화에도 보내기 (#4887 → #5324) — 보내는 쪽: 이 클라이언트는 더는 보내지 않는다", () => {
+  it("스레드 답글 요청에는 alsoInChannel 키가 어떤 옵션으로도 가지 않는다 — rootId 는 간다", async () => {
     installHost();
-    const fetchMock = vi.fn(async () => created());
-    vi.stubGlobal("fetch", fetchMock);
-    await sendThreadReply("ws", "c-1", "root", "client-1", "함께 보내요", {
-      alsoInChannel: true,
-    });
-    const body = sentBody(fetchMock);
-    expect(body.rootId).toBe("root");
-    expect(body.alsoInChannel).toBe(true);
-  });
-
-  it("끄거나 없으면 키 자체가 빠진다 — 옛 서버의 닫힌 요청이 400 내지 않게", async () => {
-    installHost();
-    for (const options of [undefined, {}, { alsoInChannel: false }]) {
+    // 타입이 이미 막는다(`ThreadReplyOptions` 에 그 필드가 없다). 옛 호출자가 억지로 넘겨도 키는 안 간다.
+    for (const options of [undefined, {}, { alsoInChannel: true }, { alsoInChannel: false }, { suppressUnfurl: true, alsoInChannel: true }]) {
       const fetchMock = vi.fn(async () => created());
       vi.stubGlobal("fetch", fetchMock);
-      await sendThreadReply("ws", "c-1", "root", "client-1", "스레드에만", options);
-      expect(Object.keys(sentBody(fetchMock))).not.toContain("alsoInChannel");
+      await sendThreadReply("ws", "c-1", "root", "client-1", "스레드에만", options as never);
+      const body = sentBody(fetchMock);
+      expect(body.rootId).toBe("root");
+      expect(Object.keys(body)).not.toContain("alsoInChannel");
     }
   });
 
-  it("sendMessage 는 rootId 가 없는 전송이라 alsoInChannel 을 어떤 모양으로도 싣지 않는다", async () => {
+  it("sendMessage 도 alsoInChannel 을 어떤 모양으로도 싣지 않는다", async () => {
     installHost();
     const fetchMock = vi.fn(async () => created());
     vi.stubGlobal("fetch", fetchMock);
@@ -193,7 +184,7 @@ describe("대화에도 보내기 (#4887) — 보내는 쪽", () => {
   });
 });
 
-describe("대화에도 보내기 (#4887) — 받는 쪽(실시간 프레임)", () => {
+describe("대화에도 보내기 (#4887) — 받는 쪽(실시간 프레임): 서버 필드는 호환을 위해 읽는다", () => {
   function frame(extra: Record<string, unknown>): MessageNewEvent["payload"] {
     return {
       id: "m-2",

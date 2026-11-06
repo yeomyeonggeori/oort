@@ -850,21 +850,19 @@ describe("참여한 스레드의 새 답글 (#4890)", () => {
     ).toBe(true);
   });
 
-  it("「대화에도 보내기」 답글은 본류에도 서므로 채널이 앞에 있으면 본 것이다", () => {
+  it("옛날에 「대화에도 보내기」로 보낸 답글도 스레드에만 그려지므로 채널이 앞에 있어도 본 것이 아니다 (#5324)", () => {
     const channelOnly = context({
       ...follows(true),
       windowFocused: true,
       isTargetVisible: () => true,
       isThreadVisible: () => false,
     });
-    expect(notifyDecision(reply({ also_in_channel: true }), channelOnly)).toEqual({
-      show: false,
-      skip: "focused",
-    });
-    // 채널이 다른 화면이면 본 것이 아니다.
+    // 서버 필드(`also_in_channel`)가 와도 화면은 본류에 그리지 않는다 — 배너가 이 답글을 알리는 유일한 길이다.
+    expect(notifyDecision(reply({ also_in_channel: true }), channelOnly).show).toBe(true);
+    // 그 스레드 패널이 열려 있으면 본 것이다(값과 무관).
     expect(
-      notifyDecision(reply({ also_in_channel: true }), { ...channelOnly, isTargetVisible: () => false }).show
-    ).toBe(true);
+      notifyDecision(reply({ also_in_channel: true }), { ...channelOnly, isThreadVisible: (id) => id === ROOT })
+    ).toEqual({ show: false, skip: "focused" });
   });
 
   it("이 기기에서 이 종류를 끄면 안 띄운다 — 다른 종류 스위치와 상관없다 (사보타주: 끔을 무시하면 RED)", () => {

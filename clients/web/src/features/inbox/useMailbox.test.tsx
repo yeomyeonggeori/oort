@@ -45,8 +45,9 @@ const channelsValue = {
   isLoading: false,
   isError: false,
 };
+// 채널 읽음 위치 투영(`useReadStates`)의 가짜. 시험이 위치를 갈아 끼운다(#5345). 비어 있으면 「위치를 모른다」이다.
 const readStatesValue = {
-  byChannel: new Map(),
+  byChannel: new Map<string, { lastReadSeq: number }>(),
   data: [],
   isLoading: false,
   dataUpdatedAt: 0,
@@ -107,6 +108,8 @@ let host: HTMLElement | null = null;
 let latest: Mailbox | null = null;
 let actions: ReturnType<typeof useMailboxReadActions> | null = null;
 let client: QueryClient;
+/** 개인 채널 구독 손잡이(`subscribeInbox`)를 줄 때만 시험이 채운다. */
+let realtimeHandle: SessionContextValue["realtime"] = null;
 
 function Probe({ filter }: { filter: MailboxFilter }) {
   latest = useMailbox(filter);
@@ -123,7 +126,7 @@ function session(): SessionContextValue {
       realtimeWebSocketUrl: "wss://x/connection/websocket",
     },
     workspaceId: WS,
-    realtime: null,
+    realtime: realtimeHandle,
     connStatus: "connected",
     logout: () => undefined,
     replaceSessionMember: () => undefined,
@@ -172,6 +175,8 @@ afterEach(() => {
   root = null;
   host?.remove();
   host = null;
+  readStatesValue.byChannel = new Map();
+  realtimeHandle = null;
   vi.clearAllMocks();
 });
 
@@ -423,5 +428,167 @@ describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커�
     // 인박스 항목만 읽는 길이 아니다: 그 길은 점을 못 끈다.
     expect(api.markInboxReadAll).not.toHaveBeenCalled();
     expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// 점은 항목 읽음과 채널 읽음 위치를 합쳐 정한다 (#5345, #5331의 웹 판). 규칙은 코어 `isServerItemUnread`다.
+//
+// 서버는 위치가 전진하는 트랜잭션에서 그 채널의 `seq <= 위치` 항목을 읽음으로 채우지만 그 일은 서버 안에서 끝나서, 이미 받아 둔
+// 목록은 그 전 스냅샷으로 남는다(대화를 읽고 15초 안에 받은함으로 돌아오거나 다른 기기가 대화를 읽는 경우). 아래 시험의 가짜 서버는
+// 그 스냅샷을 `snapshot()`으로 돌려주고, 위치는 `readStatesValue`로 갈아 끼운다.
+// =============================================================================
+describe("useMailbox: 점은 항목 읽음과 채널 읽음 위치를 합쳐 정한다 (#5345)", () => {
+  // 대문자 id: 서버 응답의 채널 id 와 읽음 위치 투영의 열쇠(`idKey` = 소문자)가 글자 크기만 다를 수 있다.
+  const HEX = "0000000a-0000-7000-8000-00000000abcd";
+  const OTHER = "0000000b-0000-7000-8000-00000000abcd";
+  const dm = (id: string, seq: number, readAt: string | null = null, channelId = HEX) => ({
+    id,
+    kind: "dm",
+    reasons: ["dm"],
+    channel: { id: channelId.toUpperCase(), name: null, kind: "dm" },
+    message: { id: `m-${id}`, seq, authorMemberId: ME, preview: `dm ${seq}`, deleted: false },
+    actorMemberId: ME,
+    createdAt: "2026-10-11T04:07:12.123456Z",
+    readAt,
+  });
+  const at = (channelId: string, lastReadSeq: number) => {
+    readStatesValue.byChannel = new Map([[channelId, { lastReadSeq }]]);
+  };
+  const listCalls = () => api.fetchInbox.mock.calls.filter((c) => c[1]?.limit !== 1);
+  const settle = async () => {
+    for (let i = 0; i < 8; i += 1) await act(async () => { await new Promise((r) => setTimeout(r, 15)); });
+  };
+  const unreadOf = () => Object.fromEntries((latest?.entries ?? []).map((e) => [e.itemId, e.unread]));
+  /** 가짜 서버가 이번 읽기에 돌려줄 목록. 시험이 호출 횟수로 갈라 쓴다. */
+  let snapshot: (nth: number) => { items: object[]; unreadCount: number } = () => ({ items: [], unreadCount: 0 });
+
+  beforeEach(() => {
+    // 목록 읽기는 한 틱 늦게 답한다: 날아가는 동안(`isFetching`)이 한 번은 그려져야 「읽는 중이면 기다린다」와 「같은 낡음은 한 번만」
+    // 가드가 실제 네트워크처럼 시험된다(즉시 풀리는 가짜는 읽는 중 상태가 렌더되지 않아 되풀이가 일어날 길이 없다).
+    api.fetchInbox.mockImplementation((_ws: string, q: { limit?: number }) => {
+      const page = parseInboxPage(
+        q.limit === 1
+          ? { items: [], nextCursor: null, unreadCount: 0 }
+          : { ...snapshot(listCalls().length), nextCursor: null }
+      );
+      return q.limit === 1 ? Promise.resolve(page) : new Promise((resolve) => setTimeout(() => resolve(page), 10));
+    });
+  });
+
+  it("위치가 항목에 닿았으면 점이 없고, 못 미치면 남고, 위치를 모르면 항목의 readAt만 본다 (같은 대화의 항목 셋 · 읽은 항목은 점이 다시 켜지지 않는다)", async () => {
+    snapshot = () => ({
+      items: [
+        dm("i3", 3),
+        dm("i2", 2),
+        dm("i1", 1),
+        dm("done", 9, "2026-10-11T04:09:00.000001Z"),
+        dm("other", 5, null, OTHER),
+      ],
+      unreadCount: 4,
+    });
+    await render("all");
+    expect(unreadOf(), "위치를 모른다").toEqual({ i3: true, i2: true, i1: true, done: false, other: true });
+
+    at(HEX, 2);
+    await render("all");
+    expect(unreadOf(), "위치 2: seq 2 는 닿았고 seq 3 은 못 미쳤다. 위치 밖의 읽은 항목·다른 채널은 그대로").toEqual({
+      i3: true,
+      i2: false,
+      i1: false,
+      done: false,
+      other: true,
+    });
+  });
+
+  it("낡은 항목이 있으면 목록을 한 번만 다시 읽고, 서버가 읽음으로 답하면 수도 서버를 따른다", async () => {
+    snapshot = (nth) =>
+      nth <= 1
+        ? { items: [dm("i3", 3), dm("i2", 2), dm("other", 5, null, OTHER)], unreadCount: 3 }
+        : {
+            items: [
+              dm("i3", 3, "2026-10-11T04:09:00.000001Z"),
+              dm("i2", 2, "2026-10-11T04:09:00.000001Z"),
+              dm("other", 5, null, OTHER),
+            ],
+            unreadCount: 1,
+          };
+    at(HEX, 3);
+    await render("all");
+    await settle();
+    expect(listCalls(), "처음 읽기 + 낡은 항목을 알아챈 뒤의 다시 읽기, 그 뒤로는 없다").toHaveLength(2);
+    expect(unreadOf()).toEqual({ i3: false, i2: false, other: true });
+    expect(latest?.serverUnreadCount).toBe(1);
+  });
+
+  it("서버가 다시 읽은 답에서도 안 읽음이라 하면 같은 낡음으로는 더 읽지 않는다 (수는 점을 따라간다) · 위치가 더 전진하면 그때 다시 읽는다", async () => {
+    snapshot = () => ({
+      items: [dm("i4", 4), dm("i3", 3), dm("i2", 2), dm("other", 5, null, OTHER)],
+      unreadCount: 4,
+    });
+    at(HEX, 3);
+    await render("all");
+    await settle();
+    expect(listCalls(), "같은 낡음(i2·i3)으로는 한 번만").toHaveLength(2);
+    expect(unreadOf(), "점은 위치를 따른다: i4(seq 4)와 다른 채널만 남는다").toEqual({ i4: true, i3: false, i2: false, other: true });
+    expect(latest?.serverUnreadCount, "서버가 센 4 에서 점이 꺼진 낡은 항목 둘을 뺀다").toBe(2);
+
+    at(HEX, 4);
+    await render("all");
+    await settle();
+    expect(listCalls(), "낡은 항목이 늘었다(i4): 그때 한 번 더").toHaveLength(3);
+    expect(latest?.serverUnreadCount).toBe(1);
+  });
+
+  it("마운트 재조회가 오는 중이면 그 답을 기다린다: 받아 둔 낡은 목록이 있어도 읽기를 끊고 다시 시작하지 않는다", async () => {
+    const cached = parseInboxPage({ items: [dm("i2", 2), dm("i1", 1)], nextCursor: null, unreadCount: 2 });
+    // `STALE_MS`(15초)를 넘긴 목록: 마운트가 다시 읽는다.
+    client.setQueryData(["inbox", WS, "all"], { pages: [cached], pageParams: [undefined] }, { updatedAt: Date.now() - 60_000 });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    api.fetchInbox.mockImplementation((_ws: string, q: { limit?: number }) =>
+      q.limit === 1
+        ? Promise.resolve(parseInboxPage({ items: [], nextCursor: null, unreadCount: 0 }))
+        : gate.then(() =>
+            parseInboxPage({
+              items: [dm("i2", 2, "2026-10-11T04:09:00.000001Z"), dm("i1", 1, "2026-10-11T04:09:00.000001Z")],
+              nextCursor: null,
+              unreadCount: 0,
+            })
+          )
+    );
+    at(HEX, 2);
+    await render("all");
+    await settle();
+    expect(listCalls(), "마운트의 읽기 하나가 날아가는 중").toHaveLength(1);
+    expect(unreadOf(), "받아 둔 목록도 위치를 따라 이미 점이 없다").toEqual({ i2: false, i1: false });
+    await act(async () => { release(); });
+    await settle();
+    expect(listCalls(), "그 답이 오면 더 읽을 것이 없다").toHaveLength(1);
+    expect(latest?.serverUnreadCount).toBe(0);
+  });
+
+  // 안 맞던 길이 아니다: 다른 기기가 항목 하나만 읽음으로 누르면 서버가 `inbox_item.read`를 내고 웹은 이미 그 신호로 목록을 다시 읽는다.
+  // 같은 규칙으로 다루지 않으니 이 길이 바뀌지 않았음을 고정한다.
+  it("다른 기기가 항목 하나만 읽음으로 누른 신호(inbox_item.read)를 받으면 목록을 다시 읽는다 (원래 맞던 길)", async () => {
+    let onEvent: (event: { type: string; itemId?: string }) => void = () => undefined;
+    realtimeHandle = {
+      subscribeInbox: (_memberId: string, handlers: { onEvent: typeof onEvent }) => {
+        onEvent = handlers.onEvent;
+        return () => undefined;
+      },
+    } as unknown as SessionContextValue["realtime"];
+    snapshot = (nth) => ({
+      items: [dm("only", 7, nth <= 1 ? null : "2026-10-11T04:09:00.000001Z")],
+      unreadCount: nth <= 1 ? 1 : 0,
+    });
+    await render("all");
+    expect(unreadOf()).toEqual({ only: true });
+    await act(async () => { onEvent({ type: "inbox_item.read", itemId: "only" }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+    await settle();
+    expect(listCalls()).toHaveLength(2);
+    expect(unreadOf()).toEqual({ only: false });
+    expect(latest?.serverUnreadCount).toBe(0);
   });
 });

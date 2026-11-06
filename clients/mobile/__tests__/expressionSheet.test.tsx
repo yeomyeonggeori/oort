@@ -33,6 +33,7 @@ import {
 import {Composer} from '../src/features/conversation/Composer';
 import {CONV} from '../src/features/conversation/convDesign';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
+import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
 import {
   ExpressionComposerModal,
@@ -43,6 +44,7 @@ import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
   browseExpressions,
   EXPRESSION_TABS,
+  expressionActionOf,
   insertExpressionToken,
 } from '../src/features/expressions/expressionViews';
 import {
@@ -62,7 +64,7 @@ jest.mock('../src/lib/haptics', () => ({
 }));
 
 // =============================================================================
-// 입력창 표현 시트 (#4942, owner 10-31) — 보내기 왼쪽 단추 하나가 여는 네 탭 시트.
+// 입력창 표현 시트 (#4942, owner 10-31 → 11-05 #5330) — 보내기 왼쪽 단추 하나가 여는 세 탭 시트(이모티콘 · 기본 · GIF).
 //
 // 진짜 부품만 쓴다: 진짜 `Composer`·`PageSheet`·`EmojiPicker` 본문·`TeamExpressionPicker`·폰 저장소. 가짜는 서버(코어 fixture
 // 서버)와 표준 이모지 목록(두 개)뿐이다. 코어 fixture 의 세 표현은 모두 움직이는 GIF 라서 GIF 보기가 거를 **정지 그림**이
@@ -97,8 +99,8 @@ const party: CatalogEmoji = {
 
 /**
  * 서버 목록의 엄지척을 정지 그림(PNG)으로 바꾼다 — thumb 는 원래 PNG 라 그림 길은 그대로다. 코어 fixture 의 종류는 앵무새
- * `emoji`·기절 `sticker`·엄지척 `sticker` 라서 이 바꿈 뒤의 네 탭은 이모티콘 = 엄지척 · 팀 이모지 = 앵무새 · GIF = 기절이다
- * (ADR-0218 §10 J2). 한 탭에 둘이 서야 재는 시험(최근 먼저)은 `rewrite` 로 한 등록의 종류를 바꿔 내린다.
+ * `emoji`·기절 `sticker`·엄지척 `sticker` 라서 이 바꿈 뒤의 세 탭은 이모티콘 = 앵무새(작은 것) + 엄지척(큰 것) · GIF = 기절이다
+ * (ADR-0218 §10 J2의 네 칸 가운데 팀 이모지 칸과 이모티콘 칸이 한 탭, 2026-11-05 증보). 종류를 바꿔 재는 시험은 `rewrite` 로 한 등록의 종류를 바꿔 내린다.
  */
 function stillThumbs(
   response: ExpressionFixtureResponse,
@@ -185,6 +187,7 @@ const flat = (style: unknown) =>
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  rememberEmojiCatalog(null); // 푼 목록의 기억은 모듈 값이다 — 시험마다 비운다.
   release = await pinReduceMotion(true);
   AppState.currentState = 'active';
   (loadPhoneEmojiCatalog as jest.Mock).mockResolvedValue([waving, party]);
@@ -201,8 +204,8 @@ afterEach(async () => {
   jest.useRealTimers();
 });
 
-// ---- 순수: 보관함을 나누는 네 탭 ----------------------------------------------------
-describe('탭이 고르는 것 — 종류와 움직임이 보관함을 겹치지 않게 나눈다 (ADR-0218 §10 J2)', () => {
+// ---- 순수: 보관함을 나누는 두 보기 ---------------------------------------------------
+describe('탭이 고르는 것 — 종류와 움직임이 보관함을 겹치지 않게 나눈다 (ADR-0218 §10 J2 + 2026-11-05 증보)', () => {
   const still = {
     ...thumbs,
     media: {...thumbs.media!, small: {...PNG}, large: {...PNG}},
@@ -210,14 +213,31 @@ describe('탭이 고르는 것 — 종류와 움직임이 보관함을 겹치지
   const items: Expression[] = [parrot, jeol, still];
   const ids = (list: Expression[]) => list.map(item => item.name);
 
-  it('이모티콘 = 정지한 sticker · 팀 이모지 = emoji(움직여도) · GIF = 움직이는 sticker — 코어 fixture 의 종류로 서로 다른 한 장씩', () => {
-    expect(ids(browseExpressions(items, 'emoticon', ''))).toEqual(['thumbs_up']);
-    expect(ids(browseExpressions(items, 'team', ''))).toEqual(['party_parrot']);
+  it('이모티콘 = 작은 emoji(움직여도) + 정지한 sticker 한 탭 · GIF = 움직이는 sticker — 한 등록은 정확히 한 탭에 선다', () => {
+    expect(ids(browseExpressions(items, 'emoticon', ''))).toEqual([
+      'party_parrot',
+      'thumbs_up',
+    ]);
     expect(ids(browseExpressions(items, 'gif', ''))).toEqual(['ki_jeol']);
+    // 합집합은 전체, 교집합은 없다 — 합친 것은 화면뿐이라 등록이 두 번 서거나 빠지지 않는다.
+    const all = [
+      ...browseExpressions(items, 'emoticon', ''),
+      ...browseExpressions(items, 'gif', ''),
+    ];
+    expect(new Set(all.map(item => item.id))).toEqual(
+      new Set(items.map(item => item.id)),
+    );
+    expect(all).toHaveLength(items.length);
+  });
+
+  it('고른 뒤의 동작은 탭이 아니라 등록이 정한다 — 작은 것은 입력칸에, 큰 것(움직여도)은 보낸다', () => {
+    expect(expressionActionOf(parrot)).toBe('insert'); // emoji: 움직여도 작은 것
+    expect(expressionActionOf(still)).toBe('send'); // 정지한 sticker
+    expect(expressionActionOf(jeol)).toBe('send'); // 움직이는 sticker
   });
 
   it('한 탭 안에서: 빈 검색은 최근에 쓴 것이 먼저, 검색어가 있으면 관련도 — 거르기는 탭 밖의 등록을 들이지 않는다', () => {
-    // 한 탭에 둘이 서야 차례를 잰다: 엄지척을 팀 이모지(`emoji`)로 두면 그 탭에 앵무새와 엄지척이 선다.
+    // 한 탭에 둘이 서야 차례를 잰다: 엄지척을 작은 이모티콘(`emoji`)으로 두면 그 탭에 앵무새와 엄지척이 선다.
     const team: Expression[] = [parrot, {...still, kind: 'emoji'}, jeol];
 
     // 최근 먼저: 파티 앵무새를 세 번(오래전), 엄지척을 한 번(방금) 썼다. 코어의 빈 검색은 **횟수** 순이라 앵무새가 앞이고(대조),
@@ -230,20 +250,19 @@ describe('탭이 고르는 것 — 종류와 움직임이 보관함을 겹치지
       'thumbs_up',
       'ki_jeol',
     ]);
-    expect(ids(browseExpressions(team, 'team', '', usage))).toEqual([
+    expect(ids(browseExpressions(team, 'emoticon', '', usage))).toEqual([
       'thumbs_up',
       'party_parrot',
     ]);
-    // 방금 쓴 정지 그림이어도 `emoji` 이면 GIF·이모티콘 보기에는 서지 않는다.
+    // 방금 쓴 정지 그림이어도 GIF 보기에는 서지 않는다.
     expect(ids(browseExpressions(team, 'gif', '', usage))).toEqual(['ki_jeol']);
-    expect(ids(browseExpressions(team, 'emoticon', '', usage))).toEqual([]);
     // 검색어가 있으면 거르고, 앞뒤 콜론은 이름 검색으로 읽는다. 다른 탭의 등록은 이름이 맞아도 서지 않는다.
-    expect(ids(browseExpressions(team, 'team', '엄지', usage))).toEqual([
+    expect(ids(browseExpressions(team, 'emoticon', '엄지', usage))).toEqual([
       'thumbs_up',
     ]);
-    expect(ids(browseExpressions(team, 'team', ':party_parrot:', usage))).toEqual([
-      'party_parrot',
-    ]);
+    expect(
+      ids(browseExpressions(team, 'emoticon', ':party_parrot:', usage)),
+    ).toEqual(['party_parrot']);
     expect(ids(browseExpressions(team, 'gif', ':party_parrot:', usage))).toEqual(
       [],
     );
@@ -270,7 +289,7 @@ describe('탭이 고르는 것 — 종류와 움직임이 보관함을 겹치지
 
 // ---- 시트 ---------------------------------------------------------------------
 describe('표현 시트', () => {
-  it('네 탭이 이 차례로 서고 맨 위 검색은 하나다 — 낭독 이름·선택 상태·탭마다 다른 검색 이름', async () => {
+  it('세 탭이 이 차례로 서고 맨 위 검색은 하나다 — 낭독 이름·선택 상태·탭마다 다른 검색 이름', async () => {
     const {store} = await loaded();
     openSheet(store);
     const tabs = screen.getByTestId('expression-sheet-tabs');
@@ -280,31 +299,33 @@ describe('표현 시트', () => {
       expect(tab.props.accessibilityRole).toBe('tab');
       return [id, tab.props.accessibilityLabel, tab.props.accessibilityState.selected];
     });
+    // 첫 탭은 「우리 팀」(owner 11-06 #5427): 창 제목이 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다.
+    // 앞 판의 「이모지」·「팀 이모지」 탭은 없고, 표준 그림 문자는 「기본」이다.
     expect(labels).toEqual([
-      ['emoticon', '이모티콘', false],
-      ['emoji', '이모지', true], // 처음 열 때: 옛 고르개가 열던 표준 이모지
-      ['team', '팀 이모지', false],
+      ['emoticon', '우리 팀', false],
+      ['emoji', '기본', true], // 처음 열 때: 옛 고르개가 열던 표준 목록
       ['gif', 'GIF', false],
     ]);
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(4);
-    // 검색은 시트에 하나 — 이모지 본문(`embedded`)은 제 검색 칸·「우리 팀」 탭·머리를 세우지 않는다.
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(3);
+    expect(screen.queryByTestId('expression-sheet-tab-team')).toBeNull();
+    // 검색은 시트에 하나 — 기본 본문(`embedded`)은 제 검색 칸·「우리 팀」 탭·머리를 세우지 않는다.
     expect(screen.getAllByTestId('expression-sheet-search')).toHaveLength(1);
     expect(screen.queryByTestId('emoji-search')).toBeNull();
     expect(screen.queryByTestId('emoji-tab-team')).toBeNull();
     expect(screen.queryByTestId('emoji-picker-close')).toBeNull();
     expect(
       screen.getByTestId('expression-sheet-search').props.accessibilityLabel,
-    ).toBe('이모지 검색');
+    ).toBe('기본 이모티콘 검색');
     expect(
       screen.getByTestId('expression-sheet-close').props.accessibilityLabel,
-    ).toBe('이모티콘·이모지·GIF 닫기');
-    pressTab('team');
+    ).toBe('이모티콘 닫기');
+    pressTab('emoticon');
     expect(
       screen.getByTestId('expression-sheet-search').props.accessibilityLabel,
-    ).toBe('팀 이모지 검색');
+    ).toBe('이모티콘 검색');
     expect(
-      screen.getByTestId('expression-sheet-tab-team').props.accessibilityState
-        .selected,
+      screen.getByTestId('expression-sheet-tab-emoticon').props
+        .accessibilityState.selected,
     ).toBe(true);
     expect(
       screen.getByTestId('expression-sheet-tab-emoji').props.accessibilityState
@@ -348,7 +369,7 @@ describe('표현 시트', () => {
   });
 
   // #5065 M1·L1: 같은 검색어가 걸린 세 탭의 빈 결과 안내. 맨 `Text` 는 글자 단위로 끊어 「…검색해 보세 / 요.」(캡처 4942-…-017·019)가 됐고,
-  // 이모지 탭만 합쇼체(「없습니다」)라 한 시트 안에서 말씨가 갈렸다. 렌더된 글자 노드의 줄바꿈 속성과 문장 끝(해요체)을 잰다.
+  // 기본 탭만 합쇼체(「없습니다」)라 한 시트 안에서 말씨가 갈렸다. 렌더된 글자 노드의 줄바꿈 속성과 문장 끝(해요체)을 잰다.
   it('빈 결과 안내는 세 탭 모두 어절 단위로 줄바꿈하고 같은 말씨(해요체)로 끝난다 (#5065)', async () => {
     const {store} = await loaded();
     openSheet(store);
@@ -363,8 +384,8 @@ describe('표현 시트', () => {
       });
       emptyLines.push(sentence);
     };
-    read('emoji-empty', '찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.');
-    pressTab('team');
+    read('emoji-empty', '찾는 이모티콘이 없어요. 다른 이름으로 검색해 보세요.');
+    pressTab('emoticon');
     await screen.findByTestId('emoji-team-empty');
     read('emoji-team-empty', '찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요.');
     pressTab('gif');
@@ -375,10 +396,10 @@ describe('표현 시트', () => {
     expect(sentences.filter(sentence => !/요\.$/.test(sentence))).toEqual([]);
   });
 
-  it('팀 이모지 탭: 고르면 `:이름:` 을 입력칸에 넣는다 — 미리보기도 보내기도 없다', async () => {
+  it('이모티콘 탭의 작은 것: 고르면 `:이름:` 을 입력칸에 넣는다 — 미리보기도 보내기도 없다', async () => {
     const {store} = await loaded();
     const h = openSheet(store);
-    pressTab('team');
+    pressTab('emoticon');
     fireEvent.press(await screen.findByTestId('expression-pick-party_parrot'));
     await waitFor(() => expect(h.onInsertExpression).toHaveBeenCalledTimes(1));
     expect(h.onInsertExpression).toHaveBeenCalledWith(':party_parrot:');
@@ -387,11 +408,11 @@ describe('표현 시트', () => {
     expect(h.onInsert).not.toHaveBeenCalled();
   });
 
-  it('이모티콘 탭: 큰 그림을 먼저 보고 「보내기」를 눌러야 한 메시지로 간다 — 입력칸에는 안 들어간다', async () => {
+  it('이모티콘 탭의 큰 것: 큰 그림을 먼저 보고 「보내기」를 눌러야 한 메시지로 간다 — 입력칸에는 안 들어간다', async () => {
     const {store} = await loaded();
     const h = openSheet(store);
     pressTab('emoticon');
-    // 이모티콘 탭에는 정지한 sticker(엄지척)만 선다 — 앵무새(emoji)·기절(움직이는 sticker)은 다른 탭이다.
+    // 같은 탭에 작은 앵무새(emoji)도 서지만 누르는 동작이 다르다 — 큰 것(엄지척)은 미리 본다. 기절(움직이는 sticker)은 GIF 탭이다.
     fireEvent.press(await screen.findByTestId('expression-pick-thumbs_up'));
     expect(screen.getByTestId('expression-send-preview')).toBeTruthy();
     expect(h.onSend).not.toHaveBeenCalled();
@@ -402,19 +423,16 @@ describe('표현 시트', () => {
     expect(h.onInsert).not.toHaveBeenCalled();
   });
 
-  it('GIF 탭은 움직이는 것만 보이고 같은 방식으로 보낸다 — 「＋ 추가하기」는 이모티콘·팀 이모지 탭에만 있다', async () => {
+  it('GIF 탭은 움직이는 것만 보이고 같은 방식으로 보낸다 — 「＋ 추가하기」는 이모티콘 탭에만 있다', async () => {
     const {store} = await loaded();
     const h = openSheet(store);
     pressTab('emoticon');
     await screen.findByTestId('expression-pick-thumbs_up');
     expect(screen.getByTestId('expression-add-menu')).toBeTruthy();
-    expect(cellNames()).toEqual(['thumbs_up']);
-    pressTab('team');
-    expect(screen.getByTestId('expression-add-menu')).toBeTruthy();
-    // 팀 이모지는 emoji 종류다(앵무새는 움직여도 여기 선다).
-    expect(cellNames()).toEqual(['party_parrot']);
+    // 작은 앵무새(emoji, 움직여도)와 정지한 큰 엄지척이 한 탭에 선다.
+    expect(cellNames()).toEqual(['party_parrot', 'thumbs_up']);
     pressTab('gif');
-    // 움직이는 sticker 만 — 엄지척은 정지 그림이라 이모티콘 탭이고, 움직이는 앵무새는 emoji 라 팀 이모지 탭이다.
+    // 움직이는 sticker 만 — 엄지척은 정지 그림이라 이모티콘 탭이고, 움직이는 앵무새는 emoji 라 이모티콘 탭이다.
     expect(cellNames()).toEqual(['ki_jeol']);
     expect(screen.queryByTestId('expression-add-menu')).toBeNull();
     fireEvent.press(screen.getByTestId('expression-pick-ki_jeol'));
@@ -424,7 +442,7 @@ describe('표현 시트', () => {
   });
 
   it('검색어는 탭을 옮겨도 남고 지금 탭 안에서만 거른다 — 최근에 쓴 것이 먼저다', async () => {
-    // 팀 이모지 탭에 둘이 서야 차례를 잰다: 엄지척을 emoji 로 내려 앵무새와 한 탭에 둔다(이모티콘 탭은 비게 된다).
+    // 이모티콘 탭에 앵무새와 엄지척이 함께 선다(엄지척을 emoji 로 내려도 같은 탭이다 — 합친 탭이다).
     const {store} = await loaded(item =>
       item.id === thumbs.id ? {...item, kind: 'emoji'} : item,
     );
@@ -437,23 +455,20 @@ describe('표현 시트', () => {
     now.mockReturnValueOnce(5000);
     store.recordSuccess('message:thumbs', ':thumbs_up:');
     openSheet(store);
-    pressTab('team');
+    pressTab('emoticon');
     await screen.findByTestId('expression-pick-party_parrot');
     // 한 탭 안의 차례: 방금 쓴 엄지척이 앞이다. 기절(움직이는 sticker)은 이 탭이 아니다.
     expect(cellNames()).toEqual(['thumbs_up', 'party_parrot']);
     fireEvent.changeText(screen.getByTestId('expression-sheet-search'), '엄지');
     expect(cellNames()).toEqual(['thumbs_up']);
-    // 같은 검색어가 다른 탭에도 걸려 있다 — 엄지척은 emoji 라 GIF·이모티콘 탭에는 없으니 둘 다 비어 보인다.
+    // 같은 검색어가 GIF 탭에도 걸려 있다 — 엄지척은 emoji 라 GIF 탭에는 없으니 비어 보인다.
     pressTab('gif');
-    expect(cellNames()).toEqual([]);
-    expect(screen.getByTestId('emoji-team-empty')).toBeTruthy();
-    pressTab('emoticon');
     expect(cellNames()).toEqual([]);
     expect(screen.getByTestId('emoji-team-empty')).toBeTruthy();
     expect(screen.getByTestId('expression-sheet-search').props.value).toBe(
       '엄지',
     );
-    pressTab('team');
+    pressTab('emoticon');
     expect(cellNames()).toEqual(['thumbs_up']);
   });
 
@@ -504,6 +519,118 @@ describe('표현 시트', () => {
     expect(
       screen.getByTestId('expression-image-party_parrot-tile').props.source.uri,
     ).toMatch(/png$/);
+  });
+
+  // #5330: 시트를 닫았다 다시 열 때마다 「불러오는 중이에요」가 다시 떴다(원인은 인계 맨 위). 한 번 읽은 목록은 첫 그림부터 서고, 목록을 다시 받지도 않는다.
+  it('시트를 닫았다 다시 열어도 처음 그리는 순간부터 목록이 서고 「불러오는 중」이 없다 — 목록을 다시 받지도 않는다 (#5330)', async () => {
+    const {store, request} = await loaded();
+    const lists = () =>
+      request.mock.calls.filter(
+        ([input]) =>
+          input.method === 'GET' && input.path.split('?')[0] === base,
+      ).length;
+    expect(lists()).toBe(1);
+    for (let round = 0; round < 3; round += 1) {
+      const view = render(
+        <PhoneExpressions.Provider value={store}>
+          <ExpressionComposerPicker {...handlers()} />
+        </PhoneExpressions.Provider>,
+      );
+      if (round === 0) await act(async () => {}); // 표준 목록을 처음 한 번 읽는다
+      // 기다리지 않는다(`getBy`): 이미 읽은 것이 같은 렌더 안에서 서 있다.
+      if (round > 0) {
+        expect(screen.getByTestId('emoji-pick-🎉')).toBeTruthy();
+        expect(screen.queryByTestId('emoji-empty')).toBeNull();
+      }
+      pressTab('emoticon');
+      expect(screen.getByTestId('expression-pick-party_parrot')).toBeTruthy();
+      expect(screen.queryByTestId('expression-loading')).toBeNull();
+      pressTab('gif');
+      expect(screen.getByTestId('expression-pick-ki_jeol')).toBeTruthy();
+      expect(screen.queryByTestId('expression-loading')).toBeNull();
+      view.unmount();
+    }
+    expect(lists()).toBe(1); // 열 때마다 받지 않았다
+  });
+
+  it('앱이 앞으로 돌아와 전체를 다시 읽는 동안에도 열려 있는 시트의 목록이 그대로 선다 (#5330)', async () => {
+    const {store, request, server} = await loaded();
+    openSheet(store);
+    pressTab('emoticon');
+    await screen.findByTestId('expression-pick-party_parrot');
+    const before = cellNames();
+    let reply!: () => void;
+    request.mockImplementationOnce(async input => {
+      await new Promise<void>(resolve => {
+        reply = resolve;
+      });
+      return stillThumbs(server.request(input));
+    });
+    let reading!: Promise<void>;
+    act(() => {
+      reading = store.refresh(true);
+    });
+    expect(screen.queryByTestId('expression-loading')).toBeNull();
+    expect(cellNames()).toEqual(before);
+    await act(async () => {
+      reply();
+      await reading;
+    });
+    expect(screen.queryByTestId('expression-loading')).toBeNull();
+    expect(cellNames()).toEqual(before);
+  });
+
+  // owner 11-05 「이모티콘으로 통일」: 시트의 어느 탭·어느 상태에도 「이모지」·「팀 이모지」·「스티커」가 글자로도 낭독 이름으로도 없다.
+  // 「우리 팀」은 owner 11-06(#5427)부터 첫 탭의 이름이다: 탭 줄 밖(목록·빈 안내·메뉴)에는 머리글로도 안내로도 겹쳐 서지 않는다.
+  it('세 탭 어디에도(목록·빈 안내·「추가하기」 메뉴) 「이모지」·「팀 이모지」·「스티커」가 없고, 「우리 팀」은 탭 줄의 첫 탭 이름으로만 선다 — 보이는 글자와 낭독 이름 모두', async () => {
+    const {store} = await loaded();
+    openSheet(store);
+    await screen.findByTestId('emoji-pick-🎉');
+    // `skip`: 이 testID 의 줄기는 건너뛴다(탭 줄 밖의 글만 볼 때).
+    const copy = (skip?: string) => {
+      const seen: string[] = [];
+      const walk = (node: unknown): void => {
+        if (typeof node === 'string') seen.push(node);
+        else if (Array.isArray(node)) node.forEach(walk);
+        else if (node && typeof node === 'object') {
+          const {props, children} = node as {
+            props?: Record<string, unknown>;
+            children?: unknown;
+          };
+          if (skip !== undefined && props?.testID === skip) return;
+          for (const key of ['accessibilityLabel', 'accessibilityHint', 'placeholder'])
+            if (typeof props?.[key] === 'string') seen.push(props[key] as string);
+          walk(children);
+        }
+      };
+      walk(screen.toJSON());
+      return seen.join('\n');
+    };
+    const RETIRED = /이모지|스티커/;
+    const TAB_ROW = 'expression-sheet-tabs';
+    // 건너뛰기가 헛돌지 않는다는 증거: 탭 줄까지 읽으면 「우리 팀」이 보이고(첫 탭의 글자·낭독 이름), 탭 줄을 건너뛰면 사라진다.
+    expect(copy().match(/우리 팀/g)).not.toBeNull();
+    expect(copy(TAB_ROW).match(/우리 팀/)).toBeNull();
+    const sweep = (where: string) =>
+      expect({
+        where,
+        retired: copy().match(RETIRED)?.[0] ?? null,
+        teamOutsideTabs: copy(TAB_ROW).match(/우리 팀/)?.[0] ?? null,
+      }).toEqual({where, retired: null, teamOutsideTabs: null});
+    for (const tab of ['emoji', 'emoticon', 'gif', 'emoji'] as const) {
+      pressTab(tab);
+      if (tab === 'emoticon')
+        await screen.findByTestId('expression-pick-party_parrot');
+      sweep(`${tab} 목록`);
+      // 아무것도 못 맞추는 검색: 탭마다 다른 빈 안내가 선다.
+      fireEvent.changeText(screen.getByTestId('expression-sheet-search'), 'zzzz');
+      sweep(`${tab} 빈 안내`);
+      fireEvent.changeText(screen.getByTestId('expression-sheet-search'), '');
+    }
+    pressTab('emoticon');
+    fireEvent.press(await screen.findByTestId('expression-add-menu'));
+    await screen.findByTestId('expression-add-doors');
+    sweep('이모티콘 「추가하기」 메뉴');
   });
 
   it('「＋ 추가하기」의 안쪽 장이 열린 동안은 검색·탭 줄이 접히고, ‹ 로 돌아오면 다시 선다', async () => {
@@ -585,13 +712,13 @@ describe('입력창의 표현 단추', () => {
     expect(screen.getByTestId('composer-tool-mention')).toBeTruthy();
   });
 
-  it('눌러 시트를 열고, 팀 이모지는 글 뒤에 띄어 넣고, 이모티콘은 입력 중인 글을 건드리지 않고 보낸다', async () => {
+  it('눌러 시트를 열고, 작은 이모티콘은 글 뒤에 띄어 넣고, 큰 이모티콘은 입력 중인 글을 건드리지 않고 보낸다', async () => {
     const {store} = await loaded();
     const {onSend} = mountComposer(store);
     fireEvent.changeText(screen.getByTestId('composer-input'), '안녕');
     fireEvent.press(screen.getByTestId('composer-expression'));
     expect(await screen.findByTestId('expression-sheet-search')).toBeTruthy();
-    pressTab('team');
+    pressTab('emoticon');
     fireEvent.press(await screen.findByTestId('expression-pick-party_parrot'));
     await waitFor(() =>
       expect(screen.getByTestId('composer-input').props.value).toBe(
@@ -602,7 +729,7 @@ describe('입력창의 표현 단추', () => {
     expect(haptics.light).not.toHaveBeenCalled(); // 넣기는 보내기가 아니다
     expect(screen.queryByTestId('expression-sheet-search')).toBeNull();
 
-    // 이모티콘: 미리보기 → 보내기. 입력창의 글은 그대로다. 보내기 = light 한 번(`submit` 과 같은 규칙).
+    // 큰 이모티콘: 미리보기 → 보내기. 입력창의 글은 그대로다. 보내기 = light 한 번(`submit` 과 같은 규칙).
     fireEvent.press(screen.getByTestId('composer-expression'));
     pressTab('emoticon');
     fireEvent.press(await screen.findByTestId('expression-pick-thumbs_up'));
@@ -649,7 +776,7 @@ describe('입력창의 표현 단추', () => {
           screen.getByTestId(`expression-sheet-tab-${id}`).props
             .accessibilityLabel,
       ),
-    ).toEqual(['Emoticons', 'Emoji', 'Team emoji', 'GIF']);
+    ).toEqual(['Team', 'Emoji', 'GIF']);
     expect(
       screen.getByTestId('expression-sheet-search').props.accessibilityLabel,
     ).toBe('Search emoji');

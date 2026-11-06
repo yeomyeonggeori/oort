@@ -1360,6 +1360,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load activity"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions, so the list below only has agent turns"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1370,6 +1376,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "Reopen the panel to read it again."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "We'll read it again in a moment."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the record"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load progress"
+    }
+  ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load this agent's profile, so we can't tell what will apply"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the profiles of "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", so we can't tell what will apply"
     }
   ],
   "connection.load.agentProfileTitle": [
@@ -1412,6 +1462,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list, so we can't show conversation names"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't check where your drafts belong"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1468,6 +1530,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the notification rules"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load unread markers, so conversations with members who left are still showing"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1480,10 +1548,22 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Try again in a moment."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "Something went wrong."
     }
   ],
   "connection.load.sentence": [
@@ -1500,10 +1580,52 @@ export const catalog: MessageCatalog = {
       "value": "reason"
     }
   ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't refresh team work. Showing the last list we have"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the team pictures"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the code execution hosts"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load where sessions run"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the selected work session"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the progress steps"
     }
   ],
   "connection.send.failed": [
@@ -1942,7 +2064,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.backLabel": [
     {
       "type": 0,
-      "value": "Back to the team emoji list"
+      "value": "Back to the emoticon list"
     }
   ],
   "expressions.add.import": [
@@ -1954,7 +2076,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.importDetail": [
     {
       "type": 0,
-      "value": "Register your own picture or link as a team emoji"
+      "value": "Register your own picture or link as an emoticon"
     }
   ],
   "expressions.add.make": [
@@ -2236,13 +2358,13 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "Team emoji"
+      "value": "Small emoticon"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves."
+      "value": "A small picture. Use it between words and in reactions. It stays a small emoticon even when it moves."
     }
   ],
   "expressions.kind.hintSticker": [
@@ -2260,7 +2382,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "Emoticon"
+      "value": "Large emoticon"
     }
   ],
   "expressions.make.agent": [
@@ -2640,12 +2762,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Team expression views"
-    }
-  ],
-  "expressions.panel.viewTeam": [
-    {
-      "type": 0,
-      "value": "Team emoji"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -3037,25 +3153,19 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyEmoticon": [
     {
       "type": 0,
-      "value": "No team emoticons yet. Use “Add” above to make or import one."
+      "value": "No emoticons yet. Use “Add” above to make or import one."
     }
   ],
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Emoticons tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
     {
       "type": 0,
-      "value": "No team emoji yet."
-    }
-  ],
-  "expressions.sheet.emptyTeam": [
-    {
-      "type": 0,
-      "value": "No team emoji yet. Use “Add” above to import one."
+      "value": "No team emoticons yet."
     }
   ],
   "expressions.sheet.error": [
@@ -3148,12 +3258,6 @@ export const catalog: MessageCatalog = {
       "value": "Search GIFs"
     }
   ],
-  "expressions.sheet.searchTeam": [
-    {
-      "type": 0,
-      "value": "Search team emoji"
-    }
-  ],
   "expressions.sheet.send": [
     {
       "type": 0,
@@ -3175,7 +3279,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Emoticons"
+      "value": "Team"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -3188,12 +3292,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Kinds"
-    }
-  ],
-  "expressions.sheet.tabTeam": [
-    {
-      "type": 0,
-      "value": "Team emoji"
     }
   ],
   "expressions.sheet.title": [
@@ -3256,6 +3354,304 @@ export const catalog: MessageCatalog = {
       "value": "Save to Photos"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "Me"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "Results list"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "Newer result"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "Older result"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "Clear text"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "Close search"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "Yesterday"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Try a different word."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "No results for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn’t search."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "Type something to look for."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "Load more"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "Loading…"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "Search conversation"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "Search this channel"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "Search this conversation"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of at least "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "Clear all recent searches"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "Search again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "Search this conversation again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " (found earlier in "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "Recent searches"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 0,
+      "value": "Message from "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "Results in this channel · newest first"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "Results in this conversation · newest first"
+    }
+  ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "Search all conversations for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "Searching…"
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "Type at least 2 characters to start searching."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,
@@ -3290,6 +3686,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load earlier messages"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "Looking for the message in earlier messages…"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
     }
   ],
   "mobile.linkCard.cancel": [
@@ -4590,6 +5016,318 @@ export const catalog: MessageCatalog = {
       "value": "Open a thread from the summary line under a message and choose Follow thread in its header. On the phone, try swiping a message too."
     }
   ],
+  "releaseNotes.v0143.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Web and desktop work console and emoticon lists now say if a failed load is offline or an unreachable server."
+    }
+  ],
+  "releaseNotes.v0143.agentsLine2": [
+    {
+      "type": 0,
+      "value": "The web and desktop work panel now calls its session list “Work sessions” and its host status “Where it runs”."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsChanged": [
+    {
+      "type": 0,
+      "value": "When you call an agent in a channel, its answer, approval cards and tool lines gather in a thread under your message. A 1:1 DM between you and an agent still answers in the conversation itself. The tick chip that marked a finished job is gone, while chips for other states, such as working, waiting for approval or failed, stay."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTitle": [
+    {
+      "type": 0,
+      "value": "Agent replies go to a thread"
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTryIt": [
+    {
+      "type": 0,
+      "value": "Call an agent in a channel, then open the thread from the replies line under your message to read the answer."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, attaching files makes the composer grow less, with a tighter gap between the cards and your text."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the ✕ on a link card shows only on hover or keyboard selection, and always on touch screens."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Team, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTitle": [
+    {
+      "type": 0,
+      "value": "Composer attachments and the emoticon picker"
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, keep the keyboard open and attach a photo with +. Then open the emoticon picker with the smiley button in the composer and look through the three tabs."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "Also send to the conversation is gone from thread replies, and ones already sent that way now show only in the thread."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, sending no longer flashes a Sending line that shifts rows, and only a slow send shows a small clock."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "In a thread, a quote that points at the top message is no longer shown, so the same words are not repeated."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine1": [
+    {
+      "type": 0,
+      "value": "The hover toolbar now leaves with the pointer after you close the ⋮ menu or pick an action from it."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine2": [
+    {
+      "type": 0,
+      "value": "A work band appearing above the composer no longer hides the hover toolbar beneath it while the pointer rests."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine3": [
+    {
+      "type": 0,
+      "value": "The thread reply box on web and desktop now looks like the channel composer."
+    }
+  ],
+  "releaseNotes.v0143.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0143.editMessageChanged": [
+    {
+      "type": 0,
+      "value": "Your own messages get a pencil button in the hover toolbar, and on the phone Edit is now the top row of the long-press sheet. The Edited mark now shows when you edited, as a tooltip on hover on web and desktop and when you tap it on the phone."
+    }
+  ],
+  "releaseNotes.v0143.editMessageTitle": [
+    {
+      "type": 0,
+      "value": "Editing messages and seeing when you edited"
+    }
+  ],
+  "releaseNotes.v0143.editMessageTryIt": [
+    {
+      "type": 0,
+      "value": "Hover over one of your messages, click the pencil and edit it, then point at Edited. On the phone, long-press your message, tap Edit at the top, then tap Edited."
+    }
+  ],
+  "releaseNotes.v0143.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "The kinds you pick when registering are now Small emoticon (goes into the input) and Large emoticon (preview first)."
+    }
+  ],
+  "releaseNotes.v0143.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetChanged": [
+    {
+      "type": 0,
+      "value": "When something is unread, the oort icon in the Mac menu bar turns its small top right planet orange instead of adding a dot. With nothing unread, it stays a single plain color as before."
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTitle": [
+    {
+      "type": 0,
+      "value": "The orange planet in the menu bar icon"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTryIt": [
+    {
+      "type": 0,
+      "value": "Compare the menu bar icon when you have unread notifications and after you have read them all."
+    }
+  ],
+  "releaseNotes.v0143.networkLine1": [
+    {
+      "type": 0,
+      "value": "On the phone, the connection band no longer lingers for over 30 seconds until you unlock the phone."
+    }
+  ],
+  "releaseNotes.v0143.networkLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a failed load is no longer announced twice: one sidebar line and one box in the main pane."
+    }
+  ],
+  "releaseNotes.v0143.networkLine3": [
+    {
+      "type": 0,
+      "value": "On web and desktop, failed loads in sidebar DMs, drafts, mentions and the team board say why and keep saved content."
+    }
+  ],
+  "releaseNotes.v0143.networkLine4": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the inbox offline band calls the list a snapshot only when a saved list shows below it."
+    }
+  ],
+  "releaseNotes.v0143.networkTopic": [
+    {
+      "type": 0,
+      "value": "Connection"
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Read items in the inbox no longer keep an unread dot, on the phone, web and desktop."
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "When remote work asks for approval, the phone alert goes only to the session owner who can decide."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayChanged": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts for mentions, DMs and thread replies wait one minute by default, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed, and the server only learns that you are active, which other members cannot see."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTitle": [
+    {
+      "type": 0,
+      "value": "Delaying phone alerts while you use the desktop"
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTryIt": [
+    {
+      "type": 0,
+      "value": "In the web or desktop app, open “Delay phone alerts while I use the desktop” in Settings › Notifications and choose Off, 1 min or 5 min."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine1": [
+    {
+      "type": 0,
+      "value": "The Home + menu and the attach + menu follow your chosen theme, so a dark theme no longer shows a white panel."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine2": [
+    {
+      "type": 0,
+      "value": "Korean text in message bubbles now wraps at spaces, so words are far less often cut in the middle."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchChanged": [
+    {
+      "type": 0,
+      "value": "The search screen now finds people, channels and messages from one box, and opens with your recently opened chats and recent searches. The magnifier in a conversation header searches only that conversation, and tapping one of its results jumps to the message with your words highlighted in the bubble."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTitle": [
+    {
+      "type": 0,
+      "value": "Phone search and search inside a conversation"
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTryIt": [
+    {
+      "type": 0,
+      "value": "Open the search screen and type a name or a few words from a message. Then open a conversation, tap the magnifier in its header, tap a result and use the ↑ ↓ bar to move between results."
+    }
+  ],
+  "releaseNotes.v0143.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionChanged": [
+    {
+      "type": 0,
+      "value": "The “Can't reach the server” notice now re-checks on its own and clears itself once the server is back, with no tap or message needed. On the phone, returning to the app no longer announces a drop you never saw, “Reconnected” fades by itself, and a conversation opens already at the bottom instead of moving down from the top."
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTitle": [
+    {
+      "type": 0,
+      "value": "A quieter connection notice"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTryIt": [
+    {
+      "type": 0,
+      "value": "Leave the app for a moment, come back and open a conversation. If the can't-reach-the-server notice shows, watch whether it clears by itself once the server is back."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardChanged": [
+    {
+      "type": 0,
+      "value": "A reply that quotes a message is now one card: a header that says “Replying to” with the name and one line of the original, a thin divider, then the message. The old vertical bar is gone, the quote chip above the composer matches, and an agent answering the message right above it no longer repeats it as a quote."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTitle": [
+    {
+      "type": 0,
+      "value": "Quotes as one card"
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTryIt": [
+    {
+      "type": 0,
+      "value": "Reply to a message, then tap the header of the quote card to jump to the original."
+    }
+  ],
+  "releaseNotes.v0143.searchLine1": [
+    {
+      "type": 0,
+      "value": "On the “Messages” chip, “Choose conversation” narrows the search to a single conversation."
+    }
+  ],
+  "releaseNotes.v0143.searchLine2": [
+    {
+      "type": 0,
+      "value": "Home search and in-conversation search share one recent list, and “All conversations” repeats a search everywhere."
+    }
+  ],
+  "releaseNotes.v0143.searchLine3": [
+    {
+      "type": 0,
+      "value": "Going to an older message from search, a pin or a quote loads earlier chat (you can cancel), or shows a note if too far."
+    }
+  ],
+  "releaseNotes.v0143.searchTopic": [
+    {
+      "type": 0,
+      "value": "Phone search"
+    }
+  ],
+  "releaseNotes.v0143.summary": [
+    {
+      "type": 0,
+      "value": "Phone search is rebuilt, agent replies gather in threads, and phone alerts wait while you use the desktop."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -4614,18 +5352,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "date"
-    }
-  ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "Also send to the conversation"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "This server does not support “Also send to the conversation” yet. Turn it off and send again."
     }
   ],
   "reply.card.cancel": [
@@ -4722,6 +5448,460 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open the thread this reply is in"
+    }
+  ],
+  "search.group.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "search.group.loadingMore": [
+    {
+      "type": 0,
+      "value": "Loading"
+    }
+  ],
+  "search.group.messages": [
+    {
+      "type": 0,
+      "value": "Messages"
+    }
+  ],
+  "search.group.more": [
+    {
+      "type": 0,
+      "value": "See more"
+    }
+  ],
+  "search.group.moreLabel": [
+    {
+      "type": 0,
+      "value": "See more "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "search.group.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "search.input.clearLabel": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "search.input.exitLabel": [
+    {
+      "type": 0,
+      "value": "Back to Home"
+    }
+  ],
+  "search.input.placeholder": [
+    {
+      "type": 0,
+      "value": "Search people, channels, messages"
+    }
+  ],
+  "search.kind.all": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "search.kind.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "search.kind.groupLabel": [
+    {
+      "type": 0,
+      "value": "Search type"
+    }
+  ],
+  "search.kind.messages": [
+    {
+      "type": 0,
+      "value": "Messages"
+    }
+  ],
+  "search.kind.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "search.picker.agent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "search.picker.all": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "search.picker.channelPrivate": [
+    {
+      "type": 0,
+      "value": "Private channel"
+    }
+  ],
+  "search.picker.channelPublic": [
+    {
+      "type": 0,
+      "value": "Public channel"
+    }
+  ],
+  "search.picker.close": [
+    {
+      "type": 0,
+      "value": "Close conversation picker"
+    }
+  ],
+  "search.picker.dm": [
+    {
+      "type": 0,
+      "value": "Direct message"
+    }
+  ],
+  "search.picker.empty": [
+    {
+      "type": 0,
+      "value": "No matching conversations."
+    }
+  ],
+  "search.picker.filterLabel": [
+    {
+      "type": 0,
+      "value": "Find a conversation"
+    }
+  ],
+  "search.picker.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "Find a conversation"
+    }
+  ],
+  "search.picker.title": [
+    {
+      "type": 0,
+      "value": "Where should we search?"
+    }
+  ],
+  "search.recent.clearAll": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "search.recent.clearAllLabel": [
+    {
+      "type": 0,
+      "value": "Clear all recent searches"
+    }
+  ],
+  "search.recent.conversations": [
+    {
+      "type": 0,
+      "value": "Recently opened"
+    }
+  ],
+  "search.recent.empty": [
+    {
+      "type": 0,
+      "value": "Type a person, channel, or message you want to find."
+    }
+  ],
+  "search.recent.openLabel": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.recent.searches": [
+    {
+      "type": 0,
+      "value": "Recent searches"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "Search again for recent search "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    }
+  ],
+  "search.recent.searchLabel": [
+    {
+      "type": 0,
+      "value": "Search again for recent search "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "search.row.agentLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", agent"
+    }
+  ],
+  "search.row.agentSubtitle": [
+    {
+      "type": 0,
+      "value": "Agent · @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.channelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel"
+    }
+  ],
+  "search.row.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Conversation"
+    }
+  ],
+  "search.row.messageLabel": [
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": "'s message in "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "search.row.openChannelHint": [
+    {
+      "type": 0,
+      "value": "Opens the channel."
+    }
+  ],
+  "search.row.openDmHint": [
+    {
+      "type": 0,
+      "value": "Opens the conversation."
+    }
+  ],
+  "search.row.personLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", person"
+    }
+  ],
+  "search.row.personSubtitle": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.privateChannelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " private channel"
+    }
+  ],
+  "search.scope.all": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "search.scope.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Searching only in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", tap to remove the limit"
+    }
+  ],
+  "search.scope.groupLabel": [
+    {
+      "type": 0,
+      "value": "Where to search"
+    }
+  ],
+  "search.scope.pick": [
+    {
+      "type": 0,
+      "value": "Choose conversation"
+    }
+  ],
+  "search.scope.pickLabel": [
+    {
+      "type": 0,
+      "value": "Choose a conversation to search"
+    }
+  ],
+  "search.state.errorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "search.state.errorHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't search."
+    }
+  ],
+  "search.state.loading": [
+    {
+      "type": 0,
+      "value": "Searching…"
+    }
+  ],
+  "search.state.noResults": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "search.state.noResultsIn": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "” in "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "search.state.pendingChannels": [
+    {
+      "type": 0,
+      "value": "Loading channels and people…"
+    }
+  ],
+  "search.state.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "search.state.scopeNote": [
+    {
+      "type": 0,
+      "value": "Only messages from channels you belong to are searched. If it was in another channel, join it and search again."
+    }
+  ],
+  "search.state.shortHint": [
+    {
+      "type": 0,
+      "value": "Type at least 2 characters to start searching."
+    }
+  ],
+  "search.state.shortHintMessages": [
+    {
+      "type": 0,
+      "value": "Messages are searched from 2 characters."
     }
   ],
   "settings.aiLimits.ceilingSearches": [
@@ -5288,6 +6468,54 @@ export const catalog: MessageCatalog = {
       "value": "Checking your notification settings."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts wait for the time you choose, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed. The server only learns that you are active, and other members can't see it."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5 min"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "Delay phone alerts while I use the desktop"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the phone alert delay."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1 min"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the phone alert delay. Try again in a moment."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -5818,6 +7046,64 @@ export const catalog: MessageCatalog = {
       "value": "If you do not decide, the agent has to propose it again."
     }
   ],
+  "timeline.edited.atDate": [
+    {
+      "type": 0,
+      "value": "Edited on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atDay": [
+    {
+      "type": 0,
+      "value": "Edited "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.atTime": [
+    {
+      "type": 0,
+      "value": "Edited at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "timeline.edited.mark": [
+    {
+      "type": 0,
+      "value": "Edited"
+    }
+  ],
+  "timeline.edited.pressHint": [
+    {
+      "type": 0,
+      "value": "Shows when it was edited"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -5846,6 +7132,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.quote.head": [
+    {
+      "type": 0,
+      "value": "Replying to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "Replying to a message"
     }
   ],
   "timeline.runException.open": [
@@ -6098,12 +7400,6 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [

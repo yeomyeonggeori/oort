@@ -258,13 +258,12 @@ describe("머리 줄의 칩 (B)", () => {
     expect(q(none, "trigger-chip")).toBeNull();
   });
 
-  it("평소의 진행에는 칩만 있고 문장 행은 없다: 받음·가져감·작업 중·승인 필요·답함", () => {
+  it("평소의 진행에는 칩만 있고 문장 행은 없다: 받음·가져감·작업 중·승인 필요", () => {
     const states: [Partial<AgentRunProgress>, string][] = [
       [{ status: "queued", phase: "queued", leaseState: "none", startedAtMs: undefined, createdAtMs: T0 - 10_000 }, "받음"],
       [{ status: "queued", phase: "claimed", claimedAtMs: T0 - 5_000, startedAtMs: undefined }, "가져감"],
       [{}, "작업 중"],
       [{ status: "awaiting_approval", phase: "awaiting_approval" }, "승인 필요"],
-      [DONE, "답함"],
     ];
     for (const [extra, word] of states) {
       const el = mount({ startsGroup: true, runStatus: [run(extra)] });
@@ -276,25 +275,60 @@ describe("머리 줄의 칩 (B)", () => {
     }
   });
 
-  it("「답함 ✓」을 누르면 답 메시지로 간다(onJumpToMessage에 id와 seq)", () => {
-    const jump = vi.fn();
-    const done = run(DONE);
-    const el = mount({
-      startsGroup: true,
-      runStatus: [done],
-      runAnswers: new Map([[done.id.toLowerCase(), { id: "answer-1", seq: 42 }]]),
-      onJumpToMessage: jump,
-    });
-    act(() => q(el, "trigger-chip")?.click());
-    expect(jump).toHaveBeenCalledWith("answer-1", 42);
+  // ---- 성공으로 끝나면 칩이 사라진다 (#5382, owner 11-05 결정: 답함 태그는 필요 없다) ----
+
+  it("성공으로 끝난 행에는 칩이 없다: 머리 줄 칩도, 이어지는 행의 거터 칩도, 눌리는 것도 없다", () => {
+    const head = mount({ startsGroup: true, runStatus: [run(DONE)] });
+    expect(q(head, "trigger-chip")).toBeNull();
+    expect(q(head, "trigger-chip-word")).toBeNull();
+    expect(head.querySelector("[data-row-chip]")).toBeNull();
+    // 예외 줄도 문장 행도 없다: 성공은 조용한 상태다.
+    expect(q(head, "run-exception")).toBeNull();
+    expect(q(head, "message-run-status-slot")?.childElementCount ?? 0).toBe(0);
+    act(() => mountedRoot?.unmount());
+    host?.remove();
+
+    const gutter = mount({ startsGroup: false, runStatus: [run(DONE)] });
+    expect(q(gutter, "trigger-chip")).toBeNull();
+    expect(gutter.querySelector("[data-row-chip]")).toBeNull();
   });
 
-  it("답을 모르면 같은 칩이 눌리지 않는다", () => {
-    const jump = vi.fn();
-    const el = mount({ startsGroup: true, runStatus: [run(DONE)], onJumpToMessage: jump });
-    expect(q(el, "trigger-chip")?.tagName).toBe("SPAN");
-    act(() => q(el, "trigger-chip")?.click());
-    expect(jump).not.toHaveBeenCalled();
+  it("칩 자리가 비어도 머리 줄은 칩이 있을 때와 같다: 줄바꿈 없는 @container 줄·줄지 않는 시각·이름과 시각만 남는 두 칸 (#5382)", () => {
+    const working = mount({ startsGroup: true, runStatus: [run()] });
+    const workingHead = q(working, "row-time")!.parentElement!;
+    const workingTime = q(working, "row-time")!;
+    expect(workingHead.childElementCount).toBe(3);
+    const before = {
+      head: workingHead.className,
+      time: workingTime.className,
+      name: workingHead.firstElementChild?.className,
+      nameText: workingHead.firstElementChild?.textContent,
+      clock: workingTime.textContent,
+    };
+    act(() => mountedRoot?.unmount());
+    host?.remove();
+
+    const done = mount({ startsGroup: true, runStatus: [run(DONE)] });
+    const head = q(done, "row-time")!.parentElement!;
+    // 칩이 지면 그 칸은 통째로 사라진다(빈 칸·유령 낱말이 남아 줄 폭을 쥐지 않는다).
+    expect(q(done, "trigger-chip")).toBeNull();
+    expect(head.childElementCount).toBe(2);
+    expect(head.lastElementChild).toBe(q(done, "row-time"));
+    // 머리 줄의 모양을 정하는 것은 칩이 아니라 「이 메시지에 run이 있다」이다: 칩이 지는 순간 줄이 다시 흐르지 않는다.
+    expect(head.className).toBe(before.head);
+    expect(head.className).toContain("@container");
+    expect(head.className).not.toContain("flex-wrap");
+    expect(q(done, "row-time")?.className).toBe(before.time);
+    expect(head.firstElementChild?.className).toBe(before.name);
+    expect(head.firstElementChild?.textContent).toBe(before.nameText);
+    expect(q(done, "row-time")?.textContent).toBe(before.clock);
+  });
+
+  it("성공한 run 곁에 실패한 run이 있으면 실패 칩이 선다(성공은 세지 않는다)", () => {
+    const failed = run({ status: "failed", phase: "failed", endReason: "agent_error", finishedAtMs: T0 - 1_000 });
+    const el = mount({ startsGroup: true, runStatus: [run(DONE), { ...failed, id: "0199aa11-2222-7000-8000-0000000000b2" }] });
+    expect(q(el, "trigger-chip")?.getAttribute("data-kind")).toBe("failed");
+    expect(q(el, "trigger-chip-word")?.textContent).toBe("실패");
   });
 });
 
@@ -309,7 +343,7 @@ describe("스레드 요약 줄의 「작업 중」 칩 (E)", () => {
     expect(q(meta!, "thread-work-chip")?.textContent).toContain("작업 중");
   });
 
-  it("일이 끝났거나(답함) 답글이 없는 루트에는 서지 않는다", () => {
+  it("일이 끝났거나(성공) 답글이 없는 루트에는 서지 않는다", () => {
     const done = mount({ startsGroup: true, message: message(withReplies), runStatus: [run(DONE)] });
     expect(q(done, "thread-work-chip")).toBeNull();
     act(() => mountedRoot?.unmount());

@@ -27,6 +27,8 @@
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 //! | `inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits` | #3118 (R2 H1): `SessionManager::permission_preview_sha256` looked up in `ControlLoop::check_signature` and `HumanTrust::check_control_with_preview` rebuilding the allow with the host's own hash; the preview relayed with the request is the tool call the agent asked about |
 //! | `inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands` | `policy::AGENT_ENV_ALLOWLIST` in `policy::launch_spec` (#2630 F1); `HOME` in Codex's isolation environment (#2630 F5) |
+//! | `inv_55_a_resume_never_hands_the_relayed_label_to_the_agent` | the resume arm of the first prompt in `SessionManager::spawn` and `policy::RESUME_FIRST_PROMPT` (#5338, ADR-0188 §8.12): a session the server pre-allocated starts with the host's sentence, not the label |
+//! | `inv_56_r2_a_resume_runs_the_label_only_when_the_host_verified_the_owners_signature` | `ControlLoop::check_signature` reporting `Ok(true)` only after it verified the signature, handed on as `owner_confirmed_label` to `SessionManager::spawn` (#5338): a verified signature keeps the signed label, an unverified one gets the sentence |
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -42,7 +44,7 @@ use momo_workd::config::ToolEntry;
 use momo_workd::controls::ControlLoop;
 use momo_workd::folders::FolderBook;
 use momo_workd::human_trust::{HumanTrust, RevocationSource, TrustIdentity};
-use momo_workd::policy::{AdapterKind, CodexHome};
+use momo_workd::policy::{AdapterKind, CodexHome, RESUME_FIRST_PROMPT};
 use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
     PERMISSION_EXPIRED_DETAIL,
@@ -1282,6 +1284,68 @@ async fn inv_6_codex_runs_only_from_the_hosts_own_home() {
         .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(answer, "stub heard: summarise the repo — done.");
+}
+
+#[tokio::test]
+async fn inv_6b_a_codex_session_starts_only_when_its_effective_features_read_off() {
+    // #2647 L1 (#2644 security review): the host's switches are keys in its
+    // `config.toml`. A codex that ignores or renamed one would run the
+    // feature on its default — `shell_snapshot` brings the owner's `.zshrc`
+    // exports back into every command. So the host reads the effective table
+    // back from the codex the adapter runs before it starts a Codex session
+    // (ADR-0188 §8.10), and refuses the session when it differs.
+    let mut h = harness_with(&[(
+        "codex",
+        AdapterKind::Codex,
+        &["--codex-modes", "--mode", "read-only"],
+    )]);
+    sign_in_codex(&h);
+    // The fake codex-acp's drift hook (`momo-workd-acp-stub`, `cli features
+    // list`): a row forced to a state is a codex that ignores the key, a
+    // `-name` line is a codex that no longer lists the feature.
+    let hook = h.codex.home.join("zz-stub-features");
+    for (what, line) in [
+        (
+            "codex ignores the shell_snapshot key",
+            "shell_snapshot stable true",
+        ),
+        (
+            "codex renamed the shell_snapshot feature",
+            "-shell_snapshot",
+        ),
+        ("codex ignores the memories key", "memories stable true"),
+    ] {
+        std::fs::write(&hook, format!("{line}\n")).unwrap();
+        let request = spawn(&h, "codex", "look around");
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        assert_eq!(
+            ack_for(&h, request.id),
+            ControlAck::refused("codex_config_unverified"),
+            "{what}"
+        );
+        assert!(
+            !h.record.exists(),
+            "{what}: no adapter session was launched: {:?}",
+            stub_log(&h)
+        );
+        assert!(h.server.creates().is_empty(), "{what}: no server session");
+    }
+
+    // The hook is the only difference: without it the same spawn runs, so the
+    // refusals above are the check's, not something else's.
+    std::fs::remove_file(&hook).unwrap();
+    let request = spawn(&h, "codex", "summarise the repo");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the first turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    assert!(h.record.exists(), "the session launched the adapter");
 }
 
 #[tokio::test]
@@ -4848,5 +4912,115 @@ async fn inv_54_a_signed_v4_without_a_usable_prompt_is_refused_where_signatures_
     assert!(
         !ack.ok,
         "a non-string prompt is refused even unlocked: {ack:?}"
+    );
+}
+
+/// What the stub agent received as prompts, one text per `session/prompt`.
+fn prompt_texts(h: &Harness) -> Vec<String> {
+    stub_log(h)
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .filter_map(|entry| {
+            entry["received"]["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn inv_55_a_resume_never_hands_the_relayed_label_to_the_agent() {
+    // #5338 (#5327 F-10, ADR-0188 §8.12; D3 「소유자 지시 판별」). A resume is the
+    // spawn the server pre-allocated a session for. Its `label` is the title the
+    // session's creator gave it — on a resume that can be another member of the
+    // room — so with signatures off (R1) the agent must not be started with it.
+    let mut h = harness(&[("claude", &[])]);
+    let preallocated = Uuid::new_v4();
+    let label = "teammate-label-5338";
+    let resume = control(
+        &h,
+        "spawn",
+        h.owner,
+        Some(preallocated),
+        json!({"tool": "claude", "label": label}),
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &resume).await,
+        ControlAck::ok(Some(preallocated))
+    );
+    wait_for("the resumed session's first prompt", || {
+        !prompt_texts(&h).is_empty()
+    })
+    .await;
+    // Anything else the host would send arrives within this window.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let sent = prompt_texts(&h);
+    assert_eq!(
+        sent,
+        [RESUME_FIRST_PROMPT],
+        "the host's own sentence, not the relayed label"
+    );
+    assert!(
+        !sent[0].contains(label),
+        "the relayed label reached the agent: {sent:?}"
+    );
+    // An old-style spawn has no session yet and is the owner's own words
+    // (`require_owner`): its label is still its prompt.
+    let fresh = spawn(&h, "claude", "list the files");
+    let fresh_session = poll_and_ack(&mut h, &fresh).await.session_id.unwrap();
+    wait_for("the fresh spawn's prompt", || prompt_texts(&h).len() == 2).await;
+    assert_eq!(prompt_texts(&h)[1], "list the files");
+    let _ = fresh_session;
+}
+
+#[tokio::test]
+async fn inv_56_r2_a_resume_runs_the_label_only_when_the_host_verified_the_owners_signature() {
+    // #5338 (ADR-0188 §8.12). With signatures required the owner signs the
+    // resume's statement, which binds the label as its first prompt, and the
+    // host verifies it before anything runs: that label is the text the owner
+    // confirmed, and it is sent as it always was. A host that verified nothing
+    // (R2 not latched: the signature is not even looked at) sends its own
+    // sentence, signed or not.
+    let root = Device::new(1);
+    let mut locked = harness_r2(&[("claude", &[])]);
+    pin(&locked, &root);
+    let successor = Uuid::new_v4();
+    let mut resume = spawn(&locked, "claude", "continue the work");
+    resume.session_id = Some(successor);
+    let resume = signed(resume, &root, None);
+    assert_eq!(
+        poll_and_ack(&mut locked, &resume).await,
+        ControlAck::ok(Some(successor))
+    );
+    wait_for("the signed resume's prompt", || {
+        !prompt_texts(&locked).is_empty()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        prompt_texts(&locked),
+        ["continue the work"],
+        "the label the owner signed and the host verified"
+    );
+
+    let mut open = harness_latching(&[("claude", &[])]);
+    pin(&open, &root);
+    let successor = Uuid::new_v4();
+    let mut resume = spawn(&open, "claude", "continue the work");
+    resume.session_id = Some(successor);
+    let resume = signed(resume, &root, None);
+    assert_eq!(
+        poll_and_ack(&mut open, &resume).await,
+        ControlAck::ok(Some(successor))
+    );
+    wait_for("the unverified resume's prompt", || {
+        !prompt_texts(&open).is_empty()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        prompt_texts(&open),
+        [RESUME_FIRST_PROMPT],
+        "nothing was verified on this host, so the label is not confirmed"
     );
 }

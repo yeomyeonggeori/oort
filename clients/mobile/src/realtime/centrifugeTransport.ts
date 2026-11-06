@@ -137,6 +137,52 @@ type Timer = ReturnType<typeof setTimeout>;
 /** Do not use a token response that iOS held across suspension (#4783). */
 export const TOKEN_RESPONSE_MAX_AGE_MS = 30_000;
 
+/**
+ * How long ONE token request may take before the attempt gives it up and the library retries (#4895).
+ *
+ * An attempt to reconnect is two stages: ① the token request (REST: 15 s deadline, and two of them back to
+ * back when the session needs a rotation first) and ② the WebSocket handshake, which centrifuge-js itself
+ * bounds at 5 s (`timeout`). **Stage ① has no bound of its own.** It is on the path of every attempt that
+ * follows a `resume()` (that clears the token), and on a road that is dead — a Wi-Fi whose uplink dropped, a
+ * cellular dead zone, the moment Wi-Fi hands over to cellular — the request hears nothing until its REST
+ * deadline, so one attempt could hold the whole reconnect for 15–30 s. 6 s is the handshake's 5 s plus room
+ * for one rotation: both stages need about three round trips on a fresh connection, so a link slow enough to
+ * miss 6 s here would miss the handshake's 5 s too. A request given up this way is simply abandoned (it ends
+ * on its own deadline); the next attempt is a fresh request.
+ */
+export const TOKEN_FETCH_BUDGET_MS = 6_000;
+
+/**
+ * An explicit recovery (a return, a network kind change, reachability coming back, the person's tap on the
+ * "reconnect now" button) cuts a token request that has already been out this long (#4895). Younger than this it is left
+ * alone — the #4783 review (M2) is why: opening an attempt twice (a lock-and-unlock bounce, two signals in a
+ * row) churns the handshake. A healthy token request answers in well under a second, so a request still
+ * waiting after 3 s is on a road that was not usable when it left.
+ */
+export const STUCK_TOKEN_FETCH_MS = 3_000;
+
+/** Give a promise a deadline. The promise itself is not cancelled; the caller just stops waiting for it. */
+function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('token request timed out')), ms);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** A promise that never settles: what a cut attempt's late answer becomes, so the library never sees it. */
+function neverSettles<T>(): Promise<T> {
+  return new Promise<T>(() => undefined);
+}
+
 export function createRealtimeTransport(
   options: RealtimeTransportOptions,
 ): RealtimeTransport {
@@ -167,19 +213,41 @@ export function createRealtimeTransport(
     onSocketEvent?.(event);
   };
 
+  /**
+   * Bumped when `resume()` cuts a stuck attempt. A token request that left under an older generation never
+   * reaches the library, whatever it finally answers: centrifuge-js would take a late token for the NEW
+   * attempt and open a second transport (the churn #4783 M2 was about).
+   */
+  let attemptGeneration = 0;
+  /** When the token request of the attempt in front left, null while none is out. */
+  let tokenFetchStartedAt: number | null = null;
+
   // Every token centrifuge-js presents comes through here — the first connect,
   // a 109 retry and the scheduled refresh alike.
   const getToken = async (): Promise<string> => {
-    let requestedAt = now();
-    let token = await fetchToken();
-    // A token request itself may have been suspended by iOS. Do not hand a
-    // response held across a long lock straight to the socket.
-    while (now() - requestedAt >= TOKEN_RESPONSE_MAX_AGE_MS) {
-      requestedAt = now();
-      token = await fetchToken();
+    const generation = attemptGeneration;
+    const startedAt = now();
+    tokenFetchStartedAt = startedAt;
+    try {
+      let requestedAt = startedAt;
+      let token = await withinBudget(Promise.resolve(fetchToken()), TOKEN_FETCH_BUDGET_MS);
+      // A token request itself may have been suspended by iOS. Do not hand a
+      // response held across a long lock straight to the socket.
+      while (now() - requestedAt >= TOKEN_RESPONSE_MAX_AGE_MS) {
+        // A request that was cut has nothing left to fetch for: the new attempt asked for its own.
+        if (generation !== attemptGeneration) return await neverSettles<string>();
+        requestedAt = now();
+        token = await withinBudget(Promise.resolve(fetchToken()), TOKEN_FETCH_BUDGET_MS);
+      }
+      if (generation !== attemptGeneration) return await neverSettles<string>();
+      recordRealtimeDiagnostic({at: Date.now(), kind: 'token'});
+      return token;
+    } catch (error) {
+      if (generation !== attemptGeneration) return await neverSettles<string>();
+      throw error;
+    } finally {
+      if (tokenFetchStartedAt === startedAt) tokenFetchStartedAt = null;
     }
-    recordRealtimeDiagnostic({at: Date.now(), kind: 'token'});
-    return token;
   };
   // Not-background, rather than exactly-active. `policyStep` decides foreground
   // that way for every transition after this one ("iOS `inactive` is NOT
@@ -286,7 +354,16 @@ export function createRealtimeTransport(
     pushSocketEvent({kind: 'resume'});
     // Do not duplicate an opening token request/handshake. Its token source
     // refreshes access first, and discards responses held across suspension.
-    if (String(current.state) === 'connecting' && attemptInFlight(current)) return;
+    // But a token request that has been out for STUCK_TOKEN_FETCH_MS or more is not "opening", it is
+    // stuck on a road that was not usable when it left, and nothing else would end it before its REST
+    // deadline (#4895): supersede it, and open a fresh attempt below.
+    if (String(current.state) === 'connecting' && attemptInFlight(current)) {
+      if (tokenFetchStartedAt === null || now() - tokenFetchStartedAt < STUCK_TOKEN_FETCH_MS) return;
+      attemptGeneration += 1;
+      tokenFetchStartedAt = null;
+      // Written to the connection record like every policy action (`apply` records its kind).
+      apply([{kind: 'stuck-attempt-cut'}]);
+    }
     // Connection tokens are capped by ACCESS expiry too, so age alone (270 s)
     // cannot prove one is usable after returning. Get one for this handshake.
     current.disconnect();
@@ -460,6 +537,7 @@ export function createRealtimeTransport(
     client: ensureClient,
     dispose() {
       disposed = true;
+      attemptGeneration += 1;
       clearRetryTimer();
       if (graceTimer !== null) {
         clearTimeout(graceTimer);

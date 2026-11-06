@@ -7,7 +7,6 @@ import {
   pinFailureMessage,
   reactionFailureMessage,
   replyFailureMessage,
-  isClosedBodyRejection,
 } from "./actionCopy";
 
 // The exact sentences the message routes answer with. They are the right thing
@@ -94,20 +93,5 @@ describe("message action failure copy", () => {
 
   it("keeps one shared fallback line rather than four near-identical ones", () => {
     expect(genericActionFailureMessage).toMatch(/다시 시도/);
-  });
-});
-
-// #4888 - 옛 서버는 모르는 키 `alsoInChannel` 을 닫힌 본문 규칙으로 거절한다(400, 본문 해석 오류면 422). 켠 때만 쓰는 판정이다.
-describe("isClosedBodyRejection", () => {
-  it("400 과 422 만 본문 모양 거절로 읽는다", () => {
-    expect(isClosedBodyRejection(new ApiError(400, "unknown field"))).toBe(true);
-    expect(isClosedBodyRejection(new ApiError(422, "unprocessable"))).toBe(true);
-  });
-  it("권한·없음·서버 오류·네트워크는 아니다 — 모르는 서버 탓으로 돌리지 않는다", () => {
-    for (const status of [401, 403, 404, 429, 500, 503]) {
-      expect(isClosedBodyRejection(new ApiError(status, "x"))).toBe(false);
-    }
-    expect(isClosedBodyRejection(new Error("network"))).toBe(false);
-    expect(isClosedBodyRejection(undefined)).toBe(false);
   });
 });

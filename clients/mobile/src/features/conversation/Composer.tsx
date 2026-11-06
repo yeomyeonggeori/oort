@@ -89,7 +89,6 @@ import {
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
 import {ReplyDraftCard} from './ReplyDraftCard';
-import {AlsoInChannelCheck} from './AlsoInChannelCheck';
 import {useReplyCopy} from './replyCopy';
 import type {ReplyTarget} from './replyTarget';
 import {ComposerLinkPreview} from './ComposerLinkPreview';
@@ -1100,11 +1099,6 @@ export interface ComposerSendOptions {
    * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
    */
   suppressUnfurl?: boolean;
-  /**
-   * #4888 — 「대화에도 보내기」를 켜고 보낸다(ADR-0148 증보 2026-10-31). 스레드 답글(스레드 화면, 밀어서 답글)에서만 뜻이 있고, 켠 때만
-   * 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
-   */
-  alsoInChannel?: boolean;
 }
 
 /**
@@ -1143,7 +1137,6 @@ export function Composer({
   onCancelQuote,
   replyTarget,
   onCancelReply,
-  offerAlsoInChannel,
   attachmentTarget,
   placeholder: placeholderProp,
   sendLabel: sendLabelProp = '보내기',
@@ -1248,11 +1241,6 @@ export function Composer({
   /** 답글 대상만 뗀다 — **쓴 글은 남는다**(글은 이 컴포저가 들고 있다). 대상이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelReply?: () => void;
   /**
-   * 「대화에도 보내기」 체크를 늘 세운다(스레드 화면 입력칸, #4888). 채널 입력칸은 주지 않고, 밀어서 건 답글 머리말(`replyTarget`)이 있는 동안에만
-   * 체크가 선다. 기본은 꺼짐이고 마지막 선택을 기억하지 않는다 — 보내면 꺼지고, 답글 대상이나 입력칸(`draftKey`)이 바뀌면 꺼진다.
-   */
-  offerAlsoInChannel?: boolean;
-  /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
    * raise the real software keyboard without a tap (a simulator cannot be
@@ -1284,12 +1272,6 @@ export function Composer({
   // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
   const openMadeConversation = useMakeLanding();
   const replying = !!replyTarget && onCancelReply !== undefined;
-  // 「대화에도 보내기」(#4888): 서는 자리는 스레드 입력칸과 답글 머리말이 걸린 동안이다. 상태는 여기서 들고, 기억하지 않는다.
-  const offersAlsoInChannel = offerAlsoInChannel === true || replying;
-  const [alsoInChannel, setAlsoInChannel] = useState(false);
-  const alsoInChannelScope = `${replyTarget?.messageId ?? ''}|${draftKey ?? ''}`;
-  useEffect(() => setAlsoInChannel(false), [alsoInChannelScope]);
-  const alsoInChannelOn = offersAlsoInChannel && alsoInChannel;
   const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
   const sendLabel = replying ? replyCopy.send() : sendLabelProp;
   const keyboardAppearance = useKeyboardAppearance();
@@ -1827,13 +1809,7 @@ export function Composer({
     }
     // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
     // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
-    const picked = {
-      ...(linkPreview.suppressed ? {suppressUnfurl: true} : {}),
-      // 켠 때만 키가 간다. 보냈으므로 체크는 꺼진다(마지막 선택을 기억하지 않는다).
-      ...(alsoInChannelOn ? {alsoInChannel: true} : {}),
-    };
-    const flags = Object.keys(picked).length === 0 ? null : picked;
-    setAlsoInChannel(false);
+    const flags = linkPreview.suppressed ? {suppressUnfurl: true} : null;
     if (attachmentKey === null) {
       if (flags === null) onSend(body);
       else onSend(body, flags);
@@ -1860,7 +1836,6 @@ export function Composer({
     slashRows,
     acceptSlash,
     linkPreview.suppressed,
-    alsoInChannelOn,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -2533,23 +2508,9 @@ export function Composer({
         </Sentence>
       ) : null}
 
-      {attachmentKey === null ? null : (
-        <AttachmentTray
-          drafts={attachmentSurface.drafts}
-          pickerIssue={attachmentSurface.pickerIssue}
-          onRemove={localId => dropDraft(attachmentKey, localId)}
-          onRetry={localId => {
-            if (stableAttachmentTarget !== null) {
-              retryDraft(attachmentKey, stableAttachmentTarget, localId);
-            }
-          }}
-          onClear={() => clearSurface(attachmentKey)}
-        />
-      )}
-
-      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이 바로 아래, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
+      {/* 보내기 전 링크 미리보기(#5016): 알약 바로 위, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
           가깝다). 알약 **밖**이라 ✕가 보내기를 일으키지 않는다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 —
-          첨부 트레이·인용 줄과 같은 취급이고, 줄 안 높이는 트레이와 같은 상한이 묶는다. */}
+          인용 줄과 같은 취급이다(첨부 미리보기는 #5325 로 알약 **안**에 들어갔다 — 아래 알약 머리). */}
       <ComposerLinkPreview
         cards={linkPreview.cards}
         onDismiss={dismissLinkPreview}
@@ -2612,13 +2573,22 @@ export function Composer({
           onCancel={onCancelReply}
         />
       ) : null}
-      {offersAlsoInChannel ? (
-        <AlsoInChannelCheck
-          checked={alsoInChannel}
-          onChange={setAlsoInChannel}
-          textLeft={fieldInset(INPUT_TEXT_LEFT)}
+      {/* 첨부 미리보기 (#5325) — 알약 **안**, 글 줄 바로 위: 사진은 작은 썸네일 한 줄, 파일·실패는 같은 줄의 칩이다. 옛 판은 알약 밖(입력창 위 도크 줄)이라 입력창을 눌러도 입력창 안에는 없었다.
+          좌우 여백은 글 칸의 글자 왼쪽(`INPUT_TEXT_LEFT`)에 맞춘다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 — 답글 머리말과 같은 취급이다. */}
+      {attachmentKey === null ? null : (
+        <AttachmentTray
+          inset={INPUT_TEXT_LEFT}
+          drafts={attachmentSurface.drafts}
+          pickerIssue={attachmentSurface.pickerIssue}
+          onRemove={localId => dropDraft(attachmentKey, localId)}
+          onRetry={localId => {
+            if (stableAttachmentTarget !== null) {
+              retryDraft(attachmentKey, stableAttachmentTarget, localId);
+            }
+          }}
+          onClear={() => clearSurface(attachmentKey)}
         />
-      ) : null}
+      )}
       <View
         style={styles.bar}
         testID="composer-bar"
@@ -2794,6 +2764,9 @@ export function Composer({
         {shown ? (
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
+            // 터치는 자식(「@」)만 받는다 (#5325). 이 줄은 펼침(자판이 올라온 때)에만 서고 알약 폭 전체인데, 알약 바닥에 절대 배치된 + 원은 이 줄보다 **앞** 형제라 그 위에 그려진 이 줄이 + 의
+            // 터치를 삼켰다 — 자판이 올라온 채 +를 누르면 아무 일도 안 났다(시뮬레이터 실측: Maestro 탭은 COMPLETED 인데 첨부 메뉴가 안 열림, 이 한 줄로 열림). 보내기·표현 단추는 이 줄 **뒤**에 있어 멀쩡했다.
+            pointerEvents="box-none"
             testID="composer-tools">
             {TOOL_SLOTS.includes('mention') ? (
               <Pressable

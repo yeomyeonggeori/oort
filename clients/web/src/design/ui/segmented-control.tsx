@@ -27,6 +27,7 @@ export function SegmentedControl<V extends string>({
   onValueChange,
   disabled = false,
   name,
+  describedBy,
   className,
   testId,
 }: {
@@ -38,6 +39,8 @@ export function SegmentedControl<V extends string>({
   disabled?: boolean;
   /** 라디오 그룹 이름. 비우면 고유 id. */
   name?: string;
+  /** 설명이나 잠긴 이유를 말하는 글의 id(`aria-describedby`). 잠긴 컨트롤은 사유를 든다(#1559). */
+  describedBy?: string;
   className?: string;
   testId?: string;
 }) {
@@ -46,6 +49,7 @@ export function SegmentedControl<V extends string>({
   return (
     <fieldset
       disabled={disabled}
+      aria-describedby={describedBy}
       data-testid={testId}
       className={cn(
         "m-0 grid min-w-0 auto-cols-fr grid-flow-col rounded-full bg-surface-muted p-marker disabled:opacity-50",

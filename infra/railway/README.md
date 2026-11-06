@@ -164,12 +164,18 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | hermes | `API_SERVER_HOST` | `0.0.0.0` (environments created after 2025-10-16; a legacy IPv6-only environment would need `::`, which is runtime-unverified) |
 | hermes | `API_SERVER_PORT` | `8642` |
 | hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
-| hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line). A connector-mode Hermes (Gmail, calendar, drive read-only) takes the connector-mode config instead: `python3 infra/hermes/render_model_config.py --auth <method> [--fallback <method>] --connector-base infra/hermes/google-connectors.config.yaml \| base64 \| tr -d '\n'`. The start command accepts exactly the five configs of `render_model_config.py --catalog` (#4935); compare with `--sha256`, never print a value |
-| hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
+| hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line). A team Hermes that pins its model (default mode, picture and search tools, no connectors) takes the default config with the Codex primary / Claude fallback fragment instead: `python3 infra/hermes/render_model_config.py --auth codex-oauth --fallback claude-oauth --base infra/hermes/config.yaml \| base64 \| tr -d '\n'` (#5323). A connector-mode Hermes (Gmail, calendar, drive read-only) takes the connector-mode config instead: `python3 infra/hermes/render_model_config.py --auth <method> [--fallback <method>] --connector-base infra/hermes/google-connectors.config.yaml \| base64 \| tr -d '\n'`. The start command accepts exactly the six configs of `render_model_config.py --catalog` (#4935, #5323); compare with `--sha256`, never print a value |
+| hermes | `HERMES_LOCKGATE_B64` | line 1 of `base64 < infra/hermes/lockgate.py \| tr -d '\n' \| fold -w 32000`. Railway refuses a value over 32,768 characters, so the gate takes several variables; the start command joins them and checks the sha256 of the result |
+| hermes | `HERMES_LOCKGATE_B64_2` | line 2 of the same output (leave unset when there is no such line) |
+| hermes | `HERMES_LOCKGATE_B64_3` | line 3 of the same output (leave unset when there is no such line) |
+| hermes | `HERMES_LOCKGATE_B64_4` | line 4 of the same output (leave unset when there is no such line) |
+| hermes | `HERMES_LOCKGATE_B64_5` | line 5 of the same output (leave unset when there is no such line) |
 | hermes | `HERMES_IMAGE_GUARD_B64` | `base64 < infra/hermes/plugins/oort-image-guard/__init__.py \| tr -d '\n'` (one line) — the oort guard that refuses every `image_generate` address, path and non-inline value before the tool runs (#4820, ADR-0203 I2) |
 | hermes | `HERMES_IMAGE_GUARD_MANIFEST_B64` | `base64 < infra/hermes/plugins/oort-image-guard/plugin.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the login relay sidecar's own shared secret (`openssl rand -hex 32`, never the chat key); leave the shared variable out and the sidecar does not start (oort answers `login_relay_off`) |
-| hermes | `HERMES_LOGIN_RELAY_B64` | `base64 < infra/hermes/login_relay.py \| tr -d '\n'` (one line; needed only with the relay key) |
+| hermes | `HERMES_LOGIN_RELAY_B64` | line 1 of `base64 < infra/hermes/login_relay.py \| tr -d '\n' \| fold -w 32000` (needed only with the relay key) |
+| hermes | `HERMES_LOGIN_RELAY_B64_2` | line 2 of the same output (needed only with the relay key; leave unset when there is no such line) |
+| hermes | `HERMES_LOGIN_RELAY_B64_3` | line 3 of the same output (needed only with the relay key; leave unset when there is no such line) |
 | hermes | `HERMES_LOGIN_PROBE_B64` | `base64 < infra/hermes/mcp_login_probe.py \| tr -d '\n'` (one line; needed only with the relay key) |
 | centrifugo | `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY` | `${{shared.CENT_TOKEN_HMAC}}` |
 | centrifugo | `CENTRIFUGO_HTTP_API_KEY` | `${{shared.CENT_API_KEY}}` |
@@ -211,13 +217,13 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
 2. **Four base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
    from `infra/hermes/config.yaml` (24 toolsets off, `memory` and `session_search` among them and Hermes' memory switches off, Codex subscription search and
    image generation on, the image guard enabled, approvals manual/deny, no model, no connector),
-   `HERMES_LOCKGATE_B64` from `infra/hermes/lockgate.py`, and the two files of the oort image guard
+   `HERMES_LOCKGATE_B64` (and its parts `_2`…`_5`, the file is too long for one variable) from `infra/hermes/lockgate.py`, and the two files of the oort image guard
    plugin, `HERMES_IMAGE_GUARD_B64` (`plugins/oort-image-guard/__init__.py`) and
    `HERMES_IMAGE_GUARD_MANIFEST_B64` (`plugins/oort-image-guard/plugin.yaml`).
 3. **Start order.** The start command writes the config, the gate and the guard plugin
    (into `/opt/data/plugins/oort-image-guard`), checks the gate and the plugin files against the sha256 of the repo files and
-   the config against a LIST of sha256 values (an empty, stale or swapped variable stops the service; the five accepted
-   configs are the default config and a connector-mode config for each model fragment, `render_model_config.py --catalog`;
+   the config against a LIST of sha256 values (an empty, stale or swapped variable stops the service; the six accepted
+   configs are the default config, the default config with the team model fragment and a connector-mode config for each model fragment, `render_model_config.py --catalog`;
    `check_railway_catalog.py` recomputes the hashes, so changing `config.yaml`, `google-connectors.config.yaml`, a model fragment,
    `lockgate.py` or a plugin file means updating the command in the same change), runs `lockgate.py gate` and only then `exec`s the Hermes
    dispatcher. A non-zero gate (`set -e`) means the service never listens. When image generation is
@@ -243,7 +249,7 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    the file with two readers and the gate judges it as both do: a line break inside an allowed value, or a
    name only the line-by-line reader reads, is refused too. Any other name stops the start by name (never
    by value), and so does a `.op.env` beside it or any entry under `/opt/data/profiles/`; `report` judges
-   the same file with the same function after start. **Before replacing `HERMES_LOCKGATE_B64` on a project
+   the same file with the same function after start. **Before replacing `HERMES_LOCKGATE_B64` and its parts on a project
    that already runs Hermes, read the NAMES in its `.env`** (never the values) and remove what is not on
    the list, or the next start is refused: the check is in `docs/RELEASING.md`, "Hermes step".
 4. api and agent-worker get the wiring from the hand-mapped table (host,

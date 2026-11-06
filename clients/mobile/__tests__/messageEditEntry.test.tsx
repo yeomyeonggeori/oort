@@ -1,10 +1,14 @@
 import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
+import {contrast} from '@momo/core/design/color';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
+import {FixedScheme, paletteFor} from '../src/design/theme';
 import {MessageRow, type MessageRowActions} from '../src/features/conversation/MessageRow';
 import {__resetEntryDrafts} from '../src/lib/entryDrafts';
+import {captureNativeDismiss, finishNativeDismiss, isModalDown} from './fixtures/nativeDismiss';
 
 jest.mock('../src/session/useSession', () => ({
   useSession: () => ({workspaceId: 'ws', member: {id: 'self'}, signOut: jest.fn()}),
@@ -150,6 +154,8 @@ describe('폰 재현 표: 내 메시지의 고치기 입구 (#5191)', () => {
     await renderRow(original, rowActions);
     longPress();
     fireEvent.press(screen.getByTestId('sheet-edit'));
+    // 편집기는 행동 시트의 Modal 이 iOS 에서 다 내려간 **뒤에** 선다(#5417) - 시뮬레이터에서는 네이티브가 신호를 보낸다.
+    await finishNativeDismiss('message-action-sheet');
 
     const input = await screen.findByTestId('editor-input');
     expect(input.props.value).toBe('회의 시간은 3시로 정했어요');
@@ -169,5 +175,205 @@ describe('폰 재현 표: 내 메시지의 고치기 입구 (#5191)', () => {
   it('고치지 않은 메시지에는 「수정됨」이 없다', async () => {
     await renderRow(message());
     expect(screen.queryByTestId('edited-mark')).toBeNull();
+  });
+});
+
+// =============================================================================
+// #5326 — 고치기를 찾기 쉽게(시트 맨 위 줄) + 「수정됨」을 누르면·시트 머리에서 고친 시각.
+//
+// 폰 시계: 제공자 없는 시험은 한국어 서비스의 UTC 문맥으로 읽는다(`useLocaleService` 의 대체). 오전·오후 글자는 ICU 판마다 달라서(Node 24 는
+// 한국어를 「AM」으로 낸다) 시각은 숫자(`9:05`)로만 잰다. 09:05 는 12시간제(`9:05`)와 24시간제(`09:05`) 둘 다에 `9:05` 로 들어 있다.
+// =============================================================================
+
+const utc = (y: number, m: number, d: number, hh: number, mm: number) => Date.UTC(y, m - 1, d, hh, mm);
+// BASE_MS = 2023-11-14 22:13 UTC.
+const TODAY_0905 = utc(2023, 11, 14, 9, 5);
+const YESTERDAY_0905 = utc(2023, 11, 13, 9, 5);
+const OTHER_DAY_0905 = utc(2023, 11, 3, 9, 5);
+const OTHER_YEAR_0905 = utc(2022, 12, 31, 9, 5);
+
+function rowTree(msg: Message, rowActions: MessageRowActions = actions()) {
+  return (
+    <MessageRow
+      message={msg}
+      startsGroup
+      directory={DIRECTORY}
+      chips={[]}
+      nowMs={BASE_MS}
+      actions={rowActions}
+    />
+  );
+}
+
+async function settle() {
+  await act(async () => {
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  });
+}
+
+const textOf = (node: {props: {children?: unknown}}): string => {
+  const children = node.props.children;
+  return Array.isArray(children) ? children.join('') : String(children ?? '');
+};
+
+describe('폰: 길게 누르기 시트의 고치기 — 맨 위 줄 (#5326)', () => {
+  // 트리 순서대로 돌려준다(호스트 요소만). 위에서 아래로 읽는 사람의 순서가 곧 이 배열의 순서다.
+  const orderedRows = (): string[] =>
+    screen
+      .getAllByTestId(/^sheet-(edit|reply|quote|copy|pin)$/)
+      .map(element => String(element.props.testID));
+
+  it('내 메시지: 고치기가 답글·인용·복사·고정보다 앞, 행동 줄 맨 위다', async () => {
+    await renderRow(message());
+    longPress();
+    const order = orderedRows();
+    expect(order[0]).toBe('sheet-edit');
+    expect(order).toEqual(expect.arrayContaining(['sheet-reply', 'sheet-copy']));
+    expect(order.indexOf('sheet-edit')).toBeLessThan(order.indexOf('sheet-reply'));
+    expect(order.indexOf('sheet-edit')).toBeLessThan(order.indexOf('sheet-copy'));
+  });
+
+  it('남의 메시지: 고치기가 없고 첫 줄은 답글 달기다', async () => {
+    await renderRow(message({authorMemberId: OTHER}));
+    longPress();
+    expect(screen.queryByTestId('sheet-edit')).toBeNull();
+    expect(orderedRows()[0]).toBe('sheet-reply');
+  });
+
+  it.each([
+    ['첨부 든 글', {attachments: [PHOTO]}],
+    ['답글', {rootId: 'root-1'}],
+  ] as ReadonlyArray<[string, Partial<Message>]>)('%s도 같은 맨 위 줄이다', async (_name, over) => {
+    await renderRow(message(over));
+    longPress();
+    expect(orderedRows()[0]).toBe('sheet-edit');
+  });
+});
+
+describe('폰: 「수정됨」과 고친 시각 (#5326)', () => {
+  it('고치지 않은 글: 시트 머리에 고친 시각 줄이 없다', async () => {
+    await renderRow(message());
+    longPress();
+    expect(screen.queryByTestId('sheet-edited-at')).toBeNull();
+  });
+
+  it('고친 글: 길게 누르기 시트 머리가 고친 시각 문장을 말한다', async () => {
+    await renderRow(message({state: 'edited', editedAtMs: TODAY_0905}));
+    longPress();
+    const line = screen.getByTestId('sheet-edited-at');
+    expect(textOf(line)).toMatch(/9:05에 수정됨$/);
+    expect(textOf(line)).not.toMatch(/어제|월 /);
+  });
+
+  it('고친 시각을 모르는 줄: 시트 머리에 줄이 없고 꼬리는 낱말 하나다', async () => {
+    await renderRow(message({state: 'edited'}));
+    expect(screen.getByText('수정됨')).toBeTruthy();
+    longPress();
+    expect(screen.queryByTestId('sheet-edited-at')).toBeNull();
+  });
+
+  it('꼬리의 「수정됨」을 누르면 시각 문장으로 펼쳐지고, 다시 누르면 낱말로 접힌다', async () => {
+    await renderRow(message({state: 'edited', editedAtMs: TODAY_0905}));
+    const mark = screen.getByTestId('edited-mark');
+    expect(screen.getByText('수정됨')).toBeTruthy();
+    expect(mark.props.accessibilityState).toEqual({expanded: false});
+    fireEvent.press(mark);
+    expect(screen.getByText(/9:05에 수정됨$/)).toBeTruthy();
+    expect(screen.getByTestId('edited-mark').props.accessibilityState).toEqual({expanded: true});
+    fireEvent.press(screen.getByTestId('edited-mark'));
+    expect(screen.getByText('수정됨')).toBeTruthy();
+    expect(screen.queryByText(/9:05에 수정됨$/)).toBeNull();
+  });
+
+  it('낭독 라벨은 낱말이 아니라 시각 문장을 읽는다(행이 접근성 원소 하나다)', async () => {
+    await renderRow(message({state: 'edited', editedAtMs: TODAY_0905}));
+    const label = screen.getByTestId('message-row').props.accessibilityLabel as string;
+    expect(label).toMatch(/9:05에 수정됨/);
+  });
+
+  it.each([
+    ['오늘', TODAY_0905, /^(?!.*(어제|월 )).*9:05에 수정됨$/],
+    ['어제', YESTERDAY_0905, /^어제 .*9:05에 수정됨$/],
+    ['같은 해 다른 날', OTHER_DAY_0905, /^11월 3일 .*9:05에 수정됨$/],
+    ['다른 해', OTHER_YEAR_0905, /^2022년 12월 31일 .*9:05에 수정됨$/],
+  ] as ReadonlyArray<[string, number, RegExp]>)('%s: 시트 머리의 시각 앞 말', async (_name, editedAtMs, expected) => {
+    await renderRow(message({state: 'edited', editedAtMs}));
+    longPress();
+    expect(textOf(screen.getByTestId('sheet-edited-at'))).toMatch(expected);
+  });
+
+  it('실시간: 같은 행이 새 고친 시각으로 다시 그려지면 펼친 문장이 새 시각으로 바뀐다', async () => {
+    const rowActions = actions();
+    const view = render(rowTree(message({state: 'edited', editedAtMs: TODAY_0905}), rowActions));
+    await settle();
+    fireEvent.press(screen.getByTestId('edited-mark'));
+    expect(screen.getByText(/9:05에 수정됨$/)).toBeTruthy();
+    // 다른 사람이 한 번 더 고쳤다: `message.edited` 프레임이 `applyEditedMessage` 를 지나 행에 새 메시지 객체와 새 `editedAtMs` 를 준다.
+    view.rerender(
+      rowTree(message({state: 'edited', body: '회의 시간은 4시로 바꿨어요', editedAtMs: utc(2023, 11, 14, 11, 40)}), rowActions),
+    );
+    await settle();
+    expect(screen.getByText(/11:40에 수정됨$/)).toBeTruthy();
+    expect(screen.queryByText(/9:05에 수정됨$/)).toBeNull();
+    expect(screen.getByText('회의 시간은 4시로 바꿨어요')).toBeTruthy();
+  });
+
+  it('실시간: 처음 고쳐진 글에 표지가 새로 선다', async () => {
+    const rowActions = actions();
+    const view = render(rowTree(message(), rowActions));
+    await settle();
+    expect(screen.queryByTestId('edited-mark')).toBeNull();
+    view.rerender(rowTree(message({state: 'edited', editedAtMs: TODAY_0905}), rowActions));
+    await settle();
+    expect(screen.getByText('수정됨')).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// #5417 — 「고치기」는 행동 시트의 Modal 이 iOS 에서 다 내려간 **뒤에** 편집 시트를 세운다.
+//
+// 시트가 미끄러져 내린 뒤 부모가 행동 시트를 언마운트하는 같은 화면 갱신에서 편집 시트(다른 Modal)를 마운트하면, iOS 는 내려가는 Modal 위의 제시를 거절하고
+// 편집 시트는 영영 안 뜬다(검증 6a High, 시뮬레이터 Maestro 3/3 - `maestro/5417-edit-from-sheet-live.yaml`). Jest 의 `Modal` 은 거절하지 못하므로 이 시험은 **순서**를
+// 잰다: 슬라이드가 끝나 그릇이 Modal 만 내린 순간(= iOS 의 신호 전)에 편집 시트가 이미 마운트돼 있으면 한 화면 갱신에 두 Modal 이 겹친 것이다.
+// =============================================================================
+
+describe('「고치기」: 행동 시트의 Modal 이 iOS 에서 다 내려간 뒤에 편집 시트가 선다 (#5417)', () => {
+  it('슬라이드가 끝나 Modal 이 내려가도 신호 전에는 편집 시트가 없다 - 신호가 오면 행동 시트가 걷히고 편집 시트가 선다', async () => {
+    await renderRow(message());
+    longPress();
+    const signal = captureNativeDismiss('message-action-sheet');
+    fireEvent.press(screen.getByTestId('sheet-edit'));
+    await waitFor(() => expect(isModalDown('message-action-sheet')).toBe(true), {timeout: 8000});
+
+    // 신호 전: 내려가는 Modal 과 올라오는 Modal 이 한 화면 갱신에 겹치지 않는다(겹치면 iOS 가 편집 시트의 제시를 거절한다).
+    expect(screen.queryByTestId('message-editor', {includeHiddenElements: true})).toBeNull();
+
+    signal();
+    expect(await screen.findByTestId('editor-input')).toBeTruthy();
+    expect(isModalDown('message-action-sheet')).toBe(true);
+  }, 15000);
+});
+
+// =============================================================================
+// 6a 폰 디자인 검수 H1 — 눌러서 고친 시각을 펼치는 「수정됨」 꼬리의 잉크가 AA 였는가.
+//
+// 꼬리의 「수정됨」은 읽기만 하는 표지가 아니라 단추의 이름이자 시각 정보다. `textFaint`(3:1 힌트용)로 그려 밝음 3.24·어두움 3.89:1 이었다. 렌더된 글자의 실제 색을 읽어
+// 두 스킴에서 대화 바탕(`bg`·`surface`) 위의 대비를 숫자로 잰다.
+// =============================================================================
+
+describe('「수정됨」 꼬리는 AA 잉크로 그려진다 (6a 디자인 검수 H1)', () => {
+  it.each(['light', 'dark'] as const)('%s: 글자 색이 textMuted 이고 대화 바탕(bg·surface) 위에서 4.5:1 이상이다', async scheme => {
+    render(<FixedScheme scheme={scheme}>{rowTree(message({state: 'edited', editedAtMs: TODAY_0905}))}</FixedScheme>);
+    await settle();
+    const ink = StyleSheet.flatten(within(screen.getByTestId('edited-mark')).getByText('수정됨').props.style).color;
+    const palette = paletteFor(scheme);
+    expect(ink).toBe(palette.textMuted);
+    for (const ground of [palette.bg, palette.surface]) {
+      expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);
+    }
+    // 펼친 시각 문장도 같은 잉크다(같은 `tailMark` 상자).
+    fireEvent.press(screen.getByTestId('edited-mark'));
+    const opened = StyleSheet.flatten(within(screen.getByTestId('edited-mark')).getByText(/에 수정됨$/).props.style).color;
+    expect(opened).toBe(palette.textMuted);
   });
 });

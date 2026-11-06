@@ -144,6 +144,89 @@ it('revokes loaded and in-flight images on hide, reconnect and session disposal'
   expect(await store.image(FIXTURE_EXPRESSIONS[1], 'thumb')).toBeNull();
 });
 
+// #5330 owner 11-05 「자꾸 불러오는중이 뜨는데」 — 원인: 앱이 앞으로 돌아올 때(`focusManager`)·연결이 다시 이어질 때·변경 알림이 올 때마다 저장소가
+// 읽은 목록을 **먼저 비우고 `loading` 을 내보내서**(옛 `refresh(true)`·`changed()`) 모든 탭이 「불러오는 중이에요」로 바뀌었다.
+// 지금은 읽은 목록이 곧 캐시이고, 답이 오면 한 번에 바꿔 끼운다. 처음 읽을 때(비어 있을 때)만 `loading` 이다.
+it('keeps the list and the ready state while a full read is in flight — no loading flash when the app returns to the foreground (#5330)', async () => {
+  const {store, request, server} = setup();
+  await store.refresh(true);
+  expect(store.snapshot().items).toHaveLength(3);
+  let reply!: () => void;
+  request.mockImplementationOnce(async input => {
+    await new Promise<void>(resolve => {
+      reply = resolve;
+    });
+    return server.request(input);
+  });
+  let reading!: Promise<void>;
+  act(() => {
+    reading = store.refresh(true);
+  });
+  // 읽는 동안: 이미 읽은 목록이 그대로이고 상태는 ready 다(앞 판은 비우고 loading 이었다).
+  expect(store.snapshot().state).toBe('ready');
+  expect(store.snapshot().items).toHaveLength(3);
+  // 전체 읽기는 `since` 없이 간다 — 서버가 `reset` 목록을 준다.
+  expect(request.mock.calls[request.mock.calls.length - 1][0].path).toBe(base);
+  await act(async () => {
+    reply();
+    await reading;
+  });
+  expect(store.snapshot().state).toBe('ready');
+  expect(store.snapshot().items).toHaveLength(3);
+});
+
+it('a change notice revokes the loaded pictures at once but keeps the list on screen while the delta is read (#5330)', async () => {
+  const server = createExpressionFixtureServer();
+  let reply!: (response: ExpressionFixtureResponse) => void;
+  let held: ExpressionFixtureRequest | undefined;
+  const {store, files} = setup(async input => {
+    if (input.path.includes('since=')) {
+      held = input;
+      return new Promise(resolve => {
+        reply = resolve;
+      });
+    }
+    return server.request(input);
+  });
+  await store.refresh(true);
+  await store.image(parrot, 'thumb');
+  act(() => store.changed());
+  expect(files.remove).toHaveBeenCalledTimes(1); // 그림 파일은 그 자리에서 걷혔다(계약은 그대로)
+  expect(store.snapshot().state).toBe('ready'); // 이름 목록은 그대로다
+  expect(store.snapshot().items).toHaveLength(3);
+  await act(async () => {
+    reply(server.request(held!));
+  });
+  await waitFor(() => expect(store.snapshot().state).toBe('ready'));
+  expect(store.snapshot().items).toHaveLength(3);
+});
+
+it('a routine full read of an unchanged list keeps every loaded picture; a read whose list drops an item revokes them (#5330)', async () => {
+  const {store, files, request, server} = setup();
+  await store.refresh(true);
+  const uri = await store.image(parrot, 'thumb');
+  const revision = store.snapshot().revision;
+  const imageGets = () =>
+    request.mock.calls.filter(([input]) => input.path.includes('/image?'))
+      .length;
+  for (let round = 0; round < 3; round += 1) await store.refresh(true);
+  expect(store.snapshot().revision).toBe(revision); // 그림의 판(epoch)이 그대로다
+  expect(await store.image(parrot, 'thumb')).toBe(uri); // 같은 파일 — 다시 내려받지 않는다
+  expect(imageGets()).toBe(1);
+  expect(files.write).toHaveBeenCalledTimes(1);
+  expect(files.remove).not.toHaveBeenCalled();
+  // 서버가 한 등록을 숨긴 뒤의 전체 읽기: 그림이 걷히고 목록에서 빠진다.
+  server.request({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  await store.refresh(true);
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().revision).toBeGreaterThan(revision);
+  expect(files.remove).toHaveBeenCalledTimes(1);
+});
+
 it('fails closed for malformed/foreign snapshots, errors, and offline, then recovers from the fixture', async () => {
   const {store, request, server} = setup();
   request.mockResolvedValueOnce({
@@ -191,7 +274,7 @@ it('records only confirmed receipts once and scopes persisted usage to the membe
   other.dispose();
 });
 
-it('searches Korean initials and presents emoji/sticker/GIF as views over the same items using static thumbnails', async () => {
+it('searches Korean initials and presents the all/GIF filters over the same items using static thumbnails', async () => {
   const {store, request} = setup();
   await store.refresh(true);
   const onSelect = jest.fn();
@@ -201,9 +284,12 @@ it('searches Korean initials and presents emoji/sticker/GIF as views over the sa
   );
   await screen.findByTestId('expression-pick-party_parrot');
   expect(screen.queryByTestId('expression-pick-ki_jeol')).toBeNull();
-  fireEvent.press(screen.getByLabelText('스티커'));
+  // 「이모티콘」 하나로 모은 거르기 줄(owner 11-05): 앞 판의 「스티커」(거르지 않는 칸)는 「이모티콘」(전체)과 같아서 합쳤고 「우리 팀 GIF」는 「GIF」다.
+  expect(screen.queryByLabelText('스티커')).toBeNull();
+  expect(screen.queryByLabelText('이모지')).toBeNull();
+  expect(screen.queryByLabelText('우리 팀 GIF')).toBeNull();
+  fireEvent.press(screen.getByLabelText('GIF'));
   expect(screen.getByText('파티 앵무새')).toBeTruthy();
-  fireEvent.press(screen.getByLabelText('우리 팀 GIF'));
   expect(screen.getByTestId('expression-pick-party_parrot')).toBeTruthy();
   await waitFor(() =>
     expect(
@@ -216,7 +302,13 @@ it('searches Korean initials and presents emoji/sticker/GIF as views over the sa
       .every(([input]) => input.path.includes('size=thumb')),
   ).toBe(true);
   fireEvent.press(screen.getByTestId('expression-pick-party_parrot'));
-  await waitFor(() => expect(onSelect).toHaveBeenCalledWith(':party_parrot:'));
+  // 넘기는 것: 정본 본문 토큰과, 그 순간 서버가 확인한 등록(시트가 고른 뒤의 동작을 등록으로 가른다).
+  await waitFor(() =>
+    expect(onSelect).toHaveBeenCalledWith(
+      ':party_parrot:',
+      expect.objectContaining({id: parrot.id, name: 'party_parrot'}),
+    ),
+  );
   ui.unmount();
 });
 
@@ -263,7 +355,9 @@ it('confirms an active preview once with only the canonical body token', async (
   fireEvent.press(screen.getByTestId('expression-pick-party_parrot'));
   fireEvent.press(screen.getByTestId('expression-confirm-send'));
   await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-  expect(send).toHaveBeenCalledWith(':party_parrot:');
+  // 본문은 정본 토큰 하나뿐이고(꾸밈 없음), 둘째로 확인된 등록이 따라간다.
+  expect(send.mock.calls[0][0]).toBe(':party_parrot:');
+  expect(send.mock.calls[0][1]).toMatchObject({id: parrot.id, name: 'party_parrot'});
 });
 
 it('uses large/medium/inline sizes, keeps large sends outside bubbles and returns to strings after hide', async () => {

@@ -248,7 +248,7 @@ describe("InboxDetail", () => {
   });
 
   // #5294(화면 검수 5a M1): 받은함의 승인 줄도 입력창·승인 카드와 같은 원인 문장이라 어절에서 꺾는다(「연/결되면」으로 끊기지 않는다). 꺾이는
-  // 자리는 폭에 달려 jsdom 이 못 재므로 클래스로 지키고, 엔진이 계산한 `word-break` 는 capture-4888·5239 가 입력창·승인 카드에서 잰다.
+  // 자리는 폭에 달려 jsdom 이 못 재므로 클래스로 지키고, 엔진이 계산한 `word-break` 는 capture-5324·5239 가 입력창·승인 카드에서 잰다.
   it("처리할 일 + 오프라인이면 승인 줄이 어절에서 꺾인다(break-keep)", async () => {
     const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true);
     const note = h.querySelector('[data-testid="inbox-approval-offline"]');
@@ -289,8 +289,8 @@ describe("InboxDetail", () => {
   // #5242: 옛 「대화를 불러오지 못했어요.」 배너는 원인 상자다. 이유가 원인을 따르고 다시 시도가 맥락을 다시 읽는다.
   it("맥락을 못 불러오면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 다시 읽는다", async () => {
     const cases: [Error, string, string][] = [
-      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요."],
     ];
     for (const [error, cause, reason] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);

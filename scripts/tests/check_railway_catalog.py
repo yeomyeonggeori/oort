@@ -113,6 +113,33 @@ HERMES_DATA = "/opt/data"
 HERMES_GUARD_DIR = HERMES_DATA + "/plugins/oort-image-guard"  # #4820 review: the oort image_generate guard plugin
 HERMES_KEYS = {"public", "image", "startCommand", "port", "privateHostname", "volume", "variables"}
 HERMES_PY = "/opt/hermes/.venv/bin/python"
+# #5348: Railway refuses a variable value over RAILWAY_VARIABLE_MAX characters (measured on the team project, 2026-11-05).
+# A file too long for one variable arrives in parts of HERMES_PART_CHARS characters (`fold -w 32000`, README) and the start
+# command joins them before the checksum. (variable, repo file, how many variables the start command joins)
+RAILWAY_VARIABLE_MAX = 32768
+HERMES_PART_CHARS = 32000
+HERMES_B64_FILES = (
+    ("HERMES_CONFIG_B64", "config.yaml", 1),
+    ("HERMES_LOCKGATE_B64", "lockgate.py", 5),
+    ("HERMES_IMAGE_GUARD_B64", "plugins/oort-image-guard/__init__.py", 1),
+    ("HERMES_IMAGE_GUARD_MANIFEST_B64", "plugins/oort-image-guard/plugin.yaml", 1),
+    ("HERMES_LOGIN_RELAY_B64", "login_relay.py", 3),
+    ("HERMES_LOGIN_PROBE_B64", "mcp_login_probe.py", 1),
+)
+
+
+def hermes_part_names(name: str) -> list[str]:
+    parts = next(count for var, _, count in HERMES_B64_FILES if var == name)
+    return [name] + ["%s_%d" % (name, n) for n in range(2, parts + 1)]
+
+
+def hermes_b64_names() -> list[str]:
+    return [part for name, _, _ in HERMES_B64_FILES for part in hermes_part_names(name)]
+
+
+def hermes_printf_words(name: str) -> list[str]:
+    """`printf %s` of the first part (required) and the later ones (unset when the file needs fewer)."""
+    return ["printf", "%s", "$" + name] + ["${%s:-}" % part for part in hermes_part_names(name)[1:]]
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
 SHARED_RE = re.compile(r"^shared\.([A-Za-z_][A-Za-z0-9_]*)$")
 PLACEHOLDER_PREFIXES = ("<sealed:", "<operator:")
@@ -236,7 +263,7 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
     # compose mounts config.yaml and lockgate.py read-only; Railway has no bind mount, so
     # both arrive as base64 variables the start command decodes.
-    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
+    "hermes": ([("docker-compose.rust.yml", "hermes")], set(hermes_b64_names())),
     "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
     # compose mounts infra/centrifugo.json; these four env literals replace it.
     "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
@@ -317,13 +344,45 @@ def hermes_config_shas(repo_root: Path, errors: list[str]) -> list[str]:
     return list(shas.values())
 
 
+def hermes_extra_model_errors(repo_root: Path) -> list[str]:
+    """#5323 (ADR-0203 증보 2026-11-05, N4/N5): the model ids the renderer accepts BEYOND the pinned image's static list are a table of the ADR as
+    well, one row per (provider, id), and the vendor page the code line names is in the row. An id or a row on one side only is the drift the rule
+    forbids (the table is read from `### N5.` to the next heading). It lives here, and not in a unit test of infra/hermes, because the in-image
+    proof runs those tests with only that folder mounted: the ADR is outside it."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location("catalog_check_extra_models", repo_root / "infra" / "hermes" / "render_model_config.py")
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        extras = {(provider, model): source for provider, models in renderer.EXTRA_MODELS.items() for model, source in models.items()}
+        text = (repo_root / "docs" / "adr" / "0203-cohosted-agent-detection.md").read_text(encoding="utf-8")
+        start = text.index("### N5. ")
+        section = text[start:text.index("\n### ", start + 1)]
+    except Exception as exc:  # no table to compare is no comparison
+        return ["ADR-0203 N5 table or infra/hermes/render_model_config.py EXTRA_MODELS cannot be read: %s" % exc.__class__.__name__]
+    rows = re.findall(r"(?m)^\|[^|\n]*\|\s*`([^`\n]+)`\s*\|\s*`([^`\n]+)`\s*\|([^\n]*)\|\s*$", section)
+    errors = []
+    if len(rows) != len(extras) or {(provider, model) for provider, model, _ in rows} != set(extras):
+        errors.append(
+            "ADR-0203 N5 table and infra/hermes/render_model_config.py EXTRA_MODELS are not the same set of (provider, id) pairs: "
+            "one row per id, in both places (rows %s, code %s)" % (sorted((p, m) for p, m, _ in rows), sorted(extras))
+        )
+    for provider, model, line in rows:
+        source = extras.get((provider, model))
+        pages = re.findall(r"[a-z0-9.-]+\.[a-z]{2,}/[^\s)]+", source or "")
+        if source is not None and (not pages or not all(page in line for page in pages)):
+            errors.append("ADR-0203 N5 row of %s %s does not name the vendor page of its EXTRA_MODELS line (%s)" % (provider, model, ", ".join(pages) or "none"))
+    return errors
+
+
 def hermes_canonical(
     config_shas: list[str], gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
 
-    #4935: the config is pinned to a LIST of sha256 values, not one: the default config and the connector-mode config of each model
-    fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
+    #4935, #5323: the config is pinned to a LIST of sha256 values, not one: the default config, the default config with the team model
+    fragment and the connector-mode config of each model fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
     decoded file's hash is exactly one of them (whole-line, fixed-string match), and `|| { echo ... >&2; exit 78; }` says why it stopped.
 
     The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
@@ -348,7 +407,7 @@ def hermes_canonical(
         (";", ["mkdir", "-p", HERMES_GUARD_DIR]),
         (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
         ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
-        (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
+        (";", hermes_printf_words("HERMES_LOCKGATE_B64")),
         ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
         (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_B64"]),
         ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/__init__.py"]),
@@ -369,7 +428,7 @@ def hermes_canonical(
         (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
         (";", ["[", "-z", "${HERMES_LOGIN_RELAY_KEY:-}", "]"]),
         ("||", ["{", ":", "${HERMES_LOGIN_RELAY_B64:?}", "${HERMES_LOGIN_PROBE_B64:?}"]),
-        (";", ["printf", "%s", "$HERMES_LOGIN_RELAY_B64"]),
+        (";", hermes_printf_words("HERMES_LOGIN_RELAY_B64")),
         ("|", ["base64", "-d", ">", "/tmp/login_relay.py"]),
         (";", ["printf", "%s", "$HERMES_LOGIN_PROBE_B64"]),
         ("|", ["base64", "-d", ">", "/tmp/mcp_login_probe.py"]),
@@ -378,7 +437,7 @@ def hermes_canonical(
         (";", ["echo", "%s  %s" % (probe_sha, "/tmp/mcp_login_probe.py")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["OORT_LOGIN_RELAY_PROBE=/tmp/mcp_login_probe.py", HERMES_PY, "-B", "/tmp/login_relay.py", "launch", "&", "}"]),
-        (";", ["unset", "HERMES_LOGIN_RELAY_KEY", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"]),
+        (";", ["unset", "HERMES_LOGIN_RELAY_KEY", *hermes_part_names("HERMES_LOGIN_RELAY_B64"), "HERMES_LOGIN_PROBE_B64"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
                "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
     ]
@@ -779,12 +838,13 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
     config_shas = hermes_config_shas(repo_root, errors)
+    errors.extend(hermes_extra_model_errors(repo_root))
     if len(shas) == 5 and config_shas:
         diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(config_shas, *shas))
         if diff:
             errors.append(
                 "hermes start command is not the canonical command list (gate-first, fail-closed, config pinned to the sha256 LIST of "
-                "`render_model_config.py --catalog` (the default config and a connector-mode config for each model fragment), gate and "
+                "`render_model_config.py --catalog` (the default config, the default config with the team model fragment and a connector-mode config for each model fragment), gate and "
                 "the two image-guard plugin files pinned to the sha256 of lockgate.py and plugins/oort-image-guard/*, the plugin "
                 "installed before the gate; the login relay block only with a key, its two files pinned the same way, key variables "
                 "unset before exec): %s" % diff
@@ -810,10 +870,23 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
             "hermes HERMES_LOGIN_RELAY_KEY %r must be %s (its own shared secret, not the chat key)"
             % (variables.get("HERMES_LOGIN_RELAY_KEY"), HERMES_RELAY_SHARED_KEY)
         )
-    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64",
-                 "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
+    for name in hermes_b64_names():
         if not str(variables.get(name, "")).startswith("<operator:"):
             errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
+    if HERMES_PART_CHARS > RAILWAY_VARIABLE_MAX:
+        errors.append("HERMES_PART_CHARS %d is over the Railway limit %d" % (HERMES_PART_CHARS, RAILWAY_VARIABLE_MAX))
+    for name, rel, _ in HERMES_B64_FILES:
+        try:
+            chars = 4 * ((len((repo_root / "infra" / "hermes" / rel).read_bytes()) + 2) // 3)
+        except OSError:
+            continue  # named above: the sha256 pass already reported the unreadable file
+        declared = sum(1 for part in hermes_part_names(name) if part in variables)
+        if chars > declared * HERMES_PART_CHARS:
+            errors.append(
+                "hermes %s does not fit: infra/hermes/%s is %d base64 characters and the catalog has %d variable(s) of %d (Railway refuses "
+                "a value over %d): add a part to HERMES_B64_FILES, the start command, the catalog and the README table"
+                % (name, rel, chars, declared, HERMES_PART_CHARS, RAILWAY_VARIABLE_MAX)
+            )
     if hermes.get("healthcheckPath") is not None:
         errors.append("hermes healthcheckPath is runtime-unverified on Railway; leave it unset")
     base = "http://%s:%d/v1" % (hermes.get("privateHostname"), HERMES_PORT)
@@ -1366,6 +1439,28 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + "0" * 64 + " -e ", kind
         )
+    elif kind in ("hermes-config-hash-pre55", "hermes-config-hash-old-team-default"):  # #5323: the list is not the one the catalog rebuilds
+        import importlib.util
+
+        hermes_dir = Path(__file__).resolve().parents[2] / "infra" / "hermes"
+        spec = importlib.util.spec_from_file_location("catalog_mutation_renderer", hermes_dir / "render_model_config.py")
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        base = renderer.read_text(str(hermes_dir / "config.yaml"))
+        current = renderer.sha256_of(renderer.repo_catalog(str(hermes_dir))["default/codex-oauth.fallback-claude-oauth"])
+        if kind == "hermes-config-hash-pre55":
+            # the team default with the id Hermes' static list ends at (claude-sonnet-5) in place of 5.5: a list nobody refreshed
+            stale = renderer.sha256_of(renderer.render(base, "codex-oauth", "claude-oauth", fallback_model="claude-sonnet-5"))
+            if stale == current:
+                raise SystemExit("mutation %s: the pre-5.5 config is the current one" % kind)
+            services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], current, stale, kind)
+        else:
+            # the Claude-primary / Codex-fallback line the first revision of #5323 accepted (owner 2026-11-05 16:01 turned it round): kept beside the
+            # new one, which the one-line default-mode rule forbids
+            previous = renderer.sha256_of(renderer.render(base, "claude-oauth", "codex-oauth"))
+            if previous == current:
+                raise SystemExit("mutation %s: the previous team default is the current one" % kind)
+            services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + previous + " -e ", kind)
     elif kind == "hermes-config-substring":  # #4935: whole-line match weakened to a substring match
         services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qF -e ", kind)
     elif kind == "hermes-config-check-dropped":  # #4935: the config is not checked at all
@@ -1468,8 +1563,19 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["startCommand"] = command.replace(stale.group(1), "0" * 64, 1)
     elif kind == "hermes-relay-key-not-unset":  # the gateway would inherit the relay key
         services["hermes"]["startCommand"] = replace_once(
-            services["hermes"]["startCommand"], "unset HERMES_LOGIN_RELAY_KEY HERMES_LOGIN_RELAY_B64 HERMES_LOGIN_PROBE_B64; ", "", kind
+            services["hermes"]["startCommand"], "unset HERMES_LOGIN_RELAY_KEY HERMES_LOGIN_RELAY_B64 HERMES_LOGIN_RELAY_B64_2 HERMES_LOGIN_RELAY_B64_3 HERMES_LOGIN_PROBE_B64; ", "", kind
         )
+    elif kind == "hermes-relay-part-not-unset":  # the gateway would inherit one part of the relay source
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "HERMES_LOGIN_RELAY_B64_3 HERMES_LOGIN_PROBE_B64; ", "HERMES_LOGIN_PROBE_B64; ", kind
+        )
+    elif kind == "hermes-gate-part-not-joined":  # the file is cut short; the checksum would stop every start
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], ' "${HERMES_LOCKGATE_B64_4:-}"', "", kind
+        )
+    elif kind == "hermes-gate-parts-too-few":  # #5348: fewer variables than the file needs at the Railway limit
+        for name in ("HERMES_LOCKGATE_B64_3", "HERMES_LOCKGATE_B64_4", "HERMES_LOCKGATE_B64_5"):
+            del services["hermes"]["variables"][name]
     elif kind == "hermes-relay-unconditional":  # the sidecar would start without a key
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"], '[ -z "${HERMES_LOGIN_RELAY_KEY:-}" ] || { ', "{ ", kind
@@ -1584,10 +1690,15 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-public-string", "hermes public must be exactly false"),
     ("hermes-extra-key", "hermes has keys the catalog does not review"),
     ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-relay-part-not-unset", "hermes start command is not the canonical command list"),
+    ("hermes-gate-part-not-joined", "hermes start command is not the canonical command list"),
+    ("hermes-gate-parts-too-few", "hermes HERMES_LOCKGATE_B64 does not fit"),
     ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
     ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-dropped", "hermes start command is not the canonical command list"),
     ("hermes-config-hash-foreign", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-pre55", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-old-team-default", "hermes start command is not the canonical command list"),
     ("hermes-config-substring", "hermes start command is not the canonical command list"),
     ("hermes-config-check-dropped", "hermes start command is not the canonical command list"),
     ("hermes-no-guard-install", "hermes start command is not the canonical command list"),
