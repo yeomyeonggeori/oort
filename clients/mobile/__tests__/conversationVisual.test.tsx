@@ -1282,7 +1282,8 @@ describe('ADR-0155 — 멈춘 답은 꼬리 한 낱말로 말한다', () => {
         .style,
     );
     expect(mark.color).toBe(edited.color);
-    expect(mark.color).toBe(color.textFaint);
+    // 꼬리 표지의 잉크는 `textMuted`(AA 4.5:1)다 - 「수정됨」이 눌러서 고친 시각을 펼치는 단추가 되며 `textFaint` 로는 모자랐다(6a 디자인 검수 H1, #5417).
+    expect(mark.color).toBe(color.textMuted);
     expect(mark.color).not.toBe(color.accent);
     expect(mark.color).not.toBe(color.danger);
   });

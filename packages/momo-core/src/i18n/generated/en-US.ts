@@ -3557,7 +3557,7 @@ export const catalog: MessageCatalog = {
   "mobile.convSearch.recentRowIn": [
     {
       "type": 0,
-      "value": "Search again: "
+      "value": "Search this conversation again: "
     },
     {
       "type": 1,
@@ -3565,11 +3565,15 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " · "
+      "value": " (found earlier in "
     },
     {
       "type": 1,
       "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "mobile.convSearch.recentTitle": [

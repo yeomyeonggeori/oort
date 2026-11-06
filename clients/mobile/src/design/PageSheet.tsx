@@ -13,6 +13,7 @@ import {
   Keyboard,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   useWindowDimensions,
@@ -93,6 +94,15 @@ import {ds2Radius, SHEET, type Palette} from './tokens';
 // `usePageSheetAction()` 으로 「미끄러져 내린 뒤 `onClose`, 이어서 행동」을 한 번 부른다 — 부모가 행동
 // 안에서 곧바로 언마운트해 시트가 스냅으로 사라지는 것을 막는다.
 //
+// ## 다른 시트·시스템 화면을 띄우는 행동은 시트가 **다 내려간 뒤에** (#5417)
+//
+// 슬라이드가 끝난 뒤 `onClose` 와 행동을 한 틱에 부르면, 부모가 이 시트를 언마운트하는 같은 화면 갱신에서 **다른 Modal 을 마운트**할 수 있다(「고치기」 -> 편집
+// 시트). 내려가는 Modal 과 올라오는 Modal 이 겹치면 iOS 는 뒤의 제시를 거절하고 RN 은 이미 떴다고 믿는다 - 편집 시트가 영영 안 뜬다(검증 6a High). 시간을
+// 늦추는 것(700ms)은 어림이라 기기·부하에 따라 다시 깨진다. 그래서 행동이 다른 Modal·시스템 화면을 띄운다면 `usePageSheetHandoff()` 로 보낸다: 슬라이드가
+// 끝나면 **이 Modal 만 먼저 내리고**(`visible=false`, 자식은 그대로 마운트) iOS 가 「다 내렸다」고 알릴 때(`Modal` 의 `onDismiss`) 비로소 `onClose` -> 행동을 부른다.
+// 언마운트로 내린 Modal 은 신호를 못 보낸다(Fabric 은 사라진 뷰의 이벤트를 버린다) - 그래서 부모의 언마운트가 아니라 **이 그릇이 쥐고** 있다가 내린다.
+// iOS 가 끝내 알리지 않을 때를 위한 안전망 시계가 하나 있다(`HANDOFF_WATCHDOG_MS`) - 정상 경로는 신호이고, 이 시계는 재지 않는다.
+//
 // ## 끌기 (#4612) — 판정은 `sheetModel.ts`, 여기는 배선
 //
 // 끌기 응답자는 둘이다. 같은 `travel`·같은 닫는 길을 쓰고 **가져가는 조건만** 다르다.
@@ -136,6 +146,13 @@ export {SHEET_TOP};
 export const SHEET_RADIUS = ds2Radius.sheet;
 /** 시안 `.a-grab` 38×5. */
 const GRAB = {width: 38, height: 5} as const;
+/**
+ * 「다 내린 뒤에 연다」(`usePageSheetHandoff`, #5417)의 안전망. iOS 가 Modal 을 내렸다는 신호(`onDismiss`)를 끝내 안 보낼 때만 닿는다 - 신호는 보통
+ * 한두 프레임 안에 온다. 이 시간이 지나면 행동을 부른다: 늦게라도 열리는 편이 영영 안 열리는 것보다 낫다.
+ */
+export const HANDOFF_WATCHDOG_MS = 2000;
+/** `Modal` 의 `onDismiss`(iOS 가 Modal 을 다 내렸다는 신호)는 iOS 만 부른다. */
+const HAS_DISMISS_SIGNAL = Platform.select({ios: true, default: false});
 
 type DragHandlers = PanResponderInstance['panHandlers'];
 
@@ -145,6 +162,8 @@ interface SheetControl {
   close: () => void;
   /** 미끄러져 내린 뒤 `onClose` 를 부르고, 이어서 `action` 을 **한 번** 부른다. 묻지 않는다. */
   closeThen: (action: () => void) => void;
+  /** `closeThen` 과 같되 **iOS 가 Modal 을 다 내렸다고 알린 뒤에** 부른다(#5417) - 행동이 다른 Modal·시스템 화면을 띄울 때. */
+  handoff: (action: () => void) => void;
   /** 소프트 키보드가 가린 높이(내려가 있으면 0). */
   keyboardHeight: number;
   /** 머리 끌기 핸들러. 머리의 뿌리 `View` 에 펼친다(`SheetHeader`). */
@@ -348,6 +367,18 @@ export function usePageSheetAction(): (action: () => void) => void {
   return useContext(SheetControlContext)?.closeThen ?? runNow;
 }
 
+/**
+ * 시트 안의 **다른 시트·시스템 화면을 띄우는 행동**이 부를 것(#5417): 시트를 미끄러뜨려 내리고, iOS 가 이 Modal 을 **완전히 내렸다고 알린 뒤에**
+ * `onClose`, 이어서 행동을 한 번 부른다. `usePageSheetAction` 과 같은 계약(`onClose` 먼저, 행동 나중, 닫는 중이면 아무것도 안 함, 시트 밖이면 바로 부름,
+ * 동작 줄이기여도 신호를 기다린다)이고 **기다리는 것 하나**만 다르다.
+ *
+ * 쓰는 때: 행동이 곧바로 다른 `Modal`(편집 시트)이나 시스템 화면(공유·picker)을 띄운다. `usePageSheetAction` 으로 보내면 내려가는 Modal 과 올라오는 Modal 이 한
+ * 화면 갱신에 겹쳐 iOS 가 뒤의 제시를 거절한다. 그 밖의 행동(입력칸 열기·화면 이동·복사)은 `usePageSheetAction` 이면 된다 - 이쪽은 한 신호만큼 늦다.
+ */
+export function usePageSheetHandoff(): (action: () => void) => void {
+  return useContext(SheetControlContext)?.handoff ?? runNow;
+}
+
 /** 키보드가 가린 높이. 시트 몸(`SheetScroll`)이 홈 인디케이터 여백을 걷을지 정한다. 시트 밖에서는 0. */
 export function usePageSheetKeyboard(): number {
   return useContext(SheetControlContext)?.keyboardHeight ?? 0;
@@ -419,18 +450,56 @@ export function PageSheet({
    */
   keepOnEntry?: boolean;
 }): React.JSX.Element {
+  // 다른 Modal·시스템 화면을 띄우는 행동(`usePageSheetHandoff`, #5417)은 이 Modal 이 iOS 에서 **다 내려간 뒤에** 불려야 한다. 신호(`onDismiss`)는 Modal 이 **마운트된 채**
+  // `visible=false` 가 될 때만 온다(부모가 언마운트하면 Fabric 이 사라진 뷰의 이벤트를 버린다) - 그래서 슬라이드가 끝나면 이 그릇이 먼저 Modal 만 내리고(`shown`),
+  // 신호가 오면 그때 `onClose` -> 행동을 부른다. 기다리는 뒷일(`handoff`)은 한 번만 불린다: 신호·안전망 시계·언마운트 중 먼저 오는 쪽이 부르고 나머지는 빈손이다.
+  const [shown, setShown] = useState(true);
+  const handoff = useRef<(() => void) | null>(null);
+  // 뒷일이 한 번이라도 시작됐는가. 안전망 시계가 먼저 부른 뒤에 늦게 온 신호가 `onClose` 를 또 부르지 않게 한다.
+  const handedOff = useRef(false);
+  const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finishHandoff = useCallback(() => {
+    if (watchdog.current !== null) {
+      clearTimeout(watchdog.current);
+      watchdog.current = null;
+    }
+    const run = handoff.current;
+    handoff.current = null;
+    run?.();
+  }, []);
+  const beginHandoff = useCallback(
+    (run: () => void) => {
+      handoff.current = run;
+      handedOff.current = true;
+      // 신호가 없는 플랫폼은 기다릴 것이 없다. 그 밖에는 신호가 먼저이고 이 시계는 안전망이다.
+      if (!HAS_DISMISS_SIGNAL) {
+        finishHandoff();
+        return;
+      }
+      watchdog.current = setTimeout(finishHandoff, HANDOFF_WATCHDOG_MS);
+      setShown(false);
+    },
+    [finishHandoff],
+  );
+  // 기다리는 도중 부모가 시트를 걷으면(행이 사라짐·로그아웃) 신호는 오지 않는다. 뒷일은 그 언마운트에서 한 번 부른다(`usePageSheetAction` 의 「불리지 않음은 없다」와 같다).
+  useEffect(() => finishHandoff, [finishHandoff]);
+
   return (
     <Modal
-      visible
+      visible={shown}
       transparent
       animationType="none"
       statusBarTranslucent
       onRequestClose={onNavigateBack ?? onClose}
-      onDismiss={onClose}
+      onDismiss={() => {
+        if (handoff.current !== null) finishHandoff();
+        else if (!handedOff.current) onClose();
+      }}
       testID={testID}>
       <SafeAreaProvider>
         <SheetFrame
           onClose={onClose}
+          onHandoff={beginHandoff}
           onNavigateBack={onNavigateBack}
           accessibilityLabel={accessibilityLabel}
           height={height}
@@ -454,6 +523,7 @@ const MAX_SAMPLES = 24;
 
 function SheetFrame({
   onClose,
+  onHandoff,
   onNavigateBack,
   accessibilityLabel,
   height: sheetHeight,
@@ -465,6 +535,8 @@ function SheetFrame({
   children,
 }: {
   onClose: () => void;
+  /** 슬라이드가 끝났을 때 `run`(= `onClose` -> 행동)을 **Modal 이 다 내려간 뒤로** 미룬다(`usePageSheetHandoff`). */
+  onHandoff: (run: () => void) => void;
   onNavigateBack?: () => void;
   accessibilityLabel: string;
   height: SheetHeight;
@@ -494,6 +566,8 @@ function SheetFrame({
   // 같은 이유로 `dirty`·묻기·시트 높이·스크롤 오프셋도 ref/Map 으로 읽는다 — 응답자의 의존성에 넣지 않는다.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onHandoffRef = useRef(onHandoff);
+  onHandoffRef.current = onHandoff;
   const backRef = useRef(onNavigateBack);
   backRef.current = onNavigateBack;
   const keyboardRef = useRef(keyboardHeight);
@@ -554,16 +628,21 @@ function SheetFrame({
   // 속도가 손가락의 속도인 `FLING_OUT`. 정지에서 출발하는 기본 곡선(`inOut`)은 튕긴 손가락의 속도를 잇지 못하고 멈칫하고,
   // 강한 ease-out(`EASE_OUT`)은 손가락보다 4 배 빠르게 튀어 나간다. 없으면(X·스크림·행동 누름) 기본 길이·기본 곡선이다.
   const slideOut = useCallback(
-    (after?: () => void, release?: {offset: number; velocity: number}) => {
+    (after?: () => void, release?: {offset: number; velocity: number}, afterDismissed = false) => {
       if (closing.current) return;
       closing.current = true;
       // 시트 안의 입력이 부른 키보드는 시트와 같이 내려간다. 안 그러면 시트가 다 나간 뒤에야(언마운트 때)
       // 키보드가 혼자 내려간다.
       if (keyboardRef.current > 0 && !keyboardWasUp.current) Keyboard.dismiss();
       const finish = () => {
-        // `onClose` 가 먼저다: 행동이 시트를 다시 열 수 있고, 그 말이 마지막이어야 한다.
-        onCloseRef.current();
-        after?.();
+        const run = () => {
+          // `onClose` 가 먼저다: 행동이 시트를 다시 열 수 있고, 그 말이 마지막이어야 한다.
+          onCloseRef.current();
+          after?.();
+        };
+        // 다른 Modal·시스템 화면을 띄우는 행동은 이 Modal 이 iOS 에서 다 내려간 뒤에 부른다(#5417). 나머지는 곧바로.
+        if (afterDismissed) onHandoffRef.current(run);
+        else run();
       };
       if (reduceMotion.current) {
         finish();
@@ -598,6 +677,10 @@ function SheetFrame({
   }, [askDiscard, slideOut]);
   const closeThen = useCallback(
     (action: () => void) => slideOut(action),
+    [slideOut],
+  );
+  const handoff = useCallback(
+    (action: () => void) => slideOut(action, undefined, true),
     [slideOut],
   );
   // 알림이 새 입구로 들어왔다(#4667) — 사람이 부른 닫기가 아니다. `close()` 가 아니라 `slideOut()` 이 곧바로 닫는다:
@@ -771,8 +854,8 @@ function SheetFrame({
   const bodyPan = useMemo(() => makePan('body'), [makePan]);
 
   const control = useMemo<SheetControl>(
-    () => ({close, closeThen, keyboardHeight: lifted, dragHandlers: headerPan.panHandlers, isGone}),
-    [close, closeThen, lifted, headerPan, isGone],
+    () => ({close, closeThen, handoff, keyboardHeight: lifted, dragHandlers: headerPan.panHandlers, isGone}),
+    [close, closeThen, handoff, lifted, headerPan, isGone],
   );
   const scrollPort = useMemo<SheetScrollPort>(() => ({scrolls, overflows, frozen}), [scrolls, overflows, frozen]);
 

@@ -61,7 +61,10 @@ export interface ConversationSearch {
   retry: () => void;
   /** 최근 검색 — 홈 검색과 **한 목록**이다(맨 앞이 가장 최근). 범위가 있는 줄(`channelId`)은 그 대화 안에서 찾은 말이다. */
   recent: readonly RecentSearch[];
-  /** 고른 줄의 말로 바로 찾는다(이 대화 안에서 — 줄의 범위가 다른 대화여도 말만 가져온다). */
+  /**
+   * 고른 줄의 말로 바로 찾는다(이 대화 안에서 — 줄의 범위가 다른 대화여도 말만 가져온다). 이 면의 검색 배선은 `channelId` 에 묶여 있어 저장된 범위를 따라갈 수 없다: 다른 대화 칩이 붙은 줄이 그
+   * 사실을 말하는 것은 카드의 몫이다(낭독 이름 `mobile.convSearch.recentRowIn`, #5418).
+   */
   pickRecent: (saved: RecentSearch) => void;
   /** 「모두 지우기」 — 한 목록이라 홈 검색의 최근 검색도 함께 비워진다. */
   clearRecent: () => void;

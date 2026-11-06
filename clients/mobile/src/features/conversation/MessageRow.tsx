@@ -3792,6 +3792,8 @@ function MessageRowInner({
               : undefined
           }
           onEdit={() => {
+            // 이 행동은 행동 시트의 Modal 이 iOS 에서 **다 내려간 뒤에** 불린다(`MessageActionSheet` 의 `usePageSheetHandoff`, #5417). 그래서 같은 화면 갱신에서
+            // 편집 시트(다른 Modal)를 세워도 겹치지 않는다. 시간을 늦춰 여는 길(`setTimeout`)로 되돌리지 말 것 - 기기·부하에 따라 다시 깨진다.
             setSheetOpen(false);
             setEditError(null);
             setEditing(true);
@@ -4701,9 +4703,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
   // 사람은 둘이 다른 것을 뜻한다고 읽는다.
   tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-  // 꼬리 한 줄에 앉는 **읽기만 하는 표지**들 — 「수정됨」과 「고정됨」.
-  // 둘은 같은 격이므로 같은 상자를 쓴다: 흐린 meta 글자, 강조 없음.
-  tailMark: {fontSize: font.meta, color: color.textFaint},
+  // 꼬리 한 줄에 앉는 **표지**들 — 「수정됨」과 「고정됨」(과 중단 표지).
+  // 같은 격이므로 같은 상자를 쓴다: meta 글자, 강조 없음. 잉크는 `textMuted`(AA 4.5:1)다 - 「수정됨」은 눌러서 고친 시각 문장으로 펼치는 단추의 이름이자
+  // 시각 정보라 `textFaint`(3:1, 읽기만 하는 힌트의 잉크)로는 모자랐다(6a 디자인 검수 H1: 밝음 3.24·어두움 3.89:1). 웹 꼬리는 `text-meta text-ink-muted`.
+  tailMark: {fontSize: font.meta, color: color.textMuted},
   tailRow: {
     flexDirection: 'row',
     alignItems: 'center',
