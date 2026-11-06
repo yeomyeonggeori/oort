@@ -101,7 +101,7 @@ export function ExpressionPlanCard({ card, plan }: { card: AgentApprovalCard; pl
   const keptReferences = usable ? usable.references.filter((reference) => !edit.removedReferences.includes(reference.attachmentId)) : [];
 
   return <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-plan" data-open={String(open)}>
-    <p className="text-body font-semibold">{title}</p>
+    <p className="break-words text-body font-semibold">{title}</p>
     {open && usable === null && <>
       <p role="alert" className="text-body" data-testid="expression-plan-unreadable">{formatMessage("expressions.set.unreadable")}</p>
       <div className="flex justify-end">
@@ -117,7 +117,7 @@ export function ExpressionPlanCard({ card, plan }: { card: AgentApprovalCard; pl
         <div className="flex flex-col gap-1">
           <dt className="text-meta font-semibold text-ink-muted">{formatMessage("expressions.plan.scenes")}</dt>
           <dd>
-            <ol className="flex list-decimal flex-col gap-1 pl-4" data-testid="expression-plan-scenes">
+            <ol className="flex list-decimal flex-col gap-1 pl-6" data-testid="expression-plan-scenes">
               {[...usable.slots].sort((a, b) => a.index - b.index).map((slot) => <li key={slot.index} className="break-words text-body" data-testid="expression-plan-scene">
                 <span className="font-semibold">{slot.displayName}</span>{" "}
                 <span className="text-ink-muted">{slot.scene !== null ? slot.scene : formatMessage("expressions.plan.gif", { base: slotName(slot.baseIndex ?? -1), motion: slot.motion ? formatMessage(MOTION_LABEL[slot.motion]) : "" })}</span>
@@ -154,14 +154,16 @@ export function ExpressionPlanCard({ card, plan }: { card: AgentApprovalCard; pl
           // 움직일 정지 칸이 빠진 GIF는 스스로 켤 수 없다: 바탕이 돌아와야 같이 돌아온다.
           const follows = slot.scene === null && slot.baseIndex !== null && !planSlotKept(usable, edit, slot.baseIndex);
           return <li key={slot.index} className="flex flex-col gap-1 border-t border-line pt-2" data-testid="expression-plan-edit-slot">
-            <label className="flex items-center gap-2 rounded-md p-1 text-meta font-semibold hover:bg-surface-hover active:bg-surface-pressed">
-              <input type="checkbox" className="focus-visible:focus-ring" checked={kept} disabled={blocked || follows} data-testid="expression-plan-edit-include"
-                onChange={() => setEdit((current) => { const dropped = new Set(current.dropped); if (dropped.has(slot.index)) dropped.delete(slot.index); else dropped.add(slot.index); return { ...current, dropped }; })} />
-              {formatMessage("expressions.plan.editInclude", { displayName: edit.names[slot.index] ?? slot.displayName })}
-            </label>
-            <Input value={edit.names[slot.index] ?? slot.displayName} maxLength={40} disabled={blocked || !kept} data-testid="expression-plan-edit-name"
-              aria-label={formatMessage("expressions.plan.editName", { index: slot.index + 1 })}
-              onChange={(event) => setEdit((current) => ({ ...current, names: { ...current.names, [slot.index]: event.target.value } }))} />
+            <div className="flex items-center gap-2">
+              <label className="flex shrink-0 items-center rounded-md p-1 hover:bg-surface-hover active:bg-surface-pressed">
+                <input type="checkbox" className="accent-primary focus-visible:focus-ring" checked={kept} disabled={blocked || follows} data-testid="expression-plan-edit-include"
+                  aria-label={formatMessage("expressions.plan.editInclude", { displayName: edit.names[slot.index] ?? slot.displayName })}
+                  onChange={() => setEdit((current) => { const dropped = new Set(current.dropped); if (dropped.has(slot.index)) dropped.delete(slot.index); else dropped.add(slot.index); return { ...current, dropped }; })} />
+              </label>
+              <Input value={edit.names[slot.index] ?? slot.displayName} maxLength={40} disabled={blocked || !kept} data-testid="expression-plan-edit-name"
+                aria-label={formatMessage("expressions.plan.editName", { index: slot.index + 1 })}
+                onChange={(event) => setEdit((current) => ({ ...current, names: { ...current.names, [slot.index]: event.target.value } }))} />
+            </div>
             {slot.scene !== null && <textarea rows={2} maxLength={300} value={edit.scenes[slot.index] ?? slot.scene} disabled={blocked || !kept} data-testid="expression-plan-edit-scene"
               aria-label={formatMessage("expressions.plan.editScene", { index: slot.index + 1 })}
               className="w-full resize-y rounded-lg border border-line-strong bg-transparent px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"

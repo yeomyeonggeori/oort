@@ -9,7 +9,8 @@
 /* 격자의 한 칸. 그림 자리는 준비된 칸과 회색 칸이 같은 크기다(L7.6: 칸이 사라져 줄이 당겨지지 않는다). */
 .expression-set-picture { width: 64px; height: 64px; }
 .expression-set-tile { width: 100%; height: 100%; border: 2px solid var(--line); background-color: var(--surface); }
-.expression-set-tile[aria-pressed="true"] { border-color: var(--primary); }
+/* 고른 칸의 테두리는 3:1 선(`--line-strong`)이다: 열 장이 모두 고른 칸일 때 격자가 검은 상자 열 개가 되지 않게, 고름은 체크 상자의 잉크 채움이 지고 테두리는 돕는다. */
+.expression-set-tile[aria-pressed="true"] { border-color: var(--line-strong); }
 .expression-set-tile:hover { background-color: var(--surface-hover); }
 /* 회색 칸: 선택·올리기·다시 시도가 없다. 점선과 아이콘과 글이 구분을 지고, 색에만 기대지 않는다. */
 .expression-set-tile[data-gray] { border-style: dashed; background-color: var(--surface-muted); cursor: default; }

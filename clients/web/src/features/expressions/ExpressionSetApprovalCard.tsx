@@ -159,7 +159,7 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
 
   return <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-set" data-open={String(pending)}>
     <header className="flex flex-col gap-1">
-      <p className="text-body font-semibold">{title}</p>
+      <p className="break-words text-body font-semibold">{title}</p>
       {summary !== null && pending && <p className="text-meta text-ink-muted" data-numeric data-testid="expression-set-summary">{summary}</p>}
     </header>
     {pending && usable === null && <>
@@ -232,7 +232,8 @@ function SetTile({ slot, position, active, checked, editable, draft, onToggle, o
         {draft ? <ExpressionImage item={draft} size="medium" still /> : <ImageOff className="size-6 text-ink-muted" />}
       </span>
       <span className="break-words text-meta font-semibold text-ink" aria-hidden="true">{slot.displayName}</span>
-      <span className="break-all font-mono text-timestamp text-ink-muted" aria-hidden="true">{`:${slot.name}:`}</span>
+      {/* 이름은 밑줄 뒤에서 줄을 바꿀 수 있다(좁은 칸에서 낱말 가운데가 잘리지 않게). 글자는 그대로 하나의 이름이다. */}
+      <span className="break-words font-mono text-timestamp text-ink-muted" aria-hidden="true">:{slot.name.split("_").flatMap((part, at) => (at === 0 ? [part] : ["_", <wbr key={at} />, part]))}:</span>
       {draft !== null && isAnimatedExpression(draft) && <span className="rounded-sm bg-surface-muted px-1 text-timestamp font-semibold text-ink-muted" aria-hidden="true">{formatMessage("expressions.set.badgeGif")}</span>}
       {reason !== null && <span className="break-words text-timestamp text-ink-muted" aria-hidden="true">{reason}</span>}
     </button>
