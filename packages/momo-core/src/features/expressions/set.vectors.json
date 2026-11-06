@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "adr": "docs/adr/0218-workspace-expressions.md §12 L6",
+  "readBy": "the core test (set.test.ts) and, in the server slice, a Rust test; the core package cannot read outside itself (purity gate), so the file lives here",
+  "rule": "One decision keeps some ready slots of one set card. The items are taken in SLOT order whatever the request order. A draft that is not a ready slot of the card (a grey slot has no id), a revision or hash that is not the one shown, or an expired card refuses the WHOLE decision (409 expression_preview_stale). A name the workspace already has is skipped (name_taken); once live registrations reach the ceiling every later item is skipped (quota). A skip never stops the others. Nothing registered at all is a refusal: expression_name_reserved if any skip was a name, else expression_quota. A kind the person chose wins, else the J4 recommendation (expression-kind.vectors.json) for the stored large picture.",
+  "quota": 1000,
+  "slotFields": "index (0-39, the slot order), name, state (ready|gray), kind (still|gif), width/height/frames = the stored LARGE picture of a ready slot (frames > 1 is a GIF)",
+  "caseFields": "choose = slot indexes the person kept, in REQUEST order; chooseKinds = index -> kind the person picked; taken = names the workspace has; live = registrations that are not deleted; quota = override of the ceiling; stale = indexes whose choice pins a revision the card did not show; expired = the card is past its window; expect = the verdict (registered/skipped in SLOT order)",
+  "cases": [
+    {
+      "name": "every kept ready slot registers, and the kind follows the stored large picture",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 512, "height": 512, "frames": 1 },
+        { "index": 2, "name": "cat_c", "state": "ready", "kind": "gif", "width": 360, "height": 360, "frames": 16 }
+      ],
+      "choose": [0, 1, 2],
+      "taken": [],
+      "live": 10,
+      "expect": { "ok": true, "registered": [{ "name": "cat_a", "kind": "emoji" }, { "name": "cat_b", "kind": "sticker" }, { "name": "cat_c", "kind": "sticker" }], "skipped": [] }
+    },
+    {
+      "name": "the order of the request does not matter: slot order wins",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 2, "name": "cat_c", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [2, 0, 1],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": true, "registered": [{ "name": "cat_a", "kind": "emoji" }, { "name": "cat_b", "kind": "emoji" }, { "name": "cat_c", "kind": "emoji" }], "skipped": [] }
+    },
+    {
+      "name": "the person may keep only some of the ready slots",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 2, "name": "cat_c", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [1],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": true, "registered": [{ "name": "cat_b", "kind": "emoji" }], "skipped": [] }
+    },
+    {
+      "name": "a name the workspace already has is skipped and the others still register",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 2, "name": "cat_c", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 1, 2],
+      "taken": ["cat_b"],
+      "live": 10,
+      "expect": { "ok": true, "registered": [{ "name": "cat_a", "kind": "emoji" }, { "name": "cat_c", "kind": "emoji" }], "skipped": [{ "name": "cat_b", "reason": "name_taken" }] }
+    },
+    {
+      "name": "the kind the person picked beats the recommendation",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 512, "height": 512, "frames": 1 }
+      ],
+      "choose": [0],
+      "chooseKinds": { "0": "emoji" },
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": true, "registered": [{ "name": "cat_a", "kind": "emoji" }], "skipped": [] }
+    },
+    {
+      "name": "past the ceiling every later item is skipped, in slot order",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 2, "name": "cat_c", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [2, 1, 0],
+      "taken": [],
+      "live": 998,
+      "expect": { "ok": true, "registered": [{ "name": "cat_a", "kind": "emoji" }, { "name": "cat_b", "kind": "emoji" }], "skipped": [{ "name": "cat_c", "reason": "quota" }] }
+    },
+    {
+      "name": "a taken name does not use a place under the ceiling",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 1],
+      "taken": ["cat_a"],
+      "live": 999,
+      "expect": { "ok": true, "registered": [{ "name": "cat_b", "kind": "emoji" }], "skipped": [{ "name": "cat_a", "reason": "name_taken" }] }
+    },
+    {
+      "name": "every kept name taken: nothing registers and the approval is not spent",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 1],
+      "taken": ["cat_a", "cat_b"],
+      "live": 5,
+      "expect": { "ok": false, "status": 409, "code": "expression_name_reserved" }
+    },
+    {
+      "name": "the library is full: nothing registers",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0],
+      "taken": [],
+      "live": 1000,
+      "expect": { "ok": false, "status": 409, "code": "expression_quota" }
+    },
+    {
+      "name": "a taken name and a full library together refuse as a taken name",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 1],
+      "taken": ["cat_a"],
+      "live": 1000,
+      "expect": { "ok": false, "status": 409, "code": "expression_name_reserved" }
+    },
+    {
+      "name": "a grey slot has no id: naming it refuses the whole decision",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "gray", "kind": "still" }
+      ],
+      "choose": [0, 1],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": false, "status": 409, "code": "expression_preview_stale" }
+    },
+    {
+      "name": "one stale revision refuses the whole decision",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 },
+        { "index": 1, "name": "cat_b", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 1],
+      "stale": [1],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": false, "status": 409, "code": "expression_preview_stale" }
+    },
+    {
+      "name": "an expired card refuses the whole decision",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0],
+      "expired": true,
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": false, "status": 409, "code": "expression_preview_stale" }
+    },
+    {
+      "name": "the same draft twice is a malformed request",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [0, 0],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": false, "status": 400, "code": "expression_choice_invalid" }
+    },
+    {
+      "name": "an empty list is a malformed request",
+      "slots": [
+        { "index": 0, "name": "cat_a", "state": "ready", "kind": "still", "width": 64, "height": 64, "frames": 1 }
+      ],
+      "choose": [],
+      "taken": [],
+      "live": 0,
+      "expect": { "ok": false, "status": 400, "code": "expression_choice_invalid" }
+    }
+  ]
+}
