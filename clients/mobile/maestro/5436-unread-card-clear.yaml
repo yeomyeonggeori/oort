@@ -1,0 +1,74 @@
+appId: app.momo.ios
+name: 5436-unread-card-clear
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 안 읽은 채널을 처음 열면 「안 읽은 동안」 카드가 떠 있는 머리 단추 밑에 깔리지 않는다 (#5436, 검증 6b-2 화면 검수).
+#
+# 준비: `CHANNEL_ID` 는 **한 번도 열지 않은** 채널이고 안 읽은 줄이 5개 이상이다(카드 문턱 `MISSED_MIN_UNREAD`). 카드는 방문마다 한 번만 서므로 흐름을 다시 돌릴
+# 때마다 새 채널이 있어야 한다. 줄 수는 **내용이 한 화면을 조금 넘게** 맞춘다 - 7개(남의 글 3·내 글 4, 인용 둘)가 그 띠다. 이 띠가 결함이 사는 자리다:
+# 진입은 늘 바닥에 앉고(#1025), 카드는 목록 맨 위라 바닥에 앉는 순간 머리 밑으로 밀려 올라갔다(iPhone 17 Pro 402×874 실측: 카드 위끝 42pt, 머리 밑 124pt →
+# 카드 전체가 머리 덮개 안, ✕ 위끝 43pt). 내용이 한 화면 안이면 카드는 머리 밑에 온전히 서고, 훨씬 길면 화면 밖이라 이 띠가 아니면 재현되지 않는다.
+#
+#   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#     -e CHANNEL_ID=<안 읽은 채널 id> clients/mobile/maestro/5436-unread-card-clear.yaml
+#
+# 이 흐름이 재는 것(눈이 아니라 단정이다):
+#   ① 착지 직후 - 카드와 ✕ 가 머리 알약 줄(`conversation-header-row`) **아래**에 선다. Maestro 의 `below` 는 요소의 위치를 비교하므로 가려진 카드는 못 통과한다
+#      (고치기 전에는 카드가 머리 덮개 안이라 여기서 붉다).
+#   ② 맨 위까지 올린 뒤 - 같은 단정. 위 여백이 머리 높이만큼 카드에도 적용됨은 고치기 전에도 참이었다(실측 0pt).
+#   ③ ✕ 가 눌린다 - 누르면 카드가 걷힌다(머리 단추 ⋮ 가 대신 눌렸다면 카드가 남는다).
+# 이 흐름이 **못 재는 것**: 겹친 양(pt) 자체 - 그것은 `maestro hierarchy` 덤프로 잰다(인계의 숫자). 어두운 테마·큰 글자·SE 폭.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- waitForAnimationToEnd:
+    timeout: 4000
+# ① 착지 직후.
+- assertVisible:
+    id: "missed-digest-card"
+- assertVisible:
+    id: "missed-digest-card"
+    below:
+      id: "conversation-header-row"
+- assertVisible:
+    id: "missed-digest-dismiss"
+    below:
+      id: "conversation-header-row"
+# ② 맨 위까지.
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 50%, 30%
+          end: 50%, 85%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 1200
+- assertVisible:
+    id: "missed-digest-card"
+    below:
+      id: "conversation-header-row"
+- assertVisible:
+    id: "missed-digest-dismiss"
+    below:
+      id: "conversation-header-row"
+# ③ ✕ 가 눌린다.
+- tapOn:
+    id: "missed-digest-dismiss"
+- assertNotVisible:
+    id: "missed-digest-card"
