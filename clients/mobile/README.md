@@ -315,8 +315,10 @@ reads the live view hierarchy, pastes the geometry into every `${NAME}` and only
 then hands Maestro the result — which is why a value that never varies (the 60 ms
 flick) is a plain number there, not a placeholder (see the syntax check below).
 `4869-reply-swipe` does run through the lane, with `--flow 4869-reply-swipe`: the
-lane passes every flow `-e CHANNEL_ID` (#agent-lab) and `-e PEER_TEXT` (the mock's
-fixed reply), so that flow has a peer's row to swipe. After a stack is replaced the
+lane passes every flow `-e CHANNEL_ID` (#agent-lab) and `-e PEER_TEXT` (the one line
+the lane's second member, "Lane Peer", writes in that channel's main flow — the
+mock's reply no longer works as a peer row since #4646 puts it in a thread), so
+that flow has a peer's row to swipe. After a stack is replaced the
 app still holds the old stack's login; with `--flow` the first flow signs in again
 before it starts (slower, still works) — `--flow 00-login` first gives a clean start.
 

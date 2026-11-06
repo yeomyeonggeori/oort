@@ -4,7 +4,7 @@
 //
 //   입력창 레일(A) · 머리 칩(B) · 예외 줄(D) · 이어지는 행의 거터 칩 · 스레드 요약 칩(E)
 //
-// 상태 일곱(1명 작업 중 · 2명 · 승인 대기 · 아직 받지 않았어요 · 실패 · 끝남 · 깨우는 신호가 닿지 않음) ×
+// 상태 일곱(1명 작업 중 · 2명 · 승인 필요 · 아직 받지 않았어요 · 실패 · 끝남 · 깨우는 신호가 닿지 않음) ×
 // 라이트·다크 × 창 폭(1440 · 720 데스크탑 최소 · 390 폰 폭 웹), 그리고 머리 칩 일곱 종, 이어지는 행의 거터 칩(쉼·hover),
 // 레일 팝오버, 취소 확인, 사람만 있는 대화와 에이전트 대화의 입력창 위 간격 대조, 긴 이름.
 //
@@ -173,7 +173,7 @@ function conversation(kind, now, triggerAuthor = ME) {
   return { rows, runs };
 }
 
-/** 머리 칩 일곱 종이 한 화면에: 서로 다른 사람이 서로 다른 에이전트 상태를 부른 일곱 메시지. */
+/** 머리 칩 일곱 종이 한 화면에: 서로 다른 사람이 서로 다른 에이전트 상태를 부른 여덟 메시지(하나는 성공으로 끝나 칩이 없다). */
 function gallery(now) {
   const rows = [
     m(21, SEO, "@달무리봇 인터뷰 메모를 한 장으로 줄여 줄래요?", 40),
@@ -234,7 +234,7 @@ function threadRoot(now) {
   return { rows, runs };
 }
 
-/** 위로 한 화면 넘게 올라간 트리거에서 「답함 ✓」을 누르면 답으로 가는지. */
+/** 위로 한 화면 넘게 올라간 트리거(답이 끝난 run)에도 칩·점프 단추가 없는지(#5382로 「답함 ✓」과 답으로 가는 점프가 사라졌다). */
 function jumpScene(now) {
   const rows = [m(61, ME, "@달무리봇 분기 보고서 목차 먼저 잡아 줘요", 180)];
   for (let i = 0; i < 28; i += 1) {
@@ -245,7 +245,7 @@ function jumpScene(now) {
   return { rows, runs };
 }
 
-/** 에이전트 DM: 사람 메시지마다 에이전트의 답이 달렸고 마지막 요청은 진행 중이다(「답함 ✓」 칩이 모든 사람 메시지에 서는 밀도). */
+/** 에이전트 DM: 사람 메시지마다 에이전트의 답이 달렸고 마지막 요청은 진행 중이다(성공으로 끝난 셋에는 칩이 없고 진행 중 하나만 칩이 선다, #5382). */
 function dmScene(now) {
   const rows = [
     m(81, ME, "이번 주 인터뷰 메모를 세 줄로 줄여 줘요", 46),
@@ -525,11 +525,11 @@ async function sheet(browser, scheme, name, items, columns) {
 const STATE_LABELS = {
   working1: "1명 작업 중",
   working2: "2명 작업 중(합침)",
-  approval: "승인 대기",
+  approval: "승인 필요",
   uncollected: "아직 받지 않았어요 (owner)",
   failed: "실패",
   timedOut: "신호 소실(가져간 뒤 서버가 끝냄)",
-  done: "끝남(답함 ✓)",
+  done: "끝남(칩 없음)",
   wakeFailed: "깨우는 신호가 닿지 않음 (owner)",
 };
 
@@ -559,8 +559,8 @@ async function bundle(browser, origin, vp, opts) {
     }
     if (kind === "working2") check(`${tag} working2: 두 에이전트는 한 줄로 합친다`, railText === "달무리봇 +1", railText);
     if (kind === "approval") {
-      check(`${tag} approval: 레일 「달무리봇 · 승인 대기」`, railText === "달무리봇 · 승인 대기", railText);
-      check(`${tag} approval: 승인 대기는 「작업 중」이라 부르지 않는다`, !railText.includes("작업 중"));
+      check(`${tag} approval: 레일 「달무리봇 · 승인 필요」`, railText === "달무리봇 · 승인 필요", railText);
+      check(`${tag} approval: 승인을 기다리는 일은 「작업 중」이라 부르지 않는다`, !railText.includes("작업 중"));
     }
     if (kind === "uncollected") {
       check(`${tag} uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」`, line === "달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요", line);
@@ -593,8 +593,10 @@ async function bundle(browser, origin, vp, opts) {
     }
     if (kind === "done") {
       check(`${tag} done: 레일은 비고 칸은 남는다`, g.railState === "idle" && g.hasRail);
-      const chip = page.locator('[data-testid="trigger-chip"][data-kind="answered"]').first();
-      check(`${tag} done: 「답함 ✓」은 답을 알 때 눌리는 단추다`, (await chip.evaluate((el) => el.tagName)) === "BUTTON");
+      // #5382: 성공으로 끝난 run 은 칩이 없다. 칩이 그려지는 같은 길(진행 읽기 → 머리 줄)은 아래 「칩 일곱 종」이 맞는 데이터로 잰다.
+      check(`${tag} done: 성공으로 끝난 요청의 머리에 칩이 없다(「답함 ✓」이 사라졌다)`, chips.length === 0, chips.join(","));
+      check(`${tag} done: 트리거 메시지와 에이전트의 답은 그대로 서 있다(칩이 없는 이유가 빈 화면이 아니다)`,
+        (await page.locator(`[data-message-id="${mid(3)}"]`).count()) === 1 && (await page.locator(`[data-message-id="${mid(5)}"]`).count()) === 1);
     }
     if (kind === "wakeFailed") {
       check(`${tag} wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」`, line.startsWith("달무리봇: 깨우는 신호가 닿지 않음"), line);
@@ -620,7 +622,9 @@ async function bundle(browser, origin, vp, opts) {
   const boxShift = Math.max(...[...gaps.values()].map((v) => Math.max(Math.abs(v.listBottom - base.listBottom), Math.abs(v.cardTop - base.cardTop))));
   check(`${tag} 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 ${boxShift.toFixed(2)}px)`, boxShift < 0.01, gapValues.join(" "));
   const rowShift = Math.max(...[...gaps.values()].map((v) => Math.abs(v.lastRowGap - base.lastRowGap)));
-  check(`${tag} 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 ${rowShift.toFixed(2)}px)`, rowShift < 1, [...gaps.entries()].map(([k, v]) => `${k}=${v.lastRowGap}`).join(" "));
+  // 장면마다 위의 행이 달라 가상 목록의 바닥 붙임이 정수 한 칸(1.00px)까지 갈린다(720·390 폭의 「2명 작업 중」 장면이 23, 나머지가 24 — 같은 번들·
+  // 같은 폭에서 매번 같은 값이라 부하 탓이 아니다). 그래서 「1px 이하」로 둔다. 레일이 움직였는지의 엄격한 가드는 위의 상자 단정(`boxShift < 0.01`)이다.
+  check(`${tag} 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 이하 허용, 최대 차이 ${rowShift.toFixed(2)}px)`, rowShift <= 1.0001, [...gaps.entries()].map(([k, v]) => `${k}=${v.lastRowGap}`).join(" "));
   const expectedAgentGap = base.dockBorderTop + 24;
   check(`${tag} 에이전트 대화의 목록~입력창 간격은 ${expectedAgentGap}px(칸 24${base.dockBorderTop ? " + 독 경계선 1" : ""})`, Math.abs(base.railGap - expectedAgentGap) < 0.51, String(base.railGap));
 
@@ -632,9 +636,9 @@ async function bundle(browser, origin, vp, opts) {
       const scene = sceneOf("gallery");
       const { context, page } = await open(browser, origin, vp, scene);
       const kinds = await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => ({ kind: e.getAttribute("data-kind"), variant: e.getAttribute("data-variant") ?? "row", w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })));
-      check(`${tag} 칩 여덟 종이 한 화면에: ${kinds.map((k) => k.kind).sort().join(",")}`,
-        JSON.stringify(kinds.map((k) => k.kind).sort()) === JSON.stringify(["answered", "approval", "claimed", "failed", "received", "timed_out", "uncollected", "working"]));
-      check(`${tag} 칩 크기 고정: 여덟 종의 폭·높이가 같다(${kinds[0]?.w.toFixed(1)}×${kinds[0]?.h.toFixed(1)})`,
+      check(`${tag} 칩 일곱 종이 한 화면에(성공한 run 의 메시지에는 칩이 없다): ${kinds.map((k) => k.kind).sort().join(",")}`,
+        JSON.stringify(kinds.map((k) => k.kind).sort()) === JSON.stringify(["approval", "claimed", "failed", "received", "timed_out", "uncollected", "working"]));
+      check(`${tag} 칩 크기 고정: 일곱 종의 폭·높이가 같다(${kinds[0]?.w.toFixed(1)}×${kinds[0]?.h.toFixed(1)})`,
         kinds.every((k) => Math.abs(k.w - kinds[0].w) < 0.01 && Math.abs(k.h - kinds[0].h) < 0.01));
       const words = await page.getByTestId("trigger-chip-word").evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0).map((e) => e.textContent?.trim()));
       if (phoneWidth || vp.width < 900) {
@@ -642,12 +646,12 @@ async function bundle(browser, origin, vp, opts) {
         const marks = await page.getByTestId("trigger-chip-mark").evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0).length);
         note(`[${tag}] 좁은 줄: 보이는 낱말 ${words.length}개 · 보이는 아이콘 ${marks}개`);
       } else {
-        check(`${tag} 넓은 줄: 여덟 낱말이 보인다`, words.length === 8, words.join("|"));
+        check(`${tag} 넓은 줄: 일곱 낱말이 보인다`, words.length === 7, words.join("|"));
       }
       const heights = await rowHeightsWithAndWithoutChip(page);
       check(`${tag} 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, ${heights.withChip.length}행)`,
-        heights.withChip.length === 8 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
-      items.push({ label: "머리 칩 여덟 종", buf: await crop(page, { height: 700, width: phoneWidth ? 420 : 700 }) });
+        heights.withChip.length === 7 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
+      items.push({ label: "머리 칩 일곱 종", buf: await crop(page, { height: 700, width: phoneWidth ? 420 : 700 }) });
       out.galleryItem = items.at(-1);
       await context.close();
     }
@@ -709,12 +713,15 @@ async function bundle(browser, origin, vp, opts) {
       const { context, page } = await open(browser, origin, vp, scene);
       const g = await geometry(page);
       const kinds = await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
-      check(`${tag} 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, ${kinds.join(",")})`, JSON.stringify([...kinds].sort()) === JSON.stringify(["answered", "answered", "answered", "working"]), kinds.join(","));
-      check(`${tag} 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다`, g.hasRail && Math.abs(g.railHeight - 24) < 0.51 && g.railState === "active", JSON.stringify(g));
-      const dmRail = await text(page, "composer-working-text");
-      check(`${tag} 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」`, dmRail === "달무리봇 · 작업 중 · 참석자 명단 고치는 중", dmRail);
+      check(`${tag} 에이전트 DM: 진행 중인 요청 하나에만 칩이 선다(작업 중 ×1, 답이 달린 셋에는 없다, ${kinds.join(",")})`, JSON.stringify([...kinds]) === JSON.stringify(["working"]), kinds.join(","));
+      const humanRows = await Promise.all([81, 83, 85, 87].map((n) => page.locator(`[data-message-id="${mid(n)}"]`).count()));
+      check(`${tag} 에이전트 DM: 사람 메시지 넷이 모두 서 있다(칩 없는 셋이 빈 화면 탓이 아니다)`, humanRows.every((n) => n === 1), humanRows.join(","));
+      // 1:1 DM 에서는 진행 중 줄이 입력창 레일이 아니라 그 요청을 한 메시지 안(`request-thought-line`)에 선다: 레일 칸(24)은 남고 비어 있다.
+      check(`${tag} 에이전트 DM: 레일 칸은 서고(24) 비어 있다(진행 중 줄은 메시지 안에 선다)`, g.hasRail && Math.abs(g.railHeight - 24) < 0.51 && g.railState === "idle", JSON.stringify(g));
+      const dmThought = ((await page.locator(`[data-testid="timeline-message"][data-message-id="${mid(87)}"] [data-testid="request-thought-line"]`).first().textContent({ timeout: 5000 }).catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      check(`${tag} 에이전트 DM: 그 메시지 안의 줄 「달무리봇 · 생각 중 · 참석자 명단 고치는 중」`, dmThought.includes("달무리봇 · 생각 중 · 참석자 명단 고치는 중"), dmThought);
       const heights = await rowHeightsWithAndWithoutChip(page);
-      check(`${tag} 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(${heights.withChip.length}행)`, heights.withChip.length === 4 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
+      check(`${tag} 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(${heights.withChip.length}행)`, heights.withChip.length === 1 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
       out.dm = await crop(page, { height: 560, width: phoneWidth ? Math.max(vp.width, 320) : 700 });
       await context.close();
     }
@@ -792,20 +799,12 @@ async function jumpScene2(browser, origin, vp) {
   const scroller = page.locator('[data-testid="timeline-virtuoso"]').first();
   await scroller.evaluate((el) => { el.scrollTop = 0; });
   await page.waitForTimeout(600);
-  const chip = page.locator('[data-testid="trigger-chip"][data-kind="answered"]').first();
-  await chip.waitFor({ timeout: 10_000 });
-  check(`${tag} 점프: 위에서 본 「답함 ✓」은 단추다`, (await chip.evaluate((el) => el.tagName)) === "BUTTON");
-  const before = await scroller.evaluate((el) => el.scrollTop);
-  await chip.click();
-  await page.waitForTimeout(1200);
-  const after = await scroller.evaluate((el) => el.scrollTop);
-  const answerVisible = await page.evaluate(() => {
-    const el = [...document.querySelectorAll("[data-row-body]")].find((b) => (b.textContent ?? "").includes("목차를 잡았어요"));
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    return r.bottom > 0 && r.top < innerHeight;
-  });
-  check(`${tag} 점프: 「답함 ✓」을 누르면 답 메시지로 간다(스크롤 ${Math.round(before)} → ${Math.round(after)})`, answerVisible && after > before, `${before} -> ${after}, visible=${answerVisible}`);
+  // #5382: 「답함 ✓」과 그 점프는 없다. 트리거가 화면에 있고(가상 목록이 그렸고) 그 머리에 칩도 점프 단추도 없어야 한다.
+  const trigger = page.locator(`[data-message-id="${mid(61)}"]`);
+  await trigger.waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  const chipCount = await page.getByTestId("trigger-chip").count();
+  check(`${tag} 점프: 위로 올라간 트리거(답이 끝난 run)에 칩이 없다 — 답으로 가는 단추가 사라졌다`, (await trigger.count()) === 1 && chipCount === 0, `trigger=${await trigger.count()} chips=${chipCount}`);
   await context.close();
 }
 
@@ -1032,11 +1031,11 @@ async function main() {
         await sheet(browser, scheme, `states-${name}`, r.items.filter((i) => !i.label.startsWith("머리 칩")), cols);
         // 칩·거터·스레드 시트
         const extra = [
-          { label: "머리 칩 여덟 종", buf: r.galleryItem.buf },
+          { label: "머리 칩 일곱 종", buf: r.galleryItem.buf },
           { label: "이어지는 행: 쉼 (거터 아이콘 칩)", buf: r.gutterRest },
           { label: "이어지는 행: hover (시각에 자리를 내준다)", buf: r.gutterHover },
           { label: "스레드 요약 줄의 작업 중 칩", buf: r.thread },
-          { label: "에이전트 DM: 사람 메시지마다 칩(답함 ×3 + 작업 중)", buf: r.dm },
+          { label: "에이전트 DM: 진행 중인 요청에만 칩(작업 중), 끝난 셋은 칩 없음", buf: r.dm },
         ];
         if (p.key === "wide" || p.key === "narrow720") {
           extra.push({ label: "레일 팝오버", buf: await popoverScene(browser, preview.origin, vp) });
