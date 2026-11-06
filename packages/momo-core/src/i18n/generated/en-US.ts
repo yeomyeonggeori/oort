@@ -3138,6 +3138,76 @@ export const catalog: MessageCatalog = {
       "value": "photo, face"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "Add"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "Add to favorites"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "Remove from favorites"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "Favorites"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "Recent"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "Sets"
+    }
+  ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "Team library"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 0,
+      "value": "Remove preview of "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "Emoticon to send"
+    }
+  ],
   "expressions.sheet.a11y": [
     {
       "type": 0,
@@ -3159,7 +3229,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3243,7 +3313,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "Search emoji"
+      "value": "Search by name"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3279,7 +3349,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Team"
+      "value": "Emoticons"
     }
   ],
   "expressions.sheet.tabGif": [
