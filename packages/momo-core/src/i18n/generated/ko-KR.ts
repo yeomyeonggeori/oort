@@ -3397,7 +3397,7 @@ export const catalog: MessageCatalog = {
   "mobile.convSearch.recentRowIn": [
     {
       "type": 0,
-      "value": "다시 찾기: "
+      "value": "이 대화에서 다시 찾기: "
     },
     {
       "type": 1,
@@ -3405,11 +3405,15 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " · "
+      "value": " ("
     },
     {
       "type": 1,
       "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 찾았던 말)"
     }
   ],
   "mobile.convSearch.recentTitle": [
