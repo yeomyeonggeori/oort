@@ -50,9 +50,10 @@ export const NON_SECRET_KEYS = {
    */
   attachmentSizes: 'momo.mobile.timeline.attachment-sizes.v1',
   /**
-   * 팀 표현 보관함의 **마지막으로 읽은 목록**(이름·그림 크기·그림 해시 — 그림 파일은 없다, #5451). 대화가 열릴 때 보관함이 아직 안 와도 큰 이모티콘의 칸이
-   * 첫 프레임부터 서게 한다. 읽을 때 워크스페이스·멤버와 계약 검사를 지난 것만 받고, 로그아웃·세션 끝이 지운다(`features/expressions/store.ts`).
-   * 비밀이 아니다(팀원이면 누구나 보는 이름·태그). 잃으면 한 번 늦게 서고 다음 읽기가 채운다.
+   * 팀 표현 보관함의 **마지막으로 읽은 목록**(그리는 데 필요한 것만: id·이름·표시 이름·상태·종류·그림 정보 — 그림 파일은 없다, #5451). 대화가 열릴 때 보관함이 아직
+   * 안 와도 큰 이모티콘의 칸이 첫 프레임부터 서게 한다. 프롬프트·출처 주소·만든 사람·대상 멤버·태그는 남기지 않는다(#5473 · 형식 번호 2, 옛 형식은 읽을 때 지운다).
+   * 읽을 때 워크스페이스·멤버와 계약 검사를 지난 것만 받고, 로그아웃(`useSession.tsx`)·세션 끝(`store.ts` `dispose`)이 지운다(`forgetExpressionShelf`).
+   * 잃으면 한 번 늦게 서고 다음 읽기가 채운다.
    */
   expressionShelf: 'momo.mobile.expressions.shelf.v1',
   unfurlHeights: 'momo.mobile.timeline.unfurl-heights.v1',
@@ -241,6 +242,14 @@ export function nonSecretStore(): NonSecretStore {
     instance = createMMKV({id: 'momo.mobile.cache'});
   }
   return instance;
+}
+
+/**
+ * 기기에 남긴 표현 보관함(`expressionShelf`)을 지운다. 세션이 끝나는 길이 모두 이 함수를 부른다 — 표현 저장소의 `dispose`(`features/expressions`)와 로그아웃(`session/useSession.tsx`).
+ * 둘 다 같은 키를 지워야 하는데 `useSession` 이 표현 provider 를 가져오면 import 가 돌아서(provider 가 `useSession` 을 쓴다) 키를 아는 이 파일에 둔다.
+ */
+export function forgetExpressionShelf(): void {
+  nonSecretStore().remove(NON_SECRET_KEYS.expressionShelf);
 }
 
 /** Test seam: swap the store, or pass null to fall back to the real MMKV. */
