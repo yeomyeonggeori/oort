@@ -630,11 +630,18 @@ LANE_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 LANE_SESSION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 LANE_SESSION_HOST_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 LANE_EMAIL="lane-$RUN_ID@momo.local"
+# A second, ordinary member of #agent-lab who writes one message in the main flow (4869-reply-swipe swipes a row
+# SOMEONE ELSE wrote). Since #4646 the agent's reply to a channel mention lives in a thread under the mention, so the
+# mock's reply is no longer a row of the main flow and the flow had no peer row left to swipe (검증 6a, #5419).
+PEER_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+PEER_EMAIL="lane-peer-$RUN_ID@momo.local"
+PEER_TEXT="peer note about lunch"
 # Alphanumeric on purpose. It is typed into a `secureTextEntry` field by an
 # automation, and that field is already delicate enough (see the `eraseText`
 # note in maestro/00-login.yaml) without adding punctuation the software
 # keyboard has to switch planes to reach.
 LANE_PASSWORD="lane$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | cut -c1-16)"
+PEER_PASSWORD="lane$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | cut -c1-16)"
 
 run_sql() {
   compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" \
@@ -667,6 +674,14 @@ INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash
 VALUES ('$LANE_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$LANE_EMAIL', true,
         momo_password_hash('$LANE_PASSWORD'), 'UTC');
 
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$PEER_MEMBER_ID', '$DEMO_WORKSPACE_ID', 'human', 'active',
+        'Lane Peer', 'lane-peer-$RUN_ID');
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$PEER_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$PEER_EMAIL', true,
+        momo_password_hash('$PEER_PASSWORD'), 'UTC');
+
 -- Workspace membership is a SEPARATE table from channel membership, and it is
 -- the one every workspace-scoped route authorises against
 -- (WorkspaceAuthorization.activeRole). Without this row the app signs in
@@ -680,11 +695,13 @@ VALUES ('$LANE_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$LANE_EMAIL', true,
 -- lowering it is a fixture change that wants its own proof, not a side effect of
 -- the flow cleanup in #5045.
 INSERT INTO workspace_membership (workspace_id, member_id, role)
-VALUES ('$DEMO_WORKSPACE_ID', '$LANE_MEMBER_ID', 'admin');
+VALUES ('$DEMO_WORKSPACE_ID', '$LANE_MEMBER_ID', 'admin'),
+       ('$DEMO_WORKSPACE_ID', '$PEER_MEMBER_ID', 'member');
 
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$LANE_MEMBER_ID', 'member'),
-       ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$LANE_MEMBER_ID', 'member');
+       ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$LANE_MEMBER_ID', 'member'),
+       ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$PEER_MEMBER_ID', 'member');
 
 INSERT INTO agent_profile (agent_member_id, workspace_id, instructions,
                            enabled_tools, updated_by)
@@ -807,6 +824,28 @@ until [ "$(query_sql "SET row_security=off; SELECT count(*) FROM message
   sleep 2
 done
 say "agent path live"
+
+# The peer's one message in #agent-lab's main flow (4869-reply-swipe's PEER_TEXT). Written over REST by the peer
+# themself — a row a person wrote, which is what a swipe-reply asks 「…님에게 답글」 about. The agent's mock reply cannot
+# stand in: since #4646 it sits in a thread under the warm-up mention.
+peer_login="$(curl -sS -X POST "$BASE_URL/v1/auth/login" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"$PEER_EMAIL\",\"password\":\"$PEER_PASSWORD\"}")"
+PEER_TOKEN="$(printf '%s' "$peer_login" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["accessToken"])
+except Exception: pass')"
+[ -n "$PEER_TOKEN" ] || { echo "[lane] the peer fixture login failed: $peer_login" >&2; exit 1; }
+curl -sS -o /dev/null -X POST \
+  "$BASE_URL/v1/workspaces/$DEMO_WORKSPACE_ID/channels/$AGENT_LAB_CHANNEL_ID/messages" \
+  -H "authorization: Bearer $PEER_TOKEN" -H 'content-type: application/json' \
+  -d "{\"body\":\"$PEER_TEXT\",\"clientMsgId\":\"$(uuidgen)\"}"
+[ "$(query_sql "SET row_security=off; SELECT count(*) FROM message
+                WHERE channel_id = '$AGENT_LAB_CHANNEL_ID'
+                  AND author_member_id = '$PEER_MEMBER_ID';")" = "1" ] || {
+  echo "[lane] the peer's message did not land in #agent-lab" >&2
+  exit 1
+}
+say "peer message in #agent-lab main flow (for 4869-reply-swipe)"
 
 # ---------------------------------------------------------------------------
 # ADR-0004 — the provider is the mock, proved rather than self-reported
@@ -1081,12 +1120,12 @@ for flow in "${FLOWS[@]}"; do
   # slow-but-healthy runs and report them as failures, which is the worse error.
   # macOS ships no coreutils `timeout`, hence the explicit watchdog.
   # CHANNEL_ID and PEER_TEXT are 4869-reply-swipe's inputs (it is not in FLOWS;
-  # run it with `--flow 4869-reply-swipe`). #agent-lab holds, in order, the lane
-  # member's own warm-up mention, 김인턴's mock reply, and the realtime probe's
-  # message — so a reply swipe has a PEER's row to hit and two of the member's own
-  # rows to miss it onto, which is what that flow's 「…님에게 답글」 assertion needs.
-  # PEER_TEXT is the mock's fixed reply text (assert_provider_is_the_mock greps the
-  # same string), not something a real provider could be made to say.
+  # run it with `--flow 4869-reply-swipe`). #agent-lab's main flow holds, in order,
+  # the lane member's own warm-up mention (with the 「답글 1개」 line: 김인턴's mock
+  # reply is in the thread under it since #4646), the peer's message, and the
+  # realtime probe's message — so a reply swipe has a PEER's row to hit and the
+  # member's own rows to miss it onto, which is what that flow's 「…님에게 답글」
+  # assertion needs. PEER_TEXT is the text of the peer's message seeded above.
   maestro --udid "$UDID" test --test-output-dir "$flow_out" "$flow_file" \
       -e SERVER_URL="$FLOW_SERVER_URL" \
       -e EMAIL="$LANE_EMAIL" \
@@ -1096,7 +1135,7 @@ for flow in "${FLOWS[@]}"; do
       -e AGENT_HANDLE="$AGENT_HANDLE" \
       -e WORK_SESSION_ID="$LANE_SESSION_ID" \
       -e CHANNEL_ID="$AGENT_LAB_CHANNEL_ID" \
-      -e PEER_TEXT="mock reply" \
+      -e PEER_TEXT="$PEER_TEXT" \
       >"$OUT_DIR/$flow.log" 2>&1 &
   FLOW_PID=$!
   ( sleep "$FLOW_TIMEOUT"; kill -TERM "$FLOW_PID" 2>/dev/null ) &
