@@ -17,6 +17,7 @@ import {
 } from '@momo/core/features/expressions/fixtures';
 import type {
   Expression,
+  ExpressionList,
   ExpressionMedia,
 } from '@momo/core/features/expressions/types';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
@@ -60,12 +61,19 @@ const moving: Expression = FIXTURE_EXPRESSIONS[0];
 const stores: PhoneExpressionStore[] = [];
 let release: (() => void) | undefined;
 
-function setup() {
+function setup(holdDeltas = false) {
   const list = {...FIXTURE_LIST, items: [moving, still]};
+  // 변경 알림 뒤의 부분 읽기(`?since=`)를 붙들어 두는 칸(#5473): 알림은 왔고 다음 목록은 아직 안 온 상태를 만든다.
+  const deltas: Array<(answer: {status: number; json?: ExpressionList}) => void> = [];
   const request = jest.fn(
     async (input: {method: string; path: string}) => {
       if (input.method === 'GET' && input.path === base) {
         return {status: 200, json: list};
+      }
+      if (holdDeltas && input.method === 'GET' && input.path.includes('since=')) {
+        return new Promise<{status: number; json?: ExpressionList}>(resolve => {
+          deltas.push(resolve);
+        });
       }
       if (input.path.includes('/image?')) {
         const wantsGif =
@@ -90,7 +98,7 @@ function setup() {
     {read: () => null, write: jest.fn()},
   );
   stores.push(store);
-  return {store, request, files};
+  return {store, request, files, deltas};
 }
 
 function mount(store: PhoneExpressionStore, children: React.ReactNode) {
@@ -296,6 +304,120 @@ describe('움직이는 그림(GIF)', () => {
     expect(screen.getByTestId(`expression-image-${moving.name}-large`).props.source.uri).toMatch(/png$/);
     // 동작 줄이기에서는 움직임이 없으니 누름도 받지 않는다(줄이 받는다) — 앞 판과 같다.
     expect(screen.getByLabelText(`${moving.displayName} · ${moving.tags[0]}`).props.onPress).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// #5473 M-5451-1 — 숨김·삭제 알림(`store.changed()`)이 오면, 다음 목록이 적용될 때까지 이미 그린 그림이 화면에 남지 않는다.
+//
+// #5451 은 그림 층을 새로 받는 동안에도 칸에 남겨 두어서(빈 프레임 방지) 알림이 걷은 파일을 가리키는 층이 델타가 적용될 때까지 그려졌다(ADR-0218 D3 「숨김·삭제
+// 이벤트 때 폐기」의 화면 쪽 후퇴). 지금은 알림 뒤 목록이 올 때까지 칸(`expression-box-*`)만 서고 그림 층(`expression-image-*`)은 0개다. 칸 크기는 그대로다.
+// 기존 시험은 `store.refresh()` 를 기다려서 이 창을 잴 수 없었다 — 여기서는 목록 읽기를 붙들어 둔다.
+// =============================================================================
+describe('알림 뒤 목록이 적용되기 전', () => {
+  const layerCount = (name: string) =>
+    screen.queryAllByTestId(new RegExp(`^expression-image-${name}-large`)).length;
+  const both = () => (
+    <>
+      <ExpressionImage expression={still} size="large" visible />
+      <ExpressionImage expression={moving} size="large" visible />
+    </>
+  );
+  /** 서버가 `moving` 을 숨겼다는 부분 읽기 답. */
+  const hidesMoving = (): {status: number; json: ExpressionList} => ({
+    status: 200,
+    json: {
+      ...FIXTURE_LIST,
+      version: '4',
+      baseVersion: '3',
+      reset: false,
+      items: [{...moving, version: '4', status: 'hidden', media: null}],
+    },
+  });
+
+  it('changed() 만 오고 목록이 아직 안 왔을 때 그림 층은 0개이고 칸은 그대로이며, 목록이 오면 남은 표현만 다시 서고 숨겨진 것은 글자가 된다', async () => {
+    const {store, request, deltas} = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    // 대조: 알림 전에는 두 표현 모두 그림이 그려져 있다(없으면 아래 「0개」는 아무것도 재지 못한다).
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+    const boxes = {still: boxOf(still.name, 'large'), moving: boxOf(moving.name, 'large')};
+    expect(boxes.still).toMatchObject({width: 160, height: 160});
+    const callsBefore = imageCalls(request).length;
+
+    // 알림만 온다 — 목록 읽기는 붙들려 있다.
+    act(() => store.changed());
+    await flush();
+    expect(deltas).toHaveLength(1);
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+    expect(layerCount(moving.name)).toBe(0);
+    // 칸은 그대로고(줄이 뛰지 않는다) 글자도 서지 않는다 — 어느 표현이 숨겨졌는지 모르는 동안은 비워 둘 뿐이다.
+    expect(boxOf(still.name, 'large')).toEqual(boxes.still);
+    expect(boxOf(moving.name, 'large')).toEqual(boxes.moving);
+    expect(tokenText(still.name)).toBeNull();
+    expect(tokenText(moving.name)).toBeNull();
+    // 확인되지 않은 동안에는 그림을 새로 받지도 않는다.
+    expect(imageCalls(request).length).toBe(callsBefore);
+
+    // 목록이 온다: 숨겨진 것은 글자가 되고, 남은 표현은 칸 그대로 다시 선다.
+    await act(async () => {
+      deltas[0](hidesMoving());
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(boxOf(still.name, 'large')).toEqual(boxes.still);
+    expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
+    expect(layerCount(moving.name)).toBe(0);
+  });
+
+  it('읽은 답이 이미 적용한 목록보다 낡으면 한 번 더 읽고, 그 뒤에 그림을 다시 그린다 (멈춘 채 남지 않는다)', async () => {
+    const { store, deltas } = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    act(() => store.changed());
+    await flush();
+    // 첫 답이 낡았다(이미 적용한 3판보다 앞선 2판).
+    await act(async () => {
+      deltas[0]({
+        status: 200,
+        json: {...FIXTURE_LIST, version: '2', baseVersion: '1', reset: false, items: []},
+      });
+    });
+    await flush();
+    expect(deltas).toHaveLength(2); // 한 번 더 읽는다
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+    await act(async () => {
+      deltas[1]({
+        status: 200,
+        json: {...FIXTURE_LIST, version: '3', baseVersion: '3', reset: false, items: []},
+      });
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+  });
+
+  it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 글자가 서며 그림 층은 없다', async () => {
+    const { store, deltas } = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    act(() => store.changed());
+    await flush();
+    await act(async () => {
+      deltas[0]({status: 500});
+    });
+    for (let step = 0; step < 3; step += 1) await flush();
+    expect(store.snapshot()).toMatchObject({state: 'error', changePending: false});
+    expect(layerCount(still.name)).toBe(0);
+    expect(screen.getByText(`:${still.name}:`)).toBeTruthy();
   });
 });
 
