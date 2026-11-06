@@ -43,10 +43,11 @@ import type { ReleaseNote } from "../model";
 
 export const RELEASE_NOTE_0_1_43: ReleaseNote = {
   version: "0.1.43",
-  releasedOn: "2026-11-07",
+  releasedOn: "2026-11-06",
   phoneBuild: 3060,
-  // release 채널은 0.1.43. 다음 채널 번호는 승격 커밋에서 만드는 팀 설치 빌드가 정해지면 통합자가 더한다.
-  desktopFrom: ["0.1.43"],
+  // release 채널은 0.1.43, 다음 채널은 승격 커밋에서 만드는 팀 설치 빌드 0.1.0-next.11(#5227)이 처음 담는다.
+  // v0.1.42 소식도 같은 빌드가 처음 담으므로 그 빌드는 더 새 소식인 이것을 자기 소식으로 보인다.
+  desktopFrom: ["0.1.43", "0.1.0-next.11"],
   summary: "releaseNotes.v0143.summary",
   items: [
     {
