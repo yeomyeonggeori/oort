@@ -2,10 +2,10 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObj
 import { ArrowLeft, MoreHorizontal, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
 import type { MessageKey } from "@momo/core/i18n";
-import { searchExpressions } from "@momo/core/features/expressions/search";
+import { orderExpressionsForTab } from "@momo/core/features/expressions/browse";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
-import { expressionShelfOf, expressionsForView, firstFilledView, type ExpressionView } from "@momo/core/features/expressions/kind";
+import { firstFilledView, type ExpressionView } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionMetadata } from "@momo/core/features/expressions/types";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -42,7 +42,12 @@ const VIEW_OPTIONS = [
   { value: "gif", name: "expressions.panel.viewGif" },
 ] as const satisfies readonly { value: ExpressionView; name: MessageKey }[];
 
-export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, view: fixedView }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void;
+export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClose, escapeClaim, view: fixedView }: { onPick: (token: string) => void;
+  /**
+   * 입력창 위 미리 보기로 고르는 호스트(메인 컴포저, #5453)가 준다. 주면 고른 표현을 `:이름:` 글로 넣지 않고 표현 자체를 넘긴다 - 호스트가 입력창 위에 미리
+   * 보여 주고 보내기 한 번에 글과 함께 보낸다. 주지 않으면 예전 그대로 `onPick(토큰)`이다(스레드 입력칸·반응).
+   */
+  onPickExpression?: (expression: Expression) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void;
   /**
    * 호스트(고르개)가 탭으로 보기를 정해 준다. 주면 이 패널은 자기 보기 고르기와 「우리 팀」 머리글을 그리지 않는다 — 탭 줄이 그 일을 한다(owner 11-05).
    * 주지 않으면(단독으로 쓸 때) 이모티콘·GIF 고르기를 스스로 그리고, 사람이 고르기 전에는 등록이 있는 첫 보기를 연다.
@@ -121,7 +126,8 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, vi
   }, [escapeClaim, confirming]);
   if (!store) return null;
   function backToList() { focusTrigger.current = true; setMode("list"); }
-  const items = expressionsForView(searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage), view);
+  // 빈 검색은 최근에 쓴 것이 먼저, 검색어가 있으면 관련도(코어 `orderExpressionsForTab`, 폰 시트와 같은 함수). 보기 이름이 곧 탭 이름이다.
+  const items = orderExpressionsForTab(cache.items, view, { query, usage });
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
     lock.current = true; setBusy(true); setError(null);
@@ -152,7 +158,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, vi
       <div className="flex justify-end gap-2"><Button ref={cancelRef} type="button" variant="secondary" aria-disabled={busy || undefined} className={cn(busy && DIM)} onClick={closeConfirm}>취소</Button><Button type="button" variant="destructive" aria-busy={busy || undefined} aria-disabled={offline || undefined} className={cn(offline && DIM)} onClick={() => void confirm()}>{busy ? "처리 중" : target.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
     </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
       {fixedView ? null : <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />}
-      <Input ref={searchRef} type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <Input ref={searchRef} type="search" aria-label={formatMessage(view === "gif" ? "expressions.sheet.searchGif" : "expressions.sheet.searchEmoticon")} placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
       {/* 다시 읽기가 실패해도 이미 받아 둔 목록은 지우지 않는다(#5279 C, #5242 규칙): 한 줄이 위에서 원인과 함께 말하고 목록은 그대로 서 있다. 받아 둔 것이 없을 때만 한 줄뿐이다. */}
       {status === "error" && <LoadFailureNote titleKey={CONNECTION_KEYS.loadTeamExpressionsTitle} cause={loadCauseOf(failure)} onRetry={() => void store.refresh()} separator={false} testId="team-expressions-error" />}
@@ -160,8 +166,10 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim, vi
         <ul ref={listRef} className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);
-            if (active?.status === "active") onPick(expressionToken(active.name));
-          }}><ExpressionImage item={item} size={expressionShelfOf(item) === "emoticon" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
+            if (active?.status !== "active") return;
+            if (onPickExpression) onPickExpression(active);
+            else onPick(expressionToken(active.name));
+          }}><ExpressionImage item={item} size="medium" still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
           <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`${item.displayName} 관리`} data-manage={item.id}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent>
             <DropdownMenuItem onSelect={() => { setError(null); setTarget({ item, action: "report" }); }}>신고하기</DropdownMenuItem>
             <DropdownMenuItem disabled={item.createdBy !== store.memberId && !admin} onSelect={() => { setError(null); setTarget({ item, action: "delete" }); }}>삭제하기{item.createdBy !== store.memberId && !admin ? " (만든 사람·관리자만)" : ""}</DropdownMenuItem>

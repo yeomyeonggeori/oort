@@ -24,7 +24,7 @@ async function mountPanel(store = makeStore()) {
   const view = render(<ExpressionsContext.Provider value={store}><TeamExpressionsPanel purpose="reaction" onPick={() => {}} escapeClaim={claim} /></ExpressionsContext.Provider>);
   return { store, claim, view };
 }
-function manage(view: RenderResult) { return view.getByRole("button", { name: "파티 앵무새 관리" }); }
+function manage(view: RenderResult) { return view.getByRole("button", { name: "기절 관리" }); }
 async function chooseFromMenu(view: RenderResult, name: "신고하기" | "삭제하기") {
   const trigger = manage(view);
   fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false });
@@ -53,7 +53,7 @@ describe("팀 표현 삭제·신고 확인은 고르개 안의 단계다 (#4986)
     const group = view.getByRole("group", { name: "팀 그림을 삭제할까요?" });
     expect(group.getAttribute("aria-describedby")).toBeTruthy();
     expect(view.queryByRole("list", { name: "팀 표현 목록" })).toBeNull();
-    expect(view.queryByLabelText("우리 팀 표현 검색")).toBeNull();
+    expect(view.queryByLabelText("Search GIFs")).toBeNull();
   });
 
   it("초점은 「취소」로 들어가고, 취소하면 그 항목의 「관리」로 돌아간다", async () => {
@@ -85,8 +85,8 @@ describe("팀 표현 삭제·신고 확인은 고르개 안의 단계다 (#4986)
     fireEvent.click(view.getByRole("button", { name: "신고하고 숨기기" }));
     await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(step(view)).toBeNull());
-    expect(view.queryByRole("button", { name: "파티 앵무새 관리" })).toBeNull();
-    expect(document.activeElement).toBe(view.getByLabelText("우리 팀 표현 검색"));
+    expect(view.queryByRole("button", { name: "기절 관리" })).toBeNull();
+    expect(document.activeElement).toBe(view.getByLabelText("Search GIFs"));
   });
 
   it("보내는 동안 초점을 쥔 단추는 disabled가 되지 않고 자기 진행으로 잠기지 않아서 초점이 body로 떨어지지 않는다", async () => {

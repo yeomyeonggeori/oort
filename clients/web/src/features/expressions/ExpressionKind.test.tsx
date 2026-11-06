@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-libra
 import vectors from "../../../../../docs/api/expression-kind.vectors.json";
 import { FIXTURE_EXPRESSIONS, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_MEMBER_ID, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID, fixtureManualDraft } from "@momo/core/features/expressions/fixtures";
 import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
-import { EXPRESSION_EMOJI_MAX_EDGE, recommendExpressionKind } from "@momo/core/features/expressions/kind";
+import { EXPRESSION_EMOJI_MAX_EDGE, expressionsForPickerTab, recommendExpressionKind } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionKind, ExpressionList, ExpressionMedia } from "@momo/core/features/expressions/types";
 import { createLocaleService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
 import { LocaleContext } from "@/i18n/localeContext";
@@ -165,7 +165,7 @@ describe("the team panel's two views do not overlap", () => {
   }
   const names = (view: ReturnType<typeof render>) => Array.from(view.container.querySelectorAll("ul[aria-label='팀 표현 목록'] li button[aria-label$='메시지에 넣기']")).map((button) => (button.getAttribute("aria-label") ?? "").replace(" 메시지에 넣기", ""));
 
-  it("puts every registration in exactly one view: the small emoji and the still stickers share the emoticon view, the moving stickers are the GIF view, an older one is a sticker", async () => {
+  it("puts every big picture in exactly one view: the still stickers are the emoticon view, the moving stickers are the GIF view, an older one is a sticker; the small emoji belong to the emoji tab, not to these views", async () => {
     const store = storeOf(CATALOGUE); await store.refresh();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
@@ -174,10 +174,13 @@ describe("the team panel's two views do not overlap", () => {
     seen.emoticon = names(view).sort();
     fireEvent.click(view.getByLabelText("GIF")); seen.gif = names(view).sort();
     expect(seen).toEqual({
-      emoticon: ["emoji_moving", "emoji_still", "older_still", "sticker_still"],
+      emoticon: ["older_still", "sticker_still"],
       gif: ["older_moving", "sticker_moving"],
     });
-    const all = [...seen.emoticon, ...seen.gif];
+    // Together with the emoji tab's small pictures (core `expressionsForPickerTab`) the two views hold the whole catalogue, each exactly once.
+    const small = expressionsForPickerTab(CATALOGUE, "emoji").map((item) => item.name);
+    expect(small.sort()).toEqual(["emoji_moving", "emoji_still"]);
+    const all = [...seen.emoticon, ...seen.gif, ...small];
     expect(all.sort()).toEqual(CATALOGUE.map((item) => item.name).sort());
     expect(new Set(all).size).toBe(CATALOGUE.length);
   });
@@ -189,7 +192,7 @@ describe("the team panel's two views do not overlap", () => {
     expect(view.queryAllByRole("radio")).toHaveLength(0);
     expect(view.container.textContent).not.toContain("우리 팀");
     view.rerender(wrapper(store, <TeamExpressionsPanel purpose="insert" view="emoticon" onPick={() => {}} />));
-    expect(names(view).sort()).toEqual(["emoji_moving", "emoji_still", "older_still", "sticker_still"]);
+    expect(names(view).sort()).toEqual(["older_still", "sticker_still"]);
   });
   it("opens on the first filled view, so a team whose pictures are all moving stickers sees them at once; a pick is kept", async () => {
     const store = storeOf([moving("sticker_moving", "sticker")]); await store.refresh();
@@ -206,10 +209,10 @@ describe("the team panel's two views do not overlap", () => {
     expect(view.container.textContent).toContain("Nothing in this view yet");
   });
   it("says a view is empty, not that the team has no pictures, when only another view has some", async () => {
-    const store = storeOf([still("only_emoji", "emoji")]); await store.refresh();
+    const store = storeOf([still("only_still", "sticker")]); await store.refresh();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
-    expect(names(view)).toEqual(["only_emoji"]);
+    expect(names(view)).toEqual(["only_still"]);
     fireEvent.click(view.getByLabelText("GIF"));
     expect(names(view)).toEqual([]);
     expect(view.container.textContent).toContain("Nothing in this view yet");
@@ -248,10 +251,10 @@ describe("the team panel's two views do not overlap", () => {
     const card = render(<LocaleContext.Provider value={locale}>{wrapper(fixtureStore(), <ExpressionDraftCard draft={movingDraft()} onReplace={() => {}} onApprove={vi.fn()} />)}</LocaleContext.Provider>);
     const kindNames = within(card.container).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent);
     expect(kindNames).toEqual([...words.kinds]);
-    // The sheet's tabs are a different word from the views (owner 11-06, #5427): the first tab says where the pictures come from (Team), the view that lists them says what they are (Emoticon). The GIF view is still the GIF tab.
+    // The sheet's tabs and the views say the same thing now (owner 11-07, #5453: 이모티콘 · 이모지 · GIF, no 「우리 팀」 / 「기본」 split): the first tab is the emoticon view (plural in English), the last the GIF view.
     const t = locale.service.formatMessage;
-    expect(t("expressions.sheet.tabEmoticon")).toBe(language === "ko-KR" ? "우리 팀" : "Team");
-    expect(words.names[0]).not.toBe(t("expressions.sheet.tabEmoticon"));
+    expect(t("expressions.sheet.tabEmoticon")).toBe(language === "ko-KR" ? "이모티콘" : "Emoticons");
+    expect(t("expressions.sheet.tabEmoji")).toBe(language === "ko-KR" ? "이모지" : "Emoji");
     expect(words.names[1]).toBe(t("expressions.sheet.tabGif"));
     expect(words.kinds[0].endsWith(words.names[0].toLowerCase())).toBe(true);
     expect(words.kinds[1].endsWith(words.names[0].toLowerCase())).toBe(true);
