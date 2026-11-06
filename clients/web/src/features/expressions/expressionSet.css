@@ -1,0 +1,21 @@
+/*
+ * 계획 카드·세트 카드 (ADR-0218 §12 L2.5·L5~L7, #5462). 색은 토큰만 읽는다(`--surface`, `--line`, `--primary`…): 이 파일에 값이 없다.
+ * 고른 칸·회색 칸의 모양을 클래스 이름이 아니라 **읽는 쪽이 이미 보는 속성**(`aria-pressed`, `data-gray`)으로 정한다: 화면과 보조기술이 같은 사실에서 나온다.
+ */
+
+/* 참조 그림 썸네일. 크기는 사람이 얼굴 유무를 알아볼 수 있는 최소로 한 곳에서 정한다. */
+.expression-set-thumb { width: 48px; height: 48px; flex: none; object-fit: cover; }
+
+/* 격자의 한 칸. 그림 자리는 준비된 칸과 회색 칸이 같은 크기다(L7.6: 칸이 사라져 줄이 당겨지지 않는다). */
+.expression-set-picture { width: 64px; height: 64px; }
+.expression-set-tile { width: 100%; height: 100%; border: 2px solid var(--line); background-color: var(--surface); }
+.expression-set-tile[aria-pressed="true"] { border-color: var(--primary); }
+.expression-set-tile:hover { background-color: var(--surface-hover); }
+/* 회색 칸: 선택·올리기·다시 시도가 없다. 점선과 아이콘과 글이 구분을 지고, 색에만 기대지 않는다. */
+.expression-set-tile[data-gray] { border-style: dashed; background-color: var(--surface-muted); cursor: default; }
+
+/* 칸 위쪽 왼쪽의 체크 상자. 고른 칸에서만 채워지고 표식이 보인다. */
+.expression-set-check { border: 1px solid var(--line-strong); background-color: var(--surface); }
+.expression-set-check svg { display: none; }
+.expression-set-tile[aria-pressed="true"] .expression-set-check { border-color: var(--primary); background-color: var(--primary); color: var(--on-primary); }
+.expression-set-tile[aria-pressed="true"] .expression-set-check svg { display: block; }
