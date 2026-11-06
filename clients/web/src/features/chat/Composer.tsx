@@ -1,5 +1,7 @@
 import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpressionPreview";
+import { ComposerExpressionSuggest, type ExpressionSuggestHandle } from "@/features/expressions/ComposerExpressionSuggest";
 import { useExpressions } from "@/features/expressions/context";
+import { useExpressionSuggest } from "@/features/expressions/useExpressionSuggest";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
@@ -406,6 +408,15 @@ export function Composer({
     text,
     paused: offline,
   });
+  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 추천이 뜬다(#5476). 맞추기는 기기 안에서만 한다(네트워크 없음). 이미 미리 본 그림이 있거나(큰 그림은 하나),
+  // 오프라인이거나(그림을 받을 수 없다), 멘션·채널·`:` 후보나 `/` 명령을 치는 중이면(`autocomplete.kind`) 줄이 서지 않는다.
+  const suggestRef = useRef<ExpressionSuggestHandle>(null);
+  const suggest = useExpressionSuggest({
+    workspaceId,
+    channelId,
+    text,
+    enabled: !offline && pendingExpression === null && autocomplete.kind === null && parseSlashCommand(text) === null,
+  });
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
   const keysHintNeeded = useSendHintNeeded();
 
@@ -761,6 +772,25 @@ export function Composer({
     inputRef.current?.focus();
   }
 
+  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다. */
+  function pickSuggestion(item: Expression) {
+    setPendingExpression(item);
+    suggest.close();
+    inputRef.current?.focus();
+  }
+
+  /** 추천 줄의 ✕: 이 대화에서 이 낱말 추천을 끈다. */
+  function muteSuggestion() {
+    suggest.mute();
+    inputRef.current?.focus();
+  }
+
+  /** 추천 줄의 Esc: 줄만 닫는다(쓴 글도 끈 낱말도 그대로). */
+  function dismissSuggestion() {
+    suggest.close();
+    inputRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 일반 메시지와 예약으로 둘 다 나가면 안 된다.
@@ -798,6 +828,9 @@ export function Composer({
         quoteOpen: quote !== null,
         // 입력칸 위에 지울 것이 있다: 링크 카드(저절로 떴다) 또는 미리 본 이모티콘(일부러 골랐다). Esc 는 링크 카드 → 이모티콘 → 인용 차례로 하나씩 치운다.
         previewOpen: linkPreview.cards.length > 0 || pendingExpression !== null,
+        // #5476 - 입력칸 위 이모티콘 추천 줄. Esc 는 이 줄을 먼저 닫고, ↑ 는 (캐럿이 첫 줄이면) 이 줄로 들어간다. Enter 는 이 줄과 상관없이 보내기다.
+        suggestOpen: suggest.open,
+        caretOnFirstLine: !event.currentTarget.value.slice(0, event.currentTarget.selectionStart ?? 0).includes("\n"),
         // #5191 - 입력칸이 한 글자도 없을 때만 ↑ 가 「내 마지막 메시지 고치기」가 된다. 이 키를 받을 곳이 없으면 적지 않는다.
         ...(onEditLast !== undefined ? { textEmpty: text.length === 0 } : {}),
       }
@@ -820,6 +853,15 @@ export function Composer({
         }
         return;
       }
+      case "suggest-dismiss":
+        // 멘션 목록 다음, 링크 카드·미리 본 이모티콘·인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). 줄만 닫는다.
+        event.preventDefault();
+        dismissSuggestion();
+        return;
+      case "suggest-focus":
+        event.preventDefault();
+        suggestRef.current?.focus();
+        return;
       case "preview-dismiss":
         // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다. 링크 카드가 먼저, 없으면 미리 본 이모티콘이다.
         event.preventDefault();
@@ -996,6 +1038,16 @@ export function Composer({
             testId="composer-secret-block"
             cardAvailable={cardAvailable}
             {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
+          />
+        )}
+        {suggest.open && (
+          <ComposerExpressionSuggest
+            ref={suggestRef}
+            items={suggest.items}
+            onPick={pickSuggestion}
+            onMute={muteSuggestion}
+            onDismiss={dismissSuggestion}
+            onReturn={() => inputRef.current?.focus()}
           />
         )}
         <ComposerAutocompleteList
