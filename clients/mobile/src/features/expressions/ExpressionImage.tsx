@@ -68,7 +68,7 @@ export function ExpressionImage({
   size: PhoneExpressionSize;
   visible?: boolean;
 }) {
-  const {store, items, state} = useExpressions();
+  const {store, shelf, state} = useExpressions();
   const {
     fontScale,
     height: windowHeight,
@@ -90,7 +90,8 @@ export function ExpressionImage({
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const layersRef = useRef(layers);
   layersRef.current = layers;
-  const live = items.find(
+  // 그리기(칸·토큰)는 보관함(`shelf`)을 따른다 — 처음 읽는 동안에도 칸이 서고, 그림 파일은 목록이 확인된 뒤(`state === 'ready'`)에 받는다.
+  const live = shelf.find(
     item =>
       item.id === expression.id &&
       item.name === expression.name &&

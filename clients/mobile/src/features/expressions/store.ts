@@ -54,8 +54,29 @@ export interface ExpressionFiles {
   write(key: string, bytes: Uint8Array): string;
   remove(uri: string): void;
 }
+/**
+ * 기기에 남기는 **마지막 보관함**(이름 → 그림 크기, #5451). 대화가 열리는 순간 보관함이 아직 안 왔어도 `:이름:` 을 글로 먼저 그렸다가 큰 그림으로
+ * 바꾸지 않으려는 것이다. 읽기·쓰기는 동기다(MMKV). 목록 응답(`ExpressionList`)과 같은 모양을 적고, 읽을 때 같은 계약 검사를 지난 것만 받는다.
+ */
+export interface ExpressionShelfStorage {
+  read(): unknown;
+  write(value: PersistedShelf): void;
+  clear(): void;
+}
+export interface PersistedShelf {
+  v: 1;
+  memberId: string;
+  list: ExpressionList;
+}
 export interface ExpressionSnapshot {
   items: readonly Expression[];
+  /**
+   * 대화 줄(본문 토큰·반응 칩)이 **그리는** 표현 목록. `items` 는 서버가 확인한 목록(고르개·보내기가 쓴다)이고, 이것은 그리기 전용이다:
+   *   · 읽은 목록이 있을 때(`ready`) = `items`
+   *   · 처음 읽는 중(`loading`) = 마지막으로 읽은 목록(기기에 남긴 것 포함) — 그림 칸이 첫 프레임부터 선다. 그림 파일은 목록이 확인된 뒤에야 받는다.
+   *   · 끊김·오류(`offline`·`error`)·세션 끝 = 비어 있다(닫힌 채로 — 숨김·삭제를 확인할 수 없는 동안 낡은 목록으로 그리지 않는다).
+   */
+  shelf: readonly Expression[];
   state: 'loading' | 'ready' | 'error' | 'offline';
   revision: number;
   usage?: ExpressionUsage;
@@ -70,11 +91,37 @@ export function createPhoneExpressionStore(
   transport: ExpressionTransport,
   files: ExpressionFiles,
   storage?: {read(): unknown; write(value: ExpressionUsage): void},
+  shelfStorage?: ExpressionShelfStorage,
 ) {
   const emptyItems: readonly Expression[] = [];
+  // 마지막으로 읽은(또는 기기에 남은) 목록 — 다른 워크스페이스·멤버의 것이나 계약에 안 맞는 것은 받지 않는다.
+  const restoreShelf = (): readonly Expression[] => {
+    if (!shelfStorage) return emptyItems;
+    try {
+      const value = shelfStorage.read() as PersistedShelf | null;
+      if (
+        value === null ||
+        typeof value !== 'object' ||
+        value.v !== 1 ||
+        value.memberId !== memberId ||
+        !matchesExpressionContract('List', value.list) ||
+        value.list.workspaceId !== workspaceId
+      )
+        return emptyItems;
+      const active = value.list.items.filter(
+        item => item.status === 'active' && item.media !== null,
+      );
+      return active.length > 0 ? active : emptyItems;
+    } catch {
+      return emptyItems;
+    }
+  };
+  let lastKnown: readonly Expression[] = restoreShelf();
+  let shelfVersion: string | null = null;
   let cache = emptyExpressionCache(workspaceId, memberId);
   let snapshot: ExpressionSnapshot = {
     items: emptyItems,
+    shelf: lastKnown,
     state: 'loading',
     revision: 0,
   };
@@ -94,10 +141,38 @@ export function createPhoneExpressionStore(
   // 등록 전 미리보기 파일. 목록 그림(`images`)과 따로 둔다: 변경 알림이 목록 그림을 걷어도 사람이 보고 있는
   // 미리보기를 지우면 안 된다. 화면이 놓을 때(`discardDraftImage`)나 세션이 끝날 때만 지운다.
   const draftFiles = new Set<string>();
+  // 읽은 목록을 마지막 보관함으로 삼고 기기에 남긴다(같은 버전이면 다시 쓰지 않는다 — 목록이 클 수 있다).
+  const rememberShelf = () => {
+    if (cache.version === null || cache.version === shelfVersion) return;
+    shelfVersion = cache.version;
+    const active = cache.items.filter(
+      item => item.status === 'active' && item.media !== null,
+    );
+    lastKnown = active.length > 0 ? active : emptyItems;
+    try {
+      shelfStorage?.write({
+        v: 1,
+        memberId,
+        list: {
+          workspaceId,
+          version: cache.version,
+          baseVersion: null,
+          reset: true,
+          addPolicy: cache.addPolicy ?? 'members',
+          items: active,
+        },
+      });
+    } catch {
+      // 기기에 못 남겨도 앱 안의 보관함은 그대로다.
+    }
+  };
   const publish = (state = snapshot.state) => {
+    if (state === 'ready') rememberShelf();
+    const items =
+      state === 'ready' && cache.items.length > 0 ? cache.items : emptyItems;
     snapshot = {
-      items:
-        state === 'ready' && cache.items.length > 0 ? cache.items : emptyItems,
+      items,
+      shelf: state === 'ready' ? items : state === 'loading' ? lastKnown : emptyItems,
       state,
       revision: epoch,
       usage,
@@ -363,6 +438,14 @@ export function createPhoneExpressionStore(
     },
     dispose() {
       disposed = true;
+      // 세션이 끝났다(로그아웃·워크스페이스 전환): 남겨 둔 보관함도 지운다.
+      lastKnown = emptyItems;
+      shelfVersion = null;
+      try {
+        shelfStorage?.clear();
+      } catch {
+        // 못 지워도 다음 읽기가 계약(워크스페이스·멤버)으로 걸러 낸다.
+      }
       for (const uri of draftFiles) files.remove(uri);
       draftFiles.clear();
       evict();
