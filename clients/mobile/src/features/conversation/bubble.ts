@@ -62,8 +62,8 @@ const HEX = /^#[0-9a-f]{6}$/i;
  * 대화 목록이 **실제로 서는 바닥** (#5421) — `ConversationScreen` 의 `screen` 배경(위 25% 에서 `canvasTop` 이 이 색으로 건너가고 그 아래는 평평하다)의
  * 끝 색이자 측정 하네스 `ConversationFloor` 의 끝 색이다. 세 곳이 이 함수 하나를 읽는다 — 화면 배경을 고치면 말풍선 채움과 사진 틀이 함께 움직인다.
  *
- * 라이트는 `surface`(종이색), 다크는 `bg`, 사용자 배경 이미지 위에서는 `bg` 한 장(`AppBackground` 가 그 밑을 그린다)이다. 팔레트의 `bg` 가 아니다 —
- * 라이트에서 `bg`(`canvas-mid`)는 목록 바닥이 아니라 그라디언트의 중간 정지점이고, 그 값으로 말풍선을 골랐던 것이 #5421 의 뿌리였다.
+ * 라이트는 `surface`(종이색), 다크는 `bg`, 사용자 배경 이미지 위에서는 `bg` 한 장(`AppBackground` 가 그 밑을 그린다)이다. 팔레트의 `bg` 가 늘 바닥인 것이 아니다 —
+ * 라이트에서 `bg`(`canvas-mid`)는 대화 목록 바닥에 쓰이지 않고(목록은 `canvasTop` → `surface` 그라디언트), 그 값으로 말풍선을 골랐던 것이 #5421 의 뿌리였다.
  */
 export function conversationFloor(
   p: Pick<Palette, 'mode' | 'backdrop' | 'surface' | 'bg'>,
