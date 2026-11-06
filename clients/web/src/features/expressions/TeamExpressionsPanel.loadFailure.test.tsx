@@ -50,8 +50,8 @@ function mountPanel(store: ExpressionStore): RenderResult {
     </LocaleProvider>
   );
 }
-const LIST = { name: "팀 표현 목록" };
-const rowCount = (view: RenderResult) => within(view.getByRole("list", LIST)).getAllByRole("listitem").length;
+// 목록은 그림 격자다(owner 2026-11-07, #5453): 칸 하나가 단추 하나다.
+const rowCount = (view: RenderResult) => within(view.getByTestId("expression-grid")).getAllByRole("button").length;
 const noteText = (view: RenderResult) => view.getByTestId("team-expressions-error").textContent ?? "";
 
 describe("팀 그림 목록 읽기 실패 (#5279 C)", () => {
@@ -91,7 +91,7 @@ describe("팀 그림 목록 읽기 실패 (#5279 C)", () => {
     const view = mountPanel(store);
 
     expect(noteText(view)).toContain("팀 그림을 불러오지 못했어요. 서버에 닿지 못했어요.");
-    expect(view.queryByRole("list", LIST)).toBeNull();
+    expect(view.queryByTestId("expression-grid")).toBeNull();
     expect(view.queryByText("아직 팀 그림이 없어요")).toBeNull();
 
     store.transport.json = working;

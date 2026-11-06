@@ -38,6 +38,7 @@ import {ExpressionImage} from './ExpressionImage';
 import {ExpressionImportForm} from './ExpressionImportForm';
 import {ExpressionMakeEntry} from './ExpressionMakeEntry';
 import {useExpressions} from './ExpressionProvider';
+import type {PhoneExpressionStore} from './store';
 import {
   browseExpressions,
   expressionActionOf,
@@ -69,6 +70,27 @@ const EMPTY_COPY: Readonly<Record<ExpressionView, PlainMessageKey>> = {
   gif: 'expressions.sheet.emptyGif',
 };
 
+/**
+ * 고른 등록이 지금도 활성인지 다시 읽어 확인한다 - 고르는 사이 다른 곳에서 신고·삭제될 수 있다. 활성이면 그 등록, 아니면 null이다.
+ * 이모지 탭의 팀 이모지 한 줄(`TeamEmojiRow`)도 같은 길로 고른다.
+ */
+export async function resolveActiveExpression(
+  store: PhoneExpressionStore,
+  item: Expression,
+): Promise<Expression | null> {
+  await store.refresh();
+  const now = store.snapshot();
+  if (now.state !== 'ready') return null;
+  return (
+    now.items.find(
+      entry =>
+        entry.id === item.id &&
+        entry.name === item.name &&
+        entry.status === 'active',
+    ) ?? null
+  );
+}
+
 export function TeamExpressionPicker({
   query,
   onSelect,
@@ -83,13 +105,12 @@ export function TeamExpressionPicker({
   /**
    * 옛 모양(`view` 없음, 반응 고르개)의 동작. `reaction`: 고르면 바로 넘긴다. `message`: 큰 그림을 먼저 미리 보고 「보내기」를 한 번 더
    * 눌러야 넘긴다(ADR-0218 D1). `insert`: 고르면 바로 넘긴다 — 호스트가 그 이름을 입력칸에 넣는다(미리보기 없음, #4942).
-   * **`view` 가 있으면 이 값을 읽지 않는다**: 한 보기 안에 두 동작이 함께 서므로 등록 하나가 정한다(큰 것은 미리 보고 보낸다 ·
-   * 작은 것은 입력칸에 넣는다, `expressionActionOf`).
+   * **`view` 가 있으면 이 값을 읽지 않는다**: 등록 하나가 정한다(큰 것은 미리 보고 보낸다 · 작은 것은 입력칸에 넣는다, `expressionActionOf`).
    */
   mode?: 'reaction' | 'message' | 'insert';
   /**
-   * 입력창 표현 시트의 탭(#4942): 안쪽 필터 줄 없이 이 보기 하나만 그린다(`expressionViews.ts` 머리말). 주지 않으면
-   * 옛 모양(이모티콘·GIF·최근·자주 필터 줄)이고 반응 고르개가 그렇게 쓴다.
+   * 입력창 표현 시트의 탭(#4942): 안쪽 필터 줄 없이 이 보기 하나만 그린다(`expressionViews.ts` 머리말). 이모지 탭은 표준 그림 문자
+   * 목록이 본문이라 여기 오지 않는다(팀의 작은 이모지는 `TeamEmojiRow`). 주지 않으면 옛 모양(이모티콘·GIF·최근·자주 필터 줄)이고 반응 고르개가 그렇게 쓴다.
    */
   view?: ExpressionView;
   /** 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 간다. 호스트가 대화로 가는 길을 줄 때만 서고, 시트를 먼저 내린다. */
@@ -117,7 +138,7 @@ export function TeamExpressionPicker({
   const [selectionError, setSelectionError] = useState(false);
   const selection = useRef(0);
   const locked = useRef(false);
-  // 시트의 두 보기는 모두 큰 칸(`tile`)이다 — 작은 것과 큰 것이 한 보기에 서도 칸 크기를 하나로 맞춘다(`expressionViews.ts` 머리말).
+  // 시트의 두 보기(이모티콘·GIF)는 모두 큰 칸(`tile`)이다.
   const tiles = view !== undefined;
   // 이름 줄은 옛 모양에서는 전체(이모티콘) 필터만 빼고, 시트에서는 늘 둔다.
   const captioned = view ? true : filter !== 'emoji';
@@ -177,18 +198,8 @@ export function TeamExpressionPicker({
     setSelecting(true);
     setSelectionError(false);
     // Selection can outlive a report/delete elsewhere. Re-resolve before handing off.
-    await store.refresh();
+    const active = await resolveActiveExpression(store, item);
     if (attempt !== selection.current) return;
-    const active =
-      store.snapshot().state === 'ready' &&
-      store
-        .snapshot()
-        .items.find(
-          entry =>
-            entry.id === item.id &&
-            entry.name === item.name &&
-            entry.status === 'active',
-        );
     setSelecting(false);
     if (!active) {
       locked.current = false;
@@ -252,7 +263,7 @@ export function TeamExpressionPicker({
           ))}
         </View>
       )}
-      {store && view !== 'gif' && !current ? (
+      {store && !current ? (
         <ExpressionAddMenu
           canAdd={canAdd}
           offline={state === 'offline'}
@@ -388,7 +399,8 @@ export function TeamExpressionPicker({
   );
 }
 
-const buildStyles = (color: Palette) =>
+/** 시트의 칸 모양. 이모지 탭의 한 줄(`TeamEmojiRow`)이 같은 칸·줄·글자 모양을 쓴다. */
+export const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
     list: {flex: 1},
