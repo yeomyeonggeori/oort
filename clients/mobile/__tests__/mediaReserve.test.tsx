@@ -1,7 +1,9 @@
 import type {MessageUnfurl} from '@momo/core/features/timeline/unfurl';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, renderHook, screen} from '@testing-library/react-native';
 import React from 'react';
 import {StyleSheet} from 'react-native';
+import * as api from '@momo/core/lib/api';
+import type {Message} from '@momo/core/lib/api';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -22,6 +24,7 @@ import {
   unfurlReserveFor,
 } from '../src/features/conversation/unfurlReserve';
 import {UnfurlCards} from '../src/features/conversation/UnfurlCards';
+import {useMessageUnfurls} from '../src/features/conversation/useMessageUnfurls';
 import {resetUnfurlImagesForTest} from '../src/features/conversation/unfurlImage';
 
 // =============================================================================
@@ -194,5 +197,44 @@ describe('링크 카드 자리', () => {
     expect(unfurlReserveFor('M5')).toBe(72.4);
     fireEvent(screen.getByTestId('unfurl-group'), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 300, height: 0}}});
     expect(unfurlReserveFor('m5')).toBe(72.4); // 0 은 받지 않는다
+  });
+});
+
+describe('방을 열고 카드를 읽은 뒤의 기억', () => {
+  const message = {id: 'M9', body: '이 글 보세요 https://example.com/post'} as Message;
+  const ok = {
+    id: 'u9',
+    messageId: 'm9',
+    url: 'https://example.com/post',
+    status: 'ok',
+    title: '배포 후기',
+    description: '이야기',
+    domain: 'example.com',
+  } as unknown as MessageUnfurl;
+
+  async function read(result: MessageUnfurl[] | Error) {
+    const spy = jest.spyOn(api, 'fetchMessageUnfurls');
+    if (result instanceof Error) spy.mockRejectedValue(result);
+    else spy.mockResolvedValue(result);
+    const hook = renderHook(() => useMessageUnfurls('ws', () => 'ch'));
+    await act(async () => {
+      hook.result.current.hydrate([message], 'ch');
+      await Promise.resolve();
+    });
+    return hook;
+  }
+
+  it('읽었더니 보여 줄 카드가 없으면 기억한 자리를 지운다', async () => {
+    rememberUnfurlHeight('m9', 90);
+    await read([]);
+    expect(unfurlReserveFor('m9')).toBeNull();
+  });
+
+  it('읽기가 실패한 것은 모르는 것이라 기억을 두고, 카드가 있으면 그대로 둔다', async () => {
+    rememberUnfurlHeight('m9', 90);
+    await read(new Error('offline'));
+    expect(unfurlReserveFor('m9')).toBe(90);
+    await read([ok]);
+    expect(unfurlReserveFor('m9')).toBe(90);
   });
 });
