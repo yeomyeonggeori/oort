@@ -2589,14 +2589,18 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
 
     // (e) The web-search allowance of a step: with one search spent today, the team's limit of one
     //     withholds the search tool; so does the operator's ceiling of zero; with neither, it is offered.
+    //     The two say DIFFERENT things (ADR-0201 증보 v4 P2, #5369): a spent allowance comes back tomorrow,
+    //     the operator's `0` does not — and only the first may ever be answered by Hermes — so the prompt
+    //     of a step names the one that is true.
     type Tune = fn(&mut WorkerConfig);
-    let cases: [(&str, Option<Value>, Tune, i32, bool); 3] = [
+    let cases: [(&str, Option<Value>, Tune, i32, bool, &str); 3] = [
         (
             "no limit",
             None,
             (|_: &mut WorkerConfig| {}) as Tune,
             1,
             true,
+            "",
         ),
         (
             "the team's dailySearches",
@@ -2604,6 +2608,7 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
             (|_: &mut WorkerConfig| {}) as Tune,
             1,
             false,
+            "오늘 웹 검색을 다 썼어요",
         ),
         (
             "the operator's search ceiling of zero",
@@ -2611,9 +2616,10 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
             (|c: &mut WorkerConfig| c.team_ai_daily_search_cap = Some(0)) as Tune,
             0,
             false,
+            "웹 검색은 서버 운영자가 꺼 두었어요",
         ),
     ];
-    for (label, limits, tune, searches_spent, search_offered) in cases {
+    for (label, limits, tune, searches_spent, search_offered, why) in cases {
         reset_instance(&su).await;
         let t = seed(&su, &pool).await;
         seed_anthropic_link(&su, t.owner_id).await;
@@ -2637,9 +2643,15 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
         );
         if !search_offered {
             assert!(
-                system_prompt(step2).contains("오늘 웹 검색을 다 썼어요"),
+                system_prompt(step2).contains(why),
                 "(e) {label}: the prompt says why"
             );
+            if label.contains("zero") {
+                assert!(
+                    !system_prompt(step2).contains("오늘 웹 검색을 다 썼어요"),
+                    "(e) {label}: a zero is not a spent allowance"
+                );
+            }
         }
     }
 }

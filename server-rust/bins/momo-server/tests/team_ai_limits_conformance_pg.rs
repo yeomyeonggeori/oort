@@ -672,6 +672,8 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
     let caps = OperatorCaps {
         daily_tokens: Some(400_000),
         daily_searches: None,
+        // the third ceiling is not what this test reads: unset = the delegation is closed
+        daily_delegations: None,
     };
     let d = door(caps).await;
     let ws = d.fixture.workspace;

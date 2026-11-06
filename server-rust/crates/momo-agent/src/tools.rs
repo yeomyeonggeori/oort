@@ -210,6 +210,73 @@ pub const TASK_PLAN_ITEMS_MAX: usize = 8;
 pub const TASK_PLAN_ITEM_CHARS_MAX: usize = 60;
 pub const TASK_NOTE_CHARS_MAX: usize = 2_000;
 
+/// `ask_hermes` — the team AI's **delegation** to the team's Hermes (ADR-0201 증보 v4 P1, #5369).
+///
+/// Arguments: `{"kind": "image" | "web_search", "request": "<2..=1200 chars>"}` and nothing else
+/// (`additionalProperties: false`). It is offered only while the `hermes` bundle is on
+/// (`team_ai_roles::BUNDLES` lists it under that bundle, so the request builder's `tool_allowed`
+/// filter drops it with the bundle — G1) **and** only when the ten doors G1~G10 all judge open
+/// (`momo_workspace_actions::team_ai_hermes::judge_door`, one function), with a closed `kind` enum that
+/// holds **only the kinds this request is offered**. Like [`TASK_CONTINUE`] it is deliberately not in
+/// [`CATALOG`]: no agent profile can list it, no generic tool path can run it, and the worker handles
+/// it inline.
+pub const ASK_HERMES: &str = "ask_hermes";
+/// The two kinds of work the helper may delegate (P1: a closed enum). `image` is a still picture
+/// (P6/F11: no animation is ever promised), `web_search` is the search that the helper's own wire
+/// cannot do (P2 "종류 배타").
+pub const ASK_HERMES_KINDS: [&str; 2] = ["image", "web_search"];
+/// The bounds of `request` (P1: 문자열 2~1,200자). The schema below and
+/// `momo_workspace_actions::team_ai_hermes_request` read the same numbers.
+pub const ASK_HERMES_REQUEST_CHARS_MIN: usize = 2;
+pub const ASK_HERMES_REQUEST_CHARS_MAX: usize = 1_200;
+
+/// The description the model sees. It promises neither motion (F11: the subscription path refuses a
+/// GIF) nor a model name (F10: nothing can name or see which model draws), and it says what may be
+/// written into `request`: what the person asked for, in their own words.
+const ASK_HERMES_DESCRIPTION: &str =
+    "도우미가 직접 못 하는 일을 팀 Hermes에게 한 번 맡길 때 불러. \
+     kind는 맡길 일의 종류이고, request에는 부탁한 사람이 원한 일을 한두 문장으로 적어. \
+     사람이 쓴 말만 옮기고, 이름·메일·채널 이름·워크스페이스에서 읽은 내용은 쓰지 마. \
+     한 요청에 한 번만 부를 수 있어.";
+
+/// `ask_hermes`'s published definition, with the `kind` enum cut to `kinds` — the kinds this request
+/// is offered (`momo_workspace_actions::team_ai_hermes::DoorVerdict::offered_kinds`). `None` when
+/// nothing is on offer: a tool with no kind to give is not offered at all, like the proposal tool with
+/// no `actionId` left. A name that is not one of [`ASK_HERMES_KINDS`] is ignored, and the order is the
+/// kinds' own (not the caller's), so the schema is the same for the same set.
+pub fn ask_hermes_definition(kinds: &[&str]) -> Option<ToolDefinition> {
+    let offered: Vec<&str> = ASK_HERMES_KINDS
+        .iter()
+        .copied()
+        .filter(|kind| kinds.contains(kind))
+        .collect();
+    if offered.is_empty() {
+        return None;
+    }
+    Some(ToolDefinition {
+        name: ASK_HERMES,
+        description: ASK_HERMES_DESCRIPTION,
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": offered,
+                    "description": "맡길 일의 종류."
+                },
+                "request": {
+                    "type": "string",
+                    "minLength": ASK_HERMES_REQUEST_CHARS_MIN,
+                    "maxLength": ASK_HERMES_REQUEST_CHARS_MAX,
+                    "description": "부탁한 사람이 원한 일을 한두 문장으로."
+                }
+            },
+            "required": ["kind", "request"],
+            "additionalProperties": false
+        }),
+    })
+}
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -1125,6 +1192,71 @@ pub fn requires_approval(tool_name: &str, grants: Option<&[ToolGrant]>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0201 증보 v4 P1 (#5369): `ask_hermes` carries exactly `kind` + `request`, closed
+    /// (`additionalProperties: false`), with the enum cut to the kinds the request is offered — and
+    /// nothing to offer means no tool. The wire name survives the providers' name pattern, and the
+    /// tool is **not** in the catalog (no agent profile can list it).
+    #[test]
+    fn ask_hermes_is_a_closed_two_field_tool_whose_kind_enum_is_what_is_offered() {
+        assert!(ask_hermes_definition(&[]).is_none());
+        assert!(ask_hermes_definition(&["video", "gif", ""]).is_none());
+        for (offered, expected) in [
+            (vec!["image"], vec!["image"]),
+            (vec!["web_search"], vec!["web_search"]),
+            // the schema is the kinds' own order, not the caller's
+            (vec!["web_search", "image"], vec!["image", "web_search"]),
+            (vec!["image", "image", "nope"], vec!["image"]),
+        ] {
+            let definition = ask_hermes_definition(&offered).expect("a kind is on offer");
+            assert_eq!(definition.name, ASK_HERMES);
+            assert_eq!(definition.parameters["additionalProperties"], json!(false));
+            assert_eq!(
+                definition.parameters["required"],
+                json!(["kind", "request"])
+            );
+            assert_eq!(
+                definition.parameters["properties"]["kind"]["enum"],
+                json!(expected)
+            );
+            let fields: Vec<&str> = definition.parameters["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(fields.len(), 2, "{fields:?}");
+            let request = &definition.parameters["properties"]["request"];
+            assert_eq!(request["minLength"], json!(ASK_HERMES_REQUEST_CHARS_MIN));
+            assert_eq!(request["maxLength"], json!(ASK_HERMES_REQUEST_CHARS_MAX));
+        }
+        assert_eq!(
+            (ASK_HERMES_REQUEST_CHARS_MIN, ASK_HERMES_REQUEST_CHARS_MAX),
+            (2, 1_200)
+        );
+        assert_eq!(wire_tool_name(ASK_HERMES), ASK_HERMES);
+        assert!(
+            !CATALOG.contains(&ASK_HERMES),
+            "the helper's own tool is not a profile tool"
+        );
+        assert!(!is_executable(ASK_HERMES));
+    }
+
+    /// P6/F10/F11: what the model is told promises no motion and no model. A description that said
+    /// "GIF" or named a model would be a promise the subscription path cannot keep.
+    #[test]
+    fn ask_hermes_promises_neither_motion_nor_a_model() {
+        let definition = ask_hermes_definition(&ASK_HERMES_KINDS).unwrap();
+        let said = format!("{} {}", definition.description, definition.parameters);
+        for banned in [
+            "GIF", "gif", "움직", "애니", "영상", "gpt", "GPT", "dall", "DALL", "모델",
+        ] {
+            assert!(
+                !said.contains(banned),
+                "the tool text carries {banned:?}: {said}"
+            );
+        }
+    }
 
     /// The measured constraint, applied to the whole catalog (goal SRV-HOT1).
     ///
