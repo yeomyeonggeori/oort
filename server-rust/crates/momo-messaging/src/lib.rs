@@ -134,9 +134,9 @@ pub use agent_picture::{
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
     load_attachment_in_tx, load_readable_attachment_in_tx, message_attachments_in_tx,
-    settle_upload_in_tx, validate_attachment_id_list, validate_attachment_mime,
-    validate_attachment_name, Attachment, AttachmentLinkRejected, AttachmentMedia,
-    AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
+    message_attachments_without_media_in_tx, settle_upload_in_tx, validate_attachment_id_list,
+    validate_attachment_mime, validate_attachment_name, Attachment, AttachmentLinkRejected,
+    AttachmentMedia, AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
     MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MEDIA_KIND_VIDEO,
 };
 pub use attachment_media::{

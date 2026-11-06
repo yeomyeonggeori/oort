@@ -980,6 +980,18 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 - 파일 충돌 주의: `media.rs`는 #5442의 후속 슬라이스(세트 보관)도 건드릴 수 있고 `message.rs`·`self_media.rs`는 다른 칸과 겹칠 수 있다. 두 곳 모두 이 증보의 변경은 **함수 추가와 접두 확장**뿐이라 착륙 때 맞추기 쉽다.
 - **2단계 분할 제안**: 2단계-가 = WS1~WS4 + WS6의 서버 쪽 시험(약 6~7시간), 2단계-나 = WS5 + google 쓰기 + 워커 시험 + 사보타주 표 + PR 본문(약 4~5시간). 한 세션은 50만 토큰 한도가 있으므로 가·나 사이에 체크포인트를 커밋한다.
 
+### 구현 기록 (2단계, #5371 — 구현이 설계에 더한 것)
+
+설계(W1~W12)는 바뀌지 않았다. 구현하며 코드에서 확인해 더한 것만 적는다.
+
+1. **워커의 답 투영은 미디어 요약이 없는 짝을 쓴다(W9).** 워커의 DB 역할 `momo_worker`는 `attachment_media`에 아무 권한이 없고(`attachment-media-lockdown`), 기존 `message_attachments_in_tx`는 그 표를 `LEFT JOIN`한다. 표 이름이 문장에 있으면 권한 없는 역할은 맞는 행이 없어도 실패한다. 그래서 `message_attachments_without_media_in_tx`(같은 행·같은 네 키, `media` 없음)와 `AttachmentPolicy::ProjectWithoutMedia`를 새로 두었고 새 입구만 쓴다. 에이전트 그림은 영상이 아니라서(`attachment_media` 행은 사람이 올린 영상에만 쓰인다) 잃는 것이 없다. 이 사실은 설계 단계의 검수가 보지 못했고 구현 중 코드 읽기와 시험이 잡았다.
+2. **소비 뒤의 일은 별도 task가 끝까지 돈다(W4).** 호출자가 연결을 끊으면 hyper가 핸들러 future를 버린다. 보관소 쓰기와 행 쓰기 사이에서 버려지면 행 없는 객체가 남으므로, 토큰을 푼 뒤의 6~11단계는 `land()`로 떼어 낸다(해독 감독자가 이미 쓰는 방식, `media::run_with_permit`). 요청은 그 결과를 기다리기만 한다.
+3. **인프로세스 업로드를 못 받는 보관소는 세션을 만들기 전에 `Unavailable`이다(W7).** 읽기 전용으로 연 로컬 볼륨과 설정 없는 보관소가 그렇다. `DriveArchive::backend_kind()`는 감사의 `backend`에 쓰는 고정 낱말(`local`·`google`·`stub`·`unavailable`)이다.
+4. **엣지 Caddyfile은 둘이 아니라 넷이다(M3).** `infra/rust/Caddyfile`·`infra/railway/Caddyfile.railway` 말고 `Caddyfile.local`·`Caddyfile.host-network`도 같은 `/v1/centrifugo/*` 403을 갖고 있어서(터널 뒤 원점과 호스트 네트워크 배치) 넷에 같은 블록을 둔다. 시험(`test_public_edge.sh`)은 `git ls-files`로 넷을 찾아 모두 잰다.
+5. **알림 역할 시험이 새 잠금 표를 안다.** `prod_role_conformance_pg::the_other_runtime_roles_reach_every_table_the_migrations_created`는 「모든 표에 app·relay·worker가 닿는다」를 재므로 잠금 표는 그 규칙 밖으로 빼고 따로 권한을 잰다(`attachment_write_token`을 `self_media_token`과 같은 방식으로).
+6. **시험이 낮추는 값은 `AppState`에 있다.** 쓰기 자리(`with_agent_media_slots`)·24시간 상한(`with_agent_media_daily_ceiling`)·본문 마감(`with_agent_media_body_deadline`). 정적 변수가 아니라서 시험이 쥐고 풀 수 있다. 자식·부모 코덱 시작 횟수(WA7)는 `momo_expressions::media`의 읽기 전용 카운터 둘(`decoder_children_started`·`in_process_codec_starts`)로 잰다.
+7. **호출자가 없다는 것을 시험이 지킨다(WA20).** `momo-agent-worker/tests/agent_picture_static_guards.rs`가 워커의 다른 소스와 서버·크레이트가 쓰기 길의 입구(`PictureWriter`·답 helper·발급)를 부르지 않음을 잰다. 호출자를 붙이는 S4(#5372)·#5334의 PR이 이 시험을 같은 PR에서 고친다.
+
 ### 이슈·문서 문구와 다른 곳
 
 1. **증보 번호**: 브리프의 「증보 4」·ADR-0201의 「ADR-0151 증보」는 이 증보 8이다(위 번호 줄).

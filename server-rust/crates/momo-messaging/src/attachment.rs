@@ -682,6 +682,45 @@ pub async fn message_attachments_in_tx(
         .map_err(DbError::from)
 }
 
+/// [`message_attachments_in_tx`] **without** the video summary: the same rows (complete, on a live
+/// message, oldest first) and the same four keys, read from `attachment` and `message` alone.
+///
+/// For the agent-worker's answer (ADR-0151 증보 8 W9, #5371). The worker's database role holds nothing on
+/// `attachment_media` (the `attachment-media-lockdown` keeps every tenant's video frames from the BYPASSRLS
+/// roles), and a statement that names the table fails for a role without the privilege **whether or not a row
+/// matches**, so the worker cannot run the projection above. A picture the worker wrote is never a video: the
+/// route stores a re-encoded png or jpeg, and an `attachment_media` row is only ever written by `PUT …/media`
+/// for the uploader's own video. So no `media` summary is lost, and the key stays absent exactly as it is for
+/// every photo.
+pub async fn message_attachments_without_media_in_tx(
+    conn: &mut PgConnection,
+    message_id: Uuid,
+) -> Result<Vec<MessageAttachment>, DbError> {
+    let rows = sqlx::query(
+        "SELECT a.id, a.name, a.mime, a.size_bytes \
+           FROM attachment a \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.message_id = $1 AND a.status = 'complete' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
+          ORDER BY a.created_at ASC, a.id ASC",
+    )
+    .bind(message_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MessageAttachment {
+                id: row.try_get::<Uuid, _>("id")?.to_string(),
+                name: row.try_get("name")?,
+                mime: row.try_get("mime")?,
+                size_bytes: row.try_get("size_bytes")?,
+                media: None,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
 /// The `LEFT JOIN LATERAL` that carries the same projection through a **page**
 /// of messages (Swift `MessageRoutes.swift:455-470`).
 ///

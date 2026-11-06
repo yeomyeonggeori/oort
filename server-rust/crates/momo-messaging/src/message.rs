@@ -58,7 +58,8 @@ use uuid::Uuid;
 
 use crate::attachment::{
     decode_paged_attachments, link_attachments_in_tx, message_attachments_in_tx,
-    AttachmentLinkRejected, MessageAttachment, PAGED_ATTACHMENT_COL, PAGED_ATTACHMENT_JOIN,
+    message_attachments_without_media_in_tx, AttachmentLinkRejected, MessageAttachment,
+    PAGED_ATTACHMENT_COL, PAGED_ATTACHMENT_JOIN,
 };
 use crate::error::{MessagingError, ProvenanceRejected};
 use crate::interaction::{opening_stream_props, STREAM_PROPS_KEY};
@@ -598,6 +599,10 @@ enum AttachmentPolicy {
     /// project the message's completed attachments onto both the response and
     /// the broadcast.
     Project,
+    /// [`Project`](Self::Project) for a caller whose database role cannot read `attachment_media`
+    /// (the agent-worker's answer, ADR-0151 증보 8 W9): the same projection without the video
+    /// summary ([`message_attachments_without_media_in_tx`]).
+    ProjectWithoutMedia,
 }
 
 /// The REST send's optional extras — the two things `MessageRoutes.send` can
@@ -791,6 +796,9 @@ async fn finish_send_in_tx(
         let attachments = match attachments_policy {
             AttachmentPolicy::Skip => Vec::new(),
             AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
+            AttachmentPolicy::ProjectWithoutMedia => {
+                message_attachments_without_media_in_tx(&mut *conn, message.id).await?
+            }
         };
         return Ok(SentMessage {
             message,
@@ -878,6 +886,9 @@ async fn finish_send_in_tx(
     let attachments = match attachments_policy {
         AttachmentPolicy::Skip => Vec::new(),
         AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
+        AttachmentPolicy::ProjectWithoutMedia => {
+            message_attachments_without_media_in_tx(&mut *conn, message.id).await?
+        }
     };
 
     // ADR-0216 D8 — the payload describes the row, marker included: a developer-token
@@ -1047,7 +1058,7 @@ pub async fn send_thread_notice_with_run_pictures_in_tx(
         deduped,
         MentionPolicy::Skip,
         ThreadPolicy::Maintain,
-        AttachmentPolicy::Project,
+        AttachmentPolicy::ProjectWithoutMedia,
     )
     .await?))
 }
