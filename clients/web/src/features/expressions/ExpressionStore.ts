@@ -5,6 +5,7 @@ import { matchesExpressionContract } from "@momo/core/features/expressions/contr
 import { photoModelRequest, readPhotoDraftResult, readPhotoModel, type PhotoDraftResult, type PhotoModel } from "@momo/core/features/expressions/photo";
 import type { ExpressionDraft, ExpressionList, ExpressionMutation } from "@momo/core/features/expressions/types";
 import type { ExpressionRequest, ExpressionTransport } from "./transport";
+import { ImageCache, type ImageCacheLimits } from "./ImageCache";
 
 export class ExpressionStore {
   private disposed = false;
@@ -13,10 +14,12 @@ export class ExpressionStore {
   private listeners = new Set<() => void>();
   private generation = 0;
   private refreshSerial = 0;
-  private images = new Map<string, Promise<string>>();
+  /** 인증된 그림의 메모리 캐시: 바이트 예산 LRU(#5468). 로그아웃·워크스페이스 전환·숨김·삭제·오프라인은 아래 `clearImages` 가 통째로 비운다. */
+  private images: ImageCache;
   readonly base: string;
   snapshot;
-  constructor(readonly workspaceId: string, readonly memberId: string, readonly transport: ExpressionTransport) {
+  constructor(readonly workspaceId: string, readonly memberId: string, readonly transport: ExpressionTransport, imageLimits?: ImageCacheLimits) {
+    this.images = new ImageCache(imageLimits);
     this.usageKey = `oort.expressions.usage:${workspaceId}:${memberId}`;
     let usage = emptyExpressionUsage(workspaceId, memberId);
     try { usage = restoreExpressionUsage(JSON.parse(localStorage.getItem(this.usageKey) ?? "null"), workspaceId, memberId); } catch { /* Storage is optional. */ }
@@ -96,18 +99,17 @@ export class ExpressionStore {
     try { localStorage.setItem(this.usageKey, JSON.stringify(this.snapshot.usage)); } catch { /* Storage is optional. */ }
     this.emit();
   }
+  /** 쥐고 있는 그림 수·바이트(시험·진단용). */
+  imageCacheStats() { return this.images.stats(); }
   image(path: string): Promise<string> {
     if (this.snapshot.offline) return Promise.reject(new Error("offline"));
     const hit = this.images.get(path);
     if (hit) return hit;
     const generation = this.generation;
-    const pending = this.transport.image(path).then((src) => {
+    // 메모리 캐시만(ADR-0218 D3): 총량은 `ImageCache` 가 바이트 예산 LRU 로 묶는다.
+    return this.images.add(path, this.transport.image(path).then((src) => {
       if (generation !== this.generation) throw new Error("evicted expression");
       return src;
-    }).catch((error: unknown) => { if (this.images.get(path) === pending) this.images.delete(path); throw error; });
-    this.images.set(path, pending);
-    // Authenticated memory cache only; bounded for large workspaces.
-    while (this.images.size > 96) this.images.delete(this.images.keys().next().value!);
-    return pending;
+    }));
   }
 }
