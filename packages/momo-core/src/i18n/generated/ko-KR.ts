@@ -2970,6 +2970,76 @@ export const catalog: MessageCatalog = {
       "value": "사진, 얼굴"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "추가하기"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에 추가"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에서 빼기"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "팀 표현 목록"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "즐겨찾기"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "기타"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "최근"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "세트"
+    }
+  ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "팀 보관함"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 미리 보기 지우기"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "보낼 이모티콘"
+    }
+  ],
   "expressions.sheet.a11y": [
     {
       "type": 0,
@@ -2991,7 +3061,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 이모티콘이 없어요. 우리 팀 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3075,7 +3145,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "기본 이모티콘 검색"
+      "value": "이름으로 검색"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3105,13 +3175,13 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoji": [
     {
       "type": 0,
-      "value": "기본"
+      "value": "이모지"
     }
   ],
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "우리 팀"
+      "value": "이모티콘"
     }
   ],
   "expressions.sheet.tabGif": [

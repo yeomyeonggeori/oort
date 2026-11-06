@@ -1,3 +1,4 @@
+import type {Expression} from '@momo/core/features/expressions/types';
 import React, {useState} from 'react';
 import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {SHELL_ICONS} from '../../design/icons';
@@ -27,6 +28,7 @@ import {
   expressionActionOf,
   type ExpressionTab,
 } from './expressionViews';
+import {TeamEmojiRow} from './TeamEmojiRow';
 import {TeamExpressionPicker} from './TeamExpressionPicker';
 import {
   useExpressionMessages,
@@ -34,18 +36,16 @@ import {
 } from './useExpressionMessages';
 
 // =============================================================================
-// 입력창 표현 시트 (#4942, owner 10-31 → owner 11-05 #5330) — 보내기 왼쪽 단추 하나가 여는 바텀시트.
+// 입력창 표현 시트 (#4942 → owner 2026-11-07 #5453) - 보내기 왼쪽 단추 하나가 여는 바텀시트.
 //
-// 카카오톡처럼 세 탭(우리 팀 · 기본 · GIF)을 오가고, 맨 위 검색 하나가 **지금 탭**을 거른다(검색어는 탭을 옮겨도 남는다).
-// 사용자에게 보이는 이름은 「이모티콘」 하나다: 팀 보관함의 작은 것과 큰 것이 한 탭에 서고, 표준 그림 문자는 「기본」이다.
-// 그 첫 탭의 글자는 「우리 팀」이다(owner 11-06 #5427 — 창 제목이 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다. 탭 id·보기 이름은 `emoticon` 그대로)
-// (`expressionViews.ts` 머리말, ADR-0218 §10 J2 + 2026-11-05 증보). 하는 일은 **고른 등록 하나**가 정한다 — 큰 그림(이모티콘·GIF)은
-// 미리 보고 「보내기」로 **대화에 보내고**, 작은 그림과 기본 그림 문자는 **입력칸에 넣는다**.
+// 카카오톡처럼 세 탭(이모티콘 · 이모지 · GIF)을 오가고, 맨 위 검색 하나가 **지금 탭**을 거른다(검색어는 탭을 옮겨도 남는다). 우리 팀이 올린 것과 기본을
+// 탭으로 가르지 않는다: 이모티콘 = 움직이지 않는 큰 그림, 이모지 = 표준 그림 문자 목록 + 팀의 작은 이모지 한 줄, GIF = 움직이는 큰 그림. 분류는 코어의 표 하나이고
+// 웹 고르개와 같다(`expressionViews.ts` 머리말, ADR-0218 §10 J2 + 2026-11-05·11-07 증보). 하는 일은 **고른 등록 하나**가 정한다 - 큰 그림(이모티콘·GIF)은
+// 미리 보고 「보내기」로 **대화에 보내고**, 작은 그림과 표준 그림 문자는 **입력칸에 넣는다**.
 //
-// 안쪽 본문은 새로 짓지 않았다: 기본 탭은 반응·상태 고르개가 쓰는 `EmojiPicker` 의 본문(`embedded`), 나머지 둘은
-// `TeamExpressionPicker` 의 `view` 다. 둘 다 시트 규칙(phone-sheets.md)의 그릇·머리를 그대로 쓰고, 이 파일은 머리·검색·탭
-// 줄만 갖는다. 「＋ 추가하기」(#4891)의 안쪽 장이 열려 있는 동안은 검색·탭 줄을 접는다 — 장에는 자기 머리(‹)가 있고
-// 좁은 화면(SE + 키보드)에서 폼이 그 자리를 써야 한다.
+// 안쪽 본문은 새로 짓지 않았다: 이모지 탭은 반응·상태 고르개가 쓰는 `EmojiPicker` 의 본문(`embedded`) 위에 `TeamEmojiRow` 한 줄을 얹고, 나머지 둘은
+// `TeamExpressionPicker` 의 `view` 다. 둘 다 시트 규칙(phone-sheets.md)의 그릇·머리를 그대로 쓰고, 이 파일은 머리·검색·탭 줄만 갖는다. 「＋ 추가하기」(#4891)의
+// 안쪽 장이 열려 있는 동안은 검색·탭 줄을 접는다 - 장에는 자기 머리(‹)가 있고 좁은 화면(SE + 키보드)에서 폼이 그 자리를 써야 한다.
 // =============================================================================
 
 const TAB_LABEL: Readonly<Record<ExpressionTab, PlainMessageKey>> = {
@@ -68,11 +68,11 @@ export function ExpressionComposerPicker({
   initialTab = DEFAULT_EXPRESSION_TAB,
 }: {
   onClose: () => void;
-  /** 처음 여는 탭(기본값은 「기본」 — 옛 이모지 고르개가 열던 표준 목록). 캡처 표면이 탭마다 한 장면을 찍는 데 쓴다. */
+  /** 처음 여는 탭(기본값은 「이모지」 - 옛 이모지 고르개가 열던 표준 목록). 캡처 표면이 탭마다 한 장면을 찍는 데 쓴다. */
   initialTab?: ExpressionTab;
-  /** 기본 탭의 표준 그림 문자를 입력칸에 넣는다. */
+  /** 이모지 탭의 표준 그림 문자를 입력칸에 넣는다. */
   onInsert: (glyph: string) => void;
-  /** 작은 이모티콘의 `:이름:` 을 입력칸에 넣는다 — 앞뒤 띄어쓰기는 호스트(입력칸)가 안다. */
+  /** 팀의 작은 이모지의 `:이름:` 을 입력칸에 넣는다 - 앞뒤 띄어쓰기는 호스트(입력칸)가 안다. */
   onInsertExpression: (token: string) => void;
   /** 큰 이모티콘·GIF 의 `:이름:` 을 한 메시지로 보낸다. */
   onSend: (body: string) => void;
@@ -88,6 +88,13 @@ export function ExpressionComposerPicker({
   const [tab, setTab] = useState<ExpressionTab>(initialTab);
   const [query, setQuery] = useState('');
   const [chapterOpen, setChapterOpen] = useState(false);
+  // 하는 일은 탭이 아니라 고른 등록이 정한다(큰 것은 보내고 작은 것은 입력칸에 넣는다, `expressionActionOf`).
+  const pick = (token: string, item: Expression) =>
+    afterClose(() =>
+      expressionActionOf(item) === 'send'
+        ? onSend(token)
+        : onInsertExpression(token),
+    );
 
   return (
     <>
@@ -150,26 +157,23 @@ export function ExpressionComposerPicker({
         </View>
       )}
       {tab === 'emoji' ? (
-        <EmojiPicker
-          // 검색어는 이 시트가 쥔다 — 본문의 「검색 지우기」도 이 검색어를 비워야 눌린 것이다(#5065).
-          embedded={{query, onClearQuery: () => setQuery('')}}
-          onClose={onClose}
-          onSelect={glyph => afterClose(() => onInsert(glyph))}
-        />
+        <>
+          {/* 팀의 작은 이모지 한 줄 - 같은 검색 칸이 표와 함께 거른다. 이 탭에 등록이 없으면 줄이 서지 않는다. */}
+          <TeamEmojiRow tab={tab} query={query} onSelect={pick} />
+          <EmojiPicker
+            // 검색어는 이 시트가 쥔다 — 본문의 「검색 지우기」도 이 검색어를 비워야 눌린 것이다(#5065).
+            embedded={{query, onClearQuery: () => setQuery('')}}
+            onClose={onClose}
+            onSelect={glyph => afterClose(() => onInsert(glyph))}
+          />
+        </>
       ) : (
         <TeamExpressionPicker
           // 탭마다 새로 선다 — 미리보기·안쪽 장·스크롤이 옆 탭으로 새지 않는다.
           key={tab}
           view={tab}
-          // 하는 일은 탭이 아니라 고른 등록이 정한다(큰 것은 보내고 작은 것은 입력칸에 넣는다, `expressionActionOf`).
           query={query}
-          onSelect={(token, item) =>
-            afterClose(() =>
-              expressionActionOf(item) === 'send'
-                ? onSend(token)
-                : onInsertExpression(token),
-            )
-          }
+          onSelect={pick}
           onOpenConversation={onOpenConversation}
           onChapterChange={setChapterOpen}
         />
