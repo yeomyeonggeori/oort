@@ -2188,7 +2188,7 @@ export default function ConversationScreen({
     }));
   }, [awaitingJump, awaitingArrived]);
 
-  // 고지·요약도 스크롤 안에 둔다. 카드가 null 이거나 닫히면 별도 머리 여백이 남지 않는다.
+  // 고지는 스크롤 안에 둔다. 고지가 null 이거나 닫히면 별도 머리 여백이 남지 않는다. 안 읽은 동안 요약 카드는 스크롤 안이 아니라 머리 아래 띠다(아래 `digestBand`, #5436).
   const topNotice = useMemo(() => (
     <>
       {/* 점프가 빈손으로 돌아온 고지(「더 위쪽에 있습니다」 등)는 **여기 서지 않는다** (#5384). 이 자리는 목록의 맨 위라 스크롤 안에 있고, 점프를 건 사람은
@@ -2207,21 +2207,39 @@ export default function ConversationScreen({
           />
         </View>
       ) : null}
-      {/* 안 읽은 동안 요약 (#3166, plan.md §5 V1). 목록 머리에 선다 — 타임라인
-          꼬리가 아니다: 돌아온 사람이 처음 읽을 자리이고, 닫을 수 있다. 경계는
-          구분선과 같은 얼린 스냅샷이다. */}
-      {boundary !== null && memoryEligible ? (
-        <MissedDigestCard
-          workspaceId={workspaceId}
-          channelId={channelId}
-          sinceSeq={boundary.lastReadSeq}
-          unreadCount={boundary.unreadCount}
-          headSeq={memoryHeadSeq}
-          onOpenEvidence={openMemoryEvidence}
-        />
-      ) : null}
     </>
-  ), [notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
+  ), [notificationNotice, dismissNotificationNotice, styles.notice]);
+
+  // 안 읽은 동안 요약 (#3166, plan.md §5 V1) — 머리 **아래 띠**로 선다 (#5436). 경계는 구분선과 같은 얼린 스냅샷이고, 돌아온 사람이 처음 읽을 자리이며, 닫을 수 있다.
+  //
+  // ## 왜 목록 머리가 아니라 머리 덮개의 띠인가
+  // 카드는 #4789 부터 목록 머리(스크롤 안)에 서 있었다. 그런데 진입은 늘 바닥에 앉는다(#1025). 내용이 한 화면을 조금 넘는 채널에서는 바닥에 앉는 순간 목록 맨 위의 카드가
+  // 떠 있는 머리 밑으로 밀려 올라가, 첫 화면에서 카드 전체가 머리 알약 줄 안에 가렸다(402×874 실측: 카드 위끝 42pt·✕ 43pt, 머리 밑 124pt — 6b-2 검수 High). 맨 위까지 올리면
+  // 위 여백(`contentTopInset`)이 카드도 밀어내 겹침이 0 이었으므로 틀린 것은 **착지 자리**이지 여백이 아니다.
+  // 착지를 카드 위끝으로 옮기는 길은 쓰지 않았다: 진입은 최신에 앉는다는 계약(#1025)을 깨고, 진입을 모는 `Timeline` 의 수렴·베일(#5403)을 건드려야 한다.
+  // 카드를 머리 덮개 안으로 옮기면 착지 자리와 상관없이 머리 바로 밑에 선다 — 머리 높이(`headerInset`)가 카드 높이를 함께 재서 목록 위 여백·위 필·검색 면이 모두 카드 밑에서
+  // 시작하고, 목록 뷰포트는 그대로라(덮개는 `absolute`) 진입 베일·바닥 착지에는 손대지 않는다.
+  // 카드가 `null`(문턱 밑·닫음)이면 띠가 재는 높이가 0 이라 별도 머리 여백이 남지 않는다(#4789 의 이유, 아래 시험이 잠근다).
+  //
+  // ## 띠는 한 줄 높이다 (디자인 검수 H1·M1·M2)
+  // 처음 판은 카드 그대로(요약 여러 줄 + 근거 알약 + 더 보기)를 머리에 붙였고, 바닥 착지에서 맨 위의 날짜 칩과 「새 메시지 N개」 구분선이 띠(92pt) 뒤에 가렸다 — 착지에서 맨 위
+  // 내용이 서는 자리(뷰포트 y 142~)는 띠 높이와 상관없이 고정이라, 띠가 낮을수록 가리는 양이 준다. 그래서 `compact`: 「안 읽은 동안 · 요약 한 줄(말줄임) · 더 보기 · ✕」 한 줄
+  // (카드 46pt + 위아래 8pt = 62pt, 머리 덮개 0–124 → 0–186). 이제 착지 직후 구분선 줄(186–216)이 띠 바로 밑에 온전히 보이고, 높이 상한이 구조로 생겼다(요약이 길어도 한 줄).
+  // 전문·근거는 이미 있는 「더 보기」 시트가 연다. 띠 뒷면(`missed-digest-band`)은 대화 바닥 색 한 장이라 카드 둘레 틈으로 밑의 글자가 비치지 않는다.
+  const digestBand = useMemo(
+    () => boundary !== null && memoryEligible ? (
+      <MissedDigestCard
+        compact
+        workspaceId={workspaceId}
+        channelId={channelId}
+        sinceSeq={boundary.lastReadSeq}
+        unreadCount={boundary.unreadCount}
+        headSeq={memoryHeadSeq}
+        onOpenEvidence={openMemoryEvidence}
+      />
+    ) : null,
+    [boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence],
+  );
 
   const requestRuns = useChannelRuns(channelId);
   const railTurns = useMemo(() => {
@@ -2304,6 +2322,8 @@ export default function ConversationScreen({
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
           컴포저 액세서리 스택이 아니다(`AdeSummaryLine` 머리말의 세 근거). */}
       {isSurfaceProvided('ade') ? <AdeSummaryLine onPress={openAde} /> : null}
+      {/* 안 읽은 동안 카드의 자리(#5436): 머리 알약 줄 바로 밑. 위 `digestBand` 주석. */}
+      {digestBand}
       </ConversationHeader>
       </View>
       {/* 결과 목록 면이 대화를 덮는 동안 대화(목록·컴포저)는 화면 낭독에서 뺀다(#5364): 불투명한 면 뒤의 보이지 않는 행에 낭독 초점이 닿지 않게. 머리(검색 줄)는 이 틀 **밖**
