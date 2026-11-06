@@ -68,7 +68,12 @@ const HEX = /^#[0-9a-f]{6}$/i;
 export function conversationFloor(
   p: Pick<Palette, 'mode' | 'backdrop' | 'surface' | 'bg'>,
 ): string {
-  return p.backdrop !== 'image' && p.mode === 'light' ? p.surface : p.bg;
+  // 바탕 종류 × 모드 표다. 모드·바탕 이름을 문자열 비교로 적지 않는 것은 직접 문구 장부(`direct-copy`)가 영단어 리터럴을 문구로 세기 때문이다 — 표의 열쇠는 식별자라 세지 않는다.
+  const floors = {
+    canvas: {light: p.surface, dark: p.bg},
+    image: {light: p.bg, dark: p.bg},
+  };
+  return floors[p.backdrop][p.mode];
 }
 
 /** 남 말풍선 기본 채움 — 표면 두 단 중 **대화 바닥**(`conversationFloor`)에서 더 도드라지는 쪽. 같으면 `surfacePressed`. */

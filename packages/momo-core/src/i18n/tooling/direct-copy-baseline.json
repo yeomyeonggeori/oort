@@ -312,7 +312,7 @@
     "clients/mobile/src/screens/AppDetailScreen.tsx": 26,
     "clients/mobile/src/screens/AppsScreen.tsx": 20,
     "clients/mobile/src/screens/ConnectScreen.tsx": 128,
-    "clients/mobile/src/screens/ConversationScreen.tsx": 55,
+    "clients/mobile/src/screens/ConversationScreen.tsx": 54,
     "clients/mobile/src/screens/HostedConnectionDetailScreen.tsx": 23,
     "clients/mobile/src/screens/HostedConnectionsScreen.tsx": 17,
     "clients/mobile/src/screens/InboxScreen.tsx": 89,
