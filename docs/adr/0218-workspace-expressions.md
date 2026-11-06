@@ -8,7 +8,7 @@
 > 증보 3: §9 (2026-11-01, #4992, **Accepted** 2026-11-02 planner) — 사진 초안 되찾기·돈이 든 그림 지키기: 내 사진 초안 목록 읽기 하나, 호출 뒤 디코더 바쁨 재시도, 격리 디코더 `--prepare` 출력 모양, 키 여는 문 시험. H9~H12의 결정은 바꾸지 않는다.
 > 증보 4: §10 (2026-11-02, #4961, **Accepted** 2026-11-02 planner) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
 > 증보 5: §11 (2026-11-02, #5133, **Accepted** 2026-11-02 planner) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
-> 증보 6: §12 (2026-11-06, #5442, **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**) — 이모티콘 세트 제안과 여러 개 승인: 팀 AI(oort 도우미)가 사람이 `@oort`로 부탁한 job 위에서만 세트(최대 40칸, 기본 정지 8+GIF 2)를 제안한다. 그림은 제안 본문이 아니라 서버 임시 보관(`expression_set`)에 장면마다 쌓이고 제안은 `setId`만 가리킨다(본문의 그림 바이트 0, Agent Port·MCP 한도 무변경). 사람이 세트마다 한 번 승인하면 고른 항목만 한 tx에서 항목별로 등록한다(같은 이름·1,000 초과는 건너뜀, 어긋난 핀은 전체 거절). 모델이 거절한 장면은 회색 칸이고 승인 대상이 아니며 다시 시도하지 않는다. §7의 「세트(팩)는 열지 않는다」를 이 방식 하나로 연다. D1~D6·부록 A·B(pinned 블록)·`expression.create`는 바뀌지 않는다. 새 경로 0, migration 번호는 planner가 S1a에서 배정한다. **2026-11-06 21시대 owner 결정**(참조 그림을 v1부터 Hermes에 함께 보낸다·여러 장·고지와 동의, 팀 키 그림 모델은 `backend` 예약 칸으로만, 한도·거절 멈춤·대기 한도는 권장안대로)과 **1회차 보안 검수**(대상 `8a58d1a3d`, FAIL High 2·Medium 4·Low 7)의 반영을 §12 L18~L22가 적는다.
+> 증보 6: §12 (2026-11-06, #5442, **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**) — 이모티콘 세트 제안과 여러 개 승인: 팀 AI(oort 도우미)가 사람이 `@oort`로 부탁한 job 위에서만 세트(최대 40칸, 기본 정지 8+GIF 2)를 제안한다. 그림은 제안 본문이 아니라 서버 임시 보관(`expression_set`)에 장면마다 쌓이고 제안은 `setId`만 가리킨다(본문의 그림 바이트 0, Agent Port·MCP 한도 무변경). 사람이 세트마다 한 번 승인하면 고른 항목만 한 tx에서 항목별로 등록한다(같은 이름·1,000 초과는 건너뜀, 어긋난 핀은 전체 거절). 모델이 거절한 장면은 회색 칸이고 승인 대상이 아니며 다시 시도하지 않는다. §7의 「세트(팩)는 열지 않는다」를 이 방식 하나로 연다. D1~D6·부록 A·B(pinned 블록)·`expression.create`는 바뀌지 않는다. 새 경로 0, migration 번호는 planner가 S1a에서 배정한다. **2026-11-06 21시대 owner 결정**(참조 그림을 v1부터 Hermes에 함께 보낸다·여러 장·고지와 동의, 팀 키 그림 모델은 `backend` 예약 칸으로만, 한도·거절 멈춤·대기 한도는 권장안대로)과 **1회차 보안 검수**(대상 `8a58d1a3d`, FAIL High 2·Medium 4·Low 7)의 반영을 §12 L18~L22가 적는다. **2026-11-07 owner 결정 O5**(참조 그림 고지는 멤버별 「처음 한 번」, 요청마다 동의 카드 없음, 요청마다의 눈 확인은 계획 카드)을 L2.5·L19가 적는다.
 > 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)가 §8 H9.2가 팀 AI 도우미의 같은 능력 사용(ADR-0201 증보 v3 B6의 「그림」)을 이 증보 위에서 따로 정한다고 한 그 「따로」다. 도우미의 그림은 Hermes 도구(`ask_hermes`)로 하고, 이모티콘 사진 길(H9의 팀 이미지 키)은 그대로다. H9~H12의 결정은 바꾸지 않았다.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301), 증보 6은 여기에 [ADR-0201 증보 v4](0201-team-ai-fast-path-for-simple-workspace-requests.md)(#5342)와 [ADR-0151 증보 3](0151-attachments-v0-drive-contract-port.md)을 더 읽는다.
 
@@ -801,7 +801,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 ## 12. 증보 2026-11-06 — 이모티콘 세트 제안과 여러 개 승인 (#5442)
 
-> Status: **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**(owner 결정 인용). ADR-0100: 공개 API(행동 id 하나, 결정 요청 필드 하나, 카드 props 키 하나), 보안 경계(팀 AI가 사람의 승인 앞에서 그림을 서버에 쌓는 면), DB 계약(표 셋, CHECK 하나)이 바뀌므로 이 증보가 Accepted가 되기 전에는 서버·웹·폰·도우미 도구 어느 칸도 코드를 머지하지 않는다.
+> Status: **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**(owner 결정 인용). ADR-0100: 공개 API(행동 id 하나, 결정 요청 필드 하나, 카드 props 키 하나), 보안 경계(팀 AI가 사람의 승인 앞에서 그림을 서버에 쌓는 면), DB 계약(표 넷, CHECK 하나)이 바뀌므로 이 증보가 Accepted가 되기 전에는 서버·웹·폰·도우미 도구 어느 칸도 코드를 머지하지 않는다.
 > 근거: owner 2026-11-06 18:22 「추천대로 하고 가능한 빨리 진행해줘.」(planner의 흐름 페이지 결정 1~6, 비공개 기록)와 그 앞의 owner 질문(oort 도우미를 내부 하위 에이전트처럼 쓰면 안 되느냐는 것), 이슈 [#5442](https://github.com/yeomyeonggeori/oort/issues/5442)의 「정해진 것」 여섯이다. 이 절은 그 여섯을 다시 묻거나 넓히지 않는다. 같은 날 21시대에 owner 결정이 더해졌다(L16 「owner 결정(2026-11-06)」).
 > 범위: 세트 제안과 여러 개 승인의 계약, 그리고 서버·웹·폰·도우미 도구 네 칸의 인계. 코드·migration·정책 파일을 바꾸지 않았다. 같은 PR의 코어 계약(`packages/momo-core/src/features/expressions/`의 [set.ts](../../packages/momo-core/src/features/expressions/set.ts)·[set.schema.json](../../packages/momo-core/src/features/expressions/set.schema.json)·[set.vectors.json](../../packages/momo-core/src/features/expressions/set.vectors.json)·[setFixtures.ts](../../packages/momo-core/src/features/expressions/setFixtures.ts)·[set.test.ts](../../packages/momo-core/src/features/expressions/set.test.ts))는 이 절의 실행 가능한 형태이고, 글과 코드가 다르면 글을 고친다.
 > 표기는 앞 증보와 같다: [V] 코드·문서를 직접 읽거나 실측해서 확인 · **[추정]** 이 절이 정한 값·해석 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행하지 않음. 이 절의 어느 것도 실제 Hermes·실 PG·화면·실기기에서 돌려 보지 않았다.
@@ -844,7 +844,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | L7 회색 칸 | 거절·실패·미시도·바탕 없음 넷, 바이트도 id도 없는 설명자. 선택·교체 업로드 불가. **한 칸은 한 번만 쓰이고 거절은 영구히 닫힌다** | 직접 올리기 허용, 자동 재시도, 표현 바꾸기 |
 | L8 한도 | 미결정 세트 에이전트당 1(일반 대기 요청자별 3·워크스페이스별 30에는 세지 않음), 보관 2시간, 승인 대기는 워커 설정(기본 1시간), 취소는 기존 경로 | 일반 3칸에 합산 |
 | L9 이름 | 세트 앞머리 `prefix` + `_`, 공통 태그는 서버가 합쳐 카드에 보인다 | 이름 규칙 없음 |
-| L18 참조 그림 | 서버가 요청 메시지의 이미지 첨부를 고르고(최대 4장) 같은 묶음을 모든 칸의 Hermes 요청에 **눈으로 보게** 붙인다. 보내기 전에 고지·동의(L19). owner 2026-11-06 | 모델·에이전트·클라이언트가 첨부 id를 고르기, 칸마다 다른 참조, 읽은 내용·남의 글의 그림, 도구가 픽셀을 받는 길(L21.4) |
+| L18 참조 그림 | 서버가 요청 메시지의 이미지 첨부를 고르고(최대 4장) 같은 묶음을 모든 칸의 Hermes 요청에 **눈으로 보게** 붙인다. 멤버별 처음 한 번의 고지와 요청마다의 계획 카드(L2.5·L19, O5). owner 2026-11-06 | 모델·에이전트·클라이언트가 첨부 id를 고르기, 칸마다 다른 참조, 읽은 내용·남의 글의 그림, 도구가 픽셀을 받는 길(L21.4) |
 | L20 백엔드 | 계획의 `backend` 칸: `hermes`(켜짐) · `team_image_model`(예약, 꺼짐). 카드·승인·등록은 같다. owner 2026-11-06 | 지금 팀 키 그림 모델 경로를 짓기 |
 
 ### L2. 제안하는 주체와 문 — 사람이 부탁한 job 위에서만, 카드는 서버 코드가 올린다
@@ -865,6 +865,15 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 4. **민감 집합에 넣지 않는 이유.** 위 2·3이 `SENSITIVE_ACTION_IDS`(F6)의 목적(읽은 글이 카드를 만들게 하지 않는다)을 구조로 채운다. 반대로 목록에 넣으면 제안이 필연적으로 위임 결과(읽은 것으로 센다, P5) 뒤에 오므로 영원히 닿지 못한다. 이 판단은 보안 검수의 눈으로 다시 본다(L12 T2).
 5. **요청자가 승인할 수 있는 카드만.** 팀 AI 문은 「요청자가 승인할 수 없는 카드는 올리지 않는다」(`requester_could_approve_in_tx`)를 건다. 이 문의 `ExpressionAdder` 갈래는 지금 `false`로 고정이라(F10) 그대로면 어떤 세트도 올라올 수 없다. S1b가 이 갈래를 실제 술어로 바꾼다: 요청자가 카드 채널의 살아 있는 사람 멤버이고 게스트가 아니며 지금의 추가 정책을 충족하고, 세트에 얼굴이 있으면(`subjectMemberId`가 null이 아니면) 요청자가 그 당사자여야 한다. 이 문의 기존 규칙 때문에 **이 문에서 `subjectMemberId`는 null이거나 요청자 본인이다**(다른 사람의 얼굴은 이 문으로 올리지 않는다).
 6. **표지.** 서버 코드가 올리는 카드도 팀 AI 문의 표지를 달아야 한다: `via_ai{source:"team_ai", requester_id=트리거 작성자, trigger_message_id, tools, web_searches}`와 props `proposed_via`를 `propose_with_avatar_in_tx`의 `via_json`과 똑같이 쓴다. 표지가 빠지면 `card_provenance`가 승인을 거절하고(닫힌 방향) 요청자별 계수 제외도 성립하지 않는다(A23, 검수 L5).
+
+**L2.5 세트 계획 카드 — 사람의 한 번의 확인 (owner 2026-11-06, O5).** 계획이 저장된 뒤(`begin`) **아무것도 만들기 전에** 서버가 대화에 올리는 카드다. 흐름의 둘째 단계(요청 → **세트 계획** → 만들기 → 고르기 → 등록)이고 **모든 세트**가 거친다(참조가 없는 세트도). 카드의 와이어는 코어 `SetPlanCard`, 보기는 `expressionSetPlanView`다.
+- **보이는 것**: 제목·컨셉(`prompt`)·장면 목록(정지는 `scene`, GIF는 바탕 정지 칸과 움직임)·만들 그림 N장(숫자만, G5)·**보낼 참조 그림의 썸네일(포인터)과 장수**(그림 자체는 대화 첨부 경로로 열린다, G1)·참조가 있으면 「사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.」(**매번**)·그 멤버의 첫 참조 세트면 고지 두 줄(L19.1). 버튼은 「이대로 만들기」·「장면 고치기」·「취소」다.
+- **누가**: 요청자 본인만 누른다.
+- **무엇이 나가는가 — 불변식**: **「이대로 만들기」를 누르기 전에는 아무것도 Hermes로 가지 않는다**(L19.3, A31): 참조 바이트 읽기·주소 발급·위임 호출 어느 것도 0이다. 참조가 없는 세트의 요청 문장도 같다.
+- **전달 [추정, S5a가 확정]**: 서버 코드가 올리는 승인 카드 한 장이다. 새 행동 하나(이름은 제안: `expression.set.plan`, `Proposers::ServerOnly`, `required_role` 요청한 본인(`RequestingMember`), 위험 `approval`, 인자 `{setId}`)이고 선례는 `dm.agent.admit`이다(새 경로 0). 승인 = 「이대로 만들기」, 거절 = 「취소」, **고치기** = 아래의 새 계획. 이 카드는 L2.4-6의 팀 AI 표지를 같이 단다.
+- **「이대로 만들기」의 실행기**: 같은 tx에서 보관 머리의 `plan_confirmed_at`을 **한 번** 쓰고, 이 카드가 고지를 보였으면(머리의 `notice_shown`) 그 멤버의 고지 기록을 쓰고(L19.1), 승인된 run을 끝내며 작업 재개 job을 넣는다. 그 뒤에야 위의 읽기·발급·호출이 열린다.
+- **「장면 고치기」**: **계획 행은 고치지 않는다**(L2.4-2). 고치기는 **새 계획**이다: 옛 계획은 `cancelled`로 끝나고(보관 머리 `expired`, `prompt`·`scene` NULL) 새 `begin`이 새 계획과 새 카드를 만든다. 사람이 줄 수 있는 입력은 (가) 장면·표시 이름의 글(사람이 쓴 글, 같은 P1 거름·상한을 지난다), (나) 칸 빼기, (다) **참조 빼기**다. **참조는 빼기만 된다**: 서버가 고른 묶음의 부분집합만 되고 더할 수 없으며 묶음에 없는 id가 하나라도 있으면 편집 전체를 거절한다(코어 `narrowExpressionSetReferences`, A42). 편집 요청의 와이어(결정 요청의 새 필드 모양)는 S5a가 `docs/api/openapi.yaml`과 함께 고정한다. 새 카드도 버튼 전 0이다.
+- **만료·한도**: 승인 창(워커 `approval_ttl_seconds`)이 지나면 `expired`이고 보관 머리는 `expired`로 끝난다(`abandon`). 계획 카드가 열려 있는 동안도 머리는 `staging`이라 에이전트당 미결정 1(L8-1)에 든다.
 
 ### L3. 그림 40장을 어떻게 넘기나
 
@@ -1026,7 +1035,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 2. **속도.** run당 `begin`은 한 번이다. 요청자 10분 계수(ADR-0201 P7의 6회)는 **세트 하나를 한 요청으로** 센다: 기본 세트의 정지 8장이 이미 6을 넘으므로 칸마다 세면 7번째 칸에서 끊긴다(검수 L6). 일일 계수(기본 30)는 **정지 한 장을 한 번으로** 센다(owner 결정 O1, GIF 0). 위임 동시 2는 세트 하나가 칸을 한 번에 하나씩 순서대로 만들므로 1이다. 세 계수 모두 S5a가 ADR-0201 증보로 고정하고 상한은 유지한다. 천장 둘(40칸·24 MiB)이 한 세트의 크기를 묶는다. 결정 쪽은 기존 규칙이다.
 3. **만료와 승인 창 (검수 M1·L1).** 보관(`staging`)은 `begin` 시각에서 **2시간**(절대, 마지막 쓰기와 무관하다)이고 TTL sweep은 **`staging` 머리에만** 건다. `proposed` 머리는 보관 TTL의 대상이 아니다: 승인의 끝과 **한 tx로** 옮긴다. 결정 성공 → `decided`; 거절·만료·run 취소·요청자 이탈 → `expired` + `prompt`·`scene` NULL. 세트 초안을 회수하는 **모든 곳**(결정 라우트의 거절·만료 팔, run 취소 `approval.rs`, 초안 TTL sweep `sweep_in_tx`)이 같은 tx에서 머리를 옮기고, 세트 초안의 `expires_at`은 승인의 `expires_at`이다(제안 tx가 쓴다; 노티파이어의 승인 만료 sweep은 초안을 회수하지 않고 초안 TTL sweep에 기댄다, F21). 승인 창은 워커의 `approval_ttl_seconds`(기본 3,600초, F8)이고 `begin`+2시간을 넘어도 된다. 그래서 `begin`+1시간 50분에 선 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다(A29). 둘 다 notifier가 발견하고(`momo_notifier`의 열 단위 SELECT) 회수는 `momo_app`의 워크스페이스 묶인 tx다. 회수는 렌디션 바이트를 지우고 머리를 `expired`로 바꾸며 `prompt`·`scene`을 NULL로 비운다(#4900의 「만료된 행에 에이전트가 쓴 글은 남지 않는다」 규칙을 머리에도). **등록된 세트(`decided`)의 머리는 글을 지키지 않는다**: 등록된 표현의 `origin`이 이미 같은 글을 가진다. 그래서 A13의 NULL 규칙은 미등록 끝 길에만 적용된다. 머리의 칸 설명자(이름·표시 이름·태그)는 초안 행이 이름을 남기는 것과 같은 급으로 남는다.
 4. **취소.** 사람의 run 취소·요청자 이탈로 run이 끝나면 `abandon`이 같은 tx에서 보관 바이트를 회수하고 머리를 `expired`로 한다. 승인 대기 중의 취소·거절·만료는 기존 경로가 초안을 회수한다(`reclaim_in_tx` 재사용). 미결정 슬롯은 머리가 `staging`·`proposed`를 벗어나는 순간 비워진다.
-5. **감사.** D6의 제한을 따른다(바이트·base64·prompt·이름·원본 링크 없음): `expression.set.proposed`(set id, approval id, 칸 수, 준비 수, 회색 코드별 수, 참조 장수, 보관 바이트 합) · `expression.set.reference_consented`(set id, 장수) · `expression.set.reference_refused`(set id, 닫힌 이유) · `expression.created`(등록 항목마다, 기존 필드에 set id) · `expression.set.decided`(승인/거절, 등록 수, 건너뜀 이유별 수) · `expression.set.reclaimed`(만료·취소·거절의 회수 칸 수). 칸마다의 `expression.staged`는 세트에 쓰지 않는다: 요약 한 줄이 회색 사유별 수를 남기므로 40줄 감사를 피한다.
+5. **감사.** D6의 제한을 따른다(바이트·base64·prompt·이름·원본 링크 없음): `expression.set.proposed`(set id, approval id, 칸 수, 준비 수, 회색 코드별 수, 참조 장수, 보관 바이트 합) · `expression.set.plan_confirmed`(set id, 참조 장수, 고지가 보였는지) · `expression.set.plan_cancelled`·`expression.set.plan_revised`(set id, 장수) · `expression.set.reference_notice_seen`(멤버, 처음 한 번) · `expression.created`(등록 항목마다, 기존 필드에 set id) · `expression.set.decided`(승인/거절, 등록 수, 건너뜀 이유별 수) · `expression.set.reclaimed`(만료·취소·거절의 회수 칸 수). 칸마다의 `expression.staged`는 세트에 쓰지 않는다: 요약 한 줄이 회색 사유별 수를 남기므로 40줄 감사를 피한다.
 
 ### L9. 세트 앞머리·태그 규칙
 
@@ -1041,20 +1050,20 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 **L10.1 쓰기 역할 — 결정 (검수 H1; V3 닫음).** 보관을 쓰는 주체는 **BYPASSRLS `momo_worker`**다(agent-worker의 기존 예외, F15). 이 역할이 이미 하는 일과 같은 종류다(호스팅 문의 `expression_draft` 쓰기, `team_ai_task`, `self_media_token`). **새 역할이나 `SET LOCAL ROLE`은 도입하지 않는다**(변경이 가장 작고 선례가 169·160이다). 대신 「BYPASSRLS라서 RLS가 마지막 문이 못 된다」는 사실을 계약에 적고 셋으로 막는다.
 
-1. **잠금 블록 `expression-set-lockdown`.** 세 표에서 PUBLIC과 모든 런타임 역할의 권한을 거둔 뒤 역할마다 **코드가 쓰는 동사만** 준다(아래 표). 블록은 migration과 `infra/rust/sql/bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`에 **같은 글자**로 있고(`-- BEGIN/END expression-set-lockdown` 표지 사이를 시험이 비교한다), 두 bootstrap 파일은 migration 뒤에 `ALL TABLES` 권한을 다시 주므로 **그 뒤에** 적용한다. 정적 가드 시험은 169의 `team_ai_task_static_guards`와 같은 넷이다(세 파일의 같은 글자 · 적용 순서 · migration 안 블록 밖 GRANT 없음 · 블록이 존재 이유를 말함). 실 PG에서 역할마다 권한을 재는 시험(A37)이 붙는다. relay·notifier는 기본 권한 때문에 이 표들에 DML을 갖게 되므로 이 블록이 「notifier는 발견용 열 단위 읽기만」을 성립시킨다.
+1. **잠금 블록 `expression-set-lockdown`.** 네 표에서 PUBLIC과 모든 런타임 역할의 권한을 거둔 뒤 역할마다 **코드가 쓰는 동사만** 준다(아래 표). 블록은 migration과 `infra/rust/sql/bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`에 **같은 글자**로 있고(`-- BEGIN/END expression-set-lockdown` 표지 사이를 시험이 비교한다), 두 bootstrap 파일은 migration 뒤에 `ALL TABLES` 권한을 다시 주므로 **그 뒤에** 적용한다. 정적 가드 시험은 169의 `team_ai_task_static_guards`와 같은 넷이다(세 파일의 같은 글자 · 적용 순서 · migration 안 블록 밖 GRANT 없음 · 블록이 존재 이유를 말함). 실 PG에서 역할마다 권한을 재는 시험(A37)이 붙는다. relay·notifier는 기본 권한 때문에 이 표들에 DML을 갖게 되므로 이 블록이 「notifier는 발견용 열 단위 읽기만」을 성립시킨다.
 2. **모든 SQL 문이 `workspace_id`와 (에이전트·요청자·run) 조건을 직접 쓴다**(169의 「BYPASSRLS라서 쓰는 문장이 workspace_id를 직접 명시한다」). 읽기·쓰기 SQL이 이 값들을 인자로 받아 건다(G7의 `assembly::get_in_tx`와 같다). 소유 판정의 시험은 **운영 쓰기 역할로** 돌려 이 조건을 지우면 빨강이 되게 한다(A6).
 3. RESTRICTIVE 에이전트 정책(159의 `app.agent_member_id`)은 **안전망이라 부르지 않는다**: 이 값은 Agent Port 요청에서만 묶이고 워커 경로에서는 비어 있으며 BYPASSRLS면 평가되지 않는다. 두더라도 `momo_app` 읽기 경로의 안전망으로만 둔다.
 
-| 역할 | `expression_set` | `expression_set_slot` | `expression_set_image` |
-|---|---|---|---|
-| `momo_worker` | SELECT·INSERT·UPDATE | SELECT·INSERT·UPDATE | SELECT·INSERT·DELETE |
-| `momo_app` | SELECT·UPDATE | SELECT·UPDATE (끝 길의 `scene` NULL만) | SELECT·DELETE |
-| `momo_notifier` | **열 단위 `SELECT (workspace_id, state, expires_at)`만** | 없음 | 없음 |
-| `momo_relay`·`momo_platform_admin` | 없음 | 없음 | 없음 |
+| 역할 | `expression_set` | `expression_set_slot` | `expression_set_image` | `expression_set_notice` |
+|---|---|---|---|---|
+| `momo_worker` | SELECT·INSERT·UPDATE | SELECT·INSERT·UPDATE | SELECT·INSERT·DELETE | SELECT(계획 카드의 `noticeDue` 계산) |
+| `momo_app` | SELECT·UPDATE | SELECT·UPDATE (끝 길의 `scene` NULL만) | SELECT·DELETE | SELECT·INSERT(확정 실행기가 처음 한 번 쓴다, `ON CONFLICT DO NOTHING`) |
+| `momo_notifier` | **열 단위 `SELECT (workspace_id, state, expires_at)`만** | 없음 | 없음 | 없음 |
+| `momo_relay`·`momo_platform_admin` | 없음 | 없음 | 없음 | 없음 |
 
-`momo_worker`는 `begin`·`put_*`·`abandon`·제안 tx에, `momo_app`은 결정·만료 회수(머리 상태를 옮기고 렌디션을 지우며, 칸의 `scene`을 NULL로 비운다: L8-3)에 쓴다. 머리·칸에는 DELETE가 어느 역할에도 없다(행은 기록으로 남고 끝 상태만 바뀐다. 워크스페이스 삭제의 CASCADE는 표 소유자 권한이다). 픽셀 UPDATE는 어느 역할에도 없다. 검증은 열 단위 권한 때문에 표 단위(`has_table_privilege`)와 열 단위(`has_column_privilege`)를 모두 쓴다.
+`momo_worker`는 `begin`·`put_*`·`abandon`·제안 tx에, `momo_app`은 결정·만료 회수(머리 상태를 옮기고 렌디션을 지우며, 칸의 `scene`을 NULL로 비운다: L8-3)에 쓴다. 머리·칸·고지 기록에는 DELETE가 어느 역할에도 없고 고지 기록에는 UPDATE도 없다(첫 시각이 남는다)(행은 기록으로 남고 끝 상태만 바뀐다. 워크스페이스 삭제의 CASCADE는 표 소유자 권한이다). 픽셀 UPDATE는 어느 역할에도 없다. 검증은 열 단위 권한 때문에 표 단위(`has_table_privilege`)와 열 단위(`has_column_privilege`)를 모두 쓴다.
 
-**L10.2 표 셋.**
+**L10.2 표 넷(고지 기록 표는 L19.1).**
 
 ```sql
 CREATE TABLE expression_set (
@@ -1072,7 +1081,8 @@ CREATE TABLE expression_set (
   reference_attachment_ids uuid[] NOT NULL DEFAULT '{}' CHECK (cardinality(reference_attachment_ids) <= 4),  -- L18.5: 첨부를 여는 열쇠가 아니다, FK 없음
   -- 상태 열
   state text NOT NULL DEFAULT 'staging' CHECK (state IN ('staging','proposed','decided','expired')),
-  reference_consent_at timestamptz,         -- 동의가 한 번 쓴다(L19). 참조가 있으면 NULL인 동안 읽기·전송이 없다
+  plan_confirmed_at timestamptz,            -- 「이대로 만들기」가 한 번 쓴다(L2.5). NULL인 동안 읽기·주소 발급·위임 호출이 0이다(L19.3)
+  notice_shown boolean NOT NULL DEFAULT false,   -- 계획 카드가 멤버의 첫 고지를 보였는가(계획 열, 서버가 begin에서 쓴다). 확정이 고지 기록을 쓸지 정한다
   stored_bytes bigint NOT NULL DEFAULT 0 CHECK (stored_bytes BETWEEN 0 AND 25165824),  -- 행 CHECK는 마지막 문이고 상한은 쓰기 함수가 지킨다(A9)
   approval_id uuid,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -1115,13 +1125,21 @@ CREATE TABLE expression_set_image (         -- 칸별 세 렌디션. 158의 CHEC
 );
 ALTER TABLE expression_set_image DROP COLUMN expression_id;
 
+CREATE TABLE expression_set_notice (        -- 멤버가 참조 그림 고지를 처음 본 때(L19.1): (워크스페이스, 멤버)당 한 행, 첫 시각은 바뀌지 않는다
+  workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  member_id uuid NOT NULL,
+  seen_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (workspace_id,member_id),
+  FOREIGN KEY (workspace_id,member_id) REFERENCES member(workspace_id,id)
+);
+
 -- 세트 초안은 기존 expression_draft 행이다(approval_id를 갖고 태어난다). 바뀌는 것은 이 CHECK 하나뿐이다.
 ALTER TABLE expression_draft DROP CONSTRAINT expression_draft_candidate_index_check;
 ALTER TABLE expression_draft ADD CONSTRAINT expression_draft_candidate_index_check CHECK (candidate_index BETWEEN 0 AND 39);
 ```
 
 **L10.3 트리거·소유·하지 않는 것 (검수 L4).**
-- **불변.** 렌디션 행은 159처럼 UPDATE가 모두 거절된다(픽셀 불변). 머리의 `state`는 앞으로만 간다(`staging → proposed → decided`, 어느 쪽에서든 `expired`로, 되돌아오지 않는다). **계획 열**(머리의 `title`·`prefix`·`backend`·`subject_member_id`·`reference_attachment_ids`·`prompt`, 칸의 `kind`·`name`·`display_name`·`tags`·`scene`·`base_index`·`motion`)은 `begin`의 INSERT가 쓰고 그 뒤 UPDATE는 트리거가 거절한다. 예외는 끝 길에서 `prompt`·`scene`을 NULL로 비우는 것 하나다(A27). 머리의 `stored_bytes`는 `staging` 동안만 늘고, `approval_id`·`reference_consent_at`은 NULL에서 값으로 **한 번**만 바뀐다. 칸의 `state`는 `planned`에서 `ready|gray`로 한 번만 바뀐다.
+- **불변.** 렌디션 행은 159처럼 UPDATE가 모두 거절된다(픽셀 불변). 머리의 `state`는 앞으로만 간다(`staging → proposed → decided`, 어느 쪽에서든 `expired`로, 되돌아오지 않는다). **계획 열**(머리의 `title`·`prefix`·`backend`·`subject_member_id`·`reference_attachment_ids`·`notice_shown`·`prompt`, 칸의 `kind`·`name`·`display_name`·`tags`·`scene`·`base_index`·`motion`)은 `begin`의 INSERT가 쓰고 그 뒤 UPDATE는 트리거가 거절한다. 예외는 끝 길에서 `prompt`·`scene`을 NULL로 비우는 것 하나다(A27). 머리의 `stored_bytes`는 `staging` 동안만 늘고, `approval_id`·`plan_confirmed_at`은 NULL에서 값으로 **한 번**만 바뀐다. 칸의 `state`는 `planned`에서 `ready|gray`로 한 번만 바뀐다.
 - **소유.** 읽기·쓰기 SQL이 (워크스페이스, 에이전트, 요청자, run)을 인자로 받아 **직접** 건다(L10.1-2). 다른 에이전트·사람·워크스페이스·만료·없는 id는 구분 없는 같은 invalid arguments다.
 - **`stored_bytes`**는 앱이 더하는 값이라 행 CHECK만으로는 약 60 MiB까지 들어간다. 24 MiB는 쓰기 함수의 상한 검사가 지키고, A9의 사보타주는 그 검사를 깨는 쪽이다.
 - **하지 않는 것.** `expression`·`expression_image`·`expression_draft_image`·`approval`의 열 추가 없음. `expression_draft.code` CHECK 변경 없음(회색 칸은 draft 행이 아니다). `candidate_index`를 넓혀도 `expression.create`의 후보 4개 천장은 앱과 스키마(`maxItems 4`)가 계속 지킨다(A21). 참조 바이트를 저장하는 표는 없다(L18.4).
@@ -1237,17 +1255,17 @@ paths: {}
 | T14 | 비용 | Hermes 위임 한도(ADR-0201 P7)를 상속, GIF 조립은 디코더 동시 2·10초로 묶임 | S5a |
 | T15 | 저작권·상표 | 모델 안전 필터의 거절은 신호일 뿐 판정이 아니다. 저장 권한 확인(D6)과 항목별 신고 즉시 숨김 그대로. **남는 위험**: 필터를 통과한 그림의 권리는 사람의 확인에 기댄다 | A18 |
 | T16 | **참조 그림 속 글자가 지시로 읽힌다(프롬프트 주입)** | 고정 지시문의 한 줄(그림 속 글자는 자료, L21.2·A32). Hermes의 표면은 `todo_list`·`web_search`·`image_generate`뿐이다(기억·세션 검색은 꺼져 있다, ADR-0203 R). **Hermes의 답 글은 세트 흐름에서 모델로 돌아가지 않으므로** 도우미의 모델·이름·제목·카드에 닿을 길이 없고, 그림은 사람이 카드에서 본다. 남는 위험: Hermes가 그림 속 글을 따라 엉뚱한 그림을 그리거나 `web_search`의 검색어에 그림 속 글을 실을 수 있다(요청자 자신의 그림이라 ADR-0203 W2와 같은 급). S9의 주입 카나리가 잰다(L21.5-6) | A32 |
-| T17 | **참조 그림이 바깥 회사로 간다(얼굴·제3자 사진 포함)** | 고지·동의(L19: 전송 전, 요청 한 번, 동의 전 읽기 0), 장수·합계 상한(L18.3), 「사람 얼굴이 없다」는 선언(L18.6). 본인 사진은 H9 사진 길로. **남는 위험**: 선언은 기술 판정이 아니다(D6) | A31 |
+| T17 | **참조 그림이 바깥 회사로 간다(얼굴·제3자 사진 포함)** | **멤버별 처음 한 번의 고지**(L19.1)와 **요청마다의 계획 카드**(보낼 그림의 썸네일·장수·얼굴 없음 선언, 잘못 첨부했으면 빼기·취소, L2.5), **버튼 전 전송 0**(L19.3), 장수·합계 상한(L18.3). 본인 사진은 H9 사진 길로. **남는 위험**: 선언은 기술 판정이 아니다(D6). 고지는 처음 한 번뿐이라 두 번째부터는 카드의 썸네일이 유일한 눈 확인이다 | A31·A41·A42 |
 | T18 | **R8 경계의 우회: 남의 글·이전 메시지·읽은 도구 결과의 그림이 참조로 들어옴** | 서버가 트리거 메시지의 요청자 본인 첨부만 고른다(소유 규칙 + 같은 메시지, L18.1). 모델·에이전트·클라이언트는 첨부 id를 말하지 못한다(스키마·함수 시그니처). 이전 메시지의 그림은 참조가 아니다(L18.2) | A30 |
 | T19 | **Hermes가 참조 바이트를 기록에 남긴다** | 합계 4 MiB·4장의 상한과 고지 한 줄(남길 수 있어요, L19.1). 칸마다 재전송이라 세트당 최대 합계 × 정지 칸 수다(L18.3). **남는 위험**, S9가 잰다(V7) | A34·S9 |
 | T20 | **보관을 쓰는 역할이 BYPASSRLS라서 RLS가 마지막 문이 못 된다 (검수 H1)** | 잠금 블록(역할마다 코드가 쓰는 동사만, migration + 두 bootstrap 파일 같은 글자, 정적 가드), 모든 SQL 문이 `workspace_id`와 소유 조건을 직접 씀, 복합 FK, **운영 역할로 재는 소유 시험**(L10.1) | A6·A7·A9·A37·A38 |
 | T21 | **예약 백엔드가 조용히 켜진다** | `backend`는 서버가 정하고 `team_image_model`은 서버가 거절(`set_backend_off`)하며 그 단어를 읽는 코드 경로가 없다. 스키마가 단어를 닫는다. 켜려면 L20.3의 증보와 등급 2 검수가 필요하다 | A36 |
 | T22 | **한 사람이 팀의 하나뿐인 세트 칸을 붙잡거나 `@oort`를 오래 막는다 (검수 M4)** | 요청자별 쿨다운(L8-1), 일일 위임 한도(O1), 만드는 걸음은 동시 칸 밖(V1), 같은 방 누구나 하는 취소 | A40 |
-| T23 | **동의 전에 참조가 나간다** | 동의 확인(`reference_consent_at`)을 주소 발급 tx가 건다: NULL이면 발급 0·읽기 0·호출 0. 동의는 요청 한 번의 것이고 재사용하지 않는다(L19.2) | A31 |
+| T23 | **버튼 전에 그림(또는 어떤 위임)이 나간다** | `plan_confirmed_at`을 주소 발급 tx가 건다: NULL이면 발급 0·읽기 0·호출 0(글만의 세트도 같다). 이 값은 확정 실행기만 한 번 쓴다(UPDATE는 트리거가 NULL → 값 한 번만 허용). 코어 `expressionSetPlanMayStart`가 같은 판정이고 사보타주로 깨진다 | A31 |
 
 ### L13. 수용 기준(사보타주로 깰 수 있는 단정)
 
-각 단정은 해당 줄을 지우거나 뒤집었을 때 실패해야 한다. 코어(A1~A3·A20·A34·A39)는 이 PR의 [set.test.ts](../../packages/momo-core/src/features/expressions/set.test.ts)와 [set.vectors.json](../../packages/momo-core/src/features/expressions/set.vectors.json)이 이미 갖고 있다.
+각 단정은 해당 줄을 지우거나 뒤집었을 때 실패해야 한다. 코어(A1~A3·A20·A31·A34·A39·A41·A42의 순수 규칙)는 이 PR의 [set.test.ts](../../packages/momo-core/src/features/expressions/set.test.ts)와 [set.vectors.json](../../packages/momo-core/src/features/expressions/set.vectors.json)이 이미 갖고 있다.
 
 | # | 단정 | 지우면 빨강인 곳 | 칸 |
 |---|---|---|---|
@@ -1281,16 +1299,19 @@ paths: {}
 | A28 | **칸별 Hermes 요청은 서버 코드가 저장된 계획에서 만들고 P1 거름을 지난다**: 제어 문자·코드 펜스·`MEDIA:` 줄·UUID 모양·이메일 모양·**요청자 글에 없는 이름**이 든 칸이 하나라도 있으면 계획 전체가 거절되고 행이 0이다(시료로 하나씩 확인). 조립한 요청은 어떤 계획에서도 1,200자 이하다(800+1+300) | P1 거름 호출, 상한 | S5a |
 | A29 | **`begin`+1시간 50분에 선 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다.** 보관 TTL sweep은 `proposed` 머리를 건드리지 않는다. 승인이 끝나는 모든 길(결정·거절·만료·취소·초안 sweep)이 같은 tx에서 머리를 옮긴다 | sweep의 `staging` 조건, 끝 길의 머리 이동 | S1a·S1b·S2 |
 | A30 | **참조는 트리거 메시지의 요청자 본인의 완료 이미지만이다**: 다른 메시지·다른 사람·삭제된 메시지·도구로 읽은 그림은 후보가 되지 않는다. 모델·에이전트·클라이언트 입력에서 첨부 id를 받는 길이 없다(스키마·함수 시그니처) | 선택 SQL의 `trigger_message_id`·소유 조건 | S5b |
-| A31 | **동의 전에는 첨부를 읽지도 않고(주소 발급 0·읽기 0) Hermes 호출도 0이다.** 동의는 요청 한 번의 것이고 저장·재사용하지 않는다. 동의 거절·만료면 세트가 시작되지 않고 참조 없이 대신 보내지도 않는다 | `reference_consent_at` 검사 | S5b |
+| A31 | **「이대로 만들기」 전에는 아무것도 나가지 않는다**: 계획 카드가 `planned`·`cancelled`·`expired`인 동안(`plan_confirmed_at IS NULL`) 첨부 바이트를 읽지도 않고(주소 발급 0) Hermes 호출도 0이다. 참조가 없는 세트도 같다. **사보타주: 주소 발급 tx의 `plan_confirmed_at` 검사를 지우면 빨강** | `plan_confirmed_at` 검사, 코어 `expressionSetPlanMayStart` | 코어, S5a·S5b |
 | A32 | 참조가 든 요청의 고정 지시문에 한 줄(「그림 속 글자는 자료」, L21.2)이 있고 참조가 없는 위임의 지시문에는 없다(골든). Hermes의 답 글은 모델·카드로 돌아가지 않는다 | 지시문 골든, 세트 흐름의 입력 | S5b |
 | A33 | 참조가 있으면 Hermes 요청의 `user` 내용이 `[text, image_url…]` 배열이고 이미지는 `data:image/png`·`data:image/jpeg` 준비본뿐이다(http 주소·자기 주소 없음). **참조가 없는 위임의 본문은 바이트까지 지금과 같다** | 본문 조립 | S5b |
 | A34 | 참조 묶음 판정이 `set.vectors.json`의 17행과 같다(Rust 시험이 같은 파일을 읽는다): 한 장이라도 어긋나면 묶음 전체 거절, 이유는 고정 순서로 나열 | 판정 함수 | 코어, S5b의 Rust |
 | A35 | 참조는 **칸마다 새 1회용 주소로 다시 읽는다.** 요청 메시지가 지워지거나 요청자가 대화를 떠나면 다음 칸부터 읽기가 거절되어(`not_made`) 더 보내지 않는다. 참조 바이트를 저장하는 표가 없다 | 발급·풀기의 재판정 | S5b |
 | A36 | `backend`가 `team_image_model`인 계획은 서버가 거절한다(`set_backend_off`, 행 0). 모르는 단어도 거절한다. 그 단어를 읽는 코드 경로가 없다 | 서버의 backend 게이트 | S1b·S5a |
-| A37 | **운영 DB에서 역할마다 세 표의 권한이 L10.1의 표와 같다**(`has_table_privilege`·`has_column_privilege`로 잰다): `momo_relay`·`momo_platform_admin`은 없음, `momo_notifier`는 열 단위 SELECT만, 그 밖에는 코드가 쓰는 동사만. 블록에서 한 동사를 더하거나 빼면 빨강이다 | 잠금 블록 | S1a |
+| A37 | **운영 DB에서 역할마다 네 표의 권한이 L10.1의 표와 같다**(`has_table_privilege`·`has_column_privilege`로 잰다): `momo_relay`·`momo_platform_admin`은 없음, `momo_notifier`는 열 단위 SELECT만, 그 밖에는 코드가 쓰는 동사만. 블록에서 한 동사를 더하거나 빼면 빨강이다 | 잠금 블록 | S1a |
 | A38 | 잠금 블록이 migration과 두 bootstrap 파일에서 같은 글이고 bootstrap에서 `ALL TABLES` 권한 **뒤에** 적용된다(정적 가드 시험 넷, 169 모양) | 정적 가드 | S1a |
 | A39 | `expressionSetMayTryNext`·`settleExpressionSetStills`·`settleExpressionSetGifs`와 같은 결과: 연속 거절 3이면 남은 정지는 `not_made`, GIF는 바탕이 있으면 만들고 없으면 `base_missing`. 서버 루프는 호출마다 이 판정을 묻는다 | 루프의 판정 | 코어, S5a의 Rust |
 | A40 | 한 요청자는 직전 세트가 끝난 뒤 10분 안에 새 세트를 시작할 수 없다(`set_cooldown`). **세트의 만드는 걸음이 도우미의 동시 실행 칸을 쥐지 않는다**: 세트가 도는 동안에도 같은 도우미의 빠른 답이 막히지 않는다 | `begin`의 쿨다운 검사, 칸 계수에서의 제외 | S5a |
+| A41 | **고지는 멤버별로 처음 한 번이다**: 기록이 없는 멤버의 참조가 있는 계획 카드만 `noticeDue`이고, 그 카드의 「이대로 만들기」가 기록을 쓴다(첫 시각은 바뀌지 않는다). 이미 본 멤버의 카드·글만의 세트·다른 멤버의 첫 카드(그 멤버는 기록이 없다)는 각자 자기 기록으로 판정한다. 취소·고치기·만료한 카드는 기록을 쓰지 않는다 | 기록 쓰기·`noticeDue` 계산 | 코어, S5a·S5b |
+| A42 | **계획 카드는 서버의 묶음만 보인다**(썸네일 포인터·장수). 「장면 고치기」의 참조 빼기는 묶음의 부분집합만 되고 모르는 id는 편집 전체 거절이다. 고친 계획은 **새 계획**이다(옛 계획 `cancelled`, 계획 행은 UPDATE되지 않는다). 새 카드도 버튼 전 0이다 | `narrowExpressionSetReferences`, 새 `begin` | 코어, S5a |
+| A43 | **고지 기록은 (워크스페이스, 멤버)당 한 행이고 UPDATE·DELETE가 없다**(운영 역할로). 멤버 설정은 고지 문장을 언제나 다시 보여 준다(사전 문구) | 표 권한·잠금 블록 | S1a·S3·S4 |
 
 ### L14. 구현 슬라이스(한 슬라이스 = 한 이슈 = 한 브랜치·PR)
 
@@ -1299,13 +1320,13 @@ paths: {}
 | ID | 트랙 | 내용 | 크기·등급 | 파일 소유(착수 때 확정) | 선행 |
 |---|---|---|---|---|---|
 | S0 | 엔진(문서+코어) | 이 증보 + 코어 계약(#5442) | L·2 | `docs/adr/0218-…`, `docs/adr/0186-…`·`0201-…`(역방향 한 줄씩), `packages/momo-core/src/features/expressions/`의 `set*.ts`·`set.schema.json`·`set.vectors.json`·`fixtureServer.ts`·`contracts.ts`·`index.ts`·`verify-contract.mjs` | — |
-| S1a | 엔진 | **보관**: migration(L10: 표 셋·트리거·**잠금 블록과 정적 가드 시험**), 도메인 함수(`begin`·`put_still`·`put_gif`·`put_gray`·`abandon`), 소유를 직접 거는 읽기·쓰기 SQL, `staging` 만료 sweep, 미결정 1의 부분 유니크 인덱스. 시험 A6·A7·A9·A27·A37·A38과 A13의 보관 쪽(**운영 쓰기 역할로**) | M~L·2 | `server/Migrations/<번호>`, `infra/rust/sql/bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`, `momo-expressions/src/`(보관 모듈 신규), `bins/momo-notifier/src/`(회수), 정적 가드 시험 | S0 Accepted |
+| S1a | 엔진 | **보관**: migration(L10: 표 넷(고지 기록 포함)·트리거·**잠금 블록과 정적 가드 시험**), 도메인 함수(`begin`·`put_still`·`put_gif`·`put_gray`·`abandon`), 소유를 직접 거는 읽기·쓰기 SQL, `staging` 만료 sweep, 미결정 1의 부분 유니크 인덱스. 시험 A6·A7·A9·A27·A37·A38과 A13의 보관 쪽(**운영 쓰기 역할로**) | M~L·2 | `server/Migrations/<번호>`, `infra/rust/sql/bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`, `momo-expressions/src/`(보관 모듈 신규), `bins/momo-notifier/src/`(회수), 정적 가드 시험 | S0 Accepted |
 | S1b | 엔진 | **문과 카드**: 레지스트리 행(`TeamAiOnly`), 허용 목록 14→15와 **서버 전용 목록을 빼는 두 입구**(`advertised_action_ids`와 `catalog_definitions()`·프로필 `enabled_tool_definitions`, L2.2·F20), `requester_could_approve_in_tx`의 갈래 교체(L2.4-5), 일반 대기 계수에서 세트 제외(L8-1), 제안 tx(보관 잠금·초안 복사·보관 회수·approval·카드·**팀 AI 표지**·초안 `expires_at` = 승인의 것), `opens_in_app`에 Open, 미리보기 인가 확장(`candidate_row`), **교체 경로 허용 목록**(`routes/expressions.rs::replace`와 `replace_candidate_in_tx`, F19), `action_resolve`의 인자 해석, 고정 시험 갱신(`helper_only` 5→6, 열림 표, 포트 열거 13·4 유지, `the_team_ai_ids_are_one_list_in_three_places`). 사용자 영향 0(광고하지 않는다) | M~L·2 | `momo-agent/src/{actions.rs,team_ai_roles.rs,approval.rs,tools.rs}`, `bins/momo-agent-worker/src/payload.rs`, `momo-workspace-actions/src/{team_ai.rs,action_resolve.rs}`, `momo-expressions/src/action.rs`, `bins/momo-server/src/routes/{expressions.rs,actions.rs}` | S1a |
 | S2 | 엔진 | 결정 tx(`expressionChoices` DTO, 셋 상태의 판정식 `expression_choice_refused`, 항목별 등록, 영수증·결과 카드, 감사), **회수 길**(거절·만료 `routes/approvals.rs`, run 취소 `approval.rs`, 초안 TTL sweep)에 세트 추가와 머리 상태 이동(L8-3), `docs/api/openapi.yaml`·샘플러, Rust 벡터 시험(코어의 `set.vectors.json`을 읽는다: 읽는 경로는 정책 한 줄 또는 `docs/api/`의 바이트 같은 사본, 인계 §8) | M·2 | `bins/momo-server/src/{dto.rs, routes/approvals.rs}`, `momo-agent/src/approval.rs`, `momo-expressions/src/`, `docs/api/openapi.yaml` | S1b |
-| S3 | UXUI(웹·데스크탑) | 세트 카드: 격자·칸별 선택·종류 고르기·회색 칸·**참고한 그림 줄**·결과 줄·접근성, 사전 | M | `clients/web/src/features/expressions/`(신규 세트 카드), 문구 사전 | S0 핀(실서버는 S2 뒤) |
-| S4 | UXUI(폰) | 같은 카드의 폰 모양 | M | `clients/mobile/src/features/expressions/` | S0 핀 |
-| S5a | 엔진(도우미) | **세트 도구**: 계획 도구(**ask_hermes와 같은 문 + P4-4 재판정**, 계획 행 한 번 쓰기, 칸별 요청의 P1 거름, L2.4-2)·위임 루프(칸당 한 번, 연속 3 거절 닫힘 L7.7)·`put_*` 호출·**서버 코드가 저장된 계획으로 `expression.set.create` 카드를 올림**·묶음 `hermes` 소유·지시문·도구 설명 골든·요청자 쿨다운, **ADR-0201 증보**(10분 계수는 세트 하나, 일일 계수는 정지 한 장 O1, 쿨다운, 위임 동시, 참조 입력 L21). 작업 걸음은 동시 칸 밖에서만 돈다(V1) | L·2 | `bins/momo-agent-worker/src/team_ai.rs`·`team_ai/`, `momo-agent/src/team_ai_roles.rs`, `docs/adr/0201-…`(증보) | S1b·S2, #5369(문), #5370(작업 걸음), #5372(그림 추출). **#5371은 필요 없다**(세트는 첨부 쓰기 길을 쓰지 않는다, L3.3) |
-| S5b | 엔진(도우미) | **참조 입력**: 선택 함수 `trigger_photos_in_tx`(L18.1), 행 메타 판정(코어와 같은 벡터), **동의 확인**(L19, 읽기 전), 칸마다 `mint_for_attachment_in_tx` 읽기·`prepare`·준비본 판정, Hermes 요청 본문의 이미지 부분과 고정 지시문 한 줄(L21), 보관 머리의 `reference_attachment_ids`·`reference_consent_at` 쓰기. 시험 A30~A35 | M~L·2 | `bins/momo-agent-worker/src/`, `momo-messaging/src/self_media.rs`, `momo-workspace-actions/src/` | S5a, **ADR-0201 P14-S9의 실측(L21.5)으로 V6~V8을 닫기 전에는 켜지 않는다** |
+| S3 | UXUI(웹·데스크탑) | **계획 카드(썸네일·장수·버튼 셋·첫 한 번의 고지, L2.5)**·세트 카드: 격자·칸별 선택·종류 고르기·회색 칸·**참고한 그림 줄**·결과 줄·접근성, 사전 | M | `clients/web/src/features/expressions/`(신규 세트 카드), 문구 사전 | S0 핀(실서버는 S2 뒤) |
+| S4 | UXUI(폰) | 같은 두 카드(계획 카드·세트 카드)의 폰 모양 | M | `clients/mobile/src/features/expressions/` | S0 핀 |
+| S5a | 엔진(도우미) | **세트 도구**: **계획 카드(`expression.set.plan`, L2.5)와 확정 실행기·「장면 고치기」(새 계획)**, 계획 도구(**ask_hermes와 같은 문 + P4-4 재판정**, 계획 행 한 번 쓰기, 칸별 요청의 P1 거름, L2.4-2)·위임 루프(칸당 한 번, 연속 3 거절 닫힘 L7.7)·`put_*` 호출·**서버 코드가 저장된 계획으로 `expression.set.create` 카드를 올림**·묶음 `hermes` 소유·지시문·도구 설명 골든·요청자 쿨다운, **ADR-0201 증보**(10분 계수는 세트 하나, 일일 계수는 정지 한 장 O1, 쿨다운, 위임 동시, 참조 입력 L21). 작업 걸음은 동시 칸 밖에서만 돈다(V1) | L·2 | `bins/momo-agent-worker/src/team_ai.rs`·`team_ai/`, `momo-agent/src/team_ai_roles.rs`, `docs/adr/0201-…`(증보) | S1b·S2, #5369(문), #5370(작업 걸음), #5372(그림 추출). **#5371은 필요 없다**(세트는 첨부 쓰기 길을 쓰지 않는다, L3.3) |
+| S5b | 엔진(도우미) | **참조 입력**: 선택 함수 `trigger_photos_in_tx`(L18.1), 행 메타 판정(코어와 같은 벡터), **버튼 전 읽기 0**(L19.3)과 계획 카드의 참조 썸네일·장수(L2.5), **멤버별 처음 한 번의 고지 기록**(L19.1), 칸마다 `mint_for_attachment_in_tx` 읽기·`prepare`·준비본 판정, Hermes 요청 본문의 이미지 부분과 고정 지시문 한 줄(L21), 보관 머리의 `reference_attachment_ids`·`plan_confirmed_at` 검사. 시험 A30~A35 | M~L·2 | `bins/momo-agent-worker/src/`, `momo-messaging/src/self_media.rs`, `momo-workspace-actions/src/` | S5a, **ADR-0201 P14-S9의 실측(L21.5)으로 V6~V8을 닫기 전에는 켜지 않는다** |
 
 S3·S4는 S0의 코어 핀(이 PR의 마지막 코어 커밋)만으로 가짜 서버 위에서 화면을 끝낼 수 있다(`createExpressionFixtureServer({sets: FIXTURE_SET_CARDS})`). 서버 칸이 착륙해도 도우미는 이 행동을 광고에서 볼 수 없고(L2.2) S5a가 서버 코드로 올리기 전에는 카드가 서지 않으므로 사용자 영향은 0이다. ADR-0201 P14-S9(운영·docs)가 L21.5의 절차로 `runtime-unverified`를 닫는다.
 
@@ -1324,13 +1345,13 @@ S3·S4는 S0의 코어 핀(이 PR의 마지막 코어 커밋)만으로 가짜 �
 ### L16. 결정과 열려 있는 것
 
 **owner 결정(2026-11-06).** 인용은 이슈 #5442에 적었다. 이 절은 결정을 다시 묻거나 넓히지 않는다.
-- **O3 = 나**: v1부터 **참조 그림을 Hermes에 함께 넘긴다.** 참조 그림은 **여러 장** 첨부할 수 있다(L18, 최대 4장). 보내기 전에 고지·동의(L19). 팀 키 그림 모델(§8 H9의 길, 「다」)은 **지금 만들지 않고** 나중에 켤 수 있게 길만 열어 둔다(L20: `backend` 칸, 코드 경로 없음).
+- **O3 = 나**: v1부터 **참조 그림을 Hermes에 함께 넘긴다.** 참조 그림은 **여러 장** 첨부할 수 있다(L18, 최대 4장). 멤버별 처음 한 번의 고지와 요청마다의 계획 카드(L19·L2.5, 아래 O5). 팀 키 그림 모델(§8 H9의 길, 「다」)은 **지금 만들지 않고** 나중에 켤 수 있게 길만 열어 둔다(L20: `backend` 칸, 코드 경로 없음).
 - **O1**: 정지 한 장 = 위임 1회, GIF 0. 시작 전에 남은 한도로 계획을 줄이거나 시작하지 않고 숫자로 알린다. 기본 세트(정지 8장)는 하루 세 번, 정지 32장짜리 40칸 세트는 관리자가 한도를 올려야 한다. 요청자 10분 계수는 세트 하나를 한 요청으로 센다(L8-2).
 - **O2**: 연속 3번 거절이면 남은 정지 칸은 `not_made`(L7.7). 이 값은 권장안 그대로 확정됐다.
 - **O4**: 세트 카드의 대기 한도는 1(미결정 세트)이고 일반 3(요청자별)·30(워크스페이스별)과 따로다(L8-1).
+- **O5 = 처음 한 번 고지**(2026-11-07, 질문 창에서 권장안 대신 고름): 참조 그림 고지는 **멤버가 처음 참조 그림을 보낼 때 한 번**이다. 요청마다 동의 카드를 띄우지 않는다. 「첨부한 그림이 Hermes의 그림 모델로 전송돼요」(회사 이름 없음, F10), 본 기록은 멤버 단위로 남고 설정에서 다시 볼 수 있다(L19). 요청마다의 눈 확인은 계획 카드가 맡는다: 보낼 참조 그림의 썸네일·장수를 보이고 「장면 고치기」로 빼거나 「취소」로 접을 수 있으며, **버튼 전에는 아무 그림도 Hermes로 가지 않는다**(L2.5·L19.3).
 
-**owner 결정 필요(권장안을 함께 적는다).**
-- **O5 참조를 보내기 전의 동의 방식.** 권장: 요청마다 **한 번 누르는 확인 카드**(L19.3, 선례 `dm.agent.admit`: 새 행동 하나·새 경로 0). 가벼운 대안: 묶음 `hermes`의 고지로 갈음하고 요청마다는 묻지 않는다. 앞쪽이 안전하지만 참조가 있는 세트마다 한 번의 탭이 더 든다. 값은 S5b가 착수하기 전에 정한다.
+**owner 결정 필요.** 없다(O5는 위 「owner 결정」으로 닫혔다).
 
 **owner가 알아야 할 한계 (S9 실측 뒤에 결정으로 올라갈 수 있다).** Hermes의 모델은 참조 그림을 **보고** 글 설명으로 옮겨 그린다. 그림 도구가 참조의 **픽셀**을 직접 받는 길은 열지 않았다(L21.4). 그래서 닮는 정도가 owner 로컬 시료(참조를 도구에 직접 넣은 결과)보다 낮을 수 있다. 시료와 같은 닮음이 꼭 필요하면 그림 도구가 픽셀을 받게 하는 길(ADR-0203 증보와 G4 재검수가 필요한 별도 결정)이나 「다」(팀 키 그림 모델이 참조를 API 본문으로 받는다, L20.3-5)로 간다.
 
@@ -1360,11 +1381,11 @@ S3·S4는 S0의 코어 핀(이 PR의 마지막 코어 커밋)만으로 가짜 �
 
 owner 결정: v1부터 참조 그림을 Hermes에 함께 넘기고, 그림은 여러 장 첨부할 수 있다. 이 절은 **무엇을 어떻게 고르고 얼마까지 보내는가**를 정한다.
 
-**L18.1 누가 고르나 — 서버다.** 요청 메시지(run의 트리거)에 요청자가 **직접 올린** 이미지 첨부 가운데서 서버가 고른다. 모델·에이전트·클라이언트가 첨부 id를 말하는 길은 없다: 계획과 제안에 참조 키가 없고(코어 시험이 `references`·`attachmentId` 따위를 거절한다) 선택 함수의 인자에 id가 없다(A30). ADR-0218 G4의 「첨부 id는 에이전트·모델·호출자 누구도 정하지 못한다」와 같은 원칙이다. 선택 함수 `trigger_photos_in_tx`는 `trigger_photo_in_tx`(F16)를 여러 장으로 일반화한 것이다: 트리거 메시지에 붙은 **완료된 `image/*` 첨부**를 `created_at, id` 순서로 읽고 각각에 소유 규칙(`find_requester_attachment_in_tx`)을 건다. 이미지가 아닌 첨부(문서·압축 파일)는 그림이 아니므로 무시한다. **이미지인데 형식이 PNG·JPEG·WebP가 아니거나(GIF·HEIC·AVIF·SVG) 소유 규칙을 못 지난 것이 하나라도 있으면 묶음 전체를 거절한다**(L18.3): 조용히 건너뛰면 사람은 그 그림도 쓰였다고 믿는다.
+**L18.1 누가 고르나 — 서버다.** 요청 메시지(run의 트리거)에 요청자가 **직접 올린** 이미지 첨부 가운데서 서버가 고른다. 모델·에이전트·클라이언트가 첨부 id를 **더하는** 길은 없다: 계획과 제안에 참조 키가 없고(코어 시험이 `references`·`attachmentId` 따위를 거절한다) 선택 함수의 인자에 id가 없다(A30). 사람은 계획 카드에서 서버의 묶음에서 **빼기만** 할 수 있다(L2.5). ADR-0218 G4의 「첨부 id는 에이전트·모델·호출자 누구도 정하지 못한다」와 같은 원칙이다. 선택 함수 `trigger_photos_in_tx`는 `trigger_photo_in_tx`(F16)를 여러 장으로 일반화한 것이다: 트리거 메시지에 붙은 **완료된 `image/*` 첨부**를 `created_at, id` 순서로 읽고 각각에 소유 규칙(`find_requester_attachment_in_tx`)을 건다. 이미지가 아닌 첨부(문서·압축 파일)는 그림이 아니므로 무시한다. **이미지인데 형식이 PNG·JPEG·WebP가 아니거나(GIF·HEIC·AVIF·SVG) 소유 규칙을 못 지난 것이 하나라도 있으면 묶음 전체를 거절한다**(L18.3): 조용히 건너뛰면 사람은 그 그림도 쓰였다고 믿는다.
 
 **L18.2 무엇이 아닌가 (R8과의 경계는 L21.3).** 이전 메시지의 그림, 다른 사람의 글에 붙은 그림, 도우미가 도구로 읽은 그림(`read_attachment`·대화 읽기), 검색 결과의 그림은 참조가 아니다. 요청자가 이전 메시지의 그림을 쓰려면 요청 메시지에 다시 첨부한다.
 
-**L18.3 한도와 근거 숫자.** 한 장이라도 어긋나면 **묶음 전체**를 거절하고 이유를 요청자에게 한 줄로 알린다(코어 `expressionSetReferenceLine`). 판정은 코어 `expressionSetReferenceVerdict`이고 `set.vectors.json`의 17행이 S5b의 Rust 시험과 같은 기준이다(A34). **행의 메타(mime·bytes·치수)로 하는 판정은 바이트를 읽기 전에, 동의 전에** 하고, 준비본 판정은 읽은 뒤 **첫 칸의 Hermes 호출 앞에서** 한다. 준비본 판정이 어긋나면 첫 호출 전에 세트가 끝나고 보낸 것이 없다.
+**L18.3 한도와 근거 숫자.** 한 장이라도 어긋나면 **묶음 전체**를 거절하고 이유를 요청자에게 한 줄로 알린다(코어 `expressionSetReferenceLine`). 판정은 코어 `expressionSetReferenceVerdict`이고 `set.vectors.json`의 17행이 S5b의 Rust 시험과 같은 기준이다(A34). **행의 메타(mime·bytes·치수)로 하는 판정은 바이트를 읽기 전에, 계획 카드가 서기 전에** 하고, 준비본 판정은 읽은 뒤 **첫 칸의 Hermes 호출 앞에서** 한다. 준비본 판정이 어긋나면 첫 호출 전에 세트가 끝나고(버튼은 이미 눌렸다) 보낸 것이 없다.
 
 | 항목 | 값 | 근거 |
 |---|---|---|
@@ -1380,17 +1401,23 @@ owner 결정: v1부터 참조 그림을 Hermes에 함께 넘기고, 그림은 �
 
 **L18.5 기록.** 승인 카드의 `references`는 닫힌 포인터 0~4개다(코어 `SetApproval`; 첨부를 여는 열쇠가 아니고 그림 자체는 대화 첨부 경로로만 열린다, G1). 등록되는 표현의 `origin_source_attachment_id`에는 **첫 참조 하나**가 대표로 들어간다(G1은 표현당 하나의 기록 포인터이고 표현에는 세트라는 개념이 없다). 나머지 포인터는 보관 머리와 감사(장수만)에만 남고 등록 뒤에는 사라진다. 새 열이 필요한 곳은 보관 머리 한 곳이다(`reference_attachment_ids uuid[]`, L10: 같은 migration 안). 표현·초안의 표에는 열을 더하지 않는다.
 
-**L18.6 얼굴.** v1의 참조는 **사람 얼굴이 없는 그림**(캐릭터·일러스트·사물)이다. 동의가 그 선언이다(L19). 그래서 참조가 있는 세트의 `subjectMemberId`는 null이다. 사람 얼굴이 있는 사진은 이 길로 보내지 않는다: 본인 사진의 배경 지우기·캐리커처는 H9 사진 길(한 장, 당사자 규칙)로 간다. 얼굴 탐지는 없다(D6): 선언은 기술 판정이 아니고 신고 즉시 숨김이 보완이다.
+**L18.6 얼굴.** v1의 참조는 **사람 얼굴이 없는 그림**(캐릭터·일러스트·사물)이다. 계획 카드의 선언 한 줄과 그 버튼(「이대로 만들기」)이 그 선언이다(L2.5·L19.2). 그래서 참조가 있는 세트의 `subjectMemberId`는 null이다. 사람 얼굴이 있는 사진은 이 길로 보내지 않는다: 본인 사진의 배경 지우기·캐리커처는 H9 사진 길(한 장, 당사자 규칙)로 간다. 얼굴 탐지는 없다(D6): 선언은 기술 판정이 아니고 신고 즉시 숨김이 보완이다.
 
-### L19. 보내기 전의 고지와 동의
+### L19. 참조 그림의 고지 — 멤버별 처음 한 번, 요청마다의 눈 확인은 계획 카드 (owner 2026-11-07, O5)
 
-**L19.1 고지.** 참조 묶음이 있으면 **첫 바이트를 읽기 전에** 요청자에게 고정 문장을 보인다(코어 `expressionSetReferenceNotice`, ADR-0218 H9.4와 같은 모양): 「첨부한 그림 N장이 Hermes의 그림 모델로 전송돼요」. **회사 이름·모델 판은 쓰지 않는다**(F10: 고를 수도 알 수도 없다). 같은 자리에 선언 한 줄(「사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.」)과 [추정, V7] 「Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요」 한 줄을 둔다(Hermes가 입력 그림을 기록에 두는지는 S9가 확인한다: 어느 쪽이든 이 문장은 거짓이 아니다). 비용 문장은 쓰지 않는다: H9.4의 「팀이 연결한 키로 청구」는 이 길에 맞지 않고(Hermes의 구독, ADR-0004 증보 6) 금액은 oort가 모른다.
+owner 결정: 고지는 **멤버가 처음 참조 그림을 보낼 때 한 번**이다. **요청마다 동의 카드를 띄우지 않는다**(질문 창에서 권장안 대신 고름).
 
-**L19.2 동의.** 동의는 **요청 한 번의 것**이다: 저장·재사용하지 않고 같은 사람의 다음 세트는 다시 묻는다. 요청자 본인만 할 수 있다. **동의 전에는 (a) 첨부 바이트를 읽지 않고(주소 발급 0), (b) Hermes를 부르지 않는다**(A31). 동의가 거절·만료되면 세트는 시작되지 않고 **참조 없이 대신 보내지도 않는다**(사람이 원한 것은 참조로 만든 세트다). 글만으로 만드는 세트는 참조가 없으므로 이 단계가 없다(요청 문장의 전달은 묶음 `hermes`의 고지, ADR-0201 P10).
+**L19.1 고지(처음 한 번).** 고정 문장(코어 `expressionSetReferenceNotice`): 「첨부한 그림이 Hermes의 그림 모델로 전송돼요」. **회사 이름·모델 판은 쓰지 않는다**(F10: 고를 수도 알 수도 없다). 같은 자리에 [추정, V7] 「Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요」 한 줄을 둔다(Hermes가 입력 그림을 기록에 두는지는 S9가 확인한다: 어느 쪽이든 이 문장은 거짓이 아니다). 비용 문장은 쓰지 않는다(Hermes의 구독, ADR-0004 증보 6; H9.4의 「팀이 연결한 키로 청구」는 이 길에 맞지 않는다).
+- **어디에**: 그 멤버의 **첫 참조 세트의 계획 카드(L2.5) 안**이다(`noticeDue`). 첫 바이트를 읽기 전이고 버튼 전이다.
+- **기록**: **멤버 단위**, `(워크스페이스, 멤버)`당 한 행(`expression_set_notice`, L10). 그 카드의 「이대로 만들기」가 눌린 같은 tx에서 쓴다: 고지가 **보인** 카드(머리의 `notice_shown`)의 버튼만 쓴다. 첫 시각은 바뀌지 않는다(`ON CONFLICT DO NOTHING`, UPDATE·DELETE 없음). 취소·고치기·만료한 카드는 쓰지 않으므로 그 멤버는 다음에 다시 본다(A41).
+- **설정**: 멤버의 설정 화면이 같은 문장을 언제나 다시 보여 준다(사전 문구, 서버 호출 없음). 본 시각까지 보이려면 멤버 응답에 가산 필드가 필요하므로 v1 밖이다(A43).
+- **범위**: 참조 그림에만 있다. 글만으로 만드는 세트에는 고지가 없다(요청 문장의 전달은 묶음 `hermes`의 고지, ADR-0201 P10).
 
-**L19.3 어떻게 받나 [추정 — O5].** 권장은 서버 코드가 올리는 **확인 카드 한 장**이다. 선례는 `dm.agent.admit`(서버만 올리는 동의 승인, ADR-0217)이다. 새 행동 하나(이름은 제안: `expression.set.reference.consent`, `Proposers::ServerOnly`, `required_role`은 요청한 본인(`RequestingMember`), 위험 `approval`)가 필요하고, 실행기는 보관 머리의 `reference_consent_at`을 한 번 쓰고 작업 재개 job을 넣는다. **새 경로는 없다**(기존 결정 라우트). 카드는 L19.1의 세 줄과 장수만 보이고 그림 자체는 보이지 않는다(요청 메시지에 이미 있다). 이 확인은 세트 승인과 별개이고 아무것도 등록하지 않는다. 대안은 묶음 `hermes`의 고지로 갈음하는 것(요청마다 묻지 않음)이고 owner에게 O5로 묻는다. 확인 카드가 기다리는 동안 run·작업이 도우미의 동시 실행 칸을 쥐지 않아야 한다(V1).
+**L19.2 요청마다의 눈 확인 = 계획 카드.** 고지는 처음 한 번뿐이므로 요청마다 무엇이 나가는지는 **계획 카드**가 보인다(L2.5): 보낼 참조 그림의 **썸네일(포인터)과 장수**, 「사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.」(**매번**), 만들 그림 장수·장면 목록. 잘못 첨부했으면 그 자리에서 「장면 고치기」로 빼거나 「취소」로 접는다. **「이대로 만들기」는 사람 얼굴이 없다는 선언이다**(D6의 제출자 선언: 그래서 `subjectMemberId`는 null이다). 새 카드 종류는 이 하나뿐이고 동의 카드는 없다.
 
-**L19.4 감사.** `expression.set.reference_consented`(set id, 장수)와 `expression.set.reference_refused`(set id, 닫힌 이유). 그림·파일 이름·첨부 id 목록은 싣지 않는다(D6).
+**L19.3 불변식 — 버튼 전에는 아무것도 나가지 않는다.** 참조 바이트 읽기·1회용 주소 발급·Hermes 호출 어느 것도 `plan_confirmed_at`이 NULL인 동안 0이다. 참조가 없는 세트의 위임도 같다. 확정 실행기만 이 값을 한 번 쓴다. 코어 `expressionSetPlanMayStart`가 같은 판정(확정된 카드일 때만 참, 창이 지난 `planned`는 `expired`)이고 서버의 모든 읽기·발급·호출이 이것을 먼저 묻는다(A31). 시험은 주소 발급 tx의 `plan_confirmed_at` 검사를 지우면 빨강이다.
+
+**L19.4 감사.** `expression.set.plan_confirmed`(set id, 참조 장수, 고지가 보였는지)·`expression.set.plan_cancelled`·`expression.set.plan_revised`(set id, 장수)·`expression.set.reference_notice_seen`(멤버, 처음 한 번). 그림·파일 이름·첨부 id 목록은 싣지 않는다(D6).
 
 ### L20. 생성 백엔드 자리 — `hermes`는 켜짐, `team_image_model`은 예약 (owner 2026-11-06)
 
@@ -1404,7 +1431,7 @@ owner 결정: 팀 키 그림 모델(§8 H9의 길)은 지금 만들지 않는다
 1. **예외의 확장**: ADR-0218 H9.2는 서버의 팀 키 호출을 「사람 멤버가 사진 한 장으로 요청한 이 경로」 하나에 한정했고 ADR-0186 X8-1이 같은 문장을 갖는다. 팀 AI(에이전트)가 칸마다 부르는 것은 새 예외이므로 두 문장에 역방향 줄이 필요하다.
 2. **비용**: 칸마다 호출이라 정지 32칸이면 팀 키로 32번 청구된다. H9.3의 「제한 없음」과 #4944의 관리자 한도 위에 세트용 계수를 얹어야 한다.
 3. **폭주 막이**: H9.3의 멤버당 동시 1·인스턴스 동시 4·멤버당 60초 10회가 세트를 순서대로 만드는 흐름과 맞는지(세트 하나가 멤버의 1칸을 오래 쥔다), 세트를 한 요청으로 세는 계수.
-4. **동의**: H9.4의 `acknowledgedProvider`(회사 이름) 모양이 필요하다(L19.1은 회사 이름을 쓰지 않는다). 이때는 비용 문장도 H9.4의 것(팀이 연결한 키로 청구)이 된다.
+4. **고지·동의**: H9.4의 `acknowledgedProvider`(회사 이름) 모양이 필요하다(L19.1의 고지는 회사 이름을 쓰지 않고 처음 한 번뿐이다). 이때는 비용 문장도 H9.4의 것(팀이 연결한 키로 청구)이 된다.
 5. **참조 전달**: 이미지 모델 API에 참조 그림을 **API 본문으로** 직접 보낸다(OpenAI `images/edits`의 `image[]`, Gemini 이미지 블록). L18의 묶음과 준비본을 그대로 쓰되 도구 인자를 거치지 않으므로 L21.4의 「보는 것 ≠ 쓰는 것」 한계가 사라진다.
 6. **키 여는 문**: `read_team_key`가 한 문이라는 불변식(H11 (a), I4의 호출 수 시험)에 새 호출자가 생긴다. 숫자와 시험을 검수와 함께 바꾼다.
 7. **묶음**: `hermes`와 다른 역할 묶음이 필요한지(관리자가 따로 끌 수 있어야 한다).
@@ -1469,3 +1496,4 @@ owner 결정: 팀 키 그림 모델(§8 H9의 길)은 지금 만들지 않는다
 | L6 속도 한도 | L8-2 |
 | L7 벡터 경로 | 코어 주석, L14 S2, 인계 |
 | **owner 11-06** O3=나·다는 예약, O1·O2·O4 | L18~L21, L7.7, L16, 코어 `set*` |
+| **owner 11-07** O5 = 처음 한 번 고지 | **L2.5**(계획 카드), **L19**(고지·기록·버튼 전 0), L10(고지 기록 표·`plan_confirmed_at`), L13 A31·A41~A43, T17·T23, 코어 `SetPlanCard`·`expressionSetPlanMayStart` |
