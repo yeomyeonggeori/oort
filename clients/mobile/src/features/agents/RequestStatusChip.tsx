@@ -17,7 +17,6 @@ import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {CONV_ICONS} from '../../design/icons';
 import {font, line, slopTo, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
-import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // Lucide(ISC), 셸과 같은 24 viewBox·1.8 선의 1/2/3배 래스터예요.
 export const ICONS: Record<string, ImageSourcePropType> = {
@@ -70,7 +69,6 @@ export function RequestStatusChip({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const formatMessage = useFormatMessage();
   const {fontScale} = useWindowDimensions();
   const source = useRef<View | null>(null);
   const scale = Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
@@ -80,7 +78,8 @@ export function RequestStatusChip({
     {
       height,
       // 칩의 폭은 **어떤 낱말이 서 있든** 코어가 말하는 가장 긴 낱말(`TRIGGER_CHIP_FACES`)의 폭이다 — 낱말이 바뀌어도(받음 → 가져감 →
-      // 작업 중 → 답함) 머리 줄의 이름·시각 자리가 움직이지 않는다. 낱말이 번역으로 길어져도 코어 목록이 따라간다.
+      // 작업 중) 머리 줄의 이름·시각 자리가 움직이지 않는다. 낱말이 번역으로 길어져도 코어 목록이 따라간다. 성공으로 끝나면
+      // 이 칩 자체가 서지 않는다(#5382, 코어 `triggerChip` → null).
       ...(reserve ? {width: font.meta * scale * CHIP_LONGEST_WORD + line.meta + space.sm} : {}),
     },
   ];
@@ -91,8 +90,6 @@ export function RequestStatusChip({
       ? 'Clock'
       : chip.mark === 'cross'
       ? 'CircleX'
-      : chip.mark === 'check'
-      ? 'Check'
       : chip.kind === 'approval'
       ? 'ShieldQuestion'
       : 'CircleDot';
@@ -117,7 +114,6 @@ export function RequestStatusChip({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={chip.kind === 'answered' && chip.answer !== undefined ? formatMessage('timeline.triggerChip.jumpHint') : undefined}
       ref={source}
       onPress={() => onOpen(source)}
       hitSlop={{top: slopTo(height), bottom: slopTo(height)}}

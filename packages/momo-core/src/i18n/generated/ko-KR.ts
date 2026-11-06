@@ -1318,6 +1318,12 @@ export const catalog: MessageCatalog = {
       "value": "활동을 불러오지 못했어요"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션 목록을 불러오지 못해 아래 목록에는 에이전트 턴만 있어요"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1328,6 +1334,46 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "패널을 다시 열면 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "기록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "진행을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": "의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
     }
   ],
   "connection.load.agentProfileTitle": [
@@ -1370,6 +1416,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 초안 대상을 확인할 수 없어요"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1426,6 +1484,12 @@ export const catalog: MessageCatalog = {
       "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1438,10 +1502,22 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요."
     }
   ],
   "connection.load.sentence": [
@@ -1458,10 +1534,52 @@ export const catalog: MessageCatalog = {
       "value": "reason"
     }
   ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "팀 그림을 불러오지 못했어요"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "실행 위치를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "선택한 작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "진행 내역을 불러오지 못했어요"
     }
   ],
   "connection.send.failed": [
@@ -3068,6 +3186,308 @@ export const catalog: MessageCatalog = {
       "value": "사진에 저장"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "결과 목록"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "더 최근 결과"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "더 오래된 결과"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "검색 닫기"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "어제"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "다른 말로 다시 찾아 보세요."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "찾을 말을 입력해 보세요."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "불러오는 중이에요"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "대화 검색"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 찾기"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 찾기"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 이상 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 모두 지우기"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "이 대화에서 다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 찾았던 말)"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": "의 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "이 채널의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "이 대화의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "모든 대화에서"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "모든 대화에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 찾기"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,
@@ -3102,6 +3522,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
+    }
+  ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "이전 대화를 불러오지 못했어요"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "이전 대화에서 메시지를 찾는 중이에요"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
     }
   ],
   "mobile.linkCard.cancel": [
@@ -3727,7 +4177,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "더보기"
+      "value": "더 보기"
     }
   ],
   "releaseNotes.popup.title": [
@@ -4508,6 +4958,460 @@ export const catalog: MessageCatalog = {
       "value": "이 답글이 달린 스레드 열기"
     }
   ],
+  "search.group.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.group.loadingMore": [
+    {
+      "type": 0,
+      "value": "불러오는 중"
+    }
+  ],
+  "search.group.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.group.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "search.group.moreLabel": [
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " 더 보기"
+    }
+  ],
+  "search.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.input.clearLabel": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "search.input.exitLabel": [
+    {
+      "type": 0,
+      "value": "홈으로 돌아가기"
+    }
+  ],
+  "search.input.placeholder": [
+    {
+      "type": 0,
+      "value": "사람·채널·메시지 찾기"
+    }
+  ],
+  "search.kind.all": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "search.kind.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.kind.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 종류"
+    }
+  ],
+  "search.kind.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.kind.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.picker.agent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "search.picker.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.picker.channelPrivate": [
+    {
+      "type": 0,
+      "value": "비공개 채널"
+    }
+  ],
+  "search.picker.channelPublic": [
+    {
+      "type": 0,
+      "value": "공개 채널"
+    }
+  ],
+  "search.picker.close": [
+    {
+      "type": 0,
+      "value": "대화 고르기 닫기"
+    }
+  ],
+  "search.picker.dm": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지"
+    }
+  ],
+  "search.picker.empty": [
+    {
+      "type": 0,
+      "value": "맞는 대화가 없어요."
+    }
+  ],
+  "search.picker.filterLabel": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.title": [
+    {
+      "type": 0,
+      "value": "어느 대화에서 찾을까요"
+    }
+  ],
+  "search.recent.clearAll": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "search.recent.clearAllLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 모두 지우기"
+    }
+  ],
+  "search.recent.conversations": [
+    {
+      "type": 0,
+      "value": "최근 연 대화"
+    }
+  ],
+  "search.recent.empty": [
+    {
+      "type": 0,
+      "value": "찾고 싶은 사람·채널·메시지를 입력해 보세요."
+    }
+  ],
+  "search.recent.openLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 열기"
+    }
+  ],
+  "search.recent.searches": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ", 다시 찾기"
+    }
+  ],
+  "search.recent.searchLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " 다시 찾기"
+    }
+  ],
+  "search.row.agentLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 에이전트"
+    }
+  ],
+  "search.row.agentSubtitle": [
+    {
+      "type": 0,
+      "value": "에이전트 · @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.channelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널"
+    }
+  ],
+  "search.row.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "search.row.messageLabel": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": "의 "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": " 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "search.row.openChannelHint": [
+    {
+      "type": 0,
+      "value": "채널을 열어요."
+    }
+  ],
+  "search.row.openDmHint": [
+    {
+      "type": 0,
+      "value": "대화를 열어요."
+    }
+  ],
+  "search.row.personLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 사람"
+    }
+  ],
+  "search.row.personSubtitle": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.privateChannelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 비공개 채널"
+    }
+  ],
+  "search.scope.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.scope.chosenLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서만 찾는 중, 누르면 범위를 풀어요"
+    }
+  ],
+  "search.scope.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 범위"
+    }
+  ],
+  "search.scope.pick": [
+    {
+      "type": 0,
+      "value": "대화 고르기"
+    }
+  ],
+  "search.scope.pickLabel": [
+    {
+      "type": 0,
+      "value": "찾을 대화 고르기"
+    }
+  ],
+  "search.state.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "search.state.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "search.state.loading": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "search.state.noResults": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.noResultsIn": [
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.pendingChannels": [
+    {
+      "type": 0,
+      "value": "채널과 사람을 불러오는 중이에요."
+    }
+  ],
+  "search.state.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "search.state.scopeNote": [
+    {
+      "type": 0,
+      "value": "내가 속한 채널의 메시지만 찾아요. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요."
+    }
+  ],
+  "search.state.shortHint": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
+  "search.state.shortHintMessages": [
+    {
+      "type": 0,
+      "value": "메시지는 2자 이상 입력하면 찾아요."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,
@@ -5033,6 +5937,54 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "알림 설정을 확인하는 중이에요."
+    }
+  ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱을 쓰는 동안은 폰 알림을 정한 시간만큼 늦춰요. 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않아요. 서버가 아는 것은 쓰고 있다는 사실뿐이고, 다른 멤버에게는 보이지 않아요."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5분"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "데스크탑을 쓰는 동안 폰 알림 늦추기"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기 설정을 불러오지 못했어요."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1분"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요."
     }
   ],
   "settings.notifications.threadReplyDescription": [
@@ -5649,6 +6601,22 @@ export const catalog: MessageCatalog = {
       "value": "축소"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 답장"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "메시지에 답장"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -5794,12 +6762,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [

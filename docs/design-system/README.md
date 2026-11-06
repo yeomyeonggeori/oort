@@ -314,7 +314,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 
 **폰에서 44는 손으로 적는 값이 아니라 도출되어야 하는 값이다.** `slopTo(size)`가 콘텐츠 상자 크기에서 슬롭을 계산한다 — 슬롭을 손으로 적었을 때 아무도 산수를 다시 확인하지 않아서 답글 표식 29pt · 롤업 29pt · 오류 닫기 33pt가 출하됐던 것이 이 함수가 생긴 이유다(감사 M-14).
 
-다만 **아직 전면 적용이 아니다.** `slopTo`를 쓰는 것은 그 결함이 발견된 `MessageRow.tsx` 하나이고, 다섯 자리가 여전히 숫자를 손으로 적는다(`atoms.tsx` · `StopTurnControl.tsx` · `LongPressHint.tsx` · `MessageBody.tsx` · `Quote.tsx`). `designSystem.test.ts`가 강제하는 것은 "전부 도출"이 아니라 **"그 다섯이 여섯이 되지 않는 것"**이다 — 새로 손으로 적으면 빨갛고, 기존 다섯은 세어진 채 남아 있다.
+다만 **아직 전면 적용이 아니다.** `slopTo`를 쓰는 것은 그 결함이 발견된 `MessageRow.tsx` 하나이고, 세 자리가 여전히 숫자를 손으로 적는다(`atoms.tsx` · `StopTurnControl.tsx` · `MessageBody.tsx`; `LongPressHint.tsx`는 코치마크가 되며, `Quote.tsx`는 #5381에서 인용 머리가 두 줄 높이가 되어 슬롭이 필요 없어지며 빠졌다). `designSystem.test.ts`가 강제하는 것은 "전부 도출"이 아니라 **"그 셋이 넷이 되지 않는 것"**이다 — 새로 손으로 적으면 빨갛고, 기존 셋은 세어진 채 남아 있다.
 
 ### 2.8 아이콘 — `lucide-react`가 기능 글리프의 정본이다
 
@@ -464,6 +464,29 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 **기계.** `clients/web/scripts/capture-5200.mjs`가 번들 Chromium(또는 `--engine webkit`)에서 상자를 잰다(줄이 입력창 안인가·한 줄이고 높이가 같은가·×의 크기·위치·그림 가운데를 덮는가·입력창이 줄만큼만 자라는가·키보드 빼기와 초점·링이 면 **위에** 그려지는가(픽셀)·썸네일이 카드의 2배인가·터치에서 ×가 보이는가). 단위 시험은 `trayModel.test.ts`(판정)·`attachmentTray.test.tsx`(상호작용).
 
+### 2.12 대화 안 인용: 답장 카드의 윗칸 머리 (#5381, owner 2026-11-05 · 시안 Q4)
+
+> 계기(요약): owner 의견은 「인용의 왼쪽 둥근 세로 테두리가 흔한 AI 모양처럼 보인다」였다. 조사한 네 가지 모양(한 줄 머리 · 연결선 + 작은 얼굴 · 색 막대 판 · 카드 윗칸 머리) 중 owner가 **카드 윗칸 머리(Q4)**를 골랐다. 줄 수는 owner가 따로 말하지 않아 추천안(웹·폰 모두 1줄)을 기본값으로 뒀다. 에이전트 답이 어느 자리에 서는지(R1, #4646)와 「답함」 칩 제거(#5382)는 이 절 밖이다.
+
+**모양.** 답장 메시지는 **한 덩어리 카드**다. 윗칸이 머리이고, 가는 구분선 아래가 답 본문이다. 세로선·막대는 어느 표면에도 없다.
+
+| | 웹·데스크탑 | 폰 |
+|---|---|---|
+| 카드 | 본문 자리가 카드: `bg-surface-muted` · `rounded-lg`(14) · 폭은 내용 폭, `max-w-pane-lg`(640)까지. 채움에는 그림자·테두리가 없다 | 말풍선 **안** 윗칸이 머리: 머리는 말풍선 가장자리까지 차는 띠(위 두 모서리가 말풍선 반경을 따른다)이고 본문은 안쪽 여백을 따로 진다. 내 말풍선(신호색)·남 말풍선·보내는 중 메아리가 같다 |
+| 머리 | 아이콘 `CornerUpLeft`(12) + 「{이름}에게 답장」(`text-meta` 600, `text-ink-muted`) · 아래에 원문 **1줄**(`truncate`) · 가는 구분선(`border-line`) | 같은 아이콘(Lucide `corner-up-left`를 12pt PNG로 옮겨 담았다) + 이름 문장 + 원문 1줄(`numberOfLines`) · 가는 선. 색은 말풍선 색에서 유도한다(`bubble.ts` `quoteHeadFor`: 검정 쪽으로 어둡힌 띠, 글자 4.5:1 보증) |
+| 누르면 | 머리가 버튼이다: 원본으로 이동(`watchForMessageId` 앵커 기계 그대로). 갈 곳이 없는 마운트는 글이다 | 머리가 눌린다: `onJumpToQuoted`. 목적지를 모르는 인용(`unresolved`)에는 문이 없다 |
+| 입력창 | `QuoteChip`이 같은 문법: 아이콘 + 이름 문장 + 원문 1줄 + 닫기(✕) | `QuoteDraftBar`가 같은 문법(`draftRule` 삭제). 스레드 답글 머리말(`ReplyDraftCard`, 「○○님에게 **답글**」)은 다른 장치라 그대로다 |
+
+**말.** 머리 문장은 코어 사전의 `timeline.quote.head`(ko 「{name}에게 답장」 · en 「Replying to {name}」)와 `timeline.quote.headUnnamed`(「메시지에 답장」)다. 이름을 부를지는 코어 `quoteHeadAuthorId`가 정한다: 못 푼 인용(`unresolved`)과 저자를 잃은 지워진 원본은 이름을 지어내지 않고 이름 없는 문장을 말한다. 지워진 원본(「삭제된 메시지」)·못 푼 원본(「인용한 메시지가 이 화면에 없습니다」 / 폰 「인용한 원본을 아직 불러오지 않았습니다」)은 **지금 문구 그대로 같은 머리 자리**에 선다. 화면 낭독(폰 행 라벨)은 눈이 보는 머리와 같은 낱말이다: 「{이름}에게 답장, {원문}」. 「답글」은 스레드(`root_id`)의 낱말이고, 인용은 「답장」이다(ADR-0148의 두 장치를 낱말로도 가른다).
+
+**줄 수.** 원문은 **1줄**이다(코어 `QUOTE_EXCERPT_MAX_LINES` 2→1, 웹·폰 같은 한 값). 글자 수 140은 폭 밖의 문자 예산이라 그대로이고, 폭이 모자라면 화면이 말줄임으로 자른다.
+
+**안 그리는 인용.** 스레드 화면에서 인용 대상이 그 스레드의 root면 그리지 않는다(`isQuoteRedundant`의 `threadRootId`: 작성자·블록 갈래를 묻지 않는다 — root는 맨 위 행으로 이미 서 있고, 스레드 안에는 「인용해서 답하기」가 없다). 에이전트 답이 바로 위 메시지를 가리키는 경우(#5357)와 같은 함수 한 곳이다([ADR-0148](../adr/0148-quote-reply-vs-thread.md) 증보).
+
+**B-1이 바뀌었다.** 1차 `QuoteBlock` 주석 B-1은 「인용에 배경 한 단을 넣었다가 되돌렸다」(정지 레일이 앰버라는 전제가 실측에서 거짓이었고, 폭을 꽉 채운 고도 있는 띠는 인용의 무게를 올린다)였다. 이번 결정이 그 되돌림을 다시 열었고, 두 점이 달라서 채움을 쓴다: ① 채움은 인용 띠가 아니라 **답장 한 덩어리(머리 + 본문)**를 싸서 머리만 도드라지지 않는다, ② 채움은 보조 채움 토큰(`--surface-muted`)이고 고도가 없다. accent(앰버)는 여전히 닿지 않는다(멘션·미읽 경계·앵커 착지의 색이다): 머리는 중성 잉크이고 hover도 중성 위계 안에서만 움직인다. 머리 자체에는 별도 채움을 주지 않는다 — 눌림·hover 상태 토큰(`--surface-hover`/`--surface-pressed`)을 가만히 선 면에 빌려 쓰지 않는다(#1515).
+
+**기계.** 웹 `QuoteCard.test.tsx`(카드 구조·머리 문장·1줄·누르면 이동·지워진/못 푼 원본·본문 없는 카드·편집 중·스레드 root 생략·입력창 칩·보내는 중 echo, 「세로선 없음」은 클래스로 잰다), 코어 `quote.test.ts`(1줄·root 생략·바로 위와의 조합·사전 낱말), 폰 `quoteSurface.test.tsx`(머리가 말풍선 안인가·본문 없는 행·코드 첫 블록·내 말풍선 대비·초안·낭독 문장, 「세로선 없음」은 그려진 트리의 스타일로 잰다)와 `messageBubble.test.tsx`(`quoteHeadFor`를 모든 테마·모드·신호색 조합에서 4.5:1·띠 가시성으로 전수). `clients/web/gates/gate-quote.mjs`는 레일 색 단정을 「카드 안에 한쪽 변 테두리 0 · 머리 글자가 accent가 아님(정지·hover) · 카드 채움이 착지 틴트가 아님」으로 바꿨다. **재지 않는 것:** 실기기 폰 렌더(캡처는 시뮬레이터 하네스 `quote-q4`), 데스크탑 앱 빌드, 실제 외부 에이전트가 `replyToId`를 달고 스레드에 답하는 모양(#4646).
+
 ### 2.10 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
 
 사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤, 펼친 셸의 컴포저 입력 상자는 `창 폭 − 390`이다. 바닥(240)을 지키지 못한 폭은 **600~629px뿐**이었다(600px에서 210). 630~719px는 수리 전에도 바닥 위였다(650 → 260 · 719 → 329). 규칙은 이 문서가 이미 쓰는 문법이다: **주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다**(`route-region` · `chat-region` · `thread-pane`). 그 부차 표면에 사이드바 열이 빠져 있었을 뿐이고, 문턱은 더하지 않았다.
@@ -582,7 +605,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. `appPaneIsolation.browser.test.ts`(#4587) — 판(`app-pane`)이 `isolate`일 때의 순서를 WebKit·Chromium의 **그려진 픽셀**로 잰다(포털 스크림 > 판 안의 덮는 판, 서랍 > 덮는 판, 덮는 판 > 머리, 띠의 알약 > 머리, 그리고 판 격리로 **바뀐** 두 관계: 띠의 알약 > 덮는 판, 사이드바 스크림 > 덮는 판). 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 토글 중심 20 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약 · 전체 화면 인셋 · 판 바깥 = 사이드바 색 픽셀(팔레트 3 × 스킴 2 × 장면 4) · 노을띠 「내 작업」 윗줄 픽셀) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정, 다운로드 단추를 채운 오른쪽 자리) + `features/downloads/*.test.*`(진행·기록·단추 상태·웹에서 숨김·셸과 번들의 약속) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
 | **좁은 웹 창의 본문 바닥** (§2.10) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
-| **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 「답함」 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다([§10](agent-work-display.md): jest만 — 실측·캡처는 검증 줄) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
+| **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 요청 묶음을 여는 칩의 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 칩 자리가 비어도(성공) 머리 줄 높이·줄바꿈 0 불변 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다([§10](agent-work-display.md): jest만 — 실측·캡처는 검증 줄) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
@@ -610,7 +633,6 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | — | **실제 Tauri 창이 띠를 잡고 움직이는가**(§2.9) | 번들 시험은 속성과 Tauri `drag.js`의 판정 사본까지만 잰다. 진짜 WKWebView에서 마우스로 끌리는지, 신호등 중심과 띠의 시각 정렬, 전체 화면·좁은 창의 모양은 데스크탑 빌드를 사람이 확인한다(PR의 실제 앱 캡처) |
 | — | **웹의 렌더된 컨트롤 경계·터치 크기 전수** | 지금은 토큰 층과 프리미티브 층까지만 잰다. 렌더 스윕은 미구현(감사 §C-3-b·c). 예외 하나: **대화 머리의 컨트롤**은 뷰포트 안·겹침·눌림(히트 테스트)·툴팁이 판 안인지를 `gate:channel-header-fit`이 실브라우저에서 잰다(#4230). 다른 표면은 그대로 미구현 |
 | — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`에 남아 있고(`AgentHubRoute` 자리는 #1957이 닫음), **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
-| — | **외부 에이전트의 실제 답이 칩의 「답함 ✓」과 이어지는가**(agent-work-display §3) | 이동의 근거는 에이전트의 최종 답이 트리거를 인용(`replyToId`, ADR-0148 규칙 6)하거나 정산된 턴 기록(`props.run_id`)에 있다는 것이다. Agent Port(`oort_message_post`)로 쓰는 외부 에이전트(grok 등)의 글이 그것을 달고 오는지는 **실제 에이전트가 답해 봐야** 안다(runtime-unverified). 안 달리면 칩은 「답함」을 말하되 눌리지 않는다 — 죽은 단추는 없지만 이동도 없다 |
 | — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
 | — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |

@@ -1360,6 +1360,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load activity"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions, so the list below only has agent turns"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1370,6 +1376,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "Reopen the panel to read it again."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "We'll read it again in a moment."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the record"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load progress"
+    }
+  ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load this agent's profile, so we can't tell what will apply"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the profiles of "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", so we can't tell what will apply"
     }
   ],
   "connection.load.agentProfileTitle": [
@@ -1412,6 +1462,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list, so we can't show conversation names"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't check where your drafts belong"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1468,6 +1530,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the notification rules"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load unread markers, so conversations with members who left are still showing"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1480,10 +1548,22 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Try again in a moment."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "We can't reach the server."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "Something went wrong."
     }
   ],
   "connection.load.sentence": [
@@ -1500,10 +1580,52 @@ export const catalog: MessageCatalog = {
       "value": "reason"
     }
   ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't refresh team work. Showing the last list we have"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the team pictures"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the code execution hosts"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load where sessions run"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the selected work session"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load work sessions"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the progress steps"
     }
   ],
   "connection.send.failed": [
@@ -3232,6 +3354,304 @@ export const catalog: MessageCatalog = {
       "value": "Save to Photos"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "Me"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "Results list"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "Newer result"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "Older result"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "Clear text"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "Close search"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "Yesterday"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Try a different word."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "No results for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn’t search."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "Type something to look for."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "Load more"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "Loading…"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "Search conversation"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "Search this channel"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "Search this conversation"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "Result "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " of at least "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "Clear all recent searches"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "Search again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "Search this conversation again: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " (found earlier in "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "Recent searches"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 0,
+      "value": "Message from "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "Results in this channel · newest first"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "Results in this conversation · newest first"
+    }
+  ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "Search all conversations for ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "Searching…"
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "Type at least 2 characters to start searching."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,
@@ -3266,6 +3686,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load earlier messages"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "Looking for the message in earlier messages…"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
     }
   ],
   "mobile.linkCard.cancel": [
@@ -4688,6 +5138,460 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread this reply is in"
     }
   ],
+  "search.group.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "search.group.loadingMore": [
+    {
+      "type": 0,
+      "value": "Loading"
+    }
+  ],
+  "search.group.messages": [
+    {
+      "type": 0,
+      "value": "Messages"
+    }
+  ],
+  "search.group.more": [
+    {
+      "type": 0,
+      "value": "See more"
+    }
+  ],
+  "search.group.moreLabel": [
+    {
+      "type": 0,
+      "value": "See more "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "search.group.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "search.input.clearLabel": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "search.input.exitLabel": [
+    {
+      "type": 0,
+      "value": "Back to Home"
+    }
+  ],
+  "search.input.placeholder": [
+    {
+      "type": 0,
+      "value": "Search people, channels, messages"
+    }
+  ],
+  "search.kind.all": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "search.kind.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "search.kind.groupLabel": [
+    {
+      "type": 0,
+      "value": "Search type"
+    }
+  ],
+  "search.kind.messages": [
+    {
+      "type": 0,
+      "value": "Messages"
+    }
+  ],
+  "search.kind.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "search.picker.agent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "search.picker.all": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "search.picker.channelPrivate": [
+    {
+      "type": 0,
+      "value": "Private channel"
+    }
+  ],
+  "search.picker.channelPublic": [
+    {
+      "type": 0,
+      "value": "Public channel"
+    }
+  ],
+  "search.picker.close": [
+    {
+      "type": 0,
+      "value": "Close conversation picker"
+    }
+  ],
+  "search.picker.dm": [
+    {
+      "type": 0,
+      "value": "Direct message"
+    }
+  ],
+  "search.picker.empty": [
+    {
+      "type": 0,
+      "value": "No matching conversations."
+    }
+  ],
+  "search.picker.filterLabel": [
+    {
+      "type": 0,
+      "value": "Find a conversation"
+    }
+  ],
+  "search.picker.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "Find a conversation"
+    }
+  ],
+  "search.picker.title": [
+    {
+      "type": 0,
+      "value": "Where should we search?"
+    }
+  ],
+  "search.recent.clearAll": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "search.recent.clearAllLabel": [
+    {
+      "type": 0,
+      "value": "Clear all recent searches"
+    }
+  ],
+  "search.recent.conversations": [
+    {
+      "type": 0,
+      "value": "Recently opened"
+    }
+  ],
+  "search.recent.empty": [
+    {
+      "type": 0,
+      "value": "Type a person, channel, or message you want to find."
+    }
+  ],
+  "search.recent.openLabel": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.recent.searches": [
+    {
+      "type": 0,
+      "value": "Recent searches"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "Search again for recent search "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    }
+  ],
+  "search.recent.searchLabel": [
+    {
+      "type": 0,
+      "value": "Search again for recent search "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "search.row.agentLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", agent"
+    }
+  ],
+  "search.row.agentSubtitle": [
+    {
+      "type": 0,
+      "value": "Agent · @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.channelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel"
+    }
+  ],
+  "search.row.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Conversation"
+    }
+  ],
+  "search.row.messageLabel": [
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": "'s message in "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "search.row.openChannelHint": [
+    {
+      "type": 0,
+      "value": "Opens the channel."
+    }
+  ],
+  "search.row.openDmHint": [
+    {
+      "type": 0,
+      "value": "Opens the conversation."
+    }
+  ],
+  "search.row.personLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", person"
+    }
+  ],
+  "search.row.personSubtitle": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.privateChannelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " private channel"
+    }
+  ],
+  "search.scope.all": [
+    {
+      "type": 0,
+      "value": "All conversations"
+    }
+  ],
+  "search.scope.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Searching only in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", tap to remove the limit"
+    }
+  ],
+  "search.scope.groupLabel": [
+    {
+      "type": 0,
+      "value": "Where to search"
+    }
+  ],
+  "search.scope.pick": [
+    {
+      "type": 0,
+      "value": "Choose conversation"
+    }
+  ],
+  "search.scope.pickLabel": [
+    {
+      "type": 0,
+      "value": "Choose a conversation to search"
+    }
+  ],
+  "search.state.errorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "search.state.errorHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't search."
+    }
+  ],
+  "search.state.loading": [
+    {
+      "type": 0,
+      "value": "Searching…"
+    }
+  ],
+  "search.state.noResults": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "search.state.noResultsIn": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "” in "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "search.state.pendingChannels": [
+    {
+      "type": 0,
+      "value": "Loading channels and people…"
+    }
+  ],
+  "search.state.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "search.state.scopeNote": [
+    {
+      "type": 0,
+      "value": "Only messages from channels you belong to are searched. If it was in another channel, join it and search again."
+    }
+  ],
+  "search.state.shortHint": [
+    {
+      "type": 0,
+      "value": "Type at least 2 characters to start searching."
+    }
+  ],
+  "search.state.shortHintMessages": [
+    {
+      "type": 0,
+      "value": "Messages are searched from 2 characters."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,
@@ -5250,6 +6154,54 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Checking your notification settings."
+    }
+  ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts wait for the time you choose, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed. The server only learns that you are active, and other members can't see it."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5 min"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "Delay phone alerts while I use the desktop"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the phone alert delay."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1 min"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the phone alert delay. Try again in a moment."
     }
   ],
   "settings.notifications.threadReplyDescription": [
@@ -5870,6 +6822,22 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.quote.head": [
+    {
+      "type": 0,
+      "value": "Replying to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "Replying to a message"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -6120,12 +7088,6 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [

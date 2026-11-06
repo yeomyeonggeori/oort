@@ -2,7 +2,7 @@ import type {AgentRunProgress, Message, RosterMember} from '@momo/core/lib/api';
 import {triggerChip} from '@momo/core/features/agents/triggerChip';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {PendingMessage} from '@momo/core/features/timeline/model';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
 import {StyleSheet} from 'react-native';
 
@@ -137,10 +137,10 @@ describe('요청 묶음의 채널 칩과 스레드 자리', () => {
     expect(screen.getAllByTestId('message-row')).toHaveLength(1);
     expect(screen.getByText('소개를 바꿨어요')).toBeTruthy();
   });
-  it('승인·거부·만료·끝으로 바뀌어도 칩의 상자 크기는 같아요', () => {
+  it('승인·거부·만료·실패로 바뀌어도 칩의 상자 크기는 같아요', () => {
     const view = render(<RequestStatusChip chip={triggerChip([run], () => ({name: '에이전트'}), BASE_MS)!} />);
     const box = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
-    for (const [phase, endReason] of [['cancelled', 'approval_rejected'], ['timed_out', 'approval_expired'], ['succeeded', undefined]] as const) {
+    for (const [phase, endReason] of [['cancelled', 'approval_rejected'], ['timed_out', 'approval_expired'], ['failed', undefined]] as const) {
       const chip = triggerChip([{...run, phase, endReason}], () => ({name: '에이전트'}), BASE_MS)!;
       view.rerender(<RequestStatusChip chip={chip} />);
       const next = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
@@ -506,5 +506,6 @@ it('S1 #4789 머리 여백은 스크롤 안에 있고 날짜·안 읽음 자리�
   expect(StyleSheet.flatten(list.props.contentContainerStyle)).toMatchObject({paddingTop: 121, flexGrow: 1, justifyContent: 'flex-end'});
   expect(StyleSheet.flatten(list.props.style)?.paddingTop).toBeUndefined();
   expect(StyleSheet.flatten(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
-  expect(screen.UNSAFE_getAllByType(require('react-native').ActivityIndicator)).toHaveLength(1);
+  // 옛 대화를 불러오는 스피너는 목록 **안**(머리)에 하나다. 진입 베일(#5403)의 덮개가 목록 밖에 세우는 불러오는 화면의 스피너는 세지 않는다.
+  expect(within(list).UNSAFE_getAllByType(require('react-native').ActivityIndicator)).toHaveLength(1);
 });

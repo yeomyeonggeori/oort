@@ -196,33 +196,34 @@ afterEach(() => {
 });
 
 describe("Sidebar: 채널 목록 불러오기 실패", () => {
-  // 지키는 것: 받아 둔 채널이 없으면 상자(제목 + 이유 + 다시 시도), 이유는 원인을 따라간다.
-  it("받아 둔 채널이 없으면 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 목록을 다시 읽는다", async () => {
-    const cases: [Error, boolean, string, string][] = [
-      [new NetworkError("unreachable", 15_000), false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-      [new NetworkError("unreachable", 15_000), true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), true, "", "문제가 생겼어요. 다시 시도해 주세요."],
+  // 지키는 것(#5307 L1): 받아 둔 채널이 없어도 사이드바는 상자가 아니라 **한 줄**로 말한다. 본문(`ChatShell`)이 같은 실패를 원인 상자(`alert`)로 말하므로
+  // 사이드바가 같은 상자를 또 세우면 한 사건을 두 번 말하고 낭독도 두 번이다. 한 줄은 회색 띠 + `status`라 낭독은 본문의 한 번이다.
+  it("받아 둔 채널이 없어도 상자 없이 한 줄만 서고(낭독 `status`), 다시 시도가 목록을 다시 읽는다", async () => {
+    const cases: [Error, boolean][] = [
+      [new NetworkError("unreachable", 15_000), false],
+      [new NetworkError("unreachable", 15_000), true],
+      [new ApiError(500, "boom", "internal"), true],
     ];
-    for (const [error, online, cause, reason] of cases) {
+    for (const [error, online] of cases) {
       deviceOnline(online);
       channelsQuery.error = error;
       refetch.mockClear();
       const host = await mount();
-      const box = host.querySelector<HTMLElement>('[data-testid="channels-error"]');
-      expect(box, reason).not.toBeNull();
-      expect(box?.getAttribute("role")).toBe("alert");
-      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
-      expect(box?.textContent).toContain("채널 목록을 불러오지 못했어요");
-      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
-      expect(box?.textContent).not.toMatch(/\d{3}/);
+      expect(host.querySelector('[data-testid="channels-error"]')).toBeNull();
+      const line = host.querySelector<HTMLElement>('[data-testid="channels-error-line"]');
+      expect(line).not.toBeNull();
+      expect(line?.getAttribute("role")).toBe("status");
+      expect(line?.textContent).toContain("채널 목록을 불러오지 못했어요");
+      expect(line?.textContent).not.toMatch(/\d{3}/);
       expect(host.textContent).not.toContain("채널을 불러오지 못했습니다");
-      expect(host.querySelector('[data-testid="channels-error-line"]')).toBeNull();
+      // 사이드바 안에는 `alert`가 없다: 같은 실패를 낭독이 두 번 말하지 않는다(본문 상자가 `alert` 한 번을 맡는다).
+      expect(host.querySelector('[role="alert"]')).toBeNull();
       // 사이드바 시트 위: 「다시 시도」는 보조 채움이 아니라 시트 위 문법이다(#5306, 시트와 같은 색이라 사라지던 알약).
-      const retryClasses = (box?.querySelector("button")?.className ?? "").split(/\s+/);
+      const retryClasses = (line?.querySelector("button")?.className ?? "").split(/\s+/);
       expect(retryClasses).toEqual(expect.arrayContaining(["bg-surface", "shadow-sm"]));
       expect(retryClasses).not.toContain("bg-surface-muted");
       await act(async () => {
-        box?.querySelector("button")?.click();
+        line?.querySelector("button")?.click();
       });
       expect(refetch).toHaveBeenCalledTimes(1);
       act(() => mountedRoot?.unmount());
@@ -232,8 +233,8 @@ describe("Sidebar: 채널 목록 불러오기 실패", () => {
     }
   });
 
-  // 지키는 것: 받아 둔 채널이 있으면 상자로 덮지 않는다. 목록은 그대로 두고 위에 한 줄만 선다.
-  it("받아 둔 채널이 있으면 상자 없이 목록은 그대로 두고 위에 한 줄만 선다", async () => {
+  // 지키는 것: 받아 둔 채널이 있으면 목록은 그대로 두고 위에 같은 한 줄만 선다.
+  it("받아 둔 채널이 있으면 목록은 그대로 두고 위에 한 줄만 선다", async () => {
     deviceOnline(true);
     channelsQuery.error = new NetworkError("unreachable", 15_000);
     channelsQuery.groups = { channels: [engine], dms: [] };
@@ -242,6 +243,7 @@ describe("Sidebar: 채널 목록 불러오기 실패", () => {
     expect(host.querySelector('[data-testid="channels-error"]')).toBeNull();
     const line = host.querySelector<HTMLElement>('[data-testid="channels-error-line"]');
     expect(line?.textContent).toContain("채널 목록을 불러오지 못했어요");
+    expect(line?.getAttribute("role")).toBe("status");
     expect(host.textContent).toContain("엔진");
     // 한 줄의 알약도 같은 시트 위에 선다(#5306).
     const retryClasses = (line?.querySelector("button")?.className ?? "").split(/\s+/);

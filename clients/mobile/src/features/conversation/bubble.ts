@@ -1,4 +1,4 @@
-import {contrast, mixOklab} from '@momo/core/design/color';
+import {contrast, fromOklch, mixOklab, toOklch} from '@momo/core/design/color';
 
 import type {Palette} from '../../design/tokens';
 import {CONV} from './convDesign';
@@ -111,4 +111,103 @@ export function bubbleFor(p: BubbleInput, overrides?: BubbleOverrides): BubbleTo
     padX: CONV.bubblePadX,
     padY: CONV.bubblePadY,
   };
+}
+
+// =============================================================================
+// 인용 머리의 색 (#5381 Q4 — 말풍선 **안** 윗칸)
+//
+// 인용은 말풍선 안 윗칸이 머리다(웹 카드의 윗칸과 같은 문법). 머리의 색은 **말풍선 색에서 유도한다** — 말풍선이 신호색(내 글)이든 표면(남 글)이든,
+// 개인 덮어쓰기(`bubbleFor`)로 바뀌었든, 못 보낸 글의 옅은 채움(`failedBubbleFor`)이든 머리는 그 위에서 읽혀야 하기 때문이다.
+//
+//   fill     말풍선 채움을 **검정 쪽으로 한 단 어둡힌** 띠(시안 `.pq4h`의 `rgba(0,0,0,.2)`, 웹 라이트의 `--quote-fill`도 같은 방향이다).
+//            띠가 눈에 보이는 가장 작은 단계(말풍선과 대비 1.08)를 쓴다 — 라이트의 흰 말풍선은 조금만, 다크의 어두운 말풍선은 더 어두워져야 보인다.
+//            검정 리터럴을 쓰지 않는다(색은 토큰에서 나온다): OKLCH 밝기를 줄여 어둡힌다.
+//   line     머리와 본문 사이의 가는 선: 띠에서 글자색 쪽으로 한 걸음.
+//   label·excerpt  남 말풍선은 보조 글자색(`textMuted`, 시안 `--ink-muted`), 내 말풍선은 말풍선 본래 글자색이다(신호색 위에 보조 회색이 읽히지 않는다).
+//
+// 그 띠 위에서 글자 대비가 4.5:1 에 못 닿거나 띠가 보일 만큼 어두워지지 못하면(검정에 가까운 말풍선) 띠 없이(채움 = 말풍선) 말풍선 본래 글자색으로
+// 물러난다 — 대비가 먼저다(`failedBubbleFor` 와 같은 규율). 구분선은 그때도 선다.
+// =============================================================================
+
+export interface QuoteHeadColors {
+  fill: string;
+  line: string;
+  label: string;
+  excerpt: string;
+}
+
+/** 띠를 말풍선보다 어둡게 하는 정도(밝기의 비율). 작은 쪽부터 시도해 띠가 보이는 첫 단계에서 멈춘다. */
+const QUOTE_HEAD_WASHES = [0.04, 0.06, 0.08, 0.1, 0.12, 0.16, 0.2] as const;
+/** 띠가 말풍선과 갈려 보이는 가장 작은 대비. 시안(다크 ≈1.17 · 라이트 ≈1.08)의 아래쪽이다. */
+const QUOTE_HEAD_VISIBLE_STEP = 1.08;
+/** 구분선: 띠에서 글자색 쪽으로 가는 정도. */
+const QUOTE_HEAD_LINE_MIX = 0.14;
+
+/** 색의 OKLCH 밝기를 `wash` 비율만큼 줄인다 — 채도와 색조는 그대로이고 검정 쪽으로 간다. */
+function darken(hex: string, wash: number): string {
+  const {L, C, h} = toOklch(hex);
+  return fromOklch({L: L * (1 - wash), C, h});
+}
+
+export function quoteHeadFor(
+  p: Pick<Palette, 'textMuted'>,
+  tone: {bg: string; fg: string},
+  mine: boolean,
+): QuoteHeadColors {
+  const inks = mine ? [tone.fg] : [p.textMuted, tone.fg];
+  const line = (fill: string): string => mixOklab(fill, tone.fg, QUOTE_HEAD_LINE_MIX);
+  const band = QUOTE_HEAD_WASHES.map(wash => darken(tone.bg, wash)).find(
+    fill => contrast(fill, tone.bg) >= QUOTE_HEAD_VISIBLE_STEP,
+  );
+  if (band !== undefined) {
+    const ink = inks.find(candidate => contrast(candidate, band) >= BUBBLE_MIN_CONTRAST);
+    if (ink !== undefined) return {fill: band, line: line(band), label: ink, excerpt: ink};
+  }
+  // 띠가 서지 못한다: 말풍선 그대로. 글자는 말풍선 위에서 4.5:1 을 지키는 첫 잉크, 없으면 말풍선 본래 글자색.
+  const ink = inks.find(candidate => contrast(candidate, tone.bg) >= BUBBLE_MIN_CONTRAST) ?? tone.fg;
+  return {fill: tone.bg, line: line(tone.bg), label: ink, excerpt: ink};
+}
+
+// =============================================================================
+// 찾은 글자 강조의 색 (#5384 — 대화 안 검색으로 착지한 메시지의 말풍선 **본문 안**)
+//
+// 결과 목록의 강조(`accentSurfaceStrong` 채움 + 굵게)와 같은 말이되, 말풍선이 어떤 색이든 읽혀야 한다: 남 말풍선(표면)과 평면 행 위에서는 같은 신호색 채움이 그대로 서고,
+// 내 말풍선(신호색 채움)에서는 같은 채움이 바탕에 묻히므로 **말풍선 채움을 글자색과 반대로 한 단 옮긴 칩**이 선다 — 밝은 글자(신호색 위 흰 글자)면 어둡게, 어두운 글자면 밝게. 반대로 옮기는
+// 이유는 글자 대비가 오히려 **오르기** 때문이다(글자 쪽으로 옮기면 라이트 테마의 흰 글자가 4.5:1 아래로 내려간다 — 실측). 검정·흰 리터럴은 쓰지 않는다(OKLCH 밝기만 옮긴다).
+//
+// 칩이 말풍선과 갈려 보이는 가장 작은 단계를 쓴다. 어느 후보도 눈에 보이면서 4.5:1 을 지키지 못하면(깨진 개인 색) 채움 없이 굵게만 남는다 — 대비가 먼저다
+// (`failedBubbleFor`·`quoteHeadFor` 와 같은 규율). 글자색은 말풍선 본래 잉크를 그대로 이어받는다(중첩 글자가 상속한다).
+// =============================================================================
+
+export interface SearchMatchColors {
+  /** 칩의 채움. 칩을 세울 수 없으면 `null`(굵게만 남는다). */
+  fill: string | null;
+}
+
+/** 칩이 말풍선과 갈려 보이는 가장 작은 대비(`QUOTE_HEAD_VISIBLE_STEP` 1.08 보다 한 걸음 더 — 강조는 띠보다 눈에 띄어야 한다). */
+const SEARCH_MATCH_VISIBLE_STEP = 1.12;
+/** 칩을 말풍선에서 글자 반대쪽으로 옮기는 밝기의 비율. 작은 쪽부터 시도해 보이는 첫 단계에서 멈춘다. */
+const SEARCH_MATCH_SHIFTS = [0.1, 0.14, 0.18, 0.22, 0.26, 0.3] as const;
+
+/** 색의 OKLCH 밝기를 `shift`(음수면 어둡게, 양수면 밝게) 비율만큼 옮긴다 — 채도와 색조는 그대로다. */
+function shifted(hex: string, shift: number): string {
+  const {L, C, h} = toOklch(hex);
+  return fromOklch({L: shift < 0 ? L * (1 + shift) : L + (1 - L) * shift, C, h});
+}
+
+export function searchMatchFor(
+  p: Pick<Palette, 'accentSurfaceStrong'>,
+  tone: {bg: string; fg: string},
+  mine: boolean,
+): SearchMatchColors {
+  const lightInk = toOklch(tone.fg).L > toOklch(tone.bg).L;
+  // 남 말풍선·평면 행: 결과 목록과 같은 신호색 채움이 먼저다(내 말풍선은 신호색 위라 건너뛴다).
+  const candidates = mine ? [] : [p.accentSurfaceStrong];
+  for (const shift of SEARCH_MATCH_SHIFTS) candidates.push(shifted(tone.bg, lightInk ? -shift : shift));
+  const fill = candidates.find(
+    candidate =>
+      contrast(candidate, tone.bg) >= SEARCH_MATCH_VISIBLE_STEP &&
+      contrast(tone.fg, candidate) >= BUBBLE_MIN_CONTRAST,
+  );
+  return {fill: fill ?? null};
 }

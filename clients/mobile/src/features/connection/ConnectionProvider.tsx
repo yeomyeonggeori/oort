@@ -1,6 +1,10 @@
 import NetInfo from '@react-native-community/netinfo';
 import type {ConnectionView} from '@momo/core/features/connection/model';
 import {
+  startRestProbe,
+  wantsRestProbe,
+} from '@momo/core/features/connection/restProbe';
+import {
   deviceEvent,
   isRecovered,
   restEvent,
@@ -15,8 +19,13 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import {isOnlineFromNetInfo} from '../../query/queryClient';
+import {
+  appStateForeground,
+  useAppForeground,
+} from '../readState/useViewingBeat';
 import type {DisplayEvent} from '../../realtime/connectionDisplay';
 import {createConnectionStore} from './connectionStore';
+import {onAppBackground} from './appBackground';
 import {connectionEventOf} from './connectionEvents';
 import {recordDeviceOnline} from './deviceOnline';
 
@@ -31,6 +40,12 @@ import {recordDeviceOnline} from './deviceOnline';
 //     여기서 따로 듣지 않는다.
 //   · REST 결과 — `subscribeRestOutcome` 한 번. 폰의 푸시 API 호출도 같은 `fetchWithDeadline` 이라 함께 들어온다.
 //   · 만료 — 폰은 만료가 서면 앱이 곧바로 로그인 화면으로 돌아가 이 트리가 사라진다. 사건을 받지 않는다.
+//   · 앱이 뒤로 갔다/돌아왔다(AppState) — 뒤에 가 있던 시간은 화면을 보는 사람이 없던 시간이다(#5403). 그 사이 쌓인 「끊김이 보였다」
+//     기억·복구 표시는 남기지 않고, 돌아온 순간 소켓이 붙어 있지 않으면 틈을 새 침묵으로 다시 시작한다(코어 `visibility`). 전송의 다시 열기
+//     (`resume`)가 이 알림보다 먼저 와도 결과가 같다. `inactive`(알림 센터를 당긴 정도)는 뒤로 간 것이 아니다.
+//   · 저절로 다시 확인 - 「서버에 닿지 못했어요」·「연결에 문제가 있어요」 띠는 REST 실패가 쌓여 선 것이라 응답 한 건이 와야 걷혔다. 이 띠가 **앞에서** 서 있는 동안
+//     코어 `restProbe` 가 늘려 가는 간격(2 · 4 · 8 · 16 · 30초)으로 가벼운 확인 요청을 보낸다(#5407). 뒤에 있으면 보내지 않는다. 결과는 위 REST 구독으로
+//     들어와 서버가 답하면 띠가 걷히고, 걷히면 확인도 멈춘다. 사람의 요청은 필요 없다.
 //
 // 사건에는 일어난 순간의 시각(`at`)을 한 번 찍어 저장소(`connectionStore.ts`)에 넣는다(리듀서는 시계를 읽지 않는다). 시간만으로 바뀌는
 // 판정(침묵 → 「연결 중」 → 「끊김」, 복구 표시 끝)은 저장소가 `nextWakeAt` 에 타이머 하나로 깨운다. 이 공급자가 하는 일은 사건을 모아
@@ -42,6 +57,11 @@ export interface ConnectionContextValue {
   view: ConnectionView;
   /** 「다시 연결됐어요」를 지금 그리나(「끊김」이 보였다 정상으로 돌아온 뒤 2초). */
   recovered: boolean;
+  /**
+   * 복구 표시가 끝나는 시각(epoch ms), 서 있지 않으면 null. 깨움 시계가 늦거나 사라져도 읽는 쪽이 자기 렌더 시각과 견주어 거둘 수 있게
+   * 건넨다(#5403) - 상태는 깨움이 와야 바뀌므로 시각 없이 읽으면 낡은 표시가 보내기 같은 다음 사건까지 남는다.
+   */
+  recoveredUntil: number | null;
 }
 
 /**
@@ -95,6 +115,21 @@ export function ConnectionProvider({
     };
   }, [store, feedRef]);
 
+  // 앱: 뒤로 가면 아무도 보지 않는다. 돌아오면 새로 시작하고, `inactive` → `active` 는 시각만 따라간다(스토어 `setVisible`). 뒤로 가는 것은
+  // `onAppBackground`(앞에 있는 동안의 `inactive` 는 뒤로 간 것이 아니다), 앞으로 돌아오는 것은 「보고 있음」 신호와 같은 어댑터(`appStateForeground`)가
+  // 알린다. 마운트 시점에 앞이 아니면(푸시로 깨어난 앱) 뒤에 있는 것으로 시작한다.
+  useEffect(() => {
+    if (!appStateForeground.isForeground()) store.setVisible(false);
+    const stopBackground = onAppBackground(() => store.setVisible(false));
+    const stopForeground = appStateForeground.subscribe(active => {
+      if (active) store.setVisible(true);
+    });
+    return () => {
+      stopBackground();
+      stopForeground();
+    };
+  }, [store]);
+
   // 기기: NetInfo 는 구독 즉시 현재 상태를 한 번 보고한다. 모름(`null`)은 막지 않는 쪽이라 첫 보고 전의 기본이다.
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(netState => {
@@ -115,8 +150,18 @@ export function ConnectionProvider({
     [store],
   );
 
+  // 저절로 다시 확인: REST 실패에서 온 띠가 앞에서 서 있는 동안만 켜 두고, 띠가 걷히거나 뒤로 가면 거둔다(앞/뒤는 `inactive` 도 뒤로 친다 - 알림 센터를
+  // 당긴 동안에는 보내지 않는다). 켜진 채 상태만 바뀌는 렌더에서는 시계를 다시 시작하지 않는다(`probing` 이 바뀔 때만 효과가 돈다).
+  const foreground = useAppForeground();
+  const probing = wantsRestProbe(state.view, foreground && state.hiddenAt === null);
+  useEffect(() => (probing ? startRestProbe() : undefined), [probing]);
+
   const value = useMemo<ConnectionContextValue>(
-    () => ({view: state.view, recovered: isRecovered(state)}),
+    () => ({
+      view: state.view,
+      recovered: isRecovered(state),
+      recoveredUntil: state.recoveredUntil,
+    }),
     [state],
   );
   return (

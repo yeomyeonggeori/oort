@@ -27,6 +27,7 @@ import {Timeline} from '../src/features/conversation/Timeline';
 
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+const AGENT = 'cccccccc-1111-4111-8111-cccccccccccc';
 const BASE_MS = 1_700_000_000_000;
 const ORIGINAL_ID = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 
@@ -49,6 +50,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
+  member({id: AGENT, kind: 'agent', displayName: '코메토', handle: 'kometto'}),
 ]);
 
 function message(over: Partial<Message> & {id: string; seq: number}): Message {
@@ -249,5 +251,84 @@ describe('낙관적 메아리', () => {
     );
     expect(screen.getByTestId('pending-row')).toBeTruthy();
     expect(screen.queryByTestId('quote-block')).toBeNull();
+  });
+});
+
+// =============================================================================
+// 에이전트 답의 인용: 바로 위 메시지를 가리키면 그리지 않는다 (#5357, owner 2026-11-05).
+//
+// 판정의 표(에이전트인가 · 대상이 바로 위인가 · 어느 갈래의 블록인가)는 코어 `quote.test.ts` 가 든다. 여기는 그 함수가 **폰의 목록과 행에
+// 제대로 걸렸는지** 본다 - 블록이 서는지 뿐 아니라, 같은 블록을 말하던 두 자리(화면 낭독의 「인용」 문장과 로터의 「인용한 원본으로
+// 이동」)가 함께 내려가는지. 그리지 않는 블록을 귀로만 읽어 주면 눈에 안 보이는 것이 들린다.
+// =============================================================================
+
+describe('에이전트 답의 인용 (#5357)', () => {
+  const rowLabels = (): string[] =>
+    screen
+      .getAllByTestId('message-row')
+      .map(row => String(row.props.accessibilityLabel));
+  const rowActionNames = (index: number): string[] =>
+    (
+      screen.getAllByTestId('message-row')[index].props.accessibilityActions as
+        | {name: string}[]
+        | undefined
+    )?.map(action => action.name) ?? [];
+
+  const AGENT_REPLY = message({
+    id: 'msg-2',
+    seq: 5,
+    authorMemberId: AGENT,
+    replyToId: ORIGINAL_ID,
+    body: '확인했어요',
+  });
+
+  it('질문 바로 아래 에이전트 답은 인용 블록도, 낭독 문장도, 로터 동작도 없다', () => {
+    timeline([ORIGINAL, AGENT_REPLY], [], ACTIONS);
+    expect(screen.queryByTestId('quote-block')).toBeNull();
+    // 낭독: 답의 문장에 「에게 답장」(인용 머리의 문장, #5381)이 없다(질문의 문장은 질문 행의 것이다).
+    expect(rowLabels()[1]).not.toContain('에게 답장');
+    expect(rowLabels()[1]).toContain('확인했어요');
+    // 로터: 눈에 안 보이는 블록으로 가는 동작이 남지 않는다.
+    expect(rowActionNames(1)).not.toContain('momoQuoteJump');
+  });
+
+  it('사이에 다른 말이 끼면 블록·낭독·로터가 모두 그대로 선다', () => {
+    timeline(
+      [
+        ORIGINAL,
+        message({id: 'msg-mid', seq: 5, body: '끼어든 말'}),
+        {...AGENT_REPLY, seq: 6},
+      ],
+      [],
+      ACTIONS,
+    );
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+    expect(rowLabels()[2]).toContain('에게 답장');
+    expect(rowActionNames(2)).toContain('momoQuoteJump');
+  });
+
+  it('사람이 직접 고른 인용은 바로 위여도 그대로 선다', () => {
+    timeline(
+      [ORIGINAL, {...AGENT_REPLY, authorMemberId: SELF}],
+      [],
+      ACTIONS,
+    );
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+    expect(rowLabels()[1]).toContain('에게 답장');
+    expect(rowActionNames(1)).toContain('momoQuoteJump');
+  });
+
+  it('지워진 원본은 바로 위여도 「삭제된 메시지」로 그대로 선다', () => {
+    const gone = message({
+      id: ORIGINAL_ID,
+      seq: 4,
+      state: 'deleted',
+      body: undefined,
+      deletedAtMs: BASE_MS,
+    });
+    timeline([gone, AGENT_REPLY], [], ACTIONS);
+    expect(screen.getByTestId('quote-tombstone').props.children).toBe(
+      appNote(QUOTE_DELETED_TEXT),
+    );
   });
 });

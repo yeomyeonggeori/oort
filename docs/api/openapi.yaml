@@ -2460,7 +2460,7 @@ paths:
           description: Too many unfinished upload sessions.
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
 
   /v1/workspaces/{workspaceId}/members/me/avatar/{mediaId}/complete:
@@ -6434,18 +6434,21 @@ paths:
       operationId: touchPresenceActivity
       summary: Presence heartbeat - "a desktop or web client of mine is in use".
       description: >
-        ADR-0206 D4 contract draft (served from the activity slice; 404 until
-        then). A web or desktop client that is in front and was used in the last
-        5 minutes sends this at most every 20 seconds. The server treats a stamp
-        younger than 30 seconds as "my desktop is active" and, for the caller's
-        phone tokens only, holds the push reasons `mention`, `dm`,
-        `channel_message` and `keyword` for the caller's `phoneDelaySecs`
-        (default 60) and drops them if the message is read in that time.
-        Approval requests and the work reasons are never held. The phone does not
-        send this. No body and no member id: the owner is the bearer, no other
-        member can read the stamp, and a beat younger than 5 seconds after the
-        previous one is accepted and not rewritten. A client that never sends it
-        keeps today's behavior. Human bearer only (an agent bearer is 403).
+        ADR-0206 D4 (served since #4497, migration 174). A web or desktop client
+        that is in front and was used in the last 5 minutes sends this at most
+        every 20 seconds. The server treats a stamp younger than 30 seconds as
+        "my desktop is active" and, for the caller's phone tokens only
+        (`device.platform = ios`), holds the push reasons `mention`, `dm` and
+        `thread_reply` for the caller's `phoneDelaySecs` (default 60; 0 turns the
+        delay and the read-cancel off) and drops them if the message is read in
+        that time. The reasons `channel_message` and `keyword` join the same
+        allow-list when they ship. Approval requests, the work reasons, system
+        pushes and `macos` tokens are never held. The phone does not send this.
+        No body and no member id: the owner is the bearer, no endpoint reads the
+        stamp, and a beat younger than 5 seconds after the previous one is
+        accepted and not rewritten. A client that never sends it keeps today's
+        behavior. A client that gets 404 or 405 (an older server) stops sending to
+        that server. Human bearer only (an agent bearer or a work host is 403).
       security:
         - bearerAuth: []
       parameters:
@@ -6463,6 +6466,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            The beat could not get the caller's row within 3 seconds (a burst of beats
+            from one member queues on it). Nothing was recorded; send again at the next
+            beat, or after the `Retry-After` seconds. Not a sign that the route is
+            missing: unlike 404 and 405, it never makes a client stop sending.
           content:
             application/json:
               schema:
@@ -11579,8 +11592,23 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "502":
+          description: >
+            The archive refused the instance's own credentials (`error.code`
+            `drive_access_denied`, no `Retry-After`) or the archive request failed
+            (`drive_upstream_failed`, with `Retry-After`). Nothing was written
+            (ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -11626,6 +11654,27 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "413":
           description: Measured archive size exceeds 100 MB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >
+            The archive refused the instance's own credentials (`error.code`
+            `drive_access_denied`, no `Retry-After`) or the archive request failed
+            (`drive_upstream_failed`, with `Retry-After`). The attachment stays
+            pending (ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -11783,13 +11832,21 @@ paths:
         "502":
           description: >
             The archive failed, was refused by the instance's own credentials, or reported a
-            different length than the attachment's row. Nothing of the file was sent.
+            different length than the attachment's row. Nothing of the file was sent. The
+            `error.code` says which: `drive_access_denied` (refused; no `Retry-After`) or
+            `drive_upstream_failed` (failed or disagreed with the row; with `Retry-After`;
+            ADR-0151 amendment 7).
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again; sent only with `drive_upstream_failed`.
+              schema:
+                type: integer
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Drive archive is not configured.
+          description: Drive archive is not configured (`error.code` `drive_not_configured`).
           content:
             application/json:
               schema:
@@ -17947,9 +18004,20 @@ components:
                 invites can name channels): 400 `guest_invites_paused` (the
                 `guest` role asked for by `POST …/invites`, or carried by a usable
                 code given to `POST …/invites/{inviteId}/regenerate`, `POST
-                …/invites/redeem` or `POST /v1/join`). The
-                approval receipt status `dev_cannot_decide` is a receipt's `status`,
-                not an `error.code`.
+                …/invites/redeem` or `POST /v1/join`); ADR-0151 amendment 7 (#5223,
+                a refusal that comes from the file archive, on the attachment and
+                avatar routes, which answer through one archive error table): 503
+                `drive_not_configured` (this instance has
+                no usable archive; an operator has to fix it, so no `Retry-After`),
+                502 `drive_access_denied` (the archive refused the instance's own
+                credentials; no `Retry-After`) and 502 `drive_upstream_failed` (the
+                archive request failed, or its bytes disagree with the row; sent
+                with `Retry-After`). A 502 or 503 that carries an `error.code`
+                names its own cause; one without a code may have been produced by
+                something in front of this server and says nothing about the
+                cause. The approval receipt
+                status `dev_cannot_decide` is a receipt's `status`, not an
+                `error.code`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:

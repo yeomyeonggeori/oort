@@ -70,12 +70,12 @@ pub use gateway::{
     HOSTED_LEASE_SECONDS_DEFAULT, HOSTED_LEASE_SECONDS_MAX, HOSTED_LEASE_SECONDS_MIN,
 };
 pub use push::{
-    claim_push_candidate_batch, claim_push_system_batch, emit_approval_settled_push_candidate,
-    emit_push_system, emit_stream_closed_push_candidate, push_system_payload,
-    reclaim_stuck_push_candidates, reclaim_stuck_push_system, stream_closed_candidate_payload,
-    ClaimedPushCandidate, ClaimedPushSystem, PushSystemDecodeError, PushSystemPayload,
-    PushSystemReason, PUSH_CANDIDATE_SCHEMA, PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
-    PUSH_SYSTEM_COLLAPSE_ID_MAX_BYTES, PUSH_SYSTEM_SCHEMA,
+    claim_push_candidate_batch, claim_push_system_batch, defer_push_candidate,
+    emit_approval_settled_push_candidate, emit_push_system, emit_stream_closed_push_candidate,
+    push_system_payload, reclaim_stuck_push_candidates, reclaim_stuck_push_system,
+    stream_closed_candidate_payload, ClaimedPushCandidate, ClaimedPushSystem,
+    PushSystemDecodeError, PushSystemPayload, PushSystemReason, PUSH_CANDIDATE_SCHEMA,
+    PUSH_CANDIDATE_SOURCE_STREAM_CLOSED, PUSH_SYSTEM_COLLAPSE_ID_MAX_BYTES, PUSH_SYSTEM_SCHEMA,
 };
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,

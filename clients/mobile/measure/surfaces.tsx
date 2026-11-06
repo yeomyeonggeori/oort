@@ -1,7 +1,6 @@
-import type {Message, MessageSearchHit, RosterMember} from '@momo/core/lib/api';
+import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
 import {
   LogBox,
@@ -27,6 +26,7 @@ import {ApiError} from '@momo/core/lib/api';
 import type {ProviderLink} from '@momo/core/features/settings/api';
 import {AiConnectCard, TEAM_QUERY_KEY} from '../src/features/aiConnect/AiConnectCard';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
+import {QuoteDraftBar} from '../src/features/conversation/Quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {
   Composer,
@@ -131,6 +131,7 @@ import {ExpressionSheetSurface} from './expressionSheet';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
+import {ConversationSearchSurface} from './conversationSearch';
 import {ConversationInfoPageSurface} from './conversationInfoPage';
 import {
   DelegateWorkSheet,
@@ -169,7 +170,7 @@ import type {DeviceKeyView} from '../src/deviceKey/enrollment';
 import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
-import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
+import {SearchSurface} from './searchSurfaces';
 import SidebarScreen, {
   SearchEntryAction,
   SearchFallthrough,
@@ -179,7 +180,6 @@ import {
   unreadDividerCursorSeq,
 } from '@momo/core/features/readState/model';
 import {markAt3Cursor10} from '@momo/core/features/readState/proof';
-import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import {
   font,
   // `line` 이라는 이름은 이 파일에서 이미 「초안 한 줄」로 쓰이고 있다
@@ -199,11 +199,13 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {JumpSeekSurface} from './jumpSeek';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
 import {SentenceWrapSurface} from './sentenceWrap';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
+import {EditLiveSurface} from './editLive';
 import {JumpLatestSurface} from './jumpLatest';
 import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
@@ -503,43 +505,6 @@ const AVAILABILITY = {
   edit: true,
   delete: true,
 };
-
-const HITS: MessageSearchHit[] = [
-  {
-    channelId: 'ch-1',
-    messageId: 'm-1',
-    seq: 41,
-    authorMemberId: SELF,
-    createdAtMs: NOW,
-    snippet:
-      '어제 이야기한 대로 금요일 배포는 오전 10시에 시작합니다. 롤백 절차는 문서에 적어 뒀고, 확인 부탁드립니다.',
-    matchOffset: 16,
-  },
-  {
-    channelId: 'ch-2',
-    messageId: 'm-2',
-    seq: 12,
-    authorMemberId: SELF,
-    createdAtMs: NOW - 86_400_000,
-    snippet: '배포 전에 스테이징에서 한 번 더 돌려 보죠.',
-    matchOffset: 0,
-  },
-];
-
-function search(phase: SearchPhase, hits: MessageSearchHit[] = []): MessageSearch {
-  return {
-    query: '배포',
-    setQuery: () => {},
-    phase,
-    settledQuery: '배포',
-    hits,
-    hasMore: false,
-    loadingMore: false,
-    loadMore: () => {},
-    retry: () => {},
-  };
-}
-
 
 // =============================================================================
 // ADE 관제 픽스처 (이슈 1137).
@@ -2291,6 +2256,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name === 'convheader' || name.startsWith('convheader-')) {
     return <ConversationHeaderSurface which={name.slice('convheader'.length).replace(/^-/, '')} />;
   }
+  // #5364: 대화 안 검색(`measure/conversationSearch.tsx`, 배송되는 머리 돋보기·검색 줄·결과 면·이동 막대 + 고정 데이터, 가상 인물).
+  if (name === 'convsearch' || name.startsWith('convsearch-')) {
+    return <ConversationSearchSurface which={name.slice('convsearch'.length).replace(/^-/, '')} />;
+  }
   // #4319: 대화·채널 정보 페이지(`measure/conversationInfoPage.tsx`, 배송되는 페이지 + 고정 데이터·합성 사진, 가상 인물).
   if (name === 'infopage' || name.startsWith('infopage-')) {
     return <ConversationInfoPageSurface which={name.slice('infopage'.length).replace(/^-/, '')} />;
@@ -2321,6 +2290,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #5383: 불러온 범위 밖 점프 - 찾는 중·실패·읽고 나서 착지(실제 `Timeline`·`JumpSeekLine`·`Composer`).
+  if (name.startsWith('jump-seek')) {
+    return <JumpSeekSurface which={name.slice('jump-seek'.length).replace(/^-/, '')} />;
+  }
   // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
   if (name.startsWith('dm-steady')) {
@@ -2333,6 +2306,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4614: 대화 목록을 눌러 자판·입력창을 내린다. 대화 화면 그대로(행이 눌리는 `actions` 포함) + 터치·자판 기록.
   if (name === 'tap' || name.startsWith('tap-')) {
     return <TapDismissSurface which={name.slice('tap'.length).replace(/^-/, '')} />;
+  }
+  // #5417: 길게 눌러 「고치기」 -> 편집 시트 -> 저장 -> 「수정됨」. 대화 화면 그대로 + 저장이 글을 바꾸는 행 동작(`measure/editLive.tsx`).
+  if (name === 'edit-live' || name.startsWith('edit-live-')) {
+    return <EditLiveSurface />;
   }
   // #4689: 멀리 올라간 채 아래 알약 「최신으로」를 누르면 마지막 메시지가 보이기까지 얼마나 걸리고 몇 번에 나눠 내려가는가. 진짜 대화 화면 + 스크롤 기록(`measure/jumpLatest.tsx`).
   if (name === 'jump-latest' || name.startsWith('jump-latest-') || name.startsWith('jump-latest+')) {
@@ -2430,14 +2407,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         body: '릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.',
       });
       return (
-        <Frame label="인용 · 정상 — 중성 규정선, 배경 없음 (H-2)">
+        <Frame label="인용 · 정상 — 말풍선 안 머리, 세로선 없음 (#5381 Q4)">
           {draft ? quoted(draft.block) : <View />}
         </Frame>
       );
     }
     case 'quote-deleted':
       return (
-        <Frame label="인용 · 삭제된 원본 — 사본을 남기지 않는다">
+        <Frame label="인용 · 삭제된 원본 — 같은 머리 자리, 사본을 남기지 않는다">
           {/* 인용 원본의 저자는 **타인**이다 (design-review N-7). 첫 판은
               `SELF` 였고, 그래서 사진에서 행 저자와 인용 저자가 둘 다 같은
               이름으로 나왔다 — 자기 말을 자기가 인용하는 화면은 이 기능이
@@ -2457,6 +2434,40 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           {quoted({kind: 'unresolved', targetId: 'orig-1', targetSeq: null})}
         </Frame>
       );
+    // #5381 Q4: 말풍선 안 윗칸 머리의 네 장면을 한 화면에 — 남 말풍선(긴 원문은 1줄 말줄임) · 내 말풍선(신호색 위) · 지워진 원본 · 입력창 초안.
+    case 'quote-q4': {
+      const original = (body: string) =>
+        quoteDraftFor({...MESSAGE, id: 'orig-1', seq: 4, authorMemberId: OTHER, body})?.block;
+      const long = original(
+        '배포 되돌리기 절차 정리해 줄래요? 릴리스 태그 확인, 이전 이미지 롤백, 헬스체크까지 순서대로 알려 주면 좋겠어요.\n둘째 줄은 보이지 않아요',
+      );
+      const short = original('릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.');
+      const row = (author: string, body: string, block: QuoteBlockModel | undefined, id: string) =>
+        block === undefined ? null : (
+          <MessageRow
+            message={{...MESSAGE, id, authorMemberId: author, body, thread: undefined}}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            quote={block}
+            actions={{
+              myMemberId: SELF,
+              onToggleReaction: async () => {},
+              onEdit: async () => {},
+              onDelete: async () => {},
+            }}
+          />
+        );
+      return (
+        <Frame label="인용 · 말풍선 안 머리 (#5381 Q4) — 남 · 내 · 지워진 원본 · 입력창">
+          {row(AGENT, '세 단계예요. 릴리스 태그를 확인하고, 이전 이미지로 롤백한 뒤, 헬스체크를 돌려요.', long, 'row-other')}
+          {row(SELF, '재시작할게요. 끝나면 알려 드릴게요.', short, 'row-mine')}
+          {row(OTHER, '확인했어요.', {kind: 'deleted', targetId: 'orig-1', targetSeq: 4, authorMemberId: OTHER}, 'row-gone')}
+          {long ? <QuoteDraftBar block={long} directory={DIRECTORY} onCancel={() => {}} /> : null}
+        </Frame>
+      );
+    }
     // ---- U4-3 (#1079): 최종 리뷰가 지목한 잔여 위상 --------------------------
     case 'typing-empty':
       return (
@@ -4763,30 +4774,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SearchFallthrough query="배포" onPress={() => {}} />
         </Frame>
       );
+    // #5365: 검색 탭은 한 화면(`SearchView`)이고 장면마다 데이터만 다르다 — 서버가 못 주는 상태(빈 결과·오류)도 이 화면 그대로 찍는다.
     case 'search-idle':
-      return (
-        <Frame label="검색 · 입력 전">
-          <SearchBody search={search('idle')} renderItem={() => <View />} />
-        </Frame>
-      );
+    case 'search-home':
+      return <SearchSurface which="home" />;
+    case 'search-all':
+    case 'search-results':
+      return <SearchSurface which="all" />;
+    case 'search-messages':
+      return <SearchSurface which="messages" />;
+    case 'search-picker':
+      return <SearchSurface which="picker" />;
     case 'search-searching':
-      return (
-        <Frame label="검색 · 찾는 중">
-          <SearchBody search={search('searching')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="searching" />;
     case 'search-empty':
-      return (
-        <Frame label="검색 · 결과 없음 — 범위를 함께 말한다">
-          <SearchBody search={search('empty')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="empty" />;
     case 'search-error':
-      return (
-        <Frame label="검색 · 오류 — 다시 시도가 있다">
-          <SearchBody search={search('error')} renderItem={() => <View />} />
-        </Frame>
-      );
+      return <SearchSurface which="error" />;
     // ---- #1210 D2: 되돌릴 수 없는 확정 버튼 ----------------------------------
     //
     // 이 제품에서 **파괴 채움이 실제로 그려지는 유일한 화면**이고, 그동안 한 번도
@@ -4821,12 +4825,6 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               testIDPrefix="measure-stop"
             />
           </View>
-        </Frame>
-      );
-    case 'search-results':
-      return (
-        <Frame label="검색 · 결과">
-          <SearchResults />
         </Frame>
       );
     // ---- #1503: 에이전트 상세의 세션 행과 수명주기 칩 한 벌 ------------------
@@ -5865,24 +5863,6 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
         )}
       </PageSheet>
     </View>
-  );
-}
-
-/** The results phase draws the shipping row, handed fixture hits. */
-function SearchResults(): React.JSX.Element {
-  return (
-    <SearchBody
-      search={search('results', HITS)}
-      renderItem={({item}) => (
-        <ResultRow
-          hit={item}
-          query="배포"
-          channelTitle={item.channelId === 'ch-1' ? '#배포' : '#일반'}
-          authorName="이도현"
-          onPress={() => {}}
-        />
-      )}
-    />
   );
 }
 

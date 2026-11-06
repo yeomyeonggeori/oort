@@ -61,10 +61,10 @@ import {
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
 import { mainFlowMessages } from "@momo/core/features/timeline/threadHome";
+import { messageAboveIds } from "@momo/core/features/timeline/quote";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
-import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
 import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runStatusForMessage } from "./runStatus";
 
@@ -528,6 +528,11 @@ export function Timeline({
     showIntro,
   ]);
 
+  // 각 메시지 바로 위에 **그려진** 메시지(#5357). 접기를 다 거친 `items` 에서 한 번 센다 — 메시지 배열에서 세면 화면이 가린 행과 접은 묘비를
+  // 잘못 센다. 가상 목록의 인덱스에서 이웃을 읽지 않는 까닭은 `firstItemIndex` 가 앞에 쌓인 행에 따라 움직이기 때문이다. 에이전트의 답이 이 표의
+  // 이웃을 가리키면 그 행은 인용을 그리지 않는다(코어 `isQuoteRedundant`, 폰과 같은 함수).
+  const aboveIds = useMemo(() => messageAboveIds(items), [items]);
+
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
   // 이 목록은 가상화되어 있어서 그 비용이 바로 스크롤로 나온다.
@@ -537,10 +542,6 @@ export function Timeline({
   const timelineChannelId = messages[0]?.channelId ?? null;
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
-  // #4619 — 「답함 ✓」 칩이 누르면 가는 답 메시지. 로드된 메시지를 한 번 색인해 끝난 run마다 답을 찾는다
-  // (행마다 찾으면 목록 전체를 행 수만큼 훑는다). 답이 아직 로드되지 않았거나 이을 길이 없으면 그 run은
-  // 지도에 없고, 칩은 「답함」을 말하되 눌리지 않는다.
-  const runAnswers = useMemo(() => runAnswerMap(channelRuns, mainMessages), [channelRuns, mainMessages]);
   const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined =>
     runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage });
 
@@ -995,12 +996,12 @@ export function Timeline({
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}
               quoteLookup={quoteLookup}
+              aboveMessageId={aboveIds.get(item.message.id.toLowerCase())}
               onOpenWorkSession={onOpenWorkSession}
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
               runStatus={runStatusFor(item.message)}
               showThought={channelKind === "dm" && peer?.kind === "agent"}
-              runAnswers={runAnswers}
             />
           );
         }}

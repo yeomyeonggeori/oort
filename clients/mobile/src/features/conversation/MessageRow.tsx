@@ -127,7 +127,7 @@ import {landedFace, pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
-import {MessageBody, bodyAffordances, openLink} from './MessageBody';
+import {MessageBody, QuoteHeadBubble, bodyAffordances, openLink, type QuoteHeadSpec} from './MessageBody';
 import {MessageActionSheet, timeLabel} from './MessageActionSheet';
 import {LinkActionSheet} from './LinkActionSheet';
 import {
@@ -283,7 +283,7 @@ import {
   type CompletionReportCard,
   type CompletionTone,
 } from '@momo/core/features/timeline/completionReportCard';
-import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
+import {quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
@@ -673,6 +673,7 @@ function Author({
   time,
   pendingMark,
   requestChip,
+  chipHead = requestChip != null,
 }: {
   directory: Directory;
   memberId: string;
@@ -695,6 +696,11 @@ function Author({
    */
   pendingMark?: React.ReactNode;
   requestChip?: React.ReactNode;
+  /**
+   * 머리 줄이 칩이 서는 줄의 모양(줄바꿈 없음·가운데 정렬)인가. 칩이 지금 서 있는지가 아니라 **이 메시지가 에이전트를 불렀는지**가 정한다
+   * (#5382): 성공으로 끝나 칩이 비어도 줄이 다시 흐르지 않아서 높이와 정렬이 그대로다(웹 `hasRunChip`과 같은 몫). 기본은 칩이 있느냐다.
+   */
+  chipHead?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
@@ -712,7 +718,7 @@ function Author({
           isAgent && styles.authorNameAgent,
           // 칩이 서는 머리 줄은 줄바꿈이 없다(웹 planner 결정 6): 긴 이름이 줄어들고 칩·시각은 줄지 않는다 — 칩이 혼자 다음 줄로 내려가
           // 머리 줄 높이가 바뀌는 일이 없다.
-          requestChip ? styles.authorNameShrink : null,
+          chipHead ? styles.authorNameShrink : null,
         ]}
         numberOfLines={1}>
         {parts.name}
@@ -751,7 +757,7 @@ function Author({
   // 폭이라 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다. 프로필 문은 얼굴
   // (`profile-avatar-target`)과 멘션뿐이고, 이 줄을 누르면 행 탭이 받는다(스레드·키보드 닫기·길게 누르기 시트).
   return (
-    <View style={[styles.authorRow, requestChip ? styles.authorRowChip : null]}>
+    <View style={[styles.authorRow, chipHead ? styles.authorRowChip : null]}>
       {content}
     </View>
   );
@@ -2206,8 +2212,6 @@ export interface MessageRowActions {
    * the target off it, because the row does not know what the page holds.
    */
   onJumpToQuoted?: (message: Message) => void;
-  /** 「답함 ✓」 칩을 누르면 그 답 메시지로 간다(#4620 B). 답 메시지는 로드된 목록 안에 있다(칩이 거기서만 찾는다). */
-  onJumpToMessage?: (messageId: string, seq: number) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
@@ -2270,6 +2274,11 @@ export interface MessageRowProps {
    * `LandedTintFade` 가 든다 — 이 prop 이 참에서 거짓이 되는 순간에만 일한다.
    */
   landed?: boolean;
+  /**
+   * 대화 안 검색으로 착지한 메시지라면 **찾은 말**(#5384). 목록이 선택한 결과의 행에만 건넨다. 본문 말풍선 안에서 이 말과 같은 글자가 칠해진다(`MessageBody.searchMatch`) —
+   * 착지 틴트(`landed`, 1.5초)와 달리 검색 막대가 서 있는 동안 남는다. 문자열 하나라 동일성 비교로 충분하다.
+   */
+  searchMatch?: string;
   nowMs: number;
   /** A server-stored `failed` row offers a fresh send, not a replay. */
   onResend?: (message: Message) => void;
@@ -2302,6 +2311,14 @@ export interface MessageRowProps {
    * hardest exactly when the conversation is busy.
    */
   quote?: QuoteBlockModel | null;
+  /**
+   * 위 `quote` 를 **그리지 않는다** — 에이전트의 답이 같은 목록의 바로 위 메시지를 가리킨다(#5357, 코어 `isQuoteRedundant`).
+   *
+   * `quote` 를 `null` 로 비우지 않고 이 플래그를 따로 두는 까닭: 걸러지기 전의 블록이 아직 일을 한다. 도우미가 넘기는 줄은 실시간으로 온 행이면
+   * 원래 요청의 본문을 이 블록에서 읽는다(`delegateSourceBody`) — 요청이 바로 위에 있는 때가 정확히 이 플래그가 켜지는 때다. 그리는 자리(블록)와
+   * 말하는 자리(화면 낭독의 「인용」 문장·「인용한 원본으로 이동」 동작)만 이 플래그를 따른다. 없으면 `false` 다.
+   */
+  quoteRedundant?: boolean;
   /** 로드된 인용 원본의 첨부 수. 인용 안에서는 바이트 대신 최소 표지만 그린다. */
   quoteAttachmentCount?: number;
   /**
@@ -2456,12 +2473,14 @@ function MessageRowInner({
   pausedRepeat,
   deletedRepeat,
   landed,
+  searchMatch,
   nowMs,
   onResend,
   actions,
   rollup: rollupOverride,
   replyParent,
   quote,
+  quoteRedundant = false,
   quoteAttachmentCount,
   unfurls = NO_UNFURLS,
   approvalGates,
@@ -2494,6 +2513,8 @@ function MessageRowInner({
         : undefined,
     [registerRowNode, messageId],
   );
+  // 이 행이 **그리고 말하는** 인용. 걸러지기 전의 `quote` 는 위임 줄의 원문 읽기(`delegateSourceBody`)만 쓴다 — 이유는 `quoteRedundant` 의 prop 주석.
+  const drawnQuote = quoteRedundant ? null : quote;
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const requestSentence = useMemo(() => {
     if (!requestCardTarget) return undefined;
@@ -3072,7 +3093,7 @@ function MessageRowInner({
     // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
     // 메시지에는 열 링크도 복사할 코드도 없다.
     if (!deleted) {
-      if (quote && quote.kind !== 'unresolved' && actions?.onJumpToQuoted) {
+      if (drawnQuote && drawnQuote.kind !== 'unresolved' && actions?.onJumpToQuoted) {
         list.push({name: 'momoQuoteJump', label: '인용한 원본으로 이동'});
       }
       if (affordances.firstLink) {
@@ -3113,7 +3134,7 @@ function MessageRowInner({
     actionable,
     threadTarget,
     deleted,
-    quote,
+    drawnQuote,
     actions,
     affordances,
     presentation.artifact,
@@ -3179,6 +3200,40 @@ function MessageRowInner({
     threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
+  // 인용 머리의 재료 (#5381 Q4). 머리는 말풍선 **안** 윗칸이라 `MessageBody` 가 그린다 — 본문이 없는 행만 아래에서 단독 말풍선으로 세운다.
+  // 묘비에는 붙이지 않는다: 지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지 묘비에 대한 사실이 아니다.
+  const quoteHeadSpec: QuoteHeadSpec | undefined =
+    drawnQuote && !deleted
+      ? {
+          block: drawnQuote,
+          directory,
+          attachmentCount: quoteAttachmentCount,
+          // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
+          // 범위 안에 있든 없든.
+          //
+          // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
+          // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
+          // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
+          // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
+          // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
+          // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
+          //
+          // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
+          // `QuoteBlock` 이 자기 갈래로 직접 한다.
+          onJump: actions?.onJumpToQuoted
+            ? () => {
+                if (longPress.consumeTap()) return;
+                actions.onJumpToQuoted?.(message);
+              }
+            : undefined,
+        }
+      : undefined;
+  // 이 행의 말풍선 종류. 본문 말풍선과 단독 머리 말풍선이 같은 색을 읽는다.
+  const rowBubble =
+    actions?.myMemberId !== undefined && message.authorMemberId === actions.myMemberId
+      ? 'mine'
+      : 'other';
+
   return (
     <View
       ref={rowNodeRef}
@@ -3200,8 +3255,8 @@ function MessageRowInner({
         tombstoneText,
         replyTo: replyToSpoken,
         quoted:
-          quote && !deleted
-            ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
+          drawnQuote && !deleted
+            ? quoteAccessibilityPhrase(drawnQuote, directory, formatMessage, quoteAttachmentCount)
             : null,
         }),
         // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
@@ -3298,10 +3353,10 @@ function MessageRowInner({
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
+            chipHead={requestChip != null || (runStatus?.length ?? 0) > 0}
             requestChip={requestChip ? <RequestStatusChip chip={requestChip}
               sentence={requestSentence}
-              // 「답함 ✓」(#4620 B): 답 메시지를 알 때만 눌리고(누르면 그 답으로 간다), 모르면 같은 칩이 눌리지 않는다 — 죽은 단추를 세우지 않는다.
-              onOpen={!requestCardTarget && requestChip.kind === 'answered' ? (requestChip.answer !== undefined && actions?.onJumpToMessage ? () => actions.onJumpToMessage?.(requestChip.answer!.id, requestChip.answer!.seq) : undefined) : requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
+              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
@@ -3326,37 +3381,12 @@ function MessageRowInner({
           />
         ) : null}
 
-        {/* 인용 블록 (ADR-0148). 표식 **아래**, 본문 **위** — 한 행이 둘 다 가질
-            수 있고(규칙 1), 그때 읽히는 순서는 「어느 대화에 속하는가」 →
-            「무엇을 가리키는가」 → 「무슨 말인가」다. 묘비에는 붙이지 않는다:
-            지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지
-            묘비에 대한 사실이 아니다. */}
-        {quote && !deleted ? (
-          <QuoteBlock
-            block={quote}
-            directory={directory}
-            attachmentCount={quoteAttachmentCount}
-            // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
-            // 범위 안에 있든 없든.
-            //
-            // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
-            // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
-            // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
-            // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
-            // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
-            // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
-            //
-            // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
-            // `QuoteBlock` 이 자기 갈래로 직접 한다.
-            onJump={
-              actions?.onJumpToQuoted
-                ? () => {
-                    if (longPress.consumeTap()) return;
-                    actions.onJumpToQuoted?.(message);
-                  }
-                : undefined
-            }
-          />
+        {/* 인용 머리 (ADR-0148 · #5381 Q4). 말풍선 **안** 윗칸이다 — 아래 `MessageBody` 가 `quoteHead` 로 받아 자기 첫 말풍선에
+            그린다. 표식 **아래**, 본문 **위**: 한 행이 둘 다 가질 수 있고(규칙 1), 그때 읽히는 순서는 「어느 대화에 속하는가」 →
+            「무엇을 가리키는가」 → 「무슨 말인가」다. 보일 본문이 없는 행(카드·첨부만 보낸 답장)만 여기서 머리를 **자기 말풍선**으로 세운다 —
+            본문이 있는 행에서 여기까지 그리면 머리가 두 번 선다. */}
+        {quoteHeadSpec && !(presentation.keepsBody && hasBody) ? (
+          <QuoteHeadBubble quoteHead={quoteHeadSpec} bubble={rowBubble} />
         ) : null}
 
         {deleted ? (
@@ -3398,12 +3428,11 @@ function MessageRowInner({
                 selectable={!actionable}
                 // 말풍선 (#4300): 내 글은 신호색, 남·에이전트 글은 표면. 카드·첨부는 아래에서
                 // 말풍선 밖 전체 폭으로 선다.
-                bubble={
-                  actions?.myMemberId !== undefined &&
-                  message.authorMemberId === actions.myMemberId
-                    ? 'mine'
-                    : 'other'
-                }
+                bubble={rowBubble}
+                // 인용 머리(#5381): 이 본문의 첫 말풍선 안 윗칸.
+                quoteHead={quoteHeadSpec}
+                // 대화 안 검색으로 착지한 행이면 찾은 글자(#5384). 본문 글자 조각에서만 칠해지고 인용 머리는 칠하지 않는다.
+                searchMatch={searchMatch}
               />
             ) : null}
 
@@ -3575,7 +3604,7 @@ function MessageRowInner({
                   <ThreadSummaryContent
                     view={threadView}
                     directory={directory}
-                    suffix={requestCardTarget ? ` · ${requestSentence ?? requestChip?.word ?? ''}` : undefined}
+                    suffix={requestCardTarget && (requestSentence ?? requestChip?.word) ? ` · ${requestSentence ?? requestChip?.word}` : undefined}
                     workChip={threadWorkChip}
                   />
                 </Pressable>
@@ -3763,6 +3792,8 @@ function MessageRowInner({
               : undefined
           }
           onEdit={() => {
+            // 이 행동은 행동 시트의 Modal 이 iOS 에서 **다 내려간 뒤에** 불린다(`MessageActionSheet` 의 `usePageSheetHandoff`, #5417). 그래서 같은 화면 갱신에서
+            // 편집 시트(다른 Modal)를 세워도 겹치지 않는다. 시간을 늦춰 여는 길(`setTimeout`)로 되돌리지 말 것 - 기기·부하에 따라 다시 깨진다.
             setSheetOpen(false);
             setEditError(null);
             setEditing(true);
@@ -3899,12 +3930,14 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   pausedRepeat: true,
   deletedRepeat: true,
   landed: true,
+  searchMatch: true,
   nowMs: true,
   onResend: true,
   actions: true,
   rollup: true,
   replyParent: true,
   quote: true,
+  quoteRedundant: true,
   quoteAttachmentCount: true,
   unfurls: true,
   approvalGates: true,
@@ -3973,6 +4006,8 @@ export function sameMessageRowProps(
     // 그 행이 다시 그려진다 — 채널의 다른 고정은 이 행을 건드리지 않는다.
     a.pinned === b.pinned &&
     a.landed === b.landed &&
+    // #5384. 문자열(없음 포함)이라 동일성으로 충분하다. 선택한 결과가 바뀔 때 그 행과 앞 행 둘만 다시 그려진다.
+    a.searchMatch === b.searchMatch &&
     a.nowMs === b.nowMs &&
     a.onResend === b.onResend &&
     a.actions === b.actions &&
@@ -3980,6 +4015,8 @@ export function sameMessageRowProps(
     sameChips(a.chips, b.chips) &&
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote) &&
+    // #5357. 스칼라다. 없음과 거짓은 같은 말이다(그린다). 빠지면 질문 바로 아래로 옮겨 온 행이 인용을 든 채 서 있다.
+    (a.quoteRedundant ?? false) === (b.quoteRedundant ?? false) &&
     a.quoteAttachmentCount === b.quoteAttachmentCount &&
     // #4883. 목록이 줄마다 코어 투영 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성으로 충분하다. 한 메시지의 카드가
     // 바뀔 때(서버가 만들었다·작성자가 지웠다)만 그 줄이 다시 그려진다 — 채널의 다른 카드는 이 줄을 건드리지 않는다.
@@ -4294,6 +4331,11 @@ export function PendingRow({
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
+  // 인용 머리의 재료(#5381 Q4). 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을 때 그 글이 어디 있는지 아무도
+  // 보장하지 못한다(웹 `PendingRow` 와 같은 규칙).
+  const echoQuoteHead: QuoteHeadSpec | undefined = quote
+    ? {block: quote, directory, attachmentCount: quoteAttachmentCount}
+    : undefined;
 
   // 오래 걸리는 전송만 시계 하나로 알린다(#4455). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
   const slow = useSlowSend(pending.createdAtMs, pending.status);
@@ -4397,12 +4439,10 @@ export function PendingRow({
             myMemberId={pending.authorMemberId}
           />
         ) : null}
-        {quote ? (
-          <QuoteBlock
-            block={quote}
-            directory={directory}
-            attachmentCount={quoteAttachmentCount}
-          />
+        {/* 인용 머리(#5381 Q4): 확정된 행과 같은 말풍선 안 윗칸이다 — 아래 `MessageBody` 가 그린다. 보낼 본문이 없는 메아리(사진만 보낸 답장)만 여기서
+            머리를 자기 말풍선으로 세운다. 에코가 머리를 안 그렸다가 서버 사본이 오는 순간 모양이 바뀌면 글이 움직인다. */}
+        {echoQuoteHead && !hasRenderableBody(pending.body) ? (
+          <QuoteHeadBubble quoteHead={echoQuoteHead} bubble="mine" muted={failed} />
         ) : null}
         {/* Same anatomy as a confirmed row: the text must not re-flow when the
             server's copy replaces this one — which is exactly why the echo goes
@@ -4421,6 +4461,7 @@ export function PendingRow({
             selfMemberId={pending.authorMemberId}
             // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
             bubble="mine"
+            quoteHead={echoQuoteHead}
           />
         ) : null}
         {pending.attachments && pending.attachments.length > 0 ? (
@@ -4662,9 +4703,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
   // 사람은 둘이 다른 것을 뜻한다고 읽는다.
   tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-  // 꼬리 한 줄에 앉는 **읽기만 하는 표지**들 — 「수정됨」과 「고정됨」.
-  // 둘은 같은 격이므로 같은 상자를 쓴다: 흐린 meta 글자, 강조 없음.
-  tailMark: {fontSize: font.meta, color: color.textFaint},
+  // 꼬리 한 줄에 앉는 **표지**들 — 「수정됨」과 「고정됨」(과 중단 표지).
+  // 같은 격이므로 같은 상자를 쓴다: meta 글자, 강조 없음. 잉크는 `textMuted`(AA 4.5:1)다 - 「수정됨」은 눌러서 고친 시각 문장으로 펼치는 단추의 이름이자
+  // 시각 정보라 `textFaint`(3:1, 읽기만 하는 힌트의 잉크)로는 모자랐다(6a 디자인 검수 H1: 밝음 3.24·어두움 3.89:1). 웹 꼬리는 `text-meta text-ink-muted`.
+  tailMark: {fontSize: font.meta, color: color.textMuted},
   tailRow: {
     flexDirection: 'row',
     alignItems: 'center',

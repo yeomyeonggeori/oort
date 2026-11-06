@@ -90,9 +90,10 @@ import {
 } from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
+  isQuoteRedundant,
   resolveQuote,
 } from "@momo/core/features/timeline/quote";
-import { QuoteBlock } from "./QuoteBlock";
+import { QuoteCard, QuoteCardAround } from "./QuoteBlock";
 import {
   DeleteMessageDialog,
   MessageActionContextMenu,
@@ -148,7 +149,6 @@ import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest"
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
 import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
-import type { AnswerRef } from "@momo/core/features/agents/triggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -312,6 +312,7 @@ export function MessageRow({
   onQuoteMessage,
   onJumpToMessage,
   quoteLookup,
+  aboveMessageId,
   onOpenWorkSession,
   onResend,
   showRollup = true,
@@ -319,7 +320,6 @@ export function MessageRow({
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
-  runAnswers,
   showThought = false,
 }: {
   message: Message;
@@ -379,6 +379,14 @@ export function MessageRow({
    * 네트워크를 다시 때리지 않는다.
    */
   quoteLookup?: (messageId: string) => Message | undefined;
+  /**
+   * 같은 목록에서 이 행 **바로 위에 그려진** 메시지의 id (#5357, 코어 `messageAboveIds`).
+   *
+   * 에이전트의 답이 이 메시지를 가리키면 인용 블록은 바로 위의 말을 한 번 더 보여 줄 뿐이라 그리지 않는다(코어 `isQuoteRedundant`가
+   * 판정하고 폰이 같은 함수를 쓴다). 목록이 넣는다 — 이웃은 접기·가리기를 다 거친 목록에서 세야 맞아서 행이 혼자 알 수 없다. 넣지 않으면
+   * (갤러리·받은 편지함·작업 로그) 「모른다」이고 인용은 늘 그린다.
+   */
+  aboveMessageId?: string;
   onOpenWorkSession?: OpenWorkSession;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
@@ -420,11 +428,6 @@ export function MessageRow({
    * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
    */
   runStatus?: readonly AgentRunProgress[];
-  /**
-   * #4619 — 위 run들의 **답 메시지**(run id 소문자 → id·seq). 「답함 ✓」 칩이 누르면 답으로 가는 길이다.
-   * 목록이 한 번 색인해 넣는다(`Timeline`). 없거나 모르는 run이면 칩은 누르는 것이 아니다.
-   */
-  runAnswers?: ReadonlyMap<string, AnswerRef>;
   /** 요청 스레드 또는 에이전트 1:1 DM에서만 생각 줄을 세워요. */
   showThought?: boolean;
 }) {
@@ -585,6 +588,23 @@ export function MessageRow({
   // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
   // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
   const quote = resolveQuote(message, quoteLookup);
+  // #5357 — 에이전트의 답이 바로 위 메시지를 가리키면 그 인용은 정보를 더하지 못한다. 그리는 마지막 걸음에서만 거르고 데이터는 건드리지 않는다.
+  // #5381 — 스레드 화면(`ThreadSurfaceRoot`)에서 인용 대상이 그 스레드의 root면 그것도 같은 함수가 거른다: root는 맨 위 행으로 이미 서 있다(요청 고리 §4.2).
+  const quoteRedundant = isQuoteRedundant(quote, {
+    directory,
+    authorMemberId: message.authorMemberId,
+    aboveMessageId,
+    ...(threadSurfaceRoot !== null ? { threadRootId: threadSurfaceRoot } : {}),
+  });
+  // 그려야 하는 인용(없으면 null). 답장 한 덩어리 카드의 머리다(#5381 Q4).
+  const drawnQuote = quote !== null && !quoteRedundant ? quote : null;
+  // 카드가 **본문을 싼다**: 보일 본문(묘비·글)이 있고 편집기·작업 중 안내가 자리를 차지하지 않을 때. 아니면 머리만 선 카드를 그린다
+  // (첨부만 보낸 답장, 편집 중인 행). 본문이 없는 행에 구분선만 긋지 않는다.
+  const quoteCardHoldsBody =
+    drawnQuote !== null &&
+    keepsBody &&
+    idleNotice === null &&
+    (deleted || (hasBody && !(editing && actions)));
 
   // What this row is allowed to offer. The server decides for real (403/400);
   // these only decide what to draw, and `onOpenThread` gates 답글 because a
@@ -1057,8 +1077,6 @@ export function MessageRow({
               <MessageTriggerChip
                 runs={runStatus}
                 directory={directory}
-                {...(runAnswers !== undefined ? { runAnswers } : {})}
-                {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
                 onOpenBundle={onOpenThread || runStatus.some((run) => run.phase === "awaiting_approval" || run.phase === "paused") ? (opener, runIds) => {
                   const awaiting = runStatus.some((run) => runIds.includes(run.id) && (run.phase === "awaiting_approval" || run.phase === "paused"));
                   if (awaiting) openRunStage(opener, runIds);
@@ -1068,17 +1086,22 @@ export function MessageRow({
             )}
           </div>
         )}
-        {/* 본문 **위**. 스레드 롤업이 본문 아래 꼬리에 있는 것과 대칭이고, 그
-            대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
+        {/* 본문 **위**: 본문을 싸는 카드의 윗칸이다(#5381 Q4). 스레드 롤업이 본문 아래 꼬리에
+            있는 것과 대칭이고, 그 대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
             tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
-            지워지지 않는다. */}
-        {quote && (
-          <QuoteBlock
-            block={quote}
+            지워지지 않는다. 본문이 없거나 편집기가 서는 행은 머리만 선 카드다. */}
+        {drawnQuote && !quoteCardHoldsBody && (
+          <QuoteCard
+            block={drawnQuote}
             directory={directory}
             {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
           />
         )}
+        <QuoteCardAround
+          quote={quoteCardHoldsBody ? drawnQuote : null}
+          directory={directory}
+          {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+        >
         {keepsBody &&
           idleNotice === null &&
           // A tombstone is our sentence, not the author's, so it never goes
@@ -1135,6 +1158,7 @@ export function MessageRow({
             // 자리이고, 거기서 웹은 글자 없는 문단을 하나 세우고 폰은 세우지 않았다.
             null
           ))}
+        </QuoteCardAround>
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}

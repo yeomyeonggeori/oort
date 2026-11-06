@@ -202,8 +202,15 @@ export const messageKeys = [
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
   "connection.load.activityTitle",
+  "connection.load.adeSessionsTitle",
   "connection.load.agentChannelsTitle",
   "connection.load.agentHistoryTitle",
+  "connection.load.agentLedgerReopenTail",
+  "connection.load.agentLedgerRetryTail",
+  "connection.load.agentLedgerTitle",
+  "connection.load.agentPaneProgressTitle",
+  "connection.load.agentProfileAppliesTitle",
+  "connection.load.agentProfilesApplyTitle",
   "connection.load.agentProfileTitle",
   "connection.load.agentRosterTitle",
   "connection.load.agentRunTitle",
@@ -211,6 +218,8 @@ export const messageKeys = [
   "connection.load.conversationTitle",
   "connection.load.deviceKeysTitle",
   "connection.load.dmApprovalTitle",
+  "connection.load.dmNamesTitle",
+  "connection.load.draftTargetsTitle",
   "connection.load.hermesStatusTitle",
   "connection.load.inboxMoreTitle",
   "connection.load.inboxTitle",
@@ -220,11 +229,21 @@ export const messageKeys = [
   "connection.load.membersTitle",
   "connection.load.newerTitle",
   "connection.load.notificationRulesTitle",
+  "connection.load.readMarkersTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
+  "connection.load.reasonServerBare",
   "connection.load.reasonUnknown",
+  "connection.load.reasonUnknownBare",
   "connection.load.sentence",
+  "connection.load.teamBoardStaleTitle",
+  "connection.load.teamExpressionsTitle",
   "connection.load.threadTitle",
+  "connection.load.workHostsTitle",
+  "connection.load.workLocationsTitle",
+  "connection.load.workSelectedSessionTitle",
+  "connection.load.workSessionsTitle",
+  "connection.load.workStepsTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
   "connection.send.reasonRejected",
@@ -471,12 +490,50 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
+  "mobile.convSearch.authorSelf",
+  "mobile.convSearch.barList",
+  "mobile.convSearch.barNewer",
+  "mobile.convSearch.barOlder",
+  "mobile.convSearch.clearInput",
+  "mobile.convSearch.close",
+  "mobile.convSearch.dayYesterday",
+  "mobile.convSearch.emptyDetail",
+  "mobile.convSearch.emptyHeadline",
+  "mobile.convSearch.errorDetail",
+  "mobile.convSearch.errorHeadline",
+  "mobile.convSearch.idleHint",
+  "mobile.convSearch.more",
+  "mobile.convSearch.moreLoading",
+  "mobile.convSearch.open",
+  "mobile.convSearch.placeholderChannel",
+  "mobile.convSearch.placeholderDm",
+  "mobile.convSearch.position",
+  "mobile.convSearch.positionMore",
+  "mobile.convSearch.positionSpoken",
+  "mobile.convSearch.positionSpokenMore",
+  "mobile.convSearch.recentClear",
+  "mobile.convSearch.recentClearLabel",
+  "mobile.convSearch.recentRow",
+  "mobile.convSearch.recentRowIn",
+  "mobile.convSearch.recentTitle",
+  "mobile.convSearch.resultLabel",
+  "mobile.convSearch.resultsChannel",
+  "mobile.convSearch.resultsDm",
+  "mobile.convSearch.searchAll",
+  "mobile.convSearch.searchAllLabel",
+  "mobile.convSearch.searching",
+  "mobile.convSearch.tooShort",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.jumpSeek.cancel",
+  "mobile.jumpSeek.dismiss",
+  "mobile.jumpSeek.failed",
+  "mobile.jumpSeek.reading",
+  "mobile.jumpSeek.retry",
   "mobile.linkCard.cancel",
   "mobile.linkCard.copied",
   "mobile.linkCard.copy",
@@ -699,6 +756,63 @@ export const messageKeys = [
   "reply.home.headerSelf",
   "reply.home.headerUnknown",
   "reply.home.open",
+  "search.group.channels",
+  "search.group.loadingMore",
+  "search.group.messages",
+  "search.group.more",
+  "search.group.moreLabel",
+  "search.group.people",
+  "search.input.clearLabel",
+  "search.input.exitLabel",
+  "search.input.placeholder",
+  "search.kind.all",
+  "search.kind.channels",
+  "search.kind.groupLabel",
+  "search.kind.messages",
+  "search.kind.people",
+  "search.picker.agent",
+  "search.picker.all",
+  "search.picker.channelPrivate",
+  "search.picker.channelPublic",
+  "search.picker.close",
+  "search.picker.dm",
+  "search.picker.empty",
+  "search.picker.filterLabel",
+  "search.picker.filterPlaceholder",
+  "search.picker.title",
+  "search.recent.clearAll",
+  "search.recent.clearAllLabel",
+  "search.recent.conversations",
+  "search.recent.empty",
+  "search.recent.openLabel",
+  "search.recent.searches",
+  "search.recent.searchInLabel",
+  "search.recent.searchLabel",
+  "search.row.agentLabel",
+  "search.row.agentSubtitle",
+  "search.row.channelLabel",
+  "search.row.fallbackTitle",
+  "search.row.messageLabel",
+  "search.row.openChannelHint",
+  "search.row.openDmHint",
+  "search.row.personLabel",
+  "search.row.personSubtitle",
+  "search.row.privateChannelLabel",
+  "search.scope.all",
+  "search.scope.chosenLabel",
+  "search.scope.groupLabel",
+  "search.scope.pick",
+  "search.scope.pickLabel",
+  "search.state.errorDetail",
+  "search.state.errorHeadline",
+  "search.state.loading",
+  "search.state.noResults",
+  "search.state.noResultsIn",
+  "search.state.pendingChannels",
+  "search.state.retry",
+  "search.state.scopeNote",
+  "search.state.shortHint",
+  "search.state.shortHintMessages",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -762,6 +876,14 @@ export const messageKeys = [
   "settings.invite.guestInvitesPaused",
   "settings.notifications.alwaysDetail",
   "settings.notifications.checking",
+  "settings.notifications.phoneDelayDescription",
+  "settings.notifications.phoneDelayFiveMinutes",
+  "settings.notifications.phoneDelayLabel",
+  "settings.notifications.phoneDelayLoadFailed",
+  "settings.notifications.phoneDelayOff",
+  "settings.notifications.phoneDelayOneMinute",
+  "settings.notifications.phoneDelayRetry",
+  "settings.notifications.phoneDelaySaveFailed",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -857,6 +979,8 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.quote.head",
+  "timeline.quote.headUnnamed",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
@@ -874,7 +998,6 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
-  "timeline.triggerChip.jumpHint",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -1222,8 +1345,17 @@ export const argumentSpecs = {
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
   "connection.load.activityTitle": {},
+  "connection.load.adeSessionsTitle": {},
   "connection.load.agentChannelsTitle": {},
   "connection.load.agentHistoryTitle": {},
+  "connection.load.agentLedgerReopenTail": {},
+  "connection.load.agentLedgerRetryTail": {},
+  "connection.load.agentLedgerTitle": {},
+  "connection.load.agentPaneProgressTitle": {},
+  "connection.load.agentProfileAppliesTitle": {},
+  "connection.load.agentProfilesApplyTitle": {
+    "names": "string"
+  },
   "connection.load.agentProfileTitle": {},
   "connection.load.agentRosterTitle": {},
   "connection.load.agentRunTitle": {},
@@ -1231,6 +1363,8 @@ export const argumentSpecs = {
   "connection.load.conversationTitle": {},
   "connection.load.deviceKeysTitle": {},
   "connection.load.dmApprovalTitle": {},
+  "connection.load.dmNamesTitle": {},
+  "connection.load.draftTargetsTitle": {},
   "connection.load.hermesStatusTitle": {},
   "connection.load.inboxMoreTitle": {},
   "connection.load.inboxTitle": {},
@@ -1240,14 +1374,24 @@ export const argumentSpecs = {
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
   "connection.load.notificationRulesTitle": {},
+  "connection.load.readMarkersTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
+  "connection.load.reasonServerBare": {},
   "connection.load.reasonUnknown": {},
+  "connection.load.reasonUnknownBare": {},
   "connection.load.sentence": {
     "reason": "string",
     "title": "string"
   },
+  "connection.load.teamBoardStaleTitle": {},
+  "connection.load.teamExpressionsTitle": {},
   "connection.load.threadTitle": {},
+  "connection.load.workHostsTitle": {},
+  "connection.load.workLocationsTitle": {},
+  "connection.load.workSelectedSessionTitle": {},
+  "connection.load.workSessionsTitle": {},
+  "connection.load.workStepsTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
   "connection.send.reasonRejected": {},
@@ -1529,12 +1673,75 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
+  "mobile.convSearch.authorSelf": {},
+  "mobile.convSearch.barList": {},
+  "mobile.convSearch.barNewer": {},
+  "mobile.convSearch.barOlder": {},
+  "mobile.convSearch.clearInput": {},
+  "mobile.convSearch.close": {},
+  "mobile.convSearch.dayYesterday": {},
+  "mobile.convSearch.emptyDetail": {},
+  "mobile.convSearch.emptyHeadline": {
+    "query": "string"
+  },
+  "mobile.convSearch.errorDetail": {},
+  "mobile.convSearch.errorHeadline": {},
+  "mobile.convSearch.idleHint": {},
+  "mobile.convSearch.more": {},
+  "mobile.convSearch.moreLoading": {},
+  "mobile.convSearch.open": {},
+  "mobile.convSearch.placeholderChannel": {},
+  "mobile.convSearch.placeholderDm": {},
+  "mobile.convSearch.position": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpoken": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.positionSpokenMore": {
+    "index": "string",
+    "total": "string"
+  },
+  "mobile.convSearch.recentClear": {},
+  "mobile.convSearch.recentClearLabel": {},
+  "mobile.convSearch.recentRow": {
+    "query": "string"
+  },
+  "mobile.convSearch.recentRowIn": {
+    "query": "string",
+    "where": "string"
+  },
+  "mobile.convSearch.recentTitle": {},
+  "mobile.convSearch.resultLabel": {
+    "author": "string",
+    "snippet": "string",
+    "when": "string"
+  },
+  "mobile.convSearch.resultsChannel": {},
+  "mobile.convSearch.resultsDm": {},
+  "mobile.convSearch.searchAll": {},
+  "mobile.convSearch.searchAllLabel": {
+    "query": "string"
+  },
+  "mobile.convSearch.searching": {},
+  "mobile.convSearch.tooShort": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.jumpSeek.cancel": {},
+  "mobile.jumpSeek.dismiss": {},
+  "mobile.jumpSeek.failed": {},
+  "mobile.jumpSeek.reading": {},
+  "mobile.jumpSeek.retry": {},
   "mobile.linkCard.cancel": {},
   "mobile.linkCard.copied": {},
   "mobile.linkCard.copy": {},
@@ -1780,6 +1987,97 @@ export const argumentSpecs = {
   "reply.home.headerSelf": {},
   "reply.home.headerUnknown": {},
   "reply.home.open": {},
+  "search.group.channels": {},
+  "search.group.loadingMore": {},
+  "search.group.messages": {},
+  "search.group.more": {},
+  "search.group.moreLabel": {
+    "group": "string"
+  },
+  "search.group.people": {},
+  "search.input.clearLabel": {},
+  "search.input.exitLabel": {},
+  "search.input.placeholder": {},
+  "search.kind.all": {},
+  "search.kind.channels": {},
+  "search.kind.groupLabel": {},
+  "search.kind.messages": {},
+  "search.kind.people": {},
+  "search.picker.agent": {},
+  "search.picker.all": {},
+  "search.picker.channelPrivate": {},
+  "search.picker.channelPublic": {},
+  "search.picker.close": {},
+  "search.picker.dm": {},
+  "search.picker.empty": {},
+  "search.picker.filterLabel": {},
+  "search.picker.filterPlaceholder": {},
+  "search.picker.title": {},
+  "search.recent.clearAll": {},
+  "search.recent.clearAllLabel": {},
+  "search.recent.conversations": {},
+  "search.recent.empty": {},
+  "search.recent.openLabel": {
+    "name": "string"
+  },
+  "search.recent.searches": {},
+  "search.recent.searchInLabel": {
+    "query": "string",
+    "where": "string"
+  },
+  "search.recent.searchLabel": {
+    "query": "string"
+  },
+  "search.row.agentLabel": {
+    "handle": "string",
+    "name": "string"
+  },
+  "search.row.agentSubtitle": {
+    "handle": "string"
+  },
+  "search.row.channelLabel": {
+    "name": "string"
+  },
+  "search.row.fallbackTitle": {},
+  "search.row.messageLabel": {
+    "author": "string",
+    "channel": "string",
+    "snippet": "string"
+  },
+  "search.row.openChannelHint": {},
+  "search.row.openDmHint": {},
+  "search.row.personLabel": {
+    "handle": "string",
+    "name": "string"
+  },
+  "search.row.personSubtitle": {
+    "handle": "string"
+  },
+  "search.row.privateChannelLabel": {
+    "name": "string"
+  },
+  "search.scope.all": {},
+  "search.scope.chosenLabel": {
+    "name": "string"
+  },
+  "search.scope.groupLabel": {},
+  "search.scope.pick": {},
+  "search.scope.pickLabel": {},
+  "search.state.errorDetail": {},
+  "search.state.errorHeadline": {},
+  "search.state.loading": {},
+  "search.state.noResults": {
+    "query": "string"
+  },
+  "search.state.noResultsIn": {
+    "query": "string",
+    "where": "string"
+  },
+  "search.state.pendingChannels": {},
+  "search.state.retry": {},
+  "search.state.scopeNote": {},
+  "search.state.shortHint": {},
+  "search.state.shortHintMessages": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -1880,6 +2178,14 @@ export const argumentSpecs = {
   "settings.invite.guestInvitesPaused": {},
   "settings.notifications.alwaysDetail": {},
   "settings.notifications.checking": {},
+  "settings.notifications.phoneDelayDescription": {},
+  "settings.notifications.phoneDelayFiveMinutes": {},
+  "settings.notifications.phoneDelayLabel": {},
+  "settings.notifications.phoneDelayLoadFailed": {},
+  "settings.notifications.phoneDelayOff": {},
+  "settings.notifications.phoneDelayOneMinute": {},
+  "settings.notifications.phoneDelayRetry": {},
+  "settings.notifications.phoneDelaySaveFailed": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1991,6 +2297,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.quote.head": {
+    "name": "string"
+  },
+  "timeline.quote.headUnnamed": {},
   "timeline.runException.open": {
     "text": "string"
   },
@@ -2019,7 +2329,6 @@ export const argumentSpecs = {
   "timeline.thread.unreadChip": {
     "count": "number"
   },
-  "timeline.triggerChip.jumpHint": {},
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -2406,8 +2715,15 @@ export interface MessageArgs {
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
   "connection.load.activityTitle": Record<string, never>;
+  "connection.load.adeSessionsTitle": Record<string, never>;
   "connection.load.agentChannelsTitle": Record<string, never>;
   "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentLedgerReopenTail": Record<string, never>;
+  "connection.load.agentLedgerRetryTail": Record<string, never>;
+  "connection.load.agentLedgerTitle": Record<string, never>;
+  "connection.load.agentPaneProgressTitle": Record<string, never>;
+  "connection.load.agentProfileAppliesTitle": Record<string, never>;
+  "connection.load.agentProfilesApplyTitle": { names: string };
   "connection.load.agentProfileTitle": Record<string, never>;
   "connection.load.agentRosterTitle": Record<string, never>;
   "connection.load.agentRunTitle": Record<string, never>;
@@ -2415,6 +2731,8 @@ export interface MessageArgs {
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.deviceKeysTitle": Record<string, never>;
   "connection.load.dmApprovalTitle": Record<string, never>;
+  "connection.load.dmNamesTitle": Record<string, never>;
+  "connection.load.draftTargetsTitle": Record<string, never>;
   "connection.load.hermesStatusTitle": Record<string, never>;
   "connection.load.inboxMoreTitle": Record<string, never>;
   "connection.load.inboxTitle": Record<string, never>;
@@ -2424,11 +2742,21 @@ export interface MessageArgs {
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
   "connection.load.notificationRulesTitle": Record<string, never>;
+  "connection.load.readMarkersTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonServerBare": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.reasonUnknownBare": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
+  "connection.load.teamBoardStaleTitle": Record<string, never>;
+  "connection.load.teamExpressionsTitle": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
+  "connection.load.workHostsTitle": Record<string, never>;
+  "connection.load.workLocationsTitle": Record<string, never>;
+  "connection.load.workSelectedSessionTitle": Record<string, never>;
+  "connection.load.workSessionsTitle": Record<string, never>;
+  "connection.load.workStepsTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;
   "connection.send.reasonRejected": Record<string, never>;
@@ -2675,12 +3003,50 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
+  "mobile.convSearch.authorSelf": Record<string, never>;
+  "mobile.convSearch.barList": Record<string, never>;
+  "mobile.convSearch.barNewer": Record<string, never>;
+  "mobile.convSearch.barOlder": Record<string, never>;
+  "mobile.convSearch.clearInput": Record<string, never>;
+  "mobile.convSearch.close": Record<string, never>;
+  "mobile.convSearch.dayYesterday": Record<string, never>;
+  "mobile.convSearch.emptyDetail": Record<string, never>;
+  "mobile.convSearch.emptyHeadline": { query: string };
+  "mobile.convSearch.errorDetail": Record<string, never>;
+  "mobile.convSearch.errorHeadline": Record<string, never>;
+  "mobile.convSearch.idleHint": Record<string, never>;
+  "mobile.convSearch.more": Record<string, never>;
+  "mobile.convSearch.moreLoading": Record<string, never>;
+  "mobile.convSearch.open": Record<string, never>;
+  "mobile.convSearch.placeholderChannel": Record<string, never>;
+  "mobile.convSearch.placeholderDm": Record<string, never>;
+  "mobile.convSearch.position": { index: string; total: string };
+  "mobile.convSearch.positionMore": { index: string; total: string };
+  "mobile.convSearch.positionSpoken": { index: string; total: string };
+  "mobile.convSearch.positionSpokenMore": { index: string; total: string };
+  "mobile.convSearch.recentClear": Record<string, never>;
+  "mobile.convSearch.recentClearLabel": Record<string, never>;
+  "mobile.convSearch.recentRow": { query: string };
+  "mobile.convSearch.recentRowIn": { query: string; where: string };
+  "mobile.convSearch.recentTitle": Record<string, never>;
+  "mobile.convSearch.resultLabel": { author: string; snippet: string; when: string };
+  "mobile.convSearch.resultsChannel": Record<string, never>;
+  "mobile.convSearch.resultsDm": Record<string, never>;
+  "mobile.convSearch.searchAll": Record<string, never>;
+  "mobile.convSearch.searchAllLabel": { query: string };
+  "mobile.convSearch.searching": Record<string, never>;
+  "mobile.convSearch.tooShort": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.jumpSeek.cancel": Record<string, never>;
+  "mobile.jumpSeek.dismiss": Record<string, never>;
+  "mobile.jumpSeek.failed": Record<string, never>;
+  "mobile.jumpSeek.reading": Record<string, never>;
+  "mobile.jumpSeek.retry": Record<string, never>;
   "mobile.linkCard.cancel": Record<string, never>;
   "mobile.linkCard.copied": Record<string, never>;
   "mobile.linkCard.copy": Record<string, never>;
@@ -2903,6 +3269,63 @@ export interface MessageArgs {
   "reply.home.headerSelf": Record<string, never>;
   "reply.home.headerUnknown": Record<string, never>;
   "reply.home.open": Record<string, never>;
+  "search.group.channels": Record<string, never>;
+  "search.group.loadingMore": Record<string, never>;
+  "search.group.messages": Record<string, never>;
+  "search.group.more": Record<string, never>;
+  "search.group.moreLabel": { group: string };
+  "search.group.people": Record<string, never>;
+  "search.input.clearLabel": Record<string, never>;
+  "search.input.exitLabel": Record<string, never>;
+  "search.input.placeholder": Record<string, never>;
+  "search.kind.all": Record<string, never>;
+  "search.kind.channels": Record<string, never>;
+  "search.kind.groupLabel": Record<string, never>;
+  "search.kind.messages": Record<string, never>;
+  "search.kind.people": Record<string, never>;
+  "search.picker.agent": Record<string, never>;
+  "search.picker.all": Record<string, never>;
+  "search.picker.channelPrivate": Record<string, never>;
+  "search.picker.channelPublic": Record<string, never>;
+  "search.picker.close": Record<string, never>;
+  "search.picker.dm": Record<string, never>;
+  "search.picker.empty": Record<string, never>;
+  "search.picker.filterLabel": Record<string, never>;
+  "search.picker.filterPlaceholder": Record<string, never>;
+  "search.picker.title": Record<string, never>;
+  "search.recent.clearAll": Record<string, never>;
+  "search.recent.clearAllLabel": Record<string, never>;
+  "search.recent.conversations": Record<string, never>;
+  "search.recent.empty": Record<string, never>;
+  "search.recent.openLabel": { name: string };
+  "search.recent.searches": Record<string, never>;
+  "search.recent.searchInLabel": { query: string; where: string };
+  "search.recent.searchLabel": { query: string };
+  "search.row.agentLabel": { handle: string; name: string };
+  "search.row.agentSubtitle": { handle: string };
+  "search.row.channelLabel": { name: string };
+  "search.row.fallbackTitle": Record<string, never>;
+  "search.row.messageLabel": { author: string; channel: string; snippet: string };
+  "search.row.openChannelHint": Record<string, never>;
+  "search.row.openDmHint": Record<string, never>;
+  "search.row.personLabel": { handle: string; name: string };
+  "search.row.personSubtitle": { handle: string };
+  "search.row.privateChannelLabel": { name: string };
+  "search.scope.all": Record<string, never>;
+  "search.scope.chosenLabel": { name: string };
+  "search.scope.groupLabel": Record<string, never>;
+  "search.scope.pick": Record<string, never>;
+  "search.scope.pickLabel": Record<string, never>;
+  "search.state.errorDetail": Record<string, never>;
+  "search.state.errorHeadline": Record<string, never>;
+  "search.state.loading": Record<string, never>;
+  "search.state.noResults": { query: string };
+  "search.state.noResultsIn": { query: string; where: string };
+  "search.state.pendingChannels": Record<string, never>;
+  "search.state.retry": Record<string, never>;
+  "search.state.scopeNote": Record<string, never>;
+  "search.state.shortHint": Record<string, never>;
+  "search.state.shortHintMessages": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;
@@ -2966,6 +3389,14 @@ export interface MessageArgs {
   "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.alwaysDetail": Record<string, never>;
   "settings.notifications.checking": Record<string, never>;
+  "settings.notifications.phoneDelayDescription": Record<string, never>;
+  "settings.notifications.phoneDelayFiveMinutes": Record<string, never>;
+  "settings.notifications.phoneDelayLabel": Record<string, never>;
+  "settings.notifications.phoneDelayLoadFailed": Record<string, never>;
+  "settings.notifications.phoneDelayOff": Record<string, never>;
+  "settings.notifications.phoneDelayOneMinute": Record<string, never>;
+  "settings.notifications.phoneDelayRetry": Record<string, never>;
+  "settings.notifications.phoneDelaySaveFailed": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
@@ -3061,6 +3492,8 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.quote.head": { name: string };
+  "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
@@ -3078,7 +3511,6 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
-  "timeline.triggerChip.jumpHint": Record<string, never>;
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

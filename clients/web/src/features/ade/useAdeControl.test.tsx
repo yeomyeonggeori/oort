@@ -21,6 +21,8 @@ const hoisted = vi.hoisted(() => ({
   sessions: [] as unknown[],
   hosts: [] as unknown[],
   sessionsError: false,
+  /** 읽기가 던진 오류 객체(`useQuery().error`). 실패가 아니면 null. */
+  sessionsFailure: null as unknown,
   signals: new Map<string, unknown>(),
   useWorkSessions: vi.fn(),
   useWorkHosts: vi.fn(),
@@ -35,7 +37,7 @@ vi.mock("@/features/work/useWorkSessions", () => ({
   // 쿼리 훅은 인자를 기록하고 늘 데이터를 돌려준다 — 켜지 않았어도 캐시에 옛 데이터가 남아 있는 상황을 흉내 낸다.
   useWorkSessions: (...args: unknown[]) => {
     hoisted.useWorkSessions(...args);
-    return { data: hoisted.sessions, isError: hoisted.sessionsError, refetch: vi.fn() };
+    return { data: hoisted.sessions, isError: hoisted.sessionsError, error: hoisted.sessionsFailure, refetch: vi.fn() };
   },
   useWorkHosts: (...args: unknown[]) => {
     hoisted.useWorkHosts(...args);
@@ -121,6 +123,7 @@ beforeEach(() => {
   hoisted.sessions = [session];
   hoisted.hosts = [workHost];
   hoisted.sessionsError = false;
+  hoisted.sessionsFailure = null;
   hoisted.signals = new Map([["k", turn]]);
   hoisted.useWorkSessions.mockClear();
   hoisted.useWorkHosts.mockClear();
@@ -155,15 +158,26 @@ describe("useAdeControl: 세션 읽기를 끄는 인자 (#5193)", () => {
     expect(latest?.counts).toMatchObject({ working: 1, blocked: 0, total: 1 });
   });
 
-  it("꺼 두면 읽기 실패도 말하지 않는다(읽지 않았으므로 못 읽은 것이 아니다)", () => {
+  it("꺼 두면 읽기 실패도 말하지 않는다(읽지 않았으므로 못 읽은 것이 아니다). 오류 객체도 새지 않는다", () => {
     hoisted.sessionsError = true;
+    hoisted.sessionsFailure = new Error("old cache failure");
     mount(false);
     expect(latest?.sessionsFailed).toBe(false);
+    expect(latest?.sessionsError).toBeNull();
   });
 
-  it("켜 두면 읽기 실패를 그대로 말한다", () => {
+  it("켜 두면 읽기 실패를 그대로 말하고, 그 읽기가 던진 오류 객체를 서랍에 건넨다(원인 분류의 재료, #5279 B)", () => {
+    const failure = new Error("sessions read failed");
     hoisted.sessionsError = true;
+    hoisted.sessionsFailure = failure;
     mount(true);
     expect(latest?.sessionsFailed).toBe(true);
+    expect(latest?.sessionsError).toBe(failure);
+  });
+
+  it("읽기가 실패하지 않았으면 오류 객체는 null이다", () => {
+    mount(true);
+    expect(latest?.sessionsFailed).toBe(false);
+    expect(latest?.sessionsError).toBeNull();
   });
 });

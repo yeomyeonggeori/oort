@@ -308,10 +308,12 @@ async function scene(browser, origin, scheme, reduced) {
   check(`${tag} 남은 줄이 「실패」를 말한다`, rowText.includes("실패"), rowText);
   check(`${tag} 「완료」·「걸림」 영수증이 없다`, !(await page.locator("body").textContent())?.includes("걸림") || rowText.includes("걸림"));
   check(`${tag} 실패 줄은 그 글 아래에 선다(진행 중 글 아래에는 없다)`, (await page.locator('[data-run-id="' + RUN_C + '"]').count()) === 0 && (await page.locator('[data-run-id="' + RUN_A + '"]').count()) === 1);
-  // 칩: 실패·답함·작업 중이 각자의 메시지에 선다(행 높이는 칩과 무관하다). 같은 사람의 연속 메시지(「ㅎㅇ」)에는 머리 줄이
-  // 없어 아이콘 칩이 거터에 선다(`data-variant=mark`).
+  // 칩: 실패·작업 중이 각자의 메시지에 선다(행 높이는 칩과 무관하다). 성공으로 끝난 run 의 메시지(같은 사람의 연속 메시지
+  // 「ㅎㅇ」)에는 칩이 없다(#5382로 「답함 ✓」이 사라졌다: 그 자리는 예전에 거터 아이콘 칩이었다).
   const kinds = (await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => `${e.getAttribute("data-kind")}:${e.getAttribute("data-variant") ?? "word"}`))).sort();
-  check(`${tag} 칩 셋: 실패(머리)·작업 중(머리)·답함(거터 아이콘)`, JSON.stringify(kinds) === JSON.stringify(["answered:mark", "failed:word", "working:word"]), JSON.stringify(kinds));
+  check(`${tag} 칩 둘: 실패(머리)·작업 중(머리) — 성공한 run 의 메시지에는 칩이 없다`, JSON.stringify(kinds) === JSON.stringify(["failed:word", "working:word"]), JSON.stringify(kinds));
+  const okRow = page.locator(`[data-testid="timeline-message"][data-message-id="${T(2)}"]`);
+  check(`${tag} 성공한 run 의 메시지(「ㅎㅇ」)는 서 있고 칩이 없다`, (await okRow.count()) === 1 && (await okRow.getByTestId("trigger-chip").count()) === 0, `row=${await okRow.count()} chip=${await okRow.getByTestId("trigger-chip").count()}`);
   await page.screenshot({ path: shot("1-responding") });
 
   // c. 답이 오면 사라진다
@@ -321,6 +323,9 @@ async function scene(browser, origin, scheme, reduced) {
   check(`${tag} run이 끝나면 줄이 사라진다`, (await page.getByTestId("composer-working-text").count()) === 0);
   check(`${tag} 줄이 사라져도 레일 칸은 남는다(목록이 움직이지 않는다)`, (await page.getByTestId("composer-working").getAttribute("data-state")) === "idle");
   check(`${tag} 끝난 뒤에도 성공 영수증은 없다`, (await page.locator('[data-run-id="' + RUN_C + '"]').count()) === 0);
+  // 작업 중이던 run 이 성공으로 끝나면 그 칩이 사라지고 「답함」으로 바뀌지도 않는다(#5382): 남는 칩은 실패 하나뿐이다.
+  const kindsAfter = (await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")))).sort();
+  check(`${tag} 성공으로 끝나면 작업 중 칩이 사라지고 남는 칩은 실패 하나뿐이다`, JSON.stringify(kindsAfter) === JSON.stringify(["failed"]), JSON.stringify(kindsAfter));
   await page.screenshot({ path: shot("2-after-answer") });
   await context.close();
 }
