@@ -18,7 +18,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {Image, StyleSheet} from 'react-native';
+import {Image, StyleSheet, type StyleProp, type ViewStyle} from 'react-native';
 
 import {SHEET_ICONS} from '../src/design/icons';
 import {TOUCH_TARGET} from '../src/design/tokens';
@@ -227,7 +227,10 @@ describe('요약 카드 — 한 줄 띠 (#5436)', () => {
     // 뒷면은 대화 바닥 색 한 장이다 - 투명하면 카드 둘레 틈·모서리로 밑을 지나는 목록 글자가 비친다(검수 M2).
     expect(StyleSheet.flatten(back.props.style).backgroundColor).toMatch(/^#[0-9a-f]{6}$/i);
     const card = within(back).getByTestId('missed-digest-card');
-    expect(StyleSheet.flatten(card.props.style).minHeight).toBe(TOUCH_TARGET);
+    // 카드 안은 한 줄(옛 카드의 `head` 줄: 최소 높이 = 눌림 크기)뿐이고 아래 여백이 없다.
+    expect(card.children).toHaveLength(1);
+    expect(StyleSheet.flatten((card.children[0] as {props: {style: StyleProp<ViewStyle>}}).props.style).minHeight).toBe(TOUCH_TARGET);
+    expect(StyleSheet.flatten(card.props.style).paddingBottom).toBe(0);
     // 뒷면 아래끝 이음매: 흐름(Maestro)이 「목록 첫 내용 ≥ 띠 아래끝」을 이것 `below` 로 잰다.
     expect(StyleSheet.flatten(within(back).getByTestId('missed-digest-band-end').props.style)).toMatchObject({position: 'absolute', bottom: 0, height: 1});
     fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
