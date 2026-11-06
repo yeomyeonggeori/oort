@@ -1048,11 +1048,11 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | 역할 | `expression_set` | `expression_set_slot` | `expression_set_image` |
 |---|---|---|---|
 | `momo_worker` | SELECT·INSERT·UPDATE | SELECT·INSERT·UPDATE | SELECT·INSERT·DELETE |
-| `momo_app` | SELECT·UPDATE | SELECT | SELECT·DELETE |
+| `momo_app` | SELECT·UPDATE | SELECT·UPDATE (끝 길의 `scene` NULL만) | SELECT·DELETE |
 | `momo_notifier` | **열 단위 `SELECT (workspace_id, state, expires_at)`만** | 없음 | 없음 |
 | `momo_relay`·`momo_platform_admin` | 없음 | 없음 | 없음 |
 
-`momo_worker`는 `begin`·`put_*`·`abandon`·제안 tx에, `momo_app`은 결정·만료 회수(머리 상태를 옮기고 렌디션을 지움)에 쓴다. 머리·칸에는 DELETE가 어느 역할에도 없다(행은 기록으로 남고 끝 상태만 바뀐다. 워크스페이스 삭제의 CASCADE는 표 소유자 권한이다). 픽셀 UPDATE는 어느 역할에도 없다. 검증은 열 단위 권한 때문에 표 단위(`has_table_privilege`)와 열 단위(`has_column_privilege`)를 모두 쓴다.
+`momo_worker`는 `begin`·`put_*`·`abandon`·제안 tx에, `momo_app`은 결정·만료 회수(머리 상태를 옮기고 렌디션을 지우며, 칸의 `scene`을 NULL로 비운다: L8-3)에 쓴다. 머리·칸에는 DELETE가 어느 역할에도 없다(행은 기록으로 남고 끝 상태만 바뀐다. 워크스페이스 삭제의 CASCADE는 표 소유자 권한이다). 픽셀 UPDATE는 어느 역할에도 없다. 검증은 열 단위 권한 때문에 표 단위(`has_table_privilege`)와 열 단위(`has_column_privilege`)를 모두 쓴다.
 
 **L10.2 표 셋.**
 
