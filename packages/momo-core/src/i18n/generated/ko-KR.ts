@@ -2991,7 +2991,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 이모티콘이 없어요. 이모티콘 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 우리 팀 탭의 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3111,7 +3111,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "이모티콘"
+      "value": "우리 팀"
     }
   ],
   "expressions.sheet.tabGif": [

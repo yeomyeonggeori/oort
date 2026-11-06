@@ -299,9 +299,10 @@ describe('표현 시트', () => {
       expect(tab.props.accessibilityRole).toBe('tab');
       return [id, tab.props.accessibilityLabel, tab.props.accessibilityState.selected];
     });
-    // 「이모티콘」 한 이름(owner 11-05): 앞 판의 「이모지」·「팀 이모지」 탭은 없다. 표준 그림 문자는 「기본」이다.
+    // 첫 탭은 「우리 팀」(owner 11-06 #5427): 창 제목이 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다.
+    // 앞 판의 「이모지」·「팀 이모지」 탭은 없고, 표준 그림 문자는 「기본」이다.
     expect(labels).toEqual([
-      ['emoticon', '이모티콘', false],
+      ['emoticon', '우리 팀', false],
       ['emoji', '기본', true], // 처음 열 때: 옛 고르개가 열던 표준 목록
       ['gif', 'GIF', false],
     ]);
@@ -579,12 +580,14 @@ describe('표현 시트', () => {
     expect(cellNames()).toEqual(before);
   });
 
-  // owner 11-05 「이모티콘으로 통일」: 시트의 어느 탭·어느 상태에도 「이모지」·「팀 이모지」·「스티커」·「우리 팀」이 글자로도 낭독 이름으로도 없다.
-  it('세 탭 어디에도(목록·빈 안내·「추가하기」 메뉴) 「이모지」·「팀 이모지」·「스티커」·「우리 팀」이 없다 — 보이는 글자와 낭독 이름 모두', async () => {
+  // owner 11-05 「이모티콘으로 통일」: 시트의 어느 탭·어느 상태에도 「이모지」·「팀 이모지」·「스티커」가 글자로도 낭독 이름으로도 없다.
+  // 「우리 팀」은 owner 11-06(#5427)부터 첫 탭의 이름이다: 탭 줄 밖(목록·빈 안내·메뉴)에는 머리글로도 안내로도 겹쳐 서지 않는다.
+  it('세 탭 어디에도(목록·빈 안내·「추가하기」 메뉴) 「이모지」·「팀 이모지」·「스티커」가 없고, 「우리 팀」은 탭 줄의 첫 탭 이름으로만 선다 — 보이는 글자와 낭독 이름 모두', async () => {
     const {store} = await loaded();
     openSheet(store);
     await screen.findByTestId('emoji-pick-🎉');
-    const copy = () => {
+    // `skip`: 이 testID 의 줄기는 건너뛴다(탭 줄 밖의 글만 볼 때).
+    const copy = (skip?: string) => {
       const seen: string[] = [];
       const walk = (node: unknown): void => {
         if (typeof node === 'string') seen.push(node);
@@ -594,6 +597,7 @@ describe('표현 시트', () => {
             props?: Record<string, unknown>;
             children?: unknown;
           };
+          if (skip !== undefined && props?.testID === skip) return;
           for (const key of ['accessibilityLabel', 'accessibilityHint', 'placeholder'])
             if (typeof props?.[key] === 'string') seen.push(props[key] as string);
           walk(children);
@@ -602,12 +606,17 @@ describe('표현 시트', () => {
       walk(screen.toJSON());
       return seen.join('\n');
     };
-    const RETIRED = /이모지|스티커|우리 팀/;
+    const RETIRED = /이모지|스티커/;
+    const TAB_ROW = 'expression-sheet-tabs';
+    // 건너뛰기가 헛돌지 않는다는 증거: 탭 줄까지 읽으면 「우리 팀」이 보이고(첫 탭의 글자·낭독 이름), 탭 줄을 건너뛰면 사라진다.
+    expect(copy().match(/우리 팀/g)).not.toBeNull();
+    expect(copy(TAB_ROW).match(/우리 팀/)).toBeNull();
     const sweep = (where: string) =>
-      expect({where, retired: copy().match(RETIRED)?.[0] ?? null}).toEqual({
+      expect({
         where,
-        retired: null,
-      });
+        retired: copy().match(RETIRED)?.[0] ?? null,
+        teamOutsideTabs: copy(TAB_ROW).match(/우리 팀/)?.[0] ?? null,
+      }).toEqual({where, retired: null, teamOutsideTabs: null});
     for (const tab of ['emoji', 'emoticon', 'gif', 'emoji'] as const) {
       pressTab(tab);
       if (tab === 'emoticon')
@@ -767,7 +776,7 @@ describe('입력창의 표현 단추', () => {
           screen.getByTestId(`expression-sheet-tab-${id}`).props
             .accessibilityLabel,
       ),
-    ).toEqual(['Emoticons', 'Emoji', 'GIF']);
+    ).toEqual(['Team', 'Emoji', 'GIF']);
     expect(
       screen.getByTestId('expression-sheet-search').props.accessibilityLabel,
     ).toBe('Search emoji');

@@ -13,8 +13,9 @@ import { EmojiPickerDialog } from "./EmojiPickerDialog";
 
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
-// #5330, owner 2026-11-05: 사용자에게 보이는 이름은 「이모티콘」 하나다. 웹 고르개도 폰 시트와 같은 세 탭(이모티콘 · 기본 · GIF)이고 「이모지」·「팀 이모지」·「우리 팀」이
-// 화면에 없다. 탭 이름은 사전의 것이고(폰 시트와 같은 키), 기대값은 사전에서 읽지 않고 글자로 못 박는다.
+// #5330, owner 2026-11-05: 사용자에게 보이는 이름은 「이모티콘」 하나다. 웹 고르개도 폰 시트와 같은 세 탭이고 「이모지」·「팀 이모지」가 화면에 없다.
+// #5427, owner 2026-11-06: 창 제목이 이미 「이모티콘」이라 첫 탭은 어디서 온 그림인지만 말한다 — 탭은 우리 팀 · 기본 · GIF이고, 「우리 팀」은 그 탭의 이름으로만 선다(패널의 머리글로는 없다).
+// 탭 이름은 사전의 것이고(폰 시트와 같은 키), 기대값은 사전에서 읽지 않고 글자로 못 박는다.
 
 async function appLocale(language: "ko-KR" | "en-US"): Promise<AppLocale> {
   const context = resolveLocaleContext(language, { languages: [language], timeZone: "Asia/Seoul" });
@@ -50,8 +51,8 @@ const names = () => screen.queryAllByRole("button", { name: /메시지에 넣기
 
 describe("the web picker has the phone sheet's three tabs and one name (#5330)", () => {
   const WORDS = {
-    "ko-KR": { group: "표현 종류", tabs: ["이모티콘", "기본", "GIF"] },
-    "en-US": { group: "Kinds", tabs: ["Emoticons", "Emoji", "GIF"] },
+    "ko-KR": { group: "표현 종류", tabs: ["우리 팀", "기본", "GIF"] },
+    "en-US": { group: "Kinds", tabs: ["Team", "Emoji", "GIF"] },
   } as const;
   it.each([["ko-KR"], ["en-US"]] as const)("%s: the tabs stand in the order emoticon · basic · GIF, open on the basic table, and each opens its own panel", async (language) => {
     await open(language);
@@ -76,7 +77,7 @@ describe("the web picker has the phone sheet's three tabs and one name (#5330)",
     expect(await screen.findByLabelText("이모티콘 검색")).toBeTruthy();
     expect(screen.queryByTestId("team-expressions")).toBeNull();
   });
-  it("ko-KR: no 이모지 · 팀 이모지 on the open picker, on any tab (visible words and accessible names), and no 「우리 팀」 heading", async () => {
+  it("ko-KR: no 이모지 · 팀 이모지 on the open picker, on any tab (visible words and accessible names), and 「우리 팀」 is the first tab's name only — the panel has no heading of its own", async () => {
     await open("ko-KR");
     const picker = await screen.findByTestId("picker");
     const names = () => `${Array.from(picker.querySelectorAll("[aria-label],[title],[placeholder]")).map((node) => `${node.getAttribute("aria-label")} ${node.getAttribute("title")} ${node.getAttribute("placeholder")}`).join(" ")} ${picker.getAttribute("aria-label")}`;
@@ -84,9 +85,12 @@ describe("the web picker has the phone sheet's three tabs and one name (#5330)",
     for (const tab of [tabs[1], tabs[0], tabs[2], tabs[1]]) {
       fireEvent.click(tab);
       await waitFor(() => expect(picker.querySelector("[data-testid='team-expressions'], [aria-label='이모티콘 검색']")).not.toBeNull());
-      expect(picker.textContent).not.toMatch(/이모지|우리 팀/);
+      expect(picker.textContent).not.toMatch(/이모지/);
       expect(names()).not.toMatch(/이모지/);
+      // 「우리 팀」 is said once, by the first tab; the panel under it does not say it again (no heading, no empty-state line).
+      expect(picker.textContent?.split("우리 팀")).toHaveLength(2);
     }
+    expect(tabs[0].textContent).toBe("우리 팀");
     expect(picker.getAttribute("aria-label")).toBe("이모티콘 넣기");
   });
   it("the status picker has no tabs: it chooses a standard glyph only (no library there)", async () => {
