@@ -1792,32 +1792,65 @@ pub fn validate_pure(
 // the fallback (D5)
 // ---------------------------------------------------------------------------
 
-/// Active external (hosted) agents a person could hand the request to.
+/// The agents a person could hand the request to with one click — the 「맡기기」 buttons (D5).
+/// Pressing one posts an ordinary @mention by the requester, so every candidate is an agent that
+/// mention would reach. Two kinds, at most five in all:
+///
+/// * an **active hosted agent** (a live `hosted_agent_connection`) — as before;
+/// * the workspace's **team Hermes** (ADR-0201 증보 v4 P14-S5, the F1 repair): an agent pinned to
+///   the operator's own env link (`agent_provider_pin.kind = 'operator_env'`). Connecting it
+///   writes no hosted connection and no channel membership (F2), so the first kind never listed it.
+///   This path is a person's click — it has nothing to do with the helper's own `ask_hermes` door.
+///
+/// The team Hermes is a candidate only when **all four** hold; one false is no candidate:
+/// 1. it has no connector owner (`agent.connector_owner_human_id IS NULL`) — an agent that runs one
+///    person's connected apps answers only that person (ADR-0113 증보 2 E3);
+/// 2. its call scope is open to `requester_member_id` — a `workspace` agent is open to everyone, an
+///    `owner_only` one only to its owner. That is `owner_only_gate`'s identity rule and no more
+///    (its two instance switches are the mention path's to judge); an unknown owner opens nothing;
+/// 3. it is not paused (`agent_profile.paused`);
+/// 4. it is an active member of `channel_id` — a mention reaches an agent only in a room it is in.
+///
+/// 3 and 4 hold for both kinds, so they are the shared predicates below. A pinned agent is judged
+/// by the four alone: a stray hosted connection on it cannot get it past 1 and 2.
 pub async fn delegation_candidates_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     team_ai_member_id: Uuid,
     channel_id: Uuid,
+    requester_member_id: Uuid,
 ) -> Result<Vec<(Uuid, String, String)>, DbError> {
     let rows = sqlx::query(
         "SELECT m.id, m.handle, m.display_name \
            FROM member m \
+           JOIN agent a \
+             ON a.workspace_id = m.workspace_id AND a.member_id = m.id \
            JOIN agent_profile ap \
              ON ap.workspace_id = m.workspace_id AND ap.agent_member_id = m.id \
+           LEFT JOIN agent_provider_pin pin \
+             ON pin.workspace_id = m.workspace_id AND pin.agent_member_id = m.id \
+            AND pin.kind = 'operator_env' \
           WHERE m.workspace_id = $1 AND m.kind = 'agent' AND m.status = 'active' \
             AND m.deleted_at IS NULL AND m.id <> $2 AND m.handle IS NOT NULL \
             AND NOT ap.paused \
             AND EXISTS (SELECT 1 FROM membership cm \
                          WHERE cm.workspace_id = m.workspace_id AND cm.channel_id = $3 \
                            AND cm.member_id = m.id AND cm.left_at IS NULL) \
-            AND EXISTS (SELECT 1 FROM hosted_agent_connection h \
-                         WHERE h.workspace_id = m.workspace_id AND h.agent_member_id = m.id \
-                           AND h.status = 'active') \
+            AND ((pin.agent_member_id IS NOT NULL \
+                  AND a.connector_owner_human_id IS NULL \
+                  AND (a.invocation_scope = 'workspace' \
+                       OR (a.invocation_scope = 'owner_only' AND a.owner_human_id = $4))) \
+                 OR (pin.agent_member_id IS NULL \
+                     AND EXISTS (SELECT 1 FROM hosted_agent_connection h \
+                                  WHERE h.workspace_id = m.workspace_id \
+                                    AND h.agent_member_id = m.id \
+                                    AND h.status = 'active'))) \
           ORDER BY lower(m.display_name) LIMIT 5",
     )
     .bind(workspace_id)
     .bind(team_ai_member_id)
     .bind(channel_id)
+    .bind(requester_member_id)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows
