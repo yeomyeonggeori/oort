@@ -8,7 +8,7 @@
 > 증보 3: §9 (2026-11-01, #4992, **Accepted** 2026-11-02 planner) — 사진 초안 되찾기·돈이 든 그림 지키기: 내 사진 초안 목록 읽기 하나, 호출 뒤 디코더 바쁨 재시도, 격리 디코더 `--prepare` 출력 모양, 키 여는 문 시험. H9~H12의 결정은 바꾸지 않는다.
 > 증보 4: §10 (2026-11-02, #4961, **Accepted** 2026-11-02 planner) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
 > 증보 5: §11 (2026-11-02, #5133, **Accepted** 2026-11-02 planner) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
-> 증보 6: §12 (2026-11-06, #5442, **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**) — 이모티콘 세트 제안과 여러 개 승인: 팀 AI(oort 도우미)가 사람이 `@oort`로 부탁한 job 위에서만 세트(최대 40칸, 기본 정지 8+GIF 2)를 제안한다. 그림은 제안 본문이 아니라 서버 임시 보관(`expression_set`)에 장면마다 쌓이고 제안은 `setId`만 가리킨다(본문의 그림 바이트 0, Agent Port·MCP 한도 무변경). 사람이 세트마다 한 번 승인하면 고른 항목만 한 tx에서 항목별로 등록한다(같은 이름·1,000 초과는 건너뜀, 어긋난 핀은 전체 거절). 모델이 거절한 장면은 회색 칸이고 승인 대상이 아니며 다시 시도하지 않는다. §7의 「세트(팩)는 열지 않는다」를 이 방식 하나로 연다. D1~D6·부록 A·B(pinned 블록)·`expression.create`는 바뀌지 않는다. 새 경로 0, migration 번호는 planner가 S1에서 배정한다.
+> 증보 6: §12 (2026-11-06, #5442, **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**) — 이모티콘 세트 제안과 여러 개 승인: 팀 AI(oort 도우미)가 사람이 `@oort`로 부탁한 job 위에서만 세트(최대 40칸, 기본 정지 8+GIF 2)를 제안한다. 그림은 제안 본문이 아니라 서버 임시 보관(`expression_set`)에 장면마다 쌓이고 제안은 `setId`만 가리킨다(본문의 그림 바이트 0, Agent Port·MCP 한도 무변경). 사람이 세트마다 한 번 승인하면 고른 항목만 한 tx에서 항목별로 등록한다(같은 이름·1,000 초과는 건너뜀, 어긋난 핀은 전체 거절). 모델이 거절한 장면은 회색 칸이고 승인 대상이 아니며 다시 시도하지 않는다. §7의 「세트(팩)는 열지 않는다」를 이 방식 하나로 연다. D1~D6·부록 A·B(pinned 블록)·`expression.create`는 바뀌지 않는다. 새 경로 0, migration 번호는 planner가 S1a에서 배정한다.
 > 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)가 §8 H9.2가 팀 AI 도우미의 같은 능력 사용(ADR-0201 증보 v3 B6의 「그림」)을 이 증보 위에서 따로 정한다고 한 그 「따로」다. 도우미의 그림은 Hermes 도구(`ask_hermes`)로 하고, 이모티콘 사진 길(H9의 팀 이미지 키)은 그대로다. H9~H12의 결정은 바꾸지 않았다.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301), 증보 6은 여기에 [ADR-0201 증보 v4](0201-team-ai-fast-path-for-simple-workspace-requests.md)(#5342)와 [ADR-0151 증보 3](0151-attachments-v0-drive-contract-port.md)을 더 읽는다.
 
@@ -802,7 +802,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 ## 12. 증보 2026-11-06 — 이모티콘 세트 제안과 여러 개 승인 (#5442)
 
 > Status: **Proposed — 등급 2 독립 보안 검수 Blocker 0·High 0 뒤 planner가 Accepted**(owner 결정 인용). ADR-0100: 공개 API(행동 id 하나, 결정 요청 필드 하나, 카드 props 키 하나), 보안 경계(팀 AI가 사람의 승인 앞에서 그림을 서버에 쌓는 면), DB 계약(표 둘, CHECK 하나)이 바뀌므로 이 증보가 Accepted가 되기 전에는 서버·웹·폰·도우미 도구 어느 칸도 코드를 머지하지 않는다.
-> 근거: owner 2026-11-06 18:22 「추천대로 하고 가능한 빨리 진행해줘.」(planner의 흐름 페이지 결정 1~6, 비공개 기록)와 그 앞의 질문 「oort가 내부적으로 서브에이전트로 활용하면 안돼 ?」, 이슈 [#5442](https://github.com/yeomyeonggeori/oort/issues/5442)의 「정해진 것」 여섯이다. 이 절은 그 여섯을 다시 묻거나 넓히지 않는다.
+> 근거: owner 2026-11-06 18:22 「추천대로 하고 가능한 빨리 진행해줘.」(planner의 흐름 페이지 결정 1~6, 비공개 기록)와 그 앞의 owner 질문(oort 도우미를 내부 하위 에이전트처럼 쓰면 안 되느냐는 것), 이슈 [#5442](https://github.com/yeomyeonggeori/oort/issues/5442)의 「정해진 것」 여섯이다. 이 절은 그 여섯을 다시 묻거나 넓히지 않는다.
 > 범위: 세트 제안과 여러 개 승인의 계약, 그리고 서버·웹·폰·도우미 도구 네 칸의 인계. 코드·migration·정책 파일을 바꾸지 않았다. 같은 PR의 코어 계약(`packages/momo-core/src/features/expressions/`의 [set.ts](../../packages/momo-core/src/features/expressions/set.ts)·[set.schema.json](../../packages/momo-core/src/features/expressions/set.schema.json)·[set.vectors.json](../../packages/momo-core/src/features/expressions/set.vectors.json)·[setFixtures.ts](../../packages/momo-core/src/features/expressions/setFixtures.ts)·[set.test.ts](../../packages/momo-core/src/features/expressions/set.test.ts))는 이 절의 실행 가능한 형태이고, 글과 코드가 다르면 글을 고친다.
 > 표기는 앞 증보와 같다: [V] 코드·문서를 직접 읽거나 실측해서 확인 · **[추정]** 이 절이 정한 값·해석 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행하지 않음. 이 절의 어느 것도 실제 Hermes·실 PG·화면·실기기에서 돌려 보지 않았다.
 > **바뀌지 않는 것**: D1~D6(메시지 모델, 이름 영구 예약, 이미지 규격, 얼굴·권리·신고), 부록 A의 REST 경로 전부(새 경로 0), 부록 B의 pinned 블록과 `contracts.schema.json`, `expression.create`의 모양과 6 MiB 예산(Agent Port는 이 절로 바뀌지 않는다), `expression-failure-copy.json` 골든, G3의 조립 계약, H9~H12·I·J·K.
@@ -820,28 +820,38 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | F7 | ADR-0201 v4: `ask_hermes`는 글 요청 한 문장을 보내 **그림 한 장**을 받고(P1·P3·P6, R10), 요청당 위임 1회(G10), 일일 위임 기본 30(P7), 한 위임은 작업 걸음으로 돈다(P4). 그림을 대화에 올리는 길(#5371)은 그림을 도우미 **답**의 첨부로 묶는다. 이 길들은 아직 구현 전이다 | ADR-0201 증보 v4 P1·P4·P6·P7, 이슈 #5369~#5372 |
 | F8 | 승인 대기 기본 창은 3,600초다 | `momo-agent/src/approval.rs` `DEFAULT_TTL_SECONDS` |
 | F9 | **실측(owner 로컬 시료 2026-11-06, 저장소 밖, 그림·이름은 옮기지 않는다)**: 캐릭터 다섯 × (정지 8 + GIF 2). 정지 40장을 시도해 32장이 만들어졌고 8장이 거절됐다(한 캐릭터의 여덟 장면이 전부, 출력 단계 안전 필터, 거절마다 오류 줄 한 개이고 스스로 다시 시도한 흔적 0). 만든 정지 32장은 512×512 투명 PNG, **155,189~285,855 B**(평균 213,447, 합 6,830,291). GIF 8개는 448×448, **332,741~948,286 B**(평균 615,975, 합 4,927,801), 모두 1 MiB 안이다. 캐릭터 하나의 세트(정지 8+GIF 2)는 원본 합 **2.28~3.36 MB**. 만든 장은 한 장에 **42~91초**(평균 57초), 거절된 장은 평균 45초, 40번을 한 번에 하나씩 돌려 약 54분. 같은 정지 그림을 128 px로 줄인 PNG는 **13~29 KB**(평균 20 KB, `sips` 추정 — small·thumb의 크기 근거). GIF는 정지 그림에 프로그램 움직임을 입힌 것이고, 바탕 정지 그림이 없는 GIF 2개는 만들지 못했다 | `claudedocs/owner-pages/2026-11-06-characters/`(planner 로컬 기록) |
+| F10 | 팀 AI 문의 제안 순서와 한도: 허용 목록(`is_team_ai_action`) → 문(`proposable_action_by_id(TeamAi)`) → 묶음(`action_allowed`) → 읽은 뒤 민감 거절 → 요청자(`suggestion_requester_in_tx`) → 대기 한도(요청자별 `MAX_PENDING_PER_REQUESTER` 3, 워크스페이스별 `MAX_PENDING_PER_WORKSPACE` 30, `via_ai.source='team_ai'`인 대기 카드를 센다) → 인자 → 해석 → 같은 대상 대기 → `requester_could_approve_in_tx` → run park → 승인·카드. `requester_could_approve_in_tx`의 `ExpressionAdder` 갈래는 「팀 AI 행동이 아니다」라는 이유로 `false`로 고정돼 있다. 승인 대기 창은 워커 설정 `approval_ttl_seconds`(기본 `DEFAULT_TTL_SECONDS` 3,600초, F8)다 | `momo-workspace-actions/src/team_ai.rs`, `bins/momo-agent-worker/src/team_ai.rs` |
+| F11 | **허용 목록과 광고는 다른 것이다.** 카드가 `via_ai.source="team_ai"` 표시를 달면 결정 라우트의 `card_provenance`가 그 행동이 허용 목록(`TEAM_AI_ACTION_IDS`)에 있는지 보고(없으면 거절), `TeamAiOnly` 행동의 카드에 표시가 없으면 거절한다. 모델에게 보이는 `actionId` 열거는 `advertised_action_ids` = 허용 목록 − 꺼진 묶음의 id − (요청이 읽었으면) 민감 목록이고, 어느 묶음도 소유하지 않은 허용 id는 늘 광고된다 | `bins/momo-server/src/routes/approvals.rs`(`card_provenance`), `momo-agent/src/team_ai_roles.rs`(`advertised_action_ids`) |
+| F12 | 위임 뒤의 합치는 모델 호출에는 도구가 없다(제안·읽기·검색 모두). `ask_hermes`가 든 응답은 같은 응답의 다른 도구 호출을 실행하지 않는다. 그래서 모델이 Hermes의 답을 읽은 **뒤에** 카드를 제안할 길이 없다 | ADR-0201 증보 v4 P4-4·P4-7 |
+| F13 | 팀 AI 문에는 「제안 tx 밖에서 준비한 그림을 같은 tx에서 승인에 묶는」 선례가 있다: 아바타(`stage_avatar_image_in_tx` → `bind_staged_image_to_approval_in_tx`, 오래된 것은 `purge_stale_staged_avatar_images_in_tx`가 지운다) | `momo-workspace-actions/src/team_ai.rs`, `momo-messaging` |
+| F14 | `expression.create`에 키가 걸려 있어 세트가 같이 고쳐야 하는 자리: `opens_in_app`(`actions.rs`), 레지스트리 행과 그 고정 시험들(`TEAM_AI_ACTION_IDS` 길이, `helper_only` 목록, 열림 표), run 취소 때 초안 회수(`approval.rs`), 거절·만료 때 초안 회수와 `expressionChoice` 판정식(`routes/approvals.rs`), 인자 해석기(`action_resolve.rs`) | 각 파일 |
 
 ### L1. 결정 요약
 
 | 결정 | 고른 길 | 버린 길(이유는 해당 절) |
 |---|---|---|
-| L2 누가·어느 문으로 | 팀 AI(oort 도우미)의 `workspace_action_propose`. 새 행동 `expression.set.create`, `Proposers::TeamAiOnly`. **사람이 `@oort`로 부탁한 run 위에서만** | `INITIATIVE_ACTION_IDS`에 더하기, Agent Port 열기, `expression.create` 후보 수 늘리기 |
+| L2 누가·어느 문으로 | 팀 AI(oort 도우미)의 승인 카드 하나. 새 행동 `expression.set.create`, `Proposers::TeamAiOnly`, **허용 목록에는 오르고 모델에게는 광고하지 않는다**(계획은 읽기 전에 정해 저장하고 카드는 서버 코드가 올린다). **사람이 `@oort`로 부탁한 run 위에서만** | `INITIATIVE_ACTION_IDS`에 더하기, Agent Port 열기, 모델의 도구 호출로 제안, `expression.create` 후보 수 늘리기 |
 | L3 그림을 어떻게 넘기나 | 장면이 만들어지는 대로 **서버 임시 보관**(`expression_set`)에 쌓고 제안은 `setId`만 가리킨다. **제안 본문의 그림 바이트 0** | 본문에 바이트, 대화 첨부(#5371)를 운반체로, 장면마다 제안, 워커 메모리 |
 | L4 예산 | **40칸**(회색 포함) · 칸당 1.5 MiB · 세트당 **24 MiB** · 그림 입력 5 MiB · 보관 2시간 · 승인 대기 1시간 | 40 × D3 상한(60 MiB), 칸 수만 두기 |
 | L5·L6 승인 | 결정 요청에 `expressionChoices`(선택 목록 1~40개). **한 tx에서 항목별 등록**, 같은 이름·1,000개 초과는 **건너뜀**, 어긋난 핀은 **전체 거절** | 전부-아니면-전무, 항목마다 승인, 한 개만 고르기 |
 | L7 회색 칸 | 거절·실패·미시도·바탕 없음 넷, 바이트도 id도 없는 설명자. 선택·교체 업로드 불가. **한 칸은 한 번만 쓰이고 거절은 영구히 닫힌다** | 직접 올리기 허용, 자동 재시도, 표현 바꾸기 |
-| L8 한도 | 미결정 세트 에이전트당 1(일반 3과 별개 계수), 보관 2시간, 승인 대기 1시간, 취소는 기존 경로 | 일반 3칸에 합산 |
+| L8 한도 | 미결정 세트 에이전트당 1(일반 대기 요청자별 3·워크스페이스별 30에는 세지 않음), 보관 2시간, 승인 대기는 워커 설정(기본 1시간), 취소는 기존 경로 | 일반 3칸에 합산 |
 | L9 이름 | 세트 앞머리 `prefix` + `_`, 공통 태그는 서버가 합쳐 카드에 보인다 | 이름 규칙 없음 |
 
-### L2. 제안하는 주체와 문 — 사람이 부탁한 job 위에서만
+### L2. 제안하는 주체와 문 — 사람이 부탁한 job 위에서만, 카드는 서버 코드가 올린다
 
-**L2.1 문.** 세트는 팀 AI의 `workspace_action_propose`로만 올라온다. 레지스트리에 `expression.set.create`를 `proposers: TeamAiOnly`·`initiative: false`·`required_role: ExpressionAdder`·`risk: approval`로 더한다(`ACTION_EXPRESSION_CREATE`와 같은 역할 술어 하나, X8-3). 그러면 F1에 따라 (a) Agent Port의 `oort_action_propose`는 이 id를 「알 수 없는 id」와 똑같이 거절하고, (b) MCP의 `WORKSPACE_ACTION_IDS`(13개)와 `INITIATIVE_ACTION_IDS`(4개)는 **길이가 그대로**이며, (c) OpenAPI `WorkspaceActionId`에는 팀 AI 전용 행으로서 실린다. 외부 에이전트·`oort` CLI·사람 개발자 토큰·사람 세션이 이 행동을 올리거나 등록하는 길은 없다(owner 결정 1). 터미널의 에이전트 모드(#4616)는 이 절과 무관하다(owner 결정 4).
+**L2.1 문.** 세트는 팀 AI(oort 도우미)의 문으로만 올라온다. 레지스트리에 `expression.set.create`를 `proposers: TeamAiOnly`·`initiative: false`·`required_role: ExpressionAdder`·`risk: approval`로 더한다(`ACTION_EXPRESSION_CREATE`와 같은 역할 술어 하나, X8-3). 그러면 F1에 따라 (a) Agent Port의 `oort_action_propose`는 이 id를 「알 수 없는 id」와 똑같이 거절하고, (b) MCP의 `WORKSPACE_ACTION_IDS`(13개)와 `INITIATIVE_ACTION_IDS`(4개)는 **길이가 그대로**이며, (c) OpenAPI `WorkspaceActionId`에는 팀 AI 전용 행으로서 실린다. 외부 에이전트·`oort` CLI·사람 개발자 토큰·사람 세션이 이 행동을 올리거나 등록하는 길은 없다(owner 결정 1). 터미널의 에이전트 모드(#4616)는 이 절과 무관하다(owner 결정 4).
 
-**L2.2 사람이 부탁한 run.** 제안 tx는 `expression.create`의 호스팅 문과 같은 순서로 연다: 에이전트 잠금 → `lock_gateway_run_in_tx`(`running`·`failed`이고 에이전트·채널이 같음) → `requester_of_run_in_tx`가 **살아 있는 사람 요청자**를 돌려줌 → 해석(사람·정책) → 미결정 세트 계수(L8) → run을 park → 승인·초안·카드. 요청자가 없는 run(`Work` 트리거, 환영, 먼저 제안으로 태어난 run)은 거절하고 행을 하나도 남기지 않는다. 먼저 제안의 닫힌 4종(U-b-2)을 늘리지 않는 것이 「누가 시키지 않은 세트 제안은 열지 않는다」의 구조다. 보관의 쓰기(L3)도 같은 증명을 쓸 때마다 다시 한다.
+**L2.2 허용 목록에는 오르고, 모델에게는 광고하지 않는다.** (F10·F11) 팀 AI가 올린 카드는 `via_ai.source="team_ai"` 표시를 달고, 결정 라우트의 `card_provenance`는 그 표시가 붙은 카드의 행동이 허용 목록에 없으면 거절한다. 허용 목록에 오르지 않은 채로 두면 세트 카드는 한 번 서고 나서 **승인 자체가 거절된다.** 그래서 이 id는 **허용 목록(`TEAM_AI_ACTION_IDS`)에 오른다**(14 → 15). 그런데 허용 목록에 오른 id는 `advertised_action_ids`가 묶음·오염 규칙만 거쳐 `workspace_action_propose`의 `actionId` 열거에 싣는다. 세트는 모델의 도구 호출이 올리는 카드가 아니므로(L2.4) **닫힌 목록 `SERVER_RAISED_ACTION_IDS`(이름은 제안)를 두고 `advertised_action_ids`·시스템 지시문·제안 검사가 모두 그 목록을 뺀다.** 모델이 이 id를 불러도 광고하지 않은 도구를 부른 것과 같이 거절한다(`not_offered`). 이렇게 하면 S1b가 착륙해도 도우미는 이 행동을 보지 못해 **사용자 영향이 0**이고, 별도의 「광고 끔」 상수가 필요 없다(ADR-0201 P6의 `ATTACHMENT_WRITE_PATH_READY`와 같은 효과를 구조로 얻는다). 드리프트 시험은 모델에게 가는 열거에 서버 전용 id가 없음을 잰다.
 
-**L2.3 역할 묶음.** 이 행동은 ADR-0201 v4 P10의 묶음 `hermes`가 소유한다: 꺼져 있으면 광고되지 않고, 제안과 승인 실행에서 거절된다(F6). 묶음은 #5369가 만든다. 그 전에는 이 id를 `TEAM_AI_ACTION_IDS`에 **올리지 않는다**: 서버 칸은 레지스트리 항목과 도메인 함수만 만들고, 도우미가 이 행동을 보게 하는 일(광고)은 도우미 세트 도구 칸의 몫이다. 이렇게 하면 서버 칸이 착륙해도 사용자 영향은 0이다.
+**L2.3 묶음.** ADR-0201 v4 P10의 묶음 `hermes`가 이 id를 소유한다(묶음은 #5369가 만든다). 묶음이 꺼지면 결정 때 거절되어(B13-I5, `team_ai_bundle_allows_in_tx`) 이미 올라온 세트 카드도 실행되지 않는다. 묶음이 생기기 전에는 소유자가 없어 묶음 벽은 없고 광고 벽(L2.2)만 있다.
 
-**L2.4 읽은 뒤에는 안 된다 — 그리고 이 행동은 민감 집합에 두지 않는다.** 세트는 ADR-0201 P2의 문(G1~G10)을 통과한 요청에서만 시작한다. 그 문은 요청이 아무것도 읽지 않았을 때만 `ask_hermes`를 광고하므로(G7), 읽은 글이 세트를 만들게 하는 길이 없다(읽으면 그림을 만들 수 없고, 그림 없이는 보관할 것이 없다). 반대로 `expression.set.create` 자체는 `SENSITIVE_ACTION_IDS`(F6)에 넣지 **않는다**: 제안은 필연적으로 위임 결과(읽은 것으로 센다, P5) 뒤에 오므로 목록에 넣으면 행동이 영원히 닿지 못한다. 대신 (i) 그림은 서버가 쌓은 것이라 읽은 글이 바꿀 수 없고, (ii) 제안 인자의 글(제목·이름·표시 이름·태그·prompt)은 평문 패턴으로 닫혀 있고 카드가 「에이전트가 쓴 글」로 표시하며, (iii) 등록은 사람의 승인 뒤에만 이뤄지고 항목마다 되돌릴 수 있다(숨김·삭제). 이 판단은 보안 검수의 눈으로 다시 본다(L12 T2).
+**L2.4 사람이 부탁한 run, 계획은 읽기 전에, 카드는 서버 코드가.**
+1. **부탁한 사람.** 제안은 팀 AI 문의 순서를 따른다(F10): 허용 목록 → 문 → 묶음 → 오염 → **살아 있는 사람 요청자**(`suggestion_requester_in_tx`, 트리거 메시지 작성자) → 대기 한도 → 해석 → `requester_could_approve_in_tx` → run park → 승인·초안·카드. 요청자가 없는 run(`Work`·환영·먼저 제안으로 태어난 run)은 거절하고 행을 하나도 남기지 않는다. 먼저 제안의 닫힌 4종(U-b-2)을 늘리지 않는 것이 「누가 시키지 않은 세트 제안은 열지 않는다」의 구조다. 보관의 쓰기(L3)도 같은 증명을 쓸 때마다 다시 한다.
+2. **계획은 읽기 전에 정한다.** 세트의 글(제목·앞머리·공통 태그·prompt, 칸마다 이름·표시 이름·태그)은 모델이 **아무것도 읽기 전의 첫 호출**(`tainted=false`, ADR-0201 G7)에서 정하고 작업 행에 저장한다. 이후 Hermes의 답(글·그림)은 모델 문맥으로 돌아가지 않는다: 서버 코드(`put_*`)가 그림을 보관에 쌓고 모델에는 개수만 알린다(ADR-0201 P1·P6).
+3. **카드는 서버 코드가 저장된 계획으로 올린다.** 마지막 걸음에서 `expression.set.create` 카드는 워커 코드가 저장된 계획에서 만든다(모델의 도구 호출이 아니다). 위임 뒤의 합치는 호출에는 도구가 없으므로(F12) 모델이 읽은 뒤에 제안할 길 자체가 없다. 읽은 글이 이름·제목·prompt를 바꿀 길이 없다. 제안 함수는 계획 행만 읽고 모델 출력 인자를 받는 시그니처가 없다.
+4. **민감 집합에 넣지 않는 이유.** 위 2·3이 `SENSITIVE_ACTION_IDS`(F6)의 목적(읽은 글이 카드를 만들게 하지 않는다)을 구조로 채운다. 반대로 목록에 넣으면 제안이 필연적으로 위임 결과(읽은 것으로 센다, P5) 뒤에 오므로 영원히 닿지 못한다. 이 판단은 보안 검수의 눈으로 다시 본다(L12 T2).
+5. **요청자가 승인할 수 있는 카드만.** 팀 AI 문은 「요청자가 승인할 수 없는 카드는 올리지 않는다」(`requester_could_approve_in_tx`)를 건다. 이 문의 `ExpressionAdder` 갈래는 지금 `false`로 고정이라(F10) 그대로면 어떤 세트도 올라올 수 없다. S1b가 이 갈래를 실제 술어로 바꾼다: 요청자가 카드 채널의 살아 있는 사람 멤버이고 게스트가 아니며 지금의 추가 정책을 충족하고, 세트에 얼굴이 있으면(`subjectMemberId`가 null이 아니면) 요청자가 그 당사자여야 한다. 이 문의 기존 규칙 때문에 **이 문에서 `subjectMemberId`는 null이거나 요청자 본인이다**(다른 사람의 얼굴은 이 문으로 올리지 않는다).
 
 ### L3. 그림 40장을 어떻게 넘기나
 
@@ -882,7 +892,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | 한 칸 보관(세 렌디션) | ≤1.5 MiB = 256 KiB + 1 MiB + 256 KiB | D3 상한 합. 표의 CHECK가 지킨다 |
 | **한 세트 보관 합계** | **≤24 MiB**(25,165,824 B) | 아래 계산 |
 | 보관 시간 | 시작 후 **2시간** | 최악 40 × 91초 ≈ 61분(F9)에 여유 |
-| 승인 대기 | 3,600초(F8, 바꾸지 않음) | owner의 「승인 대기」 기본값 |
+| 승인 대기 | 워커의 `approval_ttl_seconds`(기본 3,600초, F8). 카드가 서는 시각부터 센다 | 승인 대기는 바꾸지 않는다 |
 | 에이전트당 미결정 세트 | **1**(보관 중이거나 사람을 기다리는 것) | owner 결정 3 |
 
 **24 MiB의 계산 [V 실측 + 추정].** 칸 하나가 저장되면 large·small·thumb 세 장이다. 정지 칸: large 평균 213 KB(최대 286 KB) + small·thumb 각 평균 20 KB(최대 29 KB) = **평균 약 254 KB, 최대 약 344 KB**. GIF 칸: large 평균 616 KB(최대 948 KB) + small GIF **[추정]** 128 px라 large의 면적비 8% 안팎(평균 약 50 KB, 최대 약 78 KB) + thumb 약 20 KB = **평균 약 686 KB, 최대 약 1.05 MB**. 그래서 기본 세트(정지 8+GIF 2)는 평균 **약 3.4 MB**, 최대 약 4.9 MB이다. 40칸을 정지 32+GIF 8로 채우면 평균 약 13.6 MB, **실측 최악 약 19.4 MB**이다. D3 상한만 곱하면 40 × 1.5 MiB = 60 MiB이지만 그 값은 실측의 세 배이고 팀 PG에 대기 중인 초안 하나가 쥐는 양으로 크다. **24 MiB는 실측 최악의 1.3배, 평균 40칸의 1.8배**이며 정상 세트를 막지 않고 모든 렌디션이 상한에 붙은 병적 세트(17칸이면 넘는다)만 막는다. 합계는 보관 머리의 `stored_bytes`에 칸을 쓸 때마다 더해지고 CHECK가 지킨다. 넘는 쓰기는 거절되고 그 칸은 `put_gray(failed)`로 닫힌다(조용히 자르지 않는다, D3).
@@ -895,7 +905,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 새 경로는 **없다**. 미리보기·결정·승인 카드는 기존 경로이고, 바뀌는 것은 행동 id 하나, 카드 props 키 하나, 결정 요청 필드 하나, 결과 키 하나다. 스키마의 정본은 [set.schema.json](../../packages/momo-core/src/features/expressions/set.schema.json)이고 L11이 같은 JSON을 이 문서에 고정한다.
 
-**L5.1 행동 `expression.set.create`(`SetAction`).** 인자는 닫혀 있다(`additionalProperties:false`).
+**L5.1 행동 `expression.set.create`(`SetAction`).** 이 인자는 **서버 코드가 저장된 계획으로 채운다**(L2.4). 모델은 이 행동을 직접 부르지 않으므로 이 스키마는 서버 안의 닫힌 계약이다. 인자는 닫혀 있다(`additionalProperties:false`).
 
 | 키 | 규칙 |
 |---|---|
@@ -903,7 +913,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | `title` | 평문 1~40자(D1 `displayName` 규칙). 카드 제목이고 저장되지 않는다: 등록된 표현에는 세트라는 개념이 없다 |
 | `prefix` | L9 |
 | `tags` | 세트 공통 태그 0~3개(L9) |
-| `subjectMemberId` | **키가 필수**. null = 「사람 얼굴 없음」이라는 제출자 선언, 아니면 워크스페이스 사람 한 명. 세트 전체에 하나다(D6·G2) |
+| `subjectMemberId` | **키가 필수**. null = 「사람 얼굴 없음」이라는 제출자 선언, 아니면 워크스페이스 사람 한 명. 세트 전체에 하나다(D6·G2). 이 문에서는 null이거나 요청자 본인이다(L2.4-5) |
 | `prompt` | 1~2,000자, 에이전트가 쓴 평문. 등록되는 모든 표현의 `origin.prompt`가 된다. 카드에 「에이전트가 쓴 글」로 한 번 보인다 |
 | `slots` | 1~40개 `{index, name, displayName, tags≤5}`. 보관에 있는 index를 **정확히 한 번씩**(집합이 다르면 invalid arguments). 이름은 L9 |
 
@@ -994,9 +1004,9 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 ### L8. 한도·속도·만료·취소·감사
 
-1. **미결정 세트는 에이전트당 1개.** `expression_set`의 부분 유니크 인덱스 `(workspace_id, agent_member_id) WHERE state IN ('staging','proposed')`가 DB에서 지키고, `begin`과 제안 tx는 에이전트 `member` 행 잠금 아래에서도 확인한다. **일반 제안 3개의 계수는 그대로**이고 `expression.set.create` 승인은 그 계수(`count_pending_workspace_actions_in_tx`의 `all`)에 **들지 않는다**: 합치면 일반 2+세트 1에서 막혀 일반 한도가 실질적으로 줄어든다. 도우미는 워크스페이스마다 하나이므로 이 값은 곧 「팀에서 한 번에 한 세트」다.
+1. **미결정 세트는 에이전트당 1개.** `expression_set`의 부분 유니크 인덱스 `(workspace_id, agent_member_id) WHERE state IN ('staging','proposed')`가 DB에서 지키고, `begin`과 제안 tx는 에이전트 `member` 행 잠금 아래에서도 확인한다. **일반 제안의 한도는 그대로다.** 팀 AI 문의 한도는 요청자별 3(`MAX_PENDING_PER_REQUESTER`)·워크스페이스별 30(`MAX_PENDING_PER_WORKSPACE`)이고 `via_ai.source='team_ai'`인 대기 카드를 센다(F10). 세트 카드도 그 표시를 달므로 S1b가 두 계수(`count_pending_for_requester_in_tx`)에서 `expression.set.create`를 **뺀다**: 합치면 세트 하나가 일반 한 칸을 먹어서 「일반 제안 3개 한도는 그대로」(owner 결정 3)가 지켜지지 않는다(이 해석은 L16 O4). Agent Port의 에이전트당 3 계수(`count_pending_workspace_actions_in_tx`)는 이 행동이 포트에서 올라올 수 없어 해당 없다. 도우미는 워크스페이스마다 하나이므로 이 값은 곧 「팀에서 한 번에 한 세트」다.
 2. **속도.** run당 `begin`은 한 번이다. 쓰기의 속도는 Hermes 위임의 속도·한도(ADR-0201 P7: 요청자 10분 6회, 워크스페이스 일일 30, 위임 동시 2)가 정하고, 이 절은 따로 쓰기 속도 제한을 만들지 않는다. 대신 천장 둘(40칸·24 MiB)이 한 세트의 크기를 묶는다. 결정 쪽은 기존 규칙이다.
-3. **만료.** 보관은 `begin` 시각에서 **2시간**(절대, 마지막 쓰기와 무관하다. 가장 단순하고 자원 상한이 분명하다). 승인 대기는 **3,600초**(F8). 둘 다 notifier의 TTL sweep이 회수한다: 발견은 기존 예외(`momo_notifier`의 열 단위 SELECT)이고 회수는 `momo_app`의 워크스페이스 묶인 tx다. 회수는 렌디션 바이트를 지우고 머리를 `expired`로 바꾸며 `prompt`를 NULL로 비운다(#4900의 「만료된 행에 에이전트가 쓴 글은 남지 않는다」 규칙을 머리에도). 머리의 칸 설명자(이름·표시 이름·태그)는 초안 행이 이름을 남기는 것과 같은 급으로 남는다.
+3. **만료.** 보관은 `begin` 시각에서 **2시간**(절대, 마지막 쓰기와 무관하다. 가장 단순하고 자원 상한이 분명하다). 승인 대기는 워커의 `approval_ttl_seconds`(기본 3,600초, F8). 둘 다 notifier의 TTL sweep이 회수한다: 발견은 기존 예외(`momo_notifier`의 열 단위 SELECT)이고 회수는 `momo_app`의 워크스페이스 묶인 tx다. 회수는 렌디션 바이트를 지우고 머리를 `expired`로 바꾸며 `prompt`를 NULL로 비운다(#4900의 「만료된 행에 에이전트가 쓴 글은 남지 않는다」 규칙을 머리에도). 머리의 칸 설명자(이름·표시 이름·태그)는 초안 행이 이름을 남기는 것과 같은 급으로 남는다.
 4. **취소.** 사람의 run 취소·요청자 이탈로 run이 끝나면 `abandon`이 같은 tx에서 보관 바이트를 회수하고 머리를 `expired`로 한다. 승인 대기 중의 취소·거절·만료는 기존 경로가 초안을 회수한다(`reclaim_in_tx` 재사용). 미결정 슬롯은 머리가 `staging`·`proposed`를 벗어나는 순간 비워진다.
 5. **감사.** D6의 제한을 따른다(바이트·base64·prompt·이름·원본 링크 없음): `expression.set.proposed`(set id, approval id, 칸 수, 준비 수, 회색 코드별 수, 보관 바이트 합) · `expression.created`(등록 항목마다, 기존 필드에 set id) · `expression.set.decided`(승인/거절, 등록 수, 건너뜀 이유별 수) · `expression.set.reclaimed`(만료·취소·거절의 회수 칸 수). 칸마다의 `expression.staged`는 세트에 쓰지 않는다: 요약 한 줄이 회색 사유별 수를 남기므로 40줄 감사를 피한다.
 
@@ -1007,7 +1017,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 - **태그.** 공통 태그 `tags`는 0~3개, 칸 태그는 0~5개이고 서버가 공통 태그를 칸 태그 **앞에** 합쳐 중복을 지운다(최종 ≤8, D2의 상한). 카드는 합친 최종 값을 보인다(보이는 것 = 저장되는 것). 각 태그는 D1의 규칙(1~16자, 제어 문자와 `@` `<` `>` `[` `]` 백틱 역슬래시 금지)이다.
 - **제목과 표시 이름**은 D1의 `displayName` 규칙(1~40자 평문)이다. 제목은 카드 머리에만 있고 등록된 표현에는 남지 않는다. 등록된 표현은 서로 독립이며 세트 소속은 `approval_id`(기존 열)로만 추적된다. 세트 이름으로 묶어 보는 보관함 보기는 부록 A가 후속으로 미룬 「보관함 모음」이고 이 절이 열지 않는다.
 
-### L10. 스키마 델타(migration 번호는 비워 둔다 — planner가 S1 착수 때 배정)
+### L10. 스키마 델타(migration 번호는 비워 둔다 — planner가 S1a 착수 때 배정)
 
 이 PR에 SQL은 없다. 모든 신규 표는 D2와 같다: `workspace_id NOT NULL`, `ENABLE/FORCE ROW LEVEL SECURITY`, `ws_isolation`, tx 시작의 `SET LOCAL app.workspace_id`, 복합 FK, 쓰기 역할에 BYPASSRLS 없음. 159(`expression_assembly`)의 형제다.
 
@@ -1148,8 +1158,8 @@ paths: {}
 
 | # | 위협 | 막는 곳 | 시험 |
 |---|---|---|---|
-| T1 | 누가 시키지 않은 세트 제안 | 제안 tx가 살아 있는 사람 요청자 없는 run을 거절(`Work`·환영·먼저 제안 run), 먼저 제안 닫힌 4종 불변(L2.2) | A5 |
-| T2 | 읽은 글·Hermes 답 속 지시가 이름·제목·prompt에 섞임 | 인자의 글은 평문 패턴(제어 문자와 `@` `<` `>` `[` `]` 백틱 역슬래시 금지, 길이)과 `prefix_` 규칙으로 닫히고 카드가 「에이전트가 쓴 글」로 표시. 그림은 서버가 쌓은 것이라 바꿀 수 없음. 민감 집합에 안 넣는 이유(L2.4)를 검수가 다시 본다 | A5·A10 |
+| T1 | 누가 시키지 않은 세트 제안 | 제안 tx가 살아 있는 사람 요청자 없는 run을 거절(`Work`·환영·먼저 제안 run). 모델은 이 id를 광고에서 볼 수 없고 불러도 거절된다(서버 코드만 올린다, L2.2·L2.4). 먼저 제안 닫힌 4종 불변 | A5 |
+| T2 | 읽은 글·Hermes 답 속 지시가 이름·제목·prompt에 섞임 | 글은 읽기 전에 정해 저장하고 Hermes의 답은 모델 문맥으로 돌아가지 않으며 카드는 서버 코드가 저장된 계획으로 올린다(L2.4). 그 위에 평문 패턴(제어 문자와 `@` `<` `>` `[` `]` 백틱 역슬래시 금지, 길이)·`prefix_` 규칙·카드의 「에이전트가 쓴 글」 표시. 민감 집합에 안 넣는 이유(L2.4-4)를 검수가 다시 본다 | A5·A10·A24 |
 | T3 | 외부 에이전트·사람 토큰으로 세트를 올리거나 등록 | `TeamAiOnly`(포트가 알 수 없는 id로 거절), 직접 `POST /expressions`는 세트 초안에 404, 새 경로 0 | A4·A14 |
 | T4 | 저장소 고갈(보관 남용) | 40칸·24 MiB·미결정 1(DB 부분 유니크)·2시간 TTL·notifier 회수 | A8·A9·A13 |
 | T5 | 남의 `setId`·만료·이미 제안된 id | 읽기 SQL이 (에이전트·요청자·run)으로 거름 + RLS + 제안 tx의 `FOR UPDATE` 재증명, 구분 없는 invalid arguments | A6 |
@@ -1173,24 +1183,27 @@ paths: {}
 | A1 | 한 세트는 40칸이다: 40칸은 통과, 41칸은 스키마가 거절(행동 인자·카드·선택 목록 모두) | `maxItems` 40 | 코어 |
 | A2 | 회색 칸에는 `draftId`·`media`·`revision`을 붙일 수 없고, 선택할 수 없고, 올리기가 없고, 사유 문장에 재시도·올리기를 권하는 말이 없다 | `SetGraySlot` 닫힌 키, `selectable`, 문구 | 코어 |
 | A3 | 결정 규칙 표(15행)와 같은 결과: 요청 순서 무관·같은 이름 건너뜀·정원 건너뜀·전부 건너뛰면 거절·어긋난 핀은 전체 거절·중복 id 400 | `decideExpressionSet`의 해당 줄 | 코어, S2의 Rust가 같은 표를 읽음 |
-| A4 | `oort_action_propose`는 `expression.set.create`를 알 수 없는 id로 거절하고, `WORKSPACE_ACTION_IDS`는 13개, `INITIATIVE_ACTION_IDS`는 4개로 남는다. OpenAPI `WorkspaceActionId`에는 있다 | `proposers: TeamAiOnly` | S1 |
-| A5 | 요청자 없는 run(`Work`·환영·먼저 제안)에서 제안하면 거절되고 행이 0이다. 읽은 요청에서는 `begin`이 없다 | `requester_of_run_in_tx` 줄 | S1·S5 |
-| A6 | 다른 에이전트·다른 요청자·다른 워크스페이스·만료·이미 제안된 `setId`는 구분 없이 같은 invalid arguments다(두 테넌트, 비우회 역할) | 읽기 SQL의 소유 술어, RLS | S1 |
-| A7 | 한 칸은 한 번만 쓰인다: 회색 칸에 그림 쓰기, 그림 칸에 회색 쓰기, 같은 칸 두 번이 모두 `set_slot_closed`이고 카드·행이 생기지 않는다 | `UNIQUE (set, index, variant)`, 상태 검사 | S1 |
-| A8 | 미결정 세트는 에이전트당 1개다(동시 `begin` 경쟁 포함). 일반 대기 3의 계수는 세트를 세지 않는다 | 부분 유니크 인덱스, 계수의 제외 조건 | S1 |
-| A9 | 41번째 칸과 24 MiB를 넘는 쓰기가 거절된다(`set_full`·`set_bytes_over`), 조용히 자르지 않는다 | `stored_bytes` CHECK, 쓰기 함수의 상한 | S1 |
-| A10 | 제안 본문에 그림 키가 있으면 400이다(바이트 0). 제안 tx는 초안 복사·보관 회수·approval·카드가 한 tx이고, 카드 쓰기를 실패시키면 approval·초안·상태 변경이 0이다 | 스키마 닫힘, tx 경계 | S1 |
+| A4 | `oort_action_propose`는 `expression.set.create`를 알 수 없는 id로 거절하고, `WORKSPACE_ACTION_IDS`는 13개, `INITIATIVE_ACTION_IDS`는 4개로 남는다. `TEAM_AI_ACTION_IDS`는 15개이고 `helper_only` 고정 목록은 6개이며 OpenAPI `WorkspaceActionId`에는 있다 | `proposers: TeamAiOnly`, 허용 목록 | S1b |
+| A5 | 요청자 없는 run(`Work`·환영·먼저 제안)에서 제안하면 거절되고 행이 0이다. **모델이 이 id를 불러도 `not_offered`로 거절되고 세트 행이 0이며, 모델에게 가는 `actionId` 열거에는 이 id가 없다** | `requester_of_run_in_tx` 줄, 광고에서 빼는 닫힌 목록 | S1b·S5 |
+| A6 | 다른 에이전트·다른 요청자·다른 워크스페이스·만료·이미 제안된 `setId`는 구분 없이 같은 invalid arguments다(두 테넌트, 비우회 역할) | 읽기 SQL의 소유 술어, RLS | S1a |
+| A7 | 한 칸은 한 번만 쓰인다: 회색 칸에 그림 쓰기, 그림 칸에 회색 쓰기, 같은 칸 두 번이 모두 `set_slot_closed`이고 카드·행이 생기지 않는다 | `UNIQUE (set, index, variant)`, 상태 검사 | S1a |
+| A8 | 미결정 세트는 에이전트당 1개다(동시 `begin` 경쟁 포함). 요청자별 3·워크스페이스별 30의 일반 대기 계수는 세트를 세지 않고, 일반 3개가 차 있어도 세트가 올라온다 | 부분 유니크 인덱스, 두 계수의 제외 조건 | S1a·S1b |
+| A9 | 41번째 칸과 24 MiB를 넘는 쓰기가 거절된다(`set_full`·`set_bytes_over`), 조용히 자르지 않는다 | `stored_bytes` CHECK, 쓰기 함수의 상한 | S1a |
+| A10 | 제안 본문에 그림 키가 있으면 400이다(바이트 0). 제안 tx는 초안 복사·보관 회수·approval·카드가 한 tx이고, 카드 쓰기를 실패시키면 approval·초안·상태 변경이 0이다 | 스키마 닫힘, tx 경계 | S1b |
 | A11 | 결정: 어긋난 핀 하나가 전체를 409로 거절하고 등록 0·승인 미소모. 같은 이름과 1,000 초과는 항목별로 건너뛰고 나머지는 등록. 등록 대상 0이면 409. 요청 순서가 달라도 같은 결과 | 재해시·건너뜀·정렬 줄 | S2 |
 | A12 | 등록된 표현의 `created_by`는 결정자, `proposed_by`는 도우미, `approval_id`가 있다. 한 결정은 카탈로그 version을 한 번 올리고 outbox를 한 건 쓴다 | INSERT 열, version 호출 횟수 | S2 |
-| A13 | 결정·거절·만료·취소·sweep 뒤에 `expression_draft_image`와 `expression_set_image`의 바이트가 0이고 머리의 `prompt`가 NULL이다 | `reclaim_in_tx` 호출, sweep | S1·S2 |
-| A14 | 세트 초안에 `PUT …/file`과 직접 `POST /expressions`는 404이고, 비멤버·다른 방·다른 테넌트의 미리보기는 같은 404다 | `candidate_row` 확장, 직접 경로의 거절 | S1·S2 |
-| A15 | 감사에 바이트·base64·prompt·이름·원본 링크가 없다(D6) | 감사 행 모양 | S1·S2 |
-| A16 | 당사자가 아닌 사람의 결정은 403 `role_required`이고 승인이 소모되지 않는다. 세트 안 `subjectMemberId` 불일치는 제안이 거절된다 | `adder_allows`, 같은 subject 검사 | S1·S2 |
+| A13 | **모든 끝 길**(승인의 미선택분, 거절, 만료, run 취소, 요청자 이탈, notifier sweep) 뒤에 `expression_draft_image`와 `expression_set_image`의 바이트가 0이고 머리의 `prompt`가 NULL이다. 회수 호출은 키가 `expression.create`에 걸린 두 곳(`approval.rs`, `routes/approvals.rs`)에 세트도 더해진다 | `reclaim_in_tx` 호출들, sweep | S1a·S1b·S2 |
+| A14 | 세트 초안에 `PUT …/file`과 직접 `POST /expressions`는 404이고, 비멤버·다른 방·다른 테넌트의 미리보기는 같은 404다 | `candidate_row` 확장, 직접 경로의 거절 | S1b·S2 |
+| A15 | 감사에 바이트·base64·prompt·이름·원본 링크가 없다(D6) | 감사 행 모양 | S1a·S1b·S2 |
+| A16 | 당사자가 아닌 사람의 결정은 403 `role_required`이고 승인이 소모되지 않는다. 세트 안 `subjectMemberId` 불일치는 제안이 거절된다 | `adder_allows`, 같은 subject 검사 | S1b·S2 |
 | A17 | 같은 `client_decision_id`의 재시도는 첫 영수증이다. 항목 영수증도 한 번만 쓰인다 | 기존 멱등 키 | S2 |
 | A18 | 화면: 회색 칸은 선택·올리기·다시 시도가 0이고 사유 줄이 있다. 기본은 전체 선택이고 칸별로 뺄 수 있고 선택 0이면 승인이 꺼진다. 이름 목록이 모두 보인다. 결과 줄은 숫자만이다 | 컴포넌트 시험, Playwright·Maestro | S3·S4 |
 | A19 | 도구: 거절된 칸의 index로 두 번째 호출이 0이다(거절 뒤 같은 칸·다른 표현·다른 참조 모두). 지시문과 도구 설명에 L7.5의 키워드가 있고 골든이 잠근다. 연속 거절 규칙(O2)이 서면 그 숫자 | 루프의 분기, 골든 | S5 |
 | A20 | 이 절의 고정 JSON 블록 = `set.schema.json`(`verify-contract.mjs`), 이 절의 OpenAPI 조각의 `$ref`가 실재한다 | 블록, ref | 코어 |
-| A21 | `expression.create`는 여전히 후보 4개까지이고 6 MiB 예산·64 KiB 기본이 그대로다(`candidate_index` CHECK를 넓힌 뒤에도) | 기존 시험 | S1 |
+| A21 | `expression.create`는 여전히 후보 4개까지이고 6 MiB 예산·64 KiB 기본이 그대로다(`candidate_index` CHECK를 넓힌 뒤에도) | 기존 시험 | S1b |
+| A22 | 팀 AI 문의 `requester_could_approve_in_tx`는 세트에서 상수 `false`가 아니다: 요청자가 게스트이거나 정책 밖이거나 세트의 얼굴이 요청자가 아니면 `RequesterLacksRole`, 아니면 통과한다. 이 갈래를 `false`로 되돌리면 어떤 세트도 올라올 수 없다 | 갈래의 술어 | S1b |
+| A23 | 세트 카드의 결정은 허용 목록 항목이 있어야 `card_provenance`를 통과한다(14개로 되돌리면 승인이 거절되는 시험). `opens_in_app`은 이 id에 Open을 낸다(푸시에 승인 버튼 없음) | `TEAM_AI_ACTION_IDS`, `opens_in_app` | S1b·S2 |
+| A24 | 카드의 이름·제목·prompt·태그는 저장된 계획과 바이트 단위로 같다(Hermes 답의 글이 섞이지 않는다). 제안 함수는 계획 행만 읽고 모델 출력 인자를 받는 시그니처가 없다 | 제안 함수의 입력 | S5 |
 
 ### L14. 구현 슬라이스(한 슬라이스 = 한 이슈 = 한 브랜치·PR)
 
@@ -1199,13 +1212,14 @@ paths: {}
 | ID | 트랙 | 내용 | 크기·등급 | 파일 소유(착수 때 확정) | 선행 |
 |---|---|---|---|---|---|
 | S0 | 엔진(문서+코어) | 이 증보 + 코어 계약(#5442) | L·2 | `docs/adr/0218-…`, `docs/adr/0186-…`(역방향 한 줄), `packages/momo-core/src/features/expressions/`의 `set*.ts`·`set.schema.json`·`set.vectors.json`·`fixtureServer.ts`·`contracts.ts`·`index.ts`·`verify-contract.mjs` | — |
-| S1 | 엔진 | 레지스트리 항목(`TeamAiOnly`, **광고 목록에는 올리지 않음**), migration(L10), 보관 도메인 함수(`begin`·`put_still`·`put_gif`·`put_gray`·`abandon`), 제안 tx(복사·회수·approval·카드), 미리보기 인가 확장, 만료 sweep, 드리프트 시험(포트 열거 13·4 유지) | L·2 (넘으면 S1a 보관·쓰기 / S1b 제안·카드로 나눈다) | `server/Migrations/<번호>`, `momo-expressions/src/`(보관 모듈 신규), `momo-agent/src/actions.rs`, `momo-workspace-actions/src/`, `momo-notifier`(회수) | S0 Accepted |
-| S2 | 엔진 | 결정 tx(`expressionChoices` DTO·배타 규칙, 항목별 등록, 영수증·결과 카드, 회수·감사), `docs/api/openapi.yaml`·샘플러, Rust 벡터 시험 | M·2 | `bins/momo-server/src/{dto.rs, routes/approvals.rs}`, `momo-expressions/src/`, `docs/api/openapi.yaml` | S1 |
+| S1a | 엔진 | **보관**: migration(L10), 도메인 함수(`begin`·`put_still`·`put_gif`·`put_gray`·`abandon`), 소유를 거르는 읽기 SQL, 만료 sweep, 미결정 1의 부분 유니크 인덱스. 시험 A6·A7·A9와 A13의 보관 쪽 | M·2 | `server/Migrations/<번호>`, `momo-expressions/src/`(보관 모듈 신규), `bins/momo-notifier/src/`(회수) | S0 Accepted |
+| S1b | 엔진 | **문과 카드**: 레지스트리 행(`TeamAiOnly`), 허용 목록 14→15와 광고에서 빼는 닫힌 목록(L2.2), `requester_could_approve_in_tx`의 갈래 교체(L2.4-5), 일반 대기 계수에서 세트 제외(L8-1), 제안 tx(보관 잠금·초안 복사·보관 회수·approval·카드), `opens_in_app`에 Open, 미리보기 인가 확장(`candidate_row`), `action_resolve`의 인자 해석, 고정 시험 갱신(`helper_only` 5→6, 열림 표, 포트 열거 13·4 유지). 사용자 영향 0(광고하지 않는다) | M~L·2 | `momo-agent/src/{actions.rs,team_ai_roles.rs,approval.rs}`, `momo-workspace-actions/src/{team_ai.rs,action_resolve.rs}`, `momo-expressions/src/action.rs` | S1a |
+| S2 | 엔진 | 결정 tx(`expressionChoices` DTO, 셋 상태의 판정식 `expression_choice_refused`, 항목별 등록, 영수증·결과 카드, 감사), **회수 길**(거절·만료 `routes/approvals.rs`, run 취소 `approval.rs`)에 세트 추가, `docs/api/openapi.yaml`·샘플러, Rust 벡터 시험(코어의 `set.vectors.json`을 읽는다) | M·2 | `bins/momo-server/src/{dto.rs, routes/approvals.rs}`, `momo-agent/src/approval.rs`, `momo-expressions/src/`, `docs/api/openapi.yaml` | S1b |
 | S3 | UXUI(웹·데스크탑) | 세트 카드: 격자·칸별 선택·종류 고르기·회색 칸·결과 줄·접근성, 사전 | M | `clients/web/src/features/expressions/`(신규 세트 카드), 문구 사전 | S0 핀(실서버는 S2 뒤) |
 | S4 | UXUI(폰) | 같은 카드의 폰 모양 | M | `clients/mobile/src/features/expressions/` | S0 핀 |
-| S5 | 엔진(도우미) | 세트 도구: 장면 계획·위임 루프·`put_*` 호출·`expression.set.create` 제안·광고(`TEAM_AI_ACTION_IDS`)와 묶음 `hermes` 소유·지시문·도구 설명 골든, **ADR-0201 증보**(요청당 위임 1회 → 칸 수, 한도 계수 O1, 연속 거절 O2) | L·2 | `momo-agent-worker/src/team_ai/`, `momo-agent/src/team_ai_roles.rs`, `docs/adr/0201-…`(증보) | S1·S2, #5369(문), #5370(작업 걸음), #5372(그림 추출). **#5371은 필요 없다**(세트는 첨부 쓰기 길을 쓰지 않는다, L3.3) |
+| S5 | 엔진(도우미) | 세트 도구: 장면 계획(읽기 전 첫 호출)·위임 루프·`put_*` 호출·**서버 코드가 저장된 계획으로 `expression.set.create` 카드를 올림**(모델의 도구 호출이 아니다, L2.4)·묶음 `hermes` 소유·지시문·도구 설명 골든, **ADR-0201 증보**(요청당 위임 1회 → 칸 수, 한도 계수 O1, 연속 거절 O2) | L·2 | `bins/momo-agent-worker/src/team_ai.rs`·`team_ai/`, `momo-agent/src/team_ai_roles.rs`, `docs/adr/0201-…`(증보) | S1b·S2, #5369(문), #5370(작업 걸음), #5372(그림 추출). **#5371은 필요 없다**(세트는 첨부 쓰기 길을 쓰지 않는다, L3.3) |
 
-S3·S4는 S0의 코어 핀(이 PR의 커밋)만으로 가짜 서버 위에서 화면을 끝낼 수 있다(`createExpressionFixtureServer({sets: FIXTURE_SET_CARDS})`). 서버 칸이 착륙해도 S5 전에는 도우미가 이 행동을 보지 못하므로 사용자 영향은 0이다.
+S3·S4는 S0의 코어 핀(이 PR의 커밋)만으로 가짜 서버 위에서 화면을 끝낼 수 있다(`createExpressionFixtureServer({sets: FIXTURE_SET_CARDS})`). 서버 칸이 착륙해도 도우미는 이 행동을 광고에서 볼 수 없고(L2.2) S5가 서버 코드로 올리기 전에는 카드가 서지 않으므로 사용자 영향은 0이다.
 
 ### L15. 기각한 대안(L3의 운반 방식 밖)
 
@@ -1224,8 +1238,10 @@ S3·S4는 S0의 코어 핀(이 PR의 커밋)만으로 가짜 서버 위에서 �
 **owner 결정 필요(권장안을 함께 적는다).**
 - **O1 Hermes 일일 위임 한도와 세트.** ADR-0201 P7의 기본 30(워크스페이스)은 요청당 1회·그림 1장을 전제로 정했다. 권장: 세트의 정지 한 장을 위임 한 번으로 세고(GIF는 서버 조립이라 0), 시작 전에 남은 한도로 계획을 줄이거나 시작하지 않고 숫자로 알린다. 그러면 기본 세트(8장)는 하루 세 번이고 정지 32장짜리 40칸 세트는 관리자가 한도를 올려야 한다. 세는 법은 S5가 ADR-0201 증보로 고정한다.
 - **O2 연속 거절의 멈춤.** 실측에서 한 참조의 여덟 장면이 모두 거절됐고(약 6분, 위임 8회) 한 번도 통하지 않았다. 권장: 연속 3개가 거절되면 남은 칸을 시도하지 않고 `not_made`로 닫는다. owner가 말하지 않은 값이고 범위나 계약을 바꾸지는 않는다.
+- **O3 참조 그림 없이 그린다.** 팀 AI가 Hermes에 보내는 것은 글 한 문장이고 그림·첨부를 넘기지 않는다(ADR-0201 P3·R8). 그래서 v1 세트는 글 설명만으로 그리고, 사람이 올린 캐릭터·사진을 참조해 그리는 길은 열려 있지 않다(owner 로컬 시료는 참조 그림을 넣어 만들었다). 권장: v1은 글 설명만으로 가고, 참조 입력은 ADR-0201 P3의 입력 규칙을 넓히는 별도 결정으로 후속에 둔다.
+- **O4 「일반 3개 한도는 그대로」의 해석.** 세트 카드는 일반 대기 한도(요청자별 3·워크스페이스별 30)에 세지 않고 자기 한도(미결정 1)를 따로 쓴다고 읽었다. 권장: 이대로. 합산을 원하면 두 계수에서 제외 조건만 빼면 된다.
 
-**확인 필요(S1 착수 때 측정).**
+**확인 필요(S1a·S1b 착수 때 측정).**
 - **V1** 승인 대기 중인 run이 도우미의 동시 실행 칸(`max_concurrent_runs` 기본 1)을 쥐는지. 쥔다면 대기 시간이 곧 `@oort`가 막히는 시간이다. 그 경우 세트의 제안은 run을 park하지 않는 길을 따로 정한다.
 - **V2** 40칸 카드(약 28 KB)가 메시지 props의 한도 안인지.
 - **V3** 보관을 쓰는 워커 쪽 DB 역할과 BYPASSRLS 예외의 범위(쓰기 경로에 BYPASSRLS 금지, AGENTS.md).
