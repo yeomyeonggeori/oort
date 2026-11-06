@@ -11,7 +11,7 @@ import {
 import {readFileSync} from 'fs';
 import {join} from 'path';
 import React from 'react';
-import {Text} from 'react-native';
+import {Keyboard, Text} from 'react-native';
 
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
@@ -571,6 +571,63 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
     release();
     await settle(100);
     expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name);
+  });
+
+  it('#5418 결과(최근 연 대화·메시지·채널·사람)를 누르면 자판을 먼저 내린 뒤 이동한다 - 검색 탭은 남아 있어서 내리지 않으면 자판이 대화 위에 그대로 남는다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    try {
+      rememberConversation(scope, CH_LAUNCH.id);
+      searchMessages.mockResolvedValue({hits: [hit(7, CH_PROJECT.id)]});
+      const {onOpenResult} = await mountSearch();
+      const lastOrder = (spy: {mock: {invocationCallOrder: number[]}}) => spy.mock.invocationCallOrder[spy.mock.invocationCallOrder.length - 1];
+
+      /** 이 눌림 하나가 자판을 **새로** 내렸고(앞 눌림의 호출이 아니다), 그 내림이 이동보다 앞섰다. */
+      const opensAfterDismiss = async (testID: string) => {
+        const dismissedBefore = dismiss.mock.calls.length;
+        const openedBefore = onOpenResult.mock.calls.length;
+        press(testID);
+        await settle(100);
+        expect(onOpenResult.mock.calls.length).toBe(openedBefore + 1);
+        expect(dismiss.mock.calls.length).toBeGreaterThan(dismissedBefore);
+        expect(lastOrder(dismiss)).toBeLessThan(lastOrder(onOpenResult));
+      };
+
+      // 입력 전의 첫 화면: 최근 연 대화.
+      await opensAfterDismiss(`search-recent-conversation-${CH_LAUNCH.id}`);
+      // 입력 뒤: 메시지 · 채널 · 사람.
+      enter('루나');
+      await searched();
+      await opensAfterDismiss('search-result');
+      await opensAfterDismiss(`search-channel-${CH_DESIGN.id}`);
+      await opensAfterDismiss('search-person-luna');
+    } finally {
+      dismiss.mockRestore();
+    }
+  });
+
+  it('#5418 사람은 누른 순간 자판을 내리고, DM 이 열려 이동하는 순간에도 한 번 더 내린다(그 사이 입력칸을 다시 눌렀을 수 있다)', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    try {
+      searchMessages.mockResolvedValue({hits: []});
+      const {onOpenResult} = await mountSearch();
+      enter('루나');
+      await searched();
+      let release: () => void = () => {};
+      dmGate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      press('search-person-luna');
+      // 아직 DM 이 열리는 중이다: 이동은 없고 자판은 이미 내려갔다.
+      expect(onOpenResult).not.toHaveBeenCalled();
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      release();
+      await settle(100);
+      expect(onOpenResult).toHaveBeenLastCalledWith(DM_LUNA.id, '루나');
+      expect(dismiss).toHaveBeenCalledTimes(2);
+      expect(dismiss.mock.invocationCallOrder[1]).toBeLessThan(onOpenResult.mock.invocationCallOrder[0]);
+    } finally {
+      dismiss.mockRestore();
+    }
   });
 
   it('메시지 쪽 상태: 한 글자는 안내, 실패는 다시 시도, 결과 없음은 친 말을 인용한다', async () => {
