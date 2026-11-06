@@ -547,20 +547,24 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
     controller.dispose();
   });
 
-  it('종류 이름은 시트의 탭 이름(「이모티콘」)을 그대로 품는다 — 한국어는 글자 그대로, 영어는 단수 · 문장 첫 글자만 대문자', () => {
-    // 같은 말을 두 곳에 따로 적었으니, 한쪽만 바뀌면 빨개진다(탭을 고치면 종류 이름도 같이 고치게 한다). 종류 이름은 「작은/큰 + 탭 이름」이다.
-    const tab = ko.formatMessage('expressions.sheet.tabEmoticon');
-    expect(tab).toBe('이모티콘');
-    expect(ko.formatMessage('expressions.kind.emoji')).toBe(`작은 ${tab}`);
-    expect(ko.formatMessage('expressions.kind.sticker')).toBe(`큰 ${tab}`);
-    // 탭 「Emoticons」는 목록의 이름(복수)이고 종류 「Small/Large emoticon」은 한 그림의 분류(단수)다.
-    const enTab = en.formatMessage('expressions.sheet.tabEmoticon').replace(/s$/, '').toLowerCase();
-    expect(en.formatMessage('expressions.kind.emoji')).toBe(`Small ${enTab}`);
-    expect(en.formatMessage('expressions.kind.sticker')).toBe(`Large ${enTab}`);
-    // 응답 카드의 발췌 낱말은 단수 「Emoticon」이다.
-    expect(en.formatMessage('reply.card.excerptExpression')).toBe(
-      enTab[0].toUpperCase() + enTab.slice(1),
-    );
+  it('첫 탭 이름(「우리 팀」·「Team」)과 종류 이름(「이모티콘」)은 서로 다른 말이다 — 종류는 글자 그대로, 영어는 단수 · 문장 첫 글자만 대문자', () => {
+    // owner 11-06(#5427): 창 제목이 이미 「이모티콘」이라 첫 탭은 어디서 온 그림인지(우리 팀이 올린 것)만 말한다. 종류 이름은 「작은/큰 + 이모티콘」 그대로다.
+    // 두 곳을 글자로 못 박아, 어느 쪽이든 옛 「탭 이름 = 종류 낱말」로 돌아가면 빨개진다(사전에서 읽어 맞추지 않는다).
+    const tab = {
+      ko: ko.formatMessage('expressions.sheet.tabEmoticon'),
+      en: en.formatMessage('expressions.sheet.tabEmoticon'),
+    };
+    expect(tab).toEqual({ko: '우리 팀', en: 'Team'});
+    expect(ko.formatMessage('expressions.kind.emoji')).toBe('작은 이모티콘');
+    expect(ko.formatMessage('expressions.kind.sticker')).toBe('큰 이모티콘');
+    expect(en.formatMessage('expressions.kind.emoji')).toBe('Small emoticon');
+    expect(en.formatMessage('expressions.kind.sticker')).toBe('Large emoticon');
+    // 종류 이름은 탭 이름을 품지 않는다(앞 판은 「작은/큰 + 탭 이름」이라 탭을 고치면 종류도 따라 바뀌었다).
+    for (const kind of KIND_WORDS.ko.labels) expect(kind).not.toContain(tab.ko);
+    for (const kind of KIND_WORDS.en.labels) expect(kind).not.toContain(tab.en);
+    // 응답 카드의 발췌 낱말은 종류 이름의 낱말(영어는 단수 「Emoticon」)이다 — 탭 이름이 아니다.
+    expect(ko.formatMessage('reply.card.excerptExpression')).toBe('이모티콘');
+    expect(en.formatMessage('reply.card.excerptExpression')).toBe('Emoticon');
     // sentence case: 첫 글자만 대문자, 뒤의 낱말은 소문자(「Team Emoji」가 아니다).
     for (const label of KIND_WORDS.en.labels) {
       expect(label).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);

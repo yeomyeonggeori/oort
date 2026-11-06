@@ -45,7 +45,8 @@ import { useHoverNone } from "./useHoverNone";
 export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
 /**
- * 고르개의 세 탭은 폰 시트와 같은 코어의 목록이다(owner 11-05): 이모티콘 · 기본 · GIF. 이모티콘·GIF 는 팀 보관함(`TeamExpressionsPanel` 의 두 보기)이고
+ * 고르개의 세 탭은 폰 시트와 같은 코어의 목록이다(owner 11-05): 이모티콘 · 기본 · GIF. 첫 탭의 글자는 「우리 팀」이다(owner 11-06 #5427 — 창 제목이
+ * 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다. 탭 id·보기 이름은 `emoticon` 그대로). 이모티콘·GIF 는 팀 보관함(`TeamExpressionsPanel` 의 두 보기)이고
  * 「기본」은 표준 그림 문자 표다. 처음 여는 탭은 앞 판과 같은 「기본」이다. 이름은 폰 시트와 같은 사전 키다.
  */
 const TAB_NAME = {
