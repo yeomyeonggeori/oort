@@ -867,7 +867,8 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await openDm();
     if (unread > 0) {
       await waitFor(() => expect(screen.getByTestId('missed-digest-dismiss')).toBeTruthy());
-      expect(within(screen.getByTestId('timeline-list')).getByTestId('missed-digest-dismiss')).toBeTruthy();
+      // 카드는 목록 안이 아니라 머리 덮개 안의 띠다(#5436) - 닫으면 그 높이가 머리 높이에서 빠져 목록 안 머리 여백이 하나만 남는다.
+      expect(within(screen.getByTestId('conversation-header-overlay')).getByTestId('missed-digest-dismiss')).toBeTruthy();
       fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
     }
     expect(screen.queryByTestId('missed-digest-card')).toBeNull();
@@ -882,6 +883,39 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       if (node.type === 'View') expect(flat(node.props.style).paddingTop ?? 0).toBe(0);
       node = node.parent;
     }
+  });
+
+  it('S1 #5436: 안 읽은 동안 카드는 머리 덮개의 띠라서 착지 자리와 상관없이 머리 밑에 서고, 목록 위 여백·위 필은 카드 밑에서 시작한다', async () => {
+    peerKind = 'agent';
+    serverUnread = 6;
+    jest.spyOn(memoryApi, 'getMemorySettings').mockResolvedValue({
+      workspace: {enabled: true, paused: false, resetEpoch: 0}, channels: [], me: {paused: false},
+    });
+    jest.spyOn(memoryApi, 'listMemoryDigests').mockResolvedValue({
+      digests: [], afterSeq: HISTORY_COUNT - 6, summarizedThroughSeq: HISTORY_COUNT,
+    });
+    await openDm();
+    await waitFor(() => expect(screen.getByTestId('missed-digest-card')).toBeTruthy());
+    // 목록은 바닥에 앉으므로 목록 머리의 카드는 머리 밑으로 밀려 올라가 가렸다(402×874 실측 겹침 82pt). 카드는 목록 안에 없다.
+    expect(within(screen.getByTestId('timeline-list')).queryByTestId('missed-digest-card')).toBeNull();
+    const overlay = screen.getByTestId('conversation-header-overlay');
+    const header = within(overlay).getByTestId('conversation-header');
+    // 띠는 알약 줄 **다음** 형제다 - 알약 줄 밑에서 시작한다.
+    expect(
+      within(header).getAllByTestId(/^(conversation-header-row|missed-digest-card)$/).map(node => node.props.testID),
+    ).toEqual(['conversation-header-row', 'missed-digest-card']);
+    // 카드는 한 줄 띠다(뒷면 + 카드, 8 + 46 + 8 = 62pt, 시뮬레이터 실측 머리 덮개 0–124 → 0–186) - 목록에는 없고 머리 안에 서며 뒷면이 그 안에 든다.
+    expect(within(overlay).getByTestId('missed-digest-band')).toBeTruthy();
+    // 머리 덮개가 띠까지 잰 높이(121 + 62)가 목록 위 여백과 위 필의 높이다 - 맨 위의 날짜 칩·안 읽음 구분선이 띠 **밑**에서 시작한다(검수 B1: 「목록 첫 내용 위끝 ≥ 띠 아래끝」).
+    fireEvent(overlay, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121 + 62}}});
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121 + 62);
+    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121 + 62);
+    // 닫으면 띠가 사라지고 머리가 다시 121 을 재서 여백이 하나만 남는다.
+    fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
+    expect(screen.queryByTestId('missed-digest-card')).toBeNull();
+    fireEvent(overlay, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121}}});
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121);
+    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
   });
 
   it('S1 #4789 머리·연결 띠 높이는 목록 안 여백과 위 필로 건너가며 셀은 다시 그려지지 않는다', async () => {

@@ -17,6 +17,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {conversationFloor} from '../conversation/bubble';
 import {
   MISSED_DISMISS_A11Y,
   MISSED_EMPTY,
@@ -54,18 +55,44 @@ import {phaseOf, useMemorySettings, useMissedDigests} from './queries';
 
 const NO_DIGESTS: readonly MemoryDigest[] = [];
 
+/** 한 줄 띠의 문장 칸 testID — 상태마다 옛 카드와 같은 id 를 쓴다(시험·흐름이 상태를 id 로 읽는다). */
+const COMPACT_SENTENCE_ID = {
+  loading: 'missed-digest-loading',
+  error: 'missed-digest-error',
+  off: 'missed-digest-off',
+  notSummarized: 'missed-digest-pending',
+  empty: 'missed-digest-empty',
+  ready: 'missed-digest-ready',
+} as const;
+
+/**
+ * 요약이 없는 상태의 한 문장 — 옛 카드가 본문에 쓰던 그 문장이다. 열쇠가 식별자인 표라 문자열 비교·`case` 를 쓰지 않는다(직접 문구 장부 `direct-copy` 가
+ * 영단어 리터럴을 문구로 센다 — `bubble.ts` 의 `conversationFloor` 와 같은 이유). 꺼짐의 이유는 상태가 든 `cause` 가 문장을 정하고 요약이 선 때는 첫 줄이 문장이다.
+ */
+const COMPACT_NOTICE: Readonly<Record<Exclude<MissedCardState['kind'], 'hidden'>, string>> = {
+  loading: MISSED_LOADING,
+  error: MISSED_ERROR,
+  off: '',
+  notSummarized: MISSED_NOT_SUMMARIZED,
+  empty: MISSED_EMPTY,
+  ready: '',
+};
+
 export function MissedDigestCardView({
   state,
   onDismiss,
   onRetry,
   onMore,
   onOpenEvidence,
+  compact = false,
 }: {
   state: MissedCardState;
   onDismiss: () => void;
   onRetry?: () => void;
   onMore?: () => void;
   onOpenEvidence?: (link: MemoryEvidenceLink) => void;
+  /** 한 줄 띠(#5436): 머리 밑에 붙는 자리용. 전문·근거는 「더 보기」 시트가 든다. 스레드 패널의 목록 머리 카드는 그대로(`false`). */
+  compact?: boolean;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const readyDigests = state.kind === 'ready' ? state.digests : null;
@@ -78,6 +105,62 @@ export function MissedDigestCardView({
     [readyDigests],
   );
   if (state.kind === 'hidden') return null;
+  if (compact) {
+    // 한 줄 띠 (#5436): 「안 읽은 동안」 · 요약 한 줄(말줄임) · [더 보기|다시 시도] · ✕. 높이는 상태와 상관없이 한 줄(`TOUCH_TARGET`)이라 머리 높이가 흔들리지 않고(진입 뒤
+    // 목록 여백이 움직이지 않는다), 목록 첫 줄을 가리는 양이 가장 작다. 요약 전문·근거 알약은 이미 있는 「더 보기」 시트(`MemoryDigestSheet`)로 간다.
+    const offCause = (state as {cause?: keyof typeof MISSED_OFF}).cause;
+    const summary =
+      readyDigests !== null
+        ? (lines.shown[0] ?? MISSED_EMPTY)
+        : offCause !== undefined
+          ? MISSED_OFF[offCause]
+          : COMPACT_NOTICE[state.kind];
+    const actions: Record<string, {label: string; onPress?: () => void; testID: string} | undefined> = {
+      error: {label: MISSED_RETRY, onPress: onRetry, testID: 'missed-digest-retry'},
+      ready: {label: MISSED_MORE, onPress: onMore, testID: 'missed-digest-more'},
+    };
+    const action = actions[state.kind];
+    return (
+      <View style={styles.band} testID="missed-digest-band">
+        {/* 뒷면의 아래끝을 알리는 1pt 이음매 - 화면이 읽는 높이가 아니라 **흐름이 재는 자리**다. Maestro 의 `below` 는 「위끝이 더 아래」를 비교해서 띠 뒤에 가린 요소도 통과시키므로
+            (실측: 뒷면 안 날짜 칩이 `below: missed-digest-band` 를 통과했다), 「목록 첫 내용이 띠 밑에서 시작한다」는 이 이음매 `below` 로 잰다(`5436-unread-card-clear`). */}
+        <View collapsable={false} pointerEvents="none" style={styles.bandEdge} testID="missed-digest-band-end" />
+        <View style={[styles.card, styles.cardCompact]} testID="missed-digest-card">
+          <View style={styles.head}>
+            <Text accessibilityRole="header" style={styles.title}>
+              {MISSED_TITLE}
+            </Text>
+            <Sentence
+              ellipsizeMode="tail"
+              numberOfLines={1}
+              style={[styles.muted, styles.compactText]}
+              testID={COMPACT_SENTENCE_ID[state.kind]}>
+              {summary}
+            </Sentence>
+            {action?.onPress ? (
+              <Pressable
+                accessibilityRole="button"
+                // 보이는 높이는 알약(`PILL_HEIGHT` 28)이지만 눌림은 44 다 — 위아래만 넓히므로 오른쪽 ✕ 의 눌림 상자(`dismiss`, 44×44)와 가로로 겹치지 않는다(재검수 H2).
+                hitSlop={{top: slopTo(PILL_HEIGHT), bottom: slopTo(PILL_HEIGHT)}}
+                onPress={action.onPress}
+                style={({pressed}) => [styles.more, pressed && styles.pressed]}
+                testID={action.testID}>
+                <Text style={styles.action}>{action.label}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={MISSED_DISMISS_A11Y}
+              onPress={onDismiss}
+              style={({pressed}) => [styles.dismiss, pressed && styles.pressed]}
+              testID="missed-digest-dismiss">
+              <Image source={SHEET_ICONS.close} style={styles.dismissGlyph} />
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
   const more =
     state.kind === 'ready' &&
     (lines.hidden > 0 || state.digests.length > 1 || evidence.length > MISSED_MAX_EVIDENCE);
@@ -184,6 +267,7 @@ export function MissedDigestCard({
   headSeq,
   eligible = true,
   onOpenEvidence,
+  compact = false,
 }: {
   workspaceId: string;
   channelId: string;
@@ -193,6 +277,8 @@ export function MissedDigestCard({
   headSeq: number;
   eligible?: boolean;
   onOpenEvidence?: (link: MemoryEvidenceLink) => void;
+  /** 한 줄 띠로 그린다(#5436) — 대화 화면의 머리 밑 띠. */
+  compact?: boolean;
 }): React.JSX.Element | null {
   const visitId = `${channelId}:${threadRootId ?? '-'}:${sinceSeq}`;
   const [dismissedId, setDismissedId] = useState<string | null>(null);
@@ -234,6 +320,7 @@ export function MissedDigestCard({
         onRetry={() => void digests.refetch()}
         onMore={() => setSheetOpen(true)}
         onOpenEvidence={onOpenEvidence}
+        compact={compact}
       />
       {sheetOpen && state.kind === 'ready' ? (
         <MemoryDigestSheet
@@ -283,6 +370,13 @@ const buildStyles = (color: Palette) =>
       borderColor: color.border,
       backgroundColor: color.surface,
     },
+    // 한 줄 띠(#5436). 뒷면(`band`)은 대화 바닥 색 한 장 — 카드 둘레 틈·둥근 모서리로 밑을 지나는 목록 글자가 비치지 않게 한다.
+    band: {backgroundColor: conversationFloor(color)},
+    // 아래끝 1pt: 절대 배치 틀(`absoluteFill`)에서 위를 풀고 높이를 1 로 - 문자열 리터럴 없이(`direct-copy`).
+    bandEdge: {...StyleSheet.absoluteFill, top: undefined, height: 1},
+    // 한 줄: 안쪽 줄은 옛 카드의 `head`(가로·가운데·최소 `TOUCH_TARGET`)를 그대로 쓰고, 아래 여백만 뺀다.
+    cardCompact: {paddingBottom: 0},
+    compactText: {flex: 1, flexShrink: 1, marginHorizontal: space.sm},
     head: {
       flexDirection: 'row',
       alignItems: 'center',
