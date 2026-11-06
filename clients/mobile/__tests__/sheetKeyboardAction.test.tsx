@@ -27,7 +27,13 @@ import {
 } from 'react-native';
 
 import {REACTION_GLYPH_MAX_SCALE, ROW_GLYPH_MAX_SCALE} from '../src/design/atoms';
-import {PageSheet, usePageSheetAction, usePageSheetClose} from '../src/design/PageSheet';
+import {
+  HANDOFF_WATCHDOG_MS,
+  PageSheet,
+  usePageSheetAction,
+  usePageSheetClose,
+  usePageSheetHandoff,
+} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {sheetFrame, sheetTop, type SheetHeight} from '../src/design/sheetModel';
 import {
@@ -54,6 +60,7 @@ import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
+import {captureNativeDismiss, isModalDown} from './fixtures/nativeDismiss';
 import {describeCloseContract} from './fixtures/sheetContract';
 
 // =============================================================================
@@ -150,6 +157,16 @@ function RunAfterClose({action}: {action: () => void}) {
   const run = usePageSheetAction();
   return (
     <Pressable testID="run" onPress={() => run(action)}>
+      <Text>행동</Text>
+    </Pressable>
+  );
+}
+
+/** 시트 안의 행동 하나 - `usePageSheetHandoff`(다른 Modal·시스템 화면을 띄우는 행동)의 배선을 그대로 쓴다. */
+function RunAfterDismissed({action}: {action: () => void}) {
+  const run = usePageSheetHandoff();
+  return (
+    <Pressable testID="run-handoff" onPress={() => run(action)}>
       <Text>행동</Text>
     </Pressable>
   );
@@ -590,6 +607,74 @@ describe('행동은 시트가 미끄러져 내린 뒤에 한 번 불린다 (useP
     });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledWith();
+  });
+});
+
+describe('다른 시트를 띄우는 행동은 Modal 이 iOS 에서 다 내려간 뒤에 불린다 (usePageSheetHandoff, #5417)', () => {
+  // Jest 의 Modal 은 `visible=false` 면 트리에서 사라진다 - 「사라졌다」가 곧 「그릇이 Modal 을 내렸다」다(`fixtures/nativeDismiss.ts`).
+  it('Modal 만 먼저 내리고 iOS 의 신호 전에는 onClose 도 행동도 없다 - 신호가 오면 onClose 먼저, 행동 나중, 각각 한 번', async () => {
+    const calls: string[] = [];
+    const onClose = jest.fn(() => calls.push('close'));
+    const action = jest.fn(() => calls.push('action'));
+    // 동작 줄이기가 켜져 있어도 신호를 기다린다 - 줄이는 것은 슬라이드이지 iOS 의 Modal 내림이 아니다.
+    await mount(
+      <Sheet onClose={onClose}>
+        <RunAfterDismissed action={action} />
+      </Sheet>,
+      true,
+    );
+    const signal = captureNativeDismiss('sheet');
+    expect(isModalDown('sheet')).toBe(false);
+    fireEvent.press(screen.getByTestId('run-handoff'));
+    expect(isModalDown('sheet')).toBe(true);
+    expect(calls).toEqual([]);
+    signal();
+    expect(calls).toEqual(['close', 'action']);
+    // 늦게 온 둘째 신호는 아무것도 다시 부르지 않는다.
+    signal();
+    expect(calls).toEqual(['close', 'action']);
+  });
+
+  it('신호가 끝내 안 오면 안전망 시계가 한 번 부른다 - 그 뒤에 온 신호는 아무것도 다시 부르지 않는다', async () => {
+    const calls: string[] = [];
+    const onClose = jest.fn(() => calls.push('close'));
+    const action = jest.fn(() => calls.push('action'));
+    await mount(
+      <Sheet onClose={onClose}>
+        <RunAfterDismissed action={action} />
+      </Sheet>,
+      true,
+    );
+    const signal = captureNativeDismiss('sheet');
+    fireEvent.press(screen.getByTestId('run-handoff'));
+    expect(action).not.toHaveBeenCalled();
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1), {timeout: HANDOFF_WATCHDOG_MS + 4000});
+    expect(calls).toEqual(['close', 'action']);
+    signal();
+    expect(calls).toEqual(['close', 'action']);
+  }, 15000);
+
+  it('기다리는 도중 부모가 시트를 걷으면 행동은 그 언마운트에서 한 번 불린다 - 불리지 않음은 없다', async () => {
+    const calls: string[] = [];
+    const onClose = jest.fn(() => calls.push('close'));
+    const action = jest.fn(() => calls.push('action'));
+    const view = await mount(
+      <Sheet onClose={onClose}>
+        <RunAfterDismissed action={action} />
+      </Sheet>,
+      true,
+    );
+    fireEvent.press(screen.getByTestId('run-handoff'));
+    expect(calls).toEqual([]);
+    view.unmount();
+    expect(calls).toEqual(['close', 'action']);
+  });
+
+  it('시트 밖에서는 바로 부른다 - 기다릴 Modal 이 없다', async () => {
+    const action = jest.fn();
+    await mount(<RunAfterDismissed action={action} />, false);
+    fireEvent.press(screen.getByTestId('run-handoff'));
+    expect(action).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1126,7 +1211,6 @@ describe('메시지 행동 시트: 고르면 곧 닫히는 행동은 슬라이�
     ['인용하기', 'sheet-quote', 'onQuote', 'quote'],
     ['복사하기', 'sheet-copy', 'onCopy', 'copy'],
     ['고정하기', 'sheet-pin', 'onPin', 'pin'],
-    ['고치기', 'sheet-edit', 'onEdit', 'edit'],
     ['빠른 반응', `quick-reaction-${QUICK_REACTIONS[0]}`, 'onToggleReaction', 'react'],
   ];
 
@@ -1152,6 +1236,20 @@ describe('메시지 행동 시트: 고르면 곧 닫히는 행동은 슬라이�
     expect(handlers[handler]).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(['close', name]);
   });
+
+  it('고치기는 한 걸음 더 기다린다 - 슬라이드가 끝나도 iOS 가 Modal 을 다 내렸다고 알리기 전에는 onClose·onEdit 이 없고, 신호가 오면 onClose → onEdit 이 한 번씩 (#5417)', async () => {
+    const calls: string[] = [];
+    const {handlers, ui} = messageSheet(calls);
+    await mount(ui, false);
+    const signal = captureNativeDismiss('message-action-sheet');
+    fireEvent.press(screen.getByTestId('sheet-edit'));
+    expect(handlers.onEdit).not.toHaveBeenCalled();
+    await waitFor(() => expect(isModalDown('message-action-sheet')).toBe(true), {timeout: 8000});
+    // 슬라이드가 끝나 Modal 이 내려갔다. 그래도 아직 신호 전이다: 부모는 이 시트를 걷지도, 편집 시트를 세우지도 않았다.
+    expect(calls).toEqual([]);
+    signal();
+    expect(calls).toEqual(['close', 'edit']);
+  }, 15000);
 
   it('미리보기와 삭제 확인의 머리말·설명이 `hangul-word` 줄바꿈 전략을 든다 (렌더된 줄바꿈과 조사 고아는 캡처와 아래 문구 훑기가 잰다)', async () => {
     const calls: string[] = [];

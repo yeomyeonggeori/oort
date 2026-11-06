@@ -1,0 +1,73 @@
+appId: app.momo.ios
+name: 5417-edit-from-sheet-live
+---
+# 5417-edit-from-sheet-live — 내 글을 길게 눌러 「고치기」를 누르면 편집 시트가 선다 (#5417, 검증 6a High).
+#
+# 결함: 시트에서 「고치기」를 누르면 행동 시트만 닫히고 편집 시트가 **아예 안 떴다**(6a Maestro 3/3). 행동 시트는 미끄러져 내린 뒤 부모가 언마운트하고
+# (`onClose`), 같은 틱에 편집 시트를 마운트(`setEditing(true)`)한다 - 내려가는 Modal 과 올라오는 Modal 이 한 화면 갱신에 겹치면 iOS 가 뒤의 제시를 거절하고
+# RN 은 이미 떴다고 믿는다(그래서 다시 시도하지도 않는다). 시간을 늦추는 것(700ms)은 이 흐름이 통과하게 하지만 신호가 아니라 어림이다. 고친 뒤에는 시트가 iOS 가
+# 「다 내렸다」고 알린 뒤(`Modal` 의 `onDismiss`)에야 편집 시트를 세운다(`usePageSheetHandoff`).
+#
+# 표면 `-momoMeasure EDIT-LIVE`(`measure/editLive.tsx`)는 진짜 머리·타임라인·컴포저가 선 대화에 **저장이 글을 바꾸는** 행 동작만 얹는다(서버 불필요).
+# 길게 누르기·「고치기」 누르기·편집 시트가 서는 것·저장 모두 이 흐름의 **실제 탭**이다.
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure EDIT-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test clients/mobile/maestro/5417-edit-from-sheet-live.yaml
+#
+# 이 흐름이 재는 것(눈이 아니라 단정이다):
+#   ① 내 글을 길게 누르면 시트 맨 위 줄 「고치기」가 선다.
+#   ② 「고치기」를 누르면 **편집 시트의 입력칸**(`editor-input`)이 선다 - 고치기 전에는 여기서 10초를 기다리다 떨어진다.
+#   ③ 고쳐 쓰고 ✓ 를 누르면 편집 시트가 닫히고(입력칸이 사라진다) 행 꼬리에 「수정됨」이 서며 글이 바뀐다(옛 글은 사라진다).
+#
+# 입력은 ASCII 다: Maestro 의 `inputText` 는 시뮬레이터에서 한글 조합을 못 친다(조합 깨짐은 앱이 아니라 도구의 한계).
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 90000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+# 디버그 빌드의 LogBox 띠가 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- waitForAnimationToEnd:
+    timeout: 3000
+# ① 내 글을 길게 눌러 시트를 연다. 맨 위 줄이 「고치기」다.
+- longPressOn:
+    id: "message-press"
+    text: ".*회의 시간은 3시로 정했어요.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-edit"
+    timeout: 10000
+- takeScreenshot: 5417-1-sheet
+# ② 「고치기」 - 시트가 내려간 **뒤** 편집 시트가 선다.
+- tapOn:
+    id: "sheet-edit"
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 10000
+- assertVisible: "메시지 고치기"
+- takeScreenshot: 5417-2-editor
+# ③ 고쳐 쓰고 저장한다. 입력칸은 처음 글(13자)로 열리므로 넉넉히 지우고 쓴다.
+- eraseText: 60
+- inputText: "meeting moved to 4pm"
+- tapOn:
+    id: "editor-save"
+# 편집 시트가 닫힌다(입력칸이 위에서 보였으므로 「사라짐」은 실제로 있었던 것이 없어진 것이다).
+- extendedWaitUntil:
+    notVisible:
+      id: "editor-input"
+    timeout: 20000
+# ④ 행 꼬리 「수정됨」 + 새 글. 옛 글은 없다.
+- extendedWaitUntil:
+    visible:
+      id: "edited-mark"
+    timeout: 20000
+- assertVisible: ".*meeting moved to 4pm.*"
+- assertNotVisible: ".*회의 시간은 3시로 정했어요.*"
+- takeScreenshot: 5417-3-saved

@@ -13,7 +13,7 @@ import {
 import React, {useCallback, useState} from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
-import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
+import {PageSheet, usePageSheetAction, usePageSheetHandoff} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {
   ConfirmStep,
@@ -83,6 +83,10 @@ export function timeLabel(atMs: number): string {
 // (동작 줄이기면 바로). 반응이 칩으로 보이는 데 슬라이드 한 번(260ms)이 더 걸린다 - 고른 것이 시트와
 // 함께 사라지고 그 자리에서 칩이 늘어난다.
 //
+// 「고치기」는 닫는 길이되 **한 걸음 더 기다린다** (#5417): 행동이 곧바로 다른 `Modal`(편집 시트)을 띄우므로, 슬라이드가 끝난 뒤에도 iOS 가 이 시트의 Modal 을
+// 다 내렸다고 알릴 때까지(`usePageSheetHandoff`) `onClose` 와 `onEdit` 을 부르지 않는다. 한 화면 갱신에 시트 언마운트와 편집 시트 마운트가 겹치면 iOS 가
+// 편집 시트의 제시를 거절해 영영 안 떴다(검증 6a High). 그 밖의 행(답글·인용·복사·고정·반응)은 다른 Modal 을 띄우지 않으므로 그대로 `closesSheet` 다.
+//
 // 닫는 길로 보내지 **않는** 둘: 「지우기」 행은 시트 안에서 확인 단계로 넘어갈 뿐이고, 확인의 「지우기」
 // 는 왕복이 도는 동안 시트가 「지우는 중…」을 말해야 한다(성공 뒤에야 부모가 닫는다). 이 닫힘은 부모의
 // `.then(() => setSheetOpen(false))` 라 지금도 스냅이다 - PR 「발견」 참조.
@@ -130,6 +134,7 @@ export interface MessageActionSheetProps {
    * 진다. 고정은 **채널의 사실**이라 작성자 관문이 없다.
    */
   onPin?: () => void;
+  /** 「고치기」. 시트가 미끄러져 내리고 iOS 가 그 Modal 을 **다 내린 뒤에** `onClose` 다음으로 불린다(#5417) - 편집 시트처럼 다른 Modal 을 곧바로 세워도 된다. */
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -182,6 +187,7 @@ function SheetBody({
   const styles = useStyles(buildStyles);
   const locale = useLocaleService();
   const afterClose = usePageSheetAction();
+  const afterDismissed = usePageSheetHandoff();
   // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
   const openMadeConversation = useMakeLanding();
   const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
@@ -210,11 +216,11 @@ function SheetBody({
     // 고치기는 **맨 위 줄**이다(#5326, owner 2026-11-05: 고치기를 찾지 못했다). 내 메시지에서만 서고(`availability.edit` = 작성자 본인의
     // 살아 있는 글), 남의 메시지의 시트는 답글 달기가 첫 줄이다. 웹 호버 막대의 연필과 같은 낱말이다.
     availability.edit ? (
+      // `closesSheet` 가 아니다: 편집 시트는 **다른 Modal** 이라 이 시트의 Modal 이 iOS 에서 다 내려간 뒤에 세워야 한다(#5417, 위 「고치기는 한 걸음 더」).
       <ListRow
         key="edit"
         title="고치기"
-        onPress={onEdit}
-        closesSheet
+        onPress={() => afterDismissed(onEdit)}
         testID="sheet-edit"
       />
     ) : null,
