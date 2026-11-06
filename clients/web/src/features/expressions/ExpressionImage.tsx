@@ -131,7 +131,7 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
     {image}
     {/* 멈춘 그림 위에 덮는 단추: <img> 를 단추 안으로 옮기면 노드가 새로 만들어져 깜빡이므로, 그림은 그대로 두고 단추만 얹는다. */}
     {stopped && !still && !reduce && size !== "reaction" && (
-      <button type="button" onClick={() => { setStopped(false); setReplay((value) => value + 1); }} aria-label={`${item.displayName} 다시 재생`} className="absolute inset-0 rounded-sm focus-visible:focus-ring" />
+      <button type="button" onClick={() => { setStopped(false); setReplay((value) => value + 1); }} aria-label={`${item.displayName} 다시 재생`} className="absolute inset-0 rounded-sm press focus-visible:focus-ring" />
     )}
     {size === "large" && failed === key && !offline && <button type="button" onClick={() => { setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}
   </span>;
