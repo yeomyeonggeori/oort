@@ -113,6 +113,11 @@ FAKE_HERMES = textwrap.dedent(
     out("  Or paste the redirect URL here and press Enter. Type skip to continue without this server:")
     line = sys.stdin.readline().strip()
     finish(line)
+    if sc.get("hold_until_release"):  # the vendor exchange stays in flight until the test creates $HOME/release
+        for _ in range(600):
+            if os.path.exists(os.path.join(home, "release")):
+                break
+            time.sleep(0.05)
     from urllib.parse import urlsplit, parse_qs
     q = parse_qs(urlsplit(line).query)
     if q.get("state", [""])[0] != state:
@@ -325,6 +330,7 @@ class RedProofs(unittest.TestCase):
     # --- 3: state mismatch writes nothing to stdin; redirect mismatch 400; second complete 409 -------------------
     def test_rp03_state_mismatch_writes_nothing_then_retry_then_once(self):
         h = Harness(self)
+        h.scenario({"hold_until_release": True})  # the child keeps the exchange open after it read the line (see below)
         r = h.start("mcp", "notes")[1]
         lid = r["login_id"]
         st, body, _ = h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_mcp(h, MARK_CODE, state="WRONG")}, op=OP)
@@ -337,9 +343,18 @@ class RedProofs(unittest.TestCase):
         self.assertIsNone(h.stdin_log())
         st, _, _ = h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_mcp(h, MARK_CODE)}, op=OP)
         self.assertEqual(st, 200)
+        # A second paste gets one of two different 409s, by where the login is: `already_submitted` while the exchange is
+        # in flight (pending, line written), `not_pending` once the child has finished. Which one a free-running child
+        # produces depends on the machine's load (the child can finish before the second request arrives), so the child is
+        # held: it has read the line (stdin.log) and waits for $HOME/release. Each answer is then asserted where it is true.
+        self.assertTrue(h.wait_until(lambda: h.stdin_log() is not None), "the child never read the pasted line")
         st, body, _ = h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_mcp(h, MARK_CODE)}, op=OP)
         self.assertEqual((st, body), (409, {"error": "already_submitted"}))
+        self.assertEqual(h.call("GET", "/v1/login/" + lid, op=OP)[1], {"status": "pending"})  # still exchanging
+        open(os.path.join(h.data, "release"), "w").close()
         h.wait_status(lid, "done")
+        st, body, _ = h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_mcp(h, MARK_CODE)}, op=OP)
+        self.assertEqual((st, body), (409, {"error": "not_pending"}))  # finished: no longer pending
         self.assertEqual(h.stdin_log().count("\n"), 1)  # exactly one line ever reached the child
 
     def test_rp03_three_rejections_cancel_the_login_and_kill_the_child(self):
