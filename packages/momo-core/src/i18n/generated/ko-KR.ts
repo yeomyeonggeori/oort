@@ -4907,7 +4907,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 이모티콘 창은 이모티콘, 이모지, GIF 세 탭으로 정리되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
+      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 이모티콘 창은 우리 팀, 기본, GIF 세 탭으로 정리되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [

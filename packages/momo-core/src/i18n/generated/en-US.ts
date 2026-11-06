@@ -5083,7 +5083,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Emoticons, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Team, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [
