@@ -18,7 +18,8 @@
 //   툴팁        처음 가리키면 ≤ 200ms 안에 선다(목표 ≤ 150, 정확한 경계는 `tooltipDelay.test.ts`가 가짜 시계로 잰다),
 //               옆 단추로 옮기면 바로 선다(≤ 80ms, 한 번에 하나), 빠른 통과는 안 뜨고, 키보드 초점은 즉시 뜬다.
 //   겹침        넓은 판(1440)은 도구 막대 ∩ 이웃 글자 = 0 (레인 공용 자 `lib/hoverToolbarOverlap.mjs`). 좁은 판(900)의 겹침은 #4231 1번의
-//               기존 결함이고 값이 실행마다 0↔16으로 흔들려 로그에만 적는다. 대신 도구 막대 너비(223)가 커지지 않았는지를 결정적으로 단정한다.
+//               기존 결함이고 값이 실행마다 0↔16으로 흔들려 로그에만 적는다. 대신 도구 막대 너비(남의·에이전트 223, 내 행 257)가 커지지 않았는지를
+//               결정적으로 단정한다.
 //
 // 백엔드는 없다: `/v1/**` 는 고정 응답이고 소켓은 구독만 받는다. 인물은 전부 가상이다(레포는 공개).
 // 단언이 하나라도 실패하면 종료 코드 1(고치기 전 번들에서는 붉은 것이 정상: 그것이 「고치기 전 RED」다).
@@ -46,12 +47,15 @@ const FIRST_TIP_MAX_MS = 200;
 /** 옆 단추로 옮겼을 때 툴팁이 서기까지의 상한(ms): 지연이 없으니 렌더 한두 프레임이다. */
 const HOP_TIP_MAX_MS = 80;
 /**
- * 호버 도구 막대의 너비 상한(css px). 변경 전·후 모두 223×42였고, 내·남의·에이전트 행이 같다(고치기 연필을 올려 보면 내 행만 257로 +34).
+ * 호버 도구 막대의 너비 상한(css px). 남의·에이전트 행은 변경 전과 같은 223×42다. 내 행은 고치기 연필(#5326, `toolbar-edit`)이 도구 막대에
+ * 올라 한 칸(34)이 더해진 257×42다(7번째 단추): 연필은 내 메시지에만 서므로 두 상한을 따로 둔다.
  * #4231 1번(900폭에서 도구 막대가 앞 행 끝줄을 덮음)은 이 이슈 이전부터 있던 결함이다. 덮는 글자 수는 앞 행의 마지막 줄이 막대 왼쪽 끝에
  * 닿느냐에 달려 **실행마다 0과 16 사이로 흔들려서**(같은 번들·같은 레인을 반복해도 그렇다) 상한 가드로 쓰지 못한다(값은 로그에만 적는다).
- * 대신 원인인 도구 막대의 **크기**를 결정적으로 가둔다: 막대를 키우는 변경은 덮는 글자를 늘리고 내·남의 행의 모양을 갈라 놓는다.
+ * 대신 원인인 도구 막대의 **크기**를 결정적으로 가둔다: 막대를 키우는 변경은 덮는 글자를 늘리고 행의 모양을 갈라 놓는다.
  */
 const TOOLBAR_MAX_WIDTH = 223.5;
+/** 내 메시지의 도구 막대 상한: 남의 행 223 + 연필 한 칸 34. 연필 말고 단추가 하나라도 더 오르면 이 상한이 잡는다. */
+const TOOLBAR_MAX_WIDTH_OWN = 257.5;
 /** 이 폭부터는 본문 판이 넉넉해 막대 아래 이웃 글자가 없어야 한다(0 단정). */
 const WIDE_PANE_MIN_VIEWPORT = 1100;
 
@@ -367,10 +371,16 @@ async function runKind(page, tag, k, shotTag) {
   const bar = await rectOf(page, '[data-testid="message-hover-toolbar"]');
   check(`${name}: 호버로 도구 막대가 선다(화면에 하나만)`, bar !== null && (await toolbarCount(page)) === 1, `count=${await toolbarCount(page)}`);
   note(`도구 막대 상자 ${bar ? `${bar.w}×${bar.h}` : "없음"}`);
-  check(`${name}: 도구 막대 너비가 변경 전(223px)보다 커지지 않았다(막대를 키우면 좁은 판 겹침 #4231 1번이 커진다)`, bar !== null && bar.w <= TOOLBAR_MAX_WIDTH, `w=${bar?.w}`);
-  // 고치기 연필은 도구 막대에 올리지 않는다(Buzz·Slack 모두 ⋮ 안): 내 메시지의 막대도 남의 메시지와 같은 단추 6개(반응 3 · 더하기 · 답글 · ⋮)다.
+  const widthMax = k.own ? TOOLBAR_MAX_WIDTH_OWN : TOOLBAR_MAX_WIDTH;
+  check(`${name}: 도구 막대 너비가 한계(${k.own ? "연필 포함 257" : "223"}px)를 넘지 않았다(막대를 키우면 좁은 판 겹침 #4231 1번이 커진다)`, bar !== null && bar.w <= widthMax, `w=${bar?.w} 한계=${widthMax}`);
+  // 고치기 연필(#5326)은 내 메시지의 도구 막대에만 선다: 내 행은 단추 7개(반응 3 · 더하기 · 답글 · 연필 · ⋮), 남의·에이전트 행은 6개(연필 없음).
   const itemCount = await row.locator('[data-testid="message-hover-toolbar"] [data-toolbar-item]').count();
-  check(`${name}: 도구 막대 단추는 6개로 내·남의·에이전트 행이 같다(고치기 연필 없음)`, itemCount === 6, `count=${itemCount}`);
+  const pencilCount = await row.locator('[data-testid="toolbar-edit"]').count();
+  check(`${name}: 도구 막대 단추는 ${k.own ? "7개(고치기 연필 있음)" : "6개(고치기 연필 없음)"}다`, itemCount === (k.own ? 7 : 6) && pencilCount === (k.own ? 1 : 0), `count=${itemCount} pencil=${pencilCount}`);
+  if (k.own) {
+    const pencil = await glyphs(row.locator('[data-testid="toolbar-edit"]'));
+    check(`${name}: 연필 단추의 아이콘은 연필이다`, pencil[0] === "lucide-pencil", `pencil=${pencil}`);
+  }
   const trigger = row.locator('[data-testid="message-actions-trigger"]');
   const dots = await glyphs(trigger);
   const more = await glyphs(row.locator('[data-testid="toolbar-react-more"]'));
@@ -466,6 +476,8 @@ async function runKind(page, tag, k, shotTag) {
     });
     await page.mouse.click(spot.x, spot.y, { button: "right" });
     const opened = await page.locator('[data-testid="message-context-menu"]').waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false);
+    // setTimeout(0) 이 읽기보다 늦으면 null 이 읽힌다(부하에서 한 번 그랬다): 채워질 때까지 기다린 뒤 읽는다. 값이 "" 가 아니면 아래 단정이 그대로 잡는다.
+    await page.waitForFunction(() => window.__selAtCtx !== null, null, { timeout: 2000 }).catch(() => {});
     const selAtCtx = await page.evaluate(() => window.__selAtCtx);
     const sequence = (await menuSequence(page, "message-context-menu", "context-")) ?? [];
     const sel = await page.evaluate((id) => {
