@@ -171,10 +171,12 @@ for (let index = 1; index < series.length; index++) {
   while (veilFrom > 0 && series[veilFrom - 1].ys.length < 2) veilFrom--;
   if (series[index].t - series[veilFrom].t < 0.15) continue;
   lastAny = index;
-  // 그 뒤로 대화가 적어도 1초는 화면에 있어야 한다(영상 끝에 찍힌 홈 화면·앱 종료 같은 잔상이 「마지막 전환」을 가로채지 못하게).
+  // 그 뒤로 행이 서 있는 프레임이 이어져야 한다(영상 끝에 찍힌 홈 화면·앱 종료 같은 잔상이 「마지막 전환」을 가로채지 못하게). 영상은 화면이 바뀔 때만 프레임을
+  // 쓰므로(`simctl io recordVideo`) 가만히 선 대화는 시간이 아니라 **프레임 수**로 잰다: 8프레임 이상, 또는 영상 끝까지 이어진 3프레임 이상.
   let hold = index;
   while (hold + 1 < series.length && series[hold + 1].ys.length >= 2) hold++;
-  if (series[hold].t - series[index].t >= 1) start = index;
+  const frames = hold - index + 1;
+  if (frames >= 8 || (hold === series.length - 1 && frames >= 3)) start = index;
 }
 // 영상이 짧아 1초 이상 이어진 전환이 없으면 마지막 전환을 쓴다.
 if (start < 0) start = lastAny;
