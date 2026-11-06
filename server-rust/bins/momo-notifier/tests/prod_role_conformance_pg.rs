@@ -1612,7 +1612,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
     // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
-    // lockdown, see below) and `attachment_media` (#4673 C5 lockdown, see below) are the only tables
+    // lockdown, see below), `attachment_media` (#4673 C5 lockdown, see below) and the four
+    // `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
     // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
@@ -1626,6 +1627,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname <> 'self_media_token' \
             AND c.relname <> 'team_ai_task' \
             AND c.relname <> 'attachment_media' \
+            AND c.relname NOT LIKE 'expression\\_set%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1778,10 +1780,78 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("attachment media table count");
+    // `expression-set-lockdown` (bootstrap_runtime_roles.sql, #5459 S1a; ADR-0218 증보 6 §12 L10.1):
+    // the set tables hold what the team AI planned and made before any person approved it, the writer
+    // is the BYPASSRLS `momo_worker`, and the BYPASSRLS roles skip RLS, so their table privileges are
+    // what keeps a forged or foreign row out. `momo_worker` stages and closes (heads and slots
+    // SELECT/INSERT/UPDATE, images SELECT/INSERT/DELETE, notices SELECT); `momo_app` decides and
+    // reclaims (heads and slots SELECT/UPDATE, images SELECT/DELETE, notices SELECT/INSERT); relay and
+    // the helper's read role touch nothing; the notifier reads three columns of the head (below).
+    let expression_set_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname IN ('expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice') \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM ( \
+                  (c.relname IN ('expression_set', 'expression_set_slot') \
+                     AND ((r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE')) \
+                          OR (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')))) \
+                  OR (c.relname = 'expression_set_image' \
+                     AND ((r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'DELETE')) \
+                          OR (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'DELETE')))) \
+                  OR (c.relname = 'expression_set_notice' \
+                     AND ((r.rolname = 'momo_worker' AND p.priv = 'SELECT') \
+                          OR (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'INSERT')))) ) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("expression set privilege scan");
+    // the notifier's one cross-tenant read, by column: workspace_id, state, expires_at of the head
+    let expression_set_column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s.%s has=%s', r.rolname, c.relname, a.attname, \
+                       has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT')) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'expression_set' \
+            AND has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT') \
+                IS DISTINCT FROM (r.rolname IN ('momo_app', 'momo_worker') \
+                                  OR (r.rolname = 'momo_notifier' AND a.attname IN ('workspace_id', 'state', 'expires_at'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("expression set column privilege scan");
+    let expression_set_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname IN ('expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice')",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("expression set table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
         "runtime roles cannot reach tables: {missing:?}"
+    );
+    assert_eq!(
+        expression_set_tables, 4,
+        "the scan must actually see all four expression_set tables, or it proves nothing"
+    );
+    assert!(
+        expression_set_drift.is_empty(),
+        "expression_set* privileges drifted from the lockdown: {expression_set_drift:?}"
+    );
+    assert!(
+        expression_set_column_drift.is_empty(),
+        "expression_set column privileges drifted (the notifier reads workspace_id, state, expires_at and nothing else): \
+         {expression_set_column_drift:?}"
     );
     assert!(
         box_drift.is_empty(),

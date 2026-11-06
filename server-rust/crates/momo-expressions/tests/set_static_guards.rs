@@ -140,11 +140,20 @@ fn the_block_still_says_what_it_exists_for() {
 #[test]
 fn the_verb_table_in_the_block_is_exactly_the_one_in_the_adr() {
     let expected: [(&str, &[&str]); 8] = [
-        ("expression_set/momo_worker", &["SELECT", "INSERT", "UPDATE"]),
+        (
+            "expression_set/momo_worker",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
         ("expression_set/momo_app", &["SELECT", "UPDATE"]),
-        ("expression_set_slot/momo_worker", &["SELECT", "INSERT", "UPDATE"]),
+        (
+            "expression_set_slot/momo_worker",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
         ("expression_set_slot/momo_app", &["SELECT", "UPDATE"]),
-        ("expression_set_image/momo_worker", &["SELECT", "INSERT", "DELETE"]),
+        (
+            "expression_set_image/momo_worker",
+            &["SELECT", "INSERT", "DELETE"],
+        ),
         ("expression_set_image/momo_app", &["SELECT", "DELETE"]),
         ("expression_set_notice/momo_worker", &["SELECT"]),
         ("expression_set_notice/momo_app", &["SELECT", "INSERT"]),

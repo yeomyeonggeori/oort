@@ -441,11 +441,13 @@ SCAN_SCOPE = [
         "column_reads": {
             "expression_draft": ["workspace_id", "state", "expires_at"],
             "expression_assembly": ["workspace_id", "state", "expires_at"],
+            "expression_set": ["workspace_id", "state", "expires_at"],
         },
         "why": (
             "notifier lib.rs:805 momo_expressions::sweep_expired: the cross-tenant candidate "
             "READ on the notifier pool (restart-safe byte TTL, ADR-0218 D2 / G3.6). "
-            "`SELECT workspace_id` over expression_draft ∪ expression_assembly filtered by "
+            "`SELECT workspace_id` over expression_draft ∪ expression_assembly ∪ expression_set (#5459, "
+            "ADR-0218 §12 L8-3: the staging sets whose two hours are up) filtered by "
             "state and expires_at: workspace ids only, never the prompt, the picture bytes, "
             "the requester or the agent. sweep_in_tx (SELECT … FOR UPDATE, the DELETE of the "
             "image bytes, the UPDATE of the headers) is the momo_app write pool's and must "
@@ -1420,7 +1422,7 @@ print(
 # UPDATE injected into the scanned sweep text is seen (→ RED), so dropping the entry cannot pass.
 EXPRESSION_SWEEP_COLUMNS = {"workspace_id", "state", "expires_at"}
 EXPRESSION_SWEEP_SCAN = "server-rust/crates/momo-expressions/src/store.rs"
-for table in ("expression_draft", "expression_assembly"):
+for table in ("expression_draft", "expression_assembly", "expression_set"):
     if table not in COLUMN_READS or table not in COLUMN_GRANTS:
         fail(f"{table} must be a column-scoped read (scan scope + bootstrap)")
     if COLUMN_GRANTS[table] != EXPRESSION_SWEEP_COLUMNS:

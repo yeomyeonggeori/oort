@@ -220,7 +220,7 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  -- 계획 열은 바뀌지 않는다. 장면 글은 NULL로 비우는 것만 허용한다(끝 길).
+  -- 계획 열은 바뀌지 않는다. 장면 글은 머리가 이미 expired일 때 NULL로 비우는 것만 허용한다(끝 길: 머리 먼저, 칸 다음).
   IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id OR NEW.set_id IS DISTINCT FROM OLD.set_id
      OR NEW.slot_index IS DISTINCT FROM OLD.slot_index OR NEW.kind IS DISTINCT FROM OLD.kind
      OR NEW.name IS DISTINCT FROM OLD.name OR NEW.display_name IS DISTINCT FROM OLD.display_name
@@ -228,8 +228,9 @@ BEGIN
      OR NEW.motion IS DISTINCT FROM OLD.motion THEN
     RAISE EXCEPTION 'expression set slot plan is immutable' USING ERRCODE = '23514';
   END IF;
-  IF NEW.scene IS DISTINCT FROM OLD.scene AND NEW.scene IS NOT NULL THEN
-    RAISE EXCEPTION 'expression set slot scene can only be blanked' USING ERRCODE = '23514';
+  IF NEW.scene IS DISTINCT FROM OLD.scene
+     AND (NEW.scene IS NOT NULL OR head_state IS DISTINCT FROM 'expired') THEN
+    RAISE EXCEPTION 'expression set slot scene can only be blanked once the set has expired' USING ERRCODE = '23514';
   END IF;
   IF NEW.state IS DISTINCT FROM OLD.state OR NEW.code IS DISTINCT FROM OLD.code THEN
     IF OLD.state <> 'planned' THEN

@@ -792,12 +792,25 @@ mod tests {
     /// theirs was in use. Tenant ENABLE + FORCE + `ws_isolation`, a composite FK into `member (workspace_id,
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
+    ///
+    /// 177 is #5459's 「이모티콘 세트 보관」 (ADR-0218 증보 6 §12 L10, S1a): the four tables
+    /// `expression_set` / `_slot` / `_image` / `_notice` (tenant ENABLE + FORCE + `ws_isolation`,
+    /// composite FKs including `(workspace, run, agent, channel)` into `agent_run`), the per-table
+    /// one-way triggers, the partial unique index that keeps one undecided set per agent, the
+    /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
+    /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
+    /// is the writer, so the block, not RLS, is the last door).
+    ///
+    /// **175 and 176 are reserved** for #5371 (attachment write token) and #5370 (task steps), which
+    /// land before this one; until they are in the tree the gap below is the only one allowed. When
+    /// they land the planner turns the expectation into plain `1..=177`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_174() {
+    fn discovers_contiguous_migrations_001_to_177() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=174).collect();
+        let reserved: [i64; 2] = [175, 176];
+        let expected: Vec<i64> = (1..=177).filter(|n| !reserved.contains(n)).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -805,7 +818,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=174 under {}",
+            "expected contiguous 001..=177 (except the reserved 175 and 176) under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -813,7 +826,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("174_member_activity"));
+            .starts_with("177_expression_set"));
     }
 
     #[test]
