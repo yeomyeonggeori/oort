@@ -3159,7 +3159,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Emoticons tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3279,7 +3279,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Emoticons"
+      "value": "Team"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -5014,6 +5014,318 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open a thread from the summary line under a message and choose Follow thread in its header. On the phone, try swiping a message too."
+    }
+  ],
+  "releaseNotes.v0143.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Web and desktop work console and emoticon lists now say if a failed load is offline or an unreachable server."
+    }
+  ],
+  "releaseNotes.v0143.agentsLine2": [
+    {
+      "type": 0,
+      "value": "The web and desktop work panel now calls its session list “Work sessions” and its host status “Where it runs”."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsChanged": [
+    {
+      "type": 0,
+      "value": "When you call an agent in a channel, its answer, approval cards and tool lines gather in a thread under your message. A 1:1 DM between you and an agent still answers in the conversation itself. The tick chip that marked a finished job is gone, while chips for other states, such as working, waiting for approval or failed, stay."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTitle": [
+    {
+      "type": 0,
+      "value": "Agent replies go to a thread"
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTryIt": [
+    {
+      "type": 0,
+      "value": "Call an agent in a channel, then open the thread from the replies line under your message to read the answer."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, attaching files makes the composer grow less, with a tighter gap between the cards and your text."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the ✕ on a link card shows only on hover or keyboard selection, and always on touch screens."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Team, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTitle": [
+    {
+      "type": 0,
+      "value": "Composer attachments and the emoticon picker"
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, keep the keyboard open and attach a photo with +. Then open the emoticon picker with the smiley button in the composer and look through the three tabs."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "Also send to the conversation is gone from thread replies, and ones already sent that way now show only in the thread."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, sending no longer flashes a Sending line that shifts rows, and only a slow send shows a small clock."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "In a thread, a quote that points at the top message is no longer shown, so the same words are not repeated."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine1": [
+    {
+      "type": 0,
+      "value": "The hover toolbar now leaves with the pointer after you close the ⋮ menu or pick an action from it."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine2": [
+    {
+      "type": 0,
+      "value": "A work band appearing above the composer no longer hides the hover toolbar beneath it while the pointer rests."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine3": [
+    {
+      "type": 0,
+      "value": "The thread reply box on web and desktop now looks like the channel composer."
+    }
+  ],
+  "releaseNotes.v0143.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0143.editMessageChanged": [
+    {
+      "type": 0,
+      "value": "Your own messages get a pencil button in the hover toolbar, and on the phone Edit is now the top row of the long-press sheet. The Edited mark now shows when you edited, as a tooltip on hover on web and desktop and when you tap it on the phone."
+    }
+  ],
+  "releaseNotes.v0143.editMessageTitle": [
+    {
+      "type": 0,
+      "value": "Editing messages and seeing when you edited"
+    }
+  ],
+  "releaseNotes.v0143.editMessageTryIt": [
+    {
+      "type": 0,
+      "value": "Hover over one of your messages, click the pencil and edit it, then point at Edited. On the phone, long-press your message, tap Edit at the top, then tap Edited."
+    }
+  ],
+  "releaseNotes.v0143.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "The kinds you pick when registering are now Small emoticon (goes into the input) and Large emoticon (preview first)."
+    }
+  ],
+  "releaseNotes.v0143.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetChanged": [
+    {
+      "type": 0,
+      "value": "When something is unread, the oort icon in the Mac menu bar turns its small top right planet orange instead of adding a dot. With nothing unread, it stays a single plain color as before."
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTitle": [
+    {
+      "type": 0,
+      "value": "The orange planet in the menu bar icon"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTryIt": [
+    {
+      "type": 0,
+      "value": "Compare the menu bar icon when you have unread notifications and after you have read them all."
+    }
+  ],
+  "releaseNotes.v0143.networkLine1": [
+    {
+      "type": 0,
+      "value": "On the phone, the connection band no longer lingers for over 30 seconds until you unlock the phone."
+    }
+  ],
+  "releaseNotes.v0143.networkLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a failed load is no longer announced twice: one sidebar line and one box in the main pane."
+    }
+  ],
+  "releaseNotes.v0143.networkLine3": [
+    {
+      "type": 0,
+      "value": "On web and desktop, failed loads in sidebar DMs, drafts, mentions and the team board say why and keep saved content."
+    }
+  ],
+  "releaseNotes.v0143.networkLine4": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the inbox offline band calls the list a snapshot only when a saved list shows below it."
+    }
+  ],
+  "releaseNotes.v0143.networkTopic": [
+    {
+      "type": 0,
+      "value": "Connection"
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Read items in the inbox no longer keep an unread dot, on the phone, web and desktop."
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "When remote work asks for approval, the phone alert goes only to the session owner who can decide."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayChanged": [
+    {
+      "type": 0,
+      "value": "While you use the web or desktop app, phone alerts for mentions, DMs and thread replies wait one minute by default, and are skipped if you read the message first. Approval requests and work-finished alerts are never delayed, and the server only learns that you are active, which other members cannot see."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTitle": [
+    {
+      "type": 0,
+      "value": "Delaying phone alerts while you use the desktop"
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTryIt": [
+    {
+      "type": 0,
+      "value": "In the web or desktop app, open “Delay phone alerts while I use the desktop” in Settings › Notifications and choose Off, 1 min or 5 min."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine1": [
+    {
+      "type": 0,
+      "value": "The Home + menu and the attach + menu follow your chosen theme, so a dark theme no longer shows a white panel."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine2": [
+    {
+      "type": 0,
+      "value": "Korean text in message bubbles now wraps at spaces, so words are far less often cut in the middle."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchChanged": [
+    {
+      "type": 0,
+      "value": "The search screen now finds people, channels and messages from one box, and opens with your recently opened chats and recent searches. The magnifier in a conversation header searches only that conversation, and tapping one of its results jumps to the message with your words highlighted in the bubble."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTitle": [
+    {
+      "type": 0,
+      "value": "Phone search and search inside a conversation"
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTryIt": [
+    {
+      "type": 0,
+      "value": "Open the search screen and type a name or a few words from a message. Then open a conversation, tap the magnifier in its header, tap a result and use the ↑ ↓ bar to move between results."
+    }
+  ],
+  "releaseNotes.v0143.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionChanged": [
+    {
+      "type": 0,
+      "value": "The “Can't reach the server” notice now re-checks on its own and clears itself once the server is back, with no tap or message needed. On the phone, returning to the app no longer announces a drop you never saw, “Reconnected” fades by itself, and a conversation opens already at the bottom instead of moving down from the top."
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTitle": [
+    {
+      "type": 0,
+      "value": "A quieter connection notice"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTryIt": [
+    {
+      "type": 0,
+      "value": "Leave the app for a moment, come back and open a conversation. If the can't-reach-the-server notice shows, watch whether it clears by itself once the server is back."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardChanged": [
+    {
+      "type": 0,
+      "value": "A reply that quotes a message is now one card: a header that says “Replying to” with the name and one line of the original, a thin divider, then the message. The old vertical bar is gone, the quote chip above the composer matches, and an agent answering the message right above it no longer repeats it as a quote."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTitle": [
+    {
+      "type": 0,
+      "value": "Quotes as one card"
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTryIt": [
+    {
+      "type": 0,
+      "value": "Reply to a message, then tap the header of the quote card to jump to the original."
+    }
+  ],
+  "releaseNotes.v0143.searchLine1": [
+    {
+      "type": 0,
+      "value": "On the “Messages” chip, “Choose conversation” narrows the search to a single conversation."
+    }
+  ],
+  "releaseNotes.v0143.searchLine2": [
+    {
+      "type": 0,
+      "value": "Home search and in-conversation search share one recent list, and “All conversations” repeats a search everywhere."
+    }
+  ],
+  "releaseNotes.v0143.searchLine3": [
+    {
+      "type": 0,
+      "value": "Going to an older message from search, a pin or a quote loads earlier chat (you can cancel), or shows a note if too far."
+    }
+  ],
+  "releaseNotes.v0143.searchTopic": [
+    {
+      "type": 0,
+      "value": "Phone search"
+    }
+  ],
+  "releaseNotes.v0143.summary": [
+    {
+      "type": 0,
+      "value": "Phone search is rebuilt, agent replies gather in threads, and phone alerts wait while you use the desktop."
     }
   ],
   "releaseNotes.version.current": [

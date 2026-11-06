@@ -3,7 +3,7 @@ name: 4942-expression-sheet
 # No `env:` block — see the note at the top of 00-login.yaml.
 #   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
 ---
-# 4942-expression-sheet — 입력창 보내기 왼쪽 표현 단추 → 바텀시트의 세 탭(이모티콘·기본·GIF)과 검색 하나 (owner 10-31, 이름은 owner 11-05 #5330 로 「이모티콘」 하나).
+# 4942-expression-sheet — 입력창 보내기 왼쪽 표현 단추 → 바텀시트의 세 탭(우리 팀·기본·GIF)과 검색 하나 (owner 10-31, 이름은 owner 11-05 #5330 로 「이모티콘」 하나, 첫 탭의 글자는 owner 11-06 #5427 로 「우리 팀」).
 #
 # 스택 검증용이다(워커는 돌리지 않았다 — `runtime-unverified`). 서버에 아무것도 쓰지 않는다: 이모지 하나를 입력칸에 넣을 뿐
 # 메시지는 보내지 않는다. 보내기·넣기 규칙(큰 이모티콘·GIF = 큰 그림 미리보기 뒤 대화로, 기본 그림 문자·작은 이모티콘 = 입력칸)과 탭 안 검색·최근
@@ -12,7 +12,7 @@ name: 4942-expression-sheet
 #   · 시트가 열리고 세 탭이 오가며 **검색이 하나**이고 탭을 옮겨도 남는가(옛 「팀 이모지」 탭은 없다)
 #   · 이모지를 고르면 시트가 내려가고 입력칸에 글자가 들어가며 키보드가 되돌아오는가
 #
-# 팀 보관함에 표현이 하나도 없는 격리 스택이면 두 팀 탭은 「아직 … 없어요」 안내와 「＋ 추가하기」(이모티콘 탭)까지만
+# 팀 보관함에 표현이 하나도 없는 격리 스택이면 두 팀 탭은 「아직 … 없어요」 안내와 「＋ 추가하기」(「우리 팀」 탭)까지만
 # 지난다. 칸을 눌러 큰 그림 미리보기 → 「보내기」(큰 이모티콘·GIF)와 입력칸에 `:이름:` 넣기(작은 이모티콘)는 GIF 하나를 등록한 스택에서
 # 손으로 한 번 더 본다(인계 「스택 검증 메모」).
 #
@@ -65,7 +65,7 @@ name: 4942-expression-sheet
     id: "expression-sheet-tab-emoji"
 - assertVisible:
     id: "expression-sheet-tab-gif"
-# 「팀 이모지」 탭은 「이모티콘」 탭에 합쳐졌다(owner 11-05).
+# 「팀 이모지」 탭은 첫 탭에 합쳐졌다(owner 11-05; 그 탭의 글자는 owner 11-06 #5427 부터 「우리 팀」).
 - assertNotVisible:
     id: "expression-sheet-tab-team"
 # 기본 본문은 제 검색 칸·「우리 팀」 탭을 세우지 않는다(검색 하나).
