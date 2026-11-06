@@ -3609,6 +3609,12 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,

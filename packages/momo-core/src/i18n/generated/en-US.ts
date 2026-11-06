@@ -3908,6 +3908,12 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,

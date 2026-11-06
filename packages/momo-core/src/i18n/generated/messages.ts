@@ -537,6 +537,7 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "inbox.approval.open",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1869,6 +1870,7 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "inbox.approval.open": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3306,6 +3308,7 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "inbox.approval.open": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
