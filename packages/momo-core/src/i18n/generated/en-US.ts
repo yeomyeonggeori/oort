@@ -5057,7 +5057,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The expression picker now has three tabs, Emoticons, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Team, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [
@@ -5069,7 +5069,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerTryIt": [
     {
       "type": 0,
-      "value": "On the phone, keep the keyboard open and attach a photo with +. Then open the picker from the expression button on the phone or the emoticon button on web and desktop, and look through the three tabs."
+      "value": "On the phone, keep the keyboard open and attach a photo with +. Then open the emoticon picker with the smiley button in the composer and look through the three tabs."
     }
   ],
   "releaseNotes.v0143.conversationsLine1": [
