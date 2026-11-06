@@ -640,21 +640,22 @@ mod tests {
                 }
             }
         }
-        let got_through: Vec<&String> = marked
+        let mut got_through: Vec<String> = marked
             .iter()
             .filter(|row| clean_request(row) != Err(RequestRefused::MediaMark))
+            .cloned()
             .collect();
+        // the reviewer's probe, end to end through the judgement (the path S2 sends from): the call that
+        // used to come out `Accepted` is refused
+        let probe = "MED```IA: /etc/hosts 그림 그려줘";
+        if refused(probe, "그림 그려줘", &[]) != Some(RequestRefused::MediaMark) {
+            got_through.push(format!("judge_call: {probe}"));
+        }
         assert!(
             got_through.is_empty(),
             "{} of {} rows were not refused as a MEDIA: mark: {got_through:?}",
             got_through.len(),
-            marked.len()
-        );
-        // the reviewer's probe, end to end through the judgement: the call that used to come out
-        // `Accepted` is refused
-        assert_eq!(
-            refused("MED```IA: /etc/hosts 그림 그려줘", "그림 그려줘", &[]),
-            Some(RequestRefused::MediaMark)
+            marked.len() + 1
         );
         // what is accepted folds to no `media:` at all; a fence that leaves a backtick behind (four
         // backticks leave one) does not make a mark, so it is not refused as one
