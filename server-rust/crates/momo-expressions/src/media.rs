@@ -4,17 +4,18 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
+use image::codecs::gif::GifDecoder;
 use image::metadata::Orientation;
 use image::{
-    AnimationDecoder, Delay, DynamicImage, Frame, ImageDecoder, ImageEncoder, ImageFormat,
-    ImageReader, Limits,
+    AnimationDecoder, DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader, Limits,
 };
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 
 use crate::{ImageInfo, INPUT_BYTES};
+
+mod motion;
 
 pub const ALLOCATION_LIMIT: u64 = 192 * 1024 * 1024;
 const SCRATCH: u64 = 16 * 1024 * 1024;
@@ -496,24 +497,67 @@ fn shrink(image: &DynamicImage, max: u32) -> image::RgbaImage {
     let max = max.min(image.width().max(image.height()));
     image.thumbnail(max, max).to_rgba8()
 }
+/// How far a trial encoding may grow while the search is only comparing sizes against each other.
+const TRIAL_CAP: usize = 8 * 1024 * 1024;
+
+/// A still rendition, as small as the same pixels will go (#5455). The picture is stored exactly:
+/// the search only chooses how the PNG spells it.
+///
+/// 1. A picture with no see-through pixel is stored as RGB; the alpha plane would only repeat 255.
+/// 2. The old settings (fast deflate, adaptive filter) are tried first, so the answer is never
+///    larger than it was, and they stay the answer if nothing below fits `max`.
+/// 3. All six PNG filters are compared at a cheap deflate level, and the winner is written again at
+///    level 9. On AI-drawn sticker art `NoFilter` won every time measured and on photo-like pictures the
+///    adaptive filter does; ranking at the cheap level named the level-9 winner in every case measured.
+///
+/// Only `max` decides whether a result is acceptable: a trial that outgrows it is not a candidate,
+/// and when none fits the rendition fails as before. A trial that runs into the deadline is not a
+/// candidate either, so a slow machine ends with the old settings' answer, not with an error.
 fn png(image: &image::RgbaImage, max: usize, end: Instant) -> Result<Rendition, Rejected> {
-    let mut out = output(max, end);
-    image::codecs::png::PngEncoder::new(&mut out)
-        .write_image(
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|_| Rejected::Invalid)?;
-    Ok(rendition(
-        out.data,
-        "image/png",
-        image.width(),
-        image.height(),
-        1,
-        0,
-    ))
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    let (width, height) = (image.width(), image.height());
+    let opaque = image.pixels().all(|p| p.0[3] == 255);
+    let rgb: Vec<u8>;
+    let (raw, color) = if opaque {
+        rgb = image
+            .pixels()
+            .flat_map(|p| [p.0[0], p.0[1], p.0[2]])
+            .collect();
+        (rgb.as_slice(), image::ExtendedColorType::Rgb8)
+    } else {
+        (image.as_raw().as_slice(), image::ExtendedColorType::Rgba8)
+    };
+    let trial = |compression: CompressionType, filter: FilterType, cap: usize| -> Option<Vec<u8>> {
+        let mut out = output(cap, end);
+        PngEncoder::new_with_quality(&mut out, compression, filter)
+            .write_image(raw, width, height, color)
+            .ok()?;
+        Some(out.data)
+    };
+    let mut best = trial(CompressionType::Fast, FilterType::Adaptive, max);
+    let mut chosen: Option<(FilterType, usize)> = None;
+    for filter in [
+        FilterType::NoFilter,
+        FilterType::Sub,
+        FilterType::Up,
+        FilterType::Avg,
+        FilterType::Paeth,
+        FilterType::Adaptive,
+    ] {
+        if let Some(data) = trial(CompressionType::Level(3), filter, TRIAL_CAP) {
+            if chosen.is_none_or(|(_, len)| data.len() < len) {
+                chosen = Some((filter, data.len()));
+            }
+        }
+    }
+    if let Some((filter, _)) = chosen {
+        let cap = best.as_ref().map_or(max, |b| b.len().saturating_sub(1));
+        if let Some(data) = trial(CompressionType::Level(9), filter, cap) {
+            best = Some(data);
+        }
+    }
+    let data = best.ok_or(Rejected::Invalid)?;
+    Ok(rendition(data, "image/png", width, height, 1, 0))
 }
 
 /// Container preflight for GIF: count ALL images and delays without allocating
@@ -1016,8 +1060,8 @@ pub fn decode_cutout(bytes: &[u8], end: Instant) -> Result<Cutout, Rejected> {
     })
 }
 
-fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
-    let (_, _, count, ms) = gif_spec(bytes)?;
+/// The composited frames of a GIF, read with the same limits every time it is read.
+fn motion_frames(bytes: &[u8], end: Instant) -> Result<image::Frames<'_>, Rejected> {
     let input = std::io::BufReader::new(TimedReader {
         input: Cursor::new(bytes),
         end,
@@ -1026,48 +1070,56 @@ fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     decoder
         .set_limits(limits(512))
         .map_err(|_| Rejected::Invalid)?;
-    let (mut small_out, mut large_out) = (output(256 * 1024, end), output(1024 * 1024, end));
-    let (mut small_wh, mut large_wh) = ((0, 0), (0, 0));
+    Ok(decoder.into_frames())
+}
+
+/// A frame's delay in hundredths of a second, with the 20 ms floor of ADR-0218 D3.
+fn centiseconds(frame: &image::Frame) -> u16 {
+    let (num, denom) = frame.delay().numer_denom_ms();
+    (((num / denom.max(1)).max(20)) / 10).min(u32::from(u16::MAX)) as u16
+}
+
+/// Two passes over the animation, neither holding more than one frame: the first learns the colours
+/// each size will use, the second writes the frames with them (#5455, see [`motion`]).
+fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
+    let (_, _, count, ms) = gif_spec(bytes)?;
+    let (mut small_colors, mut large_colors) = (motion::Census::new(), motion::Census::new());
+    let mut seen = 0;
+    for frame in motion_frames(bytes, end)? {
+        check(end).map_err(|_| Rejected::Timeout)?;
+        let image = DynamicImage::ImageRgba8(frame.map_err(|_| Rejected::Invalid)?.into_buffer());
+        small_colors.add(&shrink(&image, 128));
+        large_colors.add(&shrink(&image, 512));
+        seen += 1;
+    }
+    if seen != count {
+        return Err(Rejected::Invalid);
+    }
+    let mut small = motion::Strip::new(output(256 * 1024, end), small_colors.finish())?;
+    let mut large = motion::Strip::new(output(1024 * 1024, end), large_colors.finish())?;
+    let (small_wh, large_wh) = (small.size(), large.size());
     let mut thumb = None;
-    {
-        let mut small = GifEncoder::new_with_speed(&mut small_out, 30);
-        let mut large = GifEncoder::new_with_speed(&mut large_out, 30);
-        // NETSCAPE repeat count is repetitions AFTER the initial pass: 3+1=4.
-        small
-            .set_repeat(Repeat::Finite(3))
-            .map_err(|_| Rejected::Invalid)?;
-        large
-            .set_repeat(Repeat::Finite(3))
-            .map_err(|_| Rejected::Invalid)?;
-        let mut seen = 0;
-        for frame in decoder.into_frames() {
-            check(end).map_err(|_| Rejected::Timeout)?;
-            let frame = frame.map_err(|_| Rejected::Invalid)?;
-            let (num, denom) = frame.delay().numer_denom_ms();
-            let delay = Delay::from_numer_denom_ms((num / denom.max(1)).max(20), 1);
-            let image = DynamicImage::ImageRgba8(frame.into_buffer());
-            let s = shrink(&image, 128);
-            let l = shrink(&image, 512);
-            small_wh = s.dimensions();
-            large_wh = l.dimensions();
-            if thumb.is_none() {
-                thumb = Some(png(&s, 256 * 1024, end)?);
-            }
-            small
-                .encode_frame(Frame::from_parts(s, 0, 0, delay))
-                .map_err(|_| Rejected::Invalid)?;
-            large
-                .encode_frame(Frame::from_parts(l, 0, 0, delay))
-                .map_err(|_| Rejected::Invalid)?;
-            seen += 1;
+    let mut seen = 0;
+    for frame in motion_frames(bytes, end)? {
+        check(end).map_err(|_| Rejected::Timeout)?;
+        let frame = frame.map_err(|_| Rejected::Invalid)?;
+        let delay = centiseconds(&frame);
+        let image = DynamicImage::ImageRgba8(frame.into_buffer());
+        let s = shrink(&image, 128);
+        let l = shrink(&image, 512);
+        if thumb.is_none() {
+            thumb = Some(png(&s, 256 * 1024, end)?);
         }
-        if seen != count {
-            return Err(Rejected::Invalid);
-        }
+        small.push(&s, delay)?;
+        large.push(&l, delay)?;
+        seen += 1;
+    }
+    if seen != count {
+        return Err(Rejected::Invalid);
     }
     Ok(Processed {
         small: rendition(
-            small_out.data,
+            small.finish()?,
             "image/gif",
             small_wh.0,
             small_wh.1,
@@ -1075,7 +1127,7 @@ fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
             ms,
         ),
         large: rendition(
-            large_out.data,
+            large.finish()?,
             "image/gif",
             large_wh.0,
             large_wh.1,
