@@ -3,6 +3,7 @@ import { NetworkError } from '@momo/core/lib/http';
 import { apiBase, coreSession } from '@momo/core/runtime/host';
 import { Directory, File, Paths } from 'expo-file-system';
 import { useEffect, useState } from 'react';
+import { attachmentSizeMemory } from '../../storage/measureMemory';
 
 // =============================================================================
 // 첨부 바이트의 폰 어댑터 (ADR-0151 D2 / #1681).
@@ -52,9 +53,20 @@ const measuredSizes = new Map<string, MeasuredSize>();
 
 const sizeKey = (attachmentId: string): string => attachmentId.toLowerCase();
 
-/** 이 첨부의 잰 크기. 아직 못 쟀으면 `null`. 같은 크기는 **같은 객체**를 돌려준다(상태 갱신이 비교만으로 끝난다). */
+/**
+ * 이 첨부의 잰 크기. 아직 못 쟀으면 `null`. 같은 크기는 **같은 객체**를 돌려준다(상태 갱신이 비교만으로 끝난다).
+ * 앱이 사는 동안의 지도(`measuredSizes`)에 없으면 **기기에 기억해 둔 값**(`attachmentSizeMemory`, #5451)을 읽는다 — 앱을 다시 켠 뒤 들어간
+ * 대화도 사진이 첫 프레임부터 제 비율로 선다.
+ */
 export function measuredAttachmentSize(attachmentId: string): MeasuredSize | null {
-  return measuredSizes.get(sizeKey(attachmentId)) ?? null;
+  const key = sizeKey(attachmentId);
+  const known = measuredSizes.get(key);
+  if (known !== undefined) return known;
+  const remembered = attachmentSizeMemory.get(key);
+  if (remembered === null) return null;
+  const size: MeasuredSize = { width: remembered[0], height: remembered[1] };
+  measuredSizes.set(key, size);
+  return size;
 }
 
 /** 잰 크기를 적는다. 유한하고 0보다 큰 가로·세로만 받는다(그림이 아닌 값이 자리를 굳히지 않게). */
@@ -67,10 +79,11 @@ export function rememberAttachmentSize(
     return null;
   }
   const key = sizeKey(attachmentId);
-  const earlier = measuredSizes.get(key);
-  if (earlier !== undefined && earlier.width === width && earlier.height === height) {
+  const earlier = measuredAttachmentSize(attachmentId);
+  if (earlier !== null && earlier.width === width && earlier.height === height) {
     return earlier;
   }
+  attachmentSizeMemory.set(key, [width, height]);
   const size: MeasuredSize = { width, height };
   measuredSizes.delete(key);
   measuredSizes.set(key, size);
@@ -290,4 +303,5 @@ export function resetAttachmentContentForTest(): void {
   cached.clear();
   inflight.clear();
   measuredSizes.clear();
+  attachmentSizeMemory.clearForTest();
 }
