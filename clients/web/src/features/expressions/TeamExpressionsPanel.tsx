@@ -108,6 +108,7 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
   // 항목이 사라졌으면(지움·신고로 숨김) 목록의 검색 칸으로 간다 — 초점이 문서 처음(body)으로 떨어지지 않게.
   useLayoutEffect(() => {
     if (target !== null) { cancelRef.current?.focus(); return; }
+    confirmOpened.current = false; // 메뉴가 닫힘 알림 없이 사라졌어도 다음 메뉴가 이 표시를 물려받지 않는다.
     const id = returnFocusTo.current;
     if (id === null) return;
     returnFocusTo.current = null;
