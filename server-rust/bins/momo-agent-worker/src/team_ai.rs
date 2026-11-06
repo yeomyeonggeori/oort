@@ -242,8 +242,14 @@ impl AgentWorker {
                             channel_id,
                         )
                         .await?,
-                        team_ai::delegation_candidates_in_tx(conn, workspace_id, agent, channel_id)
-                            .await?,
+                        team_ai::delegation_candidates_in_tx(
+                            conn,
+                            workspace_id,
+                            agent,
+                            channel_id,
+                            requester.member_id,
+                        )
+                        .await?,
                     ),
                     None => (team_ai::Roster::default(), Vec::new()),
                 };
