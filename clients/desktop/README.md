@@ -74,8 +74,11 @@ src-tauri/
                       # commands, same fence (D3-f, #2878)
                       # downloads.json: the five download_* commands, same fence (#4587)
   icons/              # generated via `cargo tauri icon app-icon.png`
-  icons/tray/         # the menu-bar icon's four template PNGs (18pt: @1x 18x18, @2x 36x36; black + alpha), made from the brand mark by
-                      # `scripts/desktop/render_tray_icons.sh` (`--check` compares them with the mark). `src/tray.rs` embeds the @2x pair.
+  icons/tray/         # the menu-bar icon's eight PNGs (18pt: @1x 18x18, @2x 36x36), made from the brand mark by
+                      # `scripts/desktop/render_tray_icons.sh` (`--check` compares them with the mark and the `--signal` token).
+                      # Templates (black + alpha): `oort-tray` (nothing unread) and `oort-tray-unread` (mark + dot, the safe fallback).
+                      # Color, not templates: `oort-tray-unread-on-light` / `-on-dark` (ring for the bar, upper-right planet in `--signal`).
+                      # `src/tray.rs` embeds the @2x files and picks one by unread x the bar's look (`icon_kind`).
 ```
 
 # Bridge contract

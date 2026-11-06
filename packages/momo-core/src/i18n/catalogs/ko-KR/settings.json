@@ -70,6 +70,14 @@
   "settings.aiLimits.loading": "사용 한도를 불러오고 있어요.",
   "settings.notifications.alwaysDetail": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요.",
   "settings.notifications.checking": "알림 설정을 확인하는 중이에요.",
+  "settings.notifications.phoneDelayLabel": "데스크탑을 쓰는 동안 폰 알림 늦추기",
+  "settings.notifications.phoneDelayDescription": "웹이나 데스크탑 앱을 쓰는 동안은 폰 알림을 정한 시간만큼 늦춰요. 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않아요. 서버가 아는 것은 쓰고 있다는 사실뿐이고, 다른 멤버에게는 보이지 않아요.",
+  "settings.notifications.phoneDelayOff": "끔",
+  "settings.notifications.phoneDelayOneMinute": "1분",
+  "settings.notifications.phoneDelayFiveMinutes": "5분",
+  "settings.notifications.phoneDelayLoadFailed": "폰 알림 늦추기 설정을 불러오지 못했어요.",
+  "settings.notifications.phoneDelayRetry": "다시 시도",
+  "settings.notifications.phoneDelaySaveFailed": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요.",
   "settings.notifications.threadReplyName": "참여한 스레드의 새 답글",
   "settings.notifications.threadReplyDescription": "따라가는 스레드에 남이 쓴 새 답글이에요."
 }

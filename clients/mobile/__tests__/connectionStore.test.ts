@@ -98,6 +98,62 @@ describe('깨움 시계: 침묵 → 연결 중 → 끊김이 시계 하나씩 �
   });
 });
 
+describe('#5403 — 사람이 보지 못한 시간과 늦은 깨움', () => {
+  it('앱이 뒤에 가 있는 동안 멈췄다 늦게 깨는 시계는 끊김으로 치지 않는다: 돌아와 붙으면 복구 표시가 없다', () => {
+    jest.setSystemTime(T0);
+    const store = healthyStore(Date.now);
+    jest.advanceTimersByTime(HEALED_MS + 100);
+    store.emit(at => socketEvent(at, 'connecting'));
+    store.setVisible(false);
+    // JS 가 멈춘 채 5분이 흐른다: 시계는 시각이 훌쩍 지난 뒤에야 깬다.
+    jest.setSystemTime(T0 + 300_000);
+    jest.advanceTimersByTime(10_000);
+    expect(store.getSnapshot().sawDown).toBe(false);
+    store.setVisible(true);
+    store.emit(at => connectionEventOf({kind: 'resume'}, at));
+    // 돌아온 순간은 새 침묵 1초다(곧바로 「연결 중」이 서지 않는다).
+    expect(store.getSnapshot().view.phase).toBe('quiet');
+    jest.advanceTimersByTime(400);
+    store.emit(at => socketEvent(at, 'connected'));
+    expect(store.getSnapshot().view.phase).toBe('ok');
+    expect(store.getSnapshot().recoveredUntil).toBeNull();
+    jest.advanceTimersByTime(5_000);
+    expect(store.getSnapshot().recoveredUntil).toBeNull();
+    store.stop();
+  });
+
+  it('깨움 시계가 5분 늦게 울려도 한 번에 복구 표시를 거둔다 (보내기를 기다리지 않는다)', () => {
+    jest.setSystemTime(T0);
+    const store = healthyStore(Date.now);
+    jest.advanceTimersByTime(HEALED_MS + 100);
+    store.emit(at => socketEvent(at, 'connecting'));
+    jest.advanceTimersByTime(DISPLAY_GRACE_MS);
+    store.emit(at => socketEvent(at, 'connected'));
+    expect(store.getSnapshot().recoveredUntil).not.toBeNull();
+    // 시각만 5분 뛴다. 깨움은 울리지 않았다.
+    jest.setSystemTime(Date.now() + 300_000);
+    expect(store.getSnapshot().recoveredUntil).not.toBeNull();
+    jest.advanceTimersByTime(2_000);
+    expect(store.getSnapshot().recoveredUntil).toBeNull();
+    store.stop();
+  });
+
+  it('앞에 있던 채(inactive → active) 시계를 잃었어도 복귀 알림 한 번에 낡은 복구 표시가 거두어진다', () => {
+    jest.setSystemTime(T0);
+    const store = healthyStore(Date.now);
+    jest.advanceTimersByTime(HEALED_MS + 100);
+    store.emit(at => socketEvent(at, 'connecting'));
+    jest.advanceTimersByTime(DISPLAY_GRACE_MS);
+    store.emit(at => socketEvent(at, 'connected'));
+    expect(store.getSnapshot().recoveredUntil).not.toBeNull();
+    store.stop();
+    jest.setSystemTime(Date.now() + 300_000);
+    expect(store.getSnapshot().recoveredUntil).not.toBeNull();
+    store.setVisible(true);
+    expect(store.getSnapshot().recoveredUntil).toBeNull();
+  });
+});
+
 describe('수명', () => {
   it('stop() 은 시계를 거두고 start() 는 상태를 잃지 않고 다시 건다 (개발 모드의 효과 재실행)', () => {
     jest.setSystemTime(T0);

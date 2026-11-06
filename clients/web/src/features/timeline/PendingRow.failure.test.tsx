@@ -177,7 +177,9 @@ describe("PendingRow: 보내지 못한 메시지의 아이콘 둘", () => {
 
   it("보내는 중인 행에는 아이콘이 없다: 이 키의 요청이 날아가는 중이라 지울 수 없다", () => {
     mount(row({ status: "sending" }), { onResend: vi.fn(), onDiscard: vi.fn() });
-    expect(screen.getByTestId("pending-sending").textContent).toBe("전송 중");
+    // 정상 전송에는 「전송 중」 줄이 없다(#4468) — 느린 전송의 시계는 `PendingRow.slow.test.tsx`가 잰다.
+    expect(screen.queryByTestId("pending-sending")).toBeNull();
+    expect(screen.getByTestId("timeline-pending").textContent).not.toContain("전송 중");
     expect(screen.queryByTestId("pending-failed")).toBeNull();
     expect(screen.queryByTestId("pending-resend")).toBeNull();
     expect(screen.queryByTestId("pending-discard")).toBeNull();

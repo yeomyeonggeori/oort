@@ -128,7 +128,7 @@ describe("CohostedAgentCard", () => {
     mount(false, true);
     const note = await until("ai-cohosted-error");
     expect(note.getAttribute("role")).toBe("alert");
-    expect(note.textContent).toContain("같은 서버의 Hermes 상태를 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요.");
+    expect(note.textContent).toContain("같은 서버의 Hermes 상태를 불러오지 못했어요. 문제가 생겼어요.");
     expect(note.textContent).not.toMatch(/\d{3}/);
     const reads = api.request.mock.calls.length;
     await act(async () => {

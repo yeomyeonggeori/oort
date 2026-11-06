@@ -140,7 +140,7 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{
-    patch_message_props_in_tx, send_message_in_tx, send_thread_notice_in_tx,
+    patch_message_props_in_tx, send_message_in_tx, send_run_line_in_tx, send_thread_notice_in_tx,
     stream_message_body_in_tx, MessageType, NewMessage, StreamCloseOutcome, StreamEdit,
     STREAM_PROPS_KEY,
 };
@@ -1717,13 +1717,21 @@ impl AgentWorker {
 
         with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                // (1) the call itself, on the spine. `client_msg_id` from the
-                // provider's `call_id` makes a re-claimed turn re-post nothing.
-                // Its *result* takes `tool_exec::result_message_id`, a separate
-                // key space on purpose (#1133): the guard this key buys is
-                // `(channel, author, client_msg_id)`, and the card and the
-                // result already agree on the first two.
-                send_message_in_tx(
+                // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): the run's cards and tool lines stand
+                // where its answer will — under the request's thread, or under the request itself at
+                // a channel's top level, the main flow in a 1:1 DM. Decided once, here, and read
+                // by the call card, the approval card below and (off the stored call card) the
+                // result line, so one tool call is one bundle in one place.
+                let place = momo_agent::run_answer_root_in_tx(conn, workspace_id, run_id).await?;
+                // (1) the call itself. `send_run_line_in_tx` puts it in the thread without
+                // counting it: the product counts only `text` and `approval_request` as replies
+                // (`counts_as_thread_reply`), and the approval card below is the counted one.
+                // `client_msg_id` from the provider's `call_id` makes a re-claimed turn
+                // re-post nothing. Its *result* takes `tool_exec::result_message_id`, a
+                // separate key space on purpose (#1133): the guard this key buys is
+                // `(channel, author, client_msg_id)`, and the card and the result already
+                // agree on the first two.
+                send_run_line_in_tx(
                     conn,
                     workspace_id,
                     NewMessage {
@@ -1732,7 +1740,7 @@ impl AgentWorker {
                         message_type: MessageType::ToolCall,
                         body: Some(call.message_body()),
                         props: call.message_props(),
-                        root_id: None,
+                        root_id: place,
                         // ADR-0148 규칙 6, and the answer here is `None` on
                         // purpose. A `tool_call` card is a trace of the agent's
                         // own work — it addresses nobody and points at no
@@ -1841,7 +1849,7 @@ impl AgentWorker {
                     &mut card_props,
                     momo_agent::actions::decision_mode(ACTION_TYPE_TOOL_CALL, &approval_payload),
                 );
-                let card = send_message_in_tx(
+                let card = send_thread_notice_in_tx(
                     conn,
                     workspace_id,
                     NewMessage {
@@ -1850,7 +1858,7 @@ impl AgentWorker {
                         message_type: MessageType::ApprovalRequest,
                         body: Some(approval_request_body(&call.name)),
                         props: card_props,
-                        root_id: None,
+                        root_id: place,
                         // `None`, like the call card above. What this message
                         // points at is an `approval` row, not a message: the
                         // decision buttons, the tool name and the arguments are
@@ -2289,17 +2297,15 @@ impl AgentWorker {
                         message_type: MessageType::Text,
                         body,
                         props,
-                        // The thread the request was made in (#4622). Swift answered
-                        // inside the trigger's thread; B5.1 could not, because
-                        // momo-messaging exposed no reader for a message's own root and
-                        // this crate owns no message SQL, so the answer went to the top
-                        // level and left the thread the person was watching. The
-                        // locked run row now carries the root
-                        // (`GatewayRunSnapshot::trigger_root_id`), read once with the
-                        // trigger and shared with the streamed opening write — which has
-                        // already created this message when the turn streamed, so the
-                        // two must agree. `None` — the main flow, quoting — when the
-                        // request was made there (a DM, a channel's top level).
+                        // The thread the answer belongs in — the request's own thread
+                        // (#4622), or a new thread under the request at a channel's top level
+                        // (#4646). Swift answered inside the trigger's thread; B5.1 could not,
+                        // because momo-messaging exposed no reader for a message's own root and
+                        // this crate owns no message SQL. The locked run row now carries the
+                        // place (`GatewayRunSnapshot::trigger_root_id`, `momo_agent::answer_place_root`),
+                        // read once with the trigger and shared with the streamed opening write —
+                        // which has already created this message when the turn streamed, so the
+                        // two must agree. `None` — the main flow, quoting — only in a 1:1 DM.
                         root_id: snapshot.trigger_root_id,
                         // ADR-0148 규칙 6 — agent = member, no branch. "This
                         // answers that message" is the one thing an agent turn
@@ -2318,11 +2324,12 @@ impl AgentWorker {
                         // to point at, and inventing one would be worse than
                         // pointing at nothing.
                         //
-                        // Quoting, not threading — for a request made in the main flow:
-                        // the answer stays there with the question attached, which is
-                        // the distinction the ADR exists to draw. Inside a thread it
-                        // carries both columns (규칙 1: belonging and aim are not one
-                        // spelling): the thread it belongs to, the message it answers.
+                        // Quoting, not threading — in a 1:1 DM: the answer stays in the main
+                        // flow with the question attached. Everywhere else it carries both
+                        // columns (규칙 1: belonging and aim are not one spelling): the thread it
+                        // belongs to, the message it answers. At a channel's top level those two
+                        // are the same message, and the client does not draw a quote that points
+                        // at the thread's own root (#5381).
                         reply_to_id: snapshot.trigger_message_id,
                         client_msg_id: Some(run_id),
                         run_id: Some(run_id),
@@ -2545,6 +2552,7 @@ impl AgentWorker {
                             channel_id: snapshot.channel_id,
                             message_id: sent.message.id,
                             message_seq: sent.message.seq,
+                            root_id: sent.message.root_id,
                             author_agent_member_id: snapshot.agent_member_id,
                             source_run_id: run_id,
                             body: &mention_body,
@@ -3382,12 +3390,14 @@ impl AgentWorker {
                 if snapshot.status == RunStatus::Cancelled {
                     return Ok(false);
                 }
-                // This line lands in the main timeline (root_id None) and the
-                // throttle keys on the channel — whatever place the request was
-                // made in. #4622 moved a run's *final answer* into the thread the
-                // request was made in, and this line, which stands in for an answer,
-                // does not follow it yet: that is #4646's "주변 줄" list, decided
-                // with the rest of the answer-place work rather than here.
+                // #4646 (ADR-0148 증보, ADR-0186 증보 v6 R-c): this line stands in for an answer,
+                // so it stands where the answer would have — under the request's thread, or
+                // under the request itself at a channel's top level, the main flow in a 1:1 DM
+                // (`snapshot.trigger_root_id`, decided once in the statement that locked the
+                // run). The **throttle** is deliberately unchanged and keys on the channel,
+                // whatever place the request was made in: `notice_thread_key`'s own rule is that
+                // the channel's top level is one conversation, so a person who keeps calling an
+                // agent that cannot answer is not handed a fresh line for every call.
                 let thread_key = notice_thread_key(channel_id, None);
                 let key = hosted_skip_notice_key(
                     agent_member_id,
@@ -3441,7 +3451,7 @@ impl AgentWorker {
                     } else {
                         hosted_skip_notice_body(reason, &name)
                     };
-                    let sent = send_thread_notice_in_tx(
+                    let sent = send_run_line_in_tx(
                         conn,
                         workspace_id,
                         NewMessage {
@@ -3456,7 +3466,7 @@ impl AgentWorker {
                                 thread_key,
                                 trigger_message_id,
                             ),
-                            root_id: None,
+                            root_id: snapshot.trigger_root_id,
                             reply_to_id: None,
                             // One line per run, whatever re-claims the job.
                             client_msg_id: Some(run_id),

@@ -11,8 +11,6 @@
   "reply.home.headerUnknown": "스레드에 답글",
   "reply.home.excerptDeleted": "삭제된 메시지",
   "reply.home.open": "이 답글이 달린 스레드 열기",
-  "reply.alsoInChannel.label": "대화에도 보내기",
-  "reply.alsoInChannel.unsupported": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요.",
   "reply.composer.placeholder": "답글 입력",
   "reply.composer.send": "답글 보내기"
 }

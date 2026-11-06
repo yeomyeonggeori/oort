@@ -21,14 +21,40 @@ export function loadCauseOf(error: unknown): ConnectionCause | null {
 
 type FormatMessage = ReturnType<typeof useFormatMessage>;
 
-/** 제목 + 이유를 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀). 문자열만 받는 자리(설명·aria)에도 쓴다. */
+/**
+ * 이 원인의 이유 문장 키. 곁에 「다시 시도」 단추가 서 있으면(`withAction`) 다음 행동을 뺀 문장이다 — 단추와 문장이 같은 말을 되풀이하지 않는다(#5307 L2).
+ * 단추가 없는 자리는 문장이 다음 행동까지 말한다.
+ */
+export function loadReasonKeyOf(cause: ConnectionCause | null, withAction: boolean): ConnectionPlainKey {
+  const copy = copyForCause(cause);
+  return withAction ? copy.loadReasonBare : copy.loadReason;
+}
+
+/**
+ * 이미 만들어 둔 제목 문장(값이 든 키를 `formatMessage(key, values)`로 푼 것)에 이유를 붙여 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀).
+ * `withAction`은 곁에 「다시 시도」 단추가 서 있는가: 있으면 이유가 다음 행동을 되풀이하지 않는다(#5307 L2).
+ */
+export function loadFailureSentenceOf(
+  formatMessage: FormatMessage,
+  title: string,
+  cause: ConnectionCause | null,
+  withAction = true
+): string {
+  return formatMessage(CONNECTION_KEYS.loadSentence, {
+    title,
+    reason: formatMessage(loadReasonKeyOf(cause, withAction)),
+  });
+}
+
+/**
+ * 제목 + 이유를 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀). 문자열만 받는 자리(설명·aria)에도 쓴다. `withAction`은 곁에 「다시 시도」 단추가
+ * 서 있는가(기본 있음): 있으면 이유가 다음 행동을 되풀이하지 않는다.
+ */
 export function loadFailureSentence(
   formatMessage: FormatMessage,
   titleKey: ConnectionPlainKey,
-  cause: ConnectionCause | null
+  cause: ConnectionCause | null,
+  withAction = true
 ): string {
-  return formatMessage(CONNECTION_KEYS.loadSentence, {
-    title: formatMessage(titleKey),
-    reason: formatMessage(copyForCause(cause).loadReason),
-  });
+  return loadFailureSentenceOf(formatMessage, formatMessage(titleKey), cause, withAction);
 }

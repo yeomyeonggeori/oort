@@ -1,4 +1,6 @@
 import {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
+import type { MessageKey } from "@momo/core/i18n";
+import { DEFAULT_EXPRESSION_PICKER_TAB, EXPRESSION_PICKER_TABS, expressionViewOfPickerTab, type ExpressionPickerTab } from "@momo/core/features/expressions/kind";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import {
@@ -15,6 +17,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { useExpressions } from "@/features/expressions/context";
 import { TeamExpressionsPanel } from "@/features/expressions/TeamExpressionsPanel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { CatalogEmoji } from "./catalog";
 import { loadCatalog } from "./catalog";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
@@ -41,15 +44,28 @@ import { useHoverNone } from "./useHoverNone";
 
 export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
+/**
+ * 고르개의 세 탭은 폰 시트와 같은 코어의 목록이다(owner 11-05): 이모티콘 · 기본 · GIF. 첫 탭의 글자는 「우리 팀」이다(owner 11-06 #5427 — 창 제목이
+ * 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다. 탭 id·보기 이름은 `emoticon` 그대로). 이모티콘·GIF 는 팀 보관함(`TeamExpressionsPanel` 의 두 보기)이고
+ * 「기본」은 표준 그림 문자 표다. 처음 여는 탭은 앞 판과 같은 「기본」이다. 이름은 폰 시트와 같은 사전 키다.
+ */
+const TAB_NAME = {
+  emoticon: "expressions.sheet.tabEmoticon",
+  emoji: "expressions.sheet.tabEmoji",
+  gif: "expressions.sheet.tabGif",
+} as const satisfies Record<ExpressionPickerTab, MessageKey>;
+
+// 사용자에게 보이는 이름은 「이모티콘」 하나다(owner 2026-11-05, #5330). 반응·넣기 고르개의 글에서 「이모지」를 지웠다. 상태 고르개는 표준
+// 그림 문자만 고르므로(보관함이 없다) 「상태 이모지」 그대로다.
 const COPY = {
   reaction: {
     title: "반응 고르기",
-    description: "이 메시지에 남길 이모지를 고르세요.",
+    description: "이 메시지에 남길 이모티콘을 고르세요.",
     itemPrefix: "picker-react",
   },
   insert: {
-    title: "이모지 넣기",
-    description: "메시지에 넣을 이모지를 고르세요.",
+    title: "이모티콘 넣기",
+    description: "메시지에 넣을 이모티콘을 고르세요.",
     itemPrefix: "picker-insert",
   },
   status: {
@@ -81,8 +97,12 @@ export function EmojiPickerDialog({
   side?: "top" | "bottom";
 }) {
   const copy = COPY[purpose];
+  const formatMessage = useFormatMessage();
   const { store: expressions } = useExpressions();
-  const [team, setTeam] = useState(false);
+  const [tab, setTab] = useState<ExpressionPickerTab>(DEFAULT_EXPRESSION_PICKER_TAB);
+  // 팀 보관함 탭(이모티콘·GIF)은 상태 고르개에 없다: 거기서는 표준 그림 문자만 고른다.
+  const view = expressionViewOfPickerTab(tab);
+  const team = view !== null && purpose !== "status";
   const isTouch = useHoverNone();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -151,12 +171,11 @@ export function EmojiPickerDialog({
   };
 
   const panel = (
-    <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-2 focus-visible:focus-ring">
-    {purpose !== "status" && expressions && <div className="flex flex-wrap gap-1" aria-label="이모지 보관함">
-      <Button type="button" variant={team ? "ghost" : "secondary"} size="sm" aria-pressed={!team} onClick={() => { setSkinOpen(false); setTeam(false); }}>기본 이모지</Button>
-      <Button type="button" variant={team ? "secondary" : "ghost"} size="sm" aria-pressed={team} onClick={() => { setSkinOpen(false); setTeam(true); }}>우리 팀</Button>
+    <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-3 focus-visible:focus-ring">
+    {purpose !== "status" && expressions && <div role="group" className="flex flex-wrap gap-2" aria-label={formatMessage("expressions.sheet.tabs")}>
+      {EXPRESSION_PICKER_TABS.map((id) => <Button key={id} type="button" variant={tab === id ? "secondary" : "ghost"} size="sm" aria-pressed={tab === id} onClick={() => { setSkinOpen(false); setTab(id); }}>{formatMessage(TAB_NAME[id])}</Button>)}
     </div>}
-    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
+    {team && view !== null ? <TeamExpressionsPanel view={view} purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
       entries={entries}
       loading={open && !error && entries === null}

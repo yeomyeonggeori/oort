@@ -33,8 +33,11 @@ import {
 import {headroomLineHeight} from '../../design/lineHeadroom';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
-import {bubbleFor, failedBubbleFor} from './bubble';
+import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
+import {MatchScope, type SearchMatchSpec} from '../search/MatchedText';
+import {bubbleFor, failedBubbleFor, otherBubbleFill, quoteHeadFor, searchMatchFor} from './bubble';
 import {COPY_RECEIPT_MS, copyText} from './copy';
+import {QuoteBlock} from './Quote';
 
 // =============================================================================
 // 메시지 본문 — 웹 `MessageBody.tsx` 의 RN 판 (goal U4-a / #1048, BL-1·BL-3).
@@ -253,6 +256,14 @@ export type BubbleProbeEvent =
 /** 두 번째 인자는 이 말풍선이 담은 **메시지 본문**이다 — 목록 한가운데서 한 Provider 가 여러 행의 보고를 받을 때(`dmConversation.tsx`) 행을 가리는 표지다. */
 export type BubbleProbe = (event: BubbleProbeEvent, body: string) => void;
 export const BubbleProbeContext = React.createContext<BubbleProbe | null>(null);
+
+/**
+ * 말풍선 산문(평문 · 문단 · 목록 항목)의 한국어는 **어절 단위로** 꺾는다 (#5313) - iOS 기본은 글자 단위라 「두었으/니」·「오/전 9시」처럼 낱말 가운데서 끊긴다.
+ * 앱 안의 다른 글(`Sentence`·`NoticeBlock`·입력창)이 이미 같은 규칙이다(#4982·#5288). 줄 높이 여유(`headroomLineHeight`)가 이 전략을 실제로 켠다 -
+ * 컨테이너 높이가 줄 수의 요구와 정확히 같으면 전략이 꺼져 있었다(`design/lineHeadroom.ts` 5번). 공백이 없는 긴 낱말·주소는 여전히 글자 단위로 꺾이고 넘치지
+ * 않는다(`measure/bubbleClip.tsx` url 묶음). 속성은 문단 단위라 안쪽에 겹친 `Text`(굵게·인라인 코드·멘션·링크)는 바깥을 따르고, 코드 블록은 가로 스크롤이라 대상이 아니다.
+ */
+const WORD_WRAP = 'hangul-word' as const;
 
 const NO_PROBE_PROPS = {} as const;
 
@@ -578,6 +589,7 @@ function BlockNode({
             )}
             <Text
               selectable={selectable}
+              lineBreakStrategyIOS={WORD_WRAP}
               style={[styles.listText, muted && styles.muted, inkStyle]}
               {...paragraphProbeProps(probe, `${probeKey}.${index}`, probeBody)}>
               <InlineNodes nodes={item} mentions={mentions} />
@@ -591,6 +603,7 @@ function BlockNode({
   return (
     <Text
       selectable={selectable}
+      lineBreakStrategyIOS={WORD_WRAP}
       style={[styles.paragraph, muted && styles.muted, inkStyle]}
       {...paragraphProbeProps(probe, probeKey, probeBody)}>
       {block.lines.map((line, index) => (
@@ -600,6 +613,73 @@ function BlockNode({
         </React.Fragment>
       ))}
     </Text>
+  );
+}
+
+/**
+ * 말풍선 위쪽 윗칸이 그려야 할 인용 머리의 재료 (#5381 Q4). `MessageRow` 가 **데이터로** 건네고, 색은 이 파일이 말풍선에서 유도한다.
+ * 함수가 아니라 값이다 — 행이 다시 그려질 때마다 새 함수를 만들지 않는다.
+ */
+export interface QuoteHeadSpec {
+  block: QuoteBlockModel;
+  directory: Directory;
+  /** 원본 줄로 이동. 없으면 머리는 누를 수 없는 글이다. */
+  onJump?: (() => void) | undefined;
+  attachmentCount?: number | undefined;
+}
+
+/**
+ * 말풍선의 색·모서리 — 본문(`MessageBody`)과 단독 머리(`QuoteHeadBubble`)가 **같은 값**을 읽는다.
+ * 보내지 못한 글(`muted`)의 옅은 채움까지 한 곳에서 정하므로, 머리가 말풍선과 다른 색 위에 서는 일이 없다.
+ */
+function useBubbleTone(bubble: 'mine' | 'other' | null, muted: boolean) {
+  const palette = usePalette();
+  const bubbleChoice = useBubbleChoice();
+  // 개인 덮어쓰기(#4383): 줄 보기(`layout: 'row'`)·색·모서리. 대비가 모자란 색은 `bubbleFor` 가 버린다.
+  const tokens = useMemo(() => bubbleFor(palette, bubbleChoice), [palette, bubbleChoice]);
+  const baseTone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
+  // 보내지 못한 말풍선(`muted`, #5294 검수 5a M5): 옅기는 채움만 맡고 글자는 그 위에서 4.5:1 을 지키는 잉크다(`failedBubbleFor`). 말풍선 전체에
+  // 불투명도 막을 걸면 글자까지 바탕으로 녹아 밝음 2.66:1 · 어두움 3.52:1 이 됐다.
+  const tone = useMemo(
+    () => (baseTone !== null && muted ? failedBubbleFor(palette, baseTone) : baseTone),
+    [baseTone, muted, palette],
+  );
+  // 말풍선이 실제로 서는 내 글인가(줄 보기 배치에서는 말풍선이 없어 거짓이다). 머리 색과 본문 잉크가 같은 판정을 읽는다.
+  const mine = tone !== null && bubble === 'mine';
+  return {palette, tokens, tone, mine};
+}
+
+/**
+ * 인용 머리를 **자기 말풍선**에 담아 단독으로 그린다. 말풍선 **안** 윗칸이 되어야 할 머리가 앉을 말풍선이 없는 자리에서 쓴다:
+ * 본문이 없는 답장(첨부만·카드만 보낸 행), 코드 블록이 첫 블록인 글, 이모티콘만 보낸 글, 줄 보기 배치(`layout: 'row'`).
+ * 말풍선이 있는 행에서는 쓰지 않는다 — 그때 머리는 첫 말풍선의 윗칸이다(`MessageBody` 의 `quoteHead`).
+ */
+export function QuoteHeadBubble({
+  quoteHead,
+  bubble,
+  muted = false,
+}: {
+  quoteHead: QuoteHeadSpec;
+  bubble: 'mine' | 'other' | null;
+  muted?: boolean;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const {palette, tokens, tone, mine} = useBubbleTone(bubble, muted);
+  const base = useMemo(
+    () => tone ?? {bg: otherBubbleFill(palette), fg: palette.text},
+    [tone, palette],
+  );
+  // 머리뿐인 말풍선: 띠를 따로 어둡히지 않는다(말풍선 전체가 머리다) — 구분선도 없다.
+  const colors = useMemo(
+    () => ({...quoteHeadFor(palette, base, mine), fill: base.bg}),
+    [palette, base, mine],
+  );
+  return (
+    <View
+      testID="quote-head-bubble"
+      style={[styles.bubble, {backgroundColor: base.bg, borderRadius: tokens.radius}]}>
+      <QuoteBlock {...quoteHead} colors={colors} radius={tokens.radius} />
+    </View>
   );
 }
 
@@ -624,6 +704,8 @@ export function MessageBody({
   selfMemberId,
   bubble = null,
   mentionTap,
+  quoteHead,
+  searchMatch,
 }: {
   body: string;
   /**
@@ -651,6 +733,16 @@ export function MessageBody({
   selectable?: boolean;
   /** 주면 멘션이 그 멤버의 프로필로 가는 문이 된다(#4319). 안 주면 멘션은 예전처럼 글자 스타일뿐이다. */
   mentionTap?: MentionTap;
+  /**
+   * 인용 머리의 재료 (#5381 Q4). 주면 이 본문의 **첫 말풍선 안 윗칸**에 머리가 서고 가는 선 아래가 본문이다. 첫 말풍선이 없는 자리(코드 블록이
+   * 첫 블록 · 이모티콘만 · 줄 보기 배치)에서는 머리가 자기 말풍선으로 본문 **위**에 선다(`QuoteHeadBubble`) — 인용을 그리지 않는 길은 없다.
+   */
+  quoteHead?: QuoteHeadSpec | undefined;
+  /**
+   * 대화 안 검색으로 착지한 메시지의 **찾은 말**(#5384). 주면 본문의 글자 조각 중 이 말과 같은 곳이 말풍선 안에서 칠해진다(`MatchedText`). 인용 머리·코드 블록·인라인 코드·멘션은
+   * 본문 글자 잎을 거치지 않아 칠해지지 않는다. 안 주면(기본) 행은 평소와 같다.
+   */
+  searchMatch?: string | undefined;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const expressions = useExpressionItems();
@@ -662,26 +754,53 @@ export function MessageBody({
     () => (isPlainText(expressionBody.markdown) ? null : parseMarkdown(expressionBody.markdown)),
     [expressionBody.markdown],
   );
-  const palette = usePalette();
   const probe = useContext(BubbleProbeContext);
-  const bubbleChoice = useBubbleChoice();
-  // 개인 덮어쓰기(#4383): 줄 보기(`layout: 'row'`)·색·모서리. 대비가 모자란 색은 `bubbleFor` 가 버린다.
-  const tokens = useMemo(() => bubbleFor(palette, bubbleChoice), [palette, bubbleChoice]);
-  const baseTone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
-  // 보내지 못한 말풍선(`muted`, #5294 검수 5a M5): 옅기는 채움만 맡고 글자는 그 위에서 4.5:1 을 지키는 잉크다(`failedBubbleFor`). 말풍선 전체에
-  // 불투명도 막을 걸면 글자까지 바탕으로 녹아 밝음 2.66:1 · 어두움 3.52:1 이 됐다.
-  const tone = useMemo(
-    () => (baseTone !== null && muted ? failedBubbleFor(palette, baseTone) : baseTone),
-    [baseTone, muted, palette],
-  );
+  const {palette, tokens, tone, mine} = useBubbleTone(bubble, muted);
   const ink = useMemo(
-    () => (tone !== null && bubble !== null ? {fg: tone.fg, mine: bubble === 'mine'} : null),
-    [tone, bubble],
+    () => (tone !== null && bubble !== null ? {fg: tone.fg, mine} : null),
+    [tone, bubble, mine],
   );
-  const wrapProse = (children: React.ReactNode, key?: number): React.JSX.Element =>
-    tone === null ? (
-      <React.Fragment key={key}>{children}</React.Fragment>
-    ) : (
+  // 찾은 글자 강조(#5384): 칩 색은 말풍선에서 유도한다(내 말풍선이 신호색이어도 읽힌다). 말풍선이 없는 평면 행은 바탕 위 본문 글자색이 기준이다.
+  const matchSpec = useMemo<SearchMatchSpec | null>(() => {
+    if (searchMatch === undefined || searchMatch.trim() === '') return null;
+    const {fill} = searchMatchFor(palette, tone ?? {bg: palette.bg, fg: palette.text}, mine);
+    return {query: searchMatch, style: fill === null ? styles.match : [styles.match, {backgroundColor: fill}]};
+  }, [searchMatch, palette, tone, mine, styles.match]);
+  // 인용 머리 (#5381). 말풍선 안 윗칸(`inBubbleHead`)과 단독 말풍선(`standaloneHead`)은 같은 재료에서 나온다. 단독은 줄 보기 배치·첫 블록이 코드인 글·
+  // 이모티콘에서 말풍선 대신 선다 — 그 자리에서 머리를 빼면 인용이 말없이 사라진다.
+  const headTone = useMemo(
+    () => tone ?? {bg: otherBubbleFill(palette), fg: palette.text},
+    [tone, palette],
+  );
+  const headColors = useMemo(
+    () => quoteHeadFor(palette, headTone, mine),
+    [palette, headTone, mine],
+  );
+  // 머리 띠는 말풍선 가장자리까지 차므로 위쪽 두 모서리를 말풍선과 같은 반경으로 둥글린다(자르기 `overflow` 없이).
+  const inBubbleHead =
+    quoteHead === undefined ? null : (
+      <QuoteBlock {...quoteHead} colors={headColors} divider radius={tokens.radius} />
+    );
+  const standaloneHead =
+    quoteHead === undefined ? null : (
+      <QuoteHeadBubble quoteHead={quoteHead} bubble={bubble} muted={muted} />
+    );
+  const wrapProse = (
+    children: React.ReactNode,
+    key?: number,
+    withHead = false,
+  ): React.JSX.Element => {
+    if (tone === null) {
+      // 줄 보기 배치: 말풍선이 없다. 머리는 단독 말풍선으로 본문 위에 선다.
+      return (
+        <React.Fragment key={key}>
+          {withHead ? standaloneHead : null}
+          {children}
+        </React.Fragment>
+      );
+    }
+    const head = withHead ? inBubbleHead : null;
+    return (
       <View
         key={key}
         testID="message-bubble"
@@ -692,16 +811,19 @@ export function MessageBody({
         }
         style={[
           styles.bubble,
-          {
-            backgroundColor: tone.bg,
-            borderRadius: tokens.radius,
-            paddingHorizontal: tokens.padX,
-            paddingVertical: tokens.padY,
-          },
+          {backgroundColor: tone.bg, borderRadius: tokens.radius},
+          // 머리가 있는 말풍선: 머리는 말풍선 가장자리까지 가득 차고(띠), 본문은 안쪽 여백을 따로 진다.
+          head === null ? {paddingHorizontal: tokens.padX, paddingVertical: tokens.padY} : null,
         ]}>
-        {children}
+        {head}
+        {head === null ? (
+          children
+        ) : (
+          <View style={{paddingHorizontal: tokens.padX, paddingVertical: tokens.padY}}>{children}</View>
+        )}
       </View>
     );
+  };
   const mentions = useMemo<MentionRendering>(() => {
     // Keep the pre-markdown path cheap: ordinary prose neither walks the
     // directory nor changes its rendered shape just because this prop exists.
@@ -719,36 +841,52 @@ export function MessageBody({
   }, [blocks, directory, selfMemberId, mentionTap]);
 
   if (expressionBody.replacements.size > 0 && expressionBody.size !== 'inline') {
-    return (
+    const row = (
       <View style={styles.expressionRow} testID={`expression-body-${expressionBody.size}`}>
         {expressionBody.tokens.map((token, index) => token.type === 'expression'
           ? <ExpressionImage key={index} expression={token.expression} size={expressionBody.size} />
           : null)}
       </View>
     );
+    // 이모티콘만 보낸 답장: 말풍선이 없다 — 머리는 단독 말풍선으로 이모티콘 위에 선다(인용을 말없이 지우지 않는다).
+    return standaloneHead === null ? (
+      row
+    ) : (
+      <View style={styles.markdown}>
+        {standaloneHead}
+        {row}
+      </View>
+    );
   }
 
   if (blocks === null || blocks.length === 0) {
     return (
+      <MatchScope spec={matchSpec}>
       <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <BubbleInk.Provider value={ink}>
         {wrapProse(
           <Text
             style={[styles.paragraph, muted && styles.muted, ink && {color: ink.fg}]}
             selectable={selectable}
+            lineBreakStrategyIOS={WORD_WRAP}
             {...paragraphProbeProps(probe, '0.0', body)}>
             <ExpressionText text={expressionBody.markdown} />
           </Text>,
+          undefined,
+          true,
         )}
       </BubbleInk.Provider>
       </ExpressionTextContext.Provider>
+      </MatchScope>
     );
   }
 
   if (tone === null) {
     return (
+      <MatchScope spec={matchSpec}>
       <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <View style={styles.markdown} testID="message-markdown">
+        {standaloneHead}
         {blocks.map((block, index) => (
           <BlockNode
             key={index}
@@ -762,17 +900,21 @@ export function MessageBody({
         ))}
       </View>
       </ExpressionTextContext.Provider>
+      </MatchScope>
     );
   }
 
   // 산문 블록은 이어진 것끼리 한 말풍선에, 코드 블록은 말풍선 밖에서 끊는다.
   const nodes: React.JSX.Element[] = [];
   let run: React.JSX.Element[] = [];
+  // 인용 머리(#5381)는 **맨 위**에 한 번만 선다: 첫 블록이 산문이면 그 첫 말풍선의 윗칸이고, 코드 블록이 먼저면 말풍선이 없으므로 단독 말풍선으로 먼저 선다.
+  let headPlaced = quoteHead === undefined;
   const flush = (): void => {
     if (run.length === 0) return;
     nodes.push(
-      wrapProse(<View style={styles.markdown}>{run}</View>, nodes.length),
+      wrapProse(<View style={styles.markdown}>{run}</View>, nodes.length, !headPlaced),
     );
+    headPlaced = true;
     run = [];
   };
   blocks.forEach((block, index) => {
@@ -790,6 +932,11 @@ export function MessageBody({
     );
     if (block.kind === 'code') {
       flush();
+      if (!headPlaced) {
+        // 코드 블록이 첫 블록이다(앞 산문이 있었다면 위 `flush` 가 이미 첫 말풍선에 머리를 놓았다).
+        nodes.push(<React.Fragment key="quote-head">{standaloneHead}</React.Fragment>);
+        headPlaced = true;
+      }
       nodes.push(<React.Fragment key={`c${index}`}>{node}</React.Fragment>);
     } else {
       run.push(node);
@@ -798,6 +945,7 @@ export function MessageBody({
   flush();
 
   return (
+    <MatchScope spec={matchSpec}>
     <ExpressionTextContext.Provider value={expressionBody.replacements}>
     <BubbleInk.Provider value={ink}>
       <View style={styles.markdown} testID="message-markdown">
@@ -805,6 +953,7 @@ export function MessageBody({
       </View>
     </BubbleInk.Provider>
     </ExpressionTextContext.Provider>
+    </MatchScope>
   );
 }
 
@@ -818,6 +967,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   paragraph: {fontSize: font.body, color: color.text, lineHeight: headroomLineHeight(line.body)},
   muted: {color: color.textMuted},
   strong: {fontWeight: '700'},
+  // 찾은 글자(#5384). 채움은 말풍선에서 유도한 값이라 스타일에 못 박지 않고 `matchSpec` 이 얹는다. 글자색은 두지 않는다 — 말풍선 잉크를 상속한다.
+  match: {fontWeight: '700'},
   em: {fontStyle: 'italic'},
   // 인라인 코드와 코드 블록은 한 얼굴을 쓴다: 인용된 글자이지 카드가 아니다.
   // 색을 따로 박지 않는다 — **상속**되어야 보내는 중인 행의 흐린 색이 그 안의

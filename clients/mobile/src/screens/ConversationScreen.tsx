@@ -103,6 +103,8 @@ import {useOnline} from '../features/inbox/useOnline';
 import {useConnectionBand} from '../features/connection/useConnectionBand';
 import {useConnectionGates} from '../features/connection/useConnectionGates';
 import {useFormatMessage} from '../i18n/useFormatMessage';
+import {JumpSeekLine} from '../features/conversation/JumpSeekLine';
+import {planSeek, SeekOutcome, SeekPlan} from '../features/conversation/jumpSeek';
 import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -115,6 +117,7 @@ import {
   type ComposerSendOptions,
 } from '../features/conversation/Composer';
 import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
+import {conversationFloor} from '../features/conversation/bubble';
 import {CONV} from '../features/conversation/convDesign';
 import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -127,6 +130,13 @@ import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {ConversationHeader} from '../features/conversation/ConversationHeader';
 import {ConversationMenuSheet} from '../features/conversation/ConversationMenuSheet';
+import {COMPOSER_HIDDEN, ConversationSearchBar} from '../features/conversation/ConversationSearchBar';
+import {ConversationSearchPanel} from '../features/conversation/ConversationSearchPanel';
+import {ConversationSearchRow} from '../features/conversation/ConversationSearchRow';
+import {isDirectConversation} from '../features/conversation/conversationSearchModel';
+import {useConversationSearch} from '../features/conversation/useConversationSearch';
+import {recentScopeOf} from '../features/search/recentScope';
+import type {RecentSearch} from '../features/search/searchRecents';
 import {
   conversationInfoActionItems,
   conversationMenuActionItems,
@@ -339,6 +349,7 @@ export default function ConversationScreen({
   onOpenWorkSession,
   onOpenWorkList,
   onOpenSettings,
+  onOpenSearch,
 }: {
   channelId: string;
   title: string;
@@ -397,6 +408,11 @@ export default function ConversationScreen({
    * 없으면 자기 프로필에 그 타일이 서지 않는다(측정 하네스처럼 셸이 아닌 곳에서 쓰는 호출자).
    */
   onOpenSettings?: () => void;
+  /**
+   * 대화 안 검색 결과의 「모든 대화에서 ›」가 부른다(#5384): 같은 검색어로 홈 검색 탭을 연다. 셸의 `openSearch` 라서 탭이 검색으로 옮겨 가고 이 대화는 걷힌다
+   * (뒤로가기는 검색 탭에서 홈 탭으로 돌아가는 X 와 같은 길). 없으면(셸이 아닌 곳에서 쓰는 호출자) 문이 서지 않는다.
+   */
+  onOpenSearch?: (initialQuery: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -1148,6 +1164,13 @@ export default function ConversationScreen({
   const [quote, setQuote] = useState<QuoteDraft | null>(null);
   useEffect(() => setQuote(null), [channelId]);
   const composerInputRef = useRef<TextInput | null>(null);
+  // 대화 안 검색이 열려 있는 동안 사람이 글쓰기를 시작하면(인용·답글 대상을 걸면) 검색을 끝낸다(#5364): 컴포저가 숨어 있어서 그대로 두면 자판만 뜨고 입력칸이 안 보인다.
+  // 검색 훅은 아래에서 만들어지므로 닫는 문을 ref 로 받는다(`jumpTargetRef` 와 같은 거울).
+  const endSearchForWriting = useRef<() => void>(() => {});
+  const focusComposer = useCallback(() => {
+    composerInputRef.current?.focus();
+    endSearchForWriting.current();
+  }, []);
 
   const messages = timeline.state.messages;
   const membershipRevision = dmMembershipRevision(messages);
@@ -1164,8 +1187,8 @@ export default function ConversationScreen({
   const onReplyStarted = useCallback(() => {
     setQuote(null);
     // 답글을 건 사람의 다음 동작도 100% 글쓰기다 — 인용과 같다.
-    composerInputRef.current?.focus();
-  }, []);
+    focusComposer();
+  }, [focusComposer]);
   const {replyTarget, startReply, cancelReply, sendReply: sendReplyDraft} =
     useReplyDraft({
       channelId,
@@ -1191,8 +1214,8 @@ export default function ConversationScreen({
     cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
-    composerInputRef.current?.focus();
-  }, [cancelReply]);
+    focusComposer();
+  }, [cancelReply, focusComposer]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
@@ -1253,6 +1276,37 @@ export default function ConversationScreen({
    */
   const refiredRef = useRef<string | null>(null);
 
+  // ---- 불러온 범위 밖의 목적지는 그 자리까지 거슬러 읽는다 (#5383) --------------------------------
+  //
+  // 점프가 빈손으로 돌아오면(`onJumpMissed`) 목적지 `seq` 를 아는 경우에 한해 「위로 올려 이전 대화를 더 불러오세요」를 사람에게
+  // 시키는 대신 화면이 그 일을 한다: `timeline.seekOlder` 가 `before` 쪽 넘김을 목적지 seq 에 닿을 때까지 이어 읽고, 합친 뒤
+  // 같은 문으로 **한 번 더** 쏜다. 읽는 동안은 입력창 위 한 줄(`JumpSeekLine`)이 「찾는 중 · 취소」를, 실패하면 「다시 시도 · 닫기」를 말한다.
+  // 그 줄이 곧 이 기다림의 컨트롤이다 - 보이지 않는 의도는 두지 않는다(`cancelJump` 머리말과 같은 규율).
+  //
+  // 한 번의 이동은 **한 번만** 읽는다(`seekTriedRef`). 읽고 다시 쐈는데도 없으면(상한·채널의 처음·목록에 그려지지 않는 줄) 아래의
+  // 사실 진술 고지로 간다 - 새 요청(`requestJump`)이 들어오면 이 기억은 지워진다. 상한(쪽 수·거리)과 그 이유는 `jumpSeek.ts`.
+  const [seek, setSeek] = useState<{
+    messageId: string;
+    seq: number;
+    failed: boolean;
+  } | null>(null);
+  /** 읽기마다 하나 오르는 번호. 접거나(`cancelSeek`) 새 요청이 오면 오르고, 늦게 온 답은 번호가 달라 버려진다. */
+  const seekRunRef = useRef(0);
+  /** 이 요청(`requestJump` 한 번)은 이미 위로 읽어 보았다. */
+  const seekTriedRef = useRef(false);
+  /** 읽기를 접는다 - 이미 나간 쪽 요청의 답은 번호가 달라 버려지고, 아직 안 읽은 쪽은 읽지 않는다. */
+  const cancelSeek = useCallback(() => {
+    seekRunRef.current += 1;
+    setSeek(null);
+  }, []);
+  // 화면이 사라지면 읽기도 끝난다 - 늦게 온 답이 없는 화면에 상태를 쓰지 않는다.
+  useEffect(
+    () => () => {
+      seekRunRef.current += 1;
+    },
+    [],
+  );
+
   // 방을 옮기면 앞선 방의 점프도, 그 방에서 기다리던 줄도 이 화면의 사실이 아니다.
   //
   // **아래의 세션 앵커 효과보다 먼저** 선언돼 있는 것이 load-bearing 이다: 같은
@@ -1263,7 +1317,9 @@ export default function ConversationScreen({
     setJumpMissed(null);
     setAwaitingJump(null);
     refiredRef.current = null;
-  }, [channelId]);
+    cancelSeek();
+    seekTriedRef.current = false;
+  }, [channelId, cancelSeek]);
 
   /**
    * 점프 한 번을 건다 — **네 갈래가 전부 이 문을 통과한다** (#1209 리뷰 High).
@@ -1281,13 +1337,16 @@ export default function ConversationScreen({
       setJumpMissed(null);
       setAwaitingJump(null);
       refiredRef.current = null;
+      // 새 요청은 앞선 읽기를 접고, 이 요청이 위로 읽어 볼 기회를 새로 준다(#5383).
+      cancelSeek();
+      seekTriedRef.current = false;
       setJumpTarget(current => ({
         messageId,
         seq,
         token: (current?.token ?? 0) + 1,
       }));
     },
-    [],
+    [cancelSeek],
   );
 
   const onJumpToQuoted = useCallback(
@@ -1324,6 +1383,39 @@ export default function ConversationScreen({
     setAwaitingJump(null);
   }, []);
 
+  // ---- 대화 안 검색 (#5364) -----------------------------------------------------
+  //
+  // 머리의 돋보기 → 머리가 검색 줄로 바뀐다 → 결과 목록이 대화를 덮는다 → 결과를 누르면 **이 화면의 점프 문**(`requestJump('search', …)`, 홈 검색
+  // 결과와 같은 주어)으로 그 메시지로 가고, 컴포저 자리에 이동 막대(「목록」·「3 / 20+」·↑↓)가 선다. 결과 하나로 가는 일을 이 화면이
+  // 새로 만들지 않는다 — 이미 불러온 범위 밖의 오래된 결과는 그 문이 하는 만큼(「찾던 메시지는 … 위쪽에 있어요」 고지)만 간다.
+  const onSearchJump = useCallback(
+    (hit: {messageId: string; seq: number}) => {
+      // 결과를 눌렀으면 자판은 걷는다 — 대화가 보여야 한다(입력을 다시 누르면 결과 목록으로 돌아간다).
+      Keyboard.dismiss();
+      requestJump('search', hit.messageId, hit.seq);
+    },
+    [requestJump],
+  );
+  const convSearch = useConversationSearch({workspaceId, memberId: member.id, channelId, onJump: onSearchJump});
+  // 고른 결과의 말풍선 안에 찾은 글자를 칠한다(#5384). 결과를 골라 이동한 동안(`selected` 가 서 있고 막대가 선 동안)만 값이 있다 — 목록 보기로 돌아가거나 검색을 끝내면 `null`.
+  // 착지 틴트(1.5초)와 달리 막대가 서 있는 동안 남는다. 값이 바뀔 때만 새 객체다(`Timeline` 의 `renderItem` 의존성).
+  const searchSelectedId =
+    convSearch.selected === null ? null : (convSearch.hits[convSearch.selected]?.messageId ?? null);
+  const searchSelectedQuery = convSearch.settledQuery;
+  const searchHighlight = useMemo(
+    () =>
+      searchSelectedId === null || searchSelectedQuery === ''
+        ? null
+        : {messageId: searchSelectedId, query: searchSelectedQuery},
+    [searchSelectedId, searchSelectedQuery],
+  );
+  endSearchForWriting.current = () => {
+    if (!convSearch.active) return;
+    convSearch.close();
+    // 컴포저가 돌아온 **다음 프레임**에 캐럿을 옮긴다 — 걸 때의 `focus()` 는 숨어 있던 입력칸이라 닿지 않았다.
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  };
+
   /**
    * 고정 목록에서 원본으로 (이슈 #1112).
    *
@@ -1336,15 +1428,6 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  /**
-   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
-   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
-   */
-  const onJumpToMessage = useCallback(
-    (messageId: string, seq: number) => requestJump('search', messageId, seq),
-    [requestJump],
-  );
-
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1501,6 +1584,15 @@ export default function ConversationScreen({
   // 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없으면 NetInfo 만으로 같은 질문에 답한다.
   const gates = useConnectionGates();
   const formatMessage = useFormatMessage();
+  // 최근 검색은 홈 검색과 한 목록이다(#5384): 다른 대화 안에서 찾은 줄에만 그 대화의 범위 칩이 붙는다(이 대화 것은 이 화면이 곧 범위라 칩이 없다).
+  const fallbackScopeTitle = formatMessage('search.row.fallbackTitle');
+  const recentScope = useCallback(
+    (saved: RecentSearch) =>
+      saved.channelId === undefined || uuidEq(saved.channelId, channelId)
+        ? null
+        : recentScopeOf(groups, directory, member.id, saved.channelId, fallbackScopeTitle),
+    [channelId, groups, directory, member.id, fallbackScopeTitle],
+  );
   const composerNote =
     gates.composerNote === null ? undefined : formatMessage(gates.composerNote);
   const invalidateApprovals = useInvalidateApprovals();
@@ -1560,7 +1652,68 @@ export default function ConversationScreen({
   // 타고 「붙어 있는 모든 행을 다시 그려라」가 된다(`jumpSubjectRef` 와 같은 이유).
   const jumpTargetRef = useRef<typeof jumpTarget>(null);
   jumpTargetRef.current = jumpTarget;
-  const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
+  // 위로 읽기를 시작하는 함수는 매 렌더 새로 쓴다(최신 `timeline` 을 닫고 있다) - `onJumpMissed` 의 동일성은 위 이유로 고정이라
+  // 거울(ref)로 부른다. 읽기를 **시작했으면** 참이다.
+  const startSeekRef = useRef<(target: {messageId: string; seq: number}) => boolean>(
+    () => false,
+  );
+  startSeekRef.current = target => {
+    // 읽을 만한가는 훅이 든 범위로 묻는다(`planSeek`) - 목록(`items`)의 최솟값이 아니다.
+    const plan = planSeek({
+      heldOldestSeq: timeline.state.oldestSeq,
+      targetSeq: target.seq,
+      reachedStart: timeline.reachedStart,
+    });
+    if (plan !== SeekPlan.Read) return false;
+    seekRunRef.current += 1;
+    const run = seekRunRef.current;
+    setSeek({...target, failed: false});
+    AccessibilityInfo.announceForAccessibility(formatMessage('mobile.jumpSeek.reading'));
+    void timeline
+      .seekOlder(target.seq, () => seekRunRef.current !== run)
+      .then(outcome => {
+        if (seekRunRef.current !== run || outcome === SeekOutcome.Cancelled) return;
+        if (outcome === SeekOutcome.Failed) {
+          // 합친 것이 없다 - 화면은 읽기 전 그대로이고, 줄이 다시 시도를 말한다.
+          setSeek({...target, failed: true});
+          AccessibilityInfo.announceForAccessibility(formatMessage('mobile.jumpSeek.failed'));
+          return;
+        }
+        // 닿았거나(합쳤다), 처음까지 갔거나(합쳤다), 상한에 닿았다(합치지 않았다). 어느 쪽이든 목록이 판정한다 -
+        // 있으면 착지하고, 없으면 `seekTriedRef` 때문에 읽지 않고 사실 진술 고지로 간다.
+        setSeek(null);
+        setJumpTarget(current => ({
+          messageId: target.messageId,
+          seq: target.seq,
+          token: (current?.token ?? 0) + 1,
+        }));
+      });
+    return true;
+  };
+  const onSeekRetry = useCallback(() => {
+    if (seek === null) return;
+    const target = {messageId: seek.messageId, seq: seek.seq};
+    if (startSeekRef.current(target)) return;
+    // 그 사이 사람이 손으로 올려 범위가 목적지를 덮었다 - 읽을 것이 없으니 목록이 판정하게 한다.
+    cancelSeek();
+    setJumpTarget(current => ({
+      ...target,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [seek, cancelSeek]);
+  const seekView = useRef({reachedStart: timeline.reachedStart});
+  seekView.current = {reachedStart: timeline.reachedStart};
+  const onJumpMissed = useCallback((missed: 'older' | 'unknown') => {
+    const target = jumpTargetRef.current;
+    const olderMiss = missed === 'older';
+    if (olderMiss && target !== null && target.seq !== null && !seekTriedRef.current) {
+      if (startSeekRef.current({messageId: target.messageId, seq: target.seq})) {
+        seekTriedRef.current = true;
+        return;
+      }
+    }
+    // 채널의 처음까지 읽은 목록에 「더 위쪽」은 없다 - 그때의 빈손은 위가 아니라 **모르겠다**다.
+    const reason = olderMiss && seekView.current.reachedStart ? 'unknown' : missed;
     const notice = jumpMissedNotice(reason, jumpSubjectRef.current);
     setJumpMissed(notice);
     // 알림으로 온 점프만 소리를 낸다 (#2584 리뷰 M-2). 다른 넷(인용·고정·검색·세션)은
@@ -1570,7 +1723,6 @@ export default function ConversationScreen({
     if (jumpSubjectRef.current === 'notification') {
       AccessibilityInfo.announceForAccessibility(jumpNoticeSpeech(notice));
     }
-    const target = jumpTargetRef.current;
     if (target === null) return;
     setAwaitingJump({messageId: target.messageId, seq: target.seq});
   }, []);
@@ -1728,7 +1880,6 @@ export default function ConversationScreen({
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
@@ -1757,7 +1908,6 @@ export default function ConversationScreen({
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
-      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],
@@ -2041,53 +2191,10 @@ export default function ConversationScreen({
   // 고지·요약도 스크롤 안에 둔다. 카드가 null 이거나 닫히면 별도 머리 여백이 남지 않는다.
   const topNotice = useMemo(() => (
     <>
-      {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
-          인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
-          사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
-          이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
-          두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
-          (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
-
-          옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
-          아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
-          바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
-          거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
-          (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
-          그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
-      {/* ===================================================
-          실패가 아니라 **사실 진술**이다 (design-review H-5).
-
-          사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다.
-          빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는
-          「내가 뭔가 잘못했다」를 말한다. `atoms` 에 이 경우를 위한
-          컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로
-          *"A statement of fact that is not a failure … Deliberately has
-          no retry and no danger colour."*
-
-          닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인
-          알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이
-          방금 한 동작(인용 탭)에 대한 답이고, 한 번 읽으면 목록 아래에
-          영영 붙어 있을 이유가 없다. 서버가 못 하는 일에 대한 고지가
-          아니다.
-
-          점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
-
-          그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
-          리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
-          의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
-          것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
-          않는다.
-          =================================================== */}
-      {jumpMissed ? (
-        <View style={styles.notice}>
-          <NoticeBlock
-            headline={jumpMissed.headline}
-            detail={jumpMissed.detail}
-            onDismiss={cancelJump}
-            testID="jump-missed"
-          />
-        </View>
-      ) : null}
+      {/* 점프가 빈손으로 돌아온 고지(「더 위쪽에 있습니다」 등)는 **여기 서지 않는다** (#5384). 이 자리는 목록의 맨 위라 스크롤 안에 있고, 점프를 건 사람은
+          거의 언제나 바닥에 있다 — 300줄을 넘어 읽기에서 물러난 점프가 「눌렀는데 아무 일도 없다」가 되는 길이었다. 고지는 입력창 바로 위 도크에 선다(아래
+          `jump-missed-dock`, 읽는 줄 `JumpSeekLine` 과 같은 자리). 같은 사실을 두 군데서 말하지 않는다(#1196)는 규율은 그대로이고 자리만 하나로 모였다. 닫기·기다림을
+          접는 규율(`cancelJump`)과 문장은 그대로다(`NoticeBlock` 의 `onDismiss` 독스트링, #1209 리뷰 High). */}
       {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
           (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
           말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
@@ -2114,7 +2221,7 @@ export default function ConversationScreen({
         />
       ) : null}
     </>
-  ), [jumpMissed, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
+  ), [notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
 
   const requestRuns = useChannelRuns(channelId);
   const railTurns = useMemo(() => {
@@ -2175,6 +2282,20 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
+        // 돋보기는 종류를 알 때만 선다 — 안내문이 「이 채널에서」인지 「이 대화에서」인지 모른다(⋮ 시트의 정보 행과 같은 규칙).
+        onOpenSearch={channel !== null ? convSearch.open : undefined}
+        searchRow={
+          convSearch.active ? (
+            <ConversationSearchRow
+              query={convSearch.query}
+              onChangeQuery={convSearch.setQuery}
+              onSubmit={convSearch.submit}
+              onFocus={convSearch.editing}
+              onClose={convSearch.close}
+              isDm={isDirectConversation(channel?.kind)}
+            />
+          ) : undefined
+        }
         band={band}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
@@ -2185,6 +2306,12 @@ export default function ConversationScreen({
       {isSurfaceProvided('ade') ? <AdeSummaryLine onPress={openAde} /> : null}
       </ConversationHeader>
       </View>
+      {/* 결과 목록 면이 대화를 덮는 동안 대화(목록·컴포저)는 화면 낭독에서 뺀다(#5364): 불투명한 면 뒤의 보이지 않는 행에 낭독 초점이 닿지 않게. 머리(검색 줄)는 이 틀 **밖**
+          형제라 그대로 닿는다 — 그래서 면에 `accessibilityViewIsModal` 을 걸지 않는다(그러면 형제인 검색 줄까지 낭독에서 빠진다). 레이아웃에는 영향이 없다(`flex: 1`). */}
+      <View
+        style={styles.layoutFill}
+        accessibilityElementsHidden={convSearch.listOpen}
+        testID="conversation-layout-wrap">
       <ConversationLayout
         list={
           <>
@@ -2231,6 +2358,7 @@ export default function ConversationScreen({
               onDiscardPending={onDiscardPending}
               failureKinds={failureKinds}
               jumpTarget={jumpTarget ?? undefined}
+              searchHighlight={searchHighlight}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
               onReaderTookList={onReaderTookList}
@@ -2251,6 +2379,59 @@ export default function ConversationScreen({
         }
         composer={
           <>
+            {/* 결과로 이동한 동안 컴포저 **자리**에 이동 막대가 선다(#5364). 컴포저는 걷지 않고 **숨긴다**(`display: 'none'`) — 마운트가 유지돼서 쓰던 글·첨부·답글
+                머리말이 그대로고, 검색을 끝내면 그 자리에서 돌아온다. */}
+            {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196). 인용·고정·세션 앵커·검색 진입 넷이 같은 고지를 쓴다 — 같은 사실("이 화면에 그 줄이 없다")을
+                두 가지 모양으로 말할 이유가 없고, 두 벌을 그릴 수도 없다(같은 한 번에 같은 문장이 **두 줄** 선다).
+
+                ## 자리는 입력창 바로 위다 (#5384)
+                이 고지는 목록의 **맨 위**(스크롤 안)에 서 있었다. 그런데 점프를 건 사람은 거의 언제나 **바닥**에 있다 — 홈 검색 결과를 눌러 대화가 바닥에서 열렸거나, 대화 안
+                검색 목록에서 돌아왔다. 읽기 상한(300줄, `jumpSeek.ts`)을 넘어 물러난 점프의 끝 고지가 안 보이면 「오래된 결과를 눌렀는데 아무 일도 없다」가 된다. 그래서 읽는
+                줄(`JumpSeekLine`)과 **같은 자리**, 곧 입력창 바로 위 도크다. 이 자리는 컴포저 묶음을 숨기는 틀 **밖**이라(`COMPOSER_HIDDEN`) 대화 안 검색 중에도 이동 막대 바로
+                위에 보인다. 읽는 줄과 동시에 서지 않는다(읽는 동안은 고지가 없고, 끝난 뒤에는 줄이 없다).
+
+                ## 실패가 아니라 **사실 진술**이다 (design-review H-5)
+                사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다. 빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는 「내가 뭔가 잘못했다」를 말한다.
+                `atoms` 에 이 경우를 위한 컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로 *"A statement of fact that is not a failure … Deliberately has no retry and no
+                danger colour."*
+
+                닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인 알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이 방금 한 동작(결과·인용 탭)에
+                대한 답이고, 한 번 읽으면 영영 붙어 있을 이유가 없다. 점프가 성공하면 스스로도 물러난다(`clearJumpNotice`). 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`,
+                #1209 리뷰 Medium): 이 상자는 「그 줄이 오면 데려간다」는 의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는 것이다. */}
+            {jumpMissed ? (
+              <View style={styles.notice} testID="jump-missed-dock">
+                <NoticeBlock
+                  headline={jumpMissed.headline}
+                  detail={jumpMissed.detail}
+                  onDismiss={cancelJump}
+                  testID="jump-missed"
+                />
+              </View>
+            ) : null}
+            {/* 불러온 범위 밖 점프가 그 자리까지 읽는 동안의 한 줄(#5383): 「찾는 중 · 취소」/「다시 시도 · 닫기」. **숨기는 틀 밖**에 둔다 - 대화 안 검색에서
+                결과(또는 ↑ ↓)를 눌러 읽는 동안에도 보여야 하고, 컴포저 묶음은 그때 숨는다. 위의 `jump-missed` 와 동시에 서지 않는다(읽는 동안은 고지가 없고,
+                끝난 뒤에는 줄이 없다). 검색 중이 아니면 컴포저 묶음 맨 위, 곧 입력창 바로 위다. */}
+            {seek !== null ? (
+              <JumpSeekLine
+                failed={seek.failed}
+                onCancel={cancelSeek}
+                onRetry={onSeekRetry}
+                onDismiss={cancelSeek}
+              />
+            ) : null}
+            {convSearch.active && convSearch.position !== null ? (
+              <ConversationSearchBar
+                position={convSearch.position}
+                query={convSearch.settledQuery}
+                canOlder={convSearch.canOlder}
+                canNewer={convSearch.canNewer}
+                loadingMore={convSearch.loadingMore}
+                onList={convSearch.backToList}
+                onOlder={convSearch.older}
+                onNewer={convSearch.newer}
+              />
+            ) : null}
+            <View style={convSearch.active ? COMPOSER_HIDDEN : undefined} testID="conversation-composer-stack">
             {/* 입력창 위, 모든 줄의 맨 위 (#2945, Q1 「입력창 위 채널당 한 장」).
                 타임라인 꼬리가 아니라 여기인 이유는 PR 「시안과의 차이」 표. */}
             {aiCard !== null && aiCard.channelId === channelId ? (
@@ -2347,9 +2528,25 @@ export default function ConversationScreen({
               onSlashCommand={onSlashCommand}
               onKeyBlockedChange={setComposerKeyBlocked}
             />
+            </View>
           </>
         }
       />
+      </View>
+      {/* 결과 목록 보기일 때만 대화를 덮는다. 머리(`zIndex` 1)는 이 면 **위**에 서서 검색 줄이 보인다. 이 틀 안에 두는 이유는 머리와 같다 — 덮개들(스레드 ·
+          고정 목록)이 이 틀 **뒤** 형제라 그 위에 서야 할 것은 위에 선다. */}
+      {convSearch.listOpen ? (
+        <ConversationSearchPanel
+          search={convSearch}
+          directory={directory}
+          selfMemberId={member.id}
+          isDm={isDirectConversation(channel?.kind)}
+          topInset={headerInset}
+          nowMs={nowMs}
+          onSearchAll={onOpenSearch}
+          recentScope={recentScope}
+        />
+      ) : null}
       </View>
 
       {thread ? (
@@ -2529,6 +2726,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
   /** 머리 · 요약 줄 · 목록의 틀(#4292). `Screen` 의 남은 높이를 다 쓴다 — 이 틀 안에서만 머리의 `zIndex` 가 겨룬다. */
   column: {flex: 1},
+  /** 대화 틀(목록 + 컴포저)을 낭독에서 뺄 수 있게 감싼 한 겹 — 레이아웃은 그대로다(#5364). */
+  layoutFill: {flex: 1},
   headerOverlay: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1},
   /**
    * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`
@@ -2540,9 +2739,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     ...(color.backdrop === 'image'
       ? {backgroundColor: color.bg}
       : {
-          experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
-            color.mode === 'light' ? color.surface : color.bg
-          } 25%)`,
+          experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${conversationFloor(color)} 25%)`,
         }),
   },
   /**

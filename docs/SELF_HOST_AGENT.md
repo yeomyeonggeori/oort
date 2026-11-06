@@ -1922,12 +1922,14 @@ tunnel, with the active credential from join.
    Where it goes: your final answer is the body of oort_run_complete. oort
    posts it for you and you do not choose where, so never also send it with
    oort_message_post. For a message you post yourself with oort_message_post,
-   answer where you were asked: in a direct message, at the top level (no
-   rootId); for a top-level mention in a channel, rootId is that message's id;
-   inside a thread, rootId is the thread's root (every message from
+   answer where you were asked: in a 1:1 direct message, at the top level (no
+   rootId); inside a thread, rootId is the thread's root (every message from
    oort_job_start or oort_conversation_read carries rootId, and the message
-   that called you is work.triggerMessageId). If a top-level message might be
-   a direct message and you cannot tell, leave rootId out.
+   that called you is work.triggerMessageId); anywhere else (a top-level
+   mention in a channel, a group direct message), rootId is the id of the
+   message that called you, so your message opens a thread under it. If a
+   top-level message might be a 1:1 direct message and you cannot tell, leave
+   rootId out.
 5) If events is empty, still do h) and call oort_job_start {} once while
    fewer than 4 folders exist (another wake may have read the same page
    first); if it returns a job, go on as in 3 a). If job is null and no
@@ -2565,7 +2567,8 @@ generator now do for you; you still read the lock, and the model key stays yours
   is shut and a photo message is an ordinary conversation turn (no error card). Set it
   only after the Hermes service runs the new gate, and update an existing Railway project
   in this order: (1) add `HERMES_MEDIA_DELIVERY_STRICT=1` to hermes; (2) redeploy
-  `HERMES_LOCKGATE_B64` and the start command's checksum together (the new gate refuses
+  `HERMES_LOCKGATE_B64` (with its parts `_2`…`_5`: Railway refuses a value over 32,768 characters, and each line of
+  `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000` is one variable) and the start command's checksum together (the new gate refuses
   to start Hermes without (1), so (2) alone stops the agent); (3) when the `LOCKGATE` line
   of the deploy log shows `"media_strict": true`, set
   `OORT_HOSTED_MEDIA_STRICT=1` last. Only an exact `1` opens the door. In both
@@ -2949,7 +2952,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
-| `stack.outbox` | non-`done` rows | `push_candidate` pending is **info** (count) when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). `agent_job` pending younger than 5 minutes is info; older is major (kind/status/count/max age listed). Other kinds: `logs relay` if pending/failed. |
+| `stack.outbox` | non-`done` rows | `push_candidate` pending is **info** (count) when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). A `push_candidate` whose `available_at` is still in the future (`pending_deferred`: a phone push waiting out a member's delay of at most 300 s) is **info** in every case, never FAIL; one that is already due stays FAIL when a relay is configured. `agent_job` pending younger than 5 minutes is info; older is major (kind/status/count/max age listed). Other kinds: `logs relay` if pending/failed. |
 | `stack.scheduler` | a scheduled message is more than 5 minutes past its time and still `pending` (major; says "past the grace window" when it is past `MOMO_SCHEDULER_GRACE_SECONDS`, default 3600) | The api tick is not running or cannot close the row: `logs api` for `scheduled messages tick`; `MOMO_SCHEDULER_ENABLED=0` stops it. **info** = schedules the server missed in the last 24 h (no action; their author decides). **skip** = the connection cannot skip row-level security, so the count is unknown (use the owner URL). |
 | `stack.migrate_idempotency` | no `IDEMPOTENCY_OK` | `logs migrate`. |
 | `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. Cloudflare T3 (§3.8): a `public.*` skip (「흔적 없음」) is a user error — run `--public-origin` first; skip is not PASS. |

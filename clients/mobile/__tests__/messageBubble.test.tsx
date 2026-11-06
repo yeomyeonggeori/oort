@@ -17,6 +17,7 @@ import {
   BUBBLE_MIN_CONTRAST,
   failedBubbleFor,
   otherBubbleFill,
+  quoteHeadFor,
 } from '../src/features/conversation/bubble';
 import {CONV} from '../src/features/conversation/convDesign';
 import {LandedTintFade} from '../src/features/conversation/LandedTintFade';
@@ -372,9 +373,12 @@ describe('말풍선 — 토큰으로만 그린다', () => {
 
   it('카드·첨부는 말풍선 밖이다 — 말풍선은 본문(MessageBody)만 감싼다', () => {
     const code = codeOnly(SRC('MessageRow.tsx'));
-    // 말풍선 prop 은 MessageBody 에만 걸리고 AgentCard·ArtifactCard·AttachmentList 에는 없다.
+    // 말풍선 prop 은 MessageBody(와 본문이 없을 때 인용 머리를 자기 말풍선에 담는 QuoteHeadBubble, #5381)에만 걸리고
+    // AgentCard·ArtifactCard·AttachmentList 에는 없다.
     const uses = code.match(/bubble=/g) ?? [];
-    expect(uses).toHaveLength(2); // 확정 행 + 낙관적 메아리
+    expect(uses).toHaveLength(4); // (확정 행 + 낙관적 메아리) × (본문 + 단독 인용 머리)
+    expect(code.match(/<MessageBody[\s\S]*?bubble=/g) ?? []).toHaveLength(2);
+    expect(code.match(/<QuoteHeadBubble[^>]*bubble=/g) ?? []).toHaveLength(2);
     expect(code).not.toMatch(/<(AgentCard|ArtifactCard|AttachmentList)[^>]*bubble/);
   });
 
@@ -423,6 +427,46 @@ describe('말풍선 — 토큰으로만 그린다', () => {
   });
 });
 
+/** 모든 테마·모드·신호색 조합 + 카탈로그 팔레트의 말풍선 입력(채움·글자·보조 글자 토큰). */
+function allBubblePalettes(): (readonly [string, Record<string, string>])[] {
+  return [
+    ...DS2_COMBOS.flatMap(([theme, mode]) =>
+      [null, ...Object.keys(SIGNAL_PRESETS)].map(preset => [
+        `${theme}/${mode}/${preset ?? 'default'}`,
+        resolveAppearance(theme, mode, preset ? ({preset} as never) : null).palette as unknown as Record<string, string>,
+      ] as const),
+    ),
+    ...catalogEntries().flatMap(e =>
+      (['light', 'dark'] as const).flatMap(mode => {
+        const d = deriveCatalogMode(e.id, mode);
+        if (!d) return [];
+        const t = d.tokens as unknown as {
+          color: Record<string, string>;
+          derived: Record<string, string>;
+          canvas: string[];
+        };
+        return [
+          [
+            `catalog:${e.id}/${mode}`,
+            {
+              // `mode`·`backdrop` 이 없으면 `otherBubbleFill` 이 조용히 바닥을 `bg` 로 읽는다(#5421) — 라이트 행을 옛 규칙으로 재는 초록이 된다.
+              mode,
+              backdrop: 'canvas',
+              accent: t.color.signal,
+              onAccent: t.color['on-signal'],
+              surface: t.color.surface,
+              surfacePressed: t.derived['surface-pressed'],
+              text: t.color.ink,
+              textMuted: t.color['ink-muted'],
+              bg: t.canvas[1],
+            },
+          ] as const,
+        ];
+      }),
+    ),
+  ];
+}
+
 describe('말풍선 토큰 — 덮어쓰기와 대비', () => {
   it('layout·radius 덮어쓰기를 받고, 범위를 벗어나면 기본으로 돌아간다', () => {
     expect(bubbleFor(color, {layout: 'row'}).layout).toBe('row');
@@ -442,38 +486,7 @@ describe('말풍선 토큰 — 덮어쓰기와 대비', () => {
 
   it('모든 조합에서 두 말풍선의 글자 대비가 4.5:1 이상이다', () => {
     const bad: string[] = [];
-    const all = [
-      ...DS2_COMBOS.flatMap(([theme, mode]) =>
-        [null, ...Object.keys(SIGNAL_PRESETS)].map(preset => [
-          `${theme}/${mode}/${preset ?? 'default'}`,
-          resolveAppearance(theme, mode, preset ? ({preset} as never) : null).palette,
-        ] as const),
-      ),
-      ...catalogEntries().flatMap(e =>
-        (['light', 'dark'] as const).flatMap(mode => {
-          const d = deriveCatalogMode(e.id, mode);
-          if (!d) return [];
-          const t = d.tokens as unknown as {
-            color: Record<string, string>;
-            derived: Record<string, string>;
-            canvas: string[];
-          };
-          return [
-            [
-              `catalog:${e.id}/${mode}`,
-              {
-                accent: t.color.signal,
-                onAccent: t.color['on-signal'],
-                surface: t.color.surface,
-                surfacePressed: t.derived['surface-pressed'],
-                text: t.color.ink,
-                bg: t.canvas[1],
-              },
-            ] as const,
-          ];
-        }),
-      ),
-    ];
+    const all = allBubblePalettes();
     for (const [name, p] of all) {
       const b = bubbleFor(p as never);
       if (contrast(b.mine.fg, b.mine.bg) < BUBBLE_MIN_CONTRAST) bad.push(`${name} mine`);
@@ -486,6 +499,44 @@ describe('말풍선 토큰 — 덮어쓰기와 대비', () => {
     expect(all.length).toBeGreaterThan(60);
     // 깨뜨리면: 내 말풍선 글자를 text 로(onAccent 대신) → 다수 조합이 빨강.
     // 깨뜨리면: failedBubbleFor 가 글자색을 tone.fg(onAccent) 그대로 두고 채움만 옅히면 → 모든 조합의 mine-failed 가 빨강.
+  });
+});
+
+describe('인용 머리의 색 (#5381 Q4) — 말풍선 안 윗칸', () => {
+  it('모든 조합에서 머리 글자가 띠 위에서 4.5:1 이상이고, 띠는 말풍선과 갈려 보이거나 말풍선 그대로다', () => {
+    const bad: string[] = [];
+    let bands = 0;
+    for (const [name, p] of allBubblePalettes()) {
+      const b = bubbleFor(p as never);
+      const cases = [
+        ['mine', b.mine, true],
+        ['other', b.other, false],
+        ['mine-failed', failedBubbleFor(p as never, b.mine), true],
+      ] as const;
+      for (const [kind, tone, mine] of cases) {
+        const head = quoteHeadFor(p as never, tone, mine);
+        if (contrast(head.label, head.fill) < BUBBLE_MIN_CONTRAST) bad.push(`${name} ${kind} label`);
+        if (contrast(head.excerpt, head.fill) < BUBBLE_MIN_CONTRAST) bad.push(`${name} ${kind} excerpt`);
+        if (head.fill !== tone.bg) {
+          bands += 1;
+          // 띠가 섰다면 말풍선과 보이게 갈려 있다.
+          if (contrast(head.fill, tone.bg) < 1.08) bad.push(`${name} ${kind} band invisible`);
+        }
+        // 구분선은 띠 위에서 보인다(띠와 같은 색이면 선이 없는 것이다).
+        if (head.line === head.fill) bad.push(`${name} ${kind} line`);
+      }
+    }
+    expect(bad).toEqual([]);
+    // 띠가 서는 조합이 대다수다(전부 물러나면 이 검사가 아무것도 재지 않는 초록이다).
+    expect(bands).toBeGreaterThan(100);
+    // 깨뜨리면: 띠 단계가 글자 대비를 안 보고 첫 단계를 쓰면 → 다크의 신호색(밝은 말풍선) 위 어두운 글자 조합이 빨강.
+    // 깨뜨리면: 띠를 `tone.bg` 그대로 두면(어둡히지 않으면) → `bands` 가 0 이라 마지막 단정이 빨강.
+  });
+
+  it('내 말풍선 글자는 말풍선 본래 글자색이고, 남 말풍선 글자는 보조 글자색이다', () => {
+    const b = bubbleFor(color);
+    expect(quoteHeadFor(color, b.mine, true).label).toBe(b.mine.fg);
+    expect(quoteHeadFor(color, b.other, false).label).toBe(color.textMuted);
   });
 });
 

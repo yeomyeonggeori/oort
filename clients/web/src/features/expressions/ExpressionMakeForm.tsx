@@ -24,7 +24,10 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { Select } from "@/design/ui/select";
-import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { EmptyInvite, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import type { UploadHandle } from "@/features/attachments/uploadTransport";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { useExpressions } from "./context";
@@ -74,7 +77,8 @@ const STEP_LINES: Record<MakeStep, string> = {
 const PAUSED_SUFFIX = " (잠들어 있어요)";
 const PREVIEW_EDGE = 192;
 
-type RosterState = { kind: "loading" } | { kind: "error" } | { kind: "ready"; agents: RosterMember[] };
+// `error`는 목록 읽기가 던진 오류 객체다(#5279 C): 버리지 않고 들고 있어야 실패 줄이 오프라인인지 서버에 닿지 못했는지를 말한다.
+type RosterState = { kind: "loading" } | { kind: "error"; error: unknown } | { kind: "ready"; agents: RosterMember[] };
 type Phase = { kind: "idle" } | { kind: "busy"; step: MakeStep } | { kind: "failed"; line: string } | { kind: "sent"; channel: Channel };
 interface Invalid { photo?: string; motion?: string; agent?: string; note?: string }
 
@@ -176,7 +180,7 @@ export function ExpressionMakeForm({ onImport, onClose }: { onImport: () => void
       setRoster({ kind: "ready", agents });
       // 하나뿐이면 미리 골라 둔다. 여럿이면 사람이 고른다.
       setAgentId((current) => agents.some((agent) => agent.id === current) ? current : agents.length === 1 ? agents[0].id : "");
-    }, () => { if (live) setRoster({ kind: "error" }); });
+    }, (error: unknown) => { if (live) setRoster({ kind: "error", error }); });
     return () => { live = false; };
   }, [store, rosterTry]);
 
@@ -275,7 +279,7 @@ export function ExpressionMakeForm({ onImport, onClose }: { onImport: () => void
 
   return <form className="flex min-h-0 max-h-pane-lg flex-col gap-3" aria-label="AI와 만들기" noValidate data-testid="expression-make-form" data-state={phase.kind} onSubmit={(event) => void submit(event)}>
     <p className="break-keep text-meta text-ink-muted">고른 사진으로 에이전트가 팀 이모티콘을 만들고, 결과는 대화에 승인 카드로 와요.</p>
-    {roster.kind === "error" && <InlineBanner message="에이전트 목록을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => setRosterTry((value) => value + 1)} separator={false} className="px-0" testId="expression-make-roster-error" />}
+    {roster.kind === "error" && <LoadFailureNote titleKey={CONNECTION_KEYS.loadAgentRosterTitle} cause={loadCauseOf(roster.error)} onRetry={() => setRosterTry((value) => value + 1)} separator={false} className="px-0" testId="expression-make-roster-error" />}
     {roster.kind === "ready" && noAgents && <EmptyInvite headline="아직 에이전트가 없어요" detail="AI와 만들려면 에이전트가 있어야 해요. 지금은 사진이나 링크로 가져올 수 있어요." className="px-0 py-3" testId="expression-make-empty" actions={<Button type="button" variant="secondary" onClick={onImport}>가져오기</Button>} />}
     {/* 고르는 칸은 스크롤되고, 보내기와 그 결과 줄은 아래에 붙어 있어서 어디까지 내려가 있어도 보인다.
         막혀 있을 때는 지우지 않고 숨긴다: 고른 사진이 칸 안의 상태로 남아 다시 시도 뒤에도 어긋나지 않는다. */}

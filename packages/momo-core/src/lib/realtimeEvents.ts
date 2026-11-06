@@ -52,10 +52,9 @@ export interface MessageNewEvent {
      */
     reply_to_id?: string | null;
     /**
-     * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다(본류에도 보이는
-     * 스레드 답글). **`true`일 때만 키가 있다** — 켜지 않은 메시지의 프레임은 예전 바이트 그대로다.
-     * `message.edited`도 싣는다(편집은 메시지 전체를 다시 싣는 프레임이라, 침묵을 「꺼짐」으로
-     * 읽으면 본류의 행이 사라진다).
+     * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐던 스레드 답글. **`true`일 때만 키가 있다** — 켜지 않은
+     * 메시지의 프레임은 예전 바이트 그대로다. `message.edited`도 싣는다. 2026-11-05부터 화면은 이 값을 읽어 그리지 않는다(스레드에만 보인다,
+     * 서버 필드는 호환을 위해 유지).
      */
     also_in_channel?: boolean;
     /**
@@ -354,7 +353,7 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
   // ADR-0148. `replyTo` is deliberately NOT set here — the frame has no quoted
   // body to set it from, and inventing one would be the snapshot the ADR bans.
   if (typeof p.reply_to_id === "string") message.replyToId = p.reply_to_id;
-  // #4887 — `=== true` 로만 읽는다: 키가 없거나 다른 값이면 「꺼짐」이고 필드는 만들지 않는다.
+  // #4887 — `=== true` 로만 읽는다: 키가 없거나 다른 값이면 「꺼짐」이고 필드는 만들지 않는다(화면은 그리는 데 쓰지 않는다 — 코어 `threadHome` 머리말).
   if (p.also_in_channel === true) message.alsoInChannel = true;
   if (p.props && typeof p.props === "object") message.props = p.props;
   if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;

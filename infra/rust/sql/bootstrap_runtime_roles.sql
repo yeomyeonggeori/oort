@@ -669,6 +669,12 @@ BEGIN
   IF to_regclass('public.channel_viewing') IS NOT NULL THEN
     GRANT SELECT ON TABLE channel_viewing TO momo_notifier;
   END IF;
+  -- ADR-0206 D4 / #4497 (migration 174): the push judgment's tail reads the member's desktop-activity
+  -- stamp and holds a phone push while it is fresh. SELECT only — `momo_app` writes the row (the
+  -- `PUT …/presence/activity` heartbeat), the notifier never does.
+  IF to_regclass('public.member_activity') IS NOT NULL THEN
+    GRANT SELECT ON TABLE member_activity TO momo_notifier;
+  END IF;
   -- ADR-0206 증보 1 F1 / #4889 2단계 (migration 165): the `thread_reply` arm of the push
   -- judgment reads who follows the thread. SELECT only — the rows are made by momo_app
   -- (follow API) and momo_worker (the agent worker's send), never by the notifier: its own

@@ -41,6 +41,7 @@ pub mod dispatch;
 pub mod dispatch_log;
 pub mod error;
 pub mod judgment;
+pub mod refine;
 pub mod system;
 
 pub use approvers::{may_approve_in_tx, ApprovalCard, CardAudience};
@@ -72,6 +73,12 @@ pub use error::{DeviceInputError, DeviceRejection, PushError};
 pub use judgment::{
     judge_candidate_targets, judge_targets, unread_badge, JudgedTarget,
     WORK_COMPLETE_FOREGROUND_WINDOW_SECS, WORK_COMPLETE_MIN_RAN_MS,
+    WORK_PERMISSION_PUSH_WINDOW_SECS,
+};
+pub use refine::{
+    decide, delay_applies, has_delayable_targets, is_delayable_reason, refine_targets,
+    DelayVerdict, MemberFacts, Refined, ACTIVITY_WINDOW_SECS, PHONE_DELAY_DEFAULT_SECS,
+    PHONE_DELAY_MAX_SECS,
 };
 pub use system::{
     system_dispatch_target, system_targets, test_notification_collapse_id,

@@ -1,20 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { agentRunProgressFromWire, type AgentRunBundle, type AgentRunProgress, type Message } from "../../lib/api";
+import { agentRunProgressFromWire, type AgentRunBundle, type AgentRunProgress } from "../../lib/api";
 import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "./runWaiting";
 import type { AgentNameLookup, AgentNameParts } from "./turnCopy";
 import {
-  answerMessageFor,
-  CHIP_WORD_ANSWERED,
   CHIP_WORD_FAILED,
   CHIP_WORD_UNCOLLECTED,
-  indexAnswers,
-  runAnswerMap,
   TRIGGER_CHIP_FACES,
+  TRIGGER_CHIP_KINDS,
   triggerChip,
 } from "./triggerChip";
 
 // =============================================================================
-// 트리거 메시지 칩의 모델 (#4619 B): run들 → 칩 하나, 급한 순서, 「답함」의 목적지, 초 단위 없음.
+// 트리거 메시지 칩의 모델 (#4619 B): run들 → 칩 하나, 급한 순서, 성공은 칩이 없음(#5382), 초 단위 없음.
 // =============================================================================
 
 const A = "00000000-0000-7000-8000-000000000301";
@@ -94,7 +91,6 @@ describe("run 하나 → 칩", () => {
       mark: "none",
       tone: "warn",
     },
-    { name: "완료", extra: DONE, kind: "answered", word: CHIP_WORD_ANSWERED, mark: "check", tone: "ok" },
     { name: "실패", extra: FAILED, kind: "failed", word: CHIP_WORD_FAILED, mark: "cross", tone: "danger" },
     // 서버가 일을 끝내지 못한 것(시간 초과·신호 소실)은 오류가 아니다(ADR-0132): 경고 톤·느낌표이고 위험 톤·가위표가 아니다.
     {
@@ -167,6 +163,12 @@ describe("run 하나 → 칩", () => {
     expect(triggerChip([run()], nameFor, T + 14 * MIN, { routineFor })?.word).toBe(UNCOLLECTED_WORD);
   });
 
+  it("성공으로 끝난 run은 칩이 없다 — 「답함 ✓」은 서지 않는다 (#5382)", () => {
+    expect(triggerChip([run(DONE)], nameFor, NOW)).toBeNull();
+    // 한참 뒤에 읽어도 같다(경과가 칩을 되살리지 않는다).
+    expect(triggerChip([run(DONE)], nameFor, T + HOUR)).toBeNull();
+  });
+
   it("취소는 사람이 직접 한 일이라 칩이 없다", () => {
     expect(
       triggerChip(
@@ -183,7 +185,7 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
   const NOW = T + 30 * SEC;
   const pick = (runs: AgentRunProgress[], now = NOW) => triggerChip(runs, nameFor, now);
 
-  it("실패 > 시간 초과 > 아직 받지 않았어요 > 승인 필요 > 작업 중 > 가져감 > 받음 > 답함", () => {
+  it("실패 > 시간 초과 > 아직 받지 않았어요 > 승인 필요 > 작업 중 > 가져감 > 받음", () => {
     expect(pick([run(DONE), run(FAILED)])?.kind).toBe("failed");
     expect(pick([run(FAILED), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("failed");
     // 시간 초과(가져간 뒤 서버가 끝냄)는 실패보다 약하고 아직 받지 않았어요보다 강하다.
@@ -199,15 +201,22 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
     expect(pick([run(), run(DONE)])?.kind).toBe("received");
   });
 
-  it("하나라도 아직 일하는 중이면 「답함」이 아니다", () => {
-    expect(pick([run(DONE), run({ ...RUNNING, agentMemberId: B })])?.word).toBe("작업 중");
-    expect(pick([run(DONE), run({ ...DONE, agentMemberId: B })])?.word).toBe("답함");
+  it("성공은 칩에 세지 않는다: 전부 성공이면 칩이 없고, 하나라도 다른 상태면 그 상태의 칩이다 (#5382)", () => {
+    expect(pick([run(DONE)])).toBeNull();
+    expect(pick([run(DONE), run({ ...DONE, agentMemberId: B })])).toBeNull();
+    expect(pick([run(DONE), run({ ...FAILED, agentMemberId: B })])).toMatchObject({ kind: "failed", word: CHIP_WORD_FAILED });
+    expect(pick([run(DONE), run({ ...RUNNING, agentMemberId: B })])).toMatchObject({ kind: "working", word: "작업 중" });
+    // 칩이 말하는 run은 성공한 쪽이 아니라 다른 상태의 run이다(이름도 그쪽이다).
+    const mixed = pick([run(DONE), run({ ...FAILED, agentMemberId: B })])!;
+    expect(mixed.label).toBe("모래시계봇 에이전트의 실행이 실패했어요.");
+    expect(mixed.runIds).toHaveLength(1);
   });
 
   it("취소된 run은 세지 않는다: 남은 것이 칩이 되고, 전부 취소면 칩이 없다", () => {
     const cancelled = (agentMemberId: string) =>
       run({ phase: "cancelled", status: "cancelled", agentMemberId });
-    expect(pick([cancelled(A), run({ ...DONE, agentMemberId: B })])?.kind).toBe("answered");
+    expect(pick([cancelled(A), run({ ...RUNNING, agentMemberId: B })])?.kind).toBe("working");
+    expect(pick([cancelled(A), run({ ...DONE, agentMemberId: B })])).toBeNull();
     expect(pick([cancelled(A), cancelled(B)])).toBeNull();
   });
 
@@ -216,43 +225,11 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
     expect(pick([run(RUNNING), run({ ...RUNNING, agentMemberId: B })])?.label).toBe(
       "달무리봇 외 1명 에이전트가 작업 중이에요."
     );
-    expect(pick([run(DONE)])?.label).toBe("달무리봇 에이전트가 답했어요.");
     expect(pick([run(FAILED)])?.label).toBe("달무리봇 에이전트의 실행이 실패했어요.");
     expect(pick([run()], T + 10 * MIN)?.label).toBe("달무리봇 에이전트가 요청을 가져가지 않았어요.");
     expect(pick([run({ phase: "claimed", leaseState: "live" })])?.label).toBe(
       "달무리봇 에이전트가 일을 가져갔어요. 아직 보고는 없어요."
     );
-  });
-});
-
-describe("「답함 ✓」의 목적지", () => {
-  it("답 메시지를 알면 칩이 그 id와 seq를 들고, 모르면 들지 않는다(눌리지 않는 칩)", () => {
-    const done = run(DONE);
-    const known = triggerChip([done], nameFor, T + HOUR, {
-      answerFor: () => ({ id: "answer-1", seq: 42 }),
-    });
-    expect(known).toMatchObject({ kind: "answered", answer: { id: "answer-1", seq: 42 } });
-    const unknown = triggerChip([done], nameFor, T + HOUR, { answerFor: () => undefined });
-    expect(unknown?.kind).toBe("answered");
-    expect(unknown?.answer).toBeUndefined();
-    expect(triggerChip([done], nameFor, T + HOUR)?.answer).toBeUndefined();
-  });
-
-  it("「답함」이 아닌 칩은 답을 들지 않는다", () => {
-    const chip = triggerChip([run(DONE), run(RUNNING)], nameFor, T + HOUR, {
-      answerFor: () => ({ id: "answer-1", seq: 42 }),
-    });
-    expect(chip?.kind).toBe("working");
-    expect(chip?.answer).toBeUndefined();
-  });
-
-  it("여러 에이전트가 답했으면 답을 아는 첫 run의 답을 쓴다", () => {
-    const first = run({ ...DONE, agentMemberId: A });
-    const second = run({ ...DONE, agentMemberId: B });
-    const chip = triggerChip([first, second], nameFor, T + HOUR, {
-      answerFor: (r) => (r.id === second.id ? { id: "answer-b", seq: 7 } : undefined),
-    });
-    expect(chip?.answer).toEqual({ id: "answer-b", seq: 7 });
   });
 });
 
@@ -264,7 +241,6 @@ describe("칩이 입을 수 있는 낱말 전부(폭을 고정하는 표면이 �
       RUNNING,
       { phase: "awaiting_approval", status: "awaiting_approval" },
       { phase: "paused", status: "paused" },
-      DONE,
       FAILED,
     ];
     const faces = TRIGGER_CHIP_FACES.map((f) => `${f.word}|${f.mark}`);
@@ -276,6 +252,15 @@ describe("칩이 입을 수 있는 낱말 전부(폭을 고정하는 표면이 �
     const stuck = triggerChip([run()], nameFor, T + 10 * MIN);
     expect(faces).toContain(`${stuck!.word}|${stuck!.mark}`);
     expect(new Set(faces).size).toBe(faces.length);
+  });
+
+  it("성공은 칩이 없으므로 폭을 가장 넓은 낱말에 맞출 때 「답함」·「끝」은 세지 않는다 (#5382)", () => {
+    const words = TRIGGER_CHIP_FACES.map((f) => f.word);
+    expect(words).not.toContain("답함");
+    expect(words).not.toContain("끝");
+    // 표지·종류 어휘에도 성공의 체크·ok가 남지 않는다.
+    expect(TRIGGER_CHIP_FACES.map((f) => f.mark)).not.toContain("check");
+    expect(TRIGGER_CHIP_KINDS).not.toContain("answered");
   });
 });
 
@@ -301,114 +286,6 @@ describe("초 단위 숫자가 없다", () => {
       }
     }
     expect(seen).toBeGreaterThanOrEqual(30);
-  });
-});
-
-describe("답 메시지 색인", () => {
-  function message(extra: Partial<Message> & { id: string }): Message {
-    return {
-      channelId: "00000000-0000-7000-8000-000000000201",
-      seq: 1,
-      hlcTs: 1,
-      hlcCount: 0,
-      authorMemberId: A,
-      type: "text",
-      body: "답이에요",
-      createdAtMs: T,
-      ...extra,
-    };
-  }
-  const RUN_ID = "0199aa11-2222-7000-8000-0000000000f1";
-  const target = { id: RUN_ID, agentMemberId: A, triggerMessageId: TRIGGER } as const;
-
-  it("정산된 턴 기록(props.run_id)은 run id가 정확히 맞는다", () => {
-    const index = indexAnswers([
-      message({
-        id: "turn-record",
-        props: { schema: "momo.agent_gateway.timeline.v0", run_id: RUN_ID.toUpperCase() },
-      }),
-    ]);
-    expect(answerMessageFor(index, target)?.id).toBe("turn-record");
-  });
-
-  it("에이전트가 트리거를 인용해 쓴 첫 글(replyToId)을 답으로 본다", () => {
-    const index = indexAnswers([
-      message({ id: "first", seq: 2, replyToId: TRIGGER }),
-      message({ id: "second", seq: 3, replyToId: TRIGGER }),
-    ]);
-    expect(answerMessageFor(index, target)?.id).toBe("first");
-  });
-
-  it("다른 에이전트의 인용·삭제된 글·글이 아닌 행·인용 없는 글은 답이 아니다", () => {
-    const index = indexAnswers([
-      message({ id: "other-agent", authorMemberId: B, replyToId: TRIGGER }),
-      message({ id: "deleted", replyToId: TRIGGER, state: "deleted" }),
-      message({ id: "tool", type: "tool_call", replyToId: TRIGGER }),
-      message({ id: "no-quote" }),
-      message({ id: "other-trigger", replyToId: "00000000-0000-7000-8000-0000000a0002" }),
-    ]);
-    expect(answerMessageFor(index, target)).toBeUndefined();
-  });
-
-  it("승인 만료·멈춤 알림은 답이 아니다: props.answers_message_id로 가리켜도 찾지 않는다", () => {
-    const index = indexAnswers([
-      message({ id: "notice", props: { answers_message_id: TRIGGER } }),
-    ]);
-    expect(answerMessageFor(index, target)).toBeUndefined();
-  });
-
-  it("정확한 턴 기록이 인용보다 앞선다", () => {
-    const index = indexAnswers([
-      message({ id: "quote", seq: 2, replyToId: TRIGGER }),
-      message({
-        id: "record",
-        seq: 3,
-        props: { schema: "momo.agent_gateway.timeline.v0", run_id: RUN_ID },
-      }),
-    ]);
-    expect(answerMessageFor(index, target)?.id).toBe("record");
-  });
-
-  it("트리거가 없는 run(환영·작업)은 인용으로 찾을 수 없다", () => {
-    const index = indexAnswers([message({ id: "quote", replyToId: TRIGGER })]);
-    expect(
-      answerMessageFor(index, { id: RUN_ID, agentMemberId: A })
-    ).toBeUndefined();
-  });
-});
-
-describe("목록이 넘기는 답 지도", () => {
-  const RUN_OK = "0199aa11-2222-7000-8000-0000000000e1";
-  const RUN_OPEN = "0199aa11-2222-7000-8000-0000000000e2";
-  const RUN_LOST = "0199aa11-2222-7000-8000-0000000000e3";
-  const quote = (id: string, seq: number, extra: Partial<Message> = {}): Message => ({
-    id,
-    channelId: "00000000-0000-7000-8000-000000000201",
-    seq,
-    hlcTs: seq,
-    hlcCount: 0,
-    authorMemberId: A,
-    type: "text",
-    body: "답이에요",
-    createdAtMs: T,
-    replyToId: TRIGGER,
-    ...extra,
-  });
-
-  it("끝난(succeeded) run 중 답을 이을 수 있는 것만 지도에 있고 키는 소문자 run id다", () => {
-    const messages = [quote("answer-1", 7)];
-    const map = runAnswerMap(
-      [
-        { id: RUN_OK.toUpperCase(), phase: "succeeded", agentMemberId: A, triggerMessageId: TRIGGER },
-        // 아직 열린 run: 답이 이미 와 있어도(진행 중 보고 글) 「답함」이 아니다.
-        { id: RUN_OPEN, phase: "running", agentMemberId: A, triggerMessageId: TRIGGER },
-        // 끝났지만 이을 길이 없는 run(다른 트리거).
-        { id: RUN_LOST, phase: "succeeded", agentMemberId: A, triggerMessageId: "00000000-0000-7000-8000-0000000a0099" },
-      ],
-      messages
-    );
-    expect([...map.keys()]).toEqual([RUN_OK]);
-    expect(map.get(RUN_OK)).toEqual({ id: "answer-1", seq: 7 });
   });
 });
 
@@ -456,19 +333,18 @@ describe("요청 묶음 칩", () => {
     ).toBeNull();
   });
 
-  it("묶음의 끝과 말로 답함을 구분하고 생각·실행은 상위 낱말 작업 중으로 읽는다", () => {
+  it("묶음의 끝도 성공이라 칩이 없고 생각·실행은 상위 낱말 작업 중으로 읽는다", () => {
     const done = run(DONE);
-    expect(triggerChip([done], nameFor, T)?.word).toBe("답함");
-    expect(
-      triggerChip([{ ...done, bundle: bundleOf({ status: "approved" }) }], nameFor, T)?.word
-    ).toBe("끝");
+    expect(triggerChip([done], nameFor, T)).toBeNull();
+    // 요청 묶음의 「끝」은 말로 답한 성공과 같은 종류라 함께 빠진다(#5382).
     const bundled = { ...done, bundle: bundleOf({ status: "approved" }) };
+    expect(triggerChip([bundled], nameFor, T)).toBeNull();
+    // 묶음의 끝 + 다른 run의 실패: 실패 칩이다.
+    expect(triggerChip([bundled, run({ ...FAILED, agentMemberId: B })], nameFor, T)).toMatchObject({ kind: "failed" });
+    // 묶음 카드로 가는 닻은 칩이 서는 상태에서 그대로 따라온다.
     const destination = { id: "approval-card", seq: 12 };
-    const textAnswer = { id: "text-answer", seq: 13 };
-    const routed = triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer, bundleTargetFor: () => destination });
-    expect(routed?.answer).toEqual(destination);
-    expect(routed?.bundleTarget).toEqual(destination);
-    expect(triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer })?.answer).toBeUndefined();
+    const pending = { ...run(RUNNING), bundle: bundleOf() };
+    expect(triggerChip([pending], nameFor, T, { bundleTargetFor: () => destination })?.bundleTarget).toEqual(destination);
     // 승인된 도구 호출이 아직 도는 중이면 「끝」이 아니라 작업 중이다(actionType이 가른다).
     expect(
       triggerChip(
@@ -512,7 +388,7 @@ describe("요청 묶음 칩", () => {
 
   it("서버가 보낸 bundle은 파서를 지나 칩 낱말이 된다: phase만으로는 못 읽던 거부·승인 대기 (#4763)", () => {
     // 와이어(camelCase)를 그대로 `agentRunProgressFromWire`에 통과시킨다 — 파서가 bundle을 버리면
-    // 이 칩들은 phase만 읽어 「답함」·「작업 중」으로 거짓을 말한다.
+    // 이 칩들은 phase만 읽어 칩 없음·「작업 중」으로 거짓을 말한다.
     const wireRun = (phase: string, status: string, bundle?: Record<string, unknown>) =>
       agentRunProgressFromWire({
         id: "00000000-0000-7000-8000-0000000000b1", channelId: "00000000-0000-7000-8000-000000000201", agentMemberId: A,
@@ -520,18 +396,21 @@ describe("요청 묶음 칩", () => {
         createdAtMs: T - MIN, updatedAtMs: T, ...(bundle ? { bundle } : {}),
       });
     const server = { approvalId: "approval", decisionMode: "inline", canDecide: true, actionType: "workspace_action" };
-    const wordOf = (run: AgentRunProgress) => triggerChip([run], nameFor, T)?.word;
-    expect(wordOf(wireRun("succeeded", "succeeded"))).toBe("답함");
+    const wordOf = (run: AgentRunProgress) => triggerChip([run], nameFor, T)?.word ?? null;
+    expect(wordOf(wireRun("succeeded", "succeeded"))).toBeNull();
     expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "rejected", canDecide: false }))).toBe("거부");
-    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "approved", canDecide: false }))).toBe("끝");
+    // 승인되어 끝난 묶음(「끝」)은 칩이 없다(#5382).
+    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "approved", canDecide: false }))).toBeNull();
     expect(wordOf(wireRun("running", "running", { ...server, status: "pending" }))).toBe("승인 필요");
-    // 모르는 상태는 bundle이 없는 것과 같다: 칩은 phase로 읽는다.
-    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "escalated" }))).toBe("답함");
+    // 모르는 상태는 bundle이 없는 것과 같다: 칩은 phase로 읽는다(성공이라 칩 없음).
+    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "escalated" }))).toBeNull();
   });
 
-  it("고정 폭 측정 얼굴에 끝·답함·거부·만료가 모두 있고 거부는 실패와 다른 모양이다", () => {
-    for (const word of ["끝", "답함", "거부", "만료", "승인 필요"])
+  it("고정 폭 측정 얼굴에 거부·만료·승인 필요가 있고(끝·답함은 칩이 없어 없다) 거부는 실패와 다른 모양이다", () => {
+    for (const word of ["거부", "만료", "승인 필요"])
       expect(TRIGGER_CHIP_FACES.some((face) => face.word === word)).toBe(true);
+    for (const word of ["끝", "답함"])
+      expect(TRIGGER_CHIP_FACES.some((face) => face.word === word)).toBe(false);
     const declined = triggerChip(
       [
         run({

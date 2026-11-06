@@ -1318,6 +1318,12 @@ export const catalog: MessageCatalog = {
       "value": "활동을 불러오지 못했어요"
     }
   ],
+  "connection.load.adeSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션 목록을 불러오지 못해 아래 목록에는 에이전트 턴만 있어요"
+    }
+  ],
   "connection.load.agentChannelsTitle": [
     {
       "type": 0,
@@ -1328,6 +1334,46 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentLedgerReopenTail": [
+    {
+      "type": 0,
+      "value": "패널을 다시 열면 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerRetryTail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 읽어요."
+    }
+  ],
+  "connection.load.agentLedgerTitle": [
+    {
+      "type": 0,
+      "value": "기록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentPaneProgressTitle": [
+    {
+      "type": 0,
+      "value": "진행을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentProfileAppliesTitle": [
+    {
+      "type": 0,
+      "value": "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
+    }
+  ],
+  "connection.load.agentProfilesApplyTitle": [
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": "의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했어요"
     }
   ],
   "connection.load.agentProfileTitle": [
@@ -1370,6 +1416,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmNamesTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요"
+    }
+  ],
+  "connection.load.draftTargetsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 초안 대상을 확인할 수 없어요"
     }
   ],
   "connection.load.hermesStatusTitle": [
@@ -1426,6 +1484,12 @@ export const catalog: MessageCatalog = {
       "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
+  "connection.load.readMarkersTitle": [
+    {
+      "type": 0,
+      "value": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -1438,10 +1502,22 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
     }
   ],
+  "connection.load.reasonServerBare": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요."
+    }
+  ],
   "connection.load.reasonUnknown": [
     {
       "type": 0,
       "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknownBare": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요."
     }
   ],
   "connection.load.sentence": [
@@ -1458,10 +1534,52 @@ export const catalog: MessageCatalog = {
       "value": "reason"
     }
   ],
+  "connection.load.teamBoardStaleTitle": [
+    {
+      "type": 0,
+      "value": "팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "팀 그림을 불러오지 못했어요"
+    }
+  ],
   "connection.load.threadTitle": [
     {
       "type": 0,
       "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workHostsTitle": [
+    {
+      "type": 0,
+      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workLocationsTitle": [
+    {
+      "type": 0,
+      "value": "실행 위치를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSelectedSessionTitle": [
+    {
+      "type": 0,
+      "value": "선택한 작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workSessionsTitle": [
+    {
+      "type": 0,
+      "value": "작업 세션을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.workStepsTitle": [
+    {
+      "type": 0,
+      "value": "진행 내역을 불러오지 못했어요"
     }
   ],
   "connection.send.failed": [
@@ -1778,7 +1896,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.backLabel": [
     {
       "type": 0,
-      "value": "팀 이모지 목록으로 돌아가기"
+      "value": "이모티콘 목록으로 돌아가기"
     }
   ],
   "expressions.add.import": [
@@ -1790,7 +1908,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.importDetail": [
     {
       "type": 0,
-      "value": "내 사진이나 링크로 팀 이모지를 등록해요"
+      "value": "내 사진이나 링크로 이모티콘을 등록해요"
     }
   ],
   "expressions.add.make": [
@@ -1966,7 +2084,7 @@ export const catalog: MessageCatalog = {
   "expressions.import.nameTaken": [
     {
       "type": 0,
-      "value": "표준 이모지와 겹치는 이름이에요. 다른 이름을 써 주세요."
+      "value": "기본 이모티콘과 겹치는 이름이에요. 다른 이름을 써 주세요."
     }
   ],
   "expressions.import.offline": [
@@ -2072,13 +2190,13 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "팀 이모지"
+      "value": "작은 이모티콘"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 작은 이모티콘이에요."
     }
   ],
   "expressions.kind.hintSticker": [
@@ -2096,7 +2214,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "이모티콘"
+      "value": "큰 이모티콘"
     }
   ],
   "expressions.make.agent": [
@@ -2478,12 +2596,6 @@ export const catalog: MessageCatalog = {
       "value": "팀 표현 보기"
     }
   ],
-  "expressions.panel.viewTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지"
-    }
-  ],
   "expressions.photo.agentInstead": [
     {
       "type": 0,
@@ -2645,7 +2757,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.errorName": [
     {
       "type": 0,
-      "value": "이름을 확인해 주세요. 표준 이모지와 겹치는 이름은 쓸 수 없어요."
+      "value": "이름을 확인해 주세요. 기본 이모티콘과 겹치는 이름은 쓸 수 없어요."
     }
   ],
   "expressions.photo.errorOffline": [
@@ -2861,37 +2973,31 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.a11y": [
     {
       "type": 0,
-      "value": "이모티콘, 이모지, GIF 고르기"
+      "value": "이모티콘 고르기"
     }
   ],
   "expressions.sheet.close": [
     {
       "type": 0,
-      "value": "이모티콘·이모지·GIF 닫기"
+      "value": "이모티콘 닫기"
     }
   ],
   "expressions.sheet.emptyEmoticon": [
     {
       "type": 0,
-      "value": "아직 팀 이모티콘이 없어요. 위의 「추가하기」로 만들거나 가져와 보세요."
+      "value": "아직 이모티콘이 없어요. 위의 「추가하기」로 만들거나 가져와 보세요."
     }
   ],
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 표현이 없어요. 이모티콘 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 우리 팀 탭의 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
     {
       "type": 0,
-      "value": "아직 우리 팀 이모지가 없습니다."
-    }
-  ],
-  "expressions.sheet.emptyTeam": [
-    {
-      "type": 0,
-      "value": "아직 팀 이모지가 없어요. 위의 「추가하기」로 가져와 보세요."
+      "value": "아직 팀 이모티콘이 없어요."
     }
   ],
   "expressions.sheet.error": [
@@ -2939,7 +3045,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.open": [
     {
       "type": 0,
-      "value": "이모티콘, 이모지, GIF 고르기"
+      "value": "이모티콘 고르기"
     }
   ],
   "expressions.sheet.pickAgain": [
@@ -2969,7 +3075,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "이모지 검색"
+      "value": "기본 이모티콘 검색"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -2982,12 +3088,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "GIF 검색"
-    }
-  ],
-  "expressions.sheet.searchTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지 검색"
     }
   ],
   "expressions.sheet.send": [
@@ -3005,13 +3105,13 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoji": [
     {
       "type": 0,
-      "value": "이모지"
+      "value": "기본"
     }
   ],
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "이모티콘"
+      "value": "우리 팀"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -3026,16 +3126,10 @@ export const catalog: MessageCatalog = {
       "value": "표현 종류"
     }
   ],
-  "expressions.sheet.tabTeam": [
-    {
-      "type": 0,
-      "value": "팀 이모지"
-    }
-  ],
   "expressions.sheet.title": [
     {
       "type": 0,
-      "value": "이모티콘·이모지·GIF"
+      "value": "이모티콘"
     }
   ],
   "expressions.sheet.unavailable": [
@@ -3092,6 +3186,308 @@ export const catalog: MessageCatalog = {
       "value": "사진에 저장"
     }
   ],
+  "mobile.convSearch.authorSelf": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "mobile.convSearch.barList": [
+    {
+      "type": 0,
+      "value": "결과 목록"
+    }
+  ],
+  "mobile.convSearch.barNewer": [
+    {
+      "type": 0,
+      "value": "더 최근 결과"
+    }
+  ],
+  "mobile.convSearch.barOlder": [
+    {
+      "type": 0,
+      "value": "더 오래된 결과"
+    }
+  ],
+  "mobile.convSearch.clearInput": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "mobile.convSearch.close": [
+    {
+      "type": 0,
+      "value": "검색 닫기"
+    }
+  ],
+  "mobile.convSearch.dayYesterday": [
+    {
+      "type": 0,
+      "value": "어제"
+    }
+  ],
+  "mobile.convSearch.emptyDetail": [
+    {
+      "type": 0,
+      "value": "다른 말로 다시 찾아 보세요."
+    }
+  ],
+  "mobile.convSearch.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "mobile.convSearch.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "mobile.convSearch.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "mobile.convSearch.idleHint": [
+    {
+      "type": 0,
+      "value": "찾을 말을 입력해 보세요."
+    }
+  ],
+  "mobile.convSearch.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "mobile.convSearch.moreLoading": [
+    {
+      "type": 0,
+      "value": "불러오는 중이에요"
+    }
+  ],
+  "mobile.convSearch.open": [
+    {
+      "type": 0,
+      "value": "대화 검색"
+    }
+  ],
+  "mobile.convSearch.placeholderChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 찾기"
+    }
+  ],
+  "mobile.convSearch.placeholderDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 찾기"
+    }
+  ],
+  "mobile.convSearch.position": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "mobile.convSearch.positionMore": [
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "mobile.convSearch.positionSpoken": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.positionSpokenMore": [
+    {
+      "type": 0,
+      "value": "검색 결과 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 이상 중 "
+    },
+    {
+      "type": 1,
+      "value": "index"
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
+  "mobile.convSearch.recentClear": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "mobile.convSearch.recentClearLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 모두 지우기"
+    }
+  ],
+  "mobile.convSearch.recentRow": [
+    {
+      "type": 0,
+      "value": "다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    }
+  ],
+  "mobile.convSearch.recentRowIn": [
+    {
+      "type": 0,
+      "value": "이 대화에서 다시 찾기: "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 찾았던 말)"
+    }
+  ],
+  "mobile.convSearch.recentTitle": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "mobile.convSearch.resultLabel": [
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": "의 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "mobile.convSearch.resultsChannel": [
+    {
+      "type": 0,
+      "value": "이 채널의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.resultsDm": [
+    {
+      "type": 0,
+      "value": "이 대화의 결과 · 최근 순"
+    }
+  ],
+  "mobile.convSearch.searchAll": [
+    {
+      "type": 0,
+      "value": "모든 대화에서"
+    }
+  ],
+  "mobile.convSearch.searchAllLabel": [
+    {
+      "type": 0,
+      "value": "모든 대화에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 찾기"
+    }
+  ],
+  "mobile.convSearch.searching": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "mobile.convSearch.tooShort": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,
@@ -3126,6 +3522,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
+    }
+  ],
+  "mobile.jumpSeek.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.jumpSeek.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "mobile.jumpSeek.failed": [
+    {
+      "type": 0,
+      "value": "이전 대화를 불러오지 못했어요"
+    }
+  ],
+  "mobile.jumpSeek.reading": [
+    {
+      "type": 0,
+      "value": "이전 대화에서 메시지를 찾는 중이에요"
+    }
+  ],
+  "mobile.jumpSeek.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
     }
   ],
   "mobile.linkCard.cancel": [
@@ -3751,7 +4177,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "더보기"
+      "value": "더 보기"
     }
   ],
   "releaseNotes.popup.title": [
@@ -4414,6 +4840,318 @@ export const catalog: MessageCatalog = {
       "value": "스레드가 달린 메시지의 요약 줄로 스레드를 열고, 머리의 「따라가기」를 골라 보세요. 폰에서는 메시지를 밀어 보세요."
     }
   ],
+  "releaseNotes.v0143.agentsLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 작업 콘솔과 이모티콘 목록은 「불러오지 못했어요」가 오프라인인지 서버에 닿지 못한 것인지 나눠 말해요."
+    }
+  ],
+  "releaseNotes.v0143.agentsLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑 작업 패널의 「세션 목록」은 「작업 세션」으로, 「호스트 상태」는 「실행 위치」로 이름이 바뀌었어요."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsChanged": [
+    {
+      "type": 0,
+      "value": "채널에서 에이전트를 부르면 답과 승인 카드, 도구 줄이 부른 메시지 아래 스레드에 모여요. 나와 에이전트 둘뿐인 1:1 DM은 지금처럼 대화에 바로 답해요. 일이 잘 끝났을 때 붙던 「답함 ✓」 칩은 없어지고, 작업 중, 승인 대기, 실패 같은 다른 상태의 칩은 그대로 보여요."
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 답은 스레드로"
+    }
+  ],
+  "releaseNotes.v0143.agentThreadsTryIt": [
+    {
+      "type": 0,
+      "value": "채널에서 에이전트를 불러 보고, 부른 메시지 아래의 「답글」 줄로 스레드를 열어 답을 확인해 보세요."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑에서 첨부를 넣은 입력창이 덜 커지고, 카드 줄과 글 사이도 좁아졌어요."
+    }
+  ],
+  "releaseNotes.v0143.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑에서 링크 카드의 ✕는 마우스를 올리거나 키보드로 골랐을 때만 서고, 터치 화면에서는 늘 보여요."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerChanged": [
+    {
+      "type": 0,
+      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 이모티콘 창은 우리 팀, 기본, GIF 세 탭으로 정리되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTitle": [
+    {
+      "type": 0,
+      "value": "입력창 첨부와 이모티콘 창"
+    }
+  ],
+  "releaseNotes.v0143.composerPickerTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 자판을 연 채 입력창의 +로 사진을 붙여 보세요. 입력창의 웃는 얼굴 단추로 이모티콘 창을 열어 세 탭을 둘러보세요."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "스레드 답글의 「대화에도 보내기」가 없어졌고, 이미 그렇게 보낸 답글도 스레드에서만 보여요."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑에서 보낼 때 「전송 중」 줄이 잠깐 서고 사라지며 줄이 흔들리던 것을 고쳤고, 오래 걸릴 때만 작은 시계가 서요."
+    }
+  ],
+  "releaseNotes.v0143.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "스레드 안에서 맨 위 글을 가리키는 인용은 같은 말이 되풀이되지 않도록 보여 주지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine1": [
+    {
+      "type": 0,
+      "value": "⋮ 더 많은 기능 메뉴를 닫거나 행동을 고른 뒤 마우스가 떠나면 메시지의 도구 막대도 함께 사라져요."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine2": [
+    {
+      "type": 0,
+      "value": "마우스를 올려 둔 채 입력창 위에 작업 띠가 서도 도구 막대가 띠 밑에 숨지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.desktopLine3": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 스레드 답글 입력창이 채널 입력창과 같은 모양이 되었어요."
+    }
+  ],
+  "releaseNotes.v0143.desktopTopic": [
+    {
+      "type": 0,
+      "value": "데스크탑"
+    }
+  ],
+  "releaseNotes.v0143.editMessageChanged": [
+    {
+      "type": 0,
+      "value": "내 메시지에 마우스를 올리면 도구 막대에 연필 단추가 생겼고, 폰은 길게 눌러 뜨는 시트의 맨 위 줄이 「고치기」가 되었어요. 고친 메시지의 「수정됨」은 웹에서 마우스를 올리면, 폰에서는 탭하면 「오후 2:05에 수정됨」처럼 고친 시각을 보여 줘요."
+    }
+  ],
+  "releaseNotes.v0143.editMessageTitle": [
+    {
+      "type": 0,
+      "value": "메시지 고치기와 고친 시각"
+    }
+  ],
+  "releaseNotes.v0143.editMessageTryIt": [
+    {
+      "type": 0,
+      "value": "내 메시지에 마우스를 올려 연필로 고친 뒤 「수정됨」에 마우스를 올려 보세요. 폰은 내 메시지를 길게 눌러 맨 위의 「고치기」를 누르고, 고친 뒤 「수정됨」을 탭해 보세요."
+    }
+  ],
+  "releaseNotes.v0143.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "등록할 때 고르는 종류 이름이 「작은 이모티콘」(입력칸에 들어가요)과 「큰 이모티콘」(미리 보고 보내요)으로 바뀌었어요."
+    }
+  ],
+  "releaseNotes.v0143.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "팀 표현"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetChanged": [
+    {
+      "type": 0,
+      "value": "안 읽은 알림이 있으면 맥 메뉴 막대의 oort 아이콘에서 점이 붙는 대신 오른쪽 위의 작은 행성이 주황색으로 바뀌어요. 알림이 없으면 예전처럼 한 가지 색이에요."
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTitle": [
+    {
+      "type": 0,
+      "value": "메뉴 막대 아이콘의 주황 행성"
+    }
+  ],
+  "releaseNotes.v0143.menuBarPlanetTryIt": [
+    {
+      "type": 0,
+      "value": "안 읽은 알림이 있을 때와 모두 읽은 뒤에 메뉴 막대의 아이콘을 비교해 보세요."
+    }
+  ],
+  "releaseNotes.v0143.networkLine1": [
+    {
+      "type": 0,
+      "value": "폰에서 연결 띠가 30초 넘게 남아 잠금을 풀어야 사라지던 경우를 막았어요."
+    }
+  ],
+  "releaseNotes.v0143.networkLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑은 같은 불러오기 실패를 사이드바와 본문이 두 번 말하지 않고, 사이드바는 한 줄, 본문은 상자 하나로 말해요."
+    }
+  ],
+  "releaseNotes.v0143.networkLine3": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑은 사이드바 DM, 임시 저장, 멘션 줄, 팀 보드의 불러오기 실패도 원인을 말하고, 받아 둔 내용은 가리지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.networkLine4": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑 받은함의 오프라인 띠는 저장해 둔 목록이 아래에 보일 때만 「그때의 상태」라고 알려 줘요."
+    }
+  ],
+  "releaseNotes.v0143.networkTopic": [
+    {
+      "type": 0,
+      "value": "연결"
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "받은함에서 이미 읽은 항목에 안 읽음 점이 남던 것을 폰, 웹, 데스크탑에서 모두 고쳤어요."
+    }
+  ],
+  "releaseNotes.v0143.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "원격 작업이 승인을 물으면 폰 알림은 결정할 수 있는 세션 주인에게만 가요."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayChanged": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱을 쓰는 동안은 멘션, DM, 스레드 답글의 폰 알림이 기본 1분 늦게 가고, 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않고, 서버가 아는 것은 쓰고 있다는 사실뿐이라 다른 멤버에게는 보이지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTitle": [
+    {
+      "type": 0,
+      "value": "데스크탑을 쓰는 동안 폰 알림 늦추기"
+    }
+  ],
+  "releaseNotes.v0143.phoneDelayTryIt": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱의 설정 › 알림에서 「데스크탑을 쓰는 동안 폰 알림 늦추기」를 열어 끔, 1분, 5분 중에 골라 보세요."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine1": [
+    {
+      "type": 0,
+      "value": "홈의 + 메뉴와 대화의 첨부 + 메뉴가 고른 테마를 따라, 어두운 테마에서 흰 판이 뜨지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.phoneLine2": [
+    {
+      "type": 0,
+      "value": "말풍선의 한국어는 띄어쓰기에서 줄이 바뀌어, 낱말 가운데서 끊기는 일이 크게 줄었어요."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchChanged": [
+    {
+      "type": 0,
+      "value": "검색 화면이 입력칸 하나로 사람, 채널, 메시지를 함께 찾도록 바뀌었고, 열면 최근 연 대화와 최근 검색이 먼저 보여요. 대화 머리의 돋보기로 그 대화 안만 찾을 수 있고, 그 결과를 누르면 말풍선 속 찾은 글자가 강조된 채 그 메시지로 이동해요."
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTitle": [
+    {
+      "type": 0,
+      "value": "폰 검색과 대화 안 검색"
+    }
+  ],
+  "releaseNotes.v0143.phoneSearchTryIt": [
+    {
+      "type": 0,
+      "value": "검색 화면을 열어 이름이나 메시지 속 말을 입력해 보세요. 대화를 열어 머리의 돋보기를 누르고 결과 하나를 누른 뒤, 아래 막대의 ↑ ↓로 다른 결과로 넘어가 보세요."
+    }
+  ],
+  "releaseNotes.v0143.phoneTopic": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionChanged": [
+    {
+      "type": 0,
+      "value": "「서버에 닿지 못했어요」 띠는 이제 앱이 스스로 다시 확인해서, 서버가 돌아오면 손대지 않아도 사라져요. 폰은 앱으로 돌아올 때 내가 보지 않던 사이의 끊김을 알리지 않고, 「다시 연결됐어요」는 저절로 사라지며, 대화는 위에서 아래로 움직이지 않고 처음부터 맨 아래에서 열려요."
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTitle": [
+    {
+      "type": 0,
+      "value": "조용해진 연결 표시"
+    }
+  ],
+  "releaseNotes.v0143.quietConnectionTryIt": [
+    {
+      "type": 0,
+      "value": "앱을 잠시 나갔다 돌아와 보고 대화를 열어 보세요. 서버에 닿지 못했다는 띠가 보이면 서버가 돌아올 때 저절로 사라지는지 지켜봐 주세요."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardChanged": [
+    {
+      "type": 0,
+      "value": "답장한 메시지는 위쪽에 「○○에게 답장」과 원문 한 줄이 서고 가는 선 아래에 본문이 오는 한 장의 카드가 되었고, 옛 세로선은 없어졌어요. 입력창 위의 인용 칩도 같은 모양이고, 에이전트가 바로 위 메시지에 답할 때는 같은 말을 인용으로 한 번 더 보여 주지 않아요."
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTitle": [
+    {
+      "type": 0,
+      "value": "인용이 한 장의 카드로"
+    }
+  ],
+  "releaseNotes.v0143.quoteCardTryIt": [
+    {
+      "type": 0,
+      "value": "메시지에 답장을 보내 보고, 카드 위쪽을 눌러 원래 메시지로 가 보세요."
+    }
+  ],
+  "releaseNotes.v0143.searchLine1": [
+    {
+      "type": 0,
+      "value": "「메시지」 칩에서는 「대화 고르기」로 한 대화만 골라 그 안에서 찾을 수 있어요."
+    }
+  ],
+  "releaseNotes.v0143.searchLine2": [
+    {
+      "type": 0,
+      "value": "홈 검색과 대화 안 검색이 최근 검색 한 목록을 같이 쓰고, 「모든 대화에서」로 같은 말을 전체에서 이어 찾아요."
+    }
+  ],
+  "releaseNotes.v0143.searchLine3": [
+    {
+      "type": 0,
+      "value": "검색 결과, 고정한 메시지, 인용에서 오래된 메시지로 가면 이전 대화를 읽어 그 자리로 가고(취소할 수 있어요), 너무 멀면 안내만 서요."
+    }
+  ],
+  "releaseNotes.v0143.searchTopic": [
+    {
+      "type": 0,
+      "value": "폰 검색"
+    }
+  ],
+  "releaseNotes.v0143.summary": [
+    {
+      "type": 0,
+      "value": "폰 검색이 새로워지고, 에이전트 답은 스레드로 모이며, 데스크탑을 쓰는 동안은 폰 알림이 늦게 와요."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -4438,18 +5176,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 공개"
-    }
-  ],
-  "reply.alsoInChannel.label": [
-    {
-      "type": 0,
-      "value": "대화에도 보내기"
-    }
-  ],
-  "reply.alsoInChannel.unsupported": [
-    {
-      "type": 0,
-      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
     }
   ],
   "reply.card.cancel": [
@@ -4542,6 +5268,460 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이 답글이 달린 스레드 열기"
+    }
+  ],
+  "search.group.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.group.loadingMore": [
+    {
+      "type": 0,
+      "value": "불러오는 중"
+    }
+  ],
+  "search.group.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.group.more": [
+    {
+      "type": 0,
+      "value": "더 보기"
+    }
+  ],
+  "search.group.moreLabel": [
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " 더 보기"
+    }
+  ],
+  "search.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.input.clearLabel": [
+    {
+      "type": 0,
+      "value": "입력 지우기"
+    }
+  ],
+  "search.input.exitLabel": [
+    {
+      "type": 0,
+      "value": "홈으로 돌아가기"
+    }
+  ],
+  "search.input.placeholder": [
+    {
+      "type": 0,
+      "value": "사람·채널·메시지 찾기"
+    }
+  ],
+  "search.kind.all": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "search.kind.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "search.kind.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 종류"
+    }
+  ],
+  "search.kind.messages": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "search.kind.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "search.picker.agent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "search.picker.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.picker.channelPrivate": [
+    {
+      "type": 0,
+      "value": "비공개 채널"
+    }
+  ],
+  "search.picker.channelPublic": [
+    {
+      "type": 0,
+      "value": "공개 채널"
+    }
+  ],
+  "search.picker.close": [
+    {
+      "type": 0,
+      "value": "대화 고르기 닫기"
+    }
+  ],
+  "search.picker.dm": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지"
+    }
+  ],
+  "search.picker.empty": [
+    {
+      "type": 0,
+      "value": "맞는 대화가 없어요."
+    }
+  ],
+  "search.picker.filterLabel": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "대화 이름 찾기"
+    }
+  ],
+  "search.picker.title": [
+    {
+      "type": 0,
+      "value": "어느 대화에서 찾을까요"
+    }
+  ],
+  "search.recent.clearAll": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "search.recent.clearAllLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 모두 지우기"
+    }
+  ],
+  "search.recent.conversations": [
+    {
+      "type": 0,
+      "value": "최근 연 대화"
+    }
+  ],
+  "search.recent.empty": [
+    {
+      "type": 0,
+      "value": "찾고 싶은 사람·채널·메시지를 입력해 보세요."
+    }
+  ],
+  "search.recent.openLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 열기"
+    }
+  ],
+  "search.recent.searches": [
+    {
+      "type": 0,
+      "value": "최근 검색"
+    }
+  ],
+  "search.recent.searchInLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": ", 다시 찾기"
+    }
+  ],
+  "search.recent.searchLabel": [
+    {
+      "type": 0,
+      "value": "최근 검색 "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " 다시 찾기"
+    }
+  ],
+  "search.row.agentLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 에이전트"
+    }
+  ],
+  "search.row.agentSubtitle": [
+    {
+      "type": 0,
+      "value": "에이전트 · @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.channelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널"
+    }
+  ],
+  "search.row.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "search.row.messageLabel": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": "의 "
+    },
+    {
+      "type": 1,
+      "value": "author"
+    },
+    {
+      "type": 0,
+      "value": " 메시지, "
+    },
+    {
+      "type": 1,
+      "value": "snippet"
+    }
+  ],
+  "search.row.openChannelHint": [
+    {
+      "type": 0,
+      "value": "채널을 열어요."
+    }
+  ],
+  "search.row.openDmHint": [
+    {
+      "type": 0,
+      "value": "대화를 열어요."
+    }
+  ],
+  "search.row.personLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ", 사람"
+    }
+  ],
+  "search.row.personSubtitle": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "search.row.privateChannelLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 비공개 채널"
+    }
+  ],
+  "search.scope.all": [
+    {
+      "type": 0,
+      "value": "모든 대화"
+    }
+  ],
+  "search.scope.chosenLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서만 찾는 중, 누르면 범위를 풀어요"
+    }
+  ],
+  "search.scope.groupLabel": [
+    {
+      "type": 0,
+      "value": "찾을 범위"
+    }
+  ],
+  "search.scope.pick": [
+    {
+      "type": 0,
+      "value": "대화 고르기"
+    }
+  ],
+  "search.scope.pickLabel": [
+    {
+      "type": 0,
+      "value": "찾을 대화 고르기"
+    }
+  ],
+  "search.state.errorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "search.state.errorHeadline": [
+    {
+      "type": 0,
+      "value": "검색하지 못했어요."
+    }
+  ],
+  "search.state.loading": [
+    {
+      "type": 0,
+      "value": "찾는 중이에요."
+    }
+  ],
+  "search.state.noResults": [
+    {
+      "type": 0,
+      "value": "‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.noResultsIn": [
+    {
+      "type": 1,
+      "value": "where"
+    },
+    {
+      "type": 0,
+      "value": "에서 ‘"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "’ 검색 결과가 없어요."
+    }
+  ],
+  "search.state.pendingChannels": [
+    {
+      "type": 0,
+      "value": "채널과 사람을 불러오는 중이에요."
+    }
+  ],
+  "search.state.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "search.state.scopeNote": [
+    {
+      "type": 0,
+      "value": "내가 속한 채널의 메시지만 찾아요. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요."
+    }
+  ],
+  "search.state.shortHint": [
+    {
+      "type": 0,
+      "value": "2자 이상 입력하면 찾기 시작해요."
+    }
+  ],
+  "search.state.shortHintMessages": [
+    {
+      "type": 0,
+      "value": "메시지는 2자 이상 입력하면 찾아요."
     }
   ],
   "settings.aiLimits.ceilingSearches": [
@@ -5071,6 +6251,54 @@ export const catalog: MessageCatalog = {
       "value": "알림 설정을 확인하는 중이에요."
     }
   ],
+  "settings.notifications.phoneDelayDescription": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑 앱을 쓰는 동안은 폰 알림을 정한 시간만큼 늦춰요. 그 사이에 읽으면 폰 알림은 가지 않아요. 승인 요청과 작업 끝남 알림은 늦추지 않아요. 서버가 아는 것은 쓰고 있다는 사실뿐이고, 다른 멤버에게는 보이지 않아요."
+    }
+  ],
+  "settings.notifications.phoneDelayFiveMinutes": [
+    {
+      "type": 0,
+      "value": "5분"
+    }
+  ],
+  "settings.notifications.phoneDelayLabel": [
+    {
+      "type": 0,
+      "value": "데스크탑을 쓰는 동안 폰 알림 늦추기"
+    }
+  ],
+  "settings.notifications.phoneDelayLoadFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기 설정을 불러오지 못했어요."
+    }
+  ],
+  "settings.notifications.phoneDelayOff": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
+  "settings.notifications.phoneDelayOneMinute": [
+    {
+      "type": 0,
+      "value": "1분"
+    }
+  ],
+  "settings.notifications.phoneDelayRetry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.notifications.phoneDelaySaveFailed": [
+    {
+      "type": 0,
+      "value": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -5597,6 +6825,64 @@ export const catalog: MessageCatalog = {
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
     }
   ],
+  "timeline.edited.atDate": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.atDay": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.atTime": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 수정됨"
+    }
+  ],
+  "timeline.edited.mark": [
+    {
+      "type": 0,
+      "value": "수정됨"
+    }
+  ],
+  "timeline.edited.pressHint": [
+    {
+      "type": 0,
+      "value": "누르면 고친 시각을 보여 줘요"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -5625,6 +6911,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.quote.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 답장"
+    }
+  ],
+  "timeline.quote.headUnnamed": [
+    {
+      "type": 0,
+      "value": "메시지에 답장"
     }
   ],
   "timeline.runException.open": [
@@ -5772,12 +7074,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    }
-  ],
-  "timeline.triggerChip.jumpHint": [
-    {
-      "type": 0,
-      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [

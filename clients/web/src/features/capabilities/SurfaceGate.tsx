@@ -5,7 +5,9 @@ import {
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { useSession } from "@/app/session";
-import { InlineBanner } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
 import { SurfaceUnavailableRoute } from "./SurfaceUnavailable";
 import {
@@ -89,11 +91,12 @@ function SurfaceRouteShell({
         aria-busy={presence === "unknown" ? true : undefined}
       >
         {presence === "error" && (
-          <InlineBanner
-            message="코드 실행 호스트 목록을 불러오지 못했습니다."
-            actionLabel="다시 시도"
+          // 호스트 목록을 한 번도 받지 못했다: 「호스트가 없다」가 아니라 못 읽었다고, 원인(오프라인 / 서버에 닿지 못함 / 그 밖)과 함께 말한다(#5279 B).
+          <LoadFailureNote
+            titleKey={CONNECTION_KEYS.loadWorkHostsTitle}
+            cause={loadCauseOf(hosts.error)}
+            onRetry={() => void hosts.refetch()}
             actionBusy={hosts.isFetching}
-            onAction={() => void hosts.refetch()}
             testId="surface-route-error-banner"
           />
         )}

@@ -23,6 +23,8 @@ const SIDEBAR = read("../features/sidebar/Sidebar.tsx");
 const SIDEBAR_ROW = read("../features/sidebar/SidebarRow.tsx");
 const CHAT_SHELL = read("../features/chat/ChatShell.tsx");
 const COMPOSER = read("../features/chat/Composer.tsx");
+// #5324: 입력 그릇(`composer-card`)은 채널·스레드 두 입력창이 나눠 쓰는 한 부품(`ComposerCard.tsx`)에서 온다.
+const COMPOSER_CARD = read("../features/chat/ComposerCard.tsx");
 
 /** `@utility <name> {` 블록 전체(중첩 포함). 괄호를 세어 닫는다. */
 function utility(name: string): string {
@@ -253,7 +255,8 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(TOKENS).toMatch(/--radius-2xl: 20px;/);
     expect(card).toMatch(/box-shadow: var\(--elevation-float\);/);
     expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 18px;/);
-    expect(COMPOSER).toMatch(/className="composer-card\b/);
+    expect(COMPOSER_CARD).toMatch(/"composer-card\b/);
+    expect(COMPOSER).toContain("<ComposerCard");
     expect(COMPOSER).toMatch(/"composer-dock safe-area-bottom shrink-0"/);
   });
 });

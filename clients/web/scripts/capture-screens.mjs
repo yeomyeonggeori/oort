@@ -370,8 +370,8 @@ const MOBILE_TAP_TARGETS = [
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
   ["composer-mention-trigger", "멘션 넣기"],
-  ["composer-emoji-trigger", "이모지 넣기"],
-  ["emoji-search", "이모지 검색", "optional"],
+  ["composer-emoji-trigger", "이모티콘 넣기"],
+  ["emoji-search", "이모티콘 검색", "optional"],
   // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
   // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
   ["inbox-approval-approve", "인박스 승인", "optional"],
@@ -4802,7 +4802,7 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   })()`);
   if (
     proof.status !== "error" ||
-    !proof.text.includes("이모지 목록을 불러오지 못했습니다.") ||
+    !proof.text.includes("이모티콘 목록을 불러오지 못했습니다.") ||
     !proof.text.includes("다시 시도") ||
     proof.buttonType !== "button" ||
     !proof.inForm ||
@@ -13108,7 +13108,8 @@ async function captureShellScenes(_sharedBrowser, scheme) {
       await page.goto(ORIGIN, { waitUntil: "networkidle" });
       await signIn(page);
       await page
-        .getByTestId(variant === "empty" ? "sidebar-create-channel" : "channels-error")
+        // 오류 변형은 사이드바의 한 줄(`channels-error-line`)이다: 받아 둔 채널이 없어도 사이드바는 상자 대신 한 줄로 말하고 본문이 상자를 맡는다(#5307 L1).
+        .getByTestId(variant === "empty" ? "sidebar-create-channel" : "channels-error-line")
         .waitFor({ state: "visible" });
       await page.evaluate(() => {
         document.documentElement.setAttribute("data-palette", "noeul");

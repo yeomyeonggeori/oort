@@ -2,7 +2,7 @@ appId: app.momo.ios
 name: 30-approval
 # No `env:` block — see the note at the top of 00-login.yaml.
 ---
-# 30-approval — 툴콜 유도 → 결정 대기 탭 → 무장 → 확정 문장 → 승인 → 영수증.
+# 30-approval — 툴콜 유도 → 스레드 안의 승인 카드 → 결정 대기 탭 → 승인 → 영수증.
 #
 # `MOMO-352 session=<uuid>` in the message body is the tool-call trigger, and the
 # specific one matters. scripts/mock_hermes.py `_tool_fixture` maps that marker to
@@ -67,10 +67,34 @@ name: 30-approval
 - tapOn:
     id: "composer-send"
 
-# The pause is visible in the channel first — the agent posts an approval_request
-# message. Asserting it here is what ties the inbox card below to a turn this
-# flow actually caused.
+# The pause is visible in the channel first — but no longer as a card in the main
+# flow. Since #4646 the agent's answer and every card of its run (this approval
+# request too) are placed in a NEW THREAD under the message that called it: the
+# main flow keeps the trigger and its 「답글 N개」 line (`thread-rollup`), and the
+# composer rail says 「김인턴 · 승인 필요」. This flow used to wait for the card in
+# the main flow and went red on it (6a verification, #5419). It now follows the
+# card to where the product puts it: open that thread and assert the card THERE.
+# Asserting it is what ties the inbox card below to a turn this flow actually
+# caused.
 #
+# `below:` the trigger's own text, because #general also holds the threads that
+# earlier flows opened (10-mention-working and 20-stop are answered in threads
+# too) and a bare `thread-rollup` would hit the first of them.
+- extendedWaitUntil:
+    visible:
+      id: "thread-rollup"
+      below: ".*approval check.*"
+    timeout: 120000
+# The card is not in the main flow (the other half of #4646). The thinking row's
+# 「work.session.end 실행 · 생각 중」 does not match: this is the card's headline.
+- assertNotVisible: ".*도구 「work.session.end」 실행.*"
+- tapOn:
+    id: "thread-rollup"
+    below: ".*approval check.*"
+- extendedWaitUntil:
+    visible:
+      id: "thread-header-overlay"
+    timeout: 30000
 # The card's headline is composed by the CLIENT now (`requestBundleModel` in
 # packages/momo-core/src/features/timeline/requestBundle.ts): 「김인턴 · 도구
 # 「work.session.end」 실행」. The server's English title 「Approve
@@ -80,7 +104,7 @@ name: 30-approval
 # 생각 중」) already carries the name before the approval exists.
 - extendedWaitUntil:
     visible: ".*도구 「work.session.end」 실행.*"
-    timeout: 120000
+    timeout: 60000
 
 # NO RELAUNCH. There used to be one here, and it was a workaround for #1020 —
 # the inbox did not pick up an approval that arrived while the app was open, so
@@ -99,9 +123,16 @@ name: 30-approval
 # APNs, and the relaunch used to stand in for it by accident. It never proved it
 # — the runner already prints that as an explicit 실기기 파이널 체크 item.
 
-# Back out of the conversation. The card in the timeline carries 승인/거부 too now
-# (ApprovalDecision, `shape="pill"`), but the ids this flow drives
-# (`inbox-approval-*`) belong to the inbox tab, so the decision is made there.
+# Back out: close the thread, then leave the conversation (one layer per back).
+# The card in the thread carries 승인/거부 too now (ApprovalDecision,
+# `shape="pill"`), but the ids this flow drives (`inbox-approval-*`) belong to the
+# inbox tab, so the decision is made there.
+- tapOn:
+    id: "header-back"
+- extendedWaitUntil:
+    notVisible:
+      id: "thread-header-overlay"
+    timeout: 10000
 - tapOn:
     id: "header-back"
 - extendedWaitUntil:

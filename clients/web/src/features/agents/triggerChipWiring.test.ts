@@ -12,10 +12,10 @@ function source(path: string): string {
 }
 
 describe("트리거 칩·예외 줄 배선 (#4619)", () => {
-  it("타임라인은 끝난 run의 답을 한 번 색인해 행에 넘긴다", () => {
+  it("타임라인은 행에 run만 내려주고 답 메시지 지도는 더 색인하지 않는다 (#5382: 성공은 칩이 없다)", () => {
     const timeline = source("../timeline/Timeline.tsx");
-    expect(timeline).toContain("runAnswerMap(channelRuns, mainMessages)");
-    expect(timeline).toContain("runAnswers={runAnswers}");
+    expect(timeline).not.toContain("runAnswerMap");
+    expect(timeline).not.toContain("runAnswers");
     // 행에 내려주는 run은 순수 함수 하나가 고른다(누가 불렀든 사람의 메시지면 선다, planner 결정 2): 타임라인은 그 함수를 부를 뿐이다.
     expect(timeline).toContain("runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage })");
     expect(timeline).not.toContain("uuidEq(message.authorMemberId, myMemberIdForFold)");
@@ -33,8 +33,9 @@ describe("트리거 칩·예외 줄 배선 (#4619)", () => {
     // 칩은 머리 줄 안에서 시각 **뒤**다(시각 옆).
     expect(head.indexOf('data-testid="row-time"')).toBeGreaterThan(0);
     expect(head.indexOf("<MessageTriggerChip")).toBeGreaterThan(head.indexOf('data-testid="row-time"'));
-    // 칩이 답으로 가는 길(onJumpToMessage)과 답 지도(runAnswers)를 받는다.
-    expect(head).toMatch(/<MessageTriggerChip[\s\S]*?runAnswers[\s\S]*?onJump: onJumpToMessage[\s\S]*?\/>/);
+    // 칩이 받는 길은 요청 묶음을 여는 길(onOpenBundle)뿐이다: 답으로 가는 길(onJump)과 답 지도(runAnswers)는 없다.
+    expect(head).toMatch(/<MessageTriggerChip[\s\S]*?onOpenBundle=[\s\S]*?\/>/);
+    expect(head).not.toMatch(/<MessageTriggerChip[\s\S]*?(runAnswers|onJump)[\s\S]*?\/>/);
     // 스레드 요약 줄의 칩은 답글(rollup)이 있을 때만이다.
     expect(row).toMatch(/\{rollup && !hasRequestBundle && runStatus !== undefined && runStatus\.length > 0 && \(\s*<ThreadWorkChip/);
     expect(row).toContain("<ThreadRequestSummary runs={runStatus}");

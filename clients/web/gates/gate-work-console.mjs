@@ -49,6 +49,26 @@ function koBlockedLine(key) {
 const WORK_STATE_STALE_OFFLINE = koBlockedLine("blocked.workStateStale.offline");
 const WORK_STATE_NONE_OFFLINE = koBlockedLine("blocked.workStateNone.offline");
 
+// 「불러오지 못했어요」 자리(#5279 B)의 제목과 이유도 한국어 사전(connection.json)이 정본이다: 제목은 자리별 키, 이유는 닫힌 분류의 한 문장이다.
+// 이 게이트가 거는 실패는 서버가 직접 낸 500(코드 없음)이라 원인 분류는 「그 밖」이고, 단추가 곁에 서 있으므로 다음 행동을 뺀 이유(`reasonUnknownBare`)가 붙는다.
+// 손으로 적으면 이 게이트가 화면을 지키는 것이 아니라 문장이 고쳐지는 것을 막는 쪽이 된다(위 blocked.json과 같은 규칙).
+const KO_CONNECTION = JSON.parse(
+  readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs", GATE_LOCALE, "connection.json"),
+    "utf8"
+  )
+);
+function koConnectionLine(key) {
+  const text = KO_CONNECTION[key];
+  if (typeof text !== "string" || text === "") {
+    throw new Error(`한국어 사전(connection.json)에 ${key}가 없다`);
+  }
+  return text;
+}
+const LOAD_WORK_SESSIONS_TITLE = koConnectionLine("connection.load.workSessionsTitle");
+const LOAD_WORK_HOSTS_TITLE = koConnectionLine("connection.load.workHostsTitle");
+const LOAD_REASON_UNKNOWN_BARE = koConnectionLine("connection.load.reasonUnknownBare");
+
 // The hosts the two observation fixtures "dial". Their sockets are the ones
 // GateWebSocket never opens, which is the only way to hold a surface in 연결 중
 // long enough to leave it by a door the socket does not know about. They are
@@ -1058,6 +1078,13 @@ async function assertTerminalState(
   expectedCopy = null,
   { expectRoute = true } = {}
 ) {
+  // 문장 하나 또는 여럿(제목과 이유): 모두 들어 있어야 한다.
+  const expectedPieces =
+    expectedCopy === null
+      ? []
+      : Array.isArray(expectedCopy)
+        ? expectedCopy
+        : [expectedCopy];
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
@@ -1068,11 +1095,11 @@ async function assertTerminalState(
     const page = await openConsole(context, { expectRoute });
     const target = page.getByTestId(testId);
     await target.waitFor({ timeout: 10_000 });
-    if (
-      expectedCopy !== null &&
-      (await target.textContent())?.includes(expectedCopy) !== true
-    ) {
-      throw new Error(`${testId} did not render expected copy: ${expectedCopy}`);
+    const rendered = (await target.textContent()) ?? "";
+    for (const piece of expectedPieces) {
+      if (!rendered.includes(piece)) {
+        throw new Error(`${testId} did not render expected copy: ${piece} (rendered: ${rendered})`);
+      }
     }
   } finally {
     await context.close();
@@ -1616,16 +1643,17 @@ async function main() {
         browser,
         { mode: "error" },
         "work-console-error",
-        "작업 세션을 불러오지 못했습니다."
+        [LOAD_WORK_SESSIONS_TITLE, LOAD_REASON_UNKNOWN_BARE]
       );
       // 호스트 목록을 처음부터 읽지 못하면 콘솔은 서지 않는다: 작업 콘솔은 온라인 호스트가 있을 때만 서는 표면이라
       // (`SurfaceRoute`, #2780) 「없다」가 아니라 「읽지 못했다」를 표면 문이 말하고 다시 시도를 준다. 콘솔 자신의
-      // 「실행 위치를 불러오지 못했습니다」는 이미 서 있던 콘솔이 캐시로 버티는 경로(위 assertCachedRefetchFailure)에 남는다(#5048).
+      // 콘솔 자신의 「실행 위치를 불러오지 못했어요」(`work-console-error`)는 문이 같은 읽기(`["work-hosts", 워크스페이스]`)로 먼저 막으므로
+      // 이 장면에서는 문의 줄로 나타나고, 이미 서 있던 콘솔이 캐시로 버티는 경로(위 assertCachedRefetchFailure)는 「새로 확인하지 못했습니다」 띠를 쓴다(#5048).
       await assertTerminalState(
         browser,
         { mode: "normal", failHosts: true },
         "surface-route-error-banner",
-        "코드 실행 호스트 목록을 불러오지 못했습니다.",
+        [LOAD_WORK_HOSTS_TITLE, LOAD_REASON_UNKNOWN_BARE],
         { expectRoute: false }
       );
       await assertMetadataFallback(

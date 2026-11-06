@@ -246,14 +246,15 @@ describe("lastEditableMessage", () => {
     expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
   });
 
-  // #4888 - 「대화에도 보낸」 답글은 본류에 서므로 ↑ 의 대상이다. 판정이 그리는 규칙과 같은 한 함수(`isMainFlowRow`)여야 한다.
-  it("includes my reply that was also sent to the conversation: it is drawn in the main flow", () => {
+  // #5324 - 「대화에도 보내기」는 화면에서 빠졌다. 옛날에 켜고 보낸 답글도 스레드에만 보이므로 채널 입력칸의 ↑ 가 열면 안 되는 답글이다.
+  // 판정이 그리는 규칙과 같은 한 함수(`isMainFlowRow`)여야 한다 — 서버 필드가 true 여도 본류의 행이 아니다.
+  it("skips my old reply that was once sent to the conversation: it is no longer drawn in the main flow", () => {
     const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true })];
-    expect(lastEditableMessage(rows, ME)?.seq).toBe(2);
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
   });
 
-  it("still skips a thread-only reply of mine when a later also-sent reply is someone else's", () => {
-    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true, authorMemberId: OTHER }), msg(3, { rootId: ROOT })];
+  it("still skips thread replies of any kind when a later main-flow message is someone else's", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true }), msg(3, { authorMemberId: OTHER })];
     expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
   });
 

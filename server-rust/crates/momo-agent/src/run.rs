@@ -1263,23 +1263,35 @@ pub struct GatewayRunSnapshot {
     /// from — `resume_job_payload` carries no trigger, but the run row never
     /// stopped holding one.
     pub trigger_message_id: Option<Uuid>,
-    /// The thread the trigger was said in — and so the thread the run's **final answer**
-    /// belongs in (#4622, ADR-0148 증보 2026-10-27).
+    /// The thread root every line this run writes belongs under — its **final answer**, its
+    /// cards and tool lines, its refusal and closing lines — or `None` for the channel's main
+    /// flow (#4622 for a request made inside a thread, #4646 for a request made at the top
+    /// level; ADR-0148 증보 2026-11-05, ADR-0186 증보 v6 R-c).
     ///
-    /// `Some(root)` only when the trigger sits inside a thread whose root is still a **live
-    /// top-level message of this run's channel** — the test the REST send applies to a reply
-    /// (`momo_messaging::validate_thread_root_in_tx`, state `Live`), made here by
-    /// construction because the answer is written on the raw spine, whose thread-rollup bump
-    /// trusts its caller to have validated the root. `None` for a trigger at the channel's top
-    /// level or in a DM's main flow (unchanged: main flow + quote), a run with no trigger, and
-    /// a thread whose root was deleted since — an answer a person could not have posted there
-    /// falls back to where it always went, instead of failing the turn.
+    /// The name is the field's first meaning (the thread the trigger was said in) and the value
+    /// is now wider: [`answer_place_root`] decides it from facts read in the locked statement,
+    /// and it is one of three things.
     ///
-    /// Read in the same locked statement as [`Self::trigger_message_id`], for the same
-    /// reason: every writer of a final answer (gateway completion, the managed worker's commit
-    /// **and** its streamed opening write, the team AI) already reads this row, so the place is
-    /// decided in one spot and the paths cannot drift. The streamed opening write matters most:
-    /// it is the write that creates the message, and the commit's send is a dedupe onto it.
+    /// * the thread's own root, when the trigger sits inside a thread whose root is still a
+    ///   **live top-level message of this run's channel** (the test the REST send applies to a
+    ///   reply, `momo_messaging::validate_thread_root_in_tx`, state `Live`);
+    /// * **the trigger itself**, when it is a live top-level message of any conversation that is
+    ///   not a 1:1 DM — a channel, and a group DM when one exists (ADR-0217's admitted DMs
+    ///   already are). The request becomes the root of a new thread and the answer its first
+    ///   reply;
+    /// * `None` — the main flow — for a 1:1 DM (the DM is the work room), a run with no trigger
+    ///   (a work run), and a trigger or thread root that was deleted since: a line a person
+    ///   could not have posted there falls back to where it always went, instead of failing the
+    ///   turn.
+    ///
+    /// The value is made here, in the statement that locks the run, because the lines are
+    /// written on the raw spine, whose thread-rollup bump trusts its caller to have validated
+    /// the root. Every writer of a final answer (gateway completion, the managed worker's
+    /// commit **and** its streamed opening write, the team AI) already reads this row, so the
+    /// place is decided in one spot and the paths cannot drift. The streamed opening write
+    /// matters most: it is the write that creates the message, and the commit's send is a
+    /// dedupe onto it. Writers that hold no snapshot ask [`run_answer_root_in_tx`], which reads
+    /// the same facts.
     pub trigger_root_id: Option<Uuid>,
     /// `agent.model` — the ledger's fallback when the adapter reports none.
     pub model: String,
@@ -1315,6 +1327,143 @@ pub struct GatewayRunSnapshot {
     pub observed_at: DateTime<Utc>,
 }
 
+/// The facts [`answer_place_root`] decides from: one trigger, its thread, and the conversation it
+/// was said in. Everything here is read in one statement ([`ANSWER_PLACE_JOINS`] and
+/// [`ANSWER_PLACE_COLUMNS`]), so the locking read ([`lock_gateway_run_in_tx`]) and the plain read
+/// ([`run_answer_root_in_tx`]) cannot disagree about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerPlaceFacts {
+    /// `agent_run.trigger_message_id` of a trigger that lives in the run's own channel; `None` for
+    /// a run nobody said anything to raise (a work run).
+    pub trigger_message_id: Option<Uuid>,
+    /// The trigger itself can be a thread root: top-level (no `root_id`) and not deleted — the
+    /// test `momo_messaging::validate_thread_root_in_tx` applies, spelled by `deleted_at` **and**
+    /// `state`.
+    pub trigger_is_live_top_level: bool,
+    /// The trigger is a reply (`message.root_id` is set), whether or not that root still stands.
+    pub trigger_in_thread: bool,
+    /// The root of the thread the trigger is in, when it is still a live top-level message of the
+    /// run's channel.
+    pub live_thread_root: Option<Uuid>,
+    /// The run's channel is a 1:1 DM ([`is_one_to_one_dm`]).
+    pub one_to_one_dm: bool,
+}
+
+/// **The one rule** for where a run's lines go (#4646, ADR-0148 증보 2026-11-05, ADR-0186 증보 v6
+/// R-c): `Some(root)` = write under that thread root, `None` = the channel's main flow.
+///
+/// | trigger | root |
+/// |---|---|
+/// | none (a work run) | `None` |
+/// | inside a thread | the thread's root if it still stands, else `None` |
+/// | top-level in a 1:1 DM | `None` — the DM is the work room |
+/// | top-level, live, anywhere else (a channel; a group DM) | **the trigger itself** |
+/// | top-level but deleted since | `None` |
+///
+/// A pure function of [`AnswerPlaceFacts`], so the truth table is pinned without a database and
+/// the DM exception is a single line to break.
+pub fn answer_place_root(facts: &AnswerPlaceFacts) -> Option<Uuid> {
+    let trigger = facts.trigger_message_id?;
+    if facts.trigger_in_thread {
+        return facts.live_thread_root;
+    }
+    if facts.one_to_one_dm {
+        return None;
+    }
+    facts.trigger_is_live_top_level.then_some(trigger)
+}
+
+/// Is this conversation a **1:1 DM** — the only place an agent's lines stay in the main flow?
+///
+/// The rule is written as an exception for the 1:1 DM, not as "DMs": ADR-0221 keeps
+/// `channel.kind = 'dm'` for a group DM, so asking the kind alone would leave every group
+/// conversation in the main flow. A DM is a group when its `dm_key` starts with `group:`
+/// (ADR-0221 D2) or `admitted:` (ADR-0217 — an agent admitted into a human DM, which already
+/// exists), or when three or more members are active (ADR-0221 D1's `dm_is_group`). `active_members`
+/// counts `membership.left_at IS NULL`, the count ADR-0221 fixes, and is only read for a DM.
+///
+/// This mirrors ADR-0221 D1 until its SQL function lands; replace the body with that function then.
+pub fn is_one_to_one_dm(kind: &str, dm_key: Option<&str>, active_members: Option<i64>) -> bool {
+    kind == "dm"
+        && !dm_key.is_some_and(|key| key.starts_with("group:") || key.starts_with("admitted:"))
+        && active_members.is_some_and(|count| count <= 2)
+}
+
+/// The joins that bring [`AnswerPlaceFacts`] into a statement over `agent_run r` (`$1` = workspace).
+/// `trig_root` is a **live top-level** message of the run's channel — the same test a person's
+/// reply must pass.
+const ANSWER_PLACE_JOINS: &str = "\
+           LEFT JOIN message trig \
+             ON trig.id = r.trigger_message_id \
+            AND trig.workspace_id = $1 \
+            AND trig.channel_id = r.channel_id \
+           LEFT JOIN message trig_root \
+             ON trig_root.id = trig.root_id \
+            AND trig_root.workspace_id = $1 \
+            AND trig_root.channel_id = r.channel_id \
+            AND trig_root.root_id IS NULL \
+            AND trig_root.deleted_at IS NULL \
+            AND trig_root.state::text <> 'deleted' \
+           JOIN channel place_ch \
+             ON place_ch.id = r.channel_id \
+            AND place_ch.workspace_id = $1";
+
+/// The columns [`answer_place_from_row`] reads, over [`ANSWER_PLACE_JOINS`].
+const ANSWER_PLACE_COLUMNS: &str = "\
+                trig.id AS place_trigger_id, \
+                (trig.id IS NOT NULL AND trig.root_id IS NULL \
+                   AND trig.deleted_at IS NULL AND trig.state::text <> 'deleted') AS place_trigger_live_top, \
+                (trig.root_id IS NOT NULL) AS place_trigger_in_thread, \
+                trig_root.id AS place_live_root, \
+                place_ch.kind::text AS place_channel_kind, \
+                place_ch.dm_key AS place_dm_key, \
+                CASE WHEN place_ch.kind::text = 'dm' THEN ( \
+                  SELECT count(*) FROM membership place_ms \
+                   WHERE place_ms.workspace_id = $1 \
+                     AND place_ms.channel_id = r.channel_id \
+                     AND place_ms.left_at IS NULL) END AS place_active_members";
+
+/// Decode the [`ANSWER_PLACE_COLUMNS`] of one row.
+fn answer_place_from_row(row: &sqlx::postgres::PgRow) -> Result<AnswerPlaceFacts, sqlx::Error> {
+    let kind: String = row.try_get("place_channel_kind")?;
+    let dm_key: Option<String> = row.try_get("place_dm_key")?;
+    let active_members: Option<i64> = row.try_get("place_active_members")?;
+    Ok(AnswerPlaceFacts {
+        trigger_message_id: row.try_get("place_trigger_id")?,
+        trigger_is_live_top_level: row.try_get("place_trigger_live_top")?,
+        trigger_in_thread: row.try_get("place_trigger_in_thread")?,
+        live_thread_root: row.try_get("place_live_root")?,
+        one_to_one_dm: is_one_to_one_dm(&kind, dm_key.as_deref(), active_members),
+    })
+}
+
+/// Where `run_id`'s lines belong — [`answer_place_root`] over the facts of a **plain read** (no row
+/// lock), for a writer that holds no [`GatewayRunSnapshot`]: the managed worker's tool lines, the
+/// team AI's helper card, a hosted expression's approval card.
+///
+/// `None` also when no such run is in this workspace, which every caller already treats as "main
+/// flow". The statement is the locking read's own ([`lock_gateway_run_in_tx`]) minus the lock and
+/// the agent-membership gate, so a card written while the agent is mid-removal still lands next to
+/// its run's answer rather than in a different room.
+pub async fn run_answer_root_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let sql = format!(
+        "SELECT {ANSWER_PLACE_COLUMNS} \
+           FROM agent_run r {ANSWER_PLACE_JOINS} \
+          WHERE r.id = $2 AND r.workspace_id = $1"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(run_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(answer_place_root(&answer_place_from_row(&row)?))
+}
+
 /// Lock the run and read the gateway's view of it, or `None` when no such run is
 /// *callable*.
 ///
@@ -1333,9 +1482,9 @@ pub async fn lock_gateway_run_in_tx(
     workspace_id: Uuid,
     run_id: Uuid,
 ) -> Result<Option<GatewayRunSnapshot>, DbError> {
-    let row = sqlx::query(
+    let sql = format!(
         "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, \
-                r.trigger_message_id, trig_root.id AS trigger_root_id, \
+                r.trigger_message_id, {ANSWER_PLACE_COLUMNS}, \
                 r.started_at, now() AS observed_at, a.model, \
                 r.input->'routing'->>'effort' AS requested_effort, \
                 ap.effort_pref AS profile_effort_pref \
@@ -1351,17 +1500,7 @@ pub async fn lock_gateway_run_in_tx(
            LEFT JOIN agent_profile ap \
              ON ap.workspace_id = a.workspace_id \
             AND ap.agent_member_id = a.member_id \
-           LEFT JOIN message trig \
-             ON trig.id = r.trigger_message_id \
-            AND trig.workspace_id = $1 \
-            AND trig.channel_id = r.channel_id \
-           LEFT JOIN message trig_root \
-             ON trig_root.id = trig.root_id \
-            AND trig_root.workspace_id = $1 \
-            AND trig_root.channel_id = r.channel_id \
-            AND trig_root.root_id IS NULL \
-            AND trig_root.deleted_at IS NULL \
-            AND trig_root.state::text <> 'deleted' \
+           {ANSWER_PLACE_JOINS} \
           WHERE r.id = $2 \
             AND r.workspace_id = $1 \
             AND EXISTS ( \
@@ -1371,23 +1510,25 @@ pub async fn lock_gateway_run_in_tx(
                  AND ms.member_id = r.agent_member_id \
                  AND ms.left_at IS NULL \
             ) \
-          FOR UPDATE OF r",
-    )
-    .bind(workspace_id)
-    .bind(run_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+          FOR UPDATE OF r"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(run_id)
+        .fetch_optional(&mut *conn)
+        .await?;
 
     let Some(row) = row else { return Ok(None) };
     let label: String = row.try_get("status_label")?;
     let status = RunStatus::from_db_label(&label)
         .ok_or_else(|| sqlx::Error::Decode(format!("unknown run_status '{label}'").into()))?;
+    let place = answer_place_from_row(&row)?;
     Ok(Some(GatewayRunSnapshot {
         agent_member_id: row.try_get("agent_member_id")?,
         channel_id: row.try_get("channel_id")?,
         status,
         trigger_message_id: row.try_get("trigger_message_id")?,
-        trigger_root_id: row.try_get("trigger_root_id")?,
+        trigger_root_id: answer_place_root(&place),
         model: row.try_get("model")?,
         requested_effort: row.try_get("requested_effort")?,
         profile_effort_pref: row.try_get("profile_effort_pref")?,
@@ -2270,6 +2411,83 @@ pub fn completion_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts(
+        in_thread: bool,
+        live_top: bool,
+        live_root: Option<Uuid>,
+        one_to_one: bool,
+        trigger: Option<Uuid>,
+    ) -> AnswerPlaceFacts {
+        AnswerPlaceFacts {
+            trigger_message_id: trigger,
+            trigger_is_live_top_level: live_top,
+            trigger_in_thread: in_thread,
+            live_thread_root: live_root,
+            one_to_one_dm: one_to_one,
+        }
+    }
+
+    /// #4646 — the whole place rule as a truth table. Each row is a behaviour somebody could
+    /// relax by accident: the DM exception, the live-trigger test, the "root is gone" fallback.
+    #[test]
+    fn the_place_rule_is_the_adr_table() {
+        let trigger = Uuid::from_u128(1);
+        let root = Uuid::from_u128(2);
+        // a channel's top level, or a group DM: the request is the root of a new thread
+        assert_eq!(
+            answer_place_root(&facts(false, true, None, false, Some(trigger))),
+            Some(trigger)
+        );
+        // a 1:1 DM: the DM is the work room, main flow
+        assert_eq!(
+            answer_place_root(&facts(false, true, None, true, Some(trigger))),
+            None
+        );
+        // inside a thread that still stands: that thread, in a channel and in a DM alike
+        assert_eq!(
+            answer_place_root(&facts(true, false, Some(root), false, Some(trigger))),
+            Some(root)
+        );
+        assert_eq!(
+            answer_place_root(&facts(true, false, Some(root), true, Some(trigger))),
+            Some(root)
+        );
+        // inside a thread whose root was deleted since: main flow, never the trigger
+        assert_eq!(
+            answer_place_root(&facts(true, false, None, false, Some(trigger))),
+            None
+        );
+        // a top-level trigger deleted since: nothing a person could reply under
+        assert_eq!(
+            answer_place_root(&facts(false, false, None, false, Some(trigger))),
+            None
+        );
+        // no trigger (a work run): nothing to belong to
+        assert_eq!(
+            answer_place_root(&facts(false, false, None, false, None)),
+            None
+        );
+    }
+
+    /// #4646 — only a 1:1 DM keeps the main flow. A group DM keeps `kind = 'dm'` (ADR-0221 D1,
+    /// ADR-0217), so the kind alone must not decide it.
+    #[test]
+    fn only_a_one_to_one_dm_is_the_exception() {
+        assert!(is_one_to_one_dm("dm", Some("9f2c"), Some(2)));
+        assert!(is_one_to_one_dm("dm", Some("9f2c"), Some(1)));
+        // an agent admitted into a human DM (ADR-0217) — three members and its own key
+        assert!(!is_one_to_one_dm("dm", Some("admitted:01a1"), Some(3)));
+        // ADR-0221's group, and the shapes it can shrink to
+        assert!(!is_one_to_one_dm("dm", Some("group:01a1"), Some(3)));
+        assert!(!is_one_to_one_dm("dm", Some("group:01a1"), Some(2)));
+        assert!(!is_one_to_one_dm("dm", Some("9f2c"), Some(3)));
+        // channels are never the exception
+        assert!(!is_one_to_one_dm("public", None, None));
+        assert!(!is_one_to_one_dm("private", None, None));
+        // an unread member count is not a reason to call it 1:1
+        assert!(!is_one_to_one_dm("dm", Some("9f2c"), None));
+    }
 
     #[test]
     fn every_run_status_label_round_trips() {

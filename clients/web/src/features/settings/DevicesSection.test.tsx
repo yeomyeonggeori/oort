@@ -306,8 +306,8 @@ describe("설정 › 기기 목록", () => {
   // #5242: 옛 「기기 목록을 불러오지 못했어요. 다시 시도해 주세요.」는 원인을 말하는 한 줄이다. 403(사람 계정만)은 그 문장 그대로다.
   it("목록 실패는 제목 뒤에 원인이 붙은 한 줄과 다시 시도를 주고, 403은 사람 계정 안내 그대로다", async () => {
     const cases: [Error, string][] = [
-      [new NetworkError("unreachable", 15_000), "기기 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-      [new ApiError(500, "boom", "internal"), "기기 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new NetworkError("unreachable", 15_000), "기기 목록을 불러오지 못했어요. 서버에 닿지 못했어요."],
+      [new ApiError(500, "boom", "internal"), "기기 목록을 불러오지 못했어요. 문제가 생겼어요."],
       [new ApiError(403, "no"), "사람 계정만 연결된 기기를 볼 수 있어요."],
     ];
     for (const [error, sentence] of cases) {

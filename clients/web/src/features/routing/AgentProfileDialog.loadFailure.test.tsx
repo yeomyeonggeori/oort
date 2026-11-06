@@ -64,8 +64,8 @@ function open() {
 describe("에이전트 프로필 대화: 프로필 불러오기 실패 (#5242)", () => {
   // 지키는 것: 제목·이유가 오류 객체의 원인을 따라가고, 다시 시도가 훅의 refetch를 부른다.
   it.each([
-    [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
-    [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+    [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요."],
+    [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요."],
   ])("%# 읽지 못하면 원인 상자가 서고 다시 시도가 다시 읽는다", async (error, cause, reason) => {
     vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
     refetch.mockClear();

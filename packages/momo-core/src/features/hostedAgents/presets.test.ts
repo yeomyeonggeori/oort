@@ -279,7 +279,15 @@ const ROUTINE_RULES: readonly ConversationRule[] = [
   },
   {
     name: "직접 올리는 메시지는 물어본 자리에 답한다",
-    groups: [["물어본 자리"], ["1:1 DM은 본류"], ["최상위 멘션"], ["thread 안은 같은 thread"]],
+    groups: [
+      ["물어본 자리"],
+      ["1:1 DM은 본류"],
+      ["최상위 멘션"],
+      ["thread 안은 같은 thread"],
+      // #4646: 1:1 DM 만 본류에 남고, 그 밖(채널 최상위·그룹 DM)은 그 메시지 밑의 새 thread 다.
+      ["그룹 DM"],
+      ["새 thread"],
+    ],
   },
 ];
 
@@ -355,7 +363,7 @@ describe("#4622 routine 지시가 행동 규칙을 싣는다 (핵심 낱말 집�
     // routine 구획의 `- 지시: …` 한 줄에 들어가는 문장이라 줄바꿈이 있으면 구획이 깨진다.
     expect(HOSTED_ROUTINE_TEMPLATE).not.toMatch(/\n/);
     // 「원래 thread에 게시한다」는 서버가 하는 일과 달라서 뺐다(ADR-0200 증보 5 「바뀌는 기존 결정」).
-    // 최종 답은 `oort_run_complete` 가 올리고 자리는 서버가 정한다(규칙 10, #4646 이 한 번 더 바꾼다).
+    // 최종 답은 `oort_run_complete` 가 올리고 자리는 서버가 정한다(규칙 10; 1:1 DM 만 본류, 그 밖은 스레드 — #4646).
     expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("원래 thread");
     expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("에 게시한다");
   });

@@ -82,6 +82,8 @@ import {
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
 import { AgentReportSection, OortRecordSection } from "./WorkTimelineView";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
@@ -579,11 +581,14 @@ function PanelBody({
               data-testid="agent-work-panel-ledger-error"
             >
               {/* 다시 읽겠다는 약속은 열린 run에서만 지킬 수 있다(끝난 run은 30초
-                  타이머가 없다). 끝난 run에는 지킬 수 있는 말만 한다. */}
-              기록을 읽지 못했어요.{" "}
-              {isOpenRunPhase(server.phase)
-                ? "잠시 뒤에 다시 읽어요."
-                : "패널을 다시 열면 다시 읽어요."}
+                  타이머가 없다). 끝난 run에는 지킬 수 있는 말만 한다. 단추가 없고 꼬리가 다음 행동을 말하므로 이유는 다음 행동을
+                  뺀 문장이다(`withAction` 참, #5279 B). 원인(오프라인 / 서버에 닿지 못함 / 그 밖)은 원장 읽기의 오류 객체가 정한다. */}
+              {loadFailureSentence(formatMessage, CONNECTION_KEYS.loadAgentLedgerTitle, loadCauseOf(ledger.error), true)}{" "}
+              {formatMessage(
+                isOpenRunPhase(server.phase)
+                  ? CONNECTION_KEYS.loadAgentLedgerRetryTail
+                  : CONNECTION_KEYS.loadAgentLedgerReopenTail
+              )}
             </p>
           )}
         </section>

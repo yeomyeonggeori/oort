@@ -123,7 +123,9 @@ describe("PendingRow: 원인 한 줄", () => {
     mount({ pending: row({ status: "sending" }), failureKind: "server", resendAllCount: 3, onResendAll: vi.fn() });
     expect(screen.queryByTestId("pending-failed-reason")).toBeNull();
     expect(screen.queryByTestId("pending-resend-all")).toBeNull();
-    expect(screen.getByTestId("pending-sending")).toBeTruthy();
+    // 정상 전송에는 「전송 중」 줄이 없다(#4468): 잠깐 서고 사라지는 글자가 곧 깜빡임이다. 글자로 단정해 이름만 바꾼 줄도 잡는다.
+    expect(screen.queryByTestId("pending-sending")).toBeNull();
+    expect(screen.getByTestId("timeline-pending").textContent).not.toContain("전송 중");
   });
 });
 

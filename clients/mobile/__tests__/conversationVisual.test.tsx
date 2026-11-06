@@ -3,12 +3,15 @@ import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {cleanup, fireEvent, render, screen, waitFor, within} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
+import {bubbleFor, quoteHeadFor} from '../src/features/conversation/bubble';
 import {CONV} from '../src/features/conversation/convDesign';
 import {ROW_FACE} from '../src/features/conversation/rowFace';
 import {MessageActionSheet, timeLabel} from '../src/features/conversation/MessageActionSheet';
@@ -138,6 +141,9 @@ const UNRESOLVED: QuoteBlockModel = {
   targetSeq: null,
 };
 
+/** 사전의 한국어 판 — 화면이 제공자 없이 읽는 것과 같은 문장을 짓는다. */
+const FORMAT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+
 const SRC = (name: string) =>
   fs.readFileSync(
     path.resolve(__dirname, `../src/features/conversation/${name}`),
@@ -153,45 +159,36 @@ function codeOnly(source: string): string {
 
 afterEach(cleanup);
 
-describe('H-2 — 인용을 그리는 선이 accent 가 아니다', () => {
-  it('규정선이 중성이고, accent 는 닿지 않는다', () => {
-    // 블록이 실제로 서는 것부터 — 안 그려지는 화면에서 「accent 가 없다」는
-    // 아무것도 증명하지 못하는 초록이다.
-    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} />);
+describe('H-2 → #5381 — 인용 머리는 선도 accent 도 갖지 않는다', () => {
+  // 옛 판(H-2)은 말풍선 위 2px 세로 규칙의 **색**(중성 `textFaint`, ≥3:1)을 지켰다. #5381 Q4 이후 세로 규칙은 어디에도 없다 — 그 색을 재던 단정은
+  // 잴 것이 없어져 걷었다(레일이 없는데 「레일이 중성」을 재면 늘 초록이다). 지키는 것은 둘이다: **세로선이 다시 들어오지 않는다**, **accent 가 닿지 않는다.**
+  it('세로 규칙이 없다 — 그려진 머리와 입력창 초안 어디에도', () => {
+    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} divider />);
     expect(screen.getByTestId('quote-block')).toBeTruthy();
-    // 규정선 값은 소스에서 확인한다 — 2px 짜리 `View` 에 testID 를 걸면 접근성
-    // 트리에 낱말이 하나 더 얹히고, 이 행은 접근성 원소 하나여야 한다.
+    const tree = JSON.stringify(screen.toJSON());
+    // 그려진 값으로 잰다: 한쪽 변 테두리 폭이 양수이거나 폭 2짜리 막대가 하나라도 있으면 빨갛다.
+    expect(tree).not.toMatch(/"border(Left|Right|Start|End)Width":[1-9]/);
+    expect(tree).not.toMatch(/"width":2[,}]/);
+    // 소스에도 옛 규칙의 이름이 남지 않았다.
     const code = codeOnly(SRC('Quote.tsx'));
-    expect(code).toMatch(/rule:\s*\{width:\s*2,\s*backgroundColor:\s*color\.textFaint\}/);
-    expect(code).toMatch(/draftRule:.*color\.textFaint/);
-    // accent 가 이 파일 어디에도 없다. 이 화면에서 accent 는 이미 보내기 버튼과
-    // 내 반응 칩의 뜻이고, 세 번째 뜻을 갖게 두지 않는다.
-    expect(code).not.toContain('color.accent');
+    expect(code).not.toMatch(/\brule:/);
+    expect(code).not.toMatch(/draftRule/);
+    expect(code).not.toMatch(/border(Left|Right|Start|End)Width/);
   });
 
-  it('그 중성이 실제로 보인다 — 웹이 컨트롤 테두리에 요구하는 ≥3:1', () => {
-    // 「중성」만 지키고 `border`(#34323b) 를 쓰면 1.43:1 이라 선이 사라진다.
-    expect(contrast(color.textFaint, color.bg)).toBeGreaterThanOrEqual(3);
-    expect(contrast(color.border, color.bg)).toBeLessThan(3);
+  it('accent 는 이 파일 어디에도 닿지 않는다', () => {
+    // 이 화면에서 accent 는 이미 보내기 버튼과 내 반응 칩의 뜻이고, 세 번째 뜻을 갖게 두지 않는다. (내 말풍선 안 머리는 말풍선 색에서 유도한 값이라
+    // 이 파일이 accent 를 직접 읽지 않는다 — `bubble.ts` 가 읽는다.)
+    expect(codeOnly(SRC('Quote.tsx'))).not.toContain('color.accent');
   });
 
-  it('블록에 배경이 없다 — 고도 띠는 인용의 무게를 올린다', () => {
-    // 첫 판의 배경은 `surface` on `bg` 로 범위를 닫지 못했고, 그 값은 **행의 눌림
-    // 색**이기도 했다. 웹도 같은 이유로 raised 배경을 넣었다 되돌렸다.
-    //
-    // 그 부족함을 여기서는 절대 문턱(1.1)으로 적고 있었다. #1164 가 두 표면을 웹 항
-    // (`--surface`/`--surface-raised`)으로 정렬하면서 다크의 띠가 1.084 에서
-    // 1.1001 이 됐고, 그 문턱은 폰이 자기 옛 값을 보고 그은 선이라 함께 무너졌다.
-    // 재는 것을 관계로 되돌린다: 고도는 이 팔레트에서 **가장 조용한 구분**이고, 색을
-    // 가진 가장 조용한 채움(착지 틴트)보다도 작다. 그만한 띠는 인용 블록이 자기
-    // 표면을 갖는 근거가 되지 못한다. 실측 1.1001 < 1.1641.
-    expect(contrast(color.surface, color.bg)).toBeLessThan(
+  it('머리 띠는 말풍선보다 도드라지지 않는다 — 인용의 무게를 올리지 않는다', () => {
+    // 옛 근거(고도 띠는 인용의 무게를 올린다)는 이제 **띠의 크기**로 지킨다: 머리는 말풍선 안의 어둡힌 한 단이고, 말풍선 자체보다 대비가 작은 단계다.
+    const head = quoteHeadFor(color, bubbleFor(color).other, false);
+    expect(contrast(head.fill, bubbleFor(color).other.bg)).toBeLessThan(
       contrast(color.warnSurface, color.bg),
     );
-    const code = codeOnly(SRC('Quote.tsx'));
-    expect(code).not.toMatch(/block:\s*\{[^}]*backgroundColor/);
-    // 눌림 피드백은 남는다 — 이제 **누를 때만** 나타난다.
-    expect(code).toMatch(/blockPressed:\s*\{backgroundColor:\s*color\.surfacePressed\}/);
+    expect(contrast(head.label, head.fill)).toBeGreaterThanOrEqual(4.5);
   });
 });
 
@@ -538,10 +535,10 @@ describe('#1078 — 묘비·미해결의 구분축', () => {
   });
 
   it('보조기술 라벨에는 표시가 없다 — 눈으로 훑을 때의 단서다', () => {
-    expect(quoteAccessibilityPhrase(deletedBlock(), DIRECTORY)).not.toContain(
+    expect(quoteAccessibilityPhrase(deletedBlock(), DIRECTORY, FORMAT)).not.toContain(
       APP_NOTE_MARK,
     );
-    expect(quoteAccessibilityPhrase(UNRESOLVED, DIRECTORY)).not.toContain(
+    expect(quoteAccessibilityPhrase(UNRESOLVED, DIRECTORY, FORMAT)).not.toContain(
       APP_NOTE_MARK,
     );
     // 행 라벨도 마찬가지다. 이건 자동으로 참이 아니라 **`deleted` 플래그에서
@@ -1285,7 +1282,8 @@ describe('ADR-0155 — 멈춘 답은 꼬리 한 낱말로 말한다', () => {
         .style,
     );
     expect(mark.color).toBe(edited.color);
-    expect(mark.color).toBe(color.textFaint);
+    // 꼬리 표지의 잉크는 `textMuted`(AA 4.5:1)다 - 「수정됨」이 눌러서 고친 시각을 펼치는 단추가 되며 `textFaint` 로는 모자랐다(6a 디자인 검수 H1, #5417).
+    expect(mark.color).toBe(color.textMuted);
     expect(mark.color).not.toBe(color.accent);
     expect(mark.color).not.toBe(color.danger);
   });

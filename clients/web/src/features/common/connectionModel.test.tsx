@@ -182,6 +182,22 @@ describe("② 「끊김」이 보였다가 돌아오면 정확히 2초 「다시
     advance(1);
     expect(card()).toBeNull();
   });
+
+  // #5403: 폰과 같은 규칙인지 확인한다 - 깨움이 늦게 울려도(절전·멈춘 타이머) 복구 표시는 보내기 같은 사람의 행동을 기다리지 않고 거두어진다.
+  it("깨움이 5분 늦게 울려도 복구 표시는 저절로 거두어진다(다음 사건을 기다리지 않는다)", () => {
+    mountHealthy();
+    setStatus("disconnected");
+    advance(10_000);
+    expect(card()!.dataset.tone).toBe("down");
+    setStatus("connected");
+    expect(card()!.dataset.tone).toBe("recovered");
+    // 시각만 5분 뛴다(깨움 타이머는 아직 울리지 않았다). 상태는 그대로이고, 타이머가 울리는 순간 한 번의 판정으로 거둔다.
+    vi.setSystemTime(Date.now() + 300_000);
+    expect(card()!.dataset.tone).toBe("recovered");
+    advance(2_000);
+    expect(card()).toBeNull();
+    expect(probe().dataset.recovered).toBe("false");
+  });
 });
 
 describe("③ 기기 오프라인은 즉시, 그리고 막는다", () => {
@@ -331,5 +347,105 @@ describe("⑦ 문장은 사전 키로만 나온다", () => {
     expect(card()!.querySelector('[data-testid="connection-card-title"]')!.textContent).toBe("실시간 연결이 끊겼어요");
     expect(card()!.querySelector('[data-testid="connection-card-detail"]')!.textContent).toBe("새 글이 늦게 보일 수 있어요.");
     expect(action()!.textContent).toBe("지금 다시 연결");
+  });
+});
+
+// #5407: 폰과 같은 코어 규칙인지 확인한다 - 「서버에 닿지 못했어요」 카드는 응답 한 건이 와야 걷혔다. 이제 창이 보이는 동안 서 있으면 앱이 스스로 가볍게 다시 확인하고
+// (2 · 4 · 8 · 16 · 30초), 서버가 돌아오면 사람의 요청 없이 걷힌다. 숨은 창에서는 보내지 않는다. 사람이 하는 요청은 카드를 세우는 `hit` 뿐이다.
+describe("⑧ 서버에 닿지 못함 카드는 앱이 스스로 다시 확인한다 (#5407)", () => {
+  let serverUp = false;
+  const fetchMock = vi.fn();
+
+  const urls = () => fetchMock.mock.calls.map(([url]) => String(url));
+  const probes = () => urls().filter((url) => url.endsWith("/healthz"));
+  const humanRequests = () => urls().filter((url) => !url.endsWith("/healthz"));
+  const advanceAsync = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  const visibility = (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    act(() => void document.dispatchEvent(new Event("visibilitychange", { bubbles: true })));
+  };
+
+  async function hit(path: string) {
+    await act(async () => {
+      await fetchWithDeadline(`http://server.test${path}`).catch(() => undefined);
+    });
+  }
+  async function declareUnreachable() {
+    for (const path of ["/v1/a", "/v1/b", "/v1/c"]) await hit(path);
+    expect(card()!.dataset.tone).toBe("unreachable");
+  }
+
+  beforeEach(() => {
+    serverUp = false;
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => {
+      if (!serverUp) throw new TypeError("Failed to fetch");
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("서버가 돌아오면 사람의 요청 없이 카드가 걷힌다: 2초에 첫 확인, 돌아온 뒤 다음 확인(6초)에 「다시 연결됐어요」를 거쳐 비워진다", async () => {
+    mountHealthy();
+    await declareUnreachable();
+    expect(humanRequests()).toHaveLength(3);
+    await advanceAsync(1_999);
+    expect(probes()).toHaveLength(0);
+    await advanceAsync(1);
+    expect(probes()).toHaveLength(1);
+    expect(card()!.dataset.tone).toBe("unreachable");
+    expect(probe().dataset.offline).toBe("true");
+
+    serverUp = true;
+    await advanceAsync(3_999);
+    expect(probes()).toHaveLength(1);
+    expect(card()!.dataset.tone).toBe("unreachable");
+    await advanceAsync(1);
+    expect(probes()).toHaveLength(2);
+    expect(card()!.dataset.tone).toBe("recovered");
+    expect(probe().dataset.offline).toBe("false");
+    await advanceAsync(2_000);
+    expect(card()).toBeNull();
+    await advanceAsync(300_000);
+    expect(probes()).toHaveLength(2);
+    expect(humanRequests()).toHaveLength(3);
+  });
+
+  it("숨은 창에서는 확인을 한 건도 보내지 않고, 다시 보이면 2초부터 시작한다", async () => {
+    mountHealthy();
+    await declareUnreachable();
+    visibility("hidden");
+    await advanceAsync(300_000);
+    expect(probes()).toHaveLength(0);
+    visibility("visible");
+    await advanceAsync(1_999);
+    expect(probes()).toHaveLength(0);
+    await advanceAsync(1);
+    expect(probes()).toHaveLength(1);
+  });
+
+  it("포커스를 잃어도 보이는 창이면 확인한다 (옆 창을 쓰는 중에도 이 창의 카드는 걷혀야 한다)", async () => {
+    mountHealthy();
+    await declareUnreachable();
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    act(() => void window.dispatchEvent(new Event("blur")));
+    await advanceAsync(2_000);
+    expect(probes()).toHaveLength(1);
+  });
+
+  it("실시간이 다시 붙으면 요청 없이 걷히고, 확인도 멈춘다", async () => {
+    mountHealthy();
+    await declareUnreachable();
+    await advanceAsync(2_000);
+    expect(probes()).toHaveLength(1);
+    setStatus("disconnected");
+    setStatus("connected");
+    expect(card()!.dataset.tone).toBe("recovered");
+    await advanceAsync(300_000);
+    expect(probes()).toHaveLength(1);
+    expect(humanRequests()).toHaveLength(3);
   });
 });

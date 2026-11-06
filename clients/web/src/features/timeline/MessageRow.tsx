@@ -1,5 +1,5 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
-import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { threadRollup, uuidEq, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
@@ -73,6 +73,7 @@ import {
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
 } from "./spacing";
+import { timeLabel } from "./timeLabel";
 import {
   canDeleteMessage,
   canEditMessage,
@@ -89,11 +90,10 @@ import {
 } from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
+  isQuoteRedundant,
   resolveQuote,
 } from "@momo/core/features/timeline/quote";
-import { QuoteBlock } from "./QuoteBlock";
-import { ReplyHomeLine } from "./ReplyHomeLine";
-import { replyHomeRoot, type ReplyHomeLine as ReplyHomeLineModel } from "@momo/core/features/timeline/threadHome";
+import { QuoteCard, QuoteCardAround } from "./QuoteBlock";
 import {
   DeleteMessageDialog,
   MessageActionContextMenu,
@@ -104,6 +104,7 @@ import {
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
+  isKeyboardFocusTarget,
   previousMessageRowHasOpenBanner,
   shouldShowHoverToolbar,
 } from "./hoverToolbarModel";
@@ -113,6 +114,7 @@ import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
+import { EditedMark } from "./EditedMark";
 import { EditRequestContext } from "./editRequest";
 import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
@@ -147,7 +149,6 @@ import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest"
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
 import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
-import type { AnswerRef } from "@momo/core/features/agents/triggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -187,13 +188,6 @@ function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 
-
-function timeLabel(atMs: number): string {
-  const d = new Date(atMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes()
-  ).padStart(2, "0")}`;
-}
 
 /**
  * 발화자의 얼굴 (진단 H-11). Shared with the pending row so an optimistic echo
@@ -318,15 +312,14 @@ export function MessageRow({
   onQuoteMessage,
   onJumpToMessage,
   quoteLookup,
+  aboveMessageId,
   onOpenWorkSession,
   onResend,
   showRollup = true,
   rollup: listRollup,
-  replyHome,
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
-  runAnswers,
   showThought = false,
 }: {
   message: Message;
@@ -386,6 +379,14 @@ export function MessageRow({
    * 네트워크를 다시 때리지 않는다.
    */
   quoteLookup?: (messageId: string) => Message | undefined;
+  /**
+   * 같은 목록에서 이 행 **바로 위에 그려진** 메시지의 id (#5357, 코어 `messageAboveIds`).
+   *
+   * 에이전트의 답이 이 메시지를 가리키면 인용 블록은 바로 위의 말을 한 번 더 보여 줄 뿐이라 그리지 않는다(코어 `isQuoteRedundant`가
+   * 판정하고 폰이 같은 함수를 쓴다). 목록이 넣는다 — 이웃은 접기·가리기를 다 거친 목록에서 세야 맞아서 행이 혼자 알 수 없다. 넣지 않으면
+   * (갤러리·받은 편지함·작업 로그) 「모른다」이고 인용은 늘 그린다.
+   */
+  aboveMessageId?: string;
   onOpenWorkSession?: OpenWorkSession;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
@@ -415,11 +416,6 @@ export function MessageRow({
    */
   rollup?: ThreadRollup | null;
   /**
-   * 본류에 선 답글 줄(「↳ ○○님 스레드에 답글」 + 원문 한 줄, #4888). 목록이 넣는다(`Timeline`) — 본류에 선 답글(「대화에도 보낸」)에만
-   * 값이 있고, 답글이 아닌 행·스레드 패널·받은 편지함 같은 목록 밖 마운트는 넣지 않아 줄이 없다. 누르면 그 스레드가 열린다(`onOpenThread`).
-   */
-  replyHome?: ReplyHomeLineModel | null;
-  /**
    * ADR-0179 D3. True only when this row entered as a live other-user
    * arrival. Default false: REST, work log, fixtures.
    */
@@ -432,11 +428,6 @@ export function MessageRow({
    * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
    */
   runStatus?: readonly AgentRunProgress[];
-  /**
-   * #4619 — 위 run들의 **답 메시지**(run id 소문자 → id·seq). 「답함 ✓」 칩이 누르면 답으로 가는 길이다.
-   * 목록이 한 번 색인해 넣는다(`Timeline`). 없거나 모르는 run이면 칩은 누르는 것이 아니다.
-   */
-  runAnswers?: ReadonlyMap<string, AnswerRef>;
   /** 요청 스레드 또는 에이전트 1:1 DM에서만 생각 줄을 세워요. */
   showThought?: boolean;
 }) {
@@ -527,8 +518,6 @@ export function MessageRow({
   const previewText =
     message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
   const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
-  // 본류 답글 줄이 눌려 열 스레드의 루트(#4888). 열 곳이 없으면(핸들러 없음·루트를 못 불러옴) 줄은 글이다.
-  const replyHomeRoot_ = replyHome && onOpenThread && quoteLookup ? replyHomeRoot(replyHome, quoteLookup) : undefined;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
@@ -599,6 +588,23 @@ export function MessageRow({
   // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
   // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
   const quote = resolveQuote(message, quoteLookup);
+  // #5357 — 에이전트의 답이 바로 위 메시지를 가리키면 그 인용은 정보를 더하지 못한다. 그리는 마지막 걸음에서만 거르고 데이터는 건드리지 않는다.
+  // #5381 — 스레드 화면(`ThreadSurfaceRoot`)에서 인용 대상이 그 스레드의 root면 그것도 같은 함수가 거른다: root는 맨 위 행으로 이미 서 있다(요청 고리 §4.2).
+  const quoteRedundant = isQuoteRedundant(quote, {
+    directory,
+    authorMemberId: message.authorMemberId,
+    aboveMessageId,
+    ...(threadSurfaceRoot !== null ? { threadRootId: threadSurfaceRoot } : {}),
+  });
+  // 그려야 하는 인용(없으면 null). 답장 한 덩어리 카드의 머리다(#5381 Q4).
+  const drawnQuote = quote !== null && !quoteRedundant ? quote : null;
+  // 카드가 **본문을 싼다**: 보일 본문(묘비·글)이 있고 편집기·작업 중 안내가 자리를 차지하지 않을 때. 아니면 머리만 선 카드를 그린다
+  // (첨부만 보낸 답장, 편집 중인 행). 본문이 없는 행에 구분선만 긋지 않는다.
+  const quoteCardHoldsBody =
+    drawnQuote !== null &&
+    keepsBody &&
+    idleNotice === null &&
+    (deleted || (hasBody && !(editing && actions)));
 
   // What this row is allowed to offer. The server decides for real (403/400);
   // these only decide what to draw, and `onOpenThread` gates 답글 because a
@@ -808,6 +814,28 @@ export function MessageRow({
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
+  // 호버는 **DOM 이 아는 사실**로 센다(#5328, SidebarRow #3963 과 같은 문제). React 의 `onMouseEnter`/`onMouseLeave` 는 포털 자손을 행 안으로
+  // 친다: 포인터가 행에서 ⋮ 메뉴(포털, DOM 으로는 행 밖)로 건너가도 leave 가 오지 않고, 행동을 고르면 메뉴 항목이 포인터 밑에서 사라져(사라진
+  // 노드는 `mouseout` 을 못 쏜다) 그 leave 가 영영 오지 않아 「호버 중」이 남았다. 막대는 그 행에 남고, 포인터가 선 행의 막대와 함께 두 메시지에
+  // 동시에 떴다. 그래서 버블링하는 `onMouseOver`/`onMouseOut` 에서 **DOM 포함 관계**를 직접 본다: 행 DOM 안의 요소를 가리키면 호버, 나가는 곳
+  // (`relatedTarget`)이 행 DOM 밖이면(포털 메뉴·다른 행·창 밖) 호버가 아니다. 열린 메뉴·선택기는 `overlayOpen` 이 막대를 붙들고, 닫히면 포인터의
+  // 실제 자리가 정한다.
+  const onRowPointerOver = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.target instanceof Node && event.currentTarget.contains(event.target)) setRowHovered(true);
+  };
+  const onRowPointerOut = (event: ReactMouseEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || !event.currentTarget.contains(next)) setRowHovered(false);
+  };
+  // 메뉴가 닫혀 내용이 사라진 **뒤** 행의 「키보드 초점 있음」을 DOM 의 사실로 다시 읽는다(#5328). 초점을 쥔 채 사라진 노드는 `blur` 를 못
+  // 쏘므로(키보드로 연 메뉴를 마우스 바깥 누름으로 닫으면 Radix 는 초점을 ⋮ 로 돌려주지 않는다) 「초점 있음」이 낡은 채 남았다. 키보드로 고르면
+  // Radix 가 ⋮ 로 돌려준 초점이 키보드 초점이라 그대로 남는다. 호출은 Radix 가 초점을 돌려준 **뒤**(마이크로태스크)다.
+  const settleRowFocus = () => {
+    const row = rowRef.current;
+    const active = document.activeElement;
+    setRowFocused(row !== null && active !== null && row.contains(active) && isKeyboardFocusTarget(active));
+  };
+
   useEffect(() => {
     if (!rowHovered && !rowFocused) return undefined;
     const node = rowRef.current;
@@ -866,10 +894,16 @@ export function MessageRow({
       data-row-banner={rowError ? "open" : undefined}
       data-entrance-play={entrance.playing ? "1" : undefined}
       onAnimationEnd={entrance.onAnimationEnd}
-      onKeyDown={onRowKeyDown}
-      onMouseEnter={() => setRowHovered(true)}
-      onMouseLeave={() => setRowHovered(false)}
-      onFocusCapture={() => setRowFocused(true)}
+      onKeyDown={(event) => {
+        onRowKeyDown(event);
+        // 캐럿을 옮기는 키가 입력 방식 스탬프를 keyboard 로 올린 **뒤** 행 안의 초점을 다시 읽는다(#5328): 스크립트가 먼저 옮긴 초점(받은
+        // 편지함에서 이 행으로 착지)도 그때부터 키보드 초점이다. 포털 메뉴 안의 키(행 DOM 밖)는 읽지 않는다 — 메뉴가 열려 있는 동안은 막대가 닻이다.
+        if (event.target instanceof Node && event.currentTarget.contains(event.target)) settleRowFocus();
+      }}
+      // 호버는 DOM 포함 관계로 듣고(위 `onRowPointerOver`·`onRowPointerOut`), 초점은 **키보드 초점만** 센다(#5328, `isKeyboardFocusTarget`).
+      onMouseOver={onRowPointerOver}
+      onMouseOut={onRowPointerOut}
+      onFocusCapture={(event) => setRowFocused(isKeyboardFocusTarget(event.target))}
       onBlurCapture={(event) => {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget.contains(next)) return;
@@ -923,6 +957,7 @@ export function MessageRow({
           }
           menuOpen={actionMenuOpen}
           onMenuOpenChange={setActionMenuOpen}
+          onMenuSettled={settleRowFocus}
           triggerRef={actionTriggerRef}
           mineEmojis={mineEmojis}
         />
@@ -1042,8 +1077,6 @@ export function MessageRow({
               <MessageTriggerChip
                 runs={runStatus}
                 directory={directory}
-                {...(runAnswers !== undefined ? { runAnswers } : {})}
-                {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
                 onOpenBundle={onOpenThread || runStatus.some((run) => run.phase === "awaiting_approval" || run.phase === "paused") ? (opener, runIds) => {
                   const awaiting = runStatus.some((run) => runIds.includes(run.id) && (run.phase === "awaiting_approval" || run.phase === "paused"));
                   if (awaiting) openRunStage(opener, runIds);
@@ -1053,25 +1086,22 @@ export function MessageRow({
             )}
           </div>
         )}
-        {/* 본문 **위**. 스레드 롤업이 본문 아래 꼬리에 있는 것과 대칭이고, 그
-            대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
+        {/* 본문 **위**: 본문을 싸는 카드의 윗칸이다(#5381 Q4). 스레드 롤업이 본문 아래 꼬리에
+            있는 것과 대칭이고, 그 대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
             tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
-            지워지지 않는다. */}
-        {replyHome && !deleted && (
-          <ReplyHomeLine
-            line={replyHome}
-            directory={directory}
-            myMemberId={actions?.myMemberId}
-            onOpen={replyHomeRoot_ ? () => onOpenThread?.(replyHomeRoot_) : undefined}
-          />
-        )}
-        {quote && (
-          <QuoteBlock
-            block={quote}
+            지워지지 않는다. 본문이 없거나 편집기가 서는 행은 머리만 선 카드다. */}
+        {drawnQuote && !quoteCardHoldsBody && (
+          <QuoteCard
+            block={drawnQuote}
             directory={directory}
             {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
           />
         )}
+        <QuoteCardAround
+          quote={quoteCardHoldsBody ? drawnQuote : null}
+          directory={directory}
+          {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+        >
         {keepsBody &&
           idleNotice === null &&
           // A tombstone is our sentence, not the author's, so it never goes
@@ -1128,6 +1158,7 @@ export function MessageRow({
             // 자리이고, 거기서 웹은 글자 없는 문단을 하나 세우고 폰은 세우지 않았다.
             null
           ))}
+        </QuoteCardAround>
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}
@@ -1252,7 +1283,7 @@ export function MessageRow({
                 안쪽인 서술은 없다 — 이 낱말은 본문이 여기서 끝났다고 말한다.
                 꼬리의 다른 조각들은 그 본문에 **대해** 말한다. */}
             {stopMark && <span data-testid="stream-stop-mark">{stopMark}</span>}
-            {showsEditedMark && <span>수정됨</span>}
+            {showsEditedMark && <EditedMark message={message} />}
             {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
                 스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}
             {showsPinMark && (

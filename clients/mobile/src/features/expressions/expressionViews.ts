@@ -1,8 +1,11 @@
 import {
-  EXPRESSION_TABS,
-  expressionsForTab,
-  type ExpressionShelf,
-  type ExpressionTab,
+  DEFAULT_EXPRESSION_PICKER_TAB,
+  EXPRESSION_PICKER_TABS,
+  expressionActionOf,
+  expressionsForView,
+  type ExpressionAction,
+  type ExpressionPickerTab,
+  type ExpressionView,
 } from '@momo/core/features/expressions/kind';
 import {searchExpressions} from '@momo/core/features/expressions/search';
 import type {Expression} from '@momo/core/features/expressions/types';
@@ -12,38 +15,40 @@ import {
 } from '@momo/core/features/expressions/usage';
 
 // =============================================================================
-// 입력창 표현 시트의 네 탭 (#4942, owner 10-31) — 이모티콘 · 이모지 · 팀 이모지 · GIF.
+// 입력창 표현 시트의 세 탭 (#4942, owner 10-31 → owner 11-05 #5330) — 이모티콘 · 기본 · GIF. 첫 탭의 글자는 owner 11-06(#5427)부터
+// 「우리 팀」이다(창 제목이 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다). 아래의 「이모티콘」은 그 탭이 보이는 **보기·종류의 이름**(탭 id `emoticon`)이다.
 //
-// ## 네 탭이 서로 다른 것을 보이는 기준 (ADR-0218 증보 4 §10 J2, #4961·#5112)
+// ## 사용자에게 보이는 이름은 「이모티콘」 하나다 (owner 2026-11-05)
 //
-// 등록마다 종류 값(`kind`: `emoji` 작은 팀 이모지 · `sticker` 큰 이모티콘)이 있고, 보관함의 모든 활성 등록은 아래 세 칸 가운데
-// **정확히 한 곳**에 선다(합집합 = 전체, 서로 겹치지 않는다). 나누는 함수는 코어 `expressionsForTab` 이고 폰도 웹 패널도 그 함수
-// 하나를 쓴다 — 탭 값(`EXPRESSION_TABS`)도 코어의 것이다. 폰이 따로 분류를 짓지 않는다:
+// 앞 판은 네 탭(이모티콘 · 이모지 · 팀 이모지 · GIF)이었고, 「이모지」와 「팀 이모지」가 「이모티콘」과 겹쳐 읽혔다. 지금은 셋이다:
 //
-//   이모티콘  = `kind = sticker` **이고** 움직이지 않는 것 · 큰 타일 · 눌러 큰 그림을 미리 본 뒤 **대화로 보낸다**(단독 전송 = large)
-//   팀 이모지 = `kind = emoji`(움직여도) · 작은 칸 · 눌러 `:이름:` 을 **입력칸에 넣는다**(글 사이 = inline)
-//   GIF       = `kind = sticker` **이고** 움직이는 것(큰 그림이 GIF) · 큰 타일 · 이모티콘과 같은 보내기
-//   이모지    = 표준 이모지 목록(`EmojiPicker`) · 눌러 입력칸에 넣는다. **보관함의 등록은 보이지 않는다**
+//   이모티콘 = 팀 보관함의 작은 것(`kind = emoji`, 움직여도)과 큰 것(`kind = sticker` 이고 움직이지 않는 것) **한 탭**
+//   기본     = 표준 그림 문자 목록(`EmojiPicker` 본문) · 눌러 입력칸에 넣는다. **보관함의 등록은 보이지 않는다**
+//   GIF      = `kind = sticker` **이고** 움직이는 것(큰 그림이 GIF) · 큰 타일 · 눌러 큰 그림을 미리 본 뒤 대화로 보낸다
 //
-// 움직이는 팀 이모지는 팀 이모지에 남는다(글 사이에 넣는 쓰임이 같다). 종류가 없는 등록(옛 서버·옛 캐시)은 옛 등록과 같은
-// `sticker` 로 읽는다(코어 `expressionKindOf`) — 서버를 올리기 전후로 한 등록이 다른 탭으로 옮겨 다니지 않는다. 메시지·반응의
-// 크기 규칙(D1)은 종류를 읽지 않는다: 탭은 고르개의 분류이지 쓰임의 제한이 아니다. 종류는 등록하는 순간 정하고(초안 단계의
+// 합친 것은 **화면뿐**이다. 서버 `kind` 값(`emoji`·`sticker`)·API 이름·ADR-0218 §10 J2의 네 칸(코어 `expressionShelfOf`)은 그대로다:
+// 보관함의 모든 활성 등록은 여전히 정확히 한 칸에 서고, 그 칸이 **고른 뒤의 동작**을 정한다 — 작은 것(팀 이모지 칸)은 `:이름:` 을
+// 입력칸에 넣고(글 사이 = inline), 큰 것(이모티콘·GIF 칸)은 미리 본 뒤 대화로 보낸다(단독 전송 = large). 그래서 동작은 탭이
+// 아니라 **등록 하나**가 정한다(`expressionActionOf`) — 이모티콘 탭 안에 두 동작이 함께 있다. 합친 탭의 칸은 모두 같은 큰 칸
+// (`tile`)이다: 크기가 다른 칸을 한 격자에 섞으면 줄이 들쭉날쭉해져 한 칸 크기로 맞췄다.
+//
+// 보기를 합치는 함수는 코어 `expressionsForView` 하나이고 웹 패널도 같은 함수를 쓴다. 폰이 따로 분류를 짓지 않는다. 종류가 없는
+// 등록(옛 서버·옛 캐시)은 옛 등록과 같은 `sticker` 로 읽는다(코어 `expressionKindOf`). 종류는 등록하는 순간 정하고(초안 단계의
 // 고르기, `ExpressionDraftStep`), 등록 뒤에는 바꿀 수 없다.
 // =============================================================================
 
-export {EXPRESSION_TABS};
-export type {ExpressionTab};
-/** 팀 보관함을 보는 세 탭. 나머지 하나(`emoji`)는 표준 이모지 목록이다. */
-export type ExpressionView = ExpressionShelf;
-
-/** 처음 열 때의 탭 — 옛 이모지 고르개가 열던 표준 이모지 목록(자주 쓰는 것 먼저)이다. */
-export const DEFAULT_EXPRESSION_TAB: ExpressionTab = 'emoji';
-
-/** 탭에서 하나를 고르면 하는 일: 대화에 보낸다(미리보기 뒤) / 입력칸에 넣는다. */
-export type ExpressionTabAction = 'send' | 'insert';
-export const EXPRESSION_TAB_ACTION: Readonly<
-  Record<ExpressionTab, ExpressionTabAction>
-> = {emoticon: 'send', emoji: 'insert', team: 'insert', gif: 'send'};
+/**
+ * 시트의 세 탭(순서 그대로)과 처음 여는 탭 — 웹 고르개와 같은 코어의 목록이다. 탭 이름 `emoji` 는 표준 그림 문자 목록(「기본」)이다 — 서버 종류
+ * `emoji` 와 다른 물건이다. 하는 일(`expressionActionOf`)도 코어 함수 하나다.
+ */
+export {
+  DEFAULT_EXPRESSION_PICKER_TAB as DEFAULT_EXPRESSION_TAB,
+  EXPRESSION_PICKER_TABS as EXPRESSION_TABS,
+  expressionActionOf,
+  type ExpressionAction,
+  type ExpressionPickerTab as ExpressionTab,
+  type ExpressionView,
+};
 
 /** 검색어의 앞뒤 콜론(`:name:`)은 이름 검색으로 읽는다 — 옛 고르개와 같다. */
 export function expressionQuery(query: string): string {
@@ -51,7 +56,7 @@ export function expressionQuery(query: string): string {
 }
 
 /**
- * 한 탭에 보이는 표현의 차례. 탭 밖의 등록은 이름이 맞아도 들이지 않는다(코어 `expressionsForTab`, 위 머리말).
+ * 한 탭에 보이는 표현의 차례. 탭 밖의 등록은 이름이 맞아도 들이지 않는다(코어 `expressionsForView`, 위 머리말).
  *
  * - 검색어가 있으면 코어 검색의 관련도 차례 그대로다(이름 정확 > 앞부분 > 태그 > 부분·초성, 같으면 많이 쓴 것).
  * - 검색어가 없으면 **최근에 쓴 것이 먼저**(마지막으로 쓴 시각 내림차순), 그 뒤가 코어 검색의 기본 차례다.
@@ -65,7 +70,7 @@ export function browseExpressions(
 ): Expression[] {
   const q = expressionQuery(query);
   // 웹 패널과 같은 차례(`TeamExpressionsPanel`): 검색 관련도를 먼저 매기고 그 차례 그대로 탭 몫만 남긴다.
-  const found = expressionsForTab(searchExpressions(items, q, usage), view);
+  const found = expressionsForView(searchExpressions(items, q, usage), view);
   if (q.trim() !== '' || !usage) return found;
   const byId = new Map(found.map(item => [item.id, item]));
   const recent = recentExpressions(usage, new Set(byId.keys())).flatMap(

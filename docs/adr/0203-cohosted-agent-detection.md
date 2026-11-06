@@ -13,8 +13,10 @@
 - 증보(**Accepted** 2026-10-26, owner 결정 「권장으로 승인」 — 시크릿 출력 범위가 옵트인 한정으로 넓어진다): **2026-10-25 Railway 생성기의 Hermes 공유 변수 출력(옵트인), A4′** (#4461, 온보딩 r2 R2-11) — 파일 끝. 옵트인 플래그(`--platform railway --with-agents`)가 있을 때만 T2 stdout에 정본 키 집합 밖의 공유 변수 둘(`HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`)을 새로 만들어 더한다. A4의 「정본 키 집합에 넣지 않고 T2 stdout 불변」 중 「운영자가 손으로 만든다」와 `self_host_env.sh:277-278`(T2와 `--with-agents` 동시 금지)만 이 옵트인 경로에 한해 바뀌고, 기본 출력은 바이트 단위로 같다. 카탈로그의 서비스·변수·compose·서버는 바뀌지 않는다. D·K·A1·A2·A5·L·M·F(F3 마지막 항·F6 railway 계획 문구 제외)는 바뀌지 않고, A3의 「출력에 값을 내지 않는다」는 이 증보가 Accepted된 뒤 T1(compose 파일 경로) 한정으로 읽는다.
 - 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 2회차 B0·H0): **2026-11-01 볼륨 `.env`는 허용 이름만, 연결 모드 설정과 엄격 모드** (#4950, #4935) — 파일 끝. 게이트가 볼륨 `.env`를 거부 목록이 아니라 허용 목록으로 판정하고(부팅 게이트와 `report`가 같은 함수 하나), 시작 명령·게이트가 `config.yaml`을 정해진 해시 목록(기본 설정 + 연결 모드 조각 조합)으로 받으며, 엄격 모드를 모든 기동에서 요구한다. D6의 도구 허용 목록·K4·I1~I4는 바뀌지 않는다.
 - 증보(**Accepted** 2026-11-01, planner — 독립 보안 검수 1회차 B0·H0·M0, 고정 이미지 안 증명 PASS): **2026-11-01 공동 호스팅 Hermes의 세션 검색·기억 도구는 끈다** (#4898, #4820 C2a 보안 검수 Low 후속) — 파일 끝. 한 Hermes가 모든 워크스페이스를 `state.db` 하나와 `memories/` 하나로 처리해 `session_search`·`memory`가 다른 런의 기록을 읽거나 심는 길이 되므로, 두 설정에서 둘을 끄고(deny-list·`memory.*` 스위치) 게이트가 켜진 설정의 기동을 거절한다. 같은 증보가 #4950 2회차 Low 셋(시험 사례·`.deleted` 표식 문장·핀 올림 절차)도 닫는다. D6의 허용 표면이 `todo_list`·`web_search`·`image_generate`로 좁아지고(`memory`·`session_search` 제외) D1~D5·D7~D9·K1~K7은 바뀌지 않는다.
+- 증보(**Accepted** 2026-11-05, planner 위임 결재 — 독립 보안 검수 PASS 2회(첫 판·차이), owner 11-05 「에르메스 기본 모델은 sonnet 5.5로.」·「일단 가의 형태가 생각중인 형태야. 그리고 실제로 켜줘 그러면.」·「그러면 hermes는 GPT고정에 폴백으로 claude」): **2026-11-05 팀 공동 Hermes의 기본값은 기본 모드(팀 공용), 정적 목록 밖 모델 id는 판마다 근거 한 줄로 허용한다** (#5323, #5317 선행) — 파일 끝. 게이트가 받는 설정에 「기본 설정 + Codex 주·Claude 예비 모델 조각」 한 줄이 더해져 다섯에서 여섯이 되고, 렌더러가 Hermes 고정 판의 정적 목록 밖 id(`claude-sonnet-5-5`)를 근거 한 줄과 함께 받으며, 연결 모드는 팀 Hermes가 아니라 owner 전용 연결 Hermes를 위해 남는다. D6·K4·I3·W·R의 도구 허용 목록과 엄격 모드·볼륨 `.env` 허용 이름은 바뀌지 않는다.
 - 역방향: 2026-10-25 D6(Hermes 도구 잠금)은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 바꾸지 않는다. 팀 박스는 Hermes와 별개의 컴퓨터이고 Hermes 컨테이너(`/opt/data`)에는 셸을 붙이지 않으며 Hermes `terminal` 백엔드를 박스로 향하게 하지 않는다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 A4′(Accepted 2026-10-26)는 [ADR-0184](0184-platform-neutral-agent-driven-selfhost.md) D3의 「정본 키에서만」을 옵트인 경로에 한해 좁힌다. Accepted 전에는 0184 본문을 고치지 않고, Accepted 뒤 구현 이슈가 D3에 한 줄 역참조를 더한다. 10-25 증보(#4336)의 「바뀌지 않는 것」이 적은 A4 불변은 그 증보 시점의 서술이고, A4′가 Accepted되면 A4의 해당 문장은 이 절이 대체한다.
+- 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)는 (1) 이 ADR의 `operator_env` 핀을 도우미가 읽는 새 소비자가 된다(도우미가 팀 Hermes를 도구처럼 부름). D6(도구 잠금)·R(기억·세션 검색 끔)이 그 위임의 전제이고 이 ADR은 둘을 바꾸지 않는다. (2) **증보 K-S2의 「서버는 이 셋(`OORT_COHOSTED_AGENT_*`)을 api 서비스 env에서만 읽는다」와 알려진 한계 (1)의 「워커 env에 같은 attest를 요구하지 않았다」를 뒤집는다** — 워커도 세 변수(`TOOLS_LOCKED`·`CONNECTORS_LOCKED`·`CONNECTOR_APPS`)를 읽고, 템플릿(compose·Railway·`self_host_env.sh`)이 워커에도 같은 값을 두며, 카탈로그 검사기와 env 모드 시험이 api↔워커 일치를 요구한다(위임 문 G4, 증보 v4 P14-S1). K-S2의 배달 판정(`connector_trial_stop`)과 `connector-owner` 라우트는 바뀌지 않는다. 본문 결정은 바꾸지 않았다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -1162,3 +1164,87 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 1. **시험 보호 틈 둘**: 줄 판독기 이름을 마지막 텍스트에만 판정하는 변이와 복사본의 `#` 주석 판정에 공백을 요구하는 변이가 307개 시험을 통과했다. `test_lockgate_env.py`에 앞선 텍스트에만 이름이 보이는 줄 판독기 사례(`LineReaderPort`)와 `LINE_TABLE` 두 행(`#A=1`·`#<TAB>A=1`, 진짜 `_parse_env_text`로 측정해 둘 다 `{}`)을 더했고, 두 변이는 이제 RED다.
 2. **`profiles/.deleted` 표식**: E3에 사실을 적었다(위). 거절을 유지하고 `_profile_problems`의 설명·RELEASING·운영 문서의 「비어 있는 것은 괜찮다」를 「Hermes가 지운 프로필의 표식 `.deleted`도 항목」으로 맞췄다. 시험에 그 표식 사례를 더했다.
 3. **문서 틈**: `lockgate.py` 머리 설명에 둘째 판독기·값의 줄 경계 규칙·`profiles/` 규칙과 「핀을 올릴 때 `agent/secret_scope.py`가 바뀌면 `line_reader_mismatch`가 알려 주고 `line_assignments`·`LINE_TABLE`을 새 측정으로 고친다」를, RELEASING의 핀 올림 절차에 같은 문장을 더했다.
+
+## 증보 2026-11-05 — 팀 공동 Hermes의 기본값은 기본 모드(팀 공용), 정적 목록 밖 모델 id는 판마다 근거 한 줄로 허용한다 (#5323)
+
+- Status: **Accepted** (2026-11-05, 기안 Sonnet 5.5 worker, planner 위임 결재). 독립 보안 검수(등급 2: 잠금 게이트)가 첫 판과 차이에서 모두 PASS(Blocker 0·High 0·Medium 0)였다. 근거: [#5323](https://github.com/yeomyeonggeori/oort/issues/5323)(owner 2026-11-05 「에르메스 기본 모델은 sonnet 5.5로.」, 같은 날 16:01 「그러면 hermes는 GPT고정에 폴백으로 claude」로 방향이 바뀌었다: N1), 선행 운영 작업 [#5317](https://github.com/yeomyeonggeori/oort/issues/5317)이 RELEASING의 Hermes 단계 2(설정 해시 대조)에서 「카탈로그 밖」으로 멈춘 일.
+- 범위: 렌더러·모델 조각·연결 모드 기준 사본의 모델 줄·게이트의 설정 표·Railway 시작 명령의 해시 목록과 게이트 체크섬·카탈로그 검사기·시험·고정 이미지 안 증명. 운영 서비스의 변수·시작 명령·볼륨·로그인은 건드리지 않는다(#5317에서 planner, owner 사전 고지).
+- 바뀌는 기존 결정과 사실: C2의 「받는 설정은 다섯 개」가 **여섯 개**가 된다(`default/codex-oauth.fallback-claude-oauth` 하나가 더해진다). C4의 「기본 설정 + 모델 조각도 받기」(기각)는 이 한 조합에 한해 뒤집는다. 연결 모드 넷의 해시가 바뀌고(기본 설정은 그대로) 게이트의 sha256·`HERMES_LOCKGATE_B64`도 바뀐다. D6·K4·I3·W·R의 도구 허용 목록, 엄격 모드(C3), 볼륨 `.env` 허용 이름(E2)은 바뀌지 않는다.
+
+### N1. owner 결정 (2026-11-05)
+
+- 모델: 「에르메스 기본 모델은 sonnet 5.5로.」(이슈 #5323 본문의 인용)
+- 모드(14:25, planner 전달): 「일단 가의 형태가 생각중인 형태야. 그리고 실제로 켜줘 그러면.」 (가)는 **팀 공용 기본 모드**다: 그림·검색 도구가 있고 메일·드라이브 연결은 없으며 기억·세션 검색은 끈다.
+- 방향(16:01, planner 전달): 「그러면 hermes는 GPT고정에 폴백으로 claude」, 검색은 「나 방향」(= Codex 주 모델: 서버 쪽 검색은 Codex Responses 전송에서만 선다, W1). 앞선 「sonnet 5.5」는 이로써 **예비 모델**의 id가 된다.
+- 이 증보가 적는 결정: **팀 공동 Hermes(서비스 하나, 모든 워크스페이스가 쓴다)의 기본값은 기본 모드 + 주 모델 Codex `gpt-5.6-sol` + 예비 모델 Claude `claude-sonnet-5-5`이다.** 연결 모드(Gmail·캘린더·드라이브 읽기 전용)는 팀 Hermes가 아니라 **owner 전용 연결 Hermes**(K1: 1인 워크스페이스·본인 토큰)가 필요해질 때를 위해 카탈로그에 남기고, 그 Claude 모델도 5.5로 맞춘다.
+- 이 증보의 첫 판(PR #5336의 앞선 커밋들)은 「Claude 주·Codex 예비」 한 줄이었고 위 방향 결정으로 뒤집혔다. 기본 모드 줄은 계속 **하나**이고 앞의 줄은 어느 목록에도 남기지 않았다(N6).
+
+### N2. 문제
+
+1. 운영 공동 Hermes는 10-20부터 손으로 만든 설정(주 모델 provider `anthropic`·id `claude-sonnet-5-5`, 예비 `openai-codex`·`gpt-5.6-sol`)으로 돈다. 새 게이트(C2)는 정해진 해시 목록의 설정만 받고, 렌더러는 Hermes 고정 판의 정적 목록 안의 id만 허용하는데 그 목록의 Claude Sonnet은 `claude-sonnet-5`에서 끝난다. 그래서 운영 설정이 카탈로그의 어느 줄과도 같지 않았고 #5317이 멈췄다.
+2. 기본 설정에는 `model:` 구간이 없다. 모델 구간이 없으면 Hermes는 로그인된 provider의 카탈로그 기본 모델로 돈다(`H/gateway/platforms/api_server.py`의 `_recover_or_record_model`: 모델이 비면 `get_default_model_for_provider`). 팀 공용 기본 모드는 운영이 고른 주 모델을 설정으로 고정할 수 없다.
+
+### N3. 먼저 확인한 잠긴 버전의 능력 [소스 — 고정 이미지 안 파일, 네트워크·로그인 없음]
+
+고정 이미지는 `nousresearch/hermes-agent@sha256:36099926…`(v0.22.2)다. 이 이미지를 `docker run --network none`으로 열어 소스를 읽었고 벤더·모델 호출은 하지 않았다(`H/` = 이미지의 `/opt/hermes/`).
+
+1. **정적 목록은 완전하지 않다.** `H/hermes_cli/models_catalog_static.py:221`의 `anthropic` 목록은 `claude-opus-5-5`·`claude-opus-5`·`claude-sonnet-5`를 갖고 `claude-sonnet-5-5`는 갖지 않는다(40행 OpenRouter 목록에만 `anthropic/claude-sonnet-5.5`가 있다).
+2. **기동 경로가 목록을 보지 않는다.** `H/gateway/run.py:2898`의 `_resolve_gateway_model`은 `model.default`를 그대로 읽는다. `validate_requested_model`의 호출자는 `H/hermes_cli/model_switch.py:1634`(`_validate_switch`, 대화형 모델 전환) 하나뿐이고, API 서버의 요청별 `provider`·`model` 경로(`H/gateway/platforms/api_server.py:318-355`)도 목록 검사 없이 `resolve_runtime_provider`로 간다.
+3. **이름 정규화는 문자열 변환뿐이다.** `H/agent/agent_init.py:474`가 부르는 `normalize_model_for_provider`는 `anthropic`에 대해 `H/hermes_cli/model_normalize.py:35·225-227`(`_DOT_TO_HYPHEN_PROVIDERS`)로 접두를 벗기고 점을 하이픈으로 바꿀 뿐 목록과 견주지 않는다(목록으로 접두를 고치는 길 `_CATALOGUE_PREFIX_REPAIR_PROVIDERS`는 `nvidia` 하나다).
+4. **그대로 API에 보낸다.** `H/agent/anthropic_adapter.py:668·676`의 `build_anthropic_kwargs`가 `normalize_model_name`(접두 `anthropic/`를 벗기고 점을 하이픈으로)의 결과를 `kwargs["model"]`에 넣는다.
+5. **Hermes가 이 id를 직접 안다.** `H/agent/anthropic_adapter.py:106`의 `_BETWEEN_TOOLS_OFF_CLAUDE_SUBSTRINGS = ("claude-sonnet-5-5", "claude-sonnet-5.5")`이고, `_thinking_kwargs`(`:616`)는 사고를 끌 때 이 계열에 `{"thinking": {"type": "between_tools"}}`를 보낸다(Anthropic의 Sonnet 5.5 문서가 정한 형식이다: `disabled`는 400). 최대 출력(128K)과 문맥 길이(1M)는 접두 `claude-sonnet-5`로 풀린다(`:123-143`, `H/agent/model_metadata.py:294`).
+6. **예비 경로도 같다.** 예비로 넘어가는 `H/agent/chat_completion_helpers.py:2055`의 `try_activate_fallback`은 `H/agent/route_binding.py:18-52`의 `bind_route_entry`로 클라이언트를 바꾸고, `model`을 `normalize_model_for_provider`(위 3)로만 고쳐 `agent.model`에 넣는다(`resolve_provider_client`가 돌려주는 기본 모델은 버린다). 후보를 건너뛰는 규칙 `_should_skip_fallback_candidate`(`:1944`)는 이미 못 쓰는 것으로 표시된 후보·자격 거절·풀 소진·방금 실패한 것과 같은 백엔드만 보고 정적 목록을 보지 않는다. 이어지는 요청은 위 4의 `build_anthropic_kwargs`를 지난다. 이 증보에서 `claude-sonnet-5-5`는 예비 모델이라 이 길이 실제로 쓰는 경로다.
+
+결론: provider `anthropic`은 정적 목록 밖 id를 받아 그대로 API에 보낸다(주 모델로도 예비로도). 거르는 곳이 없고 이 id는 Hermes가 직접 다룬다. [V: 소스 읽기. 실제 API 왕복은 확인하지 않았다 — N9]
+
+### N4. 결정 — 목록 밖 id는 이 규칙으로만 렌더러에 더한다
+
+렌더러(`render_model_config.py`)가 받는 id는 지금처럼 **고정 판의 정적 목록에서 고른 부분**이고, 목록 밖 id는 `EXTRA_MODELS`(provider별 표, id마다 근거 한 줄)에 있는 것만 더 받는다. 줄을 더하는 조건은 셋이고 모두 갖춰야 한다.
+
+1. **경로 확인(판마다 다시).** 고정 이미지 소스에서 그 provider의 요청 경로가 목록 밖 id를 거르지 않고 그대로 API에 보낸다는 것을 읽는다(N3 모양: 파일·줄). 이미지 digest가 바뀌면 줄마다 다시 읽는다.
+2. **벤더 확인.** 벤더 공식 모델 문서가 그 id를 그 철자로 싣는다(줄에 문서 주소를 적는다).
+3. **운영 사실.** 그 id로 실제 돈 기록이 있으면 적고, 없으면 줄에 `runtime-unverified`라고 쓴다.
+
+덧붙이는 규칙: 항목은 `(provider, id)` 쌍이라 다른 provider에는 통하지 않는다. 정적 목록에 이미 있는 id는 넣지 않는다(시험이 잰다). 새 Hermes 판의 정적 목록이 id를 갖게 되면 항목을 지우고, 경로가 id를 거르게 바뀌었으면 항목과 그 id를 쓰는 설정을 지운다. 이 표는 렌더러가 **만들 수 있는** id의 범위일 뿐이고 게이트가 받는 설정의 범위가 아니다: 게이트는 해시 목록의 설정만 받고, id가 설정에 쓰이려면 N6처럼 카탈로그에 줄이 따로 올라와야 한다. 표를 넓히는 변경은 한 PR에서 렌더러·조각·카탈로그 해시·게이트 표·시작 명령 체크섬·이 표를 함께 바꾼다(`check_railway_catalog.py`와 시험이 어긋나면 RED이고, 코드의 표와 아래 N5의 표가 같은 `(provider, id)` 집합이고 행이 코드 줄의 벤더 문서 주소를 적는지도 같은 검사기가 잰다).
+
+### N5. 이번 표 (판마다 한 줄)
+
+| Hermes 판 | provider | id | 근거 한 줄 |
+|---|---|---|---|
+| v0.22.2 (`sha256:36099926…`) | `anthropic` | `claude-sonnet-5-5` | 경로는 N3-2~4(`run.py:2898`·`model_normalize.py:225`·`anthropic_adapter.py:676`)이고 Hermes가 id를 직접 다룬다(`anthropic_adapter.py:106`). 벤더는 Anthropic 모델 개요(https://platform.claude.com/docs/en/about-claude/models/overview)가 Claude Sonnet 5.5의 API id를 `claude-sonnet-5-5`(별칭 하나뿐, 날짜 고정 id 없음, 문맥 1M·출력 128K)로 싣는다. 이 칸은 네트워크를 쓰지 않아 `claude-api` 스킬이 가진 2026-10-06 캐시본으로 확인했다. 운영은 팀 Hermes가 2026-10-20부터 이 id로 돈다(`LOCKGATE ok`, planner 실측 11-05). |
+
+### N6. 설정 목록 — 기본 설정 + 모델 조각 하나
+
+받는 설정은 **여섯 개**다.
+
+| 이름 | 내용 |
+|---|---|
+| `default` | 기본 설정 그대로(모델 구간 없음, 변함 없음) |
+| `default/codex-oauth.fallback-claude-oauth` | 기본 설정 바이트 뒤에 모델 조각을 붙인 것: 주 `openai-codex`·`gpt-5.6-sol`, 예비 `anthropic`·`claude-sonnet-5-5` (**팀 공용 기본값**) |
+| `connector/<조각>` 넷 | 연결 모드 설정. Claude가 들어간 곳은 모두 `claude-sonnet-5-5`, Codex 모델은 그대로 |
+
+- **새 줄은 기본 설정과 모델 구간만 다르다.** `render`가 기본 설정 바이트 **뒤에** `model:`·`fallback_model:`만 붙인다(시험이 앞부분 일치, 새 최상위 키가 그 둘뿐임, deny-list 24개·`mcp_servers` 없음을 잰다). 도구 허용 목록(`todo_list`·`web_search`·`image_generate`)·`platform_toolsets`·`web`·`image_gen`·`plugins`·`memory` 스위치·`approvals`는 `default`와 같은 바이트이고, 게이트가 보는 선택 도구도 같다(고정 이미지 안 증명이 진짜 게이트로 잰다).
+- **한 줄만 더한다.** 받는 설정이 늘 때마다 게이트가 받는 바이트가 늘고 지금 필요한 조합은 하나다. 다른 조합(예: 앞선 Claude 주·Codex 예비)이 기본 모드에서 필요하면 `DEFAULT_MODEL_CONFIGS`에 한 줄을 더하고 같은 PR에서 해시 세 곳(게이트 표·시작 명령·카탈로그)을 바꾸며, 조합마다 이유를 이 ADR 증보에 적는다. 시험은 다른 조합이 목록에 없음을 잰다.
+- **낡은 `claude-sonnet-5` 설정은 받지 않는다.** 표에는 5.5 해시만 있고 옛 해시를 곁에 두지 않는다. `claude-sonnet-5`는 정적 목록의 이름이라 렌더러는 `--model claude-sonnet-5`로 여전히 만들 수 있지만 그 바이트는 어느 목록에도 없어 게이트와 시작 명령이 거절한다(시험·고정 이미지 안 증명). 앞서 이 증보의 첫 판이 받던 Claude 주·Codex 예비 줄도 같은 이유로 남기지 않는다(카탈로그·게이트 표·시작 명령 어디에도 없고, 그 바이트는 시험과 고정 이미지 안 증명이 거절을 잰다). 이행 구간은 두지 않는다 — 되돌리기 재료는 RELEASING 1단계의 저장본이다.
+- 연결 모드 기준 사본 `google-connectors.config.yaml`의 `fallback_model` 줄도 5.5로 맞췄다(렌더러가 그 구간을 통째로 바꾸므로 카탈로그 해시는 변하지 않는다).
+
+### N7. 연결 모드에서 팀 기본 모드로 갈 때 달라지는 것
+
+- **게이트.** `mcp_servers`가 비어 있으면 `connector_problems`는 아무것도 보지 않는다. 서비스에 남은 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은 게이트가 읽지 않는 변수이므로 지운다(쓰지 않는 비밀을 서비스에 두지 않는다).
+- **서버 선언.** 연결이 없는 Hermes에 연결 선언을 두는 것은 거짓 선언이다. api의 `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED`·`OORT_COHOSTED_AGENT_CONNECTOR_APPS`는 지우고 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 둔다. 서버는 「시험 에이전트」(`connector_owner_human_id` 표시 + `operator_env` 핀)에 한해 매 배달마다 세 선언을 다시 재므로(`momo-agent`의 `connector_trial_stop`), 지우면 그 에이전트의 배달이 `connector_trial_attest`로 멈추고 owner에게 안내가 나간다. 표시 없는 에이전트는 영향이 없다. 시험 에이전트를 어떻게 할지(핀 해제·보관)는 이 증보 밖이고 데이터 변경이라 owner가 정한다.
+- **주 모델 전환.** 운영의 현재 설정은 Claude 주·Codex 예비다. 이 증보의 기본값은 그 반대라 전환은 모델 줄 하나가 아니라 대화의 주 공급자를 바꾸는 일이다: Codex 로그인(`openai-codex`)이 먼저 있어야 하고, Claude 로그인(`anthropic`)은 예비를 위해 계속 필요하다. Codex 로그인이 없으면 주 모델 호출이 실패해 Hermes가 예비(Claude)로 넘어가고, 그 대화에는 아래 그림·검색 도구가 없다(가용성이 Codex 로그인이다).
+- **그림.** `image_generate`는 `image_gen.provider: openai-codex`이고 provider의 가용성은 Codex 로그인 유무다(`H/plugins/image_gen/openai-codex/__init__.py:244`). 주 모델이 Codex이므로 같은 로그인이 대화와 그림 모두의 전제다. 로그인이 없으면 도구가 모델에 보이지 않는다.
+- **검색.** `web_search`는 `web.search_backend: openai-native`이고 가용성은 Codex 로그인 유무다(`H/plugins/web/openai_native/provider.py:35·71`, 도구의 `check_fn` `H/tools/web_tools.py:479`). 서버 쪽 검색으로 바뀌는 것은 Codex Responses 전송뿐이다(W1-2·3). 그래서 **주 모델(Codex) 턴에서 검색이 된다**(owner 「나 방향」). 예비 Claude가 답하는 턴(Codex 호출이 실패했을 때)에서는 도구가 모델에 보여도 호출이 「client-side로 못 돌린다」는 오류(`_UNSUPPORTED_MSG`)로 끝난다 — 조용히 다른 검색으로 가지 않는다(`keyless_fallback: false`). [소스 읽기, 실행 미확인]
+
+### N8. 되돌리기
+
+- **서비스.** RELEASING의 Hermes 단계 1의 저장본으로 변수(`HERMES_CONFIG_B64`·`HERMES_LOCKGATE_B64`)와 시작 명령을 **한 번에** 되돌려 다시 배포한다(옛 게이트가 옛 설정을 받는다). 새 게이트는 옛 설정을, 옛 게이트는 새 설정을 받지 않으므로 하나만 되돌리면 서비스가 멈춘다.
+- **저장소.** 이 변경의 커밋을 되돌린다. 옛 설정 목록(이전 해시)은 이 변경 바로 전 `track/engine`(`dd5edb2db`)의 `ACCEPTED_CONFIG_SHA256`이다: `git show dd5edb2db:infra/hermes/lockgate.py | sed -n '/^ACCEPTED_CONFIG_SHA256/,/^}/p'`. 해시를 이 문서에 옮겨 적지 않는다(이름 곁의 긴 해시는 비밀 검사가 키로 읽는다).
+- **모델만 내리기(5.5 → 5)는 설정 한 줄이 아니다.** 렌더러 기본·조각·게이트 표·시작 명령이 한 벌로 바뀌어야 한다. 벤더가 `claude-sonnet-5-5`를 거두어 API가 거절하면 N4의 규칙대로 N5의 줄과 그 id를 쓰는 설정을 지운다.
+
+### N9. 남는 위험과 검증 경계
+
+- **소스가 보장하지 않는 것.** N3은 고정 이미지의 소스 읽기이고, `claude-sonnet-5-5`를 벤더가 지금 받아들이는지는 소스가 아니라 N5의 벤더 문서와 운영 사실(10-20부터)이 근거다. 이 칸은 네트워크·로그인을 쓰지 않았으므로 **실제 API 왕복은 `runtime-unverified`**다.
+- **받는 설정이 하나 늘었다.** 새 줄은 기본 설정과 모델 구간 말고 같은 바이트이고 도구 판정이 같지만, 게이트가 받는 바이트는 늘었다. 늘어난 폭은 한 줄(Codex 주·Claude 예비)이다.
+- **검색은 Codex 턴에서만 된다**(N7). 주 모델이 Codex라 평소에는 되고, 예비 Claude가 답하는 턴에서만 안 된다. Codex 로그인이 없으면 그림·검색 도구가 모두 빠진다(N7 주 모델 전환).
+- **시험.** 오프라인: `test_render_model_config.py`(표의 모양·목록·낡은 id 거절), `test_lockgate_image_guard.py`의 `AcceptedConfigs`(진짜 `gate()`가 여섯을 이름으로 받고 낡은 id를 거절), `check_railway_catalog.py`(코드의 `EXTRA_MODELS`와 이 문서 N5 표의 대조 — 고정 이미지 안 시험이 `infra/hermes`만 마운트해 단위 시험은 `docs/`를 읽지 못해 검사기에 둔다 — 와 변이 증명 `hermes-config-hash-pre55`·`hermes-config-hash-old-team-default` 추가). 고정 이미지 안(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`가 여섯 설정을 진짜 게이트에 넣고, 시작 명령 시나리오 `railway-start-default-model`(새 설정이 exec 직전까지 감)·`railway-start-stale-model`(낡은 id가 게이트 전에 멈춘다, rc 78)·`railway-start-previous-team-default`(앞선 Claude 주 줄도 같은 방식으로 멈춘다)가 새로 있다. 사보타주 표는 PR 본문이 정본이다.

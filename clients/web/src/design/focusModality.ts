@@ -21,6 +21,15 @@ export const FOCUS_MODALITY_ATTRIBUTE = "data-focus-modality";
 
 export type FocusModality = "keyboard" | "pointer";
 
+/**
+ * 지금 입력 방식이 **포인터**인가를 묻는 셀렉터(`root.matches(...)`, #5328). `:focus-visible` 만으로는 마우스 흐름과 키보드 흐름이 갈리지
+ * 않는 곳이 있다: Radix 메뉴는 트리거의 `pointerdown` 에서 기본 동작을 막아 초점이 body 에 있는 채로 열리고, 그 뒤 스크립트가 옮기는 초점
+ * (내용·항목·닫을 때 ⋮)은 마우스 흐름에서도 두 엔진 모두 `:focus-visible` 이다(Chromium 실측). 그래서 키보드 초점인지는 이 스탬프를 함께 본다:
+ * 포인터 누름이 스탬프를 `pointer` 로 되돌리고, 캐럿을 옮기는 키만 `keyboard` 로 올린다. 스탬프를 찍지 않는 환경(시험)은 이 셀렉터에 맞지 않아
+ * 판정이 `:focus-visible` 로만 남는다.
+ */
+export const POINTER_MODALITY_SELECTOR = `:root[${FOCUS_MODALITY_ATTRIBUTE}="pointer"]`;
+
 interface ModalityRoot {
   setAttribute(name: string, value: string): void;
   getAttribute(name: string): string | null;

@@ -13,7 +13,7 @@ import {
 import React from 'react';
 import {Linking} from 'react-native';
 
-import {TOUCH_TARGET} from '../src/design/tokens';
+import {line, TOUCH_TARGET} from '../src/design/tokens';
 import {
   MessageBody,
   bodyAffordances,
@@ -330,14 +330,17 @@ describe('M-1 — 마크다운도 텍스트를 꺼낼 수 있다', () => {
 });
 
 describe('M-8·M-9 — 엄지에게 44pt', () => {
-  it('인용 블록이 44pt 를 지난다', () => {
+  it('인용 머리가 44pt 를 지난다 (#5381 — 머리는 두 줄이라 따로 슬롭이 필요 없다)', () => {
     render(
       <QuoteBlock block={readyBlock()} directory={DIRECTORY} onJump={() => {}} />,
     );
     const block = screen.getByTestId('quote-block');
+    const style = flatten(block.props.style);
     const slop = block.props.hitSlop ?? {};
-    // 바닥(32) + 위아래 여유. 한 줄짜리 인용에서도 이 합이 44 를 넘는다.
-    expect(32 + (slop.top ?? 0) + (slop.bottom ?? 0)).toBeGreaterThanOrEqual(
+    // 머리는 이름 줄(16) + 원문 줄(18) + 위아래 안쪽 여백(8·8)이다. 레이아웃이 없는 시험 렌더에서는 그 산수를 토큰으로 읽는다.
+    const height =
+      Number(style.paddingVertical ?? 0) * 2 + line.meta + line.label;
+    expect(height + (slop.top ?? 0) + (slop.bottom ?? 0)).toBeGreaterThanOrEqual(
       TOUCH_TARGET,
     );
   });

@@ -10,6 +10,9 @@ import {
   workHostName,
 } from "@momo/core/features/work/workSessionModel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
 import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
@@ -353,10 +356,11 @@ export function TerminalDock({
             <Skeleton ready={false} rows={4} className="p-4" />
           </div>
         ) : failed ? (
-          <InlineBanner
-            message="작업 세션을 불러오지 못했습니다."
-            actionLabel="다시 시도"
-            onAction={() => void sessionsQuery.refetch()}
+          // 낮고 넓은 도크라 상자(세 줄 쌓기)가 아니라 한 줄이다. 원인(오프라인 / 서버에 닿지 못함 / 그 밖)을 뒤에 붙인다(#5279 B).
+          <LoadFailureNote
+            titleKey={CONNECTION_KEYS.loadWorkSessionsTitle}
+            cause={loadCauseOf(sessionsQuery.error)}
+            onRetry={() => void sessionsQuery.refetch()}
             testId="terminal-dock-error"
           />
         ) : sessions.length === 0 ? (

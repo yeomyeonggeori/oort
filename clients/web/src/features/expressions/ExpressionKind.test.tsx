@@ -107,21 +107,21 @@ describe("the draft card chooses the kind at registration", () => {
   });
 });
 
-// 종류 이름·설명의 낱말은 ADR-0218 증보 4 §10 이 정한 것이다(planner 결정, #5112 2단계): `emoji` = 팀 이모지(작은 것), `sticker` = 이모티콘(큰 것).
-// 폰 시트의 탭 이름(이모티콘 · 이모지 · 팀 이모지 · GIF)과 같은 말이다. 기대값은 사전에서 읽지 않고 **글자로 못 박는다**: 사전에서 읽으면 사전이
-// 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다. 같은 키를 폰 초안 단계가 쓰므로 폰 시험(`expressionKind.test.tsx`)이 같은 글자를 못 박는다.
+// 종류 이름·설명의 낱말은 owner 2026-11-05(#5330)가 정했다: 화면의 이름은 「이모티콘」 하나이고 종류는 그 크기로 가른다 — `emoji` = 작은 이모티콘,
+// `sticker` = 큰 이모티콘(앞 판은 「팀 이모지」·「이모티콘」이라 한 화면에 이름이 둘이었다). 기대값은 사전에서 읽지 않고 **글자로 못 박는다**: 사전에서
+// 읽으면 사전이 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다. 같은 키를 폰 초안 단계가 쓰므로 폰 시험(`expressionKind.test.tsx`)이 같은 글자를 못 박는다.
 const KIND_WORDS = {
   "ko-KR": {
-    labels: ["팀 이모지", "이모티콘"],
-    hintEmoji: "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요.",
+    labels: ["작은 이모티콘", "큰 이모티콘"],
+    hintEmoji: "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 작은 이모티콘이에요.",
     hintSticker: "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요.",
-    retired: /스티커|팀 GIF/,
+    retired: /스티커|팀 GIF|이모지/,
   },
   "en-US": {
-    labels: ["Team emoji", "Emoticon"],
-    hintEmoji: "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves.",
+    labels: ["Small emoticon", "Large emoticon"],
+    hintEmoji: "A small picture. Use it between words and in reactions. It stays a small emoticon even when it moves.",
     hintSticker: "A large picture. It is sent big, and a moving one shows under GIF.",
-    retired: /Sticker|Team GIF/,
+    retired: /Sticker|Team GIF|Team emoji/,
   },
 } as const;
 async function appLocale(language: keyof typeof KIND_WORDS): Promise<AppLocale> {
@@ -148,7 +148,7 @@ describe("the kind picker speaks the ADR-0218 §10 words", () => {
   });
 });
 
-describe("the team panel's three views do not overlap", () => {
+describe("the team panel's two views do not overlap", () => {
   let serial = 40;
   const still = (name: string, kind: ExpressionKind | undefined): Expression => {
     const made = { ...FIXTURE_EXPRESSIONS[1], id: `00000000-0000-4000-8000-${String(serial++).padStart(12, "0")}`, name, displayName: name, tags: [], kind, media: STILL_MEDIA } as Expression;
@@ -165,36 +165,44 @@ describe("the team panel's three views do not overlap", () => {
   }
   const names = (view: ReturnType<typeof render>) => Array.from(view.container.querySelectorAll("ul[aria-label='팀 표현 목록'] li button[aria-label$='메시지에 넣기']")).map((button) => (button.getAttribute("aria-label") ?? "").replace(" 메시지에 넣기", ""));
 
-  it("puts every registration in exactly one view: emoji by kind, sticker split by motion, an older one as a sticker", async () => {
+  it("puts every registration in exactly one view: the small emoji and the still stickers share the emoticon view, the moving stickers are the GIF view, an older one is a sticker", async () => {
     const store = storeOf(CATALOGUE); await store.refresh();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
     const seen: Record<string, string[]> = {};
-    seen.emoji = names(view).sort();
-    // The view names are the dictionary's (English in this fixture locale): Team emoji · Emoticon · GIF.
-    fireEvent.click(view.getByLabelText("Emoticon")); seen.sticker = names(view).sort();
+    // The view names are the dictionary's (English in this fixture locale): Emoticon · GIF. The panel opens on the first filled view: the emoticon view.
+    seen.emoticon = names(view).sort();
     fireEvent.click(view.getByLabelText("GIF")); seen.gif = names(view).sort();
     expect(seen).toEqual({
-      emoji: ["emoji_moving", "emoji_still"],
-      sticker: ["older_still", "sticker_still"],
+      emoticon: ["emoji_moving", "emoji_still", "older_still", "sticker_still"],
       gif: ["older_moving", "sticker_moving"],
     });
-    const all = [...seen.emoji, ...seen.sticker, ...seen.gif];
+    const all = [...seen.emoticon, ...seen.gif];
     expect(all.sort()).toEqual(CATALOGUE.map((item) => item.name).sort());
     expect(new Set(all).size).toBe(CATALOGUE.length);
   });
-  it("opens on the first filled view, so a team whose pictures all pre-date the kind sees them at once; a pick is kept", async () => {
-    const store = storeOf([still("older_still", undefined), moving("older_moving", undefined)]); await store.refresh();
+  it("lets the host name the view: no view picker and no 「우리 팀」 heading of its own, and the view is the one asked for", async () => {
+    const store = storeOf(CATALOGUE); await store.refresh();
+    const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" view="gif" onPick={() => {}} />));
+    await act(async () => {});
+    expect(names(view).sort()).toEqual(["older_moving", "sticker_moving"]);
+    expect(view.queryAllByRole("radio")).toHaveLength(0);
+    expect(view.container.textContent).not.toContain("우리 팀");
+    view.rerender(wrapper(store, <TeamExpressionsPanel purpose="insert" view="emoticon" onPick={() => {}} />));
+    expect(names(view).sort()).toEqual(["emoji_moving", "emoji_still", "older_still", "sticker_still"]);
+  });
+  it("opens on the first filled view, so a team whose pictures are all moving stickers sees them at once; a pick is kept", async () => {
+    const store = storeOf([moving("sticker_moving", "sticker")]); await store.refresh();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
-    // Every earlier registration is a sticker, so the team-emoji view is empty and the sticker view is the first with pictures.
-    expect(names(view)).toEqual(["older_still"]);
-    expect((view.getByLabelText("Emoticon") as HTMLInputElement).checked).toBe(true);
+    // The emoticon view is empty and the GIF view is the first with pictures.
+    expect(names(view)).toEqual(["sticker_moving"]);
+    expect((view.getByLabelText("GIF") as HTMLInputElement).checked).toBe(true);
     expect(view.container.textContent).not.toContain("Nothing in this view yet");
     // Once the person picks a view, that view stays, even an empty one.
-    fireEvent.click(view.getByLabelText("Team emoji"));
+    fireEvent.click(view.getByLabelText("Emoticon"));
     expect(names(view)).toEqual([]);
-    expect((view.getByLabelText("Team emoji") as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText("Emoticon") as HTMLInputElement).checked).toBe(true);
     expect(view.container.textContent).toContain("Nothing in this view yet");
   });
   it("says a view is empty, not that the team has no pictures, when only another view has some", async () => {
@@ -202,7 +210,7 @@ describe("the team panel's three views do not overlap", () => {
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
     expect(names(view)).toEqual(["only_emoji"]);
-    fireEvent.click(view.getByLabelText("Emoticon"));
+    fireEvent.click(view.getByLabelText("GIF"));
     expect(names(view)).toEqual([]);
     expect(view.container.textContent).toContain("Nothing in this view yet");
     expect(view.container.textContent).not.toContain("아직 팀 그림이 없어요");
@@ -213,13 +221,13 @@ describe("the team panel's three views do not overlap", () => {
     expect(bare.container.textContent).toContain("아직 팀 그림이 없어요");
   });
 
-  // 패널의 세 보기 이름은 폰 시트의 탭 이름(owner 10-31, #4942)과 같은 체계이고, 카드의 두 종류 이름과 같은 말이다(planner 결정, #5112 3단계).
-  // 보기의 값이 곧 코어의 칸 이름(`team`·`emoticon`·`gif`)이라 값마다 이름 하나다. 기대값은 사전에서 읽지 않고 글자로 못 박는다.
+  // 패널의 두 보기 이름은 폰 시트의 탭 이름(owner 10-31, #4942 → 11-05 #5330)과 같은 체계이고, 카드의 두 종류 이름은 그 이름 앞에 「작은/큰」을 붙인 말이다.
+  // 보기의 값이 곧 코어의 보기 이름(`emoticon`·`gif`)이라 값마다 이름 하나다. 기대값은 사전에서 읽지 않고 글자로 못 박는다.
   const VIEW_WORDS = {
-    "ko-KR": { names: ["팀 이모지", "이모티콘", "GIF"], legend: "팀 표현 보기", retired: /스티커|팀 GIF/, oldName: "이모지" },
-    "en-US": { names: ["Team emoji", "Emoticon", "GIF"], legend: "Team expression views", retired: /Sticker|Team GIF/, oldName: "Emoji" },
+    "ko-KR": { names: ["이모티콘", "GIF"], legend: "팀 표현 보기", retired: /스티커|팀 GIF|이모지/, oldName: "팀 이모지", kinds: ["작은 이모티콘", "큰 이모티콘"] },
+    "en-US": { names: ["Emoticon", "GIF"], legend: "Team expression views", retired: /Sticker|Team GIF|Team emoji/, oldName: "Team emoji", kinds: ["Small emoticon", "Large emoticon"] },
   } as const;
-  it.each([["ko-KR"], ["en-US"]] as const)("%s: the three views are named like the card's two kinds and the phone's tabs, and the group is named in the same language", async (language) => {
+  it.each([["ko-KR"], ["en-US"]] as const)("%s: the two views are named like the phone's tabs and the card's kinds, and the group is named in the same language", async (language) => {
     const words = VIEW_WORDS[language];
     const locale = await appLocale(language);
     const store = storeOf(CATALOGUE); await store.refresh();
@@ -227,23 +235,25 @@ describe("the team panel's three views do not overlap", () => {
     await act(async () => {});
     const inPanel = within(panel.container);
     const radios = inPanel.getAllByRole("radio") as HTMLInputElement[];
-    // One name per core shelf, in the panel's order, and each name labels exactly that view's input.
-    expect(radios.map((radio) => radio.value)).toEqual(["team", "emoticon", "gif"]);
+    // One name per view, in the panel's order, and each name labels exactly that view's input.
+    expect(radios.map((radio) => radio.value)).toEqual(["emoticon", "gif"]);
     words.names.forEach((name, index) => expect(inPanel.getByLabelText(name), name).toBe(radios[index]));
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([...words.names]);
     // The group has a name in the same language (it was a Korean literal in every language before).
     expect(inPanel.getByRole("group", { name: words.legend })).toBe(radios[0].closest("fieldset"));
-    // The names the planner retired are gone: neither as a label nor anywhere in the markup.
+    // The names the owner retired are gone: neither as a label nor anywhere in the markup.
     expect(inPanel.queryByLabelText(words.oldName)).toBeNull();
     expect(panel.container.innerHTML).not.toMatch(words.retired);
-    // The same words as the card's two kinds: team emoji = emoji, emoticon = sticker (the card is mounted in the same language).
+    // The card's two kinds are that name with a size in front (the card is mounted in the same language).
     const card = render(<LocaleContext.Provider value={locale}>{wrapper(fixtureStore(), <ExpressionDraftCard draft={movingDraft()} onReplace={() => {}} onApprove={vi.fn()} />)}</LocaleContext.Provider>);
     const kindNames = within(card.container).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent);
-    expect(kindNames).toEqual(words.names.slice(0, 2));
-    // And the same system as the phone sheet's tabs: Korean is identical; English tabs are the plural list names (Emoticons), the views the singular.
+    expect(kindNames).toEqual([...words.kinds]);
+    // The sheet's tabs are a different word from the views (owner 11-06, #5427): the first tab says where the pictures come from (Team), the view that lists them says what they are (Emoticon). The GIF view is still the GIF tab.
     const t = locale.service.formatMessage;
-    expect(words.names[0]).toBe(t("expressions.sheet.tabTeam"));
-    expect(words.names[1]).toBe(t("expressions.sheet.tabEmoticon").replace(/s$/, ""));
-    expect(words.names[2]).toBe(t("expressions.sheet.tabGif"));
+    expect(t("expressions.sheet.tabEmoticon")).toBe(language === "ko-KR" ? "우리 팀" : "Team");
+    expect(words.names[0]).not.toBe(t("expressions.sheet.tabEmoticon"));
+    expect(words.names[1]).toBe(t("expressions.sheet.tabGif"));
+    expect(words.kinds[0].endsWith(words.names[0].toLowerCase())).toBe(true);
+    expect(words.kinds[1].endsWith(words.names[0].toLowerCase())).toBe(true);
   });
 });

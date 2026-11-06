@@ -175,6 +175,15 @@ SCAN_SCOPE = [
         "why": "push.rs:139 judge_targets / :212 unread_badge",
     },
     {
+        # ADR-0206 D4 (#4497): the judgment's Rust tail reads the member's desktop-activity stamp
+        # (member_activity), their phone delay (notification_rule), the read cursor (read_state) and
+        # the message's seq (message) to hold or cancel a phone push. Reads only; every read names
+        # workspace_id. It is called from the push drain, which is already a scanned path.
+        "path": "server-rust/crates/momo-push/src/refine.rs",
+        "mode": "all",
+        "why": "push.rs apply_phone_delay -> refine_targets (D16 step 6)",
+    },
+    {
         # ADR-0204 D7 (#3928): judge_targets narrows an approval's audience to the
         # people the decision route would let through, by calling the same reads the
         # route calls. approvers.rs holds no SQL of its own; the three scopes below

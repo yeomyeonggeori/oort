@@ -56,6 +56,7 @@ import {isOnlineFromNetInfo} from '../../query/queryClient';
 import {onAppBackground} from '../connection/appBackground';
 import {deviceOnlineNow} from '../connection/deviceOnline';
 import {forgetFailedSend, readFailedSends, rememberFailedSend} from './failedSends';
+import {SEEK_MAX_PAGES, seekPageLimit, SeekOutcome} from './jumpSeek';
 import {
   addPending,
   applyEditedMessage,
@@ -147,8 +148,8 @@ import {hapticScope} from '../../lib/haptics';
 // settle rule and the reaction map — three things that must not be able to
 // disagree with what the channel is showing one screen away.
 //
-// Echoes carry their root (`PendingMessage.rootId`) and 「대화에도 보내기」 choice with them, so one settle effect still
-// covers both surfaces and the channel list can draw a reply's echo with its 「↳ ○○님 스레드에 답글」 line (#4888).
+// Echoes carry their root (`PendingMessage.rootId`) with them, so one settle effect still covers both surfaces and the
+// channel list can draw a FAILED reply's echo with its 「↳ ○○님 스레드에 답글」 line (#4888, #5324).
 // =============================================================================
 
 const HEAD_LIMIT = 50;
@@ -174,8 +175,6 @@ export interface ThreadRepliesLoad {
 export interface TimelineSendFlags {
   /** 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01). */
   suppressUnfurl?: boolean;
-  /** 스레드 답글을 「대화에도 보내기」로 보낸다(ADR-0148 증보 2026-10-31, #4888). 답글(`sendReply`)에서만 뜻이 있다. */
-  alsoInChannel?: boolean;
 }
 
 export interface UseTimelineResult {
@@ -285,6 +284,17 @@ export interface UseTimelineResult {
   /** The echoes belonging to one thread (never shown in the channel list). */
   repliesPending: (rootId: string) => PendingMessage[];
   loadOlder: () => Promise<void>;
+  /**
+   * 점프의 목적지(`untilSeq`)가 불러온 범위 위에 있을 때, 그 seq 에 닿을 때까지 `before` 쪽 넘김을 **이어서** 읽는다 (#5383).
+   *
+   * `loadOlder` 와 다른 점 셋. ① 실패를 말한다(`loadOlder` 는 조용히 삼킨다 - 손으로 다시 올리면 되기 때문이다). ② 쪽을 읽는 동안
+   * 목록에 합치지 않고 모았다가 **닿았을 때 한 번에** 합친다 - 사람은 바닥에 서 있고, 위에 쪽이 하나씩 붙을 때마다 목록이 흔들릴
+   * 이유가 없다. 닿지 못한 끝(상한·실패·접음)은 아무것도 합치지 않아 화면이 읽기 전 그대로다. ③ 사람이 접을 수 있다
+   * (`isCancelled` 가 참이 되면 다음 쪽을 읽지 않고, 늦게 온 답은 버린다).
+   *
+   * 수치(쪽 크기·쪽 상한·맥락 줄)와 그 이유는 `jumpSeek.ts` 머리말이다. 읽는 동안 `loadingOlder` 가 서서 손으로 올리는 읽기와 겹치지 않는다.
+   */
+  seekOlder: (untilSeq: number, isCancelled: () => boolean) => Promise<SeekOutcome>;
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
@@ -461,9 +471,9 @@ export function useTimeline(
     remove: removeUnfurls,
   } = useMessageUnfurls(workspaceId, currentChannel);
 
-  // Which echoes are thread replies: the echo carries its own `rootId` (and `alsoInChannel`), the way `replyToId`
-  // rides the row — the channel list needs both to draw a failed or also-sent reply with its 「↳ ○○님 스레드에 답글」
-  // line (#4888), and both surfaces still share one array and one settle effect.
+  // Which echoes are thread replies: the echo carries its own `rootId`, the way `replyToId` rides the row — the channel
+  // list needs it to draw a failed reply with its 「↳ ○○님 스레드에 답글」 line (#4888), and both surfaces still share
+  // one array and one settle effect.
 
   // 보내지 못한 글의 장부(#5222). 코어 `PendingMessage` 는 웹과 나눠 쓰므로 건드리지 않고 행 곁에 clientMsgId 로 둔다(`replyToId` 같은 칸과 달리
   // 행에 싣지 않는다). 자동 재전송의 판정(어떤 실패를 몇 번 얼마 동안)은 코어 `pickAutoResends` 하나다 - 웹 `useTimeline` 과 같은 길이다.
@@ -504,9 +514,7 @@ export function useTimeline(
         const suppress = row.suppressUnfurl === true ? {suppressUnfurl: true as const} : {};
         const attached =
           attachmentIds === undefined || attachmentIds.length === 0 ? {} : {attachmentIds};
-        // 「대화에도 보내기」도 행을 타고 다닌다: 첫 요청이 서버에 닿지 못했다면 재시도가 같은 멱등키로 **같은 요청**이어야 한다.
-        const also = row.alsoInChannel === true ? {alsoInChannel: true as const} : {};
-        const replyOptions = {...attached, ...suppress, ...also};
+        const replyOptions = {...attached, ...suppress};
         const confirmed = await (rootId === undefined
           ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
               ...(row.replyToId === undefined
@@ -551,7 +559,7 @@ export function useTimeline(
           failuresRef.current.set(row.clientMsgId, record);
           syncFailureKinds();
           if (listed) updatePending(list => failPending(list, row.clientMsgId));
-          // 스레드 답글(`rootId` 가 있는 행)도 대화의 글과 똑같이 남긴다(#5262): 행이 뿌리(`rootId`)와 「대화에도 보내기」를 싣고 다녀서
+          // 스레드 답글(`rootId` 가 있는 행)도 대화의 글과 똑같이 남긴다(#5262): 행이 뿌리(`rootId`)를 싣고 다녀서
           // 되살린 행이 스스로 어느 스레드의 답글인지 안다. 돌아온 행은 스레드 화면(`repliesPending`)과 대화 목록(실패한 답글은 목록에도
           // 선다, `isChannelListEcho`) 어느 쪽에서나 기존 실패 행 그대로 그려지고, 다시 보내기는 `post` 가 뿌리로 답글 길을 탄다.
           rememberFailedSend(workspaceId, row, record.kind);
@@ -911,7 +919,6 @@ export function useTimeline(
           ? {}
           : {attachments}),
         ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
-        ...(flags?.alsoInChannel === true ? {alsoInChannel: true} : {}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
@@ -1285,6 +1292,61 @@ export function useTimeline(
     hydrateUnfurls,
   ]);
 
+  const seekOlder = useCallback(
+    async (untilSeq: number, isCancelled: () => boolean): Promise<SeekOutcome> => {
+      const startedIn = channelId;
+      const from = state.oldestSeq;
+      if (!startedIn || from === null) return SeekOutcome.Failed;
+      if (reachedStart) return SeekOutcome.Start;
+      // 읽는 동안 손으로 올리는 읽기(`loadOlder`)가 같은 쪽을 또 읽지 않게 한다.
+      setLoadingOlder(true);
+      try {
+        const pages: Message[] = [];
+        let cursor = from;
+        let outcome: SeekOutcome = SeekOutcome.Capped;
+        let atStart = false;
+        for (let turn = 0; turn < SEEK_MAX_PAGES; turn += 1) {
+          if (isCancelled() || channelRef.current !== startedIn) return SeekOutcome.Cancelled;
+          const page = await fetchMessages(workspaceId, startedIn, {
+            before: cursor,
+            limit: seekPageLimit(cursor, untilSeq),
+          });
+          // 늦게 온 답은 버린다: 접었거나 방을 옮겼다.
+          if (isCancelled() || channelRef.current !== startedIn) return SeekOutcome.Cancelled;
+          pages.push(...page.messages);
+          const lowest = page.messages.reduce<number | null>(
+            (min, message) => (min === null || message.seq < min ? message.seq : min),
+            null,
+          );
+          // 서버는 비어 있지 않은 쪽에는 언제나 `nextBefore`(그 쪽의 가장 작은 seq)를 싣는다. 없으면 더 오래된 줄이 없다(`loadOlder` 와 같은 판정).
+          atStart = page.nextBefore === undefined;
+          if (lowest !== null && lowest <= untilSeq) {
+            outcome = SeekOutcome.Arrived;
+            break;
+          }
+          if (atStart) {
+            outcome = SeekOutcome.Start;
+            break;
+          }
+          cursor = page.nextBefore ?? cursor;
+        }
+        if (outcome === SeekOutcome.Arrived || outcome === SeekOutcome.Start) {
+          // 닿은 끝만 합친다. 위로 읽은 쪽은 `applyBatch` 를 지나지 않는다 - `loadOlder` 와 같은 이유다.
+          for (const message of pages) knownIdsRef.current.add(messageIdKey(message.id));
+          setState(s => reconcileMessages(s, pages));
+          hydrateUnfurls(pages, startedIn);
+          if (atStart) setReachedStart(true);
+        }
+        return outcome;
+      } catch {
+        return SeekOutcome.Failed;
+      } finally {
+        setLoadingOlder(false);
+      }
+    },
+    [workspaceId, channelId, state.oldestSeq, reachedStart, hydrateUnfurls],
+  );
+
   const reload = useCallback(() => setReloadNonce(n => n + 1), []);
 
   const applyThreadRead = useCallback((rootId: string, read: ThreadReadState) => {
@@ -1313,6 +1375,7 @@ export function useTimeline(
     sendReply,
     repliesPending,
     loadOlder,
+    seekOlder,
     reload,
     loadingOlder,
     reachedStart,
