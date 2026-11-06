@@ -189,10 +189,10 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
       <Input ref={searchRef} type="search" aria-label={formatMessage(view === "gif" ? "expressions.sheet.searchGif" : "expressions.sheet.searchEmoticon")} placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={enterGrid} />
       {/* 다시 읽기가 실패해도 이미 받아 둔 목록은 지우지 않는다(#5279 C, #5242 규칙): 한 줄이 위에서 원인과 함께 말하고 목록은 그대로 서 있다. 받아 둔 것이 없을 때만 한 줄뿐이다. */}
       {status === "error" && <LoadFailureNote titleKey={CONNECTION_KEYS.loadTeamExpressionsTitle} cause={loadCauseOf(failure)} onRetry={() => void store.refresh()} separator={false} testId="team-expressions-error" />}
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" && cache.items.length === 0 ? null :
-        <ExpressionGrid
+      {/* 격자는 어느 상태에서도 서고(띠의 ＋가 늘 닿는다 - 예전 머리 줄의 「추가하기」처럼), 격자 자리는 상태가 정한다: 불러오는 중 = 스켈레톤, 받아 둔 것 없이 실패 = 위 한 줄뿐, 비어 있음 = 안내. */}
+      <ExpressionGrid
           sections={sections}
-          empty={<EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} />}
+          empty={status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" && cache.items.length === 0 ? null : <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} />}
           containerRef={listRef}
           disabled={offline}
           cellLabel={(item) => `${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`}
@@ -200,7 +200,7 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
           menu={cellMenu}
           onMenuCloseAutoFocus={keepConfirmFocus}
           trailing={addMenu}
-        />}
+        />
     </>}
   </div>;
 }

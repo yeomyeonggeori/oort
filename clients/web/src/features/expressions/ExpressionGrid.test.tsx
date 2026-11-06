@@ -130,6 +130,36 @@ describe("그림 격자: 구역과 칸", () => {
   });
 });
 
+describe("네 상태에서도 ＋는 닿는다(예전 머리 줄의 「추가하기」처럼)", () => {
+  const failing = (store: ExpressionStore) => { store.transport.json = vi.fn().mockRejectedValue(new Error("down")); return store; };
+  it("불러오는 중: 스켈레톤이 서고 ＋도 서 있다", async () => {
+    const store = storeOf(ITEMS); // refresh 전 = loading
+    const view = render(<ExpressionsContext.Provider value={store}><TeamExpressionsPanel purpose="insert" view="emoticon" onPick={() => {}} /></ExpressionsContext.Provider>);
+    await act(async () => {});
+    expect(store.getSnapshot().status).toBe("loading");
+    expect(view.queryByTestId("expression-grid")).toBeNull();
+    expect((view.getByTestId("expression-add-menu") as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("받아 둔 것 없이 실패: 위 한 줄과 ＋만 서고 「아직 팀 그림이 없어요」는 말하지 않는다", async () => {
+    const store = failing(storeOf(ITEMS));
+    const { view } = await mount(store);
+    expect(store.getSnapshot().status).toBe("error");
+    expect(view.getByTestId("team-expressions-error")).toBeTruthy();
+    expect(view.queryByTestId("expression-grid")).toBeNull();
+    expect(view.container.textContent).not.toContain("아직 팀 그림이 없어요");
+    expect((view.getByTestId("expression-add-menu") as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("받아 둔 목록이 있으면 읽기가 실패해도 격자는 그대로 서고 띠도 그대로다", async () => {
+    const store = storeOf(ITEMS);
+    const { view } = await mount(store);
+    store.transport.json = vi.fn().mockRejectedValue(new Error("down"));
+    await act(() => store.refresh());
+    expect(view.getByTestId("team-expressions-error")).toBeTruthy();
+    expect(sectionsOf(view).length).toBeGreaterThan(0);
+    expect(view.getByTestId("expression-set-strip")).toBeTruthy();
+  });
+});
+
 describe("세트 띠", () => {
   // jsdom 에는 레이아웃이 없어서 구역의 윗머리를 데이터 열쇠로 정해 둔다(실제 스크롤 위치는 캡처로 잰다).
   const TOPS: Record<string, number> = { recent: 0, favorites: 120, "set:chi": 240, "set:dam": 360, other: 480 };
