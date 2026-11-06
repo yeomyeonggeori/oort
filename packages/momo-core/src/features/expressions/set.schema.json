@@ -37,6 +37,171 @@
         }
       }
     },
+    "SetMotion": {
+      "enum": [
+        "bounce",
+        "wobble",
+        "pulse",
+        "sparkle"
+      ]
+    },
+    "SetPlanState": {
+      "enum": [
+        "planned",
+        "confirmed",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "SetPlanSlotView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "name",
+        "displayName",
+        "scene",
+        "baseIndex",
+        "motion"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 39
+        },
+        "kind": {
+          "$ref": "#/$defs/SetKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "scene": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseIndex": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 39
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "motion": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SetMotion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SetPlanCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "workspaceId",
+        "setId",
+        "title",
+        "prefix",
+        "prompt",
+        "references",
+        "noticeDue",
+        "state",
+        "expiresAtMs",
+        "slots"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "setId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "prefix": {
+          "$ref": "#/$defs/SetPrefix"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "references": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SetReference"
+          }
+        },
+        "noticeDue": {
+          "enum": [
+            true,
+            false
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SetPlanState"
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/SetPlanSlotView"
+          }
+        }
+      }
+    },
     "SetPrefix": {
       "type": "string",
       "minLength": 2,

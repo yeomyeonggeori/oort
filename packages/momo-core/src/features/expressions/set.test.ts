@@ -10,6 +10,8 @@ import {
   expressionSetMayTryNext, expressionSetSlotDraft, expressionSetStoredBytes, expressionSetWithinBudget, parseExpressionSetResult, readySlots, settleExpressionSetGifs, settleExpressionSetStills,
   type ExpressionSetApproval, type ExpressionSetAttempt, type ExpressionSetDecisionReceipt, type ExpressionSetReadySlot, type ExpressionSetReferenceProbe,
   type ExpressionSetSlot, type ExpressionSetStillOutcome,
+  expressionSetPlanIssues, expressionSetPlanMayStart, expressionSetPlanStateAt, expressionSetPlanView, expressionSetReferenceNoticeDue, expressionSetReferenceNoticeSeen,
+  narrowExpressionSetReferences, type ExpressionSetPlanCard, type ExpressionSetPlanState,
 } from "./set";
 import { expressionSetGrayLine, expressionSetSkipLine } from "./setCopy";
 import {
@@ -18,6 +20,7 @@ import {
   FIXTURE_SET_REFUSED, FIXTURE_SET_REFUSED_APPROVAL_ID, FIXTURE_SET_REFUSED_ATTEMPTS, FIXTURE_SET_REFUSED_GIF_BASES, FIXTURE_SET_SAME_NAME,
   FIXTURE_SET_SAME_NAME_APPROVAL_ID, FIXTURE_SET_STREAK_ATTEMPTS, FIXTURE_SET_STREAK_CLOSED, FIXTURE_SET_STREAK_GIF_BASES, fixtureSetBytesHeavy,
   fixtureSetDraftId, fixtureSetGraySlot, fixtureSetOverLimit, fixtureSetReadySlot, fixtureSetReferenceProbesOverBytes, fixtureSetReferenceProbesTooMany,
+  FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD_SEEN, FIXTURE_SET_PLAN_CARD_WORDS, fixtureSetPlanCard,
 } from "./setFixtures";
 import type { ExpressionChoice, ExpressionMutation } from "./types";
 import vectorFile from "./set.vectors.json";
@@ -223,6 +226,9 @@ const vectors = vectorFile as unknown as {
   quota: number; cases: Vector[]; referenceLimits: Record<string, unknown>; referenceCases: ReferenceVector[];
   streak: number; mayTryCases: Array<{ name: string; attempts: ExpressionSetAttempt[]; expect: boolean }>; streakCases: Array<{ name: string; stills: number; attempts: ExpressionSetAttempt[]; expect: ExpressionSetStillOutcome[] }>;
   gifCases: Array<{ name: string; stills: ExpressionSetStillOutcome[]; bases: number[]; expect: string[] }>;
+  planGateCases: Array<{ name: string; state: ExpressionSetPlanState; expiresAtMs: number; nowMs: number; expect: boolean }>;
+  noticeCases: Array<{ name: string; seenAtMs: number | null; references: number; expect: boolean }>;
+  narrowCases: Array<{ name: string; current: string[]; remove: string[]; expect: { ok: true; references: string[] } | { ok: false; unknown: string[] } }>;
 };
 
 function approvalOf(slots: VectorSlot[], expired: boolean): ExpressionSetApproval {
@@ -439,8 +445,8 @@ describe("ADR-0218 §12 L18 reference bundle: who picks, how many, how big", () 
     expect(new Set(lines).size).toBe(lines.length);
     expect(expressionSetReferenceLine("too_many")).toBe("그림은 4장까지 보낼 수 있어요");
     expect(expressionSetReferenceLine("input_bytes")).toBe("그림 한 장은 5MB까지 보낼 수 있어요");
-    expect(expressionSetReferenceNotice(2)).toBe("첨부한 그림 2장이 Hermes의 그림 모델로 전송돼요");
-    for (const line of [...lines, expressionSetReferenceNotice(4)]) expect(line).not.toMatch(/OpenAI|Gemini|GPT|Codex|Anthropic|Claude|gpt-image/i);
+    expect(expressionSetReferenceNotice()).toBe("첨부한 그림이 Hermes의 그림 모델로 전송돼요");
+    for (const line of [...lines, expressionSetReferenceNotice()]) expect(line).not.toMatch(/OpenAI|Gemini|GPT|Codex|Anthropic|Claude|gpt-image/i);
     for (const line of lines) expect(line).not.toMatch(/\{|\}/);
   });
 });
@@ -504,4 +510,109 @@ describe("ADR-0218 §12 L7.7 three refusals in a row close the rest (shared vect
     assertExpressionContract("SetApproval", FIXTURE_SET_STREAK_CLOSED);
     expect(expressionSetIssues(FIXTURE_SET_STREAK_CLOSED)).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// ADR-0218 §12 L2.5 and L19 (owner 2026-11-06, O5): the plan card, the one-time notice, and "before the button nothing leaves".
+// ---------------------------------------------------------------------------------------------------------------
+describe("ADR-0218 §12 L2.5 the plan card: the person's one look before anything leaves", () => {
+  it("is closed on the wire: the pictures it would send are pointers, at most four, no repeats, and the plan has no id the person could aim", () => {
+    for (const card of [FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD_SEEN, FIXTURE_SET_PLAN_CARD_WORDS]) assertExpressionContract("SetPlanCard", card);
+    expect(FIXTURE_SET_PLAN_CARD.references).toHaveLength(2);
+    const five = [0, 1, 2, 3, 4].map((i) => ({ attachmentId: attachmentIdAt(i) }));
+    expect(matchesExpressionContract("SetPlanCard", fixtureSetPlanCard({ references: five.slice(0, 4) }))).toBe(true);
+    expect(matchesExpressionContract("SetPlanCard", fixtureSetPlanCard({ references: five }))).toBe(false);
+    expect(matchesExpressionContract("SetPlanCard", fixtureSetPlanCard({ references: [five[0], five[0]] }))).toBe(false);
+    for (const bad of [{ state: "done" }, { noticeDue: "yes" }, { prompt: "가".repeat(801) }, { prefix: "Cat" }]) {
+      expect(matchesExpressionContract("SetPlanCard", { ...FIXTURE_SET_PLAN_CARD, ...bad }), JSON.stringify(bad)).toBe(false);
+    }
+    const slot = FIXTURE_SET_PLAN_CARD.slots[0];
+    expect(matchesExpressionContract("SetPlanCard", { ...FIXTURE_SET_PLAN_CARD, slots: [{ ...slot, scene: "가".repeat(301) }] })).toBe(false);
+    expect(matchesExpressionContract("SetPlanCard", { ...FIXTURE_SET_PLAN_CARD, slots: [{ ...slot, attachmentId: attachmentIdAt(0) }] })).toBe(false);
+    expect(matchesExpressionContract("SetPlanCard", { ...FIXTURE_SET_PLAN_CARD, slots: [{ ...slot, motion: "spin" }] })).toBe(false);
+    const without: Record<string, unknown> = { ...FIXTURE_SET_PLAN_CARD };
+    delete without.noticeDue;
+    expect(matchesExpressionContract("SetPlanCard", without)).toBe(false);
+  });
+
+  it("finds nothing wrong with the real plan and names each way a plan can break the rules the schema cannot say", () => {
+    expect(expressionSetPlanIssues(FIXTURE_SET_PLAN_CARD)).toEqual([]);
+    const tamper = (change: (card: ExpressionSetPlanCard) => void) => { const card = copy(FIXTURE_SET_PLAN_CARD); change(card); return expressionSetPlanIssues(card).map((entry) => entry.issue); };
+    expect(tamper((card) => { card.slots[0].scene = null; })).toContain("still_without_scene");
+    expect(tamper((card) => { card.slots[8].scene = "움직이는 장면"; })).toContain("gif_with_scene");
+    expect(tamper((card) => { card.slots[8].baseIndex = 9; })).toContain("gif_base_missing");
+    expect(tamper((card) => { card.slots[8].baseIndex = null; })).toContain("gif_base_missing");
+    expect(tamper((card) => { card.slots[8].motion = null; })).toContain("gif_without_motion");
+    expect(tamper((card) => { card.slots[1].index = 0; })).toContain("duplicate_index");
+    expect(tamper((card) => { card.slots[1].name = "dog_thanks"; })).toContain("prefix_mismatch");
+    expect(tamper((card) => { card.slots[1].name = card.slots[0].name; })).toContain("duplicate_name");
+    // The longest legal prompt and the longest legal scene still fit one request (800 + 1 + 300 <= 1,200): the check never fires on a schema-legal plan.
+    expect(tamper((card) => { card.prompt = "가".repeat(800); card.slots[0].scene = "나".repeat(300); })).not.toContain("request_too_long");
+  });
+
+  it("shows what is made, how many pictures would be sent, the declaration every time, and the notice only the first time", () => {
+    const first = expressionSetPlanView(FIXTURE_SET_PLAN_CARD, FIXTURE_NOW_MS);
+    expect(first).toMatchObject({ state: "planned", canConfirm: true, canRevise: true, canCancel: true, stills: 8, gifs: 2, picturesLine: "만들 그림 10장", referencesLine: "보낼 참조 그림 2장" });
+    expect(first.declareLine).toBe("사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.");
+    expect(first.noticeLines).toEqual(["첨부한 그림이 Hermes의 그림 모델로 전송돼요", "Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요"]);
+    const next = expressionSetPlanView(FIXTURE_SET_PLAN_CARD_SEEN, FIXTURE_NOW_MS);
+    expect(next.noticeLines).toEqual([]);
+    expect(next.referencesLine).toBe("보낼 참조 그림 2장");
+    expect(next.declareLine).not.toBeNull();
+    const words = expressionSetPlanView(FIXTURE_SET_PLAN_CARD_WORDS, FIXTURE_NOW_MS);
+    expect(words).toMatchObject({ referencesLine: null, declareLine: null, noticeLines: [] });
+    // A card that says the notice is due but sends nothing shows no notice: there is nothing to be told about.
+    expect(expressionSetPlanView(fixtureSetPlanCard({ references: [], noticeDue: true }), FIXTURE_NOW_MS).noticeLines).toEqual([]);
+    for (const line of [first.picturesLine, first.referencesLine!, first.declareLine!, ...first.noticeLines]) expect(line).not.toMatch(/OpenAI|Gemini|GPT|Codex|Anthropic|Claude|gpt-image/i);
+  });
+
+  it("closes the buttons once the card is answered or its window is over", () => {
+    for (const state of ["confirmed", "cancelled", "expired"] as const) {
+      expect(expressionSetPlanView(fixtureSetPlanCard({ state }), FIXTURE_NOW_MS)).toMatchObject({ state, canConfirm: false, canRevise: false, canCancel: false });
+    }
+    const late = expressionSetPlanView(FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD.expiresAtMs);
+    expect(late).toMatchObject({ state: "expired", canConfirm: false });
+    expect(expressionSetPlanStateAt(FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD.expiresAtMs - 1)).toBe("planned");
+  });
+});
+
+describe("ADR-0218 §12 L19: before the button, nothing leaves (shared vectors)", () => {
+  for (const vector of vectors.planGateCases) {
+    it(`may start: ${vector.name}`, () => {
+      expect(expressionSetPlanMayStart({ state: vector.state, expiresAtMs: vector.expiresAtMs }, vector.nowMs)).toBe(vector.expect);
+    });
+  }
+  it("only a confirmed card lets a set start, from the fixtures", () => {
+    expect(expressionSetPlanMayStart(FIXTURE_SET_PLAN_CARD, FIXTURE_NOW_MS)).toBe(false);
+    expect(expressionSetPlanMayStart(fixtureSetPlanCard({ state: "confirmed" }), FIXTURE_NOW_MS)).toBe(true);
+    expect(expressionSetPlanMayStart(fixtureSetPlanCard({ state: "cancelled" }), FIXTURE_NOW_MS)).toBe(false);
+  });
+});
+
+describe("ADR-0218 §12 L19: the reference notice is shown once per member (shared vectors)", () => {
+  for (const vector of vectors.noticeCases) {
+    it(`notice: ${vector.name}`, () => {
+      expect(expressionSetReferenceNoticeDue({ seenAtMs: vector.seenAtMs }, vector.references)).toBe(vector.expect);
+    });
+  }
+  it("keeps the first time a member saw it, never moves it, and keeps one member's record apart from another's", () => {
+    const first = expressionSetReferenceNoticeSeen({ seenAtMs: null }, 1000);
+    expect(first).toEqual({ seenAtMs: 1000 });
+    expect(expressionSetReferenceNoticeSeen(first, 9999)).toEqual({ seenAtMs: 1000 });
+    const other = { seenAtMs: null };
+    expect(expressionSetReferenceNoticeDue(first, 2)).toBe(false);
+    expect(expressionSetReferenceNoticeDue(other, 2)).toBe(true);
+    expect(expressionSetReferenceNoticeSeen(other, 5)).toEqual({ seenAtMs: 5 });
+    expect(other).toEqual({ seenAtMs: null });
+  });
+});
+
+describe("ADR-0218 §12 L2.5 「장면 고치기」 takes pictures out of the bundle and never puts one in (shared vectors)", () => {
+  for (const vector of vectors.narrowCases) {
+    it(`narrow: ${vector.name}`, () => {
+      const current = vector.current.map((attachmentId) => ({ attachmentId }));
+      const verdict = narrowExpressionSetReferences(current, vector.remove);
+      expect(verdict.ok ? { ok: true, references: verdict.references.map((reference) => reference.attachmentId) } : verdict).toEqual(vector.expect);
+    });
+  }
 });

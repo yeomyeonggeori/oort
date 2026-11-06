@@ -247,5 +247,28 @@
     { "name": "a refused, a failed and a never-made base", "stills": ["refused", "failed", "not_made"], "bases": [0, 1, 2], "expect": ["base_missing", "base_missing", "base_missing"] },
     { "name": "the streak closed the rest, but the first still exists", "stills": ["made", "refused", "refused", "refused", "not_made", "not_made"], "bases": [0, 5], "expect": ["made", "base_missing"] },
     { "name": "a base outside the stills is missing", "stills": ["made"], "bases": [1, 40], "expect": ["base_missing", "base_missing"] }
+  ],
+  "planRule": "ADR-0218 section 12 L2.5 and L19 (owner 2026-11-06, O5). The plan card is the person's one look before anything leaves. THE invariant: nothing is read or sent for a set unless its plan card was confirmed. An unanswered card past its window is expired. A confirmed set keeps making after the window (the window is for the answer). The notice is shown once per member: due only while pictures would be sent AND the member has no record. 'Take out only': an edit may remove pictures of the server's bundle and never add one; one id the bundle does not hold refuses the whole edit.",
+  "planGateCases": [
+    { "name": "waiting for the button: nothing leaves", "state": "planned", "expiresAtMs": 1000, "nowMs": 500, "expect": false },
+    { "name": "waiting, window over: expired, nothing leaves", "state": "planned", "expiresAtMs": 1000, "nowMs": 1000, "expect": false },
+    { "name": "confirmed: it may start", "state": "confirmed", "expiresAtMs": 1000, "nowMs": 500, "expect": true },
+    { "name": "confirmed, and the answer window has passed since: it keeps making", "state": "confirmed", "expiresAtMs": 1000, "nowMs": 999999, "expect": true },
+    { "name": "cancelled: nothing leaves", "state": "cancelled", "expiresAtMs": 1000, "nowMs": 500, "expect": false },
+    { "name": "expired: nothing leaves", "state": "expired", "expiresAtMs": 1000, "nowMs": 500, "expect": false }
+  ],
+  "noticeCases": [
+    { "name": "first time with pictures: told", "seenAtMs": null, "references": 2, "expect": true },
+    { "name": "seen before: not told again", "seenAtMs": 1793314800000, "references": 2, "expect": false },
+    { "name": "words alone: nothing is sent, nothing to tell", "seenAtMs": null, "references": 0, "expect": false },
+    { "name": "a record at time zero is still a record", "seenAtMs": 0, "references": 1, "expect": false }
+  ],
+  "narrowCases": [
+    { "name": "taking nothing out keeps the bundle", "current": ["a", "b"], "remove": [], "expect": { "ok": true, "references": ["a", "b"] } },
+    { "name": "taking one out", "current": ["a", "b"], "remove": ["a"], "expect": { "ok": true, "references": ["b"] } },
+    { "name": "taking all out leaves words alone", "current": ["a", "b"], "remove": ["a", "b"], "expect": { "ok": true, "references": [] } },
+    { "name": "an id the bundle does not hold refuses the edit: no adding", "current": ["a", "b"], "remove": ["c"], "expect": { "ok": false, "unknown": ["c"] } },
+    { "name": "one known and one unknown refuses the whole edit", "current": ["a", "b"], "remove": ["a", "c"], "expect": { "ok": false, "unknown": ["c"] } },
+    { "name": "the same id twice is one removal", "current": ["a", "b"], "remove": ["a", "a"], "expect": { "ok": true, "references": ["b"] } }
   ]
 }

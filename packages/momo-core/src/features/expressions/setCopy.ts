@@ -40,12 +40,24 @@ export const EXPRESSION_SET_COPY = {
   /**
    * Reference pictures (ADR-0218 §12 L18-L19). The notice names no company and no model version (F10: nobody can
    * pick or know which model draws) and is shown before any byte of a picture leaves the server. The second line is
-   * what the person declares by continuing: a set drawn from references carries no human face (v1).
+   * what the person declares by pressing the plan card's button: a set drawn from references carries no human face (v1).
    */
   "expressions.set.reference.notice": {
-    ko: "첨부한 그림 {count, number}장이 Hermes의 그림 모델로 전송돼요",
-    en: "{count, plural, one {# attached picture is} other {# attached pictures are}} sent to Hermes's picture model",
+    ko: "첨부한 그림이 Hermes의 그림 모델로 전송돼요",
+    en: "Attached pictures are sent to Hermes's picture model.",
   },
+  /** The plan card (ADR-0218 §12 L2.5): what the person looks at before the one button that lets anything leave. */
+  "expressions.set.plan.references": {
+    ko: "보낼 참조 그림 {count, number}장",
+    en: "{count, plural, one {# reference picture to send} other {# reference pictures to send}}",
+  },
+  "expressions.set.plan.pictures": {
+    ko: "만들 그림 {count, number}장",
+    en: "{count, plural, one {# picture to make} other {# pictures to make}}",
+  },
+  "expressions.set.plan.confirm": { ko: "이대로 만들기", en: "Make it" },
+  "expressions.set.plan.revise": { ko: "장면 고치기", en: "Edit scenes" },
+  "expressions.set.plan.cancel": { ko: "취소", en: "Cancel" },
   "expressions.set.reference.declare": {
     ko: "사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.",
     en: "Do not send pictures that show a person's face. These pictures show none.",

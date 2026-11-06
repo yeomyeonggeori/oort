@@ -470,9 +470,9 @@ export type ExpressionSetReferenceVerdict =
   | { ok: true; count: number; bundleBytes: number }
   | { ok: false; refused: ExpressionSetReferenceIssueKind[] };
 
-/** 「첨부한 그림 N장이 Hermes의 그림 모델로 전송돼요」: shown before any byte leaves, once per request, naming no company (F10). */
-export function expressionSetReferenceNotice(count: number): string {
-  return expressionSetCopy("expressions.set.reference.notice", { count });
+/** 「첨부한 그림이 Hermes의 그림 모델로 전송돼요」: shown once per member, the first time they send reference pictures; names no company (F10). */
+export function expressionSetReferenceNotice(): string {
+  return expressionSetCopy("expressions.set.reference.notice");
 }
 
 /** What the requester is told when the bundle was not sent: one line per thing to fix, never a retry hint about moderation. */
@@ -536,4 +536,141 @@ export function settleExpressionSetGifs(stills: readonly ExpressionSetStillOutco
 /** The grey code a still that did not become a picture shows. */
 export function expressionSetGrayCodeOf(outcome: Exclude<ExpressionSetStillOutcome, "made">): ExpressionSetGrayCode {
   return outcome;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// ADR-0218 §12 L19 (owner 2026-11-06, O5): the reference notice is shown ONCE per member, the first time they send reference
+// pictures, and the per-request look is the plan card (L2.5). There is no consent card.
+// ---------------------------------------------------------------------------------------------------------------
+/** The per-member record (one per workspace and member): when they saw the notice, or null. Kept by the server, read back in settings. */
+export interface ExpressionSetReferenceNoticeState {
+  seenAtMs: number | null;
+}
+/** Does this member still have to be told? Only when pictures would be sent at all, and only until the first time they saw it. */
+export function expressionSetReferenceNoticeDue(state: ExpressionSetReferenceNoticeState, referenceCount: number): boolean {
+  return referenceCount > 0 && state.seenAtMs === null;
+}
+/** The record after the button of a card that SHOWED the notice was pressed. The first time stays: a later press never moves it. */
+export function expressionSetReferenceNoticeSeen(state: ExpressionSetReferenceNoticeState, nowMs: number): ExpressionSetReferenceNoticeState {
+  return state.seenAtMs === null ? { seenAtMs: nowMs } : state;
+}
+
+export type ExpressionSetPlanState = "planned" | "confirmed" | "cancelled" | "expired";
+export type ExpressionSetMotion = "bounce" | "wobble" | "pulse" | "sparkle";
+/** One slot of the plan as the person reads it. A still has a scene and nothing else; a GIF names the still it moves and how. */
+export interface ExpressionSetPlanSlotView {
+  index: number;
+  kind: ExpressionSetKind;
+  name: string;
+  displayName: string;
+  scene: string | null;
+  baseIndex: number | null;
+  motion: ExpressionSetMotion | null;
+}
+/**
+ * The 「세트 계획」 card (L2.5): the plan the helper wrote BEFORE it read anything, raised by the server, with the reference pictures
+ * it would send. It is the person's one look before anything leaves: a picture goes to Hermes only after 「이대로 만들기」.
+ * `references` is the server's own bundle (L18); the person can only take pictures out of it (`narrowExpressionSetReferences`).
+ */
+export interface ExpressionSetPlanCard {
+  v: 1;
+  workspaceId: string;
+  setId: string;
+  title: string;
+  prefix: string;
+  prompt: string;
+  references: ExpressionSetReference[];
+  /** Server-computed from the member's notice record: true = this card also shows the one-time notice. */
+  noticeDue: boolean;
+  state: ExpressionSetPlanState;
+  expiresAtMs: number;
+  slots: ExpressionSetPlanSlotView[];
+}
+
+/** An unanswered card past its window is `expired`; every other state is what it says. */
+export function expressionSetPlanStateAt(card: Pick<ExpressionSetPlanCard, "state" | "expiresAtMs">, nowMs: number): ExpressionSetPlanState {
+  return card.state === "planned" && nowMs >= card.expiresAtMs ? "expired" : card.state;
+}
+
+/**
+ * THE invariant (owner 2026-11-06): before the button, nothing goes to Hermes. The server reads no reference byte, mints no address
+ * and makes no call for a set unless its plan card was confirmed. Every step that would touch a picture asks this first.
+ */
+export function expressionSetPlanMayStart(card: Pick<ExpressionSetPlanCard, "state" | "expiresAtMs">, nowMs: number): boolean {
+  return expressionSetPlanStateAt(card, nowMs) === "confirmed";
+}
+
+/** 「장면 고치기」 may only TAKE pictures out of the server's bundle, never add one; an id the bundle does not hold refuses the edit. */
+export function narrowExpressionSetReferences(
+  current: readonly ExpressionSetReference[],
+  remove: readonly string[],
+): { ok: true; references: ExpressionSetReference[] } | { ok: false; unknown: string[] } {
+  const held = new Set(current.map((reference) => reference.attachmentId));
+  const unknown = [...new Set(remove.filter((id) => !held.has(id)))];
+  if (unknown.length > 0) return { ok: false, unknown };
+  const gone = new Set(remove);
+  return { ok: true, references: current.filter((reference) => !gone.has(reference.attachmentId)) };
+}
+
+export type ExpressionSetPlanIssueKind =
+  | "duplicate_index" | "name_invalid" | "prefix_mismatch" | "duplicate_name" | "still_without_scene" | "gif_with_scene" | "gif_base_missing" | "gif_without_motion" | "over_slots" | "request_too_long";
+/** The rules JSON Schema cannot say about a plan (L2.4-2, L10 slot table): what the server checks before it stores the plan. */
+export function expressionSetPlanIssues(card: ExpressionSetPlanCard): Array<{ index: number | null; issue: ExpressionSetPlanIssueKind }> {
+  const issues: Array<{ index: number | null; issue: ExpressionSetPlanIssueKind }> = [];
+  const stills = new Set(card.slots.filter((slot) => slot.kind === "still").map((slot) => slot.index));
+  const indexes = new Set<number>();
+  const names = new Set<string>();
+  for (const slot of card.slots) {
+    if (indexes.has(slot.index)) issues.push({ index: slot.index, issue: "duplicate_index" });
+    indexes.add(slot.index);
+    if (!NAME.test(slot.name)) issues.push({ index: slot.index, issue: "name_invalid" });
+    else if (!slot.name.startsWith(`${card.prefix}_`) || slot.name.length <= card.prefix.length + 1) issues.push({ index: slot.index, issue: "prefix_mismatch" });
+    if (names.has(slot.name)) issues.push({ index: slot.index, issue: "duplicate_name" });
+    names.add(slot.name);
+    if (slot.kind === "still") {
+      if (slot.scene === null) issues.push({ index: slot.index, issue: "still_without_scene" });
+      else if (Array.from(card.prompt).length + 1 + Array.from(slot.scene).length > EXPRESSION_SET_LIMITS.requestChars) issues.push({ index: slot.index, issue: "request_too_long" });
+    } else {
+      if (slot.scene !== null) issues.push({ index: slot.index, issue: "gif_with_scene" });
+      if (slot.baseIndex === null || !stills.has(slot.baseIndex)) issues.push({ index: slot.index, issue: "gif_base_missing" });
+      if (slot.motion === null) issues.push({ index: slot.index, issue: "gif_without_motion" });
+    }
+  }
+  if (card.slots.length > EXPRESSION_SET_LIMITS.slots) issues.push({ index: null, issue: "over_slots" });
+  return issues;
+}
+
+export interface ExpressionSetPlanView {
+  state: ExpressionSetPlanState;
+  /** The three buttons, open only while the card waits for an answer. */
+  canConfirm: boolean;
+  canRevise: boolean;
+  canCancel: boolean;
+  stills: number;
+  gifs: number;
+  /** 「만들 그림 N장」: counts only (ADR-0218 G5). */
+  picturesLine: string;
+  /** 「보낼 참조 그림 N장」, or null when nothing would be sent. */
+  referencesLine: string | null;
+  /** Every time pictures would be sent: the declaration the button stands for (no human face). */
+  declareLine: string | null;
+  /** Only on the member's first time: the one-time notice. Empty after. */
+  noticeLines: string[];
+}
+
+/** What the plan card shows. `nowMs` closes it when its window has passed. */
+export function expressionSetPlanView(card: ExpressionSetPlanCard, nowMs: number): ExpressionSetPlanView {
+  const state = expressionSetPlanStateAt(card, nowMs);
+  const open = state === "planned";
+  const references = card.references.length;
+  return {
+    state, canConfirm: open, canRevise: open, canCancel: open,
+    stills: card.slots.filter((slot) => slot.kind === "still").length, gifs: card.slots.filter((slot) => slot.kind === "gif").length,
+    picturesLine: expressionSetCopy("expressions.set.plan.pictures", { count: card.slots.length }),
+    referencesLine: references > 0 ? expressionSetCopy("expressions.set.plan.references", { count: references }) : null,
+    declareLine: references > 0 ? expressionSetCopy("expressions.set.reference.declare") : null,
+    noticeLines: card.noticeDue && references > 0
+      ? [expressionSetCopy("expressions.set.reference.notice"), expressionSetCopy("expressions.set.reference.kept")]
+      : [],
+  };
 }

@@ -2,7 +2,7 @@ import { FIXTURE_MEDIA } from "./fixtureMedia";
 import { FIXTURE_NOW_MS, FIXTURE_WORKSPACE_ID } from "./fixtures";
 import type {
   ExpressionSetAction, ExpressionSetApproval, ExpressionSetCard, ExpressionSetGrayCode, ExpressionSetGraySlot, ExpressionSetKind,
-  ExpressionSetReadySlot, ExpressionSetReference, ExpressionSetReferenceProbe, ExpressionSetSlot,
+  ExpressionSetPlanCard, ExpressionSetPlanSlotView, ExpressionSetReadySlot, ExpressionSetReference, ExpressionSetReferenceProbe, ExpressionSetSlot,
 } from "./set";
 import type { ExpressionMedia } from "./types";
 
@@ -176,3 +176,35 @@ export const FIXTURE_SET_ACTION: ExpressionSetAction = {
 };
 /** The same plan naming the team's own image key: valid on the wire, **off** in the server (ADR-0218 §12 L20). */
 export const FIXTURE_SET_ACTION_RESERVED_BACKEND: ExpressionSetAction = { ...FIXTURE_SET_ACTION, args: { ...FIXTURE_SET_ACTION.args, backend: "team_image_model" } };
+
+// ---------------------------------------------------------------------------------------------------------------
+// The 「세트 계획」 card (ADR-0218 §12 L2.5): the plan as the person reads it before anything leaves.
+// ---------------------------------------------------------------------------------------------------------------
+const PLAN_SCENES = [
+  "손을 흔들며 활짝 웃는 고양이, 굵은 글씨 '안녕'", "두 손을 모으고 고개를 숙이는 고양이, 굵은 글씨 '고마워'",
+  "귀를 내리고 미안한 얼굴의 고양이, 굵은 글씨 '미안해'", "엄지를 들어 올린 고양이, 굵은 글씨 '좋아요'",
+  "시계를 가리키며 어깨를 으쓱하는 고양이, 굵은 글씨 '나중에'", "작은 서류를 높이 든 고양이, 굵은 글씨 '다 했어요'",
+  "눈을 반짝이며 기뻐하는 얼굴, 글자 없음", "꾸벅꾸벅 졸고 있는 얼굴, 글자 없음",
+];
+/** The two GIFs move still 0 (bounce) and still 5 (wobble): the same bases the refusal fixtures use. */
+const PLAN_GIFS: Array<[number, "bounce" | "wobble"]> = [[0, "bounce"], [5, "wobble"]];
+
+export function fixtureSetPlanSlots(): ExpressionSetPlanSlotView[] {
+  return PLAN.map(([kind, name, displayName], index) => {
+    const gif = kind === "gif" ? PLAN_GIFS[index - 8] : null;
+    return { index, kind, name, displayName, scene: kind === "still" ? PLAN_SCENES[index] : null, baseIndex: gif ? gif[0] : null, motion: gif ? gif[1] : null };
+  });
+}
+
+export function fixtureSetPlanCard(over: Partial<ExpressionSetPlanCard> = {}): ExpressionSetPlanCard {
+  return {
+    v: 1, workspaceId: FIXTURE_WORKSPACE_ID, setId: FIXTURE_SET_ID, title: "고양이 세트", prefix: "cat", prompt: FIXTURE_SET_PROMPT,
+    references: FIXTURE_SET_REFERENCES, noticeDue: true, state: "planned", expiresAtMs: FIXTURE_NOW_MS + 3_600_000, slots: fixtureSetPlanSlots(), ...over,
+  };
+}
+/** The member's first time with pictures: two references (thumbnails and 「2장」) and the one-time notice. */
+export const FIXTURE_SET_PLAN_CARD: ExpressionSetPlanCard = fixtureSetPlanCard();
+/** The same member's next set: the same card without the notice (they have seen it). */
+export const FIXTURE_SET_PLAN_CARD_SEEN: ExpressionSetPlanCard = fixtureSetPlanCard({ noticeDue: false });
+/** Made from words alone: nothing to send, so no reference line, no declaration and no notice. */
+export const FIXTURE_SET_PLAN_CARD_WORDS: ExpressionSetPlanCard = fixtureSetPlanCard({ references: [], noticeDue: false });
