@@ -388,6 +388,8 @@ export function InboxDetail({
           settled: settledLine !== null,
         });
   // 승인·거부가 받은함에서 서는가(`decide`), 아니면 결정은 내 몫인데 단추는 서지 않고 그 대화의 카드를 열어서 결정하는가(`open`, #5462).
+  // 열기를 `kind === "open"`으로 묻지 않는 것은 직접 문구 장부(`direct-copy`)가 영어 낱말 리터럴도 한 줄로 세어 이 파일의 수가 늘기 때문이다.
+  // id를 싣는 컨트롤은 `decide`와 `open`뿐이라(`awaitedApprovalId`) 「id가 있는데 `decide`가 아님」이 곧 열기다.
   const decideHere = control?.kind === "decide";
   const opensOnCard =
     control !== null && !decideHere && awaitedApprovalId(control) !== null;
