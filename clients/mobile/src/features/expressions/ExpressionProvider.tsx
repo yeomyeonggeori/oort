@@ -100,10 +100,10 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
       {
         read() {
           try {
-            return JSON.parse(
-              nonSecretStore().getString(NON_SECRET_KEYS.expressionShelf) ??
-                'null',
+            const raw = nonSecretStore().getString(
+              NON_SECRET_KEYS.expressionShelf,
             );
+            return raw === undefined ? null : JSON.parse(raw);
           } catch {
             return null;
           }

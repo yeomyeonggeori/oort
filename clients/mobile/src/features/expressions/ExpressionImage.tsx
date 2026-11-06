@@ -4,7 +4,14 @@ import {
   expressionToken,
 } from '@momo/core/features/expressions/message';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {AppState, Image, Text, View, useWindowDimensions} from 'react-native';
+import {
+  AppState,
+  Image,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import {font} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {
@@ -51,12 +58,8 @@ function addLayer(layers: Layer[], layer: Layer): Layer[] {
   return layers.length === 0 ? [layer] : [layers[0], layer];
 }
 
-/** 부모가 이 칸을 그릴 때 앞 그림 위에 쌓이는 층의 스타일. 칸 안을 꽉 채운다. */
-const LAYER: {position: 'absolute'; top: 0; left: 0} = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-};
+/** 층은 칸 안에 포개 선다 — 크기는 칸(`box`)이 정한다. */
+const LAYER = StyleSheet.absoluteFill;
 
 /** Animated files never enter the picker grid/tile or an offscreen/reduced-motion cell. */
 export function ExpressionImage({

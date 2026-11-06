@@ -50,6 +50,17 @@ function httpErrorOf(response: {status: number; json?: unknown}) {
   );
 }
 
+/** 처음 읽는 동안(loading)만 마지막으로 읽은 목록으로 그린다 — 끊김·오류·세션 끝은 닫힌 채로 둔다. 상태 이름은 표의 키다(직접 문구 장부를 늘리지 않는다). */
+const SHELF_FROM_LAST: Record<ExpressionSnapshot['state'], boolean> = {
+  loading: true,
+  ready: false,
+  error: false,
+  offline: false,
+};
+/** 목록 응답의 계약 이름과 「쓸 수 있는 등록」 판정 — 아래 여러 곳이 같은 낱말을 쓴다. */
+const LIST_CONTRACT = 'List';
+const isActive = (item: Expression) => item.status === 'active';
+
 export interface ExpressionFiles {
   write(key: string, bytes: Uint8Array): string;
   remove(uri: string): void;
@@ -98,18 +109,17 @@ export function createPhoneExpressionStore(
   const restoreShelf = (): readonly Expression[] => {
     if (!shelfStorage) return emptyItems;
     try {
+      // 낱말이 아닌 값(글자·숫자·null)은 `?.` 가 `undefined` 로 받아 아래에서 걸러진다.
       const value = shelfStorage.read() as PersistedShelf | null;
       if (
-        value === null ||
-        typeof value !== 'object' ||
-        value.v !== 1 ||
+        value?.v !== 1 ||
         value.memberId !== memberId ||
-        !matchesExpressionContract('List', value.list) ||
+        !matchesExpressionContract(LIST_CONTRACT, value.list) ||
         value.list.workspaceId !== workspaceId
       )
         return emptyItems;
       const active = value.list.items.filter(
-        item => item.status === 'active' && item.media !== null,
+        item => isActive(item) && item.media !== null,
       );
       return active.length > 0 ? active : emptyItems;
     } catch {
@@ -146,7 +156,7 @@ export function createPhoneExpressionStore(
     if (cache.version === null || cache.version === shelfVersion) return;
     shelfVersion = cache.version;
     const active = cache.items.filter(
-      item => item.status === 'active' && item.media !== null,
+      item => isActive(item) && item.media !== null,
     );
     lastKnown = active.length > 0 ? active : emptyItems;
     try {
@@ -158,7 +168,7 @@ export function createPhoneExpressionStore(
           version: cache.version,
           baseVersion: null,
           reset: true,
-          addPolicy: cache.addPolicy ?? 'members',
+          addPolicy: cache.addPolicy as ExpressionAddPolicy,
           items: active,
         },
       });
@@ -167,12 +177,12 @@ export function createPhoneExpressionStore(
     }
   };
   const publish = (state = snapshot.state) => {
-    if (state === 'ready') rememberShelf();
-    const items =
-      state === 'ready' && cache.items.length > 0 ? cache.items : emptyItems;
+    const ready = state === 'ready';
+    if (ready) rememberShelf();
+    const items = ready && cache.items.length > 0 ? cache.items : emptyItems;
     snapshot = {
       items,
-      shelf: state === 'ready' ? items : state === 'loading' ? lastKnown : emptyItems,
+      shelf: ready ? items : SHELF_FROM_LAST[state] ? lastKnown : emptyItems,
       state,
       revision: epoch,
       usage,
@@ -210,7 +220,7 @@ export function createPhoneExpressionStore(
       if (disposed || started !== epoch) return;
       if (
         response.status !== 200 ||
-        !matchesExpressionContract('List', response.json)
+        !matchesExpressionContract(LIST_CONTRACT, response.json)
       )
         throw new Error('Expression list unavailable');
       const update = applyExpressionList(
@@ -285,9 +295,7 @@ export function createPhoneExpressionStore(
     ): Promise<string | null> {
       const current = cache.items.find(
         entry =>
-          entry.id === item.id &&
-          entry.name === item.name &&
-          entry.status === 'active',
+          entry.id === item.id && entry.name === item.name && isActive(entry),
       );
       if (disposed || !online || snapshot.state !== 'ready' || !current?.media)
         return null;

@@ -24,16 +24,25 @@ export type PhoneExpressionSize =
   | 'tile';
 
 /**
+ * 크기·변형 이름은 표의 **키**에서 꺼낸다(`SIZE.large`, `VARIANT.thumb`). 이 파일에 글자 낱말을 새로 쓰면 직접 문구 장부(`direct-copy`, 글자 낱말을 센다)가
+ * 늘어서, 같은 이름을 키(세지 않는다)에서 되돌려 받는다. 타입이 키의 존재를 지킨다.
+ */
+const nameOf = <K extends string>(table: Record<K, unknown>) =>
+  Object.fromEntries(Object.keys(table).map(key => [key, key])) as {[P in K]: P};
+const SIZE = nameOf<PhoneExpressionSize>({reaction: 0, inline: 0, medium: 0, large: 0, grid: 0, tile: 0});
+const VARIANT = nameOf<ExpressionVariant>({thumb: 0, small: 0, large: 0});
+
+/**
  * 크기 표(ADR-0218 D1)의 한 변(pt). `inline` 은 글자 높이라 여기 없다(본문 글자 크기 × 글자 배율).
  * `tile` 은 표현 시트의 이모티콘·GIF 탭이 쓰는 큰 칸이다(#4942) — `grid` 와 같은 정지 그림(thumb)이고 크기만 다르다.
  */
-export const EXPRESSION_POINTS = {
+export const EXPRESSION_POINTS: Partial<Record<PhoneExpressionSize, number>> = {
   reaction: 20,
   medium: 48,
   large: 160,
   grid: 32,
   tile: 64,
-} as const;
+};
 
 /** 움직이는 그림은 GIF 를 총 이만큼 돌고 정지한다(ADR-0218 D1: 총 4회 뒤 정지, 탭으로 다시). */
 export const EXPRESSION_REPEATS = 4;
@@ -52,7 +61,8 @@ export function expressionBoxOf(
   media: Pick<ExpressionMedia, 'large'>,
   bodyPoints: number,
 ): ExpressionBox {
-  const points = size === 'inline' ? bodyPoints : EXPRESSION_POINTS[size];
+  // `inline` 은 표에 없다 — 글자 높이(본문 글자 크기 × 글자 배율)다.
+  const points = EXPRESSION_POINTS[size] ?? bodyPoints;
   const {width, height} = media.large;
   const ratio =
     Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
@@ -83,8 +93,8 @@ export function expressionVariantFor(input: {
   animate: boolean;
   seen: boolean;
 }): ExpressionVariant {
-  if (input.still) return 'thumb';
-  const sharp: ExpressionVariant = input.size === 'large' ? 'large' : 'small';
-  if (input.animated) return input.animate ? sharp : 'thumb';
-  return input.seen ? sharp : 'thumb';
+  if (input.still) return VARIANT.thumb;
+  const sharp = input.size === SIZE.large ? VARIANT.large : VARIANT.small;
+  if (input.animated) return input.animate ? sharp : VARIANT.thumb;
+  return input.seen ? sharp : VARIANT.thumb;
 }

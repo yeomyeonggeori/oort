@@ -36,8 +36,9 @@ export function createMeasureMemory(options: {
   let hydrated = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  // `Number.isFinite` 는 숫자가 아닌 값(글자 포함)을 거짓으로 답한다(바꿔 읽지 않는다).
   const valid = (value: unknown): value is number =>
-    typeof value === 'number' && Number.isFinite(value) && value > 0;
+    Number.isFinite(value) && (value as number) > 0;
 
   const hydrate = () => {
     if (hydrated) return;
@@ -50,8 +51,8 @@ export function createMeasureMemory(options: {
       for (const entry of parsed as unknown[]) {
         if (!Array.isArray(entry) || entry.length !== options.arity + 1) continue;
         const [id, ...values] = entry as unknown[];
-        if (typeof id !== 'string' || !values.every(valid)) continue;
-        map.set(id, values as number[]);
+        if (id !== String(id) || !values.every(valid)) continue;
+        map.set(id as string, values as number[]);
       }
       while (map.size > options.limit) {
         const oldest = map.keys().next();
