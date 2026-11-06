@@ -25,13 +25,21 @@
 //! | `a_call_scope_closed_to_the_requester_removes_the_team_hermes_from_the_buttons` | drop the `invocation_scope` clause, or accept any `owner_human_id` instead of comparing it with the requester |
 //! | `a_paused_team_hermes_is_not_on_the_buttons` | drop `NOT ap.paused` |
 //! | `a_team_hermes_outside_the_channel_is_not_on_the_buttons` | drop the `membership` predicate (or its `left_at IS NULL`) |
+//! | `the_helpers_hand_off_line_asks_the_query_about_the_person_who_asked` | hand the worker's call a `Uuid` other than the requester's (every id there is a `Uuid`, so it compiles), or leave the requester out of the judgement |
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use momo_agent::{create_agent_run_in_tx, NewAgentRun, RunTrigger};
+use momo_agent_worker::provider::MockChatProvider;
+use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
+use momo_messaging::{send_message_in_tx, NewMessage};
+use momo_outbox::{emit_outbox, OutboxKind};
+use momo_settings::{seal_bearer, upsert_link};
+use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
@@ -588,4 +596,214 @@ async fn activate_hosted_connection(su: &PgPool, w: &World, agent: Uuid) {
     .await
     .expect("activate the hosted fixture");
     assert_eq!(activated, 1, "the hosted connection is active");
+}
+
+// --- the worker's call site ------------------------------------------------------------------
+
+const MASTER_KEY: &str = "conformance-5373-master";
+const HEAD_URL: &str = "https://team-gw.example/v1";
+const HEAD_BEARER: &str = "sk-head-5373-a1b2c3";
+
+/// The team link the helper's turn needs to be a turn at all (an instance table: emptied first, so
+/// nothing another file left behind answers for it).
+async fn seed_team_link(su: &PgPool, owner: Uuid) {
+    for table in [
+        "provider_default_ai",
+        "provider_link_chain",
+        "provider_link",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(su)
+            .await
+            .expect("empty instance table");
+    }
+    let mut conn = su.acquire().await.unwrap();
+    let head = seal_bearer(HEAD_BEARER, MASTER_KEY).unwrap();
+    upsert_link(&mut conn, HEAD_URL, &head, "external-hermes", owner)
+        .await
+        .expect("team link");
+}
+
+/// A mention of the team AI by `author`, exactly as the send route freezes it (the shape of
+/// `team_ai_limits_conformance_pg.rs::enqueue`, with the author a parameter).
+async fn enqueue(pool: &PgPool, w: &World, author: Uuid, text: &str) -> Uuid {
+    let (workspace_id, channel_id, agent) = (w.workspace_id, w.channel_id, w.helper_id);
+    let text = text.to_string();
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        let text = text.clone();
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace_id,
+                NewMessage::text(channel_id, author, text.clone()),
+            )
+            .await?;
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace_id,
+                NewAgentRun {
+                    channel_id,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: agent,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": text, "depth": 0}),
+                },
+            )
+            .await?;
+            emit_outbox(
+                &mut *conn,
+                workspace_id,
+                OutboxKind::AgentJob,
+                "publish",
+                &json!({
+                    "run_id": created.id,
+                    "workspace_id": workspace_id,
+                    "channel_id": channel_id,
+                    "agent_member_id": agent,
+                    "author_member_id": author,
+                    "trigger_message_id": sent.message.id,
+                    "trigger_message_seq": sent.message.seq,
+                    "model": "team-ai-default",
+                    "model_source": "instance_default",
+                    "prompt": text,
+                    "recent_messages": [{
+                        "message_id": sent.message.id, "channel_id": channel_id,
+                        "seq": sent.message.seq, "author_member_id": author,
+                        "author_kind": "human", "author_display": "x",
+                        "type": "text", "body": text,
+                    }],
+                    "enabled_tools": ["workspace_action_propose"],
+                    "max_output_tokens": 256,
+                    "depth": 0,
+                    "delivery": "worker",
+                    "created_from": "server.message_send.agent_mention.v0",
+                }),
+                Some(agent),
+            )
+            .await
+            .map_err(momo_db::DbError::from)?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("enqueue mention")
+}
+
+/// The member ids on the buttons of the helper's last line in the channel, and the run's end.
+async fn last_hand_off(
+    su: &PgPool,
+    w: &World,
+    run_id: Uuid,
+) -> (String, Option<String>, Vec<String>) {
+    let (status, error): (String, Option<Value>) =
+        sqlx::query_as("SELECT status::text, error FROM agent_run WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    let props: Value = sqlx::query_scalar(
+        "SELECT props FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+          ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(w.workspace_id)
+    .bind(w.helper_id)
+    .fetch_one(su)
+    .await
+    .expect("the helper's last line");
+    assert_eq!(
+        props["kind"], "team_ai.delegate.v1",
+        "the last line is the hand-off"
+    );
+    let candidates = props["delegate"]["candidates"]
+        .as_array()
+        .expect("the hand-off buttons")
+        .iter()
+        .map(|c| c["member_id"].as_str().expect("member_id").to_string())
+        .collect();
+    (
+        status,
+        error.and_then(|e| e["code"].as_str().map(str::to_string)),
+        candidates,
+    )
+}
+
+/// The worker passes the **requester** to the query. Every id in that call is a `Uuid`, so a call
+/// that handed over the wrong one would still compile and every direct call above would stay green.
+/// The helper's turn is stopped by a daily token limit before the model (the one place the buttons
+/// are drawn from); the Hermes answers only its owner. The owner who asks gets the Hermes button, the
+/// teammate who asks gets none.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_helpers_hand_off_line_asks_the_query_about_the_person_who_asked() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    let w = world(&su, &app).await;
+    seed_team_link(&su, w.owner_id).await;
+    // The Hermes is the owner's alone — pin first, scope second (migration 136).
+    exec(
+        &su,
+        "UPDATE agent SET invocation_scope = 'owner_only', subscription_harness = 'codex', \
+                          owner_human_id = $3 \
+          WHERE workspace_id = $1 AND member_id = $2",
+        &[w.workspace_id, w.hermes_id, w.owner_id],
+    )
+    .await;
+    // The team's daily limit is already reached: both turns end at the hand-off, no model call.
+    sqlx::query(
+        "UPDATE workspace SET settings = settings || \
+           jsonb_build_object('team_ai_limits', '{\"dailyTokens\": 1000}'::jsonb) WHERE id = $1",
+    )
+    .bind(w.workspace_id)
+    .execute(&su)
+    .await
+    .expect("team_ai_limits");
+    sqlx::query(
+        "INSERT INTO usage_ledger (workspace_id, agent_member_id, channel_id, model, \
+                                   prompt_tokens, completion_tokens, cost_micro_usd, created_at) \
+         VALUES ($1, $2, $3, 'candidates-test-model', 1000, 0, 0, now())",
+    )
+    .bind(w.workspace_id)
+    .bind(w.helper_id)
+    .bind(w.channel_id)
+    .execute(&su)
+    .await
+    .expect("ledger row");
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let mut config = WorkerConfig::for_target(database_url());
+    config.claim_batch_size = 10;
+    config.provider_link_master_key = Some(MASTER_KEY.to_string());
+    let worker = AgentWorker::new(worker_pool.clone(), provider.clone(), config);
+
+    for (asker, asker_is_owner) in [(w.requester_id, false), (w.owner_id, true)] {
+        let run = enqueue(&worker_pool, &w, asker, "이거 맡길 수 있어요?").await;
+        for _ in 0..8 {
+            if worker.drain_once().await.expect("drain").claimed == 0 {
+                break;
+            }
+        }
+        let (status, code, candidates) = last_hand_off(&su, &w, run).await;
+        assert_eq!(
+            (status.as_str(), code.as_deref()),
+            ("failed", Some("over_budget")),
+            "anti-vacuity: the turn ended at the team's limit, on the hand-off line"
+        );
+        let hermes = vec![w.hermes_id.to_string()];
+        assert_eq!(
+            candidates,
+            if asker_is_owner { hermes } else { Vec::new() },
+            "the buttons are judged for the person who asked (owner: {asker_is_owner})"
+        );
+    }
+    assert!(
+        provider.calls().is_empty(),
+        "the limit stopped both turns before the model"
+    );
 }

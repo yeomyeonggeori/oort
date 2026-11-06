@@ -1740,8 +1740,8 @@ pub fn validate_pure(
 /// 1. it has no connector owner (`agent.connector_owner_human_id IS NULL`) — an agent that runs one
 ///    person's connected apps answers only that person (ADR-0113 증보 2 E3);
 /// 2. its call scope is open to `requester_member_id` — a `workspace` agent is open to everyone, an
-///    `owner_only` one only to its owner (the same truth table as `owner_only_gate`, fail-closed
-///    for an owner that is not known);
+///    `owner_only` one only to its owner. That is `owner_only_gate`'s identity rule and no more
+///    (its two instance switches are the mention path's to judge); an unknown owner opens nothing;
 /// 3. it is not paused (`agent_profile.paused`);
 /// 4. it is an active member of `channel_id` — a mention reaches an agent only in a room it is in.
 ///
