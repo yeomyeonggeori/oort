@@ -105,34 +105,29 @@ async function mount(entry: MailboxEntry, offline = false): Promise<HTMLElement>
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => {
-    root?.render(
+  const tree = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(
+      SessionProvider,
+      { value: session() },
       createElement(
-        LocaleProvider,
-        { locale: korean },
-        createElement(
-          QueryClientProvider,
-          { client },
-          createElement(
-            SessionProvider,
-            { value: session() },
-            createElement(
-              MemoryRouter,
-              { initialEntries: ["/inbox"] },
-              createElement(InboxDetail, {
-                entry,
-                directory: { members: [], byId: new Map() } as never,
-                offline,
-                onToggleRead: () => undefined,
-                onDecided: () => undefined,
-                readBusy: false,
-              }),
-              createElement(Where)
-            )
-          )
-        )
+        MemoryRouter,
+        { initialEntries: ["/inbox"] },
+        createElement(InboxDetail, {
+          entry,
+          directory: { members: [], byId: new Map() } as never,
+          offline,
+          onToggleRead: () => undefined,
+          onDecided: () => undefined,
+          readBusy: false,
+        }),
+        createElement(Where)
       )
-    );
+    )
+  );
+  await act(async () => {
+    root?.render(createElement(LocaleProvider, { locale: korean, children: tree }));
   });
   return host;
 }
