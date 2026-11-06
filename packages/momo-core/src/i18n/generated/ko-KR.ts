@@ -2970,6 +2970,28 @@ export const catalog: MessageCatalog = {
       "value": "사진, 얼굴"
     }
   ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "팀 보관함"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 미리 보기 지우기"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "보낼 이모티콘"
+    }
+  ],
   "expressions.sheet.a11y": [
     {
       "type": 0,
@@ -2991,7 +3013,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 이모티콘이 없어요. 우리 팀 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3075,7 +3097,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "기본 이모티콘 검색"
+      "value": "이름으로 검색"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3105,13 +3127,13 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoji": [
     {
       "type": 0,
-      "value": "기본"
+      "value": "이모지"
     }
   ],
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "우리 팀"
+      "value": "이모티콘"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -4885,7 +4907,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 이모티콘 창은 우리 팀, 기본, GIF 세 탭으로 정리되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
+      "value": "폰은 자판이 올라온 채로도 +가 눌리고, 붙인 사진은 입력창 안의 작은 미리보기 줄에 서며 ✕로 바로 뺄 수 있어요. 이모티콘 창은 이모티콘, 이모지, GIF 세 탭으로 정리되었고, 폰에서 열 때마다 「불러오는 중」이 되풀이되던 것도 고쳤어요."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [

@@ -3138,6 +3138,28 @@ export const catalog: MessageCatalog = {
       "value": "photo, face"
     }
   ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "Team library"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 0,
+      "value": "Remove preview of "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "Emoticon to send"
+    }
+  ],
   "expressions.sheet.a11y": [
     {
       "type": 0,
@@ -3159,7 +3181,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3243,7 +3265,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "Search emoji"
+      "value": "Search by name"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3279,7 +3301,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Team"
+      "value": "Emoticons"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -5061,7 +5083,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0143.composerPickerChanged": [
     {
       "type": 0,
-      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Team, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
+      "value": "On the phone, the + button works with the keyboard open, and attached photos sit in a small preview row inside the composer with a ✕ to remove each. The emoticon picker now has three tabs, Emoticons, Emoji and GIF, and on the phone the “Loading” that kept repeating each time you opened it is fixed."
     }
   ],
   "releaseNotes.v0143.composerPickerTitle": [

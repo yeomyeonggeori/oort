@@ -454,6 +454,9 @@ export const messageKeys = [
   "expressions.photo.submit",
   "expressions.photo.tagsLabel",
   "expressions.photo.tagsPlaceholder",
+  "expressions.picker.teamGroup",
+  "expressions.preview.cancel",
+  "expressions.preview.group",
   "expressions.sheet.a11y",
   "expressions.sheet.close",
   "expressions.sheet.emptyEmoticon",
@@ -1689,6 +1692,11 @@ export const argumentSpecs = {
   "expressions.photo.submit": {},
   "expressions.photo.tagsLabel": {},
   "expressions.photo.tagsPlaceholder": {},
+  "expressions.picker.teamGroup": {},
+  "expressions.preview.cancel": {
+    "name": "string"
+  },
+  "expressions.preview.group": {},
   "expressions.sheet.a11y": {},
   "expressions.sheet.close": {},
   "expressions.sheet.emptyEmoticon": {},
@@ -3071,6 +3079,9 @@ export interface MessageArgs {
   "expressions.photo.submit": Record<string, never>;
   "expressions.photo.tagsLabel": Record<string, never>;
   "expressions.photo.tagsPlaceholder": Record<string, never>;
+  "expressions.picker.teamGroup": Record<string, never>;
+  "expressions.preview.cancel": { name: string };
+  "expressions.preview.group": Record<string, never>;
   "expressions.sheet.a11y": Record<string, never>;
   "expressions.sheet.close": Record<string, never>;
   "expressions.sheet.emptyEmoticon": Record<string, never>;
