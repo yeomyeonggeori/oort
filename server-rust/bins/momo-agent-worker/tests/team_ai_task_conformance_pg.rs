@@ -2593,7 +2593,10 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
     //     the operator's `0` does not — and only the first may ever be answered by Hermes — so the prompt
     //     of a step names the one that is true.
     type Tune = fn(&mut WorkerConfig);
-    let cases: [(&str, Option<Value>, Tune, i32, bool, &str); 3] = [
+    // label, the team's limits, the worker tuning, searches already spent today, is the search tool offered,
+    // and the sentence the prompt must say when it is not
+    type Case = (&'static str, Option<Value>, Tune, i32, bool, &'static str);
+    let cases: [Case; 3] = [
         (
             "no limit",
             None,

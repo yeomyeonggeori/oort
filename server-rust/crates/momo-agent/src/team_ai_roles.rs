@@ -16,8 +16,9 @@
 //! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
 //! eleven cards of ADR-0201 증보 v2 F2, `invite_access` owns `invite.create` and `agent.invite`
 //! (S2, #4965), `long_research` owns the task-mode tool `task_continue` (S4, #4967), `files` owns
-//! its one tool (`read_attachment`, #4970 S7) and `code` owns the work-request card
-//! (`card_suggest`'s `work.request.open`, #4972 S9); the others are empty slots, so a later slice
+//! its one tool (`read_attachment`, #4970 S7), `code` owns the work-request card
+//! (`card_suggest`'s `work.request.open`, #4972 S9) and `hermes` owns the delegation tool
+//! `ask_hermes` (ADR-0201 증보 v4 P10, #5369); the others are empty slots, so a later slice
 //! (S8 memory) adds an id to its row and nothing else: the filters below read the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.

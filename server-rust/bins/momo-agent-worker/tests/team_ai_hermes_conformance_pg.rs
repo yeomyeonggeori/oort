@@ -58,7 +58,7 @@ const MASTER_KEY: &str = "conformance-5369-master";
 const HEAD_URL: &str = "https://team-gw.example/v1";
 const HEAD_BEARER: &str = "sk-head-5369-a1b2c3";
 /// A bearer that is a real key as far as `key_configured()` goes (not a `dev-insecure-…` placeholder).
-const HERMES_BEARER: &str = "hermes-5369-test-bearer-0123456789abcdef";
+const HERMES_BEARER: &str = "hermes-conformance-bearer-for-the-5369-door-tests";
 const ASK: &str = "ask_hermes";
 
 // --- harness (the sibling suite's, trimmed) --------------------------------------------------
