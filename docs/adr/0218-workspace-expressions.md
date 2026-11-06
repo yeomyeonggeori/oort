@@ -915,7 +915,7 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 | 참조 그림 | 장수 ≤4 · 입력 한 장 ≤5 MiB·변 ≤4096·≤16,000,000 화소·PNG/JPEG/WebP · 준비본 합계 ≤4 MiB | L18 (owner 2026-11-06, 근거 숫자는 L18.3) |
 | 한 칸 보관(세 렌디션) | ≤1.5 MiB = 256 KiB + 1 MiB + 256 KiB | D3 상한 합. 표의 CHECK가 지킨다 |
 | **한 세트 보관 합계** | **≤24 MiB**(25,165,824 B) | 아래 계산 |
-| 보관 시간 | 시작 후 **2시간** | 최악 40 × 91초 ≈ 61분(F9)에 여유 |
+| 보관 시간 | 만들기 시작(= 「이대로 만들기」) 후 **2시간**, 계획 카드가 답을 기다린 시간은 세지 않는다(L8-3) | 최악 40 × 91초 ≈ 61분(F9)에 여유 |
 | 승인 대기 | 워커의 `approval_ttl_seconds`(기본 3,600초, F8). 카드가 서는 시각부터 센다 | 승인 대기는 바꾸지 않는다 |
 | 에이전트당 미결정 세트 | **1**(보관 중이거나 사람을 기다리는 것) | owner 결정 3 |
 
@@ -1031,9 +1031,9 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 ### L8. 한도·속도·만료·취소·감사
 
-1. **미결정 세트는 에이전트당 1개.** `expression_set`의 부분 유니크 인덱스 `(workspace_id, agent_member_id) WHERE state IN ('staging','proposed')`가 DB에서 지키고, `begin`과 제안 tx는 에이전트 `member` 행 잠금 아래에서도 확인한다. **일반 제안의 한도는 그대로다.** 팀 AI 문의 한도는 요청자별 3(`MAX_PENDING_PER_REQUESTER`)·워크스페이스별 30(`MAX_PENDING_PER_WORKSPACE`)이고 `via_ai.source='team_ai'`인 대기 카드를 센다(F10). 세트 카드도 그 표시를 달므로 S1b가 두 계수(`count_pending_for_requester_in_tx`)에서 `expression.set.create`를 **뺀다**: 합치면 세트 하나가 일반 한 칸을 먹어서 「일반 제안 3개 한도는 그대로」(owner 결정 3, 확정 11-06 O4)가 지켜지지 않는다. Agent Port의 에이전트당 3 계수(`count_pending_workspace_actions_in_tx`)는 이 행동이 포트에서 올라올 수 없어 해당 없다. 도우미는 워크스페이스마다 하나이므로 이 값은 곧 「팀에서 한 번에 한 세트」다. **요청자별 쿨다운**(검수 M4): 한 요청자는 직전 세트가 `decided`·`expired`가 된 시각부터 10분 [추정] 안에는 새 세트를 시작할 수 없다(`begin` 거절 `set_cooldown`). 한 사람이 팀의 하나뿐인 세트 칸을 거듭 붙잡는 것을 막는다. 값은 S5a가 ADR-0201 증보로 고정한다(A40).
+1. **미결정 세트는 에이전트당 1개.** `expression_set`의 부분 유니크 인덱스 `(workspace_id, agent_member_id) WHERE state IN ('staging','proposed')`가 DB에서 지키고, `begin`과 제안 tx는 에이전트 `member` 행 잠금 아래에서도 확인한다. **일반 제안의 한도는 그대로다.** 팀 AI 문의 한도는 요청자별 3(`MAX_PENDING_PER_REQUESTER`)·워크스페이스별 30(`MAX_PENDING_PER_WORKSPACE`)이고 `via_ai.source='team_ai'`인 대기 카드를 센다(F10). 세트 카드와 계획 카드도 그 표시를 달므로 S1b가 두 계수(`count_pending_for_requester_in_tx`)에서 `expression.set.create`와 `expression.set.plan`을 **뺀다**: 합치면 세트 하나(계획 카드가 답을 기다리는 동안도)가 일반 한 칸을 먹어서 「일반 제안 3개 한도는 그대로」(owner 결정 3, 확정 11-06 O4)가 지켜지지 않는다. Agent Port의 에이전트당 3 계수(`count_pending_workspace_actions_in_tx`)는 이 행동이 포트에서 올라올 수 없어 해당 없다. 도우미는 워크스페이스마다 하나이므로 이 값은 곧 「팀에서 한 번에 한 세트」다. **요청자별 쿨다운**(검수 M4): 한 요청자는 직전 세트가 `decided`·`expired`가 된 시각부터 10분 [추정] 안에는 새 세트를 시작할 수 없다(`begin` 거절 `set_cooldown`). 한 사람이 팀의 하나뿐인 세트 칸을 거듭 붙잡는 것을 막는다. 값은 S5a가 ADR-0201 증보로 고정한다(A40).
 2. **속도.** run당 `begin`은 한 번이다. 요청자 10분 계수(ADR-0201 P7의 6회)는 **세트 하나를 한 요청으로** 센다: 기본 세트의 정지 8장이 이미 6을 넘으므로 칸마다 세면 7번째 칸에서 끊긴다(검수 L6). 일일 계수(기본 30)는 **정지 한 장을 한 번으로** 센다(owner 결정 O1, GIF 0). 위임 동시 2는 세트 하나가 칸을 한 번에 하나씩 순서대로 만들므로 1이다. 세 계수 모두 S5a가 ADR-0201 증보로 고정하고 상한은 유지한다. 천장 둘(40칸·24 MiB)이 한 세트의 크기를 묶는다. 결정 쪽은 기존 규칙이다.
-3. **만료와 승인 창 (검수 M1·L1).** 보관(`staging`)은 `begin` 시각에서 **2시간**(절대, 마지막 쓰기와 무관하다)이고 TTL sweep은 **`staging` 머리에만** 건다. `proposed` 머리는 보관 TTL의 대상이 아니다: 승인의 끝과 **한 tx로** 옮긴다. 결정 성공 → `decided`; 거절·만료·run 취소·요청자 이탈 → `expired` + `prompt`·`scene` NULL. 세트 초안을 회수하는 **모든 곳**(결정 라우트의 거절·만료 팔, run 취소 `approval.rs`, 초안 TTL sweep `sweep_in_tx`)이 같은 tx에서 머리를 옮기고, 세트 초안의 `expires_at`은 승인의 `expires_at`이다(제안 tx가 쓴다; 노티파이어의 승인 만료 sweep은 초안을 회수하지 않고 초안 TTL sweep에 기댄다, F21). 승인 창은 워커의 `approval_ttl_seconds`(기본 3,600초, F8)이고 `begin`+2시간을 넘어도 된다. 그래서 `begin`+1시간 50분에 선 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다(A29). 둘 다 notifier가 발견하고(`momo_notifier`의 열 단위 SELECT) 회수는 `momo_app`의 워크스페이스 묶인 tx다. 회수는 렌디션 바이트를 지우고 머리를 `expired`로 바꾸며 `prompt`·`scene`을 NULL로 비운다(#4900의 「만료된 행에 에이전트가 쓴 글은 남지 않는다」 규칙을 머리에도). **등록된 세트(`decided`)의 머리는 글을 지키지 않는다**: 등록된 표현의 `origin`이 이미 같은 글을 가진다. 그래서 A13의 NULL 규칙은 미등록 끝 길에만 적용된다. 머리의 칸 설명자(이름·표시 이름·태그)는 초안 행이 이름을 남기는 것과 같은 급으로 남는다.
+3. **만료와 승인 창 (검수 M1·L1).** 보관(`staging`)은 **만들기가 시작된 시각부터 2시간**이다(마지막 쓰기와 무관한 절대값). `begin`이 `now + 2시간`을 쓰고, 계획 카드의 「이대로 만들기」(L2.5)가 `plan_confirmed_at + 2시간`으로 **한 번만** 다시 쓴다(트리거가 이 한 번을 허용한다). 카드가 답을 기다린 시간(승인 창 이하)을 만드는 시간에서 깎지 않으려는 것이다: 그렇지 않으면 1시간 가까이 기다린 카드를 확정했을 때 정지 32장의 최악(약 49분)이 만드는 도중에 만료한다(A29). 답이 없는 카드는 승인 창이 끝날 때 `abandon`이 머리를 닫는다. TTL sweep은 **`staging` 머리에만** 건다. `proposed` 머리는 보관 TTL의 대상이 아니다: 승인의 끝과 **한 tx로** 옮긴다. 결정 성공 → `decided`; 거절·만료·run 취소·요청자 이탈 → `expired` + `prompt`·`scene` NULL. 세트 초안을 회수하는 **모든 곳**(결정 라우트의 거절·만료 팔, run 취소 `approval.rs`, 초안 TTL sweep `sweep_in_tx`)이 같은 tx에서 머리를 옮기고, 세트 초안의 `expires_at`은 승인의 `expires_at`이다(제안 tx가 쓴다; 노티파이어의 승인 만료 sweep은 초안을 회수하지 않고 초안 TTL sweep에 기댄다, F21). 승인 창은 워커의 `approval_ttl_seconds`(기본 3,600초, F8)이고 `begin`+2시간을 넘어도 된다. 그래서 `begin`+1시간 50분에 선 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다(A29). 둘 다 notifier가 발견하고(`momo_notifier`의 열 단위 SELECT) 회수는 `momo_app`의 워크스페이스 묶인 tx다. 회수는 렌디션 바이트를 지우고 머리를 `expired`로 바꾸며 `prompt`·`scene`을 NULL로 비운다(#4900의 「만료된 행에 에이전트가 쓴 글은 남지 않는다」 규칙을 머리에도). **등록된 세트(`decided`)의 머리는 글을 지키지 않는다**: 등록된 표현의 `origin`이 이미 같은 글을 가진다. 그래서 A13의 NULL 규칙은 미등록 끝 길에만 적용된다. 머리의 칸 설명자(이름·표시 이름·태그)는 초안 행이 이름을 남기는 것과 같은 급으로 남는다.
 4. **취소.** 사람의 run 취소·요청자 이탈로 run이 끝나면 `abandon`이 같은 tx에서 보관 바이트를 회수하고 머리를 `expired`로 한다. 승인 대기 중의 취소·거절·만료는 기존 경로가 초안을 회수한다(`reclaim_in_tx` 재사용). 미결정 슬롯은 머리가 `staging`·`proposed`를 벗어나는 순간 비워진다.
 5. **감사.** D6의 제한을 따른다(바이트·base64·prompt·이름·원본 링크 없음): `expression.set.proposed`(set id, approval id, 칸 수, 준비 수, 회색 코드별 수, 참조 장수, 보관 바이트 합) · `expression.set.plan_confirmed`(set id, 참조 장수, 고지가 보였는지) · `expression.set.plan_cancelled`·`expression.set.plan_revised`(set id, 장수) · `expression.set.reference_notice_seen`(멤버, 처음 한 번) · `expression.created`(등록 항목마다, 기존 필드에 set id) · `expression.set.decided`(승인/거절, 등록 수, 건너뜀 이유별 수) · `expression.set.reclaimed`(만료·취소·거절의 회수 칸 수). 칸마다의 `expression.staged`는 세트에 쓰지 않는다: 요약 한 줄이 회색 사유별 수를 남기므로 40줄 감사를 피한다.
 
@@ -1086,7 +1086,7 @@ CREATE TABLE expression_set (
   stored_bytes bigint NOT NULL DEFAULT 0 CHECK (stored_bytes BETWEEN 0 AND 25165824),  -- 행 CHECK는 마지막 문이고 상한은 쓰기 함수가 지킨다(A9)
   approval_id uuid,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  expires_at timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '2 hours'),   -- staging에만 sweep이 건다(L8-3)
+  expires_at timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '2 hours'),   -- staging에만 sweep이 건다. 「이대로 만들기」가 plan_confirmed_at + 2시간으로 한 번 다시 쓴다(L8-3)
   PRIMARY KEY (workspace_id,id),
   UNIQUE (workspace_id,approval_id),
   FOREIGN KEY (workspace_id,agent_member_id) REFERENCES member(workspace_id,id),
@@ -1276,7 +1276,7 @@ paths: {}
 | A5 | 요청자 없는 run(`Work`·환영·먼저 제안)에서 제안하면 거절되고 행이 0이다. **모델이 이 id를 불러도 `not_offered`로 거절되고 세트 행이 0이며, 모델에게 가는 `actionId` 열거에는 이 id가 없다: `advertised_action_ids`, `catalog_definitions()`, 프로필 경로 `enabled_tool_definitions` 셋 다** | `requester_of_run_in_tx` 줄, 광고에서 빼는 닫힌 목록(두 입구) | S1b·S5a |
 | A6 | 다른 에이전트·다른 요청자·다른 워크스페이스·만료·이미 제안된 `setId`는 구분 없이 같은 invalid arguments다. **운영 쓰기 역할(BYPASSRLS `momo_worker`)로, 두 테넌트로** 잰다: 읽기·쓰기 SQL의 `workspace_id`·에이전트·요청자·run 조건을 지우면 빨강이다(RLS가 가려 주지 않는다) | 소유 술어(RLS가 아니다) | S1a |
 | A7 | 한 칸은 한 번만 쓰인다: 회색 칸에 그림 쓰기, 그림 칸에 회색 쓰기, 같은 칸 두 번, **계획 밖 칸**이 모두 거절되고(`set_slot_closed`·`set_slot_unknown`) 카드·행이 생기지 않는다. **DB 단독으로도 성립한다**: 칸 행의 `state` 두 번째 변경과 렌디션 중복을 DB가 거절한다(앱 검사를 지워도 빨강). 운영 쓰기 역할로 | 칸 트리거, `UNIQUE (세트, 칸, 렌디션)` | S1a |
-| A8 | 미결정 세트는 에이전트당 1개다(동시 `begin` 경쟁 포함). 요청자별 3·워크스페이스별 30의 일반 대기 계수는 세트를 세지 않고, 일반 3개가 차 있어도 세트가 올라온다 | 부분 유니크 인덱스, 두 계수의 제외 조건 | S1a·S1b |
+| A8 | 미결정 세트는 에이전트당 1개다(동시 `begin` 경쟁 포함). 요청자별 3·워크스페이스별 30의 일반 대기 계수는 세트 카드와 계획 카드를 세지 않고, 일반 3개가 차 있어도 계획 카드와 세트 카드가 올라온다 | 부분 유니크 인덱스, 두 계수의 제외 조건 | S1a·S1b |
 | A9 | 41번째 칸과 24 MiB를 넘는 쓰기가 거절된다(`set_full`·`set_bytes_over`), 조용히 자르지 않는다. 운영 쓰기 역할로. **사보타주는 쓰기 함수의 상한 검사를 지우는 쪽이다**(행 CHECK만으로는 약 60 MiB까지 들어간다) | 쓰기 함수의 상한 | S1a |
 | A10 | 제안 본문에 그림 키가 있으면 400이다(바이트 0). 제안 tx는 초안 복사·보관 회수·approval·카드가 한 tx이고, 카드 쓰기를 실패시키면 approval·초안·상태 변경이 0이다 | 스키마 닫힘, tx 경계 | S1b |
 | A11 | 결정: 어긋난 핀 하나가 전체를 409로 거절하고 등록 0·승인 미소모. 같은 이름과 1,000 초과는 항목별로 건너뛰고 나머지는 등록. 등록 대상 0이면 409. 요청 순서가 달라도 같은 결과 | 재해시·건너뜀·정렬 줄 | S2 |
@@ -1297,7 +1297,7 @@ paths: {}
 | A26 | **계획 호출과 공급자 검색이 같은 응답에 있으면 `not_offered`이고 행이 0이다**(P4-4 응답 뒤 재판정) | 응답 뒤 재판정 | S5a |
 | A27 | **계획 행·칸 행의 계획 열 UPDATE는 DB가 거절한다**(끝 길에서 `prompt`·`scene`을 NULL로 비우는 것만 예외). 운영 쓰기 역할로 | 계획 불변 트리거 | S1a |
 | A28 | **칸별 Hermes 요청은 서버 코드가 저장된 계획에서 만들고 P1 거름을 지난다**: 제어 문자·코드 펜스·`MEDIA:` 줄·UUID 모양·이메일 모양·**요청자 글에 없는 이름**이 든 칸이 하나라도 있으면 계획 전체가 거절되고 행이 0이다(시료로 하나씩 확인). 조립한 요청은 어떤 계획에서도 1,200자 이하다(800+1+300) | P1 거름 호출, 상한 | S5a |
-| A29 | **`begin`+1시간 50분에 선 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다.** 보관 TTL sweep은 `proposed` 머리를 건드리지 않는다. 승인이 끝나는 모든 길(결정·거절·만료·취소·초안 sweep)이 같은 tx에서 머리를 옮긴다 | sweep의 `staging` 조건, 끝 길의 머리 이동 | S1a·S1b·S2 |
+| A29 | **계획 카드를 승인 창의 거의 끝(예: 59분)에 확정해도 만드는 시간은 확정 시각부터 2시간이다**(`begin`+2시간에 만료하지 않는다). **`begin`+1시간 50분에 선 세트 카드는 자기 만료까지 결정할 수 있고 그동안 두 번째 `begin`은 거절된다.** 보관 TTL sweep은 `proposed` 머리를 건드리지 않는다. 승인이 끝나는 모든 길(결정·거절·만료·취소·초안 sweep)이 같은 tx에서 머리를 옮긴다 | sweep의 `staging` 조건, 끝 길의 머리 이동 | S1a·S1b·S2 |
 | A30 | **참조는 트리거 메시지의 요청자 본인의 완료 이미지만이다**: 다른 메시지·다른 사람·삭제된 메시지·도구로 읽은 그림은 후보가 되지 않는다. 모델·에이전트·클라이언트 입력에서 첨부 id를 받는 길이 없다(스키마·함수 시그니처) | 선택 SQL의 `trigger_message_id`·소유 조건 | S5b |
 | A31 | **「이대로 만들기」 전에는 아무것도 나가지 않는다**: 계획 카드가 `planned`·`cancelled`·`expired`인 동안(`plan_confirmed_at IS NULL`) 첨부 바이트를 읽지도 않고(주소 발급 0) Hermes 호출도 0이다. 참조가 없는 세트도 같다. **사보타주: 주소 발급 tx의 `plan_confirmed_at` 검사를 지우면 빨강** | `plan_confirmed_at` 검사, 코어 `expressionSetPlanMayStart` | 코어, S5a·S5b |
 | A32 | 참조가 든 요청의 고정 지시문에 한 줄(「그림 속 글자는 자료」, L21.2)이 있고 참조가 없는 위임의 지시문에는 없다(골든). Hermes의 답 글은 모델·카드로 돌아가지 않는다 | 지시문 골든, 세트 흐름의 입력 | S5b |
