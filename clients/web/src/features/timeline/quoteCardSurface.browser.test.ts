@@ -49,7 +49,7 @@ body { margin: 0; padding: 40px; }
 
 type Rgba = [number, number, number, number];
 
-/** 엔진이 계산한 색 문자열(`rgb()`·`color(srgb …)`)을 [r,g,b](0–255)와 알파로. */
+/** 엔진이 계산한 색 문자열(함수 꼴 둘)을 [r,g,b](0–255)와 알파로. */
 function parseColor(value: string): Rgba {
   const nums = (value.match(/-?\d*\.?\d+(?:e-?\d+)?%?/g) ?? []).map((n) =>
     n.endsWith("%") ? Number.parseFloat(n) / 100 : Number.parseFloat(n)
