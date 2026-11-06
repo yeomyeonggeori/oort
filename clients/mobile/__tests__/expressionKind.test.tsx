@@ -28,7 +28,10 @@ import {
   fixtureManualDraft,
 } from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
-import {EXPRESSION_TABS as CORE_EXPRESSION_TABS} from '@momo/core/features/expressions/kind';
+import {
+  EXPRESSION_VIEW_SHELVES,
+  EXPRESSION_VIEWS,
+} from '@momo/core/features/expressions/kind';
 import {
   EXPRESSION_KINDS,
   type Expression,
@@ -64,7 +67,7 @@ jest.mock('../src/lib/haptics', () => ({
 // 팀 표현의 종류 값 — 폰 몫 (#5112, ADR-0218 증보 4 §10, #4961 후속).
 //
 // 정본은 웹 시험(`clients/web/src/features/expressions/ExpressionKind.test.tsx`)이다: 같은 세 사실을 폰의 진짜 부품으로 잰다.
-//   ① 네 탭이 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`) — 순수 함수와 시트에 그려진 격자 둘 다.
+//   ① 세 탭(이모티콘 · 기본 · GIF)이 보관함을 겹치지 않게 나눈다(코어 `expressionsForView` = J2의 네 칸 가운데 팀 이모지 칸과 이모티콘 칸을 한 탭으로, 2026-11-05) — 순수 함수와 시트에 그려진 격자 둘 다.
 //   ② 초안 단계가 종류를 미리 고르고(코어 `recommendedKindForDraft`), 사람이 바꾸고, 고른 값이 `Choice.kind` 로 간다.
 //   ③ 그렇게 등록한 그림이 **고른 종류의 탭에만** 선다(진짜 가져오기 장 → 코어 fixture 서버 → 시트).
 // 가짜는 서버(코어 fixture 서버)와 표준 이모지 목록뿐이다. 추천 규칙 자체(임계값·움직임)는 코어 시험이 서버와 같은 벡터로 잰다 —
@@ -74,27 +77,27 @@ jest.mock('../src/lib/haptics', () => ({
 const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
 const en = createMessageService({messageLocale: 'en-US', catalog: enCatalog});
 
-// 종류 이름·설명의 낱말은 ADR-0218 증보 4 §10 이 정한 것이다(planner 결정, #5112 2단계): `emoji` = 팀 이모지(작은 것), `sticker` =
-// 이모티콘(큰 것). 폰 시트의 탭 이름(이모티콘 · 이모지 · 팀 이모지 · GIF)과 같은 말이고, 「이모지」만 쓰면 표준 유니코드 이모지 탭과
-// 겹친다. 기대값은 사전에서 읽지 않고 **글자로 못 박는다**: 사전에서 읽으면 사전이 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다.
+// 종류 이름·설명의 낱말은 owner 2026-11-05(#5330)가 정했다: 화면의 이름은 「이모티콘」 하나이고, 종류는 그 크기로 가른다 —
+// `emoji` = 작은 이모티콘, `sticker` = 큰 이모티콘(앞 판은 「팀 이모지」·「이모티콘」이라 한 화면에 이름이 둘이었다). 기대값은 사전에서
+// 읽지 않고 **글자로 못 박는다**: 사전에서 읽으면 사전이 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다.
 // 순서는 코어 `EXPRESSION_KINDS`(emoji → sticker)다.
 const KIND_WORDS = {
   ko: {
-    labels: ['팀 이모지', '이모티콘'],
-    hintEmoji: '작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요.',
+    labels: ['작은 이모티콘', '큰 이모티콘'],
+    hintEmoji: '작은 그림이에요. 글 사이와 반응에 써요. 움직여도 작은 이모티콘이에요.',
     hintSticker: '큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요.',
   },
   en: {
-    labels: ['Team emoji', 'Emoticon'],
+    labels: ['Small emoticon', 'Large emoticon'],
     hintEmoji:
-      'A small picture. Use it between words and in reactions. It stays a team emoji even when it moves.',
+      'A small picture. Use it between words and in reactions. It stays a small emoticon even when it moves.',
     hintSticker:
       'A large picture. It is sent big, and a moving one shows under GIF.',
   },
 } as const;
-/** 쓰지 않기로 한 옛 이름: 종류 이름 「이모지」·「스티커」(화면의 다른 「팀 이모지」와 겹치거나 탭 이름과 다르다)와 없는 곳 「팀 GIF」. */
-const RETIRED_KO = /스티커|팀 GIF/;
-const RETIRED_EN = /Sticker|Team GIF/;
+/** 쓰지 않기로 한 옛 이름: 「스티커」·「팀 GIF」(탭 이름과 다르다)와, 「이모티콘」 하나로 모으며 지운 「이모지」·「팀 이모지」(owner 11-05). */
+const RETIRED_KO = /스티커|팀 GIF|이모지/;
+const RETIRED_EN = /Sticker|Team GIF|Team emoji/;
 const root = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
 const base = `${root}/expressions`;
 const PNG = FIXTURE_MEDIA.png.image;
@@ -163,6 +166,11 @@ const SHELVES = {
 } as const;
 
 type Tab = (typeof EXPRESSION_TABS)[number];
+/** 화면의 두 보기에 선 등록(J2의 칸으로는 팀 이모지 칸 + 이모티콘 칸이 이모티콘 보기다). */
+const VIEWS = {
+  emoticon: [...SHELVES.emoticon, ...SHELVES.team].sort(),
+  gif: [...SHELVES.gif],
+};
 
 /** 코어 fixture 서버 + (주면) 이 목록으로 바꾼 보관함 목록 + 손으로 만든 초안의 미리보기 그림. */
 function setup(
@@ -286,45 +294,46 @@ afterEach(async () => {
   jest.useRealTimers();
 });
 
-// ---- ① 네 탭이 보관함을 겹치지 않게 나눈다 ----------------------------------------
-describe('네 탭은 같은 보관함을 겹치지 않게 나눈다 (ADR-0218 §10 J2)', () => {
-  it('탭 값은 코어의 `EXPRESSION_TABS` 그대로다 — 폰이 따로 적은 목록이 아니다', () => {
-    expect(EXPRESSION_TABS).toBe(CORE_EXPRESSION_TABS);
-    expect([...EXPRESSION_TABS]).toEqual(['emoticon', 'emoji', 'team', 'gif']);
+// ---- ① 세 탭이 보관함을 겹치지 않게 나눈다 ----------------------------------------
+describe('세 탭은 같은 보관함을 겹치지 않게 나눈다 (ADR-0218 §10 J2 + 2026-11-05 증보)', () => {
+  it('탭은 이모티콘 · 기본 · GIF 이고, 보관함을 보는 두 탭은 코어의 보기 정의 그대로다 — 폰이 따로 적은 칸 묶음이 아니다', () => {
+    expect([...EXPRESSION_TABS]).toEqual(['emoticon', 'emoji', 'gif']);
+    expect([...EXPRESSION_VIEWS]).toEqual(['emoticon', 'gif']);
+    // 합치는 곳은 코어의 이 한 표뿐이다 — 이모티콘 보기 = 팀 이모지 칸(작은 것) + 이모티콘 칸(정지한 큰 것).
+    expect(EXPRESSION_VIEW_SHELVES).toEqual({
+      emoticon: ['team', 'emoticon'],
+      gif: ['gif'],
+    });
   });
 
-  it('순수: 이모티콘 = 정지한 sticker, 팀 이모지 = emoji(움직여도), GIF = 움직이는 sticker, 옛 등록은 sticker — 합집합은 전체, 교집합은 없다', () => {
-    const names = (tab: Exclude<Tab, 'emoji'>) =>
+  it('순수: 이모티콘 = 작은 emoji(움직여도) + 정지한 sticker, GIF = 움직이는 sticker, 옛 등록은 sticker — 합집합은 전체, 교집합은 없다', () => {
+    const names = (tab: 'emoticon' | 'gif') =>
       browseExpressions(CATALOGUE, tab, '')
         .map(item => item.name)
         .sort();
-    expect({
-      emoticon: names('emoticon'),
-      team: names('team'),
-      gif: names('gif'),
-    }).toEqual(SHELVES);
-    const all = [...names('emoticon'), ...names('team'), ...names('gif')];
+    expect({emoticon: names('emoticon'), gif: names('gif')}).toEqual(VIEWS);
+    const all = [...names('emoticon'), ...names('gif')];
     expect([...all].sort()).toEqual(CATALOGUE.map(item => item.name).sort());
     expect(new Set(all).size).toBe(CATALOGUE.length);
   });
 
-  it('시트에 그려진 격자도 같다: 네 탭이 서로 다른 것을 보이고(이모지 탭에는 보관함 등록이 없다) 합치면 보관함 전체다', async () => {
+  it('시트에 그려진 격자도 같다: 세 탭이 서로 다른 것을 보이고(기본 탭에는 보관함 등록이 없다) 합치면 보관함 전체다', async () => {
     const {store} = setup({items: CATALOGUE});
     await store.refresh(true);
     openSheet(store);
     await screen.findByTestId('emoji-pick-🎉');
-    // 처음 열 때의 이모지 탭: 표준 이모지 목록뿐이다.
+    // 처음 열 때의 기본 탭: 표준 그림 문자 목록뿐이다.
     expect(cellNames()).toEqual([]);
     const seen: Record<string, string[]> = {};
-    for (const tab of ['emoticon', 'team', 'gif'] as const) {
+    for (const tab of ['emoticon', 'gif'] as const) {
       await pressTab(tab);
-      seen[tab] = cellNames();
+      seen[tab] = cellNames().sort();
     }
     await pressTab('emoji');
     await screen.findByTestId('emoji-pick-🎉');
     seen.emoji = cellNames();
-    expect(seen).toEqual({...SHELVES, emoji: []});
-    const all = [...seen.emoticon, ...seen.team, ...seen.gif];
+    expect(seen).toEqual({...VIEWS, emoji: []});
+    const all = [...seen.emoticon, ...seen.gif];
     expect(new Set(all).size).toBe(CATALOGUE.length);
     expect([...all].sort()).toEqual(CATALOGUE.map(item => item.name).sort());
   });
@@ -465,7 +474,7 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
     expect(
       rows.map(row => within(row).getByText(/\S/).props.children),
     ).toEqual([...KIND_WORDS.ko.labels]);
-    // 웹 초안 카드와 같은 차례(팀 이모지 → 이모티콘)다. 코어 목록이 바뀌면 이 줄이 빨개져 웹·폰이 함께 보게 된다.
+    // 웹 초안 카드와 같은 차례(작은 이모티콘 → 큰 이모티콘)다. 코어 목록이 바뀌면 이 줄이 빨개져 웹·폰이 함께 보게 된다.
     expect([...EXPRESSION_KINDS]).toEqual(['emoji', 'sticker']);
   });
 
@@ -538,24 +547,24 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
     controller.dispose();
   });
 
-  it('종류 이름은 폰 시트의 탭 이름과 같은 말이다 — 한국어는 글자 그대로, 영어는 단수 · 문장 첫 글자만 대문자', () => {
-    // 같은 말을 두 곳에 따로 적었으니, 한쪽만 바뀌면 빨개진다(탭을 고치면 종류 이름도 같이 고치게 한다).
-    expect(ko.formatMessage('expressions.kind.emoji')).toBe(
-      ko.formatMessage('expressions.sheet.tabTeam'),
-    );
-    expect(ko.formatMessage('expressions.kind.sticker')).toBe(
-      ko.formatMessage('expressions.sheet.tabEmoticon'),
-    );
-    expect(en.formatMessage('expressions.kind.emoji')).toBe(
-      en.formatMessage('expressions.sheet.tabTeam'),
-    );
-    // 탭 「Emoticons」는 목록의 이름(복수)이고 종류 「Emoticon」은 한 그림의 분류(단수)다. 응답 카드의 발췌 낱말도 단수 「Emoticon」이다.
-    expect(en.formatMessage('expressions.kind.sticker')).toBe(
-      en.formatMessage('expressions.sheet.tabEmoticon').replace(/s$/, ''),
-    );
-    expect(en.formatMessage('expressions.kind.sticker')).toBe(
-      en.formatMessage('reply.card.excerptExpression'),
-    );
+  it('첫 탭 이름(「우리 팀」·「Team」)과 종류 이름(「이모티콘」)은 서로 다른 말이다 — 종류는 글자 그대로, 영어는 단수 · 문장 첫 글자만 대문자', () => {
+    // owner 11-06(#5427): 창 제목이 이미 「이모티콘」이라 첫 탭은 어디서 온 그림인지(우리 팀이 올린 것)만 말한다. 종류 이름은 「작은/큰 + 이모티콘」 그대로다.
+    // 두 곳을 글자로 못 박아, 어느 쪽이든 옛 「탭 이름 = 종류 낱말」로 돌아가면 빨개진다(사전에서 읽어 맞추지 않는다).
+    const tab = {
+      ko: ko.formatMessage('expressions.sheet.tabEmoticon'),
+      en: en.formatMessage('expressions.sheet.tabEmoticon'),
+    };
+    expect(tab).toEqual({ko: '우리 팀', en: 'Team'});
+    expect(ko.formatMessage('expressions.kind.emoji')).toBe('작은 이모티콘');
+    expect(ko.formatMessage('expressions.kind.sticker')).toBe('큰 이모티콘');
+    expect(en.formatMessage('expressions.kind.emoji')).toBe('Small emoticon');
+    expect(en.formatMessage('expressions.kind.sticker')).toBe('Large emoticon');
+    // 종류 이름은 탭 이름을 품지 않는다(앞 판은 「작은/큰 + 탭 이름」이라 탭을 고치면 종류도 따라 바뀌었다).
+    for (const kind of KIND_WORDS.ko.labels) expect(kind).not.toContain(tab.ko);
+    for (const kind of KIND_WORDS.en.labels) expect(kind).not.toContain(tab.en);
+    // 응답 카드의 발췌 낱말은 종류 이름의 낱말(영어는 단수 「Emoticon」)이다 — 탭 이름이 아니다.
+    expect(ko.formatMessage('reply.card.excerptExpression')).toBe('이모티콘');
+    expect(en.formatMessage('reply.card.excerptExpression')).toBe('Emoticon');
     // sentence case: 첫 글자만 대문자, 뒤의 낱말은 소문자(「Team Emoji」가 아니다).
     for (const label of KIND_WORDS.en.labels) {
       expect(label).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);
@@ -586,19 +595,19 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
   it('한국어 화면 전체에 옛 이름(스티커·팀 GIF)이 없고, 설명이 움직이는 그림을 두 종류 모두에서 말한다', async () => {
     await mountStep(movingDraft());
     expect(JSON.stringify(screen.toJSON())).not.toMatch(RETIRED_KO);
-    // 움직이는 그림은 세 번째 종류가 아니다: 팀 이모지는 움직여도 팀 이모지이고, 이모티콘이 움직이면 GIF 에서 본다.
+    // 움직이는 그림은 세 번째 종류가 아니다: 작은 이모티콘은 움직여도 작은 이모티콘이고, 큰 이모티콘이 움직이면 GIF 에서 본다.
     expect(text('expression-draft-kind-hint')).toMatch(/움직이면 GIF/);
     await press('expression-draft-kind-emoji');
-    expect(text('expression-draft-kind-hint')).toMatch(/움직여도 팀 이모지/);
+    expect(text('expression-draft-kind-hint')).toMatch(/움직여도 작은 이모티콘/);
   });
 });
 
 // ---- ③ 등록한 그림은 고른 종류의 탭에만 선다 -----------------------------------------
 describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜 장 → 코어 fixture 서버 → 시트)', () => {
-  // 코어 fixture 서버의 초안은 늘 움직이는 GIF 라서 추천은 `sticker`(→ GIF 탭)다. 사람이 `emoji` 를 고르면 움직이는 그림도
-  // 팀 이모지 탭에만 선다(J2: 움직임이 가르는 것은 sticker 뿐).
+  // 코어 fixture 서버의 초안은 늘 움직이는 GIF 라서 추천은 `sticker`(→ GIF 탭)다. 사람이 `emoji`(작은 이모티콘)를 고르면 움직이는
+  // 그림도 이모티콘 탭에만 선다(J2: 움직임이 가르는 것은 sticker 뿐).
   it.each([
-    ['팀 이모지를 고르면(추천과 다르게)', 'emoji', 'emoji', ['team']],
+    ['작은 이모티콘을 고르면(추천과 다르게)', 'emoji', 'emoji', ['emoticon']],
     ['고르지 않으면(추천 그대로)', null, 'sticker', ['gif']],
   ] as const)(
     '%s → 등록 요청의 kind 가 정해지고, 그림은 한 탭에만 선다',
@@ -607,7 +616,7 @@ describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜
       await store.refresh(true);
       openSheet(store);
       await screen.findByTestId('emoji-pick-🎉');
-      await pressTab('team');
+      await pressTab('emoticon');
       await press('expression-add-menu');
       await press('expression-add-import');
       imagePicker.__state.result = {
@@ -658,7 +667,7 @@ describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜
       );
       // 이 그림이 보이는 탭은 정확히 하나다.
       const where: string[] = [];
-      for (const tab of ['emoticon', 'team', 'gif'] as const) {
+      for (const tab of ['emoticon', 'gif'] as const) {
         await pressTab(tab);
         if (cellNames().includes('kind_probe')) where.push(tab);
       }

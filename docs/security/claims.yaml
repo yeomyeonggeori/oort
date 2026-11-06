@@ -73,12 +73,14 @@ claims:
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
-    claim: "Presenting an already-used refresh token after the reuse window has passed ends the whole session lineage of that device."
-    scope: "Real PostgreSQL, device-key sessions. A resend inside the reuse window returns the same token pair and keeps the lineage (a retry after a lost response). Not a claim about access tokens already issued, which live until they expire."
+    claim: "Presenting an already-used refresh token after the reuse window has passed ends the whole session lineage of that sign-in, with the instance's default settings: a password sign-in (desktop, web) and a QR-linked phone alike."
+    scope: "Real PostgreSQL, device-key sessions. A resend inside the reuse window returns the same token pair and keeps the lineage (a retry after a lost response). An operator can switch the sweep off for password sign-ins only (`MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false`); a QR-linked phone's lineage always ends. Not a claim about access tokens that another sign-in already holds, nor that a thief who rotates the token before its owner is stopped until the owner presents the spent one."
     priority: P1
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#a_reused_refresh_token_ends_the_whole_lineage"
+      - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#by_default_a_reuse_ends_every_sign_in_lineage_password_and_phone"
+      - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#the_off_switch_spares_a_password_sign_in_but_never_a_phone"
   - id: AUTH-2
     claim: "A copy of a refresh token made without the device key ends a key-bound lineage, even inside the reuse window, and a replayed or stale proof is refused while the lineage is kept."
     scope: "Real PostgreSQL. Applies to sessions that registered a device key."

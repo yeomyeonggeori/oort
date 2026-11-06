@@ -10,7 +10,11 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { buildMakeRequest, MAKE_NOTE_MAX } from "@momo/core/features/expressions/make";
-import type { Channel, Message, RosterMember } from "@momo/core/lib/api";
+import { ApiError, type Channel, type Message, type RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { ExpressionStore } from "./ExpressionStore";
 import { createExpressionFixtureTransport } from "./transport";
 import { ExpressionsContext } from "./context";
@@ -291,7 +295,7 @@ describe("네 상태", () => {
   });
   it("목록을 못 불러오면 줄과 다시 시도가 서고 다시 시도하면 이어져요", async () => {
     api.fetchRoster.mockRejectedValueOnce(new Error("offline"));
-    const { view } = mount(form());
+    const { view } = mount(<LocaleProvider locale={await koreanLocale()}>{form()}</LocaleProvider>);
     const banner = await view.findByTestId("expression-make-roster-error");
     expect(banner.textContent).toContain("에이전트 목록을 불러오지 못했어요");
     expect([hiddenOf(view, "expression-make-body"), hiddenOf(view, "expression-make-footer")]).toEqual([true, true]);
@@ -299,6 +303,25 @@ describe("네 상태", () => {
     await waitFor(() => expect(agentSelect(view).value).toBe(MAKE_FIXTURE_AGENT_ID));
     expect([hiddenOf(view, "expression-make-body"), hiddenOf(view, "expression-make-footer")]).toEqual([false, false]);
     expect(view.queryByTestId("expression-make-roster-error")).toBeNull();
+  });
+  // #5279 C: 오류 객체를 삼키던 `{ kind: "error" }`가 오류 객체를 들고 다닌다. 같은 실패 줄이 원인(닫힌 분류)마다 다른 이유를 말하고 상태 코드는 없다.
+  it("목록 읽기 실패의 이유가 원인마다 다르다: 오프라인 / 서버에 닿지 못함 / 그 밖", async () => {
+    const ko: AppLocale = await koreanLocale();
+    const onLine = vi.spyOn(globalThis.navigator, "onLine", "get");
+    const cases: [string, unknown, boolean, string][] = [
+      ["오프라인", new NetworkError("unreachable", 15_000), false, "오프라인이에요."],
+      ["서버에 닿지 못함", new NetworkError("unreachable", 15_000), true, "서버에 닿지 못했어요."],
+      ["그 밖", new ApiError(500, "boom", "internal"), true, "문제가 생겼어요."],
+    ];
+    for (const [name, failure, online, reason] of cases) {
+      onLine.mockReturnValue(online);
+      api.fetchRoster.mockReset().mockRejectedValueOnce(failure);
+      const { view } = mount(<LocaleProvider locale={ko}>{form()}</LocaleProvider>);
+      const text = (await view.findByTestId("expression-make-roster-error")).textContent ?? "";
+      expect(text, name).toContain(`에이전트 목록을 불러오지 못했어요. ${reason}`);
+      expect(text, name).not.toMatch(/\d{3}/);
+      cleanup();
+    }
   });
   it("성공하면 보냈다는 줄이 서요", async () => {
     const { view } = mount(form());
@@ -703,7 +726,7 @@ describe("＋ 메뉴", () => {
   });
 });
 
-describe("이모지 고르개 안에서", () => {
+describe("이모티콘 고르개 안에서", () => {
   // 실제 호스트: 포인터 기기에서는 모달 팝오버다. Radix 가 ResizeObserver 를 부르므로 jsdom 에 빈 구현을 둔다.
   function Host({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
     const [open, setOpen] = useState(true);
@@ -713,7 +736,7 @@ describe("이모지 고르개 안에서", () => {
       <EmojiPickerDialog open={open} onOpenChange={(next) => { setOpen(next); onOpenChange(next); }} onPick={() => {}} opener={opener} anchor={opener} purpose="insert" testId="picker" />
     </>;
   }
-  // 기본 이모지 표가 선택 칸을 스크롤해 보이게 하는데 jsdom 에는 그 함수가 없다.
+  // 기본 그림 문자 표가 선택 칸을 스크롤해 보이게 하는데 jsdom 에는 그 함수가 없다.
   const stubBrowserOnlyApis = () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     Object.defineProperty(Element.prototype, "scrollIntoView", { value: () => {}, configurable: true, writable: true });
@@ -724,7 +747,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Team" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
@@ -748,7 +771,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await view.findByRole("button", { name: "Team" }));
     const manage = await view.findByRole("button", { name: "파티 앵무새 관리" });
     fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
     fireEvent.keyDown(manage, { key: "Enter" });
@@ -777,7 +800,7 @@ describe("이모지 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "우리 팀" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Team" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown(await mounted.view.findByRole("menu"), { key: "Escape" });

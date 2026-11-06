@@ -25,6 +25,7 @@ import { Button } from "@/design/ui/button";
 import { Switch } from "@/design/ui/switch";
 import { notificationRulesQueryKey } from "./notificationRulesKey";
 import { PauseUntilDialog } from "./PauseUntilDialog";
+import { PhoneDelayRow } from "./PhoneDelayRow";
 import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
@@ -261,6 +262,9 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
                   }
                 />
               </SettingsRow>
+              {/* 데스크탑을 쓰는 동안 폰 알림 늦추기(ADR-0206 D4, #4508). 서버에 하나만 있는 값이라 이 카드의 한 줄이다.
+                  자기 질의를 갖고, 옛 서버(404·405)에서는 줄 자체를 그리지 않는다. */}
+              <PhoneDelayRow offline={offline} offlineReasonId={offlineReasonId} />
             </div>
             {/* 두 스위치가 오프라인에서 함께 회색이 되므로 이유를 한 문장으로 말한다. 설명 줄과
                 함께 두 스위치가 aria-describedby로 가리킨다. */}

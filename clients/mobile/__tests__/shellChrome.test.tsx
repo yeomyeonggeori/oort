@@ -345,14 +345,29 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
   it('검색 탭은 누르기 전에는 마운트되지 않고, 누르면 검색 화면이 탭으로 선다', async () => {
     installFetch();
     await renderReady();
-    expect(screen.queryByTestId('search-title')).toBeNull();
+    expect(screen.queryByTestId('search-input')).toBeNull();
     fireEvent.press(screen.getByTestId('tab-search'));
-    expect(screen.getByTestId('search-title')).toBeTruthy();
-    // 탭이라 돌아갈 곳이 없다 — 뒤로 글리프가 없다.
+    expect(screen.getByTestId('search-input')).toBeTruthy();
+    // 탭이라 「닫는」 층이 없다 — 머리의 원형 X 는 입력이 비면 홈 탭으로 돌아가는 문이고 이름도 「닫기」가 아니다(#5365).
     expect(screen.queryByLabelText(/닫기$/)).toBeNull();
     expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({
       selected: true,
     });
+  });
+
+  it('검색 탭의 X 는 입력이 있으면 입력을 지우고, 비어 있으면 홈 탭으로 돌려보낸다 — 탭바는 그대로다 (#5365)', async () => {
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('tab-search'));
+    fireEvent.changeText(screen.getByTestId('search-input'), '배포');
+
+    fireEvent.press(screen.getByTestId('search-exit'));
+    expect(screen.getByTestId('search-input').props.value).toBe('');
+    expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({selected: true});
+
+    fireEvent.press(screen.getByTestId('search-exit'));
+    expect(screen.getByTestId('tab-home').props.accessibilityState).toEqual({selected: true});
+    expect(screen.getByTestId('tab-search').props.accessibilityState).toEqual({selected: false});
   });
 
   it('+ → 「AI」가 AI 시트를 열고, 시트의 「에이전트 부르기」가 에이전트 목록을 연다 (사라진 에이전트 탭의 문)', async () => {
@@ -867,7 +882,7 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     spy.mockRestore();
   });
 
-  it('+ 메뉴: 좌우 20 · 탭바 위 8 · 잉크 그릇 반경 20 · 안 여백 8 · 행 최소 54 (≥44)', async () => {
+  it('+ 메뉴: 좌우 20 · 탭바 위 8 · 표면(surface) 그릇 반경 20 · 안 여백 8 · 행 최소 54 (≥44)', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -881,7 +896,9 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
       gap: 8,
       borderRadius: 20,
     });
-    expect([lightPalette.primary, darkPalette.primary]).toContain(menu.backgroundColor);
+    // 떠 있는 판은 surface 다 — 주 행동 색(primary, 다크에서 밝은 잉크)이 아니다(#5329, `menuTheme5329.test.tsx` 가 전 테마·모드를 잰다).
+    expect([lightPalette.surface, darkPalette.surface]).toContain(menu.backgroundColor);
+    expect([lightPalette.primary, darkPalette.primary]).not.toContain(menu.backgroundColor);
     for (const key of ['dm', 'ai']) {
       const row = flat(`plus-menu-${key}`);
       expect([key, row.minHeight]).toEqual([key, PLUS_MENU.rowHeight]);
@@ -1092,13 +1109,13 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
     expect(contrast(p.onPrimary, p.primary)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('메뉴 글자·아이콘(onPrimary)이 **렌더된** 행 채움과 눌림 위에서 4.5:1', async () => {
+  it('메뉴 글자·아이콘(text)이 **렌더된** 행 채움과 눌림 위에서 4.5:1', async () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('shell-plus'));
     // 렌더된 행의 채움을 읽는다(팔레트는 시험이 고른 모드와 다를 수 있어, 채움의
-    // 알파만 가져와 이 조합의 onPrimary·primary 로 다시 합성한다).
+    // 알파만 가져와 이 조합의 text·surface 로 다시 합성한다).
     // 합성 `Pressable` 의 style 함수를 두 상태로 불러 읽는다.
     const pressable = screen
       .UNSAFE_getAllByProps({testID: 'plus-menu-dm'})
@@ -1114,8 +1131,8 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
     ] as const) {
       const alpha = String(fill).slice(7, 9);
       expect(alpha).toMatch(/^[0-9a-f]{2}$/i);
-      const bg = over(`${p.onPrimary}${alpha}`, p.primary);
-      expect([state, contrast(p.onPrimary, bg) >= 4.5]).toEqual([state, true]);
+      const bg = over(`${p.text}${alpha}`, p.surface);
+      expect([state, contrast(p.text, bg) >= 4.5]).toEqual([state, true]);
     }
   });
 });

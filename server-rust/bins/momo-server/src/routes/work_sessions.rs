@@ -3052,6 +3052,48 @@ mod tests {
         }
     }
 
+    /// #5340: the push judgment (`momo_push::judgment`, the `work_permission` arm) reads exactly
+    /// these paths of the System message an `approval.requested` becomes — the event's kind, its
+    /// id (the request's id on the push), the session it names and the option **kinds** (never
+    /// their names). The notifier's conformance writes this shape by hand, so this is the
+    /// producer's half of that contract: rename a key here and the push silently stops.
+    #[test]
+    fn an_approval_requested_message_carries_the_paths_the_push_judgment_reads() {
+        let session_id = Uuid::from_u128(0x5340);
+        let channel_id = Uuid::from_u128(0x202);
+        let event_id = Uuid::from_u128(0x5341);
+        let event = WorkSessionAcpEvent {
+            event_id,
+            event_type: "approval.requested".into(),
+            v: 1,
+            ts: 1_784_678_400_000,
+            payload: json!({
+                "run_id": session_id, "work_session_id": session_id, "channel_id": channel_id,
+                "action": "requested", "action_type": "tool_call", "status": "pending",
+                "options": [
+                    {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
+                    {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"},
+                ],
+            }),
+        };
+        let validated = validated_acp_event(&event, session_id).expect("a valid request");
+        let props = &validated.props;
+        assert_eq!(props["kind"], "work_session_event");
+        assert_eq!(props["event_type"], "approval.requested");
+        assert_eq!(props["event_id"], json!(event_id.to_string()));
+        assert_eq!(
+            props["event"]["work_session_id"],
+            json!(session_id.to_string())
+        );
+        let kinds: Vec<&str> = props["event"]["options"]
+            .as_array()
+            .expect("the options survive into the message")
+            .iter()
+            .filter_map(|option| option["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["allow_once", "reject_once"]);
+    }
+
     /// #3118: an `approval.requested` may carry the host's preview and its
     /// hash — together and agreeing — and the broadcast payload keeps only
     /// the hash (ADR-0188 D5: the preview is the owner's).

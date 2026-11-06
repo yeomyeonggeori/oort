@@ -86,8 +86,10 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
     expect(typingLine).not.toContain("composer-typing-reserved");
     expect(typingLine).not.toContain('{"\\u200b"}');
     expect(typingLine).toContain('aria-hidden="true"');
-    expect(composer).toMatch(
-      /data-testid="composer-actions"[\s\S]*?<ComposerHint[\s\S]*?<TypingLine/
+    // 액션 행은 한 부품(`ComposerCard`)이 그리고(#5324) 가운데 슬롯(`meta`)에 힌트·작성 중 줄을 채널 입력창이 넘긴다.
+    expect(composer).toMatch(/meta=\{[\s\S]*?<ComposerHint[\s\S]*?<TypingLine/);
+    expect(readFileSync(fileURLToPath(new URL("./ComposerCard.tsx", import.meta.url)), "utf8")).toMatch(
+      /\$\{testIdPrefix\}-actions[\s\S]*?\{tools\}[\s\S]*?\{meta\}[\s\S]*?\{send\}/
     );
     expect(composer).toContain("COMPOSER_FORMAT_LINK_HINT");
     expect(composer).toContain("composerFormatHasPendingLink");

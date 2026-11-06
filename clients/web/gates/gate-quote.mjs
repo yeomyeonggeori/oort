@@ -31,14 +31,14 @@
 //   QUOTE_GATE_PROVE_RED_PLACE=1 npm run gate:quote
 //     expected failure: "the quote block did not sit above the body"
 //   QUOTE_GATE_PROVE_RED_ACCENT=1 npm run gate:quote
-//     expected failure: "the quote rail is wearing the accent"
+//     expected failure: "the quote head is wearing the accent"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. REFETCH는 페이지에서 인용 대상 하나를
 // 직접 fetch하고(카운터 단언이 네트워크를 실제로 보고 있음을 증명), DELETED는 목이
 // tombstone에 본문을 실어 `state`를 살아 있는 값으로 보내고("원문은 화면에 없다"가
 // DOM을 읽고 있음을 증명), LIVE는 프레임에서 `reply_to_id`를 빼고, BINDING은 보내기
-// 전에 인용을 취소하고, PLACE는 DOM에서 블록을 본문 아래로 옮기고, ACCENT는 레일을
-// 앰버로 칠한다. 제품 소스 줄을
+// 전에 인용을 취소하고, PLACE는 DOM에서 블록을 본문 아래로 옮기고, ACCENT는 인용 머리의
+// 글자를 앰버로 칠한다. 제품 소스 줄을
 // 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -536,7 +536,11 @@ async function exercise(browser) {
     throw new Error("a live original must resolve as a ready quote");
   }
 
-  // ---- 2. 자리: 인용은 본문 위, 「답글 N개」는 본문 아래 -----------------------
+  // ---- 2. 자리: 인용은 본문을 싸는 카드의 윗칸, 「답글 N개」는 본문 아래 -------
+  //
+  // #5381 Q4: 인용은 **머리**이고 본문과 한 카드에 든다(머리 → 구분선 → 본문). 옛 판은 행 본문
+  // 상자의 자식 순서로 쟀지만 카드가 머리와 본문을 한 자식에 싸므로, 이제는 **문서 순서**로 잰다:
+  // 머리가 본문보다 앞이고, 같은 카드 안이며, 「답글 N개」(`message-meta`)는 본문보다 뒤다.
   if (proveRedPlace) {
     // red seam: DOM에서 블록을 본문 뒤로 옮긴다. 아래 순서 단언이 DOM을 읽고
     // 있다면 반드시 깨진다. 제품 소스는 그대로다.
@@ -552,8 +556,9 @@ async function exercise(browser) {
   const placement = await page.evaluate(
     ({ quotingId, quotingBody, originId, originBody }) => {
       // 본문에는 자기 testid가 없다(마크다운 렌더러가 그린다). 그래서 위치는
-      // **그 메시지가 실제로 쓴 문장**으로 찾는다 - 인용 블록에는 원본의 글이
-      // 들어 있으므로 「글이 있는 첫 블록」으로는 둘을 구분할 수 없다.
+      // **그 메시지가 실제로 쓴 문장**으로 찾는다 - 인용 머리에는 원본의 글이
+      // 들어 있으므로 「글이 있는 첫 요소」로는 둘을 구분할 수 없다: 머리 밖에서,
+      // 그 문장을 직접 든 가장 안쪽 요소를 본문으로 읽는다.
       const read = (id, needle) => {
         const article = document.querySelector(
           `[data-testid="timeline-message"][data-message-id="${id}"]`
@@ -561,20 +566,26 @@ async function exercise(browser) {
         if (!article) return null;
         const box = article.querySelector("[data-row-body]");
         if (!box) return null;
-        const children = Array.from(box.children);
-        const indexOf = (selector) =>
-          children.findIndex(
-            (child) => child.matches(selector) || child.querySelector(selector)
-          );
+        const head = box.querySelector('[data-testid="quote-block"]');
+        const order = Array.from(box.querySelectorAll("*"));
+        const bodyEl =
+          order.filter(
+            (el) =>
+              (head === null || (el !== head && !head.contains(el))) &&
+              Array.from(el.childNodes).some(
+                (node) =>
+                  node.nodeType === Node.TEXT_NODE &&
+                  (node.textContent ?? "").includes(needle)
+              )
+          )[0] ?? null;
+        const metaEl = box.querySelector('[data-testid="message-meta"]');
+        const card = head?.closest('[data-testid="quote-card"]') ?? null;
         return {
-          quote: indexOf('[data-testid="quote-block"]'),
-          meta: indexOf('[data-testid="message-meta"]'),
-          body: children.findIndex(
-            (child) =>
-              !child.matches('[data-testid="quote-block"]') &&
-              child.querySelector('[data-testid="quote-block"]') === null &&
-              (child.textContent ?? "").includes(needle)
-          ),
+          quote: head === null ? -1 : order.indexOf(head),
+          meta: metaEl === null ? -1 : order.indexOf(metaEl),
+          body: bodyEl === null ? -1 : order.indexOf(bodyEl),
+          // 머리와 본문이 한 카드에 든다(Q4 계약).
+          sameCard: card !== null && bodyEl !== null && card.contains(bodyEl),
         };
       };
       return {
@@ -600,7 +611,16 @@ async function exercise(browser) {
       `the quote block did not sit above the body (quote at ${placement.quoting.quote}, body at ${placement.quoting.body})`
     );
   }
-  if (placement.origin === null || placement.origin.meta <= placement.origin.body) {
+  if (!placement.quoting.sameCard) {
+    throw new Error(
+      "the quote head and the reply body must be ONE card (#5381 Q4); the body stood outside the quote card"
+    );
+  }
+  if (
+    placement.origin === null ||
+    placement.origin.meta < 0 ||
+    placement.origin.meta <= placement.origin.body
+  ) {
     throw new Error(
       "the thread rollup must stay BELOW the body: the two devices are told apart by where they sit"
     );
@@ -616,13 +636,16 @@ async function exercise(browser) {
     throw new Error("a quote of a quote must carry the 인용 포함 marker");
   }
 
-  // ---- 2b. 색이 뜻을 겹쳐 쓰지 않는다 (design-review B-1) --------------------
+  // ---- 2b. 색이 뜻을 겹쳐 쓰지 않는다 (design-review B-1) · 세로선이 없다 (#5381 Q4) ----
   //
   // 이 화면에서 앰버(`--accent`)는 이미 **멘션**(나를 불렀다)과 **미읽 경계**(여기부터
   // 안 읽었다)를 뜻한다. 인용은 그 둘과 관계없는 「참조」이므로 같은 색을 쓰면
   // 「가리킨다」가 「나를 불렀다」로 읽힌다. 정지 상태와 **hover 상태 둘 다** 잰다 —
   // 1차의 실제 위반은 hover(`border-accent`)였고 정지 상태만 보면 그것을 못 잡는다.
-  const railColors = await page.evaluate(([paintAccent, landingClass]) => {
+  // 그리고 #5381 이후로 인용에는 **세로선·막대가 없다**: 카드 안 어느 요소도 왼쪽·오른쪽
+  // 테두리를 두르지 않는지 계산된 스타일로 잰다(옛 판은 레일 색을 쟀다 — 레일이 없는 지금
+  // 그 값은 늘 같아서 아무것도 못 재는 단정이 되므로 걷었다).
+  const headColors = await page.evaluate(([paintAccent, landingClass]) => {
     // 토큰의 실제 계산값을 얻는 방법: 그 유틸리티를 입은 프로브를 한 번 만든다.
     // 하드코딩한 hex와 비교하면 팔레트가 재조정될 때 이 단언만 조용히 낡는다.
     const probeWith = (className, read) => {
@@ -644,74 +667,98 @@ async function exercise(browser) {
 
     const blocks = document.querySelectorAll('[data-testid="quote-block"]');
     if (paintAccent) {
-      // red seam: 드라이버가 레일을 앰버로 칠한다. 계산된 색을 **직접** 넣는 이유는
-      // `classList.add("border-accent")`가 확실하지 않기 때문이다 — 두 색 유틸리티는
+      // red seam: 드라이버가 머리의 글자를 앰버로 칠한다. 계산된 색을 **직접** 넣는 이유는
+      // `classList.add("text-accent")`가 확실하지 않기 때문이다 — 두 색 유틸리티는
       // 특정도가 같아서 컴파일된 스타일시트의 순서가 승자를 정하고, 그 순서는 게이트가
       // 통제하지 못한다. 첫 시도가 그래서 red가 되지 않았다.
       for (const node of blocks) {
-        if (node instanceof HTMLElement) node.style.borderLeftColor = accent;
+        if (node instanceof HTMLElement) node.style.color = accent;
       }
     }
     const block = blocks[0];
+    const card = block?.closest('[data-testid="quote-card"]') ?? null;
+    // 카드의 채움은 안쪽 상자가 진다(바깥은 폭 상한용 flex 자리다).
+    const fill = card?.firstElementChild ?? null;
+    const sides = (node) => {
+      const style = getComputedStyle(node);
+      return (
+        parseFloat(style.borderLeftWidth) > 0 ||
+        parseFloat(style.borderRightWidth) > 0
+      );
+    };
     return {
       accent,
       mention,
       unreadRule,
       anchorTint,
-      rail: block === undefined ? null : getComputedStyle(block).borderLeftColor,
-      railBackground:
-        block === undefined ? null : getComputedStyle(block).backgroundColor,
+      headColor: block === undefined ? null : getComputedStyle(block).color,
+      cardFill: fill === null ? null : getComputedStyle(fill).backgroundColor,
+      // 세로선: 카드 안(카드 자신 포함) 어느 요소가 왼쪽·오른쪽 테두리를 두르는가.
+      sideBorders:
+        card === null
+          ? null
+          : [card, ...card.querySelectorAll("*")].filter(sides).length,
     };
   }, [proveRedAccent, LANDING_CLASS]);
   console.log(
-    `[color] 인용 레일 ${railColors.rail} / accent ${railColors.accent} ` +
-      `(멘션 ${railColors.mention} · 미읽 규칙 ${railColors.unreadRule} · 앵커 틴트 ${railColors.anchorTint})`
+    `[color] 인용 머리 ${headColors.headColor} / 카드 채움 ${headColors.cardFill} / accent ${headColors.accent} ` +
+      `(멘션 ${headColors.mention} · 미읽 규칙 ${headColors.unreadRule} · 앵커 틴트 ${headColors.anchorTint})`
   );
-  if (railColors.rail === null) {
-    throw new Error("측정할 인용 블록이 없다");
+  if (headColors.headColor === null || headColors.sideBorders === null) {
+    throw new Error("측정할 인용 머리가 없다");
   }
-  if (railColors.rail === railColors.accent) {
+  if (headColors.sideBorders !== 0) {
     throw new Error(
-      `the quote rail is wearing the accent (${railColors.rail}); 앰버는 이 화면에서 ` +
+      `the quote card draws a vertical rail (${headColors.sideBorders} element(s) with a side border); ` +
+        "인용은 카드 윗칸 머리이고 세로선·막대는 어디에도 없다 (#5381 Q4)"
+    );
+  }
+  if (
+    headColors.headColor === headColors.accent ||
+    headColors.headColor === headColors.mention
+  ) {
+    throw new Error(
+      `the quote head is wearing the accent (${headColors.headColor}); 앰버는 이 화면에서 ` +
         "멘션과 미읽 경계의 색이고, 인용은 참조라 같은 기호를 쓸 수 없다 (taste §4)"
     );
   }
-  await quoting.hover();
-  const hoverRail = await page.evaluate(() => {
-    const block = document.querySelector('[data-testid="quote-block"]');
-    return block === null ? null : getComputedStyle(block).borderLeftColor;
+  await block.hover();
+  const hoverHead = await page.evaluate(() => {
+    const head = document.querySelector('[data-testid="quote-block"]');
+    return head === null ? null : getComputedStyle(head).color;
   });
-  console.log(`[color] hover 레일 ${hoverRail}`);
-  if (hoverRail === railColors.accent) {
+  console.log(`[color] hover 머리 ${hoverHead}`);
+  if (hoverHead === headColors.accent || hoverHead === headColors.mention) {
     throw new Error(
-      `the quote rail is wearing the accent on hover (${hoverRail}); 정지 상태만 중성인 ` +
+      `the quote head is wearing the accent on hover (${hoverHead}); 정지 상태만 중성인 ` +
         "것으로는 부족하다 - 마우스를 얹은 순간 인용이 멘션의 색이 된다"
     );
   }
   // 앵커 착지 표면(`landed-surface`, `--warn-soft`)과도 겹치지 않는다. 그것은 「방금 여기로 왔다」는
-  // 일시적 피드백이고, 인용이 상시로 그 색을 입으면 모든 인용이 방금 점프해 온 자리로
+  // 일시적 피드백이고, 인용 카드가 상시로 그 색을 입으면 모든 답장이 방금 점프해 온 자리로
   // 보인다.
   if (
-    railColors.railBackground !== null &&
-    railColors.railBackground === railColors.anchorTint
+    headColors.cardFill !== null &&
+    headColors.cardFill === headColors.anchorTint
   ) {
     throw new Error(
-      `the quote block wears the anchor landing tint as its resting background (${railColors.railBackground})`
+      `the quote card wears the anchor landing tint as its resting background (${headColors.cardFill})`
     );
   }
 
   // 포커스 링은 예외이고, 그 예외가 의도임을 여기서 못박는다: accent 링은 「포커스가
   // 여기 있다」를 말하는 하우스 패턴이고(SKILL §6) 이 앱의 모든 컨트롤이 같은 링을
-  // 쓴다. 인용만 다른 링을 쓰면 그게 새로운 오독이다.
+  // 쓴다. 인용만 다른 링을 쓰면 그게 새로운 오독이다. 다만 링이 카드 채움과 같은 색이면
+  // 포커스가 어디 있는지 보이지 않는다.
   const focusRing = await page.evaluate(() => {
-    const block = document.querySelector('[data-testid="quote-block"]');
-    if (!(block instanceof HTMLElement)) return null;
-    block.focus();
-    return getComputedStyle(block).outlineColor;
+    const head = document.querySelector('[data-testid="quote-block"]');
+    if (!(head instanceof HTMLElement)) return null;
+    head.focus();
+    return getComputedStyle(head).outlineColor;
   });
-  if (focusRing !== null && focusRing === railColors.rail) {
+  if (focusRing !== null && focusRing === headColors.cardFill) {
     throw new Error(
-      "포커스 링이 레일과 같은 색이면 포커스가 어디 있는지 보이지 않는다"
+      "포커스 링이 카드 채움과 같은 색이면 포커스가 어디 있는지 보이지 않는다"
     );
   }
 

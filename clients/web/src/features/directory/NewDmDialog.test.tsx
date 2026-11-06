@@ -344,7 +344,7 @@ describe("새 다이렉트 메시지 모달: 멤버 목록 불러오기 실패 (
   it("실패하면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 명부를 다시 읽는다", async () => {
     const cases: [boolean, string, string][] = [
       [false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
-      [true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [true, "serverUnreachable", "서버에 닿지 못했어요."],
     ];
     for (const [online, cause, reason] of cases) {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);

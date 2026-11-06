@@ -1,12 +1,46 @@
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {act, cleanup, render, screen, waitFor} from '@testing-library/react-native';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react-native';
 import {readFileSync} from 'fs';
 import {join} from 'path';
 import React from 'react';
-import {Text} from 'react-native';
+import {Keyboard, Text} from 'react-native';
 
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+import type {Channel} from '@momo/core/lib/api';
+import {
+  __resetSearchRecentsCache,
+  recentsFor,
+  recentsScope,
+  rememberConversation,
+  rememberSearch,
+} from '../src/features/search/searchRecents';
 import {useMessageSearch} from '../src/features/search/useMessageSearch';
+import SearchScreen from '../src/screens/SearchScreen';
+import {SessionProvider} from '../src/session/useSession';
+import {
+  callsTo,
+  installFetch,
+  jsonResponse,
+  member,
+  OTHER_ID,
+  renderWithQuery,
+  resetSession,
+  selfMember,
+  SELF_ID,
+  settle,
+  signIn,
+  WS_ID,
+} from './testkit';
 
 // The one network call this surface makes. Mocked at the module boundary so the
 // contract under test is "what does this hook ask for, and when" — the two
@@ -138,6 +172,17 @@ describe('입력은 동기, 요청만 늦다', () => {
     expect(searchMessages).not.toHaveBeenCalled();
   });
 
+  it('#5384 setQueryNow 는 이미 다 친 말을 디바운스 없이 바로 찾는다 — 최근 검색을 고른 것', async () => {
+    searchMessages.mockResolvedValue(page(2));
+    mount();
+    // 디바운스를 흘리지 않는다(`setQuery` 였다면 250ms 뒤에야 나갔을 요청이다).
+    act(() => {
+      probe.setQueryNow('배포 일정');
+    });
+    expect(probe.query).toBe('배포 일정');
+    await waitFor(() => expect(searchMessages).toHaveBeenCalledWith(WS, '배포 일정', expect.anything()));
+  });
+
   it('지우는 것은 기다리지 않는다', () => {
     mount();
     act(() => {
@@ -214,6 +259,404 @@ describe('넘겨받은 질의', () => {
       expect(searchMessages).toHaveBeenCalledWith(WS, '배포', expect.anything()),
     );
     expect(probe.query).toBe('배포');
+  });
+});
+
+// =============================================================================
+// 검색 탭 화면 (#5365) — 사람·채널·메시지를 한 입력칸에서.
+//
+// 가짜는 둘뿐이다: 메시지 검색(`searchMessages`, 위 모듈 경계)과 나머지 네트워크(`fetch`: 채널 목록·명부·DM 열기).
+// 화면·훅·저장소는 진짜라서 단정은 「호출했는가」가 아니라 **화면에 무엇이 서는가**에 대한 것이다. 문구는 사전에서 읽는다.
+// =============================================================================
+
+describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르기 (#5365)', () => {
+  const t = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+  const ME = selfMember({displayName: '곽성재', handle: 'seongjae'});
+  const LUNA = member({id: OTHER_ID, workspaceId: WS_ID, displayName: '루나', handle: 'luna'});
+  const HELPER = member({
+    id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+    workspaceId: WS_ID,
+    kind: 'agent',
+    displayName: '루나 도우미',
+    handle: 'luna-helper',
+  });
+  const ROSTER = [member({id: SELF_ID, workspaceId: WS_ID, displayName: '곽성재', handle: 'seongjae'}), LUNA, HELPER];
+  const channel = (id: string, name: string, kind: Channel['kind'] = 'public'): Channel => ({
+    id,
+    workspaceId: WS_ID,
+    kind,
+    name,
+    muted: false,
+  });
+  const CH_PROJECT = channel('cccccccc-1111-4111-8111-cccccccccccc', '루나-프로젝트');
+  const CH_DESIGN = channel('cccccccc-2222-4222-8222-cccccccccccc', '루나-디자인', 'private');
+  const CH_LAUNCH = channel('cccccccc-3333-4333-8333-cccccccccccc', '출시-준비');
+  const DM_LUNA: Channel = {
+    id: 'dddddddd-1111-4111-8111-dddddddddddd',
+    workspaceId: WS_ID,
+    kind: 'dm',
+    memberIds: [SELF_ID, OTHER_ID],
+    muted: false,
+  };
+  const hit = (n: number, channelId: string) => ({
+    channelId,
+    messageId: `m-${n}`,
+    seq: n,
+    authorMemberId: OTHER_ID,
+    createdAtMs: 1_700_000_000_000,
+    snippet: '루나 쪽 배포는 내일이에요',
+    matchOffset: 0,
+  });
+  const scope = recentsScope(WS_ID, SELF_ID);
+  const input = () => screen.getByTestId('search-input');
+  const enter = (text: string) => fireEvent.changeText(input(), text);
+  const press = (testID: string) => fireEvent.press(screen.getByTestId(testID));
+  const selected = (kind: string) =>
+    screen.getByTestId(`search-kind-${kind}`).props.accessibilityState.selected;
+
+  // 디바운스(250ms)가 지나고, 그 뒤에 나간 요청의 답이 화면까지 오는 두 박자.
+  const searched = async () => {
+    await settle(300);
+    await settle(100);
+  };
+
+  let network: jest.Mock;
+  // 「DM 열기」 응답을 붙잡아 두는 문 — 기본은 열려 있다.
+  let dmGate: Promise<void>;
+
+  beforeEach(() => {
+    resetSession();
+    signIn(ME);
+    __resetSearchRecentsCache();
+    dmGate = Promise.resolve();
+    network = installFetch(url => {
+      if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      if (url.endsWith('/dms')) {
+        return dmGate.then(() => jsonResponse(200, {channel: DM_LUNA, created: false}));
+      }
+      if (url.includes('/channels')) {
+        return jsonResponse(200, {channels: [CH_PROJECT, CH_DESIGN, CH_LAUNCH]});
+      }
+      return undefined;
+    });
+  });
+
+  async function mountSearch() {
+    const onOpenResult = jest.fn();
+    const onClose = jest.fn();
+    const view = renderWithQuery(
+      <SessionProvider member={ME}>
+        <SearchScreen onOpenResult={onOpenResult} onClose={onClose} />
+      </SessionProvider>,
+    );
+    await settle(50);
+    return {...view, onOpenResult, onClose};
+  }
+
+  it('처음 열면 X(홈으로)와 칩 넷이 서고, 최근이 없으면 안내 한 줄이며 서버는 부르지 않는다', async () => {
+    await mountSearch();
+    expect(screen.getByTestId('search-exit')).toHaveProp(
+      'accessibilityLabel',
+      t('search.input.exitLabel'),
+    );
+    expect(screen.getAllByTestId(/^search-kind-/)).toHaveLength(4);
+    expect(selected('all')).toBe(true);
+    expect(screen.getByTestId('search-idle')).toHaveTextContent(t('search.recent.empty'));
+    expect(searchMessages).not.toHaveBeenCalled();
+  });
+
+  it('최근 연 대화·최근 검색이 서고, 검색어를 누르면 입력칸에 들어가며, 모두 지우기는 검색어만 비운다', async () => {
+    rememberConversation(scope, CH_PROJECT.id);
+    rememberSearch(scope, '배포 일정');
+    rememberSearch(scope, '루나');
+    searchMessages.mockResolvedValue({hits: []});
+    const {onOpenResult} = await mountSearch();
+
+    fireEvent.press(screen.getByTestId(`search-recent-conversation-${CH_PROJECT.id}`));
+    expect(onOpenResult).toHaveBeenCalledWith(CH_PROJECT.id, CH_PROJECT.name);
+
+    // 가장 최근 검색이 맨 위다. 누르면 입력칸에 그 말이 들어간다.
+    const rows = screen.getAllByTestId('search-recent-search');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('루나');
+    fireEvent.press(rows[0]);
+    expect(input().props.value).toBe('루나');
+
+    // X 로 입력을 비우면 최근 목록이 돌아오고, 「모두 지우기」는 검색어만 지운다.
+    press('search-exit');
+    expect(screen.getByTestId('search-recent-searches')).toBeTruthy();
+    press('search-recent-clear');
+    expect(screen.queryByTestId('search-recent-searches')).toBeNull();
+    expect(screen.getByTestId('search-recent-conversations')).toBeTruthy();
+    expect(recentsFor(scope).searches).toEqual([]);
+    expect(recentsFor(scope).conversations).toEqual([CH_PROJECT.id]);
+  });
+
+  it('「전체」: 채널·사람은 서버를 기다리지 않고 바로, 메시지는 250ms 뒤 서버 결과로 — 찾은 글자가 강조된다', async () => {
+    searchMessages.mockResolvedValue({hits: [hit(1, CH_PROJECT.id), hit(2, CH_LAUNCH.id)]});
+    await mountSearch();
+    enter('루나');
+
+    expect(screen.getAllByTestId(/^search-channel-/)).toHaveLength(2);
+    expect(screen.getAllByTestId(/^search-person-/)).toHaveLength(2);
+    expect(screen.queryByTestId('search-results')).toBeNull();
+    expect(searchMessages).not.toHaveBeenCalled();
+    // 이름 안에서 찾은 글자만 강조 조각이 된다.
+    const row = screen.getByTestId(`search-channel-${CH_DESIGN.id}`);
+    expect(within(row).getAllByTestId('search-match')).toHaveLength(1);
+    expect(within(row).getByTestId('search-match')).toHaveTextContent('루나');
+
+    await searched();
+    expect(searchMessages).toHaveBeenCalledWith(WS_ID, '루나', expect.anything());
+    expect(screen.getAllByTestId('search-result')).toHaveLength(2);
+    // 채널이 사람보다, 사람이 메시지보다 위다(묶음 순서).
+    const order = [
+      'search-group-channels',
+      'search-group-people',
+      'search-group-messages',
+    ].map(id => JSON.stringify(screen.toJSON()).indexOf(id));
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('칩이 종류를 좁힌다 — 「전체」의 메시지 묶음은 셋까지이고 「더 보기」는 「메시지」 칩으로, 「채널」·「사람」은 서버를 다시 부르지 않는다', async () => {
+    searchMessages.mockResolvedValue({hits: [1, 2, 3, 4].map(n => hit(n, CH_PROJECT.id))});
+    await mountSearch();
+    enter('루나');
+    await searched();
+    const calls = searchMessages.mock.calls.length;
+    // 「전체」: 메시지 묶음은 셋까지만 보이고 머리의 「더 보기」가 남는다.
+    expect(screen.getAllByTestId('search-result')).toHaveLength(3);
+
+    press('search-kind-channels');
+    expect(selected('channels')).toBe(true);
+    expect(screen.getAllByTestId(/^search-channel-/)).toHaveLength(2);
+    expect(screen.queryAllByTestId(/^search-person-/)).toHaveLength(0);
+
+    press('search-kind-people');
+    expect(screen.getAllByTestId(/^search-person-/)).toHaveLength(2);
+    expect(screen.queryAllByTestId(/^search-channel-/)).toHaveLength(0);
+    await searched();
+    expect(searchMessages.mock.calls.length).toBe(calls);
+
+    // 「더 보기」는 그 종류 칩으로 보낸다: 메시지는 넷 모두, 채널·사람 묶음은 사라지고 범위 줄이 선다.
+    press('search-kind-all');
+    expect(screen.queryByTestId('search-scope')).toBeNull();
+    press('search-head-messages-more');
+    expect(selected('messages')).toBe(true);
+    expect(screen.getByTestId('search-scope')).toBeTruthy();
+    expect(screen.getAllByTestId('search-result')).toHaveLength(4);
+    expect(screen.queryAllByTestId(/^search-(channel|person)-/)).toHaveLength(0);
+  });
+
+  it('「대화 고르기」에서 고른 대화 하나로 좁혀 찾고, 「모든 대화」로 되돌린다', async () => {
+    searchMessages.mockResolvedValue({hits: [hit(1, CH_PROJECT.id)]});
+    await mountSearch();
+    press('search-kind-messages');
+    enter('루나');
+    await searched();
+    expect(searchMessages.mock.lastCall?.[2]).not.toHaveProperty('channelId');
+
+    press('search-scope-pick');
+    expect(screen.getByTestId('search-picker-sheet')).toBeTruthy();
+    // 시트 안에서 이름으로 걸러 고른다.
+    fireEvent.changeText(screen.getByTestId('search-picker-filter'), '프로젝트');
+    expect(screen.queryByTestId(`search-picker-item-${CH_DESIGN.id}`)).toBeNull();
+    press(`search-picker-item-${CH_PROJECT.id}`);
+    await settle(600);
+
+    expect(screen.getByTestId('search-scope-chosen')).toHaveTextContent(CH_PROJECT.name as string);
+    await searched();
+    expect(searchMessages.mock.lastCall?.[2]).toEqual(
+      expect.objectContaining({channelId: CH_PROJECT.id}),
+    );
+
+    press('search-scope-all');
+    expect(screen.queryByTestId('search-scope-chosen')).toBeNull();
+    await searched();
+    expect(searchMessages.mock.lastCall?.[2]).not.toHaveProperty('channelId');
+  });
+
+  it('#5384 한 대화 안에서 찾은 말은 범위와 함께 남고, 최근 검색에 범위 칩으로 서며, 누르면 「메시지」 칩 + 그 대화로 다시 찾는다', async () => {
+    searchMessages.mockResolvedValue({hits: [hit(1, CH_PROJECT.id)]});
+    await mountSearch();
+    press('search-kind-messages');
+    press('search-scope-pick');
+    press(`search-picker-item-${CH_PROJECT.id}`);
+    await settle(600);
+    enter('롤백');
+    await searched();
+    // 결과를 눌러 남긴다 - 고른 대화 하나 안에서 찾은 말이라 범위(채널 id)가 함께 저장된다.
+    press('search-result');
+    expect(recentsFor(scope).searches).toEqual([{query: '롤백', channelId: CH_PROJECT.id}]);
+
+    // 입력을 비우고 범위도 풀어 처음 모양으로 돌아오면 그 줄이 범위 칩(대화 이름)과 함께 선다.
+    press('search-exit');
+    press('search-scope-all');
+    press('search-kind-all');
+    expect(screen.getByTestId('search-recent-search')).toHaveTextContent(/롤백/);
+    expect(within(screen.getByTestId('search-recent-search')).getByTestId('search-recent-scope')).toHaveTextContent(
+      CH_PROJECT.name as string,
+    );
+    expect(screen.getByTestId('search-recent-search')).toHaveProp(
+      'accessibilityLabel',
+      t('search.recent.searchInLabel', {query: '롤백', where: CH_PROJECT.name as string}),
+    );
+
+    // 누르면 말이 들어가고, 「메시지」 칩 + 그 대화로 다시 찾는다(디바운스를 기다리지 않는다 — 같은 말·같은 범위라 방금 받은 결과가 캐시에서 바로 선다).
+    fireEvent.press(screen.getByTestId('search-recent-search'));
+    expect(input().props.value).toBe('롤백');
+    expect(selected('messages')).toBe(true);
+    expect(screen.getByTestId('search-scope-chosen')).toHaveTextContent(CH_PROJECT.name as string);
+    await settle(100);
+    expect(screen.getAllByTestId('search-result')).toHaveLength(1);
+    expect(searchMessages.mock.lastCall?.[2]).toEqual(expect.objectContaining({channelId: CH_PROJECT.id}));
+  });
+
+  it('#5384 내가 든 목록에 없는 대화의 줄은 범위 칩 없이 말만 선다 - 이름을 지어내지도, 못 찾을 범위를 되살리지도 않는다', async () => {
+    rememberSearch(scope, '나간 대화의 말', 'ffffffff-9999-4999-8999-ffffffffffff');
+    searchMessages.mockResolvedValue({hits: []});
+    await mountSearch();
+    expect(screen.getByTestId('search-recent-search')).toHaveTextContent(/나간 대화의 말/);
+    expect(screen.queryByTestId('search-recent-scope')).toBeNull();
+    fireEvent.press(screen.getByTestId('search-recent-search'));
+    expect(input().props.value).toBe('나간 대화의 말');
+    // 범위를 되살리지 않는다 - 「전체」 칩 그대로다.
+    expect(selected('all')).toBe(true);
+    expect(screen.queryByTestId('search-scope-chosen')).toBeNull();
+  });
+
+  it('X 는 입력이 있으면 입력을 지우고, 비어 있으면 홈으로 돌려보낸다', async () => {
+    const {onClose} = await mountSearch();
+    enter('루나');
+    expect(screen.getByTestId('search-exit')).toHaveProp(
+      'accessibilityLabel',
+      t('search.input.clearLabel'),
+    );
+    press('search-exit');
+    expect(input().props.value).toBe('');
+    expect(onClose).not.toHaveBeenCalled();
+
+    press('search-exit');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('결과를 누르면 메시지는 그 메시지로, 채널은 그 채널로, 사람은 DM 으로 가고, 친 말이 최근 검색에 남는다', async () => {
+    searchMessages.mockResolvedValue({hits: [hit(7, CH_PROJECT.id)]});
+    const {onOpenResult} = await mountSearch();
+    enter('루나');
+    await searched();
+
+    press('search-result');
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name, {
+      messageId: 'm-7',
+      seq: 7,
+    });
+    press(`search-channel-${CH_DESIGN.id}`);
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_DESIGN.id, CH_DESIGN.name);
+
+    press('search-person-luna');
+    await settle(100);
+    expect(callsTo(network, '/dms')).toBe(1);
+    expect(onOpenResult).toHaveBeenLastCalledWith(DM_LUNA.id, '루나');
+    expect(recentsFor(scope).searches).toEqual([{query: '루나'}]);
+
+    // DM 이 열리는 동안 다른 결과를 눌렀다면, 늦게 도착한 DM 이 그 길을 가로채지 않는다.
+    let release: () => void = () => {};
+    dmGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    press('search-person-luna');
+    press(`search-channel-${CH_PROJECT.id}`);
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name);
+    release();
+    await settle(100);
+    expect(onOpenResult).toHaveBeenLastCalledWith(CH_PROJECT.id, CH_PROJECT.name);
+  });
+
+  it('#5418 결과(최근 연 대화·메시지·채널·사람)를 누르면 자판을 먼저 내린 뒤 이동한다 - 검색 탭은 남아 있어서 내리지 않으면 자판이 대화 위에 그대로 남는다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    try {
+      rememberConversation(scope, CH_LAUNCH.id);
+      searchMessages.mockResolvedValue({hits: [hit(7, CH_PROJECT.id)]});
+      const {onOpenResult} = await mountSearch();
+      const lastOrder = (spy: {mock: {invocationCallOrder: number[]}}) => spy.mock.invocationCallOrder[spy.mock.invocationCallOrder.length - 1];
+
+      /** 이 눌림 하나가 자판을 **새로** 내렸고(앞 눌림의 호출이 아니다), 그 내림이 이동보다 앞섰다. */
+      const opensAfterDismiss = async (testID: string) => {
+        const dismissedBefore = dismiss.mock.calls.length;
+        const openedBefore = onOpenResult.mock.calls.length;
+        press(testID);
+        await settle(100);
+        expect(onOpenResult.mock.calls.length).toBe(openedBefore + 1);
+        expect(dismiss.mock.calls.length).toBeGreaterThan(dismissedBefore);
+        expect(lastOrder(dismiss)).toBeLessThan(lastOrder(onOpenResult));
+      };
+
+      // 입력 전의 첫 화면: 최근 연 대화.
+      await opensAfterDismiss(`search-recent-conversation-${CH_LAUNCH.id}`);
+      // 입력 뒤: 메시지 · 채널 · 사람.
+      enter('루나');
+      await searched();
+      await opensAfterDismiss('search-result');
+      await opensAfterDismiss(`search-channel-${CH_DESIGN.id}`);
+      await opensAfterDismiss('search-person-luna');
+    } finally {
+      dismiss.mockRestore();
+    }
+  });
+
+  it('#5418 사람은 누른 순간 자판을 내리고, DM 이 열려 이동하는 순간에도 한 번 더 내린다(그 사이 입력칸을 다시 눌렀을 수 있다)', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    try {
+      searchMessages.mockResolvedValue({hits: []});
+      const {onOpenResult} = await mountSearch();
+      enter('루나');
+      await searched();
+      let release: () => void = () => {};
+      dmGate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      press('search-person-luna');
+      // 아직 DM 이 열리는 중이다: 이동은 없고 자판은 이미 내려갔다.
+      expect(onOpenResult).not.toHaveBeenCalled();
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      release();
+      await settle(100);
+      expect(onOpenResult).toHaveBeenLastCalledWith(DM_LUNA.id, '루나');
+      expect(dismiss).toHaveBeenCalledTimes(2);
+      expect(dismiss.mock.invocationCallOrder[1]).toBeLessThan(onOpenResult.mock.invocationCallOrder[0]);
+    } finally {
+      dismiss.mockRestore();
+    }
+  });
+
+  it('메시지 쪽 상태: 한 글자는 안내, 실패는 다시 시도, 결과 없음은 친 말을 인용한다', async () => {
+    await mountSearch();
+    enter('루');
+    // 채널·사람은 한 글자부터 바로 찾고, 메시지만 두 글자부터라고 말한다(이 말은 요청과 같은 디바운스 뒤에 선다).
+    expect(screen.getAllByTestId(/^search-channel-/)).toHaveLength(2);
+    await searched();
+    expect(screen.getByTestId('search-too-short')).toHaveTextContent(
+      t('search.state.shortHintMessages'),
+    );
+    expect(searchMessages).not.toHaveBeenCalled();
+
+    searchMessages.mockRejectedValue(new Error('네트워크'));
+    press('search-kind-messages');
+    enter('배포');
+    await searched();
+    expect(screen.getByTestId('search-error')).toBeTruthy();
+    searchMessages.mockResolvedValue({hits: []});
+    press('search-error-retry');
+    await settle(100);
+    // 결과 없음은 친 말을 인용하고, 범위(내가 속한 채널만)도 함께 말한다.
+    expect(screen.getByTestId('search-empty')).toHaveTextContent(
+      t('search.state.noResults', {query: '배포'}),
+      {exact: false},
+    );
+    expect(screen.getByTestId('search-empty')).toHaveTextContent(t('search.state.scopeNote'), {
+      exact: false,
+    });
   });
 });
 

@@ -43,12 +43,13 @@
 //! | test | what it proves |
 //! |---|---|
 //! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; no request, from `register` to the last ack, carries the host key's seed in any encoding; and fake credentials planted in `run`'s environment reach neither the agent nor a command it runs (#2630 F1) |
-//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
+//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630), after `run` read Codex's effective feature switches back at start; a Codex that stops honouring a switch while the host runs is refused at its next session (`codex_config_unverified`, #2647); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can` | ADR-0188 D5 (#3000): the agent's request becomes a `work_permission_request` row (FORCE RLS); an agent bearer (the owner's own agent), a teammate, an `allow_always` (by kind or by an option id relabelled `allow_once`), an instruction and an unknown request are refused and the agent keeps waiting; the owner's `allow_once` becomes a `permission` control the host acks, the agent gets exactly that option, the server's `approval.decided` and an audit row are written; the same decision again is 200 with one control, a different one 409; a lapsed request is 409 and `expired`; ending the session cancels what is pending and answers the agent `cancelled` |
 //! | `wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end` | #3027, R2 on at both ends (server flag, host `require_human_signatures` with the root pinned): the owner's resume signed over its successor session runs on the real binary; a signed `queue` sent through `POST …/instructions` waits behind the hung first turn, a signed `interrupt` cancels it (ACP `session/cancel`) and runs next, then the queued one; both instructions are session-thread messages keyed by their nonce |
 //! | `wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it` | #3117 (E10 검수 B1): the config the desktop app writes (no `require_human_signatures`), `run` with the control socket. The server flag on and no root: the socket reports the half state (`serverRequired` true, `required` false). `pin_root` on the socket → the next poll latches R2. A control row the server inserts unsigned, and a signed instruction whose envelope is stripped in the DB, are refused (`device_signature_required`) and reach no agent; a signed resume runs. The server restarted with the flag off: an unsigned input is still refused, and after a host restart the server's own unsigned resume is refused too. Only `reset_signature_requirement` on the socket lowers it: the next unsigned resume runs |
+//! | `wdc_9_a_teammates_session_label_never_becomes_the_owners_first_prompt` | #5338 (#5327 F-10, ADR-0188 §8.12): a teammate's session, orphaned, resumed by the owner onto the served host: the agent's only first prompt is `policy::RESUME_FIRST_PROMPT`, never the teammate's label; the resumed session keeps the label as its title |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
 
 use std::net::SocketAddr;
@@ -70,6 +71,7 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
+use momo_workd::policy::RESUME_FIRST_PROMPT;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -1312,7 +1314,8 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
                 .unwrap_or_default()
         })
         .collect();
-    assert_eq!(answer, "stub heard: summarise the repo — done.");
+    // #5338: a resume starts with the host's own sentence, not its label.
+    assert_eq!(answer, format!("stub heard: {RESUME_FIRST_PROMPT} — done."));
     assert!(of_type("agent.status")
         .iter()
         .any(|row| row["props"]["event"]["has_plan"] == true));
@@ -1625,6 +1628,67 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
     );
     eprintln!("wdc_2: Codex resume {codex_spawn} ran from the host's own CODEX_HOME and HOME");
 
+    // ---- #2647 L1: a codex that drifts while the host runs ------------------
+    // `run` read Codex's effective settings back once at start, and every
+    // Codex session repeats the read before it starts anything.
+    assert!(
+        std::fs::read_to_string(&workd.log)
+            .unwrap_or_default()
+            .contains("Codex reports every feature the host switched off as off"),
+        "run checked Codex's effective settings at start: {}",
+        workd.log_tail()
+    );
+    let codex_runs = workd.record("codex").len();
+    // The stub's drift hook: from now on the fake codex ignores the key.
+    std::fs::write(
+        workd.codex_home().join("zz-stub-features"),
+        "shell_snapshot stable true\n",
+    )
+    .unwrap();
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "codex",
+        "after the update",
+    )
+    .await;
+    let (drifted, drifted_spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the drifted Codex spawn to be refused", &workd, || async {
+        (control_state(&su, drifted_spawn).await.0 == "failed").then_some(())
+    })
+    .await;
+    assert_eq!(
+        ack_error_label(&su, &fixture, drifted_spawn)
+            .await
+            .as_deref(),
+        Some("codex_config_unverified"),
+        "the refusal reaches the room with its reason"
+    );
+    wait_until("the host to end the allocated session", &workd, || async {
+        (session_status(&su, drifted).await == "ended").then_some(())
+    })
+    .await;
+    assert_eq!(
+        workd.record("codex").len(),
+        codex_runs,
+        "no Codex session was started"
+    );
+    assert!(
+        std::fs::read_to_string(&workd.log)
+            .unwrap_or_default()
+            .contains("shell_snapshot reads"),
+        "the host's log says which feature drifted: {}",
+        workd.log_tail()
+    );
+    std::fs::remove_file(workd.codex_home().join("zz-stub-features")).unwrap();
+    eprintln!(
+        "wdc_2: Codex resume {drifted_spawn} refused → codex_config_unverified, session {drifted} ended by the host"
+    );
+
     // ---- shell: refused at the resume, never delivered ----------------------
     let resumed = owner_resume(
         &su,
@@ -1811,7 +1875,8 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
                 .to_string()
         })
         .collect();
-    assert_eq!(answer, "stub heard: resume me — done.");
+    // #5338: a resume starts with the host's own sentence, not its label.
+    assert_eq!(answer, format!("stub heard: {RESUME_FIRST_PROMPT} — done."));
     eprintln!(
         "wdc_4: owner resume {resume_control} delivered and acked; session {session} ran its first turn"
     );
@@ -1837,8 +1902,8 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
         .collect();
     assert_eq!(
         prompts,
-        ["resume me"],
-        "only the owner's instruction reached the agent"
+        [RESUME_FIRST_PROMPT],
+        "only the host's own sentence reached the agent, not even the owner's old label"
     );
     let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM work_session WHERE host_id = $1")
         .bind(host)
@@ -3041,10 +3106,114 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     wait_until("its first turn", &workd, || async {
         stub_prompts(&workd, "claude")
             .iter()
-            .any(|prompt| prompt.contains("after the local reset"))
+            .any(|prompt| prompt.contains(RESUME_FIRST_PROMPT))
             .then_some(())
     })
     .await;
+    // #5338: an unsigned resume starts with the host's sentence, never its label.
+    assert!(
+        !stub_prompts(&workd, "claude")
+            .iter()
+            .any(|prompt| prompt.contains("after the local reset")),
+        "the label of an unsigned resume reached the agent"
+    );
     eprintln!("wdc_8: server off + restart → still required; local reset → unsigned resume runs");
     assert_eq!(workd.stop().await, Some(0));
+}
+
+/// #5338 (ADR-0188 §8.12; D3 「소유자 지시 판별」 on the takeover path), the
+/// real binary against the real server router on a real PG: a label a teammate
+/// wrote stays the session's title and never starts the owner's agent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn wdc_9_a_teammates_session_label_never_becomes_the_owners_first_prompt() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
+    let http = reqwest::Client::new();
+    let token = login(&http, base, &fixture).await;
+    let teammate = teammate_token(&su, &http, base, &fixture).await;
+    let workspace = fixture.workspace;
+
+    let mut workd = Workd::new(base, &fixture, &[("claude", &[])]);
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+    workd.start();
+
+    // ---- the teammate's session, with their label ----------------------------
+    let injected = "teammate-label-5338";
+    let teammate_laptop = register_idle_member_host(&http, base, &teammate, &fixture).await;
+    let created = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(&teammate)
+        .json(&json!({
+            "channelId": fixture.channel,
+            "hostId": teammate_laptop,
+            "tool": "claude",
+            "label": injected,
+        }))
+        .send()
+        .await
+        .expect("the teammate opens a session");
+    let created_status = created.status();
+    let created: Value = created.json().await.expect("source body");
+    assert_eq!(created_status, 201, "{created}");
+    let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
+    orphan_session(&su, source).await;
+
+    // ---- the owner's resume, onto the owner's own served host ----------------
+    let resumed = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+        ))
+        .bearer_auth(&token)
+        .json(&json!({"targetHostId": host}))
+        .send()
+        .await
+        .expect("resume");
+    let (session, resume_control) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the resume spawn ack", &workd, || async {
+        (control_state(&su, resume_control).await == ("acked".to_string(), Some(session)))
+            .then_some(())
+    })
+    .await;
+    wait_until("the resumed turn to go idle", &workd, || async {
+        (session_status(&su, session).await == "idle").then_some(())
+    })
+    .await;
+
+    let prompts: Vec<String> = workd
+        .record("claude")
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .filter_map(|entry| {
+            entry["received"]["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        prompts,
+        [RESUME_FIRST_PROMPT],
+        "the host's own sentence\n--- workd log ---\n{}",
+        workd.log_tail()
+    );
+    assert!(
+        !prompts[0].contains(injected),
+        "the teammate's label reached the owner's agent: {prompts:?}\n--- workd log ---\n{}",
+        workd.log_tail()
+    );
+    // The label stays the session's title: the card and the row are the
+    // teammate's words, shown to the room as such; only the agent's first
+    // instruction is the host's.
+    let title: String = sqlx::query_scalar("SELECT label FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(title, injected, "the resumed session keeps its title");
+    eprintln!("wdc_9: resume {resume_control} of a teammate's session started with {prompts:?}");
 }

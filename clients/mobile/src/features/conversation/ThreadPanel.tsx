@@ -394,16 +394,11 @@ export function ThreadPanel({
       // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
       // 결함이 한 화면 건너에서 반복되는 것이다.
       onReplySent?.();
-      // 켠 때만 키가 간다(링크 미리보기 ✕와 「대화에도 보내기」) — 아무것도 켜지 않은 답글은 예전과 같은 호출이다.
-      const flags = {
-        ...(options?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
-        ...(options?.alsoInChannel === true ? {alsoInChannel: true} : {}),
-      };
       void sendReply(
         root.id,
         body,
         options?.attachments,
-        Object.keys(flags).length === 0 ? undefined : flags,
+        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
       );
     },
     [sendReply, root.id, onReplySent],
@@ -532,8 +527,10 @@ export function ThreadPanel({
                 // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
                 // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
                 markReplies={false}
-                // 스레드 화면은 본류가 아니다: 루트와 그 답글 **전부**가 서야 한다(「대화에도 보내기」와 무관, #4888).
+                // 스레드 화면은 본류가 아니다: 루트와 그 답글 **전부**가 서야 한다(#4888).
                 mainFlow={false}
+                // 이 목록이 스레드 화면이라는 사실과 그 루트(#5381): 루트를 가리키는 인용은 맨 위 루트 행과 겹쳐 그리지 않는다.
+                threadRootId={root.id}
                 // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
                 // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
                 // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
@@ -579,8 +576,6 @@ export function ThreadPanel({
               // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               sendLabel="답글 보내기"
-              // 스레드 입력칸마다 「대화에도 보내기」 체크가 선다(기본 꺼짐, 마지막 선택을 기억하지 않는다 — #4888).
-              offerAlsoInChannel
               onSend={onSend}
             />
           }

@@ -755,7 +755,7 @@ async function u3(browser, origin, scheme) {
 // ---- d1 (#3824 → #4619): 보낸 메시지의 상태 · 걸린 시간 · 깨우는 신호 --------------------
 //
 // #3824의 메시지 아래 상태 줄(받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중 → 결과)은 없어졌다(#4619, owner 「ㄱㄱ」).
-// 같은 사실이 이제 머리 칩(받음 → 가져감 → 작업 중 → 답함), 입력창 레일, 예외 줄(깨우는 신호가 닿지 않음 · 아직 받지
+// 같은 사실이 이제 머리 칩(받음 → 가져감 → 작업 중, 성공으로 끝나면 칩이 사라진다 #5382), 입력창 레일, 예외 줄(깨우는 신호가 닿지 않음 · 아직 받지
 // 않았어요 · 실패 · 시간 초과)로 나뉘어 말해진다. 작업 패널의 원장·걸린 시간은 그대로다.
 
 const MSG_SENT = "00000000-0000-7000-8000-0000000a0009";
@@ -865,7 +865,8 @@ async function d1(browser, origin, scheme) {
   check(`${tag} panel: 도구 이름이 사람이 읽는 낱말로 나온다(식별자 「oort_…」가 아니다)`, toolLabel !== "" && !toolLabel.includes("oort_"), toolLabel);
   await page.screenshot({ path: shot("4-panel-ledger") });
 
-  // ⑥ 결과: 답함 · 3분 12초 걸림(패널). 이 run의 답 메시지를 모르면 칩은 눌리지 않는다.
+  // ⑥ 결과: 성공은 칩이 없다(#5382) · 3분 12초 걸림(패널).
+  const chipsBeforeDone = await page.getByTestId("trigger-chip").count();
   scene.ledgers[RUN_A] = [
     ...scene.ledgers[RUN_A],
     { ordinal: 9, kind: "succeeded", createdAtMs: now - 12 * MIN - 20_000 + 192_000 },
@@ -873,9 +874,9 @@ async function d1(browser, origin, scheme) {
   await serverMoves(page, scene, [
     progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "succeeded", status: "succeeded", leaseState: "none", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, finishedAtMs: now - 12 * MIN - 20_000 + 192_000 }),
   ], "succeeded");
-  await page.waitForFunction(() => /답함/.test(document.querySelector('[data-testid="trigger-chip-word"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
-  check(`${tag} done: 머리 칩 「답함」`, (await chipWord()) === "답함", await chipWord());
-  check(`${tag} done: 답을 모르면 칩은 눌리지 않는다(죽은 단추 없음)`, (await page.getByTestId("trigger-chip").first().evaluate((el) => el.tagName)) === "SPAN");
+  await page.waitForFunction(() => document.querySelector('[data-testid="trigger-chip"]') === null, null, { timeout: 3_000 }).catch(() => {});
+  check(`${tag} done: 성공으로 끝나면 머리 칩이 없다(앞 단계에서는 칩이 ${chipsBeforeDone}개 서 있었다)`, chipsBeforeDone >= 1 && (await page.getByTestId("trigger-chip").count()) === 0, `전 ${chipsBeforeDone} 후 ${await page.getByTestId("trigger-chip").count()}`);
+  check(`${tag} done: 칩이 없어도 요청 메시지는 서 있다`, (await page.locator(`[data-testid="timeline-message"][data-message-id="${MSG_SENT}"]`).count()) === 1);
   const doneDurations = ((await page.getByTestId("agent-work-panel-durations").textContent()) ?? "").trim();
   check(`${tag} done: 「대기 12초 → 작업 2분 52초 → 총 3분 12초」`, doneDurations === "대기 12초 → 작업 2분 52초 → 총 3분 12초", doneDurations);
   await page.screenshot({ path: shot("5-done") });

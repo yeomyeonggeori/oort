@@ -14,8 +14,6 @@ import {
 } from "lucide-react";
 import {
   Fragment,
-  useLayoutEffect,
-  useRef,
   useState,
   type Ref,
 } from "react";
@@ -25,15 +23,10 @@ import {
   useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
 import {
-  closestToolbarScrollContainer,
   HOVER_TOOLBAR_REACTION_SEED,
-  HOVER_TOOLBAR_NUDGE_VAR,
-  HOVER_TOOLBAR_SLIDE_VAR,
   HOVER_TOOLBAR_SLOT_COUNT,
-  neighborTextRects,
-  placeToolbar,
-  toolbarNeighbors,
 } from "./hoverToolbarModel";
+import { useHoverToolbarPlacement } from "./useHoverToolbarPlacement";
 import {
   Dialog,
   DialogContent,
@@ -66,10 +59,11 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 //
 //   * **a pointer that can hover** - on row hover or focus-within, a floating
 //     toolbar straddles the top-right (16px gutter, no own-row body overlap):
-//     frequency slots, React, Reply, and ⋯. Right-click still opens the same
-//     inventory at the pointer. A text selection yields to the browser's
-//     native menu and unmounts the toolbar so a drag is not stolen.
-//     Edit/Delete stay in the overflow menu.
+//     frequency slots, React, Reply, a pencil on **my** messages (#5326, owner
+//     2026-11-05: people could not find 고치기), and ⋯. Right-click still opens
+//     the same inventory at the pointer. A text selection yields to the
+//     browser's native menu and unmounts the toolbar so a drag is not stolen.
+//     Edit stays the first row of the overflow menu too; Delete is menu-only.
 //
 //     R1 shipped a six-button bar and failed twice: `opacity-0` hides a button
 //     from the eye but not from Tab (up to ~150 tab stops in a virtualized
@@ -368,6 +362,7 @@ export function MessageHoverToolbar({
   onOpenPicker,
   menuOpen,
   onMenuOpenChange,
+  onMenuSettled,
   triggerRef,
   mineEmojis,
 }: {
@@ -377,13 +372,19 @@ export function MessageHoverToolbar({
   onOpenPicker: (opener?: HTMLElement | null) => void;
   menuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
+  /**
+   * 메뉴 내용이 사라지고 Radix 가 초점을 정리한 **뒤** 한 번(#5328). 행이 「키보드 초점 있음」을 DOM 의 사실로 다시 읽는 자리다:
+   * 초점을 쥔 채 사라진 메뉴는 `blur` 를 못 쏜다.
+   */
+  onMenuSettled?: () => void;
   /** Surviving ⋯ trigger used as the reaction picker fallback anchor (H-4). */
   triggerRef?: Ref<HTMLButtonElement>;
   mineEmojis: ReadonlySet<string>;
 }) {
   useEscapeLayer(menuOpen, () => onMenuOpenChange(false));
-  const barRef = useRef<HTMLDivElement>(null);
-  const [straddleBelow, setStraddleBelow] = useState(false);
+  // 막대가 설 쪽(위 경계 걸침 / 아래 경계로 뒤집기 / 행 안쪽으로 밀기)은 마운트 때 재고, 그 뒤 레이아웃이 바뀌면 다시 잰다(#5307 M1). 열린 메뉴가 막대를
+  // 붙들고 있는 동안은 얼린다. 규칙은 `hoverToolbarModel.placeToolbar`(#5179), 언제 재는가는 `useHoverToolbarPlacement`.
+  const { barRef, straddleBelow } = useHoverToolbarPlacement(menuOpen);
   const liveSlots = useFrequentEmojis(
     HOVER_TOOLBAR_REACTION_SEED,
     HOVER_TOOLBAR_SLOT_COUNT
@@ -393,37 +394,14 @@ export function MessageHoverToolbar({
   // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
   // still follows live `mineEmojis`.
   const [slots] = useState(liveSlots);
-  // 설 쪽은 마운트 때 한 번 잰다(열린 메뉴가 막대를 붙들고 있는 동안 자리가 옮겨 다니지 않는다). 스크롤러를 못 찾으면 — 레이아웃을 못
-  // 재는 jsdom 시험이 그렇다 — 이웃 글자에는 손도 대지 않는다. 규칙은 `hoverToolbarModel.placeToolbar`(#5179): 아래 경계로 뒤집거나, 위·아래가 모두
-  // 글자에 막히면 위 자리에서 아래로 밀어 행 안쪽의 빈 창에 앉힌다(밀림은 CSS 변수로 건다 — 인라인 style 속성은 CSP가 막는다).
-  useLayoutEffect(() => {
-    if (straddleBelow) return;
-    const bar = barRef.current;
-    if (!bar) return;
-    const scroller = closestToolbarScrollContainer(bar);
-    if (!scroller) return;
-    const row = bar.closest('[data-testid="timeline-message"]');
-    const neighbors = row ? toolbarNeighbors(row, scroller) : null;
-    const placement = placeToolbar({
-      bar: bar.getBoundingClientRect(),
-      row: row ? row.getBoundingClientRect() : null,
-      scroller: scroller.getBoundingClientRect(),
-      prevText: () => neighborTextRects(neighbors?.prev ?? null),
-      selfText: () => neighborTextRects(row),
-      nextText: () => neighborTextRects(neighbors?.next ?? null),
-    });
-    // 비껴 서기(가로 1~2px)는 위·아래 어느 자리에서도 같다. 변수는 막대 요소에 걸려 자리 이름이 바뀌어도(`straddleBelow`) 남는다.
-    if (placement.nudge > 0) bar.style.setProperty(HOVER_TOOLBAR_NUDGE_VAR, String(placement.nudge));
-    if (placement.below) setStraddleBelow(true);
-    else if (placement.slide > 0) {
-      bar.style.setProperty(HOVER_TOOLBAR_SLIDE_VAR, String(Number(placement.slide.toFixed(2))));
-    }
-  }, [straddleBelow]);
   // 도구 막대의 단추는 모델의 표가 정한다(`MESSAGE_ACTION_GROUP_PLACEMENT`): 표와 화면이 따로 놀지 않는다.
   const toolbarItems = messageToolbarItems(available, copyState);
   const hasReact = toolbarItems.some((item) => item.key.startsWith("react:"));
   const hasReactMore = toolbarItems.some((item) => item.key === "react-more");
   const hasReply = toolbarItems.some((item) => item.key === "reply");
+  // 도구 막대에도 복사본이 서는 메뉴 항목(`toolbarCopy`): 연필(고치기, #5326) 하나다. 내 메시지에만 선다(`available.edit`가 작성자 문이다).
+  // 이름은 메뉴의 같은 항목에서 읽는다: 메뉴의 첫 줄과 같은 낱말이고 이 파일이 낱말을 두 번 적지 않는다.
+  const editCopy = toolbarItems.find((item) => item.toolbarCopy === true);
   const hasMenu =
     messageActionItemsForSurface("menu", available, copyState).length > 0;
   if (toolbarItems.length === 0 && !hasMenu) return null;
@@ -509,6 +487,21 @@ export function MessageHoverToolbar({
           </button>
         </Tooltip>
       )}
+      {editCopy && (
+        <Tooltip label={editCopy.label} side={tipSide}>
+          <button
+            type="button"
+            data-toolbar-item=""
+            data-row-action=""
+            data-testid="toolbar-edit"
+            aria-label={editCopy.label}
+            onClick={() => callbacks.onEdit()}
+            className={toolbarItemClass}
+          >
+            <Pencil className={toolbarIconClass} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      )}
       {hasMenu && (
         <DropdownMenu
           open={menuOpen}
@@ -540,6 +533,10 @@ export function MessageHoverToolbar({
             align="end"
             data-testid="message-action-menu"
             aria-label="메시지 액션"
+            // Radix 는 이 핸들러 **뒤에** 초점을 ⋮ 로 돌려준다(바깥을 눌러 닫았으면 돌려주지 않는다). 마이크로태스크로 그 뒤에 읽는다.
+            onCloseAutoFocus={() => {
+              if (onMenuSettled) queueMicrotask(onMenuSettled);
+            }}
           >
             <MessageActionMenuItems
               surface="dropdown"

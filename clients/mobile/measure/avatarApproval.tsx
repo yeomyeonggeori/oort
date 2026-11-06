@@ -1,10 +1,10 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import React, {useState, useEffect} from 'react';
+import React from 'react';
 import {ScrollView} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {MessageRow} from '../src/features/conversation/MessageRow';
-import {setServerBase} from '../src/storage/serverBase';
+import {usePinnedServerBase} from './stubServerBase';
 
 // =============================================================================
 // `member.avatar.set` 승인 카드 캡처 표면 (#4394). 진짜 MessageRow 가 서고, 사진은
@@ -98,12 +98,8 @@ function card(approvalId: string): Message {
 }
 
 export function AvatarApprovalSurface({which}: {which: string}): React.JSX.Element {
-  // 첫 렌더 전에 한 번: 카드가 마운트 직후 미리보기를 받기 시작한다.
-  useState(() => {
-    setServerBase(STUB_BASE);
-    return null;
-  });
-  useEffect(() => () => setServerBase(null), []);
+  // 첫 렌더 전에 한 번: 카드가 마운트 직후 미리보기를 받기 시작한다. 저장소에는 스텁이 남지 않는다(#5313).
+  usePinnedServerBase(STUB_BASE);
   const approvalId = APPROVAL_IDS[which] ?? APPROVAL_IDS.ready;
   const gates = new Map([
     [approvalId, {approvalId, reversible: false, expiresAtMs: NOW + 50 * 60_000}],

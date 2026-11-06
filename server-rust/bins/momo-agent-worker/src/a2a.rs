@@ -58,7 +58,7 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
     agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
-    contains_mention_with_aliases, send_message_in_tx, MessageType, NewMessage,
+    contains_mention_with_aliases, send_run_line_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -81,6 +81,10 @@ pub struct A2aSend<'a> {
     /// The agent's own reply — the trigger message of any child run.
     pub message_id: Uuid,
     pub message_seq: i64,
+    /// The thread the reply was written under (`message.root_id` of the stored reply) — where the
+    /// refusal lines below stand, beside the reply that carried the mention (#4646, ADR-0148 증보,
+    /// ADR-0186 증보 v6 R-c). `None` when the reply is in the main flow (a 1:1 DM).
+    pub root_id: Option<Uuid>,
     /// The agent that just answered: the *author* of this mention.
     pub author_agent_member_id: Uuid,
     /// The run that produced the reply — the child's `parent_run_id`.
@@ -484,7 +488,9 @@ async fn blocked(
     if !block.is_visible() {
         return skip(conn, send, trigger, agent, block).await;
     }
-    let sent = send_message_in_tx(
+    // #4646: the refusal stands beside the reply that carried the mention — in its thread, uncounted
+    // like every `system` line (`counts_as_thread_reply`).
+    let sent = send_run_line_in_tx(
         &mut *conn,
         send.workspace_id,
         NewMessage {
@@ -493,7 +499,7 @@ async fn blocked(
             message_type: MessageType::System,
             body: Some(block.system_line(&agent.display_name)),
             props: a2a_block_props(send, agent, block),
-            root_id: None,
+            root_id: send.root_id,
             reply_to_id: None,
             // Keyed on the reply that carried the mention, so a re-claimed job
             // cannot stack two identical refusals into the channel. `client_msg_id`
@@ -613,7 +619,7 @@ async fn paused(
     trigger: &MentionTrigger<'_>,
     agent: &MentionCandidate,
 ) -> Result<(), DbError> {
-    let sent = send_message_in_tx(
+    let sent = send_run_line_in_tx(
         &mut *conn,
         send.workspace_id,
         NewMessage {
@@ -622,7 +628,7 @@ async fn paused(
             message_type: MessageType::System,
             body: Some(paused_mention_body(&agent.display_name)),
             props: paused_mention_props(agent.member_id, send.message_id),
-            root_id: None,
+            root_id: send.root_id,
             reply_to_id: None,
             client_msg_id: Some(send.message_id),
             run_id: None,
@@ -689,6 +695,7 @@ mod tests {
             channel_id: Uuid::from_u128(2),
             message_id: Uuid::from_u128(3),
             message_seq: 7,
+            root_id: None,
             author_agent_member_id: Uuid::from_u128(4),
             source_run_id: Uuid::from_u128(5),
             body: "@atlas 확인해줘",

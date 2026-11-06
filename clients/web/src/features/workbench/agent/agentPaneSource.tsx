@@ -3,6 +3,9 @@ import { useQueries } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useSession } from "@/app/session";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
@@ -168,14 +171,15 @@ function PaneMissing({ onClear, loading }: { onClear: () => void; loading: boole
   );
 }
 
-function PaneError({ onRetry }: { onRetry: () => void }) {
+/** 칸이 통째로 비었다(받아 둔 진행 없음): 무엇을 못 불러왔는지 + 원인(오프라인 / 서버에 닿지 못함 / 그 밖) + 다시 시도(#5279 B). `failure`는 스레드 읽기가 던진 오류 객체다. */
+export function PaneError({ onRetry, failure }: { onRetry: () => void; failure: unknown }) {
   return (
-    <div className="flex flex-col items-start gap-2 p-4" data-testid="agent-pane-error">
-      <p className="text-body text-ink">진행을 읽지 못했어요. 연결을 확인한 뒤 다시 읽으세요.</p>
-      <Button type="button" size="sm" variant="secondary" onClick={onRetry}>
-        다시 읽기
-      </Button>
-    </div>
+    <LoadFailureBox
+      titleKey={CONNECTION_KEYS.loadAgentPaneProgressTitle}
+      cause={loadCauseOf(failure)}
+      onRetry={onRetry}
+      testId="agent-pane-error"
+    />
   );
 }
 
@@ -277,6 +281,8 @@ export function useAgentPaneSource(): AgentPaneSource {
         ownerId: string;
         loading: boolean;
         error: boolean;
+        /** 스레드 읽기가 던진 오류 객체(#5279 B). 실패가 아니면 `null`. */
+        failure: unknown;
         refetch: () => void;
       }
     >();
@@ -302,6 +308,7 @@ export function useAgentPaneSource(): AgentPaneSource {
         ownerId: s.memberId,
         loading: q?.isPending ?? true,
         error: q?.isError ?? false,
+        failure: q?.error ?? null,
         refetch: () => void q?.refetch(),
       });
     });
@@ -333,7 +340,7 @@ export function useAgentPaneSource(): AgentPaneSource {
       if (!entry) {
         return <PaneMissing loading={sessionsQuery.isPending} onClear={() => store.unbind(paneId)} />;
       }
-      if (entry.error && !entry.model) return <PaneError onRetry={entry.refetch} />;
+      if (entry.error && !entry.model) return <PaneError onRetry={entry.refetch} failure={entry.failure} />;
       if (!entry.model) return <Skeleton ready={false} rows={4} className="p-4" />;
       return (
         <>

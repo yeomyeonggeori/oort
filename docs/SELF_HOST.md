@@ -466,8 +466,8 @@ it none of these exist and no Hermes is started.
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
   backs it. The gate also accepts only the config files of its own table (the
-  default config, and a connector-mode config per model fragment that
-  `infra/hermes/render_model_config.py --catalog` lists, #4935): a config with any other
+  default config, the default config with the team model fragment, and a connector-mode config per model fragment that
+  `infra/hermes/render_model_config.py --catalog` lists, #4935, #5323): a config with any other
   byte does not start. Editing `infra/hermes/config.yaml` or the start command takes the
   backing back on yourself, and the gate's table with it.
 - Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
@@ -874,8 +874,9 @@ What an operator should know:
   failed ones (with their text, so the author can re-send) for 30.
 - **A sign-in that ends holds what it armed.** After a password change or reset,
   a suspension, a device unlink or a refresh-token reuse that ends the sign-in
-  (a linked phone's always; a password sign-in's only when
-  `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`), the schedules that sign-in wrote
+  (every sign-in's by default; only a password sign-in's stops with
+  `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=false`, a linked phone's never does),
+  the schedules that sign-in wrote
   are held as failed (`sessions_ended`) instead of going out; their author reads
   them and re-arms or sends them. A plain logout holds nothing.
   Removing a member or a member leaving cancels their schedules.

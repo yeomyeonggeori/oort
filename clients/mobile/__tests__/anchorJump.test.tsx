@@ -14,6 +14,11 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {
+  __resetSearchRecentsCache,
+  recentsFor,
+  recentsScope,
+} from '../src/features/search/searchRecents';
 import AppShell from '../src/shell/AppShell';
 import {sessionPort} from '../src/storage/secureSession';
 import {setServerBase} from '../src/storage/serverBase';
@@ -23,6 +28,17 @@ import {
   SHELL_WAIT_TEST_TIMEOUT_MS,
 } from './fixtures/fakeClock';
 import {resetSession} from './testkit';
+
+// 이 파일은 **화면이 읽을 수 없는 점프**의 길을 잰다 (#5383).
+//
+// 목적지 seq 를 알고 불러온 범위 위에 있으면 화면이 그 자리까지 거슬러 읽는다(`anchorSeek.test.tsx` 가 그 길을 잰다). 그러면 아래 시험들이 전제하는
+// 「첫 발은 빈손이고, 사람이 위로 올려 줄이 도착하면 두 번째 발이 데려간다」는 길은 **읽기가 끝내 닿지 못한 뒤**(상한·거리)의 길로 남는다.
+// 그 길은 여전히 참이어야 하므로(고지 문장 · 주어 · 닫기 · 두 번째 발), 여기서는 거리 판정만 「언제나 너무 멀다」로 고정해 같은 시험이 같은 것을
+// 잰다. 거리·상한 판정 자체는 `anchorSeek.test.tsx` 가 진짜 수치로 잰다.
+jest.mock('../src/features/conversation/jumpSeek', () => {
+  const actual = jest.requireActual('../src/features/conversation/jumpSeek');
+  return {...actual, planSeek: () => actual.SeekPlan.TooFar};
+});
 
 // =============================================================================
 // 폰의 점프 앵커 둘 (#1196) — 검색 진입은 **착지**하고, 고정은 **자기 낱말**로 말한다
@@ -487,5 +503,15 @@ describe('#1196 — 고정 목록 점프는 자기 낱말로 말한다', () => {
     expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(/인용한 원본/);
     // 검색 주어를 빌려 쓰지도 않는다 — 셋은 서로 다른 것을 찾고 있다.
     expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(/찾던 메시지/);
+  });
+});
+
+describe('#5365 — 연 대화는 검색 탭의 「최근 연 대화」에 남는다', () => {
+  it('어느 문으로 열었든 대화 층이 서면 그 채널 id 가 이 기기의 최근 목록 맨 앞에 선다', async () => {
+    __resetSearchRecentsCache();
+    installFetch();
+    await openConversation();
+    // 목록·검색·알림이 모두 대화 층 하나로 모이므로 셸이 그 자리에서 한 번 남긴다.
+    expect(recentsFor(recentsScope(WS, SELF_ID)).conversations).toEqual([GENERAL]);
   });
 });

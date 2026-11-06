@@ -3,6 +3,7 @@ import type {Message} from '@momo/core/lib/api';
 import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
+import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {pinActionLabel} from '@momo/core/features/timeline/pins';
 import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
 import {
@@ -12,7 +13,7 @@ import {
 import React, {useCallback, useState} from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
-import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
+import {PageSheet, usePageSheetAction, usePageSheetHandoff} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {
   ConfirmStep,
@@ -30,6 +31,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useLocaleService} from '../../i18n/useLocaleService';
 import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { EmojiPicker } from '../emoji/EmojiPicker';
 import { emojiFrequency } from '../emoji/preferences';
@@ -81,6 +83,10 @@ export function timeLabel(atMs: number): string {
 // (동작 줄이기면 바로). 반응이 칩으로 보이는 데 슬라이드 한 번(260ms)이 더 걸린다 - 고른 것이 시트와
 // 함께 사라지고 그 자리에서 칩이 늘어난다.
 //
+// 「고치기」는 닫는 길이되 **한 걸음 더 기다린다** (#5417): 행동이 곧바로 다른 `Modal`(편집 시트)을 띄우므로, 슬라이드가 끝난 뒤에도 iOS 가 이 시트의 Modal 을
+// 다 내렸다고 알릴 때까지(`usePageSheetHandoff`) `onClose` 와 `onEdit` 을 부르지 않는다. 한 화면 갱신에 시트 언마운트와 편집 시트 마운트가 겹치면 iOS 가
+// 편집 시트의 제시를 거절해 영영 안 떴다(검증 6a High). 그 밖의 행(답글·인용·복사·고정·반응)은 다른 Modal 을 띄우지 않으므로 그대로 `closesSheet` 다.
+//
 // 닫는 길로 보내지 **않는** 둘: 「지우기」 행은 시트 안에서 확인 단계로 넘어갈 뿐이고, 확인의 「지우기」
 // 는 왕복이 도는 동안 시트가 「지우는 중…」을 말해야 한다(성공 뒤에야 부모가 닫는다). 이 닫힘은 부모의
 // `.then(() => setSheetOpen(false))` 라 지금도 스냅이다 - PR 「발견」 참조.
@@ -97,6 +103,8 @@ export interface MessageActionSheetProps {
   pinned?: boolean;
   /** 이미 해석된 작성자 이름. 행이 쓰던 것과 같은 답을 쓴다. */
   authorLabel: string;
+  /** 행이 쓰는 시계(「오늘」의 기준). 시트 머리의 고친 시각 문장과 행 꼬리의 「수정됨」이 같은 시계로 말하게 한다(#5326). 없으면 지금이다. */
+  nowMs?: number;
   deletePending?: boolean;
   /**
    * Capture seam (`measure/surfaces.tsx`), inert in the app.
@@ -126,6 +134,7 @@ export interface MessageActionSheetProps {
    * 진다. 고정은 **채널의 사실**이라 작성자 관문이 없다.
    */
   onPin?: () => void;
+  /** 「고치기」. 시트가 미끄러져 내리고 iOS 가 그 Modal 을 **다 내린 뒤에** `onClose` 다음으로 불린다(#5417) - 편집 시트처럼 다른 Modal 을 곧바로 세워도 된다. */
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -159,6 +168,7 @@ function SheetBody({
   availability,
   pinned,
   authorLabel,
+  nowMs,
   deletePending,
   startInDeleteConfirm = false,
   pickerOpen,
@@ -175,7 +185,9 @@ function SheetBody({
   setPickerOpen: (open: boolean) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const locale = useLocaleService();
   const afterClose = usePageSheetAction();
+  const afterDismissed = usePageSheetHandoff();
   // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
   const openMadeConversation = useMakeLanding();
   const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
@@ -187,6 +199,8 @@ function SheetBody({
     [chips],
   );
 
+  const edited = editedMark(locale, message, nowMs ?? Date.now());
+
   // 글 없이 사진·파일만 보낸 메시지는 「내용 없는 메시지」가 아니라 개수로 말한다 (#4294).
   const preview =
     (message.body ?? '').trim() ||
@@ -195,10 +209,21 @@ function SheetBody({
   // 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다: 「답글 달기」는 그 메시지의 **스레드**에 단다 —
   // 같은 화면의 입력칸이 답글 머리말과 함께 열리고(#4869, 오른쪽→왼쪽 밀기와 같은 길 — VoiceOver 가 이 항목으로 간다),
   // 그 길이 닫힌 행은 스레드 화면이 열린다. 「인용하기」는 본류에 남아서 저 줄을 가리킨다(ADR-0148). 낱말을 이 파일이
-  // 고르지 않는 것이 그 구별을 지키는 방법이다. 순서는 「읽어서 가져가는 것」 다음에 「고치는 것」이고
-  // 파괴적인 쪽이 아래(따로 선 카드)로 간다. 고정은 복사 다음, 고치기 앞이다 — 채널을 바꾸지 메시지를
-  // 바꾸지 않는다. 복사는 **묘비에도 있다**(지워진 메시지는 애초에 이 시트로 오지 않는다).
+  // 고르지 않는 것이 그 구별을 지키는 방법이다. 순서는 **고치기(내 메시지만) 맨 위**, 그다음 「읽어서 가져가는 것」이고
+  // 파괴적인 쪽이 아래(따로 선 카드)로 간다(#5326: 예전에는 고치기가 고정 다음 맨 아래 줄이었다). 고정은 복사 다음이다 — 채널을
+  // 바꾸지 메시지를 바꾸지 않는다. 복사는 **묘비에도 있다**(지워진 메시지는 애초에 이 시트로 오지 않는다).
   const rows: React.ReactNode[] = [
+    // 고치기는 **맨 위 줄**이다(#5326, owner 2026-11-05: 고치기를 찾지 못했다). 내 메시지에서만 서고(`availability.edit` = 작성자 본인의
+    // 살아 있는 글), 남의 메시지의 시트는 답글 달기가 첫 줄이다. 웹 호버 막대의 연필과 같은 낱말이다.
+    availability.edit ? (
+      // `closesSheet` 가 아니다: 편집 시트는 **다른 Modal** 이라 이 시트의 Modal 이 iOS 에서 다 내려간 뒤에 세워야 한다(#5417, 위 「고치기는 한 걸음 더」).
+      <ListRow
+        key="edit"
+        title="고치기"
+        onPress={() => afterDismissed(onEdit)}
+        testID="sheet-edit"
+      />
+    ) : null,
     availability.reply ? (
       <ListRow
         key="reply"
@@ -236,15 +261,6 @@ function SheetBody({
         testID="sheet-pin"
       />
     ) : null,
-    availability.edit ? (
-      <ListRow
-        key="edit"
-        title="고치기"
-        onPress={onEdit}
-        closesSheet
-        testID="sheet-edit"
-      />
-    ) : null,
   ].filter(Boolean);
 
   if (pickerOpen)
@@ -276,6 +292,13 @@ function SheetBody({
                 {timeLabel(message.createdAtMs)}
               </Text>
             </View>
+            {/* 고친 메시지의 고친 시각 (#5326). 시트 머리가 이 메시지의 시각을 말하는 자리(연속 행이 접은 시각처럼)이고, 행 꼬리의 「수정됨」을
+                누르는 길과 같은 문장이다(`editedMark`, 웹 툴팁과 같은 코어 함수). 시각을 모르는 줄은 말할 것이 없어 줄이 없다. */}
+            {edited?.hasTime ? (
+              <Text style={styles.previewEdited} testID="sheet-edited-at">
+                {edited.full}
+              </Text>
+            ) : null}
             <Sentence
               style={styles.previewBody}
               numberOfLines={2}
@@ -400,6 +423,8 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
     },
     previewTime: {fontSize: font.meta, color: color.textMuted},
+    // 「오후 2:05에 수정됨」: 시각과 같은 격의 서술이라 같은 크기·색이다(AA: `textFaint` 는 뜻을 나르는 글자에 못 쓴다).
+    previewEdited: {fontSize: font.meta, color: color.textMuted},
     previewBody: {
       fontSize: font.label,
       color: color.text,

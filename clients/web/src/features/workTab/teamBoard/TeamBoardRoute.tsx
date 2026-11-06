@@ -37,6 +37,9 @@ import {
   Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { DiffNumbers, LaneLabel, StateChip } from "./TeamBoardParts";
 import { TeamBoardDrawer } from "./TeamBoardDrawer";
 import {
@@ -265,10 +268,10 @@ export function TeamBoardRoute() {
         />
       )}
       {staleError && !offline && (
-        <InlineBanner
-          message="팀 작업을 새로 불러오지 못했어요. 마지막 목록을 보여 드려요."
-          actionLabel={TEAM_BOARD_COPY.errorAction}
-          onAction={() => void list.refetch()}
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadTeamBoardStaleTitle}
+          cause={loadCauseOf(list.error)}
+          onRetry={() => void list.refetch()}
           testId="team-board-stale-error"
         />
       )}

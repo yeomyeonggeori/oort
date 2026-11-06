@@ -151,6 +151,12 @@ pub struct ClaimedPushCandidate {
     pub attempts: i32,
     pub workspace_id: uuid::Uuid,
     pub payload: String,
+    /// The row's `created_at`, the database's clock: ADR-0206 D4's `T`, the moment this candidate
+    /// first asked to be judged. The phone delay counts from it (`T + phoneDelaySecs`), so a notifier
+    /// that was busy for a minute does not push the expiry back, and a requeue or a defer (neither
+    /// touches `created_at`) keeps the same `T`. For an arm that holds a stream until it closes
+    /// (the agent's answer) this row is the one the close enqueued, so `T` is the closed time.
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Claim up to `batch_size` pending `push_candidate` rows and flip them to
@@ -174,7 +180,7 @@ pub async fn claim_push_candidate_batch(
     pool: &PgPool,
     batch_size: i64,
 ) -> Result<Vec<ClaimedPushCandidate>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (i64, i32, uuid::Uuid, String)>(
+    let rows = sqlx::query_as::<_, (i64, i32, uuid::Uuid, String, chrono::DateTime<chrono::Utc>)>(
         "WITH claimed AS ( \
              SELECT id FROM outbox \
               WHERE kind = 'push_candidate' \
@@ -188,24 +194,57 @@ pub async fn claim_push_candidate_batch(
                 SET status = 'processing', attempts = o.attempts + 1 \
                FROM claimed c \
               WHERE o.id = c.id \
-              RETURNING o.id, o.attempts, o.workspace_id, o.payload::text AS payload \
+              RETURNING o.id, o.attempts, o.workspace_id, o.payload::text AS payload, o.created_at \
          ) \
-         SELECT id, attempts, workspace_id, payload FROM updated ORDER BY id",
+         SELECT id, attempts, workspace_id, payload, created_at FROM updated ORDER BY id",
     )
     .bind(batch_size)
     .fetch_all(pool)
     .await?
     .into_iter()
     .map(
-        |(id, attempts, workspace_id, payload)| ClaimedPushCandidate {
+        |(id, attempts, workspace_id, payload, created_at)| ClaimedPushCandidate {
             id,
             attempts,
             workspace_id,
             payload,
+            created_at,
         },
     )
     .collect();
     Ok(rows)
+}
+
+/// Hand a claimed `push_candidate` back to `pending` until `available_at` **without spending a
+/// retry** (ADR-0206 D4 「후보 처리」): some of its targets are held for the member's desktop
+/// activity, and they are judged again at the expiry.
+///
+/// The claim counted this pass in `attempts` (`attempts + 1`); a hold is not a failure, so it is
+/// given back (`GREATEST(attempts - 1, 0)`). Without that, a candidate deferred twice would reach
+/// its retry budget (`NOTIFIER_MAX_ATTEMPTS`) on the deferrals alone, and the first transient relay
+/// error after them would park it as `failed`. `last_error` and `created_at` are left alone: a hold
+/// is no error, and `created_at` is the `T` the expiry counts from.
+///
+/// Only a row this process still holds (`processing`) is touched; returns whether one was.
+pub async fn defer_push_candidate(
+    pool: &PgPool,
+    id: i64,
+    available_at: chrono::DateTime<chrono::Utc>,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE outbox \
+            SET status = 'pending', \
+                available_at = $2, \
+                attempts = GREATEST(attempts - 1, 0) \
+          WHERE id = $1 \
+            AND kind = 'push_candidate' \
+            AND status = 'processing'",
+    )
+    .bind(id)
+    .bind(available_at)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 /// Return `push_candidate` rows stuck in `processing` to `pending`, once per

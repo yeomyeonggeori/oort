@@ -130,7 +130,8 @@ describe('머리말 문구 — 사전의 문구이고 대상이 말하는 것은
   });
 
   it('둘째 줄: 글이 있으면 원문, 없으면 「사진」·「파일」·「이모티콘」 같은 대체 글', () => {
-    expect(excerpt(message({body: '첫 줄\n\n둘째 줄\n셋째 줄'}))).toBe('첫 줄 둘째 줄');
+    // 발췌는 인용과 같은 규칙(코어 `quoteExcerpt`)이라 인용이 한 줄이 되면(#5381) 같이 한 줄이다.
+    expect(excerpt(message({body: '첫 줄\n\n둘째 줄\n셋째 줄'}))).toBe('첫 줄');
     const photo = {id: 'a1', name: 'IMG.png', mime: 'image/png', sizeBytes: 10};
     const pdf = {id: 'a2', name: '명단.pdf', mime: 'application/pdf', sizeBytes: 10};
     expect(excerpt(message({body: undefined, attachments: [photo]}))).toBe('사진');

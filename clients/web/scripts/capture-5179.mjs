@@ -7,6 +7,7 @@
 //   SHOTS=1 OUT_DIR=<dir> node scripts/capture-5179.mjs  # 캡처도 찍기(기본은 재기만)
 //   SCHEMES=light node scripts/capture-5179.mjs          # 한 색 조합만(사보타주 반복용, 기본은 light,dark)
 //   ENGINE=webkit node scripts/capture-5179.mjs          # 같은 레인을 WebKit(WKWebView 의 엔진)으로(기본은 chromium, `capture-5192.mjs` 와 같은 스위치)
+//   ONLY=M1 M1_SHOT_DIR=<dir> node scripts/capture-5179.mjs   # M1(#5307) 칸만 재고, 전후 한 쌍 캡처를 <dir> 에 남긴다
 //
 // 툴바는 행 위 경계를 걸치는 플로팅 그릇이라 그 행의 위 이웃 바닥 36px 를 덮는다(README §6 행 액션 5번). 그 띠 안에는 앞 행의
 // **마지막 줄**이 늘 서므로 겹침은 세로가 아니라 가로로 정해진다: 앞 행의 마지막 줄이 툴바 왼쪽 끝(오른쪽에서 12 + 223)보다 오른쪽까지
@@ -62,6 +63,9 @@ const DIST_DIR = process.env.DIST_DIR || "";
 const SHOTS = process.env.SHOTS === "1";
 const SCHEMES = (process.env.SCHEMES || "light,dark").split(",").filter((scheme) => scheme === "light" || scheme === "dark");
 const ENGINE = process.env.ENGINE === "webkit" ? "webkit" : "chromium";
+/** `ONLY=M1` 이면 M1(#5307: 포인터가 머문 채 레이아웃이 바뀐다) 칸만 잰다. */
+const ONLY_M1 = process.env.ONLY === "M1";
+const M1_SHOT_DIR = process.env.M1_SHOT_DIR ? resolve(process.env.M1_SHOT_DIR) : "";
 const MIN = 60_000;
 const NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
 /** 툴바 모양을 못 박는 값: #5192 의 알약 막대 폭(223)이 이 수리로 달라지지 않았는가. */
@@ -594,13 +598,105 @@ async function runSensitivity(page, tag) {
   await page.waitForTimeout(200);
 }
 
+/**
+ * M1 (#5307, 검수 5b): 포인터가 행 위에 머문 채 레이아웃이 바뀐다. 막대는 마운트 때 정한 자리를 붙들면 안 된다.
+ * 검수가 본 장면은 에이전트 대화의 마지막 행(승인 카드)에서 아래 경계로 뒤집힌 막대가, 입력창 위에 작업 띠가 선 뒤 스크롤러 밖(띠 밑)에 숨은 것이다(단추 0/6).
+ * 같은 모양을 만든다: A 칸의 행에 포인터를 올려 막대가 아래로 뒤집힌 채 서게 한 뒤, 스크롤러 바닥이 행 밑단 + 10px 에 오도록 입력창 앞에 띠를 끼운다.
+ * 아래 자리(행 밑단 − 6 + 42 = 밑단 + 36)가 스크롤러 밖이 된다. 단정: 막대 상자가 스크롤러 안에 있고, 단추 가운데 점의 맨 위 요소가 모두 그 단추다.
+ * 좁은 열(390·720)만 잰다 — 1440 의 A 는 위 그대로라 아래 자리에서 시작하지 않는다.
+ */
+async function runLayoutShift(page, tag, width) {
+  if (width >= 900) return;
+  const name = `${tag} M1 포인터가 머문 채 스크롤러가 줄어든다`;
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(250);
+  await centerRow(page, SEQ.A);
+  const rowBox = await rowOf(page, SEQ.A).boundingBox();
+  // 포인터는 행의 왼쪽 글 위에 둔다: 스크롤러가 줄면 가운데 아래의 「최신으로」 단추가 행 위로 올라와 포인터를 덮는다(그러면 행의 hover 가 풀려 툴바가 내려간다).
+  const pointer = { x: Math.round(rowBox.x + 70), y: Math.round(rowBox.y + rowBox.height / 2) };
+  await page.mouse.move(pointer.x, pointer.y);
+  await page.locator('[data-testid="message-hover-toolbar"]').first().waitFor({ state: "visible", timeout: 2000 });
+  await page.waitForTimeout(350);
+  const before = await barRect(page);
+  check(`${name}: 처음에는 아래 경계로 뒤집혀 선다(출발 자리)`, before?.straddle === "below", JSON.stringify(before));
+  const shotSlug = `${tag.replace(/\s+/g, "-")}-M1`;
+  if (M1_SHOT_DIR) {
+    mkdirSync(M1_SHOT_DIR, { recursive: true });
+    await page.screenshot({ path: resolve(M1_SHOT_DIR, `${shotSlug}-1-before-shift.png`) });
+  }
+  const cut = await page.evaluate((seq) => {
+    const sc = document.querySelector("[data-virtuoso-scroller]");
+    const row = document.querySelector(`[data-testid="timeline-message"][data-seq="${seq}"]`);
+    const composer = document.querySelector('[data-testid="composer"]');
+    if (!sc || !row || !composer) return null;
+    const scRect = sc.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const delta = Math.round(scRect.bottom - (rowRect.bottom + 10));
+    if (delta <= 0) return { delta };
+    // 스크롤러와 입력창을 함께 품은 가장 가까운 조상 안에서, 입력창을 품은 자식 앞에 띠를 끼운다(입력창 위에 서는 작업 띠와 같은 자리).
+    let branch = composer;
+    while (branch.parentElement && !branch.parentElement.contains(sc)) branch = branch.parentElement;
+    const parent = branch.parentElement;
+    if (!parent) return null;
+    const strip = document.createElement("div");
+    strip.id = "m1-strip";
+    strip.style.height = `${delta}px`;
+    strip.style.flex = "none";
+    parent.insertBefore(strip, branch);
+    return { delta };
+  }, SEQ.A);
+  check(`${name}: 스크롤러 밑에 띠를 끼웠다`, cut !== null && cut.delta > 0, JSON.stringify(cut));
+  await page.waitForTimeout(700);
+  const after = await barRect(page);
+  const sc = await scrollerRect(page);
+  const buttons = await page.evaluate(() => {
+    const bar = document.querySelector('[data-testid="message-hover-toolbar"]');
+    if (!bar) return null;
+    const rows = [];
+    for (const b of bar.querySelectorAll("button")) {
+      const r = b.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      rows.push({ label: b.getAttribute("aria-label") || "", visible: Boolean(hit && (hit === b || b.contains(hit))) });
+    }
+    return rows;
+  });
+  note(`스크롤러 y ${sc?.t}~${sc?.b} · 막대 y ${before?.t}~${before?.b}(${before?.straddle}) → ${after?.t}~${after?.b}(${after?.straddle}, 밀림 ${after?.slide})`);
+  if (M1_SHOT_DIR) await page.screenshot({ path: resolve(M1_SHOT_DIR, `${shotSlug}-2-after-shift.png`) });
+  check(`${name}: 막대 상자가 스크롤러 안에 있다(띠 밑에 숨지 않는다)`, Boolean(sc && after && after.t >= sc.t - 1 && after.b <= sc.b + 1), `막대 ${after?.t}~${after?.b} / 스크롤러 ${sc?.t}~${sc?.b}`);
+  const shown = (buttons ?? []).filter((b) => b.visible).length;
+  check(`${name}: 단추 가운데 점의 맨 위 요소가 모두 그 단추다(${shown}/${buttons?.length ?? 0})`, Boolean(buttons) && buttons.length >= 5 && shown === buttons.length, JSON.stringify(buttons));
+  // 되돌림: 띠를 걷으면(스크롤러가 다시 커지면) 막대는 다시 안 가려지고 단추는 그대로 모두 보인다.
+  await page.evaluate(() => document.getElementById("m1-strip")?.remove());
+  await page.waitForTimeout(700);
+  const restored = await page.evaluate(() => {
+    const bar = document.querySelector('[data-testid="message-hover-toolbar"]');
+    if (!bar) return null;
+    let shownCount = 0;
+    const all = Array.from(bar.querySelectorAll("button"));
+    for (const b of all) {
+      const r = b.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit && (hit === b || b.contains(hit))) shownCount += 1;
+    }
+    return { shown: shownCount, total: all.length };
+  });
+  check(`${name}: 띠를 걷은 뒤에도 단추가 모두 보인다`, Boolean(restored) && restored.total >= 5 && restored.shown === restored.total, JSON.stringify(restored));
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(200);
+}
+
 async function runViewport(origin, scheme, width, height) {
   const tag = `${ENGINE === "chromium" ? "" : `${ENGINE} `}${width} ${scheme}`;
   const { browser, context, page } = await open(origin, scheme, { width, height });
   try {
     console.log(`--- ${tag}`);
+    if (ONLY_M1) {
+      await runLayoutShift(page, tag, width);
+      return;
+    }
     for (const c of CASES.filter((x) => !x.channel)) await runCase(page, tag, width, c);
     await runSensitivity(page, tag);
+    await runLayoutShift(page, tag, width);
     // 두 번째 대화(일반): 마지막 행이 머리 행인 장면. 대화를 바꾼 뒤 목록이 새로 서기를 기다린다.
     const second = CASES.filter((x) => x.channel === "GEN");
     if (second.length > 0) {

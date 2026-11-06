@@ -257,6 +257,75 @@ describe("옅은 줄 호버 면은 57행 모두에서 보이되 튀지 않는다
 });
 
 // =============================================================================
+// 인용 카드의 그릇 (#5421, 디자인 검수 6a 웹 M1). 카드(`quote-card` 유틸)의 쉬는 면 `--surface-muted`는 라이트에서 줄 호버 면
+// (`--surface-hover` 50%) 바로 옆에 떨어져 가리키거나 키보드로 서면 그릇이 행 채움에 녹았다(대비 1.035 · OKLab 0.012). 그 순간 카드가 입는 면은
+// **CSS 에서 읽는다** — 시험이 자기 토큰 이름을 들고 있으면 CSS 를 바꿔도 초록이다. 두 자는 정본 §2.2 「그릇의 생존」(대비 ≥ 1.05 그리고 OKLab ≥ 0.02).
+// 카드 위 글자(머리 `--ink-muted` · 본문 `--ink`)는 그 면 위에서도 본문 AA 4.5를 지킨다.
+// =============================================================================
+
+const QUOTE_CARD_CSS = /@utility quote-card \{([\s\S]*?)\n\}/.exec(TOKENS_CSS)?.[1] ?? "";
+const quoteCardToken = (selector: string): string | undefined =>
+  new RegExp(`${selector}\\s*&\\s*\\{\\s*background-color:\\s*var\\(--([a-z-]+)\\)`).exec(QUOTE_CARD_CSS)?.[1];
+const QUOTE_CARD_REST = /^\s*background-color:\s*var\(--([a-z-]+)\)/m.exec(QUOTE_CARD_CSS)?.[1];
+const QUOTE_CARD_HOVER = quoteCardToken("\\.row-hover:hover:not\\(:active\\)");
+const QUOTE_CARD_FOCUS = quoteCardToken("\\.row-hover:focus-visible:not\\(:active\\)");
+const CARD_MIN_CONTRAST = 1.05;
+const CARD_MIN_DISTANCE = 0.02;
+
+describe("인용 카드 그릇은 줄 호버·초점 면 위에서도 §2.2 두 자를 넘는다 (#5421)", () => {
+  it("CSS 에서 쉬는 면과 호버·초점 면의 토큰을 읽었고, 호버 면이 쉬는 면과 다르며 호버·초점이 같은 면이다", () => {
+    expect(QUOTE_CARD_REST).toBe("surface-muted");
+    expect(QUOTE_CARD_HOVER).toBeDefined();
+    expect(QUOTE_CARD_FOCUS).toBe(QUOTE_CARD_HOVER);
+    expect(QUOTE_CARD_HOVER).not.toBe(QUOTE_CARD_REST);
+  });
+
+  it.each([...FIRST_PARTY_ROWS, ...CATALOG_ROWS].map((row) => [row.name, row] as const))("%s: 호버·초점 줄 면 위에서 카드가 두 자를 넘고 글자 대비 4.5를 지킨다", (_name, row) => {
+    const S = row.surfaces;
+    const out: string[] = [];
+    const rowFace = over(S["surface-hover"], S.pane, ROW_HOVER_STRENGTH);
+    for (const [state, token] of [["호버", QUOTE_CARD_HOVER], ["초점", QUOTE_CARD_FOCUS]] as const) {
+      const card = S[token ?? ""];
+      if (card === undefined) {
+        out.push(`${state}: 표에 없는 토큰 ${token}`);
+        continue;
+      }
+      const ratio = Number(contrast(card, rowFace).toFixed(3));
+      const distance = Number(deltaE(card, rowFace).toFixed(4));
+      if (ratio < CARD_MIN_CONTRAST) out.push(`${state}: 카드 ${token} ↔ 줄 면 대비 ${ratio} < ${CARD_MIN_CONTRAST}`);
+      if (distance < CARD_MIN_DISTANCE) out.push(`${state}: 카드 ${token} ↔ 줄 면 OKLab ${distance} < ${CARD_MIN_DISTANCE}`);
+      for (const fg of ["ink", "ink-muted"] as const) {
+        const text = Number(contrast(row.color[fg], card).toFixed(2));
+        if (text < 4.5) out.push(`${state}: ${fg} on 카드 ${text} < 4.5`);
+      }
+    }
+    expect(out).toEqual([]);
+  });
+
+  it("사보타주: 카드가 쉬는 면 그대로면 dawnsky 라이트에서 줄 호버 면에 녹는다(1.035 · 0.012) — 단정이 실제 문제를 잰다(자가 점검)", () => {
+    const light = FIRST_PARTY_ROWS.find((row) => row.name === "dawnsky light")!;
+    const S = light.surfaces;
+    const rowFace = over(S["surface-hover"], S.pane, ROW_HOVER_STRENGTH);
+    const rest = S[QUOTE_CARD_REST ?? ""];
+    expect(contrast(rest, rowFace)).toBeLessThan(CARD_MIN_CONTRAST);
+    expect(deltaE(rest, rowFace)).toBeLessThan(CARD_MIN_DISTANCE);
+    // 그리고 호버 면은 넘는다.
+    const hover = S[QUOTE_CARD_HOVER ?? ""];
+    expect(contrast(hover, rowFace)).toBeGreaterThanOrEqual(CARD_MIN_CONTRAST);
+    expect(deltaE(hover, rowFace)).toBeGreaterThanOrEqual(CARD_MIN_DISTANCE);
+  });
+
+  it("두 상태 규칙이 `row-hover` 와 같은 조건이다 — 호버는 (hover: hover)만, 둘 다 눌림(:active)에서 물러난다", () => {
+    expect(QUOTE_CARD_CSS).toMatch(/@media \(hover: hover\) \{\s*\.row-hover:hover:not\(:active\) &/);
+    expect(QUOTE_CARD_CSS).toMatch(/\.row-hover:focus-visible:not\(:active\) &/);
+    // 줄의 호버·초점 유틸이 같은 두 조건을 쓴다(한쪽이 바뀌면 카드가 따라오지 못해 이 단정이 붉다).
+    const rowHover = /@utility row-hover \{([\s\S]*?)\n\}/.exec(TOKENS_CSS)?.[1] ?? "";
+    expect(rowHover).toMatch(/@media \(hover: hover\) \{\s*&:hover:not\(:active\)/);
+    expect(rowHover).toMatch(/&:focus-visible:not\(:active\)/);
+  });
+});
+
+// =============================================================================
 // 줄 착지 면 (#4324 결정 2). `landed-surface` 유틸 = `--warn-soft` 바탕 + `--warn`을 OKLab으로 N% 섞은 1px 테두리(폰 #4300의
 // `warnSurface`·`warnBorder`와 같은 말). 57행 전부에서 (1) 그 위 글자 대비가 4.5 이상이고 (2) 테두리가 바탕과 눈에 띄게 다르며
 // (3) 착지 면이 본문 판과 눈에 띄게 다르다. 섞는 비율은 CSS에서 읽는다 — 시험이 자기 숫자를 들고 있으면 CSS를 바꿔도 초록이다.

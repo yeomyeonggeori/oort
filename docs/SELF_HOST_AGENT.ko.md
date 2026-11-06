@@ -1492,10 +1492,11 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    답 자리: 최종 답은 oort_run_complete 의 body 이다. oort 가 대신 올리고 자리는
    고르지 않으므로 같은 내용을 oort_message_post 로 또 보내지 않는다. 직접
    oort_message_post 로 올리는 메시지는 물어본 자리에 답한다: 1:1 DM 은
-   본류(rootId 없이), 채널 최상위 멘션은 그 메시지 id 를 rootId 로, 스레드
-   안은 그 스레드의 root 를 rootId 로 쓴다(oort_job_start·oort_conversation_read
-   의 모든 메시지에 rootId 가 있고, 부른 메시지는 work.triggerMessageId 다).
-   최상위 메시지가 DM 일 수도 있는데 구분이 안 되면 rootId 를 넣지 않는다.
+   본류(rootId 없이), 스레드 안은 그 스레드의 root 를 rootId 로 쓴다
+   (oort_job_start·oort_conversation_read 의 모든 메시지에 rootId 가 있고,
+   부른 메시지는 work.triggerMessageId 다). 그 밖(채널 최상위 멘션, 그룹 DM)은
+   부른 메시지 id 를 rootId 로 써서 그 밑에 새 스레드를 연다. 최상위 메시지가
+   1:1 DM 인지 구분이 안 되면 rootId 를 넣지 않는다.
 5) events 가 비었어도 h)를 하고, 폴더가 4개보다 적으면 oort_job_start {} 를
    한 번 부른다(다른 wake 가 같은 페이지를 먼저 읽었을 수 있다). job 이 오면
    3 a)처럼 이어 간다. job 이 null 이고 h)에서 넘겨받은 폴더도 없으면 아무
@@ -2065,7 +2066,8 @@ Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
   운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
   닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
   게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
-  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`와 시작
+  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`(조각 `_2`…`_5` 포함. Railway는 값이 32,768자를 넘는 변수를 거절해서,
+  `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000`의 한 줄이 변수 하나예요)와 시작
   명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
   하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서
   `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.
@@ -2437,7 +2439,7 @@ scripts/self_host_env.sh --compose logs relay
 | `stack.compose_ps` | 서비스 없음/unhealthy | 그 서비스에 `--compose ps` / `logs`. `runtime-roles` 종료코드 1에 `password authentication failed for user "momo"` 는 남은 pgdata vs 새로 만든 env — `down -v`, env 삭제, §2.3 다시 (또는 **원래** env로 `up` 재시도). |
 | `stack.healthz` | 200 `database:ok` 아님 | `logs api`. |
 | `stack.agent_port` | 401 + Bearer scope 아님 | 잘못된 이미지. `releases/latest.json` 확인. |
-| `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 **info**(개수)이다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). `agent_job` pending 은 5분 미만 info, 이상이면 major(kind/status/개수/최고 나이 나열). 다른 kind: pending/failed면 `logs relay`. |
+| `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 **info**(개수)이다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). `available_at` 이 아직 미래인 `push_candidate`(`pending_deferred`: 멤버의 폰 지연, 최대 300초를 기다리는 푸시)는 어느 경우든 **info** 이고 FAIL 이 아니다. 이미 시각이 지난 pending 은 릴레이가 있으면 그대로 FAIL 이다. `agent_job` pending 은 5분 미만 info, 이상이면 major(kind/status/개수/최고 나이 나열). 다른 kind: pending/failed면 `logs relay`. |
 | `stack.scheduler` | 예약 메시지가 시각을 5분 넘게 지났는데 아직 `pending`(major; `MOMO_SCHEDULER_GRACE_SECONDS`(기본 3600)를 넘으면 「유예를 넘긴」이라고 말한다) | api 틱이 안 돌거나 그 행을 닫지 못한다: `logs api`의 `scheduled messages tick` 줄. `MOMO_SCHEDULER_ENABLED=0`이면 멈춘다. **info** = 최근 24시간에 서버가 놓친 예약(조치 없음, 작성자가 정한다). **skip** = 연결 역할이 행 수준 보안을 건너뛰지 못해 개수를 알 수 없다(소유자 URL을 쓴다). |
 | `stack.migrate_idempotency` | `IDEMPOTENCY_OK` 없음 | `logs migrate`. |
 | `public.healthz` / `public.websocket` | 공개 오리진은 등록됐는데 200/101 없음 | 터널/Caddy와 `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 1회 재시작. Cloudflare T3(§3.8): `public.*` skip(「흔적 없음」)은 사용자 오류다 — 먼저 `--public-origin`을 돌려라. skip은 PASS가 아니다. |

@@ -418,8 +418,11 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
 2. **설정을 해시로 대조한다(값 미출력).** 운영 `HERMES_CONFIG_B64`를 디코드한 바이트의 sha256만 계산하고(`base64 -d | shasum -a 256`, 내용은 화면에 내지 않는다)
    저장소가 같은 입력으로 다시 만드는 해시와 비교한다. 연결 모드 서비스는 운영이 쓰는 모델 선택으로
    `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml --sha256`
-   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로 `HERMES_CONFIG_B64`를 만든다
-   (`… --connector-base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 네 가지 밖이면 멈춘다: 카탈로그에 더하는 결정(ADR 증보)이 먼저다.
+   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 팀 공용 기본 모드 서비스(#5323)는
+   `python3 infra/hermes/render_model_config.py --auth codex-oauth --fallback claude-oauth --base infra/hermes/config.yaml --sha256`
+   (`--catalog`의 `default/…` 줄. 모델 구간 없는 기본 설정은 `config.yaml`의 해시 그대로)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로
+   `HERMES_CONFIG_B64`를 만든다(`… --connector-base … | base64 | tr -d '\n'`, 기본 모드는 `… --base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 밖이면 멈춘다:
+   카탈로그에 더하는 결정(ADR 증보)이 먼저다([ADR-0203 증보 2026-11-05](adr/0203-cohosted-agent-detection.md)가 팀 공용 기본값과 정적 목록 밖 id의 규칙을 적는다).
 3. **볼륨 `.env`의 이름만 읽는다.** 새 게이트는 볼륨 `.env`에 허용 목록 밖의 이름이 있거나, 허용된 이름의 값에 줄바꿈이 있거나, `.op.env`가 있거나,
    `/opt/data/profiles/` 아래에 항목이 하나라도 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
    `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
@@ -430,13 +433,13 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    그 줄을 지운다(서비스 변수는 그대로 둔다). 이름만 읽어서는 값에 줄바꿈이 든 줄을 알 수 없으므로, 그런 줄은 5단계의 `problems`가 이름만 대고 알려 준다. 이름만 읽어서는 씨앗 줄의 값이 낡았는지 모르므로, 목록에 씨앗 이름이 있으면 그 줄만 열어(`grep '^<이름>=' /opt/data/.env`) 값이 `VOLUME_ENV_SEEDED`의 값과 같은지 본다. 이 값들은 Hermes
    템플릿의 공개 상수라 비밀이 아니고, 다른 이름의 줄은 열지 않는다. 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 값이 다른 씨앗 줄도 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
    지우기 전에는 4단계로 가지 않는다.
-4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② `HERMES_LOCKGATE_B64`를 `base64 < infra/hermes/lockgate.py | tr -d '\n'`로,
+4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② 게이트는 값이 길어 한 변수에 들어가지 않는다(Railway는 값이 32,768자를 넘는 변수를 거절한다, #5348): `base64 < infra/hermes/lockgate.py | tr -d '\n' | fold -w 32000`의 줄을 차례로 `HERMES_LOCKGATE_B64`, `HERMES_LOCKGATE_B64_2`, … `_5`에 넣고 줄이 없는 이름은 비운다(로그인 릴레이를 쓰는 서비스는 같은 방법으로 `HERMES_LOGIN_RELAY_B64`, `_2`, `_3`). 이어서
    시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
    `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
-   건드리지 않는다. 배포는 한 번이다.
-5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(`default` 또는 `connector/…`), `"media_strict": true`이고,
+   건드리지 않는다. 연결 모드를 떠나 팀 공용 기본 모드로 바꿀 때는 이 셋을 지운다(값은 1단계 저장본에만 남긴다). 연결 모드는 설정의 `mcp_servers`가 정하므로 남은 변수는 쓰이지 않고, 쓰지 않는 비밀을 서비스에 남기지 않는다(2026-11-05 전환, #5362). 배포는 한 번이다. **변수 저장은 한꺼번에 적용되지 않는다**: 여러 변수를 한 번에 보내도 한 값이 길이로 거절되면 그 앞 변수는 이미 써져 있다(2026-11-05 실측). 보내기 전에 모든 값이 32,768자 이하인지 보고, 거절되면 곧바로 1단계 저장본과 대조해 되돌린다. 배포 전이라 도는 서비스는 그대로지만, 재시작되면 어긋난 값으로 뜬다.
+5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(팀 공용 기본 모드는 `default/codex-oauth.fallback-claude-oauth`, 그 밖에 `default` 또는 `connector/…`)이고, `resolved_tools`는 게이트가 로그인 없는 임시 홈에서 잰 값이라 팀 공용 기본 모드에서도 `todo_list`만 나오고(로그인은 아래 `LOCKREPORT`로 확인한다), `"media_strict": true`이고,
    `selected_tools`·`resolved_tools`에 `memory`·`session_search`가 없고 `memory_config`가 `{"memory_enabled": false, "provider_set": false, "user_profile_enabled": false}`이고
-   (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
+   (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고, 팀 공용 기본 모드에서는 `live_tools`에 `image_generate`가 있고 `selected_tools`에 `web_search`가 있어(`/v1/toolsets`가 `web_search`를 보고하지 않아 `live_tools`에는 나오지 않는다) Codex 로그인이 볼륨에 있음을 확인하고(#5362), 서비스가 healthy이고 oort의 AI 연결 카드가
    정상이다. `LOCKGATE`가 `"ok": false`이거나 서비스가 멈추면 `problems`(이름·해시만 나온다)를 이슈에 적고 6단계로 간다.
 6. **되돌린다.** 1단계에서 저장한 값으로 변수와 시작 명령을 되돌려 다시 배포한다(옛 게이트가 옛 설정을 받아들인다). 볼륨의 데이터·로그인(`auth.json`)은 그대로다.
    되돌린 뒤 5단계의 `problems`에 맞춰 원인(보통 3단계에서 놓친 `.env` 이름)을 고치고 다시 4단계부터 간다.

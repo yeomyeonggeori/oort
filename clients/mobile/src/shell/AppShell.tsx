@@ -49,6 +49,7 @@ import AppDetailScreen from '../screens/AppDetailScreen';
 import AppsScreen from '../screens/AppsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
+import {recentsScope, rememberConversation} from '../features/search/searchRecents';
 import SettingsScreen from '../screens/SettingsScreen';
 import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
 import type {SettingsPageName} from '../features/profile/SettingsPage';
@@ -234,6 +235,13 @@ export function Shell({
     (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
     [],
   );
+  // 탭 하나를 고른다 — 탭바와 검색 탭의 X 가 같은 길이다. + 메뉴가 열려 있었다면 함께 접는다.
+  const selectTab = useCallback((tab: Tab) => {
+    setCreate(null);
+    dispatch({type: 'selectTab', tab});
+  }, []);
+  // 검색 탭의 X 가 입력이 비어 있을 때 부른다(#5365): 탭 구조는 그대로 두고 처음 탭(홈)으로 돌려보낸다.
+  const onCloseSearch = useCallback(() => selectTab(INITIAL_NAV.tab), [selectTab]);
   const onOpenAgentList = useCallback(
     () => dispatch({type: 'openAgentList'}),
     [],
@@ -286,6 +294,14 @@ export function Shell({
       dispatch({type: 'openHostedConnection', connection}),
     [],
   );
+
+  // 열린 대화를 이 기기의 「최근 연 대화」에 남긴다(#5365). 목록·검색·알림 어느 문으로 열든 대화 층 하나로 모이는 자리다.
+  const openedChannelId = nav.conversation?.channelId ?? null;
+  useEffect(() => {
+    if (openedChannelId !== null) {
+      rememberConversation(recentsScope(workspaceId, member.id), openedChannelId);
+    }
+  }, [openedChannelId, workspaceId, member.id]);
 
   // Which places have ever been open. A ref rather than state: it is derived
   // from `nav` and is only ever read during the render that already follows the
@@ -427,6 +443,7 @@ export function Shell({
                 key={nav.searchSeed?.seq ?? 0}
                 initialQuery={nav.searchSeed?.initialQuery ?? ''}
                 onOpenResult={onOpenConversation}
+                onClose={onCloseSearch}
               />
             </TabPane>
           ) : null}
@@ -438,10 +455,7 @@ export function Shell({
         current={nav.tab}
         inboxCount={needsMe.total}
         homeUnread={needsMe.homeUnread}
-        onSelect={tab => {
-          setCreate(null);
-          dispatch({type: 'selectTab', tab});
-        }}
+        onSelect={selectTab}
         onPlus={() => setCreate(open => (open === 'menu' ? null : 'menu'))}
         plusOpen={create === 'menu'}
         covered={covered}
@@ -626,6 +640,8 @@ export function Shell({
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
             onOpenSettings={onOpenSettingsFromConversation}
+            // 대화 안 검색의 「모든 대화에서 ›」(#5384): 같은 말로 검색 탭을 연다.
+            onOpenSearch={onOpenSearch}
           />
         </EdgeSwipeBack>
       ) : null}

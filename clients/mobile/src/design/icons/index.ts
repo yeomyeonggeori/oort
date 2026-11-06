@@ -95,11 +95,23 @@ export const CONV_ICONS = {
   // 밀어서 답글(#4869)의 문턱 표지. Lucide `reply`(ISC, 웹 `lucide-react` 0.454.0 의 경로 그대로 — polyline `9 17 4 12 9 7` +
   // path `M20 18v-2a4 4 0 0 0-4-4H4`), 같은 레시피(선 1.8, viewBox 24, 20pt 의 1·2·3배: `rsvg-convert -w <20|40|60>`).
   reply: require('./reply20.png') as ImageSourcePropType,
+  // 인용 머리 「{이름}에게 답장」의 표지(#5381 Q4). Lucide `corner-up-left`(ISC, 웹 `lucide-react` 0.454.0 의 `CornerUpLeft` 경로 그대로 —
+  // polyline `9 14 4 9 9 4` + path `M20 20v-7a4 4 0 0 0-4-4H4`)를 같은 레시피(선 1.8, viewBox 24, 12pt 의 1·2·3배: `rsvg-convert -w <12|24|36>`)로
+  // **옮겨 담았다**. 새로 그린 것이 아니다. 웹 인용 머리와 같은 도형이라 두 기기가 같은 표지를 쓴다(`reply` 는 밀어서 답글의 문턱 표지다).
+  quoteReply: require('./corner-up-left12.png') as ImageSourcePropType,
   // 스레드 머리의 「따라가기」 단추(#4890). Lucide `bell`·`bell-off`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로)를
   // 같은 레시피(선 1.8, viewBox 24, `rsvg-convert`, 20pt 의 1·2·3배)로 **옮겨 담았다**. 새로 그린 것이 아니다. 켜짐은 `bell`,
   // 꺼짐은 빗금이 있는 `bell-off`.
   bell: require('./bell.png') as ImageSourcePropType,
   bellOff: require('./bell-off.png') as ImageSourcePropType,
+  // 대화 안 검색(#5364). 머리의 돋보기 원·검색 줄·이동 막대의 「목록」·위(`chevronUp`) 화살표·최근 검색 줄의 시계(`recent`). 전부 Lucide(ISC, 웹이
+  // `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로 `search`·`list`·`chevron-up`·`clock`)를 같은 레시피(선 1.8, viewBox 24,
+  // `rsvg-convert -w <pt|2pt|3pt>`)로 **옮겨 담았다**. 새로 그린 것이 아니다. 아래 화살표는 홈의 `down`(`HOME_ICONS.down`, chevron-down 20pt)을 그대로 쓴다.
+  search: require('./search20.png') as ImageSourcePropType,
+  list: require('./list20.png') as ImageSourcePropType,
+  chevronUp: require('./chevron-up20.png') as ImageSourcePropType,
+  // 최근 검색 줄 앞 시계 18pt. 위 `clock`(12pt, 시각 글자 옆)을 키우면 흐려져서(`bot22` 사례) 따로 굽는다.
+  recent: require('./clock18.png') as ImageSourcePropType,
 } as const;
 
 export type ConvIconName = keyof typeof CONV_ICONS;
@@ -118,8 +130,13 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   file: 18,
   clock: 12,
   reply: 20,
+  quoteReply: 12,
   bell: 20,
   bellOff: 20,
+  search: 20,
+  list: 20,
+  chevronUp: 20,
+  recent: 18,
 };
 
 // ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------

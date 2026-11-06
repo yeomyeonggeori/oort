@@ -60,12 +60,11 @@ import {
 } from "@momo/core/features/timeline/deletedFold";
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
-import { mainFlowMessages, replyHomeLine } from "@momo/core/features/timeline/threadHome";
-import { useExpressions } from "@/features/expressions/context";
+import { mainFlowMessages } from "@momo/core/features/timeline/threadHome";
+import { messageAboveIds } from "@momo/core/features/timeline/quote";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
-import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
 import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runStatusForMessage } from "./runStatus";
 
@@ -419,12 +418,10 @@ export function Timeline({
   // 의존성에 넣으면 스트림이 매 렌더 새로 만들어지고, 그 동일성은 이 목록의
   // 앵커 보정이 기대는 것이다.
   const myMemberIdForFold = actions?.myMemberId;
-  // 본류에는 root 없는 메시지와 「대화에도 보낸」 답글만 서요(ADR-0148 증보 결정 4 — 코어 `isMainFlowRow` 한 곳, 폰과 같은 규칙).
-  // 서버가 소속 root를 준 답글 중 켜지 않은 것만 빠져요. 옛 서버는 `alsoInChannel`을 안 보내서 화면이 오늘과 같고, root 없는 카드는 그대로예요.
+  // 본류에는 root 없는 메시지만 서요(ADR-0148 증보 2026-11-05 — 코어 `isMainFlowRow` 한 곳, 폰과 같은 규칙). 서버가 소속 root를 준 답글은 모두
+  // 스레드에만 보여요: 옛날에 「대화에도 보내기」로 보낸 답글(서버 필드 `alsoInChannel`)도 본류의 행이나 한 줄 요약 없이 스레드에서만 읽혀요.
+  // root 없는 카드는 그대로예요.
   const mainMessages = useMemo(() => mainFlowMessages(messages), [messages]);
-  // 본류에 선 답글 줄의 원문 한 줄: 이미 든 행에서 root를 푼다(요청 없음). 이모티콘만 보낸 root를 알아보려고 명부를 건넨다.
-  const { cache: expressionCache } = useExpressions();
-  const expressionItems = expressionCache.items;
 
   // 루트 아래 요약 줄(#5008): 서버가 페이지에서 준 요약은 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글의 수·얼굴·안 읽은 수는
   // 이 목록이 이미 든 답글(`messages`에는 답글 프레임도 들어 있다 — 본류에서만 `mainMessages`가 뺀다)로 그 위에 얹는다.
@@ -531,6 +528,11 @@ export function Timeline({
     showIntro,
   ]);
 
+  // 각 메시지 바로 위에 **그려진** 메시지(#5357). 접기를 다 거친 `items` 에서 한 번 센다 — 메시지 배열에서 세면 화면이 가린 행과 접은 묘비를
+  // 잘못 센다. 가상 목록의 인덱스에서 이웃을 읽지 않는 까닭은 `firstItemIndex` 가 앞에 쌓인 행에 따라 움직이기 때문이다. 에이전트의 답이 이 표의
+  // 이웃을 가리키면 그 행은 인용을 그리지 않는다(코어 `isQuoteRedundant`, 폰과 같은 함수).
+  const aboveIds = useMemo(() => messageAboveIds(items), [items]);
+
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
   // 이 목록은 가상화되어 있어서 그 비용이 바로 스크롤로 나온다.
@@ -540,10 +542,6 @@ export function Timeline({
   const timelineChannelId = messages[0]?.channelId ?? null;
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
-  // #4619 — 「답함 ✓」 칩이 누르면 가는 답 메시지. 로드된 메시지를 한 번 색인해 끝난 run마다 답을 찾는다
-  // (행마다 찾으면 목록 전체를 행 수만큼 훑는다). 답이 아직 로드되지 않았거나 이을 길이 없으면 그 run은
-  // 지도에 없고, 칩은 「답함」을 말하되 눌리지 않는다.
-  const runAnswers = useMemo(() => runAnswerMap(channelRuns, mainMessages), [channelRuns, mainMessages]);
   const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined =>
     runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage });
 
@@ -994,17 +992,16 @@ export function Timeline({
               deletedRepeat={item.deletedRepeat}
               deletedFoldedIds={item.deletedFoldedIds}
               rollup={rollupFor(item.message, viewingKey !== null && item.message.id.toLowerCase() === viewingKey)}
-              replyHome={replyHomeLine(item.message, quoteLookup, expressionItems)}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}
               quoteLookup={quoteLookup}
+              aboveMessageId={aboveIds.get(item.message.id.toLowerCase())}
               onOpenWorkSession={onOpenWorkSession}
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
               runStatus={runStatusFor(item.message)}
               showThought={channelKind === "dm" && peer?.kind === "agent"}
-              runAnswers={runAnswers}
             />
           );
         }}
