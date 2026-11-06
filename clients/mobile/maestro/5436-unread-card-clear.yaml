@@ -1,0 +1,88 @@
+appId: app.momo.ios
+name: 5436-unread-card-clear
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 안 읽은 채널을 처음 열면 「안 읽은 동안」 한 줄 띠가 머리 알약 줄 밑에 서고, 띠 때문에 목록의 첫 내용(날짜 칩·안 읽음 구분선)이 가려진 채 멈추지 않는다 (#5436, 검증 6b-2 화면 검수 + 디자인 검수 B1·H1).
+#
+# 준비: `CHANNEL_ID` 는 **한 번도 열지 않은** 채널이고 안 읽은 줄이 5개 이상이다(카드 문턱 `MISSED_MIN_UNREAD`). 카드는 방문마다 한 번만 서므로 흐름을 다시 돌릴
+# 때마다 새 채널이 있어야 한다. **레인 기본 `CHANNEL_ID`(#agent-lab)로 돌리면 이미 열린 채널이라 첫 단정에서 붉다 - 직접 `maestro test -e CHANNEL_ID=<새 채널>` 로 돌린다.**
+# 줄 수는 **내용이 한 화면을 조금 넘게** 맞춘다 - 7개(남의 글 3·내 글 4, 인용 둘)가 그 띠다. 이 띠가 결함이 사는 자리다: 진입은 늘 바닥에 앉고(#1025), 카드는 목록
+# 맨 위라 바닥에 앉는 순간 머리 밑으로 밀려 올라갔다(iPhone 17 Pro 402×874 실측: 카드 위끝 42pt, 머리 밑 124pt → 카드 전체가 머리 덮개 안).
+#
+#   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#     -e CHANNEL_ID=<안 읽은 채널 id> clients/mobile/maestro/5436-unread-card-clear.yaml
+#
+# 이 흐름이 재는 것(눈이 아니라 단정이다). Maestro 의 `below` 는 「위끝이 더 아래」만 비교한다 - 띠 **뒤**에 가린 요소도 `below: missed-digest-band` 를 통과한다(실측: 착지 직후
+# 뒷면 안 날짜 칩이 통과). 그래서 「띠 밑」은 뒷면 아래끝의 1pt 이음매 `missed-digest-band-end` 를 기준으로 잰다(이음매 위끝 = 띠 아래끝 - 1pt).
+#   ① 착지 직후 - 카드·✕ 가 알약 줄(`conversation-header-row`) 아래에 서고, 안 읽음 구분선(`unread-divider`)이 띠 아래끝 **밑**에 보인다.
+#      (고치기 전에는 카드가 머리 덮개 안이라 첫 단정에서 붉다. 마지막 단정은 띠가 구분선을 가리면 붉다.)
+#   ② 맨 위까지 올린 뒤 - 날짜 칩(`day-divider`)과 안 읽음 구분선이 띠 아래끝 **밑**에서 시작한다(위 여백이 머리 + 띠 높이를 따라간다).
+#      진입 직후 첫 쓸기는 수리 전에도 16pt 만 가서(실측) 맨 위에는 둘째 쓸기부터 닿으므로 쓸기를 여럿 한다.
+#   ③ ✕ 가 눌린다 - 누르면 띠가 걷힌다(머리 단추 ⋮ 가 대신 눌렸다면 띠가 남는다).
+# 이 흐름이 **못 재는 것**: 겹친 양(pt) 자체 - 그것은 `maestro hierarchy` 덤프로 잰다(인계의 숫자). 어두운 테마·큰 글자·SE 폭·요약 「ready」 상태.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- waitForAnimationToEnd:
+    timeout: 4000
+# ① 착지 직후.
+- assertVisible:
+    id: "missed-digest-card"
+- assertVisible:
+    id: "missed-digest-card"
+    below:
+      id: "conversation-header-row"
+- assertVisible:
+    id: "missed-digest-dismiss"
+    below:
+      id: "conversation-header-row"
+- assertVisible:
+    id: "unread-divider"
+    below:
+      id: "missed-digest-band-end"
+# ② 맨 위까지 - 날짜 칩이 띠 밑에 올 때까지(최대 12번) 안 읽음 구분선 줄에서 아래로 쓴다. 쓸기 횟수를 못 박지 않는 이유: 부하가 큰 기기에서는 고정 횟수 쓸기가 목록을
+#   한 점도 못 움직이기도 했다(실측 · 진입 직후 첫 쓸기는 수리 전에도 16pt 만 간다). 시작점을 행이 아닌 구분선 줄에 두어 「밀어서 답글」과 겹치지 않는다. 조건은 아래
+#   단정과 같은 것이라 이 반복이 단정을 대신하지 않는다 - 12번을 넘기고도 칩이 띠 밑에 못 오면 아래 단정이 붉다.
+- repeat:
+    while:
+      notVisible:
+        id: "day-divider"
+        below:
+          id: "missed-digest-band-end"
+    times: 12
+    commands:
+      - swipe:
+          from:
+            id: "unread-divider"
+          direction: DOWN
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+- assertVisible:
+    id: "day-divider"
+    below:
+      id: "missed-digest-band-end"
+- assertVisible:
+    id: "unread-divider"
+    below:
+      id: "missed-digest-band-end"
+# ③ ✕ 가 눌린다.
+- tapOn:
+    id: "missed-digest-dismiss"
+- assertNotVisible:
+    id: "missed-digest-card"

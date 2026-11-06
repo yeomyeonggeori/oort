@@ -18,9 +18,11 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {Image, StyleSheet} from 'react-native';
+import {Image, StyleSheet, type StyleProp, type ViewStyle} from 'react-native';
 
 import {SHEET_ICONS} from '../src/design/icons';
+import {TOUCH_TARGET} from '../src/design/tokens';
+import {PILL_HEIGHT} from '../src/features/memory/EvidencePills';
 import {GroupCard} from '../src/design/sheetParts';
 import {describeCloseContract} from './fixtures/sheetContract';
 import * as copy from '../src/features/memory/copy';
@@ -182,6 +184,91 @@ describe('요약 카드 — 화면', () => {
   it('hidden 이면 아무것도 그리지 않는다', () => {
     view({kind: 'hidden'});
     expect(screen.queryByTestId('missed-digest-card')).toBeNull();
+  });
+});
+
+describe('요약 카드 — 한 줄 띠 (#5436)', () => {
+  const band = (state: React.ComponentProps<typeof MissedDigestCardView>['state'], extra = {}) =>
+    render(<MissedDigestCardView compact state={state} onDismiss={noop} {...extra} />);
+
+  it('요약은 한 줄(말줄임)만 서고 근거 알약·나머지 줄은 띠에 없다 — 전문은 「더 보기」가 연다', () => {
+    const onMore = jest.fn();
+    band({kind: 'ready', digests: [digest()], partial: false}, {onMore});
+    const first = screen.getByText('배포 일정이 금요일로 정해졌어요.');
+    expect(first.props.numberOfLines).toBe(1);
+    expect(first.props.ellipsizeMode).toBe('tail');
+    expect(first.props.testID).toBe('missed-digest-ready');
+    expect(screen.queryByText('롤백 절차는 그대로 가요.')).toBeNull();
+    expect(screen.queryByTestId('missed-digest-evidence-2')).toBeNull();
+    // 옛 카드는 줄이 많거나 요약이 둘 이상일 때만 「더 보기」를 줬다. 띠는 근거까지 시트에 있으니 요약이 서면 늘 준다.
+    fireEvent.press(screen.getByTestId('missed-digest-more'));
+    expect(onMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('오류는 한 문장 한 줄이고 다시 시도만 준다', () => {
+    const onRetry = jest.fn();
+    band({kind: 'error'}, {onRetry});
+    expect(screen.getByText(copy.MISSED_ERROR).props.numberOfLines).toBe(1);
+    fireEvent.press(screen.getByTestId('missed-digest-retry'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('missed-digest-more')).toBeNull();
+  });
+
+  it('요약 전은 한 문장 한 줄이고 행동 단추가 없다', () => {
+    band({kind: 'notSummarized'});
+    expect(screen.getByText(copy.MISSED_NOT_SUMMARIZED).props.numberOfLines).toBe(1);
+    expect(screen.queryByTestId('missed-digest-retry')).toBeNull();
+    expect(screen.queryByTestId('missed-digest-more')).toBeNull();
+  });
+
+  it('카드는 불투명한 뒷면 안에 한 줄 높이로 서고, 닫기는 그대로 눌린다', () => {
+    const onDismiss = jest.fn();
+    band({kind: 'notSummarized'}, {onDismiss});
+    const back = screen.getByTestId('missed-digest-band');
+    // 뒷면은 대화 바닥 색 한 장이다 - 투명하면 카드 둘레 틈·모서리로 밑을 지나는 목록 글자가 비친다(검수 M2).
+    expect(StyleSheet.flatten(back.props.style).backgroundColor).toMatch(/^#[0-9a-f]{6}$/i);
+    const card = within(back).getByTestId('missed-digest-card');
+    // 카드 안은 한 줄(옛 카드의 `head` 줄: 최소 높이 = 눌림 크기)뿐이고 아래 여백이 없다.
+    expect(card.children).toHaveLength(1);
+    expect(StyleSheet.flatten((card.children[0] as {props: {style: StyleProp<ViewStyle>}}).props.style).minHeight).toBe(TOUCH_TARGET);
+    expect(StyleSheet.flatten(card.props.style).paddingBottom).toBe(0);
+    // 뒷면 아래끝 이음매: 흐름(Maestro)이 「목록 첫 내용 ≥ 띠 아래끝」을 이것 `below` 로 잰다.
+    expect(StyleSheet.flatten(within(back).getByTestId('missed-digest-band-end').props.style)).toMatchObject({position: 'absolute', bottom: 0, height: 1});
+    fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['ready', 'missed-digest-more'],
+    ['error', 'missed-digest-retry'],
+  ] as const)('%s 의 단추: 눌림은 보이는 28pt 가 아니라 44pt 이고 ✕ 의 눌림 상자와 겹치지 않는다 (재검수 H2)', (kind, id) => {
+    band(
+      kind === 'ready' ? {kind: 'ready', digests: [digest()], partial: false} : {kind: 'error'},
+      {onMore: noop, onRetry: noop},
+    );
+    const button = screen.getByTestId(id);
+    const hit = (button.props.hitSlop ?? {}) as {top?: number; bottom?: number; left?: number; right?: number};
+    const visible = StyleSheet.flatten(button.props.style).minHeight;
+    // 보이는 크기는 알약 그대로, 눌림 높이 = 보이는 높이 + 위아래 hitSlop >= 44.
+    expect(visible).toBe(PILL_HEIGHT);
+    expect((visible ?? 0) + (hit.top ?? 0) + (hit.bottom ?? 0)).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 가로는 안 넓힌다: 같은 줄에서 ✕ 바로 앞 형제이고(틈 = 줄 안 배치 ≥ 0) 어느 쪽도 가로 slop 이 없어 눌림 상자 사이 틈이 0 이상이다.
+    expect((hit.left ?? 0) + (hit.right ?? 0)).toBe(0);
+    const dismiss = screen.getByTestId('missed-digest-dismiss');
+    expect(dismiss.props.hitSlop).toBeUndefined();
+    expect(StyleSheet.flatten(dismiss.props.style).minWidth).toBe(TOUCH_TARGET);
+    expect(
+      within(screen.getByTestId('missed-digest-card'))
+        .getAllByTestId(new RegExp(`^(${id}|missed-digest-dismiss)$`))
+        .map(node => node.props.testID),
+    ).toEqual([id, 'missed-digest-dismiss']);
+  });
+
+  it('긴 요약 첫 줄도 줄바꿈하지 않는다 — numberOfLines 1 이 높이를 한 줄로 못 박는다', () => {
+    const long = '아주 긴 요약 문장이 한 줄을 넘어가도 띠는 한 줄이다. '.repeat(6);
+    band({kind: 'ready', digests: [digest({body: `- ${long}\n- 두 번째 줄`})], partial: false});
+    expect(screen.getByTestId('missed-digest-ready').props.numberOfLines).toBe(1);
+    expect(screen.queryByText('두 번째 줄')).toBeNull();
   });
 });
 
