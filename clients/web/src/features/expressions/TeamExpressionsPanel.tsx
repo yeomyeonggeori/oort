@@ -1,9 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
 import type { MessageKey } from "@momo/core/i18n";
 import { isExpressionFavorite } from "@momo/core/features/expressions/favorites";
-import { buildExpressionSections } from "@momo/core/features/expressions/gridSections";
+import { buildExpressionSections, EXPRESSION_GRID_ENTRY_SELECTOR, isGridEntryKey } from "@momo/core/features/expressions/gridSections";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
 import { firstFilledView, type ExpressionView } from "@momo/core/features/expressions/kind";
@@ -142,6 +142,14 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
     } catch { setError("변경하지 못했어요. 연결과 권한을 확인하고 다시 시도해 주세요."); }
     finally { lock.current = false; setBusy(false); }
   }
+  // 검색 칸에서 아래 화살표 = 격자로 들어간다(탭 순서에 있는 한 칸으로). 격자가 없으면(비었거나 불러오는 중) 아무 일도 없다.
+  function enterGrid(event: KeyboardEvent<HTMLInputElement>) {
+    if (!isGridEntryKey(event.key)) return;
+    const cell = listRef.current?.querySelector<HTMLElement>(EXPRESSION_GRID_ENTRY_SELECTOR);
+    if (!cell) return;
+    event.preventDefault();
+    cell.focus();
+  }
   // 눌린 순간의 목록에서 다시 찾는다: 그 사이 숨겨졌거나 지워졌으면 고르지 않는다.
   function pick(item: Expression) {
     const active = store!.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);
@@ -177,7 +185,7 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
       <div className="flex justify-end gap-2"><Button ref={cancelRef} type="button" variant="secondary" aria-disabled={busy || undefined} className={cn(busy && DIM)} onClick={closeConfirm}>취소</Button><Button type="button" variant="destructive" aria-busy={busy || undefined} aria-disabled={offline || undefined} className={cn(offline && DIM)} onClick={() => void confirm()}>{busy ? "처리 중" : target.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
     </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
       {fixedView ? null : <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />}
-      <Input ref={searchRef} type="search" aria-label={formatMessage(view === "gif" ? "expressions.sheet.searchGif" : "expressions.sheet.searchEmoticon")} placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <Input ref={searchRef} type="search" aria-label={formatMessage(view === "gif" ? "expressions.sheet.searchGif" : "expressions.sheet.searchEmoticon")} placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={enterGrid} />
       {/* 다시 읽기가 실패해도 이미 받아 둔 목록은 지우지 않는다(#5279 C, #5242 규칙): 한 줄이 위에서 원인과 함께 말하고 목록은 그대로 서 있다. 받아 둔 것이 없을 때만 한 줄뿐이다. */}
       {status === "error" && <LoadFailureNote titleKey={CONNECTION_KEYS.loadTeamExpressionsTitle} cause={loadCauseOf(failure)} onRetry={() => void store.refresh()} separator={false} testId="team-expressions-error" />}
       {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" && cache.items.length === 0 ? null :

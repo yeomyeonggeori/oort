@@ -74,6 +74,13 @@ export function buildExpressionSections(
   return sections;
 }
 
+/** 검색 칸에서 격자로 들어가는 키(아래 화살표). 들어가는 칸은 지금 탭 순서에 있는 칸(`EXPRESSION_GRID_ENTRY_SELECTOR`)이다. */
+export function isGridEntryKey(key: string): boolean {
+  return key === "ArrowDown";
+}
+/** 격자에서 탭 순서에 있는 한 칸(roving tabindex)을 가리키는 선택자. */
+export const EXPRESSION_GRID_ENTRY_SELECTOR = '[data-pos][tabindex="0"]';
+
 /** 격자 안의 자리: 몇 번째 구역의 몇 번째 칸. */
 export interface GridPosition {
   section: number;

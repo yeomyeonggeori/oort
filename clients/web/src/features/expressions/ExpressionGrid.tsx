@@ -16,7 +16,7 @@ import { ExpressionImage } from "./ExpressionImage";
 
 // =============================================================================
 // 이모티콘·GIF 탭의 그림 격자와 세트 띠 (owner 2026-11-07, #5453). 카카오톡처럼 **그림만** 보인다: 이름·`:코드:`·안내 글이 격자에 없다
-// (낭독 이름과 마우스를 올렸을 때의 `title`에만 있다). 모델(구역·방향키)은 코어 `gridSections` 이고 이 파일은 그리고 키를 받는 일만 한다.
+// (낭독 이름과 마우스를 올렸을 때의 `title`에만 있다). 모델(구역·방향키)은 코어 `gridSections` 이고 이 파일은 화면에 세우고 키를 받는 일만 한다.
 //
 // 격자: 구역(최근 -> 즐겨찾기 -> 세트별 -> 기타)마다 6열. 구역이 하나뿐이면 이름줄도 없다. 칸은 누르면 고르고(`onPick`), 오른쪽 클릭·길게 누르기·메뉴 키는
 // 항목 메뉴(`menu`)를 연다 - 즐겨찾기·신고·삭제는 호스트가 준다. 칸마다 `data-manage` 로 항목을 가리키므로 호스트가 닫힌 뒤 초점을 칸으로 돌려줄 수 있다.
@@ -78,7 +78,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
   const jumps = stripped.length > 1 ? stripped : [];
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    // 항목 메뉴는 포털로 그려지지만 React 이벤트는 이 상자까지 올라온다 - 메뉴 안의 방향키는 격자를 움직이지 않는다.
+    // 항목 메뉴는 포털에 서지만 React 이벤트는 이 상자까지 올라온다 - 메뉴 안의 방향키는 격자를 움직이지 않는다.
     if (!event.currentTarget.contains(event.target as Node)) return;
     const next = moveGridPosition(sizes, here, event.key, EXPRESSION_GRID_COLS);
     if (next === null) return;
@@ -108,7 +108,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
     let at = sections[0]?.id ?? null;
     for (const node of nodes) if (node.offsetTop <= box.scrollTop + 1) at = node.dataset.section ?? at;
     // 맨 아래까지 내려왔으면 마지막 구역이 지금 구역이다.
-    if (box.scrollTop + box.clientHeight >= box.scrollHeight - 1) at = nodes.at(-1)?.dataset.section ?? at;
+    if (box.scrollHeight > box.clientHeight && box.scrollTop + box.clientHeight >= box.scrollHeight - 1) at = nodes.at(-1)?.dataset.section ?? at;
     setCurrent(at);
   };
   const markedId = current ?? sections[0]?.id ?? null;

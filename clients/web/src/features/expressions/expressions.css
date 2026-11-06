@@ -104,7 +104,7 @@
 
 /*
  * 이모티콘·GIF 탭의 그림 격자와 세트 띠 (owner 2026-11-07, #5453). 칸은 정사각 단추이고 그림이 칸 안에 맞는다(`ExpressionGrid`).
- * 그림이 오기 전과 실패했을 때 `ExpressionImage` 가 그리는 `:이름:` 글자 자리표시는 격자 칸 안에서 숨긴다 - 격자는 그림만 보인다(카카오톡처럼, 이름은 낭독 이름과 `title` 에만 있다).
+ * 그림이 오기 전과 실패했을 때 `ExpressionImage` 가 내놓는 `:이름:` 글자 자리표시는 격자 칸 안에서 숨긴다 - 격자는 그림만 보인다(카카오톡처럼, 이름은 낭독 이름과 `title` 에만 있다).
  */
 .expression-grid-cell > [data-expression-name],
 .expression-set-button > [data-expression-name] { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
