@@ -14,6 +14,7 @@ import {
   type MessageRowActions,
 } from '../src/features/conversation/MessageRow';
 import {releaseReduceMotion, setReduceMotion as setSheetReduceMotion} from './fixtures/sheetContract';
+import {captureNativeDismiss, isModalDown} from './fixtures/nativeDismiss';
 
 // =============================================================================
 // 메시지 액션의 규칙, 화면에서.
@@ -561,7 +562,11 @@ describe('알림이 새 입구로 들어오면 — 행 안에서 열린 고치�
     try {
       renderRow();
       longPress();
+      // 동작 줄이기: 슬라이드 없이 그릇이 바로 Modal 을 내린다 - 신호를 잡아 두었다가(Modal 이 서 있을 때) 내려간 뒤에 보낸다(#5417).
+      const signal = captureNativeDismiss('message-action-sheet');
       fireEvent.press(screen.getByTestId('sheet-edit'));
+      expect(isModalDown('message-action-sheet')).toBe(true);
+      signal();
       fireEvent.changeText(await screen.findByTestId('editor-input'), '고치던 문장, 아직 저장 전');
 
       act(() => {
@@ -570,7 +575,9 @@ describe('알림이 새 입구로 들어오면 — 행 안에서 열린 고치�
       await waitFor(() => expect(screen.queryByTestId('message-editor')).toBeNull());
 
       longPress();
+      const signalAgain = captureNativeDismiss('message-action-sheet');
       fireEvent.press(screen.getByTestId('sheet-edit'));
+      signalAgain();
       expect((await screen.findByTestId('editor-input')).props.value).toBe('고치던 문장, 아직 저장 전');
     } finally {
       releaseReduceMotion();
