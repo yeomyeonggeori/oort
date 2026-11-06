@@ -21,6 +21,14 @@
 //! caller yet**: the delegation that draws the picture (S4) and the conversation that asks for one
 //! (#5334) bring theirs.
 //!
+//! **Where a caller puts the write** (ADR-0151 증보 8 W9, review L3): *after* the model call that combines
+//! the answer and right before the transaction that posts it. A person who stops the run while the
+//! combining call is still going finds no row yet — and the row-write's own check (the run is still in
+//! flight) refuses it if the stop lands later — whereas a picture written *before* that call and never
+//! bound would sit unbound (readable by nobody, swept by the 30-day sweep only when it is switched
+//! on). The picture must come out of the image tool's own output (a `MEDIA:` line or the tool result),
+//! never out of free text a web search brought in (review I3); both are the caller's (S4, #5372).
+//!
 //! [`send_answer_with_run_pictures_in_tx`] is the other half of the caller's job: the one transaction
 //! that posts the run's final answer **with** the pictures this run wrote, and — if the binding is
 //! refused for any reason — posts the same answer **without** them and says so in one fixed sentence,
@@ -53,9 +61,6 @@ pub const PICTURE_UPLOAD_FAILED_SENTENCE: &str = "그림은 만들어졌지만 �
 /// origin (and deriving `Debug` is as safe as `Display`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PictureRefusal {
-    /// `OORT_API_INTERNAL_ORIGIN` is missing or is not an origin: the write path is closed. There is no
-    /// fallback — this process cannot write the archive.
-    Closed,
     /// Not a png, jpeg or webp, or nothing at all. Nothing was minted.
     NotAPicture,
     /// More than 5 MiB. Nothing was minted.

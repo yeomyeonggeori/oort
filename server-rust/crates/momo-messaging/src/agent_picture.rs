@@ -481,6 +481,7 @@ mod tests {
             AGENT_MEDIA_TTL_SECS,
             crate::self_media::SELF_MEDIA_INTERNAL_TTL_SECS
         );
-        assert!(AGENT_PICTURES_PER_RUN >= 1 && AGENT_PICTURES_PER_RUN <= 4);
+        // a compile-time fact about two constants: the code limit must sit inside the table's CHECK (1..=4)
+        const { assert!(AGENT_PICTURES_PER_RUN >= 1 && AGENT_PICTURES_PER_RUN <= 4) };
     }
 }
