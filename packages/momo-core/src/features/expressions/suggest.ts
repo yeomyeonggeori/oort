@@ -17,6 +17,11 @@ import type { ExpressionKind, ExpressionStatus } from "./types";
 
 /** 한 번에 추천하는 그림 수의 기본값(입력창 위 한 줄에 3~5개). */
 export const EXPRESSION_SUGGEST_LIMIT = 5;
+/**
+ * 입력이 멈춘 뒤 추천을 맞춰 보기까지 기다리는 시간(밀리초, 0.3초). 화면이 쓴다(#5476): 이 값만큼 아무것도 안 치면 줄을 띄우고, 그 안에 한 글자라도 더 치면
+ * 줄이 사라지고 기다림이 처음부터 다시 시작한다. 맞추는 함수는 기다리지 않는다: 시계는 화면 몫이다(웹과 폰이 같은 값을 쓰도록 여기 둔다).
+ */
+export const EXPRESSION_SUGGEST_DEBOUNCE_MS = 300;
 /** 정리한 글이 이 글자 수(코드 포인트) 이하면 마지막 낱말뿐 아니라 글 전체도 맞춰 본다. */
 export const EXPRESSION_SUGGEST_WHOLE_TEXT_MAX = 8;
 
