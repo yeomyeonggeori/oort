@@ -449,6 +449,9 @@ function allBubblePalettes(): (readonly [string, Record<string, string>])[] {
           [
             `catalog:${e.id}/${mode}`,
             {
+              // `mode`·`backdrop` 이 없으면 `otherBubbleFill` 이 조용히 바닥을 `bg` 로 읽는다(#5421) — 라이트 행을 옛 규칙으로 재는 초록이 된다.
+              mode,
+              backdrop: 'canvas',
               accent: t.color.signal,
               onAccent: t.color['on-signal'],
               surface: t.color.surface,

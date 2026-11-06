@@ -117,6 +117,7 @@ import {
   type ComposerSendOptions,
 } from '../features/conversation/Composer';
 import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
+import {conversationFloor} from '../features/conversation/bubble';
 import {CONV} from '../features/conversation/convDesign';
 import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -2738,9 +2739,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     ...(color.backdrop === 'image'
       ? {backgroundColor: color.bg}
       : {
-          experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
-            color.mode === 'light' ? color.surface : color.bg
-          } 25%)`,
+          experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${conversationFloor(color)} 25%)`,
         }),
   },
   /**
