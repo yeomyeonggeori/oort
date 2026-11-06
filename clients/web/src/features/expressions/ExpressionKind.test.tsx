@@ -163,7 +163,7 @@ describe("the team panel's two views do not overlap", () => {
     const store = new ExpressionStore(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, transport);
     return store;
   }
-  const names = (view: ReturnType<typeof render>) => Array.from(view.container.querySelectorAll("ul[aria-label='팀 표현 목록'] li button[aria-label$='메시지에 넣기']")).map((button) => (button.getAttribute("aria-label") ?? "").replace(" 메시지에 넣기", ""));
+  const names = (view: ReturnType<typeof render>) => Array.from(view.container.querySelectorAll("[data-testid='expression-grid'] button[aria-label$='메시지에 넣기']")).map((button) => (button.getAttribute("aria-label") ?? "").replace(" 메시지에 넣기", ""));
 
   it("puts every big picture in exactly one view: the still stickers are the emoticon view, the moving stickers are the GIF view, an older one is a sticker; the small emoji belong to the emoji tab, not to these views", async () => {
     const store = storeOf(CATALOGUE); await store.refresh();

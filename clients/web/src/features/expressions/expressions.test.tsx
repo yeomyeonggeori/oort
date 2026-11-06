@@ -219,8 +219,8 @@ describe("team expressions web/desktop port", () => {
     fireEvent.click(view.getByLabelText("GIF"));
     fireEvent.change(view.getByLabelText("Search GIFs"), { target: { value: "ㄱㅈ" } });
     fireEvent.click(view.getByRole("button", { name: "기절 반응으로 고르기" })); expect(pick).toHaveBeenCalledWith(":ki_jeol:");
-    const trigger = view.getByRole("button", { name: "기절 관리" });
-    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false }); fireEvent.keyDown(trigger, { key: "Enter" });
+    // 항목 메뉴는 칸의 오른쪽 클릭으로 열린다(예전 「관리」 단추 자리, owner 2026-11-07 #5453).
+    fireEvent.contextMenu(view.getByRole("button", { name: "기절 반응으로 고르기" }));
     const report = await view.findByRole("menuitem", { name: "신고하기" }); fireEvent.click(report);
     const confirm = await view.findByRole("button", { name: "신고하고 숨기기" });
     expect(mutation).not.toHaveBeenCalled(); fireEvent.click(confirm);

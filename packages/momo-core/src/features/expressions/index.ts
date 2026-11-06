@@ -5,6 +5,8 @@ export * from "./search";
 export * from "./kind";
 export * from "./browse";
 export * from "./sets";
+export * from "./favorites";
+export * from "./gridSections";
 export * from "./sendBundle";
 export * from "./message";
 export * from "./cards";

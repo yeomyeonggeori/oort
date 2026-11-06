@@ -3138,6 +3138,54 @@ export const catalog: MessageCatalog = {
       "value": "photo, face"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "Add"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "Add to favorites"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "Remove from favorites"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "Favorites"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "Recent"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "Sets"
+    }
+  ],
   "expressions.picker.teamGroup": [
     {
       "type": 0,

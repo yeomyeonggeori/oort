@@ -2970,6 +2970,54 @@ export const catalog: MessageCatalog = {
       "value": "사진, 얼굴"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "추가하기"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에 추가"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에서 빼기"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "팀 표현 목록"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "즐겨찾기"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "기타"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "최근"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "세트"
+    }
+  ],
   "expressions.picker.teamGroup": [
     {
       "type": 0,

@@ -24,11 +24,10 @@ async function mountPanel(store = makeStore()) {
   const view = render(<ExpressionsContext.Provider value={store}><TeamExpressionsPanel purpose="reaction" onPick={() => {}} escapeClaim={claim} /></ExpressionsContext.Provider>);
   return { store, claim, view };
 }
-function manage(view: RenderResult) { return view.getByRole("button", { name: "기절 관리" }); }
+// 항목 메뉴는 칸의 오른쪽 클릭(길게 누르기·메뉴 키와 같은 `contextmenu`)으로 열린다(owner 2026-11-07, #5453). 예전 「관리」 단추 자리가 칸이다.
+function manage(view: RenderResult) { return view.getByRole("button", { name: "기절 반응으로 고르기" }); }
 async function chooseFromMenu(view: RenderResult, name: "신고하기" | "삭제하기") {
-  const trigger = manage(view);
-  fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false });
-  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.contextMenu(manage(view));
   fireEvent.click(await view.findByRole("menuitem", { name }));
 }
 const step = (view: RenderResult) => view.queryByTestId("expression-confirm");
@@ -52,11 +51,11 @@ describe("팀 표현 삭제·신고 확인은 고르개 안의 단계다 (#4986)
     // 이름 붙은 그룹이고 제목과 설명이 이어져 있다.
     const group = view.getByRole("group", { name: "팀 그림을 삭제할까요?" });
     expect(group.getAttribute("aria-describedby")).toBeTruthy();
-    expect(view.queryByRole("list", { name: "팀 표현 목록" })).toBeNull();
+    expect(view.queryByTestId("expression-grid")).toBeNull();
     expect(view.queryByLabelText("Search GIFs")).toBeNull();
   });
 
-  it("초점은 「취소」로 들어가고, 취소하면 그 항목의 「관리」로 돌아간다", async () => {
+  it("초점은 「취소」로 들어가고, 취소하면 그 항목의 칸으로 돌아간다", async () => {
     const { view } = await mountPanel();
     await chooseFromMenu(view, "삭제하기");
     const cancel = view.getByRole("button", { name: "취소" });
@@ -85,7 +84,7 @@ describe("팀 표현 삭제·신고 확인은 고르개 안의 단계다 (#4986)
     fireEvent.click(view.getByRole("button", { name: "신고하고 숨기기" }));
     await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(step(view)).toBeNull());
-    expect(view.queryByRole("button", { name: "기절 관리" })).toBeNull();
+    expect(view.queryByRole("button", { name: "기절 반응으로 고르기" })).toBeNull();
     expect(document.activeElement).toBe(view.getByLabelText("Search GIFs"));
   });
 

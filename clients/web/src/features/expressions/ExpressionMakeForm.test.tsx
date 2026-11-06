@@ -671,7 +671,9 @@ describe("＋ 메뉴", () => {
     await openMenu(view);
     expect(view.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["가져오기", "AI와 만들기"]);
     expect(hasBanned(document.body.textContent ?? "")).toBe(false);
-    expect(view.getByTestId("expression-add-menu").textContent).toBe("추가하기");
+    // 「추가하기」는 세트 띠 끝의 글자 없는 작은 ＋다(owner 2026-11-07, #5453): 이름은 사전의 낭독 이름이다(이 시험은 제공자 없는 고정 영어 사전으로 돈다).
+    expect(view.getByTestId("expression-add-menu").getAttribute("aria-label")).toBe("Add");
+    expect(view.getByTestId("expression-add-menu").textContent).toBe("");
   });
   it("Escape로 닫으면 초점이 「추가하기」로 돌아와요", async () => {
     const { view } = await mountPanel();
@@ -772,9 +774,8 @@ describe("이모티콘 고르개 안에서", () => {
     await store.refresh();
     const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
     fireEvent.click(await view.findByRole("button", { name: "GIF" }));
-    const manage = await view.findByRole("button", { name: "기절 관리" });
-    fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
-    fireEvent.keyDown(manage, { key: "Enter" });
+    // 항목 메뉴는 칸의 오른쪽 클릭으로 열린다(예전 「관리」 단추 자리, owner 2026-11-07 #5453).
+    fireEvent.contextMenu(await view.findByRole("button", { name: "기절 메시지에 넣기" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "삭제하기" }));
     expect(view.getByTestId("expression-confirm")).toBeTruthy();
     // 이 순간 열린 대화상자는 고르개 하나뿐이다: 두 번째 표면이 없다.
@@ -782,7 +783,7 @@ describe("이모티콘 고르개 안에서", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(view.queryByTestId("expression-confirm")).toBeNull());
     expect(onOpenChange).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(view.getByRole("button", { name: "기절 관리" }));
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "기절 메시지에 넣기" }));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
