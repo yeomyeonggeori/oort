@@ -167,6 +167,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
                 key={section.id}
                 type="button"
                 aria-label={nameOf(section)}
+                title={nameOf(section)}
                 aria-current={markedId === section.id}
                 data-strip={section.id}
                 className="expression-set-button tap-target flex size-control shrink-0 items-center justify-center overflow-hidden rounded-sm p-0.5 press hover:bg-surface-hover focus-visible:focus-ring"

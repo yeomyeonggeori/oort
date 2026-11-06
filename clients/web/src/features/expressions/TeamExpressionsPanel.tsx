@@ -15,6 +15,7 @@ import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import { ContextMenuItem } from "@/design/ui/context-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
@@ -165,7 +166,7 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
     <ContextMenuItem disabled={item.createdBy !== store!.memberId && !admin} onSelect={() => { confirmOpened.current = true; setError(null); setTarget({ item, action: "delete" }); }}>삭제하기{item.createdBy !== store!.memberId && !admin ? " (만든 사람·관리자만)" : ""}</ContextMenuItem>
   </>;
   // 「추가하기」는 세트 띠 끝의 작은 ＋다. 같은 메뉴(가져오기 · AI와 만들기)를 열고 권한(canAdd)과 오프라인 규칙도 같다.
-  const addMenu = <DropdownMenu><DropdownMenuTrigger asChild disabled={!canAdd || offline}><Button ref={addTrigger} type="button" variant="ghost" size="icon" aria-label={formatMessage("expressions.picker.add")} disabled={!canAdd || offline} data-testid="expression-add-menu"><Plus aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" side="top">
+  const addMenu = <DropdownMenu><Tooltip label={formatMessage("expressions.picker.add")} side="top" align="end"><DropdownMenuTrigger asChild disabled={!canAdd || offline}><Button ref={addTrigger} type="button" variant="ghost" size="icon" aria-label={formatMessage("expressions.picker.add")} disabled={!canAdd || offline} data-testid="expression-add-menu"><Plus aria-hidden="true" /></Button></DropdownMenuTrigger></Tooltip><DropdownMenuContent align="end" side="top">
     <DropdownMenuItem data-testid="expression-add-import" onSelect={() => setMode("import")}>가져오기</DropdownMenuItem>
     <DropdownMenuItem data-testid="expression-add-make" onSelect={() => setMode("make")}>AI와 만들기</DropdownMenuItem>
   </DropdownMenuContent></DropdownMenu>;
