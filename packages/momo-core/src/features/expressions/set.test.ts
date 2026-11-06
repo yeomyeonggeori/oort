@@ -20,7 +20,7 @@ import {
   FIXTURE_SET_REFUSED, FIXTURE_SET_REFUSED_APPROVAL_ID, FIXTURE_SET_REFUSED_ATTEMPTS, FIXTURE_SET_REFUSED_GIF_BASES, FIXTURE_SET_SAME_NAME,
   FIXTURE_SET_SAME_NAME_APPROVAL_ID, FIXTURE_SET_STREAK_ATTEMPTS, FIXTURE_SET_STREAK_CLOSED, FIXTURE_SET_STREAK_GIF_BASES, fixtureSetBytesHeavy,
   fixtureSetDraftId, fixtureSetGraySlot, fixtureSetOverLimit, fixtureSetReadySlot, fixtureSetReferenceProbesOverBytes, fixtureSetReferenceProbesTooMany,
-  FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD_SEEN, FIXTURE_SET_PLAN_CARD_WORDS, fixtureSetPlanCard,
+  FIXTURE_SET_PLAN_CARD, FIXTURE_SET_PLAN_CARD_ONE, FIXTURE_SET_PLAN_CARD_SEEN, FIXTURE_SET_PLAN_CARD_WORDS, fixtureSetPlanCard,
 } from "./setFixtures";
 import type { ExpressionChoice, ExpressionMutation } from "./types";
 import vectorFile from "./set.vectors.json";
@@ -564,6 +564,29 @@ describe("ADR-0218 §12 L2.5 the plan card: the person's one look before anythin
     // A card that says the notice is due but sends nothing shows no notice: there is nothing to be told about.
     expect(expressionSetPlanView(fixtureSetPlanCard({ references: [], noticeDue: true }), FIXTURE_NOW_MS).noticeLines).toEqual([]);
     for (const line of [first.picturesLine, first.referencesLine!, first.declareLine!, ...first.noticeLines]) expect(line).not.toMatch(/OpenAI|Gemini|GPT|Codex|Anthropic|Claude|gpt-image/i);
+  });
+
+  it("tells a member who sends exactly ONE picture the same three things as a member who sends two: the count, the declaration, and the first-time notice (R2-M1)", () => {
+    // One reference per character is the commonest case, and each of these lines once could open only above one picture (`references > 1`) with no test noticing.
+    expect(FIXTURE_SET_PLAN_CARD_ONE.references).toHaveLength(1);
+    expect(FIXTURE_SET_PLAN_CARD_ONE.noticeDue).toBe(true);
+    const first = expressionSetPlanView(FIXTURE_SET_PLAN_CARD_ONE, FIXTURE_NOW_MS);
+    expect(first.referencesLine).toBe("보낼 참조 그림 1장");
+    expect(first.declareLine).toBe("사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요.");
+    expect(first.noticeLines).toEqual(["첨부한 그림이 Hermes의 그림 모델로 전송돼요", "Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요"]);
+    // The same member's next set with one picture: the count and the declaration come back every time, the notice does not.
+    const next = expressionSetPlanView({ ...FIXTURE_SET_PLAN_CARD_ONE, noticeDue: false }, FIXTURE_NOW_MS);
+    expect(next.referencesLine).toBe("보낼 참조 그림 1장");
+    expect(next.declareLine).toBe(first.declareLine);
+    expect(next.noticeLines).toEqual([]);
+    // One picture is the first count that sends anything: none of the three at zero, all three (the notice only while it is due) at every count from 1 to 4.
+    for (const count of [0, 1, 2, 3, 4]) {
+      const references = [0, 1, 2, 3].slice(0, count).map((i) => ({ attachmentId: attachmentIdAt(i) }));
+      const view = expressionSetPlanView(fixtureSetPlanCard({ references, noticeDue: true }), FIXTURE_NOW_MS);
+      expect(view.referencesLine, `${count} pictures: count line`).toBe(count === 0 ? null : `보낼 참조 그림 ${count}장`);
+      expect(view.declareLine === null, `${count} pictures: declaration absent`).toBe(count === 0);
+      expect(view.noticeLines, `${count} pictures: notice lines`).toHaveLength(count === 0 ? 0 : 2);
+    }
   });
 
   it("closes the buttons once the card is answered or its window is over", () => {

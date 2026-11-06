@@ -208,3 +208,8 @@ export const FIXTURE_SET_PLAN_CARD: ExpressionSetPlanCard = fixtureSetPlanCard()
 export const FIXTURE_SET_PLAN_CARD_SEEN: ExpressionSetPlanCard = fixtureSetPlanCard({ noticeDue: false });
 /** Made from words alone: nothing to send, so no reference line, no declaration and no notice. */
 export const FIXTURE_SET_PLAN_CARD_WORDS: ExpressionSetPlanCard = fixtureSetPlanCard({ references: [], noticeDue: false });
+/**
+ * The commonest first time: ONE reference picture (a character has one). 「보낼 참조 그림 1장」, the declaration and the one-time
+ * notice must all show — each line is `references > 0`, and no line may open only above one picture (security review R2-M1).
+ */
+export const FIXTURE_SET_PLAN_CARD_ONE: ExpressionSetPlanCard = fixtureSetPlanCard({ references: [FIXTURE_SET_REFERENCES[0]], noticeDue: true });

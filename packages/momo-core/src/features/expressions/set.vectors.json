@@ -259,6 +259,7 @@
   ],
   "noticeCases": [
     { "name": "first time with pictures: told", "seenAtMs": null, "references": 2, "expect": true },
+    { "name": "first time with exactly ONE picture (the commonest case): told", "seenAtMs": null, "references": 1, "expect": true },
     { "name": "seen before: not told again", "seenAtMs": 1793314800000, "references": 2, "expect": false },
     { "name": "words alone: nothing is sent, nothing to tell", "seenAtMs": null, "references": 0, "expect": false },
     { "name": "a record at time zero is still a record", "seenAtMs": 0, "references": 1, "expect": false }
