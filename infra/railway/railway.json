@@ -112,6 +112,8 @@
         "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK": "1",
         "AGENT_PROVIDER_LOCAL_HOSTS": "hermes.railway.internal",
         "OORT_COHOSTED_AGENT_TOOLS_LOCKED": "1",
+        "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED": "",
+        "OORT_COHOSTED_AGENT_CONNECTOR_APPS": "",
         "HERMES_LOGIN_RELAY_URL": "http://hermes.railway.internal:8643",
         "HERMES_LOGIN_RELAY_KEY": "${{shared.HERMES_LOGIN_RELAY_KEY}}"
       }
@@ -153,6 +155,9 @@
         "HERMES_API_KEY": "${{shared.HERMES_API_KEY}}",
         "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK": "1",
         "AGENT_PROVIDER_LOCAL_HOSTS": "hermes.railway.internal",
+        "OORT_COHOSTED_AGENT_TOOLS_LOCKED": "1",
+        "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED": "",
+        "OORT_COHOSTED_AGENT_CONNECTOR_APPS": "",
         "OORT_SELF_MEDIA_ORIGIN": "https://${{shared.OORT_SITE_ADDRESS}}",
         "OORT_API_INTERNAL_ORIGIN": "http://api.railway.internal:8080",
         "OORT_HOSTED_MEDIA_STRICT": ""
