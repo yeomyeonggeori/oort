@@ -60,6 +60,8 @@ function addLayer(layers: Layer[], layer: Layer): Layer[] {
 
 /** 층은 칸 안에 포개 선다 — 크기는 칸(`box`)이 정한다. */
 const LAYER = StyleSheet.absoluteFill;
+/** 알림 뒤 목록이 적용되기 전에 그리는 층: 없다(칸만 선다). */
+const NO_LAYERS: Layer[] = [];
 
 /** Animated files never enter the picker grid/tile or an offscreen/reduced-motion cell. */
 export function ExpressionImage({
@@ -71,7 +73,7 @@ export function ExpressionImage({
   size: PhoneExpressionSize;
   visible?: boolean;
 }) {
-  const {store, shelf, state} = useExpressions();
+  const {store, shelf, state, changePending} = useExpressions();
   const {
     fontScale,
     height: windowHeight,
@@ -151,8 +153,17 @@ export function ExpressionImage({
   }, [still, windowHeight, windowWidth]);
 
   const storeReady = state === 'ready';
+  // 숨김·삭제 알림이 왔고 그 뒤 목록이 아직 적용되지 않았다(#5473): 어느 등록이 숨겨졌는지 모르는 동안은 그림 층을 그리지 않고 칸만 둔다.
+  const held = changePending === true;
   useEffect(() => {
     if (!store || !isLive) return undefined;
+    if (held) {
+      // 알림이 걷은 파일을 가리키던 층·실패·재생 시계를 버린다. 목록이 적용되면 이 효과가 다시 돌아 남은 표현만 받아 선다(칸은 그대로라 줄이 뛰지 않는다).
+      setLayers([]);
+      setFailedKey(null);
+      setPlayingKey(null);
+      return undefined;
+    }
     // 이미 이 그림을 그리고 있거나 얹은 층이 있으면 다시 받지 않는다.
     if (layersRef.current.some(layer => layer.key === targetKey)) {
       return undefined;
@@ -175,7 +186,7 @@ export function ExpressionImage({
     return () => {
       alive = false;
     };
-  }, [store, isLive, storeReady, targetKey, expression.id, expression.name, variant, moving]);
+  }, [store, isLive, storeReady, held, targetKey, expression.id, expression.name, variant, moving]);
 
   // 새 층이 그려지면(`onLoad`) 앞 층을 걷는다. 한 프레임 쉬고 걷어서, 새 층이 화면에 올라오기 전에 앞 층이 사라지는 일이 없게 한다.
   const onLayerLoad = useCallback((layer: Layer) => {
@@ -217,16 +228,21 @@ export function ExpressionImage({
   const takesPress = !still && size !== 'reaction' && !reduceMotion;
   const onPress = takesPress ? (animated ? replay : swallow) : undefined;
 
-  const label = live
-    ? expressionAltText(live)
-    : expressionToken(expression.name);
+  // 읽기 도우미 이름: 서버가 확인한 목록(`ready`, 알림 뒤 목록이 적용된 뒤)일 때만 표시 이름·태그를 읽는다. 읽는 중·알림 뒤에는 그 사이 숨겨졌을 수 있는
+  // 표현의 이름을 읽어 주지 않고 토큰 글(`:이름:`)을 읽는다(#5473 L-5451-1).
+  const label =
+    live && storeReady && !held
+      ? expressionAltText(live)
+      : expressionToken(expression.name);
+  // 알림 뒤에는 그림 층을 그리지 않는다(위 효과가 상태도 비운다 — 효과가 돌기 전 한 프레임에 옛 층이 비치지 않게 여기서도 거른다).
+  const drawn = held ? NO_LAYERS : layers;
   // 이 표현을 지금 쓸 수 없다(숨김·삭제·목록 밖) 또는 그림을 못 받았다 — 그때만 글자다. 받는 중에는 칸이 비어 있다.
-  if (!isLive || box === null || (layers.length === 0 && failedKey === targetKey)) {
+  if (!isLive || box === null || (drawn.length === 0 && failedKey === targetKey)) {
     return (
       <Text accessibilityLabel={label}>{expressionToken(expression.name)}</Text>
     );
   }
-  const top = layers.length - 1;
+  const top = drawn.length - 1;
   return (
     <Text accessibilityLabel={label} onPress={onPress}>
       <View
@@ -235,7 +251,7 @@ export function ExpressionImage({
         pointerEvents="none"
         style={{width: box.width, height: box.height}}
         testID={`expression-box-${expression.name}-${size}`}>
-        {layers.map((layer, index) => (
+        {drawn.map((layer, index) => (
           <Image
             key={layer.key}
             source={{uri: layer.uri}}

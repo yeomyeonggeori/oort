@@ -19,7 +19,9 @@ export interface MeasureMemory {
   delete(id: string): void;
   /** 바뀔 때마다 부른다(해제 함수를 돌려준다). */
   subscribe(listener: () => void): () => void;
-  /** 시험: 메모리와 저장된 것을 모두 비운다. */
+  /** 메모리와 저장된 것을 모두 비우고 쓰기 시계도 멈춘다(로그아웃, #5473). */
+  clear(): void;
+  /** 시험: `clear()` 와 같다. */
   clearForTest(): void;
 }
 
@@ -78,6 +80,18 @@ export function createMeasureMemory(options: {
     if (timer === null) timer = setTimeout(flush, MEASURE_FLUSH_MS);
   };
   const notify = () => listeners.forEach(listener => listener());
+  const clear = () => {
+    map.clear();
+    hydrated = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    try {
+      nonSecretStore().remove(options.key);
+    } catch {
+      // 저장소가 없으면(시험) 건너뛴다.
+    }
+    notify();
+  };
 
   return {
     get(id) {
@@ -115,18 +129,8 @@ export function createMeasureMemory(options: {
         listeners.delete(listener);
       };
     },
-    clearForTest() {
-      map.clear();
-      hydrated = true;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      try {
-        nonSecretStore().remove(options.key);
-      } catch {
-        // 시험의 저장소가 없으면 건너뛴다.
-      }
-      notify();
-    },
+    clear,
+    clearForTest: clear,
   };
 }
 
@@ -143,3 +147,12 @@ export const unfurlHeightMemory = createMeasureMemory({
   limit: 300,
   arity: 1,
 });
+
+/**
+ * 로그아웃: 잰 크기 지도 둘(첨부 id → 가로세로, 메시지 id → 카드 높이)을 메모리와 기기에서 모두 지운다(#5473 L-5451-3). 숫자뿐이라 비밀은 아니지만 계정
+ * 구분이 없고, 「로그아웃은 이 기기에서 내 흔적을 지운다」(`session/useSession.tsx`)는 원칙이 같다.
+ */
+export function forgetMeasuredSizes(): void {
+  attachmentSizeMemory.clear();
+  unfurlHeightMemory.clear();
+}

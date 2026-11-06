@@ -16,6 +16,7 @@ import type {
   ExpressionAddPolicy,
   ExpressionDraft,
   ExpressionList,
+  ExpressionMedia,
   ExpressionMutation,
   ExpressionVariant,
 } from '@momo/core/features/expressions/types';
@@ -60,6 +61,23 @@ const SHELF_FROM_LAST: Record<ExpressionSnapshot['state'], boolean> = {
 /** 목록 응답의 계약 이름과 「쓸 수 있는 등록」 판정 — 아래 여러 곳이 같은 낱말을 쓴다. */
 const LIST_CONTRACT = 'List';
 const isActive = (item: Expression) => item.status === 'active';
+/** 기기에 남기는 보관함의 형식 번호. 1(전체 등록을 그대로)은 읽지 않고 지운다(#5473). */
+const SHELF_FORMAT = 2;
+/**
+ * 기기에 남기지 않은 필드의 **빈 값**. 읽어 되살린 등록은 `Expression` 모양이어야(같은 계약 검사·같은 소비자) 하지만 이 필드들은 그리는 데 쓰이지 않는다
+ * (`expressionAltText` 가 `tags[0]` 을 읽으므로 `tags` 는 빈 배열이다). 출처 종류 낱말은 표의 키에서 꺼낸다(직접 문구 장부를 늘리지 않는다).
+ */
+const [BLANK_ORIGIN_KIND] = Object.keys({upload: 0}) as Array<
+  Expression['origin']['kind']
+>;
+const blankTrace = () => ({
+  version: '0',
+  tags: [] as string[],
+  subjectMemberId: null,
+  origin: {kind: BLANK_ORIGIN_KIND, sourceUrl: null, prompt: null},
+  createdBy: '00000000-0000-4000-8000-000000000000',
+  createdAtMs: 0,
+});
 
 export interface ExpressionFiles {
   write(key: string, bytes: Uint8Array): string;
@@ -67,17 +85,30 @@ export interface ExpressionFiles {
 }
 /**
  * 기기에 남기는 **마지막 보관함**(이름 → 그림 크기, #5451). 대화가 열리는 순간 보관함이 아직 안 왔어도 `:이름:` 을 글로 먼저 그렸다가 큰 그림으로
- * 바꾸지 않으려는 것이다. 읽기·쓰기는 동기다(MMKV). 목록 응답(`ExpressionList`)과 같은 모양을 적고, 읽을 때 같은 계약 검사를 지난 것만 받는다.
+ * 바꾸지 않으려는 것이다. 읽기·쓰기는 동기다(MMKV). 읽을 때 워크스페이스·멤버와 목록 계약 검사를 지난 것만 받는다.
  */
 export interface ExpressionShelfStorage {
   read(): unknown;
   write(value: PersistedShelf): void;
   clear(): void;
 }
+/**
+ * 기기에 남기는 한 등록 — **그리는 데 필요한 것만**(#5473 L-5451-2): id·이름·표시 이름·상태·종류·그림 정보(치수·해시·형식 …).
+ * 프롬프트·출처 주소·만든 사람·대상 멤버·태그는 남기지 않는다(`origin`·`createdBy`·`subjectMemberId`·`tags`).
+ */
+export interface PersistedShelfItem {
+  id: string;
+  name: string;
+  displayName: string;
+  status: Expression['status'];
+  kind?: Expression['kind'];
+  media: ExpressionMedia;
+}
 export interface PersistedShelf {
-  v: 1;
+  v: typeof SHELF_FORMAT;
   memberId: string;
-  list: ExpressionList;
+  workspaceId: string;
+  items: PersistedShelfItem[];
 }
 export interface ExpressionSnapshot {
   items: readonly Expression[];
@@ -90,6 +121,11 @@ export interface ExpressionSnapshot {
   shelf: readonly Expression[];
   state: 'loading' | 'ready' | 'error' | 'offline';
   revision: number;
+  /**
+   * 숨김·삭제 알림(`changed()`)이 왔고 그 뒤 목록이 **아직 적용되지 않았다**(#5473 M-5451-1). 이 동안 숨긴 등록이 어느 것인지 모르므로 화면은 그림 층을
+   * 그리지 않고 칸만 둔다(칸 크기는 그대로라 줄이 뛰지 않는다). 목록이 적용되면(또는 닫히면) 내려간다. 없으면 거짓이다.
+   */
+  changePending?: boolean;
   usage?: ExpressionUsage;
   /** 누가 새 그림을 올릴 수 있는가. 서버가 준 값이고, 목록을 받기 전에는 모른다. */
   addPolicy?: ExpressionAddPolicy;
@@ -105,20 +141,41 @@ export function createPhoneExpressionStore(
   shelfStorage?: ExpressionShelfStorage,
 ) {
   const emptyItems: readonly Expression[] = [];
+  // 기기에 남은 한 등록을 `Expression` 모양으로 되살린다. 남기지 않은 필드는 빈 값이고, 남은 필드만 하나씩 골라 옮긴다(저장값의 다른 필드는 따라오지 않는다).
+  const reviveItem = (item: PersistedShelfItem): Expression => ({
+    ...blankTrace(),
+    workspaceId,
+    id: item.id,
+    name: item.name,
+    displayName: item.displayName,
+    status: item.status,
+    media: item.media,
+    ...(item.kind === undefined ? {} : {kind: item.kind}),
+  });
   // 마지막으로 읽은(또는 기기에 남은) 목록 — 다른 워크스페이스·멤버의 것이나 계약에 안 맞는 것은 받지 않는다.
   const restoreShelf = (): readonly Expression[] => {
     if (!shelfStorage) return emptyItems;
     try {
       // 낱말이 아닌 값(글자·숫자·null)은 `?.` 가 `undefined` 로 받아 아래에서 걸러진다.
       const value = shelfStorage.read() as PersistedShelf | null;
-      if (
-        value?.v !== 1 ||
-        value.memberId !== memberId ||
-        !matchesExpressionContract(LIST_CONTRACT, value.list) ||
-        value.list.workspaceId !== workspaceId
-      )
+      if (value?.v !== SHELF_FORMAT) {
+        // 옛 형식(전체 등록 — 프롬프트·출처 주소·만든 사람이 들어 있다)이나 모르는 값은 쓰지 않고 곧바로 지운다(#5473).
+        if (value !== null && value !== undefined) shelfStorage.clear();
         return emptyItems;
-      const active = value.list.items.filter(
+      }
+      if (value.memberId !== memberId || value.workspaceId !== workspaceId)
+        return emptyItems;
+      // 되살린 목록을 전체 목록 계약에 그대로 대어 본다 — 그림 정보(해시·치수·형식)와 이름·종류의 모양이 예전과 같은 검사를 지난다.
+      const list: ExpressionList = {
+        workspaceId,
+        version: '0',
+        baseVersion: null,
+        reset: true,
+        addPolicy: emptyExpressionCache(workspaceId, memberId).addPolicy,
+        items: value.items.map(reviveItem),
+      };
+      if (!matchesExpressionContract(LIST_CONTRACT, list)) return emptyItems;
+      const active = list.items.filter(
         item => isActive(item) && item.media !== null,
       );
       return active.length > 0 ? active : emptyItems;
@@ -139,6 +196,8 @@ export function createPhoneExpressionStore(
   let serial = 0;
   let online = true;
   let disposed = false;
+  // 알림(`changed()`)이 왔고 그 뒤 목록이 아직 적용되지 않았다 — 스냅샷으로 나가 화면이 그림 층을 그리지 않게 한다(#5473).
+  let changePending = false;
   let usage = storage
     ? restoreExpressionUsage(storage.read(), workspaceId, memberId)
     : emptyExpressionUsage(workspaceId, memberId);
@@ -160,17 +219,19 @@ export function createPhoneExpressionStore(
     );
     lastKnown = active.length > 0 ? active : emptyItems;
     try {
+      // 기기에는 그리는 데 필요한 것만 남긴다(`PersistedShelfItem`) — 프롬프트·출처 주소·만든 사람·태그는 나가지 않는다.
       shelfStorage?.write({
-        v: 1,
+        v: SHELF_FORMAT,
         memberId,
-        list: {
-          workspaceId,
-          version: cache.version,
-          baseVersion: null,
-          reset: true,
-          addPolicy: cache.addPolicy as ExpressionAddPolicy,
-          items: active,
-        },
+        workspaceId,
+        items: active.map(item => ({
+          id: item.id,
+          name: item.name,
+          displayName: item.displayName,
+          status: item.status,
+          kind: item.kind,
+          media: item.media as ExpressionMedia,
+        })),
       });
     } catch {
       // 기기에 못 남겨도 앱 안의 보관함은 그대로다.
@@ -185,6 +246,7 @@ export function createPhoneExpressionStore(
       shelf: ready ? items : SHELF_FROM_LAST[state] ? lastKnown : emptyItems,
       state,
       revision: epoch,
+      changePending,
       usage,
       addPolicy: cache.addPolicy,
     };
@@ -206,7 +268,7 @@ export function createPhoneExpressionStore(
    * 실패는 그대로 닫힌다: 틀린 답·실패는 목록을 비우고 `error` 다. 고르는 순간(`choose`)이 이 상태로 「지금도 있는 표현인가」를
    * 확인하므로, 읽지 못했는데 낡은 목록으로 보내는 일은 없다.
    */
-  const refresh = async (full = false): Promise<void> => {
+  const refresh = async (full = false, again = true): Promise<void> => {
     if (disposed || !online) return;
     if (cache.version === null && snapshot.state !== 'loading') publish('loading');
     const started = epoch;
@@ -232,14 +294,20 @@ export function createPhoneExpressionStore(
         await refresh(true);
         return;
       }
-      if (!update.applied) return;
+      if (!update.applied) {
+        // 읽은 답이 이미 적용한 목록보다 낡았다. 알림 뒤 목록이 아직 확인되지 않았으면 한 번 더 읽는다 — 그림을 막은 채 멈추지 않게.
+        if (changePending && again) await refresh(full, false);
+        return;
+      }
       if (update.evictImageIds.length > 0) evict();
       cache = update.cache;
+      changePending = false;
       publish('ready');
     } catch {
       if (!disposed && started === epoch) {
         evict();
         cache = emptyExpressionCache(workspaceId, memberId);
+        changePending = false;
         publish('error');
       }
     }
@@ -274,9 +342,12 @@ export function createPhoneExpressionStore(
     /**
      * A change notice revokes media immediately, before the delta arrives. 목록은 그대로 두고(#5330) 그림 파일만 걷는다 —
      * 숨겨진 등록의 그림은 걷힌 뒤 서버가 다시 주지 않으므로 거기서 닫히고, 이름 목록이 `loading` 으로 비는 일은 없다.
+     * 걷힌 파일을 가리키는 그림 층이 화면에 남지 않게, 다음 목록이 적용될 때까지는 스냅샷의 `changePending` 이 서서 화면이 칸만 둔다(#5473).
      */
     changed() {
       if (disposed || !online) return;
+      // 다음 목록이 적용될 때까지(`changePending`) 화면은 그림 층을 그리지 않고 칸만 둔다(#5473 M-5451-1).
+      changePending = true;
       evict();
       publish();
       void refresh();
@@ -286,6 +357,7 @@ export function createPhoneExpressionStore(
       online = value;
       evict();
       cache = emptyExpressionCache(workspaceId, memberId);
+      changePending = false;
       publish(value ? 'loading' : 'offline');
       if (value) void refresh(true);
     },
@@ -402,9 +474,12 @@ export function createPhoneExpressionStore(
         await refresh();
         return result;
       }
-      if (update.evictImageIds.length > 0) evict();
+      const dropsReading = update.evictImageIds.length > 0;
+      if (dropsReading) evict();
       cache = update.cache;
       publish('ready');
+      // 위 걷기는 읽고 있던 목록 읽기를 버린다(판이 바뀐다). 알림 뒤 목록이 아직 확인되지 않았다면 다시 읽는다 — 등록 응답은 알림을 확인해 주지 않는다.
+      if (dropsReading && changePending) void refresh();
       return result;
     },
     /** 등록 전 미리보기(`large`)를 임시 파일로 받는다. 못 받으면 `null` — 그때는 등록할 수 없다. */
@@ -458,6 +533,7 @@ export function createPhoneExpressionStore(
       draftFiles.clear();
       evict();
       cache = emptyExpressionCache(workspaceId, memberId);
+      changePending = false;
       publish('offline');
       listeners.clear();
     },
