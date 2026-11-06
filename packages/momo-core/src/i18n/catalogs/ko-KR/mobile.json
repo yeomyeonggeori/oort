@@ -30,7 +30,7 @@
   "mobile.convSearch.recentClear": "모두 지우기",
   "mobile.convSearch.recentClearLabel": "최근 검색 모두 지우기",
   "mobile.convSearch.recentRow": "다시 찾기: {query}",
-  "mobile.convSearch.recentRowIn": "다시 찾기: {query} · {where}",
+  "mobile.convSearch.recentRowIn": "이 대화에서 다시 찾기: {query} ({where}에서 찾았던 말)",
   "mobile.convSearch.resultsChannel": "이 채널의 결과 · 최근 순",
   "mobile.convSearch.resultsDm": "이 대화의 결과 · 최근 순",
   "mobile.convSearch.searchAll": "모든 대화에서",

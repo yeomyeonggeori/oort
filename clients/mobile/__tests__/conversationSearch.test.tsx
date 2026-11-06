@@ -655,7 +655,9 @@ describe('#5364 대화 안 검색 — 최근 검색(이 폰에만)', () => {
     expect(within(rows[0]).queryByTestId('search-recent-scope')).toBeNull();
     expect(within(rows[1]).getByTestId('search-recent-scope')).toHaveTextContent('design');
     expect(within(rows[2]).queryByTestId('search-recent-scope')).toBeNull();
-    expect(rows[1].props.accessibilityLabel).toBe('다시 찾기: 롤백 · design');
+    // 이름·낭독은 눌렀을 때 일어나는 일을 말한다(#5418): 찾는 곳은 이 대화이고, 칩의 대화는 그 말을 찾았던 기록이다.
+    expect(rows[1].props.accessibilityLabel).toBe('이 대화에서 다시 찾기: 롤백 (design에서 찾았던 말)');
+    expect(rows[0].props.accessibilityLabel).toBe('다시 찾기: 배포');
 
     // 다른 대화의 줄을 눌러도 이 대화 안에서 찾는다(말만 가져온다).
     fireEvent.press(rows[1]);
@@ -664,6 +666,28 @@ describe('#5364 대화 안 검색 — 최근 검색(이 폰에만)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain(`q=${encodeURIComponent('롤백')}`);
     expect(calls[0]).toContain(`channel=${GENERAL}`);
+  });
+
+  it('#5418 같은 검색이 되는 줄은 하나로 접힌다 - 범위 없는 말과 이 대화 안에서 찾은 같은 말은 칩 없는 한 줄이고, 다른 대화 칩이 붙은 줄은 그대로 따로 선다', async () => {
+    // 오래된 것부터: 홈 검색(범위 없음) 「배포」 → 다른 대화(design) 안 「롤백」 → 이 대화 안 「배포」 → 홈 검색 「롤백」(범위 없음). 가장 최근이 맨 앞이다.
+    rememberSearch(RECENT_SCOPE, '배포');
+    rememberSearch(RECENT_SCOPE, '롤백', DESIGN);
+    rememberSearch(RECENT_SCOPE, '배포', GENERAL);
+    rememberSearch(RECENT_SCOPE, '롤백');
+    installFetch();
+    await openSearch();
+    await waitFor(() => expect(screen.getAllByTestId('conversation-search-recent-row').length).toBeGreaterThan(0));
+
+    // 저장소에는 네 줄이 있다(같은 말이라도 범위가 다르면 다른 줄이다). 카드에는 셋만 선다 - 칩 없는 「배포」 둘이 하나로 접혔다.
+    expect(recentLines()).toHaveLength(4);
+    const rows = screen.getAllByTestId('conversation-search-recent-row');
+    expect(rows.map(row => row.props.accessibilityLabel)).toEqual([
+      '다시 찾기: 롤백',
+      '다시 찾기: 배포',
+      '이 대화에서 다시 찾기: 롤백 (design에서 찾았던 말)',
+    ]);
+    // 칩이 없는 줄에는 같은 말이 한 번씩만 선다(맨 앞 = 가장 최근을 남긴다). 칩이 붙은 「롤백」은 칩 없는 「롤백」과 다른 줄이다(칩이 둘을 가른다).
+    expect(rows.map(row => within(row).queryByTestId('search-recent-scope') !== null)).toEqual([false, false, true]);
   });
 
   it('결과를 고르면 그 결과를 낳은 말이 남는다 — 고르기 직전에 더 친 글자는 남기지 않는다', async () => {

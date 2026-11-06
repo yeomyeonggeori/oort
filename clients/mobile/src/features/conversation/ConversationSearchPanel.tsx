@@ -35,7 +35,8 @@ import type {ConversationSearch} from './useConversationSearch';
 // 조립하지 않는다):
 //
 //   입력 전(`idle`)  뒤의 대화를 **어둡게 눌러 둔 채** 최근 검색 카드가 선다(A2). 어둠 아무 데나 누르면 검색이 닫힌다. 카드의 목록은 홈 검색과 **한 목록**이다(#5384) —
-//                    다른 대화 안에서 찾은 줄은 그 대화가 범위 칩으로 붙고(`recentScope`), 이 대화 것은 칩 없이 선다(이 화면이 곧 그 범위다).
+//                    다른 대화 안에서 찾은 줄은 그 대화가 범위 칩으로 붙고(`recentScope`), 이 대화 것은 칩 없이 선다(이 화면이 곧 그 범위다). 칩 없는 줄은 같은 말이면 하나로 접는다
+//                    (`foldRecent`, #5418). 칩 줄을 눌러도 찾는 곳은 **이 대화**다(저장된 범위는 다른 대화를 가리키지만 이 면의 검색은 이 대화에 묶여 있다) - 줄의 낭독 이름이 그 사실을 말한다.
 //   그 밖            불투명한 면이 대화를 덮고 한 상태가 선다: 두 글자 미만 안내 · 찾는 중 · 오류(+다시 시도) · 결과 없음 · 결과 목록(A3).
 //
 // 결과 줄은 보낸 사람·시각·**찾은 글자 강조**(서버가 준 `matchOffset`)이고 최근 순이다. 누르면 `search.choose` — 이동은 대화 화면의 점프 문이 한다.
@@ -51,6 +52,29 @@ import type {ConversationSearch} from './useConversationSearch';
 
 /** 「지우기」 글자 한 줄을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const CLEAR_SLOP = slopTo(line.label);
+
+/**
+ * 이 카드에 설 최근 검색 줄 (#5418, 설계 검수 6a M2). 범위 칩이 없는 줄 - 범위 없는 말(홈에서 찾은 것)·이 대화 안에서 찾은 말·내가 든 목록에 없는 대화의 말 - 은 누르면 **모두 같은 검색**(이 대화
+ * 안에서 그 말)이고 보이는 모양도 같아서, 같은 말이면 가장 최근 한 줄만 남긴다(맨 앞이 가장 최근이다). 칩 없는 똑같은 줄이 둘 서면 사람은 둘을 가를 수도 이유를 알 수도 없다.
+ * 다른 대화 안에서 찾은 줄은 그 대화 칩이 줄을 가르므로 그대로 둔다. 같은 말의 판정은 저장소와 같다(대소문자 무시, `searchRecents` 의 같은 줄).
+ */
+function foldRecent(
+  recent: readonly RecentSearch[],
+  recentScope: (saved: RecentSearch) => {title: string; isPrivate: boolean | null} | null,
+): Array<{saved: RecentSearch; scope: {title: string; isPrivate: boolean | null} | null}> {
+  const chiplessSeen = new Set<string>();
+  const rows: Array<{saved: RecentSearch; scope: {title: string; isPrivate: boolean | null} | null}> = [];
+  for (const saved of recent) {
+    const scope = recentScope(saved);
+    if (scope === null) {
+      const same = saved.query.toLowerCase();
+      if (chiplessSeen.has(same)) continue;
+      chiplessSeen.add(same);
+    }
+    rows.push({saved, scope});
+  }
+  return rows;
+}
 
 /** 가로로 서고 세로 가운데에 맞추는 줄 — 이 파일의 줄 스타일이 한 벌을 나눠 쓴다(직접 문구 장부가 낱말 리터럴을 세므로 한 곳에만 적는다). */
 const ROW = {flexDirection: 'row', alignItems: 'center'} as const;
@@ -124,8 +148,7 @@ export function ConversationSearchPanel({
                   <Text style={styles.recentClear}>{formatMessage('mobile.convSearch.recentClear')}</Text>
                 </Pressable>
               </View>
-              {search.recent.map((saved, index) => {
-                const scope = recentScope(saved);
+              {foldRecent(search.recent, recentScope).map(({saved, scope}, index) => {
                 return (
                   <Pressable
                     key={`${saved.query}\u0000${saved.channelId ?? ''}`}

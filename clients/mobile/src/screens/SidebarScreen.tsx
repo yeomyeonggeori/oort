@@ -2,6 +2,7 @@ import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
+import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
@@ -13,7 +14,7 @@ import {
 } from '@momo/core/features/presence/statusDot';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {coreSession} from '@momo/core/runtime/host';
-import {useMutation} from '@tanstack/react-query';
+import {useMutation, useQueryClient} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActionSheetIOS,
@@ -57,6 +58,7 @@ import {
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {useConnection} from '../features/connection/ConnectionProvider';
 import {LoadFailureBox, LoadFailureLine} from '../features/connection/LoadFailureBox';
 import {useReadFailureOf} from '../features/connection/readFailure';
 import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
@@ -94,6 +96,7 @@ import {
   useReadStates,
   useRememberOpenedDm,
   useWorkspaceIdentity,
+  workspaceKeys,
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
@@ -735,6 +738,50 @@ export default function SidebarScreen({
     void directoryQuery.refetch();
   };
 
+  // ---- 연결이 돌아오면 실패한 읽기를 저절로 다시 읽는다 (#5418, 검증 6a) --------------------------------------------
+  // 띠(기기 오프라인 · 서버에 닿지 못함)가 서 있는 동안 홈의 읽기가 실패했다면, 띠가 걷혀도 아무도 다시 읽지 않았다: 기기는 줄곧 켜져 있어 react-query 의 「다시 연결」
+  // 재조회가 오지 않고, 채널 목록에는 주기 읽기도 없다. 그 사이 띠가 같은 원인을 말해 숨어 있던 목록 위 한 줄(위 `listFailure.spoken`)은 띠가 걷히는 순간 새로 서고,
+  // 당겨서 새로고침이 세운 실패 안내는 그 읽기가 성공하길 기다리기만 해서 같은 실패를 두 상자가 4.5초 넘게 말했다.
+  // 그래서 띠가 서 있다가 **걷히는 순간**(`shellSpeaksFor` 참 → 거짓; 새 국면이 정상이든 소켓 틈이든 같다) 오류로 끝난 읽기(채널·명부·읽음)를 한 번씩 다시 읽는다. 사람이
+  // 누를 필요가 없고, 이미 도는 읽기에는 붙는다(`cancelRefetch: false`). 다시 읽는 동안에는 목록 위 한 줄·읽음 안내를 세우지 않는다 - 「다시 연결됐어요」 곁에 「불러오지
+  // 못했어요」가 잠깐 깜빡이지 않게. 다시 읽어도 실패하면(서버가 직접 오류로 답함) 그때부터는 평소 규칙대로 한 곳이 말한다.
+  // 연결 상태 공급자가 없는 자리(격리 하네스·시험)는 띠가 선 적이 없어 아무 일도 하지 않는다.
+  const queryClient = useQueryClient();
+  const connectionView = useConnection()?.view ?? null;
+  const stripSpeaks = connectionView !== null && shellSpeaksFor(connectionView);
+  const stripSpokeRef = useRef(stripSpeaks);
+  const recoveryReloads = useRef(0);
+  const sidebarMounted = useRef(true);
+  const [recoveryReload, setRecoveryReload] = useState(false);
+  useEffect(() => {
+    sidebarMounted.current = true;
+    return () => {
+      sidebarMounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    const spoke = stripSpokeRef.current;
+    stripSpokeRef.current = stripSpeaks;
+    if (!spoke || stripSpeaks) return;
+    const failed = [
+      workspaceKeys.channels(workspaceId),
+      workspaceKeys.roster(workspaceId),
+      workspaceKeys.readState(workspaceId),
+    ].filter(queryKey => (queryClient.getQueryState(queryKey)?.error ?? null) !== null);
+    if (failed.length === 0) return;
+    recoveryReloads.current += 1;
+    setRecoveryReload(true);
+    void Promise.all(
+      failed.map(queryKey => queryClient.refetchQueries({queryKey, exact: true}, {cancelRefetch: false})),
+    ).finally(() => {
+      recoveryReloads.current -= 1;
+      if (recoveryReloads.current === 0 && sidebarMounted.current) setRecoveryReload(false);
+    });
+  }, [stripSpeaks, queryClient, workspaceId]);
+  // 당겨서 새로고침의 실패 안내는 **화면에 다른 흔적이 없을 때** 제 몫이다(`design/refresh.tsx` 머리말): 같은 읽기의 실패를 띠·목록 위 한 줄·상자·읽음 안내가 이미 말하면 같은
+  // 실패를 두 상자가 말하는 꼴이라 그리지 않는다. 안내의 생애(성공하면 거두고, 다음 당김이 서면 거둔다)는 그려지지 않는 동안에도 훅이 계속 갖는다.
+  const pullNoticeRedundant = stripSpeaks || listFailed || showListFailure || readStates.isError;
+
   const filterField = filterVisible ? (
     <View style={styles.filterWrap}>
       <TextInput
@@ -775,7 +822,7 @@ export default function SidebarScreen({
       <ShellConnectionStrip />
 
       {/* 받아 둔 목록이 있는데 다시 읽기가 실패했다(#5285): 목록은 그대로 두고, 띠가 같은 원인을 말하지 않을 때만 위에서 한 줄 말한다. */}
-      {listFailed && listCached && !listFailure.spoken ? (
+      {listFailed && listCached && !listFailure.spoken && !recoveryReload ? (
         <LoadFailureLine
           titleKey={CONNECTION_KEYS.loadChannelListTitle}
           onRetry={retryList}
@@ -786,7 +833,7 @@ export default function SidebarScreen({
       {/* Unread is server truth, so when the projection fails the badges simply
           are not there. Saying so is cheaper than letting someone conclude they
           have read everything. */}
-      {readStates.isError && !listFailed && !readStatesSpoken ? (
+      {readStates.isError && !listFailed && !readStatesSpoken && !recoveryReload ? (
         // 나간 멤버 DM 이 도로 보일 때는 새 문장이라 제목과 설명이 같은 말투(해요체)다. 그 밖에는 이 화면의 기존 문장 그대로다.
         <NoticeBlock
           headline={
@@ -823,7 +870,7 @@ export default function SidebarScreen({
 
       {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않고, 다음 당김·성공 재조회·화면을
           떠날 때 거둔다. */}
-      {notice}
+      {pullNoticeRedundant ? null : notice}
     </>
   );
 

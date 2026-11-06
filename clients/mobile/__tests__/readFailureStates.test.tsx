@@ -2,13 +2,14 @@ import NetInfo from '@react-native-community/netinfo';
 import type {Member} from '@momo/core/lib/api';
 import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
 import {copyForCause} from '@momo/core/features/connection/model';
+import {sendRestProbe} from '@momo/core/features/connection/restProbe';
 import {HEALED_MS} from '@momo/core/features/connection/thresholds';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import {onlineManager, QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {Text} from 'react-native';
+import {AccessibilityInfo, Text} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -100,13 +101,18 @@ function jsonResponse(status: number, body: unknown): Response {
  */
 type Server = 'ok' | 'network' | 'answers500';
 let server: Server = 'ok';
+/** 채널 목록 응답을 붙잡아 두는 문(#5418: 다시 읽는 중의 화면을 재려고). 기본은 열려 있다(`null`). */
+let channelsGate: Promise<void> | null = null;
 
 function installFetch(): jest.Mock {
   const mock = jest.fn(async (url: string) => {
     if (server === 'network') throw new TypeError('Network request failed');
     if (server === 'answers500') return jsonResponse(500, {error: {message: 'boom'}});
     const path = new URL(url).pathname;
-    if (/\/channels$/.test(path)) return jsonResponse(200, {channels: CHANNELS});
+    if (/\/channels$/.test(path)) {
+      if (channelsGate !== null) await channelsGate;
+      return jsonResponse(200, {channels: CHANNELS});
+    }
     if (/\/roster$/.test(path)) return jsonResponse(200, {members: ROSTER});
     if (/\/read-state$/.test(path)) return jsonResponse(200, {read_states: []});
     if (/\/usage\/agents$/.test(path)) return jsonResponse(200, USAGE);
@@ -125,6 +131,7 @@ const feedRef: React.MutableRefObject<SocketFeed> = {current: NO_FEED};
 
 beforeEach(async () => {
   server = 'ok';
+  channelsGate = null;
   releaseMotion = await pinReduceMotion(false);
   mmkvStore.clear();
   __resetSessionStore();
@@ -134,6 +141,7 @@ beforeEach(async () => {
   installFetch();
 });
 afterEach(() => {
+  jest.restoreAllMocks();
   cleanup();
   queryClient?.clear();
   queryClient = null;
@@ -487,3 +495,98 @@ describe('에이전트 목록 — 한 겹', () => {
     expect(screen.queryByTestId('shell-connection-strip')).toBeNull();
   });
 });
+
+// =============================================================================
+// 연결이 돌아오면 홈이 저절로 다시 읽는다 (#5418, 검증 6a).
+//
+// 검증 줄이 본 것: api 를 내린 채 홈을 당겨 새로고침이 실패하고 띠(「서버에 닿지 못했어요」)가 섰다. api 를 올리면 띠는 걷혔는데 홈에는 실패 상자 둘(목록 위 한 줄 「채널 목록을
+// 불러오지 못했어요」 + 당김의 「새로고침하지 못했어요」)이 4.5초 넘게 남았다. 기기는 줄곧 켜져 있어 react-query 의 「다시 연결」 재조회가 오지 않고, 채널 목록에는 주기 읽기도 없어
+// 아무도 다시 읽지 않았다. 띠가 걷히는 순간 오류로 끝난 읽기를 한 번 다시 읽고, 같은 실패는 한 곳만 말한다.
+// 회복은 `sendRestProbe`(저절로 다시 확인이 보내는 `GET /healthz` 그 함수)로 먹인다: 채널·명부·읽음을 건드리지 않는 요청이라, 이 읽기들이 다시 읽혔다면 홈이 스스로 읽은 것이다.
+// =============================================================================
+describe('홈 — 연결이 돌아오면 실패한 읽기를 저절로 다시 읽는다 (#5418)', () => {
+  const PULL_FAILED = '새로고침하지 못했어요. 다시 당겨 보세요.';
+  /** 손가락으로 목록을 당겨 놓은 것과 같은 입구. 읽기 셋이 끝나길(실패하길) act 안에서 기다린다. */
+  const pull = () =>
+    act(async () => {
+      (screen.getByTestId('sidebar-list').props.refreshControl as React.ReactElement<{onRefresh: () => void}>).props.onRefresh();
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+  const channelReads = () =>
+    (globalThis.fetch as unknown as jest.Mock).mock.calls.filter(([url]) => /\/channels$/.test(new URL(url as string).pathname)).length;
+  /** 화면에 **보이는** 실패 상자(띠는 상자가 아니다): 같은 실패를 이 중 둘이 말하면 안 된다. */
+  const visibleFailureBoxes = () =>
+    screen.queryAllByTestId(/^(channels-error-line|channels-error|read-state-error|pull-refresh-notice)$/);
+
+  /** 받아 둔 목록이 있는 홈에서, 서버가 내려간 채 당겨 새로고침이 실패하고 띠가 선 장면까지. */
+  async function outageAfterFailedPull(announce: jest.SpyInstance) {
+    // RN 의 시험 환경에서 이 낭독은 이미 모의 함수라 `spyOn` 이 같은 함수를 돌려준다 - 앞 시험의 호출이 남아 있으면 「낭독했다」가 거저 참이 된다.
+    announce.mockClear();
+    mount(home());
+    await waitFor(() => expect(screen.getByTestId('sidebar-row-channel:ch-general')).toBeTruthy());
+    server = 'network';
+    await pull();
+    await expectFailedKeepingData(['channels', WS]);
+    await expectModel('down:serverUnreachable');
+    await waitFor(() => expect(screen.getByTestId('shell-connection-strip')).toHaveTextContent('서버에 닿지 못했어요', {exact: false}));
+    // 당김의 실패 안내가 선다(~0.9초 뒤): 훅이 실패를 쥐었다는 증거는 낭독이다(서는 커밋과 같이 나간다). 띠가 원인을 말하는 동안 화면은 그 안내를 그리지 않는다.
+    await waitFor(() => expect(announce).toHaveBeenCalledWith(PULL_FAILED), {timeout: 4000});
+    expect(visibleFailureBoxes()).toHaveLength(0);
+  }
+
+  it('띠가 걷히면 아무도 누르지 않아도 실패한 읽기를 다시 읽고, 다시 읽는 동안 「불러오지 못했어요」가 깜빡이지 않으며, 끝나면 상자가 하나도 남지 않는다', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await outageAfterFailedPull(announce);
+
+    // 서버가 돌아온다. 채널 응답은 붙잡아 두어 「다시 읽는 중」의 화면을 잰다.
+    server = 'ok';
+    let release: () => void = () => {};
+    channelsGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const readsBefore = channelReads();
+    await act(async () => void (await sendRestProbe()));
+
+    // 사람이 누르지 않았다: 띠가 걷힌 순간 홈이 채널 목록을 다시 불렀다.
+    await waitFor(() => expect(channelReads()).toBeGreaterThan(readsBefore));
+    await waitFor(() => expect(screen.queryByText(/서버에 닿지 못했어요/)).toBeNull());
+    // 다시 읽는 중에는 목록 위 한 줄도, 당김의 안내도 서지 않는다(띠가 걷힌 자리에 「불러오지 못했어요」가 새로 깜빡이지 않는다).
+    expect(queryClient?.getQueryState(['channels', WS])?.fetchStatus).toBe('fetching');
+    expect(screen.queryByTestId('channels-error-line')).toBeNull();
+    expect(visibleFailureBoxes()).toHaveLength(0);
+    expect(screen.getByTestId('sidebar-row-channel:ch-general')).toBeTruthy();
+
+    release();
+    await waitFor(() => {
+      expect(queryClient?.getQueryState(['channels', WS])?.status).toBe('success');
+      expect(queryClient?.getQueryState(['roster', WS])?.status).toBe('success');
+      expect(queryClient?.getQueryState(['read-state', WS])?.status).toBe('success');
+    });
+    // 읽기가 풀리니 당김의 안내도 함께 거둬진다(훅의 「성공 재조회」): 거두지 않았다면 다른 흔적이 사라진 지금 화면에 서 있어야 한다.
+    await act(async () => void (await new Promise(resolve => setTimeout(resolve, 400))));
+    expect(visibleFailureBoxes()).toHaveLength(0);
+    expect(screen.queryByTestId('pull-refresh-notice-collapsing')).toBeNull();
+    expect(screen.getByTestId('sidebar-row-channel:ch-general')).toBeTruthy();
+  });
+
+  it('돌아와서 다시 읽어도 서버가 직접 오류로 답하면 실패 상자는 하나만 선다 - 목록 위 한 줄이 말하고 당김의 안내는 되풀이하지 않는다', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await outageAfterFailedPull(announce);
+
+    // 서버는 닿지만(살아 있음 확인에 답한다) 읽기는 오류로 답한다: 띠는 걷히고 읽기는 다시 실패한다.
+    server = 'answers500';
+    const readsBefore = channelReads();
+    await act(async () => void (await sendRestProbe()));
+    await waitFor(() => expect(channelReads()).toBeGreaterThan(readsBefore));
+
+    const line = await screen.findByTestId('channels-error-line');
+    expect(line).toHaveTextContent(say(CONNECTION_KEYS.loadChannelListTitle), {exact: false});
+    expect(screen.queryByTestId('shell-connection-strip')).toBeNull();
+    // 당김의 안내는 살아 있지만(실패가 풀리지 않았다; 위에서 낭독으로 확인) 한 줄이 이미 말하므로 그리지 않는다 - 상자는 하나다.
+    expect(visibleFailureBoxes()).toHaveLength(1);
+    expect(screen.queryByTestId('pull-refresh-notice')).toBeNull();
+    // 받아 둔 목록은 그대로다.
+    expect(screen.getByTestId('sidebar-row-channel:ch-general')).toBeTruthy();
+  });
+});
+

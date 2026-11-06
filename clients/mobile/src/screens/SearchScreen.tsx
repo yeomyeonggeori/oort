@@ -10,7 +10,7 @@ import {
 import {openDirectMessage, uuidEq, type MessageSearchHit} from '@momo/core/lib/api';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {FlatList, Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
   ErrorState,
@@ -86,6 +86,10 @@ import {openDmFailureCopy} from './SidebarScreen';
 //
 // 메시지는 그 대화의 그 메시지로(채널 id·메시지 id·seq 를 함께 넘긴다 — 아직 안 불러온 글이면 대화가 그렇다고 말한다, B12 R2
 // High-3), 채널은 그 채널로, 사람은 그 사람과의 DM 으로 간다(없으면 서버가 만든다). 누른 순간 지금 친 말을 최근 검색에 남긴다.
+//
+// 결과(사람·채널·메시지·최근 연 대화)를 누르면 **자판을 먼저 내린 뒤** 간다(#5418, 검증 6a). 검색은 탭이라 대화 층이 이 화면 위에 얹힐 뿐 이 화면은 사라지지
+// 않는다: 입력칸이 포커스를 쥔 채 가면 자판이 대화 위에 그대로 남아 입력창과 그 위 도크(「찾는 중」·「더 위쪽에 있습니다」)를 덮는다. 열리는 쪽이 아니라 자판을
+// 쥔 이 화면이 내린다. 사람은 DM 이 열리는 것을 기다리므로 누른 순간에 한 번, 도착해 이동하는 순간에 한 번 더 내린다(그 사이 입력칸을 다시 눌렀을 수 있다).
 //
 // ## 이 화면의 이름 (이슈 #1146 N4)
 //
@@ -241,25 +245,35 @@ export default function SearchScreen({
   const navigations = useRef(0);
   const dmStartedAt = useRef(0);
 
+  // 결과로 가는 모든 길의 마지막 한 걸음: 자판을 내린 뒤 연다(#5418). 인자 수는 그대로 넘긴다 - 메시지만 앵커를 가진다.
+  const openResult = useCallback(
+    (channelId: string, title: string, anchor?: {messageId: string; seq: number}) => {
+      Keyboard.dismiss();
+      if (anchor === undefined) onOpenResult(channelId, title);
+      else onOpenResult(channelId, title, anchor);
+    },
+    [onOpenResult],
+  );
+
   const openChannel = useCallback(
     (channelId: string, title: string) => {
       remember();
       navigations.current += 1;
-      onOpenResult(channelId, title);
+      openResult(channelId, title);
     },
-    [remember, onOpenResult],
+    [remember, openResult],
   );
 
   const openMessage = useCallback(
     (hit: MessageSearchHit) => {
       remember();
       navigations.current += 1;
-      onOpenResult(hit.channelId, titleFor(hit.channelId), {
+      openResult(hit.channelId, titleFor(hit.channelId), {
         messageId: hit.messageId,
         seq: hit.seq,
       });
     },
-    [remember, onOpenResult, titleFor],
+    [remember, openResult, titleFor],
   );
 
   // 사람 → DM. 「새 DM」 시트와 같은 길이다: 서버가 그 둘의 DM 을 열어 주고(없으면 만든다 — 닫아 둔 DM 도 이 길로 다시 선다) 채널 캐시에
@@ -269,7 +283,7 @@ export default function SearchScreen({
     onSuccess: opened => {
       rememberOpenedDm(opened.channel);
       if (dmStartedAt.current !== navigations.current) return;
-      onOpenResult(opened.channel.id, channelLabel(opened.channel, directory, member.id));
+      openResult(opened.channel.id, channelLabel(opened.channel, directory, member.id));
     },
   });
 
@@ -318,7 +332,7 @@ export default function SearchScreen({
         recentSearches={recentSearchRows}
         onOpenRecent={tile => {
           navigations.current += 1;
-          onOpenResult(tile.channelId, tile.title);
+          openResult(tile.channelId, tile.title);
         }}
         onPickRecentSearch={row => {
           // 이미 다 친 말이라 디바운스를 기다리지 않는다. 범위가 있는 줄은 「메시지」 칩 + 그 대화로 다시 찾는다(범위 칩이 말하던 그대로).
@@ -333,6 +347,8 @@ export default function SearchScreen({
         onClearRecentSearches={() => forgetSearches(scopeKey)}
         onOpenChannel={match => openChannel(match.channel.id, match.name)}
         onOpenPerson={match => {
+          // DM 이 열리길 기다리는 동안에도 자판은 이미 내려가 있다(도착했을 때 `openResult` 가 한 번 더 내린다).
+          Keyboard.dismiss();
           // 열리는 중에 다른 사람을 또 누르면 DM 이 둘 열린다 — 한 번에 하나다.
           if (openDm.isPending) return;
           remember();

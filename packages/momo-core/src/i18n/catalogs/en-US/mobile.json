@@ -30,7 +30,7 @@
   "mobile.convSearch.recentClear": "Clear all",
   "mobile.convSearch.recentClearLabel": "Clear all recent searches",
   "mobile.convSearch.recentRow": "Search again: {query}",
-  "mobile.convSearch.recentRowIn": "Search again: {query} · {where}",
+  "mobile.convSearch.recentRowIn": "Search this conversation again: {query} (found earlier in {where})",
   "mobile.convSearch.resultsChannel": "Results in this channel · newest first",
   "mobile.convSearch.resultsDm": "Results in this conversation · newest first",
   "mobile.convSearch.searchAll": "All conversations",
