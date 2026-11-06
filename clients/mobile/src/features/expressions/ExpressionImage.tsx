@@ -3,28 +3,60 @@ import {
   expressionAltText,
   expressionToken,
 } from '@momo/core/features/expressions/message';
-import React, {useEffect, useRef, useState} from 'react';
-import {AppState, Image, Text, useWindowDimensions} from 'react-native';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {AppState, Image, Text, View, useWindowDimensions} from 'react-native';
 import {font} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
+import {
+  EXPRESSION_REPEATS,
+  expressionBoxOf,
+  expressionVariantFor,
+  isAnimatedMedia,
+  type PhoneExpressionSize,
+} from './expressionBox';
 import {useExpressions} from './ExpressionProvider';
 
-export type PhoneExpressionSize =
-  | 'reaction'
-  | 'inline'
-  | 'medium'
-  | 'large'
-  | 'grid'
-  | 'tile';
-// `tile` 은 표현 시트의 이모티콘·GIF 탭이 쓰는 큰 칸이다(#4942) — `grid` 와 같은 정지 그림(thumb)이고 크기만 다르다.
-const POINTS = {
-  reaction: 20,
-  medium: 48,
-  large: 160,
-  grid: 32,
-  tile: 64,
-} as const;
-const REPEATS = 4;
+export type {PhoneExpressionSize} from './expressionBox';
+
+// =============================================================================
+// 한 표현의 그림 (#5451). 대화 줄의 큰 이모티콘·GIF·인라인·반응 칩과 표현 고르개의 칸이 모두 이 부품이다.
+//
+// 「높이가 바뀌지 않는다」가 이 부품의 계약이다. 앞 판은 받는 중·변형이 바뀌는 사이에 칸을 0x0 + 글자 `:이름:` 으로 접었다가 폈다
+// (`ready` 가 거짓인 동안). 대화에 들어올 때마다 이모티콘 줄이 160pt → 글자 한 줄 → 160pt 로 뛰었고(변형이 thumb → large 로 바뀔 때마다),
+// 눌렀을 때도 정지 그림까지 키(`key`)가 바뀌어 다시 마운트되며 사라졌다 돌아왔다. 지금은:
+//
+//   1. **칸은 그림이 정해지면 바뀌지 않는다.** 크기 표(ADR-0218 D1)의 점 수와 등록의 비율(`expressionBoxOf`)로 첫 프레임부터 선다.
+//      받는 중에는 빈 칸이다(글자를 세우지 않는다). 글자 `:이름:` 은 이 표현을 지금 쓸 수 없을 때(숨김·삭제·못 받음)만 선다.
+//   2. **그림은 앞 것을 둔 채 새것을 위에 얹는다.** 변형이 바뀔 때(thumb → large, 4번 돈 뒤 large → thumb, 눌러서 다시 재생)
+//      새 그림이 그려지고(`onLoad`) 난 뒤에야 앞 그림을 걷는다 — 빈 프레임이 없다.
+//   3. **정지 그림은 눌러도 아무 일도 없다.** 누름을 받지 않으니 부모 줄이 받는다(다시 마운트·깜빡임·이동 없음).
+//   4. **움직이는 그림을 누르면 첫 장면부터 다시 돈다.** 이미 받은 파일을 새 층으로 얹을 뿐이다(`store.image` 는 받은 파일을 돌려준다) —
+//      다시 재생에 네트워크가 없다.
+//
+// ADR-0218 의 약속은 그대로다: 움직임은 총 `EXPRESSION_REPEATS` 번 뒤 정지하고 탭으로 다시 시작한다. 고르개의 칸(`grid`·`tile`)·화면 밖·동작 줄이기·
+// 앱이 뒤에 있는 동안은 정지 thumb 이다.
+// =============================================================================
+
+/** 그려지는 층 하나. 같은 변형·같은 그림이면 키가 같다(`play` 는 다시 재생할 때만 오른다). */
+interface Layer {
+  key: string;
+  uri: string;
+  /** 움직이는 변형인가 — 이 층이 그려지기 시작하면 정지 시계를 건다. */
+  moving: boolean;
+}
+
+/** 새 층을 얹는다: 이미 그려진 층(맨 앞)은 두고, 아직 못 그린 옛 후보는 버린다. */
+function addLayer(layers: Layer[], layer: Layer): Layer[] {
+  if (layers.some(candidate => candidate.key === layer.key)) return layers;
+  return layers.length === 0 ? [layer] : [layers[0], layer];
+}
+
+/** 부모가 이 칸을 그릴 때 앞 그림 위에 쌓이는 층의 스타일. 칸 안을 꽉 채운다. */
+const LAYER: {position: 'absolute'; top: 0; left: 0} = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+};
 
 /** Animated files never enter the picker grid/tile or an offscreen/reduced-motion cell. */
 export function ExpressionImage({
@@ -36,14 +68,14 @@ export function ExpressionImage({
   size: PhoneExpressionSize;
   visible?: boolean;
 }) {
-  const {store, items, revision} = useExpressions();
+  const {store, items, state} = useExpressions();
   const {
     fontScale,
     height: windowHeight,
     width: windowWidth,
   } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
-  const native = useRef<Image>(null);
+  const native = useRef<View>(null);
   // 고르개의 칸(`grid`·`tile`)은 늘 정지 그림이다 — 움직이는 것은 미리보기와 대화의 줄만.
   const still = size === 'grid' || size === 'tile';
   const [onScreen, setOnScreen] = useState(still);
@@ -52,30 +84,44 @@ export function ExpressionImage({
   );
   const [stopped, setStopped] = useState(false);
   const [play, setPlay] = useState(0);
-  const [loaded, setLoaded] = useState(false);
-  const [source, setSource] = useState<{uri: string; key: string} | null>(null);
+  const [seen, setSeen] = useState(still);
+  const [layers, setLayers] = useState<Layer[]>([]);
+  const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
   const live = items.find(
     item =>
       item.id === expression.id &&
       item.name === expression.name &&
       item.status === 'active',
   );
-  const media = live?.media;
+  // 목록에 있고(`live`) 그림 정보(`media`)가 있어야 쓸 수 있다. 정보가 없는 등록은 글자로 내린다(아래).
+  const media = (live ?? expression).media;
+  const isLive = live !== undefined && media !== null;
+  const animated = media !== null && isAnimatedMedia(media);
+  const showing = visible ?? onScreen;
   const animate =
-    !still &&
-    (visible ?? onScreen) &&
-    foreground &&
-    !reduceMotion &&
-    !stopped;
-  const variant = animate ? (size === 'large' ? 'large' : 'small') : 'thumb';
+    animated && !still && showing && foreground && !reduceMotion && !stopped;
+  const variant = expressionVariantFor({
+    size,
+    still,
+    animated,
+    animate,
+    seen,
+  });
   const rendition = media?.[variant];
-  const key = `${revision}/${expression.id}/${variant}/${rendition?.sha256}/${play}`;
-  const animated = rendition?.mime === 'image/gif' && animate;
-  const points = size === 'inline' ? font.body * fontScale : POINTS[size];
-  const ratio = rendition ? rendition.width / rendition.height : 1;
-  const width = points * Math.min(1, ratio);
-  const height = points / Math.max(1, ratio);
+  const moving = animated && variant !== 'thumb';
+  const targetKey = `${variant}/${rendition?.sha256 ?? ''}/${play}`;
+  // 칸은 그림이 정해지면 바뀌지 않는다: 어느 변형을 그리든, 받았든 못 받았든 같다(`expressionBoxOf`).
+  const box =
+    media === null
+      ? null
+      : expressionBoxOf(size, media, font.body * fontScale);
 
+  useEffect(() => {
+    if (showing) setSeen(true);
+  }, [showing]);
   useEffect(() => {
     if (still) return;
     const check = () =>
@@ -91,66 +137,117 @@ export function ExpressionImage({
       });
     check();
     const timer = setInterval(check, 500);
-    const subscription = AppState.addEventListener('change', state =>
-      setForeground(state === 'active'),
+    const subscription = AppState.addEventListener('change', next =>
+      setForeground(next === 'active'),
     );
     return () => {
       clearInterval(timer);
       subscription.remove();
     };
   }, [still, windowHeight, windowWidth]);
+
+  const storeReady = state === 'ready';
   useEffect(() => {
+    if (!store || !isLive) return undefined;
+    // 이미 이 그림을 그리고 있거나 얹은 층이 있으면 다시 받지 않는다.
+    if (layersRef.current.some(layer => layer.key === targetKey)) {
+      return undefined;
+    }
     let alive = true;
-    setLoaded(false);
-    if (store)
-      void store
-        .image({id: expression.id, name: expression.name}, variant)
-        .then(uri => {
-          if (alive) setSource(uri ? {uri, key} : null);
-        });
+    void store
+      .image({id: expression.id, name: expression.name}, variant)
+      .then(uri => {
+        if (!alive) return;
+        if (uri === null) {
+          // 목록을 읽는 중이거나 끊긴 때의 `null` 은 목록이 돌아오면(`storeReady`) 다시 묻는다. 그 밖의 실패만 글자로 내린다.
+          if (storeReady) setFailedKey(targetKey);
+          return;
+        }
+        setFailedKey(null);
+        setLayers(previous =>
+          addLayer(previous, {key: targetKey, uri, moving}),
+        );
+      });
     return () => {
       alive = false;
     };
-  }, [store, key, expression.id, expression.name, variant]);
-  useEffect(() => {
-    if (!animated || !loaded || !rendition) return;
-    const timer = setTimeout(
-      () => setStopped(true),
-      rendition.durationMs * REPEATS,
-    );
-    return () => clearTimeout(timer);
-  }, [animated, loaded, rendition, play]);
+  }, [store, isLive, storeReady, targetKey, expression.id, expression.name, variant, moving]);
 
-  const ready = source?.key === key && live && rendition;
-  const geometry = {width: ready ? width : 0, height: ready ? height : 0};
+  // 새 층이 그려지면(`onLoad`) 앞 층을 걷는다. 한 프레임 쉬고 걷어서, 새 층이 화면에 올라오기 전에 앞 층이 사라지는 일이 없게 한다.
+  const onLayerLoad = useCallback((layer: Layer) => {
+    if (layer.moving) setPlayingKey(layer.key);
+    requestAnimationFrame(() => {
+      setLayers(previous =>
+        previous.length === 2 && previous[1].key === layer.key
+          ? [previous[1]]
+          : previous,
+      );
+    });
+  }, []);
+  const onLayerError = useCallback((layer: Layer) => {
+    setLayers(previous => previous.filter(item => item.key !== layer.key));
+    setFailedKey(layer.key);
+  }, []);
+
+  // 움직이는 그림은 한 번 그려지기 시작한 뒤 `EXPRESSION_REPEATS` 번 돌고 정지한다(정지 thumb 으로 층이 바뀐다).
+  const durationMs = rendition?.durationMs ?? 0;
+  useEffect(() => {
+    if (!moving || playingKey === null) return undefined;
+    const timer = setTimeout(() => {
+      setStopped(true);
+      setPlayingKey(null);
+    }, durationMs * EXPRESSION_REPEATS);
+    return () => clearTimeout(timer);
+  }, [moving, playingKey, durationMs]);
+
+  // 누름: 움직이는 그림은 첫 장면부터 다시 돌고, 정지 그림은 **누름을 받기만 하고 아무것도 하지 않는다**(다시 마운트·깜빡임·이동 없음).
+  // 받기만 하는 까닭: 눌러도 화면이 그대로여야 한다 — 부모 줄에 넘기면 줄의 탭(스레드 열기)이 화면을 바꾼다. 누름을 받는 조건은 앞 판과 같다
+  // (동작 줄이기를 켜지 않았고, 고르개의 칸·반응 칩이 아닐 때): 동작 줄이기에서는 움직임이 없으니 누름도 줄이 받고, 고르개의 칸·반응 칩은
+  // 바깥 `Pressable` 이 받는다.
+  const replay = useCallback(() => {
+    setStopped(false);
+    setPlayingKey(null);
+    setPlay(value => value + 1);
+  }, []);
+  const swallow = useCallback(() => {}, []);
+  const takesPress = !still && size !== 'reaction' && !reduceMotion;
+  const onPress = takesPress ? (animated ? replay : swallow) : undefined;
+
   const label = live
     ? expressionAltText(live)
     : expressionToken(expression.name);
-  // Image remains mounted while loading so viewport measurement can complete.
+  // 이 표현을 지금 쓸 수 없다(숨김·삭제·목록 밖) 또는 그림을 못 받았다 — 그때만 글자다. 받는 중에는 칸이 비어 있다.
+  if (!isLive || box === null || (layers.length === 0 && failedKey === targetKey)) {
+    return (
+      <Text accessibilityLabel={label}>{expressionToken(expression.name)}</Text>
+    );
+  }
+  const top = layers.length - 1;
   return (
-    <Text
-      accessibilityLabel={label}
-      onPress={
-        !still && size !== 'reaction' && !reduceMotion
-          ? () => {
-              setStopped(false);
-              setPlay(value => value + 1);
-            }
-          : undefined
-      }
-    >
-      {!ready ? expressionToken(expression.name) : null}
-      <Image
+    <Text accessibilityLabel={label} onPress={onPress}>
+      <View
         ref={native}
-        key={key}
-        source={ready ? {uri: source.uri} : undefined}
-        accessible={false}
-        resizeMode="contain"
-        style={geometry}
-        onLoad={() => setLoaded(true)}
-        onError={() => setSource(null)}
-        testID={`expression-image-${expression.name}-${size}`}
-      />
+        collapsable={false}
+        pointerEvents="none"
+        style={{width: box.width, height: box.height}}
+        testID={`expression-box-${expression.name}-${size}`}>
+        {layers.map((layer, index) => (
+          <Image
+            key={layer.key}
+            source={{uri: layer.uri}}
+            accessible={false}
+            resizeMode="contain"
+            style={[LAYER, {width: box.width, height: box.height}]}
+            onLoad={() => onLayerLoad(layer)}
+            onError={() => onLayerError(layer)}
+            testID={
+              index === top
+                ? `expression-image-${expression.name}-${size}`
+                : `expression-image-${expression.name}-${size}-prev`
+            }
+          />
+        ))}
+      </View>
     </Text>
   );
 }
