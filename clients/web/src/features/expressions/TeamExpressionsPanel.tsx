@@ -33,7 +33,7 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 type PanelMode = "list" | "import" | "make";
 // 잠금의 흐림은 잠금과 한 식이 켠다(#1486 문법). 클래스 글자는 상수로 둬서 JSX 식 안의 문자열로 세지 않는다.
 const DIM = "opacity-50";
-// 머리 줄의 정렬도 상수다(같은 이유): 호스트가 보기를 정해 주면 「우리 팀」 머리글이 없어 「추가하기」만 오른쪽 끝에 선다.
+// 머리 줄의 정렬도 상수다(같은 이유): 호스트가 보기를 정해 주면 「우리 팀」 머리글이 없어 「목록으로」(양식이 열린 동안)만 오른쪽 끝에 선다. 「추가하기」는 이 줄이 아니라 세트 띠 끝의 ＋다.
 const HEADER_ROW = "flex flex-wrap items-center gap-2";
 const HEADER_END = "justify-end";
 const HEADER_SPLIT = "justify-between";

@@ -170,6 +170,16 @@ describe("세트 띠", () => {
     expect(current()).toEqual(["other"]);
   });
 
+  it("가리키던 구역이 사라지면(별표를 뺀 뒤) 지금 구역 표시는 첫 구역으로 돌아간다", async () => {
+    const { view } = await mount(storeOf(ITEMS, { used: ["solo"], starred: ["dam_a"] }));
+    fireEvent.click(stripOf(view).querySelector("[data-strip='favorites']")!);
+    expect(stripOf(view).querySelector("[aria-current='true']")?.getAttribute("data-strip")).toBe("favorites");
+    fireEvent.contextMenu(view.getAllByRole("button", { name: "dam_a 메시지에 넣기" })[0]!);
+    fireEvent.click(await view.findByRole("menuitem", { name: "Remove from favorites" }));
+    expect(view.container.querySelector("[data-strip='favorites']")).toBeNull();
+    expect([...stripOf(view).querySelectorAll("[aria-current='true']")].map((button) => button.getAttribute("data-strip"))).toEqual(["recent"]);
+  });
+
   it("사람이 직접 스크롤하면 지금 구역이 따라간다(눌러서 건너뛴 직후의 잠깐을 빼고)", async () => {
     const { view } = await mount(storeOf(ITEMS, { used: ["solo"], starred: ["dam_a"] }));
     const grid = view.getByTestId("expression-grid");

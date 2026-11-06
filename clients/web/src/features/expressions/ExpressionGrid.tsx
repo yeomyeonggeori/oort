@@ -111,7 +111,8 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
     if (box.scrollHeight > box.clientHeight && box.scrollTop + box.clientHeight >= box.scrollHeight - 1) at = nodes.at(-1)?.dataset.section ?? at;
     setCurrent(at);
   };
-  const markedId = current ?? sections[0]?.id ?? null;
+  // 가리키던 구역이 사라졌으면(검색을 지우거나 별표를 뺀 뒤) 첫 구역을 가리킨다.
+  const markedId = sections.some((section) => section.id === current) ? current : (sections[0]?.id ?? null);
 
   return (
     <>
