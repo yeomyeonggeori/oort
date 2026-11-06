@@ -2927,6 +2927,29 @@
   }
 }
 
+/* 인용 카드의 그릇 (#5421, 디자인 검수 6a 웹 M1). 쉬는 면은 owner 가 고른 Q4 카드의 `--surface-muted`다. 줄이 가리킴·키보드 초점으로
+ * `row-hover` 면을 칠하는 동안에는 한 단 더 잉크 쪽인 `--muted-soft`로 물러선다. `row-hover` 면(`--surface-hover` 50%)은 라이트에서
+ * `--surface-muted` 바로 옆(대비 1.035 · OKLab 0.012, 정본 §2.2 두 자 1.05·0.02 밑)에 떨어져 카드 그릇이 행 채움에 녹았다.
+ * `--muted-soft`는 상태 토큰이 아니라 칩의 그릇이고(#1515: 상태 토큰을 가만히 선 면에 빌려 쓰지 않는다), hover → pressed → muted-soft로 이어지는
+ * 사다리의 끝이라 어느 테마에서도 `row-hover` 면 위에서 두 자를 넘는다(`derivedCatalog.contract.test.ts`가 57행에서 잰다).
+ * 선택자는 `row-hover`와 같은 모양이다(호버는 `(hover: hover)`만, 둘 다 눌림 `:active`에서는 물러난다): 눌린 줄은 `--surface-pressed`를 칠하고
+ * `--muted-soft`는 그 바로 옆이라 그때는 쉬는 면이 더 낫다. 머리·본문 안의 상호작용 면(머리 단추의 호버)은 이 면 위에서 그려진다. */
+@utility quote-card {
+  background-color: var(--surface-muted);
+  transition: background-color var(--motion-instant) var(--motion-ease-standard);
+  @media (hover: hover) {
+    .row-hover:hover:not(:active) & {
+      background-color: var(--muted-soft);
+    }
+  }
+  .row-hover:focus-visible:not(:active) & {
+    background-color: var(--muted-soft);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
 /* 줄 착지 면 (#4324 결정 2). 링크·인박스 카드로 도착한 줄이 잠깐 물드는 면이다. 폰의 착지 면(`warnSurface` + `warnBorder`
  * 1px, #4300)과 같은 말이다: 바탕은 `--warn-soft`, 테두리는 그 바탕에 `--warn`을 35%(OKLab) 섞은 1px이다.
  * 테두리는 안쪽 그림자(`inset`)로 그려 줄 크기가 1px 움직이지 않고 둥근 모서리를 따른다. 호버·키보드 초점 면(`row-hover`)보다
