@@ -1,9 +1,10 @@
-import React, {useRef} from 'react';
-import {StyleSheet, View} from 'react-native';
+import React, {useCallback, useEffect, useRef} from 'react';
+import {Keyboard, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {KeyboardPane} from '../../lib/keyboardPane';
+import {ComposerPanelContext, useComposerPanelState} from './composerPanel';
 import {createDockFollow, DockFollowContext, type DockFollow} from './dockFollow';
 
 // =============================================================================
@@ -153,12 +154,35 @@ export function ConversationLayout({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  const {height: windowHeight} = useWindowDimensions();
   // 입력창이 자라는 프레임에 목록이 같이 바닥을 따라가게 하는 다리(`dockFollow.ts`, #4518). 목록 자리의 `Timeline` 이 처리기를 걸고 도크 자리의 `Composer` 가 부른다.
   const dockFollow = useRef<DockFollow | null>(null);
   if (dockFollow.current === null) dockFollow.current = createDockFollow();
+  // 키보드 자리의 창(#5452, `composerPanel.tsx`). 창이 없는 동안(= 늘)은 아래 값이 전부 옛 값 그대로다: 같은 `bottomInset`, 목록·도크에 덧붙는 스타일 없음.
+  const panel = useComposerPanelState();
+  const panelOpen = panel.state.phase !== 'closed';
+  const resting = restingBottomPadding(insets.bottom);
+  // 창이 서면 도크가 변환으로 올라 있던 자리(= 키보드 높이 + 틈 - 쉬는 여백)만큼을 레이아웃의 빈 칸으로 받는다. 목록은 같은 만큼 위로 끌어올려(음의 위 여백) 크기가 안 변한다 -
+  // 키보드가 올렸을 때와 똑같이 대화 전체가 통째로 올라가고 위쪽만 잘린다(`styles.clip`). 이 둘과 `bottomInset` 이 **한 커밋**에 바뀌어야 도크가 안 움직인다.
+  const lift = panelOpen ? Math.max(0, panel.state.height + KEYBOARD_GAP - resting) : 0;
+  // 창이 서 있는 동안 네이티브 리프트를 눕힌다: 리프트는 `키보드 높이 - bottomInset`(0 아래로는 안 내려간다)이라, 창 높이보다 큰 값이면 키보드가 와도 가도 안 움직인다.
+  const paneInset = panelOpen ? Math.max(windowHeight, panel.state.height) : Math.max(0, resting - KEYBOARD_GAP);
+  // 창이 마운트되어 빈 칸이 레이아웃에 닿은 **뒤에** 키보드를 내린다. 먼저 내리면 네이티브가 옛 리프트를 내리는 애니메이션을 시작해 버린다.
+  const phaseRef = useRef(panel.state.phase);
+  phaseRef.current = panel.state.phase;
+  const keyboardOutOfTheWay = useCallback(() => {
+    if (phaseRef.current === 'open') Keyboard.dismiss();
+  }, []);
+  // 키보드가 올라오는 도중(handoff)에 ☺ 를 다시 눌렀다: 빈 칸은 이미 서 있어 위의 레이아웃 신호가 오지 않으니 여기서 바로 내린다.
+  const previousPhase = useRef(panel.state.phase);
+  useEffect(() => {
+    if (previousPhase.current === 'handoff' && panel.state.phase === 'open') Keyboard.dismiss();
+    previousPhase.current = panel.state.phase;
+  }, [panel.state.phase]);
 
   return (
     <DockFollowContext.Provider value={dockFollow.current}>
+    <ComposerPanelContext.Provider value={panel.api}>
       {/* The clip. Nothing else lives here: a transformed child draws outside its
           parent's bounds by default, and the child below is lifted by up to a
           keyboard's height — straight over the header. */}
@@ -171,15 +195,26 @@ export function ConversationLayout({
           // `키보드 높이 - bottomInset` 만큼 올리므로, 인셋을 틈만큼 덜 넘기면 그만큼 더
           // 올라간다. 쉬는 상태의 여백(패딩)은 그대로 상수다 — 두 규칙(움직이는 것은
           // 변환, 안 움직이는 것은 상수)이 둘 다 산다.
-          bottomInset={Math.max(0, restingBottomPadding(insets.bottom) - KEYBOARD_GAP)}
-          style={[styles.root, {paddingBottom: restingBottomPadding(insets.bottom)}]}
+          bottomInset={paneInset}
+          style={[styles.root, {paddingBottom: resting}]}
           testID="conversation-layout">
-          <View style={styles.list} testID="conversation-list">
+          <View
+            style={panelOpen ? [styles.list, {marginTop: -lift}] : styles.list}
+            testID="conversation-list">
             {list}
           </View>
           <View testID="composer-dock">{composer}</View>
+          {panelOpen ? (
+            <>
+              <View style={{height: lift}} onLayout={keyboardOutOfTheWay} testID="composer-panel-room" />
+              <View style={[styles.slot, {height: panel.state.height}]} testID="composer-panel">
+                {panel.content}
+              </View>
+            </>
+          ) : null}
         </KeyboardPane>
       </View>
+    </ComposerPanelContext.Provider>
     </DockFollowContext.Provider>
   );
 }
@@ -191,4 +226,6 @@ const buildStyles = (_color: Palette) => StyleSheet.create({
   clip: {flex: 1, overflow: 'hidden'},
   root: {flex: 1},
   list: {flex: 1},
+  // 키보드 자리의 창(#5452): 화면 바닥에 붙어 키보드가 있던 자리를 채운다. 도크 밑의 빈 칸(`composer-panel-room`)은 흐름이고 이 칸은 그 위에 겹쳐 서는 그림이다.
+  slot: {position: 'absolute', left: 0, right: 0, bottom: 0},
 });

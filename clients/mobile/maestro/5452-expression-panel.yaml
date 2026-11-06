@@ -1,0 +1,93 @@
+appId: app.momo.ios
+name: 5452-expression-panel
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 이모티콘 창이 키보드 자리에 서고, 미리 보기를 거쳐, 보내기 한 번에 그림과 글이 차례로 간다 (#5452, owner 2026-11-07 「별도 바텀시트 대신 키보드 영역을 활용 … 별도의 보내기 버튼이 있는 게 아니라
+# 자연스럽게 채팅까지 이어서」).
+#
+# 흐름: ☺ → 창(세 탭)이 키보드 자리에 선다(시트·검색 칸 없음) → 이모티콘 탭의 칸 → 입력창 위 미리 보기(그림 + ✕만) → 입력창을 눌러 키보드가 돌아와도 미리 보기는 그대로 → 글 입력 →
+# 보내기 한 번 → 대화에 큰 그림(`expression-body-large`)과 글이 오고 미리 보기는 사라진다. 보낸 순서(그림 → 글)와 서로 다른 `client_msg_id` 는 서버에서 읽는다(인계 「시험」).
+#
+# 준비: `CHANNEL_ID` 채널이 있고 팀 보관함에 `chi_cry` 가 있는 스택 - `measure/seed-expression-panel.py`. 돌리는 법은 `maestro/70-composer-newline.yaml` 머리말과 같다.
+- launchApp:
+    appId: app.momo.ios
+# 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ① ☺ — 창이 키보드 자리에 선다. 따로 올라오는 시트도 검색 칸도 없다.
+- tapOn:
+    id: "composer-expression"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
+- assertVisible:
+    id: "expression-panel-tab-emoticon"
+- assertVisible:
+    id: "expression-panel-tab-emoji"
+- assertVisible:
+    id: "expression-panel-tab-gif"
+- assertNotVisible:
+    id: "expression-sheet-search"
+- assertNotVisible:
+    id: "expression-sheet-close"
+# ☺ 단추가 눌린 채(키보드 단추 낭독 이름)로 입력창 곁에 그대로 있다.
+- assertVisible:
+    id: "composer-expression"
+
+# ② 이모티콘 탭의 칸 하나 — 입력창 위에 그림과 ✕만 선다(창은 그대로).
+- tapOn:
+    id: "expression-panel-tab-emoticon"
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-chi_cry"
+    timeout: 20000
+- tapOn:
+    id: "expression-pick-chi_cry"
+- extendedWaitUntil:
+    visible:
+      id: "composer-expression-preview"
+    timeout: 10000
+- assertVisible:
+    id: "composer-expression-preview-clear"
+- assertVisible:
+    id: "expression-panel"
+
+# ③ 입력창을 누르면 키보드가 돌아오고(창은 걷힌다) 미리 보기는 그대로 남는다.
+- tapOn:
+    id: "composer-input"
+- inputText: "고생 많았어요"
+- assertVisible:
+    id: "composer-expression-preview"
+- assertNotVisible:
+    id: "expression-panel"
+
+# ④ 보내기 한 번 — 그림과 글이 같이 간다. 미리 보기는 사라지고 입력창이 비워진다.
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "expression-body-large"
+    timeout: 20000
+- assertNotVisible:
+    id: "composer-expression-preview"
+- assertVisible:
+    text: "고생 많았어요"

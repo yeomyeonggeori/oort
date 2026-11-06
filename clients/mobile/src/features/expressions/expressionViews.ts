@@ -61,3 +61,21 @@ export function insertExpressionToken(base: string, token: string): string {
   const gap = base === '' || /\s$/.test(base) ? '' : ' ';
   return `${base}${gap}${token} `;
 }
+
+/** 글 `base` 의 캐럿 자리(`caret`, 글 길이 안으로 맞춘다)에 `piece` 를 끼워 넣은 글과 그 뒤의 캐럿. */
+export function insertAtCaret(base: string, caret: number, piece: string): {text: string; caret: number} {
+  const at = Math.max(0, Math.min(Number.isFinite(caret) ? caret : base.length, base.length));
+  return {text: `${base.slice(0, at)}${piece}${base.slice(at)}`, caret: at + piece.length};
+}
+
+/**
+ * `:이름:` 을 캐럿 자리에 넣는다(`insertExpressionToken` 의 캐럿판): 앞이 글자로 끝나면 한 칸 띄우고, 뒤가 공백이 아니면 한 칸을 둔다 - 이어 쓰는 글이 토큰에 붙지 않게.
+ */
+export function insertExpressionTokenAtCaret(base: string, caret: number, token: string): {text: string; caret: number} {
+  const at = Math.max(0, Math.min(Number.isFinite(caret) ? caret : base.length, base.length));
+  const before = base.slice(0, at);
+  const after = base.slice(at);
+  const lead = before === '' || /\s$/.test(before) ? '' : ' ';
+  const trail = /^\s/.test(after) ? '' : ' ';
+  return insertAtCaret(base, at, `${lead}${token}${trail}`);
+}
