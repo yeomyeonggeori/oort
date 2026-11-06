@@ -3,7 +3,7 @@
 - Status: **Accepted** (2026-08-06 성재 승인 — 실행 지시 "작업 진행해줘"와 함께. 방향은 2026-08-04 결정 D로 사전 승인)
 - Date: 2026-08-05
 - 관련: ADR-0145 증보 1(attachments 3경로=이식 대상 v0 — 본 ADR이 그 "선행 ADR"이다) · 2026-07 재설계 확정(파일 저장=Drive 공유드라이브+SA 멤버) · U1 감사 `docs/planning/research/2026-08-05-chat-ui-audit.md` H-10/U4-f(컴포저에 첨부 진입점 0)
-- 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342) P6은 도우미가 맡긴 Hermes 그림을 대화에 올리려 **워커→api 첨부 쓰기 길**(격리 디코더 재인코딩, 한 메시지에 묶기)을 요구한다. 이 ADR의 새 증보(P14-S3)가 그 길을 정하되 증보 3의 (a)식(단일 사용 발급, api가 소유 재판정)을 따르고 (c)식(내부 전용 경로 + 서비스 간 비밀)은 뒤집을 이유를 적지 않는 한 쓰지 않는다. 그 증보는 v4 검수와 별개로 자체 등급 2 독립 보안 검수 뒤에만 구현·머지하며, 그 전에는 `image` 종류가 광고되지 않는다. 본문 결정은 바꾸지 않았다.
+- 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342) P6은 도우미가 맡긴 Hermes 그림을 대화에 올리려 **워커→api 첨부 쓰기 길**(격리 디코더 재인코딩, 한 메시지에 묶기)을 요구한다. 이 ADR의 [증보 8](#증보-8-2026-11-06-5371-워커의-첨부-쓰기---api의-사설-주소로-단일-사용-쓰기-주소-하나)(Proposed, #5371, P14-S3. v4가 말하는 「ADR-0151 증보」가 이것이다)이 그 길을 정하되 증보 3의 (a)식(단일 사용 발급, api가 소유 재판정)을 따르고 (c)식(내부 전용 경로 + 서비스 간 비밀)은 뒤집을 이유를 적지 않는 한 쓰지 않는다. 그 증보는 v4 검수와 별개로 자체 등급 2 독립 보안 검수 뒤에만 구현·머지하며, 그 전에는 `image` 종류가 광고되지 않는다. 본문 결정은 바꾸지 않았다(D3의 「에이전트 업로드는 v0 제외」는 그 증보 W10이 이 한 길에 한해서만 푼다).
 
 ## Context
 
@@ -797,3 +797,223 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 
 - **엣지 후속 이슈**(D5 ②): `infra/railway/Caddyfile.railway`·`infra/rust/Caddyfile`의 `handle_errors`와 `caddy validate`, 그 뒤 OpenAPI `error.code` 목록에 `server_restarting`을 더한다. 엔진 트랙이다(`infra/**`).
 - **코어 한 줄 둘**(UXUI 표면, 이 증보는 고치지 않는다): `packages/momo-core/src/features/connection/restSignal.ts`의 `isUnreachableOutcome`이 502에도 `outcome.code === undefined`를 요구한다. `packages/momo-core/src/features/attachments/model.ts`의 `issueForStatus`와 `connection/uploadFailure.ts`가 코드를 보고 가른다: `drive_not_configured`·`drive_access_denied`는 지금의 `no-archive`(관리자에게 알리세요), `drive_upstream_failed`는 `unavailable`(잠시 뒤 다시 올리기), 코드 없는 502·503은 연결 원인 분류(지금처럼).
+
+## 증보 8 (2026-11-06, #5371): 워커의 첨부 쓰기 - api의 사설 주소로, 단일 사용 쓰기 주소 하나
+
+도우미가 팀 Hermes에 맡긴 그림([ADR-0201 증보 v4](0201-team-ai-fast-path-for-simple-workspace-requests.md) P6)과 평소 Hermes 턴의 그림은 최종 답에 `data:image/…;base64` 주소로 온다. 워커는 그 주소를 잘라 내고 문장 하나로 바꾼다(`PICTURE_REMOVED_SENTENCE`, `bins/momo-agent-worker/src/lib.rs:295`). 그림을 첨부로 바꿔 대화에 올리려면 워커가 api의 보관소에 써야 한다. 그런데 Railway에서 `local` 보관소는 api 볼륨뿐이고 Google 백엔드의 SA 키는 워커에 없다(증보 3과 같은 사정). 이 증보는 증보 3의 **거울**이다. 읽기 길이 api가 바이트를 내주는 일이었다면 쓰기 길은 api가 워커의 바이트를 **처음으로 받아** 해독하고 보관하는 일이다. 새 길을 만들지 않았던 읽기와 달리 새 표 하나, 새 공개 경로 하나, 보관소 메서드 하나, 에이전트 답 척추의 새 입구 하나가 생긴다. 그래서 등급 2다.
+
+- Status: **Proposed — 독립 보안 검수 등급 2 Blocker 0·High 0 뒤 planner Accepted.** ADR-0100: 공개 경로(`PUT /v1/agent-media/{ws}/{token}`)·보안 경계(워커가 처음으로 api 보관소에 바이트를 씀, 에이전트가 업로더인 첨부 행)·DB 계약(표 하나)이 바뀌므로 이 증보가 구현 머지 조건이다. Accepted 전에는 어느 슬라이스도 코드·migration·운영 변수를 바꾸지 않는다(ADR-0201 P14-S3 행). 이 증보는 ADR-0201 v4 검수와 별개로 자체 독립 보안 검수 1회를 받는다.
+- 번호: 브리프와 ADR-0201 v4 P6·P14-S3, 이슈 #5371 본문이 말하는 「ADR-0151 증보」(브리프는 「증보 4」)는 **이 증보 8**이다. 증보 4는 #4970(읽기 확장)이 먼저 썼고 번호는 착륙 순서다(증보 5 머리말과 같은 사정).
+- 기안: Sonnet 5.5 worker (#5371 1단계). 문서뿐이다. 코드·migration·정책 파일을 바꾸지 않았고 Hermes·모델·API·보관소·DB를 실행하거나 부르지 않았다(`runtime-unverified` 전부). 코드 사실은 `track/engine` `078283146`을 읽기만 했다.
+- 표기는 앞 증보와 같다: [V] 코드·문서를 직접 읽어 확인 · **[추정]** 이 증보가 정한 숫자·해석 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함.
+- **구현이 인용할 절 id**: 사실 `K1`~`K15`, 결정 `W1`~`W12`, 위협 `T1`~`T14`, 수용 기준 `WA1`~`WA22`, 슬라이스 `WS1`~`WS7`, 검수가 볼 곳 `R1`~`R7`. 이름·숫자 중 「제안」·**[추정]**이 붙은 것은 구현이 정하되 어기려면 이 증보를 고친다.
+- **한 줄 요지**: 워커가 DB에 단일 사용 쓰기 토큰(해시만, 60초, run당 슬롯 1)을 만들고 **자기가** api의 사설 주소로 그림 한 장을 한 번 `PUT`한다. api는 토큰을 풀 때와 행을 쓸 때 두 번, **run에서 도출한** 요청자·채널·에이전트로 다시 판정하고, 본문은 토큰이 증명된 뒤에야 읽으며, 바이트는 기존 격리 디코더(`--prepare`, 자식 불변)로 다시 인코딩한 출력만 보관소에 쓴다. 첨부 행의 업로더는 그 run의 에이전트 멤버이고, 한 run의 그림은 그 run의 최종 답 **한 메시지**에 묶인다. 이 길을 부르는 호출자는 S3에 없다(S4·#5334가 붙는다).
+
+### 변경 전 — 확인한 사실 [V]
+
+| # | 사실 | 출처 |
+|---|---|---|
+| K1 | Railway에서 워커는 api의 `local` 볼륨도 Google SA 키도 갖지 못한다(볼륨은 서비스 하나에만, 키를 복제하면 공유 드라이브 전체의 권한이 생긴다). 그래서 읽기는 api의 사설 주소로 간다 | 증보 3 서두·D5·「비교한 방식」(b)(d) |
+| K2 | Hermes 그림은 비스트리밍 최종 답의 `data:image/…` 주소(≤5 MiB)로 온다. 워커는 평소 턴에서 그 주소를 자르고 고정 문장을 쓴다. 코드 주석이 「첨부로 바꾸는 것은 후속 — 워커가 api 저장소에 쓰는 길이 따로 필요」라고 적고 있다 | `momo-agent-worker/src/lib.rs:287-295`, `hosted_door.rs:9`, ADR-0218 G4 |
+| K3 | 읽기 토큰 표 `self_media_token`의 `attachment_id`는 `NOT NULL REFERENCES attachment`이고, 가드 트리거는 `used_at` 한 번 외의 모든 UPDATE를 거절한다. 잠금 블록 `self-media-token-lockdown`이 migration과 두 bootstrap 파일에 같은 글자로 있고 정적 시험이 비교한다. 쓰기에는 첨부가 아직 없다 | `server/Migrations/160_self_media_token.sql:48,65-76,85-`, `infra/rust/sql/bootstrap_roles.sql:441`, `bootstrap_runtime_roles.sql:448` |
+| K4 | `pending` 첨부 행은 `drive_file_id`가 필요하고(`status='failed'`만 예외), 그 id는 보관소의 세션 생성이 정한다. 워커는 Railway에서 세션을 만들 수 없다 | `server/Migrations/017_attachment.sql:25-27`, `routes/attachments.rs:180-211` |
+| K5 | `DriveArchive`에는 서버가 바이트를 직접 쓰는 메서드가 없다. `create_resumable_upload`는 주소를 돌려주고(바이트는 클라이언트가 보관소로 직접 올린다), 서버 안에서 바이트를 받는 것은 stub·local의 `accept_stub_upload`뿐이다. `momo-server`는 reqwest를 갖지 않고 Google 클라이언트는 `momo-drive`에 있다 | `momo-drive/src/lib.rs:449-552`(458·543), `local.rs:546·698`, `google.rs:456`, `routes/attachments.rs:27-28` |
+| K6 | **에이전트 답 척추는 첨부를 묶지도 싣지도 않는다.** `send_message_in_tx`와 `send_thread_notice_in_tx`는 `AttachmentPolicy::Skip`이다. 묶고 투영하는 곳은 REST 보내기 한 곳(`send_message_with_mentions_via_in_tx`)이고, 주석이 「agent replies」를 Skip 쪽에 명시한다. 도우미의 최종 답은 `send_thread_notice_in_tx`로 쓴다(`client_msg_id = run_id`) | `momo-messaging/src/message.rs:590-601·939-955·981-997·1155-1180`, `momo-agent-worker/src/team_ai.rs:1499` |
+| K7 | `link_attachments_in_tx`는 행을 `FOR UPDATE`로 잠그고 `complete`·**업로더 = 작성자**·같은 채널·미묶임을 판정한다(어긋나면 닫힌 거절 일곱). 한 메시지 ≤20개다. 그래서 에이전트 답에 묶을 첨부의 업로더는 **에이전트 멤버**여야 한다 | `momo-messaging/src/attachment.rs:71·549-558·561-629(596-604)` |
+| K8 | 기본 결정 D3: 「에이전트 업로드는 v0 제외(사람만)」. 사람 업로드 라우트의 멤버십 판정 `is_attachment_channel_member`는 멤버 **종류**를 보지 않는다(에이전트 멤버도 통과하는 술어다). 그래서 D3의 「제외」가 지켜지는 곳은 판정이 아니라 라우트 앞의 에이전트 허용 목록인데, 이 목록에 업로드 라우트가 없다는 것은 코드 주석이 media 라우트에 대해 적은 문장으로만 확인했다 — [확인 필요] ① | 이 문서 25행, `attachment.rs:252-279`, `momo-server/src/lib.rs:1000-1004` |
+| K9 | **격리 디코더의 한도.** 입력 ≤`INPUT_BYTES` 5 MiB(`momo-expressions/src/model.rs:38`). `open()`: 가장자리 ≤4096, 화소 ≤16,000,000, `total_bytes + 16 + 5 + 8 MiB ≤ 192 MiB`(`ALLOCATION_LIMIT`), 마감 10초, 자식은 `env_clear`. **GIF 매직은 통과하고 한 프레임이면 정지 그림으로 열린다**(`prepare`는 움직이는 것만 거절). 출력 모양은 셋: 기본(small 128·large 512·thumb — 표현 렌디션), `--prepare`(긴 변 ≤1024, ≤4 MiB, 픽셀에서 다시 인코딩해 EXIF·GPS·ICC·주석·꼬리 바이트 제거, EXIF 방향 반영, 알파가 있으면 PNG 아니면 JPEG q90), `--cutout` | `momo-expressions/src/media.rs:19·21·257·621-631·817-873(845-847·857·862-868)·892-983(944-946)` |
+| K10 | 대기 방식 `process_waiting`은 **기본 모양(표현 렌디션)만** 낸다. `--prepare`의 `prepare_photo`는 `try_acquire`로 즉시 `Busy`를 낸다. 줄서기는 ≤3초(`WAIT_MAX`)·대기자 2(`WAITERS_MAX`, 프로세스 공용)이고 사람의 직접 올리기는 줄서지 않는다. 「돈이 든 그림」용 끈질긴 변형(`permit_patiently`, 250ms마다 다시 물음)은 기본 모양·`--cutout`에만 있다 | `media.rs:70-73·82-110·178-195·326-334·357-420` |
+| K11 | 읽기 라우트 `GET /v1/self-media/{ws}/{token}`: GET 전용(그 밖은 405), 거절은 한 모양 404, 거절만 호출 주소·경로 워크스페이스별 예산(기본 30)과 주소 전체 상한을 쓴다. 계약 파일 둘에는 없고 공개·스펙 밖 목록에 오른다. 로그 가림 `redact_self_media_urls`는 글자 `self-media` 뒤에 `/워크스페이스/토큰`이 오는 모양만 안다 | `routes/self_media.rs`, `momo-server/src/lib.rs:2457-2468`, `rate_limit.rs:649·684·715`, `tests/dev_token_door_conformance_pg.rs:160·2464`, `self_media.rs:659-694` |
+| K12 | 워커의 읽기 클라이언트는 리디렉션 없음·프록시 없음·시간 한도이고 `OORT_API_INTERNAL_ORIGIN`은 출처 문법(`internal_origin`)을 지나야 한다. 오류는 고정 낱말(`timeout`·`connect`·`body`·`request`)만 남기고 reqwest 문장은 쓰지 않는다 | `momo-agent-worker/src/self_media.rs:35·114·216-221·369`, 증보 3 D5·D6·후속 F3 |
+| K13 | 디코더 바이너리는 서버·워커와 같은 한 이미지의 `/usr/local/bin/`에 함께 있고(서비스는 시작 명령만 다르다), 호스팅 문은 워커 **프로세스 안**에서 `process_waiting`을 이미 쓴다. 슬롯 둘은 **프로세스마다** 있다: api의 둘은 사람의 직접 올리기·링크 가져오기·에이전트 포트 후보가 나눠 쓰고, 워커의 둘은 호스팅 문이 쓴다 | `server-rust/Dockerfile:239·350`, `momo-workspace-actions/src/hosted_expression.rs:695`, `media.rs:66-73` |
+| K14 | `momo_worker`는 BYPASSRLS이고 일반 표에는 SELECT·INSERT·UPDATE·DELETE 기본 권한이 있다(잠긴 표만 예외). `momo_app`은 RLS를 따르는 비우회 역할이다. 이미 워커는 모든 테넌트의 메시지·기억을 읽는 역할이다 | `infra/rust/sql/bootstrap_runtime_roles.sql:53-59`, 증보 3 남는 위험 1 |
+| K15 | 묶이지 않은 완료 첨부는 업로더만 읽고(증보 1) 30일 뒤 청소기가 거둔다(증보 2 D4, **기본 꺼짐**). `pending`·`failed` 행은 거두지 않는다 | 증보 1·증보 2 D1·D4 |
+
+### 결정
+
+- **W1 · 방식: 증보 3 (a)식의 거울.** 워커가 DB에 쓰기 토큰을 만들고(`mint`, `momo_worker`의 테넌트 tx) 그 tx를 **커밋한 뒤**(네트워크를 트랜잭션을 연 채 기다리지 않는다) `{OORT_API_INTERNAL_ORIGIN}`의 쓰기 주소를 **자기가** 한 번 부른다. api는 토큰을 풀 때와 행을 쓸 때 소유를 다시 판정한다. 새 표 하나 `attachment_write_token`(이름은 제안)과 **migration 하나**가 든다(증보 3은 없었다). **번호는 이 증보가 쓰지 않는다** — 2단계 착수 때 planner가 배정한다(`discovers_contiguous_migrations_001_to_<N>`을 그 번호로 바꾼다).
+  - 열: `workspace_id`·`token_hash`(정확히 32바이트)·`run_id`(`agent_run` FK, ON DELETE CASCADE)·`agent_member_id`·`slot`(smallint, CHECK 1~4)·`created_at`·`expires_at`(CHECK 0 < 수명 ≤ 10분)·`used_at`. 키 `(workspace_id, token_hash)`, **`UNIQUE (workspace_id, run_id, slot)`**: 한 run이 쓸 수 있는 그림 수를 DB가 쥔다. 쓰이지 않고 만료된 슬롯도 되살리지 않는다(한 번만 시도한다, W3). 행은 만료 하루 뒤에 청소되므로(아래) 이 보장은 「그 run이 사는 동안」이다 — run은 그보다 훨씬 짧게 끝난다(작업 모드 60분 한도, ADR-0201 R3). v1의 코드 상수 `AGENT_PICTURES_PER_RUN`(제안)은 **1**이고 표의 CHECK는 4까지 열어 둬서 넓힐 때 migration이 필요 없다(코드 상수와 이 증보의 개정만).
+  - **요청자·채널 열을 두지 않는다**(160과 다른 점). 풀 때 run에서 도출한다(W3). 열이 없으면 위조할 것도 없다.
+  - 가드 트리거(`used_at` 한 번 외의 UPDATE·되돌리기 거절), RLS ENABLE+FORCE `ws_isolation`, 잠금 블록 `attachment-write-token-lockdown`(제안 이름; `momo_worker` SELECT·INSERT·DELETE, `momo_app` SELECT·UPDATE, relay·notifier·platform_admin 없음)을 160과 같은 모양으로 migration과 두 bootstrap 파일에 **같은 글자**로 두고 정적 시험이 비교한다. 만들 때마다 같은 워크스페이스의 하루 지난 행을 지운다(160과 같음).
+- **W2 · 주소 모양: 새 접두 `PUT {origin}/v1/agent-media/{ws}/{token}`.** 읽기 접두와 섞지 않는 까닭: ① 읽기 라우트의 「GET 전용·405·거절 한 모양」을 시험이 못 박고 있다 ② Hermes 가드 플러그인이 `/v1/self-media/` 접두를 고정한다 ③ 공개·스펙 밖 목록에 따로 오른다(K11) ④ 접두가 갈리면 엣지가 쓰기 접두만 막는 규칙을 나중에 더할 수 있다. 대가: 로그 가림(`redact_self_media_urls`)과 거절 예산의 경로 함수(`self_media_scope`)를 새 접두까지 넓힌다(WS4). 토큰 형식(43자 URL-safe)·SHA-256 해시·`token_is_well_formed`는 재사용한다. PUT이 아닌 메서드는 경로·DB를 보기 전에 405(`Allow: PUT`)다. **토큰은 어떤 글에도 실리지 않는다**: 모델 문맥·Hermes 요청·메시지·props·감사·오류·로그·job payload 어디에도 없고 워커가 한 요청에 쓰고 버린다(증보 3 D3).
+- **W3 · 소유 재판정은 세 번이고 같은 술어다**(증보 3 D2와 같은 모양).
+  1. **발급**(워커, 행을 쓰기 **전에**): run이 `queued`·`running`이고 `agent_member_id`가 그 에이전트이며, 트리거 작성자가 살아 있는 사람이고, 에이전트와 요청자가 모두 그 대화의 활성 멤버(채널이 보관되지 않음)일 때만 — `requester_in_conversation_in_tx`(`self_media.rs:361-378`, 지금은 모듈 안 비공개 함수라 가시성만 `pub(crate)`로 열어) 그대로 재사용한다. 그 run의 이 슬롯이 아직 없을 것. 거절은 `None`이고 표에 아무것도 쓰지 않는다.
+  2. **풀기**(api, 경로의 워크스페이스로 묶은 `momo_app` tx, 한 문장): `UPDATE … SET used_at … WHERE 워크스페이스 AND 해시 AND used_at IS NULL AND expires_at > now AND EXISTS(그 run이 진행 중이고 에이전트가 같다) RETURNING run_id, agent_member_id`. 이어 **같은 tx에서 요청자와 채널을 run에서 도출**하고(트리거 메시지의 작성자, run의 채널) 두 멤버십을 다시 본다. 업로더·채널·요청자를 요청의 어떤 값(헤더·쿼리·본문)도 정하지 못한다.
+  3. **행을 쓸 때**(api, 해독·보관 뒤의 tx): 2번의 술어를 한 번 더 건다. 그동안 run이 끝났거나(취소·완료·실패) 누가 대화를 나갔을 수 있다. 어긋나면 보관한 객체를 지우고 거절한다(W6의 `run_over`).
+  - **풀기 전의 모든 거절은 같은 404 한 문장이다**(형식 틀림·없는 토큰·다른 워크스페이스·만료·재사용·끝난 run·멤버 아님). 풀기 뒤에는 호출자가 토큰을 증명했으므로 닫힌 상태 코드를 쓴다(W6, 증보 6 A와 같은 이유).
+  - **한 번만 시도한다.** 소비가 본문 읽기보다 먼저라 본문이 나빠도 토큰은 탄다. 워커는 재시도하지 않는다(실패는 호출자의 실패 문장으로 끝난다, W6·W11).
+- **W4 · 요청 처리 순서가 곧 논거다**(ADR-0218 H11 (b)와 같은 방식). 어느 단계의 실패도 다음 단계를 열지 않는다.
+  1. 메서드(PUT 아니면 405) → 2. 경로 모양(canonical 소문자 UUID + 43자 토큰, DB 없이) → 3. **`Content-Length` 필수, ≤5 MiB**(없으면 411, 넘으면 413 — 본문을 읽기 **전**이고 토큰도 타지 않는다). `Content-Type`·그 밖 헤더·쿼리는 어떤 값이어도 무시한다(종류는 바이트가 정한다) → 4. 쓰기 자리: api 프로세스당 동시 `WRITE_IN_FLIGHT` **[추정] 4**, 넘으면 토큰을 쓰기 **전에** 503 + `Retry-After` → 5. **풀기**(소비) → 6. **본문 읽기**: 선언한 길이와 정확히 같은 바이트만, 총 읽기 마감 **[추정] 10초**, 모자라거나 더 오면 끊고 400 → 7. **sniff**: png·jpeg·webp 매직일 때만(`bytes_match_mime`의 세 그림 갈래, `self_media.rs:260`) — GIF·APNG·SVG·HTML·PDF·HEIC·빈 본문은 여기서 422이고 **디코더 자식은 뜨지 않는다**. K9가 말한 대로 한 프레임 GIF는 `open()`이 받아 주므로 이 sniff가 GIF를 막는 유일한 곳이다 → 8. 격리 디코더(W5) → 9. 보관소 쓰기(W7) → 10. tx: 재판정(W3 3) + 행 INSERT + 감사(W8) → 11. 201.
+  - 본문 상한은 한 숫자다: `AGENT_PICTURE_MAX_INPUT_BYTES` = `INPUT_BYTES` = `SELF_MEDIA_MAX_BYTES` = 5 MiB(증보 4 D5와 같은 이유로 시험이 같음을 못 박는다). 원시 본문은 핸들러가 직접 읽는다(`stub_upload`와 같은 방식, `momo-server/src/lib.rs:2470-2487` 주석: 추출기 한도가 아니라 읽는 쪽이 상한을 쥔다).
+- **W5 · 격리 디코더 재사용 — 자식 코드는 한 줄도 바꾸지 않는다.** 출력 모양은 `--prepare`다(K9: 긴 변 ≤1024·≤4 MiB·메타데이터 제거·알파면 PNG 아니면 JPEG q90). ADR-0201 P6의 「다시 인코딩(메타데이터 제거·크기 상한)」과 같은 일이고, P6이 이름을 든 `process_waiting`의 **출력**(표현 렌디션 ≤512 px)은 대화 그림에 작아서 쓰지 않는다(P6의 「대기 방식」은 줄서기를 뜻하는 것으로 읽는다). 필요한 코드는 호출 쪽 얇은 함수 하나뿐이다: `prepare_photo_waiting(bytes, wait)`(제안 이름) = `permit_waiting(decoder_slots(), &Line::process_wide(), wait)` + `job(bytes, "--prepare", permit)`(`media.rs:178-195·310-321`).
+  - **대기**는 P6 그대로 ≤3초·대기자 2다(`WAIT_MAX`·`WAITERS_MAX`). 못 얻으면 `Busy` → 503 `busy`. 슬롯은 api 프로세스의 둘이라 사람의 직접 올리기·링크 가져오기와 나눈다(P6의 문장). 사람은 줄서지 않고 즉시 `Busy`를 받으므로(`media.rs:82-86`) 이 길의 대기자 둘이 사람에게 최대 3초짜리 「바쁨」을 더할 수 있다. 한도: run당 1장·워크스페이스 일일 위임 상한(P7)·`WRITE_IN_FLIGHT`.
+  - **상한**: 입력 5 MiB, 가장자리 ≤4096, 화소 ≤16,000,000, 해독 마감 10초, 출력 ≤4 MiB·긴 변 ≤1024. P6이 「S3이 디코더의 할당 한도에서 도출한다」던 **화소 상한은 1,600만**이다(증보 4 D8과 같은 숫자). 도출 [V 계산]: 할당 식에서 해독 버퍼는 `192 − 16 − 5 − 8 = 163 MiB` 이하여야 하는데, 가장 넓은 깊이(RGBA16, 화소당 8바이트)도 1,600만 × 8 = 약 122 MiB라서 화소 규칙이 먼저 걸리는 구속 항이다. 헤더만 큰 폭탄은 `dimensions`·`preflight`(`media.rs:621-631`: 가장자리 4096·1,600만 화소를 헤더의 선언값으로 먼저 본다)가 어떤 코덱 생성자보다 **앞서** 거절한다(P15-A10의 「작은 파일에 큰 선언 크기」).
+  - **보관소와 DB에 가는 바이트는 항상 자식이 인코딩한 출력이다.** 입력 바이트는 보관소·DB·로그 어디에도 가지 않는다. 출력 mime은 `image/png`·`image/jpeg`뿐이다.
+- **W6 · 응답과 실패 문장.** 풀기 전: 404 한 모양(+ 거절 예산, W12). 풀기 뒤(호출자가 증명함): **201** `{"attachmentId","mime","sizeBytes"}`(그 밖의 필드 없음), 411 `length_required`, 413 `too_large`, 400 `length_mismatch`, 422 `unsupported_format`·`invalid_picture`(sniff 밖·해독 불가·화소 상한·APNG·GIF), 503 `busy`(줄서기 실패·쓰기 자리 가득) 또는 `drive_not_configured`(보관소 없음), 504 `timeout`(해독 마감), 502 `storage_failed`, 409 `run_over`(행을 쓸 때의 재판정 실패). 본문은 닫힌 낱말 코드 하나뿐이고 사람이 읽는 문장은 없다.
+  - **사람에게 보이는 문장은 하나다** — 위임 호출자는 ADR-0201 P9의 `picture_failed` 「그림은 만들어졌지만 올리지 못했어요.」를 그대로 쓴다(원인은 감사의 닫힌 낱말로만 남는다). 위임이 아닌 호출자(평소 Hermes 턴, #5334의 대화)는 현행 `PICTURE_REMOVED_SENTENCE`(「그림은 이 메시지에 실을 수 없어서 뺐어요.」)를 그대로 쓴다: 쓰기 길이 닫혀 있거나 실패해도 오늘보다 나빠지지 않는다. 새 사전 키는 없다.
+  - reqwest의 오류 문장·URL·상태 본문은 어디에도 쓰지 않는다. 실패 로그는 고정 낱말(`timeout`·`connect`·`body`·`request`·상태 숫자)뿐이다(증보 3 D6·후속 F3).
+- **W7 · 보관소 쓰기: `DriveArchive`의 새 메서드 하나.** `put_object(channel_id, name, mime, bytes) -> Result<DriveFile, DriveError>`(제안 이름). 이름·mime·바이트는 서버가 정한 값 그대로다. 백엔드별: **stub·local** = 기본 구현이 `create_resumable_upload`와 `accept_stub_upload`를 서버 안에서 이어 부른다(바이트는 메모리 조각 스트림; `stream_into`가 길이·상한을 이미 쥔다, `local.rs:459`). 읽기 전용으로 연 보관소는 `AccessDenied`. **google** = 세션을 만든 뒤 서버(`momo-drive`)가 세션 주소에 한 번 PUT하고 `file_metadata`로 길이·mime을 대조한다 — `runtime-unverified`(가짜 구글로만 시험). **`UnavailableDriveArchive`** = `Unavailable`(→ 503 `drive_not_configured`). 이는 ADR-0201 P18 ⑧의 「첨부 쓰기의 저장소 백엔드(local/Drive)별 길」을 닫는다.
+  - **`pending` 행을 만들지 않는다.** 객체가 쓰이고 검증된 **뒤에** 행이 `complete`로 한 번에 태어난다(K4가 말하는 id는 `put_object`가 돌려준다). 그래서 증보 2 D4가 거두지 않는 `pending`·`failed` 행이 남지 않는다.
+  - 객체를 쓴 뒤 행 tx가 실패하거나 W3 3이 거절하면 `delete_file`(멱등, `lib.rs:518`)로 객체를 지운다. 지우기도 실패하면 행이 없는 고아 객체가 남고 행을 따라가는 청소기는 그것을 찾지 못한다(남는 위험 4).
+  - **시간** [추정]: 읽기 10 + 줄서기 3 + 해독 10 + 보관 10 = 최악 약 33초 → 라우트 총 마감 35초, 워커 클라이언트 마감 40초.
+- **W8 · 첨부 행과 감사.** 행: `uploader_member_id` = run의 **에이전트 멤버**(도출), `channel_id` = run의 채널(도출), `message_id` NULL, `name` = 서버 고정 `picture-{슬롯}.png`·`.jpg`(출력 mime에 맞춤. 모델·Hermes·요청의 어떤 글도 이름이 되지 않는다), `mime` = 출력 mime, `size_bytes` = 출력 길이, `status` = `complete`, `drive_file_id` = 보관소 id.
+  - 감사 `attachment.agent_picture_written`(schema `momo.attachment.agent_picture_written.v1`): 행위자 = 에이전트 멤버, 대상 = 첨부 id, detail = `channel_id`·`run_id`·`slot`·`mime_in`(sniff 결과)·`mime`·`bytes_in`·`bytes`·`decode_ms`·`backend`(`local`·`google`·`stub`). 풀기 **뒤**의 실패는 `attachment.agent_picture_refused`(대상 = run, detail = `run_id`·`slot`·`reason`(W6의 닫힌 낱말)·`bytes_in`) 한 줄이다(풀기 앞의 404는 호출자가 증명하지 않았으니 기록하지 않는다 — 예산만 쓴다).
+  - **이름·바이트·토큰·주소·요청 문장·Hermes 모델 이름은 감사·로그·메시지·props·job payload 어디에도 없다**(증보 2 D3의 「감사에 파일 이름 없음」과 같은 줄). 위임 쪽 감사 `team_ai.delegate`(P11)는 S4가 쓰고 이 증보는 거기에 「그림 바이트 수」 필드를 대 준다.
+- **W9 · 한 메시지에 묶기.**
+  - **규칙**: 한 run의 그림은 그 run의 **최종 답 메시지 하나**에 슬롯 순서로 묶인다. 그림마다 메시지를 만들지 않고, 사람의 메시지나 다른 run의 메시지에는 묶지 않는다.
+  - **구현**(K6의 틈을 메운다): 답 척추에 새 입구 하나(제안 이름 `send_thread_notice_with_attachments_in_tx`)를 둔다 = `insert_message_in_tx` → `!deduped`이면 `link_attachments_in_tx(…, 업로더 = 작성자 = 에이전트, 슬롯 순서의 id 목록)` → `finish_send_in_tx(멘션 Skip, 스레드 Maintain, **AttachmentPolicy::Project**)`. 투영을 **broadcast 앞에** 하므로 `message.new`의 payload와 기록 투영이 `attachments`를 싣는다. 새 입구를 부르는 호출자만 첨부를 갖고 `send_message_in_tx`·`send_thread_notice_in_tx`·run line은 `Skip` 그대로다.
+  - **v1은 한 장이다**(`AGENT_PICTURES_PER_RUN` = 1, ADR-0201 R10). 두 장 이상은 호출자(S4)가 광고 단계와 추출에서 거절하고(P15-A10: 첨부 0 + `picture_failed`), 이 길은 슬롯으로 상한을 지킨다. **일반형**(#5334·B6-4가 넓힐 때, N ≤ 4 **[추정]**, 표의 CHECK 상한): N개 토큰 → N개 첨부 → 한 목록으로 한 메시지(≤20, K7).
+  - **부분 실패 규칙**(한 번만 쓴다): 쓰기가 실패한 슬롯은 첨부가 없다. 성공한 슬롯은 묶는다. 하나라도 실패하면 답 끝에 `picture_failed` 문장 한 줄(N=1이면 「첨부 0 + 그 문장」). **묶기 거절**(`AttachmentLinkRejected` 어느 것이든)은 메시지를 지우지도 평문으로 새로 보내지도 않는다: 저장점으로 되돌려 **첨부 없이 같은 답 + `picture_failed` 문장**으로 한 번 다시 쓴다(`client_msg_id = run_id` 멱등, 반쪽 묶임 0).
+  - 묶이지 않은 첨부(워커가 쓰기와 묶기 사이에 죽음·tx 실패)는 증보 1(업로더만 읽음)과 증보 2 D4(30일, 기본 꺼짐)가 그대로 적용된다. 업로더가 에이전트 멤버라 사람은 읽지 못한다.
+  - 스트리밍 답(여는 쓰기 + 패치)에 첨부를 싣는 길은 정하지 않는다. 이 증보는 도우미가 한 번에 쓰는 최종 답(ADR-0201 P4-8의 모양)만 다룬다 — 열어 둔다.
+- **W10 · D3 뒤집기는 이 한 길에 한한다.** 기본 결정 D3의 「에이전트 업로드는 v0 제외」를 W2의 길 하나에 한해 푼다: **업로더가 에이전트 멤버인 첨부 행은 이 길만 만든다.** 사람 업로드 라우트(`create_upload`·`complete`)는 에이전트에게 열리지 않는다(그대로). **읽기 쪽 술어는 넓히지 않는다**: `find_requester_attachment_in_tx`(요청자 본인이 올린 첨부)가 그대로라서 도우미의 `read_attachment`는 에이전트가 쓴 그림을 읽지 못한다(`not_found`). 의도다: 자기 출력을 다시 읽지 않고, ADR-0218 §12 L3.1 B가 걱정한 「도우미 자기 것」으로의 소유 술어 확대가 없다. 채널 멤버가 읽는 길(content)은 「묶인 살아 있는 메시지의 첨부」 규칙 그대로다.
+- **W11 · 워커 쪽 규칙.**
+  1. **발급 전 선행 거절**: base64 디코드 ≤5 MiB, 매직 png·jpeg·webp, 그림 수 ≤ 슬롯 상한(v1은 정확히 1). 어긴 요청은 토큰을 만들지 않는다. api는 같은 검사를 다시 한다(워커를 믿지 않는다).
+  2. 클라이언트는 증보 3의 `attachment_client()`와 같은 설정(리디렉션 없음·프록시 없음)에 **쓰기용 마감 40초**다. `OORT_API_INTERNAL_ORIGIN`이 없거나 모양이 틀리면 **쓰기 길은 닫힌다**. 읽기와 달리 폴백이 없다(워커는 보관소에 쓸 수 없다, K1) → 호출자의 실패 문장.
+  3. **한 번만 시도한다.** 재시도도 둘째 토큰도 없다.
+  4. 토큰·주소·응답 본문·바이트는 로그·감사·오류·메시지·props·job payload에 쓰지 않는다(W2).
+  5. 모델은 「그림 n장 받음」만 안다(P6).
+  - **S3은 호출자를 더하지 않는다.** 이 길은 어느 도구·모델·HTTP 표면에서도 불리지 않는 워커 안 함수이고, `image` 광고와 코드 상수(`ATTACHMENT_WRITE_PATH_READY`, P6)는 S4가 바꾼다. S3 착륙 뒤 사용자에게 달라지는 것은 0이다.
+- **W12 · 한도와 거절 예산.** 한 run ≤ 슬롯 상한(UNIQUE), api 프로세스당 동시 쓰기 4 **[추정]**. **풀기 전 거절만** 호출 주소·경로 워크스페이스별 예산(읽기 라우트와 같은 방식)을 쓴다. 성공과 풀기 뒤의 거절은 쓰지 않는다. 한도 값은 기존 `RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE`(기본 30, 0이면 끔)를 같이 쓰되 **버킷은 접두별로 따로**다(읽기 쪽 거절이 쓰기 쪽을, 그 반대가 닫지 않는다). 주소 전체 상한(한도의 10배)도 따로 둔다. 새 환경 변수는 없다. 일일 총량은 호출자 쪽 한도(ADR-0201 P7: 위임 일일 기본 30)가 쥔다.
+
+### 비교한 방식과 기각한 대안
+
+| 방식 | 판단 |
+|---|---|
+| (a) 워커가 쓰기 토큰을 발급하고 api의 쓰기 라우트를 부른다 (**채택**) | 증보 3의 검수된 모양(1회용·해시만·짧은 수명·재판정)을 그대로 쓴다. 저장소 종류와 무관하다. 대가: 새 표·새 공개 경로·보관소 메서드·답 척추 입구 |
+| (b) 내부 전용 경로 + 서비스 간 비밀 | **기각 유지**(증보 3 (c), ADR-0201 P6). 새 비밀(회전·유출 범위)·소유 판정의 두 번째 구현·1회용 아님. 쓰기에서는 더 나쁘다: 비밀 하나로 어느 run에든 쓸 수 있다. 뒤집을 이유가 없다 |
+| (c) 읽기 표 `self_media_token`을 재사용(`attachment_id`를 NULL 허용으로, 방향 열 추가) | **기각.** 160의 `NOT NULL`·「모든 열 불변」 가드·읽기 라우트의 `RETURNING attachment_id`가 걸려 있다. 방향 술어를 한 곳만 빠뜨려도 쓰기 토큰이 읽기에(또는 반대로) 통하고 표 하나의 계약이 둘이 된다 |
+| (d) 워커가 `pending` 첨부 행을 먼저 만들고 첨부에 묶인 토큰 | **기각.** `drive_file_id`는 보관소 세션이 정하므로 워커가 못 만들고(K4), BYPASSRLS 역할이 사용자 표에 행을 쓰는 새 길이 생긴다 |
+| (e) 무상태 서명 토큰(HMAC) | **기각.** (b)와 같다: 새 비밀, 1회용을 지키려면 어차피 표가 필요하다 |
+| (f) 워커가 해독하고 보관소에 직접 | **기각.** 워커는 api 볼륨·SA 키를 가질 수 없다(증보 3 (b)(d)). 가지면 증보 3이 기각한 권한 확대다 |
+| (g) 워커가 해독하고 api는 받은 바이트를 믿고 쓴다 | **기각.** 손상된 워커가 임의 바이트를 보관소에 쓴다. api가 입력을 믿지 않고 자식 출력만 쓴다(W5) |
+| (h) 워커가 PG `bytea`에 올려 두고 api·notifier가 가져가 처리 | **기각.** 5 MiB 덩어리를 PG에 쌓고, 가져갈 폴러(새 BYPASSRLS 읽기나 definer)가 생긴다 |
+| (i) 내부 전용 리스너(별도 포트)에만 쓰기 라우트를 둔다 | **S3에서는 기각, 후속 보강으로 열어 둔다.** 템플릿·카탈로그·헬스체크 변경이 따른다. 단일 사용 토큰이 읽기 라우트와 같은 급의 공개 도달성을 이미 감수한다 **[추정]** |
+| (j) 자식에 새 모드(긴 변 2048·PNG 유지) | **기각(S3), 열어 둔다.** 코덱 코드 변경이라 별도 디코더 검수가 필요하다. `--prepare`의 1024 px·JPEG q90은 AI 그림에 충분하다고 본다 **[추정]** |
+| (k) 「돈이 든 그림」용 끈질긴 대기(`permit_patiently`, 최대 15초) | **기각.** 사람의 올리기가 「바쁨」을 맞는 시간이 늘고 api 요청이 5 MiB 본문을 쥐는 시간도 늘어난다. P6이 ≤3초·2칸으로 정했다 |
+| (l) 그림마다 메시지를 하나씩 | **기각.** 한 run의 답이 여러 메시지로 쪼개지고 `client_msg_id = run_id` 멱등이 깨진다 |
+| (m) 사람이 승인하는 카드 뒤에 올린다 | **기각.** owner Q2 가(묻지 않음, ADR-0201 P16-답). 이 길은 승인 없이 올린다 — 위험은 고지·일일 상한·run당 1장이 쥔다 |
+
+### 위협과 막는 곳
+
+| # | 위협 | 막는 곳 | 시험 |
+|---|---|---|---|
+| T1 | 토큰 위조·도용·재사용 | 32바이트 난수, DB에는 해시만, 60초, 단일 사용(UPDATE 한 문장), 풀 때 run 진행 중·에이전트 일치. 위조한 행이 있어도 요청자·채널·업로더는 run에서 도출하고 슬롯은 UNIQUE | WA1·WA2·WA3 |
+| T2 | 손상된 워커(BYPASSRLS)가 임의 (run, 에이전트) 행을 직접 넣는다 | 표 권한이 마지막 문이다(`momo_worker` SELECT·INSERT·DELETE, UPDATE 없음). 행이 있어도 풀 때 run이 **진행 중이고 그 에이전트의 것**이어야 하며 도출한 채널·요청자 멤버십이 맞아야 한다. 효과는 진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 ≤슬롯 수만큼 쓰는 것이다 | WA3·WA18 |
+| T3 | 모델·프롬프트 주입이 그림 쓰기를 부른다 | 토큰을 만드는 것은 워커 코드뿐이고 도구·모델·HTTP 표면이 없다. 토큰은 어떤 글에도 안 실린다. 호출자의 문(G1~G10)·일일 상한·run당 1장이 총량을 쥔다 | WA15·WA20 |
+| T4 | 악성 그림 바이트(디코더 악용·폭탄·다형 파일·SVG/HTML 위장·GIF·APNG) | sniff는 세 형식뿐, 자식은 빈 환경·할당 192 MiB·마감 10초, **출력만 저장**, 입력은 어디에도 가지 않음 | WA6·WA7·WA8 |
+| T5 | 자원 고갈(디코더 슬롯·메모리·보관소·행) | 동시 쓰기 4, 줄서기 ≤3초·대기자 2, 본문 ≤5 MiB와 읽기 마감, 출력 ≤4 MiB, run당 슬롯, 일일 위임 상한. 사람의 올리기는 줄서지 않으므로 최대 3초의 「바쁨」만 더해진다 | WA5·WA9·WA19 |
+| T6 | 다른 워크스페이스·대화에 쓴다 | 풀기 tx는 경로의 워크스페이스로 묶이고(RLS FORCE, 비우회 역할), 채널·업로더는 run에서 도출한다. 묶기도 같은 채널·업로더 = 작성자를 요구한다(K7) | WA3·WA12·WA14 |
+| T7 | 사칭: 사람의 메시지에 에이전트의 그림을 붙이거나 그 반대 | 업로더 = 그 run의 에이전트 멤버, 묶기는 `uploader == author`·미묶임·같은 채널(K7). 사람의 REST 보내기가 그 첨부를 지목하면 `ForeignUploader` | WA12 |
+| T8 | 토큰·주소의 새는 곳(로그·오류·감사·props·Hermes 기록·엣지 로그) | W2의 「어떤 글에도 안 실림」, 가림 확장(`redact_self_media_urls`의 새 접두), 워커는 고정 낱말만 로그, 라우트는 경로를 로그에 쓰지 않는다. **Hermes는 이 토큰을 보지 못한다**(읽기 토큰과 달리 요청 맥락에 안 실린다) | WA15 |
+| T9 | SSRF·리디렉션 | 워커→api 사설 주소 하나, 리디렉션 없음·프록시 없음. api는 나가는 요청이 없다(Google은 자기가 만든 세션 주소 하나) | WA16 |
+| T10 | 고아: 쓰고 묶기 전에 워커가 죽음 | 행은 묶이지 않은 완료 첨부 = 업로더(에이전트)만 읽음 → 증보 2 D4의 30일(기본 꺼짐). 더 짧은 청소를 만들지 않는다(남는 위험 1) | WA21 |
+| T11 | 중단·취소 뒤에도 그림이 올라온다 | 풀 때와 행을 쓸 때 두 번 run 진행 중을 본다. 어긋나면 객체를 지우고 409 | WA10 |
+| T12 | 그림 내용(부적절·얼굴·민감) | 막지 못한다. 사람의 요청이 부른 같은 방의 그림이고 공급자의 안전 장치에 기댄다. D3의 「바이러스 스캔 없음」과 같은 급의 한계 | 남는 위험 3 |
+| T13 | 사설 주소가 닿지 않음·틀림 | 쓰기 길이 닫히고(폴백 없음) 호출자의 실패 문장. 기동 때 값의 모양만 경고(증보 3 D5·F4) | WA16 |
+| T14 | 동시성·이중 쓰기 | 단일 사용 UPDATE, `UNIQUE (run, slot)`, 묶기의 `FOR UPDATE`, 메시지 재시도 멱등(`!deduped`) | WA2·WA12 |
+
+### #5442(ADR-0218 증보 6)와 겹치는 점
+
+[ADR-0218 §12](0218-workspace-expressions.md)(이모티콘 세트 제안, #5442, Proposed)를 읽기만 했고 고치지 않았다. 확인한 것:
+
+1. **세트의 후보 그림은 이 길로 올라오지 않는다.** §12 L3.1 B가 「대화 첨부를 운반체로(#5371)」를 기각했다(승인 전 40장이 대화에 영구히 올라오고, 첨부 소유 술어를 「도우미 자기 것」으로 넓혀야 하며, 대화에 보이는 것과 카드가 보이는 것이 갈린다). L3.3의 표가 겹침을 정한다. 한 Hermes 그림은 **정확히 한 길**로만 간다: 사람이 대화에서 그림 한 장을 부탁하면 이 증보의 길이고, 세트의 어떤 칸도 대화 첨부가 되지 않으며 이 길은 `expression_set`에 쓰지 않는다.
+2. **공유하는 것**(L3.3과 같다): Hermes 답에서 그림 한 장을 뽑는 함수(#5372: `data:image/` 주소 하나·png·jpeg·webp·≤5 MiB·GIF 불가), 격리 디코더, 위임 실패 어휘(`picture_failed` 등). **공유하지 않는 것**: 쓰기 주소·`attachment` 행·답 메시지에 묶기(이 증보), 세트의 `expression_set` 보관·세 렌디션(§12).
+3. **디코더 슬롯은 겹치지 않는다.** 세트의 `put_still`은 워커 안의 도메인 함수라 **워커 프로세스의** 슬롯 둘을 쓰고(§12 L3.2, K13), 이 길은 **api 프로세스의** 슬롯 둘을 쓴다(사람의 올리기·링크 가져오기와 나눔). 어느 쪽이든 해독을 다른 프로세스로 옮기면 슬롯 경쟁이 생기므로 그때 다시 잰다.
+4. **바이트 예산은 따로 센다.**
+
+| | 이 증보(대화 첨부) | §12 L4(세트) |
+|---|---|---|
+| 입력 한 장 | ≤5 MiB(`INPUT_BYTES`) | ≤5 MiB(같은 숫자) |
+| 저장 한 장 | ≤4 MiB(`--prepare` 출력), 긴 변 ≤1024 | 칸당 ≤1.5 MiB(세 렌디션 합) |
+| 한 단위 | run당 1장(v1), 일반형 ≤4 **[추정]** → ≤16 MiB | 세트당 ≤24 MiB, 40칸 |
+| 하루 | 워크스페이스 위임 일일 30(P7) × ≤4 MiB ≈ **≤120 MiB 보관소**/일 **[추정, 최악]** | 미결정 세트 에이전트당 1, 보관 2시간 |
+| 어디에 | 보관소(Drive·local 볼륨) + `attachment` 행 | PG 표 `expression_set`(승인·만료·거절 때 회수) |
+
+두 예산은 서로 더해지지 않는다(한 Hermes 그림은 한 길이다).
+5. **ADR-0201의 위임 한도와 세트의 충돌**(요청당 위임 1회 G10·그림 1장 R10 대 세트의 정지 N장)은 §12 L16 O1이 다룬다. 이 증보는 그 숫자를 바꾸지 않는다.
+6. **읽기 술어는 넓히지 않는다**(W10). §12 L3.1 B가 걱정한 소유 술어 확대는 이 증보에 없다.
+
+### 수용 기준 (구현이 내야 할 사보타주 단정 — 각 항목은 해당 분기를 지우면 빨개져야 하고 단정은 응답이 아니라 **실제 값**(보관소의 바이트, 표의 행, 자식 시작 횟수, 읽힌 본문 바이트)을 잰다)
+
+- **WA1** 발급: 다음 중 **하나만** 어긴 run에서 `mint`는 `None`이고 표에 행이 0이다 — run 끝남·없음 / 에이전트 불일치 / 트리거 작성자가 에이전트·삭제됨·비활성 / 요청자 또는 에이전트가 대화에서 나감 / 채널 보관됨 / 같은 슬롯의 둘째 발급 / 다른 워크스페이스의 run. 술어를 하나씩 지우면 해당 사례가 행을 쓴다. 둘째 발급은 직접 INSERT로도 `UNIQUE`가 거절한다(DB가 쥠).
+- **WA2** 풀기: 한 토큰을 **진짜 TCP로 동시에** 둘이 PUT해도 정확히 하나만 201이고 나머지는 404이며 첨부 행·보관소 객체가 각각 1이다(`used_at IS NULL`을 지우면 둘 다 201). 만료·다른 워크스페이스 경로·끝난 run·나간 멤버는 모두 **바이트까지 같은** 404다.
+- **WA3** 도출: 위조한 행(시험이 `momo_worker`로 직접 INSERT)의 에이전트가 run의 에이전트와 다르면 404이고, 같으면 **run의 채널·run의 에이전트**로만 쓰인다. 요청에 가짜 채널·업로더 값(헤더 `X-Channel`·`X-Uploader`, 쿼리 `?channel=`)을 실어도 행의 채널·업로더가 안 바뀐다. 두 대화에 걸친 에이전트로 시험한다. 도출을 다른 run에 대고 부르면 빨강.
+- **WA4** 순서: 나쁜 토큰·만료·재사용·끝난 run의 PUT은 **본문을 한 바이트도 읽지 않고**(읽으면 카운터가 오르는 본문을 준다) 디코더 자식을 띄우지 않으며(시작 카운터 0) 보관소 쓰기 0이다. 길이 선언 없음(411)과 5 MiB+1 선언(413)도 본문 0바이트·**토큰 소비 0**이다(이어 같은 토큰으로 정상 PUT이 201). 소비를 헤더 검사 앞으로 옮기면 빨강.
+- **WA5** 길이: 선언 N에 N−1·N+1 바이트를 보내면 400이고 자식 0·행 0이다(토큰은 탄다). 정확히 5 MiB(5,242,880)는 통과하고 5 MiB+1 선언은 413이다. 한 바이트씩 느리게 오는 본문은 읽기 마감(시험에서는 줄인 값)에서 끊기고 행 0이다.
+- **WA6** 형식: **진짜 디코더 자식으로** GIF(한 프레임·움직임)·APNG·SVG·HTML·PDF·움직이는 WebP·HEIC·빈 본문·매직만 png인 쓰레기는 모두 422이고 첨부 행 0·객체 0이다. 정지 png·jpeg·webp는 201이다. 라우트의 sniff를 지우면 **한 프레임 GIF가 201이 된다**(K9의 틈) — 이 사보타주가 빨개야 한다.
+- **WA7** 폭탄: 헤더만 큰 PNG(1,600만+1 화소, 가장자리 4097)·압축 폭탄·잘린 파일은 422이고, 자식이 실제로 한 번 떴으며 부모의 메모리가 늘지 않는다. 한도 자체는 기존 해독 시험이 재므로 이 시험은 **라우트 연결이 자식을 거침**을 잰다.
+- **WA8** 다시 인코딩: 보관소에서 **저장된 바이트를 꺼내**(응답이 아니라) 단정한다 — 입력과 바이트가 다르다, 입력에 심은 EXIF(GPS·기기)·ICC·텍스트 청크·꼬리 바이트의 표지 문자열이 0이다, EXIF 방향이 반영됐다, mime은 png·jpeg뿐이고 알파 입력은 PNG·아닌 입력은 JPEG, 긴 변 ≤1024·≤4 MiB. 라우트가 자식을 건너뛰고 입력을 저장하면 빨강.
+- **WA9** 슬롯: 두 슬롯을 쥔 채 줄이 비면 최대 3초 뒤 503 `busy`·자식 0, 대기자 둘이 차면 셋째는 **즉시** 503, 슬롯이 풀리면 줄 선 둘이 처리된다. 같은 때 사람의 직접 올리기는 줄서지 않고 즉시 `Busy`다. `WAIT_MAX`·`WAITERS_MAX`를 안 쓰면 빨강. 동시 쓰기 4를 넘는 다섯째는 **토큰 소비 0**의 503이다.
+- **WA10** 보관·재판정: 보관소가 쓰기를 거절하면 502 `storage_failed`, 행 0, `agent_picture_written` 0·`agent_picture_refused` 1이다. 객체를 쓴 뒤 행 tx가 실패하면(주입) `delete_file`이 불리고 보관소 객체가 0이다. 해독 중 run을 끝내면(취소) 409 `run_over`·객체 삭제·행 0이다 — W3 3을 지우면 행이 생긴다.
+- **WA11** 행·감사: 업로더 = 에이전트 멤버, 채널 = run의 채널, `complete`, `message_id` NULL, 이름 = `picture-1.png`·`.jpg`, mime = 출력 mime, 크기 = 보관소 객체 길이(`file_metadata`로 대조). 감사 한 줄에 W8의 필드가 있고 이름·바이트·토큰·주소·요청 문장은 문자열 검색으로 0이다. `Content-Type: text/html`·긴 가짜 파일 이름 헤더를 보내도 이름·mime이 안 바뀐다.
+- **WA12** 묶기: 새 입구가 한 번에 N장(N=1과 일반형 N=3, 단위 시험)을 한 메시지에 슬롯 순서로 묶고 `message.new`의 outbox payload와 기록 투영이 `attachments`를 싣는다(`Project` 분기를 지우면 payload의 첨부가 0 = 안 보임). 같은 첨부를 사람이 REST 보내기로 묶으려 하면 `ForeignUploader`, 다른 run의 답이 묶으려 하면 `AlreadyLinked`·`ForeignChannel`이다. 메시지 재시도(`client_msg_id = run_id`)는 다시 묶지 않는다(`!deduped`).
+- **WA13** 묶기 거절: 일부러 거절시키면(다른 채널의 첨부 id) 메시지는 첨부 없이 `picture_failed` 문장과 함께 **정확히 한 번** 남고(중복 0·반쪽 묶임 0) run은 정상 종료한다. 거절을 평문 재전송이나 삭제로 바꾸면 빨강.
+- **WA14** 테넌트: 두 테넌트(비우회 `momo_app`)로 A의 토큰을 B의 경로에 대면 404이고 B에 행 0이다. A의 첨부는 B의 어떤 읽기에도 안 보인다. `momo_app`이 GUC 없이 토큰 표에서 0행을 본다.
+- **WA15** 새는 곳 0: 성공과 **모든** 실패 경로에서 캡처한 `tracing` 출력·`audit_log`·`outbox.payload`·`agent_run.error`·메시지 `props`·job payload 어디에도 토큰 원문·`agent-media/` 경로·입력 바이트 조각·`Content-Type` 선언이 없다(로그 줄은 고정 낱말뿐). `redact_self_media_urls`가 새 접두를 가린다(`\/`·`%2F` 변형 포함, 접두 하나를 지우면 빨강).
+- **WA16** 워커 클라이언트: 리디렉션을 따르지 않는다(302 스텁이 가리키는 둘째 서버에 요청 0). `OORT_API_INTERNAL_ORIGIN`이 없거나 틀리면 호출 0·폴백 0이고 호출자의 실패 문장이 나간다. 한 번만 시도한다(실패 뒤 둘째 PUT 0, 토큰 행 1). 마감 40초(시험에서는 줄인 값). 프록시 무시는 증보 3 후속 F1처럼 자식 프로세스로 재야 하므로 측정하지 못하면 **미측정으로 기록**한다.
+- **WA17** 발급 전 거절: 5 MiB+1 base64·GIF 매직·2장은 토큰 행 0·api 요청 0이다.
+- **WA18** 잠금: 정적 시험이 세 곳(migration·두 bootstrap)의 잠금 블록이 같은 글자임을 잰다(한 곳을 고치면 빨강). 격리 PG에서 `momo_worker`는 SELECT·INSERT·DELETE만, `momo_app`은 SELECT·UPDATE만, 나머지 역할은 0이다. 가드 트리거가 `used_at` 외 UPDATE와 되돌리기를 거절하고 CHECK(해시 32바이트·수명 ≤10분·슬롯 1~4)가 선다. `momo_app`의 INSERT·DELETE와 `momo_worker`의 UPDATE는 거절된다.
+- **WA19** 예산·계약: 풀기 전 거절만 호출 주소·경로 워크스페이스의 예산을 쓰고(성공·풀기 뒤 거절은 안 씀) 주소 전체 상한이 선다. 읽기 라우트의 버킷과 섞이지 않는다. 새 경로가 공개·스펙 밖 목록에 오르고 PUT 외 6개 메서드는 405다(`dev_token_door_conformance_pg`의 두 목록).
+- **WA20** 사용자 영향 0: S3 착륙 빌드에서 어떤 도구·카드·메시지도 이 길을 부르지 않는다(워커 소스에서 호출 자리가 시험 코드뿐임을 정적 검사로 잰다). 평소 Hermes 턴의 `PICTURE_REMOVED_SENTENCE`가 그대로다.
+- **WA21** 청소: 만들 때 같은 워크스페이스의 하루 지난 토큰 행이 지워지고 다른 워크스페이스의 행은 남는다. 묶이지 않은 에이전트 첨부가 증보 2 D4의 후보 술어를 그대로 따른다(보관소 복구 포함).
+- **WA22** 상수가 한 숫자: `AGENT_PICTURE_MAX_INPUT_BYTES` = `INPUT_BYTES` = `SELF_MEDIA_MAX_BYTES`, 토큰 수명 60초 = 증보 3의 `SELF_MEDIA_INTERNAL_TTL_SECS`와 같은 값(표에서 `expires_at − created_at`으로 잰다).
+
+### 구현 슬라이스 (한 이슈 #5371 = 한 브랜치·한 PR, 아래는 그 안의 커밋 단위)
+
+기반 브랜치 `track/engine`. 크기·예상 시간은 Sonnet 워커 기준 **[추정]**이고 S3 전체는 L·등급 2다.
+
+| ID | 내용 | 파일 소유 | 크기·시간 | 선행 |
+|---|---|---|---|---|
+| WS1 | DB: 토큰 표·가드·RLS·잠금·정적 시험·연속 번호 시험 | `server/Migrations/<번호는 planner>_attachment_write_token.sql`, `infra/rust/sql/bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`(잠금 블록 한 곳씩), `momo-db/src/migrate.rs:796`(`discovers_contiguous_migrations_001_to_174`를 새 번호로), `momo-messaging/tests/agent_picture_static_guards.rs`(새) | S·1시간 | **planner의 번호 배정**, 증보 Accepted |
+| WS2 | messaging: 발급·풀기·행 쓰기·재판정, 답 척추 새 입구, 로그 가림 확장 | `momo-messaging/src/agent_picture.rs`(새), `lib.rs`(내보내기), `message.rs`(새 입구 1개), `attachment.rs`(`complete` 행 INSERT 함수 1개), `self_media.rs`(`redact_self_media_urls` 접두 확장만) | M·2시간 | WS1 |
+| WS3 | 디코더 대기 함수와 보관소 쓰기 | `momo-expressions/src/media.rs`(`prepare_photo_waiting` 한 함수, **자식·한도 불변**), `momo-drive/src/{lib,local,stub,google,fake_google}.rs`(`put_object`) | M·2시간 (google은 +1시간, `runtime-unverified`) | — |
+| WS4 | api 라우트와 예산·계약 목록 | `bins/momo-server/src/routes/agent_media.rs`(새), `routes/mod.rs`(+1), `lib.rs`(경로 마운트 +1), `rate_limit.rs`(접두 확장·버킷 분리), `tests/dev_token_door_conformance_pg.rs`(공개·스펙 밖 목록 둘) | M·2시간 | WS2·WS3 |
+| WS5 | 워커 클라이언트와 선행 거절(호출자 없음) | `bins/momo-agent-worker/src/agent_picture.rs`(새), `lib.rs`(mod 선언 1줄). `team_ai.rs`·`hosted_door.rs`의 호출 자리는 **건드리지 않는다**(S4) | M·1.5시간 | WS2·WS4 |
+| WS6 | 실 PG·실 디코더 적합성 시험과 사보타주 | `bins/momo-server/tests/agent_picture_conformance_pg.rs`(새: 두 테넌트·비우회 역할·진짜 디코더 자식·진짜 로컬 보관소·진짜 TCP), `momo-messaging/tests/agent_picture_pg.rs`(새), 워커 시험 | L·3시간 | WS1~WS5와 같이 |
+| WS7 | PR 본문(증거·사보타주 표·`runtime-unverified`)·Status 갱신 요청 | PR 본문, 이 증보 Status(planner) | S | WS6 |
+
+- **정책 파일 변경은 없다** [V]: 새 환경 변수가 없고(`OORT_API_INTERNAL_ORIGIN`은 워커에 이미 있다) `check_railway_catalog.py`·compose 템플릿을 바꾸지 않는다. 새 시험이 읽는 `infra/rust/sql/`·`server/Migrations/`는 PR 검사의 rust 필터에 이미 있다(`.github/workflows/pr-ci.yml:226`). 계약 파일(`docs/api/openapi.yaml`)은 읽기 라우트처럼 「공개·스펙 밖」으로 두므로 바꾸지 않는다.
+- 파일 충돌 주의: `media.rs`는 #5442의 후속 슬라이스(세트 보관)도 건드릴 수 있고 `message.rs`·`self_media.rs`는 다른 칸과 겹칠 수 있다. 두 곳 모두 이 증보의 변경은 **함수 추가와 접두 확장**뿐이라 착륙 때 맞추기 쉽다.
+- **2단계 분할 제안**: 2단계-가 = WS1~WS4 + WS6의 서버 쪽 시험(약 6~7시간), 2단계-나 = WS5 + google 쓰기 + 워커 시험 + 사보타주 표 + PR 본문(약 4~5시간). 한 세션은 50만 토큰 한도가 있으므로 가·나 사이에 체크포인트를 커밋한다.
+
+### 이슈·문서 문구와 다른 곳
+
+1. **증보 번호**: 브리프의 「증보 4」·ADR-0201의 「ADR-0151 증보」는 이 증보 8이다(위 번호 줄).
+2. **ADR-0201 P6의 `process_waiting`**: 대기 방식(≤3초·대기자 2)은 그대로이고 **출력 모양은 `--prepare`**다. `process_waiting`의 출력은 표현 렌디션(≤512 px)이라 대화 그림에 작다(K10·W5). 그 함수를 직접 부르라는 뜻으로 읽지 않는다.
+3. **P6의 「S3이 픽셀 상한을 정한다」**: 1,600만 화소·가장자리 4096·할당 192 MiB(W5)로 정했다.
+4. **migration**: P14-S3 행은 migration을 말하지 않았다. 이 길은 표 하나가 든다(W1, K3·K4). 번호는 planner가 정한다.
+5. **임대 계산**(ADR-0201 P4-5): 위임 걸음의 임대는 「Hermes 마감 + 합치는 호출 2회 + 여유」(최악 약 160초)로 잡혀 있다. 그림 위임은 거기에 **업로드 마감 40초**(W7·W11)가 더해져 최악 약 200초다. S2·S4가 임대를 이 숫자로 계산해야 한다 — 이 증보는 숫자만 준다.
+6. **P15-A10의 「첨부는 도우미가 쓴 메시지에 묶인다」**: 지금 답 척추는 첨부를 묶지 못하므로(K6) 새 입구가 먼저 필요하다(W9). P6이 암묵 전제한 것이다.
+7. **기본 결정 D3**: 「에이전트 업로드는 v0 제외」를 이 한 길에 한해 푼다(W10).
+
+### 바뀌지 않는 것
+
+읽기 라우트 `GET /v1/self-media/{ws}/{token}`(경로·헤더·거절·예산·405), `self_media_token` 표와 권한, 증보 3·4의 읽기 길 전부, 사람 업로드 세 라우트와 `Content-Disposition: attachment`·`nosniff`·`no-store`로 내주는 content 라우트, 격리 디코더의 자식 코드와 한도, `find_requester_attachment_in_tx`(읽기 술어), 증보 2의 청소기 술어, `link_attachments_in_tx`의 판정, `send_message_in_tx`·`send_thread_notice_in_tx`·run line의 `Skip`, ADR-0201 v4의 문(G1~G10)·한도·P9의 문장·P15의 기준, ADR-0218 §12의 세트 계약.
+
+### 남는 위험
+
+1. **고아 창.** api가 쓴 뒤 워커가 묶기 전에 죽으면 묶이지 않은 에이전트 첨부가 남고 청소기는 기본 꺼짐이다(증보 2 D4). 사람은 읽지 못하지만(업로더가 에이전트) 보관소는 늘 수 있다. 상한은 run당 슬롯·위임 일일 상한이 쥔다. 더 짧은 청소는 만들지 않는다.
+2. **워커가 api를 통해 보관소에 바이트를 쓸 수 있게 된다.** Railway에서 처음 생기는 능력이다(증보 3 남는 위험 1의 거울). 손상된 워커가 표에 행을 직접 써도 풀 때 run·에이전트·멤버십을 다시 보므로 범위는 「진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 슬롯 수만큼」이다. 워커는 이미 모든 테넌트의 메시지를 쓰는 역할이다.
+3. **그림 내용을 검열하지 않는다.** 얼굴·부적절한 그림·바이러스 스캔 없음은 D3의 v0 한계와 같은 급이다. 요청자가 부른 같은 방의 그림이고 공급자의 안전 장치에 기댄다.
+4. **고아 객체.** 객체를 쓴 뒤 행 tx와 `delete_file`이 모두 실패하면 행 없는 객체가 남고, 행을 따라가는 청소기는 찾지 못한다(채널·워크스페이스 삭제의 고아와 같은 부류, 증보 2 남는 위험).
+5. **사람의 올리기에 최대 3초의 「바쁨」을 더할 수 있다**(W5). 워크스페이스 일일 위임 상한이 빈도를 쥔다.
+6. **Google 쓰기 길은 가짜 구글로만 시험한다**(`runtime-unverified`). 실제 Drive 세션 PUT·권한·할당량은 재지 않았다. 문제가 있으면 Google 백엔드 인스턴스에서만 `drive_not_configured`처럼 닫는 선택지가 있다.
+7. **사설망 평문.** 토큰이 사설망에서 평문 http로 간다(증보 3 남는 위험 2와 같다). 본문 5 MiB도 같은 길로 간다.
+8. **1024 px·JPEG q90**은 AI 그림에 충분하다고 **[추정]**했다. 더 큰 출력이 필요하면 새 디코더 모드(기각 (j))와 그 검수가 먼저다.
+
+### runtime-unverified
+
+실제 Railway 사설망 위의 5 MiB PUT(프록시·엣지 본문 한도가 닿는지), 실제 Hermes 그림을 이 길로 올리는 왕복, 실제 Google Drive 쓰기, 로컬 볼륨의 `fsync`·디스크 가득 때의 오류 모양, 해독 자식의 Linux 한도(`--prepare`는 ADR-0218 H11에서도 Linux 한도를 재지 않았다), 한 프레임 GIF가 `open()`을 통과한다는 K9의 사실(코드 읽기만, 실행 안 함), 팀 AI 답이 스트리밍으로 쓰일 때의 묶기. 시험은 127.0.0.1 TCP·실 PG18(두 테넌트, 비우회 역할)·진짜 디코더 자식·진짜 로컬 보관소로 한다(구현 PR).
+
+### 열린 확인 [확인 필요]
+
+① 에이전트 토큰이 사람 업로드 라우트(`create_upload`·`complete`)에 닿지 못하는지(K8: media 라우트만 허용 목록 부재를 주석으로 확인) ② `attachment`를 `complete`로 직접 INSERT할 때 걸린 트리거(예약 점유 표시 트리거는 점유 표에 걸린 것이라 무관할 것이다 — 착수 때 PG로 확인) ③ Google 세션 PUT의 `Content-Range`·본문 길이 규칙 ④ 라우트의 총 마감 35초와 엣지(Caddy·Railway)의 요청 시간 한도 ⑤ 스트리밍 답에 첨부를 싣는 길 ⑥ 일반형 N 상한 4와 일일 바이트 상한(필요하면 증보) ⑦ `/v1/agent-media/` 접두를 엣지에서 막는 후속(기각 (i)).
+
+### 검수가 먼저 볼 곳
+
+**R1** 풀기 술어가 읽기(증보 3 D2)를 온전히 거울로 삼는가, 그리고 요청자·채널·업로더를 run에서 **도출**해서 위조 행의 범위가 「진행 중인 run의 그 에이전트」로 닫히는가(W3·T2). **R2** 본문 한도가 본문 **앞**에, 소비가 본문 읽기 **앞**에 있어 나쁜 토큰이 한 바이트도 읽히게 하지 못하는가(W4). **R3** 보관소에 가는 것이 자식의 출력뿐이고, GIF가 `open()`을 통과하는 틈을 sniff가 막는가(W4·W5, K9). **R4** 토큰이 어떤 글에도 없다는 증명(W2·T8)과 새 접두의 로그 가림. **R5** D3 뒤집기가 한 길에 한정되고 읽기 술어가 안 넓어졌는가(W10). **R6** 고아 창과 청소기 의존, 객체를 쓴 뒤 실패할 때의 정리(W7·T10). **R7** 새 공개 경로의 계약·예산·405 처리가 읽기 라우트와 같은 방어를 갖는가(W12·WA19).
+
+### 역방향 줄 대상(Accepted 때 planner가 각 문서 머리에 한 줄씩, 본문 결정은 바꾸지 않는다)
+
+ADR-0201(P6·P14-S3·P18 ⑧의 링크, `process_waiting` 문장·임대 계산 정정, 「증보 4」 표기 → 증보 8) · ADR-0218(§12 L3.3에 이 증보의 겹침 절 링크, H9.2의 「따로」가 이 증보 위) · ADR-0151 본문 D3(이 증보 W10) · ADR-0203(해당 없음: 이 길은 Hermes에 새 자격을 주지 않는다).
