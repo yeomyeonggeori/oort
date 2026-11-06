@@ -20,6 +20,7 @@ import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { LoadFailureBox } from "@/features/common/LoadFailureBox";
@@ -39,7 +40,11 @@ import { actorNamesIn } from "./actorNames";
 import { inboxTargetPath, watchForMessage } from "./anchor";
 import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import { InboxApprovalActions } from "./InboxApprovalActions";
-import { approvalRowControl, settledStatusLine } from "./approvalsPanel";
+import {
+  approvalRowControl,
+  awaitedApprovalId,
+  settledStatusLine,
+} from "./approvalsPanel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
@@ -301,6 +306,7 @@ export function InboxDetail({
   readBusy: boolean;
 }) {
   const { session, workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const channelsQuery = useChannels(workspaceId);
   const context = useContextMessages(entry);
@@ -381,12 +387,24 @@ export function InboxDetail({
           offline,
           settled: settledLine !== null,
         });
+  // 승인·거부가 받은함에서 서는가(`decide`), 아니면 결정은 내 몫인데 단추는 서지 않고 그 대화의 카드를 열어서 결정하는가(`open`, #5462).
+  const decideHere = control?.kind === "decide";
+  const opensOnCard =
+    control !== null && !decideHere && awaitedApprovalId(control) !== null;
 
   // 결정이 닿으면 눌린 컨트롤은 이 렌더에서 결과 줄로 바뀌며 사라진다. 초점이 body로
   // 떨어지지 않게 패널이 받는다(`AgentCard`가 같은 순간에 카드로 받는 것과 같다). 결과는
   // 위의 `inbox-decision-note`(role=status)가 한 번 읽어 주므로 초점은 결과 줄이 아니라
   // 패널 자신에게 놓는다: 같은 문장이 라이브 리전과 초점으로 두 번 들리지 않는다.
   const panelRef = useRef<HTMLElement | null>(null);
+
+  // 「대화에서 보기」와 「열기」는 같은 자리로 간다. 카드로 직접 가는 것은 처리할 일뿐이고, 멘션·답글의 착지는 seq 그대로다.
+  const targetPath = inboxTargetPath(
+    entry.kind === "task" ? entry : { channelId: entry.channelId, seq: entry.seq }
+  );
+  const landOnTarget = () => {
+    if (entry.seq !== undefined) watchForMessage(entry.seq);
+  };
 
   return (
     <section
@@ -428,15 +446,8 @@ export function InboxDetail({
           </Button>
         )}
         <Link
-          to={inboxTargetPath(
-            // 카드로 직접 가는 것은 처리할 일뿐이다. 멘션·답글의 착지는 seq 그대로다.
-            entry.kind === "task"
-              ? entry
-              : { channelId: entry.channelId, seq: entry.seq }
-          )}
-          onClick={() => {
-            if (entry.seq !== undefined) watchForMessage(entry.seq);
-          }}
+          to={targetPath}
+          onClick={landOnTarget}
           data-testid="inbox-open-conversation"
           className="press inline-flex h-control-sm items-center rounded-sm px-3 text-body text-ink hover:bg-surface-hover focus-visible:focus-ring"
         >
@@ -479,7 +490,7 @@ export function InboxDetail({
                 {entry.task.managedBy} 님이 관리하는 에이전트예요.
               </p>
             )}
-            {control?.kind === "decide" && entry.task && (
+            {decideHere && entry.task && (
               <InboxApprovalActions
                 approvalId={control.approvalId}
                 onSettled={(outcome) => {
@@ -488,6 +499,20 @@ export function InboxDetail({
                 }}
                 execution={entry.task.execution}
               />
+            )}
+            {opensOnCard && (
+              // 이 승인은 받은함에서 결정하지 않는다(계획 카드·세트 카드 등, `approvalOpensOnCard`): 승인·거부 대신 그 대화의 그 카드로 가는 길 하나.
+              <div className="flex items-center justify-end px-3 py-2 pb-2">
+                <Button asChild size="sm">
+                  <Link
+                    to={targetPath}
+                    onClick={landOnTarget}
+                    data-testid="inbox-approval-open"
+                  >
+                    {formatMessage("inbox.approval.open")}
+                  </Link>
+                </Button>
+              </div>
             )}
             {settledLine !== null && (
               <p className="text-body text-ink" data-testid="inbox-approval-settled">

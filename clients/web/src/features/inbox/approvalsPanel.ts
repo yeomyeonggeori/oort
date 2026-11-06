@@ -1,4 +1,4 @@
-import type { FeedItem } from "@momo/core/features/inbox/model";
+import { approvalOpensOnCard, type FeedItem } from "@momo/core/features/inbox/model";
 import type { ApprovalStatus } from "@momo/core/features/timeline/agentCardModel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 
@@ -66,6 +66,7 @@ export function approvalsPanelState(input: PanelInput): PanelState {
  * 이 행이 지금 받을 컨트롤.
  *
  *   none    아무것도 붙지 않는다. 결정할 수 없는 행과, 이 클라이언트가 이미 결정한 승인(#5092).
+ *   open    승인·거부 대신 「열기」 하나. 이 승인은 받은함에서 결정하지 않고 그 대화의 카드를 열어서 결정한다(#5462).
  *   offline 자리는 지키고 왜 지금 결정할 수 없는지 말한다.
  *   decide  승인/거부 2단 컨트롤. 결정을 보낼 `approvalId`를 함께 싣는다.
  *
@@ -74,9 +75,19 @@ export function approvalsPanelState(input: PanelInput): PanelState {
  * 날아가는 행이 갈라질 수 없다.
  */
 export type RowControl =
-  | { kind: "none" }
-  | { kind: "offline" }
+  | { kind: "none"; approvalId?: undefined }
+  | { kind: "offline"; approvalId?: undefined }
+  | { kind: "open"; approvalId: string }
   | { kind: "decide"; approvalId: string };
+
+/**
+ * 「내가 결정해야 하는 승인」의 id: 받은함에서 누르든(`decide`) 카드를 열어서 누르든(`open`) 결정은 내 몫이다. 배지와 「나에게 필요한 일」의
+ * 수는 이 한 판정을 읽는다 — 카드로 보내는 승인이 수에서 빠지면 계획 카드가 답을 기다리는 동안 아무 배지도 서지 않는다.
+ * id는 결정을 기다리는 두 컨트롤만 싣는다(`none`·`offline`은 `approvalId?: undefined`). 배지는 연결과 무관하게 `offline: false`로 묻는다.
+ */
+export function awaitedApprovalId(control: RowControl): string | null {
+  return control.approvalId ?? null;
+}
 
 /**
  * 결정할 수 있는 행인가.
@@ -103,6 +114,10 @@ export type RowControl =
  * 막는다). 영수증은 서버의 답이므로 클라이언트가 행을 흉내 내서
  * 치우는 것이 아니다. 끊김보다 먼저 보는 이유: 결정이 끝났다는 것은 지금 연결과 무관한
  * 지난 사실이다. 컨트롤 자리에 무엇이 서는지는 이 판정이 아니라 호출자가 말한다.
+ *
+ * `open`(#5462): 카드를 열어서 결정하는 승인(`approvalOpensOnCard`: 행동 id가 닫힌 목록에 있거나 서버가 `open`을 찍었다)은 승인/거부 컨트롤의
+ * 자격이 **없다**. 이 컨트롤을 세우는 자격과 단추가 서는 자리가 한 판정에서 나오므로(위의 `decide`와 같은 이유), 받은함 어디서도 이 승인을
+ * 일반 단추로 확정하는 길이 없다. 「열기」는 결정이 아니라 그 대화의 카드로 가는 길이라 연결이 끊겨도 같다(그래서 `offline`보다 먼저다).
  */
 export function approvalRowControl(
   item: FeedItem,
@@ -112,6 +127,9 @@ export function approvalRowControl(
   // 결정할 수 있는 행이 아니거나(`approvalId` 없음), 이 클라이언트가 이미 결정한 승인이면 컨트롤은 없다.
   if (item.approvalId === undefined || options.settled === true) {
     return { kind: "none" };
+  }
+  if (approvalOpensOnCard(item)) {
+    return { kind: "open", approvalId: item.approvalId };
   }
   if (options.offline) return { kind: "offline" };
   return { kind: "decide", approvalId: item.approvalId };
@@ -281,10 +299,13 @@ export function decisionNote(outcome: DecisionOutcome): DecisionNote {
  * `offline: false`로 세는 이유: 연결이 끊긴 것은 **지금 못 누른다**는 사실이지
  * 할 일이 없다는 사실이 아니다. 끊겼다고 배지가 0이 되면 화면은 오프라인을
  * "처리 완료"로 말하게 된다.
+ *
+ * 카드를 열어서 결정하는 승인(`open`, #5462)도 센다: 단추가 받은함에 없을 뿐 결정은 여전히 내 몫이다.
  */
 export function decidableCount(items: readonly FeedItem[]): number {
   return items.filter(
-    (item) => approvalRowControl(item, { offline: false }).kind === "decide"
+    (item) =>
+      awaitedApprovalId(approvalRowControl(item, { offline: false })) !== null
   ).length;
 }
 

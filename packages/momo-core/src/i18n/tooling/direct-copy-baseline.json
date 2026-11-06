@@ -622,7 +622,7 @@
     "clients/web/src/features/inbox/mailboxTab.ts": 10,
     "clients/web/src/features/inbox/useInbox.ts": 14,
     "clients/web/src/features/inbox/useMailbox.ts": 19,
-    "clients/web/src/features/inbox/useNeedsMe.ts": 3,
+    "clients/web/src/features/inbox/useNeedsMe.ts": 2,
     "clients/web/src/features/memory/ChannelMemoryDialog.tsx": 10,
     "clients/web/src/features/memory/DecisionTimeline.tsx": 24,
     "clients/web/src/features/memory/EvidenceLinks.tsx": 8,
