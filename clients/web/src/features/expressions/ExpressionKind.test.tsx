@@ -248,9 +248,10 @@ describe("the team panel's two views do not overlap", () => {
     const card = render(<LocaleContext.Provider value={locale}>{wrapper(fixtureStore(), <ExpressionDraftCard draft={movingDraft()} onReplace={() => {}} onApprove={vi.fn()} />)}</LocaleContext.Provider>);
     const kindNames = within(card.container).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent);
     expect(kindNames).toEqual([...words.kinds]);
-    // And the same system as the phone sheet's tabs: Korean is identical; English tabs are the plural list names (Emoticons), the views the singular.
+    // The sheet's tabs are a different word from the views (owner 11-06, #5427): the first tab says where the pictures come from (Team), the view that lists them says what they are (Emoticon). The GIF view is still the GIF tab.
     const t = locale.service.formatMessage;
-    expect(words.names[0]).toBe(t("expressions.sheet.tabEmoticon").replace(/s$/, ""));
+    expect(t("expressions.sheet.tabEmoticon")).toBe(language === "ko-KR" ? "우리 팀" : "Team");
+    expect(words.names[0]).not.toBe(t("expressions.sheet.tabEmoticon"));
     expect(words.names[1]).toBe(t("expressions.sheet.tabGif"));
     expect(words.kinds[0].endsWith(words.names[0].toLowerCase())).toBe(true);
     expect(words.kinds[1].endsWith(words.names[0].toLowerCase())).toBe(true);

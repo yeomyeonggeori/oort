@@ -3159,7 +3159,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Emoticons tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3279,7 +3279,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Emoticons"
+      "value": "Team"
     }
   ],
   "expressions.sheet.tabGif": [

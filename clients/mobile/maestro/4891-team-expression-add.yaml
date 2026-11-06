@@ -4,7 +4,7 @@ name: 4891-team-expression-add
 #   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
 ---
 # 4891-team-expression-add — 이모티콘 고르개의 「＋」: 메뉴 두 갈래와 두 장(가져오기·AI와 만들기)이 열리고 닫힌다.
-# (#4942 가 시트를 탭으로 바꿨다: 여는 곳은 보내기 왼쪽 단추 `composer-expression`, 「＋」가 있는 곳은 「이모티콘」 탭이다. 앞 판의 「팀 이모지」 탭은 owner 11-05 에 이모티콘 탭으로 합쳐졌다.)
+# (#4942 가 시트를 탭으로 바꿨다: 여는 곳은 보내기 왼쪽 단추 `composer-expression`, 「＋」가 있는 곳은 첫 탭 「우리 팀」(id `expression-sheet-tab-emoticon`)이다. 앞 판의 「팀 이모지」 탭은 owner 11-05 에 이 탭으로 합쳐졌고, 글자는 owner 11-06 #5427 에 「이모티콘」에서 「우리 팀」으로 바뀌었다.)
 #
 # 스택 검증용이다(워커는 돌리지 않았다). 서버에 아무것도 쓰지 않는다 — 장을 열고 닫기만 하고 「미리보기 만들기」·
 # 「요청 보내기」는 누르지 않는다. 등록·요청 본문·이어 가기·실패 문장은 폰 jest(`__tests__/expressionAdd.test.tsx`)가
@@ -34,7 +34,7 @@ name: 4891-team-expression-add
 # verification run failed this flow in ~40s until this line was added. The composer
 # is empty here, which is what that subflow's tap needs.
 - runFlow: subflows/dismiss-dev-logbox.yaml
-# #4942: 표현 단추는 보내기 왼쪽에 늘 서 있다(도구 줄이 아니다) — 알약을 먼저 펼칠 필요가 없다. 「＋」는 시트의 「이모티콘」 탭에 있다.
+# #4942: 표현 단추는 보내기 왼쪽에 늘 서 있다(도구 줄이 아니다) — 알약을 먼저 펼칠 필요가 없다. 「＋」는 시트의 「우리 팀」 탭(id `expression-sheet-tab-emoticon`)에 있다.
 - tapOn:
     id: "composer-expression"
 - tapOn:

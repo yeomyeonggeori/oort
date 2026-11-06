@@ -747,7 +747,7 @@ describe("이모티콘 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "Emoticons" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Team" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
@@ -771,7 +771,7 @@ describe("이모티콘 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await view.findByRole("button", { name: "Emoticons" }));
+    fireEvent.click(await view.findByRole("button", { name: "Team" }));
     const manage = await view.findByRole("button", { name: "파티 앵무새 관리" });
     fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
     fireEvent.keyDown(manage, { key: "Enter" });
@@ -800,7 +800,7 @@ describe("이모티콘 고르개 안에서", () => {
     const store = makeStore();
     await store.refresh();
     const mounted = mount(<Host onOpenChange={onOpenChange} />, store);
-    fireEvent.click(await mounted.view.findByRole("button", { name: "Emoticons" }));
+    fireEvent.click(await mounted.view.findByRole("button", { name: "Team" }));
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown(await mounted.view.findByRole("menu"), { key: "Escape" });

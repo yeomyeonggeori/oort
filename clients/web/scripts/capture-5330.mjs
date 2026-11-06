@@ -8,7 +8,7 @@
 //   node scripts/capture-5330.mjs --label before --out <스크래치>/cap5330 --port 5330
 //   node scripts/capture-5330.mjs --label after  --out <스크래치>/cap5330 --port 5330
 //
-// before 는 옛 이름(「이모지 넣기」 · 「우리 팀」), after 는 새 이름(「이모티콘 넣기」 · 「이모티콘」 · 「기본」 · 「GIF」)으로 찍는다.
+// before 는 옛 이름(「이모지 넣기」 · 「우리 팀」), after 는 새 이름(「이모티콘 넣기」 · 탭 「우리 팀」 · 「기본」 · 「GIF」 — 첫 탭 글자는 #5427 에서 바뀌었다)으로 찍는다.
 // **before 는 이 수리 전의 트리에서만 같은 값이 나온다**(수리가 들어간 뒤에는 옛 이름의 화면이 소스에 없다): 수리 전 커밋(`5567f91f7^`)을 별도 체크아웃에
 // 두고 거기서 개발 서버를 띄워 찍는다. after 는 이 트리에서 그대로 돈다.
 // 찍으면서 **재는 것**(캡처가 곧 실행 증거다):
@@ -207,8 +207,8 @@ async function main() {
       await sleep(500);
       await shoot(popover, "basic");
 
-      // 이모티콘
-      await group.getByRole("button", { name: "이모티콘", exact: true }).click();
+      // 첫 탭(탭 id `emoticon`): 글자는 「우리 팀」이다(owner 11-06, #5427 — 창 제목이 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다).
+      await group.getByRole("button", { name: "우리 팀", exact: true }).click();
       await popover.getByTestId("team-expressions").waitFor({ state: "visible", timeout: 10_000 });
       await popover.locator("img").first().waitFor({ state: "visible", timeout: 10_000 });
       await sleep(600);
