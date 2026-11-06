@@ -43,6 +43,13 @@ export interface NonSecretStore {
 export const NON_SECRET_KEYS = {
   /** Scoped device expression usage; metadata only, never media or credentials (#4678). */
   expressionUsage: 'momo.mobile.expressions.usage.v1',
+  /**
+   * 대화 행 미디어의 **잰 크기** (#5451): 첨부 id → [그림 가로, 세로](`attachmentSizes`), 메시지 id → [링크 카드 묶음 높이](`unfurlHeights`).
+   * 숫자뿐이다 — 키는 서버가 만든 uuid 이고 글·주소·바이트가 없다. 앱을 다시 켠 뒤에도 사진이 제 비율로 첫 프레임부터 서고(16:9 자리표시로 섰다가
+   * 바뀌지 않고), 링크 카드가 늦게 와도 그 자리를 미리 비워 두려는 것이다. 잃으면 한 번 더 재면 된다. 계정 정보 없음(`storage/measureMemory.ts`).
+   */
+  attachmentSizes: 'momo.mobile.timeline.attachment-sizes.v1',
+  unfurlHeights: 'momo.mobile.timeline.unfurl-heights.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',
