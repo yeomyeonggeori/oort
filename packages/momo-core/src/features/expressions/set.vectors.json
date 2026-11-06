@@ -175,5 +175,77 @@
       "live": 0,
       "expect": { "ok": false, "status": 400, "code": "expression_choice_invalid" }
     }
+  ],
+  "referenceRule": "ADR-0218 section 12 L18. The server picks the pictures (the requester's own images on the trigger message) and judges rows first, bytes after consent. One failing picture refuses the WHOLE bundle: nothing is dropped quietly. No picture at all is fine (words alone). The verdict lists every distinct issue in this fixed order: too_many, duplicate, format, input_bytes, input_pixels, prepared_bytes, bundle_bytes.",
+  "referenceLimits": { "pictures": 4, "inputBytes": 5242880, "inputEdge": 4096, "inputPixels": 16000000, "preparedBytesEach": 4194304, "bundleBytes": 4194304, "mimes": ["image/png", "image/jpeg", "image/webp"] },
+  "referenceCaseFields": "pictures = the attached images in order: mime, bytes, width, height and, once the isolated decoder ran, preparedBytes; duplicateOf = index of an earlier picture this one repeats (same attachment id)",
+  "referenceCases": [
+    { "name": "no picture: words alone is a fine bundle", "pictures": [], "expect": { "ok": true, "count": 0, "bundleBytes": 0 } },
+    { "name": "two pictures that pass, a PNG and a JPEG", "pictures": [
+        { "mime": "image/png", "bytes": 320000, "width": 800, "height": 600, "preparedBytes": 310000 },
+        { "mime": "image/jpeg", "bytes": 180000, "width": 1024, "height": 768, "preparedBytes": 150000 } ], "expect": { "ok": true, "count": 2, "bundleBytes": 460000 } },
+    { "name": "a WebP is a picture too", "pictures": [ { "mime": "image/webp", "bytes": 90000, "width": 512, "height": 512, "preparedBytes": 80000 } ], "expect": { "ok": true, "count": 1, "bundleBytes": 80000 } },
+    { "name": "four pictures whose prepared bytes are exactly the bundle ceiling pass", "pictures": [
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 } ], "expect": { "ok": true, "count": 4, "bundleBytes": 4194304 } },
+    { "name": "one byte over the bundle ceiling refuses all four", "pictures": [
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048577 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 1048576 } ], "expect": { "ok": false, "refused": ["bundle_bytes"] } },
+    { "name": "five pictures: the server does not keep the first four", "pictures": [
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 }, { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 }, { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 } ], "expect": { "ok": false, "refused": ["too_many"] } },
+    { "name": "a GIF is refused by format", "pictures": [ { "mime": "image/gif", "bytes": 90000, "width": 400, "height": 400 } ], "expect": { "ok": false, "refused": ["format"] } },
+    { "name": "a HEIC next to a good PNG refuses the whole bundle", "pictures": [
+        { "mime": "image/png", "bytes": 320000, "width": 800, "height": 600 }, { "mime": "image/heic", "bytes": 400000, "width": 3000, "height": 2000 } ], "expect": { "ok": false, "refused": ["format"] } },
+    { "name": "exactly 5 MiB in is allowed", "pictures": [ { "mime": "image/jpeg", "bytes": 5242880, "width": 4000, "height": 3000, "preparedBytes": 900000 } ], "expect": { "ok": true, "count": 1, "bundleBytes": 900000 } },
+    { "name": "one byte over 5 MiB in is refused", "pictures": [ { "mime": "image/jpeg", "bytes": 5242881, "width": 4000, "height": 3000 } ], "expect": { "ok": false, "refused": ["input_bytes"] } },
+    { "name": "4096 by 3906 is 15,998,976 pixels: inside both limits", "pictures": [ { "mime": "image/png", "bytes": 1000, "width": 4096, "height": 3906 } ], "expect": { "ok": true, "count": 1, "bundleBytes": 0 } },
+    { "name": "4096 by 4096 is 16,777,216 pixels: over the pixel limit", "pictures": [ { "mime": "image/png", "bytes": 1000, "width": 4096, "height": 4096 } ], "expect": { "ok": false, "refused": ["input_pixels"] } },
+    { "name": "one side past 4096 is refused even with few pixels", "pictures": [ { "mime": "image/png", "bytes": 1000, "width": 4097, "height": 10 } ], "expect": { "ok": false, "refused": ["input_pixels"] } },
+    { "name": "a zero-sized picture cannot be real", "pictures": [ { "mime": "image/png", "bytes": 1000, "width": 0, "height": 600 } ], "expect": { "ok": false, "refused": ["input_pixels"] } },
+    { "name": "a single prepared picture over 4 MiB is over both ceilings", "pictures": [ { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "preparedBytes": 4194305 } ], "expect": { "ok": false, "refused": ["prepared_bytes", "bundle_bytes"] } },
+    { "name": "the same attachment twice", "pictures": [
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 }, { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "duplicateOf": 0 } ], "expect": { "ok": false, "refused": ["duplicate"] } },
+    { "name": "every issue at once lists each once, in the fixed order", "pictures": [
+        { "mime": "image/gif", "bytes": 5242881, "width": 5000, "height": 5000, "preparedBytes": 4194305 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10, "duplicateOf": 0 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 }, { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 },
+        { "mime": "image/png", "bytes": 1000, "width": 10, "height": 10 } ], "expect": { "ok": false, "refused": ["too_many", "duplicate", "format", "input_bytes", "input_pixels", "prepared_bytes", "bundle_bytes"] } }
+  ],
+  "streakRule": "ADR-0218 section 12 L7.7 (owner 2026-11-06, O2). Stills are made in index order, one delegation each. Three refusals in a row close the rest: every still not yet tried is not_made. A made or failed attempt starts the count over. An attempt after the closing one is ignored. A still never tried for any other reason (time, a cap, a cancel) is not_made too.",
+  "streak": 3,
+  "mayTryCases": [
+    { "name": "nothing tried yet", "attempts": [], "expect": true },
+    { "name": "two refusals are not three", "attempts": ["refused", "refused"], "expect": true },
+    { "name": "three refusals in a row close the set", "attempts": ["refused", "refused", "refused"], "expect": false },
+    { "name": "a made attempt starts the count over", "attempts": ["refused", "refused", "made"], "expect": true },
+    { "name": "three in a row after an earlier success", "attempts": ["made", "refused", "refused", "refused"], "expect": false },
+    { "name": "a failed attempt starts the count over: a timeout is not a refusal", "attempts": ["refused", "refused", "failed", "refused", "refused"], "expect": true },
+    { "name": "a closed set stays closed whatever came after", "attempts": ["refused", "refused", "refused", "made"], "expect": false },
+    { "name": "failures alone never close a set", "attempts": ["failed", "failed", "failed", "failed"], "expect": true }
+  ],
+  "streakCases": [
+    { "name": "all made", "stills": 4, "attempts": ["made", "made", "made", "made"], "expect": ["made", "made", "made", "made"] },
+    { "name": "three refusals at the start close all the rest", "stills": 8, "attempts": ["refused", "refused", "refused"], "expect": ["refused", "refused", "refused", "not_made", "not_made", "not_made", "not_made", "not_made"] },
+    { "name": "two refusals are not enough", "stills": 4, "attempts": ["refused", "refused", "made", "made"], "expect": ["refused", "refused", "made", "made"] },
+    { "name": "a made attempt starts the count over", "stills": 8, "attempts": ["refused", "refused", "made", "refused", "refused", "made", "made", "made"], "expect": ["refused", "refused", "made", "refused", "refused", "made", "made", "made"] },
+    { "name": "a failed attempt starts the count over too: a timeout says nothing about the next scene", "stills": 6, "attempts": ["refused", "refused", "failed", "refused", "refused", "made"], "expect": ["refused", "refused", "failed", "refused", "refused", "made"] },
+    { "name": "three in a row after earlier successes close the rest", "stills": 8, "attempts": ["made", "made", "refused", "refused", "refused"], "expect": ["made", "made", "refused", "refused", "refused", "not_made", "not_made", "not_made"] },
+    { "name": "fewer attempts than stills: the rest was never tried", "stills": 5, "attempts": ["made", "failed"], "expect": ["made", "failed", "not_made", "not_made", "not_made"] },
+    { "name": "an attempt after the closing refusal is ignored", "stills": 5, "attempts": ["refused", "refused", "refused", "made", "made"], "expect": ["refused", "refused", "refused", "not_made", "not_made"] },
+    { "name": "three refusals on the very last stills close nothing more", "stills": 3, "attempts": ["refused", "refused", "refused"], "expect": ["refused", "refused", "refused"] },
+    { "name": "a set with no stills settles to nothing", "stills": 0, "attempts": [], "expect": [] }
+  ],
+  "gifRule": "A GIF is not made by Hermes: the server moves a still. A closed streak does not stop a GIF whose still was made; a GIF whose still is grey (refused, failed or never made) or out of range is base_missing.",
+  "gifCases": [
+    { "name": "bases that were made", "stills": ["made", "made", "made"], "bases": [0, 2], "expect": ["made", "made"] },
+    { "name": "a refused, a failed and a never-made base", "stills": ["refused", "failed", "not_made"], "bases": [0, 1, 2], "expect": ["base_missing", "base_missing", "base_missing"] },
+    { "name": "the streak closed the rest, but the first still exists", "stills": ["made", "refused", "refused", "refused", "not_made", "not_made"], "bases": [0, 5], "expect": ["made", "base_missing"] },
+    { "name": "a base outside the stills is missing", "stills": ["made"], "bases": [1, 40], "expect": ["base_missing", "base_missing"] }
   ]
 }

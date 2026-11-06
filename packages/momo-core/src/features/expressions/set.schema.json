@@ -16,6 +16,27 @@
         "base_missing"
       ]
     },
+    "SetBackend": {
+      "enum": [
+        "hermes",
+        "team_image_model"
+      ]
+    },
+    "SetReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId"
+      ],
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      }
+    },
     "SetPrefix": {
       "type": "string",
       "minLength": 2,
@@ -167,7 +188,7 @@
         "prefix",
         "subjectMemberId",
         "prompt",
-        "sourceAttachmentId",
+        "references",
         "expiresAtMs",
         "slots"
       ],
@@ -212,20 +233,16 @@
         "prompt": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000
+          "maxLength": 800
         },
-        "sourceAttachmentId": {
-          "oneOf": [
-            {
-              "type": "string",
-              "minLength": 36,
-              "maxLength": 36,
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "references": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SetReference"
+          }
         },
         "expiresAtMs": {
           "type": "integer",
@@ -302,6 +319,7 @@
             "title",
             "prefix",
             "tags",
+            "backend",
             "subjectMemberId",
             "prompt",
             "slots"
@@ -334,6 +352,9 @@
               },
               "uniqueItems": true
             },
+            "backend": {
+              "$ref": "#/$defs/SetBackend"
+            },
             "subjectMemberId": {
               "oneOf": [
                 {
@@ -350,7 +371,7 @@
             "prompt": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 2000
+              "maxLength": 800
             },
             "slots": {
               "type": "array",

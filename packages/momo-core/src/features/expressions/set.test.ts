@@ -4,14 +4,20 @@ import { createExpressionFixtureServer } from "./fixtureServer";
 import { FIXTURE_MEDIA } from "./fixtureMedia";
 import { FIXTURE_EXPRESSIONS, FIXTURE_NOW_MS, FIXTURE_WORKSPACE_ID } from "./fixtures";
 import {
-  decideExpressionSet, EXPRESSION_SET_ACTION_ID, EXPRESSION_SET_GRAY_CODES, EXPRESSION_SET_LIMITS, expressionSetCard, expressionSetChoices,
-  expressionSetIssues, expressionSetResultLine, expressionSetSlotDraft, expressionSetStoredBytes, expressionSetWithinBudget, parseExpressionSetResult, readySlots,
-  type ExpressionSetApproval, type ExpressionSetDecisionReceipt, type ExpressionSetReadySlot, type ExpressionSetSlot,
+  decideExpressionSet, EXPRESSION_SET_ACTION_ID, EXPRESSION_SET_BACKENDS, EXPRESSION_SET_GRAY_CODES, EXPRESSION_SET_LIMITS, EXPRESSION_SET_REFERENCE_ISSUES,
+  EXPRESSION_SET_REFERENCE_LIMITS, EXPRESSION_SET_REFUSAL_STREAK, expressionSetBackendEnabled, expressionSetCard, expressionSetChoices, expressionSetGrayCodeOf,
+  expressionSetIssues, expressionSetReferenceIssues, expressionSetReferenceLine, expressionSetReferenceNotice, expressionSetReferenceVerdict, expressionSetResultLine,
+  expressionSetMayTryNext, expressionSetSlotDraft, expressionSetStoredBytes, expressionSetWithinBudget, parseExpressionSetResult, readySlots, settleExpressionSetGifs, settleExpressionSetStills,
+  type ExpressionSetApproval, type ExpressionSetAttempt, type ExpressionSetDecisionReceipt, type ExpressionSetReadySlot, type ExpressionSetReferenceProbe,
+  type ExpressionSetSlot, type ExpressionSetStillOutcome,
 } from "./set";
 import { expressionSetGrayLine, expressionSetSkipLine } from "./setCopy";
 import {
-  FIXTURE_SET_ACTION, FIXTURE_SET_APPROVAL_ID, FIXTURE_SET_CARDS, FIXTURE_SET_NORMAL, FIXTURE_SET_REFUSED, FIXTURE_SET_REFUSED_APPROVAL_ID,
-  FIXTURE_SET_SAME_NAME, FIXTURE_SET_SAME_NAME_APPROVAL_ID, fixtureSetBytesHeavy, fixtureSetDraftId, fixtureSetGraySlot, fixtureSetOverLimit, fixtureSetReadySlot,
+  FIXTURE_SET_ACTION, FIXTURE_SET_ACTION_RESERVED_BACKEND, FIXTURE_SET_APPROVAL_ID, FIXTURE_SET_CARDS, FIXTURE_SET_NORMAL, FIXTURE_SET_REFERENCE_IDS,
+  FIXTURE_SET_REFERENCE_PROBES, FIXTURE_SET_REFERENCE_PROBES_BAD_FORMAT, FIXTURE_SET_REFERENCE_PROBES_TOO_BIG_INPUT,
+  FIXTURE_SET_REFUSED, FIXTURE_SET_REFUSED_APPROVAL_ID, FIXTURE_SET_REFUSED_ATTEMPTS, FIXTURE_SET_REFUSED_GIF_BASES, FIXTURE_SET_SAME_NAME,
+  FIXTURE_SET_SAME_NAME_APPROVAL_ID, FIXTURE_SET_STREAK_ATTEMPTS, FIXTURE_SET_STREAK_CLOSED, FIXTURE_SET_STREAK_GIF_BASES, fixtureSetBytesHeavy,
+  fixtureSetDraftId, fixtureSetGraySlot, fixtureSetOverLimit, fixtureSetReadySlot, fixtureSetReferenceProbesOverBytes, fixtureSetReferenceProbesTooMany,
 } from "./setFixtures";
 import type { ExpressionChoice, ExpressionMutation } from "./types";
 import vectorFile from "./set.vectors.json";
@@ -190,7 +196,10 @@ describe("ADR-0218 §12 the card and what a person can keep", () => {
   it("puts a slot's draft back together from the card (the shared strings are on the set, once)", () => {
     const slot = readySlots(FIXTURE_SET_NORMAL)[0];
     assertExpressionContract("Draft", expressionSetSlotDraft(FIXTURE_SET_NORMAL, slot));
-    expect(expressionSetSlotDraft(FIXTURE_SET_NORMAL, slot)).toMatchObject({ origin: { kind: "generated", prompt: FIXTURE_SET_NORMAL.prompt, sourceAttachmentId: null }, subjectMemberId: null });
+    // The first reference stands for the bundle (an expression has one pointer, G1); a set made from words alone has none.
+    expect(expressionSetSlotDraft(FIXTURE_SET_NORMAL, slot)).toMatchObject({ origin: { kind: "generated", prompt: FIXTURE_SET_NORMAL.prompt, sourceAttachmentId: FIXTURE_SET_REFERENCE_IDS[0] }, subjectMemberId: null });
+    const words = readySlots(FIXTURE_SET_SAME_NAME)[0];
+    expect(expressionSetSlotDraft(FIXTURE_SET_SAME_NAME, words).origin.sourceAttachmentId).toBeNull();
   });
 
   it("says what a decision did in one line", () => {
@@ -208,7 +217,13 @@ interface Vector {
   name: string; slots: VectorSlot[]; choose: number[]; chooseKinds?: Record<string, "emoji" | "sticker">; taken: string[]; live: number; quota?: number; stale?: number[]; expired?: boolean;
   expect: { ok: true; registered: Array<{ name: string; kind: string }>; skipped: Array<{ name: string; reason: string }> } | { ok: false; status: number; code: string };
 }
-const vectors = vectorFile as unknown as { quota: number; cases: Vector[] };
+interface VectorPicture { mime: string; bytes: number; width: number; height: number; preparedBytes?: number; duplicateOf?: number }
+interface ReferenceVector { name: string; pictures: VectorPicture[]; expect: { ok: true; count: number; bundleBytes: number } | { ok: false; refused: string[] } }
+const vectors = vectorFile as unknown as {
+  quota: number; cases: Vector[]; referenceLimits: Record<string, unknown>; referenceCases: ReferenceVector[];
+  streak: number; mayTryCases: Array<{ name: string; attempts: ExpressionSetAttempt[]; expect: boolean }>; streakCases: Array<{ name: string; stills: number; attempts: ExpressionSetAttempt[]; expect: ExpressionSetStillOutcome[] }>;
+  gifCases: Array<{ name: string; stills: ExpressionSetStillOutcome[]; bases: number[]; expect: string[] }>;
+};
 
 function approvalOf(slots: VectorSlot[], expired: boolean): ExpressionSetApproval {
   const built: ExpressionSetSlot[] = slots.map((s) => {
@@ -345,5 +360,148 @@ describe("ADR-0218 §12 fake server: a set card end to end (no network)", () => 
     expect(receiptOf(server.request({ method: "POST", path: decisionPath(FIXTURE_SET_APPROVAL_ID), body }))).toMatchObject({ status: "rejected", result: null });
     expect(server.request({ method: "GET", path: `${base}/expression-drafts/${fixtureSetDraftId(0)}/image?size=large&v=${FIXTURE_MEDIA.png.image.sha256}` }).status).toBe(404);
     expect((server.request({ method: "GET", path: `${base}/expressions` }).json as { items: unknown[] }).items).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// ADR-0218 §12 L18 (owner 2026-11-06, O3): the reference pictures. The server picks them; one failing picture refuses all.
+// ---------------------------------------------------------------------------------------------------------------
+const attachmentIdAt = (index: number) => `00000000-0000-4000-8000-${String(0x500 + index).padStart(12, "0")}`;
+function probesOf(pictures: VectorPicture[]): ExpressionSetReferenceProbe[] {
+  return pictures.map((picture, index) => ({
+    attachmentId: attachmentIdAt(picture.duplicateOf ?? index), mime: picture.mime, bytes: picture.bytes, width: picture.width, height: picture.height,
+    ...(picture.preparedBytes !== undefined ? { prepared: { mime: "image/png" as const, bytes: picture.preparedBytes } } : {}),
+  }));
+}
+
+describe("ADR-0218 §12 L18 reference bundle: who picks, how many, how big", () => {
+  it("records the references on the card as closed pointers (at most four, no repeats) and never in the plan the model could write", () => {
+    expect(FIXTURE_SET_NORMAL.references.map((reference) => reference.attachmentId)).toEqual([...FIXTURE_SET_REFERENCE_IDS]);
+    assertExpressionContract("SetApproval", { ...FIXTURE_SET_NORMAL, references: [] });
+    const withRefs = (references: unknown) => ({ ...FIXTURE_SET_NORMAL, references });
+    const five = [0, 1, 2, 3, 4].map((i) => ({ attachmentId: attachmentIdAt(i) }));
+    expect(matchesExpressionContract("SetApproval", withRefs(five.slice(0, 4)))).toBe(true);
+    expect(matchesExpressionContract("SetApproval", withRefs(five))).toBe(false);
+    expect(matchesExpressionContract("SetApproval", withRefs([five[0], five[0]]))).toBe(false);
+    expect(matchesExpressionContract("SetApproval", withRefs([{ attachmentId: "not-a-uuid" }]))).toBe(false);
+    expect(matchesExpressionContract("SetApproval", withRefs([{ attachmentId: attachmentIdAt(0), mime: "image/png" }]))).toBe(false);
+    const withoutRefs: Record<string, unknown> = { ...FIXTURE_SET_NORMAL };
+    delete withoutRefs.references;
+    expect(matchesExpressionContract("SetApproval", withoutRefs)).toBe(false);
+    // The old single pointer is gone from the card: one name for one thing.
+    expect(matchesExpressionContract("SetApproval", { ...FIXTURE_SET_NORMAL, sourceAttachmentId: null })).toBe(false);
+    // No model, agent or client names an attachment: the proposal has no key that could carry one.
+    for (const key of ["references", "attachmentId", "attachmentIds", "referenceAttachmentIds", "sourceAttachmentId", "image", "url"]) {
+      expect(matchesExpressionContract("SetAction", { ...FIXTURE_SET_ACTION, args: { ...FIXTURE_SET_ACTION.args, [key]: [attachmentIdAt(0)] } }), key).toBe(false);
+    }
+    expect(matchesExpressionContract("SetDecision", { expressionChoices: [{ ...expressionSetChoices(FIXTURE_SET_NORMAL, FIXTURE_NOW_MS)![0], attachmentId: attachmentIdAt(0) }] })).toBe(false);
+  });
+
+  it("keeps the numbers in the constants, the vectors and the plan equal, and the request inside P1's 1,200 characters", () => {
+    expect(EXPRESSION_SET_REFERENCE_LIMITS).toMatchObject(vectors.referenceLimits);
+    expect(EXPRESSION_SET_REFERENCE_LIMITS.pictures).toBe(4);
+    expect(EXPRESSION_SET_REFERENCE_LIMITS.inputBytes).toBe(5 * 1024 * 1024);
+    expect(EXPRESSION_SET_REFERENCE_LIMITS.bundleBytes).toBe(4 * 1024 * 1024);
+    expect(EXPRESSION_SET_REFERENCE_LIMITS.bundleBytes).toBeLessThanOrEqual(EXPRESSION_SET_REFERENCE_LIMITS.preparedBytesEach);
+    // The set's description + a line break + a scene is what Hermes is asked, and one request is at most 1,200 characters (ADR-0201 P1).
+    expect(EXPRESSION_SET_LIMITS.promptChars + 1 + EXPRESSION_SET_LIMITS.sceneChars).toBeLessThanOrEqual(EXPRESSION_SET_LIMITS.requestChars);
+    expect(matchesExpressionContract("SetAction", { ...FIXTURE_SET_ACTION, args: { ...FIXTURE_SET_ACTION.args, prompt: "가".repeat(EXPRESSION_SET_LIMITS.promptChars) } })).toBe(true);
+    expect(matchesExpressionContract("SetAction", { ...FIXTURE_SET_ACTION, args: { ...FIXTURE_SET_ACTION.args, prompt: "가".repeat(EXPRESSION_SET_LIMITS.promptChars + 1) } })).toBe(false);
+    expect(matchesExpressionContract("SetApproval", { ...FIXTURE_SET_NORMAL, prompt: "가".repeat(EXPRESSION_SET_LIMITS.promptChars + 1) })).toBe(false);
+  });
+
+  it("says yes to two good pictures and refuses the whole bundle for each way it can be wrong", () => {
+    expect(expressionSetReferenceVerdict(FIXTURE_SET_REFERENCE_PROBES)).toEqual({ ok: true, count: 2, bundleBytes: 460_000 });
+    expect(expressionSetReferenceVerdict([])).toEqual({ ok: true, count: 0, bundleBytes: 0 });
+    expect(expressionSetReferenceVerdict(fixtureSetReferenceProbesTooMany())).toEqual({ ok: false, refused: ["too_many"] });
+    expect(expressionSetReferenceVerdict(FIXTURE_SET_REFERENCE_PROBES_BAD_FORMAT)).toEqual({ ok: false, refused: ["format"] });
+    expect(expressionSetReferenceVerdict(fixtureSetReferenceProbesOverBytes())).toEqual({ ok: false, refused: ["bundle_bytes"] });
+    expect(expressionSetReferenceVerdict(FIXTURE_SET_REFERENCE_PROBES_TOO_BIG_INPUT)).toEqual({ ok: false, refused: ["input_bytes", "input_pixels"] });
+    // Which picture an issue is about is known: nothing is dropped and the rest kept.
+    expect(expressionSetReferenceIssues(FIXTURE_SET_REFERENCE_PROBES_BAD_FORMAT).map((entry) => entry.index)).toEqual([1, 2]);
+    expect(expressionSetReferenceIssues(fixtureSetReferenceProbesTooMany()).map((entry) => entry.index)).toEqual([null]);
+  });
+
+  for (const vector of vectors.referenceCases) {
+    it(`vector: ${vector.name}`, () => {
+      expect(expressionSetReferenceVerdict(probesOf(vector.pictures))).toEqual(vector.expect);
+    });
+  }
+
+  it("lists the issues in one fixed order, and the vectors name only issues the code knows", () => {
+    const named = new Set(vectors.referenceCases.flatMap((vector) => (vector.expect.ok ? [] : vector.expect.refused)));
+    for (const issue of named) expect(EXPRESSION_SET_REFERENCE_ISSUES as readonly string[]).toContain(issue);
+    expect([...EXPRESSION_SET_REFERENCE_ISSUES].filter((issue) => !named.has(issue))).toEqual([]);
+  });
+
+  it("tells the requester why, once per thing to fix, with no company and no model named", () => {
+    const lines = EXPRESSION_SET_REFERENCE_ISSUES.map((issue) => expressionSetReferenceLine(issue));
+    expect(new Set(lines).size).toBe(lines.length);
+    expect(expressionSetReferenceLine("too_many")).toBe("그림은 4장까지 보낼 수 있어요");
+    expect(expressionSetReferenceLine("input_bytes")).toBe("그림 한 장은 5MB까지 보낼 수 있어요");
+    expect(expressionSetReferenceNotice(2)).toBe("첨부한 그림 2장이 Hermes의 그림 모델로 전송돼요");
+    for (const line of [...lines, expressionSetReferenceNotice(4)]) expect(line).not.toMatch(/OpenAI|Gemini|GPT|Codex|Anthropic|Claude|gpt-image/i);
+    for (const line of lines) expect(line).not.toMatch(/\{|\}/);
+  });
+});
+
+describe("ADR-0218 §12 L20 backend: hermes is on, the team's own image key is a reserved name", () => {
+  it("lets the plan name either word and the server make pictures only with the first", () => {
+    expect([...EXPRESSION_SET_BACKENDS]).toEqual(["hermes", "team_image_model"]);
+    assertExpressionContract("SetAction", FIXTURE_SET_ACTION);
+    assertExpressionContract("SetAction", FIXTURE_SET_ACTION_RESERVED_BACKEND);
+    expect(FIXTURE_SET_ACTION.args.backend).toBe("hermes");
+    expect(expressionSetBackendEnabled("hermes")).toBe(true);
+    expect(expressionSetBackendEnabled("team_image_model")).toBe(false);
+    for (const word of ["openai", "gemini", "", null, undefined, 1, "Hermes", "__proto__", "constructor", "toString"]) expect(expressionSetBackendEnabled(word), String(word)).toBe(false);
+  });
+
+  it("closes the word, requires it, and keeps it off the card: the card is the same whatever made the pictures", () => {
+    for (const bad of ["openai", "", null, 1, "HERMES"]) expect(matchesExpressionContract("SetAction", { ...FIXTURE_SET_ACTION, args: { ...FIXTURE_SET_ACTION.args, backend: bad } }), String(bad)).toBe(false);
+    const withoutBackend: Record<string, unknown> = { ...FIXTURE_SET_ACTION.args };
+    delete withoutBackend.backend;
+    expect(matchesExpressionContract("SetAction", { ...FIXTURE_SET_ACTION, args: withoutBackend })).toBe(false);
+    expect(matchesExpressionContract("SetApproval", { ...FIXTURE_SET_NORMAL, backend: "hermes" })).toBe(false);
+    expect(Object.keys(FIXTURE_SET_NORMAL)).not.toContain("backend");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// ADR-0218 §12 L7.7 (owner 2026-11-06, O2): three refusals in a row close the rest of the stills.
+// ---------------------------------------------------------------------------------------------------------------
+describe("ADR-0218 §12 L7.7 three refusals in a row close the rest (shared vectors)", () => {
+  it("reads the streak the Rust side reads", () => expect(vectors.streak).toBe(EXPRESSION_SET_REFUSAL_STREAK));
+  for (const vector of vectors.mayTryCases) {
+    it(`may try the next still: ${vector.name}`, () => {
+      expect(expressionSetMayTryNext(vector.attempts)).toBe(vector.expect);
+    });
+  }
+  for (const vector of vectors.streakCases) {
+    it(`stills: ${vector.name}`, () => {
+      expect(settleExpressionSetStills(vector.stills, vector.attempts)).toEqual(vector.expect);
+    });
+  }
+  for (const vector of vectors.gifCases) {
+    it(`gifs: ${vector.name}`, () => {
+      expect(settleExpressionSetGifs(vector.stills, vector.bases)).toEqual(vector.expect);
+    });
+  }
+
+  it("derives every grey slot of the two refusal cards from the rules, so the cards cannot drift from them", () => {
+    const grayOf = (set: ExpressionSetApproval) => set.slots.map((slot) => (slot.state === "gray" ? slot.code : "ready"));
+    const derive = (attempts: readonly ExpressionSetAttempt[], bases: readonly number[]) => {
+      const stills = settleExpressionSetStills(8, attempts);
+      const gifs = settleExpressionSetGifs(stills, bases);
+      return [...stills.map((outcome) => (outcome === "made" ? "ready" : expressionSetGrayCodeOf(outcome))), ...gifs.map((outcome) => (outcome === "made" ? "ready" : outcome))];
+    };
+    expect(grayOf(FIXTURE_SET_STREAK_CLOSED)).toEqual(derive(FIXTURE_SET_STREAK_ATTEMPTS, FIXTURE_SET_STREAK_GIF_BASES));
+    expect(grayOf(FIXTURE_SET_REFUSED)).toEqual(derive(FIXTURE_SET_REFUSED_ATTEMPTS, FIXTURE_SET_REFUSED_GIF_BASES));
+    // The closed one: stills 5, 6 and 7 were never tried, and the GIF on the grey still 5 has no base; the GIF on still 0 was made.
+    const closed = expressionSetCard(FIXTURE_SET_STREAK_CLOSED, FIXTURE_NOW_MS);
+    expect(closed.slots.filter((slot) => slot.grayCode === "not_made").map((slot) => slot.index)).toEqual([5, 6, 7]);
+    expect(closed.slots.filter((slot) => slot.grayCode === "base_missing").map((slot) => slot.index)).toEqual([9]);
+    expect(closed).toMatchObject({ ready: 3, gray: 7, canApprove: true, gifs: { ready: 1, total: 2 } });
+    assertExpressionContract("SetApproval", FIXTURE_SET_STREAK_CLOSED);
+    expect(expressionSetIssues(FIXTURE_SET_STREAK_CLOSED)).toEqual([]);
   });
 });

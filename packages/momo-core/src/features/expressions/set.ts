@@ -11,7 +11,8 @@ import type { ExpressionChoice, ExpressionDraft, ExpressionKind, ExpressionMedia
  * contract for the clients and the fake server: the wire types (the schema is `set.schema.json`), the
  * numbers, and the pure rules (what the card shows, what a selection is, how one decision turns into
  * registered / skipped items). The server implements the same rules in Rust against
- * `docs/api/expression-set.vectors.json`; this file does not enforce anything by itself.
+ * `set.vectors.json` next to this file (the core cannot read outside itself, so the server slice reads it from here or from a byte-equal
+ * copy under `docs/api/`; which of the two is the planner's call, #5442 handoff); this file does not enforce anything by itself.
  */
 export const EXPRESSION_SET_ACTION_ID = "expression.set.create" as const;
 
@@ -31,7 +32,14 @@ export const EXPRESSION_SET_LIMITS = {
   prefixMax: 12,
   commonTags: 3,
   slotTags: 5,
-  promptChars: 2000,
+  /**
+   * The set's shared description (`prompt`, recorded as the `origin.prompt` of every registered picture). Every slot's request to Hermes is
+   * this + a line break + that slot's `scene` (at most `sceneChars`), and ADR-0201 P1 caps one request at `requestChars`:
+   * 800 + 1 + 300 = 1,101 fits inside 1,200 whatever the scene says (ADR-0218 §12 L2.4-2, security review H2).
+   */
+  promptChars: 800,
+  sceneChars: 300,
+  requestChars: 1200,
   /** L8: sets one agent may have undecided (being made, or waiting for a person). General proposals keep their 3. */
   undecidedPerAgent: 1,
   /** L4: one picture as the model returns it (D3 input, ADR-0201 P6). */
@@ -44,6 +52,44 @@ export const EXPRESSION_SET_LIMITS = {
   stagingSeconds: 2 * 60 * 60,
 } as const;
 
+/**
+ * L20 (owner 2026-11-06): who makes the pictures. `hermes` is on. `team_image_model` (the team's own image key,
+ * ADR-0218 §8 H9) is a **reserved name**: a plan may carry it, the server refuses it, and no code path exists
+ * behind it yet. The card, the approval and the registration are the same whatever the backend is.
+ */
+export const EXPRESSION_SET_BACKENDS = ["hermes", "team_image_model"] as const;
+export type ExpressionSetBackend = (typeof EXPRESSION_SET_BACKENDS)[number];
+export const EXPRESSION_SET_BACKEND_ENABLED: Readonly<Record<ExpressionSetBackend, boolean>> = { hermes: true, team_image_model: false };
+/** True only for a backend that may make pictures now. A word this build does not know is off, never on. */
+export function expressionSetBackendEnabled(backend: unknown): boolean {
+  return typeof backend === "string" && Object.hasOwn(EXPRESSION_SET_BACKEND_ENABLED, backend) && EXPRESSION_SET_BACKEND_ENABLED[backend as ExpressionSetBackend];
+}
+
+/**
+ * L18 (owner 2026-11-06): the reference pictures one set is made from. The SERVER picks them from the trigger
+ * message of the run (the requester's own images on the request itself); no model, agent or client names an
+ * attachment id. Every slot of a set uses the same bundle. Numbers and where they come from:
+ *  - pictures 4: the planner's recommendation; more dilutes the reference and multiplies tokens.
+ *  - input: what a requester attachment read already allows (`SELF_MEDIA_MAX_BYTES` 5 MiB) and the D3 still-picture
+ *    input (a side up to 4096, 16,000,000 pixels in all). PNG, JPEG, WebP only.
+ *  - prepared: the isolated decoder's `prepare` step as it is (EXIF upright, long edge 1024, encoded again from the
+ *    pixels, alpha stays PNG else JPEG q90, at most 4 MiB each); the bundle is held to that same 4 MiB in total,
+ *    so what leaves for Hermes never exceeds what one photo already sends to an image model (H11).
+ */
+export const EXPRESSION_SET_REFERENCE_LIMITS = {
+  pictures: 4,
+  inputBytes: 5 * MIB,
+  inputEdge: 4096,
+  inputPixels: 16_000_000,
+  preparedEdge: 1024,
+  preparedBytesEach: 4 * MIB,
+  bundleBytes: 4 * MIB,
+  mimes: ["image/png", "image/jpeg", "image/webp"],
+} as const;
+
+/** L7.7 (owner 2026-11-06, O2): three refusals in a row close every still not yet tried. */
+export const EXPRESSION_SET_REFUSAL_STREAK = 3;
+
 /** L7: why a slot has no picture. A closed list; the server maps its own reasons onto these four. */
 export const EXPRESSION_SET_GRAY_CODES = ["refused", "failed", "not_made", "base_missing"] as const;
 export type ExpressionSetGrayCode = (typeof EXPRESSION_SET_GRAY_CODES)[number];
@@ -51,6 +97,11 @@ export type ExpressionSetGrayCode = (typeof EXPRESSION_SET_GRAY_CODES)[number];
 export const EXPRESSION_SET_SKIP_REASONS = ["name_taken", "quota"] as const;
 export type ExpressionSetSkipReason = (typeof EXPRESSION_SET_SKIP_REASONS)[number];
 export type ExpressionSetKind = "still" | "gif";
+
+/** A reference picture as the card records it: a pointer into the conversation, never a key to open it (G1). */
+export interface ExpressionSetReference {
+  attachmentId: string;
+}
 
 export interface ExpressionSetReadySlot {
   index: number;
@@ -88,8 +139,11 @@ export interface ExpressionSetApproval {
   subjectMemberId: string | null;
   /** The agent-written text every picture of the set is recorded with (its `origin.prompt`). */
   prompt: string;
-  /** The server's own reading of the photo the pictures were made from; null = made from words alone. */
-  sourceAttachmentId: string | null;
+  /**
+   * The reference pictures the set was made from, in the order they were sent: the server's own reading of the
+   * trigger message (L18). Empty = made from words alone. Pointers only; the pictures open through the conversation.
+   */
+  references: ExpressionSetReference[];
   expiresAtMs: number;
   slots: ExpressionSetSlot[];
 }
@@ -108,6 +162,8 @@ export interface ExpressionSetAction {
     title: string;
     prefix: string;
     tags: string[];
+    /** The server's word, not the model's: which backend makes the pictures (L20). */
+    backend: ExpressionSetBackend;
     subjectMemberId: string | null;
     prompt: string;
     slots: ExpressionSetPlanSlot[];
@@ -154,7 +210,8 @@ export function expressionSetSlotDraft(set: ExpressionSetApproval, slot: Express
   return {
     draftId: slot.draftId, workspaceId: set.workspaceId, revision: slot.revision,
     name: slot.name, displayName: slot.displayName, tags: slot.tags, subjectMemberId: set.subjectMemberId,
-    origin: { kind: "generated", sourceUrl: null, prompt: set.prompt, sourceAttachmentId: set.sourceAttachmentId },
+    // The first reference stands for the bundle: an expression has one pointer (G1) and no set (L18).
+    origin: { kind: "generated", sourceUrl: null, prompt: set.prompt, sourceAttachmentId: set.references[0]?.attachmentId ?? null },
     expiresAtMs: set.expiresAtMs, state: "ready", code: null, media: slot.media,
   };
 }
@@ -361,4 +418,122 @@ export function expressionSetResultLine(result: ExpressionSetResult): string {
 /** The set result of a receipt, or null when the value is not exactly that shape. */
 export function parseExpressionSetResult(value: unknown): ExpressionSetResult | null {
   return matchesExpressionContract("SetResult", value) ? (value as ExpressionSetResult) : null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// L18: the reference bundle. The server reads rows first (mime, bytes, size), asks the person, and only then reads
+// bytes; `prepared` is absent until the isolated decoder has run. One failing picture refuses the whole bundle:
+// nothing is dropped quietly, because "the same bundle for every slot" must mean the bundle the person attached.
+// ---------------------------------------------------------------------------------------------------------------
+export interface ExpressionSetReferenceProbe {
+  attachmentId: string;
+  /** The type the attachment row records. */
+  mime: string;
+  bytes: number;
+  width: number;
+  height: number;
+  /** What the isolated decoder's prepare step made of it; absent while no byte has been read yet. */
+  prepared?: { mime: "image/png" | "image/jpeg"; bytes: number };
+}
+/** In the order the verdict lists them. */
+export const EXPRESSION_SET_REFERENCE_ISSUES = ["too_many", "duplicate", "format", "input_bytes", "input_pixels", "prepared_bytes", "bundle_bytes"] as const;
+export type ExpressionSetReferenceIssueKind = (typeof EXPRESSION_SET_REFERENCE_ISSUES)[number];
+export interface ExpressionSetReferenceIssue {
+  /** The picture it is about, or null for a rule about the bundle. */
+  index: number | null;
+  issue: ExpressionSetReferenceIssueKind;
+}
+
+export function expressionSetReferenceIssues(probes: readonly ExpressionSetReferenceProbe[]): ExpressionSetReferenceIssue[] {
+  const limits = EXPRESSION_SET_REFERENCE_LIMITS;
+  const issues: ExpressionSetReferenceIssue[] = [];
+  const seen = new Set<string>();
+  let bundle = 0;
+  probes.forEach((probe, index) => {
+    if (seen.has(probe.attachmentId)) issues.push({ index, issue: "duplicate" });
+    seen.add(probe.attachmentId);
+    if (!(limits.mimes as readonly string[]).includes(probe.mime)) issues.push({ index, issue: "format" });
+    if (probe.bytes > limits.inputBytes) issues.push({ index, issue: "input_bytes" });
+    const sized = probe.width >= 1 && probe.height >= 1;
+    if (!sized || probe.width > limits.inputEdge || probe.height > limits.inputEdge || probe.width * probe.height > limits.inputPixels) issues.push({ index, issue: "input_pixels" });
+    if (probe.prepared) {
+      if (probe.prepared.bytes > limits.preparedBytesEach) issues.push({ index, issue: "prepared_bytes" });
+      bundle += probe.prepared.bytes;
+    }
+  });
+  if (probes.length > limits.pictures) issues.push({ index: null, issue: "too_many" });
+  if (bundle > limits.bundleBytes) issues.push({ index: null, issue: "bundle_bytes" });
+  return issues;
+}
+
+export type ExpressionSetReferenceVerdict =
+  | { ok: true; count: number; bundleBytes: number }
+  | { ok: false; refused: ExpressionSetReferenceIssueKind[] };
+
+/** 「첨부한 그림 N장이 Hermes의 그림 모델로 전송돼요」: shown before any byte leaves, once per request, naming no company (F10). */
+export function expressionSetReferenceNotice(count: number): string {
+  return expressionSetCopy("expressions.set.reference.notice", { count });
+}
+
+/** What the requester is told when the bundle was not sent: one line per thing to fix, never a retry hint about moderation. */
+export function expressionSetReferenceLine(issue: ExpressionSetReferenceIssueKind): string {
+  const limits = EXPRESSION_SET_REFERENCE_LIMITS;
+  return expressionSetCopy(`expressions.set.reference.refused.${issue}`, { max: limits.pictures, mb: limits.inputBytes / MIB });
+}
+
+/** No picture at all is a fine bundle (words alone); any issue refuses the whole bundle. */
+export function expressionSetReferenceVerdict(probes: readonly ExpressionSetReferenceProbe[]): ExpressionSetReferenceVerdict {
+  const issues = expressionSetReferenceIssues(probes);
+  if (issues.length > 0) {
+    const kinds = new Set(issues.map((entry) => entry.issue));
+    return { ok: false, refused: EXPRESSION_SET_REFERENCE_ISSUES.filter((kind) => kinds.has(kind)) };
+  }
+  return { ok: true, count: probes.length, bundleBytes: probes.reduce((sum, probe) => sum + (probe.prepared?.bytes ?? 0), 0) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// L7.7: stills are made in index order, one delegation each (ADR-0201 P4-5: at most once). The streak closes the set.
+// ---------------------------------------------------------------------------------------------------------------
+export type ExpressionSetAttempt = "made" | "refused" | "failed";
+export type ExpressionSetStillOutcome = ExpressionSetAttempt | "not_made";
+
+/**
+ * May the server make another delegation, given how the attempts so far ended? Not once three refusals in a row have been seen:
+ * a made or failed attempt starts the count over (a timeout says nothing about whether the model will draw the next scene), but a
+ * set that reached three in a row stays closed whatever came after. This is the one decision the server's loop asks before every
+ * call, and the one the vectors measure.
+ */
+export function expressionSetMayTryNext(attempts: readonly ExpressionSetAttempt[]): boolean {
+  let streak = 0;
+  for (const attempt of attempts) {
+    streak = attempt === "refused" ? streak + 1 : 0;
+    if (streak >= EXPRESSION_SET_REFUSAL_STREAK) return false;
+  }
+  return true;
+}
+
+/**
+ * What every still ended as, given the outcomes of the attempts in the order they were made. A still that the server
+ * was not allowed to try ([`expressionSetMayTryNext`]) or never got to (time, a cap, a cancel) is `not_made`, and an attempt
+ * that somehow comes after the set closed is ignored (the server stops there).
+ */
+export function settleExpressionSetStills(total: number, attempts: readonly ExpressionSetAttempt[]): ExpressionSetStillOutcome[] {
+  const outcomes: ExpressionSetStillOutcome[] = [];
+  for (let index = 0; index < total; index += 1) {
+    outcomes.push(index < attempts.length && expressionSetMayTryNext(attempts.slice(0, index)) ? attempts[index] : "not_made");
+  }
+  return outcomes;
+}
+
+/**
+ * A GIF is not made by Hermes: the server moves a still. So a closed streak does not stop a GIF whose still exists,
+ * and a GIF whose still is grey (refused, failed or never made) is `base_missing` (L7.3-4). Out-of-range = missing.
+ */
+export function settleExpressionSetGifs(stills: readonly ExpressionSetStillOutcome[], bases: readonly number[]): Array<"made" | "base_missing"> {
+  return bases.map((base) => (stills[base] === "made" ? "made" : "base_missing"));
+}
+
+/** The grey code a still that did not become a picture shows. */
+export function expressionSetGrayCodeOf(outcome: Exclude<ExpressionSetStillOutcome, "made">): ExpressionSetGrayCode {
+  return outcome;
 }
