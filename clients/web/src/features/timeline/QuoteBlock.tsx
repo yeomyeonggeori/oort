@@ -249,7 +249,8 @@ export function QuoteBlock({
 /**
  * 답장 한 덩어리 카드: 머리(인용) + 가는 구분선 + 본문 (#5381, Q4).
  *
- * 웹·데스크탑에서는 **메시지 본문 자리가 카드**다. 채움은 보조 채움 토큰(`--surface-muted`),
+ * 웹·데스크탑에서는 **메시지 본문 자리가 카드**다. 채움은 보조 채움 토큰(`--surface-muted`)이고, 줄이 가리킴·키보드 초점으로 물드는 동안에는
+ * 한 단 더 짙은 `--muted-soft`다(`quote-card` 유틸, #5421 — 줄 호버 면 위에서 카드 그릇이 녹지 않게),
  * 반경은 디자인 시스템 사다리의 `rounded-lg`(14)다 — 시안의 12px은 사다리 밖이라 가까운 단을 쓴다.
  * 카드의 폭은 내용 폭까지이고 `max-w-pane-lg`(640, 「카드는 배너가 아니다」 — 에이전트 카드와 같은
  * 자)를 넘지 않는다. 바깥 `flex`는 그 상한이 좁은 열(스레드 패널)에서 열 폭으로 줄어들게 하는
@@ -272,7 +273,7 @@ export function QuoteCard({
   const hasBody = children !== undefined && children !== null && children !== false;
   return (
     <div className="mt-1 flex" data-testid="quote-card" data-has-body={hasBody ? "true" : "false"}>
-      <div className="min-w-0 max-w-pane-lg overflow-hidden rounded-lg bg-surface-muted">
+      <div className="min-w-0 max-w-pane-lg overflow-hidden rounded-lg quote-card">
         <QuoteBlock
           block={block}
           directory={directory}

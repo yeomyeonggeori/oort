@@ -41,6 +41,7 @@ import {
   PLACEHOLDER_MAX_LINES,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
+import {conversationFloor as conversationFloorColor} from '../src/features/conversation/bubble';
 import {CONV, composerTextColumn} from '../src/features/conversation/convDesign';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubModel';
@@ -1424,9 +1425,10 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
  * 사진도, 사진에서 잰 대비 숫자도 거짓이 된다 — 라이트 `warnSurface`(#FFF0DB)의 세기는
  * `bg` 위에서 1.04:1, 실제 지면 `surface` 위에서 1.11:1 이고 **방향도 다르다**.
  *
- * 배경식은 `ConversationScreen` 의 `screen` 과 **같은 식**을 옮겼다 — 한쪽을 고치면 이
- * 틀도 따라가야 사진이 거짓이 되지 않는다. 가운데 정렬은 점프가 행을 놓는 자리다
- * (`travelToIndex(index, 0.5, …)`: 목록 화면 가운데 → 그라디언트 아래, 평평한 바닥 위).
+ * 배경의 끝 색은 `ConversationScreen` 의 `screen` 과 **같은 함수**(`conversationFloor`, bubble.ts)가
+ * 정한다(#5421 — 식을 옮겨 적던 때에는 한쪽만 고치면 사진이 거짓이 됐다). 남 말풍선의 채움도 같은
+ * 함수에서 바닥과 견줘 고르므로, 이 틀 위의 말풍선은 앱 대화 화면과 같은 대비로 선다. 가운데 정렬은
+ * 점프가 행을 놓는 자리다(`travelToIndex(index, 0.5, …)`: 목록 화면 가운데 → 그라디언트 아래, 평평한 바닥 위).
  */
 function ConversationFloor({
   label,
@@ -2407,14 +2409,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         body: '릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.',
       });
       return (
-        <Frame label="인용 · 정상 — 말풍선 안 머리, 세로선 없음 (#5381 Q4)">
+        <ConversationFloor label="인용 · 정상 — 말풍선 안 머리, 세로선 없음 (#5381 Q4)">
           {draft ? quoted(draft.block) : <View />}
-        </Frame>
+        </ConversationFloor>
       );
     }
     case 'quote-deleted':
       return (
-        <Frame label="인용 · 삭제된 원본 — 같은 머리 자리, 사본을 남기지 않는다">
+        <ConversationFloor label="인용 · 삭제된 원본 — 같은 머리 자리, 사본을 남기지 않는다">
           {/* 인용 원본의 저자는 **타인**이다 (design-review N-7). 첫 판은
               `SELF` 였고, 그래서 사진에서 행 저자와 인용 저자가 둘 다 같은
               이름으로 나왔다 — 자기 말을 자기가 인용하는 화면은 이 기능이
@@ -2426,13 +2428,13 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             targetSeq: 4,
             authorMemberId: OTHER,
           })}
-        </Frame>
+        </ConversationFloor>
       );
     case 'quote-unresolved':
       return (
-        <Frame label="인용 · 아직 못 푼 원본 — 삭제라고 부르지 않는다">
+        <ConversationFloor label="인용 · 아직 못 푼 원본 — 삭제라고 부르지 않는다">
           {quoted({kind: 'unresolved', targetId: 'orig-1', targetSeq: null})}
-        </Frame>
+        </ConversationFloor>
       );
     // #5381 Q4: 말풍선 안 윗칸 머리의 네 장면을 한 화면에 — 남 말풍선(긴 원문은 1줄 말줄임) · 내 말풍선(신호색 위) · 지워진 원본 · 입력창 초안.
     case 'quote-q4': {
@@ -2442,7 +2444,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         '배포 되돌리기 절차 정리해 줄래요? 릴리스 태그 확인, 이전 이미지 롤백, 헬스체크까지 순서대로 알려 주면 좋겠어요.\n둘째 줄은 보이지 않아요',
       );
       const short = original('릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.');
-      const row = (author: string, body: string, block: QuoteBlockModel | undefined, id: string) =>
+      // `block === null` 은 인용이 없는 **일반** 행이다(#5421: 일반·인용·내 말풍선을 한 장에 — 상대 말풍선이 바닥과 갈리는지는 일반 행에서도 보여야 한다).
+      const row = (author: string, body: string, block: QuoteBlockModel | undefined | null, id: string) =>
         block === undefined ? null : (
           <MessageRow
             message={{...MESSAGE, id, authorMemberId: author, body, thread: undefined}}
@@ -2450,7 +2453,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             directory={DIRECTORY}
             chips={[]}
             nowMs={NOW}
-            quote={block}
+            {...(block === null ? {} : {quote: block})}
             actions={{
               myMemberId: SELF,
               onToggleReaction: async () => {},
@@ -2460,12 +2463,13 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         );
       return (
-        <Frame label="인용 · 말풍선 안 머리 (#5381 Q4) — 남 · 내 · 지워진 원본 · 입력창">
+        <ConversationFloor label="인용 · 말풍선 안 머리 (#5381 Q4) — 일반 · 남 · 내 · 지워진 원본 · 입력창 (#5421 실제 대화 바닥)">
+          {row(AGENT, '일반 말풍선이에요. 바닥과 갈려 보여야 해요.', null, 'row-plain')}
           {row(AGENT, '세 단계예요. 릴리스 태그를 확인하고, 이전 이미지로 롤백한 뒤, 헬스체크를 돌려요.', long, 'row-other')}
           {row(SELF, '재시작할게요. 끝나면 알려 드릴게요.', short, 'row-mine')}
           {row(OTHER, '확인했어요.', {kind: 'deleted', targetId: 'orig-1', targetSeq: 4, authorMemberId: OTHER}, 'row-gone')}
           {long ? <QuoteDraftBar block={long} directory={DIRECTORY} onCancel={() => {}} /> : null}
-        </Frame>
+        </ConversationFloor>
       );
     }
     // ---- U4-3 (#1079): 최종 리뷰가 지목한 잔여 위상 --------------------------
@@ -7902,9 +7906,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
     root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
     /**
-     * `ConversationFloor` — `ConversationScreen` 의 `screen` 과 같은 배경식 (#3921).
-     * 이미지 바닥이면 `bg` 한 장, 아니면 위 25% 에서 `canvasTop` 이 (라이트 `surface` ·
-     * 다크 `bg`) 로 건너가고 그 아래는 평평하다.
+     * `ConversationFloor` — `ConversationScreen` 의 `screen` 과 같은 배경 (#3921). 끝 색은 앱과 **같은 함수**
+     * (`conversationFloor`, #5421)다. 이미지 바닥이면 `bg` 한 장, 아니면 위 25% 에서 `canvasTop` 이
+     * (라이트 `surface` · 다크 `bg`) 로 건너가고 그 아래는 평평하다.
      */
     conversationFloor: {
       flex: 1,
@@ -7912,9 +7916,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
       ...(color.backdrop === 'image'
         ? {backgroundColor: color.bg}
         : {
-            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
-              color.mode === 'light' ? color.surface : color.bg
-            } 25%)`,
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${conversationFloorColor(color)} 25%)`,
           }),
     },
     /** 틀 안에서 행들을 화면 가운데에 놓는다 — 점프가 행을 놓는 자리. */

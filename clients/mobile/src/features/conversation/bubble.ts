@@ -11,9 +11,11 @@ import {CONV} from './convDesign';
 // 한 자리에서 먹는다.
 //
 //   bubble.mine.bg / .fg     내 말풍선. 기본 = 신호색(accent) 채움 + 그 위 글자(onAccent).
-//   bubble.other.bg / .fg    남 말풍선. 기본 = 표면 두 단(surface · surfacePressed) 중 **바닥(bg)에서
-//                            더 도드라지는 쪽** + 본문 글자(text). 테마마다 어느 쪽이 도드라지는지가
-//                            다르다(dawnsky 라이트는 surface, 나머지는 surfacePressed).
+//   bubble.other.bg / .fg    남 말풍선. 기본 = 표면 두 단(surface · surfacePressed) 중 **대화 목록의
+//                            실제 바닥(`conversationFloor`)에서 더 도드라지는 쪽** + 본문 글자(text).
+//                            라이트의 대화 바닥은 `surface` 라서 `surface` 는 늘 바닥과 같다 — 그래서 라이트
+//                            남 말풍선은 `surfacePressed` 다(#5421: 옛 판은 바닥을 `bg` 로 읽어 dawnsky 라이트에서
+//                            `surface` 를 골랐고, 말풍선이 바탕과 같은 `#fffefc` 가 되어 보이지 않았다).
 //   bubble.radius            모서리. **행 강조 면(눌림·착지)의 모서리와 무관하다.**
 //   bubble.layout            'bubble'(기본) | 'row'(예전 평면 행).
 //
@@ -51,14 +53,35 @@ export const BUBBLE_MIN_CONTRAST = 4.5;
 
 export type BubbleInput = Pick<
   Palette,
-  'accent' | 'onAccent' | 'surface' | 'surfacePressed' | 'text' | 'bg'
+  'accent' | 'onAccent' | 'surface' | 'surfacePressed' | 'text' | 'bg' | 'mode' | 'backdrop'
 >;
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
-/** 남 말풍선 기본 채움 — 표면 두 단 중 바닥에서 더 도드라지는 쪽. 같으면 `surfacePressed`. */
-export function otherBubbleFill(p: Pick<Palette, 'surface' | 'surfacePressed' | 'bg'>): string {
-  return contrast(p.surface, p.bg) > contrast(p.surfacePressed, p.bg)
+/**
+ * 대화 목록이 **실제로 서는 바닥** (#5421) — `ConversationScreen` 의 `screen` 배경(위 25% 에서 `canvasTop` 이 이 색으로 건너가고 그 아래는 평평하다)의
+ * 끝 색이자 측정 하네스 `ConversationFloor` 의 끝 색이다. 세 곳이 이 함수 하나를 읽는다 — 화면 배경을 고치면 말풍선 채움과 사진 틀이 함께 움직인다.
+ *
+ * 라이트는 `surface`(종이색), 다크는 `bg`, 사용자 배경 이미지 위에서는 `bg` 한 장(`AppBackground` 가 그 밑을 그린다)이다. 팔레트의 `bg` 가 늘 바닥인 것이 아니다 —
+ * 라이트에서 `bg`(`canvas-mid`)는 대화 목록 바닥에 쓰이지 않고(목록은 `canvasTop` → `surface` 그라디언트), 그 값으로 말풍선을 골랐던 것이 #5421 의 뿌리였다.
+ */
+export function conversationFloor(
+  p: Pick<Palette, 'mode' | 'backdrop' | 'surface' | 'bg'>,
+): string {
+  // 바탕 종류 × 모드 표다. 모드·바탕 이름을 문자열 비교로 적지 않는 것은 직접 문구 장부(`direct-copy`)가 영단어 리터럴을 문구로 세기 때문이다 — 표의 열쇠는 식별자라 세지 않는다.
+  const floors = {
+    canvas: {light: p.surface, dark: p.bg},
+    image: {light: p.bg, dark: p.bg},
+  };
+  return floors[p.backdrop][p.mode];
+}
+
+/** 남 말풍선 기본 채움 — 표면 두 단 중 **대화 바닥**(`conversationFloor`)에서 더 도드라지는 쪽. 같으면 `surfacePressed`. */
+export function otherBubbleFill(
+  p: Pick<Palette, 'mode' | 'backdrop' | 'surface' | 'surfacePressed' | 'bg'>,
+): string {
+  const floor = conversationFloor(p);
+  return contrast(p.surface, floor) > contrast(p.surfacePressed, floor)
     ? p.surface
     : p.surfacePressed;
 }
