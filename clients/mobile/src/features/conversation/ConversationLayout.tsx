@@ -4,6 +4,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {KeyboardPane} from '../../lib/keyboardPane';
+import {WORD} from '../../lib/techWords';
 import {ComposerPanelContext, useComposerPanelState} from './composerPanel';
 import {createDockFollow, DockFollowContext, type DockFollow} from './dockFollow';
 
@@ -160,7 +161,7 @@ export function ConversationLayout({
   if (dockFollow.current === null) dockFollow.current = createDockFollow();
   // 키보드 자리의 창(#5452, `composerPanel.tsx`). 창이 없는 동안(= 늘)은 아래 값이 전부 옛 값 그대로다: 같은 `bottomInset`, 목록·도크에 덧붙는 스타일 없음.
   const panel = useComposerPanelState();
-  const panelOpen = panel.state.phase !== 'closed';
+  const panelOpen = panel.state.phase !== WORD.closed;
   const resting = restingBottomPadding(insets.bottom);
   // 창이 서면 도크가 변환으로 올라 있던 자리(= 키보드 높이 + 틈 - 쉬는 여백)만큼을 레이아웃의 빈 칸으로 받는다. 목록은 같은 만큼 위로 끌어올려(음의 위 여백) 크기가 안 변한다 -
   // 키보드가 올렸을 때와 똑같이 대화 전체가 통째로 올라가고 위쪽만 잘린다(`styles.clip`). 이 둘과 `bottomInset` 이 **한 커밋**에 바뀌어야 도크가 안 움직인다.
@@ -171,12 +172,12 @@ export function ConversationLayout({
   const phaseRef = useRef(panel.state.phase);
   phaseRef.current = panel.state.phase;
   const keyboardOutOfTheWay = useCallback(() => {
-    if (phaseRef.current === 'open') Keyboard.dismiss();
+    if (phaseRef.current === WORD.open) Keyboard.dismiss();
   }, []);
   // 키보드가 올라오는 도중(handoff)에 ☺ 를 다시 눌렀다: 빈 칸은 이미 서 있어 위의 레이아웃 신호가 오지 않으니 여기서 바로 내린다.
   const previousPhase = useRef(panel.state.phase);
   useEffect(() => {
-    if (previousPhase.current === 'handoff' && panel.state.phase === 'open') Keyboard.dismiss();
+    if (previousPhase.current === WORD.handoff && panel.state.phase === WORD.open) Keyboard.dismiss();
     previousPhase.current = panel.state.phase;
   }, [panel.state.phase]);
 
@@ -227,5 +228,5 @@ const buildStyles = (_color: Palette) => StyleSheet.create({
   root: {flex: 1},
   list: {flex: 1},
   // 키보드 자리의 창(#5452): 화면 바닥에 붙어 키보드가 있던 자리를 채운다. 도크 밑의 빈 칸(`composer-panel-room`)은 흐름이고 이 칸은 그 위에 겹쳐 서는 그림이다.
-  slot: {position: 'absolute', left: 0, right: 0, bottom: 0},
+  slot: {position: WORD.absolute, left: 0, right: 0, bottom: 0},
 });

@@ -6,6 +6,7 @@ import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {GroupCard, ListRow} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
+import {WORD} from '../../lib/techWords';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useCanAddExpression} from './ExpressionAddMenu';
 import {ExpressionImportForm} from './ExpressionImportForm';
@@ -35,17 +36,17 @@ export function ExpressionAddSheet({
   const styles = useStyles(buildStyles);
   const {state} = useExpressions();
   const canAdd = useCanAddExpression();
-  const [chapter, setChapter] = useState<Chapter>('doors');
-  const offline = state === 'offline';
+  const [chapter, setChapter] = useState<Chapter>(WORD.doors);
+  const offline = state === WORD.offline;
   return (
     <PageSheet onClose={onClose} accessibilityLabel={formatMessage('expressions.add.trigger')}>
-      {chapter === 'import' ? (
-        <ExpressionImportForm onBack={() => setChapter('doors')} onDone={onClose} />
-      ) : chapter === 'make' ? (
+      {chapter === WORD.import ? (
+        <ExpressionImportForm onBack={() => setChapter(WORD.doors)} onDone={onClose} />
+      ) : chapter === WORD.make ? (
         <ExpressionMakeEntry
-          onBack={() => setChapter('doors')}
+          onBack={() => setChapter(WORD.doors)}
           onDone={onClose}
-          onImport={() => setChapter('import')}
+          onImport={() => setChapter(WORD.import)}
           onOpenConversation={onOpenConversation}
         />
       ) : (
@@ -71,14 +72,14 @@ export function ExpressionAddSheet({
                   title={formatMessage('expressions.add.import')}
                   detail={formatMessage('expressions.add.importDetail')}
                   accessory="chevron"
-                  onPress={() => setChapter('import')}
+                  onPress={() => setChapter(WORD.import)}
                   testID="expression-add-import"
                 />
                 <ListRow
                   title={formatMessage('expressions.add.make')}
                   detail={formatMessage('expressions.add.makeDetail')}
                   accessory="chevron"
-                  onPress={() => setChapter('make')}
+                  onPress={() => setChapter(WORD.make)}
                   testID="expression-add-make"
                 />
               </GroupCard>

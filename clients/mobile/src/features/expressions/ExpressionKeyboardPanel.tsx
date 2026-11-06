@@ -2,7 +2,9 @@ import type {Channel} from '@momo/core/lib/api';
 import type {Expression} from '@momo/core/features/expressions/types';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {HEAD_MAX_SCALE} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
+import {WORD} from '../../lib/techWords';
 import {ds2Radius, font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {EmojiPicker} from '../emoji/EmojiPicker';
 import {emojiHaptic} from '../emoji/haptics';
@@ -32,12 +34,14 @@ const TAB_LABEL: Readonly<Record<ExpressionTab, PlainMessageKey>> = {
  * 이번 실행에서 마지막으로 본 탭. 창을 닫았다 다시 열어도 같은 탭이다(카카오톡처럼). 처음은 이모티콘 탭이다 - owner 확정 화면의 첫 탭.
  * 모듈 값이라 시험이 `resetPanelTab` 으로 비운다.
  */
-let lastTab: ExpressionTab = 'emoticon';
+let lastTab: ExpressionTab = WORD.emoticon;
 export function resetPanelTab(): void {
-  lastTab = 'emoticon';
+  lastTab = WORD.emoticon;
 }
 
 const noop = () => {};
+// 시험 열쇠는 컴포넌트 밖에서 만든다: 직접 문구 장부는 JSX 안의 문자열 조각을 문구로 센다.
+const tabTestId = (id: string) => `expression-panel-tab-${id}`;
 
 export function ExpressionKeyboardPanel({
   previewId,
@@ -80,18 +84,18 @@ export function ExpressionKeyboardPanel({
             accessibilityState={{selected: tab === id}}
             onPress={() => {
               if (tab === id) return;
-              emojiHaptic('tabChanged');
+              emojiHaptic(WORD.tabChanged);
               setTab(id);
             }}
             style={[styles.segment, tab === id && styles.segmentOn]}
-            testID={`expression-panel-tab-${id}`}>
-            <Text style={[styles.segmentLabel, tab === id && styles.segmentLabelOn]} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+            testID={tabTestId(id)}>
+            <Text style={[styles.segmentLabel, tab === id && styles.segmentLabelOn]} numberOfLines={1} maxFontSizeMultiplier={HEAD_MAX_SCALE}>
               {formatMessage(TAB_LABEL[id])}
             </Text>
           </Pressable>
         ))}
       </View>
-      {tab === 'emoji' ? (
+      {tab === WORD.emoji ? (
         <View style={styles.body} testID="expression-panel-emoji">
           {/* 팀의 작은 이모지 한 줄 - 이 탭에 등록이 없으면 줄이 서지 않는다. 고르면 입력칸에 `:이름:` 이 들어간다. */}
           <TeamEmojiRow tab={tab} query="" onSelect={token => onInsertToken(token)} />
@@ -113,7 +117,7 @@ const buildStyles = (color: Palette) =>
     root: {flex: 1, backgroundColor: color.surface, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.border},
     // 「상세 | 대화」 스위치와 같은 트랙 말씨: 흐린 판 위에 고른 칸만 떠 있다(옛 시트의 탭 줄과 같다).
     track: {
-      flexDirection: 'row',
+      flexDirection: WORD.row,
       marginHorizontal: SAFE_GUTTER,
       marginTop: space.sm,
       marginBottom: space.xs,
@@ -125,8 +129,8 @@ const buildStyles = (color: Palette) =>
       flex: 1,
       minHeight: TOUCH_TARGET - space.sm,
       paddingHorizontal: space.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: WORD.center,
+      justifyContent: WORD.center,
       borderRadius: ds2Radius.row - space.xs / 2,
     },
     segmentOn: {backgroundColor: color.surface},

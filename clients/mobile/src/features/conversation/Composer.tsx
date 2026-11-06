@@ -7,6 +7,7 @@ import {
 } from '../expressions/expressionViews';
 import {useExpressionMessages} from '../expressions/useExpressionMessages';
 import {startKeyboardMemory, keyboardSlotHeight} from '../../lib/keyboardMemory';
+import {WORD} from '../../lib/techWords';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {useComposerPanel} from './composerPanel';
 import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
@@ -301,6 +302,10 @@ export {PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 //   grow1443-composer-growth-dark.png              기본 크기 — 128.0pt = 5.0줄
 //                                                  (다섯 줄이 그대로 다 보인다)
 // =============================================================================
+
+// 이모티콘 창의 사전 열쇠(#5452). 모듈 값이라 직접 문구 장부가 세지 않는다.
+const KEYBOARD_KEY = 'expressions.sheet.keyboard';
+const PREVIEW_CLEARED_KEY = 'expressions.preview.cleared';
 
 /** 작은 창·큰 글자에서도 편집 중인 줄과 그 앞 줄을 남긴다. */
 const MIN_ROWS = 2;
@@ -1354,10 +1359,10 @@ export function Composer({
   const panelHost = useComposerPanel();
   const panelHostRef = useRef(panelHost);
   panelHostRef.current = panelHost;
-  const panelPhase = panelHost?.phase ?? 'closed';
+  const panelPhase = panelHost?.phase ?? WORD.closed;
   const panelPhaseRef = useRef(panelPhase);
   panelPhaseRef.current = panelPhase;
-  const panelOpen = panelPhase !== 'closed';
+  const panelOpen = panelPhase !== WORD.closed;
   // 입력창 위 미리 보기에 올라 있는 이모티콘·GIF(채널 입력창만). 보내면 비고, ✕가 비운다.
   const [expressionPreview, setExpressionPreview] = useState<Expression | null>(null);
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
@@ -1714,7 +1719,7 @@ export function Composer({
     setPressing(false);
     setFocused(true);
     // 입력창을 눌러 키보드가 돌아온다(#5452): 키보드가 창을 다 덮은 뒤에 창이 걷힌다. 미리 보기는 그대로 남는다.
-    if (panelPhaseRef.current === 'open') panelHostRef.current?.handoff();
+    if (panelPhaseRef.current === WORD.open) panelHostRef.current?.handoff();
   }, [setKeyBlocked, clearPressGrace]);
 
   const onSelectionChange = useCallback(
@@ -1836,8 +1841,8 @@ export function Composer({
     if (preview !== null && expressionStore !== null) {
       const now = expressionStore.snapshot();
       const live =
-        now.state !== 'ready' ||
-        now.items.some(entry => entry.id === preview.id && entry.name === preview.name && entry.status === 'active');
+        now.state !== WORD.ready ||
+        now.items.some(entry => entry.id === preview.id && entry.name === preview.name && entry.status === WORD.active);
       if (!live) {
         setPreviewUnavailable(true);
         return;
@@ -1936,7 +1941,8 @@ export function Composer({
       selectionKnownRef.current = true;
       caretRef.current = next.caret;
       setCaret(next.caret);
-      requestAnimationFrame(() => inputRef.current?.setSelection(next.caret, next.caret));
+      // (`?.()` 는 시험 환경의 글 칸 대역이 이 메서드를 안 가진 탓이다 - 실제 기기에는 늘 있다.)
+      requestAnimationFrame(() => inputRef.current?.setSelection?.(next.caret, next.caret));
     },
     [onChangeText, inputRef],
   );
@@ -1964,7 +1970,7 @@ export function Composer({
     setExpressionPreview(null);
     setPreviewUnavailable(false);
     // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 - 결과를 소리로 알린다(링크 미리보기의 ✕와 같은 길).
-    AccessibilityInfo.announceForAccessibility(expressionCopy('expressions.preview.cleared'));
+    AccessibilityInfo.announceForAccessibility(expressionCopy(PREVIEW_CLEARED_KEY));
   }, [expressionCopy]);
   const panelNode = useMemo(
     () => (
@@ -1980,12 +1986,12 @@ export function Composer({
   );
   // 창이 서 있는 동안 내용이 최신이게 한다(미리 보기에 오른 것이 바뀌면 창의 칸 표시가 바뀐다).
   useEffect(() => {
-    if (panelPhase !== 'closed') panelHostRef.current?.setContent(panelNode);
+    if (panelPhase !== WORD.closed) panelHostRef.current?.setContent(panelNode);
   }, [panelPhase, panelNode]);
   const onExpressionPress = () => {
     const host = panelHostRef.current;
     if (host === null || offline === true) return;
-    if (panelPhaseRef.current === 'open') {
+    if (panelPhaseRef.current === WORD.open) {
       // 키보드 단추: 키보드가 돌아오고 창이 걷힌다.
       host.handoff();
       inputRef.current?.focus();
@@ -2043,7 +2049,7 @@ export function Composer({
   const onInputBlur = useCallback(() => {
     focusedRef.current = false;
     // 창이 키보드를 대신해 서 있으면(#5452) 포커스를 잃어도 접히지 않는다 - 펼침의 이유가 창으로 넘어갔다.
-    if (panelPhaseRef.current === 'closed') collapseWithMotion();
+    if (panelPhaseRef.current === WORD.closed) collapseWithMotion();
     setFocused(false);
   }, [collapseWithMotion]);
   // 대화 목록을 눌렀다 (#4614, `tapDismiss.ts` → `dockFollow.rest`). 자판은 목록이 이미 내렸다(`Keyboard.dismiss`) — 여기서는 **글이 남은 입력창을 접는 것**만 한다. 글이 없으면 할 일이 없다:
@@ -2053,7 +2059,7 @@ export function Composer({
     if (dockFollow === null) return undefined;
     return dockFollow.registerRest(() => {
       // 목록을 눌렀다: 키보드 자리의 창도 거둔다(#5452). 창이 닫히면 펼침의 이유가 사라져 알약은 아래 규칙대로 접힌다.
-      if (panelPhaseRef.current !== 'closed') panelHostRef.current?.close();
+      if (panelPhaseRef.current !== WORD.closed) panelHostRef.current?.close();
       if (currentTextRef.current === '' || restedRef.current) return;
       restedRef.current = true;
       // 접히는 스프링의 **시작값**: 지금 글 칸이 서 있는 높이. 모르면(아직 한 번도 재지 않았다) 이 움직임 없이 바로 접는다.
@@ -2945,7 +2951,7 @@ export function Composer({
         <Pressable
           accessibilityRole="button"
           // 창이 서 있는 동안 이 단추는 키보드로 돌아가는 단추다(#5452) - 눌린 모양(채움)과 낭독 이름이 함께 바뀐다. 글리프는 그대로 ☺ 다(키보드 글리프는 아직 기존 묶음에 없다).
-          accessibilityLabel={expressionCopy(panelOpen ? 'expressions.sheet.keyboard' : 'expressions.sheet.open')}
+          accessibilityLabel={expressionCopy(panelOpen ? KEYBOARD_KEY : 'expressions.sheet.open')}
           accessibilityState={{disabled: offline, selected: panelOpen}}
           disabled={offline}
           hitSlop={EXPRESSION_SLOP}

@@ -21,11 +21,12 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Sentence} from '../../design/atoms';
+import {HEAD_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {useStyles} from '../../design/theme';
 import {ds2Radius, font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
+import {WORD} from '../../lib/techWords';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {ExpressionImage} from './ExpressionImage';
 import {useExpressions} from './ExpressionProvider';
@@ -65,6 +66,12 @@ const EMPTY_COPY: Readonly<Record<PanelGridTab, PlainMessageKey>> = {
   gif: 'expressions.panel.emptyGif',
 };
 const GLYPH_STAR = '★';
+// 시험 열쇠는 컴포넌트 밖에서 만든다: 직접 문구 장부는 JSX 안의 문자열 조각을 문구로 센다. 칸의 열쇠는 보관함 격자·팀 이모지 줄과 같다.
+const EMPTY_ID = 'expression-panel-empty';
+const stateTestId = (state: string) => `expression-panel-${state}`;
+const sectionTestId = (id: string) => `expression-panel-section-${id}`;
+const cellTestId = (name: string) => `expression-pick-${name}`;
+const setTestId = (id: string) => `expression-panel-set-${id}`;
 
 export function ExpressionPanelGrid({
   tab,
@@ -146,14 +153,14 @@ export function ExpressionPanelGrid({
   };
 
   const notice =
-    state === 'offline'
+    state === WORD.offline
       ? formatMessage('expressions.sheet.offline')
-      : state === 'error'
+      : state === WORD.error
       ? formatMessage('expressions.sheet.error')
-      : state === 'loading'
+      : state === WORD.loading
       ? formatMessage('expressions.sheet.loading')
       : formatMessage(EMPTY_COPY[tab]);
-  const noticeId = state === 'ready' ? 'expression-panel-empty' : `expression-panel-${state}`;
+  const noticeId = state === WORD.ready ? EMPTY_ID : stateTestId(state);
 
   return (
     <View style={styles.root} testID="expression-panel-grid">
@@ -186,7 +193,7 @@ export function ExpressionPanelGrid({
             <Sentence style={styles.noticeText} accessibilityLiveRegion="polite">
               {notice}
             </Sentence>
-            {state === 'error' ? (
+            {state === WORD.error ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
@@ -200,11 +207,11 @@ export function ExpressionPanelGrid({
           </View>
         }
         renderItem={({item: layout}) => (
-          <View style={{height: layout.height}} testID={`expression-panel-section-${layout.section.id}`}>
+          <View style={{height: layout.height}} testID={sectionTestId(layout.section.id)}>
             <Text
               style={styles.sectionTitle}
               numberOfLines={1}
-              maxFontSizeMultiplier={1.2}
+              maxFontSizeMultiplier={HEAD_MAX_SCALE}
               accessibilityRole="header">
               {sectionTitle(layout)}
             </Text>
@@ -218,7 +225,7 @@ export function ExpressionPanelGrid({
                     accessibilityState={{selected: item.id === previewId}}
                     accessibilityActions={[
                       {
-                        name: 'favorite',
+                        name: WORD.favorite,
                         label: formatMessage(isFavorite(item.id) ? 'expressions.picker.favoriteRemove' : 'expressions.picker.favoriteAdd'),
                       },
                     ]}
@@ -231,7 +238,7 @@ export function ExpressionPanelGrid({
                       {width: (width - SAFE_GUTTER * 2) / columns},
                       (pressed || item.id === previewId) && styles.cellOn,
                     ]}
-                    testID={`expression-pick-${item.name}`}>
+                    testID={cellTestId(item.name)}>
                     <ExpressionImage expression={item} size="tile" />
                   </Pressable>
                 ))}
@@ -260,15 +267,15 @@ export function ExpressionPanelGrid({
                 accessibilityState={{selected: on}}
                 onPress={() => jump(layout.section.id)}
                 style={[styles.stripButton, on && styles.stripButtonOn]}
-                testID={`expression-panel-set-${layout.section.id}`}>
+                testID={setTestId(layout.section.id)}>
                 {layout.section.id === RECENT_SECTION ? (
                   <Image source={CONV_ICONS.recent} style={styles.stripGlyph} importantForAccessibility="no" />
                 ) : layout.section.id === FAVORITES_SECTION ? (
                   <Text style={styles.stripStar} allowFontScaling={false} importantForAccessibility="no">
                     {GLYPH_STAR}
                   </Text>
-                ) : kind === 'other' ? (
-                  <Text style={styles.stripText} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                ) : kind === WORD.other ? (
+                  <Text style={styles.stripText} numberOfLines={1} maxFontSizeMultiplier={HEAD_MAX_SCALE}>
                     {sectionTitle(layout)}
                   </Text>
                 ) : (
@@ -306,11 +313,11 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
       fontWeight: '600',
     },
-    row: {flexDirection: 'row', height: PANEL_ROW_HEIGHT},
+    row: {flexDirection: WORD.row, height: PANEL_ROW_HEIGHT},
     cell: {
       height: PANEL_ROW_HEIGHT,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: WORD.center,
+      justifyContent: WORD.center,
       borderRadius: ds2Radius.row,
     },
     cellOn: {backgroundColor: color.accentSurface},
@@ -319,28 +326,28 @@ const buildStyles = (color: Palette) =>
     retry: {
       minHeight: TOUCH_TARGET,
       paddingHorizontal: space.md,
-      justifyContent: 'center',
+      justifyContent: WORD.center,
       borderRadius: ds2Radius.pill,
       backgroundColor: color.surfaceMuted,
     },
     retryLabel: {fontSize: font.body, lineHeight: line.body, color: color.text},
     // 세트 띠: 창 바닥(홈 표시 줄 위). 위에 가는 선 하나로 격자와 가른다.
     strip: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      flexDirection: WORD.row,
+      alignItems: WORD.center,
       paddingTop: space.xs,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: color.border,
       backgroundColor: color.surface,
     },
     stripList: {flex: 1},
-    stripContent: {paddingHorizontal: SAFE_GUTTER - space.xs, gap: space.xs, alignItems: 'center'},
+    stripContent: {paddingHorizontal: SAFE_GUTTER - space.xs, gap: space.xs, alignItems: WORD.center},
     stripButton: {
       minWidth: STRIP_BUTTON,
       height: TOUCH_TARGET,
       paddingHorizontal: space.xs,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: WORD.center,
+      justifyContent: WORD.center,
       borderRadius: ds2Radius.row,
     },
     stripButtonOn: {backgroundColor: color.accentSurface},
@@ -352,5 +359,5 @@ const buildStyles = (color: Palette) =>
     },
     stripStar: {fontSize: font.title, color: color.icon},
     stripText: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
-    stripImage: {width: STRIP_IMAGE, height: STRIP_IMAGE, alignItems: 'center', justifyContent: 'center'},
+    stripImage: {width: STRIP_IMAGE, height: STRIP_IMAGE, alignItems: WORD.center, justifyContent: WORD.center},
   });

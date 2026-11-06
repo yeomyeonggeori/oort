@@ -4,6 +4,7 @@ import React from 'react';
 import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {useStyles} from '../../design/theme';
+import {WORD} from '../../lib/techWords';
 import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {ExpressionImage} from './ExpressionImage';
 import {EXPRESSION_POINTS} from './expressionBox';
@@ -67,25 +68,25 @@ const CLEAR_SIZE = 28;
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     row: {
-      flexDirection: 'row',
+      flexDirection: WORD.row,
       alignItems: 'flex-start',
       paddingBottom: space.sm,
       gap: space.xs,
     },
     // 칸은 줄인 크기(112)로 서고, 안쪽 160 칸을 왼쪽 위 기준으로 줄여 그린다 - 큰 그림 파일이 그대로 쓰여 흐려지지 않는다.
-    frame: {width: PREVIEW_POINTS, height: PREVIEW_POINTS, overflow: 'hidden'},
+    frame: {width: PREVIEW_POINTS, height: PREVIEW_POINTS, overflow: WORD.hidden},
     scaled: {
       width: EXPRESSION_POINTS.large ?? 160,
       height: EXPRESSION_POINTS.large ?? 160,
       transform: [{scale: SCALE}],
-      transformOrigin: 'top left',
+      transformOrigin: [0, 0, 0],
     },
     clear: {
       width: CLEAR_SIZE,
       height: CLEAR_SIZE,
       borderRadius: CLEAR_SIZE / 2,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: WORD.center,
+      justifyContent: WORD.center,
       backgroundColor: color.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
@@ -98,5 +99,5 @@ const buildStyles = (color: Palette) =>
       height: CONV_ICON_SIZE.cross,
       tintColor: color.icon,
     },
-    alert: {flex: 1, fontSize: font.meta, lineHeight: line.meta, color: color.warn, alignSelf: 'center'},
+    alert: {flex: 1, fontSize: font.meta, lineHeight: line.meta, color: color.warn, alignSelf: WORD.center},
   });

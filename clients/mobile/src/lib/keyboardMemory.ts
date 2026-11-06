@@ -1,5 +1,6 @@
 import {Keyboard, type KeyboardEvent} from 'react-native';
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
+import {WORD} from './techWords';
 
 // =============================================================================
 // 마지막으로 본 소프트 키보드의 높이 (#5452).
@@ -41,8 +42,8 @@ export function startKeyboardMemory(): void {
   if (started) return;
   started = true;
   remembered = readStored();
-  Keyboard.addListener('keyboardWillShow', remember);
-  Keyboard.addListener('keyboardDidShow', remember);
+  Keyboard.addListener(WORD.keyboardWillShow, remember);
+  Keyboard.addListener(WORD.keyboardDidShow, remember);
 }
 
 /** 키보드가 지금 가린 높이(pt). 내려가 있으면 0 이다. */

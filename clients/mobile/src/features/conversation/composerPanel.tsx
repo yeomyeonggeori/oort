@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import {Keyboard, LayoutAnimation, type EmitterSubscription} from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
+import {WORD} from '../../lib/techWords';
 
 // =============================================================================
 // 키보드 자리의 창 (#5452, owner 2026-11-07 「별도 바텀시트 대신 키보드 영역을 활용」).
@@ -67,7 +68,7 @@ export interface PanelState {
   height: number;
 }
 
-const CLOSED: PanelState = {phase: 'closed', height: 0};
+const CLOSED: PanelState = {phase: WORD.closed, height: 0};
 
 /**
  * 창의 상태. `ConversationLayout` 이 한 번 부르고, 값(`state`·`content`)으로 레이아웃을 짜고 `api` 를 컨텍스트로 내린다.
@@ -97,7 +98,7 @@ export function useComposerPanelState(): {
   const leave = useCallback(
     (animated: boolean) => {
       stopWaiting();
-      if (stateRef.current.phase === 'closed') return;
+      if (stateRef.current.phase === WORD.closed) return;
       // 키보드가 창을 덮은 채라면 움직일 것이 없다(맞바꿈은 한 커밋). 키보드가 없을 때만 미끄러진다.
       if (animated && !reduceMotion.current) LayoutAnimation.configureNext(SLIDE);
       setState(CLOSED);
@@ -109,21 +110,21 @@ export function useComposerPanelState(): {
   const open = useCallback(
     (height: number) => {
       stopWaiting();
-      if (stateRef.current.phase === 'open') return;
+      if (stateRef.current.phase === WORD.open) return;
       // 키보드가 올라와 있으면 맞바꿈(움직이지 않는다), 아니면 창이 미끄러져 올라온다.
-      if (stateRef.current.phase === 'closed' && !Keyboard.isVisible() && !reduceMotion.current) {
+      if (stateRef.current.phase === WORD.closed && !Keyboard.isVisible() && !reduceMotion.current) {
         LayoutAnimation.configureNext(SLIDE);
       }
-      setState(current => ({phase: 'open', height: current.phase === 'handoff' ? current.height : height}));
+      setState(current => ({phase: WORD.open, height: current.phase === WORD.handoff ? current.height : height}));
     },
     [reduceMotion, stopWaiting],
   );
 
   const handoff = useCallback(() => {
-    if (stateRef.current.phase !== 'open') return;
-    setState(current => ({...current, phase: 'handoff'}));
+    if (stateRef.current.phase !== WORD.open) return;
+    setState(current => ({...current, phase: WORD.handoff}));
     stopWaiting();
-    subscription.current = Keyboard.addListener('keyboardDidShow', () => leave(false));
+    subscription.current = Keyboard.addListener(WORD.keyboardDidShow, () => leave(false));
     timer.current = setTimeout(() => leave(false), HANDOFF_MAX_MS);
   }, [leave, stopWaiting]);
 
