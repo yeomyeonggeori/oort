@@ -904,10 +904,12 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(
       within(header).getAllByTestId(/^(conversation-header-row|missed-digest-card)$/).map(node => node.props.testID),
     ).toEqual(['conversation-header-row', 'missed-digest-card']);
-    // 머리 덮개가 카드까지 잰 높이(121 + 카드 92)가 목록 위 여백과 위 필의 높이다 - 첫 줄·날짜 필이 카드 밑에서 시작한다.
-    fireEvent(overlay, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121 + 92}}});
-    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121 + 92);
-    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121 + 92);
+    // 카드는 한 줄 띠다(뒷면 + 카드, 8 + 46 + 8 = 62pt, 시뮬레이터 실측 머리 덮개 0–124 → 0–186) - 목록에는 없고 머리 안에 서며 뒷면이 그 안에 든다.
+    expect(within(overlay).getByTestId('missed-digest-band')).toBeTruthy();
+    // 머리 덮개가 띠까지 잰 높이(121 + 62)가 목록 위 여백과 위 필의 높이다 - 맨 위의 날짜 칩·안 읽음 구분선이 띠 **밑**에서 시작한다(검수 B1: 「목록 첫 내용 위끝 ≥ 띠 아래끝」).
+    fireEvent(overlay, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121 + 62}}});
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121 + 62);
+    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121 + 62);
     // 닫으면 띠가 사라지고 머리가 다시 121 을 재서 여백이 하나만 남는다.
     fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
     expect(screen.queryByTestId('missed-digest-card')).toBeNull();
