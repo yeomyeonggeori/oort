@@ -336,7 +336,7 @@ describe('알림 뒤 목록이 적용되기 전', () => {
   });
 
   it('changed() 만 오고 목록이 아직 안 왔을 때 그림 층은 0개이고 칸은 그대로이며, 목록이 오면 남은 표현만 다시 서고 숨겨진 것은 글자가 된다', async () => {
-    const {store, request, deltas} = setup(true);
+    const {store, request, files, deltas} = setup(true);
     await act(async () => store.refresh(true));
     mount(store, both());
     for (let step = 0; step < 6; step += 1) await flush();
@@ -346,6 +346,7 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     const boxes = {still: boxOf(still.name, 'large'), moving: boxOf(moving.name, 'large')};
     expect(boxes.still).toMatchObject({width: 160, height: 160});
     const callsBefore = imageCalls(request).length;
+    const uriBefore = screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri;
 
     // 알림만 온다 — 목록 읽기는 붙들려 있다.
     act(() => store.changed());
@@ -372,10 +373,58 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     expect(boxOf(still.name, 'large')).toEqual(boxes.still);
     expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
     expect(layerCount(moving.name)).toBe(0);
+    // 알림은 옛 파일을 걷었고(계약), 다시 선 층은 걷힌 파일이 아니라 새로 받은 파일이다 — 죽은 주소를 다시 그리지 않는다.
+    const uriAfter = screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri;
+    const removed = files.remove.mock.calls.map(([uri]) => uri);
+    expect(removed).toContain(uriBefore);
+    expect(removed).not.toContain(uriAfter);
+    expect(uriAfter).not.toBe(uriBefore);
+  });
+
+  it('같은 때 내 등록 응답이 그림을 걷어 읽던 목록 읽기를 버려도, 알림 뒤 목록을 다시 읽어 문이 내려간다', async () => {
+    const {store, request, deltas} = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    act(() => store.changed());
+    await flush();
+    expect(deltas).toHaveLength(1);
+    // 내 등록(바꿔 올리기)의 응답: `still` 의 그림 정보가 바뀐다 → 걷기가 읽던 읽기를 버린다.
+    request.mockImplementationOnce(
+      (async () => ({
+        status: 201,
+        json: {
+          workspaceId: FIXTURE_WORKSPACE_ID,
+          version: '4',
+          expression: {...still, version: '4', media: moving.media},
+        },
+      })) as never,
+    );
+    await act(async () => {
+      await store.mutate({method: 'POST', path: base});
+    });
+    await flush();
+    expect(deltas).toHaveLength(2); // 등록 응답은 알림을 확인해 주지 않는다 — 다시 읽는다
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+    // 버려진 첫 읽기의 늦은 답은 문을 내리지 못한다. 다시 읽은 답이 내린다.
+    await act(async () => {
+      deltas[0](hidesMoving());
+    });
+    expect(store.snapshot().changePending).toBe(true);
+    await act(async () => {
+      deltas[1]({
+        status: 200,
+        json: {...FIXTURE_LIST, version: '4', baseVersion: '4', reset: false, items: []},
+      });
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
   });
 
   it('읽은 답이 이미 적용한 목록보다 낡으면 한 번 더 읽고, 그 뒤에 그림을 다시 그린다 (멈춘 채 남지 않는다)', async () => {
-    const { store, deltas } = setup(true);
+    const {store, deltas} = setup(true);
     await act(async () => store.refresh(true));
     mount(store, both());
     for (let step = 0; step < 6; step += 1) await flush();
@@ -405,7 +454,7 @@ describe('알림 뒤 목록이 적용되기 전', () => {
   });
 
   it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 글자가 서며 그림 층은 없다', async () => {
-    const { store, deltas } = setup(true);
+    const {store, deltas} = setup(true);
     await act(async () => store.refresh(true));
     mount(store, both());
     for (let step = 0; step < 6; step += 1) await flush();
