@@ -3,6 +3,7 @@ import {
   emptyExpressionCache,
 } from '@momo/core/features/expressions/cache';
 import {matchesExpressionContract} from '@momo/core/features/expressions/contracts';
+import {loopForever} from '@momo/core/features/expressions/gifLoop';
 import {
   errorCodeOf,
   photoModelRequest,
@@ -361,9 +362,14 @@ export function createPhoneExpressionStore(
       publish(value ? 'loading' : 'offline');
       if (value) void refresh(true);
     },
+    /**
+     * 한 표현의 그림 파일. `loop` 는 반응 칩만 켠다(#5504, owner 「계속 움직임」): 움직이는 그림의 반복 횟수(서버는 4번)만 무한으로 바꾼 **따로 쓴 파일**을 준다 -
+     * 서버가 준 그림·해시는 그대로이고, 같은 그림의 모든 반응 칩이 이 파일 하나를 나눠 쓴다(받기도 쓰기도 한 번). 메시지 속 그림은 `loop` 없이 서버 그대로의 파일이라 4번 규칙을 지킨다.
+     */
     async image(
       item: Pick<Expression, 'id' | 'name'>,
       variant: ExpressionVariant,
+      loop = false,
     ): Promise<string | null> {
       const current = cache.items.find(
         entry =>
@@ -372,7 +378,8 @@ export function createPhoneExpressionStore(
       if (disposed || !online || snapshot.state !== 'ready' || !current?.media)
         return null;
       const media = current.media[variant];
-      const key = `${item.id}/${variant}/${media.sha256}`;
+      const forever = loop && media.mime === 'image/gif';
+      const key = `${item.id}/${variant}/${media.sha256}${forever ? '/loop' : ''}`;
       if (images.has(key)) return images.get(key)!;
       if (pending.has(key)) return pending.get(key)!;
       const started = epoch;
@@ -397,7 +404,7 @@ export function createPhoneExpressionStore(
             return null;
           const uri = files.write(
             `${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
-            bytes,
+            forever ? loopForever(bytes) : bytes,
           );
           images.set(key, uri);
           return uri;
