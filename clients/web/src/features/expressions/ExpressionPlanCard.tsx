@@ -100,8 +100,9 @@ export function ExpressionPlanCard({ card, plan }: { card: AgentApprovalCard; pl
   const editing = mode === Mode.edit;
   const keptReferences = usable ? usable.references.filter((reference) => !edit.removedReferences.includes(reference.attachmentId)) : [];
 
-  return <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-plan" data-open={String(open)}>
-    <p className="break-words text-body font-semibold">{title}</p>
+  // `break-keep`(M1, #5527 검수 7c): 한국어는 어절에서 꺾는다. 글자 하나 위에서 줄이 바뀌면 「메신/저」처럼 낱말이 끊긴다. 상속이라 카드 안의 모든 글 줄이 같다.
+  return <section className="flex break-keep flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-plan" data-open={String(open)}>
+    <p className="break-keep text-body font-semibold">{title}</p>
     {open && usable === null && <>
       <p role="alert" className="text-body" data-testid="expression-plan-unreadable">{formatMessage("expressions.set.unreadable")}</p>
       <div className="flex justify-end">
@@ -112,13 +113,13 @@ export function ExpressionPlanCard({ card, plan }: { card: AgentApprovalCard; pl
       <dl className="flex flex-col gap-2">
         <div className="flex flex-col gap-1">
           <dt className="text-meta font-semibold text-ink-muted">{formatMessage("expressions.plan.concept")}</dt>
-          <dd className="break-words text-body" data-testid="expression-plan-concept">{usable.prompt}</dd>
+          <dd className="break-keep text-body" data-testid="expression-plan-concept">{usable.prompt}</dd>
         </div>
         <div className="flex flex-col gap-1">
           <dt className="text-meta font-semibold text-ink-muted">{formatMessage("expressions.plan.scenes")}</dt>
           <dd>
             <ol className="flex list-decimal flex-col gap-1 pl-6" data-testid="expression-plan-scenes">
-              {[...usable.slots].sort((a, b) => a.index - b.index).map((slot) => <li key={slot.index} className="break-words text-body" data-testid="expression-plan-scene">
+              {[...usable.slots].sort((a, b) => a.index - b.index).map((slot) => <li key={slot.index} className="break-keep text-body" data-testid="expression-plan-scene">
                 <span className="font-semibold">{slot.displayName}</span>{" "}
                 <span className="text-ink-muted">{slot.scene !== null ? slot.scene : formatMessage("expressions.plan.gif", { base: slotName(slot.baseIndex ?? -1), motion: slot.motion ? formatMessage(MOTION_LABEL[slot.motion]) : "" })}</span>
               </li>)}

@@ -442,3 +442,98 @@ describe("a new set replaces the choice of the old one", () => {
     await waitFor(() => expect(pressed(view)).toEqual(["true", "true", "true", "true"]));
   });
 });
+
+// 격자 열 수와 한국어 줄바꿈 (#5527, 검수 7c M2·M1). jsdom 에는 레이아웃이 없다: 카드는 폭을 `clientWidth` 로 읽고 `ResizeObserver` 로 듣는다. 둘을 시험이 준다.
+// 실제 엔진의 칸 폭·그림 자리·체크 상자·계산된 `word-break` 는 `ExpressionSetApprovalCard.fit.browser.test.ts` 가 잰다.
+describe("the grid follows the card width, and the arrows walk the same columns (#5527 M2)", () => {
+  let width = 0;
+  let observer: { callback: ResizeObserverCallback; target: Element | null } | null = null;
+  beforeEach(() => {
+    width = 0;
+    observer = null;
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) { return this.getAttribute("role") === "grid" ? width : 0; });
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { observer = { callback, target: null }; }
+      observe(target: Element) { observer!.target = target; }
+      unobserve() {}
+      disconnect() {}
+    });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+  /** 카드 폭이 바뀐 것처럼 관찰자를 깨운다(실제 엔진에서는 레이아웃이 한다). */
+  const resizeTo = (next: number) => act(() => { width = next; observer!.callback([{ contentRect: { width: next } } as ResizeObserverEntry], {} as ResizeObserver); });
+  const rowCols = (view: View) => [...new Set(view.getAllByRole("row").map((row) => row.getAttribute("data-cols")))];
+  const focusAndPress = (view: View, from: number, key: string) => {
+    act(() => tiles(view)[from].focus());
+    fireEvent.keyDown(document.activeElement!, { key });
+    return tiles(view).indexOf(document.activeElement as HTMLButtonElement);
+  };
+
+  it("draws two columns at the minimum desktop window and five rows, and ArrowDown skips two tiles", async () => {
+    width = 272;
+    const view = await mount(live(FIXTURE_SET_NORMAL));
+    expect(rowCols(view)).toEqual(["2"]);
+    expect(view.getAllByRole("row").map((row) => row.querySelectorAll('[data-testid="expression-set-tile"]').length)).toEqual([2, 2, 2, 2, 2]);
+    expect(tiles(view).map((tile) => tile.parentElement!.getAttribute("aria-colindex"))).toEqual(["1", "2", "1", "2", "1", "2", "1", "2", "1", "2"]);
+    expect(focusAndPress(view, 0, "ArrowDown")).toBe(2);
+    expect(focusAndPress(view, 5, "ArrowUp")).toBe(3);
+    expect(focusAndPress(view, 5, "ArrowRight")).toBe(6);
+  });
+
+  it("draws three columns for a mid-width card and four for a wide one, and the arrows follow each", async () => {
+    width = 340;
+    const view = await mount(live(FIXTURE_SET_NORMAL));
+    expect(rowCols(view)).toEqual(["3"]);
+    expect(focusAndPress(view, 1, "ArrowDown")).toBe(4);
+    resizeTo(520);
+    expect(rowCols(view)).toEqual(["4"]);
+    expect(view.getAllByRole("row").map((row) => row.querySelectorAll('[data-testid="expression-set-tile"]').length)).toEqual([4, 4, 2]);
+    expect(focusAndPress(view, 1, "ArrowDown")).toBe(5);
+  });
+
+  it("keeps the tile the person was on when a resize re-chunks the rows, and the next arrow uses the new columns", async () => {
+    width = 520;
+    const view = await mount(live(FIXTURE_SET_NORMAL));
+    // Tile 7 stands in the second row of four and in the fourth row of two: it moves to another parent, so React makes a new node for it.
+    const before = tiles(view)[7];
+    act(() => before.focus());
+    resizeTo(272);
+    expect(rowCols(view)).toEqual(["2"]);
+    // The rows were drawn again, so the tile node is a new one: the focus stands on the same slot, not on the page.
+    expect(tiles(view)[7]).not.toBe(before);
+    expect(document.activeElement).toBe(tiles(view)[7]);
+    expect(tiles(view).map((tile) => tile.tabIndex)).toEqual([-1, -1, -1, -1, -1, -1, -1, 0, -1, -1]);
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(tiles(view)[9]);
+  });
+
+  it("does not take the focus back when it was outside the grid at the time of the resize", async () => {
+    width = 520;
+    const view = await mount(live(FIXTURE_SET_NORMAL));
+    const outside = view.getByTestId("expression-set-register");
+    act(() => outside.focus());
+    resizeTo(272);
+    expect(rowCols(view)).toEqual(["2"]);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("keeps the wide-card look (four columns) while the width is unknown, so a first paint and a layout-less environment do not collapse", async () => {
+    const view = await mount(live(FIXTURE_SET_NORMAL));
+    expect(rowCols(view)).toEqual(["4"]);
+  });
+});
+
+describe("Korean lines break at word ends, not inside a word (#5527 M1)", () => {
+  it("puts break-keep on the card and on its title, the agent's text, and each tile's name and reason", async () => {
+    const view = await mount(live(FIXTURE_SET_REFUSED));
+    const card = view.getByTestId("expression-set");
+    expect(card.classList.contains("break-keep")).toBe(true);
+    expect(card.querySelector("header p")!.classList.contains("break-keep")).toBe(true);
+    expect(view.getByTestId("expression-set-prompt").classList.contains("break-keep")).toBe(true);
+    const lines = [...card.querySelectorAll('[data-testid="expression-set-tile"] > span.break-keep')].map((node) => node.textContent);
+    // The names of all ten tiles and the reasons of the five grey ones.
+    expect(lines.length).toBeGreaterThanOrEqual(15);
+    expect(lines).toContain("미안해");
+    expect(lines).toContain("이 장면은 그림 모델이 만들 수 없다고 했어요");
+  });
+});
