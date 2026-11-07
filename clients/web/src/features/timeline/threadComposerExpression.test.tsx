@@ -404,8 +404,27 @@ describe("보내기 한 번: [큰 그림, 글]이 같은 스레드로, 다른 �
     await accept(0);
     await accept(1);
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.options?.attachmentIds ?? []).toEqual([]);
+    expect(calls[0]?.options).not.toHaveProperty("attachmentIds");
     expect(calls[1]?.options?.attachmentIds).toEqual(["att-1"]);
+  });
+
+  it("링크 미리 보기를 끄고 보내면 끄기는 글 답글(둘째)에만 실린다 - 그림 답글에는 실리지 않는다", async () => {
+    await mount();
+    await pickCheers();
+    await type("이 링크 봐 주세요 https://a.example/one");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    // 링크 카드가 떴다: ✕ 로 이번 답글은 미리보기 없이 보낸다.
+    await click(q("thread-composer-link-preview-dismiss"));
+    expect(q("thread-composer-link-preview")).toBeNull();
+    await click(sendButton());
+    await accept(0);
+    await accept(1);
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.body)).toEqual([":cheers_still:", "이 링크 봐 주세요 https://a.example/one"]);
+    expect(calls[0]?.options).not.toHaveProperty("suppressUnfurl");
+    expect(calls[1]?.options?.suppressUnfurl).toBe(true);
   });
 });
 
