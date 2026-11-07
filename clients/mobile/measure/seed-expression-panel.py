@@ -172,6 +172,13 @@ def make_items():
     tiny("party_parrot", "파티 앵무새", ["축하"], 3)
     tiny("smile_tiny", "작은 웃음", ["웃음"], 0)
     tiny("wow_tiny", "깜짝", ["놀람"], 4)
+    # 키워드 추천(#5478) 확인용 꼬리표: 「ㅋㅋㅋ」·「한숨」·「배고파」를 치면 이 그림들이 입력창 위에 뜬다.
+    extra = {
+        "dam_kk": ["ㅋㅋ"], "chi_yay": ["ㅋㅋ"], "dam_ok": ["ㅋㅋ"], "chi_sleep": ["한숨"], "dam_haa": ["한숨"],
+        "chi_run": ["배고픔"], "cou_deploy": ["배고픔"],
+    }
+    for item in items:
+        item["tags"] = item["tags"] + extra.get(item["key"], [])
     return items
 
 
