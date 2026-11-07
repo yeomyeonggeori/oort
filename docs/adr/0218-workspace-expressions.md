@@ -1558,7 +1558,7 @@ owner 결정: 팀 키 그림 모델(§8 H9의 길)은 지금 만들지 않는다
 
 1. **모양.** `{type:"expression.changed.detail", workspaceId, version, action, expressionIds}`. `action`은 `created`·`edited`·`hidden`·`deleted`·`policy_changed`. `version`은 짝인 v1과 같은 카탈로그 version(한 변경 = 한 version이라 이것이 짝의 열쇠다). `expressionIds`는 소문자 uuid의 중복 없는 배열: `hidden`·`deleted`는 **이제 화면에 보이면 안 되는 id**, `created`·`edited`는 바뀐 id, `policy_changed`는 빈 배열. 최대 40개(§12 L4의 한 세트 승인 크기; 세트 승인은 한 version으로 등록하므로 한 알림에 담긴다).
 2. **담지 않는 것.** id·action·version 외에는 아무것도 싣지 않는다 — 이름·표시 이름·태그·신고자·사유·그림 정보 없음. `hidden`이라는 사실은 목록 델타가 이미 모든 멤버에게 `status:"hidden"`으로 보여 주는 값이다(D2). 감사 행·v1은 바뀌지 않는다.
-3. **서버.** `changed()`가 같은 tx 안에서, version을 올린 뒤, **상세를 먼저 쓰고 v1을 쓴다**(outbox `id`는 `BIGSERIAL`이라 같은 연결의 두 INSERT는 상세 < v1). 상세의 멱등 키는 `expression-detail:{ws}:{v}`로 v1의 `expression:{ws}:{v}`와 **달라야 한다**: 같으면 Centrifugo의 5분 멱등 캐시가 둘째 발행을 버린다. `changed()`는 `Effect`(`Created(ids)`·`Edited(id)`·`Hidden(id)`·`Deleted(id)`·`PolicyChanged`)를 인자로 받아 모든 호출자가 무슨 변경인지 컴파일 때 밝히게 한다 — 상세 없는 v1이 새로 생길 수 없다.
+3. **서버.** `changed()`가 같은 tx 안에서, version을 올린 뒤, **상세를 먼저 쓰고 v1을 쓴다**(outbox `id`는 `BIGSERIAL`이라 같은 연결의 두 INSERT는 상세 < v1). 상세의 멱등 키는 `expression-detail:{ws}:{v}`로 v1의 `expression:{ws}:{v}`와 **달라야 한다**: 같으면 Centrifugo의 5분 멱등 캐시가 둘째 발행을 버린다. `changed()`는 `Effect`(`Created(ids)`·`Edited(id)`·`Hidden(id)`·`Deleted(id)`·`PolicyChanged`)를 인자로 받아 모든 호출자가 무슨 변경인지 컴파일 때 밝히게 한다. 상세는 계약이 허락하는 모양일 때만 쓴다: `created`인데 id가 0개이거나 40개를 넘으면 상세 없이 v1만 나가고, 그때 클라이언트는 전부 내린다(안전한 쪽, 지금 호출자 중에는 없다).
 4. **스키마는 열려 있다.** `ChangedDetail`은 모르는 필드를 무시한다(`additionalProperties`를 닫지 않는다). v1 `Changed`가 닫혀 있어서 이번 설계가 이렇게 돌아가야 했던 것과 같은 일을 다음 더하기가 만들지 않게 한다. 반대로 **모르는 `action`은 불일치**다: 그 상세는 알림이 아니게 되고 뒤따르는 v1이 전부 내린다(안전한 쪽).
 5. **클라이언트 판정은 코어 한 곳이다**(`changeNotice.ts`). `revoke-ids`(숨김·삭제: 그 id만 내린다), `keep-all`(등록·고치기·정책: 그림을 그대로 두고 목록을 새로 받는다), `revoke-all`(상세 없는 v1, 읽을 수 없는 상세, 이름 없는 숨김·삭제: 전부 내린다), `already-handled`(같은 version의 다른 알림이 이미 처리했다). 웹과 폰이 같은 함수를 부른다.
 
@@ -1610,7 +1610,7 @@ owner 결정: 팀 키 그림 모델(§8 H9의 길)은 지금 만들지 않는다
 ### P7. 클라이언트 접합
 
 - **코어** `changeNotice.ts`: `readExpressionChangeDetail`(계약·워크스페이스 확인), `readExpressionChangedVersion`(옛 알림의 version — 폰은 옛 알림을 예전처럼 느슨하게 읽으므로 맞지 않으면 null), `decideExpressionDetail`·`decideExpressionChanged`(순수 판정, 상태 = 최근 version 기억), `createExpressionNoticeGate`(기억을 쥔 얇은 포장, `reset()`).
-- **웹**: `watchExpressionChanges`가 상세를 먼저 검사해 처리기에 넘기고, `ExpressionsProvider`가 판정대로 `evictImages(ids)`(그 id의 메모리 그림만 폐기) 또는 목록 읽기만 한다. v1 처리(전부 폐기 + 읽기)는 그대로이고 같은 version의 상세가 먼저 왔으면 건너뛴다.
+- **웹**: `watchExpressionChanges`가 상세를 먼저 검사해 처리기에 넘기고, `notices.ts`(`ExpressionsProvider`가 쓴다)가 판정대로 `evictImages(ids)`(그 id의 메모리 그림·받는 중 읽기·목록 항목만 폐기) 또는 목록 읽기만 한다. v1 처리(전부 폐기 + 읽기)는 그대로이고 같은 version의 상세가 먼저 왔으면 건너뛴다.
 - **폰**: `channelRail`이 상세를 `onDetail`로 넘기고(옛 알림은 `onChanged(version)`), 스토어가 `revoke-ids`(그 id의 파일·받는 중 읽기·보관함 항목)·`keep-all`(목록 읽기만)·`revoke-all`(그리기 멈춤 + 받는 중 읽기 폐기, 파일은 두고 목록이 알려 주는 id만 걷기)을 처리한다. 목록 읽기의 판(`readGen`)은 그림 받기의 판(`epoch`)과 따로다: 숨김 상세는 앞서 시작한 목록 읽기만 버리고 다른 그림의 받기는 이어 간다. 내 응답(`mutate`)이 낸 걷기와 목록이 알려 주는 걷기도 같은 길(그 id만)이다. 닫힌 문(`changePending`) 동안 `image()`는 두었던 파일도 내주지 않는다. 시험은 새 구독(`resetNotices`)에서 기억을 비운다.
 
 ### P8. 시험·인계·열지 않는 것
