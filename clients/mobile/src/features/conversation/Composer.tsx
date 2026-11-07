@@ -1282,8 +1282,8 @@ export function Composer({
    */
   onKeyBlockedChange?: (blocked: boolean) => void;
   /**
-   * #5452 — 이모티콘·GIF 를 고르면 입력창 위 미리 보기에 올리고 보내기 한 번에 글과 함께 보낸다(호스트의 `onSend` 가 `options.expression` 을 받는다). 켜지 않으면(스레드 입력창)
-   * 고른 이모티콘은 `:이름:` 글로 입력칸에 들어간다 - 웹 스레드 입력칸과 같다.
+   * #5452 — 이모티콘·GIF 를 고르면 입력창 위 미리 보기에 올리고 보내기 한 번에 글과 함께 보낸다(호스트의 `onSend` 가 `options.expression` 을 받는다). 대화 입력창과 스레드 입력창이 켠다(#5490):
+   * 답글 머리말(밀어서 답장)이 걸려 있어도 같다 - 미리 보기와 머리말이 함께 서고, 호스트가 두 메시지를 같은 스레드에 단다. 켜지 않으면(하네스·시험) 고른 이모티콘은 `:이름:` 글로 입력칸에 들어간다.
    */
   expressionBundle?: boolean;
 }): React.JSX.Element {
@@ -1365,12 +1365,12 @@ export function Composer({
   const panelPhaseRef = useRef(panelPhase);
   panelPhaseRef.current = panelPhase;
   const panelOpen = panelPhase !== WORD.closed;
-  // 입력창 위 미리 보기에 올라 있는 이모티콘·GIF(채널 입력창만). 보내면 비고, ✕가 비운다.
+  // 입력창 위 미리 보기에 올라 있는 이모티콘·GIF(묶음 보내기를 켠 입력창). 보내면 비고, ✕가 비운다.
   const [expressionPreview, setExpressionPreview] = useState<Expression | null>(null);
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const {store: expressionStore} = useExpressions();
-  // 답글 머리말이 걸려 있으면 이 입력창은 스레드 답글을 보낸다 - 묶음 보내기는 채널 글의 것이라 이모티콘은 `:이름:` 글로 들어간다.
-  const previewing = expressionBundle && !replying;
+  // 미리 보기에 올릴 수 있는 입력창인가. 답글 머리말(`replying`)이 걸려 있어도 그렇다(#5490): 머리말은 알약 안, 미리 보기는 알약 위라 함께 서고, 호스트가 [큰 그림, 글]을 같은 스레드의 답글로 보낸다.
+  const previewing = expressionBundle;
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
   // Mirrors `text` for the caret derivation below without making `onChangeText`
@@ -1927,11 +1927,11 @@ export function Composer({
   useEffect(() => {
     startKeyboardMemory();
   }, []);
-  // 채널을 옮기거나 답글 머리말이 걸리면 미리 보기는 따라가지 않는다(웹과 같다 - 다른 방으로 그림이 새지 않는다).
+  // 방(또는 스레드)을 옮기면 미리 보기는 따라가지 않는다(웹과 같다 - 다른 방으로 그림이 새지 않는다). 답글 머리말이 걸리거나 떨어져도 미리 보기는 남는다: 글처럼 이 입력창이 든 초안이고(#5490), 머리말은 어디로 보내는가만 바꾼다.
   useEffect(() => {
     setExpressionPreview(null);
     setPreviewUnavailable(false);
-  }, [draftKey, replying]);
+  }, [draftKey]);
   // 글을 캐럿 자리에 끼운다. 창이 서 있을 때 입력창은 포커스가 없어서(키보드가 내려갔다) 캐럿은 입력창이 마지막으로 안 자리다 - 한 번도 안 눌린 초안은 끝에 붙인다.
   const insertPiece = useCallback(
     (make: (base: string, at: number) => {text: string; caret: number}) => {
@@ -1959,7 +1959,7 @@ export function Composer({
   const pickBig = useCallback(
     (item: Expression) => {
       if (!previewing) {
-        // 스레드 입력창: 미리 보기·묶음이 없다. `:이름:` 글이 들어가고 그 글 하나만 보내면 큰 이모티콘이 된다(ADR-0218 D1).
+        // 묶음 보내기를 켜지 않은 입력창(하네스·시험): 미리 보기가 없다. `:이름:` 글이 들어가고 그 글 하나만 보내면 큰 이모티콘이 된다(ADR-0218 D1).
         insertToken(`:${item.name}:`);
         return;
       }
@@ -1975,7 +1975,7 @@ export function Composer({
     AccessibilityInfo.announceForAccessibility(expressionCopy(PREVIEW_CLEARED_KEY));
   }, [expressionCopy]);
   // ---- 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) ----------------------------------------------------
-  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다. 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 채널 입력창이 아님(스레드·답글 머리말) · 이미 미리 보기가 있음(큰 그림은
+  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다. 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 미리 보기에 올릴 수 없는 입력창(묶음 보내기를 켜지 않음) · 이미 미리 보기가 있음(큰 그림은
   // 하나) · 이모티콘 창이 서 있음(키보드로 칠 때만) · 멘션 목록이나 명령을 치는 중 · 오프라인 · 입력창에 포커스가 없음(목록을 눌러 쉬거나 키보드를 내림).
   const suggest = useExpressionSuggest({
     scope:

@@ -1,5 +1,5 @@
 import 'react-native-url-polyfill/auto';
-import React, {useContext} from 'react';
+import React, {useContext, useState} from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {AccessibilityInfo, Keyboard, View} from 'react-native';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
@@ -11,6 +11,7 @@ import type {Expression} from '@momo/core/features/expressions/types';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {DockFollowContext} from '../src/features/conversation/dockFollow';
+import type {ReplyTarget} from '../src/features/conversation/replyTarget';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
@@ -90,6 +91,32 @@ function mount(store: PhoneExpressionStore, composerProps: Partial<React.Compone
         list={<ListProbe />}
         composer={<Composer recipient="place" channelLabel="agent-lab" directory={DIRECTORY} attachmentTarget={TARGET} onSend={onSend} {...composerProps} />}
       />
+    </PhoneExpressions.Provider>,
+  );
+  return {onSend};
+}
+// 밀어서 답장(#4869)의 답글 머리말이 걸린 입력창. 머리말의 ✕는 대상을 떼어 입력창을 다시 그리게 한다(화면이 대상을 쥐는 것과 같다).
+const REPLY_TARGET: ReplyTarget = {messageId: 'message-1', authorMemberId: 'author-1', rootId: 'root-1', mine: true, excerpt: {kind: 'text', text: '금요일에 배포해요'}};
+function ReplyHost({onSend}: {onSend: jest.Mock}) {
+  const [target, setTarget] = useState<ReplyTarget | null>(REPLY_TARGET);
+  return (
+    <Composer
+      recipient="place"
+      channelLabel="agent-lab"
+      directory={DIRECTORY}
+      attachmentTarget={TARGET}
+      onSend={onSend}
+      expressionBundle
+      replyTarget={target}
+      onCancelReply={() => setTarget(null)}
+    />
+  );
+}
+function mountReply(store: PhoneExpressionStore) {
+  const onSend = jest.fn();
+  render(
+    <PhoneExpressions.Provider value={store}>
+      <ConversationLayout list={<ListProbe />} composer={<ReplyHost onSend={onSend} />} />
     </PhoneExpressions.Provider>,
   );
   return {onSend};
@@ -272,7 +299,7 @@ describe('보내기 하나 — 그림과 글을 같이(와이어는 큰 표현 �
     expect(screen.queryByTestId('composer-expression-unavailable')).toBeNull();
   });
 
-  it('스레드 입력창(묶음 없음): 이모티콘은 `:이름:` 글로 입력칸에 들어가고 미리 보기는 서지 않는다', async () => {
+  it('묶음 보내기를 켜지 않은 입력창(하네스): 이모티콘은 `:이름:` 글로 입력칸에 들어가고 미리 보기는 서지 않는다', async () => {
     const store = await loadedStore();
     const {onSend} = mount(store, {});
     openPanel();
@@ -309,5 +336,54 @@ describe('이모지 — 글자처럼 캐럿 자리에 들어간다(미리 보기
     fireEvent.press(screen.getByTestId('expression-panel-tab-emoji'));
     fireEvent.press(await screen.findByTestId('emoji-pick-🎉'));
     await waitFor(() => expect(input().props.value).toBe('🎉'));
+  });
+});
+
+describe('답글 머리말이 걸린 입력창 - 밀어서 답장도 같은 미리 보기·한 번에 보내기 (#5490)', () => {
+  it('고르면 머리말 아래(알약 안)와 입력창 위(알약 밖)에 둘이 함께 선다 - `:이름:` 글은 입력칸에 안 들어가고, 보내기 한 호출에 그림과 글이 같이 실린다', async () => {
+    const store = await loadedStore();
+    const {onSend} = mountReply(store);
+    openPanel();
+    pick('dam_kk');
+    const pill = within(screen.getByTestId('composer-pill'));
+    expect(pill.getByTestId('reply-draft-card')).toBeTruthy(); // 머리말은 알약 안
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(pill.queryByTestId('composer-expression-preview')).toBeNull(); // 미리 보기는 알약 밖(위)
+    expect(input().props.value).toBe('');
+    expect(input().props.placeholder).toBe('답글 입력'); // 머리말이 말하는 곳으로 간다
+    expect(sendDisabled()).toBe(false); // 글 없이 그림만으로도 보낼 수 있다
+    fireEvent.changeText(input(), '고생 많았어요');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith('고생 많았어요', {expression: expect.objectContaining({id: kk.id, name: 'dam_kk'})});
+    expect(screen.queryByTestId('composer-expression-preview')).toBeNull(); // 보냈으니 비운다(머리말은 호스트가 뗀다)
+  });
+
+  it('작은 이모지는 머리말이 걸려 있어도 지금처럼 글 속 캐럿 자리에 들어간다 - 미리 보기로 가지 않는다', async () => {
+    const store = await loadedStore();
+    mountReply(store);
+    fireEvent.changeText(input(), '안녕');
+    fireEvent(input(), 'selectionChange', {nativeEvent: {selection: {start: 1, end: 1}}});
+    openPanel();
+    fireEvent.press(screen.getByTestId('expression-panel-tab-emoji'));
+    fireEvent.press(await screen.findByTestId('emoji-pick-🎉'));
+    await waitFor(() => expect(input().props.value).toBe('안🎉녕'));
+    fireEvent.press(await screen.findByTestId('expression-pick-party_parrot'));
+    await waitFor(() => expect(input().props.value).toBe('안🎉 :party_parrot: 녕'));
+    expect(screen.queryByTestId('composer-expression-preview')).toBeNull();
+    expect(screen.getByTestId('reply-draft-card')).toBeTruthy();
+  });
+
+  it('답글 취소(✕) 뒤에도 미리 보기는 남는다 - 글처럼 입력창이 든 초안이다. 그 뒤의 보내기도 같은 호출 하나다', async () => {
+    const store = await loadedStore();
+    const {onSend} = mountReply(store);
+    openPanel();
+    pick('dam_haa');
+    fireEvent.press(screen.getByTestId('reply-draft-cancel'));
+    expect(screen.queryByTestId('reply-draft-card')).toBeNull();
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(screen.getByTestId('composer-expression-preview-clear').props.accessibilityLabel).toBe('하 · 농담곰 미리 보기 지우기');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('', {expression: expect.objectContaining({id: haa.id})});
   });
 });
