@@ -62,6 +62,8 @@ type Layout = {
   vw: number; vh: number;
   pop: Box; tabsRow: Box; firstTab: Box; firstTabHit: boolean; search: Box; strip: Box | null; grid: Box;
   gridClient: number; gridScroll: number; gridMaxHeight: string;
+  /** 창의 계산된 높이 상한(px)과 Radix가 준 남은 높이(px). 상한이 남은 높이를 따르는지 값으로 본다. */
+  maxHeightPx: number; availablePx: number;
 };
 
 /** 고르개를 연 채로(`?at`·`?purpose`) 새 컨텍스트·창 크기에서 잰다. 열림 동작(240ms)과 Radix의 첫 자리 계산이 끝나도록 기다린다. */
@@ -97,7 +99,9 @@ async function measure(page: Page, oldCap = false): Promise<Layout> {
     const at = firstTab.getBoundingClientRect();
     const hit = document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2);
     const grid = pop.querySelector<HTMLElement>('[data-testid="expression-grid"]') ?? pop.querySelector<HTMLElement>(".emoji-grid")!.parentElement!;
+    const style = getComputedStyle(pop);
     return {
+      maxHeightPx: parseFloat(style.maxHeight), availablePx: parseFloat(style.getPropertyValue("--radix-popover-content-available-height")),
       vw: innerWidth, vh: innerHeight,
       pop: box(pop)!, tabsRow: box(tabsRow)!, firstTab: box(firstTab)!, firstTabHit: hit === firstTab || firstTab.contains(hit),
       search: box(pop.querySelector("input"))!, strip: box(pop.querySelector('[data-testid="expression-set-strip"]')),
@@ -117,6 +121,9 @@ describe("이모티콘 창은 작은 창에서 화면 안에 선다 (#5527 B1)",
         const fixed = await measure(page);
         expect(insideScreen(fixed.pop, fixed), whereAmI(rig.engine, `창 상자 ${JSON.stringify(fixed.pop)}가 720×480 안`)).toBe(true);
         expect(fixed.firstTabHit, whereAmI(rig.engine, "탭 자리의 히트 테스트가 탭")).toBe(true);
+        // 상한이 남은 높이를 따른다: Radix가 준 남은 높이가 512보다 작은 창이고, 계산된 상한이 그 값(= min(512, 남은 높이))이다.
+        expect(fixed.availablePx, whereAmI(rig.engine, "남은 높이가 옛 상한 512보다 작은 창이다")).toBeLessThan(512);
+        expect(fixed.maxHeightPx, whereAmI(rig.engine, `창의 높이 상한(${fixed.maxHeightPx})이 남은 높이(${fixed.availablePx})를 따른다`)).toBeCloseTo(Math.min(512, fixed.availablePx), 0);
         expect(insideScreen(fixed.firstTab, fixed), whereAmI(rig.engine, "탭이 화면 안")).toBe(true);
         expect(insideScreen(fixed.search, fixed), whereAmI(rig.engine, "검색 칸이 화면 안")).toBe(true);
         expect(fixed.strip !== null && insideScreen(fixed.strip, fixed), whereAmI(rig.engine, "세트 띠가 화면 안")).toBe(true);
@@ -140,6 +147,8 @@ describe("이모티콘 창은 작은 창에서 화면 안에 선다 (#5527 B1)",
         const fixed = await measure(page);
         const old = await measure(page, true);
         expect(insideScreen(fixed.pop, fixed), whereAmI(rig.engine, "창 상자가 화면 안")).toBe(true);
+        expect(fixed.availablePx, whereAmI(rig.engine, "남은 높이가 512보다 넉넉하다")).toBeGreaterThan(512);
+        expect(fixed.maxHeightPx, whereAmI(rig.engine, "상한은 옛 값 512 그대로다")).toBe(512);
         expect(fixed.pop, whereAmI(rig.engine, "창 상자가 옛 상한과 같다")).toEqual(old.pop);
         expect(fixed.gridClient, whereAmI(rig.engine, "격자 높이가 옛 상한과 같다")).toBe(old.gridClient);
         expect(fixed.gridClient, whereAmI(rig.engine, "격자는 줄지 않았다(상한 그대로)")).toBeGreaterThanOrEqual(300);
