@@ -1637,6 +1637,7 @@ async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_th
         ("done", "11 minutes", false, "ended"), // owner, today only
         ("done", "10 seconds", false, "ended"), // member, today, member's recent
         ("done", "2 days", false, "ended"),     // owner, yesterday: nothing
+        ("called", "30 minutes", false, "active"), // owner: today, but its worker died — the claim lapsed
     ];
     for (run, (state, ago, live, task_state)) in runs.iter().zip(specs) {
         let ended = task_state == "ended";
@@ -1689,8 +1690,8 @@ async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_th
             owner_counts.requester_recent,
             owner_counts.in_flight
         ),
-        (3, 1, 1),
-        "today: the three of today; the owner's ten minutes: the one; in flight: the live one"
+        (4, 1, 1),
+        "today: the four of today; the owner's ten minutes: the one; in flight: only the live one, not the dead worker's"
     );
     let member_counts = counts_for(member).await;
     assert_eq!(
@@ -1699,7 +1700,7 @@ async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_th
             member_counts.requester_recent,
             member_counts.in_flight
         ),
-        (3, 1, 1)
+        (4, 1, 1)
     );
 
     // another workspace's rows are not in this one's counts (the worker's role skips row security, so
@@ -1720,7 +1721,7 @@ async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_th
     let again = counts_for(owner).await;
     assert_eq!(
         (again.today, again.in_flight),
-        (3, 1),
+        (4, 1),
         "another workspace's called delegation is not counted here"
     );
 }
