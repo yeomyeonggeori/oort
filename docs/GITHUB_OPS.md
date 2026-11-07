@@ -93,7 +93,7 @@
 - 실행 명령은 [개발 검증](runbooks/development-validation.md), runtime profile과 실제 커버리지는 [LOCAL_PR_GATE](LOCAL_PR_GATE.md)를 따른다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
 - merge 직전에 현재 PR head의 `PR CI gate`·`Policy integrity gate`와 exact-base wrapper provenance를 모두 확인한다. merge 후에는 실제 병합 결과가 검증된 트리와 일치하는지 확인하고 차이가 생긴 범위를 검증하며 `track-alignment` 결과도 확인한다.
-- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다.
+- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다. 단 `strict`(최신 상태 필수)는 branch별 기대값이다: `main`은 `true`, `track/*`는 `false`(#5450)이고 반대 값은 어느 쪽이든 `--check` FAIL(drift)이며, `--apply`는 이 값만은 보존하지 않고 기대값으로 맞춘다. 근거와 착륙 안전망은 [TRACKS](TRACKS.md) §3.2를 따른다.
 
 #### Trusted policy-integrity gate (#1302)
 

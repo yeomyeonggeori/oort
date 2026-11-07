@@ -1,0 +1,75 @@
+appId: app.momo.ios
+name: 5478-expression-suggest
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 글을 치다 멈추면 입력창 위에 얇은 추천 줄이 뜨고, 누르면 미리 보기에 올라가고, 보내기 한 번에 그림과 글이 간다 — 저절로 보내지 않는다 (#5478, 코어 #5454 1단계, owner 2026-11-07).
+#
+# 흐름: 입력창에 「ㅋㅋㅋ」 → 0.3초 멈추면 줄(그림 + ✕만, 안내 글 없음)이 입력창 바로 위에 뜬다 → 그림 하나를 누름 → 줄은 사라지고 입력창 위 미리 보기가 선다. 대화에는 아직 아무것도
+# 안 나갔다(저절로 보내지 않는다) → 보내기 한 번 → 미리 보기가 비워지고 대화에 큰 그림(`expression-body-large`)과 글이 온다. 서버가 받은 개수·순서(그림 → 글)는 레인 DB 에서 읽는다(인계 「시험」).
+#
+# 준비: `CHANNEL_ID` 채널이 있고 팀 보관함에 꼬리표 「ㅋㅋ」 를 가진 `dam_kk` 가 있는 스택 - `measure/seed-expression-panel.py`(꼬리표 ㅋㅋ·한숨·배고픔 포함). 돌리는 법은
+# `maestro/5452-expression-panel.yaml` 머리말과 같다. 하드웨어 키보드는 꺼져 있어야 한다(`hwkb <UDID> off`).
+- launchApp:
+    appId: app.momo.ios
+# 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ① 「ㅋㅋㅋ」 - 멈추면 입력창 위에 줄이 뜬다. 그림과 ✕ 만 있고, 대화에는 아무것도 안 나갔다.
+- tapOn:
+    id: "composer-input"
+- inputText: "ㅋㅋㅋ"
+- extendedWaitUntil:
+    visible:
+      id: "composer-expression-suggest"
+    timeout: 10000
+- assertVisible:
+    id: "composer-expression-suggest-item-dam_kk"
+- assertVisible:
+    id: "composer-expression-suggest-mute"
+- assertNotVisible:
+    id: "composer-expression-preview"
+
+# ② 그림 하나를 누른다 - 줄은 사라지고 입력창 위 미리 보기가 선다. 아직 보내지 않았다: 보냈다면 미리 보기는 이미 비워졌을 것이다(보내기가 비운다).
+#    (대화에 이미 있는 큰 그림은 앞 실행의 것일 수 있어 여기서는 재지 않는다 - 서버가 받은 개수는 인계 「시험」에서 레인 DB 로 읽는다.)
+- tapOn:
+    id: "composer-expression-suggest-item-dam_kk"
+- extendedWaitUntil:
+    visible:
+      id: "composer-expression-preview"
+    timeout: 10000
+- assertNotVisible:
+    id: "composer-expression-suggest"
+- assertVisible:
+    id: "composer-expression-preview-clear"
+
+# ③ 보내기 한 번 - 그림과 글이 같이 간다. 미리 보기는 사라진다.
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-expression-preview"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "expression-body-large"
+    timeout: 20000
+- assertVisible:
+    text: "ㅋㅋㅋ"

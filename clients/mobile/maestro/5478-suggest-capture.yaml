@@ -1,0 +1,52 @@
+appId: app.momo.ios
+name: 5478-suggest-capture
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   CHANNEL_ID TEXT PICK  (PICK=yes 면 줄의 첫 그림을 눌러 미리 보기까지 올린다)
+---
+# 키워드 추천 줄 캡처 준비 (#5478): 이미 로그인한 앱에서 채널 대화를 열고(대화가 아니면 목록에서 `CHANNEL_ID` 채널을 연다) 입력창을 비우고 `TEXT` 를 치고(필요하면 줄의 첫 그림을 눌러
+# 미리 보기에 올리고) 그 자리에서 멈춘다. 로그인은 `5478-expression-suggest.yaml` 이 이미 했다고 본다(저장된 로그인으로 목록이 먼저 뜬다).
+# 화면은 이 흐름이 끝난 뒤 셸에서 `xcrun simctl io <UDID> screenshot` 로 찍는다(디바운스 0.3초가 지난 뒤여야 「줄이 없음」 장면이 거짓이 아니다). 밝음·큰 글씨는 `xcrun simctl ui` 가 바꾼다
+# (앱은 시스템 밝기를 따르지 않고 앱 설정의 「화면 모드」를 따른다 - 어둡게는 프로필 → 테마 → 다크). 「ㅋㅋ」 를 ✕ 로 끄면 앱을 다시 켜기 전까지 이 대화에서 다시 안 뜬다.
+# 채널 대화가 아니면(앱을 다시 켠 뒤·화면 모드를 바꾼 뒤) 목록에서 이 채널을 연다.
+- runFlow:
+    when:
+      notVisible:
+        id: "composer-pill"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "sidebar-row-channel:${CHANNEL_ID}"
+          timeout: 60000
+      - tapOn:
+          id: "sidebar-row-channel:${CHANNEL_ID}"
+          retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 60000
+# 앞 장면의 미리 보기가 남아 있으면 줄이 서지 않는다(미리 보기가 있으면 줄이 없다) - 먼저 비운다.
+- runFlow:
+    when:
+      visible:
+        id: "composer-expression-preview-clear"
+    commands:
+      - tapOn:
+          id: "composer-expression-preview-clear"
+- tapOn:
+    id: "composer-input"
+- eraseText: 80
+- inputText: "${TEXT}"
+- runFlow:
+    when:
+      true: ${PICK == 'yes'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "composer-expression-suggest-item-dam_kk"
+          timeout: 10000
+      - tapOn:
+          id: "composer-expression-suggest-item-dam_kk"
+      - extendedWaitUntil:
+          visible:
+            id: "composer-expression-preview"
+          timeout: 10000
