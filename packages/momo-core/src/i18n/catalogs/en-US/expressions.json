@@ -193,6 +193,8 @@
   "expressions.suggest.group": "Emoticon suggestions",
   "expressions.suggest.pick": "Preview {name}",
   "expressions.suggest.mute": "Turn off suggestions for this word",
+  "expressions.suggest.settingLabel": "Emoticon suggestions",
+  "expressions.suggest.settingHint": "Shows matching emoticons above the message box when you pause while typing.",
   "expressions.picker.teamGroup": "Team library",
   "expressions.picker.grid": "Team expressions",
   "expressions.picker.sectionRecent": "Recent",

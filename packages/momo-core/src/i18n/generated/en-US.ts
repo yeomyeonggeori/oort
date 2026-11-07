@@ -3456,6 +3456,18 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "expressions.suggest.settingHint": [
+    {
+      "type": 0,
+      "value": "Shows matching emoticons above the message box when you pause while typing."
+    }
+  ],
+  "expressions.suggest.settingLabel": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,

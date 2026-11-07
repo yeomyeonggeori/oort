@@ -503,6 +503,8 @@ export const messageKeys = [
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.settingHint",
+  "expressions.suggest.settingLabel",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1794,6 +1796,8 @@ export const argumentSpecs = {
   "expressions.suggest.pick": {
     "name": "string"
   },
+  "expressions.suggest.settingHint": {},
+  "expressions.suggest.settingLabel": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3224,6 +3228,8 @@ export interface MessageArgs {
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.settingHint": Record<string, never>;
+  "expressions.suggest.settingLabel": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
