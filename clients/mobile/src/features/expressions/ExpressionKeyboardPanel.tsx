@@ -127,7 +127,7 @@ const buildStyles = (color: Palette) =>
     },
     segment: {
       flex: 1,
-      minHeight: TOUCH_TARGET - space.sm,
+      minHeight: TOUCH_TARGET,
       paddingHorizontal: space.sm,
       alignItems: WORD.center,
       justifyContent: WORD.center,
