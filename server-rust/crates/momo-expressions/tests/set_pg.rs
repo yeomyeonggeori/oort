@@ -393,6 +393,13 @@ async fn still(w: &World, owner: Owner, id: Uuid, index: u8, media: e::media::Pr
     .await
 }
 
+async fn gif(w: &World, owner: Owner, id: Uuid, index: u8, media: e::media::Processed) -> Wrote {
+    in_tx(&w.worker, owner.workspace, move |conn| {
+        Box::pin(async move { set::put_gif_in_tx(conn, owner, id, index, &media).await })
+    })
+    .await
+}
+
 async fn abandon(
     w: &World,
     owner: Owner,
@@ -578,6 +585,40 @@ async fn app_fails(w: &World, ws: Uuid, sql: &str) -> String {
     match sqlx::query(sql).execute(&mut *tx).await {
         Ok(done) => panic!(
             "`{sql}` should have been refused for momo_app, but changed {} rows",
+            done.rows_affected()
+        ),
+        Err(error) => db_code(&error),
+    }
+}
+
+/// Try the plan confirmation on `id` as the confirming side would (the same `UPDATE` the ADR's
+/// 「이대로 만들기」 runs: `plan_confirmed_at = t, expires_at = t + 2 hours`), inside a transaction that
+/// first locks the head and checks it is still `staging`. A concurrent sweep (another test's, in a
+/// parallel run) cannot close the head under the attempt, so a refusal can only be the trigger's own
+/// rule about the expiry and never a head that was already reclaimed. `ws` binds the tenant for the
+/// NOBYPASSRLS role. Returns the SQLSTATE the confirmation failed with; the transaction is rolled back.
+async fn confirm_fails(pool: &PgPool, ws: Option<Uuid>, id: Uuid) -> String {
+    let mut tx = pool.begin().await.unwrap();
+    if let Some(ws) = ws {
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(ws.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM expression_set WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(state, "staging", "precondition: the head was not swept yet");
+    let sql = format!(
+        "WITH t AS (SELECT clock_timestamp() AS at) UPDATE expression_set h SET plan_confirmed_at = t.at, expires_at = t.at + interval '2 hours' FROM t WHERE h.id = '{id}'"
+    );
+    match sqlx::query(&sql).execute(&mut *tx).await {
+        Ok(done) => panic!(
+            "a confirmation after the expiry changed {} rows",
             done.rows_affected()
         ),
         Err(error) => db_code(&error),
@@ -954,6 +995,118 @@ async fn begin_proves_the_run_the_requester_and_the_agent_and_a_bad_plan_writes_
         "23503",
         "not the run's conversation"
     );
+}
+
+/// Security review M1 (ADR-0218 §12 L3.2 「모든 쓰기는 같은 tx에서 run 상태·요청자·에이전트를 다시 증명한다」):
+/// `begin` proves the run, and so does every write after it. A set begun in a live run is not written
+/// into once that run has ended, its trigger message is gone, or its requester has left the room or
+/// the workspace, whichever of the three writes is tried. `begin_proves_…` measures the same things at
+/// `begin` only; without this test the line in `fill_in_tx` that asks again could be deleted with
+/// every test green (the owner predicates of `lock_staging`, which A6 measures, do not look at the run's
+/// life). Each case has a control (the same kind of write is taken while the run lives), and the end of
+/// the run must not stop `abandon`: it is the very event that reclaims the set.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a_write_after_the_run_ends_is_refused() {
+    let w = world().await;
+    // `{run}` and `{alice}` (the run's trigger author, the requester) are filled in per tenant
+    let ends: [(&str, &str); 8] = [
+        (
+            "run cancelled",
+            "UPDATE agent_run SET status = 'cancelled'::run_status WHERE id = '{run}'",
+        ),
+        (
+            "run succeeded",
+            "UPDATE agent_run SET status = 'succeeded'::run_status WHERE id = '{run}'",
+        ),
+        (
+            "run failed",
+            "UPDATE agent_run SET status = 'failed'::run_status WHERE id = '{run}'",
+        ),
+        (
+            "run timed out",
+            "UPDATE agent_run SET status = 'timed_out'::run_status WHERE id = '{run}'",
+        ),
+        (
+            "trigger deleted",
+            "UPDATE message SET deleted_at = now() WHERE id = (SELECT trigger_message_id FROM agent_run WHERE id = '{run}')",
+        ),
+        (
+            "left the room",
+            "UPDATE membership SET left_at = now() WHERE channel_id = (SELECT channel_id FROM agent_run WHERE id = '{run}') AND member_id = '{alice}'",
+        ),
+        (
+            "requester suspended",
+            "UPDATE member SET status = 'suspended'::member_status WHERE id = '{alice}'",
+        ),
+        (
+            "requester deleted",
+            "UPDATE member SET deleted_at = now() WHERE id = '{alice}'",
+        ),
+    ];
+    for (label, end) in ends {
+        let t = tenant(&w.su).await;
+        let owner = t.owner();
+        let id = begun(&w, t, plan("rvw")).await;
+        // the control: while the run lives, a write of the very same kind is taken
+        let kept = still(&w, owner, id, 1, decoded_still())
+            .await
+            .unwrap()
+            .expect("a live run writes");
+        let end = end
+            .replace("{run}", &t.run.to_string())
+            .replace("{alice}", &t.alice.to_string());
+        sqlx::query(&end).execute(&w.su).await.unwrap();
+        // all three writes are refused, with the answer an unknown set gets ...
+        assert_eq!(
+            gray(&w, owner, id, 0, GrayCode::Failed).await.unwrap(),
+            Err(Refusal::InvalidArguments),
+            "{label}: gray"
+        );
+        assert_eq!(
+            still(&w, owner, id, 0, decoded_still()).await.unwrap(),
+            Err(Refusal::InvalidArguments),
+            "{label}: still"
+        );
+        assert_eq!(
+            gif(&w, owner, id, 2, decoded_gif()).await.unwrap(),
+            Err(Refusal::InvalidArguments),
+            "{label}: gif"
+        );
+        // ... and left nothing behind
+        let held = get(&w, owner, id).await.expect("the owner still reads it");
+        assert_eq!(
+            held.slots
+                .iter()
+                .map(|s| s.state.as_str())
+                .collect::<Vec<_>>(),
+            ["planned", "ready", "planned"],
+            "{label}: only the control's slot was written"
+        );
+        assert_eq!(
+            held.stored_bytes, kept.stored_bytes,
+            "{label}: no byte was added"
+        );
+        assert_eq!(
+            images_of(&w.su, id).await,
+            3,
+            "{label}: only the control's three renditions"
+        );
+        // the end of the run is what reclaims a set, so the same rule must not stop `abandon`
+        let reclaimed = abandon(&w, owner, id)
+            .await
+            .unwrap()
+            .unwrap_or_else(|refusal| panic!("{label}: abandon was refused: {refusal:?}"));
+        assert_eq!(
+            reclaimed,
+            set::Reclaimed {
+                images: 3,
+                slots: 1,
+                closed_now: true
+            },
+            "{label}: abandon reclaims what the live run wrote"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1571,9 +1724,9 @@ async fn a37_every_runtime_role_holds_exactly_the_verbs_of_the_adr_and_real_conn
             ("expression_set", "momo_worker") | ("expression_set_slot", "momo_worker") => {
                 vec!["SELECT", "INSERT", "UPDATE"]
             }
-            ("expression_set", "momo_app") | ("expression_set_slot", "momo_app") => {
-                vec!["SELECT", "UPDATE"]
-            }
+            ("expression_set", "momo_app") => vec!["SELECT", "UPDATE"],
+            // table level SELECT only: its one slot write is the column grant UPDATE (scene) below
+            ("expression_set_slot", "momo_app") => vec!["SELECT"],
             ("expression_set_image", "momo_worker") => vec!["SELECT", "INSERT", "DELETE"],
             ("expression_set_image", "momo_app") => vec!["SELECT", "DELETE"],
             ("expression_set_notice", "momo_worker") => vec!["SELECT"],
@@ -1636,7 +1789,11 @@ async fn a37_every_runtime_role_holds_exactly_the_verbs_of_the_adr_and_real_conn
                         || (role == "momo_notifier"
                             && table == "expression_set"
                             && verb == "SELECT"
-                            && ["workspace_id", "state", "expires_at"].contains(&column.as_str()));
+                            && ["workspace_id", "state", "expires_at"].contains(&column.as_str()))
+                        || (role == "momo_app"
+                            && table == "expression_set_slot"
+                            && verb == "UPDATE"
+                            && column == "scene");
                     if has != want {
                         drift.push(format!("{role} {table}.{column} {verb} has={has}"));
                     }
@@ -1707,9 +1864,27 @@ async fn a37_every_runtime_role_holds_exactly_the_verbs_of_the_adr_and_real_conn
         "UPDATE expression_set_image SET width = width",
         "UPDATE expression_set_notice SET seen_at = now()",
         "DELETE FROM expression_set_notice",
+        // a slot: its scene text is the one column it may write (security review L1) — not the state
+        // that closes a slot, the code, the plan, nor any of them beside the scene in one statement
+        "UPDATE expression_set_slot SET state = state",
+        "UPDATE expression_set_slot SET code = code",
+        "UPDATE expression_set_slot SET name = name",
+        "UPDATE expression_set_slot SET scene = scene, state = state",
     ] {
         assert_eq!(app_fails(&w, w.a.ws, sql).await, "42501", "{sql}");
     }
+    // and the control for the denials above: the very same role may write the scene (a zero-row UPDATE
+    // still needs the privilege), so a drop of the column grant is not mistaken for the narrowing
+    in_tx(&w.api, w.a.ws, |conn| {
+        Box::pin(async move {
+            sqlx::query("UPDATE expression_set_slot SET scene = scene WHERE false")
+                .execute(&mut *conn)
+                .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("momo_app holds UPDATE (scene) on the slot");
 }
 
 #[tokio::test]
@@ -2071,6 +2246,79 @@ async fn a29_the_sweep_touches_staging_only_and_the_confirmation_restarts_the_tw
         begin(&w, again, plan("dd")).await.unwrap().unwrap_err(),
         Refusal::SetBusy
     );
+}
+
+/// Security review M2 (ADR-0218 §12 L8-3): a head whose two hours are up but that no sweep has closed
+/// yet must not be brought back to life by a confirmation. The head trigger refuses it
+/// (`OLD.expires_at <= clock_timestamp()`); without that rule the same confirmation was refused or
+/// revived the set depending on whether the sweep had run first. Both roles that may update a head are
+/// tried (the trigger does not look at who). The boundary's other side stays open: a head 119 minutes in
+/// is still confirmed and has two hours from the confirmation (the case of A29).
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a29_a_confirmation_after_the_expiry_is_refused_even_before_the_sweep_runs() {
+    let w = world().await;
+    let tw = tenant(&w.su).await;
+    let by_worker = begun(&w, tw, plan("lw")).await;
+    backdate(&w.su, by_worker, 121).await;
+    assert_eq!(
+        confirm_fails(&w.worker, None, by_worker).await,
+        "23514",
+        "momo_worker: confirmed 121 minutes in"
+    );
+    let ta = tenant(&w.su).await;
+    let by_app = begun(&w, ta, plan("la")).await;
+    backdate(&w.su, by_app, 121).await;
+    assert_eq!(
+        confirm_fails(&w.api, Some(ta.ws), by_app).await,
+        "23514",
+        "momo_app: confirmed 121 minutes in"
+    );
+    // nothing was confirmed and no expiry was extended: both heads are as due as they were
+    for id in [by_worker, by_app] {
+        let (confirmed, due): (Option<chrono::DateTime<chrono::Utc>>, bool) = sqlx::query_as(
+            "SELECT plan_confirmed_at, expires_at <= clock_timestamp() FROM expression_set WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+        assert!(confirmed.is_none(), "{id}: never confirmed");
+        assert!(due, "{id}: the expiry did not move");
+    }
+    // the sweep is what closes them, whoever runs it
+    e::sweep_expired(&w.notifier, &w.api).await.expect("sweep");
+    for id in [by_worker, by_app] {
+        let state: String = sqlx::query_scalar("SELECT state FROM expression_set WHERE id = $1")
+            .bind(id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(state, "expired", "{id}: reclaimed by the sweep");
+    }
+    // the other side of the boundary: 119 minutes in is still confirmed, two hours from the confirmation
+    let tg = tenant(&w.su).await;
+    let in_time = begun(&w, tg, plan("lg")).await;
+    backdate(&w.su, in_time, 119).await;
+    sqlx::query(&format!(
+        "WITH t AS (SELECT clock_timestamp() AS at) UPDATE expression_set h SET plan_confirmed_at = t.at, expires_at = t.at + interval '2 hours' FROM t WHERE h.id = '{in_time}'"
+    ))
+    .execute(&w.worker)
+    .await
+    .expect("a confirmation 119 minutes in is taken");
+    let (confirmed, expires, live): (
+        chrono::DateTime<chrono::Utc>,
+        chrono::DateTime<chrono::Utc>,
+        bool,
+    ) = sqlx::query_as(
+        "SELECT plan_confirmed_at, expires_at, expires_at > clock_timestamp() FROM expression_set WHERE id = $1",
+    )
+    .bind(in_time)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((expires - confirmed).num_seconds(), 7200);
+    assert!(live, "and the set lives on");
 }
 
 #[tokio::test]

@@ -2,8 +2,8 @@
 //! SQL that lives in three files, and these are the guards that keep the three the same text and in
 //! the one order in which the last file applied cannot undo it. No database: it reads the files.
 //! (The privileges a database ends up with are measured against a real Postgres by `set_pg`, A37.)
-//! Same four guards as `momo-agent/tests/team_ai_task_static_guards.rs` (169), plus one that reads
-//! the block's verb table as data.
+//! Same four guards as `momo-agent/tests/team_ai_task_static_guards.rs` (169), plus two that read
+//! the block's verb table and its column grants as data.
 //!
 //! | test | what turns it red |
 //! |---|---|
@@ -12,12 +12,13 @@
 //! | `the_migration_grants_nothing_outside_the_block` | a `GRANT` added to the migration after or beside the block (the RLS loop of 159 has one) |
 //! | `the_block_still_says_what_it_exists_for` | a block that compares equal because it was emptied everywhere, or one that names a role it must not |
 //! | `the_verb_table_in_the_block_is_exactly_the_one_in_the_adr` | a verb added or dropped for any role on any of the four tables (L10.1's table) |
+//! | `the_column_grants_in_the_block_are_exactly_the_two_the_adr_allows` | a column grant added, widened or dropped: the notifier's three-column read of the head, and `momo_app`'s `UPDATE (scene)` on the slot (never a table-level UPDATE; security review L1) |
 
 use std::path::PathBuf;
 
 const BEGIN: &str = "-- BEGIN expression-set-lockdown";
 const END: &str = "-- END expression-set-lockdown";
-const MIGRATION: &str = "server/Migrations/177_expression_set.sql";
+const MIGRATION: &str = "server/Migrations/176_expression_set.sql";
 const DEV: &str = "infra/rust/sql/bootstrap_roles.sql";
 const RUNTIME: &str = "infra/rust/sql/bootstrap_runtime_roles.sql";
 
@@ -111,6 +112,8 @@ fn the_block_still_says_what_it_exists_for() {
         "'momo_platform_admin'",
         "'momo_helper_read'",
         "GRANT SELECT (workspace_id, state, expires_at) ON expression_set TO momo_notifier",
+        "GRANT UPDATE (scene) ON expression_set_slot TO momo_app",
+        "AND t = 'expression_set_slot' AND r = 'momo_app' AND c = 'scene'",
         "has_table_privilege",
         "has_column_privilege",
         "RAISE EXCEPTION",
@@ -149,7 +152,8 @@ fn the_verb_table_in_the_block_is_exactly_the_one_in_the_adr() {
             "expression_set_slot/momo_worker",
             &["SELECT", "INSERT", "UPDATE"],
         ),
-        ("expression_set_slot/momo_app", &["SELECT", "UPDATE"]),
+        // table level SELECT only: its one slot write is the column grant `UPDATE (scene)` below (L1)
+        ("expression_set_slot/momo_app", &["SELECT"]),
         (
             "expression_set_image/momo_worker",
             &["SELECT", "INSERT", "DELETE"],
@@ -191,5 +195,71 @@ fn the_verb_table_in_the_block_is_exactly_the_one_in_the_adr() {
                 );
             }
         }
+    }
+}
+
+/// The block's column-level grants, as data. A table-level verb table (above) cannot see them, and
+/// they are where a role gets a verb on **some** columns: the notifier's discovery read of the head
+/// (workspace ids and the sweep's two conditions, never the prompt) and the decision side's one
+/// slot write (blanking an ended set's scene text, never a slot's state or plan). Every statement
+/// in the block that begins with `GRANT` is read, so a table-level grant added to the block, a
+/// widened column list or a third column grant is a different list and fails here.
+#[test]
+fn the_column_grants_in_the_block_are_exactly_the_two_the_adr_allows() {
+    let expected: [(&str, &[&str], &str, &str); 2] = [
+        (
+            "SELECT",
+            &["workspace_id", "state", "expires_at"],
+            "expression_set",
+            "momo_notifier",
+        ),
+        ("UPDATE", &["scene"], "expression_set_slot", "momo_app"),
+    ];
+    for relative in [MIGRATION, DEV, RUNTIME] {
+        let (_, block) = block_of(relative, &read(relative));
+        let mut grants: Vec<(String, Vec<String>, String, String)> = block
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("--"))
+            .filter_map(|line| line.strip_prefix("GRANT "))
+            .map(|statement| {
+                let (what, rest) = statement
+                    .split_once(" ON ")
+                    .unwrap_or_else(|| panic!("{relative}: a GRANT without ON: {statement}"));
+                let (verb, columns) = match what.split_once(" (") {
+                    Some((verb, columns)) => (
+                        verb.to_string(),
+                        columns
+                            .trim_end_matches(')')
+                            .split(',')
+                            .map(|column| column.trim().to_string())
+                            .collect(),
+                    ),
+                    None => (what.to_string(), vec![]),
+                };
+                let (table, role) = rest
+                    .trim_end_matches(';')
+                    .split_once(" TO ")
+                    .unwrap_or_else(|| panic!("{relative}: a GRANT without TO: {statement}"));
+                (verb, columns, table.to_string(), role.to_string())
+            })
+            .collect();
+        grants.sort();
+        let mut want: Vec<(String, Vec<String>, String, String)> = expected
+            .iter()
+            .map(|(verb, columns, table, role)| {
+                (
+                    verb.to_string(),
+                    columns.iter().map(|column| column.to_string()).collect(),
+                    table.to_string(),
+                    role.to_string(),
+                )
+            })
+            .collect();
+        want.sort();
+        assert_eq!(
+            grants, want,
+            "{relative}: the block's GRANT statements are not exactly the ADR's two column grants"
+        );
     }
 }

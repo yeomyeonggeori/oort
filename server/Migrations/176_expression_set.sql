@@ -1,5 +1,5 @@
 -- =============================================================================
--- 177_expression_set.sql — #5459 S1a (ADR-0218 증보 6 §12 L3·L7·L8·L10, Accepted 2026-11-07)
+-- 176_expression_set.sql — #5459 S1a (ADR-0218 증보 6 §12 L3·L7·L8·L10, Accepted 2026-11-07)
 --
 -- 이모티콘 세트의 서버 임시 보관. 팀 AI(oort 도우미)가 Hermes로 만드는 그림 최대 40장을 승인 전에
 -- 서버가 세 렌디션으로 쌓아 두는 자리다. 159(`expression_assembly`)의 형제이고 같은 불변 픽셀 CHECK를
@@ -168,11 +168,14 @@ BEGIN
      AND NOT (OLD.approval_id IS NULL AND OLD.state = 'staging' AND NEW.state = 'proposed') THEN
     RAISE EXCEPTION 'expression set approval is bound once, when it is proposed' USING ERRCODE = '23514';
   END IF;
-  -- plan_confirmed_at: NULL에서 값으로 한 번(staging 안에서), 그리고 같은 UPDATE가 expires_at을 정확히
+  -- plan_confirmed_at: NULL에서 값으로 한 번(staging 안에서, 만료 전에만), 그리고 같은 UPDATE가 expires_at을 정확히
   -- plan_confirmed_at + 2시간으로 다시 쓴다. 그 밖에는 expires_at이 움직이지 않는다(만료를 늘리는 길이 없다).
+  -- 만료가 이미 지났지만 sweep이 아직 닫지 않은 머리의 확정은 거절한다(`OLD.expires_at <= clock_timestamp()`):
+  -- 그렇지 않으면 sweep이 먼저 돌았는지에 따라 같은 확정이 거절되기도 되살아나기도 한다(보안 검수 1회차 M2).
   IF NEW.plan_confirmed_at IS DISTINCT FROM OLD.plan_confirmed_at THEN
     IF OLD.plan_confirmed_at IS NOT NULL OR NEW.plan_confirmed_at IS NULL
        OR OLD.state <> 'staging' OR NEW.state <> 'staging'
+       OR OLD.expires_at <= clock_timestamp()
        OR NEW.plan_confirmed_at < OLD.created_at OR NEW.plan_confirmed_at > clock_timestamp()
        OR NEW.expires_at IS DISTINCT FROM NEW.plan_confirmed_at + interval '2 hours' THEN
       RAISE EXCEPTION 'expression set plan is confirmed once, and the confirmation restarts the two hours' USING ERRCODE = '23514';
@@ -293,13 +296,14 @@ DO $$ DECLARE t text; BEGIN
 END $$;
 
 -- BEGIN expression-set-lockdown (#5459 S1a; ADR-0218 증보 6 §12 L10.1, threat T20). Identical in
--- 177_expression_set.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- 176_expression_set.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
 -- between the markers. The set tables hold what the team AI planned and made before any person approved
 -- it (a prompt, scene text, up to 24 MiB of pictures per set), the writer is the BYPASSRLS momo_worker, and
 -- every BYPASSRLS role skips RLS, so their table privileges are what keeps a forged or foreign row away
 -- from a role with no business writing one. Each runtime role gets exactly what the code does:
 -- momo_worker stages (INSERT), closes slots and heads (UPDATE) and takes pixels back (DELETE on the images);
--- momo_app decides and reclaims (moves the head, blanks the scene text, deletes the pixels) and records
+-- momo_app decides and reclaims (moves the head, deletes the pixels, and blanks the scene text through a
+-- column grant, UPDATE (scene), on the slot: it can never close or re-plan a slot) and records
 -- the first notice a member saw; momo_notifier only discovers which tenants hold an expired staging set,
 -- through three columns and never the prompt; nobody deletes a head, a slot or a notice (a foreign-key
 -- cascade from the workspace runs as the table's owner, so deleting a parent still clears its rows) and
@@ -324,7 +328,7 @@ BEGIN
         WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
         WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
         WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
-        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
         WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
         WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
         WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
@@ -341,6 +345,11 @@ BEGIN
   IF to_regclass('public.expression_set') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN
     GRANT SELECT (workspace_id, state, expires_at) ON expression_set TO momo_notifier;
   END IF;
+  -- the one slot write the decision side makes: blank the scene text of an ended set (column-level, so
+  -- a slot's state, code and plan stay out of this role's reach)
+  IF to_regclass('public.expression_set_slot') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    GRANT UPDATE (scene) ON expression_set_slot TO momo_app;
+  END IF;
   FOREACH t IN ARRAY ARRAY['expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice'] LOOP
     CONTINUE WHEN to_regclass(format('public.%I', t)) IS NULL;
     FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
@@ -349,7 +358,7 @@ BEGIN
         WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
         WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
         WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
-        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
         WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
         WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
         WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
@@ -367,7 +376,8 @@ BEGIN
         FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE'] LOOP
           want := p = ANY (allowed)
                   OR (p = 'SELECT' AND t = 'expression_set' AND r = 'momo_notifier'
-                      AND c IN ('workspace_id', 'state', 'expires_at'));
+                      AND c IN ('workspace_id', 'state', 'expires_at'))
+                  OR (p = 'UPDATE' AND t = 'expression_set_slot' AND r = 'momo_app' AND c = 'scene');
           IF has_column_privilege(r, format('public.%I', t), c, p) IS DISTINCT FROM want THEN
             RAISE EXCEPTION 'role % must % % on %.%',
               r, CASE WHEN want THEN 'hold' ELSE 'not hold' END, p, t, c;

@@ -11,7 +11,7 @@
 //! The writer is the agent worker's BYPASSRLS `momo_worker`. RLS does not stand between that role
 //! and any tenant's rows, so **RLS is not the last door here** (ADR-0218 §12 L10.1, threat T20):
 //! the `expression-set-lockdown` block keeps each role to the verbs the code uses, the composite
-//! foreign keys and triggers of migration 177 refuse a cross-tenant reference, a second write to a
+//! foreign keys and triggers of migration 176 refuse a cross-tenant reference, a second write to a
 //! slot and any step backwards, and **every statement below puts `workspace_id` and the owner
 //! (agent, requester, run) into its own SQL**. A set that is another agent's, another person's,
 //! another run's, another tenant's, expired, or already proposed is the same
