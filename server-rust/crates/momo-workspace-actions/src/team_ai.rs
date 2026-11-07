@@ -37,6 +37,7 @@ use momo_agent::card_suggest::suggestion_requester_in_tx;
 use momo_agent::inert_display_name;
 use momo_agent::team_ai_roles::TeamAiRoles;
 
+use crate::team_ai_hermes::HermesPrompt;
 use crate::team_ai_limits::TeamAiLimits;
 
 /// The handle of the team AI member.
@@ -701,8 +702,13 @@ pub enum WebSearch {
     /// The team key's wire has no server-side search (`ChatCompletions`,
     /// `Responses` until verified).
     NotSupported,
-    /// The operator switched it off (`team_ai_web_search: false`).
+    /// The administrator switched it off (`team_ai_web_search: false`).
     Off,
+    /// The operator switched it off for everybody (`TEAM_AI_DAILY_SEARCH_CAP=0`). Read as
+    /// [`WebSearch::DailyCapReached`] until ADR-0201 증보 v4 (#5369): the two are different facts — a spent
+    /// allowance comes back tomorrow and a `0` does not, and a spent allowance may be answered by Hermes
+    /// (P2 「종류 배타」) while a `0` may not (T14: it turns Hermes's search off too).
+    OperatorOff,
     /// The day's search allowance is used up — the workspace's own `dailySearches` or the
     /// operator's ceiling, whichever is lower (`team_ai_limits::search_cap`). The turn still
     /// answers; only the search tool is withheld.
@@ -714,12 +720,38 @@ pub enum WebSearch {
 }
 
 impl WebSearch {
+    /// **The one reading** of whether a request may search, shared by the first turn and every task step
+    /// (they used to carry two copies of this chain). The order is the point (ADR-0201 증보 v4 P2, review
+    /// RL3): both switches that mean 「아무도 웹 검색을 못 해요」 — the administrator's (`admin_on` false) and the
+    /// operator's `0` (`operator_off`) — are read **before** the wire, so a wire that cannot search can never
+    /// turn a switch into `NotSupported` (the state Hermes may answer). `cap_reached` is a non-zero allowance
+    /// that is spent (`searches_today >= cap`); an operator `0` never gets that far.
+    pub fn judge(
+        admin_on: bool,
+        operator_off: bool,
+        wire_searches: bool,
+        cap_reached: bool,
+    ) -> WebSearch {
+        if !admin_on {
+            WebSearch::Off
+        } else if operator_off {
+            WebSearch::OperatorOff
+        } else if !wire_searches {
+            WebSearch::NotSupported
+        } else if cap_reached {
+            WebSearch::DailyCapReached
+        } else {
+            WebSearch::Available
+        }
+    }
+
     /// The honest sentence the helper uses when asked to search and cannot.
     pub fn refusal(self) -> Option<&'static str> {
         match self {
             WebSearch::Available => None,
             WebSearch::NotSupported => Some("지금 연결된 팀 키로는 웹 검색을 못 해요."),
             WebSearch::Off => Some("웹 검색은 관리자가 꺼 두었어요."),
+            WebSearch::OperatorOff => Some("웹 검색은 서버 운영자가 꺼 두었어요."),
             WebSearch::DailyCapReached => Some("오늘 웹 검색을 다 썼어요. 내일 다시 쓸 수 있어요."),
             WebSearch::AfterRead => Some("이 조사는 워크스페이스를 읽은 뒤라서 웹 검색을 못 해요."),
         }
@@ -816,6 +848,35 @@ pub fn system_prompt_for(
     withheld: &[&str],
     task: TaskPrompt,
     files_on: bool,
+) -> String {
+    system_prompt_full(
+        roster,
+        web,
+        action_ids,
+        command_ids,
+        withheld,
+        task,
+        files_on,
+        &HermesPrompt::Off,
+    )
+}
+
+/// [`system_prompt_for`] plus the delegation line (ADR-0201 증보 v4 P2, #5369): `hermes` is what the door
+/// ([`DoorFacts::prompt`](crate::team_ai_hermes::DoorFacts::prompt)) says about Hermes for this request at
+/// this moment — a capability sentence only while `ask_hermes` is on the request, the one honest sentence
+/// the operator's opened-but-shut states need, and what a read took away. [`HermesPrompt::Off`] adds
+/// nothing and leaves the prompt byte for byte what [`system_prompt_for`] built before this slice. When the
+/// search is handed to Hermes the 「웹 검색을 못 해요」 refusal is left out: it would contradict the line.
+#[allow(clippy::too_many_arguments)]
+pub fn system_prompt_full(
+    roster: &Roster,
+    web: WebSearch,
+    action_ids: &[&str],
+    command_ids: &[&str],
+    withheld: &[&str],
+    task: TaskPrompt,
+    files_on: bool,
+    hermes: &HermesPrompt,
 ) -> String {
     // B10-7 (#4966): the helper's name is whatever it is called now. It rides in the data block
     // (「네 이름」), through `data_line`, like every other name a person typed: the instruction half
@@ -946,7 +1007,12 @@ pub fn system_prompt_for(
     if offers_work_request {
         abilities.push(work_request_prompt_line());
     }
-    abilities.push(web_line);
+    if !hermes.offers_web_search() {
+        abilities.push(web_line);
+    }
+    if let Some(line) = hermes.line() {
+        abilities.push(line);
+    }
     match task {
         TaskPrompt::Off => {}
         TaskPrompt::Offer => abilities.push(format!(
@@ -2210,6 +2276,12 @@ mod tests {
                 "지금 연결된 팀 키로는 웹 검색을 못 해요.",
             ),
             (WebSearch::Off, "웹 검색은 관리자가 꺼 두었어요."),
+            // ADR-0201 증보 v4 (#5369): the operator's `0` is its own fact, said as such — not as a spent
+            // allowance that "comes back tomorrow"
+            (
+                WebSearch::OperatorOff,
+                "웹 검색은 서버 운영자가 꺼 두었어요.",
+            ),
             (WebSearch::DailyCapReached, "오늘 웹 검색을 다 썼어요."),
         ] {
             assert!(
@@ -2218,6 +2290,73 @@ mod tests {
             );
         }
         assert!(WebSearch::Available.refusal().is_none());
+        assert!(!WebSearch::OperatorOff.refusal().unwrap().contains("내일"));
+    }
+
+    /// ADR-0201 증보 v4 P2 (#5369): the Hermes line is **added to**, never mixed into, the prompt. With
+    /// `HermesPrompt::Off` the prompt is byte for byte what `system_prompt_for` always built (every team
+    /// that never opened the delegation reads the prompt it read before); a line appears only for the
+    /// states the door says something about; and the refusal 「웹 검색을 못 해요」 is left out exactly when
+    /// the search is handed to Hermes (the two sentences would contradict each other).
+    #[test]
+    fn the_hermes_line_is_added_to_the_prompt_and_changes_nothing_when_it_is_off() {
+        use crate::team_ai_hermes::{HermesKind, HermesPrompt, HERMES_NOT_CONNECTED_SENTENCE};
+        let roster = Roster::default();
+        let base = |web| {
+            system_prompt_for(
+                &roster,
+                web,
+                &TEAM_AI_ACTION_IDS,
+                &[],
+                &[],
+                TaskPrompt::Off,
+                false,
+            )
+        };
+        let full = |web, hermes: &HermesPrompt| {
+            system_prompt_full(
+                &roster,
+                web,
+                &TEAM_AI_ACTION_IDS,
+                &[],
+                &[],
+                TaskPrompt::Off,
+                false,
+                hermes,
+            )
+        };
+        for web in [
+            WebSearch::Available,
+            WebSearch::NotSupported,
+            WebSearch::Off,
+            WebSearch::OperatorOff,
+            WebSearch::DailyCapReached,
+            WebSearch::AfterRead,
+        ] {
+            assert_eq!(base(web), full(web, &HermesPrompt::Off), "{web:?}");
+        }
+        // an offered search: the line is there and the refusal for that web state is not
+        let offered = HermesPrompt::Offered {
+            kinds: vec![HermesKind::WebSearch],
+        };
+        let with_line = full(WebSearch::NotSupported, &offered);
+        assert!(
+            with_line.contains("`ask_hermes`") && with_line.contains("`web_search`"),
+            "{with_line}"
+        );
+        assert!(
+            !with_line.contains("지금 연결된 팀 키로는 웹 검색을 못 해요"),
+            "{with_line}"
+        );
+        // a closed-state sentence does not remove the refusal (the search is not handed over)
+        let not_connected = full(WebSearch::NotSupported, &HermesPrompt::NotConnected);
+        assert!(not_connected.contains(HERMES_NOT_CONNECTED_SENTENCE));
+        assert!(not_connected.contains("지금 연결된 팀 키로는 웹 검색을 못 해요"));
+        // an offered picture alone does not touch the search sentence either
+        let image_only = HermesPrompt::Offered {
+            kinds: vec![HermesKind::Image],
+        };
+        assert!(full(WebSearch::Off, &image_only).contains("웹 검색은 관리자가 꺼 두었어요"));
     }
 
     #[test]

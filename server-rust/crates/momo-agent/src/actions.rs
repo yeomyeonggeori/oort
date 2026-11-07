@@ -4759,7 +4759,7 @@ mod tests {
         assert_eq!(
             schema["properties"]["bundle"]["enum"],
             serde_json::json!(crate::team_ai_roles::SWITCHABLE_BUNDLES),
-            "the six switchable bundles, and no `chat_read`"
+            "the seven switchable bundles, and no `chat_read`"
         );
         assert!(proposal_summary(action).contains("관리자"));
         for args in [

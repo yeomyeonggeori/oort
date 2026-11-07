@@ -1081,7 +1081,9 @@ fn subscription_agents_from_env() -> bool {
 /// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
 /// loudly on the same value).
 pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
-    use momo_workspace_actions::team_ai_limits::{parse_operator_cap, OperatorCaps};
+    use momo_workspace_actions::team_ai_limits::{
+        parse_hermes_cap, parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
+    };
     let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
         Ok(cap) => cap,
         Err(invalid) => {
@@ -1095,6 +1097,19 @@ pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::Operat
     OperatorCaps {
         daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
         daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
+        // ADR-0201 증보 v4 P7 (#5369): the third ceiling, whose empty is CLOSED (not "no ceiling"). The api
+        // does not enforce it (the worker does) and no settings screen shows it yet (P14-S6~S8), so a value it
+        // cannot read is the same warning and reads as the closed door.
+        daily_delegations: match parse_hermes_cap(env(HERMES_CAP_ENV).as_deref()) {
+            Ok(cap) => cap,
+            Err(invalid) => {
+                tracing::warn!(
+                    variable = invalid.0,
+                    "unreadable team AI delegation ceiling; it reads as closed (the agent-worker refuses to boot on it)"
+                );
+                None
+            }
+        },
     }
 }
 
