@@ -15,7 +15,11 @@ import {
   type PhoneExpressionStore,
 } from './store';
 import {expressionTransport} from './transport';
-import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
+import {
+  forgetExpressionShelf,
+  NON_SECRET_KEYS,
+  nonSecretStore,
+} from '../../storage/kv';
 import {warmEmojiCatalog} from '../emoji/catalogMemory';
 
 export const PhoneExpressions = createContext<PhoneExpressionStore | null>(
@@ -115,7 +119,7 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
           );
         },
         clear() {
-          nonSecretStore().remove(NON_SECRET_KEYS.expressionShelf);
+          forgetExpressionShelf();
         },
       },
     );

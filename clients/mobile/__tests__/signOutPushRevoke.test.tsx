@@ -18,6 +18,10 @@ import {
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 import {
+  attachmentSizeMemory,
+  unfurlHeightMemory,
+} from '../src/storage/measureMemory';
+import {
   __resetSessionStore,
   getAccessToken,
   keychainSettled,
@@ -511,5 +515,68 @@ describe('로그아웃 — 기기 등록 삭제에는 짧은 deadline (#2677 리
 
     await jest.advanceTimersByTimeAsync(2);
     expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true);
+  });
+});
+
+// =============================================================================
+// #5473 L-5451-3 — 로그아웃하면 잰 사진 크기·링크 카드 높이와 기기에 남긴 표현 보관함도 지운다.
+//
+// 세 키는 계정 구분이 없거나(`attachmentSizes`·`unfurlHeights`: 서버 uuid → 숫자) 앱이 죽은 채로 남을 수 있다(`expressionShelf`).
+// 「로그아웃은 이 기기에서 내 흔적을 지운다」는 같은 자리의 원칙(`clearAllDrafts` 등)에 맞춘다.
+// =============================================================================
+describe('로그아웃 — 잰 크기·표현 보관함을 지운다 (#5473)', () => {
+  const SLOTS = [
+    NON_SECRET_KEYS.attachmentSizes,
+    NON_SECRET_KEYS.unfurlHeights,
+    NON_SECRET_KEYS.expressionShelf,
+  ];
+  const ATTACHMENT = '44444444-4444-4444-8444-444444444444';
+  const MESSAGE = '55555555-5555-4555-8555-555555555555';
+
+  beforeEach(() => {
+    attachmentSizeMemory.clearForTest();
+    unfurlHeightMemory.clearForTest();
+  });
+  afterEach(() => {
+    attachmentSizeMemory.clearForTest();
+    unfurlHeightMemory.clearForTest();
+  });
+
+  it('메모리의 지도 둘과 기기에 쓴 세 값이 모두 없어진다', () => {
+    jest.useFakeTimers();
+    try {
+      attachmentSizeMemory.set(ATTACHMENT, [640, 480]);
+      unfurlHeightMemory.set(MESSAGE, [96]);
+      jest.advanceTimersByTime(1_000); // 한데 모은 쓰기가 기기에 나간다
+      store.set(NON_SECRET_KEYS.expressionShelf, JSON.stringify({v: 2, items: []}));
+      // 대조: 지우기 전에는 셋 다 기기에 있고 지도는 값을 안다.
+      for (const slot of SLOTS) expect(store.map.has(slot)).toBe(true);
+      expect(attachmentSizeMemory.get(ATTACHMENT)).toEqual([640, 480]);
+      expect(unfurlHeightMemory.get(MESSAGE)).toEqual([96]);
+
+      signOutFromApp()();
+
+      for (const slot of SLOTS) expect(store.map.has(slot)).toBe(false);
+      expect(attachmentSizeMemory.get(ATTACHMENT)).toBeNull();
+      expect(unfurlHeightMemory.get(MESSAGE)).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('쓰기를 기다리던 값도 로그아웃 뒤에 되살아나 기기에 쓰이지 않는다', () => {
+    jest.useFakeTimers();
+    try {
+      attachmentSizeMemory.set(ATTACHMENT, [640, 480]); // 아직 기기에 나가지 않았다(쓰기 시계가 돈다)
+      expect(store.map.has(NON_SECRET_KEYS.attachmentSizes)).toBe(false);
+
+      signOutFromApp()();
+      jest.advanceTimersByTime(5_000);
+
+      expect(store.map.has(NON_SECRET_KEYS.attachmentSizes)).toBe(false);
+      expect(attachmentSizeMemory.get(ATTACHMENT)).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
