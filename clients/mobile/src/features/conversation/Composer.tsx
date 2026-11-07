@@ -1,4 +1,5 @@
 import {ComposerExpressionPreview} from '../expressions/ComposerExpressionPreview';
+import {ComposerExpressionSuggest} from '../expressions/ComposerExpressionSuggest';
 import {ExpressionKeyboardPanel} from '../expressions/ExpressionKeyboardPanel';
 import {useExpressions} from '../expressions/ExpressionProvider';
 import {
@@ -6,6 +7,7 @@ import {
   insertExpressionTokenAtCaret,
 } from '../expressions/expressionViews';
 import {useExpressionMessages} from '../expressions/useExpressionMessages';
+import {useExpressionSuggest} from '../expressions/useExpressionSuggest';
 import {startKeyboardMemory, keyboardSlotHeight} from '../../lib/keyboardMemory';
 import {WORD} from '../../lib/techWords';
 import type {Expression} from '@momo/core/features/expressions/types';
@@ -1972,6 +1974,31 @@ export function Composer({
     // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 - 결과를 소리로 알린다(링크 미리보기의 ✕와 같은 길).
     AccessibilityInfo.announceForAccessibility(expressionCopy(PREVIEW_CLEARED_KEY));
   }, [expressionCopy]);
+  // ---- 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) ----------------------------------------------------
+  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다. 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 채널 입력창이 아님(스레드·답글 머리말) · 이미 미리 보기가 있음(큰 그림은
+  // 하나) · 이모티콘 창이 서 있음(키보드로 칠 때만) · 멘션 목록이나 명령을 치는 중 · 오프라인 · 입력창에 포커스가 없음(목록을 눌러 쉬거나 키보드를 내림).
+  const suggest = useExpressionSuggest({
+    scope:
+      attachmentWorkspaceId === undefined || attachmentChannelId === undefined
+        ? null
+        : `${attachmentWorkspaceId}:${attachmentChannelId}`,
+    text,
+    enabled:
+      previewing &&
+      expressionPreview === null &&
+      !panelOpen &&
+      !showMentions &&
+      !showSlash &&
+      parsedCommand === null &&
+      offline !== true &&
+      focused,
+  });
+  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. */
+  const pickSuggestion = (item: Expression) => {
+    setPreviewUnavailable(false);
+    setExpressionPreview(item);
+    suggest.close();
+  };
   const panelNode = useMemo(
     () => (
       <ExpressionKeyboardPanel
@@ -2606,6 +2633,16 @@ export function Composer({
             </View>
           ) : null}
         </View>
+      ) : null}
+
+      {/* 키워드 추천 줄 (#5478): 멘션 목록처럼 **도크 밖으로 뜬다** - 서고 사라져도 도크가 자라거나 줄지 않아 대화가 흔들리지 않는다. 그림과 ✕ 뿐, 안내 글 없음. */}
+      {suggest.open ? (
+        <ComposerExpressionSuggest
+          items={suggest.items}
+          onPick={pickSuggestion}
+          onMute={suggest.mute}
+          marginHorizontal={floatInset}
+        />
       ) : null}
 
       {admissionHint !== null ? <Text style={styles.hint} accessibilityLiveRegion="polite" testID="composer-dm-admission-hint">{admissionHint}</Text> : null}
