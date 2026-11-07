@@ -2728,11 +2728,15 @@ enum SetCard {
     Create,
 }
 
-/// The person who started the run and the room it stands in, for a set that is **this agent's, this
-/// person's and this run's** (ADR-0218 §12 L10.1-2: the owner is the SQL's own predicate, never an
-/// argument). `None` is every way of not being that: no run, another agent's run, a run nobody
-/// addressed, a set that is someone else's, another tenant's, gone, or in a state this card does not
-/// mean.
+/// The person who started the run, the room it stands in and **the face the head names**, for a set
+/// that is **this agent's, this person's and this run's** (ADR-0218 §12 L10.1-2: the owner is the
+/// SQL's own predicate, never an argument). `None` is every way of not being that: no run, another
+/// agent's run, a run nobody addressed, a set that is someone else's, another tenant's, gone, or in
+/// a state this card does not mean.
+///
+/// The face (`expression_set.subject_member_id`) is returned from the same row that proved the
+/// owner, so a decision can take it from the database and never from the stored payload (#5460
+/// security review M1; ADR-0186 D2: what was stored is not trusted).
 async fn resolve_set_owner_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -2757,11 +2761,12 @@ async fn resolve_set_owner_in_tx(
         (SetCard::Create, Some(_)) => "proposed",
         _ => "staging",
     };
-    let found = momo_db::sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM expression_set \
+    // One row at most (`id` is the head's key). `Some(None)` is a set of nobody's face.
+    let found = momo_db::sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT subject_member_id FROM expression_set \
           WHERE workspace_id = $1 AND id = $2 AND agent_member_id = $3 \
             AND requester_member_id = $4 AND run_id = $5 AND channel_id = $6 \
-            AND state = $7 AND approval_id IS NOT DISTINCT FROM $8)",
+            AND state = $7 AND approval_id IS NOT DISTINCT FROM $8",
     )
     .bind(workspace_id)
     .bind(set_id)
@@ -2771,11 +2776,12 @@ async fn resolve_set_owner_in_tx(
     .bind(channel)
     .bind(state)
     .bind(decided_under)
-    .fetch_one(&mut *conn)
+    .fetch_optional(&mut *conn)
     .await?;
-    Ok(found.then_some(SetRequester {
+    Ok(found.map(|face| SetRequester {
         member: requester,
         channel,
+        face,
     }))
 }
 
@@ -2784,6 +2790,8 @@ async fn resolve_set_owner_in_tx(
 struct SetRequester {
     member: Uuid,
     channel: Uuid,
+    /// The head's `subject_member_id`: nobody's face, or the requester's.
+    face: Option<Uuid>,
 }
 
 /// What the role gate of a [`actions::RequiredRole`] is judged against.
@@ -3677,9 +3685,19 @@ pub async fn resolve_action_with_origin_in_tx(
             else {
                 return Ok(Err(unresolved()));
             };
+            // **At the decision the face is the head's, never the stored payload's** (#5460 security
+            // review M1, ADR-0186 D2 「저장값을 신뢰하지 않는다」; `expression.create` reads its face back
+            // from its drafts the same way). The role gate below is judged against the face this
+            // resolution returns, and the pin is built from it: a payload whose `args.subjectMemberId`
+            // and `pins.subject` were both replaced resolves to the head's face and fails the pin
+            // comparison (`action_args_invalid`). A proposal's face is the plan read back from the head
+            // (`team_ai_set::plan_args`), so there is nothing to override.
+            if origin == ArgsOrigin::Stored {
+                spec.subject = requester.face;
+            }
             // A face other than the requester's is not refused **here**: it is the proposal's
             // `RequesterLacksRole` (`requester_could_approve_in_tx`, A22), and at the decision it is the
-            // face person alone who may approve (`adder_allows_in_tx` against the pinned subject).
+            // face person alone who may approve (`adder_allows_in_tx` against the face read just above).
             if let Some(face) = spec.subject {
                 if !face_is_human_in_room_in_tx(conn, workspace_id, face, requester.channel).await?
                 {

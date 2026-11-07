@@ -14,6 +14,9 @@
 //! | `a22_the_requester_must_be_able_to_approve_what_they_asked_for` | guest, an admins-only policy, a face that is not the requester each refuse; the owner passes | the `ExpressionAdder` arm goes back to a constant |
 //! | `a8_the_set_and_plan_cards_are_not_ordinary_pending_cards` | with a set card and a plan card pending, three ordinary cards still raise and the fourth is the limit | the count's exclusion goes |
 //! | `a14_a_set_draft_is_previewed_by_the_card_audience_and_replaced_or_registered_by_nobody` | preview by the channel's members only, 404 for the rest, replace refused by the function and by the route before it reads the upload, direct activation 404, the `expression.create` control still replaces | the replace allow-list goes |
+//! | `m1_the_decision_reads_the_set_cards_face_from_the_head_not_from_the_payload` | (review 1, M1) the decision's resolver reads the set card's face from the head row: a payload whose `args.subjectMemberId` and `pins.subject` were both replaced (nobody's face, another member's) resolves to the head's face and no longer matches its pins | the resolver's override of `spec.subject` by the head's face goes |
+//! | `a6_a_run_that_is_over_raises_nothing` | (review 1, M2-b) a run that is `succeeded`, `failed`, `cancelled`, `timed_out`, `paused` or `awaiting_approval` refuses with `RunNotParkable` and writes nothing: the run park is the only run-status wall of the proposal | the refusal of `park_run_for_approval_in_tx` is ignored |
+//! | `a10_a_set_that_expires_between_the_lock_and_the_hand_over_rolls_everything_back` | (review 1, M2-a) a set that expires after the lock and before the hand-over is refused by `hand_over_in_tx` — the only wall left at that edge — and the whole proposal rolls back (an `Err`), never a refusal the caller commits | the hand-over's refusal is returned as `Ok(Err)` |
 use momo_agent::actions;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx::{
@@ -25,6 +28,10 @@ use momo_expressions::media::{Processed, Rendition};
 use momo_expressions::set::{self, GrayCode, Owner, Plan, SlotKind, SlotPlan};
 use momo_expressions::{self as e, Actor, ImageInfo};
 use momo_server::{build_app, AppState};
+use momo_workspace_actions::action_resolve::{
+    resolve_action_with_origin_in_tx, ActionArgs, ActionRejection, ArgsOrigin, CardAudience,
+    ResolvedAction,
+};
 use momo_workspace_actions::team_ai::{self, ProposalContext, ProposalOk, ProposalRefusal, ViaAi};
 use momo_workspace_actions::team_ai_set;
 use serde_json::{json, Value};
@@ -1674,4 +1681,261 @@ async fn a14_a_set_draft_is_previewed_by_the_card_audience_and_replaced_or_regis
     .await
     .expect("an `expression.create` card's picture is still replaceable");
     assert_eq!(swapped.draft["revision"], "2");
+}
+
+// ---------------------------------------------------------------------------
+// Security review, round 1 (#5460): M1 the decision's face, M2 the proposal's two last walls
+// ---------------------------------------------------------------------------
+
+/// Give a staged set a face, as a write under `session_replication_role = replica` (a forged head,
+/// the way `a22` does it).
+async fn set_face(su: &PgPool, set_id: Uuid, face: Uuid) {
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_set SET subject_member_id = $2 WHERE id = $1")
+        .bind(set_id)
+        .bind(face)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+}
+
+/// The decision route's re-proof of a stored set card, as the person deciding reaches it: the
+/// NOBYPASSRLS `momo_app` in the tenant's transaction, the stored `payload.action.args`, this
+/// approval's id, the run channel's audience, and the managed helper's path (`resolve_stored_action_in_tx`
+/// hands exactly these arguments over once it has found no hosted connection; this file's agent has no
+/// `agent` row, so that step would refuse before the resolver is asked).
+async fn resolve_as_decided(
+    w: &World,
+    t: Tenant,
+    approval_id: Uuid,
+    payload: &Value,
+) -> Result<ResolvedAction, ActionRejection> {
+    let action = actions::action_by_id(actions::ACTION_EXPRESSION_SET_CREATE).expect("registered");
+    let args = payload["action"]["args"].clone();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let (agent, run) = (t.agent, t.run);
+    with_tenant_tx(&w.api, t.ws, move |conn| {
+        Box::pin(async move {
+            resolve_action_with_origin_in_tx(
+                conn,
+                t.ws,
+                agent,
+                Some(run),
+                action,
+                &args,
+                now_ms,
+                ArgsOrigin::Stored,
+                Some(approval_id),
+                CardAudience::RunChannel,
+                None,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("no database fault")
+}
+
+/// The face a resolved set card carries into the decision route's role gate and pins.
+fn resolved_face(resolved: &ResolvedAction) -> Option<Uuid> {
+    let ActionArgs::ExpressionSetCreate(spec) = &resolved.validated.args else {
+        panic!("an `expression.set.create` resolution");
+    };
+    spec.subject
+}
+
+/// M1: the decision judges the card's role gate (`adder_allows_in_tx`) against the face the resolver
+/// returns and compares the resolver's pins with the stored ones. The stored payload is a row, and
+/// ADR-0186 D2 says the decision does not trust what was stored: the face must come from the head
+/// (`expression_set.subject_member_id`), as `expression.create` reads it back from its drafts. Both
+/// places the decision reads the face from the payload (`args.subjectMemberId`, `pins.subject`) are
+/// replaced together, so the pin comparison alone could not notice.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn m1_the_decision_reads_the_set_cards_face_from_the_head_not_from_the_payload() {
+    let w = world().await;
+    let t = tenant(&w.su).await;
+    let set_id = staged_and_confirmed(&w, t, t.owner(), "mf").await;
+    // the set carries the requester's own face: the one face this door raises
+    set_face(&w.su, set_id, t.alice).await;
+    let raised = propose(&w, t, t.run, t.agent, set_id)
+        .await
+        .expect("no fault")
+        .expect("a set with the requester's own face is proposed");
+    let stored: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id = $1")
+        .bind(raised.approval_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let face = json!(t.alice.to_string());
+    // control: the card stored the face twice, and untouched it resolves to the head's face and to
+    // exactly the pins it stored
+    assert_eq!(stored["action"]["args"]["subjectMemberId"], face);
+    assert_eq!(stored["action"]["pins"]["subject"], face);
+    let untouched = resolve_as_decided(&w, t, raised.approval_id, &stored)
+        .await
+        .expect("the card as stored resolves at the decision");
+    assert_eq!(resolved_face(&untouched), Some(t.alice));
+    assert_eq!(
+        untouched.pins, stored["action"]["pins"],
+        "control: the stored pins are the resolved pins"
+    );
+    // the forgery: both places are replaced by a write to the approval row
+    for (forged_face, what) in [
+        (Value::Null, "nobody's face"),
+        (json!(t.bob.to_string()), "another member's face"),
+    ] {
+        let forged: Value = sqlx::query_scalar(
+            "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+               '{action,args,subjectMemberId}', $2), '{action,pins,subject}', $2) \
+              WHERE id = $1 RETURNING payload",
+        )
+        .bind(raised.approval_id)
+        .bind(&forged_face)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+        assert_eq!(
+            forged["action"]["args"]["subjectMemberId"], forged_face,
+            "{what}"
+        );
+        assert_eq!(forged["action"]["pins"]["subject"], forged_face, "{what}");
+        match resolve_as_decided(&w, t, raised.approval_id, &forged).await {
+            // refusing the forged card outright is as good: nobody is let through
+            Err(_) => {}
+            Ok(resolved) => {
+                assert_eq!(
+                    resolved_face(&resolved),
+                    Some(t.alice),
+                    "{what}: the face the role gate is judged against is the head's, not the payload's"
+                );
+                assert_ne!(
+                    resolved.pins, forged["action"]["pins"],
+                    "{what}: the resolved pins differ from the forged stored pins (`action_args_invalid`)"
+                );
+            }
+        }
+    }
+    // and the head itself was never touched
+    let head: Option<Uuid> =
+        sqlx::query_scalar("SELECT subject_member_id FROM expression_set WHERE id = $1")
+            .bind(set_id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(head, Some(t.alice));
+}
+
+/// 「끝난 run」(M2-b): the proposal has no run-status predicate of its own; the park is what closes a
+/// run that is over. Every status that is not live refuses and writes nothing.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a6_a_run_that_is_over_raises_nothing() {
+    let w = world().await;
+    for status in [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "paused",
+        "awaiting_approval",
+    ] {
+        let t = tenant(&w.su).await;
+        let set_id = staged_and_confirmed(&w, t, t.owner(), "fr").await;
+        let mut tx = w.su.begin().await.unwrap();
+        sqlx::query("SET LOCAL session_replication_role = replica")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(&format!(
+            "UPDATE agent_run SET status = '{status}'::run_status WHERE id = $1"
+        ))
+        .bind(t.run)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        let refused = propose(&w, t, t.run, t.agent, set_id)
+            .await
+            .expect("an answer");
+        assert_eq!(
+            refused.map(|_| ()),
+            Err(ProposalRefusal::RunNotParkable),
+            "{status}"
+        );
+        assert_eq!(approvals_of(&w.su, t.ws).await, 0, "{status}");
+        assert_eq!(drafts_of(&w.su, t.ws).await, 0, "{status}");
+        assert_eq!(
+            set_state(&w.su, set_id).await,
+            ("staging".to_string(), None, 9),
+            "{status}"
+        );
+        let after: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+            .bind(t.run)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(after, status, "{status}: the run was touched");
+    }
+}
+
+/// M2-a: the hand-over judges `expires_at` again, after the approval INSERT. A set that expires
+/// between the lock and the hand-over is refused there, and that refusal must roll the whole
+/// proposal back (an `Err`), never come back as a refusal the caller commits.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a10_a_set_that_expires_between_the_lock_and_the_hand_over_rolls_everything_back() {
+    let w = world().await;
+    let t = tenant(&w.su).await;
+    let set_id = staged_and_confirmed(&w, t, t.owner(), "ed").await;
+    // the approval INSERT (between the lock and the hand-over) is slow, in this tenant only: 5 s,
+    // against a set that lives 3 s from now. The lock comes well inside the 3 s and the hand-over
+    // after the 5 s, however slow the machine (the review's 1 s / 2 s, widened for a loaded CI)
+    let slow = format!("s1b_slow_{}", t.ws.simple());
+    sqlx::query(&format!(
+        "CREATE FUNCTION {slow}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(5); RETURN NEW; END $$"
+    )).execute(&w.su).await.unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER {slow} BEFORE INSERT ON approval FOR EACH ROW \
+           WHEN (NEW.workspace_id = '{}') EXECUTE FUNCTION {slow}()",
+        t.ws
+    ))
+    .execute(&w.su)
+    .await
+    .unwrap();
+    // the set expires three seconds from now: after the lock, before the hand-over
+    let mut tx = w.su.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_set SET expires_at = clock_timestamp() + interval '3 seconds' WHERE id = $1")
+        .bind(set_id).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    let outcome = propose(&w, t, t.run, t.agent, set_id).await;
+    sqlx::query(&format!("DROP TRIGGER {slow} ON approval"))
+        .execute(&w.su)
+        .await
+        .unwrap();
+    sqlx::query(&format!("DROP FUNCTION {slow}()"))
+        .execute(&w.su)
+        .await
+        .unwrap();
+    assert!(
+        matches!(&outcome, Err(error) if format!("{error:?}").contains("could not be handed")),
+        "the hand-over refused after the approval was written: a fault, not a refusal: {outcome:?}"
+    );
+    assert_untouched(
+        &w,
+        t,
+        t.run,
+        set_id,
+        "expired between the lock and the hand-over",
+    )
+    .await;
 }

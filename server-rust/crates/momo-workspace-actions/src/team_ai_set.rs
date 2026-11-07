@@ -209,8 +209,11 @@ pub async fn propose_set_in_tx(
     )
     .await?;
     // Drafts and renditions copied in the database, the staging emptied, the head moved with its
-    // approval in one UPDATE. A refusal here cannot happen after the proofs above; if it does the
-    // transaction must not commit what was written so far.
+    // approval in one UPDATE. The hand-over reads `expires_at` again, after the approval INSERT: a set
+    // that expires between the lock above and this call is refused **here**, and this refusal is the
+    // only wall left at that edge (#5460 review M2-a), not a second proof. It is an `Err` on purpose:
+    // the caller rolls back what was written so far, whereas an `Ok(Err(_))` would be committed (an
+    // approval nobody can see and a run parked until its window ends).
     let handed = match expression_error(
         set::hand_over_in_tx(conn, owner, set_id, approval_id, context.expires_at).await,
     )? {
