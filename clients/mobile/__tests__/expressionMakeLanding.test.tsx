@@ -10,7 +10,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import {AppState} from 'react-native';
+import {AppState, View} from 'react-native';
 import * as api from '@momo/core/lib/api';
 import type {Message} from '@momo/core/lib/api';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
@@ -30,6 +30,7 @@ import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import * as uploadTransport from '../src/features/attachments/uploadTransport';
 import {Composer} from '../src/features/conversation/Composer';
+import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
   MakeLandingContext,
   useLandOnMadeDm,
@@ -170,8 +171,9 @@ async function press(testID: string) {
 }
 
 /** 「＋」에서 「AI와 만들기」 장으로 들어가 사진·움직임을 고르고 요청을 보낸다(에이전트는 하나라 미리 골라진다). */
-async function fillAndSend() {
-  await press('expression-add-menu');
+async function fillAndSend(fromMenu = true) {
+  // 반응 고르개의 「추가하기」는 메뉴를 먼저 펴고, 입력창 이모티콘 창의 「＋」 시트는 두 문이 바로 서 있다(#5452).
+  if (fromMenu) await press('expression-add-menu');
   await press('expression-add-make');
   // 사진 양식이 먼저 열린다(#4984): 에이전트에게 부탁하는 길은 그 안의 단추 하나다.
   await waitFor(() =>
@@ -207,13 +209,19 @@ function withLanding(
 
 const DIRECTORY = makeDirectory([]);
 function composer() {
+  // 이모티콘 창은 대화 레이아웃의 키보드 자리에 선다(#5452).
   return (
-    <Composer
-      recipient="place"
-      channelLabel="agent-lab"
-      directory={DIRECTORY}
-      attachmentTarget={{workspaceId: 'ws', channelId: 'ch'}}
-      onSend={jest.fn()}
+    <ConversationLayout
+      list={<View />}
+      composer={
+        <Composer
+          recipient="place"
+          channelLabel="agent-lab"
+          directory={DIRECTORY}
+          attachmentTarget={{workspaceId: 'ws', channelId: 'ch'}}
+          onSend={jest.fn()}
+        />
+      }
     />
   );
 }
@@ -245,16 +253,17 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
     const landing = jest.fn();
     withLanding(store, landing, composer());
     fireEvent.press(screen.getByTestId('composer-expression'));
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
-    await screen.findByTestId('expression-add-menu');
-    await fillAndSend();
+    fireEvent.press(await screen.findByTestId('expression-panel-add'));
+    await screen.findByTestId('expression-add-doors');
+    await fillAndSend(false);
     // 길에 나간 것은 openDirectMessage 가 돌려준 그 채널이다.
     await waitFor(() => expect(landing).toHaveBeenCalledTimes(1));
     expect(landing).toHaveBeenCalledWith(DM);
-    // 시트가 걷혔다(이 호스트의 표현 시트도, 그 안의 만들기 장도).
+    // 시트가 걷혔다(「＋」 시트도, 그 안의 만들기 장도). 이모티콘 창은 키보드 자리에 그대로 남는다.
     expect(screen.queryByTestId('expression-make')).toBeNull();
-    expect(screen.queryByTestId('expression-sheet-close')).toBeNull();
+    expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
     expect(screen.queryByTestId('expression-make-done')).toBeNull();
+    expect(screen.getByTestId('expression-panel')).toBeTruthy();
   });
 
   it('보내기가 실패하면 시트에 그대로 머문다 — 길은 부르지 않고, 다시 시도가 이어서 가면 그때 한 번 간다', async () => {
@@ -263,9 +272,9 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
     const landing = jest.fn();
     withLanding(store, landing, composer());
     fireEvent.press(screen.getByTestId('composer-expression'));
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
-    await screen.findByTestId('expression-add-menu');
-    await fillAndSend();
+    fireEvent.press(await screen.findByTestId('expression-panel-add'));
+    await screen.findByTestId('expression-add-doors');
+    await fillAndSend(false);
     await waitFor(() =>
       expect(screen.getByTestId('expression-make-error')).toBeTruthy(),
     );
@@ -275,7 +284,6 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
     // 머문다: 만들기 장도 시트도 그대로이고, 다시 시도 단추가 서 있다.
     expect(landing).not.toHaveBeenCalled();
     expect(screen.getByTestId('expression-make')).toBeTruthy();
-    expect(screen.getByTestId('expression-sheet-close')).toBeTruthy();
     expect(send).toHaveBeenCalledTimes(1);
     await press('expression-make-submit');
     await waitFor(() => expect(landing).toHaveBeenCalledTimes(1));

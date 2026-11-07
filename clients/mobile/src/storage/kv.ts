@@ -43,6 +43,30 @@ export interface NonSecretStore {
 export const NON_SECRET_KEYS = {
   /** Scoped device expression usage; metadata only, never media or credentials (#4678). */
   expressionUsage: 'momo.mobile.expressions.usage.v1',
+  /**
+   * 대화 행 미디어의 **잰 크기** (#5451): 첨부 id → [그림 가로, 세로](`attachmentSizes`), 메시지 id → [링크 카드 묶음 높이](`unfurlHeights`).
+   * 숫자뿐이다 — 키는 서버가 만든 uuid 이고 글·주소·바이트가 없다. 앱을 다시 켠 뒤에도 사진이 제 비율로 첫 프레임부터 서고(16:9 자리표시로 섰다가
+   * 바뀌지 않고), 링크 카드가 늦게 와도 그 자리를 미리 비워 두려는 것이다. 잃으면 한 번 더 재면 된다. 계정 정보 없음(`storage/measureMemory.ts`).
+   */
+  attachmentSizes: 'momo.mobile.timeline.attachment-sizes.v1',
+  /**
+   * 팀 표현 보관함의 **마지막으로 읽은 목록**(그리는 데 필요한 것만: id·이름·표시 이름·상태·종류·그림 정보 — 그림 파일은 없다, #5451). 대화가 열릴 때 보관함이 아직
+   * 안 와도 큰 이모티콘의 칸이 첫 프레임부터 서게 한다. 프롬프트·출처 주소·만든 사람·대상 멤버·태그는 남기지 않는다(#5473 · 형식 번호 2, 옛 형식은 읽을 때 지운다).
+   * 읽을 때 워크스페이스·멤버와 계약 검사를 지난 것만 받고, 로그아웃(`useSession.tsx`)·세션 끝(`store.ts` `dispose`)이 지운다(`forgetExpressionShelf`).
+   * 잃으면 한 번 늦게 서고 다음 읽기가 채운다.
+   */
+  expressionShelf: 'momo.mobile.expressions.shelf.v1',
+  unfurlHeights: 'momo.mobile.timeline.unfurl-heights.v1',
+  /**
+   * 마지막으로 본 소프트 키보드 높이(pt, 숫자 하나 — #5452). 이모티콘 창이 키보드가 있던 **그 자리 그 높이**로 서려는 값이라, 키보드를 아직 한 번도 못 본 채(앱을 막 켠 뒤)
+   * 창을 열어도 지난번 높이로 선다. 비밀이 아니고 잃으면 창 높이를 화면 비율로 어림잡을 뿐이다.
+   */
+  keyboardHeight: 'momo.mobile.keyboard.height.v1',
+  /**
+   * 팀 표현의 즐겨찾기(이 기기 · 이 워크스페이스 · 이 사람 — 서버 계약 없음, #5452). 값의 모양과 바꾸는 법은 코어 `features/expressions/favorites.ts`가 갖는다:
+   * 읽을 때 워크스페이스·멤버가 맞는 값만 받고 깨진 값은 빈 목록이다. 등록의 id 목록뿐이라 비밀이 아니다. 로그아웃이 지우지 않는다(이 기기의 취향이다).
+   */
+  expressionFavorites: 'momo.mobile.expressions.favorites.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',
@@ -228,6 +252,14 @@ export function nonSecretStore(): NonSecretStore {
     instance = createMMKV({id: 'momo.mobile.cache'});
   }
   return instance;
+}
+
+/**
+ * 기기에 남긴 표현 보관함(`expressionShelf`)을 지운다. 세션이 끝나는 길이 모두 이 함수를 부른다 — 표현 저장소의 `dispose`(`features/expressions`)와 로그아웃(`session/useSession.tsx`).
+ * 둘 다 같은 키를 지워야 하는데 `useSession` 이 표현 provider 를 가져오면 import 가 돌아서(provider 가 `useSession` 을 쓴다) 키를 아는 이 파일에 둔다.
+ */
+export function forgetExpressionShelf(): void {
+  nonSecretStore().remove(NON_SECRET_KEYS.expressionShelf);
 }
 
 /** Test seam: swap the store, or pass null to fall back to the real MMKV. */

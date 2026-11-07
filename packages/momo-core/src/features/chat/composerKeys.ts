@@ -70,6 +70,22 @@ export type ComposerKeyIntent =
    */
   | "preview-dismiss"
   /**
+   * #5476 - 입력칸 위에 떠 있는 이모티콘 추천 줄(글 키워드에 맞는 그림 몇 개)을 닫는다. 줄만 닫고 쓴 글과 낱말은 건드리지 않는다.
+   *
+   * Esc 하나에 두 뜻을 겹치지 않는 규칙은 그대로다: 멘션 목록이 먼저이고, 그 다음이 **이 줄**, 그 다음이 링크 카드, 이모티콘 미리 보기, 인용이다.
+   * 추천 줄을 링크 카드보다 앞에 두는 이유는 같은 논리의 연장이다: 사람이 부른 적 없이 **글을 치다 저절로** 떠서(링크 카드는 붙여넣은 주소에,
+   * 이 줄은 마지막 낱말에) Esc 로 물리치는 손짓이 가장 흔하고, 일부러 고른 미리 보기나 인용을 이 Esc 가 날리면 안 된다.
+   */
+  | "suggest-dismiss"
+  /**
+   * #5476 - 입력칸에서 ↑: 추천 줄로 포커스를 옮긴다(줄은 입력칸 바로 위에 뜨므로 위쪽 화살표가 자연스럽다).
+   *
+   * 키가 이 뜻이 되는 것은 추천 줄이 떠 있고, 캐럿이 글의 **첫 줄**에 있고(더 오를 줄이 없다), 수식키가 없고, 한글 조합이 열려 있지 않고, 멘션 목록이
+   * 닫혀 있을 때뿐이다. 여러 줄 글을 ↑ 로 오르는 손을 가로채지 않으려는 것이다. 줄은 글이 비면 없으므로 빈 입력칸의 ↑(`edit-last`)와 겹치지 않는다.
+   * Tab 은 그대로다: 줄은 입력칸보다 앞(위)에 있어서 Shift+Tab 도 같은 곳에 닿는다.
+   */
+  | "suggest-focus"
+  /**
    * #5191 - 빈 입력칸의 ↑: 이 대화에서 **내** 마지막 글 있는 메시지를 고친다(Slack식).
    *
    * 메시지 고치기는 `⋯` 메뉴 맨 아래에 있어 사람들이 찾지 못했다(#5191). 그래서 가장 손에 익은 길을 하나 더 연다:
@@ -126,6 +142,19 @@ export interface ComposerKeyState {
    */
   previewOpen?: boolean;
   /**
+   * #5476 - 입력칸 위에 이모티콘 추천 줄이 떠 있다. 떠 있지 않으면 Esc·↑ 는 이 줄을 모르는 것처럼 지나간다. 옵셔널이라 이 줄을 모르는 표면(스레드
+   * 입력칸·폰 입력칸)이 이 키를 적지 않아도 동작이 이전과 한 글자도 다르지 않다.
+   */
+  suggestOpen?: boolean;
+  /**
+   * #5476 - 캐럿이 입력칸 글의 첫 **화면** 줄에 있다. 앞에 줄바꿈이 없어도 글이 길게 감겨 캐럿이 둘째 줄 이후면 거짓이다(#5489: 줄바꿈만 보면 감긴 문단의 아래 줄에서
+   * 도 ↑ 를 가로챈다). 화면 줄은 렌더에서만 알 수 있어 호출하는 표면이 잰다(웹은 `caretLine.ts`). `suggestOpen` 과 함께일 때만 ↑ 가 추천 줄로 간다.
+   *
+   * **함수로도 줄 수 있다**: 재는 일(렌더 배치를 읽는다)이 싸지 않으므로, 함수를 넘기면 이 판정이 ↑ 에서 나머지 조건(추천 줄이 떠 있고 수식키가 없다)이 모두 맞을 때에만
+   * 한 번 부른다. 다른 키·다른 상태에서는 부르지 않는다.
+   */
+  caretOnFirstLine?: boolean | (() => boolean);
+  /**
    * #5191 - 입력칸이 **비어 있다**(글이 한 글자도 없다). `true`일 때만 ↑ 가 `edit-last` 가 된다. 공백만 든 글은 빈 것이
    * 아니다: 그 입력칸의 ↑ 는 여전히 커서의 것이다.
    *
@@ -137,6 +166,11 @@ export interface ComposerKeyState {
 /** True when the keystroke belongs to an in-flight IME composition. */
 function imeOwns(event: ComposerKeyEvent, state: ComposerKeyState): boolean {
   return event.composing || state.justComposed;
+}
+
+/** `caretOnFirstLine` 은 값이거나, 필요할 때에만 재는 함수다(#5489). 적지 않았으면 첫 줄이 아니다. */
+function isCaretOnFirstLine(value: boolean | (() => boolean) | undefined): boolean {
+  return typeof value === "function" ? value() : value === true;
 }
 
 /**
@@ -179,6 +213,18 @@ export function composerKeyIntent(
     if (state.mentionsOpen) {
       return event.key === "ArrowDown" ? "mention-next" : "mention-prev";
     }
+    // #5476 - 추천 줄이 떠 있고 캐럿이 첫 줄이면 맨 ↑ 는 그 줄로 들어간다. 수식키가 붙은 ↑ 는 위 `edit-last` 와 같은 이유로 운영체제와 브라우저의 것이다.
+    if (
+      event.key === "ArrowUp" &&
+      state.suggestOpen === true &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      isCaretOnFirstLine(state.caretOnFirstLine)
+    ) {
+      return "suggest-focus";
+    }
     // #5191 - 목록이 닫혀 있고 입력칸이 비어 있을 때의 맨 ↑. 수식키가 붙은 ↑ (⌥↑ 줄 맨 앞, ⌘↑ 글 맨 앞, ⇧↑ 선택 늘이기)는
     // 운영체제와 브라우저의 것이다.
     if (
@@ -197,12 +243,52 @@ export function composerKeyIntent(
   if (event.key === "Escape") {
     if (event.composing) return "pass";
     if (state.mentionsOpen) return "mention-close";
+    if (state.suggestOpen === true) return "suggest-dismiss";
     if (state.previewOpen === true) return "preview-dismiss";
     if (state.quoteOpen === true) return "quote-cancel";
     return "pass";
   }
 
   return "pass";
+}
+
+/**
+ * #5476 - 추천 줄 **안**에 포커스가 있을 때 한 키가 뜻하는 것. 줄은 가로로 늘어선 단추들(그림 몇 개와 끝의 ✕)이 탭 정거장 하나를 나눠 쓰는 도구줄이다.
+ *
+ * - `move`: ← → Home End 가 줄 안의 이웃 단추로(`prev`·`next`·`first`·`last`). 끝에서 돌아 나가지 않는 것은 호출부 몫이다.
+ * - `dismiss`: Esc 가 줄을 닫는다. 호출부가 포커스를 입력칸에 돌려준다.
+ * - `toInput`: ↓ 가 줄을 닫지 않고 입력칸으로 돌아간다. 들어올 때 쓴 ↑ 의 짝이다.
+ * Enter·Space 는 여기 없다: 포커스가 놓인 것은 단추라 브라우저가 누름으로 바꾼다. 이 줄의 Enter 는 보내기가 아니라 그 단추를 누르는 일이다.
+ * 한글 조합 중이거나 수식키가 붙은 키, 그 밖의 키는 우리 것이 아니라 `null` 이다.
+ *
+ * 값을 문자열 이름이 아니라 필드로 돌려주는 이유: 호출하는 웹 화면 파일은 직접 문구 장부가 문자열 리터럴을 세므로(`"dismiss"` 한 낱말도 한 건이다) 이름을
+ * 비교하지 않고 필드를 읽게 한다. `move` 의 값은 `trayModel.moveTarget` 이 그대로 받는 낱말이다.
+ */
+export interface SuggestRowKey {
+  move?: "prev" | "next" | "first" | "last";
+  dismiss?: true;
+  toInput?: true;
+}
+
+export function suggestRowKey(event: ComposerKeyEvent): SuggestRowKey | null {
+  if (event.composing) return null;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
+  switch (event.key) {
+    case "ArrowLeft":
+      return { move: "prev" };
+    case "ArrowRight":
+      return { move: "next" };
+    case "Home":
+      return { move: "first" };
+    case "End":
+      return { move: "last" };
+    case "Escape":
+      return { dismiss: true };
+    case "ArrowDown":
+      return { toInput: true };
+    default:
+      return null;
+  }
 }
 
 /** What one keystroke means inside the box that edits a sent message (#5191). */

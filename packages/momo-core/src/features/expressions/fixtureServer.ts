@@ -4,6 +4,7 @@ import { recommendExpressionKind } from "./kind";
 import { FIXTURE_MEDIA } from "./fixtureMedia";
 import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoCutout, type PhotoFailureCode, type PhotoProvider } from "./photo";
 import { FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID } from "./fixtures";
+import { decideExpressionSet, EXPRESSION_SET_ACTION_ID, expressionSetSlotDraft, readySlots, type ExpressionSetCard, type ExpressionSetDecisionReceipt } from "./set";
 import type { Expression, ExpressionChoice, ExpressionDraft, ExpressionMetadata, ExpressionPatch, ManualUploadCode } from "./types";
 
 export interface ExpressionFixtureRequest {
@@ -50,16 +51,77 @@ export function createExpressionFixtureServer(options: {
   photoFailure?: PhotoFailureCode;
   /** With a model: what the fake server's cut-out did to the picture of the cut-out branch (default `erased`; a caricature has no such step). */
   photoCutout?: Exclude<PhotoCutout, null>;
+  /** ADR-0218 §12: the set approval cards the fake server hosts. Each ready slot is a draft behind the card, so the preview routes serve it. */
+  sets?: readonly ExpressionSetCard[];
+  /** Set decisions only: pretend this many more registrations that are not deleted already exist (to reach the 1,000 ceiling). */
+  liveBase?: number;
 } = {}) {
   const base = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
   const catalogue = new Map(FIXTURE_LIST.items.map((item) => [item.id, clone(item)]));
   const drafts = new Map<string, ExpressionDraft>();
   const receipts = new Map<string, { choice: ExpressionChoice; response: ExpressionFixtureResponse }>();
+  // §12 L5: the pictures of a set card are drafts of its approval. The direct route never registers them, only the decision does.
+  const setCards = new Map((options.sets ?? []).map((card) => [card.approvalId, clone(card)]));
+  const setDraftIds = new Set<string>();
+  const setSettled = new Set<string>();
+  const setReceipts = new Map<string, ExpressionFixtureResponse>();
+  for (const card of setCards.values()) {
+    for (const slot of readySlots(card.approval)) {
+      drafts.set(slot.draftId, expressionSetSlotDraft(card.approval, slot));
+      setDraftIds.add(slot.draftId);
+    }
+  }
   let version = 3;
   let serial = 30;
   const now = options.nowMs ?? FIXTURE_NOW_MS;
   const error = (status: number, code: string): ExpressionFixtureResponse => ({ status, json: { error: { code, message: code } } });
   const mutation = (expression: Expression): ExpressionFixtureResponse => ({ status: 200, json: clone({ workspaceId: FIXTURE_WORKSPACE_ID, version: String(version), expression }) });
+  /**
+   * ADR-0218 §12 L6 as the real decision route does it, in one pass: the same `client_decision_id` gets the first receipt
+   * again; a rejection reclaims the pictures; an approval takes `expressionChoices` (never the single `expressionChoice`),
+   * registers what `decideExpressionSet` says in ONE catalogue version, and leaves the card settled.
+   */
+  const decideSetCard = (approvalId: string, body: unknown): ExpressionFixtureResponse => {
+    const card = setCards.get(approvalId);
+    const input = body as { approval_id?: unknown; approve?: unknown; client_decision_id?: unknown; expressionChoices?: unknown; expressionChoice?: unknown } | null;
+    if (!card) return error(404, "not_found");
+    if (!input || typeof input !== "object" || input.approval_id !== approvalId || typeof input.approve !== "boolean" || typeof input.client_decision_id !== "string") return error(400, "expression_invalid");
+    const replay = setReceipts.get(input.client_decision_id);
+    if (replay) return clone(replay);
+    if (setSettled.has(approvalId)) return error(409, "approval_not_pending");
+    if (input.approve && input.expressionChoice !== undefined) return error(400, "expression_choice_not_allowed");
+    if (!input.approve && input.expressionChoices !== undefined) return error(400, "expression_choice_not_allowed");
+    if (input.approve && input.expressionChoices === undefined) return error(400, "expression_choice_required");
+    const settle = (response: ExpressionFixtureResponse) => {
+      setSettled.add(approvalId);
+      for (const slot of readySlots(card.approval)) drafts.delete(slot.draftId);
+      setReceipts.set(input.client_decision_id as string, clone(response));
+      return response;
+    };
+    if (!input.approve) {
+      const receipt: ExpressionSetDecisionReceipt = { status: "rejected", approvalId, result: null };
+      return settle({ status: 200, json: receipt });
+    }
+    const verdict = decideExpressionSet({
+      approval: card.approval, choices: Array.isArray(input.expressionChoices) ? input.expressionChoices : [], nowMs: now,
+      taken: new Set([...catalogue.values()].map((item) => item.name)),
+      live: (options.liveBase ?? 0) + [...catalogue.values()].filter((item) => item.status !== "deleted").length,
+    });
+    if (!verdict.ok) return error(verdict.status, verdict.code);
+    // One decision is one catalogue version for every item it registers (§12 L6), not one version per item.
+    version += 1;
+    const slots = new Map(readySlots(card.approval).map((slot) => [slot.draftId, slot]));
+    for (const item of verdict.registered) {
+      const slot = slots.get(item.draftId)!;
+      catalogue.set(slot.draftId, clone({ id: slot.draftId, workspaceId: FIXTURE_WORKSPACE_ID, name: slot.name, displayName: slot.displayName,
+        tags: slot.tags, subjectMemberId: card.approval.subjectMemberId, kind: item.kind, version: String(version), status: "active" as const,
+        origin: expressionSetSlotDraft(card.approval, slot).origin, media: slot.media, createdBy: FIXTURE_MEMBER_ID, createdAtMs: now }));
+    }
+    const receipt: ExpressionSetDecisionReceipt = { status: "executed", approvalId, result: { actionId: EXPRESSION_SET_ACTION_ID,
+      ref: { type: "expression_set", id: card.approval.setId },
+      expressionSet: { setId: card.approval.setId, registered: verdict.registered.map((item) => ({ id: item.draftId, name: item.name, token: `:${item.name}:` })), skipped: verdict.skipped } } };
+    return settle({ status: 200, json: receipt });
+  };
   return {
     request(request: ExpressionFixtureRequest): ExpressionFixtureResponse {
       let url: URL;
@@ -94,6 +156,8 @@ export function createExpressionFixtureServer(options: {
         drafts.set(draftId, draft);
         return { status: 201, json: clone({ draft, cutout }) };
       }
+      const decisionMatch = new RegExp(`^${base}/approvals/([^/]+)/decision$`).exec(path);
+      if (request.method === "POST" && decisionMatch) return decideSetCard(decisionMatch[1], request.body);
       const prepare = request.method === "POST" && ["uploads", "import", "from-attachment"].some((suffix) => path === `${base}/expressions/${suffix}`);
       if (prepare) {
         const schema = path.endsWith("/import") ? "ImportRequest" : path.endsWith("/from-attachment") ? "AttachmentRequest" : "Metadata";
@@ -135,6 +199,8 @@ export function createExpressionFixtureServer(options: {
       if (request.method === "POST" && path === `${base}/expressions`) {
         if (!matchesExpressionContract("Choice", request.body)) return error(400, "expression_invalid");
         const choice = request.body as ExpressionChoice;
+        // A picture behind a set card is the approval's, never a direct draft's (§12 L5).
+        if (setDraftIds.has(choice.draftId)) return error(404, "not_found");
         const receipt = receipts.get(choice.draftId);
         if (receipt) return receipt.choice.revision === choice.revision && receipt.choice.sha256 === choice.sha256 ? clone(receipt.response) : error(409, "expression_preview_stale");
         const draft = drafts.get(choice.draftId);
