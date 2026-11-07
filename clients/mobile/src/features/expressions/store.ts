@@ -1,7 +1,12 @@
 import {
   applyExpressionList,
   emptyExpressionCache,
+  isNextExpressionVersion,
 } from '@momo/core/features/expressions/cache';
+import {
+  createExpressionNoticeGate,
+  type ExpressionNoticeVerdict,
+} from '@momo/core/features/expressions/changeNotice';
 import {matchesExpressionContract} from '@momo/core/features/expressions/contracts';
 import {loopForever} from '@momo/core/features/expressions/gifLoop';
 import {
@@ -15,6 +20,7 @@ import {
 import type {
   Expression,
   ExpressionAddPolicy,
+  ExpressionChangedDetail,
   ExpressionDraft,
   ExpressionList,
   ExpressionMedia,
@@ -198,7 +204,16 @@ export function createPhoneExpressionStore(
     revision: 0,
     usage,
   };
+  // 그림 받기의 판. 전체 걷기·「어느 등록인지 모르는」 알림이 올리면 그전에 시작한 받기는 버려진다(`image()`).
   let epoch = 0;
+  // 목록 읽기의 판. 걷기·알림이 올리면 더 앞서 시작한 읽기의 답은 버려진다 — 낡은 목록이 내린 등록을 되살리지 못한다.
+  let readGen = 0;
+  // 그림 파일이 걷힌 횟수(스냅샷 `revision`). 전체든 일부든 걷으면 오른다.
+  let revision = 0;
+  // 등록 id 별 걷기 횟수. 숨김·삭제 상세가 그 id 의 받는 중 읽기만 버리게 한다(다른 그림의 받기는 그대로다).
+  const idEpochs = new Map<string, number>();
+  // 상세 알림과 v1 알림을 같은 version 으로 짝지어 둘째를 건너뛴다(코어 판정, ADR-0218 §15).
+  const noticeGate = createExpressionNoticeGate();
   let serial = 0;
   let online = true;
   let disposed = false;
@@ -248,18 +263,41 @@ export function createPhoneExpressionStore(
       items,
       shelf: ready ? items : SHELF_FROM_LAST[state] ? lastKnown : emptyItems,
       state,
-      revision: epoch,
+      revision,
       changePending,
       usage,
       addPolicy: cache.addPolicy,
     };
     listeners.forEach(listener => listener());
   };
+  /** 그림 파일을 전부 걷고 받는 중 읽기·목록 읽기도 버린다(끊김·오류·세션 끝·읽기 실패). */
   const evict = () => {
     epoch += 1;
+    readGen += 1;
+    revision += 1;
     for (const uri of images.values()) files.remove(uri);
     images.clear();
     pending.clear();
+  };
+  const idOfKey = (key: string) => key.slice(0, key.indexOf('/'));
+  /**
+   * 이 id 들의 그림만 걷는다: 파일·받는 중 읽기(그 id 의 것만 — 다른 그림의 받기는 이어진다)·이전에 시작한 목록 읽기. 목록이 알려 준
+   * `evictImageIds`(지워졌거나 그림이 바뀐 등록)와 숨김·삭제 상세가 이 길을 쓴다(ADR-0218 §15 P5).
+   */
+  const evictIds = (ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    readGen += 1;
+    revision += 1;
+    const gone = new Set(ids);
+    for (const id of gone) idEpochs.set(id, (idEpochs.get(id) ?? 0) + 1);
+    for (const [key, uri] of images) {
+      if (!gone.has(idOfKey(key))) continue;
+      files.remove(uri);
+      images.delete(key);
+    }
+    for (const key of [...pending.keys()]) {
+      if (gone.has(idOfKey(key))) pending.delete(key);
+    }
   };
   /**
    * 목록을 읽는다. **이미 읽은 목록이 있으면 읽는 동안에도 그대로 보인다**(#5330): 앞 판은 앞서 비우고 `loading` 을 내보내서
@@ -274,7 +312,7 @@ export function createPhoneExpressionStore(
   const refresh = async (full = false, again = true): Promise<void> => {
     if (disposed || !online) return;
     if (cache.version === null && snapshot.state !== 'loading') publish('loading');
-    const started = epoch;
+    const started = readGen;
     try {
       // 전체 읽기는 `since` 없이 — 서버가 `reset` 목록을 준다. 부분 읽기는 읽은 버전 뒤의 변경만 받는다.
       const since = !full && cache.version !== null ? `?since=${cache.version}` : '';
@@ -282,7 +320,7 @@ export function createPhoneExpressionStore(
         method: 'GET',
         path: base + since,
       });
-      if (disposed || started !== epoch) return;
+      if (disposed || started !== readGen) return;
       if (
         response.status !== 200 ||
         !matchesExpressionContract(LIST_CONTRACT, response.json)
@@ -299,20 +337,62 @@ export function createPhoneExpressionStore(
       }
       if (!update.applied) {
         // 읽은 답이 이미 적용한 목록보다 낡았다. 알림 뒤 목록이 아직 확인되지 않았으면 한 번 더 읽는다 — 그림을 막은 채 멈추지 않게.
-        if (changePending && again) await refresh(full, false);
+        if (changePending && again) {
+          await refresh(full, false);
+          return;
+        }
+        // 낡은 답이 두 번 이어졌다: 알림이 어느 등록을 내렸는지 끝내 모른다. 두었던 파일을 그대로 남기지 않고 전부 걷는다(문은 그대로 닫혀 있다).
+        if (changePending) evict();
         return;
       }
-      if (update.evictImageIds.length > 0) evict();
+      // 목록이 알려 준 id 의 그림만 걷는다(지워졌거나 그림이 바뀐 등록) — 나머지는 이미 받은 파일 그대로 다시 선다(다시 받기 없음).
+      evictIds(update.evictImageIds);
       cache = update.cache;
       changePending = false;
       publish('ready');
     } catch {
-      if (!disposed && started === epoch) {
+      if (!disposed && started === readGen) {
         evict();
         cache = emptyExpressionCache(workspaceId, memberId);
         changePending = false;
         publish('error');
       }
+    }
+  };
+  /**
+   * 알림 하나를 판정(코어 `changeNotice`)대로 처리한다(ADR-0218 §15). 도착 순서·유실에 기대지 않는다: 어느 길이든 숨기거나 지운 그림은 화면에 남지 않는다.
+   *   · `revoke-ids` 숨김·삭제 상세: 그 id 의 파일·받는 중 읽기를 걷고 보관함에서 뺀다. 다른 그림은 그대로 두고 목록을 새로 읽는다.
+   *   · `keep-all` 등록·고치기·정책 상세: 그리던 그림을 그대로 두고 목록만 새로 읽는다(빈 프레임 0, 다시 받기 0).
+   *   · `revoke-all` 상세 없는 알림: 모든 그림 층을 내리고(`changePending`) 받는 중 읽기를 버린다. 파일은 두고, 다음 목록이 알려 주는 id 의 것만 걷는다.
+   *   · `already-handled` 같은 version 의 다른 알림이 이미 처리했다. 숨김·삭제 상세는 이것이 아니다 — 앞선 v1 이 이름 없이 처리했어도 그 id 를 그 자리에서 걷는다.
+   */
+  const applyNotice = (verdict: ExpressionNoticeVerdict) => {
+    if (disposed || !online) return;
+    switch (verdict.kind) {
+      case 'already-handled':
+        return;
+      case 'keep-all':
+        void refresh();
+        return;
+      case 'revoke-ids': {
+        const gone = new Set(verdict.ids);
+        evictIds(verdict.ids);
+        // 목록이 올 때까지 기다리지 않고 보관함에서 뺀다 — 이 id 의 칸은 지금 글자가 된다(읽기가 앞서 시작했어도 `readGen` 이 그 답을 버린다).
+        cache = {...cache, items: cache.items.filter(item => !gone.has(item.id))};
+        lastKnown = lastKnown.filter(item => !gone.has(item.id));
+        publish();
+        void refresh();
+        return;
+      }
+      case 'revoke-all':
+        // 다음 목록이 적용될 때까지(`changePending`) 화면은 그림 층을 그리지 않고 칸만 둔다(#5473 M-5451-1). 파일은 걷지 않는다 — 다음 목록이 빠진 id 를 알려 준다는 전제 위에서다:
+        // 캐시가 읽지 않은 version 을 건너뛰지 않는다(`mutate` 는 응답이 바로 다음 version 일 때만 델타로 얹는다, H-5491-1).
+        changePending = true;
+        epoch += 1;
+        readGen += 1;
+        pending.clear();
+        publish();
+        void refresh();
     }
   };
   return {
@@ -343,21 +423,26 @@ export function createPhoneExpressionStore(
       publish();
     },
     /**
-     * A change notice revokes media immediately, before the delta arrives. 목록은 그대로 두고(#5330) 그림 파일만 걷는다 —
-     * 숨겨진 등록의 그림은 걷힌 뒤 서버가 다시 주지 않으므로 거기서 닫히고, 이름 목록이 `loading` 으로 비는 일은 없다.
-     * 걷힌 파일을 가리키는 그림 층이 화면에 남지 않게, 다음 목록이 적용될 때까지는 스냅샷의 `changePending` 이 서서 화면이 칸만 둔다(#5473).
+     * 어느 등록이 바뀌었는지 모르는 알림(`expression.changed`, 앞서 같은 version 의 상세가 오지 않았다): 그림을 즉시 내린다 — 모든 그림 층을 내리고
+     * (`changePending`) 받는 중 읽기를 버린다(D3). **파일은 걷지 않는다**: 다음 목록이 `evictImageIds` 로 알려 주는 id 의 것만 걷고 나머지는 이미
+     * 받은 파일 그대로 다시 선다(다시 받기 없음). 목록을 못 받으면 전부 걷는다. 이름 목록이 `loading` 으로 비는 일은 없다(#5330).
+     * `version` 은 같은 version 의 상세가 먼저 처리됐는지 알아보는 열쇠다(없으면 항상 처리한다).
      */
-    changed() {
-      if (disposed || !online) return;
-      // 다음 목록이 적용될 때까지(`changePending`) 화면은 그림 층을 그리지 않고 칸만 둔다(#5473 M-5451-1).
-      changePending = true;
-      evict();
-      publish();
-      void refresh();
+    changed(version: string | null = null) {
+      applyNotice(noticeGate.changed(version));
+    },
+    /** 상세 알림(`expression.changed.detail`): 숨김·삭제는 그 id 만 내리고, 등록·고치기·정책은 그림을 그대로 둔 채 목록만 새로 읽는다. */
+    detailed(detail: ExpressionChangedDetail) {
+      applyNotice(noticeGate.detail(detail));
+    },
+    /** 새로 구독했다(되쏘기 포함): 앞서 본 version 은 그 틈 뒤를 말해 주지 않는다. */
+    resetNotices() {
+      noticeGate.reset();
     },
     setOnline(value: boolean) {
       if (online === value) return;
       online = value;
+      noticeGate.reset();
       evict();
       cache = emptyExpressionCache(workspaceId, memberId);
       changePending = false;
@@ -377,7 +462,14 @@ export function createPhoneExpressionStore(
         entry =>
           entry.id === item.id && entry.name === item.name && isActive(entry),
       );
-      if (disposed || !online || snapshot.state !== 'ready' || !current?.media)
+      // 알림 뒤 목록이 아직 적용되지 않았으면(`changePending`) 두었던 파일도 내주지 않는다 — 어느 등록이 내려갔는지 모르는 동안이다.
+      if (
+        disposed ||
+        !online ||
+        changePending ||
+        snapshot.state !== 'ready' ||
+        !current?.media
+      )
         return null;
       const media = current.media[variant];
       const forever = loop && media.mime === 'image/gif';
@@ -385,6 +477,7 @@ export function createPhoneExpressionStore(
       if (images.has(key)) return images.get(key)!;
       if (pending.has(key)) return pending.get(key)!;
       const started = epoch;
+      const idStarted = idEpochs.get(item.id) ?? 0;
       const task = (async () => {
         try {
           const response = await transport.request({
@@ -393,7 +486,13 @@ export function createPhoneExpressionStore(
               item.id,
             )}/image?size=${variant}&v=${media.sha256}`,
           });
-          if (disposed || started !== epoch || response.status !== 200)
+          // 그 사이 전체 걷기·이 id 의 걷기가 있었으면 받은 것을 파일로 쓰지 않는다.
+          if (
+            disposed ||
+            started !== epoch ||
+            (idEpochs.get(item.id) ?? 0) !== idStarted ||
+            response.status !== 200
+          )
             return null;
           const bytes =
             response.bytes ??
@@ -460,7 +559,12 @@ export function createPhoneExpressionStore(
       if (!result) throw new ExpressionHttpError(response.status, undefined);
       return result;
     },
-    /** 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. */
+    /**
+     * 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. **바로 넣는 것은 응답이 캐시 version 의 바로 다음일 때뿐이다**:
+     * 사이에 남의 변경(예: 숨김)이 끼었으면 응답 하나로는 그것을 알 수 없고, 델타로 건너뛴 캐시는 그 등록을 `active` 로 둔 채 앞서 간다 — 뒤따르는 목록 읽기
+     * (`since`)는 건너뛴 version 을 다시 알리지 않으므로, 그 숨김의 알림이 상세 없이 오면 두었던 파일이 문이 열릴 때 다시 쓰인다(#5491 검수 1회차 H-5491-1,
+     * ADR-0218 §15 P5-4). 그때는 목록으로 다시 읽어 빠진 version 의 숨김이 `evictImageIds` 로 들어오게 한다.
+     */
     async mutate(request: ExpressionRequest): Promise<ExpressionMutation> {
       const response = await transport.request(request);
       const result = response.json as ExpressionMutation | undefined;
@@ -470,21 +574,25 @@ export function createPhoneExpressionStore(
         result?.workspaceId !== workspaceId
       )
         throw new Error('Expression mutation unavailable');
-      const update = applyExpressionList(cache, {
-        workspaceId,
-        version: result.version,
-        baseVersion: cache.version,
-        reset: false,
-        addPolicy: cache.addPolicy,
-        items: [result.expression],
-      });
+      const update =
+        cache.version !== null &&
+        isNextExpressionVersion(cache.version, result.version)
+          ? applyExpressionList(cache, {
+              workspaceId,
+              version: result.version,
+              baseVersion: cache.version,
+              reset: false,
+              addPolicy: cache.addPolicy,
+              items: [result.expression],
+            })
+          : null;
       if (disposed) return result;
-      if (!update.applied) {
+      if (!update?.applied) {
         await refresh();
         return result;
       }
       const dropsReading = update.evictImageIds.length > 0;
-      if (dropsReading) evict();
+      evictIds(update.evictImageIds);
       cache = update.cache;
       publish('ready');
       // 위 걷기는 읽고 있던 목록 읽기를 버린다(판이 바뀐다). 알림 뒤 목록이 아직 확인되지 않았다면 다시 읽는다 — 등록 응답은 알림을 확인해 주지 않는다.

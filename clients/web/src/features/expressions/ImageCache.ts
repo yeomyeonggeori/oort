@@ -70,6 +70,17 @@ export class ImageCache {
     return entry.promise;
   }
   clear() { this.entries.clear(); this.held = 0; }
+  /**
+   * 조건에 맞는 키의 칸만 비운다(받는 중인 칸 포함 — 늦게 도착해도 예산에 들지 않는다). 숨김·삭제 상세가 그 표현의 그림만 걷을 때 쓴다(ADR-0218 §15).
+   * 받는 중인 칸은 0바이트라 센 값은 받은 칸만 줄인다.
+   */
+  removeWhere(match: (key: string) => boolean) {
+    for (const [key, entry] of [...this.entries]) {
+      if (!match(key)) continue;
+      this.entries.delete(key);
+      if (entry.settled) this.held -= entry.bytes;
+    }
+  }
   private settle(key: string, entry: Entry, bytes: number) {
     entry.bytes = bytes;
     entry.settled = true;

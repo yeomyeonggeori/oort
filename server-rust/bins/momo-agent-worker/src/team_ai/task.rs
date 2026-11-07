@@ -349,6 +349,14 @@ impl AgentWorker {
                 .await;
             return Settlement::Skipped;
         };
+        // ADR-0201 증보 v4 P4 (#5370): a row that carries the delegation marker is a delegation step, not a
+        // research step. It is judged by the `hermes` bundle (not `long_research`, F17), it calls no read
+        // tool, and its own code is the only code that ever calls Hermes.
+        if task.delegation.is_some() {
+            return self
+                .run_team_ai_delegation_step(job, payload, run_id, transport, gathered, step, task)
+                .await;
+        }
 
         // The run itself. A stop is honoured before anything costs (B5-8); a run that ended
         // through a path that does not know tasks closes the row; `failed` is not an ending here —
@@ -972,7 +980,7 @@ impl AgentWorker {
     /// work (B5-5). `usage` is what is still to be charged (`None` when a transaction already wrote
     /// the ledger row). The run ends `failed` with `code`, one message is posted, the row ends.
     #[allow(clippy::too_many_arguments)]
-    async fn team_ai_task_interim(
+    pub(super) async fn team_ai_task_interim(
         &self,
         job: &ClaimedAgentJob,
         payload: &AgentJobPayload,
@@ -1004,7 +1012,7 @@ impl AgentWorker {
     /// the cut-short step had already made: they are on the ledger row like its tokens, so the day's
     /// search allowance (B9-2) counts them (security review r1 L4a).
     #[allow(clippy::too_many_arguments)]
-    async fn team_ai_task_drop(
+    pub(super) async fn team_ai_task_drop(
         &self,
         job: &ClaimedAgentJob,
         payload: &AgentJobPayload,
@@ -1100,7 +1108,7 @@ impl AgentWorker {
     }
 
     /// Has a person stopped this run? (B5-8, read before every model call of a step.)
-    async fn team_ai_task_stopped(
+    pub(super) async fn team_ai_task_stopped(
         &self,
         workspace_id: Uuid,
         run_id: Uuid,
@@ -1127,7 +1135,7 @@ impl AgentWorker {
     }
 
     /// Give a step's claim back (best effort: an expired claim is taken over anyway).
-    async fn team_ai_task_release(&self, workspace_id: Uuid, run_id: Uuid, token: Uuid) {
+    pub(super) async fn team_ai_task_release(&self, workspace_id: Uuid, run_id: Uuid, token: Uuid) {
         let released = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(
                 async move { store::release_claim_in_tx(conn, workspace_id, run_id, token).await },

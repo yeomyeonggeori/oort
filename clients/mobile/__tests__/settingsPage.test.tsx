@@ -1397,3 +1397,51 @@ describe('햅틱 설정은 없다 (#4936, owner 10-31)', () => {
     expect(within(card).getByTestId('profile-preview-row')).toBeTruthy();
   });
 });
+
+// 「이모티콘 추천」 켜기·끄기 (#5493, 웹 설정 › 모양 › 대화 표시의 짝): 보기 카드의 한 줄. 입력창이 이 값을 따라 줄을 걷고 세우는 것은 `expressionSuggestSetting.test.tsx` 가 잰다.
+describe('보기 카드의 「이모티콘 추천」 켜기·끄기 (#5493)', () => {
+  const SETTING_KEY = `${WS}:${SELF_ID}`.toLowerCase();
+  const LABEL = '이모티콘 추천';
+  const DETAIL = '글을 쓰다 멈추면 맞는 이모티콘을 입력창 위에 보여 줘요.';
+  const switchValue = () =>
+    Boolean(screen.getByTestId('settings-expression-suggest-row').props.accessibilityState?.checked);
+  const stored = () => JSON.parse(mmkvStore.get(NON_SECRET_KEYS.expressionSuggest) ?? '{}') as Record<string, unknown>;
+
+  it('링크 미리보기 다음 줄로, 기본으로 켜진 채 서고 이름·상태·설명을 보조기술에 말한다', async () => {
+    const page = await openPage();
+    const row = within(within(page).getByTestId('settings-view-card')).getByTestId('settings-expression-suggest-row');
+    expect(within(row).getByText(LABEL)).toBeTruthy();
+    expect(within(row).getByText(DETAIL)).toBeTruthy();
+    expect(row.props.accessibilityRole).toBe('switch');
+    expect(row.props.accessibilityLabel).toBe(LABEL);
+    expect(row.props.accessibilityHint).toBe(DETAIL);
+    expect(row.props.accessibilityState).toMatchObject({checked: true});
+    expect(switchValue()).toBe(true);
+    const order = flatten(screen.toJSON());
+    const at = (id: string) => order.indexOf(id);
+    expect(at('settings-link-preview-row')).toBeGreaterThan(at('profile-theme-row'));
+    expect(at('settings-expression-suggest-row')).toBeGreaterThan(at('settings-link-preview-row'));
+    expect(at('settings-status-card')).toBeGreaterThan(at('settings-expression-suggest-row'));
+    expect(mmkvStore.has(NON_SECRET_KEYS.expressionSuggest)).toBe(false); // 보기만 해서는 아무것도 쓰지 않는다
+  });
+
+  it('줄을 누르면 꺼져서 이 기기에(워크스페이스:사람) 저장되고, 다시 누르면 켜진다', async () => {
+    await openPage();
+    fireEvent.press(screen.getByTestId('settings-expression-suggest-row'));
+    expect(switchValue()).toBe(false);
+    expect(stored()[SETTING_KEY]).toEqual({v: 1, workspaceId: WS, memberId: SELF_ID, on: false});
+    fireEvent.press(screen.getByTestId('settings-expression-suggest-row'));
+    expect(switchValue()).toBe(true);
+    expect(stored()[SETTING_KEY]).toEqual({v: 1, workspaceId: WS, memberId: SELF_ID, on: true});
+  });
+
+  it('저장된 끔은 설정을 다시 열어도 꺼져 있다', async () => {
+    mmkvStore.set(
+      NON_SECRET_KEYS.expressionSuggest,
+      JSON.stringify({[SETTING_KEY]: {v: 1, workspaceId: WS, memberId: SELF_ID, on: false}}),
+    );
+    await openPage();
+    expect(switchValue()).toBe(false);
+    expect(screen.getByTestId('settings-expression-suggest-row').props.accessibilityState).toMatchObject({checked: false});
+  });
+});

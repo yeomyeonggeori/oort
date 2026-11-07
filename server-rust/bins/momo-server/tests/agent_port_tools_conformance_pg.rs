@@ -28739,6 +28739,19 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
     assert_eq!(settled["result"]["expression"]["token"], ":from_link:");
     let changed: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'").bind(ws).fetch_one(&w.su).await.unwrap();
     assert!(changed >= 1);
+    // ADR-0218 §15 (#5491): the approval path registers through the same `changed()`, so it also wrote its detail
+    // notice: `created`, naming exactly the expression this decision registered.
+    let registered_id: Uuid = sqlx::query_scalar("SELECT id FROM expression WHERE approval_id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let details: Vec<Value> = sqlx::query_scalar("SELECT payload->'data' FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed.detail' ORDER BY id").bind(ws).fetch_all(&w.su).await.unwrap();
+    assert!(
+        details.iter().any(|detail| detail["action"] == "created"
+            && detail["expressionIds"] == json!([registered_id])),
+        "the approval path writes its detail: {details:?}"
+    );
     let all_audit: String = sqlx::query_scalar(
         "SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1",
     )

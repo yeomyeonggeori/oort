@@ -11,13 +11,15 @@ import { ConversationPreview } from "../shell/ConversationPreview";
 import { SettingsRow } from "../shell/SettingsRow";
 import { SettingsSection } from "../shell/SettingsSection";
 import { DensityRow } from "./DensityRow";
+import { ExpressionSuggestRow } from "./ExpressionSuggestRow";
 import { FontSizeRow } from "./FontSizeRow";
 import { ThreadLayoutRow } from "./ThreadLayoutRow";
 
 // 카드 「대화 표시」 (#3578 S3a에서 옮김, AP-1a #4186). 링크 미리보기와 대화 미리보기는 그대로
 // 있고, 슬롯(`FontSizeRow`·`DensityRow`·`ThreadLayoutRow`)은 소유 이슈가 열기 전까지 아무것도
 // 그리지 않는다. 자리는 청사진 §5.3-a의 순서다: 글자 크기 → 대화 밀도 → 링크 미리보기 →
-// 대화 미리보기 → 스레드 배치.
+// 대화 미리보기 → 스레드 배치. 「이모티콘 추천」 스위치(#5493)는 대화 미리보기 다음, 스레드 배치 앞이다:
+// 미리보기는 그 앞의 세 선택을 그대로 비추는 행이라 사이에 다른 선택을 끼우지 않는다.
 
 // 저장되는 값은 rich·compact·off 그대로다(이름이 아니라 화면의 낱말만 작게·크게·끄기로 바뀌었다, #4882).
 // 낱말과 설명은 사전 키다: 이 줄은 새 문구라 직접 문구 장부에 더하지 않는다.
@@ -63,6 +65,7 @@ export function DisplayPrefs() {
       <SettingsRow label="대화 미리보기" description="고른 글자 크기와 대화 밀도, 링크 카드가 이렇게 보여요." stack>
         <ConversationPreview linkPreview={linkPreview} />
       </SettingsRow>
+      <ExpressionSuggestRow />
       <ThreadLayoutRow />
     </SettingsSection>
   );

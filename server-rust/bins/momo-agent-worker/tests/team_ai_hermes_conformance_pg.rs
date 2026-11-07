@@ -11,8 +11,11 @@
 //!
 //! What these tests measure is what the model is **offered** (`ScriptedModel` records every request: the
 //! tool list, the `kind` enum, the system prompt) and what the worker does when a model calls a tool it
-//! was not offered. Hermes is never called in this slice: one test binds a real TCP listener and counts
-//! the connections the worker makes to the "Hermes" address — **zero**.
+//! was not offered. Since P14-S2 (#5370) an accepted call begins a delegation; `h8` holds the line that the
+//! helper's own turn sends nothing and that only the next step reaches Hermes — counted on a real server
+//! behind the worker's real guarded provider **with the loopback allowed**, so the zero before the step and
+//! the one after it are both measurements (the #5369 version counted a bare listener that the egress policy
+//! would have kept at zero whatever the worker did).
 //!
 //! Every closed-door case is measured **by its own change from an open baseline, and the undo of that
 //! change re-opens the door** — so a case cannot pass because the baseline was never open.
@@ -26,33 +29,37 @@
 //! | `h5_after_a_read_the_tool_is_gone_and_the_prompt_says_why` | compute `tainted` as `false` for the door, or drop `HermesPrompt::WithheldByRead` |
 //! | `h6_a_call_that_was_never_offered_is_not_offered_and_runs_nothing_else` | route an un-offered `ask_hermes` to the off-script fallback, or run the reads of that answer |
 //! | `h7_a_provider_search_in_the_same_answer_is_counted_before_the_call_is_judged` | judge the call with the pre-answer `tainted` instead of `read_used \|\| web_searches > 0` after it |
-//! | `h8_an_accepted_call_ends_the_turn_with_the_fixed_sentence_and_nothing_is_sent_anywhere` | call Hermes, keep the request sentence anywhere, or drop the `team_ai.delegate` row |
+//! | `h8_an_accepted_call_begins_a_delegation_and_only_the_next_step_reaches_hermes` | call Hermes in the helper's own turn, keep the request sentence anywhere but the task row, or drop the `team_ai.delegate` row (the whole delegation is `team_ai_hermes_exec_conformance_pg`) |
 //! | `h9_the_identity_filter_turns_a_copied_name_into_invalid_arguments` | drop `screen_identity` from `judge_call` |
 //! | `h10_a_hermes_of_another_workspace_is_not_a_target_under_a_non_bypass_role` | read the pins without the workspace predicate |
 //! | `h11_a_proposal_or_a_task_in_the_same_answer_wins_and_a_step_is_never_offered_the_tool` | handle the `ask_hermes` branch before the proposal / `task_continue` checks, or put the tool on a step's request |
 
 use std::collections::VecDeque;
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use momo_agent::{create_agent_run_in_tx, NewAgentRun, RunTrigger};
 use momo_agent_worker::provider::{
-    ChatCompletion, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint, ProviderError,
-    ProviderToolCall,
+    http_provider, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint,
+    ProviderError, ProviderToolCall,
 };
 use momo_agent_worker::{AgentWorker, DrainStats, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::{send_message_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
-use momo_settings::{seal_bearer, upsert_link};
+use momo_settings::{seal_bearer, upsert_link, EgressPolicy};
 use momo_workspace_actions::team_ai_hermes::{self, HermesDeclarations};
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
+
+#[path = "common/fake_hermes.rs"]
+mod fake_hermes;
+use fake_hermes::{Behavior, FakeHermes};
 
 const MASTER_KEY: &str = "conformance-5369-master";
 const HEAD_URL: &str = "https://team-gw.example/v1";
@@ -565,6 +572,28 @@ impl ChatProvider for ScriptedModel {
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| say("네, 알겠어요.")))
+    }
+}
+
+/// Routes the helper's own model (the team link, `source = "database"`) to the scripted model and the call to
+/// Hermes (the operator's env link, `source = "environment"`) to the worker's real guarded provider.
+struct Routed {
+    model: Arc<ScriptedModel>,
+    hermes: Arc<dyn ChatProvider>,
+}
+
+#[async_trait]
+impl ChatProvider for Routed {
+    async fn complete(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        if endpoint.source == "environment" {
+            self.hermes.complete(endpoint, request).await
+        } else {
+            self.model.complete(endpoint, request).await
+        }
     }
 }
 
@@ -1352,73 +1381,73 @@ async fn h7_a_provider_search_in_the_same_answer_is_counted_before_the_call_is_j
     );
 }
 
-/// P14-S1 「집행은 `unavailable`」: an offered, well-formed call ends the turn with the fixed sentence. Not
-/// one connection reaches the "Hermes" address (a real listener counts them), the run succeeds, the ledger
-/// carries the tokens the one model call spent, there is one `team_ai.delegate` row (kind, code, target) and
-/// the request sentence is **in no table** — not the audit log, not a message or prop, not the outbox, not the
-/// run.
+/// P14-S1's line, kept honest by P14-S2 (#5370): an offered, well-formed call ends the helper's own turn
+/// **without** calling Hermes — the call is the next step's — and only that next step reaches the
+/// "Hermes" address. The address is a real HTTP server behind the worker's real guarded provider with the
+/// operator's allowance on, so both counts are measurements: **zero** after the first turn, **one** after the
+/// step. (The #5369 version asserted zero on a bare listener, which the egress policy kept at zero whether or
+/// not the worker called — a green that proved nothing once something sat behind the door.) The request
+/// sentence is in the task row and in no other table, then in none.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn h8_an_accepted_call_ends_the_turn_with_the_fixed_sentence_and_nothing_is_sent_anywhere() {
+async fn h8_an_accepted_call_begins_a_delegation_and_only_the_next_step_reaches_hermes() {
     let (su, pool, t, hermes) = fixture().await;
-    let listener = TcpListener::bind("127.0.0.1:0").expect("a port for the 'Hermes'");
-    listener.set_nonblocking(true).unwrap();
-    let mut setup = Setup::open();
-    setup.base_url = Some(format!("http://{}/v1", listener.local_addr().unwrap()));
-    let sentence = "오늘 서울 날씨 검색해 줘 9f3a7c";
-    let (model, run) = ask(
-        &su,
-        &pool,
-        &t,
-        t.owner_id,
-        "@oort-helper 날씨 알려 줘",
-        vec![
-            ask_hermes("web_search", sentence),
-            say("이 답은 쓰이면 안 돼요"),
-        ],
-        &setup,
+    let fake = FakeHermes::start(
+        su.clone(),
+        t.workspace_id,
+        Behavior::Answer {
+            text: "서울은 맑아요".to_string(),
+            usage: Some((4, 2)),
+        },
     )
     .await;
+    let mut setup = Setup::open();
+    setup.base_url = Some(fake.base_url());
+    let sentence = "오늘 서울 날씨 검색해 줘 9f3a7c";
+    let model = ScriptedModel::new([ask_hermes("web_search", sentence), say("서울은 맑대요")]);
+    // the helper's model is scripted; the Hermes call goes through the same guarded provider main.rs runs
+    let provider = Arc::new(Routed {
+        model: model.clone(),
+        hermes: http_provider(
+            Duration::from_secs(20),
+            EgressPolicy::default().with_operator_base_url(&fake.base_url()),
+        )
+        .expect("the guarded provider"),
+    });
+    let worker = worker_with(provider, &pool, &setup).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 날씨 알려 줘", None).await;
 
+    // the helper's own turn
+    let first = worker.drain_once().await.expect("first turn");
+    assert_eq!(first.claimed, 1);
     assert_eq!(
         model.requests().len(),
         1,
-        "no merging call: the turn ended at the call"
+        "one model call, and no Hermes call through the provider"
     );
-    assert_eq!(run_status(&su, run).await, "succeeded");
     assert_eq!(
-        agent_texts(&su, &t).await.last().map(String::as_str),
-        Some("지금은 Hermes에 닿지 못했어요.")
+        fake.connections(),
+        0,
+        "the helper's own turn sends nothing to Hermes"
     );
-    assert!(
-        matches!(listener.accept(), Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock),
-        "not one connection reached the Hermes address"
-    );
-    let delegate = audit_rows(&su, &t, team_ai_hermes::AUDIT_DELEGATE, run).await;
-    assert_eq!(delegate.len(), 1);
-    assert_eq!(delegate[0]["kind"], json!("web_search"));
-    assert_eq!(delegate[0]["code"], json!("unavailable"));
-    assert_eq!(delegate[0]["target"], json!(hermes.to_string()));
     assert_eq!(
-        delegate[0]["schema"],
-        json!(team_ai_hermes::AUDIT_DELEGATE_SCHEMA)
+        agent_texts(&su, &t).await.last(),
+        None,
+        "no answer yet: the delegation is the next step"
     );
-    let turn = &audit_rows(&su, &t, "team_ai.turn", run).await[0];
-    assert_eq!(
-        turn["hermes"],
-        json!({"offered": ["web_search"], "results": ["unavailable"]})
-    );
-    // the tokens of the one call are on the ledger like any answer's
-    let ledger: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2",
+    let kind_and_marker: (String, String, bool) = sqlx::query_as(
+        "SELECT delegation_kind, delegation_state, delegation_request IS NOT NULL \
+           FROM team_ai_task WHERE run_id = $1",
     )
-    .bind(t.workspace_id)
     .bind(run)
     .fetch_one(&su)
     .await
-    .unwrap();
-    assert_eq!(ledger, 1);
-    // the sentence is in no table the worker writes
+    .expect("the delegation's task row");
+    assert_eq!(
+        kind_and_marker,
+        ("web_search".to_string(), "pending".to_string(), true)
+    );
+    // while it waits for its step the sentence is in the task row and in no other table
     for (what, sql) in [
         ("audit_log", "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND detail::text LIKE '%9f3a7c%'"),
         ("message body", "SELECT count(*) FROM message WHERE workspace_id = $1 AND body LIKE '%9f3a7c%'"),
@@ -1429,6 +1458,42 @@ async fn h8_an_accepted_call_ends_the_turn_with_the_fixed_sentence_and_nothing_i
         let found: i64 = sqlx::query_scalar(sql).bind(t.workspace_id).fetch_one(&su).await.unwrap();
         assert_eq!(found, 0, "the request sentence is in {what}");
     }
+
+    // the next step: now, and only now, one connection
+    drain(&worker).await;
+    assert_eq!(
+        fake.connections(),
+        1,
+        "the step reaches Hermes once (the count is 1 where a zero would have been green anyway)"
+    );
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(
+        agent_texts(&su, &t).await.last().map(String::as_str),
+        Some("서울은 맑대요")
+    );
+    let delegate = audit_rows(&su, &t, team_ai_hermes::AUDIT_DELEGATE, run).await;
+    assert_eq!(delegate.len(), 1);
+    assert_eq!(delegate[0]["kind"], json!("web_search"));
+    assert_eq!(delegate[0]["code"], json!("ok"));
+    assert_eq!(delegate[0]["target"], json!(hermes.to_string()));
+    assert_eq!(
+        delegate[0]["schema"],
+        json!(team_ai_hermes::AUDIT_DELEGATE_SCHEMA)
+    );
+    let turn = &audit_rows(&su, &t, "team_ai.turn", run).await[0];
+    assert_eq!(
+        turn["hermes"],
+        json!({"offered": ["web_search"], "results": ["accepted"]})
+    );
+    // and the sentence is now in the row no longer
+    let still_there: bool = sqlx::query_scalar(
+        "SELECT delegation_request IS NOT NULL FROM team_ai_task WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(!still_there, "the ended row holds no sentence");
 }
 
 /// P1 identity filter, on the real path: a model that copies a roster name into `request` — a member the
