@@ -353,7 +353,16 @@ mod tests {
             .iter()
             .map(|value| value.as_str().expect("a string").to_string())
             .collect();
-        assert_eq!(tool_enum, actions::TEAM_AI_ACTION_IDS);
+        // ADR-0218 증보 6 §12 L2.2 · F20 (#5460 S1b): the tool's enum is the allow-list **minus** the
+        // ids a server routine raises. The two are on the allow-list (the decision accepts the
+        // helper's mark) and in the published enum, but no model is told them.
+        let offered: Vec<&str> = actions::TEAM_AI_ACTION_IDS
+            .iter()
+            .copied()
+            .filter(|id| !actions::SERVER_RAISED_ACTION_IDS.contains(id))
+            .collect();
+        assert_eq!(tool_enum, offered);
+        assert_eq!(tool_enum.len(), 14);
         let spec = openapi_enum("WorkspaceActionId");
         for id in actions::TEAM_AI_ACTION_IDS {
             assert!(
@@ -365,12 +374,22 @@ mod tests {
                 "{id}"
             );
         }
-        // The args hint names every helper action's keys, from the registry.
+        for id in actions::SERVER_RAISED_ACTION_IDS {
+            assert!(
+                !tool_enum.iter().any(|listed| listed == id),
+                "{id} is raised by the server and must not be in the tool's enum"
+            );
+        }
+        // The args hint names every OFFERED helper action's keys, from the registry — and none
+        // of the server-raised ones.
         let hint = worker.parameters["properties"]["args"]["description"]
             .as_str()
             .expect("an args description");
-        for id in actions::TEAM_AI_ACTION_IDS {
+        for id in offered {
             assert!(hint.contains(id), "the args hint does not name {id}");
+        }
+        for id in actions::SERVER_RAISED_ACTION_IDS {
+            assert!(!hint.contains(id), "the args hint names {id}");
         }
         assert!(
             hint.contains("workspace.work_tier.update {autoTarget?, mode}"),

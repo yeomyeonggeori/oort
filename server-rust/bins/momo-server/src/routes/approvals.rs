@@ -2237,7 +2237,13 @@ async fn execute_workspace_action(
         // stands on (the resolver read it from the database), never from the payload, and the
         // person is judged by the ONE predicate the push audience and the preview also ask
         // (`adder_allows_in_tx`) against the policy as it is now. No admin or owner proxy.
-        let ActionArgs::ExpressionCreate { subject, .. } = &resolved.validated.args else {
+        // The set card (ADR-0218 증보 6 §12, #5460 S1b) names its face the same way; its executor is S2's.
+        let (ActionArgs::ExpressionCreate { subject, .. }
+        | ActionArgs::ExpressionSetCreate(crate::routes::actions::ExpressionSetSpec {
+            subject,
+            ..
+        })) = &resolved.validated.args
+        else {
             return Err(protocol_error(
                 "expression_adder action resolved without its candidates",
             ));
@@ -2568,6 +2574,16 @@ async fn execute_workspace_action(
         ActionArgs::TeamAiRolesSet { before: None, .. } => {
             return Err(protocol_error(
                 "team_ai.roles.set resolved without the switch it showed",
+            ));
+        }
+        // ADR-0218 증보 6 §12 (#5460 S1b). The set's two cards have no executor yet: the set
+        // card's is S2's (the decision transaction), the plan card's is S5a's. A decision that
+        // reaches here rolls back and writes nothing — and no code raises either card before
+        // those slices land (nothing offers the ids to a model, and the proposal function is not
+        // called by anything). Fail closed rather than approve what cannot run.
+        ActionArgs::ExpressionSetCreate(_) | ActionArgs::ExpressionSetPlan { .. } => {
+            return Err(protocol_error(
+                "the executor of an expression set card is not part of this build",
             ));
         }
     };
@@ -5859,9 +5875,23 @@ mod tests {
             momo_agent::actions::Proposers::TeamAiOnly
         );
         assert_eq!(unfurl.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+        // ADR-0218 증보 6 §12 (#5460 S1b, A23): the set's two cards are the helper's alone and are
+        // on the allow-list (`is_team_ai_action`), so a card with the helper's mark is judged by the
+        // bundles and the read rule — taking either id off `TEAM_AI_ACTION_IDS` makes the helper's own
+        // card refuse its approval, and a card of either without the mark is refused.
+        let set_card = action_by_id("expression.set.create").expect("registered");
+        let plan_card = action_by_id("expression.set.plan").expect("registered");
+        for action in [set_card, plan_card] {
+            assert_eq!(action.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+            assert!(
+                momo_workspace_actions::team_ai::is_team_ai_action(action.id),
+                "{} must be on the allow-list",
+                action.id
+            );
+        }
         let marked = json!({"source": "team_ai", "tools": [], "web_searches": 0});
 
-        for action in [roles_card, unfurl, channel_create] {
+        for action in [roles_card, unfurl, channel_create, set_card, plan_card] {
             assert!(
                 matches!(
                     card_provenance(Some(&marked), action),
@@ -5879,7 +5909,7 @@ mod tests {
             Some(json!({"source": 1})),
             Some(json!("team_ai")),
         ] {
-            for action in [roles_card, unfurl] {
+            for action in [roles_card, unfurl, set_card, plan_card] {
                 assert!(
                     matches!(
                         card_provenance(via.as_ref(), action),

@@ -10,7 +10,8 @@
 //! This suite provisions a **fresh database** exactly the way Railway's api
 //! pre-deploy does — `bootstrap_runtime_roles.sql`, then the migrations, then
 //! `bootstrap_runtime_roles.sql` again (`momo-migrate` step 6) — and never applies
-//! the dev file. Then it runs one iteration of each notifier job **as
+//! the dev file, but for the one test that is about the dev file itself (#5370 M1,
+//! the `dev_roles_file` row below). Then it runs one iteration of each notifier job **as
 //! `momo_notifier`** (and its RLS-bound write half as `momo_app`) and fails on any
 //! `permission denied`.
 //!
@@ -27,7 +28,9 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1, v2 #5370: `momo_app` UPDATE and SELECT by column — every column but `delegation_request` —, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
+//! | `the_team_ai_task_lockdown_holds_when_the_runtime_roles_file_runs_on_schema_176` (#5370 security review M1) | bring back an early `RETURN` in the `team-ai-task-lockdown` block of `bootstrap_runtime_roles.sql` that skips the block while `delegation_request` is not there yet: on schema 176 (where a deploy runs the roles file first) the `ALL TABLES` grant before it stays, and relay, notifier, `momo_app` and `momo_worker` keep SELECT and DELETE on every tenant's task notes until 177 lands; or hand `momo_app` the table-level `SELECT` back |
+//! | `the_team_ai_task_lockdown_holds_when_the_dev_roles_file_runs_on_schema_176` (#5370 security review M1) | the same early `RETURN` in `bootstrap_roles.sql` (the dev file hands the notifier every table too) |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
@@ -130,6 +133,47 @@ fn apply_runtime_roles(database_url: &str) {
     }
     let status = command.status().expect("spawn psql");
     assert!(status.success(), "bootstrap_runtime_roles.sql failed");
+}
+
+/// `bootstrap_roles.sql`, the development file, over one database. It takes no secret: its passwords
+/// are the dev ones [`PASSWORDS`] hands the runtime file, so the roles stay what every other suite of
+/// this cluster connects with.
+fn apply_dev_roles(database_url: &str) {
+    let status = Command::new(resolve_psql())
+        .arg(database_url)
+        .args([
+            "-v",
+            "ON_ERROR_STOP=1",
+            "--no-psqlrc",
+            "--quiet",
+            "--single-transaction",
+        ])
+        .arg("-f")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
+        ))
+        .status()
+        .expect("spawn psql");
+    assert!(status.success(), "bootstrap_roles.sql failed");
+}
+
+/// The two files that provision the runtime roles, for the test that has to try both: production runs
+/// [`RolesFile::Runtime`] (Railway's pre-deploy, the compose `runtime-roles` service), the dev and e2e
+/// stacks run [`RolesFile::Dev`].
+#[derive(Clone, Copy, Debug)]
+enum RolesFile {
+    Runtime,
+    Dev,
+}
+
+impl RolesFile {
+    fn apply(self, database_url: &str) {
+        match self {
+            RolesFile::Runtime => apply_runtime_roles(database_url),
+            RolesFile::Dev => apply_dev_roles(database_url),
+        }
+    }
 }
 
 /// `bootstrap_runtime_roles.sql` rotates the four runtime roles' passwords and
@@ -748,6 +792,201 @@ async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attach
         ],
         "the backfill flagged the file the previous release's schedule holds, and only it"
     );
+}
+
+impl ProdDb {
+    /// An upgrade **stopped between its roles pass and its migration**: a fresh database holding every
+    /// migration below `first_new` (the previous release's schema) with `roles` already applied over it,
+    /// the way a deploy's pre-migrate step leaves it (Railway runs the roles file first, then `migrate`).
+    /// [`ProdDb::create_upgrading_from_before`] runs straight through to the end, so a test that has to
+    /// look at the schema in between cannot use it. The rest of the upgrade is
+    /// [`ProdDb::run_remaining_migrations`] and then the roles file again.
+    async fn create_stopped_before_migration(first_new: i64, roles: RolesFile) -> ProdDb {
+        assert_disposable_cluster();
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&cluster_url())
+            .await
+            .expect("connect as superuser");
+        drop_stale_databases(&admin).await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        // (the name shape of `create_with`, so a run that panics before `finish` is swept by the next one)
+        let name = format!(
+            "prodrole_{now}_{}",
+            &Uuid::new_v4().simple().to_string()[..8]
+        );
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("create database");
+        let url = url_for(&name);
+        if matches!(roles, RolesFile::Runtime) {
+            // Railway's order: the roles file first, on the empty database (it is made to run before the
+            // tables exist), then the migrations, then the roles file again on the old schema
+            roles.apply(&url);
+        }
+        let previous = migrations_before(first_new);
+        run_migrations(&url, &previous, SeedMode::None)
+            .expect("apply the previous release's migrations");
+        let _ = std::fs::remove_dir_all(&previous);
+        roles.apply(&url);
+        let su = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to the stopped upgrade's database");
+        ProdDb { name, admin, su }
+    }
+
+    /// The migrations a [`ProdDb::create_stopped_before_migration`] database was waiting for.
+    fn run_remaining_migrations(&self) {
+        run_migrations(
+            &url_for(&self.name),
+            &default_migrations_dir(),
+            SeedMode::None,
+        )
+        .expect("apply the migrations the stopped upgrade was waiting for");
+    }
+}
+
+/// What the catalog says about `team_ai_task` at one moment: the columns the table has, and every place a
+/// role's privileges differ from what the `team-ai-task-lockdown` block writes (empty = locked as written).
+/// The expectation is the block's own: `momo_app` UPDATE on the table and SELECT by column on every column
+/// but `delegation_request`, `momo_worker` SELECT/INSERT/UPDATE, relay, notifier and PUBLIC nothing, and
+/// DELETE (also TRUNCATE, REFERENCES, TRIGGER) for nobody. `has_table_privilege` and
+/// `has_column_privilege` count PUBLIC and role membership, which a hand-read `relacl` would not.
+struct TaskPosture {
+    columns: Vec<String>,
+    table_drift: Vec<String>,
+    column_drift: Vec<String>,
+}
+
+async fn team_ai_task_posture(su: &PgPool) -> TaskPosture {
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT attname::text FROM pg_attribute \
+          WHERE attrelid = 'public.team_ai_task'::regclass AND attnum > 0 AND NOT attisdropped \
+          ORDER BY attnum",
+    )
+    .fetch_all(su)
+    .await
+    .expect("team_ai_task columns");
+    let table_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, p.priv, \
+                       has_table_privilege(r.rolname, 'public.team_ai_task', p.priv)) \
+           FROM (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('public')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE has_table_privilege(r.rolname, 'public.team_ai_task', p.priv) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv = 'UPDATE') \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .expect("team_ai_task table privilege scan");
+    let column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, a.attname, \
+                       has_column_privilege(r.rolname, 'public.team_ai_task', a.attname::text, 'SELECT')) \
+           FROM (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('public')) AS r(rolname) \
+           CROSS JOIN pg_attribute a \
+          WHERE a.attrelid = 'public.team_ai_task'::regclass AND a.attnum > 0 AND NOT a.attisdropped \
+            AND has_column_privilege(r.rolname, 'public.team_ai_task', a.attname::text, 'SELECT') \
+                IS DISTINCT FROM (r.rolname = 'momo_worker' \
+                                  OR (r.rolname = 'momo_app' AND a.attname <> 'delegation_request')) \
+          ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .expect("team_ai_task column privilege scan");
+    TaskPosture {
+        columns,
+        table_drift,
+        column_drift,
+    }
+}
+
+/// #5370 security review M1. A deploy runs the roles file **before** the migrations, so the first deploy
+/// that carries migration 177 runs it on schema 176 — where `delegation_request` does not exist yet and the
+/// `ALL TABLES` grant at the top of the file has just handed `team_ai_task` (every tenant's task notes) to
+/// relay, notifier, `momo_app` and `momo_worker`, DELETE included. The block used to return early in that
+/// case and leave all of it standing until 177 landed (and, if 177 failed, until the next good deploy).
+/// It now locks the columns that are there: the same posture as before 177, and the same as after it.
+///
+/// The probe is the catalog at three moments of one upgrade — right after the roles pass on schema 176,
+/// right after migration 177 (its own copy of the block), and after the roles pass that follows it — and
+/// at each of them relay and notifier hold nothing, nobody holds DELETE, and `momo_app` holds no
+/// table-level SELECT but reads every column the table has (but the request sentence once it exists).
+async fn the_lockdown_holds_across_an_upgrade_that_runs_the_roles_file_on_schema_176(
+    roles: RolesFile,
+) {
+    let db = ProdDb::create_stopped_before_migration(177, roles).await;
+    let on_176 = team_ai_task_posture(&db.su).await;
+    db.run_remaining_migrations();
+    let after_177 = team_ai_task_posture(&db.su).await;
+    roles.apply(&url_for(&db.name));
+    let after_roles = team_ai_task_posture(&db.su).await;
+    db.finish().await;
+
+    // the probe saw the schema it is about: the table, and not the request column yet
+    assert!(
+        on_176.columns.len() >= 16 && on_176.columns.iter().any(|c| c == "note"),
+        "{roles:?}: the scan must see the table on schema 176, or it proves nothing: {:?}",
+        on_176.columns
+    );
+    assert!(
+        !on_176.columns.iter().any(|c| c == "delegation_request"),
+        "{roles:?}: schema 176 has no request column yet — the stop is in the wrong place: {:?}",
+        on_176.columns
+    );
+    assert!(
+        on_176.table_drift.is_empty(),
+        "{roles:?}: after the roles pass on schema 176 the table grants are not the lockdown's \
+         (relay and notifier must hold nothing, nobody DELETE, momo_app no table-level SELECT): {:?}",
+        on_176.table_drift
+    );
+    assert!(
+        on_176.column_drift.is_empty(),
+        "{roles:?}: after the roles pass on schema 176 the column grants are not the lockdown's \
+         (momo_app reads every column that exists): {:?}",
+        on_176.column_drift
+    );
+    for (moment, posture) in [
+        ("after migration 177", &after_177),
+        ("after the roles pass that follows 177", &after_roles),
+    ] {
+        assert!(
+            posture.columns.iter().any(|c| c == "delegation_request"),
+            "{roles:?}: {moment}: the request column must exist now: {:?}",
+            posture.columns
+        );
+        assert!(
+            posture.table_drift.is_empty(),
+            "{roles:?}: {moment}: table grants drifted from the lockdown: {:?}",
+            posture.table_drift
+        );
+        assert!(
+            posture.column_drift.is_empty(),
+            "{roles:?}: {moment}: column grants drifted from the lockdown (momo_app must not read \
+             delegation_request, momo_worker must): {:?}",
+            posture.column_drift
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_team_ai_task_lockdown_holds_when_the_runtime_roles_file_runs_on_schema_176() {
+    the_lockdown_holds_across_an_upgrade_that_runs_the_roles_file_on_schema_176(RolesFile::Runtime)
+        .await;
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_team_ai_task_lockdown_holds_when_the_dev_roles_file_runs_on_schema_176() {
+    the_lockdown_holds_across_an_upgrade_that_runs_the_roles_file_on_schema_176(RolesFile::Dev)
+        .await;
 }
 
 /// #4443 (owner 승인 2026-10-26, 조건 C): migration 151 removes the file **name** from the
@@ -1724,13 +1963,31 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname = 'team_ai_task' \
             AND has_table_privilege(r.rolname, c.oid, p.priv) \
-                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('UPDATE')) \
                                   OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE'))) \
           ORDER BY 1",
     )
     .fetch_all(&db.su)
     .await
     .expect("team ai task privilege scan");
+    // #5370 (ADR-0201 증보 v4 I6): `momo_app` reads by COLUMN now — every column but the delegation's
+    // request sentence — so the table-level scan above expects it to hold UPDATE only, and this scan holds
+    // the column grants to the same lockdown text (bootstrap_runtime_roles.sql).
+    let team_ai_task_column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, a.attname, \
+                       has_column_privilege(r.rolname, c.oid, a.attname, 'SELECT')) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+          WHERE n.nspname = 'public' AND c.relname = 'team_ai_task' \
+            AND has_column_privilege(r.rolname, c.oid, a.attname, 'SELECT') \
+                IS DISTINCT FROM (r.rolname = 'momo_worker' \
+                                  OR (r.rolname = 'momo_app' AND a.attname <> 'delegation_request')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("team ai task column privilege scan");
     let team_ai_task_tables: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'team_ai_task'",
@@ -1938,6 +2195,11 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         team_ai_task_drift.is_empty(),
         "team_ai_task privileges drifted from the lockdown: {team_ai_task_drift:?}"
+    );
+    assert!(
+        team_ai_task_column_drift.is_empty(),
+        "team_ai_task column privileges drifted from the lockdown (the request sentence is the worker's alone): \
+         {team_ai_task_column_drift:?}"
     );
     assert_eq!(
         attachment_media_tables, 1,

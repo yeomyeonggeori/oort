@@ -19579,6 +19579,16 @@ async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not()
             "team_ai.roles.set",
             json!({"bundle": "files", "enabled": false}),
         ),
+        // ADR-0218 증보 6 §12 L2.1 (#5460 S1b, A4): the emoticon set's two cards are server-raised
+        // helper cards; the Agent Port reads either id exactly like an unknown one.
+        (
+            "expression.set.create",
+            json!({"setId": "00000000-0000-4000-8000-000000000001"}),
+        ),
+        (
+            "expression.set.plan",
+            json!({"setId": "00000000-0000-4000-8000-000000000001"}),
+        ),
     ] {
         let before = approval_count_3900(&su, workspace).await;
         let (status, refused) =

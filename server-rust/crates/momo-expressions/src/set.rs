@@ -46,6 +46,10 @@ pub const STAGING_SECS: i64 = 7_200;
 /// The audit action of one reclaimed set (D6's closed list: ids and counts, never text or bytes).
 pub const AUDIT_RECLAIMED: &str = "expression.set.reclaimed";
 pub const AUDIT_RECLAIMED_SCHEMA: &str = "momo.expression.set.reclaimed.v1";
+/// The audit action of one proposed set (ADR-0218 §12 L8-5, #5460 S1b): ids and counts only — no
+/// byte, no prompt, no name, no link (D6).
+pub const AUDIT_PROPOSED: &str = "expression.set.proposed";
+pub const AUDIT_PROPOSED_SCHEMA: &str = "momo.expression.set.proposed.v1";
 
 /// The run states in which a run is still alive (the `agent_run_active_idx` list).
 const RUN_LIVE: &str = "('queued','running','awaiting_approval','paused')";
@@ -779,7 +783,7 @@ pub async fn get_in_tx(
 /// the caller. The head moves to `expired` with its `prompt` blanked, the slots lose their
 /// `scene`, the renditions are deleted, and one `expression.set.reclaimed` audit row records ids
 /// and counts only. Idempotent: an `expired` head is left as it is.
-async fn reclaim_in_tx(
+pub(crate) async fn reclaim_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
     set_id: Uuid,
@@ -828,6 +832,336 @@ async fn reclaim_in_tx(
         slots,
         closed_now: true,
     })
+}
+
+/// Lock a set for its proposal and read it back (ADR-0218 §12 L3.2): the owner's four predicates,
+/// `staging`, the plan **confirmed** (nothing is made, so nothing is proposed, before the person's
+/// 「이대로 만들기」, L19.3) and the two hours not yet over. The head is locked `FOR UPDATE`, so a
+/// `put_*`, an `abandon` or the sweep waits for this transaction. Every other answer — another
+/// agent's, person's, run's or tenant's set, an unconfirmed one, an expired one, one already
+/// proposed, an unknown id — is the same `None` (A6).
+pub async fn lock_for_proposal_in_tx(
+    conn: &mut PgConnection,
+    owner: Owner,
+    set_id: Uuid,
+) -> Result<Option<Held>, Error> {
+    let locked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM expression_set WHERE workspace_id = $1 AND id = $2 \
+            AND agent_member_id = $3 AND requester_member_id = $4 AND run_id = $5 \
+            AND state = 'staging' AND plan_confirmed_at IS NOT NULL \
+            AND expires_at > clock_timestamp() FOR UPDATE",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    get_in_tx(conn, owner, set_id).await
+}
+
+/// What handing a set to its approval left behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HandedOver {
+    /// Slots that became a draft (a ready picture).
+    pub ready: u64,
+    /// Slots that stay gray (no draft, no picture).
+    pub gray: u64,
+    /// Rendition rows copied into the drafts (three per ready slot) and then deleted from the set.
+    pub renditions: u64,
+}
+
+/// Move a staged set under its approval, in the proposal's own transaction (ADR-0218 §12 L3.2):
+/// one draft per **ready** slot (`candidate_index` = the slot index, `expires_at` = the approval's,
+/// `origin` = the set's prompt as `generated`, the first reference as the original-photo pointer),
+/// its three renditions **copied inside the database** (`INSERT … SELECT`, so the bytes never pass
+/// through the worker's memory), the staged renditions deleted, and the head moved
+/// `staging → proposed` with `approval_id` in **the same UPDATE** (the trigger accepts the two only
+/// together). The approval row must already exist (the foreign keys), and the caller holds the
+/// head lock ([`lock_for_proposal_in_tx`]). `stored_bytes` is left as it is: it only ever grows
+/// and is the record of what was made.
+///
+/// Every statement repeats the owner's predicates (BYPASSRLS writer, T20). Refusals write nothing:
+/// a slot still `planned` (the set is not finished), no ready slot at all (nothing a person could
+/// choose), and any owner/state mismatch are [`Refusal::InvalidArguments`]. An inconsistent
+/// database (a count that is not what the proofs said) is an `Err`, and the caller's transaction
+/// rolls back with it.
+pub async fn hand_over_in_tx(
+    conn: &mut PgConnection,
+    owner: Owner,
+    set_id: Uuid,
+    approval_id: Uuid,
+    expires_at: DateTime<Utc>,
+) -> Result<Result<HandedOver, Refusal>, Error> {
+    let head = sqlx::query(
+        "SELECT prompt, reference_attachment_ids, stored_bytes FROM expression_set \
+          WHERE workspace_id = $1 AND id = $2 AND agent_member_id = $3 AND requester_member_id = $4 \
+            AND run_id = $5 AND state = 'staging' AND plan_confirmed_at IS NOT NULL \
+            AND expires_at > clock_timestamp() FOR UPDATE",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(head) = head else {
+        return Ok(Err(Refusal::InvalidArguments));
+    };
+    let prompt: Option<String> = head.try_get("prompt")?;
+    let references: Vec<Uuid> = head.try_get("reference_attachment_ids")?;
+    let stored_bytes: i64 = head.try_get("stored_bytes")?;
+    let Some(prompt) = prompt else {
+        return Ok(Err(Refusal::InvalidArguments));
+    };
+    let counts = sqlx::query(
+        "SELECT count(*) FILTER (WHERE state = 'planned') AS planned, \
+                count(*) FILTER (WHERE state = 'ready') AS ready, \
+                count(*) FILTER (WHERE state = 'gray') AS gray, \
+                count(*) AS slots \
+           FROM expression_set_slot WHERE workspace_id = $1 AND set_id = $2",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let (planned, ready, gray, slots): (i64, i64, i64, i64) = (
+        counts.try_get("planned")?,
+        counts.try_get("ready")?,
+        counts.try_get("gray")?,
+        counts.try_get("slots")?,
+    );
+    // A card is raised for a finished set that has something to choose from.
+    if planned != 0 || ready == 0 || slots != ready + gray {
+        return Ok(Err(Refusal::InvalidArguments));
+    }
+    let origin = json!({"kind": "generated", "sourceUrl": null, "prompt": prompt});
+    let drafted = sqlx::query(
+        "INSERT INTO expression_draft(workspace_id,name,display_name,tags,subject_member_id,origin,creator,\
+            approval_id,candidate_index,state,expires_at,origin_source_attachment_id) \
+         SELECT s.workspace_id, s.name, s.display_name, s.tags, h.subject_member_id, $6, h.agent_member_id, \
+                $7, s.slot_index, 'ready', $8, $9 \
+           FROM expression_set_slot s \
+           JOIN expression_set h ON h.workspace_id = s.workspace_id AND h.id = s.set_id \
+          WHERE s.workspace_id = $1 AND s.set_id = $2 AND s.state = 'ready' \
+            AND h.agent_member_id = $3 AND h.requester_member_id = $4 AND h.run_id = $5 \
+            AND h.state = 'staging' \
+          ORDER BY s.slot_index",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .bind(&origin)
+    .bind(approval_id)
+    .bind(expires_at)
+    .bind(references.first().copied())
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if i64::try_from(drafted).ok() != Some(ready) {
+        return Err(Error::Invalid);
+    }
+    let copied = sqlx::query(
+        "INSERT INTO expression_draft_image(workspace_id,draft_id,variant,mime,bytes,sha256,width,height,\
+            frame_count,duration_ms,revision) \
+         SELECT i.workspace_id, d.id, i.variant, i.mime, i.bytes, i.sha256, i.width, i.height, \
+                i.frame_count, i.duration_ms, d.revision \
+           FROM expression_set_image i \
+           JOIN expression_set h ON h.workspace_id = i.workspace_id AND h.id = i.set_id \
+           JOIN expression_draft d ON d.workspace_id = i.workspace_id AND d.approval_id = $6 \
+                                  AND d.candidate_index = i.slot_index \
+          WHERE i.workspace_id = $1 AND i.set_id = $2 \
+            AND h.agent_member_id = $3 AND h.requester_member_id = $4 AND h.run_id = $5 \
+            AND h.state = 'staging'",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .bind(approval_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if i64::try_from(copied).ok() != Some(3 * ready) {
+        return Err(Error::Invalid);
+    }
+    // The staged copy goes in the same transaction: the drafts are the pictures from here on.
+    let freed = sqlx::query(
+        "DELETE FROM expression_set_image i USING expression_set h \
+          WHERE i.workspace_id = $1 AND i.set_id = $2 \
+            AND h.workspace_id = i.workspace_id AND h.id = i.set_id \
+            AND h.agent_member_id = $3 AND h.requester_member_id = $4 AND h.run_id = $5",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if freed != copied {
+        return Err(Error::Invalid);
+    }
+    // `state` and `approval_id` together, or the trigger and the table's CHECK refuse (L10.3).
+    let moved = sqlx::query(
+        "UPDATE expression_set SET state = 'proposed', approval_id = $6 \
+          WHERE workspace_id = $1 AND id = $2 AND agent_member_id = $3 AND requester_member_id = $4 \
+            AND run_id = $5 AND state = 'staging'",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .bind(owner.agent)
+    .bind(owner.requester)
+    .bind(owner.run)
+    .bind(approval_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if moved != 1 {
+        return Err(Error::Invalid);
+    }
+    let codes = sqlx::query(
+        "SELECT code, count(*) AS n FROM expression_set_slot \
+          WHERE workspace_id = $1 AND set_id = $2 AND state = 'gray' GROUP BY code ORDER BY code",
+    )
+    .bind(owner.workspace)
+    .bind(set_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut gray_by_code = serde_json::Map::new();
+    for row in &codes {
+        gray_by_code.insert(
+            row.try_get::<String, _>("code")?,
+            json!(row.try_get::<i64, _>("n")?),
+        );
+    }
+    write_audit(
+        conn,
+        &AuditEntry::new(owner.workspace, AUDIT_PROPOSED)
+            .by(owner.agent)
+            .target("expression_set", set_id)
+            .with_schema(
+                AUDIT_PROPOSED_SCHEMA,
+                json!({
+                    "set_id": set_id.to_string(),
+                    "approval_id": approval_id.to_string(),
+                    "slots": slots,
+                    "ready": ready,
+                    "gray": gray_by_code,
+                    "references": references.len(),
+                    "stored_bytes": stored_bytes,
+                }),
+            ),
+    )
+    .await?;
+    Ok(Ok(HandedOver {
+        ready: ready as u64,
+        gray: gray as u64,
+        renditions: copied,
+    }))
+}
+
+/// `approval_request.props.action.expressionSet` (ADR-0218 §12 L5.2, core `SetApproval`): the set as
+/// the approval now stands on it, read back from the rows — the head's plan, every slot (a ready
+/// slot with the draft that holds its pictures, a gray one with its code) in slot order. The strings
+/// are the stored plan's, once each; the card is what is stored (X8-2). A ready slot's kind must
+/// agree with its stored large picture (a still is a PNG, a motion a GIF): a card that says
+/// otherwise is not written.
+pub async fn card_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    set_id: Uuid,
+    approval_id: Uuid,
+    expires_at: DateTime<Utc>,
+) -> Result<Value, Error> {
+    let head = sqlx::query(
+        "SELECT title, prefix, subject_member_id, prompt, reference_attachment_ids FROM expression_set \
+          WHERE workspace_id = $1 AND id = $2 AND approval_id = $3 AND state = 'proposed'",
+    )
+    .bind(workspace)
+    .bind(set_id)
+    .bind(approval_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(Error::NotFound)?;
+    let prompt: String = head
+        .try_get::<Option<String>, _>("prompt")?
+        .ok_or(Error::Invalid)?;
+    let references: Vec<Uuid> = head.try_get("reference_attachment_ids")?;
+    let rows = sqlx::query(
+        "SELECT s.slot_index, s.kind, s.state, s.code, s.name, s.display_name, s.tags, \
+                d.id AS draft_id, d.revision \
+           FROM expression_set_slot s \
+           LEFT JOIN expression_draft d ON d.workspace_id = s.workspace_id AND d.approval_id = $3 \
+                                       AND d.candidate_index = s.slot_index \
+          WHERE s.workspace_id = $1 AND s.set_id = $2 ORDER BY s.slot_index",
+    )
+    .bind(workspace)
+    .bind(set_id)
+    .bind(approval_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut slots = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let index = row.try_get::<i32, _>("slot_index")?;
+        let kind: String = row.try_get("kind")?;
+        let state: String = row.try_get("state")?;
+        let mut slot = json!({
+            "index": index,
+            "kind": kind,
+            "state": state,
+            "code": row.try_get::<Option<String>, _>("code")?,
+            "name": row.try_get::<String, _>("name")?,
+            "displayName": row.try_get::<String, _>("display_name")?,
+            "tags": row.try_get::<Value, _>("tags")?,
+        });
+        match state.as_str() {
+            "ready" => {
+                let draft: Uuid = row
+                    .try_get::<Option<Uuid>, _>("draft_id")?
+                    .ok_or(Error::Invalid)?;
+                let media = crate::store::media_json(conn, workspace, draft, true).await?;
+                let mime = media["large"]["mime"].as_str().unwrap_or_default();
+                if !matches!(
+                    (kind.as_str(), mime),
+                    ("still", "image/png") | ("gif", "image/gif")
+                ) {
+                    return Err(Error::Invalid);
+                }
+                let object = slot.as_object_mut().ok_or(Error::Invalid)?;
+                object.insert("draftId".into(), json!(draft));
+                object.insert(
+                    "revision".into(),
+                    json!(row.try_get::<i64, _>("revision")?.to_string()),
+                );
+                object.insert("media".into(), media);
+            }
+            "gray" => {}
+            _ => return Err(Error::Invalid),
+        }
+        slots.push(slot);
+    }
+    Ok(json!({
+        "v": 1,
+        "workspaceId": workspace,
+        "setId": set_id,
+        "title": head.try_get::<String, _>("title")?,
+        "prefix": head.try_get::<String, _>("prefix")?,
+        "subjectMemberId": head.try_get::<Option<Uuid>, _>("subject_member_id")?,
+        "prompt": prompt,
+        "references": references.iter().map(|id| json!({"attachmentId": id})).collect::<Vec<_>>(),
+        "expiresAtMs": expires_at.timestamp_millis(),
+        "slots": slots,
+    }))
 }
 
 /// End a set that will not be proposed (the run was cancelled, the requester left, the plan card

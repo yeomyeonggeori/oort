@@ -1190,7 +1190,7 @@ ALTER TABLE expression_draft ADD CONSTRAINT expression_draft_candidate_index_che
 
 JSON Schema로 나타낼 수 없는 규칙은 서버가 강제하고 코어 `expressionSetIssues`가 같은 규칙의 실행 가능한 형태다: 이름의 앞머리와 유일성, 칸 index의 유일성, 칸의 `kind`와 큰 그림 형식의 일치(`still` ⇔ PNG), 초안 id의 유일성, 칸 수 ≤40과 보관 바이트 합 ≤24 MiB, `slots`의 index 집합이 보관의 집합과 같음, 모든 칸이 같은 `subjectMemberId`.
 
-**L11.2 OpenAPI 조각.** 새 경로는 없다. 기존 결정 요청에 필드 하나, 기존 `WorkspaceActionId`에 id 하나, 결과 참조에 종류 하나가 더해진다. 정본 `docs/api/openapi.yaml`의 변경은 S2의 일이다(스펙에 없는 경로·필드를 마운트하면 계약-라우터 차이 시험이 빨강이다).
+**L11.2 OpenAPI 조각.** 새 경로는 없다. 기존 결정 요청에 필드 하나, 기존 `WorkspaceActionId`에 id 둘, 결과 참조에 종류 하나가 더해진다. 정본 `docs/api/openapi.yaml`의 변경은 둘로 나뉜다. **`WorkspaceActionId`의 두 id(`expression.set.create`·`expression.set.plan`)는 S1b(#5460)가 싣는다**: 레지스트리 = enum 드리프트 시험(F1)이 요구하는 쪽이고 L2.1(c)·A4가 정한 쪽이다. **결정 요청의 필드(`expressionChoices`)와 결과 참조의 종류(`expression_set`)는 S2의 일이다**(스펙에 없는 경로·필드를 마운트하면 계약-라우터 차이 시험이 빨강이다).
 
 ```yaml
 openapi: 3.1.0
@@ -1211,9 +1211,9 @@ components:
           maxItems: 40
           items: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Choice'}
     WorkspaceActionIdDelta:
-      description: One id added to WorkspaceActionId. Team-AI-only (ProposalDoor TeamAi): the Agent Port refuses it as an unknown id, and it is not in InitiativeActionId.
+      description: Two ids added to WorkspaceActionId (S1b). Both are Team-AI-only (ProposalDoor TeamAi, raised by server code): the Agent Port refuses them as unknown ids, and they are not in InitiativeActionId.
       type: string
-      enum: [expression.set.create]
+      enum: [expression.set.create, expression.set.plan]
     ActionResultRefTypeDelta:
       description: One ref type added to the result of a settled workspace-action card. The id is the set id.
       type: string

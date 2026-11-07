@@ -464,9 +464,15 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
              connected tool (PRs, deploys, metrics).",
             parameters: crate::memory_suggest::parameters(),
         },
-        // The catalog is the whole allow-list; a request is offered the part its workspace's role
-        // bundles leave on (`workspace_action_propose_definition`, ADR-0201 증보 v3 B3).
-        workspace_action_propose_definition(&crate::actions::TEAM_AI_ACTION_IDS)
+        // The catalog is the whole allow-list a model may be told; a request is offered the part its
+        // workspace's role bundles leave on (`workspace_action_propose_definition`, ADR-0201 증보 v3 B3).
+        //
+        // ADR-0218 증보 6 §12 L2.2 · F20 (#5460 S1b), entrance 2 of 2: the ids a server routine raises
+        // are on the allow-list but not in this enum. This catalog is what the profile path
+        // (`enabled_tool_definitions` → the worker's `AgentJobPayload::enabled_tools`) and the provider
+        // requests hand to a model, so an id left in it here would be advertised through a door the
+        // request-level list (`TeamAiRoles::advertised_action_ids`) does not guard.
+        workspace_action_propose_definition(&crate::actions::model_offerable_action_ids())
             .expect("the allow-list is not empty"),
     ]
 }
@@ -1347,6 +1353,57 @@ mod tests {
             );
             assert_eq!(definition.parameters["type"], json!("object"));
         }
+    }
+
+    /// ADR-0218 증보 6 §12 L2.2 · F20 · A5 (#5460 S1b), entrance 2 of 2: the catalog the profile path
+    /// (`enabled_tool_definitions`) and every provider request hand to a model lists the allow-list
+    /// **minus** the ids a server routine raises. Remove the exclusion from `catalog_definitions` and
+    /// the first two assertions fail; they read the enum back as its own list, so a hand edit to the
+    /// tool cannot pass.
+    #[test]
+    fn the_catalog_enum_leaves_out_the_ids_a_server_routine_raises() {
+        let enum_of = |definition: &ToolDefinition| -> Vec<String> {
+            definition.parameters["properties"]["actionId"]["enum"]
+                .as_array()
+                .expect("an actionId enum")
+                .iter()
+                .map(|id| id.as_str().expect("a string").to_string())
+                .collect()
+        };
+        let in_catalog = catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == WORKSPACE_ACTION_PROPOSE)
+            .expect("the catalog carries the proposal tool");
+        let through_the_profile = enabled_tool_definitions(&[WORKSPACE_ACTION_PROPOSE.to_string()])
+            .into_iter()
+            .next()
+            .expect("a profile that enables the tool is handed it");
+        for (way, definition) in [("catalog", &in_catalog), ("profile", &through_the_profile)] {
+            let listed = enum_of(definition);
+            for id in crate::actions::SERVER_RAISED_ACTION_IDS {
+                assert!(!listed.iter().any(|listed| listed == id), "{way}: {id}");
+                let hint = definition.parameters["properties"]["args"]["description"]
+                    .as_str()
+                    .expect("an args hint");
+                assert!(!hint.contains(id), "{way}: the args hint names {id}");
+                assert!(
+                    !definition.description.contains(id),
+                    "{way}: the description names {id}"
+                );
+            }
+            assert_eq!(
+                listed,
+                crate::actions::model_offerable_action_ids(),
+                "{way}: the other fourteen are offered as they always were"
+            );
+        }
+        // The tool a request is actually offered is built from the request-level list, which holds
+        // the same exclusion (entrance 1).
+        let built = workspace_action_propose_definition(
+            &crate::team_ai_roles::TeamAiRoles::default().advertised_action_ids(false),
+        )
+        .expect("something to offer");
+        assert_eq!(enum_of(&built), enum_of(&in_catalog));
     }
 
     /// `enabled_tools ∩ CATALOG`, in both directions.

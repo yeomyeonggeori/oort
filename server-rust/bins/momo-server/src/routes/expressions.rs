@@ -209,6 +209,19 @@ pub async fn replace(
     expressions::get_draft(&state.pool, actor, id)
         .await
         .map_err(failure)?;
+    // ADR-0218 증보 6 §12 L5.3 · F19 (#5460 S1b): only the pictures of an `expression.create` card are
+    // replaceable. Asked **before the upload is read**, so a set card's draft (or any approval draft
+    // that is not on the list) costs no decode; `replace_candidate_in_tx` asks again.
+    let replaceable = expressions::transaction(&state.pool, actor, move |conn| {
+        Box::pin(async move {
+            expressions::action::replace_allowed_in_tx(conn, actor.workspace, id).await
+        })
+    })
+    .await
+    .map_err(failure)?;
+    if !replaceable {
+        return Err(failure(Error::NotFound));
+    }
     let (_, bytes) = multipart(&state, request, false).await?;
     let media = media::process(bytes).await.map_err(media_error)?;
     let replaced = match expressions::replace_draft(&state.pool, actor, id, media.clone()).await {
@@ -526,4 +539,19 @@ pub async fn import(
     .await
     .map_err(failure)?;
     Ok((status, Json(draft)).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    /// #5460 review L1: the replace allow-list lives in `momo-expressions`, which does not depend on
+    /// the action registry, so this is the one place that holds it equal to the registry's id. A
+    /// compared slice, not an array: a second id fails here at run time, with this message.
+    #[test]
+    fn the_replace_allow_list_is_the_one_registry_id() {
+        assert_eq!(
+            momo_expressions::action::REPLACEABLE_ACTION_IDS.as_slice(),
+            [momo_agent::actions::ACTION_EXPRESSION_CREATE].as_slice(),
+            "the drafts a direct upload may replace are `expression.create`'s and nothing else's"
+        );
+    }
 }

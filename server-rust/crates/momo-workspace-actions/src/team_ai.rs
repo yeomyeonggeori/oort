@@ -116,8 +116,20 @@ pub const TASK_REPORT_CHARS_MAX: usize = 12_000;
 const ROSTER_MEMBERS_MAX: i64 = 60;
 const ROSTER_CHANNELS_MAX: i64 = 40;
 
+/// Is `action_id` on the helper's **allow-list**? This is the decision route's question
+/// (`card_provenance`: a card with the helper's mark must be for an action on the list), and it is
+/// true for the two ids a server routine raises.
 pub fn is_team_ai_action(action_id: &str) -> bool {
     TEAM_AI_ACTION_IDS.contains(&action_id)
+}
+
+/// May a **model's** `workspace_action_propose` call name `action_id`? On the allow-list and not one a
+/// server routine raises (ADR-0218 증보 6 §12 L2.2 · A5, #5460 S1b). A model that names such an id
+/// anyway has called a tool it was not offered: [`ProposalRefusal::NotAllowed`], the same answer as an
+/// id outside the list, and no row is written. The set's own cards go through
+/// `crate::team_ai_set`, whose signature has no argument a model could fill.
+pub fn is_model_proposable_action(action_id: &str) -> bool {
+    is_team_ai_action(action_id) && !actions::is_server_raised_action(action_id)
 }
 
 /// The switch and the member, as read from `workspace.settings`.
@@ -1295,7 +1307,7 @@ pub struct ProposalOk {
     pub requester_member_id: Uuid,
 }
 
-fn via_json(context: &ProposalContext, requester: Uuid) -> Value {
+pub(crate) fn via_json(context: &ProposalContext, requester: Uuid) -> Value {
     json!({
         "source": "team_ai",
         "requester_id": requester.to_string(),
@@ -1315,16 +1327,27 @@ async fn count_pending_for_requester_in_tx(
     workspace_id: Uuid,
     requester: Uuid,
 ) -> Result<(i64, i64), DbError> {
+    // ADR-0218 증보 6 §12 L8-1 (#5460 S1b, A8): the set card and the plan card are not counted. They
+    // carry the helper's mark too, but the limit of ONE undecided set per agent is the database's
+    // (a partial unique index), and counting them here would let one set — or a plan card waiting
+    // for its answer — eat one of the three ordinary slots the owner kept for ordinary requests.
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE payload->'via_ai'->>'requester_id' = $2) AS mine, \
                 count(*) AS everyone \
            FROM approval \
           WHERE workspace_id = $1 AND status = 'pending' \
-            AND action_type = $3 AND payload->'via_ai'->>'source' = 'team_ai'",
+            AND action_type = $3 AND payload->'via_ai'->>'source' = 'team_ai' \
+            AND COALESCE(payload->'action'->>'id', '') <> ALL($4::text[])",
     )
     .bind(workspace_id)
     .bind(requester.to_string())
     .bind(actions::ACTION_TYPE_WORKSPACE_ACTION)
+    .bind(
+        actions::SERVER_RAISED_ACTION_IDS
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect::<Vec<String>>(),
+    )
     .fetch_one(&mut *conn)
     .await?;
     Ok((
@@ -1354,15 +1377,24 @@ pub async fn recent_requests_by_in_tx(
     .await?)
 }
 
+/// What the requester's approval would be about, beyond the action's [`GateSubject`]: the channel the
+/// card stands in and the face it names (`expression_adder` is judged against both).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CardScope {
+    pub channel_id: Uuid,
+    pub face: Option<Uuid>,
+}
+
 /// Could the requester approve this action themselves? A convenience check so a
 /// card nobody present can approve is not raised (D3); the **real** gate is the
 /// decision route's, which re-proves everything.
-async fn requester_could_approve_in_tx(
+pub(crate) async fn requester_could_approve_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     requester: Uuid,
     action: &WorkspaceAction,
     subject: GateSubject,
+    card: CardScope,
 ) -> Result<bool, DbError> {
     let role = momo_auth::active_workspace_role(conn, workspace_id, requester)
         .await
@@ -1389,9 +1421,36 @@ async fn requester_could_approve_in_tx(
         // the team AI never proposes `dm.agent.admit` (not on `TEAM_AI_ACTION_IDS`), so this
         // arm stays exhaustive and fail-closed.
         RequiredRole::DmParticipant => false,
-        // `expression.create` is not a team-AI action (not on `TEAM_AI_ACTION_IDS`); this
-        // arm only keeps the match exhaustive and fail-closed.
-        RequiredRole::ExpressionAdder => false,
+        // ADR-0218 증보 6 §12 L2.4-5 (#5460 S1b, A22): the set card's role. A live human member of the
+        // card's channel, not a guest, who meets the workspace's add policy **now**, and — when the
+        // set names a face — that very person. This door raises no other person's face, so a face
+        // that is not the requester is `false` before the policy is even asked. (The same predicate,
+        // `adder_allows_in_tx`, serves the decision route, the push audience and the preview.)
+        // Set back to a constant `false` and no set can ever be raised.
+        RequiredRole::ExpressionAdder => {
+            if card.face.is_some_and(|face| face != requester) {
+                false
+            } else {
+                crate::action_resolve::member_is_live_in_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    card.channel_id,
+                    requester,
+                )
+                .await?
+                    && momo_expressions::store::adder_allows_in_tx(
+                        conn,
+                        workspace_id,
+                        requester,
+                        card.face,
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        momo_expressions::Error::Db(error) => error,
+                        other => DbError::from(sqlx::Error::Protocol(other.to_string())),
+                    })?
+            }
+        }
         // Only the human who started this run, for either self-profile action (v7).
         RequiredRole::RequestingMember => {
             matches!(subject, GateSubject::Member(target) if target == requester)
@@ -1426,7 +1485,7 @@ pub async fn propose_with_avatar_in_tx(
     prepared: Option<&crate::profile_avatar::PreparedAvatar>,
 ) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
     let workspace_id = context.workspace_id;
-    if !is_team_ai_action(action_id) {
+    if !is_model_proposable_action(action_id) {
         return Ok(Err(ProposalRefusal::NotAllowed));
     }
     let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
@@ -1569,6 +1628,10 @@ pub async fn propose_with_avatar_in_tx(
         requester.member_id,
         action,
         resolved.subject,
+        CardScope {
+            channel_id: context.channel_id,
+            face: None,
+        },
     )
     .await?
     {
@@ -1776,7 +1839,7 @@ pub fn validate_pure(
     raw_args: &Value,
     now_ms: i64,
 ) -> Result<(), ProposalRefusal> {
-    if !is_team_ai_action(action_id) {
+    if !is_model_proposable_action(action_id) {
         return Err(ProposalRefusal::NotAllowed);
     }
     let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
@@ -1991,8 +2054,21 @@ mod tests {
                 "{id} is not in the registry"
             );
         }
-        assert_eq!(TEAM_AI_ACTION_IDS.len(), 14);
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 16);
         assert!(is_team_ai_action(actions::ACTION_TEAM_AI_ROLES_SET));
+        // ADR-0218 증보 6 §12 L2.2 (#5460 S1b, A5): the set's two cards are on the allow-list (the
+        // decision accepts the helper's mark) and are not a model's to name.
+        for id in actions::SERVER_RAISED_ACTION_IDS {
+            assert!(is_team_ai_action(id), "{id}");
+            assert!(!is_model_proposable_action(id), "{id}");
+            assert_eq!(
+                validate_pure(id, &json!({}), 0),
+                Err(ProposalRefusal::NotAllowed)
+            );
+        }
+        for id in &TEAM_AI_ACTION_IDS[..14] {
+            assert!(is_model_proposable_action(id), "{id}");
+        }
         assert!(is_team_ai_action(actions::ACTION_WORKSPACE_SETTINGS_UPDATE));
         assert!(is_team_ai_action(actions::ACTION_PLUGIN_INSTALL));
         // B15-A1: the two invites are the helper's now; widening the helper's own access is not.
