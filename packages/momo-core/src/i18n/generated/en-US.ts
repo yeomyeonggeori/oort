@@ -5511,13 +5511,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.expressionsLine2": [
     {
       "type": 0,
-      "value": "The Emoji tab now shows the team's small emoji in one row next to the standard ones, and one search box finds both."
+      "value": "The Emoji tab shows the team's small emoji in one row by the standard ones; on web and desktop one search finds both."
     }
   ],
   "releaseNotes.v0144.expressionsLine3": [
     {
       "type": 0,
-      "value": "In thread replies a picked emoticon goes into the text as :name:; the preview is only in the chat composer."
+      "value": "Web and desktop show the preview in threads too; on the phone, threads and swipe replies still put :name: in the text."
     }
   ],
   "releaseNotes.v0144.expressionsTopic": [
@@ -5583,7 +5583,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.sendTogetherChanged": [
     {
       "type": 0,
-      "value": "Pick an emoticon or GIF and it does not send right away; it appears large above the composer. If you change your mind, remove it with the small ✕. Write your text and press send once, and the big picture and your text go out one after the other. Emoji still go straight into your text."
+      "value": "Pick an emoticon or GIF and it does not send right away; it waits as a preview above the composer. If you change your mind, remove it with the small ✕. Write your text and press send once, and the big picture and your text go out one after the other. Emoji still go straight into your text."
     }
   ],
   "releaseNotes.v0144.sendTogetherTitle": [
