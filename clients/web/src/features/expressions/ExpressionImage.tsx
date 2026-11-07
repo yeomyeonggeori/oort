@@ -79,6 +79,8 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   // 같은 자리에 다른 표현이 오는 경우(본문 편집으로 같은 순서의 토큰이 바뀐다)에 앞 표현의 그림을 대신 걸어 두지 않으려고 걸린 그림에 주인(그림 주소에서 쿼리를 뺀 앞부분: 표현 id·초안 id 가 든다)을 적는다.
   const owner = path?.split("?")[0] ?? "";
   const animated = variant !== "thumb" && item.media?.[variant].mime === "image/gif";
+  // 이 칸이 쥐는 열쇠: 반응 칩의 움직이는 그림은 반복 횟수가 바뀐 주소라 같은 길의 원본과 섞이지 않게 따로 쥔다.
+  const heldKey = animated && endless ? `${path}#loop` : path;
   useEffect(() => {
     const node = root.current;
     if (!node) return;
@@ -93,16 +95,19 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
     // 세대가 바뀌면(저장소가 그림을 걷었다) 가진 바이트도 버린다: 걷은 그림을 이 칸이 다시 내보이지 않는다.
     if (kept.current.epoch !== epoch) kept.current = { epoch, bytes: new Map() };
     const bytes = kept.current.bytes;
-    // 이 칸이 쥐는 열쇠: 반응 칩의 움직이는 그림은 반복 횟수가 바뀐 주소라 같은 길의 원본과 섞이지 않게 따로 쥔다.
-    const heldKey = animated && endless ? `${path}#loop` : path;
-    const held = bytes.get(heldKey);
-    const source = held !== undefined ? Promise.resolve(held) : (animated && endless ? store.loopedImage(path) : store.image(path)).then((src) => { bytes.set(heldKey, src); return src; });
-    source.then((src) => decoded(animated ? replayUrl(src, replay) : src)).then(
+    const held = bytes.get(heldKey!);
+    const source = held !== undefined ? Promise.resolve(held) : (animated && endless ? store.loopedImage(path) : store.image(path)).then((src) => { bytes.set(heldKey!, src); return src; });
+    source.then((src) => decoded(animated ? replayUrl(src, replay) : src).catch((error: unknown) => {
+      // 디코드에 실패한 그림은 이 칸의 `kept`·메모리·디스크에서 **먼저** 지운다(ADR-0218 §14 M2.6): 안 그러면 「그림 다시 불러오기」가 같은 바이트를 다시 쓴다.
+      bytes.delete(heldKey!);
+      store.discardImage(path);
+      throw error;
+    })).then(
       (src) => { if (live) setShown({ key, epoch, owner, src }); },
       () => { if (live) setFailed(key); },
     );
     return () => { live = false; };
-  }, [store, path, key, offline, epoch, owner, animated, endless, replay]);
+  }, [store, path, key, offline, epoch, owner, animated, endless, replay, heldKey]);
   // 걸린 그림이 지금 보여도 되는 그림인가: 이 표현의 것이고, 같은 세대의 것이고, 오프라인이 아니고, 이 표현에 아직 그림이 있고, 깨지지 않았다.
   const current = shown && shown.owner === owner && shown.epoch === epoch && !offline && path !== null && failed !== shown.key ? shown : null;
   // 걸린 그림이 지금 바라는 그림(key)이기도 한가. 아니면 바라는 그림을 준비하는 동안 앞 그림이 대신 걸려 있는 것이다.
@@ -134,7 +139,12 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   const loading = !offline && path !== null && failed !== key && failed !== shown?.key && own !== undefined;
   const reserved = slot ?? (own ? { width: own.width, height: own.height } : null);
   const image = current ? <img src={current.src} alt={expressionAltText(item as Expression)} className="expression-image" data-size={size} width={slot?.width} height={slot?.height}
-    onLoad={onReady && !still ? () => setPainted(current.key) : undefined} onError={() => setFailed(current.key)} />
+    onLoad={onReady && !still ? () => setPainted(current.key) : undefined}
+    onError={() => {
+      // 그려지다 깨진 그림도 같다: 지우기가 먼저다(위 효과의 주석).
+      if (store && path && heldKey) { kept.current.bytes.delete(heldKey); store.discardImage(path); }
+      setFailed(current.key);
+    }} />
     : loading && reserved ? <canvas aria-hidden="true" className="expression-image" data-size={size} width={reserved.width} height={reserved.height} /> : <span>{`:${item.name}:`}</span>;
   return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}>
     {image}

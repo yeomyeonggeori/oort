@@ -22,5 +22,3 @@ momo-server box_runner_e2e the_runner_creates_starts_stops_and_deletes_a_real_ha
 momo-workd codex_isolation_real a_codex_command_sees_no_credential_from_the_host_or_the_owners_shell_files #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음
 momo-workd codex_isolation_real codex_loads_no_skill_from_the_owners_home #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음
 momo-workd codex_isolation_real the_real_adapters_codex_reads_every_switched_off_feature_off #2647 2026-11-30 codex-acp 1.13.0 실행 파일(MOMO_WORKD_CODEX_ACP_BIN)과 node 가 야간 러너에 없음 — #4730 의 두 줄과 같은 사유·기한, 실제 codex 로는 3/3 통과(검증 6a)
-# ── #5455: 손으로 돌리는 실측표(공개 저장소에 표본 그림이 없다) ──────────────────────────────────────────
-momo-expressions size_table size_table #5455 2026-12-15 손으로 돌리는 실측표: 표본 그림 폴더(MOMO_EXPRESSION_SAMPLES)는 공개 저장소에 없어 야간 러너에서 늘 빨강, #5455 B에서 시험 밖(examples)으로 옮기고 이 줄을 지운다
