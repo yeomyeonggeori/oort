@@ -35,6 +35,9 @@ pub const HERMES_MAX_TOKENS: i32 = 1_500;
 
 /// What the merging model is shown of Hermes's words (P1: `text` ≤ 3,000 characters).
 pub const ANSWER_TEXT_CHARS_MAX: usize = 3_000;
+/// How much of Hermes's reply is read at all (the body cap of the provider is 12 MiB; a web answer is a few
+/// KiB). A picture's base64 comes first when there is one, so the cap is generous for it too.
+pub const ANSWER_INPUT_CHARS_MAX: usize = 400_000;
 /// …and how many source addresses (P1: ≤ 5), each at most this long.
 pub const SOURCES_MAX: usize = 5;
 pub const SOURCE_CHARS_MAX: usize = 300;
@@ -133,7 +136,10 @@ fn without_data_addresses(raw: &str) -> String {
     out
 }
 
-/// Cut every markdown picture `![alt](address)` out of `raw` and count them.
+/// Cut every markdown picture `![alt](address)` out of `raw` and count them. **Linear in `raw`**: a `![`
+/// whose `](` or `)` never comes means no later `![` can close either, so the scan ends there instead of
+/// searching to the end again for every opener (an answer made of a million `![` would otherwise cost a
+/// million passes).
 fn without_markdown_pictures(raw: &str) -> (String, usize) {
     let mut out = String::with_capacity(raw.len());
     let mut count = 0;
@@ -141,22 +147,18 @@ fn without_markdown_pictures(raw: &str) -> (String, usize) {
     while let Some(open) = rest.find("![") {
         out.push_str(&rest[..open]);
         let after = &rest[open + 2..];
-        // `![alt](address)` — the alt text has no `]`, the address runs to the next `)`
-        let closed = after.find("](").and_then(|mid| {
-            let address = &after[mid + 2..];
-            address.find(')').map(|end| mid + 2 + end + 1)
-        });
-        match closed {
-            Some(len) => {
-                count += 1;
-                rest = &after[len..];
-            }
-            None => {
-                // not a picture after all: keep the two characters and move on
-                out.push_str("![");
-                rest = after;
-            }
-        }
+        // `![alt](address)` — the alt text runs to the next `](`, the address to the next `)`
+        let Some(mid) = after.find("](") else {
+            rest = &rest[open..];
+            break;
+        };
+        let address = &after[mid + 2..];
+        let Some(end) = address.find(')') else {
+            rest = &rest[open..];
+            break;
+        };
+        count += 1;
+        rest = &address[end + 1..];
     }
     out.push_str(rest);
     (out, count)
@@ -203,7 +205,10 @@ fn sources_of(text: &str) -> Vec<String> {
 /// spelling the fold equates ([`fold`]), no markdown picture; flattened, fenced-code defused and bounded by
 /// [`data_text`]; the addresses found in it listed apart. The bytes of a picture never survive this.
 pub fn clean_answer(raw: &str) -> HermesAnswer {
-    let no_data = without_data_addresses(raw);
+    // Bounded before anything else is done to it: the cleaning below is linear, and what the model is
+    // shown is a few thousand characters, so nothing past this is read at all.
+    let raw: String = raw.chars().take(ANSWER_INPUT_CHARS_MAX).collect();
+    let no_data = without_data_addresses(&raw);
     let kept: Vec<&str> = no_data
         .lines()
         .filter(|line| !fold(line).contains("media:"))
@@ -342,6 +347,28 @@ mod tests {
         // the body cannot spell the closing fence line: the only fences are the two the renderer wrote
         assert_eq!(shown.matches("```").count(), 2, "{shown}");
         assert!(shown.contains("ok: true | kind: web_search"));
+    }
+
+    #[test]
+    fn a_hostile_answer_costs_a_pass_not_a_million() {
+        // an opener that never closes, a million times: the scan ends at the first one
+        for raw in [
+            "![".repeat(1_000_000),
+            "![a](".repeat(200_000),
+            "data:".repeat(200_000),
+            "http://".repeat(200_000),
+        ] {
+            let started = std::time::Instant::now();
+            let answer = clean_answer(&raw);
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "{} chars took {:?}",
+                raw.len(),
+                started.elapsed()
+            );
+            assert!(answer.text.chars().count() <= ANSWER_TEXT_CHARS_MAX + 1);
+            assert!(answer.sources.len() <= SOURCES_MAX);
+        }
     }
 
     #[test]

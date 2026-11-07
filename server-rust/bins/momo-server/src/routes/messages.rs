@@ -1889,6 +1889,30 @@ mod tests {
     use momo_messaging::StreamOutcome;
     use std::collections::BTreeMap;
 
+    /// ADR-0201 증보 v4 P8 (#5370): the chip 「Hermes 도움 · 검색」 is a claim about what the server ran, so a
+    /// person's REST send is stripped of the key and so is a webhook's (both go through
+    /// `is_server_owned_props_key`), while an ordinary prop passes.
+    #[test]
+    fn the_delegation_chip_key_is_server_owned() {
+        assert!(is_server_owned_props_key(
+            momo_agent::team_ai_task::DELEGATED_PROPS_KEY
+        ));
+        let mut client = BTreeMap::new();
+        client.insert(
+            momo_agent::team_ai_task::DELEGATED_PROPS_KEY.to_string(),
+            "[{\"kind\":\"web_search\"}]".to_string(),
+        );
+        client.insert("note".to_string(), "kept".to_string());
+        let stored = props_value(Some(&client));
+        assert!(
+            stored
+                .get(momo_agent::team_ai_task::DELEGATED_PROPS_KEY)
+                .is_none(),
+            "a person cannot dress a message as work Hermes did: {stored}"
+        );
+        assert_eq!(stored["note"], "kept");
+    }
+
     fn principal(workspace_id: Uuid) -> Principal {
         Principal {
             member_id: Uuid::from_u128(7),

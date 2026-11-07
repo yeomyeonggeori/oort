@@ -701,8 +701,9 @@ fn row_of(page: &Value, run: Uuid) -> Option<&Value> {
 }
 
 fn spent_json(prompt: i64, completion: i64, searches: i64, estimated: bool) -> Value {
+    // `delegations` (ADR-0201 증보 v4 P7, #5370): 0 on a task that never handed work to Hermes
     json!({"promptTokens": prompt, "completionTokens": completion,
-           "webSearches": searches, "estimated": estimated})
+           "webSearches": searches, "estimated": estimated, "delegations": 0})
 }
 
 /// B12 (#4968): a team-AI task run's reads say what **that run** spent — the sums of its own ledger

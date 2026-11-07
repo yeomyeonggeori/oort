@@ -637,6 +637,8 @@ struct Setup {
     /// The operator wrote `HERMES_BASE_URL`, so the egress policy trusts its host (the loopback fake).
     loopback_allowed: bool,
     search_cap: Option<i64>,
+    /// A real bearer on the operator's link (G5). `false` leaves the dev placeholder, which is no key.
+    key: bool,
 }
 
 impl Setup {
@@ -647,6 +649,7 @@ impl Setup {
             deadline: Duration::from_secs(10),
             loopback_allowed: true,
             search_cap: None,
+            key: true,
         }
     }
 }
@@ -689,7 +692,9 @@ impl World {
         config.claim_batch_size = 10;
         config.provider_link_master_key = Some(MASTER_KEY.to_string());
         config.team_ai_daily_search_cap = setup.search_cap;
-        config.provider.bearer = HERMES_BEARER.to_string();
+        if setup.key {
+            config.provider.bearer = HERMES_BEARER.to_string();
+        }
         config.provider.base_url = base.clone();
         let policy = if setup.loopback_allowed {
             EgressPolicy::default().with_operator_base_url(&base)
@@ -921,7 +926,10 @@ fn delegation_script() -> Vec<ChatCompletion> {
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn x1_a_delegation_calls_hermes_once_and_the_helper_writes_the_answer() {
     let w = world(good_hermes()).await;
-    let setup = Setup::open();
+    let mut setup = Setup::open();
+    // a deadline whose worst case (100 + 2 × 20 + 30 = 170 s) is past the default 120 s step claim, so the
+    // stretch is something the claim time left can show
+    setup.deadline = Duration::from_secs(100);
     let (worker, routed) = w.worker(delegation_script(), &setup);
     let run = enqueue(
         &w.pool,
@@ -1063,8 +1071,8 @@ async fn x1_a_delegation_calls_hermes_once_and_the_helper_writes_the_answer() {
         .expect("a live claim during the call");
     let floor = (setup.deadline + 2 * Duration::from_secs(20)).as_secs_f64() - 5.0;
     assert!(
-        left >= floor && left <= 285.0,
-        "claim left {left}s, expected between {floor} and the lease (285)"
+        floor > 120.0 && left >= floor && left <= 285.0,
+        "claim left {left}s, expected between {floor} (past the default step claim of 120 s) and the lease (285)"
     );
 
     // A6 / P4-7: the merging call is the helper's second call and has no tool of any kind
@@ -1609,7 +1617,13 @@ async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_th
     let plain = w.ask(w.t.owner_id, "@oort-helper 그냥 질문").await; // a run with no task row
     let _ = plain;
     let mut runs = Vec::new();
-    for author in [w.t.owner_id, w.t.owner_id, w.t.member_id, w.t.owner_id] {
+    for author in [
+        w.t.owner_id,
+        w.t.owner_id,
+        w.t.member_id,
+        w.t.owner_id,
+        w.t.owner_id,
+    ] {
         runs.push(w.ask(author, "@oort-helper 질문").await);
     }
     // (state, called_at offset, claim live?) per run
@@ -2110,6 +2124,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
         ConnectionModeAppears,
         SearchSwitchOff,
         CeilingGone,
+        KeyGone,
         LongResearchOff,
     }
     for change in [
@@ -2120,6 +2135,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
         Change::ConnectionModeAppears,
         Change::SearchSwitchOff,
         Change::CeilingGone,
+        Change::KeyGone,
         Change::LongResearchOff,
     ] {
         let w = world(good_hermes()).await;
@@ -2149,6 +2165,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
                 set_setting(&w.su, &w.t, "team_ai_web_search", json!(false)).await
             }
             Change::CeilingGone => later.ceiling = None,
+            Change::KeyGone => later.key = false,
             Change::LongResearchOff => {
                 set_roles(&w.su, &w.t, json!({"long_research": false})).await
             }
@@ -2335,4 +2352,191 @@ async fn as_role(su: &PgPool, role: &str, workspace_id: Uuid, sql: &str) -> Resu
         )),
         Err(other) => panic!("not a database refusal: {other}"),
     }
+}
+
+/// P15-A7, the other half: a request delegates ONCE. A model that puts two `ask_hermes` calls in one answer
+/// gets one delegation — one task row, one request to Hermes, one ledger row — and the second call is never
+/// run.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x13_two_calls_in_one_answer_are_one_delegation() {
+    let w = world(good_hermes()).await;
+    let two = ChatCompletion {
+        usage: usage(),
+        tool_calls: vec![
+            call(ASK, json!({"kind": "web_search", "request": REQUEST})),
+            call(
+                ASK,
+                json!({"kind": "web_search", "request": "다른 것도 검색해 줘 5b2e91"}),
+            ),
+        ],
+        ..ChatCompletion::default()
+    };
+    let (worker, _) = w.worker(vec![two, say("서울은 맑대요")], &Setup::open());
+    let run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    assert_eq!(w.fake.connections(), 1, "one request to Hermes");
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM team_ai_task WHERE workspace_id = $1")
+        .bind(w.t.workspace_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "one task row");
+    let wire = format!("{}{}", w.fake.seen()[0].head, w.fake.seen()[0].body);
+    assert!(
+        wire.contains("9f3a7c") && !wire.contains("5b2e91"),
+        "the first call's sentence, not the second's"
+    );
+    for (what, n) in count_in_tables(&w.su, &w.t, "5b2e91").await {
+        assert_eq!(n, 0, "the second call's sentence is in {what}");
+    }
+}
+
+/// The Hermes row is written exactly once, by whoever moves the marker. (a) settle then settle again then
+/// end: one row. (b) end first (the cancel route's statement, which settles an unsettled `called`) and then
+/// the worker's settle: still one. (c) a direct second insert for the same run and member writes nothing.
+/// And a Hermes row that a person's direct `@Hermes` call wrote (a ledger row against Hermes, no marker) is
+/// in none of the delegation counts.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x14_the_hermes_row_is_written_once_by_whoever_moves_the_marker() {
+    use momo_agent::team_ai_task::{self as store, DelegationState, HermesUsageRow};
+    let w = world(good_hermes()).await;
+    let ws = w.t.workspace_id;
+    let hermes = w.hermes;
+    let helper = w.t.agent_id;
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        runs.push(w.ask(w.t.owner_id, "@oort-helper 질문").await);
+    }
+    for run in &runs {
+        sqlx::query(
+            "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, plan, note, claim_token, claim_until, \
+                 delegation_kind, delegation_state, delegation_called_at, delegation_target) \
+             VALUES ($1, $2, $3, '[]'::jsonb, '', gen_random_uuid(), now() + interval '60 seconds', \
+                 'web_search', 'called', now(), $4)",
+        )
+        .bind(ws)
+        .bind(run)
+        .bind(helper)
+        .bind(hermes)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    }
+    let usage = HermesUsageRow {
+        model: "hermes-agent",
+        prompt_tokens: 3,
+        completion_tokens: 2,
+        was_estimated: false,
+    };
+    let (a, b) = (runs[0], runs[1]);
+    let results = with_tenant_tx(&w.pool, ws, move |conn| {
+        Box::pin(async move {
+            let first =
+                store::settle_delegation_in_tx(conn, ws, a, DelegationState::Done, &usage).await?;
+            let again =
+                store::settle_delegation_in_tx(conn, ws, a, DelegationState::Failed, &usage)
+                    .await?;
+            let direct = store::record_hermes_usage_in_tx(conn, ws, a, hermes, &usage).await?;
+            let ended = store::end_in_tx(conn, ws, a, "done").await?;
+            // (b) the cancel route's statement first, the worker's settle after
+            let ended_b = store::end_in_tx(conn, ws, b, "task_cancelled").await?;
+            let late =
+                store::settle_delegation_in_tx(conn, ws, b, DelegationState::Done, &usage).await?;
+            Ok((first, again, direct, ended, ended_b, late))
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(results, (true, false, false, true, true, false));
+    assert_eq!(w.hermes_ledger(a).await.len(), 1);
+    assert_eq!(w.hermes_ledger(b).await.len(), 1);
+    assert!(
+        !w.hermes_ledger(a).await[0].estimated,
+        "the measured row a settle wrote"
+    );
+    assert!(
+        w.hermes_ledger(b).await[0].estimated,
+        "the estimated row the ending wrote"
+    );
+    assert_eq!(w.task(a).await.marker.as_deref(), Some("done"));
+    assert_eq!(w.task(b).await.marker.as_deref(), Some("failed"));
+
+    // a person's direct call of Hermes is a ledger row with no marker: no count has it
+    let direct_run = w.ask(w.t.member_id, "@hermes 안녕").await;
+    sqlx::query(
+        "INSERT INTO usage_ledger (workspace_id, run_id, agent_member_id, channel_id, model) VALUES ($1, $2, $3, $4, 'hermes-agent')",
+    )
+    .bind(ws)
+    .bind(direct_run)
+    .bind(hermes)
+    .bind(w.t.channel_id)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let member = w.t.member_id;
+    let counts = with_tenant_tx(&w.pool, ws, move |conn| {
+        Box::pin(async move {
+            store::delegation_counts_in_tx(conn, ws, member, team_ai_hermes::REQUESTER_WINDOW_SECS)
+                .await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (counts.today, counts.requester_recent),
+        (2, 0),
+        "the two delegations of the owner count for the day; the member's direct call of Hermes counts for nothing"
+    );
+}
+
+/// The sweep (P4-8): a delegation that was `called` and whose run ended through a path that does not know
+/// tasks is closed by the orphan sweep — the sentence goes with the row, and the subscription use it stands
+/// for gets its one (estimated) ledger row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x15_the_orphan_sweep_settles_a_called_delegation() {
+    let w = world(good_hermes()).await;
+    let (worker, _) = w.worker(vec![ask_hermes("web_search", REQUEST)], &Setup::open());
+    let run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.begin_only(&worker).await;
+    sqlx::query(
+        "UPDATE team_ai_task SET delegation_state = 'called', delegation_called_at = now() - interval '25 minutes', \
+                delegation_target = $2, updated_at = now() - interval '20 minutes' WHERE run_id = $1",
+    )
+    .bind(run)
+    .bind(w.hermes)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    // the run ended elsewhere (a path that knows no tasks)
+    sqlx::query("UPDATE agent_run SET status = 'failed' WHERE id = $1")
+        .bind(run)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let closed = worker.sweep_orphan_tasks().await.expect("the sweep");
+    assert_eq!(closed, 1);
+    let task = w.task(run).await;
+    assert_eq!(
+        (
+            task.state.as_str(),
+            task.end_reason.as_deref(),
+            task.marker.as_deref()
+        ),
+        ("ended", Some("run_ended"), Some("failed"))
+    );
+    assert!(task.request_null && task.claim_null);
+    let rows = w.hermes_ledger(run).await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "the delegation was called, so it has its row"
+    );
+    assert!(rows[0].estimated);
+    // swept once: a second sweep finds nothing and writes nothing
+    assert_eq!(worker.sweep_orphan_tasks().await.unwrap(), 0);
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
 }

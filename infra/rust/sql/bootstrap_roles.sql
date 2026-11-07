@@ -507,10 +507,14 @@ DECLARE
     'updated_at', 'ended_at', 'delegation_kind', 'delegation_state', 'delegation_called_at',
     'delegation_target'];
 BEGIN
-  IF to_regclass('public.team_ai_task') IS NULL
-     OR NOT EXISTS (SELECT 1 FROM pg_attribute
-                     WHERE attrelid = 'public.team_ai_task'::regclass
-                       AND attname = 'delegation_request' AND NOT attisdropped) THEN
+  IF to_regclass('public.team_ai_task') IS NULL THEN
+    RETURN;
+  END IF;
+  -- (a separate statement: a cast of the name to regclass is evaluated even when the first test above
+  -- would have returned, and fails if the table is not there yet)
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                  WHERE attrelid = to_regclass('public.team_ai_task')
+                    AND attname = 'delegation_request' AND NOT attisdropped) THEN
     RETURN;
   END IF;
   REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC;

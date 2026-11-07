@@ -900,7 +900,9 @@ impl AgentWorker {
                 let target = door.as_ref().and_then(DoorFacts::target_member_id);
                 let hermes_trace = trace.hermes.get_or_insert_with(HermesTrace::default);
                 match verdict {
-                    CallVerdict::Accepted { kind, request } => {
+                    // (a door that was open has resolved its target; a call that finds none is a call to a
+                    // door that is not there)
+                    CallVerdict::Accepted { kind, request } if target.is_some() => {
                         // ADR-0201 증보 v4 P4-4: the call passed every check, so it **becomes the next
                         // step** — a task row, a pending marker and a resume job (`team_ai_delegation_begin`,
                         // after the loop). The request sentence is carried in memory to that one
@@ -911,7 +913,7 @@ impl AgentWorker {
                         hermes_call = target.map(|target| (kind, request, target));
                         break (completion, None);
                     }
-                    CallVerdict::NotOffered => {
+                    CallVerdict::NotOffered | CallVerdict::Accepted { .. } => {
                         hermes_trace.results.push(DelegateCode::NotOffered.as_str());
                         messages.push(ChatMessage {
                             role: "assistant".to_string(),

@@ -1041,7 +1041,7 @@ pub async fn mark_called_in_tx(
 }
 
 /// What [`commit_called_in_tx`] decided.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum CalledCommit<R> {
     /// This call made the transition and owns the request: the sentence, to be sent once.
     Go(String),
@@ -1050,6 +1050,20 @@ pub enum CalledCommit<R> {
     /// The marker was not `pending` for this claim any more (another claim made or holds the call, the row
     /// ended, the claim was taken over). Nothing was written; there is no sentence to send.
     Lost,
+}
+
+impl<R: std::fmt::Debug> std::fmt::Debug for CalledCommit<R> {
+    /// Prints which way it went and, for [`CalledCommit::Go`], a length — a stray `{:?}` must not be where
+    /// the request sentence reaches a log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CalledCommit::Go(request) => {
+                write!(f, "Go(<{} chars>)", request.chars().count())
+            }
+            CalledCommit::Refused(why) => write!(f, "Refused({why:?})"),
+            CalledCommit::Lost => f.write_str("Lost"),
+        }
+    }
 }
 
 /// **The `called` commit** (ADR-0201 증보 v4 P4-5, P7): under the workspace lock, count the delegations,
