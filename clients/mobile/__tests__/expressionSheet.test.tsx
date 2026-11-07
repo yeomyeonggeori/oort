@@ -9,7 +9,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
-import {AppState, StyleSheet} from 'react-native';
+import {AppState, StyleSheet, View} from 'react-native';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
 import {
@@ -31,6 +31,7 @@ import {
   recordExpressionUse,
 } from '@momo/core/features/expressions/usage';
 import {Composer} from '../src/features/conversation/Composer';
+import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {CONV} from '../src/features/conversation/convDesign';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
@@ -52,7 +53,6 @@ import {
   type PhoneExpressionStore,
 } from '../src/features/expressions/store';
 import {createMobileLocaleController} from '../src/i18n/controller';
-import {haptics} from '../src/lib/haptics';
 import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 
@@ -719,37 +719,10 @@ describe('입력창의 표현 단추', () => {
     expect(screen.getByTestId('composer-tool-mention')).toBeTruthy();
   });
 
-  it('눌러 시트를 열고, 작은 이모지는 글 뒤에 띄어 넣고, 큰 이모티콘은 입력 중인 글을 건드리지 않고 보낸다', async () => {
-    const {store} = await loaded();
-    const {onSend} = mountComposer(store);
-    fireEvent.changeText(screen.getByTestId('composer-input'), '안녕');
-    fireEvent.press(screen.getByTestId('composer-expression'));
-    expect(await screen.findByTestId('expression-sheet-search')).toBeTruthy();
-    // 처음 여는 이모지 탭의 팀 작은 이모지.
-    fireEvent.press(await screen.findByTestId('expression-pick-party_parrot'));
-    await waitFor(() =>
-      expect(screen.getByTestId('composer-input').props.value).toBe(
-        '안녕 :party_parrot: ',
-      ),
-    );
-    expect(onSend).not.toHaveBeenCalled();
-    expect(haptics.light).not.toHaveBeenCalled(); // 넣기는 보내기가 아니다
-    expect(screen.queryByTestId('expression-sheet-search')).toBeNull();
+  // 「눌러 시트를 열고 … 큰 이모티콘을 보낸다」 흐름은 이제 키보드 자리의 창이다(#5452): `expressionComposerPanel.test.tsx` 가 ☺ → 창 → 미리 보기 → 보내기 한 번을 재고,
+  // 이 파일의 시트 시험은 옛 고르개 시트(`ExpressionComposerPicker`)를 직접 세워 잰다 - 입력창은 더는 이 시트를 열지 않는다.
 
-    // 큰 이모티콘: 미리보기 → 보내기. 입력창의 글은 그대로다. 보내기 = light 한 번(`submit` 과 같은 규칙).
-    fireEvent.press(screen.getByTestId('composer-expression'));
-    pressTab('emoticon');
-    fireEvent.press(await screen.findByTestId('expression-pick-thumbs_up'));
-    fireEvent.press(screen.getByTestId('expression-confirm-send'));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith(':thumbs_up:'));
-    expect(onSend).toHaveBeenCalledTimes(1);
-    expect(haptics.light).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('composer-input').props.value).toBe(
-      '안녕 :party_parrot: ',
-    );
-  });
-
-  it('앱 언어가 영어면 단추·탭·검색의 이름이 영어다 — 문구는 사전의 것이다', async () => {
+  it('앱 언어가 영어면 단추·창·탭의 이름이 영어다 — 문구는 사전의 것이다', async () => {
     const {store} = await loaded();
     const controller = await createMobileLocaleController({
       port: {
@@ -761,12 +734,17 @@ describe('입력창의 표현 단추', () => {
     render(
       <MobileLocaleProvider createController={async () => controller}>
         <PhoneExpressions.Provider value={store}>
-          <Composer
-            recipient="place"
-            channelLabel="agent-lab"
-            directory={DIRECTORY}
-            attachmentTarget={TARGET}
-            onSend={() => {}}
+          <ConversationLayout
+            list={<View />}
+            composer={
+              <Composer
+                recipient="place"
+                channelLabel="agent-lab"
+                directory={DIRECTORY}
+                attachmentTarget={TARGET}
+                onSend={() => {}}
+              />
+            }
           />
         </PhoneExpressions.Provider>
       </MobileLocaleProvider>,
@@ -776,20 +754,16 @@ describe('입력창의 표현 단추', () => {
       'Choose an emoticon, emoji or GIF',
     );
     fireEvent.press(button);
-    await screen.findByTestId('expression-sheet-search');
+    await screen.findByTestId('expression-panel');
+    expect(screen.getByTestId('expression-panel').props.accessibilityLabel).toBe('Emoticon panel');
+    expect(screen.getByTestId('composer-expression').props.accessibilityLabel).toBe('Show keyboard');
     expect(
       EXPRESSION_TABS.map(
         id =>
-          screen.getByTestId(`expression-sheet-tab-${id}`).props
+          screen.getByTestId(`expression-panel-tab-${id}`).props
             .accessibilityLabel,
       ),
     ).toEqual(['Emoticons', 'Emoji', 'GIF']);
-    expect(
-      screen.getByTestId('expression-sheet-search').props.accessibilityLabel,
-    ).toBe('Search by name');
-    expect(
-      screen.getByTestId('expression-sheet-close').props.accessibilityLabel,
-    ).toBe('Close emoticons, emoji and GIFs');
     controller.dispose();
   });
 });
