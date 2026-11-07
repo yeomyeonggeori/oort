@@ -1173,22 +1173,40 @@ async fn a11_one_stale_pin_refuses_the_whole_decision_and_spends_nothing() {
     assert_eq!(registered(&w.su, t.ws).await, 3);
 
     // a picture that is no longer what it was when the card was drawn: an expired draft, a draft that is
-    // not ready any more — each on a card of its own, because each forgery stays
-    for (why, forged) in [
+    // not ready any more, a draft another agent made, a draft of another face — each on a card of its
+    // own, because each forgery stays
+    for (why, forged, other) in [
         (
             "an expired draft",
             "UPDATE expression_draft SET expires_at = clock_timestamp() - interval '1 minute' WHERE approval_id = $1 AND candidate_index = 1",
+            None,
         ),
         (
             "a draft that is not ready any more",
             "UPDATE expression_draft SET state = 'expired' WHERE approval_id = $1 AND candidate_index = 1",
+            None,
+        ),
+        (
+            "a draft another agent made",
+            "UPDATE expression_draft SET creator = $2 WHERE approval_id = $1 AND candidate_index = 1",
+            Some("agent2"),
+        ),
+        (
+            "a draft of another face than the card's",
+            "UPDATE expression_draft SET subject_member_id = $2 WHERE approval_id = $1 AND candidate_index = 1",
+            Some("bob"),
         ),
     ] {
         let t2 = tenant(&w.su).await;
         let c2 = card(&w, t2, "fg", None).await;
         let list = keep(&props(&w.su, c2.message).await, &[0, 1, 3]);
         let token2 = login(&w, t2, t2.alice).await;
-        forge(&w.su, &[(forged, vec![c2.approval])]).await;
+        let binds = match other {
+            None => vec![c2.approval],
+            Some("agent2") => vec![c2.approval, t2.agent2],
+            Some(_) => vec![c2.approval, t2.bob],
+        };
+        forge(&w.su, &[(forged, binds)]).await;
         let (status, receipt) = decide(&w, t2, &token2, c2.approval, true, Uuid::new_v4(), Some(json!(list)), json!({})).await;
         assert_eq!(status, 409, "{why}: {receipt}");
         assert_eq!(receipt["status"], "expression_preview_stale", "{why}");
@@ -1202,6 +1220,90 @@ async fn a11_one_stale_pin_refuses_the_whole_decision_and_spends_nothing() {
             "{why}"
         );
     }
+}
+
+/// A failure that is NOT a database error, found after the first write: the decision's writes
+/// stand on a hand-off the proofs cannot see (a copy of the three renditions that quietly came out
+/// as two). The route maps every refusal to a receipt it commits, so such a failure must leave the
+/// function as a fault, not as a refusal — or the version, the registrations and the notices already
+/// written would commit with it. Nothing of the decision may survive.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a12_a_failure_after_the_first_write_rolls_the_whole_decision_back() {
+    let w = world().await;
+    let t = tenant(&w.su).await;
+    let c = card(&w, t, "rb", None).await;
+    let list = keep(&props(&w.su, c.message).await, &[0, 1, 3]);
+    let version = catalog_version(&w.su, t.ws).await;
+    let (detail, plain) = (
+        notices(&w.su, t.ws, "expression.changed.detail").await,
+        notices(&w.su, t.ws, "expression.changed").await,
+    );
+    let token = login(&w, t, t.alice).await;
+    // a trigger, in this tenant only, that drops the thumb of every copied rendition: the copy "works"
+    // and the registration can no longer be read back as a whole
+    let name = format!("s2_drop_thumb_{}", t.ws.simple());
+    sqlx::query(&format!(
+        "CREATE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF NEW.variant = 'thumb' THEN RETURN NULL; END IF; RETURN NEW; END $$"
+    ))
+    .execute(&w.su)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER {name} BEFORE INSERT ON expression_image FOR EACH ROW \
+           WHEN (NEW.workspace_id = '{}') EXECUTE FUNCTION {name}()",
+        t.ws
+    ))
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, body) = decide(
+        &w,
+        t,
+        &token,
+        c.approval,
+        true,
+        Uuid::new_v4(),
+        Some(json!(list.clone())),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 500, "a fault, not a receipt: {body}");
+    assert_unspent(&w, t, &c, version, "a failure after the first write").await;
+    assert_eq!(
+        notices(&w.su, t.ws, "expression.changed.detail").await,
+        detail,
+        "no notice was kept"
+    );
+    assert_eq!(
+        notices(&w.su, t.ws, "expression.changed").await,
+        plain,
+        "no notice was kept"
+    );
+    assert_eq!(
+        count(&w.su, "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action IN ('expression.created','expression.set.decided')", t.ws).await,
+        0,
+        "no audit row was kept"
+    );
+    // lift the failure: the same card decides, so it was that and nothing else
+    sqlx::query(&format!("DROP TRIGGER {name} ON expression_image"))
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, body) = decide(
+        &w,
+        t,
+        &token,
+        c.approval,
+        true,
+        Uuid::new_v4(),
+        Some(json!(list)),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(registered(&w.su, t.ws).await, 3);
 }
 
 // ---------------------------------------------------------------------------

@@ -281,6 +281,18 @@ fn fault(message: &str) -> Error {
     Error::Db(DbError::Sqlx(sqlx::Error::Protocol(message.to_string())))
 }
 
+/// What a failure in the write phase becomes: a database error stays one, and anything else (a
+/// helper that answers `NotFound` or `Invalid` — the caller maps those to a 409 it **commits**) is
+/// turned into a fault, because by then rows have been written.
+fn into_fault(error: Error) -> Error {
+    match error {
+        Error::Db(_) => error,
+        other => fault(&format!(
+            "the set decision failed after its first write: {other}"
+        )),
+    }
+}
+
 /// A registration with everything its writes need, read before the first write.
 struct Made<'a> {
     registration: &'a Registration,
@@ -515,95 +527,101 @@ pub async fn decide_in_tx(
             )
         })
         .collect();
-    // ONE version for the whole decision (L6.3): one detail notice naming every id, one plain notice.
-    let version_after = changed_each(conn, decider, &audits, Effect::Created(&ids)).await?;
-    for item in &made {
-        let id = item.registration.draft_id;
-        let created = sqlx::query(
-            "INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,\
-                created_by,proposed_by,approval_id,version,origin_source_attachment_id,kind) \
-             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *",
-        )
-        .bind(ws)
-        .bind(id)
-        .bind(&item.meta.name)
-        .bind(&item.meta.display_name)
-        .bind(json!(item.meta.tags))
-        .bind(item.meta.subject_member_id)
-        .bind(&item.origin)
-        .bind(decider.member)
-        .bind(proposer)
-        .bind(approval_id)
-        .bind(version_after)
-        .bind(item.source_attachment_id)
-        .bind(item.registration.kind.as_str())
-        .fetch_one(&mut *conn)
-        .await?;
-        sqlx::query(
-            "INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) \
-             SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms \
-               FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2",
-        )
-        .bind(ws)
-        .bind(id)
-        .execute(&mut *conn)
-        .await?;
-        // The picture's own receipt, written once with the draft's activation (A17).
-        let receipt = json!({
-            "workspaceId": ws,
-            "version": version_after.to_string(),
-            "expression": expression_json(conn, &created).await?,
-        });
-        sqlx::query("DELETE FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
+    // The write phase is one block whose every failure leaves as a fault (see [`into_fault`]).
+    let written: Result<i64, Error> = async {
+        // ONE version for the whole decision (L6.3): one detail notice naming every id, one plain notice.
+        let version_after = changed_each(conn, decider, &audits, Effect::Created(&ids)).await?;
+        for item in &made {
+            let id = item.registration.draft_id;
+            let created = sqlx::query(
+                "INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,\
+                    created_by,proposed_by,approval_id,version,origin_source_attachment_id,kind) \
+                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *",
+            )
+            .bind(ws)
+            .bind(id)
+            .bind(&item.meta.name)
+            .bind(&item.meta.display_name)
+            .bind(json!(item.meta.tags))
+            .bind(item.meta.subject_member_id)
+            .bind(&item.origin)
+            .bind(decider.member)
+            .bind(proposer)
+            .bind(approval_id)
+            .bind(version_after)
+            .bind(item.source_attachment_id)
+            .bind(item.registration.kind.as_str())
+            .fetch_one(&mut *conn)
+            .await?;
+            sqlx::query(
+                "INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) \
+                 SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms \
+                   FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2",
+            )
             .bind(ws)
             .bind(id)
             .execute(&mut *conn)
             .await?;
-        sqlx::query(
-            "UPDATE expression_draft SET state='activated',submitted_by=$3,submitted_revision=$4,\
-                submitted_sha256=$5,receipt=$6 WHERE workspace_id=$1 AND id=$2",
+            // The picture's own receipt, written once with the draft's activation (A17).
+            let receipt = json!({
+                "workspaceId": ws,
+                "version": version_after.to_string(),
+                "expression": expression_json(conn, &created).await?,
+            });
+            sqlx::query("DELETE FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
+                .bind(ws)
+                .bind(id)
+                .execute(&mut *conn)
+                .await?;
+            sqlx::query(
+                "UPDATE expression_draft SET state='activated',submitted_by=$3,submitted_revision=$4,\
+                    submitted_sha256=$5,receipt=$6 WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(ws)
+            .bind(id)
+            .bind(decider.member)
+            .bind(item.revision)
+            .bind(&item.choice.sha256)
+            .bind(&receipt)
+            .execute(&mut *conn)
+            .await?;
+        }
+        // Every picture nobody registered — the ones left unkept, the ones a skip left out — loses its
+        // bytes (and the agent's words) in this same transaction (A13).
+        crate::action::reclaim_in_tx(conn, ws, approval_id).await?;
+        // The head is decided: its pictures are expressions now, and the agent may start its next set.
+        let moved = sqlx::query(
+            "UPDATE expression_set SET state = 'decided' \
+              WHERE workspace_id = $1 AND id = $2 AND approval_id = $3 AND state = 'proposed'",
         )
         .bind(ws)
-        .bind(id)
-        .bind(decider.member)
-        .bind(item.revision)
-        .bind(&item.choice.sha256)
-        .bind(&receipt)
+        .bind(set_id)
+        .bind(approval_id)
         .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if moved != 1 {
+            return Err(fault("a locked proposed set head did not move to decided"));
+        }
+        let count = |reason: SkipReason| skipped.iter().filter(|skip| skip.reason == reason).count();
+        audit_decided_in_tx(
+            conn,
+            ws,
+            decider.member,
+            set_id,
+            approval_id,
+            DecidedCounts {
+                approved: true,
+                registered: registrations.len(),
+                skipped_name_taken: count(SkipReason::NameTaken),
+                skipped_quota: count(SkipReason::Quota),
+            },
+        )
         .await?;
+        Ok(version_after)
     }
-    // Every picture nobody registered — the ones left unkept, the ones a skip left out — loses its
-    // bytes (and the agent's words) in this same transaction (A13).
-    crate::action::reclaim_in_tx(conn, ws, approval_id).await?;
-    // The head is decided: its pictures are expressions now, and the agent may start its next set.
-    let moved = sqlx::query(
-        "UPDATE expression_set SET state = 'decided' \
-          WHERE workspace_id = $1 AND id = $2 AND approval_id = $3 AND state = 'proposed'",
-    )
-    .bind(ws)
-    .bind(set_id)
-    .bind(approval_id)
-    .execute(&mut *conn)
-    .await?
-    .rows_affected();
-    if moved != 1 {
-        return Err(fault("a locked proposed set head did not move to decided"));
-    }
-    let count = |reason: SkipReason| skipped.iter().filter(|skip| skip.reason == reason).count();
-    audit_decided_in_tx(
-        conn,
-        ws,
-        decider.member,
-        set_id,
-        approval_id,
-        DecidedCounts {
-            approved: true,
-            registered: registrations.len(),
-            skipped_name_taken: count(SkipReason::NameTaken),
-            skipped_quota: count(SkipReason::Quota),
-        },
-    )
-    .await?;
+    .await;
+    let version_after = written.map_err(into_fault)?;
     Ok(Decided {
         set_id,
         version: version_after,
