@@ -800,6 +800,14 @@ mod tests {
     /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
     /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
     ///
+    /// 176 is #5459's 「이모티콘 세트 보관」 (ADR-0218 증보 6 §12 L10, S1a): the four tables
+    /// `expression_set` / `_slot` / `_image` / `_notice` (tenant ENABLE + FORCE + `ws_isolation`,
+    /// composite FKs including `(workspace, run, agent, channel)` into `agent_run`), the per-table
+    /// one-way triggers, the partial unique index that keeps one undecided set per agent, the
+    /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
+    /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
+    /// is the writer, so the block, not RLS, is the last door).
+    ///
     /// 177 is #5370's 「도우미가 팀 Hermes에 일을 맡기는 걸음」 (ADR-0201 증보 v4 P4·P7·I6, P14-S2): five
     /// delegation columns on `team_ai_task` (the at-most-once marker `pending → called → done|failed`, its
     /// time, the Hermes member and the one request sentence), `team_ai_task_ended_ck` re-created so an ended
@@ -811,10 +819,7 @@ mod tests {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        // 176 (#5459) is reserved by a slot that has not landed on this branch yet; 177 is #5370's. The
-        // merge that brings 176 in deletes the `reserved` line and the list is 1..=177.
-        let reserved: [i64; 1] = [176];
-        let expected: Vec<i64> = (1..=177).filter(|n| !reserved.contains(n)).collect();
+        let expected: Vec<i64> = (1..=177).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -822,7 +827,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected 001..=177 (176 reserved) under {}",
+            "expected contiguous 001..=177 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));

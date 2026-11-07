@@ -147,6 +147,11 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         // ADR-0218 G3.6 (#4820 C1b): what the assembler built, held for an hour.
         "expression_assembly",
         "expression_assembly_image",
+        // ADR-0218 증보 6 §12 L10 (#5459 S1a): the staging of an emoticon set.
+        "expression_set",
+        "expression_set_slot",
+        "expression_set_image",
+        "expression_set_notice",
     ] {
         let row=sqlx::query("SELECT relrowsecurity,relforcerowsecurity,EXISTS(SELECT 1 FROM pg_policy WHERE polrelid=c.oid AND polname='ws_isolation') AS policy FROM pg_class c WHERE c.oid=$1::regclass").bind(t).fetch_one(&api).await.unwrap();
         assert!(
@@ -415,6 +420,10 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         "expression_report",
         "expression_assembly",
         "expression_assembly_image",
+        "expression_set",
+        "expression_set_slot",
+        "expression_set_image",
+        "expression_set_notice",
     ] {
         let sql = format!("SELECT count(*) FROM {table}");
         let count = e::transaction(&api, foreign, move |conn| {
