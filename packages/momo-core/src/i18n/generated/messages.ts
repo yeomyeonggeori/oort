@@ -464,6 +464,7 @@ export const messageKeys = [
   "expressions.picker.favoriteRemoved",
   "expressions.picker.grid",
   "expressions.picker.sectionFavorites",
+  "expressions.picker.sectionFrecent",
   "expressions.picker.sectionOther",
   "expressions.picker.sectionRecent",
   "expressions.picker.setStrip",
@@ -558,6 +559,8 @@ export const messageKeys = [
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.settingHint",
+  "expressions.suggest.settingLabel",
   "inbox.approval.open",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
@@ -1807,6 +1810,7 @@ export const argumentSpecs = {
   },
   "expressions.picker.grid": {},
   "expressions.picker.sectionFavorites": {},
+  "expressions.picker.sectionFrecent": {},
   "expressions.picker.sectionOther": {},
   "expressions.picker.sectionRecent": {},
   "expressions.picker.setStrip": {},
@@ -1947,6 +1951,8 @@ export const argumentSpecs = {
   "expressions.suggest.pick": {
     "name": "string"
   },
+  "expressions.suggest.settingHint": {},
+  "expressions.suggest.settingLabel": {},
   "inbox.approval.open": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
@@ -3339,6 +3345,7 @@ export interface MessageArgs {
   "expressions.picker.favoriteRemoved": { name: string };
   "expressions.picker.grid": Record<string, never>;
   "expressions.picker.sectionFavorites": Record<string, never>;
+  "expressions.picker.sectionFrecent": Record<string, never>;
   "expressions.picker.sectionOther": Record<string, never>;
   "expressions.picker.sectionRecent": Record<string, never>;
   "expressions.picker.setStrip": Record<string, never>;
@@ -3433,6 +3440,8 @@ export interface MessageArgs {
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.settingHint": Record<string, never>;
+  "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;

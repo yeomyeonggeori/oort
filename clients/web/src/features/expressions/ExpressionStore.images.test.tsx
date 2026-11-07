@@ -8,6 +8,8 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
+import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
+import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
 import { EXPRESSION_LIMITS } from "@momo/core/features/expressions/types";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { ExpressionStore } from "./ExpressionStore";
@@ -165,5 +167,49 @@ describe("ExpressionStore 그림 기억 칸: 바이트 예산 LRU (#5468)", () =
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(store.imageCacheStats()).toMatchObject({ entries: 2, bytes: thumb.length + large.length });
     expect(image).toHaveBeenCalledTimes(2); // 요청도 variant 마다 한 번
+  });
+});
+
+// #5504: 반응 칩이 그리는 움직이는 그림(반복 횟수만 무한으로 바뀐 주소)은 원본에서 만들고, 원본과 같은 예산 LRU 에 센다.
+describe("ExpressionStore.loopedImage: 반응 칩의 계속 도는 그림 (#5504)", () => {
+  const SERVER_GIF = `data:image/gif;base64,${FIXTURE_MEDIA.gif.bodyBase64}`;
+  const LOOPING_GIF = loopForeverDataUrl(SERVER_GIF);
+  function buildGif() {
+    const image = vi.fn(async () => SERVER_GIF);
+    const transport: ExpressionTransport = { json: vi.fn(), image };
+    return { store: new ExpressionStore(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, transport), image };
+  }
+
+  it("원본을 한 번만 받아 반복 횟수만 바꾼 주소를 만들고, 같은 그림을 쓰는 모두가 그 한 값을 나눠 쓴다", async () => {
+    const { store, image } = buildGif();
+    expect(LOOPING_GIF).not.toBe(SERVER_GIF);
+    const first = await Promise.all([store.loopedImage("/g"), store.loopedImage("/g"), store.loopedImage("/g")]);
+    expect(first).toEqual([LOOPING_GIF, LOOPING_GIF, LOOPING_GIF]);
+    expect(await store.loopedImage("/g")).toBe(LOOPING_GIF);
+    // 원본 읽기는 한 번이고, 원본(글 사이·큰 그림이 쓴다)은 그대로 서버가 준 주소다.
+    expect(image).toHaveBeenCalledTimes(1);
+    expect(await store.image("/g")).toBe(SERVER_GIF);
+    expect(image).toHaveBeenCalledTimes(1);
+    // 같은 예산에 두 칸으로 센다: 원본 + 바뀐 것(둘 다 같은 길이).
+    expect(store.imageCacheStats()).toMatchObject({ entries: 2, bytes: SERVER_GIF.length + LOOPING_GIF.length });
+  });
+
+  it("비우기는 바뀐 그림도 비우고, 받기가 실패하면 바뀐 항목을 남기지 않아 다음에 다시 받는다", async () => {
+    const { store, image } = buildGif();
+    await store.loopedImage("/g");
+    act(() => store.clearImages());
+    expect(store.imageCacheStats()).toMatchObject({ entries: 0, bytes: 0 });
+    image.mockRejectedValueOnce(new Error("network"));
+    await expect(store.loopedImage("/g")).rejects.toThrow();
+    expect(store.imageCacheStats().entries).toBe(0);
+    expect(await store.loopedImage("/g")).toBe(LOOPING_GIF);
+    expect(image).toHaveBeenCalledTimes(3);
+  });
+
+  it("오프라인이면 받지 않고 거절한다", async () => {
+    const { store, image } = buildGif();
+    act(() => store.setOffline(true));
+    await expect(store.loopedImage("/g")).rejects.toThrow("offline");
+    expect(image).not.toHaveBeenCalled();
   });
 });

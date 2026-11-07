@@ -3038,6 +3038,12 @@ export const catalog: MessageCatalog = {
       "value": "즐겨찾기"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "자주·최근"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -3749,6 +3755,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기에 올리기"
+    }
+  ],
+  "expressions.suggest.settingHint": [
+    {
+      "type": 0,
+      "value": "글을 쓰다 멈추면 맞는 이모티콘을 입력창 위에 보여 줘요."
+    }
+  ],
+  "expressions.suggest.settingLabel": [
+    {
+      "type": 0,
+      "value": "이모티콘 추천"
     }
   ],
   "inbox.approval.open": [
