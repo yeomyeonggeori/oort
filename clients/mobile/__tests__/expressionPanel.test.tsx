@@ -9,6 +9,8 @@ import {
 } from '@momo/core/features/expressions/fixtureServer';
 import {FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
+import {emptyExpressionFavorites} from '@momo/core/features/expressions/favorites';
+import {buildExpressionSections} from '@momo/core/features/expressions/gridSections';
 import {DEFAULT_EXPRESSION_PICKER_TAB} from '@momo/core/features/expressions/kind';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
@@ -567,6 +569,115 @@ describe('「＋」 - 창 밖의 시트 (#4891 → #5452, 옛 시트 시험을 �
     expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
     expect(screen.getByTestId('expression-panel-tabs')).toBeTruthy();
     expect(cellNames()).toHaveLength(5);
+  });
+});
+
+// 이모티콘 탭 맨 위 「자주·최근」 (#5503, owner 2026-11-07): 정지 그림과 GIF 를 섞어 횟수·최근 점수 순으로 세우고, 창이 열려 있는 동안 차례가 바뀌지 않으며 다시 열 때만 바뀐다. GIF 탭의 「최근」은 그대로다.
+describe('이모티콘 탭 맨 위 「자주·최근」 (#5503)', () => {
+  const NOW = Date.UTC(2026, 10, 7, 12);
+  const DAY = 86_400_000;
+  /** `[이름, 횟수, 며칠 전에 마지막으로]` — 점수 = 횟수 x 0.5^(일 / 7): nya_dance 2.46 · nya_jump 1.0 · dam_kk 0.91 · cheers_still 0.41 · solo_gif 0.14. 작은 이모지(party_parrot)는 50번 써도 후보가 아니다. */
+  const SEED: ReadonlyArray<readonly [string, number, number]> = [
+    ['nya_dance', 3, 2],
+    ['nya_jump', 1, 0],
+    ['dam_kk', 1, 1],
+    ['cheers_still', 1, 9],
+    ['solo_gif', 1, 20],
+    ['party_parrot', 50, 0],
+  ];
+  const FRECENT_ORDER = ['nya_dance', 'nya_jump', 'dam_kk', 'cheers_still', 'solo_gif'];
+  function seeded() {
+    const library = makeLibrary();
+    let usage = emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID);
+    for (const [name, times, daysAgo] of SEED) {
+      const id = library.find(entry => entry.name === name)!.id;
+      for (let i = 0; i < times; i += 1) usage = recordExpressionUse(usage, id, Math.round(NOW - daysAgo * DAY));
+    }
+    return {library, usage};
+  }
+  const topNames = () =>
+    within(screen.getByTestId('expression-panel-section-recent'))
+      .getAllByTestId(/^expression-pick-/)
+      .map(cell => String(cell.props.testID).replace('expression-pick-', ''));
+  beforeEach(() => {
+    // 창이 열리는 시각과 기록이 남는 시각을 고정한다(앱의 시계는 `Date.now()` 하나다).
+    jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  });
+
+  it('맨 위 칸에 정지 그림과 GIF 가 섞여 점수 순으로 서고, GIF 는 아래 구역에 없으며 작은 이모지는 없다 - 띠의 첫 단추가 그 칸이다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    const {onPickBig} = mountPanel(store);
+    expect(sections()[0]).toBe('recent');
+    expect(strip()[0]).toBe('recent');
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    expect(screen.getByText('최근')).toBeTruthy(); // 이름은 그대로 「최근」(GIF 탭과 같은 사전 열쇠)
+    // GIF 는 이 탭의 보관함이 아니라 맨 위 칸에만 한 번 서고, 정지 그림은 맨 위 칸과 아래 세트에 한 번씩 선다.
+    expect(screen.getAllByTestId('expression-pick-nya_dance')).toHaveLength(1);
+    expect(screen.getAllByTestId('expression-pick-dam_kk')).toHaveLength(2);
+    expect(screen.queryByTestId('expression-pick-party_parrot')).toBeNull();
+    // 이 칸의 GIF 도 격자의 GIF 와 같은 부품·같은 크기(`tile`)로 그린다 - 새 그림 규칙이 없다.
+    expect(screen.getAllByTestId('img-tile-nya_dance')).toHaveLength(1);
+    // 누르면 정지 그림처럼 그 등록을 넘긴다(보내지 않는다).
+    fireEvent.press(screen.getByTestId('expression-pick-nya_dance'));
+    expect(onPickBig).toHaveBeenCalledTimes(1);
+    expect(onPickBig.mock.calls[0][0]).toMatchObject({id: library.find(entry => entry.name === 'nya_dance')!.id, name: 'nya_dance'});
+  });
+
+  it('창이 열려 있는 동안 보내기가 성공해 기록이 바뀌어도 칸 순서는 그대로이고(탭을 바꿨다 돌아와도), 창을 다시 열 때만 바뀐다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    const first = mountPanel(store);
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    // 열린 채 solo_gif 가 방금 두 번 보내졌다. 기록은 실제로 바뀐다.
+    act(() => {
+      store.recordSuccess('receipt-1', ':solo_gif:');
+      store.recordSuccess('receipt-2', ':solo_gif:');
+    });
+    const soloGifId = library.find(entry => entry.name === 'solo_gif')!.id;
+    expect(store.snapshot().usage?.entries.find(entry => entry.id === soloGifId)?.count).toBe(3);
+    // 이 시험이 헛돌지 않는다는 증거: 같은 기록으로 지금 다시 계산하면 차례가 다르다(solo_gif 가 맨 앞).
+    const live = buildExpressionSections(store.snapshot().items, 'emoticon', {
+      query: '',
+      usage: store.snapshot().usage!,
+      favorites: emptyExpressionFavorites(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID),
+      nowMs: Date.now(),
+    })[0]!.items.map(entry => entry.name);
+    expect(live).not.toEqual(FRECENT_ORDER);
+    expect(live[0]).toBe('solo_gif');
+    // 그런데 열려 있는 창의 칸 순서는 그대로다. 탭을 바꿨다 돌아와도(격자가 새로 서도) 같다.
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    fireEvent.press(screen.getByTestId('expression-panel-tab-emoticon'));
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    // 닫았다 다시 열면 그때 한 번 새로 계산한다.
+    first.view.unmount();
+    mountPanel(store);
+    expect(topNames()).toEqual(live);
+  });
+
+  it('목록이 오기 전에 창을 열어도(앱을 막 켠 때) 기기의 사용 기록은 열 때 쥔다 - 목록이 오면 맨 위 칸이 그 차례로 선다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    mountPanel(store); // 아직 읽지 않았다
+    expect(screen.getByTestId('expression-panel-loading')).toBeTruthy();
+    expect(screen.queryByTestId('expression-panel-section-recent')).toBeNull();
+    await act(async () => {
+      await store.refresh(true);
+    });
+    expect(topNames()).toEqual(FRECENT_ORDER);
+  });
+
+  it('GIF 탭의 「최근」은 그대로다 - GIF 끼리 마지막으로 쓴 순이고 횟수·감쇠로 세우지 않는다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    mountPanel(store);
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    // 마지막으로 쓴 순: nya_jump(방금) > nya_dance(2일 전) > solo_gif(20일 전). 이모티콘 탭의 점수 순(nya_dance 가 앞)과 다르다.
+    expect(topNames()).toEqual(['nya_jump', 'nya_dance', 'solo_gif']);
   });
 });
 

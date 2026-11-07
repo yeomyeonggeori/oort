@@ -5,7 +5,6 @@ import {
   EXPRESSION_SECTION_NAME_KEY,
 } from '@momo/core/features/expressions/gridSections';
 import {expressionAltText} from '@momo/core/features/expressions/message';
-import {emptyExpressionUsage} from '@momo/core/features/expressions/usage';
 import type {Expression} from '@momo/core/features/expressions/types';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -37,6 +36,7 @@ import {
   PANEL_ROW_HEIGHT,
   panelColumns,
   sectionAtOffset,
+  type PanelOpening,
   type PanelSectionLayout,
 } from './panelModel';
 import {useExpressionFavorites} from './useExpressionFavorites';
@@ -45,7 +45,8 @@ import {useExpressionMessages, type PlainMessageKey} from './useExpressionMessag
 // =============================================================================
 // 키보드 자리 창의 이모티콘·GIF 탭 (#5452, owner 2026-11-07) - 그림만 보이는 격자 + 창 아래 세트 띠.
 //
-// 구역은 최근 → 즐겨찾기 → 세트별 → 기타(코어 `buildExpressionSections`, 웹과 같은 함수). 우리 팀 것과 기본 것을 가르지 않는다. 칸에는 글이 없고(낭독 이름만) 구역마다 작은 이름줄이 있다.
+// 구역은 최근 → 즐겨찾기 → 세트별 → 기타(코어 `buildExpressionSections`, 웹과 같은 함수). 우리 팀 것과 기본 것을 가르지 않는다. 이모티콘 탭의 맨 위 칸은 정지 그림과 GIF 를 섞은 「자주·최근」이고(#5503),
+// 창이 열려 있는 동안 차례가 바뀌지 않게 창이 연 순간 쥔 사용 기록·시각(`opening`)으로만 센다. 칸에는 글이 없고(낭독 이름만) 구역마다 작은 이름줄이 있다.
 // 창 아래 띠: 🕘 최근 · ★ 즐겨찾기 · 세트마다 첫 그림 · 기타, 끝의 ＋(가져오기·AI와 만들기). 누르면 그 구역으로 건너뛰고 지금 구역이 표시된다. 비어 있는 최근·즐겨찾기는 띠에 없다.
 // 칸을 누르면 미리 보기에 올라가고(고르기만 하고 보내지 않는다), 길게 누르면 즐겨찾기를 켜고 끈다(이 기기 안, 서버 계약 없음).
 //
@@ -75,17 +76,20 @@ const setTestId = (id: string) => `expression-panel-set-${id}`;
 
 export function ExpressionPanelGrid({
   tab,
+  opening,
   previewId,
   onPick,
   onAdd,
 }: {
   tab: PanelGridTab;
+  /** 창을 연 순간의 사용 기록과 시각(창이 한 번 쥔다). 맨 위 칸의 차례는 이 둘로만 센다. */
+  opening: PanelOpening;
   /** 지금 미리 보기에 올라 있는 등록의 id(칸이 눌린 모양으로 선다). */
   previewId: string | null;
   onPick: (item: Expression) => void;
   onAdd: () => void;
 }) {
-  const {items, state, store, usage} = useExpressions();
+  const {items, state, store} = useExpressions();
   const {favorites, isFavorite, toggle} = useExpressionFavorites();
   const formatMessage = useExpressionMessages();
   const styles = useStyles(buildStyles);
@@ -97,10 +101,11 @@ export function ExpressionPanelGrid({
     () =>
       buildExpressionSections(items, tab, {
         query: '',
-        usage: usage ?? emptyExpressionUsage(store?.workspaceId ?? '', store?.memberId ?? ''),
+        usage: opening.usage,
         favorites,
+        nowMs: opening.nowMs,
       }),
-    [items, tab, usage, favorites, store],
+    [items, tab, opening, favorites],
   );
   const {layouts} = useMemo(() => layoutPanelSections(sections, columns), [sections, columns]);
   const list = useRef<FlatList<PanelSectionLayout>>(null);
