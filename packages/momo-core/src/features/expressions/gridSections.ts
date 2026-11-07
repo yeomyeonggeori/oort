@@ -1,20 +1,22 @@
 import type { MessageKey } from "../../i18n";
 import { orderExpressionsForTab } from "./browse";
 import type { ExpressionFavorites } from "./favorites";
-import type { ExpressionPickerTab } from "./kind";
+import { EXPRESSION_TAB_SHELVES, expressionsForShelves, type ExpressionPickerTab, type ExpressionShelf } from "./kind";
 import { groupExpressionSets } from "./sets";
 import type { Expression } from "./types";
-import { recentExpressions, type ExpressionUsage } from "./usage";
+import { frecentExpressions, recentExpressions, type ExpressionUsage } from "./usage";
 
 // =============================================================================
 // 이모티콘·GIF 탭의 그림 격자 모델 (owner 2026-11-07, #5453). 순수 모듈이다: DOM·React·플랫폼 API가 없고 웹과 폰이 같이 쓴다. 문장은 여기 없다(사전이 가진다).
 //
 // 구역(section): 최근 -> 즐겨찾기 -> 세트별 -> 기타. 검색어가 있으면 구역 없이 결과 하나다.
 //   · 최근    이 탭의 등록 가운데 마지막으로 쓴 시각 내림차순 `EXPRESSION_RECENT_MAX` 개(사용 기록이 없으면 구역이 없다).
+//            **이모티콘 탭만 다르다**(#5503, owner 2026-11-07): 맨 위 칸이 「자주·최근」이다 - 정지 그림과 GIF 를 **섞어**(작은 팀 이모지는 뺀다) 쓴 횟수와 최근을 함께 본
+//            점수(`frecentExpressions`)로 세운 `EXPRESSION_RECENT_MAX` 개. 칸의 id·종류는 같다(`RECENT_SECTION`). GIF 탭의 「최근」은 그대로 GIF 끼리 최근 순이다.
 //   · 즐겨찾기  고른 차례. 비어 있으면 구역도 세트 띠의 ★도 없다.
 //   · 세트    코어 `groupExpressionSets` (이름 앞머리 `<접두>_`, 2개 이상). 이름표는 공통 태그, 없으면 앞머리.
 //   · 기타    세트가 되지 못한 낱개. 모든 등록은 세트 또는 기타에 정확히 한 번 서므로 어느 그림도 구역에서 빠지지 않는다.
-// 최근·즐겨찾기는 같은 그림을 한 번 더 보이는 **바로가기**이고 세트·기타가 보관함 전체다.
+// 최근·즐겨찾기는 같은 그림을 한 번 더 보이는 **바로가기**이고 세트·기타가 보관함 전체다(이모티콘 탭 맨 위 칸의 GIF 는 보관함이 GIF 탭이라 이 탭에서는 그 칸에만 선다).
 // 격자는 한 줄 `EXPRESSION_GRID_COLS` 칸이다(팝오버 기준 6열).
 // =============================================================================
 
@@ -47,13 +49,22 @@ export const FAVORITES_SECTION = "favorites";
 export const OTHER_SECTION = "other";
 export const RESULTS_SECTION = "results";
 const setSectionId = (prefix: string) => `set:${prefix}`;
+/**
+ * 이모티콘 탭 맨 위 칸(「자주·최근」)이 모으는 보관함의 칸: 큰 그림 둘(정지 이모티콘 + GIF). 작은 팀 이모지(`team`)는 글 사이에 넣는 쓰임이라 뺀다.
+ * 칸 묶음은 탭 분류의 정본 표(`EXPRESSION_TAB_SHELVES`)에서 가져온다 - 따로 적으면 표가 바뀔 때 한쪽만 바뀐다.
+ */
+const FRECENT_SHELVES: readonly ExpressionShelf[] = [...EXPRESSION_TAB_SHELVES.emoticon, ...EXPRESSION_TAB_SHELVES.gif];
 
+/**
+ * 구역 목록. `nowMs` 는 이모티콘 탭 맨 위 칸의 점수가 감쇠를 세는 기준 시각이다(순수 함수라 코어는 시계를 읽지 않는다): 창이 열려 있는 동안 칸의 차례가 흔들리지 않으려면
+ * 호스트가 **열 때 정한 사용 기록(`usage`)과 시각을 계속** 넘긴다. 다시 열 때만 새로 정한다(#5503).
+ */
 export function buildExpressionSections(
   cacheItems: readonly Expression[],
   tab: ExpressionPickerTab,
-  options: { query: string; usage: ExpressionUsage; favorites: ExpressionFavorites },
+  options: { query: string; usage: ExpressionUsage; favorites: ExpressionFavorites; nowMs: number },
 ): ExpressionSection[] {
-  const { query, usage, favorites } = options;
+  const { query, usage, favorites, nowMs } = options;
   if (query.trim() !== "") {
     const items = orderExpressionsForTab(cacheItems, tab, { query, usage });
     return items.length === 0 ? [] : [{ id: RESULTS_SECTION, kind: "results", label: null, items }];
@@ -62,9 +73,7 @@ export function buildExpressionSections(
   const all = orderExpressionsForTab(cacheItems, tab);
   const byId = new Map(all.map((item) => [item.id, item]));
   const sections: ExpressionSection[] = [];
-  const recent = recentExpressions(usage, new Set(byId.keys()))
-    .slice(0, EXPRESSION_RECENT_MAX)
-    .flatMap((entry) => byId.get(entry.id) ?? []);
+  const recent = topShortcut(cacheItems, tab, byId, usage, nowMs);
   if (recent.length > 0) sections.push({ id: RECENT_SECTION, kind: "recent", label: null, items: recent });
   const starred = favorites.ids.flatMap((id) => byId.get(id) ?? []);
   if (starred.length > 0) sections.push({ id: FAVORITES_SECTION, kind: "favorites", label: null, items: starred });
@@ -72,6 +81,30 @@ export function buildExpressionSections(
   for (const set of sets) sections.push({ id: setSectionId(set.prefix), kind: "set", label: set.label, items: set.items });
   if (loose.length > 0) sections.push({ id: OTHER_SECTION, kind: "other", label: null, items: loose });
   return sections;
+}
+
+/**
+ * 맨 위 칸의 그림. 이모티콘 탭은 정지 그림과 GIF 를 섞은 「자주·최근」이다: 후보는 활성 등록 가운데 큰 그림 칸(`FRECENT_SHELVES`)이고, 차례는 횟수와 최근을 함께 본 점수다.
+ * 그 밖의 탭(GIF)은 이 탭 등록만으로 마지막으로 쓴 시각 순이다. 사용 기록에 있어도 후보에 없는 등록(지워지거나 숨겨졌거나 작은 이모지)은 서지 않는다.
+ */
+function topShortcut(
+  cacheItems: readonly Expression[],
+  tab: ExpressionPickerTab,
+  byId: ReadonlyMap<string, Expression>,
+  usage: ExpressionUsage,
+  nowMs: number,
+): Expression[] {
+  if (tab !== "emoticon") {
+    return recentExpressions(usage, new Set(byId.keys()))
+      .slice(0, EXPRESSION_RECENT_MAX)
+      .flatMap((entry) => byId.get(entry.id) ?? []);
+  }
+  const pool = new Map(
+    expressionsForShelves(cacheItems.filter((item) => item.status === "active"), FRECENT_SHELVES).map((item) => [item.id, item]),
+  );
+  return frecentExpressions(usage, new Set(pool.keys()), nowMs)
+    .slice(0, EXPRESSION_RECENT_MAX)
+    .flatMap((entry) => pool.get(entry.id) ?? []);
 }
 
 /** 검색 칸에서 격자로 들어가는 키(아래 화살표). 들어가는 칸은 지금 탭 순서에 있는 칸(`EXPRESSION_GRID_ENTRY_SELECTOR`)이다. */

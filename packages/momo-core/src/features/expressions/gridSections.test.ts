@@ -24,7 +24,10 @@ const dam = ["dam_a", "dam_b", "dam_c"].map((name) => make(name, ["농담곰"]))
 const chi = ["chi_a", "chi_b"].map((name) => make(name));
 const solo = make("solo");
 const ITEMS = [...dam, ...chi, solo];
-const none = { usage: emptyExpressionUsage("w", "m"), favorites: emptyExpressionFavorites("w", "m") };
+// 「자주·최근」의 감쇠를 세는 기준 시각(#5503). 아래 오래된 시험들의 사용 시각(10~300ms)은 모두 이 시각보다 한참 앞이라 횟수가 같으면 **최근 순**이 그대로 드러난다.
+const NOW = Date.UTC(2026, 10, 7, 12);
+const DAY = 86_400_000;
+const none = { usage: emptyExpressionUsage("w", "m"), favorites: emptyExpressionFavorites("w", "m"), nowMs: NOW };
 const names = (section: ExpressionSection) => section.items.map((item) => item.name);
 const shape = (sections: readonly ExpressionSection[]) => sections.map((section) => [section.id, section.kind, section.label, names(section)]);
 
@@ -42,7 +45,7 @@ describe("buildExpressionSections — 검색어가 없을 때", () => {
     usage = recordExpressionUse(usage, "id-solo", 300);
     usage = recordExpressionUse(usage, "id-dam_b", 200);
     const favorites = ["id-dam_c", "id-chi_b"].reduce(toggleExpressionFavorite, emptyExpressionFavorites("w", "m"));
-    const sections = buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites });
+    const sections = buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites, nowMs: NOW });
     expect(sections.map((section) => section.id)).toEqual(["recent", "favorites", "set:chi", "set:dam", "other"]);
     expect(names(sections[0]!)).toEqual(["solo", "dam_b", "chi_a"]);
     expect(names(sections[1]!)).toEqual(["dam_c", "chi_b"]);
@@ -51,7 +54,7 @@ describe("buildExpressionSections — 검색어가 없을 때", () => {
     let usage = emptyExpressionUsage("w", "m");
     for (const item of ITEMS) usage = recordExpressionUse(usage, item.id, 10);
     const favorites = toggleExpressionFavorite(emptyExpressionFavorites("w", "m"), "id-solo");
-    const sections = buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites });
+    const sections = buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites, nowMs: NOW });
     const stored = sections.filter((section) => section.kind === "set" || section.kind === "other").flatMap(names);
     expect([...stored].sort()).toEqual(ITEMS.map((item) => item.name).sort());
     expect(new Set(stored).size).toBe(ITEMS.length);
@@ -60,7 +63,7 @@ describe("buildExpressionSections — 검색어가 없을 때", () => {
     const many = Array.from({ length: EXPRESSION_RECENT_MAX + 4 }, (_, i) => make(`item${String(i).padStart(2, "0")}`));
     let usage = emptyExpressionUsage("w", "m");
     many.forEach((item, i) => { usage = recordExpressionUse(usage, item.id, 10 + i); });
-    const recent = buildExpressionSections(many, "emoticon", { query: "", usage, favorites: none.favorites })[0]!;
+    const recent = buildExpressionSections(many, "emoticon", { query: "", usage, favorites: none.favorites, nowMs: NOW })[0]!;
     expect(recent.kind).toBe("recent");
     expect(recent.items).toHaveLength(EXPRESSION_RECENT_MAX);
     expect(recent.items[0]!.name).toBe(`item${String(many.length - 1).padStart(2, "0")}`);
@@ -68,9 +71,88 @@ describe("buildExpressionSections — 검색어가 없을 때", () => {
   it("지워지거나 이 탭에 없는 등록의 별표·기록은 구역에 서지 않는다 - 구역이 비면 구역도 없다", () => {
     const usage = recordExpressionUse(emptyExpressionUsage("w", "m"), "id-gone", 10);
     const favorites = toggleExpressionFavorite(emptyExpressionFavorites("w", "m"), "id-gone");
-    expect(buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites }).map((section) => section.id)).toEqual(["set:chi", "set:dam", "other"]);
+    expect(buildExpressionSections(ITEMS, "emoticon", { query: "", usage, favorites, nowMs: NOW }).map((section) => section.id)).toEqual(["set:chi", "set:dam", "other"]);
     // 같은 등록이어도 다른 탭이면 이 탭의 구역에 서지 않는다(이모티콘 칸은 GIF 탭에 없다).
     expect(buildExpressionSections(ITEMS, "gif", { query: "", ...none })).toEqual([]);
+  });
+});
+
+// 이모티콘 탭 맨 위 「자주·최근」 (#5503, owner 2026-11-07): 정지 그림과 GIF 를 섞어 쓴 횟수와 최근을 함께 본 점수로 세운 12개. GIF 탭의 「최근」은 그대로다.
+describe("buildExpressionSections — 이모티콘 탭 맨 위 「자주·최근」 (#5503)", () => {
+  const gifImage: ExpressionImage = { ...png, mime: "image/gif", frameCount: 8, durationMs: 800 };
+  const gifMedia: ExpressionMedia = { small: gifImage, large: gifImage, thumb: png };
+  const makeGif = (name: string): Expression => ({ ...make(name), media: gifMedia });
+  // 작은 팀 이모지: 종류가 `emoji` 라 이모지 칸(`team`)에 선다 - 이모티콘 탭의 어느 구역에도 없다.
+  const makeEmoji = (name: string): Expression => make(name, [], "emoji");
+  const useIt = (usage: ReturnType<typeof emptyExpressionUsage>, item: Expression, times: number, daysAgo: number) => {
+    let next = usage;
+    for (let i = 0; i < times; i += 1) next = recordExpressionUse(next, item.id, NOW - daysAgo * DAY);
+    return next;
+  };
+  const top = (items: readonly Expression[], usage: ReturnType<typeof emptyExpressionUsage>, tab: "emoticon" | "gif" = "emoticon") =>
+    buildExpressionSections(items, tab, { query: "", usage, favorites: none.favorites, nowMs: NOW }).find((section) => section.id === "recent");
+
+  const still1 = make("still1");
+  const still2 = make("still2");
+  const gif1 = makeGif("gif1");
+  const gif2 = makeGif("gif2");
+  const tiny = makeEmoji("tiny");
+
+  it("정지 그림과 GIF 를 섞어 횟수와 최근을 함께 본 점수로 세우고, 작은 팀 이모지는 많이 써도 뺀다", () => {
+    let usage = emptyExpressionUsage("w", "m");
+    usage = useIt(usage, gif1, 3, 2); // 3 x 0.5^(2/7) = 2.46
+    usage = useIt(usage, still1, 1, 1); // 0.91
+    usage = useIt(usage, still2, 1, 10); // 0.37
+    usage = useIt(usage, gif2, 1, 20); // 0.14
+    usage = useIt(usage, tiny, 50, 0); // 점수가 가장 높아도 이 칸의 후보가 아니다
+    const section = top([still1, still2, gif1, gif2, tiny], usage)!;
+    expect(section.kind).toBe("recent");
+    expect(names(section)).toEqual(["gif1", "still1", "still2", "gif2"]);
+  });
+
+  it("GIF 는 이 탭의 세트·기타에는 없고(GIF 탭의 보관함) 이 칸에만 서며, 정지 그림은 이 칸과 아래 구역에 한 번씩 선다", () => {
+    let usage = useIt(emptyExpressionUsage("w", "m"), gif1, 2, 1);
+    usage = useIt(usage, still1, 1, 1);
+    const sections = buildExpressionSections([still1, still2, gif1, tiny], "emoticon", { query: "", usage, favorites: none.favorites, nowMs: NOW });
+    expect(names(sections[0]!)).toEqual(["gif1", "still1"]);
+    const stored = sections.filter((section) => section.kind === "set" || section.kind === "other").flatMap(names);
+    expect([...stored].sort()).toEqual(["still1", "still2"]); // 보관함은 정지 그림뿐 - 이 칸의 GIF 와 작은 이모지는 들어오지 않는다
+  });
+
+  it("12개까지이고, 정지 그림과 GIF 가 섞여 12개를 채운다", () => {
+    const stills = Array.from({ length: 7 }, (_, i) => make(`s${i}`));
+    const gifs = Array.from({ length: 7 }, (_, i) => makeGif(`g${i}`));
+    // 정지 그림과 GIF 가 번갈아 반 날씩 더 오래된 차례로 한 번씩 쓰였다(14개).
+    const mixed = stills.flatMap((still, i) => [still, gifs[i]!]);
+    let usage = emptyExpressionUsage("w", "m");
+    mixed.forEach((item, i) => { usage = useIt(usage, item, 1, i * 0.5); });
+    const section = top(mixed, usage)!;
+    // 7개씩이라 한 종류만으로는 12개가 안 차고, 점수 순서로 두 종류가 번갈아 섞여 12개가 된다.
+    expect(names(section)).toEqual(["s0", "g0", "s1", "g1", "s2", "g2", "s3", "g3", "s4", "g4", "s5", "g5"]);
+    expect(section.items).toHaveLength(EXPRESSION_RECENT_MAX);
+  });
+
+  it("숨기거나 지운 등록·보관함에 없는 기록은 서지 않고, 서 있을 것이 하나도 없으면 칸이 없다", () => {
+    const hidden = { ...makeGif("hidden_gif"), status: "hidden" as const };
+    const deleted = { ...make("deleted_still"), status: "deleted" as const };
+    let usage = useIt(emptyExpressionUsage("w", "m"), hidden, 9, 0);
+    usage = useIt(usage, deleted, 9, 0);
+    usage = useIt(usage, make("gone"), 9, 0); // 보관함에 없는 기록
+    usage = useIt(usage, still1, 1, 3);
+    expect(names(top([hidden, deleted, still1, gif1], usage)!)).toEqual(["still1"]);
+    // 후보와 맞는 기록이 없으면(작은 이모지·숨김만 썼다) 칸 자체가 없다.
+    const onlyHidden = useIt(useIt(emptyExpressionUsage("w", "m"), tiny, 3, 0), hidden, 3, 0);
+    expect(top([hidden, tiny, still1, gif1], onlyHidden)).toBeUndefined();
+  });
+
+  it("GIF 탭의 「최근」은 그대로다 - GIF 끼리 마지막으로 쓴 순이고 횟수·감쇠는 보지 않는다", () => {
+    let usage = useIt(emptyExpressionUsage("w", "m"), gif1, 5, 10); // 자주: 이모티콘 탭 점수로는 5 x 0.37 = 1.86
+    usage = useIt(usage, gif2, 1, 0); // 방금 한 번: 점수 1
+    usage = useIt(usage, still1, 4, 0); // 정지 그림은 GIF 탭에 없다
+    expect(names(top([still1, gif1, gif2], usage, "gif")!)).toEqual(["gif2", "gif1"]);
+    expect(top([still1, gif1, gif2], usage, "gif")!.kind).toBe("recent");
+    // 같은 기록이 이모티콘 탭에서는 점수 순이다 - 두 탭의 규칙이 서로 다르다는 증거.
+    expect(names(top([still1, gif1, gif2], usage)!)).toEqual(["still1", "gif1", "gif2"]);
   });
 });
 
