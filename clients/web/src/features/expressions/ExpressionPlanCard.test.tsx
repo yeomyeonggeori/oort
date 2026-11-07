@@ -289,3 +289,17 @@ describe("a card that is no longer asking", () => {
     expect(view.queryByTestId("expression-plan-confirm")).toBeNull();
   });
 });
+
+// 한국어 줄바꿈 (#5527, 검수 7c M1): 글자 하나 위에서 줄이 바뀌면 「메신/저」처럼 낱말이 끊긴다. 계산된 `word-break` 는 실제 엔진 시험(`ExpressionSetApprovalCard.fit.browser.test.ts`)이 잰다.
+describe("Korean lines break at word ends, not inside a word (#5527 M1)", () => {
+  it("puts break-keep on the card, its title, the concept and each scene line", async () => {
+    const view = await mount(live(FIXTURE_SET_PLAN_CARD));
+    const card = view.getByTestId("expression-plan");
+    expect(card.classList.contains("break-keep")).toBe(true);
+    expect(card.firstElementChild!.classList.contains("break-keep")).toBe(true);
+    expect(view.getByTestId("expression-plan-concept").classList.contains("break-keep")).toBe(true);
+    const scenes = view.getAllByTestId("expression-plan-scene");
+    expect(scenes).toHaveLength(10);
+    expect(scenes.every((node) => node.classList.contains("break-keep"))).toBe(true);
+  });
+});

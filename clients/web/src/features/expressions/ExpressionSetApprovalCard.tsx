@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Check, ImageOff } from "lucide-react";
 import { isAnimatedExpression, LEGACY_EXPRESSION_KIND, recommendExpressionKind } from "@momo/core/features/expressions/kind";
 import {
@@ -18,6 +18,7 @@ import { useExpressions } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
 import { ExpressionSetReferences } from "./ExpressionSetReferences";
 import { Decided, OPEN, sendSetDecision, Status, type PlainKey } from "./setCards";
+import { setGridColumns, SET_GRID_MAX_COLUMNS } from "./setGridColumns";
 
 /**
  * 세트 카드 (ADR-0218 §12 L5~L7, #5462): 팀 AI가 올린 그림 세트를 사람이 **한 번** 승인하고, 서버는 고른 것만 등록한다.
@@ -30,11 +31,12 @@ import { Decided, OPEN, sendSetDecision, Status, type PlainKey } from "./setCard
  *  - 결과 줄은 숫자만이다(L5.5). 같은 이름·정원 초과로 건너뛴 것은 서버가 건너뛰고 개수만 말한다.
  *  - 이름 목록이 모두 보인다(L9): 한 번의 승인이 최대 40개 이름을 영구 예약하므로 줄이거나 접지 않는다.
  *
+ * 격자의 열 수는 카드 폭이 정한다(`setGridColumns`, #5527): 줄 나눔·줄의 모양(`data-cols`)·키보드 칸 이동이 그 한 값을 쓴다.
+ *
  * 이 파일에는 상태 이름 같은 문자열이 없다(직접 문구 장부: 새 파일은 0줄). 표의 키는 속성 이름이고, 갈래는 숫자, 모양은 `expressionSet.css`가 읽는다.
  */
-const GRID_COLUMNS = 4;
-/** 방향키: 칸 수만큼 이동. 키 이름은 속성 이름이다. */
-const STEP = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: GRID_COLUMNS, ArrowUp: -GRID_COLUMNS } as const;
+/** 방향키: 좌우는 한 칸, 위아래는 한 줄의 열 수만큼 이동. 키 이름은 속성 이름이다. */
+const stepsOf = (columns: number) => ({ ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns, ArrowUp: -columns }) as const;
 /** Home은 첫 칸, End는 끝 칸(-1). */
 const EDGE = { Home: 0, End: -1 } as const;
 /** 종류 고르개에서 아무 것도 고르지 않은 상태의 값: 고른 칸의 추천이 갈릴 때. 글자가 없어서 문구로 세지지 않고, 두 선택지 어느 것과도 같지 않다. */
@@ -77,6 +79,11 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
   const lock = useRef(false);
   const keys = useRef(new Map<string, string>());
   const tiles = useRef<Array<HTMLButtonElement | null>>([]);
+  const gridRef = useRef<HTMLDivElement>(null);
+  // 격자 열 수: 폭을 모르는 동안(첫 그림 전, 레이아웃이 없는 시험 환경)은 넓은 카드의 모양(4)이다.
+  const [columns, setColumns] = useState(SET_GRID_MAX_COLUMNS);
+  const measured = useRef(false);
+  const restoreFocus = useRef(false);
 
   // 다른 워크스페이스의 묶음은 그리지 않는다: 이 저장소의 그림 경로로는 열 수 없고, 열 수 있는 척하면 안 된다.
   const usable = set !== null && store !== null && set.workspaceId === store.workspaceId ? set : null;
@@ -99,6 +106,34 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
   const status = remembered?.status ?? card.status;
   // 열려 있다 = 아직 결정되지 않았고 카드의 기한도 묶음의 기한도 지나지 않았다. 기한은 시계가 아니라 서버가 박은 값이다.
   const pending = OPEN[status] && (!card.expiresAtMs || now < card.expiresAtMs) && (usable === null || now < usable.expiresAtMs);
+  // 카드 폭을 재서 열 수를 정한다(#5527 검수 7c M2): 첫 그림 전에 한 번(깜박임 없이), 그 뒤로는 폭이 바뀔 때마다. 격자는 열려 있고 읽을 수 있을 때만 서므로 그때 다시 건다.
+  const gridShown = pending && usable !== null;
+  useLayoutEffect(() => {
+    const box = gridRef.current;
+    if (!box) return;
+    const measure = (width: number) => {
+      const known = measured.current;
+      // 줄이 다시 나뉘면 칸이 다른 줄로 옮겨 서므로 React가 칸을 다시 만든다: 초점이 격자 안이었는지 다시 만들기 전에 적어 둔다(아래 효과가 돌려 준다).
+      restoreFocus.current = box.contains(document.activeElement);
+      setColumns((current) => setGridColumns(width, known ? current : undefined));
+      if (width > 0) measured.current = true;
+    };
+    measure(box.clientWidth);
+    // 관찰자가 없는 환경(레이아웃이 없는 시험)에서는 처음 잰 폭이 그대로다. (`typeof`와 문자열 비교는 직접 문구 장부가 영어 문구로 세므로 쓰지 않는다.)
+    const Watcher = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (!Watcher) return;
+    const watcher = new Watcher((entries) => { for (const entry of entries) measure(entry.contentRect.width); });
+    watcher.observe(box);
+    return () => watcher.disconnect();
+  }, [gridShown]);
+  // 열 수가 바뀌어 칸이 다시 서면 초점을 쥐고 있던 칸을 돌려 준다(키보드로 걷는 중에 창이 바뀌어도 초점이 문서 처음으로 떨어지지 않는다).
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  useLayoutEffect(() => {
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    if (gridRef.current && !gridRef.current.contains(document.activeElement)) tiles.current[activeRef.current]?.focus();
+  }, [columns]);
   const view = usable ? expressionSetCard(usable, now, pending) : null;
   const slots = usable ? [...usable.slots].sort((a, b) => a.index - b.index) : [];
   const stranger = usable !== null && usable.subjectMemberId !== null && usable.subjectMemberId !== store?.memberId;
@@ -117,7 +152,8 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
     setSelected((current) => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
   }
   function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const step = Object.hasOwn(STEP, event.key) ? STEP[event.key as keyof typeof STEP] : undefined;
+    const steps = stepsOf(columns);
+    const step = Object.hasOwn(steps, event.key) ? steps[event.key as keyof typeof steps] : undefined;
     const edge = Object.hasOwn(EDGE, event.key) ? EDGE[event.key as keyof typeof EDGE] : undefined;
     if (step === undefined && edge === undefined) return;
     event.preventDefault();
@@ -156,9 +192,10 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
     ? [formatMessage("expressions.set.summaryReady", { count: view.ready }), view.gray > 0 ? formatMessage("expressions.set.summaryGray", { count: view.gray }) : null].filter(Boolean).join(" · ")
     : null;
 
-  return <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-set" data-open={String(pending)}>
+  // `break-keep`(M1, #5527 검수 7c): 한국어는 어절에서 꺾는다. 글자 하나 위에서 줄이 바뀌면 「했/어요」처럼 낱말이 끊긴다. 상속이라 카드 안의 모든 글 줄이 같다.
+  return <section className="flex break-keep flex-col gap-3 rounded-lg border border-line bg-surface p-3" aria-label={title} data-testid="expression-set" data-open={String(pending)}>
     <header className="flex flex-col gap-1">
-      <p className="break-words text-body font-semibold">{title}</p>
+      <p className="break-keep text-body font-semibold">{title}</p>
       {summary !== null && pending && <p className="text-meta text-ink-muted" data-numeric data-testid="expression-set-summary">{summary}</p>}
     </header>
     {pending && usable === null && <>
@@ -172,12 +209,12 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
         <ExpressionSetReferences references={usable.references} workspaceId={store.workspaceId} channelId={card.channelId} offline={offline} />
         <span className="text-meta text-ink-muted" data-numeric>{formatMessage("expressions.set.referenceCount", { count: usable.references.length })}</span>
       </div>}
-      <p className="break-words text-meta text-ink-muted" data-testid="expression-set-prompt">{formatMessage("expressions.set.agentText", { prompt: usable.prompt })}</p>
-      <div role="grid" aria-label={formatMessage("expressions.set.gridLabel", { title: usable.title })} aria-multiselectable="true" onKeyDown={onGridKeyDown} className="flex flex-col gap-2" data-testid="expression-set-grid">
-        {chunk(slots, GRID_COLUMNS).map((row, rowAt) => <div role="row" key={row[0]?.index ?? rowAt} className="grid grid-cols-4 gap-2">
+      <p className="break-keep text-meta text-ink-muted" data-testid="expression-set-prompt">{formatMessage("expressions.set.agentText", { prompt: usable.prompt })}</p>
+      <div ref={gridRef} role="grid" aria-label={formatMessage("expressions.set.gridLabel", { title: usable.title })} aria-multiselectable="true" onKeyDown={onGridKeyDown} className="flex flex-col gap-2" data-testid="expression-set-grid">
+        {chunk(slots, columns).map((row, rowAt) => <div role="row" key={row[0]?.index ?? rowAt} className="expression-set-row grid gap-2" data-cols={columns}>
           {row.map((slot, columnAt) => {
-            const position = rowAt * GRID_COLUMNS + columnAt;
-            return <SetTile key={slot.index} slot={slot} position={position} active={active === position} checked={selected.has(slot.index)} editable={!busy}
+            const position = rowAt * columns + columnAt;
+            return <SetTile key={slot.index} slot={slot} column={columnAt + 1} active={active === position} checked={selected.has(slot.index)} editable={!busy}
               draft={drafts.get(slot.index) ?? null} onToggle={() => toggle(slot.index)} onFocusTile={() => setActive(position)} buttonRef={(node) => { tiles.current[position] = node; }} />;
           })}
         </div>)}
@@ -212,8 +249,8 @@ export function ExpressionSetApprovalCard({ card, set, result }: { card: AgentAp
  * 방향키가 건너뛰지 않게 포커스는 받고(사유를 읽어 주려고), 눌러도 아무 일도 없다. 구분은 색에만 기대지 않는다(점선·아이콘·글).
  * 고른 상태는 체크 상자와 3:1 테두리가 말하고(`expressionSet.css`가 `aria-pressed`를 읽는다), 읽는 쪽에는 `aria-pressed`와 칸의 `aria-selected`가 말한다.
  */
-function SetTile({ slot, position, active, checked, editable, draft, onToggle, onFocusTile, buttonRef }: {
-  slot: ExpressionSetSlot; position: number; active: boolean; checked: boolean; editable: boolean; draft: ReturnType<typeof expressionSetSlotDraft> | null;
+function SetTile({ slot, column, active, checked, editable, draft, onToggle, onFocusTile, buttonRef }: {
+  slot: ExpressionSetSlot; /** 한 줄 안의 열 번호(1부터). */ column: number; active: boolean; checked: boolean; editable: boolean; draft: ReturnType<typeof expressionSetSlotDraft> | null;
   onToggle: () => void; onFocusTile: () => void; buttonRef: (node: HTMLButtonElement | null) => void;
 }) {
   const formatMessage = useFormatMessage();
@@ -222,7 +259,7 @@ function SetTile({ slot, position, active, checked, editable, draft, onToggle, o
   const label = gray
     ? formatMessage("expressions.set.cellGray", { reason: reason!, displayName: slot.displayName })
     : formatMessage("expressions.set.cellReady", { displayName: slot.displayName, name: slot.name });
-  return <div role="gridcell" aria-selected={gray ? undefined : checked} aria-colindex={(position % GRID_COLUMNS) + 1} className="min-w-0">
+  return <div role="gridcell" aria-selected={gray ? undefined : checked} aria-colindex={column} className="min-w-0">
     <button type="button" ref={buttonRef} tabIndex={active ? 0 : -1} aria-label={label} aria-pressed={gray ? undefined : checked} aria-disabled={gray || !editable ? true : undefined}
       data-gray={gray ? "" : undefined} data-testid="expression-set-tile" data-index={slot.index} onClick={() => { if (!gray && editable) onToggle(); }} onFocus={onFocusTile}
       className="expression-set-tile press relative flex flex-col items-center gap-1 rounded-md p-2 text-center focus-visible:focus-ring">
@@ -230,11 +267,11 @@ function SetTile({ slot, position, active, checked, editable, draft, onToggle, o
       <span className="expression-set-picture flex items-center justify-center" aria-hidden="true">
         {draft ? <ExpressionImage item={draft} size="medium" still /> : <ImageOff className="size-6 text-ink-muted" />}
       </span>
-      <span className="break-words text-meta font-semibold text-ink" aria-hidden="true">{slot.displayName}</span>
+      <span className="break-keep text-meta font-semibold text-ink" aria-hidden="true">{slot.displayName}</span>
       {/* 이름은 밑줄 뒤에서 줄을 바꿀 수 있다(좁은 칸에서 낱말 가운데가 잘리지 않게). 글자는 그대로 하나의 이름이다. */}
       <span className="break-words font-mono text-timestamp text-ink-muted" aria-hidden="true">:{slot.name.split("_").flatMap((part, at) => (at === 0 ? [part] : ["_", <wbr key={at} />, part]))}:</span>
       {draft !== null && isAnimatedExpression(draft) && <span className="rounded-sm bg-surface-muted px-1 text-timestamp font-semibold text-ink-muted" aria-hidden="true">{formatMessage("expressions.set.badgeGif")}</span>}
-      {reason !== null && <span className="break-words text-timestamp text-ink-muted" aria-hidden="true">{reason}</span>}
+      {reason !== null && <span className="break-keep text-timestamp text-ink-muted" aria-hidden="true">{reason}</span>}
     </button>
   </div>;
 }
