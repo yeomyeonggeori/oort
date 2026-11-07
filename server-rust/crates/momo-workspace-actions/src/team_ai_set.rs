@@ -286,7 +286,8 @@ pub async fn propose_set_in_tx(
         card.message.id,
     )
     .await?;
-    // `sqlx::Row` keeps the import honest for the run-to-card figure below.
+    // The run's creation → card time, in the database's own clock: the figure ADR-0201 D7's budget is
+    // judged by, the same one the model's door records (`run_to_card_ms`).
     let run_to_card_ms: Option<i64> = sqlx::query(
         "SELECT (extract(epoch FROM (clock_timestamp() - created_at)) * 1000)::bigint AS ms \
            FROM agent_run WHERE workspace_id = $1 AND id = $2",
