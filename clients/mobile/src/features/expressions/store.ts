@@ -1,6 +1,7 @@
 import {
   applyExpressionList,
   emptyExpressionCache,
+  isNextExpressionVersion,
 } from '@momo/core/features/expressions/cache';
 import {
   createExpressionNoticeGate,
@@ -360,7 +361,7 @@ export function createPhoneExpressionStore(
    *   · `revoke-ids` 숨김·삭제 상세: 그 id 의 파일·받는 중 읽기를 걷고 보관함에서 뺀다. 다른 그림은 그대로 두고 목록을 새로 읽는다.
    *   · `keep-all` 등록·고치기·정책 상세: 그리던 그림을 그대로 두고 목록만 새로 읽는다(빈 프레임 0, 다시 받기 0).
    *   · `revoke-all` 상세 없는 알림: 모든 그림 층을 내리고(`changePending`) 받는 중 읽기를 버린다. 파일은 두고, 다음 목록이 알려 주는 id 의 것만 걷는다.
-   *   · `already-handled` 같은 version 의 다른 알림이 이미 처리했다.
+   *   · `already-handled` 같은 version 의 다른 알림이 이미 처리했다. 숨김·삭제 상세는 이것이 아니다 — 앞선 v1 이 이름 없이 처리했어도 그 id 를 그 자리에서 걷는다.
    */
   const applyNotice = (verdict: ExpressionNoticeVerdict) => {
     if (disposed || !online) return;
@@ -381,7 +382,8 @@ export function createPhoneExpressionStore(
         return;
       }
       case 'revoke-all':
-        // 다음 목록이 적용될 때까지(`changePending`) 화면은 그림 층을 그리지 않고 칸만 둔다(#5473 M-5451-1). 파일은 걷지 않는다.
+        // 다음 목록이 적용될 때까지(`changePending`) 화면은 그림 층을 그리지 않고 칸만 둔다(#5473 M-5451-1). 파일은 걷지 않는다 — 다음 목록이 빠진 id 를 알려 준다는 전제 위에서다:
+        // 캐시가 읽지 않은 version 을 건너뛰지 않는다(`mutate` 는 응답이 바로 다음 version 일 때만 델타로 얹는다, H-5491-1).
         changePending = true;
         epoch += 1;
         readGen += 1;
@@ -548,7 +550,12 @@ export function createPhoneExpressionStore(
       if (!result) throw new ExpressionHttpError(response.status, undefined);
       return result;
     },
-    /** 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. */
+    /**
+     * 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. **바로 넣는 것은 응답이 캐시 version 의 바로 다음일 때뿐이다**:
+     * 사이에 남의 변경(예: 숨김)이 끼었으면 응답 하나로는 그것을 알 수 없고, 델타로 건너뛴 캐시는 그 등록을 `active` 로 둔 채 앞서 간다 — 뒤따르는 목록 읽기
+     * (`since`)는 건너뛴 version 을 다시 알리지 않으므로, 그 숨김의 알림이 상세 없이 오면 두었던 파일이 문이 열릴 때 다시 쓰인다(#5491 검수 1회차 H-5491-1,
+     * ADR-0218 §15 P5-4). 그때는 목록으로 다시 읽어 빠진 version 의 숨김이 `evictImageIds` 로 들어오게 한다.
+     */
     async mutate(request: ExpressionRequest): Promise<ExpressionMutation> {
       const response = await transport.request(request);
       const result = response.json as ExpressionMutation | undefined;
@@ -558,16 +565,20 @@ export function createPhoneExpressionStore(
         result?.workspaceId !== workspaceId
       )
         throw new Error('Expression mutation unavailable');
-      const update = applyExpressionList(cache, {
-        workspaceId,
-        version: result.version,
-        baseVersion: cache.version,
-        reset: false,
-        addPolicy: cache.addPolicy,
-        items: [result.expression],
-      });
+      const update =
+        cache.version !== null &&
+        isNextExpressionVersion(cache.version, result.version)
+          ? applyExpressionList(cache, {
+              workspaceId,
+              version: result.version,
+              baseVersion: cache.version,
+              reset: false,
+              addPolicy: cache.addPolicy,
+              items: [result.expression],
+            })
+          : null;
       if (disposed) return result;
-      if (!update.applied) {
+      if (!update?.applied) {
         await refresh();
         return result;
       }
