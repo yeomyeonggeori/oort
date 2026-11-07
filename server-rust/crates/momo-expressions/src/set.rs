@@ -902,25 +902,33 @@ impl Retire {
 /// set is not blocked by a card nobody can decide any more.
 ///
 /// Keyed by the approval (`expression_set` holds at most one head per approval), not by a set id the
-/// caller would have to find: the cards' end paths know the approval. Takes the card's draft rows
-/// first and the head second — the order the decision and the sweep take them in. Idempotent: a card
-/// that has no `proposed` head (already ended, or not a set card) only has its drafts reclaimed, and
-/// writes no audit row twice.
+/// caller would have to find: the cards' end paths know the approval. Lock order: the approval
+/// (the caller's), then **the card's draft rows first** — `ORDER BY candidate_index FOR UPDATE`,
+/// before any rendition row is touched, the order the decision locks them in and the draft sweep
+/// locks its expired drafts in — and the head last (`FOR UPDATE`, after the drafts are reclaimed).
+/// Idempotent: a card that has no `proposed` head (already ended, or not a set card) only has its
+/// drafts reclaimed, and writes no audit row twice.
 pub async fn retire_proposed_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
     approval_id: Uuid,
     end: Retire,
 ) -> Result<Reclaimed, Error> {
-    // Every draft of the card is one picture the card held, whatever state the sweep has since put
-    // it in (a registered one would have moved the head to `decided`, which this never touches).
-    let held: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM expression_draft WHERE workspace_id = $1 AND approval_id = $2",
+    // The card's draft rows come first, in slot order. [`crate::action::reclaim_in_tx`] below deletes
+    // the renditions *before* it updates the drafts, so without this lock a path that already holds
+    // the draft rows and then wants the renditions (the draft sweep) could meet this one in a cycle
+    // (renditions here, draft rows there). Every draft of the card is one picture the card held,
+    // whatever state the sweep has since put it in (a registered one would have moved the head to
+    // `decided`, which this never touches), so the rows locked are also the count the audit row gives.
+    let held = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM expression_draft WHERE workspace_id = $1 AND approval_id = $2 \
+          ORDER BY candidate_index FOR UPDATE",
     )
     .bind(workspace)
     .bind(approval_id)
-    .fetch_one(&mut *conn)
-    .await?;
+    .fetch_all(&mut *conn)
+    .await?
+    .len();
     let images = crate::action::reclaim_in_tx(conn, workspace, approval_id).await?;
     let head: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM expression_set WHERE workspace_id = $1 AND approval_id = $2 \

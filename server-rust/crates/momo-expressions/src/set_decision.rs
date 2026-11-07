@@ -24,9 +24,12 @@
 //! with it — and is never one of those, because a refusal the caller commits would commit a
 //! half-done registration. Every `?` after the first write below is one of the second kind.
 //!
-//! Lock order is the ADR's (L6.1): the approval (the caller's), the catalogue, the card's drafts in
-//! slot order, the head, then the names — which are read under the catalogue lock every registration
-//! in the workspace takes, so no one else can take a name between the read and the write.
+//! Lock order is the ADR's (L6.1): the approval (the caller's), the catalogue, the decider's member
+//! rows (shared), the card's drafts in slot order, the head, then the names — which are read under
+//! the catalogue lock every registration in the workspace takes, so no one else can take a name
+//! between the read and the write. The card's end paths ([`crate::set::retire_proposed_in_tx`]: the
+//! approval, the drafts in slot order, the head after them) and the draft sweep (the catalogue, the
+//! expired drafts by card and slot) lock a card's drafts in that same order, the head after them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -397,8 +400,8 @@ pub async fn decide_in_tx(
     if !adder_allows(&policy, &who, subject_pin, decider.member) {
         return Err(Error::Role);
     }
-    // Every picture of the card, locked in slot order (the reclaim and the sweep take the same
-    // order), so a sweep cannot slip between the proofs and the writes.
+    // Every picture of the card, locked in slot order (the card's end paths and the draft sweep lock
+    // them in this order too), so a sweep cannot slip between the proofs and the writes.
     let rows = sqlx::query(
         "SELECT * FROM expression_draft WHERE workspace_id = $1 AND approval_id = $2 \
           ORDER BY candidate_index FOR UPDATE",
