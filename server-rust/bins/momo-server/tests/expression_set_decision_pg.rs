@@ -12,6 +12,7 @@
 //! | `a13_every_end_without_a_registration_gives_back_the_bytes_the_words_and_the_head` | rejection, a late tap, the run's cancel and the draft sweep each reclaim the drafts' bytes and words, move the head `proposed → expired` with its prompt and scenes blanked, write the audit rows and free the agent's next set | an end path forgets the head or the drafts |
 //! | `a29_the_sweep_retires_a_proposed_head_only_when_its_approval_is_overdue` | an open approval's head is left alone however old the staging two hours are; an overdue one is retired with its card's pictures; a decided head is never touched | the sweep's overdue condition or its `proposed` state goes |
 //! | `a16_only_the_face_decides_a_set_with_a_face_and_the_policy_is_read_now` | a member who is not the face, a guest and a policy that has narrowed since each answer 403 `role_required` and spend nothing; the face decides | the role proof under the catalogue lock goes |
+//! | `a16_the_function_refuses_a_face_set_to_anyone_but_the_face` | `decide_in_tx` called as a function (the route's gate is not in front of it) refuses a member of the room who is not the face of a set with a face with `Error::Role`, registers nothing and leaves the head `proposed`; the face then decides | the face half of the role proof under the catalogue lock goes (the route's gate alone would still stop every HTTP request) |
 //! | `i1_the_choice_fields_are_judged_against_the_card_before_anything_is_read` | approving without the list, with the single field, with both, a rejection with the list, an empty list, a repeated draft and a 41st each answer their 400 and spend nothing | the presence matrix or the strict parse changes |
 //! | `i2_the_decision_resolver_proves_the_owner_with_its_own_predicates` | the set another approval, a `staging` set, another agent, another requester, another room each alone refuse at the decision's resolver; the card itself resolves | one predicate of `resolve_set_owner_in_tx` goes |
 //! | `i2_a_deleted_trigger_or_a_requester_who_left_does_not_stop_a_set_without_a_face` | the documented decision: the decision does not look at the trigger message or the requester's place in the room for a set nobody's face is on; a set with the requester's face is closed by the room's own gates | the decision starts judging them |
@@ -2084,6 +2085,73 @@ async fn a16_only_the_face_decides_a_set_with_a_face_and_the_policy_is_read_now(
     })
     .await
     .expect("the owner may add under an admins-only policy");
+    assert_eq!(accepted.registered.len(), 3);
+}
+
+/// The FACE half of the role proof under the catalogue lock, on its own (#5461 security review 1,
+/// L1). The route's `ExpressionAdder` gate is the other wall, and it stops every HTTP request
+/// first; the third case of the test above narrows the *policy* of a set with no face only. This
+/// one calls the function the way any other caller would, for a set that shows `alice`'s face, as
+/// a member of the room who is not her: the function itself must refuse, with nothing registered
+/// and the head still `proposed`; then the face may.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn a16_the_function_refuses_a_face_set_to_anyone_but_the_face() {
+    let w = world().await;
+    let t = tenant(&w.su).await;
+    let c = card(&w, t, "fp", Some(t.alice)).await;
+    let choices =
+        e::set_decision::parse_choices(&json!(keep(&props(&w.su, c.message).await, &[0, 1, 3])))
+            .expect("a list of the contract's shape");
+    let by_bob = e::Actor {
+        workspace: t.ws,
+        member: t.bob,
+    };
+    let refused = e::transaction(&w.api, by_bob, {
+        let choices = choices.clone();
+        move |conn| {
+            Box::pin(async move {
+                e::set_decision::decide_in_tx(
+                    conn,
+                    by_bob,
+                    c.approval,
+                    t.agent,
+                    c.set_id,
+                    Some(t.alice),
+                    &choices,
+                )
+                .await
+            })
+        }
+    })
+    .await;
+    assert!(
+        matches!(refused, Err(e::Error::Role)),
+        "a member who is not the face: {:?}",
+        refused.map(|d| d.version)
+    );
+    assert_eq!(registered(&w.su, t.ws).await, 0);
+    assert_eq!(head(&w.su, c.set_id).await.0, "proposed");
+    let by_alice = e::Actor {
+        workspace: t.ws,
+        member: t.alice,
+    };
+    let accepted = e::transaction(&w.api, by_alice, move |conn| {
+        Box::pin(async move {
+            e::set_decision::decide_in_tx(
+                conn,
+                by_alice,
+                c.approval,
+                t.agent,
+                c.set_id,
+                Some(t.alice),
+                &choices,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the face may");
     assert_eq!(accepted.registered.len(), 3);
 }
 
