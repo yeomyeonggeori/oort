@@ -165,24 +165,31 @@ fn without_markdown_pictures(raw: &str) -> (String, usize) {
 }
 
 /// The `http`/`https` addresses in `text`, in order, without duplicates, at most [`SOURCES_MAX`]. A
-/// trailing mark of the sentence (`.`, `,`, `)`) is not part of the address. **Linear in `text`**: one
-/// search per candidate, for `http` itself, which stops at the next candidate. (Searching for `https://`
-/// and for `http://` apart ran each of them to the end of the token whenever it had no hit, so a token of
-/// a million addresses that are all too short to keep — nothing ends the loop early — cost a million
-/// passes: seconds for a 400,000-character answer, the review's L1.) The earliest address in a token
-/// comes first, whichever of the two schemes it has.
+/// trailing mark of the sentence (`.`, `,`, `)`) is not part of the address.
+///
+/// **Linear in `text`, and it finds exactly what the first version found** (the security review's L1 asked
+/// for the time, not for other results). In one token the search is "the first `https://` from here if
+/// there is one, else the first `http://`", so an `http://` address that comes before an `https://` one in
+/// the same token is passed over, as it always was. That rule used to be two searches that each ran to the
+/// end of the token when they found nothing, so a token of a million addresses that are all too short to
+/// keep (nothing ends the loop early) cost a million passes: seconds for a 400,000-character answer.
+/// Knowing where the token's LAST `https://` starts says whether the first search can still succeed, so
+/// every search stops at its first hit.
 fn sources_of(text: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for token in text.split_whitespace() {
+        let last_https = token.rfind("https://");
         let mut from = 0;
-        while let Some(at) = token[from..].find("http") {
+        loop {
+            let rest = &token[from..];
+            let hit = if last_https.is_some_and(|last| last >= from) {
+                rest.find("https://")
+            } else {
+                rest.find("http://")
+            };
+            let Some(at) = hit else { break };
             let start = from + at;
             let tail = &token[start..];
-            if !(tail.starts_with("https://") || tail.starts_with("http://")) {
-                // (`http` followed by something else: look on after it)
-                from = start + "http".len();
-                continue;
-            }
             let len = tail
                 .find([')', ']', '>', '"', '\'', '<', '(', '['])
                 .unwrap_or(tail.len());
@@ -370,17 +377,106 @@ mod tests {
         }
     }
 
-    /// Two addresses in one token with nothing between them are both listed, in order, whichever scheme
-    /// each has (the earliest address in a token comes first).
+    /// `sources_of` exactly as it was before the review's L1 fix, character for character (taken from the
+    /// blob of `b600c9cd6`): two searches that each run to the end of the token when they find nothing, so
+    /// quadratic in a token. It lives here only so that the linear one can be held to "finds the same".
+    fn sources_of_before_the_fix(text: &str) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        for token in text.split_whitespace() {
+            let mut from = 0;
+            while let Some(at) = token[from..]
+                .find("https://")
+                .or_else(|| token[from..].find("http://"))
+            {
+                let start = from + at;
+                let tail = &token[start..];
+                let len = tail
+                    .find([')', ']', '>', '"', '\'', '<', '(', '['])
+                    .unwrap_or(tail.len());
+                let address = tail[..len]
+                    .trim_end_matches(['.', ',', ';', ':', '!', '?'])
+                    .to_string();
+                from = start + len.max(1);
+                if address.is_ascii()
+                    && address.len() > "https://".len()
+                    && address.chars().count() <= SOURCE_CHARS_MAX
+                    && !found.contains(&address)
+                {
+                    found.push(address);
+                    if found.len() == SOURCES_MAX {
+                        return found;
+                    }
+                }
+                if from >= token.len() {
+                    break;
+                }
+            }
+        }
+        found
+    }
+
+    /// L1 is a fix of the TIME, not of what is found: for every input the linear search returns what the
+    /// quadratic one returned — including the old rule that, in one token, the first `https://` is taken
+    /// before an earlier `http://` (whose address is passed over). A search for the earliest `http` would
+    /// have changed exactly those: `[a](http://…)[b](https://…)` would list both, an `http://` address that
+    /// wraps an `https://` one would come out whole. So: the shapes that differ are pinned by value, and then
+    /// the two functions are compared on thousands of pseudo-random texts made of the pieces that matter to
+    /// the search (xorshift, fixed seed, no dependency: the same corpus on every run; the pieces include
+    /// non-ASCII text, so a cut inside a character would panic here).
     #[test]
-    fn two_addresses_in_one_token_are_both_listed_in_order() {
-        assert_eq!(
-            sources_of("[a](http://a.example/x)[b](https://b.example/y)"),
-            vec![
-                "http://a.example/x".to_string(),
-                "https://b.example/y".to_string()
-            ]
-        );
+    fn the_linear_search_finds_what_the_quadratic_one_found() {
+        for (text, expected) in [
+            // an `http://` address before an `https://` one in the same token is passed over, as it was
+            (
+                "[a](http://a.example/x)[b](https://b.example/y)",
+                vec!["https://b.example/y"],
+            ),
+            (
+                "http://web.archive.org/web/2020/https://example.com",
+                vec!["https://example.com"],
+            ),
+            (
+                "http://a.example,https://b.example",
+                vec!["https://b.example"],
+            ),
+            // separate tokens are separate searches: both come out, in order
+            (
+                "http://a.example/x https://b.example/y",
+                vec!["http://a.example/x", "https://b.example/y"],
+            ),
+            ("httphttps://a.example/z", vec!["https://a.example/z"]),
+            ("http://http://ab", vec!["http://http://ab"]),
+            ("", vec![]),
+        ] {
+            assert_eq!(sources_of(text), expected, "{text:?}");
+            assert_eq!(
+                sources_of_before_the_fix(text),
+                expected,
+                "the reference itself, {text:?}"
+            );
+        }
+        let pieces = [
+            "http://", "https://", "a", "b.ex", "ab", ")", "(", ".", ",", " ", "  ", "]", "[", "<",
+            "/", "http", "x", ":", "?", ";", "'", "\"", "가", "é",
+        ];
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for case in 0..5_000 {
+            let count = 1 + (next() % 14) as usize;
+            let text: String = (0..count)
+                .map(|_| pieces[(next() % pieces.len() as u64) as usize])
+                .collect();
+            assert_eq!(
+                sources_of(&text),
+                sources_of_before_the_fix(&text),
+                "case {case}: {text:?}"
+            );
+        }
     }
 
     #[test]
