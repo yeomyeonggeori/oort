@@ -361,7 +361,8 @@ pub const TEAM_AI_ACTION_IDS: [&str; 16] = [
 ///    and every provider request built from the catalog) —
 ///
 /// and a model that names one anyway is refused as not offered
-/// (`momo_workspace_actions::team_ai::ProposalRefusal::NotOffered`) with no row written. Because
+/// (`momo_workspace_actions::team_ai::ProposalRefusal::NotAllowed`, the answer for an id the model was
+/// not given) with no row written. Because
 /// nothing offers them, landing S1b changes nothing a user can see.
 pub const SERVER_RAISED_ACTION_IDS: [&str; 2] =
     [ACTION_EXPRESSION_SET_CREATE, ACTION_EXPRESSION_SET_PLAN];

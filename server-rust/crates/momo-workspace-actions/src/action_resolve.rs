@@ -4136,6 +4136,181 @@ pub fn bounded_integer(
 mod tests {
     use super::*;
 
+    // ---- ADR-0218 증보 6 §12 L5.1 · A10 · A36 (#5460 S1b): the set cards' arguments ----------------
+
+    const SET_ID: &str = "00000000-0000-4000-8000-000000000001";
+
+    fn good_set_args() -> Value {
+        let slot = |index: u64, name: &str| json!({"index": index, "name": name, "displayName": "고양이", "tags": ["축하"]});
+        json!({
+            "setId": SET_ID, "title": "고양이 세트", "prefix": "cat", "tags": ["고양이"],
+            "backend": "hermes", "subjectMemberId": null, "prompt": "고양이 스티커",
+            "slots": [slot(1, "cat_hi"), slot(0, "cat_ok")],
+        })
+    }
+
+    /// The set card's arguments are a **closed** shape: a body that carries a picture (a key the plan
+    /// does not have, at the top or inside a slot) is refused before anything is written (A10), a
+    /// missing key is refused, the reserved backend and every other word are refused (A36), and the
+    /// plan is held to the rules the stored form has (prefix, unique indexes and names, 1-40 slots).
+    #[test]
+    fn the_set_args_refuse_a_picture_the_reserved_backend_and_a_plan_that_is_not_one() {
+        let parsed = expression_set_create_args(&good_set_args()).expect("a good plan");
+        // stored in slot order, whatever order it came in
+        assert_eq!(parsed.normalized["slots"][0]["index"], json!(0));
+        let ActionArgs::ExpressionSetCreate(spec) = parsed.args else {
+            panic!("an ExpressionSetCreate");
+        };
+        assert_eq!(
+            spec.slots.iter().map(|slot| slot.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(spec.subject, None);
+        // the keys a picture could ride in, at the top and inside a slot
+        for key in [
+            "dataBase64",
+            "url",
+            "attachmentId",
+            "image",
+            "bytes",
+            "media",
+            "references",
+            "sourceAttachmentId",
+        ] {
+            let mut top = good_set_args();
+            top[key] = json!("x");
+            assert!(expression_set_create_args(&top).is_err(), "top-level {key}");
+            let mut inner = good_set_args();
+            inner["slots"][0][key] = json!("x");
+            assert!(expression_set_create_args(&inner).is_err(), "slot {key}");
+        }
+        // a missing key, each in turn
+        for key in [
+            "setId",
+            "title",
+            "prefix",
+            "tags",
+            "backend",
+            "subjectMemberId",
+            "prompt",
+            "slots",
+        ] {
+            let mut missing = good_set_args();
+            missing.as_object_mut().expect("an object").remove(key);
+            assert!(
+                expression_set_create_args(&missing).is_err(),
+                "missing {key}"
+            );
+        }
+        // the backend: only the one that is on
+        for backend in [
+            json!("team_image_model"),
+            json!("openai"),
+            json!(""),
+            json!(null),
+            json!(1),
+        ] {
+            let mut other = good_set_args();
+            other["backend"] = backend.clone();
+            assert!(
+                expression_set_create_args(&other).is_err(),
+                "backend {backend}"
+            );
+        }
+        // the plan itself
+        let with = |change: &dyn Fn(&mut Value)| {
+            let mut args = good_set_args();
+            change(&mut args);
+            args
+        };
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "a name without the prefix",
+                with(&|v| v["slots"][0]["name"] = json!("dog_hi")),
+            ),
+            (
+                "the prefix alone as a name",
+                with(&|v| v["slots"][0]["name"] = json!("cat_")),
+            ),
+            (
+                "a name used twice",
+                with(&|v| v["slots"][1]["name"] = json!("cat_hi")),
+            ),
+            (
+                "an index used twice",
+                with(&|v| v["slots"][1]["index"] = json!(1)),
+            ),
+            (
+                "an index of 40",
+                with(&|v| v["slots"][0]["index"] = json!(40)),
+            ),
+            ("no slots", with(&|v| v["slots"] = json!([]))),
+            (
+                "a prefix of one letter",
+                with(&|v| v["prefix"] = json!("c")),
+            ),
+            (
+                "an upper-case prefix",
+                with(&|v| v["prefix"] = json!("Cat")),
+            ),
+            (
+                "a face that is no uuid",
+                with(&|v| v["subjectMemberId"] = json!("alice")),
+            ),
+            (
+                "a title with markup",
+                with(&|v| v["title"] = json!("<b>고양이</b>")),
+            ),
+            ("an empty prompt", with(&|v| v["prompt"] = json!(""))),
+            (
+                "a prompt over 800",
+                with(&|v| v["prompt"] = json!("가".repeat(801))),
+            ),
+            (
+                "four common tags",
+                with(&|v| v["tags"] = json!(["a", "b", "c", "d"])),
+            ),
+            ("a repeated tag", with(&|v| v["tags"] = json!(["a", "a"]))),
+            (
+                "a set id that is no uuid",
+                with(&|v| v["setId"] = json!("set-1")),
+            ),
+        ];
+        for (why, args) in cases {
+            assert!(expression_set_create_args(&args).is_err(), "{why}");
+        }
+        // 40 slots are taken, 41 are not (an index can only be 0..=39 and is used once)
+        let many = |count: u64| {
+            let mut args = good_set_args();
+            args["slots"] = json!((0..count)
+                .map(|i| json!({"index": i, "name": format!("cat_s{i}"), "displayName": "s", "tags": []}))
+                .collect::<Vec<_>>());
+            args
+        };
+        assert!(expression_set_create_args(&many(40)).is_ok());
+        assert!(expression_set_create_args(&many(41)).is_err());
+    }
+
+    /// The plan card's arguments are `{setId}` and nothing else (§12 L2.5).
+    #[test]
+    fn the_plan_args_are_the_set_id_and_nothing_else() {
+        let parsed = expression_set_plan_args(&json!({"setId": SET_ID})).expect("good");
+        assert!(matches!(
+            parsed.args,
+            ActionArgs::ExpressionSetPlan { target: None, .. }
+        ));
+        for bad in [
+            json!({}),
+            json!({"setId": "x"}),
+            json!({"setId": SET_ID, "references": []}),
+            json!({"setId": SET_ID, "attachmentId": SET_ID}),
+            json!([SET_ID]),
+            json!(null),
+        ] {
+            assert!(expression_set_plan_args(&bad).is_err(), "{bad}");
+        }
+    }
+
     /// ADR-0218 G3.6 (#4820 C2b): `{source:"assembled", assemblyId, index}` is one closed shape. The id is
     /// the contract's lowercase hyphenated uuid, the index 0..=3, and the proposal says nothing
     /// else about the picture (its prompt and its original photo are what the assembly kept).
