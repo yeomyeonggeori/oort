@@ -801,9 +801,11 @@ mod tests {
     /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
     /// is the writer, so the block, not RLS, is the last door).
     ///
-    /// **175 is reserved** for #5371 (attachment write token), which lands before this one after the
-    /// promotion; until it is in the tree the single gap below is the only one allowed. When #5371 (175)
-    /// has landed, the planner turns the expectation back into plain `1..=176` at landing time.
+    /// **175 is reserved** for #5371 (attachment write token): it is promoted and lands before this PR,
+    /// and until its file is in the tree this branch has exactly one gap (175), the only one the
+    /// expectation below allows. 「#5371(175) 착륙 뒤 착륙 때 planner가 `1..=176` 연속으로 되돌린다」:
+    /// at landing time the planner drops `reserved` and turns the expectation back into a plain
+    /// contiguous `1..=176`.
     #[test]
     fn discovers_contiguous_migrations_001_to_176() {
         let dir = default_migrations_dir();
