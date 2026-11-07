@@ -672,6 +672,11 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+      # 시험 빌드의 디버그 정보를 줄인다(#5495, F5 — `rust` 잡의 #5182 와 같은 값). 대상 42개를 따로 링크하는 빌드의 링크 시간과 캐시 크기
+      # (캐시 하나가 0.68GB)를 줄인다. `line-tables-only` 는 패닉의 파일:줄을 남긴다. 이 값은 rust-cache 키의 환경 해시에도 들어가서,
+      # `ci-cache-warm.yml` 의 `security_pack` 잡 `env:` 와 글자 그대로 같아야 한다.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -683,8 +688,11 @@ jobs:
           bash scripts/tests/test_security_pack.sh
 
       # 캐시는 읽기만 한다(#5494). 저장은 `ci-cache-warm.yml` 의 `security_pack` 잡이 하고, 그 잡은 이 잡의 `scripts/security_pack.sh run`
-      # 과 같은 쌍을 `--no-run` 으로 컴파일한다. shared-key·workspaces 는 그 잡과 글자 그대로 같아야 한다. 이 잡에는 `rust` 잡의
-      # `CARGO_PROFILE_*_DEBUG` 가 없고(F5 #5495 가 맞출 때까지 그대로 둔다) workspaces 도 달라서 키를 나눴다.
+      # 과 같은 쌍을 `--no-run` 으로 컴파일한다. shared-key·workspaces·위 `env:` 는 그 잡과 글자 그대로 같아야 한다. `rust` 잡과는 이제
+      # `CARGO_PROFILE_*_DEBUG` 가 같지만(#5495) 키는 합치지 않았다: workspaces 가 다르고(`rust` 는 `clients/desktop/src-tauri` 도), 컴파일 명령이
+      # 다르다(`--workspace` 한 번 ↔ 선택 쌍마다 `-p … --test …`). 호출마다 의존 크레이트의 기능 합집합이 달라 같은 키로 합치면 먼저 저장한
+      # 쪽 산출물만 남고 다른 잡이 다시 빌드한다(로컬 실측: 선택 쌍을 빌드해 둔 타깃 디렉터리에서 `-p momo-wire --no-run` 이 `crypto-common`·`rustls`·
+      # `sha2` 등을 다시 컴파일했다).
       - name: cargo 캐시(레지스트리 + target)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
