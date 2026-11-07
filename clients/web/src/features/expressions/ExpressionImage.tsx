@@ -46,7 +46,11 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   still?: boolean;
   onReady?: () => void;
 }) {
-  const { store, epoch, offline } = useExpressions();
+  const { store, epoch: storeEpoch, revoked, offline } = useExpressions();
+  // 이 표현의 그림이 걷히면(숨김·삭제 상세가 그 id 만 걷는다) 이 칸만 새 세대가 된다 — 다른 표현의 칸은 그대로라 다시 그려지지 않는다(ADR-0218 §15).
+  // 둘 다 오르기만 하는 수라 합이 같으면 둘 다 그대로다.
+  const revokedId = (item as Partial<Expression>).id; // 초안 미리보기에는 `id` 가 없다
+  const epoch = storeEpoch + (revokedId === undefined ? 0 : (revoked.get(revokedId) ?? 0));
   const reduce = useReduceMotion();
   const root = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
