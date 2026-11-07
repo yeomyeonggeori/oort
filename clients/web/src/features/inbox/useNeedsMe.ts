@@ -7,7 +7,7 @@ import {
   type PaneAttentionEntry,
 } from "@/features/workbench/local/paneAttention";
 import { isDesktop } from "@/lib/tauri";
-import { approvalRowControl } from "./approvalsPanel";
+import { approvalRowControl, awaitedApprovalId } from "./approvalsPanel";
 import { useMentionCount, useNeedsAction } from "./useInbox";
 
 // =============================================================================
@@ -21,7 +21,8 @@ import { useMentionCount, useNeedsAction } from "./useInbox";
  * 순수 변환: 웹의 세 원천 → core 입력. 훅 밖에 있어 DOM 없이 못박을 수 있다.
  *
  * - 승인: `approvalRowControl`이 「결정할 수 있다」고 한 행만(인박스 탭 배지와
- *   같은 판정). 연결이 끊겨도 할 일은 사라지지 않으므로 `offline:false`로 묻는다.
+ *   같은 판정; 카드를 열어서 결정하는 `open` 행도 내가 결정할 일이다, #5462).
+ *   연결이 끊겨도 할 일은 사라지지 않으므로 `offline:false`로 묻는다.
  * - 칸: 데스크탑에서 `waiting`인 칸만. 「끝남」은 세지 않는다. 웹에는 로컬 터미널
  *   레인이 없어(ADR-0190 D1) 칸이 있어도 세지 않는다.
  */
@@ -33,8 +34,8 @@ export function needsMeFrom(sources: {
 }): NeedsMe {
   const decidableApprovalIds: string[] = [];
   for (const item of sources.approvalItems) {
-    const control = approvalRowControl(item, { offline: false });
-    if (control.kind === "decide") decidableApprovalIds.push(control.approvalId);
+    const awaited = awaitedApprovalId(approvalRowControl(item, { offline: false }));
+    if (awaited !== null) decidableApprovalIds.push(awaited);
   }
   return needsMe({
     decidableApprovalIds,

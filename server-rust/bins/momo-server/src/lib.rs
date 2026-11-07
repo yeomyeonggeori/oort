@@ -354,6 +354,16 @@ pub struct AppState {
     /// `expression.create` body (#4829): `routes::agent_port::LARGE_BODY_DEADLINE` unless a
     /// test shortens it. The ordinary 64 KiB body has no such deadline.
     pub large_body_deadline: std::time::Duration,
+    /// ADR-0151 증보 8 W4 (#5371): how many agent-worker picture writes this process serves at once
+    /// (`routes::agent_media::WRITE_IN_FLIGHT`, 4). A field rather than a static so a test can hold
+    /// the permits; a write beyond it answers 503 **before** the token is spent.
+    pub agent_media_slots: Arc<tokio::sync::Semaphore>,
+    /// ADR-0151 증보 8 W12 (M2): the api's own ceiling on agent-written attachments per workspace per
+    /// 24 hours (`momo_messaging::AGENT_PICTURES_DAILY_CEILING`, 200). A test lowers it.
+    pub agent_media_daily_ceiling: i64,
+    /// ADR-0151 증보 8 W4: the longest the route waits for the picture body after the token is spent
+    /// (`routes::agent_media::BODY_DEADLINE`, 10 s). A test shortens it.
+    pub agent_media_body_deadline: std::time::Duration,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
     /// ADR-0170 증보 2026-11-01 D18 (#4884) — the link previews this process holds for members who
     /// are still composing: in memory only, per (workspace, member, address). Tests build one with
@@ -427,6 +437,11 @@ impl AppState {
             team_keys: Arc::new(routes::expression_photo::SealedLink),
             assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
+            agent_media_slots: Arc::new(tokio::sync::Semaphore::new(
+                routes::agent_media::WRITE_IN_FLIGHT,
+            )),
+            agent_media_daily_ceiling: momo_messaging::AGENT_PICTURES_DAILY_CEILING,
+            agent_media_body_deadline: routes::agent_media::BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             unfurl_previews: Arc::new(momo_unfurl::PreviewCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
@@ -539,6 +554,24 @@ impl AppState {
     /// Shorten (conformance tests) the time an Agent Port caller has for the 6 MiB body.
     pub fn with_large_body_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.large_body_deadline = deadline;
+        self
+    }
+
+    /// Conformance tests: how many agent picture writes may run at once (ADR-0151 증보 8 W4).
+    pub fn with_agent_media_slots(mut self, slots: usize) -> Self {
+        self.agent_media_slots = Arc::new(tokio::sync::Semaphore::new(slots));
+        self
+    }
+
+    /// Conformance tests: the per-workspace 24-hour ceiling on agent-written pictures (W12).
+    pub fn with_agent_media_daily_ceiling(mut self, ceiling: i64) -> Self {
+        self.agent_media_daily_ceiling = ceiling;
+        self
+    }
+
+    /// Conformance tests: shorten the time the picture body has after the token is spent (W4).
+    pub fn with_agent_media_body_deadline(mut self, deadline: std::time::Duration) -> Self {
+        self.agent_media_body_deadline = deadline;
         self
     }
 
@@ -2463,6 +2496,25 @@ pub fn build_app(state: AppState) -> Router {
                 .route_layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     rate_limit::per_ip_self_media_ceiling,
+                )),
+        )
+        // #5371 — the address the agent-worker writes ONE re-encoded picture to (ADR-0151 증보 8).
+        // Public by construction like its read twin above (the caller holds no oort credential; the
+        // one-time, hash-only, 60-second token in the path is the only authority), but its one
+        // legitimate caller is the worker on the private network, so the public edge answers 403 for
+        // this prefix (the Caddyfiles). A separate prefix and a PUT-only route: the read route's
+        // contract (GET only, 405, one refusal) stays what it was. The budget is spent only by the
+        // route's own 404, never by a 405 (the router answers that before this layer) or a 411/413.
+        .route(
+            "/v1/agent-media/{ws}/{token}",
+            put(routes::agent_media::write)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_agent_media,
+                ))
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_agent_media_ceiling,
                 )),
         )
         .merge(protected)

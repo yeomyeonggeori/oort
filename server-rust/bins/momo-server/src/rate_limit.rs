@@ -719,6 +719,64 @@ fn self_media_scope(path: &str) -> String {
         .map_or_else(|| SELF_MEDIA_OTHER_SCOPE.to_string(), str::to_string)
 }
 
+/// Budget for **refused** agent-media write addresses (ADR-0151 증보 8 W12, #5371) — the twin of
+/// [`per_ip_self_media`] for `PUT /v1/agent-media/{ws}/{token}`: the same limit
+/// ([`RateLimitConfig::self_media_per_workspace_limit`]) and the same per-(address, path workspace)
+/// shape, in **buckets of its own** (a refused read address never spends a write address's budget, or
+/// the reverse). Only the route's one 404 (a refusal that depends on the token) spends it; a 405 is
+/// answered by the router before this layer, and the 411/413/503 refusals are made before the
+/// database and spend nothing.
+pub async fn per_ip_agent_media(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let scope = agent_media_scope(request.uri().path());
+    per_ip_refused_by(
+        state,
+        request,
+        next,
+        "ip:agent-media",
+        Some(&scope),
+        |config| config.self_media_per_workspace_limit,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+}
+
+/// The address-wide ceiling on **refused** agent-media addresses — the other half of
+/// [`per_ip_agent_media`], for the reason [`per_ip_self_media_ceiling`] gives (a caller who rotates the
+/// workspace in the path never spends the same bucket twice).
+pub async fn per_ip_agent_media_ceiling(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    per_ip_refused_by(
+        state,
+        request,
+        next,
+        "ip:agent-media-all",
+        None,
+        |config| {
+            config
+                .self_media_per_workspace_limit
+                .saturating_mul(SELF_MEDIA_ADDRESS_CEILING_FACTOR)
+        },
+        StatusCode::NOT_FOUND,
+    )
+    .await
+}
+
+/// [`self_media_scope`] for the write prefix: the canonical workspace id in
+/// `/v1/agent-media/{ws}/…`, else the shared `other` bucket.
+fn agent_media_scope(path: &str) -> String {
+    path.strip_prefix(momo_messaging::AGENT_MEDIA_PATH_PREFIX)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|segment| Uuid::parse_str(segment).is_ok_and(|id| id.to_string() == *segment))
+        .map_or_else(|| SELF_MEDIA_OTHER_SCOPE.to_string(), str::to_string)
+}
+
 /// The upload budget's own key prefix — never the join/claim prefixes, so
 /// spending one surface's budget cannot refuse another's (#2631 review S10).
 const DRIVE_UPLOAD_KEY: &str = "ip:drive-upload";
@@ -1474,6 +1532,49 @@ mod tests {
         assert_eq!(
             refused_key("ip:runner", None, "198.51.100.1"),
             "ip:runner:198.51.100.1"
+        );
+    }
+
+    /// ADR-0151 증보 8 W12 (WA19): the write address is charged to the workspace in **its own** path, in
+    /// buckets that never meet the read address's (a different key prefix), and the read prefix is not
+    /// a scope for it (nor the write prefix for the read route).
+    #[test]
+    fn an_agent_media_request_is_charged_to_the_canonical_workspace_in_its_path() {
+        let ws = "01234567-89ab-cdef-0123-456789abcdef";
+        let token = "T".repeat(43);
+        for (path, scope) in [
+            (format!("/v1/agent-media/{ws}/{token}"), ws),
+            (format!("/v1/agent-media/{ws}/{token}/extra"), ws),
+            (format!("/v1/agent-media/{ws}"), ws),
+            (
+                format!("/v1/agent-media/{}/{token}", ws.to_uppercase()),
+                "other",
+            ),
+            (format!("/v1/agent-media/%30{}/{token}", &ws[1..]), "other"),
+            (
+                format!("/v1/agent-media/{}/{token}", ws.replace('-', "")),
+                "other",
+            ),
+            (format!("/v1/agent-media//{token}"), "other"),
+            ("/v1/agent-media/".to_string(), "other"),
+            ("/v1/agent-media/not-a-uuid/x".to_string(), "other"),
+            // the other prefix is not this one's scope, in either direction
+            (format!("/v1/self-media/{ws}/{token}"), "other"),
+        ] {
+            assert_eq!(agent_media_scope(&path), scope, "{path}");
+        }
+        assert_eq!(
+            self_media_scope(&format!("/v1/agent-media/{ws}/{token}")),
+            "other"
+        );
+        assert_ne!(
+            refused_key("ip:agent-media", Some(ws), "198.51.100.1"),
+            refused_key("ip:self-media", Some(ws), "198.51.100.1"),
+            "a refused read address must never spend a write address's budget"
+        );
+        assert_ne!(
+            refused_key("ip:agent-media-all", None, "198.51.100.1"),
+            refused_key("ip:self-media-all", None, "198.51.100.1")
         );
     }
 

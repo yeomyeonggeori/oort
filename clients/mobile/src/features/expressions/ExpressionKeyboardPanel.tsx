@@ -1,5 +1,6 @@
 import type {Channel} from '@momo/core/lib/api';
 import type {Expression} from '@momo/core/features/expressions/types';
+import {emptyExpressionUsage} from '@momo/core/features/expressions/usage';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -11,8 +12,10 @@ import {EmojiPicker} from '../emoji/EmojiPicker';
 import {emojiHaptic} from '../emoji/haptics';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
 import {ExpressionAddSheet} from './ExpressionAddSheet';
+import {useExpressionStore} from './ExpressionProvider';
 import {ExpressionPanelGrid} from './ExpressionPanelGrid';
 import {DEFAULT_EXPRESSION_TAB, EXPRESSION_TABS, type ExpressionTab} from './expressionViews';
+import type {PanelOpening} from './panelModel';
 import {TeamEmojiRow} from './TeamEmojiRow';
 import {useExpressionMessages, type PlainMessageKey} from './useExpressionMessages';
 
@@ -71,7 +74,7 @@ export function ExpressionKeyboardPanel({
 }: {
   /** 지금 입력창 위 미리 보기에 올라 있는 등록의 id. */
   previewId: string | null;
-  /** 이모티콘·GIF 를 골랐다: 호스트가 미리 보기에 올리거나(채널) 입력칸에 `:이름:` 으로 넣는다(스레드). */
+  /** 이모티콘·GIF 를 골랐다: 호스트가 미리 보기에 올리거나(대화·스레드 입력창, 답글 머리말이 걸려 있어도 같다) 입력칸에 `:이름:` 으로 넣는다(묶음 보내기를 켜지 않은 입력창). */
   onPickBig: (item: Expression) => void;
   /** 표준 그림 문자를 입력칸의 커서 자리에 넣는다. */
   onInsertText: (glyph: string) => void;
@@ -96,6 +99,13 @@ export function ExpressionKeyboardPanel({
   const styles = useStyles(buildStyles);
   const [tab, setTabState] = useState<ExpressionTab>(initialTab ?? lastTab);
   const [adding, setAdding] = useState(false);
+  // 창이 서는 순간(이 부품이 마운트되는 때, 닫으면 걷힌다)의 사용 기록과 시각을 한 번 쥔다(#5503): 이모티콘 탭 맨 위 「자주·최근」 칸의 차례가 열려 있는 동안 - 칸을 눌러 보내고
+  // 보내기가 성공해 기록이 바뀌어도, 탭을 바꿨다 돌아와도 - 바뀌지 않는다. 창을 다시 열 때만 새로 계산한다.
+  const store = useExpressionStore();
+  const [opening] = useState<PanelOpening>(() => ({
+    usage: store?.snapshot().usage ?? emptyExpressionUsage(store?.workspaceId ?? '', store?.memberId ?? ''),
+    nowMs: Date.now(),
+  }));
   const setTab = useCallback(
     (next: ExpressionTab) => {
       if (rememberTab) lastTab = next;
@@ -141,10 +151,10 @@ export function ExpressionKeyboardPanel({
           {/* 탭마다 새로 선다 - 구역 위치·스크롤이 옆 탭으로 새지 않는다. */}
           {inSheet ? (
             <KeyboardInset>
-              <ExpressionPanelGrid key={tab} tab={tab} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} query={query} inSheet />
+              <ExpressionPanelGrid key={tab} tab={tab} opening={opening} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} query={query} inSheet />
             </KeyboardInset>
           ) : (
-            <ExpressionPanelGrid key={tab} tab={tab} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} query={query} />
+            <ExpressionPanelGrid key={tab} tab={tab} opening={opening} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} query={query} />
           )}
         </View>
       )}
