@@ -720,9 +720,11 @@ async fn fixture() -> (PgPool, PgPool, Tenant, Uuid) {
 
 /// P15-A1 baseline and G1, with A10 in the same breath: with every gate open the model is offered
 /// `ask_hermes` with exactly the kinds the operator declared **and** the code allows — `web_search`
-/// (the team key's wire cannot search), and **never `image`**, declared or not, because the
-/// attachment write path is a constant that is `false` until S4. The bundle alone takes the tool away,
-/// and `long_research` off does not (the delegation's bundle check is `hermes`, F17).
+/// (the team key's wire cannot search), and `image` **only when the operator declared it**: S4 (#5372) turned
+/// the attachment write path's constant on, so the declaration (`…_IMAGE_TOOL`) is the one thing that decides,
+/// and `OORT_API_INTERNAL_ORIGIN` decides nothing (set without the declaration: no `image`; the other half —
+/// the declaration without an origin — is the exec suite's x22). The bundle alone takes the tool away, and
+/// `long_research` off does not (the delegation's bundle check is `hermes`, F17).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn h1_every_gate_open_offers_the_declared_kinds_and_the_bundle_alone_takes_it_away() {
@@ -749,27 +751,37 @@ async fn h1_every_gate_open_offers_the_declared_kinds_and_the_bundle_alone_takes
         assert!(!prompt.contains(banned), "{banned}: {prompt}");
     }
 
-    // `image` declared as well: still not offered (A10 — the write path is not in this build)
+    // `image` declared as well: offered, in the kinds' own order (S4 turned the constant on; the declaration
+    // is what remains — A10)
     let mut with_image = setup.clone();
     with_image.hermes.image_tool = true;
     assert_eq!(
         first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &with_image).await,
-        Some(vec!["web_search".to_string()])
+        Some(vec!["image".to_string(), "web_search".to_string()])
     );
-    // …and an image-only declaration offers NOTHING, so there is no tool at all
+    // …and an image-only declaration offers `image` alone
     let mut image_only = setup.clone();
     image_only.hermes.search_tool = false;
     image_only.hermes.image_tool = true;
     assert_eq!(
         first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &image_only).await,
-        None
+        Some(vec!["image".to_string()])
     );
-    // even with `OORT_API_INTERNAL_ORIGIN` set the way a real deployment sets it (A10)
-    let mut origin = with_image.clone();
+    // `OORT_API_INTERNAL_ORIGIN` set the way a real deployment sets it, WITHOUT the declaration: the origin is
+    // never the switch — no `image` (A10)
+    let mut origin = setup.clone();
     origin.api_internal_origin = true;
     assert_eq!(
         first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &origin).await,
         Some(vec!["web_search".to_string()])
+    );
+    // and nothing declared at all: no tool, origin or not
+    let mut nothing = setup.clone();
+    nothing.hermes.search_tool = false;
+    nothing.api_internal_origin = true;
+    assert_eq!(
+        first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &nothing).await,
+        None
     );
 
     // G1: the bundle, alone

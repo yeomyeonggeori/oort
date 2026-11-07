@@ -3613,7 +3613,11 @@ async fn answer_message(
 /// The answer the helper posts, in the worker's own transaction.
 async fn post_answer(w: &World, ws: Uuid, input: NewMessage) -> momo_messaging::SentMessage {
     with_tenant_tx(&w.worker, ws, move |conn| {
-        Box::pin(async move { send_answer_with_run_pictures_in_tx(conn, ws, input).await })
+        Box::pin(async move {
+            send_answer_with_run_pictures_in_tx(conn, ws, input)
+                .await
+                .map(|posted| posted.sent)
+        })
     })
     .await
     .expect("the answer")
