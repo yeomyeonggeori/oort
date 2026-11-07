@@ -6198,4 +6198,73 @@ mod tests {
             assert_eq!(settings_row_lock_for(id), expected, "{id}");
         }
     }
+
+    /// ADR-0218 §12 L5.4, every row: the two choice fields of a decision request against the card.
+    /// A literal table, not a function of its own inputs, so a change of the rule is a change of a
+    /// row someone reads.
+    #[test]
+    fn the_two_choice_fields_are_judged_against_the_card_in_every_row() {
+        use ChoiceCard::{One, Other, Set};
+        const NOT: Option<&str> = Some("expression_choice_not_allowed");
+        const REQ: Option<&str> = Some("expression_choice_required");
+        // (card, approving, `expressionChoice`, `expressionChoices`, the answer)
+        let table: [(ChoiceCard, bool, bool, bool, Option<&str>); 24] = [
+            (One, true, false, false, REQ),
+            (One, true, true, false, None),
+            (One, true, false, true, NOT),
+            (One, true, true, true, NOT),
+            (One, false, false, false, None),
+            (One, false, true, false, NOT),
+            (One, false, false, true, NOT),
+            (One, false, true, true, NOT),
+            (Set, true, false, false, REQ),
+            (Set, true, true, false, NOT),
+            (Set, true, false, true, None),
+            (Set, true, true, true, NOT),
+            (Set, false, false, false, None),
+            (Set, false, true, false, NOT),
+            (Set, false, false, true, NOT),
+            (Set, false, true, true, NOT),
+            (Other, true, false, false, None),
+            (Other, true, true, false, NOT),
+            (Other, true, false, true, NOT),
+            (Other, true, true, true, NOT),
+            (Other, false, false, false, None),
+            (Other, false, true, false, NOT),
+            (Other, false, false, true, NOT),
+            (Other, false, true, true, NOT),
+        ];
+        for (card, approve, single, list, expected) in table {
+            assert_eq!(
+                expression_choice_refused(single, list, card, approve),
+                expected,
+                "{card:?} approve={approve} single={single} list={list}"
+            );
+        }
+    }
+
+    /// Which cards are which: only a `workspace_action` whose id is one of the two expression ids is
+    /// ever a choice card; the same id on another approval type is not.
+    #[test]
+    fn only_a_workspace_action_card_of_the_two_ids_has_a_choice() {
+        let mut approval = spawn_card(json!({}));
+        approval.action_type = ACTION_TYPE_WORKSPACE_ACTION.to_string();
+        approval.payload = json!({"action": {"id": "expression.create"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::One);
+        approval.payload = json!({"action": {"id": "expression.set.create"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::Set);
+        for other in ["expression.set.plan", "channel.create", ""] {
+            approval.payload = json!({"action": {"id": other}});
+            assert_eq!(choice_card(&approval), ChoiceCard::Other, "{other}");
+        }
+        approval.payload = json!({"tool_call": {"name": "x"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::Other);
+        approval.action_type = "tool_call".into();
+        approval.payload = json!({"action": {"id": "expression.set.create"}});
+        assert_eq!(
+            choice_card(&approval),
+            ChoiceCard::Other,
+            "the id on an approval that is not a workspace action is nothing"
+        );
+    }
 }

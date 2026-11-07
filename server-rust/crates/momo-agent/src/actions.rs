@@ -5413,4 +5413,37 @@ mod tests {
             &serde_json::json!({"tool_call": {"name": crate::tools::WORK_SESSION_END}})
         ));
     }
+
+    /// ADR-0218 §12 L5.5: the set card's outcome line is numbers only and is the core's sentence
+    /// (`expressions.set.result.saved` / `savedSkipped`), and its result carries `expressionSet`
+    /// next to the generic keys and never next to `expression`.
+    #[test]
+    fn the_set_result_says_numbers_and_carries_the_set_not_a_single_expression() {
+        assert_eq!(
+            expression_set_result_body(8, 0),
+            "8개를 팀 보관함에 저장했어요"
+        );
+        assert_eq!(
+            expression_set_result_body(8, 2),
+            "8개를 저장하고 2개는 건너뛰었어요"
+        );
+        let set = json!({"setId": "s", "registered": [], "skipped": []});
+        let props = action_result_props(&ActionResult {
+            action_id: ACTION_EXPRESSION_SET_CREATE,
+            status: ACTION_RESULT_EXECUTED,
+            approval_id: Uuid::from_u128(1),
+            decided_by: Uuid::from_u128(2),
+            ref_type: REF_TYPE_EXPRESSION_SET,
+            ref_id: Uuid::from_u128(3),
+            rows: vec![],
+            secret_shown_once: false,
+            next: None,
+            expression: None,
+            expression_set: Some(set.clone()),
+        });
+        let card = &props[ACTION_RESULT_PROPS_KEY];
+        assert_eq!(card["expressionSet"], set);
+        assert!(card.get("expression").is_none());
+        assert_eq!(card["ref"]["type"], "expression_set");
+    }
 }
