@@ -3214,6 +3214,12 @@ export const catalog: MessageCatalog = {
       "value": "Favorites"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "Frequent & recent"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,

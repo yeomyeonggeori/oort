@@ -15,7 +15,7 @@ import { TeamExpressionsPanel } from "./TeamExpressionsPanel";
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
 // 이모티콘·GIF 탭의 그림 격자 (owner 2026-11-07, #5453): 구역(최근 -> 즐겨찾기 -> 세트별 -> 기타) · 세트 띠 · 칸 메뉴의 즐겨찾기 · 방향키.
-// 이 시험은 제공자 없는 고정 영어 사전으로 돈다: 구역·띠의 이름은 「Recent」·「Favorites」·「Other」·「Add」이고 세트 이름표는 등록된 표현의 데이터다.
+// 이 시험은 제공자 없는 고정 영어 사전으로 돈다: 구역·띠의 이름은 「Frequent & recent」(이모티콘 보기 맨 위 칸, #5503)·「Favorites」·「Other」·「Add」이고 세트 이름표는 등록된 표현의 데이터다.
 
 const WS = FIXTURE_WORKSPACE_ID;
 const ME = FIXTURE_MEMBER_ID;
@@ -69,7 +69,7 @@ describe("그림 격자: 구역과 칸", () => {
   it("구역은 최근 -> 즐겨찾기 -> 세트별 -> 기타이고, 세트 이름표는 공통 태그(없으면 앞머리)다", async () => {
     const { view } = await mount(storeOf(ITEMS, { used: ["solo", "dam_b"], starred: ["chi_b", "dam_c"] }));
     expect(shape(view)).toEqual([
-      ["recent", "Recent", ["dam_b", "solo"]],
+      ["recent", "Frequent & recent", ["dam_b", "solo"]],
       ["favorites", "Favorites", ["chi_b", "dam_c"]],
       ["set:chi", "chi", ["chi_a", "chi_b"]],
       ["set:dam", "농담곰", ["dam_a", "dam_b", "dam_c"]],
@@ -170,7 +170,7 @@ describe("세트 띠", () => {
 
   it("최근 · 즐겨찾기 · 세트마다 첫 그림 · 기타 순이고 끝에 ＋가 선다. 별표가 없으면 ★ 칸은 숨는다", async () => {
     const { view } = await mount(storeOf(ITEMS, { used: ["solo"], starred: ["dam_a"] }));
-    expect(stripLabels(view)).toEqual(["Recent", "Favorites", "chi", "농담곰", "Other"]);
+    expect(stripLabels(view)).toEqual(["Frequent & recent", "Favorites", "chi", "농담곰", "Other"]);
     const strip = stripOf(view);
     const last = [...strip.querySelectorAll("button")].at(-1)!;
     expect(last.getAttribute("data-testid")).toBe("expression-add-menu");
