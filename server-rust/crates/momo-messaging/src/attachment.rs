@@ -1084,7 +1084,7 @@ mod tests {
         // 'sizeBytes' inside the aggregate is the wire key, not the column —
         // the projection is built in SQL, so this is where that contract lives.
         assert!(PAGED_ATTACHMENT_JOIN.contains("'sizeBytes', a.size_bytes"));
-        // the video summary rides the aggregate (ADR-0151 증보 5 D5) and the picture does not:
+        // the media summary rides the aggregate (ADR-0151 증보 5 D5) and the poster's bytes do not:
         // `hasPoster` is read off the label column. That no source outside `attachment_media.rs`
         // names the bytes column — this constant included — is
         // `tests/attachment_media_static_guards.rs::only_one_module_names_the_posters_bytes`.

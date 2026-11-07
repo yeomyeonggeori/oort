@@ -25,8 +25,8 @@
 //! route, the same authorization and the same stance: the server reads **twelve bytes** of the object
 //! ([`image_magic_matches`]: the stored type is one of four and the magic number is that type's) and
 //! range-checks two integers ([`validate_image_declaration`]). It does not read the picture's header
-//! — a JPEG's frame header sits behind a variable run of segments, and its EXIF turn is not in it, so
-//! a server reading it would give a portrait photo the shape of a landscape one. The sender measures
+//! — a JPEG's frame header sits behind a variable run of segments, and its EXIF orientation is not in
+//! it, so a server reading it would give a portrait photo the shape of a landscape one. The sender measures
 //! what the receiver will measure. A row with no length is a picture ([`MediaWrite::Image`] stores
 //! `duration_ms` as null; migration 178 lets the column be null and refuses a poster on such a row).
 //!
