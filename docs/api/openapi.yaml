@@ -20473,7 +20473,7 @@ components:
     AgentRunSpent:
       type: object
       additionalProperties: false
-      required: [promptTokens, completionTokens, webSearches, estimated]
+      required: [promptTokens, completionTokens, webSearches, estimated, delegations]
       description: >
         ADR-0201 증보 v3 B12 (#4968). What **one run** has spent: the sums of that run's own
         usage-ledger rows (a task of several steps writes one row per step; a stopped or cut-off
@@ -20500,6 +20500,15 @@ components:
           description: >
             Some of the tokens are oort's estimate because the provider reported none
             (ADR-0147 D3). A figure that may be an estimate says so.
+        delegations:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0201 증보 v4 P7 (#5370). How many times the helper handed work to the team's Hermes in
+            this run (0 or 1 — a request delegates once). The token and search sums above are the
+            helper's own rows, i.e. the team's credits; Hermes's row is a subscription oort cannot price
+            and lives under Hermes's own agent in the usage-by-agent read.
 
     AgentRunProgressPage:
       type: object
