@@ -81,6 +81,18 @@ export function isGridEntryKey(key: string): boolean {
 /** 격자에서 탭 순서에 있는 한 칸(roving tabindex)을 가리키는 선택자. */
 export const EXPRESSION_GRID_ENTRY_SELECTOR = '[data-pos][tabindex="0"]';
 
+/**
+ * 키보드로 칸 메뉴를 부르는 키(검수 7a H1, #5486): 전용 메뉴 키(윈도·리눅스 자판), 또는 그 키가 없는 자판의 표준 대체인 Shift+F10.
+ * macOS WebKit(데스크탑 Tauri 의 엔진)은 두 키 어느 쪽에도 `contextmenu` 를 내지 않고 Chromium 은 메뉴 키에만 낸다. 그래서 화면이 키를 직접 듣는다.
+ * Ctrl·Alt·⌘ 이 함께 눌린 F10 은 다른 단축키의 몫이라 가져가지 않는다.
+ */
+export function isContextMenuSummonKey(event: { key: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+  if (event.key === "ContextMenu") return true;
+  return event.key === "F10" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+}
+/** 키로 부를 때 칸에 합성해 쏘는 이벤트의 이름. 칸의 메뉴 트리거가 오른쪽 클릭과 같은 이 이벤트로 메뉴를 연다. */
+export const CONTEXT_MENU_EVENT = "contextmenu";
+
 /** 격자 안의 자리: 몇 번째 구역의 몇 번째 칸. */
 export interface GridPosition {
   section: number;

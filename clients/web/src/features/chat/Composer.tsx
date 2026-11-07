@@ -88,6 +88,7 @@ import { ComposerAutocompleteList } from "@/features/chat/ComposerAutocompleteLi
 import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete";
 import type { ComposerCandidate } from "@/features/chat/composerAutocomplete";
 import { hasLocalCardHost, openLocalCardIn } from "@/features/chat/localCards";
+import { caretOnFirstVisualLine } from "@/features/chat/caretLine";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { isDesktop } from "@/lib/tauri";
 import type {
@@ -830,7 +831,9 @@ export function Composer({
         previewOpen: linkPreview.cards.length > 0 || pendingExpression !== null,
         // #5476 - 입력칸 위 이모티콘 추천 줄. Esc 는 이 줄을 먼저 닫고, ↑ 는 (캐럿이 첫 줄이면) 이 줄로 들어간다. Enter 는 이 줄과 상관없이 보내기다.
         suggestOpen: suggest.open,
-        caretOnFirstLine: !event.currentTarget.value.slice(0, event.currentTarget.selectionStart ?? 0).includes("\n"),
+        // 캐럿이 첫 **화면** 줄일 때만(#5489 M1): 길게 감긴 한 문단의 아래 줄에서는 ↑ 가 글 안에서 움직인다. 재는 일은 거울을 만들어 배치를 읽는 것이라 함수로 넘기고,
+        // 코어가 줄이 떠 있는 맨 ↑ 에서만 부른다.
+        caretOnFirstLine: () => caretOnFirstVisualLine(event.currentTarget),
         // #5191 - 입력칸이 한 글자도 없을 때만 ↑ 가 「내 마지막 메시지 고치기」가 된다. 이 키를 받을 곳이 없으면 적지 않는다.
         ...(onEditLast !== undefined ? { textEmpty: text.length === 0 } : {}),
       }
@@ -913,6 +916,18 @@ export function Composer({
       data-composer-shell=""
       data-testid="composer"
     >
+      {/* 이모티콘 추천 줄(#5476)은 **독의 첫 자식**이다(#5489 H1): 줄의 기준 상자(높이 0)가 독 맨 위에 서야 줄이 아래의 레일·예약 배너·상태 줄·링크 카드·미리 보기를
+          덮지 않고 대화 목록 위에만 뜬다. 입력 폼 안에 두면 폼 앞의 그 줄들 위로 떨어진다. 절대 위치라 줄이 서고 져도 독·입력창은 움직이지 않는다. */}
+      {suggest.open && (
+        <ComposerExpressionSuggest
+          ref={suggestRef}
+          items={suggest.items}
+          onPick={pickSuggestion}
+          onMute={muteSuggestion}
+          onDismiss={dismissSuggestion}
+          onReturn={() => inputRef.current?.focus()}
+        />
+      )}
       {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다.
           첨부 줄(ADR-0151 D2)도 이제 입력 카드 **안**, 글 칸 바로 위에 선다(#5200). */}
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
@@ -1038,16 +1053,6 @@ export function Composer({
             testId="composer-secret-block"
             cardAvailable={cardAvailable}
             {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
-          />
-        )}
-        {suggest.open && (
-          <ComposerExpressionSuggest
-            ref={suggestRef}
-            items={suggest.items}
-            onPick={pickSuggestion}
-            onMute={muteSuggestion}
-            onDismiss={dismissSuggestion}
-            onReturn={() => inputRef.current?.focus()}
           />
         )}
         <ComposerAutocompleteList
