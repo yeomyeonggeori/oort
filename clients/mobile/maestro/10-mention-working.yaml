@@ -22,6 +22,8 @@ name: 10-mention-working
 # 30-approval's subject, not this one's.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 - tapOn:

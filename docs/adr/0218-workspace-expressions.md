@@ -959,7 +959,8 @@ H9.7은 `prompt`를 갈래마다 문장 하나로 정했다. 그래서 「배경
 
 **L5.2 승인 카드 `props.action.expressionSet`(`SetApproval`).** 서버만 쓴다. `expression.create`의 `props.action.expression`과 **키가 다르다**: 옛 클라이언트의 `expression` 파서가 세트를 한 칸짜리 후보로 읽는 일이 없다. 세트 카드를 모르는 옛 클라이언트가 승인을 시도하면 결정 요청에 `expressionChoices`가 없어 400 `expression_choice_required`로 끝나고 아무것도 소모되지 않는다(닫힌 방향으로 실패한다). 엔진과 클라이언트는 J6의 규칙대로 같은 묶음으로 올린다.
 
-- **카드가 서는 곳은 사람이 `@oort`로 부탁한 그 대화(채널·DM)다.** run의 채널이 곧 카드 채널이고 서버가 정한다(에이전트가 채널이나 수신자를 지정하는 키는 인자에 없다). 새 승인함·새 화면 자리는 만들지 않는다. 결정할 수 있는 사람은 그 채널의 활성 멤버 중 추가 정책을 충족하는 사람이다(얼굴이 있으면 당사자).
+- **카드가 서는 곳은 사람이 `@oort`로 부탁한 그 대화(채널·DM)다.** run의 채널이 곧 카드 채널이고 서버가 정한다(에이전트가 채널이나 수신자를 지정하는 키는 인자에 없다). 새 승인함·새 화면 자리는 만들지 않는다. 승인할 수 있는 사람은 그 채널의 활성 멤버 중 추가 정책을 충족하는 사람이다(얼굴이 있으면 당사자).
+- 거절·run 취소는 방의 활성 멤버 누구나(T22). (2026-11-08 정정, #5461 구현 보안 검수 1회차: 위 줄의 「결정할 수 있는 사람」은 거절까지 좁힌 것으로 읽혀서 「승인할 수 있는 사람」으로 고쳤다. 권한 동작은 바뀌지 않았다. 거절은 `expression.create`와 같은 기존 규칙(채널의 활성 멤버)이고, run 취소가 같은 회수를 하므로 거절만 좁혀서는 막히지 않는다. 좁힐지는 owner 결정으로 따로 정하며, 좁힌다면 거절과 run 취소를 함께 정한다.)
 - 머리: `workspaceId`·`setId`·`title`·`prefix`·`subjectMemberId`·`prompt`·`references`(서버가 고른 참조의 닫힌 포인터 0~4개, 첫 장이 표현마다의 대표 포인터가 된다, L18.5)·`expiresAtMs`. 문자열은 칸마다 되풀이하지 않고 **한 번만** 싣는다(40칸 × 2,000자를 피한다).
 - `slots[]`: 준비된 칸 `{index, kind, state:"ready", code:null, draftId, revision, name, displayName, tags, media}`(`media`는 부록 B의 `Media` 그대로, 핀에 쓰는 해시가 들어 있다), 회색 칸 `{index, kind, state:"gray", code, name, displayName, tags}`(L7). `kind`는 `still`·`gif`이고 준비된 칸에서는 큰 그림이 PNG이면 `still`, GIF이면 `gif`여야 한다(스키마가 못 하는 규칙: 코어 `expressionSetIssues`와 서버가 같이 강제).
 - 카드 크기 **[추정]**: 준비된 칸 하나 약 0.7 KB, 40칸 약 28 KB. 메시지 props의 한도 안인지는 [확인 필요](L16 V2).

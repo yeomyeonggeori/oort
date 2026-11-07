@@ -33,9 +33,19 @@ name: 00-login
 # `x-react-native-project-root` header — the trap gate/run.mjs:111-140
 # documents: another worktree's Metro answers identically and serves its own
 # JavaScript, so a lane could go green against code that is not under test).
+#
+# The one launch argument every flow DOES pass is a literal, `momoAutomation: "YES"`
+# (#5531): it switches the Debug LogBox strip off for the whole run
+# (`measure/automation.ts`), so no tap can land on the strip and make Metro open the
+# standalone React Native DevTools app on the machine's screen. It has no `${...}` in
+# it, so the interpolation problem above does not apply. It is a quoted string on
+# purpose: Maestro sends a YAML boolean WITHOUT the leading dash (`momoAutomation
+# true`), and iOS never reads that as a launch argument.
 - launchApp:
     appId: app.momo.ios
     clearState: true
+    arguments:
+      momoAutomation: "YES"
 
 - runFlow: subflows/dismiss-system-alerts.yaml
 

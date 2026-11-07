@@ -201,7 +201,9 @@ pub(crate) const EXPIRED_DRAFT_SET: &str =
 /// Tenant-scoped sweep: byte reclamation only, never activated receipts/names.
 pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error> {
     catalog(conn, ws).await?;
-    sqlx::query("SELECT id FROM expression_draft WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() FOR UPDATE")
+    // Locked by card, then by slot: the order the decision and the cards' end paths lock one card's
+    // drafts in (`set::retire_proposed_in_tx`), so none of them waits on rows in the opposite order.
+    sqlx::query("SELECT id FROM expression_draft WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() ORDER BY approval_id,candidate_index,id FOR UPDATE")
         .bind(ws).fetch_all(&mut *conn).await?;
     let n=sqlx::query("DELETE FROM expression_draft_image i USING expression_draft d WHERE (i.workspace_id,i.draft_id)=(d.workspace_id,d.id) AND d.workspace_id=$1 AND d.state <> 'activated' AND d.expires_at <= clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?.rows_affected();
@@ -571,28 +573,46 @@ pub(crate) async fn changed(
     extra: Option<Value>,
     effect: Effect<'_>,
 ) -> Result<i64, Error> {
+    changed_each(conn, actor, &[(id, extra)], effect).await
+}
+
+/// [`changed`] for one decision that changes **several** expressions at once (ADR-0218 §12 L6.3: one
+/// set approval registers up to 40): ONE catalogue version, ONE detail notice naming every id of the
+/// `effect` and ONE plain notice, but one audit row per entry of `audits` (`expression.created` for
+/// each registered picture, §12 L8-5). With a single entry this is exactly [`changed`], in the same
+/// order (version, audit, detail notice, plain notice), so the notices an old client reads do not move.
+pub(crate) async fn changed_each(
+    conn: &mut PgConnection,
+    actor: Actor,
+    audits: &[(Uuid, Option<Value>)],
+    effect: Effect<'_>,
+) -> Result<i64, Error> {
     let v: i64 = sqlx::query_scalar(
         "UPDATE expression_catalog SET version=version+1 WHERE workspace_id=$1 RETURNING version",
     )
     .bind(actor.workspace)
     .fetch_one(&mut *conn)
     .await?;
-    write_audit(
-        conn,
-        &AuditEntry::new(actor.workspace, effect.audit_action())
-            .by(actor.member)
-            .target("expression", id)
-            .with_schema("momo.expression.changed.v1", {
-                // Ids, a closed origin summary, a hash prefix, the approval: never bytes,
-                // a prompt or an original link (ADR-0218 D6).
-                let mut detail = json!({"version":v.to_string()});
-                if let (Some(Value::Object(more)), Some(object)) = (extra, detail.as_object_mut()) {
-                    object.extend(more);
-                }
-                detail
-            }),
-    )
-    .await?;
+    for (id, extra) in audits {
+        write_audit(
+            conn,
+            &AuditEntry::new(actor.workspace, effect.audit_action())
+                .by(actor.member)
+                .target("expression", *id)
+                .with_schema("momo.expression.changed.v1", {
+                    // Ids, a closed origin summary, a hash prefix, the approval: never bytes,
+                    // a prompt or an original link (ADR-0218 D6).
+                    let mut detail = json!({"version":v.to_string()});
+                    if let (Some(Value::Object(more)), Some(object)) =
+                        (extra.clone(), detail.as_object_mut())
+                    {
+                        object.extend(more);
+                    }
+                    detail
+                }),
+        )
+        .await?;
+    }
     let channel = format!(
         "expressions:ws{}",
         actor.workspace.to_string().to_uppercase()
