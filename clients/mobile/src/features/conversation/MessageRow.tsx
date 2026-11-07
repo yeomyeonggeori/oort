@@ -306,6 +306,7 @@ import {
   expressionSetPlanOfMessage,
   expressionSetResultOfMessage,
 } from '@momo/core/features/expressions/setWire';
+import {ExpressionPlanCard} from '../expressions/ExpressionPlanCard';
 import {ExpressionSetApprovalCard} from '../expressions/ExpressionSetApprovalCard';
 import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
 import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
@@ -1763,6 +1764,20 @@ function AgentCard({
     });
     // 이모티콘 세트의 두 카드(ADR-0218 §12, #5463): 같은 행동 승인 카드의 길 위에서 자기 모양으로 선다. 일반 승인·거부 단추는 세우지 않는다
     // (계획 카드는 썸네일·고지를 본 채로, 세트 카드는 칸을 고른 채로만 결정된다).
+    if (card.action?.id === EXPRESSION_SET_PLAN_ACTION_ID) {
+      return (
+        <AgentCardFrame testID="agent-card">
+          <ExpressionPlanCard
+            card={card}
+            plan={expressionCards?.plan ?? null}
+            settledStatus={settledStatus}
+            note={note}
+            nowMs={nowMs}
+            onSettled={onApprovalSettled}
+          />
+        </AgentCardFrame>
+      );
+    }
     if (card.action?.id === EXPRESSION_SET_ACTION_ID) {
       return (
         <AgentCardFrame testID="agent-card">

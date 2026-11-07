@@ -16,7 +16,7 @@ const spell = <K extends string>(table: Record<K, number>): {readonly [P in K]: 
 /** 이 두 카드가 더 쓰는 스타일 값. */
 export const SET_WORD = {
   ...WORD,
-  ...spell({wrap: 0, dashed: 0, thumb: 0}),
+  ...spell({wrap: 0, dashed: 0, thumb: 0, top: 0}),
 } as const;
 
 /** 시험·Maestro 이름의 조각을 잇는 점. 글자가 없어서 문구 후보로 세지지 않는다. */
@@ -39,4 +39,9 @@ export const SET_ID = {
   reference: (position: number) => joinId('expression-set-reference', position),
   referenceRow: (position: number) => joinId('expression-set-reference-row', position),
   referenceRemove: (position: number) => joinId('expression-set-reference-remove', position),
+  planScene: (index: number) => joinId('expression-plan-scene', index),
+  planEditSlot: (index: number) => joinId('expression-plan-edit-slot', index),
+  planEditInclude: (index: number) => joinId('expression-plan-edit-include', index),
+  planEditName: (index: number) => joinId('expression-plan-edit-name', index),
+  planEditScene: (index: number) => joinId('expression-plan-edit-scene', index),
 };
