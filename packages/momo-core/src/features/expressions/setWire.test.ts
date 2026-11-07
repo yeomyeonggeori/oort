@@ -8,7 +8,7 @@ import {
 } from "./setFixtures";
 import {
   EXPRESSION_SET_DECISION_FAILURES, EXPRESSION_SET_PLAN_ACTION_ID, expressionDecisionRequest, expressionSetDecisionFailure, expressionSetFromProps, expressionSetPlanFromProps,
-  expressionSetResultFromProps, expressionSetResultFromReceipt,
+  expressionSetOfMessage, expressionSetPlanOfMessage, expressionSetResultFromProps, expressionSetResultFromReceipt, expressionSetResultOfMessage,
 } from "./setWire";
 
 const base = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
@@ -98,5 +98,20 @@ describe("the decision request (an existing route; the sets add fields, not path
     expect(result?.skipped).toEqual([]);
     expect(expressionSetResultFromReceipt({ result: null })).toBeNull();
     expect(expressionSetResultFromReceipt(undefined)).toBeNull();
+  });
+});
+
+describe("the same readers on a whole message (S4 phone, #5463)", () => {
+  it("reads a message exactly as its props are read, and a message without props is no card", () => {
+    const executed = { status: "executed", expressionSet: { setId: FIXTURE_SET_NORMAL.setId, registered: [], skipped: [] } };
+    expect(expressionSetOfMessage({ props: setProps(FIXTURE_SET_NORMAL) })).toEqual(FIXTURE_SET_NORMAL);
+    expect(expressionSetPlanOfMessage({ props: planProps(FIXTURE_SET_PLAN_CARD) })).toEqual(FIXTURE_SET_PLAN_CARD);
+    expect(expressionSetResultOfMessage({ props: { result: executed } })).toEqual(expressionSetResultFromProps({ result: executed }));
+    // The id is what picks the card: a plan under the set's id (and the other way round) is not read.
+    expect(expressionSetOfMessage({ props: planProps(FIXTURE_SET_PLAN_CARD) })).toBeNull();
+    expect(expressionSetPlanOfMessage({ props: setProps(FIXTURE_SET_NORMAL) })).toBeNull();
+    expect(expressionSetOfMessage({})).toBeNull();
+    expect(expressionSetPlanOfMessage({})).toBeNull();
+    expect(expressionSetResultOfMessage({})).toBeNull();
   });
 });

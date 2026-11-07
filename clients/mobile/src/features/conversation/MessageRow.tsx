@@ -294,6 +294,19 @@ import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {RequestStatusChip} from '../agents/RequestStatusChip';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import {RequestBundleCard} from './RequestBundleCard';
+import {
+  EXPRESSION_SET_ACTION_ID,
+  type ExpressionSetApproval,
+  type ExpressionSetPlanCard,
+  type ExpressionSetResult,
+} from '@momo/core/features/expressions/set';
+import {
+  EXPRESSION_SET_PLAN_ACTION_ID,
+  expressionSetOfMessage,
+  expressionSetPlanOfMessage,
+  expressionSetResultOfMessage,
+} from '@momo/core/features/expressions/setWire';
+import {ExpressionSetApprovalCard} from '../expressions/ExpressionSetApprovalCard';
 import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
 import {useApprovalBlockedLine} from '../connection/useApprovalBlockedLine';
 
@@ -1672,10 +1685,21 @@ export function readApprovalCard(
   return {approval, receipt, settledStatus, note};
 }
 
+/**
+ * 이모티콘 세트 카드 둘(ADR-0218 §12, #5463)이 읽는 메시지의 몫. 코어가 메시지에서 읽어 준 값만 든다 - 이 파일은 props 를 읽지 않는다
+ * (`actionApprovalCard.test.tsx` 의 단일점 시험). 행동 id 가 다르면 셋 다 `null` 이다.
+ */
+interface ExpressionSetCards {
+  set: ExpressionSetApproval | null;
+  plan: ExpressionSetPlanCard | null;
+  result: ExpressionSetResult | null;
+}
+
 function AgentCard({
   card,
   directory,
   viewerMemberId,
+  expressionCards,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -1690,6 +1714,8 @@ function AgentCard({
 }: {
   card: AgentCardModel;
   viewerMemberId?: string;
+  /** 세트 카드·계획 카드의 재료(메시지에서 코어가 읽은 것). 없으면 그 두 행동은 읽지 못한 카드로 선다. */
+  expressionCards?: ExpressionSetCards;
   requestRun?: AgentRunProgress;
   onOpenDecision?: (approvalId: string) => void;
   /** 닫힌 묶음 카드의 「다시 요청」이 이 화면의 입력창에 초안을 넣는다 (`MessageRowActions.onRepropose`). */
@@ -1735,6 +1761,23 @@ function AgentCard({
       viewerMemberId,
       nameFor: id => memberFor(directory, id)?.displayName,
     });
+    // 이모티콘 세트의 두 카드(ADR-0218 §12, #5463): 같은 행동 승인 카드의 길 위에서 자기 모양으로 선다. 일반 승인·거부 단추는 세우지 않는다
+    // (계획 카드는 썸네일·고지를 본 채로, 세트 카드는 칸을 고른 채로만 결정된다).
+    if (card.action?.id === EXPRESSION_SET_ACTION_ID) {
+      return (
+        <AgentCardFrame testID="agent-card">
+          <ExpressionSetApprovalCard
+            card={card}
+            set={expressionCards?.set ?? null}
+            result={expressionCards?.result ?? null}
+            settledStatus={settledStatus}
+            note={note}
+            nowMs={nowMs}
+            onSettled={onApprovalSettled}
+          />
+        </AgentCardFrame>
+      );
+    }
     if (hasRequestBundle(card)) {
       return <RequestBundleCard card={card} directory={directory} viewerMemberId={viewerMemberId}
         gate={approval} receipt={receipt} nowMs={nowMs} offline={approvalOffline} run={requestRun}
@@ -2516,6 +2559,15 @@ function MessageRowInner({
   // 이 행이 **그리고 말하는** 인용. 걸러지기 전의 `quote` 는 위임 줄의 원문 읽기(`delegateSourceBody`)만 쓴다 — 이유는 `quoteRedundant` 의 prop 주석.
   const drawnQuote = quoteRedundant ? null : quote;
   const presentation = useMemo(() => rowPresentation(message), [message]);
+  // 이모티콘 세트의 두 카드가 읽는 메시지의 몫(ADR-0218 §12, #5463). 코어가 행동 id 로 먼저 거르므로 다른 행은 셋 다 `null` 이고 값이 싸다.
+  const expressionCards = useMemo<ExpressionSetCards>(
+    () => ({
+      set: expressionSetOfMessage(message),
+      plan: expressionSetPlanOfMessage(message),
+      result: expressionSetResultOfMessage(message),
+    }),
+    [message],
+  );
   const requestSentence = useMemo(() => {
     if (!requestCardTarget) return undefined;
     const target = rowPresentation(requestCardTarget).card;
@@ -2585,6 +2637,14 @@ function MessageRowInner({
   const decisionRotor = useMemo(() => {
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
+    // 이모티콘 세트의 두 카드는 자기 단추(칸을 고른 채·썸네일과 고지를 본 채)로만 결정한다. 마운트된 일반 결정 컨트롤이 없으니 로터에도 「승인」·「거부」를
+    // 세우지 않는다(세우면 아무것도 하지 않는 동작을 읽어 준다, #5463).
+    if (
+      card.action?.id === EXPRESSION_SET_ACTION_ID ||
+      card.action?.id === EXPRESSION_SET_PLAN_ACTION_ID
+    ) {
+      return null;
+    }
     const read = readApprovalCard(card, {
       viewerMemberId: actions?.myMemberId,
       approvalGates,
@@ -3444,6 +3504,7 @@ function MessageRowInner({
             ) : presentation.card ? (
               <AgentCard
                 viewerMemberId={actions?.myMemberId}
+                expressionCards={expressionCards}
                 card={presentation.card}
                 directory={directory}
                 approvalGates={approvalGates}

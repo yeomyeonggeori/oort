@@ -1,3 +1,4 @@
+import type { Message } from "../../lib/api";
 import { matchesExpressionContract } from "./contracts";
 import {
   EXPRESSION_SET_ACTION_ID, expressionSetIssues, expressionSetPlanIssues, parseExpressionSetResult,
@@ -50,6 +51,15 @@ export function expressionSetResultFromProps(props: unknown): ExpressionSetResul
 export function expressionSetResultFromReceipt(receipt: unknown): ExpressionSetResult | null {
   return parseExpressionSetResult(record(record(receipt).result).expressionSet);
 }
+
+/**
+ * The same three readers for a whole chat message (S4 phone, #5463). The phone hands MESSAGES to the core and never touches their props
+ * itself (`actionApprovalCard.test.tsx` fails on any `.props` read in `clients/mobile/src`), so the seam takes `Pick<Message, "props">`
+ * the way `appsRunIdOf` does. Nothing is decided here: each reads exactly what its `...FromProps` twin reads.
+ */
+export const expressionSetOfMessage = (message: Pick<Message, "props">): ExpressionSetApproval | null => expressionSetFromProps(message.props);
+export const expressionSetPlanOfMessage = (message: Pick<Message, "props">): ExpressionSetPlanCard | null => expressionSetPlanFromProps(message.props);
+export const expressionSetResultOfMessage = (message: Pick<Message, "props">): ExpressionSetResult | null => expressionSetResultFromProps(message.props);
 
 /**
  * The closed codes the decision route answers a set approval with when it spent nothing (L5.4, L6.1). The real route carries them in the
