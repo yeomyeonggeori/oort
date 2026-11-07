@@ -331,6 +331,17 @@ async fn expression_http_openapi_and_unchanged_send_reaction_spine() {
         .unwrap();
     assert_eq!(good.status(), 200);
     assert_eq!(good.headers()["content-type"], "image/png");
+    // ADR-0218 §14 MA14 (#5455): 활성 그림 200의 `Cache-Control` 은 **정확히** `private, no-store` 한 값이다(유지가 요구).
+    // 기기 캐시(후보 B)는 이 헤더가 브라우저·OS 가 앱 밖에 지울 수 없는 사본을 만들지 못하게 하는 안전장치라는 데 기댄다. 이 헤더를 단정한
+    // 곳은 지금까지 초안 경로의 200 둘뿐이라, `draft` 플래그로 활성 경로에서만 `max-age` 를 붙이는 변경을 아무 시험도 못 잡았다.
+    // 첫 값만 보는 `headers()["…"]` 가 아니라 모든 값을 모아서 비교한다(둘째 `Cache-Control` 줄을 더해도 붉어야 한다).
+    let cache_control: Vec<&str> = good
+        .headers()
+        .get_all("cache-control")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect();
+    assert_eq!(cache_control, ["private, no-store"]);
     assert_eq!(
         http.get(&active_url)
             .bearer_auth(&foreign.token)
