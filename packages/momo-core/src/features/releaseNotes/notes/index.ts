@@ -2,6 +2,7 @@ import { listReleaseNotes, type ReleaseNote } from "../model";
 import { RELEASE_NOTE_0_1_41 } from "./v0_1_41";
 import { RELEASE_NOTE_0_1_42 } from "./v0_1_42";
 import { RELEASE_NOTE_0_1_43 } from "./v0_1_43";
+import { RELEASE_NOTE_0_1_44 } from "./v0_1_44";
 
 // =============================================================================
 // 앱에 묶어 넣는 업데이트 소식의 등록부 (#4937).
@@ -13,4 +14,9 @@ import { RELEASE_NOTE_0_1_43 } from "./v0_1_43";
 // ko·en 같은 글, 쓰이지 않는 키).
 // =============================================================================
 
-export const RELEASE_NOTES: readonly ReleaseNote[] = listReleaseNotes([RELEASE_NOTE_0_1_43, RELEASE_NOTE_0_1_42, RELEASE_NOTE_0_1_41]);
+export const RELEASE_NOTES: readonly ReleaseNote[] = listReleaseNotes([
+  RELEASE_NOTE_0_1_44,
+  RELEASE_NOTE_0_1_43,
+  RELEASE_NOTE_0_1_42,
+  RELEASE_NOTE_0_1_41,
+]);

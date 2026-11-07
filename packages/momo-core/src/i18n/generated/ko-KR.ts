@@ -5222,6 +5222,168 @@ export const catalog: MessageCatalog = {
       "value": "폰 검색이 새로워지고, 에이전트 답은 스레드로 모이며, 데스크탑을 쓰는 동안은 폰 알림이 늦게 와요."
     }
   ],
+  "releaseNotes.v0144.agentsLine1": [
+    {
+      "type": 0,
+      "value": "도우미가 일을 넘길 때 나오는 「○○에게 맡기기」 단추에, 그 채널에 있고 내가 부를 수 있는 팀 Hermes도 올라와요."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowChanged": [
+    {
+      "type": 0,
+      "value": "탭이 우리 팀과 기본으로 나뉘지 않고 종류별로 이모티콘, 이모지, GIF 셋이 되었어요. 지난 소식에서 말한 「우리 팀, 기본, GIF」 탭은 이 셋으로 바뀌었어요. 이모티콘과 GIF 탭은 이름 없이 그림만 보이는 격자이고, 아래 띠로 최근, 즐겨찾기, 세트로 건너뛰어요. 웹과 데스크탑에서는 그림을 오른쪽 클릭해 즐겨찾기에 추가하고, 즐겨찾기는 이 기기에만 저장돼요."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘 창이 새로워졌어요"
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTryIt": [
+    {
+      "type": 0,
+      "value": "입력창의 웃는 얼굴 단추로 이모티콘 창을 열어 세 탭을 둘러보세요. 그림을 몇 번 써 보고 웹과 데스크탑에서는 즐겨찾기도 추가하면, 아래 띠에 최근과 즐겨찾기가 생겨요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑에서 「추가하기」는 창 아래 띠 끝의 +로 옮겼고, 신고와 삭제는 그림을 오른쪽 클릭하면 열려요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine2": [
+    {
+      "type": 0,
+      "value": "이모지 탭에는 기본 이모지와 함께 팀의 작은 이모지가 한 줄로 있고, 한 검색 칸이 둘을 같이 찾아요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine3": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 스레드 입력칸은 이전처럼 고른 이모티콘이 바로 입력칸에 들어가고, 미리 보기는 대화 입력창에서만 떠요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelChanged": [
+    {
+      "type": 0,
+      "value": "폰에서 입력창의 웃는 얼굴 단추를 누르면 키보드가 내려가고, 바로 그 자리에 이모티콘 창이 떠요. 따로 아래에서 올라오는 창은 없어요. 단추가 키보드 단추로 바뀌어서, 다시 누르면 키보드로 돌아가요."
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTitle": [
+    {
+      "type": 0,
+      "value": "키보드 자리에서 이모티콘 고르기"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTryIt": [
+    {
+      "type": 0,
+      "value": "폰에서 대화를 열고 입력창의 웃는 얼굴 단추를 눌러 보세요. 키보드 자리에 뜬 창에서 이모티콘을 고른 뒤, 단추를 다시 눌러 키보드로 돌아와 보세요."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsChanged": [
+    {
+      "type": 0,
+      "value": "새로 올리는 이모티콘은 같은 그림을 더 작은 파일로 저장해요. 정지 그림은 평균 18~26% 작아졌고 GIF도 조금 작아졌어요. 웹과 데스크탑은 받은 이모티콘 그림을 앱을 닫거나 새로 고치기 전까지 기억해서, 이모티콘이 많은 채널에 다시 들어가도 그림을 다시 받지 않아요."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘이 더 가볍고 빨라요"
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘이 많은 채널에 들어갔다가 다른 곳으로 간 뒤 다시 들어가 보세요. 웹과 데스크탑에서는 그림이 다시 불러와지는 일 없이 바로 서요."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine1": [
+    {
+      "type": 0,
+      "value": "처음 연 채널의 「안 읽은 동안」 요약이 대화 머리에 가리던 것을 고쳐, 머리 아래 한 줄 띠로 보여요."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine2": [
+    {
+      "type": 0,
+      "value": "숨기거나 지운 이모티콘은 폰 화면에서 알림이 오는 대로 바로 사라져요."
+    }
+  ],
+  "releaseNotes.v0144.phoneTopic": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherChanged": [
+    {
+      "type": 0,
+      "value": "이모티콘이나 GIF를 고르면 바로 보내지 않고 입력창 위에 크게 떠요. 마음이 바뀌면 작은 ✕로 뺄 수 있어요. 글을 쓰고 보내기를 한 번 누르면 큰 그림과 글이 차례로 가요. 이모지는 이전처럼 글 안에 바로 들어가요."
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘과 글을 한 번에 보내기"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTryIt": [
+    {
+      "type": 0,
+      "value": "대화 입력창의 웃는 얼굴 단추로 이모티콘을 하나 고르고, 입력창 위에 뜬 그림을 확인한 뒤 글을 쓰고 보내기를 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryChanged": [
+    {
+      "type": 0,
+      "value": "이모티콘과 GIF가 있는 대화에 들어가거나 이모티콘을 누를 때, 그림이 오기 전 자리가 글자 한 줄이었다가 커지면서 줄이 위아래로 흔들리던 것을 고쳤어요. 이제 그림 자리를 먼저 잡아 두어서 줄이 움직이지 않고, 정지 이모티콘은 눌러도 그대로이고 GIF는 같은 크기에서 처음 장면부터 다시 돌아요. 폰은 한 번 본 사진과 링크 카드의 크기를 기억해서 다시 들어가도 제자리에 서요. 처음 보는 사진은 아직 한 번 자랄 수 있고, 다음 판에서 고칠 예정이에요."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTitle": [
+    {
+      "type": 0,
+      "value": "채팅에 들어갈 때 화면이 흔들리지 않아요"
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘과 GIF가 많이 올라온 대화에 들어가서 줄이 움직이지 않는지 보세요. 보낸 이모티콘을 눌러 보면 정지 그림은 그대로이고 GIF는 처음부터 다시 돌아요."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsChanged": [
+    {
+      "type": 0,
+      "value": "「ㅋㅋ」, 「한숨」, 「배고파」처럼 이모티콘의 이름이나 태그와 같은 말을 쓰다 잠깐 멈추면, 입력창 바로 위에 맞는 이모티콘이 떠요. 누르면 미리 보기에 올라가고 저절로 보내지지는 않아요. 맞추는 일은 이 기기 안에서만 해서 쓴 글이 밖으로 나가지 않아요."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTitle": [
+    {
+      "type": 0,
+      "value": "글을 쓰면 이모티콘 추천"
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTryIt": [
+    {
+      "type": 0,
+      "value": "입력창에 「ㅋㅋ」나 「배고파」처럼 이모티콘 태그와 같은 말을 쓰고 잠깐 멈춰 보세요. 입력창 위에 뜬 그림을 눌러 미리 보기에 올려 보세요."
+    }
+  ],
+  "releaseNotes.v0144.summary": [
+    {
+      "type": 0,
+      "value": "채팅에 들어갈 때 화면이 흔들리지 않고, 이모티콘 창이 새로워져 이모티콘과 글을 한 번에 보낼 수 있어요."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
