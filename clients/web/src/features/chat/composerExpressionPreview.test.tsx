@@ -362,3 +362,29 @@ describe("고른 그림이 그 사이 사라졌을 때", () => {
     expect(onSend.mock.calls[0]?.[1]).not.toHaveProperty("expression");
   });
 });
+
+/** 이 화면에서 사람이 읽을 수 있는 글(낭독 전용 `sr-only` 노드와 `<textarea>`의 값은 뺀다). */
+function visibleText(): string {
+  const clone = document.body.cloneNode(true) as Element;
+  clone.querySelectorAll(".sr-only, textarea, script, style").forEach((node) => node.remove());
+  return (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+describe("보이는 안내 문장은 없다 (#5487: 두 입력창 어디에도 - 스레드 입력창은 `threadComposerExpression.test.tsx`)", () => {
+  it("고른 미리 보기 곁에도, 손으로 `:이름:` 만 친 글 곁에도 「큰 그림으로 보내요 …」 같은 문장이 없다", async () => {
+    await mount();
+    await pickCheers();
+    expect(visibleText()).not.toContain("큰 그림으로 보내요");
+    expect(visibleText()).not.toContain("한 번 더 눌러");
+    expect(q("expression-send-preview")).toBeNull();
+    await click(q("composer-expression-preview-cancel"));
+    await type(":cheers_still:");
+    expect(visibleText()).not.toContain("큰 그림으로 보내요");
+    expect(visibleText()).not.toContain("연결되면 보낼 수 있어요");
+    expect(q("expression-send-preview")).toBeNull();
+    // 그래도 글 본문이 `:이름:` 하나로 나간다(큰 그림으로 나가는 것은 그대로다).
+    await press({ key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0]?.[0]).toBe(":cheers_still:");
+  });
+});
