@@ -18,7 +18,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Image, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {LiveLine} from './ExpressionChapter';
 import {useExpressions} from './ExpressionProvider';
@@ -105,6 +105,7 @@ export function ExpressionPlanCard({
   const formatMessage = useExpressionMessages();
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const [mode, setMode] = useState<number>(Mode.view);
   const [edit, setEdit] = useState<PlanEdit>(emptyPlanEdit);
   const [busy, setBusy] = useState(false);
@@ -377,6 +378,7 @@ export function ExpressionPlanCard({
                       index: slot.index + 1,
                     })}
                     editable={live && !busy && kept}
+                    keyboardAppearance={keyboardAppearance}
                     maxLength={40}
                     onChangeText={next =>
                       setEdit(current => ({
@@ -396,6 +398,9 @@ export function ExpressionPlanCard({
                       index: slot.index + 1,
                     })}
                     editable={live && !busy && kept}
+                    keyboardAppearance={keyboardAppearance}
+                    // 한국어 장면 글이라 낱말 가운데서 끊기지 않게 한다(컴포저와 같은 규칙, #1422 — `conversationHygiene` 의 여러 줄 입력창 전수 스윕).
+                    lineBreakStrategyIOS="hangul-word"
                     maxLength={300}
                     multiline
                     onChangeText={next =>
@@ -439,7 +444,12 @@ export function ExpressionPlanCard({
           </PillRow>
         </View>
       ) : null}
-      {!open ? <LiveLine text={settledLine} testID="expression-plan-settled" /> : null}
+      {/* 끝난 카드의 한 줄은 낭독하지 않는다(세트 카드와 같은 이유): 결정의 낭독은 화면이 한다. */}
+      {!open ? (
+        <Sentence style={styles.body} testID="expression-plan-settled">
+          {settledLine}
+        </Sentence>
+      ) : null}
       <LiveLine
         text={errorLine === null ? null : formatMessage(errorLine)}
         tone="danger"

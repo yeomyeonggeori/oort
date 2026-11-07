@@ -444,8 +444,12 @@ export function ExpressionSetApprovalCard({
           </PillRow>
         </>
       ) : null}
+      {/* 끝난 카드의 한 줄은 낭독하지 않는다: 결정한 순간의 낭독은 화면(`onApprovalSettled`)이 하고, 기록을 다시 읽으러 들어온 카드가 서는 것마다 말하면
+          옛 카드가 마운트될 때마다 소리가 난다. 오류만 새로 서므로 낭독한다(`LiveLine`). */}
       {!open ? (
-        <LiveLine text={settledLine} testID="expression-set-settled" />
+        <Sentence style={styles.body} testID="expression-set-settled">
+          {settledLine}
+        </Sentence>
       ) : null}
       <LiveLine
         text={errorLine === null ? null : formatMessage(errorLine)}
