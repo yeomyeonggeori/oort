@@ -203,7 +203,7 @@ pub struct TaskRow {
     pub elapsed_secs: i64,
     /// ADR-0201 증보 v4 P4 (#5370): the delegation marker — `Some` on a row that is a delegation step,
     /// `None` on an ordinary task. **Never the request sentence**: that column is read by the one function
-    /// that sends it ([`delegation_request_in_tx`]) and by nothing else (the api's role cannot select it).
+    /// that sends it ([`mark_called_in_tx`]) and by nothing else (the api's role cannot select it).
     pub delegation: Option<DelegationMark>,
 }
 
