@@ -13,6 +13,7 @@ import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
+import type {ReplyTarget} from '../src/features/conversation/replyTarget';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
@@ -252,6 +253,22 @@ describe('✕ — 이 대화에서 그 낱말 추천을 끈다', () => {
   });
 });
 
+describe('답글 머리말이 걸려 있어도 선다 (#5490)', () => {
+  it('머리말이 걸린 입력창에도 줄이 서고, 그림을 누르면 미리 보기에 오른다 - 머리말은 그대로이고 저절로 보내지 않는다', async () => {
+    const {store} = await loadedStore();
+    const reply: ReplyTarget = {messageId: 'message-1', authorMemberId: 'author-1', rootId: 'root-1', mine: true, excerpt: {kind: 'text', text: '금요일에 배포해요'}};
+    const {onSend} = mount(store, {replyTarget: reply, onCancelReply: jest.fn()});
+    typeAndPause('ㅋㅋㅋ');
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'laugh_c']);
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-laugh_b'));
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(screen.getByTestId('reply-draft-card')).toBeTruthy();
+    expect(row()).toBeNull();
+    wait(5000);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
 describe('줄이 서지 않는 때', () => {
   it('이모티콘 창이 열려 있는 동안에는 없다(키보드로 칠 때만)', async () => {
     const {store} = await loadedStore();
@@ -278,7 +295,7 @@ describe('줄이 서지 않는 때', () => {
     expect(row()).not.toBeNull();
   });
 
-  it('스레드 입력창(묶음 보내기가 없다: 미리 보기에 올릴 곳이 없다)에는 없다', async () => {
+  it('묶음 보내기를 켜지 않은 입력창(미리 보기에 올릴 곳이 없다)에는 없다', async () => {
     const {store} = await loadedStore();
     mount(store, {expressionBundle: false});
     typeAndPause('ㅋㅋㅋ');

@@ -189,6 +189,8 @@ export interface TimelineSendFlags {
    * 입력창 위 미리 보기에 올라 있던 이모티콘·GIF(#5452). 있으면 **큰 표현 메시지 → 글 메시지** 두 개를 한 묶음으로 보낸다(코어 `planSendBundle`, 웹 #5453 과 같은 와이어):
    * 메시지마다 다른 `client_msg_id` 를 쓰고, 첫째가 확정되기 전에는 둘째가 나가지 않고, 첫째가 실패하면 둘째는 보내지 않은 채 실패한 행으로 남는다. 다시 보내기는 어느 행에서든 첫째부터다.
    * 글이 비어 있으면 표현 메시지 하나다. 인용·첨부·링크 미리보기 끄기는 마지막 메시지가 나른다.
+   * 스레드 답글(`sendReply`: 밀어서 보낸 답글과 스레드 입력창, #5490)도 같은 묶음이다. 다른 점은 **두 메시지 모두** 같은 스레드의 답글이라는 것 하나다 - 답글 대상(`rootId`)은 옵션이 아니라
+   * 메시지가 어디에 달리는가의 주소라서 마지막 메시지만 나르면 큰 그림만 본류에 홀로 남는다.
    */
   expression?: Expression;
 }
@@ -627,14 +629,18 @@ export function useTimeline(
     [post, heldRows],
   );
 
-  const send = useCallback(
+  /**
+   * 보내기의 한 길: 행을 대기 목록에 세우고 머리 행부터 보낸다. 채널 글(`send`)과 스레드 답글(`sendReply`)이 같은 길이다(#5490) - 표현이 있으면 행이 둘이고 순서·멱등·실패 규칙은 둘 다 코어 묶음 규칙 하나다.
+   * 답글이면 **모든 행이** `rootId` 를 싣는다(큰 그림도 같은 스레드에 달린다). 인용·첨부·링크 미리보기 끄기는 마지막 행만 나른다.
+   */
+  const sendRows = useCallback(
     async (
+      target: {rootId?: string; replyToId?: string; reuseClientMsgId?: string},
       body: string,
-      replyToId?: string,
       attachments?: MessageAttachment[],
-      reuseClientMsgId?: string,
       flags?: TimelineSendFlags,
     ) => {
+      const {rootId, replyToId, reuseClientMsgId} = target;
       const channel = channelId;
       const expression = flags?.expression ?? null;
       if (
@@ -674,6 +680,7 @@ export function useTimeline(
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
+        ...(rootId === undefined ? {} : {rootId}),
         ...(carries && replyToId !== undefined ? {replyToId} : {}),
         ...(carries && attachments !== undefined && attachments.length > 0
           ? {attachments}
@@ -696,6 +703,17 @@ export function useTimeline(
       await postChain(rows[0], false);
     },
     [channelId, authorMemberId, postChain, updatePending],
+  );
+
+  const send = useCallback(
+    (
+      body: string,
+      replyToId?: string,
+      attachments?: MessageAttachment[],
+      reuseClientMsgId?: string,
+      flags?: TimelineSendFlags,
+    ) => sendRows({replyToId, reuseClientMsgId}, body, attachments, flags),
+    [sendRows],
   );
 
   const ingest = useCallback(
@@ -988,35 +1006,9 @@ export function useTimeline(
   );
 
   const sendReply = useCallback(
-    async (
-      rootId: string,
-      body: string,
-      attachments?: MessageAttachment[],
-      flags?: TimelineSendFlags,
-    ) => {
-      const channel = channelId;
-      if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
-        return;
-      }
-      const clientMsgId = crypto.randomUUID();
-      const row: PendingMessage = {
-        clientMsgId,
-        channelId: channel,
-        authorMemberId,
-        body,
-        createdAtMs: Date.now(),
-        sinceSeq: newestSeqRef.current,
-        status: 'sending',
-        rootId,
-        ...(attachments === undefined || attachments.length === 0
-          ? {}
-          : {attachments}),
-        ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
-      };
-      updatePending(list => addPending(list, row));
-      await post(row);
-    },
-    [channelId, authorMemberId, post, updatePending],
+    (rootId: string, body: string, attachments?: MessageAttachment[], flags?: TimelineSendFlags) =>
+      sendRows({rootId}, body, attachments, flags),
+    [sendRows],
   );
 
   const repliesPending = useCallback(
