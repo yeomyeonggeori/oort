@@ -571,28 +571,46 @@ pub(crate) async fn changed(
     extra: Option<Value>,
     effect: Effect<'_>,
 ) -> Result<i64, Error> {
+    changed_each(conn, actor, &[(id, extra)], effect).await
+}
+
+/// [`changed`] for one decision that changes **several** expressions at once (ADR-0218 §12 L6.3: one
+/// set approval registers up to 40): ONE catalogue version, ONE detail notice naming every id of the
+/// `effect` and ONE plain notice, but one audit row per entry of `audits` (`expression.created` for
+/// each registered picture, §12 L8-5). With a single entry this is exactly [`changed`], in the same
+/// order (version, audit, detail notice, plain notice), so the notices an old client reads do not move.
+pub(crate) async fn changed_each(
+    conn: &mut PgConnection,
+    actor: Actor,
+    audits: &[(Uuid, Option<Value>)],
+    effect: Effect<'_>,
+) -> Result<i64, Error> {
     let v: i64 = sqlx::query_scalar(
         "UPDATE expression_catalog SET version=version+1 WHERE workspace_id=$1 RETURNING version",
     )
     .bind(actor.workspace)
     .fetch_one(&mut *conn)
     .await?;
-    write_audit(
-        conn,
-        &AuditEntry::new(actor.workspace, effect.audit_action())
-            .by(actor.member)
-            .target("expression", id)
-            .with_schema("momo.expression.changed.v1", {
-                // Ids, a closed origin summary, a hash prefix, the approval: never bytes,
-                // a prompt or an original link (ADR-0218 D6).
-                let mut detail = json!({"version":v.to_string()});
-                if let (Some(Value::Object(more)), Some(object)) = (extra, detail.as_object_mut()) {
-                    object.extend(more);
-                }
-                detail
-            }),
-    )
-    .await?;
+    for (id, extra) in audits {
+        write_audit(
+            conn,
+            &AuditEntry::new(actor.workspace, effect.audit_action())
+                .by(actor.member)
+                .target("expression", *id)
+                .with_schema("momo.expression.changed.v1", {
+                    // Ids, a closed origin summary, a hash prefix, the approval: never bytes,
+                    // a prompt or an original link (ADR-0218 D6).
+                    let mut detail = json!({"version":v.to_string()});
+                    if let (Some(Value::Object(more)), Some(object)) =
+                        (extra.clone(), detail.as_object_mut())
+                    {
+                        object.extend(more);
+                    }
+                    detail
+                }),
+        )
+        .await?;
+    }
     let channel = format!(
         "expressions:ws{}",
         actor.workspace.to_string().to_uppercase()

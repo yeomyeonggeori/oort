@@ -1416,6 +1416,22 @@ pub fn expression_create_result_body() -> String {
 /// `ref.type` of an executed `expression.create`: the expression that was saved.
 pub const REF_TYPE_EXPRESSION: &str = "expression";
 
+/// `ref.type` of an executed `expression.set.create` (ADR-0218 §12 L5.5): the set, by its id.
+pub const REF_TYPE_EXPRESSION_SET: &str = "expression_set";
+
+/// The outcome line of `expression.set.create` (ADR-0218 §12 L5.5): **numbers only** — how many
+/// pictures the team library took and, when there were any, how many were left out. The words are the
+/// core's `expressions.set.result.saved` / `savedSkipped` (`setCopy.ts`), so the line a device draws
+/// from the receipt and the line the server wrote on the card are one sentence. No name, no reason
+/// (a skip's reason is a field of the result, not prose), no picture.
+pub fn expression_set_result_body(saved: usize, skipped: usize) -> String {
+    if skipped == 0 {
+        format!("{saved}개를 팀 보관함에 저장했어요")
+    } else {
+        format!("{saved}개를 저장하고 {skipped}개는 건너뛰었어요")
+    }
+}
+
 /// `audit_log.action` / schema of an approved `expression.create`: ids, origin kind and
 /// domain, a sha256 **prefix**, the decider and the approval — never bytes, base64, the
 /// generation prompt or an original link.
@@ -3170,6 +3186,10 @@ pub struct ActionResult<'a> {
     /// ADR-0218 부록 B `Result` (`{id,name,token}`) of an executed `expression.create`: the
     /// one value that is not generic. `None` for every other action.
     pub expression: Option<Value>,
+    /// ADR-0218 §12 L5.5 `SetResult` (`{setId, registered:[{id,name,token}], skipped:[{draftId,name,
+    /// reason}]}`) of an executed `expression.set.create`: written as `expressionSet`, never beside
+    /// `expression` (the card has only one of the two). `None` for every other action.
+    pub expression_set: Option<Value>,
 }
 
 /// 부록 B `next` — a fixed in-app path and its label.
@@ -3213,6 +3233,9 @@ pub fn action_result_props(result: &ActionResult<'_>) -> Value {
     }
     if let (Some(expression), Some(object)) = (&result.expression, card.as_object_mut()) {
         object.insert("expression".into(), expression.clone());
+    }
+    if let (Some(set), Some(object)) = (&result.expression_set, card.as_object_mut()) {
+        object.insert("expressionSet".into(), set.clone());
     }
     json!({ ACTION_RESULT_PROPS_KEY: card })
 }
@@ -3959,6 +3982,7 @@ mod tests {
             rows: invite_result_rows("member", "2026-09-29"),
             secret_shown_once: true,
             expression: None,
+            expression_set: None,
             next: Some(INVITE_RESULT_NEXT),
         })
     }
@@ -4182,6 +4206,7 @@ mod tests {
             rows: vec![],
             secret_shown_once: false,
             expression: None,
+            expression_set: None,
             next: None,
         });
         assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());

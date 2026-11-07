@@ -50,6 +50,11 @@ pub const AUDIT_RECLAIMED_SCHEMA: &str = "momo.expression.set.reclaimed.v1";
 /// byte, no prompt, no name, no link (D6).
 pub const AUDIT_PROPOSED: &str = "expression.set.proposed";
 pub const AUDIT_PROPOSED_SCHEMA: &str = "momo.expression.set.proposed.v1";
+/// The audit action of one decided set (ADR-0218 §12 L8-5, #5461 S2): approved or rejected, and
+/// counts only — how many were registered, how many skipped for which reason. No id of a picture,
+/// no name, no byte, no prompt, no link (D6).
+pub const AUDIT_DECIDED: &str = "expression.set.decided";
+pub const AUDIT_DECIDED_SCHEMA: &str = "momo.expression.set.decided.v1";
 
 /// The run states in which a run is still alive (the `agent_run_active_idx` list).
 const RUN_LIVE: &str = "('queued','running','awaiting_approval','paused')";
@@ -778,23 +783,52 @@ pub async fn get_in_tx(
     }))
 }
 
+/// Which undecided state a head leaves when it is reclaimed. The two are different doors with
+/// different owners: a `staging` head is the worker's and the sweep's ([`abandon_in_tx`],
+/// [`sweep_in_tx`]), a `proposed` head is its approval's end (reject, expiry, the run's cancel, the
+/// draft sweep: [`retire_proposed_in_tx`]). The UPDATE names the state it expects, so a path that
+/// means one can never close the other (A29: the staging TTL leaves a `proposed` head alone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Phase {
+    Staging,
+    /// `slots`: the pictures the card held (its drafts), for the audit row. The set's own
+    /// renditions were moved into those drafts when the card was raised, so none are left here.
+    Proposed {
+        slots: u64,
+    },
+}
+
+impl Phase {
+    const fn state(self) -> &'static str {
+        match self {
+            Phase::Staging => "staging",
+            Phase::Proposed { .. } => "proposed",
+        }
+    }
+}
+
 /// Take a set's pixels and words back and close its head: the one reclaim every end path shares
-/// (the run's cancel through [`abandon_in_tx`], the TTL sweep). The head must already be locked by
-/// the caller. The head moves to `expired` with its `prompt` blanked, the slots lose their
-/// `scene`, the renditions are deleted, and one `expression.set.reclaimed` audit row records ids
-/// and counts only. Idempotent: an `expired` head is left as it is.
+/// (the run's cancel through [`abandon_in_tx`], the TTL sweep, and — for a `proposed` head — the
+/// approval's end through [`retire_proposed_in_tx`]). The head must already be locked by the
+/// caller. The head moves to `expired` with its `prompt` blanked, the slots lose their `scene`, the
+/// renditions are deleted, and one `expression.set.reclaimed` audit row records ids and counts only.
+/// Idempotent: an `expired` head is left as it is. The order is the head first, then the slots, then
+/// the renditions: the trigger lets a slot's `scene` go only once its head has expired, and the
+/// deferred constraint refuses a commit that leaves one behind.
 pub(crate) async fn reclaim_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
     set_id: Uuid,
     why: &'static str,
+    phase: Phase,
 ) -> Result<Reclaimed, Error> {
     let closed = sqlx::query(
         "UPDATE expression_set SET state = 'expired', prompt = NULL \
-          WHERE workspace_id = $1 AND id = $2 AND state = 'staging'",
+          WHERE workspace_id = $1 AND id = $2 AND state = $3",
     )
     .bind(workspace)
     .bind(set_id)
+    .bind(phase.state())
     .execute(&mut *conn)
     .await?
     .rows_affected();
@@ -816,7 +850,10 @@ pub(crate) async fn reclaim_in_tx(
     .bind(set_id)
     .fetch_all(&mut *conn)
     .await?;
-    let slots = gone.iter().collect::<std::collections::BTreeSet<_>>().len() as u64;
+    let slots = match phase {
+        Phase::Staging => gone.iter().collect::<std::collections::BTreeSet<_>>().len() as u64,
+        Phase::Proposed { slots } => slots,
+    };
     write_audit(
         conn,
         &AuditEntry::new(workspace, AUDIT_RECLAIMED)
@@ -832,6 +869,140 @@ pub(crate) async fn reclaim_in_tx(
         slots,
         closed_now: true,
     })
+}
+
+/// How a set card ended without a registration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retire {
+    /// A person said no (`by`). The set's decision is on the record too: `expression.set.decided`
+    /// with `approved: false`.
+    Rejected { by: Uuid },
+    /// The approval ran out (a late tap, or the draft sweep finding its deadline gone).
+    Expired,
+    /// The run it belonged to was stopped.
+    Cancelled,
+}
+
+impl Retire {
+    /// The closed word of the `expression.set.reclaimed` row.
+    pub const fn why(self) -> &'static str {
+        match self {
+            Retire::Rejected { .. } => "rejected",
+            Retire::Expired => "expired",
+            Retire::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// The end of a set card that registered nothing: its approval was rejected, ran out, or was
+/// cancelled with its run (ADR-0218 §12 L8-3, A13/A29). In the **caller's** transaction — the
+/// approval's own — the card's drafts lose their bytes and their words
+/// ([`crate::action::reclaim_in_tx`]) and the head moves `proposed → expired` with its `prompt` and
+/// its slots' `scene` blanked, so an end path and the head can never disagree and the agent's next
+/// set is not blocked by a card nobody can decide any more.
+///
+/// Keyed by the approval (`expression_set` holds at most one head per approval), not by a set id the
+/// caller would have to find: the cards' end paths know the approval. Takes the card's draft rows
+/// first and the head second — the order the decision and the sweep take them in. Idempotent: a card
+/// that has no `proposed` head (already ended, or not a set card) only has its drafts reclaimed, and
+/// writes no audit row twice.
+pub async fn retire_proposed_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    approval_id: Uuid,
+    end: Retire,
+) -> Result<Reclaimed, Error> {
+    // Every draft of the card is one picture the card held, whatever state the sweep has since put
+    // it in (a registered one would have moved the head to `decided`, which this never touches).
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft WHERE workspace_id = $1 AND approval_id = $2",
+    )
+    .bind(workspace)
+    .bind(approval_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let images = crate::action::reclaim_in_tx(conn, workspace, approval_id).await?;
+    let head: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM expression_set WHERE workspace_id = $1 AND approval_id = $2 \
+            AND state = 'proposed' FOR UPDATE",
+    )
+    .bind(workspace)
+    .bind(approval_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(set_id) = head else {
+        return Ok(Reclaimed {
+            images,
+            ..Reclaimed::default()
+        });
+    };
+    let mut reclaimed = reclaim_in_tx(
+        conn,
+        workspace,
+        set_id,
+        end.why(),
+        Phase::Proposed {
+            slots: u64::try_from(held).unwrap_or(0),
+        },
+    )
+    .await?;
+    reclaimed.images += images;
+    if let Retire::Rejected { by } = end {
+        audit_decided_in_tx(
+            conn,
+            workspace,
+            by,
+            set_id,
+            approval_id,
+            DecidedCounts::default(),
+        )
+        .await?;
+    }
+    Ok(reclaimed)
+}
+
+/// What a decision on a set card did, for its audit row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DecidedCounts {
+    /// `false` for a rejection.
+    pub approved: bool,
+    pub registered: usize,
+    /// Registrations a skip left out (L6.1-4): the name was taken, or the library was full.
+    pub skipped_name_taken: usize,
+    pub skipped_quota: usize,
+}
+
+/// The audit row of a decision on a set card (ADR-0218 §12 L8-5): who decided, whether the card was
+/// approved, and counts. Never an id of a picture, a name or a word (D6).
+pub async fn audit_decided_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    decider: Uuid,
+    set_id: Uuid,
+    approval_id: Uuid,
+    counts: DecidedCounts,
+) -> Result<(), Error> {
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace, AUDIT_DECIDED)
+            .by(decider)
+            .target("expression_set", set_id)
+            .with_schema(
+                AUDIT_DECIDED_SCHEMA,
+                json!({
+                    "set_id": set_id.to_string(),
+                    "approval_id": approval_id.to_string(),
+                    "approved": counts.approved,
+                    "registered": counts.registered,
+                    "skipped": {
+                        "name_taken": counts.skipped_name_taken,
+                        "quota": counts.skipped_quota,
+                    },
+                }),
+            ),
+    )
+    .await?;
+    Ok(())
 }
 
 /// Lock a set for its proposal and read it back (ADR-0218 §12 L3.2): the owner's four predicates,
@@ -1189,16 +1360,23 @@ pub async fn abandon_in_tx(
     match state.as_deref() {
         None => Ok(Err(Refusal::InvalidArguments)),
         Some("expired") => Ok(Ok(Reclaimed::default())),
-        Some(_) => Ok(Ok(
-            reclaim_in_tx(conn, owner.workspace, set_id, "abandon").await?
-        )),
+        Some(_) => Ok(Ok(reclaim_in_tx(
+            conn,
+            owner.workspace,
+            set_id,
+            "abandon",
+            Phase::Staging,
+        )
+        .await?)),
     }
 }
 
-/// The TTL half of [`crate::store::sweep_in_tx`] for sets (L8-3, A29): every `staging` head of the
-/// tenant whose two hours are up is reclaimed. **Only `staging`**: a `proposed` head is not the
-/// store's to expire, the approval's end moves it in one transaction with the drafts. Runs on
-/// the notifier's RLS-bound `momo_app` pool. Returns the rendition rows deleted.
+/// The sets' half of [`crate::store::sweep_in_tx`] (L8-3, A29), on the notifier's RLS-bound
+/// `momo_app` pool. Two clocks, never mixed up: a `staging` head whose own two hours are up is
+/// reclaimed (the staging TTL, which **only** ever touches `staging`), and a `proposed` head whose
+/// **approval** is overdue is retired with its card's pictures ([`retire_proposed_in_tx`]: the end of
+/// the approval moves the head, in one transaction with the drafts). A `proposed` head whose approval
+/// is still open is left alone however old its staging two hours are. Returns the rows of bytes deleted.
 pub(crate) async fn sweep_in_tx(conn: &mut PgConnection, workspace: Uuid) -> Result<u64, Error> {
     let due: Vec<Uuid> = sqlx::query_scalar(
         "SELECT id FROM expression_set WHERE workspace_id = $1 AND state = 'staging' \
@@ -1209,7 +1387,26 @@ pub(crate) async fn sweep_in_tx(conn: &mut PgConnection, workspace: Uuid) -> Res
     .await?;
     let mut freed = 0;
     for set_id in due {
-        freed += reclaim_in_tx(conn, workspace, set_id, "expired")
+        freed += reclaim_in_tx(conn, workspace, set_id, "expired", Phase::Staging)
+            .await?
+            .images;
+    }
+    // A `proposed` head ends with its approval, in the same transaction as the drafts (A29). The
+    // approval's own deadline is the one the drafts were given, so this is the draft sweep's other
+    // half: a head whose card ran out is retired together with the card's pictures, and the agent's
+    // next set is free. Only a head whose approval row says it is overdue: the store's two hours
+    // are not a `proposed` head's clock.
+    let overdue: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT h.approval_id FROM expression_set h \
+           JOIN approval a ON a.workspace_id = h.workspace_id AND a.id = h.approval_id \
+          WHERE h.workspace_id = $1 AND h.state = 'proposed' AND a.expires_at <= clock_timestamp() \
+          ORDER BY h.id",
+    )
+    .bind(workspace)
+    .fetch_all(&mut *conn)
+    .await?;
+    for approval_id in overdue {
+        freed += retire_proposed_in_tx(conn, workspace, approval_id, Retire::Expired)
             .await?
             .images;
     }
