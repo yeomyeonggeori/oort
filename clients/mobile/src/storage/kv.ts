@@ -57,6 +57,16 @@ export const NON_SECRET_KEYS = {
    */
   expressionShelf: 'momo.mobile.expressions.shelf.v1',
   unfurlHeights: 'momo.mobile.timeline.unfurl-heights.v1',
+  /**
+   * 마지막으로 본 소프트 키보드 높이(pt, 숫자 하나 — #5452). 이모티콘 창이 키보드가 있던 **그 자리 그 높이**로 서려는 값이라, 키보드를 아직 한 번도 못 본 채(앱을 막 켠 뒤)
+   * 창을 열어도 지난번 높이로 선다. 비밀이 아니고 잃으면 창 높이를 화면 비율로 어림잡을 뿐이다.
+   */
+  keyboardHeight: 'momo.mobile.keyboard.height.v1',
+  /**
+   * 팀 표현의 즐겨찾기(이 기기 · 이 워크스페이스 · 이 사람 — 서버 계약 없음, #5452). 값의 모양과 바꾸는 법은 코어 `features/expressions/favorites.ts`가 갖는다:
+   * 읽을 때 워크스페이스·멤버가 맞는 값만 받고 깨진 값은 빈 목록이다. 등록의 id 목록뿐이라 비밀이 아니다. 로그아웃이 지우지 않는다(이 기기의 취향이다).
+   */
+  expressionFavorites: 'momo.mobile.expressions.favorites.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',

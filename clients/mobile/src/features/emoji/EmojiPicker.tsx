@@ -80,7 +80,12 @@ export interface EmojiPickerProps {
    * 화면의 검색어와 결과는 그대로여서 눌러도 아무 일도 없는 죽은 단추가 된다. 그래서 `onClearQuery` 는 필수다 —
    * 끼워 넣는 쪽이 빠뜨리면 타입이 먼저 막는다.
    */
-  embedded?: {query: string; onClearQuery: () => void};
+  embedded?: {
+    query: string;
+    onClearQuery: () => void;
+    /** 키보드 자리의 창(#5452)처럼 낮은 자리: 피부색 줄을 접어 격자에 높이를 준다(고른 피부색은 그대로 쓰인다). */
+    compact?: boolean;
+  };
 }
 
 type Tab = (typeof EMOJI_CATEGORIES)[number]['id'] | 'team';
@@ -239,7 +244,7 @@ export function EmojiPicker({
             </Pressable>
           ))}
         </ScrollView>
-        {tab !== 'team' && keyboardHeight === 0 ? (
+        {tab !== 'team' && keyboardHeight === 0 && embedded?.compact !== true ? (
           <View style={styles.tones} accessibilityLabel="피부색" testID="emoji-tones">
             {TONES.map(item => (
               <Pressable

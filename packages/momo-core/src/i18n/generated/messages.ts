@@ -389,6 +389,9 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.a11y",
+  "expressions.panel.emptyEmoticon",
+  "expressions.panel.emptyGif",
   "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
   "expressions.panel.viewGif",
@@ -456,7 +459,9 @@ export const messageKeys = [
   "expressions.photo.tagsPlaceholder",
   "expressions.picker.add",
   "expressions.picker.favoriteAdd",
+  "expressions.picker.favoriteAdded",
   "expressions.picker.favoriteRemove",
+  "expressions.picker.favoriteRemoved",
   "expressions.picker.grid",
   "expressions.picker.sectionFavorites",
   "expressions.picker.sectionOther",
@@ -464,6 +469,7 @@ export const messageKeys = [
   "expressions.picker.setStrip",
   "expressions.picker.teamGroup",
   "expressions.preview.cancel",
+  "expressions.preview.cleared",
   "expressions.preview.group",
   "expressions.sheet.a11y",
   "expressions.sheet.close",
@@ -474,6 +480,7 @@ export const messageKeys = [
   "expressions.sheet.hintInsert",
   "expressions.sheet.hintPreview",
   "expressions.sheet.hintReact",
+  "expressions.sheet.keyboard",
   "expressions.sheet.loading",
   "expressions.sheet.noMatch",
   "expressions.sheet.offline",
@@ -1636,6 +1643,9 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.a11y": {},
+  "expressions.panel.emptyEmoticon": {},
+  "expressions.panel.emptyGif": {},
   "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
   "expressions.panel.viewGif": {},
@@ -1705,7 +1715,13 @@ export const argumentSpecs = {
   "expressions.photo.tagsPlaceholder": {},
   "expressions.picker.add": {},
   "expressions.picker.favoriteAdd": {},
+  "expressions.picker.favoriteAdded": {
+    "name": "string"
+  },
   "expressions.picker.favoriteRemove": {},
+  "expressions.picker.favoriteRemoved": {
+    "name": "string"
+  },
   "expressions.picker.grid": {},
   "expressions.picker.sectionFavorites": {},
   "expressions.picker.sectionOther": {},
@@ -1715,6 +1731,7 @@ export const argumentSpecs = {
   "expressions.preview.cancel": {
     "name": "string"
   },
+  "expressions.preview.cleared": {},
   "expressions.preview.group": {},
   "expressions.sheet.a11y": {},
   "expressions.sheet.close": {},
@@ -1725,6 +1742,7 @@ export const argumentSpecs = {
   "expressions.sheet.hintInsert": {},
   "expressions.sheet.hintPreview": {},
   "expressions.sheet.hintReact": {},
+  "expressions.sheet.keyboard": {},
   "expressions.sheet.loading": {},
   "expressions.sheet.noMatch": {},
   "expressions.sheet.offline": {},
@@ -3038,6 +3056,9 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.a11y": Record<string, never>;
+  "expressions.panel.emptyEmoticon": Record<string, never>;
+  "expressions.panel.emptyGif": Record<string, never>;
   "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.panel.viewGif": Record<string, never>;
@@ -3105,7 +3126,9 @@ export interface MessageArgs {
   "expressions.photo.tagsPlaceholder": Record<string, never>;
   "expressions.picker.add": Record<string, never>;
   "expressions.picker.favoriteAdd": Record<string, never>;
+  "expressions.picker.favoriteAdded": { name: string };
   "expressions.picker.favoriteRemove": Record<string, never>;
+  "expressions.picker.favoriteRemoved": { name: string };
   "expressions.picker.grid": Record<string, never>;
   "expressions.picker.sectionFavorites": Record<string, never>;
   "expressions.picker.sectionOther": Record<string, never>;
@@ -3113,6 +3136,7 @@ export interface MessageArgs {
   "expressions.picker.setStrip": Record<string, never>;
   "expressions.picker.teamGroup": Record<string, never>;
   "expressions.preview.cancel": { name: string };
+  "expressions.preview.cleared": Record<string, never>;
   "expressions.preview.group": Record<string, never>;
   "expressions.sheet.a11y": Record<string, never>;
   "expressions.sheet.close": Record<string, never>;
@@ -3123,6 +3147,7 @@ export interface MessageArgs {
   "expressions.sheet.hintInsert": Record<string, never>;
   "expressions.sheet.hintPreview": Record<string, never>;
   "expressions.sheet.hintReact": Record<string, never>;
+  "expressions.sheet.keyboard": Record<string, never>;
   "expressions.sheet.loading": Record<string, never>;
   "expressions.sheet.noMatch": Record<string, never>;
   "expressions.sheet.offline": Record<string, never>;
