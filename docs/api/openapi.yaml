@@ -20963,7 +20963,16 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
+        `expression.set.create` and `expression.set.plan` (ADR-0218 증보 2026-11-06
+        §12, #5460) are team-AI-only the same way and are raised by **server code**
+        from a stored plan, never by a model's tool call: the helper's tool does not
+        list them, and through the Agent Port they are refused exactly as an unknown
+        id. The plan card (`{setId}`, `requesting_member`) and the set card
+        (`{setId,title,prefix,tags,backend,subjectMemberId,prompt,slots}`,
+        `expression_adder`) are always decided in the app, never from a lock-screen
+        action. Their decision request and result shapes are published with the
+        decision transaction (#5461).
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "expression.set.create", "expression.set.plan", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string

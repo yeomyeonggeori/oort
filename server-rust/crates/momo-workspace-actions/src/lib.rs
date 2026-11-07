@@ -11,4 +11,5 @@ pub mod team_ai_hermes_exec;
 pub mod team_ai_hermes_request;
 pub mod team_ai_limits;
 pub mod team_ai_roles;
+pub mod team_ai_set;
 pub mod team_ai_tools;

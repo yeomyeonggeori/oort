@@ -175,6 +175,15 @@ pub enum ActionArgs {
         drafts: Vec<Uuid>,
         subject: Option<Uuid>,
     },
+    /// `expression.set.create` (ADR-0218 증보 6 §12 L5.1, #5460 S1b): the **plan** of one emoticon set as
+    /// the server stored it. Nothing here is ever a picture, a byte or a link: the pictures live in
+    /// the approval's draft rows, written by the proposal transaction from the staged renditions.
+    ExpressionSetCreate(ExpressionSetSpec),
+    /// `expression.set.plan` (ADR-0218 §12 L2.5): the staged set the plan card is about. Its
+    /// executor is S5a's.
+    /// `target` is the requester, filled by [`resolve_action_in_tx`] from the run: the person the
+    /// push audience and the role gate (`requesting_member`) are about, pinned as `pins.target`.
+    ExpressionSetPlan { set_id: Uuid, target: Option<Uuid> },
     InviteCreate {
         /// `momo_settings::normalized_invite_role`'s canonical spelling.
         role: &'static str,
@@ -324,6 +333,33 @@ pub struct ResolvedPerson {
     /// the card says 「현재 사진」 or 「없음」 from this.
     pub had_avatar: bool,
 }
+
+/// One slot of a set's plan, as the card names it (ADR-0218 §12 L5.1 `SetPlanSlot`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpressionSetSlotSpec {
+    pub index: u8,
+    pub name: String,
+    pub display_name: String,
+    pub tags: Vec<String>,
+}
+
+/// `expression.set.create`'s arguments, validated (ADR-0218 §12 L5.1 `SetAction.args`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpressionSetSpec {
+    pub set_id: Uuid,
+    pub title: String,
+    pub prefix: String,
+    /// The set's common tags (0-3); the stored slot tags are already the merged final ones.
+    pub tags: Vec<String>,
+    /// `None` = nobody's face; otherwise the requester (this door raises no other person's face).
+    pub subject: Option<Uuid>,
+    pub prompt: String,
+    pub slots: Vec<ExpressionSetSlotSpec>,
+}
+
+/// The only generation backend that is on (ADR-0218 §12 L20). Any other spelling is refused as an
+/// unknown value; no code path reads the reserved one.
+pub const EXPRESSION_SET_BACKEND: &str = "hermes";
 
 /// Where a set of action arguments came from. **A proposal comes from an agent; a
 /// stored form comes from this server** (it is what the decision route reads back
@@ -547,6 +583,8 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_WORK_TIER_UPDATE => workspace_work_tier_update_args(args),
         actions::ACTION_PLUGIN_INSTALL => plugin_install_args(args),
         actions::ACTION_TEAM_AI_ROLES_SET => team_ai_roles_set_args(args),
+        actions::ACTION_EXPRESSION_SET_CREATE => expression_set_create_args(args),
+        actions::ACTION_EXPRESSION_SET_PLAN => expression_set_plan_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -1623,6 +1661,196 @@ pub fn member_avatar_set_args(
 
 /// `expression.create` arguments (ADR-0218 appendix B `AgentAction.args`). Closed keys
 /// everywhere; the proposal form is the agent's, the stored form is only draft ids.
+fn uuid_text(value: &Value) -> Option<Uuid> {
+    value
+        .as_str()
+        .filter(|text| text.len() == 36)
+        .and_then(|text| Uuid::parse_str(text).ok())
+}
+
+/// A card text the way the registry spells it (`displayName` and tags of a draft): plain, bounded,
+/// no control character and none of `@ < > [ ] `` \`. A name already taken by a standard emoji is
+/// **not** this check's business (it is a per-item skip at the decision, L6.1-4).
+fn set_text_is_plain(display_name: &str, tags: &[String]) -> bool {
+    let probe = momo_expressions::Metadata {
+        name: "set_probe".to_string(),
+        display_name: display_name.to_string(),
+        tags: tags.to_vec(),
+        subject_member_id: None,
+    };
+    matches!(
+        probe.validate(),
+        Ok(()) | Err(momo_expressions::Error::NameReserved)
+    )
+}
+
+/// `expression.set.create`'s arguments (ADR-0218 §12 L5.1). The same closed shape for the proposal
+/// and the stored form. **Every key is required and no other key exists**: a picture key
+/// (`dataBase64`, `url`, `attachmentId`, `image`, …) is refused here, before anything is written
+/// (A10). The backend must be the one that is on, the face null or one person, the slot names
+/// `<prefix>_<rest>` and unique, the indexes unique in 0..=39.
+pub fn expression_set_create_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let bad = |what: &str| ActionRejection::new(format!("expression.set.create: {what}"));
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    const KEYS: [&str; 8] = [
+        "setId",
+        "title",
+        "prefix",
+        "tags",
+        "backend",
+        "subjectMemberId",
+        "prompt",
+        "slots",
+    ];
+    closed_keys(object, &KEYS)?;
+    if KEYS.iter().any(|key| !object.contains_key(*key)) {
+        return Err(bad("a required key is missing"));
+    }
+    let set_id = uuid_text(&object["setId"]).ok_or_else(|| bad("setId"))?;
+    let title = object["title"]
+        .as_str()
+        .filter(|title| set_text_is_plain(title, &[]))
+        .ok_or_else(|| bad("title"))?
+        .to_string();
+    let prefix = object["prefix"]
+        .as_str()
+        .filter(|prefix| {
+            (2..=12).contains(&prefix.len())
+                && prefix
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
+        .ok_or_else(|| bad("prefix"))?
+        .to_string();
+    let tags_of = |value: &Value, max: usize| -> Option<Vec<String>> {
+        let list = value.as_array().filter(|list| list.len() <= max)?;
+        let tags = list
+            .iter()
+            .map(|tag| tag.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?;
+        let distinct: std::collections::BTreeSet<&String> = tags.iter().collect();
+        (distinct.len() == tags.len() && set_text_is_plain("tags", &tags)).then_some(tags)
+    };
+    let tags = tags_of(&object["tags"], 3).ok_or_else(|| bad("tags"))?;
+    if object["backend"].as_str() != Some(EXPRESSION_SET_BACKEND) {
+        return Err(bad("backend"));
+    }
+    let subject = match &object["subjectMemberId"] {
+        Value::Null => None,
+        other => Some(uuid_text(other).ok_or_else(|| bad("subjectMemberId"))?),
+    };
+    let prompt = object["prompt"]
+        .as_str()
+        .filter(|prompt| (1..=800).contains(&prompt.chars().count()) && !prompt.contains('\0'))
+        .ok_or_else(|| bad("prompt"))?
+        .to_string();
+    let list = object["slots"]
+        .as_array()
+        .filter(|list| (1..=actions::EXPRESSION_SET_SLOTS_MAX).contains(&list.len()))
+        .ok_or_else(|| bad("slots"))?;
+    let head = format!("{prefix}_");
+    let mut slots: Vec<ExpressionSetSlotSpec> = Vec::with_capacity(list.len());
+    for item in list {
+        let slot = item.as_object().ok_or_else(|| bad("slot"))?;
+        closed_keys(slot, &["index", "name", "displayName", "tags"])?;
+        let index = slot
+            .get("index")
+            .and_then(Value::as_u64)
+            .filter(|index| *index < actions::EXPRESSION_SET_SLOTS_MAX as u64)
+            .and_then(|index| u8::try_from(index).ok())
+            .ok_or_else(|| bad("slot index"))?;
+        let name = slot
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| {
+                (2..=30).contains(&name.len())
+                    && name.bytes().all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-'
+                    })
+                    && name.starts_with(&head)
+                    && name.len() > head.len()
+            })
+            .ok_or_else(|| bad("slot name"))?
+            .to_string();
+        let slot_tags = slot
+            .get("tags")
+            .and_then(|tags| tags_of(tags, 5))
+            .ok_or_else(|| bad("slot tags"))?;
+        let display_name = slot
+            .get("displayName")
+            .and_then(Value::as_str)
+            .filter(|display_name| set_text_is_plain(display_name, &slot_tags))
+            .ok_or_else(|| bad("slot displayName"))?
+            .to_string();
+        if slots
+            .iter()
+            .any(|other| other.index == index || other.name == name)
+        {
+            return Err(bad("a slot index or name is used twice"));
+        }
+        slots.push(ExpressionSetSlotSpec {
+            index,
+            name,
+            display_name,
+            tags: slot_tags,
+        });
+    }
+    // The stored form is the plan sorted by slot, so a card and the decision read one order.
+    slots.sort_by_key(|slot| slot.index);
+    let normalized = json!({
+        "setId": set_id.to_string(),
+        "title": title,
+        "prefix": prefix,
+        "tags": tags,
+        "backend": EXPRESSION_SET_BACKEND,
+        "subjectMemberId": subject.map(|id| id.to_string()),
+        "prompt": prompt,
+        "slots": slots.iter().map(|slot| json!({
+            "index": slot.index,
+            "name": slot.name,
+            "displayName": slot.display_name,
+            "tags": slot.tags,
+        })).collect::<Vec<_>>(),
+    });
+    Ok(ValidatedActionArgs {
+        normalized,
+        rows: Vec::new(),
+        args: ActionArgs::ExpressionSetCreate(ExpressionSetSpec {
+            set_id,
+            title,
+            prefix,
+            tags,
+            subject,
+            prompt,
+            slots,
+        }),
+        summary: None,
+    })
+}
+
+/// `expression.set.plan`'s arguments (ADR-0218 §12 L2.5): `{setId}` and nothing else.
+pub fn expression_set_plan_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["setId"])?;
+    let set_id = object
+        .get("setId")
+        .and_then(uuid_text)
+        .ok_or_else(|| ActionRejection::new("expression.set.plan: setId"))?;
+    Ok(ValidatedActionArgs {
+        normalized: json!({"setId": set_id.to_string()}),
+        rows: Vec::new(),
+        args: ActionArgs::ExpressionSetPlan {
+            set_id,
+            target: None,
+        },
+        summary: None,
+    })
+}
+
 pub fn expression_create_args(
     args: &Value,
     origin: ArgsOrigin,
@@ -2490,6 +2718,80 @@ pub async fn member_is_live_in_channel_in_tx(
     .bind(member_id)
     .fetch_one(&mut *conn)
     .await?)
+}
+
+/// Which of the set's two cards a lookup is for: the plan card reads an unconfirmed `staging` set, the
+/// set card a `staging` one at proposal time and the `proposed` one of its own approval at decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetCard {
+    Plan,
+    Create,
+}
+
+/// The person who started the run, the room it stands in and **the face the head names**, for a set
+/// that is **this agent's, this person's and this run's** (ADR-0218 §12 L10.1-2: the owner is the
+/// SQL's own predicate, never an argument). `None` is every way of not being that: no run, another
+/// agent's run, a run nobody addressed, a set that is someone else's, another tenant's, gone, or in
+/// a state this card does not mean.
+///
+/// The face (`expression_set.subject_member_id`) is returned from the same row that proved the
+/// owner, so a decision can take it from the database and never from the stored payload (#5460
+/// security review M1; ADR-0186 D2: what was stored is not trusted).
+async fn resolve_set_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent: Uuid,
+    run_id: Option<Uuid>,
+    set_id: Uuid,
+    card: SetCard,
+    decided_under: Option<Uuid>,
+) -> Result<Option<SetRequester>, DbError> {
+    if !proposer_is_live_agent_in_tx(conn, workspace_id, agent).await? {
+        return Ok(None);
+    }
+    let Some(run_id) = run_id else {
+        return Ok(None);
+    };
+    let Some((requester, channel)) =
+        momo_messaging::requester_of_run_in_tx(conn, workspace_id, run_id, agent).await?
+    else {
+        return Ok(None);
+    };
+    let state = match (card, decided_under) {
+        (SetCard::Create, Some(_)) => "proposed",
+        _ => "staging",
+    };
+    // One row at most (`id` is the head's key). `Some(None)` is a set of nobody's face.
+    let found = momo_db::sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT subject_member_id FROM expression_set \
+          WHERE workspace_id = $1 AND id = $2 AND agent_member_id = $3 \
+            AND requester_member_id = $4 AND run_id = $5 AND channel_id = $6 \
+            AND state = $7 AND approval_id IS NOT DISTINCT FROM $8",
+    )
+    .bind(workspace_id)
+    .bind(set_id)
+    .bind(agent)
+    .bind(requester)
+    .bind(run_id)
+    .bind(channel)
+    .bind(state)
+    .bind(decided_under)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.map(|face| SetRequester {
+        member: requester,
+        channel,
+        face,
+    }))
+}
+
+/// What [`resolve_set_owner_in_tx`] found.
+#[derive(Debug, Clone, Copy)]
+struct SetRequester {
+    member: Uuid,
+    channel: Uuid,
+    /// The head's `subject_member_id`: nobody's face, or the requester's.
+    face: Option<Uuid>,
 }
 
 /// What the role gate of a [`actions::RequiredRole`] is judged against.
@@ -3363,6 +3665,70 @@ pub async fn resolve_action_with_origin_in_tx(
             *target = Some(person);
             subject
         }
+        // ADR-0218 증보 6 §12 L2.4-5 · L5.1 (#5460 S1b). The set and its requester are found from the
+        // run, never from an argument: this agent's set, for the person who started this run, in
+        // this run's conversation — in the state the origin means (a proposal reads the staging
+        // plan, the decision the one that was proposed under this very approval). This door raises
+        // no other person's face: `subjectMemberId` is null or the requester.
+        ActionArgs::ExpressionSetCreate(spec) => {
+            let unresolved = || ActionRejection::new("expression set target did not resolve");
+            let Some(requester) = resolve_set_owner_in_tx(
+                conn,
+                workspace_id,
+                proposer_member_id,
+                run_id,
+                spec.set_id,
+                SetCard::Create,
+                decision_approval_id.filter(|_| origin == ArgsOrigin::Stored),
+            )
+            .await?
+            else {
+                return Ok(Err(unresolved()));
+            };
+            // **At the decision the face is the head's, never the stored payload's** (#5460 security
+            // review M1, ADR-0186 D2 「저장값을 신뢰하지 않는다」; `expression.create` reads its face back
+            // from its drafts the same way). The role gate below is judged against the face this
+            // resolution returns, and the pin is built from it: a payload whose `args.subjectMemberId`
+            // and `pins.subject` were both replaced resolves to the head's face and fails the pin
+            // comparison (`action_args_invalid`). A proposal's face is the plan read back from the head
+            // (`team_ai_set::plan_args`), so there is nothing to override.
+            if origin == ArgsOrigin::Stored {
+                spec.subject = requester.face;
+            }
+            // A face other than the requester's is not refused **here**: it is the proposal's
+            // `RequesterLacksRole` (`requester_could_approve_in_tx`, A22), and at the decision it is the
+            // face person alone who may approve (`adder_allows_in_tx` against the face read just above).
+            if let Some(face) = spec.subject {
+                if !face_is_human_in_room_in_tx(conn, workspace_id, face, requester.channel).await?
+                {
+                    return Ok(Err(unresolved()));
+                }
+            }
+            validated.rows = vec![
+                actions::action_row("제목", spec.title.clone()),
+                actions::action_row("그림 칸", format!("{}개", spec.slots.len())),
+            ];
+            GateSubject::Workspace
+        }
+        ActionArgs::ExpressionSetPlan { set_id, target } => {
+            let Some(requester) = resolve_set_owner_in_tx(
+                conn,
+                workspace_id,
+                proposer_member_id,
+                run_id,
+                *set_id,
+                SetCard::Plan,
+                None,
+            )
+            .await?
+            else {
+                return Ok(Err(ActionRejection::new(
+                    "expression set target did not resolve",
+                )));
+            };
+            *target = Some(requester.member);
+            GateSubject::Member(requester.member)
+        }
         ActionArgs::ExpressionCreate {
             candidates,
             drafts,
@@ -3702,6 +4068,17 @@ pub async fn resolve_action_with_origin_in_tx(
         ActionArgs::ExpressionCreate { subject, .. } => json!({
             "subject": subject.map(|id| id.to_string()),
         }),
+        // The set and the face (the whole of the card's role gate, as for `expression.create`); the
+        // pictures are deliberately NOT pinned, the person's choice names the exact ones.
+        ActionArgs::ExpressionSetCreate(spec) => json!({
+            "setId": spec.set_id.to_string(),
+            "subject": spec.subject.map(|id| id.to_string()),
+        }),
+        // `target`: the push audience of a `requesting_member` card reads `pins.target`.
+        ActionArgs::ExpressionSetPlan { set_id, target } => json!({
+            "target": target.map(|id| id.to_string()),
+            "setId": set_id.to_string(),
+        }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
@@ -3776,6 +4153,181 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- ADR-0218 증보 6 §12 L5.1 · A10 · A36 (#5460 S1b): the set cards' arguments ----------------
+
+    const SET_ID: &str = "00000000-0000-4000-8000-000000000001";
+
+    fn good_set_args() -> Value {
+        let slot = |index: u64, name: &str| json!({"index": index, "name": name, "displayName": "고양이", "tags": ["축하"]});
+        json!({
+            "setId": SET_ID, "title": "고양이 세트", "prefix": "cat", "tags": ["고양이"],
+            "backend": "hermes", "subjectMemberId": null, "prompt": "고양이 스티커",
+            "slots": [slot(1, "cat_hi"), slot(0, "cat_ok")],
+        })
+    }
+
+    /// The set card's arguments are a **closed** shape: a body that carries a picture (a key the plan
+    /// does not have, at the top or inside a slot) is refused before anything is written (A10), a
+    /// missing key is refused, the reserved backend and every other word are refused (A36), and the
+    /// plan is held to the rules the stored form has (prefix, unique indexes and names, 1-40 slots).
+    #[test]
+    fn the_set_args_refuse_a_picture_the_reserved_backend_and_a_plan_that_is_not_one() {
+        let parsed = expression_set_create_args(&good_set_args()).expect("a good plan");
+        // stored in slot order, whatever order it came in
+        assert_eq!(parsed.normalized["slots"][0]["index"], json!(0));
+        let ActionArgs::ExpressionSetCreate(spec) = parsed.args else {
+            panic!("an ExpressionSetCreate");
+        };
+        assert_eq!(
+            spec.slots.iter().map(|slot| slot.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(spec.subject, None);
+        // the keys a picture could ride in, at the top and inside a slot
+        for key in [
+            "dataBase64",
+            "url",
+            "attachmentId",
+            "image",
+            "bytes",
+            "media",
+            "references",
+            "sourceAttachmentId",
+        ] {
+            let mut top = good_set_args();
+            top[key] = json!("x");
+            assert!(expression_set_create_args(&top).is_err(), "top-level {key}");
+            let mut inner = good_set_args();
+            inner["slots"][0][key] = json!("x");
+            assert!(expression_set_create_args(&inner).is_err(), "slot {key}");
+        }
+        // a missing key, each in turn
+        for key in [
+            "setId",
+            "title",
+            "prefix",
+            "tags",
+            "backend",
+            "subjectMemberId",
+            "prompt",
+            "slots",
+        ] {
+            let mut missing = good_set_args();
+            missing.as_object_mut().expect("an object").remove(key);
+            assert!(
+                expression_set_create_args(&missing).is_err(),
+                "missing {key}"
+            );
+        }
+        // the backend: only the one that is on
+        for backend in [
+            json!("team_image_model"),
+            json!("openai"),
+            json!(""),
+            json!(null),
+            json!(1),
+        ] {
+            let mut other = good_set_args();
+            other["backend"] = backend.clone();
+            assert!(
+                expression_set_create_args(&other).is_err(),
+                "backend {backend}"
+            );
+        }
+        // the plan itself
+        let with = |change: &dyn Fn(&mut Value)| {
+            let mut args = good_set_args();
+            change(&mut args);
+            args
+        };
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "a name without the prefix",
+                with(&|v| v["slots"][0]["name"] = json!("dog_hi")),
+            ),
+            (
+                "the prefix alone as a name",
+                with(&|v| v["slots"][0]["name"] = json!("cat_")),
+            ),
+            (
+                "a name used twice",
+                with(&|v| v["slots"][1]["name"] = json!("cat_hi")),
+            ),
+            (
+                "an index used twice",
+                with(&|v| v["slots"][1]["index"] = json!(1)),
+            ),
+            (
+                "an index of 40",
+                with(&|v| v["slots"][0]["index"] = json!(40)),
+            ),
+            ("no slots", with(&|v| v["slots"] = json!([]))),
+            (
+                "a prefix of one letter",
+                with(&|v| v["prefix"] = json!("c")),
+            ),
+            (
+                "an upper-case prefix",
+                with(&|v| v["prefix"] = json!("Cat")),
+            ),
+            (
+                "a face that is no uuid",
+                with(&|v| v["subjectMemberId"] = json!("alice")),
+            ),
+            (
+                "a title with markup",
+                with(&|v| v["title"] = json!("<b>고양이</b>")),
+            ),
+            ("an empty prompt", with(&|v| v["prompt"] = json!(""))),
+            (
+                "a prompt over 800",
+                with(&|v| v["prompt"] = json!("가".repeat(801))),
+            ),
+            (
+                "four common tags",
+                with(&|v| v["tags"] = json!(["a", "b", "c", "d"])),
+            ),
+            ("a repeated tag", with(&|v| v["tags"] = json!(["a", "a"]))),
+            (
+                "a set id that is no uuid",
+                with(&|v| v["setId"] = json!("set-1")),
+            ),
+        ];
+        for (why, args) in cases {
+            assert!(expression_set_create_args(&args).is_err(), "{why}");
+        }
+        // 40 slots are taken, 41 are not (an index can only be 0..=39 and is used once)
+        let many = |count: u64| {
+            let mut args = good_set_args();
+            args["slots"] = json!((0..count)
+                .map(|i| json!({"index": i, "name": format!("cat_s{i}"), "displayName": "s", "tags": []}))
+                .collect::<Vec<_>>());
+            args
+        };
+        assert!(expression_set_create_args(&many(40)).is_ok());
+        assert!(expression_set_create_args(&many(41)).is_err());
+    }
+
+    /// The plan card's arguments are `{setId}` and nothing else (§12 L2.5).
+    #[test]
+    fn the_plan_args_are_the_set_id_and_nothing_else() {
+        let parsed = expression_set_plan_args(&json!({"setId": SET_ID})).expect("good");
+        assert!(matches!(
+            parsed.args,
+            ActionArgs::ExpressionSetPlan { target: None, .. }
+        ));
+        for bad in [
+            json!({}),
+            json!({"setId": "x"}),
+            json!({"setId": SET_ID, "references": []}),
+            json!({"setId": SET_ID, "attachmentId": SET_ID}),
+            json!([SET_ID]),
+            json!(null),
+        ] {
+            assert!(expression_set_plan_args(&bad).is_err(), "{bad}");
+        }
+    }
 
     /// ADR-0218 G3.6 (#4820 C2b): `{source:"assembled", assemblyId, index}` is one closed shape. The id is
     /// the contract's lowercase hyphenated uuid, the index 0..=3, and the proposal says nothing
