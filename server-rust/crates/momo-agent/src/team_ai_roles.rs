@@ -16,8 +16,9 @@
 //! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
 //! eleven cards of ADR-0201 증보 v2 F2, `invite_access` owns `invite.create` and `agent.invite`
 //! (S2, #4965), `long_research` owns the task-mode tool `task_continue` (S4, #4967), `files` owns
-//! its one tool (`read_attachment`, #4970 S7) and `code` owns the work-request card
-//! (`card_suggest`'s `work.request.open`, #4972 S9); the others are empty slots, so a later slice
+//! its one tool (`read_attachment`, #4970 S7), `code` owns the work-request card
+//! (`card_suggest`'s `work.request.open`, #4972 S9) and `hermes` owns the delegation tool
+//! `ask_hermes` (ADR-0201 증보 v4 P10, #5369); the others are empty slots, so a later slice
 //! (S8 memory) adds an id to its row and nothing else: the filters below read the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.
@@ -33,6 +34,7 @@
 
 use serde_json::Value;
 
+use crate::actions::is_server_raised_action;
 use crate::actions::{
     ACTION_AGENT_INVITE, ACTION_AGENT_PROFILE_UPDATE, ACTION_AGENT_RENAME, ACTION_CHANNEL_CREATE,
     ACTION_CHANNEL_MEMBER_ADD, ACTION_HOST_SESSION_OPEN, ACTION_INVITE_CREATE,
@@ -42,7 +44,7 @@ use crate::actions::{
     ACTION_WORKSPACE_WORK_TIER_UPDATE, TEAM_AI_ACTION_IDS,
 };
 use crate::card_suggest::{COMMAND_WORK_REQUEST_OPEN, TEAM_AI_SUGGESTABLE_COMMAND_IDS};
-use crate::tools::TASK_CONTINUE;
+use crate::tools::{ASK_HERMES, TASK_CONTINUE};
 
 /// The workspace settings key that holds the switches (an object of booleans).
 pub const SETTINGS_KEY: &str = "team_ai_roles";
@@ -56,29 +58,36 @@ pub const LONG_RESEARCH: &str = "long_research";
 pub const FILES: &str = "files";
 pub const MEMORY: &str = "memory";
 pub const CODE: &str = "code";
+/// 「Hermes 도움」 — the helper may hand work it cannot do on the team's key (a picture, and a web
+/// search its own wire cannot make) to the team's Hermes (ADR-0201 증보 v4 P10, #5369). Owns one tool,
+/// [`ASK_HERMES`]; the bundle being on is **G1** of the ten doors, and it is only the first of them.
+pub const HERMES: &str = "hermes";
 
 /// The one tool the `files` bundle owns (ADR-0201 증보 v3 B6-1, #4970 S7): the helper reads an
 /// attachment of the person who asked. Offered only while `files` is on ([`TeamAiRoles::tool_allowed`]),
 /// and refused at execution when it is off (B13-I5).
 pub const TOOL_READ_ATTACHMENT: &str = "read_attachment";
 
-/// The six switchable bundle ids, in the ADR's table order. `momo-settings` cannot see this
-/// crate, so it keeps its own copy of the six (`TEAM_AI_ROLES_KEYS`) and a drift test in
+/// The seven switchable bundle ids, in the ADR's table order (`hermes` last: the bitmask below and
+/// every older test index the first six by position). `momo-settings` cannot see this crate, so it
+/// keeps its own copy of the seven (`TEAM_AI_ROLES_KEYS`) and a drift test in
 /// `momo-workspace-actions` holds the two equal.
-pub const SWITCHABLE_BUNDLES: [&str; 6] = [
+pub const SWITCHABLE_BUNDLES: [&str; 7] = [
     WORKSPACE_ADMIN,
     INVITE_ACCESS,
     LONG_RESEARCH,
     FILES,
     MEMORY,
     CODE,
+    HERMES,
 ];
 
 /// What the 「어떤 내용이 팀 AI 공급자에게 가는지」 line was worded as, when an admin read it.
-/// **Bump this when either notice below changes** — and append the new version to
+/// **Bump this when any notice below changes (or one is added)** — and append the new version to
 /// [`NOTICE_VERSIONS`]: the consent record names this value, and a record that quotes an old
-/// version says the admin did not read the new words.
-pub const NOTICE_VERSION: &str = "2026-11-01.v1";
+/// version says the admin did not read the new words. `2026-11-06.v2` adds the `hermes` bundle's
+/// notice (ADR-0201 증보 v4 P10, #5369); the two older lines are unchanged.
+pub const NOTICE_VERSION: &str = "2026-11-06.v2";
 
 /// Every wording a **screen** may still be showing when it records that an admin read the line
 /// (`PATCH …/settings` `team_ai_roles_notice`, #5040): the screen's sentence lives in the client's
@@ -89,12 +98,17 @@ pub const NOTICE_VERSION: &str = "2026-11-01.v1";
 /// entry. **Append a new version when the wording changes; never remove one** while an installed
 /// client can still show it (a test holds every released version in this list). Spelled out
 /// rather than built from [`NOTICE_VERSION`], so bumping that constant cannot drop the old entry.
-pub const NOTICE_VERSIONS: [&str; 1] = ["2026-11-01.v1"];
+pub const NOTICE_VERSIONS: [&str; 2] = ["2026-11-01.v1", "2026-11-06.v2"];
 
 const NOTICE_FILES: &str =
     "파일을 켜면 도우미가 읽은 첨부 파일의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요.";
 const NOTICE_MEMORY: &str =
     "기억을 켜면 도우미가 찾은 팀 기억의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요.";
+/// ADR-0201 증보 v4 P10 고지 두 줄 (one string: the card shows it as one row). The first says what
+/// leaves — the one sentence the helper writes to Hermes, which Hermes sends on to the AI company it
+/// uses; the second says it stays in Hermes's own record (R4) and whose setting keeps it.
+const NOTICE_HERMES: &str = "Hermes 도움을 켜면 도우미가 맡기는 요청 문장이 Hermes가 쓰는 AI 회사(OpenAI 등)로 전달돼요. \
+     Hermes는 맡긴 요청 문장과 결과를 자기 기록(state.db)에 남겨요. 그 보관과 삭제는 oort가 아니라 운영자 설정이에요.";
 
 /// One bundle and what it owns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,7 +135,7 @@ pub struct RoleBundle {
 }
 
 /// The table. Order is the settings object's field order.
-pub const BUNDLES: [RoleBundle; 6] = [
+pub const BUNDLES: [RoleBundle; 7] = [
     RoleBundle {
         id: WORKSPACE_ADMIN,
         label: "워크스페이스 관리",
@@ -188,7 +202,26 @@ pub const BUNDLES: [RoleBundle; 6] = [
         command_ids: &[COMMAND_WORK_REQUEST_OPEN],
         notice: None,
     },
+    // ADR-0201 증보 v4 P10 (#5369): the delegation to the team's Hermes. The tool leaves the request
+    // with the bundle (`tool_allowed`, the filter the worker's loop already applies to every tool a
+    // bundle owns — G1), and a call of it that was never offered is refused (`not_offered`). Turning
+    // it on shows the two-sentence notice; with no Hermes connected it is on and does nothing.
+    RoleBundle {
+        id: HERMES,
+        label: "Hermes 도움",
+        action_ids: &[],
+        tool_names: &[ASK_HERMES],
+        command_ids: &[],
+        notice: Some(NOTICE_HERMES),
+    },
 ];
+
+/// `TeamAiRoles::off` is one `u8` of bits, one per row: an eighth switchable bundle must widen it
+/// (and `none_on`) first, instead of overflowing a shift.
+const _: () = assert!(
+    BUNDLES.len() <= 8,
+    "TeamAiRoles::off is a u8 bitmask: widen it for a ninth row"
+);
 
 /// B4-3 오염 규칙: once a request's model context holds anything it **read** — a workspace read
 /// tool's result or a web search's (later: a file, a memory, a box result) — these ids leave the
@@ -320,7 +353,8 @@ impl TeamAiRoles {
         tool_allowed_in(&BUNDLES, self, tool_name)
     }
 
-    /// The `actionId`s one model call may be offered: the allow-list, minus the ids of every
+    /// The `actionId`s one model call may be offered: the allow-list, minus the ids a server routine
+    /// raises ([`crate::actions::SERVER_RAISED_ACTION_IDS`]), minus the ids of every
     /// bundle that is off, minus [`SENSITIVE_ACTION_IDS`] when the request has `read`
     /// something (`tainted`). Catalog order. **The one function the tool schema, the system
     /// prompt and the proposal check all read**, so they cannot disagree.
@@ -328,6 +362,10 @@ impl TeamAiRoles {
         TEAM_AI_ACTION_IDS
             .iter()
             .copied()
+            // ADR-0218 증보 6 §12 L2.2, entrance 1 of 2 (#5460 S1b): the ids a server routine raises
+            // are on the allow-list (the decision accepts the helper's mark) but never offered to a
+            // model. The second entrance is `tools::catalog_definitions`.
+            .filter(|id| !is_server_raised_action(id))
             .filter(|id| self.action_allowed(id))
             .filter(|id| !(tainted && is_sensitive_action(id)))
             .collect()
@@ -478,6 +516,7 @@ pub fn prompt_role_table() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::model_offerable_action_ids;
     use serde_json::json;
 
     fn off(ids: &[&str]) -> TeamAiRoles {
@@ -539,6 +578,11 @@ mod tests {
                 .count();
             if id == ACTION_TEAM_AI_ROLES_SET {
                 assert_eq!(owners, 0, "the roles card must not be gated by a bundle");
+            } else if is_server_raised_action(id) {
+                // ADR-0218 증보 6 §12 L2.3: the bundle `hermes` takes these two when S5a lands. Until
+                // then nobody owns them, and no switch has anything to turn off: no model is offered
+                // them either way. Never two owners.
+                assert!(owners <= 1, "{id} has {owners} owners");
             } else {
                 assert_eq!(owners, 1, "{id} needs exactly one owning bundle");
             }
@@ -556,7 +600,7 @@ mod tests {
         assert_eq!(ids, SWITCHABLE_BUNDLES);
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 6);
+        assert_eq!(ids.len(), 7);
         assert!(bundle(CHAT_READ).is_none(), "chat_read is not a bundle row");
     }
 
@@ -566,8 +610,12 @@ mod tests {
     #[test]
     fn advertised_ids_follow_the_switches() {
         let all = TeamAiRoles::default().advertised_action_ids(false);
-        assert_eq!(all, TEAM_AI_ACTION_IDS);
-        assert_eq!(all.len(), 14);
+        assert_eq!(all, model_offerable_action_ids());
+        assert_eq!(
+            all.len(),
+            14,
+            "the two server-raised ids are on the allow-list, not here"
+        );
 
         let no_admin = off(&[WORKSPACE_ADMIN]).advertised_action_ids(false);
         assert_eq!(
@@ -589,7 +637,7 @@ mod tests {
         // Bundles that own no id today change nothing, so a later slice's id appears the moment
         // it is added to its row and not before.
         let no_files = off(&[FILES, MEMORY, CODE, LONG_RESEARCH]).advertised_action_ids(false);
-        assert_eq!(no_files, TEAM_AI_ACTION_IDS);
+        assert_eq!(no_files, model_offerable_action_ids());
 
         // After the request has read something the sensitive ids leave (B4-3: the two invites
         // and the roles card — the ids on the allow-list); the other eleven stay.
@@ -605,6 +653,35 @@ mod tests {
         assert!(off(&[WORKSPACE_ADMIN, INVITE_ACCESS])
             .advertised_action_ids(true)
             .is_empty());
+    }
+
+    /// ADR-0218 증보 6 §12 L2.2 · F20 · A5 (#5460 S1b), entrance 1 of 2: whatever the switches and
+    /// whatever the request has read, a model is never offered an id a server routine raises — and
+    /// the other fourteen are all still there when nothing is off. Remove the exclusion from
+    /// `advertised_action_ids` and this fails.
+    #[test]
+    fn no_request_is_ever_offered_an_id_a_server_routine_raises() {
+        let mut every_switch = vec![TeamAiRoles::default()];
+        for bundle in BUNDLES {
+            every_switch.push(off(&[bundle.id]));
+        }
+        every_switch.push(off(&SWITCHABLE_BUNDLES));
+        for roles in every_switch {
+            for tainted in [false, true] {
+                let offered = roles.advertised_action_ids(tainted);
+                for id in crate::actions::SERVER_RAISED_ACTION_IDS {
+                    assert!(
+                        !offered.contains(&id),
+                        "{id} offered (off: {:?}, tainted: {tainted})",
+                        roles.off_bundles()
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            TeamAiRoles::default().advertised_action_ids(false),
+            &TEAM_AI_ACTION_IDS[..14]
+        );
     }
 
     /// What a read takes away is exactly the difference between the two enums — never an id the
@@ -793,6 +870,7 @@ mod tests {
             "search_memory",
             "search_messages",
             TASK_CONTINUE,
+            ASK_HERMES,
         ];
         assert_eq!(unknown_tool_names(&table, &known), ["read_atachment"]);
         table[3].tool_names = &["read_attachment"];
@@ -825,9 +903,9 @@ mod tests {
     }
 
     #[test]
-    fn only_files_and_memory_carry_a_notice_and_only_when_turned_on() {
+    fn only_files_memory_and_hermes_carry_a_notice_and_only_when_turned_on() {
         for bundle in BUNDLES {
-            let expected = bundle.id == FILES || bundle.id == MEMORY;
+            let expected = bundle.id == FILES || bundle.id == MEMORY || bundle.id == HERMES;
             assert_eq!(bundle.notice.is_some(), expected, "{}", bundle.id);
             assert_eq!(notice_for(bundle.id).is_some(), expected, "{}", bundle.id);
             let on = roles_set_rows(&bundle, false, true);
@@ -840,6 +918,66 @@ mod tests {
         assert!(notice_for(MEMORY).unwrap().contains("팀 AI 공급자"));
     }
 
+    /// ADR-0201 증보 v4 P10 (#5369): the `hermes` notice says the two things the ADR requires — the
+    /// request sentence goes to Hermes's AI company, and Hermes keeps the sentence and the result in
+    /// its own record whose retention is the operator's — and it carries no value an operator or a
+    /// person typed (a fixed sentence, nothing interpolated).
+    #[test]
+    fn the_hermes_notice_says_what_leaves_and_what_stays() {
+        let notice = notice_for(HERMES).expect("the hermes bundle carries a notice");
+        assert!(notice.contains("요청 문장"), "{notice}");
+        assert!(notice.contains("AI 회사"), "{notice}");
+        assert!(notice.contains("자기 기록"), "{notice}");
+        assert!(notice.contains("운영자 설정"), "{notice}");
+        assert!(!notice.contains('{') && !notice.contains('`'), "{notice}");
+        assert_eq!(bundle(HERMES).unwrap().label, "Hermes 도움");
+        // Turning it on shows the notice row; turning it off shows none.
+        let bundle = bundle(HERMES).unwrap();
+        let on = roles_set_rows(bundle, false, true);
+        assert_eq!(on.len(), 2);
+        assert_eq!(on[1]["value"].as_str(), Some(notice));
+        assert_eq!(roles_set_rows(bundle, true, false).len(), 1);
+    }
+
+    /// B13-I5 / ADR-0201 증보 v4 G1 (#5369): `ask_hermes` is owned by the `hermes` bundle and by
+    /// nothing else — the request builder's `tool_allowed` filter drops it with that one bundle, no
+    /// other switch moves it, and unreadable settings never offer it.
+    #[test]
+    fn ask_hermes_leaves_with_the_hermes_bundle_and_with_nothing_else() {
+        let all_on = TeamAiRoles::default();
+        assert!(all_on.tool_allowed(ASK_HERMES));
+        assert!(!all_on.with(HERMES, false).tool_allowed(ASK_HERMES));
+        assert!(!TeamAiRoles::none_on().tool_allowed(ASK_HERMES));
+        for other in [
+            WORKSPACE_ADMIN,
+            INVITE_ACCESS,
+            LONG_RESEARCH,
+            FILES,
+            MEMORY,
+            CODE,
+        ] {
+            assert!(
+                all_on.with(other, false).tool_allowed(ASK_HERMES),
+                "{other} must not move the delegation tool"
+            );
+        }
+        // `long_research` off leaves the task tool out and the delegation tool IN (F17: the
+        // delegation's bundle check is `hermes`, not `long_research`).
+        let research_off = all_on.with(LONG_RESEARCH, false);
+        assert!(!research_off.tool_allowed(TASK_CONTINUE));
+        assert!(research_off.tool_allowed(ASK_HERMES));
+        assert_eq!(bundle(HERMES).unwrap().tool_names, [ASK_HERMES]);
+        assert!(bundle(HERMES).unwrap().action_ids.is_empty());
+        assert!(bundle(HERMES).unwrap().command_ids.is_empty());
+        // A present value that is not `true` fails closed for this bundle like every other.
+        for bad in [json!("true"), json!(1), json!([]), json!(false)] {
+            let roles = TeamAiRoles::from_settings(&json!({"team_ai_roles": {"hermes": bad}}));
+            assert!(!roles.is_on(HERMES), "{bad}");
+        }
+        // On by default: nothing stored reads as on (owner answer 2026-11-01 Q2 B, again for the eighth).
+        assert!(TeamAiRoles::from_settings(&json!({})).is_on(HERMES));
+    }
+
     /// A screen may name only a wording the server lists. The newest wording is always listed
     /// (bumping [`NOTICE_VERSION`] without listing it would refuse every record from the screens
     /// that show the new words), no version is listed twice, and **no released version is ever
@@ -849,6 +987,11 @@ mod tests {
         // Every wording that has shipped to a screen. Append when a new wording ships; never edit
         // or remove a line.
         const RELEASED: [&str; 1] = ["2026-11-01.v1"];
+        // `2026-11-06.v2` (the hermes line, #5369) is listed but not RELEASED: no screen shows that
+        // wording yet (the core's `TEAM_AI_NOTICE_VERSION` still says v1 until the screens that show the
+        // hermes row ship, ADR-0201 증보 v4 P14-S6/S7/S8) — it joins this const with them.
+        assert_eq!(NOTICE_VERSIONS, ["2026-11-01.v1", "2026-11-06.v2"]);
+        assert_eq!(NOTICE_VERSION, "2026-11-06.v2");
         assert_eq!(NOTICE_VERSIONS.last(), Some(&NOTICE_VERSION));
         for released in RELEASED {
             assert!(

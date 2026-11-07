@@ -178,16 +178,75 @@ pub struct WorkerConfig {
     /// `TEAM_AI_TASK_MAX_WALL_SECS`, `TEAM_AI_TASK_MAX_MODEL_CALLS`, `TEAM_AI_TASK_MAX_TOOL_CALLS`,
     /// `TEAM_AI_TASK_MAX_PER_WORKSPACE`, `TEAM_AI_TASK_MAX_PER_REQUESTER` (each at least 1).
     pub team_ai_task: momo_agent::team_ai_task::TaskLimits,
+    /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7, #5369) — the operator's per-workspace ceiling on
+    /// the team AI's delegations to Hermes per UTC day. **The opposite direction of the two ceilings
+    /// above**: `None` (unset or blank) and `Some(0)` mean the delegation is **closed**, a positive number
+    /// opens it as a ceiling no workspace value gets past, and anything that is not a whole number stops
+    /// the worker at boot like the other two do. See [`OperatorCaps::daily_delegations`].
+    ///
+    /// [`OperatorCaps::daily_delegations`]: momo_workspace_actions::team_ai_limits::OperatorCaps::daily_delegations
+    pub team_ai_hermes_daily_cap: Option<i64>,
+    /// What the operator declared about the Hermes behind this worker (ADR-0201 증보 v4 P2 G4, #5369):
+    /// `OORT_COHOSTED_AGENT_TOOLS_LOCKED`, the two connection-mode declarations (presence of a non-empty
+    /// value) and the two kind declarations. **The worker reads what the api reads** (ADR-0203 K-S2 flipped);
+    /// the templates give both services the same three. Nothing here opens by itself: the default is "no
+    /// declaration".
+    pub hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    /// How long the one request to Hermes may take, by kind (ADR-0201 증보 v4 P4 「시간」 [추정]): the search
+    /// 60 seconds, the picture 120. Counted **apart** from the helper's own 「호출당 20초·전체 45초」. The
+    /// default is not an environment variable on purpose: the numbers are estimates to be measured and
+    /// amended in the ADR, and a deployment that wants other ones is a deployment that has measured.
+    pub hermes_deadlines: HermesDeadlines,
+}
+
+/// The deadline of the one request to Hermes, by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HermesDeadlines {
+    pub web_search: Duration,
+    pub image: Duration,
+}
+
+impl Default for HermesDeadlines {
+    fn default() -> Self {
+        HermesDeadlines {
+            web_search: Duration::from_secs(
+                momo_workspace_actions::team_ai_hermes_exec::SEARCH_DEADLINE_SECS,
+            ),
+            image: Duration::from_secs(
+                momo_workspace_actions::team_ai_hermes_exec::IMAGE_DEADLINE_SECS,
+            ),
+        }
+    }
+}
+
+impl HermesDeadlines {
+    pub fn of(&self, kind: momo_workspace_actions::team_ai_hermes::HermesKind) -> Duration {
+        match kind {
+            momo_workspace_actions::team_ai_hermes::HermesKind::WebSearch => self.web_search,
+            momo_workspace_actions::team_ai_hermes::HermesKind::Image => self.image,
+        }
+    }
 }
 
 impl WorkerConfig {
-    /// The two operator ceilings as one value (the shape `momo_workspace_actions::team_ai_limits`
-    /// judges with).
+    /// The operator ceilings as one value (the shape `momo_workspace_actions::team_ai_limits`
+    /// judges with). `daily_delegations` is the third and **inverted**: its `None` is "closed".
     pub fn team_ai_caps(&self) -> momo_workspace_actions::team_ai_limits::OperatorCaps {
         momo_workspace_actions::team_ai_limits::OperatorCaps {
             daily_tokens: self.team_ai_daily_token_cap,
             daily_searches: self.team_ai_daily_search_cap,
+            daily_delegations: self.team_ai_hermes_daily_cap,
         }
+    }
+
+    /// Has the operator done everything it takes to open the team AI's delegation to Hermes on **this
+    /// process** — G4 holds, a kind is declared, the ceiling is a positive number? Without it the door is
+    /// shut whatever a workspace says, so the worker does not even read the delegation's inputs from the
+    /// database (an instance that never opted in pays nothing, and nothing about it changes).
+    pub fn hermes_delegation_opened(&self) -> bool {
+        self.hermes.g4().is_ok()
+            && (self.hermes.image_tool || self.hermes.search_tool)
+            && self.team_ai_caps().delegation_ceiling().is_some()
     }
 }
 
@@ -669,6 +728,16 @@ fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
         .map_err(|invalid| ConfigError::NotANumber(invalid.0))
 }
 
+/// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7): read by the same rule as the other two ceilings but
+/// meaning the opposite when empty — unset, blank and `0` are **closed**. A value that is not a whole
+/// number is an error here (the worker does not boot), like `TEAM_AI_DAILY_*_CAP`.
+fn operator_hermes_cap() -> Result<Option<i64>, ConfigError> {
+    momo_workspace_actions::team_ai_limits::parse_hermes_cap(
+        env(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref(),
+    )
+    .map_err(|invalid| ConfigError::NotANumber(invalid.0))
+}
+
 /// The task bounds from the environment (ADR-0201 증보 v3 B5-5): every key optional, each value at
 /// least 1 — a `0` would end every task before its first step, which is the switch's job
 /// (`long_research` off), not a limit's.
@@ -786,6 +855,11 @@ impl WorkerConfig {
             ),
             team_ai_daily_search_cap: operator_cap("TEAM_AI_DAILY_SEARCH_CAP")?,
             team_ai_task: team_ai_task_limits_from_env()?,
+            team_ai_hermes_daily_cap: operator_hermes_cap()?,
+            // `env` already reads a blank value as unset; `from_lookup` applies the same rule again so the
+            // declarations do not depend on which helper a caller passes.
+            hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env),
+            hermes_deadlines: HermesDeadlines::default(),
         })
     }
 
@@ -827,7 +901,33 @@ impl WorkerConfig {
             ),
             team_ai_daily_search_cap: None,
             team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
+            team_ai_hermes_daily_cap: None,
+            hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
+            hermes_deadlines: HermesDeadlines::default(),
         }
+    }
+
+    /// The same config with the operator's declarations about Hermes (ADR-0201 증보 v4 G4), for tests that
+    /// must not call `std::env::set_var` — what `OORT_COHOSTED_AGENT_*` is in the environment.
+    pub fn with_hermes_declarations(
+        mut self,
+        hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    ) -> WorkerConfig {
+        self.hermes = hermes;
+        self
+    }
+
+    /// The same config with the deadline of the request to Hermes (tests use a few seconds, not a minute).
+    pub fn with_hermes_deadlines(mut self, web_search: Duration, image: Duration) -> WorkerConfig {
+        self.hermes_deadlines = HermesDeadlines { web_search, image };
+        self
+    }
+
+    /// The same config with the operator's delegation ceiling (`TEAM_AI_HERMES_DAILY_CAP`): `None` and
+    /// `Some(0)` are the closed door.
+    pub fn with_hermes_daily_cap(mut self, cap: Option<i64>) -> WorkerConfig {
+        self.team_ai_hermes_daily_cap = cap;
+        self
     }
 
     /// The same config with the self-media origin set (#4820 C2a) — a value that is not a canonical

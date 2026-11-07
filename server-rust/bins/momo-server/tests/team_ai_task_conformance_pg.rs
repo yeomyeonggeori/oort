@@ -701,8 +701,9 @@ fn row_of(page: &Value, run: Uuid) -> Option<&Value> {
 }
 
 fn spent_json(prompt: i64, completion: i64, searches: i64, estimated: bool) -> Value {
+    // `delegations` (ADR-0201 증보 v4 P7, #5370): 0 on a task that never handed work to Hermes
     json!({"promptTokens": prompt, "completionTokens": completion,
-           "webSearches": searches, "estimated": estimated})
+           "webSearches": searches, "estimated": estimated, "delegations": 0})
 }
 
 /// B12 (#4968): a team-AI task run's reads say what **that run** spent — the sums of its own ledger
@@ -1050,6 +1051,9 @@ async fn s5_no_figure_a_read_carries_is_a_persons() {
                 names,
                 [
                     "completionTokens",
+                    // ADR-0201 증보 v4 P7 (#5370): a count of times the helper handed work to Hermes — a
+                    // number about the run, not a person
+                    "delegations",
                     "estimated",
                     "promptTokens",
                     "webSearches"

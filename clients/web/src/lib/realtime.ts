@@ -1,4 +1,5 @@
-import type { ExpressionChanged } from "@momo/core/features/expressions/types";
+import type { ExpressionChanged, ExpressionChangedDetail } from "@momo/core/features/expressions/types";
+import { readExpressionChangeDetail } from "@momo/core/features/expressions/changeNotice";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { Centrifuge, type Subscription } from "centrifuge";
 import { fetchRealtimeToken } from "@momo/core/lib/api";
@@ -137,11 +138,14 @@ export function resolveSpikeRealtimeUrl(
   return url;
 }
 
-type ExpressionWatcher = (workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void) => () => void;
+type ExpressionWatcher = (workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void, detail?: (frame: ExpressionChangedDetail) => void) => () => void;
 const expressionWatchers = new WeakMap<RealtimeHandle, ExpressionWatcher>();
-/** ADR-0218: a dedicated, subscribe-proxied workspace catalogue rail. */
-export function watchExpressionChanges(handle: RealtimeHandle, workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void): () => void {
-  return expressionWatchers.get(handle)?.(workspaceId, changed, resync) ?? (() => {});
+/**
+ * ADR-0218: a dedicated, subscribe-proxied workspace catalogue rail. §15 (#5491): a change also sends `expression.changed.detail` ahead of
+ * `expression.changed`; `detail` receives it. A watcher with no `detail` ignores it, which is exactly what v0.1.44 does (the frame is not a `Changed`).
+ */
+export function watchExpressionChanges(handle: RealtimeHandle, workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void, detail?: (frame: ExpressionChangedDetail) => void): () => void {
+  return expressionWatchers.get(handle)?.(workspaceId, changed, resync, detail) ?? (() => {});
 }
 
 export function createRealtime(
@@ -678,10 +682,12 @@ export function createRealtime(
       client.disconnect();
     },
   };
-  expressionWatchers.set(handle, (workspaceId, changed, resync) => attach(
+  expressionWatchers.set(handle, (workspaceId, changed, resync, detail) => attach(
     `expressions:ws${workspaceId.toUpperCase()}`, { recoverable: true, positioned: true }, (sub) => {
       const onSubscribed = () => resync();
       const onPublication = (ctx: { data?: unknown }) => {
+        const found = readExpressionChangeDetail(workspaceId, ctx.data);
+        if (found) { detail?.(found); return; }
         if (matchesExpressionContract("Changed", ctx.data)) changed(ctx.data as ExpressionChanged);
       };
       sub.on("subscribed", onSubscribed);

@@ -2154,7 +2154,9 @@ paths:
         administrator writes it here, never an agent proposal), and
         `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
         role bundles of the helper are on — `workspace_admin`, `invite_access`,
-        `long_research`, `files`, `memory`, `code`; an absent key or field is
+        `long_research`, `files`, `memory`, `code`, `hermes` (ADR-0201 증보 v4 /
+        #5369: the helper may hand work to the team's Hermes; on by default and
+        a no-op until an operator opens it); an absent key or field is
         **on**, `chat_read` is always on and is not a field, so naming it is 400.
         This is the one key merged one level down: a named field replaces, an
         omitted field stays, `null` drops the field (back to on), so a patch
@@ -2163,9 +2165,15 @@ paths:
         writes the audit row `team_ai.roles.changed` with the key names only. An
         agent's `workspace.settings.update` proposal cannot name this key),
         and `team_ai_limits` (object, ADR-0201 증보 v3 B9 / #4944: the team AI's
-        usage limits — **absent means no limit at all**; `dailyTokens` and
+        usage limits — **absent means no limit at all** (except `dailyDelegations`,
+        below); `dailyTokens` and
         `dailySearches` are whole numbers >= 1 (at most 10^12), `monthlyUsd` is
-        a number from 0.000001 to 1000000. `0`, a negative, a fraction for a
+        a number from 0.000001 to 1000000, and `dailyDelegations` (ADR-0201 증보
+        v4 P7 / #5369: how many times a day the helper may hand a request to the
+        team's Hermes) is a whole number from 1 to 200 whose absence means the
+        default 30, never "no limit" — the server operator's
+        `TEAM_AI_HERMES_DAILY_CAP` (empty = the delegation is closed) is a
+        ceiling over it. `0`, a negative, a fraction for a
         count, a non-number and an unknown field are 400; "no limit" is the
         absence of a field, never `0`. Merged one level down like
         `team_ai_roles` — a named field replaces, an omitted field stays, a
@@ -20465,7 +20473,7 @@ components:
     AgentRunSpent:
       type: object
       additionalProperties: false
-      required: [promptTokens, completionTokens, webSearches, estimated]
+      required: [promptTokens, completionTokens, webSearches, estimated, delegations]
       description: >
         ADR-0201 증보 v3 B12 (#4968). What **one run** has spent: the sums of that run's own
         usage-ledger rows (a task of several steps writes one row per step; a stopped or cut-off
@@ -20492,6 +20500,15 @@ components:
           description: >
             Some of the tokens are oort's estimate because the provider reported none
             (ADR-0147 D3). A figure that may be an estimate says so.
+        delegations:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0201 증보 v4 P7 (#5370). How many times the helper handed work to the team's Hermes in
+            this run (0 or 1 — a request delegates once). The token and search sums above are the
+            helper's own rows, i.e. the team's credits; Hermes's row is a subscription oort cannot price
+            and lives under Hermes's own agent in the usage-by-agent read.
 
     AgentRunProgressPage:
       type: object
@@ -20913,7 +20930,7 @@ components:
         B3-T, #4964) is team-AI-only the same way: 「파일 역할 꺼 줘」 said to the
         helper becomes one card that switches ONE role bundle (`bundle` is one
         of `workspace_admin`, `invite_access`, `long_research`, `files`,
-        `memory`, `code`; `chat_read` and any other name are refused as an
+        `memory`, `code`, `hermes`; `chat_read` and any other name are refused as an
         argument). An admin approves; approving runs the same merge and write
         as `PATCH …/settings` for `{team_ai_roles: {<bundle>: <enabled>}}` with
         the approver's authority and writes the audit row `team_ai.roles.changed`
@@ -20946,7 +20963,16 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
+        `expression.set.create` and `expression.set.plan` (ADR-0218 증보 2026-11-06
+        §12, #5460) are team-AI-only the same way and are raised by **server code**
+        from a stored plan, never by a model's tool call: the helper's tool does not
+        list them, and through the Agent Port they are refused exactly as an unknown
+        id. The plan card (`{setId}`, `requesting_member`) and the set card
+        (`{setId,title,prefix,tags,backend,subjectMemberId,prompt,slots}`,
+        `expression_adder`) are always decided in the app, never from a lock-screen
+        action. Their decision request and result shapes are published with the
+        decision transaction (#5461).
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "expression.set.create", "expression.set.plan", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -26322,6 +26348,7 @@ components:
             files: {type: boolean}
             memory: {type: boolean}
             code: {type: boolean}
+            hermes: {type: boolean}
         team_ai_limits:
           type: object
           description: >
@@ -26332,6 +26359,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
             dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = closed) is a ceiling over it."}
         team_ai_limits_status:
           $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
@@ -26434,6 +26462,7 @@ components:
             files: {type: boolean, nullable: true}
             memory: {type: boolean, nullable: true}
             code: {type: boolean, nullable: true}
+            hermes: {type: boolean, nullable: true}
         team_ai_roles_notice:
           nullable: true
           type: object
@@ -26484,6 +26513,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
             dailySearches: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, nullable: true}
 
     TeamAiLimitsStatus:
       type: object

@@ -210,6 +210,73 @@ pub const TASK_PLAN_ITEMS_MAX: usize = 8;
 pub const TASK_PLAN_ITEM_CHARS_MAX: usize = 60;
 pub const TASK_NOTE_CHARS_MAX: usize = 2_000;
 
+/// `ask_hermes` — the team AI's **delegation** to the team's Hermes (ADR-0201 증보 v4 P1, #5369).
+///
+/// Arguments: `{"kind": "image" | "web_search", "request": "<2..=1200 chars>"}` and nothing else
+/// (`additionalProperties: false`). It is offered only while the `hermes` bundle is on
+/// (`team_ai_roles::BUNDLES` lists it under that bundle, so the request builder's `tool_allowed`
+/// filter drops it with the bundle — G1) **and** only when the ten doors G1~G10 all judge open
+/// (`momo_workspace_actions::team_ai_hermes::judge_door`, one function), with a closed `kind` enum that
+/// holds **only the kinds this request is offered**. Like [`TASK_CONTINUE`] it is deliberately not in
+/// [`CATALOG`]: no agent profile can list it, no generic tool path can run it, and the worker handles
+/// it inline.
+pub const ASK_HERMES: &str = "ask_hermes";
+/// The two kinds of work the helper may delegate (P1: a closed enum). `image` is a still picture
+/// (P6/F11: no animation is ever promised), `web_search` is the search that the helper's own wire
+/// cannot do (P2 "종류 배타").
+pub const ASK_HERMES_KINDS: [&str; 2] = ["image", "web_search"];
+/// The bounds of `request` (P1: 문자열 2~1,200자). The schema below and
+/// `momo_workspace_actions::team_ai_hermes_request` read the same numbers.
+pub const ASK_HERMES_REQUEST_CHARS_MIN: usize = 2;
+pub const ASK_HERMES_REQUEST_CHARS_MAX: usize = 1_200;
+
+/// The description the model sees. It promises neither motion (F11: the subscription path refuses a
+/// GIF) nor a model name (F10: nothing can name or see which model draws), and it says what may be
+/// written into `request`: what the person asked for, in their own words.
+const ASK_HERMES_DESCRIPTION: &str =
+    "도우미가 직접 못 하는 일을 팀 Hermes에게 한 번 맡길 때 불러. \
+     kind는 맡길 일의 종류이고, request에는 부탁한 사람이 원한 일을 한두 문장으로 적어. \
+     사람이 쓴 말만 옮기고, 이름·메일·채널 이름·워크스페이스에서 읽은 내용은 쓰지 마. \
+     한 요청에 한 번만 부를 수 있어.";
+
+/// `ask_hermes`'s published definition, with the `kind` enum cut to `kinds` — the kinds this request
+/// is offered (`momo_workspace_actions::team_ai_hermes::DoorVerdict::offered_kinds`). `None` when
+/// nothing is on offer: a tool with no kind to give is not offered at all, like the proposal tool with
+/// no `actionId` left. A name that is not one of [`ASK_HERMES_KINDS`] is ignored, and the order is the
+/// kinds' own (not the caller's), so the schema is the same for the same set.
+pub fn ask_hermes_definition(kinds: &[&str]) -> Option<ToolDefinition> {
+    let offered: Vec<&str> = ASK_HERMES_KINDS
+        .iter()
+        .copied()
+        .filter(|kind| kinds.contains(kind))
+        .collect();
+    if offered.is_empty() {
+        return None;
+    }
+    Some(ToolDefinition {
+        name: ASK_HERMES,
+        description: ASK_HERMES_DESCRIPTION,
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": offered,
+                    "description": "맡길 일의 종류."
+                },
+                "request": {
+                    "type": "string",
+                    "minLength": ASK_HERMES_REQUEST_CHARS_MIN,
+                    "maxLength": ASK_HERMES_REQUEST_CHARS_MAX,
+                    "description": "부탁한 사람이 원한 일을 한두 문장으로."
+                }
+            },
+            "required": ["kind", "request"],
+            "additionalProperties": false
+        }),
+    })
+}
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -397,9 +464,15 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
              connected tool (PRs, deploys, metrics).",
             parameters: crate::memory_suggest::parameters(),
         },
-        // The catalog is the whole allow-list; a request is offered the part its workspace's role
-        // bundles leave on (`workspace_action_propose_definition`, ADR-0201 증보 v3 B3).
-        workspace_action_propose_definition(&crate::actions::TEAM_AI_ACTION_IDS)
+        // The catalog is the whole allow-list a model may be told; a request is offered the part its
+        // workspace's role bundles leave on (`workspace_action_propose_definition`, ADR-0201 증보 v3 B3).
+        //
+        // ADR-0218 증보 6 §12 L2.2 · F20 (#5460 S1b), entrance 2 of 2: the ids a server routine raises
+        // are on the allow-list but not in this enum. This catalog is what the profile path
+        // (`enabled_tool_definitions` → the worker's `AgentJobPayload::enabled_tools`) and the provider
+        // requests hand to a model, so an id left in it here would be advertised through a door the
+        // request-level list (`TeamAiRoles::advertised_action_ids`) does not guard.
+        workspace_action_propose_definition(&crate::actions::model_offerable_action_ids())
             .expect("the allow-list is not empty"),
     ]
 }
@@ -1126,6 +1199,71 @@ pub fn requires_approval(tool_name: &str, grants: Option<&[ToolGrant]>) -> bool 
 mod tests {
     use super::*;
 
+    /// ADR-0201 증보 v4 P1 (#5369): `ask_hermes` carries exactly `kind` + `request`, closed
+    /// (`additionalProperties: false`), with the enum cut to the kinds the request is offered — and
+    /// nothing to offer means no tool. The wire name survives the providers' name pattern, and the
+    /// tool is **not** in the catalog (no agent profile can list it).
+    #[test]
+    fn ask_hermes_is_a_closed_two_field_tool_whose_kind_enum_is_what_is_offered() {
+        assert!(ask_hermes_definition(&[]).is_none());
+        assert!(ask_hermes_definition(&["video", "gif", ""]).is_none());
+        for (offered, expected) in [
+            (vec!["image"], vec!["image"]),
+            (vec!["web_search"], vec!["web_search"]),
+            // the schema is the kinds' own order, not the caller's
+            (vec!["web_search", "image"], vec!["image", "web_search"]),
+            (vec!["image", "image", "nope"], vec!["image"]),
+        ] {
+            let definition = ask_hermes_definition(&offered).expect("a kind is on offer");
+            assert_eq!(definition.name, ASK_HERMES);
+            assert_eq!(definition.parameters["additionalProperties"], json!(false));
+            assert_eq!(
+                definition.parameters["required"],
+                json!(["kind", "request"])
+            );
+            assert_eq!(
+                definition.parameters["properties"]["kind"]["enum"],
+                json!(expected)
+            );
+            let fields: Vec<&str> = definition.parameters["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(fields.len(), 2, "{fields:?}");
+            let request = &definition.parameters["properties"]["request"];
+            assert_eq!(request["minLength"], json!(ASK_HERMES_REQUEST_CHARS_MIN));
+            assert_eq!(request["maxLength"], json!(ASK_HERMES_REQUEST_CHARS_MAX));
+        }
+        assert_eq!(
+            (ASK_HERMES_REQUEST_CHARS_MIN, ASK_HERMES_REQUEST_CHARS_MAX),
+            (2, 1_200)
+        );
+        assert_eq!(wire_tool_name(ASK_HERMES), ASK_HERMES);
+        assert!(
+            !CATALOG.contains(&ASK_HERMES),
+            "the helper's own tool is not a profile tool"
+        );
+        assert!(!is_executable(ASK_HERMES));
+    }
+
+    /// P6/F10/F11: what the model is told promises no motion and no model. A description that said
+    /// "GIF" or named a model would be a promise the subscription path cannot keep.
+    #[test]
+    fn ask_hermes_promises_neither_motion_nor_a_model() {
+        let definition = ask_hermes_definition(&ASK_HERMES_KINDS).unwrap();
+        let said = format!("{} {}", definition.description, definition.parameters);
+        for banned in [
+            "GIF", "gif", "움직", "애니", "영상", "gpt", "GPT", "dall", "DALL", "모델",
+        ] {
+            assert!(
+                !said.contains(banned),
+                "the tool text carries {banned:?}: {said}"
+            );
+        }
+    }
+
     /// The measured constraint, applied to the whole catalog (goal SRV-HOT1).
     ///
     /// This is the test that would have caught #1018 before a user did: it
@@ -1215,6 +1353,57 @@ mod tests {
             );
             assert_eq!(definition.parameters["type"], json!("object"));
         }
+    }
+
+    /// ADR-0218 증보 6 §12 L2.2 · F20 · A5 (#5460 S1b), entrance 2 of 2: the catalog the profile path
+    /// (`enabled_tool_definitions`) and every provider request hand to a model lists the allow-list
+    /// **minus** the ids a server routine raises. Remove the exclusion from `catalog_definitions` and
+    /// the first two assertions fail; they read the enum back as its own list, so a hand edit to the
+    /// tool cannot pass.
+    #[test]
+    fn the_catalog_enum_leaves_out_the_ids_a_server_routine_raises() {
+        let enum_of = |definition: &ToolDefinition| -> Vec<String> {
+            definition.parameters["properties"]["actionId"]["enum"]
+                .as_array()
+                .expect("an actionId enum")
+                .iter()
+                .map(|id| id.as_str().expect("a string").to_string())
+                .collect()
+        };
+        let in_catalog = catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == WORKSPACE_ACTION_PROPOSE)
+            .expect("the catalog carries the proposal tool");
+        let through_the_profile = enabled_tool_definitions(&[WORKSPACE_ACTION_PROPOSE.to_string()])
+            .into_iter()
+            .next()
+            .expect("a profile that enables the tool is handed it");
+        for (way, definition) in [("catalog", &in_catalog), ("profile", &through_the_profile)] {
+            let listed = enum_of(definition);
+            for id in crate::actions::SERVER_RAISED_ACTION_IDS {
+                assert!(!listed.iter().any(|listed| listed == id), "{way}: {id}");
+                let hint = definition.parameters["properties"]["args"]["description"]
+                    .as_str()
+                    .expect("an args hint");
+                assert!(!hint.contains(id), "{way}: the args hint names {id}");
+                assert!(
+                    !definition.description.contains(id),
+                    "{way}: the description names {id}"
+                );
+            }
+            assert_eq!(
+                listed,
+                crate::actions::model_offerable_action_ids(),
+                "{way}: the other fourteen are offered as they always were"
+            );
+        }
+        // The tool a request is actually offered is built from the request-level list, which holds
+        // the same exclusion (entrance 1).
+        let built = workspace_action_propose_definition(
+            &crate::team_ai_roles::TeamAiRoles::default().advertised_action_ids(false),
+        )
+        .expect("something to offer");
+        assert_eq!(enum_of(&built), enum_of(&in_catalog));
     }
 
     /// `enabled_tools ∩ CATALOG`, in both directions.

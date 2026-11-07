@@ -240,7 +240,7 @@ private_envelope_valid() {
 # No executor, no secret, no credential ever rides in the catalog, so the whole body is
 # searched for `code|secret|credential`. ONE place is excused, and only while it is what
 # it is meant to be: `code` is the NAME of a role bundle (ADR-0201 증보 v3 B3), and the
-# `team_ai.roles.set` row lists the six switchable bundle ids as the enum of its `bundle`
+# `team_ai.roles.set` row lists the seven switchable bundle ids as the enum of its `bundle`
 # argument. That enum — and only that, only while it equals the bundle table in order — is
 # taken out of the scan. Everything else is still read: a `code` anywhere else (another
 # row's enum, another argument of the same row, a one-time code on a row), and any other
@@ -249,13 +249,14 @@ private_envelope_valid() {
 # This is the shell twin of the Rust catalog test's exception
 # (server-rust/bins/momo-server/src/routes/actions.rs, the scan under "No executor, no
 # secret, no credential ever rides in the catalog": it takes the same enum out and asserts
-# it equals `momo_agent::team_ai_roles::SWITCHABLE_BUNDLES`). The six ids below are a COPY
+# it equals `momo_agent::team_ai_roles::SWITCHABLE_BUNDLES`). The seven ids below are a COPY
 # of that table (server-rust/crates/momo-agent/src/team_ai_roles.rs). When the table
 # changes this gate goes RED here on purpose — update the list in the same change; the
-# exception follows the table consciously and never widens by itself.
+# exception follows the table consciously and never widens by itself. (`hermes` is the seventh
+# since ADR-0201 증보 v4 P10, #5369.)
 ACTION_CATALOG_SCAN_JQ='
 def catalog_secret_free:
-  ["workspace_admin","invite_access","long_research","files","memory","code"] as $bundles
+  ["workspace_admin","invite_access","long_research","files","memory","code","hermes"] as $bundles
   | .actions |= map(if .id == "team_ai.roles.set"
                        and .argsSchema.properties.bundle.enum == $bundles
                     then del(.argsSchema.properties.bundle.enum)
@@ -475,7 +476,7 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
     {"id":"team_ai.roles.set","title":"도우미 역할 켜고 끄기","summary":"도우미가 할 수 있는 일의 묶음 하나를 켜거나 꺼요. 한 카드에 묶음 하나만 바꿔요.",
      "risk":"approval","requiredRole":"admin","agentDelivery":"none","executable":true,"unavailableReason":null,
      "argsSchema":{"type":"object","additionalProperties":false,"required":["bundle","enabled"],
-       "properties":{"bundle":{"type":"string","enum":["workspace_admin","invite_access","long_research","files","memory","code"]},
+       "properties":{"bundle":{"type":"string","enum":["workspace_admin","invite_access","long_research","files","memory","code","hermes"]},
                      "enabled":{"type":"boolean"}}}}]}'
   # control: the scan as it was before #5269 reads this very input as a leak. Without it
   # the green case below could be a fixture that never met the exception.
@@ -485,10 +486,10 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
     echo "[openapi-rust] catalog secret scan control: the live-shape fixture no longer trips the pre-#5269 scan (exit $legacy_rc)" >&2
     exit 1
   }
-  # 1) the live shape: the bundle name `code`, inside the six-bundle enum -> clean.
+  # 1) the live shape: the bundle name `code`, inside the seven-bundle enum -> clean.
   catalog_scan_expect 0 'live shape: code as a bundle name' "$catalog_live"
-  # 2) a seventh value in that enum is not the table, so the enum is read -> leak.
-  catalog_scan_expect 1 'seventh value in the bundle enum' \
+  # 2) one more value than the table in that enum is not the table, so the enum is read -> leak.
+  catalog_scan_expect 1 'extra value in the bundle enum' \
     "$(jq -c '.actions[1].argsSchema.properties.bundle.enum += ["credential"]' <<<"$catalog_live")"
   # 3) another argument of the same row is not the enum -> leak.
   catalog_scan_expect 1 'secret-shaped argument beside the bundle enum' \

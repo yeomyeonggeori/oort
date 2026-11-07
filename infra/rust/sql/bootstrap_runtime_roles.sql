@@ -487,23 +487,35 @@ BEGIN
 END $$;
 -- END self-media-token-lockdown
 
--- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7). Identical in
--- 169_team_ai_task.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
--- between the markers. A row's note is model-written text that may carry what the helper read for one
--- requester, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps every tenant's
--- notes away from a role with no business reading them. Each runtime role gets exactly what the code
--- does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends and sweeps, SELECT
--- reads it); momo_app only counts the concurrency slot (SELECT) and ends the task a cancel stops
--- (UPDATE); nobody deletes a row (an ended row is kept, its note gone — a foreign-key cascade from the
--- run or the workspace runs as the table's owner, so deleting a parent still clears its rows); relay,
--- notifier and platform_admin do not touch it at all. Idempotent and order-proof (a pass before the
--- table or the roles exist finishes what it can, the pass after lands the rest), and it fails loudly
--- if the result is not what is written here.
+-- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7; v2 = #5370, ADR-0201
+-- 증보 v4 P4·I6). Identical in 177_team_ai_task_delegation.sql, bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers. A row's note is model-written
+-- text that may carry what the helper read for one requester, and a delegating row's request sentence is
+-- the one sentence the helper hands to Hermes; the BYPASSRLS roles skip RLS, so their table privileges are
+-- what keeps every tenant's notes away from a role with no business reading them. Each runtime role gets
+-- exactly what the code does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends
+-- and sweeps, SELECT reads it, the request sentence included — it is the only role that sends it);
+-- momo_app counts the concurrency slot and reads the marker (SELECT of every column but the request
+-- sentence: delegation_request is NOT in its column list) and ends the task a cancel stops (UPDATE, which
+-- clears the sentence); nobody deletes a row (an ended row is kept, its note and its sentence gone — a
+-- foreign-key cascade from the run or the workspace runs as the table's owner, so deleting a parent still
+-- clears its rows); relay, notifier and platform_admin do not touch it at all. Idempotent and order-proof
+-- (a pass before the table or the roles exist finishes what it can; a pass before the delegation columns
+-- exist — a deploy runs the roles file BEFORE the migrations, so on schema 176 — still locks what is there
+-- the same way: momo_app's column grant is the list below INTERSECTED with the columns the table has, so
+-- no table-level SELECT or DELETE survives the ALL TABLES grant before it; the pass after the migration
+-- lands the rest), and it fails loudly if the result is not what is written here.
 DO $$
 DECLARE
   r text;
   p text;
+  c text;
   allowed text[];
+  app_columns text[] := ARRAY[
+    'workspace_id', 'run_id', 'agent_member_id', 'state', 'end_reason', 'steps_done', 'model_calls',
+    'tool_calls', 'web_searches', 'plan', 'note', 'claim_token', 'claim_until', 'started_at',
+    'updated_at', 'ended_at', 'delegation_kind', 'delegation_state', 'delegation_called_at',
+    'delegation_target'];
 BEGIN
   IF to_regclass('public.team_ai_task') IS NULL THEN
     RETURN;
@@ -512,7 +524,7 @@ BEGIN
   FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
     CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
     allowed := CASE r
-      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_app' THEN ARRAY['UPDATE']
       WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
       ELSE ARRAY[]::text[]
     END;
@@ -520,10 +532,28 @@ BEGIN
     IF cardinality(allowed) > 0 THEN
       EXECUTE format('GRANT %s ON TABLE public.team_ai_task TO %I', array_to_string(allowed, ', '), r);
     END IF;
+    IF r = 'momo_app' THEN
+      EXECUTE format(
+        'GRANT SELECT (%s) ON TABLE public.team_ai_task TO %I',
+        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(app_columns) AS x
+          WHERE EXISTS (SELECT 1 FROM pg_attribute
+                         WHERE attrelid = to_regclass('public.team_ai_task')
+                           AND attname = x AND NOT attisdropped)), r);
+    END IF;
     FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
       IF has_table_privilege(r, 'public.team_ai_task', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
         RAISE EXCEPTION 'role % must % % on team_ai_task',
           r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+    FOR c IN SELECT attname::text FROM pg_attribute
+              WHERE attrelid = 'public.team_ai_task'::regclass AND attnum > 0 AND NOT attisdropped LOOP
+      IF has_column_privilege(r, 'public.team_ai_task', c, 'SELECT')
+         IS DISTINCT FROM (r = 'momo_worker' OR (r = 'momo_app' AND c = ANY (app_columns))) THEN
+        RAISE EXCEPTION 'role % must % SELECT on team_ai_task.%',
+          r,
+          CASE WHEN r = 'momo_worker' OR (r = 'momo_app' AND c = ANY (app_columns)) THEN 'hold' ELSE 'not hold' END,
+          c;
       END IF;
     END LOOP;
   END LOOP;
@@ -584,6 +614,143 @@ BEGIN
   END LOOP;
 END $$;
 -- END attachment-media-lockdown
+
+-- BEGIN attachment-write-token-lockdown (#5371; ADR-0151 증보 8 W1, security review M2). Identical in
+-- 175_attachment_write_token.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the
+-- text between the markers. A row of this table lets whoever presents the token write one re-encoded
+-- picture into an in-flight run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so
+-- their table privileges are what keeps a forged row away from a role with no business writing one. Each
+-- runtime role gets exactly what the flow uses: momo_worker mints (INSERT), sweeps day-old rows (DELETE)
+-- and reads what it writes and the attachment ids a run recorded (SELECT); momo_app spends a token and
+-- records the attachment it made (UPDATE ... RETURNING, so SELECT too) and never creates or deletes one;
+-- relay, notifier and platform_admin do not touch it at all. A foreign-key cascade (run, workspace) runs
+-- as the table's owner, so deleting a parent still clears its rows. Idempotent and order-proof (a pass
+-- before the table or the roles exist finishes what it can, the pass after lands the rest), and it fails
+-- loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.attachment_write_token') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.attachment_write_token FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.attachment_write_token FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.attachment_write_token TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.attachment_write_token', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on attachment_write_token',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END attachment-write-token-lockdown
+
+-- BEGIN expression-set-lockdown (#5459 S1a; ADR-0218 증보 6 §12 L10.1, threat T20). Identical in
+-- 176_expression_set.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. The set tables hold what the team AI planned and made before any person approved
+-- it (a prompt, scene text, up to 24 MiB of pictures per set), the writer is the BYPASSRLS momo_worker, and
+-- every BYPASSRLS role skips RLS, so their table privileges are what keeps a forged or foreign row away
+-- from a role with no business writing one. Each runtime role gets exactly what the code does:
+-- momo_worker stages (INSERT), closes slots and heads (UPDATE) and takes pixels back (DELETE on the images);
+-- momo_app decides and reclaims (moves the head, deletes the pixels, and blanks the scene text through a
+-- column grant, UPDATE (scene), on the slot: it can never close or re-plan a slot) and records
+-- the first notice a member saw; momo_notifier only discovers which tenants hold an expired staging set,
+-- through three columns and never the prompt; nobody deletes a head, a slot or a notice (a foreign-key
+-- cascade from the workspace runs as the table's owner, so deleting a parent still clears its rows) and
+-- nobody changes a pixel or a notice. relay, platform_admin and the helper's read role do not touch the
+-- tables at all. Idempotent and order-proof (a pass before the tables or the roles exist finishes what it
+-- can, the pass after lands the rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  t text;
+  r text;
+  p text;
+  c text;
+  allowed text[];
+  want boolean;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice'] LOOP
+    CONTINUE WHEN to_regclass(format('public.%I', t)) IS NULL;
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      allowed := CASE t || '/' || r
+        WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
+        WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+        WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
+        WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
+        WHEN 'expression_set_notice/momo_app' THEN ARRAY['SELECT', 'INSERT']
+        ELSE ARRAY[]::text[]
+      END;
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+      IF cardinality(allowed) > 0 THEN
+        EXECUTE format('GRANT %s ON TABLE public.%I TO %I', array_to_string(allowed, ', '), t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+  -- the one cross-tenant read: the TTL sweep finds the tenants whose staging set is due (workspace ids only)
+  IF to_regclass('public.expression_set') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN
+    GRANT SELECT (workspace_id, state, expires_at) ON expression_set TO momo_notifier;
+  END IF;
+  -- the one slot write the decision side makes: blank the scene text of an ended set (column-level, so
+  -- a slot's state, code and plan stay out of this role's reach)
+  IF to_regclass('public.expression_set_slot') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    GRANT UPDATE (scene) ON expression_set_slot TO momo_app;
+  END IF;
+  FOREACH t IN ARRAY ARRAY['expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice'] LOOP
+    CONTINUE WHEN to_regclass(format('public.%I', t)) IS NULL;
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      allowed := CASE t || '/' || r
+        WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
+        WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+        WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
+        WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
+        WHEN 'expression_set_notice/momo_app' THEN ARRAY['SELECT', 'INSERT']
+        ELSE ARRAY[]::text[]
+      END;
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        IF has_table_privilege(r, format('public.%I', t), p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+          RAISE EXCEPTION 'role % must % % on %',
+            r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p, t;
+        END IF;
+      END LOOP;
+      FOR c IN SELECT a.attname::text FROM pg_attribute a
+                WHERE a.attrelid = format('public.%I', t)::regclass AND a.attnum > 0 AND NOT a.attisdropped LOOP
+        FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE'] LOOP
+          want := p = ANY (allowed)
+                  OR (p = 'SELECT' AND t = 'expression_set' AND r = 'momo_notifier'
+                      AND c IN ('workspace_id', 'state', 'expires_at'))
+                  OR (p = 'UPDATE' AND t = 'expression_set_slot' AND r = 'momo_app' AND c = 'scene');
+          IF has_column_privilege(r, format('public.%I', t), c, p) IS DISTINCT FROM want THEN
+            RAISE EXCEPTION 'role % must % % on %.%',
+              r, CASE WHEN want THEN 'hold' ELSE 'not hold' END, p, t, c;
+          END IF;
+        END LOOP;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END expression-set-lockdown
 
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply

@@ -2491,8 +2491,9 @@ memory:                        # ADR-0203 R2: one Hermes serves every workspace,
    `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
    `AGENT_PROVIDER_LOCAL_HOSTS=<service-name>.railway.internal` (exact host, no
    wildcard). A plain `http://` internal host is refused without this opt-in.
-7. **Attest the lock** on the `api` service:
-   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`. This is the operator's own
+7. **Attest the lock** on the `api` **and** `agent-worker` services (the Railway
+   template already carries it on both; ADR-0201 증보 v4 flips ADR-0203 K-S2's "api only":
+   the worker reads the same declaration): `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`. This is the operator's own
    declaration that steps 1-4 were followed. oort shows it that way and does
    not verify it; a false declaration leaves a terminal on the agent host.
 8. In the web or desktop app, as the instance operator
@@ -2683,8 +2684,12 @@ mcp_servers:
 4. **Log in** from the Hermes shell: `hermes mcp login <server>` (paste the
    redirect URL back; the redirect port can be fixed with `oauth.redirect_port`).
    Do not copy token files from your own machine.
-5. **Declare on oort's `api` service** (the service that answers the routes; the
-   other services need nothing):
+5. **Declare on oort's `api` AND `agent-worker` services, the same values on both**
+   (the Railway template and compose give both services the same three variables, and
+   `check_railway_catalog.py` / `test_self_host_env_modes.sh` fail when one side differs):
+   the team AI's worker reads them too, and a **non-empty** connection-mode value there — even
+   `0` — shuts the helper's delegation to Hermes, so a Hermes that carries a person's apps can
+   never be reached through the helper. Set on `api` alone, the worker would not know.
    `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=1` (you followed steps 2-3) and
    `OORT_COHOSTED_AGENT_CONNECTOR_APPS=com.momo.plugins.gmail,com.momo.plugins.google-calendar`
    (the apps switched on in Hermes, comma separated). A malformed id voids the whole

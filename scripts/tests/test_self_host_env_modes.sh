@@ -2001,10 +2001,32 @@ else:
             bad.append("%s lacks the exact-host local opt-in for hermes" % name)
         if "*" in e.get("AGENT_PROVIDER_LOCAL_HOSTS", ""):
             bad.append("%s opts in a wildcard host" % name)
-    if api.get("OORT_COHOSTED_AGENT_TOOLS_LOCKED") != "1":
-        bad.append("api lacks OORT_COHOSTED_AGENT_TOOLS_LOCKED=1")
-    if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in worker:
-        bad.append("agent-worker carries the api-only lock declaration")
+    # ADR-0201 증보 v4 G4 (#5369, review RM1/RM2) FLIPS ADR-0203 K-S2's "api only": api and agent-worker carry the SAME THREE
+    # declarations. Compose's own `config` renders `${VAR:-}` as a present-but-EMPTY key, so "the same" is: the key is present
+    # on BOTH (a missing key is not an empty one — the worker would judge a mode api does not see) and the two values are
+    # equal, whichever side differs. The generated team default mode ships TOOLS_LOCKED `1` and the two connection-mode
+    # declarations EMPTY on both services.
+    for var, default in (
+        ("OORT_COHOSTED_AGENT_TOOLS_LOCKED", "1"),
+        ("OORT_COHOSTED_AGENT_CONNECTORS_LOCKED", ""),
+        ("OORT_COHOSTED_AGENT_CONNECTOR_APPS", ""),
+    ):
+        for role, e in (("api", api), ("agent-worker", worker)):
+            if var not in e:
+                bad.append("%s lacks %s (api and agent-worker carry the same three declarations)" % (role, var))
+            elif e[var] != default:
+                bad.append("%s %s is %r, not the team default mode's %r" % (role, var, e[var], default))
+        if api.get(var) != worker.get(var):
+            bad.append("api and agent-worker disagree on %s (api %r, agent-worker %r)" % (var, api.get(var), worker.get(var)))
+    # The Hermes delegation stays closed as shipped: no kind declared, and the per-workspace operator ceiling EMPTY (which
+    # means CLOSED, unlike the two older ceilings): a template that carried a value would make the first release with the
+    # delegation active by itself.
+    for var in ("OORT_COHOSTED_AGENT_IMAGE_TOOL", "OORT_COHOSTED_AGENT_SEARCH_TOOL"):
+        if worker.get(var) != "":
+            bad.append("agent-worker %s is %r (the template declares no Hermes kind: present and empty)" % (var, worker.get(var)))
+    for role, e in (("api", api), ("agent-worker", worker)):
+        if e.get("TEAM_AI_HERMES_DAILY_CAP") != "":
+            bad.append("%s TEAM_AI_HERMES_DAILY_CAP is %r (the template ships it present and EMPTY = delegation closed)" % (role, e.get("TEAM_AI_HERMES_DAILY_CAP")))
     for secret in ("DATABASE_URL", "WORKER_DATABASE_URL", "PROVIDER_LINK_MASTER_KEY", "JWT_HMAC"):
         if secret in env:
             bad.append("hermes holds oort secret %s" % secret)
@@ -2083,6 +2105,29 @@ elif edit == "wildcard-host":
     api["AGENT_PROVIDER_LOCAL_HOSTS"] = "*"
 elif edit == "no-attest":
     api["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = ""
+elif edit == "worker-attest-dropped":  # K-S2 flipped: the worker lost the declaration api has
+    del cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
+elif edit == "api-connector-apps-only":  # connection mode on api alone
+    api["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+elif edit == "worker-connector-apps-only":  # and the other direction
+    cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+elif edit == "api-connectors-locked-only":
+    api["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "1"
+elif edit == "worker-connectors-locked-only":
+    cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "1"
+elif edit == "worker-connectors-locked-zero":  # a `0` is a value, not an absence
+    cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "0"
+elif edit == "connector-apps-differ":  # both set, not the same list
+    api["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+    cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.google-calendar"
+elif edit == "worker-connector-apps-dropped":  # a missing key is not an empty one
+    del cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
+elif edit == "api-connector-apps-dropped":
+    del api["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
+elif edit == "hermes-cap-shipped-set":  # the template must not open the delegation by itself
+    cfg["services"]["agent-worker"]["environment"]["TEAM_AI_HERMES_DAILY_CAP"] = "30"
+elif edit == "hermes-kind-shipped-declared":
+    cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_SEARCH_TOOL"] = "1"
 elif edit == "relay-key-kept":
     h["command"] = [h["command"][0].replace("unset HERMES_LOGIN_RELAY_KEY; ", "")]
 elif edit == "relay-before-gate":
@@ -2126,10 +2171,13 @@ PY
 }
 for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest \
   relay-key-kept relay-before-gate relay-on-worker relay-url-elsewhere relay-key-differs-on-api \
-  guard-not-installed guard-after-gate writable-guard no-media-strict media-strict-wrong door-attested-by-default door-var-on-api; do
+  guard-not-installed guard-after-gate writable-guard no-media-strict media-strict-wrong door-attested-by-default door-var-on-api \
+  worker-attest-dropped api-connector-apps-only worker-connector-apps-only api-connectors-locked-only \
+  worker-connectors-locked-only worker-connectors-locked-zero connector-apps-differ worker-connector-apps-dropped \
+  api-connector-apps-dropped hermes-cap-shipped-set hermes-kind-shipped-declared; do
   agents_sabotage "$sab" "$sab"
 done
-echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec + image guard plugin installed before the gate from a read-only mount + strict media delivery on (hermes) and the hosted door shut by default (agent-worker); 20 sabotages RED"
+echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec + image guard plugin installed before the gate from a read-only mount + strict media delivery on (hermes) and the hosted door shut by default (agent-worker) + api and agent-worker carry the SAME THREE OORT_COHOSTED_AGENT_* declarations (ADR-0201 증보 v4 G4, K-S2 flipped) and the Hermes delegation ships closed; 31 sabotages RED"
 
 # Add-only on the existing env: the generated key is never replaced, a re-run of
 # --allow-local-provider alone keeps the Hermes host, and a second --with-agents
@@ -2203,7 +2251,41 @@ run_generator "$bs_fixture" "$bs_fixture/bs-output" 49814 --local-build --with-a
 [ "$(grep -c '^AGENT_PROVIDER_LOCAL_HOSTS=' "$bs_fixture/infra/rust/local.secrets.env")" = "1" ]
 ! grep -qx 'b,hermes' "$bs_fixture/infra/rust/local.secrets.env" || { echo "backslash value was split into two lines" >&2; exit 1; }
 
-echo "with-agents: add-only re-run, host merge both orders, foreign HERMES_BASE_URL refused, default stack has no hermes"
+# ADR-0201 증보 v4 G4: a connection-mode declaration the operator left in the env is kept untouched and only NAMED (never
+# with its value) — api and agent-worker both read it, and while it is set the worker keeps the Hermes delegation shut. An
+# empty one, and a default run, say nothing.
+if grep -Fq '연결 모드 선언이 env 에 남아 있다' "$agents_fixture/output" "$agents_fixture/rerun-output"; then
+  echo "--with-agents named a connection-mode declaration that was not set" >&2
+  exit 1
+fi
+conn_fixture="$(make_fixture with-agents-connection)"
+run_generator "$conn_fixture" "$conn_fixture/output" 49818 --local-build
+printf 'OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=0\nOORT_COHOSTED_AGENT_CONNECTOR_APPS=com.momo.plugins.gmail\n' \
+  >>"$conn_fixture/infra/rust/local.secrets.env"
+run_generator "$conn_fixture" "$conn_fixture/conn-output" 49818 --local-build --with-agents
+grep -Fq '연결 모드 선언이 env 에 남아 있다: OORT_COHOSTED_AGENT_CONNECTORS_LOCKED OORT_COHOSTED_AGENT_CONNECTOR_APPS' "$conn_fixture/conn-output" || {
+  echo "--with-agents did not name the leftover connection-mode declarations: $(cat "$conn_fixture/conn-output")" >&2
+  exit 1
+}
+if grep -Fq 'com.momo.plugins.gmail' "$conn_fixture/conn-output"; then
+  echo "--with-agents printed the value of a connection-mode declaration" >&2
+  exit 1
+fi
+grep -Fxq 'OORT_COHOSTED_AGENT_CONNECTOR_APPS=com.momo.plugins.gmail' "$conn_fixture/infra/rust/local.secrets.env" || {
+  echo "--with-agents rewrote the operator's connection-mode declaration" >&2
+  exit 1
+}
+grep -Fxq 'OORT_COHOSTED_AGENT_TOOLS_LOCKED=1' "$conn_fixture/infra/rust/local.secrets.env"
+conn_empty_fixture="$(make_fixture with-agents-connection-empty)"
+run_generator "$conn_empty_fixture" "$conn_empty_fixture/output" 49822 --local-build
+printf 'OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=\nOORT_COHOSTED_AGENT_CONNECTOR_APPS=\n' >>"$conn_empty_fixture/infra/rust/local.secrets.env"
+run_generator "$conn_empty_fixture" "$conn_empty_fixture/empty-output" 49822 --local-build --with-agents
+if grep -Fq '연결 모드 선언이 env 에 남아 있다' "$conn_empty_fixture/empty-output"; then
+  echo "--with-agents named an EMPTY connection-mode declaration" >&2
+  exit 1
+fi
+
+echo "with-agents: add-only re-run, host merge both orders, foreign HERMES_BASE_URL refused, default stack has no hermes, a leftover connection-mode declaration is named (never its value) and kept"
 # Railway renders the catalog (infra/railway/railway.json), not a file.
 if run_generator "$(make_fixture with-agents-railway)" "$TMP_ROOT/agents-railway-output" 49806 \
   --platform railway --with-agents; then

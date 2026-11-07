@@ -108,6 +108,10 @@ impl StubDriveArchive {
 
 #[async_trait]
 impl DriveArchive for StubDriveArchive {
+    fn backend_kind(&self) -> &'static str {
+        "stub"
+    }
+
     fn accepts_stub_uploads(&self) -> bool {
         true
     }

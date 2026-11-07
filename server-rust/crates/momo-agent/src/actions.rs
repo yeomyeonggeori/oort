@@ -156,6 +156,19 @@ pub const ACTION_MESSAGE_UNPIN: &str = "message.unpin";
 /// action: only an external agent a person asked, through `oort_action_propose`.
 pub const ACTION_EXPRESSION_CREATE: &str = "expression.create";
 
+/// `expression.set.create` — the approval card of one emoticon **set** the team AI made for a
+/// person who asked (ADR-0218 증보 6 §12 L2·L5, #5460 S1b). Up to 40 slots, one approval, the person
+/// keeps the pictures they chose. Raised by **server code** from the stored plan
+/// (`momo_workspace_actions::team_ai_set`), never by a model's tool call: it is on
+/// [`TEAM_AI_ACTION_IDS`] (so the decision route accepts the helper's mark) and on
+/// [`SERVER_RAISED_ACTION_IDS`] (so no model is offered it).
+pub const ACTION_EXPRESSION_SET_CREATE: &str = "expression.set.create";
+
+/// `expression.set.plan` — the plan card of a set (ADR-0218 §12 L2.5): shown **before** anything is
+/// made, decided by the requester alone and **only in the app** (R2-H1, A44). Same two lists as
+/// [`ACTION_EXPRESSION_SET_CREATE`]. Its executor is S5a's.
+pub const ACTION_EXPRESSION_SET_PLAN: &str = "expression.set.plan";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -312,7 +325,13 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// Still outside: `hosted.channels.grant` (widens the proposing agent's own access, which the
 /// helper does not have, B4-6) and everything declared but not executable (`webhook.create`,
 /// `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 14] = [
+///
+/// ADR-0218 증보 6 §12 L2.2 (#5460 S1b) adds the two **server-raised** ids at the end
+/// ([`SERVER_RAISED_ACTION_IDS`]). They are on this list because the decision route accepts a card
+/// carrying the helper's mark only for an action that is on it (`card_provenance`) — leaving them off
+/// would let the card stand once and then refuse its own approval. **On the list is not offered**:
+/// no model is ever told these ids (see [`SERVER_RAISED_ACTION_IDS`]).
+pub const TEAM_AI_ACTION_IDS: [&str; 16] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -327,7 +346,42 @@ pub const TEAM_AI_ACTION_IDS: [&str; 14] = [
     ACTION_INVITE_CREATE,
     ACTION_AGENT_INVITE,
     ACTION_TEAM_AI_ROLES_SET,
+    ACTION_EXPRESSION_SET_CREATE,
+    ACTION_EXPRESSION_SET_PLAN,
 ];
+
+/// The allow-list ids a **server routine** raises and a model never names (ADR-0218 증보 6 §12 L2.2,
+/// F20). A set's plan is fixed before anything is read and its cards are written by worker code from
+/// the stored plan, so the model has no business holding these ids: they leave **both** entrances
+/// of the `workspace_action_propose` tool's `actionId` enum —
+///
+/// 1. `TeamAiRoles::advertised_action_ids` (the request's tool list, the system prompt and the
+///    proposal check), and
+/// 2. [`crate::tools::catalog_definitions`] (and so the profile path `enabled_tool_definitions`
+///    and every provider request built from the catalog) —
+///
+/// and a model that names one anyway is refused as not offered
+/// (`momo_workspace_actions::team_ai::ProposalRefusal::NotAllowed`, the answer for an id the model was
+/// not given) with no row written. Because
+/// nothing offers them, landing S1b changes nothing a user can see.
+pub const SERVER_RAISED_ACTION_IDS: [&str; 2] =
+    [ACTION_EXPRESSION_SET_CREATE, ACTION_EXPRESSION_SET_PLAN];
+
+/// Is `action_id` one a server routine raises and no model is offered ([`SERVER_RAISED_ACTION_IDS`])?
+pub fn is_server_raised_action(action_id: &str) -> bool {
+    SERVER_RAISED_ACTION_IDS.contains(&action_id)
+}
+
+/// The allow-list as a **model** may be told it: [`TEAM_AI_ACTION_IDS`] minus
+/// [`SERVER_RAISED_ACTION_IDS`], in list order. The one place both advertisement entrances start
+/// from, so neither can forget the exclusion on its own.
+pub fn model_offerable_action_ids() -> Vec<&'static str> {
+    TEAM_AI_ACTION_IDS
+        .iter()
+        .copied()
+        .filter(|id| !is_server_raised_action(id))
+        .collect()
+}
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
 /// of (only) the approver (ADR-0186 증보 v3 V3-3a, V3-5).
@@ -726,6 +780,8 @@ impl DecisionReason {
 /// 4. an `agent.profile.update` that changes the avatar or name, every
 ///    `member.avatar.set`, `member.display_name.set` and `agent.rename`: the person
 ///    sees the picture or the before/after name in the app (#4810);
+///    The two cards of an emoticon set (`expression.set.create`, `expression.set.plan`; ADR-0218
+///    증보 6 §12 L2.5 · R2-H1) open for the same reason: what a person agrees to is inside the card;
 /// 5. every `message.pin` and `message.unpin` (ADR-0186 증보 v5 U-e): the card names a
 ///    message by its first 120 characters, and a pin endorses all of it;
 /// 6. **a `hosted.channels.grant` an agent asked for** (D6-2: 권한 — the agent may read and
@@ -872,6 +928,15 @@ fn judge(action_type: &str, payload: &Value) -> (DecisionMode, DecisionReason) {
                 // none: the push says 「앱에서 확인」 and offers no 승인 button
                 // (ADR-0186 증보 v8 X8-3).
                 || id == ACTION_EXPRESSION_CREATE
+                // The set's two cards (ADR-0218 증보 6 §12 L6.4 · L2.5, R2-H1, A44). The set card shows
+                // the pictures; the plan card holds the first notice, the thumbnails and the count of
+                // the pictures about to leave for another company, and the 「사람 얼굴이 없어요」
+                // declaration — all inside the card, none on a banner. The default is Inline (F22), so
+                // leaving either id off this list would let one tap on a lock screen confirm a plan
+                // nobody read. The id decides: an argument's value is never read here, so a plan with no
+                // reference pictures opens too.
+                || id == ACTION_EXPRESSION_SET_CREATE
+                || id == ACTION_EXPRESSION_SET_PLAN
                 // The card carries the 「공급자로 가는 내용」 line for `files` and `memory`;
                 // approving is the consent to it, so it is read in the app (ADR-0201 증보
                 // v3 B3-T). The id decides — an argument's value is never read here.
@@ -1287,6 +1352,58 @@ fn expression_create_args_schema() -> Value {
                     }
                 }
             }
+        }
+    })
+}
+
+/// ADR-0218 증보 6 §12 L4: the slots of one set, gray ones included.
+pub const EXPRESSION_SET_SLOTS_MAX: usize = 40;
+
+/// `expression.set.create`'s `args` (ADR-0218 §12 L5.1, core `SetAction.args`): the **plan** as the
+/// server stored it, written by server code and never by a model. Closed on purpose: a picture key
+/// (`dataBase64`, `url`, `attachmentId`, `image`, a rendition, a byte string) is not a key of this
+/// shape, so a body that carries one is refused as invalid arguments and nothing is written (A10).
+fn expression_set_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["setId", "title", "prefix", "tags", "backend", "subjectMemberId", "prompt", "slots"],
+        "properties": {
+            "setId": {"type": "string", "minLength": 36, "maxLength": 36, "description": "The staged set. The server fills it; it is never a model's value."},
+            "title": {"type": "string", "minLength": 1, "maxLength": 40},
+            "prefix": {"type": "string", "minLength": 2, "maxLength": 12, "pattern": "^[a-z0-9]{2,12}$"},
+            "tags": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 16}},
+            "backend": {"type": "string", "enum": ["hermes", "team_image_model"], "description": "Chosen by the server, never by a model; the second word is reserved and refused."},
+            "subjectMemberId": {"type": ["string", "null"], "maxLength": 36, "description": "REQUIRED to be present: null = nobody's face is in the pictures; otherwise the requester."},
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 800},
+            "slots": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": EXPRESSION_SET_SLOTS_MAX,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["index", "name", "displayName", "tags"],
+                    "properties": {
+                        "index": {"type": "integer", "minimum": 0, "maximum": 39},
+                        "name": {"type": "string", "minLength": 2, "maxLength": 30, "pattern": "^[a-z0-9_-]{2,30}$"},
+                        "displayName": {"type": "string", "minLength": 1, "maxLength": 40},
+                        "tags": {"type": "array", "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 16}}
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// `expression.set.plan`'s `args` (ADR-0218 §12 L2.5): the staged set the plan card is about.
+fn expression_set_plan_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["setId"],
+        "properties": {
+            "setId": {"type": "string", "minLength": 36, "maxLength": 36, "description": "The staged set the plan card is about. The server fills it."}
         }
     })
 }
@@ -2111,6 +2228,38 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         question: "도우미 역할을 바꿔도 될까요?",
         done: "도우미 역할을 바꿨어요",
         args_schema: team_ai_roles_set_args_schema,
+    },
+    // ADR-0218 증보 6 §12 L2.1 (#5460 S1b): the two cards of an emoticon set. `TeamAiOnly`, so the
+    // Agent Port refuses both ids exactly like an unknown id; on [`TEAM_AI_ACTION_IDS`] so the
+    // decision route accepts the helper's mark; on [`SERVER_RAISED_ACTION_IDS`] so no model is told
+    // them. Neither is initiative: nobody may raise a set nobody asked for.
+    WorkspaceAction {
+        id: ACTION_EXPRESSION_SET_CREATE,
+        title: "팀 표현 세트 추가",
+        summary: "도우미가 만든 그림 세트(최대 40칸)에서 저장할 그림을 골라 팀 보관함에 한꺼번에 저장해요. 저장될 그림을 직접 보고 고르며, 얼굴이 있으면 그 본인만 승인할 수 있어요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::ExpressionAdder,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        initiative: false,
+        effect: "카드에서 고른 그림들을 팀 보관함에 저장해요",
+        question: "팀 표현 세트를 추가해도 될까요?",
+        done: "팀 표현 세트를 추가했어요",
+        args_schema: expression_set_create_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_EXPRESSION_SET_PLAN,
+        title: "표현 세트 만들기 계획",
+        summary: "도우미가 만들 그림 세트의 계획을 확인해요. 이대로 만들기를 누르면 그림 만들기가 시작돼요. 요청한 본인만 앱에서 누를 수 있어요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::RequestingMember,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        initiative: false,
+        effect: "계획한 장면대로 그림 세트 만들기를 시작해요",
+        question: "이 계획대로 표현 세트를 만들어도 될까요?",
+        done: "만들기를 시작했어요",
+        args_schema: expression_set_plan_args_schema,
     },
     WorkspaceAction {
         id: ACTION_DM_AGENT_ADMIT,
@@ -3138,6 +3287,8 @@ mod tests {
                 "workspace.work_tier.update",
                 "plugin.install",
                 "team_ai.roles.set",
+                "expression.set.create",
+                "expression.set.plan",
                 "dm.agent.admit"
             ]
         );
@@ -3174,6 +3325,8 @@ mod tests {
                 "invite.create",
                 "agent.invite",
                 "team_ai.roles.set",
+                "expression.set.create",
+                "expression.set.plan",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -3216,7 +3369,10 @@ mod tests {
                 ACTION_WORKSPACE_MEMORY_UPDATE,
                 ACTION_WORKSPACE_WORK_TIER_UPDATE,
                 ACTION_PLUGIN_INSTALL,
-                ACTION_TEAM_AI_ROLES_SET
+                ACTION_TEAM_AI_ROLES_SET,
+                // ADR-0218 증보 6 §12 (#5460 S1b, A4): the set's two cards.
+                ACTION_EXPRESSION_SET_CREATE,
+                ACTION_EXPRESSION_SET_PLAN
             ]
         );
         assert_eq!(
@@ -3257,6 +3413,164 @@ mod tests {
                 "only a human DM call may raise consent"
             );
         }
+    }
+
+    /// ADR-0218 증보 6 §12 L2 (#5460 S1b, A4): the set's two cards are registered, the helper's alone,
+    /// and on the allow-list **and** on the server-raised list. The Agent Port's lists do not move: 13
+    /// proposable ids and 4 initiative ids, and both ids answer there exactly like an unknown id.
+    #[test]
+    fn the_two_set_cards_are_the_helpers_alone_and_raised_by_the_server() {
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 16);
+        assert_eq!(
+            SERVER_RAISED_ACTION_IDS,
+            [ACTION_EXPRESSION_SET_CREATE, ACTION_EXPRESSION_SET_PLAN]
+        );
+        for id in SERVER_RAISED_ACTION_IDS {
+            assert!(
+                TEAM_AI_ACTION_IDS.contains(&id),
+                "{id}: on the allow-list, or the decision route refuses the helper's own card"
+            );
+            assert!(is_server_raised_action(id), "{id}");
+            let action = action_by_id(id).expect("registered");
+            assert_eq!(action.proposers, Proposers::TeamAiOnly, "{id}");
+            assert!(
+                !action.initiative,
+                "{id}: nobody raises a set nobody asked for"
+            );
+            assert_eq!(action.risk, Risk::Approval, "{id}");
+            assert_eq!(action.secret_delivery, SecretDelivery::None, "{id}");
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::AgentPort).is_none(),
+                "{id}: through the Agent Port it must read as an unknown id"
+            );
+            assert!(initiative_action_by_id(id).is_none(), "{id}");
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::TeamAi).is_some(),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            action_by_id(ACTION_EXPRESSION_SET_CREATE).map(|a| a.required_role),
+            Some(RequiredRole::ExpressionAdder)
+        );
+        assert_eq!(
+            action_by_id(ACTION_EXPRESSION_SET_PLAN).map(|a| a.required_role),
+            Some(RequiredRole::RequestingMember)
+        );
+        assert_eq!(proposable_action_ids(ProposalDoor::AgentPort).len(), 13);
+        assert_eq!(initiative_action_ids().len(), 4);
+        // What a model may be told is the allow-list without the two.
+        let offerable = model_offerable_action_ids();
+        assert_eq!(offerable.len(), 14);
+        for id in SERVER_RAISED_ACTION_IDS {
+            assert!(!offerable.contains(&id), "{id}");
+        }
+        assert_eq!(
+            offerable,
+            TEAM_AI_ACTION_IDS[..14].to_vec(),
+            "the fourteen the helper has always been offered, in order"
+        );
+    }
+
+    /// The two arg shapes are closed and have no key a picture could ride in (A10): the schema is the
+    /// first door of a proposal body, the stored form is re-validated against it at the decision.
+    #[test]
+    fn the_set_args_are_closed_and_have_no_key_for_a_picture() {
+        let keys = |schema: &Value| -> std::collections::BTreeSet<String> {
+            schema["properties"]
+                .as_object()
+                .expect("properties")
+                .keys()
+                .cloned()
+                .collect()
+        };
+        let create = action_by_id(ACTION_EXPRESSION_SET_CREATE)
+            .expect("registered")
+            .args_schema();
+        assert_eq!(create["additionalProperties"], json!(false));
+        assert_eq!(
+            keys(&create),
+            [
+                "setId",
+                "title",
+                "prefix",
+                "tags",
+                "backend",
+                "subjectMemberId",
+                "prompt",
+                "slots"
+            ]
+            .iter()
+            .map(|key| key.to_string())
+            .collect()
+        );
+        assert_eq!(create["properties"]["slots"]["maxItems"], json!(40));
+        let slot = &create["properties"]["slots"]["items"];
+        assert_eq!(slot["additionalProperties"], json!(false));
+        assert_eq!(
+            keys(slot),
+            ["index", "name", "displayName", "tags"]
+                .iter()
+                .map(|key| key.to_string())
+                .collect()
+        );
+        let plan = action_by_id(ACTION_EXPRESSION_SET_PLAN)
+            .expect("registered")
+            .args_schema();
+        assert_eq!(plan["additionalProperties"], json!(false));
+        assert_eq!(
+            keys(&plan),
+            ["setId"].iter().map(|key| key.to_string()).collect()
+        );
+        for picture in [
+            "dataBase64",
+            "url",
+            "attachmentId",
+            "image",
+            "bytes",
+            "media",
+            "mime",
+            "sha256",
+            "references",
+        ] {
+            assert!(!keys(&create).contains(picture), "{picture}");
+            assert!(!keys(slot).contains(picture), "{picture}");
+            assert!(!keys(&plan).contains(picture), "{picture}");
+        }
+    }
+
+    /// ADR-0218 증보 6 §12 L2.5 · A44 (a), R2-H1: both cards open in the app and the judgment is the id
+    /// alone — a plan with no reference pictures, an empty body and a body that claims a picture all
+    /// give the same Open, `NeedsTheApp`, and so the push category without a 승인 button. Removing an id
+    /// from `judge`'s `in_app` list makes this fail (the default is Inline, F22).
+    #[test]
+    fn the_two_set_cards_open_in_the_app_whatever_their_arguments_say() {
+        for id in SERVER_RAISED_ACTION_IDS {
+            for args in [
+                json!({}),
+                json!({"setId": "00000000-0000-4000-8000-000000000001"}),
+                json!({"setId": "00000000-0000-4000-8000-000000000001", "references": []}),
+                json!({"references": [{"attachmentId": "00000000-0000-4000-8000-000000000002"}]}),
+            ] {
+                let card = json!({"action": {"id": id, "args": args}});
+                assert_eq!(
+                    decision_mode(ACTION_TYPE_WORKSPACE_ACTION, &card),
+                    DecisionMode::Open,
+                    "{id} {card}"
+                );
+                assert_eq!(
+                    decision_reason(ACTION_TYPE_WORKSPACE_ACTION, &card),
+                    DecisionReason::NeedsTheApp,
+                    "{id}"
+                );
+                assert!(opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card), "{id}");
+            }
+        }
+        // The control: an ordinary helper card with the same shape stays decidable from a banner.
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &json!({"action": {"id": ACTION_CHANNEL_CREATE, "args": {}}})
+        ));
     }
 
     /// H6-1: the memory card can only turn memory OFF — `enabled` is `const:false`
@@ -4093,6 +4407,10 @@ mod tests {
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
                 && action.id != ACTION_EXPRESSION_CREATE
+                // The set's two cards are opened for what is inside them (pinned by
+                // `the_two_set_cards_open_in_the_app_whatever_their_arguments_say`).
+                && action.id != ACTION_EXPRESSION_SET_CREATE
+                && action.id != ACTION_EXPRESSION_SET_PLAN
                 // An agent asking for more channels is a permission (ADR-0204 증보 6 D6-2);
                 // pinned by `a_channel_grant_an_agent_asked_for_is_opened_and_the_one_a_person_called_for_is_not`.
                 && action.id != ACTION_HOSTED_CHANNELS_GRANT
@@ -4221,6 +4539,13 @@ mod tests {
             // The picture is the card, and a banner shows none: always opened in the app
             // (ADR-0186 증보 v8 X8-3; no 승인 button on the lock screen).
             (ACTION_EXPRESSION_CREATE, Open, Why::NeedsTheApp),
+            // The set's two cards (ADR-0218 증보 6 §12 L6.4 · L2.5, R2-H1, A44). The plan card holds
+            // the first notice, the thumbnails and the declaration inside the card, and the default
+            // is Inline: an id missing from `judge`'s `in_app` list would be confirmed by one tap on
+            // a lock screen. Decided by the id alone (no argument is read), so a plan with no
+            // reference pictures opens too.
+            (ACTION_EXPRESSION_SET_CREATE, Open, Why::NeedsTheApp),
+            (ACTION_EXPRESSION_SET_PLAN, Open, Why::NeedsTheApp),
         ];
         let registered: std::collections::BTreeSet<&str> =
             ACTIONS.iter().map(|action| action.id).collect();
@@ -4759,7 +5084,7 @@ mod tests {
         assert_eq!(
             schema["properties"]["bundle"]["enum"],
             serde_json::json!(crate::team_ai_roles::SWITCHABLE_BUNDLES),
-            "the six switchable bundles, and no `chat_read`"
+            "the seven switchable bundles, and no `chat_read`"
         );
         assert!(proposal_summary(action).contains("관리자"));
         for args in [

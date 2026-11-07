@@ -294,7 +294,7 @@ describe('입력창의 표현 시트 (호스트 1)', () => {
 });
 
 describe('메시지 액션 시트 (호스트 2)', () => {
-  it('반응 고르개의 팀 탭에서 만든 요청도 시트를 먼저 내린 뒤 그 DM 으로 간다', async () => {
+  it('반응 고르개의 ＋ 에서 만든 요청도 시트를 먼저 내린 뒤 그 DM 으로 간다', async () => {
     wire();
     const store = await loadedStore();
     const order: string[] = [];
@@ -333,10 +333,12 @@ describe('메시지 액션 시트 (호스트 2)', () => {
         onDelete={jest.fn()}
       />,
     );
+    // 반응 고르개(#5504)는 입력창 창과 같은 세트 띠를 쓴다: 이모티콘 탭의 띠 끝 ＋ 가 가져오기·AI와 만들기 문을 연다.
     fireEvent.press(screen.getByTestId('all-reactions'));
-    fireEvent.press(await screen.findByTestId('emoji-tab-team'));
-    await screen.findByTestId('expression-add-menu');
-    await fillAndSend();
+    fireEvent.press(await screen.findByTestId('expression-panel-tab-emoticon'));
+    fireEvent.press(await screen.findByTestId('expression-panel-add'));
+    await screen.findByTestId('expression-add-doors');
+    await fillAndSend(false);
     await waitFor(() => expect(landing).toHaveBeenCalledTimes(1));
     expect(landing).toHaveBeenCalledWith(DM);
     // 순서: 시트를 내리고(`onClose`) 나서 간다 — Modal 위에 Modal 을 쌓지 않는다.
