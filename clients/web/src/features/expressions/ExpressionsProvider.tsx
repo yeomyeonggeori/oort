@@ -1,4 +1,3 @@
-import { expressionCacheNeedsRefresh } from "@momo/core/features/expressions/cache";
 import { ExpressionsContext } from "./context";
 import { watchExpressionChanges } from "@/lib/realtime";
 import { useEffect, useMemo, type ReactNode } from "react";
@@ -8,6 +7,7 @@ import { photoFixtureFromQuery } from "@momo/core/features/expressions/photo";
 import { MANUAL_UPLOAD_CODES } from "@momo/core/features/expressions/types";
 import type { ManualUploadCode } from "@momo/core/features/expressions/types";
 import { ExpressionStore } from "./ExpressionStore";
+import { expressionNoticeHandlers } from "./notices";
 import { createExpressionFixtureTransport, expressionHttpTransport } from "./transport";
 
 export function TeamExpressionsProvider({ children }: { children: ReactNode }) {
@@ -28,11 +28,8 @@ export function TeamExpressionsProvider({ children }: { children: ReactNode }) {
   }, [store, offline, connStatus]);
   useEffect(() => {
     if (!realtime) return;
-    return watchExpressionChanges(realtime, workspaceId, (frame) => {
-      if (!expressionCacheNeedsRefresh(store.getSnapshot().cache, frame.workspaceId, frame.version)) return;
-      store.clearImages();
-      void store.refresh(false);
-    }, () => { store.clearImages(); void store.refresh(); });
+    const notices = expressionNoticeHandlers(store);
+    return watchExpressionChanges(realtime, workspaceId, notices.changed, notices.resync, notices.detail);
   }, [store, realtime, memberId, workspaceId]);
   useEffect(() => {
     const refresh = () => { if (navigator.onLine) void store.refresh(); };
