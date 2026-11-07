@@ -464,6 +464,7 @@ export const messageKeys = [
   "expressions.picker.favoriteRemoved",
   "expressions.picker.grid",
   "expressions.picker.sectionFavorites",
+  "expressions.picker.sectionFrecent",
   "expressions.picker.sectionOther",
   "expressions.picker.sectionRecent",
   "expressions.picker.setStrip",
@@ -1751,6 +1752,7 @@ export const argumentSpecs = {
   },
   "expressions.picker.grid": {},
   "expressions.picker.sectionFavorites": {},
+  "expressions.picker.sectionFrecent": {},
   "expressions.picker.sectionOther": {},
   "expressions.picker.sectionRecent": {},
   "expressions.picker.setStrip": {},
@@ -3185,6 +3187,7 @@ export interface MessageArgs {
   "expressions.picker.favoriteRemoved": { name: string };
   "expressions.picker.grid": Record<string, never>;
   "expressions.picker.sectionFavorites": Record<string, never>;
+  "expressions.picker.sectionFrecent": Record<string, never>;
   "expressions.picker.sectionOther": Record<string, never>;
   "expressions.picker.sectionRecent": Record<string, never>;
   "expressions.picker.setStrip": Record<string, never>;

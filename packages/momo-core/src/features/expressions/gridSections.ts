@@ -12,7 +12,7 @@ import { frecentExpressions, recentExpressions, type ExpressionUsage } from "./u
 // 구역(section): 최근 -> 즐겨찾기 -> 세트별 -> 기타. 검색어가 있으면 구역 없이 결과 하나다.
 //   · 최근    이 탭의 등록 가운데 마지막으로 쓴 시각 내림차순 `EXPRESSION_RECENT_MAX` 개(사용 기록이 없으면 구역이 없다).
 //            **이모티콘 탭만 다르다**(#5503, owner 2026-11-07): 맨 위 칸이 「자주·최근」이다 - 정지 그림과 GIF 를 **섞어**(작은 팀 이모지는 뺀다) 쓴 횟수와 최근을 함께 본
-//            점수(`frecentExpressions`)로 세운 `EXPRESSION_RECENT_MAX` 개. 칸의 id·종류는 같다(`RECENT_SECTION`). GIF 탭의 「최근」은 그대로 GIF 끼리 최근 순이다.
+//            점수(`frecentExpressions`)로 세운 `EXPRESSION_RECENT_MAX` 개. 칸의 id·종류는 같다(`RECENT_SECTION`), 머리글만 「자주·최근」이다(`nameKey`). GIF 탭의 「최근」은 그대로 GIF 끼리 최근 순이다.
 //   · 즐겨찾기  고른 차례. 비어 있으면 구역도 세트 띠의 ★도 없다.
 //   · 세트    코어 `groupExpressionSets` (이름 앞머리 `<접두>_`, 2개 이상). 이름표는 공통 태그, 없으면 앞머리.
 //   · 기타    세트가 되지 못한 낱개. 모든 등록은 세트 또는 기타에 정확히 한 번 서므로 어느 그림도 구역에서 빠지지 않는다.
@@ -32,6 +32,8 @@ export interface ExpressionSection {
   kind: ExpressionSectionKind;
   /** 세트의 이름표(데이터). 나머지 구역의 이름은 사전이 가진다. */
   label: string | null;
+  /** 이 구역만 종류의 이름 대신 쓰는 사전 열쇠(이모티콘 탭 맨 위 칸의 「자주·최근」). 없으면 종류의 이름이다. 화면은 `expressionSectionNameKey` 로 읽는다. */
+  nameKey?: ExpressionSectionNameKey;
   items: Expression[];
 }
 
@@ -43,6 +45,19 @@ export const EXPRESSION_SECTION_NAME_KEY = {
   set: null,
   results: null,
 } as const satisfies Record<ExpressionSectionKind, MessageKey | null>;
+
+/** 이모티콘 탭 맨 위 칸의 이름(「자주·최근」, #5503): 횟수와 최근을 함께 본 칸이라 GIF 탭의 「최근」과 다른 말이다. 종류·id 는 그대로 `recent` 이다. */
+const FRECENT_NAME_KEY = "expressions.picker.sectionFrecent" as const satisfies MessageKey;
+/** 구역 이름이 되는 사전 열쇠. 모두 인자가 없는 문장이라 화면이 `formatMessage(열쇠)` 로 바로 읽는다. */
+export type ExpressionSectionNameKey = NonNullable<(typeof EXPRESSION_SECTION_NAME_KEY)[ExpressionSectionKind]> | typeof FRECENT_NAME_KEY;
+
+/**
+ * 구역 이름의 사전 열쇠. 구역이 자기 열쇠(`nameKey`)를 가지면 그것이, 아니면 종류의 이름(`EXPRESSION_SECTION_NAME_KEY`)이다. 세트처럼 데이터(`label`)가 이름이면 null.
+ * 웹 세트 띠·구역 머리글·폰 격자가 같은 함수로 읽으므로 띠 단추의 낭독 이름과 머리글이 늘 같은 말이다.
+ */
+export function expressionSectionNameKey(section: Pick<ExpressionSection, "kind" | "nameKey">): ExpressionSectionNameKey | null {
+  return section.nameKey ?? EXPRESSION_SECTION_NAME_KEY[section.kind];
+}
 
 export const RECENT_SECTION = "recent";
 export const FAVORITES_SECTION = "favorites";
@@ -74,7 +89,10 @@ export function buildExpressionSections(
   const byId = new Map(all.map((item) => [item.id, item]));
   const sections: ExpressionSection[] = [];
   const recent = topShortcut(cacheItems, tab, byId, usage, nowMs);
-  if (recent.length > 0) sections.push({ id: RECENT_SECTION, kind: "recent", label: null, items: recent });
+  if (recent.length > 0) {
+    // 이모티콘 탭만 머리글이 「자주·최근」이다(GIF 탭은 마지막으로 쓴 순이라 「최근」 그대로).
+    sections.push({ id: RECENT_SECTION, kind: "recent", label: null, ...(tab === "emoticon" ? { nameKey: FRECENT_NAME_KEY } : {}), items: recent });
+  }
   const starred = favorites.ids.flatMap((id) => byId.get(id) ?? []);
   if (starred.length > 0) sections.push({ id: FAVORITES_SECTION, kind: "favorites", label: null, items: starred });
   const { sets, loose } = groupExpressionSets(all);

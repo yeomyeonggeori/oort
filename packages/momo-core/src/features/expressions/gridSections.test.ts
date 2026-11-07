@@ -5,6 +5,7 @@ import {
   buildExpressionSections,
   EXPRESSION_GRID_COLS,
   EXPRESSION_RECENT_MAX,
+  expressionSectionNameKey,
   isContextMenuSummonKey,
   moveGridPosition,
   type ExpressionSection,
@@ -143,6 +144,26 @@ describe("buildExpressionSections — 이모티콘 탭 맨 위 「자주·최근
     // 후보와 맞는 기록이 없으면(작은 이모지·숨김만 썼다) 칸 자체가 없다.
     const onlyHidden = useIt(useIt(emptyExpressionUsage("w", "m"), tiny, 3, 0), hidden, 3, 0);
     expect(top([hidden, tiny, still1, gif1], onlyHidden)).toBeUndefined();
+  });
+
+  it("머리글의 사전 열쇠: 이모티콘 탭 맨 위 칸만 「자주·최근」이고, GIF 탭의 「최근」과 나머지 구역은 종류의 이름 그대로다", () => {
+    let usage = useIt(emptyExpressionUsage("w", "m"), still1, 1, 1);
+    usage = useIt(usage, gif1, 1, 1);
+    const favorites = toggleExpressionFavorite(emptyExpressionFavorites("w", "m"), still1.id);
+    const keys = (tab: "emoticon" | "gif") =>
+      buildExpressionSections([still1, gif1], tab, { query: "", usage, favorites, nowMs: NOW }).map((section) => [section.id, section.kind, expressionSectionNameKey(section)]);
+    expect(keys("emoticon")).toEqual([
+      ["recent", "recent", "expressions.picker.sectionFrecent"], // id·종류는 그대로 `recent`, 머리글만 다른 말
+      ["favorites", "favorites", "expressions.picker.sectionFavorites"],
+      ["other", "other", "expressions.picker.sectionOther"],
+    ]);
+    expect(keys("gif")).toEqual([
+      ["recent", "recent", "expressions.picker.sectionRecent"], // 마지막으로 쓴 순이라 「최근」
+      ["other", "other", "expressions.picker.sectionOther"],
+    ]);
+    // 검색 결과와 세트는 사전 열쇠가 없다(결과는 이름이 없고, 세트는 데이터가 이름이다).
+    expect(expressionSectionNameKey({ kind: "results" })).toBeNull();
+    expect(expressionSectionNameKey({ kind: "set" })).toBeNull();
   });
 
   it("GIF 탭의 「최근」은 그대로다 - GIF 끼리 마지막으로 쓴 순이고 횟수·감쇠는 보지 않는다", () => {

@@ -269,7 +269,7 @@ describe('이모티콘·GIF 탭 — 그림만 있는 격자와 세트 띠', () =
     expect(screen.getByTestId('expression-pick-dam_kk').props.accessibilityState.selected).toBe(false);
   });
 
-  it('쓴 적이 있으면 「최근」 구역이 맨 앞에 서고 띠의 첫 단추가 된다', async () => {
+  it('쓴 적이 있으면 맨 위 구역(이모티콘 탭은 「자주·최근」)이 맨 앞에 서고 띠의 첫 단추가 된다', async () => {
     const library = makeLibrary();
     const usage = recordExpressionUse(emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID), library[3].id, 5000);
     const {store} = makeStore({items: library, usage});
@@ -277,7 +277,9 @@ describe('이모티콘·GIF 탭 — 그림만 있는 격자와 세트 띠', () =
     mountPanel(store);
     expect(sections()[0]).toBe('recent');
     expect(strip()[0]).toBe('recent');
-    expect(screen.getByText('최근')).toBeTruthy();
+    // 이모티콘 탭 맨 위 칸의 머리글과 띠 단추(🕘)의 낭독 이름은 「자주·최근」이다(#5503).
+    expect(screen.getByText('자주·최근')).toBeTruthy();
+    expect(screen.getByTestId('expression-panel-set-recent').props.accessibilityLabel).toBe('자주·최근');
     // 같은 그림이 최근과 세트에 한 번씩 선다.
     expect(screen.getAllByTestId('expression-pick-chi_cry')).toHaveLength(2);
   });
@@ -612,7 +614,8 @@ describe('이모티콘 탭 맨 위 「자주·최근」 (#5503)', () => {
     expect(sections()[0]).toBe('recent');
     expect(strip()[0]).toBe('recent');
     expect(topNames()).toEqual(FRECENT_ORDER);
-    expect(screen.getByText('최근')).toBeTruthy(); // 이름은 그대로 「최근」(GIF 탭과 같은 사전 열쇠)
+    expect(screen.getByText('자주·최근')).toBeTruthy(); // 횟수와 최근을 함께 본 칸이라 머리글이 「자주·최근」 (id·종류는 그대로 recent)
+    expect(screen.queryByText('최근')).toBeNull();
     // GIF 는 이 탭의 보관함이 아니라 맨 위 칸에만 한 번 서고, 정지 그림은 맨 위 칸과 아래 세트에 한 번씩 선다.
     expect(screen.getAllByTestId('expression-pick-nya_dance')).toHaveLength(1);
     expect(screen.getAllByTestId('expression-pick-dam_kk')).toHaveLength(2);
@@ -678,6 +681,10 @@ describe('이모티콘 탭 맨 위 「자주·최근」 (#5503)', () => {
     fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
     // 마지막으로 쓴 순: nya_jump(방금) > nya_dance(2일 전) > solo_gif(20일 전). 이모티콘 탭의 점수 순(nya_dance 가 앞)과 다르다.
     expect(topNames()).toEqual(['nya_jump', 'nya_dance', 'solo_gif']);
+    // 마지막으로 쓴 순이라 머리글과 띠 단추(🕘)의 이름은 「최근」 그대로다 - 「자주·최근」은 이모티콘 탭만이다.
+    expect(screen.getByText('최근')).toBeTruthy();
+    expect(screen.queryByText('자주·최근')).toBeNull();
+    expect(screen.getByTestId('expression-panel-set-recent').props.accessibilityLabel).toBe('최근');
   });
 });
 

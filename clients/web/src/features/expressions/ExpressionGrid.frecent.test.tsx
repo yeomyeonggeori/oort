@@ -14,7 +14,7 @@ import { TeamExpressionsPanel } from "./TeamExpressionsPanel";
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
 // 이모티콘 탭 맨 위 「자주·최근」 (#5503, owner 2026-11-07): 창을 열면 정지 그림과 GIF 가 섞여 횟수와 최근 점수 순으로 서고,
-// 열려 있는 동안에는 차례가 바뀌지 않으며 다시 열 때만 바뀐다. 이 시험은 제공자 없는 고정 영어 사전으로 돈다(구역 이름은 「Recent」).
+// 열려 있는 동안에는 차례가 바뀌지 않으며 다시 열 때만 바뀐다. 이 시험은 제공자 없는 고정 영어 사전으로 돈다(이모티콘 보기 맨 위 칸의 이름은 「Frequent & recent」, GIF 보기의 「Recent」는 그대로).
 
 const WS = FIXTURE_WORKSPACE_ID;
 const ME = FIXTURE_MEMBER_ID;
@@ -49,14 +49,14 @@ function storeOf(image: ExpressionTransport["image"]) {
   const list: ExpressionList = { ...FIXTURE_LIST, version: "9", items: LIBRARY };
   return new ExpressionStore(WS, ME, { json: async () => list, image });
 }
-const panel = (store: ExpressionStore, onPickExpression?: (item: Expression) => void) => (
+const panel = (store: ExpressionStore, onPickExpression?: (item: Expression) => void, view: "emoticon" | "gif" = "emoticon") => (
   <ExpressionsContext.Provider value={store}>
-    <TeamExpressionsPanel purpose="insert" view="emoticon" onPick={() => {}} {...(onPickExpression ? { onPickExpression } : {})} />
+    <TeamExpressionsPanel purpose="insert" view={view} onPick={() => {}} {...(onPickExpression ? { onPickExpression } : {})} />
   </ExpressionsContext.Provider>
 );
-async function open(store: ExpressionStore, onPickExpression?: (item: Expression) => void) {
+async function open(store: ExpressionStore, onPickExpression?: (item: Expression) => void, which: "emoticon" | "gif" = "emoticon") {
   await store.refresh();
-  const view = render(panel(store, onPickExpression));
+  const view = render(panel(store, onPickExpression, which));
   await act(async () => {});
   return view;
 }
@@ -85,9 +85,10 @@ describe("이모티콘 탭 맨 위 「자주·최근」 (#5503)", () => {
       ["set:dam", ["dam_a", "dam_b"]], // 보관함은 정지 그림뿐: 맨 위 칸의 GIF·작은 이모지가 아래에 한 번 더 서지 않는다
       ["other", ["solo"]],
     ]);
-    // 이름은 사전의 것이고 세트 띠의 첫 단추가 그 칸으로 건너뛴다(시계). 칸의 id 는 예전 「최근」과 같다.
-    expect(view.container.querySelector("[data-section='recent'] p")?.textContent).toBe("Recent");
-    expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("aria-label")).toBe("Recent");
+    // 이름은 사전의 것이고 세트 띠의 첫 단추(시계)가 그 칸으로 건너뛴다. 칸의 id 는 예전 「최근」과 같지만 머리글과 띠 단추의 낭독 이름은 「자주·최근」(en: Frequent & recent)이다.
+    expect(view.container.querySelector("[data-section='recent'] p")?.textContent).toBe("Frequent & recent");
+    expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("aria-label")).toBe("Frequent & recent");
+    expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("title")).toBe("Frequent & recent");
     // 이 칸의 GIF 도 격자의 GIF 와 같은 규칙으로 그린다: 움직이지 않는 썸네일만 받는다(정지 썸네일 규칙을 새로 만들지 않는다).
     await waitFor(() => expect(view.container.querySelectorAll("[data-testid='expression-grid'] img")).toHaveLength(7));
     for (const gif of [wiggle, spin]) {
@@ -95,6 +96,16 @@ describe("이모티콘 탭 맨 위 「자주·최근」 (#5503)", () => {
       expect(mine.length).toBeGreaterThan(0);
       expect(mine.every((path) => path.includes("size=thumb"))).toBe(true);
     }
+  });
+
+  it("머리글은 탭마다 다르다: GIF 보기의 「최근」은 그대로 「Recent」이고(마지막으로 쓴 순), 띠 단추의 이름도 같은 말이다", async () => {
+    seedUsage(SEED);
+    const view = await open(storeOf(async () => "data:image/png;base64,AA=="), undefined, "gif");
+    // GIF 보기: 맨 위 칸은 GIF 끼리 마지막으로 쓴 순(wiggle 2일 전, spin 20일 전)이고 이름은 「Recent」다.
+    expect(shape(view)).toEqual([["recent", ["wiggle", "spin"]], ["other", ["spin", "wiggle"]]]);
+    expect(view.container.querySelector("[data-section='recent'] p")?.textContent).toBe("Recent");
+    expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("aria-label")).toBe("Recent");
+    expect(view.container.textContent).not.toContain("Frequent & recent");
   });
 
   it("GIF 를 누르면 정지 그림처럼 그 등록 자체를 고른다", async () => {

@@ -2,7 +2,7 @@ import {buildExpressionSections} from '@momo/core/features/expressions/gridSecti
 import {
   FAVORITES_SECTION,
   RECENT_SECTION,
-  EXPRESSION_SECTION_NAME_KEY,
+  expressionSectionNameKey,
 } from '@momo/core/features/expressions/gridSections';
 import {expressionAltText} from '@momo/core/features/expressions/message';
 import type {Expression} from '@momo/core/features/expressions/types';
@@ -153,7 +153,7 @@ export function ExpressionPanelGrid({
   );
 
   const sectionTitle = (layout: PanelSectionLayout): string => {
-    const key = EXPRESSION_SECTION_NAME_KEY[layout.section.kind];
+    const key = expressionSectionNameKey(layout.section);
     return key === null ? layout.section.label ?? '' : formatMessage(key);
   };
 

@@ -3038,6 +3038,12 @@ export const catalog: MessageCatalog = {
       "value": "즐겨찾기"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "자주·최근"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
