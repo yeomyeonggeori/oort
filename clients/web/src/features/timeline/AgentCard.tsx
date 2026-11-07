@@ -1,5 +1,9 @@
 import { ExpressionApprovalCard } from "@/features/expressions/ExpressionApprovalCard";
 import { expressionApprovalPayload, expressionResultPayload } from "@/features/expressions/cards";
+import { ExpressionPlanCard } from "@/features/expressions/ExpressionPlanCard";
+import { ExpressionSetApprovalCard } from "@/features/expressions/ExpressionSetApprovalCard";
+import { EXPRESSION_SET_ACTION_ID } from "@momo/core/features/expressions/set";
+import { EXPRESSION_SET_PLAN_ACTION_ID, expressionSetFromProps, expressionSetPlanFromProps, expressionSetResultFromProps } from "@momo/core/features/expressions/setWire";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { seedComposerText } from "@/features/chat/draftStore";
@@ -1527,6 +1531,9 @@ export function AgentCard({
 }) {
   if (card.kind === "approval") {
     if (card.action?.id === "expression.create") return <ExpressionApprovalCard card={card} payload={expressionApprovalPayload(expressionProps)} result={expressionResultPayload(expressionProps)} />;
+    // ADR-0218 §12: 세트 제안의 두 카드(계획 L2.5, 세트 L5)도 같은 행동 승인 카드의 길이다. 새 경로는 없다.
+    if (card.action?.id === EXPRESSION_SET_PLAN_ACTION_ID) return <ExpressionPlanCard card={card} plan={expressionSetPlanFromProps(expressionProps)} />;
+    if (card.action?.id === EXPRESSION_SET_ACTION_ID) return <ExpressionSetApprovalCard card={card} set={expressionSetFromProps(expressionProps)} result={expressionSetResultFromProps(expressionProps)} />;
     return <ApprovalBody card={card} directory={directory} onOpenStage={onOpenStage} viewerMemberId={viewerMemberId} />;
   }
   if (card.kind === "login_handoff") {

@@ -1,4 +1,5 @@
 import {uuidEq, type Message, type MessageAttachment} from '@momo/core/lib/api';
+import type {Expression} from '@momo/core/features/expressions/types';
 import {useCallback, useEffect, useRef, useState} from 'react';
 
 import {useExpressionItems} from '../expressions/ExpressionProvider';
@@ -37,8 +38,10 @@ export interface UseReplyDraftResult {
   /**
    * 보내기. 대상이 걸려 있으면 그 스레드(`rootId`)에 달고 **`true`**, 대상을 뗀다(보낸 순간 떨어진다 — 남겨 두면 다음 줄까지
    * 같은 스레드로 간다). 없으면 `false` — 부른 쪽이 평소대로 보낸다.
+   *
+   * 입력창 위 미리 보기에 이모티콘·GIF(`expression`)가 올라 있으면 [큰 그림, 글]을 **둘 다** 이 스레드에 단다(#5490) - 묶음의 순서·멱등·실패 규칙은 `timeline.sendReply` 가 코어 묶음 규칙으로 지킨다.
    */
-  sendReply: (body: string, options?: {attachments?: MessageAttachment[]}) => boolean;
+  sendReply: (body: string, options?: {attachments?: MessageAttachment[]; expression?: Expression}) => boolean;
 }
 
 export function useReplyDraft({
@@ -100,11 +103,13 @@ export function useReplyDraft({
   const cancelReply = useCallback(() => setReplyTarget(null), []);
 
   const sendReply = useCallback(
-    (body: string, options?: {attachments?: MessageAttachment[]}) => {
+    (body: string, options?: {attachments?: MessageAttachment[]; expression?: Expression}) => {
       const target = targetRef.current;
       if (target === null) return false;
       setReplyTarget(null);
-      void sendRef.current(target.rootId, body, options?.attachments);
+      // 표현이 없으면 예전과 같은 호출이다(옵션 자리가 비어 있다).
+      if (options?.expression === undefined) void sendRef.current(target.rootId, body, options?.attachments);
+      else void sendRef.current(target.rootId, body, options.attachments, {expression: options.expression});
       return true;
     },
     [],
