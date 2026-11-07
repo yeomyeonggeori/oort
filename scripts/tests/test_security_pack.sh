@@ -386,6 +386,7 @@ echo "\$target RUNNER=\${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:-unset} TP
 sleep "\${FAKE_CARGO_SLEEP:-0}"
 rm -f "$2/running/\$\$"
 echo '    Finished \`test\` profile [unoptimized] target(s) in 0.50s'
+if [ "\${FAKE_CARGO_RETRY:-}" = "\$target" ]; then echo '[psql-retry] 역할 DDL 충돌(tuple concurrently updated) — 다시 시도 1/12' >&2; fi
 if [ "\${FAKE_CARGO_FAIL:-}" = "\$target" ]; then
   echo 'test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s'; exit 101
 fi
@@ -404,7 +405,7 @@ run_pack() { # <루트> <bin> <packer 스크립트> [VAR=값…] — 출력과 �
 max_conc() { sort -n "$1/conc.log" | tail -n 1; }
 rp="$TMP/par"; mk_quar_tree "$rp"; mk_run_bin "$rp/bin" "$rp/st"
 out="$(run_pack "$rp" "$rp/bin" "$PACK" SECURITY_PACK_JOBS=4 FAKE_CARGO_SLEEP=1)" || fail "병렬: 초록이어야 해요 — $out"
-want_in "병렬(초록)" "$out" '대상 6개를 4개씩 동시에' 'PASS targets=6 tests=18 ' ' jobs=4'
+want_in "병렬(초록)" "$out" '대상 6개를 4개씩 동시에' 'PASS targets=6 tests=18 ' ' jobs=4 retries=0'
 [ "$(grep -c '^\[security-pack\] ok fake/' <<<"$out")" = 6 ] || fail "병렬: 대상마다 ok 줄이 하나씩이어야 해요 — $out"
 [ "$(wc -l <"$rp/st/calls.log" | tr -d ' ')" = 6 ] || fail "병렬: cargo 를 대상마다 한 번씩 부르지 않았어요 — $(cat "$rp/st/calls.log")"
 [ "$(max_conc "$rp/st")" -ge 2 ] || fail "병렬: 대상이 겹쳐 돌지 않았어요(동시 개수 최대 $(max_conc "$rp/st")) — 직렬과 같아요"
@@ -415,6 +416,10 @@ want_in "병렬(초록)" "$out" '대상 6개를 4개씩 동시에' 'PASS targets
   || fail "병렬: 모든 cargo 호출의 PATH 맨 앞에 psql 대리인(infra/security-pack/shim)을 두지 않았어요 — $(cat "$rp/st/calls.log")"
 grep -Fq 'CREATE DATABASE "nt_template" TEMPLATE "db" ALLOW_CONNECTIONS false' "$rp/st/psql.log" || fail "병렬: setup 이 끝난 DB 에서 템플릿을 만들지 않았어요 — $(cat "$rp/st/psql.log")"
 [ "$(grep -c 'DROP DATABASE IF EXISTS "nt_template"' "$rp/st/psql.log")" = 2 ] || fail "병렬: 끝에 템플릿을 지우지 않았어요 — $(cat "$rp/st/psql.log")"
+# 대상 로그에 남은 psql 재시도 횟수가 PASS 줄에 보인다(0 에서 멀어지면 병렬이 흔들린다는 신호).
+rr="$TMP/par-retry"; mk_quar_tree "$rr"; mk_run_bin "$rr/bin" "$rr/st"
+out_r="$(run_pack "$rr" "$rr/bin" "$PACK" FAKE_CARGO_RETRY=good_pg3)" || fail "병렬(재시도 표시): 초록이어야 해요 — $out_r"
+want_in "병렬(재시도 표시)" "$out_r" 'PASS targets=6 tests=18 ' ' jobs=4 retries=1'
 # 직렬(JOBS=1)과 같은 대상·같은 시험 수 — 같은 선택 목록·같은 가짜 cargo 에서 숫자가 정확히 같아야 한다.
 rs="$TMP/ser"; mk_quar_tree "$rs"; mk_run_bin "$rs/bin" "$rs/st"
 out_s="$(run_pack "$rs" "$rs/bin" "$PACK" SECURITY_PACK_JOBS=1)" || fail "직렬: 초록이어야 해요 — $out_s"

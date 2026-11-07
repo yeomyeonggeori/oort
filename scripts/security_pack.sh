@@ -423,7 +423,7 @@ nightly_target_db_teardown() { nightly_admin "DROP DATABASE IF EXISTS \"$NIGHTLY
 # 판정은 xargs 종료 코드가 아니라 **대상마다 남기는 결과 파일**과 선택 목록의 집합 대조로 한다 — 한 대상이라도 결과가 없으면
 # (안 돌았든 죽었든) 어느 대상인지 찍고 빨강이다. 통과 개수가 0 이거나 숫자가 아닌 결과, 선택에 없는 결과도 빨강이다.
 cmd_run_parallel() {
-  local start res want have missing extra rc=0 total=0 targets=0 bad="" name field n f want_n shim_abs
+  local start res want have missing extra rc=0 total=0 targets=0 bad="" name field n f want_n shim_abs retries
   start="$(date +%s)"
   res="$(mktemp -d "$OUT/results.XXXXXX")"
   nightly_target_db_setup
@@ -464,7 +464,9 @@ cmd_run_parallel() {
     for name in $extra; do echo "[security-pack] 빨강 — 선택에 없는 결과: $name" >&2; done
     die "병렬 실행 빨강: 선택 ${want_n}개 · 통과 결과 ${targets}개 · 결과 없음 $(printf '%s\n' "$missing" | awk 'NF' | wc -l | tr -d ' ')개 · xargs 종료 코드 ${rc}"
   fi
-  echo "[security-pack] PASS targets=$targets tests=$total seconds=$(( $(date +%s) - start )) jobs=$JOBS"
+  # 동시 시작 충돌로 psql 대리인이 다시 시도한 횟수(대상 로그에만 남는다). 0 에서 멀어지면 병렬이 흔들린다는 신호다.
+  retries="$(entries | while read -r _d pkg test; do cat "$OUT/$pkg.$test.log" 2>/dev/null; done | grep -c '\[psql-retry\]' || true)"
+  echo "[security-pack] PASS targets=$targets tests=$total seconds=$(( $(date +%s) - start )) jobs=$JOBS retries=${retries:-0}"
 }
 
 # `run` 의 병렬 실행기가 대상마다 한 번씩 부르는 내부 명령: `run-one <패키지> <타깃>`. 결과는 SECURITY_PACK_RESULTS 아래에 파일로
