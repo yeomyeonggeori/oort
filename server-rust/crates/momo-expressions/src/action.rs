@@ -491,6 +491,39 @@ pub async fn is_candidate_in_tx(conn: &mut PgConnection, actor: Actor, id: Uuid)
     candidate_row(conn, actor, id).await.is_ok()
 }
 
+/// The approvals whose drafts a direct upload may replace (ADR-0218 증보 6 §12 L5.3 · F19, 검수 M2,
+/// #5460 S1b): the `workspace_action` of an `expression.create` card, and **nothing else**. An
+/// allow-list, not a deny-list of the set: a future kind of approval draft is closed to replacement
+/// until someone writes it down here. The set card's drafts are not replaceable (L7.3-3: a refused
+/// scene must not be filled by an upload), and `replace_candidate_in_tx` writes the card's
+/// `props.action.expression`, a key a set card does not have. The id is the registry's
+/// `momo_agent::actions::ACTION_EXPRESSION_CREATE`; this crate does not depend on the registry, so a
+/// test in the server crate holds the two equal.
+pub const REPLACEABLE_ACTION_IDS: [&str; 1] = ["expression.create"];
+
+/// Is an approval of this `action_type` and `payload.action.id` one whose drafts may be replaced?
+pub fn replaceable_action(action_type: &str, action_id: Option<&str>) -> bool {
+    action_type == "workspace_action"
+        && action_id.is_some_and(|id| REPLACEABLE_ACTION_IDS.contains(&id))
+}
+
+/// May the draft `id` be replaced by a direct upload, as far as its **approval's action** goes? A
+/// draft that stands behind no approval (a direct draft, or no draft at all) is not this check's:
+/// the answer is `true` and the route's own path decides. The route asks this **before it reads the
+/// upload**, so a refusal costs no decode; `replace_candidate_in_tx` asks again.
+pub async fn replace_allowed_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    id: Uuid,
+) -> Result<bool, Error> {
+    let row = sqlx::query("SELECT a.action_type, a.payload->'action'->>'id' AS action_id FROM expression_draft d JOIN approval a ON (a.workspace_id,a.id)=(d.workspace_id,d.approval_id) WHERE d.workspace_id=$1 AND d.id=$2 AND d.approval_id IS NOT NULL")
+        .bind(workspace).bind(id).fetch_optional(&mut *conn).await?;
+    let Some(row) = row else { return Ok(true) };
+    let action_type: String = row.try_get("action_type")?;
+    let action_id: Option<String> = row.try_get("action_id")?;
+    Ok(replaceable_action(&action_type, action_id.as_deref()))
+}
+
 /// A candidate replaced by a direct upload (ADR-0186 X8-4).
 #[derive(Debug, Clone)]
 pub struct Replaced {
@@ -514,8 +547,18 @@ pub async fn replace_candidate_in_tx(
 ) -> Result<Replaced, Error> {
     let approval_id: Uuid = sqlx::query_scalar("SELECT approval_id FROM expression_draft WHERE workspace_id=$1 AND id=$2 AND approval_id IS NOT NULL")
         .bind(actor.workspace).bind(id).fetch_optional(&mut *conn).await?.ok_or(Error::NotFound)?;
-    let approval = sqlx::query("SELECT status::text AS status, channel_id, expires_at, request_message_id FROM approval WHERE workspace_id=$1 AND id=$2 FOR UPDATE")
+    let approval = sqlx::query("SELECT status::text AS status, action_type, payload->'action'->>'id' AS action_id, channel_id, expires_at, request_message_id FROM approval WHERE workspace_id=$1 AND id=$2 FOR UPDATE")
         .bind(actor.workspace).bind(approval_id).fetch_optional(&mut *conn).await?.ok_or(Error::NotFound)?;
+    // The allow-list (ADR-0218 §12 L5.3 · F19): only an `expression.create` card's pictures are
+    // replaceable. Another kind of approval draft is the same `NotFound` as an unknown id.
+    if !replaceable_action(
+        &approval.try_get::<String, _>("action_type")?,
+        approval
+            .try_get::<Option<String>, _>("action_id")?
+            .as_deref(),
+    ) {
+        return Err(Error::NotFound);
+    }
     let approval_expires: Option<DateTime<Utc>> = approval.try_get("expires_at")?;
     if approval.try_get::<String, _>("status")? != "pending" {
         return Err(Error::NotFound);

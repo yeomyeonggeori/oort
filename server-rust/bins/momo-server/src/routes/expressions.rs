@@ -209,6 +209,19 @@ pub async fn replace(
     expressions::get_draft(&state.pool, actor, id)
         .await
         .map_err(failure)?;
+    // ADR-0218 증보 6 §12 L5.3 · F19 (#5460 S1b): only the pictures of an `expression.create` card are
+    // replaceable. Asked **before the upload is read**, so a set card's draft (or any approval draft
+    // that is not on the list) costs no decode; `replace_candidate_in_tx` asks again.
+    let replaceable = expressions::transaction(&state.pool, actor, move |conn| {
+        Box::pin(async move {
+            expressions::action::replace_allowed_in_tx(conn, actor.workspace, id).await
+        })
+    })
+    .await
+    .map_err(failure)?;
+    if !replaceable {
+        return Err(failure(Error::NotFound));
+    }
     let (_, bytes) = multipart(&state, request, false).await?;
     let media = media::process(bytes).await.map_err(media_error)?;
     let replaced = match expressions::replace_draft(&state.pool, actor, id, media.clone()).await {
