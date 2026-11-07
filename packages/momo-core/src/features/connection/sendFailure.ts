@@ -1,6 +1,7 @@
 import { ApiError } from "../../lib/api";
 import type { RestOutcome } from "../../lib/http";
 import type { PendingMessage } from "../timeline/model";
+import { bundleMayPost } from "../expressions/sendBundle";
 import { judgeAutoResend } from "./autoResend";
 import { CONNECTION_KEYS as K, type ConnectionPlainKey } from "./copyKeys";
 import { causeOfFailure } from "./failure";
@@ -76,13 +77,15 @@ export function recordSendFailure(
  * 기록이 없는 행(새로고침 뒤 되살린 행)은 자동 대상이 아니다: 처음 실패한 때를 몰라 5분을 셀 수 없다.
  */
 export function pickAutoResends(
-  rows: readonly Pick<PendingMessage, "clientMsgId" | "status">[],
+  rows: readonly Pick<PendingMessage, "clientMsgId" | "status" | "after">[],
   records: ReadonlyMap<string, SendFailureRecord>,
   now: number
 ): string[] {
   const picked: string[] = [];
   for (const row of rows) {
     if (row.status !== "failed") continue;
+    // 이모티콘과 글 묶음의 둘째는 앞 메시지가 확정되기 전에는 고르지 않는다(#5453): 앞이 자동 재전송 상한에 닿았어도 뒤가 앞지르지 않는다.
+    if (!bundleMayPost(row, rows)) continue;
     const record = records.get(row.clientMsgId);
     if (record === undefined) continue;
     const verdict = judgeAutoResend({

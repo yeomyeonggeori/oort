@@ -3,22 +3,22 @@ name: 4891-team-expression-add
 # No `env:` block — see the note at the top of 00-login.yaml.
 #   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
 ---
-# 4891-team-expression-add — 이모티콘 고르개의 「＋」: 메뉴 두 갈래와 두 장(가져오기·AI와 만들기)이 열리고 닫힌다.
-# (#4942 가 시트를 탭으로 바꿨다: 여는 곳은 보내기 왼쪽 단추 `composer-expression`, 「＋」가 있는 곳은 첫 탭 「우리 팀」(id `expression-sheet-tab-emoticon`)이다. 앞 판의 「팀 이모지」 탭은 owner 11-05 에 이 탭으로 합쳐졌고, 글자는 owner 11-06 #5427 에 「이모티콘」에서 「우리 팀」으로 바뀌었다.)
+# 4891-team-expression-add — 이모티콘 창의 「＋」: 문 두 갈래와 두 장(가져오기·AI와 만들기)이 열리고 닫힌다.
+# (#5452 가 바텀시트를 키보드 자리의 창(`expression-panel`)으로 바꿨고 #5482 가 이 흐름을 새 창으로 옮겼다. 여는 곳은 보내기 왼쪽 단추 `composer-expression`,
+# 「＋」는 이모티콘·GIF 탭의 세트 띠 끝(`expression-panel-add`)에 있다. 「＋」는 더는 제자리에서 펼치는 메뉴(`expression-add-menu`)가 아니라 **창 밖의 시트**
+# (`expression-add-sheet`)를 열고, 그 시트가 문 둘을 바로 보인다 — 글자 칸이 있는 폼이 키보드를 불러 창이 서야 할 자리를 덮기 때문이다.)
 #
-# 스택 검증용이다(워커는 돌리지 않았다). 서버에 아무것도 쓰지 않는다 — 장을 열고 닫기만 하고 「미리보기 만들기」·
-# 「요청 보내기」는 누르지 않는다. 등록·요청 본문·이어 가기·실패 문장은 폰 jest(`__tests__/expressionAdd.test.tsx`)가
-# 코어 fixture 서버로 재고, 이 흐름은 jest 가 못 재는 것을 본다:
-#   · 시트 안에서 장이 목록을 대신하고 「‹」로 돌아오는가(Modal 위에 Modal 이 쌓이지 않는가)
-#   · 키보드가 올라와도 입력 칸이 키보드 위에 서고 보내기 단추가 스크롤로 닿는가(SE 에서 확인)
+# 스택 검증용이다. 서버에 아무것도 쓰지 않는다 — 장을 열고 닫기만 하고 「미리보기 만들기」·「요청 보내기」는 누르지 않는다. 등록·요청 본문·이어 가기·실패 문장은
+# 폰 jest(`__tests__/expressionAdd.test.tsx`)가 코어 fixture 서버로 재고, 이 흐름은 jest 가 못 재는 것을 본다:
+#   · 시트 안에서 장이 문 목록을 대신하고 「‹」로 돌아오는가(Modal 위에 Modal 이 쌓이지 않는가)
+#   · 시트가 닫히면 창이 그대로 남아 있는가(시트가 창을 거두지 않는다)
 #   · 사진 앨범 시스템 창(PHPicker)이 권한 문구 없이 뜨는가 — 아래 `expression-import-photo`
 #
-# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 「＋」 펼침 · 가져오기 장 · AI와 만들기 장(사진 양식 또는 모델 없음
-# 안내, 에이전트 양식의 칩 다섯·미리보기 재생·동작 줄이기 켬/끔). 캡처와 design-review 는 planner 몫이다.
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 시트의 문 둘 · 가져오기 장 · AI와 만들기 장(사진 양식 또는 모델 없음 안내, 에이전트 양식의 칩 다섯·미리보기 재생·
+# 동작 줄이기 켬/끔). 캡처와 design-review 는 planner 몫이다.
 #
-# 손으로 돌리는 법(레인 밖): 70-composer-newline.yaml 의 머리말과 같다 — 로그인할 수 있는 멤버가 든 격리 스택 + 이
-# 체크아웃의 Metro. 「AI와 만들기」 장의 에이전트 줄은 그 스택에 활성 에이전트가 있어야 서고, 없으면 「아직 에이전트가
-# 없어요」 안내가 선다(그것도 이 흐름이 지나는 길이다).
+# 손으로 돌리는 법(레인 밖): 70-composer-newline.yaml 의 머리말과 같다 — 로그인할 수 있는 멤버가 든 격리 스택 + 이 체크아웃의 Metro. 「AI와 만들기」 장의 에이전트 줄은
+# 그 스택에 활성 에이전트가 있어야 서고, 없으면 「아직 에이전트가 없어요」 안내가 선다(그것도 이 흐름이 지나는 길이다).
 - launchApp:
     appId: app.momo.ios
 - runFlow: subflows/ensure-signed-in.yaml
@@ -34,23 +34,44 @@ name: 4891-team-expression-add
 # verification run failed this flow in ~40s until this line was added. The composer
 # is empty here, which is what that subflow's tap needs.
 - runFlow: subflows/dismiss-dev-logbox.yaml
-# #4942: 표현 단추는 보내기 왼쪽에 늘 서 있다(도구 줄이 아니다) — 알약을 먼저 펼칠 필요가 없다. 「＋」는 시트의 「우리 팀」 탭(id `expression-sheet-tab-emoticon`)에 있다.
+
+# ☺ — 창이 키보드 자리에 선다. 처음 여는 탭은 이모티콘이다(웹 고르개와 같은 코어 상수 하나, #5482): `launchApp` 이 앱을 새로 띄워 「마지막으로 본 탭」 기억이 비어 있는 처음 상태라
+# 탭을 누르지 않고 눌린 채(selected)로 서 있는지 본다. 「＋」는 이모티콘 탭(세트 띠 끝)에 있다.
 - tapOn:
     id: "composer-expression"
-- tapOn:
-    id: "expression-sheet-tab-emoticon"
-
-# 「＋」가 두 갈래를 제자리에서 펼친다.
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
 - assertVisible:
-    id: "expression-add-menu"
+    id: "expression-panel-tab-emoticon"
+    selected: true
+- assertVisible:
+    id: "expression-panel-tab-emoji"
+    selected: false
+- assertVisible:
+    id: "expression-panel-tab-gif"
+    selected: false
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel-add"
+    timeout: 20000
+
+# 「＋」가 창 밖의 시트를 열고, 시트가 문 둘을 바로 보인다(펼치는 단계가 따로 없다).
 - tapOn:
-    id: "expression-add-menu"
+    id: "expression-panel-add"
+- extendedWaitUntil:
+    visible:
+      id: "expression-add-sheet"
+    timeout: 10000
+- assertVisible:
+    id: "expression-add-doors"
 - assertVisible:
     id: "expression-add-import"
 - assertVisible:
     id: "expression-add-make"
 
-# 가져오기 장: 열리고, 입력 칸이 서고, 「‹」로 목록에 돌아온다.
+# 가져오기 장: 열리고, 입력 칸이 서고, 「‹」로 문 목록에 돌아온다.
 - tapOn:
     id: "expression-add-import"
 - assertVisible:
@@ -65,14 +86,12 @@ name: 4891-team-expression-add
 - tapOn:
     id: "expression-chapter-back"
 - assertVisible:
-    id: "expression-add-menu"
+    id: "expression-add-doors"
 
 # AI와 만들기 장(#4984): 사진 양식이 먼저 열린다. 이 레인의 서버에는 이미지 모델이 없어서(`provider_link` 없음) 확인이 끝나면
 # 「연결된 이미지 모델이 없어요」 안내가 서고, 모델이 연결된 서버에서는 양식(`expression-photo-form`)이 선다. 에이전트에게
 # 부탁하는 양식(움직임 칩)은 양식이나 확인 실패 쪽에서만 닿는다 — 그 단추가 보이는 서버에서만 그 길을 지난다.
 # 장면마다의 문장·요청·취소·실패는 폰 jest(`__tests__/expressionPhoto.test.tsx`)와 캡처 표면 `EXPRESSIONPHOTO-<장면>`이 맡는다.
-- tapOn:
-    id: "expression-add-menu"
 - tapOn:
     id: "expression-add-make"
 - assertVisible:
@@ -104,4 +123,16 @@ name: 4891-team-expression-add
 - tapOn:
     id: "expression-chapter-back"
 - assertVisible:
-    id: "expression-add-menu"
+    id: "expression-add-doors"
+
+# 시트를 닫으면 창이 그대로 남아 있다 — 시트는 창을 거두지 않는다.
+- tapOn:
+    id: "expression-add-sheet-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "expression-add-sheet"
+    timeout: 10000
+- assertVisible:
+    id: "expression-panel"
+- assertVisible:
+    id: "expression-panel-add"

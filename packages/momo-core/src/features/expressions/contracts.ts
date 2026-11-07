@@ -1,4 +1,5 @@
 import document from "./contracts.schema.json";
+import setDocument from "./set.schema.json";
 
 type Schema = {
   $ref?: string;
@@ -22,13 +23,22 @@ type Schema = {
 };
 
 export const EXPRESSION_CONTRACTS = document;
-export type ExpressionContractName = keyof typeof document.$defs;
-const definitions = document.$defs as unknown as Record<string, Schema>;
+/**
+ * ADR-0218 §12 (#5442): the definitions the set proposal adds. They are additive on purpose: the
+ * pinned `expression-contracts-v1` block and `contracts.schema.json` are not touched, and every
+ * name here starts with `Set`, so the two documents share one validator without a clash.
+ */
+export const EXPRESSION_SET_CONTRACTS = setDocument;
+export type ExpressionContractName = keyof typeof document.$defs | keyof typeof setDocument.$defs;
+const definitions = { ...document.$defs, ...setDocument.$defs } as unknown as Record<string, Schema>;
+const REF_MARKER = "#/$defs/";
 
 /** Dependency-free validator for the closed JSON-Schema subset in this contract. */
 function conforms(schema: Schema, value: unknown): boolean {
   if (schema.$ref) {
-    const target = definitions[schema.$ref.replace("#/$defs/", "")];
+    // `#/$defs/X` (same document) and `urn:oort:expressions:v1#/$defs/X` (the main one) both name a definition.
+    const at = schema.$ref.indexOf(REF_MARKER);
+    const target = at < 0 ? undefined : definitions[schema.$ref.slice(at + REF_MARKER.length)];
     return !!target && conforms(target, value);
   }
   if (schema.oneOf) return schema.oneOf.filter((branch) => conforms(branch, value)).length === 1;

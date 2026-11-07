@@ -1,6 +1,7 @@
 import {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 import type { MessageKey } from "@momo/core/i18n";
 import { DEFAULT_EXPRESSION_PICKER_TAB, EXPRESSION_PICKER_TABS, expressionViewOfPickerTab, type ExpressionPickerTab } from "@momo/core/features/expressions/kind";
+import type { Expression } from "@momo/core/features/expressions/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import {
@@ -21,6 +22,7 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { CatalogEmoji } from "./catalog";
 import { loadCatalog } from "./catalog";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
+import { TeamEmojiStrip } from "./TeamEmojiStrip";
 import { recordEmojiUse } from "./frequencyStore";
 import { useHoverNone } from "./useHoverNone";
 
@@ -45,9 +47,10 @@ import { useHoverNone } from "./useHoverNone";
 export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
 /**
- * 고르개의 세 탭은 폰 시트와 같은 코어의 목록이다(owner 11-05): 이모티콘 · 기본 · GIF. 첫 탭의 글자는 「우리 팀」이다(owner 11-06 #5427 — 창 제목이
- * 이미 「이모티콘」이라 탭은 어디서 온 그림인지만 말한다. 탭 id·보기 이름은 `emoticon` 그대로). 이모티콘·GIF 는 팀 보관함(`TeamExpressionsPanel` 의 두 보기)이고
- * 「기본」은 표준 그림 문자 표다. 처음 여는 탭은 앞 판과 같은 「기본」이다. 이름은 폰 시트와 같은 사전 키다.
+ * 고르개의 세 탭은 폰 창과 같은 코어의 목록이다: 이모티콘 · 이모지 · GIF (owner 2026-11-07, #5453). 우리 팀이 올린 것과 기본을 탭으로 가르지 않는다.
+ * 이모티콘·GIF 는 팀 보관함의 큰 그림(`TeamExpressionsPanel` 의 두 보기)이고, 이모지는 표준 유니코드 표에 팀의 작은 이모지를 한 탭으로 합친 것이다
+ * (`TeamEmojiStrip`, 코어 `EXPRESSION_TAB_SHELVES`). 처음 여는 탭은 이모티콘이다(코어 `DEFAULT_EXPRESSION_PICKER_TAB`, owner 탭 순서·planner 결정 #5482 - 폰 창도 같은 상수로 열린다). 「이모지」라는 말은 이 탭의 이름에만 쓴다.
+ * 이름은 폰 창과 같은 사전 키다.
  */
 const TAB_NAME = {
   emoticon: "expressions.sheet.tabEmoticon",
@@ -84,6 +87,7 @@ export function EmojiPickerDialog({
   purpose,
   testId,
   side = "top",
+  onPickExpression,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,14 +99,22 @@ export function EmojiPickerDialog({
   testId: string;
   /** 포인터 팝오버가 앵커의 어느 쪽에 뜨는지. 아래에 다른 칸이 없는 자리(컴포저)는 위, 폼 안은 아래. */
   side?: "top" | "bottom";
+  /**
+   * 메인 컴포저만 준다(#5453): 이모티콘·GIF 를 고르면 `:이름:` 글을 넣는 대신 표현 자체를 넘기고 고르개를 닫는다 - 컴포저가 입력창 위에 크게 미리 보여 주고
+   * 보내기 한 번에 글과 함께 보낸다. 작은 이모지(이모지 탭)는 계속 `onPick`으로 글에 들어간다. 주지 않는 곳(스레드 입력칸·반응)은 예전 그대로다.
+   */
+  onPickExpression?: (expression: Expression) => void;
 }) {
   const copy = COPY[purpose];
   const formatMessage = useFormatMessage();
   const { store: expressions } = useExpressions();
-  const [tab, setTab] = useState<ExpressionPickerTab>(DEFAULT_EXPRESSION_PICKER_TAB);
+  // 넣기(컴포저·스레드 입력칸)는 첫 탭 「이모티콘」, 반응은 예전처럼 작은 「이모지」부터 연다(#5482 planner 결정).
+  const [tab, setTab] = useState<ExpressionPickerTab>(purpose === "insert" ? DEFAULT_EXPRESSION_PICKER_TAB : "emoji");
   // 팀 보관함 탭(이모티콘·GIF)은 상태 고르개에 없다: 거기서는 표준 그림 문자만 고른다.
   const view = expressionViewOfPickerTab(tab);
-  const team = view !== null && purpose !== "status";
+  // 상태 고르개에는 탭도 팀 이모지 줄도 없다(표준 그림 문자만 고른다). 탭 줄과 줄 둘이 같은 조건이다.
+  const tabbed = purpose !== "status" && expressions;
+  const team = view !== null && tabbed;
   const isTouch = useHoverNone();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -172,10 +184,10 @@ export function EmojiPickerDialog({
 
   const panel = (
     <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-3 focus-visible:focus-ring">
-    {purpose !== "status" && expressions && <div role="group" className="flex flex-wrap gap-2" aria-label={formatMessage("expressions.sheet.tabs")}>
+    {tabbed && <div role="group" className="flex flex-wrap gap-2" aria-label={formatMessage("expressions.sheet.tabs")}>
       {EXPRESSION_PICKER_TABS.map((id) => <Button key={id} type="button" variant={tab === id ? "secondary" : "ghost"} size="sm" aria-pressed={tab === id} onClick={() => { setSkinOpen(false); setTab(id); }}>{formatMessage(TAB_NAME[id])}</Button>)}
     </div>}
-    {team && view !== null ? <TeamExpressionsPanel view={view} purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
+    {team && view !== null ? <TeamExpressionsPanel view={view} purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} {...(onPickExpression ? { onPickExpression: (expression: Expression) => { onPickExpression(expression); onOpenChange(false); } } : {})} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
       entries={entries}
       loading={open && !error && entries === null}
@@ -187,6 +199,7 @@ export function EmojiPickerDialog({
       skinOpen={skinOpen}
       onSkinOpenChange={setSkinOpen}
       autoFocusSearch={!isTouch}
+      {...(tabbed ? { renderTeam: (query: string) => <TeamEmojiStrip tab={tab} query={query} onPick={(token) => { onPick(token); onOpenChange(false); }} /> } : {})}
     />}
     </div>
   );
