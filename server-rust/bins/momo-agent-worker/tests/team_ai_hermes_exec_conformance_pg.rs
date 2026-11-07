@@ -2992,6 +2992,22 @@ async fn x18_a_delegated_picture_is_posted_with_the_answer_and_the_model_is_told
     assert_eq!(audit[0]["kind"], json!("image"));
     assert_eq!(audit[0]["code"], json!("ok"));
     assert_eq!(audit[0]["picture_bytes"], json!(picture_bytes().len()));
+    // the progress line names the kind (P8) and the result line follows
+    let stages: Vec<String> = sqlx::query_scalar(
+        "SELECT stage FROM agent_run_event WHERE run_id = $1 AND stage IS NOT NULL ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        stages.iter().any(|stage| stage == "위임: Hermes · 그림"),
+        "{stages:?}"
+    );
+    assert!(
+        stages.iter().any(|stage| stage == "위임 결과 수신: Hermes"),
+        "{stages:?}"
+    );
     the_picture_is_in_no_table(&w).await;
 }
 
@@ -3617,4 +3633,47 @@ async fn x28_a_binding_the_finishing_transaction_refuses_posts_the_answer_once_w
     let audit = w.delegate_audit(run).await;
     assert_eq!(audit[0]["code"], json!("picture_failed"));
     assert_eq!(audit[0]["picture_bytes"], json!(picture_bytes().len()));
+}
+
+/// P6: the picture is taken from the answer **as Hermes wrote it**, before any cleaning — a picture whose base64
+/// is longer than the 400,000 characters the cleaning reads (a 1 MiB picture is ~1.4 million), written as a bare
+/// address on its own line (no markdown picture around it, so the cleaning's own count of pictures is 0 and the
+/// model's `pictures: 1` can only come from the extraction).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x29_a_picture_longer_than_the_cleaning_reads_is_taken_from_the_raw_answer() {
+    let mut big = picture_bytes();
+    big.extend((0u8..=250).cycle().take(1024 * 1024));
+    let w = world_with_api(
+        answering(format!("그렸어요.\n{}\n끝", address("png", &big))),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    let puts = w.api.as_ref().unwrap().seen();
+    assert_eq!(puts.len(), 1, "the picture was taken and uploaded");
+    assert_eq!(
+        puts[0].body, big,
+        "every byte of it, past the cleaning's read limit"
+    );
+    let requests = routed.model.requests();
+    let merge_input: String = requests[1]
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        merge_input.contains("pictures: 1"),
+        "the count is the extraction's (the cleaning saw no markdown picture): {merge_input}"
+    );
+    the_model_saw_only_a_count(&requests);
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+    let rows = attachments(&w.su, &w.t).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].size, big.len() as i64);
 }
