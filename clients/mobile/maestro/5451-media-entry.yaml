@@ -1,0 +1,31 @@
+appId: app.momo.ios
+name: 5451-media-entry
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 채팅 진입 때 위아래 흔들림 시험(#5451, owner 11-07 「채팅으로 들어올 때마다 위아래 진동」) — 대화에 **들어가기까지**만 한다.
+#
+# 이 흐름은 단정이 아니다. 들어간 뒤의 행 움직임은 화면 녹화를 `measure/media-rows.mjs --mode entry` 가 재고(베일이 걷힌 뒤 3초 동안 행 이동 ≤1pt),
+# 녹화·분석은 `measure/run-media-entry.sh` 가 이 흐름을 감싸서 한다. Maestro 의 `assertVisible` 은 「그 순간 보이는가」만 알아서 몇 프레임짜리 접힘과
+# 아래로 밀림을 못 본다 — 앞 판은 글만 든 시드로 같은 이름의 진입 흐름(`4869-reply-swipe` 등)이 통과했다(owner 가 본 흔들림이 큰 이모티콘·GIF·이미지·링크 카드
+# 에서 나왔는데도).
+#
+# 준비: `CHANNEL_ID` 채널이 **한 화면을 넘고, 맨 아래 화면에 큰 이모티콘(정지·움직이는)·이미지 첨부·GIF 첨부·링크 카드·이모티콘 반응이 섞여 있다.**
+# 작성자를 번갈아 써서 모든 글에 아바타가 선다(행을 아바타로 찾는다). 시드는 `measure/seed-media-lab.py` 가 한다(레인 서버 + 이 채널).
+#
+#   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… -e CHANNEL_ID=<채널 id> clients/mobile/maestro/5451-media-entry.yaml
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+# 한 번만 누른다(`retryTapIfNoChange: false`): 베일이 서 있는 동안 화면이 안 바뀐 것으로 읽혀 두 번째 탭이 대화 안의 사진 같은 것을 누르면 시험이 엉뚱한 화면에서 끝난다.
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000

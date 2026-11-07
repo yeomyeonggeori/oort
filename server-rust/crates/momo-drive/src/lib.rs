@@ -448,6 +448,12 @@ impl DriveError {
 /// the operator's environment decides which archive they run against.
 #[async_trait]
 pub trait DriveArchive: Send + Sync + std::fmt::Debug {
+    /// A fixed word naming the backend, for an audit line that says where a picture went (ADR-0151
+    /// 증보 8 W8): `local`, `google`, `stub` or `unavailable`. Never a path, an id or a credential.
+    fn backend_kind(&self) -> &'static str {
+        "other"
+    }
+
     /// Whether this backend serves the in-process upload endpoint. The stub and
     /// the local-volume archive do; the route is mounted only when this is true
     /// (Swift `App.swift:115`, ADR-0169).
@@ -549,6 +555,51 @@ pub trait DriveArchive: Send + Sync + std::fmt::Debug {
     ) -> Result<(), DriveError> {
         Err(DriveError::FileNotFound)
     }
+
+    /// Write one object whose bytes **the server itself holds** (ADR-0151 증보 8 W7, #5371): the
+    /// agent-worker's picture, already re-encoded by the isolated decoder. The one write path that
+    /// does not go through a client's session.
+    ///
+    /// `name`, `mime` and `bytes` are the server's own values and are stored as given. The default
+    /// serves the in-process archives (stub, local): it creates the session and feeds the body to
+    /// [`DriveArchive::accept_stub_upload`] in this process, so the same checks (capability, declared
+    /// length, ceiling, mime agreement, one upload per session) apply. A backend that cannot accept
+    /// in-process uploads and does not override this one (the unavailable archive, an archive opened
+    /// read-only) answers [`DriveError::Unavailable`] **before it creates a session**. The metadata is
+    /// read back so the caller records what the archive holds.
+    async fn put_object(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> Result<DriveFile, DriveError> {
+        let size = i64::try_from(bytes.len()).map_err(|_| DriveError::ContentTooLarge)?;
+        // Asked **before** a session is made, so an archive that cannot take an in-process upload
+        // leaves no session behind.
+        if !self.accepts_stub_uploads() {
+            return Err(DriveError::Unavailable);
+        }
+        let session = self
+            .create_resumable_upload(channel_id, name, mime, size)
+            .await?;
+        // `…/__momo_stub/drive/uploads/{token}`: the capability is the last path segment.
+        let token = session
+            .upload_url
+            .split('?')
+            .next()
+            .and_then(|path| path.rsplit('/').next())
+            .filter(|token| !token.is_empty())
+            .ok_or(DriveError::UpstreamFailure)?
+            .to_string();
+        let declared = u64::try_from(bytes.len()).map_err(|_| DriveError::ContentTooLarge)?;
+        let body = upload_body(futures::stream::once(async move {
+            Ok::<_, std::io::Error>(Bytes::from(bytes))
+        }));
+        self.accept_stub_upload(&token, Some(mime), Some(declared), body)
+            .await?;
+        self.file_metadata(&session.drive_file_id).await
+    }
 }
 
 /// The archive an instance gets when it configured none.
@@ -562,6 +613,10 @@ pub struct UnavailableDriveArchive;
 
 #[async_trait]
 impl DriveArchive for UnavailableDriveArchive {
+    fn backend_kind(&self) -> &'static str {
+        "unavailable"
+    }
+
     async fn create_resumable_upload(
         &self,
         _channel_id: Uuid,

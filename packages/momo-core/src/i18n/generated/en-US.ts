@@ -2740,6 +2740,24 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.panel.a11y": [
+    {
+      "type": 0,
+      "value": "Emoticon panel"
+    }
+  ],
+  "expressions.panel.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "No emoticons yet. Use the + below to make or import some."
+    }
+  ],
+  "expressions.panel.emptyGif": [
+    {
+      "type": 0,
+      "value": "No animated emoticons yet. Use the + below to import or make some."
+    }
+  ],
   "expressions.panel.viewEmoticon": [
     {
       "type": 0,
@@ -3138,6 +3156,88 @@ export const catalog: MessageCatalog = {
       "value": "photo, face"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "Add"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "Add to favorites"
+    }
+  ],
+  "expressions.picker.favoriteAdded": [
+    {
+      "type": 0,
+      "value": "Added "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to favorites"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "Remove from favorites"
+    }
+  ],
+  "expressions.picker.favoriteRemoved": [
+    {
+      "type": 0,
+      "value": "Removed "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from favorites"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "Favorites"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "Recent"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "Sets"
+    }
+  ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "Team library"
+    }
+  ],
   "expressions.plan.cancel": [
     {
       "type": 0,
@@ -3378,6 +3478,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Scenes"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 0,
+      "value": "Remove preview of "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.preview.cleared": [
+    {
+      "type": 0,
+      "value": "Preview removed"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "Emoticon to send"
     }
   ],
   "expressions.set.agentText": [
@@ -3761,7 +3883,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "No moving pictures yet. Use “Add” on the Team tab to import or make one."
+      "value": "No moving pictures yet. Use “Add” to import or make one."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3792,6 +3914,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "React"
+    }
+  ],
+  "expressions.sheet.keyboard": [
+    {
+      "type": 0,
+      "value": "Show keyboard"
     }
   ],
   "expressions.sheet.loading": [
@@ -3845,7 +3973,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "Search emoji"
+      "value": "Search by name"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3881,7 +4009,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "Team"
+      "value": "Emoticons"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -3906,6 +4034,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "This one is not available right now. Please choose another."
+    }
+  ],
+  "expressions.suggest.group": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions"
+    }
+  ],
+  "expressions.suggest.mute": [
+    {
+      "type": 0,
+      "value": "Turn off suggestions for this word"
+    }
+  ],
+  "expressions.suggest.pick": [
+    {
+      "type": 0,
+      "value": "Preview "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "inbox.approval.open": [
@@ -5934,6 +6084,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Phone search is rebuilt, agent replies gather in threads, and phone alerts wait while you use the desktop."
+    }
+  ],
+  "releaseNotes.v0144.agentsLine1": [
+    {
+      "type": 0,
+      "value": "The hand-off buttons now also offer the team's Hermes when it is in the channel and you can call it."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowChanged": [
+    {
+      "type": 0,
+      "value": "The tabs are no longer split into Team and Default; they now go by kind: Emoticons, Emoji and GIF. This replaces the Team, Emoji and GIF tabs from the last update. The window opens on the Emoticons tab first; only the reaction picker on web and desktop still starts on Emoji. The Emoticons and GIF tabs show a grid of pictures only, with a strip along the bottom that jumps to Recent, Favorites and sets. You can add or remove a favorite by right-clicking a picture on web and desktop or pressing and holding it on the phone, and favorites are kept on this device only."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTitle": [
+    {
+      "type": 0,
+      "value": "A new emoticon window"
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTryIt": [
+    {
+      "type": 0,
+      "value": "Open the emoticon window with the smiley button in the composer and look through the three tabs. Use a few pictures and add one to your favorites (right-click on web and desktop, press and hold on the phone); Recent and Favorites then appear in the strip at the bottom."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "“Add” moved to the + at the end of the bottom strip. On web and desktop, right-click a picture for Report and Delete."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine2": [
+    {
+      "type": 0,
+      "value": "The Emoji tab shows the team's small emoji in one row by the standard ones; on web and desktop one search finds both."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine3": [
+    {
+      "type": 0,
+      "value": "Web and desktop show the preview in threads too; on the phone, threads and swipe replies still put :name: in the text."
+    }
+  ],
+  "releaseNotes.v0144.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "Emoticons"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, the smiley button in the composer now lowers the keyboard and opens the emoticon window in the same place, so no separate sheet slides up. While the window is open the button looks pressed, and pressing it again or tapping the text box brings the keyboard back. Tapping the chat list closes the window."
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTitle": [
+    {
+      "type": 0,
+      "value": "Pick emoticons where the keyboard was"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, open a chat and press the smiley button in the composer. Pick an emoticon in the window that replaces the keyboard, then press the button again to get the keyboard back."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsChanged": [
+    {
+      "type": 0,
+      "value": "Emoticons you upload from now on are stored as smaller files with the same picture: still pictures are 18 to 26% smaller on average, and GIFs are a little smaller too. On web and desktop, emoticon pictures you have received are kept until you close or reload the app, so going back into a channel with many emoticons does not download them again."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTitle": [
+    {
+      "type": 0,
+      "value": "Lighter, faster emoticons"
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTryIt": [
+    {
+      "type": 0,
+      "value": "Open a channel with many emoticons, go somewhere else, and come back. On web and desktop the pictures appear right away instead of loading again."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine1": [
+    {
+      "type": 0,
+      "value": "The “안 읽은 동안” (while you were away) summary no longer hides under the header on a first visit; it is a one-line band."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine2": [
+    {
+      "type": 0,
+      "value": "An emoticon that was hidden or deleted disappears from the phone as soon as the notice arrives."
+    }
+  ],
+  "releaseNotes.v0144.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherChanged": [
+    {
+      "type": 0,
+      "value": "Pick an emoticon or GIF and it does not send right away; it waits as a preview above the composer. If you change your mind, remove it with the small ✕. Write your text and press send once, and the big picture and your text go out one after the other. Emoji still go straight into your text."
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTitle": [
+    {
+      "type": 0,
+      "value": "Send an emoticon and text together"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTryIt": [
+    {
+      "type": 0,
+      "value": "Pick an emoticon with the smiley button in the composer, check the picture that appears above it, then write some text and press send."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryChanged": [
+    {
+      "type": 0,
+      "value": "When you open a chat full of emoticons and GIFs, or press an emoticon, the space for each picture used to start as one line of text and then grow, so rows shook up and down. That is fixed: the space is reserved first, so rows stay put. A still emoticon stays as it is when you press it, and a GIF replays from its first frame at the same size. On the phone, photos and link cards you have already seen keep their size, so the chat settles in place when you come back. A photo you see for the first time can still grow once, and we plan to fix that in the next version."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTitle": [
+    {
+      "type": 0,
+      "value": "Chats stay steady when you open them"
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTryIt": [
+    {
+      "type": 0,
+      "value": "Open a chat with lots of emoticons and GIFs and watch that the rows stay still. Then press one you sent: a still picture stays as it is and a GIF starts again from the beginning."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsChanged": [
+    {
+      "type": 0,
+      "value": "When you type a word that matches the name or a tag of an emoticon, for example “ㅋㅋ”, “한숨” or “배고파”, and pause for a moment, matching emoticons appear just above the composer. Pressing one puts it in the preview and does not send it. The small ✕ at the end of the row turns off suggestions for that word in this chat. Matching happens only on this device, so what you type never leaves it."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTitle": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions as you type"
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTryIt": [
+    {
+      "type": 0,
+      "value": "Type a word that matches an emoticon tag, such as “ㅋㅋ” or “배고파”, and pause. Press a picture that appears above the composer to put it in the preview."
+    }
+  ],
+  "releaseNotes.v0144.summary": [
+    {
+      "type": 0,
+      "value": "Chats no longer shake when you open them, and the new emoticon window lets you send an emoticon and your text in one go."
     }
   ],
   "releaseNotes.version.current": [

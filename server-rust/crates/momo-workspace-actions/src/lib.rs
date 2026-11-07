@@ -6,6 +6,8 @@ pub mod hosted_expression;
 pub mod profile_avatar;
 pub mod team_ai;
 pub mod team_ai_attachments;
+pub mod team_ai_hermes;
+pub mod team_ai_hermes_request;
 pub mod team_ai_limits;
 pub mod team_ai_roles;
 pub mod team_ai_tools;

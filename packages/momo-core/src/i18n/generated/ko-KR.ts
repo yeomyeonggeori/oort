@@ -2572,6 +2572,24 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.panel.a11y": [
+    {
+      "type": 0,
+      "value": "이모티콘 창"
+    }
+  ],
+  "expressions.panel.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "아직 이모티콘이 없어요. 아래의 ＋로 만들거나 가져와 보세요."
+    }
+  ],
+  "expressions.panel.emptyGif": [
+    {
+      "type": 0,
+      "value": "아직 움직이는 이모티콘이 없어요. 아래의 ＋로 가져오거나 만들 수 있어요."
+    }
+  ],
   "expressions.panel.viewEmoticon": [
     {
       "type": 0,
@@ -2970,6 +2988,80 @@ export const catalog: MessageCatalog = {
       "value": "사진, 얼굴"
     }
   ],
+  "expressions.picker.add": [
+    {
+      "type": 0,
+      "value": "추가하기"
+    }
+  ],
+  "expressions.picker.favoriteAdd": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에 추가"
+    }
+  ],
+  "expressions.picker.favoriteAdded": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 즐겨찾기에 추가했어요"
+    }
+  ],
+  "expressions.picker.favoriteRemove": [
+    {
+      "type": 0,
+      "value": "즐겨찾기에서 빼기"
+    }
+  ],
+  "expressions.picker.favoriteRemoved": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 즐겨찾기에서 뺐어요"
+    }
+  ],
+  "expressions.picker.grid": [
+    {
+      "type": 0,
+      "value": "팀 표현 목록"
+    }
+  ],
+  "expressions.picker.sectionFavorites": [
+    {
+      "type": 0,
+      "value": "즐겨찾기"
+    }
+  ],
+  "expressions.picker.sectionOther": [
+    {
+      "type": 0,
+      "value": "기타"
+    }
+  ],
+  "expressions.picker.sectionRecent": [
+    {
+      "type": 0,
+      "value": "최근"
+    }
+  ],
+  "expressions.picker.setStrip": [
+    {
+      "type": 0,
+      "value": "세트"
+    }
+  ],
+  "expressions.picker.teamGroup": [
+    {
+      "type": 0,
+      "value": "팀 보관함"
+    }
+  ],
   "expressions.plan.cancel": [
     {
       "type": 0,
@@ -3180,6 +3272,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "장면"
+    }
+  ],
+  "expressions.preview.cancel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 미리 보기 지우기"
+    }
+  ],
+  "expressions.preview.cleared": [
+    {
+      "type": 0,
+      "value": "미리 보기를 지웠어요"
+    }
+  ],
+  "expressions.preview.group": [
+    {
+      "type": 0,
+      "value": "보낼 이모티콘"
     }
   ],
   "expressions.set.agentText": [
@@ -3462,7 +3576,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.emptyGif": [
     {
       "type": 0,
-      "value": "아직 움직이는 이모티콘이 없어요. 우리 팀 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+      "value": "아직 움직이는 이모티콘이 없어요. 「추가하기」로 가져오거나 만들 수 있어요."
     }
   ],
   "expressions.sheet.emptyLegacy": [
@@ -3493,6 +3607,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "반응하기"
+    }
+  ],
+  "expressions.sheet.keyboard": [
+    {
+      "type": 0,
+      "value": "키보드 열기"
     }
   ],
   "expressions.sheet.loading": [
@@ -3546,7 +3666,7 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.searchEmoji": [
     {
       "type": 0,
-      "value": "기본 이모티콘 검색"
+      "value": "이름으로 검색"
     }
   ],
   "expressions.sheet.searchEmoticon": [
@@ -3576,13 +3696,13 @@ export const catalog: MessageCatalog = {
   "expressions.sheet.tabEmoji": [
     {
       "type": 0,
-      "value": "기본"
+      "value": "이모지"
     }
   ],
   "expressions.sheet.tabEmoticon": [
     {
       "type": 0,
-      "value": "우리 팀"
+      "value": "이모티콘"
     }
   ],
   "expressions.sheet.tabGif": [
@@ -3607,6 +3727,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
+    }
+  ],
+  "expressions.suggest.group": [
+    {
+      "type": 0,
+      "value": "이모티콘 추천"
+    }
+  ],
+  "expressions.suggest.mute": [
+    {
+      "type": 0,
+      "value": "이 낱말 추천 끄기"
+    }
+  ],
+  "expressions.suggest.pick": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 미리 보기에 올리기"
     }
   ],
   "inbox.approval.open": [
@@ -5627,6 +5769,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "폰 검색이 새로워지고, 에이전트 답은 스레드로 모이며, 데스크탑을 쓰는 동안은 폰 알림이 늦게 와요."
+    }
+  ],
+  "releaseNotes.v0144.agentsLine1": [
+    {
+      "type": 0,
+      "value": "도우미가 일을 넘길 때 나오는 「○○에게 맡기기」 단추에, 그 채널에 있고 내가 부를 수 있는 팀 Hermes도 올라와요."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowChanged": [
+    {
+      "type": 0,
+      "value": "탭이 우리 팀과 기본으로 나뉘지 않고 종류별로 이모티콘, 이모지, GIF 셋이 되었어요. 지난 소식에서 말한 「우리 팀, 기본, GIF」 탭은 이 셋으로 바뀌었어요. 처음 열면 이모티콘 탭이 먼저 보이고, 웹과 데스크탑의 반응 고르기만 예전처럼 이모지 탭부터 열려요. 이모티콘과 GIF 탭은 이름 없이 그림만 보이는 격자이고, 아래 띠로 최근, 즐겨찾기, 세트로 건너뛰어요. 그림을 웹과 데스크탑에서는 오른쪽 클릭하고 폰에서는 길게 눌러 즐겨찾기에 추가하거나 뺄 수 있고, 즐겨찾기는 이 기기에만 저장돼요."
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘 창이 새로워졌어요"
+    }
+  ],
+  "releaseNotes.v0144.emoticonWindowTryIt": [
+    {
+      "type": 0,
+      "value": "입력창의 웃는 얼굴 단추로 이모티콘 창을 열어 세 탭을 둘러보세요. 그림을 몇 번 써 보고 즐겨찾기도 추가하면(웹과 데스크탑은 오른쪽 클릭, 폰은 길게 누르기), 아래 띠에 최근과 즐겨찾기가 생겨요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "「추가하기」는 창 아래 띠 끝의 +로 옮겼어요. 웹과 데스크탑에서는 신고와 삭제를 그림을 오른쪽 클릭해서 열어요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine2": [
+    {
+      "type": 0,
+      "value": "이모지 탭에는 기본 이모지와 함께 팀의 작은 이모지가 한 줄로 있어요. 웹과 데스크탑에서는 한 검색 칸이 둘을 같이 찾아요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsLine3": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑은 스레드 입력칸에서도 미리 보기가 떠요. 폰의 스레드 입력칸과 밀어서 답장할 때는 고른 이모티콘이 아직 :이름: 글로 들어가요."
+    }
+  ],
+  "releaseNotes.v0144.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelChanged": [
+    {
+      "type": 0,
+      "value": "폰에서 입력창의 웃는 얼굴 단추를 누르면 키보드가 내려가고, 바로 그 자리에 이모티콘 창이 떠요. 따로 아래에서 올라오는 창은 없어요. 창이 떠 있는 동안 단추는 눌린 모양이 되고, 다시 누르거나 입력창을 누르면 키보드가 돌아와요. 대화 목록을 누르면 창이 닫혀요."
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTitle": [
+    {
+      "type": 0,
+      "value": "키보드 자리에서 이모티콘 고르기"
+    }
+  ],
+  "releaseNotes.v0144.keyboardPanelTryIt": [
+    {
+      "type": 0,
+      "value": "폰에서 대화를 열고 입력창의 웃는 얼굴 단추를 눌러 보세요. 키보드 자리에 뜬 창에서 이모티콘을 고른 뒤, 단추를 다시 눌러 키보드로 돌아와 보세요."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsChanged": [
+    {
+      "type": 0,
+      "value": "새로 올리는 이모티콘은 같은 그림을 더 작은 파일로 저장해요. 정지 그림은 평균 18~26% 작아졌고 GIF도 조금 작아졌어요. 웹과 데스크탑은 받은 이모티콘 그림을 앱을 닫거나 새로 고치기 전까지 기억해서, 이모티콘이 많은 채널에 다시 들어가도 그림을 다시 받지 않아요."
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘이 더 가볍고 빨라요"
+    }
+  ],
+  "releaseNotes.v0144.lighterEmoticonsTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘이 많은 채널에 들어갔다가 다른 곳으로 간 뒤 다시 들어가 보세요. 웹과 데스크탑에서는 그림이 다시 불러와지는 일 없이 바로 서요."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine1": [
+    {
+      "type": 0,
+      "value": "처음 연 채널의 「안 읽은 동안」 요약이 대화 머리에 가리던 것을 고쳐, 머리 아래 한 줄 띠로 보여요."
+    }
+  ],
+  "releaseNotes.v0144.phoneLine2": [
+    {
+      "type": 0,
+      "value": "숨기거나 지운 이모티콘은 폰 화면에서 알림이 오는 대로 바로 사라져요."
+    }
+  ],
+  "releaseNotes.v0144.phoneTopic": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherChanged": [
+    {
+      "type": 0,
+      "value": "이모티콘이나 GIF를 고르면 바로 보내지 않고 입력창 위에 미리 보기로 떠요. 마음이 바뀌면 작은 ✕로 뺄 수 있어요. 글을 쓰고 보내기를 한 번 누르면 큰 그림과 글이 차례로 가요. 이모지는 이전처럼 글 안에 바로 들어가요."
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘과 글을 한 번에 보내기"
+    }
+  ],
+  "releaseNotes.v0144.sendTogetherTryIt": [
+    {
+      "type": 0,
+      "value": "대화 입력창의 웃는 얼굴 단추로 이모티콘을 하나 고르고, 입력창 위에 뜬 그림을 확인한 뒤 글을 쓰고 보내기를 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryChanged": [
+    {
+      "type": 0,
+      "value": "이모티콘과 GIF가 있는 대화에 들어가거나 이모티콘을 누를 때, 그림이 오기 전 자리가 글자 한 줄이었다가 커지면서 줄이 위아래로 흔들리던 것을 고쳤어요. 이제 그림 자리를 먼저 잡아 두어서 줄이 움직이지 않고, 정지 이모티콘은 눌러도 그대로이고 GIF는 같은 크기에서 처음 장면부터 다시 돌아요. 폰은 한 번 본 사진과 링크 카드의 크기를 기억해서 다시 들어가도 제자리에 서요. 처음 보는 사진은 아직 한 번 자랄 수 있고, 다음 판에서 고칠 예정이에요."
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTitle": [
+    {
+      "type": 0,
+      "value": "채팅에 들어갈 때 화면이 흔들리지 않아요"
+    }
+  ],
+  "releaseNotes.v0144.steadyEntryTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘과 GIF가 많이 올라온 대화에 들어가서 줄이 움직이지 않는지 보세요. 보낸 이모티콘을 눌러 보면 정지 그림은 그대로이고 GIF는 처음부터 다시 돌아요."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsChanged": [
+    {
+      "type": 0,
+      "value": "「ㅋㅋ」, 「한숨」, 「배고파」처럼 이모티콘의 이름이나 태그와 같은 말을 쓰다 잠깐 멈추면, 입력창 바로 위에 맞는 이모티콘이 떠요. 누르면 미리 보기에 올라가고 저절로 보내지지는 않아요. 줄 끝의 작은 ✕를 누르면 이 대화에서 그 낱말의 추천이 꺼져요. 맞추는 일은 이 기기 안에서만 해서 쓴 글이 밖으로 나가지 않아요."
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTitle": [
+    {
+      "type": 0,
+      "value": "글을 쓰면 이모티콘 추천"
+    }
+  ],
+  "releaseNotes.v0144.suggestionsTryIt": [
+    {
+      "type": 0,
+      "value": "입력창에 「ㅋㅋ」나 「배고파」처럼 이모티콘 태그와 같은 말을 쓰고 잠깐 멈춰 보세요. 입력창 위에 뜬 그림을 눌러 미리 보기에 올려 보세요."
+    }
+  ],
+  "releaseNotes.v0144.summary": [
+    {
+      "type": 0,
+      "value": "채팅에 들어갈 때 화면이 흔들리지 않고, 이모티콘 창이 새로워져 이모티콘과 글을 한 번에 보낼 수 있어요."
     }
   ],
   "releaseNotes.version.current": [

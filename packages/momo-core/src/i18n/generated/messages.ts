@@ -389,6 +389,9 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.a11y",
+  "expressions.panel.emptyEmoticon",
+  "expressions.panel.emptyGif",
   "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
   "expressions.panel.viewGif",
@@ -454,6 +457,17 @@ export const messageKeys = [
   "expressions.photo.submit",
   "expressions.photo.tagsLabel",
   "expressions.photo.tagsPlaceholder",
+  "expressions.picker.add",
+  "expressions.picker.favoriteAdd",
+  "expressions.picker.favoriteAdded",
+  "expressions.picker.favoriteRemove",
+  "expressions.picker.favoriteRemoved",
+  "expressions.picker.grid",
+  "expressions.picker.sectionFavorites",
+  "expressions.picker.sectionOther",
+  "expressions.picker.sectionRecent",
+  "expressions.picker.setStrip",
+  "expressions.picker.teamGroup",
   "expressions.plan.cancel",
   "expressions.plan.closed",
   "expressions.plan.concept",
@@ -479,6 +493,9 @@ export const messageKeys = [
   "expressions.plan.references",
   "expressions.plan.revise",
   "expressions.plan.scenes",
+  "expressions.preview.cancel",
+  "expressions.preview.cleared",
+  "expressions.preview.group",
   "expressions.set.agentText",
   "expressions.set.badgeGif",
   "expressions.set.cellGray",
@@ -518,6 +535,7 @@ export const messageKeys = [
   "expressions.sheet.hintInsert",
   "expressions.sheet.hintPreview",
   "expressions.sheet.hintReact",
+  "expressions.sheet.keyboard",
   "expressions.sheet.loading",
   "expressions.sheet.noMatch",
   "expressions.sheet.offline",
@@ -537,6 +555,9 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.group",
+  "expressions.suggest.mute",
+  "expressions.suggest.pick",
   "inbox.approval.open",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
@@ -847,6 +868,33 @@ export const messageKeys = [
   "releaseNotes.v0143.searchLine3",
   "releaseNotes.v0143.searchTopic",
   "releaseNotes.v0143.summary",
+  "releaseNotes.v0144.agentsLine1",
+  "releaseNotes.v0144.emoticonWindowChanged",
+  "releaseNotes.v0144.emoticonWindowTitle",
+  "releaseNotes.v0144.emoticonWindowTryIt",
+  "releaseNotes.v0144.expressionsLine1",
+  "releaseNotes.v0144.expressionsLine2",
+  "releaseNotes.v0144.expressionsLine3",
+  "releaseNotes.v0144.expressionsTopic",
+  "releaseNotes.v0144.keyboardPanelChanged",
+  "releaseNotes.v0144.keyboardPanelTitle",
+  "releaseNotes.v0144.keyboardPanelTryIt",
+  "releaseNotes.v0144.lighterEmoticonsChanged",
+  "releaseNotes.v0144.lighterEmoticonsTitle",
+  "releaseNotes.v0144.lighterEmoticonsTryIt",
+  "releaseNotes.v0144.phoneLine1",
+  "releaseNotes.v0144.phoneLine2",
+  "releaseNotes.v0144.phoneTopic",
+  "releaseNotes.v0144.sendTogetherChanged",
+  "releaseNotes.v0144.sendTogetherTitle",
+  "releaseNotes.v0144.sendTogetherTryIt",
+  "releaseNotes.v0144.steadyEntryChanged",
+  "releaseNotes.v0144.steadyEntryTitle",
+  "releaseNotes.v0144.steadyEntryTryIt",
+  "releaseNotes.v0144.suggestionsChanged",
+  "releaseNotes.v0144.suggestionsTitle",
+  "releaseNotes.v0144.suggestionsTryIt",
+  "releaseNotes.v0144.summary",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -1678,6 +1726,9 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.a11y": {},
+  "expressions.panel.emptyEmoticon": {},
+  "expressions.panel.emptyGif": {},
   "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
   "expressions.panel.viewGif": {},
@@ -1745,6 +1796,21 @@ export const argumentSpecs = {
   "expressions.photo.submit": {},
   "expressions.photo.tagsLabel": {},
   "expressions.photo.tagsPlaceholder": {},
+  "expressions.picker.add": {},
+  "expressions.picker.favoriteAdd": {},
+  "expressions.picker.favoriteAdded": {
+    "name": "string"
+  },
+  "expressions.picker.favoriteRemove": {},
+  "expressions.picker.favoriteRemoved": {
+    "name": "string"
+  },
+  "expressions.picker.grid": {},
+  "expressions.picker.sectionFavorites": {},
+  "expressions.picker.sectionOther": {},
+  "expressions.picker.sectionRecent": {},
+  "expressions.picker.setStrip": {},
+  "expressions.picker.teamGroup": {},
   "expressions.plan.cancel": {},
   "expressions.plan.closed": {},
   "expressions.plan.concept": {},
@@ -1789,6 +1855,11 @@ export const argumentSpecs = {
   },
   "expressions.plan.revise": {},
   "expressions.plan.scenes": {},
+  "expressions.preview.cancel": {
+    "name": "string"
+  },
+  "expressions.preview.cleared": {},
+  "expressions.preview.group": {},
   "expressions.set.agentText": {
     "prompt": "string"
   },
@@ -1851,6 +1922,7 @@ export const argumentSpecs = {
   "expressions.sheet.hintInsert": {},
   "expressions.sheet.hintPreview": {},
   "expressions.sheet.hintReact": {},
+  "expressions.sheet.keyboard": {},
   "expressions.sheet.loading": {},
   "expressions.sheet.noMatch": {},
   "expressions.sheet.offline": {},
@@ -1870,6 +1942,11 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.group": {},
+  "expressions.suggest.mute": {},
+  "expressions.suggest.pick": {
+    "name": "string"
+  },
   "inbox.approval.open": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
@@ -2220,6 +2297,33 @@ export const argumentSpecs = {
   "releaseNotes.v0143.searchLine3": {},
   "releaseNotes.v0143.searchTopic": {},
   "releaseNotes.v0143.summary": {},
+  "releaseNotes.v0144.agentsLine1": {},
+  "releaseNotes.v0144.emoticonWindowChanged": {},
+  "releaseNotes.v0144.emoticonWindowTitle": {},
+  "releaseNotes.v0144.emoticonWindowTryIt": {},
+  "releaseNotes.v0144.expressionsLine1": {},
+  "releaseNotes.v0144.expressionsLine2": {},
+  "releaseNotes.v0144.expressionsLine3": {},
+  "releaseNotes.v0144.expressionsTopic": {},
+  "releaseNotes.v0144.keyboardPanelChanged": {},
+  "releaseNotes.v0144.keyboardPanelTitle": {},
+  "releaseNotes.v0144.keyboardPanelTryIt": {},
+  "releaseNotes.v0144.lighterEmoticonsChanged": {},
+  "releaseNotes.v0144.lighterEmoticonsTitle": {},
+  "releaseNotes.v0144.lighterEmoticonsTryIt": {},
+  "releaseNotes.v0144.phoneLine1": {},
+  "releaseNotes.v0144.phoneLine2": {},
+  "releaseNotes.v0144.phoneTopic": {},
+  "releaseNotes.v0144.sendTogetherChanged": {},
+  "releaseNotes.v0144.sendTogetherTitle": {},
+  "releaseNotes.v0144.sendTogetherTryIt": {},
+  "releaseNotes.v0144.steadyEntryChanged": {},
+  "releaseNotes.v0144.steadyEntryTitle": {},
+  "releaseNotes.v0144.steadyEntryTryIt": {},
+  "releaseNotes.v0144.suggestionsChanged": {},
+  "releaseNotes.v0144.suggestionsTitle": {},
+  "releaseNotes.v0144.suggestionsTryIt": {},
+  "releaseNotes.v0144.summary": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -3160,6 +3264,9 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.a11y": Record<string, never>;
+  "expressions.panel.emptyEmoticon": Record<string, never>;
+  "expressions.panel.emptyGif": Record<string, never>;
   "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.panel.viewGif": Record<string, never>;
@@ -3225,6 +3332,17 @@ export interface MessageArgs {
   "expressions.photo.submit": Record<string, never>;
   "expressions.photo.tagsLabel": Record<string, never>;
   "expressions.photo.tagsPlaceholder": Record<string, never>;
+  "expressions.picker.add": Record<string, never>;
+  "expressions.picker.favoriteAdd": Record<string, never>;
+  "expressions.picker.favoriteAdded": { name: string };
+  "expressions.picker.favoriteRemove": Record<string, never>;
+  "expressions.picker.favoriteRemoved": { name: string };
+  "expressions.picker.grid": Record<string, never>;
+  "expressions.picker.sectionFavorites": Record<string, never>;
+  "expressions.picker.sectionOther": Record<string, never>;
+  "expressions.picker.sectionRecent": Record<string, never>;
+  "expressions.picker.setStrip": Record<string, never>;
+  "expressions.picker.teamGroup": Record<string, never>;
   "expressions.plan.cancel": Record<string, never>;
   "expressions.plan.closed": Record<string, never>;
   "expressions.plan.concept": Record<string, never>;
@@ -3250,6 +3368,9 @@ export interface MessageArgs {
   "expressions.plan.references": { count: number };
   "expressions.plan.revise": Record<string, never>;
   "expressions.plan.scenes": Record<string, never>;
+  "expressions.preview.cancel": { name: string };
+  "expressions.preview.cleared": Record<string, never>;
+  "expressions.preview.group": Record<string, never>;
   "expressions.set.agentText": { prompt: string };
   "expressions.set.badgeGif": Record<string, never>;
   "expressions.set.cellGray": { displayName: string; reason: string };
@@ -3289,6 +3410,7 @@ export interface MessageArgs {
   "expressions.sheet.hintInsert": Record<string, never>;
   "expressions.sheet.hintPreview": Record<string, never>;
   "expressions.sheet.hintReact": Record<string, never>;
+  "expressions.sheet.keyboard": Record<string, never>;
   "expressions.sheet.loading": Record<string, never>;
   "expressions.sheet.noMatch": Record<string, never>;
   "expressions.sheet.offline": Record<string, never>;
@@ -3308,6 +3430,9 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.group": Record<string, never>;
+  "expressions.suggest.mute": Record<string, never>;
+  "expressions.suggest.pick": { name: string };
   "inbox.approval.open": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
@@ -3618,6 +3743,33 @@ export interface MessageArgs {
   "releaseNotes.v0143.searchLine3": Record<string, never>;
   "releaseNotes.v0143.searchTopic": Record<string, never>;
   "releaseNotes.v0143.summary": Record<string, never>;
+  "releaseNotes.v0144.agentsLine1": Record<string, never>;
+  "releaseNotes.v0144.emoticonWindowChanged": Record<string, never>;
+  "releaseNotes.v0144.emoticonWindowTitle": Record<string, never>;
+  "releaseNotes.v0144.emoticonWindowTryIt": Record<string, never>;
+  "releaseNotes.v0144.expressionsLine1": Record<string, never>;
+  "releaseNotes.v0144.expressionsLine2": Record<string, never>;
+  "releaseNotes.v0144.expressionsLine3": Record<string, never>;
+  "releaseNotes.v0144.expressionsTopic": Record<string, never>;
+  "releaseNotes.v0144.keyboardPanelChanged": Record<string, never>;
+  "releaseNotes.v0144.keyboardPanelTitle": Record<string, never>;
+  "releaseNotes.v0144.keyboardPanelTryIt": Record<string, never>;
+  "releaseNotes.v0144.lighterEmoticonsChanged": Record<string, never>;
+  "releaseNotes.v0144.lighterEmoticonsTitle": Record<string, never>;
+  "releaseNotes.v0144.lighterEmoticonsTryIt": Record<string, never>;
+  "releaseNotes.v0144.phoneLine1": Record<string, never>;
+  "releaseNotes.v0144.phoneLine2": Record<string, never>;
+  "releaseNotes.v0144.phoneTopic": Record<string, never>;
+  "releaseNotes.v0144.sendTogetherChanged": Record<string, never>;
+  "releaseNotes.v0144.sendTogetherTitle": Record<string, never>;
+  "releaseNotes.v0144.sendTogetherTryIt": Record<string, never>;
+  "releaseNotes.v0144.steadyEntryChanged": Record<string, never>;
+  "releaseNotes.v0144.steadyEntryTitle": Record<string, never>;
+  "releaseNotes.v0144.steadyEntryTryIt": Record<string, never>;
+  "releaseNotes.v0144.suggestionsChanged": Record<string, never>;
+  "releaseNotes.v0144.suggestionsTitle": Record<string, never>;
+  "releaseNotes.v0144.suggestionsTryIt": Record<string, never>;
+  "releaseNotes.v0144.summary": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };

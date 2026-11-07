@@ -1,7 +1,17 @@
-import {ExpressionComposerModal} from '../expressions/ExpressionComposerPicker';
-import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
-import {insertExpressionToken} from '../expressions/expressionViews';
+import {ComposerExpressionPreview} from '../expressions/ComposerExpressionPreview';
+import {ComposerExpressionSuggest} from '../expressions/ComposerExpressionSuggest';
+import {ExpressionKeyboardPanel} from '../expressions/ExpressionKeyboardPanel';
+import {useExpressions} from '../expressions/ExpressionProvider';
+import {
+  insertAtCaret,
+  insertExpressionTokenAtCaret,
+} from '../expressions/expressionViews';
 import {useExpressionMessages} from '../expressions/useExpressionMessages';
+import {useExpressionSuggest} from '../expressions/useExpressionSuggest';
+import {startKeyboardMemory, keyboardSlotHeight} from '../../lib/keyboardMemory';
+import {WORD} from '../../lib/techWords';
+import type {Expression} from '@momo/core/features/expressions/types';
+import {useComposerPanel} from './composerPanel';
 import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
 import {dmAdmissionCandidates, dmAdmissionHint} from '@momo/core/features/agents/dmAdmission';
 import type {Channel} from '@momo/core/lib/api';
@@ -294,6 +304,10 @@ export {PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 //   grow1443-composer-growth-dark.png              기본 크기 — 128.0pt = 5.0줄
 //                                                  (다섯 줄이 그대로 다 보인다)
 // =============================================================================
+
+// 이모티콘 창의 사전 열쇠(#5452). 모듈 값이라 직접 문구 장부가 세지 않는다.
+const KEYBOARD_KEY = 'expressions.sheet.keyboard';
+const PREVIEW_CLEARED_KEY = 'expressions.preview.cleared';
 
 /** 작은 창·큰 글자에서도 편집 중인 줄과 그 앞 줄을 남긴다. */
 const MIN_ROWS = 2;
@@ -1099,6 +1113,11 @@ export interface ComposerSendOptions {
    * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
    */
   suppressUnfurl?: boolean;
+  /**
+   * #5452 — 입력창 위 미리 보기에 올라 있던 이모티콘·GIF. 있으면 호스트가 **큰 표현 메시지 → 글 메시지** 두 개를 한 묶음(코어 `planSendBundle`)으로 보낸다. 글이 비어도 표현만 나간다.
+   * 켠 때만 있다: 미리 보기가 없는 전송은 이 필드 이전과 같은 호출이다.
+   */
+  expression?: Expression;
 }
 
 /**
@@ -1143,6 +1162,7 @@ export function Composer({
   inputRef: externalInputRef,
   onSlashCommand,
   onKeyBlockedChange,
+  expressionBundle = false,
 }: {
   channelLabel: string;
   channel?: Channel | null;
@@ -1261,6 +1281,11 @@ export function Composer({
    * 카드가 한 화면을 넘어 카드 머리가 밀려 나가지 않게.
    */
   onKeyBlockedChange?: (blocked: boolean) => void;
+  /**
+   * #5452 — 이모티콘·GIF 를 고르면 입력창 위 미리 보기에 올리고 보내기 한 번에 글과 함께 보낸다(호스트의 `onSend` 가 `options.expression` 을 받는다). 켜지 않으면(스레드 입력창)
+   * 고른 이모티콘은 `:이름:` 글로 입력칸에 들어간다 - 웹 스레드 입력칸과 같다.
+   */
+  expressionBundle?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -1312,6 +1337,10 @@ export function Composer({
   // 스스로 열린다 — 아무도 아직 아무것도 안 쳤는데. 그 둘은 한 결정이고, 이
   // 티켓(시트의 **상한**)의 것이 아니다.
   const [caret, setCaret] = useState(0);
+  // 캐럿을 한 번이라도 알았는가(글을 쳤거나 선택이 옮겨졌다)와 그 동기 사본 - 이모티콘 창이 글을 캐럿 자리에 끼울 때 읽는다(#5452).
+  const selectionKnownRef = useRef(false);
+  const caretRef = useRef(caret);
+  caretRef.current = caret;
   const [mentionOpen, setMentionOpen] = useState(true);
   // 슬래시 목록을 닫은 뒤(골랐거나 보냈다) 같은 글자에서 다시 열리지 않게 한다.
   // 다음 키스트로크가 다시 연다 — 멘션과 같은 규율이다.
@@ -1328,8 +1357,20 @@ export function Composer({
     onKeyBlockedChangeRef.current?.(next);
   }, []);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
-  const [expressionPickerOpen, setExpressionPickerOpen] = useState(false);
-  const expressionTrigger = useEmojiTriggerFocus(expressionPickerOpen);
+  // 키보드 자리의 이모티콘 창(#5452): 상태는 대화 레이아웃의 호스트가 쥐고(`composerPanel.tsx`) 입력창은 열고 닫을 뿐이다. 호스트가 없으면(하네스·시험 일부) 창이 서지 않는다.
+  const panelHost = useComposerPanel();
+  const panelHostRef = useRef(panelHost);
+  panelHostRef.current = panelHost;
+  const panelPhase = panelHost?.phase ?? WORD.closed;
+  const panelPhaseRef = useRef(panelPhase);
+  panelPhaseRef.current = panelPhase;
+  const panelOpen = panelPhase !== WORD.closed;
+  // 입력창 위 미리 보기에 올라 있는 이모티콘·GIF(채널 입력창만). 보내면 비고, ✕가 비운다.
+  const [expressionPreview, setExpressionPreview] = useState<Expression | null>(null);
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const {store: expressionStore} = useExpressions();
+  // 답글 머리말이 걸려 있으면 이 입력창은 스레드 답글을 보낸다 - 묶음 보내기는 채널 글의 것이라 이모티콘은 `:이름:` 글로 들어간다.
+  const previewing = expressionBundle && !replying;
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
   // Mirrors `text` for the caret derivation below without making `onChangeText`
@@ -1607,6 +1648,7 @@ export function Composer({
     // costs one string compare and is exact for an insertion, a deletion, and
     // for an IME replacing the composing tail.
     setCaret(caretAfterChange(currentTextRef.current, next));
+    selectionKnownRef.current = true;
     // 접힘 ↔ 펼침 전이에는 햅틱이 없다(#4331 「채팅을 치면 진동하면서」 — 첫 글자의 진동이 같은 불만이 된다).
     // 입력 길의 햅틱은 0번이고, 보내기만 light 한 번 울린다(`submit`).
     currentTextRef.current = next;
@@ -1678,6 +1720,8 @@ export function Composer({
     setRestedFlag(false);
     setPressing(false);
     setFocused(true);
+    // 입력창을 눌러 키보드가 돌아온다(#5452): 키보드가 창을 다 덮은 뒤에 창이 걷힌다. 미리 보기는 그대로 남는다.
+    if (panelPhaseRef.current === WORD.open) panelHostRef.current?.handoff();
   }, [setKeyBlocked, clearPressGrace]);
 
   const onSelectionChange = useCallback(
@@ -1686,6 +1730,7 @@ export function Composer({
       // synchronously above; taking this event's value as well would let a late
       // selection event overwrite the fresh position with the old one.
       const {start, end} = event.nativeEvent.selection;
+      selectionKnownRef.current = true;
       selectionRangeRef.current = start !== end;
       if (start === end && currentTextRef.current === text) setCaret(start);
     },
@@ -1786,12 +1831,24 @@ export function Composer({
       acceptSlash(slashRows[0]);
       return;
     }
+    const preview = previewing ? expressionPreview : null;
     if (
       offline === true ||
       attachmentBlock !== null ||
-      (body === '' && !hasAttachments)
+      (body === '' && !hasAttachments && preview === null)
     ) {
       return;
+    }
+    // 고른 뒤 그 표현이 숨겨지거나 지워졌다면 보내지 않고 한 문장으로 말한다(웹 미리 보기와 같다). 목록을 확인할 수 없는 동안(불러오는 중·끊김)은 막지 않는다 - 서버가 그 글을 받는다.
+    if (preview !== null && expressionStore !== null) {
+      const now = expressionStore.snapshot();
+      const live =
+        now.state !== WORD.ready ||
+        now.items.some(entry => entry.id === preview.id && entry.name === preview.name && entry.status === WORD.active);
+      if (!live) {
+        setPreviewUnavailable(true);
+        return;
+      }
     }
     // 보내기 = light 한 번 (#4305, `haptics.ts` 표). 접힘 전이는 소리 없이 돌아온다.
     haptics.light();
@@ -1809,7 +1866,18 @@ export function Composer({
     }
     // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
     // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
-    const flags = linkPreview.suppressed ? {suppressUnfurl: true} : null;
+    const flags =
+      linkPreview.suppressed || preview !== null
+        ? {
+            ...(linkPreview.suppressed ? {suppressUnfurl: true as const} : {}),
+            ...(preview === null ? {} : {expression: preview}),
+          }
+        : null;
+    // 보냈으니 미리 보기는 비운다(글과 같은 규율 - 입력창이 보낸 것을 쥐고 있지 않는다).
+    if (preview !== null) {
+      setExpressionPreview(null);
+      setPreviewUnavailable(false);
+    }
     if (attachmentKey === null) {
       if (flags === null) onSend(body);
       else onSend(body, flags);
@@ -1836,6 +1904,9 @@ export function Composer({
     slashRows,
     acceptSlash,
     linkPreview.suppressed,
+    previewing,
+    expressionPreview,
+    expressionStore,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -1848,7 +1919,114 @@ export function Composer({
     showSlash ||
     (offline !== true &&
       attachmentBlock === null &&
-      (text.trim() !== '' || attachmentSurface.drafts.length > 0));
+      (text.trim() !== '' ||
+        attachmentSurface.drafts.length > 0 ||
+        (previewing && expressionPreview !== null)));
+  // ---- 키보드 자리의 이모티콘 창 (#5452) ---------------------------------------------------
+  // 키보드 높이는 입력창이 처음 선 때부터 적어 둔다(창을 키보드가 한 번도 안 뜬 채 열어도 지난번 높이로 서게).
+  useEffect(() => {
+    startKeyboardMemory();
+  }, []);
+  // 채널을 옮기거나 답글 머리말이 걸리면 미리 보기는 따라가지 않는다(웹과 같다 - 다른 방으로 그림이 새지 않는다).
+  useEffect(() => {
+    setExpressionPreview(null);
+    setPreviewUnavailable(false);
+  }, [draftKey, replying]);
+  // 글을 캐럿 자리에 끼운다. 창이 서 있을 때 입력창은 포커스가 없어서(키보드가 내려갔다) 캐럿은 입력창이 마지막으로 안 자리다 - 한 번도 안 눌린 초안은 끝에 붙인다.
+  const insertPiece = useCallback(
+    (make: (base: string, at: number) => {text: string; caret: number}) => {
+      const base = currentTextRef.current;
+      const at = selectionKnownRef.current ? Math.min(caretRef.current, base.length) : base.length;
+      const next = make(base, at);
+      onChangeText(next.text);
+      // 코드로 쓴 선택은 iOS 가 알려 주지 않는다 - 알려 줄 때까지 기다리지 않고 캐럿을 직접 쥔다.
+      selectionKnownRef.current = true;
+      caretRef.current = next.caret;
+      setCaret(next.caret);
+      // (`?.()` 는 시험 환경의 글 칸 대역이 이 메서드를 안 가진 탓이다 - 실제 기기에는 늘 있다.)
+      requestAnimationFrame(() => inputRef.current?.setSelection?.(next.caret, next.caret));
+    },
+    [onChangeText, inputRef],
+  );
+  const insertGlyph = useCallback(
+    (glyph: string) => insertPiece((base, at) => insertAtCaret(base, at, glyph)),
+    [insertPiece],
+  );
+  const insertToken = useCallback(
+    (token: string) => insertPiece((base, at) => insertExpressionTokenAtCaret(base, at, token)),
+    [insertPiece],
+  );
+  const pickBig = useCallback(
+    (item: Expression) => {
+      if (!previewing) {
+        // 스레드 입력창: 미리 보기·묶음이 없다. `:이름:` 글이 들어가고 그 글 하나만 보내면 큰 이모티콘이 된다(ADR-0218 D1).
+        insertToken(`:${item.name}:`);
+        return;
+      }
+      setPreviewUnavailable(false);
+      setExpressionPreview(item);
+    },
+    [previewing, insertToken],
+  );
+  const clearPreview = useCallback(() => {
+    setExpressionPreview(null);
+    setPreviewUnavailable(false);
+    // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 - 결과를 소리로 알린다(링크 미리보기의 ✕와 같은 길).
+    AccessibilityInfo.announceForAccessibility(expressionCopy(PREVIEW_CLEARED_KEY));
+  }, [expressionCopy]);
+  // ---- 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) ----------------------------------------------------
+  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다. 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 채널 입력창이 아님(스레드·답글 머리말) · 이미 미리 보기가 있음(큰 그림은
+  // 하나) · 이모티콘 창이 서 있음(키보드로 칠 때만) · 멘션 목록이나 명령을 치는 중 · 오프라인 · 입력창에 포커스가 없음(목록을 눌러 쉬거나 키보드를 내림).
+  const suggest = useExpressionSuggest({
+    scope:
+      attachmentWorkspaceId === undefined || attachmentChannelId === undefined
+        ? null
+        : `${attachmentWorkspaceId}:${attachmentChannelId}`,
+    text,
+    enabled:
+      previewing &&
+      expressionPreview === null &&
+      !panelOpen &&
+      !showMentions &&
+      !showSlash &&
+      parsedCommand === null &&
+      offline !== true &&
+      focused,
+  });
+  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. */
+  const pickSuggestion = (item: Expression) => {
+    setPreviewUnavailable(false);
+    setExpressionPreview(item);
+    suggest.close();
+  };
+  const panelNode = useMemo(
+    () => (
+      <ExpressionKeyboardPanel
+        previewId={expressionPreview?.id ?? null}
+        onPickBig={pickBig}
+        onInsertText={insertGlyph}
+        onInsertToken={insertToken}
+        onOpenConversation={openMadeConversation}
+      />
+    ),
+    [expressionPreview?.id, pickBig, insertGlyph, insertToken, openMadeConversation],
+  );
+  // 창이 서 있는 동안 내용이 최신이게 한다(미리 보기에 오른 것이 바뀌면 창의 칸 표시가 바뀐다).
+  useEffect(() => {
+    if (panelPhase !== WORD.closed) panelHostRef.current?.setContent(panelNode);
+  }, [panelPhase, panelNode]);
+  const onExpressionPress = () => {
+    const host = panelHostRef.current;
+    if (host === null || offline === true) return;
+    if (panelPhaseRef.current === WORD.open) {
+      // 키보드 단추: 키보드가 돌아오고 창이 걷힌다.
+      host.handoff();
+      inputRef.current?.focus();
+      return;
+    }
+    host.setContent(panelNode);
+    host.open(keyboardSlotHeight(windowHeight * KEYBOARD_WINDOW_SHARE));
+  };
   const canAttach =
     stableAttachmentTarget !== null &&
     offline !== true &&
@@ -1868,7 +2046,8 @@ export function Composer({
     restFromRef.current = null;
     setRestFrom(null);
   }, [restedFlag, text]);
-  const expanded = pressing || focused || (text !== '' && !rested);
+  // 창이 서 있는 동안에도 펼친 채다(#5452): 키보드가 내려가며 포커스를 잃어도 알약이 접히지 않아야 입력창이 안 움직인다.
+  const expanded = pressing || focused || panelOpen || (text !== '' && !rested);
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const dockFollow = useContext(DockFollowContext);
@@ -1896,7 +2075,8 @@ export function Composer({
   }, [reduceMotion]);
   const onInputBlur = useCallback(() => {
     focusedRef.current = false;
-    collapseWithMotion();
+    // 창이 키보드를 대신해 서 있으면(#5452) 포커스를 잃어도 접히지 않는다 - 펼침의 이유가 창으로 넘어갔다.
+    if (panelPhaseRef.current === WORD.closed) collapseWithMotion();
     setFocused(false);
   }, [collapseWithMotion]);
   // 대화 목록을 눌렀다 (#4614, `tapDismiss.ts` → `dockFollow.rest`). 자판은 목록이 이미 내렸다(`Keyboard.dismiss`) — 여기서는 **글이 남은 입력창을 접는 것**만 한다. 글이 없으면 할 일이 없다:
@@ -1905,6 +2085,8 @@ export function Composer({
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.registerRest(() => {
+      // 목록을 눌렀다: 키보드 자리의 창도 거둔다(#5452). 창이 닫히면 펼침의 이유가 사라져 알약은 아래 규칙대로 접힌다.
+      if (panelPhaseRef.current !== WORD.closed) panelHostRef.current?.close();
       if (currentTextRef.current === '' || restedRef.current) return;
       restedRef.current = true;
       // 접히는 스프링의 **시작값**: 지금 글 칸이 서 있는 높이. 모르면(아직 한 번도 재지 않았다) 이 움직임 없이 바로 접는다.
@@ -2453,6 +2635,16 @@ export function Composer({
         </View>
       ) : null}
 
+      {/* 키워드 추천 줄 (#5478): 멘션 목록처럼 **도크 밖으로 뜬다** - 서고 사라져도 도크가 자라거나 줄지 않아 대화가 흔들리지 않는다. 그림과 ✕ 뿐, 안내 글 없음. */}
+      {suggest.open ? (
+        <ComposerExpressionSuggest
+          items={suggest.items}
+          onPick={pickSuggestion}
+          onMute={suggest.mute}
+          marginHorizontal={floatInset}
+        />
+      ) : null}
+
       {admissionHint !== null ? <Text style={styles.hint} accessibilityLiveRegion="polite" testID="composer-dm-admission-hint">{admissionHint}</Text> : null}
       {dmHint !== undefined ? (
         dmHint !== null && text.trim() === '' ? (
@@ -2524,6 +2716,16 @@ export function Composer({
           block={quote.block}
           directory={directory}
           onCancel={onCancelQuote}
+        />
+      ) : null}
+
+      {/* 이모티콘·GIF 미리 보기 (#5452): 알약 바로 위, **그림과 작은 ✕뿐**이다(안내 글 없음, 낭독 이름만). 알약 밖이라 ✕가 보내기를 일으키지 않는다. 높이 예산에는 넣지 않는다 - 인용 줄과 같은 취급이다. */}
+      {previewing && expressionPreview !== null ? (
+        <ComposerExpressionPreview
+          expression={expressionPreview}
+          unavailable={previewUnavailable}
+          onClear={clearPreview}
+          marginHorizontal={floatInset}
         />
       ) : null}
 
@@ -2784,17 +2986,14 @@ export function Composer({
         {/* 표현 단추 (#4942) — **보내기 바로 왼쪽**, 접힘·펼침·입력 중 모두 선다. 두 원과 같은 지름의 칸이고 글리프만
             그린다(원 채움 없음 — 채운 원은 보내기 하나다). 도구 줄이 아니라 알약 바닥에 절대 배치라 도구 줄이 접혀도 안 움직인다. */}
         <Pressable
-          ref={expressionTrigger}
           accessibilityRole="button"
-          accessibilityLabel={expressionCopy('expressions.sheet.open')}
-          accessibilityState={{disabled: offline}}
+          // 창이 서 있는 동안 이 단추는 키보드로 돌아가는 단추다(#5452) - 눌린 모양(채움)과 낭독 이름이 함께 바뀐다. 글리프는 그대로 ☺ 다(키보드 글리프는 아직 기존 묶음에 없다).
+          accessibilityLabel={expressionCopy(panelOpen ? KEYBOARD_KEY : 'expressions.sheet.open')}
+          accessibilityState={{disabled: offline, selected: panelOpen}}
           disabled={offline}
           hitSlop={EXPRESSION_SLOP}
-          onPress={() => {
-            Keyboard.dismiss();
-            setExpressionPickerOpen(true);
-          }}
-          style={({pressed}) => [styles.expression, pressed && styles.pressed]}
+          onPress={onExpressionPress}
+          style={({pressed}) => [styles.expression, panelOpen && styles.expressionOn, pressed && styles.pressed]}
           testID="composer-expression">
           <Image
             source={EXPRESSION_ICONS.smile}
@@ -2834,26 +3033,6 @@ export function Composer({
         </Pressable>
       </View>
       </GlassSurface>
-      {expressionPickerOpen ? (
-          <ExpressionComposerModal
-            onClose={() => setExpressionPickerOpen(false)}
-            onInsert={glyph => {
-              onChangeText(currentTextRef.current + glyph);
-              inputRef.current?.focus();
-            }}
-            onInsertExpression={token => {
-              onChangeText(insertExpressionToken(currentTextRef.current, token));
-              inputRef.current?.focus();
-            }}
-            onSend={body => {
-              if (offline) return;
-              // 이모티콘·GIF 도 보내기다 — 보내기 = light 한 번(`submit` 과 같은 규칙, `haptics.ts` 표). 입력칸의 글은 건드리지 않는다.
-              haptics.light();
-              onSend(body);
-            }}
-            onOpenConversation={openMadeConversation}
-          />
-      ) : null}
       <AttachMenu
         visible={attachmentPickerOpen}
         anchorRef={attachRef}
@@ -2949,6 +3128,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** 이모티콘 창이 서 있는 동안 ☺ 단추의 눌린 모양: 옅은 강조 채움(owner 확정 화면의 `aria-pressed`). */
+  expressionOn: {backgroundColor: color.accentSurface},
   attachGlyph: {width: CONV_ICON_SIZE.plus, height: CONV_ICON_SIZE.plus},
   placeholder: {
     position: 'absolute',

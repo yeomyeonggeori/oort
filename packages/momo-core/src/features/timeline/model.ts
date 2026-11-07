@@ -853,6 +853,12 @@ export interface PendingMessage {
    * 답글」 줄을 그리려면 에코가 자기 루트를 알아야 한다(#4888). `replyToId` 처럼 행이 들고 다닌다.
    */
   rootId?: string;
+  /**
+   * #5453 - 이모티콘과 글을 한 번에 보낸 묶음의 둘째 메시지가 달고 다니는, 앞 메시지의 `clientMsgId`. 그 키가 대기 목록에 남아 있는 동안은
+   * 이 행을 서버로 보내지 않는다(`bundleMayPost`, expressions/sendBundle.ts). 다른 필드와 같은 이유로 행을 타고 다닌다: 새로고침 뒤에 되살린
+   * 실패 행도 순서를 지켜야 하고, 켠 때만 있다. 첫 메시지와 묶음이 아닌 보내기에는 없다.
+   */
+  after?: string;
 }
 
 /** True when `message` is the server's echo of `pending`. */
