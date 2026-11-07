@@ -35,15 +35,23 @@ name: 4891-team-expression-add
 # is empty here, which is what that subflow's tap needs.
 - runFlow: subflows/dismiss-dev-logbox.yaml
 
-# ☺ — 창이 키보드 자리에 선다. 「＋」는 이모티콘 탭(세트 띠 끝)에 있다.
+# ☺ — 창이 키보드 자리에 선다. 처음 여는 탭은 이모티콘이다(웹 고르개와 같은 코어 상수 하나, #5482): `launchApp` 이 앱을 새로 띄워 「마지막으로 본 탭」 기억이 비어 있는 처음 상태라
+# 탭을 누르지 않고 눌린 채(selected)로 서 있는지 본다. 「＋」는 이모티콘 탭(세트 띠 끝)에 있다.
 - tapOn:
     id: "composer-expression"
 - extendedWaitUntil:
     visible:
       id: "expression-panel"
     timeout: 10000
-- tapOn:
+- assertVisible:
     id: "expression-panel-tab-emoticon"
+    selected: true
+- assertVisible:
+    id: "expression-panel-tab-emoji"
+    selected: false
+- assertVisible:
+    id: "expression-panel-tab-gif"
+    selected: false
 - extendedWaitUntil:
     visible:
       id: "expression-panel-add"
