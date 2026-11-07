@@ -64,6 +64,9 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
   const { store, cache, usage, favorites, status, offline, failure } = useExpressions();
   const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
+  // 창을 여는 순간의 사용 기록과 시각을 한 번 쥔다(#5503): 이모티콘 탭 맨 위 「자주·최근」 칸의 차례는 열려 있는 동안 보내기가 성공해 기록이 바뀌어도 흔들리지 않고,
+  // 고르개를 다시 열 때(이 패널이 새로 설 때)만 새로 계산한다. 그림 목록(`cache.items`)은 계속 실시간이라 지워지거나 숨겨진 그림은 바로 빠진다.
+  const [opened] = useState(() => ({ usage, nowMs: Date.now() }));
   // ADR-0218 §10 J2 + 2026-11-05 증보: 두 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForView`). 이모티콘 = 작은 이모티콘(움직여도)과
   // 움직이지 않는 큰 그림, GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 보기 이름이다.
   // 호스트가 보기를 주지 않았고 사람도 고르기 전이면 등록이 있는 첫 보기를 연다(움직이는 큰 그림뿐인 팀이 빈 이모티콘 보기를 먼저 보지 않게).
@@ -132,7 +135,8 @@ export function TeamExpressionsPanel({ onPick, onPickExpression, purpose, onClos
   if (!store) return null;
   function backToList() { focusTrigger.current = true; setMode("list"); }
   // 그림 격자의 구역(코어 `buildExpressionSections`): 최근 -> 즐겨찾기 -> 세트별 -> 기타, 검색어가 있으면 관련도 차례의 결과 하나. 보기 이름이 곧 탭 이름이다.
-  const sections = buildExpressionSections(cache.items, view, { query, usage, favorites });
+  // 이모티콘 보기의 「최근」 칸은 정지 그림과 GIF 를 섞은 「자주·최근」이다(열 때 쥔 `opened` 로 센다).
+  const sections = buildExpressionSections(cache.items, view, { query, usage: opened.usage, favorites, nowMs: opened.nowMs });
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
     lock.current = true; setBusy(true); setError(null);
