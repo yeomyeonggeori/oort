@@ -368,4 +368,172 @@ ro="$TMP/iso-off"; mk_quar_tree "$ro"; : >"$ro/cargo.log"; : >"$ro/psql.log"; mk
 out="$(SECURITY_PACK_TARGET_DB=0 iso_nightly "$ro" "$ro/bin")" || fail "nightly(격리 끔): 초록이어야 해요 — $out"
 [ ! -s "$ro/psql.log" ] || fail "nightly(격리 끔): DB 를 만졌어요"
 grep -Fq 'RUNNER=unset' "$ro/cargo.log" || fail "nightly(격리 끔): 실행기가 걸렸어요"
-echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 3·음성 14종 + 요약 12종 + nightly 흐름 7종 + 타깃별 DB 실행기 8종·nightly 배선 3종)"
+# ── 대상 병렬 실행(#5495) ──────────────────────────────────────────────────────────────
+# `run` 은 선택 대상을 SECURITY_PACK_JOBS(기본 4)개씩 **동시에**, 대상마다 템플릿 복제 DB 에서 돈다. 가짜 cargo·psql·rustc 로 DB 없이:
+# (1) 정말 겹쳐 돌고 상한을 지킨다 (2) 직렬(JOBS=1)과 같은 대상·같은 시험 수가 돈다 (3) 대상 하나가 빨강·0개·결과 없음이면
+# 잡이 빨갛고 **어느 대상인지** 찍힌다(집합 대조 — 숫자만 맞춰서는 통과하지 못한다).
+mk_run_bin() { # <bin 디렉터리> <상태 디렉터리> — 가짜 cargo(동시에 도는 개수를 conc.log 에 적는다)·psql·rustc
+  mkdir -p "$1" "$2/running"; : >"$2/conc.log"; : >"$2/calls.log"; : >"$2/psql.log"
+  mk_fake_psql "$1" "$2/psql.log"
+  printf '#!/usr/bin/env bash\n[ "$1" = -vV ] && echo "host: x86_64-unknown-linux-gnu"\n' >"$1/rustc"
+  cat >"$1/cargo" <<EOF
+#!/usr/bin/env bash
+target=""; prev=""
+for a in "\$@"; do [ "\$prev" = --test ] && target="\$a"; prev="\$a"; done
+touch "$2/running/\$\$"
+ls "$2/running" | wc -l | tr -d ' ' >>"$2/conc.log"
+echo "\$target RUNNER=\${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:-unset} TPL=\${NIGHTLY_DB_TEMPLATE:-unset} PSQL=\$(command -v psql)" >>"$2/calls.log"
+sleep "\${FAKE_CARGO_SLEEP:-0}"
+rm -f "$2/running/\$\$"
+echo '    Finished \`test\` profile [unoptimized] target(s) in 0.50s'
+if [ "\${FAKE_CARGO_FAIL:-}" = "\$target" ]; then
+  echo 'test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s'; exit 101
+fi
+if [ "\${FAKE_CARGO_ZERO:-}" = "\$target" ]; then
+  echo 'test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.10s'; exit 0
+fi
+echo 'test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s'
+EOF
+  chmod +x "$1/rustc" "$1/cargo"
+}
+run_pack() { # <루트> <bin> <packer 스크립트> [VAR=값…] — 출력과 종료 코드를 그대로 낸다
+  local r="$1" bin="$2" packer="$3"; shift 3
+  env "$@" PATH="$bin:$PATH" PSQL_BIN="$bin/psql" DATABASE_URL='postgres://u:p@127.0.0.1:5432/db' \
+    SECURITY_PACK_ROOT="$r" SECURITY_PACK_TODAY="$NOW" SECURITY_PACK_OUT="$r/out" "$packer" run 2>&1
+}
+max_conc() { sort -n "$1/conc.log" | tail -n 1; }
+rp="$TMP/par"; mk_quar_tree "$rp"; mk_run_bin "$rp/bin" "$rp/st"
+out="$(run_pack "$rp" "$rp/bin" "$PACK" SECURITY_PACK_JOBS=4 FAKE_CARGO_SLEEP=1)" || fail "병렬: 초록이어야 해요 — $out"
+want_in "병렬(초록)" "$out" '대상 6개를 4개씩 동시에' 'PASS targets=6 tests=18 ' ' jobs=4'
+[ "$(grep -c '^\[security-pack\] ok fake/' <<<"$out")" = 6 ] || fail "병렬: 대상마다 ok 줄이 하나씩이어야 해요 — $out"
+[ "$(wc -l <"$rp/st/calls.log" | tr -d ' ')" = 6 ] || fail "병렬: cargo 를 대상마다 한 번씩 부르지 않았어요 — $(cat "$rp/st/calls.log")"
+[ "$(max_conc "$rp/st")" -ge 2 ] || fail "병렬: 대상이 겹쳐 돌지 않았어요(동시 개수 최대 $(max_conc "$rp/st")) — 직렬과 같아요"
+[ "$(max_conc "$rp/st")" -le 4 ] || fail "병렬: 동시 개수가 상한 4 를 넘었어요($(max_conc "$rp/st"))"
+[ "$(grep -c 'RUNNER=.*/infra/security-pack/nightly-target-db.sh TPL=nt_template' "$rp/st/calls.log")" = 6 ] \
+  || fail "병렬: 모든 cargo 호출에 대상별 DB 실행기를 걸지 않았어요 — $(cat "$rp/st/calls.log")"
+[ "$(grep -c 'PSQL=.*/infra/security-pack/shim/psql$' "$rp/st/calls.log")" = 6 ] \
+  || fail "병렬: 모든 cargo 호출의 PATH 맨 앞에 psql 대리인(infra/security-pack/shim)을 두지 않았어요 — $(cat "$rp/st/calls.log")"
+grep -Fq 'CREATE DATABASE "nt_template" TEMPLATE "db" ALLOW_CONNECTIONS false' "$rp/st/psql.log" || fail "병렬: setup 이 끝난 DB 에서 템플릿을 만들지 않았어요 — $(cat "$rp/st/psql.log")"
+[ "$(grep -c 'DROP DATABASE IF EXISTS "nt_template"' "$rp/st/psql.log")" = 2 ] || fail "병렬: 끝에 템플릿을 지우지 않았어요 — $(cat "$rp/st/psql.log")"
+# 직렬(JOBS=1)과 같은 대상·같은 시험 수 — 같은 선택 목록·같은 가짜 cargo 에서 숫자가 정확히 같아야 한다.
+rs="$TMP/ser"; mk_quar_tree "$rs"; mk_run_bin "$rs/bin" "$rs/st"
+out_s="$(run_pack "$rs" "$rs/bin" "$PACK" SECURITY_PACK_JOBS=1)" || fail "직렬: 초록이어야 해요 — $out_s"
+want_in "직렬(초록)" "$out_s" 'PASS targets=6 tests=18 '
+[ "$(max_conc "$rs/st")" = 1 ] || fail "직렬: 대상이 겹쳐 돌았어요(최대 $(max_conc "$rs/st"))"
+[ ! -s "$rs/st/psql.log" ] || fail "직렬: DB 를 만졌어요(예전 방식은 한 DB 에서 차례로) — $(cat "$rs/st/psql.log")"
+grep -Fq 'RUNNER=unset' "$rs/st/calls.log" || fail "직렬: 대상별 DB 실행기가 걸렸어요"
+grep -Fq '/infra/security-pack/shim/psql' "$rs/st/calls.log" && fail "직렬: psql 대리인이 PATH 에 걸렸어요(예전 방식은 그대로여야 해요)"
+[ "$(sed -n 's/.*PASS \(targets=[0-9]* tests=[0-9]*\) .*/\1/p' <<<"$out")" = "$(sed -n 's/.*PASS \(targets=[0-9]* tests=[0-9]*\) .*/\1/p' <<<"$out_s")" ] \
+  || fail "직렬과 병렬의 대상·시험 수가 달라요 — 병렬 '$out' / 직렬 '$out_s'"
+# 상한: 2개씩이면 동시 개수가 정확히 2 를 넘지 않는다.
+rc2="$TMP/par2"; mk_quar_tree "$rc2"; mk_run_bin "$rc2/bin" "$rc2/st"
+out2="$(run_pack "$rc2" "$rc2/bin" "$PACK" SECURITY_PACK_JOBS=2 FAKE_CARGO_SLEEP=1)" || fail "병렬(2): 초록이어야 해요 — $out2"
+[ "$(max_conc "$rc2/st")" = 2 ] || fail "병렬(2): 동시 개수가 2 가 아니에요(최대 $(max_conc "$rc2/st"))"
+# 대상별 DB 를 끄면 동시에 못 돈다(공용 DB 에서 겹치면 서로 깨뜨린다) — 차례로 돌고 알려 준다.
+rt="$TMP/par-nodb"; mk_quar_tree "$rt"; mk_run_bin "$rt/bin" "$rt/st"
+out_t="$(run_pack "$rt" "$rt/bin" "$PACK" SECURITY_PACK_JOBS=4 SECURITY_PACK_TARGET_DB=0 FAKE_CARGO_SLEEP=1)" || fail "병렬(TARGET_DB=0): 초록이어야 해요 — $out_t"
+want_in "병렬(TARGET_DB=0)" "$out_t" '동시에 못 돌아요' 'PASS targets=6 tests=18 '
+[ "$(max_conc "$rt/st")" = 1 ] && [ ! -s "$rt/st/psql.log" ] || fail "병렬(TARGET_DB=0): 공용 DB 에서 겹쳐 돌았어요"
+for bad_jobs in 0 abc 04 -1; do
+  rj="$TMP/par-jobs$bad_jobs"; mk_quar_tree "$rj"; mk_run_bin "$rj/bin" "$rj/st"
+  if out_j="$(run_pack "$rj" "$rj/bin" "$PACK" SECURITY_PACK_JOBS="$bad_jobs")"; then fail "병렬: SECURITY_PACK_JOBS='$bad_jobs' 인데 초록"; fi
+  grep -Fq 'SECURITY_PACK_JOBS 는 1 이상의 정수' <<<"$out_j" || fail "병렬: JOBS='$bad_jobs' 가 다른 이유로 빨강 — $out_j"
+  [ ! -s "$rj/st/calls.log" ] || fail "병렬: JOBS='$bad_jobs' 인데 cargo 를 불렀어요"
+done
+# 한 대상이 빨강이면 잡이 빨갛고 그 대상이 찍힌다. 나머지는 끝까지 돌아 한 번에 모두 보인다.
+rf="$TMP/par-fail"; mk_quar_tree "$rf"; mk_run_bin "$rf/bin" "$rf/st"
+if out_f="$(run_pack "$rf" "$rf/bin" "$PACK" FAKE_CARGO_FAIL=good_pg3)"; then fail "병렬: 대상 하나가 빨강인데 초록"; fi
+want_in "병렬(대상 빨강)" "$out_f" 'fake/good_pg3' '병렬 실행 빨강' '결과가 없는 대상: fake/good_pg3' '::error title=Security pack 대상 빨강::fake/good_pg3'
+grep -Fq 'PASS' <<<"$out_f" && fail "병렬: 빨강인데 PASS 줄이 있어요"
+grep -Fq '[security-pack] ok fake/good_pg6 ' <<<"$out_f" || fail "병렬: 한 대상이 빨강이어도 나머지는 끝까지 돌아야 해요 — $out_f"
+# 0개를 실행한 대상(빈 초록)도 빨강이고 어느 대상인지 찍힌다.
+rz="$TMP/par-zero"; mk_quar_tree "$rz"; mk_run_bin "$rz/bin" "$rz/st"
+if out_z="$(run_pack "$rz" "$rz/bin" "$PACK" FAKE_CARGO_ZERO=good_pg2)"; then fail "병렬: 0개를 실행한 대상인데 초록"; fi
+want_in "병렬(0개)" "$out_z" '빈 초록' 'fake/good_pg2'
+# ── psql 대리인(infra/security-pack/shim/psql) ───────────────────────────────────────────
+# 시험 실행 파일이 시작 때 `psql -f bootstrap_roles.sql` 로 클러스터 전역 역할 DDL 을 다시 적용하므로, 대상을 동시에 시작하면
+# `tuple concurrently updated` 로 죽는다(실측). 대리인은 그 호출에서 **그 오류 하나만** 다시 시도하고 나머지는 그대로 넘긴다.
+SHIM="$REPO_ROOT/infra/security-pack/shim/psql"
+[ -x "$SHIM" ] || fail "psql 대리인이 없거나 실행 권한이 없어요: $SHIM"
+mk_shim_env() { # <이름> — 실제 psql 흉내(호출 횟수·인자를 적는다). FAKE_MODE: ok | transient2 | transient_always | other
+  local d="$TMP/shim-$1"; mkdir -p "$d"; : >"$d/args"; rm -f "$d/count"
+  cat >"$d/realpsql" <<EOF
+#!/usr/bin/env bash
+n=\$(( \$(cat "$d/count" 2>/dev/null || echo 0) + 1 )); echo \$n >"$d/count"
+echo "ARGS: \$*" >>"$d/args"
+case "\${FAKE_MODE:-ok}" in
+  transient2) if [ "\$n" -le 2 ]; then echo 'psql: ERROR:  tuple concurrently updated' >&2; exit 3; fi ;;
+  transient_always) echo 'psql: ERROR:  tuple concurrently updated' >&2; exit 3 ;;
+  other) echo 'psql: ERROR:  permission denied for table x' >&2; exit 4 ;;
+esac
+echo "out-\$n"
+EOF
+  chmod +x "$d/realpsql"; printf '%s' "$d"
+}
+shim_call() { # <dir> <FAKE_MODE> <인자…> — 종료 코드를 그대로 낸다
+  local d="$1" mode="$2"; shift 2
+  FAKE_MODE="$mode" PSQL_BIN="$d/realpsql" PSQL_RETRY_SLEEP=0 PSQL_RETRY_MAX="${PSQL_RETRY_MAX:-12}" "$SHIM" "$@"
+}
+BOOT=/x/infra/rust/sql/bootstrap_roles.sql
+d="$(mk_shim_env retry)"; out_h="$(shim_call "$d" transient2 postgres://u@h/db -v ON_ERROR_STOP=1 --single-transaction -f $BOOT 2>&1)" \
+  || fail "대리인: 일시 오류 두 번 뒤 성공해야 해요 — $out_h"
+[ "$(cat "$d/count")" = 3 ] || fail "대리인: 세 번째 시도에서 성공해야 해요(호출 $(cat "$d/count")회)"
+want_in "대리인(재시도)" "$out_h" 'out-3' '다시 시도 1/12' '다시 시도 2/12'
+grep -Fq 'psql: ERROR:' <<<"$out_h" && fail "대리인: 성공했는데 실패한 시도의 psql 오류가 출력에 남았어요 — $out_h"
+d="$(mk_shim_env same-args)"; shim_call "$d" transient2 postgres://u@h/db -v ON_ERROR_STOP=1 --single-transaction -f $BOOT >/dev/null 2>&1
+[ "$(sort -u "$d/args" | wc -l | tr -d ' ')" = 1 ] || fail "대리인: 다시 시도할 때 인자가 달라졌어요 — $(cat "$d/args")"
+d="$(mk_shim_env file-eq)"; shim_call "$d" transient2 postgres://u@h/db --file=$BOOT >/dev/null 2>&1 || fail "대리인: --file=… 형태도 감싸야 해요"
+[ "$(cat "$d/count")" = 3 ] || fail "대리인: --file=… 형태가 다시 시도되지 않았어요(호출 $(cat "$d/count")회)"
+d="$(mk_shim_env other)"; rc=0; out_h="$(shim_call "$d" other postgres://u@h/db -f $BOOT 2>&1)" || rc=$?
+[ "$rc" = 4 ] && [ "$(cat "$d/count")" = 1 ] || fail "대리인: 다른 오류는 다시 시도하지 않고 종료 코드(4)를 그대로 내야 해요(rc=$rc, 호출 $(cat "$d/count")회)"
+grep -Fq 'permission denied for table x' <<<"$out_h" || fail "대리인: 다른 오류의 출력이 사라졌어요 — $out_h"
+d="$(mk_shim_env cap)"; rc=0; out_h="$(PSQL_RETRY_MAX=3 shim_call "$d" transient_always postgres://u@h/db -f $BOOT 2>&1)" || rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$d/count")" = 3 ] || fail "대리인: 상한(3)에서 멈추고 마지막 종료 코드(3)를 내야 해요(rc=$rc, 호출 $(cat "$d/count")회)"
+grep -Fq 'tuple concurrently updated' <<<"$out_h" || fail "대리인: 상한에서 멈출 때 마지막 오류를 보여 줘야 해요 — $out_h"
+# 감싸지 않는 호출: 같은 일시 오류 문구가 나와도 한 번만 부르고 그대로 넘긴다(다른 SQL 파일·-c 는 건드리지 않는다).
+d="$(mk_shim_env passthrough)"; rc=0; shim_call "$d" transient_always postgres://u@h/db -c 'select 1' >/dev/null 2>&1 || rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$d/count")" = 1 ] || fail "대리인: bootstrap 이 아닌 호출을 감쌌어요(rc=$rc, 호출 $(cat "$d/count")회)"
+d="$(mk_shim_env other-file)"; rc=0; shim_call "$d" transient_always postgres://u@h/db -f /x/seed.sql >/dev/null 2>&1 || rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$d/count")" = 1 ] || fail "대리인: 다른 SQL 파일(-f)을 감쌌어요(rc=$rc, 호출 $(cat "$d/count")회)"
+d="$(mk_shim_env args-pass)"; shim_call "$d" ok postgres://u@h/db -v 'a=b c' -c "select 'x y'" >/dev/null 2>&1
+grep -Fxq "ARGS: postgres://u@h/db -v a=b c -c select 'x y'" "$d/args" || fail "대리인: 감싸지 않는 호출의 인자를 바꿨어요 — $(cat "$d/args")"
+# 집합 대조가 정말 실패할 수 있는지: 병렬 실행기의 결과 기록을 일부러 깬 사본에서 빨강이어야 한다.
+# 사본은 스크립트와 실행기를 같은 상대 위치에 복사하고, 결과를 적는 한 줄만 리터럴로 바꾼다(정규식 아님 — 인용 사고를 막는다).
+OK_OLD="$(cat <<'EOF'
+    printf '%s/%s passed=%s\n' "$pkg" "$test" "$n" >"$res/$pkg.$test.ok"
+EOF
+)"
+mut_pack() { # <이름> <바꿀 줄> — 사본 스크립트 경로를 낸다
+  local m="$TMP/mutpack-$1"
+  mkdir -p "$m/scripts" "$m/infra/security-pack/shim"
+  cp "$RUNNER" "$m/infra/security-pack/nightly-target-db.sh"; cp "$SHIM" "$m/infra/security-pack/shim/psql"
+  OLD="$OK_OLD" NEW="$2" awk '$0 == ENVIRON["OLD"] { print ENVIRON["NEW"]; next } { print }' "$PACK" >"$m/scripts/security_pack.sh"
+  chmod +x "$m/scripts/security_pack.sh"
+  cmp -s "$PACK" "$m/scripts/security_pack.sh" && fail "$1: 변이가 적용되지 않았어요(결과를 적는 줄이 바뀜)"
+  printf '%s' "$m/scripts/security_pack.sh"
+}
+mut_run() { # <이름> <바꿀 줄> — 변이 사본으로 새 트리에서 `run`. 출력과 종료 코드를 그대로 낸다
+  local m r="$TMP/par-$1"
+  m="$(mut_pack "$1" "$2")"
+  mk_quar_tree "$r"; mk_run_bin "$r/bin" "$r/st"
+  run_pack "$r" "$r/bin" "$m"
+}
+if out_m="$(mut_run no-result '    [ "$test" = good_pg4 ] || printf '"'"'%s/%s passed=%s\n'"'"' "$pkg" "$test" "$n" >"$res/$pkg.$test.ok"')"; then
+  fail "병렬: 결과 파일이 빠진 대상(good_pg4)인데 초록 — 집합 대조가 실패할 수 없는 가드예요"
+fi
+want_in "병렬(결과 없음)" "$out_m" '결과가 없는 대상: fake/good_pg4' '결과 없음 1개'
+if out_m="$(mut_run zero-result '    printf '"'"'%s/%s passed=%s\n'"'"' "$pkg" "$test" "$([ "$test" = good_pg5 ] && echo 0 || echo "$n")" >"$res/$pkg.$test.ok"')"; then
+  fail "병렬: 통과 0개로 기록된 대상(good_pg5)인데 초록 — 집계가 0 을 걸러내지 못해요"
+fi
+want_in "병렬(통과 0 기록)" "$out_m" '통과 개수가 0 이거나 숫자가 아닌 대상: fake/good_pg5'
+if out_m="$(mut_run extra-result '    printf '"'"'%s/%s passed=%s\n'"'"' "$pkg" "$([ "$test" = good_pg6 ] && echo ghost || echo "$test")" "$n" >"$res/$pkg.$test.ok"')"; then
+  fail "병렬: 선택에 없는 이름(ghost)으로 기록된 결과인데 초록"
+fi
+want_in "병렬(선택에 없는 결과)" "$out_m" '선택에 없는 결과: fake/ghost' '결과가 없는 대상: fake/good_pg6'
+# 대조군: 줄을 같은 내용으로 "바꾼" 사본(같은 복사 절차)은 초록이어야 변이 시험이 "사본이라서 빨강"이 아니라는 것이 보인다.
+m="$TMP/mutpack-control"; mkdir -p "$m/scripts" "$m/infra/security-pack/shim"
+cp "$PACK" "$m/scripts/security_pack.sh"; cp "$RUNNER" "$m/infra/security-pack/nightly-target-db.sh"; cp "$SHIM" "$m/infra/security-pack/shim/psql"
+rm_="$TMP/par-control"; mk_quar_tree "$rm_"; mk_run_bin "$rm_/bin" "$rm_/st"
+out_m="$(run_pack "$rm_" "$rm_/bin" "$m/scripts/security_pack.sh")" || fail "병렬: 변이 없는 사본(대조군)이 빨강 — $out_m"
+want_in "병렬(대조군)" "$out_m" 'PASS targets=6 tests=18 '
+echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 3·음성 14종 + 요약 12종 + nightly 흐름 7종 + 타깃별 DB 실행기 8종·nightly 배선 3종 + 대상 병렬 실행: 동시성·상한·직렬 동치·잘못된 JOBS 4종·실패/0개/결과 없음/0 기록/선택 밖 결과 5종 + 대조군 + psql 대리인 8종)"

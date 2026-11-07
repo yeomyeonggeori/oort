@@ -7,6 +7,8 @@
 #   list      선택된 `패키지 타깃` 쌍을 출력.
 #   setup     DATABASE_URL(슈퍼유저)에 마이그레이션 + bootstrap_roles.sql 적용.
 #   run       선택 시험을 `--ignored --test-threads=1` 로 실행. 타깃마다 `N passed`(N>0)·failed 0 을 요구한다.
+#             기본은 타깃 SECURITY_PACK_JOBS(4)개씩 **동시에**, 타깃마다 템플릿 복제 DB 에서 돈다(#5495). 판정은 타깃마다 남긴
+#             결과 파일과 선택 목록의 집합 대조라서 한 타깃이라도 빠지면 어느 타깃인지 찍고 빨강이다. JOBS=1 은 예전 방식.
 #   negative  일회용 DB 에 FORCE 없는 테넌트 테이블 픽스처를 얹고 tenant_catalog_pg 가
 #             **그 테이블을 이름으로 지목하며** 빨강인지 확인한다(다른 이유의 빨강은 실패).
 #   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용. 시험 실행 파일마다 새 DB(템플릿 복제,
@@ -24,7 +26,8 @@
 #       SECURITY_PACK_QUARANTINE(기본 infra/security-pack/nightly-quarantine.txt),
 #       SECURITY_PACK_ROOT(기본 레포 루트, 시험 편의), SECURITY_PACK_OUT(로그 디렉터리),
 #       SECURITY_PACK_TODAY(YYYY-MM-DD, 기한 판정용 오늘 — 시험 편의),
-#       SECURITY_PACK_TARGET_DB(0 이면 야간도 한 DB 에서 전부 — 진단·시험 편의, 기본 1),
+#       SECURITY_PACK_TARGET_DB(0 이면 야간도 한 DB 에서 전부, `run` 도 동시에 못 돌고 차례로 — 진단·시험 편의, 기본 1),
+#       SECURITY_PACK_JOBS(`run` 이 동시에 돌 타깃 수, 기본 4. 1 이면 한 DB 에서 차례로),
 #       SECURITY_PACK_MIN_PASSED(전량 실행 통과 하한, 기본 1200 — 빈 초록 방지. 2026-10-28 실측 1,855개),
 #       DATABASE_URL, PSQL_BIN. 시크릿은 출력하지 않는다(DB URL은 로그에 안 찍는다).
 # =============================================================================
@@ -196,10 +199,22 @@ log_run_secs() {
   echo "${v:-?}"
 }
 
+# 동시에 돌 대상 수(#5495). 1 이거나 SECURITY_PACK_TARGET_DB=0 이면 예전처럼 한 DB 에서 차례로 돈다.
+JOBS="${SECURITY_PACK_JOBS:-4}"
+
 cmd_run() {
   cmd_lint
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
+  case "$JOBS" in ''|*[!0-9]*|0|0[0-9]*) die "SECURITY_PACK_JOBS 는 1 이상의 정수여야 해요: '$JOBS'" ;; esac
   mkdir -p "$OUT"
+  if [ "$JOBS" -gt 1 ] && [ "${SECURITY_PACK_TARGET_DB:-1}" = 0 ]; then
+    echo "[security-pack] SECURITY_PACK_TARGET_DB=0 이면 대상끼리 DB 를 나누지 않아서 동시에 못 돌아요 — 차례로 돌아요"
+  fi
+  if [ "$JOBS" -gt 1 ] && [ "${SECURITY_PACK_TARGET_DB:-1}" != 0 ]; then cmd_run_parallel; else cmd_run_serial; fi
+}
+
+# 한 DB 에서 대상을 차례로(예전 방식 — 진단·비교용). 첫 빨강에서 멈춘다.
+cmd_run_serial() {
   local total=0 targets=0 start now t0 pkg test n log
   start="$(date +%s)"
   while read -r _d pkg test; do
@@ -376,6 +391,7 @@ nightly_quarantine_pass() {
 # SECURITY_PACK_TARGET_DB=0 이면 예전처럼 한 DB 에서 전부 돈다(진단·시험 편의).
 NIGHTLY_TEMPLATE="nt_template"
 NIGHTLY_RUNNER="$SCRIPT_DIR/../infra/security-pack/nightly-target-db.sh"
+PSQL_SHIM_DIR="$SCRIPT_DIR/../infra/security-pack/shim"
 nightly_admin() { # <SQL> — 접속 DB 와 같은 서버의 postgres DB 로 실행
   local base="${DATABASE_URL%%\?*}" query
   query="${DATABASE_URL#"$base"}"
@@ -397,6 +413,75 @@ nightly_target_db_setup() {
   echo "[security-pack] 시험 실행 파일마다 새 DB 에서 돌려요(템플릿 $NIGHTLY_TEMPLATE ← $curdb, 실행기 $var)"
 }
 nightly_target_db_teardown() { nightly_admin "DROP DATABASE IF EXISTS \"$NIGHTLY_TEMPLATE\" WITH (FORCE)" 2>/dev/null || true; }
+
+# ── 대상 병렬 실행 (#5495) ────────────────────────────────────────────────────
+# `run` 은 선택 대상을 SECURITY_PACK_JOBS(기본 4)개씩 동시에 돈다. 대상마다 야간과 같은 「템플릿 복제 DB」(위
+# nightly_target_db_setup)에서 돌아서, 동시에 도는 대상끼리 행·잠금을 보지 않고 앞 대상의 찌꺼기도 뒤 대상에 안 닿는다.
+# 대상 하나의 명령은 직렬 때와 같다(`cargo test -p … --test … -- --ignored --test-threads=1` — 대상 안은 여전히 시험 하나씩).
+# `cargo test` 는 시험을 실행하기 전에 빌드 디렉터리 잠금을 풀어서(cargo 1.95 실측: 느린 시험이 도는 중에 다른 `cargo test`
+# 가 1초 만에 끝났다) 컴파일은 잠금에서 차례를 기다리고 시험 실행만 겹친다.
+# 판정은 xargs 종료 코드가 아니라 **대상마다 남기는 결과 파일**과 선택 목록의 집합 대조로 한다 — 한 대상이라도 결과가 없으면
+# (안 돌았든 죽었든) 어느 대상인지 찍고 빨강이다. 통과 개수가 0 이거나 숫자가 아닌 결과, 선택에 없는 결과도 빨강이다.
+cmd_run_parallel() {
+  local start res want have missing extra rc=0 total=0 targets=0 bad="" name field n f want_n shim_abs
+  start="$(date +%s)"
+  res="$(mktemp -d "$OUT/results.XXXXXX")"
+  nightly_target_db_setup
+  trap nightly_target_db_teardown EXIT
+  # 시험 실행 파일은 시작할 때마다 bootstrap_roles.sql 을 다시 적용하는데(클러스터 전역 역할 DDL), 동시에 시작하면 서로 부딪쳐
+  # `tuple concurrently updated` 로 죽는다. 그 오류 하나만 다시 시도하는 psql 대리인을 PATH 앞에 둔다(PSQL_BIN 은 위에서 확정됨).
+  [ -x "$PSQL_SHIM_DIR/psql" ] || die "psql 대리인이 없거나 실행 권한이 없어요: $PSQL_SHIM_DIR/psql"
+  shim_abs="$(CDPATH= cd -- "$PSQL_SHIM_DIR" && pwd)"
+  export PATH="$shim_abs:$PATH"
+  want_n="$(entries | wc -l | tr -d ' ')"
+  echo "[security-pack] 대상 ${want_n}개를 ${JOBS}개씩 동시에 돌려요(결과 파일: $res)"
+  export SECURITY_PACK_OUT="$OUT" SECURITY_PACK_RESULTS="$res"
+  entries | awk '{print $2, $3}' \
+    | xargs -n 2 -P "$JOBS" bash "$SCRIPT_DIR/security_pack.sh" run-one || rc=$?
+
+  want="$(entries | awk '{print $2 "/" $3}' | sort)"
+  have="$(find "$res" -name '*.ok' -exec cat {} + 2>/dev/null | awk '{print $1}' | sort)"
+  missing="$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have") | awk 'NF')"
+  extra="$(comm -13 <(printf '%s\n' "$want") <(printf '%s\n' "$have") | awk 'NF')"
+  while read -r name field; do
+    [ -n "$name" ] || continue
+    n="${field#passed=}"
+    case "$n" in ''|*[!0-9]*|0) bad="$bad $name"; continue ;; esac
+    total=$((total + n)); targets=$((targets + 1))
+  done < <(find "$res" -name '*.ok' -exec cat {} + 2>/dev/null)
+
+  if [ "$rc" -ne 0 ] || [ -n "$missing" ] || [ -n "$extra" ] || [ -n "$bad" ] || [ "$targets" -ne "$want_n" ]; then
+    # 실패한 대상의 꼬리 로그는 여기서 차례로 찍는다(동시에 찍으면 서로 섞인다).
+    for f in "$res"/*.err; do
+      if [ -s "$f" ]; then echo "──── $(basename "${f%.err}") ────" >&2; cat "$f" >&2; fi
+    done
+    for name in $missing; do
+      echo "[security-pack] 빨강 — 결과가 없는 대상: $name" >&2; echo "::error title=Security pack 대상 빨강::$name"
+    done
+    for name in $bad; do
+      echo "[security-pack] 빨강 — 통과 개수가 0 이거나 숫자가 아닌 대상: $name" >&2; echo "::error title=Security pack 대상 빨강::$name"
+    done
+    for name in $extra; do echo "[security-pack] 빨강 — 선택에 없는 결과: $name" >&2; done
+    die "병렬 실행 빨강: 선택 ${want_n}개 · 통과 결과 ${targets}개 · 결과 없음 $(printf '%s\n' "$missing" | awk 'NF' | wc -l | tr -d ' ')개 · xargs 종료 코드 ${rc}"
+  fi
+  echo "[security-pack] PASS targets=$targets tests=$total seconds=$(( $(date +%s) - start )) jobs=$JOBS"
+}
+
+# `run` 의 병렬 실행기가 대상마다 한 번씩 부르는 내부 명령: `run-one <패키지> <타깃>`. 결과는 SECURITY_PACK_RESULTS 아래에 파일로
+# 남긴다(`.ok` = 통과, `.err` = 실패 꼬리 로그). 통과·실패 판정은 run_target 이 직렬 때와 똑같이 한다.
+cmd_run_one() {
+  local pkg="${1:-}" test="${2:-}" res="${SECURITY_PACK_RESULTS:-}" log t0 n
+  [ -n "$pkg" ] && [ -n "$test" ] && [ -d "$res" ] || die "run-one 은 run 이 부르는 내부 명령이에요(<패키지> <타깃>, SECURITY_PACK_RESULTS)"
+  mkdir -p "$OUT"
+  log="$OUT/$pkg.$test.log"; t0="$(date +%s)"
+  if n="$(run_target "$pkg" "$test" "$log" 2>"$res/$pkg.$test.err")"; then
+    printf '%s/%s passed=%s\n' "$pkg" "$test" "$n" >"$res/$pkg.$test.ok"
+    echo "[security-pack] ok $pkg/$test passed=$n seconds=$(( $(date +%s) - t0 )) build=$(log_build_secs "$log") run=$(log_run_secs "$log")"
+  else
+    echo "[security-pack] 빨강 $pkg/$test (전체 로그: $log)" >&2
+    return 1
+  fi
+}
 
 cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
@@ -445,6 +530,7 @@ case "${1:-}" in
   list) cmd_list ;;
   setup) cmd_setup ;;
   run) cmd_run ;;
+  run-one) shift; cmd_run_one "$@" ;; # 내부 명령 — `run` 의 병렬 실행기가 대상마다 부른다
   negative) cmd_negative ;;
   nightly) cmd_nightly ;;
   report) shift; cmd_report "$@" ;;
