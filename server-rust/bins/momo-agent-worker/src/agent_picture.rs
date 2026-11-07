@@ -193,8 +193,9 @@ impl PictureWriter {
         let grant = match minted {
             Ok(Some(grant)) => grant,
             Ok(None) => return Err(PictureRefusal::NoToken),
-            Err(error) => {
-                tracing::warn!(%run_id, cause = %error, "agent picture: the write token could not be minted");
+            Err(_) => {
+                // a fixed word, never the database's own text (S3 implementation review I-3, closed by S4)
+                tracing::warn!(%run_id, cause = "database", "agent picture: the write token could not be minted");
                 return Err(PictureRefusal::Failed("database"));
             }
         };
