@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./contracts";
 export * from "./cache";
+export * from "./changeNotice";
 export * from "./search";
 export * from "./kind";
 export * from "./browse";
