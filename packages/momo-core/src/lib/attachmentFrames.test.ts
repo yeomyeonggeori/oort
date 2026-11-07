@@ -62,6 +62,33 @@ describe("realtime attachments", () => {
     ]);
   });
 
+  it("carries a photo's size summary through the live frame (ADR-0151 증보 9)", () => {
+    const media = { kind: "image", width: 4032, height: 3024 };
+    const parsed = attachmentsFromWire([
+      { id: "att-p", name: "IMG_0001.jpg", mime: "image/jpeg", sizeBytes: 3_100_000, media },
+    ]);
+    expect(parsed).toEqual([
+      { id: "att-p", name: "IMG_0001.jpg", mime: "image/jpeg", sizeBytes: 3_100_000, media },
+    ]);
+  });
+
+  it("drops only a picture summary that is out of range or of a kind it does not know, and keeps the attachment (증보 9)", () => {
+    for (const media of [
+      { kind: "image", width: 0, height: 10 },
+      { kind: "image", width: 16_385, height: 10 },
+      { kind: "image", width: 4.5, height: 10 },
+      { kind: "image", width: 4 },
+      { kind: "hologram", width: 4, height: 3 },
+    ]) {
+      const parsed = attachmentsFromWire([
+        { id: "att-p", name: "a.png", mime: "image/png", sizeBytes: 10, media },
+        { id: "att-q", name: "b.png", mime: "image/png", sizeBytes: 10 },
+      ]);
+      expect(parsed.map((entry) => entry.id)).toEqual(["att-p", "att-q"]);
+      expect("media" in (parsed[0] ?? {})).toBe(false);
+    }
+  });
+
   it("drops only a malformed media summary and keeps the attachment (#5208)", () => {
     const parsed = attachmentsFromWire([
       {

@@ -12,11 +12,17 @@
   4. 글·표현·이미지/GIF 첨부·링크(외부 접속 없이 `message_unfurl` 행을 직접 심는다)·반응을 오래된 것부터 보낸다. 마지막에 내 읽음 커서를 끝으로 옮긴다.
 결과(채널 id·계정)는 --out(기본: 표준출력)에 JSON 으로 적는다. 프로필: `entry` = 한 화면을 넘고 맨 아래에 모든 종류가 섞인 채널, `taps` = 맨 아래에 정지 큰 이모티콘 하나·움직이는 것(5초) 하나.
 레인에는 첨부를 담을 자리가 있어야 한다: `LANE_PHONE_LOCAL_DRIVE=1`(ADR-0169 로컬 볼륨). 외부 네트워크로 나가지 않는다.
+
+사진·GIF 첨부는 올린 뒤 보내기 전에 **가로세로를 선언한다**(`PUT …/attachments/{id}/media {kind: image, width, height}`, ADR-0151 증보 9, #5469) —
+새 앱이 올린 사진과 같다. 처음 보는 사진이 대화에 들어갈 때 첫 프레임부터 제 칸에 서는지(행 이동 ≤1pt)는 이 선언이 있어야 잰다.
+`--no-declare-sizes` 는 선언 없이 올린다(옛 앱이 보낸 사진·옛 메시지 흉내): 처음 보는 사진이 한 번 자라는 **기준선**이고, 한 번 본 뒤에는 0 이다.
+선언은 덤이라 서버가 거절해도(옛 서버 422 등) 시드는 계속한다.
 """
 import argparse
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -36,6 +42,7 @@ ap.add_argument("--name", default="media-lab")
 ap.add_argument("--out", default="")
 ap.add_argument("--fillers", type=int, default=18)
 ap.add_argument("--profile", default="entry,taps", help="entry, taps 또는 둘(쉼표)")
+ap.add_argument("--no-declare-sizes", action="store_true", help="사진·GIF 의 가로세로를 선언하지 않고 올린다(옛 앱·옛 메시지 흉내, 기준선)")
 args = ap.parse_args()
 API = args.api.rstrip("/")
 PG = args.pg
@@ -175,6 +182,43 @@ def register(me, name, display, filename, mime, kind):
     return expr["id"]
 
 
+# 서버가 가로세로를 받는 닫힌 목록(ADR-0151 증보 9): 이 밖의 종류는 선언하지 않는다.
+IMAGE_MIMES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+
+
+def image_size(path):
+    """PNG·GIF·JPEG 의 가로세로를 머리 바이트에서 읽는다(표준 라이브러리만). 못 읽으면 None. 이 시드가 ffmpeg 로 만든 파일은 방향 표지가 없다."""
+    with open(path, "rb") as handle:
+        head = handle.read(1 << 16)
+    if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+        return struct.unpack(">II", head[16:24])
+    if head[:6] in (b"GIF87a", b"GIF89a") and len(head) >= 10:
+        return struct.unpack("<HH", head[6:10])
+    if head[:3] == b"\xff\xd8\xff":
+        i = 2
+        while i + 9 < len(head) and head[i] == 0xFF:
+            marker = head[i + 1]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height, width = struct.unpack(">HH", head[i + 5 : i + 9])
+                return (width, height)
+            i += 2 + struct.unpack(">H", head[i + 2 : i + 4])[0]
+    return None
+
+
+def declare_size(token, channel, attachment_id, path, mime):
+    """올린 사진·GIF 의 가로세로를 선언한다. 덤이라 어떤 실패도 시드를 멈추지 않는다."""
+    if args.no_declare_sizes or mime not in IMAGE_MIMES:
+        return
+    size = image_size(path)
+    if size is None:
+        return
+    try:
+        call("PUT", f"/v1/workspaces/{WS}/channels/{channel}/attachments/{attachment_id}/media", token,
+             body={"kind": "image", "width": size[0], "height": size[1]}, retry=False)
+    except SystemExit as err:
+        print(f"declare size skipped for {os.path.basename(path)}: {err}", file=sys.stderr)
+
+
 def upload_attachment(token, channel, filename, mime):
     path = os.path.join(MEDIA, filename)
     size = os.path.getsize(path)
@@ -186,6 +230,7 @@ def upload_attachment(token, channel, filename, mime):
     except urllib.error.HTTPError as err:
         raise SystemExit(f"PUT {up['uploadUrl'][:80]} -> {err.code} {err.read()[:200]!r}")
     call("POST", f"/v1/workspaces/{WS}/channels/{channel}/attachments/{up['id']}/complete", token)
+    declare_size(token, channel, up["id"], path, mime)
     return up["id"]
 
 
