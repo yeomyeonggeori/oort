@@ -9,6 +9,7 @@
 //! | `a5_a_model_naming_a_set_id_is_refused_and_a_run_with_no_human_requester_raises_nothing` | `propose_with_avatar_in_tx` (the model's door) answers `NotAllowed` for both ids with zero rows; a run whose trigger an agent wrote raises no card | `is_model_proposable_action` loses its server-raised exclusion, or the `suggestion_requester_in_tx` line goes |
 //! | `a6_a_set_is_proposed_only_by_its_owner_for_the_bypassrls_writer` | agent, requester, run, tenant, state, confirmation, expiry, a still-planned slot and nothing-ready each alone refuse with the same answer and write nothing | one owner predicate leaves `lock_for_proposal_in_tx`/`hand_over_in_tx`, or the confirmation/slot proofs go |
 //! | `the_proposal_moves_the_set_under_its_approval_and_the_card_says_what_is_stored` | A23 + A15 + the 「제안 본문 그림 0」: drafts copied in the database, staging emptied, head `proposed` with its approval, the helper's mark with the trigger's author, `decision_mode` open, draft expiry = the approval's, audit with ids and counts only | a copy, the head move, the mark or the audit changes |
+//! | `the_two_proposal_reads_carry_their_own_owner_predicates` | `lock_for_proposal_in_tx` and `hand_over_in_tx`, called **directly** by the BYPASSRLS writer with one wrong owner part, one unconfirmed or planned state each: refused as `None`/`InvalidArguments` with nothing written (each layer proves for itself; the caller's checks cannot stand in for it) | one owner predicate or state proof leaves either function |
 //! | `a10_a_card_that_cannot_be_written_leaves_no_approval_no_draft_and_no_state_change` | the whole proposal rolls back when the card write fails; the same call succeeds once the failure is lifted | a refusal is returned after the first write instead of an error |
 //! | `a22_the_requester_must_be_able_to_approve_what_they_asked_for` | guest, an admins-only policy, a face that is not the requester each refuse; the owner passes | the `ExpressionAdder` arm goes back to a constant |
 //! | `a8_the_set_and_plan_cards_are_not_ordinary_pending_cards` | with a set card and a plan card pending, three ordinary cards still raise and the fourth is the limit | the count's exclusion goes |
@@ -408,12 +409,11 @@ fn expression_error<T>(result: Result<T, e::Error>) -> Result<T, DbError> {
     })
 }
 
-/// Begin, make (slots 0, 1 drawn; 2 refused; 3 moving slot 0), and confirm the plan, as the writer
-/// the worker is. Returns the set id. The confirmation is the S5a executor's one UPDATE, written
-/// here by the superuser exactly as the trigger allows it.
-async fn staged_and_confirmed(w: &World, t: Tenant, owner: Owner, prefix: &str) -> Uuid {
+/// Begin and make (slots 0, 1 drawn; 2 refused; 3 moving slot 0) as the writer the worker is, and
+/// leave the plan **unconfirmed**. Returns the set id.
+async fn staged(w: &World, t: Tenant, owner: Owner, prefix: &str) -> Uuid {
     let plan = plan(prefix);
-    let set_id = in_worker_tx(w, t.ws, move |conn| {
+    in_worker_tx(w, t.ws, move |conn| {
         Box::pin(async move {
             let begun = expression_error(set::begin_in_tx(conn, owner, &plan).await)?
                 .expect("begin is taken");
@@ -430,7 +430,13 @@ async fn staged_and_confirmed(w: &World, t: Tenant, owner: Owner, prefix: &str) 
         })
     })
     .await
-    .expect("staging");
+    .expect("staging")
+}
+
+/// [`staged`], then the confirmation: the S5a executor's one UPDATE, written here by the superuser
+/// exactly as the trigger allows it.
+async fn staged_and_confirmed(w: &World, t: Tenant, owner: Owner, prefix: &str) -> Uuid {
+    let set_id = staged(w, t, owner, prefix).await;
     confirm(&w.su, set_id).await;
     set_id
 }
@@ -743,6 +749,184 @@ async fn a6_a_set_is_proposed_only_by_its_owner_for_the_bypassrls_writer() {
         let (state, approval, _) = set_state(&w.su, id).await;
         assert_eq!((state.as_str(), approval), ("staging", None), "{why}");
     }
+}
+
+/// Each of the two reads the proposal stands on proves the owner **in its own SQL** (T20: the writer
+/// is BYPASSRLS, and a caller's earlier proof is not a door this function may lean on). Called
+/// directly, with one part of the owner wrong at a time.
+#[tokio::test]
+#[ignore = "needs a dedicated PG18 DATABASE_URL"]
+async fn the_two_proposal_reads_carry_their_own_owner_predicates() {
+    let w = world().await;
+    let t = tenant(&w.su).await;
+    let other = tenant(&w.su).await;
+    let set_id = staged_and_confirmed(&w, t, t.owner(), "dr").await;
+    let good = t.owner();
+    let variants: Vec<(&str, Owner)> = vec![
+        (
+            "another agent",
+            Owner {
+                agent: t.agent2,
+                ..good
+            },
+        ),
+        (
+            "another requester",
+            Owner {
+                requester: t.bob,
+                ..good
+            },
+        ),
+        (
+            "another run",
+            Owner {
+                run: t.run_again,
+                ..good
+            },
+        ),
+        (
+            "another tenant",
+            Owner {
+                workspace: other.ws,
+                ..good
+            },
+        ),
+    ];
+    // control: the owner reads it
+    let held = in_worker_tx(&w, t.ws, move |conn| {
+        Box::pin(
+            async move { expression_error(set::lock_for_proposal_in_tx(conn, good, set_id).await) },
+        )
+    })
+    .await
+    .expect("a read");
+    assert_eq!(held.expect("the owner's confirmed set").id, set_id);
+    for (why, owner) in variants {
+        let scope = owner.workspace;
+        // A wrong owner gets nothing back **and takes no lock on the row** (the writer bypasses RLS:
+        // a lock on somebody else's set would be a lever on it). Probed from another session while
+        // the call's transaction is still open.
+        let probe = w.su.clone();
+        let locked = in_worker_tx(&w, scope, move |conn| {
+            Box::pin(async move {
+                let held =
+                    expression_error(set::lock_for_proposal_in_tx(conn, owner, set_id).await)?;
+                let free =
+                    sqlx::query("SELECT 1 FROM expression_set WHERE id = $1 FOR UPDATE NOWAIT")
+                        .bind(set_id)
+                        .fetch_optional(&probe)
+                        .await;
+                Ok((held.map(|h| h.id), free.is_ok()))
+            })
+        })
+        .await
+        .expect("a read");
+        assert_eq!(locked, (None, true), "lock_for_proposal_in_tx: {why}");
+        let handed = in_worker_tx(&w, scope, move |conn| {
+            Box::pin(async move {
+                expression_error(
+                    set::hand_over_in_tx(
+                        conn,
+                        owner,
+                        set_id,
+                        Uuid::new_v4(),
+                        chrono::Utc::now() + chrono::Duration::minutes(60),
+                    )
+                    .await,
+                )
+            })
+        })
+        .await
+        .expect("a refusal is an answer");
+        assert_eq!(
+            handed.map(|_| ()),
+            Err(set::Refusal::InvalidArguments),
+            "hand_over_in_tx: {why}"
+        );
+    }
+    assert_untouched(
+        &w,
+        t,
+        t.run,
+        set_id,
+        "a wrong owner called the reads directly",
+    )
+    .await;
+    // an unconfirmed set — every slot closed, so the only thing wrong is the missing confirmation:
+    // the same refusal from both, from their own SQL
+    let t2 = tenant(&w.su).await;
+    let owner = t2.owner();
+    let unconfirmed = staged(&w, t2, owner, "dq").await;
+    let locked = in_worker_tx(&w, t2.ws, move |conn| {
+        Box::pin(async move {
+            expression_error(set::lock_for_proposal_in_tx(conn, owner, unconfirmed).await)
+        })
+    })
+    .await
+    .expect("a read");
+    assert!(locked.is_none(), "lock_for_proposal_in_tx: not confirmed");
+    let handed = in_worker_tx(&w, t2.ws, move |conn| {
+        Box::pin(async move {
+            expression_error(
+                set::hand_over_in_tx(
+                    conn,
+                    owner,
+                    unconfirmed,
+                    Uuid::new_v4(),
+                    chrono::Utc::now() + chrono::Duration::minutes(60),
+                )
+                .await,
+            )
+        })
+    })
+    .await
+    .expect("a refusal is an answer");
+    assert_eq!(
+        handed.map(|_| ()),
+        Err(set::Refusal::InvalidArguments),
+        "hand_over_in_tx: not confirmed"
+    );
+    // confirmed, but a slot is still planned: `hand_over_in_tx` refuses on its own
+    let t3 = tenant(&w.su).await;
+    let owner = t3.owner();
+    let plan = plan("dp");
+    let half = in_worker_tx(&w, t3.ws, move |conn| {
+        Box::pin(async move {
+            let begun =
+                expression_error(set::begin_in_tx(conn, owner, &plan).await)?.expect("begin");
+            expression_error(
+                set::put_still_in_tx(conn, owner, begun.set_id, 0, &still_media(10)).await,
+            )?
+            .expect("kept");
+            Ok(begun.set_id)
+        })
+    })
+    .await
+    .expect("staged");
+    confirm(&w.su, half).await;
+    let handed = in_worker_tx(&w, t3.ws, move |conn| {
+        Box::pin(async move {
+            expression_error(
+                set::hand_over_in_tx(
+                    conn,
+                    owner,
+                    half,
+                    Uuid::new_v4(),
+                    chrono::Utc::now() + chrono::Duration::minutes(60),
+                )
+                .await,
+            )
+        })
+    })
+    .await
+    .expect("a refusal is an answer");
+    assert_eq!(
+        handed.map(|_| ()),
+        Err(set::Refusal::InvalidArguments),
+        "hand_over_in_tx: a slot still planned"
+    );
+    assert_eq!(drafts_of(&w.su, t2.ws).await, 0);
+    assert_eq!(drafts_of(&w.su, t3.ws).await, 0);
 }
 
 // ---------------------------------------------------------------------------
