@@ -126,3 +126,12 @@
 @media (width >= 600px) { [data-composer-shell] .expression-suggest-row { left: var(--spacing-6); } }
 /* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다. */
 .expression-set-button[aria-current="true"] { background-color: var(--color-accent-soft); }
+
+/*
+ * 입력창 위 미리 보기 카드 (owner 2026-11-07 웹 목업 `.w-preview`, #5487 M2). 그림은 56×56 칸 안에 비율을 지켜 들어간다(`object-fit: contain` 은 위 기본 규칙). 그림이 오기 전의
+ * 칸 예약(`<canvas>`)도 같은 규칙을 받아서 도착 순간에 카드가 자라지 않는다. 불러오기에 실패했거나 오프라인이면 `ExpressionImage` 가 글자(`:이름:`)와 다시 불러오기
+ * 단추를 내놓는다: 칸은 최소 56 이고 그 글자만큼 자란다(오류 상태의 말은 숨기지 않는다). 채널·스레드 입력창이 같은 `ComposerExpressionPreview` 를 쓰므로 이 규칙 한 곳이
+ * 두 입력창의 크기를 정한다.
+ */
+.expression-preview-card > [data-expression-name] { display: flex; min-width: 56px; min-height: 56px; align-items: center; justify-content: center; }
+.expression-preview-card .expression-image[data-size="large"] { width: 56px; height: 56px; max-width: 56px; max-height: 56px; }

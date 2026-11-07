@@ -1,5 +1,5 @@
 import { useExpressions } from "@/features/expressions/context";
-import { ExpressionSendPreview } from "@/features/expressions/ExpressionSendPreview";
+import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpressionPreview";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   clearThreadDraft,
@@ -17,6 +17,12 @@ import {
 } from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import {
+  bundleCarriesOptions,
+  planSendBundle,
+  type SendBundleMessage,
+} from "@momo/core/features/expressions/sendBundle";
+import type { Expression } from "@momo/core/features/expressions/types";
 import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -102,10 +108,24 @@ import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 // =============================================================================
 
 /**
- * 이 키 뜻이 입력창 위 링크 미리보기를 닫는 Esc인가(`composerKeys.ts` 의 `preview-dismiss`). 낱말을 JSX 표현식 밖에 두는
+ * 이 키 뜻이 입력창 위 미리 보기(링크 카드 · 미리 본 이모티콘)를 닫는 Esc인가(`composerKeys.ts` 의 `preview-dismiss`). 낱말을 JSX 표현식 밖에 두는
  * 까닭: 직접 문구 장부는 JSX 안의 문자열을 문구로 세므로, 규칙의 이름이 장부에 문구로 오르지 않게 한다.
  */
-const closesLinkPreview = (intent: ComposerKeyIntent): boolean => intent === "preview-dismiss";
+const closesPreview = (intent: ComposerKeyIntent): boolean => intent === "preview-dismiss";
+
+// =============================================================================
+// 이모티콘을 고르면 입력창 위 미리 보기에 서고, 보내기 한 번에 [큰 그림 답글, 글 답글]이 같은 스레드로 간다 (#5487, 검증 7a H2).
+//
+// 채널 입력창(#5453)과 **같은 것을 같게** 한다: 큰 그림(이모티콘·GIF)은 글에 `:이름:`으로 들어가지 않고 입력창 위에 그림과 작은 ✕ 만 선다.
+// 보이는 안내 글은 없다(예전의 「큰 그림으로 보내요 …」 줄은 두 입력창 어디에도 없다). 작은 이모지는 예전처럼 글 속 캐럿 자리에 들어간다.
+// 사람이 `:이름:`만 손으로 쳐도 안내 글은 서지 않고, 큰 그림으로 나가는 것은 그대로다(글 본문이 `:이름:` 하나면 서버·타임라인이 큰 그림으로 그린다).
+//
+// 채널 입력창과 다른 것은 **보내는 길**뿐이다. 이 패널에는 보내는 중·실패 행이 없다(`useTimeline` 의 대기 목록이 없다). 그래서 코어 `planSendBundle`
+// 이 정한 순서와 메시지마다 다른 멱등 열쇠를 그대로 쓰되, 둘째는 **첫째가 서버에 확정된 뒤에만** 보낸다(`sendInOrder`):
+//   · 첫째가 실패하면 둘째는 나가지 않는다. 미리 보기·글·첨부는 입력창에 남고, 이유는 기존 실패 줄(`thread-composer-error`)에 선다.
+//   · 첫째는 되고 둘째만 실패하면 그림은 이미 나갔으므로 미리 보기는 비고, 글·첨부는 남는다(다시 보내면 글만 나간다. 그림이 두 번 나가지 않는다).
+// 열쇠는 보내기 시도마다 새로 만든다(아래 `submit` 의 기존 규칙 그대로).
+// =============================================================================
 
 export function ThreadComposer({
   workspaceId,
@@ -127,7 +147,21 @@ export function ThreadComposer({
   /** 처음 답하는 사람에게 입력창 곁에 한 줄로 알릴 말(#5017). 세울지는 호스트가 정한다(`followOnReplyHint`). 없으면 줄이 없다. */
   followHint?: string;
 }) {
-  const { store: expressionStore } = useExpressions();
+  const { store: expressionStore, cache: expressionCache } = useExpressions();
+  // 미리 본 큰 그림은 **이 스레드의 것**이다. 패널은 스레드를 옮겨도 다시 올라오지 않으므로(`key="thread-panel"`) 고른 자리(scope)를 같이 적어 두고,
+  // 다른 스레드를 보는 동안에는 없는 것으로 읽는다. 옮긴 뒤 되돌아와도 옛 미리 보기가 다시 서지 않게 아래 효과가 비운다.
+  const scope = `${workspaceId}:${channelId}:${rootId}`;
+  const [picked, setPicked] = useState<{ scope: string; expression: Expression } | null>(null);
+  const pendingExpression = picked !== null && picked.scope === scope ? picked.expression : null;
+  useEffect(() => {
+    if (picked !== null && picked.scope !== scope) setPicked(null);
+  }, [picked, scope]);
+  // 고를 때 활성이었으므로, 지금도 같은 상태인 등록이 보관함에 있으면 살아 있는 것이다(숨김·삭제로 바뀌었으면 없다). 최신 객체를 보낸다.
+  const livePending =
+    pendingExpression === null
+      ? null
+      : (expressionCache.items.find((entry) => entry.id === pendingExpression.id && entry.status === pendingExpression.status) ?? null);
+  const expressionGone = pendingExpression !== null && livePending === null;
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +176,11 @@ export function ThreadComposer({
   // 막았을 때 위 한 줄과 보내기 단추의 설명이 말하는 문장(#5239): 막은 원인에 따라 연결 상태 모델이 고른다(채널 입력창과 같은 훅).
   const blockedLine = useComposerBlockedLine();
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  /** ✕·Esc: 미리 본 그림을 치운다. 눌린 버튼이 사라지므로 포커스는 입력창이 받는다. */
+  const dismissExpressionPreview = () => {
+    setPicked(null);
+    ref.current?.focus();
+  };
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
   const viewer = useSession().session.member;
@@ -244,12 +283,14 @@ export function ThreadComposer({
   // 빨리 생긴다는 점뿐이다.
   useAutoGrow(ref, draft, { minRows: 1, maxRows: COMPOSER_MAX_ROWS });
 
-  // 파일만 보내는 답글도 답글이다. 채널 컴포저와 같은 규칙을 같은 함수로 판정한다.
+  // 파일만 보내는 답글도 답글이다. 채널 컴포저와 같은 규칙을 같은 함수로 판정한다. 그림만 있는 답글도 답글이다(글이 비어도 미리 본 그림이 나간다).
+  // 미리 본 그림이 그 사이 숨겨졌거나 지워졌으면(`expressionGone`) 보내지 않는다 - 몰래 그림만 빼고 보내지 않고, 미리 보기가 한 문장으로 말한다.
   const canSend =
     !sending &&
     !offline &&
     attachBlock === null &&
-    (draft.trim().length > 0 || tray.drafts.length > 0);
+    !expressionGone &&
+    (draft.trim().length > 0 || tray.drafts.length > 0 || livePending !== null);
 
   // ── 예약해서 보내기 (ADR-0208, #4215) ────────────────────────────────────────
   //
@@ -289,6 +330,49 @@ export function ThreadComposer({
   // 힌트 줄은 입력창에 묶어 읽는다. 키 차단 안내가 서 있으면 그쪽이 먼저다(막힌 이유가 더 급하다).
   const followHintId = followHint === undefined ? undefined : "thread-composer-follow-hint";
 
+  /**
+   * 정한 순서대로 한 통씩 보낸다. 둘째는 첫째가 서버에 확정된 **뒤에만** 나간다(`await`). 어느 통이 실패하든 거기서 멈추고 이유를 기존 실패 줄에 둔다.
+   * 보내기 옵션(첨부·링크 미리보기 끄기)은 마지막 통(글)이 나른다 - 코어 `bundleCarriesOptions`. 표현만 보내면 그 하나가 마지막이다.
+   */
+  const sendInOrder = async (messages: readonly SendBundleMessage[], attachmentIds: string[]) => {
+    try {
+      for (const [index, message] of messages.entries()) {
+        const carries = bundleCarriesOptions(messages, index);
+        let replyId: string;
+        try {
+          // A fresh idempotency key per attempt, like the channel send: a retry after a failure is a new send, not a replay of one that may already have
+          // landed. 키는 통마다 다르다(`planSendBundle` 이 정한다): 같은 키를 나누면 둘째가 첫째로 접혀 글이 조용히 사라진다.
+          const reply = await sendThreadReply(workspaceId, channelId, rootId, message.clientMsgId, message.body, {
+            ...(carries ? { attachmentIds } : {}),
+            // ✕로 끈 채 보낸다(켠 때만 키가 간다). 값은 이 렌더의 것이고, 실패하면 글이 남아 ✕도 남으므로 다시
+            // 보내도 같은 선택이다. 성공하면 글이 비어 저절로 풀린다.
+            ...(carries && linkPreview.suppressed ? { suppressUnfurl: true } : {}),
+          });
+          replyId = reply.id;
+        } catch (cause: unknown) {
+          setError(replyFailureMessage(cause));
+          return;
+        }
+        expressionStore?.recordSuccess(message.body, replyId);
+        if (index < messages.length - 1) {
+          // 앞 통(큰 그림)은 나갔다: 미리 보기는 비우고(다시 보내면 글만 나간다), 글·첨부는 뒤 통이 끝날 때까지 입력창에 남긴다.
+          setPicked(null);
+          onSent();
+        }
+      }
+      clearThreadDraft(workspaceId, rootId);
+      setDraft("");
+      setPicked(null);
+      autocomplete.close();
+      format.dismiss();
+      clearSurface(trayKey);
+      onSent();
+      ref.current?.focus();
+    } finally {
+      setSending(false);
+    }
+  };
+
   const submit = () => {
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 답글과 예약으로 둘 다 나가면 안 된다.
     if (!canSend || schedule.busy) return;
@@ -298,35 +382,22 @@ export function ThreadComposer({
       setSecretBlocks((count) => count + 1);
       return;
     }
-    const body = draft.trim();
-    setSending(true);
-    setError(null);
     // 트레이는 **성공한 뒤에** 비운다. 채널 컴포저와 다른 점이 여기다: 그쪽은
     // 실패한 전송이 타임라인에 「전송 실패 · 다시 보내기」 행으로 남아 첨부를
     // 계속 들고 있지만, 이 표면에는 그런 행이 없다. 먼저 비우면 실패한 답글의
     // 파일이 사라지고 사람은 같은 파일을 다시 찾아 붙여야 한다.
     const sent = peekSent(trayKey);
-    // A fresh idempotency key per attempt, like the channel send: a retry after
-    // a failure is a new send, not a replay of one that may already have
-    // landed.
-    sendThreadReply(workspaceId, channelId, rootId, crypto.randomUUID(), body, {
-      attachmentIds: sent.attachmentIds,
-      // ✕로 끈 채 보낸다(켠 때만 키가 간다). 값은 이 렌더의 것이고, 실패하면 글이 남아 ✕도 남으므로 다시
-      // 보내도 같은 선택이다. 성공하면 글이 비어 저절로 풀린다.
-      ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
-    })
-      .then((message) => {
-        expressionStore?.recordSuccess(body, message.id);
-        clearThreadDraft(workspaceId, rootId);
-        setDraft("");
-        autocomplete.close();
-        format.dismiss();
-        clearSurface(trayKey);
-        onSent();
-        ref.current?.focus();
-      })
-      .catch((cause: unknown) => setError(replyFailureMessage(cause)))
-      .finally(() => setSending(false));
+    // 표현이 있으면 [큰 그림, 글] 둘, 없으면 글 하나다(예전과 같은 요청). `canSend` 가 사라진 표현·빈 답글을 이미 막았으므로 거절은 방어선이다.
+    const plan = planSendBundle({
+      expression: livePending,
+      text: draft.trim(),
+      hasAttachments: sent.attachmentIds.length > 0,
+      newId: () => crypto.randomUUID(),
+    });
+    if (!plan.ok) return;
+    setSending(true);
+    setError(null);
+    void sendInOrder(plan.messages, sent.attachmentIds);
   };
 
   return (
@@ -355,6 +426,16 @@ export function ThreadComposer({
         onDismiss={dismissLinkPreview}
         testId="thread-composer-link-preview"
       />
+      {/* 미리 본 이모티콘(#5487): 채널 입력창과 같은 자리·같은 부품이다(링크 카드 바로 아래, 입력 그릇 위의 한 줄). 그림과 작은 ✕ 뿐이고 보이는 글이 없다.
+          채널 입력창과 한 화면에 서므로 시험 열쇠는 `thread-composer-` 를 앞에 단다. */}
+      {pendingExpression !== null && (
+        <ComposerExpressionPreview
+          expression={livePending ?? pendingExpression}
+          gone={expressionGone}
+          onCancel={dismissExpressionPreview}
+          testId="thread-composer-expression-preview"
+        />
+      )}
       <div className="p-3">
         {/* 이 스레드의 예약 배너(UI 명세 1.6 (b), 1.1): 이 호스트의 확인은 ③ 지속 배너가 맡는다. 「이 스레드에 예약된
             메시지 1개」가 생기거나 숫자가 오르는 것이 확인이고, 보내지 못한 예약이 있으면 실패 어조 한 줄이 대신 선다. */}
@@ -401,7 +482,6 @@ export function ThreadComposer({
           </p>
         )}
         <div className="relative">
-          <ExpressionSendPreview body={draft} />
           <ComposerAutocompleteList
             id={`thread-${autocomplete.slug}-list`}
             kind={autocomplete.kind}
@@ -539,17 +619,19 @@ export function ThreadComposer({
                     mentionsOpen: autocomplete.visible,
                     justComposed: justComposedRef.current,
                     enterSends: !isMobile,
-                    previewOpen: linkPreview.cards.length > 0,
+                    // 입력창 위에 지울 것이 있다: 링크 카드(저절로 떴다) 또는 미리 본 이모티콘(일부러 골랐다). Esc 는 링크 카드 → 이모티콘 차례로 하나씩 치운다.
+                    previewOpen: linkPreview.cards.length > 0 || pendingExpression !== null,
                   }
                 );
                 if (autocomplete.handleIntent(intent)) {
                   event.preventDefault();
                   return;
                 }
-                if (closesLinkPreview(intent)) {
-                  // 멘션 목록 다음이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
+                if (closesPreview(intent)) {
+                  // 멘션 목록 다음이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다. 링크 카드가 먼저, 없으면 미리 본 이모티콘이다.
                   event.preventDefault();
-                  dismissLinkPreview();
+                  if (linkPreview.cards.length > 0) dismissLinkPreview();
+                  else dismissExpressionPreview();
                   return;
                 }
                 if (intent !== "send") return;
@@ -589,6 +671,8 @@ export function ThreadComposer({
         anchor={emoji.anchor}
         purpose="insert"
         testId="thread-composer-emoji-picker"
+        // 큰 그림(이모티콘·GIF)은 글에 `:이름:`으로 넣지 않고 입력창 위 미리 보기에 올린다. 작은 이모지는 계속 `onPick` 으로 캐럿 자리에 들어간다.
+        onPickExpression={(expression) => setPicked({ scope, expression })}
       />
       <ScheduleDialog {...schedule.dialogProps} />
     </div>
