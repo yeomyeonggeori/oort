@@ -3,25 +3,25 @@ name: 5112-expression-kind
 # No `env:` block — see the note at the top of 00-login.yaml.
 #   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
 ---
-# 5112-expression-kind — 팀 표현의 종류 값 (ADR-0218 증보 4 §10, #5112): 작은 정지 그림 → 「작은 이모티콘」으로 등록 → 「우리 팀」 탭에만 보인다(GIF 탭에는 없다).
-# (이름은 owner 11-05 #5330 로 「이모티콘」 하나다: 앞 판의 「팀 이모지」 = 「작은 이모티콘」, 「팀 이모지」 탭은 첫 탭에 합쳐졌고 그 탭의 글자는 owner 11-06 #5427 부터 「우리 팀」이다.)
+# 5112-expression-kind — 팀 표현의 종류 값 (ADR-0218 증보 4 §10, #5112): 작은 정지 그림 → 「작은 이모티콘」으로 등록 → **이모지 탭에만** 보인다(이모티콘·GIF 탭에는 없다).
+# (이름은 owner 11-05 #5330 로 「이모티콘」 하나다: 「작은 이모티콘」 = 서버 종류 `emoji`, 「큰 이모티콘」 = `sticker`. 탭은 owner 11-07 #5453 부터 모양으로 가른다: 이모티콘 = 정지한 큰 그림,
+# 이모지 = 팀의 작은 이모티콘(움직여도)과 표준 목록, GIF = 움직이는 큰 그림. #5452 가 시트를 키보드 자리의 창으로 바꿨고 #5482 가 이 흐름을 새 창으로 옮겼다 — 앞 판의 「우리 팀」 탭은 없다.)
 #
-# 스택 검증용이다(워커는 돌리지 않았다 — `runtime-unverified`, `maestro check-syntax` 만 통과시켰다). **서버에 쓴다**: 팀 보관함에 표현
-# 하나를 등록한다. 그래서 (1) 로그인할 수 있는 멤버가 든 **격리 스택**에서만 돌리고(70-composer-newline.yaml 의 머리말과 같다), (2) 이름은
-# 돌 때마다 새로 짓는다 — 지운 이름은 다시 못 쓰고 같은 이름은 `expression_name_reserved` 로 거절된다. 이 흐름은 지우지 않는다(표현 삭제는
-# 이 칸의 범위 밖이다): 격리 스택이라 그대로 두어도 된다.
+# 스택 검증용이다. **서버에 쓴다**: 팀 보관함에 표현 하나를 등록한다. 그래서 (1) 로그인할 수 있는 멤버가 든 **격리 스택**에서만 돌리고(70-composer-newline.yaml 의 머리말과 같다),
+# (2) 이름은 돌 때마다 새로 짓는다 — 지운 이름은 다시 못 쓰고 같은 이름은 `expression_name_reserved` 로 거절된다. 이 흐름은 지우지 않는다(표현 삭제는 이 칸의 범위 밖이다):
+# 격리 스택이라 그대로 두어도 된다.
 #
-# 폰 jest(`__tests__/expressionKind.test.tsx`)가 코어 fixture 서버로 재는 것(탭이 겹치지 않음·추천을 미리 고름·고른 값이 `Choice.kind` 로
-# 감)을 이 흐름은 **진짜 서버·진짜 사진 창(PHPicker)·진짜 시트**로 한 번 더 본다:
-#   · 사진 창이 뜨고 고른 그림이 가져오기 장에 돌아오는가
+# 폰 jest(`__tests__/expressionKind.test.tsx`)가 코어 fixture 서버로 재는 것(탭이 겹치지 않음·추천을 미리 고름·고른 값이 `Choice.kind` 로 감)을 이 흐름은 **진짜 서버·진짜 사진 창(PHPicker)·
+# 진짜 시트**로 한 번 더 본다:
+#   · 창의 「＋」가 연 시트에서 사진 창이 뜨고 고른 그림이 가져오기 장에 돌아오는가
 #   · 초안 단계에 「종류」 묶음이 서고, 작은 정지 그림이라 「작은 이모티콘」이 미리 골라져 있는가(서버가 같은 규칙으로 정한다)
-#   · 등록하면 시트 목록에서 **「우리 팀」 탭에만** 보이고, GIF 탭에는 없는가
+#   · 등록하면 시트가 닫히고 창의 **이모지 탭에만** 보이고, 이모티콘·GIF 탭에는 없는가
 #
 # 사진 창은 **사진첩에 이 그림 하나만** 있다고 보고 첫 칸을 누른다. 복제한 시뮬레이터에 다른 사진이 있으면 첫 칸이 다른 그림일 수 있다 —
-# 그래도 「작은 이모티콘」을 직접 골라 등록하므로 마지막 단정(「우리 팀」 탭에만)은 그대로 성립하고, 미리 고른 값을 보는 단정만 달라진다(아래 표시).
+# 그래도 「작은 이모티콘」을 직접 골라 등록하므로 마지막 단정(이모지 탭에만)은 그대로 성립하고, 미리 고른 값을 보는 단정만 달라진다(아래 표시).
 #
 # 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 초안 단계의 「종류」 묶음(라벨 · 작은 이모티콘/큰 이모티콘 두 줄 · 설명 · 「그림의 크기와 움직임에
-# 맞춰 골라 뒀어요」) · 등록 뒤 「우리 팀」 탭. 캡처와 design-review 는 planner 몫이다.
+# 맞춰 골라 뒀어요」) · 등록 뒤 창의 이모지 탭. 캡처와 design-review 는 planner 몫이다.
 - launchApp:
     appId: app.momo.ios
 - runFlow: subflows/ensure-signed-in.yaml
@@ -39,16 +39,28 @@ name: 5112-expression-kind
     visible:
       id: "composer-pill"
     timeout: 30000
-# 디버그 LogBox 띠가 컴포저 위를 덮고 첫 탭을 먹는다(4942-expression-sheet.yaml 의 같은 자리). 입력칸이 비어 있어 이 좌표 탭은 아무 일도 안 한다.
+# 디버그 LogBox 띠가 컴포저 위를 덮고 첫 탭을 먹는다(4891-team-expression-add.yaml 의 같은 자리). 입력칸이 비어 있어 이 좌표 탭은 아무 일도 안 한다.
 - runFlow: subflows/dismiss-dev-logbox.yaml
 
-# 시트 → 「우리 팀」 탭 → 「＋ 추가하기」 → 가져오기 장.
+# ☺ → 창(이모티콘 탭) → 세트 띠 끝의 「＋」 → 시트의 「가져오기」 → 가져오기 장.
 - tapOn:
     id: "composer-expression"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
 - tapOn:
-    id: "expression-sheet-tab-emoticon"
+    id: "expression-panel-tab-emoticon"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel-add"
+    timeout: 20000
 - tapOn:
-    id: "expression-add-menu"
+    id: "expression-panel-add"
+- extendedWaitUntil:
+    visible:
+      id: "expression-add-doors"
+    timeout: 10000
 - tapOn:
     id: "expression-add-import"
 - assertVisible:
@@ -63,7 +75,8 @@ name: 5112-expression-kind
 - inputText: "종류 시험"
 # 입력이 끝났으니 자판을 접는다(#5286). 자판이 올라온 채로는 사진 단추(`expression-import-photo`)가 자판 밑에 가려져, 그 자리를 누르면
 # 사진 창이 아니라 자판의 「ㅋ」 키가 눌렸다(표시 이름이 「종류 시험ㅋ」이 되고 사진 창 단정이 30초 뒤 붉어졌다).
-- hideKeyboard
+# (#5482: 창 밖 시트 안에서는 `hideKeyboard` 가 「Couldn't hide the keyboard」 로 붉었다 - 한 줄 글 칸의 보내기 키(Enter)가 칸의 초점을 놓아 자판을 접는다.)
+- pressKey: Enter
 - tapOn:
     id: "expression-import-photo"
 # 시스템 사진 창(PHPicker): 칸의 낭독 이름은 「Photo, <날짜>」(영어 기기) 또는 「사진, <날짜>」(한국어 기기)다.
@@ -120,26 +133,45 @@ name: 5112-expression-kind
 - tapOn:
     id: "expression-draft-approve"
 
-# 등록하면 장이 닫히고 「우리 팀」 목록으로 돌아온다 → 새 그림이 보인다.
+# 등록하면 시트가 닫히고 창으로 돌아온다 - 창은 시트가 열린 동안에도 서 있었다.
+- extendedWaitUntil:
+    notVisible:
+      id: "expression-add-sheet"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
+
+# 작은 이모티콘은 이모지 탭에만 선다(팀의 작은 이모지 한 줄, 칸 id 는 격자와 같은 `expression-pick-<이름>`). 이모티콘·GIF 탭에는 없다 —
+# 한 등록은 정확히 한 탭에만 선다(이모티콘 탭 = 정지한 큰 그림, GIF 탭 = 움직이는 큰 그림, 이모지 탭 = 작은 이모티콘은 움직여도).
+- tapOn:
+    id: "expression-panel-tab-emoji"
 - extendedWaitUntil:
     visible:
       id: "expression-pick-${output.probeName}"
     timeout: 30000
-
-# GIF 탭에는 없다 — 한 등록은 정확히 한 탭에만 선다(「우리 팀」 탭 = 작은 것 + 정지한 큰 그림, GIF 탭 = 움직이는 큰 그림). 작은 이모티콘은 움직여도 「우리 팀」 탭이다.
 - tapOn:
-    id: "expression-sheet-tab-gif"
+    id: "expression-panel-tab-emoticon"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel-add"
+    timeout: 10000
 - assertNotVisible:
     id: "expression-pick-${output.probeName}"
 - tapOn:
-    id: "expression-sheet-tab-emoticon"
-- assertVisible:
+    id: "expression-panel-tab-gif"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel-add"
+    timeout: 10000
+- assertNotVisible:
     id: "expression-pick-${output.probeName}"
 
-# 떠나기 전에 시트를 닫는다. 서버에 남는 것은 등록한 표현 하나뿐이고(위), 입력칸에는 아무것도 넣지 않았다.
+# 떠나기 전에 키보드를 돌려 창을 거둔다(☺ 한 번 더). 서버에 남는 것은 등록한 표현 하나뿐이고(위), 입력칸에는 아무것도 넣지 않았다.
 - tapOn:
-    id: "expression-sheet-close"
-- assertNotVisible:
-    id: "expression-sheet-search"
-- assertVisible:
     id: "composer-expression"
+- extendedWaitUntil:
+    notVisible:
+      id: "expression-panel"
+    timeout: 10000
