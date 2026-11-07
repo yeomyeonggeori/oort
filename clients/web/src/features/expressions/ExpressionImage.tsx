@@ -97,7 +97,12 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
     const heldKey = animated && endless ? `${path}#loop` : path;
     const held = bytes.get(heldKey);
     const source = held !== undefined ? Promise.resolve(held) : (animated && endless ? store.loopedImage(path) : store.image(path)).then((src) => { bytes.set(heldKey, src); return src; });
-    source.then((src) => decoded(animated ? replayUrl(src, replay) : src)).then(
+    source.then((src) => decoded(animated ? replayUrl(src, replay) : src).catch((error: unknown) => {
+      // 디코드에 실패한 그림은 이 칸의 `kept`·메모리·디스크에서 **먼저** 지운다(ADR-0218 §14 M2.6): 안 그러면 「그림 다시 불러오기」가 같은 바이트를 다시 쓴다.
+      bytes.delete(heldKey);
+      store.discardImage(path);
+      throw error;
+    })).then(
       (src) => { if (live) setShown({ key, epoch, owner, src }); },
       () => { if (live) setFailed(key); },
     );
@@ -134,7 +139,12 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   const loading = !offline && path !== null && failed !== key && failed !== shown?.key && own !== undefined;
   const reserved = slot ?? (own ? { width: own.width, height: own.height } : null);
   const image = current ? <img src={current.src} alt={expressionAltText(item as Expression)} className="expression-image" data-size={size} width={slot?.width} height={slot?.height}
-    onLoad={onReady && !still ? () => setPainted(current.key) : undefined} onError={() => setFailed(current.key)} />
+    onLoad={onReady && !still ? () => setPainted(current.key) : undefined}
+    onError={() => {
+      // 그려지다 깨진 그림도 같다: 지우기가 먼저다(위 효과의 주석).
+      if (store && path) { kept.current.bytes.delete(animated && endless ? `${path}#loop` : path); store.discardImage(path); }
+      setFailed(current.key);
+    }} />
     : loading && reserved ? <canvas aria-hidden="true" className="expression-image" data-size={size} width={reserved.width} height={reserved.height} /> : <span>{`:${item.name}:`}</span>;
   return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}>
     {image}
