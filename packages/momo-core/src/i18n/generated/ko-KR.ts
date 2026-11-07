@@ -5327,13 +5327,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.expressionsLine2": [
     {
       "type": 0,
-      "value": "이모지 탭에는 기본 이모지와 함께 팀의 작은 이모지가 한 줄로 있고, 한 검색 칸이 둘을 같이 찾아요."
+      "value": "이모지 탭에는 기본 이모지와 함께 팀의 작은 이모지가 한 줄로 있어요. 웹과 데스크탑에서는 한 검색 칸이 둘을 같이 찾아요."
     }
   ],
   "releaseNotes.v0144.expressionsLine3": [
     {
       "type": 0,
-      "value": "스레드 입력칸에서는 고른 이모티콘이 :이름: 글로 입력칸에 들어가고, 미리 보기는 대화 입력창에서만 떠요."
+      "value": "웹과 데스크탑은 스레드 입력칸에서도 미리 보기가 떠요. 폰의 스레드 입력칸과 밀어서 답장할 때는 고른 이모티콘이 아직 :이름: 글로 들어가요."
     }
   ],
   "releaseNotes.v0144.expressionsTopic": [
@@ -5399,7 +5399,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.sendTogetherChanged": [
     {
       "type": 0,
-      "value": "이모티콘이나 GIF를 고르면 바로 보내지 않고 입력창 위에 크게 떠요. 마음이 바뀌면 작은 ✕로 뺄 수 있어요. 글을 쓰고 보내기를 한 번 누르면 큰 그림과 글이 차례로 가요. 이모지는 이전처럼 글 안에 바로 들어가요."
+      "value": "이모티콘이나 GIF를 고르면 바로 보내지 않고 입력창 위에 미리 보기로 떠요. 마음이 바뀌면 작은 ✕로 뺄 수 있어요. 글을 쓰고 보내기를 한 번 누르면 큰 그림과 글이 차례로 가요. 이모지는 이전처럼 글 안에 바로 들어가요."
     }
   ],
   "releaseNotes.v0144.sendTogetherTitle": [

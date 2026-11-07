@@ -147,9 +147,13 @@ export interface ComposerKeyState {
    */
   suggestOpen?: boolean;
   /**
-   * #5476 - 캐럿이 입력칸 글의 첫 줄에 있다(앞에 줄바꿈이 없다). `suggestOpen` 과 함께일 때만 ↑ 가 추천 줄로 간다.
+   * #5476 - 캐럿이 입력칸 글의 첫 **화면** 줄에 있다. 앞에 줄바꿈이 없어도 글이 길게 감겨 캐럿이 둘째 줄 이후면 거짓이다(#5489: 줄바꿈만 보면 감긴 문단의 아래 줄에서
+   * 도 ↑ 를 가로챈다). 화면 줄은 렌더에서만 알 수 있어 호출하는 표면이 잰다(웹은 `caretLine.ts`). `suggestOpen` 과 함께일 때만 ↑ 가 추천 줄로 간다.
+   *
+   * **함수로도 줄 수 있다**: 재는 일(렌더 배치를 읽는다)이 싸지 않으므로, 함수를 넘기면 이 판정이 ↑ 에서 나머지 조건(추천 줄이 떠 있고 수식키가 없다)이 모두 맞을 때에만
+   * 한 번 부른다. 다른 키·다른 상태에서는 부르지 않는다.
    */
-  caretOnFirstLine?: boolean;
+  caretOnFirstLine?: boolean | (() => boolean);
   /**
    * #5191 - 입력칸이 **비어 있다**(글이 한 글자도 없다). `true`일 때만 ↑ 가 `edit-last` 가 된다. 공백만 든 글은 빈 것이
    * 아니다: 그 입력칸의 ↑ 는 여전히 커서의 것이다.
@@ -162,6 +166,11 @@ export interface ComposerKeyState {
 /** True when the keystroke belongs to an in-flight IME composition. */
 function imeOwns(event: ComposerKeyEvent, state: ComposerKeyState): boolean {
   return event.composing || state.justComposed;
+}
+
+/** `caretOnFirstLine` 은 값이거나, 필요할 때에만 재는 함수다(#5489). 적지 않았으면 첫 줄이 아니다. */
+function isCaretOnFirstLine(value: boolean | (() => boolean) | undefined): boolean {
+  return typeof value === "function" ? value() : value === true;
 }
 
 /**
@@ -208,11 +217,11 @@ export function composerKeyIntent(
     if (
       event.key === "ArrowUp" &&
       state.suggestOpen === true &&
-      state.caretOnFirstLine === true &&
       !event.shiftKey &&
       !event.metaKey &&
       !event.ctrlKey &&
-      !event.altKey
+      !event.altKey &&
+      isCaretOnFirstLine(state.caretOnFirstLine)
     ) {
       return "suggest-focus";
     }
