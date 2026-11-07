@@ -39,23 +39,28 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // keys (B13-I9). `momo_agent::team_ai_roles::SETTINGS_KEY` spells the same key for the reader.
     "team_ai_roles",
     // ADR-0201 증보 v3 B9 (#4944): the team AI's usage limits. Absent = **no limit** (BYOK: the
-    // team pays, the team decides). An object of up to three limits — `dailyTokens` and
-    // `dailySearches` (whole numbers >= 1), `monthlyUsd` (a number > 0). Written by a workspace
-    // administrator here and nowhere else: `workspace.settings.update` names two other keys, so a
-    // helper's card cannot raise the limit that bounds the helper (B13-I9).
+    // team pays, the team decides). An object of up to four limits — `dailyTokens` and
+    // `dailySearches` (whole numbers >= 1), `monthlyUsd` (a number > 0), and (ADR-0201 증보 v4 P7,
+    // #5369) `dailyDelegations` (a whole number in 1..=200: the day's delegations to the team's
+    // Hermes — the one limit whose absence is NOT "no limit": it reads as the default 30, under the
+    // operator's ceiling). Written by a workspace administrator here and nowhere else:
+    // `workspace.settings.update` names two other keys, so a helper's card cannot raise the limit
+    // that bounds the helper (B13-I9).
     "team_ai_limits",
 ];
 
-/// The six role bundles that can be switched (`chat_read` is not one: it is always on). A copy of
+/// The seven role bundles that can be switched (`chat_read` is not one: it is always on; `hermes`
+/// is the seventh, ADR-0201 증보 v4 P10, #5369). A copy of
 /// `momo_agent::team_ai_roles::SWITCHABLE_BUNDLES` — this crate cannot see `momo-agent` — held
 /// equal by a drift test in `momo-workspace-actions`.
-pub const TEAM_AI_ROLES_KEYS: [&str; 6] = [
+pub const TEAM_AI_ROLES_KEYS: [&str; 7] = [
     "workspace_admin",
     "invite_access",
     "long_research",
     "files",
     "memory",
     "code",
+    "hermes",
 ];
 
 /// The settings key of the role switches.
@@ -70,11 +75,30 @@ pub const TEAM_AI_LIMIT_DAILY_TOKENS: &str = "dailyTokens";
 pub const TEAM_AI_LIMIT_DAILY_SEARCHES: &str = "dailySearches";
 /// Dollars (public list price equivalent, read-time) per UTC calendar month. A number > 0.
 pub const TEAM_AI_LIMIT_MONTHLY_USD: &str = "monthlyUsd";
-/// The three fields, in the order the screen shows them.
-pub const TEAM_AI_LIMIT_FIELDS: [&str; 3] = [
+/// Delegations to the team's Hermes the helper may make per UTC day (ADR-0201 증보 v4 P7, #5369). A
+/// whole number in [`MIN_TEAM_AI_DAILY_DELEGATIONS`]..=[`MAX_TEAM_AI_DAILY_DELEGATIONS`]. **Absent is
+/// not "no limit"**: a subscription is not the team's own money, so the reader answers
+/// [`DEFAULT_TEAM_AI_DAILY_DELEGATIONS`] and the operator's ceiling can only lower it.
+pub const TEAM_AI_LIMIT_DAILY_DELEGATIONS: &str = "dailyDelegations";
+/// The smallest `dailyDelegations` — a `0` is not a limit here either (the bundle's switch and the
+/// operator's ceiling are how delegation is turned off). **[추정]**
+pub const MIN_TEAM_AI_DAILY_DELEGATIONS: i64 = 1;
+/// The largest `dailyDelegations` a workspace may set, whatever the operator's ceiling says (the
+/// subscription's own limit is unknown, so the hard stop is low). **[추정]**
+pub const MAX_TEAM_AI_DAILY_DELEGATIONS: i64 = 200;
+/// What a workspace that set no `dailyDelegations` gets. **[추정]**, measured two weeks after launch.
+pub const DEFAULT_TEAM_AI_DAILY_DELEGATIONS: i64 = 30;
+// The default a workspace gets must be a value the settings door itself would accept.
+const _: () = assert!(
+    MIN_TEAM_AI_DAILY_DELEGATIONS <= DEFAULT_TEAM_AI_DAILY_DELEGATIONS
+        && DEFAULT_TEAM_AI_DAILY_DELEGATIONS <= MAX_TEAM_AI_DAILY_DELEGATIONS
+);
+/// The four fields, in the order the screen shows them.
+pub const TEAM_AI_LIMIT_FIELDS: [&str; 4] = [
     TEAM_AI_LIMIT_DAILY_TOKENS,
     TEAM_AI_LIMIT_DAILY_SEARCHES,
     TEAM_AI_LIMIT_MONTHLY_USD,
+    TEAM_AI_LIMIT_DAILY_DELEGATIONS,
 ];
 /// A sanity ceiling on a count limit, so a typo does not store a number nobody can reach.
 pub const MAX_TEAM_AI_LIMIT_COUNT: i64 = 1_000_000_000_000;
@@ -137,12 +161,14 @@ pub enum WorkspaceSettingsInvalid {
     TeamAiRolesShape,
     #[error("unknown team_ai_roles bundle: {0}")]
     TeamAiRolesUnknownBundle(String),
-    #[error("team_ai_limits must be an object of dailyTokens, dailySearches and monthlyUsd")]
+    #[error("team_ai_limits must be an object of dailyTokens, dailySearches, monthlyUsd and dailyDelegations")]
     TeamAiLimitsShape,
     #[error("unknown team_ai_limits field: {0}")]
     TeamAiLimitsUnknownField(String),
     #[error("team_ai_limits.{0} must be a whole number of at least 1 (no limit is the absence of the field, not 0)")]
     TeamAiLimitsCount(&'static str),
+    #[error("team_ai_limits.dailyDelegations must be a whole number from 1 to 200 (the absence of the field means the default, not no limit)")]
+    TeamAiLimitsDelegations,
     #[error("team_ai_limits.monthlyUsd must be a number above 0 and at most 1000000 (no limit is the absence of the field, not 0)")]
     TeamAiLimitsUsd,
     #[error("welcome_prompt must be a string")]
@@ -264,6 +290,11 @@ fn validate_team_ai_limits(value: &Value) -> Result<(), WorkspaceSettingsInvalid
                     return Err(WorkspaceSettingsInvalid::TeamAiLimitsUsd);
                 }
             }
+            TEAM_AI_LIMIT_DAILY_DELEGATIONS => {
+                if !limit.is_null() && !valid_daily_delegations(limit) {
+                    return Err(WorkspaceSettingsInvalid::TeamAiLimitsDelegations);
+                }
+            }
             other => {
                 return Err(WorkspaceSettingsInvalid::TeamAiLimitsUnknownField(
                     other.to_string(),
@@ -285,6 +316,15 @@ fn validate_limit_count(
         Some(count) if (1..=MAX_TEAM_AI_LIMIT_COUNT).contains(&count) => Ok(()),
         _ => Err(WorkspaceSettingsInvalid::TeamAiLimitsCount(field)),
     }
+}
+
+/// A usable `dailyDelegations`: a JSON **integer** (`1.5`, `"5"`, `true` are not) in
+/// [`MIN_TEAM_AI_DAILY_DELEGATIONS`]..=[`MAX_TEAM_AI_DAILY_DELEGATIONS`]. Shared with the reader so a
+/// stored value this door would refuse reads as absent (the default), never as the number a hand edit left.
+pub fn valid_daily_delegations(value: &Value) -> bool {
+    value.as_i64().is_some_and(|count| {
+        (MIN_TEAM_AI_DAILY_DELEGATIONS..=MAX_TEAM_AI_DAILY_DELEGATIONS).contains(&count)
+    })
 }
 
 /// A usable `monthlyUsd`: a JSON number, finite, in range. Shared with the reader so a stored value
@@ -684,10 +724,10 @@ mod tests {
         assert_eq!(cleared["role_labels"], json!({"owner": "대표"}));
     }
 
-    /// ADR-0201 증보 v3 B3 (#4964): `team_ai_roles` is a writable object of booleans over the six
-    /// switchable bundles. `chat_read`, an unknown bundle, a non-boolean and a non-object are 400.
+    /// ADR-0201 증보 v3 B3 (#4964): `team_ai_roles` is a writable object of booleans over the seven
+    /// switchable bundles (`hermes` since ADR-0201 증보 v4, #5369). `chat_read`, an unknown bundle, a non-boolean and a non-object are 400.
     #[test]
-    fn team_ai_roles_takes_only_booleans_for_the_six_switchable_bundles() {
+    fn team_ai_roles_takes_only_booleans_for_the_seven_switchable_bundles() {
         assert!(ALLOWED_SETTINGS_KEYS.contains(&"team_ai_roles"));
         for bundle in TEAM_AI_ROLES_KEYS {
             for on in [true, false] {
@@ -811,6 +851,53 @@ mod tests {
         let merged = merge_workspace_settings(&json!({}), &json!({"welcome_agent_member_id": id}));
         assert!(merged.is_ok(), "{merged:?}");
         assert_eq!(merged.unwrap()["welcome_agent_member_id"], json!(id));
+    }
+
+    /// ADR-0201 증보 v4 P7 (#5369): `dailyDelegations` is a whole number in 1..=200 and nothing else —
+    /// `0` is not a limit (delegation is switched off by the bundle or the operator's ceiling),
+    /// `201` is above the hard stop that holds whatever the operator's ceiling says, and a `null`
+    /// drops the field (back to the default). The fourth field does not loosen the other three.
+    #[test]
+    fn daily_delegations_takes_a_whole_number_from_1_to_200_only() {
+        for bad in [
+            json!({"team_ai_limits": {"dailyDelegations": 0}}),
+            json!({"team_ai_limits": {"dailyDelegations": -1}}),
+            json!({"team_ai_limits": {"dailyDelegations": MAX_TEAM_AI_DAILY_DELEGATIONS + 1}}),
+            json!({"team_ai_limits": {"dailyDelegations": 30.5}}),
+            json!({"team_ai_limits": {"dailyDelegations": 30.0}}),
+            json!({"team_ai_limits": {"dailyDelegations": "30"}}),
+            json!({"team_ai_limits": {"dailyDelegations": true}}),
+            json!({"team_ai_limits": {"dailyDelegations": [30]}}),
+            // the neighbours' numbers do not carry over: a huge token count is fine, a huge delegation count is not
+            json!({"team_ai_limits": {"dailyDelegations": MAX_TEAM_AI_LIMIT_COUNT}}),
+        ] {
+            assert_eq!(
+                merge_workspace_settings(&json!({}), &bad).unwrap_err(),
+                WorkspaceSettingsInvalid::TeamAiLimitsDelegations,
+                "{bad}"
+            );
+        }
+        for good in [
+            MIN_TEAM_AI_DAILY_DELEGATIONS,
+            30,
+            MAX_TEAM_AI_DAILY_DELEGATIONS,
+        ] {
+            let merged = merge_workspace_settings(
+                &json!({}),
+                &json!({"team_ai_limits": {"dailyDelegations": good}}),
+            )
+            .unwrap_or_else(|error| panic!("{good}: {error}"));
+            assert_eq!(merged["team_ai_limits"], json!({"dailyDelegations": good}));
+        }
+        // null drops the field and keeps the others
+        let merged = merge_workspace_settings(
+            &json!({"team_ai_limits": {"dailyTokens": 5, "dailyDelegations": 9}}),
+            &json!({"team_ai_limits": {"dailyDelegations": null}}),
+        )
+        .unwrap();
+        assert_eq!(merged["team_ai_limits"], json!({"dailyTokens": 5}));
+        assert_eq!(TEAM_AI_LIMIT_FIELDS.len(), 4);
+        assert!(valid_daily_delegations(&json!(200)) && !valid_daily_delegations(&json!(201)));
     }
 
     /// ADR-0201 증보 v3 B9-1 (#4944): `team_ai_limits` takes only the three fields, each a real

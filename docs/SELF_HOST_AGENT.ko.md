@@ -1999,8 +1999,9 @@ memory:                        # ADR-0203 R2: Hermes 하나가 모든 워크스�
    `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
    `AGENT_PROVIDER_LOCAL_HOSTS=<서비스이름>.railway.internal`(정확한 호스트,
    와일드카드 금지). 이 허용 없이는 평문 `http://` 내부 호스트가 거절돼요.
-7. **잠금을 선언해요.** `api` 서비스에 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을
-   넣어요. 1~4번을 따랐다는 **운영자 본인의 선언**이에요. oort는 그렇게 표시할
+7. **잠금을 선언해요.** `api`와 `agent-worker` 서비스에 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을
+   넣어요(Railway 템플릿에는 이미 둘 다 들어 있어요. ADR-0201 증보 v4가 ADR-0203 K-S2의
+   「api 전용」을 뒤집어서 워커도 같은 선언을 읽어요). 1~4번을 따랐다는 **운영자 본인의 선언**이에요. oort는 그렇게 표시할
    뿐 검증하지 않아요. 거짓으로 선언하면 에이전트 호스트에 터미널이 남아요.
 8. 웹·데스크탑에서 인스턴스 운영자(`PLATFORM_ADMIN_EMAILS`)로 설정 › AI 연결을
    열어요. 「같은 서버의 Hermes를 찾았어요, 연결할까요?」 카드는 7번 뒤에만
@@ -2178,8 +2179,12 @@ mcp_servers:
 4. **로그인**은 Hermes 셸에서 `hermes mcp login <server>`로 해요(리디렉션 URL을
    붙여 넣어요. `oauth.redirect_port`로 포트를 고정할 수 있어요). 내 컴퓨터의
    토큰 파일을 복사하지 마세요.
-5. **oort `api` 서비스에 선언해요**(라우트를 받는 서비스예요. 다른 서비스는
-   필요 없어요): `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=1`(2~3번을 따랐다는
+5. **oort `api`와 `agent-worker` 서비스에 같은 값으로 선언해요**(Railway 템플릿과
+   compose는 두 서비스에 같은 세 변수를 주고, `check_railway_catalog.py`·`test_self_host_env_modes.sh`는
+   한쪽만 다르면 빨강이에요). 팀 AI의 워커도 이 값을 읽고, 거기에 **비어 있지 않은** 연결 모드
+   값이 있으면(`0`이어도) 도우미의 Hermes 위임이 닫혀서, 사람의 앱이 붙은 Hermes에는 도우미를
+   거쳐 닿을 수 없어요. `api`에만 넣으면 워커는 몰라요:
+   `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=1`(2~3번을 따랐다는
    선언), `OORT_COHOSTED_AGENT_CONNECTOR_APPS=com.momo.plugins.gmail,com.momo.plugins.google-calendar`
    (Hermes에 켜 둔 앱, 쉼표 구분. 형식이 틀린 id가 하나라도 있으면 목록 전체가
    무효예요). §3.4.1의 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`도 있어야 해요.
