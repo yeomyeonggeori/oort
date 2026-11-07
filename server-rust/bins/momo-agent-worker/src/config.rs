@@ -192,6 +192,40 @@ pub struct WorkerConfig {
     /// the templates give both services the same three. Nothing here opens by itself: the default is "no
     /// declaration".
     pub hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    /// How long the one request to Hermes may take, by kind (ADR-0201 증보 v4 P4 「시간」 [추정]): the search
+    /// 60 seconds, the picture 120. Counted **apart** from the helper's own 「호출당 20초·전체 45초」. The
+    /// default is not an environment variable on purpose: the numbers are estimates to be measured and
+    /// amended in the ADR, and a deployment that wants other ones is a deployment that has measured.
+    pub hermes_deadlines: HermesDeadlines,
+}
+
+/// The deadline of the one request to Hermes, by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HermesDeadlines {
+    pub web_search: Duration,
+    pub image: Duration,
+}
+
+impl Default for HermesDeadlines {
+    fn default() -> Self {
+        HermesDeadlines {
+            web_search: Duration::from_secs(
+                momo_workspace_actions::team_ai_hermes_exec::SEARCH_DEADLINE_SECS,
+            ),
+            image: Duration::from_secs(
+                momo_workspace_actions::team_ai_hermes_exec::IMAGE_DEADLINE_SECS,
+            ),
+        }
+    }
+}
+
+impl HermesDeadlines {
+    pub fn of(&self, kind: momo_workspace_actions::team_ai_hermes::HermesKind) -> Duration {
+        match kind {
+            momo_workspace_actions::team_ai_hermes::HermesKind::WebSearch => self.web_search,
+            momo_workspace_actions::team_ai_hermes::HermesKind::Image => self.image,
+        }
+    }
 }
 
 impl WorkerConfig {
@@ -825,6 +859,7 @@ impl WorkerConfig {
             // `env` already reads a blank value as unset; `from_lookup` applies the same rule again so the
             // declarations do not depend on which helper a caller passes.
             hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env),
+            hermes_deadlines: HermesDeadlines::default(),
         })
     }
 
@@ -868,6 +903,7 @@ impl WorkerConfig {
             team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
             team_ai_hermes_daily_cap: None,
             hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
+            hermes_deadlines: HermesDeadlines::default(),
         }
     }
 
@@ -878,6 +914,12 @@ impl WorkerConfig {
         hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
     ) -> WorkerConfig {
         self.hermes = hermes;
+        self
+    }
+
+    /// The same config with the deadline of the request to Hermes (tests use a few seconds, not a minute).
+    pub fn with_hermes_deadlines(mut self, web_search: Duration, image: Duration) -> WorkerConfig {
+        self.hermes_deadlines = HermesDeadlines { web_search, image };
         self
     }
 

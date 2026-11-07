@@ -2250,6 +2250,10 @@ pub struct AgentRunSpentDto {
     /// Some of the tokens are oort's estimate (the provider reported none). ADR-0147 D3: a
     /// figure that may be an estimate says so.
     pub estimated: bool,
+    /// ADR-0201 증보 v4 P7 (#5370): how many times the helper handed work to Hermes in this run (0 or
+    /// 1). The three sums above are the helper's own rows — the team's credits; Hermes's row is a
+    /// subscription and sits under Hermes in `usage/agents`.
+    pub delegations: i64,
 }
 
 impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
@@ -2259,6 +2263,7 @@ impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
             completion_tokens: spent.completion_tokens,
             web_searches: spent.web_searches,
             estimated: spent.estimated,
+            delegations: spent.delegations,
         }
     }
 }

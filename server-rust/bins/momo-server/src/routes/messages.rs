@@ -129,6 +129,10 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
         // (`inline` | `open`), written by the server beside the approval it describes. A message
         // that carried a forged one would tell a client which way to draw somebody's decision.
         || matches!(key, "announce" | "bundle_of" | "decision_mode")
+        // ADR-0201 증보 v4 P8 (#5370): `team_ai_delegated` is the chip 「Hermes 도움 · 검색」 on the helper's
+        // answer. The server writes it from the delegation it actually ran, so a person or an external
+        // sender who could write the same key could dress their own message as work Hermes did.
+        || key == momo_agent::team_ai_task::DELEGATED_PROPS_KEY
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry

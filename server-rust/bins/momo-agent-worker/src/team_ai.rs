@@ -43,6 +43,7 @@
 //! step to run or a duplicate to drop is the **row's** verdict (`decide_step`), read at the top of
 //! [`AgentWorker::run_team_ai_turn`].
 
+mod delegate;
 mod task;
 
 use std::time::Instant;
@@ -115,6 +116,10 @@ struct HermesGather {
     /// Tasks running in this workspace / for this requester (G6's task bounds; a delegation is a task).
     tasks_workspace: i64,
     tasks_requester: i64,
+    /// ADR-0201 증보 v4 P7 (#5370): the day's, the requester's last ten minutes' and the running
+    /// delegations, from the marker on the task rows. An advertisement-time estimate (no lock); the `called`
+    /// commit counts again under the workspace lock.
+    delegations: momo_agent::team_ai_task::DelegationCounts,
 }
 
 impl HermesGather {
@@ -161,6 +166,13 @@ impl HermesGather {
             None,
         )
         .await?;
+        let delegations = momo_agent::team_ai_task::delegation_counts_in_tx(
+            conn,
+            workspace_id,
+            requester.member_id,
+            team_ai_hermes::REQUESTER_WINDOW_SECS,
+        )
+        .await?;
         Ok(HermesGather {
             pinned,
             guest,
@@ -168,6 +180,7 @@ impl HermesGather {
             trigger_body,
             tasks_workspace,
             tasks_requester,
+            delegations,
         })
     }
 }
@@ -179,11 +192,13 @@ impl HermesGather {
 struct HermesTrace {
     /// The kinds this request was offered at any call.
     offered: Vec<&'static str>,
-    /// How the request's calls of `ask_hermes` went, in order: `not_offered`, `invalid_arguments`,
-    /// `unavailable` (the one that ends the turn in this slice). Closed words from [`DelegateCode`].
+    /// How the request's calls of `ask_hermes` went, in order: `not_offered`, `invalid_arguments`, and the
+    /// one that ends the turn — `accepted` (the call became the delegation step) or, in the step itself,
+    /// the delegation's own closed word. Closed words from [`DelegateCode`] and the two audit words.
     results: Vec<&'static str>,
-    /// The kind of the call that ended the turn as `unavailable`, and the agent it would have gone to.
-    ended_with: Option<(&'static str, Uuid)>,
+    /// How the delegation ended, for the transaction that finishes the run: one `team_ai.delegate` audit
+    /// row, the marker's move and the Hermes ledger row (ADR-0201 증보 v4 P4-8, P11).
+    settle: Option<delegate::HermesSettlement>,
 }
 
 /// What one request did, for the audit row and `via_ai` (H9-I10). Names and
@@ -615,9 +630,9 @@ impl AgentWorker {
         let deadline = self.config.team_ai_request_deadline;
 
         let mut card_call: Option<ProviderToolCall> = None;
-        // ADR-0201 증보 v4 (#5369): a call of the delegation tool that passed every check this slice
-        // makes ends the turn with the fixed `unavailable` sentence — nothing is sent to Hermes.
-        let mut hermes_unavailable = false;
+        // ADR-0201 증보 v4 P4-4 (#5370): a call of the delegation tool that passed every check ends this
+        // turn and starts the delegation step (kind, the cleaned sentence, the Hermes it goes to).
+        let mut hermes_call: Option<(HermesKind, String, Uuid)> = None;
         let (completion, call) = loop {
             let elapsed = started.elapsed();
             if trace.model_calls as usize >= team_ai::MAX_MODEL_CALLS || elapsed >= deadline {
@@ -885,13 +900,15 @@ impl AgentWorker {
                 let target = door.as_ref().and_then(DoorFacts::target_member_id);
                 let hermes_trace = trace.hermes.get_or_insert_with(HermesTrace::default);
                 match verdict {
-                    CallVerdict::Accepted { kind, request: _ } => {
-                        // The request sentence is dropped here: this slice keeps it nowhere.
+                    CallVerdict::Accepted { kind, request } => {
+                        // ADR-0201 증보 v4 P4-4: the call passed every check, so it **becomes the next
+                        // step** — a task row, a pending marker and a resume job (`team_ai_delegation_begin`,
+                        // after the loop). The request sentence is carried in memory to that one
+                        // transaction; this loop writes it nowhere.
                         hermes_trace
                             .results
-                            .push(DelegateCode::Unavailable.as_str());
-                        hermes_trace.ended_with = target.map(|target| (kind.as_str(), target));
-                        hermes_unavailable = true;
+                            .push(team_ai_hermes::AUDIT_CODE_ACCEPTED);
+                        hermes_call = target.map(|target| (kind, request, target));
                         break (completion, None);
                     }
                     CallVerdict::NotOffered => {
@@ -1031,26 +1048,38 @@ impl AgentWorker {
         trace.latency_ms = millis(started);
         let latency_ms = trace.latency_ms;
 
-        // ADR-0201 증보 v4 P14-S1 (#5369): the door is built, nothing sits behind it. A call that passed
-        // every check ends the turn with the fixed `unavailable` sentence (P9) — Hermes is not called, no
-        // picture or search happens, and the tokens this request spent are charged like any answer's.
-        // The turn's audit row says so (names and closed words), and so does `team_ai.delegate`.
-        if hermes_unavailable {
-            let sentence = DelegateCode::Unavailable
-                .sentence()
-                .unwrap_or_default()
-                .to_string();
+        // ADR-0201 증보 v4 P4 (#5370): the model called `ask_hermes` and the call passed every check. The
+        // turn ends here and the delegation is the NEXT step: one transaction writes the task row (with the
+        // pending marker and the sentence), the stage line, the `delegate` activity and the resume job. Hermes
+        // is not called in this turn (F3: the helper's turn is 45 s, Hermes is an agent loop).
+        if let Some((kind, request, target)) = hermes_call {
+            trace.latency_ms = millis(started);
+            let display_name = gathered
+                .hermes
+                .as_ref()
+                .and_then(|hermes| {
+                    hermes
+                        .pinned
+                        .iter()
+                        .find(|pinned| pinned.member_id == target)
+                        .map(|pinned| pinned.display_name.clone())
+                })
+                .unwrap_or_default();
             return Some(
-                self.team_ai_finish(
+                self.team_ai_delegation_begin(
                     job,
                     payload,
                     run_id,
-                    Some(sentence),
-                    json!({}),
+                    &requester,
+                    &gathered.candidates,
+                    delegate::DelegationStart {
+                        kind,
+                        request,
+                        display_name,
+                    },
                     spend,
                     &model,
-                    Ending::Answered,
-                    Some(trace),
+                    &trace,
                 )
                 .await,
             );
@@ -1623,12 +1652,12 @@ impl AgentWorker {
     /// database's are the config's (`G4`'s declarations, the bounds) and the pin's (G5: does the target's
     /// `operator_env` link resolve — the same function a mention of the agent resolves it by).
     ///
-    /// **S1's counts**: the delegation counters (today, last ten minutes, in flight) are read from the
-    /// delegation marker on a `team_ai_task` row that S2's migration adds, so they are `0` here and G6
-    /// judges the two task bounds (rows that exist) and the operator's ceiling. `delegated` (G10) is
-    /// `false` for the same reason: nothing delegates within a turn until S2. This function runs for a
-    /// request's **first turn** only — a task step is routed away before it (`decide_step`) and its loop
-    /// offers no delegation tool (G9, structurally).
+    /// The delegation counters (today, last ten minutes, running) are read from the marker on the task
+    /// rows (migration 177) in the request's first read transaction, so G6 judges the real numbers at
+    /// advertisement; the authoritative judgement is the `called` commit under the workspace lock (P7).
+    /// `delegated` (G10) is `false`: a request delegates once, and the call that does ends this turn. This
+    /// function runs for a request's **first turn** only — a task step is routed away before it
+    /// (`decide_step`) and its loop offers no delegation tool (G9, structurally).
     async fn hermes_door_facts(
         &self,
         workspace_id: Uuid,
@@ -1670,9 +1699,11 @@ impl AgentWorker {
                 tasks_requester_max: self.config.team_ai_task.max_per_requester,
             },
             usage: DelegationUsage {
+                today: gather.delegations.today,
+                requester_recent: gather.delegations.requester_recent,
+                in_flight: gather.delegations.in_flight,
                 tasks_workspace: gather.tasks_workspace,
                 tasks_requester: gather.tasks_requester,
-                ..DelegationUsage::default()
             },
             direct_mention,
             task_step: false,
@@ -1734,12 +1765,13 @@ impl AgentWorker {
             })
         });
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
-        // ADR-0201 증보 v4 P11 (#5369): a delegation that ended as `unavailable` is one `team_ai.delegate`
-        // row — kind, closed code, the target agent's id. Never the request sentence (it is not kept).
-        let delegate_ended: Option<(&'static str, Uuid)> = trace
+        // ADR-0201 증보 v4 P11 (#5370): how the delegation ended — one `team_ai.delegate` row (kind, closed
+        // code, ms, the target agent's id; never the request sentence, a result or a picture), the marker's
+        // move and the Hermes ledger row, all in the finishing transaction.
+        let delegate_settle: Option<delegate::HermesSettlement> = trace
             .as_ref()
             .and_then(|trace| trace.hermes.as_ref())
-            .and_then(|hermes| hermes.ended_with);
+            .and_then(|hermes| hermes.settle.clone());
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
@@ -1766,6 +1798,7 @@ impl AgentWorker {
             let props = props.clone();
             let ledger = ledger.clone();
             let model = model.clone();
+            let delegate_settle = delegate_settle.clone();
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
@@ -1783,9 +1816,17 @@ impl AgentWorker {
                 };
                 // B5-2: a run with a task row is in task mode — its ledger rows are per step and
                 // its row ends with it.
-                let in_task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id)
-                    .await?
-                    .is_some();
+                let task_row =
+                    momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id).await?;
+                let in_task = task_row.is_some();
+                // A delegation that was called and that nobody has settled yet (a requester who left, a
+                // helper that left, a path that never met Hermes's answer): `end_in_tx` below writes its
+                // estimated ledger row; this is what the audit row of that ending names.
+                let called_unsettled = task_row
+                    .as_ref()
+                    .and_then(|row| row.delegation.as_ref())
+                    .filter(|mark| mark.state == momo_agent::team_ai_task::DelegationState::Called)
+                    .cloned();
                 if snapshot.status == RunStatus::Cancelled {
                     if in_task {
                         // B5-8: a stop that lands while a step is finishing still leaves what the
@@ -1924,6 +1965,41 @@ impl AgentWorker {
                             .await?;
                     }
                 }
+                // ADR-0201 증보 v4 P4-8 (#5370): the delegation is settled BEFORE the row ends, in the same
+                // transaction as the message and the run's end — the marker's move is the compare-and-swap that
+                // makes the Hermes ledger row exactly one (a cancel that ended the row first has already
+                // settled it, and this finds nothing to move).
+                if in_task {
+                    if let Some(settle) = &delegate_settle {
+                        if let Some(to) = settle.to {
+                            let usage = momo_agent::team_ai_task::HermesUsageRow {
+                                model: &settle.model,
+                                prompt_tokens: settle.prompt_tokens,
+                                completion_tokens: settle.completion_tokens,
+                                was_estimated: settle.estimated,
+                            };
+                            let moved = momo_agent::team_ai_task::settle_delegation_in_tx(
+                                conn,
+                                workspace_id,
+                                run_id,
+                                to,
+                                &usage,
+                            )
+                            .await?;
+                            if moved {
+                                delegate::write_delegate_progress(
+                                    conn,
+                                    workspace_id,
+                                    run_id,
+                                    agent,
+                                    settle,
+                                    to,
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                }
                 if in_task {
                     // The step that ends the task reports its activities too. The visible plan is
                     // left as the previous step wrote it: the ledger records what was said, and a
@@ -1961,25 +2037,41 @@ impl AgentWorker {
                     )
                     .await?;
                 }
-                if let Some((kind, target)) = delegate_ended {
-                    audit::write_audit(
+                if let Some(settle) = &delegate_settle {
+                    delegate::write_delegate_audit(
                         conn,
-                        &AuditEntry::new(workspace_id, team_ai_hermes::AUDIT_DELEGATE)
-                            .by(agent)
-                            .about(target)
-                            .run(run_id)
-                            .with_schema(
-                                team_ai_hermes::AUDIT_DELEGATE_SCHEMA,
-                                json!({
-                                    "kind": kind,
-                                    "code": DelegateCode::Unavailable.as_str(),
-                                    "target": target.to_string(),
-                                    "ms": 0,
-                                    "picture_bytes": 0,
-                                }),
-                            ),
+                        workspace_id,
+                        run_id,
+                        agent,
+                        settle.kind,
+                        settle.target,
+                        settle.code,
+                        settle.ms,
                     )
                     .await?;
+                } else if let Some(mark) = &called_unsettled {
+                    // The row ended by a path that never met Hermes's answer (the person left, the helper
+                    // left, a stop landed with the step): the ledger row is the store's estimate, and the
+                    // audit says how it ended in the closed words.
+                    if let Some(target) = mark.target {
+                        let code = match task_end_reason {
+                            momo_agent::team_ai_task::END_REQUESTER_GONE
+                            | momo_agent::team_ai_task::END_AGENT_GONE
+                            | momo_agent::team_ai_task::END_CANCELLED => DelegateCode::Cancelled,
+                            _ => DelegateCode::Failed,
+                        };
+                        delegate::write_delegate_audit(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            delegate::kind_word(&mark.kind),
+                            target,
+                            code.as_str(),
+                            0,
+                        )
+                        .await?;
+                    }
                 }
                 Ok(true)
             })
