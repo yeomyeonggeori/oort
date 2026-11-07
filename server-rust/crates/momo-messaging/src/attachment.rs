@@ -694,17 +694,23 @@ pub async fn message_attachments_in_tx(
 /// every photo.
 pub async fn message_attachments_without_media_in_tx(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
     message_id: Uuid,
 ) -> Result<Vec<MessageAttachment>, DbError> {
+    // The caller is the agent-worker's role, which skips RLS (BYPASSRLS): the workspace is asked for
+    // in the statement itself, like `link_attachments_in_tx` does for the same reason (review L-2). A
+    // message id of another tenant reads nothing here.
     let rows = sqlx::query(
         "SELECT a.id, a.name, a.mime, a.size_bytes \
            FROM attachment a \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
-          WHERE a.message_id = $1 AND a.status = 'complete' \
+          WHERE a.workspace_id = $2 AND m.workspace_id = $2 \
+            AND a.message_id = $1 AND a.status = 'complete' \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
           ORDER BY a.created_at ASC, a.id ASC",
     )
     .bind(message_id)
+    .bind(workspace_id)
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()

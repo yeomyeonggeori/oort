@@ -49,7 +49,10 @@
 
 pub mod agent_avatar;
 pub mod agent_card;
-pub mod agent_picture;
+/// #5371 (ADR-0151 증보 8): private on purpose (implementation review L-1). The only way in from another
+/// crate is the names re-exported below, so a "no caller yet" guard that watches those names cannot be
+/// walked around with a module path.
+mod agent_picture;
 pub mod approval_card;
 pub mod attachment;
 pub mod attachment_media;
@@ -122,14 +125,17 @@ pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
     AgentCardPatch, CardStatusPatch, FieldPatch,
 };
+// Only what another crate calls (a route, the worker, a test). The predicate every call shares
+// (`agent_picture_binding_in_tx`) and the struct it returns stay inside the module: nobody outside asks it
+// directly, and a name that is not exported cannot be a caller. `tests/agent_picture_static_guards.rs` in
+// `momo-agent-worker` reads this list and fails on a function that is exported and not watched.
 pub use agent_picture::{
-    agent_picture_binding_in_tx, mint_in_tx as mint_agent_picture_in_tx,
+    mint_in_tx as mint_agent_picture_in_tx,
     mint_with_ttl_in_tx as mint_agent_picture_with_ttl_in_tx, picture_name,
     record_picture_refused_in_tx, redeem_in_tx as redeem_agent_picture_in_tx,
-    run_picture_ids_in_tx, write_picture_in_tx, AgentPictureBinding, AgentPictureGrant,
-    AgentPictureTarget, PictureWriteRefused, StoredPicture, AGENT_MEDIA_PATH_PREFIX,
-    AGENT_MEDIA_TTL_SECS, AGENT_PICTURES_DAILY_CEILING, AGENT_PICTURES_PER_RUN,
-    AGENT_PICTURE_MAX_INPUT_BYTES,
+    run_picture_ids_in_tx, write_picture_in_tx, AgentPictureGrant, AgentPictureTarget,
+    PictureWriteRefused, StoredPicture, AGENT_MEDIA_PATH_PREFIX, AGENT_MEDIA_TTL_SECS,
+    AGENT_PICTURES_DAILY_CEILING, AGENT_PICTURES_PER_RUN, AGENT_PICTURE_MAX_INPUT_BYTES,
 };
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,

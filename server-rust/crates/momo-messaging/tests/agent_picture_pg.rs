@@ -11,7 +11,9 @@
 //! The api route, the decoder child and the archive are the conformance test's half (`momo-server`);
 //! everything here is the database contract the route stands on.
 //!
-//! Line numbers in the last column are at HEAD `1c931cbcb`: `ap` = `src/agent_picture.rs`, `att` =
+//! Line numbers in the last column are at HEAD `1c931cbcb` (before the implementation-review round, which
+//! added the agent-kind join and comments to `ap`: its lines below the binding have moved down, so find an
+//! anchor by its text): `ap` = `src/agent_picture.rs`, `att` =
 //! `src/attachment.rs`, `msg` = `src/message.rs`, `175` = `server/Migrations/175_attachment_write_token.sql`,
 //! `173` = `server/Migrations/173_attachment_media.sql`. Where two lines guard the same fact, both are named:
 //! deleting one of them alone leaves the test green (a belt and braces the tests cannot tell apart).
@@ -19,12 +21,12 @@
 //! | test | acceptance criterion | what turns it red |
 //! |---|---|---|
 //! | `a_healthy_run_gets_one_hash_only_row_…` | WA1, WA22, T1 | `ap:209` (the token stored instead of its hash), `ap:204` (the lifetime), `ap:197` (a second mint finds a free slot), `175:61` |
-//! | `a_mint_writes_nothing_when_only_one_condition_is_wrong` | WA1, WA23 (mint) | `ap:120` (agent of the run; the run's workspace there only together with `att:270`), `ap:121` (run state), `ap:122` (`kind = 'human'`; its `status`/`deleted_at` only together with `att:267`/`att:268` of the requester call), `ap:132` (agent member), `ap:133` (requester member), `att:264` (`left_at`), `att:267` (agent `status`), `att:268` (agent `deleted_at`), `att:271` (`archived_at`) |
+//! | `a_mint_writes_nothing_when_only_one_condition_is_wrong` | WA1, WA23 (mint) | `ap:120` (agent of the run; the run's workspace there only together with `att:270`), `ap:121` (run state), `ap:122` (`kind = 'human'`; its `status`/`deleted_at` only together with `att:267`/`att:268` of the requester call), `ap:132` (agent member), `ap:133` (requester member), `att:264` (`left_at`), `att:267` (agent `status`), `att:268` (agent `deleted_at`), `att:271` (`archived_at`), the binding's `a.kind = 'agent'` join (cell `AgentSeatIsHuman`: a run whose agent seat is a person) |
 //! | `two_mints_for_the_same_slot_…` | WA1 | `ap:205` (`ON CONFLICT DO NOTHING`: the loser would error instead of getting `None`), `175:60` |
 //! | `an_expired_unspent_slot_is_not_given_back_…` | W1 | `ap:190-199` (the slot search must not look at expiry or use), `175:62` (ttl check) |
 //! | `eight_racing_connections_…`, `a_spent_token_…` | WA2, T14 | `ap:240` (`t.used_at IS NULL`; the racers then hit the guard trigger `175:77-88` and error) |
 //! | `a_stale_or_forged_token_is_refused_by_the_spend_…` | WA2, WA3, WA24 | `ap:240` (`expires_at >`), `ap:241` (`slot <=`), `ap:244` (the run's agent), `ap:245` (run state: the token must not be burned); `ap:239`'s workspace condition is redundant with RLS `175:96-98` |
-//! | `a_binding_that_stops_holding_refuses_after_the_spend_…` | WA2, WA3 | `ap:256-260` (the binding after the spend), `ap:122` (`kind = 'human'`: the agent-authored trigger), the member and channel anchors of the mint row |
+//! | `a_binding_that_stops_holding_refuses_after_the_spend_…` | WA2, WA3 | `ap:256-260` (the binding after the spend), `ap:122` (`kind = 'human'`: the agent-authored trigger), the binding's `a.kind = 'agent'` (the forged run that seats a person, and the cell `AgentSeatIsHuman`), the member and channel anchors of the mint row |
 //! | `a_redeem_names_what_the_run_names_…` | WA3 | `ap:256-267` (the target comes from the token's own run), `175` column list (a requester or channel column) |
 //! | `a_written_picture_is_…` | WA11, W9 | `ap:340-355` (the row's uploader, channel, status, `message_id`), `ap:373-395` (audit fields), `175:77-88` (record once) |
 //! | `a_write_that_cannot_record_itself_…` | W9 L2 | `ap:356-372` (`used_at IS NOT NULL AND attachment_id IS NULL` at `ap:359`, `rows_affected() != 1` at `ap:368`) |
@@ -35,7 +37,7 @@
 //! | `a_runs_picture_ids_…` | WA12, L2 | `ap:439` (`attachment_id IS NOT NULL`; the workspace and run scope), `ap:440` (`ORDER BY slot`) |
 //! | `the_answer_binds_exactly_…`, `a_run_that_wrote_no_picture_…`, `a_retried_answer_…`, `three_recorded_pictures_…` | WA12 | `msg:1036` (ids only from the run's record), `msg:1033` (`!deduped`), `msg:1061` (`Skip` loses the file card; `Project` is refused to `momo_worker`), `att:577` |
 //! | `a_refused_binding_leaves_nothing_…`, `a_human_cannot_…` | WA12, WA13, T7 | `att:599-607` (the four rejections), `msg:1049` (the refusal must be returned, not swallowed) |
-//! | `the_worker_answers_without_the_media_table_…` | W9 | `msg:1061` (`ProjectWithoutMedia` → `Project`: SQLSTATE 42501 for the worker), `att:703-705` (complete, live message, oldest first), `173:109` (the lockdown that keeps the worker out) |
+//! | `the_worker_answers_without_the_media_table_…` | W9 | `msg:1061` (`ProjectWithoutMedia` → `Project`: SQLSTATE 42501 for the worker), `att:703-705` (complete, live message, oldest first), `173:109` (the lockdown that keeps the worker out), the lean projection's `a.workspace_id = $2 AND m.workspace_id = $2` (the other-tenant cell: the worker role skips RLS, so the statement is the guard; implementation review L-2) |
 //! | `the_worker_role_cannot_bind_another_workspaces_attachment` | WA14, L1 | `att:577` (`AND workspace_id = $2`; the one at `att:609` is unreachable behind it) |
 //! | `the_runtime_roles_hold_exactly_…` | WA18 | `175:127-129` and the same block in both bootstrap files |
 //! | `the_guard_trigger_…` | WA18 | `175:77-88` |
@@ -43,7 +45,7 @@
 //! | `rls_…` | WA14, WA18 | `175:96-98` (ENABLE, FORCE, policy) |
 //! | `a_parent_run_delete_…` | lockdown note | `175:52` (`ON DELETE CASCADE`) |
 //! | `a_mint_clears_only_its_own_…` | WA21 | `ap:184` (`workspace_id = $1`; `expires_at < now() - 1 day`) |
-//! | `mint_redeem_and_write_refuse_the_same_breakages` | WA23 | every anchor of the mint, binding and write rows; the six run-state cells of `redeem` also stand on `ap:245`, so deleting `ap:121` alone leaves those six green |
+//! | `mint_redeem_and_write_refuse_the_same_breakages` | WA23 | every anchor of the mint, binding and write rows, the binding's `a.kind = 'agent'` included (cell `AgentSeatIsHuman`, red in all three calls); the six run-state cells of `redeem` also stand on `ap:245`, so deleting `ap:121` alone leaves those six green |
 //!
 //! Run: `DATABASE_URL=… cargo test -p momo-messaging --test agent_picture_pg -- --ignored --test-threads=1`
 
@@ -561,9 +563,15 @@ enum Break {
     /// Same for the agent: only `deleted_at`, `status` stays `active`.
     AgentDeletedAt,
     ChannelArchived,
+    /// The run's agent seat is held by a PERSON, who is still an active member of the channel: the agent's
+    /// `member.kind` flips to `human`. Everything else about the run holds, so only the binding's
+    /// `a.kind = 'agent'` can refuse it (implementation review M-1: `agent_run.agent_member_id` only
+    /// references `member`, so a run row can seat a person there and the picture would be uploaded by that
+    /// person and escape the agent-written count).
+    AgentSeatIsHuman,
 }
 
-const BREAKS: [Break; 14] = [
+const BREAKS: [Break; 15] = [
     Break::RunSucceeded,
     Break::RunFailed,
     Break::RunCancelled,
@@ -578,6 +586,7 @@ const BREAKS: [Break; 14] = [
     Break::AgentSuspended,
     Break::AgentDeletedAt,
     Break::ChannelArchived,
+    Break::AgentSeatIsHuman,
 ];
 
 impl Break {
@@ -649,6 +658,13 @@ async fn apply(su: &PgPool, w: &World, fault: Break) {
                 .execute(su)
                 .await
                 .expect("archive");
+        }
+        Break::AgentSeatIsHuman => {
+            sqlx::query("UPDATE member SET kind = 'human'::member_kind WHERE id = $1")
+                .bind(w.agent)
+                .execute(su)
+                .await
+                .expect("seat a person as the run's agent");
         }
     }
 }
@@ -1194,6 +1210,33 @@ async fn a_binding_that_stops_holding_refuses_after_the_spend_and_the_token_is_g
         "an agent is not a requester"
     );
     assert!(used_at(su, w.ws, &forged).await.is_some());
+
+    // a forged run that seats a PERSON as its agent (bob is an active member of the channel, the trigger is
+    // alice's, the run is in flight and the row names it): only the binding's `a.kind = 'agent'` can
+    // refuse it, and without that the picture would be uploaded by bob and never counted
+    let w = seed_world(su).await;
+    let run = seed_run(su, w.ws, w.channel, w.bob, Some(w.trigger), "running").await;
+    let forged = forged_token();
+    forge_as_worker(&pools, w.ws, &forged, run, w.bob, 1).await;
+    assert!(
+        redeem(&pools, w.ws, &forged).await.is_none(),
+        "a person is not the run's agent"
+    );
+    assert!(used_at(su, w.ws, &forged).await.is_some());
+    assert_eq!(
+        attachment_rows(su, w.ws).await,
+        0,
+        "nothing was written for the person"
+    );
+    assert!(
+        mint_for(&pools, w.ws, run, w.bob).await.is_none(),
+        "and the worker cannot mint for a run whose agent seat is a person either"
+    );
+    assert_eq!(
+        token_rows(su, w.ws).await,
+        1,
+        "only the forged row is in the table: the refused mint added none"
+    );
 }
 
 /// WA3: the requester, the channel and the agent come from the RUN. The agent sits in two conversations
@@ -2448,7 +2491,7 @@ async fn project(
             let outcome = match which {
                 Projection::WithMedia => message_attachments_in_tx(&mut *conn, message_id).await,
                 Projection::WithoutMedia => {
-                    message_attachments_without_media_in_tx(&mut *conn, message_id).await
+                    message_attachments_without_media_in_tx(&mut *conn, ws, message_id).await
                 }
             };
             sqlx::query("ROLLBACK TO SAVEPOINT projection")
@@ -2465,6 +2508,24 @@ async fn project(
     })
     .await
     .expect("projection transaction")
+}
+
+/// The lean projection as `pool`'s role inside a tenant tx bound to `tenant`, but ASKING for `asked`'s
+/// rows: what a BYPASSRLS caller can do (RLS does not stop it), so only the statement's own workspace
+/// condition does (implementation review L-2).
+async fn lean_projection_asking(
+    pool: &PgPool,
+    tenant: Uuid,
+    asked: Uuid,
+    message_id: Uuid,
+) -> Vec<MessageAttachment> {
+    with_tenant_tx(pool, tenant, move |conn| {
+        Box::pin(async move {
+            message_attachments_without_media_in_tx(&mut *conn, asked, message_id).await
+        })
+    })
+    .await
+    .expect("the lean projection")
 }
 
 /// W9 (the production fix found while this test was written): `momo_worker` holds nothing on
@@ -2577,6 +2638,24 @@ async fn the_worker_answers_without_the_media_table_and_its_projection_agrees_wi
     assert_eq!(lean_worker, full_app, "same rows, same order, same values");
     assert_eq!(lean_worker, full_su);
     assert_eq!(lean_worker, lean_app);
+
+    // L-2: the lean projection is the BYPASSRLS worker's, so the workspace is asked in the statement. Asked
+    // under ANOTHER tenant's id it reads nothing of this message, though the role skips RLS (the control:
+    // asked under its own tenant's id from a tx bound to the other one, it reads the rows, which is exactly
+    // why RLS is not what protects this)
+    let other = seed_world(su).await;
+    assert_eq!(
+        lean_projection_asking(&pools.worker, other.ws, other.ws, message).await,
+        Vec::new(),
+        "another tenant's workspace id must read none of this tenant's attachments"
+    );
+    assert_eq!(
+        lean_projection_asking(&pools.worker, other.ws, w.ws, message)
+            .await
+            .len(),
+        3,
+        "the control: the worker role is not bound by RLS, so the condition in the statement is the guard"
+    );
 
     // the one thing the lean projection leaves out: a video's media summary (a picture the worker wrote is
     // never one, so nothing is lost in the answer)

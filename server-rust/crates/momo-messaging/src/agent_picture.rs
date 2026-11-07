@@ -48,7 +48,12 @@ pub const AGENT_MEDIA_TTL_SECS: i64 = 60;
 pub const AGENT_PICTURES_PER_RUN: i16 = 1;
 /// The api's own backstop (security review M2): the most agent-written attachments a workspace may
 /// gain in 24 hours. The same number as ADR-0201 P7's highest settable delegation cap, so a legitimate
-/// configuration never reaches it; a compromised worker that can forge run rows does.
+/// configuration never reaches it; a compromised worker that forges run, token or membership rows does.
+///
+/// **What it does not bound** (implementation review M-1 (b), ADR-0151 증보 8 T2): it counts `attachment`
+/// rows, and `momo_worker` holds UPDATE and DELETE on that table, so a worker compromised at the database
+/// level can roll the count back (`created_at`, `status`, a deleted row). Counting from a source the
+/// worker cannot shrink is decided with the first caller (S4, #5372); this constant is not that.
 pub const AGENT_PICTURES_DAILY_CEILING: i64 = 200;
 /// The most bytes the route reads: one number with the decoder's input ceiling and the read route's
 /// (a test pins the three together).
@@ -84,9 +89,11 @@ impl std::fmt::Debug for AgentPictureGrant {
     }
 }
 
-/// Who a run's picture is for: derived from the run, never from a row or a request.
+/// Who a run's picture is for: derived from the run, never from a row or a request. Not exported: the
+/// callers outside this module ask [`mint_in_tx`], [`redeem_in_tx`] and [`write_picture_in_tx`], never the
+/// predicate itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentPictureBinding {
+pub(crate) struct AgentPictureBinding {
     pub requester_member_id: Uuid,
     pub channel_id: Uuid,
 }
@@ -102,11 +109,14 @@ pub struct AgentPictureTarget {
 }
 
 /// **The one function that decides whether an agent's run may write a picture now** (W3, M1): the run
-/// is `queued` or `running` and belongs to this agent, its trigger's author is a live human, and both
-/// the agent and that human are active members of the run's channel, which is not archived
+/// is `queued` or `running` and belongs to this agent, **the run's agent seat is held by an agent**
+/// (`member.kind = 'agent'`, implementation review M-1: `agent_run.agent_member_id` only references
+/// `member`, so a run row can name a person there, and the attachment would then be uploaded by that
+/// person and escape the agent-written count), its trigger's author is a live human, and both the
+/// agent and that human are active members of the run's channel, which is not archived
 /// (`is_attachment_channel_member` holds `archived_at IS NULL`, member active and `left_at IS NULL` in
 /// one statement). `None` is every refusal alike.
-pub async fn agent_picture_binding_in_tx(
+pub(crate) async fn agent_picture_binding_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
@@ -117,8 +127,10 @@ pub async fn agent_picture_binding_in_tx(
            FROM agent_run r \
            JOIN message t ON t.workspace_id = r.workspace_id AND t.id = r.trigger_message_id \
            JOIN member h ON h.workspace_id = t.workspace_id AND h.id = t.author_member_id \
+           JOIN member a ON a.workspace_id = r.workspace_id AND a.id = r.agent_member_id \
           WHERE r.workspace_id = $1 AND r.id = $2 AND r.agent_member_id = $3 \
             AND r.status IN ('queued', 'running') \
+            AND a.kind = 'agent' \
             AND h.kind = 'human' AND h.status = 'active' AND h.deleted_at IS NULL",
     )
     .bind(workspace_id)
@@ -234,6 +246,11 @@ pub async fn redeem_in_tx(
     if !token_is_well_formed(token) {
         return Ok(None);
     }
+    // The run-state list inside this statement is the second copy of the one in
+    // `agent_picture_binding_in_tx` (review I-1): it keeps a token from being burned for a run that is
+    // already over. It may be narrower than the predicate, never wider; if the predicate's list ever
+    // grows (the ADR's open check ① names `awaiting_approval`), this one grows with it, or a run in the
+    // new state would be refused here before the predicate is asked.
     let spent: Option<(Uuid, Uuid, i16)> = sqlx::query_as(
         "UPDATE attachment_write_token t SET used_at = clock_timestamp() \
           WHERE t.workspace_id = $1 AND t.token_hash = $2 \
@@ -324,7 +341,9 @@ pub async fn write_picture_in_tx(
     if binding.channel_id != target.channel_id {
         return Ok(Err(PictureWriteRefused::RunOver));
     }
-    // The api counts for itself (M2): a worker that can forge run rows must not make this unbounded.
+    // The api counts for itself (M2): a worker that forges run, token or membership rows must not make
+    // this unbounded. It counts `attachment` rows, which that worker can also rewrite: see
+    // `AGENT_PICTURES_DAILY_CEILING` for what this backstop does not bound.
     let today: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM attachment a \
            JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.uploader_member_id \

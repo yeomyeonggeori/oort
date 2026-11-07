@@ -40,7 +40,8 @@
 --   블록은 이 파일·bootstrap_roles.sql·bootstrap_runtime_roles.sql 에 같은 글자로 있다(두 bootstrap 파일은
 --   마이그레이션 뒤에 ALL TABLES 권한을 다시 주므로, 이 파일에서만 거두면 다음 bootstrap 이 되돌린다).
 --   DB 수준으로 뚫린 워커는 agent_run·message·membership 에도 쓸 수 있어 이 표의 권한만으로 범위가 닫히지
---   않는다 — 그래서 api 가 행을 쓰는 tx 에서 워크스페이스별 일일 상한을 스스로 센다(증보 8 W12).
+--   않는다 — 그래서 api 가 행을 쓰는 tx 에서 워크스페이스별 일일 상한을 스스로 센다(증보 8 W12). 그 상한은
+--   attachment 행을 세므로 그 표를 고칠 수 있는 워커의 숫자는 되돌릴 수 있다(T2, 구현 검수 M-1 (b)).
 --
 -- 청소
 --   만들 때마다 같은 워크스페이스의 하루 지난 행을 지운다(앱 코드, 새 notifier 스윕 없음).

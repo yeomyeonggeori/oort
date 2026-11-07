@@ -797,7 +797,8 @@ async fn finish_send_in_tx(
             AttachmentPolicy::Skip => Vec::new(),
             AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
             AttachmentPolicy::ProjectWithoutMedia => {
-                message_attachments_without_media_in_tx(&mut *conn, message.id).await?
+                message_attachments_without_media_in_tx(&mut *conn, workspace_id, message.id)
+                    .await?
             }
         };
         return Ok(SentMessage {
@@ -887,7 +888,7 @@ async fn finish_send_in_tx(
         AttachmentPolicy::Skip => Vec::new(),
         AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
         AttachmentPolicy::ProjectWithoutMedia => {
-            message_attachments_without_media_in_tx(&mut *conn, message.id).await?
+            message_attachments_without_media_in_tx(&mut *conn, workspace_id, message.id).await?
         }
     };
 
@@ -1012,7 +1013,7 @@ pub async fn send_thread_notice_in_tx(
 /// them, **before** the broadcast, so the `message.new` payload and the history carry `attachments`.
 ///
 /// The attachment ids are **not the caller's**: they are the ids this run's write tokens recorded
-/// ([`crate::agent_picture::run_picture_ids_in_tx`], keyed by `input.run_id`), in slot order. A picture
+/// ([`crate::run_picture_ids_in_tx`], keyed by `input.run_id`), in slot order. A picture
 /// another run wrote, in the same channel by the same agent and still unbound, is not in that record
 /// and is not bound (security review L2). A run that wrote none behaves exactly like
 /// [`send_thread_notice_in_tx`] apart from the projection.
