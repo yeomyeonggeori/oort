@@ -399,6 +399,8 @@ describe("누르면 미리 보기에 올라가고, 저절로 보내지 않는다
     await mount();
     await typeAndPause("ㅋㅋㅋ");
     await click(items()[1] ?? null);
+    // 누른 바로 그 순간: 보내지 않았다(미리 보기 선택은 보내기가 아니다).
+    expect(onSend).not.toHaveBeenCalled();
     const preview = q("composer-expression-preview");
     expect(preview).not.toBeNull();
     expect(preview?.querySelector("[data-expression-name]")?.getAttribute("data-expression-name")).toBe("kk_loud");
@@ -508,6 +510,12 @@ describe("키보드", () => {
     // 같은 글에서는 닫힌 채이고, 글이 바뀌어 멈추면 다시 맞춘다(낱말을 끈 것이 아니다).
     await pause();
     expect(row()).toBeNull();
+    await typeAndPause("ㅋㅋㅋㅋ");
+    expect(row()).not.toBeNull();
+    // 닫힘은 「이 글」에 대한 것이다: 닫은 뒤 글을 지웠다가 같은 낱말을 다시 치면 새로 맞춘다.
+    await press({ key: "Escape" });
+    expect(row()).toBeNull();
+    await typeAndPause("");
     await typeAndPause("ㅋㅋㅋㅋ");
     expect(row()).not.toBeNull();
   });

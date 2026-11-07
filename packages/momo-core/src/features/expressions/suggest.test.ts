@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FIXTURE_EXPRESSIONS } from "./fixtures";
 import {
+  EXPRESSION_SUGGEST_DEBOUNCE_MS,
   EXPRESSION_SUGGEST_LIMIT,
   EXPRESSION_SUGGEST_WHOLE_TEXT_MAX,
   KEYWORD_ENDING_TABLE,
@@ -93,6 +94,13 @@ describe("suggestionKeywords: 입력에서 맞춰 볼 낱말", () => {
     expect(suggestionKeywords("   ")).toEqual([]);
     expect(suggestionKeywords("?!")).toEqual([]);
     expect(EXPRESSION_SUGGEST_WHOLE_TEXT_MAX).toBe(8);
+  });
+});
+
+describe("EXPRESSION_SUGGEST_DEBOUNCE_MS: 화면이 기다리는 시간", () => {
+  // #5476 계약: 「약 0.3초 멈추면」 줄을 띄운다. 웹(과 이어서 폰)이 이 값 하나를 읽으므로 계약 숫자를 여기서 못 박는다.
+  it("입력이 멈춘 뒤 맞추기까지 0.3초다", () => {
+    expect(EXPRESSION_SUGGEST_DEBOUNCE_MS).toBe(300);
   });
 });
 

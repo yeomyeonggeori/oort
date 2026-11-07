@@ -67,6 +67,11 @@ export function useExpressionSuggest({
     return () => window.clearTimeout(timer);
   }, [text, active, scope, cache.items, usage, favorites]);
 
+  // 닫은 글에서 한 글자라도 바뀌면 닫힘은 풀린다: 글을 지웠다가 같은 낱말을 다시 치면 새로 맞춘다(닫힘은 「이 글」에 대한 것이다).
+  useEffect(() => {
+    setClosed(null);
+  }, [text, scope]);
+
   const current = active && shown !== null && shown.scope === scope && shown.text === text ? shown : null;
   const dismissed = closed !== null && closed.scope === scope && closed.text === text;
   const items = current !== null && !dismissed ? current.items : NONE;

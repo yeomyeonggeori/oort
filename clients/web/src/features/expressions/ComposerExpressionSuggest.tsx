@@ -21,6 +21,8 @@ import { ExpressionImage } from "./ExpressionImage";
 // ← → Home End 가 줄 안을 움직이고, Enter·Space 는 포커스가 놓인 단추를 누르고, ↓ 는 입력칸으로 돌아가고, Esc 는 줄을 닫는다. 키 이름은 코어
 // (`suggestRowKey`)가 읽는다 - 이 파일은 키 이름을 적지 않는다. 호출한 쪽이 닫은 뒤 포커스를 입력칸으로 돌려준다(눌린 단추가 사라지므로).
 //
+// 포커스가 입력창 밖으로 나가면(대화 목록을 누르거나 다른 창으로 갈 때) 줄은 CSS 로 물러났다가(`expressions.css`) 돌아오면 다시 선다: 떠 있는 줄이 읽는 것을 가리지 않게.
+//
 // 그림은 `ExpressionImage` 그대로(`still`: 움직이는 GIF 도 줄에서는 멈춘 그림이다)고, 그림이 오기 전과 실패했을 때의 `:이름:` 자리표시는 칸 안에서 숨긴다(`expressions.css`).
 // =============================================================================
 
@@ -92,7 +94,7 @@ export const ComposerExpressionSuggest = forwardRef<
       aria-orientation="horizontal"
       data-composer-popover="list"
       data-testid={testId}
-      className="absolute bottom-full left-3 mb-2 flex max-w-full items-center gap-1 rounded-lg border border-line bg-surface-raised p-1 shadow-lg"
+      className="expression-suggest-row absolute bottom-full left-3 mb-2 flex max-w-full items-center gap-1 rounded-lg border border-line bg-surface-raised p-1 shadow-lg"
       onKeyDown={onKeyDown}
       onMouseDown={(event) => event.preventDefault()}
     >
