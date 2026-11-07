@@ -201,11 +201,62 @@ pub struct TaskRow {
     pub claim_live: bool,
     /// Seconds since the task started.
     pub elapsed_secs: i64,
+    /// ADR-0201 증보 v4 P4 (#5370): the delegation marker — `Some` on a row that is a delegation step,
+    /// `None` on an ordinary task. **Never the request sentence**: that column is read by the one function
+    /// that sends it ([`delegation_request_in_tx`]) and by nothing else (the api's role cannot select it).
+    pub delegation: Option<DelegationMark>,
 }
+
+/// The delegation marker of a [`TaskRow`] (migration 177).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegationMark {
+    /// `web_search` or `image` ([`DELEGATION_KINDS`]).
+    pub kind: String,
+    pub state: DelegationState,
+    /// The Hermes member the call went to — set by the very statement that writes `called`.
+    pub target: Option<Uuid>,
+}
+
+/// `team_ai_task.delegation_state` (migration 177). `pending` → `called` → `done` | `failed`. **`called`
+/// is written before Hermes is called**, so a worker that finds it knows a call may be in flight or may
+/// have happened, and never calls again (I5, at-most-once).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelegationState {
+    Pending,
+    Called,
+    Done,
+    Failed,
+}
+
+impl DelegationState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DelegationState::Pending => "pending",
+            DelegationState::Called => "called",
+            DelegationState::Done => "done",
+            DelegationState::Failed => "failed",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<DelegationState> {
+        [
+            DelegationState::Pending,
+            DelegationState::Called,
+            DelegationState::Done,
+            DelegationState::Failed,
+        ]
+        .into_iter()
+        .find(|state| state.as_str() == raw)
+    }
+}
+
+/// The closed kinds of `team_ai_task.delegation_kind`.
+pub const DELEGATION_KINDS: [&str; 2] = ["web_search", "image"];
 
 const ROW_COLS: &str = "state, end_reason, steps_done, model_calls, tool_calls, web_searches, plan, note, \
      claim_token, COALESCE(claim_until > clock_timestamp(), false) AS claim_live, \
-     GREATEST(0, floor(extract(epoch FROM (clock_timestamp() - started_at))))::bigint AS elapsed_secs";
+     GREATEST(0, floor(extract(epoch FROM (clock_timestamp() - started_at))))::bigint AS elapsed_secs, \
+     delegation_kind, delegation_state, delegation_target";
 
 fn decode_row(row: &sqlx::postgres::PgRow) -> Result<TaskRow, sqlx::Error> {
     let state: String = row.try_get("state")?;
@@ -221,6 +272,16 @@ fn decode_row(row: &sqlx::postgres::PgRow) -> Result<TaskRow, sqlx::Error> {
         })
         .unwrap_or_default();
     let note: Option<String> = row.try_get("note")?;
+    let delegation_kind: Option<String> = row.try_get("delegation_kind")?;
+    let delegation_state: Option<String> = row.try_get("delegation_state")?;
+    let delegation = match (delegation_kind, delegation_state.as_deref()) {
+        (Some(kind), Some(raw)) => DelegationState::parse(raw).map(|state| DelegationMark {
+            kind,
+            state,
+            target: row.try_get("delegation_target").ok().flatten(),
+        }),
+        _ => None,
+    };
     Ok(TaskRow {
         active: state == "active",
         end_reason: row.try_get("end_reason")?,
@@ -233,6 +294,7 @@ fn decode_row(row: &sqlx::postgres::PgRow) -> Result<TaskRow, sqlx::Error> {
         claim_token: row.try_get("claim_token")?,
         claim_live: row.try_get("claim_live")?,
         elapsed_secs: row.try_get("elapsed_secs")?,
+        delegation,
     })
 }
 
@@ -371,6 +433,44 @@ pub async fn running_counts_in_tx(
     Ok(counts)
 }
 
+/// Take the per-workspace task lock for the rest of the transaction. **The one lock** every count that
+/// bounds tasks or delegations is judged under: [`create_in_tx`] starts a task under it, and the
+/// delegation's `called` commit (ADR-0201 증보 v4 P4-5, P7) re-judges the day's, the requester's and the
+/// concurrent limits under it — so two delegations that start at the same moment cannot both pass the
+/// last free slot (the overshoot is zero because the second sees the first's `called`).
+pub async fn lock_workspace_tasks_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 4967))")
+        .bind(format!("team_ai_task:{workspace_id}"))
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// What a delegation row starts with (ADR-0201 증보 v4 P4-4): the kind and the one request sentence.
+/// The sentence is kept in this row and nowhere else, and is gone once the row ends (migration 177).
+#[derive(Clone, Copy)]
+pub struct NewDelegation<'a> {
+    /// One of [`DELEGATION_KINDS`].
+    pub kind: &'a str,
+    /// The cleaned request sentence (2~1,200 characters).
+    pub request: &'a str,
+}
+
+impl std::fmt::Debug for NewDelegation<'_> {
+    /// Prints the kind and a length — a stray `{:?}` must not be where the sentence reaches a log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "NewDelegation {{ kind: {:?}, request: <{} chars> }}",
+            self.kind,
+            self.request.chars().count()
+        )
+    }
+}
+
 /// Start a task: take the per-workspace lock, count the tasks that are running, and insert the row
 /// — one transaction, so two starts cannot both pass the count. A task is *running* while its row
 /// is active and its run has not ended for good; the requester of a running task is the author of
@@ -381,10 +481,20 @@ pub async fn create_in_tx(
     requester_member_id: Uuid,
     limits: &TaskLimits,
 ) -> Result<CreateOutcome, DbError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 4967))")
-        .bind(format!("team_ai_task:{}", new.workspace_id))
-        .execute(&mut *conn)
-        .await?;
+    create_with_delegation_in_tx(conn, new, requester_member_id, limits, None).await
+}
+
+/// [`create_in_tx`], and — for the helper's delegation to Hermes — the same row with its marker
+/// (`pending`) and the request sentence. A delegation **is** a task (B5-5): the same lock, the same two
+/// counts, the same row.
+pub async fn create_with_delegation_in_tx(
+    conn: &mut PgConnection,
+    new: &NewTask<'_>,
+    requester_member_id: Uuid,
+    limits: &TaskLimits,
+    delegation: Option<&NewDelegation<'_>>,
+) -> Result<CreateOutcome, DbError> {
+    lock_workspace_tasks_in_tx(conn, new.workspace_id).await?;
     let exists: Option<i32> =
         sqlx::query_scalar("SELECT 1 FROM team_ai_task WHERE workspace_id = $1 AND run_id = $2")
             .bind(new.workspace_id)
@@ -410,8 +520,9 @@ pub async fn create_in_tx(
     let inserted = sqlx::query(
         "INSERT INTO team_ai_task \
            (workspace_id, run_id, agent_member_id, steps_done, model_calls, tool_calls, web_searches, \
-            plan, note) \
-         VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8) \
+            plan, note, delegation_kind, delegation_state, delegation_request) \
+         VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, \
+                 $9::text, CASE WHEN $9::text IS NULL THEN NULL ELSE 'pending' END, $10::text) \
          ON CONFLICT (workspace_id, run_id) DO NOTHING",
     )
     .bind(new.workspace_id)
@@ -422,6 +533,8 @@ pub async fn create_in_tx(
     .bind(new.web_searches)
     .bind(json!(new.plan))
     .bind(new.note)
+    .bind(delegation.map(|d| d.kind))
+    .bind(delegation.map(|d| d.request))
     .execute(&mut *conn)
     .await?;
     Ok(if inserted.rows_affected() > 0 {
@@ -550,18 +663,36 @@ pub async fn commit_step_in_tx(
     Ok(row.as_ref().map(decode_row).transpose()?)
 }
 
-/// End the task of a run with `reason`, dropping the plan, the note and the claim. Idempotent: an
-/// already-ended or missing row is not touched, and `false` says so. Called by every path that
-/// ends the run (the worker's final reply, the cancel route), in the same transaction.
+/// End the task of a run with `reason`, dropping the plan, the note, the claim **and the delegation's
+/// request sentence** (`team_ai_task_ended_ck` refuses an ended row that still holds any of them).
+/// Idempotent: an already-ended or missing row is not touched, and `false` says so. Called by every path
+/// that ends the run (the worker's final reply, the cancel route), in the same transaction.
+///
+/// **A delegation that was called and is not settled gets its ledger row here** (ADR-0201 증보 v4 P4-8,
+/// A8·A13): the marker moves `called` → `failed` and one estimated Hermes row is written in the same
+/// transaction, whoever ends the row — the api's cancel route (which never knew about Hermes), the
+/// worker's attempt-exhaustion path, `requester_gone`, `agent_gone`. A worker that settles first (the
+/// normal answer, a timeout) has already moved the marker, so this finds nothing to settle: the row is
+/// written exactly once because the one that moves the marker is the one that writes it.
 pub async fn end_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     reason: &str,
 ) -> Result<bool, DbError> {
+    // The row lock makes "who moves the marker" a single answer when two enders meet.
+    let unsettled: Option<(Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT delegation_state, delegation_target FROM team_ai_task \
+          WHERE workspace_id = $1 AND run_id = $2 AND state = 'active' FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_optional(&mut *conn)
+    .await?;
     let ended = sqlx::query(
         "UPDATE team_ai_task \
-            SET state = 'ended', end_reason = $3, plan = NULL, note = NULL, \
+            SET state = 'ended', end_reason = $3, plan = NULL, note = NULL, delegation_request = NULL, \
+                delegation_state = CASE WHEN delegation_state = 'called' THEN 'failed' ELSE delegation_state END, \
                 claim_token = NULL, claim_until = NULL, ended_at = now(), updated_at = now() \
           WHERE workspace_id = $1 AND run_id = $2 AND state = 'active'",
     )
@@ -570,6 +701,18 @@ pub async fn end_in_tx(
     .bind(reason)
     .execute(&mut *conn)
     .await?;
+    if let Some((Some(state), Some(target))) = unsettled {
+        if state == DelegationState::Called.as_str() {
+            record_hermes_usage_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                target,
+                &HermesUsageRow::unknown(HERMES_LEDGER_MODEL),
+            )
+            .await?;
+        }
+    }
     Ok(ended.rows_affected() > 0)
 }
 
@@ -597,14 +740,30 @@ pub async fn workspaces_with_orphan_tasks(
 }
 
 /// The **write** half of the sweep, inside one workspace's tenant transaction: end every orphaned
-/// task there with [`END_RUN_ENDED`]. Returns how many rows it closed.
+/// task there with [`END_RUN_ENDED`] (a delegation that was called gets its estimated ledger row, as in
+/// [`end_in_tx`]). Returns how many rows it closed.
 pub async fn end_orphan_tasks_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
 ) -> Result<u64, DbError> {
+    let unsettled: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT t.run_id, t.delegation_target \
+           FROM team_ai_task t \
+           JOIN agent_run r ON r.workspace_id = t.workspace_id AND r.id = t.run_id \
+          WHERE t.workspace_id = $1 AND t.state = 'active' \
+            AND t.delegation_state = 'called' AND t.delegation_target IS NOT NULL \
+            AND r.status IN ('succeeded', 'failed', 'cancelled', 'timed_out') \
+            AND t.updated_at < now() - make_interval(secs => $2) \
+            FOR UPDATE OF t",
+    )
+    .bind(workspace_id)
+    .bind(ORPHAN_GRACE_SECS as f64)
+    .fetch_all(&mut *conn)
+    .await?;
     let ended = sqlx::query(
         "UPDATE team_ai_task t \
-            SET state = 'ended', end_reason = $2, plan = NULL, note = NULL, \
+            SET state = 'ended', end_reason = $2, plan = NULL, note = NULL, delegation_request = NULL, \
+                delegation_state = CASE WHEN t.delegation_state = 'called' THEN 'failed' ELSE t.delegation_state END, \
                 claim_token = NULL, claim_until = NULL, ended_at = now(), updated_at = now() \
            FROM agent_run r \
           WHERE t.workspace_id = $1 AND t.state = 'active' \
@@ -617,6 +776,16 @@ pub async fn end_orphan_tasks_in_tx(
     .bind(ORPHAN_GRACE_SECS as f64)
     .execute(&mut *conn)
     .await?;
+    for (run_id, target) in unsettled {
+        record_hermes_usage_in_tx(
+            conn,
+            workspace_id,
+            run_id,
+            target,
+            &HermesUsageRow::unknown(HERMES_LEDGER_MODEL),
+        )
+        .await?;
+    }
     Ok(ended.rows_affected())
 }
 
@@ -723,6 +892,10 @@ pub struct RunSpent {
     pub web_searches: i64,
     /// Some of the tokens are oort's estimate because the provider reported none (ADR-0147 D3).
     pub estimated: bool,
+    /// ADR-0201 증보 v4 P7 (#5370): how many times the helper handed work to Hermes in this run (0 or 1:
+    /// a request delegates once). **The helper's own rows are the only ones summed above** — Hermes's row
+    /// is a subscription, not the team's credits, and lives under Hermes's own agent id (`usage/agents`).
+    pub delegations: i64,
 }
 
 /// The spend of every task-mode run among `run_ids`, keyed by run id. A run that is **not** a task
@@ -743,12 +916,14 @@ pub async fn spent_by_run_in_tx(
                 COALESCE(SUM(u.prompt_tokens), 0)::bigint AS prompt_tokens, \
                 COALESCE(SUM(u.completion_tokens), 0)::bigint AS completion_tokens, \
                 COALESCE(SUM(u.web_search_requests), 0)::bigint AS web_searches, \
-                COALESCE(bool_or(u.was_estimated), false) AS estimated \
+                COALESCE(bool_or(u.was_estimated), false) AS estimated, \
+                (t.delegation_called_at IS NOT NULL)::int::bigint AS delegations \
            FROM team_ai_task t \
            LEFT JOIN usage_ledger u \
                   ON u.workspace_id = t.workspace_id AND u.run_id = t.run_id \
+                 AND u.agent_member_id = t.agent_member_id \
           WHERE t.workspace_id = $1 AND t.run_id = ANY($2) \
-          GROUP BY t.run_id",
+          GROUP BY t.run_id, t.delegation_called_at",
     )
     .bind(workspace_id)
     .bind(run_ids)
@@ -763,10 +938,263 @@ pub async fn spent_by_run_in_tx(
                 completion_tokens: row.try_get("completion_tokens")?,
                 web_searches: row.try_get("web_searches")?,
                 estimated: row.try_get("estimated")?,
+                delegations: row.try_get("delegations")?,
             },
         );
     }
     Ok(spent)
+}
+
+// ---------------------------------------------------------------------------
+// the delegation (ADR-0201 증보 v4 P4·P7, #5370)
+// ---------------------------------------------------------------------------
+
+/// The key of the helper's answer message that says which delegation it carries (ADR-0201 증보 v4 P8):
+/// `team_ai_delegated: [{kind, agent_member_id}]`. **Server-owned**: written only by the worker from a
+/// delegation it ran, stripped from every person's and webhook's props (`is_server_owned_props_key`).
+pub const DELEGATED_PROPS_KEY: &str = "team_ai_delegated";
+
+/// The model label of the estimated ledger row a path writes when it does not know what Hermes
+/// reported (a cancel, a crash, a timeout). A closed word: it names nothing the operator chose.
+pub const HERMES_LEDGER_MODEL: &str = "hermes";
+
+/// What the three delegation limits are judged by (P7): rows whose marker is `called` or later, read
+/// from the task row itself — a delegation in flight is counted, which the ledger (written when a
+/// delegation ends) could not do.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DelegationCounts {
+    /// Delegations called today (UTC day of `delegation_called_at`), in this workspace.
+    pub today: i64,
+    /// Delegations this requester called in the last `window_secs`. The requester is the author of the
+    /// run's trigger message — the same predicate [`running_counts_in_tx`] uses. **Only delegations**:
+    /// the helper's other runs are not counted (a person asking the helper ten ordinary questions is
+    /// not ten delegations).
+    pub requester_recent: i64,
+    /// Delegations running now: called, the row still active and its claim alive (a worker is on it).
+    pub in_flight: i64,
+}
+
+/// Read [`DelegationCounts`]. A read — the caller that **decides** under it holds
+/// [`lock_workspace_tasks_in_tx`] first.
+pub async fn delegation_counts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    requester_member_id: Uuid,
+    window_secs: i64,
+) -> Result<DelegationCounts, DbError> {
+    let (today, requester_recent, in_flight): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+           count(*) FILTER (WHERE t.delegation_called_at >= \
+                  (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'))::bigint, \
+           count(*) FILTER (WHERE m.author_member_id = $2 \
+                  AND t.delegation_called_at > now() - make_interval(secs => $3))::bigint, \
+           count(*) FILTER (WHERE t.state = 'active' AND t.delegation_state = 'called' \
+                  AND t.claim_until > clock_timestamp())::bigint \
+           FROM team_ai_task t \
+           LEFT JOIN agent_run r ON r.workspace_id = t.workspace_id AND r.id = t.run_id \
+           LEFT JOIN message m ON m.workspace_id = r.workspace_id AND m.id = r.trigger_message_id \
+          WHERE t.workspace_id = $1 AND t.delegation_called_at IS NOT NULL",
+    )
+    .bind(workspace_id)
+    .bind(requester_member_id)
+    .bind(window_secs as f64)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(DelegationCounts {
+        today,
+        requester_recent,
+        in_flight,
+    })
+}
+
+/// **The at-most-once commit** (I5): `pending` → `called`, written *before* Hermes is called, for the
+/// holder of the step's claim only. In the same statement the claim is extended to `extend_secs` from now
+/// (the worst time of the call and the merging — the default step claim is shorter than that, F18) and the
+/// Hermes member the call goes to is recorded. Returns the request sentence **iff this call made the
+/// transition** — it is read here and nowhere else: a second claim, a re-run, a lost race finds the
+/// marker no longer `pending` and gets `None`, so it has no sentence to send and no right to send one.
+pub async fn mark_called_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    token: Uuid,
+    target: Uuid,
+    extend_secs: i64,
+) -> Result<Option<String>, DbError> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "UPDATE team_ai_task \
+            SET delegation_state = 'called', delegation_called_at = clock_timestamp(), \
+                delegation_target = $4, \
+                claim_until = clock_timestamp() + make_interval(secs => $5), updated_at = now() \
+          WHERE workspace_id = $1 AND run_id = $2 AND state = 'active' \
+            AND delegation_state = 'pending' AND claim_token = $3 \
+      RETURNING delegation_request",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(token)
+    .bind(target)
+    .bind(extend_secs as f64)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.and_then(|(request,)| request))
+}
+
+/// What [`commit_called_in_tx`] decided.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CalledCommit<R> {
+    /// This call made the transition and owns the request: the sentence, to be sent once.
+    Go(String),
+    /// The caller's judgement refused, under the lock. Nothing was written.
+    Refused(R),
+    /// The marker was not `pending` for this claim any more (another claim made or holds the call, the row
+    /// ended, the claim was taken over). Nothing was written; there is no sentence to send.
+    Lost,
+}
+
+/// **The `called` commit** (ADR-0201 증보 v4 P4-5, P7): under the workspace lock, count the delegations,
+/// let `judge` refuse, and — only if it did not — write `called` and stretch the claim. Counting, judging
+/// and writing are one critical section, which is what makes the overshoot zero: two delegations that reach
+/// the last free slot together are serialised on [`lock_workspace_tasks_in_tx`], and the second one counts
+/// the first one's `called` (the count reads the marker, so a delegation in flight is in it).
+///
+/// `judge` is the caller's rule (the limits live in `momo-workspace-actions`, which depends on this crate):
+/// it sees the counts as they are under the lock and returns why the door is shut, or `None`.
+#[allow(clippy::too_many_arguments)]
+pub async fn commit_called_in_tx<R>(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    token: Uuid,
+    requester_member_id: Uuid,
+    target: Uuid,
+    extend_secs: i64,
+    window_secs: i64,
+    judge: impl FnOnce(&DelegationCounts) -> Option<R>,
+) -> Result<CalledCommit<R>, DbError> {
+    lock_workspace_tasks_in_tx(conn, workspace_id).await?;
+    let counts =
+        delegation_counts_in_tx(conn, workspace_id, requester_member_id, window_secs).await?;
+    if let Some(refusal) = judge(&counts) {
+        return Ok(CalledCommit::Refused(refusal));
+    }
+    Ok(
+        match mark_called_in_tx(conn, workspace_id, run_id, token, target, extend_secs).await? {
+            Some(request) if !request.trim().is_empty() => CalledCommit::Go(request),
+            _ => CalledCommit::Lost,
+        },
+    )
+}
+
+/// How long the claim on a step still has to live, in seconds (`None` when there is no active claim).
+/// A second claimant that meets a live claim on a `called` delegation waits exactly this long — and no
+/// longer: the wait ends where the lease ends, not after a fixed number of attempts (the review's Low).
+pub async fn claim_remaining_secs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<Option<i64>, DbError> {
+    let remaining: Option<Option<f64>> = sqlx::query_scalar(
+        "SELECT extract(epoch FROM (claim_until - clock_timestamp()))::float8 \
+           FROM team_ai_task \
+          WHERE workspace_id = $1 AND run_id = $2 AND state = 'active' AND claim_until IS NOT NULL",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(remaining
+        .flatten()
+        .filter(|secs| *secs > 0.0)
+        .map(|secs| secs.ceil() as i64))
+}
+
+/// One Hermes ledger row (P7): the target's id, the label Hermes is known by, the tokens Hermes reported
+/// or an estimate — **never** a price (a subscription has none; the row counts as unpriced).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HermesUsageRow<'a> {
+    pub model: &'a str,
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    /// Hermes reported no usage: the tokens are oort's estimate (ADR-0147 D3).
+    pub was_estimated: bool,
+}
+
+impl<'a> HermesUsageRow<'a> {
+    /// What a path that never saw Hermes's answer writes: a call happened, its size is not known.
+    pub fn unknown(model: &'a str) -> HermesUsageRow<'a> {
+        HermesUsageRow {
+            model,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            was_estimated: true,
+        }
+    }
+}
+
+/// Write the delegation's ledger row against the Hermes member — **at most once per run and member**
+/// (`NOT EXISTS`, under the caller's row lock). `source` is `self_reported`: the numbers are Hermes's own
+/// (or an estimate), not oort's measurement. Returns whether this call wrote the row.
+pub async fn record_hermes_usage_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    hermes_member_id: Uuid,
+    usage: &HermesUsageRow<'_>,
+) -> Result<bool, DbError> {
+    let inserted = sqlx::query(
+        "INSERT INTO usage_ledger \
+           (workspace_id, run_id, agent_member_id, channel_id, model, \
+            prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, \
+            cost_micro_usd, was_estimated, effort, source, web_search_requests) \
+         SELECT $1, $2, $3, (SELECT channel_id FROM agent_run WHERE workspace_id = $1 AND id = $2), \
+                $4, $5, $6, 0, 0, 0, $7, NULL, 'self_reported', 0 \
+          WHERE NOT EXISTS (SELECT 1 FROM usage_ledger \
+                             WHERE workspace_id = $1 AND run_id = $2 AND agent_member_id = $3)",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(hermes_member_id)
+    .bind(usage.model)
+    .bind(usage.prompt_tokens.max(0))
+    .bind(usage.completion_tokens.max(0))
+    .bind(usage.was_estimated)
+    .execute(&mut *conn)
+    .await?;
+    Ok(inserted.rows_affected() > 0)
+}
+
+/// Settle a called delegation: the marker moves `called` → `to` (`done` or `failed`) **and** the Hermes
+/// ledger row is written, in the caller's transaction. The marker move is the compare-and-swap that makes
+/// "exactly one row" true: the caller that moves it writes the row; a caller that finds the marker already
+/// moved (a cancel that ended the row first, a second worker) writes nothing. Returns whether this call
+/// settled it.
+pub async fn settle_delegation_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    to: DelegationState,
+    usage: &HermesUsageRow<'_>,
+) -> Result<bool, DbError> {
+    debug_assert!(matches!(
+        to,
+        DelegationState::Done | DelegationState::Failed
+    ));
+    let moved: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "UPDATE team_ai_task SET delegation_state = $3, updated_at = now() \
+          WHERE workspace_id = $1 AND run_id = $2 AND delegation_state = 'called' \
+      RETURNING delegation_target",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(to.as_str())
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((Some(target),)) = moved else {
+        return Ok(false);
+    };
+    record_hermes_usage_in_tx(conn, workspace_id, run_id, target, usage).await?;
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -1080,6 +1508,68 @@ pub async fn record_progress_in_tx(
     }
 }
 
+// ---------------------------------------------------------------------------
+// what a delegation reports (ADR-0201 증보 v4 P8, #5370)
+// ---------------------------------------------------------------------------
+
+/// The closed word for a delegation kind in the progress line.
+fn delegation_kind_word(kind: &str) -> &'static str {
+    match kind {
+        "image" => "그림",
+        _ => "검색",
+    }
+}
+
+/// The progress line of a delegation (P8, D5-4): `위임: Hermes · 검색` while the helper waits for Hermes
+/// and `위임 결과 수신: Hermes` once the answer is in. **Assembled by the server from closed words and the
+/// target's current display name** — the request sentence and Hermes's answer have no way into it. The
+/// name is made to fit the short-text rule people read it under ([`display_line`]); the finished line is
+/// judged by the stage marker's own rule ([`judged_label`]) and falls back to a head that always passes.
+pub fn delegation_stage_label(target_display_name: &str, kind: &str, received: bool) -> String {
+    let name = display_line(target_display_name, 30);
+    let name = if name.is_empty() {
+        "Hermes".to_string()
+    } else {
+        name
+    };
+    if received {
+        judged_label(&format!("위임 결과 수신: {name}"), "위임 결과 수신")
+    } else {
+        judged_label(
+            &format!("위임: {name} · {}", delegation_kind_word(kind)),
+            "위임 중",
+        )
+    }
+}
+
+/// Write the delegation's one activity (`kind: "delegate"`, no label — the kind names the work, ADR-0200
+/// 증보 7 7-1) through **the** run-activity writer, in the caller's transaction. `status` is
+/// `in_progress` while Hermes is on it, `completed` or `failed` after: a change of status is a new row
+/// of the ledger, a repeat is folded (the writer's own rule). A refusal by the shared rule is returned
+/// for the caller to log — a progress decoration must not stop a delegation.
+pub async fn record_delegate_activity_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    step: i32,
+    status: &str,
+) -> Result<ProgressWrite, DbError> {
+    let activity = RawActivity {
+        id: step_activity_id(step, "delegate"),
+        kind: "delegate".to_string(),
+        label: None,
+        status: status.to_string(),
+        n: None,
+    };
+    match ActivityReport::validate(Some(&[activity]), None) {
+        Ok(report) => Ok(ProgressWrite::Written(
+            record_run_activity_in_tx(conn, workspace_id, run_id, agent_member_id, &report).await?,
+        )),
+        Err(fault) => Ok(ProgressWrite::Refused(fault)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1097,6 +1587,7 @@ mod tests {
             claim_token: None,
             claim_live: false,
             elapsed_secs: 0,
+            delegation: None,
         }
     }
 

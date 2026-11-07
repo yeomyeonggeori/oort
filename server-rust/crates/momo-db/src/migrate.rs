@@ -792,12 +792,22 @@ mod tests {
     /// theirs was in use. Tenant ENABLE + FORCE + `ws_isolation`, a composite FK into `member (workspace_id,
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
+    ///
+    /// 177 is #5370's 「도우미가 팀 Hermes에 일을 맡기는 걸음」 (ADR-0201 증보 v4 P4·P7·I6, P14-S2): five
+    /// delegation columns on `team_ai_task` (the at-most-once marker `pending → called → done|failed`, its
+    /// time, the Hermes member and the one request sentence), `team_ai_task_ended_ck` re-created so an ended
+    /// row cannot hold the sentence, and `momo_app` made unable to SELECT the sentence's column
+    /// (column-level grants in the same `team-ai-task-lockdown` block, the same text in the migration and
+    /// both role bootstraps). No new table, so no new RLS policy.
     #[test]
-    fn discovers_contiguous_migrations_001_to_174() {
+    fn discovers_contiguous_migrations_001_to_177() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=174).collect();
+        // 175 (#5371) and 176 (#5459) are reserved by two slots that have not landed on this branch yet;
+        // 177 is #5370's. The merge that brings them in deletes this line and the list is 1..=177.
+        let reserved: [i64; 2] = [175, 176];
+        let expected: Vec<i64> = (1..=177).filter(|n| !reserved.contains(n)).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -805,7 +815,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=174 under {}",
+            "expected 001..=177 (175 and 176 reserved) under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -813,7 +823,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("174_member_activity"));
+            .starts_with("177_team_ai_task_delegation"));
     }
 
     #[test]

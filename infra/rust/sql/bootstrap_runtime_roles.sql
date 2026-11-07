@@ -487,32 +487,44 @@ BEGIN
 END $$;
 -- END self-media-token-lockdown
 
--- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7). Identical in
--- 169_team_ai_task.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
--- between the markers. A row's note is model-written text that may carry what the helper read for one
--- requester, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps every tenant's
--- notes away from a role with no business reading them. Each runtime role gets exactly what the code
--- does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends and sweeps, SELECT
--- reads it); momo_app only counts the concurrency slot (SELECT) and ends the task a cancel stops
--- (UPDATE); nobody deletes a row (an ended row is kept, its note gone — a foreign-key cascade from the
--- run or the workspace runs as the table's owner, so deleting a parent still clears its rows); relay,
--- notifier and platform_admin do not touch it at all. Idempotent and order-proof (a pass before the
--- table or the roles exist finishes what it can, the pass after lands the rest), and it fails loudly
--- if the result is not what is written here.
+-- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7; v2 = #5370, ADR-0201
+-- 증보 v4 P4·I6). Identical in 177_team_ai_task_delegation.sql, bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers. A row's note is model-written
+-- text that may carry what the helper read for one requester, and a delegating row's request sentence is
+-- the one sentence the helper hands to Hermes; the BYPASSRLS roles skip RLS, so their table privileges are
+-- what keeps every tenant's notes away from a role with no business reading them. Each runtime role gets
+-- exactly what the code does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends
+-- and sweeps, SELECT reads it, the request sentence included — it is the only role that sends it);
+-- momo_app counts the concurrency slot and reads the marker (SELECT of every column but the request
+-- sentence: delegation_request is NOT in its column list) and ends the task a cancel stops (UPDATE, which
+-- clears the sentence); nobody deletes a row (an ended row is kept, its note and its sentence gone — a
+-- foreign-key cascade from the run or the workspace runs as the table's owner, so deleting a parent still
+-- clears its rows); relay, notifier and platform_admin do not touch it at all. Idempotent and order-proof
+-- (a pass before the table, the new column or the roles exist finishes what it can, the pass after lands
+-- the rest), and it fails loudly if the result is not what is written here.
 DO $$
 DECLARE
   r text;
   p text;
+  c text;
   allowed text[];
+  app_columns text[] := ARRAY[
+    'workspace_id', 'run_id', 'agent_member_id', 'state', 'end_reason', 'steps_done', 'model_calls',
+    'tool_calls', 'web_searches', 'plan', 'note', 'claim_token', 'claim_until', 'started_at',
+    'updated_at', 'ended_at', 'delegation_kind', 'delegation_state', 'delegation_called_at',
+    'delegation_target'];
 BEGIN
-  IF to_regclass('public.team_ai_task') IS NULL THEN
+  IF to_regclass('public.team_ai_task') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM pg_attribute
+                     WHERE attrelid = 'public.team_ai_task'::regclass
+                       AND attname = 'delegation_request' AND NOT attisdropped) THEN
     RETURN;
   END IF;
   REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC;
   FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
     CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
     allowed := CASE r
-      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_app' THEN ARRAY['UPDATE']
       WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
       ELSE ARRAY[]::text[]
     END;
@@ -520,10 +532,25 @@ BEGIN
     IF cardinality(allowed) > 0 THEN
       EXECUTE format('GRANT %s ON TABLE public.team_ai_task TO %I', array_to_string(allowed, ', '), r);
     END IF;
+    IF r = 'momo_app' THEN
+      EXECUTE format(
+        'GRANT SELECT (%s) ON TABLE public.team_ai_task TO %I',
+        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(app_columns) AS x), r);
+    END IF;
     FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
       IF has_table_privilege(r, 'public.team_ai_task', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
         RAISE EXCEPTION 'role % must % % on team_ai_task',
           r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+    FOR c IN SELECT attname::text FROM pg_attribute
+              WHERE attrelid = 'public.team_ai_task'::regclass AND attnum > 0 AND NOT attisdropped LOOP
+      IF has_column_privilege(r, 'public.team_ai_task', c, 'SELECT')
+         IS DISTINCT FROM (r = 'momo_worker' OR (r = 'momo_app' AND c = ANY (app_columns))) THEN
+        RAISE EXCEPTION 'role % must % SELECT on team_ai_task.%',
+          r,
+          CASE WHEN r = 'momo_worker' OR (r = 'momo_app' AND c = ANY (app_columns)) THEN 'hold' ELSE 'not hold' END,
+          c;
       END IF;
     END LOOP;
   END LOOP;

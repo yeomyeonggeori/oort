@@ -27,7 +27,7 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1, v2 #5370: `momo_app` UPDATE and SELECT by column — every column but `delegation_request` —, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
@@ -1720,13 +1720,31 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname = 'team_ai_task' \
             AND has_table_privilege(r.rolname, c.oid, p.priv) \
-                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('UPDATE')) \
                                   OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE'))) \
           ORDER BY 1",
     )
     .fetch_all(&db.su)
     .await
     .expect("team ai task privilege scan");
+    // #5370 (ADR-0201 증보 v4 I6): `momo_app` reads by COLUMN now — every column but the delegation's
+    // request sentence — so the table-level scan above expects it to hold UPDATE only, and this scan holds
+    // the column grants to the same lockdown text (bootstrap_runtime_roles.sql).
+    let team_ai_task_column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, a.attname, \
+                       has_column_privilege(r.rolname, c.oid, a.attname, 'SELECT')) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+          WHERE n.nspname = 'public' AND c.relname = 'team_ai_task' \
+            AND has_column_privilege(r.rolname, c.oid, a.attname, 'SELECT') \
+                IS DISTINCT FROM (r.rolname = 'momo_worker' \
+                                  OR (r.rolname = 'momo_app' AND a.attname <> 'delegation_request')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("team ai task column privilege scan");
     let team_ai_task_tables: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'team_ai_task'",
@@ -1810,6 +1828,11 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         team_ai_task_drift.is_empty(),
         "team_ai_task privileges drifted from the lockdown: {team_ai_task_drift:?}"
+    );
+    assert!(
+        team_ai_task_column_drift.is_empty(),
+        "team_ai_task column privileges drifted from the lockdown (the request sentence is the worker's alone): \
+         {team_ai_task_column_drift:?}"
     );
     assert_eq!(
         attachment_media_tables, 1,
