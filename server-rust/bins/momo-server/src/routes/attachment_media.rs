@@ -73,11 +73,11 @@ pub const MAX_MEDIA_BODY_BYTES: usize = 512 * 1024;
 
 /// `PUT …/media` request (openapi `SetAttachmentMediaRequest`, a `oneOf`).
 ///
-/// `kind` decides which closed shape the body must be: absent or `"video"` is a [`VideoMediaRequest`]
-/// (a client older than ADR-0151 증보 9 sends no `kind`), `"image"` is an [`ImageMediaRequest`], and
-/// anything else is refused like a key the route does not know. A body the JSON reader cannot use
-/// never gets further: the framework answers 400, 415 or 422 first (this type's errors are data
-/// errors, so 422).
+/// `kind` decides which closed shape the body must be: `"image"` is an [`ImageMediaRequest`]; absent or
+/// `"video"` is a [`VideoMediaRequest`] (a client older than ADR-0151 증보 9 sends no `kind`), and any
+/// other `kind` is that same shape with a `kind` it does not accept, so it is refused like a key the
+/// route does not know. A body the JSON reader cannot use never gets further: the framework answers
+/// 400, 415 or 422 first (this type's errors are data errors, so 422).
 #[derive(Debug)]
 pub enum SetAttachmentMediaRequest {
     Video(VideoMediaRequest),
@@ -88,17 +88,10 @@ impl<'de> Deserialize<'de> for SetAttachmentMediaRequest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let image = match value.get("kind") {
-            None => false,
-            Some(kind) if kind == "video" => false,
-            Some(kind) if kind == "image" => true,
-            Some(_) => {
-                return Err(D::Error::custom(
-                    "unknown kind: expected \"video\" or \"image\"",
-                ))
-            }
-        };
-        if image {
+        // `"image"` selects the picture's shape. **Everything else is the video's**, whose own `kind`
+        // accepts nothing but `"video"` (or no `kind` at all): that one field is what turns an unknown
+        // word, another case or another type away, so this choice has no second copy of the rule.
+        if value.get("kind").is_some_and(|kind| kind == "image") {
             serde_json::from_value(value)
                 .map(Self::Image)
                 .map_err(D::Error::custom)
