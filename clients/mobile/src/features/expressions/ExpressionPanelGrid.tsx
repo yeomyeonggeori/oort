@@ -24,7 +24,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {HEAD_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {useStyles} from '../../design/theme';
-import {ds2Radius, font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {ds2Radius, font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
 import {WORD} from '../../lib/techWords';
 import {useReduceMotion} from '../../lib/useReduceMotion';
@@ -47,6 +47,7 @@ import {useExpressionMessages, type PlainMessageKey} from './useExpressionMessag
 //
 // 구역은 최근 → 즐겨찾기 → 세트별 → 기타(코어 `buildExpressionSections`, 웹과 같은 함수). 우리 팀 것과 기본 것을 가르지 않는다. 칸에는 글이 없고(낭독 이름만) 구역마다 작은 이름줄이 있다.
 // 창 아래 띠: 🕘 최근 · ★ 즐겨찾기 · 세트마다 첫 그림 · 기타, 끝의 ＋(가져오기·AI와 만들기). 누르면 그 구역으로 건너뛰고 지금 구역이 표시된다. 비어 있는 최근·즐겨찾기는 띠에 없다.
+// 띠의 단추는 눌림 면이 44×44 이다: 보이는 상자는 40×44 이고 모자란 가로는 `hitSlop`(`slopTo`)이 채운다. 이웃과의 틈 4 를 반씩 나눠 가져서 눌림 면끼리 겹치지 않는다(#5492).
 // 칸을 누르면 미리 보기에 올라가고(고르기만 하고 보내지 않는다), 길게 누르면 즐겨찾기를 켜고 끈다(이 기기 안, 서버 계약 없음).
 //
 // 네 상태: 불러오는 중 · 오류(다시 시도) · 비어 있음(만드는 길을 말한다) · 있음. ＋ 는 어느 상태에서도 서 있다.
@@ -56,7 +57,17 @@ export type PanelGridTab = 'emoticon' | 'gif';
 
 /** 칸 하나의 가로(pt)를 정하는 기준: 정지 그림 64 + 칸 여백. 열 수는 글자 배율만큼 줄어든다. */
 const TILE_CELL = 72;
-const STRIP_BUTTON = 40;
+/**
+ * 세트 띠의 단추 사이 틈. 단추의 눌림 면(`hitSlop`)이 이 틈을 반씩 나눠 가져서 이웃과 겹치지 않는다 - 보이는 상자 + 틈 = 한 걸음이 정확히 `TOUCH_TARGET` 이다.
+ */
+const STRIP_GAP = space.xs;
+/**
+ * 세트 띠 단추의 보이는 상자 가로: 한 걸음 44 에서 틈을 뺀 40(그림 32 + 좌우 여백 4). 손으로 적은 40 은 슬롭이 없어서 눌림 면도 40 이었다(검증 7b M2, #5492).
+ * 모자란 가로는 `slopTo` 가 채운다(감사 M-14) - 슬롭이 한 변에 2, 두 변의 합 4 = 틈이라 이웃의 눌림 면과 만날 뿐 겹치지 않는다. 세로는 처음부터 `TOUCH_TARGET` 이다. 보이는 그림 32 는 그대로.
+ */
+const STRIP_BUTTON = TOUCH_TARGET - STRIP_GAP;
+const STRIP_SLOP = slopTo(STRIP_BUTTON);
+const STRIP_HIT_SLOP = {left: STRIP_SLOP, right: STRIP_SLOP};
 const STRIP_IMAGE = 32;
 /** 띠로 건너뛴 직후 스크롤 이벤트가 표시를 되돌리지 않게 잠그는 시간(ms). */
 const JUMP_HOLD_MS = 500;
@@ -265,6 +276,7 @@ export function ExpressionPanelGrid({
                 accessibilityRole="button"
                 accessibilityLabel={sectionTitle(layout)}
                 accessibilityState={{selected: on}}
+                hitSlop={STRIP_HIT_SLOP}
                 onPress={() => jump(layout.section.id)}
                 style={[styles.stripButton, on && styles.stripButtonOn]}
                 testID={setTestId(layout.section.id)}>
@@ -290,6 +302,7 @@ export function ExpressionPanelGrid({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={formatMessage('expressions.picker.add')}
+          hitSlop={STRIP_HIT_SLOP}
           onPress={onAdd}
           style={({pressed}) => [styles.stripButton, styles.stripAdd, pressed && styles.cellOn]}
           testID="expression-panel-add">
@@ -341,7 +354,7 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.surface,
     },
     stripList: {flex: 1},
-    stripContent: {paddingHorizontal: SAFE_GUTTER - space.xs, gap: space.xs, alignItems: WORD.center},
+    stripContent: {paddingHorizontal: SAFE_GUTTER - space.xs, gap: STRIP_GAP, alignItems: WORD.center},
     stripButton: {
       minWidth: STRIP_BUTTON,
       height: TOUCH_TARGET,
