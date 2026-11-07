@@ -15,7 +15,7 @@ import { EmojiPickerDialog } from "./EmojiPickerDialog";
 
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
-// #5453, owner 2026-11-07: 탭은 이모티콘 · 이모지 · GIF 이고, 우리 팀이 올린 것과 기본을 탭으로 가르지 않는다. 폰 시트와 같은 코어 표(`EXPRESSION_TAB_SHELVES`)를 읽는다:
+// #5453, owner 2026-11-07: 탭은 이모티콘 · 이모지 · GIF 이고, 우리 팀이 올린 것과 기본을 탭으로 가르지 않는다. 폰 창과 같은 코어 표(`EXPRESSION_TAB_SHELVES`)를 읽는다:
 //   이모티콘 = 움직이지 않는 큰 그림 · 이모지 = 표준 표 + 팀의 작은 이모지 · GIF = 움직이는 큰 그림.
 // 「이모지」라는 말은 탭 이름에만 선다(보이는 글자와 낭독 이름 모두). 기대값은 사전에서 읽지 않고 글자로 못 박는다.
 
@@ -86,31 +86,34 @@ describe("고르개의 세 탭: 이모티콘 · 이모지 · GIF (#5453)", () =>
     "ko-KR": { group: "표현 종류", tabs: ["이모티콘", "이모지", "GIF"] },
     "en-US": { group: "Kinds", tabs: ["Emoticons", "Emoji", "GIF"] },
   } as const;
-  it.each([["ko-KR"], ["en-US"]] as const)("%s: 탭은 이모티콘 · 이모지 · GIF 차례이고 처음에는 이모지(표 + 팀 이모지)가 열려 있다", async (language) => {
+  // #5482, planner 결정: 웹·폰 모두 처음 열면 첫 탭은 「이모티콘」이다(앞 판은 이모지였다). 폰 창(`ExpressionKeyboardPanel`)과 같은 코어 상수 하나로 연다.
+  it.each([["ko-KR"], ["en-US"]] as const)("%s: 탭은 이모티콘 · 이모지 · GIF 차례이고 처음에는 이모티콘(큰 그림 목록)이 열려 있다", async (language) => {
     await open(language);
     const group = await screen.findByRole("group", { name: WORDS[language].group });
     const tabs = within(group).getAllByRole("button");
     expect(tabs.map((tab) => tab.textContent)).toEqual([...WORDS[language].tabs]);
-    expect(tabs.map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["false", "true", "false"]);
-    expect(await screen.findByTestId("emoji-search")).toBeTruthy();
-    expect(screen.queryByTestId("team-expressions")).toBeNull();
+    expect(tabs.map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+    // 열린 본문도 이모티콘 탭의 것이다: 팀 보관함의 큰 그림 목록이 서고 표준 이모지 표(검색 칸)와 팀 이모지 줄은 없다.
+    expect(await screen.findByTestId("team-expressions")).toBeTruthy();
+    expect(screen.queryByTestId("emoji-search")).toBeNull();
+    expect(screen.queryByTestId("team-emoji-strip")).toBeNull();
   });
 
   it("각 탭이 모으는 것: 이모티콘 = 움직이지 않는 큰 그림, 이모지 = 표준 표 + 팀의 작은 이모지(움직여도), GIF = 움직이는 큰 그림 — 우리 팀 · 기본 구분이 없다", async () => {
     await open("ko-KR");
     const tabs = within(await screen.findByRole("group", { name: "표현 종류" })).getAllByRole("button");
-    // 이모지(처음): 표준 표가 서고, 그 위에 팀의 작은 이모지 둘이 같은 탭에 섞여 선다. 큰 그림은 없다.
-    await waitFor(() => expect(stripNames()).toEqual(["작은 웃음", "파티 앵무새"]));
-    expect(screen.getByTestId("emoji-search")).toBeTruthy();
-    expect(listNames()).toEqual([]);
-    // 이모티콘: 움직이지 않는 큰 그림만.
-    fireEvent.click(tabs[0]);
+    // 이모티콘(처음): 움직이지 않는 큰 그림만.
     await screen.findByTestId("team-expressions");
     await waitFor(() => expect(listNames()).toEqual(["건배"]));
     expect(screen.queryByTestId("emoji-search")).toBeNull();
     expect(screen.queryByTestId("team-emoji-strip")).toBeNull();
     expect(screen.queryAllByRole("radio")).toHaveLength(0);
     expect(screen.getByLabelText("이모티콘 검색")).toBeTruthy();
+    // 이모지: 표준 표가 서고, 그 위에 팀의 작은 이모지 둘이 같은 탭에 섞여 선다. 큰 그림은 없다.
+    fireEvent.click(tabs[1]);
+    await waitFor(() => expect(stripNames()).toEqual(["작은 웃음", "파티 앵무새"]));
+    expect(screen.getByTestId("emoji-search")).toBeTruthy();
+    expect(listNames()).toEqual([]);
     // GIF: 움직이는 큰 그림 둘 - 움직이는 작은 이모지(파티 앵무새)는 여기가 아니라 이모지 탭이다.
     fireEvent.click(tabs[2]);
     await waitFor(() => expect(listNames()).toEqual(["기절", "엄지척"]));
@@ -181,6 +184,7 @@ describe("고르개의 세 탭: 이모티콘 · 이모지 · GIF (#5453)", () =>
 
   it("이모지 탭의 검색 칸 하나가 표와 팀 이모지를 함께 거른다", async () => {
     await open("ko-KR");
+    fireEvent.click(within(await screen.findByRole("group", { name: "표현 종류" })).getAllByRole("button")[1]);
     await waitFor(() => expect(stripNames()).toEqual(["작은 웃음", "파티 앵무새"]));
     fireEvent.change(screen.getByTestId("emoji-search"), { target: { value: "앵무" } });
     await waitFor(() => expect(stripNames()).toEqual(["파티 앵무새"]));

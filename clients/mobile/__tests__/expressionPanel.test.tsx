@@ -9,6 +9,7 @@ import {
 } from '@momo/core/features/expressions/fixtureServer';
 import {FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
+import {DEFAULT_EXPRESSION_PICKER_TAB} from '@momo/core/features/expressions/kind';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
@@ -170,6 +171,19 @@ describe('세 탭 — 이모티콘 · 이모지 · GIF', () => {
     expect(screen.queryAllByText(/이모지/)).toHaveLength(1);
     fireEvent.press(tabs[1]);
     expect(screen.queryAllByText(/이모지/)).toHaveLength(1);
+  });
+
+  // #5482, planner 결정: 웹·폰 모두 처음 열면 첫 탭은 「이모티콘」. 폰은 웹 고르개와 같은 코어 상수 하나로 연다 - 따로 적어 두면 한쪽만 바뀐다.
+  it('처음 여는 탭은 코어의 처음 여는 탭 상수 하나(이모티콘)다 - 선택 상태도 본문도 그 탭이다', async () => {
+    const {store} = makeStore();
+    await store.refresh(true);
+    mountPanel(store);
+    const selected = ['emoticon', 'emoji', 'gif'].filter(id => screen.getByTestId(`expression-panel-tab-${id}`).props.accessibilityState.selected);
+    expect(selected).toEqual([DEFAULT_EXPRESSION_PICKER_TAB]);
+    expect(DEFAULT_EXPRESSION_PICKER_TAB).toBe('emoticon'); // owner 결정을 글자로도 못 박는다 - 상수가 옮겨 가면 웹 시험과 함께 빨개진다
+    // 본문도 이모티콘 탭의 것이다: 정지한 큰 그림 격자가 서고, 이모지 탭의 표준 목록은 없다.
+    expect(cellNames().sort()).toEqual(['cheers_still', 'chi_cry', 'chi_yay', 'dam_haa', 'dam_kk']);
+    expect(screen.queryByTestId('expression-panel-emoji')).toBeNull();
   });
 
   it('마지막으로 본 탭을 다시 열어도 기억한다(이번 실행 동안)', async () => {
