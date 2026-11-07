@@ -254,16 +254,27 @@ pub fn clean_answer(raw: &str) -> HermesAnswer {
 /// What the merging model reads of a good answer: a closed shape inside the data fence (P1:
 /// `{ok:true, kind, text, pictures, sources}`). It goes through [`ToolOutcome::render`], which defuses a
 /// code fence in the body and says again that none of it is an instruction (T2).
+///
+/// **The count is the picture's, not the cleaning's** (security review L1 of #5372): only an `image`
+/// delegation yields a picture (the worker sets `answer.pictures` from [`picture_of`]); a search never does,
+/// whatever its text held (a markdown picture the cleaning cut is not one the server attaches). So a search
+/// is shown `pictures: 0` — shown a 1, it would meet the merge prompt's 「pictures가 1이면 그림은 서버가 따로
+/// 붙이니…」 and tell the person a picture was made when none was. The `match` has no wildcard: a new kind
+/// has to say what its count is.
 pub fn result_for_model(kind: HermesKind, answer: &HermesAnswer) -> ToolOutcome {
     let sources = if answer.sources.is_empty() {
         "-".to_string()
     } else {
         answer.sources.join(" | ")
     };
+    let pictures = match kind {
+        HermesKind::Image => answer.pictures,
+        HermesKind::WebSearch => 0,
+    };
     ToolOutcome::Data(format!(
         "ok: true | kind: {} | pictures: {} | sources: {} | text: {}",
         kind.as_str(),
-        answer.pictures,
+        pictures,
         sources,
         answer.text
     ))
@@ -310,9 +321,9 @@ impl std::fmt::Debug for PictureBytes {
 ///   bytes decide, never the declared type). Otherwise the closed code the delegation ends with:
 ///   - `PictureFailed` — Hermes did hand something over that cannot be used: two or more addresses, a GIF
 ///     (the subscription path cannot make motion, F11, and a still is the contract), any other type, bad
-///     base64, more than 5 MiB, bytes that are no picture — **or** it said it drew one (a `MEDIA:` line)
-///     but gave no address the worker can read (the line is a path on Hermes's volume and is never
-///     opened). The sentence 「그림은 만들어졌지만 올리지 못했어요.」 is true of these;
+///     base64, more than 5 MiB, bytes that are no picture — **or** it said it drew one (a line that begins
+///     with `MEDIA:`) but gave no address the worker can read (the line is a path on Hermes's volume and is
+///     never opened). The sentence 「그림은 만들어졌지만 올리지 못했어요.」 is true of these;
 ///   - `Failed` — nothing at all that says a picture was made (no address, no `MEDIA:` line): Hermes did not
 ///     do the work, and saying a picture was made would be false.
 ///
@@ -326,7 +337,10 @@ pub fn picture_of(kind: HermesKind, raw: &str) -> Result<Option<PictureBytes>, D
         Picture::One { mime, base64 } => (mime, base64),
         Picture::Unusable | Picture::TooLarge => return Err(DelegateCode::PictureFailed),
         Picture::None => {
-            let said_it_drew_one = raw.lines().any(|line| fold(line).contains("media:"));
+            // a line that BEGINS with the mark (the fold has already dropped the blanks before it): the way
+            // Hermes writes a file it drew. The word in the middle of a sentence (「social media: …」) says
+            // nothing about a picture (security review L2 of #5372)
+            let said_it_drew_one = raw.lines().any(|line| fold(line).starts_with("media:"));
             return Err(if said_it_drew_one {
                 DelegateCode::PictureFailed
             } else {
@@ -758,6 +772,37 @@ mod tests {
         ] {
             assert_eq!(taken(said), Err(DelegateCode::PictureFailed), "{said}");
         }
+        // L2: the word in the middle of a line is no claim that a picture was drawn — a plain answer that
+        // happens to say `media:` is `failed` (the sentence 「그림은 만들어졌지만…」 would be false)
+        for talk in [
+            "소셜 media: 이야기만 있어요",
+            "social media: not a picture",
+            "그림은 못 그렸어요 MEDIA:/opt/x.png 라고 쓰기만 했어요",
+            "첫 줄이에요\n둘째 줄에 media: 가 낀 말이에요",
+        ] {
+            assert_eq!(taken(talk), Err(DelegateCode::Failed), "{talk}");
+        }
+    }
+
+    /// L1: the picture count the merging model reads is the picture's — a search is shown `pictures: 0` even
+    /// when its text held a markdown picture (which would otherwise meet 「pictures가 1이면 그림은 서버가 붙여」
+    /// in the merge prompt), and an image delegation is shown the count the worker set from [`picture_of`].
+    #[test]
+    fn a_search_is_never_told_it_holds_a_picture() {
+        let mut answer = clean_answer("결과예요 ![x](data:image/png;base64,AAAA) 끝");
+        assert_eq!(
+            answer.pictures, 1,
+            "the cleaning did count a markdown picture"
+        );
+        let shown = result_for_model(HermesKind::WebSearch, &answer).render("ask_hermes");
+        assert!(shown.contains("kind: web_search | pictures: 0"), "{shown}");
+        assert!(!shown.contains("pictures: 1"), "{shown}");
+        answer.pictures = 1;
+        let shown = result_for_model(HermesKind::Image, &answer).render("ask_hermes");
+        assert!(shown.contains("kind: image | pictures: 1"), "{shown}");
+        answer.pictures = 0;
+        let shown = result_for_model(HermesKind::Image, &answer).render("ask_hermes");
+        assert!(shown.contains("kind: image | pictures: 0"), "{shown}");
     }
 
     /// S3 review I3: a web search never yields a picture, whatever address its text holds.

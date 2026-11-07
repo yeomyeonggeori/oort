@@ -677,6 +677,9 @@ struct Setup {
     /// #5372: `OORT_API_INTERNAL_ORIGIN` — where the picture's writer dials. `Unset` is the default of every
     /// delegation of S2 (a search never writes a picture).
     picture_origin: PictureOrigin,
+    /// #5372 (security review M1): `OORT_HOSTED_MEDIA_STRICT=1` — the operator's oort-side attestation that
+    /// Hermes delivers media strictly. A picture delegation is called only with it; a search never looks.
+    media_strict: bool,
 }
 
 /// Where the worker is told the api lives.
@@ -700,6 +703,7 @@ impl Setup {
             key: true,
             lease_seconds: None,
             picture_origin: PictureOrigin::Unset,
+            media_strict: false,
         }
     }
 
@@ -711,7 +715,16 @@ impl Setup {
         }
     }
 
-    /// The operator declared `image` (and not a search), the writer dials the world's fake api.
+    /// `image()`, but the operator never attested strict media delivery (`OORT_HOSTED_MEDIA_STRICT` unset).
+    fn image_without_strict_media() -> Setup {
+        Setup {
+            media_strict: false,
+            ..Setup::image()
+        }
+    }
+
+    /// The operator declared `image` (and not a search), the writer dials the world's fake api, and the
+    /// operator attested strict media delivery.
     fn image() -> Setup {
         Setup {
             hermes: HermesDeclarations {
@@ -720,6 +733,7 @@ impl Setup {
                 ..HermesDeclarations::default()
             },
             picture_origin: PictureOrigin::Api,
+            media_strict: true,
             ..Setup::open()
         }
     }
@@ -771,7 +785,8 @@ impl World {
         let mut config = WorkerConfig::for_target(database_url())
             .with_hermes_declarations(setup.hermes.clone())
             .with_hermes_daily_cap(setup.ceiling)
-            .with_hermes_deadlines(setup.deadline, setup.deadline);
+            .with_hermes_deadlines(setup.deadline, setup.deadline)
+            .with_hosted_media_strict(setup.media_strict);
         config.claim_batch_size = 10;
         if let Some(lease_seconds) = setup.lease_seconds {
             config.lease_seconds = lease_seconds;
@@ -3081,6 +3096,13 @@ async fn x19_an_answer_that_is_not_exactly_one_usable_picture_ends_without_a_tok
             "failed",
         ),
         (
+            // L2 (security review of #5372): `media:` in the middle of a sentence is no claim that a picture
+            // was drawn — the sentence 「그림은 만들어졌지만 올리지 못했어요」 would be false
+            "the word media in a sentence",
+            "그림은 못 그리고 social media: 이야기만 했어요".to_string(),
+            "failed",
+        ),
+        (
             "an http picture only",
             "![a](https://example.com/cat.png) 이거예요".to_string(),
             "failed",
@@ -3266,14 +3288,14 @@ async fn x21_a_stop_between_the_write_up_and_the_upload_leaves_no_picture() {
     );
 }
 
-/// A10 (the two halves of "both") and the step's own gate: `image` is offered when the operator declared it and
-/// the ceiling is set — and a deployment that declares nothing, or has no ceiling, or whose worker has no private
-/// origin, spends nothing. Without a private origin the door still offers `image` (the offer is the code
-/// constant and the declaration, P6) and the **step** ends `unavailable` before Hermes is called: no request,
-/// no `called`, no ledger row, no count.
+/// A10 (the two halves of "both") and the step's own gates: `image` is offered when the operator declared it and
+/// the ceiling is set — and a deployment that declares nothing, or has no ceiling, spends nothing. Without a
+/// private origin, or without the operator's strict-media attestation (security review M1), the door still
+/// offers `image` (the offer is the code constant and the declaration, P6) and the **step** ends `unavailable`
+/// before Hermes is called: no request, no `called`, no ledger row, no count.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_without_a_writer_calls_nothing(
+async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_without_a_writer_or_the_attestation_calls_nothing(
 ) {
     // (a) declared + ceiling + origin: offered
     let w = world_with_api(
@@ -3334,38 +3356,83 @@ async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_witho
         "an `image` nobody declared is never offered: {kinds:?}"
     );
 
-    // (d) declared, ceiling set, NO private origin: still offered; the step ends `unavailable`, Hermes is
-    // never called, and nothing is counted
-    let w = world(drawn()).await;
-    let (worker, routed) = w.worker(image_script(), &Setup::image_without_origin());
+    // (d) declared, ceiling set, but the step cannot post (NO private origin) or was never attested (NO
+    // `OORT_HOSTED_MEDIA_STRICT`, security review M1): still offered — the offer is the constant and the
+    // declaration alone — and the step ends `unavailable` before Hermes is called, nothing counted
+    for (label, setup) in [
+        ("no private origin", Setup::image_without_origin()),
+        (
+            "no strict-media attestation",
+            Setup::image_without_strict_media(),
+        ),
+    ] {
+        let w = world_with_api(
+            drawn(),
+            ApiBehavior::Store {
+                after: AfterStore::Nothing,
+            },
+        )
+        .await;
+        let (worker, routed) = w.worker(image_script(), &setup);
+        let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+        w.drain(&worker).await;
+        assert_eq!(
+            offered_kinds(&routed.model.requests()[0]),
+            Some(vec!["image".to_string()]),
+            "{label}: the offer is the constant and the declaration alone (A10: nothing else is evidence of anything)"
+        );
+        assert_eq!(
+            w.fake.connections(),
+            0,
+            "{label}: a picture that cannot be posted, or that Hermes may deliver from any file, is not worth a call to Hermes"
+        );
+        assert_eq!(
+            w.api.as_ref().unwrap().connections(),
+            0,
+            "{label}: nothing reached the api"
+        );
+        assert_eq!(routed.model.requests().len(), 1, "{label}");
+        assert_eq!(
+            w.last_agent_text().await.as_deref(),
+            team_ai_hermes::DelegateCode::Unavailable.sentence(),
+            "{label}"
+        );
+        assert_eq!(
+            w.run_error_code(run).await.as_deref(),
+            Some("hermes_unavailable"),
+            "{label}"
+        );
+        let task = w.task(run).await;
+        assert_eq!(
+            task.marker.as_deref(),
+            Some("pending"),
+            "{label}: never `called`"
+        );
+        assert!(!task.called, "{label}");
+        assert_eq!(
+            w.hermes_ledger(run).await.len(),
+            0,
+            "{label}: no row, no count"
+        );
+        assert_eq!(write_tokens(&w.su, &w.t).await, (0, 0, 0), "{label}");
+        let audit = w.delegate_audit(run).await;
+        assert_eq!(audit[0]["code"], json!("unavailable"), "{label}");
+    }
+
+    // (e) the attestation is the **only** thing that differs from the delegation that works (x18): attested,
+    // with the origin, the very same request reaches Hermes and posts its picture
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, _routed) = w.worker(image_script(), &Setup::image());
     let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
     w.drain(&worker).await;
-    assert_eq!(
-        offered_kinds(&routed.model.requests()[0]),
-        Some(vec!["image".to_string()]),
-        "the offer is the constant and the declaration alone (A10: no origin is evidence of anything)"
-    );
-    assert_eq!(
-        w.fake.connections(),
-        0,
-        "a picture nobody can post is not worth a call to Hermes"
-    );
-    assert_eq!(routed.model.requests().len(), 1);
-    assert_eq!(
-        w.last_agent_text().await.as_deref(),
-        team_ai_hermes::DelegateCode::Unavailable.sentence()
-    );
-    assert_eq!(
-        w.run_error_code(run).await.as_deref(),
-        Some("hermes_unavailable")
-    );
-    let task = w.task(run).await;
-    assert_eq!(task.marker.as_deref(), Some("pending"), "never `called`");
-    assert!(!task.called);
-    assert_eq!(w.hermes_ledger(run).await.len(), 0, "no row, no count");
-    assert_eq!(write_tokens(&w.su, &w.t).await, (0, 0, 0));
-    let audit = w.delegate_audit(run).await;
-    assert_eq!(audit[0]["code"], json!("unavailable"));
+    assert_eq!(w.fake.connections(), 1, "attested, it is called");
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
 }
 
 /// S3 review I3: a web search never yields a picture. Its answer holds a `data:image/` address; the worker
@@ -3403,6 +3470,22 @@ async fn x23_a_search_answer_with_a_picture_address_uploads_nothing() {
     the_model_saw_only_a_count(&routed.model.requests());
     the_picture_is_in_no_table(&w).await;
     assert_eq!(w.delegate_audit(run).await[0]["picture_bytes"], json!(0));
+    // L1 (security review of #5372): the search's write-up is shown `pictures: 0` — never a 1 that the merge
+    // prompt's 「pictures가 1이면 그림은 서버가 따로 붙이니…」 would turn into 「그림을 만들었다」 with nothing
+    // attached (the cleaning counted the markdown picture the answer held; the search is not told so)
+    let requests = routed.model.requests();
+    assert_eq!(requests.len(), 2, "the decision and the write-up");
+    let merge_input: String = requests[1]
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        merge_input.contains("kind: web_search | pictures: 0"),
+        "{merge_input}"
+    );
+    assert!(!merge_input.contains("pictures: 1"), "{merge_input}");
 }
 
 /// A9 for a picture: an `image` delegation is counted by the same marker as a search, so the day's cap holds

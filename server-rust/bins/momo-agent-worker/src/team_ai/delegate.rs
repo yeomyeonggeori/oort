@@ -729,6 +729,12 @@ impl AgentWorker {
             // `image` needs the code constant (S4 turned it on) and a writer: it is never callable without
             && (kind != HermesKind::Image
                 || (team_ai_hermes::ATTACHMENT_WRITE_PATH_READY && writer.is_some()))
+            // …and the operator's oort-side attestation that Hermes delivers media strictly — the very one the
+            // hosted expression door opens on (security review M1 of #5372). Without it a `MEDIA:` line the
+            // model names could be turned into any file Hermes can read, on a volume every workspace shares;
+            // Hermes's own boot gate is the first lock, this is the second, and a worker that cannot see the
+            // first does not call on its word alone. Judged here, like the writer: not an advertisement switch
+            && (kind != HermesKind::Image || self.config.hosted_media_strict)
             // T14: the administrator's search switch and the operator's `0` close Hermes's search too,
             // also for a request that was already on its way when they were thrown
             && (kind != HermesKind::WebSearch

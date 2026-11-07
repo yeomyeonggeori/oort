@@ -1058,7 +1058,7 @@ Blocker 0 · High 0 · Medium 1 · Low 2 · Info 6, 대상 커밋 `732bae063`. �
 
 ### 첫 호출자 (2026-11-07, #5372 — ADR-0201 증보 v4.3)
 
-S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀 AI의 Hermes 위임 걸음(`bins/momo-agent-worker/src/team_ai/delegate.rs`가 `PictureWriter::write`를 한 번, `team_ai.rs`의 마무리 트랜잭션이 `send_answer_with_run_pictures_in_tx`로 그 run의 그림을 묶는다). 정적 가드(`tests/agent_picture_static_guards.rs`)는 「호출자 없음」에서 **누가 어느 이름을 부를 수 있는가의 허용표**로 바뀌었고, #5334가 자기 호출자를 더할 때 자기 행을 더한다. L3의 순서는 그대로 구현됐다(합치는 호출 뒤, 정지 확인, 쓰기, 마무리 트랜잭션). 위임 걸음의 임대는 업로드 마감(`WRITE_DEADLINE` 40초)을 더한 값으로 늘고(기본 230초), `send_answer_with_run_pictures_in_tx`는 묶기가 거절돼 그림 없이 나갔는지(`PostedAnswer.pictures_bound`)를 돌려준다. **넘어온 것 중 하지 않은 것**: M-1 (b)(줄일 수 없는 원본에서 세기)는 migration과 역할 SQL(`momo_worker`의 DELETE를 거둠)을 함께 바꾸는 일이라 후속 이슈로 남겼고(위 T2·남는 위험 2가 그대로 맞다), 지운 트리거 메시지·I-2는 남았고, I-3(워커 발급 실패 로그를 고정 낱말로)은 호출자가 생긴 이 칸이 닫았다. 자세한 것은 ADR-0201 증보 v4.3.
+S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀 AI의 Hermes 위임 걸음(`bins/momo-agent-worker/src/team_ai/delegate.rs`가 `PictureWriter::write`를 한 번, `team_ai.rs`의 마무리 트랜잭션이 `send_answer_with_run_pictures_in_tx`로 그 run의 그림을 묶는다). 정적 가드(`tests/agent_picture_static_guards.rs`)는 「호출자 없음」에서 **누가 어느 이름을 부를 수 있는가의 허용표**로 바뀌었고, #5334가 자기 호출자를 더할 때 자기 행을 더한다. L3의 순서는 그대로 구현됐다(합치는 호출 뒤, 정지 확인, 쓰기, 마무리 트랜잭션). 위임 걸음의 임대는 업로드 마감(`WRITE_DEADLINE` 40초)을 더한 값으로 늘고(기본 230초), `send_answer_with_run_pictures_in_tx`는 묶기가 거절돼 그림 없이 나갔는지(`PostedAnswer.pictures_bound`)를 돌려준다. **넘어온 것 중 하지 않은 것**: M-1 (b)(줄일 수 없는 원본에서 세기)는 migration과 역할 SQL(`momo_worker`의 DELETE를 거둠)을 함께 바꾸는 일이라 후속 이슈 **#5530**으로 남겼고(위 T2·남는 위험 2가 그대로 맞다), 지운 트리거 메시지는 planner가 「답하지 않기」로 정해(열린 확인 ⑧ 해소) run 척추 공통 **#5533**이 하고, I-2는 남았고, I-3(워커 발급 실패 로그를 고정 낱말로)은 호출자가 생긴 이 칸이 닫았다. 자세한 것은 ADR-0201 증보 v4.3.
 
 ### 바뀌지 않는 것
 
