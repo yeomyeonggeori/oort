@@ -1051,6 +1051,9 @@ async fn s5_no_figure_a_read_carries_is_a_persons() {
                 names,
                 [
                     "completionTokens",
+                    // ADR-0201 증보 v4 P7 (#5370): a count of times the helper handed work to Hermes — a
+                    // number about the run, not a person
+                    "delegations",
                     "estimated",
                     "promptTokens",
                     "webSearches"
