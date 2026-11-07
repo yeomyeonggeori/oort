@@ -338,7 +338,7 @@ describe('덮는 층은 알약 폭 전체의 띠다', () => {
     expect(width - edge(tray, 'marginLeft') - edge(tray, 'marginRight')).toBe(width - edge(pill, 'marginLeft') - edge(pill, 'marginRight'));
   });
 
-  it('그림과 ✕ 의 자리·크기는 그대로다 - 왼쪽부터 서고(칸 44×44, ✕ 보이는 28 + 눌림 44), 띠는 위로만 자라서 아래 끝은 그대로다', async () => {
+  it('그림은 왼쪽부터 서고 ✕ 는 띠의 오른쪽 끝이다(owner 목업) - 칸 44×44, ✕ 보이는 28 + 눌림 44, 띠는 위로만 자라서 아래 끝은 그대로다', async () => {
     const {store} = await loadedStore();
     mount(store);
     typeAndPause('ㅋㅋㅋ');
@@ -352,6 +352,8 @@ describe('덮는 층은 알약 폭 전체의 띠다', () => {
     }
     const mute = flat('composer-expression-suggest-mute');
     expect([mute.width, mute.height]).toEqual([28, 28]);
+    // ✕ 만 자기 왼쪽 여백으로 오른쪽 끝에 선다. 오른쪽 여백은 예전 값 그대로다(띠 안쪽 끝과의 틈).
+    expect([mute.marginLeft, mute.marginRight]).toEqual(['auto', space.xs]);
     expect(28 + 2 * Number(screen.getByTestId('composer-expression-suggest-mute').props.hitSlop)).toBe(TOUCH_TARGET);
     expect(28 + 2 * slopTo(28)).toBe(TOUCH_TARGET);
     // 위 안쪽 여백만 한 단 더 두껍다(덮은 한 줄 말풍선의 윗변이 띠 위로 비어져 나오지 않게). 옆·아래 여백과 알약과의 틈(`marginBottom`)은 그대로라서 아래 끝과 그림의 자리가 안 움직인다.

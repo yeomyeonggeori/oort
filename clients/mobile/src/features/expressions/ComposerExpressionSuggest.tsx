@@ -19,7 +19,7 @@ import {useExpressionMessages} from './useExpressionMessages';
 // 그대로 받는다(줄 안은 줄이 받는다).
 //
 // 폭: **덮는 층은 알약 폭 전체 - 거터 안쪽 끝에서 끝까지 - 의 한 덩어리 띠다**(#5492, 검증 7b M1). 줄이 그림 수만큼만 넓은 카드(약 140~190pt)였을 때는 덮인 마지막 말풍선의 조각이 카드 옆·위로 비어져 나와
-// 반쯤 잘린 말풍선처럼 읽혔다. 띠의 양쪽 바깥 여백이 알약과 같아(`marginHorizontal`, 호출한 쪽이 알약에 주는 값) 양끝이 알약의 양쪽 가장자리와 맞고, 그림과 ✕ 는 왼쪽부터 그대로 선다(자리·크기 그대로).
+// 반쯤 잘린 말풍선처럼 읽혔다. 띠의 양쪽 바깥 여백이 알약과 같아(`marginHorizontal`, 호출한 쪽이 알약에 주는 값) 양끝이 알약의 양쪽 가장자리와 맞고, 그림은 왼쪽부터 서고(자리·크기 그대로) ✕ 는 owner 목업대로 띠의 오른쪽 끝에 선다.
 // 위 안쪽 여백만 `TRAY_TOP_EXTRA` 더 두꺼워서 띠가 위로만 자란다: 아래 끝과 그림의 자리는 그대로이고, 덮인 한 줄 말풍선의 윗변이 띠 위로 1~2pt 호로 남던 것(5478 계측: 띠 (8,376)-(196,429), 윗변 ≈ 375pt)을 덮는다.
 //
 // 누르면 **고르기만** 한다(호출한 쪽이 입력창 위 미리 보기에 올린다): 저절로 보내지 않는다. 그림은 이모티콘 창의 칸과 같은 정지 그림이다(`grid`: 움직이는 GIF 도 줄에서는 멈춘 그림이다).
@@ -90,7 +90,7 @@ const buildStyles = (color: Palette) =>
   StyleSheet.create({
     // 도크 밖으로 뜨는 칸: 멘션 목록과 같은 앵커(`bottom: 100%`)다. 알약과의 틈은 아래 `marginBottom`. 바깥 칸은 눌림을 받지 않고(`box-none`) 안쪽 줄만 받는다.
     host: {position: WORD.absolute, left: 0, right: 0, bottom: '100%', zIndex: 1, marginBottom: space.sm},
-    // 폭을 가두지 않는다: `alignSelf`·`maxWidth`·`width` 가 없어서 바깥 칸(좌우 0)의 폭에서 양쪽 바깥 여백(JSX 의 `marginHorizontal`)을 뺀 만큼, 곧 알약의 폭 전체가 된다(#5492). 그림과 ✕ 는 왼쪽부터 선다.
+    // 폭을 가두지 않는다: `alignSelf`·`maxWidth`·`width` 가 없어서 바깥 칸(좌우 0)의 폭에서 양쪽 바깥 여백(JSX 의 `marginHorizontal`)을 뺀 만큼, 곧 알약의 폭 전체가 된다(#5492). 그림은 왼쪽부터, ✕ 는 오른쪽 끝(`mute` 의 `marginLeft`)이다.
     tray: {
       flexDirection: WORD.row,
       alignItems: WORD.center,
@@ -117,7 +117,8 @@ const buildStyles = (color: Palette) =>
       borderRadius: MUTE_SIZE / 2,
       alignItems: WORD.center,
       justifyContent: WORD.center,
-      marginHorizontal: space.xs,
+      marginLeft: WORD.auto,
+      marginRight: space.xs,
     },
     glyph: {width: CONV_ICON_SIZE.cross, height: CONV_ICON_SIZE.cross, tintColor: color.icon},
   });
