@@ -11,6 +11,7 @@
 //! | `the_block_still_says_what_it_exists_for` | a block that compares equal because it was emptied everywhere, or one that hands a role a verb the code does not use |
 //! | `the_api_role_is_never_handed_the_request_sentence` | `delegation_request` added to `momo_app`'s column list, or the table-level `SELECT` handed back to it (#5370, ADR-0201 증보 v4 I6) |
 //! | `the_migration_keeps_the_sentence_out_of_every_ended_row` | the request column dropped from `team_ai_task_ended_ck` (an ended row could keep the sentence) |
+//! | `the_block_locks_the_columns_there_are_instead_of_returning_before_the_new_one_exists` | an early `RETURN` that skips the lockdown while `delegation_request` is not there yet (schema 176, where a deploy runs the roles file first), or `momo_app`'s grant no longer the allowed list ∩ the columns that exist (#5370 security review M1; the live proof is `prod_role_conformance_pg`) |
 
 use std::path::PathBuf;
 
@@ -201,4 +202,48 @@ fn the_migration_keeps_the_sentence_out_of_every_ended_row() {
         ),
         "169's guarantees must survive the re-creation: {constraint}"
     );
+}
+
+/// Whitespace folded to single spaces, so a needle does not depend on how a statement is wrapped.
+fn squashed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// #5370 security review M1: a deploy runs the roles file BEFORE the migrations, so the first deploy that
+/// carries 177 runs it on schema 176, where the request column is not there yet and the `ALL TABLES` grant
+/// above the block has just handed the table to every runtime role. A block that returns early in that
+/// case (it did) leaves all of it standing until 177 lands. So the block has exactly **one** early return
+/// — the table itself is missing — and it comes before everything the block does; `momo_app`'s columns are
+/// the allowed list INTERSECTED with the columns the table has, which is what lets the grant be made at
+/// all when four of them do not exist yet. (The live proof — relay and notifier hold nothing on schema
+/// 176 after either roles file — is `prod_role_conformance_pg`; this one needs no database.)
+#[test]
+fn the_block_locks_the_columns_there_are_instead_of_returning_before_the_new_one_exists() {
+    for relative in [MIGRATION, DEV, RUNTIME] {
+        let (_, block) = block_of(relative, &read(relative));
+        assert_eq!(
+            block.matches("RETURN;").count(),
+            1,
+            "{relative}: the block may return early for a missing table only"
+        );
+        let missing_table = block
+            .find("to_regclass('public.team_ai_task') IS NULL")
+            .unwrap_or_else(|| panic!("{relative}: the missing-table test is gone"));
+        let only_return = block.find("RETURN;").unwrap();
+        let first_revoke = block
+            .find("REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC")
+            .unwrap_or_else(|| panic!("{relative}: the first REVOKE is gone"));
+        assert!(
+            missing_table < only_return && only_return < first_revoke,
+            "{relative}: the one early return must be the missing-table one, before any REVOKE or GRANT"
+        );
+        assert!(
+            squashed(&block).contains(
+                "FROM unnest(app_columns) AS x WHERE EXISTS (SELECT 1 FROM pg_attribute \
+                 WHERE attrelid = to_regclass('public.team_ai_task') \
+                 AND attname = x AND NOT attisdropped)"
+            ),
+            "{relative}: momo_app's column grant is no longer the allowed list ∩ the columns the table has"
+        );
+    }
 }

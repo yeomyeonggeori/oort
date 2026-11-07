@@ -493,8 +493,11 @@ END $$;
 -- clears the sentence); nobody deletes a row (an ended row is kept, its note and its sentence gone — a
 -- foreign-key cascade from the run or the workspace runs as the table's owner, so deleting a parent still
 -- clears its rows); relay, notifier and platform_admin do not touch it at all. Idempotent and order-proof
--- (a pass before the table, the new column or the roles exist finishes what it can, the pass after lands
--- the rest), and it fails loudly if the result is not what is written here.
+-- (a pass before the table or the roles exist finishes what it can; a pass before the delegation columns
+-- exist — a deploy runs the roles file BEFORE the migrations, so on schema 176 — still locks what is there
+-- the same way: momo_app's column grant is the list below INTERSECTED with the columns the table has, so
+-- no table-level SELECT or DELETE survives the ALL TABLES grant before it; the pass after the migration
+-- lands the rest), and it fails loudly if the result is not what is written here.
 DO $$
 DECLARE
   r text;
@@ -508,13 +511,6 @@ DECLARE
     'delegation_target'];
 BEGIN
   IF to_regclass('public.team_ai_task') IS NULL THEN
-    RETURN;
-  END IF;
-  -- (a separate statement: a cast of the name to regclass is evaluated even when the first test above
-  -- would have returned, and fails if the table is not there yet)
-  IF NOT EXISTS (SELECT 1 FROM pg_attribute
-                  WHERE attrelid = to_regclass('public.team_ai_task')
-                    AND attname = 'delegation_request' AND NOT attisdropped) THEN
     RETURN;
   END IF;
   REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC;
@@ -532,7 +528,10 @@ BEGIN
     IF r = 'momo_app' THEN
       EXECUTE format(
         'GRANT SELECT (%s) ON TABLE public.team_ai_task TO %I',
-        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(app_columns) AS x), r);
+        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(app_columns) AS x
+          WHERE EXISTS (SELECT 1 FROM pg_attribute
+                         WHERE attrelid = to_regclass('public.team_ai_task')
+                           AND attname = x AND NOT attisdropped)), r);
     END IF;
     FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
       IF has_table_privilege(r, 'public.team_ai_task', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
