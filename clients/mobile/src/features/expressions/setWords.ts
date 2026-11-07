@@ -44,4 +44,5 @@ export const SET_ID = {
   planEditInclude: (index: number) => joinId('expression-plan-edit-include', index),
   planEditName: (index: number) => joinId('expression-plan-edit-name', index),
   planEditScene: (index: number) => joinId('expression-plan-edit-scene', index),
+  inboxOpen: (key: string) => joinId('decision-open', key),
 };
