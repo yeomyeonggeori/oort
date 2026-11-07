@@ -227,6 +227,44 @@ export interface FeedItem {
    * 화면은 이 값을 읽기만 하고 다시 계산하지 않는다. 없음은 `inline`이 아니다(옛 서버).
    */
   decisionMode?: DecisionMode;
+  /**
+   * 워크스페이스 행동 승인의 레지스트리 id(`payload.action.id`), 서버 행이 실었을 때만. 행 문장(`predicate`)이 이 id로 만들어지는 것과
+   * 같은 값이고, `approvalOpensOnCard`가 닫힌 목록에서 찾는 열쇠다. 그 밖의 승인(`tool_call`·`work.spawn`)에는 없다.
+   */
+  workspaceActionId?: string;
+}
+
+/**
+ * 받은함이 일반 승인·거부 단추를 세우지 않고 **「열기」만** 세우는 행동 id의 닫힌 목록 (#5462, planner 2026-11-07).
+ *
+ * 둘 다 ADR-0218 §12의 이모티콘 세트 카드다. 계획 카드(`expression.set.plan`)의 「이대로 만들기」는 참조 그림의 썸네일·장수와 처음 한 번 고지를
+ * **본 채로** 누르는 동의이고(L2.5 결정 방식·보안 검수 R2-H1), 세트 카드(`expression.set.create`)는 등록할 칸을 **골라야** 결정된다. 둘 다 그 내용이
+ * 카드 안에 있고 받은함 줄에는 없으므로, 받은함에서 승인 한 번으로 확정되면 보지 않은 것이 본 것으로 기록된다. 그래서 이 행동의 결정은 그 대화의 그
+ * 카드에서만 한다.
+ *
+ * 목록은 일부러 **둘뿐**이다. 서버가 찍는 `decisionMode`는 받은함이 따르지 않는다(planner 2026-11-07): 서버가 `open`을 찍는 기존 승인(`work.spawn`의
+ * 호스트 고르개, `message.pin`, 아바타·이름 변경 …)의 받은함 모습은 예전 그대로다. 서버의 `open`을 받은함에서 따르는 일은 인박스 「승인」 칸(#4765)의
+ * 몫이다. 서버 값이 없거나 `inline`이어도 이 둘은 단추를 얻지 못한다. 아이디 두 개와 이 목록이 같은지는 시험이 상수(`EXPRESSION_SET_ACTION_ID`·
+ * `EXPRESSION_SET_PLAN_ACTION_ID`)로 못 박는다.
+ */
+export const INBOX_OPEN_ONLY_ACTION_IDS: ReadonlySet<string> = new Set([
+  "expression.set.plan",
+  "expression.set.create",
+]);
+
+/**
+ * 이 승인은 받은함에서 결정하지 않고 그 대화의 카드를 **열어서** 결정하는가: 행동 id가 위 닫힌 목록에 있으면 그렇다.
+ *
+ * **서버가 찍은 `decisionMode`는 보지 않는다**(planner 2026-11-07). 서버가 `open`을 찍어도 목록 밖 행동은 이전 그대로 받은함에서 결정하고, 서버가
+ * `inline`을 찍거나 값을 안 실어도 목록의 행동은 연다. 그래서 이 판정은 행동 id 하나만 읽는다.
+ */
+export function approvalOpensOnCard(
+  item: Pick<FeedItem, "workspaceActionId">
+): boolean {
+  return (
+    item.workspaceActionId !== undefined &&
+    INBOX_OPEN_ONLY_ACTION_IDS.has(item.workspaceActionId)
+  );
 }
 
 // ---- time --------------------------------------------------------------
@@ -380,6 +418,9 @@ export function approvalItem(
       : {}),
     ...(approval.decisionMode !== undefined
       ? { decisionMode: approval.decisionMode }
+      : {}),
+    ...(approval.workspaceActionId !== undefined
+      ? { workspaceActionId: approval.workspaceActionId }
       : {}),
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),

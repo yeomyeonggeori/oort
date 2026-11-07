@@ -574,14 +574,17 @@ pub async fn link_attachments_in_tx(
     for attachment_id in attachment_ids {
         let row = sqlx::query(
             "SELECT status, uploader_member_id, channel_id, message_id \
-               FROM attachment WHERE id = $1 FOR UPDATE",
+               FROM attachment WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
         )
         .bind(attachment_id)
+        .bind(workspace_id)
         .fetch_optional(&mut *conn)
         .await?;
-        // An id in another tenant is invisible under RLS and lands here as
-        // "not found" — the same answer as an id that never existed, so a
-        // sender cannot probe for attachments outside their workspace.
+        // An id in another tenant is "not found" — the same answer as an id that never existed,
+        // so a sender cannot probe for attachments outside their workspace. Two layers say so:
+        // RLS hides the row from the api's non-bypass role, and the `workspace_id` condition above
+        // does the same for a BYPASSRLS caller (the agent-worker's picture answer, ADR-0151 증보 8
+        // L1), which RLS does not bind.
         let Some(row) = row else {
             return Ok(Err(AttachmentLinkRejected::NotFound));
         };
@@ -603,9 +606,10 @@ pub async fn link_attachments_in_tx(
             return Ok(Err(AttachmentLinkRejected::AlreadyLinked));
         }
 
-        sqlx::query("UPDATE attachment SET message_id = $2 WHERE id = $1")
+        sqlx::query("UPDATE attachment SET message_id = $2 WHERE id = $1 AND workspace_id = $3")
             .bind(attachment_id)
             .bind(message_id)
+            .bind(workspace_id)
             .execute(&mut *conn)
             .await?;
         write_audit(
@@ -672,6 +676,51 @@ pub async fn message_attachments_in_tx(
                     row.try_get("media_height")?,
                     row.try_get("media_has_poster")?,
                 ),
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// [`message_attachments_in_tx`] **without** the video summary: the same rows (complete, on a live
+/// message, oldest first) and the same four keys, read from `attachment` and `message` alone.
+///
+/// For the agent-worker's answer (ADR-0151 증보 8 W9, #5371). The worker's database role holds nothing on
+/// `attachment_media` (the `attachment-media-lockdown` keeps every tenant's video frames from the BYPASSRLS
+/// roles), and a statement that names the table fails for a role without the privilege **whether or not a row
+/// matches**, so the worker cannot run the projection above. A picture the worker wrote is never a video: the
+/// route stores a re-encoded png or jpeg, and an `attachment_media` row is only ever written by `PUT …/media`
+/// for the uploader's own video. So no `media` summary is lost, and the key stays absent exactly as it is for
+/// every photo.
+pub async fn message_attachments_without_media_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+) -> Result<Vec<MessageAttachment>, DbError> {
+    // The caller is the agent-worker's role, which skips RLS (BYPASSRLS): the workspace is asked for
+    // in the statement itself, like `link_attachments_in_tx` does for the same reason (review L-2). A
+    // message id of another tenant reads nothing here.
+    let rows = sqlx::query(
+        "SELECT a.id, a.name, a.mime, a.size_bytes \
+           FROM attachment a \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.workspace_id = $2 AND m.workspace_id = $2 \
+            AND a.message_id = $1 AND a.status = 'complete' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
+          ORDER BY a.created_at ASC, a.id ASC",
+    )
+    .bind(message_id)
+    .bind(workspace_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MessageAttachment {
+                id: row.try_get::<Uuid, _>("id")?.to_string(),
+                name: row.try_get("name")?,
+                mime: row.try_get("mime")?,
+                size_bytes: row.try_get("size_bytes")?,
+                media: None,
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()

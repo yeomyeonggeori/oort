@@ -32,6 +32,14 @@
 		Referrer-Policy "no-referrer"
 	}
 
+	# ADR-0151 증보 8 (#5371): the agent-worker's picture write address belongs only to the private
+	# worker -> api hop (api.railway.internal / api:8080). Its one legitimate caller never passes this
+	# edge, so the public edge answers 403 and the route cannot be reached from outside. Keep this
+	# matcher before the general /v1 proxy.
+	handle /v1/agent-media/* {
+		respond 403
+	}
+
 	# ADR-0002 / #1300: same exclusive deny as the public template, before
 	# the general /v1 proxy. A missing matcher here would let a guessed
 	# CENT_PROXY_SECRET reach the API from this edge.

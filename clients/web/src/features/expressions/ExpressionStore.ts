@@ -1,6 +1,7 @@
 import { recordExpressionUse, restoreExpressionUsage } from "@momo/core/features/expressions/usage";
 import { restoreExpressionFavorites, toggleExpressionFavorite } from "@momo/core/features/expressions/favorites";
 import { tokenizeExpressions } from "@momo/core/features/expressions/message";
+import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
 import { applyExpressionList, emptyExpressionCache } from "@momo/core/features/expressions/cache";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { photoModelRequest, readPhotoDraftResult, readPhotoModel, type PhotoDraftResult, type PhotoModel } from "@momo/core/features/expressions/photo";
@@ -127,5 +128,16 @@ export class ExpressionStore {
       if (generation !== this.generation) throw new Error("evicted expression");
       return src;
     }));
+  }
+  /**
+   * 반응 칩이 그리는 움직이는 그림(#5504, owner 「계속 움직임」): `image(path)` 와 **같은 그림**에서 GIF 의 반복 횟수만 무한으로 바꾼 데이터 주소다(코어 `loopForeverDataUrl`).
+   * 서버가 주는 그림·해시는 그대로이고 이 주소는 화면에만 쓴다. 같은 그림을 쓰는 모든 칩이 이 약속 하나를 나눠 쓰므로(한 주소) 엔진이 디코드를 한 번만 하고 장면도 함께 간다.
+   * 원본과 같은 예산 LRU 에 들어가므로 비우기(`clearImages`)·밀려나기가 똑같이 적용된다.
+   */
+  loopedImage(path: string): Promise<string> {
+    const key = `${path}#loop`;
+    const hit = this.images.get(key);
+    if (hit) return hit;
+    return this.images.add(key, this.image(path).then(loopForeverDataUrl));
   }
 }

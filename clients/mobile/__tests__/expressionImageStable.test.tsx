@@ -480,3 +480,107 @@ describe('쓸 수 없는 표현', () => {
     expect(screen.getByText(':ghost_one:')).toBeTruthy();
   });
 });
+
+// =============================================================================
+// #5504 — 반응 칩의 GIF 는 4번 돌고 멈추지 않고 계속 움직인다(owner 2026-11-07). 동작 줄이기는 멈춘 첫 장면, 화면 밖은 정지.
+//
+// 서버 GIF 는 NETSCAPE 반복 횟수가 3(= 총 4번)이라 iOS(`RCTUIImageViewAnimated`)도 4번째 재생 끝에서 멈춘다. 타이머를 빼는 것만으로는 부족해서 반응 칩은 **반복 횟수만 무한으로 바꾼 파일**을
+// 그린다(`store.image(…, loop)`). 여기서는 그 파일의 바이트를 읽는다(NETSCAPE 횟수 두 바이트가 0 인가, 나머지는 서버 그대로인가). 시뮬레이터 없이 jest 로만 잰다 - 실제 재생은 인계의 측정 메모.
+// =============================================================================
+describe('반응 칩의 GIF (#5504)', () => {
+  /** 파일에 쓰인 GIF 바이트에서 NETSCAPE 반복 횟수(두 바이트). 확장이 없으면 null. */
+  const loopCountOf = (bytes: Uint8Array): number | null => {
+    const text = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
+    const at = text.indexOf('NETSCAPE2.0');
+    return at < 0 ? null : bytes[at + 11 + 2] + bytes[at + 11 + 3] * 256;
+  };
+  const gifWrites = (files: {write: jest.Mock}) =>
+    files.write.mock.calls.filter(([name]) => String(name).endsWith('.gif'));
+
+  it('4번 돌 시간이 지나도 정지 thumb 로 바뀌지 않고, 반복 횟수만 0(무한)인 파일을 그린다', async () => {
+    const {store, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    const top = () => screen.getByTestId(`expression-image-${moving.name}-reaction`);
+    act(() => {
+      fireEvent(top(), 'load');
+    });
+    await flush();
+    expect(top().props.source.uri).toMatch(/gif$/);
+    // 같은 시간에 큰 그림은 정지 thumb 로 바뀐다(위 시험) - 반응 칩은 몇 번을 더 지나도 움직이는 그림 그대로다.
+    for (let round = 0; round < 3; round += 1) {
+      await act(async () => {
+        jest.advanceTimersByTime(moving.media!.small.durationMs * 4 + 1000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(top().props.source.uri).toMatch(/gif$/);
+    }
+    expect(screen.queryByTestId(`expression-image-${moving.name}-reaction-prev`)).toBeNull();
+    // 쓰인 파일은 서버가 준 바이트에서 반복 횟수만 달라졌다: 서버 그림은 3, 반응 칩의 파일은 0.
+    const written = gifWrites(files);
+    expect(written).toHaveLength(1);
+    const served = Uint8Array.from(atob(gif.bodyBase64), char => char.charCodeAt(0));
+    expect(loopCountOf(served)).toBe(3);
+    const drawn = written[0][1] as Uint8Array;
+    expect(loopCountOf(drawn)).toBe(0);
+    expect(drawn.length).toBe(served.length);
+    expect(Array.from(drawn).filter((byte, index) => byte !== served[index])).toHaveLength(1);
+  });
+
+  it('메시지 속 그림(글 사이·가운데)은 서버가 준 파일 그대로라 4번 규칙을 지킨다', async () => {
+    const {store, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(
+      store,
+      <>
+        <ExpressionImage expression={moving} size="inline" visible />
+        <ExpressionImage expression={moving} size="medium" visible />
+      </>,
+    );
+    for (let step = 0; step < 4; step += 1) await flush();
+    const written = gifWrites(files);
+    expect(written).toHaveLength(1); // 같은 small 한 장을 둘이 나눠 쓴다
+    expect(loopCountOf(written[0][1] as Uint8Array)).toBe(3);
+  });
+
+  it('같은 표현의 반응 칩 여럿은 그림을 한 번만 받고 파일을 한 번만 쓰고 한 파일을 나눠 쓴다', async () => {
+    const {store, request, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(
+      store,
+      <>
+        {[0, 1, 2, 3, 4, 5].map(index => (
+          <ExpressionImage key={index} expression={moving} size="reaction" visible />
+        ))}
+      </>,
+    );
+    for (let step = 0; step < 4; step += 1) await flush();
+    const uris = screen.getAllByTestId(`expression-image-${moving.name}-reaction`).map(node => node.props.source.uri);
+    expect(uris).toHaveLength(6);
+    expect(new Set(uris).size).toBe(1);
+    expect(imageCalls(request).filter(([input]) => String(input.path).includes('size=small'))).toHaveLength(1);
+    expect(gifWrites(files)).toHaveLength(1);
+  });
+
+  it('동작 줄이기에서는 멈춘 첫 장면(thumb)이고 움직이는 그림을 받지도 않는다', async () => {
+    release?.();
+    release = await pinReduceMotion(true);
+    const {store, request} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    expect(screen.getByTestId(`expression-image-${moving.name}-reaction`).props.source.uri).toMatch(/png$/);
+    expect(imageCalls(request).filter(([input]) => String(input.path).includes('size=small'))).toHaveLength(0);
+  });
+
+  it('화면 밖(visible 거짓)이거나 앱이 뒤에 있으면 정지 thumb 다', async () => {
+    const {store} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible={false} />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    expect(screen.getByTestId(`expression-image-${moving.name}-reaction`).props.source.uri).toMatch(/png$/);
+  });
+});

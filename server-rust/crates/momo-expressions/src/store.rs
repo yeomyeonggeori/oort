@@ -171,10 +171,10 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     if !safe {
         return Err(Error::Role);
     }
-    // Expired drafts and expired held assemblies (ADR-0218 G3.6) are found together: one sweep. A held
+    // Expired drafts, expired held assemblies (ADR-0218 G3.6) and due staging sets (§12 L8-3) are found together: one sweep. A held
     // assembly is due when its hour is up whether it is still `ready` or a reclaim already retired it
     // (`expired`): either way its header holds the agent's prompt, and the sweep deletes it.
-    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT workspace_id FROM (SELECT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() UNION SELECT workspace_id FROM expression_assembly WHERE state IN ('ready','expired') AND expires_at<=clock_timestamp()) due LIMIT 100")
+    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT workspace_id FROM (SELECT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() UNION SELECT workspace_id FROM expression_assembly WHERE state IN ('ready','expired') AND expires_at<=clock_timestamp() UNION SELECT workspace_id FROM expression_set WHERE state='staging' AND expires_at<=clock_timestamp()) due LIMIT 100")
         .fetch_all(read_pool).await?;
     let mut bytes = 0;
     for ws in workspaces {
@@ -209,7 +209,9 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).execute(&mut *conn).await?;
     // Held assemblies (G3.6) follow the same hour, but their header goes with the bytes (it holds the
     // agent's prompt; a draft's header is a record). See `assembly::sweep_in_tx`.
-    Ok(n + crate::assembly::sweep_in_tx(conn, ws).await?)
+    let held = crate::assembly::sweep_in_tx(conn, ws).await?;
+    // Staging sets (ADR-0218 §12 L8-3) follow their own two hours: bytes and words back, head `expired`.
+    Ok(n + held + crate::set::sweep_in_tx(conn, ws).await?)
 }
 
 pub(crate) async fn put_images(

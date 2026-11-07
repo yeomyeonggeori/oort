@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "7a02501c3ba56f65d09848f654fd39c6beb93c23",
+  "baselineHead": "0b9b9b71c9416ffdafd48f4d42db5e9c658bbc43",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -154,7 +154,7 @@
     "clients/mobile/src/features/conversation/useLongPress.ts": 6,
     "clients/mobile/src/features/conversation/usePendingApprovals.ts": 4,
     "clients/mobile/src/features/conversation/usePersonalAgentCall.ts": 10,
-    "clients/mobile/src/features/conversation/useTimeline.ts": 23,
+    "clients/mobile/src/features/conversation/useTimeline.ts": 22,
     "clients/mobile/src/features/conversation/useTypingSender.ts": 3,
     "clients/mobile/src/features/decisionStage/DecisionStage.tsx": 64,
     "clients/mobile/src/features/decisionStage/DecisionStageScope.tsx": 4,
@@ -620,7 +620,7 @@
     "clients/web/src/features/inbox/mailboxTab.ts": 10,
     "clients/web/src/features/inbox/useInbox.ts": 14,
     "clients/web/src/features/inbox/useMailbox.ts": 19,
-    "clients/web/src/features/inbox/useNeedsMe.ts": 3,
+    "clients/web/src/features/inbox/useNeedsMe.ts": 2,
     "clients/web/src/features/memory/ChannelMemoryDialog.tsx": 10,
     "clients/web/src/features/memory/DecisionTimeline.tsx": 24,
     "clients/web/src/features/memory/EvidenceLinks.tsx": 8,

@@ -3038,6 +3038,12 @@ export const catalog: MessageCatalog = {
       "value": "즐겨찾기"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "자주·최근"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -3062,6 +3068,218 @@ export const catalog: MessageCatalog = {
       "value": "팀 보관함"
     }
   ],
+  "expressions.plan.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "expressions.plan.closed": [
+    {
+      "type": 0,
+      "value": "이 계획은 닫혔어요"
+    }
+  ],
+  "expressions.plan.concept": [
+    {
+      "type": 0,
+      "value": "컨셉"
+    }
+  ],
+  "expressions.plan.confirm": [
+    {
+      "type": 0,
+      "value": "이대로 만들기"
+    }
+  ],
+  "expressions.plan.confirmed": [
+    {
+      "type": 0,
+      "value": "만들기를 시작했어요"
+    }
+  ],
+  "expressions.plan.declare": [
+    {
+      "type": 0,
+      "value": "사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요."
+    }
+  ],
+  "expressions.plan.editBack": [
+    {
+      "type": 0,
+      "value": "그만두기"
+    }
+  ],
+  "expressions.plan.editInclude": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": " 넣기"
+    }
+  ],
+  "expressions.plan.editName": [
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번 표시 이름"
+    }
+  ],
+  "expressions.plan.editRemoveReference": [
+    {
+      "type": 0,
+      "value": "참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 빼기"
+    }
+  ],
+  "expressions.plan.editScene": [
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번 장면"
+    }
+  ],
+  "expressions.plan.editSubmit": [
+    {
+      "type": 0,
+      "value": "고친 대로 새로 계획하기"
+    }
+  ],
+  "expressions.plan.gif": [
+    {
+      "type": 0,
+      "value": "바탕: "
+    },
+    {
+      "type": 1,
+      "value": "base"
+    },
+    {
+      "type": 0,
+      "value": ", 움직임: "
+    },
+    {
+      "type": 1,
+      "value": "motion"
+    }
+  ],
+  "expressions.plan.heading": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 계획"
+    }
+  ],
+  "expressions.plan.kept": [
+    {
+      "type": 0,
+      "value": "Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요"
+    }
+  ],
+  "expressions.plan.motionBounce": [
+    {
+      "type": 0,
+      "value": "통통"
+    }
+  ],
+  "expressions.plan.motionPulse": [
+    {
+      "type": 0,
+      "value": "두근두근"
+    }
+  ],
+  "expressions.plan.motionSparkle": [
+    {
+      "type": 0,
+      "value": "반짝"
+    }
+  ],
+  "expressions.plan.motionWobble": [
+    {
+      "type": 0,
+      "value": "흔들흔들"
+    }
+  ],
+  "expressions.plan.notice": [
+    {
+      "type": 0,
+      "value": "첨부한 그림이 Hermes의 그림 모델로 전송돼요"
+    }
+  ],
+  "expressions.plan.pictures": [
+    {
+      "type": 0,
+      "value": "만들 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.plan.referenceAlt": [
+    {
+      "type": 0,
+      "value": "참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.references": [
+    {
+      "type": 0,
+      "value": "보낼 참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.plan.revise": [
+    {
+      "type": 0,
+      "value": "장면 고치기"
+    }
+  ],
+  "expressions.plan.scenes": [
+    {
+      "type": 0,
+      "value": "장면"
+    }
+  ],
   "expressions.preview.cancel": [
     {
       "type": 1,
@@ -3082,6 +3300,265 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "보낼 이모티콘"
+    }
+  ],
+  "expressions.set.agentText": [
+    {
+      "type": 0,
+      "value": "에이전트가 쓴 설명: "
+    },
+    {
+      "type": 1,
+      "value": "prompt"
+    }
+  ],
+  "expressions.set.badgeGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.set.cellGray": [
+    {
+      "type": 0,
+      "value": "선택할 수 없는 칸, "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.set.cellReady": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.set.decline": [
+    {
+      "type": 0,
+      "value": "안 할래요"
+    }
+  ],
+  "expressions.set.errorGeneric": [
+    {
+      "type": 0,
+      "value": "결정하지 못했어요. 권한과 연결을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "expressions.set.errorQuota": [
+    {
+      "type": 0,
+      "value": "보관함이 가득 차서 저장하지 못했어요."
+    }
+  ],
+  "expressions.set.errorStale": [
+    {
+      "type": 0,
+      "value": "그림이 바뀌었어요. 카드를 새로 불러온 뒤 다시 골라 주세요."
+    }
+  ],
+  "expressions.set.errorTaken": [
+    {
+      "type": 0,
+      "value": "고른 이름이 모두 이미 쓰이고 있어요. 다른 그림을 골라 주세요."
+    }
+  ],
+  "expressions.set.faceOnly": [
+    {
+      "type": 0,
+      "value": "얼굴 당사자만 승인할 수 있어요."
+    }
+  ],
+  "expressions.set.grayBaseMissing": [
+    {
+      "type": 0,
+      "value": "바탕이 되는 그림이 없어서 움직임을 입히지 못했어요"
+    }
+  ],
+  "expressions.set.grayFailed": [
+    {
+      "type": 0,
+      "value": "이 장면은 그림을 만들지 못했어요"
+    }
+  ],
+  "expressions.set.grayNotMade": [
+    {
+      "type": 0,
+      "value": "시간이 모자라서 이 장면은 만들지 못했어요"
+    }
+  ],
+  "expressions.set.grayRefused": [
+    {
+      "type": 0,
+      "value": "이 장면은 그림 모델이 만들 수 없다고 했어요"
+    }
+  ],
+  "expressions.set.gridLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 그림 목록"
+    }
+  ],
+  "expressions.set.offline": [
+    {
+      "type": 0,
+      "value": "연결되면 다시 시도해 주세요."
+    }
+  ],
+  "expressions.set.referenceCount": [
+    {
+      "type": 0,
+      "value": "참고한 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.set.register": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 등록"
+    }
+  ],
+  "expressions.set.registering": [
+    {
+      "type": 0,
+      "value": "등록 중"
+    }
+  ],
+  "expressions.set.resultSaved": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 팀 보관함에 저장했어요"
+    }
+  ],
+  "expressions.set.resultSavedSkipped": [
+    {
+      "type": 2,
+      "value": "saved",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 저장하고 "
+    },
+    {
+      "type": 2,
+      "value": "skipped",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개는 건너뛰었어요"
+    }
+  ],
+  "expressions.set.rights": [
+    {
+      "type": 0,
+      "value": "저장해도 되는 그림인지 확인해 주세요. 고른 그림만 등록돼요."
+    }
+  ],
+  "expressions.set.selectAll": [
+    {
+      "type": 0,
+      "value": "전체 선택"
+    }
+  ],
+  "expressions.set.selectNone": [
+    {
+      "type": 0,
+      "value": "전체 해제"
+    }
+  ],
+  "expressions.set.settledDeclined": [
+    {
+      "type": 0,
+      "value": "저장하지 않았어요"
+    }
+  ],
+  "expressions.set.settledDone": [
+    {
+      "type": 0,
+      "value": "처리가 끝난 요청이에요"
+    }
+  ],
+  "expressions.set.settledExpired": [
+    {
+      "type": 0,
+      "value": "승인을 기다리다 만료됐어요"
+    }
+  ],
+  "expressions.set.summaryGray": [
+    {
+      "type": 0,
+      "value": "만들지 못한 장면 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "expressions.set.summaryReady": [
+    {
+      "type": 0,
+      "value": "그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "expressions.set.unreadable": [
+    {
+      "type": 0,
+      "value": "그림 세트를 읽지 못했어요. 도우미에게 다시 만들어 달라고 해 주세요."
     }
   ],
   "expressions.sheet.a11y": [
@@ -3278,6 +3755,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기에 올리기"
+    }
+  ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "열기"
     }
   ],
   "mobile.attachmentSave.failed": [
