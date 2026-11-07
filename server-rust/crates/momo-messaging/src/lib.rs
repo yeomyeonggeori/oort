@@ -143,12 +143,13 @@ pub use attachment::{
     message_attachments_without_media_in_tx, settle_upload_in_tx, validate_attachment_id_list,
     validate_attachment_mime, validate_attachment_name, Attachment, AttachmentLinkRejected,
     AttachmentMedia, AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
-    MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MEDIA_KIND_VIDEO,
+    MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MEDIA_KIND_IMAGE, MEDIA_KIND_VIDEO,
 };
 pub use attachment_media::{
-    load_poster_in_tx, may_hold_media, require_video_mime, set_attachment_media_in_tx,
-    validate_media_declaration, validate_poster, video_magic_matches, MediaDeclaration,
-    MediaRejected, Poster, PosterImage, VIDEO_PREFIX_BYTES,
+    image_magic_matches, load_poster_in_tx, may_hold_media, require_image_mime, require_video_mime,
+    set_attachment_media_in_tx, validate_image_declaration, validate_media_declaration,
+    validate_poster, video_magic_matches, ImageDeclaration, MediaDeclaration, MediaRejected,
+    MediaWrite, Poster, PosterImage, IMAGE_MIMES, MEDIA_PREFIX_BYTES, VIDEO_PREFIX_BYTES,
 };
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,

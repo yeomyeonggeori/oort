@@ -30,6 +30,7 @@ import {
   type HttpResponse,
 } from "./http";
 import { absoluteApiBase, apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
+import { attachmentMediaFromWire } from "./attachmentMedia";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
@@ -3416,20 +3417,36 @@ export function sendThreadReply(
 // `clients/web/src/features/attachments/uploadTransport.ts`에 있다.
 
 /**
- * openapi `AttachmentMedia` — 영상 첨부의 요약 (ADR-0151 증보 5 D5, #4673).
+ * openapi `VideoAttachmentMedia` — 영상 첨부의 요약 (ADR-0151 증보 5 D5, #4673).
  *
  * **보내는 기기가 잰 선언**이다. 서버는 영상을 열어 보지 않고 범위만 본다(`durationMs` 1~86,400,000 정수,
  * `width`·`height` 1~16,384 정수). 그래서 이 값으로 칸을 그리는 쪽이 한 번 더 거르고 칸을 가둔다
  * (`attachmentMedia.ts` 의 `attachmentMediaFromWire`, `videoCardSize`). 포스터의 바이트는 어느 투영에도 실리지 않는다 —
  * `hasPoster` 가 `GET …/attachments/{id}/poster` 에 줄 것이 있는지 알릴 뿐이다.
  */
-export interface AttachmentMedia {
+export interface VideoMedia {
   kind: "video";
   durationMs: number;
   width: number;
   height: number;
   hasPoster: boolean;
 }
+
+/**
+ * openapi `ImageAttachmentMedia` — 사진·GIF 첨부의 가로세로 (ADR-0151 증보 9, #5469).
+ *
+ * 보내는 기기가 **표시되는 크기**(EXIF 방향을 적용한 값)로 잰 선언이고 서버는 범위(1~16,384 정수)와 파일의 종류·매직만 본다.
+ * 길이도 포스터도 없다. 받는 쪽은 이 값을 **그림이 오기 전까지의 칸**으로만 쓰고(`attachmentImageSizeOf`), 그림이 디코드되면 실제
+ * 크기가 이긴다.
+ */
+export interface ImageMedia {
+  kind: "image";
+  width: number;
+  height: number;
+}
+
+/** openapi `AttachmentMedia` — 영상 또는 정지 그림의 요약. `kind` 로 가른다. */
+export type AttachmentMedia = VideoMedia | ImageMedia;
 
 /** openapi `MessageAttachment` — 메시지에 묶인 첨부 한 건. */
 export interface MessageAttachment {
@@ -3438,8 +3455,9 @@ export interface MessageAttachment {
   mime: string;
   sizeBytes: number;
   /**
-   * 영상 요약. 보내는 기기가 길이·치수를 재서 보냈을 때만 있다(사진·문서와 재지 않는 클라의 영상에는 **키가 없다**).
-   * 없다는 것은 「영상이 아님」이 아니라 「요약을 모름」일 수 있으니, 영상인지는 `mime` 으로 가른다(`isVideoAttachment`).
+   * 미디어 요약. 보내는 기기가 길이·치수(영상) 또는 치수(사진·GIF)를 재서 보냈을 때만 있다(문서와 재지 않는 클라의 파일에는 **키가 없다**).
+   * 없다는 것은 「영상·사진이 아님」이 아니라 「요약을 모름」일 수 있으니, 종류는 `mime` 으로 가른다(`isVideoAttachment`).
+   * 영상 요약은 `attachmentMediaOf`, 사진 요약은 `attachmentImageSizeOf` 로 읽는다 — 어긋난 요약은 거기서 버려진다.
    */
   media?: AttachmentMedia;
 }
@@ -3540,6 +3558,37 @@ export async function completeAttachmentUpload(
     status: status as AttachmentRow["status"],
     createdAtMs: num(source, "createdAtMs") ?? 0,
   };
+}
+
+/** openapi `SetAttachmentMediaRequest` 의 사진 모양 — 종류와 가로세로 둘뿐이다(길이·포스터는 모르는 키다). */
+export interface SetImageMediaBody {
+  kind: "image";
+  width: number;
+  height: number;
+}
+
+/**
+ * 올린 사진·GIF 의 가로세로를 서버에 선언한다 (`PUT …/attachments/{id}/media`, ADR-0151 증보 9).
+ *
+ * **보내기 전에, 완료(`completeAttachmentUpload`) 뒤에** 부른다: 서버는 업로더 본인의 `complete` 이고 아직 메시지에 안 묶인
+ * 첨부에만 쓴다(그 밖은 같은 404). 이 호출은 **덤**이다 — 실패해도 보내기는 진행하고(호출처가 잡는다) 요약 없이 간다.
+ * 응답은 서버가 저장한 요약이고, 어긋난 모양이면 `WireShapeError` 다.
+ */
+export async function setAttachmentMedia(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string,
+  body: SetImageMediaBody
+): Promise<AttachmentMedia> {
+  const source = responseRecord(
+    await request<unknown>(
+      `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(attachmentId)}/media`,
+      { method: "PUT", body: JSON.stringify(body) }
+    )
+  );
+  const media = attachmentMediaFromWire(source);
+  if (media === undefined) throw new WireShapeError();
+  return media;
 }
 
 /**

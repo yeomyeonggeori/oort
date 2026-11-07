@@ -44,11 +44,11 @@
 // 판정은 여전히 서버의 것이고, 이쪽은 그 판정을 앞당겨 말할 뿐이다.
 // =============================================================================
 
-import type { AttachmentMedia, MessageAttachment } from "../../lib/api";
+import type { AttachmentMedia, ImageMedia, MessageAttachment, VideoMedia } from "../../lib/api";
 import { attachmentMediaFromWire } from "../../lib/attachmentMedia";
 import type { ConnectionCause } from "../connection/model";
 
-export type { AttachmentMedia, MessageAttachment };
+export type { AttachmentMedia, ImageMedia, MessageAttachment, VideoMedia };
 
 /** 서버가 받는 최대 크기 (`momo-messaging::attachment::MAX_ATTACHMENT_BYTES`). */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
@@ -749,13 +749,29 @@ const IN_APP_PLAYABLE_VIDEO_MIMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 이 첨부의 영상 요약. 와이어의 값은 REST 페이지에서 **다시 걸러지지 않으므로**(응답이 그대로 통과한다) 읽는 자리에서
- * 같은 판정(`attachmentMediaFromWire`)을 한 번 더 한다. 없거나 어긋나면 `null`.
+ * 이 첨부의 **영상** 요약. 와이어의 값은 REST 페이지에서 **다시 걸러지지 않으므로**(응답이 그대로 통과한다) 읽는 자리에서
+ * 같은 판정(`attachmentMediaFromWire`)을 한 번 더 한다. 없거나 어긋나거나 **사진 요약이면** `null`(영상 카드는 길이·포스터를 그리는
+ * 쪽이라 사진 요약을 영상으로 읽지 않는다 — 사진은 `attachmentImageSizeOf`).
  */
 export function attachmentMediaOf(
   attachment: Pick<MessageAttachment, "media"> | null | undefined,
-): AttachmentMedia | null {
-  return attachmentMediaFromWire(attachment?.media) ?? null;
+): VideoMedia | null {
+  const media = attachmentMediaFromWire(attachment?.media);
+  return media?.kind === "video" ? media : null;
+}
+
+/**
+ * 이 첨부의 **사진·GIF 가로세로**(ADR-0151 증보 9) — 그림이 오기 전까지의 칸 크기다. 요약이 사진이고(범위 1~16,384 정수를 다시 막은
+ * 값) **첨부의 선언 종류가 이미지일 때만** 믿는다: 영상이나 문서에 붙은 사진 요약은 서버가 만들 수 없는 모양이라 버린다. 없거나
+ * 어긋나면 `null` — 호출한 쪽은 지금처럼 기기 기억(옛 메시지·옛 판이 보낸 사진)을 쓴다.
+ */
+export function attachmentImageSizeOf(
+  attachment: Pick<MessageAttachment, "media" | "mime"> | null | undefined,
+): { width: number; height: number } | null {
+  if (attachment === null || attachment === undefined) return null;
+  if (!isImageMime(typeof attachment.mime === "string" ? attachment.mime : "")) return null;
+  const media = attachmentMediaFromWire(attachment.media);
+  return media?.kind === "image" ? { width: media.width, height: media.height } : null;
 }
 
 /** 영상 첨부인가: 선언 타입이 `video/*` 이다. 요약이 없어도(재지 않는 클라가 올린 영상) 영상이다. */
@@ -790,7 +806,7 @@ const VIDEO_CARD_MAX_ASPECT = 16 / 9;
  * 영상은 16:9 자리다. 카드가 포스터보다 먼저 서므로 포스터가 도착해도 행이 자라지 않는다.
  */
 export function videoCardSize(
-  media: AttachmentMedia | null,
+  media: VideoMedia | null,
   max: { width: number; height: number },
 ): { width: number; height: number } {
   const raw = media === null ? VIDEO_CARD_MAX_ASPECT : media.width / media.height;

@@ -6,12 +6,14 @@ import {
   completeUpload as completeDraftUpload,
   draftFor,
   failUpload,
+  INLINE_PREVIEW_MAX_BYTES,
   progressUpload,
   uploadIssueCopy,
   uploadIssueNext,
   verifyUpload,
   type AttachmentDraft,
 } from '@momo/core/features/attachments/model';
+import * as declareModule from '@momo/core/features/attachments/declareImageSize';
 import {ApiError} from '@momo/core/lib/api';
 import * as api from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
@@ -22,11 +24,12 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Linking, StyleSheet, View} from 'react-native';
+import {AccessibilityInfo, Image, Linking, StyleSheet, View} from 'react-native';
 
 import {
   ATTACHMENT_TRAY_MAX_HEIGHT,
@@ -40,12 +43,18 @@ import {Composer} from '../src/features/conversation/Composer';
 import {
   addPickedFiles,
   attachmentSurfaceKey,
+  clearAllAttachmentDrafts,
   resetAttachmentDraftsForTest,
+  takeSent,
+  useAttachmentSurface,
 } from '../src/features/attachments/draftStore';
+import * as imageSizeModule from '../src/features/attachments/imageSize';
+import {measurePickedImage} from '../src/features/attachments/imageSize';
 import {
   pickCamera,
   pickDocument,
   pickPhoto,
+  type PickedAttachmentFile,
 } from '../src/features/attachments/picker';
 import {putAttachmentBytes} from '../src/features/attachments/uploadTransport';
 import * as uploadTransport from '../src/features/attachments/uploadTransport';
@@ -100,6 +109,9 @@ const fileSystem = jest.requireMock('expo-file-system') as FileSystemMock;
 
 const createUpload = jest.spyOn(api, 'createAttachmentUpload');
 const completeUpload = jest.spyOn(api, 'completeAttachmentUpload');
+// 올린 사진·GIF 는 완료 뒤 가로세로를 선언한다(ADR-0151 증보 9, #5469). 이 파일의 사진 흐름이 서버로 진짜 요청을 보내지 않게 늘 가짜로 받고,
+// 선언 자체를 보는 시험은 맨 아래 묶음이 이 가짜를 갈아 끼운다.
+const declareMedia = jest.spyOn(api, 'setAttachmentMedia');
 
 function completedRow(id: string) {
   return {
@@ -256,6 +268,8 @@ beforeEach(() => {
   resetAttachmentDraftsForTest();
   createUpload.mockReset();
   completeUpload.mockReset();
+  declareMedia.mockReset();
+  declareMedia.mockResolvedValue({kind: 'image', width: 320, height: 240});
 });
 
 afterEach(() => {
@@ -1259,5 +1273,406 @@ describe('#1703 M-2 후속 폴리시', () => {
     });
     expect(completeUpload).not.toHaveBeenCalled();
     put.mockRestore();
+  });
+});
+
+// =============================================================================
+// #5469 (ADR-0151 증보 9 I7) — 올린 사진·GIF 의 가로세로를 서버에 선언한다
+//
+// 보내는 폰은 올리기가 끝나(`complete`) **끝남으로 바뀌기 전에** 가로세로를 `PUT …/media` 로 선언한다: 서버는 아직 메시지에 안 묶인 첨부에만
+// 쓰므로, 끝남(= 보내기 가능) 뒤에 부르면 빠른 전송이 먼저 묶어 선언이 조용히 404 가 된다. 선언은 **덤**이다 — 어떤 실패도 올리기를 실패로
+// 만들지 않고, 예산(4초)을 넘기면 기다리기를 그만둔다. 가로세로는 받는 쪽이 같은 바이트에서 재는 것과 같은 자(`Image.getSize`)로 재고,
+// 받는 쪽이 인라인 그림으로 그리지 않는 사진(8 MiB 초과)과 서버가 받지 않는 종류는 재지도 선언하지도 않는다.
+// =============================================================================
+describe('올린 사진·GIF 의 가로세로 선언 (#5469, ADR-0151 증보 9)', () => {
+  const KEY = attachmentSurfaceKey(TARGET);
+  const SHOWN = {width: 4032, height: 3024};
+  const PHOTO: PickedAttachmentFile = {
+    uri: 'file:///photos/shot.jpg',
+    name: 'shot.jpg',
+    mime: 'image/jpeg',
+    sizeBytes: 4096,
+    sizeKnown: true,
+  };
+
+  type GetSizeMode = 'size' | 'fail' | 'throw';
+  let getSize: jest.SpyInstance;
+  let putBytes: jest.SpyInstance;
+  /** 업로드 흐름이 사진의 크기를 재러 들어갔는가(통과 호출 — 진짜 `measurePickedImage` 가 그대로 돈다). */
+  let measureSpy: jest.SpyInstance;
+  /** 시험 안에서 만든 spy — 끝나면 **이것만** 푼다(전체 복원은 파일 맨 위의 공용 spy 까지 풀어 다음 시험이 진짜 API 를 부르게 한다). */
+  let extraSpies: jest.SpyInstance[] = [];
+  const spy = <T extends jest.SpyInstance>(made: T): T => {
+    extraSpies.push(made);
+    return made;
+  };
+
+  /** `Image.getSize` 를 즉시 답하는 가짜로 — 시험이 무엇을 재라고 물었는지 `getSize.mock.calls` 로 본다. */
+  function stubGetSize(mode: GetSizeMode = 'size', size = SHOWN): void {
+    getSize?.mockRestore();
+    getSize = jest.spyOn(Image, 'getSize').mockImplementation(((
+      _uri: string,
+      success: (width: number, height: number) => void,
+      failure?: (error: unknown) => void,
+    ) => {
+      if (mode === 'size') success(size.width, size.height);
+      else if (mode === 'fail') failure?.(new Error('unreadable'));
+      else throw new Error('native image loader is gone');
+    }) as never);
+  }
+
+  function photoRow(id: string, over: Partial<ReturnType<typeof completedRow>> = {}) {
+    return {...completedRow(id), name: 'shot.jpg', mime: 'image/jpeg', size: 4096, ...over};
+  }
+
+  function pick(over: Partial<PickedAttachmentFile> = {}): void {
+    addPickedFiles(KEY, TARGET, [{...PHOTO, ...over}]);
+  }
+
+  /** 올리기·완료·선언의 비동기 마디를 다 흘린다(가짜 시계의 `setImmediate` 는 진짜다). */
+  const settle = () =>
+    act(async () => {
+      for (let turn = 0; turn < 4; turn += 1) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((ok, no) => {
+      resolve = ok;
+      reject = no;
+    });
+    return {promise, resolve, reject};
+  }
+
+  function watchSurface() {
+    const surface = renderHook(() => useAttachmentSurface(KEY));
+    return {
+      surface,
+      draft: () => surface.result.current.drafts[0],
+      status: () => surface.result.current.drafts[0]?.status,
+    };
+  }
+
+  beforeEach(() => {
+    stubGetSize();
+    measureSpy = spy(jest.spyOn(imageSizeModule, 'measurePickedImage'));
+    putBytes = jest
+      .spyOn(uploadTransport, 'putAttachmentBytes')
+      .mockReturnValue({done: Promise.resolve({ok: true}), abort: jest.fn()});
+    createUpload.mockResolvedValue({
+      id: 'upload-1',
+      status: 'pending',
+      uploadUrl: 'https://upload.example/1',
+    });
+    completeUpload.mockResolvedValue(photoRow('att-1'));
+  });
+
+  afterEach(() => {
+    getSize.mockRestore();
+    putBytes.mockRestore();
+    for (const made of extraSpies) made.mockRestore();
+    extraSpies = [];
+  });
+
+  it('완료가 돌아온 **뒤에** 선언하고, 선언한 사진이 그대로 보낼 첨부가 된다(호출 순서·본문)', async () => {
+    const seen: string[] = [];
+    const watch = watchSurface();
+    completeUpload.mockImplementation(async () => {
+      seen.push('complete');
+      return photoRow('att-1');
+    });
+    declareMedia.mockImplementation(async () => {
+      seen.push('선언');
+      return {kind: 'image', width: SHOWN.width, height: SHOWN.height};
+    });
+
+    act(() => pick());
+    await settle();
+
+    expect(seen).toEqual(['complete', '선언']);
+    expect(measureSpy).toHaveBeenCalledTimes(1);
+    expect(measureSpy).toHaveBeenCalledWith(PHOTO.uri, 'image/jpeg');
+    expect(completeUpload.mock.invocationCallOrder[0]).toBeLessThan(declareMedia.mock.invocationCallOrder[0]);
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(declareMedia).toHaveBeenCalledWith(TARGET.workspaceId, TARGET.channelId, 'att-1', {
+      kind: 'image',
+      width: 4032,
+      height: 3024,
+    });
+    expect(watch.status()).toBe('uploaded');
+    expect(watch.draft()?.attachmentId).toBe('att-1');
+    expect(takeSent(KEY).attachments).toEqual([
+      {id: 'att-1', name: 'shot.jpg', mime: 'image/jpeg', sizeBytes: 4096},
+    ]);
+  });
+
+  // 순서의 증거는 이 시험이다: 선언이 **아직 돌아오지 않은** 때의 초안은 끝남이 아니다 — 끝남(= 보내기 가능)은 선언 뒤에 온다. 끝남 뒤에 선언을
+  // 부르면(그 사이에 전송이 첨부를 묶으면 서버가 같은 404 로 돌려준다) 이 시점의 초안이 이미 `uploaded` 다.
+  it('선언이 아직 끝나지 않았으면 초안은 끝남이 아니다 — 끝나는 순간에 끝남이 된다(선언은 보내기 가능으로 바뀌기 전이다)', async () => {
+    const held = deferred<api.AttachmentMedia>();
+    declareMedia.mockReturnValue(held.promise);
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(watch.status()).toBe('verifying');
+    expect(watch.draft()?.attachmentId).toBeUndefined();
+    await act(async () => {
+      held.resolve({kind: 'image', width: SHOWN.width, height: SHOWN.height});
+    });
+    await settle();
+    expect(watch.status()).toBe('uploaded');
+    expect(watch.draft()?.attachmentId).toBe('att-1');
+  });
+
+  it.each([
+    ['image/jpeg', 'a.jpg'],
+    ['image/png', 'a.png'],
+    ['image/gif', 'a.gif'],
+    ['image/webp', 'a.webp'],
+  ])('%s 도 선언한다 — 서버가 가로세로를 받는 닫힌 목록 전부', async (mime, name) => {
+    completeUpload.mockResolvedValue(photoRow('att-1', {mime, name}));
+    const watch = watchSurface();
+    act(() => pick({mime, name, uri: `file:///photos/${name}`}));
+    await settle();
+    expect(getSize).toHaveBeenCalledTimes(1);
+    expect(getSize.mock.calls[0][0]).toBe(`file:///photos/${name}`);
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(declareMedia.mock.calls[0][3]).toEqual({kind: 'image', width: 4032, height: 3024});
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it('가로세로는 `Image.getSize` 가 잰 값이다 — 사진 고르개가 알려 준 크기가 아니다(받는 쪽과 같은 자)', async () => {
+    stubGetSize('size', {width: 3024, height: 4032});
+    act(() => pick({width: 999, height: 111} as Partial<PickedAttachmentFile>));
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(declareMedia.mock.calls[0][3]).toEqual({kind: 'image', width: 3024, height: 4032});
+  });
+
+  it('재는 일은 올리기를 시작할 때 한다 — 완료를 기다리지 않는다', async () => {
+    const heldComplete = deferred<ReturnType<typeof photoRow>>();
+    completeUpload.mockReturnValue(heldComplete.promise);
+    act(() => pick());
+    await settle();
+    // 완료는 아직인데 이미 쟀다.
+    expect(completeUpload).toHaveBeenCalledTimes(1);
+    expect(getSize).toHaveBeenCalledTimes(1);
+    expect(getSize.mock.calls[0][0]).toBe(PHOTO.uri);
+    expect(declareMedia).not.toHaveBeenCalled();
+    await act(async () => {
+      heldComplete.resolve(photoRow('att-1'));
+    });
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['HEIC(닫힌 목록 밖)', 'image/heic'],
+    ['SVG', 'image/svg+xml'],
+    ['PDF', 'application/pdf'],
+    ['글', 'text/plain'],
+    ['영상', 'video/mp4'],
+    ['종류를 모르는 파일', 'application/octet-stream'],
+  ])('%s 는 재지도 선언하지도 않는다 — 올리기는 그대로 끝난다', async (_label, mime) => {
+    completeUpload.mockResolvedValue(photoRow('att-1', {mime}));
+    const watch = watchSurface();
+    act(() => pick({mime, name: 'file.bin'}));
+    await settle();
+    // 올리기 흐름이 재러 들어가지도 않는다(호출 자리의 문) — 그 안쪽의 문(`measurePickedImage`·코어 선언)은 따로 시험한다.
+    expect(measureSpy).not.toHaveBeenCalled();
+    expect(getSize).not.toHaveBeenCalled();
+    expect(declareMedia).not.toHaveBeenCalled();
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it('받는 쪽이 인라인 그림으로 그리지 않는 큰 사진(한도 초과)은 디코드하지도 선언하지도 않는다 — 올리기는 끝난다', async () => {
+    completeUpload.mockResolvedValue(photoRow('att-1', {size: INLINE_PREVIEW_MAX_BYTES + 1}));
+    const watch = watchSurface();
+    act(() => pick({sizeBytes: INLINE_PREVIEW_MAX_BYTES + 1}));
+    await settle();
+    expect(createUpload.mock.calls[0][2].size).toBe(INLINE_PREVIEW_MAX_BYTES + 1);
+    expect(measureSpy).not.toHaveBeenCalled();
+    expect(getSize).not.toHaveBeenCalled();
+    expect(declareMedia).not.toHaveBeenCalled();
+    expect(watch.status()).toBe('uploaded');
+    expect(takeSent(KEY).attachments).toHaveLength(1);
+  });
+
+  it('한도 딱 그만큼의 사진은 받는 쪽이 그리므로 재고 선언한다', async () => {
+    completeUpload.mockResolvedValue(photoRow('att-1', {size: INLINE_PREVIEW_MAX_BYTES}));
+    const watch = watchSurface();
+    act(() => pick({sizeBytes: INLINE_PREVIEW_MAX_BYTES}));
+    await settle();
+    expect(measureSpy).toHaveBeenCalledTimes(1);
+    expect(getSize).toHaveBeenCalledTimes(1);
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it('크기를 모르고 올린 사진이 완료 때 한도를 넘는 것으로 밝혀지면 선언은 하지 않는다(완료가 돌려준 실제 크기로 다시 본다)', async () => {
+    completeUpload.mockResolvedValue(photoRow('att-1', {size: INLINE_PREVIEW_MAX_BYTES + 1}));
+    const watch = watchSurface();
+    act(() => pick({sizeBytes: 0, sizeKnown: false}));
+    await settle();
+    // 올릴 때는 크기를 몰라 재 두었고(그 사이 아무도 모른다), 완료가 실제 크기를 알려 준 뒤에야 선언을 거른다.
+    expect(measureSpy).toHaveBeenCalledTimes(1);
+    expect(declareMedia).not.toHaveBeenCalled();
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it.each([
+    ['getSize 가 실패 콜백을 부른다', 'fail' as const],
+    ['getSize 가 던진다', 'throw' as const],
+  ])('못 재면(%s) 아무것도 선언하지 않는다 — 잘못된 크기를 보내느니 요약 없이 간다', async (_label, mode) => {
+    stubGetSize(mode);
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(getSize).toHaveBeenCalledTimes(1);
+    expect(declareMedia).not.toHaveBeenCalled();
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it.each([
+    ['꺼져 있다(네트워크)', new Error('offline')],
+    ['한도에 막혔다(429)', new ApiError(429, 'rate limited', undefined, 30)],
+    ['이미 묶였다(404)', new ApiError(404, 'completed attachment not found')],
+    ['거절했다(400)', new ApiError(400, 'width and height must be integers from 1 to 16384')],
+    ['서버 오류(500)', new ApiError(500, 'boom')],
+  ])('서버가 %s 해도 올리기는 실패가 아니다 — 사진은 요약 없이 끝남이 된다', async (_label, error) => {
+    declareMedia.mockRejectedValue(error);
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(watch.status()).toBe('uploaded');
+    expect(watch.draft()?.issue).toBeUndefined();
+    expect(takeSent(KEY).attachments.map(attachment => attachment.id)).toEqual(['att-1']);
+  });
+
+  it('선언 단계 자체가 던져도(약속이 깨져도) 올리기는 실패가 되지 않는다', async () => {
+    spy(jest.spyOn(declareModule, 'declareImageSize')).mockRejectedValue(new Error('the helper broke its promise'));
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(watch.status()).toBe('uploaded');
+    expect(watch.draft()?.issue).toBeUndefined();
+  });
+
+  it('서버가 답하지 않으면 예산(4초) 뒤에 기다리기를 그만둔다 — 4초 전에는 끝남이 아니다', async () => {
+    declareMedia.mockReturnValue(new Promise(() => {}));
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(watch.status()).toBe('verifying');
+    await act(async () => {
+      jest.advanceTimersByTime(3_999);
+    });
+    await settle();
+    expect(watch.status()).toBe('verifying');
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+    });
+    await settle();
+    expect(watch.status()).toBe('uploaded');
+  });
+
+  it('올리기가 실패하면(바이트·완료) 선언까지 가지 않는다', async () => {
+    putBytes.mockReturnValueOnce({done: Promise.resolve({ok: false, failure: 'network'}), abort: jest.fn()});
+    const failedBytes = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(failedBytes.status()).toBe('failed');
+    expect(completeUpload).not.toHaveBeenCalled();
+    expect(declareMedia).not.toHaveBeenCalled();
+
+    resetAttachmentDraftsForTest();
+    completeUpload.mockRejectedValue(new ApiError(409, 'attachment bytes do not match'));
+    const failedComplete = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(failedComplete.status()).toBe('failed');
+    expect(declareMedia).not.toHaveBeenCalled();
+  });
+
+  it('선언하는 동안 로그아웃하면 옛 초안이 새 계정 표면에서 끝남이 되지 않는다', async () => {
+    // 새 계정의 초안이 옛 초안과 같은 로컬 id 를 받게 해서, 옛 흐름이 되살아나 새 초안을 건드리면 눈에 보이게 한다.
+    spy(jest.spyOn(globalThis.crypto, 'randomUUID')).mockReturnValue('00000000-0000-4000-8000-0000000000aa');
+    const held = deferred<api.AttachmentMedia>();
+    declareMedia.mockReturnValue(held.promise);
+    const watch = watchSurface();
+    act(() => pick());
+    await settle();
+    expect(declareMedia).toHaveBeenCalledTimes(1);
+    expect(watch.status()).toBe('verifying');
+
+    // 로그아웃 — 그리고 다음 계정이 같은 칸에서 새 사진을 올리기 시작한다(올리기는 끝나지 않는다).
+    act(() => clearAllAttachmentDrafts());
+    createUpload.mockReturnValueOnce(new Promise(() => {}));
+    act(() => pick({uri: 'file:///photos/next-account.jpg', name: 'next.jpg'}));
+    await settle();
+    expect(watch.status()).toBe('uploading');
+
+    // 옛 선언이 이제 끝난다.
+    await act(async () => {
+      held.resolve({kind: 'image', width: SHOWN.width, height: SHOWN.height});
+    });
+    await settle();
+    expect(watch.status()).toBe('uploading');
+    expect(watch.draft()?.attachmentId).toBeUndefined();
+    expect(takeSent(KEY).attachments).toEqual([]);
+  });
+});
+
+describe('measurePickedImage (#5469)', () => {
+  let spies: jest.SpyInstance[] = [];
+  const track = <T extends jest.SpyInstance>(made: T): T => {
+    spies.push(made);
+    return made;
+  };
+  afterEach(() => {
+    for (const made of spies) made.mockRestore();
+    spies = [];
+  });
+
+  it('받는 쪽과 같은 자 — `Image.getSize` 로 고른 파일의 크기를 잰다', async () => {
+    const asked = track(jest.spyOn(Image, 'getSize')).mockImplementation(((
+      _uri: string,
+      success: (width: number, height: number) => void,
+    ) => success(1170, 2532)) as never);
+    await expect(measurePickedImage('file:///a.png', 'image/png')).resolves.toEqual({width: 1170, height: 2532});
+    expect(asked).toHaveBeenCalledTimes(1);
+    expect(asked.mock.calls[0][0]).toBe('file:///a.png');
+  });
+
+  it.each(['image/heic', 'image/svg+xml', 'application/pdf', 'video/mp4', 'text/plain', ''])(
+    '닫힌 목록 밖의 종류(%s)는 묻지도 않고 null 이다',
+    async mime => {
+      // 묻기만 하면 답이 오도록 해 둔다 — 문이 없으면 크기가 돌아와 `null` 단정이 바로 붉다(답을 안 주는 가짜는 시간 초과로만 붉다).
+      const asked = track(jest.spyOn(Image, 'getSize')).mockImplementation(((
+        _uri: string,
+        success: (width: number, height: number) => void,
+      ) => success(10, 10)) as never);
+      await expect(measurePickedImage('file:///a.bin', mime)).resolves.toBeNull();
+      expect(asked).not.toHaveBeenCalled();
+    },
+  );
+
+  it('못 읽거나 던지면 null 이다 — 던지지 않는다', async () => {
+    const failing = track(jest.spyOn(Image, 'getSize')).mockImplementation(((
+      _uri: string,
+      _success: unknown,
+      failure: (error: unknown) => void,
+    ) => failure(new Error('unreadable'))) as never);
+    await expect(measurePickedImage('file:///a.jpg', 'image/jpeg')).resolves.toBeNull();
+    failing.mockImplementation((() => {
+      throw new Error('native');
+    }) as never);
+    await expect(measurePickedImage('file:///a.jpg', 'image/jpeg')).resolves.toBeNull();
   });
 });
