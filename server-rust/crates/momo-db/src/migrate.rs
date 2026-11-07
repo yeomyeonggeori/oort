@@ -799,12 +799,20 @@ mod tests {
     /// token is spent), `UNIQUE (workspace, run, slot)`, a guard trigger (one spend, one attachment
     /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
     /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
+    ///
+    /// 176 is #5459's 「이모티콘 세트 보관」 (ADR-0218 증보 6 §12 L10, S1a): the four tables
+    /// `expression_set` / `_slot` / `_image` / `_notice` (tenant ENABLE + FORCE + `ws_isolation`,
+    /// composite FKs including `(workspace, run, agent, channel)` into `agent_run`), the per-table
+    /// one-way triggers, the partial unique index that keeps one undecided set per agent, the
+    /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
+    /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
+    /// is the writer, so the block, not RLS, is the last door).
     #[test]
-    fn discovers_contiguous_migrations_001_to_175() {
+    fn discovers_contiguous_migrations_001_to_176() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=175).collect();
+        let expected: Vec<i64> = (1..=176).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -812,7 +820,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=175 under {}",
+            "expected contiguous 001..=176 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -820,7 +828,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("175_attachment_write_token"));
+            .starts_with("176_expression_set"));
     }
 
     #[test]

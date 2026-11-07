@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRun, Approval, Message } from "../../lib/api";
+import { EXPRESSION_SET_ACTION_ID } from "../expressions/set";
+import { EXPRESSION_SET_PLAN_ACTION_ID } from "../expressions/setWire";
 import {
+  INBOX_OPEN_ONLY_ACTION_IDS,
   agentsFeedPartial,
   approvalActionLabel,
   approvalItem,
+  approvalOpensOnCard,
   deadlineLabel,
   mentionItem,
   mentionMemberIds,
@@ -536,3 +540,72 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
   });
 });
 
+// ---- 받은함은 어떤 승인을 카드로 보내는가 (#5462) --------------------------------
+
+/** 서버 승인 목록의 한 행: 행동 승인(`workspace_action`)과 서버가 찍은 결정 자리. 전부 진짜 `approvalItem`을 태운다. */
+function actionRow(workspaceActionId: string | undefined, decisionMode?: "inline" | "open") {
+  return approvalItem(
+    approval({
+      actionType: "workspace_action",
+      ...(workspaceActionId === undefined ? {} : { workspaceActionId }),
+      ...(decisionMode === undefined ? {} : { decisionMode }),
+    }),
+    agent,
+    "엔진",
+    NOW
+  );
+}
+
+describe("approvalOpensOnCard (#5462)", () => {
+  it("행에 행동 id 를 싣는다 — 서버 행이 이름 지어 준 것만, 지어내지 않는다", () => {
+    expect(actionRow("expression.set.plan").workspaceActionId).toBe("expression.set.plan");
+    // 행동 id 가 없는 승인(도구·스폰)에는 키 자체가 없다.
+    expect("workspaceActionId" in approvalItem(approval(), agent, "엔진", NOW)).toBe(false);
+  });
+
+  it("닫힌 목록은 세트 행동 둘이고, 코어가 아는 두 상수와 글자까지 같다", () => {
+    // 목록이 문자열 리터럴이라 상수가 바뀌면 조용히 갈라진다: 이 단정이 그 갈라짐을 이름으로 잡는다.
+    expect([...INBOX_OPEN_ONLY_ACTION_IDS].sort()).toEqual(
+      [EXPRESSION_SET_ACTION_ID, EXPRESSION_SET_PLAN_ACTION_ID].sort()
+    );
+  });
+
+  it.each([
+    ["계획 카드", EXPRESSION_SET_PLAN_ACTION_ID],
+    ["세트 카드", EXPRESSION_SET_ACTION_ID],
+  ])("%s는 서버가 값을 안 싣든 inline 을 찍든 open 을 찍든 카드로 보낸다", (_name, id) => {
+    expect(approvalOpensOnCard(actionRow(id))).toBe(true);
+    // 서버 값은 목록의 행을 닫을 수 없다(둘 중 하나라도 open 이면 연다).
+    expect(approvalOpensOnCard(actionRow(id, "inline"))).toBe(true);
+    expect(approvalOpensOnCard(actionRow(id, "open"))).toBe(true);
+  });
+
+  it("목록 밖 행동은 서버가 open 을 찍어도 카드로 보내지 않는다 — 기존 승인의 받은함 모습은 그대로다 (planner 11-07)", () => {
+    for (const id of ["channel.create", "expression.create", "member.avatar.set", "member.display_name.set", "message.pin", undefined]) {
+      for (const mode of [undefined, "inline", "open"] as const) {
+        expect(approvalOpensOnCard(actionRow(id, mode)), `${id ?? "행동 id 없음"} (서버 ${mode ?? "값 없음"})`).toBe(false);
+      }
+    }
+    // 도구·스폰 승인(행동 id 없음, 서버가 호스트 고르기를 open 으로 찍는 `work.spawn`)도 같다.
+    for (const mode of [undefined, "inline", "open"] as const) {
+      const spawn = approvalItem(approval({ ...(mode === undefined ? {} : { decisionMode: mode }) }), agent, "엔진", NOW);
+      expect(approvalOpensOnCard(spawn), `work.spawn (서버 ${mode ?? "값 없음"})`).toBe(false);
+    }
+  });
+
+  it("목록은 정확히 일치만 센다 — 비슷한 이름·대소문자·객체 프로토타입 이름은 열지 않는다", () => {
+    for (const id of [
+      "expression.set",
+      "expression.set.plan.extra",
+      "Expression.Set.Plan",
+      " expression.set.plan",
+      "expression.set.plan ",
+      "constructor",
+      "toString",
+      "__proto__",
+      "hasOwnProperty",
+    ]) {
+      expect(approvalOpensOnCard(actionRow(id)), id).toBe(false);
+    }
+  });
+});
