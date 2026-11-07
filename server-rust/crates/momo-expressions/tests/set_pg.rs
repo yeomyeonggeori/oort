@@ -293,6 +293,9 @@ async fn fails_with(pool: &PgPool, sql: &str) -> String {
     }
 }
 
+/// One change to a good plan, for the table of plans the server must not take.
+type PlanChange = Box<dyn Fn(&mut Plan)>;
+
 fn plan(prefix: &str) -> Plan {
     let slot = |index: u8, name: &str, kind: SlotKind| SlotPlan {
         index,
@@ -820,7 +823,7 @@ async fn begin_proves_the_run_the_requester_and_the_agent_and_a_bad_plan_writes_
 
     // plans the server does not take, each from a good plan changed in one place
     let t = tenant(&w.su).await;
-    let bad: Vec<(&str, Box<dyn Fn(&mut Plan)>)> = vec![
+    let bad: Vec<(&str, PlanChange)> = vec![
         ("prefix too short", Box::new(|p| p.prefix = "a".into())),
         ("prefix upper case", Box::new(|p| p.prefix = "Cat".into())),
         (
@@ -1020,12 +1023,12 @@ async fn a7_a_slot_is_written_once_by_the_domain_functions_and_by_the_database_a
         gray(&w, owner, id, 2, GrayCode::Refused).await.unwrap(),
         Err(Refusal::InvalidArguments)
     );
-    assert_eq!(
+    assert!(
         gray(&w, owner, id, 2, GrayCode::BaseMissing)
             .await
             .unwrap()
             .is_ok(),
-        true
+        "a GIF slot closes base_missing"
     );
 
     // the database ALONE, as the worker, with the function checks out of the way
@@ -1501,7 +1504,7 @@ async fn the_deferred_rule_an_expired_set_keeps_no_scene_holds_at_commit() {
     // expiring the head and leaving a scene behind: the COMMIT is refused
     let head =
         format!("UPDATE expression_set SET state = 'expired', prompt = NULL WHERE id = '{id}'");
-    let error = exec_tx(&w.worker, &[head.clone()])
+    let error = exec_tx(&w.worker, std::slice::from_ref(&head))
         .await
         .expect_err("a scene would survive the expiry");
     assert_eq!(db_code(&error), "23514");
