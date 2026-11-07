@@ -183,7 +183,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
           </div>
         ))}
       </div>}
-      <div role="group" aria-label={formatMessage("expressions.picker.setStrip")} data-testid="expression-set-strip" className="flex items-center gap-1 border-t border-line pt-2">
+      <div role="group" aria-label={formatMessage("expressions.picker.setStrip")} data-testid="expression-set-strip" className="flex shrink-0 items-center gap-1 border-t border-line pt-2">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {jumps.map((section) => {
             const Icon = SECTION_ICON[section.kind];

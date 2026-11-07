@@ -4,6 +4,7 @@
 - Date: 2026-08-05
 - 관련: ADR-0145 증보 1(attachments 3경로=이식 대상 v0 — 본 ADR이 그 "선행 ADR"이다) · 2026-07 재설계 확정(파일 저장=Drive 공유드라이브+SA 멤버) · U1 감사 `docs/planning/research/2026-08-05-chat-ui-audit.md` H-10/U4-f(컴포저에 첨부 진입점 0)
 - 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342) P6은 도우미가 맡긴 Hermes 그림을 대화에 올리려 **워커→api 첨부 쓰기 길**(격리 디코더 재인코딩, 한 메시지에 묶기)을 요구한다. 이 ADR의 [증보 8](#증보-8-2026-11-06-5371-워커의-첨부-쓰기---api의-사설-주소로-단일-사용-쓰기-주소-하나)(Proposed, #5371, P14-S3. v4가 말하는 「ADR-0151 증보」가 이것이다)이 그 길을 정하되 증보 3의 (a)식(단일 사용 발급, api가 소유 재판정)을 따르고 (c)식(내부 전용 경로 + 서비스 간 비밀)은 뒤집을 이유를 적지 않는 한 쓰지 않는다. 그 증보는 v4 검수와 별개로 자체 등급 2 독립 보안 검수 뒤에만 구현·머지하며, 그 전에는 `image` 종류가 광고되지 않는다. 본문 결정은 바꾸지 않았다(D3의 「에이전트 업로드는 v0 제외」는 그 증보 W10이 이 한 길에 한해서만 푼다).
+- 증보 9: 2026-11-07 (#5469, **Accepted** 2026-11-07 planner — 등급 2 보안 검수 1회차 PASS, Medium 1 문구 수리) 사진·GIF의 가로세로 요약 — 보내는 기기가 선언하고 서버는 범위만 본다. `AttachmentMedia`에 `kind: image`(가로·세로만)가 더해지고, 같은 `PUT …/media` 길과 `attachment_media` 표(길이 열을 널 허용)를 쓴다. 처음 보는 사진도 첫 프레임부터 칸이 선다 — 파일 끝 「증보 9」. D5의 영상 결정과 증보 5~8의 본문 결정은 바꾸지 않는다.
 
 ## Context
 
@@ -420,7 +421,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
   - **저장은 PG다.** 첨부 id에 1:1인 표 `attachment_media`(`workspace_id` 열과 `ws_isolation` 정책을 명시하고 `ON DELETE CASCADE`, RLS FORCE)에 `duration_ms`(1..86,400,000), `width`·`height`(1..16,384), 포스터 `poster_mime`(`image/jpeg`·`image/webp`), `poster_width`·`poster_height`(1,280 이하), `poster_bytes`(`bytea`, 256 KiB 이하)를 둔다. 보관소에는 서버가 바이트를 쓰는 API가 없고(131 아바타 이미지가 같은 이유로 PG에 둔다), 포스터를 둘째 첨부 행으로 두면 「묶이지 않은 초안은 업로더만 읽고 30일 뒤 청소된다」는 규칙에 걸려 다른 멤버에게 안 보이거나 지워진다.
   - **쓰기**: `PUT /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/media`, JSON `{durationMs, width, height, poster: {mime, dataBase64}}`(본문 상한 512 KiB). **업로더 본인이 `complete`이고 아직 메시지에 묶이지 않은 첨부에만** 쓴다(멱등 교체). 서버 검증: 저장된 mime이 닫힌 영상 목록(`video/mp4`·`video/quicktime`·`video/webm`)이고 `read_prefix`로 읽은 첫 바이트에 `ftyp`(mp4·mov, 오프셋 4) 또는 EBML(`1A 45 DF A3`, webm) 매직이 있다. **새 파서 crate는 쓰지 않는다**(이슈 #4673의 「mp4 헤더 검사」는 이 매직 확인으로 줄인다). 포스터는 `sniff_image_mime`(JPEG·WebP 매직)·`image_dimensions`(헤더 치수)·크기로 바이트를 검증한다. 길이·치수는 **선언값의 범위만** 검증한다(클라이언트가 거짓이면 레이아웃만 틀어진다).
   - **예산**(검수 1회차 M-1): 이 쓰기는 호출 하나가 PG에 최대 256 KiB를 쓰고(재쓰기도 새로 쓴다) 보관소에서 첫 바이트를 읽으므로 업로드 시작처럼 멤버 × 표면 예산을 쓴다: 표면 `media_write`, 기본 60/창, `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`(0이면 끔), 키는 업로드 시작과 따로 둔다. 게이트는 본문을 읽기 전에 거절하고 거절된 요청도 센다. 멤버별 **묶이지 않은 media 행 수 상한**은 C6·후속이다(그때까지는 이 예산과 초안 회수가 상한이다).
-  - **읽기**: `GET …/attachments/{id}/poster`가 content와 같은 인가·같은 헤더 셋·같은 404를 쓴다. 메시지 투영의 `attachments[]`에는 영상일 때만 `media: {kind, durationMs, width, height, hasPoster}`를 **더한다**(가산). 포스터 바이트는 투영·`message.new` 프레임·outbox 페이로드 어디에도 싣지 않고, 목록 질의는 `poster_bytes`를 고르지 않는다.
+  - **읽기**: `GET …/attachments/{id}/poster`가 content와 같은 인가·같은 헤더 셋·같은 404를 쓴다. 메시지 투영의 `attachments[]`에는 영상일 때만 `media: {kind, durationMs, width, height, hasPoster}`를 **더한다**(가산). (정지 그림의 요약 `{kind: "image", width, height}`는 파일 끝 증보 9가 같은 자리에 더한다. 영상 요약은 그대로다.) 포스터 바이트는 투영·`message.new` 프레임·outbox 페이로드 어디에도 싣지 않고, 목록 질의는 `poster_bytes`를 고르지 않는다.
   - **신뢰**: 포스터가 그 영상의 실제 프레임이라는 보장은 없다(남는 위험). 클라이언트는 선언한 길이·치수를 믿지 않고 자리 높이·비율을 clamp한다(16,384까지 선언할 수 있다). `ftyp`로 시작하지 않는 오래된 `.mov`는 매직 때문에 media를 못 받고 카드로 남는다(의도). 쓰기는 감사한다(`attachment.media_set`, 종류만이고 내용·이름은 없다). 회수는 행 CASCADE가 따라간다.
 - **D6 · 폰 영상 압축 기본값** (구현은 F1 #4586, 값은 여기서 정한다) [권장].
   - 기본은 「일반 화질」이다. `expo-image-picker`의 내보내기 프리셋 `H264_1280x720`(H.264·AAC, 해상도가 정해져 있어 어디서나 재생되고 크기를 가늠할 수 있다. `MediumQuality`는 해상도가 기기에 달렸다). 「원본」은 `Passthrough`이고 **보낼 때마다 직접 고른다**(기억하지 않는다. 셀룰러에서 원본 300 MiB를 실수로 올리지 않게 한다).
@@ -1090,3 +1091,96 @@ S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀
 ### 역방향 줄 대상(각 문서 머리에 한 줄씩, 본문 결정은 바꾸지 않는다)
 
 **이 PR이 단 줄**: ADR-0201 머리 한 줄(P6·P14-S3·P18 ⑧ 링크, `process_waiting` 문장·임대 계산·PUT 위치 정정, 「증보 4」 표기 → 증보 8) · ADR-0151 본문 D3 한 줄(이 증보 W10). **이 PR이 달지 않은 것**: ADR-0218(§12 L3.3에 이 증보의 겹침 절 링크, H9.2의 「따로」가 이 증보 위) — #5442 브랜치가 §12를 고치는 중이라 그 착륙 뒤 planner가 단다. ADR-0203은 해당 없음(이 길은 Hermes에 새 자격을 주지 않는다).
+
+## 증보 9 (2026-11-07, #5469): 사진·GIF의 가로세로 요약 — 보내는 기기가 선언하고, 서버는 범위만 본다
+
+#5451(폰 채팅 진입 흔들림 수리)이 남긴 한 가지다. 첨부 사진·GIF의 가로세로를 서버가 주지 않아서(`AttachmentMedia.kind`는 `video`뿐이다) **처음 보는 사진은 받는 동안 칸 크기를 모른다.** 웹은 높이 180의 자리 상자에서, 폰은 16:9 자리표시에서 서고, 디코드가 끝나야 제 비율이 된다. 왕복 500ms에서 그 한 걸음이 약 80pt이고, 한 번 본 사진은 기기가 크기를 기억해서 제자리에 선다(#5451 §1). 이 증보는 영상 요약(증보 5 D5)과 **같은 길**로 사진·GIF의 가로세로를 실어, 처음 보는 사진도 첫 프레임부터 제 칸에 서게 한다.
+
+- Status: **Accepted** (2026-11-07 planner — 등급 2 독립 보안 검수 1회차 PASS: Blocker 0 · High 0 · Medium 1 · Low 1, 대상 `92985c622`; Medium(롤백 정리 SQL 문구)은 남는 위험 5에서 고쳤다) (2026-11-07, Sonnet 5.5 worker 기안. 독립 보안 검수 등급 2 전이다). ADR-0100: 공개 API(`setAttachmentMedia` 요청·`AttachmentMedia` 투영)와 DB 계약(migration 178)이 바뀌므로 이 증보가 구현 머지 조건이다. 구현은 같은 PR에 있고 Accepted 전에는 머지하지 않는다. **M7-I 「다시 재는 조건」(서버 API·DB 계약)에 해당한다.**
+- 표기는 앞 증보와 같다: [V] 코드·문서를 직접 읽어 확인 · **[추정]** 이 증보가 정한 숫자·해석 · `runtime-unverified` 실행 안 함. 구현이 인용할 절 id: 사실 `F1`~`F8`, 결정 `I1`~`I9`, 수용 기준 `IA1`~`IA11`.
+- **한 줄 요지**: `PUT …/attachments/{id}/media`가 `kind: "image"`와 `width`·`height`만 받는다(영상은 `kind`가 없거나 `video`). 서버는 사진을 열지 않고 범위(1~16,384)·저장된 종류(JPEG·PNG·GIF·WebP)·첫 12바이트의 매직만 본다. 값은 `attachment_media`에 길이 없이(널) 저장되고, 모든 투영이 `media: {kind: "image", width, height}`를 더한다. 받는 쪽은 그 크기로 첫 프레임부터 칸을 잡고, 그림이 디코드되면 **실제 크기가 이긴다.** 요약이 없는 옛 메시지는 지금처럼 기기 기억을 쓴다.
+
+### 변경 전 — 확인한 사실 [V]
+
+- **F1** openapi `AttachmentMedia`는 `kind: [video]`에 필수 키 다섯(`kind`·`durationMs`·`width`·`height`·`hasPoster`)이고, `MessageAttachment.media` 설명이 「사진·문서는 `media` 키가 없다」고 말한다. 요청 `SetAttachmentMediaRequest`는 `durationMs`·`width`·`height`가 필수이고 `additionalProperties: false`다.
+- **F2** 쓰기 길 `routes/attachment_media.rs::set_media`: ① 요청 모양(숫자 범위·포스터)을 연결을 잡기 전에 판정 → ② 업로더 본인·`complete`·메시지에 안 묶인 첨부만(`may_hold_media`, 멤버십은 content 라우트의 두 함수) → ③ 저장된 mime이 닫힌 영상 목록이고 `ftyp`·EBML 매직(범위 읽기 12바이트) → ④ 둘째 tx에서 첨부 행을 `FOR UPDATE`로 잡고 다시 판정한 뒤 쓴다. 표 `media_write` 예산, 감사 `attachment.media_set`(`kind`는 종류만).
+- **F3** `attachment_media` 표(173): `duration_ms integer NOT NULL`(1~86,400,000), `width`·`height` NOT NULL(1~16,384), 포스터 네 열은 모두 있거나 모두 없다. RLS ENABLE+FORCE+`ws_isolation`, 복합 FK CASCADE. 권한은 `attachment-media-lockdown` 블록이 **세 파일(173·`bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`)에 같은 글자로** 쥐고, 팀 AI 읽기 역할(`momo_helper_read`)은 열 이름을 나열한 `GRANT SELECT (…)`로 포스터 바이트만 뺀 열을 읽는다. 정적 시험이 블록의 글자와 그 열 목록을 못 박는다.
+- **F4** `media`를 싣는 투영은 둘이다: `message_attachments_in_tx`(보내기 응답·재생 echo·`message.new` 프레임·outbox)와 `PAGED_ATTACHMENT_JOIN`(채널·스레드 페이지, 팀 AI 읽기 역할도 같은 문장). 에이전트 워커의 답은 표 권한이 없어 `media` 없는 투영(`message_attachments_without_media_in_tx`)을 쓴다.
+- **F5** 받는 쪽 거름: 코어 `attachmentMediaFromWire`는 `kind !== "video"`이면 **요약만 버리고**, `attachmentsFromWire`는 그 첨부를 남긴다. REST 페이지는 응답을 그대로 통과시키고 화면이 `attachmentMediaOf`로 다시 거른다. 이 거름은 v0.1.42(#5208)부터 나갔고(`git tag --contains 3248e7eeb`), 그 앞 판은 `media`를 읽지 않는다. 메시지 페이지·`message.new` 프레임을 `additionalProperties: false`·enum으로 거르는 엄격한 스키마 거름은 웹·폰·코어에 없다(zod·ajv 등 의존이 `package.json`에 없고, 첨부를 만드는 길은 위 두 곳뿐이다. 데스크탑은 웹 번들이다). 그래서 어느 출시 판도 `kind: "image"` 요약 때문에 **첨부나 메시지를 버리지 않는다.**
+- **F6** 받는 쪽 칸: 웹 `AttachmentList`의 한 장 사진은 받는 동안 높이 `preview-frame`(180) 상자, 디코드 뒤(`onLoad`) 규칙 상자(`inlineImageBox`)이고 자연 크기를 메모리에만 기억한다. 폰 `ImageTile`은 16:9 자리표시, `Image.getSize` 뒤 비율이고 잰 크기를 기기에 기억한다(#5451 `attachmentSizeMemory`). 처음 보는 사진은 한 번 자란다(왕복 500ms에서 약 80pt).
+- **F7** 보내는 쪽: 웹·폰 모두 `PUT …/media`를 부르는 코드가 **이 트리에 없다**(`media`를 읽는 폰의 영상 카드·재생은 있고, 영상을 재서 올리는 쪽은 없다 — 코드 전체 검색으로 확인). 사진용이 첫 호출자다.
+- **F8** 서버에는 머리 바이트만 읽는 크기 읽기(`member_avatar::image_dimensions`)와 매직 판별(`sniff_image_mime`)이 이미 있다(아바타·포스터용). 단 JPEG의 크기 표지(SOF)는 앞의 APPn·ICC 조각을 **걸어서** 찾으므로 읽어야 할 앞 바이트 수가 입력에 달렸고(영상 매직은 12바이트), EXIF 방향은 읽지 않는다.
+
+### 결정
+
+- **I1 · 설계 (a): 보내는 기기가 선언한다.** 사진·GIF를 올리는 기기는 자기가 이미 아는 가로세로를 `PUT …/media`로 보낸다(영상과 같은 시점: `complete` 뒤, 전송 전). 서버는 사진을 파싱하지도 디코드하지도 않는다. 증보 5 D5의 원칙(「서버는 영상을 파싱하지도 변환하지도 않는다」, 적대 형식의 파싱은 가둬야 한다)이 사진에도 그대로다.
+- **I2 · 와이어.** 요청은 `oneOf`다. 영상: 지금과 같다(`durationMs`·`width`·`height` 필수, `poster` 선택, `kind`는 없거나 `video`). 사진: `{kind: "image", width, height}` 셋이 전부이고 `durationMs`·`poster`는 모르는 키다. 둘 다 닫힌 객체다. 응답과 모든 투영의 `media`도 `oneOf`다: `{kind: "video", durationMs, width, height, hasPoster}`(그대로) 또는 `{kind: "image", width, height}`(`hasPoster`·`durationMs` 키 없음). 포스터는 사진에 없다.
+- **I3 · 서버 검증은 영상과 같은 네 걸음이다.** ① 모양: `width`·`height`가 정수 1~16,384(`MEDIA_MAX_DIMENSION`, 영상과 한 숫자)이고 연결을 잡기 전에 누구에게나 400. ② 누구·무엇: 같은 멤버십·읽기 함수·`may_hold_media`(업로더 본인·`complete`·미묶임), 같은 403/404 문장, 같은 `media_write` 예산, 사람만(`require_human`). ③ 파일: 저장된 mime이 `image/jpeg`·`image/png`·`image/gif`·`image/webp`(`sniff_image_mime`이 아는 넷, 닫힌 목록)이고 첫 12바이트의 매직이 그 종류다(`sniff_image_mime(prefix) == 저장된 mime`). 아니면 업로더 본인에게만 400. 영상 모양을 사진 파일에, 사진 모양을 영상 파일에 보내도 400이다. ④ 둘째 tx에서 `FOR UPDATE`로 다시 판정하고 쓴다(멱등 교체). 감사는 `attachment.media_set`에 `kind: "image"`·`has_poster: false`.
+- **I4 · DB는 한 열을 풀고 한 줄을 더한다 (migration 178).** `attachment_media.duration_ms`의 NOT NULL을 풀고, `CHECK (duration_ms IS NOT NULL OR poster_mime IS NULL)`(길이 없는 행 = 정지 그림 = 포스터 없음)를 더한다. 길이·치수 범위 CHECK는 널이면 통과하므로 그대로다. **`kind` 열을 만들지 않는다**: 길이가 없으면 정지 그림이다. 새 열·새 표·새 권한이 없으므로 RLS 정책·FK·`attachment-media-lockdown` 블록(세 파일의 같은 글자)·점검 SQL은 그대로다. 투영은 `am.duration_ms IS NULL`로 종류를 가른다.
+- **I5 · 투영.** 두 투영이 같은 모양을 낸다: 행이 있고 길이가 없으면 `{kind: "image", width, height}`. 행이 없으면 지금처럼 `media` 키가 없다. 에이전트 워커의 투영은 그대로 `media`가 없다(표 권한이 없다). Rust의 `AttachmentMedia`는 `kind`로 가른 enum이다(`Video{…}`·`Image{width, height}`).
+- **I6 · 받는 쪽.** 요약이 있으면(코어가 범위 1~16,384 정수를 다시 막은 값, 그리고 첨부의 mime이 이미지일 때만) 그 크기로 **첫 프레임부터** 칸을 잡는다. 웹은 받는 동안의 자리를 이 크기(`inlineImageBox`)로 세우고 폰은 첫 상태를 이 크기로 둔다. **그림이 디코드되면 실제 크기가 이긴다**: 같으면 칸은 움직이지 않고(정직한 선언이 계약이다), 다르면 한 번 고쳐 선다(선언은 그림이 오기 전까지의 자리일 뿐이다). 요약이 없으면(옛 메시지, 옛 판이 보낸 사진) 지금과 같다: 기기 기억, 없으면 자리표시.
+- **I7 · 보내는 쪽.** 웹·폰은 `complete` 응답을 받은 **뒤, 그 첨부를 보내기 가능으로 바꾸기 전에** `PUT …/media`를 부른다(그 사이에 전송이 묶으면 `may_hold_media`가 거절한다). 실패·시간 초과는 보내기를 막지 않는다(요약 없이 간다). 가로세로는 **받는 쪽이 같은 바이트에서 재는 것과 같은 자**로 잰다: 웹은 `createImageBitmap(file)`(방향을 적용한 표시 크기), 폰은 `Image.getSize(파일 주소)`. 닫힌 목록 밖의 종류(HEIC 등)와 **인라인 미리보기 상한(8 MiB, `INLINE_PREVIEW_MAX_BYTES`)을 넘는 사진**은 선언하지 않고 재지도 않는다: 받는 쪽이 그런 파일은 칸이 아니라 파일 카드로 그리므로 크기가 쓰일 곳이 없고, 큰 그림을 디코드하는 비용만 든다.
+- **I8 · 옛 판.** 위 F5 그대로다. 새 서버가 `kind: "image"` 요약을 실어도 v0.1.42 이상은 요약만 버리고 첨부를 지금처럼 그리며, 그 앞 판은 `media`를 읽지 않는다. 옛 클라이언트의 사진 보내기(선언 없음)는 지금처럼 요약 없이 간다. 새 클라이언트가 옛 서버에 `kind: "image"`를 보내면 옛 서버는 `kind`를 모르는 키로 422하고(`deny_unknown_fields`) 클라이언트는 그 실패를 무시한다(I7).
+- **I9 · 이번에 하지 않는 것.** 링크 카드 높이(#5469 선택 2), 에이전트가 올린 그림(증보 8, 요약 없음 — api가 재인코딩한 바이트를 알고 있으므로 후속에서 채울 수 있다), 서버가 사진을 열어 재는 길, 포스터의 사진 확장.
+
+### 비교한 방식
+
+| 방식 | 판단 | 근거 |
+|---|---|---|
+| **(a) 보내는 기기가 선언, 서버는 범위·종류·매직만** | **채택 [권장]** | 영상과 같은 길·같은 권한·같은 예산이고 서버가 사진을 열지 않는다. 기기는 받는 쪽과 같은 자로 표시 크기를 이미 안다. |
+| (b) 서버가 `complete`에서 머리 바이트를 읽어 잰다 | 기각 | ① `complete`가 보관소 내용 읽기가 되어(지금은 메타 호출뿐) 업로드 완료의 실패 모양이 늘고, JPEG는 F8대로 12바이트로 모자라 읽는 바이트가 입력에 달린다. ② 헤더 파서가 적대 입력을 만나는 자리가 사람 업로드 전부로 넓어진다(증보 5 D5·증보 4 D7의 원칙). ③ **EXIF 방향을 읽지 않으므로** 세로로 찍은 사진의 헤더는 가로세로가 뒤바뀐 값이라 가장 흔한 사진에서 힌트가 틀린다 — 방향까지 읽으려면 파서가 하나 더 든다. ④ 선언이 거짓일 수 있다는 점은 (a)와 같아 (b)가 신뢰를 더하지 못한다. 장점(옛 클라이언트가 올린 사진에도 요약이 생긴다)은 인정한다: 새 클라이언트가 퍼질수록 (a)의 범위가 같아진다. |
+| (c) 서버가 사진을 디코드 | 기각 | 모든 멤버의 업로드를 api가 디코드(CPU·메모리 공격면). 증보 8의 격리 디코더는 워커용 5 MiB 한 장이다. |
+| (d) 새 표 `attachment_image_media` | 기각 | 새 테넌트 표 = RLS·복합 FK·권한 블록 세 파일·점검 SQL 4절·증보 2 참조 전수 표(A7)가 한꺼번에 는다. 한 열의 NOT NULL을 푸는 것이 같은 일을 더 작게 한다. |
+| (e) `kind` 열을 더한다 | 기각 | 새 열이 팀 AI 읽기 역할의 열 단위 `GRANT SELECT (…)`에 들어가야 해서(안 넣으면 페이지 문장이 42501) 세 파일의 블록 글자와 그 정적 시험을 고치게 된다. 길이의 유무가 같은 정보를 준다(I4). |
+
+### 수용 기준과 red proof
+
+각 줄은 그 줄을 **지우면 붉어지는 시험**이다(단정은 응답 모양이 아니라 실제 값 — 저장된 행, 읽힌 바이트 수, 실제 SQL 결과, 칸의 치수 — 을 잰다). 서버 시험은 실 PG18(비우회 역할, 두 테넌트)이다.
+
+| 기준 | 시험 | 지우면 붉어지는 줄 |
+|---|---|---|
+| **IA1** JPEG·PNG·GIF·WebP의 선언을 받고, 답은 세 키 요약이며, 행은 길이·포스터가 없고, 받은 쓰기는 객체를 한 번(12바이트) 읽는다 | `a_photo_or_gif_holds_its_size_before_the_send_only` ① | 닫힌 목록, 세 키 응답, migration 178의 `DROP NOT NULL` |
+| **IA2** 범위 밖(0·16,385·음수)은 연결을 잡기 전에 400(다른 멤버에게도 같은 400)이고, 소수·문자·빠진 값은 422이며, 보관소 읽기는 0이다 | 같은 시험 ③, 단위 `a_picture_size_is_range_checked_at_both_ends`, 라우트 단위 `the_shape_step_builds_the_write_and_range_checks_it` | `validate_image_declaration`의 범위 |
+| **IA3** 목록 밖(PDF·SVG·HEIC·영상)과 종류와 매직이 다른 파일(글→png, png→jpeg, gif→webp), 영상 모양을 사진에·사진 모양을 영상에 보낸 것은 업로더에게만 400이고, 목록 밖은 읽기 0이다 | 같은 시험 ⑤, 단위 `only_the_four_picture_types_may_hold_a_size`·`the_picture_magic_is_the_one_the_stored_type_names`·`a_write_asks_the_questions_of_its_own_kind` | `require_image_mime`, `image_magic_matches`의 종류 대조, 라우트의 매직 질문 |
+| **IA4** 쓰기는 업로더 본인·`complete`·미묶임뿐이다. 다른 멤버·pending·보낸 뒤·지운 뒤·다른 테넌트는 영상과 같은 404(없는 id의 404와 바이트까지 같다), 비멤버·남의 자격은 403이다 | 같은 시험 ⑥⑦⑨ | `may_hold_media`의 항, 두 트랜잭션의 재판정 |
+| **IA5** 사진 모양은 닫힌 객체(길이·포스터·`hasPoster`는 422)이고, `kind`가 없는 본문은 영상이며, 모르는 `kind`(다른 낱말·대소문자·타입)는 422이다 | 같은 시험 ④, 라우트 단위 `the_kind_picks_one_of_two_closed_shapes`·`the_request_is_closed_and_its_poster_is_optional` | `ImageMediaRequest`의 `deny_unknown_fields`, 영상 `kind` 필드의 단일 값 |
+| **IA6** 보내기 응답·같은 보내기의 재생·채널 페이지·스레드 페이지·outbox 프레임·팀 AI 읽기 역할이 모두 **세 키** 요약을 싣고(영상 요약은 다섯 키 그대로), 선언 없는 사진은 `media` 키가 없다 | `an_image_summary_rides_every_projection`, 단위 `a_picture_summary_is_three_keys_and_never_a_length_or_a_poster`·`a_row_without_a_length_is_a_picture_and_no_row_is_no_summary`·`the_page_projection_reads_the_lateral_aggregate_and_hides_incomplete_rows` | `PAGED_ATTACHMENT_JOIN`의 `WHEN am.duration_ms IS NULL` 가지, `from_joined`의 사진 갈래 |
+| **IA7** `duration_ms`만 널 허용이고, 길이 없는 행에 포스터가 못 붙고(CHECK), 길이 범위·가로세로 범위가 그대로이며, 178을 두 번 적용해도 무해하고, 새 권한이 없다 | `a_picture_row_has_no_length_and_no_poster_and_the_migration_reapplies` | `attachment_media_still_ck`, `DROP NOT NULL` |
+| **IA8** openapi `oneOf` 두 갈래가 서버가 직렬화하는 키·`kind`·범위와 같고, 문서가 말하는 요청 두 모양만 라우트가 읽는다 | `attachment_media_image_contract`의 시험 넷 | 스펙과 서버 한쪽만 바꾸기 |
+| **IA9** 받는 쪽 코어: 사진 요약은 통과하고 범위 밖·모르는 `kind`는 요약만 버리며(첨부는 남는다), 영상 읽기(`attachmentMediaOf`)는 사진 요약을 읽지 않고, 사진 크기(`attachmentImageSizeOf`)는 이미지 첨부에서만 믿는다. **나간 v0.1.42~0.1.44의 거름(글자 그대로 얼린 사본)은 사진 요약만 버리고 첨부를 남긴다** | 코어 `attachmentMedia.test.ts`·`legacyMediaFilter.test.ts`·`attachmentFrames.test.ts`·`video.test.ts` | 거름의 범위·`kind` 갈래·키 목록, `attachmentImageSizeOf`의 mime 확인 |
+| **IA10** 보내는 쪽: 선언은 `complete` 뒤 보내기 가능으로 바꾸기 **전**이고, 닫힌 목록 밖·인라인 상한(8 MiB) 위는 재지도 보내지도 않으며, 재지 못하거나 범위 밖이면 보내지 않고, 실패·429·예산 초과는 보내기를 막지 않으며, 본문은 `{kind: "image", width, height}`이다 | 코어 `declareImageSize.test.ts`·`attachmentMediaApi.test.ts`, 웹·폰 선언 시험(아래 구현 기록) | 호출 순서, 닫힌 목록·상한 확인, 던지지 않음, 예산, `PUT` 경로 |
+| **IA11** 받는 쪽 칸: 요약 있는 처음 보는 사진의 첫 프레임 칸은 디코드 뒤의 칸과 같고(이동 0), 디코드된 크기가 다르면 한 번 고쳐 서며 선언은 기억되지 않고, 요약이 없으면 지금과 같다 | 웹·폰 칸 시험(아래 구현 기록) | 선언으로 첫 칸 세우기, 선언을 기억에 쓰지 않기, 잰 값이 이기기 |
+
+### 구현 기록 (같은 PR — 코어·웹·폰·재는 도구)
+
+- **코어**: `lib/attachmentMedia.ts`(`attachmentMediaFromWire` 영상|사진, `canDeclareImageSize`, `imageSizeDeclaration`), `features/attachments/model.ts`(`attachmentMediaOf`는 영상만, `attachmentImageSizeOf`는 이미지 첨부의 사진 요약만), `features/attachments/declareImageSize.ts`(선언 한 걸음: 던지지 않고 예산 4초), `lib/api.ts`(`setAttachmentMedia`).
+- **웹**: 받는 쪽 `timeline/AttachmentList.tsx`(`ImageTile`의 칸 = 잰 크기 ?? 선언, 오는 동안 같은 상자를 `<canvas>` 자리로 — `<svg>`는 `iconSystem.test`가 막는다) · 시험 `attachments/inlineImageDeclared.test.tsx`. 보내는 쪽 `attachments/draftStore.ts`(`uploadOne`: 완료 뒤·칩이 「올림」이 되기 전 `declareImageSize`, 닫힌 목록 밖·8 MiB 위는 재지 않음), `attachments/imageDimensions.ts`(`decodeDisplayBitmap`: `imageOrientation: "from-image"`를 직접 청하고, 그 값을 모르는 엔진의 `TypeError`에서만 기본값으로 한 번 다시 푼다), `attachments/draftThumbnail.ts`(트레이 썸네일이 같은 디코드를 나눠 쓴다 — 재기를 업로드 시작이 아니라 바이트가 다 올라간 뒤에 시작하는 까닭이다: 큰 사진을 두 번 풀지 않는다) · 시험 `draftStore.declareSize.test.ts`·`imageDimensions.test.ts`·`draftThumbnail.sharedDecode.test.tsx`.
+- **폰**: 받는 쪽 `attachments/AttachmentList.tsx`(`ImageTile`의 상태는 **잰 값만**이고 칸은 `measured ?? declared`다. 그래서 `Image.getSize`가 실패해도 선언 칸으로 남고 16:9로 되튀지 않는다) · 시험 `__tests__/attachmentPhotoRow.test.tsx`. 보내는 쪽 `attachments/draftStore.ts`, `attachments/imageSize.ts`(`measurePickedImage`: 받는 쪽과 같은 `Image.getSize`로 잰다. 고르개가 알려 주는 가로세로는 쓰지 않는다 — 플랫폼에 따라 방향을 적용하기 전의 값일 수 있다) · 시험 `__tests__/composerAttachments.test.tsx`.
+- **재는 도구**: `clients/mobile/measure/seed-media-lab.py`가 사진·GIF를 올린 뒤 가로세로를 선언한다(`--no-declare-sizes`는 선언 없이 올리는 기준선). 선언이 없는 시드로는 이 기능 경로가 돌지 않아 #5451 측정 흐름이 여전히 약 80pt 자람을 보인다.
+
+### 신뢰와 공격면
+
+- 값은 **보내는 기기의 선언**이고 서버는 범위만 본다. 쓰임은 **그림이 오기 전의 자리**뿐이며, 받는 쪽은 범위를 다시 막고(1~16,384 정수) 그림이 디코드되면 실제 크기를 쓴다(I6). 거짓 선언(극단적으로 납작한 값 포함)이 만드는 것은 그림이 올 때까지의 잘못된 자리와 한 번의 자리 고침이고, 그림을 가리거나 영구히 가는 띠로 두지 못한다.
+- 서버가 더하는 일은 **저장된 mime 비교, 첫 12바이트 범위 읽기 한 번(영상과 같은 `file_range`, 보관소 락 없이), 정수 두 개 저장**이다. 파서·디코더·새 crate·자식 프로세스가 없다. 매직이 맞는 가짜(헤더만 사진인 파일)는 통과한다 — 받는 쪽 디코더가 「미리보기를 못 불러왔어요」로 받고, 서버는 이 파일을 지금도 `attachment`·`nosniff`로만 내준다. 영상의 같은 한계(증보 5 D5 「신뢰」)와 같다.
+- 쓰기 권한은 영상과 **글자까지 같은 두 함수**(`may_hold_media`, content 라우트의 멤버십·읽기)가 쥔다. 사진이라고 넓어지지 않는다: 업로더 본인·`complete`·미묶임, 에이전트·개발자 토큰은 문이 없다. 예산도 `media_write` 하나를 영상과 나눈다(첨부 20개 한도에서 한 메시지의 선언 20번이 기본 60/창 안이다).
+- 테넌트: 같은 표·같은 RLS FORCE·복합 FK다. 다른 워크스페이스의 첨부 id는 그 요청의 `app.workspace_id` 아래에서 보이지 않아 같은 404다.
+
+### 바뀌지 않는 것
+
+증보 5 D5의 영상 요약·포스터(저장·읽기·헤더·예산·감사 모양), 업로드 세 라우트와 content 라우트의 헤더(`attachment`·`nosniff`·`no-store`), 증보 1·2의 읽기·수명 술어(청소기는 첨부 행을 따라가고 media 행은 CASCADE다), `attachment-media-lockdown`의 글자·열 목록·권한, `message_attachments_without_media_in_tx`(워커), 에이전트 업로드 금지(D3, 증보 8 W10의 한 길만 예외).
+
+### 남는 위험
+
+1. 새 클라이언트가 보낸 사진부터 요약이 있다(I8). 옛 판이 올린 사진·옛 메시지는 지금처럼 한 번 자란다.
+2. 선언이 틀리면(거짓·플랫폼 차이) 그 사진은 한 번 자리를 고친다(I6). 같은 바이트를 같은 자로 재므로 정직한 기기에서는 일어나지 않아야 하나, 폰 `Image.getSize`가 방향을 적용하는지는 실기기로 재지 못했다(`runtime-unverified`).
+3. 에이전트가 올린 그림에는 요약이 없다(I9).
+4. 한 멤버가 묶이지 않은 media 행을 쌓는 상한은 영상과 같이 예산·초안 회수가 쥔다(증보 5 D5 「예산」).
+5. **서버를 이 증보 이전 판으로 되돌리면(롤백) 길이 없는 행이 옛 서버의 페이지 읽기를 깬다.** 옛 `PAGED_ATTACHMENT_JOIN`은 길이를 그대로 JSON에 실어 `durationMs: null`을 만들고 옛 디코더(`i64`)가 그것을 거절하므로, 사진 요약이 든 메시지가 있는 채널의 페이지가 500이 된다(옛 per-message 투영은 요약만 빠뜨린다). 요약은 힌트일 뿐이라 지워도 잃는 것이 없다: 롤백 **전에** 소유자 권한으로 `DELETE FROM attachment_media WHERE duration_ms IS NULL`을 한 번 돌린다. 앞으로 가는 방향(새 서버·새 DB, 옛 클라이언트)은 안전하다. 같은 이유로 사진 요약을 쓰는 클라이언트는 이 서버가 배포된 **뒤에** 나가야 한다(옛 서버에는 `kind`가 422다 — I8). **이 정리는 슈퍼유저 연결로 실행한다**: 표가 FORCE RLS라 슈퍼유저가 아닌 소유자로 돌리면 오류 없이 0행을 지운다(보안 검수 1회차 Medium, 실측: 소유자 0행 · 슈퍼유저 7행 · `momo_app` 권한 거부). 실행 뒤 `SELECT count(*) FROM attachment_media WHERE duration_ms IS NULL`이 0인지 확인한다.
+
+### runtime-unverified
+
+실기기·실제 팀 서버의 왕복 500ms 처음 진입 흔들림(≤1pt) 실측(#5451 측정 흐름 재사용은 스택 검증 몫), 폰 `Image.getSize`·웹 `createImageBitmap`의 방향 처리와 큰 GIF·WebP의 크기 값, HEIC 등 닫힌 목록 밖 종류.
+
+### 검수가 먼저 볼 곳
+
+**R1** 사진 쓰기가 영상과 같은 두 함수·같은 404/403·같은 예산을 거치는가(I3). **R2** 서버가 사진 바이트를 읽는 곳이 첫 12바이트 한 번뿐이고 파서가 없는가(I3·F8). **R3** migration 178이 새 열·권한을 만들지 않고, 사진 행에 포스터가 들어갈 수 없는가(I4). **R4** 두 투영이 같은 모양이고 팀 AI 읽기 역할이 여전히 페이지를 읽는가(I5). **R5** 받는 쪽이 어떤 요약이 와도 첨부를 버리지 않고, 범위 밖·이미지가 아닌 첨부의 요약을 믿지 않는가(I6·I8).
