@@ -12,6 +12,7 @@ import { ExpressionStore } from "./ExpressionStore";
 import { expressionNoticeHandlers } from "./notices";
 import { bumpSessionGeneration } from "./disk/generation";
 import { startExpressionDiskBoot, sweepExpressionDiskOutside } from "./disk/boot";
+import { forgetExpressionDiskOnSignOut } from "./disk/signOut";
 import { openExpressionDisk } from "./disk/open";
 import { EXPRESSION_DISK_LIFETIME_MS, expressionDiskKey } from "@momo/core/features/expressions/diskCache";
 import { boot, createMemoryDiskBackend, diskName, ME, OTHER_ME, OTHER_WS, pic, uuid, WS, World, type Pic } from "./disk/testkit/world";
@@ -478,6 +479,45 @@ describe("MA8 세션 경계", () => {
     await store.image(world.pathOf(store, 2, "large"));
     await store.settleDisk();
     expect(keysOfCompartment(backend)).toEqual([]);
+    // 항목만이 아니라 칸(과 그 이름)도 남지 않는다: 쓰기는 지워진 칸을 **다시 만들기** 때문에 항목 하나를 지우는 것으로는 빈 칸 이름이 남는다(구현 검수 1회차 L1).
+    expect(backend.names()).toEqual([]);
+  });
+
+  it("로그아웃과 겹쳐 늦게 닿은 저장: 쓰기 문을 지난 저장이 디스크에 닿기 직전에 로그아웃(세대 올림 + 모든 칸 삭제)이 끝나도 빈 칸 이름이 되살아나지 않는다 (구현 검수 1회차 L1)", async () => {
+    const world = worldOf(3);
+    const backend = createMemoryDiskBackend();
+    await firstRun(world, backend, [1]); // 로그아웃이 지울 칸이 이미 있다
+    expect(backend.names()).toEqual([diskName()]);
+    const open = backend.open.bind(backend);
+    backend.open = (name) => {
+      const inner = open(name)!;
+      return { ...inner, write: async (entryKey, image) => { await forgetExpressionDiskOnSignOut(backend); await inner.write(entryKey, image); } };
+    };
+    const store = boot(world, backend);
+    await store.refresh();
+    expect(await store.image(world.pathOf(store, 2, "large"))).toBe(world.srcOf(2, "large")); // 그림은 그대로 그려진다
+    await store.settleDisk();
+    expect(keysOfCompartment(backend)).toEqual([]); // 바이트는 남지 않았고
+    expect(backend.names()).toEqual([]); // 칸 이름도 남지 않았다(항목만 지우면 빈 칸이 남는다)
+  });
+
+  it("저장소가 놓인 뒤(계정·워크스페이스 전환) 늦게 닿은 저장도 `dispose()` 가 지운 앞 칸을 되살리지 못한다 (구현 검수 1회차 L1)", async () => {
+    const world = worldOf(3);
+    const backend = createMemoryDiskBackend();
+    await firstRun(world, backend, [1]);
+    const opened: { store?: ExpressionStore } = {};
+    const open = backend.open.bind(backend);
+    backend.open = (name) => {
+      const inner = open(name)!;
+      return { ...inner, write: async (entryKey, image) => { opened.store!.dispose(); await inner.write(entryKey, image); } }; // 저장이 닿기 전에 전환이 앞 칸을 지운다
+    };
+    const store = boot(world, backend);
+    opened.store = store;
+    await store.refresh();
+    await store.image(world.pathOf(store, 2, "large"));
+    await store.settleDisk();
+    expect(keysOfCompartment(backend)).toEqual([]);
+    expect(backend.names()).toEqual([]);
   });
 });
 

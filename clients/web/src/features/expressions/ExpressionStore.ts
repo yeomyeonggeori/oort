@@ -298,8 +298,9 @@ export class ExpressionStore {
       if ((await sha256Hex(image.bytes).catch(() => null)) !== target.sha) return;
       if (!this.diskWriteAllowed(target, stale)) return;
       try { await disk.compartment.write(target.key, image); } catch { this.writesPaused = true; return; }
-      // 쓰는 사이 세션이 끝났거나 저장소가 놓였다면(다른 탭의 로그아웃) 되살린 항목을 그 자리에서 다시 지운다(R2-L3).
-      if (!disk.sessionUnchanged() || this.disposed) { await disk.compartment.remove([target.key]); return; }
+      // 쓰는 사이 세션이 끝났거나(다른 탭의 로그아웃) 저장소가 놓였다면(계정·워크스페이스 전환) 되살아난 칸을 **칸째** 다시 지운다(R2-L3, 구현 검수 1회차 L1).
+      // 쓰기는 이미 지워진 칸과 장부 줄을 다시 만들기 때문에 항목 하나만 지우면 그림 바이트는 없어도 워크스페이스·멤버 id 가 든 빈 칸 이름이 다음 시작까지 남는다.
+      if (!disk.sessionUnchanged() || this.disposed) { await disk.compartment.destroy(); return; }
       this.writesSinceTrim += 1;
       if (this.writesSinceTrim === 1 || this.writesSinceTrim % TRIM_EVERY_WRITES === 0) await disk.compartment.trim();
     })());
