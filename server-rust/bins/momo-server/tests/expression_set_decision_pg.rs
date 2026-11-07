@@ -2222,30 +2222,56 @@ async fn i1_the_choice_fields_are_judged_against_the_card_before_anything_is_rea
         );
         assert_unspent(&w, t, &c, version, why).await;
     }
-    // a list on a card that is not a set card is `not_allowed` too: the table is read from the card
-    let other = tenant(&w.su).await;
-    let token_other = login(&w, other, other.alice).await;
-    let invite = json!({
-        "approvalId": Uuid::new_v4(), "approve": true, "clientDecisionId": Uuid::new_v4(),
-        "expressionChoices": [item(1)],
-    });
-    let missing = w
-        .http
-        .post(format!(
-            "{}/v1/workspaces/{}/approvals/{}/decision",
-            w.base,
-            other.ws,
-            invite["approvalId"].as_str().unwrap()
-        ))
-        .bearer_auth(&token_other)
-        .json(&invite)
-        .send()
-        .await
-        .unwrap();
+    // a list on a card that is not a set card is `not_allowed` too — approving or rejecting: the table is
+    // read from the card. A pending `expression.create` card stands for "any other card" (the gate runs
+    // before any executor, so the card needs nothing but to be pending and in this room).
+    let (ws, channel, agent, run_again) = (t.ws, t.channel, t.agent, t.run_again);
+    let other_card = in_worker_tx(&w, t.ws, move |conn| {
+        Box::pin(async move {
+            momo_agent::create_pending_approval_in_tx(
+                conn,
+                ws,
+                momo_agent::NewApproval {
+                    run_id: run_again,
+                    channel_id: channel,
+                    requested_by: agent,
+                    action_type: actions::ACTION_TYPE_WORKSPACE_ACTION.to_string(),
+                    payload: actions::workspace_action_payload(
+                        actions::ACTION_EXPRESSION_CREATE,
+                        &json!({"drafts": []}),
+                        None,
+                        agent,
+                    ),
+                    expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("a pending card of another action");
+    for approve in [true, false] {
+        let (status, receipt) = decide(
+            &w,
+            t,
+            &token,
+            other_card,
+            approve,
+            Uuid::new_v4(),
+            Some(json!(good.clone())),
+            json!({}),
+        )
+        .await;
+        assert_eq!(
+            (status, receipt["status"].as_str()),
+            (400, Some("expression_choice_not_allowed")),
+            "a list on another card, approve={approve}: {receipt}"
+        );
+    }
     assert_eq!(
-        missing.status(),
-        404,
-        "an unknown approval is a 404 whatever it is sent"
+        approval_status(&w.su, other_card).await,
+        "pending",
+        "and that card is as it was"
     );
 }
 
@@ -2499,4 +2525,42 @@ async fn i2_a_deleted_trigger_or_a_requester_who_left_does_not_stop_a_set_withou
         assert!(matches!(status, 403 | 409), "{who}: {status} {receipt}");
         assert_unspent(&w, t2, &c2, version, who).await;
     }
+
+    // the one thing the decision DOES still read about the person who asked: they must still be an active
+    // human of the workspace (the resolver finds the requester through the run, as `member.avatar.set`
+    // does). A suspended requester closes the card for everybody — fail closed — and it ends with its time.
+    let t3 = tenant(&w.su).await;
+    let c3 = card(&w, t3, "sp", None).await;
+    let list = keep(&props(&w.su, c3.message).await, &[0, 1, 3]);
+    let version = catalog_version(&w.su, t3.ws).await;
+    sqlx::query("UPDATE member SET status = 'suspended'::member_status WHERE id = $1")
+        .bind(t3.alice)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let bob = login(&w, t3, t3.bob).await;
+    let (status, receipt) = decide(
+        &w,
+        t3,
+        &bob,
+        c3.approval,
+        true,
+        Uuid::new_v4(),
+        Some(json!(list)),
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        (status, receipt["status"].as_str()),
+        (409, Some("action_args_invalid")),
+        "{receipt}"
+    );
+    assert_unspent(
+        &w,
+        t3,
+        &c3,
+        version,
+        "a requester who is no longer an active human",
+    )
+    .await;
 }
