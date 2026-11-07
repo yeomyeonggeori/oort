@@ -27,6 +27,8 @@ name: "5325-attach-in-pill"
 # 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): ③ 알약 안 썸네일 줄(글 줄 위) · ④ 자판 위에서도 보이는 미리보기. 캡처와 design-review 는 planner 몫이다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 # 시뮬레이터 사진첩에 합성 그림(600x450)을 넣는다.

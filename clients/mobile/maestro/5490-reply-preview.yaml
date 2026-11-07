@@ -28,6 +28,8 @@ name: 5490-reply-preview
 # 같은 흐름을 세 번 돌려 3/3 이어야 한다. 보낼 때마다 대상 글 밑 스레드에 답글이 둘씩 쌓이지만 이 흐름은 보낸 뒤를 짚지 않는다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 # 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
 - runFlow:
     when:

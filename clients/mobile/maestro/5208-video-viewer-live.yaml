@@ -25,6 +25,8 @@ name: "5208-video-viewer-live"
 # 달라서 어느 영상을 눌렀는지 틀리지 않는다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 - tapOn:
