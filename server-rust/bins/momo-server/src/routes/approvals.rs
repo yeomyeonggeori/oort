@@ -5875,9 +5875,23 @@ mod tests {
             momo_agent::actions::Proposers::TeamAiOnly
         );
         assert_eq!(unfurl.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+        // ADR-0218 증보 6 §12 (#5460 S1b, A23): the set's two cards are the helper's alone and are
+        // on the allow-list (`is_team_ai_action`), so a card with the helper's mark is judged by the
+        // bundles and the read rule — taking either id off `TEAM_AI_ACTION_IDS` makes the helper's own
+        // card refuse its approval, and a card of either without the mark is refused.
+        let set_card = action_by_id("expression.set.create").expect("registered");
+        let plan_card = action_by_id("expression.set.plan").expect("registered");
+        for action in [set_card, plan_card] {
+            assert_eq!(action.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+            assert!(
+                momo_workspace_actions::team_ai::is_team_ai_action(action.id),
+                "{} must be on the allow-list",
+                action.id
+            );
+        }
         let marked = json!({"source": "team_ai", "tools": [], "web_searches": 0});
 
-        for action in [roles_card, unfurl, channel_create] {
+        for action in [roles_card, unfurl, channel_create, set_card, plan_card] {
             assert!(
                 matches!(
                     card_provenance(Some(&marked), action),
@@ -5895,7 +5909,7 @@ mod tests {
             Some(json!({"source": 1})),
             Some(json!("team_ai")),
         ] {
-            for action in [roles_card, unfurl] {
+            for action in [roles_card, unfurl, set_card, plan_card] {
                 assert!(
                     matches!(
                         card_provenance(via.as_ref(), action),

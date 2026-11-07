@@ -181,7 +181,9 @@ pub enum ActionArgs {
     ExpressionSetCreate(ExpressionSetSpec),
     /// `expression.set.plan` (ADR-0218 §12 L2.5): the staged set the plan card is about. Its
     /// executor is S5a's.
-    ExpressionSetPlan { set_id: Uuid },
+    /// `target` is the requester, filled by [`resolve_action_in_tx`] from the run: the person the
+    /// push audience and the role gate (`requesting_member`) are about, pinned as `pins.target`.
+    ExpressionSetPlan { set_id: Uuid, target: Option<Uuid> },
     InviteCreate {
         /// `momo_settings::normalized_invite_role`'s canonical spelling.
         role: &'static str,
@@ -1841,7 +1843,10 @@ pub fn expression_set_plan_args(args: &Value) -> Result<ValidatedActionArgs, Act
     Ok(ValidatedActionArgs {
         normalized: json!({"setId": set_id.to_string()}),
         rows: Vec::new(),
-        args: ActionArgs::ExpressionSetPlan { set_id },
+        args: ActionArgs::ExpressionSetPlan {
+            set_id,
+            target: None,
+        },
         summary: None,
     })
 }
@@ -3672,9 +3677,9 @@ pub async fn resolve_action_with_origin_in_tx(
             else {
                 return Ok(Err(unresolved()));
             };
-            if spec.subject.is_some_and(|face| face != requester.member) {
-                return Ok(Err(unresolved()));
-            }
+            // A face other than the requester's is not refused **here**: it is the proposal's
+            // `RequesterLacksRole` (`requester_could_approve_in_tx`, A22), and at the decision it is the
+            // face person alone who may approve (`adder_allows_in_tx` against the pinned subject).
             if let Some(face) = spec.subject {
                 if !face_is_human_in_room_in_tx(conn, workspace_id, face, requester.channel).await?
                 {
@@ -3687,7 +3692,7 @@ pub async fn resolve_action_with_origin_in_tx(
             ];
             GateSubject::Workspace
         }
-        ActionArgs::ExpressionSetPlan { set_id } => {
+        ActionArgs::ExpressionSetPlan { set_id, target } => {
             let Some(requester) = resolve_set_owner_in_tx(
                 conn,
                 workspace_id,
@@ -3703,6 +3708,7 @@ pub async fn resolve_action_with_origin_in_tx(
                     "expression set target did not resolve",
                 )));
             };
+            *target = Some(requester.member);
             GateSubject::Member(requester.member)
         }
         ActionArgs::ExpressionCreate {
@@ -4050,7 +4056,11 @@ pub async fn resolve_action_with_origin_in_tx(
             "setId": spec.set_id.to_string(),
             "subject": spec.subject.map(|id| id.to_string()),
         }),
-        ActionArgs::ExpressionSetPlan { set_id } => json!({"setId": set_id.to_string()}),
+        // `target`: the push audience of a `requesting_member` card reads `pins.target`.
+        ActionArgs::ExpressionSetPlan { set_id, target } => json!({
+            "target": target.map(|id| id.to_string()),
+            "setId": set_id.to_string(),
+        }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
