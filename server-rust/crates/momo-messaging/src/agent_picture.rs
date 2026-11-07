@@ -14,9 +14,13 @@
 //!   ([`agent_picture_binding_in_tx`]), never read from the row or the request. Every refusal is the
 //!   same `None`.
 //! * [`write_picture_in_tx`] — the api, after the picture was decoded and stored: the binding is asked
-//!   a third time, the workspace's own 24-hour ceiling is counted, and only then the `complete`
-//!   attachment row (uploader = the run's agent member), its audit row and the token's one-time
-//!   attachment record are written.
+//!   a third time, the workspace's own 24-hour ceiling is counted from `agent_picture_mark` (a table the
+//!   worker holds no privilege on and nothing cascades into), and only then the `complete` attachment
+//!   row (uploader = the run's agent member), the mark row that makes it count, its audit row and the
+//!   token's one-time attachment record are written.
+//!
+//! The day-old sweep of the token table and of the mark table is the **api's** (inside [`redeem_in_tx`],
+//! in the spend's own transaction): the worker holds no DELETE on either table any more (#5530).
 //!
 //! **One function decides who may write** (security review M1): [`agent_picture_binding_in_tx`] is what
 //! the mint, the redeem and the row write all call. It is *not* `self_media::requester_in_conversation_in_tx`
@@ -46,21 +50,33 @@ pub const AGENT_MEDIA_TTL_SECS: i64 = 60;
 /// How many pictures one run may write (ADR-0201 R10, v1). The table's CHECK is open to 4; widening
 /// this constant is a code change plus an amendment, not a migration.
 pub const AGENT_PICTURES_PER_RUN: i16 = 1;
-/// The api's own backstop (security review M2): the most agent-written attachments a workspace may
-/// gain in 24 hours. The same number as ADR-0201 P7's highest settable delegation cap, so a legitimate
-/// configuration never reaches it; a compromised worker that forges run, token or membership rows does.
+/// The api's own backstop (security review M2): the most pictures the api may write for agents in one
+/// workspace in 24 hours. The same number as ADR-0201 P7's highest settable delegation cap, so a
+/// legitimate configuration never reaches it; a compromised worker that forges run, token or membership
+/// rows does.
 ///
-/// **What it does not bound** (implementation review M-1 (b), ADR-0151 증보 8 T2): it counts `attachment`
-/// rows, and `momo_worker` holds UPDATE and DELETE on that table, so a worker compromised at the database
-/// level can roll the count back (`created_at`, `status`, a deleted row). Counting from a source the
-/// worker cannot shrink is decided with the first caller (S4, #5372); this constant is not that.
+/// **What it counts** (#5530, implementation review M-1 (b), ADR-0151 증보 8 보충): the rows of
+/// `agent_picture_mark` of the last 24 hours (a rolling window on the database's clock), one per picture
+/// [`write_picture_in_tx`] wrote. Not `attachment` rows and not token rows: `momo_worker` can rewrite or
+/// delete the first, and a foreign-key cascade (run, channel, workspace — which runs as the table's owner)
+/// clears the second whatever the table's privileges say. The mark table has no foreign key, no privilege
+/// for the worker, a trigger that refuses every UPDATE and the delete of any row inside the window, so a
+/// worker compromised at the database level cannot make today's number smaller.
+///
+/// **What it still does not bound**: a worker that can write the tenant tables can also create a whole
+/// new workspace, and that workspace starts at zero (the ceiling is per workspace).
 pub const AGENT_PICTURES_DAILY_CEILING: i64 = 200;
 /// The most bytes the route reads: one number with the decoder's input ceiling and the read route's
 /// (a test pins the three together).
 pub const AGENT_PICTURE_MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 
-/// Spent and expired rows stay a day, then the next mint in that workspace drops them.
-const CLEANUP_AFTER_SECS: f64 = 86_400.0;
+/// Spent and expired token rows stay a day past their expiry, then the api's next spend in that workspace
+/// drops them ([`sweep_in_tx`]).
+const TOKEN_SWEEP_AFTER_SECS: f64 = 86_400.0;
+/// A mark row is swept once it is older than **twice** the counting window (48 hours), so what the sweep
+/// takes is long gone from every count — and the table's trigger refuses a delete inside the 24 hours
+/// whatever this number says.
+const MARK_SWEEP_AFTER_SECS: f64 = 172_800.0;
 
 /// A freshly minted write address: the token (shown once, never stored), when it dies and its slot.
 ///
@@ -191,14 +207,7 @@ pub async fn mint_with_ttl_in_tx(
     let Some(token) = new_token() else {
         return Ok(None);
     };
-    sqlx::query(
-        "DELETE FROM attachment_write_token \
-          WHERE workspace_id = $1 AND expires_at < clock_timestamp() - make_interval(secs => $2)",
-    )
-    .bind(workspace_id)
-    .bind(CLEANUP_AFTER_SECS)
-    .execute(&mut *conn)
-    .await?;
+    // No sweep here: the worker holds no DELETE on the token table (#5530). The api sweeps when it spends.
     let taken: Vec<i16> = sqlx::query_scalar(
         "SELECT slot FROM attachment_write_token WHERE workspace_id = $1 AND run_id = $2",
     )
@@ -270,6 +279,10 @@ pub async fn redeem_in_tx(
     let Some((run_id, agent_member_id, slot)) = spent else {
         return Ok(None);
     };
+    // A proven token is the api's one reason to sweep this workspace's old rows (#5530). It runs before
+    // the binding is asked, in the same transaction, so a refusal below keeps the sweep like it keeps the
+    // spend.
+    sweep_in_tx(conn, workspace_id).await?;
     let Some(binding) =
         agent_picture_binding_in_tx(conn, workspace_id, run_id, agent_member_id).await?
     else {
@@ -282,6 +295,38 @@ pub async fn redeem_in_tx(
         channel_id: binding.channel_id,
         slot,
     }))
+}
+
+/// The api's sweep of its own workspace's old rows, run when a token has just been spent (#5530; the worker
+/// used to sweep the token table when it minted and no longer may: it holds no DELETE on either table).
+///
+/// * token rows a day past their expiry — hygiene, nothing counts from them;
+/// * mark rows older than [`MARK_SWEEP_AFTER_SECS`] (twice the 24-hour counting window): **only rows no count
+///   can see any more**, so today's number is never touched. The mark table's trigger refuses a delete inside
+///   the 24 hours as well, so a wrong number here fails the transaction instead of shrinking the count.
+///
+/// Not a periodic job: the api cannot list tenants (`momo-server`'s `attachment_reclaim.rs` explains what a
+/// cross-tenant tick would cost a non-bypass role), so each call sweeps the workspace it is already bound
+/// to — the same shape as the mint-time sweep it replaces. A workspace nobody writes to again keeps its last
+/// rows (ids and timestamps, never content).
+async fn sweep_in_tx(conn: &mut PgConnection, workspace_id: Uuid) -> Result<(), DbError> {
+    sqlx::query(
+        "DELETE FROM attachment_write_token \
+          WHERE workspace_id = $1 AND expires_at < clock_timestamp() - make_interval(secs => $2)",
+    )
+    .bind(workspace_id)
+    .bind(TOKEN_SWEEP_AFTER_SECS)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "DELETE FROM agent_picture_mark \
+          WHERE workspace_id = $1 AND written_at < clock_timestamp() - make_interval(secs => $2)",
+    )
+    .bind(workspace_id)
+    .bind(MARK_SWEEP_AFTER_SECS)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// What the route stored and wants recorded. Every field is the **server's** value: the name is
@@ -307,7 +352,8 @@ pub enum PictureWriteRefused {
     /// The binding no longer holds (the run ended or was cancelled, someone left, the channel was
     /// archived) — asked a third time, after the decode.
     RunOver,
-    /// The workspace already gained [`AGENT_PICTURES_DAILY_CEILING`] agent-written attachments today.
+    /// The workspace already has [`AGENT_PICTURES_DAILY_CEILING`] marks (pictures the api wrote for agents)
+    /// in the last 24 hours.
     CapReached,
 }
 
@@ -342,13 +388,13 @@ pub async fn write_picture_in_tx(
         return Ok(Err(PictureWriteRefused::RunOver));
     }
     // The api counts for itself (M2): a worker that forges run, token or membership rows must not make
-    // this unbounded. It counts `attachment` rows, which that worker can also rewrite: see
-    // `AGENT_PICTURES_DAILY_CEILING` for what this backstop does not bound.
+    // this unbounded. It counts the marks of the last 24 hours — rows only this role writes and nothing
+    // (no privilege, no foreign-key cascade) lets the worker shrink: see `AGENT_PICTURES_DAILY_CEILING`.
+    // The window is the trigger's too (`179_agent_picture_mark.sql`): the rows this counts are exactly the
+    // rows the table will not let anyone delete.
     let today: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM attachment a \
-           JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.uploader_member_id \
-          WHERE a.workspace_id = $1 AND m.kind = 'agent' AND a.status = 'complete' \
-            AND a.created_at > clock_timestamp() - interval '24 hours'",
+        "SELECT count(*) FROM agent_picture_mark \
+          WHERE workspace_id = $1 AND written_at > clock_timestamp() - interval '24 hours'",
     )
     .bind(workspace_id)
     .fetch_one(&mut *conn)
@@ -371,6 +417,17 @@ pub async fn write_picture_in_tx(
     .bind(&picture.mime)
     .bind(picture.size_bytes)
     .fetch_one(&mut *conn)
+    .await?;
+    // The mark that makes this picture count, in the transaction that writes it: both land or neither does.
+    sqlx::query(
+        "INSERT INTO agent_picture_mark (workspace_id, attachment_id, run_id, agent_member_id) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(workspace_id)
+    .bind(attachment_id)
+    .bind(target.run_id)
+    .bind(target.agent_member_id)
+    .execute(&mut *conn)
     .await?;
     let recorded = sqlx::query(
         "UPDATE attachment_write_token SET attachment_id = $4 \

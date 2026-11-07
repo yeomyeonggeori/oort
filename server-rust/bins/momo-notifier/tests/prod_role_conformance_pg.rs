@@ -1852,9 +1852,9 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
     // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
     // lockdown, see below), `attachment_media` (#4673 C5 lockdown, see below),
-    // `attachment_write_token` (#5371 lockdown, see below) and the four `expression_set*` tables
-    // (#5459 S1a lockdown, see below) are the only tables outside the rule; everything else must be
-    // readable and writable by the three ALL-TABLES roles.
+    // `attachment_write_token` (#5371 lockdown, see below), `agent_picture_mark` (#5530 lockdown, see
+    // below) and the four `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
+    // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -1868,6 +1868,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname <> 'team_ai_task' \
             AND c.relname <> 'attachment_media' \
             AND c.relname <> 'attachment_write_token' \
+            AND c.relname <> 'agent_picture_mark' \
             AND c.relname NOT LIKE 'expression\\_set%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
@@ -2040,11 +2041,12 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .await
     .expect("attachment media table count");
     // `attachment-write-token-lockdown` (bootstrap_runtime_roles.sql, #5371; ADR-0151 증보 8 W1, security
-    // review M2): a row lets whoever presents its token write one re-encoded picture into an in-flight
-    // run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so their table privileges
-    // are what keeps a forged row out of a role with no business writing one. `momo_worker` mints and
-    // sweeps (SELECT/INSERT/DELETE), `momo_app` spends a token and records the attachment it made
-    // (SELECT/UPDATE), relay and notifier touch nothing; no role holds TRUNCATE/REFERENCES/TRIGGER.
+    // review M2; re-issued by #5530): a row lets whoever presents its token write one re-encoded picture
+    // into an in-flight run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so their
+    // table privileges are what keeps a forged row out of a role with no business writing one.
+    // `momo_worker` mints and reads (SELECT/INSERT — no DELETE any more), `momo_app` spends a token,
+    // records the attachment it made and sweeps the rows a day past their expiry (SELECT/UPDATE/DELETE),
+    // relay and notifier touch nothing; no role holds TRUNCATE/REFERENCES/TRIGGER.
     let attachment_write_drift: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
                        has_table_privilege(r.rolname, c.oid, p.priv)) \
@@ -2054,8 +2056,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname = 'attachment_write_token' \
             AND has_table_privilege(r.rolname, c.oid, p.priv) \
-                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
-                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'DELETE'))) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE', 'DELETE')) \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT'))) \
           ORDER BY 1",
     )
     .fetch_all(&db.su)
@@ -2068,6 +2070,34 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("attachment write token table count");
+    // `agent-picture-mark-lockdown` (bootstrap_runtime_roles.sql, #5530; ADR-0151 증보 8 보충, security
+    // review M-1 (b)): one row per picture the api wrote for an agent is what the api's daily ceiling counts,
+    // and the BYPASSRLS roles skip RLS, so their table privileges are what keeps today's number out of a
+    // worker's reach. `momo_app` counts, writes the row and sweeps (SELECT/INSERT/DELETE); the worker,
+    // relay, notifier and the helper's read role hold nothing; nobody updates a row; no role holds
+    // TRUNCATE/REFERENCES/TRIGGER.
+    let agent_picture_mark_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'agent_picture_mark' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'INSERT', 'DELETE')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("agent picture mark privilege scan");
+    let agent_picture_mark_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'agent_picture_mark'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("agent picture mark table count");
     // `expression-set-lockdown` (bootstrap_runtime_roles.sql, #5459 S1a; ADR-0218 증보 6 §12 L10.1):
     // the set tables hold what the team AI planned and made before any person approved it, the writer
     // is the BYPASSRLS `momo_worker`, and the BYPASSRLS roles skip RLS, so their table privileges are
@@ -2221,6 +2251,15 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         attachment_write_drift.is_empty(),
         "attachment_write_token privileges drifted from the lockdown: {attachment_write_drift:?}"
+    );
+    assert_eq!(
+        agent_picture_mark_tables, 1,
+        "the scan must actually see the agent_picture_mark table, or it proves nothing"
+    );
+    assert!(
+        agent_picture_mark_drift.is_empty(),
+        "agent_picture_mark privileges drifted from the lockdown (momo_app alone holds SELECT/INSERT/DELETE): \
+         {agent_picture_mark_drift:?}"
     );
 }
 
