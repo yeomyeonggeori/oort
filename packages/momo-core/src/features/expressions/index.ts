@@ -4,6 +4,7 @@ export * from "./cache";
 export * from "./changeNotice";
 export * from "./search";
 export * from "./kind";
+export * from "./gifLoop";
 export * from "./browse";
 export * from "./sets";
 export * from "./favorites";

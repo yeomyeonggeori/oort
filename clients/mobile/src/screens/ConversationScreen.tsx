@@ -2556,7 +2556,7 @@ export default function ConversationScreen({
               onSend={onSend}
               onSlashCommand={onSlashCommand}
               onKeyBlockedChange={setComposerKeyBlocked}
-              // 이모티콘·GIF 는 입력창 위 미리 보기에 올려 글과 함께 보낸다(#5452). 스레드 입력창은 켜지 않는다(`:이름:` 글).
+              // 이모티콘·GIF 는 입력창 위 미리 보기에 올려 글과 함께 보낸다(#5452). 답글 머리말이 걸려 있어도 같고(#5490), 스레드 입력창(`ThreadPanel`)도 켠다.
               expressionBundle
             />
             </View>

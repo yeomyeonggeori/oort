@@ -3214,6 +3214,12 @@ export const catalog: MessageCatalog = {
       "value": "Favorites"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "Frequent & recent"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -4056,6 +4062,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "expressions.suggest.settingHint": [
+    {
+      "type": 0,
+      "value": "Shows matching emoticons above the message box when you pause while typing."
+    }
+  ],
+  "expressions.suggest.settingLabel": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions"
     }
   ],
   "inbox.approval.open": [

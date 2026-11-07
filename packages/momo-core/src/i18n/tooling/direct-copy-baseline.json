@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "b42cf4b7168aaf902ae94c755b70f02d162988fd",
+  "baselineHead": "19f3af6d97a7af3165b086e992431fa94081e500",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -154,7 +154,7 @@
     "clients/mobile/src/features/conversation/useLongPress.ts": 6,
     "clients/mobile/src/features/conversation/usePendingApprovals.ts": 4,
     "clients/mobile/src/features/conversation/usePersonalAgentCall.ts": 10,
-    "clients/mobile/src/features/conversation/useTimeline.ts": 23,
+    "clients/mobile/src/features/conversation/useTimeline.ts": 22,
     "clients/mobile/src/features/conversation/useTypingSender.ts": 3,
     "clients/mobile/src/features/decisionStage/DecisionStage.tsx": 64,
     "clients/mobile/src/features/decisionStage/DecisionStageScope.tsx": 4,

@@ -1,5 +1,6 @@
 import type {ExpressionSection} from '@momo/core/features/expressions/gridSections';
 import type {Expression} from '@momo/core/features/expressions/types';
+import type {ExpressionUsage} from '@momo/core/features/expressions/usage';
 
 // =============================================================================
 // 키보드 자리 창(이모티콘·GIF 탭)의 격자 산수 (#5452). 순수 모듈이다: 구역을 줄로 풀어 놓고, 구역마다 위쪽 위치와 높이를 정하고, 스크롤 위치가 어느 구역인지 답한다.
@@ -7,6 +8,15 @@ import type {Expression} from '@momo/core/features/expressions/types';
 // 구역 목록(`buildExpressionSections`)은 코어가 웹과 같은 함수로 만든다. 폰이 더하는 것은 **높이가 글자 크기에 안 흔들리는 줄**이다: 구역 이름줄과 칸 줄을 고정 높이로 두어
 // (이름줄은 글자 배율 상한이 있다) 세트 띠가 구역으로 건너뛰는 위치를 그리기 전에 산수로 안다. 측정(`onLayout`)에 기대면 화면 밖 구역의 위치를 모른다.
 // =============================================================================
+
+/**
+ * 창을 여는 순간 **한 번** 쥐는 사용 기록과 시각(#5503). 이모티콘 탭 맨 위 「자주·최근」 칸의 점수는 이 둘로만 센다 - 창이 열려 있는 동안 보내기가 성공해 기록이 바뀌어도
+ * 칸 순서가 출렁이지 않고, 창을 다시 열 때만 새로 정한다(그림 목록은 계속 실시간이라 지워진 그림은 바로 빠진다). 탭을 바꿔도 그대로여야 해서 격자(탭마다 새로 선다)가 아니라 창이 쥔다.
+ */
+export interface PanelOpening {
+  usage: ExpressionUsage;
+  nowMs: number;
+}
 
 /** 구역 이름줄의 높이(pt). 글자는 한 줄이고 배율 상한이 있어 이 높이를 넘지 않는다. */
 export const PANEL_HEADER_HEIGHT = 32;

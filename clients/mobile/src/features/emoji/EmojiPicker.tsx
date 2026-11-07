@@ -93,6 +93,26 @@ const TABS = [...EMOJI_CATEGORIES, {id: 'team', label: '우리 팀'}] as const;
 // 줄 사이 틈은 `space.sm`(8) — 앞 판의 `space.xs`(4)는 이모티콘 칸이 위아래로 붙어 보였다(#5330).
 const ROW_HEIGHT = TOUCH_TARGET + space.sm;
 
+/**
+ * 시트의 머리 - 원형 X 와 제목. 상태 고르개(`EmojiPicker`)와 반응 고르개(`ReactionPicker`)가 같은 머리를 쓴다. 시트 안에서는 그릇이 쥔 닫기(스크림·끌기와 같이 미끄러져 나간다)가
+ * 우선이고, 시트 밖에서만 `onClose` 를 부른다.
+ */
+export function EmojiPickerHeader({
+  onClose,
+}: {
+  onClose: () => void;
+}): React.JSX.Element {
+  const close = usePageSheetClose() ?? onClose;
+  return (
+    <SheetHeader
+      title="이모지 고르기"
+      closeLabel="이모지 고르기 닫기"
+      onClose={close}
+      closeTestID="emoji-picker-close"
+    />
+  );
+}
+
 /** Sheet body shared by reactions and status. The caller owns the one PageSheet. */
 export function EmojiPicker({
   onSelect,
@@ -130,7 +150,6 @@ export function EmojiPicker({
   );
   const list = useRef<FlatList<CatalogEmoji[]>>(null);
   const scrollProps = usePageSheetScrollProps();
-  const closePicker = usePageSheetClose() ?? onClose;
 
   useEffect(() => {
     let alive = true;
@@ -190,14 +209,7 @@ export function EmojiPicker({
 
   return (
     <>
-      {embedded ? null : (
-        <SheetHeader
-          title="이모지 고르기"
-          closeLabel="이모지 고르기 닫기"
-          onClose={closePicker}
-          closeTestID="emoji-picker-close"
-        />
-      )}
+      {embedded ? null : <EmojiPickerHeader onClose={onClose} />}
       <View style={styles.controls}>
         {embedded ? null : (
           <TextInput

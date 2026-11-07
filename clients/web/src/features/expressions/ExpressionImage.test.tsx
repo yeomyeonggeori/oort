@@ -7,6 +7,8 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
+import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
+import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
 import type { Expression, ExpressionImage as Picture } from "@momo/core/features/expressions/types";
 import { ExpressionStore } from "./ExpressionStore";
 import type { ExpressionTransport } from "./transport";
@@ -191,5 +193,83 @@ describe("ExpressionImage: 누르면 사라지거나 흔들리던 것 (#5456)", 
     // 오프라인: 받아 둔 그림도 걷고 글자만 남긴다.
     await act(async () => { store.setOffline(true); });
     expect(image(view.container)).toBeNull(); expect(view.container.textContent).toContain(`:${gifItem.name}:`);
+  });
+});
+
+// #5504: 반응 칩의 GIF 는 4번 돌고 멈추지 않는다(owner 2026-11-07). 서버 GIF 는 반복 횟수가 4번(NETSCAPE 3)이라 타이머만 빼서는 엔진이 마지막 장면에서 멈추므로,
+// 반응 칩은 같은 그림의 반복 횟수만 무한으로 바꾼 주소를 그린다. 엔진이 정말 계속 도는지는 `ReactionChips.motion.browser.test.ts` 가 실제 엔진으로 잰다.
+describe("ExpressionImage: 반응 칩의 GIF 는 계속 움직인다 (#5504)", () => {
+  // 바이트가 진짜 GIF 여야 반복 횟수를 바꾼 주소가 원본과 달라진다(위의 짧은 글자 GIF 는 GIF 머리 6글자뿐이라 바뀌지 않는다).
+  const SERVER_GIF = `data:image/gif;base64,${FIXTURE_MEDIA.gif.bodyBase64}`;
+  const LOOPING_GIF = loopForeverDataUrl(SERVER_GIF);
+  function buildReal() {
+    const transport = {
+      json: vi.fn(),
+      image: vi.fn(async (path: string) => path.includes("size=thumb") ? THUMB : SERVER_GIF),
+    } satisfies ExpressionTransport;
+    const store = new ExpressionStore(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, transport);
+    return { store, transport };
+  }
+  const smallCalls = (transport: { image: { mock: { calls: unknown[][] } } }) => transport.image.mock.calls.filter(([path]) => String(path).includes("size=small")).length;
+  // 가짜 시계 아래에서 새로 마운트해 4회 뒤 시각을 건너뛴다(기존 시험과 같은 방법).
+  async function afterFourPlays(store: ExpressionStore, size: "reaction" | "large", view: ReturnType<typeof render>) {
+    await waitFor(() => expect(image(view.container)?.src).not.toBe(THUMB));
+    vi.useFakeTimers();
+    view.rerender(wrapper(store, <ExpressionImage key="clock" item={gifItem} size={size} />));
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(STOP_AFTER_MS + 1_000); });
+    await flush();
+  }
+
+  it("반응 칩은 4번 돌 시간이 지나도 멈춘 그림(thumb)으로 바뀌지 않고, 같은 시간이 지난 큰 그림은 멈춘다", async () => {
+    const { store } = buildReal();
+    const chip = render(wrapper(store, <ExpressionImage item={gifItem} size="reaction" />));
+    await afterFourPlays(store, "reaction", chip);
+    expect(image(chip.container)?.src).toBe(LOOPING_GIF);
+    expect(chip.queryByRole("button")).toBeNull();
+    cleanup(); vi.useRealTimers();
+    // 대조: 같은 시계에서 큰 그림은 정지 thumb 으로 바뀐다(메시지 속 GIF 의 4번 규칙은 그대로다).
+    const large = render(wrapper(store, <ExpressionImage item={gifItem} size="large" />));
+    await afterFourPlays(store, "large", large);
+    expect(image(large.container)?.src).toBe(THUMB);
+  });
+
+  it("반응 칩은 원본이 아니라 반복 횟수가 바뀐 주소를 그린다: 원본 GIF 와 주소가 다르고 그림 요청은 같다", async () => {
+    const { store, transport } = buildReal();
+    expect(LOOPING_GIF).not.toBe(SERVER_GIF);
+    const chip = render(wrapper(store, <ExpressionImage item={gifItem} size="reaction" />));
+    await waitFor(() => expect(image(chip.container)?.src).toBe(LOOPING_GIF));
+    cleanup();
+    const inline = render(wrapper(store, <ExpressionImage item={gifItem} size="inline" />));
+    await waitFor(() => expect(image(inline.container)?.src).toBe(SERVER_GIF));
+    // 반응 칩도 글 사이 그림도 서버 그림 한 번(small)만 받는다: 반복 횟수만 바꾼 주소는 받은 그림에서 만든다.
+    expect(smallCalls(transport)).toBe(1);
+  });
+
+  it("같은 그림의 반응 칩 여럿은 한 번 받고 한 주소를 나눠 쓴다(디코드를 한 번만)", async () => {
+    const { store, transport } = buildReal();
+    const row = render(wrapper(store, <>{[0, 1, 2, 3, 4, 5].map((index) => <ExpressionImage key={index} item={gifItem} size="reaction" />)}</>));
+    await waitFor(() => expect(row.container.querySelectorAll("img")).toHaveLength(6));
+    await waitFor(() => expect([...row.container.querySelectorAll("img")].every((node) => node.src === LOOPING_GIF)).toBe(true));
+    expect(smallCalls(transport)).toBe(1);
+  });
+
+  it("동작 줄이기는 멈춘 첫 장면(thumb)이고 반복 횟수를 바꾼 그림을 만들지도 않는다", async () => {
+    vi.mocked(window.matchMedia).mockImplementation(() => ({ matches: true, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+    const { store, transport } = buildReal();
+    const chip = render(wrapper(store, <ExpressionImage item={gifItem} size="reaction" />));
+    await waitFor(() => expect(image(chip.container)?.src).toBe(THUMB));
+    await settle();
+    expect(image(chip.container)?.src).toBe(THUMB);
+    expect(smallCalls(transport)).toBe(0);
+  });
+
+  it("화면 밖의 반응 칩은 멈춘 그림이고 돌아오면 계속 도는 그림이다", async () => {
+    const sight = controlledVisibility(); const { store } = buildReal();
+    const chip = render(wrapper(store, <ExpressionImage item={gifItem} size="reaction" />));
+    await sight.report(true); await waitFor(() => expect(image(chip.container)?.src).toBe(LOOPING_GIF));
+    const node = image(chip.container)!;
+    await sight.report(false); await settle(); expect(image(chip.container)).toBe(node); expect(node.src).toBe(THUMB);
+    await sight.report(true); await settle(); expect(image(chip.container)).toBe(node); expect(node.src).toBe(LOOPING_GIF);
   });
 });

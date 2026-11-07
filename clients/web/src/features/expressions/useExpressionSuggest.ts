@@ -3,6 +3,7 @@ import { EXPRESSION_SUGGEST_DEBOUNCE_MS, suggestExpressions, suggestionKeywords 
 import { recentExpressions } from "@momo/core/features/expressions/usage";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { useExpressions } from "./context";
+import { useExpressionSuggestOn } from "./suggestSetting";
 import { muteKeywords, mutedKeywords } from "@momo/core/features/expressions/suggestMute";
 
 // =============================================================================
@@ -16,6 +17,8 @@ import { muteKeywords, mutedKeywords } from "@momo/core/features/expressions/sug
 //     (「킹 받네」 → 「킹받네」 꼬리표) 나중에 「킹받네」만 쳤을 때 줄이 다시 뜬다.
 //   · `enabled` 가 거짓이면(오프라인·이미 미리 본 그림이 있음·멘션 목록이나 명령이 열려 있음) 줄이 없다. 보관함이 아직 안 왔거나 읽지 못했을 때도
 //     없다: 그림이 없는 줄을 보이지 않는다. 보관함 상태의 안내는 이모티콘 창이 말하고, 이 줄은 맞는 것이 있을 때만 선다.
+//   · 설정 › 모양 › 「이모티콘 추천」(#5493)을 끄면 줄이 **아예** 서지 않는다(`enabled` 와 같은 칸이지만 사람이 정한 것이라 이 훅이 직접 읽는다 - 이 훅을 쓰는 입력창은 모두 따라온다).
+//     끄면 그 순간 줄이 걷히고 다시 켜면 이미 친 글에 대해 0.3초 뒤 다시 선다(`active` 가 효과의 의존이라 기다림이 처음부터 다시 시작한다) - 앱을 다시 켤 필요가 없다.
 // 즐겨찾기·최근 쓴 차례는 맞는 것들의 **순서**만 바꾼다(코어가 채워 넣지 않는다).
 // =============================================================================
 
@@ -43,11 +46,13 @@ export function useExpressionSuggest({
   text: string;
   enabled: boolean;
 }): ExpressionSuggest {
-  const { cache, usage, favorites, failure, offline } = useExpressions();
+  const { store, cache, usage, favorites, failure, offline } = useExpressions();
   const scope = `${workspaceId}:${channelId}`;
-  // 보관함을 한 번 받았고(`version`) 마지막 읽기가 실패하지 않았고(`failure` 가 비어 있다) 보관함 저장소가 오프라인이 아닐 때만 선다: 아직 안 왔거나, 읽지 못했거나,
+  // 사람이 설정에서 정한 켬·끔(#5493). 이 기기 · 이 워크스페이스 · 이 사람 기준이라 보관함 저장소가 아는 사람 id 로 읽는다(저장소가 없으면 어차피 줄이 없다).
+  const suggestOn = useExpressionSuggestOn(store?.workspaceId ?? "", store?.memberId ?? "");
+  // 설정이 켜져 있고, 보관함을 한 번 받았고(`version`) 마지막 읽기가 실패하지 않았고(`failure` 가 비어 있다) 보관함 저장소가 오프라인이 아닐 때만 선다: 아직 안 왔거나, 읽지 못했거나,
   // 그림 바이트를 받을 수 없으면 보일 그림이 없다.
-  const active = enabled && cache.version !== null && failure === null && !offline;
+  const active = enabled && suggestOn && cache.version !== null && failure === null && !offline;
   const [shown, setShown] = useState<{ scope: string; text: string; items: readonly Expression[] } | null>(null);
   const [closed, setClosed] = useState<{ scope: string; text: string } | null>(null);
   // 끈 낱말은 모듈 기억에 있다(`suggestMute`): 바꾸면 이 훅을 다시 그리게 한다.

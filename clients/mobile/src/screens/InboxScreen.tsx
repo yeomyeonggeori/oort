@@ -14,6 +14,7 @@ import {
 } from '@momo/core/features/inbox/mailbox';
 import {
   agentsFeedPartial,
+  approvalOpensOnCard,
   availableInboxFilters,
   filterLabel,
   parseFilter,
@@ -45,6 +46,7 @@ import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {ds2Radius, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {useFormatMessage} from '../i18n/useFormatMessage';
+import {SET_ID, SET_WORD} from '../features/expressions/setWords';
 import {
   ApprovalDecision,
   decisionReceiptCopy,
@@ -243,7 +245,11 @@ export default function InboxScreen({
    * 조용한 기본값이 되면, 재조회가 사라진 것을 아무도 알아채지 못한다.
    */
   active?: boolean;
-  onOpenConversation: (channelId: string, title: string) => void;
+  onOpenConversation: (
+    channelId: string,
+    title: string,
+    anchor?: {messageId: string; seq: number},
+  ) => void;
 }): React.JSX.Element {
   // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
   const clearance = useTabBarClearance();
@@ -446,6 +452,29 @@ export default function InboxScreen({
       // `approvalId`는 core가 대기 행에만 싣는다. 없으면 결정할 대상이 없다는
       // 뜻이므로 컨트롤도 없다.
       if (item.approvalId === undefined) return null;
+      // 이모티콘 세트의 두 카드(계획 카드·세트 카드)는 받은함에서 승인·거부로 결정하지 않는다(ADR-0218 §12 L2.5·보안 검수 R2-H1, planner 11-07 #5463):
+      // 계획 카드의 「이대로 만들기」는 썸네일·고지를 본 채로, 세트 카드는 칸을 고른 채로만 결정된다. 줄에는 「열기」 하나만 서고, 누르면 그 대화의 그 카드로
+      // 간다. 열기는 결정이 아니라 이동이라 어느 탭에서도 연결이 끊겨도 선다(웹 받은함과 같은 순서: 결정 없음 → 열기 → 오프라인 → 결정).
+      if (approvalOpensOnCard(item)) {
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={formatMessage('inbox.approval.open')}
+            onPress={() =>
+              onOpenConversation(
+                item.channelId,
+                item.channelLabel,
+                item.messageId !== undefined && item.seq !== undefined
+                  ? {messageId: item.messageId, seq: item.seq}
+                  : undefined,
+              )
+            }
+            style={({pressed}) => [styles.openButton, pressed && styles.openPressed]}
+            testID={SET_ID.inboxOpen(item.key)}>
+            <Text style={styles.openLabel}>{formatMessage('inbox.approval.open')}</Text>
+          </Pressable>
+        );
+      }
       if (filter !== 'needs-action') {
         return (
           <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
@@ -480,7 +509,7 @@ export default function InboxScreen({
         />
       );
     },
-    [approvalsProvided, filter, onDecided, online, receipts, styles],
+    [approvalsProvided, filter, formatMessage, onDecided, onOpenConversation, online, receipts, styles],
   );
 
   return (
@@ -962,6 +991,18 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   note: {fontSize: font.meta, color: color.warn},
   managed: {fontSize: font.meta, color: color.textFaint},
   receipt: {fontSize: font.meta, color: color.text, paddingBottom: space.md},
+  // 받은함 줄의 「열기」(이모티콘 세트의 두 카드): 알약, 누름 면은 엄지 바닥 이상이다.
+  openButton: {
+    minHeight: TOUCH_TARGET,
+    alignSelf: 'flex-start',
+    alignItems: SET_WORD.center,
+    justifyContent: SET_WORD.center,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.pill,
+    backgroundColor: color.surfaceMuted,
+  },
+  openPressed: {backgroundColor: color.surfacePressed},
+  openLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   markRead: {
     minWidth: TOUCH_TARGET,
     minHeight: TOUCH_TARGET,

@@ -67,6 +67,12 @@ export const NON_SECRET_KEYS = {
    * 읽을 때 워크스페이스·멤버가 맞는 값만 받고 깨진 값은 빈 목록이다. 등록의 id 목록뿐이라 비밀이 아니다. 로그아웃이 지우지 않는다(이 기기의 취향이다).
    */
   expressionFavorites: 'momo.mobile.expressions.favorites.v1',
+  /**
+   * 「이모티콘 추천」 켜기·끄기 (이 기기 · 이 워크스페이스 · 이 사람 - 서버 계약 없음, #5493). 입력창 위의 키워드 추천 줄을 통째로 끄는 사람의 선택이다. 값의 모양과 읽는 법은
+   * 코어 `features/expressions/suggestSetting.ts`가 갖는다: `워크스페이스:사람` → 값 지도 한 덩이이고, 읽을 때 워크스페이스·멤버가 맞고 `on` 이 `false` 로 분명히 적힌 값만 끔이다
+   * (비었거나 깨졌거나 옛 모양이면 켜짐 - 기본은 켜짐). 비밀이 아니고 로그아웃이 지우지 않는다(이 기기의 취향이다). 잃으면 추천 줄이 다시 켜질 뿐이다.
+   */
+  expressionSuggest: 'momo.mobile.expressions.suggest.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',
