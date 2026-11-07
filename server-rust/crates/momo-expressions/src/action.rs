@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::media::{Processed, Rendition};
 use crate::store::{
     adder_allows, adder_allows_in_tx, authorize, catalog, changed, draft_json, expression_json,
-    media_json, metadata, put_images, resolve_kind, unexpired,
+    media_json, metadata, put_images, resolve_kind, unexpired, Effect,
 };
 use crate::{
     hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, Metadata, Origin,
@@ -341,7 +341,6 @@ pub async fn choose_in_tx(
         conn,
         decider,
         id,
-        "expression.created",
         Some(json!({
             "approval_id": approval_id.to_string(),
             "proposed_by": proposer.to_string(),
@@ -349,6 +348,7 @@ pub async fn choose_in_tx(
             "origin_domain": origin.source_url.as_deref().and_then(host_of),
             "sha256_prefix": choice.sha256.chars().take(12).collect::<String>(),
         })),
+        Effect::Created(&[id]),
     )
     .await?;
     // The original-photo pointer travels with the chosen draft (ADR-0218 G1): the registered
