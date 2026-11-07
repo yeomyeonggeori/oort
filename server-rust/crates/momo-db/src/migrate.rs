@@ -807,12 +807,21 @@ mod tests {
     /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
     /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
     /// is the writer, so the block, not RLS, is the last door).
+    ///
+    /// 178 is #5469's 「사진·GIF 가로세로 요약」 (ADR-0151 증보 9): `attachment_media.duration_ms`
+    /// becomes nullable (a row **without** a length is a still picture's size, a row with one is a
+    /// video's), the length range check says so (`duration_ms IS NULL OR BETWEEN …`), and
+    /// `attachment_media_still_ck` keeps a poster off a row with no length. No new column, table or
+    /// grant, so no new RLS policy and the `attachment-media-lockdown` block (the same text in
+    /// three files) is untouched. **177 is #5370's** (`team_ai_task_delegation`, not on this branch
+    /// yet): this test needs both to land, and fails on a tree that holds 178 without 177 — land
+    /// #5370 first.
     #[test]
-    fn discovers_contiguous_migrations_001_to_176() {
+    fn discovers_contiguous_migrations_001_to_178() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=176).collect();
+        let expected: Vec<i64> = (1..=178).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -820,7 +829,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=176 under {}",
+            "expected contiguous 001..=178 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -828,7 +837,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("176_expression_set"));
+            .starts_with("178_attachment_media_image"));
     }
 
     #[test]

@@ -1,9 +1,17 @@
-//! Video meta and poster — the two routes of ADR-0151 증보 5 D5 (#4673 C5).
+//! Video meta and poster, and a photo's or GIF's size — the two routes of ADR-0151 증보 5 D5
+//! (#4673 C5) and 증보 9 (#5469).
 //!
 //! ```text
 //! PUT …/channels/{ch}/attachments/{id}/media    → setAttachmentMedia   (the uploader, before the send)
 //! GET …/channels/{ch}/attachments/{id}/poster   → getAttachmentPoster  (anyone the content route serves)
 //! ```
+//!
+//! The write takes **two shapes** (a `oneOf`, discriminated by `kind`): a video's `{durationMs, width,
+//! height, poster?}` (`kind` absent or `"video"` — a client older than 증보 9 sends none) and a
+//! picture's `{kind: "image", width, height}`. Each is a closed object: a picture that names a length
+//! or a poster is a key the route does not know (422), as a video with a `kind` of anything else is.
+//! Past the shape, a picture takes **the same four steps** a video does, with its own two questions of
+//! the file ([`MediaWrite::require_mime`], [`MediaWrite::magic_matches`]).
 //!
 //! ## One authorization, two doors
 //!
@@ -45,11 +53,11 @@ use momo_auth::Principal;
 use momo_drive::{ByteRange, DriveArchive, DriveError, MAX_ATTACHMENT_BYTES};
 use momo_messaging::{
     is_attachment_channel_member, load_attachment_in_tx, load_poster_in_tx,
-    load_readable_attachment_in_tx, may_hold_media, require_video_mime, set_attachment_media_in_tx,
-    validate_media_declaration, validate_poster, video_magic_matches, Attachment, AttachmentMedia,
-    MediaRejected, VIDEO_PREFIX_BYTES,
+    load_readable_attachment_in_tx, may_hold_media, set_attachment_media_in_tx,
+    validate_image_declaration, validate_media_declaration, validate_poster, Attachment,
+    AttachmentMedia, MediaRejected, MediaWrite, MEDIA_PREFIX_BYTES,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::error::ApiError;
 use crate::routes::attachments::drive_error;
@@ -63,19 +71,111 @@ use crate::AppState;
 /// bytes. 512 KiB leaves the framing room and nothing for a bulk upload to ride on.
 pub const MAX_MEDIA_BODY_BYTES: usize = 512 * 1024;
 
-/// `PUT …/media` request (openapi `SetAttachmentMediaRequest`).
+/// `PUT …/media` request (openapi `SetAttachmentMediaRequest`, a `oneOf`).
+///
+/// `kind` decides which closed shape the body must be: absent or `"video"` is a [`VideoMediaRequest`]
+/// (a client older than ADR-0151 증보 9 sends no `kind`), `"image"` is an [`ImageMediaRequest`], and
+/// anything else is refused like a key the route does not know. A body the JSON reader cannot use
+/// never gets further: the framework answers 400, 415 or 422 first (this type's errors are data
+/// errors, so 422).
+#[derive(Debug)]
+pub enum SetAttachmentMediaRequest {
+    Video(VideoMediaRequest),
+    Image(ImageMediaRequest),
+}
+
+impl<'de> Deserialize<'de> for SetAttachmentMediaRequest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let image = match value.get("kind") {
+            None => false,
+            Some(kind) if kind == "video" => false,
+            Some(kind) if kind == "image" => true,
+            Some(_) => {
+                return Err(D::Error::custom(
+                    "unknown kind: expected \"video\" or \"image\"",
+                ))
+            }
+        };
+        if image {
+            serde_json::from_value(value)
+                .map(Self::Image)
+                .map_err(D::Error::custom)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Video)
+                .map_err(D::Error::custom)
+        }
+    }
+}
+
+impl SetAttachmentMediaRequest {
+    /// Step 1, the **shape** of the request: the numbers inside their ranges and, for a video, the
+    /// poster's label, base64, bytes and size. Reads the body and nothing else.
+    fn into_write(self) -> Result<MediaWrite, MediaRejected> {
+        match self {
+            Self::Video(video) => {
+                let declaration =
+                    validate_media_declaration(video.duration_ms, video.width, video.height)?;
+                let poster = video
+                    .poster
+                    .as_ref()
+                    .map(|poster| validate_poster(&poster.mime, &poster.data_base64))
+                    .transpose()?;
+                Ok(MediaWrite::Video {
+                    declaration,
+                    poster,
+                })
+            }
+            Self::Image(image) => Ok(MediaWrite::Image(validate_image_declaration(
+                image.width,
+                image.height,
+            )?)),
+        }
+    }
+}
+
+/// The video shape.
 ///
 /// The three numbers are integers: a fractional `durationMs` is a client that did not round, and
 /// is refused as a malformed body rather than truncated. `poster` may be absent (a device that could
 /// measure the video but not take a frame): the media then has no poster and says so (`hasPoster`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SetAttachmentMediaRequest {
+pub struct VideoMediaRequest {
+    /// Absent, or exactly `"video"` (checked by the enum's reader before this struct is read).
+    #[serde(default)]
+    #[allow(dead_code)]
+    kind: Option<VideoKind>,
     pub duration_ms: i64,
     pub width: i64,
     pub height: i64,
     #[serde(default)]
     pub poster: Option<PosterRequest>,
+}
+
+/// The picture shape (ADR-0151 증보 9): a size and nothing else. A photo or GIF has no length and no
+/// poster, so naming one is a key the route does not know.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageMediaRequest {
+    #[allow(dead_code)]
+    kind: ImageKind,
+    pub width: i64,
+    pub height: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum VideoKind {
+    Video,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ImageKind {
+    Image,
 }
 
 /// The poster half of the request: its type label and its bytes, standard base64.
@@ -105,16 +205,17 @@ fn rejected(why: MediaRejected) -> ApiError {
 
 /// `PUT /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/media`
 ///
-/// Sets (or replaces, whole) the length, size and poster of a video the caller uploaded and has not
-/// sent yet. Order, and why:
+/// Sets (or replaces, whole) the length, size and poster of a video — or the size of a photo or GIF
+/// (ADR-0151 증보 9) — that the caller uploaded and has not sent yet. Order, and why (the same four
+/// steps for both kinds):
 ///
 /// 1. the **shape** of the request, before any connection is taken — it needs nothing from the
 ///    database and the answer to it is the caller's own business;
 /// 2. **who and what**: the content route's membership and readability, then [`may_hold_media`];
 ///    any failure is the flat 404 (a non-member's is the 403);
-/// 3. **the file**: a stored type from the closed video list, and the object's first bytes — read
-///    outside any transaction, because holding a Postgres connection across an archive round trip
-///    is how a slow upstream becomes a pool outage;
+/// 3. **the file**: a stored type from the kind's closed list (the three video types, or the four
+///    picture types), and the object's first bytes — read outside any transaction, because holding a
+///    Postgres connection across an archive round trip is how a slow upstream becomes a pool outage;
 /// 4. **the write**, in a second transaction that repeats the membership check and takes the
 ///    attachment row `FOR UPDATE` — the lock a send takes to bind the file, so the two are ordered —
 ///    and asks [`may_hold_media`] again before anything is written.
@@ -132,15 +233,7 @@ pub async fn set_media(
     let via_token_id = audit_via_token_id(&principal);
 
     // 1. shape
-    let declaration =
-        validate_media_declaration(request.duration_ms, request.width, request.height)
-            .map_err(rejected)?;
-    let poster = request
-        .poster
-        .as_ref()
-        .map(|poster| validate_poster(&poster.mime, &poster.data_base64))
-        .transpose()
-        .map_err(rejected)?;
+    let write = request.into_write().map_err(rejected)?;
 
     // 2. who and what
     let found: DbRejectable<Attachment> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -162,9 +255,11 @@ pub async fn set_media(
     };
 
     // 3. the file
-    require_video_mime(&found.mime).map_err(rejected)?;
+    write.require_mime(&found.mime).map_err(rejected)?;
     let prefix = first_bytes(&*state.drive, &found, &drive_file_id).await?;
-    video_magic_matches(&found.mime, &prefix).map_err(rejected)?;
+    write
+        .magic_matches(&found.mime, &prefix)
+        .map_err(rejected)?;
 
     // 4. the write
     let written: DbRejectable<AttachmentMedia> =
@@ -192,8 +287,7 @@ pub async fn set_media(
                     locked.id,
                     member_id,
                     via_token_id,
-                    declaration,
-                    poster.as_ref(),
+                    &write,
                 )
                 .await?;
                 Ok(Ok(media))
@@ -203,7 +297,7 @@ pub async fn set_media(
     Ok(Json(settle_db("attachment_media.set", written)?))
 }
 
-/// The first [`VIDEO_PREFIX_BYTES`] bytes of the object (fewer when it is shorter), by the archive's
+/// The first [`MEDIA_PREFIX_BYTES`] bytes of the object (fewer when it is shorter), by the archive's
 /// range read: the range is resolved against **the row's** size — the archive is never asked for a
 /// byte past the end — and the archive's own idea of the length must be the row's, or the read is
 /// refused with the 502 the content route gives the same disagreement.
@@ -221,7 +315,7 @@ async fn first_bytes(
     else {
         return Ok(Vec::new());
     };
-    let range = ByteRange::new(0, last_byte.min(VIDEO_PREFIX_BYTES as u64 - 1))
+    let range = ByteRange::new(0, last_byte.min(MEDIA_PREFIX_BYTES as u64 - 1))
         .ok_or_else(|| drive_error(DriveError::UpstreamFailure))?;
     // The ceiling, not any effective limit: a file that is complete stays readable whatever an
     // operator later lowers what may be uploaded (ADR-0151 증보 5 D1).
@@ -237,14 +331,14 @@ async fn first_bytes(
         );
         return Err(drive_error(DriveError::UpstreamFailure));
     }
-    let mut prefix = Vec::with_capacity(VIDEO_PREFIX_BYTES);
+    let mut prefix = Vec::with_capacity(MEDIA_PREFIX_BYTES);
     while let Some(chunk) = archived.body.next().await {
         prefix.extend_from_slice(&chunk.map_err(drive_error)?);
-        if prefix.len() >= VIDEO_PREFIX_BYTES {
+        if prefix.len() >= MEDIA_PREFIX_BYTES {
             break;
         }
     }
-    prefix.truncate(VIDEO_PREFIX_BYTES);
+    prefix.truncate(MEDIA_PREFIX_BYTES);
     Ok(prefix)
 }
 
@@ -320,32 +414,137 @@ mod tests {
         assert_eq!(flat.message, "completed attachment not found");
     }
 
+    fn request(body: serde_json::Value) -> Result<SetAttachmentMediaRequest, serde_json::Error> {
+        serde_json::from_value(body)
+    }
+
     #[test]
     fn the_request_is_closed_and_its_poster_is_optional() {
-        let full: SetAttachmentMediaRequest = serde_json::from_value(serde_json::json!({
+        let SetAttachmentMediaRequest::Video(full) = request(serde_json::json!({
             "durationMs": 4200, "width": 1280, "height": 720,
             "poster": {"mime": "image/jpeg", "dataBase64": "AAAA"}
         }))
-        .expect("a full request");
+        .expect("a full request") else {
+            panic!("a body with a length is a video");
+        };
         assert!(full.poster.is_some());
-        let bare: SetAttachmentMediaRequest = serde_json::from_value(serde_json::json!({
+        let SetAttachmentMediaRequest::Video(bare) = request(serde_json::json!({
             "durationMs": 4200, "width": 1280, "height": 720
         }))
-        .expect("a request without a poster");
+        .expect("a request without a poster") else {
+            panic!("a body with a length is a video");
+        };
         assert!(bare.poster.is_none());
         // an unknown key is a client that means something the server does not do
-        assert!(
-            serde_json::from_value::<SetAttachmentMediaRequest>(serde_json::json!({
-                "durationMs": 1, "width": 1, "height": 1, "kind": "audio"
-            }))
-            .is_err()
-        );
+        assert!(request(serde_json::json!({
+            "durationMs": 1, "width": 1, "height": 1, "kind": "audio"
+        }))
+        .is_err());
+        assert!(request(serde_json::json!({
+            "durationMs": 1, "width": 1, "height": 1, "colour": "red"
+        }))
+        .is_err());
         // and a fractional duration is not rounded for the client
-        assert!(
-            serde_json::from_value::<SetAttachmentMediaRequest>(serde_json::json!({
-                "durationMs": 1.5, "width": 1, "height": 1
+        assert!(request(serde_json::json!({
+            "durationMs": 1.5, "width": 1, "height": 1
+        }))
+        .is_err());
+        // a video missing a number is not a body this route can use
+        assert!(request(serde_json::json!({"width": 1, "height": 1})).is_err());
+    }
+
+    /// ADR-0151 증보 9: `kind` is the discriminator. A video may name itself or say nothing (a client
+    /// older than the amendment sends none); a picture must name itself and may carry nothing else.
+    #[test]
+    fn the_kind_picks_one_of_two_closed_shapes() {
+        // the picture
+        assert!(matches!(
+            request(serde_json::json!({"kind": "image", "width": 4032, "height": 3024})),
+            Ok(SetAttachmentMediaRequest::Image(_))
+        ));
+        // a video that names itself is the same video
+        assert!(matches!(
+            request(serde_json::json!({
+                "kind": "video", "durationMs": 1, "width": 1, "height": 1
+            })),
+            Ok(SetAttachmentMediaRequest::Video(_))
+        ));
+        // a picture with a length or a poster is a key the route does not know: the picture has neither
+        for stray in [
+            serde_json::json!({"kind": "image", "width": 1, "height": 1, "durationMs": 5}),
+            serde_json::json!({
+                "kind": "image", "width": 1, "height": 1,
+                "poster": {"mime": "image/jpeg", "dataBase64": "AAAA"}
+            }),
+            serde_json::json!({"kind": "image", "width": 1, "height": 1, "hasPoster": false}),
+        ] {
+            assert!(request(stray.clone()).is_err(), "{stray}");
+        }
+        // a picture needs both numbers, integers
+        for lacking in [
+            serde_json::json!({"kind": "image", "width": 1}),
+            serde_json::json!({"kind": "image", "height": 1}),
+            serde_json::json!({"kind": "image"}),
+            serde_json::json!({"kind": "image", "width": 1.5, "height": 1}),
+            serde_json::json!({"kind": "image", "width": "640", "height": 1}),
+        ] {
+            assert!(request(lacking.clone()).is_err(), "{lacking}");
+        }
+        // no `kind` is a video, so a picture's two numbers alone are a video missing its length
+        assert!(request(serde_json::json!({"width": 640, "height": 480})).is_err());
+        // any other `kind` — another word, another case, another type — is refused
+        for kind in [
+            serde_json::json!("audio"),
+            serde_json::json!("Image"),
+            serde_json::json!("IMAGE"),
+            serde_json::json!(""),
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!(["image"]),
+        ] {
+            assert!(
+                request(serde_json::json!({"kind": kind, "width": 1, "height": 1})).is_err(),
+                "{kind}"
+            );
+        }
+        // not an object at all
+        assert!(request(serde_json::json!([1, 2])).is_err());
+        assert!(request(serde_json::json!("image")).is_err());
+    }
+
+    /// The shape step turns a usable body into the write the later steps ask questions of, and
+    /// range-checks it: a picture's numbers by the same bound a video's side is held to.
+    #[test]
+    fn the_shape_step_builds_the_write_and_range_checks_it() {
+        let write = |body| request(body).expect("a body").into_write();
+        assert_eq!(
+            write(serde_json::json!({"kind": "image", "width": 4032, "height": 3024})),
+            Ok(MediaWrite::Image(momo_messaging::ImageDeclaration {
+                width: 4032,
+                height: 3024
             }))
-            .is_err()
+        );
+        for (w, h) in [(0, 10), (10, 0), (16_385, 10), (10, 16_385), (-5, 10)] {
+            assert_eq!(
+                write(serde_json::json!({"kind": "image", "width": w, "height": h})),
+                Err(MediaRejected::Dimensions),
+                "{w}x{h}"
+            );
+        }
+        assert_eq!(
+            write(serde_json::json!({"kind": "image", "width": 16_384, "height": 16_384}))
+                .map(|write| write.kind()),
+            Ok("image")
+        );
+        // the video's own checks are unchanged
+        assert_eq!(
+            write(serde_json::json!({"durationMs": 0, "width": 1, "height": 1})),
+            Err(MediaRejected::Duration)
+        );
+        assert_eq!(
+            write(serde_json::json!({"durationMs": 1, "width": 1, "height": 1}))
+                .map(|write| write.kind()),
+            Ok("video")
         );
     }
 
