@@ -1277,12 +1277,15 @@ async fn a_client_that_hangs_up_while_its_refusal_is_recorded_still_leaves_exact
         json!({"clientMsgId": Uuid::new_v4(), "type": "text", "body": "예산 밖"}).to_string();
     let stream = raw_post(&address, &path, &token, &body);
 
-    // The server is parked in the audit INSERT: it shows up as a lock wait.
+    // The server is parked in the audit INSERT: it shows up as a lock wait. Only this test's own
+    // database counts: Security pack targets run side by side (#5495), and another target's blocked
+    // `INSERT INTO audit_log` in a different database must not read as this one being parked.
     let mut parked = false;
     for _ in 0..400 {
         let waiting: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM pg_stat_activity \
-              WHERE wait_event_type = 'Lock' AND query LIKE 'INSERT INTO audit_log%'",
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND query LIKE 'INSERT INTO audit_log%'",
         )
         .fetch_one(&rig.su)
         .await

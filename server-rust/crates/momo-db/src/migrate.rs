@@ -808,14 +808,19 @@ mod tests {
     /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
     /// is the writer, so the block, not RLS, is the last door).
     ///
+    /// 177 is #5370's 「도우미가 팀 Hermes에 일을 맡기는 걸음」 (ADR-0201 증보 v4 P4·P7·I6, P14-S2): five
+    /// delegation columns on `team_ai_task` (the at-most-once marker `pending → called → done|failed`, its
+    /// time, the Hermes member and the one request sentence), `team_ai_task_ended_ck` re-created so an ended
+    /// row cannot hold the sentence, and `momo_app` made unable to SELECT the sentence's column
+    /// (column-level grants in the same `team-ai-task-lockdown` block, the same text in the migration and
+    /// both role bootstraps). No new table, so no new RLS policy.
     /// 178 is #5469's 「사진·GIF 가로세로 요약」 (ADR-0151 증보 9): `attachment_media.duration_ms`
     /// becomes nullable (a row **without** a length is a still picture's size, a row with one is a
     /// video's), the length range check says so (`duration_ms IS NULL OR BETWEEN …`), and
     /// `attachment_media_still_ck` keeps a poster off a row with no length. No new column, table or
     /// grant, so no new RLS policy and the `attachment-media-lockdown` block (the same text in
-    /// three files) is untouched. **177 is #5370's** (`team_ai_task_delegation`, not on this branch
-    /// yet): this test needs both to land, and fails on a tree that holds 178 without 177 — land
-    /// #5370 first.
+    /// three files) is untouched. 177 is #5370's (`team_ai_task_delegation`, above); the two landed in that order
+    /// so the list is contiguous again.
     #[test]
     fn discovers_contiguous_migrations_001_to_178() {
         let dir = default_migrations_dir();

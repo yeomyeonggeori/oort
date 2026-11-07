@@ -199,3 +199,22 @@ export interface ExpressionChanged {
   workspaceId: string;
   version: ExpressionVersion;
 }
+
+/**
+ * ADR-0218 §15 (#5491): what a change did to the pictures on screen. The server writes one of these ahead of
+ * every `expression.changed` in the same transaction; a client that reads it knows which pictures to take
+ * down and leaves the rest alone. `hidden`/`deleted` name the ids that are no longer shown; `created`/`edited`
+ * take nothing down; `policy_changed` carries no id (it is the add policy, not a picture).
+ */
+export const EXPRESSION_CHANGE_ACTIONS = ["created", "edited", "hidden", "deleted", "policy_changed"] as const;
+export type ExpressionChangeAction = (typeof EXPRESSION_CHANGE_ACTIONS)[number];
+/** At most one set approval's worth of ids (ADR-0218 §12 L4: 40 slots). */
+export const EXPRESSION_CHANGE_MAX_IDS = 40;
+export interface ExpressionChangedDetail {
+  type: "expression.changed.detail";
+  workspaceId: string;
+  /** The same catalog version the paired `expression.changed` carries. */
+  version: ExpressionVersion;
+  action: ExpressionChangeAction;
+  expressionIds: string[];
+}

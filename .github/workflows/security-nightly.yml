@@ -35,6 +35,12 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+      # 시험 빌드의 디버그 정보를 줄인다(#5182 와 같은 수리, #5495). 이 잡은 워크스페이스의 시험 실행 파일 전부를 빌드하는데,
+      # 전체 디버그 정보로는 ubuntu-latest 러너 디스크(시작 때 여유 약 87GB)를 넘겨서 11-05·11-06 야간이 세 번 연속
+      # `No space left on device` 로 러너째 죽었다(시험은 한 개도 돌지 못했다). `rust` 잡의 같은 빌드는 line-tables-only 로
+      # 약 35GB 를 쓴다. `line-tables-only` 는 패닉의 파일:줄을 남긴다. 이 값은 rust-cache 키에도 들어가서 첫 회는 콜드다.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -45,5 +51,11 @@ jobs:
           workspaces: server-rust
       - name: DB 준비(마이그레이션 + bootstrap_roles.sql)
         run: scripts/security_pack.sh setup
+      # 앞뒤 `df -h /` 는 러너 디스크 여유의 증거다(`rust` 잡과 같다). 뒤쪽은 시험이 빨강이어도 남긴다.
+      - name: 디스크 여유(시험 전)
+        run: df -h /
       - name: 모든 #[ignore] PG 시험(--workspace --ignored --test-threads=1)
         run: scripts/security_pack.sh nightly
+      - name: 디스크 여유(시험 후)
+        if: always()
+        run: df -h /

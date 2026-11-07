@@ -34,6 +34,7 @@
 
 use serde_json::Value;
 
+use crate::actions::is_server_raised_action;
 use crate::actions::{
     ACTION_AGENT_INVITE, ACTION_AGENT_PROFILE_UPDATE, ACTION_AGENT_RENAME, ACTION_CHANNEL_CREATE,
     ACTION_CHANNEL_MEMBER_ADD, ACTION_HOST_SESSION_OPEN, ACTION_INVITE_CREATE,
@@ -352,7 +353,8 @@ impl TeamAiRoles {
         tool_allowed_in(&BUNDLES, self, tool_name)
     }
 
-    /// The `actionId`s one model call may be offered: the allow-list, minus the ids of every
+    /// The `actionId`s one model call may be offered: the allow-list, minus the ids a server routine
+    /// raises ([`crate::actions::SERVER_RAISED_ACTION_IDS`]), minus the ids of every
     /// bundle that is off, minus [`SENSITIVE_ACTION_IDS`] when the request has `read`
     /// something (`tainted`). Catalog order. **The one function the tool schema, the system
     /// prompt and the proposal check all read**, so they cannot disagree.
@@ -360,6 +362,10 @@ impl TeamAiRoles {
         TEAM_AI_ACTION_IDS
             .iter()
             .copied()
+            // ADR-0218 증보 6 §12 L2.2, entrance 1 of 2 (#5460 S1b): the ids a server routine raises
+            // are on the allow-list (the decision accepts the helper's mark) but never offered to a
+            // model. The second entrance is `tools::catalog_definitions`.
+            .filter(|id| !is_server_raised_action(id))
             .filter(|id| self.action_allowed(id))
             .filter(|id| !(tainted && is_sensitive_action(id)))
             .collect()
@@ -510,6 +516,7 @@ pub fn prompt_role_table() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::model_offerable_action_ids;
     use serde_json::json;
 
     fn off(ids: &[&str]) -> TeamAiRoles {
@@ -571,6 +578,11 @@ mod tests {
                 .count();
             if id == ACTION_TEAM_AI_ROLES_SET {
                 assert_eq!(owners, 0, "the roles card must not be gated by a bundle");
+            } else if is_server_raised_action(id) {
+                // ADR-0218 증보 6 §12 L2.3: the bundle `hermes` takes these two when S5a lands. Until
+                // then nobody owns them, and no switch has anything to turn off: no model is offered
+                // them either way. Never two owners.
+                assert!(owners <= 1, "{id} has {owners} owners");
             } else {
                 assert_eq!(owners, 1, "{id} needs exactly one owning bundle");
             }
@@ -598,8 +610,12 @@ mod tests {
     #[test]
     fn advertised_ids_follow_the_switches() {
         let all = TeamAiRoles::default().advertised_action_ids(false);
-        assert_eq!(all, TEAM_AI_ACTION_IDS);
-        assert_eq!(all.len(), 14);
+        assert_eq!(all, model_offerable_action_ids());
+        assert_eq!(
+            all.len(),
+            14,
+            "the two server-raised ids are on the allow-list, not here"
+        );
 
         let no_admin = off(&[WORKSPACE_ADMIN]).advertised_action_ids(false);
         assert_eq!(
@@ -621,7 +637,7 @@ mod tests {
         // Bundles that own no id today change nothing, so a later slice's id appears the moment
         // it is added to its row and not before.
         let no_files = off(&[FILES, MEMORY, CODE, LONG_RESEARCH]).advertised_action_ids(false);
-        assert_eq!(no_files, TEAM_AI_ACTION_IDS);
+        assert_eq!(no_files, model_offerable_action_ids());
 
         // After the request has read something the sensitive ids leave (B4-3: the two invites
         // and the roles card — the ids on the allow-list); the other eleven stay.
@@ -637,6 +653,35 @@ mod tests {
         assert!(off(&[WORKSPACE_ADMIN, INVITE_ACCESS])
             .advertised_action_ids(true)
             .is_empty());
+    }
+
+    /// ADR-0218 증보 6 §12 L2.2 · F20 · A5 (#5460 S1b), entrance 1 of 2: whatever the switches and
+    /// whatever the request has read, a model is never offered an id a server routine raises — and
+    /// the other fourteen are all still there when nothing is off. Remove the exclusion from
+    /// `advertised_action_ids` and this fails.
+    #[test]
+    fn no_request_is_ever_offered_an_id_a_server_routine_raises() {
+        let mut every_switch = vec![TeamAiRoles::default()];
+        for bundle in BUNDLES {
+            every_switch.push(off(&[bundle.id]));
+        }
+        every_switch.push(off(&SWITCHABLE_BUNDLES));
+        for roles in every_switch {
+            for tainted in [false, true] {
+                let offered = roles.advertised_action_ids(tainted);
+                for id in crate::actions::SERVER_RAISED_ACTION_IDS {
+                    assert!(
+                        !offered.contains(&id),
+                        "{id} offered (off: {:?}, tainted: {tainted})",
+                        roles.off_bundles()
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            TeamAiRoles::default().advertised_action_ids(false),
+            &TEAM_AI_ACTION_IDS[..14]
+        );
     }
 
     /// What a read takes away is exactly the difference between the two enums — never an id the

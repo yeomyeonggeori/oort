@@ -20484,7 +20484,7 @@ components:
     AgentRunSpent:
       type: object
       additionalProperties: false
-      required: [promptTokens, completionTokens, webSearches, estimated]
+      required: [promptTokens, completionTokens, webSearches, estimated, delegations]
       description: >
         ADR-0201 증보 v3 B12 (#4968). What **one run** has spent: the sums of that run's own
         usage-ledger rows (a task of several steps writes one row per step; a stopped or cut-off
@@ -20511,6 +20511,15 @@ components:
           description: >
             Some of the tokens are oort's estimate because the provider reported none
             (ADR-0147 D3). A figure that may be an estimate says so.
+        delegations:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0201 증보 v4 P7 (#5370). How many times the helper handed work to the team's Hermes in
+            this run (0 or 1 — a request delegates once). The token and search sums above are the
+            helper's own rows, i.e. the team's credits; Hermes's row is a subscription oort cannot price
+            and lives under Hermes's own agent in the usage-by-agent read.
 
     AgentRunProgressPage:
       type: object
@@ -20965,7 +20974,16 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
+        `expression.set.create` and `expression.set.plan` (ADR-0218 증보 2026-11-06
+        §12, #5460) are team-AI-only the same way and are raised by **server code**
+        from a stored plan, never by a model's tool call: the helper's tool does not
+        list them, and through the Agent Port they are refused exactly as an unknown
+        id. The plan card (`{setId}`, `requesting_member`) and the set card
+        (`{setId,title,prefix,tags,backend,subjectMemberId,prompt,slots}`,
+        `expression_adder`) are always decided in the app, never from a lock-screen
+        action. Their decision request and result shapes are published with the
+        decision transaction (#5461).
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "expression.set.create", "expression.set.plan", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string

@@ -1,7 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import React from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
-import {AccessibilityInfo, Dimensions, FlatList} from 'react-native';
+import {AccessibilityInfo, Dimensions, FlatList, StyleSheet} from 'react-native';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
 import {
   createExpressionFixtureServer,
@@ -14,6 +14,7 @@ import {buildExpressionSections} from '@momo/core/features/expressions/gridSecti
 import {DEFAULT_EXPRESSION_PICKER_TAB} from '@momo/core/features/expressions/kind';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
@@ -282,6 +283,56 @@ describe('이모티콘·GIF 탭 — 그림만 있는 격자와 세트 띠', () =
     expect(screen.getByTestId('expression-panel-set-recent').props.accessibilityLabel).toBe('자주·최근');
     // 같은 그림이 최근과 세트에 한 번씩 선다.
     expect(screen.getAllByTestId('expression-pick-chi_cry')).toHaveLength(2);
+  });
+});
+
+// 세트 띠 단추의 눌림 면 (#5492, 검증 7b M2): 보이는 상자 40×44 에 `hitSlop` 이 없어서 눌림 면도 40×44 였다. 이 축을 재는 기계는 없었다(대화 행의 정해진 요소만 보는 `conversationHygiene` 의 「M-14」 밖이다).
+// 폰 시험에는 배치 엔진이 없어서 렌더 트리의 값(상자 `minWidth`·`height` + `hitSlop`)을 더해 잰다. 슬롭은 화면 캡처·계층 덤프에 보이지 않으므로 이 시험이 유일한 증거다.
+describe('세트 띠 단추의 눌림 면은 44×44 이상이다', () => {
+  type Node = ReturnType<typeof screen.getByTestId>;
+  const flat = (node: Node) => StyleSheet.flatten(node.props.style) as Record<string, unknown>;
+  const slopOf = (value: unknown) => {
+    if (typeof value === 'number') return {top: value, bottom: value, left: value, right: value};
+    const edges = (value ?? {}) as Record<string, number>;
+    return {top: edges.top ?? 0, bottom: edges.bottom ?? 0, left: edges.left ?? 0, right: edges.right ?? 0};
+  };
+  /** 띠 목록의 내용 상자 스타일(`gap`·`paddingHorizontal`): 단추 위의 조상 중 `contentContainerStyle` 을 든 첫 노드가 읽는다. */
+  const stripContent = (node: Node) => {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (parent.props.contentContainerStyle !== undefined) return StyleSheet.flatten(parent.props.contentContainerStyle) as Record<string, unknown>;
+    }
+    return {};
+  };
+
+  it('띠의 단추 전부 - 최근 · 즐겨찾기 · 세트 · 기타 · ＋ - 의 가로·세로 눌림 면이 44 이상이고 이웃의 눌림 면과 겹치지 않는다. 보이는 상자 40 은 그대로', async () => {
+    const library = makeLibrary();
+    const usage = recordExpressionUse(emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID), library[3].id, 5000);
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    mountPanel(store);
+    fireEvent(screen.getByTestId('expression-pick-dam_haa'), 'longPress'); // 즐겨찾기를 켜면 ★ 단추가 선다
+    // 단추 모양이 넷 다 선 띠다: 🕘(그림) · ★(글자) · 세트 첫 그림 · 「기타」(글자). 오른쪽 끝에 ＋ 가 따로 선다.
+    expect(strip()).toEqual(expect.arrayContaining(['recent', 'favorites', 'set:chi', 'set:dam', 'other']));
+    const add = screen.getByTestId('expression-panel-add');
+    const buttons = [...screen.getAllByTestId(/^expression-panel-set-/), add];
+    const content = stripContent(buttons[0]);
+    const gap = Number(content.gap);
+    expect(gap).toBeGreaterThan(0); // 틈을 못 읽었다면 아래 겹침 단정이 거저 통과한다
+    for (const button of buttons) {
+      const label = String(button.props.testID);
+      const box = flat(button);
+      const slop = slopOf(button.props.hitSlop);
+      expect({label, press: Number(box.minWidth) + slop.left + slop.right >= TOUCH_TARGET}).toEqual({label, press: true});
+      expect({label, press: Number(box.height) + slop.top + slop.bottom >= TOUCH_TARGET}).toEqual({label, press: true});
+      // 겹치지 않는다: 이웃 단추 사이 틈 안에 두 눌림 면의 슬롭 합(이 단추의 오른쪽 + 이웃의 왼쪽 = 같은 슬롭이므로 좌우 합)이 들어간다.
+      expect({label, within: slop.left + slop.right <= gap}).toEqual({label, within: true});
+      // 세로는 상자가 이미 44 이고 위아래에 이웃이 없다 - 세로 슬롭은 없다.
+      expect({label, vertical: slop.top + slop.bottom}).toEqual({label, vertical: 0});
+      // 보이는 상자는 그대로 한 걸음(44)에서 틈을 뺀 40 이다.
+      expect({label, visible: Number(box.minWidth)}).toEqual({label, visible: TOUCH_TARGET - gap});
+    }
+    // ＋ 와 목록 끝 단추 사이에는 목록의 오른쪽 안쪽 여백이 있어서 두 눌림 면이 만나지 않는다.
+    expect(Number(content.paddingHorizontal)).toBeGreaterThanOrEqual(slopOf(add.props.hitSlop).left + slopOf(buttons[0].props.hitSlop).right);
   });
 });
 

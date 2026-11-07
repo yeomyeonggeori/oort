@@ -10,6 +10,7 @@
 > 증보 5: §11 (2026-11-02, #5133, **Accepted** 2026-11-02 planner) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
 > 증보 6: §12 (2026-11-06, #5442, **Accepted** 2026-11-07 planner — 등급 2 독립 보안 검수 1~3회차 합계 Blocker 0·High 0) — 이모티콘 세트 제안과 여러 개 승인: 팀 AI(oort 도우미)가 사람이 `@oort`로 부탁한 job 위에서만 세트(최대 40칸, 기본 정지 8+GIF 2)를 제안한다. 그림은 제안 본문이 아니라 서버 임시 보관(`expression_set`)에 장면마다 쌓이고 제안은 `setId`만 가리킨다(본문의 그림 바이트 0, Agent Port·MCP 한도 무변경). 사람이 세트마다 한 번 승인하면 고른 항목만 한 tx에서 항목별로 등록한다(같은 이름·1,000 초과는 건너뜀, 어긋난 핀은 전체 거절). 모델이 거절한 장면은 회색 칸이고 승인 대상이 아니며 다시 시도하지 않는다. §7의 「세트(팩)는 열지 않는다」를 이 방식 하나로 연다. D1~D6·부록 A·B(pinned 블록)·`expression.create`는 바뀌지 않는다. 새 경로 0, migration 번호는 planner가 S1a에서 배정한다. **2026-11-06 21시대 owner 결정**(참조 그림을 v1부터 Hermes에 함께 보낸다·여러 장·고지와 동의, 팀 키 그림 모델은 `backend` 예약 칸으로만, 한도·거절 멈춤·대기 한도는 권장안대로)과 **1회차 보안 검수**(대상 `8a58d1a3d`, FAIL High 2·Medium 4·Low 7)의 반영을 §12 L18~L22가 적는다. **2026-11-07 owner 결정 O5**(참조 그림 고지는 멤버별 「처음 한 번」, 요청마다 동의 카드 없음, 요청마다의 눈 확인은 계획 카드)을 L2.5·L19가 적는다.
 > 증보 7: §13 (2026-11-07, #5504, **Accepted — owner 2026-11-07**) — 반응 칩은 4번 멈춤 규칙의 예외(owner 2026-11-07, 동작 줄이기는 그대로): 반응 칩의 GIF는 계속 움직이고, 메시지 속 GIF의 「총 4회 뒤 정지」는 그대로다. 와이어(`:이름:` 반응)·서버·렌디션·해시는 바뀌지 않는다. 폰 반응 고르개도 웹처럼 세 탭이다.
+> 증보 9: §15 (2026-11-07, #5491, **Accepted** 2026-11-07 planner — 등급 2 보안 검수 1회차 FAIL(High 1) → 수리 → 부분 재확인 통과) — 변경 알림에 무엇이 바뀌었는지 싣기: 서버가 변경마다 새 알림 `expression.changed.detail`(`action` created·edited·hidden·deleted·policy_changed + `expressionIds`)을 기존 `expression.changed` **앞에** 같은 tx로 쓴다. 기존 알림은 바이트 그대로라 옛 웹·데스크탑·폰은 지금과 똑같이 동작한다(상세를 읽지 않고 전부 내린다). 새 클라이언트는 숨김·삭제 상세에서 그 id만 즉시 내리고 등록·고치기 상세에서는 그리던 그림을 그대로 둔 채 목록을 새로 받는다. 도착 순서·유실에 기대지 않는다(어긋나면 지금과 같은 전부 내리기). D3의 목표(숨기거나 지운 그림이 남지 않는다)는 그대로이고 「폐기」를 읽는 법만 P5-4가 정한다. 부록 B에 `ChangedDetail`이 더해지고 `Changed`는 바뀌지 않는다. migration 0, 새 경로 0, Centrifugo 설정 0.
 > 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)가 §8 H9.2가 팀 AI 도우미의 같은 능력 사용(ADR-0201 증보 v3 B6의 「그림」)을 이 증보 위에서 따로 정한다고 한 그 「따로」다. 도우미의 그림은 Hermes 도구(`ask_hermes`)로 하고, 이모티콘 사진 길(H9의 팀 이미지 키)은 그대로다. H9~H12의 결정은 바꾸지 않았다.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301), 증보 6은 여기에 [ADR-0201 증보 v4](0201-team-ai-fast-path-for-simple-workspace-requests.md)(#5342)와 [ADR-0151 증보 3](0151-attachments-v0-drive-contract-port.md)을 더 읽는다.
 
@@ -253,7 +254,8 @@ paths:
     "Decision": {"type":"object","additionalProperties":false,"required":["expressionChoice"],"properties":{"expressionChoice":{"$ref":"#/$defs/Choice"}}},
     "Result": {"type":"object","additionalProperties":false,"required":["id","name","token"],"properties":{"id":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},"name":{"type":"string","minLength":2,"maxLength":30,"pattern":"^[a-z0-9_-]{2,30}$"},"token":{"type":"string","minLength":4,"maxLength":32,"pattern":"^:[a-z0-9_-]{2,30}:$"}}},
     "MessageInput": {"type":"object","additionalProperties":false,"required":["body"],"properties":{"body":{"type":"string","minLength":4,"maxLength":32,"pattern":"^:[a-z0-9_-]{2,30}:$"}}},
-    "Changed": {"type":"object","additionalProperties":false,"required":["type","workspaceId","version"],"properties":{"type":{"const":"expression.changed"},"workspaceId":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},"version":{"type":"string","minLength":1,"maxLength":19,"pattern":"^(0|[1-9][0-9]*)$"}}}
+    "Changed": {"type":"object","additionalProperties":false,"required":["type","workspaceId","version"],"properties":{"type":{"const":"expression.changed"},"workspaceId":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},"version":{"type":"string","minLength":1,"maxLength":19,"pattern":"^(0|[1-9][0-9]*)$"}}},
+    "ChangedDetail": {"oneOf":[{"type":"object","required":["type","workspaceId","version","action","expressionIds"],"properties":{"type":{"const":"expression.changed.detail"},"workspaceId":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},"version":{"type":"string","minLength":1,"maxLength":19,"pattern":"^(0|[1-9][0-9]*)$"},"action":{"enum":["created","edited","hidden","deleted"]},"expressionIds":{"type":"array","minItems":1,"maxItems":40,"uniqueItems":true,"items":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}}}},{"type":"object","required":["type","workspaceId","version","action","expressionIds"],"properties":{"type":{"const":"expression.changed.detail"},"workspaceId":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},"version":{"type":"string","minLength":1,"maxLength":19,"pattern":"^(0|[1-9][0-9]*)$"},"action":{"const":"policy_changed"},"expressionIds":{"type":"array","minItems":0,"maxItems":0,"items":{"type":"string","minLength":36,"maxLength":36,"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}}}}]}
   }
 }
 ```
@@ -1188,7 +1190,7 @@ ALTER TABLE expression_draft ADD CONSTRAINT expression_draft_candidate_index_che
 
 JSON Schema로 나타낼 수 없는 규칙은 서버가 강제하고 코어 `expressionSetIssues`가 같은 규칙의 실행 가능한 형태다: 이름의 앞머리와 유일성, 칸 index의 유일성, 칸의 `kind`와 큰 그림 형식의 일치(`still` ⇔ PNG), 초안 id의 유일성, 칸 수 ≤40과 보관 바이트 합 ≤24 MiB, `slots`의 index 집합이 보관의 집합과 같음, 모든 칸이 같은 `subjectMemberId`.
 
-**L11.2 OpenAPI 조각.** 새 경로는 없다. 기존 결정 요청에 필드 하나, 기존 `WorkspaceActionId`에 id 하나, 결과 참조에 종류 하나가 더해진다. 정본 `docs/api/openapi.yaml`의 변경은 S2의 일이다(스펙에 없는 경로·필드를 마운트하면 계약-라우터 차이 시험이 빨강이다).
+**L11.2 OpenAPI 조각.** 새 경로는 없다. 기존 결정 요청에 필드 하나, 기존 `WorkspaceActionId`에 id 둘, 결과 참조에 종류 하나가 더해진다. 정본 `docs/api/openapi.yaml`의 변경은 둘로 나뉜다. **`WorkspaceActionId`의 두 id(`expression.set.create`·`expression.set.plan`)는 S1b(#5460)가 싣는다**: 레지스트리 = enum 드리프트 시험(F1)이 요구하는 쪽이고 L2.1(c)·A4가 정한 쪽이다. **결정 요청의 필드(`expressionChoices`)와 결과 참조의 종류(`expression_set`)는 S2의 일이다**(스펙에 없는 경로·필드를 마운트하면 계약-라우터 차이 시험이 빨강이다).
 
 ```yaml
 openapi: 3.1.0
@@ -1209,9 +1211,9 @@ components:
           maxItems: 40
           items: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Choice'}
     WorkspaceActionIdDelta:
-      description: One id added to WorkspaceActionId. Team-AI-only (ProposalDoor TeamAi): the Agent Port refuses it as an unknown id, and it is not in InitiativeActionId.
+      description: Two ids added to WorkspaceActionId (S1b). Both are Team-AI-only (ProposalDoor TeamAi, raised by server code): the Agent Port refuses them as unknown ids, and they are not in InitiativeActionId.
       type: string
-      enum: [expression.set.create]
+      enum: [expression.set.create, expression.set.plan]
     ActionResultRefTypeDelta:
       description: One ref type added to the result of a settled workspace-action card. The id is the set id.
       type: string
@@ -1537,3 +1539,112 @@ owner가 2026-11-07에 GIF(와 이모티콘)를 커스텀 반응처럼 쓸 수 �
 - **함정 — 타이머를 빼는 것만으로는 모자란다.** 서버 GIF는 NETSCAPE 반복 횟수가 3(= 총 4회)이라(`media/motion.rs`, 시험 `gif_all_frames_delays_and_four_plays_are_encoded_with_static_thumb`) 브라우저도 iOS(`RCTUIImageViewAnimated`)도 4번 돌고 마지막 장면에서 멈춘다. 반응 칩은 **그리는 쪽의 변환**으로 푼다: 받은 바이트에서 반복 횟수 두 바이트만 0(무한)으로 바꾼 것을 그린다(코어 `gifLoop.ts`의 `loopForever`, 블록 구조를 따라가며 찾고 반복 정보가 없으면 더한다). 서버가 주는 그림·치수·해시는 그대로이고 바뀐 바이트는 화면에만 쓴다. 같은 그림은 같은 바이트(웹은 같은 데이터 주소, 폰은 저장소가 따로 쓴 한 파일)라서 엔진이 디코드를 한 번만 하고 칩끼리 장면도 함께 간다. 주소를 바꿔 다시 시작하는 방식(주기적 다시 재생)은 매번 디코드를 새로 하고 칩끼리 어긋나서 쓰지 않았다.
 - **폰 반응 고르개.** 메시지 액션 시트의 「+」가 입력창 이모티콘 창(#5452)과 같은 탭·격자·세트 띠 부품으로 세 탭(이모티콘 · 이모지 · GIF)을 연다. 반응은 예전처럼 「이모지」 탭부터 열고, 고르면 그 표현이 `:이름:` 반응 하나로 달린다(큰 그림 메시지를 보내지 않는다).
 - **시험.** 코어 `gifLoop.test.ts`(바이트), 웹 `ExpressionImage.test.tsx`(jsdom: 4번 시간이 지나도 thumb으로 안 바뀐다·동작 줄이기·화면 밖·한 주소), 웹 `ReactionChips.motion.browser.test.ts`(**실제 엔진** WebKit·Chromium의 화면 캡처로 4번 뒤에도 장면이 바뀐다 — `loopForever`를 입력 그대로 돌려주면 붉다), 폰 `expressionImageStable.test.tsx`·`reactionPicker.test.tsx`. 폰 실기기 재생과 폰 프레임은 runtime-unverified다.
+
+## 15. 증보 2026-11-07 — 변경 알림에 무엇이 바뀌었는지 싣기: 숨김·삭제는 그 그림만 내리고 등록·고치기는 그림을 그대로 둔다 (#5491)
+
+> Status: **Accepted** — 2026-11-07 planner. 등급 2 독립 보안 검수 1회차 FAIL(High 1, H-5491-1: 상세 없는 숨김 알림 뒤 폰이 남긴 파일로 숨긴 그림을 다시 그림) → 수리(P9) → 검수자가 정한 부분 재확인(재현 시험 REPRO-1·2·2b·CONTROL GREEN, 수리 줄 두 곳을 각각 깨면 RED, 해시 원복) 통과. 자세한 판정은 비공개 기록, PR 본문에 요약. ADR-0100: 실시간 알림 계약(새 type)을 더하고 D3의 「폐기」를 읽는 법을 정하므로 이 참조가 머지 조건이다. 근거: v0.1.44 승격 전 폰 화면 검수 7b의 M3 — [#5491](https://github.com/yeomyeonggeori/oort/issues/5491).
+> 범위: `expressions:ws…` 채널의 알림. **바뀌는 것**: 서버가 변경마다 새 알림 `expression.changed.detail` 하나를 기존 `expression.changed` **앞에** 같은 tx로 더 쓴다 / 코어 `ChangedDetail` 계약과 판정 함수 / 폰·웹(데스크탑 포함)이 숨김·삭제 상세에서 그 id만 내리고 등록·고치기 상세에서는 그리던 그림을 그대로 둔다 / 폰은 상세가 없는 알림에서도 그림 파일을 걷지 않고 그리기만 멈춘다. **바뀌지 않는 것**: `expression.changed`(v1)의 바이트·스키마·멱등 키·쓰는 자리, D1~D3의 보안 목표(숨기거나 지운 그림은 화면에 남지 않는다), 공개 REST·DB(migration 0)·Centrifugo 설정(채널·namespace 0).
+> 절 번호: §13은 #5504(증보 7), §14는 디스크 캐시 B(증보 8)가 쓴다. 이 절의 소절은 P로 시작한다(§12의 owner 질문 O1~O5와 겹치지 않게).
+
+### P0. 문제와 확인한 사실
+
+`[V]`는 이 저장소 소스를 읽어 확인한 사실이다. 화면·실기기·실제 Centrifugo 왕복은 확인하지 않았다(**runtime-unverified**).
+
+1. `[V]` 서버가 알림을 쓰는 곳은 `store.rs`의 `changed()` 하나다: 카탈로그 version을 올리고, 감사 행(`momo.expression.changed.v1`)과 outbox `expression.changed`(`data = {type, workspaceId, version}`)를 쓴다. 호출자는 등록(`activate`)·에이전트 승인 등록(`action::choose_in_tx`)·고치기·숨기기·지우기(`mutate`)·정책 변경(`set_policy`)이다. 세트 승인(§12 L6)은 이 base에 아직 호출자가 없다. 알림에는 **무엇이 바뀌었는지도 어느 등록인지도 없다**.
+2. `[V]` 폰은 알림이 오면 그림 파일을 전부 걷고(`evict()`) 다음 목록이 적용될 때까지 모든 그림 층을 내려 칸만 둔다(`changePending`, #5473 — 보안 검수 M-5451-1: 숨긴 그림이 화면에 남으면 안 된다). 웹은 알림마다 메모리 그림을 전부 폐기하고(`clearImages()`) epoch를 올려 모든 칸이 그림을 다시 받는다.
+3. 그래서 누가 이모티콘 하나를 **새로 등록하기만 해도** 보이던 큰 이모티콘·반응 칩·창 격자·미리 보기가 한꺼번에 비었다가 다시 선다(M3). Hermes 이모티콘 세트(§12)가 들어오면 등록이 몰려 더 잦다. 폰의 이 비용은 #5473 인계가 이미 적어 두었다(「알림마다 보이던 표현이 한 번씩 다시 받아져요」).
+4. `[V]` **옛 판은 v1을 엄격하게 읽는다.** 웹·데스크탑: `lib/realtime.ts`가 `matchesExpressionContract("Changed", data)`로 거르고, `Changed`는 `additionalProperties: false`다. 폰: `channelRail.ts`가 `type === 'expression.changed'`와 `workspaceId`만 본다. 그래서 **기존 알림에 필드를 더하면 v0.1.44 웹·데스크탑이 알림을 버린다** — 그러면 옛 판에서 숨긴 그림이 다음 읽기까지 남는다(D3 후퇴, 보안 문제).
+5. `[V]` 채널 `expressions`는 `infra/centrifugo.json`에서 `history_size: 0`, `history_ttl: 0s`다: 복구도 위치 추적도 없다. 놓친 알림은 재구독 때의 전체 읽기, 웹의 30초·창 초점 읽기, 폰의 포그라운드·연결 복귀 전체 읽기가 메운다(지금도 그렇다).
+
+### P1. 비교한 설계
+
+| | 설계 | 판정 |
+|---|---|---|
+| (a) | v1 `expression.changed`에 `action`·`expressionIds`를 더한다 | **기각.** P0-4: 옛 웹·데스크탑이 알림을 통째로 버려 D3가 뒤로 간다 |
+| (b) | 같은 채널에 새 type의 상세 알림을 v1 **앞에** 같은 tx로 쓴다. 새 클라이언트는 상세로 처리하고 같은 version의 v1은 건너뛴다. 상세가 없으면(옛 서버·유실) v1에서 전부 내린다 | **선택.** 옛 판은 상세를 알림으로 읽지 않아 지금과 똑같다(P3). 서버·클라이언트 어느 쪽이 먼저 배포돼도 안전하다 |
+| (c) | 새 채널(예 `expressions-detail:ws…`)에 상세만 낸다. 새 클라이언트는 그 채널만 듣는다 | **기각(이번 칸).** 건너뛰기·순서 문제는 사라지지만 `infra/centrifugo.json`에 namespace와 `channel_regex`를 더하고 구독 프록시(`subscribe_proxy_enabled`) 인가를 더해야 해서 Docker·Centrifugo 검증과 배포 순서 의존이 생긴다. 같은 채널 방식은 인프라 없이 옛 판을 바이트 그대로 둔다. 두 채널 사이의 순서는 같은 채널 안보다 더 약하다 |
+| (d) | 상세를 v1 **뒤에** 쓴다 | **기각.** 새 클라이언트가 v1을 받는 순간에는 아는 것이 없어 전부 내려야 하므로 깜빡임이 그대로다 |
+| (e) | 계약 없이 클라이언트만 고친다: 폰이 알림 때 파일을 걷지 않고 그리기만 멈춘 뒤 목록 적용 때 `evictImageIds`만 지운다 | **보강으로 채택(P5-4).** 다시 받기(왕복)는 없애지만 목록 왕복 동안의 빈 칸은 남아 단독으로는 「등록 때 깜빡임 0」을 못 한다. 상세가 없는 경우(옛 서버·유실)의 비용을 줄이는 몫으로 둔다 |
+
+### P2. 선택한 설계 — 상세 알림 `expression.changed.detail`
+
+1. **모양.** `{type:"expression.changed.detail", workspaceId, version, action, expressionIds}`. `action`은 `created`·`edited`·`hidden`·`deleted`·`policy_changed`. `version`은 짝인 v1과 같은 카탈로그 version(한 변경 = 한 version이라 이것이 짝의 열쇠다). `expressionIds`는 소문자 uuid의 중복 없는 배열: `hidden`·`deleted`는 **이제 화면에 보이면 안 되는 id**, `created`·`edited`는 바뀐 id, `policy_changed`는 빈 배열. 최대 40개(§12 L4의 한 세트 승인 크기; 세트 승인은 한 version으로 등록하므로 한 알림에 담긴다).
+2. **담지 않는 것.** id·action·version 외에는 아무것도 싣지 않는다 — 이름·표시 이름·태그·신고자·사유·그림 정보 없음. `hidden`이라는 사실은 목록 델타가 이미 모든 멤버에게 `status:"hidden"`으로 보여 주는 값이다(D2). 감사 행·v1은 바뀌지 않는다.
+3. **서버.** `changed()`가 같은 tx 안에서, version을 올린 뒤, **상세를 먼저 쓰고 v1을 쓴다**(outbox `id`는 `BIGSERIAL`이라 같은 연결의 두 INSERT는 상세 < v1). 상세의 멱등 키는 `expression-detail:{ws}:{v}`로 v1의 `expression:{ws}:{v}`와 **달라야 한다**: 같으면 Centrifugo의 5분 멱등 캐시가 둘째 발행을 버린다. `changed()`는 `Effect`(`Created(ids)`·`Edited(id)`·`Hidden(id)`·`Deleted(id)`·`PolicyChanged`)를 인자로 받아 모든 호출자가 무슨 변경인지 컴파일 때 밝히게 한다. 상세는 계약이 허락하는 모양일 때만 쓴다: `created`인데 id가 0개이거나 40개를 넘으면 상세 없이 v1만 나가고, 그때 클라이언트는 전부 내린다(안전한 쪽, 지금 호출자 중에는 없다).
+4. **스키마는 열려 있다.** `ChangedDetail`은 모르는 필드를 무시한다(`additionalProperties`를 닫지 않는다). v1 `Changed`가 닫혀 있어서 이번 설계가 이렇게 돌아가야 했던 것과 같은 일을 다음 더하기가 만들지 않게 한다. 반대로 **모르는 `action`은 불일치**다: 그 상세는 알림이 아니게 되고 뒤따르는 v1이 전부 내린다(안전한 쪽).
+5. **클라이언트 판정은 코어 한 곳이다**(`changeNotice.ts`). `revoke-ids`(숨김·삭제: 그 id만 내린다), `keep-all`(등록·고치기·정책: 그림을 그대로 두고 목록을 새로 받는다), `revoke-all`(상세 없는 v1, 읽을 수 없는 상세, 이름 없는 숨김·삭제: 전부 내린다), `already-handled`(같은 version의 다른 알림이 이미 처리했다 — **숨김·삭제 상세는 이것이 되지 않는다**, P4). 웹과 폰이 같은 함수를 부른다.
+
+### P3. 옛 판 호환 근거
+
+| 읽는 쪽 | 코드 | 상세 프레임이 오면 | v1이 오면 |
+|---|---|---|---|
+| 웹·데스크탑(v0.1.44) | `lib/realtime.ts` publication 처리기: `matchesExpressionContract("Changed", ctx.data)`가 참일 때만 `changed()`를 부른다 | `type`이 상수 `expression.changed`가 아니라 불일치 → 아무것도 안 부른다 | 지금과 같다(그림 전부 폐기 + 목록 읽기) |
+| 폰(v0.1.44) | `channelRail.ts` `subscribeExpressions`: `frame?.type === 'expression.changed'` 이고 `workspaceId`가 같을 때만 `onChanged()` | `type` 불일치 → 무시 | 지금과 같다(그림 전부 걷고 목록 읽기) |
+
+- v1은 **바이트 그대로**다: 같은 `data`(`type`·`workspaceId`·`version` 셋), 같은 멱등 키, 같은 `changed()` 한 곳. 시험이 v1의 `data`를 글자 그대로 단정하고(Rust), 코어 시험이 `Changed` 정의가 v0.1.44의 것과 같음을 값으로 단정한다.
+- 옛 판은 상세를 **읽지 않을 뿐 해롭지 않다**: 구독은 같은 채널이고 프레임 하나가 더 올 뿐이다. 옛 클라이언트에 「모르는 type은 전부 다시 읽기」 같은 경로가 있는지 보았다 — 없다(위 표의 두 처리기가 전부다). 이 호환의 증거는 소스와 단위 시험이고 v0.1.44 바이너리를 실제로 돌려 본 것은 아니다.
+- 새 클라이언트와 **옛 서버**(상세 없음)는 v1만 받으므로 `revoke-all`이고 오늘과 같은 보안 모양이다. 그 길의 비용은 P5-4가 줄인다. 새 서버를 먼저 배포해도, 클라이언트를 먼저 배포해도 어느 조합이든 D3가 지켜진다.
+
+### P4. 순서 보장 — 확인한 것과 설계가 요구하지 않는 것
+
+**확인한 것 `[V]`.**
+1. 한 `changed()` 안의 두 `emit_outbox`는 같은 tx·같은 연결이고 `outbox.id`는 `BIGSERIAL`이라 **상세의 id < v1의 id**다.
+2. 릴레이는 `claim_broadcast_batch`로 `ORDER BY id … LIMIT 64 FOR UPDATE SKIP LOCKED`로 가져가고, `drain_once`는 가져온 행을 **하나씩 `await`하며** 발행한다. 릴레이가 하나이고 실패가 없으면 상세가 먼저 발행된다.
+3. Centrifugo 안에서 한 채널의 발행이 도착한 순서대로 전달된다는 것은 공개 문서의 보장에 기댄다(이 저장소에서 실제 왕복은 재지 않았다).
+
+**지켜지지 않는 경우 `[V]`.** (i) 상세 행의 발행이 일시 실패하면 그 행만 `pending`으로 돌아가 백오프(첫 재시도 2초 뒤) 동안 대기하고 같은 묶음의 v1은 그대로 나간다. (ii) 릴레이가 둘 이상이면 `SKIP LOCKED` 때문에 두 행을 서로 다른 인스턴스가 가져가 순서가 뒤집힐 수 있다. (iii) 영구 실패(`failed`)한 행은 다시 나가지 않는다. (iv) 이 namespace는 `history_size: 0`이라 놓친 발행을 되살리지 않는다. **따라서 순서를 보장한다고 쓰지 않는다.**
+
+**설계는 순서에 기대지 않는다.** 모든 판정이 어떤 순서와 어떤 유실에서도 안전한 쪽으로 떨어지게 짰다.
+
+| 도착 | 새 클라이언트가 하는 일 | 결과 |
+|---|---|---|
+| 상세 → v1 (같은 version) | 상세로 처리, v1은 건너뜀 | 깜빡임 0 (순서가 지켜진 경우) |
+| v1 → 상세 | v1에서 전부 내림(=지금). 뒤늦은 **숨김·삭제 상세는 같은 version이어도 건너뛰지 않고** 그 id를 그 자리에서 내림(두 번 내려도 안전). 건너뛰는 것은 등록·고치기·정책 상세뿐 | 웹은 보안상 지금과 같다(목록을 한 번 더 읽는다). 폰은 v1이 파일을 두므로 이 상세가 숨긴 id를 이름으로 알려 준다 — 목록이 알려 준다는 전제에만 기대지 않는다 |
+| 상세만 (v1 유실) | 상세로 처리 | 숨김·삭제는 상세만으로 충분히 내려간다 |
+| v1만 (상세 유실·옛 서버) | 전부 내림. 폰은 그리기만 멈추고 파일은 다음 목록이 알려 주는 id만 걷는다(P5-4) | 지금과 같다. **폰은 캐시가 읽지 않은 version을 건너뛰지 않는다는 조건에서만** 같다(아래 전제) |
+| 둘 다 유실 | 재구독·포커스·주기 읽기가 메운다 | 지금과 같다 |
+
+순서가 지켜지면 깜빡임 0, 어긋나면 지금과 같을 뿐이고 **보안은 어느 쪽도 같다**(폰이 v1만 받을 때는 아래 전제가 성립하는 한).
+
+**폰이 v1만 받을 때의 전제 (1회차 보안 검수 H-5491-1에서 어긋나 고쳤다).** 폰이 파일을 두는 길(P5-4)은 「다음 목록이 빠진 id를 알려 준다」에 기댄다. 목록은 `since`(캐시 version) 뒤의 변경만 주므로 이 전제는 **캐시가 읽지 않은 version을 건너뛰지 않을 때만** 성립한다. 폰의 `mutate`가 내 변경의 응답을 `캐시 version → 응답 version` 델타로 얹으면 사이에 낀 남의 변경(예: 숨김)을 건너뛰어, 그 등록이 캐시에 `active`로 남고 다음 목록도 그것을 다시 알리지 않았다(재현: 숨긴 그림의 파일이 문이 열릴 때 다시 쓰였다). 그래서 **응답이 캐시 version의 바로 다음(서버 카운터가 변경마다 +1)일 때만 델타로 얹고, 아니면 목록을 다시 읽는다**(코어 `isNextExpressionVersion`). 그러면 폰 캐시가 가진 version 이하의 숨김은 모두 이미 목록(또는 바로 다음 version의 내 응답)으로 읽혀 그 파일이 걷혔고, 알림의 version이 더 크면 다음 델타 목록이 그 숨김을 `evictImageIds`로 알려 준다. 웹은 파일이 없고 `mutate`가 그림을 전부 폐기하므로(P8) 같은 경주에서 서버의 404가 막고 다음 전체 읽기가 목록을 바로잡는다.
+
+「같은 version」 판정의 기억은 구독마다 최근 64개 version만 갖고 재구독(웹 `resync`·폰 `resetNotices`)과 폰의 오프라인 복귀에서 비운다 — **재구독이 일어나는 서버 복원**에서 version이 되돌아가도 새 변경이 건너뛰어지지 않게 하는 데까지다. DB만 복원되고 구독이 끊기지 않으면 기억이 남아 되돌아간 version과 겹치는 새 변경의 알림이 건너뛰어질 수 있다(1회차 검수 L-5491-1: 웹은 기존 `expressionCacheNeedsRefresh`가 `version ≤ 캐시 version` 알림을 통째로 건너뛰므로 더 넓은 기존 동작이고, 폰은 복원 뒤 목록을 늘 낡은 답으로 거절하는 기존 문제가 먼저다). 후속으로 둔다(P9). 기억에서 밀려난 version의 알림은 건너뛰지 않는다(안전한 쪽).
+
+### P5. D3를 지키는 방법
+
+1. **숨김·삭제는 상세의 id를 그 자리에서 내린다.** 폰: 그 id의 파일·층·받는 중 읽기를 걷고 보관함에서 그 항목을 뺀다. 웹: 그 id의 메모리 그림·받는 중 읽기를 폐기하고 목록에서 뺀다. 다른 그림은 그대로이고 목록은 새로 읽는다. 읽기가 알림보다 앞서 시작했으면 그 답은 버린다(낡은 목록이 내린 그림을 되살리지 못한다).
+2. **서버 불변식(완전성).** 한 version에서 화면에 보이면 안 되게 된 **모든** 등록의 id가 그 상세의 `expressionIds`에 있다. `changed()`가 `Effect`를 받으므로 호출자는 그 id를 밝혀야 하고, 시험이 네 길마다 id를 값으로 단정한다. 새 길이 생겨도 `Effect`를 고르지 않으면 컴파일되지 않는다.
+3. **전부 내리는 길은 그대로 남는다.** 상세 없는 v1, 읽을 수 없는 상세, 모르는 `action`, 이름 없는 숨김·삭제, 목록 읽기 실패, 끊김·오프라인, 재연결·재구독의 전체 읽기, 로그아웃·워크스페이스 전환. D3의 문장은 이 길들에 그대로 적용된다.
+4. **D3의 「폐기」 읽는 법(planner 결정 요청).** D3는 「숨김·삭제 이벤트·재연결 전체 갱신 때 디코드 중인 것도 폐기한다」고 한다. 상세가 **없는** 알림(옛 서버·유실)에서 폰은 이전까지 그 자리에서 그림 파일을 전부 걷었다. 이 증보는 폰이 (i) 화면에서는 그 자리에서 모든 그림 층을 내리고(`changePending`) 받는 중 읽기를 버리되, (ii) **파일은 목록이 어느 등록이 빠졌는지 알려 주는 순간(`applyExpressionList`의 `evictImageIds`)에 그 id만 걷고**, (iii) 목록 읽기가 실패하거나 낡은 답이 두 번 이어지면 전부 걷는 것으로 읽는다. 이유: 숨긴 그림이 **화면에 남지 않는** 것이 D3의 목표(보안 검수 M-5451-1)이고 파일은 앱 전용 임시 폴더의 인증된 사본이다. 문이 닫힌 동안 그것을 그리는 코드가 없고, 닫힌 문은 목록이 적용되거나 실패해 전부 걷힐 때만 열린다. 이 읽기를 받지 않으면 폰은 알림마다 보이는 그림을 전부 다시 받는다. 웹은 파일이 없고 메모리 사본뿐이라 상세 없는 경로는 오늘과 같이 전부 폐기한다. **이 읽기는 「목록이 빠진 id를 알려 준다」는 전제 위에서만 성립한다**(1회차 검수 H-5491-1에서 어긋났다): 목록은 `since`(캐시 version) 뒤의 변경만 주므로 캐시가 읽지 않은 version을 델타로 건너뛰면 그 숨김은 다시 알려지지 않는다. 그래서 폰은 `mutate`의 응답을 **캐시 version의 바로 다음일 때만** 델타로 얹고(아니면 목록을 다시 읽는다) 캐시가 읽지 않은 version을 건너뛰지 않게 하며, 숨김 상세가 v1보다 늦게 와도 상세가 그 id를 이름으로 내린다(P4). 이 둘이 문이 열릴 때 숨긴 id가 반드시 걷힌다는 보장이다 — 이 보장을 못 지키는 길이 생기면 상세 없는 길은 옛 동작(`evict()` 전부)으로 되돌려야 한다.
+5. **고치기.** 고치기(`Patch`)는 표시 이름·태그만 바꾸고 그림의 바이트·해시·치수는 DB 트리거(`expression_image_immutable`, migration 158)가 불변으로 지킨다. 그래서 `edited`는 그림을 내리지 않는다(`keep`). **그림이 바뀌는 고치기가 생기면 그 id는 `hidden`·`deleted`와 같은 쪽(`expressionIds`가 내릴 id)으로 분류해야 한다.** 그렇게 분류되지 않아도 클라이언트는 목록 적용 때 `media`가 바뀐 등록을 걷는다(`applyExpressionList`의 `evictImageIds`가 마지막 말이다) — 최악은 목록 왕복 한 번 동안 옛 그림이 보이는 것이다.
+6. **클라이언트가 상세를 믿는 범위.** 상세는 서버만 쓴다(클라이언트 직접 publish 금지). 위조해도 내리는 방향(서비스 거부 정도)이고 숨긴 것을 보이게 하지는 못한다. 서버가 숨김을 `edited`로 잘못 분류해도 다음 목록 적용이 그 id를 걷는다.
+
+### P6. 스키마 델타 — 부록 B에 합침
+
+`ChangedDetail`이 부록 B의 고정 JSON(`expression-contracts-v1`)과 코어 `contracts.schema.json`에 같은 값으로 더해졌다(G7과 같은 방식; `verify-contract.mjs`가 동등성을 잰다). **`Changed`는 한 글자도 바뀌지 않았다**(코어 시험이 v0.1.44의 정의 그대로 값을 단정한다). 두 모양의 `oneOf`다: `action ∈ {created, edited, hidden, deleted}`는 `expressionIds` 1~40개, `action = policy_changed`는 빈 배열. 두 모양 모두 모르는 필드를 허용한다(P2-4). 새 OpenAPI 경로·새 REST 응답은 없다(알림은 실시간 채널의 프레임이고 `docs/api/openapi*.yaml`에 이 알림은 적혀 있지 않다 — 확인).
+
+### P7. 클라이언트 접합
+
+- **코어** `changeNotice.ts`: `readExpressionChangeDetail`(계약·워크스페이스 확인), `readExpressionChangedVersion`(옛 알림의 version — 폰은 옛 알림을 예전처럼 느슨하게 읽으므로 맞지 않으면 null), `decideExpressionDetail`·`decideExpressionChanged`(순수 판정, 상태 = 최근 version 기억), `createExpressionNoticeGate`(기억을 쥔 얇은 포장, `reset()`).
+- **웹**: `watchExpressionChanges`가 상세를 먼저 검사해 처리기에 넘기고, `notices.ts`(`ExpressionsProvider`가 쓴다)가 판정대로 `evictImages(ids)`(그 id의 메모리 그림·받는 중 읽기·목록 항목만 폐기) 또는 목록 읽기만 한다. v1 처리(전부 폐기 + 읽기)는 그대로이고 같은 version의 상세가 먼저 왔으면 건너뛴다.
+- **폰**: `channelRail`이 상세를 `onDetail`로 넘기고(옛 알림은 `onChanged(version)`), 스토어가 `revoke-ids`(그 id의 파일·받는 중 읽기·보관함 항목)·`keep-all`(목록 읽기만)·`revoke-all`(그리기 멈춤 + 받는 중 읽기 폐기, 파일은 두고 목록이 알려 주는 id만 걷기)을 처리한다. 목록 읽기의 판(`readGen`)은 그림 받기의 판(`epoch`)과 따로다: 숨김 상세는 앞서 시작한 목록 읽기만 버리고 다른 그림의 받기는 이어 간다. 내 응답(`mutate`)은 캐시 version의 바로 다음일 때만 델타로 얹고(아니면 목록을 다시 읽는다, P4), 그 응답이 낸 걷기와 목록이 알려 주는 걷기도 같은 길(그 id만)이다. 닫힌 문(`changePending`) 동안 `image()`는 두었던 파일도 내주지 않는다. 시험은 새 구독(`resetNotices`)에서 기억을 비운다.
+
+### P8. 시험·인계·열지 않는 것
+
+- Rust 실 PG(`storage_pg.rs`): 등록·고치기·숨기기·지우기·정책 변경마다 같은 tx에 상세 하나와 v1 하나·순서(상세 먼저)·action과 id·멱등 키가 다름·v1의 `data`가 글자 그대로·다른 테넌트의 행 0·상세에 이름·바이트·신고 내용이 없음·상세 행을 못 쓰면 변경 전체가 되돌려짐. 에이전트 승인 등록(`choose_in_tx`)은 기존 적합성 시험에 상세 단정을 더했다. **기존 시험 한 곳**(`storage_pg`의 v1 행 고르기)은 같은 `version`의 행이 둘이 되어 `type` 조건 한 줄을 더했다 — 고치기 전에 실제로 붉었다(`left: expression.changed.detail`). 단정은 그대로다.
+- 코어: `ChangedDetail` 계약(양·음성, 열림), `Changed` 불변, 판정 함수(순서·유실·건너뛰기·기억 한도).
+- 웹·폰: 등록 상세 → 그리던 그림 그대로(요청 0·층 유지)·숨김 상세 → 그 id만 내림·v1만 → 전부 내림·같은 version의 v1 건너뛰기(목록 읽기가 아직 진행 중일 때 포함)·옛 방식 호출(상세 처리기 없음)이 상세를 무시.
+- 1회차 검수 수리(H-5491-1): 폰 `expressionNoticeRace.test.tsx`(남의 숨김이 끼어든 내 응답 → 목록 다시 읽기, v1만·v1 뒤 상세·상세 먼저의 정상 순서·바로 다음 version이면 다시 읽지 않기), 코어 `isNextExpressionVersion`과 「숨김·삭제 상세는 같은 version이어도 건너뛰지 않는다」, 웹 같은 순서 시험.
+- **열지 않는 것**: 새 채널·Centrifugo 설정 변경(P1-c), 알림 묶음 합치기(세트 승인은 한 version이라 이미 한 알림이다), 웹 `ExpressionStore.mutate`(내 등록·숨김 응답)의 전부 폐기 줄이기 — 웹에서 **내가** 등록하면 내 화면의 그림은 여전히 한 번 다시 받아진다(폰은 이 증보로 같은 길이 그 id만 걷는다), 숨김 해제(없음), 순서 보장을 위한 릴레이 변경.
+- **runtime-unverified**: 화면 녹화·프레임 분석, 실제 Centrifugo·릴레이 왕복, 폰 실기기·시뮬레이터, v0.1.44 바이너리와의 실제 호환(소스·단위 시험으로만 확인).
+
+### P9. 1회차 보안 검수(대상 `71624ceca`)의 반영 (2026-11-07)
+
+판정 FAIL(Blocker 0 · High 1 · Low 2). 서버 완전성·누설·테넌트·계약·옛 판 호환은 확인됐고 막은 것은 폰 하나였다.
+
+- **H-5491-1 (High) — 반영.** 폰이 상세 없는 숨김 알림에서 파일을 두고 목록의 `evictImageIds`만 걷는데(P5-4), 내 변경의 응답이 남의 숨김 version을 건너뛰어 캐시를 앞당긴 경우 목록이 그 숨김을 다시 알리지 않아 숨긴 그림의 파일이 문이 열릴 때 다시 쓰였다(재현 시험: 71624ceca에서 RED, 기준선 `e84b6eb3c`에서 GREEN). 수리 둘: ① 폰 `mutate`는 응답이 캐시 version의 바로 다음일 때만 델타로 얹고 아니면 목록을 다시 읽는다(코어 `isNextExpressionVersion`, P4·P5-4·P7) ② 코어 `decideExpressionDetail`은 늦게 온 숨김·삭제 상세를 같은 version이 이미 처리됐어도 건너뛰지 않는다(P2-5·P4). ①이 뿌리이고 ②는 같은 경주의 다른 입구를 따로 닫는다(v1이 먼저 오고 상세가 늦을 때 상세가 id를 이름으로 내린다).
+- **고른 이유(① 대 검수가 적은 더 좁은 대안).** 좁은 대안은 「v1만 받았고 그 알림 version ≤ 캐시 version이면 파일을 전부 걷기」다. 그러나 내 변경의 알림은 응답과 같은 version이라 응답이 먼저 오는 정상 순서에서도 그 조건이 참이 되어 매번 전부 걷게 되고(M3 깜빡임이 되살아난다) 숨긴 등록이 캐시에 `active`로 남는 틈 자체는 닫지 못한다. ①은 틈을 만들지 않으므로 P5-4의 전제가 구조로 성립한다.
+- **L-5491-1 (Low) — 문장을 좁히고 후속.** 위 P4의 기억 문장을 「재구독이 일어나는 복원」으로 좁혔다. DB만 복원되고 구독이 유지되는 경우는 버전만으로 복원과 늦은 알림을 가를 수 없고(늦게 온 옛 version의 알림도 정상이다) 폰이 복원 뒤 목록을 낡은 답으로 거절하는 기존 문제와 한 묶음이라, 이 칸에서 코드로 고치지 않고 후속으로 둔다.
+- **L-5491-2 (Low) — 후속.** 숨김 상세 뒤에도 기기 보관함(MMKV)에는 그 항목의 메타데이터(id·이름·표시 이름·상태·media 해시, 바이트 아님)가 다음 목록 적용까지 남는다(콜드 스타트에서 목록이 오기 전 칸만 서고 그림은 받지 않는다). `revoke-ids`에서 기기 보관함도 다시 쓰는 한 줄이 후속이다.
+- 웹 `ExpressionStore.mutate`는 열지 않았다(I-1: `clearImages()`가 전부 폐기하고 서버 404가 숨긴 그림을 막는다. P8). 같은 판정을 쓰려면 코어 `isNextExpressionVersion` 한 줄이다.
+- Status는 부분 재확인(재현 시험 GREEN과 수리 줄 사보타주 RED) 뒤 planner가 **Accepted**로 올렸다(2026-11-07).

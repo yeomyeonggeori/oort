@@ -785,6 +785,14 @@ impl HermesPrompt {
 // the closed result codes (P1, P9)
 // ---------------------------------------------------------------------------
 
+/// The audit row's and the trace's word for a delegation that **ended well** (#5370). P1's twelve codes
+/// are the results a model or a person is told; a good result is neither a refusal nor a failure, so it
+/// has no code there. The audit row (`team_ai.delegate`) says `ok`.
+pub const AUDIT_CODE_OK: &str = "ok";
+/// The trace's word (`team_ai.turn` → `hermes.results`) for a call that passed every check and became the
+/// delegation step: what happens next is the next step's audit row, not this one's.
+pub const AUDIT_CODE_ACCEPTED: &str = "accepted";
+
 /// The closed codes of a delegation's result (P1). The model reads `code` (and, for the first two, a
 /// reason); a person reads [`DelegateCode::sentence`] where there is one (P9). S1 produces `not_offered`,
 /// `invalid_arguments` and `unavailable`; the rest are S2's, named here so the set is closed in one place.

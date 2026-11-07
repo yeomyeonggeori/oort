@@ -8,6 +8,7 @@ import { photoModelRequest, readPhotoDraftResult, readPhotoModel, type PhotoDraf
 import type { ExpressionDraft, ExpressionList, ExpressionMutation } from "@momo/core/features/expressions/types";
 import type { ExpressionRequest, ExpressionTransport } from "./transport";
 import { ImageCache, type ImageCacheLimits } from "./ImageCache";
+import { expressionIdOfImagePath } from "./media";
 
 /** 이 기기에 저장된 JSON 값. 저장소가 없거나 값이 깨졌으면 null이다(복원 함수가 빈 값으로 바꾼다 - 저장소는 선택 사항이다). */
 function storedJson(key: string): unknown {
@@ -22,6 +23,8 @@ export class ExpressionStore {
   private listeners = new Set<() => void>();
   private generation = 0;
   private refreshSerial = 0;
+  /** 표현 id 별 걷기 횟수. 숨김·삭제 상세가 그 id 의 그림만 걷을 때(`evictImages`) 오른다: 그 칸은 새 세대가 되고 그 id 의 받는 중 읽기는 버려진다(다른 그림은 그대로). */
+  private revoked = new Map<string, number>();
   /** 인증된 그림의 메모리 캐시: 바이트 예산 LRU(#5468). 로그아웃·워크스페이스 전환·숨김·삭제·오프라인은 아래 `clearImages` 가 통째로 비운다. */
   private images: ImageCache;
   readonly base: string;
@@ -34,12 +37,26 @@ export class ExpressionStore {
     const usage = restoreExpressionUsage(storedJson(this.usageKey), workspaceId, memberId);
     const favorites = restoreExpressionFavorites(storedJson(this.favoritesKey), workspaceId, memberId);
     this.base = `/v1/workspaces/${encodeURIComponent(workspaceId)}`;
-    this.snapshot = { usage, favorites, cache: emptyExpressionCache(workspaceId, memberId), status: "loading" as "loading" | "ready" | "error", epoch: 0, offline: false, failure: null as unknown };
+    this.snapshot = { usage, favorites, cache: emptyExpressionCache(workspaceId, memberId), status: "loading" as "loading" | "ready" | "error", epoch: 0, revoked: this.revoked as ReadonlyMap<string, number>, offline: false, failure: null as unknown };
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
   private emit() { this.snapshot = { ...this.snapshot }; this.listeners.forEach((listener) => listener()); }
   clearImages() { this.generation++; this.images.clear(); this.snapshot.epoch++; this.emit(); }
+  /**
+   * 이 id 들의 그림만 걷는다(숨김·삭제 상세, ADR-0218 §15): 메모리 그림·받는 중 읽기·보관함 항목. 다른 그림은 그대로이고 그 칸들은 다시 그려지지 않는다.
+   * 이 알림보다 앞서 시작한 목록 읽기의 답은 버린다(낡은 목록이 숨긴 등록을 되살리지 못한다). 목록은 부르는 쪽이 새로 읽는다.
+   */
+  evictImages(ids: readonly string[]) {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    this.refreshSerial++;
+    for (const id of gone) this.revoked.set(id, (this.revoked.get(id) ?? 0) + 1);
+    this.images.removeWhere((path) => { const id = expressionIdOfImagePath(path); return id !== null && gone.has(id); });
+    const cache = this.snapshot.cache;
+    this.snapshot.cache = { ...cache, items: cache.items.filter((item) => !gone.has(item.id)) };
+    this.emit();
+  }
   dispose() { this.disposed = true; this.refreshSerial++; this.clearImages(); this.snapshot.cache = emptyExpressionCache(this.workspaceId, this.memberId); this.listeners.clear(); }
   setOffline(offline: boolean) { this.snapshot.offline = offline; if (offline) this.clearImages(); else this.emit(); }
   /**
@@ -123,9 +140,11 @@ export class ExpressionStore {
     const hit = this.images.get(path);
     if (hit) return hit;
     const generation = this.generation;
-    // 메모리 캐시만(ADR-0218 D3): 총량은 `ImageCache` 가 바이트 예산 LRU 로 묶는다.
+    const id = expressionIdOfImagePath(path);
+    const idGeneration = id === null ? 0 : (this.revoked.get(id) ?? 0);
+    // 메모리 캐시만(ADR-0218 D3): 총량은 `ImageCache` 가 바이트 예산 LRU 로 묶는다. 전체 걷기와 이 id 의 걷기 모두 받는 중 읽기를 버린다.
     return this.images.add(path, this.transport.image(path).then((src) => {
-      if (generation !== this.generation) throw new Error("evicted expression");
+      if (generation !== this.generation || (id !== null && (this.revoked.get(id) ?? 0) !== idGeneration)) throw new Error("evicted expression");
       return src;
     }));
   }

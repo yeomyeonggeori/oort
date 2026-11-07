@@ -152,8 +152,10 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
   useEffect(
     () =>
       rail?.subscribeExpressions?.(workspaceId, {
-        onChanged: () => store.changed(),
+        onChanged: version => store.changed(version ?? null),
+        onDetail: detail => store.detailed(detail),
         onResync: () => {
+          store.resetNotices();
           void store.refresh(true);
         },
       }),

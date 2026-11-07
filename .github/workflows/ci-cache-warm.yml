@@ -19,15 +19,16 @@
 # 키가 같아야 한다 — 이 파일의 불변식. PR 잡이 여기서 저장한 캐시를 찾으려면 키가 글자 그대로 같아야 하고, 키는 입력에서
 # 나온다. 아래 짝은 `pr-ci.yml` 의 짝 잡과 함께 바꾼다(한쪽만 바꾸면 PR 이 조용히 콜드로 돌아가서 티가 안 난다):
 #   rust          ↔ pr-ci `rust`          shared-key `oort-rust-test`     · workspaces 2개 · `CARGO_PROFILE_*_DEBUG`
-#   security_pack ↔ pr-ci `security_pack` shared-key `oort-security-pack` · workspaces `server-rust`
+#   security_pack ↔ pr-ci `security_pack` shared-key `oort-security-pack` · workspaces `server-rust` · `CARGO_PROFILE_*_DEBUG`(#5495)
 #   node_core·node_web·node_mobile ↔ pr-ci 의 같은 이름 잡(`header_fit` 은 `node_web` 과 잠금 파일이 같아 같은 키)
 # rust-cache 키 = 접두 + shared-key + OS·arch + 해시(rustc 버전 · `CARGO*`·`RUST*` 등 환경 변수) + 해시(`workspaces` 의
 # Cargo.lock·매니페스트). 환경 변수나 workspaces 가 다르면 키가 달라서 PR 이 못 찾는다. 반대로 컴파일 명령(`-p`·`--test`·
 # 기능 플래그)은 키에 들어가지 않는다: 키가 같아도 명령이 다르면 다른 산출물이 저장되므로 PR 잡과 같은 명령으로 컴파일한다.
 #
-# Rust 키가 둘인 이유: `rust` 잡에는 `CARGO_PROFILE_*_DEBUG=line-tables-only`(#5182)와 `clients/desktop/src-tauri`
-# workspace 가 있고 `security_pack` 에는 없어서 컴파일 설정이 다르다. 한 키로 합치면 먼저 저장한 쪽 산출물만 남고, 다른 잡은
-# 자기 것과 맞지 않는 캐시를 받아 다시 빌드한다. 두 설정을 맞추는 일(F5, #5495)이 끝나면 `shared-key` 를 하나로 합칠 수 있다.
+# Rust 키가 둘인 이유(#5495 F5 뒤에도): 환경은 이제 같다 — 두 잡 모두 `CARGO_PROFILE_*_DEBUG=line-tables-only`(#5182, F5). 하지만
+# `rust` 잡은 `clients/desktop/src-tauri` workspace 가 더 있고(락 해시가 다르다), 컴파일 명령도 다르다(`--workspace` 한 번 ↔
+# `security_pack` 은 선택 쌍마다 `-p … --test …`). 호출마다 의존 크레이트의 기능 합집합이 달라서 한 키로 합치면 먼저 저장한 쪽
+# 산출물만 남고 다른 잡은 자기 것과 맞지 않는 캐시를 받아 다시 빌드한다. 컴파일 명령을 같게 만들 수 있을 때만 합친다.
 #
 # 같은 키가 이미 있으면 컴파일·설치를 건너뛴다(rust-cache 의 `cache-hit`, npm 은 `lookup-only` 조회). GitHub 캐시는 한 번
 # 저장되면 바뀌지 않아서 그때는 저장할 것이 없다. 키가 없을 때만(잠금 파일이 바뀌었거나 러너 이미지의 rustc 가 바뀐 뒤 첫
@@ -77,7 +78,10 @@ jobs:
             clients/desktop/src-tauri
           shared-key: oort-rust-test
 
-      - name: cargo test --workspace 컴파일만(--no-run — pr-ci rust 잡과 같은 명령)
+      # pr-ci `rust` 잡은 `cargo nextest run --workspace --locked --manifest-path server-rust/Cargo.toml` 으로 시험을 돌린다(#5495).
+      # nextest 는 실행 전에 `cargo test --no-run` 과 같은 컴파일을 하므로(로컬 실측: 이 명령 뒤 nextest 에 Compiling 0줄) 산출물이
+      # 같고, 인자(`--workspace --locked --manifest-path`)·환경(위 `env:`)만 PR 잡과 그대로 맞추면 된다.
+      - name: cargo test --workspace 컴파일만(--no-run — pr-ci rust 잡의 nextest 가 먼저 하는 컴파일과 같다)
         if: steps.rust_cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml --no-run
 
@@ -87,6 +91,10 @@ jobs:
     runs-on: ubuntu-latest
     # 행 방지용 상한. 콜드 컴파일 약 8분(선택 목록 42개 대상).
     timeout-minutes: 30
+    # pr-ci `security_pack` 잡과 같은 환경 변수(#5495 F5). rust-cache 키의 환경 해시에 들어간다.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

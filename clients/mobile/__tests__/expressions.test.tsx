@@ -24,6 +24,7 @@ import {
   FIXTURE_MEMBER_ID,
   FIXTURE_WORKSPACE_ID,
 } from '@momo/core/features/expressions/fixtures';
+import type {ExpressionList} from '@momo/core/features/expressions/types';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
   createPhoneExpressionStore,
@@ -175,7 +176,9 @@ it('keeps the list and the ready state while a full read is in flight — no loa
   expect(store.snapshot().items).toHaveLength(3);
 });
 
-it('a change notice revokes the loaded pictures at once but keeps the list on screen while the delta is read (#5330)', async () => {
+// #5491 (ADR-0218 §15): 어느 등록이 바뀌었는지 모르는 알림(`changed()`, 상세 없음)은 그림을 **그리지 않게** 즉시 막지만(`changePending`) 그림 파일은 걷지 않는다.
+// 앞 판(#5330)은 알림 순간 파일을 전부 걷고 목록이 오면 보이는 그림을 전부 다시 받았다. 지금은 목록이 알려 주는 id 의 파일만 걷는다. 목록을 못 받으면 전부 걷는다.
+it('a change notice with no detail stops the drawing at once but keeps the files and the list; a delta that names nothing removes nothing (#5491)', async () => {
   const server = createExpressionFixtureServer();
   let reply!: (response: ExpressionFixtureResponse) => void;
   let held: ExpressionFixtureRequest | undefined;
@@ -189,16 +192,219 @@ it('a change notice revokes the loaded pictures at once but keeps the list on sc
     return server.request(input);
   });
   await store.refresh(true);
-  await store.image(parrot, 'thumb');
+  const uri = await store.image(parrot, 'thumb');
   act(() => store.changed());
-  expect(files.remove).toHaveBeenCalledTimes(1); // 그림 파일은 그 자리에서 걷혔다(계약은 그대로)
+  expect(store.snapshot().changePending).toBe(true); // 그리기는 그 자리에서 멈춘다
+  expect(await store.image(parrot, 'thumb')).toBeNull(); // 닫힌 동안은 두었던 파일도 내주지 않는다
+  expect(files.remove).not.toHaveBeenCalled(); // 파일은 걷지 않는다
   expect(store.snapshot().state).toBe('ready'); // 이름 목록은 그대로다
   expect(store.snapshot().items).toHaveLength(3);
   await act(async () => {
     reply(server.request(held!));
   });
-  await waitFor(() => expect(store.snapshot().state).toBe('ready'));
+  await waitFor(() => expect(store.snapshot().changePending).toBe(false));
   expect(store.snapshot().items).toHaveLength(3);
+  expect(files.remove).not.toHaveBeenCalled(); // 델타가 아무것도 걷지 않았다
+  expect(await store.image(parrot, 'thumb')).toBe(uri); // 같은 파일 — 다시 받지 않는다
+  expect(files.write).toHaveBeenCalledTimes(1);
+});
+
+it('a change notice with no detail voids a download that is in flight: it writes no file while the list is still unknown (#5491)', async () => {
+  const server = createExpressionFixtureServer();
+  let imageReply!: (response: ExpressionFixtureResponse) => void;
+  const {store, files} = setup(async input => {
+    // 알림이 시작한 목록 읽기는 붙들어 둔다 — 어느 등록이 내려갔는지 모르는 때다.
+    if (input.path.includes('since='))
+      return new Promise<ExpressionFixtureResponse>(() => {});
+    if (input.path.includes('/image?') && input.path.includes('size=small'))
+      return new Promise(resolve => {
+        imageReply = resolve;
+      });
+    return server.request(input);
+  });
+  await store.refresh(true);
+  const late = store.image(parrot, 'small');
+  const answer = await server.request({
+    method: 'GET',
+    path: `${base}/${parrot.id}/image?size=small&v=${parrot.media!.small.sha256}`,
+  });
+  act(() => store.changed());
+  imageReply(answer); // 받기가 목록보다 먼저 답한다
+  expect(await late).toBeNull(); // 받던 것은 버려진다(D3: 디코드 중인 것도 폐기)
+  expect(files.write).not.toHaveBeenCalled(); // 목록을 모르는 동안에는 새 파일도 쓰지 않는다
+});
+
+it('a change notice with no detail: the delta that hides one removes only that one\'s files and the others come back without a download (#5491)', async () => {
+  const {store, files, request, server} = setup();
+  await store.refresh(true);
+  const other = FIXTURE_EXPRESSIONS[1];
+  const keptUri = await store.image(other, 'thumb');
+  const goneUri = await store.image(parrot, 'thumb');
+  const downloads = () =>
+    request.mock.calls.filter(([input]) => input.path.includes('/image?')).length;
+  const before = downloads();
+  server.request({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  act(() => store.changed());
+  await waitFor(() => expect(store.snapshot().changePending).toBe(false));
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(files.remove.mock.calls).toEqual([[goneUri]]); // 목록이 알려 준 그 id 의 파일뿐
+  expect(await store.image(other, 'thumb')).toBe(keptUri);
+  expect(downloads()).toBe(before); // 남은 그림은 다시 받지 않았다
+});
+
+it('a delta that cannot be read after a notice with no detail removes every file, as before (#5491)', async () => {
+  const server = createExpressionFixtureServer();
+  const {store, files} = setup(async input =>
+    input.path.includes('since=') ? {status: 500} : server.request(input),
+  );
+  await store.refresh(true);
+  await store.image(parrot, 'thumb');
+  await store.image(FIXTURE_EXPRESSIONS[1], 'thumb');
+  act(() => store.changed());
+  await waitFor(() => expect(store.snapshot().state).toBe('error'));
+  expect(files.remove).toHaveBeenCalledTimes(2);
+  expect(store.snapshot().changePending).toBe(false);
+});
+
+it('a hide detail removes that one item at once, and a list read that started before it cannot bring it back (#5491)', async () => {
+  const server = createExpressionFixtureServer();
+  let staleReply!: (response: ExpressionFixtureResponse) => void;
+  let deltaReply!: (response: ExpressionFixtureResponse) => void;
+  let fullReads = 0;
+  const {store, files} = setup(async input => {
+    if (input.method === 'GET' && input.path === base) {
+      fullReads += 1;
+      // 알림보다 앞서 시작한 읽기: 숨기기 전 목록으로 늦게 답한다.
+      if (fullReads === 2)
+        return new Promise(resolve => {
+          staleReply = resolve;
+        });
+    }
+    // 알림이 시작한 읽기도 붙들어 둔다 — 낡은 답이 먼저 와야 「되살아남」을 잴 수 있다(읽기가 먼저 끝나면 판이 올라 낡은 답이 저절로 거절된다).
+    if (input.path.includes('since='))
+      return new Promise(resolve => {
+        deltaReply = resolve;
+      });
+    return server.request(input);
+  });
+  await store.refresh(true);
+  const loaded = await store.image(parrot, 'thumb');
+  const preHide = await server.request({method: 'GET', path: base});
+  let reading!: Promise<void>;
+  act(() => {
+    reading = store.refresh(true);
+  });
+  server.request({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  const afterHide = await server.request({
+    method: 'GET',
+    path: `${base}?since=${(preHide.json as ExpressionList).version}`,
+  });
+  act(() =>
+    store.detailed({
+      type: 'expression.changed.detail',
+      workspaceId: FIXTURE_WORKSPACE_ID,
+      version: '4',
+      action: 'hidden',
+      expressionIds: [parrot.id],
+    }),
+  );
+  // 그 자리에서: 보관함에서 빠지고 그 id 의 파일만 걷힌다. 읽기를 기다리지 않는다.
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
+  expect(files.remove.mock.calls).toEqual([[loaded]]);
+  expect(await store.image(parrot, 'small')).toBeNull();
+  // 숨기기 전 목록이 알림이 시작한 읽기보다 **먼저** 늦게 온다 — 버려져야 한다. 버리지 않으면 숨긴 등록이 여기서 되살아난다.
+  await act(async () => {
+    staleReply(preHide);
+    await reading;
+  });
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
+  // 알림이 시작한 읽기의 답이 오면 목록이 확인된다.
+  await act(async () => {
+    deltaReply(afterHide);
+  });
+  await waitFor(() => expect(store.snapshot().revision).toBeGreaterThan(0));
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().items).toHaveLength(2);
+  expect(await store.image(parrot, 'thumb')).toBeNull();
+});
+
+it('the response to my own hide removes only that item\'s files, not every picture (#5491)', async () => {
+  const {store, files} = setup();
+  await store.refresh(true);
+  const other = FIXTURE_EXPRESSIONS[1];
+  const keptUri = await store.image(other, 'thumb');
+  const goneUri = await store.image(parrot, 'thumb');
+  await store.mutate({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(files.remove.mock.calls).toEqual([[goneUri]]);
+  expect(await store.image(other, 'thumb')).toBe(keptUri);
+});
+
+it('a hidden item is gone from the last-known shelf too: a later loading state does not draw it again (#5491)', async () => {
+  const {store} = setup();
+  await store.refresh(true);
+  act(() =>
+    store.detailed({
+      type: 'expression.changed.detail',
+      workspaceId: FIXTURE_WORKSPACE_ID,
+      version: '4',
+      action: 'hidden',
+      expressionIds: [parrot.id],
+    }),
+  );
+  // 끊겼다 이어지면 목록을 다시 읽는 동안(`loading`)은 마지막으로 읽은 보관함으로 그린다 — 거기에 숨긴 등록이 있으면 안 된다.
+  act(() => store.setOnline(false));
+  act(() => store.setOnline(true));
+  expect(store.snapshot().state).toBe('loading');
+  expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().shelf.length).toBeGreaterThan(0);
+});
+
+it('a hide detail voids the in-flight download of that id only; the others finish and are kept (#5491)', async () => {
+  const server = createExpressionFixtureServer();
+  const other = FIXTURE_EXPRESSIONS[1];
+  const replies = new Map<string, (response: ExpressionFixtureResponse) => void>();
+  const {store, files} = setup(async input => {
+    if (input.path.includes('/image?')) {
+      return new Promise(resolve => {
+        replies.set(input.path, resolve);
+      });
+    }
+    return server.request(input);
+  });
+  await store.refresh(true);
+  const lateParrot = store.image(parrot, 'small');
+  const lateOther = store.image(other, 'small');
+  await waitFor(() => expect(replies.size).toBe(2));
+  act(() =>
+    store.detailed({
+      type: 'expression.changed.detail',
+      workspaceId: FIXTURE_WORKSPACE_ID,
+      version: '4',
+      action: 'hidden',
+      expressionIds: [parrot.id],
+    }),
+  );
+  for (const [path, reply] of replies) {
+    reply(await server.request({method: 'GET', path}));
+  }
+  expect(await lateParrot).toBeNull(); // 숨겨진 id 의 받는 중 읽기는 파일이 되지 못한다
+  expect(typeof (await lateOther)).toBe('string'); // 다른 그림의 받기는 이어진다
+  expect(files.write).toHaveBeenCalledTimes(1);
 });
 
 it('a routine full read of an unchanged list keeps every loaded picture; a read whose list drops an item revokes them (#5330)', async () => {
