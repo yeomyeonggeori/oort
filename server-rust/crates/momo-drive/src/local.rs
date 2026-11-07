@@ -543,6 +543,10 @@ fn read_meta(root: &Path, file_id: &str) -> Result<StoredMeta, DriveError> {
 
 #[async_trait]
 impl DriveArchive for LocalDriveArchive {
+    fn backend_kind(&self) -> &'static str {
+        "local"
+    }
+
     fn accepts_stub_uploads(&self) -> bool {
         !self.read_only
     }

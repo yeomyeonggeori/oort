@@ -158,6 +158,10 @@ const PUBLIC_TEMPLATES: &[&str] = &[
     // construction (its caller is Hermes, which holds no oort credential; the one-time token in the
     // path is the only authority), mounted with the other public routes.
     "/v1/self-media/{ws}/{token}",
+    // #5371: the address the agent-worker writes ONE re-encoded picture to (ADR-0151 증보 8). Public
+    // by construction like its read twin (the one-time token in the path is the only authority), and
+    // reached only on the private network: the public edge answers 403 for this prefix.
+    "/v1/agent-media/{ws}/{token}",
 ];
 
 /// Public only when the Drive archive accepts stub uploads (an in-memory or local archive); the
@@ -2462,6 +2466,10 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
     (
         "The photo address the co-hosted Hermes' picture tool downloads (#4820 C2a, ADR-0218 G4): a capacity URL like /__momo_stub/drive/uploads/{token} rather than a client API — its caller is Hermes, not a client, and the one-time, hash-only, five-minute token in the path is the only authority — so it is listed in neither contract file this test reads",
         &[("GET", "/v1/self-media/{}/{}")],
+    ),
+    (
+        "The write address the agent-worker spends once to put ONE re-encoded picture into its run's conversation (#5371, ADR-0151 증보 8): a capacity URL like the read address above rather than a client API — its caller is the worker on the private network, not a client, and the one-time, hash-only, 60-second token in the path is the only authority — so it is listed in neither contract file this test reads",
+        &[("PUT", "/v1/agent-media/{}/{}")],
     ),
 ];
 

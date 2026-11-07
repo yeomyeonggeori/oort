@@ -266,6 +266,7 @@ async fn child_typed<T: serde::de::DeserializeOwned>(
         .kill_on_drop(true)
         .spawn()
         .map_err(|_| Rejected::Invalid)?;
+    DECODER_CHILDREN_STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut input = child.stdin.take().ok_or(Rejected::Invalid)?;
     let mut output = child.stdout.take().ok_or(Rejected::Invalid)?;
     let work = async {
@@ -333,6 +334,42 @@ pub async fn prepare_photo(bytes: Vec<u8>) -> Result<Prepared, Rejected> {
         .map_err(|_| Rejected::Busy)?;
     job(bytes, "--prepare", permit).await
 }
+
+/// [`prepare_photo`] for a picture the **server** holds and a person is waiting on (ADR-0151 증보 8 W5,
+/// #5371: the agent-worker's picture, written through the api): a busy decoder is **waited for**, as an
+/// agent's candidates are ([`process_waiting`]) — at most `wait` (and never more than [`WAIT_MAX`]), and
+/// only if the line is shorter than [`WAITERS_MAX`]. A line that is full or a wait that runs out is
+/// [`Rejected::Busy`], never `Timeout`. The child, its mode (`--prepare`), its limits and its output
+/// shape are exactly [`prepare_photo`]'s; the wait is the only difference.
+pub async fn prepare_photo_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Prepared, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
+    let permit = permit_waiting(decoder_slots(), &Line::process_wide(), wait).await?;
+    job(bytes, "--prepare", permit).await
+}
+
+/// How many codec child processes this process has started (ADR-0151 증보 8 WA7). A counter of the
+/// parent's own spawns, so a test can say **"the route started exactly one child"** or **"a refused
+/// request started none"** with a number instead of a guess. It changes nothing about a spawn.
+pub fn decoder_children_started() -> u64 {
+    DECODER_CHILDREN_STARTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static DECODER_CHILDREN_STARTED: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// How many times **this process** opened a picture with a codec itself (ADR-0151 증보 8 WA7): the
+/// decoder child's own `main` does, a parent that only supervises children never does. A test of the
+/// api reads **0** here to show the route decoded nothing in its own process.
+pub fn in_process_codec_starts() -> u64 {
+    IN_PROCESS_CODEC_STARTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static IN_PROCESS_CODEC_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// What an image model drew, as a cut-out ([`decode_cutout`], in the isolated child). The model
 /// call has been paid for by now, so a busy decoder is **waited for** (as an agent's candidates
@@ -897,6 +934,7 @@ fn open(bytes: &[u8], end: Instant) -> Result<Opened, Rejected> {
     };
     #[cfg(test)]
     CODEC_STARTS.with(|n| n.set(n.get() + 1));
+    IN_PROCESS_CODEC_STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut reader = ImageReader::with_format(input(), format);
     reader.limits(limits(4096));
     let mut decoder = reader.into_decoder().map_err(|_| Rejected::Invalid)?;

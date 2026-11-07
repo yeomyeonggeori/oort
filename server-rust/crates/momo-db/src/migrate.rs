@@ -793,6 +793,13 @@ mod tests {
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
     ///
+    /// 175 is #5371's `attachment_write_token` (ADR-0151 증보 8): the hash of a single-use, 60-second
+    /// address through which the agent-worker writes ONE picture into an in-flight run's conversation
+    /// as that run's agent. No requester or channel column (both are derived from the run when the
+    /// token is spent), `UNIQUE (workspace, run, slot)`, a guard trigger (one spend, one attachment
+    /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
+    /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
+    ///
     /// 177 is #5370's 「도우미가 팀 Hermes에 일을 맡기는 걸음」 (ADR-0201 증보 v4 P4·P7·I6, P14-S2): five
     /// delegation columns on `team_ai_task` (the at-most-once marker `pending → called → done|failed`, its
     /// time, the Hermes member and the one request sentence), `team_ai_task_ended_ck` re-created so an ended
@@ -804,9 +811,9 @@ mod tests {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        // 175 (#5371) and 176 (#5459) are reserved by two slots that have not landed on this branch yet;
-        // 177 is #5370's. The merge that brings them in deletes this line and the list is 1..=177.
-        let reserved: [i64; 2] = [175, 176];
+        // 176 (#5459) is reserved by a slot that has not landed on this branch yet; 177 is #5370's. The
+        // merge that brings 176 in deletes the `reserved` line and the list is 1..=177.
+        let reserved: [i64; 1] = [176];
         let expected: Vec<i64> = (1..=177).filter(|n| !reserved.contains(n)).collect();
         let found: Vec<i64> = migrations
             .iter()
@@ -815,7 +822,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected 001..=177 (175 and 176 reserved) under {}",
+            "expected 001..=177 (176 reserved) under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));

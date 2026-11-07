@@ -1612,8 +1612,9 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
     // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
-    // lockdown, see below) and `attachment_media` (#4673 C5 lockdown, see below) are the only tables
-    // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
+    // lockdown, see below), `attachment_media` (#4673 C5 lockdown, see below) and
+    // `attachment_write_token` (#5371 lockdown, see below) are the only tables outside the rule;
+    // everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -1626,6 +1627,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname <> 'self_media_token' \
             AND c.relname <> 'team_ai_task' \
             AND c.relname <> 'attachment_media' \
+            AND c.relname <> 'attachment_write_token' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1796,6 +1798,35 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("attachment media table count");
+    // `attachment-write-token-lockdown` (bootstrap_runtime_roles.sql, #5371; ADR-0151 증보 8 W1, security
+    // review M2): a row lets whoever presents its token write one re-encoded picture into an in-flight
+    // run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so their table privileges
+    // are what keeps a forged row out of a role with no business writing one. `momo_worker` mints and
+    // sweeps (SELECT/INSERT/DELETE), `momo_app` spends a token and records the attachment it made
+    // (SELECT/UPDATE), relay and notifier touch nothing; no role holds TRUNCATE/REFERENCES/TRIGGER.
+    let attachment_write_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'attachment_write_token' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'DELETE'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("attachment write token privilege scan");
+    let attachment_write_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'attachment_write_token'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("attachment write token table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -1846,6 +1877,14 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
         attachment_media_column_drift.is_empty(),
         "attachment_media column privileges drifted from the lockdown (the poster's bytes are momo_app's alone): \
          {attachment_media_column_drift:?}"
+    );
+    assert_eq!(
+        attachment_write_tables, 1,
+        "the scan must actually see the attachment_write_token table, or it proves nothing"
+    );
+    assert!(
+        attachment_write_drift.is_empty(),
+        "attachment_write_token privileges drifted from the lockdown: {attachment_write_drift:?}"
     );
 }
 
