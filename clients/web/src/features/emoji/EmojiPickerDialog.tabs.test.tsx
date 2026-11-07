@@ -174,6 +174,16 @@ describe("고르개의 세 탭: 이모티콘 · 이모지 · GIF (#5453)", () =>
     expect(onPickExpression).not.toHaveBeenCalled();
   });
 
+  it("처음 여는 탭: 넣기는 「이모티콘」, 반응은 「이모지」부터 연다", async () => {
+    await open("ko-KR", { purpose: "insert" });
+    let tabs = within(await screen.findByRole("group", { name: "표현 종류" })).getAllByRole("button");
+    expect(tabs.filter((tab) => tab.getAttribute("aria-pressed") === "true").map((tab) => tab.textContent)).toEqual(["이모티콘"]);
+    cleanup();
+    await open("ko-KR", { purpose: "reaction" });
+    tabs = within(await screen.findByRole("group", { name: "표현 종류" })).getAllByRole("button");
+    expect(tabs.filter((tab) => tab.getAttribute("aria-pressed") === "true").map((tab) => tab.textContent)).toEqual(["이모지"]);
+  });
+
   it("상태 고르개에는 탭도 팀 이모지 줄도 없다: 표준 그림 문자만 고른다", async () => {
     await open("ko-KR", { purpose: "status" });
     await screen.findByTestId("picker");

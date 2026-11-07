@@ -108,7 +108,8 @@ export function EmojiPickerDialog({
   const copy = COPY[purpose];
   const formatMessage = useFormatMessage();
   const { store: expressions } = useExpressions();
-  const [tab, setTab] = useState<ExpressionPickerTab>(DEFAULT_EXPRESSION_PICKER_TAB);
+  // 넣기(컴포저·스레드 입력칸)는 첫 탭 「이모티콘」, 반응은 예전처럼 작은 「이모지」부터 연다(#5482 planner 결정).
+  const [tab, setTab] = useState<ExpressionPickerTab>(purpose === "insert" ? DEFAULT_EXPRESSION_PICKER_TAB : "emoji");
   // 팀 보관함 탭(이모티콘·GIF)은 상태 고르개에 없다: 거기서는 표준 그림 문자만 고른다.
   const view = expressionViewOfPickerTab(tab);
   // 상태 고르개에는 탭도 팀 이모지 줄도 없다(표준 그림 문자만 고른다). 탭 줄과 줄 둘이 같은 조건이다.
