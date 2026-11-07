@@ -786,3 +786,128 @@ async fn a_consumer_slower_than_the_old_total_limit_still_gets_every_byte() {
     );
     assert_eq!(got, bytes);
 }
+
+/// **Red proof (ADR-0151 증보 8 W7, #5371 — `put_object`).** The server writes one object it holds:
+/// on the local volume and on the in-memory stub the bytes read back are exactly the bytes sent and the
+/// metadata the archive reports is the mime and length that were sent (the trait default feeds the
+/// in-process upload with the declared length, so a short or long body cannot land); a volume
+/// opened read-only cannot take an in-process upload, so it says `Unavailable` before it makes
+/// anything; the unavailable archive says `Unavailable`; and an archive that cannot take an
+/// in-process upload leaves **no session behind**.
+///
+/// Delete the default's `accepts_stub_uploads()` question and the last row goes red (a session would
+/// be created first); feed `accept_stub_upload` another length and the first two go red.
+#[tokio::test]
+async fn put_object_stores_exactly_the_bytes_it_was_given_or_says_why_not() {
+    let bytes = object();
+    let (dir, _guard) = temp_dir("put-object");
+    let local = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("local");
+    let stub = StubDriveArchive::new("http://127.0.0.1:9");
+    for (label, archive) in [
+        ("local", &local as &dyn DriveArchive),
+        ("stub", &stub as &dyn DriveArchive),
+    ] {
+        let file = archive
+            .put_object(Uuid::nil(), "picture-1.png", "image/png", bytes.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{label}: {error:?}"));
+        assert_eq!(file.size_bytes, bytes.len() as i64, "{label}");
+        assert_eq!(file.mime, "image/png", "{label}");
+        let stored = collect(
+            archive
+                .file_range(
+                    &file.drive_file_id,
+                    range(0, bytes.len() as u64 - 1),
+                    MAX_ATTACHMENT_BYTES,
+                )
+                .await
+                .unwrap_or_else(|error| panic!("{label} read: {error:?}")),
+        )
+        .await;
+        assert_eq!(
+            stored, bytes,
+            "{label}: the stored bytes are the sent bytes"
+        );
+        // a second write is a second object, never the first one overwritten
+        let second = archive
+            .put_object(Uuid::nil(), "picture-2.png", "image/png", vec![1, 2, 3])
+            .await
+            .expect("second write");
+        assert_ne!(second.drive_file_id, file.drive_file_id, "{label}");
+    }
+
+    // a volume opened read-only cannot take an upload: it says so before it makes anything
+    let (read_dir, _read_guard) = temp_dir("put-object-readonly");
+    let _ = LocalDriveArchive::open(read_dir.to_str(), "http://127.0.0.1:9").expect("prepare");
+    let reader = LocalDriveArchive::open_reader(read_dir.to_str()).expect("reader");
+    assert_eq!(
+        reader
+            .put_object(Uuid::nil(), "p.png", "image/png", vec![1])
+            .await
+            .expect_err("a reader never writes"),
+        DriveError::Unavailable
+    );
+
+    // the archive an instance gets when it configured none
+    assert_eq!(
+        UnavailableDriveArchive
+            .put_object(Uuid::nil(), "p.png", "image/png", vec![1])
+            .await
+            .expect_err("no archive"),
+        DriveError::Unavailable
+    );
+
+    // an archive that cannot take an in-process upload: no session is created first
+    let no_uploads = SessionCounter::default();
+    assert_eq!(
+        no_uploads
+            .put_object(Uuid::nil(), "p.png", "image/png", vec![1])
+            .await
+            .expect_err("a double that cannot take an in-process upload"),
+        DriveError::Unavailable
+    );
+    assert_eq!(
+        no_uploads
+            .sessions
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a session was made for an upload nobody could take"
+    );
+}
+
+/// An archive that makes sessions (and counts them) but, like Google, does not take an in-process
+/// upload: the default `put_object` must not create one before it knows it cannot finish.
+#[derive(Debug, Default)]
+struct SessionCounter {
+    sessions: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl DriveArchive for SessionCounter {
+    async fn create_resumable_upload(
+        &self,
+        _channel_id: Uuid,
+        _name: &str,
+        _mime: &str,
+        _size_bytes: i64,
+    ) -> Result<DriveUploadSession, DriveError> {
+        self.sessions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(DriveUploadSession {
+            drive_file_id: "counted".into(),
+            upload_url: "https://example.invalid/upload".into(),
+        })
+    }
+
+    async fn file_metadata(&self, _file_id: &str) -> Result<DriveFile, DriveError> {
+        Err(DriveError::Unavailable)
+    }
+
+    async fn file_content(
+        &self,
+        _file_id: &str,
+        _max_bytes: i64,
+    ) -> Result<DriveContent, DriveError> {
+        Err(DriveError::Unavailable)
+    }
+}
