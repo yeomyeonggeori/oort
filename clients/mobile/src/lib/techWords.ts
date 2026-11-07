@@ -21,7 +21,6 @@ export const WORD = spell({
   doors: 0,
   import: 0,
   make: 0,
-  emoticon: 0,
   emoji: 0,
   other: 0,
   favorite: 0,

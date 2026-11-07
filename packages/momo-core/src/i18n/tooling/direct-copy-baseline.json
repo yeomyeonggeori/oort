@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "9acf20ac58537f7f91520cc34417e82f2f3ad7bc",
+  "baselineHead": "ffc41b07e5e634d9b3937f55423ef974805d32fc",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -172,7 +172,6 @@
     "clients/mobile/src/features/emoji/catalog.ts": 1,
     "clients/mobile/src/features/expressions/ExpressionAddMenu.tsx": 6,
     "clients/mobile/src/features/expressions/ExpressionChapter.tsx": 9,
-    "clients/mobile/src/features/expressions/ExpressionComposerPicker.tsx": 6,
     "clients/mobile/src/features/expressions/ExpressionDraftStep.tsx": 11,
     "clients/mobile/src/features/expressions/ExpressionImage.tsx": 13,
     "clients/mobile/src/features/expressions/ExpressionImportForm.tsx": 25,
@@ -541,7 +540,7 @@
     "clients/web/src/features/downloads/downloadsTestKit.ts": 2,
     "clients/web/src/features/drafts/DraftsNavItem.tsx": 1,
     "clients/web/src/features/drafts/DraftsRoute.tsx": 16,
-    "clients/web/src/features/emoji/EmojiPickerDialog.tsx": 10,
+    "clients/web/src/features/emoji/EmojiPickerDialog.tsx": 12,
     "clients/web/src/features/emoji/EmojiPickerPanel.tsx": 62,
     "clients/web/src/features/emoji/catalog.ts": 19,
     "clients/web/src/features/emoji/frequencyStore.ts": 2,

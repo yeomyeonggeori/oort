@@ -10,7 +10,7 @@ import {EmojiPicker} from '../emoji/EmojiPicker';
 import {emojiHaptic} from '../emoji/haptics';
 import {ExpressionAddSheet} from './ExpressionAddSheet';
 import {ExpressionPanelGrid} from './ExpressionPanelGrid';
-import {EXPRESSION_TABS, type ExpressionTab} from './expressionViews';
+import {DEFAULT_EXPRESSION_TAB, EXPRESSION_TABS, type ExpressionTab} from './expressionViews';
 import {TeamEmojiRow} from './TeamEmojiRow';
 import {useExpressionMessages, type PlainMessageKey} from './useExpressionMessages';
 
@@ -31,12 +31,12 @@ const TAB_LABEL: Readonly<Record<ExpressionTab, PlainMessageKey>> = {
 };
 
 /**
- * 이번 실행에서 마지막으로 본 탭. 창을 닫았다 다시 열어도 같은 탭이다(카카오톡처럼). 처음은 이모티콘 탭이다 - owner 확정 화면의 첫 탭.
- * 모듈 값이라 시험이 `resetPanelTab` 으로 비운다.
+ * 이번 실행에서 마지막으로 본 탭. 창을 닫았다 다시 열어도 같은 탭이다(카카오톡처럼). 처음은 코어의 처음 여는 탭(`DEFAULT_EXPRESSION_TAB` = 이모티콘, owner 확정 화면의 첫 탭)이다 -
+ * 웹 고르개가 열리는 탭과 같은 상수 하나라서 한쪽만 바뀌지 않는다(#5482). 모듈 값이라 시험이 `resetPanelTab` 으로 비운다.
  */
-let lastTab: ExpressionTab = WORD.emoticon;
+let lastTab: ExpressionTab = DEFAULT_EXPRESSION_TAB;
 export function resetPanelTab(): void {
-  lastTab = WORD.emoticon;
+  lastTab = DEFAULT_EXPRESSION_TAB;
 }
 
 const noop = () => {};

@@ -47,10 +47,10 @@ import { useHoverNone } from "./useHoverNone";
 export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
 /**
- * 고르개의 세 탭은 폰 시트와 같은 코어의 목록이다: 이모티콘 · 이모지 · GIF (owner 2026-11-07, #5453). 우리 팀이 올린 것과 기본을 탭으로 가르지 않는다.
+ * 고르개의 세 탭은 폰 창과 같은 코어의 목록이다: 이모티콘 · 이모지 · GIF (owner 2026-11-07, #5453). 우리 팀이 올린 것과 기본을 탭으로 가르지 않는다.
  * 이모티콘·GIF 는 팀 보관함의 큰 그림(`TeamExpressionsPanel` 의 두 보기)이고, 이모지는 표준 유니코드 표에 팀의 작은 이모지를 한 탭으로 합친 것이다
- * (`TeamEmojiStrip`, 코어 `EXPRESSION_TAB_SHELVES`). 처음 여는 탭은 앞 판과 같은 표(이모지)다. 「이모지」라는 말은 이 탭의 이름에만 쓴다.
- * 이름은 폰 시트와 같은 사전 키다.
+ * (`TeamEmojiStrip`, 코어 `EXPRESSION_TAB_SHELVES`). 처음 여는 탭은 이모티콘이다(코어 `DEFAULT_EXPRESSION_PICKER_TAB`, owner 탭 순서·planner 결정 #5482 - 폰 창도 같은 상수로 열린다). 「이모지」라는 말은 이 탭의 이름에만 쓴다.
+ * 이름은 폰 창과 같은 사전 키다.
  */
 const TAB_NAME = {
   emoticon: "expressions.sheet.tabEmoticon",
@@ -108,7 +108,8 @@ export function EmojiPickerDialog({
   const copy = COPY[purpose];
   const formatMessage = useFormatMessage();
   const { store: expressions } = useExpressions();
-  const [tab, setTab] = useState<ExpressionPickerTab>(DEFAULT_EXPRESSION_PICKER_TAB);
+  // 넣기(컴포저·스레드 입력칸)는 첫 탭 「이모티콘」, 반응은 예전처럼 작은 「이모지」부터 연다(#5482 planner 결정).
+  const [tab, setTab] = useState<ExpressionPickerTab>(purpose === "insert" ? DEFAULT_EXPRESSION_PICKER_TAB : "emoji");
   // 팀 보관함 탭(이모티콘·GIF)은 상태 고르개에 없다: 거기서는 표준 그림 문자만 고른다.
   const view = expressionViewOfPickerTab(tab);
   // 상태 고르개에는 탭도 팀 이모지 줄도 없다(표준 그림 문자만 고른다). 탭 줄과 줄 둘이 같은 조건이다.

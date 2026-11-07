@@ -9,6 +9,7 @@ import {
 } from '@momo/core/features/expressions/fixtureServer';
 import {FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
+import {DEFAULT_EXPRESSION_PICKER_TAB} from '@momo/core/features/expressions/kind';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
@@ -170,6 +171,19 @@ describe('세 탭 — 이모티콘 · 이모지 · GIF', () => {
     expect(screen.queryAllByText(/이모지/)).toHaveLength(1);
     fireEvent.press(tabs[1]);
     expect(screen.queryAllByText(/이모지/)).toHaveLength(1);
+  });
+
+  // #5482, planner 결정: 웹·폰 모두 처음 열면 첫 탭은 「이모티콘」. 폰은 웹 고르개와 같은 코어 상수 하나로 연다 - 따로 적어 두면 한쪽만 바뀐다.
+  it('처음 여는 탭은 코어의 처음 여는 탭 상수 하나(이모티콘)다 - 선택 상태도 본문도 그 탭이다', async () => {
+    const {store} = makeStore();
+    await store.refresh(true);
+    mountPanel(store);
+    const selected = ['emoticon', 'emoji', 'gif'].filter(id => screen.getByTestId(`expression-panel-tab-${id}`).props.accessibilityState.selected);
+    expect(selected).toEqual([DEFAULT_EXPRESSION_PICKER_TAB]);
+    expect(DEFAULT_EXPRESSION_PICKER_TAB).toBe('emoticon'); // owner 결정을 글자로도 못 박는다 - 상수가 옮겨 가면 웹 시험과 함께 빨개진다
+    // 본문도 이모티콘 탭의 것이다: 정지한 큰 그림 격자가 서고, 이모지 탭의 표준 목록은 없다.
+    expect(cellNames().sort()).toEqual(['cheers_still', 'chi_cry', 'chi_yay', 'dam_haa', 'dam_kk']);
+    expect(screen.queryByTestId('expression-panel-emoji')).toBeNull();
   });
 
   it('마지막으로 본 탭을 다시 열어도 기억한다(이번 실행 동안)', async () => {
@@ -360,6 +374,199 @@ describe('이모지 탭 — 글자처럼 입력창에 들어간다(미리 보기
     fireEvent.press(await screen.findByTestId('emoji-pick-🎉'));
     expect(onInsertText).toHaveBeenCalledWith('🎉');
     expect(onPickBig).not.toHaveBeenCalled();
+  });
+});
+
+describe('다시 열어도 목록이 첫 그림부터 서고 다시 받지 않는다 (#5330, 옛 시트 시험을 창으로 옮김 #5482)', () => {
+  const lists = (request: jest.Mock) =>
+    request.mock.calls.filter(([input]) => input.method === 'GET' && input.path.split('?')[0] === base).length;
+
+  it('창을 닫았다 다시 열어도 처음 그리는 순간부터 격자가 서고 「불러오는 중」이 없다 - 목록을 다시 받지도 않는다', async () => {
+    const {store, request} = makeStore();
+    await store.refresh(true);
+    expect(lists(request)).toBe(1);
+    for (let round = 0; round < 3; round += 1) {
+      const {view} = mountPanel(store);
+      // 기다리지 않는다(`getBy`·`query`): 이미 읽은 것이 같은 렌더 안에서 서 있다.
+      for (const [tab, want] of [
+        ['emoticon', ['cheers_still', 'chi_cry', 'chi_yay', 'dam_haa', 'dam_kk']],
+        ['gif', ['nya_dance', 'nya_jump', 'solo_gif']],
+        ['emoji', ['party_parrot']],
+      ] as const) {
+        fireEvent.press(screen.getByTestId(`expression-panel-tab-${tab}`));
+        if (tab === 'emoji') await screen.findByTestId('emoji-pick-🎉');
+        expect(cellNames().sort()).toEqual([...want]);
+        expect(screen.queryByTestId('expression-panel-loading')).toBeNull();
+      }
+      view.unmount();
+    }
+    expect(lists(request)).toBe(1); // 열 때마다 받지 않았다
+  });
+
+  it('앱이 앞으로 돌아와 전체를 다시 읽는 동안에도 열려 있는 창의 격자가 그대로 선다', async () => {
+    const {store, request} = makeStore();
+    await store.refresh(true);
+    mountPanel(store);
+    const before = cellNames();
+    expect(before).toHaveLength(5);
+    const real = request.getMockImplementation()!;
+    let reply!: () => void;
+    request.mockImplementationOnce(async input => {
+      await new Promise<void>(resolve => {
+        reply = resolve;
+      });
+      return real(input);
+    });
+    let reading!: Promise<void>;
+    act(() => {
+      reading = store.refresh(true);
+    });
+    expect(screen.queryByTestId('expression-panel-loading')).toBeNull();
+    expect(cellNames()).toEqual(before);
+    await act(async () => {
+      reply();
+      await reading;
+    });
+    expect(screen.queryByTestId('expression-panel-loading')).toBeNull();
+    expect(cellNames()).toEqual(before);
+  });
+});
+
+describe('안내 문장의 줄바꿈과 말씨 (#5065, 옛 시트 시험을 창으로 옮김 #5482)', () => {
+  // 맨 `Text` 는 한글을 글자 단위로 끊어 「…검색해 보세 / 요.」가 됐고, 한 시트 안에서 합쇼체(「없습니다」)와 해요체가 섞였다. 네 상태의 안내 문장은 어절 단위로
+  // 줄바꿈하고(`lineBreakStrategyIOS`) 모두 「요.」로 끝난다.
+  it('불러오는 중·오류·비어 있음(탭마다)·오프라인의 안내는 모두 어절 단위로 줄바꿈하고 해요체로 끝난다', async () => {
+    const lines: string[] = [];
+    const read = (container: string, sentence: string) => {
+      const node = within(screen.getByTestId(container)).getByText(sentence);
+      expect({container, breaks: node.props.lineBreakStrategyIOS}).toEqual({container, breaks: 'hangul-word'});
+      lines.push(sentence);
+    };
+
+    const loading = makeStore();
+    const first = mountPanel(loading.store); // 아직 읽지 않았다
+    read('expression-panel-loading', '팀 보관함을 불러오는 중이에요.');
+    first.view.unmount();
+
+    const failing = makeStore({fail: true});
+    await failing.store.refresh(true);
+    const second = mountPanel(failing.store);
+    read('expression-panel-error', '팀 보관함을 불러오지 못했어요. 다시 시도해 주세요.');
+    second.view.unmount();
+
+    const empty = makeStore({items: []});
+    await empty.store.refresh(true);
+    const third = mountPanel(empty.store);
+    read('expression-panel-empty', '아직 이모티콘이 없어요. 아래의 ＋로 만들거나 가져와 보세요.');
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    read('expression-panel-empty', '아직 움직이는 이모티콘이 없어요. 아래의 ＋로 가져오거나 만들 수 있어요.');
+    third.view.unmount();
+
+    const offline = makeStore();
+    await offline.store.refresh(true);
+    offline.store.setOnline(false);
+    mountPanel(offline.store);
+    read('expression-panel-offline', '오프라인이에요. 연결되면 팀 보관함을 볼 수 있어요.');
+
+    // 말씨: 문장마다 「요.」로 끝난다 - 「…없습니다.」·「…하세요.」가 하나라도 섞이면 빨개진다.
+    const sentences = lines.flatMap(line => line.split(/(?<=\.)\s+/));
+    expect(sentences.length).toBeGreaterThanOrEqual(7);
+    expect(sentences.filter(sentence => !/요\.$/.test(sentence))).toEqual([]);
+  });
+});
+
+describe('말 규칙 - 「이모지」는 탭 이름에만, 「스티커」·「우리 팀」은 어디에도 없다 (owner 11-07, 옛 시트 시험을 창으로 옮김 #5482)', () => {
+  /** 렌더된 글자와 낭독 이름·힌트·자리 글. `skip` 이 testID 인 줄기는 건너뛴다(탭 줄 밖의 글만 볼 때). */
+  const copy = (skip?: string): string => {
+    const seen: string[] = [];
+    const walk = (node: unknown): void => {
+      if (typeof node === 'string') seen.push(node);
+      else if (Array.isArray(node)) node.forEach(walk);
+      else if (node && typeof node === 'object') {
+        const {props: attrs, children} = node as {props?: Record<string, unknown>; children?: unknown};
+        if (skip !== undefined && attrs?.testID === skip) return;
+        for (const key of ['accessibilityLabel', 'accessibilityHint', 'placeholder'])
+          if (typeof attrs?.[key] === 'string') seen.push(attrs[key] as string);
+        walk(children);
+      }
+    };
+    walk(screen.toJSON());
+    return seen.join('\n');
+  };
+  const RETIRED = /스티커|우리 팀/;
+  const TAB_ROW = 'expression-panel-tabs';
+
+  it('세 탭의 목록·빈 안내·「＋」 시트의 문 둘 어디에도 - 보이는 글자와 낭독 이름 모두', async () => {
+    const full = makeStore();
+    await full.store.refresh(true);
+    mountPanel(full.store);
+    // 건너뛰기가 헛돌지 않는다는 증거: 탭 줄까지 읽으면 「이모지」가 보이고(탭의 글자·낭독 이름), 탭 줄을 건너뛰면 사라진다.
+    expect(copy().match(/이모지/g)).not.toBeNull();
+    expect(copy(TAB_ROW).match(/이모지/)).toBeNull();
+    const sweep = (where: string) =>
+      expect({
+        where,
+        retired: copy().match(RETIRED)?.[0] ?? null,
+        emojiOutsideTabs: copy(TAB_ROW).match(/이모지/)?.[0] ?? null,
+      }).toEqual({where, retired: null, emojiOutsideTabs: null});
+    for (const tab of ['emoticon', 'gif', 'emoji', 'emoticon'] as const) {
+      fireEvent.press(screen.getByTestId(`expression-panel-tab-${tab}`));
+      if (tab === 'emoji') await screen.findByTestId('emoji-pick-🎉');
+      sweep(`${tab} 목록`);
+    }
+    // 「＋」가 연 시트의 문 둘.
+    fireEvent.press(screen.getByTestId('expression-panel-add'));
+    await screen.findByTestId('expression-add-doors');
+    sweep('「＋」 시트의 문');
+  });
+
+  it('보관함이 비었을 때의 빈 안내(이모티콘·GIF)에도 없다', async () => {
+    const empty = makeStore({items: []});
+    await empty.store.refresh(true);
+    mountPanel(empty.store);
+    for (const tab of ['emoticon', 'gif'] as const) {
+      fireEvent.press(screen.getByTestId(`expression-panel-tab-${tab}`));
+      expect(screen.getByTestId('expression-panel-empty')).toBeTruthy();
+      expect(copy().match(RETIRED)).toBeNull();
+      expect(copy(TAB_ROW).match(/이모지/)).toBeNull();
+    }
+  });
+});
+
+describe('「＋」 - 창 밖의 시트 (#4891 → #5452, 옛 시트 시험을 창으로 옮김 #5482)', () => {
+  it('「＋」는 이모티콘·GIF 탭의 세트 띠 끝에 있고 이모지 탭에는 없다(그 탭은 격자가 아니다)', async () => {
+    const {store} = makeStore();
+    await store.refresh(true);
+    mountPanel(store);
+    expect(screen.getByTestId('expression-panel-add')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    expect(screen.getByTestId('expression-panel-add')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('expression-panel-tab-emoji'));
+    expect(screen.queryByTestId('expression-panel-add')).toBeNull();
+  });
+
+  it('누르면 문 둘이 바로 보이는 시트가 서고, 안쪽 장은 ‹ 로 문 목록에 돌아오며, 닫으면 창이 그대로 남는다', async () => {
+    const {store} = makeStore();
+    await store.refresh(true);
+    mountPanel(store);
+    // 시트가 열리기 전에는 시트도 문도 없다 - 「＋」가 제자리에서 펼치는 옛 메뉴(`expression-add-menu`)도 없다.
+    expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
+    expect(screen.queryByTestId('expression-add-menu')).toBeNull();
+    fireEvent.press(screen.getByTestId('expression-panel-add'));
+    expect(await screen.findByTestId('expression-add-doors')).toBeTruthy();
+    expect(screen.getByTestId('expression-add-import')).toBeTruthy();
+    expect(screen.getByTestId('expression-add-make')).toBeTruthy();
+    // 가져오기 장이 문 목록을 대신하고 「‹」로 돌아온다.
+    fireEvent.press(screen.getByTestId('expression-add-import'));
+    expect(screen.getByTestId('expression-import')).toBeTruthy();
+    expect(screen.queryByTestId('expression-add-doors')).toBeNull();
+    fireEvent.press(screen.getByTestId('expression-chapter-back'));
+    expect(screen.getByTestId('expression-add-doors')).toBeTruthy();
+    // 시트를 닫아도 창(탭 줄·격자)은 거두어지지 않는다.
+    fireEvent.press(screen.getByTestId('expression-add-sheet-close'));
+    expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
+    expect(screen.getByTestId('expression-panel-tabs')).toBeTruthy();
+    expect(cellNames()).toHaveLength(5);
   });
 });
 
