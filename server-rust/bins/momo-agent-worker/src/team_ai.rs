@@ -1774,6 +1774,11 @@ impl AgentWorker {
             .as_ref()
             .and_then(|trace| trace.hermes.as_ref())
             .and_then(|hermes| hermes.settle.clone());
+        // ADR-0201 증보 v4 P6 (#5372): a delegation that wrote a picture posts its answer **with** the run's
+        // picture, in this one transaction; every other ending posts the plain answer it always did.
+        let picture_expected = delegate_settle
+            .as_ref()
+            .is_some_and(|settle| settle.picture_bytes > 0);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
@@ -1875,6 +1880,9 @@ impl AgentWorker {
                     None => (body, props),
                 };
                 let mut message_id: Option<Uuid> = None;
+                // `false` only when the run's picture was written and binding it was refused (the answer then
+                // went without it, with the fixed sentence): the delegation's audit row says so.
+                let mut picture_posted = true;
                 if let Some(text) = body {
                     let mut props = if props.is_object() { props } else { json!({}) };
                     if let Some(object) = props.as_object_mut() {
@@ -1887,24 +1895,32 @@ impl AgentWorker {
                     // #4622 (ADR-0148 증보 2026-10-27): the same place and the same spine
                     // as every other final answer — inside the thread the request was
                     // made in (the rollup moves with it), the main flow otherwise.
-                    let sent = send_thread_notice_in_tx(
-                        conn,
-                        workspace_id,
-                        NewMessage {
-                            channel_id,
-                            author_member_id: agent,
-                            message_type: MessageType::Text,
-                            body: Some(text),
-                            props,
-                            root_id: snapshot.trigger_root_id,
-                            reply_to_id: snapshot.trigger_message_id,
-                            client_msg_id: Some(run_id),
-                            run_id: Some(run_id),
-                            hlc_ts: None,
-                            hlc_count: None,
-                        },
-                    )
-                    .await?;
+                    let answer = NewMessage {
+                        channel_id,
+                        author_member_id: agent,
+                        message_type: MessageType::Text,
+                        body: Some(text),
+                        props,
+                        root_id: snapshot.trigger_root_id,
+                        reply_to_id: snapshot.trigger_message_id,
+                        client_msg_id: Some(run_id),
+                        run_id: Some(run_id),
+                        hlc_ts: None,
+                        hlc_count: None,
+                    };
+                    let sent = if picture_expected {
+                        // the pictures are not named here: they are the ones this run's write recorded
+                        let posted = crate::agent_picture::send_answer_with_run_pictures_in_tx(
+                            conn,
+                            workspace_id,
+                            answer,
+                        )
+                        .await?;
+                        picture_posted = posted.pictures_bound;
+                        posted.sent
+                    } else {
+                        send_thread_notice_in_tx(conn, workspace_id, answer).await?
+                    };
                     message_id = Some(sent.message.id);
                     if withhold_previews {
                         team_ai::withhold_link_previews_in_tx(
@@ -2040,6 +2056,13 @@ impl AgentWorker {
                     .await?;
                 }
                 if let Some(settle) = &delegate_settle {
+                    // the picture was written and could not be bound: the audit row says so (`picture_failed`),
+                    // with the bytes that were stored — the person was told by the fixed sentence
+                    let code = if picture_posted {
+                        settle.code
+                    } else {
+                        DelegateCode::PictureFailed.as_str()
+                    };
                     delegate::write_delegate_audit(
                         conn,
                         workspace_id,
@@ -2047,8 +2070,9 @@ impl AgentWorker {
                         agent,
                         settle.kind,
                         settle.target,
-                        settle.code,
+                        code,
                         settle.ms,
+                        settle.picture_bytes,
                     )
                     .await?;
                 } else if let Some(mark) = &called_unsettled {
@@ -2070,6 +2094,7 @@ impl AgentWorker {
                             delegate::kind_word(&mark.kind),
                             target,
                             code.as_str(),
+                            0,
                             0,
                         )
                         .await?;

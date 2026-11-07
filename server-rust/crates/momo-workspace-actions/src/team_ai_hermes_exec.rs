@@ -13,6 +13,12 @@
 //!   instruction** (T2). It is stripped of everything that is not words — a `data:` address, a `MEDIA:`
 //!   line, a markdown picture — bounded, and shown to the merging model inside the same unclosable fence
 //!   every read result of the helper is shown in ([`ToolOutcome::render`]).
+//! * **The picture** ([`picture_of`], #5372 = P14-S4): of an `image` delegation's answer, **one** picture is
+//!   taken out as bytes — the one `data:image/(png|jpeg|webp);base64,` address Hermes's API server turns a
+//!   `MEDIA:` line into (a `MEDIA:` line itself is never opened: it is a path on Hermes's own volume). Two
+//!   addresses, a GIF, bytes that are no picture, more than 5 MiB: `picture_failed`, no attachment. A web
+//!   search never yields one (a `data:image/` inside search text is text, S3 review I3). The model is told a
+//!   **count** (`pictures: 1`), never a byte, an address or a mark.
 //! * **The merge** ([`MERGE_SYSTEM_PROMPT`]): the second model call has **no tools** (P4-7). The prompt says
 //!   so, and the request that carries it has an empty tool list — the wall is the empty list, the sentence
 //!   only agrees with it.
@@ -20,6 +26,10 @@
 //! Nothing here knows a model's name, a price or the egress policy: the call itself, its deadline and its
 //! errors are the worker's.
 
+use base64::Engine as _;
+use momo_messaging::{bytes_match_mime, AGENT_PICTURE_MAX_INPUT_BYTES};
+
+use crate::hosted_expression::{self, Picture};
 use crate::team_ai_hermes::{DelegateCode, HermesKind};
 use crate::team_ai_hermes_request::fold;
 use crate::team_ai_tools::{data_text, ToolOutcome};
@@ -255,6 +265,86 @@ pub fn result_for_model(kind: HermesKind, answer: &HermesAnswer) -> ToolOutcome 
         sources,
         answer.text
     ))
+}
+
+/// What the answer of a picture delegation is posted as when the merging call gave nothing usable but the
+/// picture is in hand (P16-D ⑪: the picture is not lost because the write-up failed).
+pub const PICTURE_MADE_SENTENCE: &str = "그림을 만들었어요.";
+
+/// The one picture of an `image` delegation's answer, as bytes (P6). **Only** the bytes: no address, no
+/// `MEDIA:` mark, no text. It is `Debug`-printed as a length — nothing that logs it can print a picture.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PictureBytes(Vec<u8>);
+
+impl PictureBytes {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Never true for a picture [`picture_of`] returned (an empty one is refused there).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The bytes, handed to the writer (which asks the api, which re-encodes them).
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for PictureBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PictureBytes({} bytes)", self.0.len())
+    }
+}
+
+/// Take the picture out of Hermes's **raw** answer (the text before [`clean_answer`] cut anything — that
+/// cut reads at most [`ANSWER_INPUT_CHARS_MAX`] characters and a 5 MiB picture is ~7 million of them).
+///
+/// * `WebSearch` → `Ok(None)`: a search never yields a picture, whatever address its text holds (S3 review
+///   I3: a web page's `data:image/` is not what the helper asked Hermes to draw).
+/// * `Image` → `Ok(Some(bytes))` for **exactly one** `data:image/(png|jpeg|webp);base64,` address that
+///   decodes to at most [`AGENT_PICTURE_MAX_INPUT_BYTES`] and starts like a png, a jpeg or a webp (the
+///   bytes decide, never the declared type). Otherwise the closed code the delegation ends with:
+///   - `PictureFailed` — Hermes did hand something over that cannot be used: two or more addresses, a GIF
+///     (the subscription path cannot make motion, F11, and a still is the contract), any other type, bad
+///     base64, more than 5 MiB, bytes that are no picture — **or** it said it drew one (a `MEDIA:` line)
+///     but gave no address the worker can read (the line is a path on Hermes's volume and is never
+///     opened). The sentence 「그림은 만들어졌지만 올리지 못했어요.」 is true of these;
+///   - `Failed` — nothing at all that says a picture was made (no address, no `MEDIA:` line): Hermes did not
+///     do the work, and saying a picture was made would be false.
+///
+/// The pixel ceiling (a small file that declares a huge size) is the api's decoder's, not this function's: it
+/// reads no image header. It reaches the person as the writer's refusal (`picture_failed`).
+pub fn picture_of(kind: HermesKind, raw: &str) -> Result<Option<PictureBytes>, DelegateCode> {
+    if kind != HermesKind::Image {
+        return Ok(None);
+    }
+    let (mime, base64) = match hosted_expression::harvest(raw) {
+        Picture::One { mime, base64 } => (mime, base64),
+        Picture::Unusable | Picture::TooLarge => return Err(DelegateCode::PictureFailed),
+        Picture::None => {
+            let said_it_drew_one = raw.lines().any(|line| fold(line).contains("media:"));
+            return Err(if said_it_drew_one {
+                DelegateCode::PictureFailed
+            } else {
+                DelegateCode::Failed
+            });
+        }
+    };
+    if mime == "image/gif" {
+        return Err(DelegateCode::PictureFailed);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .map_err(|_| DelegateCode::PictureFailed)?;
+    let is_a_picture = ["image/png", "image/jpeg", "image/webp"]
+        .iter()
+        .any(|accepted| bytes_match_mime(accepted, &bytes));
+    if bytes.is_empty() || bytes.len() > AGENT_PICTURE_MAX_INPUT_BYTES || !is_a_picture {
+        return Err(DelegateCode::PictureFailed);
+    }
+    Ok(Some(PictureBytes(bytes)))
 }
 
 /// The merging call's system prompt. The request that carries it has **no tool of any kind**.
@@ -523,6 +613,162 @@ mod tests {
             assert!(answer.text.chars().count() <= ANSWER_TEXT_CHARS_MAX + 1);
             assert!(answer.sources.len() <= SOURCES_MAX);
         }
+    }
+
+    // ---- #5372: the picture of an image delegation's answer -----------------------------------------
+
+    fn png() -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.extend_from_slice(b"not a real image, only what the sniff reads");
+        bytes
+    }
+
+    fn jpeg() -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        bytes.extend_from_slice(b"jfif body");
+        bytes
+    }
+
+    fn webp() -> Vec<u8> {
+        let mut bytes = b"RIFF\x10\x00\x00\x00WEBPVP8 ".to_vec();
+        bytes.extend_from_slice(b"body");
+        bytes
+    }
+
+    /// `data:image/<declared>;base64,<bytes>` — built at run time, so no literal is a long secret-looking
+    /// string for a scanner to flag.
+    fn address(declared: &str, bytes: &[u8]) -> String {
+        format!(
+            "data:image/{declared};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    }
+
+    fn taken(raw: &str) -> Result<Option<Vec<u8>>, DelegateCode> {
+        picture_of(HermesKind::Image, raw).map(|picture| picture.map(PictureBytes::into_bytes))
+    }
+
+    /// P6 / A10: exactly one picture comes out, as the bytes Hermes drew — markdown or bare, any case of
+    /// the scheme, any of the three types — and its words are not among them.
+    #[test]
+    fn exactly_one_address_is_one_picture_and_the_bytes_are_what_was_drawn() {
+        let drawn = png();
+        let markdown = format!("만들었어요 ![그림]({}) 끝", address("png", &drawn));
+        assert_eq!(taken(&markdown), Ok(Some(drawn.clone())));
+        let bare = format!("만들었어요\n{}\n", address("png", &drawn));
+        assert_eq!(taken(&bare), Ok(Some(drawn.clone())), "a bare address");
+        let shouting = address("png", &drawn).to_ascii_uppercase().replace(
+            // the payload is case-sensitive base64: only the scheme and the header are upper-cased
+            &base64::engine::general_purpose::STANDARD
+                .encode(&drawn)
+                .to_ascii_uppercase(),
+            &base64::engine::general_purpose::STANDARD.encode(&drawn),
+        );
+        assert_eq!(taken(&shouting), Ok(Some(drawn)), "{shouting}");
+        assert_eq!(taken(&address("jpeg", &jpeg())), Ok(Some(jpeg())));
+        assert_eq!(taken(&address("webp", &webp())), Ok(Some(webp())));
+        // the bytes decide, never the declared type: a jpeg declared as a png is still a jpeg
+        assert_eq!(taken(&address("png", &jpeg())), Ok(Some(jpeg())));
+        // and what comes out says nothing but its size when it is printed
+        let picture = picture_of(HermesKind::Image, &address("png", &png()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            format!("{picture:?}"),
+            format!("PictureBytes({} bytes)", png().len())
+        );
+    }
+
+    /// P6 / A10: everything that is not one usable still is `picture_failed` and no bytes — two pictures,
+    /// a GIF (declared or real), another type, bad base64, bytes that are no picture, more than 5 MiB.
+    #[test]
+    fn two_pictures_a_gif_bad_bytes_and_too_many_bytes_are_picture_failed() {
+        let drawn = png();
+        let failed = Err(DelegateCode::PictureFailed);
+        // two
+        let two = format!(
+            "![a]({}) ![b]({})",
+            address("png", &drawn),
+            address("png", &drawn)
+        );
+        assert_eq!(taken(&two), failed);
+        // a GIF, by declaration, and a GIF whose declaration lies
+        assert_eq!(taken(&address("gif", b"GIF89a\x01\x00\x01\x00")), failed);
+        assert_eq!(taken(&address("png", b"GIF89a\x01\x00\x01\x00")), failed);
+        // another type, a type that is not base64, bytes that are no picture, an empty payload
+        assert_eq!(taken(&address("svg+xml", b"<svg/>")), failed);
+        assert_eq!(taken("data:image/png;utf8,abc"), failed);
+        assert_eq!(taken(&address("png", b"%PDF-1.7 not a picture")), failed);
+        assert_eq!(taken("data:image/png;base64,"), failed);
+        // base64 the engine refuses (one character is no whole group)
+        assert_eq!(taken("data:image/png;base64,A"), failed);
+        // 5 MiB + 1 byte: the text length passes the cheap check (the payload is exactly as long as the limit
+        // allows) and the **decoded** size is the one that refuses
+        let mut over = png();
+        over.resize(AGENT_PICTURE_MAX_INPUT_BYTES + 1, 0);
+        assert_eq!(taken(&address("png", &over)), failed);
+        // exactly 5 MiB is fine
+        let mut exact = png();
+        exact.resize(AGENT_PICTURE_MAX_INPUT_BYTES, 0);
+        assert_eq!(
+            taken(&address("png", &exact)).map(|picture| picture.map(|bytes| bytes.len())),
+            Ok(Some(AGENT_PICTURE_MAX_INPUT_BYTES))
+        );
+        // a payload longer than any 5 MiB picture can be written in is refused by its length, undecoded
+        let longer = format!(
+            "data:image/png;base64,{}",
+            "A".repeat(hosted_expression::PICTURE_B64_MAX_CHARS + 4)
+        );
+        assert_eq!(taken(&longer), failed);
+    }
+
+    /// A delegation that hands over **nothing that says a picture was made** is `failed` (saying 「그림은
+    /// 만들어졌지만…」 would be false); one that says it drew one but gives no address the worker can read is
+    /// `picture_failed` — the `MEDIA:` line is a path on Hermes's volume and is never opened.
+    #[test]
+    fn no_address_is_failed_unless_hermes_said_it_drew_one() {
+        assert_eq!(
+            taken("그림 도구를 쓸 수 없어요."),
+            Err(DelegateCode::Failed)
+        );
+        assert_eq!(taken(""), Err(DelegateCode::Failed));
+        assert_eq!(
+            taken("![x](https://example.com/a.png) 이거예요"),
+            Err(DelegateCode::Failed),
+            "an http picture is a link, not a picture the worker took"
+        );
+        for said in [
+            "만들었어요\nMEDIA:/opt/data/cache/images/abc.png",
+            "만들었어요\n  ＭＥＤＩＡ：/opt/data/cache/images/abc.png",
+            "media: /tmp/x.png",
+        ] {
+            assert_eq!(taken(said), Err(DelegateCode::PictureFailed), "{said}");
+        }
+    }
+
+    /// S3 review I3: a web search never yields a picture, whatever address its text holds.
+    #[test]
+    fn a_web_search_never_yields_a_picture() {
+        let raw = format!("검색 결과 ![x]({})", address("png", &png()));
+        assert_eq!(picture_of(HermesKind::WebSearch, &raw), Ok(None));
+        assert_eq!(picture_of(HermesKind::WebSearch, ""), Ok(None));
+        assert_eq!(
+            picture_of(HermesKind::Image, &raw).map(|p| p.is_some()),
+            Ok(true)
+        );
+    }
+
+    /// The text is read once: a million marks are two-or-more pictures and cost one pass, not a million.
+    #[test]
+    fn a_hostile_answer_is_read_in_one_pass() {
+        let hostile = "data:image/".repeat(1_000_000);
+        let started = std::time::Instant::now();
+        assert_eq!(taken(&hostile), Err(DelegateCode::PictureFailed));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
