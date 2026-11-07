@@ -4,6 +4,7 @@ import {
   EXPRESSION_NOTICE_MEMORY,
   createExpressionNoticeGate,
   decideExpressionChanged,
+  readExpressionChangedVersion,
   decideExpressionDetail,
   emptyExpressionNoticeState,
   readExpressionChangeDetail,
@@ -95,6 +96,17 @@ describe("ADR-0218 §15 contract: ChangedDetail", () => {
   });
 });
 
+describe("ADR-0218 §15 reading a plain notice's version", () => {
+  it("returns the version only for a frame that matches the old contract exactly", () => {
+    expect(readExpressionChangedVersion({ type: "expression.changed", workspaceId: FIXTURE_WORKSPACE_ID, version: "4" })).toBe("4");
+    expect(readExpressionChangedVersion({ type: "expression.changed", workspaceId: FIXTURE_WORKSPACE_ID })).toBeNull();
+    expect(readExpressionChangedVersion({ type: "expression.changed", workspaceId: FIXTURE_WORKSPACE_ID, version: 4 })).toBeNull();
+    expect(readExpressionChangedVersion({ type: "expression.changed", workspaceId: FIXTURE_WORKSPACE_ID, version: "4", extra: 1 })).toBeNull();
+    expect(readExpressionChangedVersion(detail())).toBeNull();
+    expect(readExpressionChangedVersion(null)).toBeNull();
+  });
+});
+
 describe("ADR-0218 §15 reading a detail frame", () => {
   it("returns the detail only for this workspace and only when it matches the contract", () => {
     expect(readExpressionChangeDetail(FIXTURE_WORKSPACE_ID, detail())).toEqual(detail());
@@ -115,9 +127,9 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
   });
 
   it("created, edited and a policy change take nothing down", () => {
-    expect(act("created", [first.id])).toEqual({ kind: "keep" });
-    expect(act("edited", [first.id])).toEqual({ kind: "keep" });
-    expect(act("policy_changed", [])).toEqual({ kind: "keep" });
+    expect(act("created", [first.id])).toEqual({ kind: "keep-all" });
+    expect(act("edited", [first.id])).toEqual({ kind: "keep-all" });
+    expect(act("policy_changed", [])).toEqual({ kind: "keep-all" });
   });
 
   it("a hide or delete that names nothing falls back to taking everything down (never to keeping)", () => {
@@ -133,12 +145,12 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
   it("a detail takes the plain notice of the same version out of the way, in either order", () => {
     // 상세 → v1: v1 은 건너뛴다(그림을 전부 내리지 않는다).
     const gate = createExpressionNoticeGate();
-    expect(gate.detail(detail({ action: "created", version: "9" }))).toEqual({ kind: "keep" });
-    expect(gate.changed("9")).toEqual({ kind: "skip" });
+    expect(gate.detail(detail({ action: "created", version: "9" }))).toEqual({ kind: "keep-all" });
+    expect(gate.changed("9")).toEqual({ kind: "already-handled" });
     // v1 → 상세: v1 이 이미 전부 내렸으니 뒤늦은 상세는 할 일이 없다.
     const late = createExpressionNoticeGate();
     expect(late.changed("10")).toEqual({ kind: "revoke-all" });
-    expect(late.detail(detail({ action: "hidden", version: "10" }))).toEqual({ kind: "skip" });
+    expect(late.detail(detail({ action: "hidden", version: "10" }))).toEqual({ kind: "already-handled" });
   });
 
   it("only the same version is skipped: a plain notice of another version, or with a version it cannot read, still takes everything down", () => {
@@ -154,15 +166,15 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
     expect(gate.changed("11")).toEqual({ kind: "revoke-all" });
     const other = createExpressionNoticeGate();
     expect(other.detail(detail({ version: "12" })).kind).toBe("revoke-ids");
-    expect(other.detail(detail({ version: "12" }))).toEqual({ kind: "skip" });
+    expect(other.detail(detail({ version: "12" }))).toEqual({ kind: "already-handled" });
   });
 
   it("two changes whose notices interleave still pair up by version", () => {
     const gate = createExpressionNoticeGate();
-    expect(gate.detail(detail({ action: "created", version: "20" }))).toEqual({ kind: "keep" });
+    expect(gate.detail(detail({ action: "created", version: "20" }))).toEqual({ kind: "keep-all" });
     expect(gate.detail(detail({ action: "hidden", version: "21" })).kind).toBe("revoke-ids");
-    expect(gate.changed("20")).toEqual({ kind: "skip" });
-    expect(gate.changed("21")).toEqual({ kind: "skip" });
+    expect(gate.changed("20")).toEqual({ kind: "already-handled" });
+    expect(gate.changed("21")).toEqual({ kind: "already-handled" });
   });
 
   it("a fresh subscription starts over: a version seen before the gap says nothing about after it", () => {
@@ -170,7 +182,7 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
     gate.detail(detail({ version: "30" }));
     gate.reset();
     expect(gate.changed("30")).toEqual({ kind: "revoke-all" });
-    expect(gate.detail(detail({ version: "30", action: "created" }))).toEqual({ kind: "skip" }); // v1 이 이미 했다
+    expect(gate.detail(detail({ version: "30", action: "created" }))).toEqual({ kind: "already-handled" }); // v1 이 이미 했다
   });
 
   it("remembers a bounded number of versions", () => {
@@ -178,6 +190,6 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
     for (let version = 1; version <= EXPRESSION_NOTICE_MEMORY + 5; version += 1) state = decideExpressionChanged(state, String(version)).state;
     expect(state.handled).toHaveLength(EXPRESSION_NOTICE_MEMORY);
     expect(decideExpressionChanged(state, "1").verdict).toEqual({ kind: "revoke-all" }); // 밀려난 판은 건너뛰지 않는다(안전한 쪽)
-    expect(decideExpressionChanged(state, String(EXPRESSION_NOTICE_MEMORY + 5)).verdict).toEqual({ kind: "skip" });
+    expect(decideExpressionChanged(state, String(EXPRESSION_NOTICE_MEMORY + 5)).verdict).toEqual({ kind: "already-handled" });
   });
 });

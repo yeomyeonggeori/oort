@@ -156,7 +156,14 @@ export function ExpressionImage({
   // 숨김·삭제 알림이 왔고 그 뒤 목록이 아직 적용되지 않았다(#5473): 어느 등록이 숨겨졌는지 모르는 동안은 그림 층을 그리지 않고 칸만 둔다.
   const held = changePending === true;
   useEffect(() => {
-    if (!store || !isLive) return undefined;
+    if (!store) return undefined;
+    if (!isLive) {
+      // 목록에서 빠졌다(숨김·삭제·끊김): 그렸던 층·실패·재생 시계를 버린다. 걷힌 파일 주소를 그린 층이 남지 않고, 다시 쓸 수 있게 되면 새로 받아 선다.
+      setLayers(previous => (previous.length === 0 ? previous : []));
+      setFailedKey(null);
+      setPlayingKey(null);
+      return undefined;
+    }
     if (held) {
       // 알림이 걷은 파일을 가리키던 층·실패·재생 시계를 버린다. 목록이 적용되면 이 효과가 다시 돌아 남은 표현만 받아 선다(칸은 그대로라 줄이 뛰지 않는다).
       setLayers([]);

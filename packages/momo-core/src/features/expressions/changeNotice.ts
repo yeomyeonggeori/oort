@@ -1,5 +1,5 @@
 import { matchesExpressionContract } from "./contracts";
-import type { ExpressionChangedDetail, ExpressionVersion } from "./types";
+import type { ExpressionChanged, ExpressionChangedDetail, ExpressionVersion } from "./types";
 
 /**
  * ADR-0218 §15 (#5491): what a client does with one change notice. Pure — the web store and the phone store
@@ -14,14 +14,14 @@ import type { ExpressionChangedDetail, ExpressionVersion } from "./types";
  *     read): take every picture down, as ADR-0218 D3 always said. This is the fail-safe and it is today's behaviour.
  *   · `revoke-ids` — the detail names the pictures that are no longer shown (`hidden`, `deleted`): take down exactly
  *     those, now. Every other picture stays on screen.
- *   · `keep` — a registration, an edit or a policy change took nothing down: leave every picture and read the list.
- *   · `skip` — the other notice of this same version already did the work.
+ *   · `keep-all` — a registration, an edit or a policy change took nothing down: leave every picture and read the list.
+ *   · `already-handled` — the other notice of this same version already did the work.
  */
 export type ExpressionNoticeVerdict =
   | { kind: "revoke-all" }
   | { kind: "revoke-ids"; ids: readonly string[] }
-  | { kind: "keep" }
-  | { kind: "skip" };
+  | { kind: "keep-all" }
+  | { kind: "already-handled" };
 
 /** The versions this rail has already acted on (newest last), so the second notice of a version is skipped. */
 export interface ExpressionNoticeState {
@@ -51,9 +51,17 @@ export function readExpressionChangeDetail(workspaceId: string, data: unknown): 
   return detail.workspaceId.toLowerCase() === workspaceId.toLowerCase() ? detail : null;
 }
 
+/**
+ * The `version` of a plain `expression.changed` frame that matches the contract exactly, or null. The phone reads that frame loosely
+ * (`type` and `workspaceId` only, as it always has) and passes null when this says nothing: it is then acted on and not remembered.
+ */
+export function readExpressionChangedVersion(data: unknown): ExpressionVersion | null {
+  return matchesExpressionContract("Changed", data) ? (data as ExpressionChanged).version : null;
+}
+
 /** A detail notice (`readExpressionChangeDetail` already checked it). */
 export function decideExpressionDetail(state: ExpressionNoticeState, detail: ExpressionChangedDetail): ExpressionNoticeDecision {
-  if (state.handled.includes(detail.version)) return { verdict: { kind: "skip" }, state };
+  if (state.handled.includes(detail.version)) return { verdict: { kind: "already-handled" }, state };
   const next = remember(state, detail.version);
   if (detail.action === "hidden" || detail.action === "deleted") {
     // A hide or delete that names no picture cannot be narrowed: fall back to taking everything down.
@@ -61,7 +69,7 @@ export function decideExpressionDetail(state: ExpressionNoticeState, detail: Exp
   }
   // `edited` never changes a picture's bytes (the image row is immutable, ADR-0218 D2) and a policy change touches none;
   // `applyExpressionList.evictImageIds` stays the last word on a picture whose `media` did change.
-  return { verdict: { kind: "keep" }, state: next };
+  return { verdict: { kind: "keep-all" }, state: next };
 }
 
 /**
@@ -70,7 +78,7 @@ export function decideExpressionDetail(state: ExpressionNoticeState, detail: Exp
  */
 export function decideExpressionChanged(state: ExpressionNoticeState, version: ExpressionVersion | null): ExpressionNoticeDecision {
   if (version === null) return { verdict: { kind: "revoke-all" }, state };
-  if (state.handled.includes(version)) return { verdict: { kind: "skip" }, state };
+  if (state.handled.includes(version)) return { verdict: { kind: "already-handled" }, state };
   return { verdict: { kind: "revoke-all" }, state: remember(state, version) };
 }
 
