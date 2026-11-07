@@ -210,17 +210,17 @@ describe("team expressions web/desktop port", () => {
   it("shares emoticon/GIF views and confirmation gates destructive mutations", async () => {
     const store = makeStore(); await store.refresh(); const mutation = vi.spyOn(store, "mutate"); const pick = vi.fn();
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="reaction" onPick={pick} />));
-    // ADR-0218 §10 J2 + 2026-11-05 증보: 두 보기는 겹치지 않는다. 파티 앵무새는 움직이는 작은 이모티콘(`emoji` 종류)이라 이모티콘 보기에, 움직이는 큰 이모티콘
-    // 둘은 GIF 보기에 있다(자세한 분포는 ExpressionKind.test.tsx). 보기 이름은 사전의 것이고(폰 시트의 탭 이름과 같은 체계, #5330) 이 시험은 제공자 없는
-    // 고정 영어 사전으로 돈다: 「Emoticon」 · 「GIF」. 기대값은 사전에서 읽지 않고 글자로 적는다.
+    // ADR-0218 §10 J2 + 2026-11-07(#5453) 증보: 두 보기는 큰 그림만 모은다. 파티 앵무새는 움직이는 작은 이모티콘(`emoji` 종류)이라 어느 보기도 아니고 이모지 탭의 것이며,
+    // 움직이는 큰 이모티콘 둘은 GIF 보기에 있다(자세한 분포는 ExpressionKind.test.tsx). 움직이지 않는 큰 그림은 이 보관함에 없어 이모티콘 보기는 비어 있고, 패널은
+    // 등록이 있는 첫 보기(GIF)에서 열린다. 보기 이름은 사전의 것이고 이 시험은 제공자 없는 고정 영어 사전으로 돈다: 「Emoticon」 · 「GIF」. 기대값은 사전에서 읽지 않고 글자로 적는다.
     const labels = () => view.queryAllByRole("button", { name: /반응으로 고르기$/ }).map((button) => button.getAttribute("aria-label")).sort();
-    expect(labels()).toEqual(["파티 앵무새 반응으로 고르기"]);
-    fireEvent.click(view.getByLabelText("GIF")); expect(labels()).toEqual(["기절 반응으로 고르기", "엄지척 반응으로 고르기"]);
-    fireEvent.click(view.getByLabelText("Emoticon"));
-    fireEvent.change(view.getByLabelText("우리 팀 표현 검색"), { target: { value: "ㅍㅌ" } });
-    fireEvent.click(view.getByRole("button", { name: "파티 앵무새 반응으로 고르기" })); expect(pick).toHaveBeenCalledWith(":party_parrot:");
-    const trigger = view.getByRole("button", { name: "파티 앵무새 관리" });
-    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false }); fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(labels()).toEqual(["기절 반응으로 고르기", "엄지척 반응으로 고르기"]);
+    fireEvent.click(view.getByLabelText("Emoticon")); expect(labels()).toEqual([]);
+    fireEvent.click(view.getByLabelText("GIF"));
+    fireEvent.change(view.getByLabelText("Search GIFs"), { target: { value: "ㄱㅈ" } });
+    fireEvent.click(view.getByRole("button", { name: "기절 반응으로 고르기" })); expect(pick).toHaveBeenCalledWith(":ki_jeol:");
+    // 항목 메뉴는 칸의 오른쪽 클릭으로 열린다(예전 「관리」 단추 자리, owner 2026-11-07 #5453).
+    fireEvent.contextMenu(view.getByRole("button", { name: "기절 반응으로 고르기" }));
     const report = await view.findByRole("menuitem", { name: "신고하기" }); fireEvent.click(report);
     const confirm = await view.findByRole("button", { name: "신고하고 숨기기" });
     expect(mutation).not.toHaveBeenCalled(); fireEvent.click(confirm);

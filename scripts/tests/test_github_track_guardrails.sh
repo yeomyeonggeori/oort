@@ -307,9 +307,11 @@ if [[ "$endpoint" == repos/fixture/oort/branches/*/protection ]]; then
       echo 'gh: Validation Failed (HTTP 422): required_status_checks matches more than one schema' >&2
       exit 1
     fi
-    if ! jq -e --argjson app_id 15368 '
+    # strict is per-branch (#5450): only main requires up-to-date branches. The
+    # literal expectation here is deliberately independent of the guard helper.
+    if ! jq -e --argjson app_id 15368 --arg branch "$branch" '
       (.required_status_checks | keys | sort) == ["checks", "strict"] and
-      (.required_status_checks.strict == true) and
+      (.required_status_checks.strict == ($branch == "main")) and
       ((.required_status_checks.checks | type) == "array") and
       all(.required_status_checks.checks[];
         ((.context | type) == "string") and
@@ -947,7 +949,7 @@ MUTATED_GUARD="$MUTATION_ROOT/scripts/github_track_guardrails.sh"
 mkdir -p "$MUTATION_ROOT/scripts"
 awk '
   { print }
-  $0 == "          strict: true," {
+  $0 == "          strict: $strict_expected," {
     print "          contexts: [],"
     inserted += 1
   }
@@ -1044,6 +1046,156 @@ for expected_call in \
   grep -Fq "$expected_call" "$STATE/verifier_calls.log" \
     || fail "apply did not verify exact bootstrap mapping $expected_call"
 done
+
+# `strict` (require branches to be up to date) is a per-branch expectation
+# (#5450): main keeps strict=true, track/* run with strict=false, and the
+# opposite value on either side is drift. The expected values below are literals
+# on purpose, independent of the guard's own helper.
+set_strict() { # <state key> <true|false|missing>
+  if [ "$2" = missing ]; then
+    jq 'del(.required_status_checks.strict)' "$STATE/$1.json" >"$STATE/tmp.json"
+  else
+    jq --argjson value "$2" '.required_status_checks.strict = $value' \
+      "$STATE/$1.json" >"$STATE/tmp.json"
+  fi
+  mv "$STATE/tmp.json" "$STATE/$1.json"
+}
+
+assert_strict_state() { # <state key> <true|false>
+  jq -e --argjson want "$2" '.required_status_checks.strict == $want' \
+    "$STATE/$1.json" >/dev/null \
+    || fail "$1 strict is not $2 (found: $(jq -c '.required_status_checks.strict' "$STATE/$1.json"))"
+}
+
+assert_only_branch_failed() { # <output file> <the one branch that must FAIL> <label>
+  local other
+  for other in main track/engine track/uxui; do
+    if [ "$other" = "$2" ]; then
+      continue
+    fi
+    if grep -Fq "FAIL $other:" "$1"; then
+      fail "$3 also flagged $other: $(cat "$1")"
+    fi
+  done
+}
+
+# Case 1: the first apply wrote strict=true for main and strict=false for both
+# tracks (attempts follow the canonical branch order), and check reports PASS.
+for expectation in "1:main:true" "2:track/engine:false" "3:track/uxui:false"; do
+  attempt="${expectation%%:*}"
+  rest="${expectation#*:}"
+  strict_branch="${rest%%:*}"
+  want="${rest##*:}"
+  [ "$(sed -n "${attempt}p" "$STATE/put_attempts.log")" = "$strict_branch" ] \
+    || fail "first apply PUT $attempt was not $strict_branch"
+  jq -e --argjson want "$want" '.required_status_checks.strict == $want' \
+    "$STATE/put_attempt.$attempt.json" >/dev/null \
+    || fail "$strict_branch PUT did not carry strict=$want"
+done
+assert_strict_state main true
+assert_strict_state track_engine false
+assert_strict_state track_uxui false
+reset_mutations
+run_guard --check >"$SANDBOX/out" 2>&1 \
+  || fail "check failed with main strict=true and tracks strict=false: $(cat "$SANDBOX/out")"
+for strict_branch in main track/engine track/uxui; do
+  grep -Fq "PASS protection: $strict_branch" "$SANDBOX/out" \
+    || fail "$strict_branch was not reported PASS with its expected strict value"
+done
+assert_put_zero "per-branch strict check"
+
+# Case 2: main without strict is drift. Check names main only; apply repairs
+# exactly main and leaves both tracks alone.
+set_strict main false
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with main strict=false"
+fi
+grep -Fq 'FAIL main: required status checks are not strict' "$SANDBOX/out" \
+  || fail "main strict=false was not named: $(cat "$SANDBOX/out")"
+assert_only_branch_failed "$SANDBOX/out" main "main strict=false"
+assert_put_zero "main strict=false check"
+reset_mutations
+run_guard --apply >"$SANDBOX/out" 2>&1 \
+  || fail "main strict repair apply failed: $(cat "$SANDBOX/out")"
+[ "$(tr '\n' ' ' <"$STATE/puts.log")" = "main " ] \
+  || fail "main strict repair wrote [$(tr '\n' ' ' <"$STATE/puts.log")] instead of exactly main"
+jq -e '.required_status_checks.strict == true' "$STATE/put_attempt.1.json" >/dev/null \
+  || fail "main strict repair PUT did not carry strict=true"
+assert_strict_state main true
+assert_strict_state track_engine false
+assert_strict_state track_uxui false
+
+# Case 3: a track that drifted back to strict=true fails check and only that
+# track is named. Both tracks are exercised so neither is special-cased.
+for drifted in track_engine track_uxui; do
+  strict_branch="$(printf '%s' "$drifted" | tr '_' '/')"
+  set_strict "$drifted" true
+  reset_mutations
+  if run_guard --check >"$SANDBOX/out" 2>&1; then
+    fail "check passed with $strict_branch strict=true"
+  fi
+  grep -Fq "FAIL $strict_branch: required status checks strict must be false on $strict_branch" "$SANDBOX/out" \
+    || fail "$strict_branch strict=true drift was not named: $(cat "$SANDBOX/out")"
+  assert_only_branch_failed "$SANDBOX/out" "$strict_branch" "$strict_branch strict=true drift"
+  assert_put_zero "$strict_branch strict=true check"
+  set_strict "$drifted" false
+done
+
+# Case 4: a missing strict field is neither true nor false. Only an explicit
+# false passes on a track and only an explicit true passes on main.
+set_strict track_engine missing
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with track/engine strict missing"
+fi
+grep -Fq 'FAIL track/engine: required status checks strict must be false' "$SANDBOX/out" \
+  || fail "track/engine missing strict was not named: $(cat "$SANDBOX/out")"
+assert_only_branch_failed "$SANDBOX/out" track/engine "track/engine missing strict"
+assert_put_zero "track/engine missing strict check"
+set_strict track_engine false
+set_strict main missing
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with main strict missing"
+fi
+grep -Fq 'FAIL main: required status checks are not strict' "$SANDBOX/out" \
+  || fail "main missing strict was not named: $(cat "$SANDBOX/out")"
+assert_only_branch_failed "$SANDBOX/out" main "main missing strict"
+assert_put_zero "main missing strict check"
+set_strict main true
+
+# Case 5: the state GitHub has before this policy change (strict=true on all
+# three). Check names exactly both tracks; one apply writes exactly both tracks
+# with strict=false, leaves main alone, and the next check is green.
+set_strict track_engine true
+set_strict track_uxui true
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with strict=true on both tracks"
+fi
+for strict_branch in track/engine track/uxui; do
+  grep -Fq "FAIL $strict_branch: required status checks strict must be false" "$SANDBOX/out" \
+    || fail "$strict_branch pre-change strict=true was not named: $(cat "$SANDBOX/out")"
+done
+if grep -Fq 'FAIL main:' "$SANDBOX/out"; then
+  fail "main was flagged although strict=true is its expected value: $(cat "$SANDBOX/out")"
+fi
+assert_put_zero "pre-change all-strict check"
+reset_mutations
+run_guard --apply >"$SANDBOX/out" 2>&1 \
+  || fail "pre-change strict repair apply failed: $(cat "$SANDBOX/out")"
+[ "$(tr '\n' ' ' <"$STATE/puts.log")" = "track/engine track/uxui " ] \
+  || fail "pre-change strict repair wrote [$(tr '\n' ' ' <"$STATE/puts.log")] instead of exactly both tracks"
+grep -Fq 'unchanged: main already compliant' "$SANDBOX/out" \
+  || fail "pre-change strict repair did not leave main unchanged: $(cat "$SANDBOX/out")"
+assert_strict_state main true
+assert_strict_state track_engine false
+assert_strict_state track_uxui false
+reset_mutations
+run_guard --check >"$SANDBOX/out" 2>&1 \
+  || fail "check failed after the strict repair: $(cat "$SANDBOX/out")"
+assert_put_zero "post-repair strict check"
 
 # Steady-state policy compliance includes the trusted workflow identity itself,
 # not only the branch-protection context left behind by an older run.
@@ -1460,4 +1612,4 @@ grep -Fq "latest 'PR CI gate' is not successful" "$SANDBOX/out" || fail "post-PU
 [ -s "$STATE/puts.log" ] || fail "post-PUT context fixture never reached mutation"
 rm -f "$STATE/checks.after.page1.json" "$STATE/checks.after.page2.json"
 
-echo "[github-guardrails-test] PASS dual app pins, policy provenance mapping, fail-closed reads, preservation, TOCTOU, and idempotency"
+echo "[github-guardrails-test] PASS dual app pins, per-branch strict (main on, track/* off), policy provenance mapping, fail-closed reads, preservation, TOCTOU, and idempotency"

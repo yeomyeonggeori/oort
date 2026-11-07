@@ -1758,14 +1758,23 @@ export default function ConversationScreen({
       // 메시지를 직접 보내므로 표시가 이 길로 넘어가지 않으면 사람이 끈 카드가 `@별칭` 메시지에만 되살아난다.
       // 켠 때만 있다 — 켜지 않은 전송은 예전과 같은 호출이다.
       const flags = options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined;
+      // 미리 보기에 올린 이모티콘·GIF 가 있으면(#5452) 호출 길을 지나지 않는다: 호출은 글 하나를 직접 보내는 길이라 큰 표현 메시지가 앞서 나갈 수 없다.
+      const expression = options?.expression;
       if (
+        expression === undefined &&
         replyToId === undefined &&
         (options?.attachments?.length ?? 0) === 0 &&
         tryPersonalCall(body, flags)
       ) {
         return;
       }
-      void send(body, replyToId, options?.attachments, undefined, flags);
+      void send(
+        body,
+        replyToId,
+        options?.attachments,
+        undefined,
+        expression === undefined ? flags : {...flags, expression},
+      );
     },
     [send, tryPersonalCall, sendReplyDraft],
   );
@@ -2547,6 +2556,8 @@ export default function ConversationScreen({
               onSend={onSend}
               onSlashCommand={onSlashCommand}
               onKeyBlockedChange={setComposerKeyBlocked}
+              // 이모티콘·GIF 는 입력창 위 미리 보기에 올려 글과 함께 보낸다(#5452). 스레드 입력창은 켜지 않는다(`:이름:` 글).
+              expressionBundle
             />
             </View>
           </>

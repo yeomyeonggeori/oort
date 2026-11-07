@@ -2086,7 +2086,9 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "color_quant",
  "futures",
+ "gif",
  "hex",
  "image",
  "momo-db",

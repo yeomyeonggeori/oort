@@ -59,6 +59,12 @@ includes administrators, requires conversation resolution, and forbids force
 pushes/deletion. Existing stricter checks, review rules, push restrictions, and
 linear-history rules are preserved rather than overwritten.
 
+The one exception is `strict` (require branches to be up to date before
+merging), which is a per-branch expectation (#5450): main must be strict=true
+and track/* must be strict=false. The opposite value on either side is drift
+that fails --check, and --apply sets the expected value instead of preserving
+the observed one.
+
 `--apply` is an attended, non-transactional bootstrap. Keep it running through
 the final verification. If a later write or recheck fails, the script prints an
 APPLY_INCOMPLETE recovery marker and the targets already updated; repair the
@@ -866,13 +872,42 @@ load_latest_required_check() {
   echo "[github-guardrails] PASS context: $REQUIRED_CONTEXT@$sha app=$REQUIRED_APP_SLUG/$app_id"
 }
 
+# Branch-specific `required_status_checks.strict` ("require branches to be up to
+# date before merging") expectation (#5450). main keeps it on, so nothing merges
+# there against a stale base. track/* turn it off: with it on, every merged PR
+# forced an update-branch plus a full CI rerun on each queued PR, which kept the
+# landing lane about 94% occupied between v0.1.42 and v0.1.43. Track landings
+# are covered instead by the pre-landing merge-tree typecheck, the exact-base
+# policy verifier, and the rolling verification lane. Both directions are drift:
+# the value is set to the expectation by --apply and never carried over from an
+# observed state. Any other branch name fails closed.
+expected_strict_for_branch() {
+  local branch="${1:-}" track
+  if [ "$branch" = "main" ]; then
+    printf 'true\n'
+    return 0
+  fi
+  for track in "${TRACK_BRANCHES[@]}"; do
+    if [ "$branch" = "$track" ]; then
+      printf 'false\n'
+      return 0
+    fi
+  done
+  echo "[github-guardrails] internal error: no strict expectation for branch '$branch'" >&2
+  return 1
+}
+
 protection_is_compliant() {
   local json="$1"
+  local branch="${2:-}"
+  local strict_expected
+  strict_expected="$(expected_strict_for_branch "$branch")" || return 1
   jq -e \
     --arg pr_context "$REQUIRED_CONTEXT" \
     --arg policy_context "$POLICY_CONTEXT" \
-    --argjson app_id "$REQUIRED_APP_ID" '
-    (.required_status_checks.strict == true) and
+    --argjson app_id "$REQUIRED_APP_ID" \
+    --argjson strict_expected "$strict_expected" '
+    (.required_status_checks.strict == $strict_expected) and
     any(.required_status_checks.checks[]?;
       .context == $pr_context and .app_id == $app_id
     ) and
@@ -899,7 +934,8 @@ protection_is_compliant() {
 report_noncompliance() {
   local branch="$1"
   local json="$2"
-  local failed=0
+  local failed=0 strict_expected
+  strict_expected="$(expected_strict_for_branch "$branch")" || return 1
   check_expr() {
     local label="$1"
     local expr="$2"
@@ -907,12 +943,20 @@ report_noncompliance() {
       --arg pr_context "$REQUIRED_CONTEXT" \
       --arg policy_context "$POLICY_CONTEXT" \
       --argjson app_id "$REQUIRED_APP_ID" \
+      --argjson strict_expected "$strict_expected" \
       "$expr" "$json" >/dev/null; then
       echo "[github-guardrails] FAIL $branch: $label" >&2
       failed=1
     fi
   }
-  check_expr "required status checks are not strict" '.required_status_checks.strict == true'
+  if [ "$strict_expected" = "true" ]; then
+    # shellcheck disable=SC2016 # strict_expected is a jq variable.
+    check_expr "required status checks are not strict" '.required_status_checks.strict == $strict_expected'
+  else
+    # shellcheck disable=SC2016 # strict_expected is a jq variable.
+    check_expr "required status checks strict must be false on $branch (the up-to-date requirement is main-only)" \
+      '.required_status_checks.strict == $strict_expected'
+  fi
   # shellcheck disable=SC2016 # context/app_id names are jq variables.
   check_expr "GitHub-Actions-pinned required check missing: $REQUIRED_CONTEXT/$REQUIRED_APP_ID" \
     'any(.required_status_checks.checks[]?; .context == $pr_context and .app_id == $app_id)'
@@ -941,7 +985,7 @@ check_protections() {
   for branch in "${BRANCHES[@]}"; do
     json="$TEMP_ROOT/check-$(printf '%s' "$branch" | tr '/' '_').json"
     if get_protection "$branch" "$json"; then
-      if protection_is_compliant "$json"; then
+      if protection_is_compliant "$json" "$branch"; then
         echo "[github-guardrails] PASS protection: $branch"
       else
         report_noncompliance "$branch" "$json" || true
@@ -962,15 +1006,21 @@ build_policy_payload() {
   local observed="$1"
   local retained="$2"
   local output="$3"
+  local branch="${4:-}"
+  local strict_expected
+  strict_expected="$(expected_strict_for_branch "$branch")" || return 1
 
   # The second input is the accumulated preservation contract from every state
   # this invocation has observed. This makes a retry-safe monotonic merge:
   # concurrent stronger checks/settings are carried into the next PUT instead
-  # of being overwritten by a payload built from the initial read.
+  # of being overwritten by a payload built from the initial read. `strict` is
+  # the one deliberate exception: it is the branch expectation (#5450), so a
+  # stricter observed value on a track is drift to correct, not to preserve.
   jq -s \
     --arg pr_context "$REQUIRED_CONTEXT" \
     --arg policy_context "$POLICY_CONTEXT" \
-    --argjson app_id "$REQUIRED_APP_ID" '
+    --argjson app_id "$REQUIRED_APP_ID" \
+    --argjson strict_expected "$strict_expected" '
     def enabled($value):
       if ($value | type) == "object" then
         (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
@@ -1010,7 +1060,7 @@ build_policy_payload() {
         # `checks` as mutually exclusive oneOf shapes. Legacy contexts were
         # normalized above; never emit the `contexts` field alongside checks.
         required_status_checks: {
-          strict: true,
+          strict: $strict_expected,
           checks: $required_checks
         },
         enforce_admins: true,
@@ -1063,7 +1113,10 @@ build_policy_payload() {
 protection_preserves_contract() {
   local actual="$1"
   local contract="$2"
-  jq -e --slurpfile expected "$contract" '
+  local branch="${3:-}"
+  local strict_expected
+  strict_expected="$(expected_strict_for_branch "$branch")" || return 1
+  jq -e --slurpfile expected "$contract" --argjson strict_expected "$strict_expected" '
     def enabled($value):
       if ($value | type) == "object" then
         (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
@@ -1098,7 +1151,7 @@ protection_preserves_contract() {
       | ($actual.restrictions // null) as $actual_restrictions
       | ($wanted.restrictions // null) as $wanted_restrictions
       | contains_all($actual_checks; $wanted_checks)
-      and ($actual.required_status_checks.strict == true)
+      and ($actual.required_status_checks.strict == $strict_expected)
       and ($actual.required_pull_request_reviews != null)
       and (($actual_reviews.required_approving_review_count // -1)
         >= ($wanted_reviews.required_approving_review_count // 0))
@@ -1317,7 +1370,7 @@ refresh_preservation_contract() {
     echo "[github-guardrails] apply blocked: $branch authorization allowlist changed during apply" >&2
     return 1
   fi
-  build_policy_payload "$observation" "$contract" "$merged" || return 1
+  build_policy_payload "$observation" "$contract" "$merged" "$branch" || return 1
   mv "$merged" "$contract"
 
   if ! jq -e --slurpfile initial "$initial" '. == $initial[0]' "$observation" >/dev/null 2>&1; then
@@ -1340,7 +1393,7 @@ verify_preservation_contracts() {
       echo "[github-guardrails] FAIL $branch: protection disappeared during apply" >&2
       return 1
     fi
-    if ! protection_is_compliant "$actual"; then
+    if ! protection_is_compliant "$actual" "$branch"; then
       report_noncompliance "$branch" "$actual" || true
       return 1
     fi
@@ -1348,7 +1401,7 @@ verify_preservation_contracts() {
       echo "[github-guardrails] FAIL $branch: final authorization allowlist differs from the exact fresh payload" >&2
       return 1
     fi
-    if ! protection_preserves_contract "$actual" "$contract"; then
+    if ! protection_preserves_contract "$actual" "$contract" "$branch"; then
       echo "[github-guardrails] FAIL $branch: an observed stronger protection requirement was lost" >&2
       return 1
     fi
@@ -1374,7 +1427,7 @@ apply_policy() {
       return 1
     fi
     contract="$TEMP_ROOT/contract-$key.json"
-    if ! build_policy_payload "$existing" "$empty" "$contract"; then
+    if ! build_policy_payload "$existing" "$empty" "$contract" "$branch"; then
       echo "[github-guardrails] apply blocked: could not build $branch preservation contract" >&2
       return 1
     fi
@@ -1427,8 +1480,8 @@ apply_policy() {
     fresh="$TEMP_ROOT/fresh-$key.json"
     presence="$TEMP_ROOT/fresh-$key.presence"
     if [ "$(cat "$presence")" = "protected" ] \
-      && protection_is_compliant "$fresh" \
-      && protection_preserves_contract "$fresh" "$contract"; then
+      && protection_is_compliant "$fresh" "$branch" \
+      && protection_preserves_contract "$fresh" "$contract" "$branch"; then
       echo "[github-guardrails] unchanged: $branch already compliant"
       continue
     fi
@@ -1453,8 +1506,8 @@ apply_policy() {
     fresh="$TEMP_ROOT/fresh-$key.json"
     presence="$TEMP_ROOT/fresh-$key.presence"
     if [ "$(cat "$presence")" = "protected" ] \
-      && protection_is_compliant "$fresh" \
-      && protection_preserves_contract "$fresh" "$contract"; then
+      && protection_is_compliant "$fresh" "$branch" \
+      && protection_preserves_contract "$fresh" "$contract" "$branch"; then
       echo "[github-guardrails] unchanged: $branch became compliant before PUT"
       continue
     fi

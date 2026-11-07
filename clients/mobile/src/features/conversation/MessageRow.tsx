@@ -17,7 +17,7 @@ import {
   type Message,
   type ThreadRollup,
 } from '@momo/core/lib/api';
-import type {MessageUnfurl} from '@momo/core/features/timeline/unfurl';
+import {messageMayHaveUnfurls, type MessageUnfurl} from '@momo/core/features/timeline/unfurl';
 import {
   dayDividerLabel,
   dayDividerSegments,
@@ -3518,10 +3518,12 @@ function MessageRowInner({
 
             {/* 링크 카드(#4883)는 첨부 **아래**다 — 파일은 작성자가 이 메시지에 직접 붙인 것이고, 카드는 그 메시지에
                 **대해** 서버가 말하는 것이다(웹과 같은 순서, ADR-0151 D2). 끄면(`off`) 카드는 아무것도 그리지 않는다. */}
-            {unfurls.length > 0 ? (
+            {unfurls.length > 0 || (!deleted && messageMayHaveUnfurls(message.body)) ? (
               <UnfurlCards
                 unfurls={unfurls}
                 rowKey={messageRowKey(message.seq)}
+                messageId={message.id}
+                mayHaveCard={!deleted && messageMayHaveUnfurls(message.body)}
                 onLongPressCard={openLinkSheet}
               />
             ) : null}
