@@ -248,6 +248,22 @@ describe('스레드 입력창 - 고르기 → 미리 보기 → 보내기 한 �
     expect(live.repliesPending(ROOT_ID)).toEqual([]);
   });
 
+  it('글을 치다 멈추면 스레드 입력창에도 추천 줄이 서고, 누르면 미리 보기에 오른다 - 저절로 보내지 않는다', async () => {
+    const store = await loadedStore();
+    mountWith(store, <Thread />);
+    await screen.findByTestId('composer-input');
+    act(() => void fireEvent(input(), 'focus'));
+    act(() => void fireEvent.changeText(input(), '킹받네'));
+    expect(screen.queryByTestId('composer-expression-suggest')).toBeNull(); // 0.3초 전엔 없다
+    act(() => void jest.advanceTimersByTime(300));
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-dam_kk'));
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(screen.queryByTestId('composer-expression-suggest')).toBeNull();
+    act(() => void jest.advanceTimersByTime(5000));
+    expect(reply).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('킹받네'); // 쓴 글은 그대로
+  });
+
   it('첫째가 실패하면 둘째는 나가지 않는다 - 입력창은 비고(대화 입력창과 같은 규칙) 실패한 행 둘이 스레드에 남아, 둘째 행에서 다시 보내도 그림부터 같은 id 로 나간다', async () => {
     const store = await loadedStore();
     reply.mockRejectedValueOnce(new NetworkError('unreachable', 15_000));
