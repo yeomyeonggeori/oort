@@ -124,8 +124,9 @@
  * 폼의 좌우 인셋 24(`tokens.css` `composer-dock` 의 `form` 인셋, 같은 토큰 `--spacing-6`)에서 시작하므로 거기에 맞춘다. 후보 목록의 같은 규칙(`& > form > [data-composer-popover]`)은
  * 폼 안의 자식만 보므로 독 맨 위에 서는 이 줄은 여기서 따라간다. 폼 인셋이 바뀌면 이 값도 함께 바꾼다(브라우저 시험이 카드 왼쪽과의 차 0 을 잰다). */
 @media (width >= 600px) { [data-composer-shell] .expression-suggest-row { left: var(--spacing-6); } }
-/* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다. */
-.expression-set-button[aria-current="true"] { background-color: var(--color-accent-soft); }
+/* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다.
+ * 채움은 단추의 안여백(`p-1`, 4px) 둘레에서 보인다: 그림이 단추 안쪽 상자의 100% 라서 가장자리까지 칠해진 그림도 이 띠는 덮지 못한다(#5486 M1, `p-0.5` 는 사다리 밖이라 컴파일되지 않아 여백이 0이었다). */
+.expression-set-button[aria-current="true"] { background-color: var(--signal-soft); }
 
 /*
  * 입력창 위 미리 보기 카드 (owner 2026-11-07 웹 목업 `.w-preview`, #5487 M2). 그림은 56×56 칸 안에 비율을 지켜 들어간다(`object-fit: contain` 은 위 기본 규칙). 그림이 오기 전의
