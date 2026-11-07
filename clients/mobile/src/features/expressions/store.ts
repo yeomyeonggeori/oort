@@ -186,11 +186,16 @@ export function createPhoneExpressionStore(
   let lastKnown: readonly Expression[] = restoreShelf();
   let shelfVersion: string | null = null;
   let cache = emptyExpressionCache(workspaceId, memberId);
+  let usage = storage
+    ? restoreExpressionUsage(storage.read(), workspaceId, memberId)
+    : emptyExpressionUsage(workspaceId, memberId);
+  // 처음 스냅샷에도 기기의 사용 기록이 실린다(#5503): 목록이 오기 전에 창을 열면 창이 이 기록을 열 때 쥐므로, 첫 `publish` 전에 비어 있으면 그 창의 「자주·최근」 칸이 끝내 서지 않는다.
   let snapshot: ExpressionSnapshot = {
     items: emptyItems,
     shelf: lastKnown,
     state: 'loading',
     revision: 0,
+    usage,
   };
   let epoch = 0;
   let serial = 0;
@@ -198,9 +203,6 @@ export function createPhoneExpressionStore(
   let disposed = false;
   // 알림(`changed()`)이 왔고 그 뒤 목록이 아직 적용되지 않았다 — 스냅샷으로 나가 화면이 그림 층을 그리지 않게 한다(#5473).
   let changePending = false;
-  let usage = storage
-    ? restoreExpressionUsage(storage.read(), workspaceId, memberId)
-    : emptyExpressionUsage(workspaceId, memberId);
   const receipts = new Set<string>();
   const listeners = new Set<() => void>();
   const images = new Map<string, string>();

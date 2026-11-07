@@ -196,6 +196,7 @@
   "expressions.picker.teamGroup": "Team library",
   "expressions.picker.grid": "Team expressions",
   "expressions.picker.sectionRecent": "Recent",
+  "expressions.picker.sectionFrecent": "Frequent & recent",
   "expressions.picker.sectionFavorites": "Favorites",
   "expressions.picker.sectionOther": "Other",
   "expressions.picker.setStrip": "Sets",

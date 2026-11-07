@@ -1,5 +1,6 @@
 import type {Channel} from '@momo/core/lib/api';
 import type {Expression} from '@momo/core/features/expressions/types';
+import {emptyExpressionUsage} from '@momo/core/features/expressions/usage';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {HEAD_MAX_SCALE} from '../../design/atoms';
@@ -9,8 +10,10 @@ import {ds2Radius, font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} f
 import {EmojiPicker} from '../emoji/EmojiPicker';
 import {emojiHaptic} from '../emoji/haptics';
 import {ExpressionAddSheet} from './ExpressionAddSheet';
+import {useExpressionStore} from './ExpressionProvider';
 import {ExpressionPanelGrid} from './ExpressionPanelGrid';
 import {DEFAULT_EXPRESSION_TAB, EXPRESSION_TABS, type ExpressionTab} from './expressionViews';
+import type {PanelOpening} from './panelModel';
 import {TeamEmojiRow} from './TeamEmojiRow';
 import {useExpressionMessages, type PlainMessageKey} from './useExpressionMessages';
 
@@ -64,6 +67,13 @@ export function ExpressionKeyboardPanel({
   const styles = useStyles(buildStyles);
   const [tab, setTabState] = useState<ExpressionTab>(lastTab);
   const [adding, setAdding] = useState(false);
+  // 창이 서는 순간(이 부품이 마운트되는 때, 닫으면 걷힌다)의 사용 기록과 시각을 한 번 쥔다(#5503): 이모티콘 탭 맨 위 「자주·최근」 칸의 차례가 열려 있는 동안 - 칸을 눌러 보내고
+  // 보내기가 성공해 기록이 바뀌어도, 탭을 바꿨다 돌아와도 - 바뀌지 않는다. 창을 다시 열 때만 새로 계산한다.
+  const store = useExpressionStore();
+  const [opening] = useState<PanelOpening>(() => ({
+    usage: store?.snapshot().usage ?? emptyExpressionUsage(store?.workspaceId ?? '', store?.memberId ?? ''),
+    nowMs: Date.now(),
+  }));
   const setTab = useCallback((next: ExpressionTab) => {
     lastTab = next;
     setTabState(next);
@@ -104,7 +114,7 @@ export function ExpressionKeyboardPanel({
       ) : (
         <View style={styles.body}>
           {/* 탭마다 새로 선다 - 구역 위치·스크롤이 옆 탭으로 새지 않는다. */}
-          <ExpressionPanelGrid key={tab} tab={tab} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} />
+          <ExpressionPanelGrid key={tab} tab={tab} opening={opening} previewId={previewId} onPick={onPickBig} onAdd={() => setAdding(true)} />
         </View>
       )}
       {adding ? <ExpressionAddSheet onClose={() => setAdding(false)} onOpenConversation={onOpenConversation} /> : null}

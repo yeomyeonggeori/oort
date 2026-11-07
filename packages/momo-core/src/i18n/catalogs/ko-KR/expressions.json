@@ -196,6 +196,7 @@
   "expressions.picker.teamGroup": "팀 보관함",
   "expressions.picker.grid": "팀 표현 목록",
   "expressions.picker.sectionRecent": "최근",
+  "expressions.picker.sectionFrecent": "자주·최근",
   "expressions.picker.sectionFavorites": "즐겨찾기",
   "expressions.picker.sectionOther": "기타",
   "expressions.picker.setStrip": "세트",
