@@ -2545,3 +2545,36 @@ async fn x15_the_orphan_sweep_settles_a_called_delegation() {
     assert_eq!(worker.sweep_orphan_tasks().await.unwrap(), 0);
     assert_eq!(w.hermes_ledger(run).await.len(), 1);
 }
+
+/// #5371 ① and #5459 wait on the answer: in what state is the run while the resumed step works — also when
+/// the step is a RETRY (the worker's retry path leaves the run reading `failed` between attempts)? The
+/// `called` commit puts it back to `running`, so Hermes works and the helper writes under a `running` run,
+/// whichever attempt it is; the finishing transaction ends it.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x16_a_retried_step_runs_its_delegation_under_a_running_run() {
+    let w = world(good_hermes()).await;
+    let (worker, routed) = w.worker(delegation_script(), &Setup::open());
+    let run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    let step_job = w.begin_only(&worker).await;
+    // the previous attempt of the step failed before it did anything: the retry path marked the run
+    sqlx::query("UPDATE agent_run SET status = 'failed', error = '{\"code\":\"retry\"}'::jsonb WHERE id = $1")
+        .bind(run)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    w.release_step(step_job).await;
+    w.drain(&worker).await;
+    let seen = w.fake.seen();
+    assert_eq!(seen.len(), 1);
+    println!(
+        "RUN STATE at the Hermes request of a RETRIED step: {:?}",
+        seen[0].run_statuses
+    );
+    assert_eq!(seen[0].run_statuses, "running");
+    assert_eq!(
+        *routed.model_run_statuses.lock().unwrap(),
+        vec!["running".to_string(), "running".to_string()]
+    );
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+}

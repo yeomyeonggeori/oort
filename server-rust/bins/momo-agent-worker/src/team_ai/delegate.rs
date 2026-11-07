@@ -1113,6 +1113,12 @@ impl AgentWorker {
                     },
                 )
                 .await?;
+                // A retried attempt left the run reading `failed` (the worker's retry path marks a run
+                // between attempts); a delegation that is going to call Hermes is `running` while it does —
+                // the state a picture write (S4) and the run's own reads judge by.
+                if matches!(committed, store::CalledCommit::Go(_)) {
+                    momo_agent::run::resume_run_between_attempts_in_tx(conn, run_id).await?;
+                }
                 Ok(match committed {
                     store::CalledCommit::Go(request) => Called::Go {
                         request,
