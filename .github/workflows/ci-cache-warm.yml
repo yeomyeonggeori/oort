@@ -77,7 +77,10 @@ jobs:
             clients/desktop/src-tauri
           shared-key: oort-rust-test
 
-      - name: cargo test --workspace 컴파일만(--no-run — pr-ci rust 잡과 같은 명령)
+      # pr-ci `rust` 잡은 `cargo nextest run --workspace --locked --manifest-path server-rust/Cargo.toml` 으로 시험을 돌린다(#5495).
+      # nextest 는 실행 전에 `cargo test --no-run` 과 같은 컴파일을 하므로(로컬 실측: 이 명령 뒤 nextest 에 Compiling 0줄) 산출물이
+      # 같고, 인자(`--workspace --locked --manifest-path`)·환경(위 `env:`)만 PR 잡과 그대로 맞추면 된다.
+      - name: cargo test --workspace 컴파일만(--no-run — pr-ci rust 잡의 nextest 가 먼저 하는 컴파일과 같다)
         if: steps.rust_cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml --no-run
 
