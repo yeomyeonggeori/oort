@@ -8,6 +8,8 @@ name: 5452-panel-capture
 # 준비: `measure/seed-expression-panel.py` 로 만든 채널.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow:
     when:
       visible: "Not Now"

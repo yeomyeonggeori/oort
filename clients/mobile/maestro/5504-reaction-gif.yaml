@@ -13,6 +13,8 @@ name: 5504-reaction-gif
 # 입력은 ASCII 다: Maestro 의 `inputText` 는 시뮬레이터에서 한글 조합을 못 친다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 # 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
 - runFlow:
     when:

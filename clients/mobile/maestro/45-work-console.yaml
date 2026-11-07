@@ -9,6 +9,8 @@ name: 45-work-console
 # (#5045). 줄을 누르면 열리는 시트(`TeamBoardDetailSheet`, `team-detail-*`)는 두 화면이 같이 써서 그대로다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 # Dismiss the development LogBox away from the tab bar, using the same safe

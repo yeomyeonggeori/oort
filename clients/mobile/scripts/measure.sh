@@ -31,6 +31,9 @@ node "$(cd "$(dirname "$0")" && pwd)/../measure/known-surface.cjs" $(grep -E '^c
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/devtools-shell.sh
+. scripts/devtools-shell.sh
+
 BUNDLE_ID="app.momo.ios"
 OUT_DIR="${1:-measure/out}"
 mkdir -p "$OUT_DIR"
@@ -41,7 +44,26 @@ defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false || 
 echo "==> starting the Origin stub"
 node measure/origin-stub.mjs > "$OUT_DIR/origin-stub.log" 2>&1 &
 STUB_PID=$!
-trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
+
+# One exit handler for every stage of the run. It used to be re-armed as a longer
+# one-liner each time a stage had something more to undo; with the DevTools sweep
+# below that was three copies of one long line. Every name it reads is empty until its
+# stage has run, so it is safe from the first moment it is armed (`set -u`).
+cleanup_run() {
+  [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null || true
+  # The DevTools windows this run opened (#5531), while this run's Metro is still up.
+  # Only after a baseline was taken — see scripts/devtools-shell.sh.
+  if [ "${DEVTOOLS_BASELINE_TAKEN:-0}" = "1" ]; then
+    devtools_shells_close "${METRO_PORT:-}" "${DEVTOOLS_BASELINE:-}" || true
+  fi
+  # `OWN_METRO_PID` is empty when this checkout was already being served.
+  [ -n "${OWN_METRO_PID:-}" ] && kill "$OWN_METRO_PID" 2>/dev/null || true
+  # A failure after the Dynamic Type change must also restore the simulator's setting.
+  [ -n "${ORIGINAL_CONTENT_SIZE:-}" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true
+}
+DEVTOOLS_BASELINE=""
+DEVTOOLS_BASELINE_TAKEN=0
+trap cleanup_run EXIT
 sleep 1
 
 echo "==> bringing the simulator window to the front"
@@ -80,13 +102,15 @@ if [ "$(metro_root "$METRO_PORT")" = "$PROJECT_ROOT" ]; then
 else
   METRO_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
   echo "==> metro :$METRO_PORT (started for this run — :8081 is not this checkout)"
-  # CHROME_PATH=/usr/bin/false keeps a stray tap on the dev build's debugger
-  # toast from launching the real Chrome out of this shell — see lane-phone.sh
-  # (#5083).
+  # What a tap on the dev build's "Open debugger" strip opens depends on the React
+  # Native version; lane-phone.sh has the whole story (#5083, #5531). In short:
+  # RN 0.86 opens the standalone DevTools app, and CHROME_PATH=/usr/bin/false only
+  # blocks the Chrome fallback. The launch arguments below keep the strip from being
+  # drawn (`measure/automation.ts`), and `cleanup_run` closes any DevTools window
+  # this run opened anyway.
   CHROME_PATH=/usr/bin/false node node_modules/react-native/cli.js start --port "$METRO_PORT" \
     > "$OUT_DIR/metro.log" 2>&1 &
   OWN_METRO_PID=$!
-  trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true; [ -n "$ORIGINAL_CONTENT_SIZE" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true' EXIT
   for _ in $(seq 1 90); do
     [ "$(metro_root "$METRO_PORT")" = "$PROJECT_ROOT" ] && break
     sleep 1
@@ -97,9 +121,12 @@ else
   fi
 fi
 
-# From here on a failure must also restore the simulator's Dynamic Type setting.
-# `OWN_METRO_PID` is empty when this checkout was already being served.
-trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true; [ -n "$ORIGINAL_CONTENT_SIZE" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true' EXIT
+# The DevTools windows already open for this Metro, before the app is touched
+# (scripts/devtools-shell.sh): `cleanup_run` closes only the ones that appear after
+# this, whether this run started the Metro or reused one that was already serving
+# the checkout. From here on the exit handler sweeps.
+DEVTOOLS_BASELINE="$(devtools_baseline_for_port "$METRO_PORT")"
+DEVTOOLS_BASELINE_TAKEN=1
 
 echo "==> launching with -momoMeasure YES"
 xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true

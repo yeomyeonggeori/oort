@@ -24,6 +24,8 @@ name: 5112-expression-kind
 # 맞춰 골라 뒀어요」) · 등록 뒤 창의 이모지 탭. 캡처와 design-review 는 planner 몫이다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 # 이름은 돌 때마다 새로 짓는다(`^[a-z0-9_-]{2,30}$`).
