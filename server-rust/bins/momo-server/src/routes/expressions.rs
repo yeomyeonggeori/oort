@@ -540,3 +540,18 @@ pub async fn import(
     .map_err(failure)?;
     Ok((status, Json(draft)).into_response())
 }
+
+#[cfg(test)]
+mod tests {
+    /// #5460 review L1: the replace allow-list lives in `momo-expressions`, which does not depend on
+    /// the action registry, so this is the one place that holds it equal to the registry's id. A
+    /// compared slice, not an array: a second id fails here at run time, with this message.
+    #[test]
+    fn the_replace_allow_list_is_the_one_registry_id() {
+        assert_eq!(
+            momo_expressions::action::REPLACEABLE_ACTION_IDS.as_slice(),
+            [momo_agent::actions::ACTION_EXPRESSION_CREATE].as_slice(),
+            "the drafts a direct upload may replace are `expression.create`'s and nothing else's"
+        );
+    }
+}

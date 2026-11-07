@@ -497,8 +497,9 @@ pub async fn is_candidate_in_tx(conn: &mut PgConnection, actor: Actor, id: Uuid)
 /// until someone writes it down here. The set card's drafts are not replaceable (L7.3-3: a refused
 /// scene must not be filled by an upload), and `replace_candidate_in_tx` writes the card's
 /// `props.action.expression`, a key a set card does not have. The id is the registry's
-/// `momo_agent::actions::ACTION_EXPRESSION_CREATE`; this crate does not depend on the registry, so a
-/// test in the server crate holds the two equal.
+/// `momo_agent::actions::ACTION_EXPRESSION_CREATE`; this crate does not depend on the registry, so
+/// the server crate's `routes::expressions::tests::the_replace_allow_list_is_the_one_registry_id`
+/// holds the two equal (#5460 review L1).
 pub const REPLACEABLE_ACTION_IDS: [&str; 1] = ["expression.create"];
 
 /// Is an approval of this `action_type` and `payload.action.id` one whose drafts may be replaced?
