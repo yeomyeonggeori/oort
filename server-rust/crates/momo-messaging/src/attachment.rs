@@ -110,50 +110,76 @@ pub struct MessageAttachment {
     pub name: String,
     pub mime: String,
     pub size_bytes: i64,
-    /// The video summary (ADR-0151 증보 5 D5, #4673): **only** on an attachment whose sender
-    /// put a length and size on it (`PUT …/media`), so the key is absent for everything else —
-    /// a photo, a document, and a video from a client that does not measure one. A client
-    /// that has never heard of it reads the same four keys it always did.
+    /// The media summary (ADR-0151 증보 5 D5, #4673 for a video; 증보 9, #5469 for a photo or GIF):
+    /// **only** on an attachment whose sender put a length and size (video) or a size (picture)
+    /// on it (`PUT …/media`), so the key is absent for everything else — a document, and a
+    /// photo or video from a client that does not declare one. A client that has never heard of
+    /// the `image` kind drops the summary and keeps the attachment (`attachmentMediaFromWire`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<AttachmentMedia>,
 }
 
-/// The kind a [`AttachmentMedia`] carries today. A closed word, not a mime: the card draws a
-/// video the same whichever container it came in.
+/// The kind word of a video summary. A closed word, not a mime: the card draws a video the same
+/// whichever container it came in.
 pub const MEDIA_KIND_VIDEO: &str = "video";
 
-/// What a message's attachment card learns about a video before it opens it (openapi
-/// `AttachmentMedia`, ADR-0151 증보 5 D5).
+/// The kind word of a still-picture summary (ADR-0151 증보 9): a photo or a GIF. One word for
+/// every format the closed list holds, as for video.
+pub const MEDIA_KIND_IMAGE: &str = "image";
+
+/// What a message's attachment card learns about a file before it opens it (openapi
+/// `AttachmentMedia`, ADR-0151 증보 5 D5 and 증보 9): a **video** (length, size, whether there is
+/// a poster) or a **still picture** (size only). `kind` is the wire's discriminator.
 ///
 /// **Never the poster itself.** `has_poster` says whether `GET …/poster` has something to
 /// serve; the bytes ride that route alone — no projection, no realtime frame, no outbox row
 /// carries them (`a_poster_is_never_in_a_payload`). The numbers are the sender's declaration,
-/// checked for range only, so a client clamps the card it draws from them.
+/// checked for range only, so a client clamps what it draws from them. A picture has no length
+/// and no poster, and says neither (`{kind, width, height}` and nothing else).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AttachmentMedia {
-    pub kind: String,
-    pub duration_ms: i64,
-    pub width: i64,
-    pub height: i64,
-    pub has_poster: bool,
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+pub enum AttachmentMedia {
+    #[serde(rename_all = "camelCase")]
+    Video {
+        duration_ms: i64,
+        width: i64,
+        height: i64,
+        has_poster: bool,
+    },
+    Image {
+        width: i64,
+        height: i64,
+    },
 }
 
 impl AttachmentMedia {
-    /// A video summary from the (nullable) columns a `LEFT JOIN attachment_media` yields:
-    /// `None` when the join found no row.
+    /// The wire's `kind` word of this summary.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Video { .. } => MEDIA_KIND_VIDEO,
+            Self::Image { .. } => MEDIA_KIND_IMAGE,
+        }
+    }
+
+    /// A summary from the (nullable) columns a `LEFT JOIN attachment_media` yields: `None` when
+    /// the join found no row. **A row without a length is a still picture** (migration 178: the
+    /// length is the one column that is null, and `width` is never null, so `width` is the
+    /// presence signal).
     pub(crate) fn from_joined(
         duration_ms: Option<i32>,
         width: Option<i32>,
         height: Option<i32>,
         has_poster: bool,
     ) -> Option<Self> {
-        Some(Self {
-            kind: MEDIA_KIND_VIDEO.to_string(),
-            duration_ms: i64::from(duration_ms?),
-            width: i64::from(width?),
-            height: i64::from(height?),
-            has_poster,
+        let (width, height) = (i64::from(width?), i64::from(height?));
+        Some(match duration_ms {
+            Some(duration_ms) => Self::Video {
+                duration_ms: i64::from(duration_ms),
+                width,
+                height,
+                has_poster,
+            },
+            None => Self::Image { width, height },
         })
     }
 }
@@ -646,8 +672,9 @@ pub async fn message_attachments_in_tx(
     conn: &mut PgConnection,
     message_id: Uuid,
 ) -> Result<Vec<MessageAttachment>, DbError> {
-    // The video summary rides the same statement (`LEFT JOIN attachment_media`): one read, one
-    // snapshot, and the poster's bytes are not in the select list (`a_poster_is_never_in_a_payload`).
+    // The media summary (a video's, or a picture's: a row without a length) rides the same
+    // statement (`LEFT JOIN attachment_media`): one read, one snapshot, and the poster's bytes are
+    // not in the select list (`a_poster_is_never_in_a_payload`).
     let rows = sqlx::query(
         "SELECT a.id, a.name, a.mime, a.size_bytes, \
                 am.duration_ms AS media_duration_ms, am.width AS media_width, \
@@ -742,17 +769,23 @@ pub async fn message_attachments_without_media_in_tx(
 /// removed. The aggregate is then `NULL`, which [`decode_paged_attachments`] reads
 /// as "none" and the DTO omits.
 ///
-/// **The video summary rides the same aggregate** (ADR-0151 증보 5 D5, #4673): an attachment with
-/// an `attachment_media` row gets a `media` object (`kind`, `durationMs`, `width`, `height`,
-/// `hasPoster`), every other attachment keeps the four keys it always had. `hasPoster` is read
-/// off `poster_mime`, **not** the bytes: this statement never names the poster's bytes, so no page
-/// can carry them, and the team AI's read role (which may not read that column) can run it.
+/// **The media summary rides the same aggregate** (ADR-0151 증보 5 D5, #4673; 증보 9, #5469): an
+/// attachment with an `attachment_media` row gets a `media` object — a video's (`kind`,
+/// `durationMs`, `width`, `height`, `hasPoster`) or, **when the row has no length** (a still
+/// picture, migration 178), a picture's (`kind`, `width`, `height`) — and every other attachment
+/// keeps the four keys it always had. `hasPoster` is read off `poster_mime`, **not** the bytes:
+/// this statement never names the poster's bytes, so no page can carry them, and the team AI's
+/// read role (which may not read that column) can run it. Every column named here is one that
+/// role may read, which is why the picture's kind is `duration_ms IS NULL` and not a new column.
 pub(crate) const PAGED_ATTACHMENT_JOIN: &str = "LEFT JOIN LATERAL ( \
        SELECT jsonb_agg( \
                 jsonb_build_object( \
                   'id', a.id::text, 'name', a.name, 'mime', a.mime, \
                   'sizeBytes', a.size_bytes \
                 ) || CASE WHEN am.attachment_id IS NULL THEN '{}'::jsonb \
+                          WHEN am.duration_ms IS NULL THEN jsonb_build_object('media', \
+                                 jsonb_build_object('kind', 'image', \
+                                   'width', am.width, 'height', am.height)) \
                           ELSE jsonb_build_object('media', jsonb_build_object( \
                                  'kind', 'video', 'durationMs', am.duration_ms, \
                                  'width', am.width, 'height', am.height, \
@@ -867,8 +900,7 @@ mod tests {
             size_bytes: 2048,
             media,
         };
-        let with = serde_json::to_value(attachment(Some(AttachmentMedia {
-            kind: MEDIA_KIND_VIDEO.into(),
+        let with = serde_json::to_value(attachment(Some(AttachmentMedia::Video {
             duration_ms: 4200,
             width: 1280,
             height: 720,
@@ -882,8 +914,17 @@ mod tests {
                 "hasPoster": true
             })
         );
+        assert_eq!(with["media"].as_object().expect("object").len(), 5);
         let back: MessageAttachment = serde_json::from_value(with).expect("round trip");
-        assert_eq!(back.media.map(|media| media.duration_ms), Some(4200));
+        assert_eq!(
+            back.media,
+            Some(AttachmentMedia::Video {
+                duration_ms: 4200,
+                width: 1280,
+                height: 720,
+                has_poster: true
+            })
+        );
 
         let without = serde_json::to_value(attachment(None)).expect("serialize");
         assert!(
@@ -902,6 +943,87 @@ mod tests {
             "mime": "application/pdf", "sizeBytes": 1, "posterBytes": "AAAA"
         }))
         .is_err());
+    }
+
+    /// ADR-0151 증보 9: a still picture's summary is **three** keys — `kind`, `width`, `height` —
+    /// and says nothing about a length or a poster. It decodes from its own wire form (the page's
+    /// SQL builds it) and refuses a key that is a video's.
+    #[test]
+    fn a_picture_summary_is_three_keys_and_never_a_length_or_a_poster() {
+        let picture = AttachmentMedia::Image {
+            width: 4032,
+            height: 3024,
+        };
+        let wire = serde_json::to_value(&picture).expect("serialize");
+        assert_eq!(
+            wire,
+            json!({"kind": "image", "width": 4032, "height": 3024})
+        );
+        assert_eq!(wire.as_object().expect("object").len(), 3);
+        assert_eq!(picture.kind(), MEDIA_KIND_IMAGE);
+        let back: AttachmentMedia = serde_json::from_value(wire).expect("round trip");
+        assert_eq!(back, picture);
+        // the page decoder is closed: a picture that carries a video's key is a contract break,
+        // and so is a video that lost its length
+        for stray in [
+            json!({"kind": "image", "width": 1, "height": 1, "durationMs": 5}),
+            json!({"kind": "image", "width": 1, "height": 1, "hasPoster": false}),
+            json!({"kind": "video", "width": 1, "height": 1, "hasPoster": false}),
+            json!({"kind": "audio", "width": 1, "height": 1}),
+            json!({"width": 1, "height": 1}),
+        ] {
+            assert!(
+                serde_json::from_value::<AttachmentMedia>(stray.clone()).is_err(),
+                "{stray}"
+            );
+        }
+        // the attachment around it keeps its four keys and gains one
+        let attachment = MessageAttachment {
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            name: "photo.jpg".into(),
+            mime: "image/jpeg".into(),
+            size_bytes: 2048,
+            media: Some(picture),
+        };
+        let wire = serde_json::to_value(&attachment).expect("serialize");
+        assert_eq!(wire.as_object().expect("object").len(), 5);
+        assert_eq!(
+            wire["media"],
+            json!({"kind": "image", "width": 4032, "height": 3024})
+        );
+    }
+
+    /// ADR-0151 증보 9 I4: the joined columns say which summary a row is. No row is no summary; a
+    /// row without a length is a picture; a row with one is a video (and says whether it has a
+    /// poster). `width` is the presence signal because it is the one numeric column that is
+    /// never null.
+    #[test]
+    fn a_row_without_a_length_is_a_picture_and_no_row_is_no_summary() {
+        assert_eq!(AttachmentMedia::from_joined(None, None, None, false), None);
+        assert_eq!(
+            AttachmentMedia::from_joined(None, Some(640), Some(480), false),
+            Some(AttachmentMedia::Image {
+                width: 640,
+                height: 480
+            })
+        );
+        assert_eq!(
+            AttachmentMedia::from_joined(Some(4200), Some(1280), Some(720), true),
+            Some(AttachmentMedia::Video {
+                duration_ms: 4200,
+                width: 1280,
+                height: 720,
+                has_poster: true
+            })
+        );
+        // a poster flag on a row with no length is not a picture's: the picture has no poster
+        assert_eq!(
+            AttachmentMedia::from_joined(None, Some(1), Some(1), true),
+            Some(AttachmentMedia::Image {
+                width: 1,
+                height: 1
+            })
+        );
     }
 
     #[test]
@@ -962,12 +1084,25 @@ mod tests {
         // 'sizeBytes' inside the aggregate is the wire key, not the column —
         // the projection is built in SQL, so this is where that contract lives.
         assert!(PAGED_ATTACHMENT_JOIN.contains("'sizeBytes', a.size_bytes"));
-        // the video summary rides the aggregate (ADR-0151 증보 5 D5) and the picture does not:
+        // the media summary rides the aggregate (ADR-0151 증보 5 D5) and the poster's bytes do not:
         // `hasPoster` is read off the label column. That no source outside `attachment_media.rs`
         // names the bytes column — this constant included — is
         // `tests/attachment_media_static_guards.rs::only_one_module_names_the_posters_bytes`.
         assert!(PAGED_ATTACHMENT_JOIN.contains("LEFT JOIN attachment_media am"));
         assert!(PAGED_ATTACHMENT_JOIN.contains("'hasPoster', am.poster_mime IS NOT NULL"));
+        // ADR-0151 증보 9: a row without a length is a picture, and its object has exactly the
+        // three keys (a `hasPoster` or `durationMs` there would be a video's key on a picture)
+        assert!(PAGED_ATTACHMENT_JOIN.contains("WHEN am.duration_ms IS NULL THEN"));
+        assert!(PAGED_ATTACHMENT_JOIN.contains("jsonb_build_object('kind', 'image',"));
+        let picture_branch = PAGED_ATTACHMENT_JOIN
+            .split("WHEN am.duration_ms IS NULL THEN")
+            .nth(1)
+            .and_then(|rest| rest.split("ELSE").next())
+            .expect("the picture branch");
+        assert!(
+            !picture_branch.contains("hasPoster") && !picture_branch.contains("durationMs"),
+            "{picture_branch}"
+        );
     }
 
     #[test]

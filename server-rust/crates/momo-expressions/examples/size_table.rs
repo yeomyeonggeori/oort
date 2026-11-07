@@ -1,10 +1,12 @@
 //! #5455 실측표: 서버 재인코딩(`media::decode`)이 실제 그림 묶음에 만드는 바이트·치수·프레임·시간.
-//! `#[ignore]` — 사람이 손으로 돌린다. CI는 돌리지 않는다. 그림은 저장소에 없다(공개 저장소).
+//! **시험이 아니라 예제(`examples/`)다** — 사람이 손으로 돌린다. 앞 판은 `tests/size_table.rs` 의 `#[ignore]` 시험이었는데, 표본 그림이
+//! 공개 저장소에 없어서 `MOMO_EXPRESSION_SAMPLES` 가 없는 야간 러너(`--ignored` 전량 실행)에서는 늘 빨강이었다(#5455 B-1, 야간 격리 줄을 없앴다).
+//! 예제는 `cargo test` 에 들어가지 않으므로 CI·야간이 돌리지 않는다. 그림은 저장소에 없다(공개 저장소).
 //!
 //! ```text
 //! MOMO_EXPRESSION_SAMPLES=<폴더: stills/*.png, gifs/*.gif> \
 //! MOMO_EXPRESSION_TABLE_OUT=<결과를 쓸 .json 경로> \
-//! cargo test -p momo-expressions --test size_table -- --ignored --nocapture
+//! cargo run -p momo-expressions --example size_table
 //! ```
 //!
 //! `MOMO_EXPRESSION_DUMP=<폴더>` 를 주면 만들어진 small/large/thumb 파일도 거기에 쓴다(눈으로·다른 디코더로 대조용).
@@ -189,9 +191,7 @@ fn gif_stats(
     })
 }
 
-#[test]
-#[ignore = "손으로 돌리는 실측표: MOMO_EXPRESSION_SAMPLES 가 필요하다"]
-fn size_table() {
+fn main() {
     let dir = PathBuf::from(
         std::env::var("MOMO_EXPRESSION_SAMPLES").expect("MOMO_EXPRESSION_SAMPLES=<폴더>"),
     );

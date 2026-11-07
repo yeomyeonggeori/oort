@@ -11950,13 +11950,16 @@ paths:
     put:
       tags: [attachments]
       operationId: setAttachmentMedia
-      summary: Set (replace) a video attachment's length, size and poster before it is sent.
+      summary: Set (replace) an attachment's media summary before it is sent - a video's length, size and poster, or a photo's or GIF's size.
       description: >
-        ADR-0151 amendment 5 D5 (#4673). The device that picked the video measures its length and
-        size and takes a frame, so the card that later shows the file is drawn at the right shape
-        with a picture in it. The server does not look inside the video: the numbers are the
-        sender's declaration, checked for range only, and the poster is checked by its bytes (magic
-        number, header size, byte size) and never decoded.
+        ADR-0151 amendment 5 D5 (#4673) and amendment 9 (#5469). The device that picked the file
+        measures it, so the card or box that later shows the file is drawn at the right shape before
+        a byte of it has arrived. **A video** (`kind` absent or `video`): its length and size, and a
+        frame to draw in the card. **A photo or GIF** (`kind: image`): its size, and nothing else (no
+        length, no poster). The server does not look inside the file: the numbers are the sender's
+        declaration, checked for range only, and a poster is checked by its bytes (magic number,
+        header size, byte size) and never decoded. A picture's file is checked by its stored type and
+        its first twelve bytes (the magic number), never by a header.
 
 
         Allowed only for **the uploader**, of a **complete** file that **no message carries yet**.
@@ -11968,8 +11971,9 @@ paths:
 
 
         **The shape of the request is judged first**, before the caller is looked up against the
-        file, and answers 400 to anyone who sends it: `durationMs` is an integer from 1 to 86,400,000;
-        `width` and `height` are integers from 1 to 16,384; a poster is `image/jpeg` or `image/webp`
+        file, and answers 400 to anyone who sends it: `durationMs` (a video's) is an integer from 1 to
+        86,400,000; `width` and `height` (a video's or a picture's) are integers from 1 to 16,384; a
+        poster (a video's) is `image/jpeg` or `image/webp`
         whose bytes say so (the magic number must be the label's), strict base64, at most 256 KiB
         decoded and at most 1,280 pixels on a side by its header. These checks look at the body alone
         and say nothing about any file. A JPEG that is cut off after its frame header passes (the
@@ -11979,15 +11983,19 @@ paths:
 
 
         **Only the checks that read the file come after the authorization** and are therefore seen
-        only by the file's own uploader (400): the stored type must be `video/mp4`,
+        only by the file's own uploader (400): for a video the stored type must be `video/mp4`,
         `video/quicktime` or `video/webm`, and the object's first bytes must be that container's
-        (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML header for WebM).
+        (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML header for WebM); for a picture
+        the stored type must be `image/jpeg`, `image/png`, `image/gif` or `image/webp` and the
+        object's first twelve bytes must be that format's magic number. A picture's body sent for a
+        video file, and a video's body sent for a picture, are both this 400.
 
 
         The request body is at most 512 KiB (413 above that). A body the JSON reader cannot use is
         answered by the framework before the route runs: 400 when it is not JSON, 415 when it is not
         sent as `application/json`, 422 when it is JSON of the wrong shape (a missing field, a
-        fractional or non-numeric value, a key this route does not know). The route spends a
+        fractional or non-numeric value, a key this route does not know - a picture that names a
+        length or a poster, a `kind` other than `video` or `image`). The route spends a
         per-member write budget of its own, default 60 per window (`RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`,
         0 removes it), before the body is read; a refused request counts. The write is audited as
         `attachment.media_set` with the kind and whether there is a poster, never the numbers or the
@@ -12008,7 +12016,8 @@ paths:
         "200":
           description: >
             Stored. The summary the message projections will carry once the file is sent -
-            never the poster itself.
+            a video's (five keys) or a picture's (`kind`, `width`, `height`), never the poster
+            itself.
           content:
             application/json:
               schema:
@@ -12018,8 +12027,9 @@ paths:
             The request is wrong in itself: a body that is not JSON, a number outside its range, a
             poster that is not the image its label says, too large or too big by its header, or
             malformed base64 (all judged before the file is looked at). Or, for the file's own
-            uploader only: an attachment whose stored type is not a video type, or whose bytes are
-            not that container.
+            uploader only: an attachment whose stored type is not a type of the request's kind (a
+            video type for a video, a picture type for a picture), or whose bytes are not that
+            container or format.
           content:
             application/json:
               schema:
@@ -12048,8 +12058,9 @@ paths:
         "422":
           description: >
             The body is JSON but not this request: a missing field, a fractional or non-numeric
-            value (`durationMs` is an integer), or a key the route does not know. Answered by the
-            framework; the body is plain text.
+            value (`durationMs`, `width` and `height` are integers), or a key the route does not
+            know (a picture with a length or a poster; a `kind` that is neither `video` nor `image`).
+            Answered by the framework; the body is plain text.
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -26828,10 +26839,24 @@ components:
           description: Opaque Google resumable upload capability URL.
 
     SetAttachmentMediaRequest:
+      description: >
+        One of two closed shapes (ADR-0151 amendment 9): a video's, or a photo's or GIF's. `kind`
+        picks it: a body with no `kind` or `kind: video` is a video's, `kind: image` is a
+        picture's. A picture names a size and nothing else - a length or a poster is a key the route
+        does not know.
+      oneOf:
+        - $ref: "#/components/schemas/SetVideoAttachmentMediaRequest"
+        - $ref: "#/components/schemas/SetImageAttachmentMediaRequest"
+
+    SetVideoAttachmentMediaRequest:
       type: object
       additionalProperties: false
       required: [durationMs, width, height]
       properties:
+        kind:
+          type: string
+          enum: [video]
+          description: Optional - a client older than amendment 9 sends none, and a body without it is a video's.
         durationMs:
           type: integer
           format: int64
@@ -26852,6 +26877,28 @@ components:
           description: The video's height in pixels, as the sender measured it. Checked for range only.
         poster:
           $ref: "#/components/schemas/AttachmentPosterUpload"
+
+    SetImageAttachmentMediaRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, width, height]
+      properties:
+        kind:
+          type: string
+          enum: [image]
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            The photo's or GIF's width in pixels as it is shown (EXIF orientation applied), measured
+            by the sender with the ruler a receiving client uses on the same bytes. Checked for range
+            only.
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: The photo's or GIF's height in pixels as it is shown, measured as `width` is. Checked for range only.
 
     AttachmentPosterUpload:
       type: object
@@ -27229,17 +27276,24 @@ components:
           $ref: "#/components/schemas/AttachmentMedia"
 
     AttachmentMedia:
+      description: >
+        The media summary of an attachment (ADR-0151 amendment 5 D5, #4673, and amendment 9, #5469):
+        a video's or a still picture's, told apart by `kind`. Present **only** on an attachment whose
+        sender put one on it (`setAttachmentMedia`) before the message was sent: a document, and a
+        photo, GIF or video from a client that does not declare one (video from the web and desktop
+        clients has none yet) carry no `media` key at all. It rides every projection of the message -
+        the send's answer, the channel and thread pages and the realtime `message.new` frame. The
+        numbers are the sender's declaration, checked for range only, so a client clamps what it
+        draws from them and, for a picture, measures the decoded image when it has it. **The poster's
+        bytes are in none of them**: a video's `hasPoster` says whether `getAttachmentPoster` has
+        something to serve, and a picture has no poster and no length.
+      oneOf:
+        - $ref: "#/components/schemas/VideoAttachmentMedia"
+        - $ref: "#/components/schemas/ImageAttachmentMedia"
+
+    VideoAttachmentMedia:
       type: object
       required: [kind, durationMs, width, height, hasPoster]
-      description: >
-        The video summary of an attachment (ADR-0151 amendment 5 D5, #4673). Present **only** on
-        an attachment whose sender put a length and size on it (`setAttachmentMedia`) before the
-        message was sent: a photo, a document, and a video from a client that does not measure one
-        carry no `media` key at all (video from the web and desktop clients has none yet). It rides
-        every projection of the message - the send's answer, the channel and thread pages and the
-        realtime `message.new` frame. The numbers are the sender's declaration, checked for range
-        only, so a client clamps the card it draws from them. **The poster's bytes are in none of
-        them**: `hasPoster` says whether `getAttachmentPoster` has something to serve.
       properties:
         kind:
           type: string
@@ -27259,6 +27313,26 @@ components:
           maximum: 16384
         hasPoster:
           type: boolean
+
+    ImageAttachmentMedia:
+      type: object
+      required: [kind, width, height]
+      description: >
+        A photo's or GIF's size (JPEG, PNG, GIF or WebP) and nothing else. A client that has never
+        heard of this kind drops the summary and keeps the attachment, and draws the picture as it
+        always did (v0.1.42 and later drop an unknown `kind`; earlier clients do not read `media`).
+      properties:
+        kind:
+          type: string
+          enum: [image]
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
 
     ThreadRollup:
       type: object

@@ -387,7 +387,11 @@ fn is_b64(c: char) -> bool {
 /// The picture of an answer **with its request block already cut out**: exactly one
 /// `data:image/(png|jpeg|webp|gif);base64,` address is the picture. Nothing here decodes; a
 /// longer-than-5-MiB payload is refused by its length alone.
-fn harvest(outside: &str) -> Picture {
+///
+/// `pub(crate)` since #5372: the team AI's delegation of a picture to Hermes
+/// ([`crate::team_ai_hermes_exec::picture_of`]) reads an answer by this same rule — one address is one
+/// picture, two are none — instead of keeping a second copy that could drift from it.
+pub(crate) fn harvest(outside: &str) -> Picture {
     let at = match data_marks(outside).as_slice() {
         [] => return Picture::None,
         [only] => *only,

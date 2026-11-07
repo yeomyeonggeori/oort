@@ -12,6 +12,7 @@ import type {
   HostRevokeRequest,
 } from "@momo/core/runtime/host";
 import { forgetWallpaperOnSignOut } from "../design/wallpaper/signOut";
+import { forgetExpressionDiskOnSignOut } from "../features/expressions/disk/signOut";
 import { withRotationLock } from "./rotationLock";
 import { apiBase } from "./serverBase";
 import { desktopKeychain, desktopRotationHold, desktopSession, isDesktop } from "./tauri";
@@ -565,5 +566,7 @@ export function clearSession(): void {
   }
   // 배경 사진은 사람의 것이다(ADR-0189 증보 3 D4): 세션이 끝나는 모든 길이 지나는 이 자리에서 지운다.
   forgetWallpaperOnSignOut();
+  // 이모티콘 그림의 기기 캐시도 같은 자리에서 지운다(ADR-0218 §14 M2.5): 세대를 먼저 동기로 올리고 삭제는 비동기. 어떤 실패도 던지지 않는다.
+  void forgetExpressionDiskOnSignOut();
   notify();
 }

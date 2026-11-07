@@ -24,6 +24,7 @@ import { useRevealOnHover } from "@/features/attachments/useRevealOnHover";
 import {
   ATTACH_COPY,
   attachmentDisplayName,
+  attachmentImageSizeOf,
   formatBytes,
   formatMimeLabel,
   genericAttachmentName,
@@ -70,7 +71,12 @@ import {
 //
 // ## 자리와 크기 (#5189, 규칙 정본 README §2.10 · 계산 `inlineImageModel.ts`)
 //
-// 서버는 이미지 치수를 주지 않는다. 받는 중에는 높이 `preview-frame`(180) 상자가
+// **크기를 아는 한 장은 첫 프레임부터 제 칸에 선다**(ADR-0151 증보 9, #5469): 보내는 기기가 선언한 가로세로(`media`, 코어가 범위를
+// 다시 막은 값)나 한 번 잰 크기로 규칙 상자를 정하고, 받는 동안에도 같은 상자를 `<canvas>` 로 세운다(글만 얹는다). 디코드된 **실제 크기가
+// 선언을 이긴다**: 같으면 칸은 움직이지 않고(정직한 선언의 계약), 다르면 한 번 고쳐 서며 그 크기를 기억한다 — 선언은 그림이 오기 전까지의
+// 자리일 뿐이라 기억하지 않는다(거짓 선언이 「잰 크기」가 되지 않게). 아래는 선언도 기억도 없을 때(옛 메시지·옛 판이 보낸 사진)의 길이다.
+//
+// 서버가 이미지 치수를 주지 않을 때: 받는 중에는 높이 `preview-frame`(180) 상자가
 // 서고, 디코드되면(`onLoad`) 자연 크기로 규칙이 상자를 정한다: 보통 그림은 360×320
 // 안에서 비율을 지키고, **가로로 긴 그림은 높이 180 을 지키며 폭을 열이 허락하는 만큼
 // 늘린다**(그래서 가로 캡처의 글자가 미리보기 없이 읽힌다). 열이 상자보다 좁으면
@@ -105,6 +111,16 @@ function rememberNaturalSize(id: string, size: NaturalSize): void {
 /** 단일 이미지가 오는 동안의 자리. 셔머 없는 중립 면이다(SKILL §5). */
 const PREVIEW_FRAME_CLASS =
   "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md bg-surface-hover press hover:bg-surface-raised focus-visible:focus-ring";
+
+/** 그림이 온 뒤(또는 크기를 아는 한 장이 오는 동안)의 틀. 모서리는 그림과 같은 `image-corner` 다(고정 반경은 낮은 띠를 알약으로 만든다). */
+const CLIP_CLASS = "block max-w-full overflow-hidden image-corner press focus-visible:focus-ring";
+
+/**
+ * 크기를 아는 한 장이 오는 동안(ADR-0151 증보 9) 틀에 더하는 중립 면. 틀 안의 `<canvas>` 가 그림이 설 상자와 같은 치수 속성으로 그 비율을
+ * 잡고(좁은 열에서는 그림과 같은 `h-auto max-w-full` 이 비율대로 줄인다), 글은 그 위에 얹는다. 낱말 하나씩 따로 적는 것은 직접 문구
+ * 장부(`direct-copy`)가 띄어 쓴 클래스 문자열을 문구로 세기 때문이다(`inlineImageModel.ts` 의 `IMAGE_FIT_*` 와 같은 사정).
+ */
+const RESERVED_FRAME_EXTRA = ["bg-surface-hover", "hover:bg-surface-raised"] as const;
 
 /** 이미지 위에 뜨는 행동 줄. 면 위에 얹으므로 사진 위에서도 읽힌다. */
 const OVERLAY_CLASS =
@@ -151,7 +167,17 @@ function ImageTile({
   const [natural, setNatural] = useState<NaturalSize | null>(
     () => naturalSizes.get(attachment.id) ?? null
   );
-  const box = single ? inlineImageBox(natural) : null;
+  // 칸을 정하는 크기: 잰 것(디코드했거나 기억한 것)이 먼저고, 없으면 보내는 기기의 선언이다. 선언은 상태에도 기억에도 넣지 않는다 —
+  // 읽는 자리마다 다시 고르므로 그림이 오면 실제 크기가 이기고, 거짓 선언이 「잰 크기」로 남을 길이 없다(증보 9 I6).
+  const declared = attachmentImageSizeOf(attachment);
+  const box = single ? inlineImageBox(natural ?? declared) : null;
+  // 오는 동안(`waiting`)에도 크기를 아는 한 장이면 그림이 설 상자를 세운다. 못 불러온 경우는 읽을 수 있는 옛 틀로 돌아간다.
+  const waiting = preview.status === "loading";
+  const reserved = single && box !== null && waiting;
+  // 그림과 그 자리(`<canvas>`)가 같은 클래스를 쓴다: 자리를 세우는 상자와 그림이 서는 상자가 갈라질 길이 없다.
+  const pictureClass = single
+    ? cn("block image-corner object-contain", ...(box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN))
+    : "block size-full image-corner object-cover";
   const compact = isCompactImage(box);
   const learnNaturalSize = (node: HTMLImageElement) => {
     const { naturalWidth: width, naturalHeight: height } = node;
@@ -182,11 +208,10 @@ function ImageTile({
         title={label}
         className={
           preview.status === "ready"
-            ? cn(
-                "block max-w-full overflow-hidden image-corner press focus-visible:focus-ring",
-                !single && "size-full"
-              )
-            : cn(PREVIEW_FRAME_CLASS, !single && "size-full")
+            ? cn(CLIP_CLASS, !single && "size-full")
+            : reserved
+              ? cn(CLIP_CLASS, ...RESERVED_FRAME_EXTRA)
+              : cn(PREVIEW_FRAME_CLASS, !single && "size-full")
         }
       >
         {preview.status === "ready" ? (
@@ -199,20 +224,25 @@ function ImageTile({
             // 줄이고, 상자 높이가 줄면 `image-corner` 의 퍼센트가 반경을 함께 줄인다.
             {...(box === null ? {} : { width: box.width, height: box.height })}
             onLoad={single ? (event) => learnNaturalSize(event.currentTarget) : undefined}
-            className={
-              single
-                ? cn(
-                    "block image-corner object-contain",
-                    ...(box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN)
-                  )
-                : "block size-full image-corner object-cover"
-            }
+            className={pictureClass}
           />
+        ) : reserved ? (
+          <>
+            <canvas
+              aria-hidden="true"
+              data-testid="attachment-image-reserve"
+              width={box.width}
+              height={box.height}
+              className={pictureClass}
+            />
+            {/* 글은 틀(`figure`, 이 칸의 `relative`) 위에 얹는다: 틀이 그림과 같은 크기라 같은 자리다. */}
+            <span className="absolute inset-0 flex items-center justify-center px-2 text-meta text-ink-muted">
+              {ATTACH_COPY.previewLoading}
+            </span>
+          </>
         ) : (
           <span className="px-2 text-meta text-ink-muted">
-            {preview.status === "loading"
-              ? ATTACH_COPY.previewLoading
-              : ATTACH_COPY.previewFailed}
+            {waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed}
           </span>
         )}
       </button>

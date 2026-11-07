@@ -1,18 +1,23 @@
-//! #5371 WA20 — **the picture write path has no caller yet** (ADR-0151 증보 8 W11, ADR-0201 P6 / P14-S3).
+//! #5371 WA20, changed on purpose by #5372 (S4): **the picture write path has exactly the callers the
+//! delegation of a picture needs, and no others** (ADR-0151 증보 8 W11, ADR-0201 P6 / P14-S3 / P14-S4).
 //!
-//! S3 builds the road and puts nothing on it: no tool, card, message or HTTP surface may reach the
-//! worker's `PictureWriter`, the write-token mint or the answer entry that binds a run's pictures.
-//! The delegation that draws the picture (S4, #5372) and the conversation that asks for one (#5334)
-//! bring the callers — and then **change this file on purpose**, in the same PR, which is the point:
-//! a caller added by accident (a half-merged branch, a copied snippet) turns this red. No database:
-//! it reads the sources.
+//! S3 built the road and put nothing on it, and this file said so: *no* source could name the worker's
+//! `PictureWriter`, the write-token mint or the answer entry that binds a run's pictures. S4 brings the one
+//! caller — the delegation step of the team AI (`team_ai/delegate.rs` writes the picture; `team_ai.rs`'s
+//! finishing transaction posts the answer with it) — so the contract this file holds is now a **table of who
+//! may name what**: any other worker source, route, tool or crate naming an entry (a half-merged branch, a
+//! copied snippet, the conversation that will ask for a picture in #5334 before it has its own review) turns
+//! it red until its author adds a row on purpose, in the same PR. The table is read both ways: a needle in a
+//! file the table does not allow fails, and a file the table allows that no longer names its needle fails
+//! too (the allowance cannot go stale and keep the guard green for the wrong reason). No database: it reads
+//! the sources.
 //!
 //! | test | what turns it red |
 //! |---|---|
-//! | `nothing_in_the_worker_calls_the_picture_writer_but_its_own_module` | any other worker source naming `PictureWriter`, the answer helper, the mint, the redeem, the refusal audit or the module path |
+//! | `only_the_delegation_step_and_its_finishing_transaction_call_the_picture_writer` | a worker source other than the table's naming `PictureWriter`, the answer helper, the mint, the redeem, the refusal audit or the messaging module path; or a table row whose file no longer names its needle |
 //! | `nothing_outside_the_picture_modules_names_the_write_path_entries` | a route, tool or other crate naming an entry of the table below, or the messaging module's path (`agent_picture::`) |
 //! | `the_messaging_picture_module_is_private_and_every_function_it_exports_is_watched` | `pub mod agent_picture` (a caller could then walk around the names with a module path), or a function exported at the crate root that the table does not watch (implementation review L-1) |
-//! | `the_image_tool_is_not_advertised_by_anything_this_slice_added` | a constant that switches the `image` tool on, appearing in the worker before S4 |
+//! | `the_image_kind_is_switched_by_the_constant_and_the_declaration_and_nothing_else` | the constant turned off again, a worker source other than the door and the step reading it, or the door's `image_path_ready` made to depend on anything else (an environment variable, `OORT_API_INTERNAL_ORIGIN`, A10) |
 
 use std::path::{Path, PathBuf};
 
@@ -73,7 +78,7 @@ fn code(text: &str) -> String {
 /// `agent_picture::` is the messaging module's own path. The module is private now (review L-1), so no
 /// other crate can write it; the needle is the second lock — it turns a regression to `pub mod` plus a
 /// call by module path red, where the names alone would not see it.
-const WRITE_PATH_ENTRIES: [(&str, &[&str]); 8] = [
+const WRITE_PATH_ENTRIES: [(&str, &[&str]); 9] = [
     (
         "mint_agent_picture",
         &[
@@ -91,7 +96,19 @@ const WRITE_PATH_ENTRIES: [(&str, &[&str]); 8] = [
     ),
     (
         "PictureWriter",
-        &["bins/momo-agent-worker/src/agent_picture.rs"],
+        &[
+            "bins/momo-agent-worker/src/agent_picture.rs",
+            // S4: the delegation step writes the picture of an `image` delegation, once
+            "bins/momo-agent-worker/src/team_ai/delegate.rs",
+        ],
+    ),
+    (
+        "send_answer_with_run_pictures_in_tx",
+        &[
+            "bins/momo-agent-worker/src/agent_picture.rs",
+            // S4: the finishing transaction of a delegation that wrote a picture
+            "bins/momo-agent-worker/src/team_ai.rs",
+        ],
     ),
     (
         "redeem_agent_picture_in_tx",
@@ -128,6 +145,11 @@ const WRITE_PATH_ENTRIES: [(&str, &[&str]); 8] = [
         &[
             "crates/momo-messaging/src/lib.rs",
             "crates/momo-messaging/src/message.rs",
+            // the **worker's** own module path (`crate::agent_picture::…`, not messaging's, which is private):
+            // the two files of S4's caller. The worker-only table above says which of the worker's files may
+            // use which name; this row only keeps the module path from appearing anywhere new.
+            "bins/momo-agent-worker/src/team_ai/delegate.rs",
+            "bins/momo-agent-worker/src/team_ai.rs",
         ],
     ),
 ];
@@ -136,8 +158,38 @@ const WRITE_PATH_ENTRIES: [(&str, &[&str]); 8] = [
 /// builder. Anything else exported must be in [`WRITE_PATH_ENTRIES`].
 const PURE_EXPORTS: [&str; 1] = ["picture_name"];
 
+/// Who in the **worker** may name each entry of the write path. The worker's own module
+/// (`agent_picture.rs`) is always allowed; the rest is the table. `crate::agent_picture` is the worker's own
+/// module path (the delegation reaches `PictureWriter` through it); `momo_messaging::agent_picture` is the
+/// messaging module's, which only the worker's own module may spell (it is private, review L-1, so nothing
+/// else could — the needle is the second lock).
+const WORKER_ALLOWANCES: [(&str, &[&str]); 10] = [
+    (
+        "PictureWriter",
+        &["bins/momo-agent-worker/src/team_ai/delegate.rs"],
+    ),
+    (
+        "send_answer_with_run_pictures_in_tx",
+        &["bins/momo-agent-worker/src/team_ai.rs"],
+    ),
+    (
+        "crate::agent_picture",
+        &[
+            "bins/momo-agent-worker/src/team_ai/delegate.rs",
+            "bins/momo-agent-worker/src/team_ai.rs",
+        ],
+    ),
+    ("mint_agent_picture", &[]),
+    ("send_thread_notice_with_run_pictures_in_tx", &[]),
+    ("run_picture_ids_in_tx", &[]),
+    ("write_picture_in_tx", &[]),
+    ("redeem_agent_picture", &[]),
+    ("record_picture_refused_in_tx", &[]),
+    ("momo_messaging::agent_picture", &[]),
+];
+
 #[test]
-fn nothing_in_the_worker_calls_the_picture_writer_but_its_own_module() {
+fn only_the_delegation_step_and_its_finishing_transaction_call_the_picture_writer() {
     let worker = sources(&server_rust().join("bins/momo-agent-worker/src"));
     assert!(
         worker.len() > 10,
@@ -148,26 +200,29 @@ fn nothing_in_the_worker_calls_the_picture_writer_but_its_own_module() {
         worker.iter().any(|(path, _)| path == own),
         "the picture module moved: update this guard with it"
     );
-    for (path, text) in &worker {
-        if path == own {
-            continue;
-        }
-        let body = code(text);
-        for needle in [
-            "PictureWriter",
-            "send_answer_with_run_pictures_in_tx",
-            "mint_agent_picture",
-            "send_thread_notice_with_run_pictures_in_tx",
-            "run_picture_ids_in_tx",
-            "write_picture_in_tx",
-            "redeem_agent_picture",
-            "record_picture_refused_in_tx",
-            "agent_picture::",
-        ] {
+    for (needle, allowed) in WORKER_ALLOWANCES {
+        // the table must not go stale: a file it allows has to be using what it is allowed to use
+        for file in allowed {
+            let (_, text) = worker
+                .iter()
+                .find(|(path, _)| path == file)
+                .unwrap_or_else(|| {
+                    panic!("{file} is in the allowance table and is not a worker source")
+                });
             assert!(
-                !body.contains(needle),
-                "{path} names `{needle}`: the picture write path has no caller in S3 (ADR-0151 증보 8 W11) — \
-                 S4/#5334 add one and update this guard in the same PR"
+                code(text).contains(needle),
+                "{file} no longer names `{needle}`: drop its row from WORKER_ALLOWANCES (or this guard is \
+                 green for a reason that is not true any more)"
+            );
+        }
+        for (path, text) in &worker {
+            if path == own || allowed.contains(&path.as_str()) {
+                continue;
+            }
+            assert!(
+                !code(text).contains(needle),
+                "{path} names `{needle}`: only {allowed:?} may (ADR-0151 증보 8 W11, ADR-0201 P14-S4) — a new \
+                 caller of the picture write path adds its own row here, in its own PR"
             );
         }
     }
@@ -255,22 +310,58 @@ fn the_messaging_picture_module_is_private_and_every_function_it_exports_is_watc
 }
 
 #[test]
-fn the_image_tool_is_not_advertised_by_anything_this_slice_added() {
-    // ADR-0201 P6 / owner Q1 「가」: the `image` kind is switched on by a code constant that S4 changes.
-    // S1 (#5369) owns the constant and the worker reads it as a parameter; S3 must leave it `false`.
+fn the_image_kind_is_switched_by_the_constant_and_the_declaration_and_nothing_else() {
+    // ADR-0201 P6 / owner Q1 「가」 / A10: the `image` kind is offered when the code constant is `true` — S4
+    // (#5372) turned it on — and the operator declared it. Nothing else switches it.
     let switch = std::fs::read_to_string(
         server_rust().join("crates/momo-workspace-actions/src/team_ai_hermes.rs"),
     )
     .expect("the switch's source");
     assert!(
-        code(&switch).contains("pub const ATTACHMENT_WRITE_PATH_READY: bool = false;"),
-        "the switch that turns the image tool on belongs to S4, not to the write path (S3)"
+        code(&switch).contains("pub const ATTACHMENT_WRITE_PATH_READY: bool = true;"),
+        "the constant that switches the image tool on is off again: either a deliberate rollback (then \
+         this guard and ADR-0201 v4.3 change with it) or a slip"
     );
-    for (path, text) in sources(&server_rust().join("bins/momo-agent-worker/src")) {
-        let body = code(&text);
+    // who reads the constant: the door (`team_ai.rs`) and the step's re-judgement (`delegate.rs`)
+    let readers = [
+        "bins/momo-agent-worker/src/team_ai.rs",
+        "bins/momo-agent-worker/src/team_ai/delegate.rs",
+    ];
+    let worker = sources(&server_rust().join("bins/momo-agent-worker/src"));
+    for (path, text) in &worker {
+        let body = code(text);
+        let reads = body.contains("ATTACHMENT_WRITE_PATH_READY");
+        if readers.contains(&path.as_str()) {
+            assert!(
+                reads,
+                "{path} no longer reads the constant: the door and the step must both judge `image` by it"
+            );
+        } else {
+            assert!(
+                !reads,
+                "{path} reads ATTACHMENT_WRITE_PATH_READY: only the door and the step may decide whether \
+                 `image` is on"
+            );
+        }
         assert!(
             !body.contains("AGENT_PICTURES_PER_RUN") || path.ends_with("agent_picture.rs"),
             "{path}: the per-run picture limit is the write path's, not a tool's"
         );
     }
+    // the door's parameter is the constant itself — not the constant AND something, and never an
+    // environment-derived value (A10: `OORT_API_INTERNAL_ORIGIN` is never the constant's evidence)
+    let team_ai = code(
+        &std::fs::read_to_string(server_rust().join("bins/momo-agent-worker/src/team_ai.rs"))
+            .expect("team_ai.rs"),
+    );
+    let assignments: Vec<&str> = team_ai
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("image_path_ready:"))
+        .collect();
+    assert_eq!(
+        assignments,
+        ["image_path_ready: team_ai_hermes::ATTACHMENT_WRITE_PATH_READY,"],
+        "the door must offer `image` by the constant and the declaration alone"
+    );
 }
