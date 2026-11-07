@@ -835,7 +835,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 - **W1 · 방식: 증보 3 (a)식의 거울.** 워커가 DB에 쓰기 토큰을 만들고(`mint`, `momo_worker`의 테넌트 tx) 그 tx를 **커밋한 뒤**(네트워크를 트랜잭션을 연 채 기다리지 않는다) `{OORT_API_INTERNAL_ORIGIN}`의 쓰기 주소를 **자기가** 한 번 부른다. api는 토큰을 풀 때와 행을 쓸 때 소유를 다시 판정한다. 새 표 하나 `attachment_write_token`(이름은 제안)과 **migration 하나**가 든다(증보 3은 없었다). **번호는 175다**(planner 배정, 2026-11-06. 다른 칸이 먼저 착륙하면 planner가 착륙 때 맞춘다). `discovers_contiguous_migrations_001_to_174`를 175로 바꾼다.
   - 열: `workspace_id`·`token_hash`(정확히 32바이트)·`run_id`(`agent_run` FK, ON DELETE CASCADE)·`agent_member_id`·`slot`(smallint, CHECK 1~4)·`created_at`·`expires_at`(CHECK 0 < 수명 ≤ 10분)·`used_at`·`attachment_id`(NULL 허용, **행을 쓴 tx가 한 번만** 기록한다 — W9 L2. CHECK: `used_at`이 선 뒤에만. 참조 열이 아니라서 FK를 두지 않는다: 증보 2 D4의 「첨부 id를 가리키는 곳 전수」와 점검 SQL 4절을 늘리지 않는다). 키 `(workspace_id, token_hash)`, **`UNIQUE (workspace_id, run_id, slot)`**: 한 run이 쓸 수 있는 그림 수를 DB가 쥔다. 쓰이지 않고 만료된 슬롯도 되살리지 않는다(한 번만 시도한다, W3). 행은 만료 하루 뒤에 청소되므로(아래) 이 보장은 「그 run이 사는 동안」이다 — run은 그보다 훨씬 짧게 끝난다(작업 모드 60분 한도, ADR-0201 R3). v1의 코드 상수 `AGENT_PICTURES_PER_RUN`(제안)은 **1**이고 표의 CHECK는 4까지 열어 둬서 넓힐 때 migration이 필요 없다(코드 상수와 이 증보의 개정만).
   - **요청자·채널 열을 두지 않는다**(160과 다른 점). 풀 때 run에서 도출한다(W3). 열이 없으면 위조할 것도 없다.
-  - 가드 트리거(`used_at` NULL→값 한 번, 그리고 `used_at`이 선 뒤 `attachment_id` NULL→값 한 번 외의 UPDATE·되돌리기 거절), RLS ENABLE+FORCE `ws_isolation`, 잠금 블록 `attachment-write-token-lockdown`(제안 이름; `momo_worker` SELECT·INSERT·DELETE, `momo_app` SELECT·UPDATE, relay·notifier·platform_admin 없음)을 160과 같은 모양으로 migration과 두 bootstrap 파일에 **같은 글자**로 두고 정적 시험이 비교한다. 만들 때마다 같은 워크스페이스의 하루 지난 행을 지운다(160과 같음).
+  - 가드 트리거(`used_at` NULL→값 한 번, 그리고 `used_at`이 선 뒤 `attachment_id` NULL→값 한 번 외의 UPDATE·되돌리기 거절), RLS ENABLE+FORCE `ws_isolation`, 잠금 블록 `attachment-write-token-lockdown`(제안 이름; `momo_worker` SELECT·INSERT·DELETE, `momo_app` SELECT·UPDATE, relay·notifier·platform_admin 없음)을 160과 같은 모양으로 migration과 두 bootstrap 파일에 **같은 글자**로 두고 정적 시험이 비교한다. 하루 지난 행의 청소는 처음엔 만들 때마다(160과 같음) 워커가 했고 **#5530에서 api의 풀기 tx 안으로 옮겼다**(워커는 DELETE를 잃었다, 아래 「증보 8 보충」 B4).
 - **W2 · 주소 모양: 새 접두 `PUT {origin}/v1/agent-media/{ws}/{token}`.** 읽기 접두와 섞지 않는 까닭: ① 읽기 라우트의 「GET 전용·405·거절 한 모양」을 시험이 못 박고 있다 ② Hermes 가드 플러그인이 `/v1/self-media/` 접두를 고정한다 ③ 공개·스펙 밖 목록에 따로 오른다(K11) ④ 접두가 갈리면 엣지가 쓰기 접두만 막을 수 있다 — **S3이 두 Caddyfile에서 `/v1/agent-media/*`를 403으로 막는다**(WS4, 검수 M3). 정당한 호출자는 사설망의 워커 하나뿐이고 워커는 엣지를 지나지 않는다. 대가: 로그 가림(`redact_self_media_urls`)과 거절 예산의 경로 함수(`self_media_scope`)를 새 접두까지 넓힌다(WS4). 토큰 형식(43자 URL-safe)·SHA-256 해시·`token_is_well_formed`는 재사용한다. PUT이 아닌 메서드는 경로·DB를 보기 전에 405(`Allow: PUT`)다. **토큰은 어떤 글에도 실리지 않는다**: 모델 문맥·Hermes 요청·메시지·props·감사·오류·로그·job payload 어디에도 없고 워커가 한 요청에 쓰고 버린다(증보 3 D3).
 - **W3 · 소유 재판정은 세 번이고 같은 함수 하나가 한다**(증보 3 D2와 같은 모양, 검수 M1). 그 함수(`agent_picture_binding_in_tx`, 제안 이름)는 **한 곳**에 있고 발급·풀기·행 쓰기가 모두 그것을 부른다: run이 `queued`·`running`이고 `agent_member_id`가 그 에이전트이며, **그 에이전트 자리가 실제 에이전트**(`member.kind = 'agent'` — `agent_run.agent_member_id`는 `member`를 가리킬 뿐이라 run 행이 사람을 거기 앉힐 수 있고, 그러면 첨부의 업로더가 그 사람이 되어 에이전트 업로더만 세는 상한 셈에서 빠진다, 구현 검수 M-1 (a))이고, 트리거 작성자가 살아 있는 사람이고, 에이전트와 요청자가 모두 그 대화의 활성 멤버이며 **채널이 보관되지 않았을 것**(첨부 쪽의 `is_attachment_channel_member`가 `archived_at IS NULL`·멤버 활성·`left_at IS NULL`을 한 문장으로 이미 쥔다. 둘에게 한 번씩 부른다). 읽기 길의 `requester_in_conversation_in_tx`(`self_media.rs:361-379`)는 이 함수의 재료가 아니다: 그 함수는 run 상태도 `archived_at`도 보지 않고(`requester_of_run_in_tx`와 `is_channel_member` 두 번뿐, `agent_avatar.rs:801-819`·`identity.rs:130-145`) 읽기 길의 보관 채널 거절은 첨부 판정 SQL(`agent_avatar.rs:928-938`)에서 왔다. 쓰기에는 첨부가 아직 없으므로 이 함수가 그 조건을 **직접** 건다. 아래 1~3은 같은 함수에 각자의 몫을 더한다.
   1. **발급**(워커, 행을 쓰기 **전에**): 위 함수가 통과하고 그 run의 이 슬롯이 아직 없으며 슬롯 번호가 `AGENT_PICTURES_PER_RUN`(v1 = 1) 이하일 때만. 거절은 `None`이고 표에 아무것도 쓰지 않는다.
@@ -875,7 +875,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
   4. 토큰·주소·응답 본문·바이트는 로그·감사·오류·메시지·props·job payload에 쓰지 않는다(W2).
   5. 모델은 「그림 n장 받음」만 안다(P6).
   - **S3은 호출자를 더하지 않는다.** 이 길은 어느 도구·모델·HTTP 표면에서도 불리지 않는 워커 안 함수이고, `image` 광고와 코드 상수(`ATTACHMENT_WRITE_PATH_READY`, P6)는 S4가 바꾼다. S3 착륙 뒤 사용자에게 달라지는 것은 0이다.
-- **W12 · 한도와 거절 예산.** 한 run ≤ 슬롯 상한(UNIQUE), api 프로세스당 동시 쓰기 4 **[추정]**. **풀기 전 거절만** 호출 주소·경로 워크스페이스별 예산(읽기 라우트와 같은 방식)을 쓴다. 성공과 풀기 뒤의 거절은 쓰지 않는다. 한도 값은 기존 `RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE`(기본 30, 0이면 끔)를 같이 쓰되 **버킷은 접두별로 따로**다(읽기 쪽 거절이 쓰기 쪽을, 그 반대가 닫지 않는다). 주소 전체 상한(한도의 10배)도 따로 둔다. 새 환경 변수는 없다. 일일 총량은 호출자 쪽 한도(ADR-0201 P7: 위임 일일 기본 30)가 1차로 쥐고, **api도 행 쓰기 tx에서 워크스페이스별 일일 상한을 스스로 센다**(검수 M2): 업로더가 에이전트 멤버인 `complete` 첨부의 최근 24시간 수 ≥ `AGENT_PICTURES_DAILY_CEILING`(제안 이름, **[추정] 200** = P7의 설정 상한과 같은 숫자라 정상 경로에서는 걸리지 않는 방어선)이면 429 `cap_reached`로 거절하고 객체를 지운다. **이 숫자는 `attachment` 행에서 세는데 `momo_worker`는 그 표에 `UPDATE`·`DELETE`가 있으므로, 이 상한이 막는 상대는 토큰·run·멤버십 행을 위조하는 워커까지다**(T2, 구현 검수 M-1 (b)). 풀기는 `slot ≤ AGENT_PICTURES_PER_RUN`(v1 = 1)을 본다(표 CHECK는 4까지 열려 있다).
+- **W12 · 한도와 거절 예산.** 한 run ≤ 슬롯 상한(UNIQUE), api 프로세스당 동시 쓰기 4 **[추정]**. **풀기 전 거절만** 호출 주소·경로 워크스페이스별 예산(읽기 라우트와 같은 방식)을 쓴다. 성공과 풀기 뒤의 거절은 쓰지 않는다. 한도 값은 기존 `RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE`(기본 30, 0이면 끔)를 같이 쓰되 **버킷은 접두별로 따로**다(읽기 쪽 거절이 쓰기 쪽을, 그 반대가 닫지 않는다). 주소 전체 상한(한도의 10배)도 따로 둔다. 새 환경 변수는 없다. 일일 총량은 호출자 쪽 한도(ADR-0201 P7: 위임 일일 기본 30)가 1차로 쥐고, **api도 행 쓰기 tx에서 워크스페이스별 일일 상한을 스스로 센다**(검수 M2): 업로더가 에이전트 멤버인 `complete` 첨부의 최근 24시간 수 ≥ `AGENT_PICTURES_DAILY_CEILING`(제안 이름, **[추정] 200** = P7의 설정 상한과 같은 숫자라 정상 경로에서는 걸리지 않는 방어선)이면 429 `cap_reached`로 거절하고 객체를 지운다. **이 숫자는 `attachment` 행이 아니라 `agent_picture_mark`(migration 179)의 최근 24시간 줄에서 센다**(#5530, 아래 「증보 8 보충」 B1~B3): 워커가 쓰지도 읽지도 지우지도 못하고 어떤 외래 키 연쇄도 닿지 않는 표라서, DB 수준으로 뚫린 워커도 오늘 값을 줄이지 못한다(T2, 구현 검수 M-1 (b)가 닫혔다). 풀기는 `slot ≤ AGENT_PICTURES_PER_RUN`(v1 = 1)을 본다(표 CHECK는 4까지 열려 있다).
 
 ### 비교한 방식과 기각한 대안
 
@@ -900,7 +900,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | # | 위협 | 막는 곳 | 시험 |
 |---|---|---|---|
 | T1 | 토큰 위조·도용·재사용 | 32바이트 난수, DB에는 해시만, 60초, 단일 사용(UPDATE 한 문장), 풀 때 run 진행 중·에이전트 일치. 위조한 행이 있어도 요청자·채널·업로더는 run에서 도출하고 슬롯은 UNIQUE | WA1·WA2·WA3 |
-| T2 | 손상된 워커(BYPASSRLS)가 임의 (run, 에이전트) 행을 직접 넣는다 | 표 권한이 마지막 문이다(`momo_worker` SELECT·INSERT·DELETE, UPDATE 없음). **토큰 행만 위조할 때**는 풀 때 run이 **진행 중이고 그 에이전트의 것**이어야 하며 도출한 채널·요청자 멤버십이 맞고 슬롯 번호가 상한 안이어야 해서, 효과는 진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 ≤슬롯 수만큼 쓰는 것이다. **DB 수준으로 뚫린 워커**는 `agent_run`·`message`·`membership`과 토큰 표 DELETE에도 쓰기 권한이 있어(`bootstrap_runtime_roles.sql:52-59`) run·멤버십·슬롯을 모두 위조할 수 있다. 다만 run의 에이전트 자리는 `member.kind = 'agent'`여야 풀린다(W3의 공용 판정, 구현 검수 M-1 (a)): run 행만 위조해 사람 멤버를 에이전트 자리에 앉혀서는 풀리지 않는다(그림이 사람 이름으로 올라가 상한 셈에서 빠지는 길이다). `member`·`attachment` 행 자체를 고치는 워커는 아래 상한의 사정과 같은 부류다. 그에게 남는 경계는 「다시 인코딩한 png·jpeg만, api 프로세스당 동시 4」다. **api가 세는 일일 상한(W12)은 `attachment` 행을 세는데 `momo_worker`는 그 표에 `UPDATE`·`DELETE`가 있어서**(`created_at`·`status`를 고치거나 행을 지우면 숫자가 되돌아간다) **토큰·run·멤버십 행을 위조하는 워커에게만 걸리고 `attachment` 행을 고치는 워커에게는 걸리지 않는다**(구현 검수 M-1 (b), planner 결정: 이 PR은 코드를 바꾸지 않는다). 이 PR에는 호출자가 없고, 워커가 줄일 수 없는 원본에서 세는 일(안: 하루 지난 토큰 청소를 api 쪽으로 옮기고 `momo_worker`의 DELETE를 거둔 뒤 `attachment_write_token`의 `attachment_id IS NOT NULL` 행을 센다)은 호출자를 붙이는 S4(#5372)가 함께 정한다 | WA3·WA18·WA24 |
+| T2 | 손상된 워커(BYPASSRLS)가 임의 (run, 에이전트) 행을 직접 넣는다 | 표 권한이 마지막 문이다(`momo_worker` SELECT·INSERT, UPDATE 없음 — DELETE는 #5530에서 거뒀다). **토큰 행만 위조할 때**는 풀 때 run이 **진행 중이고 그 에이전트의 것**이어야 하며 도출한 채널·요청자 멤버십이 맞고 슬롯 번호가 상한 안이어야 해서, 효과는 진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 ≤슬롯 수만큼 쓰는 것이다. **DB 수준으로 뚫린 워커**는 `agent_run`·`message`·`membership`에도 쓰기 권한이 있고 `channel`·`workspace`까지 DELETE가 있어(`bootstrap_runtime_roles.sql:52-59`) run·멤버십을 위조하고 run·channel·workspace 삭제의 연쇄로 토큰 행을 지울 수 있다(토큰 표의 DELETE는 #5530에서 거뒀지만 연쇄는 표 주인 권한으로 돌아서 막히지 않는다). 다만 run의 에이전트 자리는 `member.kind = 'agent'`여야 풀린다(W3의 공용 판정, 구현 검수 M-1 (a)): run 행만 위조해 사람 멤버를 에이전트 자리에 앉혀서는 풀리지 않는다(그림이 사람 이름으로 올라가 상한 셈에서 빠지는 길이다). `member`·`attachment` 행 자체를 고치는 워커는 아래 상한의 사정과 같은 부류다. 그에게 남는 경계는 「다시 인코딩한 png·jpeg만, api 프로세스당 동시 4」다. **api가 세는 일일 상한(W12)은 워커가 줄일 수 없는 원본에서 센다**(#5530, 구현 검수 M-1 (b)를 닫은 것): `attachment` 행(워커가 UPDATE·DELETE로, `member.kind`·channel·workspace 삭제로 줄일 수 있었다)도 쓴 토큰 행(run·channel·workspace 삭제의 연쇄로 지워진다)도 아니라, api가 그림을 쓴 같은 tx에서 한 줄씩 더하는 `agent_picture_mark`의 최근 24시간 줄이다. 그 표에는 외래 키가 없고 `momo_worker`에게는 아무 권한이 없으며 트리거가 UPDATE와 창 안의 DELETE를 막는다. 그에게 남는 길은 새 워크스페이스를 만들어 0에서 시작하는 것뿐이다(상한은 워크스페이스별, 남는 위험 2) | WA3·WA18·WA24 |
 | T3 | 모델·프롬프트 주입이 그림 쓰기를 부른다 | 토큰을 만드는 것은 워커 코드뿐이고 도구·모델·HTTP 표면이 없다. 토큰은 어떤 글에도 안 실린다. 호출자의 문(G1~G10)·일일 상한·run당 1장이 총량을 쥔다 | WA15·WA20 |
 | T4 | 악성 그림 바이트(디코더 악용·폭탄·다형 파일·SVG/HTML 위장·GIF·APNG) | sniff는 세 형식뿐, 자식은 빈 환경·할당 192 MiB·마감 10초, **출력만 저장**, 입력은 어디에도 가지 않음 | WA6·WA7·WA8 |
 | T5 | 자원 고갈(디코더 슬롯·메모리·보관소·행) | 동시 쓰기 4, 줄서기 ≤3초·대기자 2, 본문 ≤5 MiB와 읽기 마감, 출력 ≤4 MiB, run당 슬롯, 일일 위임 상한. 사람의 올리기는 줄서지 않으므로 에이전트 해독이 슬롯을 쥔 동안(장당 ≤10초) `Busy`일 수 있다(W5) | WA5·WA9·WA19 |
@@ -954,13 +954,13 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 - **WA15** 새는 곳 0: 성공과 **모든** 실패 경로에서 캡처한 `tracing` 출력·`audit_log`·`outbox.payload`·`agent_run.error`·메시지 `props`·job payload 어디에도 토큰 원문·`agent-media/` 경로·입력 바이트 조각·`Content-Type` 선언이 없다(로그 줄은 고정 낱말뿐). `redact_self_media_urls`가 새 접두를 가린다(`\/`·`%2F` 변형 포함, 접두 하나를 지우면 빨강).
 - **WA16** 워커 클라이언트: 리디렉션을 따르지 않는다(302 스텁이 가리키는 둘째 서버에 요청 0). `OORT_API_INTERNAL_ORIGIN`이 없거나 틀리면 호출 0·폴백 0이고 호출자의 실패 문장이 나간다. 한 번만 시도한다(실패 뒤 둘째 PUT 0, 토큰 행 1). 마감 40초(시험에서는 줄인 값). 프록시 무시는 증보 3 후속 F1처럼 자식 프로세스로 재야 하므로 측정하지 못하면 **미측정으로 기록**한다.
 - **WA17** 발급 전 거절: 5 MiB+1 base64·GIF 매직·2장은 토큰 행 0·api 요청 0이다.
-- **WA18** 잠금: 정적 시험이 세 곳(migration·두 bootstrap)의 잠금 블록이 같은 글자임을 잰다(한 곳을 고치면 빨강). 격리 PG에서 `momo_worker`는 SELECT·INSERT·DELETE만, `momo_app`은 SELECT·UPDATE만, 나머지 역할은 0이다. 가드 트리거가 `used_at` 외 UPDATE와 되돌리기를 거절하고 CHECK(해시 32바이트·수명 ≤10분·슬롯 1~4)가 선다. `momo_app`의 INSERT·DELETE와 `momo_worker`의 UPDATE는 거절된다.
+- **WA18** 잠금: 정적 시험이 세 곳(migration·두 bootstrap)의 잠금 블록이 같은 글자임을 잰다(한 곳을 고치면 빨강). 격리 PG에서 `momo_worker`는 SELECT·INSERT만(#5530 전에는 DELETE도), `momo_app`은 SELECT·UPDATE·DELETE만(전에는 DELETE 없이), 나머지 역할은 0이다. 가드 트리거가 `used_at` 외 UPDATE와 되돌리기를 거절하고 CHECK(해시 32바이트·수명 ≤10분·슬롯 1~4)가 선다. `momo_app`의 INSERT와 `momo_worker`의 UPDATE·DELETE는 거절된다.
 - **WA19** 예산·계약: 풀기 전 거절만 호출 주소·경로 워크스페이스의 예산을 쓰고(성공·풀기 뒤 거절은 안 씀) 주소 전체 상한이 선다. 읽기 라우트의 버킷과 섞이지 않는다. 새 경로가 공개·스펙 밖 목록에 오르고 PUT 외 6개 메서드는 405이며 **예산을 쓰지 않는다**(라우터 층의 405는 예산 층을 지나지 않는다, `dev_token_door_conformance_pg`의 두 목록).
 - **WA20** 사용자 영향 0: S3 착륙 빌드에서 어떤 도구·카드·메시지도 이 길을 부르지 않는다(워커 소스에서 호출 자리가 시험 코드뿐임을 정적 검사로 잰다). 평소 Hermes 턴의 `PICTURE_REMOVED_SENTENCE`가 그대로다.
-- **WA21** 청소: 만들 때 같은 워크스페이스의 하루 지난 토큰 행이 지워지고 다른 워크스페이스의 행은 남는다. 묶이지 않은 에이전트 첨부가 증보 2 D4의 후보 술어를 그대로 따른다(보관소 복구 포함).
+- **WA21** 청소: **api가 토큰을 풀 때**(#5530 전에는 워커가 만들 때) 같은 워크스페이스의 하루 지난 토큰 행이 지워지고 다른 워크스페이스의 행은 남는다. 워커의 발급은 아무것도 지우지 않는다. 묶이지 않은 에이전트 첨부가 증보 2 D4의 후보 술어를 그대로 따른다(보관소 복구 포함).
 - **WA22** 상수가 한 숫자: `AGENT_PICTURE_MAX_INPUT_BYTES` = `INPUT_BYTES` = `SELF_MEDIA_MAX_BYTES`, 토큰 수명 60초 = 증보 3의 `SELF_MEDIA_INTERNAL_TTL_SECS`와 같은 값(표에서 `expires_at − created_at`으로 잰다).
 - **WA23** 세 판정이 같은 함수를 부른다(검수 M1): 끝난 run·`awaiting_approval`·`paused`(검수 I2: 심은 `running`이 아니라 **실제 재개 걸음의 상태**로도 잰다)·나간 멤버·**보관된 채널**·삭제된 요청자·**run의 에이전트 자리가 사람 멤버**(구현 검수 M-1 (a): 같은 run·같은 채널에서 그 에이전트의 `member.kind`만 `human`이다, 사람을 에이전트 자리에 앉힌 위조 run 칸 포함) 각각이 발급·풀기·행 쓰기 **셋 모두에서** 거절된다. 함수의 `archived_at`·`kind = 'agent'`·멤버십 조건을 지우면 세 곳의 같은 사례가 한꺼번에 빨개진다(함수가 둘로 갈라지면 한 곳만 빨갛다). run 상태 조건만은 풀기의 소비 문장이 같은 목록의 사본을 하나 더 쥐고 있어(토큰을 헛되이 태우지 않으려는 것, 구현 검수 I-1) 판정에서만 지우면 발급·행 쓰기의 칸이 빨개지고 풀기의 칸은 남는다 — 둘은 같은 목록이어야 한다(코드 주석이 짝을 표시한다).
-- **WA24** 위조 상한(검수 M2): 시험이 `momo_worker`로 run·트리거 메시지·멤버십·토큰 행(슬롯 2)을 직접 만들어도 풀기가 `slot ≤ AGENT_PICTURES_PER_RUN`으로 404이고, api가 세는 일일 상한(시험에서는 줄인 값)을 넘으면 429 `cap_reached`이며 보관소 객체가 늘지 않고(객체 수를 센다) 감사 `agent_picture_refused`가 한 줄 남는다. 상한 검사를 지우면 객체가 늘어난다.
+- **WA24** 위조 상한(검수 M2): 시험이 `momo_worker`로 run·트리거 메시지·멤버십·토큰 행(슬롯 2)을 직접 만들어도 풀기가 `slot ≤ AGENT_PICTURES_PER_RUN`으로 404이고, api가 세는 일일 상한(시험에서는 줄인 값)을 넘으면 429 `cap_reached`이며 보관소 객체가 늘지 않고(객체 수를 센다) 감사 `agent_picture_refused`가 한 줄 남는다. 상한 검사를 지우면 객체가 늘어난다. (#5530: 이 상한의 원본은 `agent_picture_mark`다 — 아래 WB1·WB2.)
 - **WA25** 공개 엣지(검수 M3): 추적되는 엣지 Caddyfile 넷(`infra/rust/Caddyfile`·`infra/railway/Caddyfile.railway`·`infra/rust/Caddyfile.local`·`infra/rust/Caddyfile.host-network`)이 모두 `/v1/agent-media/*`에 `respond 403`을 `/v1/*` 앞에서 낸다. `scripts/tests/test_public_edge.sh`가 네 파일을 재고 로컬 엣지를 실제로 띄워 PUT이 403임을 보며, `scripts/tests/test_railway_template.sh`가 Railway 파일의 순서·모양(`assert_403_order`)을 잰다. 한 줄을 지우면 빨강. 워커의 `OORT_API_INTERNAL_ORIGIN` 배선이 엣지를 거치지 않는 사설 주소임(카탈로그 검사가 이미 못 박고 있다)은 그대로다.
 
 ### 구현 슬라이스 (한 이슈 #5371 = 한 브랜치·한 PR, 아래는 그 안의 커밋 단위)
@@ -1038,7 +1038,7 @@ Blocker 0 · High 0 · Medium 1 · Low 2 · Info 6, 대상 커밋 `732bae063`. �
 | 발견 | 닫은 곳 |
 |---|---|
 | M-1 (a) run의 에이전트 자리가 사람이어도 통과 | W3 공용 판정의 `member.kind = 'agent'`·WA23의 `AgentSeatIsHuman` 칸과 사람을 에이전트 자리에 앉힌 위조 run 칸·구현 기록 8 |
-| M-1 (b) 세는 표를 워커가 고칠 수 있음 | T2·남는 위험 2·W12의 범위 문장(코드는 바꾸지 않았다, planner 결정)·구현 기록 9 — 줄일 수 없는 원본에서 세는 일은 S4(#5372) |
+| M-1 (b) 세는 표를 워커가 고칠 수 있음 | T2·남는 위험 2·W12의 범위 문장(그때는 코드를 바꾸지 않았다, planner 결정)·구현 기록 9 — 줄일 수 없는 원본에서 세는 일은 S4(#5372)가 넘겨 **#5530(「증보 8 보충」)이 닫았다** |
 | L-1 「호출자 0」 가드를 모듈 경로로 피함 | `mod agent_picture;`(비공개)·루트 재수출 정리·워커 정적 가드의 표와 `agent_picture::` 바늘·재수출 점검 시험·구현 기록 10 |
 | L-2 투영 함수에 `workspace_id`가 없음 | `message_attachments_without_media_in_tx(conn, workspace_id, message_id)`·다른 테넌트 칸·구현 기록 11 |
 | I-1 풀기 UPDATE의 run 상태 사본 | 코드 주석으로 짝을 표시, WA23 문장을 풀기의 사정까지 정확하게 고침 |
@@ -1059,7 +1059,7 @@ Blocker 0 · High 0 · Medium 1 · Low 2 · Info 6, 대상 커밋 `732bae063`. �
 
 ### 첫 호출자 (2026-11-07, #5372 — ADR-0201 증보 v4.3)
 
-S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀 AI의 Hermes 위임 걸음(`bins/momo-agent-worker/src/team_ai/delegate.rs`가 `PictureWriter::write`를 한 번, `team_ai.rs`의 마무리 트랜잭션이 `send_answer_with_run_pictures_in_tx`로 그 run의 그림을 묶는다). 정적 가드(`tests/agent_picture_static_guards.rs`)는 「호출자 없음」에서 **누가 어느 이름을 부를 수 있는가의 허용표**로 바뀌었고, #5334가 자기 호출자를 더할 때 자기 행을 더한다. L3의 순서는 그대로 구현됐다(합치는 호출 뒤, 정지 확인, 쓰기, 마무리 트랜잭션). 위임 걸음의 임대는 업로드 마감(`WRITE_DEADLINE` 40초)을 더한 값으로 늘고(기본 230초), `send_answer_with_run_pictures_in_tx`는 묶기가 거절돼 그림 없이 나갔는지(`PostedAnswer.pictures_bound`)를 돌려준다. **넘어온 것 중 하지 않은 것**: M-1 (b)(줄일 수 없는 원본에서 세기)는 migration과 역할 SQL(`momo_worker`의 DELETE를 거둠)을 함께 바꾸는 일이라 후속 이슈 **#5530**으로 남겼고(위 T2·남는 위험 2가 그대로 맞다), 지운 트리거 메시지는 planner가 「답하지 않기」로 정해(열린 확인 ⑧ 해소) run 척추 공통 **#5533**이 하고, I-2는 남았고, I-3(워커 발급 실패 로그를 고정 낱말로)은 호출자가 생긴 이 칸이 닫았다. 자세한 것은 ADR-0201 증보 v4.3.
+S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀 AI의 Hermes 위임 걸음(`bins/momo-agent-worker/src/team_ai/delegate.rs`가 `PictureWriter::write`를 한 번, `team_ai.rs`의 마무리 트랜잭션이 `send_answer_with_run_pictures_in_tx`로 그 run의 그림을 묶는다). 정적 가드(`tests/agent_picture_static_guards.rs`)는 「호출자 없음」에서 **누가 어느 이름을 부를 수 있는가의 허용표**로 바뀌었고, #5334가 자기 호출자를 더할 때 자기 행을 더한다. L3의 순서는 그대로 구현됐다(합치는 호출 뒤, 정지 확인, 쓰기, 마무리 트랜잭션). 위임 걸음의 임대는 업로드 마감(`WRITE_DEADLINE` 40초)을 더한 값으로 늘고(기본 230초), `send_answer_with_run_pictures_in_tx`는 묶기가 거절돼 그림 없이 나갔는지(`PostedAnswer.pictures_bound`)를 돌려준다. **넘어온 것 중 하지 않은 것**: M-1 (b)(줄일 수 없는 원본에서 세기)는 migration과 역할 SQL(`momo_worker`의 DELETE를 거둠)을 함께 바꾸는 일이라 후속 이슈 **#5530**으로 남겼고(그때는 위 T2·남는 위험 2가 그대로 맞았다 — #5530이 닫았다, 「증보 8 보충」), 지운 트리거 메시지는 planner가 「답하지 않기」로 정해(열린 확인 ⑧ 해소) run 척추 공통 **#5533**이 하고, I-2는 남았고, I-3(워커 발급 실패 로그를 고정 낱말로)은 호출자가 생긴 이 칸이 닫았다. 자세한 것은 ADR-0201 증보 v4.3.
 
 ### 바뀌지 않는 것
 
@@ -1068,7 +1068,7 @@ S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀
 ### 남는 위험
 
 1. **고아 창.** api가 쓴 뒤 워커가 묶기 전에 죽으면 묶이지 않은 에이전트 첨부가 남고 청소기는 기본 꺼짐이다(증보 2 D4). 사람은 읽지 못하지만(업로더가 에이전트) 보관소는 늘 수 있다. 상한은 run당 슬롯·api가 세는 일일 상한·위임 일일 상한이 쥔다. 더 짧은 청소는 만들지 않는다. **합치는 호출 동안의 중지**는 호출자(S4)가 PUT을 합치는 호출 뒤에 두면 창이 없다(W9, 검수 L3). 어기는 호출자에서는 중지마다 고아가 하나 남는다.
-2. **워커가 api를 통해 보관소에 바이트를 쓸 수 있게 된다.** Railway에서 처음 생기는 능력이다(증보 3 남는 위험 1의 거울). **토큰 행만 위조하는** 워커는 풀 때 run·에이전트·멤버십·슬롯을 다시 보므로 범위가 「진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 슬롯 수만큼」이다. **DB 수준으로 뚫린 워커**는 run·멤버십·슬롯도 쓸 수 있다(`bootstrap_runtime_roles.sql:52-59`: `agent_run`·`message`·`membership`·토큰 표 DELETE) — 그에게는 어느 채널에든 쓸 길이 열려 있다(에이전트 자리는 `member.kind = 'agent'`여야 한다, M-1 (a)). 남는 경계는 재인코딩된 png·jpeg와 동시 4다. api가 세는 일일 상한(W12)은 `attachment` 행을 세므로 그 표를 고칠 수 있는 이 워커는 숫자를 되돌릴 수 있다(구현 검수 M-1 (b), 이 PR은 코드를 바꾸지 않는다 — 줄일 수 없는 원본에서 세는 일은 호출자를 붙이는 S4가 정한다). 더해지는 것은 「보관소의 새 바이트」와 「대화의 그림」이고, 워커는 이미 모든 테넌트의 메시지를 쓰고 지울 수 있는 역할이다(160 L6의 「BYPASSRLS 역할에게는 표 권한이 마지막 문」과 같은 원칙으로 api가 스스로 상한을 세지만 그 상한이 막는 상대는 위 범위까지다).
+2. **워커가 api를 통해 보관소에 바이트를 쓸 수 있게 된다.** Railway에서 처음 생기는 능력이다(증보 3 남는 위험 1의 거울). **토큰 행만 위조하는** 워커는 풀 때 run·에이전트·멤버십·슬롯을 다시 보므로 범위가 「진행 중인 run의 에이전트가 자기 대화에 재인코딩된 그림 슬롯 수만큼」이다. **DB 수준으로 뚫린 워커**는 run·멤버십도 쓸 수 있다(`bootstrap_runtime_roles.sql:52-59`: `agent_run`·`message`·`membership`; 토큰 표의 DELETE는 #5530에서 거뒀다) — 그에게는 어느 채널에든 쓸 길이 열려 있다(에이전트 자리는 `member.kind = 'agent'`여야 한다, M-1 (a)). 남는 경계는 재인코딩된 png·jpeg와 동시 4다. api가 세는 일일 상한(W12)은 이제 워커가 쓰지도 읽지도 지우지도 못하고 연쇄도 닿지 않는 표(`agent_picture_mark`)에서 세므로 이 워커도 오늘 값을 줄이지 못한다(#5530, 구현 검수 M-1 (b)가 닫혔다). 남는 길은 새 워크스페이스를 만들어 그 워크스페이스의 0에서 시작하는 것이다(아래 「증보 8 보충」 남는 위험 1). 더해지는 것은 「보관소의 새 바이트」와 「대화의 그림」이고, 워커는 이미 모든 테넌트의 메시지를 쓰고 지울 수 있는 역할이다(160 L6의 「BYPASSRLS 역할에게는 표 권한이 마지막 문」과 같은 원칙으로 api가 스스로 상한을 세지만 그 상한이 막는 상대는 위 범위까지다).
 3. **그림 내용을 검열하지 않는다.** 얼굴·부적절한 그림·바이러스 스캔 없음은 D3의 v0 한계와 같은 급이다. 요청자가 부른 같은 방의 그림이고 공급자의 안전 장치에 기댄다.
 4. **고아 객체.** 객체를 쓴 뒤 행 tx와 `delete_file`이 모두 실패하면 행 없는 객체가 남고, 행을 따라가는 청소기는 찾지 못한다(채널·워크스페이스 삭제의 고아와 같은 부류, 증보 2 남는 위험).
 5. **사람의 올리기에 「바쁨」을 더할 수 있다**(W5, 검수 L5): 에이전트 쓰기 넷이 이어지면 에이전트 해독이 슬롯을 쥔 동안(장당 ≤10초, 몰리면 약 20초). 일일 상한이 빈도를 쥔다.
@@ -1091,6 +1091,79 @@ S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀
 ### 역방향 줄 대상(각 문서 머리에 한 줄씩, 본문 결정은 바꾸지 않는다)
 
 **이 PR이 단 줄**: ADR-0201 머리 한 줄(P6·P14-S3·P18 ⑧ 링크, `process_waiting` 문장·임대 계산·PUT 위치 정정, 「증보 4」 표기 → 증보 8) · ADR-0151 본문 D3 한 줄(이 증보 W10). **이 PR이 달지 않은 것**: ADR-0218(§12 L3.3에 이 증보의 겹침 절 링크, H9.2의 「따로」가 이 증보 위) — #5442 브랜치가 §12를 고치는 중이라 그 착륙 뒤 planner가 단다. ADR-0203은 해당 없음(이 길은 Hermes에 새 자격을 주지 않는다).
+
+### 증보 8 보충 (2026-11-08, #5530, Proposed — 등급 2 구현 보안 검수 뒤 planner가 Accepted)
+
+구현 검수 M-1 (b)와 #5372 인계가 남긴 「api의 하루 상한을 워커가 줄일 수 없는 원본에서 세기」를 닫는다. **DB 계약**(표 하나, 잠금 블록 둘)과 **보안 경계**(워커가 오늘 값을 줄이는 길)를 바꾸므로 ADR-0100에 따라 이 보충이 구현 머지 조건이고 자체 등급 2 구현 보안 검수 1회를 받는다. 위 증보 8의 T2·W12·WA18·WA21·WA24·남는 위험 2·W1의 청소 문장은 이 보충의 사실로 바꿨다(각 줄에 「#5530」이 붙어 있다). 코드 사실은 `track/engine` `22c9465a2`(#5372 착륙 뒤)다.
+
+#### 변경 전 — 실 PG로 잰 사실 [V]
+
+격리 PG18(`pgvector/pgvector:0.8.7-pg18-trixie`)에 migration 001~178과 개발 역할 파일을 적용하고, 오늘 값이 1인 워크스페이스(에이전트 그림 한 장: `attachment` 행·쓴 토큰)를 아홉 개 만들어 **실제 `momo_worker` 역할**이 한 워크스페이스에 한 가지씩 시도했다. 표의 「셈」은 시도 뒤 값이다(1이면 줄지 않았다). 워커는 `attachment`·`member`·`channel`·`agent_run`·`workspace`에 SELECT·INSERT·UPDATE·DELETE 기본 권한이 있다(K14).
+
+| # | 워커의 시도 | 변경 전 원본: 에이전트의 `complete` `attachment` 행 셈 | 첫 후보: 쓴 토큰 셈(DELETE를 거둔 가정) |
+|---|---|---|---|
+| 1 | `UPDATE attachment SET created_at` 하루 전으로 | **1 → 0** | 1 |
+| 2 | `UPDATE attachment SET status = 'failed'` | **1 → 0** | 1 |
+| 3 | `DELETE FROM attachment` | **1 → 0** | 1 |
+| 4 | 그 에이전트의 `member.kind`를 `human`으로 | **1 → 0**(셈이 `member`를 조인한다) | 1 |
+| 5 | `DELETE FROM channel`(FK 연쇄) | **1 → 0** | **1 → 0**(연쇄가 run을 거쳐 토큰을 지운다) |
+| 6 | `TRUNCATE` | 거절(권한 없음) | 거절 |
+| 7 | `DELETE FROM agent_run`(FK 연쇄) | 1 | **1 → 0** |
+| 8 | `DELETE FROM workspace`를 하고 같은 id로 다시 만듦 | **1 → 0** | **1 → 0** |
+| 9 | `DELETE FROM attachment_write_token` | 1 | **1 → 0**(이 길은 DELETE 회수가 막는다) |
+
+읽는 법: (a) 변경 전 원본은 1~5·8로 줄고, (b) 이슈가 먼저 든 후보(「토큰의 DELETE를 거두고 쓴 토큰을 센다」)는 9만 막고 5·7·8로 여전히 줄어든다. **연쇄는 표 주인 권한으로 돌아서 표 권한이 막지 못한다**(그래서 K14의 「워커가 `agent_run`·`channel`·`workspace`를 지울 수 있다」가 토큰 표의 DELETE 회수를 무력하게 만든다). 세는 원본은 워커의 어떤 권한(연쇄 포함)으로도 줄지 않아야 한다.
+
+#### 결정
+
+- **B1 · 세는 원본: `agent_picture_mark`(migration 179, 번호는 planner 배정).** api가 그림을 쓰는 **같은 tx**(`write_picture_in_tx`)에서 `attachment` 행·토큰의 `attachment_id` 기록·감사와 함께 한 줄(`workspace_id`·`attachment_id`·`run_id`·`agent_member_id`·`written_at`)을 더하고, 하루 상한은 이 표에서 `written_at`이 **최근 24시간**인 줄을 센다. 굴러가는 창이고 시각은 DB 시계(`clock_timestamp()`의 열 기본값)다: UTC 하루 경계였다면 자정 앞뒤로 두 배를 쓸 수 있고, `attachment.created_at`처럼 워커가 고칠 수 있는 열이면 창이 움직인다. 표는 한 줄이 한 그림을 뜻하고 내용이 없다(id·시각뿐). 줄의 키는 `(workspace_id, attachment_id)`.
+- **B2 · 외래 키는 어느 방향으로도 없다.** FK 연쇄는 표 주인 권한으로 돌아서(위 표 5·7·8) 권한이 막은 DELETE를 부모 삭제로 되찾아 준다. `workspace`로의 `ON DELETE CASCADE`도 같다(삭제 뒤 같은 id로 다시 만들면 센 값이 0이다, 표 8). 그래서 참조 무결성 대신 키와 트리거가 줄을 지킨다. 대가: **삭제된 워크스페이스의 줄은 남는다**(청소는 api가 자기 워크스페이스에서 하므로 그 워크스페이스를 부르는 호출이 더는 없다). 줄은 id와 시각뿐이고 하루 상한 이하로 쌓이며 아무것도 가리키지 않는다.
+- **B3 · 권한과 트리거.** 잠금 블록 `agent-picture-mark-lockdown`(migration 179·`bootstrap_roles.sql`·`bootstrap_runtime_roles.sql`에 같은 글자): `momo_app` = SELECT·INSERT·DELETE(셈·행 쓰기·청소), **그 밖의 모든 역할(워커·relay·notifier·platform_admin·helper 읽기 역할)은 아무것도 없다**(워커는 읽지도 못한다), 아무도 UPDATE·TRUNCATE·REFERENCES·TRIGGER가 없다. 트리거 `agent_picture_mark_guard`: 어떤 UPDATE도 거절(23514), `written_at`이 24시간보다 최근인 줄의 DELETE도 거절(셈의 술어의 정확히 반대). 그래서 api의 청소가 창 값을 잘못 써도 오늘 값은 지워지지 않고 그 tx가 실패한다. RLS는 ENABLE+FORCE+`ws_isolation`(169·175·176과 같음).
+- **B4 · 토큰 잠금 블록 재발행과 청소 이전.** `attachment-write-token-lockdown`을 179가 **다시 낸다**(175의 첫 판은 이미 적용된 파일이라 그대로 두고 179가 뒤에 적용되어 이긴다 — 169→177의 `team-ai-task-lockdown`과 같은 방식; 두 bootstrap 파일은 179의 글자): `momo_worker` **SELECT·INSERT**(DELETE 회수 — 자기가 쓴 슬롯을 풀어 한 run에 그림을 더 쓸 길이었다), `momo_app` **SELECT·UPDATE·DELETE**(청소). 하루 지난 토큰 청소(만료 하루 뒤)와 표지 줄 청소(B5)는 **api가 토큰을 푼 직후 같은 tx**(`redeem_in_tx`, 풀린 토큰이 있을 때만)에서 한다. 워커의 발급은 아무것도 지우지 않는다. **주기 작업을 만들지 않은 까닭**: api는 테넌트를 나열할 수 없다(비우회 역할이라 `workspace`가 FORCE RLS로 보이지 않는다 — `momo-server/src/attachment_reclaim.rs` 머리말). 호출마다 자기 워크스페이스를 청소하는 것은 175의 「만들 때마다 청소」와 같은 모양이고, 그 워크스페이스에 호출이 더는 없으면 마지막 줄들이 남는다(위 B2의 대가와 같은 한계, 쌓이는 양은 하루 상한 이하).
+- **B5 · 청소는 셈이 볼 수 있는 줄에 닿지 않는다.** 표지 줄은 **창의 두 배(48시간)보다 오래된 것만** 지운다(셈은 24시간 안의 줄만 보므로 지워진 줄은 어느 셈에도 보이지 않았다). 트리거가 24시간 안의 DELETE를 따로 거절하므로 두 겹이다. 토큰 줄은 만료 하루 뒤(셈과 무관한 위생).
+- **B6 · 시작.** 표지는 비어 시작한다. 이 migration 이전에 쓰인 에이전트 그림은 세지 않는다 — 첫 호출자(#5372)와 같은 배포에서 처음 생기므로 운영에는 없다(백필하지 않는다: `attachment`에는 `created_at`의 범용 색인이 없어 — 부분 색인 둘뿐이다 — 마이그레이션이 큰 표를 훑게 된다).
+- **한 줄 요지**: 세는 표를 `attachment`에서 FK 없는 덧붙이기 전용 표지 표로 옮기고(워커는 권한이 없다), 토큰 DELETE를 워커에게서 거두고 청소를 api의 풀기로 옮겼다.
+
+#### 변경 후 — 같은 아홉 시도(같은 환경, migration 179 적용)
+
+| # | 워커의 시도 | 새 원본: `agent_picture_mark` 셈 |
+|---|---|---|
+| 1~4 | `attachment` 고치기·지우기, `member.kind` 바꾸기 | **1**(워커는 허용되지만 값이 그대로다) |
+| 5·7·8 | channel·run·workspace 삭제(연쇄), 같은 id로 다시 만들기 | **1**(연쇄가 이 표에 닿지 않는다: FK 없음) |
+| 6 | `TRUNCATE`(`attachment`·토큰·표지) | 거절(`permission denied`) |
+| 9 | 토큰 DELETE | 거절 |
+| 10 | 표지 표 SELECT·INSERT·UPDATE·DELETE | 모두 거절 |
+| 11 | 쓴 토큰의 `used_at`을 NULL로 | 거절 |
+
+시험은 이 시도들과 `SET ROLE`로 닿는 두 역할(`momo_memory`·`momo_helper_read`)을 **api 자신의 함수**로 잰다(시도 뒤 같은 워크스페이스에 새 run을 만들어 상한을 시도 전 값으로 놓고 쓰기를 부른다 — `CapReached`가 나와야 한다).
+
+#### 수용 기준 보충 (구현이 내야 할 사보타주 단정 — 각 항목은 해당 줄을 지우면 빨개져야 한다)
+
+- **WB1** 세는 원본: 상한 2에서 오래된(25시간) 표지·다른 워크스페이스의 표지·모든 종류의 `attachment` 행(에이전트의 `complete` 행 포함)은 세지 않고 23시간 전 표지 하나는 센다. 쓰기가 표지 줄을 하나 더한다. 서버 시험도 같다(`momo-server`의 일일 상한 시험: 표지는 센다, 오늘의 에이전트 `complete` 행은 세지 않는다, 위조 세계에서 워커가 첨부 행을 지우고 `member.kind`를 바꿔도 다음 쓰기가 429다). 옛 원본으로 되돌리면 빨갛다.
+- **WB2** 워커의 시도: 시험이 `attachment` 고치기·지우기, `member.kind`, channel·run·workspace(같은 id로 다시 만들기까지) 삭제, 토큰·표지 표의 DELETE·UPDATE·TRUNCATE, `SET ROLE`로 닿는 `momo_helper_read`·`momo_memory`까지 열다섯 시도를 하고(허용되는 것은 값이 그대로, 거절되는 것은 42501) api의 함수와 표지 줄 수로 잰다. 옛 원본으로 되돌리면 `attachment`·`member`·channel·workspace를 건드린 시도가, 토큰 셈으로 되돌리면 channel·run·workspace 삭제가 빨갛다.
+- **WB3** 표 모양: 표지 표에 FK가 0(양방향 카탈로그), 키가 `(workspace_id, attachment_id)`, RLS 켜짐·FORCE·정책 하나. 역할마다(`public`·`momo_helper_read`·`momo_memory` 포함 모든 비초월 역할) 표지 표의 권한이 `momo_app`의 SELECT·INSERT·DELETE뿐이다. 운영 역할 파일 순서(역할 → migration → 역할)의 시험도 같다.
+- **WB4** 트리거: 한 분·23시간 59분 전 줄의 DELETE는 거절되고 24시간 1분 전 줄은 지워진다. 어떤 UPDATE도 거절된다(소유자도).
+- **WB5** 청소: 발급은 아무것도 지우지 않는다. 풀기는 자기 워크스페이스의 만료 하루 뒤 토큰과 48시간보다 오래된 표지만 지우고(1·23·25·47시간 줄은 남는다), 다른 워크스페이스는 건드리지 않는다. 트리거를 끈 채로도 코드의 창이 48시간이다.
+- **WB6** 토큰 권한: `momo_worker` SELECT·INSERT, `momo_app` SELECT·UPDATE·DELETE, 나머지 0. run 삭제의 연쇄는 여전히 토큰을 지운다(그래서 셈이 토큰이 아니다).
+- **WB7** 같은 글자: 두 잠금 블록이 migration 179와 두 bootstrap 파일에서 같고(한 곳을 고치면 빨강), 175의 첫 판은 그대로다. 블록은 `ALL TABLES` 권한 뒤에 오고, 179에 블록 밖 `GRANT`가 없다. 표지 표의 `CREATE TABLE`에 `REFERENCES`가 없다.
+- **WB8** 같은 tx: 쓰기가 실패하거나 거절되면 표지도 없다(`RunOver`·반복 쓰기·소비하지 않은 토큰). 표지 줄은 이 쓰기의 attachment·run·agent다.
+
+#### 남는 위험 (보충)
+
+1. **새 워크스페이스는 0에서 시작한다.** 워커는 `workspace`·`member`·`channel`을 만들 수 있다(K14). 만든 워크스페이스마다 상한(200)이 새로 있다. api(비우회 역할)는 테넌트를 가로질러 세지 못하므로 **전역 상한은 이 보충의 범위 밖**이다(보관소 디스크 감시 같은 운영 쪽 몫). 다만 이 길은 그림을 쓰는 api 경로(재인코딩된 png·jpeg, 동시 4)를 거쳐야 한다.
+2. **표지 없이 쓰인 첨부.** 워커가 `attachment` 행을 직접 INSERT하는 길은 이 상한이 막는 길이 아니다(바이트는 api 보관소에 가지 않는다 — 그림 바이트가 api 보관소에 쓰이는 길은 이 PUT 하나이고 거기서 표지가 더해진다).
+3. **삭제된 워크스페이스의 표지 줄은 남는다**(B2·B4의 대가): id·시각뿐, 하루 상한 이하, 아무것도 가리키지 않는다.
+4. **api가 손상되면**(비우회 `momo_app`) 표지를 더하지 않거나 창 밖 줄을 지울 수 있다. 이 상한은 워커를 상대로 한다(api의 쓰기 길이 상한을 세는 주체다). 창 안의 줄은 트리거가 api에게도 지우지 못하게 한다.
+5. **되돌릴 때**: 이 migration 이전의 코드로 되돌리면 옛 발급이 하루 지난 토큰을 지우려다 `permission denied`(42501)로 실패한다(그림이 실패 문장으로 끝난다). 운영 DB에서 `GRANT DELETE ON attachment_write_token TO momo_worker;`로 되돌리고(표지 표와 트리거는 그대로 둬도 무해하다), 그 코드는 `attachment` 행을 세므로 위 구현 검수 M-1 (b)의 상태로 돌아간다.
+6. **동시 쓰기의 세기→INSERT 순서**(구현 검수 I-4)는 그대로다: READ COMMITTED에서 `WRITE_IN_FLIGHT`×프로세스 수만큼 넘칠 수 있다.
+
+#### runtime-unverified
+
+Railway 위의 실제 migration 적용 순서와 실제 운영 DB는 재지 않았다(운영 역할 파일 → migration → 역할 파일의 순서는 격리 PG에서 `prod_role_conformance_pg`로만 재었다). 비우회 `momo_app`으로 실제 api(`PUT /v1/agent-media`)를 거친 쓰기·429는 격리 PG의 실제 서버 시험으로 재었다.
+
+#### 검수가 먼저 볼 곳
+
+**RB1** 표지 표에 워커가 닿는 길이 정말 0인가(FK 양방향 0·권한·`SET ROLE`로 닿는 역할·트리거; 위 열다섯 시도). **RB2** 표지가 쓰기와 같은 tx이고 api의 셈이 그 표만 읽는가(`write_picture_in_tx`). **RB3** 청소가 셈이 볼 줄에 닿지 않는가(48시간·트리거 24시간)와 청소를 풀기 tx 안에 둔 선택(주기 작업이 아닌 까닭). **RB4** 토큰 잠금 블록 재발행의 적용 순서(175 뒤 179, 운영에서 역할 파일이 migration 앞뒤로 도는 순서)와 되돌릴 때 줄. **RB5** B2의 대가(삭제된 워크스페이스의 줄·새 워크스페이스 0)를 받아들일 만한가.
 
 ## 증보 9 (2026-11-07, #5469): 사진·GIF의 가로세로 요약 — 보내는 기기가 선언하고, 서버는 범위만 본다
 

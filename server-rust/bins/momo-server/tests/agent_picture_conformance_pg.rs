@@ -3095,18 +3095,15 @@ async fn the_daily_ceiling_is_counted_by_the_api_and_a_forged_world_meets_it_too
     let (id, _, _) = expect_201(&put(&w, ws, &within, picture.clone()).await);
     let row = attachment_row(&w, id).await;
     assert_eq!((row.uploader, row.channel_id), (forged_agent, channel));
-    // …the worker's own role (it may DELETE and UPDATE `attachment`) deletes the row its picture became and
-    // sets its agent down as a person — what used to bring the count back to zero (#5530)…
+    // …the worker's own role (it may DELETE and UPDATE `attachment`) deletes the row its picture became — what
+    // used to bring the count back to zero (#5530; the other ways, `member.kind` and the parents' deletes, are
+    // `agent_picture_pg`'s fifteen attempts: a run whose agent seat holds a person is refused at the spend, so
+    // it cannot be done here and still reach the ceiling)…
     sqlx::query("DELETE FROM attachment WHERE id = $1")
         .bind(id)
         .execute(&w.worker)
         .await
         .expect("the worker may delete an attachment row");
-    sqlx::query("UPDATE member SET kind = 'human'::member_kind WHERE id = $1")
-        .bind(forged_agent)
-        .execute(&w.worker)
-        .await
-        .expect("the worker may update a member row");
     // …and the next forged run meets the api's ceiling all the same
     let run = trigger_run_slot(&w, ws, channel, forged_agent, victim.alice).await;
     let again = forge_token(&w, ws, run, forged_agent, 1).await;
