@@ -183,6 +183,16 @@ oort_cohosted_agent_env_keys() {
   printf '%s\n' 'COMPOSE_PROFILES' 'HERMES_API_KEY' 'HERMES_BASE_URL' \
     'OORT_COHOSTED_AGENT_TOOLS_LOCKED' 'HERMES_LOGIN_RELAY_KEY' 'HERMES_LOGIN_RELAY_URL'
 }
+# ADR-0201 증보 v4 P2 G4 (#5369) FLIPS ADR-0203 증보 K-S2's "api only": OORT_COHOSTED_AGENT_TOOLS_LOCKED above and the two
+# connection-mode declarations below are read by api AND agent-worker, and compose gives both services the SAME
+# `${VAR:-}` for all three (scripts/tests/test_self_host_env_modes.sh and check_railway_catalog.py fail when one side
+# differs). The generator writes the team default mode only (TOOLS_LOCKED=1, these two EMPTY); the connection mode (a
+# Hermes with one person's apps, ADR-0203 K4) is the operator's, written by hand, and while either of these two holds a
+# non-empty value — even `0` — the team AI's delegation to Hermes stays shut on the worker (fail-closed). Not written here,
+# so an env file keeps whatever the operator typed; they are only named (never printed with a value) when found set.
+oort_cohosted_agent_connection_env_keys() {
+  printf '%s\n' 'OORT_COHOSTED_AGENT_CONNECTORS_LOCKED' 'OORT_COHOSTED_AGENT_CONNECTOR_APPS'
+}
 SELF_HOST_HERMES_BASE_URL="http://hermes:8642/v1"
 # #4078 / ADR-0203 증보 2026-10-19 Q3: the login relay sidecar of the same Hermes container.
 SELF_HOST_HERMES_LOGIN_RELAY_URL="http://hermes:8643"
@@ -565,6 +575,11 @@ declaration that the lock holds; here it is backed by the gate, and it stops
 being true if you edit infra/hermes/config.yaml or the start command. An env
 that already declares a different HERMES_BASE_URL is refused. Model
 authentication is a separate step. Local-install only — not for a T2 platform.
+The declarations are read by api AND agent-worker (the same value on both; compose
+gives them the same expression). This writes the team default mode: the two
+connection-mode declarations (oort_cohosted_agent_connection_env_keys) are never
+written and stay empty. A value you typed there is kept and only named: while either
+is non-empty the team AI's delegation to Hermes stays shut (ADR-0201 증보 v4 G4).
 On an existing env it writes the missing keys and sets the declaration keys
 to the bundled values (an empty value you chose is replaced); the generated
 HERMES_API_KEY and a valid HERMES_LOGIN_RELAY_KEY are never replaced.
@@ -1463,6 +1478,21 @@ ensure_cohosted_agent_env() {
   fi
   rewrite_env_assignment AGENT_PROVIDER_LOCAL_HOSTS "$(csv_with_item "$current" "$SELF_HOST_HERMES_HOST")"
   rewrite_env_assignment OORT_COHOSTED_AGENT_TOOLS_LOCKED "1"
+  # ADR-0201 증보 v4 G4: a connection-mode declaration left from an earlier hand-made setup is the operator's — kept,
+  # never rewritten, never printed with its value. Naming it is the point: api and agent-worker both read it, and
+  # while it is set the worker keeps the team AI's Hermes delegation shut.
+  local connection_set=""
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    [ "$(env_key_count "$key")" -le 1 ] ||
+      fail "${ENV_FILE}의 $key 항목은 최대 한 번만 있어야 한다."
+    if [ "$(env_key_count "$key")" -eq 1 ] &&
+      [ -n "$(env_value_once "$key" | tr -d '[:space:]')" ]; then
+      connection_set="${connection_set}${connection_set:+ }${key}"
+    fi
+  done <<EOF
+$(oort_cohosted_agent_connection_env_keys)
+EOF
   count="$(env_key_count COMPOSE_PROFILES)"
   current=""
   if [ "$count" -eq 1 ]; then
@@ -1478,6 +1508,10 @@ EOF
   printf '[self-host] %s 에 같은 서버 Hermes 키를 썼다 (oort_cohosted_agent_env_keys, 프로파일 agents).\n' \
     "$ENV_FILE" >&2
   printf '[self-host] OORT_COHOSTED_AGENT_TOOLS_LOCKED=1 은 운영자의 자기 선언이다. 여기서는 hermes 서비스가 잠금 게이트(exit 0) 없이는 뜨지 않는 것이 근거다.\n' >&2
+  if [ -n "$connection_set" ]; then
+    printf '[self-host] 연결 모드 선언이 env 에 남아 있다: %s (값은 출력하지 않는다). api 와 agent-worker 가 같은 값을 읽고, 값이 있는 동안 팀 AI 의 Hermes 위임(ADR-0201 증보 v4 G4)은 닫혀 있다. 팀 기본 모드로 돌아가려면 이 줄을 지운다.\n' \
+      "$connection_set" >&2
+  fi
   printf '[self-host] 이미 떠 있는 스택이라면 api · agent-worker 를 다시 만들어야 반영된다: %s\n' \
     "$(stack_restart_hint)" >&2
 }

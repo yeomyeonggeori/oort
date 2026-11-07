@@ -340,6 +340,37 @@ pub enum CreateOutcome {
     RequesterBusy,
 }
 
+/// How many tasks are **running** — in the workspace, and for `requester_member_id` — leaving out
+/// `except_run` (the run that is about to start one: it has no row yet, and a re-run of its first turn
+/// must not count itself). A task is *running* while its row is active and its run has not ended for
+/// good; the requester of a running task is the author of its run's trigger message. **The one
+/// definition of "running"**: [`create_in_tx`] counts with it under the workspace lock, and the helper's
+/// delegation door (ADR-0201 증보 v4 G6, #5369) reads it without the lock for its advertisement-time
+/// estimate — a delegation is a task (B5-5), so the bounds are the same two numbers.
+pub async fn running_counts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    requester_member_id: Uuid,
+    except_run: Option<Uuid>,
+) -> Result<(i64, i64), DbError> {
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT count(*)::bigint, \
+                count(*) FILTER (WHERE m.author_member_id = $3)::bigint \
+           FROM team_ai_task t \
+           JOIN agent_run r ON r.workspace_id = t.workspace_id AND r.id = t.run_id \
+           LEFT JOIN message m ON m.workspace_id = r.workspace_id AND m.id = r.trigger_message_id \
+          WHERE t.workspace_id = $1 AND t.state = 'active' \
+            AND ($2::uuid IS NULL OR t.run_id <> $2) \
+            AND r.status NOT IN ('succeeded', 'cancelled', 'timed_out')",
+    )
+    .bind(workspace_id)
+    .bind(except_run)
+    .bind(requester_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(counts)
+}
+
 /// Start a task: take the per-workspace lock, count the tasks that are running, and insert the row
 /// — one transaction, so two starts cannot both pass the count. A task is *running* while its row
 /// is active and its run has not ended for good; the requester of a running task is the author of
@@ -363,19 +394,12 @@ pub async fn create_in_tx(
     if exists.is_some() {
         return Ok(CreateOutcome::AlreadyExists);
     }
-    let (in_workspace, by_requester): (i64, i64) = sqlx::query_as(
-        "SELECT count(*)::bigint, \
-                count(*) FILTER (WHERE m.author_member_id = $3)::bigint \
-           FROM team_ai_task t \
-           JOIN agent_run r ON r.workspace_id = t.workspace_id AND r.id = t.run_id \
-           LEFT JOIN message m ON m.workspace_id = r.workspace_id AND m.id = r.trigger_message_id \
-          WHERE t.workspace_id = $1 AND t.state = 'active' AND t.run_id <> $2 \
-            AND r.status NOT IN ('succeeded', 'cancelled', 'timed_out')",
+    let (in_workspace, by_requester) = running_counts_in_tx(
+        conn,
+        new.workspace_id,
+        requester_member_id,
+        Some(new.run_id),
     )
-    .bind(new.workspace_id)
-    .bind(new.run_id)
-    .bind(requester_member_id)
-    .fetch_one(&mut *conn)
     .await?;
     if in_workspace >= limits.max_per_workspace {
         return Ok(CreateOutcome::WorkspaceBusy);
@@ -801,7 +825,11 @@ pub struct TaskContinueArgs {
 /// selectors, tag characters). A private, narrower list used to stand here, so a plan line with a
 /// Hangul filler or an emoji variation selector became a progress line the rule itself refuses
 /// (#4968).
-fn is_invisible(c: char) -> bool {
+///
+/// `pub` since #5369: the helper's delegation to Hermes (ADR-0201 증보 v4 P1) cleans the one sentence it
+/// writes and folds names for its identity filter by **this** predicate — "v3.1·v3.3이 쓰는 같은 규칙" —
+/// so a fourth private copy of the list cannot drift from the third.
+pub fn is_invisible(c: char) -> bool {
     is_unsafe_char(c)
 }
 

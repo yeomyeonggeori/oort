@@ -58,6 +58,11 @@ use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
 use momo_workspace_actions::team_ai_attachments as team_ai_files;
+use momo_workspace_actions::team_ai_hermes::{
+    self, DelegateCode, DelegationBounds, DelegationUsage, DoorFacts, HermesKind, HermesPrompt,
+    PinnedAgent, RequesterFacts, TargetResolution,
+};
+use momo_workspace_actions::team_ai_hermes_request::{self, CallVerdict, IdentityContext};
 use momo_workspace_actions::team_ai_limits::{self, LimitHit, Usage};
 use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
@@ -89,6 +94,96 @@ struct Gathered {
     /// this job reads it (the cooperative cancel check).
     task: Option<momo_agent::team_ai_task::TaskRow>,
     run_status: Option<RunStatus>,
+    /// ADR-0201 증보 v4 (#5369): what the delegation door reads from the database — present only when
+    /// the operator opened the delegation on this process, the `hermes` bundle is on and a human asked
+    /// ([`HermesGather::wanted`]). `None` is a closed door that was not even looked at.
+    hermes: Option<HermesGather>,
+}
+
+/// What the delegation door reads from the database (ADR-0201 증보 v4 P2, #5369), in the request's first
+/// read transaction. Read-only; every query is a tenant read under RLS.
+struct HermesGather {
+    /// The workspace's agents pinned to the operator's own link (G3's input).
+    pinned: Vec<PinnedAgent>,
+    /// The requester is a guest of the workspace or of the channel (G2).
+    guest: bool,
+    /// The workspace's own name, for the identity filter's list of names that only the context holds.
+    workspace_name: String,
+    /// What the requester **wrote** — the raw message body, without the lines the server appends to the
+    /// trigger turn (ids, types, sizes). The only text a name may legitimately come from (P1).
+    trigger_body: String,
+    /// Tasks running in this workspace / for this requester (G6's task bounds; a delegation is a task).
+    tasks_workspace: i64,
+    tasks_requester: i64,
+}
+
+impl HermesGather {
+    /// Read the door's inputs. Called only when the operator opened the delegation on this process, the
+    /// bundle is on and a human asked: otherwise the door is shut whatever the database says, and nothing
+    /// is read (an instance that never opted in pays nothing).
+    async fn read(
+        conn: &mut momo_db::PgConnection,
+        workspace_id: Uuid,
+        helper: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        trigger_message_id: Option<Uuid>,
+    ) -> Result<HermesGather, DbError> {
+        let pinned = team_ai_hermes::pinned_agents_in_tx(conn, workspace_id, helper).await?;
+        let guest = momo_agent::is_guest_in_channel_in_tx(
+            conn,
+            workspace_id,
+            requester.channel_id,
+            requester.member_id,
+        )
+        .await?;
+        let workspace_name: String =
+            momo_db::sqlx::query_scalar("SELECT name FROM workspace WHERE id = $1")
+                .bind(workspace_id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .unwrap_or_default();
+        let trigger_body: String = match trigger_message_id {
+            Some(id) => momo_db::sqlx::query_scalar(
+                "SELECT body FROM message WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+            )
+            .bind(workspace_id)
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .flatten()
+            .unwrap_or_default(),
+            None => String::new(),
+        };
+        let (tasks_workspace, tasks_requester) = momo_agent::team_ai_task::running_counts_in_tx(
+            conn,
+            workspace_id,
+            requester.member_id,
+            None,
+        )
+        .await?;
+        Ok(HermesGather {
+            pinned,
+            guest,
+            workspace_name,
+            trigger_body,
+            tasks_workspace,
+            tasks_requester,
+        })
+    }
+}
+
+/// What the delegation door did in one request, as names and numbers only (H9-I10, P11): the kinds it
+/// offered, and the closed word of what happened to a call of the tool. **Never the request sentence, a
+/// result, or the target's name.**
+#[derive(Debug, Clone, Default)]
+struct HermesTrace {
+    /// The kinds this request was offered at any call.
+    offered: Vec<&'static str>,
+    /// How the request's calls of `ask_hermes` went, in order: `not_offered`, `invalid_arguments`,
+    /// `unavailable` (the one that ends the turn in this slice). Closed words from [`DelegateCode`].
+    results: Vec<&'static str>,
+    /// The kind of the call that ended the turn as `unavailable`, and the agent it would have gone to.
+    ended_with: Option<(&'static str, Uuid)>,
 }
 
 /// What one request did, for the audit row and `via_ai` (H9-I10). Names and
@@ -113,6 +208,10 @@ struct TurnTrace {
     /// registry's `&'static str`, so a count of suggestions needs no text. **Never the prompt**
     /// the card carries, and never the card's label or body (H9-I10).
     suggested_command: Option<&'static str>,
+    /// ADR-0201 증보 v4 (#5369): what the delegation door offered and how a call of `ask_hermes` went.
+    /// `None` (the default, and every request of an instance that did not open the delegation) adds
+    /// nothing to the audit row.
+    hermes: Option<HermesTrace>,
 }
 
 impl TurnTrace {
@@ -139,6 +238,10 @@ impl TurnTrace {
         if let Some(command) = self.suggested_command {
             detail["suggested_command"] = json!(command);
         }
+        if let Some(hermes) = &self.hermes {
+            // names and closed words only — never the request sentence, a result or a target's name
+            detail["hermes"] = json!({"offered": hermes.offered, "results": hermes.results});
+        }
         detail
     }
 }
@@ -149,6 +252,9 @@ impl TurnTrace {
 fn wire_searches(wire: ProviderWire) -> bool {
     matches!(wire, ProviderWire::AnthropicMessages)
 }
+
+/// [`team_ai_hermes_request::judge_call`] under the name this module's loop reads it by.
+use team_ai_hermes_request::judge_call as team_ai_request_judge;
 
 /// `team_ai.turn`'s `outcome` for a card the helper refused to raise (B13-I5, B4-3): a reason
 /// code and nothing else, so refusals can be counted.
@@ -191,6 +297,9 @@ impl AgentWorker {
         let channel_id = payload.channel_id;
         let trigger_message_id = payload.trigger_message_id;
 
+        // ADR-0201 증보 v4 (#5369): has the operator opened the delegation on this process? Without it the
+        // door is shut whatever the database says, so nothing of it is read.
+        let hermes_delegation_opened = self.config.hermes_delegation_opened();
         let gathered = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let state = team_ai::read_state_in_tx(conn, workspace_id).await?;
@@ -267,6 +376,24 @@ impl AgentWorker {
                     }
                     None => 0,
                 };
+                let hermes = match &requester {
+                    Some(requester)
+                        if hermes_delegation_opened
+                            && state.roles.is_on(momo_agent::team_ai_roles::HERMES) =>
+                    {
+                        Some(
+                            HermesGather::read(
+                                conn,
+                                workspace_id,
+                                agent,
+                                requester,
+                                trigger_message_id,
+                            )
+                            .await?,
+                        )
+                    }
+                    _ => None,
+                };
                 Ok(Some(Gathered {
                     searches_today,
                     recent_requests,
@@ -279,6 +406,7 @@ impl AgentWorker {
                     candidates,
                     task,
                     run_status,
+                    hermes,
                 }))
             })
         })
@@ -400,17 +528,39 @@ impl AgentWorker {
 
         let model = payload.model_or(&self.config.default_model).to_string();
         let wire = transport.endpoint.wire;
-        let web = if !gathered.state.web_search {
-            WebSearch::Off
-        } else if !wire_searches(wire) {
-            WebSearch::NotSupported
-        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
-            .is_some_and(|cap| gathered.searches_today >= cap)
-        {
-            WebSearch::DailyCapReached
-        } else {
-            WebSearch::Available
+        // ADR-0201 증보 v4 P2 (#5369): one reading of "may this request search", shared with the task
+        // steps. The administrator's switch and the operator's `0` come BEFORE the wire, so a wire that
+        // cannot search never turns a switch into `NotSupported` (the state Hermes may answer, T14).
+        let web = WebSearch::judge(
+            gathered.state.web_search,
+            caps.search_off(),
+            wire_searches(wire),
+            team_ai_limits::search_cap(&gathered.state.limits, &caps)
+                .is_some_and(|cap| gathered.searches_today >= cap),
+        );
+        // ADR-0201 증보 v4 (#5369): the delegation door for this request — judged by ONE function over
+        // ten gates, from facts gathered once. `None` = the operator did not open the delegation on this
+        // process (or the bundle is off, or nobody human asked): the tool is not on any call of this
+        // request and the prompt says nothing about Hermes.
+        let door = match (&gathered.hermes, &gathered.requester) {
+            (Some(hermes), Some(requester)) => Some(
+                self.hermes_door_facts(
+                    workspace_id,
+                    &gathered.state,
+                    &caps,
+                    requester,
+                    hermes,
+                    web,
+                )
+                .await,
+            ),
+            _ => None,
         };
+        let identity = gathered
+            .hermes
+            .as_ref()
+            .map(|hermes| IdentityContext::from_roster(&gathered.roster, &hermes.workspace_name))
+            .unwrap_or_default();
         let mut trace = TurnTrace {
             model: model.clone(),
             wire: wire.as_str(),
@@ -438,8 +588,12 @@ impl AgentWorker {
         // B8 C1: the `card_suggest` commands this request is offered (`code` on = the work-request
         // card). The tool, the prompt and the check on what the model names all read this one list.
         let card_commands = roles.advertised_command_ids();
+        let hermes_prompt = |tainted: bool| match &door {
+            Some(door) => door.prompt(tainted),
+            None => HermesPrompt::Off,
+        };
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt_for(
+            ChatMessage::system(team_ai::system_prompt_full(
                 &gathered.roster,
                 web,
                 &roles.advertised_action_ids(false),
@@ -447,6 +601,7 @@ impl AgentWorker {
                 &[],
                 task_prompt,
                 roles.is_on(momo_agent::team_ai_roles::FILES),
+                &hermes_prompt(false),
             )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
@@ -460,6 +615,9 @@ impl AgentWorker {
         let deadline = self.config.team_ai_request_deadline;
 
         let mut card_call: Option<ProviderToolCall> = None;
+        // ADR-0201 증보 v4 (#5369): a call of the delegation tool that passed every check this slice
+        // makes ends the turn with the fixed `unavailable` sentence — nothing is sent to Hermes.
+        let mut hermes_unavailable = false;
         let (completion, call) = loop {
             let elapsed = started.elapsed();
             if trace.model_calls as usize >= team_ai::MAX_MODEL_CALLS || elapsed >= deadline {
@@ -488,7 +646,7 @@ impl AgentWorker {
             let tainted = read_used || trace.web_searches > 0;
             let offered = roles.advertised_action_ids(tainted);
             if tainted && !prompt_after_read {
-                messages[0] = ChatMessage::system(team_ai::system_prompt_for(
+                messages[0] = ChatMessage::system(team_ai::system_prompt_full(
                     &gathered.roster,
                     web,
                     &offered,
@@ -496,8 +654,25 @@ impl AgentWorker {
                     &roles.withheld_by_read(),
                     task_prompt,
                     roles.is_on(momo_agent::team_ai_roles::FILES),
+                    &hermes_prompt(true),
                 ));
                 prompt_after_read = true;
+            }
+            // ADR-0201 증보 v4 G1~G10: the delegation tool is on this call only if the door is open for
+            // the request as it stands now (`tainted` is G7). Its `kind` enum holds exactly the kinds
+            // offered; the same list is what the answer is judged against below (P4-4).
+            let hermes_verdict = match &door {
+                Some(door) => door.judge(tainted),
+                None => team_ai_hermes::DoorVerdict::Closed(team_ai_hermes::DoorClosed::BundleOff),
+            };
+            let hermes_offered: Vec<HermesKind> = hermes_verdict.kinds().to_vec();
+            if !hermes_offered.is_empty() {
+                let hermes_trace = trace.hermes.get_or_insert_with(HermesTrace::default);
+                for kind in hermes_verdict.kind_names() {
+                    if !hermes_trace.offered.contains(&kind) {
+                        hermes_trace.offered.push(kind);
+                    }
+                }
             }
             let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
                 momo_agent::tools::workspace_action_propose_definition(&offered)
@@ -512,6 +687,10 @@ impl AgentWorker {
             // behind the taint rule (B4-3): it changes no server state and a person sends what it
             // fills in, so a request that read something may still give it.
             momo_tools.extend(momo_agent::tools::card_suggest_definition(&card_commands));
+            // ADR-0201 증보 v4: the delegation tool, with the kinds the door offers (none = no tool).
+            momo_tools.extend(momo_agent::tools::ask_hermes_definition(
+                &hermes_verdict.kind_names(),
+            ));
             // The seam later slices fill: a tool a bundle owns leaves with it.
             momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
@@ -678,6 +857,74 @@ impl AgentWorker {
                 card_call = Some(card.clone());
                 break (completion, None);
             }
+            // ADR-0201 증보 v4 P4-4 (#5369): a call of the delegation tool is judged **after the model
+            // answered** — was the tool and the kind on offer to THIS call, has the request read nothing
+            // once this answer's own provider searches are counted (`trace.web_searches` already holds
+            // them: the same predicate the card path asks, F15), is the call well-formed, does the
+            // sentence pass the identity filter? A call that fails the first is `not_offered`, the other
+            // calls of that answer are NOT run (the `continue` below skips the reads), and nothing is
+            // sent anywhere. This branch sits after the proposal, `task_continue` and `card_suggest`
+            // checks on purpose: when one of them comes in the same answer it wins and this call is
+            // dropped (A5), and before the off-script check so a call that was never offered is answered
+            // `not_offered` instead of ending the request.
+            if let Some(delegate) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::ASK_HERMES)
+            }) {
+                let verdict = team_ai_request_judge(
+                    &hermes_offered,
+                    read_used || trace.web_searches > 0,
+                    &delegate.arguments_json(),
+                    gathered
+                        .hermes
+                        .as_ref()
+                        .map(|hermes| hermes.trigger_body.as_str())
+                        .unwrap_or(""),
+                    &identity,
+                );
+                let target = door.as_ref().and_then(DoorFacts::target_member_id);
+                let hermes_trace = trace.hermes.get_or_insert_with(HermesTrace::default);
+                match verdict {
+                    CallVerdict::Accepted { kind, request: _ } => {
+                        // The request sentence is dropped here: this slice keeps it nowhere.
+                        hermes_trace
+                            .results
+                            .push(DelegateCode::Unavailable.as_str());
+                        hermes_trace.ended_with = target.map(|target| (kind.as_str(), target));
+                        hermes_unavailable = true;
+                        break (completion, None);
+                    }
+                    CallVerdict::NotOffered => {
+                        hermes_trace.results.push(DelegateCode::NotOffered.as_str());
+                        messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: format!("({} 호출)", momo_agent::tools::ASK_HERMES),
+                        });
+                        messages.push(ChatMessage::user(
+                            ToolOutcome::Notice {
+                                code: DelegateCode::NotOffered.as_str(),
+                                sentence: DelegateCode::NotOffered.sentence().unwrap_or_default(),
+                            }
+                            .render(momo_agent::tools::ASK_HERMES),
+                        ));
+                        continue;
+                    }
+                    CallVerdict::Invalid(why) => {
+                        hermes_trace
+                            .results
+                            .push(DelegateCode::InvalidArguments.as_str());
+                        messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: format!("({} 호출)", momo_agent::tools::ASK_HERMES),
+                        });
+                        messages.push(ChatMessage::user(
+                            ToolOutcome::Invalid(why.sentence())
+                                .render(momo_agent::tools::ASK_HERMES),
+                        ));
+                        continue;
+                    }
+                }
+            }
             // Anything that is neither a read nor the proposal is the model going
             // off script.
             if completion
@@ -783,6 +1030,31 @@ impl AgentWorker {
         };
         trace.latency_ms = millis(started);
         let latency_ms = trace.latency_ms;
+
+        // ADR-0201 증보 v4 P14-S1 (#5369): the door is built, nothing sits behind it. A call that passed
+        // every check ends the turn with the fixed `unavailable` sentence (P9) — Hermes is not called, no
+        // picture or search happens, and the tokens this request spent are charged like any answer's.
+        // The turn's audit row says so (names and closed words), and so does `team_ai.delegate`.
+        if hermes_unavailable {
+            let sentence = DelegateCode::Unavailable
+                .sentence()
+                .unwrap_or_default()
+                .to_string();
+            return Some(
+                self.team_ai_finish(
+                    job,
+                    payload,
+                    run_id,
+                    Some(sentence),
+                    json!({}),
+                    spend,
+                    &model,
+                    Ending::Answered,
+                    Some(trace),
+                )
+                .await,
+            );
+        }
 
         if let Some(card) = card_call {
             return Some(
@@ -1346,6 +1618,70 @@ impl AgentWorker {
         .await
     }
 
+    /// ADR-0201 증보 v4 P2 (#5369): what the delegation door judges, gathered once for this request. The
+    /// database facts came in the first read transaction ([`HermesGather`]); the two that are not the
+    /// database's are the config's (`G4`'s declarations, the bounds) and the pin's (G5: does the target's
+    /// `operator_env` link resolve — the same function a mention of the agent resolves it by).
+    ///
+    /// **S1's counts**: the delegation counters (today, last ten minutes, in flight) are read from the
+    /// delegation marker on a `team_ai_task` row that S2's migration adds, so they are `0` here and G6
+    /// judges the two task bounds (rows that exist) and the operator's ceiling. `delegated` (G10) is
+    /// `false` for the same reason: nothing delegates within a turn until S2. This function runs for a
+    /// request's **first turn** only — a task step is routed away before it (`decide_step`) and its loop
+    /// offers no delegation tool (G9, structurally).
+    async fn hermes_door_facts(
+        &self,
+        workspace_id: Uuid,
+        state: &TeamAiWorkspace,
+        caps: &team_ai_limits::OperatorCaps,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        gather: &HermesGather,
+        web: WebSearch,
+    ) -> DoorFacts {
+        let target = team_ai_hermes::resolve_target(&gather.pinned, requester.member_id);
+        // G5 is worth a read only when there is a target and the declarations hold.
+        let pin_resolves = match &target {
+            TargetResolution::One(one) if self.config.hermes.g4().is_ok() => matches!(
+                self.resolve_agent_pin(workspace_id, one.member_id).await,
+                crate::PinOutcome::Applied(_, _, momo_settings::PinKind::OperatorEnv)
+            ),
+            _ => false,
+        };
+        let direct_mention = match &target {
+            TargetResolution::One(one) => {
+                team_ai_hermes::mentions_target(&gather.trigger_body, one)
+            }
+            _ => false,
+        };
+        DoorFacts {
+            roles: state.roles,
+            requester: RequesterFacts {
+                human: true,
+                guest: gather.guest,
+            },
+            target,
+            declarations: self.config.hermes.clone(),
+            pin_resolves,
+            bounds: DelegationBounds {
+                day_cap: team_ai_limits::delegation_cap(&state.limits, caps),
+                requester_window_max: team_ai_hermes::REQUESTER_WINDOW_MAX,
+                concurrent_max: team_ai_hermes::CONCURRENT_MAX,
+                tasks_workspace_max: self.config.team_ai_task.max_per_workspace,
+                tasks_requester_max: self.config.team_ai_task.max_per_requester,
+            },
+            usage: DelegationUsage {
+                tasks_workspace: gather.tasks_workspace,
+                tasks_requester: gather.tasks_requester,
+                ..DelegationUsage::default()
+            },
+            direct_mention,
+            task_step: false,
+            delegated: false,
+            web,
+            image_path_ready: team_ai_hermes::ATTACHMENT_WRITE_PATH_READY,
+        }
+    }
+
     /// One transaction: the message (if any), the run's end, the ledger row (if
     /// tokens were spent), the rail's terminal frame. **Routes nothing** — what
     /// the team AI says does not start another agent.
@@ -1398,6 +1734,12 @@ impl AgentWorker {
             })
         });
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
+        // ADR-0201 증보 v4 P11 (#5369): a delegation that ended as `unavailable` is one `team_ai.delegate`
+        // row — kind, closed code, the target agent's id. Never the request sentence (it is not kept).
+        let delegate_ended: Option<(&'static str, Uuid)> = trace
+            .as_ref()
+            .and_then(|trace| trace.hermes.as_ref())
+            .and_then(|hermes| hermes.ended_with);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
@@ -1616,6 +1958,26 @@ impl AgentWorker {
                             .by(agent)
                             .run(run_id)
                             .with_schema("momo.team_ai_turn.v1", detail),
+                    )
+                    .await?;
+                }
+                if let Some((kind, target)) = delegate_ended {
+                    audit::write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, team_ai_hermes::AUDIT_DELEGATE)
+                            .by(agent)
+                            .about(target)
+                            .run(run_id)
+                            .with_schema(
+                                team_ai_hermes::AUDIT_DELEGATE_SCHEMA,
+                                json!({
+                                    "kind": kind,
+                                    "code": DelegateCode::Unavailable.as_str(),
+                                    "target": target.to_string(),
+                                    "ms": 0,
+                                    "picture_bytes": 0,
+                                }),
+                            ),
                     )
                     .await?;
                 }

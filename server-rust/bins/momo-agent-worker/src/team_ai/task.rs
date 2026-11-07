@@ -499,18 +499,18 @@ impl AgentWorker {
         };
 
         // H5, for the whole task: once a step has read the workspace, no later step searches the web.
-        let web = if !gathered.state.web_search {
-            WebSearch::Off
-        } else if !wire_searches(wire) {
-            WebSearch::NotSupported
-        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
-            .is_some_and(|cap| gathered.searches_today >= cap)
-        {
-            WebSearch::DailyCapReached
-        } else if task.tool_calls > 0 {
-            WebSearch::AfterRead
-        } else {
-            WebSearch::Available
+        // The same single reading of "may this search" the first turn uses (ADR-0201 증보 v4 P2, #5369): the
+        // administrator's switch and the operator's `0` before the wire. A task that has read the workspace
+        // then loses an otherwise-available search to `AfterRead`.
+        let web = match WebSearch::judge(
+            gathered.state.web_search,
+            caps.search_off(),
+            wire_searches(wire),
+            team_ai_limits::search_cap(&gathered.state.limits, &caps)
+                .is_some_and(|cap| gathered.searches_today >= cap),
+        ) {
+            WebSearch::Available if task.tool_calls > 0 => WebSearch::AfterRead,
+            other => other,
         };
         // No card is offered to a step of a task (B5-6: a task is reading work, and the sensitive
         // set — whatever `SENSITIVE_ACTION_IDS` holds — is never offered inside one), and neither is
