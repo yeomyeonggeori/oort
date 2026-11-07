@@ -16,7 +16,7 @@ import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
 import { ExpressionStore } from "@/features/expressions/ExpressionStore";
 import { ExpressionsContext } from "@/features/expressions/context";
-import { resetSuggestMuteForTest } from "@/features/expressions/suggestMute";
+import { resetSuggestMuteForTest } from "@momo/core/features/expressions/suggestMute";
 import type { ExpressionTransport } from "@/features/expressions/transport";
 
 // =============================================================================
