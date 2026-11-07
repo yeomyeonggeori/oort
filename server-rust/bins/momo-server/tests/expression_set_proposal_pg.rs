@@ -988,7 +988,16 @@ async fn the_proposal_moves_the_set_under_its_approval_and_the_card_says_what_is
 
     // the drafts: one per ready slot (0, 1, 3), by slot index, the agent's, under the approval, the
     // approval's own expiry, the set's prompt as the agent's generated origin
-    let drafts: Vec<(Uuid, i32, Uuid, String, String, Value, chrono::DateTime<chrono::Utc>)> =
+    type DraftRow = (
+        Uuid,
+        i32,
+        Uuid,
+        String,
+        String,
+        Value,
+        chrono::DateTime<chrono::Utc>,
+    );
+    let drafts: Vec<DraftRow> =
         sqlx::query_as(
             "SELECT id, candidate_index, creator, state, name, origin, expires_at FROM expression_draft \
               WHERE approval_id = $1 ORDER BY candidate_index",
