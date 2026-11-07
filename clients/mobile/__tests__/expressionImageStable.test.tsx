@@ -455,6 +455,40 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     expect(layerCount(moving.name)).toBe(1);
   });
 
+  it('낡은 답이 두 번 이어지면 어느 표현이 내려갔는지 끝내 모른다: 두었던 파일을 전부 걷고 문은 닫힌 채 둔다 (#5491)', async () => {
+    const {store, files, deltas} = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    const drawn = [still, moving].map(
+      item => screen.getByTestId(`expression-image-${item.name}-large`).props.source.uri,
+    );
+    act(() => store.changed());
+    await flush();
+    expect(files.remove).not.toHaveBeenCalled(); // 알림은 파일을 걷지 않는다
+    const stale = {
+      status: 200,
+      json: {...FIXTURE_LIST, version: '2', baseVersion: '1', reset: false, items: []},
+    };
+    await act(async () => {
+      deltas[0](stale);
+    });
+    await flush();
+    expect(deltas).toHaveLength(2); // 한 번 더 읽는다
+    expect(files.remove).not.toHaveBeenCalled();
+    await act(async () => {
+      deltas[1](stale);
+    });
+    await flush();
+    // 두었던 파일은 하나도 남지 않는다: 지금 그린 것뿐 아니라 앞서 받아 둔 변형도 쓴 파일 전부다.
+    const written = files.write.mock.results.map(result => result.value as string);
+    const removed = files.remove.mock.calls.map(([uri]) => uri as string);
+    expect([...removed].sort()).toEqual([...written].sort());
+    expect(removed).toEqual(expect.arrayContaining(drawn));
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+  });
+
   it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 글자가 서며 그림 층은 없다', async () => {
     const {store, deltas} = setup(true);
     await act(async () => store.refresh(true));
