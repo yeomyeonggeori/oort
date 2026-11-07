@@ -1,8 +1,10 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Clock, Star, type LucideIcon } from "lucide-react";
 import {
+  CONTEXT_MENU_EVENT,
   EXPRESSION_GRID_COLS,
   EXPRESSION_SECTION_NAME_KEY,
+  isContextMenuSummonKey,
   moveGridPosition,
   RESULTS_SECTION,
   type ExpressionSection,
@@ -18,8 +20,9 @@ import { ExpressionImage } from "./ExpressionImage";
 // 이모티콘·GIF 탭의 그림 격자와 세트 띠 (owner 2026-11-07, #5453). 카카오톡처럼 **그림만** 보인다: 이름·`:코드:`·안내 글이 격자에 없다
 // (낭독 이름과 마우스를 올렸을 때의 `title`에만 있다). 모델(구역·방향키)은 코어 `gridSections` 이고 이 파일은 화면에 세우고 키를 받는 일만 한다.
 //
-// 격자: 구역(최근 -> 즐겨찾기 -> 세트별 -> 기타)마다 6열. 구역이 하나뿐이면 이름줄도 없다. 칸은 누르면 고르고(`onPick`), 오른쪽 클릭·길게 누르기·메뉴 키는
-// 항목 메뉴(`menu`)를 연다 - 즐겨찾기·신고·삭제는 호스트가 준다. 칸마다 `data-manage` 로 항목을 가리키므로 호스트가 닫힌 뒤 초점을 칸으로 돌려줄 수 있다.
+// 격자: 구역(최근 -> 즐겨찾기 -> 세트별 -> 기타)마다 6열. 구역이 하나뿐이면 이름줄도 없다. 칸은 누르면 고르고(`onPick`), 오른쪽 클릭·길게 누르기는
+// 항목 메뉴(`menu`)를 열고, 키보드의 메뉴 키·Shift+F10 은 칸이 직접 받아 같은 문으로 연다(아래 `summonAt`) - 즐겨찾기·신고·삭제는 호스트가 준다.
+// 칸마다 `data-manage` 로 항목을 가리키므로 호스트가 닫힌 뒤 초점을 칸으로 돌려줄 수 있다.
 // 키보드: 한 칸만 탭 순서에 있고(`tabIndex` 0, 나머지 -1), 방향키가 구역을 이어 붙인 격자 위에서 움직인다. Enter/Space 는 단추의 기본 동작이다.
 //
 // 세트 띠: 최근 · 즐겨찾기 · 세트마다 첫 그림 · 기타. 누르면 그 구역으로 스크롤한다(`aria-current` 가 지금 구역). 띠 끝의 `trailing`(＋)은 호스트가 준다.
@@ -40,6 +43,22 @@ const sectionSelector = (id: string) => `[data-section="${id}"]`;
 function clampPosition(position: GridPosition, sizes: readonly number[]): GridPosition {
   const section = Math.min(position.section, Math.max(0, sizes.length - 1));
   return { section, index: Math.min(position.index, Math.max(0, (sizes[section] ?? 1) - 1)) };
+}
+
+// 키보드로 칸 메뉴 부르기 (검수 7a H1, #5486). 사이드바 행 메뉴(`SidebarRowContextMenu`)가 이미 푼 모양 그대로다: 키를 직접 받아 칸의 사각형 위에
+// `contextmenu` 하나를 합성해 쏘면 Radix 트리거가 그 좌표로 메뉴를 세우므로 오른쪽 클릭·길게 누르기와 같은 문이고, 자리잡기·방향키·Enter·Esc·닫힘 뒤 초점 복귀도
+// Radix 것이다. 어느 키가 부르는가(`isContextMenuSummonKey`)와 쏘는 이벤트 이름은 방향키 모델과 같이 코어 `gridSections` 가 갖는다(직접 문구 장부는 이 파일의 낱말 문자열을 센다).
+// (사이드바와 이 파일이 같은 합성 함수를 따로 갖는다: 공용 `design/ui/context-menu` 로 올리는 일은 후속이다.)
+
+/** 칸의 왼쪽 아래 가까이에 `contextmenu` 를 합성해 쏜다 - 브라우저가 키보드 소환에서 쓰는 자리와 같고, 메뉴가 그 칸에 붙어 선다. */
+function summonAt(cell: HTMLElement): void {
+  const rect = cell.getBoundingClientRect();
+  cell.dispatchEvent(new MouseEvent(CONTEXT_MENU_EVENT, {
+    bubbles: true,
+    cancelable: true,
+    clientX: Math.round(rect.left + Math.min(16, rect.width / 2)),
+    clientY: Math.round(rect.bottom),
+  }));
 }
 
 export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, menu, onMenuCloseAutoFocus, containerRef, trailing }: {
@@ -146,6 +165,12 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
                         className="expression-grid-cell tap-target flex aspect-square w-full items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
                         onFocus={() => setActive(position)}
                         onClick={() => onPick(item)}
+                        onKeyDown={(event) => {
+                          if (!isContextMenuSummonKey(event)) return;
+                          // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면 같은 한 번의 키가 메뉴를 두 번 연다.
+                          event.preventDefault();
+                          summonAt(event.currentTarget);
+                        }}
                       >
                         <ExpressionImage item={item} size="medium" still />
                       </button>
@@ -171,7 +196,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
                 title={nameOf(section)}
                 aria-current={markedId === section.id}
                 data-strip={section.id}
-                className="expression-set-button tap-target flex size-control shrink-0 items-center justify-center overflow-hidden rounded-sm p-0.5 press hover:bg-surface-hover focus-visible:focus-ring"
+                className="expression-set-button tap-target flex size-control shrink-0 items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring"
                 onClick={() => jump(section.id)}
               >
                 {Icon ? <Icon aria-hidden="true" className="size-4" /> : first ? <ExpressionImage item={first} size="medium" still /> : null}

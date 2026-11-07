@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { FIXTURE_EXPRESSIONS, FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
 import { EXPRESSION_GRID_COLS } from "@momo/core/features/expressions/gridSections";
@@ -320,6 +320,38 @@ describe("칸 메뉴와 즐겨찾기", () => {
     fireEvent.click(await view.findByRole("menuitem", { name: "신고하기" }));
     expect(view.getByTestId("expression-confirm")).toBeTruthy();
     expect(view.queryByTestId("expression-grid")).toBeNull();
+  });
+});
+
+// 칸 메뉴의 키보드 길(검수 7a H1, #5486)의 jsdom 층. 실제 엔진·실제 키 누름(WebKit·Chromium)은 `ExpressionGrid.keyboardMenu.browser.test.ts` 가 재고, 엔진이 없는 레인에서도
+// 칸의 `onKeyDown` 이 지켜지도록 같은 약속을 합성 keydown 으로 한 번 더 건다(사이드바 행 메뉴 시험과 같은 모양). 오른쪽 클릭을 합성하는 위의 시험들은 이 키 처리를 지나지 않는다.
+describe("칸 메뉴의 키보드 길 (jsdom 층, #5486 H1)", () => {
+  it("Shift+F10 이 칸 메뉴를 열고 기본 동작을 가져가며, Esc 로 닫으면 초점이 그 칸으로 돌아온다. 다른 키·조합은 열지 않는다", async () => {
+    const { view } = await mount(storeOf(ITEMS));
+    const cell = view.getByRole("button", { name: "dam_b 메시지에 넣기" });
+    cell.focus();
+    // 이 줄이 없으면 아래 「열렸다」는 「keydown 을 쏘면 늘 열린다」로도 통과한다.
+    for (const init of [{ key: "F10" }, { key: "F10", shiftKey: true, ctrlKey: true }, { key: "m" }, { key: "ArrowRight" }]) {
+      fireEvent.keyDown(cell, init);
+      expect(view.queryByRole("menu"), JSON.stringify(init)).toBeNull();
+    }
+    cell.focus();
+    const summon = createEvent.keyDown(cell, { key: "F10", shiftKey: true });
+    fireEvent(cell, summon);
+    expect(summon.defaultPrevented).toBe(true);
+    expect((await view.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Add to favorites", "신고하기", "삭제하기"]);
+    await waitFor(() => expect(view.getByRole("menu").contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(view.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("전용 메뉴 키(ContextMenu)도 같은 문이다", async () => {
+    const { view } = await mount(storeOf(ITEMS));
+    const cell = view.getByRole("button", { name: "solo 메시지에 넣기" });
+    cell.focus();
+    fireEvent.keyDown(cell, { key: "ContextMenu" });
+    expect((await view.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Add to favorites", "신고하기", "삭제하기"]);
   });
 });
 
