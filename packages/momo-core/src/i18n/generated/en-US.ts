@@ -3434,6 +3434,28 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "expressions.suggest.group": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions"
+    }
+  ],
+  "expressions.suggest.mute": [
+    {
+      "type": 0,
+      "value": "Turn off suggestions for this word"
+    }
+  ],
+  "expressions.suggest.pick": [
+    {
+      "type": 0,
+      "value": "Preview "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,

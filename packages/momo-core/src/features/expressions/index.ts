@@ -8,6 +8,7 @@ export * from "./sets";
 export * from "./favorites";
 export * from "./gridSections";
 export * from "./sendBundle";
+export * from "./suggest";
 export * from "./message";
 export * from "./cards";
 export * from "./cardCopy";
