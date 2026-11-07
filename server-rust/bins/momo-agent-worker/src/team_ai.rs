@@ -1778,7 +1778,7 @@ impl AgentWorker {
         // picture, in this one transaction; every other ending posts the plain answer it always did.
         let picture_expected = delegate_settle
             .as_ref()
-            .is_some_and(|settle| settle.picture_bytes > 0);
+            .is_some_and(|settle| settle.picture_bytes.is_some());
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
@@ -2072,7 +2072,7 @@ impl AgentWorker {
                         settle.target,
                         code,
                         settle.ms,
-                        settle.picture_bytes,
+                        settle.picture_bytes.unwrap_or(0),
                     )
                     .await?;
                 } else if let Some(mark) = &called_unsettled {

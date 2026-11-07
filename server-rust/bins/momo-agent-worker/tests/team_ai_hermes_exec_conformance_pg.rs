@@ -2919,6 +2919,10 @@ async fn x18_a_delegated_picture_is_posted_with_the_answer_and_the_model_is_told
         merge_input.contains("pictures: 1"),
         "the model is told how many: {merge_input}"
     );
+    assert!(
+        system_prompt(&requests[1]).contains("그림 주소나 마크다운 그림은 쓰지 말고"),
+        "…and that the server attaches the picture itself"
+    );
     the_model_saw_only_a_count(&requests);
 
     // the upload: once, the bytes Hermes drew, a running run, a claim that counts the upload
@@ -3155,7 +3159,9 @@ async fn x19_an_answer_that_is_not_exactly_one_usable_picture_ends_without_a_tok
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn x20_an_api_that_refuses_or_is_gone_ends_picture_failed_after_one_write() {
     for status in [404u16, 409, 413, 422, 429, 502, 503, 504, 500] {
-        let w = world_with_api(drawn(), ApiBehavior::Status(status)).await;
+        // the fake gives the run's token slot back after each answer, so a retry WOULD succeed: the one
+        // connection below is the worker's own doing, not the table's one-slot rule stopping a second mint
+        let w = world_with_api(drawn(), ApiBehavior::StatusFreeSlot(status)).await;
         let (worker, routed) = w.worker(image_script(), &Setup::image());
         let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
         w.drain(&worker).await;
@@ -3170,11 +3176,10 @@ async fn x20_an_api_that_refuses_or_is_gone_ends_picture_failed_after_one_write(
             2,
             "{status}: the write-up came first (L3)"
         );
-        let tokens = write_tokens(&w.su, &w.t).await;
         assert_eq!(
-            (tokens.0, tokens.2),
-            (1, 0),
-            "{status}: minted, nothing recorded"
+            write_tokens(&w.su, &w.t).await,
+            (0, 0, 0),
+            "{status}: the fake gave the slot back; nothing is recorded"
         );
         assert!(attachments(&w.su, &w.t).await.is_empty(), "{status}");
         assert_eq!(
@@ -3193,6 +3198,17 @@ async fn x20_an_api_that_refuses_or_is_gone_ends_picture_failed_after_one_write(
         assert_eq!(audit[0]["picture_bytes"], json!(0), "{status}");
         the_picture_is_in_no_table(&w).await;
     }
+    // …and with the slot kept, the one token that was minted is there, unspent and recorded nowhere
+    let w = world_with_api(drawn(), ApiBehavior::Status(503)).await;
+    let (worker, _routed) = w.worker(image_script(), &Setup::image());
+    w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(w.api.as_ref().unwrap().connections(), 1);
+    assert_eq!(
+        write_tokens(&w.su, &w.t).await,
+        (1, 0, 0),
+        "minted, never spent, recorded nowhere"
+    );
     // an api nobody listens on: the connection is refused
     let mut w = world(drawn()).await;
     let dead = dead_origin().await;

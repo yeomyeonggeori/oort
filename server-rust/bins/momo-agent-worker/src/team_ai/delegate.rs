@@ -133,10 +133,11 @@ pub(super) struct HermesSettlement {
     pub estimated: bool,
     /// The target's current display name, for the 「위임 결과 수신」 line.
     pub display_name: String,
-    /// The bytes of the picture the api stored for this delegation (the attachment's size), `0` when no
-    /// picture was written. Also what tells the finishing transaction to post the answer **with** the run's
-    /// picture (P6): a number, never a byte.
-    pub picture_bytes: i64,
+    /// `Some(bytes)` — the size of the attachment the api stored for this delegation — when a picture was
+    /// written, `None` when none was. Its presence (not its value) is what tells the finishing transaction to
+    /// post the answer **with** the run's picture (P6): a number, never a byte, and never a number standing
+    /// in for "there is one".
+    pub picture_bytes: Option<i64>,
 }
 
 /// One `team_ai.delegate` audit row (P11): run, kind, closed result code, ms, picture bytes (the size of the
@@ -868,7 +869,7 @@ impl AgentWorker {
                     completion_tokens: 0,
                     estimated: true,
                     display_name,
-                    picture_bytes: 0,
+                    picture_bytes: None,
                 };
                 if let Some(hermes) = trace.hermes.as_mut() {
                     hermes.results.push(code.as_str());
@@ -962,8 +963,8 @@ impl AgentWorker {
             }
         };
         let (label, prompt_tokens, completion_tokens, estimated, ms) = usage_row;
-        let settle_for =
-            |code: &'static str, to: DelegationState, picture_bytes: i64| HermesSettlement {
+        let settle_for = |code: &'static str, to: DelegationState, picture_bytes: Option<i64>| {
+            HermesSettlement {
                 kind: kind.as_str(),
                 target,
                 code,
@@ -975,13 +976,14 @@ impl AgentWorker {
                 estimated,
                 display_name: display_name.clone(),
                 picture_bytes,
-            };
+            }
+        };
 
         // Hermes answered nothing usable: the fixed `failed` sentence, no merging call.
         let Some(shown) = merge_input else {
             if let Some(hermes) = trace.hermes.as_mut() {
                 hermes.results.push(code.as_str());
-                hermes.settle = Some(settle_for(code.as_str(), to, 0));
+                hermes.settle = Some(settle_for(code.as_str(), to, None));
             }
             trace.latency_ms = millis(started);
             return self
@@ -1047,7 +1049,7 @@ impl AgentWorker {
                 hermes.settle = Some(settle_for(
                     DelegateCode::Failed.as_str(),
                     DelegationState::Failed,
-                    0,
+                    None,
                 ));
             }
             return self
@@ -1070,7 +1072,7 @@ impl AgentWorker {
         // the row write's own check refuses a later one), while the run is still `running` (S2's
         // measurement). A stop is read first: the person who stopped it gets no attachment. One write, no
         // retry: a failed one is `picture_failed` (a second token is a second picture).
-        let mut picture_bytes = 0i64;
+        let mut picture_bytes: Option<i64> = None;
         if let Some(found) = picture.take() {
             if self
                 .team_ai_task_stopped(workspace_id, run_id)
@@ -1101,7 +1103,7 @@ impl AgentWorker {
                 None => Err(PictureRefusal::NoToken),
             };
             match written {
-                Ok(written) => picture_bytes = written.size_bytes,
+                Ok(written) => picture_bytes = Some(written.size_bytes),
                 Err(refusal) => {
                     // closed words only: the refusal holds no token, no address, no message of the api
                     tracing::warn!(
@@ -1114,7 +1116,7 @@ impl AgentWorker {
                         hermes.settle = Some(settle_for(
                             DelegateCode::PictureFailed.as_str(),
                             DelegationState::Failed,
-                            0,
+                            None,
                         ));
                     }
                     return self
@@ -1503,7 +1505,7 @@ impl AgentWorker {
                     completion_tokens: 0,
                     estimated: true,
                     display_name: String::new(),
-                    picture_bytes: 0,
+                    picture_bytes: None,
                 }),
             });
         }
@@ -1582,7 +1584,7 @@ impl AgentWorker {
                 completion_tokens: 0,
                 estimated: true,
                 display_name: String::new(),
-                picture_bytes: 0,
+                picture_bytes: None,
             }),
         });
         self.team_ai_finish(

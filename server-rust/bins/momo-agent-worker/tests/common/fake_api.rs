@@ -11,6 +11,10 @@
 //!   `momo-server`'s `agent_picture_conformance_pg` against the real decoder; here they are the statuses
 //!   [`ApiBehavior::Status`] answers).
 //! * [`ApiBehavior::Status`] answers any status with an empty JSON body.
+//! * [`ApiBehavior::StatusFreeSlot`] does the same **and gives the run's token slot back** (the token rows
+//!   are deleted before the answer goes out): a second `mint` would then succeed, so a worker that retried
+//!   would reach this server twice — the count of connections measures the worker's own "one write, no
+//!   retry", not the table's one-slot-per-run rule that would stop a retry anyway.
 //!
 //! It counts the connections that reach it and keeps what it was sent (head, path, body bytes), the status
 //! of every run of the workspace **at the moment the request arrived** (the state the writer's token is
@@ -49,6 +53,7 @@ pub enum AfterStore {
 pub enum ApiBehavior {
     Store { after: AfterStore },
     Status(u16),
+    StatusFreeSlot(u16),
 }
 
 /// One `PUT` the fake received.
@@ -137,6 +142,16 @@ impl FakeApi {
                         });
                         match behavior {
                             ApiBehavior::Status(code) => respond(&mut socket, code, "{}").await,
+                            ApiBehavior::StatusFreeSlot(code) => {
+                                sqlx::query(
+                                    "DELETE FROM attachment_write_token WHERE workspace_id = $1",
+                                )
+                                .bind(workspace_id)
+                                .execute(&su)
+                                .await
+                                .expect("the slot is given back");
+                                respond(&mut socket, code, "{}").await
+                            }
                             ApiBehavior::Store { after } => {
                                 let (code, text) =
                                     store(&su, &app, workspace_id, after, &path, &body).await;
