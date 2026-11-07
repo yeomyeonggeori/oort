@@ -46,7 +46,11 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   still?: boolean;
   onReady?: () => void;
 }) {
-  const { store, epoch, offline } = useExpressions();
+  const { store, epoch: storeEpoch, revoked, offline } = useExpressions();
+  // 이 표현의 그림이 걷히면(숨김·삭제 상세가 그 id 만 걷는다) 이 칸만 새 세대가 된다 — 다른 표현의 칸은 그대로라 다시 그려지지 않는다(ADR-0218 §15).
+  // 둘 다 오르기만 하는 수라 합이 같으면 둘 다 그대로다.
+  const revokedId = (item as Partial<Expression>).id; // 초안 미리보기에는 `id` 가 없다
+  const epoch = storeEpoch + (revokedId === undefined ? 0 : (revoked.get(revokedId) ?? 0));
   const reduce = useReduceMotion();
   const root = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
@@ -66,6 +70,9 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   // 이 칸이 이미 받은 바이트(같은 문자열을 가리킬 뿐 복사하지 않는다). 다시 재생·멈춤·보임 전환이 저장소의 96칸 캐시가 밀려나도 요청을 내지 않게 한다.
   const kept = useRef<{ epoch: number; bytes: Map<string, string> }>({ epoch: 0, bytes: new Map() });
   const fullVariant = size === "large" ? "large" : "small";
+  // 반응 칩의 움직이는 그림은 4번 돌고 멈추지 않고 계속 돈다(owner 2026-11-07, ADR-0218 증보 §13). 서버 GIF 의 반복 횟수는 4번이라(NETSCAPE 3) 타이머만 빼서는 마지막 장면에서 멈추므로
+  // 반응 칩은 같은 그림의 반복 횟수만 무한으로 바꾼 주소를 그린다(`store.loopedImage`). 동작 줄이기·화면 밖은 아래 `variant` 가 그대로 정지 thumb 이다.
+  const endless = size === "reaction";
   const variant = still || reduce || !visible || stopped ? "thumb" : fullVariant;
   const path = store ? expressionImagePath(store.base, item, variant) : null;
   const key = `${path}:${epoch}:${replay}:${attempt}`;
@@ -86,26 +93,28 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
     // 세대가 바뀌면(저장소가 그림을 걷었다) 가진 바이트도 버린다: 걷은 그림을 이 칸이 다시 내보이지 않는다.
     if (kept.current.epoch !== epoch) kept.current = { epoch, bytes: new Map() };
     const bytes = kept.current.bytes;
-    const held = bytes.get(path);
-    const source = held !== undefined ? Promise.resolve(held) : store.image(path).then((src) => { bytes.set(path, src); return src; });
+    // 이 칸이 쥐는 열쇠: 반응 칩의 움직이는 그림은 반복 횟수가 바뀐 주소라 같은 길의 원본과 섞이지 않게 따로 쥔다.
+    const heldKey = animated && endless ? `${path}#loop` : path;
+    const held = bytes.get(heldKey);
+    const source = held !== undefined ? Promise.resolve(held) : (animated && endless ? store.loopedImage(path) : store.image(path)).then((src) => { bytes.set(heldKey, src); return src; });
     source.then((src) => decoded(animated ? replayUrl(src, replay) : src)).then(
       (src) => { if (live) setShown({ key, epoch, owner, src }); },
       () => { if (live) setFailed(key); },
     );
     return () => { live = false; };
-  }, [store, path, key, offline, epoch, owner, animated, replay]);
+  }, [store, path, key, offline, epoch, owner, animated, endless, replay]);
   // 걸린 그림이 지금 보여도 되는 그림인가: 이 표현의 것이고, 같은 세대의 것이고, 오프라인이 아니고, 이 표현에 아직 그림이 있고, 깨지지 않았다.
   const current = shown && shown.owner === owner && shown.epoch === epoch && !offline && path !== null && failed !== shown.key ? shown : null;
   // 걸린 그림이 지금 바라는 그림(key)이기도 한가. 아니면 바라는 그림을 준비하는 동안 앞 그림이 대신 걸려 있는 것이다.
   const available = current !== null && current.key === key;
   const playing = animated && available;
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || endless) return;
     // GIF output is encoded for four total plays as well. This deadline switches
     // to the static thumb even on decoders with different loop metadata semantics.
     const timer = window.setTimeout(() => setStopped(true), (item.media?.[variant].durationMs ?? 0) * 4);
     return () => window.clearTimeout(timer);
-  }, [playing, key, item.media, variant]);
+  }, [playing, endless, key, item.media, variant]);
   // 사람이 승인 전에 **본** 그림이라는 신호(#4846): 실제로 그려졌고(load) 화면에 있을 때(visible) 한 번만, 둘의 순서와
   // 무관하게 낸다. 안 보이는 그림이나 깨진 그림(error)으로는 풀리지 않는다. 한 key에 한 번(`told`)이라 보임이 흔들려도,
   // 같은 그림이 다시 load돼도 신호는 더 오지 않는다.
@@ -130,7 +139,7 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}>
     {image}
     {/* 멈춘 그림 위에 덮는 단추: <img> 를 단추 안으로 옮기면 노드가 새로 만들어져 깜빡이므로, 그림은 그대로 두고 단추만 얹는다. */}
-    {stopped && !still && !reduce && size !== "reaction" && (
+    {stopped && !still && !reduce && !endless && (
       <button type="button" onClick={() => { setStopped(false); setReplay((value) => value + 1); }} aria-label={`${item.displayName} 다시 재생`} className="absolute inset-0 rounded-sm press focus-visible:focus-ring" />
     )}
     {size === "large" && failed === key && !offline && <button type="button" onClick={() => { setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}

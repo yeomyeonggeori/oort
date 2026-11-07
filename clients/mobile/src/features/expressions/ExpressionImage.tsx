@@ -19,6 +19,7 @@ import {
   expressionBoxOf,
   expressionVariantFor,
   isAnimatedMedia,
+  keepsMoving,
   type PhoneExpressionSize,
 } from './expressionBox';
 import {useExpressions} from './ExpressionProvider';
@@ -41,7 +42,8 @@ export type {PhoneExpressionSize} from './expressionBox';
 //      다시 재생에 네트워크가 없다.
 //
 // ADR-0218 의 약속은 그대로다: 움직임은 총 `EXPRESSION_REPEATS` 번 뒤 정지하고 탭으로 다시 시작한다. 고르개의 칸(`grid`·`tile`)·화면 밖·동작 줄이기·
-// 앱이 뒤에 있는 동안은 정지 thumb 이다.
+// 앱이 뒤에 있는 동안은 정지 thumb 이다. **반응 칩(`reaction`)만 예외**다(#5504, owner 2026-11-07 「계속 움직임」, ADR-0218 증보 §13): 4번 뒤에도 멈추지 않는다 -
+// 다만 동작 줄이기·화면 밖·앱이 뒤에 있는 동안은 같은 정지 thumb 이다.
 // =============================================================================
 
 /** 그려지는 층 하나. 같은 변형·같은 그림이면 키가 같다(`play` 는 다시 재생할 때만 오른다). */
@@ -106,6 +108,9 @@ export function ExpressionImage({
   const media = (live ?? expression).media;
   const isLive = live !== undefined && media !== null;
   const animated = media !== null && isAnimatedMedia(media);
+  // 반응 칩의 움직이는 그림은 4번 돌고 멈추지 않고 계속 돈다(owner 2026-11-07, ADR-0218 증보 §13). 서버 GIF 의 반복 횟수는 4번이라 타이머만 빼서는 iOS 도 마지막 장면에서 멈추므로
+  // 반응 칩은 반복 횟수만 무한으로 바꾼 파일을 그린다(`store.image(…, loop)`). 동작 줄이기·화면 밖·앱이 뒤에 있는 동안은 아래 `animate` 가 그대로 정지 thumb 다.
+  const endless = keepsMoving(size);
   const showing = visible ?? onScreen;
   const animate =
     animated && !still && showing && foreground && !reduceMotion && !stopped;
@@ -156,7 +161,14 @@ export function ExpressionImage({
   // 숨김·삭제 알림이 왔고 그 뒤 목록이 아직 적용되지 않았다(#5473): 어느 등록이 숨겨졌는지 모르는 동안은 그림 층을 그리지 않고 칸만 둔다.
   const held = changePending === true;
   useEffect(() => {
-    if (!store || !isLive) return undefined;
+    if (!store) return undefined;
+    if (!isLive) {
+      // 목록에서 빠졌다(숨김·삭제·끊김): 그렸던 층·실패·재생 시계를 버린다. 걷힌 파일 주소를 그린 층이 남지 않고, 다시 쓸 수 있게 되면 새로 받아 선다.
+      setLayers(previous => (previous.length === 0 ? previous : []));
+      setFailedKey(null);
+      setPlayingKey(null);
+      return undefined;
+    }
     if (held) {
       // 알림이 걷은 파일을 가리키던 층·실패·재생 시계를 버린다. 목록이 적용되면 이 효과가 다시 돌아 남은 표현만 받아 선다(칸은 그대로라 줄이 뛰지 않는다).
       setLayers([]);
@@ -170,7 +182,7 @@ export function ExpressionImage({
     }
     let alive = true;
     void store
-      .image({id: expression.id, name: expression.name}, variant)
+      .image({id: expression.id, name: expression.name}, variant, endless && moving)
       .then(uri => {
         if (!alive) return;
         if (uri === null) {
@@ -186,7 +198,7 @@ export function ExpressionImage({
     return () => {
       alive = false;
     };
-  }, [store, isLive, storeReady, held, targetKey, expression.id, expression.name, variant, moving]);
+  }, [store, isLive, storeReady, held, targetKey, expression.id, expression.name, variant, moving, endless]);
 
   // 새 층이 그려지면(`onLoad`) 앞 층을 걷는다. 한 프레임 쉬고 걷어서, 새 층이 화면에 올라오기 전에 앞 층이 사라지는 일이 없게 한다.
   const onLayerLoad = useCallback((layer: Layer) => {
@@ -207,13 +219,13 @@ export function ExpressionImage({
   // 움직이는 그림은 한 번 그려지기 시작한 뒤 `EXPRESSION_REPEATS` 번 돌고 정지한다(정지 thumb 으로 층이 바뀐다).
   const durationMs = rendition?.durationMs ?? 0;
   useEffect(() => {
-    if (!moving || playingKey === null) return undefined;
+    if (!moving || playingKey === null || endless) return undefined;
     const timer = setTimeout(() => {
       setStopped(true);
       setPlayingKey(null);
     }, durationMs * EXPRESSION_REPEATS);
     return () => clearTimeout(timer);
-  }, [moving, playingKey, durationMs]);
+  }, [moving, playingKey, durationMs, endless]);
 
   // 누름: 움직이는 그림은 첫 장면부터 다시 돌고, 정지 그림은 **누름을 받기만 하고 아무것도 하지 않는다**(다시 마운트·깜빡임·이동 없음).
   // 받기만 하는 까닭: 눌러도 화면이 그대로여야 한다 — 부모 줄에 넘기면 줄의 탭(스레드 열기)이 화면을 바꾼다. 누름을 받는 조건은 앞 판과 같다

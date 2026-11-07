@@ -490,12 +490,86 @@ pub async fn replace_draft(
     })).await
 }
 
+/// What one change did to the pictures on screen: the one thing the detail notice says
+/// (ADR-0218 §15 P2). Every caller of [`changed`] names one, so a plain `expression.changed`
+/// can no longer go out without its detail, and the audit action is derived from the same
+/// value so the two cannot drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Effect<'a> {
+    /// Registered: these ids are new. Nothing on screen goes down.
+    Created(&'a [Uuid]),
+    /// Display name or tags changed. The picture's bytes cannot change
+    /// (`expression_image_immutable`, migration 158), so nothing goes down; a picture that
+    /// did change would have to be classed with [`Effect::Hidden`] (§15 P5-5).
+    Edited(Uuid),
+    /// Hidden by a report: this id must leave every screen at once.
+    Hidden(Uuid),
+    /// Deleted: this id must leave every screen at once.
+    Deleted(Uuid),
+    /// The add policy changed. No picture is involved.
+    PolicyChanged,
+}
+
+/// Most ids one detail notice carries (`ChangedDetail.expressionIds`, §12 L4: one set approval).
+pub const DETAIL_MAX_IDS: usize = 40;
+
+impl Effect<'_> {
+    /// The audit action (`audit_log.action`), unchanged from before the detail notice existed.
+    fn audit_action(&self) -> &'static str {
+        match self {
+            Effect::Created(_) => "expression.created",
+            Effect::Edited(_) => "expression.edited",
+            Effect::Hidden(_) => "expression.hidden",
+            Effect::Deleted(_) => "expression.deleted",
+            Effect::PolicyChanged => "expression.policy_changed",
+        }
+    }
+    /// The detail notice's `action` word (`ChangedDetail.action`).
+    fn notice_action(&self) -> &'static str {
+        match self {
+            Effect::Created(_) => "created",
+            Effect::Edited(_) => "edited",
+            Effect::Hidden(_) => "hidden",
+            Effect::Deleted(_) => "deleted",
+            Effect::PolicyChanged => "policy_changed",
+        }
+    }
+    fn ids(&self) -> Vec<Uuid> {
+        match self {
+            Effect::Created(ids) => ids.to_vec(),
+            Effect::Edited(id) | Effect::Hidden(id) | Effect::Deleted(id) => vec![*id],
+            Effect::PolicyChanged => Vec::new(),
+        }
+    }
+}
+
+/// The `data` of the detail notice, or `None` when it cannot be written as the contract allows
+/// (`created` with no id, more than [`DETAIL_MAX_IDS`] ids): then only the plain notice goes out
+/// and every client takes everything down, which is the safe side (§15 P4). Nothing but ids, the
+/// action and the version travels: no name, no report, no picture.
+pub(crate) fn detail_data(workspace: Uuid, version: i64, effect: &Effect<'_>) -> Option<Value> {
+    let ids = effect.ids();
+    let bounded = match effect {
+        Effect::PolicyChanged => ids.is_empty(),
+        _ => !ids.is_empty() && ids.len() <= DETAIL_MAX_IDS,
+    };
+    bounded.then(|| {
+        json!({
+            "type": "expression.changed.detail",
+            "workspaceId": workspace,
+            "version": version.to_string(),
+            "action": effect.notice_action(),
+            "expressionIds": ids,
+        })
+    })
+}
+
 pub(crate) async fn changed(
     conn: &mut PgConnection,
     actor: Actor,
     id: Uuid,
-    action: &str,
     extra: Option<Value>,
+    effect: Effect<'_>,
 ) -> Result<i64, Error> {
     let v: i64 = sqlx::query_scalar(
         "UPDATE expression_catalog SET version=version+1 WHERE workspace_id=$1 RETURNING version",
@@ -505,7 +579,7 @@ pub(crate) async fn changed(
     .await?;
     write_audit(
         conn,
-        &AuditEntry::new(actor.workspace, action)
+        &AuditEntry::new(actor.workspace, effect.audit_action())
             .by(actor.member)
             .target("expression", id)
             .with_schema("momo.expression.changed.v1", {
@@ -519,11 +593,33 @@ pub(crate) async fn changed(
             }),
     )
     .await?;
+    let channel = format!(
+        "expressions:ws{}",
+        actor.workspace.to_string().to_uppercase()
+    );
+    // The detail goes out FIRST (a lower `outbox.id`, same tx, same connection), then the plain
+    // notice, whose bytes are exactly what they were before the detail existed: the old web, desktop
+    // and phone read only that one (§15 P3). The idempotency key is its own: the same key as the plain
+    // notice would make Centrifugo's idempotency cache drop whichever is published second.
+    if let Some(data) = detail_data(actor.workspace, v, &effect) {
+        let detail = BroadcastPayload {
+            channel: channel.clone(),
+            data,
+            version: None,
+            idempotency_key: Some(format!("expression-detail:{}:{v}", actor.workspace)),
+        };
+        emit_outbox(
+            &mut *conn,
+            actor.workspace,
+            OutboxKind::Broadcast,
+            "publish",
+            &json!(detail),
+            Some(actor.workspace),
+        )
+        .await?;
+    }
     let payload = BroadcastPayload {
-        channel: format!(
-            "expressions:ws{}",
-            actor.workspace.to_string().to_uppercase()
-        ),
+        channel,
         data: json!({"type":"expression.changed","workspaceId":actor.workspace,"version":v.to_string()}),
         version: None,
         idempotency_key: Some(format!("expression:{}:{v}", actor.workspace)),
@@ -569,7 +665,7 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
         let id=choice.draft_id;
         // The kind is decided here, at the one door every route registers through (§10 J3).
         let kind=resolve_kind(choice.kind,&media["large"])?;
-        let v=changed(conn,actor,id,"expression.created",None).await?;
+        let v=changed(conn,actor,id,None,Effect::Created(&[id])).await?;
         let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *")
             .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).bind(kind.as_str()).fetch_one(&mut *conn).await?;
         sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
@@ -636,7 +732,8 @@ pub async fn mutate(
         }
         let changes=patch.is_some() || (report.is_some() && status=="active") || (report.is_none() && patch.is_none() && status!="deleted");
         let (row,v)=if changes {
-            let v=changed(conn,actor,id,if report.is_some(){"expression.hidden"}else if patch.is_some(){"expression.edited"}else{"expression.deleted"},None).await?;
+            let effect=if report.is_some(){Effect::Hidden(id)}else if patch.is_some(){Effect::Edited(id)}else{Effect::Deleted(id)};
+            let v=changed(conn,actor,id,None,effect).await?;
             let next=if patch.is_some(){"active"}else if report.is_some(){"hidden"}else{"deleted"};
             let meta=metadata(&row)?;
             let display=patch.as_ref().and_then(|p|p.display_name.clone()).unwrap_or(meta.display_name);
@@ -699,14 +796,7 @@ pub async fn set_policy(pool: &PgPool, actor: Actor, policy: String) -> Result<(
                     .bind(policy)
                     .execute(&mut *conn)
                     .await?;
-                changed(
-                    conn,
-                    actor,
-                    actor.workspace,
-                    "expression.policy_changed",
-                    None,
-                )
-                .await?;
+                changed(conn, actor, actor.workspace, None, Effect::PolicyChanged).await?;
             }
             Ok(())
         })
@@ -725,4 +815,89 @@ pub async fn attachment_source(
             .bind(actor.workspace).bind(attachment).bind(channel).bind(actor.member).bind(crate::INPUT_BYTES as i64).fetch_optional(&mut *conn).await?.ok_or(Error::NotFound)?;
         Ok(row.try_get("drive_file_id")?)
     })).await
+}
+
+#[cfg(test)]
+mod detail_notice_tests {
+    //! ADR-0218 §15 P2: what the detail notice says, and the one rule that keeps the audit word and the
+    //! notice word from drifting (both come from the same [`Effect`]).
+    use super::*;
+
+    const WS: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(0x1000_0000_0000_4000_8000_0000_0000_0000 + n)
+    }
+
+    #[test]
+    fn the_notice_carries_the_version_the_action_and_ids_and_nothing_else() {
+        let one = id(1);
+        let data = detail_data(WS, 7, &Effect::Hidden(one)).expect("a hide is writable");
+        assert_eq!(
+            data,
+            json!({
+                "type": "expression.changed.detail",
+                "workspaceId": WS,
+                "version": "7",
+                "action": "hidden",
+                "expressionIds": [one],
+            })
+        );
+        let keys: Vec<&str> = data
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys.len(),
+            5,
+            "no name, reason or picture rides along: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn every_effect_names_its_own_action_and_ids() {
+        let (a, b) = (id(1), id(2));
+        let created = [a, b];
+        let cases: [(Effect<'_>, &str, &str, Vec<Uuid>); 5] = [
+            (
+                Effect::Created(&created),
+                "created",
+                "expression.created",
+                vec![a, b],
+            ),
+            (Effect::Edited(a), "edited", "expression.edited", vec![a]),
+            (Effect::Hidden(a), "hidden", "expression.hidden", vec![a]),
+            (Effect::Deleted(a), "deleted", "expression.deleted", vec![a]),
+            (
+                Effect::PolicyChanged,
+                "policy_changed",
+                "expression.policy_changed",
+                vec![],
+            ),
+        ];
+        for (effect, notice, audit, ids) in cases {
+            assert_eq!(effect.notice_action(), notice);
+            assert_eq!(
+                effect.audit_action(),
+                audit,
+                "the audit word is what it always was"
+            );
+            assert_eq!(effect.ids(), ids);
+        }
+    }
+
+    #[test]
+    fn a_notice_the_contract_would_refuse_is_not_written() {
+        // `created` with no id, or more than one set approval's worth: the plain notice alone goes out and every
+        // client takes everything down (the safe side).
+        assert!(detail_data(WS, 1, &Effect::Created(&[])).is_none());
+        let forty: Vec<Uuid> = (0..DETAIL_MAX_IDS as u128).map(id).collect();
+        assert!(detail_data(WS, 1, &Effect::Created(&forty)).is_some());
+        let forty_one: Vec<Uuid> = (0..=DETAIL_MAX_IDS as u128).map(id).collect();
+        assert!(detail_data(WS, 1, &Effect::Created(&forty_one)).is_none());
+        // A policy change has no id; the contract wants the list empty.
+        let policy = detail_data(WS, 1, &Effect::PolicyChanged).unwrap();
+        assert_eq!(policy["expressionIds"], json!([]));
+    }
 }

@@ -394,12 +394,15 @@ export function ThreadPanel({
       // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
       // 결함이 한 화면 건너에서 반복되는 것이다.
       onReplySent?.();
-      void sendReply(
-        root.id,
-        body,
-        options?.attachments,
-        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
-      );
+      // 켠 것만 싣는다: 링크 미리보기 ✕(#5016)와 미리 보기에 올린 이모티콘·GIF(#5490). 둘 다 없으면 예전과 같은 호출(옵션 자리가 비어 있음)이다.
+      // 이모티콘이 있으면 [큰 그림, 글]이 둘 다 이 스레드의 답글로 나간다 - 묶음의 순서·멱등·실패 규칙은 `sendReply` 가 지킨다.
+      const suppress = options?.suppressUnfurl === true;
+      const expression = options?.expression;
+      const flags =
+        !suppress && expression === undefined
+          ? undefined
+          : {...(suppress ? {suppressUnfurl: true as const} : {}), ...(expression === undefined ? {} : {expression})};
+      void sendReply(root.id, body, options?.attachments, flags);
     },
     [sendReply, root.id, onReplySent],
   );
@@ -577,6 +580,8 @@ export function ThreadPanel({
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               sendLabel="답글 보내기"
               onSend={onSend}
+              // 스레드 입력창도 대화 입력창처럼 이모티콘·GIF 를 미리 보기에 올려 글과 함께 보낸다(#5490, 웹 스레드 입력창 #5487 의 짝).
+              expressionBundle
             />
           }
         />

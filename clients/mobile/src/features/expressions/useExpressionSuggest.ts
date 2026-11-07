@@ -6,6 +6,7 @@ import {useEffect, useReducer, useState} from 'react';
 import {WORD} from '../../lib/techWords';
 import {useExpressions} from './ExpressionProvider';
 import {readExpressionFavorites} from './useExpressionFavorites';
+import {useExpressionSuggestOn} from './useExpressionSuggestSetting';
 
 // =============================================================================
 // 글을 치다 멈추면 입력창 위에 띄우는 이모티콘·GIF 추천 - 폰 (#5478, 웹 `useExpressionSuggest.ts` #5476 의 짝, 코어 #5454 1단계).
@@ -19,6 +20,8 @@ import {readExpressionFavorites} from './useExpressionFavorites';
 //     (「킹 받네」 → 「킹받네」 꼬리표) 나중에 「킹받네」만 쳤을 때 줄이 다시 뜬다.
 //   · `enabled` 가 거짓이거나(오프라인·미리 보기가 있음·창이 열려 있음·멘션 목록이나 명령을 치는 중·입력창에 포커스가 없음) 방을 모르거나, 보관함을 아직 못 받았거나 읽지 못했을 때도
 //     줄이 없다: 그림이 없는 줄을 보이지 않는다. 보관함 상태의 안내는 이모티콘 창이 말하고, 이 줄은 맞는 것이 있을 때만 선다.
+//   · 설정 › 보기 › 「이모티콘 추천」(#5493)을 끄면 줄이 **아예** 서지 않는다(`enabled` 와 같은 칸이지만 사람이 정한 것이라 이 훅이 직접 읽는다 - 이 훅을 쓰는 입력창은 모두 따라온다: 대화·스레드).
+//     끄면 그 순간 줄이 걷히고 다시 켜면 이미 친 글에 대해 0.3초 뒤 다시 선다(`active` 가 효과의 의존이라 기다림이 처음부터 다시 시작한다) - 앱을 다시 켤 필요가 없다.
 // 맞추는 상대는 서버가 확인한 목록(`items`, 꼬리표가 있다)이다 - 그리기용 `shelf` 는 꼬리표를 기기에 남기지 않는다. 즐겨찾기는 쓰는 순간에 저장소에서 읽는다(이모티콘 창의 ★ 가 따로 쥔 값이
 // 바뀌어도 이 입력창이 낡은 값으로 줄을 세우지 않게). 최근·즐겨찾기는 맞는 것들의 **순서**만 바꾼다(코어가 채워 넣지 않는다).
 // =============================================================================
@@ -47,8 +50,10 @@ export function useExpressionSuggest({
   enabled: boolean;
 }): ExpressionSuggest {
   const {store, items: catalog, state, usage} = useExpressions();
-  // 보관함을 서버에서 받아 확인한 뒤(`ready`)에만 선다: 아직 받는 중이거나, 읽지 못했거나, 끊겼으면 보일 그림이 없다.
-  const active = enabled && scope !== null && store !== null && state === WORD.ready;
+  // 사람이 설정에서 정한 켬·끔(#5493). 이 기기 · 이 워크스페이스 · 이 사람 기준이라 보관함 저장소가 아는 사람 id 로 읽는다(저장소가 없으면 어차피 줄이 없다).
+  const suggestOn = useExpressionSuggestOn(store?.workspaceId ?? '', store?.memberId ?? '');
+  // 설정이 켜져 있고 보관함을 서버에서 받아 확인한 뒤(`ready`)에만 선다: 아직 받는 중이거나, 읽지 못했거나, 끊겼으면 보일 그림이 없다.
+  const active = enabled && suggestOn && scope !== null && store !== null && state === WORD.ready;
   const [shown, setShown] = useState<{scope: string; text: string; items: readonly Expression[]} | null>(null);
   const [closed, setClosed] = useState<{scope: string; text: string} | null>(null);
   // 끈 낱말은 모듈 기억에 있다(`suggestMute`): 바꾸면 이 훅을 다시 그리게 한다.

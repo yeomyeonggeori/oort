@@ -18,6 +18,28 @@ export function compareExpressionVersions(a: ExpressionVersion, b: ExpressionVer
   return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
 }
 
+/**
+ * Whether `next` is the catalogue version right after `prior`. Versions are decimal strings of a counter the server raises by exactly one per change
+ * (`expression_catalog.version = version + 1`, one row lock), so nothing sits between two consecutive ones. A client may lay the response of ONE change
+ * of its own over its cache as a delta (`prior -> next`) only then: any other pair means someone else's change slipped in between (a hide, a delete)
+ * that this single response does not carry, and a cache that jumped over it keeps that registration `active` while later list reads never mention it
+ * again (#5491 review 1, H-5491-1). A value that is not a decimal string is not "next" either (the caller then re-reads the list).
+ */
+export function isNextExpressionVersion(prior: ExpressionVersion, next: ExpressionVersion): boolean {
+  const decimal = /^(0|[1-9][0-9]*)$/;
+  if (!decimal.test(prior) || !decimal.test(next)) return false;
+  // prior + 1 on the digits: a bigint version never passes through a JS number.
+  const digits = prior.split("");
+  let index = digits.length - 1;
+  while (index >= 0 && digits[index] === "9") {
+    digits[index] = "0";
+    index -= 1;
+  }
+  if (index < 0) digits.unshift("1");
+  else digits[index] = String(Number(digits[index]) + 1);
+  return digits.join("") === next;
+}
+
 export interface ExpressionCacheUpdate {
   cache: ExpressionCache;
   applied: boolean;

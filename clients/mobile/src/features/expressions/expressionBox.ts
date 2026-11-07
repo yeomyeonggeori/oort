@@ -47,6 +47,12 @@ export const EXPRESSION_POINTS: Partial<Record<PhoneExpressionSize, number>> = {
 /** 움직이는 그림은 GIF 를 총 이만큼 돌고 정지한다(ADR-0218 D1: 총 4회 뒤 정지, 탭으로 다시). */
 export const EXPRESSION_REPEATS = 4;
 
+/**
+ * 이 크기의 움직이는 그림은 4번 돌고 멈추지 않고 계속 도는가: **반응 칩만** 그렇다(owner 2026-11-07, ADR-0218 증보 §13). 크기 이름은 표의 키에서 꺼낸다(위 머리말: 글자 낱말을 새로 쓰지 않는다).
+ * 동작 줄이기·화면 밖·앱이 뒤에 있는 동안은 이 크기도 정지 thumb 이다(`expressionVariantFor` 의 `animate`).
+ */
+export const keepsMoving = (size: PhoneExpressionSize): boolean => size === SIZE.reaction;
+
 export interface ExpressionBox {
   width: number;
   height: number;
