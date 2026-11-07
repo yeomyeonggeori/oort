@@ -2572,6 +2572,24 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.panel.a11y": [
+    {
+      "type": 0,
+      "value": "이모티콘 창"
+    }
+  ],
+  "expressions.panel.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "아직 이모티콘이 없어요. 아래의 ＋로 만들거나 가져와 보세요."
+    }
+  ],
+  "expressions.panel.emptyGif": [
+    {
+      "type": 0,
+      "value": "아직 움직이는 이모티콘이 없어요. 아래의 ＋로 가져오거나 만들 수 있어요."
+    }
+  ],
   "expressions.panel.viewEmoticon": [
     {
       "type": 0,
@@ -2982,10 +3000,30 @@ export const catalog: MessageCatalog = {
       "value": "즐겨찾기에 추가"
     }
   ],
+  "expressions.picker.favoriteAdded": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 즐겨찾기에 추가했어요"
+    }
+  ],
   "expressions.picker.favoriteRemove": [
     {
       "type": 0,
       "value": "즐겨찾기에서 빼기"
+    }
+  ],
+  "expressions.picker.favoriteRemoved": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 즐겨찾기에서 뺐어요"
     }
   ],
   "expressions.picker.grid": [
@@ -3032,6 +3070,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기 지우기"
+    }
+  ],
+  "expressions.preview.cleared": [
+    {
+      "type": 0,
+      "value": "미리 보기를 지웠어요"
     }
   ],
   "expressions.preview.group": [
@@ -3092,6 +3136,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "반응하기"
+    }
+  ],
+  "expressions.sheet.keyboard": [
+    {
+      "type": 0,
+      "value": "키보드 열기"
     }
   ],
   "expressions.sheet.loading": [

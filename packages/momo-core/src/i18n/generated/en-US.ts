@@ -2740,6 +2740,24 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.panel.a11y": [
+    {
+      "type": 0,
+      "value": "Emoticon panel"
+    }
+  ],
+  "expressions.panel.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "No emoticons yet. Use the + below to make or import some."
+    }
+  ],
+  "expressions.panel.emptyGif": [
+    {
+      "type": 0,
+      "value": "No animated emoticons yet. Use the + below to import or make some."
+    }
+  ],
   "expressions.panel.viewEmoticon": [
     {
       "type": 0,
@@ -3150,10 +3168,38 @@ export const catalog: MessageCatalog = {
       "value": "Add to favorites"
     }
   ],
+  "expressions.picker.favoriteAdded": [
+    {
+      "type": 0,
+      "value": "Added "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to favorites"
+    }
+  ],
   "expressions.picker.favoriteRemove": [
     {
       "type": 0,
       "value": "Remove from favorites"
+    }
+  ],
+  "expressions.picker.favoriteRemoved": [
+    {
+      "type": 0,
+      "value": "Removed "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from favorites"
     }
   ],
   "expressions.picker.grid": [
@@ -3200,6 +3246,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "expressions.preview.cleared": [
+    {
+      "type": 0,
+      "value": "Preview removed"
     }
   ],
   "expressions.preview.group": [
@@ -3260,6 +3312,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "React"
+    }
+  ],
+  "expressions.sheet.keyboard": [
+    {
+      "type": 0,
+      "value": "Show keyboard"
     }
   ],
   "expressions.sheet.loading": [

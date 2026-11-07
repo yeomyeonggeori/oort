@@ -3,7 +3,7 @@ import { EXPRESSION_SUGGEST_DEBOUNCE_MS, suggestExpressions, suggestionKeywords 
 import { recentExpressions } from "@momo/core/features/expressions/usage";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { useExpressions } from "./context";
-import { muteKeywords, mutedKeywords } from "./suggestMute";
+import { muteKeywords, mutedKeywords } from "@momo/core/features/expressions/suggestMute";
 
 // =============================================================================
 // 글을 치다 멈추면 입력창 위에 띄우는 이모티콘·GIF 추천 (#5476, 코어 #5454 1단계). 이 훅이 가진 것은 **시계와 기억**이다: 맞추는 일은 코어
