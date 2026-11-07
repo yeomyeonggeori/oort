@@ -4,7 +4,6 @@ import { indexedDbExpressionDisk } from "./idb";
 import type { DiskImage } from "./port";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __expressionDiskClock: number | undefined;
 }
 

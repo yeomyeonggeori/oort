@@ -291,6 +291,7 @@ describe("MA5 대조 청소: 목록에 active 로 없는 디스크 키를 지운
     await firstRun(world, backend, [1, 2, 3]);
     const store = boot(world, backend);
     await store.refresh();
+    await store.settleDisk(); // 목록 적용 때 돈 대조 청소가 끝나게 한다: 아래에서 지워지는 것은 알림이 이름으로 부른 id 의 지우기뿐이어야 한다
     const handlers = expressionNoticeHandlers(store);
     const before = keysOfCompartment(backend).length;
     world.hide(2);
@@ -324,8 +325,10 @@ describe("MA6 알림은 그리기만 막는다", () => {
     const before = keysOfCompartment(backend).length;
     expect(store.imageCacheStats().entries).toBe(3);
     const release = world.holdImages();
+    const asked = world.imageCalls.length;
     const inflight = store.image(world.pathOf(store, 4, "large")); // 아직 디스크에 없는 그림이 받는 중이다
     inflight.catch(() => undefined);
+    await vi.waitFor(() => expect(world.imageCalls.length).toBe(asked + 1)); // 디스크에 없어 네트워크 요청이 실제로 시작됐다(그 뒤에 알림이 온다)
     world.add(5);
     const handlers = expressionNoticeHandlers(store);
     handlers.changed(plain("5")); // 상세 없는 옛 알림: 메모리 전부 폐기 + 목록 읽기
