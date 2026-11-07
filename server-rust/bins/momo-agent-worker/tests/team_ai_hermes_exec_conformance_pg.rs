@@ -59,8 +59,11 @@ use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
+#[path = "common/fake_api.rs"]
+mod fake_api;
 #[path = "common/fake_hermes.rs"]
 mod fake_hermes;
+use fake_api::{dead_origin, AfterStore, ApiBehavior, FakeApi};
 use fake_hermes::{Behavior, FakeHermes};
 
 const MASTER_KEY: &str = "conformance-5370-master";
@@ -607,6 +610,10 @@ struct Routed {
     model: Arc<ScriptedModel>,
     hermes: Arc<dyn ChatProvider>,
     model_run_statuses: Mutex<Vec<String>>,
+    /// #5372: `(n, run, the api's pool)` — a person stops `run` (the cancel route's own statement) right after
+    /// the helper's model answered for the `n`-th time, so a stop can be made to land **between** the merging
+    /// call and the picture's upload.
+    stop_after_call: Mutex<Option<(usize, Uuid, PgPool)>>,
 }
 
 #[async_trait]
@@ -628,7 +635,27 @@ impl ChatProvider for Routed {
         .await
         .unwrap_or_default();
         self.model_run_statuses.lock().unwrap().push(statuses);
-        self.model.complete(endpoint, request).await
+        let answer = self.model.complete(endpoint, request).await;
+        let stop = self.stop_after_call.lock().unwrap().clone();
+        if let Some((n, run, app)) = stop {
+            if self.model.requests().len() == n {
+                let ws = self.workspace_id;
+                with_tenant_tx(&app, ws, move |conn| {
+                    Box::pin(async move {
+                        momo_agent::run::cancel_run_in_tx(
+                            conn,
+                            ws,
+                            run,
+                            &json!({"code": "cancelled_by_user"}),
+                        )
+                        .await
+                    })
+                })
+                .await
+                .expect("the api's role cancels the run");
+            }
+        }
+        answer
     }
 }
 
@@ -647,6 +674,19 @@ struct Setup {
     /// The lease the outbox gives every job it claims (`WORKER_LEASE_SECONDS`); `None` keeps the worker's
     /// default (300 s).
     lease_seconds: Option<i64>,
+    /// #5372: `OORT_API_INTERNAL_ORIGIN` — where the picture's writer dials. `Unset` is the default of every
+    /// delegation of S2 (a search never writes a picture).
+    picture_origin: PictureOrigin,
+}
+
+/// Where the worker is told the api lives.
+#[derive(Clone)]
+enum PictureOrigin {
+    Unset,
+    /// The world's fake api.
+    Api,
+    /// Some other origin (a dead port).
+    Other(String),
 }
 
 impl Setup {
@@ -659,6 +699,28 @@ impl Setup {
             search_cap: None,
             key: true,
             lease_seconds: None,
+            picture_origin: PictureOrigin::Unset,
+        }
+    }
+
+    /// `image()`, but the worker was given no private origin (`OORT_API_INTERNAL_ORIGIN` unset).
+    fn image_without_origin() -> Setup {
+        Setup {
+            picture_origin: PictureOrigin::Unset,
+            ..Setup::image()
+        }
+    }
+
+    /// The operator declared `image` (and not a search), the writer dials the world's fake api.
+    fn image() -> Setup {
+        Setup {
+            hermes: HermesDeclarations {
+                tools_locked: true,
+                image_tool: true,
+                ..HermesDeclarations::default()
+            },
+            picture_origin: PictureOrigin::Api,
+            ..Setup::open()
         }
     }
 }
@@ -669,6 +731,8 @@ struct World {
     t: Tenant,
     hermes: Uuid,
     fake: FakeHermes,
+    /// #5372: the api the picture is uploaded to (only a world made by [`world_with_api`] has one).
+    api: Option<FakeApi>,
 }
 
 async fn world(behavior: Behavior) -> World {
@@ -686,7 +750,17 @@ async fn world(behavior: Behavior) -> World {
         t,
         hermes,
         fake,
+        api: None,
     }
+}
+
+/// A world whose helper can upload a picture: the same, plus a fake api answering `PUT /v1/agent-media/…`
+/// with the route's own functions as the non-bypass `momo_app` role ([`fake_api`]).
+async fn world_with_api(behavior: Behavior, api: ApiBehavior) -> World {
+    let mut w = world(behavior).await;
+    let app = momo_app_pool().await;
+    w.api = Some(FakeApi::start(w.su.clone(), app, w.t.workspace_id, api).await);
+    w
 }
 
 impl World {
@@ -704,6 +778,16 @@ impl World {
         }
         config.provider_link_master_key = Some(MASTER_KEY.to_string());
         config.team_ai_daily_search_cap = setup.search_cap;
+        config.api_internal_origin = match &setup.picture_origin {
+            PictureOrigin::Unset => None,
+            PictureOrigin::Api => Some(
+                self.api
+                    .as_ref()
+                    .expect("this setup dials the world's fake api")
+                    .origin(),
+            ),
+            PictureOrigin::Other(origin) => Some(origin.clone()),
+        };
         if setup.key {
             config.provider.bearer = HERMES_BEARER.to_string();
         }
@@ -719,6 +803,7 @@ impl World {
             model: ScriptedModel::new(script),
             hermes: http_provider(Duration::from_secs(20), policy).expect("the guarded provider"),
             model_run_statuses: Mutex::new(Vec::new()),
+            stop_after_call: Mutex::new(None),
         });
         (
             AgentWorker::new(self.pool.clone(), routed.clone(), config),
@@ -2626,4 +2711,910 @@ async fn x17_a_short_job_lease_caps_the_claim_the_called_commit_stretches() {
         "succeeded",
         "…and the delegation ends well under the short lease"
     );
+}
+
+// =================================================================================================
+// #5372 (ADR-0201 증보 v4 P14-S4) — the picture kind: `image` on offer, one picture taken from Hermes's
+// answer, uploaded through the write path S3 built (a fake api with the route's own functions), posted with
+// the answer. A10 and the picture halves of A8, A9, A12, A13.
+// =================================================================================================
+
+/// What the helper asks Hermes to draw (a distinctive sentence to search the tables for).
+const DRAW: &str = "파란 고양이가 우산을 쓴 정지 그림 한 장 4c7e1d";
+const PICTURE_MARKER: &str = "IHDR-5372-picture-marker-b19d2e";
+
+/// A picture as far as the worker looks at one: the png signature, then a body nobody decodes in this suite
+/// (the fake api records what it was sent), with a marker that nothing but the picture itself may carry.
+fn picture_bytes() -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    bytes.extend_from_slice(PICTURE_MARKER.as_bytes());
+    bytes.extend((0u8..=250).cycle().take(3_000));
+    bytes
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// `data:image/<declared>;base64,<bytes>` — built at run time.
+fn address(declared: &str, bytes: &[u8]) -> String {
+    format!("data:image/{declared};base64,{}", b64(bytes))
+}
+
+fn answering(text: String) -> Behavior {
+    Behavior::Answer {
+        text,
+        usage: Some((21, 9)),
+    }
+}
+
+/// Hermes's answer for a picture as its API server writes it: a sentence, the leftover `MEDIA:` path line a
+/// reader must never open, and the picture as the `data:image/…` address.
+fn drawn() -> Behavior {
+    answering(format!(
+        "그렸어요.\nMEDIA:/opt/data/cache/images/cat.png\n![그림]({})",
+        address("png", &picture_bytes())
+    ))
+}
+
+/// The helper's script for one good picture: the call, then the write-up.
+fn image_script() -> Vec<ChatCompletion> {
+    vec![ask_hermes("image", DRAW), say("파란 고양이를 그렸어요.")]
+}
+
+const ASK_PICTURE: &str = "@oort-helper 파란 고양이 그려 줘";
+
+type AttachmentTuple = (Uuid, Option<Uuid>, Uuid, String, String, String, i64);
+
+#[derive(Debug)]
+struct AttachmentRow {
+    message_id: Option<Uuid>,
+    uploader: Uuid,
+    status: String,
+    name: String,
+    mime: String,
+    size: i64,
+}
+
+async fn attachments(su: &PgPool, t: &Tenant) -> Vec<AttachmentRow> {
+    let rows: Vec<AttachmentTuple> = sqlx::query_as(
+        "SELECT id, message_id, uploader_member_id, status::text, name, mime, size_bytes \
+           FROM attachment WHERE workspace_id = $1 ORDER BY created_at, id",
+    )
+    .bind(t.workspace_id)
+    .fetch_all(su)
+    .await
+    .expect("attachments");
+    rows.into_iter()
+        .map(|row| AttachmentRow {
+            message_id: row.1,
+            uploader: row.2,
+            status: row.3,
+            name: row.4,
+            mime: row.5,
+            size: row.6,
+        })
+        .collect()
+}
+
+/// `(rows, rows spent, rows that recorded an attachment)` of the write-token table.
+async fn write_tokens(su: &PgPool, t: &Tenant) -> (i64, i64, i64) {
+    sqlx::query_as(
+        "SELECT count(*), count(used_at), count(attachment_id) \
+           FROM attachment_write_token WHERE workspace_id = $1",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(su)
+    .await
+    .expect("write tokens")
+}
+
+async fn last_agent_message(su: &PgPool, t: &Tenant) -> Option<(Uuid, Value)> {
+    sqlx::query_as::<_, (Uuid, Value)>(
+        "SELECT id, props FROM message \
+          WHERE workspace_id = $1 AND author_member_id = $2 AND type::text = 'text' \
+          ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .fetch_optional(su)
+    .await
+    .expect("the helper's last message")
+}
+
+/// A15 of the model's side (P6, I6): whatever the helper's model was shown, none of it holds a byte of the
+/// picture, an address, a `MEDIA:` mark or the marker — only the count.
+fn the_model_saw_only_a_count(requests: &[ChatRequest]) {
+    let head = b64(&picture_bytes())[..32].to_string();
+    for request in requests {
+        for message in &request.messages {
+            for banned in [
+                "data:image",
+                "base64,",
+                "MEDIA:",
+                "/opt/data",
+                PICTURE_MARKER,
+                head.as_str(),
+            ] {
+                assert!(
+                    !message.content.contains(banned),
+                    "the model was shown `{banned}`: {}",
+                    message.content
+                );
+            }
+        }
+    }
+}
+
+/// The picture's bytes, the `MEDIA:` line and the marker are in **no table** the worker could have written
+/// them to (the attachment row holds a name, a type and a size — never a byte).
+async fn the_picture_is_in_no_table(w: &World) {
+    let head = b64(&picture_bytes())[..32].to_string();
+    for needle in [
+        head.as_str(),
+        PICTURE_MARKER,
+        "MEDIA:",
+        "/opt/data",
+        "data:image",
+    ] {
+        for (what, n) in count_in_tables(&w.su, &w.t, needle).await {
+            assert_eq!(n, 0, "`{needle}` is in {what}");
+        }
+    }
+}
+
+/// A10 (the good path) and I6 for a picture. The door offers exactly `image`; Hermes is called once with the
+/// fixed instruction; **the merging call is told `pictures: 1` and nothing of the picture**; one `PUT` with the
+/// single-use token carries the bytes Hermes drew, while the run is `running` and under a claim that already
+/// counts the upload's own deadline; the answer is one message with the attachment bound to it, uploaded by
+/// the helper; one Hermes ledger row; the audit row names the kind and the bytes and never the picture.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x18_a_delegated_picture_is_posted_with_the_answer_and_the_model_is_told_only_a_count() {
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let mut setup = Setup::image();
+    // a deadline whose worst case WITHOUT the upload (100 + 2 × 20 + 30 = 170 s) is below what the claim left
+    // at the upload must show if the upload's own 40 s is in it (210 s)
+    setup.deadline = Duration::from_secs(100);
+    let (worker, routed) = w.worker(image_script(), &setup);
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+
+    let requests = routed.model.requests();
+    assert_eq!(
+        offered_kinds(&requests[0]),
+        Some(vec!["image".to_string()]),
+        "the declared image, and no search (not declared)"
+    );
+    assert!(
+        system_prompt(&requests[0]).contains("`image`"),
+        "the line that offers it"
+    );
+    // Hermes: one call, the fixed instruction of the kind
+    assert_eq!(w.fake.connections(), 1, "one request reached Hermes");
+    let body: Value = serde_json::from_str(&w.fake.seen()[0].body).expect("a JSON body");
+    let system = body["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("정지 그림 한 장"), "{system}");
+    assert!(
+        !system.contains("GIF") && !system.contains("움직"),
+        "no motion is promised"
+    );
+    // the merging call: no tool, a count, nothing of the picture
+    assert_eq!(requests.len(), 2, "the decision and the write-up");
+    assert!(requests[1].tools.is_empty() && requests[1].momo_tools.is_empty());
+    let merge_input: String = requests[1]
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        merge_input.contains("pictures: 1"),
+        "the model is told how many: {merge_input}"
+    );
+    the_model_saw_only_a_count(&requests);
+
+    // the upload: once, the bytes Hermes drew, a running run, a claim that counts the upload
+    let api = w.api.as_ref().unwrap();
+    assert_eq!(api.connections(), 1, "one write, no retry");
+    let puts = api.seen();
+    assert_eq!(
+        puts[0].body,
+        picture_bytes(),
+        "the bytes are what Hermes drew"
+    );
+    assert!(
+        puts[0].head.starts_with("put /v1/agent-media/"),
+        "{}",
+        puts[0].head
+    );
+    assert!(puts[0]
+        .head
+        .contains("content-type: application/octet-stream"));
+    assert_eq!(
+        puts[0].run_statuses, "running",
+        "the picture is written while the run is `running` (S2's measurement, S3's judgement)"
+    );
+    let left = puts[0].claim_secs_left.expect("a claim at the upload");
+    assert!(
+        left > 180.0 && left <= 210.0,
+        "the claim counts Hermes's deadline, two model calls, the slack AND the upload's 40 s: {left}"
+    );
+
+    // the answer: one message, the attachment bound to it, uploaded by the helper
+    let (message, props) = last_agent_message(&w.su, &w.t).await.expect("the answer");
+    assert_eq!(
+        w.last_agent_text().await.as_deref(),
+        Some("파란 고양이를 그렸어요.")
+    );
+    let rows = attachments(&w.su, &w.t).await;
+    assert_eq!(rows.len(), 1);
+    let picture = &rows[0];
+    assert_eq!(picture.message_id, Some(message));
+    assert_eq!(picture.uploader, w.t.agent_id);
+    assert_eq!(picture.status, "complete");
+    assert_eq!(picture.name, "picture-1.png");
+    assert_eq!(picture.mime, "image/png");
+    assert_eq!(picture.size, picture_bytes().len() as i64);
+    assert_eq!(
+        write_tokens(&w.su, &w.t).await,
+        (1, 1, 1),
+        "one token, spent once, and it recorded the attachment"
+    );
+    assert_eq!(
+        props[momo_agent::team_ai_task::DELEGATED_PROPS_KEY][0]["kind"],
+        json!("image"),
+        "the chip says what was delegated"
+    );
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+    assert_eq!(w.run_error_code(run).await, None);
+    let task = w.task(run).await;
+    assert_eq!(
+        (task.state.as_str(), task.marker.as_deref()),
+        ("ended", Some("done"))
+    );
+    assert!(task.request_null);
+    // one Hermes row from Hermes's own report, none for the picture
+    let ledger = w.hermes_ledger(run).await;
+    assert_eq!(ledger.len(), 1);
+    assert_eq!((ledger[0].prompt, ledger[0].completion), (21, 9));
+    assert!(!ledger[0].estimated);
+    // the audit row: kind, ok, the bytes that were stored — and nothing of the picture
+    let audit = w.delegate_audit(run).await;
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["kind"], json!("image"));
+    assert_eq!(audit[0]["code"], json!("ok"));
+    assert_eq!(audit[0]["picture_bytes"], json!(picture_bytes().len()));
+    the_picture_is_in_no_table(&w).await;
+}
+
+/// A10: what is not exactly one usable still ends `picture_failed` **before** a token is minted — two
+/// pictures, a GIF (declared, and one that lies about it), another type, bad base64, bytes that are no
+/// picture, more than 5 MiB, a `MEDIA:` line without an address — and an answer with nothing that says a
+/// picture was made is `failed` (the sentence 「만들어졌지만 올리지 못했어요」 would be false). Every one: Hermes
+/// was called once, **no request reached the api, no token, no attachment, no write-up call**, one Hermes
+/// ledger row, the fixed sentence.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x19_an_answer_that_is_not_exactly_one_usable_picture_ends_without_a_token() {
+    let picture = picture_bytes();
+    let mut over = b"\x89PNG\r\n\x1a\n".to_vec();
+    over.resize(momo_messaging::AGENT_PICTURE_MAX_INPUT_BYTES + 1, 0);
+    let cases: Vec<(&str, String, &str)> = vec![
+        (
+            "two pictures",
+            format!(
+                "![a]({}) ![b]({})",
+                address("png", &picture),
+                address("png", &picture)
+            ),
+            "picture_failed",
+        ),
+        (
+            "a gif",
+            format!("![a]({})", address("gif", b"GIF89a\x01\x00\x01\x00")),
+            "picture_failed",
+        ),
+        (
+            "a gif that says png",
+            format!("![a]({})", address("png", b"GIF89a\x01\x00\x01\x00")),
+            "picture_failed",
+        ),
+        (
+            "an svg",
+            format!(
+                "![a]({})",
+                address("svg+xml", b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+            ),
+            "picture_failed",
+        ),
+        (
+            "base64 that is none",
+            "![a](data:image/png;base64,A)".to_string(),
+            "picture_failed",
+        ),
+        (
+            "bytes that are no picture",
+            format!("![a]({})", address("png", b"%PDF-1.7 not a picture at all")),
+            "picture_failed",
+        ),
+        (
+            "5 MiB and one byte",
+            format!("![a]({})", address("png", &over)),
+            "picture_failed",
+        ),
+        (
+            "a MEDIA line and no address",
+            "그렸어요.\nMEDIA:/opt/data/cache/images/cat.png".to_string(),
+            "picture_failed",
+        ),
+        (
+            "words only",
+            "그림 도구를 쓸 수 없어요.".to_string(),
+            "failed",
+        ),
+        (
+            "an http picture only",
+            "![a](https://example.com/cat.png) 이거예요".to_string(),
+            "failed",
+        ),
+    ];
+    for (name, text, code) in cases {
+        let w = world_with_api(
+            answering(text),
+            ApiBehavior::Store {
+                after: AfterStore::Nothing,
+            },
+        )
+        .await;
+        let (worker, routed) = w.worker(image_script(), &Setup::image());
+        let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+        w.drain(&worker).await;
+
+        assert_eq!(w.fake.connections(), 1, "{name}: Hermes was called once");
+        assert_eq!(
+            w.api.as_ref().unwrap().connections(),
+            0,
+            "{name}: nothing reached the api"
+        );
+        assert_eq!(
+            write_tokens(&w.su, &w.t).await,
+            (0, 0, 0),
+            "{name}: no token was minted"
+        );
+        assert!(attachments(&w.su, &w.t).await.is_empty(), "{name}");
+        assert_eq!(
+            routed.model.requests().len(),
+            1,
+            "{name}: no write-up of an answer that has no usable picture"
+        );
+        let expected = if code == "failed" {
+            team_ai_hermes::DelegateCode::Failed
+        } else {
+            team_ai_hermes::DelegateCode::PictureFailed
+        };
+        assert_eq!(
+            w.last_agent_text().await.as_deref(),
+            expected.sentence(),
+            "{name}: the fixed sentence of `{code}`"
+        );
+        assert_eq!(run_status(&w.su, run).await, "failed", "{name}");
+        assert_eq!(
+            w.run_error_code(run).await.as_deref(),
+            Some(format!("hermes_{code}").as_str()),
+            "{name}"
+        );
+        assert_eq!(
+            w.hermes_ledger(run).await.len(),
+            1,
+            "{name}: one Hermes row"
+        );
+        let audit = w.delegate_audit(run).await;
+        assert_eq!(audit.len(), 1, "{name}");
+        assert_eq!(audit[0]["code"], json!(code), "{name}");
+        assert_eq!(audit[0]["picture_bytes"], json!(0), "{name}");
+        let task = w.task(run).await;
+        assert_eq!(
+            (task.state.as_str(), task.marker.as_deref()),
+            ("ended", Some("failed")),
+            "{name}"
+        );
+        assert!(task.request_null, "{name}");
+    }
+}
+
+/// A10: the api's own refusals (a picture the decoder cannot take — a bomb, a declared size past the pixel
+/// ceiling —, a slot that stays busy, a run that is over, a ceiling) reach the person as `picture_failed`;
+/// a dead api does too. Every one: Hermes once, **one write and no retry**, the write-up was made (the
+/// picture failed only after it), no attachment, a token that was minted and never recorded one, the fixed
+/// sentence, one Hermes row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x20_an_api_that_refuses_or_is_gone_ends_picture_failed_after_one_write() {
+    for status in [404u16, 409, 413, 422, 429, 502, 503, 504, 500] {
+        let w = world_with_api(drawn(), ApiBehavior::Status(status)).await;
+        let (worker, routed) = w.worker(image_script(), &Setup::image());
+        let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+        w.drain(&worker).await;
+        assert_eq!(w.fake.connections(), 1, "{status}: Hermes was called once");
+        assert_eq!(
+            w.api.as_ref().unwrap().connections(),
+            1,
+            "{status}: one write, no retry (a second token is a second picture)"
+        );
+        assert_eq!(
+            routed.model.requests().len(),
+            2,
+            "{status}: the write-up came first (L3)"
+        );
+        let tokens = write_tokens(&w.su, &w.t).await;
+        assert_eq!(
+            (tokens.0, tokens.2),
+            (1, 0),
+            "{status}: minted, nothing recorded"
+        );
+        assert!(attachments(&w.su, &w.t).await.is_empty(), "{status}");
+        assert_eq!(
+            w.last_agent_text().await.as_deref(),
+            team_ai_hermes::DelegateCode::PictureFailed.sentence(),
+            "{status}"
+        );
+        assert_eq!(
+            w.run_error_code(run).await.as_deref(),
+            Some("hermes_picture_failed"),
+            "{status}"
+        );
+        assert_eq!(w.hermes_ledger(run).await.len(), 1, "{status}");
+        let audit = w.delegate_audit(run).await;
+        assert_eq!(audit[0]["code"], json!("picture_failed"), "{status}");
+        assert_eq!(audit[0]["picture_bytes"], json!(0), "{status}");
+        the_picture_is_in_no_table(&w).await;
+    }
+    // an api nobody listens on: the connection is refused
+    let mut w = world(drawn()).await;
+    let dead = dead_origin().await;
+    let setup = Setup {
+        picture_origin: PictureOrigin::Other(dead),
+        ..Setup::image()
+    };
+    let (worker, _routed) = w.worker(image_script(), &setup);
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(w.fake.connections(), 1);
+    assert_eq!(
+        w.last_agent_text().await.as_deref(),
+        team_ai_hermes::DelegateCode::PictureFailed.sentence()
+    );
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
+    assert!(attachments(&w.su, &w.t).await.is_empty());
+    w.api = None;
+}
+
+/// P4 「취소」 / A13: a person who stops the run **after the write-up and before the upload** gets no
+/// picture — no request reaches the api, no token, no attachment, no message — and the ledger keeps its one
+/// Hermes row (the cancel route settled it).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x21_a_stop_between_the_write_up_and_the_upload_leaves_no_picture() {
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    // the stop lands right after the helper's SECOND model answer: the merging call
+    *routed.stop_after_call.lock().unwrap() = Some((2, run, momo_app_pool().await));
+    w.drain(&worker).await;
+
+    assert_eq!(routed.model.requests().len(), 2, "the write-up was made");
+    assert_eq!(w.fake.connections(), 1, "Hermes was called once");
+    assert_eq!(
+        w.api.as_ref().unwrap().connections(),
+        0,
+        "the stop is read before the upload: nothing is written"
+    );
+    assert_eq!(write_tokens(&w.su, &w.t).await, (0, 0, 0));
+    assert!(attachments(&w.su, &w.t).await.is_empty());
+    assert_eq!(run_status(&w.su, run).await, "cancelled");
+    assert_eq!(w.last_agent_text().await, None, "no answer after a stop");
+    assert_eq!(
+        w.hermes_ledger(run).await.len(),
+        1,
+        "the cancel route settled the Hermes row"
+    );
+}
+
+/// A10 (the two halves of "both") and the step's own gate: `image` is offered when the operator declared it and
+/// the ceiling is set — and a deployment that declares nothing, or has no ceiling, or whose worker has no private
+/// origin, spends nothing. Without a private origin the door still offers `image` (the offer is the code
+/// constant and the declaration, P6) and the **step** ends `unavailable` before Hermes is called: no request,
+/// no `called`, no ledger row, no count.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_without_a_writer_calls_nothing(
+) {
+    // (a) declared + ceiling + origin: offered
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, routed) = w.worker(vec![say("그릴 수 있어요")], &Setup::image());
+    w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(
+        offered_kinds(&routed.model.requests()[0]),
+        Some(vec!["image".to_string()])
+    );
+
+    // (b) the ceiling is unset (the production default): the door is shut — no tool at all
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let setup = Setup {
+        ceiling: None,
+        ..Setup::image()
+    };
+    let (worker, routed) = w.worker(vec![say("그릴 수 없어요")], &setup);
+    w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(
+        offered_kinds(&routed.model.requests()[0]),
+        None,
+        "an unset ceiling is closed, `image` declared or not"
+    );
+    assert_eq!(w.fake.connections(), 0);
+
+    // (c) `image` not declared (a search is): not on offer
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let setup = Setup {
+        picture_origin: PictureOrigin::Api,
+        ..Setup::open()
+    };
+    let (worker, routed) = w.worker(vec![say("그릴 수 없어요")], &setup);
+    w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    let kinds = offered_kinds(&routed.model.requests()[0]).unwrap_or_default();
+    assert!(
+        !kinds.contains(&"image".to_string()),
+        "an `image` nobody declared is never offered: {kinds:?}"
+    );
+
+    // (d) declared, ceiling set, NO private origin: still offered; the step ends `unavailable`, Hermes is
+    // never called, and nothing is counted
+    let w = world(drawn()).await;
+    let (worker, routed) = w.worker(image_script(), &Setup::image_without_origin());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(
+        offered_kinds(&routed.model.requests()[0]),
+        Some(vec!["image".to_string()]),
+        "the offer is the constant and the declaration alone (A10: no origin is evidence of anything)"
+    );
+    assert_eq!(
+        w.fake.connections(),
+        0,
+        "a picture nobody can post is not worth a call to Hermes"
+    );
+    assert_eq!(routed.model.requests().len(), 1);
+    assert_eq!(
+        w.last_agent_text().await.as_deref(),
+        team_ai_hermes::DelegateCode::Unavailable.sentence()
+    );
+    assert_eq!(
+        w.run_error_code(run).await.as_deref(),
+        Some("hermes_unavailable")
+    );
+    let task = w.task(run).await;
+    assert_eq!(task.marker.as_deref(), Some("pending"), "never `called`");
+    assert!(!task.called);
+    assert_eq!(w.hermes_ledger(run).await.len(), 0, "no row, no count");
+    assert_eq!(write_tokens(&w.su, &w.t).await, (0, 0, 0));
+    let audit = w.delegate_audit(run).await;
+    assert_eq!(audit[0]["code"], json!("unavailable"));
+}
+
+/// S3 review I3: a web search never yields a picture. Its answer holds a `data:image/` address; the worker
+/// reads none of it as a picture — no token, no request to the api, no attachment — and the model is shown
+/// no address.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x23_a_search_answer_with_a_picture_address_uploads_nothing() {
+    let w = world_with_api(
+        answering(format!(
+            "서울은 맑아요. ![x]({}) 자세한 건 https://wx.example/seoul",
+            address("png", &picture_bytes())
+        )),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let setup = Setup {
+        picture_origin: PictureOrigin::Api,
+        ..Setup::open()
+    };
+    let (worker, routed) = w.worker(delegation_script(), &setup);
+    let run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    assert_eq!(w.fake.connections(), 1);
+    assert_eq!(
+        w.api.as_ref().unwrap().connections(),
+        0,
+        "a search is never the picture's writer"
+    );
+    assert_eq!(write_tokens(&w.su, &w.t).await, (0, 0, 0));
+    assert!(attachments(&w.su, &w.t).await.is_empty());
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+    the_model_saw_only_a_count(&routed.model.requests());
+    the_picture_is_in_no_table(&w).await;
+    assert_eq!(w.delegate_audit(run).await[0]["picture_bytes"], json!(0));
+}
+
+/// A9 for a picture: an `image` delegation is counted by the same marker as a search, so the day's cap holds
+/// for pictures — the first picture goes through, the second request (the cap is one) ends
+/// `cap_reached` **before Hermes is called**, with no token and no second upload. The administrator's own value
+/// (`dailyDelegations`) is the same bound.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x24_a_picture_counts_toward_the_days_delegations() {
+    for (label, ceiling, admin) in [
+        ("the operator's ceiling of one", Some(1i64), None),
+        (
+            "the administrator's dailyDelegations of one",
+            Some(30),
+            Some(1i64),
+        ),
+    ] {
+        let w = world_with_api(
+            drawn(),
+            ApiBehavior::Store {
+                after: AfterStore::Nothing,
+            },
+        )
+        .await;
+        if let Some(limit) = admin {
+            set_setting(
+                &w.su,
+                &w.t,
+                "team_ai_limits",
+                json!({ "dailyDelegations": limit }),
+            )
+            .await;
+        }
+        let setup = Setup {
+            ceiling,
+            ..Setup::image()
+        };
+        let (worker, _routed) = w.worker(
+            vec![
+                ask_hermes("image", DRAW),
+                ask_hermes("image", DRAW),
+                say("파란 고양이를 그렸어요."),
+            ],
+            &setup,
+        );
+        let first = w.ask(w.t.owner_id, ASK_PICTURE).await;
+        let second = w.ask(w.t.member_id, ASK_PICTURE).await;
+        w.drain(&worker).await;
+
+        assert_eq!(
+            w.fake.connections(),
+            1,
+            "{label}: one picture asked of Hermes"
+        );
+        assert_eq!(
+            w.api.as_ref().unwrap().connections(),
+            1,
+            "{label}: one upload"
+        );
+        assert_eq!(run_status(&w.su, first).await, "succeeded", "{label}");
+        assert_eq!(attachments(&w.su, &w.t).await.len(), 1, "{label}");
+        assert_eq!(run_status(&w.su, second).await, "failed", "{label}");
+        assert_eq!(
+            w.run_error_code(second).await.as_deref(),
+            Some("hermes_cap_reached"),
+            "{label}"
+        );
+        let refused = w.task(second).await;
+        assert_eq!(refused.marker.as_deref(), Some("pending"), "{label}");
+        assert!(!refused.called, "{label}: never `called`, never counted");
+        assert_eq!(w.hermes_ledger(second).await.len(), 0, "{label}");
+        assert_eq!(
+            write_tokens(&w.su, &w.t).await.0,
+            1,
+            "{label}: no token for the refused one"
+        );
+    }
+}
+
+/// A12 for a picture (T7, 「같은 그림 두 번」): the same step job claimed again after the picture was posted calls
+/// Hermes no second time, uploads no second picture, mints no second token and writes no second row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x25_a_second_claim_of_the_step_draws_and_uploads_nothing_again() {
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, _routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(w.api.as_ref().unwrap().connections(), 1);
+    let (ws, agent, channel) = (w.t.workspace_id, w.t.agent_id, w.t.channel_id);
+    with_tenant_tx(&w.pool, ws, move |conn| {
+        Box::pin(async move {
+            let payload = momo_agent::team_ai_task::step_job_payload(
+                ws,
+                run,
+                agent,
+                channel,
+                2,
+                "team-ai-default",
+                Some("instance_default"),
+            );
+            emit_outbox(
+                &mut *conn,
+                ws,
+                OutboxKind::AgentJob,
+                "publish",
+                &payload,
+                Some(agent),
+            )
+            .await
+            .map_err(momo_db::DbError::from)?;
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    let again = worker.drain_once().await.expect("the duplicate");
+    assert_eq!(again.claimed, 1);
+    assert_eq!(
+        w.fake.connections(),
+        1,
+        "Hermes is not asked for a second picture"
+    );
+    assert_eq!(
+        w.api.as_ref().unwrap().connections(),
+        1,
+        "nothing is uploaded twice"
+    );
+    assert_eq!(write_tokens(&w.su, &w.t).await, (1, 1, 1));
+    assert_eq!(attachments(&w.su, &w.t).await.len(), 1);
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
+    assert_eq!(agent_texts(&w.su, &w.t).await.len(), 1, "one answer");
+}
+
+/// P6: an answer larger than the provider's body cap (12 MiB — sized for a 5 MiB picture in base64 and nothing
+/// bigger) is, for a picture, a picture past the size limit: `picture_failed`, nothing uploaded.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x26_a_reply_past_the_body_cap_is_a_picture_past_the_limit() {
+    let huge = format!(
+        "![x](data:image/png;base64,{})",
+        "A".repeat(13 * 1024 * 1024)
+    );
+    let w = world_with_api(
+        answering(huge),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(w.fake.connections(), 1);
+    assert_eq!(w.api.as_ref().unwrap().connections(), 0);
+    assert_eq!(routed.model.requests().len(), 1);
+    assert_eq!(
+        w.last_agent_text().await.as_deref(),
+        team_ai_hermes::DelegateCode::PictureFailed.sentence()
+    );
+    assert_eq!(
+        w.run_error_code(run).await.as_deref(),
+        Some("hermes_picture_failed")
+    );
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
+}
+
+/// P4-7 / P16-D ⑪: a write-up that fails (the model calls a tool it was not offered) loses nothing when the
+/// picture is in hand: the answer is the fixed 「그림을 만들었어요.」 and the attachment is bound to it — the
+/// delegation is `ok`, not `failed`.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x27_a_failed_write_up_still_posts_the_picture_with_the_fixed_sentence() {
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let off_script = ChatCompletion {
+        usage: usage(),
+        tool_calls: vec![call("read_channel", json!({}))],
+        ..ChatCompletion::default()
+    };
+    let (worker, routed) = w.worker(vec![ask_hermes("image", DRAW), off_script], &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    assert_eq!(routed.model.requests().len(), 2);
+    assert_eq!(
+        w.last_agent_text().await.as_deref(),
+        Some(momo_workspace_actions::team_ai_hermes_exec::PICTURE_MADE_SENTENCE)
+    );
+    let (message, _) = last_agent_message(&w.su, &w.t).await.unwrap();
+    let rows = attachments(&w.su, &w.t).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message_id, Some(message));
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+    assert_eq!(w.delegate_audit(run).await[0]["code"], json!("ok"));
+}
+
+/// The finishing transaction's own refusal: the picture was written and, by the time the answer is posted, binding
+/// it is refused (the attachment is found bound to another message). The answer goes **once**, without the
+/// picture, with the fixed sentence after the helper's words; the picture is not on the answer; the audit row
+/// says `picture_failed` and still names the bytes that were stored.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x28_a_binding_the_finishing_transaction_refuses_posts_the_answer_once_without_the_picture()
+{
+    let w = world_with_api(
+        drawn(),
+        ApiBehavior::Store {
+            after: AfterStore::LinkedElsewhere,
+        },
+    )
+    .await;
+    let (worker, _routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    let texts = agent_texts(&w.su, &w.t).await;
+    assert_eq!(texts.len(), 1, "one answer, never two");
+    assert_eq!(
+        texts[0],
+        format!(
+            "파란 고양이를 그렸어요.\n\n{}",
+            momo_agent_worker::agent_picture::PICTURE_UPLOAD_FAILED_SENTENCE
+        )
+    );
+    let rows = attachments(&w.su, &w.t).await;
+    assert_eq!(rows.len(), 1, "the picture was written");
+    let (answer, _) = last_agent_message(&w.su, &w.t).await.unwrap();
+    assert_ne!(
+        rows[0].message_id,
+        Some(answer),
+        "…and it is not on the answer that went"
+    );
+    assert_eq!(w.hermes_ledger(run).await.len(), 1);
+    let audit = w.delegate_audit(run).await;
+    assert_eq!(audit[0]["code"], json!("picture_failed"));
+    assert_eq!(audit[0]["picture_bytes"], json!(picture_bytes().len()));
 }
