@@ -28,8 +28,12 @@
 //! | `x8_requester_gone_and_agent_gone_after_called_leave_one_ledger_row_each` | A8 | the backstop in `end_in_tx` |
 //! | `x9_the_merging_call_has_no_tools_and_hermes_words_are_data` | A6 | a tool on the merging request, an un-fenced result, a surviving `data:` address |
 //! | `x10_the_gates_are_judged_again_when_the_step_runs` | A1 (resumed step) | skip the re-judgement of any of the bundle, target, declaration, pin, switch |
-//! | `x11_an_answer_full_of_mentions_starts_no_run_and_the_chip_is_the_servers` | A7 | route the answer's mentions, let a person's props carry the chip key |
-//! | `x12_the_request_sentence_cannot_outlive_its_row_and_tenants_do_not_meet` | A3 A14 | take the request column out of the ended constraint, count another workspace's rows |
+//! | `x11_an_answer_full_of_mentions_starts_no_run_and_the_chip_is_the_servers` | A7 | route the answer's mentions into a run or a job (the chip key's stripping from a person's props is the `momo-server` unit test `the_delegation_chip_key_is_server_owned`) |
+//! | `x12_the_request_sentence_cannot_outlive_its_row_and_tenants_do_not_meet` | A3 | take the request column out of the ended constraint, loosen the marker's shape constraint (the tenant half — another workspace's `called` rows are not in this one's counts — is x5(c); the column-level grants are the worker's t19 and the static guards) |
+//! | `x13_two_calls_in_one_answer_are_one_delegation` | A7 | run the second `ask_hermes` of one answer (one task row, one request, one ledger row, the second sentence nowhere) |
+//! | `x14_the_hermes_row_is_written_once_by_whoever_moves_the_marker` | A8 A9 | settle without the `called` predicate, write the Hermes row without `NOT EXISTS`, count a person's direct call of Hermes |
+//! | `x15_the_orphan_sweep_settles_a_called_delegation` | A8 | keep the sentence in a swept row, skip the sweep's Hermes row |
+//! | `x16_a_retried_step_runs_its_delegation_under_a_running_run` | run state (#5371 ①, #5459) | leave a retried attempt's run reading `failed` at the `called` commit |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -2268,10 +2272,10 @@ async fn x11_an_answer_full_of_mentions_starts_no_run_and_the_chip_is_the_server
     assert_eq!(w.fake.connections(), 1);
 }
 
-/// P15-A3's database half and A14. The request sentence cannot outlive its row: the database refuses an ended
+/// P15-A3's database half. The request sentence cannot outlive its row: the database refuses an ended
 /// row that holds it (an UPDATE that forgets to clear it, an INSERT that starts that way), whichever role
-/// writes it; the marker's own shape is checked too; another workspace's called delegations are not in this
-/// workspace's counts.
+/// writes it; the marker's own shape is checked too. (The tenant half of A14 — another workspace's called
+/// delegations are not in this workspace's counts — is measured in x5(c).)
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn x12_the_request_sentence_cannot_outlive_its_row_and_tenants_do_not_meet() {
