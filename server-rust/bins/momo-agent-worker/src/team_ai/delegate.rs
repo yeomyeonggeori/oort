@@ -49,13 +49,14 @@ const ACTIVITY_STEP: i32 = 1;
 /// The seconds the task claim is stretched to when `called` is written, for `job` at `now`: the call's
 /// own deadline, the merging's two attempts and a slack — and never past the end of **this job's own
 /// lease** less [`LEASE_MARGIN_SECS`]. A job that is re-claimed can only come after its lease has ended,
-/// so a claim that ends before that finds nothing to wait for (F18). The lease is the one the job was
-/// really claimed with (`WORKER_LEASE_SECONDS`, 300 s by default; `lease_expires_at`) less what has
-/// already passed since — not the default as a constant: an operator who shortens the lease, or a step
-/// that reached its commit late, gets a shorter claim instead of one that outlives the lease (the
-/// security review's L2). If the lease is shorter than the worst time of the call plus the margin, the
-/// claim ends before the call can: a re-claim then ends the delegation `failed` without calling again
-/// (the CAS on `called` keeps it at most once) and a late answer is dropped — safe, but the answer is lost.
+/// so a claim that ends before that has expired by then and the re-claimed job has nothing to wait for
+/// (F18). The lease is the one the job was really claimed with (`WORKER_LEASE_SECONDS`, 300 s by
+/// default; `lease_expires_at`) less what has already passed since — not the default as a constant: an
+/// operator who shortens the lease, or a step that reached its commit late, gets a shorter claim instead
+/// of one that outlives the lease (the security review's L2). If the lease is shorter than the worst time
+/// of the call plus the margin, the claim ends before the call can: a re-claim then ends the delegation
+/// `failed` without calling again (the CAS on `called` keeps it at most once) and a late answer is
+/// dropped — safe, but the answer is lost.
 ///
 /// `min` then `max`, never `clamp`: with a lease nearly gone the upper bound is below the lower one, and
 /// `clamp` panics on that. One second is the floor (a valid interval; a re-claim finds it expired).

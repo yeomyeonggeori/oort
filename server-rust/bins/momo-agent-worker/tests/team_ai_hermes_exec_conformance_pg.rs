@@ -34,6 +34,7 @@
 //! | `x14_the_hermes_row_is_written_once_by_whoever_moves_the_marker` | A8 A9 | settle without the `called` predicate, write the Hermes row without `NOT EXISTS`, count a person's direct call of Hermes |
 //! | `x15_the_orphan_sweep_settles_a_called_delegation` | A8 | keep the sentence in a swept row, skip the sweep's Hermes row |
 //! | `x16_a_retried_step_runs_its_delegation_under_a_running_run` | run state (#5371 ①, #5459) | leave a retried attempt's run reading `failed` at the `called` commit |
+//! | `x17_a_short_job_lease_caps_the_claim_the_called_commit_stretches` | A12 (security review L2) | cap the stretched claim by a constant (or by another job's lease) instead of the lease the step's own job was claimed with |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -643,6 +644,9 @@ struct Setup {
     search_cap: Option<i64>,
     /// A real bearer on the operator's link (G5). `false` leaves the dev placeholder, which is no key.
     key: bool,
+    /// The lease the outbox gives every job it claims (`WORKER_LEASE_SECONDS`); `None` keeps the worker's
+    /// default (300 s).
+    lease_seconds: Option<i64>,
 }
 
 impl Setup {
@@ -654,6 +658,7 @@ impl Setup {
             loopback_allowed: true,
             search_cap: None,
             key: true,
+            lease_seconds: None,
         }
     }
 }
@@ -694,6 +699,9 @@ impl World {
             .with_hermes_daily_cap(setup.ceiling)
             .with_hermes_deadlines(setup.deadline, setup.deadline);
         config.claim_batch_size = 10;
+        if let Some(lease_seconds) = setup.lease_seconds {
+            config.lease_seconds = lease_seconds;
+        }
         config.provider_link_master_key = Some(MASTER_KEY.to_string());
         config.team_ai_daily_search_cap = setup.search_cap;
         if setup.key {
@@ -2582,4 +2590,40 @@ async fn x16_a_retried_step_runs_its_delegation_under_a_running_run() {
         vec!["running".to_string(), "running".to_string()]
     );
     assert_eq!(run_status(&w.su, run).await, "succeeded");
+}
+
+/// The security review's L2, end to end. The claim the `called` commit stretches is capped by the lease the
+/// step's OWN job was claimed with (`WORKER_LEASE_SECONDS`, less the margin and what has already passed), not
+/// by the 300 s default as a constant. The unit tests of `claim_secs_for` cannot show that the step passes its
+/// own job; this does, on the claim as the database holds it while Hermes works. A 60 s job lease leaves 45 s
+/// at the very most; the worst case of the call and the merging is 10 + 2 × 20 + 30 = 80 s, so it is the cap
+/// that is measured (before the fix the stretch was 80 s). The delegation still goes through.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x17_a_short_job_lease_caps_the_claim_the_called_commit_stretches() {
+    let w = world(good_hermes()).await;
+    let mut setup = Setup::open();
+    setup.lease_seconds = Some(60);
+    let (worker, _routed) = w.worker(delegation_script(), &setup);
+    let run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    let seen = w.fake.seen();
+    assert_eq!(seen.len(), 1, "the delegation still reaches Hermes once");
+    let left = seen[0]
+        .claim_secs_left
+        .expect("a live claim during the call");
+    println!("CLAIM LEFT while Hermes works, under a 60 s job lease: {left} s");
+    assert!(
+        left <= 45.0,
+        "claim left {left} s: it outlives the job's 60 s lease less the 15 s margin (the cap is 45 s)"
+    );
+    assert!(
+        left >= 30.0,
+        "claim left {left} s: far below the cap — the step was handed a lease it never had"
+    );
+    assert_eq!(
+        run_status(&w.su, run).await,
+        "succeeded",
+        "…and the delegation ends well under the short lease"
+    );
 }
