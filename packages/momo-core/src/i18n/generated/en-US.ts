@@ -5561,7 +5561,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.suggestionsChanged": [
     {
       "type": 0,
-      "value": "When you type a word that matches the name or a tag of an emoticon, for example “ㅋㅋ”, “한숨” or “배고파”, and pause for a moment, matching emoticons appear just above the composer. Pressing one puts it in the preview and does not send it. Matching happens only on this device, so what you type never leaves it."
+      "value": "When you type a word that matches the name or a tag of an emoticon, for example “ㅋㅋ”, “한숨” or “배고파”, and pause for a moment, matching emoticons appear just above the composer. Pressing one puts it in the preview and does not send it. The small ✕ at the end of the row turns off suggestions for that word in this chat. Matching happens only on this device, so what you type never leaves it."
     }
   ],
   "releaseNotes.v0144.suggestionsTitle": [
