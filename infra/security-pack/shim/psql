@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 대상 병렬 실행용 psql 대리인 (#5495) — scripts/security_pack.sh run 이 PATH 맨 앞에 둔다.
+#
+# 왜: 시험 실행 파일은 시작할 때마다 `psql -f infra/rust/sql/bootstrap_roles.sql` 로 클러스터 전역 역할(ALTER ROLE·GRANT)을
+#   다시 적용한다(시험 215개 파일이 같은 방식 — resolve_psql() 이 PATH 에서 psql 을 먼저 찾는다). 대상을 차례로 돌 때는 겹치지
+#   않았지만 동시에 시작하면 두 파일이 같은 역할 행을 동시에 고쳐 `ERROR: tuple concurrently updated` 로 시작 단계에서 죽는다
+#   (실측: invite_lifecycle_conformance_pg 4개 전부). PG 가 일부러 다시 시도하라고 내는 일시 오류다.
+#
+# 무엇: bootstrap*roles.sql 을 `-f` 로 적용하는 호출만 감싸서 **그 오류 하나만** 짧게 쉬고 같은 SQL 을 다시 적용한다. 그 밖의 모든
+#   호출은 인자·표준입력·종료 코드를 그대로 두고 실제 psql 로 넘긴다(exec). 감싼 호출은 시험들이 `--single-transaction` 으로 적용하므로
+#   실패하면 아무것도 남지 않아 다시 돌려도 안전하다. 다른 오류(권한·문법·연결)는 다시 시도하지 않고 첫 시도의 출력·종료 코드 그대로 낸다.
+#
+# 환경: PSQL_BIN(실제 psql — security_pack.sh 가 PATH 를 바꾸기 전에 확정해 export 한다) ·
+#   PSQL_RETRY_MAX(시도 상한, 기본 12) · PSQL_RETRY_SLEEP(기본 대기 초, 기본 0.3 — 여기에 0~0.7초 무작위를 더한다).
+# =============================================================================
+set -uo pipefail
+
+real="${PSQL_BIN:-}"
+if [ -z "$real" ]; then
+  self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+  IFS=: read -r -a dirs <<<"$PATH"
+  for d in "${dirs[@]}"; do
+    [ "$d" = "$self_dir" ] && continue
+    if [ -x "$d/psql" ]; then real="$d/psql"; break; fi
+  done
+fi
+[ -n "$real" ] || { echo "[psql-retry] 실제 psql 을 찾을 수 없어요(PSQL_BIN 을 주세요)" >&2; exit 127; }
+
+# 감쌀 호출인가: `-f`/`--file` 의 값이 bootstrap*roles.sql.
+wrap=0; prev=""
+for a in "$@"; do
+  case "$prev" in -f|--file) case "$a" in *bootstrap*roles.sql) wrap=1 ;; esac ;; esac
+  case "$a" in --file=*bootstrap*roles.sql) wrap=1 ;; esac
+  prev="$a"
+done
+[ "$wrap" = 1 ] || exec "$real" "$@"
+
+max="${PSQL_RETRY_MAX:-12}"; attempt=1
+err="$(mktemp)"; trap 'rm -f "$err"' EXIT
+while :; do
+  "$real" "$@" 2>"$err"; rc=$?
+  if [ "$rc" -eq 0 ] || ! grep -Fq 'tuple concurrently updated' "$err" || [ "$attempt" -ge "$max" ]; then
+    cat "$err" >&2
+    exit "$rc"
+  fi
+  echo "[psql-retry] 역할 DDL 충돌(tuple concurrently updated) — 다시 시도 ${attempt}/${max}" >&2
+  attempt=$((attempt + 1))
+  sleep "$(awk -v s="${PSQL_RETRY_SLEEP:-0.3}" -v r="$RANDOM" 'BEGIN { printf "%.2f", s + (r % 8) * 0.1 }')"
+done

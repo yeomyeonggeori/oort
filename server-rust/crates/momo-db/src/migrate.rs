@@ -814,12 +814,19 @@ mod tests {
     /// row cannot hold the sentence, and `momo_app` made unable to SELECT the sentence's column
     /// (column-level grants in the same `team-ai-task-lockdown` block, the same text in the migration and
     /// both role bootstraps). No new table, so no new RLS policy.
+    /// 178 is #5469's 「사진·GIF 가로세로 요약」 (ADR-0151 증보 9): `attachment_media.duration_ms`
+    /// becomes nullable (a row **without** a length is a still picture's size, a row with one is a
+    /// video's), the length range check says so (`duration_ms IS NULL OR BETWEEN …`), and
+    /// `attachment_media_still_ck` keeps a poster off a row with no length. No new column, table or
+    /// grant, so no new RLS policy and the `attachment-media-lockdown` block (the same text in
+    /// three files) is untouched. 177 is #5370's (`team_ai_task_delegation`, above); the two landed in that order
+    /// so the list is contiguous again.
     #[test]
-    fn discovers_contiguous_migrations_001_to_177() {
+    fn discovers_contiguous_migrations_001_to_178() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=177).collect();
+        let expected: Vec<i64> = (1..=178).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -827,7 +834,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=177 under {}",
+            "expected contiguous 001..=178 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -835,7 +842,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("177_team_ai_task_delegation"));
+            .starts_with("178_attachment_media_image"));
     }
 
     #[test]
