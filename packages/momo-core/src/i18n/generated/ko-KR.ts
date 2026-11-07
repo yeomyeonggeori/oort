@@ -3208,6 +3208,28 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "expressions.suggest.group": [
+    {
+      "type": 0,
+      "value": "이모티콘 추천"
+    }
+  ],
+  "expressions.suggest.mute": [
+    {
+      "type": 0,
+      "value": "이 낱말 추천 끄기"
+    }
+  ],
+  "expressions.suggest.pick": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 미리 보기에 올리기"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,
