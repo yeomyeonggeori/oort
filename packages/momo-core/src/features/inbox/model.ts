@@ -242,9 +242,10 @@ export interface FeedItem {
  * 카드 안에 있고 받은함 줄에는 없으므로, 받은함에서 승인 한 번으로 확정되면 보지 않은 것이 본 것으로 기록된다. 그래서 이 행동의 결정은 그 대화의 그
  * 카드에서만 한다.
  *
- * 이 목록은 서버 판정(`decisionMode`)의 거울이 아니라 **그 앞의 보험**이다: 서버가 값을 안 싣는 옛 서버·값이 `inline`으로 잘못 온 경우에도 이 둘은
- * 단추를 얻지 못한다(`approvalOpensOnCard`는 둘 중 하나라도 `open`이면 연다). 목록은 일부러 둘뿐이다 — 다른 행동의 받은함 동작은 이 목록이 바꾸지
- * 않는다. 아이디 두 개와 이 목록이 같은지는 시험이 상수(`EXPRESSION_SET_ACTION_ID`·`EXPRESSION_SET_PLAN_ACTION_ID`)로 못 박는다.
+ * 목록은 일부러 **둘뿐**이다. 서버가 찍는 `decisionMode`는 받은함이 따르지 않는다(planner 2026-11-07): 서버가 `open`을 찍는 기존 승인(`work.spawn`의
+ * 호스트 고르개, `message.pin`, 아바타·이름 변경 …)의 받은함 모습은 예전 그대로다. 서버의 `open`을 받은함에서 따르는 일은 인박스 「승인」 칸(#4765)의
+ * 몫이다. 서버 값이 없거나 `inline`이어도 이 둘은 단추를 얻지 못한다. 아이디 두 개와 이 목록이 같은지는 시험이 상수(`EXPRESSION_SET_ACTION_ID`·
+ * `EXPRESSION_SET_PLAN_ACTION_ID`)로 못 박는다.
  */
 export const INBOX_OPEN_ONLY_ACTION_IDS: ReadonlySet<string> = new Set([
   "expression.set.plan",
@@ -252,16 +253,14 @@ export const INBOX_OPEN_ONLY_ACTION_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 이 승인은 받은함에서 결정하지 않고 그 대화의 카드를 **열어서** 결정하는가.
+ * 이 승인은 받은함에서 결정하지 않고 그 대화의 카드를 **열어서** 결정하는가: 행동 id가 위 닫힌 목록에 있으면 그렇다.
  *
- * **둘 중 하나라도 열라고 하면 연다**(fail-closed): ① 행동 id가 위 닫힌 목록에 있다, ② 서버가 `decisionMode: "open"`을 찍었다(ADR-0204 증보 6
- * D6-2: 서버의 한 판정을 클라이언트가 다시 계산하지 않고 따른다). 서버가 `inline`을 찍었어도 ①이면 연다 — 서버 값은 목록의 행을 닫을 수 없다.
- * 두 신호가 모두 없는 승인(목록 밖 행동 + 서버가 `inline`이거나 값을 안 실음)은 이전 그대로 받은함에서 결정한다.
+ * **서버가 찍은 `decisionMode`는 보지 않는다**(planner 2026-11-07). 서버가 `open`을 찍어도 목록 밖 행동은 이전 그대로 받은함에서 결정하고, 서버가
+ * `inline`을 찍거나 값을 안 실어도 목록의 행동은 연다. 그래서 이 판정은 행동 id 하나만 읽는다.
  */
 export function approvalOpensOnCard(
-  item: Pick<FeedItem, "workspaceActionId" | "decisionMode">
+  item: Pick<FeedItem, "workspaceActionId">
 ): boolean {
-  if (item.decisionMode === "open") return true;
   return (
     item.workspaceActionId !== undefined &&
     INBOX_OPEN_ONLY_ACTION_IDS.has(item.workspaceActionId)

@@ -580,15 +580,17 @@ describe("approvalOpensOnCard (#5462)", () => {
     expect(approvalOpensOnCard(actionRow(id, "open"))).toBe(true);
   });
 
-  it("목록 밖 행동은 서버가 open 이라고 할 때만 카드로 보낸다 — 아니면 이전 그대로 받은함에서 결정한다", () => {
-    for (const id of ["channel.create", "expression.create", "member.avatar.set", undefined]) {
-      expect(approvalOpensOnCard(actionRow(id))).toBe(false);
-      expect(approvalOpensOnCard(actionRow(id, "inline"))).toBe(false);
-      expect(approvalOpensOnCard(actionRow(id, "open"))).toBe(true);
+  it("목록 밖 행동은 서버가 open 을 찍어도 카드로 보내지 않는다 — 기존 승인의 받은함 모습은 그대로다 (planner 11-07)", () => {
+    for (const id of ["channel.create", "expression.create", "member.avatar.set", "member.display_name.set", "message.pin", undefined]) {
+      for (const mode of [undefined, "inline", "open"] as const) {
+        expect(approvalOpensOnCard(actionRow(id, mode)), `${id ?? "행동 id 없음"} (서버 ${mode ?? "값 없음"})`).toBe(false);
+      }
     }
-    // 도구·스폰 승인(행동 id 없음)도 같다.
-    expect(approvalOpensOnCard(approvalItem(approval(), agent, "엔진", NOW))).toBe(false);
-    expect(approvalOpensOnCard(approvalItem(approval({ decisionMode: "open" }), agent, "엔진", NOW))).toBe(true);
+    // 도구·스폰 승인(행동 id 없음, 서버가 호스트 고르기를 open 으로 찍는 `work.spawn`)도 같다.
+    for (const mode of [undefined, "inline", "open"] as const) {
+      const spawn = approvalItem(approval({ ...(mode === undefined ? {} : { decisionMode: mode }) }), agent, "엔진", NOW);
+      expect(approvalOpensOnCard(spawn), `work.spawn (서버 ${mode ?? "값 없음"})`).toBe(false);
+    }
   });
 
   it("목록은 정확히 일치만 센다 — 비슷한 이름·대소문자·객체 프로토타입 이름은 열지 않는다", () => {

@@ -20,7 +20,8 @@ import { InboxDetail } from "./InboxDetail";
 //
 // 이모티콘 세트의 계획 카드(`expression.set.plan`)와 세트 카드(`expression.set.create`)는 받은함의 일반 승인 단추로 확정하지 않는다
 // (계획 카드는 썸네일·장수·고지를 본 채로 눌러야 하고, 세트 카드는 칸을 골라야 한다). 두 행동의 칸은 승인·거부 대신 「열기」 하나이고,
-// 누르면 「대화에서 보기」와 같은 자리, 곧 그 대화의 그 카드로 간다. 다른 행동의 칸은 그대로다.
+// 누르면 「대화에서 보기」와 같은 자리, 곧 그 대화의 그 카드로 간다. 다른 행동의 칸은 그대로다: 서버가 `decision_mode: open`을 찍는 기존 승인
+// (`message.pin`, `work.spawn` 호스트 고르개 …)도 받은함에서는 예전처럼 승인·거부가 선다(planner 11-07: 열기는 두 행동 id의 닫힌 목록에만 걸린다).
 //
 // 진짜 `InboxDetail`·`InboxApprovalActions`·`approvalItem`·`taskEntry`를 태우고, 네트워크를 건너는 `ApprovalActions` 한 겹만 바꾼다. 바꾼
 // 겹은 진짜와 같은 시험 id(`<접두>-approve`·`<접두>-reject`)로 두 단추를 그려서, 단추가 서면 아래 단정이 잡는다.
@@ -43,16 +44,33 @@ vi.mock("@/features/timeline/MessageBody", () => ({
 }));
 vi.mock("@/features/timeline/ThreadComposer", () => ({ ThreadComposer: () => null }));
 vi.mock("@/features/timeline/ApprovalActions", () => ({
-  ApprovalActions: ({ approvalId, testIdPrefix }: { approvalId: string; testIdPrefix: string }) =>
+  ApprovalActions: ({
+    approvalId,
+    testIdPrefix,
+    execution,
+  }: {
+    approvalId: string;
+    testIdPrefix: string;
+    execution: unknown;
+  }) =>
     createElement(
       "div",
-      { "data-testid": `${testIdPrefix}-actions`, "data-id": approvalId },
+      {
+        "data-testid": `${testIdPrefix}-actions`,
+        "data-id": approvalId,
+        "data-host-choice": execution === null || execution === undefined ? "none" : "plan",
+      },
       createElement("button", { type: "button", "data-testid": `${testIdPrefix}-reject` }, "거부"),
       createElement("button", { type: "button", "data-testid": `${testIdPrefix}-approve` }, "승인")
     ),
 }));
 
-function entryFor(workspaceActionId: string, decisionMode?: "inline" | "open", id = "a1"): MailboxEntry {
+function entryFor(
+  workspaceActionId: string | undefined,
+  decisionMode?: "inline" | "open",
+  id = "a1",
+  spawn = false
+): MailboxEntry {
   const approval: Approval = {
     id,
     workspaceId: WS,
@@ -60,8 +78,10 @@ function entryFor(workspaceActionId: string, decisionMode?: "inline" | "open", i
     channelId: CH,
     requestMessageId: CARD,
     requestedBy: "00000000-0000-7000-8000-000000000102",
-    actionType: "workspace_action",
-    workspaceActionId,
+    // 스폰 승인: 행동 id 없이 호스트를 고르는 승인(서버가 `open`으로 찍는 기존 승인의 대표).
+    actionType: spawn ? "work.spawn" : "workspace_action",
+    ...(workspaceActionId === undefined ? {} : { workspaceActionId }),
+    ...(spawn ? { execution: { kind: "work_session_spawn", candidates: [] } } : {}),
     status: "pending",
     expiresAtMs: NOW + 600_000,
     ...(decisionMode === undefined ? {} : { decisionMode }),
@@ -213,8 +233,8 @@ describe("InboxDetail: 카드로 보내는 승인은 열기만 선다 (#5462)", 
     expect(byId(h, "inbox-approval-settled")[0]?.textContent).toContain("승인을 기록했어요.");
   });
 
-  it("다른 행동은 그대로다: 승인·거부 단추가 서고 열기는 없다 (서버 값이 없거나 inline)", async () => {
-    for (const mode of [undefined, "inline"] as const) {
+  it("다른 행동은 그대로다: 서버가 값을 안 싣든 inline 이든 open 이든 승인·거부 단추가 서고 열기는 없다", async () => {
+    for (const mode of [undefined, "inline", "open"] as const) {
       const h = await mount(entryFor("channel.create", mode, "b1"));
       expect(byId(h, "inbox-approval-approve"), `승인 (서버 ${mode ?? "값 없음"})`).toHaveLength(1);
       expect(byId(h, "inbox-approval-reject"), `거부 (서버 ${mode ?? "값 없음"})`).toHaveLength(1);
@@ -224,10 +244,22 @@ describe("InboxDetail: 카드로 보내는 승인은 열기만 선다 (#5462)", 
     }
   });
 
-  it("서버가 open 을 찍은 다른 행동도 열기만 선다 (둘 중 하나라도 open 이면 연다)", async () => {
-    const h = await mount(entryFor("channel.create", "open", "c1"));
-    expect(byId(h, "inbox-approval-approve")).toHaveLength(0);
-    expect(byId(h, "inbox-approval-reject")).toHaveLength(0);
-    expect(byId(h, "inbox-approval-open")).toHaveLength(1);
+  it("서버가 open 을 찍어도 기존 승인은 예전처럼 승인·거부가 선다 — message.pin·아바타 변경·work.spawn 호스트 고르기 (planner 11-07)", async () => {
+    const existing: [string, string | undefined, boolean][] = [
+      ["message.pin", "message.pin", false],
+      ["member.avatar.set", "member.avatar.set", false],
+      ["work.spawn", undefined, true],
+    ];
+    for (const [name, actionId, spawn] of existing) {
+      const h = await mount(entryFor(actionId, "open", "c1", spawn));
+      expect(byId(h, "inbox-approval-approve"), `승인 (${name})`).toHaveLength(1);
+      expect(byId(h, "inbox-approval-reject"), `거부 (${name})`).toHaveLength(1);
+      expect(byId(h, "inbox-approval-open"), `열기 (${name})`).toHaveLength(0);
+      // 스폰 승인의 호스트 고르개 재료는 받은함의 결정 컨트롤에 그대로 닿는다(ADR-0125 D6-A).
+      expect(byId(h, "inbox-approval-actions")[0]?.getAttribute("data-host-choice"), `호스트 고르기 (${name})`).toBe(
+        spawn ? "plan" : "none"
+      );
+      unmount();
+    }
   });
 });
