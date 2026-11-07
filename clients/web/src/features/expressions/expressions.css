@@ -120,5 +120,6 @@
 /* 입력창 밖으로 포커스가 나가면(대화 목록을 누르거나 다른 창으로 갈 때) 추천 줄은 물러난다: 대화 목록 위에 떠 있는 줄이 읽는 것을 가리지 않게. 줄의 상태는 그대로라
  * 포커스가 입력창으로 돌아오면 다시 선다(`ComposerExpressionSuggest`, #5476). 입력창 한 벌은 `data-composer-shell` 이다. */
 [data-composer-shell]:not(:focus-within) .expression-suggest-row { display: none; }
-/* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다. */
-.expression-set-button[aria-current="true"] { background-color: var(--color-accent-soft); }
+/* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다.
+ * 채움은 단추의 안여백(`p-1`, 4px) 둘레에서 보인다: 그림이 단추 안쪽 상자의 100% 라서 가장자리까지 칠해진 그림도 이 띠는 덮지 못한다(#5486 M1, `p-0.5` 는 사다리 밖이라 컴파일되지 않아 여백이 0이었다). */
+.expression-set-button[aria-current="true"] { background-color: var(--signal-soft); }

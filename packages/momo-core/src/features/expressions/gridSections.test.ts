@@ -5,6 +5,7 @@ import {
   buildExpressionSections,
   EXPRESSION_GRID_COLS,
   EXPRESSION_RECENT_MAX,
+  isContextMenuSummonKey,
   moveGridPosition,
   type ExpressionSection,
 } from "./gridSections";
@@ -113,5 +114,21 @@ describe("moveGridPosition — 구역을 이어 붙인 격자 위의 방향키",
     expect(moveGridPosition([0, 3], at(1, 0), "ArrowLeft")).toBeNull(); // 앞 구역이 비어 있으면 건너뛴다 -> 갈 곳 없음
     expect(moveGridPosition([0, 3], at(1, 0), "Home")).toBeNull(); // 이미 처음
     expect(moveGridPosition([], at(0, 0), "ArrowRight")).toBeNull();
+  });
+});
+
+describe("isContextMenuSummonKey — 칸 메뉴를 키보드로 부르는 키 (#5486)", () => {
+  const press = (key: string, mods: Partial<{ shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }> = {}) =>
+    isContextMenuSummonKey({ key, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...mods });
+  it("전용 메뉴 키와 Shift+F10 만 부른다", () => {
+    expect(press("ContextMenu")).toBe(true);
+    expect(press("F10", { shiftKey: true })).toBe(true);
+    expect(press("F10")).toBe(false);
+    expect(press("m")).toBe(false);
+    expect(press("Enter")).toBe(false);
+    expect(press("ArrowDown", { shiftKey: true })).toBe(false);
+  });
+  it("Ctrl·Alt·⌘ 이 함께 눌린 F10 은 다른 단축키의 몫이라 부르지 않는다", () => {
+    for (const mod of ["ctrlKey", "altKey", "metaKey"] as const) expect(press("F10", { shiftKey: true, [mod]: true })).toBe(false);
   });
 });
