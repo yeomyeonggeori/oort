@@ -686,23 +686,50 @@ describe('상세 알림 (ADR-0218 §15)', () => {
     expect(deltas.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('v1 이 먼저 오면(순서가 뒤집혀도) 전부 내리고, 뒤늦은 같은 version 의 상세는 할 일이 없다', async () => {
+  it('v1 이 먼저 오면(순서가 뒤집혀도) 전부 내리고, 뒤늦게 온 같은 version 의 등록 상세는 할 일이 없다', async () => {
     const {store, deltas} = await mounted();
     act(() => store.changed('4'));
     await flush();
     expect(store.snapshot().changePending).toBe(true);
     expect(layerCount(still.name)).toBe(0);
     expect(deltas).toHaveLength(1);
-    act(() => store.detailed(detail('hidden', [moving.id])));
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'])));
     await flush();
     expect(deltas).toHaveLength(1); // 두 번째 읽기도, 두 번째 걷기도 없다
     await act(async () => {
-      deltas[0](hidesMoving());
+      deltas[0](addsOne());
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+  });
+
+  it('v1 이 먼저 오고 숨김 상세가 늦게 와도 건너뛰지 않는다: 목록을 기다리지 않고 그 표현의 파일만 걷고, 앞서 시작한 읽기는 버리고 다시 읽는다 (#5491 H-5491-1)', async () => {
+    const {store, files, deltas, uris} = await mounted();
+    act(() => store.changed('4'));
+    await flush();
+    expect(store.snapshot().changePending).toBe(true);
+    expect(deltas).toHaveLength(1);
+    expect(files.remove).not.toHaveBeenCalled(); // 이름 없는 v1 은 파일을 걷지 못한다
+    act(() => store.detailed(detail('hidden', [moving.id]))); // 같은 version 의 늦은 숨김 상세
+    await flush();
+    // 상세가 그 id 의 파일을 그 자리에서 걷는다 — 목록이 오기 전에, 다른 표현의 파일은 그대로.
+    expect(files.remove.mock.calls).toEqual([[uris.moving]]);
+    expect(store.snapshot().items.some(item => item.id === moving.id)).toBe(false);
+    expect(deltas).toHaveLength(2); // 앞서 시작한 읽기는 버려지고 새로 읽는다
+    await act(async () => {
+      deltas[0](hidesMoving()); // 버려진 읽기의 늦은 답은 문을 내리지 못한다
+    });
+    expect(store.snapshot().changePending).toBe(true);
+    await act(async () => {
+      deltas[1](hidesMoving());
     });
     for (let step = 0; step < 6; step += 1) await flush();
     expect(store.snapshot().changePending).toBe(false);
     expect(layerCount(still.name)).toBe(1);
     expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
+    expect(files.remove).toHaveBeenCalledTimes(1);
   });
 
   it('새로 구독하면 기억이 비워진다: 앞서 본 version 의 v1 도 다시 전부 내린다', async () => {

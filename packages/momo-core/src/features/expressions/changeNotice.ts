@@ -15,7 +15,8 @@ import type { ExpressionChanged, ExpressionChangedDetail, ExpressionVersion } fr
  *   · `revoke-ids` — the detail names the pictures that are no longer shown (`hidden`, `deleted`): take down exactly
  *     those, now. Every other picture stays on screen.
  *   · `keep-all` — a registration, an edit or a policy change took nothing down: leave every picture and read the list.
- *   · `already-handled` — the other notice of this same version already did the work.
+ *   · `already-handled` — the other notice of this same version already did the work. A hide or delete detail is never this: it names
+ *     the pictures a plain notice cannot, so it is acted on even after the plain notice of its version (taking the same ids down twice is safe).
  */
 export type ExpressionNoticeVerdict =
   | { kind: "revoke-all" }
@@ -59,11 +60,18 @@ export function readExpressionChangedVersion(data: unknown): ExpressionVersion |
   return matchesExpressionContract("Changed", data) ? (data as ExpressionChanged).version : null;
 }
 
-/** A detail notice (`readExpressionChangeDetail` already checked it). */
+/**
+ * A detail notice (`readExpressionChangeDetail` already checked it). A hide or a delete is **never skipped**, even when this version
+ * was already acted on (#5491 review 1, H-5491-1): the plain notice that got here first (`revoke-all`) names no picture, and the phone keeps its
+ * files across it and takes down only the ids the list reports — this detail is the one that names the hidden id. Taking the same ids
+ * down twice is harmless. Only a registration, an edit and a policy change (`keep-all`) are skipped once the version was handled.
+ */
 export function decideExpressionDetail(state: ExpressionNoticeState, detail: ExpressionChangedDetail): ExpressionNoticeDecision {
-  if (state.handled.includes(detail.version)) return { verdict: { kind: "already-handled" }, state };
-  const next = remember(state, detail.version);
-  if (detail.action === "hidden" || detail.action === "deleted") {
+  const takesDown = detail.action === "hidden" || detail.action === "deleted";
+  const seen = state.handled.includes(detail.version);
+  if (seen && !takesDown) return { verdict: { kind: "already-handled" }, state };
+  const next = seen ? state : remember(state, detail.version);
+  if (takesDown) {
     // A hide or delete that names no picture cannot be narrowed: fall back to taking everything down.
     return { verdict: detail.expressionIds.length === 0 ? { kind: "revoke-all" } : { kind: "revoke-ids", ids: [...detail.expressionIds] }, state: next };
   }

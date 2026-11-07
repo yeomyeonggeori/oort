@@ -147,10 +147,28 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
     const gate = createExpressionNoticeGate();
     expect(gate.detail(detail({ action: "created", version: "9" }))).toEqual({ kind: "keep-all" });
     expect(gate.changed("9")).toEqual({ kind: "already-handled" });
-    // v1 → 상세: v1 이 이미 전부 내렸으니 뒤늦은 상세는 할 일이 없다.
+    // v1 → 상세: v1 이 이미 전부 내렸으니 뒤늦은 등록·고치기·정책 상세는 할 일이 없다(숨김·삭제 상세는 아래 시험이 따로 잰다).
     const late = createExpressionNoticeGate();
     expect(late.changed("10")).toEqual({ kind: "revoke-all" });
-    expect(late.detail(detail({ action: "hidden", version: "10" }))).toEqual({ kind: "already-handled" });
+    expect(late.detail(detail({ action: "created", version: "10" }))).toEqual({ kind: "already-handled" });
+  });
+
+  it("a hide or delete detail is never skipped, even after the plain notice of its version — it names the ids the plain notice could not (#5491 review 1, H-5491-1)", () => {
+    for (const action of ["hidden", "deleted"] as const) {
+      const gate = createExpressionNoticeGate();
+      expect(gate.changed("10")).toEqual({ kind: "revoke-all" });
+      expect(gate.detail(detail({ action, version: "10" })), action).toEqual({ kind: "revoke-ids", ids: [first.id] });
+      // 두 번 걷어도 안전하다: 같은 상세가 다시 와도 같은 판정이다.
+      expect(gate.detail(detail({ action, version: "10" })), action).toEqual({ kind: "revoke-ids", ids: [first.id] });
+    }
+    // 건너뛰는 것은 등록·고치기·정책 상세뿐이다.
+    const gate = createExpressionNoticeGate();
+    gate.changed("11");
+    for (const action of ["created", "edited"] as const) expect(gate.detail(detail({ action, version: "11" })), action).toEqual({ kind: "already-handled" });
+    expect(gate.detail(detail({ action: "policy_changed", expressionIds: [], version: "11" }))).toEqual({ kind: "already-handled" });
+    // 같은 version 을 기억에 두 번 적지 않는다.
+    const once = decideExpressionDetail(emptyExpressionNoticeState, detail({ version: "12" }));
+    expect(decideExpressionDetail(once.state, detail({ version: "12" })).state.handled).toEqual(["12"]);
   });
 
   it("only the same version is skipped: a plain notice of another version, or with a version it cannot read, still takes everything down", () => {
@@ -161,12 +179,12 @@ describe("ADR-0218 §15 decision: which pictures a notice takes down", () => {
     expect(gate.changed(null)).toEqual({ kind: "revoke-all" }); // 읽을 수 없는 판은 기억하지 않는다
   });
 
-  it("a detail that was lost leaves the plain notice to take everything down; a duplicate detail is skipped", () => {
+  it("a detail that was lost leaves the plain notice to take everything down; a duplicate registration detail is skipped", () => {
     const gate = createExpressionNoticeGate();
     expect(gate.changed("11")).toEqual({ kind: "revoke-all" });
     const other = createExpressionNoticeGate();
-    expect(other.detail(detail({ version: "12" })).kind).toBe("revoke-ids");
-    expect(other.detail(detail({ version: "12" }))).toEqual({ kind: "already-handled" });
+    expect(other.detail(detail({ action: "created", version: "12" })).kind).toBe("keep-all");
+    expect(other.detail(detail({ action: "created", version: "12" }))).toEqual({ kind: "already-handled" });
   });
 
   it("two changes whose notices interleave still pair up by version", () => {

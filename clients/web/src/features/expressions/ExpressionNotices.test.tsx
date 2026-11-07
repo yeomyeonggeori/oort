@@ -104,15 +104,30 @@ describe("웹 알림 처리: 상세 알림 (ADR-0218 §15)", () => {
     expect(m.image.mock.calls.length).toBeGreaterThan(m.base.images); // 칸들이 그림을 다시 받는다
   });
 
-  it("옛 알림이 먼저 오면(순서가 뒤집혀도) 전부 폐기하고, 뒤늦은 같은 version 의 상세는 할 일이 없다", async () => {
+  it("옛 알림이 먼저 오면(순서가 뒤집혀도) 전부 폐기하고, 뒤늦게 온 같은 version 의 등록 상세는 할 일이 없다", async () => {
     const m = await mounted(); const epoch = m.store.getSnapshot().epoch;
     act(() => m.handlers.changed(plain("11")));
     expect(m.store.getSnapshot().epoch).toBe(epoch + 1);
     const reads = m.reads();
-    act(() => m.handlers.detail(detail("hidden", [parrot.id], "11")));
+    act(() => m.handlers.detail(detail("created", ["00000000-0000-4000-8000-0000000000e1"], "11")));
     expect(m.store.getSnapshot().epoch).toBe(epoch + 1);
     await m.settle();
     expect(m.reads()).toBe(reads); // 두 번째 읽기도 없다
+  });
+
+  it("옛 알림이 먼저 오고 숨김 상세가 늦게 와도 건너뛰지 않는다: 그 id 를 목록을 기다리지 않고 내리고 목록을 새로 읽는다 (#5491 H-5491-1)", async () => {
+    const m = await mounted(); const epoch = m.store.getSnapshot().epoch;
+    act(() => m.handlers.changed(plain("11")));
+    expect(m.store.getSnapshot().epoch).toBe(epoch + 1);
+    const reads = m.reads();
+    expect(m.store.getSnapshot().cache.items.some((item) => item.id === parrot.id)).toBe(true);
+    act(() => m.handlers.detail(detail("hidden", [parrot.id], "11")));
+    // 목록이 오기 전에: 그 id 가 목록에서 빠지고 그 id 의 받는 중 읽기·캐시 칸은 새 세대가 된다(전체 폐기는 아니다).
+    expect(m.store.getSnapshot().cache.items.some((item) => item.id === parrot.id)).toBe(false);
+    expect(m.store.getSnapshot().revoked.get(parrot.id)).toBe(1);
+    expect(m.store.getSnapshot().epoch).toBe(epoch + 1);
+    await m.settle();
+    expect(m.reads()).toBe(reads + 1); // 앞서 시작한 읽기는 버려지고 새로 읽는다
   });
 
   it("재구독(resync)은 기억을 비우고 전부 폐기한다", async () => {
