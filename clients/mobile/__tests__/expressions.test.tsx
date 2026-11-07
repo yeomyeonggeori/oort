@@ -209,6 +209,31 @@ it('a change notice with no detail stops the drawing at once but keeps the files
   expect(files.write).toHaveBeenCalledTimes(1);
 });
 
+it('a change notice with no detail voids a download that is in flight: it writes no file while the list is still unknown (#5491)', async () => {
+  const server = createExpressionFixtureServer();
+  let imageReply!: (response: ExpressionFixtureResponse) => void;
+  const {store, files} = setup(async input => {
+    // 알림이 시작한 목록 읽기는 붙들어 둔다 — 어느 등록이 내려갔는지 모르는 때다.
+    if (input.path.includes('since='))
+      return new Promise<ExpressionFixtureResponse>(() => {});
+    if (input.path.includes('/image?') && input.path.includes('size=small'))
+      return new Promise(resolve => {
+        imageReply = resolve;
+      });
+    return server.request(input);
+  });
+  await store.refresh(true);
+  const late = store.image(parrot, 'small');
+  const answer = await server.request({
+    method: 'GET',
+    path: `${base}/${parrot.id}/image?size=small&v=${parrot.media!.small.sha256}`,
+  });
+  act(() => store.changed());
+  imageReply(answer); // 받기가 목록보다 먼저 답한다
+  expect(await late).toBeNull(); // 받던 것은 버려진다(D3: 디코드 중인 것도 폐기)
+  expect(files.write).not.toHaveBeenCalled(); // 목록을 모르는 동안에는 새 파일도 쓰지 않는다
+});
+
 it('a change notice with no detail: the delta that hides one removes only that one\'s files and the others come back without a download (#5491)', async () => {
   const {store, files, request, server} = setup();
   await store.refresh(true);
