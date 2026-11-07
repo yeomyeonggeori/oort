@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -12,6 +15,7 @@ import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
 import { EXPRESSION_SUGGEST_DEBOUNCE_MS } from "@momo/core/features/expressions/suggest";
 import { createLocaleService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { compileTokensCss, ENGINES } from "@/design/appearance/compileTokensTestKit";
 import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
 import { ExpressionStore } from "@/features/expressions/ExpressionStore";
@@ -539,6 +543,156 @@ describe("키보드", () => {
     await typeAndPause("ㅋㅋㅋ");
     expect(await press({ key: "ArrowUp", altKey: true })).toBe(false);
     expect(await press({ key: "ArrowUp", shiftKey: true })).toBe(false);
+  });
+});
+
+describe("자리와 ↑ 의 첫 화면 줄 (#5489, 검증 7a-2 H1·M1)", () => {
+  it("H1: 줄의 기준 상자는 독의 첫 자식이고 입력 폼 안에 있지 않다 - 폼 앞에 서는 레일·링크 카드·예약 배너를 덮지 않는 자리다", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋㅋ");
+    const dock = q("composer");
+    const anchor = q("composer-expression-suggest-anchor");
+    expect(anchor).not.toBeNull();
+    expect(dock?.firstElementChild).toBe(anchor);
+    expect(anchor?.parentElement).toBe(dock);
+    expect(anchor?.contains(row())).toBe(true);
+    // 폼 안이면 폼 앞의 줄들(레일·링크 카드·예약 배너) 위로 떨어진다.
+    expect(row()?.closest("form")).toBeNull();
+    // 기준 상자는 `relative`, 줄은 그 맨 위에서 위로 서는 절대 위치다(흐름에 자리를 먹지 않아 입력창이 움직이지 않는다).
+    expect(anchor?.classList.contains("relative")).toBe(true);
+    expect(row()?.classList.contains("absolute")).toBe(true);
+    expect(row()?.classList.contains("bottom-full")).toBe(true);
+    // 줄이 지면 기준 상자도 없다.
+    await press({ key: "Escape" });
+    expect(q("composer-expression-suggest-anchor")).toBeNull();
+  });
+
+  // 진짜 엔진: 위의 구조 단정은 「어디에 있는가」만 말한다. 줄 상자가 독 안의 줄들과 **겹치지 않는다**는 것은 배치가 말한다(jsdom 은 배치가 없다). 진짜 `Composer` 가 줄을 연 채
+  // 그린 마크업과 `tokens.css` 컴파일 결과·`expressions.css` 를 Chromium·WebKit 에 올리고, 입력 폼 앞(독 안)에 레일(24)·링크 카드(88) 같은 높이의 줄을 세워 줄 상자와의 겹침 넓이를 잰다.
+  // 사보타주: 줄을 다시 입력 폼 안으로 옮기면(옛 자리) 줄이 그 줄들 위로 떨어져 겹침이 0보다 커진다.
+  it.skipIf(ENGINES.length === 0)(
+    "H1: 독 안에 레일·링크 카드 높이의 줄이 서 있어도 줄 상자는 독 안 어느 줄과도 겹치지 않고, 줄이 서도 입력창·카드 자리가 그대로이며, 왼쪽이 카드 왼쪽과 같다 (1280 · 390)",
+    async () => {
+      await mount({ fake: false });
+      await type("ㅋㅋㅋ");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, EXPRESSION_SUGGEST_DEBOUNCE_MS + 200));
+      });
+      expect(row()).not.toBeNull();
+      const html = host?.innerHTML ?? "";
+      const classes = [...(host?.querySelectorAll("[class]") ?? [])].flatMap((el) => [...el.classList]);
+      const here = dirname(fileURLToPath(import.meta.url));
+      const expressionsCss = readFileSync(join(here, "..", "expressions", "expressions.css"), "utf8");
+      const css = await compileTokensCss(classes);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      const VIEWPORTS = [
+        { name: "넓은 창 1280", width: 1280, leftExpected: 24 },
+        { name: "폰 390", width: 390, leftExpected: 12 },
+      ] as const;
+      const FILLERS = [[], [24], [24, 88], [88]] as const;
+
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          for (const viewport of VIEWPORTS) {
+            const page = await browser.newPage({ viewport: { width: viewport.width, height: 900 } });
+            try {
+              for (const heights of FILLERS) {
+                await page.setContent(`<!doctype html><html lang="ko"><head><style>${css}
+${expressionsCss}
+html, body { margin: 0; }
+#column { width: ${viewport.width}px; padding-top: 320px; box-sizing: border-box; }
+.filler-rail { height: 24px; }
+.filler-card { height: 88px; }
+</style></head><body class="bg-surface text-ink"><div id="column">${html}</div></body></html>`);
+                // 입력칸에 포커스가 있어야 줄이 선다(밖이면 CSS 가 물린다).
+                await page.focus('[data-testid="composer-input"]');
+                await page.evaluate((list) => {
+                  const dock = document.querySelector('[data-testid="composer"]');
+                  const form = dock?.querySelector("form");
+                  for (const height of list) {
+                    const filler = document.createElement("div");
+                    filler.className = height === 24 ? "filler-rail" : "filler-card";
+                    dock?.insertBefore(filler, form ?? null);
+                  }
+                }, heights as readonly number[]);
+                const measure = () =>
+                  page.evaluate(() => {
+                    const box = (el: Element | null) => {
+                      const r = el?.getBoundingClientRect();
+                      return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null;
+                    };
+                    const dock = document.querySelector('[data-testid="composer"]');
+                    const anchor = document.querySelector('[data-testid="composer-expression-suggest-anchor"]');
+                    return {
+                      dock: box(dock),
+                      card: box(document.querySelector('[data-testid="composer-frame"]')),
+                      row: box(document.querySelector('[data-testid="composer-expression-suggest"]')),
+                      children: [...(dock?.children ?? [])].filter((el) => el !== anchor).map((el) => box(el)).filter((b) => b !== null && b.h > 0),
+                    };
+                  });
+                const withRow = await measure();
+                const at = `${engine} ${viewport.name} 독 안 줄 ${JSON.stringify(heights)}`;
+                const rowBox = withRow.row;
+                if (rowBox === null || rowBox.w <= 0 || rowBox.h <= 0) {
+                  problems.push(`${at}: 줄이 보이지 않는다(상자 ${JSON.stringify(rowBox)})`);
+                  continue;
+                }
+                const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+                  Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+                const worst = Math.max(0, ...withRow.children.map((child) => (child === null ? 0 : overlap(rowBox, child))));
+                if (worst > 0) problems.push(`${at}: 줄 상자가 독 안 줄과 겹친다(넓이 ${worst}px²)`);
+                const dockTop = withRow.dock?.y ?? 0;
+                if (rowBox.y + rowBox.h > dockTop) problems.push(`${at}: 줄 아래(${rowBox.y + rowBox.h})가 독 맨 위(${dockTop})보다 아래다`);
+                const cardLeft = withRow.card?.x ?? 0;
+                if (Math.abs(rowBox.x - cardLeft) > 0.5 || Math.abs(rowBox.x - viewport.leftExpected) > 0.5) {
+                  problems.push(`${at}: 줄 왼쪽 ${rowBox.x}, 카드 왼쪽 ${cardLeft}, 기대 ${viewport.leftExpected}`);
+                }
+                // 줄이 서도 입력창·카드가 움직이지 않는다: 기준 상자(와 줄)를 걷어 낸 배치와 같다.
+                await page.evaluate(() => document.querySelector('[data-testid="composer-expression-suggest-anchor"]')?.remove());
+                const withoutRow = await measure();
+                if (JSON.stringify(withoutRow.dock) !== JSON.stringify(withRow.dock) || JSON.stringify(withoutRow.card) !== JSON.stringify(withRow.card)) {
+                  problems.push(`${at}: 줄이 서자 독·카드 자리가 움직인다`);
+                }
+              }
+            } finally {
+              await page.close();
+            }
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    180_000
+  );
+
+  it("M1: 줄바꿈 없이 길게 감긴 글의 아래 화면 줄에서 ↑ 는 줄로 가지 않고 글 안에서 움직이고, 첫 화면 줄에서만 줄로 들어간다", async () => {
+    // jsdom 에는 배치가 없다: 거울의 표지만 앞 글 10자마다 한 줄(20px)로 내려가는 가짜 배치를 건다. 진짜 엔진의 감김은 `caretLine.browser.test.ts` 가 잰다.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const marked = this.parentElement?.hasAttribute("data-composer-format-mirror") === true;
+      const top = marked ? Math.floor((this.previousSibling?.textContent ?? "").length / 10) * 20 : 0;
+      return { x: 0, y: top, top, left: 0, right: 0, bottom: top + 16, width: 0, height: marked ? 16 : 0, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      await mount();
+      const wrapped = "회의가 길어져서 오늘은 늦을 것 같아요 ㅋㅋㅋ"; // 줄바꿈이 없다(옛 판정은 이 글의 어느 줄에서도 ↑ 를 가로챘다)
+      expect(wrapped.includes("\n")).toBe(false);
+      await typeAndPause(wrapped);
+      expect(row()).not.toBeNull();
+      // 캐럿은 글 끝(가짜 배치로 셋째 화면 줄)이다: ↑ 는 우리 것이 아니라 textarea 의 것이다.
+      expect(await press({ key: "ArrowUp" })).toBe(false);
+      expect(document.activeElement).not.toBe(items()[0]);
+      expect(row()).not.toBeNull();
+      // 첫 화면 줄로 옮기면 줄로 들어간다.
+      textarea().setSelectionRange(3, 3);
+      expect(await press({ key: "ArrowUp" })).toBe(true);
+      expect(document.activeElement).toBe(items()[0]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 
