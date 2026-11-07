@@ -660,6 +660,14 @@ mod tests {
         assert_eq!(taken(&markdown), Ok(Some(drawn.clone())));
         let bare = format!("만들었어요\n{}\n", address("png", &drawn));
         assert_eq!(taken(&bare), Ok(Some(drawn.clone())), "a bare address");
+        // a `MEDIA:` line that carries the address itself is the same one picture: the line is cut from the
+        // words by the cleaning, and the address in it is what is taken (the brief's 「MEDIA 줄·data 주소」)
+        let in_a_media_line = format!("만들었어요\nMEDIA:{}\n", address("png", &drawn));
+        assert_eq!(
+            taken(&in_a_media_line),
+            Ok(Some(drawn.clone())),
+            "an address on a MEDIA line"
+        );
         let shouting = address("png", &drawn).to_ascii_uppercase().replace(
             // the payload is case-sensitive base64: only the scheme and the header are upper-cased
             &base64::engine::general_purpose::STANDARD
