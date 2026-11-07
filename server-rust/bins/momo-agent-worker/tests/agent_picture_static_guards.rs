@@ -257,13 +257,17 @@ fn the_messaging_picture_module_is_private_and_every_function_it_exports_is_watc
 #[test]
 fn the_image_tool_is_not_advertised_by_anything_this_slice_added() {
     // ADR-0201 P6 / owner Q1 「가」: the `image` kind is switched on by a code constant that S4 changes.
-    // S3 neither adds it nor advertises a picture tool, so nothing in the worker may name either.
+    // S1 (#5369) owns the constant and the worker reads it as a parameter; S3 must leave it `false`.
+    let switch = std::fs::read_to_string(
+        server_rust().join("crates/momo-workspace-actions/src/team_ai_hermes.rs"),
+    )
+    .expect("the switch's source");
+    assert!(
+        code(&switch).contains("pub const ATTACHMENT_WRITE_PATH_READY: bool = false;"),
+        "the switch that turns the image tool on belongs to S4, not to the write path (S3)"
+    );
     for (path, text) in sources(&server_rust().join("bins/momo-agent-worker/src")) {
         let body = code(&text);
-        assert!(
-            !body.contains("ATTACHMENT_WRITE_PATH_READY"),
-            "{path}: the switch that turns the image tool on belongs to S4, not to the write path (S3)"
-        );
         assert!(
             !body.contains("AGENT_PICTURES_PER_RUN") || path.ends_with("agent_picture.rs"),
             "{path}: the per-run picture limit is the write path's, not a tool's"
