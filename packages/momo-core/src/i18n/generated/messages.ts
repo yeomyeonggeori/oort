@@ -493,6 +493,9 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.group",
+  "expressions.suggest.mute",
+  "expressions.suggest.pick",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1768,6 +1771,11 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.group": {},
+  "expressions.suggest.mute": {},
+  "expressions.suggest.pick": {
+    "name": "string"
+  },
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3188,6 +3196,9 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.group": Record<string, never>;
+  "expressions.suggest.mute": Record<string, never>;
+  "expressions.suggest.pick": { name: string };
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;

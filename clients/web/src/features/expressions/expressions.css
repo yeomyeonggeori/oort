@@ -106,12 +106,19 @@
 /*
  * 이모티콘·GIF 탭의 그림 격자와 세트 띠 (owner 2026-11-07, #5453). 칸은 정사각 단추이고 그림이 칸 안에 맞는다(`ExpressionGrid`).
  * 그림이 오기 전과 실패했을 때 `ExpressionImage` 가 내놓는 `:이름:` 글자 자리표시는 격자 칸 안에서 숨긴다 - 격자는 그림만 보인다(카카오톡처럼, 이름은 낭독 이름과 `title` 에만 있다).
+ * 입력창 위 추천 줄의 칸(`expression-suggest-cell`, #5476)도 같은 규칙이다: 줄은 그림과 ✕ 뿐이다.
  */
 .expression-grid-cell > [data-expression-name],
-.expression-set-button > [data-expression-name] { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
+.expression-set-button > [data-expression-name],
+.expression-suggest-cell > [data-expression-name] { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 .expression-grid-cell > [data-expression-name]:not(:has(img)),
-.expression-set-button > [data-expression-name]:not(:has(img)) { visibility: hidden; }
+.expression-set-button > [data-expression-name]:not(:has(img)),
+.expression-suggest-cell > [data-expression-name]:not(:has(img)) { visibility: hidden; }
 .expression-grid-cell .expression-image[data-size="medium"],
-.expression-set-button .expression-image[data-size="medium"] { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
+.expression-set-button .expression-image[data-size="medium"],
+.expression-suggest-cell .expression-image[data-size="medium"] { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
+/* 입력창 밖으로 포커스가 나가면(대화 목록을 누르거나 다른 창으로 갈 때) 추천 줄은 물러난다: 대화 목록 위에 떠 있는 줄이 읽는 것을 가리지 않게. 줄의 상태는 그대로라
+ * 포커스가 입력창으로 돌아오면 다시 선다(`ComposerExpressionSuggest`, #5476). 입력창 한 벌은 `data-composer-shell` 이다. */
+[data-composer-shell]:not(:focus-within) .expression-suggest-row { display: none; }
 /* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다. */
 .expression-set-button[aria-current="true"] { background-color: var(--color-accent-soft); }
