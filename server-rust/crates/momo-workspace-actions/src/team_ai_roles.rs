@@ -733,7 +733,8 @@ mod tests {
             (
                 "more names than there are bundles",
                 good(
-                    json!(["files", "memory", "code", "x", "y", "z", "w"]),
+                    // one more than there are switchable bundles (seven since `hermes`, #5369)
+                    json!(["files", "memory", "code", "x", "y", "z", "w", "v"]),
                     version.clone(),
                     json!("settings"),
                 ),
@@ -871,6 +872,12 @@ mod tests {
         known.push(momo_agent::tools::WORKSPACE_ACTION_PROPOSE);
         // The task-mode tool is defined next to the proposal tool, outside the catalog.
         known.push(momo_agent::tools::task_continue_definition().name);
+        // So is the delegation tool (ADR-0201 증보 v4, #5369), defined only for the kinds a request is offered.
+        known.push(
+            momo_agent::tools::ask_hermes_definition(&momo_agent::tools::ASK_HERMES_KINDS)
+                .expect("the delegation tool is defined for its kinds")
+                .name,
+        );
         known.extend(
             momo_agent::tools::catalog_definitions()
                 .iter()

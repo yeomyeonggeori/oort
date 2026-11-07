@@ -55,7 +55,7 @@ export function ExpressionKeyboardPanel({
 }: {
   /** 지금 입력창 위 미리 보기에 올라 있는 등록의 id. */
   previewId: string | null;
-  /** 이모티콘·GIF 를 골랐다: 호스트가 미리 보기에 올리거나(채널) 입력칸에 `:이름:` 으로 넣는다(스레드). */
+  /** 이모티콘·GIF 를 골랐다: 호스트가 미리 보기에 올리거나(대화·스레드 입력창, 답글 머리말이 걸려 있어도 같다) 입력칸에 `:이름:` 으로 넣는다(묶음 보내기를 켜지 않은 입력창). */
   onPickBig: (item: Expression) => void;
   /** 표준 그림 문자를 입력칸의 커서 자리에 넣는다. */
   onInsertText: (glyph: string) => void;

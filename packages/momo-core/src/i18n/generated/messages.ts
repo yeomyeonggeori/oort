@@ -469,9 +469,64 @@ export const messageKeys = [
   "expressions.picker.sectionRecent",
   "expressions.picker.setStrip",
   "expressions.picker.teamGroup",
+  "expressions.plan.cancel",
+  "expressions.plan.closed",
+  "expressions.plan.concept",
+  "expressions.plan.confirm",
+  "expressions.plan.confirmed",
+  "expressions.plan.declare",
+  "expressions.plan.editBack",
+  "expressions.plan.editInclude",
+  "expressions.plan.editName",
+  "expressions.plan.editRemoveReference",
+  "expressions.plan.editScene",
+  "expressions.plan.editSubmit",
+  "expressions.plan.gif",
+  "expressions.plan.heading",
+  "expressions.plan.kept",
+  "expressions.plan.motionBounce",
+  "expressions.plan.motionPulse",
+  "expressions.plan.motionSparkle",
+  "expressions.plan.motionWobble",
+  "expressions.plan.notice",
+  "expressions.plan.pictures",
+  "expressions.plan.referenceAlt",
+  "expressions.plan.references",
+  "expressions.plan.revise",
+  "expressions.plan.scenes",
   "expressions.preview.cancel",
   "expressions.preview.cleared",
   "expressions.preview.group",
+  "expressions.set.agentText",
+  "expressions.set.badgeGif",
+  "expressions.set.cellGray",
+  "expressions.set.cellReady",
+  "expressions.set.decline",
+  "expressions.set.errorGeneric",
+  "expressions.set.errorQuota",
+  "expressions.set.errorStale",
+  "expressions.set.errorTaken",
+  "expressions.set.faceOnly",
+  "expressions.set.grayBaseMissing",
+  "expressions.set.grayFailed",
+  "expressions.set.grayNotMade",
+  "expressions.set.grayRefused",
+  "expressions.set.gridLabel",
+  "expressions.set.offline",
+  "expressions.set.referenceCount",
+  "expressions.set.register",
+  "expressions.set.registering",
+  "expressions.set.resultSaved",
+  "expressions.set.resultSavedSkipped",
+  "expressions.set.rights",
+  "expressions.set.selectAll",
+  "expressions.set.selectNone",
+  "expressions.set.settledDeclined",
+  "expressions.set.settledDone",
+  "expressions.set.settledExpired",
+  "expressions.set.summaryGray",
+  "expressions.set.summaryReady",
+  "expressions.set.unreadable",
   "expressions.sheet.a11y",
   "expressions.sheet.close",
   "expressions.sheet.emptyEmoticon",
@@ -504,6 +559,7 @@ export const messageKeys = [
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "inbox.approval.open",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1757,11 +1813,108 @@ export const argumentSpecs = {
   "expressions.picker.sectionRecent": {},
   "expressions.picker.setStrip": {},
   "expressions.picker.teamGroup": {},
+  "expressions.plan.cancel": {},
+  "expressions.plan.closed": {},
+  "expressions.plan.concept": {},
+  "expressions.plan.confirm": {},
+  "expressions.plan.confirmed": {},
+  "expressions.plan.declare": {},
+  "expressions.plan.editBack": {},
+  "expressions.plan.editInclude": {
+    "displayName": "string"
+  },
+  "expressions.plan.editName": {
+    "index": "number"
+  },
+  "expressions.plan.editRemoveReference": {
+    "position": "number"
+  },
+  "expressions.plan.editScene": {
+    "index": "number"
+  },
+  "expressions.plan.editSubmit": {},
+  "expressions.plan.gif": {
+    "base": "string",
+    "motion": "string"
+  },
+  "expressions.plan.heading": {
+    "title": "string"
+  },
+  "expressions.plan.kept": {},
+  "expressions.plan.motionBounce": {},
+  "expressions.plan.motionPulse": {},
+  "expressions.plan.motionSparkle": {},
+  "expressions.plan.motionWobble": {},
+  "expressions.plan.notice": {},
+  "expressions.plan.pictures": {
+    "count": "number"
+  },
+  "expressions.plan.referenceAlt": {
+    "position": "number"
+  },
+  "expressions.plan.references": {
+    "count": "number"
+  },
+  "expressions.plan.revise": {},
+  "expressions.plan.scenes": {},
   "expressions.preview.cancel": {
     "name": "string"
   },
   "expressions.preview.cleared": {},
   "expressions.preview.group": {},
+  "expressions.set.agentText": {
+    "prompt": "string"
+  },
+  "expressions.set.badgeGif": {},
+  "expressions.set.cellGray": {
+    "displayName": "string",
+    "reason": "string"
+  },
+  "expressions.set.cellReady": {
+    "displayName": "string",
+    "name": "string"
+  },
+  "expressions.set.decline": {},
+  "expressions.set.errorGeneric": {},
+  "expressions.set.errorQuota": {},
+  "expressions.set.errorStale": {},
+  "expressions.set.errorTaken": {},
+  "expressions.set.faceOnly": {},
+  "expressions.set.grayBaseMissing": {},
+  "expressions.set.grayFailed": {},
+  "expressions.set.grayNotMade": {},
+  "expressions.set.grayRefused": {},
+  "expressions.set.gridLabel": {
+    "title": "string"
+  },
+  "expressions.set.offline": {},
+  "expressions.set.referenceCount": {
+    "count": "number"
+  },
+  "expressions.set.register": {
+    "count": "number"
+  },
+  "expressions.set.registering": {},
+  "expressions.set.resultSaved": {
+    "count": "number"
+  },
+  "expressions.set.resultSavedSkipped": {
+    "saved": "number",
+    "skipped": "number"
+  },
+  "expressions.set.rights": {},
+  "expressions.set.selectAll": {},
+  "expressions.set.selectNone": {},
+  "expressions.set.settledDeclined": {},
+  "expressions.set.settledDone": {},
+  "expressions.set.settledExpired": {},
+  "expressions.set.summaryGray": {
+    "count": "number"
+  },
+  "expressions.set.summaryReady": {
+    "count": "number"
+  },
+  "expressions.set.unreadable": {},
   "expressions.sheet.a11y": {},
   "expressions.sheet.close": {},
   "expressions.sheet.emptyEmoticon": {},
@@ -1796,6 +1949,7 @@ export const argumentSpecs = {
   "expressions.suggest.pick": {
     "name": "string"
   },
+  "inbox.approval.open": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3192,9 +3346,64 @@ export interface MessageArgs {
   "expressions.picker.sectionRecent": Record<string, never>;
   "expressions.picker.setStrip": Record<string, never>;
   "expressions.picker.teamGroup": Record<string, never>;
+  "expressions.plan.cancel": Record<string, never>;
+  "expressions.plan.closed": Record<string, never>;
+  "expressions.plan.concept": Record<string, never>;
+  "expressions.plan.confirm": Record<string, never>;
+  "expressions.plan.confirmed": Record<string, never>;
+  "expressions.plan.declare": Record<string, never>;
+  "expressions.plan.editBack": Record<string, never>;
+  "expressions.plan.editInclude": { displayName: string };
+  "expressions.plan.editName": { index: number };
+  "expressions.plan.editRemoveReference": { position: number };
+  "expressions.plan.editScene": { index: number };
+  "expressions.plan.editSubmit": Record<string, never>;
+  "expressions.plan.gif": { base: string; motion: string };
+  "expressions.plan.heading": { title: string };
+  "expressions.plan.kept": Record<string, never>;
+  "expressions.plan.motionBounce": Record<string, never>;
+  "expressions.plan.motionPulse": Record<string, never>;
+  "expressions.plan.motionSparkle": Record<string, never>;
+  "expressions.plan.motionWobble": Record<string, never>;
+  "expressions.plan.notice": Record<string, never>;
+  "expressions.plan.pictures": { count: number };
+  "expressions.plan.referenceAlt": { position: number };
+  "expressions.plan.references": { count: number };
+  "expressions.plan.revise": Record<string, never>;
+  "expressions.plan.scenes": Record<string, never>;
   "expressions.preview.cancel": { name: string };
   "expressions.preview.cleared": Record<string, never>;
   "expressions.preview.group": Record<string, never>;
+  "expressions.set.agentText": { prompt: string };
+  "expressions.set.badgeGif": Record<string, never>;
+  "expressions.set.cellGray": { displayName: string; reason: string };
+  "expressions.set.cellReady": { displayName: string; name: string };
+  "expressions.set.decline": Record<string, never>;
+  "expressions.set.errorGeneric": Record<string, never>;
+  "expressions.set.errorQuota": Record<string, never>;
+  "expressions.set.errorStale": Record<string, never>;
+  "expressions.set.errorTaken": Record<string, never>;
+  "expressions.set.faceOnly": Record<string, never>;
+  "expressions.set.grayBaseMissing": Record<string, never>;
+  "expressions.set.grayFailed": Record<string, never>;
+  "expressions.set.grayNotMade": Record<string, never>;
+  "expressions.set.grayRefused": Record<string, never>;
+  "expressions.set.gridLabel": { title: string };
+  "expressions.set.offline": Record<string, never>;
+  "expressions.set.referenceCount": { count: number };
+  "expressions.set.register": { count: number };
+  "expressions.set.registering": Record<string, never>;
+  "expressions.set.resultSaved": { count: number };
+  "expressions.set.resultSavedSkipped": { saved: number; skipped: number };
+  "expressions.set.rights": Record<string, never>;
+  "expressions.set.selectAll": Record<string, never>;
+  "expressions.set.selectNone": Record<string, never>;
+  "expressions.set.settledDeclined": Record<string, never>;
+  "expressions.set.settledDone": Record<string, never>;
+  "expressions.set.settledExpired": Record<string, never>;
+  "expressions.set.summaryGray": { count: number };
+  "expressions.set.summaryReady": { count: number };
+  "expressions.set.unreadable": Record<string, never>;
   "expressions.sheet.a11y": Record<string, never>;
   "expressions.sheet.close": Record<string, never>;
   "expressions.sheet.emptyEmoticon": Record<string, never>;
@@ -3227,6 +3436,7 @@ export interface MessageArgs {
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "inbox.approval.open": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
