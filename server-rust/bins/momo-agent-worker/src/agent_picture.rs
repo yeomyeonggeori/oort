@@ -17,17 +17,19 @@
 //! or a model's context (the only things it logs are the run id and a fixed word); follow a redirect or
 //! a proxy; retry (a failed write is the caller's failure sentence, not a second token); fall back to
 //! writing the archive itself (unlike the read, there is no archive here to fall back to); or decide
-//! whether a picture is wanted — that is the caller's gate (ADR-0201 G1~G10), and this module has **no
-//! caller yet**: the delegation that draws the picture (S4) and the conversation that asks for one
-//! (#5334) bring theirs.
+//! whether a picture is wanted — that is the caller's gate (ADR-0201 G1~G10). Its **one caller** is the
+//! delegation of a picture to Hermes (S4, #5372: `team_ai/delegate.rs` writes, `team_ai.rs`'s finishing
+//! transaction posts); the conversation that asks for one (#5334) brings its own, in its own PR, and
+//! `tests/agent_picture_static_guards.rs` turns red until it adds its row.
 //!
 //! **Where a caller puts the write** (ADR-0151 증보 8 W9, review L3): *after* the model call that combines
 //! the answer and right before the transaction that posts it. A person who stops the run while the
 //! combining call is still going finds no row yet — and the row-write's own check (the run is still in
 //! flight) refuses it if the stop lands later — whereas a picture written *before* that call and never
 //! bound would sit unbound (readable by nobody, swept by the 30-day sweep only when it is switched
-//! on). The picture must come out of the image tool's own output (a `MEDIA:` line or the tool result),
-//! never out of free text a web search brought in (review I3); both are the caller's (S4, #5372).
+//! on). The picture must come out of the image tool's own output (the one `data:image/…` address Hermes
+//! turns a `MEDIA:` line into), never out of free text a web search brought in (review I3); both are the
+//! caller's (S4, #5372: `momo_workspace_actions::team_ai_hermes_exec::picture_of`).
 //!
 //! [`send_answer_with_run_pictures_in_tx`] is the other half of the caller's job: the one transaction
 //! that posts the run's final answer **with** the pictures this run wrote, and — if the binding is
@@ -70,6 +72,15 @@ pub enum PictureRefusal {
     NoToken,
     /// The request or the api failed, with the fixed word that says how. The token is spent.
     Failed(&'static str),
+}
+
+/// What [`send_answer_with_run_pictures_in_tx`] posted.
+#[derive(Debug, Clone)]
+pub struct PostedAnswer {
+    pub sent: SentMessage,
+    /// `false`: binding the run's pictures was refused and the answer went **without** them, with
+    /// [`PICTURE_UPLOAD_FAILED_SENTENCE`] appended (one message, never two).
+    pub pictures_bound: bool,
 }
 
 /// A picture the api stored and recorded as an attachment of this run's agent.
@@ -182,8 +193,9 @@ impl PictureWriter {
         let grant = match minted {
             Ok(Some(grant)) => grant,
             Ok(None) => return Err(PictureRefusal::NoToken),
-            Err(error) => {
-                tracing::warn!(%run_id, cause = %error, "agent picture: the write token could not be minted");
+            Err(_) => {
+                // a fixed word, never the database's own text (S3 implementation review I-3, closed by S4)
+                tracing::warn!(%run_id, cause = "database", "agent picture: the write token could not be minted");
                 return Err(PictureRefusal::Failed("database"));
             }
         };
@@ -235,12 +247,14 @@ impl PictureWriter {
 /// transaction. The pictures are not named by the caller: they are the ones this run's write tokens
 /// recorded (`input.run_id`), in slot order. If binding them is refused for any reason the answer is
 /// posted again **without** them and with [`PICTURE_UPLOAD_FAILED_SENTENCE`] appended — a savepoint
-/// takes the first attempt back, so there is never a half-bound message and never two answers.
+/// takes the first attempt back, so there is never a half-bound message and never two answers. The
+/// result says which of the two happened ([`PostedAnswer::pictures_bound`]) so the caller's audit line can
+/// tell a delegation that delivered a picture from one that could not.
 pub async fn send_answer_with_run_pictures_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: NewMessage,
-) -> Result<SentMessage, momo_db::DbError> {
+) -> Result<PostedAnswer, momo_db::DbError> {
     sqlx::query("SAVEPOINT agent_picture_answer")
         .execute(&mut *conn)
         .await?;
@@ -249,7 +263,10 @@ pub async fn send_answer_with_run_pictures_in_tx(
             sqlx::query("RELEASE SAVEPOINT agent_picture_answer")
                 .execute(&mut *conn)
                 .await?;
-            Ok(sent)
+            Ok(PostedAnswer {
+                sent,
+                pictures_bound: true,
+            })
         }
         Err(rejected) => {
             tracing::warn!(cause = %rejected, "agent picture: the pictures could not be bound; the answer goes without them");
@@ -266,7 +283,11 @@ pub async fn send_answer_with_run_pictures_in_tx(
                 }
                 _ => PICTURE_UPLOAD_FAILED_SENTENCE.to_string(),
             });
-            send_thread_notice_in_tx(conn, workspace_id, plain).await
+            let sent = send_thread_notice_in_tx(conn, workspace_id, plain).await?;
+            Ok(PostedAnswer {
+                sent,
+                pictures_bound: false,
+            })
         }
     }
 }
