@@ -165,17 +165,24 @@ fn without_markdown_pictures(raw: &str) -> (String, usize) {
 }
 
 /// The `http`/`https` addresses in `text`, in order, without duplicates, at most [`SOURCES_MAX`]. A
-/// trailing mark of the sentence (`.`, `,`, `)`) is not part of the address.
+/// trailing mark of the sentence (`.`, `,`, `)`) is not part of the address. **Linear in `text`**: one
+/// search per candidate, for `http` itself, which stops at the next candidate. (Searching for `https://`
+/// and for `http://` apart ran each of them to the end of the token whenever it had no hit, so a token of
+/// a million addresses that are all too short to keep — nothing ends the loop early — cost a million
+/// passes: seconds for a 400,000-character answer, the review's L1.) The earliest address in a token
+/// comes first, whichever of the two schemes it has.
 fn sources_of(text: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for token in text.split_whitespace() {
         let mut from = 0;
-        while let Some(at) = token[from..]
-            .find("https://")
-            .or_else(|| token[from..].find("http://"))
-        {
+        while let Some(at) = token[from..].find("http") {
             let start = from + at;
             let tail = &token[start..];
+            if !(tail.starts_with("https://") || tail.starts_with("http://")) {
+                // (`http` followed by something else: look on after it)
+                from = start + "http".len();
+                continue;
+            }
             let len = tail
                 .find([')', ']', '>', '"', '\'', '<', '(', '['])
                 .unwrap_or(tail.len());
@@ -323,6 +330,57 @@ mod tests {
         let mut unique = sources.clone();
         unique.dedup();
         assert_eq!(unique.len(), sources.len());
+    }
+
+    /// The security review's L1: `sources_of` was quadratic. Every candidate of `http://a)` repeated is too
+    /// short to keep (an address must be longer than `https://`), so nothing ends the loop early — the worst
+    /// case for a search that runs to the end of the token for every candidate. 400,000 characters (the cap
+    /// on what is read of an answer) took seconds even in a build made for speed. The budget is a second in
+    /// a **debug** build, which only a linear scan meets; the findings are what they were before the fix.
+    #[test]
+    fn a_hostile_answer_is_cleaned_in_linear_time() {
+        for (shape, kept) in [
+            // every candidate is `http://a`: too short, nothing is kept
+            ("http://a)", Vec::new()),
+            // `http` that is no address at all, four bytes at a time
+            ("http", Vec::new()),
+            // one kept address, then candidates that are not (and a duplicate of the first)
+            ("https://a)http://a)", vec!["https://a".to_string()]),
+        ] {
+            let hostile = shape.repeat(ANSWER_INPUT_CHARS_MAX / shape.len() + 1);
+            assert!(hostile.chars().count() >= ANSWER_INPUT_CHARS_MAX);
+            let started = std::time::Instant::now();
+            let sources = sources_of(&hostile);
+            let took = started.elapsed();
+            assert!(
+                took < std::time::Duration::from_secs(1),
+                "sources_of took {took:?} on {} characters of `{shape}`",
+                hostile.chars().count()
+            );
+            assert_eq!(sources, kept, "`{shape}`");
+            // the whole cleaning, through the public entry (it cuts the answer at the cap first)
+            let started = std::time::Instant::now();
+            let answer = clean_answer(&hostile);
+            let took = started.elapsed();
+            assert!(
+                took < std::time::Duration::from_secs(1),
+                "clean_answer took {took:?} on `{shape}`"
+            );
+            assert_eq!(answer.sources, kept, "`{shape}` through clean_answer");
+        }
+    }
+
+    /// Two addresses in one token with nothing between them are both listed, in order, whichever scheme
+    /// each has (the earliest address in a token comes first).
+    #[test]
+    fn two_addresses_in_one_token_are_both_listed_in_order() {
+        assert_eq!(
+            sources_of("[a](http://a.example/x)[b](https://b.example/y)"),
+            vec![
+                "http://a.example/x".to_string(),
+                "https://b.example/y".to_string()
+            ]
+        );
     }
 
     #[test]

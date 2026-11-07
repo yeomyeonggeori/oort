@@ -33,13 +33,11 @@ use momo_agent::team_ai_task::{
     self as store, ClaimOutcome, CreateOutcome, DelegationMark, DelegationState, NewDelegation,
     NewTask, TaskRow,
 };
-use momo_outbox::{
-    backoff_seconds, emit_outbox, requeue, OutboxKind, DEFAULT_WORKER_LEASE_SECONDS,
-};
+use momo_outbox::{backoff_seconds, emit_outbox, requeue, OutboxKind};
 use momo_workspace_actions::team_ai_hermes_exec as exec;
 
-/// Room kept between the stretched claim and the outbox job's lease: a job that is re-claimed after its
-/// lease expired must always find the dead worker's claim expired too, or it would wait for nothing.
+/// Room kept between the stretched claim and the end of the job's own lease: a job that is re-claimed after
+/// its lease expired must find the dead worker's claim expired too, or it would wait for nothing.
 const LEASE_MARGIN_SECS: i64 = 15;
 /// Seconds the stretched claim keeps beyond the worst time of the call and the merging (the commit, the
 /// scheduler, a slow disk).
@@ -47,6 +45,35 @@ const CLAIM_SLACK_SECS: u64 = 30;
 /// The activity of a delegation is one ledger id for its whole life (`s1_delegate`): `in_progress` at the
 /// start, then `completed` or `failed`. It is the first step's id by design, whatever step ends it.
 const ACTIVITY_STEP: i32 = 1;
+
+/// The seconds the task claim is stretched to when `called` is written, for `job` at `now`: the call's
+/// own deadline, the merging's two attempts and a slack — and never past the end of **this job's own
+/// lease** less [`LEASE_MARGIN_SECS`]. A job that is re-claimed can only come after its lease has ended,
+/// so a claim that ends before that finds nothing to wait for (F18). The lease is the one the job was
+/// really claimed with (`WORKER_LEASE_SECONDS`, 300 s by default; `lease_expires_at`) less what has
+/// already passed since — not the default as a constant: an operator who shortens the lease, or a step
+/// that reached its commit late, gets a shorter claim instead of one that outlives the lease (the
+/// security review's L2). If the lease is shorter than the worst time of the call plus the margin, the
+/// claim ends before the call can: a re-claim then ends the delegation `failed` without calling again
+/// (the CAS on `called` keeps it at most once) and a late answer is dropped — safe, but the answer is lost.
+///
+/// `min` then `max`, never `clamp`: with a lease nearly gone the upper bound is below the lower one, and
+/// `clamp` panics on that. One second is the floor (a valid interval; a re-claim finds it expired).
+fn claim_secs_for(
+    config: &crate::WorkerConfig,
+    kind: HermesKind,
+    job: &ClaimedAgentJob,
+    now: chrono::DateTime<chrono::Utc>,
+) -> i64 {
+    let worst = config.hermes_deadlines.of(kind).as_secs()
+        + 2 * config.team_ai_model_timeout.as_secs()
+        + CLAIM_SLACK_SECS;
+    let lease_left_secs = (job.lease_expires_at - now).num_seconds();
+    i64::try_from(worst)
+        .unwrap_or(i64::MAX)
+        .min(lease_left_secs.saturating_sub(LEASE_MARGIN_SECS))
+        .max(1)
+}
 
 /// The word of a kind (`web_search` / `image`) as a `&'static str`.
 pub(super) fn kind_word(kind: &str) -> &'static str {
@@ -485,16 +512,9 @@ impl AgentWorker {
         }
     }
 
-    /// The seconds the claim is stretched to when `called` is written: the call's own deadline, the
-    /// merging's two attempts and a slack — never past the outbox job's lease less a margin (a re-claimed
-    /// job must find an expired claim, F18).
-    fn delegation_claim_secs(&self, kind: HermesKind) -> i64 {
-        let worst = self.config.hermes_deadlines.of(kind).as_secs()
-            + 2 * self.config.team_ai_model_timeout.as_secs()
-            + CLAIM_SLACK_SECS;
-        i64::try_from(worst)
-            .unwrap_or(i64::MAX)
-            .clamp(1, DEFAULT_WORKER_LEASE_SECONDS - LEASE_MARGIN_SECS)
+    /// The seconds the claim is stretched to when `called` is written: see [`claim_secs_for`].
+    fn delegation_claim_secs(&self, kind: HermesKind, job: &ClaimedAgentJob) -> i64 {
+        claim_secs_for(&self.config, kind, job, chrono::Utc::now())
     }
 
     /// Run the delegation step (`step >= 2` of a row that carries the marker). `gathered` was read at the
@@ -698,7 +718,7 @@ impl AgentWorker {
         };
 
         // The `called` commit (the at-most-once marker) under the workspace lock.
-        let claim_secs = self.delegation_claim_secs(kind);
+        let claim_secs = self.delegation_claim_secs(kind, job);
         let called = self
             .delegation_commit_called(
                 workspace_id,
@@ -1427,5 +1447,105 @@ impl AgentWorker {
             Some(trace),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{DateTime, Duration as Span, Utc};
+
+    /// A claimed job whose lease ends `left_secs` after `now`.
+    fn job_with_lease_left(now: DateTime<Utc>, left_secs: i64) -> ClaimedAgentJob {
+        ClaimedAgentJob {
+            id: 1,
+            workspace_id: Uuid::nil(),
+            attempts: 1,
+            method: "agent.turn".to_string(),
+            payload: "{}".to_string(),
+            partition_key: None,
+            lease_id: Uuid::nil(),
+            lease_expires_at: now + Span::seconds(left_secs),
+            created_at: now,
+        }
+    }
+
+    fn config_with_lease(lease_seconds: i64) -> crate::WorkerConfig {
+        let mut config = crate::WorkerConfig::for_target("postgres://unused");
+        config.lease_seconds = lease_seconds;
+        config
+    }
+
+    /// The worst time of the call and the merging on the default deadlines: the search 60 s, the picture
+    /// 120 s, two merging attempts of 20 s, a 30 s slack.
+    const SEARCH_WORST: i64 = 130;
+    const IMAGE_WORST: i64 = 190;
+
+    /// A job on the default 300 s lease keeps the whole worst time: nothing about the default changes.
+    #[test]
+    fn a_job_on_the_default_lease_keeps_the_whole_worst_time() {
+        let now = Utc::now();
+        let config = config_with_lease(300);
+        let job = job_with_lease_left(now, 300);
+        assert_eq!(
+            claim_secs_for(&config, HermesKind::WebSearch, &job, now),
+            SEARCH_WORST
+        );
+        assert_eq!(
+            claim_secs_for(&config, HermesKind::Image, &job, now),
+            IMAGE_WORST
+        );
+    }
+
+    /// The review's L2: the cap is the job's real lease, not 300 s as a constant. A job claimed just now
+    /// under a short `WORKER_LEASE_SECONDS` must get a claim that ends a margin before its lease does —
+    /// the old constant gave the search 130 s under a 100 s lease.
+    #[test]
+    fn the_claim_never_outlives_a_short_lease_less_the_margin() {
+        let now = Utc::now();
+        for lease in [20, 40, 60, 100, 145, 200] {
+            let config = config_with_lease(lease);
+            let job = job_with_lease_left(now, config.lease_seconds);
+            for (kind, worst) in [
+                (HermesKind::WebSearch, SEARCH_WORST),
+                (HermesKind::Image, IMAGE_WORST),
+            ] {
+                let claim = claim_secs_for(&config, kind, &job, now);
+                assert!(
+                    claim <= lease - LEASE_MARGIN_SECS,
+                    "{kind:?} under a {lease} s lease: a claim of {claim} s outlives it less the margin"
+                );
+                assert_eq!(claim, worst.min(lease - LEASE_MARGIN_SECS));
+            }
+        }
+    }
+
+    /// The other half of L2: a step that reached its commit late (the lease is already partly spent) gets
+    /// the rest of the lease, not the lease it started with.
+    #[test]
+    fn a_step_that_reaches_its_commit_late_gets_what_is_left_of_the_lease() {
+        let now = Utc::now();
+        let config = config_with_lease(300);
+        let job = job_with_lease_left(now, 300 - 200);
+        assert_eq!(
+            claim_secs_for(&config, HermesKind::WebSearch, &job, now),
+            300 - 200 - LEASE_MARGIN_SECS
+        );
+    }
+
+    /// A lease that is nearly gone, or gone, leaves a one-second claim — and does not panic: `clamp(1, cap)`
+    /// panics when `cap < 1`, which is exactly a lease with under a margin left.
+    #[test]
+    fn a_lease_that_is_nearly_gone_or_gone_leaves_a_one_second_claim() {
+        let now = Utc::now();
+        let config = config_with_lease(300);
+        for left in [16, 15, 10, 1, 0, -5, -3_600] {
+            let job = job_with_lease_left(now, left);
+            assert_eq!(
+                claim_secs_for(&config, HermesKind::WebSearch, &job, now),
+                1,
+                "{left} s of lease left"
+            );
+        }
     }
 }
