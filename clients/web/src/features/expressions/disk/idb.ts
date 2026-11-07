@@ -1,4 +1,6 @@
 import {
+  EXPRESSION_DISK_BUDGET_BYTES,
+  EXPRESSION_DISK_LIFETIME_MS,
   EXPRESSION_DISK_PREFIX,
   isExpressionDiskName,
   planTrim,
@@ -91,16 +93,26 @@ function forget(name: string): void {
   writeRegistry(readRegistry().filter((known) => known !== name));
 }
 
-export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () => number = () => Date.now()): ExpressionDiskBackend {
+export function indexedDbExpressionDisk(
+  factory?: IDBFactory | null,
+  clock: () => number = () => Date.now(),
+  limits: { budgetBytes?: number; lifetimeMs?: number } = {},
+): ExpressionDiskBackend {
+  const budgetBytes = limits.budgetBytes ?? EXPRESSION_DISK_BUDGET_BYTES;
+  const lifetimeMs = limits.lifetimeMs ?? EXPRESSION_DISK_LIFETIME_MS;
   const idb = factory === undefined ? (typeof indexedDB === "undefined" ? null : indexedDB) : factory;
-  /** 이름 → 열린 연결의 약속. 닫히거나 지워지면 비운다. */
-  const connections = new Map<string, Promise<IDBDatabase>>();
+  /** 이름 → 열린 연결의 약속. 닫히거나 지워지면 비운다. `null` 은 「그 칸이 없다」(읽으려고 열었다가 없던 칸이라 만들지 않았다) — 기억하지 않는다. */
+  const connections = new Map<string, Promise<IDBDatabase | null>>();
 
-  function connect(name: string): Promise<IDBDatabase> {
+  /**
+   * 칸에 연결한다. **`create` 가 거짓이면 없는 칸을 만들지 않는다**(읽기·색인·지우기·청소가 이미 지워진 칸을 빈 DB 로 되살려 로그아웃 뒤에 칸 이름이 남지 않게 한다): 없던 칸이면 `null`.
+   * 쓰기만 칸을 만든다.
+   */
+  function connect(name: string, create: boolean): Promise<IDBDatabase | null> {
     if (idb === null) return Promise.reject(new Error("indexedDB unavailable"));
     let opened = connections.get(name);
     if (opened === undefined) {
-      opened = new Promise<IDBDatabase>((resolve, reject) => {
+      opened = new Promise<IDBDatabase | null>((resolve, reject) => {
         let req: IDBOpenDBRequest;
         try {
           req = idb.open(name, DB_VERSION);
@@ -108,7 +120,14 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
           reject(error);
           return;
         }
-        req.onupgradeneeded = () => {
+        let missing = false;
+        req.onupgradeneeded = (event) => {
+          if (event.oldVersion === 0 && !create) {
+            // 없던 칸을 읽으려고 만들지 않는다: 업그레이드를 중단하면 DB 는 만들어지지 않는다.
+            missing = true;
+            req.transaction?.abort();
+            return;
+          }
           const db = req.result;
           if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
           if (!db.objectStoreNames.contains(BLOBS)) db.createObjectStore(BLOBS);
@@ -125,21 +144,35 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
           };
           resolve(db);
         };
-        req.onerror = () => reject(req.error ?? new Error("idb open"));
+        req.onerror = () => {
+          if (missing) resolve(null);
+          else reject(req.error ?? new Error("idb open"));
+        };
         req.onblocked = () => reject(new Error("idb open blocked"));
       });
       connections.set(name, opened);
-      // 실패한 열기를 기억하지 않는다: 다음 호출이 다시 시도한다.
-      opened.catch(() => {
-        if (connections.get(name) === opened) connections.delete(name);
-      });
+      // 실패한 열기와 「없는 칸」을 기억하지 않는다: 다음 호출이 다시 시도한다(쓰기는 칸을 만든다).
+      const pending = opened;
+      opened.then(
+        (db) => { if (db === null && connections.get(name) === pending) connections.delete(name); },
+        () => { if (connections.get(name) === pending) connections.delete(name); },
+      );
     }
     return opened;
+  }
+  /** 쓰기 전용 연결: 칸을 만든다. 같은 이름의 「없으면 만들지 않는」 열기가 진행 중이라 `null` 을 받았다면 한 번 더 만들어 연다. */
+  async function connectForWrite(name: string): Promise<IDBDatabase> {
+    const first = await connect(name, true);
+    if (first !== null) return first;
+    const again = await connect(name, true);
+    if (again === null) throw new Error("idb open");
+    return again;
   }
 
   async function removeKeys(name: string, keys: readonly string[]): Promise<void> {
     if (keys.length === 0) return;
-    const db = await connect(name);
+    const db = await connect(name, false);
+    if (db === null) return;
     const tx = db.transaction([META, BLOBS], "readwrite");
     for (const key of keys) {
       tx.objectStore(META).delete(key);
@@ -152,7 +185,8 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
     return {
       async read(key) {
         try {
-          const db = await connect(name);
+          const db = await connect(name, false);
+          if (db === null) return null;
           const tx = db.transaction([META, BLOBS], "readonly");
           const metaRequest = tx.objectStore(META).get(key) as IDBRequest<unknown>;
           const blobRequest = tx.objectStore(BLOBS).get(key) as IDBRequest<unknown>;
@@ -180,7 +214,7 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
         }
       },
       async write(key, image: DiskImage) {
-        const db = await connect(name);
+        const db = await connectForWrite(name);
         const now = clock();
         const tx = db.transaction([META, BLOBS], "readwrite");
         const meta: StoredMeta = { mime: image.mime, size: image.bytes.byteLength, writtenAt: now, lastReadAt: now };
@@ -191,7 +225,8 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
       },
       async keys() {
         try {
-          const db = await connect(name);
+          const db = await connect(name, false);
+          if (db === null) return []; // 없는 칸에는 디스크에 남은 것이 없다(청소할 것도 없다)
           const tx = db.transaction([META], "readonly");
           const all = request(tx.objectStore(META).getAllKeys());
           await done(tx);
@@ -210,7 +245,8 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
       async removeIds(ids) {
         if (ids.length === 0) return;
         try {
-          const db = await connect(name);
+          const db = await connect(name, false);
+          if (db === null) return;
           const tx = db.transaction([META, BLOBS], "readwrite");
           for (const id of ids) {
             // 키는 `<id>:<size>:<sha>`라서 `<id>:` 로 시작하는 구간이 그 표현의 모든 항목이다.
@@ -225,7 +261,8 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
       },
       async trim() {
         try {
-          const db = await connect(name);
+          const db = await connect(name, false);
+          if (db === null) return;
           const tx = db.transaction([META], "readonly");
           const entries = new Map<string, DiskEntryMeta>();
           await new Promise<void>((resolve, reject) => {
@@ -243,7 +280,7 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
               at.continue();
             };
           });
-          await removeKeys(name, planTrim(entries, clock()));
+          await removeKeys(name, planTrim(entries, clock(), budgetBytes, lifetimeMs));
         } catch {
           // 청소 실패는 다음 쓰기·시작이 다시 한다.
         }
@@ -260,7 +297,7 @@ export function indexedDbExpressionDisk(factory?: IDBFactory | null, clock: () =
     connections.delete(name);
     if (opened !== undefined) {
       try {
-        (await opened).close();
+        (await opened)?.close();
       } catch {
         // 열리지 못한 연결은 닫을 것이 없다.
       }

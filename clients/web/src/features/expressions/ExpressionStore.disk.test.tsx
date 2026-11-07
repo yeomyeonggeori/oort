@@ -341,6 +341,24 @@ describe("MA6 알림은 그리기만 막는다", () => {
   });
 });
 
+describe("MA6 늦게 온 바이트: 쓰기 직전에 걷혀도 쓰지 않는다", () => {
+  it("알림 없이 메모리를 비운 길(내 mutate)에서도, 받던 그림이 해시를 재는 사이 걷혔다면 디스크에 쓰지 않는다", async () => {
+    const world = worldOf(4);
+    const backend = createMemoryDiskBackend();
+    const store = boot(world, backend);
+    await store.refresh();
+    // 네트워크 응답이 온 뒤 쓰기 문을 통과하고 sha256 을 재는 중에(해시는 비동기다) 저장소가 그림을 걷는다.
+    expect(await store.image(world.pathOf(store, 4, "large"))).toBe(world.srcOf(4, "large"));
+    store.clearImages(); // 쓰기 작업은 아직 해시를 재는 중이다
+    await store.settleDisk();
+    expect(keysOfCompartment(backend)).toEqual([]); // 걷힌 그림의 바이트는 쓰이지 않았다
+    // 대조군: 걷지 않으면 같은 길로 쓰인다.
+    expect(await store.image(world.pathOf(store, 3, "large"))).toBe(world.srcOf(3, "large"));
+    await store.settleDisk();
+    expect(hasId(keysOfCompartment(backend), 3)).toBe(true);
+  });
+});
+
 describe("MA7 시작 청소", () => {
   const entry = { bytes: new ArrayBuffer(8), mime: "image/png" };
   const sha = "a".repeat(64);
