@@ -114,8 +114,51 @@ struct Parts {
     client_email: String,
     signing_key: EncodingKey,
     api_base: String,
+    /// Where resumable sessions are requested and which session address the bytes may go to.
+    upload: UploadEndpoint,
     token: Option<CachedToken>,
     limits: Limits,
+}
+
+/// Where Google's resumable upload lives, and which session address this process will send bytes to
+/// (ADR-0151 증보 8 W7, review L6; implementation review round 2, L-3). A real archive always has
+/// [`UploadEndpoint::google`]. This crate's own tests build one that points at a stand-in on
+/// 127.0.0.1, so the **same** assembly — session request, the `Location` check, the pin, the `PUT`,
+/// the read-back and the take-back — runs against a recording server instead of Google. The judgement
+/// is the same code with other data; there is no way to set the data from outside the crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UploadEndpoint {
+    /// The upload base a resumable session is requested from.
+    base: String,
+    /// The scheme a session address must have.
+    scheme: String,
+    /// The host a session address must have.
+    host: String,
+    /// The explicit port a session address must carry (`None`: none at all).
+    port: Option<u16>,
+}
+
+impl UploadEndpoint {
+    /// Google's own: `https://www.googleapis.com/upload/drive/v3`, no explicit port. A test pins these
+    /// values and reads them back from an archive built the way the real constructor builds one.
+    fn google() -> UploadEndpoint {
+        UploadEndpoint {
+            base: UPLOAD_API_BASE.to_string(),
+            scheme: "https".to_string(),
+            host: "www.googleapis.com".to_string(),
+            port: None,
+        }
+    }
+
+    /// What the address a session request answers with must start with — the textual check
+    /// [`GoogleDriveArchive::create_resumable_upload`] makes before it hands the address on (to a
+    /// browser, or to [`pinned_session_url`]). For Google: `https://www.googleapis.com/`.
+    fn session_prefix(&self) -> String {
+        match self.port {
+            Some(port) => format!("{}://{}:{port}/", self.scheme, self.host),
+            None => format!("{}://{}/", self.scheme, self.host),
+        }
+    }
 }
 
 /// The service-account fields this crate uses. `private_key` is never logged,
@@ -164,6 +207,9 @@ pub struct GoogleDriveArchive {
     /// except in this crate's own tests, which point it at a recording stand-in
     /// on 127.0.0.1. There is no way to set it from outside the crate.
     api_base: String,
+    /// Where sessions are requested and which session address bytes may go to:
+    /// [`UploadEndpoint::google`] always, except in this crate's own tests.
+    upload: UploadEndpoint,
     token: Arc<Mutex<Option<CachedToken>>>,
     folders: Arc<Mutex<HashMap<Uuid, String>>>,
 }
@@ -230,6 +276,7 @@ impl GoogleDriveArchive {
             client_email: key.client_email,
             signing_key,
             api_base: DRIVE_API_BASE.to_string(),
+            upload: UploadEndpoint::google(),
             token: None,
             limits: Limits::PRODUCTION,
         })
@@ -246,6 +293,7 @@ impl GoogleDriveArchive {
             http,
             limits: parts.limits,
             api_base: parts.api_base,
+            upload: parts.upload,
             token: Arc::new(Mutex::new(parts.token)),
             folders: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -264,6 +312,7 @@ impl GoogleDriveArchive {
             client_email: "stand-in@momo.test".to_string(),
             signing_key: EncodingKey::from_secret(b"stand-in"),
             api_base: api_base.trim_end_matches('/').to_string(),
+            upload: UploadEndpoint::google(),
             token: Some(CachedToken {
                 token: "stand-in-token".to_string(),
                 expires_at: i64::MAX,
@@ -274,6 +323,31 @@ impl GoogleDriveArchive {
             },
         })
         .expect("a client with only timeouts builds")
+    }
+
+    /// [`Self::against_stand_in`] for a stand-in that plays Google's **upload** endpoint as well, at
+    /// `origin` (`http://127.0.0.1:<port>`): the Drive API is `<origin>/drive/v3`, a session is requested
+    /// from `<origin>/upload/drive/v3`, and a session address must be on that scheme, host and port and
+    /// under `/upload/` — the judgement a real archive makes, with the data pointed at the loopback.
+    /// Compiled for this crate's tests only, like [`Self::against_stand_in`].
+    #[cfg(test)]
+    pub(crate) fn against_upload_stand_in(
+        origin: &str,
+        idle_timeout: Duration,
+    ) -> GoogleDriveArchive {
+        let origin = origin.trim_end_matches('/');
+        let parsed = reqwest::Url::parse(origin).expect("a stand-in origin is an address");
+        let mut archive = Self::against_stand_in(&format!("{origin}/drive/v3"), idle_timeout);
+        archive.upload = UploadEndpoint {
+            base: format!("{origin}/upload/drive/v3"),
+            scheme: parsed.scheme().to_string(),
+            host: parsed
+                .host_str()
+                .expect("a stand-in has a host")
+                .to_string(),
+            port: parsed.port(),
+        };
+        archive
     }
 
     /// Send `bytes` to an already-pinned resumable session with one `PUT` (ADR-0151 증보 8 W7, L6).
@@ -497,7 +571,7 @@ impl DriveArchive for GoogleDriveArchive {
         let parent_id = self.channel_folder_id(channel_id).await?;
         let file_id = self.generate_file_id().await?;
         let url = build_url(
-            UPLOAD_API_BASE,
+            &self.upload.base,
             "/files",
             &[("uploadType", "resumable"), ("supportsAllDrives", "true")],
         )?;
@@ -533,7 +607,7 @@ impl DriveArchive for GoogleDriveArchive {
         // The session URL is handed to a browser. Refusing anything that is not
         // Google's own host is what keeps a compromised or confused upstream
         // from turning this route into an open redirect for file uploads.
-        if !location.starts_with("https://www.googleapis.com/") {
+        if !location.starts_with(&self.upload.session_prefix()) {
             return Err(DriveError::UpstreamFailure);
         }
         Ok(DriveUploadSession {
@@ -606,7 +680,7 @@ impl DriveArchive for GoogleDriveArchive {
         let session = self
             .create_resumable_upload(channel_id, name, mime, size)
             .await?;
-        let url = pinned_session_url(&session.upload_url)?;
+        let url = pinned_session_url(&session.upload_url, &self.upload)?;
         self.put_to_session(url, mime, bytes).await?;
         let file = self.file_metadata(&session.drive_file_id).await?;
         if file.drive_file_id != session.drive_file_id
@@ -885,16 +959,17 @@ fn delete_outcome_of_probe_error(error: DriveError) -> Result<(), DriveError> {
 }
 
 /// The one place a resumable **session address** is judged before bytes go to it (ADR-0151 증보 8 W7,
-/// review L6): `https`, host exactly `www.googleapis.com`, no userinfo, no explicit port, a path under
-/// `/upload/`. Anything else — another host, `http`, a look-alike such as `www.googleapis.com.evil.test`
-/// or `www.googleapis.com@evil.test`, a port, another path — is the archive failing, and no byte is sent.
-fn pinned_session_url(raw: &str) -> Result<reqwest::Url, DriveError> {
+/// review L6): for Google (`endpoint` = [`UploadEndpoint::google`]) `https`, host exactly
+/// `www.googleapis.com`, no userinfo, no explicit port, a path under `/upload/`. Anything else — another
+/// host, `http`, a look-alike such as `www.googleapis.com.evil.test` or `www.googleapis.com@evil.test`, a
+/// port, another path — is the archive failing, and no byte is sent.
+fn pinned_session_url(raw: &str, endpoint: &UploadEndpoint) -> Result<reqwest::Url, DriveError> {
     let url = reqwest::Url::parse(raw).map_err(|_| DriveError::UpstreamFailure)?;
-    let pinned = url.scheme() == "https"
-        && url.host_str() == Some("www.googleapis.com")
+    let pinned = url.scheme() == endpoint.scheme
+        && url.host_str() == Some(endpoint.host.as_str())
         && url.username().is_empty()
         && url.password().is_none()
-        && url.port().is_none()
+        && url.port() == endpoint.port
         && url.path().starts_with("/upload/");
     if pinned {
         Ok(url)
@@ -942,7 +1017,10 @@ mod tests {
             "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=AbC",
             "https://www.googleapis.com/upload/drive/v3/files",
         ] {
-            assert!(pinned_session_url(good).is_ok(), "{good}");
+            assert!(
+                pinned_session_url(good, &UploadEndpoint::google()).is_ok(),
+                "{good}"
+            );
         }
         for bad in [
             "http://www.googleapis.com/upload/drive/v3/files?upload_id=x",
@@ -960,7 +1038,7 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                pinned_session_url(bad).expect_err(bad),
+                pinned_session_url(bad, &UploadEndpoint::google()).expect_err(bad),
                 DriveError::UpstreamFailure,
                 "{bad}"
             );
@@ -1107,6 +1185,392 @@ mod tests {
         assert!(
             second.seen.lock().expect("log").is_empty(),
             "the bytes were sent to wherever a redirect pointed"
+        );
+    }
+
+    /// One request the whole-Google stand-in understood.
+    #[derive(Debug, Clone)]
+    struct SeenCall {
+        method: String,
+        /// The path without its query.
+        path: String,
+        authorization: bool,
+        content_type: Option<String>,
+        /// `X-Upload-Content-Length`: the size a session request declares.
+        declared_length: Option<String>,
+        body_len: usize,
+    }
+
+    /// What Drive reports for the object once the bytes were sent.
+    #[derive(Debug, Clone)]
+    struct Stored {
+        id: &'static str,
+        size: i64,
+        mime: &'static str,
+    }
+
+    /// A loopback server that plays **all** of Google for one `put_object` — the two folder lookups, the
+    /// file id, the resumable session, the `PUT`, the metadata read-back and the delete — and records every
+    /// request it understood, in order. Hand-rolled over `tokio::net` like [`put_stand_in`], one request per
+    /// connection. `session_address` is what the session request answers as `Location`; `{origin}`,
+    /// `{authority}` and `{port}` in it stand for this server's own `http://127.0.0.1:<port>`,
+    /// `127.0.0.1:<port>` and `<port>`.
+    struct GoogleStandIn {
+        origin: String,
+        seen: Arc<std::sync::Mutex<Vec<SeenCall>>>,
+    }
+
+    impl GoogleStandIn {
+        fn calls(&self) -> Vec<SeenCall> {
+            self.seen.lock().expect("log").clone()
+        }
+    }
+
+    const STAND_IN_FILE: &str = "1StandInFile";
+    const STAND_IN_FILE_PATH: &str = "/drive/v3/files/1StandInFile";
+
+    async fn google_stand_in(session_address: &str, stored: Stored) -> GoogleStandIn {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let origin = format!("http://{address}");
+        let location = session_address
+            .replace("{origin}", &origin)
+            .replace("{authority}", &address.to_string())
+            .replace("{port}", &address.port().to_string());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let (log, stored, location) = (log.clone(), stored.clone(), location.clone());
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        match socket.read(&mut byte).await {
+                            Ok(1) => head.push(byte[0]),
+                            _ => return,
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&head).into_owned();
+                    let mut lines = text.split("\r\n");
+                    let request_line = lines.next().unwrap_or_default().to_string();
+                    let mut parts = request_line.split(' ');
+                    let method = parts.next().unwrap_or_default().to_string();
+                    let target = parts.next().unwrap_or_default();
+                    let path = target.split('?').next().unwrap_or_default().to_string();
+                    let mut call = SeenCall {
+                        method,
+                        path,
+                        authorization: false,
+                        content_type: None,
+                        declared_length: None,
+                        body_len: 0,
+                    };
+                    for line in lines {
+                        if let Some((name, value)) = line.split_once(':') {
+                            let value = value.trim().to_string();
+                            match name.trim().to_ascii_lowercase().as_str() {
+                                "authorization" => call.authorization = true,
+                                "content-type" => call.content_type = Some(value),
+                                "x-upload-content-length" => call.declared_length = Some(value),
+                                "content-length" => call.body_len = value.parse().unwrap_or(0),
+                                _ => {}
+                            }
+                        }
+                    }
+                    let mut body = vec![0u8; call.body_len];
+                    if socket.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let (status, headers, reply_body) =
+                        match (call.method.as_str(), call.path.as_str()) {
+                            ("GET", "/drive/v3/files") => {
+                                (200, vec![], r#"{"files":[{"id":"1Folder"}]}"#.to_string())
+                            }
+                            ("GET", "/drive/v3/files/generateIds") => {
+                                (200, vec![], format!(r#"{{"ids":["{STAND_IN_FILE}"]}}"#))
+                            }
+                            ("POST", "/upload/drive/v3/files") => {
+                                (200, vec![("Location", location)], String::new())
+                            }
+                            ("PUT", _) => (200, vec![], String::new()),
+                            ("GET", STAND_IN_FILE_PATH) => (
+                                200,
+                                vec![],
+                                serde_json::json!({
+                                    "id": stored.id,
+                                    "name": "p.png",
+                                    "mimeType": stored.mime,
+                                    "size": stored.size.to_string(),
+                                    "driveId": "0StandInDrive",
+                                    "trashed": false,
+                                })
+                                .to_string(),
+                            ),
+                            ("DELETE", STAND_IN_FILE_PATH) => (204, vec![], String::new()),
+                            _ => (404, vec![], String::new()),
+                        };
+                    log.lock().expect("log").push(call);
+                    let mut reply = format!("HTTP/1.1 {status} X\r\nConnection: close\r\n");
+                    if status != 204 {
+                        reply.push_str(&format!("Content-Length: {}\r\n", reply_body.len()));
+                    }
+                    if !reply_body.is_empty() {
+                        reply.push_str("Content-Type: application/json\r\n");
+                    }
+                    for (name, value) in headers {
+                        reply.push_str(&format!("{name}: {value}\r\n"));
+                    }
+                    reply.push_str("\r\n");
+                    reply.push_str(&reply_body);
+                    let _ = socket.write_all(reply.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        GoogleStandIn { origin, seen }
+    }
+
+    fn calls_of<'a>(calls: &'a [SeenCall], method: &str) -> Vec<&'a SeenCall> {
+        calls.iter().filter(|call| call.method == method).collect()
+    }
+
+    /// Implementation review round 2, L-3 (W7): `put_object` reads back what Drive holds and takes the
+    /// object back when it is not what was sent. Run end to end — session, pin, `PUT`, read-back, delete —
+    /// against a stand-in that plays all of Google, so deleting the comparison (or any one of its terms)
+    /// turns this red. The pieces tested alone cannot: they never meet the comparison.
+    #[tokio::test]
+    async fn what_drive_holds_after_the_put_must_be_what_was_sent_or_the_object_is_taken_back_once()
+    {
+        let channel = Uuid::new_v4();
+        let bytes = vec![7u8; 1234];
+        let size = i64::try_from(bytes.len()).expect("a small length");
+        let honest = Stored {
+            id: STAND_IN_FILE,
+            size,
+            mime: "image/png",
+        };
+
+        // The control: Drive holds exactly what was sent. The object is kept and nothing is deleted, so
+        // the refusals below are the comparison's doing and not the harness's.
+        let server = google_stand_in(
+            "{origin}/upload/drive/v3/files?upload_id=ok",
+            honest.clone(),
+        )
+        .await;
+        let archive =
+            GoogleDriveArchive::against_upload_stand_in(&server.origin, Duration::from_secs(5));
+        let stored = archive
+            .put_object(channel, "p.png", "image/png", bytes.clone())
+            .await
+            .expect("what was sent is what Drive holds");
+        assert_eq!(stored.drive_file_id, STAND_IN_FILE);
+        assert_eq!(stored.size_bytes, size);
+        assert_eq!(stored.mime, "image/png");
+        let calls = server.calls();
+        let session = calls_of(&calls, "POST");
+        assert_eq!(session.len(), 1, "one session request");
+        assert_eq!(
+            session[0].declared_length.as_deref(),
+            Some("1234"),
+            "the session declares the size it will be sent"
+        );
+        assert!(
+            session[0].authorization,
+            "the session is asked for with the bearer"
+        );
+        let puts = calls_of(&calls, "PUT");
+        assert_eq!(puts.len(), 1, "one PUT");
+        assert_eq!(puts[0].path, "/upload/drive/v3/files");
+        assert_eq!(puts[0].body_len, bytes.len());
+        assert_eq!(puts[0].content_type.as_deref(), Some("image/png"));
+        assert!(
+            !puts[0].authorization,
+            "the session address is its own capability"
+        );
+        assert!(
+            calls_of(&calls, "DELETE").is_empty(),
+            "nothing is taken back when Drive holds what was sent"
+        );
+
+        for (what, wrong) in [
+            (
+                "a size one byte too big",
+                Stored {
+                    size: size + 1,
+                    ..honest.clone()
+                },
+            ),
+            (
+                "a size one byte too small",
+                Stored {
+                    size: size - 1,
+                    ..honest.clone()
+                },
+            ),
+            (
+                "another type",
+                Stored {
+                    mime: "image/jpeg",
+                    ..honest.clone()
+                },
+            ),
+            (
+                "another file id",
+                Stored {
+                    id: "1SomebodyElsesFile",
+                    ..honest.clone()
+                },
+            ),
+        ] {
+            let server =
+                google_stand_in("{origin}/upload/drive/v3/files?upload_id=ok", wrong).await;
+            let archive =
+                GoogleDriveArchive::against_upload_stand_in(&server.origin, Duration::from_secs(5));
+            let got = archive
+                .put_object(channel, "p.png", "image/png", bytes.clone())
+                .await;
+            assert_eq!(got, Err(DriveError::UpstreamFailure), "{what}: fail closed");
+            let calls = server.calls();
+            assert_eq!(
+                calls_of(&calls, "PUT").len(),
+                1,
+                "{what}: the bytes were sent once"
+            );
+            let deletes = calls_of(&calls, "DELETE");
+            assert_eq!(
+                deletes.len(),
+                1,
+                "{what}: the object is taken back exactly once"
+            );
+            assert_eq!(
+                deletes[0].path, STAND_IN_FILE_PATH,
+                "{what}: the object that was written"
+            );
+            let put_at = calls.iter().position(|call| call.method == "PUT");
+            let read_at = calls
+                .iter()
+                .position(|call| call.method == "GET" && call.path == STAND_IN_FILE_PATH);
+            let delete_at = calls.iter().position(|call| call.method == "DELETE");
+            assert!(
+                put_at < read_at && read_at < delete_at,
+                "{what}: the read-back came between the PUT and the delete: {calls:?}"
+            );
+        }
+    }
+
+    /// Implementation review round 2, L-3 (WA10, review L6): a session address outside the pin is given
+    /// no byte, and the write fails. Run through `put_object` against a stand-in that plays all of Google,
+    /// so deleting the call to the pin turns this red. The first three addresses are on the right host and
+    /// port, so only the pin's path rule refuses them (the textual `Location` check lets them through); the
+    /// others are somewhere else, which the `Location` check and the pin both refuse — one address judged
+    /// twice, on purpose.
+    #[tokio::test]
+    async fn a_session_address_outside_the_pin_is_given_no_byte_and_the_write_fails() {
+        let channel = Uuid::new_v4();
+        let bytes = vec![7u8; 1234];
+        let honest = Stored {
+            id: STAND_IN_FILE,
+            size: 1234,
+            mime: "image/png",
+        };
+
+        // The control: an address inside the pin is sent the bytes once, so "no PUT" below is a refusal.
+        let server = google_stand_in(
+            "{origin}/upload/drive/v3/files?upload_id=ok",
+            honest.clone(),
+        )
+        .await;
+        let archive =
+            GoogleDriveArchive::against_upload_stand_in(&server.origin, Duration::from_secs(5));
+        archive
+            .put_object(channel, "p.png", "image/png", bytes.clone())
+            .await
+            .expect("an address inside the pin is sent the bytes");
+        assert_eq!(calls_of(&server.calls(), "PUT").len(), 1);
+
+        // Another place on the same machine: if anything reaches it, the address was followed.
+        let elsewhere = put_stand_in(200, None).await;
+        let elsewhere_address = elsewhere.address;
+        for (what, session) in [
+            (
+                "a path outside /upload/",
+                "{origin}/drive/v3/files?upload_id=x".to_string(),
+            ),
+            (
+                "the upload path in capitals",
+                "{origin}/UPLOAD/drive/v3/files?upload_id=x".to_string(),
+            ),
+            (
+                "the upload path without its slash",
+                "{origin}/upload?upload_id=x".to_string(),
+            ),
+            (
+                "the same host on another port",
+                format!("http://{elsewhere_address}/upload/drive/v3/files?upload_id=x"),
+            ),
+            (
+                "another name for the same host",
+                "http://localhost:{port}/upload/drive/v3/files?upload_id=x".to_string(),
+            ),
+            (
+                "the right place as userinfo and somewhere else as the host",
+                format!("http://{{authority}}@{elsewhere_address}/upload/drive/v3/files"),
+            ),
+            (
+                "userinfo in front of the right host",
+                "http://user:pw@{authority}/upload/drive/v3/files".to_string(),
+            ),
+            (
+                "another scheme",
+                "https://{authority}/upload/drive/v3/files".to_string(),
+            ),
+        ] {
+            let server = google_stand_in(&session, honest.clone()).await;
+            let archive =
+                GoogleDriveArchive::against_upload_stand_in(&server.origin, Duration::from_secs(5));
+            let got = archive
+                .put_object(channel, "p.png", "image/png", bytes.clone())
+                .await;
+            assert_eq!(got, Err(DriveError::UpstreamFailure), "{what}");
+            assert!(
+                calls_of(&server.calls(), "PUT").is_empty(),
+                "{what}: a byte was sent to an address outside the pin"
+            );
+        }
+        assert!(
+            elsewhere.seen.lock().expect("log").is_empty(),
+            "a request reached the other place"
+        );
+    }
+
+    /// The data the session request and the pin are made from, for a real archive: Google's own, read back
+    /// from an archive built the way the real constructor builds one. A stand-in's data is the tests' to
+    /// choose; this is the one that ships.
+    #[test]
+    fn a_real_archive_requests_sessions_from_and_pins_them_to_googles_own_upload_endpoint() {
+        let key = KeyFile::new();
+        let archive = GoogleDriveArchive::open(key.path(), Some("0ABCdef"), lenient_key)
+            .expect("a key file of the right shape opens");
+        assert_eq!(archive.upload, UploadEndpoint::google());
+        assert_eq!(archive.upload.base, UPLOAD_API_BASE);
+        assert_eq!(
+            archive.upload.base,
+            "https://www.googleapis.com/upload/drive/v3"
+        );
+        assert_eq!(archive.upload.scheme, "https");
+        assert_eq!(archive.upload.host, "www.googleapis.com");
+        assert_eq!(archive.upload.port, None);
+        assert_eq!(
+            archive.upload.session_prefix(),
+            "https://www.googleapis.com/",
+            "the textual check on the address a session request answers with"
         );
     }
 
