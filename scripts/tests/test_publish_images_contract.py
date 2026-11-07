@@ -252,8 +252,8 @@ def validate_arch_job(job_name: str, job: dict[str, Any], *, runner: str, platfo
         require(build_inputs.get("sbom") is True, f"{job_name} {name} build must emit an SBOM")
         require(build_inputs.get("cache-from") == f"type=gha,scope={cache_scope}", f"{job_name} {name} cache-from scope drifted")
         require(
-            build_inputs.get("cache-to") == f"type=gha,mode=max,scope={cache_scope}",
-            f"{job_name} {name} cache-to scope drifted",
+            build_inputs.get("cache-to") == f"type=gha,mode=min,scope={cache_scope}",
+            f"{job_name} {name} cache-to mode/scope drifted (mode=min since #5494; mode=max filled the 10GB cache budget)",
         )
         labels = build_inputs.get("labels", "")
         require("org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" in labels, f"{job_name} {name} package must link source")
