@@ -1,6 +1,6 @@
 // ADR-0218 §14 M2.7·M2.3·M2.5: 포트의 순수 규칙. 바이트 상한은 개수가 아니라 바이트로 세고(MA11), 수명은 마지막으로 읽거나 쓴 뒤에서 센다.
 import { describe, expect, it } from "vitest";
-import { createMemoryDiskBackend } from "./memory";
+import type { Expression } from "./types";
 import {
   EXPRESSION_DISK_BUDGET_BYTES,
   EXPRESSION_DISK_LAST_READ_GRANULARITY_MS,
@@ -9,17 +9,21 @@ import {
   expressionDiskKey,
   expressionDiskName,
   expressionIdOfDiskKey,
+  activeDiskKeys,
   isExpressionDiskName,
+  isListedDiskTarget,
+  listedDiskTarget,
   parseExpressionImagePath,
   planTrim,
   shouldTouchLastRead,
   type DiskEntryMeta,
-} from "./port";
+} from "./diskCache";
 
 const ID = "00000000-0000-4000-8000-000000000011";
 const SHA = "ab".repeat(32);
 const WS = "00000000-0000-4000-8000-000000000001";
 const ME = "00000000-0000-4000-8000-000000000002";
+
 
 describe("칸 이름과 키", () => {
   it("칸 이름은 워크스페이스·멤버 둘 다 들어가고 `oort-shell-` 로 시작하지 않으며, uuid 가 아니면 만들지 않는다", () => {
@@ -86,28 +90,27 @@ describe("청소 계획 (planTrim)", () => {
   });
 });
 
-describe("메모리 가짜(진짜 구현과 같은 규칙)", () => {
-  const image = (length: number) => ({ bytes: new ArrayBuffer(length), mime: "image/png" });
+describe("목록 대조(읽기 문 3번·대조 청소의 기준)", () => {
+  const media = (sha: string) => ({ mime: "image/png" as const, sha256: sha, bytes: 10, width: 8, height: 8, frameCount: 1, durationMs: 0 });
+  const item = (id: string, status: "active" | "hidden", sha: string): Expression => ({
+    id, workspaceId: WS, name: "x", displayName: "x", tags: [], subjectMemberId: null, version: "1", status, kind: "sticker",
+    media: status === "active" ? { small: media(sha), large: media(sha), thumb: media(sha) } : null,
+    origin: { kind: "upload", sourceUrl: null, prompt: null }, createdBy: ME, createdAtMs: 0,
+  });
+  const path = (id: string, sha: string) => `/v1/workspaces/${WS}/expressions/${id}/image?size=large&v=${sha}`;
 
-  it("읽으면 마지막 읽은 시각이 오르고(1분 단위), 상한을 넘으면 오래 읽지 않은 것부터 버려서 최근에 읽은 항목이 남는다", async () => {
-    let clock = 1_000_000;
-    const backend = createMemoryDiskBackend({ now: () => clock, budgetBytes: 25 });
-    const compartment = backend.open(expressionDiskName(WS, ME)!)!;
-    for (const name of ["a", "b", "c", "d"]) { await compartment.write(name, image(10)); clock += 1000; }
-    clock += EXPRESSION_DISK_LAST_READ_GRANULARITY_MS;
-    expect(await compartment.read("a")).not.toBeNull(); // a 를 최근에 읽었다
-    await compartment.trim();
-    expect(await compartment.keys()).toEqual(["a", "d"]); // b·c(가장 오래 읽지 않은 둘)가 나갔다
+  it("주소의 (id, size, sha) 가 active 항목의 sha 와 같을 때만 대상이다. 숨김·삭제·다른 sha·초안 주소는 대상이 아니다", () => {
+    const items = [item(ID, "active", SHA)];
+    expect(listedDiskTarget(items, path(ID, SHA))?.media.sha256).toBe(SHA);
+    expect(isListedDiskTarget(items, parseExpressionImagePath(path(ID, SHA))!)).toBe(true);
+    expect(listedDiskTarget(items, path(ID, "cd".repeat(32)))).toBeNull(); // 그림이 바뀌었다(옛 sha)
+    expect(listedDiskTarget([item(ID, "hidden", SHA)], path(ID, SHA))).toBeNull(); // 숨김
+    expect(listedDiskTarget([], path(ID, SHA))).toBeNull(); // 목록에 없다
+    expect(listedDiskTarget(items, `/v1/workspaces/${WS}/expression-drafts/${ID}/image?size=large&v=${SHA}`)).toBeNull();
   });
 
-  it("id 별 삭제는 그 표현의 모든 크기·sha 를 지우고 다른 표현은 남긴다", async () => {
-    const backend = createMemoryDiskBackend();
-    const compartment = backend.open(expressionDiskName(WS, ME)!)!;
-    const other = "00000000-0000-4000-8000-000000000012";
-    await compartment.write(expressionDiskKey(ID, "large", SHA), image(4));
-    await compartment.write(expressionDiskKey(ID, "thumb", "cd".repeat(32)), image(4));
-    await compartment.write(expressionDiskKey(other, "large", SHA), image(4));
-    await compartment.removeIds([ID]);
-    expect(await compartment.keys()).toEqual([expressionDiskKey(other, "large", SHA)]);
+  it("활성 키는 active 항목의 세 크기뿐이다", () => {
+    const keys = activeDiskKeys([item(ID, "active", SHA), item("00000000-0000-4000-8000-000000000012", "hidden", SHA)]);
+    expect([...keys].sort()).toEqual(["large", "small", "thumb"].map((size) => expressionDiskKey(ID, size as "small", SHA)).sort());
   });
 });

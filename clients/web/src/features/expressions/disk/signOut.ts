@@ -1,6 +1,6 @@
 import { bumpSessionGeneration } from "./generation";
 import { defaultExpressionDiskBackend } from "./idb";
-import type { ExpressionDiskBackend } from "./port";
+import type { ExpressionDiskBackend } from "@momo/core/features/expressions/diskCache";
 
 // =============================================================================
 // 세션이 끝나는 자리에서 이모티콘 그림의 기기 캐시를 모두 지운다 (ADR-0218 §14 M2.5, #5455 B-1).

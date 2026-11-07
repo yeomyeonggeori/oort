@@ -1,4 +1,4 @@
-import type { DiskImage } from "./port";
+import type { DiskImage } from "@momo/core/features/expressions/diskCache";
 
 // 데이터 주소 ↔ 바이트, sha256. 앱은 그림을 데이터 주소로 그린다(CSP `img-src data:`, ADR-0218 §14 M2.3).
 
@@ -24,7 +24,7 @@ export function parseImageDataUrl(src: string): DiskImage | null {
 export function bytesToDataUrl(image: DiskImage): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => (typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("image")));
+    reader.onload = () => (reader.result instanceof ArrayBuffer || reader.result === null ? reject(new Error("image")) : resolve(reader.result));
     reader.onerror = () => reject(new Error("image"));
     reader.readAsDataURL(new Blob([image.bytes], { type: image.mime }));
   });
@@ -32,7 +32,7 @@ export function bytesToDataUrl(image: DiskImage): Promise<string> {
 
 /** 소문자 hex sha256. `crypto.subtle`이 없으면(보안 맥락이 아니다) 던진다 — 호출부는 디스크를 쓰지 않는다. */
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  const subtle = typeof crypto === "undefined" ? undefined : crypto.subtle;
+  const subtle = globalThis.crypto?.subtle;
   if (subtle === undefined) throw new Error("crypto.subtle unavailable");
   const digest = new Uint8Array(await subtle.digest("SHA-256", bytes));
   let hex = "";
@@ -42,5 +42,5 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 
 /** 이 환경에서 sha256을 잴 수 있는가(못 재면 디스크 저장소를 켜지 않는다: 무결성을 확인할 수 없는 캐시는 두지 않는다). */
 export function canVerifyImages(): boolean {
-  return typeof crypto !== "undefined" && crypto.subtle !== undefined;
+  return globalThis.crypto?.subtle !== undefined;
 }

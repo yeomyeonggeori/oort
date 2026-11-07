@@ -5,7 +5,7 @@ import { build } from "vite";
 import { describe, expect, it } from "vitest";
 import { browserLaunchBlocked } from "@/testing/agentSandbox";
 import type { ExpressionDiskApi } from "./idb.browser.entry";
-import { EXPRESSION_DISK_LIFETIME_MS, expressionDiskKey, expressionDiskName } from "./port";
+import { EXPRESSION_DISK_LIFETIME_MS, expressionDiskKey, expressionDiskName } from "@momo/core/features/expressions/diskCache";
 
 // =============================================================================
 // 이모티콘 그림의 기기 캐시: **진짜 IndexedDB**(ADR-0218 §14 M5, #5455 B-1). 앱의 `idb.ts` 를 Vite 로 한 덩어리로 묶어 Playwright 의 Chromium·WebKit 에 올린다.

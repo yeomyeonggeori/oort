@@ -1,7 +1,7 @@
 import { defaultExpressionDiskBackend } from "./idb";
 import { canVerifyImages } from "./bytes";
 import { ensureSessionGeneration, readSessionGeneration } from "./generation";
-import { expressionDiskName, type ExpressionDiskBackend, type ExpressionDiskCompartment } from "./port";
+import { expressionDiskName, type ExpressionDiskBackend, type ExpressionDiskCompartment } from "@momo/core/features/expressions/diskCache";
 
 /** 저장소(`ExpressionStore`)가 쥐는 디스크 한 칸과 그 칸을 연 때의 세션 세대. */
 export interface ExpressionDisk {

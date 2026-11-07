@@ -1,5 +1,5 @@
 import { defaultExpressionDiskBackend } from "./idb";
-import { expressionDiskName, type ExpressionDiskBackend } from "./port";
+import { expressionDiskName, type ExpressionDiskBackend } from "@momo/core/features/expressions/diskCache";
 import { destroyAllExpressionDisks } from "./signOut";
 
 // =============================================================================

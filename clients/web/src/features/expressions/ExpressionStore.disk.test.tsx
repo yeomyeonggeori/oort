@@ -4,7 +4,7 @@
 // R2-M2: MA2·MA3·MA4 는 저장소의 읽기 함수(`store.image`)를 직접 부르고 **저장소 포트의 디스크 읽기 횟수**(`backend.stats.reads`)를 센다. 화면(`ExpressionImage`)을 그려서
 // 재면 화면 부품의 문이 저장소의 문을 가려 저장소의 문을 꺼도 붉지 않다. 화면 시험은 맨 아래 덧붙임이다.
 // 「앱을 다시 켠다」 = 같은 메모리 백엔드(디스크)를 새 `ExpressionStore` 에 주는 것이다(저장소 인스턴스는 죽고 디스크는 남는다).
-// 그림 바이트는 실제 sha256 을 가진다(`disk/world.testkit.ts`).
+// 그림 바이트는 실제 sha256 을 가진다(`disk/testkit/world.ts`).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExpressionChanged, ExpressionChangedDetail } from "@momo/core/features/expressions/types";
 import { ExpressionHttpError } from "./transport";
@@ -13,8 +13,8 @@ import { expressionNoticeHandlers } from "./notices";
 import { bumpSessionGeneration } from "./disk/generation";
 import { startExpressionDiskBoot, sweepExpressionDiskOutside } from "./disk/boot";
 import { openExpressionDisk } from "./disk/open";
-import { EXPRESSION_DISK_LIFETIME_MS, expressionDiskKey } from "./disk/port";
-import { boot, createMemoryDiskBackend, diskName, ME, OTHER_ME, OTHER_WS, pic, uuid, WS, World, type Pic } from "./disk/world.testkit";
+import { EXPRESSION_DISK_LIFETIME_MS, expressionDiskKey } from "@momo/core/features/expressions/diskCache";
+import { boot, createMemoryDiskBackend, diskName, ME, OTHER_ME, OTHER_WS, pic, uuid, WS, World, type Pic } from "./disk/testkit/world";
 import type { MemoryDiskBackend } from "./disk/memory";
 
 type Size = "small" | "large" | "thumb";

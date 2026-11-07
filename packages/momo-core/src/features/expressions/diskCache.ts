@@ -1,12 +1,14 @@
 // =============================================================================
-// 이모티콘 그림의 기기 캐시(웹·데스크탑): 저장소 포트와 순수 규칙 (ADR-0218 §14·증보 8, #5455 B-1).
+// 이모티콘 그림의 기기 캐시: 플랫폼에 기대지 않는 규칙과 포트 (ADR-0218 §14·증보 8, #5455 B-1).
 //
-// 이 파일은 **잎(leaf)** 이다 — 앱 모듈을 하나도 import하지 않는다. `lib/session.ts`의 `clearSession`이 로그아웃·만료·복원 거절 때
-// 이 모듈의 지우기를 부르기 때문이다(`design/wallpaper/idb.ts`와 같은 이유: 세션 저장소가 테마·Tauri 모듈 사슬을 끌고 오면 안 된다).
-//
-// 읽기 문·대조 청소·알림 규칙(M2.4)은 여기가 아니라 `ExpressionStore` 한 곳에 있다. 이 포트는 바이트를 두고 꺼내는 일만 한다:
-// 어떤 항목이 지금 그려도 되는 것인지는 포트가 모른다.
+// 칸 이름·키 모양·그림 주소 읽기·청소 계획·상한·수명·목록 대조는 웹(IndexedDB)과 폰(`Paths.cache` 폴더, B-2)이 **같은 규칙**을 쓰도록 코어에 둔다.
+// 바이트를 어디에 두는지(저장소 구현)는 각 클라이언트가 하고, 이 파일은 그 구현이 따르는 포트(`ExpressionDiskCompartment`)와 순수 함수만 든다.
+// 읽기 문·대조 청소·알림 규칙(M2.4)은 여기가 아니라 각 클라이언트의 저장소 한 곳(웹 `ExpressionStore`)에 있다 — 포트는 어떤 항목이 지금 그려도 되는지 모른다.
 // =============================================================================
+import type { Expression, ExpressionImage } from "./types";
+
+/** 그림의 세 크기. 목록 항목의 `media` 가 이 이름으로 가진다. */
+export const EXPRESSION_VARIANTS = ["small", "large", "thumb"] as const;
 
 /** 보관 칸 하나(= `(워크스페이스, 멤버)` 하나)의 바이트 상한. 넘으면 오래 읽지 않은 것부터 버린다(ADR §14 M2.7, 저장 바이트). */
 export const EXPRESSION_DISK_BUDGET_BYTES = 128 * 1024 * 1024;
@@ -80,7 +82,7 @@ export function isExpressionDiskName(name: string): boolean {
   return name.startsWith(EXPRESSION_DISK_PREFIX);
 }
 
-export type ExpressionDiskSize = "small" | "large" | "thumb";
+export type ExpressionDiskSize = (typeof EXPRESSION_VARIANTS)[number];
 
 /** 디스크 키: `(id, size, sha)` 한 벌. 칸이 이미 `(워크스페이스, 멤버)`를 담고 있으므로 키에는 그것을 또 넣지 않는다. */
 export function expressionDiskKey(id: string, size: ExpressionDiskSize, sha: string): string {
@@ -110,8 +112,8 @@ export function parseExpressionImagePath(path: string): ParsedImagePath | null {
   const query = new URLSearchParams(match[2]);
   const size = query.get("size");
   const sha = query.get("v");
-  if ((size !== "small" && size !== "large" && size !== "thumb") || sha === null || !SHA256.test(sha)) return null;
-  return { id: match[1], size, sha, key: expressionDiskKey(match[1], size, sha) };
+  if (!EXPRESSION_VARIANTS.some((variant) => variant === size) || sha === null || !SHA256.test(sha)) return null;
+  return { id: match[1], size: size as ExpressionDiskSize, sha, key: expressionDiskKey(match[1], size as ExpressionDiskSize, sha) };
 }
 
 /**
@@ -145,4 +147,60 @@ export function planTrim(
 /** 읽기 성공 때 마지막 읽은 시각을 다시 쓸지(1분 단위). */
 export function shouldTouchLastRead(meta: DiskEntryMeta, now: number): boolean {
   return now - meta.lastReadAt >= EXPRESSION_DISK_LAST_READ_GRANULARITY_MS;
+}
+
+// ------------------------------------------------------------------------------------------------ 목록과의 대조 (읽기 문 3번, 대조 청소)
+/** 목록이 말하는 지금 그려도 되는 항목인가(`active`). */
+export const isActiveExpression = (item: Expression): boolean => item.status === "active";
+
+/** 디스크 대상: 주소가 가리키는 `(id, size, sha)` 와 **목록이 말하는 그 그림의 메타**(정확한 길이·MIME 대조에 쓴다). */
+export interface ListedDiskTarget extends ParsedImagePath {
+  media: ExpressionImage;
+}
+
+/**
+ * 읽기 문의 조건 3(M2.4-1): 주소의 `(id, size, sha)` 가 **확인된 목록의 active 항목**의 `media.<size>.sha256` 과 같을 때만 대상이다. 초안 미리보기 주소·그 밖의 모양·
+ * 목록에 없는(숨김·삭제·교체된) 그림은 `null` 이라 디스크를 아예 읽지도 쓰지도 않는다.
+ */
+export function listedDiskTarget(items: readonly Expression[], path: string): ListedDiskTarget | null {
+  const parsed = parseExpressionImagePath(path);
+  if (parsed === null) return null;
+  const media = items.find((item) => item.id === parsed.id && isActiveExpression(item))?.media?.[parsed.size];
+  return media !== undefined && media.sha256 === parsed.sha ? { ...parsed, media } : null;
+}
+
+/** 이 대상이 지금 목록에도 active 로 있는가(받는 도중·해시를 재는 동안 목록이 바뀌었을 수 있다). */
+export function isListedDiskTarget(items: readonly Expression[], target: ParsedImagePath): boolean {
+  return items.find((item) => item.id === target.id && isActiveExpression(item))?.media?.[target.size]?.sha256 === target.sha;
+}
+
+/** 목록이 말하는 지금 유효한 디스크 키 전부(active 항목의 세 크기). 대조 청소가 「목록에 없는 키」를 가르는 기준이다. */
+export function activeDiskKeys(items: readonly Expression[]): Set<string> {
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (!isActiveExpression(item) || item.media === null) continue;
+    for (const size of EXPRESSION_VARIANTS) keys.add(expressionDiskKey(item.id, size, item.media[size].sha256));
+  }
+  return keys;
+}
+
+// ------------------------------------------------------------------------------------------------ 웹 저장소(IndexedDB)의 모양
+/** object store 이름. 메타(`meta`)와 바이트(`blobs`)를 나눠, 읽을 때마다 하는 「마지막 읽은 시각」 갱신이 바이트를 다시 쓰지 않게 한다. */
+export const EXPRESSION_DISK_STORES = { meta: "meta", blobs: "blobs" } as const;
+/** 트랜잭션 모드 둘. */
+export const EXPRESSION_DISK_ACCESS = { read: "readonly", write: "readwrite" } as const;
+
+/** 저장된 메타: 바이트 없이 항목 하나가 어떤 그림이고 언제 쓰이고 읽혔는지. */
+export interface StoredDiskMeta extends DiskEntryMeta {
+  mime: string;
+}
+export const isText = (value: unknown): value is string => typeof value === "string";
+export function isStoredDiskMeta(value: unknown): value is StoredDiskMeta {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return isText(record.mime) && Number.isFinite(record.size) && Number.isFinite(record.writtenAt) && Number.isFinite(record.lastReadAt);
+}
+/** 칸 이름 장부(JSON 배열)에서 이 모듈이 만든 칸 이름만. */
+export function registeredDiskNames(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((name): name is string => isText(name) && isExpressionDiskName(name)) : [];
 }

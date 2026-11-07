@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { coreSession } from "@momo/core/runtime/host";
 import { readSessionGeneration } from "@/features/expressions/disk/generation";
-import { expressionDiskKey, expressionDiskName } from "@/features/expressions/disk/port";
+import { expressionDiskKey, expressionDiskName } from "@momo/core/features/expressions/diskCache";
 import type { MemoryDiskBackend } from "@/features/expressions/disk/memory";
 
 // =============================================================================

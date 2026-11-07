@@ -1,15 +1,21 @@
 import {
+  EXPRESSION_DISK_ACCESS,
   EXPRESSION_DISK_BUDGET_BYTES,
   EXPRESSION_DISK_LIFETIME_MS,
   EXPRESSION_DISK_PREFIX,
+  EXPRESSION_DISK_STORES,
   isExpressionDiskName,
+  isStoredDiskMeta,
+  isText,
   planTrim,
+  registeredDiskNames,
   shouldTouchLastRead,
   type DiskEntryMeta,
   type DiskImage,
   type ExpressionDiskBackend,
   type ExpressionDiskCompartment,
-} from "./port";
+  type StoredDiskMeta,
+} from "@momo/core/features/expressions/diskCache";
 
 // =============================================================================
 // 이모티콘 그림의 기기 캐시: IndexedDB 구현 (ADR-0218 §14 M5 「웹 구현에서 정해진 값」, #5455 B-1).
@@ -25,30 +31,13 @@ import {
 // =============================================================================
 
 const DB_VERSION = 1;
-const META = "meta";
-const BLOBS = "blobs";
+const META = EXPRESSION_DISK_STORES.meta;
+const BLOBS = EXPRESSION_DISK_STORES.blobs;
+const { read: READ, write: WRITE } = EXPRESSION_DISK_ACCESS;
 /** `indexedDB.databases()`가 없는 엔진(Firefox 125 이하)을 위한 칸 이름 장부. 비밀이 아니다(이름에는 id 둘뿐). */
 const REGISTRY_KEY = "oort.expressions.disk.names.v1";
 /** 다른 탭이 칸을 열어 둬 `deleteDatabase`가 막혀도 흐름이 이만큼 이상 기다리지 않는다. */
 const DESTROY_WAIT_MS = 3000;
-
-interface StoredMeta {
-  mime: string;
-  size: number;
-  writtenAt: number;
-  lastReadAt: number;
-}
-
-function isStoredMeta(value: unknown): value is StoredMeta {
-  if (value === null || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.mime === "string" &&
-    typeof record.size === "number" &&
-    typeof record.writtenAt === "number" &&
-    typeof record.lastReadAt === "number"
-  );
-}
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -68,8 +57,7 @@ function done(tx: IDBTransaction): Promise<void> {
 
 function readRegistry(): string[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(REGISTRY_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((name): name is string => typeof name === "string" && isExpressionDiskName(name)) : [];
+    return registeredDiskNames(JSON.parse(localStorage.getItem(REGISTRY_KEY) ?? "[]"));
   } catch {
     return [];
   }
@@ -100,7 +88,7 @@ export function indexedDbExpressionDisk(
 ): ExpressionDiskBackend {
   const budgetBytes = limits.budgetBytes ?? EXPRESSION_DISK_BUDGET_BYTES;
   const lifetimeMs = limits.lifetimeMs ?? EXPRESSION_DISK_LIFETIME_MS;
-  const idb = factory === undefined ? (typeof indexedDB === "undefined" ? null : indexedDB) : factory;
+  const idb = factory === undefined ? (globalThis.indexedDB ?? null) : factory;
   /** 이름 → 열린 연결의 약속. 닫히거나 지워지면 비운다. `null` 은 「그 칸이 없다」(읽으려고 열었다가 없던 칸이라 만들지 않았다) — 기억하지 않는다. */
   const connections = new Map<string, Promise<IDBDatabase | null>>();
 
@@ -173,7 +161,7 @@ export function indexedDbExpressionDisk(
     if (keys.length === 0) return;
     const db = await connect(name, false);
     if (db === null) return;
-    const tx = db.transaction([META, BLOBS], "readwrite");
+    const tx = db.transaction([META, BLOBS], WRITE);
     for (const key of keys) {
       tx.objectStore(META).delete(key);
       tx.objectStore(BLOBS).delete(key);
@@ -187,14 +175,14 @@ export function indexedDbExpressionDisk(
         try {
           const db = await connect(name, false);
           if (db === null) return null;
-          const tx = db.transaction([META, BLOBS], "readonly");
+          const tx = db.transaction([META, BLOBS], READ);
           const metaRequest = tx.objectStore(META).get(key) as IDBRequest<unknown>;
           const blobRequest = tx.objectStore(BLOBS).get(key) as IDBRequest<unknown>;
           await done(tx);
           const meta = metaRequest.result;
           const bytes = blobRequest.result;
           if (meta === undefined && bytes === undefined) return null;
-          if (!isStoredMeta(meta) || !(bytes instanceof ArrayBuffer)) {
+          if (!isStoredDiskMeta(meta) || !(bytes instanceof ArrayBuffer)) {
             // 반쪽짜리 항목(메타만 있거나 바이트만 있다)은 읽을 수 없다. 치워서 같은 키가 영원히 막히지 않게 한다.
             await removeKeys(name, [key]).catch(() => undefined);
             return null;
@@ -203,7 +191,7 @@ export function indexedDbExpressionDisk(
           if (shouldTouchLastRead(meta, now)) {
             // 바이트는 건드리지 않고 메타만 다시 쓴다. 실패해도 읽기는 성공이다.
             void (async () => {
-              const touch = db.transaction([META], "readwrite");
+              const touch = db.transaction([META], WRITE);
               touch.objectStore(META).put({ ...meta, lastReadAt: now }, key);
               await done(touch);
             })().catch(() => undefined);
@@ -216,8 +204,8 @@ export function indexedDbExpressionDisk(
       async write(key, image: DiskImage) {
         const db = await connectForWrite(name);
         const now = clock();
-        const tx = db.transaction([META, BLOBS], "readwrite");
-        const meta: StoredMeta = { mime: image.mime, size: image.bytes.byteLength, writtenAt: now, lastReadAt: now };
+        const tx = db.transaction([META, BLOBS], WRITE);
+        const meta: StoredDiskMeta = { mime: image.mime, size: image.bytes.byteLength, writtenAt: now, lastReadAt: now };
         tx.objectStore(META).put(meta, key);
         tx.objectStore(BLOBS).put(image.bytes, key);
         await done(tx);
@@ -227,10 +215,10 @@ export function indexedDbExpressionDisk(
         try {
           const db = await connect(name, false);
           if (db === null) return []; // 없는 칸에는 디스크에 남은 것이 없다(청소할 것도 없다)
-          const tx = db.transaction([META], "readonly");
+          const tx = db.transaction([META], READ);
           const all = request(tx.objectStore(META).getAllKeys());
           await done(tx);
-          return (await all).filter((key): key is string => typeof key === "string");
+          return (await all).filter(isText);
         } catch {
           return null;
         }
@@ -247,7 +235,7 @@ export function indexedDbExpressionDisk(
         try {
           const db = await connect(name, false);
           if (db === null) return;
-          const tx = db.transaction([META, BLOBS], "readwrite");
+          const tx = db.transaction([META, BLOBS], WRITE);
           for (const id of ids) {
             // 키는 `<id>:<size>:<sha>`라서 `<id>:` 로 시작하는 구간이 그 표현의 모든 항목이다.
             const range = IDBKeyRange.bound(`${id}:`, `${id}:￿`);
@@ -263,7 +251,7 @@ export function indexedDbExpressionDisk(
         try {
           const db = await connect(name, false);
           if (db === null) return;
-          const tx = db.transaction([META], "readonly");
+          const tx = db.transaction([META], READ);
           const entries = new Map<string, DiskEntryMeta>();
           await new Promise<void>((resolve, reject) => {
             const cursor = tx.objectStore(META).openCursor();
@@ -274,7 +262,7 @@ export function indexedDbExpressionDisk(
                 resolve();
                 return;
               }
-              if (typeof at.key === "string" && isStoredMeta(at.value)) {
+              if (isText(at.key) && isStoredDiskMeta(at.value)) {
                 entries.set(at.key, { size: at.value.size, writtenAt: at.value.writtenAt, lastReadAt: at.value.lastReadAt });
               }
               at.continue();
@@ -330,10 +318,10 @@ export function indexedDbExpressionDisk(
     async list() {
       const names = new Set(readRegistry());
       const databases = (idb as (IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }) | null)?.databases;
-      if (idb !== null && typeof databases === "function") {
+      if (idb !== null && databases !== undefined) {
         try {
           for (const database of await databases.call(idb)) {
-            if (typeof database.name === "string" && database.name.startsWith(EXPRESSION_DISK_PREFIX)) names.add(database.name);
+            if (isText(database.name) && database.name.startsWith(EXPRESSION_DISK_PREFIX)) names.add(database.name);
           }
         } catch {
           // 장부만으로 센다.

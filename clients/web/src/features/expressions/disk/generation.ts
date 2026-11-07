@@ -12,7 +12,8 @@ const GENERATION_KEY = "oort.expressions.disk.generation.v1";
 
 function fresh(): string {
   try {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const random = globalThis.crypto?.randomUUID?.();
+    if (random !== undefined) return random;
   } catch {
     // 아래의 대체 값을 쓴다.
   }

@@ -1,7 +1,7 @@
 // 실제 엔진 시험(`idb.browser.test.ts`)이 페이지에 올리는 번들의 입구. 앱의 IndexedDB 구현을 그대로 쓰고, 부를 때마다 **새 백엔드(새 연결)**를 만든다:
 // 「같은 객체가 메모리에 쥐고 있어서 읽힌다」가 답이 될 수 없게 하려는 것이다.
 import { indexedDbExpressionDisk } from "./idb";
-import type { DiskImage } from "./port";
+import type { DiskImage } from "@momo/core/features/expressions/diskCache";
 
 declare global {
   var __expressionDiskClock: number | undefined;

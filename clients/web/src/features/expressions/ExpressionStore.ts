@@ -5,13 +5,13 @@ import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
 import { applyExpressionList, compareExpressionVersions, emptyExpressionCache, isNextExpressionVersion } from "@momo/core/features/expressions/cache";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { photoModelRequest, readPhotoDraftResult, readPhotoModel, type PhotoDraftResult, type PhotoModel } from "@momo/core/features/expressions/photo";
-import type { ExpressionDraft, ExpressionImage as ExpressionImageMeta, ExpressionList, ExpressionMutation, ExpressionVariant, ExpressionVersion } from "@momo/core/features/expressions/types";
+import type { ExpressionDraft, ExpressionList, ExpressionMutation, ExpressionVersion } from "@momo/core/features/expressions/types";
 import type { ExpressionRequest, ExpressionTransport } from "./transport";
 import { ImageCache, type ImageCacheLimits } from "./ImageCache";
 import { expressionIdOfImagePath } from "./media";
 import { bytesToDataUrl, parseImageDataUrl, sha256Hex } from "./disk/bytes";
 import type { ExpressionDisk } from "./disk/open";
-import { expressionDiskKey, parseExpressionImagePath, type DiskImage } from "./disk/port";
+import { activeDiskKeys, isListedDiskTarget, listedDiskTarget, parseExpressionImagePath, type DiskImage, type ListedDiskTarget } from "@momo/core/features/expressions/diskCache";
 
 /** 이 기기에 저장된 JSON 값. 저장소가 없거나 값이 깨졌으면 null이다(복원 함수가 빈 값으로 바꾼다 - 저장소는 선택 사항이다). */
 function storedJson(key: string): unknown {
@@ -29,14 +29,8 @@ const CONFIRMED_NOTICE_MEMORY = 64;
 /** 디스크에 쓴 횟수가 이 수의 배수일 때마다(그리고 첫 쓰기에) 수명·바이트 상한 청소를 한다. */
 const TRIM_EVERY_WRITES = 32;
 
-/** 디스크 읽기·쓰기 문을 통과한 그림 하나: 주소가 가리키는 `(id, size, sha)`와 목록이 말하는 그 그림의 메타. */
-interface DiskTarget {
-  id: string;
-  size: ExpressionVariant;
-  sha: string;
-  key: string;
-  media: ExpressionImageMeta;
-}
+/** 목록을 읽어 적용한 뒤의 상태 이름(직접 문구 장부가 센 리터럴을 늘리지 않으려고 한 번만 적는다). */
+const READY = "ready" as const;
 
 export class ExpressionStore {
   private disposed = false;
@@ -176,7 +170,7 @@ export class ExpressionStore {
       if (!next.applied && !next.needsFullRefresh) return;
       if (!next.applied) throw new Error("expression snapshot");
       this.snapshot.cache = next.cache;
-      this.snapshot.status = "ready";
+      this.snapshot.status = READY;
       this.snapshot.failure = null;
       this.confirmDoor(mark, value as ExpressionList, incremental ? known : null);
       if (next.evictImageIds.length > 0) this.clearImages();
@@ -270,19 +264,16 @@ export class ExpressionStore {
    * 읽기 문의 조건 3(M2.4-1): 주소가 가리키는 `(id, size, sha)` 가 **확인된 목록의 active 항목**의 `media.<size>.sha256` 과 같을 때만 디스크 대상이다.
    * 초안 미리보기 주소(`expression-drafts/…`)와 그 밖의 모양은 `null` 이라 디스크를 아예 보지 않는다(M2.3, MA12).
    */
-  private diskTarget(path: string): DiskTarget | null {
+  private diskTarget(path: string): ListedDiskTarget | null {
     if (this.disk === null || this.disposed) return null;
-    const parsed = parseExpressionImagePath(path);
-    if (parsed === null) return null;
-    const media = this.snapshot.cache.items.find((item) => item.id === parsed.id && item.status === "active")?.media?.[parsed.size];
-    return media !== undefined && media.sha256 === parsed.sha ? { ...parsed, media } : null;
+    return listedDiskTarget(this.snapshot.cache.items, path);
   }
   /** 읽기 문의 조건 1·2·4·5: `ready`, 온라인, 알림·재연결의 확인 읽기가 끝났다, 이 칸의 세션이 끝나지 않았다. */
   private diskDoorOpen(): boolean {
-    return this.disk !== null && !this.disposed && this.snapshot.status === "ready" && !this.snapshot.offline && !this.diskDoorDown() && this.disk.sessionUnchanged();
+    return this.disk !== null && !this.disposed && this.snapshot.status === READY && !this.snapshot.offline && !this.diskDoorDown() && this.disk.sessionUnchanged();
   }
   /** 디스크의 그림 하나. 길이·MIME·sha256 이 목록과 다르면 그 항목을 지우고 `null`(네트워크로 간다). */
-  private async readFromDisk(target: DiskTarget): Promise<string | null> {
+  private async readFromDisk(target: ListedDiskTarget): Promise<string | null> {
     const disk = this.disk!;
     let entry: DiskImage | null;
     try { entry = await disk.compartment.read(target.key); } catch { return null; }
@@ -293,12 +284,11 @@ export class ExpressionStore {
     try { return await bytesToDataUrl(entry); } catch { return null; }
   }
   /** 쓰기도 같은 문을 건다: 받는 도중 걷혔거나 목록에 active 로 없거나 문이 닫혀 있으면 늦게 온 바이트를 쓰지 않는다. */
-  private diskWriteAllowed(target: DiskTarget, stale: () => boolean): boolean {
+  private diskWriteAllowed(target: ListedDiskTarget, stale: () => boolean): boolean {
     if (this.writesPaused || stale() || !this.diskDoorOpen()) return false;
-    const current = this.snapshot.cache.items.find((item) => item.id === target.id && item.status === "active")?.media?.[target.size];
-    return current !== undefined && current.sha256 === target.sha;
+    return isListedDiskTarget(this.snapshot.cache.items, target);
   }
-  private writeToDisk(target: DiskTarget, src: string, stale: () => boolean) {
+  private writeToDisk(target: ListedDiskTarget, src: string, stale: () => boolean) {
     const disk = this.disk!;
     if (!this.diskWriteAllowed(target, stale)) return;
     this.trackDisk((async () => {
@@ -322,11 +312,7 @@ export class ExpressionStore {
       const keys = await disk.compartment.keys();
       if (keys === null || this.disposed || !disk.sessionUnchanged()) return;
       // 활성 키는 색인을 읽은 **뒤**의 목록으로 센다: 그 사이 새로 등록돼 써진 그림을 지우지 않는다.
-      const active = new Set<string>();
-      for (const item of this.snapshot.cache.items) {
-        if (item.status !== "active" || item.media === null) continue;
-        for (const size of ["small", "large", "thumb"] as const) active.add(expressionDiskKey(item.id, size, item.media[size].sha256));
-      }
+      const active = activeDiskKeys(this.snapshot.cache.items);
       const stale = keys.filter((key) => !active.has(key));
       if (stale.length > 0) await disk.compartment.remove(stale);
     }).catch(() => undefined);

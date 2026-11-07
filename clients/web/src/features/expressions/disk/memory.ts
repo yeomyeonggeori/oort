@@ -9,7 +9,7 @@ import {
   type DiskImage,
   type ExpressionDiskBackend,
   type ExpressionDiskCompartment,
-} from "./port";
+} from "@momo/core/features/expressions/diskCache";
 
 // =============================================================================
 // 메모리 가짜 저장소 (ADR-0218 §14 M5, #5455 B-1): 시험이 「앱을 다시 켠 뒤」를 흉내 내는 데 쓴다.

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ExpressionsContext } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
-import { boot, createMemoryDiskBackend, diskName, uuid, World } from "./disk/world.testkit";
+import { boot, createMemoryDiskBackend, diskName, uuid, World } from "./disk/testkit/world";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

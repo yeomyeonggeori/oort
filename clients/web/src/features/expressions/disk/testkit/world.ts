@@ -4,11 +4,11 @@ import { createHash } from "node:crypto";
 import { vi } from "vitest";
 import { FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import type { Expression, ExpressionList, ExpressionMedia, ExpressionImage as ExpressionImageMeta } from "@momo/core/features/expressions/types";
-import { ExpressionStore } from "../ExpressionStore";
-import { ExpressionHttpError, type ExpressionRequest, type ExpressionTransport } from "../transport";
-import { createMemoryDiskBackend, type MemoryDiskBackend } from "./memory";
-import { openExpressionDisk } from "./open";
-import { expressionDiskName } from "./port";
+import { ExpressionStore } from "../../ExpressionStore";
+import { ExpressionHttpError, type ExpressionRequest, type ExpressionTransport } from "../../transport";
+import { createMemoryDiskBackend, type MemoryDiskBackend } from "../memory";
+import { openExpressionDisk } from "../open";
+import { expressionDiskName } from "@momo/core/features/expressions/diskCache";
 
 export const WS = FIXTURE_WORKSPACE_ID;
 export const ME = FIXTURE_MEMBER_ID;
