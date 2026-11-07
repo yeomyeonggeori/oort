@@ -24,6 +24,14 @@ for (const name of Object.keys(setSchema.$defs)) {
   assert.ok(!Object.hasOwn(schema.$defs, name), `set definition ${name} collides with the main document`);
 }
 
+// ADR-0218 §12 (#5461 S2): the server's Rust test reads the decision vectors from a byte-equal copy under
+// `docs/api/` (a Rust test may only read files the PR CI rust filter covers, and the core cannot be read
+// from there). The copy must be this very file: after changing `set.vectors.json`, copy it over.
+assert.ok(
+  readFileSync(resolve(directory, "set.vectors.json")).equals(readFileSync(resolve(root, "docs/api/expression-set.vectors.json"))),
+  "docs/api/expression-set.vectors.json must be byte-equal to set.vectors.json (cp it after a change)",
+);
+
 // Every fenced yaml block of the ADR (appendix A and section 12) points only at definitions that exist.
 const schemas = { "contracts.schema.json": schema, "set.schema.json": setSchema };
 const yamls = [...adr.matchAll(/```yaml\n([\s\S]*?)\n```/g)].map((match) => match[1]);

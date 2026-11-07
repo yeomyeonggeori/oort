@@ -20970,8 +20970,10 @@ components:
         id. The plan card (`{setId}`, `requesting_member`) and the set card
         (`{setId,title,prefix,tags,backend,subjectMemberId,prompt,slots}`,
         `expression_adder`) are always decided in the app, never from a lock-screen
-        action. Their decision request and result shapes are published with the
-        decision transaction (#5461).
+        action. The set card's decision request (`expressionChoices`) and result
+        (`result.expressionSet`, `ref.type` `expression_set`) are published on
+        `ApprovalDecisionRequest` and `WorkspaceActionResult` (#5461); the plan card's
+        confirmation is published with the plan-card slice (S5a).
       enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "expression.set.create", "expression.set.plan", "dm.agent.admit"]
 
     InitiativeActionId:
@@ -28758,13 +28760,20 @@ components:
             draftId: {type: string, format: uuid}
             revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
             sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            kind:
+              type: string
+              enum: [emoji, sticker]
+              description: >
+                ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
+                the server applies its recommendation (J4) to the stored large picture.
           description: >
             ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
             an `expression.create` card, exactly as shown (draft id, revision, large
             sha256). **Required when approving that action and a 400 receipt
             (`expression_choice_required`) without it; a 400 receipt
             (`expression_choice_not_allowed`) on anything else** (another action, a
-            rejection, a non-workspace approval), judged before the status and expiry
+            rejection, a non-workspace approval, an `expression.set.create` card, or
+            together with `expressionChoices`), judged before the status and expiry
             arms. The decision transaction re-proves the approval is pending and
             unexpired, the person's current membership, add policy and (for a face) that
             they are the person shown, the candidate's membership of this card, its
@@ -28773,6 +28782,50 @@ components:
             `expression_quota`) that spends nothing. Success registers that one picture,
             reclaims every other candidate's bytes and writes `props.result.expression`
             (`{id,name,token}`) on the card.
+        expressionChoices:
+          type: array
+          minItems: 1
+          maxItems: 40
+          items:
+            type: object
+            additionalProperties: false
+            required: [draftId, revision, sha256]
+            properties:
+              draftId: {type: string, format: uuid}
+              revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+              sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+              kind:
+                type: string
+                enum: [emoji, sticker]
+          description: >
+            ADR-0218 addendum 6 section 12 L5.4 / `SetDecision` (#5461). The pictures kept
+            on an `expression.set.create` card, 1 to 40, each exactly as shown (draft id,
+            revision, large sha256) and optionally with the `kind` the person picked.
+            **Required when approving that card and a 400 receipt
+            (`expression_choice_required`) without it; a 400 receipt
+            (`expression_choice_not_allowed`) on anything else** (another action, a
+            rejection, together with `expressionChoice`), judged before the status and
+            expiry arms. A list that is empty, longer than 40, with a key or a `kind`
+            outside the shape or with one `draftId` twice is a 400 receipt
+            (`expression_choice_invalid`) before anything is read. A gray slot has no
+            draft id, so it cannot be named. The decision transaction proves everything
+            again before its first write: the approval is pending and unexpired, the
+            person's add policy and (for a face) that they are the person shown, and for
+            every kept picture that it is a ready draft of this card, its revision, its
+            expiry and its stored bytes hashed again; **one picture that is not what the
+            person saw refuses the whole decision** (409 receipt
+            `expression_preview_stale`: nothing registered, the approval not spent). The
+            kept pictures are then taken in slot order whatever order the request names
+            them in: a name the team already has (a deleted name stays taken) is skipped
+            as `name_taken`, and every picture past the 1,000 live registrations as
+            `quota`; a skip never stops the others. If nothing at all registers the
+            receipt is a 409 (`expression_name_reserved` when any kept name was taken,
+            else `expression_quota`) and the approval stays. Success registers every
+            kept picture that was not skipped in **one** catalogue version (one
+            `expression.changed` notice) as the person who decided (`created_by`),
+            proposed by the helper, reclaims the bytes of every picture it did not
+            register (the unkept and the skipped) and writes `result.expressionSet` on the
+            receipt and on the card.
         deliverSecretToAgent:
           type: boolean
           default: false
@@ -28883,6 +28936,55 @@ components:
             message instead — the one exception to "nowhere else" — and is the
             only place the link is; the pairing code of its `agent.invite`
             stays here.
+        expressionSet:
+          allOf:
+            - $ref: "#/components/schemas/ExpressionSetResult"
+          description: >
+            ADR-0218 addendum 6 section 12 L5.5 (#5461). Present only when the approved
+            action is `expression.set.create`: what the decision registered and what it
+            skipped. Ids, names and counts, never a picture. Stored in the receipt like
+            `ref`, so a retry of the same `client_decision_id` answers the same set of ids,
+            and written as `props.result.expressionSet` on the settled card, whose line
+            says numbers only (`N개를 팀 보관함에 저장했어요`, or `N개를 저장하고 M개는
+            건너뛰었어요` when some were skipped). The card has no single `expression`.
+
+    ExpressionSetResult:
+      type: object
+      description: >
+        ADR-0218 addendum 6 section 12 L5.5 `SetResult`, the same shape as
+        `set.schema.json#/$defs/SetResult` (the executable contract of the clients).
+      additionalProperties: false
+      required: [setId, registered, skipped]
+      properties:
+        setId:
+          type: string
+          format: uuid
+        registered:
+          type: array
+          maxItems: 40
+          description: Slot order. Each id is the id of the registered expression.
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, token]
+            properties:
+              id: {type: string, format: uuid}
+              name: {type: string, pattern: '^[a-z0-9_-]{2,30}$'}
+              token: {type: string, pattern: '^:[a-z0-9_-]{2,30}:$'}
+        skipped:
+          type: array
+          maxItems: 40
+          description: >
+            Slot order. A kept picture left out of an otherwise good decision: its name
+            was taken (a deleted name stays taken) or the library was full.
+          items:
+            type: object
+            additionalProperties: false
+            required: [draftId, name, reason]
+            properties:
+              draftId: {type: string, format: uuid}
+              name: {type: string, pattern: '^[a-z0-9_-]{2,30}$'}
+              reason: {type: string, enum: [name_taken, quota]}
 
     WorkspaceActionRef:
       type: object
@@ -28892,7 +28994,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message, expression, expression_set]
         id:
           type: string
           format: uuid
