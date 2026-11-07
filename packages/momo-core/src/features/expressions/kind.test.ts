@@ -203,9 +203,11 @@ describe("옛 두 보기 — 폰 시트가 옮겨 가기 전까지 남는 길 (�
     expect(firstFilledView([{ ...item("sticker", still(8, 8)), status: "hidden" as const, media: null }, item("sticker", moving(8, 8))])).toBe("gif");
     expect(firstFilledView([{ ...item("sticker", still(8, 8)), status: "deleted" as const, media: null }])).toBe("emoticon");
   });
-  it("탭은 이모티콘 · 이모지 · GIF 이고 처음 여는 탭은 이모지이며, 이모지(표준 표 바탕)는 보관함의 한 보기가 아니다", () => {
+  it("탭은 이모티콘 · 이모지 · GIF 이고 처음 여는 탭은 이모티콘이며(웹·폰 모두, #5482), 이모지(표준 표 바탕)는 보관함의 한 보기가 아니다", () => {
     expect([...EXPRESSION_PICKER_TABS]).toEqual(["emoticon", "emoji", "gif"]);
-    expect(DEFAULT_EXPRESSION_PICKER_TAB).toBe("emoji");
+    expect(DEFAULT_EXPRESSION_PICKER_TAB).toBe("emoticon");
+    // 처음 여는 탭은 세 탭 가운데 하나이고 첫 칸이다(owner 의 탭 순서 맨 앞) - 상수가 목록 밖의 값이거나 가운데로 가면 빨개진다.
+    expect(EXPRESSION_PICKER_TABS[0]).toBe(DEFAULT_EXPRESSION_PICKER_TAB);
     expect(expressionViewOfPickerTab("emoji")).toBeNull();
     expect(expressionViewOfPickerTab("emoticon")).toBe("emoticon");
     expect(expressionViewOfPickerTab("gif")).toBe("gif");

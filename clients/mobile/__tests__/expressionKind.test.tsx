@@ -38,7 +38,7 @@ import {
   type ExpressionMedia,
 } from '@momo/core/features/expressions/types';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
-import {ExpressionComposerPicker} from '../src/features/expressions/ExpressionComposerPicker';
+import {ExpressionKeyboardPanel, resetPanelTab} from '../src/features/expressions/ExpressionKeyboardPanel';
 import {ExpressionDraftStep} from '../src/features/expressions/ExpressionDraftStep';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
@@ -64,9 +64,9 @@ jest.mock('../src/lib/haptics', () => ({
 // 팀 표현의 종류 값 — 폰 몫 (#5112, ADR-0218 증보 4 §10, #4961 후속).
 //
 // 정본은 웹 시험(`clients/web/src/features/expressions/ExpressionKind.test.tsx`)이다: 같은 세 사실을 폰의 진짜 부품으로 잰다.
-//   ① 세 탭(이모티콘 · 이모지 · GIF)이 보관함을 겹치지 않게 나눈다(코어 `EXPRESSION_TAB_SHELVES` = J2의 네 칸을 탭마다 한 칸씩, 2026-11-07 #5453) — 순수 함수와 시트에 그려진 격자 둘 다.
+//   ① 세 탭(이모티콘 · 이모지 · GIF)이 보관함을 겹치지 않게 나눈다(코어 `EXPRESSION_TAB_SHELVES` = J2의 네 칸을 탭마다 한 칸씩, 2026-11-07 #5453) — 순수 함수와 키보드 자리 창에 그려진 격자 둘 다(#5482 가 옛 시트에서 창으로 옮겼다).
 //   ② 초안 단계가 종류를 미리 고르고(코어 `recommendedKindForDraft`), 사람이 바꾸고, 고른 값이 `Choice.kind` 로 간다.
-//   ③ 그렇게 등록한 그림이 **고른 종류의 탭에만** 선다(진짜 가져오기 장 → 코어 fixture 서버 → 시트).
+//   ③ 그렇게 등록한 그림이 **고른 종류의 탭에만** 선다(창의 「＋」가 연 시트의 진짜 가져오기 장 → 코어 fixture 서버 → 창).
 // 가짜는 서버(코어 fixture 서버)와 표준 이모지 목록뿐이다. 추천 규칙 자체(임계값·움직임)는 코어 시험이 서버와 같은 벡터로 잰다 —
 // 여기서는 폰이 **그 함수의 답을 미리 고르는가**를 재므로 기대값은 코어 함수를 다시 부르지 않고 낱말로 적는다.
 // =============================================================================
@@ -231,16 +231,17 @@ const stillDraft = (media: ExpressionMedia = STILL): ExpressionDraft =>
   live({...FIXTURE_READY_DRAFT, state: 'ready', code: null, media});
 const movingDraft = (): ExpressionDraft => live(FIXTURE_READY_DRAFT);
 
-function openSheet(store: PhoneExpressionStore) {
+/** 키보드 자리의 창(#5452)을 세운다. 호스트(입력창)가 쥐는 콜백은 이 시험이 보지 않는다 - 가짜 함수만 쥐여 준다. */
+function openPanel(store: PhoneExpressionStore) {
   const handlers = {
-    onClose: jest.fn(),
-    onInsert: jest.fn(),
-    onInsertExpression: jest.fn(),
-    onSend: jest.fn(),
+    previewId: null as string | null,
+    onPickBig: jest.fn(),
+    onInsertText: jest.fn(),
+    onInsertToken: jest.fn(),
   };
   render(
     <PhoneExpressions.Provider value={store}>
-      <ExpressionComposerPicker {...handlers} />
+      <ExpressionKeyboardPanel {...handlers} />
     </PhoneExpressions.Provider>,
   );
   return handlers;
@@ -251,7 +252,7 @@ const press = async (testID: string) => {
     fireEvent.press(screen.getByTestId(testID));
   });
 };
-const pressTab = (id: Tab) => press(`expression-sheet-tab-${id}`);
+const pressTab = (id: Tab) => press(`expression-panel-tab-${id}`);
 const type = async (testID: string, value: string) => {
   await act(async () => {
     fireEvent.changeText(screen.getByTestId(testID), value);
@@ -276,6 +277,7 @@ const picked = () =>
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  resetPanelTab(); // 창은 마지막으로 본 탭을 모듈 값으로 기억한다 - 시험마다 처음(이모티콘)으로 되돌린다.
   release = await pinReduceMotion(true);
   AppState.currentState = 'active';
   imagePicker.__reset();
@@ -319,18 +321,16 @@ describe('세 탭은 같은 보관함을 겹치지 않게 나눈다 (ADR-0218 §
     expect(new Set(all).size).toBe(CATALOGUE.length);
   });
 
-  it('시트에 그려진 격자도 같다: 세 탭이 서로 다른 것을 보이고(이모지 탭은 표준 목록 위에 팀의 작은 이모지 한 줄) 합치면 보관함 전체다', async () => {
+  it('창에 그려진 격자도 같다: 세 탭이 서로 다른 것을 보이고(이모지 탭은 표준 목록 위에 팀의 작은 이모지 한 줄) 합치면 보관함 전체다', async () => {
     const {store} = setup({items: CATALOGUE});
     await store.refresh(true);
-    openSheet(store);
-    await screen.findByTestId('emoji-pick-🎉');
-    // 처음 열 때의 이모지 탭: 표준 그림 문자 목록 위에 팀의 작은 이모지 한 줄이 선다(움직이는 것도 작은 이모지다).
-    expect(cellNames()).toEqual(VIEWS.emoji);
-    const seen: Record<string, string[]> = {};
-    for (const tab of ['emoticon', 'gif'] as const) {
-      await pressTab(tab);
-      seen[tab] = cellNames().sort();
-    }
+    openPanel(store);
+    // 처음 여는 탭은 이모티콘이다(창은 이모티콘 탭에서 열린다, owner 11-07): 정지한 큰 그림 칸뿐이다.
+    expect(cellNames()).toEqual(VIEWS.emoticon);
+    const seen: Record<string, string[]> = {emoticon: cellNames()};
+    await pressTab('gif');
+    seen.gif = cellNames().sort();
+    // 이모지 탭: 표준 그림 문자 목록 위에 팀의 작은 이모지 한 줄이 선다(움직이는 것도 작은 이모지다).
     await pressTab('emoji');
     await screen.findByTestId('emoji-pick-🎉');
     seen.emoji = cellNames();
@@ -616,7 +616,7 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
 });
 
 // ---- ③ 등록한 그림은 고른 종류의 탭에만 선다 -----------------------------------------
-describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜 장 → 코어 fixture 서버 → 시트)', () => {
+describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (창의 「＋」 → 진짜 장 → 코어 fixture 서버 → 창)', () => {
   // 코어 fixture 서버의 초안은 늘 움직이는 GIF 라서 추천은 `sticker`(→ GIF 탭)다. 사람이 `emoji`(작은 이모티콘)를 고르면 움직이는
   // 그림도 이모지 탭에만 선다(J2: 움직임이 가르는 것은 sticker 뿐).
   it.each([
@@ -627,10 +627,9 @@ describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜
     async (_label, pick, want, shelves) => {
       const {store, request} = setup();
       await store.refresh(true);
-      openSheet(store);
-      await screen.findByTestId('emoji-pick-🎉');
-      await pressTab('emoticon');
-      await press('expression-add-menu');
+      openPanel(store);
+      // 「＋」는 이모티콘·GIF 탭의 세트 띠 끝에 있고, 창 밖의 시트를 연다(문 둘이 바로 보인다).
+      await press('expression-panel-add');
       await press('expression-add-import');
       imagePicker.__state.result = {
         canceled: false,

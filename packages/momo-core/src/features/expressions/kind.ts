@@ -135,8 +135,11 @@ export function expressionsForView<T extends Pick<Expression, "kind" | "media">>
  */
 export const EXPRESSION_PICKER_TABS = ["emoticon", "emoji", "gif"] as const;
 export type ExpressionPickerTab = (typeof EXPRESSION_PICKER_TABS)[number];
-/** 처음 여는 탭 — 옛 이모지 고르개가 열던 표준 표(자주 쓰는 것 먼저)다. */
-export const DEFAULT_EXPRESSION_PICKER_TAB: ExpressionPickerTab = "emoji";
+/**
+ * 처음 여는 탭 — 이모티콘이다(owner 11-07 탭 순서·카카오톡 레퍼런스, planner 결정 #5482: 웹·폰 모두 처음 열면 첫 탭 「이모티콘」). 웹 고르개가 이 상수로 열고, 폰 창
+ * (`ExpressionKeyboardPanel`)도 같은 상수를 첫 탭으로 쓴다 - 한쪽만 바뀌지 않는다. 마지막에 쓴 탭을 기억하는 일은 이 상수와 별개다(폰 창은 이번 실행 동안만 기억하고, 웹은 열 때마다 처음부터다).
+ */
+export const DEFAULT_EXPRESSION_PICKER_TAB: ExpressionPickerTab = "emoticon";
 /** 탭이 보이는 보관함의 보기(옛 길, 폰 #5452가 옮기면 지운다). 이모지 탭은 표준 표가 바탕이라 한 보기가 아니고 `null`. */
 export function expressionViewOfPickerTab(tab: ExpressionPickerTab): ExpressionView | null {
   return tab === "emoji" ? null : tab;
