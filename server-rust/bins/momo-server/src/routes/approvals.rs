@@ -2237,7 +2237,13 @@ async fn execute_workspace_action(
         // stands on (the resolver read it from the database), never from the payload, and the
         // person is judged by the ONE predicate the push audience and the preview also ask
         // (`adder_allows_in_tx`) against the policy as it is now. No admin or owner proxy.
-        let ActionArgs::ExpressionCreate { subject, .. } = &resolved.validated.args else {
+        // The set card (ADR-0218 증보 6 §12, #5460 S1b) names its face the same way; its executor is S2's.
+        let (ActionArgs::ExpressionCreate { subject, .. }
+        | ActionArgs::ExpressionSetCreate(crate::routes::actions::ExpressionSetSpec {
+            subject,
+            ..
+        })) = &resolved.validated.args
+        else {
             return Err(protocol_error(
                 "expression_adder action resolved without its candidates",
             ));
@@ -2568,6 +2574,16 @@ async fn execute_workspace_action(
         ActionArgs::TeamAiRolesSet { before: None, .. } => {
             return Err(protocol_error(
                 "team_ai.roles.set resolved without the switch it showed",
+            ));
+        }
+        // ADR-0218 증보 6 §12 (#5460 S1b). The set's two cards have no executor yet: the set
+        // card's is S2's (the decision transaction), the plan card's is S5a's. A decision that
+        // reaches here rolls back and writes nothing — and no code raises either card before
+        // those slices land (nothing offers the ids to a model, and the proposal function is not
+        // called by anything). Fail closed rather than approve what cannot run.
+        ActionArgs::ExpressionSetCreate(_) | ActionArgs::ExpressionSetPlan { .. } => {
+            return Err(protocol_error(
+                "the executor of an expression set card is not part of this build",
             ));
         }
     };
