@@ -28821,8 +28821,9 @@ components:
             `quota`; a skip never stops the others. If nothing at all registers the
             receipt is a 409 (`expression_name_reserved` when any kept name was taken,
             else `expression_quota`) and the approval stays. Success registers every
-            kept picture that was not skipped in **one** catalogue version (one
-            `expression.changed` notice) as the person who decided (`created_by`),
+            kept picture that was not skipped in **one** catalogue version (one detail
+            notice, `expression.changed.detail`, plus one plain `expression.changed`
+            notice) as the person who decided (`created_by`),
             proposed by the helper, reclaims the bytes of every picture it did not
             register (the unkept and the skipped) and writes `result.expressionSet` on the
             receipt and on the card.
