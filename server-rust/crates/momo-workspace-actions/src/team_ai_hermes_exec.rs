@@ -121,7 +121,9 @@ impl std::fmt::Debug for HermesAnswer {
 
 impl HermesAnswer {
     /// Is there anything to merge? An answer of nothing (an empty reply, or one that was only a picture
-    /// address) is a `failed` delegation, not a success with no words.
+    /// address) is a `failed` delegation, not a success with no words — **for a search**. A picture delegation
+    /// that took its picture ([`picture_of`]) is an answer whatever its words (#5372): the worker decides that
+    /// before it asks this.
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
     }

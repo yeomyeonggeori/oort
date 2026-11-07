@@ -3693,3 +3693,38 @@ async fn x29_a_picture_longer_than_the_cleaning_reads_is_taken_from_the_raw_answ
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].size, big.len() as i64);
 }
+
+/// P1 / P4-7: an answer of **nothing but the picture** — no words at all — is still an answer (the cleaned text is
+/// empty, which for a search is a `failed` delegation, and for a picture is not): the model is told one picture
+/// and an empty text, writes the write-up, and the picture goes up and is bound to it.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x30_an_answer_of_only_a_picture_is_still_an_answer() {
+    let w = world_with_api(
+        answering(address("png", &picture_bytes())),
+        ApiBehavior::Store {
+            after: AfterStore::Nothing,
+        },
+    )
+    .await;
+    let (worker, routed) = w.worker(image_script(), &Setup::image());
+    let run = w.ask(w.t.owner_id, ASK_PICTURE).await;
+    w.drain(&worker).await;
+    let requests = routed.model.requests();
+    assert_eq!(requests.len(), 2, "the write-up was made: {requests:?}");
+    let merge_input: String = requests[1]
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(merge_input.contains("pictures: 1"), "{merge_input}");
+    the_model_saw_only_a_count(&requests);
+    assert_eq!(w.api.as_ref().unwrap().connections(), 1);
+    assert_eq!(run_status(&w.su, run).await, "succeeded");
+    assert_eq!(w.delegate_audit(run).await[0]["code"], json!("ok"));
+    let (message, _) = last_agent_message(&w.su, &w.t).await.unwrap();
+    let rows = attachments(&w.su, &w.t).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message_id, Some(message));
+}
