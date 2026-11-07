@@ -1,0 +1,83 @@
+appId: app.momo.ios
+name: 5452-panel-capture
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 이모티콘 창의 화면 캡처 흐름 (#5452): 단정 없이 장면마다 한 장씩 찍는다 - 창이 열린 세 탭, 미리 보기, 보낸 뒤 대화.
+# 밝기·글자 크기는 부르는 쪽이 `xcrun simctl ui <udid> appearance dark|light`·`content_size …` 로 정한 뒤 돌린다.
+# 준비: `measure/seed-expression-panel.py` 로 만든 채널.
+- launchApp:
+    appId: app.momo.ios
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "composer-expression"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
+- tapOn:
+    id: "expression-panel-tab-emoticon"
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-chi_cry"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-1-emoticon
+- tapOn:
+    id: "expression-panel-tab-emoji"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-2-emoji
+- tapOn:
+    id: "expression-panel-tab-gif"
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-nya_dance"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-3-gif
+- tapOn:
+    id: "expression-panel-tab-emoticon"
+- tapOn:
+    id: "expression-pick-chi_cry"
+- extendedWaitUntil:
+    visible:
+      id: "composer-expression-preview"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-4-preview
+- tapOn:
+    id: "composer-input"
+- inputText: "고생 많았어요"
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-5-preview-keyboard
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "expression-body-large"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 5452-cap-6-sent

@@ -377,9 +377,15 @@ it('uses large/medium/inline sizes, keeps large sends outside bubbles and return
       <MessageBody body={':party_parrot: '.repeat(7)} />
     </PhoneExpressions.Provider>,
   );
+  // 칸은 첫 프레임부터 서고(`expression-box-…`), 그림 층은 받은 뒤에 얹힌다(#5451) — 받는 동안 글자나 0x0 칸이 서지 않는다.
   expect(
-    screen.getAllByTestId('expression-image-party_parrot-inline'),
+    screen.getAllByTestId('expression-box-party_parrot-inline'),
   ).toHaveLength(7);
+  await waitFor(() =>
+    expect(
+      screen.getAllByTestId('expression-image-party_parrot-inline'),
+    ).toHaveLength(7),
+  );
   server.request({
     method: 'POST',
     path: `${base}/${parrot.id}/report`,
@@ -402,8 +408,13 @@ it('does not replace Markdown code, escaped tokens or URL destinations and never
   ).toBe(1);
   const ui = mount(store, <MessageBody body={body} />);
   expect(
-    screen.getAllByTestId('expression-image-party_parrot-inline'),
+    screen.getAllByTestId('expression-box-party_parrot-inline'),
   ).toHaveLength(1);
+  await waitFor(() =>
+    expect(
+      screen.getAllByTestId('expression-image-party_parrot-inline'),
+    ).toHaveLength(1),
+  );
   expect(screen.getByTestId('message-inline-code').props.children).toBe(
     ':party_parrot:',
   );

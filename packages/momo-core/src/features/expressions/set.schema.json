@@ -1,0 +1,633 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oort:expressions:v1:augment-5442",
+  "$defs": {
+    "SetKind": {
+      "enum": [
+        "still",
+        "gif"
+      ]
+    },
+    "SetGrayCode": {
+      "enum": [
+        "refused",
+        "failed",
+        "not_made",
+        "base_missing"
+      ]
+    },
+    "SetBackend": {
+      "enum": [
+        "hermes",
+        "team_image_model"
+      ]
+    },
+    "SetReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId"
+      ],
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "SetMotion": {
+      "enum": [
+        "bounce",
+        "wobble",
+        "pulse",
+        "sparkle"
+      ]
+    },
+    "SetPlanState": {
+      "enum": [
+        "planned",
+        "confirmed",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "SetPlanSlotView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "name",
+        "displayName",
+        "scene",
+        "baseIndex",
+        "motion"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 39
+        },
+        "kind": {
+          "$ref": "#/$defs/SetKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "scene": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseIndex": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 39
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "motion": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SetMotion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SetPlanCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "workspaceId",
+        "setId",
+        "title",
+        "prefix",
+        "prompt",
+        "references",
+        "noticeDue",
+        "state",
+        "expiresAtMs",
+        "slots"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "setId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "prefix": {
+          "$ref": "#/$defs/SetPrefix"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "references": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SetReference"
+          }
+        },
+        "noticeDue": {
+          "enum": [
+            true,
+            false
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SetPlanState"
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/SetPlanSlotView"
+          }
+        }
+      }
+    },
+    "SetPrefix": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 12,
+      "pattern": "^[a-z0-9]{2,12}$"
+    },
+    "SetReadySlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "state",
+        "code",
+        "draftId",
+        "revision",
+        "name",
+        "displayName",
+        "tags",
+        "media"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 39
+        },
+        "kind": {
+          "$ref": "#/$defs/SetKind"
+        },
+        "state": {
+          "const": "ready"
+        },
+        "code": {
+          "type": "null"
+        },
+        "draftId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 19,
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+          },
+          "uniqueItems": true
+        },
+        "media": {
+          "$ref": "urn:oort:expressions:v1#/$defs/Media"
+        }
+      }
+    },
+    "SetGraySlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "state",
+        "code",
+        "name",
+        "displayName",
+        "tags"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 39
+        },
+        "kind": {
+          "$ref": "#/$defs/SetKind"
+        },
+        "state": {
+          "const": "gray"
+        },
+        "code": {
+          "$ref": "#/$defs/SetGrayCode"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "SetSlot": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SetReadySlot"
+        },
+        {
+          "$ref": "#/$defs/SetGraySlot"
+        }
+      ]
+    },
+    "SetApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "workspaceId",
+        "setId",
+        "title",
+        "prefix",
+        "subjectMemberId",
+        "prompt",
+        "references",
+        "expiresAtMs",
+        "slots"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "setId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "prefix": {
+          "$ref": "#/$defs/SetPrefix"
+        },
+        "subjectMemberId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "references": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SetReference"
+          }
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/SetSlot"
+          }
+        }
+      }
+    },
+    "SetPlanSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "name",
+        "displayName",
+        "tags"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 39
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "SetAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "args"
+      ],
+      "properties": {
+        "action": {
+          "const": "expression.set.create"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "setId",
+            "title",
+            "prefix",
+            "tags",
+            "backend",
+            "subjectMemberId",
+            "prompt",
+            "slots"
+          ],
+          "properties": {
+            "setId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+            },
+            "prefix": {
+              "$ref": "#/$defs/SetPrefix"
+            },
+            "tags": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16,
+                "pattern": "^[^\\u0000-\\u001f\\u007f@<>\\[\\]`\\\\]+$"
+              },
+              "uniqueItems": true
+            },
+            "backend": {
+              "$ref": "#/$defs/SetBackend"
+            },
+            "subjectMemberId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 800
+            },
+            "slots": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 40,
+              "items": {
+                "$ref": "#/$defs/SetPlanSlot"
+              }
+            }
+          }
+        }
+      }
+    },
+    "SetDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expressionChoices"
+      ],
+      "properties": {
+        "expressionChoices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "$ref": "urn:oort:expressions:v1#/$defs/Choice"
+          }
+        }
+      }
+    },
+    "SetSkip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draftId",
+        "name",
+        "reason"
+      ],
+      "properties": {
+        "draftId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30,
+          "pattern": "^[a-z0-9_-]{2,30}$"
+        },
+        "reason": {
+          "enum": [
+            "name_taken",
+            "quota"
+          ]
+        }
+      }
+    },
+    "SetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "setId",
+        "registered",
+        "skipped"
+      ],
+      "properties": {
+        "setId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "registered": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 40,
+          "items": {
+            "$ref": "urn:oort:expressions:v1#/$defs/Result"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/SetSkip"
+          }
+        }
+      }
+    }
+  }
+}

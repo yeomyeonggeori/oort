@@ -1,0 +1,49 @@
+appId: app.momo.ios
+name: 5451-media-taps
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 정지 이모티콘·GIF 를 눌러도 사라지거나 떨지 않는다 (#5451, #5456 폰 몫 — owner 11-07 「이모티콘이나 GIF를 지금 클릭하면 갑자기 사라지거나 진동을 하는 케이스」).
+#
+# 이 흐름은 눌러 줄 뿐이고 단정이 없다. 눌린 뒤의 화면은 녹화를 `measure/media-rows.mjs --mode taps` 가 잰다:
+#   · 정지 이모티콘 행 — 기준 프레임과 달라진 프레임 0, 행 이동 ≤1pt (눌러도 바뀌지 않는다)
+#   · GIF 행 — 그림 칸이 빈 프레임 0, 행 높이 변화 ≤1pt (눌러도 사라지지 않고 첫 장면부터 다시 돈다)
+#
+# 준비: `CHANNEL_ID` 채널의 **맨 아래 화면에 큰 이모티콘이 둘**이다 — 위가 정지, 아래가 움직이는 것(`measure/seed-media-lab.py --profile taps`). 움직이는 것은 4번 돌고
+# 서는 시간(`EXPRESSION_REPEATS` × 길이)이 시험 창보다 길어야 한다(시드의 `slow_gif` 는 5초 × 4 = 20초).
+# 누르는 자리는 줄 안 큰 이모티콘 칸(`expression-body-large`)의 **왼쪽 25%** 다: 그 칸은 본문 열 폭이라 그림은 왼쪽에 서고, 가운데는 그림 오른쪽 끝이다.
+#
+#   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… -e CHANNEL_ID=<채널 id> clients/mobile/maestro/5451-media-taps.yaml
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "expression-body-large"
+    timeout: 60000
+# 진입이 가라앉기를 기다린다(움직이는 그림이 도는 화면이라 이 대기는 상한까지 걸린다).
+- waitForAnimationToEnd:
+    timeout: 4000
+# ① 정지 이모티콘(위)
+- tapOn:
+    id: "expression-body-large"
+    index: 0
+    point: "25%,50%"
+    retryTapIfNoChange: false
+- waitForAnimationToEnd:
+    timeout: 3000
+# ② GIF(아래)
+- tapOn:
+    id: "expression-body-large"
+    index: 1
+    point: "25%,50%"
+    retryTapIfNoChange: false
+- waitForAnimationToEnd:
+    timeout: 3000

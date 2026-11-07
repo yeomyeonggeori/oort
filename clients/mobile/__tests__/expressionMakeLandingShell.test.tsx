@@ -251,9 +251,9 @@ describe('「AI와 만들기」 요청 뒤 (#4962)', () => {
     const buttons = screen.getAllByTestId('composer-expression');
     expect(buttons).toHaveLength(2);
     fireEvent.press(buttons[buttons.length - 1]);
-    fireEvent.press(await screen.findByTestId('expression-sheet-tab-emoticon'));
-    await screen.findByTestId('expression-add-menu');
-    await press('expression-add-menu');
+    // 이모티콘 창은 키보드 자리에 서고(#5452), 가져오기·만들기는 띠 끝의 「＋」 시트로 연다.
+    fireEvent.press(await screen.findByTestId('expression-panel-add'));
+    await screen.findByTestId('expression-add-doors');
     await press('expression-add-make');
     // 사진 양식이 먼저 열린다(#4984): 에이전트에게 부탁하는 길은 그 안의 단추 하나다.
     await waitFor(() =>
@@ -291,7 +291,7 @@ describe('「AI와 만들기」 요청 뒤 (#4962)', () => {
     expect(screen.queryByTestId('thread-title')).toBeNull();
     // 시트는 걷혔고 「확인」으로 돌아오는 길은 서지 않았다.
     expect(screen.queryByTestId('expression-make')).toBeNull();
-    expect(screen.queryByTestId('expression-sheet-close')).toBeNull();
+    expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
     // 요청은 그 DM 으로 나갔다.
     expect(openDm).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);

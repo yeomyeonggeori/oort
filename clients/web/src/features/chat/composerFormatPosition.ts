@@ -68,7 +68,7 @@ export function clampFormatTrayPosition(
   };
 }
 
-const MIRROR_PROPS = [
+export const MIRROR_PROPS = [
   "box-sizing",
   "width",
   "height",
@@ -96,17 +96,14 @@ const MIRROR_PROPS = [
 ] as const;
 
 /**
- * textarea 선택은 DOM Range 가 아니라서 getClientRects 가 비어 있다. 같은
- * 박스·스크롤의 숨은 미러에서 선택 첫 줄 상자를 읽는다.
+ * textarea 와 같은 박스·글꼴·감김의 숨은 미러를 문서에 붙인다: `head` 글 뒤에 표지 하나(`marked` 글)가 선다. 호출한 쪽이 좌표를 읽고 `mirror.remove()` 한다.
+ * 선택 서식 트레이(`getTextareaSelectionRect`)와 추천 줄의 캐럿 화면 줄 판정(`caretLine`, #5489)이 이 한 곳의 미러를 쓴다.
  */
-export function getTextareaSelectionRect(
-  textarea: HTMLTextAreaElement
-): DOMRect | null {
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  if (start === end) return null;
-  if (typeof document === "undefined") return null;
-
+export function mountTextareaMirror(
+  textarea: HTMLTextAreaElement,
+  head: string,
+  marked: string
+): { mirror: HTMLElement; head: Text; mark: HTMLElement } {
   const textareaRect = textarea.getBoundingClientRect();
   const style = window.getComputedStyle(textarea);
   const mirror = document.createElement("div");
@@ -123,13 +120,34 @@ export function getTextareaSelectionRect(
   mirror.style.setProperty("white-space", "pre-wrap");
   mirror.style.setProperty("overflow", "hidden");
 
-  const value = textarea.value;
+  const headText = document.createTextNode(head);
   const mark = document.createElement("span");
-  mark.append(document.createTextNode(value.slice(start, end) || "\u200b"));
-  mirror.append(document.createTextNode(value.slice(0, start)), mark);
+  mark.append(document.createTextNode(marked));
+  mirror.append(headText, mark);
   document.body.append(mirror);
   mirror.scrollTop = textarea.scrollTop;
   mirror.scrollLeft = textarea.scrollLeft;
+  return { mirror, head: headText, mark };
+}
+
+/**
+ * textarea 선택은 DOM Range 가 아니라서 getClientRects 가 비어 있다. 같은
+ * 박스·스크롤의 숨은 미러에서 선택 첫 줄 상자를 읽는다.
+ */
+export function getTextareaSelectionRect(
+  textarea: HTMLTextAreaElement
+): DOMRect | null {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  if (start === end) return null;
+  if (typeof document === "undefined") return null;
+
+  const value = textarea.value;
+  const { mirror, mark } = mountTextareaMirror(
+    textarea,
+    value.slice(0, start),
+    value.slice(start, end) || "\u200b"
+  );
 
   const rects = Array.from(mark.getClientRects()).filter(
     (rect) => rect.width > 0 || rect.height > 0

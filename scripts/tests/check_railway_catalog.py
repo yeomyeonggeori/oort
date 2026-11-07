@@ -87,6 +87,8 @@ HAND_LITERALS = {
     # #4072: the same-server Hermes wiring is typed by hand, so the README lists it.
     "HERMES_BASE_URL", "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK", "AGENT_PROVIDER_LOCAL_HOSTS",
     "OORT_COHOSTED_AGENT_TOOLS_LOCKED", "API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_PORT",
+    # ADR-0201 증보 v4 G4 (#5369): the connection-mode declarations ship EMPTY on api AND agent-worker.
+    "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED", "OORT_COHOSTED_AGENT_CONNECTOR_APPS",
     "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
     # #4820 C2b 3부: the two halves of the hosted expression door are typed by hand, so the README lists both.
     "OORT_HOSTED_MEDIA_STRICT", "HERMES_MEDIA_DELIVERY_STRICT",
@@ -107,6 +109,17 @@ GITHUB_KEY_VALUE = "${{shared.GITHUB_APP_MASTER_KEY}}"
 PUBLIC_BASE_VAR = "MOMO_PUBLIC_BASE_URL"
 PUBLIC_BASE_VALUE = "https://${{shared.OORT_SITE_ADDRESS}}"
 HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
+# ADR-0201 증보 v4 P2 G4 (#5369) FLIPS ADR-0203 증보 K-S2's "api only" (review RM1/RM2). The three operator declarations
+# are read by api AND agent-worker, so BOTH services carry the SAME THREE, with the SAME value in this catalog and the
+# SAME expression in compose. The team AI's Hermes delegation (a worker door) opens only while the worker's TOOLS_LOCKED is
+# true and its two connection-mode variables are EMPTY; if a template let the two sides differ, an instance in connection
+# mode (a Hermes with a person's apps) could open that door on the worker while only api knew. name -> what the committed
+# TEMPLATE ships on both services (team default mode); connection mode is the operator's, typed on both.
+COHOSTED_DECLARATIONS = {
+    "OORT_COHOSTED_AGENT_TOOLS_LOCKED": "1",
+    "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED": "",
+    "OORT_COHOSTED_AGENT_CONNECTOR_APPS": "",
+}
 HERMES_RELAY_SHARED_KEY = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
 HERMES_PORT = 8642
 HERMES_DATA = "/opt/data"
@@ -494,6 +507,42 @@ def compose_env_keys(text: str) -> dict[str, set[str]]:
             elif re.match(r"^ {0,4}\S", line):
                 in_env = False
     return keys
+
+
+def compose_env_values(text: str) -> dict[str, dict[str, str]]:
+    """services.<name>.environment of a compose file (map form) as the expression text after each key.
+
+    Only what the source says: `${VAR:-}` stays `${VAR:-}` (compose's own `config` renders it away, so the rendered
+    config cannot tell two different expressions from two equal ones). A trailing ` # comment` is dropped."""
+    values: dict[str, dict[str, str]] = {}
+    in_services = in_env = False
+    service = None
+    for line in text.splitlines():
+        if re.match(r"^\S", line):
+            in_services = bool(re.match(r"^services:\s*$", line))
+            service, in_env = None, False
+            continue
+        if not in_services:
+            continue
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            service, in_env = match.group(1), False
+            values.setdefault(service, {})
+            continue
+        if service is None:
+            continue
+        if re.match(r"^    environment:\s*$", line):
+            in_env = True
+            continue
+        if in_env:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            match = re.match(r"^      ([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$", line)
+            if match:
+                values[service][match.group(1)] = re.sub(r"\s+#.*$", "", match.group(2)).strip()
+            elif re.match(r"^ {0,4}\S", line):
+                in_env = False
+    return values
 
 
 def leaf_settings(node: object, prefix: str = "") -> set[str]:
@@ -901,8 +950,9 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
             # exact host, never a wildcard (ADR-0004 증보 2026-09-08)
             "AGENT_PROVIDER_LOCAL_HOSTS": hermes.get("privateHostname"),
         }
+        # ADR-0201 증보 v4 G4: the three declarations, on BOTH roles, as the team default mode ships them.
+        want.update(COHOSTED_DECLARATIONS)
         if role == "api":
-            want["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
             # #4079: the login relay (api only): the sidecar's private address and its own shared key.
             want["HERMES_LOGIN_RELAY_URL"] = "http://%s:8643" % hermes.get("privateHostname")
             want["HERMES_LOGIN_RELAY_KEY"] = HERMES_RELAY_SHARED_KEY
@@ -912,8 +962,46 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     for var in ("HERMES_LOGIN_RELAY_URL", "HERMES_LOGIN_RELAY_KEY"):
         if var in (services["agent-worker"].get("variables") or {}):
             errors.append("agent-worker must not carry %s (the login relay is api only, #4079)" % var)
-    if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in (services["agent-worker"].get("variables") or {}):
-        errors.append("agent-worker must not carry OORT_COHOSTED_AGENT_* (api only, ADR-0203 증보 K-S2)")
+    errors.extend(cohosted_declaration_errors(services, compose))
+    return errors
+
+
+def cohosted_declaration_errors(services: dict, compose: str) -> list[str]:
+    """ADR-0201 증보 v4 P2 G4 (#5369, review RM1/RM2): api and agent-worker carry the SAME THREE `OORT_COHOSTED_AGENT_*`
+    declarations — in this catalog (same value) and in compose (same expression). Both directions are an error: a
+    variable only api has, only the worker has, or with a different value on each, would let the worker judge a mode
+    api does not see (the connection-mode check on the worker is only as good as this equality). The old K-S2 rule
+    (\"agent-worker must not carry OORT_COHOSTED_AGENT_*\") is gone: with the variables on api alone, the worker's
+    \"no connection variable\" was true in connection mode too and separated nothing."""
+    errors: list[str] = []
+    api = services["api"].get("variables") or {}
+    worker = services["agent-worker"].get("variables") or {}
+    for var in COHOSTED_DECLARATIONS:
+        for role, got in (("api", api), ("agent-worker", worker)):
+            if var not in got:
+                errors.append(
+                    "%s %s is missing: api and agent-worker must carry the same three OORT_COHOSTED_AGENT_* "
+                    "declarations (ADR-0201 증보 v4 G4, K-S2 flipped)" % (role, var)
+                )
+        if var in api and var in worker and api[var] != worker[var]:
+            errors.append(
+                "api and agent-worker must carry the same %s: api %r, agent-worker %r "
+                "(ADR-0201 증보 v4 G4, K-S2 flipped)" % (var, api[var], worker[var])
+            )
+    expressions = compose_env_values(compose)
+    for var in COHOSTED_DECLARATIONS:
+        api_expr = expressions.get("api", {}).get(var)
+        worker_expr = expressions.get("agent-worker", {}).get(var)
+        if api_expr is None or worker_expr is None:
+            errors.append(
+                "compose api/agent-worker %s must be set on both services (api %r, agent-worker %r; "
+                "ADR-0201 증보 v4 G4, K-S2 flipped)" % (var, api_expr, worker_expr)
+            )
+        elif api_expr != worker_expr:
+            errors.append(
+                "compose api and agent-worker must declare the same expression for %s: api %r, agent-worker %r "
+                "(ADR-0201 증보 v4 G4, K-S2 flipped)" % (var, api_expr, worker_expr)
+            )
     return errors
 
 
@@ -1047,13 +1135,16 @@ def collect_errors(
     centrifugo_path: Path,
     keys_path: Path,
     readme_path: Path,
+    compose_text: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
         data = json.loads(catalog_path.read_text())
     except json.JSONDecodeError as exc:
         return ["railway.json is not JSON: %s" % exc]
-    compose = compose_path.read_text()
+    # `compose_text` stands in for docker-compose.rust.yml only (the mutation proof edits the text in memory; the
+    # repo root and the sibling compose files still come from `compose_path`).
+    compose = compose_text if compose_text is not None else compose_path.read_text()
     centrifugo_json = json.loads(centrifugo_path.read_text())
     generator_keys = {
         line.strip() for line in keys_path.read_text().splitlines() if line.strip()
@@ -1078,7 +1169,11 @@ def collect_errors(
 
     # -- each service gets only what its compose twin gets -------------------
     compose_keys = {
-        fname: compose_env_keys((compose_path.parent / fname).read_text())
+        fname: compose_env_keys(
+            compose
+            if compose_text is not None and fname == compose_path.name
+            else (compose_path.parent / fname).read_text()
+        )
         for fname in sorted({f for twins, _ in COMPOSE_TWINS.values() for f, _ in twins})
     }
     for name, (twins, extras) in COMPOSE_TWINS.items():
@@ -1584,8 +1679,31 @@ def mutate_catalog(kind: str, data: dict) -> None:
         api["variables"]["AGENT_PROVIDER_LOCAL_HOSTS"] = "*.railway.internal"
     elif kind == "api-hermes-attest-dropped":
         del api["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
-    elif kind == "worker-hermes-attest":
-        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
+    # ADR-0201 증보 v4 G4 (#5369, review RM2): K-S2 FLIPPED. The old `worker-hermes-attest` (the worker gains the
+    # declaration) is the template now, so it proves nothing; what must turn red is the two sides DISAGREEING, in both
+    # directions, and the template itself leaving team default mode.
+    elif kind == "worker-hermes-attest-dropped":  # the worker lost the declaration api has
+        del services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
+    elif kind == "api-connector-apps-only":  # connection mode on api alone: the worker would read team default
+        api["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+    elif kind == "worker-connector-apps-only":  # and the other direction: only the worker has it
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+    elif kind == "api-connectors-locked-only":
+        api["variables"]["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "1"
+    elif kind == "worker-connectors-locked-only":
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "1"
+    elif kind == "worker-connectors-locked-zero":  # a `0` is a value: it differs from api's empty one
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"] = "0"
+    elif kind == "connector-apps-differ":  # both set, not the same list
+        api["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.google-calendar"
+    elif kind == "api-connector-apps-dropped":
+        del api["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
+    elif kind == "worker-connector-apps-dropped":
+        del services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
+    elif kind == "both-connector-apps-set":  # equal on both, but the TEMPLATE no longer ships team default mode
+        api["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
     elif kind == "api-github-key-dropped":  # #4221: api without the key: the GitHub routes answer 503
         del api["variables"][GITHUB_KEY_VAR]
     elif kind == "worker-github-key":  # ADR-0203 D6-2: a worker must not open the App's stored key
@@ -1715,7 +1833,16 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-relay-unconditional", "hermes start command is not the canonical command list"),
     ("api-hermes-wildcard-host", "api AGENT_PROVIDER_LOCAL_HOSTS"),
     ("api-hermes-attest-dropped", "api OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
-    ("worker-hermes-attest", "agent-worker variables outside its compose twin"),
+    ("worker-hermes-attest-dropped", "agent-worker OORT_COHOSTED_AGENT_TOOLS_LOCKED is missing"),
+    ("api-connector-apps-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
+    ("worker-connector-apps-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
+    ("api-connectors-locked-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"),
+    ("worker-connectors-locked-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"),
+    ("worker-connectors-locked-zero", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"),
+    ("connector-apps-differ", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
+    ("api-connector-apps-dropped", "api OORT_COHOSTED_AGENT_CONNECTOR_APPS is missing"),
+    ("worker-connector-apps-dropped", "agent-worker OORT_COHOSTED_AGENT_CONNECTOR_APPS is missing"),
+    ("both-connector-apps-set", "OORT_COHOSTED_AGENT_CONNECTOR_APPS 'com.momo.plugins.gmail' must be ''"),
     ("api-github-key-dropped", "api GITHUB_APP_MASTER_KEY"),
     ("worker-github-key", "GITHUB_APP_MASTER_KEY reaches api only"),
     ("hermes-github-key", "GITHUB_APP_MASTER_KEY reaches api only"),
@@ -1740,6 +1867,67 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+# ADR-0201 증보 v4 G4 (#5369, review RM1/RM2): compose is the other half of "the same expression on both services".
+# Each mutation edits the text of docker-compose.rust.yml in memory (the committed file is never touched) and must
+# turn the compose rule red by name, in both directions.
+COMPOSE_MUTATIONS: tuple[tuple[str, str], ...] = (
+    ("compose-api-connector-apps-dropped",
+     "compose api/agent-worker OORT_COHOSTED_AGENT_CONNECTOR_APPS must be set on both services"),
+    ("compose-worker-connector-apps-dropped",
+     "compose api/agent-worker OORT_COHOSTED_AGENT_CONNECTOR_APPS must be set on both services"),
+    ("compose-worker-tools-locked-dropped",
+     "compose api/agent-worker OORT_COHOSTED_AGENT_TOOLS_LOCKED must be set on both services"),
+    ("compose-api-connector-apps-differs",
+     "compose api and agent-worker must declare the same expression for OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
+    ("compose-worker-connector-apps-differs",
+     "compose api and agent-worker must declare the same expression for OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
+    ("compose-worker-connectors-locked-differs",
+     "compose api and agent-worker must declare the same expression for OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"),
+    ("compose-worker-tools-locked-fixed",
+     "compose api and agent-worker must declare the same expression for OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
+)
+
+
+def edit_compose_service(text: str, service: str, old: str, new: str, kind: str) -> str:
+    """Replace `old` (found exactly once) inside the `  <service>:` block of a compose file."""
+    start = re.search(r"(?m)^  %s:\s*$" % re.escape(service), text)
+    if start is None:
+        raise SystemExit("mutation %s: no compose service %s" % (kind, service))
+    after = re.search(r"(?m)^(  [A-Za-z0-9_-]+:\s*$|\S)", text[start.end():])
+    end = start.end() + after.start() if after else len(text)
+    block = text[start.start():end]
+    if block.count(old) != 1:
+        raise SystemExit("mutation %s: %r found %d times in compose %s (want 1)" % (kind, old, block.count(old), service))
+    return text[:start.start()] + block.replace(old, new, 1) + text[end:]
+
+
+def mutate_compose(kind: str, text: str) -> str:
+    apps, locked, tools = (
+        "OORT_COHOSTED_AGENT_CONNECTOR_APPS",
+        "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED",
+        "OORT_COHOSTED_AGENT_TOOLS_LOCKED",
+    )
+
+    def line(var: str) -> str:
+        return "      %s: ${%s:-}\n" % (var, var)
+
+    if kind == "compose-api-connector-apps-dropped":
+        return edit_compose_service(text, "api", line(apps), "", kind)
+    if kind == "compose-worker-connector-apps-dropped":
+        return edit_compose_service(text, "agent-worker", line(apps), "", kind)
+    if kind == "compose-worker-tools-locked-dropped":
+        return edit_compose_service(text, "agent-worker", line(tools), "", kind)
+    if kind == "compose-api-connector-apps-differs":
+        return edit_compose_service(text, "api", "${%s:-}" % apps, "${%s:-com.momo.plugins.gmail}" % apps, kind)
+    if kind == "compose-worker-connector-apps-differs":
+        return edit_compose_service(text, "agent-worker", "${%s:-}" % apps, "${%s:-com.momo.plugins.gmail}" % apps, kind)
+    if kind == "compose-worker-connectors-locked-differs":
+        return edit_compose_service(text, "agent-worker", "${%s:-}" % locked, "${%s:-1}" % locked, kind)
+    if kind == "compose-worker-tools-locked-fixed":  # hard-coded on the worker while api interpolates
+        return edit_compose_service(text, "agent-worker", "${%s:-}" % tools, "1", kind)
+    raise SystemExit("unknown compose mutation %s" % kind)
+
+
 def prove_mutations(
     catalog_path: Path,
     compose_path: Path,
@@ -1747,7 +1935,12 @@ def prove_mutations(
     keys_path: Path,
     readme_path: Path,
 ) -> None:
-    origin = (file_digest(catalog_path), file_digest(readme_path), file_digest(centrifugo_path))
+    origin = (
+        file_digest(catalog_path),
+        file_digest(readme_path),
+        file_digest(centrifugo_path),
+        file_digest(compose_path),
+    )
     base = json.loads(catalog_path.read_text())
     with tempfile.TemporaryDirectory(prefix="oort-railway-catalog.") as tmp:
         scratch = Path(tmp)
@@ -1759,6 +1952,21 @@ def prove_mutations(
             dest = scratch / ("%s.json" % kind)
             dest.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
             errors = collect_errors(dest, compose_path, centrifugo_path, keys_path, readme_path)
+            joined = "; ".join(errors)
+            if not errors:
+                raise SystemExit("mutation %s still passed — rule is not load-bearing" % kind)
+            if needle not in joined:
+                raise SystemExit("mutation %s failed without naming its rule (%s): %s" % (kind, needle, joined))
+            print("mutation %s RED (%s)" % (kind, needle))
+        # compose text: the "same expression on api and agent-worker" half of ADR-0201 증보 v4 G4.
+        compose_text = compose_path.read_text()
+        for kind, needle in COMPOSE_MUTATIONS:
+            mutated = mutate_compose(kind, compose_text)
+            if mutated == compose_text:
+                raise SystemExit("mutation %s changed nothing — it proves nothing" % kind)
+            errors = collect_errors(
+                catalog_path, compose_path, centrifugo_path, keys_path, readme_path, compose_text=mutated
+            )
             joined = "; ".join(errors)
             if not errors:
                 raise SystemExit("mutation %s still passed — rule is not load-bearing" % kind)
@@ -1796,8 +2004,13 @@ def prove_mutations(
         if not any("infra/centrifugo.json settings differ" in error for error in errors):
             raise SystemExit("mutation centrifugo-json-new-key did not fail: %s" % errors)
         print("mutation centrifugo-json-new-key RED (infra/centrifugo.json settings differ)")
-    if (file_digest(catalog_path), file_digest(readme_path), file_digest(centrifugo_path)) != origin:
-        raise SystemExit("committed catalog/README/centrifugo.json changed during scratch mutations")
+    if (
+        file_digest(catalog_path),
+        file_digest(readme_path),
+        file_digest(centrifugo_path),
+        file_digest(compose_path),
+    ) != origin:
+        raise SystemExit("committed catalog/README/centrifugo.json/compose changed during scratch mutations")
     leftover = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, readme_path)
     if leftover:
         raise SystemExit("committed catalog drifted after scratch mutations: %s" % "; ".join(leftover))

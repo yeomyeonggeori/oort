@@ -55,6 +55,17 @@ import NetInfo from '@react-native-community/netinfo';
 import {isOnlineFromNetInfo} from '../../query/queryClient';
 import {onAppBackground} from '../connection/appBackground';
 import {deviceOnlineNow} from '../connection/deviceOnline';
+import {
+  bundleCarriesOptions,
+  bundleHead,
+  bundleMayPost,
+  failBundleTail,
+  planSendBundle,
+  postBundleInOrder,
+  retryBundleTail,
+  type BundlePoster,
+} from '@momo/core/features/expressions/sendBundle';
+import type {Expression} from '@momo/core/features/expressions/types';
 import {forgetFailedSend, readFailedSends, rememberFailedSend} from './failedSends';
 import {SEEK_MAX_PAGES, seekPageLimit, SeekOutcome} from './jumpSeek';
 import {
@@ -67,7 +78,6 @@ import {
   isChannelListEcho,
   reconcileMessages,
   removePending,
-  retryPending,
   unsettledPending,
   type PendingMessage,
   type RecoveryMarker,
@@ -175,6 +185,12 @@ export interface ThreadRepliesLoad {
 export interface TimelineSendFlags {
   /** 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01). */
   suppressUnfurl?: boolean;
+  /**
+   * 입력창 위 미리 보기에 올라 있던 이모티콘·GIF(#5452). 있으면 **큰 표현 메시지 → 글 메시지** 두 개를 한 묶음으로 보낸다(코어 `planSendBundle`, 웹 #5453 과 같은 와이어):
+   * 메시지마다 다른 `client_msg_id` 를 쓰고, 첫째가 확정되기 전에는 둘째가 나가지 않고, 첫째가 실패하면 둘째는 보내지 않은 채 실패한 행으로 남는다. 다시 보내기는 어느 행에서든 첫째부터다.
+   * 글이 비어 있으면 표현 메시지 하나다. 인용·첨부·링크 미리보기 끄기는 마지막 메시지가 나른다.
+   */
+  expression?: Expression;
 }
 
 export interface UseTimelineResult {
@@ -572,6 +588,45 @@ export function useTimeline(
     [workspaceId, applyBatch, updatePending, expressionStore, forgetRow, syncFailureKinds],
   );
 
+  // 이모티콘 + 글 묶음의 앞 메시지가 나가지 못했다(#5452): 보내지 않은 뒤 메시지를 실패 모양으로 맞춘다. 글을 잃지 않게 행은 남기고, 이유 한 줄은 앞 메시지와 같다(같은 실패다).
+  // 이 기기에도 남겨서 앱을 다시 켠 뒤에도 같은 순서 규칙(`after`)이 돌아온다.
+  const heldRows = useCallback(
+    (rows: PendingMessage[], because: PendingMessage) => {
+      const record = failuresRef.current.get(because.clientMsgId);
+      updatePending(list => failBundleTail(list, because.clientMsgId));
+      for (const row of rows) {
+        if (record !== undefined) {
+          failuresRef.current.set(
+            row.clientMsgId,
+            recordSendFailure(
+              failuresRef.current.get(row.clientMsgId),
+              record.failure,
+              deviceOnlineNow(),
+              Date.now(),
+              false,
+            ),
+          );
+        }
+        rememberFailedSend(workspaceId, row, record?.kind ?? null);
+      }
+      syncFailureKinds();
+    },
+    [workspaceId, updatePending, syncFailureKinds],
+  );
+
+  /** 머리 행을 보내고, 묶음이면 뒤 행을 이어서 보낸다. 처음 보내기·다시·모두 다시·저절로 다시가 모두 이 한 길을 지난다(순서 문은 코어 `postBundleInOrder`). */
+  const postChain = useCallback(
+    (head: PendingMessage, automatic: boolean): Promise<boolean> => {
+      const poster: BundlePoster = {
+        list: () => pendingRef.current,
+        post: row => post(row, automatic),
+        held: heldRows,
+      };
+      return postBundleInOrder(head, poster);
+    },
+    [post, heldRows],
+  );
+
   const send = useCallback(
     async (
       body: string,
@@ -581,33 +636,66 @@ export function useTimeline(
       flags?: TimelineSendFlags,
     ) => {
       const channel = channelId;
-      if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
+      const expression = flags?.expression ?? null;
+      if (
+        channel === null ||
+        (expression === null && body === '' && (attachments?.length ?? 0) === 0)
+      ) {
         return;
       }
-      const row: PendingMessage = {
+      // 이모티콘과 글을 한 번에(#5452): 표현 메시지 → 글 메시지. 표현이 없으면 메시지 하나이고 아래 행은 예전과 한 글자도 다르지 않다.
+      const bundle =
+        expression === null
+          ? null
+          : planSendBundle({
+              expression,
+              text: body,
+              hasAttachments: (attachments?.length ?? 0) > 0,
+              newId: () => crypto.randomUUID(),
+            });
+      if (bundle !== null && !bundle.ok) return;
+      // 인용·첨부·링크 미리보기 끄기는 마지막 메시지(글)가 나른다. 표현 메시지는 `:이름:` 하나뿐이다(코어 `bundleCarriesOptions`).
+      const makeRow = (
+        clientMsgId: string,
+        rowBody: string,
+        carries: boolean,
+        after?: string,
+      ): PendingMessage => ({
         // `crypto.randomUUID()` — React Native has no `crypto` global at all, so
         // this call lands on the polyfill installed by `src/boot/polyfills.ts`
         // (RFC 4122 v4 over the platform CSPRNG). Without that import first,
         // every send would throw `ReferenceError` here.
-        clientMsgId: reuseClientMsgId ?? crypto.randomUUID(),
+        clientMsgId,
         channelId: channel,
         authorMemberId,
-        body,
+        body: rowBody,
         // Local clock, used only for grouping and the label on a row that has
         // not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
-        ...(replyToId === undefined ? {} : {replyToId}),
-        ...(attachments === undefined || attachments.length === 0
-          ? {}
-          : {attachments}),
-        ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
-      };
-      updatePending(list => addPending(list, row));
-      await post(row);
+        ...(carries && replyToId !== undefined ? {replyToId} : {}),
+        ...(carries && attachments !== undefined && attachments.length > 0
+          ? {attachments}
+          : {}),
+        ...(carries && flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
+        ...(after === undefined ? {} : {after}),
+      });
+      const rows =
+        bundle === null
+          ? [makeRow(reuseClientMsgId ?? crypto.randomUUID(), body, true)]
+          : bundle.messages.map((message, index) =>
+              makeRow(
+                message.clientMsgId,
+                message.body,
+                bundleCarriesOptions(bundle.messages, index),
+                message.after,
+              ),
+            );
+      updatePending(list => rows.reduce(addPending, list));
+      await postChain(rows[0], false);
     },
-    [channelId, authorMemberId, post, updatePending],
+    [channelId, authorMemberId, postChain, updatePending],
   );
 
   const ingest = useCallback(
@@ -623,13 +711,16 @@ export function useTimeline(
     async (clientMsgId: string) => {
       const row = pendingRef.current.find(p => p.clientMsgId === clientMsgId);
       if (!row || isSendingRow(row)) return;
+      // 이모티콘 + 글 묶음의 뒤 메시지에서 눌러도 앞 메시지부터다(#5452): 뒤가 앞지르지 못한다. 묶음이 아니면 머리는 이 행 자신이다.
+      const head = bundleHead(pendingRef.current, row);
+      if (isSendingRow(head)) return;
       // The key is REUSED on purpose: a failed POST may still have committed
       // (a dropped response, a timeout), and the idempotency key is exactly what
       // turns that ambiguity into "the server returns the original message".
-      updatePending(list => retryPending(list, clientMsgId));
-      await post(row, false);
+      updatePending(list => retryBundleTail(list, head.clientMsgId));
+      await postChain(head, false);
     },
-    [post, updatePending],
+    [postChain, updatePending],
   );
 
   // 「모두 다시 보내기」(#5222): 이 대화의 실패한 글 전부를, 보낸 순서대로, 각자 **같은 멱등 키로 한 번씩**, 앞의 글이 끝난 뒤에 다음
@@ -644,11 +735,13 @@ export function useTimeline(
     for (const snapshot of failed) {
       const row = pendingRef.current.find(p => p.clientMsgId === snapshot.clientMsgId);
       if (!row || !isFailedRow(row)) continue;
-      updatePending(list => retryPending(list, row.clientMsgId));
-      const sent = await post(row, false);
+      // 묶음의 뒤 메시지는 앞 메시지의 차례에 함께 나간다(#5452). 앞이 서버에 거절돼 남아 있어도 뒤가 앞지르지 않는다.
+      if (!bundleMayPost(row, pendingRef.current)) continue;
+      updatePending(list => retryBundleTail(list, row.clientMsgId));
+      const sent = await postChain(row, false);
       if (!sent && !resendAllContinuesAfter(failuresRef.current.get(row.clientMsgId))) break;
     }
-  }, [post, updatePending]);
+  }, [postChain, updatePending]);
 
   // 결정 ⑤: 네트워크로 못 보낸 글만 연결이 돌아오면 같은 멱등 키로 저절로 다시 보낸다(한 글 3회·5분). 한 번에 한 행이고, 실패하면
   // 다음 신호까지 쉰다. 기기가 꺼져 있다고 알면 신호를 기다린다. 판정은 코어 `pickAutoResends`(→ `judgeAutoResend`) 하나다.
@@ -661,13 +754,13 @@ export function useTimeline(
         const [id] = pickAutoResends(pendingRef.current, failuresRef.current, Date.now());
         const row = id === undefined ? undefined : pendingRef.current.find(p => p.clientMsgId === id);
         if (row === undefined) return;
-        updatePending(list => retryPending(list, row.clientMsgId));
-        if (!(await post(row, true))) return;
+        updatePending(list => retryBundleTail(list, row.clientMsgId));
+        if (!(await postChain(row, true))) return;
       }
     } finally {
       autoRunningRef.current = false;
     }
-  }, [post, updatePending]);
+  }, [postChain, updatePending]);
 
   // 「연결이 돌아왔다」는 신호 둘: 기기가 꺼졌다 켜졌다(NetInfo), 서버가 답했다(5xx 응답은 아니다). 실패한 행이 없으면 콜백은 아무 일도
   // 하지 않는다. S-A 모델이 「서버에 닿음」을 선언·해제하는 것과 같은 사실이다.

@@ -26,6 +26,8 @@ import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
 import {clearEntryDrafts} from '../lib/entryDrafts';
 import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
+import {forgetExpressionShelf} from '../storage/kv';
+import {forgetMeasuredSizes} from '../storage/measureMemory';
 import {revokeDevice} from '../push/devices';
 import {dismissDeliveredNotifications} from '../push/dismissDelivered';
 import {clearPushActionSession} from '../push/pushActionSession';
@@ -291,6 +293,10 @@ export function SessionProvider({
     // 최근 검색(홈 검색과 대화 안 검색이 한 목록, #5384)·최근 연 대화도 지운다(#5364·#5365): 앞 사람이 친 말이 이 폰에 들어온 다음 사람의 검색 첫 화면에 비치면 안 된다.
     // 옮기기 전의 옛 대화 안 검색 저장이 남아 있어도 같은 호출이 함께 지운다.
     clearAllSearchRecents();
+    // 잰 사진 크기·링크 카드 높이(`storage/measureMemory.ts`)와 기기에 남긴 표현 보관함도 지운다(#5473): 서버가 만든 id → 숫자·표현 이름이라 비밀은 아니지만,
+    // 로그아웃은 「이 기기에서 내 흔적을 지운다」이고 두 지도는 계정 구분이 없다.
+    forgetMeasuredSizes();
+    forgetExpressionShelf();
     // 알림이 걷어 간 시트의 글(`lib/entryDrafts.ts`)도 같은 이유로 지운다 (#5058). 메모리에만 있어 프로세스와 함께 사라지지만,
     // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 새 채널 이름·내 맥 질문이 그 사람의 시트에 나타난다.
     clearEntryDrafts();

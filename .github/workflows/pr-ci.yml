@@ -512,6 +512,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: cargo-deny 설치
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
@@ -592,12 +593,18 @@ jobs:
           rustc --version
           cargo --version
 
+      # 캐시는 읽기만 한다(#5494). 저장은 기준 브랜치 push 때 `ci-cache-warm.yml` 의 `rust` 잡이 하고, PR 이 저장하면 PR 전용
+      # 범위라 다른 PR 이 못 읽고 한도(10GB)만 채운다. shared-key·workspaces·위 `env:`·아래 컴파일 명령은 그 잡과 글자 그대로
+      # 같아야 키가 맞는다(rust-cache 키 = shared-key + rustc·`CARGO*` 환경 해시 + 이 workspaces 의 락 해시).
+      # `security_pack` 과 키를 합치지 않은 이유(컴파일 설정이 다르다)는 그 파일 머리 주석에 있다.
       - name: cargo 캐시(레지스트리 + target)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
             server-rust
             clients/desktop/src-tauri
+          shared-key: oort-rust-test
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: cargo test --workspace (server-rust)
         # --locked: Cargo.lock을 고쳐야 하는 매니페스트 변경이 락 커밋 없이
@@ -660,10 +667,15 @@ jobs:
           scripts/security_pack.sh lint
           bash scripts/tests/test_security_pack.sh
 
+      # 캐시는 읽기만 한다(#5494). 저장은 `ci-cache-warm.yml` 의 `security_pack` 잡이 하고, 그 잡은 이 잡의 `scripts/security_pack.sh run`
+      # 과 같은 쌍을 `--no-run` 으로 컴파일한다. shared-key·workspaces 는 그 잡과 글자 그대로 같아야 한다. 이 잡에는 `rust` 잡의
+      # `CARGO_PROFILE_*_DEBUG` 가 없고(F5 #5495 가 맞출 때까지 그대로 둔다) workspaces 도 달라서 키를 나눴다.
       - name: cargo 캐시(레지스트리 + target)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: server-rust
+          shared-key: oort-security-pack
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: DB 준비(마이그레이션 + bootstrap_roles.sql)
         run: |
@@ -687,6 +699,12 @@ jobs:
   # (core·web = vitest, mobile = jest) — CI가 러너를 다시 고르면 개발자가 로컬에서 돌리는
   # 것과 다른 명령이 된다. 셋 모두 `node` 레인 하나(`changes` 출력)로 선택되고, `gate` 가
   # 잡마다 선택/결과를 교차검증한다.
+  #
+  # npm 캐시는 읽기만 한다(#5494). 잡마다 `setup-node` 의 `cache: npm` 대신 `actions/cache/restore` 를 쓴다(`header_fit` 포함):
+  # `setup-node` 는 저장을 끌 수 없어서 PR 마다 PR 전용 범위(다른 PR 이 못 읽는 곳)에 캐시를 쌓았다. 저장은 기준 브랜치 push 때
+  # `ci-cache-warm.yml` 이 한다. 키는 `setup-node` 가 쓰던 입력 그대로(`cache-dependency-path` 의 잠금 파일 해시)에 트리 이름을
+  # 붙인 것이고(`header_fit` 은 `node_web` 과 같은 잠금 파일이라 같은 키), 그 파일의 같은 이름 잡과 글자 그대로 같아야 한다.
+  # `package-manager-cache: false` 는 package.json 에 `packageManager` 가 생겨도 `setup-node` 가 몰래 저장하지 않게 막는다.
   node_core:
     name: TS core — npm 라이선스 게이트 + 타입체크 + 단위 시험
     needs: changes
@@ -704,8 +722,15 @@ jobs:
           # clients/mobile/package.json engines = ">= 22.11.0"이 레포의 유일한
           # 선언 제약이고, 24는 개발 머신에서 실제로 npm ci가 도는 버전이다.
           node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
+          package-manager-cache: false
+
+      - name: npm 캐시 복원(읽기 전용 — 저장은 ci-cache-warm.yml)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.npm
+          key: oort-npm-${{ runner.os }}-${{ runner.arch }}-core-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            oort-npm-${{ runner.os }}-${{ runner.arch }}-core-
 
       - name: npm 의존 라이선스 게이트(워크스페이스 루트 + web + mobile)
         # 설치 전에 돈다 — 이 스크립트는 세 트리의 package-lock.json만 읽으므로 npm ci가
@@ -738,10 +763,15 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            clients/web/package-lock.json
+          package-manager-cache: false
+
+      - name: npm 캐시 복원(읽기 전용 — 저장은 ci-cache-warm.yml)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.npm
+          key: oort-npm-${{ runner.os }}-${{ runner.arch }}-web-${{ hashFiles('package-lock.json', 'clients/web/package-lock.json') }}
+          restore-keys: |
+            oort-npm-${{ runner.os }}-${{ runner.arch }}-web-
 
       - name: npm ci (워크스페이스 루트 = packages/momo-core)
         run: npm ci
@@ -777,10 +807,15 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            clients/mobile/package-lock.json
+          package-manager-cache: false
+
+      - name: npm 캐시 복원(읽기 전용 — 저장은 ci-cache-warm.yml)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.npm
+          key: oort-npm-${{ runner.os }}-${{ runner.arch }}-mobile-${{ hashFiles('package-lock.json', 'clients/mobile/package-lock.json') }}
+          restore-keys: |
+            oort-npm-${{ runner.os }}-${{ runner.arch }}-mobile-
 
       - name: npm ci (워크스페이스 루트 = packages/momo-core)
         run: npm ci
@@ -892,10 +927,16 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            clients/web/package-lock.json
+          package-manager-cache: false
+
+      # `node_web` 과 같은 잠금 파일이라 같은 키를 읽는다 — `ci-cache-warm.yml` 의 `node_web` 잡이 저장한 캐시다. 읽기 전용(#5494).
+      - name: npm 캐시 복원(읽기 전용 — 저장은 ci-cache-warm.yml)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.npm
+          key: oort-npm-${{ runner.os }}-${{ runner.arch }}-web-${{ hashFiles('package-lock.json', 'clients/web/package-lock.json') }}
+          restore-keys: |
+            oort-npm-${{ runner.os }}-${{ runner.arch }}-web-
 
       - name: npm ci (워크스페이스 루트 = packages/momo-core)
         run: npm ci

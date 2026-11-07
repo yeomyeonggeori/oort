@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   composerKeyIntent,
   isComposingEvent,
   keyKeepsCompositionGuard,
   messageEditorKeyIntent,
+  suggestRowKey,
   type ComposerKeyEvent,
   type ComposerKeyState,
 } from "./composerKeys";
@@ -154,6 +155,82 @@ describe("composerKeyIntent", () => {
     expect(composerKeyIntent(key("Enter", { metaKey: true }), CARD)).toBe("send");
   });
 
+  // #5476 - 입력칸 위 이모티콘 추천 줄. 줄은 글을 치다 저절로 뜨므로 Esc 는 링크 카드·미리 보기·인용보다 먼저 이 줄을 닫고, 맨 ↑ 는 (캐럿이 첫 줄일 때)
+  // 이 줄로 들어간다. **Enter 는 한 글자도 달라지지 않는다**: 줄이 떠 있다고 Enter 가 추천을 고르지 않고 보내기로 남는다(멘션 목록과 다른 점).
+  describe("suggest row (#5476)", () => {
+    const ROW: ComposerKeyState = { ...IDLE, suggestOpen: true, caretOnFirstLine: true };
+    const PHONE_ROW: ComposerKeyState = { ...ROW, enterSends: false };
+
+    it("closes the row on Escape, after the mention list and before the card, the preview and the quote", () => {
+      expect(composerKeyIntent(key("Escape"), ROW)).toBe("suggest-dismiss");
+      expect(composerKeyIntent(key("Escape"), { ...ROW, mentionsOpen: true })).toBe("mention-close");
+      expect(composerKeyIntent(key("Escape"), { ...ROW, previewOpen: true, quoteOpen: true })).toBe("suggest-dismiss");
+      // 줄이 없으면 Esc 는 이전 순서 그대로다.
+      expect(composerKeyIntent(key("Escape"), { ...IDLE, suggestOpen: false, previewOpen: true })).toBe("preview-dismiss");
+      expect(composerKeyIntent(key("Escape"), { ...IDLE, previewOpen: true, quoteOpen: true })).toBe("preview-dismiss");
+      expect(composerKeyIntent(key("Escape", { composing: true }), ROW)).toBe("pass");
+    });
+
+    it("moves focus into the row on a bare ArrowUp from the first line", () => {
+      expect(composerKeyIntent(key("ArrowUp"), ROW)).toBe("suggest-focus");
+    });
+
+    it("leaves ArrowUp to the caret when it is not on the first line, or when no row is open", () => {
+      expect(composerKeyIntent(key("ArrowUp"), { ...ROW, caretOnFirstLine: false })).toBe("pass");
+      expect(composerKeyIntent(key("ArrowUp"), { ...IDLE, suggestOpen: true })).toBe("pass");
+      expect(composerKeyIntent(key("ArrowUp"), { ...IDLE, suggestOpen: false, caretOnFirstLine: true })).toBe("pass");
+      expect(composerKeyIntent(key("ArrowUp"), IDLE)).toBe("pass");
+    });
+
+    // #5489 - 「첫 화면 줄」은 렌더에서만 알 수 있고 재는 일이 싸지 않다: 함수로 받으면 ↑ 가 줄로 들어갈 수 있는 모든 조건이 맞을 때에만 한 번 묻는다.
+    it("takes caretOnFirstLine as a function and asks it once, only when a bare ArrowUp could enter the open row", () => {
+      const ask = vi.fn(() => true);
+      const lazy: ComposerKeyState = { ...IDLE, suggestOpen: true, caretOnFirstLine: ask };
+      expect(composerKeyIntent(key("ArrowUp"), lazy)).toBe("suggest-focus");
+      expect(ask).toHaveBeenCalledTimes(1);
+
+      // 묻지 않는 경우: 다른 키, 수식키, 한글 조합 중, 멘션 목록이 열림, 줄이 없음.
+      ask.mockClear();
+      const notAsked = [
+        composerKeyIntent(key("ArrowDown"), lazy),
+        composerKeyIntent(key("Enter"), lazy),
+        composerKeyIntent(key("Escape"), lazy),
+        composerKeyIntent(key("a"), lazy),
+        composerKeyIntent(key("ArrowUp", { shiftKey: true }), lazy),
+        composerKeyIntent(key("ArrowUp", { altKey: true }), lazy),
+        composerKeyIntent(key("ArrowUp", { composing: true }), lazy),
+        composerKeyIntent(key("ArrowUp"), { ...lazy, mentionsOpen: true }),
+        composerKeyIntent(key("ArrowUp"), { ...lazy, suggestOpen: false }),
+      ];
+      expect(notAsked).toEqual(["pass", "send", "suggest-dismiss", "pass", "pass", "pass", "pass", "mention-prev", "pass"]);
+      expect(ask).not.toHaveBeenCalled();
+
+      // 거짓이면 ↑ 는 글(커서)의 것이다.
+      const wrapped: ComposerKeyState = { ...IDLE, suggestOpen: true, caretOnFirstLine: () => false };
+      expect(composerKeyIntent(key("ArrowUp"), wrapped)).toBe("pass");
+    });
+
+    it("is not ours with a modifier held, under an open IME, or with the mention list open", () => {
+      for (const modifier of ["shiftKey", "altKey", "ctrlKey", "metaKey"] as const) {
+        expect(composerKeyIntent(key("ArrowUp", { [modifier]: true }), ROW)).toBe("pass");
+      }
+      expect(composerKeyIntent(key("ArrowUp", { composing: true }), ROW)).toBe("pass");
+      expect(composerKeyIntent(key("ArrowUp"), { ...ROW, mentionsOpen: true })).toBe("mention-prev");
+      expect(composerKeyIntent(key("ArrowDown"), ROW)).toBe("pass");
+    });
+
+    it("never changes what Enter, Shift+Enter, Cmd+Enter and Tab do: the row does not pick anything", () => {
+      expect(composerKeyIntent(key("Enter"), ROW)).toBe("send");
+      expect(composerKeyIntent(key("Enter", { shiftKey: true }), ROW)).toBe("newline");
+      expect(composerKeyIntent(key("Enter", { metaKey: true }), ROW)).toBe("send");
+      expect(composerKeyIntent(key("Enter"), PHONE_ROW)).toBe("newline");
+      expect(composerKeyIntent(key("Tab"), ROW)).toBe("pass");
+      // 한글 조합을 끝내는 Enter 도 그대로 IME 의 것이다.
+      expect(composerKeyIntent(key("Enter", { composing: true }), ROW)).toBe("pass");
+      expect(composerKeyIntent(key("Enter"), { ...ROW, justComposed: true })).toBe("pass");
+    });
+  });
+
   it("closes the mention list on Escape unless the IME is composing", () => {
     expect(composerKeyIntent(key("Escape"), MENTIONS)).toBe("mention-close");
     expect(composerKeyIntent(key("Escape", { composing: true }), MENTIONS)).toBe(
@@ -180,6 +257,35 @@ describe("composerKeyIntent", () => {
   it("passes every other key through", () => {
     expect(composerKeyIntent(key("a"), MENTIONS)).toBe("pass");
     expect(composerKeyIntent(key("Backspace"), MENTIONS)).toBe("pass");
+  });
+});
+
+// #5476 - 추천 줄 안에 포커스가 있을 때의 키. ← → Home End 로 이웃 단추, Esc 로 줄 닫기, ↓ 로 입력칸으로 돌아간다. Enter·Space 는 단추의 기본 동작이라 여기 없다.
+describe("suggestRowKey", () => {
+  it("walks the row with the horizontal keys", () => {
+    expect(suggestRowKey(key("ArrowLeft"))).toEqual({ move: "prev" });
+    expect(suggestRowKey(key("ArrowRight"))).toEqual({ move: "next" });
+    expect(suggestRowKey(key("Home"))).toEqual({ move: "first" });
+    expect(suggestRowKey(key("End"))).toEqual({ move: "last" });
+  });
+
+  it("closes the row on Escape and returns to the input on ArrowDown", () => {
+    expect(suggestRowKey(key("Escape"))).toEqual({ dismiss: true });
+    expect(suggestRowKey(key("ArrowDown"))).toEqual({ toInput: true });
+  });
+
+  it("leaves Enter and Space to the focused button, and every other key to the browser", () => {
+    for (const other of ["Enter", " ", "Tab", "ArrowUp", "a", "Backspace"]) {
+      expect(suggestRowKey(key(other))).toBeNull();
+    }
+  });
+
+  it("is not ours under an open IME or with a modifier held", () => {
+    expect(suggestRowKey(key("Escape", { composing: true }))).toBeNull();
+    for (const modifier of ["shiftKey", "altKey", "ctrlKey", "metaKey"] as const) {
+      expect(suggestRowKey(key("ArrowRight", { [modifier]: true }))).toBeNull();
+      expect(suggestRowKey(key("Escape", { [modifier]: true }))).toBeNull();
+    }
   });
 });
 
