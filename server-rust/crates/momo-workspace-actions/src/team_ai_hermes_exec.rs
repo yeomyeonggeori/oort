@@ -177,10 +177,10 @@ fn sources_of(text: &str) -> Vec<String> {
             let start = from + at;
             let tail = &token[start..];
             let len = tail
-                .find(|c: char| matches!(c, ')' | ']' | '>' | '"' | '\'' | '<' | '(' | '['))
+                .find([')', ']', '>', '"', '\'', '<', '(', '['])
                 .unwrap_or(tail.len());
             let address = tail[..len]
-                .trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?'))
+                .trim_end_matches(['.', ',', ';', ':', '!', '?'])
                 .to_string();
             from = start + len.max(1);
             if address.is_ascii()

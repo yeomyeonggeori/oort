@@ -786,6 +786,23 @@ impl World {
     }
 }
 
+/// `team_ai_task`'s columns this suite reads, in the order `task_state` selects them.
+type TaskTuple = (
+    String,
+    Option<String>,
+    i32,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<Uuid>,
+    bool,
+    bool,
+    bool,
+    bool,
+);
+/// `usage_ledger`'s columns `ledger_rows` selects.
+type LedgerTuple = (Uuid, String, i32, i32, bool, Option<String>, i64);
+
 #[derive(Debug)]
 struct TaskState {
     state: String,
@@ -802,19 +819,7 @@ struct TaskState {
 }
 
 async fn task_state(su: &PgPool, run: Uuid) -> TaskState {
-    let row: (
-        String,
-        Option<String>,
-        i32,
-        Option<String>,
-        Option<String>,
-        bool,
-        Option<Uuid>,
-        bool,
-        bool,
-        bool,
-        bool,
-    ) = sqlx::query_as(
+    let row: TaskTuple = sqlx::query_as(
         "SELECT state, end_reason, steps_done, delegation_kind, delegation_state, \
                 delegation_called_at IS NOT NULL, delegation_target, delegation_request IS NULL, \
                 claim_token IS NULL, plan IS NULL, note IS NULL \
@@ -851,7 +856,7 @@ struct LedgerRow {
 }
 
 async fn ledger_rows(su: &PgPool, run: Uuid) -> Vec<LedgerRow> {
-    let rows: Vec<(Uuid, String, i32, i32, bool, Option<String>, i64)> = sqlx::query_as(
+    let rows: Vec<LedgerTuple> = sqlx::query_as(
         "SELECT agent_member_id, model, prompt_tokens, completion_tokens, was_estimated, source, cost_micro_usd \
            FROM usage_ledger WHERE run_id = $1 ORDER BY id",
     )
