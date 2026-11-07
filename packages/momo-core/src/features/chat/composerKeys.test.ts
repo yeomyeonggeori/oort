@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   composerKeyIntent,
   isComposingEvent,
@@ -180,6 +180,34 @@ describe("composerKeyIntent", () => {
       expect(composerKeyIntent(key("ArrowUp"), { ...IDLE, suggestOpen: true })).toBe("pass");
       expect(composerKeyIntent(key("ArrowUp"), { ...IDLE, suggestOpen: false, caretOnFirstLine: true })).toBe("pass");
       expect(composerKeyIntent(key("ArrowUp"), IDLE)).toBe("pass");
+    });
+
+    // #5489 - 「첫 화면 줄」은 렌더에서만 알 수 있고 재는 일이 싸지 않다: 함수로 받으면 ↑ 가 줄로 들어갈 수 있는 모든 조건이 맞을 때에만 한 번 묻는다.
+    it("takes caretOnFirstLine as a function and asks it once, only when a bare ArrowUp could enter the open row", () => {
+      const ask = vi.fn(() => true);
+      const lazy: ComposerKeyState = { ...IDLE, suggestOpen: true, caretOnFirstLine: ask };
+      expect(composerKeyIntent(key("ArrowUp"), lazy)).toBe("suggest-focus");
+      expect(ask).toHaveBeenCalledTimes(1);
+
+      // 묻지 않는 경우: 다른 키, 수식키, 한글 조합 중, 멘션 목록이 열림, 줄이 없음.
+      ask.mockClear();
+      const notAsked = [
+        composerKeyIntent(key("ArrowDown"), lazy),
+        composerKeyIntent(key("Enter"), lazy),
+        composerKeyIntent(key("Escape"), lazy),
+        composerKeyIntent(key("a"), lazy),
+        composerKeyIntent(key("ArrowUp", { shiftKey: true }), lazy),
+        composerKeyIntent(key("ArrowUp", { altKey: true }), lazy),
+        composerKeyIntent(key("ArrowUp", { composing: true }), lazy),
+        composerKeyIntent(key("ArrowUp"), { ...lazy, mentionsOpen: true }),
+        composerKeyIntent(key("ArrowUp"), { ...lazy, suggestOpen: false }),
+      ];
+      expect(notAsked).toEqual(["pass", "send", "suggest-dismiss", "pass", "pass", "pass", "pass", "mention-prev", "pass"]);
+      expect(ask).not.toHaveBeenCalled();
+
+      // 거짓이면 ↑ 는 글(커서)의 것이다.
+      const wrapped: ComposerKeyState = { ...IDLE, suggestOpen: true, caretOnFirstLine: () => false };
+      expect(composerKeyIntent(key("ArrowUp"), wrapped)).toBe("pass");
     });
 
     it("is not ours with a modifier held, under an open IME, or with the mention list open", () => {
