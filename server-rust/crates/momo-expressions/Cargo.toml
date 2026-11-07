@@ -32,6 +32,11 @@ rlimit = "0.10"
 # ADR-0218 D3: GIF decoding/compositing and fresh pixel-only encoding.
 # image, gif, color_quant and weezl are MIT/Apache-2.0; no video codecs.
 image = { workspace = true, features = ["gif"] }
+# #5455: the GIF writer (one palette for the whole animation, a box per frame) talks to the gif
+# crate itself, and trains its palette with color_quant. Both are the versions `image` already
+# pulls in (gif 0.14 MIT OR Apache-2.0, color_quant 1.1 MIT): no new crate, only a direct edge.
+gif = "0.14"
+color_quant = "1.1"
 # #4992: the prepared photo crosses the decoder child's stdout as base64 (media::Prepared).
 base64.workspace = true
 

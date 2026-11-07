@@ -42,6 +42,8 @@ export function parseFailedSend(raw: string | null): StoredFailedSend | null {
     if (typeof r.createdAtMs !== "number" || !Number.isFinite(r.createdAtMs)) return null;
     if (r.sinceSeq !== null && typeof r.sinceSeq !== "number") return null;
     if (r.attachments !== undefined && !Array.isArray(r.attachments)) return null;
+    // 묶음의 둘째 행이 들고 다니는 앞 메시지의 열쇠(#5453). 문자열이 아니면 순서 규칙을 읽을 수 없으니 항목이 아니다.
+    if (r.after !== undefined && (typeof r.after !== "string" || r.after === "")) return null;
     return {
       row: { ...(r as unknown as PendingMessage), status: "failed" },
       kind: typeof kind === "string" && KINDS.includes(kind) ? (kind as SendFailureKind) : null,

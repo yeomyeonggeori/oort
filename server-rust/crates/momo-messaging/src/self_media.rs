@@ -244,7 +244,7 @@ pub fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
 
-fn new_token() -> Option<String> {
+pub(crate) fn new_token() -> Option<String> {
     let mut secret = [0u8; 32];
     getrandom::getrandom(&mut secret).ok()?;
     Some(URL_SAFE_NO_PAD.encode(secret))
@@ -657,11 +657,17 @@ pub async fn redeem_in_tx(
 /// of the string is untouched. A provider may echo the address inside an error body; the scrub
 /// also understands the JSON-escaped (`\/`) and percent-encoded (`%2F`) separators.
 pub fn redact_self_media_urls(text: &str) -> String {
-    const MARK: &str = "self-media";
+    // ADR-0151 증보 8 W2: the worker's write address (`…/agent-media/{workspace}/{token}`) has the same
+    // shape behind a second mark, and the same scrub covers it.
+    redact_after_mark(&redact_after_mark(text, "self-media"), "agent-media")
+}
+
+/// [`redact_self_media_urls`] for one mark: every `{mark}/{workspace}/{token}` in `text` loses its token.
+fn redact_after_mark(text: &str, mark: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(at) = rest.find(MARK) {
-        let after_mark = at + MARK.len();
+    while let Some(at) = rest.find(mark) {
+        let after_mark = at + mark.len();
         out.push_str(&rest[..after_mark]);
         rest = &rest[after_mark..];
         let Some(workspace_at) = skip_separator(rest) else {
@@ -812,6 +818,43 @@ mod tests {
         assert_eq!(
             redact_self_media_urls("self-media is a word"),
             "self-media is a word"
+        );
+    }
+
+    /// ADR-0151 증보 8 W2 (WA15): the worker's **write** address has the same shape behind a second
+    /// mark and the same scrub covers it, in every spelling and next to a read address in one string.
+    #[test]
+    fn the_scrub_covers_the_write_address_as_well() {
+        let uuid = "01234567-89ab-cdef-0123-456789abcdef";
+        // Two real-shaped tokens (43 URL-safe characters, as `new_token` makes them), built at run time from
+        // fixed bytes so the source holds no long random-looking literal for the secret scan to take for a key.
+        let token = URL_SAFE_NO_PAD.encode([0x5au8; 32]);
+        let other = URL_SAFE_NO_PAD.encode([0xa5u8; 32]);
+        assert!(token_is_well_formed(&token) && token_is_well_formed(&other) && token != other);
+        let (token, other) = (token.as_str(), other.as_str());
+        let plain = format!("PUT http://api:8080/v1/agent-media/{uuid}/{token} failed");
+        let cleaned = redact_self_media_urls(&plain);
+        assert!(!cleaned.contains(token), "{cleaned}");
+        assert!(cleaned.contains(&format!("/v1/agent-media/{uuid}/<redacted> failed")));
+        let escaped =
+            format!("{{\"url\":\"http:\\/\\/api\\/v1\\/agent-media\\/{uuid}\\/{token}\"}}");
+        assert!(!redact_self_media_urls(&escaped).contains(token));
+        let encoded = format!("http://api/v1/agent-media%2F{uuid}%2f{token}?x=1");
+        let cleaned = redact_self_media_urls(&encoded);
+        assert!(!cleaned.contains(token), "{cleaned}");
+        assert!(cleaned.ends_with("<redacted>?x=1"), "{cleaned}");
+        // both marks in one string: each loses its own token
+        let both =
+            format!("read /v1/self-media/{uuid}/{other} then write /v1/agent-media/{uuid}/{token}");
+        let cleaned = redact_self_media_urls(&both);
+        assert!(
+            !cleaned.contains(token) && !cleaned.contains(other),
+            "{cleaned}"
+        );
+        assert_eq!(cleaned.matches("<redacted>").count(), 2);
+        assert_eq!(
+            redact_self_media_urls("agent-media is a word"),
+            "agent-media is a word"
         );
     }
 

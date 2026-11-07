@@ -5,6 +5,7 @@ import {
   messageMayHaveUnfurls,
   replaceMessageUnfurls,
   unfurlsFor,
+  visibleUnfurls,
   type MessageUnfurl,
   type UnfurlMap,
 } from '@momo/core/features/timeline/unfurl';
@@ -15,6 +16,7 @@ import {
 } from '@momo/core/lib/api';
 import type {UnfurlEvent} from '@momo/core/lib/realtimeEvents';
 import {useCallback, useRef, useState} from 'react';
+import {forgetUnfurlHeight} from './unfurlReserve';
 
 // =============================================================================
 // 한 방의 링크 카드 상태 (ADR-0170 D5, #4883).
@@ -86,13 +88,18 @@ export function useMessageUnfurls(
       for (const message of candidates) {
         void (async () => {
           let rows: MessageUnfurl[] = [];
+          let read = false;
           try {
             rows = await fetchMessageUnfurls(workspaceId, message.id);
+            read = true;
           } catch {
             // 서버가 꺼졌거나 옛 서버거나 닿지 않는다 — 부속물이 없을 뿐 읽히는 메시지의 오류가 아니다.
             // 뒤따르는 실시간 프레임이 이 조용한 부재를 덮을 수 있다.
           }
           if (currentChannel() !== channel) return;
+          // 읽었더니 보여 줄 카드가 없다: 기억해 둔 카드 자리(`unfurlReserve.ts`)도 비운다(빈 자리가 영영 남지 않게). 읽기가 실패한 것은 모르는 것이라
+          // 기억을 두고, 다음 읽기가 정한다.
+          if (read && visibleUnfurls(rows).length === 0) forgetUnfurlHeight(message.id);
           apply(mergeColdMessageUnfurls(mapRef.current, message.id, rows));
         })();
       }

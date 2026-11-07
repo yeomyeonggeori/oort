@@ -258,7 +258,7 @@ pub enum ActionArgs {
         plugin: Option<ResolvedPlugin>,
     },
     /// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T, #4964): ONE role bundle and the switch.
-    /// `bundle` is one of the six switchable ids (the table's own `&'static str` — `chat_read`
+    /// `bundle` is one of the seven switchable ids (the table's own `&'static str` — `chat_read`
     /// and anything unknown never get this far); `before` is the switch as
     /// [`resolve_action_in_tx`] found it (an absent field reads as on).
     TeamAiRolesSet {
@@ -974,7 +974,7 @@ pub fn plugin_install_args(args: &Value) -> Result<ValidatedActionArgs, ActionRe
 }
 
 /// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T): `{bundle, enabled}`, both required, nothing else.
-/// `bundle` is matched against the table's six switchable ids and the table's own
+/// `bundle` is matched against the table's seven switchable ids and the table's own
 /// `&'static str` is what is kept — `chat_read` (always on) and every unknown name are refused
 /// *here*, at the argument step, with the same answer (a refusal names no value, so it cannot be
 /// used to ask which bundles exist).
@@ -3924,7 +3924,7 @@ mod tests {
     }
 
     /// B13-I9 (#4944): `team_ai.roles.set` — the other card the helper may raise about itself — names
-    /// one of the six bundles and a switch, nothing else. A limit is not a bundle, and a limits
+    /// one of the seven bundles and a switch, nothing else. A limit is not a bundle, and a limits
     /// object cannot ride beside one.
     #[test]
     fn the_roles_card_cannot_name_the_team_ai_limits() {

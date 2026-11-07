@@ -77,6 +77,7 @@
 //! deviation list with what it costs.
 
 pub mod a2a;
+pub mod agent_picture;
 pub mod anthropic;
 pub mod attachment_image;
 mod attachment_lockdown;

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type ReactNode,
 } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -87,6 +88,7 @@ export function EmojiPickerPanel({
   skinOpen,
   onSkinOpenChange,
   autoFocusSearch = true,
+  renderTeam,
 }: {
   itemPrefix: string;
   entries: CatalogEmoji[] | null;
@@ -99,6 +101,11 @@ export function EmojiPickerPanel({
   skinOpen: boolean;
   onSkinOpenChange: (open: boolean) => void;
   autoFocusSearch?: boolean;
+  /**
+   * 검색 칸 아래, 분류 탭 위에 서는 자리(#5453). 이모지 탭이 팀의 작은 이모지를 같은 탭에 합쳐 보일 때 쓴다 - 줄은 이 패널의 검색어를 받으므로 한 검색 칸이
+   * 둘을 함께 거른다. 없으면 이 패널은 예전과 한 글자도 다르지 않다(상태 고르개).
+   */
+  renderTeam?: (query: string) => ReactNode;
 }) {
   const id = useId();
   const tablistId = `${id}-tabs`;
@@ -343,6 +350,8 @@ export function EmojiPickerPanel({
           )}
         </div>
       </div>
+
+      {renderTeam?.(query)}
 
       {!searching && (
         // 390에서 9탭이 7+2로 접힌다. nowrap+overflow-x는 무선언 가로 스크롤이라

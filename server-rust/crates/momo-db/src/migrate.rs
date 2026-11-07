@@ -793,6 +793,13 @@ mod tests {
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
     ///
+    /// 175 is #5371's `attachment_write_token` (ADR-0151 증보 8): the hash of a single-use, 60-second
+    /// address through which the agent-worker writes ONE picture into an in-flight run's conversation
+    /// as that run's agent. No requester or channel column (both are derived from the run when the
+    /// token is spent), `UNIQUE (workspace, run, slot)`, a guard trigger (one spend, one attachment
+    /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
+    /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
+    ///
     /// 176 is #5459's 「이모티콘 세트 보관」 (ADR-0218 증보 6 §12 L10, S1a): the four tables
     /// `expression_set` / `_slot` / `_image` / `_notice` (tenant ENABLE + FORCE + `ws_isolation`,
     /// composite FKs including `(workspace, run, agent, channel)` into `agent_run`), the per-table
@@ -800,19 +807,12 @@ mod tests {
     /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
     /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
     /// is the writer, so the block, not RLS, is the last door).
-    ///
-    /// **175 is reserved** for #5371 (attachment write token): it is promoted and lands before this PR,
-    /// and until its file is in the tree this branch has exactly one gap (175), the only one the
-    /// expectation below allows. 「#5371(175) 착륙 뒤 착륙 때 planner가 `1..=176` 연속으로 되돌린다」:
-    /// at landing time the planner drops `reserved` and turns the expectation back into a plain
-    /// contiguous `1..=176`.
     #[test]
     fn discovers_contiguous_migrations_001_to_176() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let reserved: [i64; 1] = [175];
-        let expected: Vec<i64> = (1..=176).filter(|n| !reserved.contains(n)).collect();
+        let expected: Vec<i64> = (1..=176).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=176 (except the reserved 175) under {}",
+            "expected contiguous 001..=176 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
