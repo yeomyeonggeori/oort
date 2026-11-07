@@ -3,6 +3,7 @@
 > Status: Accepted for MOMO-234
 > Date: 2026-07-01
 > 역방향: 2026-11-05 [ADR-0201](0201-team-ai-fast-path-for-simple-workspace-requests.md) 증보 v4(#5342)의 도우미 위임(`ask_hermes`)은 증보 6이 쓰는 env 전송의 두 번째 호출자다. 불투명 bearer만 쓰고 Codex/Claude 구독 토큰이 oort를 지나지 않는 경계는 바뀌지 않는다. 본문 결정은 바꾸지 않았다.
+> 역방향: 2026-11-08 [ADR-0218](0218-workspace-expressions.md) 증보 10(§16, #5502)의 꼬리표 추천은 증보 6이 쓰는 env 전송의 **세 번째 호출자**이고 api 안에서는 처음이다(봉인 crate 하나·연산 하나 `suggest_tags`, 호스트는 `HERMES_BASE_URL`의 원점뿐, 키는 같은 프로세스 env의 불투명 bearer). Codex/Claude 구독 토큰이 oort를 지나지 않는 경계는 바뀌지 않는다. 본문 결정은 고치지 않았다.
 
 ## Decision
 
