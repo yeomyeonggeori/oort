@@ -24,6 +24,7 @@ import {
   FIXTURE_MEMBER_ID,
   FIXTURE_WORKSPACE_ID,
 } from '@momo/core/features/expressions/fixtures';
+import type {ExpressionList} from '@momo/core/features/expressions/types';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
   createPhoneExpressionStore,
@@ -247,6 +248,7 @@ it('a delta that cannot be read after a notice with no detail removes every file
 it('a hide detail removes that one item at once, and a list read that started before it cannot bring it back (#5491)', async () => {
   const server = createExpressionFixtureServer();
   let staleReply!: (response: ExpressionFixtureResponse) => void;
+  let deltaReply!: (response: ExpressionFixtureResponse) => void;
   let fullReads = 0;
   const {store, files} = setup(async input => {
     if (input.method === 'GET' && input.path === base) {
@@ -257,6 +259,11 @@ it('a hide detail removes that one item at once, and a list read that started be
           staleReply = resolve;
         });
     }
+    // 알림이 시작한 읽기도 붙들어 둔다 — 낡은 답이 먼저 와야 「되살아남」을 잴 수 있다(읽기가 먼저 끝나면 판이 올라 낡은 답이 저절로 거절된다).
+    if (input.path.includes('since='))
+      return new Promise(resolve => {
+        deltaReply = resolve;
+      });
     return server.request(input);
   });
   await store.refresh(true);
@@ -270,6 +277,10 @@ it('a hide detail removes that one item at once, and a list read that started be
     method: 'POST',
     path: `${base}/${parrot.id}/report`,
     body: {reason: 'other'},
+  });
+  const afterHide = await server.request({
+    method: 'GET',
+    path: `${base}?since=${(preHide.json as ExpressionList).version}`,
   });
   act(() =>
     store.detailed({
@@ -285,15 +296,57 @@ it('a hide detail removes that one item at once, and a list read that started be
   expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
   expect(files.remove.mock.calls).toEqual([[loaded]]);
   expect(await store.image(parrot, 'small')).toBeNull();
-  // 늦게 온 숨기기 전 목록은 버려진다 — 숨긴 등록이 되살아나지 않는다.
+  // 숨기기 전 목록이 알림이 시작한 읽기보다 **먼저** 늦게 온다 — 버려져야 한다. 버리지 않으면 숨긴 등록이 여기서 되살아난다.
   await act(async () => {
     staleReply(preHide);
     await reading;
   });
   expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
-  await waitFor(() => expect(store.snapshot().state).toBe('ready'));
+  expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
+  // 알림이 시작한 읽기의 답이 오면 목록이 확인된다.
+  await act(async () => {
+    deltaReply(afterHide);
+  });
+  await waitFor(() => expect(store.snapshot().revision).toBeGreaterThan(0));
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
   expect(store.snapshot().items).toHaveLength(2);
   expect(await store.image(parrot, 'thumb')).toBeNull();
+});
+
+it('the response to my own hide removes only that item\'s files, not every picture (#5491)', async () => {
+  const {store, files} = setup();
+  await store.refresh(true);
+  const other = FIXTURE_EXPRESSIONS[1];
+  const keptUri = await store.image(other, 'thumb');
+  const goneUri = await store.image(parrot, 'thumb');
+  await store.mutate({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  expect(files.remove.mock.calls).toEqual([[goneUri]]);
+  expect(await store.image(other, 'thumb')).toBe(keptUri);
+});
+
+it('a hidden item is gone from the last-known shelf too: a later loading state does not draw it again (#5491)', async () => {
+  const {store} = setup();
+  await store.refresh(true);
+  act(() =>
+    store.detailed({
+      type: 'expression.changed.detail',
+      workspaceId: FIXTURE_WORKSPACE_ID,
+      version: '4',
+      action: 'hidden',
+      expressionIds: [parrot.id],
+    }),
+  );
+  // 끊겼다 이어지면 목록을 다시 읽는 동안(`loading`)은 마지막으로 읽은 보관함으로 그린다 — 거기에 숨긴 등록이 있으면 안 된다.
+  act(() => store.setOnline(false));
+  act(() => store.setOnline(true));
+  expect(store.snapshot().state).toBe('loading');
+  expect(store.snapshot().shelf.some(item => item.id === parrot.id)).toBe(false);
+  expect(store.snapshot().shelf.length).toBeGreaterThan(0);
 });
 
 it('a hide detail voids the in-flight download of that id only; the others finish and are kept (#5491)', async () => {

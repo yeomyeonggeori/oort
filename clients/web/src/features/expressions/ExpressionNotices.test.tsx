@@ -124,20 +124,29 @@ describe("웹 알림 처리: 상세 알림 (ADR-0218 §15)", () => {
     expect(m.store.getSnapshot().epoch).toBe(epoch + 2); // 앞서 본 version 이어도 건너뛰지 않는다
   });
 
-  it("숨김 상세보다 앞서 시작한 읽기의 낡은 답은 버려진다 — 숨긴 등록이 되살아나지 않는다", async () => {
+  it("evictImages 는 앞서 시작한 읽기의 낡은 답을 버린다 — 숨기기 전 목록이 늦게 와도 숨긴 등록이 되살아나지 않는다", async () => {
+    // 알림 처리기는 걷은 뒤 읽기를 새로 시작하고 그것이 앞선 읽기를 낡게 만든다. 여기서는 저장소 하나만 재려고 `evictImages` 를 직접 부른다.
     const m = await mounted();
     let stale!: (value: unknown) => void;
-    const original = m.store.transport.json.bind(m.store.transport);
-    const preHide = await original({ method: "GET", path: `${m.store.base}/expressions` });
+    const preHide = await m.store.transport.json({ method: "GET", path: `${m.store.base}/expressions` });
     m.json.mockImplementationOnce(() => new Promise((resolve) => { stale = resolve; }));
     let reading!: Promise<void>;
     act(() => { reading = m.store.refresh(); }); // 알림보다 앞서 시작한 읽기(붙들려 있다)
     await m.hide(parrot.id);
-    act(() => m.handlers.detail(detail("hidden", [parrot.id])));
-    await act(async () => { stale(preHide); await reading; });
+    act(() => m.store.evictImages([parrot.id]));
     expect(m.store.getSnapshot().cache.items.some((item) => item.id === parrot.id)).toBe(false);
+    await act(async () => { stale(preHide); await reading; }); // 숨기기 전 목록이 늦게 답한다
+    expect(m.store.getSnapshot().cache.items.some((item) => item.id === parrot.id)).toBe(false);
+  });
+
+  it("알림 처리기: 숨김 상세 뒤의 새 읽기가 숨긴 등록을 목록에서 확인한다", async () => {
+    const m = await mounted();
+    await m.hide(parrot.id);
+    act(() => m.handlers.detail(detail("hidden", [parrot.id])));
     await m.settle();
     expect(m.store.getSnapshot().cache.items.some((item) => item.id === parrot.id)).toBe(false);
+    expect(m.store.getSnapshot().cache.version).toBe("4"); // 읽은 목록이 숨김 version 까지 왔다
+    expect(m.store.getSnapshot().status).toBe("ready");
   });
 
   it("숨김 상세는 그 id 의 받는 중 그림만 버린다: 다른 그림의 받기는 이어진다", async () => {
