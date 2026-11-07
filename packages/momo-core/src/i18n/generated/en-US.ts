@@ -5487,7 +5487,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.emoticonWindowChanged": [
     {
       "type": 0,
-      "value": "The tabs are no longer split into Team and Default; they now go by kind: Emoticons, Emoji and GIF. This replaces the Team, Emoji and GIF tabs from the last update. The Emoticons and GIF tabs show a grid of pictures only, with a strip along the bottom that jumps to Recent, Favorites and sets. On web and desktop you can right-click a picture to add it to your favorites, and favorites are kept on this device only."
+      "value": "The tabs are no longer split into Team and Default; they now go by kind: Emoticons, Emoji and GIF. This replaces the Team, Emoji and GIF tabs from the last update. The window opens on the Emoticons tab first; only the reaction picker on web and desktop still starts on Emoji. The Emoticons and GIF tabs show a grid of pictures only, with a strip along the bottom that jumps to Recent, Favorites and sets. You can add or remove a favorite by right-clicking a picture on web and desktop or pressing and holding it on the phone, and favorites are kept on this device only."
     }
   ],
   "releaseNotes.v0144.emoticonWindowTitle": [
@@ -5499,13 +5499,13 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.emoticonWindowTryIt": [
     {
       "type": 0,
-      "value": "Open the emoticon window with the smiley button in the composer and look through the three tabs. Use a few pictures, and on web and desktop add one to your favorites; Recent and Favorites then appear in the strip at the bottom."
+      "value": "Open the emoticon window with the smiley button in the composer and look through the three tabs. Use a few pictures and add one to your favorites (right-click on web and desktop, press and hold on the phone); Recent and Favorites then appear in the strip at the bottom."
     }
   ],
   "releaseNotes.v0144.expressionsLine1": [
     {
       "type": 0,
-      "value": "On web and desktop, “Add” is now the + at the end of the strip, and right-clicking a picture opens Report and Delete."
+      "value": "“Add” moved to the + at the end of the bottom strip. On web and desktop, right-click a picture for Report and Delete."
     }
   ],
   "releaseNotes.v0144.expressionsLine2": [
@@ -5517,7 +5517,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.expressionsLine3": [
     {
       "type": 0,
-      "value": "In thread replies on web and desktop, a picked emoticon still goes straight into the text, with no preview."
+      "value": "In thread replies a picked emoticon goes into the text as :name:; the preview is only in the chat composer."
     }
   ],
   "releaseNotes.v0144.expressionsTopic": [
@@ -5529,7 +5529,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0144.keyboardPanelChanged": [
     {
       "type": 0,
-      "value": "On the phone, the smiley button in the composer now lowers the keyboard and opens the emoticon window in the same place, so no separate sheet slides up. The button turns into a keyboard button, and pressing it brings the keyboard back."
+      "value": "On the phone, the smiley button in the composer now lowers the keyboard and opens the emoticon window in the same place, so no separate sheet slides up. While the window is open the button looks pressed, and pressing it again or tapping the text box brings the keyboard back. Tapping the chat list closes the window."
     }
   ],
   "releaseNotes.v0144.keyboardPanelTitle": [
