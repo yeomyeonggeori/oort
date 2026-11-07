@@ -1056,6 +1056,10 @@ Blocker 0 · High 0 · Medium 1 · Low 2 · Info 6, 대상 커밋 `732bae063`. �
 | I-9 W7의 오래된 낱말 하나(읽기 전용 보관소를 `AccessDenied`로 적었으나 코드·구현 기록 3은 `Unavailable`) | 열어 둔다(문서만, 닫히는 쪽) |
 | I-10 메타데이터 응답의 바이트 한도 없음(이 PR 이전부터 있던 코드) | 변경 없음 |
 
+### 첫 호출자 (2026-11-07, #5372 — ADR-0201 증보 v4.3)
+
+S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀 AI의 Hermes 위임 걸음(`bins/momo-agent-worker/src/team_ai/delegate.rs`가 `PictureWriter::write`를 한 번, `team_ai.rs`의 마무리 트랜잭션이 `send_answer_with_run_pictures_in_tx`로 그 run의 그림을 묶는다). 정적 가드(`tests/agent_picture_static_guards.rs`)는 「호출자 없음」에서 **누가 어느 이름을 부를 수 있는가의 허용표**로 바뀌었고, #5334가 자기 호출자를 더할 때 자기 행을 더한다. L3의 순서는 그대로 구현됐다(합치는 호출 뒤, 정지 확인, 쓰기, 마무리 트랜잭션). 위임 걸음의 임대는 업로드 마감(`WRITE_DEADLINE` 40초)을 더한 값으로 늘고(기본 230초), `send_answer_with_run_pictures_in_tx`는 묶기가 거절돼 그림 없이 나갔는지(`PostedAnswer.pictures_bound`)를 돌려준다. **넘어온 것 중 하지 않은 것**: M-1 (b)(줄일 수 없는 원본에서 세기)는 migration과 역할 SQL(`momo_worker`의 DELETE를 거둠)을 함께 바꾸는 일이라 후속 이슈로 남겼고(위 T2·남는 위험 2가 그대로 맞다), 지운 트리거 메시지·I-2·I-3도 남았다. 자세한 것은 ADR-0201 증보 v4.3.
+
 ### 바뀌지 않는 것
 
 읽기 라우트 `GET /v1/self-media/{ws}/{token}`(경로·헤더·거절·예산·405), `self_media_token` 표와 권한, 증보 3·4의 읽기 길 전부, 사람 업로드 세 라우트와 `Content-Disposition: attachment`·`nosniff`·`no-store`로 내주는 content 라우트, 격리 디코더의 자식 코드와 한도, `find_requester_attachment_in_tx`(읽기 술어), 증보 2의 청소기 술어, `link_attachments_in_tx`의 판정, `send_message_in_tx`·`send_thread_notice_in_tx`·run line의 `Skip`, ADR-0201 v4의 문(G1~G10)·한도·P9의 문장·P15의 기준, ADR-0218 §12의 세트 계약.

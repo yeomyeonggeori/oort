@@ -1627,13 +1627,19 @@ mod tests {
     }
 
     /// The worst time of the call and the merging on the default deadlines: the search 60 s, the picture
-    /// 120 s, two merging attempts of 20 s, a 30 s slack.
+    /// 120 s, two merging attempts of 20 s, a 30 s slack — and, for the picture only, the upload's own 40 s
+    /// (S4, #5372: `WRITE_DEADLINE`; S3's 「약 200초」 closed at 230).
     const SEARCH_WORST: i64 = 130;
-    const IMAGE_WORST: i64 = 190;
+    const IMAGE_WORST: i64 = 190 + 40;
 
     /// A job on the default 300 s lease keeps the whole worst time: nothing about the default changes.
     #[test]
     fn a_job_on_the_default_lease_keeps_the_whole_worst_time() {
+        // the picture's extra is exactly the upload's deadline, not a number of its own
+        assert_eq!(
+            IMAGE_WORST - SEARCH_WORST - 60,
+            crate::agent_picture::WRITE_DEADLINE.as_secs() as i64
+        );
         let now = Utc::now();
         let config = config_with_lease(300);
         let job = job_with_lease_left(now, 300);
