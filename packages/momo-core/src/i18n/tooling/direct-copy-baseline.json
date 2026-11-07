@@ -154,7 +154,7 @@
     "clients/mobile/src/features/conversation/useLongPress.ts": 6,
     "clients/mobile/src/features/conversation/usePendingApprovals.ts": 4,
     "clients/mobile/src/features/conversation/usePersonalAgentCall.ts": 10,
-    "clients/mobile/src/features/conversation/useTimeline.ts": 23,
+    "clients/mobile/src/features/conversation/useTimeline.ts": 22,
     "clients/mobile/src/features/conversation/useTypingSender.ts": 3,
     "clients/mobile/src/features/decisionStage/DecisionStage.tsx": 64,
     "clients/mobile/src/features/decisionStage/DecisionStageScope.tsx": 4,
