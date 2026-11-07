@@ -1300,6 +1300,258 @@ if out="$( ( REPO_ROOT="$TMP_DIR/not-a-checkout"; mkdir -p "$REPO_ROOT"; \
 fi
 grep -Fq "git ls-files did not list AGENTS.md" <<<"$out" || fail "not-a-checkout went red for another reason: $out"
 
+# --- #5495 M2: 캐시 데우기(ci-cache-warm.yml)와 「PR 잡은 캐시를 저장하지 않는다」 상시 가드 -----------------------
+# #5494 가 만든 불변식이 시험 없이 사람 눈에만 걸려 있었다.
+#   (1) 데우기는 기준 브랜치 push 세 개에서만 돌고 권한은 `contents: read` 뿐이며 비밀값을 안 쓴다.
+#   (2) PR 잡에는 캐시를 저장하는 길이 없다: rust-cache 는 `save-if` 가 PR 이벤트를 끄고, npm 은 `actions/cache/restore` 뿐이며,
+#       setup-node 에는 `cache:` 가 없다(`package-manager-cache: false`).
+#   (3) 데우기와 PR 잡의 키 재료(shared-key·workspaces·CARGO*/RUST* 환경·액션 핀·npm key/path)가 글자 그대로 같고, 컴파일 명령의
+#       인자(`--locked`·`--manifest-path`·`-p … --test …`)가 같다. 한쪽만 바꾸면 PR 이 조용히 콜드로 돌아가서 티가 안 난다.
+#   (4) nextest 는 doc 시험을 안 돌린다: rustdoc 이 시험으로 도는 문서 코드 펜스가 생기면 rust 잡에 `cargo test --doc` 단계가 있어야 한다.
+# 검사기는 두 워크플로를 YAML 로 읽어 어긋남을 줄마다 낸다(없으면 종료 0). 아래에서 진짜 파일은 0건이어야 하고, 사본에 일부러 낸
+# 변이 하나하나는 **의도한 이유 문구로** 빨강이어야 한다(다른 이유의 빨강이나 검사기 오류는 실패).
+CACHE_WARM="$REPO_ROOT/.github/workflows/ci-cache-warm.yml"
+SECURITY_PACK_SH="$REPO_ROOT/scripts/security_pack.sh"
+command -v ruby >/dev/null 2>&1 || fail "ruby 가 필요해요(캐시 데우기 가드의 YAML 검사기) — ubuntu-latest(24.04 Ruby 3.2·26.04 Ruby 3.3)와 macOS 시스템 Ruby 에 있어요"
+read -r -d '' CACHE_CONTRACT_RB <<'RUBY' || true
+require 'yaml'
+pr_path, warm_path, pack_path = ARGV
+pr = YAML.load_file(pr_path)
+warm = YAML.load_file(warm_path)
+pr_text = File.read(pr_path)
+warm_text = File.read(warm_path)
+pack_text = File.read(pack_path)
+errs = []
+
+code = lambda { |t| t.lines.reject { |l| l.strip.start_with?('#') } }
+jobs = lambda { |d| d['jobs'] || {} }
+steps = lambda { |d, j| (jobs.call(d)[j] || {})['steps'] || [] }
+with = lambda { |st| (st && st['with']) || {} }
+find_use = lambda { |d, j, prefix| steps.call(d, j).find { |st| st['uses'].to_s.start_with?(prefix) } }
+norm = lambda { |v| v.to_s.split("\n").map { |x| x.strip }.reject { |x| x.empty? } }
+env_of = lambda do |d, j|
+  e = {}
+  (d['env'] || {}).each { |k, v| e[k.to_s] = v.to_s }
+  ((jobs.call(d)[j] || {})['env'] || {}).each { |k, v| e[k.to_s] = v.to_s }
+  e.select { |k, _| k =~ /\A(CARGO|CC|CFLAGS|CXX|CMAKE|RUST)/ }
+end
+run_lines = lambda { |d, j| steps.call(d, j).map { |st| st['run'].to_s }.join("\n").lines.map { |l| l.strip } }
+
+# (1) 데우기 워크플로
+on = warm['on'] || warm[true]
+errs << "warm: on 은 push 하나뿐이어야 해요(pull_request·schedule·workflow_dispatch 등은 안 돼요): #{on.inspect}" unless on.is_a?(Hash) && on.keys == ['push']
+push = on.is_a?(Hash) ? on['push'] : nil
+unless push.is_a?(Hash) && push.keys == ['branches'] && push['branches'] == %w[main track/engine track/uxui]
+  errs << "warm: push 는 branches 만 갖고 main·track/engine·track/uxui 이어야 해요(branches 가 달라요): #{push.inspect}"
+end
+errs << "warm: permissions 는 contents: read 뿐이어야 해요: #{warm['permissions'].inspect}" unless warm['permissions'] == { 'contents' => 'read' }
+jobs.call(warm).each { |n, j| errs << "warm: 잡 #{n} 가 permissions 를 따로 가져요(넓히지 않아요)" if j.is_a?(Hash) && j.key?('permissions') }
+errs << "warm: 비밀값(secrets.)을 써요" if code.call(warm_text).any? { |l| l.include?('secrets.') }
+errs << "warm: pull_request 를 써요" if code.call(warm_text).any? { |l| l.include?('pull_request') }
+code.call(warm_text).each do |l|
+  errs << "warm: uses 가 전체 SHA(40자)로 고정되지 않았어요: #{l.strip}" if l =~ /^\s*(- )?uses:/ && l !~ /@[0-9a-f]{40}(\s|$)/
+end
+errs << "warm: concurrency.cancel-in-progress 는 false 여야 해요(착륙이 몰려도 도는 잡이 안 죽게)" unless (warm['concurrency'] || {})['cancel-in-progress'] == false
+jobs.call(warm).each_key do |n|
+  run_lines.call(warm, n).each do |l|
+    errs << "warm: #{n} 의 npm ci 에 --ignore-scripts 가 없어요: #{l}" if l =~ /\bnpm ci\b/ && l !~ /--ignore-scripts/
+  end
+end
+
+# (2) PR 워크플로에는 캐시를 저장하는 길이 없다
+code.call(pr_text).each do |l|
+  errs << "pr-ci: PR 잡이 캐시를 저장하는 액션(actions/cache 또는 actions/cache/save)을 써요: #{l.strip}" if l =~ %r{uses:\s*actions/cache(/save)?@}
+end
+jobs.call(pr).each do |n, j|
+  ((j.is_a?(Hash) && j['steps']) || []).each do |st|
+    u = st['uses'].to_s
+    if u.start_with?('Swatinem/rust-cache@')
+      unless with.call(st)['save-if'] == "${{ github.event_name != 'pull_request' }}"
+        errs << "pr-ci: #{n} 의 rust-cache 가 PR 에서도 저장해요(save-if 가 PR 이벤트를 끄지 않아요): #{with.call(st)['save-if'].inspect}"
+      end
+    end
+    next unless u.start_with?('actions/setup-node@')
+    w = with.call(st)
+    errs << "pr-ci: #{n} 의 setup-node 에 cache: 가 있어요(PR 전용 범위에 저장돼요)" if w.key?('cache')
+    errs << "pr-ci: #{n} 의 setup-node 에 package-manager-cache: false 가 없어요(package.json 이 바뀌면 몰래 저장해요)" unless w['package-manager-cache'] == false
+  end
+end
+
+# (3) 키 재료
+%w[rust security_pack].each do |job|
+  a = find_use.call(pr, job, 'Swatinem/rust-cache@')
+  b = find_use.call(warm, job, 'Swatinem/rust-cache@')
+  if a.nil? || b.nil?
+    errs << "키 재료: #{job} 의 rust-cache 단계를 못 찾았어요(PR #{a.nil? ? '없음' : '있음'} / 데우기 #{b.nil? ? '없음' : '있음'})"
+    next
+  end
+  errs << "키 재료: #{job} 의 rust-cache 액션 핀이 데우기와 달라요" unless a['uses'] == b['uses']
+  errs << "키 재료: #{job} 의 workspaces 가 데우기와 달라요(PR #{norm.call(with.call(a)['workspaces']).inspect} / 데우기 #{norm.call(with.call(b)['workspaces']).inspect})" unless norm.call(with.call(a)['workspaces']) == norm.call(with.call(b)['workspaces'])
+  errs << "키 재료: #{job} 의 shared-key 가 데우기와 달라요(PR #{with.call(a)['shared-key'].inspect} / 데우기 #{with.call(b)['shared-key'].inspect})" unless with.call(a)['shared-key'] == with.call(b)['shared-key']
+  errs << "키 재료: #{job} 의 shared-key 가 비었어요" if with.call(a)['shared-key'].to_s.empty?
+  ea = env_of.call(pr, job)
+  eb = env_of.call(warm, job)
+  errs << "키 재료: #{job} 의 CARGO*/RUST* 환경이 데우기와 달라요(PR #{ea.inspect} / 데우기 #{eb.inspect})" unless ea == eb
+end
+ra = find_use.call(pr, 'rust', 'Swatinem/rust-cache@')
+sa = find_use.call(pr, 'security_pack', 'Swatinem/rust-cache@')
+if ra && sa && with.call(ra)['shared-key'] == with.call(sa)['shared-key']
+  errs << "키 재료: rust 와 security_pack 의 shared-key 가 같아요 — 컴파일 명령이 달라서 합치면 먼저 저장한 쪽 산출물만 남아요(합치려면 명령을 같게 만든 뒤 이 가드를 함께 고쳐요)"
+end
+%w[node_core node_web node_mobile].each do |job|
+  r = find_use.call(pr, job, 'actions/cache/restore@')
+  wr = find_use.call(warm, job, 'actions/cache/restore@')
+  ws = find_use.call(warm, job, 'actions/cache/save@')
+  if r.nil? || wr.nil? || ws.nil?
+    errs << "npm 키: #{job} 의 복원(PR)·조회(데우기)·저장(데우기) 단계 중 빠진 게 있어요"
+    next
+  end
+  errs << "npm 키: #{job} 의 PR 복원과 데우기 조회의 액션 핀이 달라요" unless r['uses'] == wr['uses']
+  [[wr, '조회'], [ws, '저장']].each do |st, kind|
+    errs << "npm 키: #{job} 데우기 #{kind} 의 key 가 PR 복원과 달라요" unless with.call(st)['key'] == with.call(r)['key']
+    errs << "npm 키: #{job} 데우기 #{kind} 의 path 가 PR 복원과 달라요" unless with.call(st)['path'] == with.call(r)['path']
+  end
+  errs << "npm 키: #{job} 데우기 조회에 lookup-only: true 가 없어요" unless with.call(wr)['lookup-only'] == true
+end
+hf = find_use.call(pr, 'header_fit', 'actions/cache/restore@')
+nw = find_use.call(pr, 'node_web', 'actions/cache/restore@')
+errs << "npm 키: header_fit 의 복원 key 가 node_web 과 달라요(같은 잠금 파일을 읽어요)" unless hf && nw && with.call(hf)['key'] == with.call(nw)['key']
+
+# 컴파일 명령 인자 — Security pack: PR 의 run_target 한 줄 ↔ 데우기의 컴파일 줄
+pack_line = pack_text.lines.find { |l| l =~ /^\s*cargo test --locked --manifest-path "\$MANIFEST" -p "\$pkg" --test "\$test" -- --ignored/ }
+warm_line = run_lines.call(warm, 'security_pack').find { |l| l =~ /\bcargo test\b/ }
+if pack_line.nil? || warm_line.nil?
+  errs << "컴파일 명령: security_pack.sh run_target 의 cargo 줄 또는 데우기 security_pack 의 cargo 줄을 못 찾았어요"
+else
+  pa = pack_line.strip.split(' -- ').first.split.map { |t| t.sub('"$MANIFEST"', 'M').sub('"$pkg"', 'P').sub('"$test"', 'T') }
+  wa = warm_line.sub(/\s+--no-run\b/, '').split.map { |t| t.sub('"$PWD/server-rust/Cargo.toml"', 'M').sub('"$pkg"', 'P').sub('"$target"', 'T') }
+  errs << "컴파일 명령: Security pack 의 cargo 인자가 데우기와 달라요(PR #{pa.join(' ')} / 데우기 #{wa.join(' ')})" unless pa == wa
+  errs << "컴파일 명령: 데우기 Security pack 의 컴파일에 --no-run 이 없어요(시험까지 돌려요)" unless warm_line.include?('--no-run')
+end
+# 컴파일 명령 인자 — rust: PR 의 nextest 줄 ↔ 데우기의 `cargo test --no-run` 줄(nextest 는 먼저 같은 컴파일을 한다)
+pr_rust = run_lines.call(pr, 'rust').find { |l| l =~ /\Acargo (nextest run|test)\b/ }
+warm_rust = run_lines.call(warm, 'rust').find { |l| l =~ /\Acargo test\b/ }
+if pr_rust.nil? || warm_rust.nil?
+  errs << "컴파일 명령: rust 잡의 cargo 줄 또는 데우기 rust 의 cargo 줄을 못 찾았어요"
+else
+  flags = lambda { |c| c.split.reject { |t| %w[cargo nextest run test --no-run --no-fail-fast].include?(t) } }
+  errs << "컴파일 명령: rust 잡의 cargo 인자가 데우기와 달라요(PR #{flags.call(pr_rust).inspect} / 데우기 #{flags.call(warm_rust).inspect})" unless flags.call(pr_rust) == flags.call(warm_rust)
+  errs << "컴파일 명령: 데우기 rust 의 컴파일에 --no-run 이 없어요(시험까지 돌려요)" unless warm_rust.include?('--no-run')
+end
+
+puts errs
+exit(errs.empty? ? 0 : 1)
+RUBY
+cache_contract() { # <pr-ci.yml> <ci-cache-warm.yml> <security_pack.sh> -> 위반을 줄마다 stdout 에, 있으면 종료 1
+  ruby -ryaml -e "$CACHE_CONTRACT_RB" -- "$1" "$2" "$3"
+}
+cache_contract "$WORKFLOW" "$CACHE_WARM" "$SECURITY_PACK_SH" > "$TMP_DIR/cache-contract-real.out" 2>&1 \
+  || { sed 's/^/[cache-contract] /' "$TMP_DIR/cache-contract-real.out" >&2; fail "PR CI 와 캐시 데우기의 계약이 어긋났어요"; }
+
+CC_DIR="$TMP_DIR/cache-contract"
+mkdir -p "$CC_DIR"
+cc_mut() { # <이름> <pr|warm> <기대 문구> <입력(stdin)→출력(stdout) 명령…> — 사본에 변이를 내고 의도한 이유로 빨강인지 본다
+  local name="$1" which="$2" want="$3" pr="$WORKFLOW" warm="$CACHE_WARM" src dst out
+  shift 3
+  if [ "$which" = pr ]; then src="$WORKFLOW"; dst="$CC_DIR/$name.pr.yml"; pr="$dst"; else src="$CACHE_WARM"; dst="$CC_DIR/$name.warm.yml"; warm="$dst"; fi
+  "$@" <"$src" >"$dst"
+  cmp -s "$src" "$dst" && fail "cache-contract $name: 변이가 적용되지 않았어요(닻 문구가 바뀜)"
+  if out="$(cache_contract "$pr" "$warm" "$SECURITY_PACK_SH" 2>&1)"; then
+    fail "cache-contract $name: 변이가 통과했어요 — 검사기가 이 어긋남을 못 잡아요"
+  fi
+  grep -Fq -- "$want" <<<"$out" || fail "cache-contract $name: 다른 이유로 빨강이에요(기대 '$want') — $out"
+}
+# awk 변이 조각: 줄 뒤에 끼우기 / n 번째 같은 줄 지우기 / n 번째 같은 줄 바꾸기 / 한 잡 안에서 글자 바꾸기(정규식 아님 — 리터럴)
+cc_after() { awk -v a="$1" -v i="$2" '{ print } $0 == a { print i }'; }
+cc_drop() { awk -v a="$1" -v n="$2" '$0 == a { c++; if (c == n) next } { print }'; }
+cc_swap() { awk -v a="$1" -v b="$2" -v n="$3" '$0 == a { c++; if (c == n) { print b; next } } { print }'; }
+cc_repl_job() { awk -v job="  $1:" -v from="$2" -v to="$3" '
+  $0 ~ /^  [[:alnum:]_-]+:$/ { on = ($0 == job) }
+  on { i = index($0, from); if (i) { $0 = substr($0, 1, i - 1) to substr($0, i + length(from)) } }
+  { print }'; }
+
+# 데우기: 트리거·권한·비밀값·핀·동시성
+cc_mut warm-pull-request warm 'on 은 push 하나뿐' cc_after 'on:' '  pull_request:'
+cc_mut warm-dispatch warm 'on 은 push 하나뿐' cc_after 'on:' '  workflow_dispatch:'
+cc_mut warm-schedule warm 'on 은 push 하나뿐' cc_after 'on:' '  schedule:'
+cc_mut warm-extra-branch warm 'branches 가 달라요' cc_after '      - track/uxui' '      - feature/x'
+cc_mut warm-write-perm warm 'permissions 는 contents: read 뿐' sed 's#^  contents: read$#  contents: write#'
+cc_mut warm-extra-perm warm 'permissions 는 contents: read 뿐' cc_after '  contents: read' '  actions: write'
+cc_mut warm-job-perm warm '가 permissions 를 따로 가져요' cc_after '    name: 데우기 — cargo test (Rust)' '    permissions: write-all'
+cc_mut warm-secret warm '비밀값(secrets.)' cc_after '    name: 데우기 — npm 캐시 (TS core)' '    env: { X: "${{ secrets.X }}" }'
+cc_mut warm-unpinned warm '전체 SHA(40자)로 고정되지 않았어요' sed 's#actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 \# v7#actions/checkout@v7#'
+cc_mut warm-cancel warm 'cancel-in-progress 는 false' sed 's#cancel-in-progress: false#cancel-in-progress: true#'
+cc_mut warm-npm-scripts warm '--ignore-scripts 가 없어요' sed 's#npm ci --ignore-scripts#npm ci#'
+# PR 잡: 캐시를 저장하는 길
+cc_mut pr-save-if-dropped pr 'rust-cache 가 PR 에서도 저장해요' cc_drop "          save-if: \${{ github.event_name != 'pull_request' }}" 1
+cc_mut pr-save-if-true pr 'rust-cache 가 PR 에서도 저장해요' cc_swap "          save-if: \${{ github.event_name != 'pull_request' }}" '          save-if: true' 1
+cc_mut pr-cache-save pr '캐시를 저장하는 액션' cc_after '          tool: cargo-nextest@0.9.143' '      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6'
+cc_mut pr-cache-rw pr '캐시를 저장하는 액션' cc_after '          tool: cargo-nextest@0.9.143' '      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6'
+cc_mut pr-setup-node-cache pr 'setup-node 에 cache: 가 있어요' cc_after '          package-manager-cache: false' '          cache: npm'
+cc_mut pr-setup-node-pmc pr 'package-manager-cache: false 가 없어요' cc_drop '          package-manager-cache: false' 1
+# 키 재료: 데우기 ↔ PR
+cc_mut warm-shared-key warm 'rust 의 shared-key 가 데우기와 달라요' sed 's#shared-key: oort-rust-test#shared-key: oort-rust-tset#'
+cc_mut warm-pack-env warm 'security_pack 의 CARGO*/RUST* 환경이 데우기와 달라요' cc_repl_job security_pack 'CARGO_PROFILE_TEST_DEBUG: line-tables-only' 'CARGO_PROFILE_TEST_DEBUG: limited'
+cc_mut pr-pack-workspaces pr 'security_pack 의 workspaces 가 데우기와 달라요' sed 's#^          workspaces: server-rust$#          workspaces: server-rust/crates#'
+cc_mut pr-rust-cache-pin pr 'rust 의 rust-cache 액션 핀이 데우기와 달라요' cc_repl_job rust 'rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6' 'rust-cache@7323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+cc_mut pr-keys-merged pr 'shared-key 가 같아요' sed 's#shared-key: oort-security-pack#shared-key: oort-rust-test#'
+cc_mut warm-npm-key warm 'node_web 데우기 조회 의 key 가 PR 복원과 달라요' sed 's#-web-\${{ hashFiles#-wbe-${{ hashFiles#'
+cc_mut warm-npm-lookup warm 'lookup-only: true 가 없어요' sed 's#lookup-only: true#lookup-only: false#'
+cc_mut pr-header-fit-key pr 'header_fit 의 복원 key 가 node_web 과 달라요' cc_repl_job header_fit '-web-' '-wbe-'
+# 컴파일 명령 인자
+cc_mut warm-pack-locked warm 'Security pack 의 cargo 인자가 데우기와 달라요' sed 's#cargo test --locked --manifest-path "\$PWD/server-rust/Cargo.toml" -p#cargo test --manifest-path "$PWD/server-rust/Cargo.toml" -p#'
+cc_mut warm-pack-run warm '컴파일에 --no-run 이 없어요' sed 's#--test "\$target" --no-run#--test "$target"#'
+cc_mut pr-rust-locked pr 'rust 잡의 cargo 인자가 데우기와 달라요' sed 's#cargo nextest run --workspace --locked#cargo nextest run --workspace#'
+cc_mut warm-rust-manifest warm 'rust 잡의 cargo 인자가 데우기와 달라요' sed 's#--manifest-path server-rust/Cargo.toml --no-run#--manifest-path server-rust/other/Cargo.toml --no-run#'
+
+# (4) nextest 는 doc 시험을 안 돌린다 — rustdoc 이 시험으로 도는 문서 주석 코드 펜스가 생기면 rust 잡에 `cargo test --doc` 가 있어야 한다.
+# 실행되는 펜스 = info string 이 없거나 rust 속성(rust·no_run·should_panic·ignore·compile_fail·editionNNNN·test_harness)뿐인 것.
+# ```text·```json 같은 펜스는 시험이 아니다(지금 이 레포의 문서 코드 펜스는 전부 그쪽이다). 닫는 펜스는 상태로 거른다.
+read -r -d '' DOC_FENCE_AWK <<'AWK' || true
+FNR == 1 { infence = 0 }
+{
+  if (match($0, /^[[:space:]]*\/\/[\/!]/)) {
+    body = substr($0, RLENGTH + 1)
+    sub(/^[[:space:]]*/, "", body)
+    if (body ~ /^(```|~~~)/) {
+      info = body; sub(/^(```+|~~~+)[[:space:]]*/, "", info)
+      if (!infence) {
+        infence = 1
+        if (info == "" || info ~ /^(rust|no_run|should_panic|ignore|compile_fail|edition[0-9]+|test_harness)([, ]|$)/) {
+          if (!(FILENAME in seen)) { seen[FILENAME] = 1; print FILENAME }
+        }
+      } else { infence = 0 }
+    }
+  } else { infence = 0 }
+}
+AWK
+doc_fence_files() { # NUL 로 구분된 파일 목록을 stdin 으로 받아, 실행되는 문서 코드 펜스가 있는 파일을 낸다
+  xargs -0 awk "$DOC_FENCE_AWK" 2>/dev/null || true
+}
+doc_tests_covered() { # <workflow> <펜스 있는 파일 목록> — 펜스가 없으면 0, 있으면 rust 잡(주석 제외)에 cargo test --doc 이 있어야 0
+  [ -z "$2" ] && return 0
+  job_block "$1" rust | grep -Ev '^[[:space:]]*#' | grep -Eq 'cargo test[^#]*--doc'
+}
+real_fences="$(git -C "$REPO_ROOT" ls-files -z -- 'server-rust/*.rs' | (cd "$REPO_ROOT" && doc_fence_files))"
+doc_tests_covered "$WORKFLOW" "$real_fences" || fail "실행되는 문서 코드 펜스가 있는데 rust 잡이 cargo test --doc 을 안 돌려요(nextest 는 doc 시험을 안 돌려요): $real_fences"
+DOC_FIX="$TMP_DIR/doc-fence"
+mkdir -p "$DOC_FIX"
+printf '/// 설명\n/// ```\n/// assert_eq!(1, 1);\n/// ```\npub fn a() {}\n' >"$DOC_FIX/with_fence.rs"
+printf '//! ```rust,no_run\n//! let x = 1;\n//! ```\n' >"$DOC_FIX/inner_fence.rs"
+printf '// 일반 주석 ```\nfn b() { let s = "```"; }\n/// 코드 펜스 없는 문서 주석\npub fn c() {}\n' >"$DOC_FIX/no_fence.rs"
+printf '/// 예시:\n/// ```text\n/// not a test\n/// ```\npub fn d() {}\n/// ```json\n/// {}\n/// ```\npub fn e() {}\n' >"$DOC_FIX/text_fence.rs"
+[ "$(printf '%s\0' "$DOC_FIX/with_fence.rs" | doc_fence_files)" = "$DOC_FIX/with_fence.rs" ] || fail "doc 펜스 탐지기가 /// 의 실행되는 코드 펜스를 못 찾아요"
+[ "$(printf '%s\0' "$DOC_FIX/inner_fence.rs" | doc_fence_files)" = "$DOC_FIX/inner_fence.rs" ] || fail "doc 펜스 탐지기가 //! 의 rust,no_run 코드 펜스를 못 찾아요"
+[ -z "$(printf '%s\0' "$DOC_FIX/no_fence.rs" | doc_fence_files)" ] || fail "doc 펜스 탐지기가 일반 주석·문자열의 백틱을 펜스로 오인해요"
+[ -z "$(printf '%s\0' "$DOC_FIX/text_fence.rs" | doc_fence_files)" ] || fail "doc 펜스 탐지기가 ```text·```json 펜스(또는 그 닫는 펜스)를 시험으로 오인해요"
+if doc_tests_covered "$WORKFLOW" "$DOC_FIX/with_fence.rs"; then fail "실행되는 문서 코드 펜스가 생겼는데 rust 잡에 cargo test --doc 이 없는 워크플로가 통과했어요"; fi
+awk '{ print } $0 == "          cargo nextest run --workspace --locked --manifest-path server-rust/Cargo.toml --no-fail-fast" { print "          cargo test --doc --workspace --locked --manifest-path server-rust/Cargo.toml" }' "$WORKFLOW" >"$DOC_FIX/with-doc-step.yml"
+cmp -s "$WORKFLOW" "$DOC_FIX/with-doc-step.yml" && fail "doc 단계 사본 변이가 적용되지 않았어요(닻 문구가 바뀜)"
+doc_tests_covered "$DOC_FIX/with-doc-step.yml" "$DOC_FIX/with_fence.rs" || fail "rust 잡에 cargo test --doc 단계가 있는데 가드가 빨강이에요"
+awk '{ print } $0 == "          df -h /" && !d { d = 1; print "          # cargo test --doc --workspace (주석이라 도는 게 아니에요)" }' "$WORKFLOW" >"$DOC_FIX/doc-in-comment.yml"
+cmp -s "$WORKFLOW" "$DOC_FIX/doc-in-comment.yml" && fail "doc 주석 사본 변이가 적용되지 않았어요(닻 문구가 바뀜)"
+if doc_tests_covered "$DOC_FIX/doc-in-comment.yml" "$DOC_FIX/with_fence.rs"; then fail "주석 속 cargo test --doc 이 doc 시험을 돌리는 것으로 오인돼요"; fi
+
 for required in \
   '  push:' \
   '  schedule:' \
@@ -1309,4 +1561,4 @@ for required in \
   grep -Fq "$required" "$MONITOR" || fail "track monitor missing: $required"
 done
 
-echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures (rust/node/policy lanes), big-PR lane matching without SIGPIPE, classifier faults failing the step, executed gate verdicts, retired web-legacy lane absence, per-tree node jobs, path-selected policy job, gitleaks PR-range fail-closed lane, stable fail-closed gate, REVIEW.md risk table lock, mutation proofs, and monitor triggers"
+echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures (rust/node/policy lanes), big-PR lane matching without SIGPIPE, classifier faults failing the step, executed gate verdicts, retired web-legacy lane absence, per-tree node jobs, path-selected policy job, gitleaks PR-range fail-closed lane, stable fail-closed gate, REVIEW.md risk table lock, mutation proofs, cache-warm contract (push-only triggers, contents:read, PR jobs never save caches, warm/PR key material and compile arguments equal, nextest doc-test guard), and monitor triggers"

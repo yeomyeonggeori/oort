@@ -606,13 +606,28 @@ jobs:
           shared-key: oort-rust-test
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: cargo test --workspace (server-rust)
+      # 시험은 nextest 로 돌린다(#5495, F4). `cargo test` 는 시험 실행 파일 329개를 한 줄로 차례로 돌지만 nextest 는 시험을 프로세스
+      # 하나씩 vCPU 수(4)만큼 바이너리 경계 없이 동시에 돌린다. 컴파일은 `cargo test --no-run` 과 같은 산출물을 쓴다(로컬 실측:
+      # `cargo test --no-run` 뒤 `cargo nextest run` 에 Compiling 0줄, 시험 수도 같다) — 그래서 `ci-cache-warm.yml` 의 `--no-run`
+      # 캐시가 그대로 맞는다. 설치는 `cargo-deny` 와 같은 액션 핀·버전 고정이다(0.9.143 은 이 핀의 매니페스트에 있어 체크섬 검증됨).
+      # CI 전용 도구라 앱 번들·NOTICE 에는 들어가지 않는다(Apache-2.0 OR MIT, 라이선스 게이트 대상 아님).
+      # **nextest 는 doc 시험을 돌리지 않는다.** 이 워크스페이스에는 지금 doc 시험이 0개다(이전 로그의 `Doc-tests … running 0 tests`
+      # 33개 크레이트; 문서 주석의 코드 펜스는 전부 ```text·```json 이라 rustdoc 이 시험으로 돌리지 않는다). 실행되는 펜스(info 가 없거나
+      # rust 속성뿐)가 생기면 `cargo test --doc --workspace --locked --manifest-path server-rust/Cargo.toml` 단계를 아래에 더해야 하고,
+      # scripts/tests/test_pr_ci_guardrails.sh 가 그런 펜스가 생기면 그 단계가 없는 한 빨강이 된다.
+      - name: cargo-nextest 설치
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        with:
+          tool: cargo-nextest@0.9.143
+
+      - name: cargo nextest run --workspace (server-rust)
         # --locked: Cargo.lock을 고쳐야 하는 매니페스트 변경이 락 커밋 없이
         # 들어오면 여기서 빨강. 락 갱신은 리뷰 대상이지 CI의 부작용이 아니다.
+        # --no-fail-fast: 빨강이 여러 개여도 한 번에 보인다(다시 돌리는 왕복 한 번이 7~10분이다).
         # 앞뒤 `df -h /`는 러너 디스크 여유의 증거다(#5182).
         run: |
           df -h /
-          cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
+          cargo nextest run --workspace --locked --manifest-path server-rust/Cargo.toml --no-fail-fast
           df -h /
 
       - name: cargo-deny 설치
@@ -657,6 +672,11 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+      # 시험 빌드의 디버그 정보를 줄인다(#5495, F5 — `rust` 잡의 #5182 와 같은 값). 대상 42개를 따로 링크하는 빌드의 링크 시간과 캐시 크기
+      # (캐시 하나가 0.68GB)를 줄인다. `line-tables-only` 는 패닉의 파일:줄을 남긴다. 이 값은 rust-cache 키의 환경 해시에도 들어가서,
+      # `ci-cache-warm.yml` 의 `security_pack` 잡 `env:` 와 글자 그대로 같아야 한다.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -668,8 +688,11 @@ jobs:
           bash scripts/tests/test_security_pack.sh
 
       # 캐시는 읽기만 한다(#5494). 저장은 `ci-cache-warm.yml` 의 `security_pack` 잡이 하고, 그 잡은 이 잡의 `scripts/security_pack.sh run`
-      # 과 같은 쌍을 `--no-run` 으로 컴파일한다. shared-key·workspaces 는 그 잡과 글자 그대로 같아야 한다. 이 잡에는 `rust` 잡의
-      # `CARGO_PROFILE_*_DEBUG` 가 없고(F5 #5495 가 맞출 때까지 그대로 둔다) workspaces 도 달라서 키를 나눴다.
+      # 과 같은 쌍을 `--no-run` 으로 컴파일한다. shared-key·workspaces·위 `env:` 는 그 잡과 글자 그대로 같아야 한다. `rust` 잡과는 이제
+      # `CARGO_PROFILE_*_DEBUG` 가 같지만(#5495) 키는 합치지 않았다: workspaces 가 다르고(`rust` 는 `clients/desktop/src-tauri` 도), 컴파일 명령이
+      # 다르다(`--workspace` 한 번 ↔ 선택 쌍마다 `-p … --test …`). 호출마다 의존 크레이트의 기능 합집합이 달라 같은 키로 합치면 먼저 저장한
+      # 쪽 산출물만 남고 다른 잡이 다시 빌드한다(로컬 실측: 선택 쌍을 빌드해 둔 타깃 디렉터리에서 `-p momo-wire --no-run` 이 `crypto-common`·`rustls`·
+      # `sha2` 등을 다시 컴파일했다).
       - name: cargo 캐시(레지스트리 + target)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
