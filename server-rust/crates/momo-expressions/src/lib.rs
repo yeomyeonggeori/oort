@@ -6,6 +6,7 @@ pub mod cutout;
 pub mod intake;
 pub mod media;
 pub mod model;
+pub mod set;
 pub mod store;
 
 pub use model::*;

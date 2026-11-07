@@ -3214,6 +3214,12 @@ export const catalog: MessageCatalog = {
       "value": "Favorites"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "Frequent & recent"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -3238,6 +3244,248 @@ export const catalog: MessageCatalog = {
       "value": "Team library"
     }
   ],
+  "expressions.plan.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "expressions.plan.closed": [
+    {
+      "type": 0,
+      "value": "This plan is closed."
+    }
+  ],
+  "expressions.plan.concept": [
+    {
+      "type": 0,
+      "value": "Concept"
+    }
+  ],
+  "expressions.plan.confirm": [
+    {
+      "type": 0,
+      "value": "Make it"
+    }
+  ],
+  "expressions.plan.confirmed": [
+    {
+      "type": 0,
+      "value": "Started making the pictures."
+    }
+  ],
+  "expressions.plan.declare": [
+    {
+      "type": 0,
+      "value": "Do not send pictures that show a person's face. These pictures show none."
+    }
+  ],
+  "expressions.plan.editBack": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "expressions.plan.editInclude": [
+    {
+      "type": 0,
+      "value": "Include "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.plan.editName": [
+    {
+      "type": 0,
+      "value": "Display name of picture "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    }
+  ],
+  "expressions.plan.editRemoveReference": [
+    {
+      "type": 0,
+      "value": "Remove reference picture "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.editScene": [
+    {
+      "type": 0,
+      "value": "Scene of picture "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    }
+  ],
+  "expressions.plan.editSubmit": [
+    {
+      "type": 0,
+      "value": "Plan again with these changes"
+    }
+  ],
+  "expressions.plan.gif": [
+    {
+      "type": 0,
+      "value": "Base: "
+    },
+    {
+      "type": 1,
+      "value": "base"
+    },
+    {
+      "type": 0,
+      "value": ", motion: "
+    },
+    {
+      "type": 1,
+      "value": "motion"
+    }
+  ],
+  "expressions.plan.heading": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " plan"
+    }
+  ],
+  "expressions.plan.kept": [
+    {
+      "type": 0,
+      "value": "Hermes may keep what it receives and makes in its own records."
+    }
+  ],
+  "expressions.plan.motionBounce": [
+    {
+      "type": 0,
+      "value": "Bounce"
+    }
+  ],
+  "expressions.plan.motionPulse": [
+    {
+      "type": 0,
+      "value": "Pulse"
+    }
+  ],
+  "expressions.plan.motionSparkle": [
+    {
+      "type": 0,
+      "value": "Sparkle"
+    }
+  ],
+  "expressions.plan.motionWobble": [
+    {
+      "type": 0,
+      "value": "Wobble"
+    }
+  ],
+  "expressions.plan.notice": [
+    {
+      "type": 0,
+      "value": "Attached pictures are sent to Hermes's picture model."
+    }
+  ],
+  "expressions.plan.pictures": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture to make"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures to make"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.plan.referenceAlt": [
+    {
+      "type": 0,
+      "value": "Reference picture "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.references": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference picture to send"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference pictures to send"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.plan.revise": [
+    {
+      "type": 0,
+      "value": "Edit scenes"
+    }
+  ],
+  "expressions.plan.scenes": [
+    {
+      "type": 0,
+      "value": "Scenes"
+    }
+  ],
   "expressions.preview.cancel": [
     {
       "type": 0,
@@ -3258,6 +3506,366 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Emoticon to send"
+    }
+  ],
+  "expressions.set.agentText": [
+    {
+      "type": 0,
+      "value": "Written by the agent: "
+    },
+    {
+      "type": 1,
+      "value": "prompt"
+    }
+  ],
+  "expressions.set.badgeGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.set.cellGray": [
+    {
+      "type": 0,
+      "value": "Not selectable, "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.set.cellReady": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.set.decline": [
+    {
+      "type": 0,
+      "value": "No thanks"
+    }
+  ],
+  "expressions.set.errorGeneric": [
+    {
+      "type": 0,
+      "value": "The decision did not go through. Check your access and connection, then try again."
+    }
+  ],
+  "expressions.set.errorQuota": [
+    {
+      "type": 0,
+      "value": "The library is full, so nothing was saved."
+    }
+  ],
+  "expressions.set.errorStale": [
+    {
+      "type": 0,
+      "value": "The pictures changed. Reload the card and choose again."
+    }
+  ],
+  "expressions.set.errorTaken": [
+    {
+      "type": 0,
+      "value": "Every name you picked is already taken. Pick other pictures."
+    }
+  ],
+  "expressions.set.faceOnly": [
+    {
+      "type": 0,
+      "value": "Only the person shown can approve this."
+    }
+  ],
+  "expressions.set.grayBaseMissing": [
+    {
+      "type": 0,
+      "value": "There is no base picture to add motion to."
+    }
+  ],
+  "expressions.set.grayFailed": [
+    {
+      "type": 0,
+      "value": "This scene could not be made."
+    }
+  ],
+  "expressions.set.grayNotMade": [
+    {
+      "type": 0,
+      "value": "There was not enough time to make this scene."
+    }
+  ],
+  "expressions.set.grayRefused": [
+    {
+      "type": 0,
+      "value": "The picture model said it cannot make this scene."
+    }
+  ],
+  "expressions.set.gridLabel": [
+    {
+      "type": 0,
+      "value": "Pictures in "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "expressions.set.offline": [
+    {
+      "type": 0,
+      "value": "Try again when you are connected."
+    }
+  ],
+  "expressions.set.referenceCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.register": [
+    {
+      "type": 0,
+      "value": "Save "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.registering": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "expressions.set.resultSaved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " saved to the team library"
+    }
+  ],
+  "expressions.set.resultSavedSkipped": [
+    {
+      "type": 2,
+      "value": "saved",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " saved, "
+    },
+    {
+      "type": 2,
+      "value": "skipped",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " skipped"
+    }
+  ],
+  "expressions.set.rights": [
+    {
+      "type": 0,
+      "value": "Make sure you are allowed to keep these pictures. Only the ones you pick are saved."
+    }
+  ],
+  "expressions.set.selectAll": [
+    {
+      "type": 0,
+      "value": "Select all"
+    }
+  ],
+  "expressions.set.selectNone": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "expressions.set.settledDeclined": [
+    {
+      "type": 0,
+      "value": "Nothing was saved."
+    }
+  ],
+  "expressions.set.settledDone": [
+    {
+      "type": 0,
+      "value": "This request is already settled."
+    }
+  ],
+  "expressions.set.settledExpired": [
+    {
+      "type": 0,
+      "value": "This request expired before anyone approved it."
+    }
+  ],
+  "expressions.set.summaryGray": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scene not made"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scenes not made"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.summaryReady": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.unreadable": [
+    {
+      "type": 0,
+      "value": "Could not read this picture set. Ask the assistant to make it again."
     }
   ],
   "expressions.sheet.a11y": [
@@ -3466,6 +4074,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Emoticon suggestions"
+    }
+  ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "Open"
     }
   ],
   "mobile.attachmentSave.failed": [

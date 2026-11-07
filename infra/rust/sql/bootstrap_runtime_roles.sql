@@ -628,6 +628,100 @@ BEGIN
 END $$;
 -- END attachment-write-token-lockdown
 
+-- BEGIN expression-set-lockdown (#5459 S1a; ADR-0218 증보 6 §12 L10.1, threat T20). Identical in
+-- 176_expression_set.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. The set tables hold what the team AI planned and made before any person approved
+-- it (a prompt, scene text, up to 24 MiB of pictures per set), the writer is the BYPASSRLS momo_worker, and
+-- every BYPASSRLS role skips RLS, so their table privileges are what keeps a forged or foreign row away
+-- from a role with no business writing one. Each runtime role gets exactly what the code does:
+-- momo_worker stages (INSERT), closes slots and heads (UPDATE) and takes pixels back (DELETE on the images);
+-- momo_app decides and reclaims (moves the head, deletes the pixels, and blanks the scene text through a
+-- column grant, UPDATE (scene), on the slot: it can never close or re-plan a slot) and records
+-- the first notice a member saw; momo_notifier only discovers which tenants hold an expired staging set,
+-- through three columns and never the prompt; nobody deletes a head, a slot or a notice (a foreign-key
+-- cascade from the workspace runs as the table's owner, so deleting a parent still clears its rows) and
+-- nobody changes a pixel or a notice. relay, platform_admin and the helper's read role do not touch the
+-- tables at all. Idempotent and order-proof (a pass before the tables or the roles exist finishes what it
+-- can, the pass after lands the rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  t text;
+  r text;
+  p text;
+  c text;
+  allowed text[];
+  want boolean;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice'] LOOP
+    CONTINUE WHEN to_regclass(format('public.%I', t)) IS NULL;
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      allowed := CASE t || '/' || r
+        WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
+        WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+        WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
+        WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
+        WHEN 'expression_set_notice/momo_app' THEN ARRAY['SELECT', 'INSERT']
+        ELSE ARRAY[]::text[]
+      END;
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+      IF cardinality(allowed) > 0 THEN
+        EXECUTE format('GRANT %s ON TABLE public.%I TO %I', array_to_string(allowed, ', '), t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+  -- the one cross-tenant read: the TTL sweep finds the tenants whose staging set is due (workspace ids only)
+  IF to_regclass('public.expression_set') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN
+    GRANT SELECT (workspace_id, state, expires_at) ON expression_set TO momo_notifier;
+  END IF;
+  -- the one slot write the decision side makes: blank the scene text of an ended set (column-level, so
+  -- a slot's state, code and plan stay out of this role's reach)
+  IF to_regclass('public.expression_set_slot') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    GRANT UPDATE (scene) ON expression_set_slot TO momo_app;
+  END IF;
+  FOREACH t IN ARRAY ARRAY['expression_set', 'expression_set_slot', 'expression_set_image', 'expression_set_notice'] LOOP
+    CONTINUE WHEN to_regclass(format('public.%I', t)) IS NULL;
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      allowed := CASE t || '/' || r
+        WHEN 'expression_set/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set/momo_app' THEN ARRAY['SELECT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN 'expression_set_slot/momo_app' THEN ARRAY['SELECT']
+        WHEN 'expression_set_image/momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+        WHEN 'expression_set_image/momo_app' THEN ARRAY['SELECT', 'DELETE']
+        WHEN 'expression_set_notice/momo_worker' THEN ARRAY['SELECT']
+        WHEN 'expression_set_notice/momo_app' THEN ARRAY['SELECT', 'INSERT']
+        ELSE ARRAY[]::text[]
+      END;
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        IF has_table_privilege(r, format('public.%I', t), p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+          RAISE EXCEPTION 'role % must % % on %',
+            r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p, t;
+        END IF;
+      END LOOP;
+      FOR c IN SELECT a.attname::text FROM pg_attribute a
+                WHERE a.attrelid = format('public.%I', t)::regclass AND a.attnum > 0 AND NOT a.attisdropped LOOP
+        FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE'] LOOP
+          want := p = ANY (allowed)
+                  OR (p = 'SELECT' AND t = 'expression_set' AND r = 'momo_notifier'
+                      AND c IN ('workspace_id', 'state', 'expires_at'))
+                  OR (p = 'UPDATE' AND t = 'expression_set_slot' AND r = 'momo_app' AND c = 'scene');
+          IF has_column_privilege(r, format('public.%I', t), c, p) IS DISTINCT FROM want THEN
+            RAISE EXCEPTION 'role % must % % on %.%',
+              r, CASE WHEN want THEN 'hold' ELSE 'not hold' END, p, t, c;
+          END IF;
+        END LOOP;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END expression-set-lockdown
+
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
 -- of this file is what actually lands these grants (#2193).

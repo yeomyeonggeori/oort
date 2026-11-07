@@ -1,7 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import React from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
-import {AccessibilityInfo, Dimensions, FlatList} from 'react-native';
+import {AccessibilityInfo, Dimensions, FlatList, StyleSheet} from 'react-native';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
 import {
   createExpressionFixtureServer,
@@ -9,9 +9,12 @@ import {
 } from '@momo/core/features/expressions/fixtureServer';
 import {FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
+import {emptyExpressionFavorites} from '@momo/core/features/expressions/favorites';
+import {buildExpressionSections} from '@momo/core/features/expressions/gridSections';
 import {DEFAULT_EXPRESSION_PICKER_TAB} from '@momo/core/features/expressions/kind';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
 import {emojiFrequency, emojiSkinTone} from '../src/features/emoji/preferences';
@@ -267,7 +270,7 @@ describe('이모티콘·GIF 탭 — 그림만 있는 격자와 세트 띠', () =
     expect(screen.getByTestId('expression-pick-dam_kk').props.accessibilityState.selected).toBe(false);
   });
 
-  it('쓴 적이 있으면 「최근」 구역이 맨 앞에 서고 띠의 첫 단추가 된다', async () => {
+  it('쓴 적이 있으면 맨 위 구역(이모티콘 탭은 「자주·최근」)이 맨 앞에 서고 띠의 첫 단추가 된다', async () => {
     const library = makeLibrary();
     const usage = recordExpressionUse(emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID), library[3].id, 5000);
     const {store} = makeStore({items: library, usage});
@@ -275,9 +278,61 @@ describe('이모티콘·GIF 탭 — 그림만 있는 격자와 세트 띠', () =
     mountPanel(store);
     expect(sections()[0]).toBe('recent');
     expect(strip()[0]).toBe('recent');
-    expect(screen.getByText('최근')).toBeTruthy();
+    // 이모티콘 탭 맨 위 칸의 머리글과 띠 단추(🕘)의 낭독 이름은 「자주·최근」이다(#5503).
+    expect(screen.getByText('자주·최근')).toBeTruthy();
+    expect(screen.getByTestId('expression-panel-set-recent').props.accessibilityLabel).toBe('자주·최근');
     // 같은 그림이 최근과 세트에 한 번씩 선다.
     expect(screen.getAllByTestId('expression-pick-chi_cry')).toHaveLength(2);
+  });
+});
+
+// 세트 띠 단추의 눌림 면 (#5492, 검증 7b M2): 보이는 상자 40×44 에 `hitSlop` 이 없어서 눌림 면도 40×44 였다. 이 축을 재는 기계는 없었다(대화 행의 정해진 요소만 보는 `conversationHygiene` 의 「M-14」 밖이다).
+// 폰 시험에는 배치 엔진이 없어서 렌더 트리의 값(상자 `minWidth`·`height` + `hitSlop`)을 더해 잰다. 슬롭은 화면 캡처·계층 덤프에 보이지 않으므로 이 시험이 유일한 증거다.
+describe('세트 띠 단추의 눌림 면은 44×44 이상이다', () => {
+  type Node = ReturnType<typeof screen.getByTestId>;
+  const flat = (node: Node) => StyleSheet.flatten(node.props.style) as Record<string, unknown>;
+  const slopOf = (value: unknown) => {
+    if (typeof value === 'number') return {top: value, bottom: value, left: value, right: value};
+    const edges = (value ?? {}) as Record<string, number>;
+    return {top: edges.top ?? 0, bottom: edges.bottom ?? 0, left: edges.left ?? 0, right: edges.right ?? 0};
+  };
+  /** 띠 목록의 내용 상자 스타일(`gap`·`paddingHorizontal`): 단추 위의 조상 중 `contentContainerStyle` 을 든 첫 노드가 읽는다. */
+  const stripContent = (node: Node) => {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (parent.props.contentContainerStyle !== undefined) return StyleSheet.flatten(parent.props.contentContainerStyle) as Record<string, unknown>;
+    }
+    return {};
+  };
+
+  it('띠의 단추 전부 - 최근 · 즐겨찾기 · 세트 · 기타 · ＋ - 의 가로·세로 눌림 면이 44 이상이고 이웃의 눌림 면과 겹치지 않는다. 보이는 상자 40 은 그대로', async () => {
+    const library = makeLibrary();
+    const usage = recordExpressionUse(emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID), library[3].id, 5000);
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    mountPanel(store);
+    fireEvent(screen.getByTestId('expression-pick-dam_haa'), 'longPress'); // 즐겨찾기를 켜면 ★ 단추가 선다
+    // 단추 모양이 넷 다 선 띠다: 🕘(그림) · ★(글자) · 세트 첫 그림 · 「기타」(글자). 오른쪽 끝에 ＋ 가 따로 선다.
+    expect(strip()).toEqual(expect.arrayContaining(['recent', 'favorites', 'set:chi', 'set:dam', 'other']));
+    const add = screen.getByTestId('expression-panel-add');
+    const buttons = [...screen.getAllByTestId(/^expression-panel-set-/), add];
+    const content = stripContent(buttons[0]);
+    const gap = Number(content.gap);
+    expect(gap).toBeGreaterThan(0); // 틈을 못 읽었다면 아래 겹침 단정이 거저 통과한다
+    for (const button of buttons) {
+      const label = String(button.props.testID);
+      const box = flat(button);
+      const slop = slopOf(button.props.hitSlop);
+      expect({label, press: Number(box.minWidth) + slop.left + slop.right >= TOUCH_TARGET}).toEqual({label, press: true});
+      expect({label, press: Number(box.height) + slop.top + slop.bottom >= TOUCH_TARGET}).toEqual({label, press: true});
+      // 겹치지 않는다: 이웃 단추 사이 틈 안에 두 눌림 면의 슬롭 합(이 단추의 오른쪽 + 이웃의 왼쪽 = 같은 슬롭이므로 좌우 합)이 들어간다.
+      expect({label, within: slop.left + slop.right <= gap}).toEqual({label, within: true});
+      // 세로는 상자가 이미 44 이고 위아래에 이웃이 없다 - 세로 슬롭은 없다.
+      expect({label, vertical: slop.top + slop.bottom}).toEqual({label, vertical: 0});
+      // 보이는 상자는 그대로 한 걸음(44)에서 틈을 뺀 40 이다.
+      expect({label, visible: Number(box.minWidth)}).toEqual({label, visible: TOUCH_TARGET - gap});
+    }
+    // ＋ 와 목록 끝 단추 사이에는 목록의 오른쪽 안쪽 여백이 있어서 두 눌림 면이 만나지 않는다.
+    expect(Number(content.paddingHorizontal)).toBeGreaterThanOrEqual(slopOf(add.props.hitSlop).left + slopOf(buttons[0].props.hitSlop).right);
   });
 });
 
@@ -567,6 +622,120 @@ describe('「＋」 - 창 밖의 시트 (#4891 → #5452, 옛 시트 시험을 �
     expect(screen.queryByTestId('expression-add-sheet')).toBeNull();
     expect(screen.getByTestId('expression-panel-tabs')).toBeTruthy();
     expect(cellNames()).toHaveLength(5);
+  });
+});
+
+// 이모티콘 탭 맨 위 「자주·최근」 (#5503, owner 2026-11-07): 정지 그림과 GIF 를 섞어 횟수·최근 점수 순으로 세우고, 창이 열려 있는 동안 차례가 바뀌지 않으며 다시 열 때만 바뀐다. GIF 탭의 「최근」은 그대로다.
+describe('이모티콘 탭 맨 위 「자주·최근」 (#5503)', () => {
+  const NOW = Date.UTC(2026, 10, 7, 12);
+  const DAY = 86_400_000;
+  /** `[이름, 횟수, 며칠 전에 마지막으로]` — 점수 = 횟수 x 0.5^(일 / 7): nya_dance 2.46 · nya_jump 1.0 · dam_kk 0.91 · cheers_still 0.41 · solo_gif 0.14. 작은 이모지(party_parrot)는 50번 써도 후보가 아니다. */
+  const SEED: ReadonlyArray<readonly [string, number, number]> = [
+    ['nya_dance', 3, 2],
+    ['nya_jump', 1, 0],
+    ['dam_kk', 1, 1],
+    ['cheers_still', 1, 9],
+    ['solo_gif', 1, 20],
+    ['party_parrot', 50, 0],
+  ];
+  const FRECENT_ORDER = ['nya_dance', 'nya_jump', 'dam_kk', 'cheers_still', 'solo_gif'];
+  function seeded() {
+    const library = makeLibrary();
+    let usage = emptyExpressionUsage(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID);
+    for (const [name, times, daysAgo] of SEED) {
+      const id = library.find(entry => entry.name === name)!.id;
+      for (let i = 0; i < times; i += 1) usage = recordExpressionUse(usage, id, Math.round(NOW - daysAgo * DAY));
+    }
+    return {library, usage};
+  }
+  const topNames = () =>
+    within(screen.getByTestId('expression-panel-section-recent'))
+      .getAllByTestId(/^expression-pick-/)
+      .map(cell => String(cell.props.testID).replace('expression-pick-', ''));
+  beforeEach(() => {
+    // 창이 열리는 시각과 기록이 남는 시각을 고정한다(앱의 시계는 `Date.now()` 하나다).
+    jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  });
+
+  it('맨 위 칸에 정지 그림과 GIF 가 섞여 점수 순으로 서고, GIF 는 아래 구역에 없으며 작은 이모지는 없다 - 띠의 첫 단추가 그 칸이다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    const {onPickBig} = mountPanel(store);
+    expect(sections()[0]).toBe('recent');
+    expect(strip()[0]).toBe('recent');
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    expect(screen.getByText('자주·최근')).toBeTruthy(); // 횟수와 최근을 함께 본 칸이라 머리글이 「자주·최근」 (id·종류는 그대로 recent)
+    expect(screen.queryByText('최근')).toBeNull();
+    // GIF 는 이 탭의 보관함이 아니라 맨 위 칸에만 한 번 서고, 정지 그림은 맨 위 칸과 아래 세트에 한 번씩 선다.
+    expect(screen.getAllByTestId('expression-pick-nya_dance')).toHaveLength(1);
+    expect(screen.getAllByTestId('expression-pick-dam_kk')).toHaveLength(2);
+    expect(screen.queryByTestId('expression-pick-party_parrot')).toBeNull();
+    // 이 칸의 GIF 도 격자의 GIF 와 같은 부품·같은 크기(`tile`)로 그린다 - 새 그림 규칙이 없다.
+    expect(screen.getAllByTestId('img-tile-nya_dance')).toHaveLength(1);
+    // 누르면 정지 그림처럼 그 등록을 넘긴다(보내지 않는다).
+    fireEvent.press(screen.getByTestId('expression-pick-nya_dance'));
+    expect(onPickBig).toHaveBeenCalledTimes(1);
+    expect(onPickBig.mock.calls[0][0]).toMatchObject({id: library.find(entry => entry.name === 'nya_dance')!.id, name: 'nya_dance'});
+  });
+
+  it('창이 열려 있는 동안 보내기가 성공해 기록이 바뀌어도 칸 순서는 그대로이고(탭을 바꿨다 돌아와도), 창을 다시 열 때만 바뀐다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    const first = mountPanel(store);
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    // 열린 채 solo_gif 가 방금 두 번 보내졌다. 기록은 실제로 바뀐다.
+    act(() => {
+      store.recordSuccess('receipt-1', ':solo_gif:');
+      store.recordSuccess('receipt-2', ':solo_gif:');
+    });
+    const soloGifId = library.find(entry => entry.name === 'solo_gif')!.id;
+    expect(store.snapshot().usage?.entries.find(entry => entry.id === soloGifId)?.count).toBe(3);
+    // 이 시험이 헛돌지 않는다는 증거: 같은 기록으로 지금 다시 계산하면 차례가 다르다(solo_gif 가 맨 앞).
+    const live = buildExpressionSections(store.snapshot().items, 'emoticon', {
+      query: '',
+      usage: store.snapshot().usage!,
+      favorites: emptyExpressionFavorites(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID),
+      nowMs: Date.now(),
+    })[0]!.items.map(entry => entry.name);
+    expect(live).not.toEqual(FRECENT_ORDER);
+    expect(live[0]).toBe('solo_gif');
+    // 그런데 열려 있는 창의 칸 순서는 그대로다. 탭을 바꿨다 돌아와도(격자가 새로 서도) 같다.
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    fireEvent.press(screen.getByTestId('expression-panel-tab-emoticon'));
+    expect(topNames()).toEqual(FRECENT_ORDER);
+    // 닫았다 다시 열면 그때 한 번 새로 계산한다.
+    first.view.unmount();
+    mountPanel(store);
+    expect(topNames()).toEqual(live);
+  });
+
+  it('목록이 오기 전에 창을 열어도(앱을 막 켠 때) 기기의 사용 기록은 열 때 쥔다 - 목록이 오면 맨 위 칸이 그 차례로 선다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    mountPanel(store); // 아직 읽지 않았다
+    expect(screen.getByTestId('expression-panel-loading')).toBeTruthy();
+    expect(screen.queryByTestId('expression-panel-section-recent')).toBeNull();
+    await act(async () => {
+      await store.refresh(true);
+    });
+    expect(topNames()).toEqual(FRECENT_ORDER);
+  });
+
+  it('GIF 탭의 「최근」은 그대로다 - GIF 끼리 마지막으로 쓴 순이고 횟수·감쇠로 세우지 않는다', async () => {
+    const {library, usage} = seeded();
+    const {store} = makeStore({items: library, usage});
+    await store.refresh(true);
+    mountPanel(store);
+    fireEvent.press(screen.getByTestId('expression-panel-tab-gif'));
+    // 마지막으로 쓴 순: nya_jump(방금) > nya_dance(2일 전) > solo_gif(20일 전). 이모티콘 탭의 점수 순(nya_dance 가 앞)과 다르다.
+    expect(topNames()).toEqual(['nya_jump', 'nya_dance', 'solo_gif']);
+    // 마지막으로 쓴 순이라 머리글과 띠 단추(🕘)의 이름은 「최근」 그대로다 - 「자주·최근」은 이모티콘 탭만이다.
+    expect(screen.getByText('최근')).toBeTruthy();
+    expect(screen.queryByText('자주·최근')).toBeNull();
+    expect(screen.getByTestId('expression-panel-set-recent').props.accessibilityLabel).toBe('최근');
   });
 });
 
