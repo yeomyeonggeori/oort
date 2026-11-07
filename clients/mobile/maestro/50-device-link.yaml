@@ -21,6 +21,8 @@ name: 50-device-link
 - launchApp:
     appId: app.momo.ios
     clearState: true
+    arguments:
+      momoAutomation: "YES"
 
 - runFlow: subflows/dismiss-system-alerts.yaml
 
