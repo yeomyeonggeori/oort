@@ -120,5 +120,9 @@
 /* 입력창 밖으로 포커스가 나가면(대화 목록을 누르거나 다른 창으로 갈 때) 추천 줄은 물러난다: 대화 목록 위에 떠 있는 줄이 읽는 것을 가리지 않게. 줄의 상태는 그대로라
  * 포커스가 입력창으로 돌아오면 다시 선다(`ComposerExpressionSuggest`, #5476). 입력창 한 벌은 `data-composer-shell` 이다. */
 [data-composer-shell]:not(:focus-within) .expression-suggest-row { display: none; }
+/* 추천 줄의 가로 자리 (#5489): 줄은 독 맨 위의 기준 상자에 서고 왼쪽은 입력 카드의 왼쪽 가장자리다. 폰 폭은 폼 여백과 같은 12(클래스 `left-3`)이고, 넓은 창(≥600)은 카드가
+ * 폼의 좌우 인셋 24(`tokens.css` `composer-dock` 의 `form` 인셋, 같은 토큰 `--spacing-6`)에서 시작하므로 거기에 맞춘다. 후보 목록의 같은 규칙(`& > form > [data-composer-popover]`)은
+ * 폼 안의 자식만 보므로 독 맨 위에 서는 이 줄은 여기서 따라간다. 폼 인셋이 바뀌면 이 값도 함께 바꾼다(브라우저 시험이 카드 왼쪽과의 차 0 을 잰다). */
+@media (width >= 600px) { [data-composer-shell] .expression-suggest-row { left: var(--spacing-6); } }
 /* 세트 띠에서 지금 구역을 가리키는 단추. 호버·눌림은 단추의 유틸리티 클래스가 입히고 이 규칙은 현재 표시만 더한다. */
 .expression-set-button[aria-current="true"] { background-color: var(--color-accent-soft); }
