@@ -2,6 +2,7 @@ import {buildExpressionSections} from '@momo/core/features/expressions/gridSecti
 import {
   FAVORITES_SECTION,
   RECENT_SECTION,
+  RESULTS_SECTION,
   expressionSectionNameKey,
 } from '@momo/core/features/expressions/gridSections';
 import {expressionAltText} from '@momo/core/features/expressions/message';
@@ -22,6 +23,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {HEAD_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
+import {usePageSheetScrollProps} from '../../design/PageSheet';
 import {useStyles} from '../../design/theme';
 import {ds2Radius, font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
@@ -80,6 +82,8 @@ export function ExpressionPanelGrid({
   previewId,
   onPick,
   onAdd,
+  query = '',
+  inSheet = false,
 }: {
   tab: PanelGridTab;
   /** 창을 연 순간의 사용 기록과 시각(창이 한 번 쥔다). 맨 위 칸의 차례는 이 둘로만 센다. */
@@ -88,6 +92,10 @@ export function ExpressionPanelGrid({
   previewId: string | null;
   onPick: (item: Expression) => void;
   onAdd: () => void;
+  /** 호스트의 검색어(반응 고르개의 시트). 비어 있지 않으면 코어가 한 구역 「검색 결과」로 묶는다. */
+  query?: string;
+  /** 바텀 시트 안인가: 목록이 시트의 끌어내리기와 스크롤을 주고받는다(안 그러면 시트가 목록 위의 끌기를 가로챈다). */
+  inSheet?: boolean;
 }) {
   const {items, state, store} = useExpressions();
   const {favorites, isFavorite, toggle} = useExpressionFavorites();
@@ -100,12 +108,12 @@ export function ExpressionPanelGrid({
   const sections = useMemo(
     () =>
       buildExpressionSections(items, tab, {
-        query: '',
+        query: query ?? '',
         usage: opening.usage,
         favorites,
         nowMs: opening.nowMs,
       }),
-    [items, tab, opening, favorites],
+    [items, tab, opening, favorites, query],
   );
   const {layouts} = useMemo(() => layoutPanelSections(sections, columns), [sections, columns]);
   const list = useRef<FlatList<PanelSectionLayout>>(null);
@@ -116,10 +124,10 @@ export function ExpressionPanelGrid({
   const current = activeId !== null && layouts.some(layout => layout.section.id === activeId) ? activeId : layouts[0]?.section.id ?? null;
 
   useEffect(() => {
-    // 탭이나 목록이 바뀌면 맨 위로 간다(구역 위치가 다 달라졌다).
+    // 탭이나 검색어가 바뀌면 맨 위로 간다(구역 위치가 다 달라졌다).
     list.current?.scrollToOffset({offset: 0, animated: false});
     setActiveId(null);
-  }, [tab]);
+  }, [tab, query]);
 
   const jump = useCallback(
     (id: string) => {
@@ -139,6 +147,16 @@ export function ExpressionPanelGrid({
     },
     [layouts],
   );
+  // 시트 안에서는 시트의 끌어내리기와 스크롤을 주고받는다(`usePageSheetScrollProps` 가 우리 처리기를 겹쳐 쓴다). 키보드 자리 창에서는 예전 그대로다.
+  const sheetScroll = usePageSheetScrollProps({
+    onScroll,
+    onLayout: event => {
+      viewport.current = event.nativeEvent.layout.height;
+    },
+    onContentSizeChange: (_w, h) => {
+      content.current = h;
+    },
+  });
   const toggleFavorite = useCallback(
     (item: Expression) => {
       const added = toggle(item.id);
@@ -164,6 +182,8 @@ export function ExpressionPanelGrid({
       ? formatMessage('expressions.sheet.error')
       : state === WORD.loading
       ? formatMessage('expressions.sheet.loading')
+      : query.trim() !== ''
+      ? formatMessage('expressions.sheet.noMatch')
       : formatMessage(EMPTY_COPY[tab]);
   const noticeId = state === WORD.ready ? EMPTY_ID : stateTestId(state);
 
@@ -179,14 +199,18 @@ export function ExpressionPanelGrid({
         showsVerticalScrollIndicator={false}
         initialNumToRender={3}
         windowSize={5}
-        scrollEventThrottle={32}
-        onScroll={onScroll}
-        onLayout={event => {
-          viewport.current = event.nativeEvent.layout.height;
-        }}
-        onContentSizeChange={(_w, h) => {
-          content.current = h;
-        }}
+        {...(inSheet
+          ? sheetScroll
+          : {
+              scrollEventThrottle: 32,
+              onScroll,
+              onLayout: (event: {nativeEvent: {layout: {height: number}}}) => {
+                viewport.current = event.nativeEvent.layout.height;
+              },
+              onContentSizeChange: (_w: number, h: number) => {
+                content.current = h;
+              },
+            })}
         getItemLayout={(_data, index) => ({
           length: layouts[index]?.height ?? 0,
           offset: layouts[index]?.top ?? 0,
@@ -255,7 +279,8 @@ export function ExpressionPanelGrid({
       <View style={[styles.strip, {paddingBottom: Math.max(insets.bottom, space.xs)}]} testID="expression-panel-strip">
         <FlatList
           horizontal
-          data={layouts}
+          // 검색 결과는 구역 하나뿐이라 건너뛸 곳이 없다 - 웹 격자도 띠에서 뺀다.
+          data={layouts.filter(layout => layout.section.id !== RESULTS_SECTION)}
           keyExtractor={layout => layout.section.id}
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

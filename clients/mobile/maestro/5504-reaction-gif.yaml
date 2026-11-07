@@ -1,0 +1,143 @@
+appId: app.momo.ios
+name: 5504-reaction-gif
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID
+---
+# 이모티콘·GIF 를 반응으로 달고 지운다 (#5504, owner 2026-11-07: GIF·이모티콘도 반응으로). 이 흐름은 쓰기만 했고 아직 돌리지 않았다
+# (`maestro check-syntax` 로 문법만 봤다) - 시뮬레이터 판정은 스택 검증 줄이 한다.
+#
+# 흐름: 글 하나를 보낸다 → 길게 눌러 시트 → 「＋」(전체 반응) → 반응 고르개가 **세 탭이고 처음은 이모지**다 → GIF 탭에서 한 장 고르면 시트가 내려가고 그 메시지 아래에 반응 칩이 하나 달린다
+# (큰 그림 메시지는 가지 않는다) → 칩을 눌러 지운다 → 이모티콘 탭에서도 한 장 달고 지운다. 칩의 GIF 가 계속 움직이는지(4번 뒤에도)는 눈으로 보는 것이라 캡처(`takeScreenshot`)로 남긴다.
+#
+# 준비: `CHANNEL_ID` 채널이 있고 팀 보관함에 `nya_dance`(GIF) 와 `chi_cry`(이모티콘)가 있는 스택 - `measure/seed-expression-panel.py`. 돌리는 법은 `maestro/70-composer-newline.yaml` 머리말과 같다.
+# 입력은 ASCII 다: Maestro 의 `inputText` 는 시뮬레이터에서 한글 조합을 못 친다.
+- launchApp:
+    appId: app.momo.ios
+# 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+- runFlow: subflows/ensure-signed-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:${CHANNEL_ID}"
+    timeout: 90000
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ① 반응을 달 글 하나를 보낸다.
+- tapOn:
+    id: "composer-input"
+- inputText: "react to this 5504"
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "message-press"
+      text: ".*react to this 5504.*"
+    timeout: 20000
+
+# ② 길게 눌러 시트를 열고 「＋」(전체 반응)을 누른다. 반응 고르개가 같은 시트 안에서 큰 단으로 바뀐다.
+- longPressOn:
+    id: "message-press"
+    text: ".*react to this 5504.*"
+- extendedWaitUntil:
+    visible:
+      id: "all-reactions"
+    timeout: 10000
+- tapOn:
+    id: "all-reactions"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel"
+    timeout: 10000
+# 세 탭이다. 처음은 이모지 탭이라 표준 그림 문자 목록(`emoji-grid`)과 팀 이모지 줄이 서 있고, 이모티콘·GIF 격자는 아직 없다.
+- assertVisible:
+    id: "expression-panel-tab-emoticon"
+- assertVisible:
+    id: "expression-panel-tab-emoji"
+- assertVisible:
+    id: "expression-panel-tab-gif"
+- assertVisible:
+    id: "expression-panel-emoji"
+- assertNotVisible:
+    id: "expression-panel-grid"
+# 예전 시트의 머리·검색 칸은 그대로다.
+- assertVisible:
+    id: "emoji-picker-close"
+- assertVisible:
+    id: "emoji-search"
+
+# ③ GIF 탭에서 한 장을 고른다: 시트가 내려가고, 그 글 아래에 `:nya_dance:` 반응 칩이 하나 달린다. 큰 그림 메시지는 대화에 오지 않는다.
+- tapOn:
+    id: "expression-panel-tab-gif"
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-nya_dance"
+    timeout: 20000
+- tapOn:
+    id: "expression-pick-nya_dance"
+- extendedWaitUntil:
+    visible:
+      id: "reaction-chip-:nya_dance:"
+    timeout: 20000
+- assertNotVisible:
+    id: "expression-body-large"
+# 칩의 GIF 는 4번 돈 뒤에도 계속 움직인다(8초 뒤에도 그림이 그대로 GIF 로 서 있다). 장면이 바뀌는지는 두 캡처를 눈으로 비교한다.
+- takeScreenshot: 5504-1-gif-chip-a
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: 5504-2-gif-chip-b
+- assertVisible:
+    id: "reaction-chip-:nya_dance:"
+# 칩을 누르면 내 반응이 지워지고 칩도 사라진다(하나뿐이던 칩).
+- tapOn:
+    id: "reaction-chip-:nya_dance:"
+- extendedWaitUntil:
+    notVisible:
+      id: "reaction-chip-:nya_dance:"
+    timeout: 20000
+
+# ④ 이모티콘 탭에서도 한 장을 달고 지운다.
+- longPressOn:
+    id: "message-press"
+    text: ".*react to this 5504.*"
+- extendedWaitUntil:
+    visible:
+      id: "all-reactions"
+    timeout: 10000
+- tapOn:
+    id: "all-reactions"
+- extendedWaitUntil:
+    visible:
+      id: "expression-panel-tab-emoticon"
+    timeout: 10000
+- tapOn:
+    id: "expression-panel-tab-emoticon"
+- extendedWaitUntil:
+    visible:
+      id: "expression-pick-chi_cry"
+    timeout: 20000
+- tapOn:
+    id: "expression-pick-chi_cry"
+- extendedWaitUntil:
+    visible:
+      id: "reaction-chip-:chi_cry:"
+    timeout: 20000
+- assertNotVisible:
+    id: "expression-body-large"
+- takeScreenshot: 5504-3-emoticon-chip
+- tapOn:
+    id: "reaction-chip-:chi_cry:"
+- extendedWaitUntil:
+    notVisible:
+      id: "reaction-chip-:chi_cry:"
+    timeout: 20000
