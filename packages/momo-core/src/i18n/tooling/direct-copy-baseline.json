@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "82d4d2b438ab234700e106cb9c73d35aea041e44",
+  "baselineHead": "b42cf4b7168aaf902ae94c755b70f02d162988fd",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -620,7 +620,7 @@
     "clients/web/src/features/inbox/mailboxTab.ts": 10,
     "clients/web/src/features/inbox/useInbox.ts": 14,
     "clients/web/src/features/inbox/useMailbox.ts": 19,
-    "clients/web/src/features/inbox/useNeedsMe.ts": 3,
+    "clients/web/src/features/inbox/useNeedsMe.ts": 2,
     "clients/web/src/features/memory/ChannelMemoryDialog.tsx": 10,
     "clients/web/src/features/memory/DecisionTimeline.tsx": 24,
     "clients/web/src/features/memory/EvidenceLinks.tsx": 8,
