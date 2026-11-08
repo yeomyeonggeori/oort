@@ -448,7 +448,8 @@ export function ThreadPanel({
 
   if (status === 'error') {
     return (
-      <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
+      // 실패 화면도 대화를 통째로 덮는다 — 낭독 경계는 아래 본 화면과 같다(#5544).
+      <EdgeSwipeBack accessibilityViewIsModal style={styles.overlay} onBack={onClose}>
         <Screen style={styles.screen}>
           <ConversationHeader
             title="스레드"
@@ -476,7 +477,12 @@ export function ThreadPanel({
     // 스레드를 열어 둔 채 엣지를 밀면 닫히는 것은 스레드 하나이고, 대화는 그대로
     // 남는다. 뒤로가기가 한 번에 한 겹씩만 벗겨진다는 것은 헤더의 「‹」 버튼이
     // 이미 지키던 규칙이고, 제스처가 그것을 다르게 해석하면 안 된다.
-    <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
+    //
+    // 판은 대화 화면 전체(채널 머리 포함)를 덮는 불투명한 면이라 판 자신이 VoiceOver 의 모달 경계다(#5544): 형제인
+    // `conversation-column`(채널 머리의 ‹·이름 알약·돋보기·⋮, 목록, 채널 입력창)이 낭독에서 빠진다. 안 걸면 판 뒤의 보이지 않는
+    // 채널 ‹·⋮ 에 낭독 초점이 닿는다 — 스레드를 닫는다고 믿고 대화를 나갈 수 있다. 같은 층의 정보 페이지(`ConversationInfoPage`)와 같은 자리다.
+    // 이 플래그는 iOS 전용이라 목록·채널 입력창은 `ConversationScreen` 의 `conversation-layout-wrap` 이 두 플랫폼에서 따로 뺀다.
+    <EdgeSwipeBack accessibilityViewIsModal style={styles.overlay} onBack={onClose}>
       <Screen style={styles.screen}>
         <View pointerEvents="box-none" style={styles.headerOverlay} onLayout={onHeaderLayout} testID="thread-header-overlay">
           <ConversationHeader
