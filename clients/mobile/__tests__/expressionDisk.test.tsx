@@ -2,7 +2,8 @@
 //
 // **MA2·MA3·MA4는 저장소 `image()`를 직접 부르고 포트(보관 칸 가짜)의 디스크 읽기 횟수를 센다**(R2-M2: 화면을 그려서 재면 화면 부품의 문이 저장소의 문을 가려 저장소의 문을 꺼도
 // 붉지 않다). 화면 시험은 덧붙임이다. 「앱을 다시 켠다」는 같은 보관 칸 가짜를 새 저장소에 넘기는 것이다(저장소 인스턴스가 죽어도 디스크는 남는다). 줄마다 「끄면 RED」는 사보타주 하네스가
-// 확인했고 인계 문서의 표에 있다. MA13·무결성의 파일 수준·시작 청소·세션 경계는 `expressionDiskBackend.test.ts`·`expressionDiskSession.test.tsx`.
+// 확인했고 인계 문서의 표에 있다 — 단독으로 끄면 붉지 않는 겹친 줄(ready·온라인·active·`since` 검사처럼 앞선 줄이 먼저 막는 것)도 그 표에 따로 적었다.
+// MA13·무결성의 파일 수준·시작 청소·세션 경계는 `expressionDiskBackend.test.ts`·`expressionDiskSession.test.tsx`.
 import 'react-native-url-polyfill/auto';
 import {
   FIXTURE_READY_DRAFT,
