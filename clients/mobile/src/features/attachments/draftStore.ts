@@ -6,6 +6,7 @@ import {
   completeUpload,
   draftFor,
   failUpload,
+  INLINE_PREVIEW_MAX_BYTES,
   progressUpload,
   removeDraft as removeDraftFrom,
   requeueUpload,
@@ -16,16 +17,19 @@ import {
   type MessageAttachment,
   type UploadIssue,
 } from '@momo/core/features/attachments/model';
+import {declareImageSize} from '@momo/core/features/attachments/declareImageSize';
 import {
   completeAttachmentUpload,
   createAttachmentUpload,
 } from '@momo/core/lib/api';
+import {canDeclareImageSize} from '@momo/core/lib/attachmentMedia';
 import {
   verdictForRequestFailure,
   verdictForTransferFailure,
 } from '@momo/core/features/connection/uploadFailure';
 import {deviceOnlineNow} from '../connection/deviceOnline';
 
+import {measurePickedImage, type ImageSize} from './imageSize';
 import type {PickedAttachmentFile} from './picker';
 import {putAttachmentBytes, type UploadHandle} from './uploadTransport';
 
@@ -113,6 +117,14 @@ async function uploadOne(
     return;
   }
   update(key, list => beginUpload(list, draft.localId));
+  // 사진·GIF 의 표시 크기는 올리는 동안 재 둔다(ADR-0151 증보 9 I7): 업로드가 끝날 때쯤 답이 이미 있어서 아래 선언이 기다리지 않는다.
+  // **받는 쪽이 인라인 그림으로 그리는 사진만** 잰다: 닫힌 목록(JPEG·PNG·GIF·WebP) 안이고 인라인 미리보기 한도(`INLINE_PREVIEW_MAX_BYTES`, 받는 쪽
+  // `showsInlinePreview` 와 같은 한도) 이하여야 한다. 그 위의 큰 사진은 받는 쪽이 파일 카드로 그리므로 아무도 안 그리는 칸을 재자고 디코드하지도,
+  // 선언을 보내지도 않는다. 어떤 실패도 던지지 않는다(`null`).
+  const measuring: Promise<ImageSize | null> | null =
+    canDeclareImageSize(draft.mime) && draft.sizeBytes <= INLINE_PREVIEW_MAX_BYTES
+      ? measurePickedImage(picked.uri, draft.mime)
+      : null;
 
   let session;
   try {
@@ -181,6 +193,26 @@ async function uploadOne(
       target.channelId,
       session.id,
     );
+    if (generation !== sessionGeneration) return;
+    // **보내기 가능으로 바꾸기 전에** 가로세로를 선언한다(ADR-0151 증보 9 I7): 서버는 아직 메시지에 안 묶인 첨부에만 쓰므로, 바꾼 뒤에
+    // 부르면 빠른 전송이 먼저 묶어 이 호출이 조용히 404 가 된다. 덤이다 — 던지지 않고(코어 `declareImageSize`), 예산이 넘으면 기다리기를
+    // 그만두며, 실패해도 사진은 요약 없이 간다. 아래 `catch {}` 는 그 약속이 어떤 사정으로도 깨지지 않게 하는 자리다: 선언 때문에 올리기가
+    // 「실패」가 되는 일은 없다.
+    // 크기를 모르고 올린 파일(`sizeKnown: false`)은 완료가 돌려준 **실제 크기**(`row.size`)로 한 번 더 한도를 본다.
+    if (measuring !== null && row.size <= INLINE_PREVIEW_MAX_BYTES) {
+      try {
+        await declareImageSize({
+          workspaceId: target.workspaceId,
+          channelId: target.channelId,
+          attachmentId: row.id,
+          mime: draft.mime,
+          measure: () => measuring,
+        });
+      } catch {
+        // 선언은 덤이다.
+      }
+    }
+    // 그 사이 로그아웃했으면 옛 계정의 초안을 새 계정 표면에서 「끝남」으로 바꾸지 않는다(위 `complete` 뒤와 같은 자물쇠).
     if (generation !== sessionGeneration) return;
     update(key, list => completeUpload(list, draft.localId, row.id));
   } catch (error: unknown) {

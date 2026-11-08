@@ -37,6 +37,7 @@ use momo_agent::card_suggest::suggestion_requester_in_tx;
 use momo_agent::inert_display_name;
 use momo_agent::team_ai_roles::TeamAiRoles;
 
+use crate::team_ai_hermes::HermesPrompt;
 use crate::team_ai_limits::TeamAiLimits;
 
 /// The handle of the team AI member.
@@ -115,8 +116,20 @@ pub const TASK_REPORT_CHARS_MAX: usize = 12_000;
 const ROSTER_MEMBERS_MAX: i64 = 60;
 const ROSTER_CHANNELS_MAX: i64 = 40;
 
+/// Is `action_id` on the helper's **allow-list**? This is the decision route's question
+/// (`card_provenance`: a card with the helper's mark must be for an action on the list), and it is
+/// true for the two ids a server routine raises.
 pub fn is_team_ai_action(action_id: &str) -> bool {
     TEAM_AI_ACTION_IDS.contains(&action_id)
+}
+
+/// May a **model's** `workspace_action_propose` call name `action_id`? On the allow-list and not one a
+/// server routine raises (ADR-0218 증보 6 §12 L2.2 · A5, #5460 S1b). A model that names such an id
+/// anyway has called a tool it was not offered: [`ProposalRefusal::NotAllowed`], the same answer as an
+/// id outside the list, and no row is written. The set's own cards go through
+/// `crate::team_ai_set`, whose signature has no argument a model could fill.
+pub fn is_model_proposable_action(action_id: &str) -> bool {
+    is_team_ai_action(action_id) && !actions::is_server_raised_action(action_id)
 }
 
 /// The switch and the member, as read from `workspace.settings`.
@@ -701,8 +714,13 @@ pub enum WebSearch {
     /// The team key's wire has no server-side search (`ChatCompletions`,
     /// `Responses` until verified).
     NotSupported,
-    /// The operator switched it off (`team_ai_web_search: false`).
+    /// The administrator switched it off (`team_ai_web_search: false`).
     Off,
+    /// The operator switched it off for everybody (`TEAM_AI_DAILY_SEARCH_CAP=0`). Read as
+    /// [`WebSearch::DailyCapReached`] until ADR-0201 증보 v4 (#5369): the two are different facts — a spent
+    /// allowance comes back tomorrow and a `0` does not, and a spent allowance may be answered by Hermes
+    /// (P2 「종류 배타」) while a `0` may not (T14: it turns Hermes's search off too).
+    OperatorOff,
     /// The day's search allowance is used up — the workspace's own `dailySearches` or the
     /// operator's ceiling, whichever is lower (`team_ai_limits::search_cap`). The turn still
     /// answers; only the search tool is withheld.
@@ -714,12 +732,38 @@ pub enum WebSearch {
 }
 
 impl WebSearch {
+    /// **The one reading** of whether a request may search, shared by the first turn and every task step
+    /// (they used to carry two copies of this chain). The order is the point (ADR-0201 증보 v4 P2, review
+    /// RL3): both switches that mean 「아무도 웹 검색을 못 해요」 — the administrator's (`admin_on` false) and the
+    /// operator's `0` (`operator_off`) — are read **before** the wire, so a wire that cannot search can never
+    /// turn a switch into `NotSupported` (the state Hermes may answer). `cap_reached` is a non-zero allowance
+    /// that is spent (`searches_today >= cap`); an operator `0` never gets that far.
+    pub fn judge(
+        admin_on: bool,
+        operator_off: bool,
+        wire_searches: bool,
+        cap_reached: bool,
+    ) -> WebSearch {
+        if !admin_on {
+            WebSearch::Off
+        } else if operator_off {
+            WebSearch::OperatorOff
+        } else if !wire_searches {
+            WebSearch::NotSupported
+        } else if cap_reached {
+            WebSearch::DailyCapReached
+        } else {
+            WebSearch::Available
+        }
+    }
+
     /// The honest sentence the helper uses when asked to search and cannot.
     pub fn refusal(self) -> Option<&'static str> {
         match self {
             WebSearch::Available => None,
             WebSearch::NotSupported => Some("지금 연결된 팀 키로는 웹 검색을 못 해요."),
             WebSearch::Off => Some("웹 검색은 관리자가 꺼 두었어요."),
+            WebSearch::OperatorOff => Some("웹 검색은 서버 운영자가 꺼 두었어요."),
             WebSearch::DailyCapReached => Some("오늘 웹 검색을 다 썼어요. 내일 다시 쓸 수 있어요."),
             WebSearch::AfterRead => Some("이 조사는 워크스페이스를 읽은 뒤라서 웹 검색을 못 해요."),
         }
@@ -816,6 +860,35 @@ pub fn system_prompt_for(
     withheld: &[&str],
     task: TaskPrompt,
     files_on: bool,
+) -> String {
+    system_prompt_full(
+        roster,
+        web,
+        action_ids,
+        command_ids,
+        withheld,
+        task,
+        files_on,
+        &HermesPrompt::Off,
+    )
+}
+
+/// [`system_prompt_for`] plus the delegation line (ADR-0201 증보 v4 P2, #5369): `hermes` is what the door
+/// ([`DoorFacts::prompt`](crate::team_ai_hermes::DoorFacts::prompt)) says about Hermes for this request at
+/// this moment — a capability sentence only while `ask_hermes` is on the request, the one honest sentence
+/// the operator's opened-but-shut states need, and what a read took away. [`HermesPrompt::Off`] adds
+/// nothing and leaves the prompt byte for byte what [`system_prompt_for`] built before this slice. When the
+/// search is handed to Hermes the 「웹 검색을 못 해요」 refusal is left out: it would contradict the line.
+#[allow(clippy::too_many_arguments)]
+pub fn system_prompt_full(
+    roster: &Roster,
+    web: WebSearch,
+    action_ids: &[&str],
+    command_ids: &[&str],
+    withheld: &[&str],
+    task: TaskPrompt,
+    files_on: bool,
+    hermes: &HermesPrompt,
 ) -> String {
     // B10-7 (#4966): the helper's name is whatever it is called now. It rides in the data block
     // (「네 이름」), through `data_line`, like every other name a person typed: the instruction half
@@ -946,7 +1019,12 @@ pub fn system_prompt_for(
     if offers_work_request {
         abilities.push(work_request_prompt_line());
     }
-    abilities.push(web_line);
+    if !hermes.offers_web_search() {
+        abilities.push(web_line);
+    }
+    if let Some(line) = hermes.line() {
+        abilities.push(line);
+    }
     match task {
         TaskPrompt::Off => {}
         TaskPrompt::Offer => abilities.push(format!(
@@ -1229,7 +1307,7 @@ pub struct ProposalOk {
     pub requester_member_id: Uuid,
 }
 
-fn via_json(context: &ProposalContext, requester: Uuid) -> Value {
+pub(crate) fn via_json(context: &ProposalContext, requester: Uuid) -> Value {
     json!({
         "source": "team_ai",
         "requester_id": requester.to_string(),
@@ -1249,16 +1327,27 @@ async fn count_pending_for_requester_in_tx(
     workspace_id: Uuid,
     requester: Uuid,
 ) -> Result<(i64, i64), DbError> {
+    // ADR-0218 증보 6 §12 L8-1 (#5460 S1b, A8): the set card and the plan card are not counted. They
+    // carry the helper's mark too, but the limit of ONE undecided set per agent is the database's
+    // (a partial unique index), and counting them here would let one set — or a plan card waiting
+    // for its answer — eat one of the three ordinary slots the owner kept for ordinary requests.
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE payload->'via_ai'->>'requester_id' = $2) AS mine, \
                 count(*) AS everyone \
            FROM approval \
           WHERE workspace_id = $1 AND status = 'pending' \
-            AND action_type = $3 AND payload->'via_ai'->>'source' = 'team_ai'",
+            AND action_type = $3 AND payload->'via_ai'->>'source' = 'team_ai' \
+            AND COALESCE(payload->'action'->>'id', '') <> ALL($4::text[])",
     )
     .bind(workspace_id)
     .bind(requester.to_string())
     .bind(actions::ACTION_TYPE_WORKSPACE_ACTION)
+    .bind(
+        actions::SERVER_RAISED_ACTION_IDS
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect::<Vec<String>>(),
+    )
     .fetch_one(&mut *conn)
     .await?;
     Ok((
@@ -1288,15 +1377,24 @@ pub async fn recent_requests_by_in_tx(
     .await?)
 }
 
+/// What the requester's approval would be about, beyond the action's [`GateSubject`]: the channel the
+/// card stands in and the face it names (`expression_adder` is judged against both).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CardScope {
+    pub channel_id: Uuid,
+    pub face: Option<Uuid>,
+}
+
 /// Could the requester approve this action themselves? A convenience check so a
 /// card nobody present can approve is not raised (D3); the **real** gate is the
 /// decision route's, which re-proves everything.
-async fn requester_could_approve_in_tx(
+pub(crate) async fn requester_could_approve_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     requester: Uuid,
     action: &WorkspaceAction,
     subject: GateSubject,
+    card: CardScope,
 ) -> Result<bool, DbError> {
     let role = momo_auth::active_workspace_role(conn, workspace_id, requester)
         .await
@@ -1323,9 +1421,36 @@ async fn requester_could_approve_in_tx(
         // the team AI never proposes `dm.agent.admit` (not on `TEAM_AI_ACTION_IDS`), so this
         // arm stays exhaustive and fail-closed.
         RequiredRole::DmParticipant => false,
-        // `expression.create` is not a team-AI action (not on `TEAM_AI_ACTION_IDS`); this
-        // arm only keeps the match exhaustive and fail-closed.
-        RequiredRole::ExpressionAdder => false,
+        // ADR-0218 증보 6 §12 L2.4-5 (#5460 S1b, A22): the set card's role. A live human member of the
+        // card's channel, not a guest, who meets the workspace's add policy **now**, and — when the
+        // set names a face — that very person. This door raises no other person's face, so a face
+        // that is not the requester is `false` before the policy is even asked. (The same predicate,
+        // `adder_allows_in_tx`, serves the decision route, the push audience and the preview.)
+        // Set back to a constant `false` and no set can ever be raised.
+        RequiredRole::ExpressionAdder => {
+            if card.face.is_some_and(|face| face != requester) {
+                false
+            } else {
+                crate::action_resolve::member_is_live_in_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    card.channel_id,
+                    requester,
+                )
+                .await?
+                    && momo_expressions::store::adder_allows_in_tx(
+                        conn,
+                        workspace_id,
+                        requester,
+                        card.face,
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        momo_expressions::Error::Db(error) => error,
+                        other => DbError::from(sqlx::Error::Protocol(other.to_string())),
+                    })?
+            }
+        }
         // Only the human who started this run, for either self-profile action (v7).
         RequiredRole::RequestingMember => {
             matches!(subject, GateSubject::Member(target) if target == requester)
@@ -1360,7 +1485,7 @@ pub async fn propose_with_avatar_in_tx(
     prepared: Option<&crate::profile_avatar::PreparedAvatar>,
 ) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
     let workspace_id = context.workspace_id;
-    if !is_team_ai_action(action_id) {
+    if !is_model_proposable_action(action_id) {
         return Ok(Err(ProposalRefusal::NotAllowed));
     }
     let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
@@ -1503,6 +1628,10 @@ pub async fn propose_with_avatar_in_tx(
         requester.member_id,
         action,
         resolved.subject,
+        CardScope {
+            channel_id: context.channel_id,
+            face: None,
+        },
     )
     .await?
     {
@@ -1710,7 +1839,7 @@ pub fn validate_pure(
     raw_args: &Value,
     now_ms: i64,
 ) -> Result<(), ProposalRefusal> {
-    if !is_team_ai_action(action_id) {
+    if !is_model_proposable_action(action_id) {
         return Err(ProposalRefusal::NotAllowed);
     }
     let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
@@ -1925,8 +2054,21 @@ mod tests {
                 "{id} is not in the registry"
             );
         }
-        assert_eq!(TEAM_AI_ACTION_IDS.len(), 14);
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 16);
         assert!(is_team_ai_action(actions::ACTION_TEAM_AI_ROLES_SET));
+        // ADR-0218 증보 6 §12 L2.2 (#5460 S1b, A5): the set's two cards are on the allow-list (the
+        // decision accepts the helper's mark) and are not a model's to name.
+        for id in actions::SERVER_RAISED_ACTION_IDS {
+            assert!(is_team_ai_action(id), "{id}");
+            assert!(!is_model_proposable_action(id), "{id}");
+            assert_eq!(
+                validate_pure(id, &json!({}), 0),
+                Err(ProposalRefusal::NotAllowed)
+            );
+        }
+        for id in &TEAM_AI_ACTION_IDS[..14] {
+            assert!(is_model_proposable_action(id), "{id}");
+        }
         assert!(is_team_ai_action(actions::ACTION_WORKSPACE_SETTINGS_UPDATE));
         assert!(is_team_ai_action(actions::ACTION_PLUGIN_INSTALL));
         // B15-A1: the two invites are the helper's now; widening the helper's own access is not.
@@ -2210,6 +2352,12 @@ mod tests {
                 "지금 연결된 팀 키로는 웹 검색을 못 해요.",
             ),
             (WebSearch::Off, "웹 검색은 관리자가 꺼 두었어요."),
+            // ADR-0201 증보 v4 (#5369): the operator's `0` is its own fact, said as such — not as a spent
+            // allowance that "comes back tomorrow"
+            (
+                WebSearch::OperatorOff,
+                "웹 검색은 서버 운영자가 꺼 두었어요.",
+            ),
             (WebSearch::DailyCapReached, "오늘 웹 검색을 다 썼어요."),
         ] {
             assert!(
@@ -2218,6 +2366,73 @@ mod tests {
             );
         }
         assert!(WebSearch::Available.refusal().is_none());
+        assert!(!WebSearch::OperatorOff.refusal().unwrap().contains("내일"));
+    }
+
+    /// ADR-0201 증보 v4 P2 (#5369): the Hermes line is **added to**, never mixed into, the prompt. With
+    /// `HermesPrompt::Off` the prompt is byte for byte what `system_prompt_for` always built (every team
+    /// that never opened the delegation reads the prompt it read before); a line appears only for the
+    /// states the door says something about; and the refusal 「웹 검색을 못 해요」 is left out exactly when
+    /// the search is handed to Hermes (the two sentences would contradict each other).
+    #[test]
+    fn the_hermes_line_is_added_to_the_prompt_and_changes_nothing_when_it_is_off() {
+        use crate::team_ai_hermes::{HermesKind, HermesPrompt, HERMES_NOT_CONNECTED_SENTENCE};
+        let roster = Roster::default();
+        let base = |web| {
+            system_prompt_for(
+                &roster,
+                web,
+                &TEAM_AI_ACTION_IDS,
+                &[],
+                &[],
+                TaskPrompt::Off,
+                false,
+            )
+        };
+        let full = |web, hermes: &HermesPrompt| {
+            system_prompt_full(
+                &roster,
+                web,
+                &TEAM_AI_ACTION_IDS,
+                &[],
+                &[],
+                TaskPrompt::Off,
+                false,
+                hermes,
+            )
+        };
+        for web in [
+            WebSearch::Available,
+            WebSearch::NotSupported,
+            WebSearch::Off,
+            WebSearch::OperatorOff,
+            WebSearch::DailyCapReached,
+            WebSearch::AfterRead,
+        ] {
+            assert_eq!(base(web), full(web, &HermesPrompt::Off), "{web:?}");
+        }
+        // an offered search: the line is there and the refusal for that web state is not
+        let offered = HermesPrompt::Offered {
+            kinds: vec![HermesKind::WebSearch],
+        };
+        let with_line = full(WebSearch::NotSupported, &offered);
+        assert!(
+            with_line.contains("`ask_hermes`") && with_line.contains("`web_search`"),
+            "{with_line}"
+        );
+        assert!(
+            !with_line.contains("지금 연결된 팀 키로는 웹 검색을 못 해요"),
+            "{with_line}"
+        );
+        // a closed-state sentence does not remove the refusal (the search is not handed over)
+        let not_connected = full(WebSearch::NotSupported, &HermesPrompt::NotConnected);
+        assert!(not_connected.contains(HERMES_NOT_CONNECTED_SENTENCE));
+        assert!(not_connected.contains("지금 연결된 팀 키로는 웹 검색을 못 해요"));
+        // an offered picture alone does not touch the search sentence either
+        let image_only = HermesPrompt::Offered {
+            kinds: vec![HermesKind::Image],
+        };
+        assert!(full(WebSearch::Off, &image_only).contains("웹 검색은 관리자가 꺼 두었어요"));
     }
 
     #[test]

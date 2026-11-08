@@ -245,12 +245,16 @@ describe('「AI와 만들기」 요청 뒤 (#4962)', () => {
     // 루트 행의 롤업을 눌러 스레드 판을 연다 — 지금은 #general 이고 채널 머리(얼굴이 아니라 # 글리프)다.
     fireEvent.press(await screen.findByTestId('thread-rollup'));
     await screen.findByTestId('thread-title');
-    expect(screen.queryByTestId('conversation-title-face')).toBeNull();
+    // 채널 머리는 스레드 판 뒤에서 낭독에서 빠져 있다(#5544) — 숨은 것까지 보고 「얼굴이 아니라 # 글리프」를 잰다.
+    const hidden = {includeHiddenElements: true} as const;
+    expect(screen.queryByTestId('conversation-title-face', hidden)).toBeNull();
+    expect(screen.getByTestId('conversation-title-glyph-public', hidden)).toBeTruthy();
 
-    // 입력창은 둘이다(본류 · 스레드). 스레드 판이 뒤에 그려지므로 마지막이 스레드의 것이다.
+    // 입력창은 둘 다 마운트돼 있지만(본류 · 스레드), 스레드 판이 열린 동안 본류 입력창은 낭독에서 빠진다(#5544) — 닿는 것은 스레드의 것 하나다.
+    expect(screen.getAllByTestId('composer-expression', hidden)).toHaveLength(2);
     const buttons = screen.getAllByTestId('composer-expression');
-    expect(buttons).toHaveLength(2);
-    fireEvent.press(buttons[buttons.length - 1]);
+    expect(buttons).toHaveLength(1);
+    fireEvent.press(buttons[0]);
     // 이모티콘 창은 키보드 자리에 서고(#5452), 가져오기·만들기는 띠 끝의 「＋」 시트로 연다.
     fireEvent.press(await screen.findByTestId('expression-panel-add'));
     await screen.findByTestId('expression-add-doors');

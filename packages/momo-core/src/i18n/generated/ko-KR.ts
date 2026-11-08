@@ -3038,6 +3038,12 @@ export const catalog: MessageCatalog = {
       "value": "즐겨찾기"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "자주·최근"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -3062,6 +3068,218 @@ export const catalog: MessageCatalog = {
       "value": "팀 보관함"
     }
   ],
+  "expressions.plan.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "expressions.plan.closed": [
+    {
+      "type": 0,
+      "value": "이 계획은 닫혔어요"
+    }
+  ],
+  "expressions.plan.concept": [
+    {
+      "type": 0,
+      "value": "컨셉"
+    }
+  ],
+  "expressions.plan.confirm": [
+    {
+      "type": 0,
+      "value": "이대로 만들기"
+    }
+  ],
+  "expressions.plan.confirmed": [
+    {
+      "type": 0,
+      "value": "만들기를 시작했어요"
+    }
+  ],
+  "expressions.plan.declare": [
+    {
+      "type": 0,
+      "value": "사람 얼굴이 있는 그림은 보내지 마세요. 이 그림들에는 사람 얼굴이 없어요."
+    }
+  ],
+  "expressions.plan.editBack": [
+    {
+      "type": 0,
+      "value": "그만두기"
+    }
+  ],
+  "expressions.plan.editInclude": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": " 넣기"
+    }
+  ],
+  "expressions.plan.editName": [
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번 표시 이름"
+    }
+  ],
+  "expressions.plan.editRemoveReference": [
+    {
+      "type": 0,
+      "value": "참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 빼기"
+    }
+  ],
+  "expressions.plan.editScene": [
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번 장면"
+    }
+  ],
+  "expressions.plan.editSubmit": [
+    {
+      "type": 0,
+      "value": "고친 대로 새로 계획하기"
+    }
+  ],
+  "expressions.plan.gif": [
+    {
+      "type": 0,
+      "value": "바탕: "
+    },
+    {
+      "type": 1,
+      "value": "base"
+    },
+    {
+      "type": 0,
+      "value": ", 움직임: "
+    },
+    {
+      "type": 1,
+      "value": "motion"
+    }
+  ],
+  "expressions.plan.heading": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 계획"
+    }
+  ],
+  "expressions.plan.kept": [
+    {
+      "type": 0,
+      "value": "Hermes는 보낸 그림과 결과를 자기 기록에 남길 수 있어요"
+    }
+  ],
+  "expressions.plan.motionBounce": [
+    {
+      "type": 0,
+      "value": "통통"
+    }
+  ],
+  "expressions.plan.motionPulse": [
+    {
+      "type": 0,
+      "value": "두근두근"
+    }
+  ],
+  "expressions.plan.motionSparkle": [
+    {
+      "type": 0,
+      "value": "반짝"
+    }
+  ],
+  "expressions.plan.motionWobble": [
+    {
+      "type": 0,
+      "value": "흔들흔들"
+    }
+  ],
+  "expressions.plan.notice": [
+    {
+      "type": 0,
+      "value": "첨부한 그림이 Hermes의 그림 모델로 전송돼요"
+    }
+  ],
+  "expressions.plan.pictures": [
+    {
+      "type": 0,
+      "value": "만들 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.plan.referenceAlt": [
+    {
+      "type": 0,
+      "value": "참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.references": [
+    {
+      "type": 0,
+      "value": "보낼 참조 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.plan.revise": [
+    {
+      "type": 0,
+      "value": "장면 고치기"
+    }
+  ],
+  "expressions.plan.scenes": [
+    {
+      "type": 0,
+      "value": "장면"
+    }
+  ],
   "expressions.preview.cancel": [
     {
       "type": 1,
@@ -3082,6 +3300,265 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "보낼 이모티콘"
+    }
+  ],
+  "expressions.set.agentText": [
+    {
+      "type": 0,
+      "value": "에이전트가 쓴 설명: "
+    },
+    {
+      "type": 1,
+      "value": "prompt"
+    }
+  ],
+  "expressions.set.badgeGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.set.cellGray": [
+    {
+      "type": 0,
+      "value": "선택할 수 없는 칸, "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.set.cellReady": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.set.decline": [
+    {
+      "type": 0,
+      "value": "안 할래요"
+    }
+  ],
+  "expressions.set.errorGeneric": [
+    {
+      "type": 0,
+      "value": "결정하지 못했어요. 권한과 연결을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "expressions.set.errorQuota": [
+    {
+      "type": 0,
+      "value": "보관함이 가득 차서 저장하지 못했어요."
+    }
+  ],
+  "expressions.set.errorStale": [
+    {
+      "type": 0,
+      "value": "그림이 바뀌었어요. 카드를 새로 불러온 뒤 다시 골라 주세요."
+    }
+  ],
+  "expressions.set.errorTaken": [
+    {
+      "type": 0,
+      "value": "고른 이름이 모두 이미 쓰이고 있어요. 다른 그림을 골라 주세요."
+    }
+  ],
+  "expressions.set.faceOnly": [
+    {
+      "type": 0,
+      "value": "얼굴 당사자만 승인할 수 있어요."
+    }
+  ],
+  "expressions.set.grayBaseMissing": [
+    {
+      "type": 0,
+      "value": "바탕이 되는 그림이 없어서 움직임을 입히지 못했어요"
+    }
+  ],
+  "expressions.set.grayFailed": [
+    {
+      "type": 0,
+      "value": "이 장면은 그림을 만들지 못했어요"
+    }
+  ],
+  "expressions.set.grayNotMade": [
+    {
+      "type": 0,
+      "value": "시간이 모자라서 이 장면은 만들지 못했어요"
+    }
+  ],
+  "expressions.set.grayRefused": [
+    {
+      "type": 0,
+      "value": "이 장면은 그림 모델이 만들 수 없다고 했어요"
+    }
+  ],
+  "expressions.set.gridLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 그림 목록"
+    }
+  ],
+  "expressions.set.offline": [
+    {
+      "type": 0,
+      "value": "연결되면 다시 시도해 주세요."
+    }
+  ],
+  "expressions.set.referenceCount": [
+    {
+      "type": 0,
+      "value": "참고한 그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "expressions.set.register": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 등록"
+    }
+  ],
+  "expressions.set.registering": [
+    {
+      "type": 0,
+      "value": "등록 중"
+    }
+  ],
+  "expressions.set.resultSaved": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 팀 보관함에 저장했어요"
+    }
+  ],
+  "expressions.set.resultSavedSkipped": [
+    {
+      "type": 2,
+      "value": "saved",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 저장하고 "
+    },
+    {
+      "type": 2,
+      "value": "skipped",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개는 건너뛰었어요"
+    }
+  ],
+  "expressions.set.rights": [
+    {
+      "type": 0,
+      "value": "저장해도 되는 그림인지 확인해 주세요. 고른 그림만 등록돼요."
+    }
+  ],
+  "expressions.set.selectAll": [
+    {
+      "type": 0,
+      "value": "전체 선택"
+    }
+  ],
+  "expressions.set.selectNone": [
+    {
+      "type": 0,
+      "value": "전체 해제"
+    }
+  ],
+  "expressions.set.settledDeclined": [
+    {
+      "type": 0,
+      "value": "저장하지 않았어요"
+    }
+  ],
+  "expressions.set.settledDone": [
+    {
+      "type": 0,
+      "value": "처리가 끝난 요청이에요"
+    }
+  ],
+  "expressions.set.settledExpired": [
+    {
+      "type": 0,
+      "value": "승인을 기다리다 만료됐어요"
+    }
+  ],
+  "expressions.set.summaryGray": [
+    {
+      "type": 0,
+      "value": "만들지 못한 장면 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "expressions.set.summaryReady": [
+    {
+      "type": 0,
+      "value": "그림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "expressions.set.unreadable": [
+    {
+      "type": 0,
+      "value": "그림 세트를 읽지 못했어요. 도우미에게 다시 만들어 달라고 해 주세요."
     }
   ],
   "expressions.sheet.a11y": [
@@ -3278,6 +3755,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기에 올리기"
+    }
+  ],
+  "expressions.suggest.settingHint": [
+    {
+      "type": 0,
+      "value": "글을 쓰다 멈추면 맞는 이모티콘을 입력창 위에 보여 줘요."
+    }
+  ],
+  "expressions.suggest.settingLabel": [
+    {
+      "type": 0,
+      "value": "이모티콘 추천"
+    }
+  ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "열기"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -5454,6 +5949,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "채팅에 들어갈 때 화면이 흔들리지 않고, 이모티콘 창이 새로워져 이모티콘과 글을 한 번에 보낼 수 있어요."
+    }
+  ],
+  "releaseNotes.v0145.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "폰의 이모티콘 추천 줄이 입력창 폭 전체로 서고, 끄는 ✕는 줄 오른쪽 끝으로 옮겼어요."
+    }
+  ],
+  "releaseNotes.v0145.expressionsLine2": [
+    {
+      "type": 0,
+      "value": "데스크탑의 가장 작은 창에서도 이모티콘 창의 탭과 검색 칸이 화면 안에 보여요."
+    }
+  ],
+  "releaseNotes.v0145.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentChanged": [
+    {
+      "type": 0,
+      "value": "이모티콘 탭의 맨 위 칸이 「자주·최근」이 되었어요. 최근에 쓴 정지 그림만 보이던 자리에, 정지 그림과 GIF를 섞어 자주 쓰고 최근에 쓴 그림이 12개까지 와요. 얼마나 자주, 얼마나 최근에 썼는지를 함께 따져서, 어제 한 번 쓴 그림이 한 달 전에 열 번 쓴 그림보다 앞에 서요. 창이 열려 있는 동안에는 차례가 바뀌지 않고, 다음에 열 때 다시 정해져요. 쓴 기록은 이 기기에만 있고, GIF 탭의 「최근」은 예전 그대로예요."
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentTitle": [
+    {
+      "type": 0,
+      "value": "자주 쓰는 그림이 맨 위에 모여요"
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘과 GIF를 몇 번 보낸 뒤 입력창의 웃는 얼굴 단추로 이모티콘 창을 다시 열어 보세요. 이모티콘 탭 맨 위 「자주·최근」에 방금 쓴 그림이 모여 있어요."
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsChanged": [
+    {
+      "type": 0,
+      "value": "앱을 완전히 닫았다가 다시 켜거나 웹을 새로 고쳐도, 이미 본 이모티콘 그림은 다시 받지 않고 기기에 남겨 둔 것으로 바로 그려요. 그림은 워크스페이스와 사람마다 따로 이 기기에만 두고, 팀 이모티콘 목록에 아직 있는 동안에만 꺼내 그려요. 숨기거나 지우거나 신고된 그림은 기기에 남아 있어도 그리지 않고, 새 목록이 오는 대로 지워요. 로그아웃하거나 로그인이 만료되면 모두 지우고, 7일 동안 쓰지 않은 그림도 정리해요."
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsTitle": [
+    {
+      "type": 0,
+      "value": "이미 본 이모티콘은 기기에 남아요"
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘이 많은 채널에 들어갔다가 앱을 완전히 닫고 다시 켜 보세요(웹은 새로 고침). 그림이 다시 불러와지지 않고 바로 서요."
+    }
+  ],
+  "releaseNotes.v0145.noBlinkChanged": [
+    {
+      "type": 0,
+      "value": "누군가 이모티콘 하나를 등록하거나 고치거나 숨기거나 지울 때, 화면의 이모티콘이 모두 사라졌다가 다시 뜨던 것을 고쳤어요. 숨기거나 지운 이모티콘은 그 그림만 바로 내려가고, 등록하거나 고칠 때는 보이던 그림이 그대로 있어요. 그림을 다시 받지도 않아요."
+    }
+  ],
+  "releaseNotes.v0145.noBlinkTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘 하나를 바꿔도 화면이 비지 않아요"
+    }
+  ],
+  "releaseNotes.v0145.noBlinkTryIt": [
+    {
+      "type": 0,
+      "value": "이모티콘이 많이 보이는 대화를 열어 둔 채, 다른 기기에서 내가 올린 이모티콘 하나를 숨겨 보세요. 그 그림만 내려가고 나머지는 그대로예요."
+    }
+  ],
+  "releaseNotes.v0145.phoneLine1": [
+    {
+      "type": 0,
+      "value": "VoiceOver가 스레드를 연 동안에는 뒤의 채널로, 대화를 연 동안에는 뒤의 홈 목록으로 넘어가지 않아요."
+    }
+  ],
+  "releaseNotes.v0145.phoneTopic": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsChanged": [
+    {
+      "type": 0,
+      "value": "폰에서 메시지를 길게 눌러 「빠른 반응」 줄 끝의 +를 누르면, 웹처럼 이모티콘, 이모지, GIF 세 탭이 떠요. 처음에는 예전처럼 이모지 탭이 열리고, 이모티콘이나 GIF를 고르면 큰 그림을 보내지 않고 반응 하나로 달려요. 반응으로 단 GIF는 웹, 데스크탑, 폰 모두 멈추지 않고 계속 움직여요. 메시지 속 GIF는 예전처럼 네 번 돌고 멈춰요. 기기에서 동작 줄이기를 켜 두었다면 반응 GIF도 첫 장면에 서 있어요."
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsTitle": [
+    {
+      "type": 0,
+      "value": "반응으로 단 GIF가 계속 움직여요"
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsTryIt": [
+    {
+      "type": 0,
+      "value": "폰에서 메시지를 길게 눌러 「빠른 반응」 줄 끝의 +를 누르고, GIF 탭에서 그림 하나를 골라 보세요. 반응으로 달린 GIF가 멈추지 않고 계속 움직여요."
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewChanged": [
+    {
+      "type": 0,
+      "value": "폰에서 메시지를 밀어 답장할 때와 스레드 입력칸에서도, 고른 이모티콘이나 GIF가 :이름: 글로 들어가지 않고 입력창 위에 미리 보기로 떠요. 보내기를 한 번 누르면 그림과 글이 같은 스레드에 차례로 가요. 글을 쓰다 멈추면 뜨는 이모티콘 추천 줄도 이제 두 곳에서 떠요. 지난 소식에서 아직 :이름: 글로 들어간다고 알린 부분을 고친 것이에요. 이모지는 예전처럼 글 안에 바로 들어가요."
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewTitle": [
+    {
+      "type": 0,
+      "value": "밀어서 답장과 스레드에서도 미리 보기"
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewTryIt": [
+    {
+      "type": 0,
+      "value": "폰에서 메시지를 밀어 답장을 열고, 웃는 얼굴 단추로 이모티콘을 골라 보세요. 입력창 위 미리 보기를 확인하고 글을 쓴 뒤 보내기를 누르면, 그림과 글이 그 스레드에 차례로 달려요."
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosChanged": [
+    {
+      "type": 0,
+      "value": "사진이나 GIF를 보낼 때 앱이 그 크기를 함께 보내서, 받는 화면이 그림이 도착하기 전부터 맞는 자리를 잡아 둬요. 그래서 대화에 들어갈 때 처음 보는 사진도 자라면서 줄을 밀어내지 않아요. 지난 소식에서 다음 판에 고칠 예정이라고 한 부분이에요. 이번 판 전에 보낸 사진과 아직 업데이트하지 않은 앱이 보낸 사진은 예전과 같아요."
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosTitle": [
+    {
+      "type": 0,
+      "value": "처음 보는 사진도 제자리에 서요"
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosTryIt": [
+    {
+      "type": 0,
+      "value": "업데이트한 앱으로 대화에 사진을 하나 보낸 뒤, 다른 기기에서 그 대화에 들어가 보세요. 사진 자리가 처음부터 잡혀 있어서 줄이 움직이지 않아요."
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchChanged": [
+    {
+      "type": 0,
+      "value": "글을 쓰다 멈추면 입력창 위에 뜨는 이모티콘 추천 줄을 설정에서 끌 수 있어요. 웹과 데스크탑은 설정 › 모양 › 대화 표시, 폰은 설정 › 보기의 맨 아래에 있는 「이모티콘 추천」 스위치예요. 끄면 낱말이 맞아도 추천 줄이 뜨지 않고, 다시 켜면 앱을 다시 열지 않아도 곧 돌아와요. 처음에는 켜져 있고, 고른 값은 이 기기에만 저장돼요. 줄 끝의 ✕는 예전처럼 그 대화에서 그 낱말의 추천만 꺼요."
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchTitle": [
+    {
+      "type": 0,
+      "value": "이모티콘 추천을 끌 수 있어요"
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchTryIt": [
+    {
+      "type": 0,
+      "value": "설정에서 「이모티콘 추천」을 끄고, 입력창에 「ㅋㅋ」처럼 이모티콘 태그와 같은 말을 쓰고 잠깐 멈춰 보세요. 추천 줄이 뜨지 않고, 스위치를 다시 켜면 돌아와요."
+    }
+  ],
+  "releaseNotes.v0145.summary": [
+    {
+      "type": 0,
+      "value": "다시 켜도 이미 본 이모티콘을 다시 받지 않고, 이모티콘 탭 맨 위에 자주 쓰는 그림이 모이고, 폰에서도 반응으로 이모티콘과 GIF를 달 수 있어요."
     }
   ],
   "releaseNotes.version.current": [

@@ -312,6 +312,16 @@ fn memory_config() -> WorkerConfig {
     config
 }
 
+/// A UTC offset that puts the workspace's local midnight 12 hours away from "now". A test that back-dates one message
+/// by an hour must not straddle a local day boundary: the sweep closes an earlier local day's pile as its own window,
+/// so the old message is summarised alone. The 2026-11-04 nightly ran just after 00:00 UTC (the config's offset is 0)
+/// and saw exactly that, in two tests.
+fn offset_with_midnight_far_away() -> i32 {
+    use chrono::Timelike;
+    let now = chrono::Utc::now();
+    12 * 60 - (now.hour() * 60 + now.minute()) as i32
+}
+
 type HookFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type Hook = Arc<dyn Fn(usize) -> HookFuture + Send + Sync>;
 
@@ -2254,7 +2264,9 @@ async fn a_streaming_marker_older_than_thirty_minutes_no_longer_blocks_the_curso
         .await
         .unwrap();
     let provider = Recorder::new();
-    let worker = worker_with(&provider, memory_config()).await;
+    let mut config = memory_config();
+    config.utc_offset_minutes = offset_with_midnight_far_away();
+    let worker = worker_with(&provider, config).await;
     let stats = worker.summary_sweep().await;
     assert_eq!(
         stats.windows, 1,
@@ -2363,7 +2375,9 @@ async fn a_frozen_for_a_retry_marker_older_than_thirty_minutes_no_longer_blocks_
         .await
         .unwrap();
     let provider = Recorder::new();
-    let worker = worker_with(&provider, memory_config()).await;
+    let mut config = memory_config();
+    config.utc_offset_minutes = offset_with_midnight_far_away();
+    let worker = worker_with(&provider, config).await;
     let stats = worker.summary_sweep().await;
     assert_eq!(
         stats.windows, 1,

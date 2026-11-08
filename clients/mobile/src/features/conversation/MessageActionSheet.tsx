@@ -1,5 +1,5 @@
-import {TeamExpressionPicker} from '../expressions/TeamExpressionPicker';
-import type {Message} from '@momo/core/lib/api';
+import {ReactionPicker} from '../expressions/ReactionPicker';
+import type {Channel, Message} from '@momo/core/lib/api';
 import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
@@ -33,7 +33,6 @@ import {
 import {useStyles} from '../../design/theme';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
-import { EmojiPicker } from '../emoji/EmojiPicker';
 import { emojiFrequency } from '../emoji/preferences';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
 import {useMakeLanding} from './makeLanding';
@@ -91,7 +90,7 @@ export function timeLabel(atMs: number): string {
 // 는 왕복이 도는 동안 시트가 「지우는 중…」을 말해야 한다(성공 뒤에야 부모가 닫는다). 이 닫힘은 부모의
 // `.then(() => setSheetOpen(false))` 라 지금도 스냅이다 - PR 「발견」 참조.
 //
-// 「+」 는 같은 PageSheet 를 큰 단의 전체 이모지 피커로 바꾼다(#4322).
+// 「+」 는 같은 PageSheet 를 큰 단의 반응 고르개로 바꾼다(#4322 → #5504: 이모티콘 · 이모지 · GIF 세 탭, 처음은 이모지).
 // 시트를 겹치지 않고, X 는 빠른 행동 목록으로 돌아온다. 고르면 기존 닫는 길 뒤에 반응을 쓴다.
 // =============================================================================
 
@@ -263,12 +262,19 @@ function SheetBody({
     ) : null,
   ].filter(Boolean);
 
+  // 「+」: 같은 시트가 큰 단의 반응 고르개로 바뀐다. 표준 그림 문자·팀 이모지·이모티콘·GIF 어느 것을 골라도 반응 하나로 달린다(큰 그림 메시지는 보내지 않는다, #5504).
   if (pickerOpen)
     return (
-      <EmojiPicker
+      <ReactionPicker
         onClose={() => setPickerOpen(false)}
-        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} onOpenConversation={openMadeConversation} />}}
-        onSelect={glyph => afterClose(() => onToggleReaction(glyph))}
+        onReact={reaction => afterClose(() => onToggleReaction(reaction))}
+        // 「＋」→ AI와 만들기는 **안쪽 시트**(가져오기·만들기 문)에서 열린다. 그 시트는 제 몸을 내린 뒤 이 길을 부르므로, 바깥의 이 메시지 액션 시트도 여기서 내린 뒤에 대화로 간다 -
+        // Modal 위에 Modal 을 쌓은 채 화면이 바뀌지 않게(`makeLanding.ts` 머리말).
+        onOpenConversation={
+          openMadeConversation
+            ? (channel: Channel) => afterClose(() => openMadeConversation(channel))
+            : undefined
+        }
       />
     );
 

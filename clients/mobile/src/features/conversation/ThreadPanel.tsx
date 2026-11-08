@@ -394,12 +394,15 @@ export function ThreadPanel({
       // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
       // 결함이 한 화면 건너에서 반복되는 것이다.
       onReplySent?.();
-      void sendReply(
-        root.id,
-        body,
-        options?.attachments,
-        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
-      );
+      // 켠 것만 싣는다: 링크 미리보기 ✕(#5016)와 미리 보기에 올린 이모티콘·GIF(#5490). 둘 다 없으면 예전과 같은 호출(옵션 자리가 비어 있음)이다.
+      // 이모티콘이 있으면 [큰 그림, 글]이 둘 다 이 스레드의 답글로 나간다 - 묶음의 순서·멱등·실패 규칙은 `sendReply` 가 지킨다.
+      const suppress = options?.suppressUnfurl === true;
+      const expression = options?.expression;
+      const flags =
+        !suppress && expression === undefined
+          ? undefined
+          : {...(suppress ? {suppressUnfurl: true as const} : {}), ...(expression === undefined ? {} : {expression})};
+      void sendReply(root.id, body, options?.attachments, flags);
     },
     [sendReply, root.id, onReplySent],
   );
@@ -445,7 +448,8 @@ export function ThreadPanel({
 
   if (status === 'error') {
     return (
-      <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
+      // 실패 화면도 대화를 통째로 덮는다 — 낭독 경계는 아래 본 화면과 같다(#5544).
+      <EdgeSwipeBack accessibilityViewIsModal style={styles.overlay} onBack={onClose}>
         <Screen style={styles.screen}>
           <ConversationHeader
             title="스레드"
@@ -473,7 +477,12 @@ export function ThreadPanel({
     // 스레드를 열어 둔 채 엣지를 밀면 닫히는 것은 스레드 하나이고, 대화는 그대로
     // 남는다. 뒤로가기가 한 번에 한 겹씩만 벗겨진다는 것은 헤더의 「‹」 버튼이
     // 이미 지키던 규칙이고, 제스처가 그것을 다르게 해석하면 안 된다.
-    <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
+    //
+    // 판은 대화 화면 전체(채널 머리 포함)를 덮는 불투명한 면이라 판 자신이 VoiceOver 의 모달 경계다(#5544): 형제인
+    // `conversation-column`(채널 머리의 ‹·이름 알약·돋보기·⋮, 목록, 채널 입력창)이 낭독에서 빠진다. 안 걸면 판 뒤의 보이지 않는
+    // 채널 ‹·⋮ 에 낭독 초점이 닿는다 — 스레드를 닫는다고 믿고 대화를 나갈 수 있다. 같은 층의 정보 페이지(`ConversationInfoPage`)와 같은 자리다.
+    // 이 플래그는 iOS 전용이라 목록·채널 입력창은 `ConversationScreen` 의 `conversation-layout-wrap` 이 두 플랫폼에서 따로 뺀다.
+    <EdgeSwipeBack accessibilityViewIsModal style={styles.overlay} onBack={onClose}>
       <Screen style={styles.screen}>
         <View pointerEvents="box-none" style={styles.headerOverlay} onLayout={onHeaderLayout} testID="thread-header-overlay">
           <ConversationHeader
@@ -577,6 +586,8 @@ export function ThreadPanel({
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               sendLabel="답글 보내기"
               onSend={onSend}
+              // 스레드 입력창도 대화 입력창처럼 이모티콘·GIF 를 미리 보기에 올려 글과 함께 보낸다(#5490, 웹 스레드 입력창 #5487 의 짝).
+              expressionBundle
             />
           }
         />

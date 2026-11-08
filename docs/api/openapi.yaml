@@ -2154,7 +2154,9 @@ paths:
         administrator writes it here, never an agent proposal), and
         `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
         role bundles of the helper are on — `workspace_admin`, `invite_access`,
-        `long_research`, `files`, `memory`, `code`; an absent key or field is
+        `long_research`, `files`, `memory`, `code`, `hermes` (ADR-0201 증보 v4 /
+        #5369: the helper may hand work to the team's Hermes; on by default and
+        a no-op until an operator opens it); an absent key or field is
         **on**, `chat_read` is always on and is not a field, so naming it is 400.
         This is the one key merged one level down: a named field replaces, an
         omitted field stays, `null` drops the field (back to on), so a patch
@@ -2163,9 +2165,15 @@ paths:
         writes the audit row `team_ai.roles.changed` with the key names only. An
         agent's `workspace.settings.update` proposal cannot name this key),
         and `team_ai_limits` (object, ADR-0201 증보 v3 B9 / #4944: the team AI's
-        usage limits — **absent means no limit at all**; `dailyTokens` and
+        usage limits — **absent means no limit at all** (except `dailyDelegations`,
+        below); `dailyTokens` and
         `dailySearches` are whole numbers >= 1 (at most 10^12), `monthlyUsd` is
-        a number from 0.000001 to 1000000. `0`, a negative, a fraction for a
+        a number from 0.000001 to 1000000, and `dailyDelegations` (ADR-0201 증보
+        v4 P7 / #5369: how many times a day the helper may hand a request to the
+        team's Hermes) is a whole number from 1 to 200 whose absence means the
+        default 30, never "no limit" — the server operator's
+        `TEAM_AI_HERMES_DAILY_CAP` (empty = the delegation is closed) is a
+        ceiling over it. `0`, a negative, a fraction for a
         count, a non-number and an unknown field are 400; "no limit" is the
         absence of a field, never `0`. Merged one level down like
         `team_ai_roles` — a named field replaces, an omitted field stays, a
@@ -11942,13 +11950,16 @@ paths:
     put:
       tags: [attachments]
       operationId: setAttachmentMedia
-      summary: Set (replace) a video attachment's length, size and poster before it is sent.
+      summary: Set (replace) an attachment's media summary before it is sent - a video's length, size and poster, or a photo's or GIF's size.
       description: >
-        ADR-0151 amendment 5 D5 (#4673). The device that picked the video measures its length and
-        size and takes a frame, so the card that later shows the file is drawn at the right shape
-        with a picture in it. The server does not look inside the video: the numbers are the
-        sender's declaration, checked for range only, and the poster is checked by its bytes (magic
-        number, header size, byte size) and never decoded.
+        ADR-0151 amendment 5 D5 (#4673) and amendment 9 (#5469). The device that picked the file
+        measures it, so the card or box that later shows the file is drawn at the right shape before
+        a byte of it has arrived. **A video** (`kind` absent or `video`): its length and size, and a
+        frame to draw in the card. **A photo or GIF** (`kind: image`): its size, and nothing else (no
+        length, no poster). The server does not look inside the file: the numbers are the sender's
+        declaration, checked for range only, and a poster is checked by its bytes (magic number,
+        header size, byte size) and never decoded. A picture's file is checked by its stored type and
+        its first twelve bytes (the magic number), never by a header.
 
 
         Allowed only for **the uploader**, of a **complete** file that **no message carries yet**.
@@ -11960,8 +11971,9 @@ paths:
 
 
         **The shape of the request is judged first**, before the caller is looked up against the
-        file, and answers 400 to anyone who sends it: `durationMs` is an integer from 1 to 86,400,000;
-        `width` and `height` are integers from 1 to 16,384; a poster is `image/jpeg` or `image/webp`
+        file, and answers 400 to anyone who sends it: `durationMs` (a video's) is an integer from 1 to
+        86,400,000; `width` and `height` (a video's or a picture's) are integers from 1 to 16,384; a
+        poster (a video's) is `image/jpeg` or `image/webp`
         whose bytes say so (the magic number must be the label's), strict base64, at most 256 KiB
         decoded and at most 1,280 pixels on a side by its header. These checks look at the body alone
         and say nothing about any file. A JPEG that is cut off after its frame header passes (the
@@ -11971,15 +11983,19 @@ paths:
 
 
         **Only the checks that read the file come after the authorization** and are therefore seen
-        only by the file's own uploader (400): the stored type must be `video/mp4`,
+        only by the file's own uploader (400): for a video the stored type must be `video/mp4`,
         `video/quicktime` or `video/webm`, and the object's first bytes must be that container's
-        (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML header for WebM).
+        (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML header for WebM); for a picture
+        the stored type must be `image/jpeg`, `image/png`, `image/gif` or `image/webp` and the
+        object's first twelve bytes must be that format's magic number. A picture's body sent for a
+        video file, and a video's body sent for a picture, are both this 400.
 
 
         The request body is at most 512 KiB (413 above that). A body the JSON reader cannot use is
         answered by the framework before the route runs: 400 when it is not JSON, 415 when it is not
         sent as `application/json`, 422 when it is JSON of the wrong shape (a missing field, a
-        fractional or non-numeric value, a key this route does not know). The route spends a
+        fractional or non-numeric value, a key this route does not know - a picture that names a
+        length or a poster, a `kind` other than `video` or `image`). The route spends a
         per-member write budget of its own, default 60 per window (`RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`,
         0 removes it), before the body is read; a refused request counts. The write is audited as
         `attachment.media_set` with the kind and whether there is a poster, never the numbers or the
@@ -12000,7 +12016,8 @@ paths:
         "200":
           description: >
             Stored. The summary the message projections will carry once the file is sent -
-            never the poster itself.
+            a video's (five keys) or a picture's (`kind`, `width`, `height`), never the poster
+            itself.
           content:
             application/json:
               schema:
@@ -12010,8 +12027,9 @@ paths:
             The request is wrong in itself: a body that is not JSON, a number outside its range, a
             poster that is not the image its label says, too large or too big by its header, or
             malformed base64 (all judged before the file is looked at). Or, for the file's own
-            uploader only: an attachment whose stored type is not a video type, or whose bytes are
-            not that container.
+            uploader only: an attachment whose stored type is not a type of the request's kind (a
+            video type for a video, a picture type for a picture), or whose bytes are not that
+            container or format.
           content:
             application/json:
               schema:
@@ -12040,8 +12058,9 @@ paths:
         "422":
           description: >
             The body is JSON but not this request: a missing field, a fractional or non-numeric
-            value (`durationMs` is an integer), or a key the route does not know. Answered by the
-            framework; the body is plain text.
+            value (`durationMs`, `width` and `height` are integers), or a key the route does not
+            know (a picture with a length or a poster; a `kind` that is neither `video` nor `image`).
+            Answered by the framework; the body is plain text.
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -20465,7 +20484,7 @@ components:
     AgentRunSpent:
       type: object
       additionalProperties: false
-      required: [promptTokens, completionTokens, webSearches, estimated]
+      required: [promptTokens, completionTokens, webSearches, estimated, delegations]
       description: >
         ADR-0201 증보 v3 B12 (#4968). What **one run** has spent: the sums of that run's own
         usage-ledger rows (a task of several steps writes one row per step; a stopped or cut-off
@@ -20492,6 +20511,15 @@ components:
           description: >
             Some of the tokens are oort's estimate because the provider reported none
             (ADR-0147 D3). A figure that may be an estimate says so.
+        delegations:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0201 증보 v4 P7 (#5370). How many times the helper handed work to the team's Hermes in
+            this run (0 or 1 — a request delegates once). The token and search sums above are the
+            helper's own rows, i.e. the team's credits; Hermes's row is a subscription oort cannot price
+            and lives under Hermes's own agent in the usage-by-agent read.
 
     AgentRunProgressPage:
       type: object
@@ -20913,7 +20941,7 @@ components:
         B3-T, #4964) is team-AI-only the same way: 「파일 역할 꺼 줘」 said to the
         helper becomes one card that switches ONE role bundle (`bundle` is one
         of `workspace_admin`, `invite_access`, `long_research`, `files`,
-        `memory`, `code`; `chat_read` and any other name are refused as an
+        `memory`, `code`, `hermes`; `chat_read` and any other name are refused as an
         argument). An admin approves; approving runs the same merge and write
         as `PATCH …/settings` for `{team_ai_roles: {<bundle>: <enabled>}}` with
         the approver's authority and writes the audit row `team_ai.roles.changed`
@@ -20946,7 +20974,18 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
+        `expression.set.create` and `expression.set.plan` (ADR-0218 증보 2026-11-06
+        §12, #5460) are team-AI-only the same way and are raised by **server code**
+        from a stored plan, never by a model's tool call: the helper's tool does not
+        list them, and through the Agent Port they are refused exactly as an unknown
+        id. The plan card (`{setId}`, `requesting_member`) and the set card
+        (`{setId,title,prefix,tags,backend,subjectMemberId,prompt,slots}`,
+        `expression_adder`) are always decided in the app, never from a lock-screen
+        action. The set card's decision request (`expressionChoices`) and result
+        (`result.expressionSet`, `ref.type` `expression_set`) are published on
+        `ApprovalDecisionRequest` and `WorkspaceActionResult` (#5461); the plan card's
+        confirmation is published with the plan-card slice (S5a).
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "expression.set.create", "expression.set.plan", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -26322,6 +26361,7 @@ components:
             files: {type: boolean}
             memory: {type: boolean}
             code: {type: boolean}
+            hermes: {type: boolean}
         team_ai_limits:
           type: object
           description: >
@@ -26332,6 +26372,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
             dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = closed) is a ceiling over it."}
         team_ai_limits_status:
           $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
@@ -26434,6 +26475,7 @@ components:
             files: {type: boolean, nullable: true}
             memory: {type: boolean, nullable: true}
             code: {type: boolean, nullable: true}
+            hermes: {type: boolean, nullable: true}
         team_ai_roles_notice:
           nullable: true
           type: object
@@ -26484,6 +26526,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
             dailySearches: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, nullable: true}
 
     TeamAiLimitsStatus:
       type: object
@@ -26796,10 +26839,24 @@ components:
           description: Opaque Google resumable upload capability URL.
 
     SetAttachmentMediaRequest:
+      description: >
+        One of two closed shapes (ADR-0151 amendment 9): a video's, or a photo's or GIF's. `kind`
+        picks it: a body with no `kind` or `kind: video` is a video's, `kind: image` is a
+        picture's. A picture names a size and nothing else - a length or a poster is a key the route
+        does not know.
+      oneOf:
+        - $ref: "#/components/schemas/SetVideoAttachmentMediaRequest"
+        - $ref: "#/components/schemas/SetImageAttachmentMediaRequest"
+
+    SetVideoAttachmentMediaRequest:
       type: object
       additionalProperties: false
       required: [durationMs, width, height]
       properties:
+        kind:
+          type: string
+          enum: [video]
+          description: Optional - a client older than amendment 9 sends none, and a body without it is a video's.
         durationMs:
           type: integer
           format: int64
@@ -26820,6 +26877,28 @@ components:
           description: The video's height in pixels, as the sender measured it. Checked for range only.
         poster:
           $ref: "#/components/schemas/AttachmentPosterUpload"
+
+    SetImageAttachmentMediaRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, width, height]
+      properties:
+        kind:
+          type: string
+          enum: [image]
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            The photo's or GIF's width in pixels as it is shown (EXIF orientation applied), measured
+            by the sender with the ruler a receiving client uses on the same bytes. Checked for range
+            only.
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: The photo's or GIF's height in pixels as it is shown, measured as `width` is. Checked for range only.
 
     AttachmentPosterUpload:
       type: object
@@ -27197,17 +27276,24 @@ components:
           $ref: "#/components/schemas/AttachmentMedia"
 
     AttachmentMedia:
+      description: >
+        The media summary of an attachment (ADR-0151 amendment 5 D5, #4673, and amendment 9, #5469):
+        a video's or a still picture's, told apart by `kind`. Present **only** on an attachment whose
+        sender put one on it (`setAttachmentMedia`) before the message was sent: a document, and a
+        photo, GIF or video from a client that does not declare one (video from the web and desktop
+        clients has none yet) carry no `media` key at all. It rides every projection of the message -
+        the send's answer, the channel and thread pages and the realtime `message.new` frame. The
+        numbers are the sender's declaration, checked for range only, so a client clamps what it
+        draws from them and, for a picture, measures the decoded image when it has it. **The poster's
+        bytes are in none of them**: a video's `hasPoster` says whether `getAttachmentPoster` has
+        something to serve, and a picture has no poster and no length.
+      oneOf:
+        - $ref: "#/components/schemas/VideoAttachmentMedia"
+        - $ref: "#/components/schemas/ImageAttachmentMedia"
+
+    VideoAttachmentMedia:
       type: object
       required: [kind, durationMs, width, height, hasPoster]
-      description: >
-        The video summary of an attachment (ADR-0151 amendment 5 D5, #4673). Present **only** on
-        an attachment whose sender put a length and size on it (`setAttachmentMedia`) before the
-        message was sent: a photo, a document, and a video from a client that does not measure one
-        carry no `media` key at all (video from the web and desktop clients has none yet). It rides
-        every projection of the message - the send's answer, the channel and thread pages and the
-        realtime `message.new` frame. The numbers are the sender's declaration, checked for range
-        only, so a client clamps the card it draws from them. **The poster's bytes are in none of
-        them**: `hasPoster` says whether `getAttachmentPoster` has something to serve.
       properties:
         kind:
           type: string
@@ -27227,6 +27313,26 @@ components:
           maximum: 16384
         hasPoster:
           type: boolean
+
+    ImageAttachmentMedia:
+      type: object
+      required: [kind, width, height]
+      description: >
+        A photo's or GIF's size (JPEG, PNG, GIF or WebP) and nothing else. A client that has never
+        heard of this kind drops the summary and keeps the attachment, and draws the picture as it
+        always did (v0.1.42 and later drop an unknown `kind`; earlier clients do not read `media`).
+      properties:
+        kind:
+          type: string
+          enum: [image]
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
 
     ThreadRollup:
       type: object
@@ -28728,13 +28834,20 @@ components:
             draftId: {type: string, format: uuid}
             revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
             sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            kind:
+              type: string
+              enum: [emoji, sticker]
+              description: >
+                ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
+                the server applies its recommendation (J4) to the stored large picture.
           description: >
             ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
             an `expression.create` card, exactly as shown (draft id, revision, large
             sha256). **Required when approving that action and a 400 receipt
             (`expression_choice_required`) without it; a 400 receipt
             (`expression_choice_not_allowed`) on anything else** (another action, a
-            rejection, a non-workspace approval), judged before the status and expiry
+            rejection, a non-workspace approval, an `expression.set.create` card, or
+            together with `expressionChoices`), judged before the status and expiry
             arms. The decision transaction re-proves the approval is pending and
             unexpired, the person's current membership, add policy and (for a face) that
             they are the person shown, the candidate's membership of this card, its
@@ -28743,6 +28856,51 @@ components:
             `expression_quota`) that spends nothing. Success registers that one picture,
             reclaims every other candidate's bytes and writes `props.result.expression`
             (`{id,name,token}`) on the card.
+        expressionChoices:
+          type: array
+          minItems: 1
+          maxItems: 40
+          items:
+            type: object
+            additionalProperties: false
+            required: [draftId, revision, sha256]
+            properties:
+              draftId: {type: string, format: uuid}
+              revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+              sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+              kind:
+                type: string
+                enum: [emoji, sticker]
+          description: >
+            ADR-0218 addendum 6 section 12 L5.4 / `SetDecision` (#5461). The pictures kept
+            on an `expression.set.create` card, 1 to 40, each exactly as shown (draft id,
+            revision, large sha256) and optionally with the `kind` the person picked.
+            **Required when approving that card and a 400 receipt
+            (`expression_choice_required`) without it; a 400 receipt
+            (`expression_choice_not_allowed`) on anything else** (another action, a
+            rejection, together with `expressionChoice`), judged before the status and
+            expiry arms. A list that is empty, longer than 40, with a key or a `kind`
+            outside the shape or with one `draftId` twice is a 400 receipt
+            (`expression_choice_invalid`) before anything is read. A gray slot has no
+            draft id, so it cannot be named. The decision transaction proves everything
+            again before its first write: the approval is pending and unexpired, the
+            person's add policy and (for a face) that they are the person shown, and for
+            every kept picture that it is a ready draft of this card, its revision, its
+            expiry and its stored bytes hashed again; **one picture that is not what the
+            person saw refuses the whole decision** (409 receipt
+            `expression_preview_stale`: nothing registered, the approval not spent). The
+            kept pictures are then taken in slot order whatever order the request names
+            them in: a name the team already has (a deleted name stays taken) is skipped
+            as `name_taken`, and every picture past the 1,000 live registrations as
+            `quota`; a skip never stops the others. If nothing at all registers the
+            receipt is a 409 (`expression_name_reserved` when any kept name was taken,
+            else `expression_quota`) and the approval stays. Success registers every
+            kept picture that was not skipped in **one** catalogue version (one detail
+            notice, `expression.changed.detail`, plus one plain `expression.changed`
+            notice) as the person who decided (`created_by`),
+            proposed by the helper, reclaims the bytes of every picture it did not
+            register (the unkept and the skipped) and writes `result.expressionSet` on the
+            receipt and on the card.
         deliverSecretToAgent:
           type: boolean
           default: false
@@ -28853,6 +29011,55 @@ components:
             message instead — the one exception to "nowhere else" — and is the
             only place the link is; the pairing code of its `agent.invite`
             stays here.
+        expressionSet:
+          allOf:
+            - $ref: "#/components/schemas/ExpressionSetResult"
+          description: >
+            ADR-0218 addendum 6 section 12 L5.5 (#5461). Present only when the approved
+            action is `expression.set.create`: what the decision registered and what it
+            skipped. Ids, names and counts, never a picture. Stored in the receipt like
+            `ref`, so a retry of the same `client_decision_id` answers the same set of ids,
+            and written as `props.result.expressionSet` on the settled card, whose line
+            says numbers only (`N개를 팀 보관함에 저장했어요`, or `N개를 저장하고 M개는
+            건너뛰었어요` when some were skipped). The card has no single `expression`.
+
+    ExpressionSetResult:
+      type: object
+      description: >
+        ADR-0218 addendum 6 section 12 L5.5 `SetResult`, the same shape as
+        `set.schema.json#/$defs/SetResult` (the executable contract of the clients).
+      additionalProperties: false
+      required: [setId, registered, skipped]
+      properties:
+        setId:
+          type: string
+          format: uuid
+        registered:
+          type: array
+          maxItems: 40
+          description: Slot order. Each id is the id of the registered expression.
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, token]
+            properties:
+              id: {type: string, format: uuid}
+              name: {type: string, pattern: '^[a-z0-9_-]{2,30}$'}
+              token: {type: string, pattern: '^:[a-z0-9_-]{2,30}:$'}
+        skipped:
+          type: array
+          maxItems: 40
+          description: >
+            Slot order. A kept picture left out of an otherwise good decision: its name
+            was taken (a deleted name stays taken) or the library was full.
+          items:
+            type: object
+            additionalProperties: false
+            required: [draftId, name, reason]
+            properties:
+              draftId: {type: string, format: uuid}
+              name: {type: string, pattern: '^[a-z0-9_-]{2,30}$'}
+              reason: {type: string, enum: [name_taken, quota]}
 
     WorkspaceActionRef:
       type: object
@@ -28862,7 +29069,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message, expression, expression_set]
         id:
           type: string
           format: uuid

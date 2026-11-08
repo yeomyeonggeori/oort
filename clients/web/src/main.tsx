@@ -11,7 +11,8 @@ import { queryClient } from "@/app/queryClient";
 import { App } from "@/app/App";
 import { PwaBanner } from "@/features/pwa/PwaBanner";
 import { startPwa } from "@/features/pwa/store";
-import { initSessionStore } from "@/lib/session";
+import { hasPersistedSession, initSessionStore } from "@/lib/session";
+import { startExpressionDiskBoot } from "@/features/expressions/disk/boot";
 import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
 import { initFocusModality } from "@/design/focusModality";
@@ -23,6 +24,7 @@ import { installDesktopEffects } from "@/features/settings/appearance/desktopEff
 import { IS_TAURI } from "@/lib/env";
 import "@/design/tokens.css";
 import "@/features/expressions/expressions.css";
+import "@/features/expressions/expressionSet.css";
 
 // 셸 높이의 근거 (goal B9). 첫 렌더보다 먼저 켠다: 로그인 화면도 셸 밖의 표면이라
 // 같은 높이를 쓰고, 컴포저가 있는 첫 프레임이 이미 맞아 있어야 한다. 해제 함수는
@@ -87,6 +89,10 @@ function render(locale: AppLocale) {
 // 서비스 워커 등록은 store.ts가 load 이후로 미룬다. 그래서 렌더와 경쟁하지
 // 않으면서, 아주 이른 프레임에 올 수 있는 beforeinstallprompt를 놓치지 않는다.
 startPwa();
+
+// 이모티콘 그림의 기기 캐시 시작 청소 (ADR-0218 §14 M2.5): 세션을 복원하기 **전에** 시작한다. 수명이 지난 항목을 지우고, 세션 저장소가 자리를 잡은 뒤 저장된 자격이
+// 없으면 모든 보관 칸을 지운다(로그아웃을 거치지 않은 종료가 남긴 것). 첫 페인트를 기다리게 하지 않는다.
+void startExpressionDiskBoot({ ready: initSessionStore(), hasCredentials: hasPersistedSession });
 
 // Settle session storage before the first render (ADR-0133 P2, MOMO-603) — but
 // only for as long as that is free. In the desktop shell the refresh token comes

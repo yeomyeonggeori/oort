@@ -36,5 +36,15 @@ name: dismiss-dev-logbox
 # This is a Debug-build-only problem. A release build has no LogBox at all, and
 # `build:sim` is Debug on purpose (it is the build that can reach the keychain —
 # see the header of scripts/build-sim.sh).
+#
+# An app launched by these flows has NO strip (#5531): every `launchApp` passes
+# `arguments: {momoAutomation: "YES"}`, and `measure/automation.ts` turns the LogBox
+# notifications off when the app starts. There is nothing at this coordinate then, so
+# the tap below lands on what is underneath — the harmless places listed above — and is
+# not needed. It stays because an app started WITHOUT the argument can still show the
+# strip (a person's `xcrun simctl launch`, an app the OS killed and relaunched, an
+# `oort://` cold start), and a tap that lands on the strip's body is what makes Metro
+# open the standalone DevTools app. lane-phone.sh and measure.sh close the DevTools
+# windows their own run opened, whatever opened them.
 - tapOn:
     point: "92%,94%"

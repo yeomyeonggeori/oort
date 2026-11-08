@@ -184,7 +184,7 @@ export function EmojiPickerDialog({
 
   const panel = (
     <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-3 focus-visible:focus-ring">
-    {tabbed && <div role="group" className="flex flex-wrap gap-2" aria-label={formatMessage("expressions.sheet.tabs")}>
+    {tabbed && <div role="group" className="flex shrink-0 flex-wrap gap-2" aria-label={formatMessage("expressions.sheet.tabs")}>
       {EXPRESSION_PICKER_TABS.map((id) => <Button key={id} type="button" variant={tab === id ? "secondary" : "ghost"} size="sm" aria-pressed={tab === id} onClick={() => { setSkinOpen(false); setTab(id); }}>{formatMessage(TAB_NAME[id])}</Button>)}
     </div>}
     {team && view !== null ? <TeamExpressionsPanel view={view} purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} {...(onPickExpression ? { onPickExpression: (expression: Expression) => { onPickExpression(expression); onOpenChange(false); } } : {})} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
@@ -247,7 +247,9 @@ export function EmojiPickerDialog({
           if (team) panelRef.current?.focus();
           else searchRef.current?.focus();
         }}
-        className="flex max-h-pane-md flex-col"
+        // 높이 상한은 pane-md(512)와 Radix가 준 남은 높이 중 작은 쪽이다(`max-h-pane-md-fit`, #5527 검수 7c B1): 데스크탑 최소 창(720×480)에서 창이 화면 위로 서서 탭 줄과
+        // 검색 칸이 화면 밖이던 것을 막는다. 줄어드는 몫은 격자 스크롤 칸이 지고, 탭 줄·검색 칸·세트 띠는 `shrink-0`이라 늘 보인다.
+        className="flex max-h-pane-md-fit flex-col"
       >
         <p className="sr-only">{copy.description}</p>
         {panel}

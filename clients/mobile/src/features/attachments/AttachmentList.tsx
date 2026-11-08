@@ -1,6 +1,7 @@
 import {
   ATTACH_COPY,
   attachmentDisplayName,
+  attachmentImageSizeOf,
   attachmentMediaOf,
   attachmentMetaLine,
   formatVideoDuration,
@@ -77,6 +78,11 @@ import { useShareAttachment, type DownloadState } from './useShareAttachment';
 // 앞 판의 16:9 고정 프레임은 **받는 동안의 자리**로만 남는다(도착하면 그림의 비율). 한 번 잰 그림은 새 마운트가 첫
 // 프레임부터 그 비율로 선다 — 보낸 사진의 메아리가 서버 사본으로 바뀌는 순간 행이 줄었다 자라지 않게(`content.ts` 의
 // 「잰 크기」, #4455).
+//
+// **처음 보는 사진도 첫 프레임부터 제 칸이다**(ADR-0151 증보 9, #5469): 보내는 기기가 가로세로를 선언해 서버가 `media: {kind: "image"}` 로
+// 싣는다. 선언은 **그림이 오기 전까지의 칸**일 뿐이다 — 상태에는 **잰 크기**만 두고, 칸은 `잰 크기 ?? 선언` 이다. 그래서 ① 선언은 잰 크기
+// 기억(`content.ts`·기기)에 **쓰이지 않고**(틀린 선언이 기억으로 굳지 않는다), ② 그림을 읽으면(`Image.getSize`·`onLoad`) 실제 크기가 이기며
+// (선언과 같으면 칸은 움직이지 않는다), ③ 못 재면 선언으로 남는다. 선언이 없으면(옛 메시지·옛 판이 보낸 사진) 위와 같다.
 // =============================================================================
 
 const PREVIEW_ASPECT_RATIO = 16 / 9;
@@ -145,9 +151,16 @@ function ImageTile({
   // 비율은 **첫 프레임부터** 알아야 한다(#4455 design-review r2 H2). 이 그림을 이미 잰 마운트가 있으면(보낸 사진의 메아리가
   // 서버 사본으로 바뀔 때, 화면 밖에서 돌아온 행, 다시 들어온 방) 그 크기로 곧바로 서고, 못 쟀을 때만 16:9 자리표시로 선다.
   // 효과에서 읽으면 한 프레임 늦어서 새 마운트가 16:9 로 한 번 선다 — 그 한 프레임이 곧 행이 53~163pt 줄었다 자라는 이음매다.
-  const [natural, setNatural] = useState<MeasuredSize | null>(() =>
+  //
+  // 처음 보는 그림은 **보낸 기기의 선언**(`attachmentImageSizeOf`: 서버가 범위만 보고 저장한 값을 다시 범위로 막고, 이미지 첨부일 때만)이
+  // 첫 프레임의 칸이다(ADR-0151 증보 9). 선언은 상태에 넣지도 잰 크기 기억에 적지도 않는다: 상태(`measured`)는 **잰 값**만 담고 칸은
+  // `measured ?? declared` 로 매 렌더 셈한다. 그래서 잰 값(기억·`getSize`·`onLoad`)이 늘 선언을 이기고, 재기가 실패해 `measured` 가 비어도
+  // 선언으로 돌아갈 뿐 16:9 로 되튀지 않는다.
+  const [measured, setMeasured] = useState<MeasuredSize | null>(() =>
     measuredAttachmentSize(attachment.id),
   );
+  const declared = attachmentImageSizeOf(attachment);
+  const natural: MeasuredSize | null = measured ?? declared;
   const uri = preview.status === 'ready' ? preview.uri : null;
   React.useEffect(() => {
     if (uri === null) return undefined;
@@ -155,7 +168,7 @@ function ImageTile({
     if (known !== null) {
       // 잰 값이 있으면 다시 재지 않는다 — 같은 그림의 크기는 바뀌지 않는다. 마운트 뒤에 다른 타일이 먼저 쟀을 수도 있어서
       // 상태는 맞춰 둔다(같은 객체면 갱신이 곧 끝난다).
-      setNatural(known);
+      setMeasured(known);
       return undefined;
     }
     let live = true;
@@ -163,10 +176,10 @@ function ImageTile({
       uri,
       (width, height) => {
         const size = rememberAttachmentSize(attachment.id, width, height);
-        if (live) setNatural(size);
+        if (live) setMeasured(size);
       },
       () => {
-        if (live) setNatural(null);
+        if (live) setMeasured(null);
       },
     );
     return () => {
@@ -225,7 +238,7 @@ function ImageTile({
             source={{ uri: preview.uri }}
             onLoad={event => {
               const {width, height} = event.nativeEvent.source;
-              setNatural(rememberAttachmentSize(attachment.id, width, height));
+              setMeasured(rememberAttachmentSize(attachment.id, width, height));
             }}
             resizeMode={layout === 'single' ? 'contain' : 'cover'}
             style={styles.previewImage}

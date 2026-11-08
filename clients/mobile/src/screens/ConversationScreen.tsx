@@ -327,6 +327,12 @@ const READ_CURSOR_COALESCE_MS = 600;
 const PENDING_ANCHOR_TTL_MS = 30_000;
 
 /**
+ * 덮인 대화 틀을 Android 화면 낭독(TalkBack)에서 빼는 속성 (#5544). iOS 짝은 `accessibilityElementsHidden` 이다 — 둘이 한 쌍인 것은
+ * `ShellChrome` 의 `coveredProps` 와 같다. 덮이지 않았을 때는 아무것도 펼치지 않는다(기본값 `auto`).
+ */
+const HIDE_DESCENDANTS_ANDROID = {importantForAccessibility: 'no-hide-descendants'} as const;
+
+/**
  * 한 방문 — 이 화면이 한 채널을 연 한 번 (#1964). 객체의 동일성으로 센다.
  * `cachedAt` 은 방문이 시작될 때 손에 든 읽음 상태가 언제 도착한 것이었는가다
  * (`dataUpdatedAt`, 없으면 0). 명시 열람의 문턱이 이 값과 견준다.
@@ -2275,6 +2281,8 @@ export default function ConversationScreen({
     [railTurns, directory, evalNowMs],
   );
   const railReserved = isRailReserved({dmAgent, directory, channelId});
+  // 대화 틀(목록·컴포저) 위에 불투명한 면이 덮고 있는가 — 결과 목록 면(#5364)이나 스레드 판(#5544). 덮여 있는 동안 틀은 화면 낭독에서 뺀다(아래 `conversation-layout-wrap`).
+  const layoutCovered = convSearch.listOpen || thread !== null;
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
@@ -2336,10 +2344,14 @@ export default function ConversationScreen({
       </ConversationHeader>
       </View>
       {/* 결과 목록 면이 대화를 덮는 동안 대화(목록·컴포저)는 화면 낭독에서 뺀다(#5364): 불투명한 면 뒤의 보이지 않는 행에 낭독 초점이 닿지 않게. 머리(검색 줄)는 이 틀 **밖**
-          형제라 그대로 닿는다 — 그래서 면에 `accessibilityViewIsModal` 을 걸지 않는다(그러면 형제인 검색 줄까지 낭독에서 빠진다). 레이아웃에는 영향이 없다(`flex: 1`). */}
+          형제라 그대로 닿는다 — 그래서 면에 `accessibilityViewIsModal` 을 걸지 않는다(그러면 형제인 검색 줄까지 낭독에서 빠진다). 레이아웃에는 영향이 없다(`flex: 1`).
+          스레드 판이 열려 있는 동안에도 같은 조건으로 뺀다(#5544): 판은 이 틀 위에 겹쳐 그려지는 불투명한 면(`ThreadPanel` 의 `overlay`)인데, 안 빼면 판 뒤의 보이지 않는 채널 입력창·보내기 단추에
+          낭독 초점이 닿는다 — 스레드에 답한다고 믿고 채널에 보낼 수 있다(채널 컴포저의 `composer-input`·`composer-send` 가 스레드 컴포저와 같은 id 로 접근성 계층에 함께 섰다). 한 조건이 목록과 채널
+          입력창을 함께 뺀다. iOS 는 `accessibilityElementsHidden`, Android 는 `importantForAccessibility="no-hide-descendants"` 다(`ShellChrome` 의 `coveredProps` 와 같은 쌍). */}
       <View
         style={styles.layoutFill}
-        accessibilityElementsHidden={convSearch.listOpen}
+        accessibilityElementsHidden={layoutCovered}
+        {...(layoutCovered ? HIDE_DESCENDANTS_ANDROID : null)}
         testID="conversation-layout-wrap">
       <ConversationLayout
         list={
@@ -2556,7 +2568,7 @@ export default function ConversationScreen({
               onSend={onSend}
               onSlashCommand={onSlashCommand}
               onKeyBlockedChange={setComposerKeyBlocked}
-              // 이모티콘·GIF 는 입력창 위 미리 보기에 올려 글과 함께 보낸다(#5452). 스레드 입력창은 켜지 않는다(`:이름:` 글).
+              // 이모티콘·GIF 는 입력창 위 미리 보기에 올려 글과 함께 보낸다(#5452). 답글 머리말이 걸려 있어도 같고(#5490), 스레드 입력창(`ThreadPanel`)도 켠다.
               expressionBundle
             />
             </View>

@@ -34,6 +34,8 @@ name: 70-composer-newline
 #        -e GENERAL_CHANNEL_ID=<새 채널 id> maestro/70-composer-newline.yaml
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 - tapOn:

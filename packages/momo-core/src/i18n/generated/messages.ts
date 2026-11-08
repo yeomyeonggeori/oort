@@ -464,13 +464,69 @@ export const messageKeys = [
   "expressions.picker.favoriteRemoved",
   "expressions.picker.grid",
   "expressions.picker.sectionFavorites",
+  "expressions.picker.sectionFrecent",
   "expressions.picker.sectionOther",
   "expressions.picker.sectionRecent",
   "expressions.picker.setStrip",
   "expressions.picker.teamGroup",
+  "expressions.plan.cancel",
+  "expressions.plan.closed",
+  "expressions.plan.concept",
+  "expressions.plan.confirm",
+  "expressions.plan.confirmed",
+  "expressions.plan.declare",
+  "expressions.plan.editBack",
+  "expressions.plan.editInclude",
+  "expressions.plan.editName",
+  "expressions.plan.editRemoveReference",
+  "expressions.plan.editScene",
+  "expressions.plan.editSubmit",
+  "expressions.plan.gif",
+  "expressions.plan.heading",
+  "expressions.plan.kept",
+  "expressions.plan.motionBounce",
+  "expressions.plan.motionPulse",
+  "expressions.plan.motionSparkle",
+  "expressions.plan.motionWobble",
+  "expressions.plan.notice",
+  "expressions.plan.pictures",
+  "expressions.plan.referenceAlt",
+  "expressions.plan.references",
+  "expressions.plan.revise",
+  "expressions.plan.scenes",
   "expressions.preview.cancel",
   "expressions.preview.cleared",
   "expressions.preview.group",
+  "expressions.set.agentText",
+  "expressions.set.badgeGif",
+  "expressions.set.cellGray",
+  "expressions.set.cellReady",
+  "expressions.set.decline",
+  "expressions.set.errorGeneric",
+  "expressions.set.errorQuota",
+  "expressions.set.errorStale",
+  "expressions.set.errorTaken",
+  "expressions.set.faceOnly",
+  "expressions.set.grayBaseMissing",
+  "expressions.set.grayFailed",
+  "expressions.set.grayNotMade",
+  "expressions.set.grayRefused",
+  "expressions.set.gridLabel",
+  "expressions.set.offline",
+  "expressions.set.referenceCount",
+  "expressions.set.register",
+  "expressions.set.registering",
+  "expressions.set.resultSaved",
+  "expressions.set.resultSavedSkipped",
+  "expressions.set.rights",
+  "expressions.set.selectAll",
+  "expressions.set.selectNone",
+  "expressions.set.settledDeclined",
+  "expressions.set.settledDone",
+  "expressions.set.settledExpired",
+  "expressions.set.summaryGray",
+  "expressions.set.summaryReady",
+  "expressions.set.unreadable",
   "expressions.sheet.a11y",
   "expressions.sheet.close",
   "expressions.sheet.emptyEmoticon",
@@ -503,6 +559,9 @@ export const messageKeys = [
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.settingHint",
+  "expressions.suggest.settingLabel",
+  "inbox.approval.open",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -839,6 +898,33 @@ export const messageKeys = [
   "releaseNotes.v0144.suggestionsTitle",
   "releaseNotes.v0144.suggestionsTryIt",
   "releaseNotes.v0144.summary",
+  "releaseNotes.v0145.expressionsLine1",
+  "releaseNotes.v0145.expressionsLine2",
+  "releaseNotes.v0145.expressionsTopic",
+  "releaseNotes.v0145.frequentRecentChanged",
+  "releaseNotes.v0145.frequentRecentTitle",
+  "releaseNotes.v0145.frequentRecentTryIt",
+  "releaseNotes.v0145.keptEmoticonsChanged",
+  "releaseNotes.v0145.keptEmoticonsTitle",
+  "releaseNotes.v0145.keptEmoticonsTryIt",
+  "releaseNotes.v0145.noBlinkChanged",
+  "releaseNotes.v0145.noBlinkTitle",
+  "releaseNotes.v0145.noBlinkTryIt",
+  "releaseNotes.v0145.phoneLine1",
+  "releaseNotes.v0145.phoneTopic",
+  "releaseNotes.v0145.reactionGifsChanged",
+  "releaseNotes.v0145.reactionGifsTitle",
+  "releaseNotes.v0145.reactionGifsTryIt",
+  "releaseNotes.v0145.replyPreviewChanged",
+  "releaseNotes.v0145.replyPreviewTitle",
+  "releaseNotes.v0145.replyPreviewTryIt",
+  "releaseNotes.v0145.steadyPhotosChanged",
+  "releaseNotes.v0145.steadyPhotosTitle",
+  "releaseNotes.v0145.steadyPhotosTryIt",
+  "releaseNotes.v0145.suggestionSwitchChanged",
+  "releaseNotes.v0145.suggestionSwitchTitle",
+  "releaseNotes.v0145.suggestionSwitchTryIt",
+  "releaseNotes.v0145.summary",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -1751,15 +1837,113 @@ export const argumentSpecs = {
   },
   "expressions.picker.grid": {},
   "expressions.picker.sectionFavorites": {},
+  "expressions.picker.sectionFrecent": {},
   "expressions.picker.sectionOther": {},
   "expressions.picker.sectionRecent": {},
   "expressions.picker.setStrip": {},
   "expressions.picker.teamGroup": {},
+  "expressions.plan.cancel": {},
+  "expressions.plan.closed": {},
+  "expressions.plan.concept": {},
+  "expressions.plan.confirm": {},
+  "expressions.plan.confirmed": {},
+  "expressions.plan.declare": {},
+  "expressions.plan.editBack": {},
+  "expressions.plan.editInclude": {
+    "displayName": "string"
+  },
+  "expressions.plan.editName": {
+    "index": "number"
+  },
+  "expressions.plan.editRemoveReference": {
+    "position": "number"
+  },
+  "expressions.plan.editScene": {
+    "index": "number"
+  },
+  "expressions.plan.editSubmit": {},
+  "expressions.plan.gif": {
+    "base": "string",
+    "motion": "string"
+  },
+  "expressions.plan.heading": {
+    "title": "string"
+  },
+  "expressions.plan.kept": {},
+  "expressions.plan.motionBounce": {},
+  "expressions.plan.motionPulse": {},
+  "expressions.plan.motionSparkle": {},
+  "expressions.plan.motionWobble": {},
+  "expressions.plan.notice": {},
+  "expressions.plan.pictures": {
+    "count": "number"
+  },
+  "expressions.plan.referenceAlt": {
+    "position": "number"
+  },
+  "expressions.plan.references": {
+    "count": "number"
+  },
+  "expressions.plan.revise": {},
+  "expressions.plan.scenes": {},
   "expressions.preview.cancel": {
     "name": "string"
   },
   "expressions.preview.cleared": {},
   "expressions.preview.group": {},
+  "expressions.set.agentText": {
+    "prompt": "string"
+  },
+  "expressions.set.badgeGif": {},
+  "expressions.set.cellGray": {
+    "displayName": "string",
+    "reason": "string"
+  },
+  "expressions.set.cellReady": {
+    "displayName": "string",
+    "name": "string"
+  },
+  "expressions.set.decline": {},
+  "expressions.set.errorGeneric": {},
+  "expressions.set.errorQuota": {},
+  "expressions.set.errorStale": {},
+  "expressions.set.errorTaken": {},
+  "expressions.set.faceOnly": {},
+  "expressions.set.grayBaseMissing": {},
+  "expressions.set.grayFailed": {},
+  "expressions.set.grayNotMade": {},
+  "expressions.set.grayRefused": {},
+  "expressions.set.gridLabel": {
+    "title": "string"
+  },
+  "expressions.set.offline": {},
+  "expressions.set.referenceCount": {
+    "count": "number"
+  },
+  "expressions.set.register": {
+    "count": "number"
+  },
+  "expressions.set.registering": {},
+  "expressions.set.resultSaved": {
+    "count": "number"
+  },
+  "expressions.set.resultSavedSkipped": {
+    "saved": "number",
+    "skipped": "number"
+  },
+  "expressions.set.rights": {},
+  "expressions.set.selectAll": {},
+  "expressions.set.selectNone": {},
+  "expressions.set.settledDeclined": {},
+  "expressions.set.settledDone": {},
+  "expressions.set.settledExpired": {},
+  "expressions.set.summaryGray": {
+    "count": "number"
+  },
+  "expressions.set.summaryReady": {
+    "count": "number"
+  },
+  "expressions.set.unreadable": {},
   "expressions.sheet.a11y": {},
   "expressions.sheet.close": {},
   "expressions.sheet.emptyEmoticon": {},
@@ -1794,6 +1978,9 @@ export const argumentSpecs = {
   "expressions.suggest.pick": {
     "name": "string"
   },
+  "expressions.suggest.settingHint": {},
+  "expressions.suggest.settingLabel": {},
+  "inbox.approval.open": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -2170,6 +2357,33 @@ export const argumentSpecs = {
   "releaseNotes.v0144.suggestionsTitle": {},
   "releaseNotes.v0144.suggestionsTryIt": {},
   "releaseNotes.v0144.summary": {},
+  "releaseNotes.v0145.expressionsLine1": {},
+  "releaseNotes.v0145.expressionsLine2": {},
+  "releaseNotes.v0145.expressionsTopic": {},
+  "releaseNotes.v0145.frequentRecentChanged": {},
+  "releaseNotes.v0145.frequentRecentTitle": {},
+  "releaseNotes.v0145.frequentRecentTryIt": {},
+  "releaseNotes.v0145.keptEmoticonsChanged": {},
+  "releaseNotes.v0145.keptEmoticonsTitle": {},
+  "releaseNotes.v0145.keptEmoticonsTryIt": {},
+  "releaseNotes.v0145.noBlinkChanged": {},
+  "releaseNotes.v0145.noBlinkTitle": {},
+  "releaseNotes.v0145.noBlinkTryIt": {},
+  "releaseNotes.v0145.phoneLine1": {},
+  "releaseNotes.v0145.phoneTopic": {},
+  "releaseNotes.v0145.reactionGifsChanged": {},
+  "releaseNotes.v0145.reactionGifsTitle": {},
+  "releaseNotes.v0145.reactionGifsTryIt": {},
+  "releaseNotes.v0145.replyPreviewChanged": {},
+  "releaseNotes.v0145.replyPreviewTitle": {},
+  "releaseNotes.v0145.replyPreviewTryIt": {},
+  "releaseNotes.v0145.steadyPhotosChanged": {},
+  "releaseNotes.v0145.steadyPhotosTitle": {},
+  "releaseNotes.v0145.steadyPhotosTryIt": {},
+  "releaseNotes.v0145.suggestionSwitchChanged": {},
+  "releaseNotes.v0145.suggestionSwitchTitle": {},
+  "releaseNotes.v0145.suggestionSwitchTryIt": {},
+  "releaseNotes.v0145.summary": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -3185,13 +3399,69 @@ export interface MessageArgs {
   "expressions.picker.favoriteRemoved": { name: string };
   "expressions.picker.grid": Record<string, never>;
   "expressions.picker.sectionFavorites": Record<string, never>;
+  "expressions.picker.sectionFrecent": Record<string, never>;
   "expressions.picker.sectionOther": Record<string, never>;
   "expressions.picker.sectionRecent": Record<string, never>;
   "expressions.picker.setStrip": Record<string, never>;
   "expressions.picker.teamGroup": Record<string, never>;
+  "expressions.plan.cancel": Record<string, never>;
+  "expressions.plan.closed": Record<string, never>;
+  "expressions.plan.concept": Record<string, never>;
+  "expressions.plan.confirm": Record<string, never>;
+  "expressions.plan.confirmed": Record<string, never>;
+  "expressions.plan.declare": Record<string, never>;
+  "expressions.plan.editBack": Record<string, never>;
+  "expressions.plan.editInclude": { displayName: string };
+  "expressions.plan.editName": { index: number };
+  "expressions.plan.editRemoveReference": { position: number };
+  "expressions.plan.editScene": { index: number };
+  "expressions.plan.editSubmit": Record<string, never>;
+  "expressions.plan.gif": { base: string; motion: string };
+  "expressions.plan.heading": { title: string };
+  "expressions.plan.kept": Record<string, never>;
+  "expressions.plan.motionBounce": Record<string, never>;
+  "expressions.plan.motionPulse": Record<string, never>;
+  "expressions.plan.motionSparkle": Record<string, never>;
+  "expressions.plan.motionWobble": Record<string, never>;
+  "expressions.plan.notice": Record<string, never>;
+  "expressions.plan.pictures": { count: number };
+  "expressions.plan.referenceAlt": { position: number };
+  "expressions.plan.references": { count: number };
+  "expressions.plan.revise": Record<string, never>;
+  "expressions.plan.scenes": Record<string, never>;
   "expressions.preview.cancel": { name: string };
   "expressions.preview.cleared": Record<string, never>;
   "expressions.preview.group": Record<string, never>;
+  "expressions.set.agentText": { prompt: string };
+  "expressions.set.badgeGif": Record<string, never>;
+  "expressions.set.cellGray": { displayName: string; reason: string };
+  "expressions.set.cellReady": { displayName: string; name: string };
+  "expressions.set.decline": Record<string, never>;
+  "expressions.set.errorGeneric": Record<string, never>;
+  "expressions.set.errorQuota": Record<string, never>;
+  "expressions.set.errorStale": Record<string, never>;
+  "expressions.set.errorTaken": Record<string, never>;
+  "expressions.set.faceOnly": Record<string, never>;
+  "expressions.set.grayBaseMissing": Record<string, never>;
+  "expressions.set.grayFailed": Record<string, never>;
+  "expressions.set.grayNotMade": Record<string, never>;
+  "expressions.set.grayRefused": Record<string, never>;
+  "expressions.set.gridLabel": { title: string };
+  "expressions.set.offline": Record<string, never>;
+  "expressions.set.referenceCount": { count: number };
+  "expressions.set.register": { count: number };
+  "expressions.set.registering": Record<string, never>;
+  "expressions.set.resultSaved": { count: number };
+  "expressions.set.resultSavedSkipped": { saved: number; skipped: number };
+  "expressions.set.rights": Record<string, never>;
+  "expressions.set.selectAll": Record<string, never>;
+  "expressions.set.selectNone": Record<string, never>;
+  "expressions.set.settledDeclined": Record<string, never>;
+  "expressions.set.settledDone": Record<string, never>;
+  "expressions.set.settledExpired": Record<string, never>;
+  "expressions.set.summaryGray": { count: number };
+  "expressions.set.summaryReady": { count: number };
+  "expressions.set.unreadable": Record<string, never>;
   "expressions.sheet.a11y": Record<string, never>;
   "expressions.sheet.close": Record<string, never>;
   "expressions.sheet.emptyEmoticon": Record<string, never>;
@@ -3224,6 +3494,9 @@ export interface MessageArgs {
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.settingHint": Record<string, never>;
+  "expressions.suggest.settingLabel": Record<string, never>;
+  "inbox.approval.open": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
@@ -3560,6 +3833,33 @@ export interface MessageArgs {
   "releaseNotes.v0144.suggestionsTitle": Record<string, never>;
   "releaseNotes.v0144.suggestionsTryIt": Record<string, never>;
   "releaseNotes.v0144.summary": Record<string, never>;
+  "releaseNotes.v0145.expressionsLine1": Record<string, never>;
+  "releaseNotes.v0145.expressionsLine2": Record<string, never>;
+  "releaseNotes.v0145.expressionsTopic": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentChanged": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentTitle": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentTryIt": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsChanged": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsTitle": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsTryIt": Record<string, never>;
+  "releaseNotes.v0145.noBlinkChanged": Record<string, never>;
+  "releaseNotes.v0145.noBlinkTitle": Record<string, never>;
+  "releaseNotes.v0145.noBlinkTryIt": Record<string, never>;
+  "releaseNotes.v0145.phoneLine1": Record<string, never>;
+  "releaseNotes.v0145.phoneTopic": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsChanged": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsTitle": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsTryIt": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewChanged": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewTitle": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewTryIt": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosChanged": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosTitle": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosTryIt": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchChanged": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchTitle": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchTryIt": Record<string, never>;
+  "releaseNotes.v0145.summary": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };

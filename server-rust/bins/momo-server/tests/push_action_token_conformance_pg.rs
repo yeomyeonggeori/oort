@@ -1629,9 +1629,29 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         None,
         w.agent,
     );
+    // ADR-0218 증보 6 §12 L2.5 · A44 (b) (#5460 S1b, 보안 검수 R2-H1): the set's plan card is a
+    // consent to a notice, a count of pictures about to leave for another company and a declaration
+    // about faces — all inside the card — and the set card is the pictures themselves. Neither is
+    // confirmed by a lock-screen tap, approve or reject, and the refusal comes before anything is
+    // read or written: the card stays pending. The ids alone decide (`judge` reads no argument), so
+    // the plan of a set with no reference picture is refused too.
+    let set_plan = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_EXPRESSION_SET_PLAN,
+        &json!({"setId": Uuid::new_v4().to_string()}),
+        None,
+        w.agent,
+    );
+    let set_create = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_EXPRESSION_SET_CREATE,
+        &json!({"setId": Uuid::new_v4().to_string()}),
+        None,
+        w.agent,
+    );
     let members_before = w.count("member").await;
     let agents_before = w.count("agent").await;
     let invites_before = w.count("invite_code").await;
+    let notices_before = w.count("expression_set_notice").await;
+    let sets_before = w.count("expression_set").await;
 
     let mut seeded = Vec::new();
     for (label, action_type, payload) in [
@@ -1657,6 +1677,8 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
             "workspace_action",
             channels_asked,
         ),
+        ("expression.set.plan", "workspace_action", set_plan),
+        ("expression.set.create", "workspace_action", set_create),
     ] {
         let (_, approval) = w.seed_parked_approval(action_type, payload).await;
         seeded.push((label, approval));
@@ -1708,6 +1730,14 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         invites_before,
         "no invite was minted"
     );
+    // A44 (c), the part that needs no executor: the refused plan card recorded no notice and made
+    // no set. (The confirmation, the audit row and the resume job are S5a's to add here.)
+    assert_eq!(
+        w.count("expression_set_notice").await,
+        notices_before,
+        "a lock-screen tap on the plan card recorded a notice"
+    );
+    assert_eq!(w.count("expression_set").await, sets_before);
 
     // The exception, from the route's side: the `hosted.channels.grant` card the server raised in
     // place (a person called the agent in that very channel) is **not** refused to the lock

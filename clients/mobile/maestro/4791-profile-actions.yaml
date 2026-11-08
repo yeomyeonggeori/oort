@@ -9,6 +9,8 @@ name: 4791-profile-actions
 ---
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - tapOn:
     id: "sidebar-row-channel:${PROFILE_CHANNEL_ID}"
