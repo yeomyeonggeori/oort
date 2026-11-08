@@ -15,6 +15,7 @@ import {
   type PhoneExpressionStore,
 } from './store';
 import {expressionTransport} from './transport';
+import {openPhoneExpressionDisk} from './disk/open';
 import {
   forgetExpressionShelf,
   NON_SECRET_KEYS,
@@ -57,7 +58,8 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
   const {workspaceId, member} = useSession();
   const {rail, status} = useRealtime();
   const store = useMemo(() => {
-    // No adoption across sessions: files live only as long as this provider.
+    // 세션 폴더: 이 provider 가 사는 동안만 쓰는 임시 파일(초안 미리보기·반응 칩의 무한 반복 GIF·보관 칸에 못 쓴 그림)이다. 이모티콘 그림의 기기 캐시는 이것이 아니라 아래 `disk`
+    // (`Paths.cache/<칸 이름>`, ADR-0218 §14)다. 앱이 죽어 남은 옛 폴더는 다음 시작 청소가 지운다(`disk/boot.ts`).
     const directory = new Directory(
       Paths.cache,
       `oort-expressions-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -122,6 +124,8 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
           forgetExpressionShelf();
         },
       },
+      // 칸을 못 열면(`null`: id 가 uuid 모양이 아니다) 예전처럼 세션 폴더만 쓴다(닫힌 쪽).
+      openPhoneExpressionDisk(workspaceId, member.id),
     );
   }, [workspaceId, member.id]);
   // 표준 목록(「기본」 탭)을 시트가 열리기 전에 한 번 풀어 둔다 — 처음 열 때도 격자가 바로 선다(#5330).
@@ -144,6 +148,8 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
   }, [store]);
   useEffect(() => {
     if (status === 'connected') {
+      // 실시간이 다시 이어졌다: 끊긴 동안의 알림은 오지 않았으니 전체 목록이 적용될 때까지 디스크 읽기 문을 닫는다. 저장소의 첫 연결은 재연결이 아니라 문을 올리지 않는다(ADR §14 M2.4-1).
+      store.reconnected();
       store.setOnline(onlineManager.isOnline());
       void store.refresh(true);
     } else

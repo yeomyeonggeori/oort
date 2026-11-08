@@ -23,6 +23,8 @@ name: 5436-unread-card-clear
 # 이 흐름이 **못 재는 것**: 겹친 양(pt) 자체 - 그것은 `maestro hierarchy` 덤프로 잰다(인계의 숫자). 어두운 테마·큰 글자·SE 폭·요약 「ready」 상태.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - tapOn:
     id: "sidebar-row-channel:${CHANNEL_ID}"

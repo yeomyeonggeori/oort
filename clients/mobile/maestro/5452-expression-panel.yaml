@@ -12,6 +12,8 @@ name: 5452-expression-panel
 # 준비: `CHANNEL_ID` 채널이 있고 팀 보관함에 `chi_cry` 가 있는 스택 - `measure/seed-expression-panel.py`. 돌리는 법은 `maestro/70-composer-newline.yaml` 머리말과 같다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 # 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
 - runFlow:
     when:

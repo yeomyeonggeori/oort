@@ -1,5 +1,6 @@
 import {
   applyExpressionList,
+  compareExpressionVersions,
   emptyExpressionCache,
   isNextExpressionVersion,
 } from '@momo/core/features/expressions/cache';
@@ -17,6 +18,13 @@ import {
   type PhotoDraftResult,
   type PhotoModel,
 } from '@momo/core/features/expressions/photo';
+import {
+  activeDiskKeys,
+  isListedDiskTarget,
+  listedDiskTarget,
+  type DiskImage,
+  type ListedDiskTarget,
+} from '@momo/core/features/expressions/diskCache';
 import type {
   Expression,
   ExpressionAddPolicy,
@@ -26,7 +34,14 @@ import type {
   ExpressionMedia,
   ExpressionMutation,
   ExpressionVariant,
+  ExpressionVersion,
 } from '@momo/core/features/expressions/types';
+import {
+  sniffImageMime,
+  toArrayBuffer,
+  type LocatedImage,
+  type PhoneExpressionDisk,
+} from './disk/port';
 import type {ExpressionRequest, ExpressionTransport} from './transport';
 import {
   emptyExpressionUsage,
@@ -70,6 +85,13 @@ const LIST_CONTRACT = 'List';
 const isActive = (item: Expression) => item.status === 'active';
 /** 기기에 남기는 보관함의 형식 번호. 1(전체 등록을 그대로)은 읽지 않고 지운다(#5473). */
 const SHELF_FORMAT = 2;
+const DECIMAL = /^(0|[1-9][0-9]*)$/;
+/** 확인된 알림 version 을 기억하는 수(같은 version 의 늦은 프레임이 문을 다시 닫지 않게 한다). */
+const CONFIRMED_NOTICE_MEMORY = 64;
+/** 디스크에 쓴 횟수가 이 수의 배수일 때마다(그리고 첫 쓰기에) 수명·바이트 상한 청소를 한다. */
+const TRIM_EVERY_WRITES = 32;
+/** 목록 읽기가 이 상태로 끝나면 로그인이 끝났거나 멤버에서 빠졌거나 워크스페이스가 없다: 그 보관 칸을 지운다(M2.5). 그림 하나의 404(숨김·틀린 sha 에 대한 설계된 응답)는 이것이 아니다. */
+const LIST_REFUSED = new Set([401, 403, 404]);
 /**
  * 기기에 남기지 않은 필드의 **빈 값**. 읽어 되살린 등록은 `Expression` 모양이어야(같은 계약 검사·같은 소비자) 하지만 이 필드들은 그리는 데 쓰이지 않는다
  * (`expressionAltText` 가 `tags[0]` 을 읽으므로 `tags` 는 빈 배열이다). 출처 종류 낱말은 표의 키에서 꺼낸다(직접 문구 장부를 늘리지 않는다).
@@ -89,6 +111,15 @@ const blankTrace = () => ({
 export interface ExpressionFiles {
   write(key: string, bytes: Uint8Array): string;
   remove(uri: string): void;
+}
+/**
+ * 화면이 쥔 그림 파일 하나. `owned` 는 **이 세션의 임시 파일**(반응 칩의 무한 반복 GIF·쓰기가 막혔거나 실패한 그림)이라 이 저장소가 걷을 때 지운다는 뜻이다. 아니면 **보관 칸의 파일**이고
+ * 알림·끊김은 그것을 지우지 않는다(ADR §14 M2.4-3: 알림은 그리기만 막는다) — 지우는 일은 숨김·삭제 상세·대조 청소·세션 끝이 한다. `diskKey` 는 그 파일의 보관 칸 키다.
+ */
+interface Held {
+  uri: string;
+  owned: boolean;
+  diskKey: string | null;
 }
 /**
  * 기기에 남기는 **마지막 보관함**(이름 → 그림 크기, #5451). 대화가 열리는 순간 보관함이 아직 안 왔어도 `:이름:` 을 글로 먼저 그렸다가 큰 그림으로
@@ -146,6 +177,11 @@ export function createPhoneExpressionStore(
   files: ExpressionFiles,
   storage?: {read(): unknown; write(value: ExpressionUsage): void},
   shelfStorage?: ExpressionShelfStorage,
+  /**
+   * 이모티콘 그림의 기기 캐시(ADR-0218 §14, #5455 B-2): `Paths.cache` 아래 보관 칸. 없으면(`null`) 예전 그대로 세션 폴더의 임시 파일(`files`)만 쓴다. 읽기 문·쓰기 문·대조 청소·알림 규칙은
+   * 모두 **이 저장소 한 곳**에 있다(화면 부품은 문을 모른다).
+   */
+  disk: PhoneExpressionDisk | null = null,
 ) {
   const emptyItems: readonly Expression[] = [];
   // 기기에 남은 한 등록을 `Expression` 모양으로 되살린다. 남기지 않은 필드는 빈 값이고, 남은 필드만 하나씩 골라 옮긴다(저장값의 다른 필드는 따라오지 않는다).
@@ -221,13 +257,221 @@ export function createPhoneExpressionStore(
   let changePending = false;
   const receipts = new Set<string>();
   const listeners = new Set<() => void>();
-  const images = new Map<string, string>();
+  const images = new Map<string, Held>();
   const pending = new Map<string, Promise<string | null>>();
   const root = `/v1/workspaces/${encodeURIComponent(workspaceId)}`;
   const base = `${root}/expressions`;
   // 등록 전 미리보기 파일. 목록 그림(`images`)과 따로 둔다: 변경 알림이 목록 그림을 걷어도 사람이 보고 있는
   // 미리보기를 지우면 안 된다. 화면이 놓을 때(`discardDraftImage`)나 세션이 끝날 때만 지운다.
   const draftFiles = new Set<string>();
+  const isReady = () => snapshot.state === 'ready';
+  // ---- 이모티콘 그림의 기기 캐시(ADR-0218 §14, #5455 B-2). 읽기 문·쓰기 문·대조 청소는 **모두 이 저장소 한 곳**에 있다(화면 부품은 모른다). `disk` 가 `null` 이면 아래는 아무 일도 하지 않는다.
+  /** 아직 확인되지 않은 알림: version → 기록한 순번. 그 알림의 version 을 **담은 읽기**가 적용될 때까지 디스크 읽기 문은 닫혀 있다(M2.4-1 4번). */
+  const pendingNotices = new Map<string, number>();
+  /** 최근에 확인된 알림 version(늦게 온 같은 version 의 프레임이 문을 다시 닫지 않게 한다). */
+  const confirmedNotices = new Set<string>();
+  let noticeSerial = 0;
+  /** 재연결·오프라인 복귀의 횟수와 그중 전체 목록 읽기가 확인한 횟수. 재연결은 version 이 없으므로 **전체 목록**만 문을 연다. */
+  let reconnectSerial = 0;
+  let reconnectConfirmed = 0;
+  /** 이 저장소의 첫 `connected` 를 이미 봤는가: 첫 연결은 재연결이 아니다(`reconnected`). */
+  let reconnectedOnce = false;
+  /** 디스크 쓰기가 한 번 실패하면 이 세션은 쓰기를 쉰다(재시도 폭주 방지, M2.7). */
+  let writesPaused = false;
+  let writesSinceTrim = 0;
+  const diskTasks = new Set<Promise<void>>();
+  let reconcileChain: Promise<void> = Promise.resolve();
+  const trackDisk = (task: Promise<unknown>) => {
+    const settled: Promise<void> = task
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => {
+        diskTasks.delete(settled);
+      });
+    diskTasks.add(settled);
+  };
+  const noteReconnect = () => {
+    if (disk === null) return;
+    confirmedNotices.clear();
+    reconnectSerial += 1;
+  };
+  /**
+   * 알림 프레임 하나를 기록한다. **어떤 조기 반환보다 먼저** 부른다(`changed`·`detailed`): 이미 처리한 version 의 둘째 프레임, 그림을 그대로 두는 등록·고치기·정책 상세까지 모두
+   * 새로 서는 칸의 디스크 읽기 문을 닫는다. 그 알림의 version 을 **담은 읽기**(전체 목록이거나 `since` < version ≤ 응답 version)가 적용돼야 열린다. 내 쓰기 응답(`mutate`)은 확인이 아니다.
+   * version 을 읽을 수 없는 알림은 재연결처럼 전체 목록만 문을 연다.
+   */
+  const noticed = (version: ExpressionVersion | null) => {
+    if (disk === null || disposed) return;
+    if (version === null || !DECIMAL.test(version)) {
+      noteReconnect();
+      return;
+    }
+    if (confirmedNotices.has(version) || pendingNotices.has(version)) return;
+    pendingNotices.set(version, ++noticeSerial);
+  };
+  /** 읽기 문이 알림 또는 재연결 때문에 닫혀 있는가. */
+  const diskDoorDown = () =>
+    pendingNotices.size > 0 || reconnectConfirmed < reconnectSerial;
+  /** 문을 열려면 증분 읽기로는 모자란가: 재연결이 있었거나, 기다리는 알림의 version 이 이미 캐시 version 이하(`since` 가 알림보다 작을 수 없다 — 내 응답이 먼저 왔다)다. */
+  const doorNeedsFullRead = (known: ExpressionVersion) =>
+    reconnectConfirmed < reconnectSerial ||
+    [...pendingNotices.keys()].some(
+      version => compareExpressionVersions(version, known) <= 0,
+    );
+  /** 이 읽기가 알림을 확인했는가: 읽기가 시작하기 전에 기록된 알림 중, 목록이 그 version 까지 오고 그 version 을 **담은**(전체이거나 since < version) 것. */
+  const confirmDoor = (
+    mark: {notices: number; reconnect: number},
+    list: ExpressionList,
+    since: ExpressionVersion | null,
+  ) => {
+    for (const [version, recordedAt] of [...pendingNotices]) {
+      if (
+        recordedAt > mark.notices ||
+        compareExpressionVersions(list.version, version) < 0
+      )
+        continue;
+      if (
+        !list.reset &&
+        (since === null || compareExpressionVersions(since, version) >= 0)
+      )
+        continue;
+      pendingNotices.delete(version);
+      confirmedNotices.add(version);
+      if (confirmedNotices.size > CONFIRMED_NOTICE_MEMORY) {
+        const oldest = confirmedNotices.values().next();
+        if (!oldest.done) confirmedNotices.delete(oldest.value);
+      }
+    }
+    if (list.reset && mark.reconnect > reconnectConfirmed)
+      reconnectConfirmed = mark.reconnect;
+  };
+  /**
+   * 읽기 문의 조건 3(M2.4-1): 주소가 가리키는 `(id, size, sha)` 가 **확인된 목록의 active 항목**의 `media.<size>.sha256` 과 같을 때만 디스크 대상이다. 초안 미리보기 주소
+   * (`expression-drafts/…`)와 그 밖의 모양은 `null` 이라 디스크를 아예 읽지도 쓰지도 않는다(M2.3, MA12). 파일 이름은 이 검사를 지난 엄격한 모양(uuid·세 크기·hex 64)으로만 만들어진다.
+   */
+  const diskTargetOf = (path: string): ListedDiskTarget | null =>
+    disk === null || disposed ? null : listedDiskTarget(cache.items, path);
+  /** 읽기 문의 조건 1·2·4·5: `ready`, 온라인, 알림 뒤 목록이 적용됐다, 알림·재연결의 확인 읽기가 끝났다, 이 칸의 세션이 끝나지 않았다. shelf 로는 열리지 않는다(`ready` 는 서버가 확인한 목록뿐이다). */
+  const diskDoorOpen = (): boolean =>
+    disk !== null &&
+    !disposed &&
+    online &&
+    !changePending &&
+    isReady() &&
+    !diskDoorDown() &&
+    disk.sessionUnchanged();
+  /** 지금 화면이 쥔 보관 칸 파일의 키들(`trim` 이 지우지 않는다). */
+  const pinnedKeys = (): Set<string> => {
+    const keys = new Set<string>();
+    for (const kept of images.values()) {
+      if (kept.diskKey !== null) keys.add(kept.diskKey);
+    }
+    return keys;
+  };
+  /**
+   * 디스크의 그림 하나. 바이트를 JS 힙에 올리지 않고 파일 주소만 얻는다(`locate`). 길이가 목록의 `media.bytes` 와 다르면 그 항목을 지우고 `null`(네트워크로 간다, M2.6: 폰은 읽을 때 sha 를 재지 않는다).
+   * `forever`(반응 칩의 무한 반복 GIF)면 보관한 원본에서 따로 쓴 임시 파일을 만든다(원본은 그대로).
+   */
+  const readFromDisk = async (
+    target: ListedDiskTarget,
+    forever: boolean,
+    stale: () => boolean,
+  ): Promise<Held | null> => {
+    const compartment = disk!.compartment;
+    let found: LocatedImage | null;
+    try {
+      found = await compartment.locate(target.key, target.media.mime);
+    } catch {
+      return null;
+    }
+    if (found === null) return null;
+    if (found.bytes !== target.media.bytes) {
+      trackDisk(compartment.remove([target.key]));
+      return null;
+    }
+    if (stale() || !disk!.sessionUnchanged()) return null;
+    if (!forever) return {uri: found.uri, owned: false, diskKey: target.key};
+    let stored: DiskImage | null;
+    try {
+      stored = await compartment.read(target.key);
+    } catch {
+      return null;
+    }
+    if (stored === null || stale()) return null;
+    return {
+      uri: files.write(`${++serial}.gif`, loopForever(new Uint8Array(stored.bytes))),
+      owned: true,
+      diskKey: null,
+    };
+  };
+  /** 쓰기도 같은 문을 건다: 받는 도중 걷혔거나 목록에 active 로 없거나 문이 닫혀 있으면 늦게 온 바이트를 쓰지 않는다. */
+  const diskWriteAllowed = (target: ListedDiskTarget, stale: () => boolean) =>
+    !writesPaused &&
+    !stale() &&
+    diskDoorOpen() &&
+    isListedDiskTarget(cache.items, target);
+  /**
+   * 받은 바이트를 보관 칸에 쓰고 쓴 파일의 주소를 돌려준다. 못 썼으면 `null` — 부르는 쪽은 받은 바이트를 **세션의 임시 파일**로 그린다(쓰기 실패 때도 같다, M2.7): 그림은 그려지고 이 세션은 쓰기를 쉰다.
+   * 길이는 목록의 `media.bytes` 와 **정확히** 같고(`!==` 면 거절) 받은 바이트의 머리가 `media.mime` 과 같을 때만 둔다(M2.6).
+   */
+  const rememberOnDisk = async (
+    target: ListedDiskTarget,
+    bytes: Uint8Array,
+    stale: () => boolean,
+  ): Promise<string | null> => {
+    const compartment = disk!.compartment;
+    if (
+      bytes.length !== target.media.bytes ||
+      sniffImageMime(bytes) !== target.media.mime
+    )
+      return null;
+    if (!diskWriteAllowed(target, stale)) return null;
+    try {
+      await compartment.write(target.key, {
+        bytes: toArrayBuffer(bytes),
+        mime: target.media.mime,
+      });
+    } catch {
+      // 쓰기 실패(디스크 가득 참 등)는 「캐시 없음」이다. 이 세션은 쓰기를 쉰다(재시도 폭주 방지).
+      writesPaused = true;
+      return null;
+    }
+    // 쓰는 사이 세션이 끝났거나(로그아웃) 저장소가 놓였다면(계정 교체) 되살아난 칸을 **칸 폴더째** 다시 지운다(항목 하나만 지우면 빈 칸 폴더가 남는다, 웹 B-1 검수 L1과 같은 모양).
+    if (!disk!.sessionUnchanged() || disposed) {
+      await compartment.destroy().catch(() => undefined);
+      return null;
+    }
+    writesSinceTrim += 1;
+    if (writesSinceTrim === 1 || writesSinceTrim % TRIM_EVERY_WRITES === 0)
+      trackDisk(compartment.trim(pinnedKeys()));
+    return compartment.uriOf(target.key, target.media.mime);
+  };
+  /** 디스크 대조 청소(M2.4-2): 지금 목록에 active 로 없는 디스크 키를 모두 지운다. 기준은 코어의 `evictImageIds` 가 아니라 **디스크 색인**(폴더 목록)이다. 색인을 읽을 수 없으면 청소를 돌리지 않는다. */
+  const reconcileDisk = () => {
+    if (disk === null || disposed) return;
+    const compartment = disk.compartment;
+    reconcileChain = reconcileChain
+      .then(async () => {
+        const keys = await compartment.keys();
+        // 확인된 목록(`ready`)이 서 있을 때만 대조한다: 끊김·오류로 캐시가 비었을 때(빈 목록)는 모든 항목이 「목록에 없는 키」로 보인다.
+        if (
+          keys === null ||
+          disposed ||
+          !disk.sessionUnchanged() ||
+          !isReady() ||
+          cache.version === null
+        )
+          return;
+        // 활성 키는 색인을 읽은 **뒤**의 목록으로 센다: 그 사이 새로 등록돼 써진 그림을 지우지 않는다.
+        const active = activeDiskKeys(cache.items);
+        const stale = keys.filter(key => !active.has(key));
+        if (stale.length > 0) await compartment.remove(stale);
+      })
+      .catch(() => undefined);
+    trackDisk(reconcileChain);
+  };
   // 읽은 목록을 마지막 보관함으로 삼고 기기에 남긴다(같은 버전이면 다시 쓰지 않는다 — 목록이 클 수 있다).
   const rememberShelf = () => {
     if (cache.version === null || cache.version === shelfVersion) return;
@@ -275,7 +519,8 @@ export function createPhoneExpressionStore(
     epoch += 1;
     readGen += 1;
     revision += 1;
-    for (const uri of images.values()) files.remove(uri);
+    // 이 세션의 임시 파일만 지운다. 보관 칸의 파일은 알림·끊김이 지우지 않는다(ADR §14 M2.4-3): 지우는 일은 숨김·삭제 상세·대조 청소·세션 끝이 한다.
+    for (const kept of images.values()) if (kept.owned) files.remove(kept.uri);
     images.clear();
     pending.clear();
   };
@@ -290,9 +535,9 @@ export function createPhoneExpressionStore(
     revision += 1;
     const gone = new Set(ids);
     for (const id of gone) idEpochs.set(id, (idEpochs.get(id) ?? 0) + 1);
-    for (const [key, uri] of images) {
+    for (const [key, kept] of images) {
       if (!gone.has(idOfKey(key))) continue;
-      files.remove(uri);
+      if (kept.owned) files.remove(kept.uri);
       images.delete(key);
     }
     for (const key of [...pending.keys()]) {
@@ -313,14 +558,22 @@ export function createPhoneExpressionStore(
     if (disposed || !online) return;
     if (cache.version === null && snapshot.state !== 'loading') publish('loading');
     const started = readGen;
+    // 이 읽기가 시작하기 전에 기록된 알림·재연결만 이 읽기가 확인할 수 있다(읽기 문, M2.4-1 4번).
+    const mark = {notices: noticeSerial, reconnect: reconnectSerial};
+    let refused = false;
     try {
-      // 전체 읽기는 `since` 없이 — 서버가 `reset` 목록을 준다. 부분 읽기는 읽은 버전 뒤의 변경만 받는다.
-      const since = !full && cache.version !== null ? `?since=${cache.version}` : '';
+      // 전체 읽기는 `since` 없이 — 서버가 `reset` 목록을 준다. 부분 읽기는 읽은 버전 뒤의 변경만 받는다. 읽기 문이 닫혀 있고 증분으로는 알림 version 을 담을 수 없으면(재연결·이미 가진 version)
+      // 전체로 읽는다.
+      const known = cache.version;
+      const incremental =
+        !full && known !== null && !doorNeedsFullRead(known);
+      const since = incremental ? `?since=${known}` : '';
       const response = await transport.request({
         method: 'GET',
         path: base + since,
       });
       if (disposed || started !== readGen) return;
+      refused = LIST_REFUSED.has(response.status);
       if (
         response.status !== 200 ||
         !matchesExpressionContract(LIST_CONTRACT, response.json)
@@ -349,13 +602,18 @@ export function createPhoneExpressionStore(
       evictIds(update.evictImageIds);
       cache = update.cache;
       changePending = false;
+      confirmDoor(mark, response.json as ExpressionList, incremental ? known : null);
       publish('ready');
+      // 목록이 적용될 때마다 디스크 색인을 목록과 대조해 active 가 아닌 키를 지운다(M2.4-2). 기준은 코어의 `evictImageIds` 가 아니라 **디스크 색인**이다.
+      reconcileDisk();
     } catch {
       if (!disposed && started === readGen) {
         evict();
         cache = emptyExpressionCache(workspaceId, memberId);
         changePending = false;
         publish('error');
+        // 목록 읽기가 401·403·404 로 끝났다(강제 퇴장·멤버 제거·로그인 끝): 그 보관 칸을 지운다(M2.5). 읽기 실패 자체는 청소를 돌리지 않고 문만 닫아 둔다(`error` 는 `ready` 가 아니다).
+        if (disk !== null && refused) trackDisk(disk.compartment.destroy());
       }
     }
   };
@@ -377,6 +635,8 @@ export function createPhoneExpressionStore(
       case 'revoke-ids': {
         const gone = new Set(verdict.ids);
         evictIds(verdict.ids);
+        // id 를 이름으로 알려 주는 알림만 그 id 의 보관 칸 항목을 그 자리에서 지운다(M2.4-2 마지막 항목·M2.4-3). 이름 없는 알림은 디스크를 지우지 않는다.
+        if (disk !== null) trackDisk(disk.compartment.removeIds([...gone]));
         // 목록이 올 때까지 기다리지 않고 보관함에서 뺀다 — 이 id 의 칸은 지금 글자가 된다(읽기가 앞서 시작했어도 `readGen` 이 그 답을 버린다).
         cache = {...cache, items: cache.items.filter(item => !gone.has(item.id))};
         lastKnown = lastKnown.filter(item => !gone.has(item.id));
@@ -398,6 +658,8 @@ export function createPhoneExpressionStore(
   return {
     start() {
       disposed = false;
+      // 앞 세션의 정리가 이 저장소가 만들어진 **뒤** 돌았어도(계정 교체) 이 저장소를 막지 않게 세대를 지금 값으로 다시 잡는다.
+      disk?.arm();
     },
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -429,11 +691,27 @@ export function createPhoneExpressionStore(
      * `version` 은 같은 version 의 상세가 먼저 처리됐는지 알아보는 열쇠다(없으면 항상 처리한다).
      */
     changed(version: string | null = null) {
+      // 모든 알림 프레임을 조기 반환보다 먼저 기록한다(읽기 문, M2.4-1 4번): 그 version 을 담은 읽기가 적용될 때까지 새로 서는 칸은 디스크에서 읽지 않는다.
+      noticed(version);
       applyNotice(noticeGate.changed(version));
     },
     /** 상세 알림(`expression.changed.detail`): 숨김·삭제는 그 id 만 내리고, 등록·고치기·정책은 그림을 그대로 둔 채 목록만 새로 읽는다. */
     detailed(detail: ExpressionChangedDetail) {
+      noticed(detail.version);
       applyNotice(noticeGate.detail(detail));
+    },
+    /**
+     * 실시간이 (다시) 연결됐다(`status === 'connected'`, ADR §14 M2.4-1 4번·R2-L2). 알림은 끊긴 동안 오지 않으므로 **전체 목록이 적용돼야** 디스크 읽기 문이 열린다.
+     * **첫 연결은 재연결이 아니다**(planner 결정 2026-11-08, 웹의 첫 구독 예외와 같다): 저장소가 만들어진 뒤 처음 받는 신호는 문을 올리지 않는다 — 그 신호가 부르는 전체 읽기는
+     * 그대로 한다. 앱을 다시 켤 때마다 첫 연결이 문을 닫으면 그 순간(첫 화면이 서는 때) 새로 서는 칸이 모두 네트워크로 가서 이득이 사라진다.
+     */
+    reconnected() {
+      if (disk === null) return;
+      if (!reconnectedOnce) {
+        reconnectedOnce = true;
+        return;
+      }
+      noteReconnect();
     },
     /** 새로 구독했다(되쏘기 포함): 앞서 본 version 은 그 틈 뒤를 말해 주지 않는다. */
     resetNotices() {
@@ -443,6 +721,8 @@ export function createPhoneExpressionStore(
       if (online === value) return;
       online = value;
       noticeGate.reset();
+      // 오프라인 동안 알림을 못 받았을 수 있다: 복귀 뒤에는 **전체 목록**이 적용돼야 읽기 문이 열린다. 디스크는 지우지 않는다(M2.5 「오프라인」 — 대조 청소가 정리한다).
+      if (!value) noteReconnect();
       evict();
       cache = emptyExpressionCache(workspaceId, memberId);
       changePending = false;
@@ -467,33 +747,42 @@ export function createPhoneExpressionStore(
         disposed ||
         !online ||
         changePending ||
-        snapshot.state !== 'ready' ||
+        !isReady() ||
         !current?.media
       )
         return null;
       const media = current.media[variant];
       const forever = loop && media.mime === 'image/gif';
       const key = `${item.id}/${variant}/${media.sha256}${forever ? '/loop' : ''}`;
-      if (images.has(key)) return images.get(key)!;
+      const kept = images.get(key);
+      if (kept !== undefined) return kept.uri;
       if (pending.has(key)) return pending.get(key)!;
       const started = epoch;
       const idStarted = idEpochs.get(item.id) ?? 0;
+      // 받는 도중 전체 걷기·이 id 의 걷기·세션 끝이 있었는가.
+      const stale = () =>
+        disposed ||
+        started !== epoch ||
+        (idEpochs.get(item.id) ?? 0) !== idStarted;
       const task = (async () => {
         try {
-          const response = await transport.request({
-            method: 'GET',
-            path: `${base}/${encodeURIComponent(
-              item.id,
-            )}/image?size=${variant}&v=${media.sha256}`,
-          });
+          const path = `${base}/${encodeURIComponent(
+            item.id,
+          )}/image?size=${variant}&v=${media.sha256}`;
+          // 디스크 → 네트워크 순서다. 디스크는 읽기 문(M2.4-1)을 모두 지났을 때만 본다: 문이 닫혀 있으면 그림은 네트워크로 간다(숨긴 것은 서버가 404 로 막는다).
+          const target = diskTargetOf(path);
+          if (target !== null && diskDoorOpen()) {
+            const found = await readFromDisk(target, forever, stale);
+            if (stale()) return null;
+            if (found !== null) {
+              images.set(key, found);
+              return found.uri;
+            }
+            if (!disk!.sessionUnchanged()) return null;
+          }
+          const response = await transport.request({method: 'GET', path});
           // 그 사이 전체 걷기·이 id 의 걷기가 있었으면 받은 것을 파일로 쓰지 않는다.
-          if (
-            disposed ||
-            started !== epoch ||
-            (idEpochs.get(item.id) ?? 0) !== idStarted ||
-            response.status !== 200
-          )
-            return null;
+          if (stale() || response.status !== 200) return null;
           const bytes =
             response.bytes ??
             (response.bodyBase64 === undefined
@@ -503,11 +792,20 @@ export function createPhoneExpressionStore(
                 ));
           if (!bytes || bytes.length > media.bytes || bytes.length === 0)
             return null;
+          // 보관 칸에 쓴다(쓰기 문, 길이·형식 대조). 못 썼으면(문이 닫힘·쓰기 실패·길이 어긋남) 받은 바이트를 세션의 임시 파일로 그대로 그린다.
+          const stored =
+            target === null ? null : await rememberOnDisk(target, bytes, stale);
+          // 쓰는 사이 세션이 끝났다면(로그아웃) 그리지도 않는다.
+          if (stale() || (disk !== null && !disk.sessionUnchanged())) return null;
+          if (stored !== null && target !== null && !forever) {
+            images.set(key, {uri: stored, owned: false, diskKey: target.key});
+            return stored;
+          }
           const uri = files.write(
             `${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
             forever ? loopForever(bytes) : bytes,
           );
-          images.set(key, uri);
+          images.set(key, {uri, owned: true, diskKey: null});
           return uri;
         } catch {
           return null;
@@ -595,6 +893,7 @@ export function createPhoneExpressionStore(
       evictIds(update.evictImageIds);
       cache = update.cache;
       publish('ready');
+      reconcileDisk();
       // 위 걷기는 읽고 있던 목록 읽기를 버린다(판이 바뀐다). 알림 뒤 목록이 아직 확인되지 않았다면 다시 읽는다 — 등록 응답은 알림을 확인해 주지 않는다.
       if (dropsReading && changePending) void refresh();
       return result;
@@ -607,12 +906,10 @@ export function createPhoneExpressionStore(
       if (disposed || !online || draft.state !== 'ready') return null;
       const media = draft.media[variant];
       try {
-        const response = await transport.request({
-          method: 'GET',
-          path: `${root}/expression-drafts/${encodeURIComponent(
-            draft.draftId,
-          )}/image?size=${variant}&v=${media.sha256}`,
-        });
+        const path = `${root}/expression-drafts/${encodeURIComponent(
+          draft.draftId,
+        )}/image?size=${variant}&v=${media.sha256}`;
+        const response = await transport.request({method: 'GET', path});
         if (disposed || response.status !== 200) return null;
         const bytes =
           response.bytes ??
@@ -623,6 +920,10 @@ export function createPhoneExpressionStore(
               ));
         if (!bytes || bytes.length > media.bytes || bytes.length === 0)
           return null;
+        // 초안·세트 후보 그림은 보관 칸에 넣지 않는다(ADR §14 M2.3, MA12): 서버가 시간이 지나면 회수하는 바이트가 기기에 남아서는 안 된다. `diskTargetOf` 가 `expression-drafts/…` 주소를
+        // 거르므로 이 길은 항상 세션의 임시 파일이다. 보관 칸의 쓰기 문은 `image()` 와 이 길이 **같은 문 하나**를 지난다.
+        const target = diskTargetOf(path);
+        if (target !== null) await rememberOnDisk(target, bytes, () => disposed);
         const uri = files.write(
           `draft-${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
           bytes,
@@ -653,6 +954,12 @@ export function createPhoneExpressionStore(
       changePending = false;
       publish('offline');
       listeners.clear();
+      // 계정·워크스페이스 전환과 세션 끝: 앞 보관 칸을 폴더째 지운다(M2.5: 앞 칸을 남기지 않는 보수적 선택). 지금 쓰는 중이던 늦은 저장도 쓴 직후 이 칸을 다시 지운다.
+      if (disk !== null) trackDisk(disk.compartment.destroy());
+    },
+    /** 진행 중인 디스크 쓰기·청소가 끝나기를 기다린다(시험·진단용). */
+    async settleDisk() {
+      while (diskTasks.size > 0) await Promise.all([...diskTasks]);
     },
   };
 }
