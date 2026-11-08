@@ -608,18 +608,21 @@ BEGIN
 END $$;
 -- END attachment-media-lockdown
 
--- BEGIN attachment-write-token-lockdown (#5371; ADR-0151 증보 8 W1, security review M2). Identical in
--- 175_attachment_write_token.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the
--- text between the markers. A row of this table lets whoever presents the token write one re-encoded
--- picture into an in-flight run's conversation as that run's agent, and the BYPASSRLS roles skip RLS, so
--- their table privileges are what keeps a forged row away from a role with no business writing one. Each
--- runtime role gets exactly what the flow uses: momo_worker mints (INSERT), sweeps day-old rows (DELETE)
--- and reads what it writes and the attachment ids a run recorded (SELECT); momo_app spends a token and
--- records the attachment it made (UPDATE ... RETURNING, so SELECT too) and never creates or deletes one;
--- relay, notifier and platform_admin do not touch it at all. A foreign-key cascade (run, workspace) runs
--- as the table's owner, so deleting a parent still clears its rows. Idempotent and order-proof (a pass
--- before the table or the roles exist finishes what it can, the pass after lands the rest), and it fails
--- loudly if the result is not what is written here.
+-- BEGIN attachment-write-token-lockdown (#5371; ADR-0151 증보 8 W1, security review M2; re-issued by #5530,
+-- ADR-0151 증보 8 보충). Identical in 179_agent_picture_mark.sql, bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers. 175 carries the first copy (an
+-- applied file is not edited) and this one, applied after it, wins. A row of this table lets whoever presents
+-- the token write one re-encoded picture into an in-flight run's conversation as that run's agent, and the
+-- BYPASSRLS roles skip RLS, so their table privileges are what keeps a forged row away from a role with no
+-- business writing one. Each runtime role gets exactly what the flow uses: momo_worker mints (INSERT) and
+-- reads what it writes and the attachment ids a run recorded (SELECT) and no longer deletes (it could free
+-- its own spent slot that way; the day-old sweep moved to the api); momo_app spends a token and records the
+-- attachment it made (UPDATE ... RETURNING, so SELECT too) and sweeps the rows a day past their expiry
+-- (DELETE, in the spend's own transaction) and never creates one; relay, notifier and platform_admin do not
+-- touch it at all. A foreign-key cascade (run, channel, workspace) runs as the table's owner, so deleting a
+-- parent still clears its rows: this table is therefore not where the daily ceiling is counted
+-- (agent_picture_mark is). Idempotent and order-proof (a pass before the table or the roles exist finishes
+-- what it can, the pass after lands the rest), and it fails loudly if the result is not what is written here.
 DO $$
 DECLARE
   r text;
@@ -633,8 +636,8 @@ BEGIN
   FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
     CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
     allowed := CASE r
-      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
-      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE', 'DELETE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT']
       ELSE ARRAY[]::text[]
     END;
     EXECUTE format('REVOKE ALL ON TABLE public.attachment_write_token FROM %I', r);
@@ -744,6 +747,52 @@ BEGIN
   END LOOP;
 END $$;
 -- END expression-set-lockdown
+
+-- BEGIN agent-picture-mark-lockdown (#5530; ADR-0151 증보 8 보충, security review M-1 (b)). Identical in
+-- 179_agent_picture_mark.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. One row per picture the api wrote for an agent is what the api's daily ceiling counts,
+-- and the BYPASSRLS roles skip RLS, so their table privileges are what keeps today's number out of reach of a
+-- worker compromised at the database level: momo_worker, relay, notifier, platform_admin and the two roles the
+-- worker may SET ROLE to (the helper's read role and momo_memory) hold nothing on it (a row of theirs, rewritten
+-- or deleted, is what the old count could not survive). Those two are named here because a membership granted
+-- WITH INHERIT FALSE is invisible to has_table_privilege('momo_worker', ...): a stray grant to either would
+-- pass a block that did not name it and still be the worker's (#5530 implementation review M-1).
+-- momo_app counts (SELECT), writes the row in the transaction that writes the attachment (INSERT) and sweeps
+-- rows older than twice the window (DELETE; a trigger refuses a row inside the window whoever asks); nobody
+-- updates or truncates a row (the same trigger refuses both, the owner included). The table has no foreign key
+-- in either direction on purpose: a cascade runs as the table's owner, so a key to a run, channel, attachment
+-- or workspace would hand a role that may delete a parent the delete the privileges withhold. Idempotent and
+-- order-proof (a pass before the table or the roles exist finishes what it can, the pass after lands the
+-- rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.agent_picture_mark') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.agent_picture_mark FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read', 'momo_memory'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.agent_picture_mark FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.agent_picture_mark TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.agent_picture_mark', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on agent_picture_mark',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END agent-picture-mark-lockdown
 
 -- Migration 009 can run before these runtime roles exist (the production
 -- internal-smoke order). Reassert the locked join boundary after role creation:

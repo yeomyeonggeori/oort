@@ -509,6 +509,34 @@ async fn attachment_rows(su: &PgPool, ws: Uuid) -> i64 {
     .await
 }
 
+async fn mark_rows(su: &PgPool, ws: Uuid) -> i64 {
+    count(
+        su,
+        "SELECT count(*) FROM agent_picture_mark WHERE workspace_id = $1",
+        ws,
+    )
+    .await
+}
+
+/// A mark row `age` old (a Postgres interval: "1 hour", "49 hours"), written directly — what the api's
+/// write transaction leaves behind, at the age a test needs. Returns its attachment id.
+async fn seed_mark(su: &PgPool, ws: Uuid, age: &str) -> Uuid {
+    let attachment = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_picture_mark (workspace_id, attachment_id, run_id, agent_member_id, written_at) \
+         VALUES ($1, $2, $3, $4, clock_timestamp() - $5::interval)",
+    )
+    .bind(ws)
+    .bind(attachment)
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(age)
+    .execute(su)
+    .await
+    .expect("mark row");
+    attachment
+}
+
 async fn audit_rows(su: &PgPool, ws: Uuid, action: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = $2")
         .bind(ws)
@@ -1424,6 +1452,20 @@ async fn a_written_picture_is_one_complete_agent_row_with_one_audit_line_and_one
     );
     assert_eq!(attachment_rows(su, w.ws).await, 1, "exactly one row");
 
+    // the mark that makes the picture count (#5530): one row naming this write, written with it
+    let marks: Vec<(Uuid, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT attachment_id, run_id, agent_member_id FROM agent_picture_mark WHERE workspace_id = $1",
+    )
+    .bind(w.ws)
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(
+        marks,
+        vec![(id, w.run, w.agent)],
+        "one mark: this attachment, this run, this agent"
+    );
+
     // the audit line: the documented fields, exactly, and none of the secrets
     let audits: Vec<AuditLine> = sqlx::query_as(
         "SELECT actor_member_id, target_type, target_id, detail FROM audit_log \
@@ -1532,6 +1574,7 @@ async fn a_write_that_cannot_record_itself_fails_loudly_and_leaves_nothing() {
         "the second write of one target must fail, not write a second picture: {again:?}"
     );
     assert_eq!(attachment_rows(su, w.ws).await, 1, "still one attachment");
+    assert_eq!(mark_rows(su, w.ws).await, 1, "still one mark");
     assert_eq!(
         audit_rows(su, w.ws, "attachment.agent_picture_written").await,
         1,
@@ -1562,6 +1605,7 @@ async fn a_write_that_cannot_record_itself_fails_loudly_and_leaves_nothing() {
         "a token that was never spent records nothing: {outcome:?}"
     );
     assert_eq!(attachment_rows(su, w.ws).await, 0, "rolled back with it");
+    assert_eq!(mark_rows(su, w.ws).await, 0, "the mark rolled back with it");
     assert_eq!(
         audit_rows(su, w.ws, "attachment.agent_picture_written").await,
         0
@@ -1593,6 +1637,9 @@ async fn write_refused_after(pools: &Pools, fault: Break) -> Result<(), String> 
     }
     if attachment_rows(su, w.ws).await != 0 {
         return Err("an attachment row was written".into());
+    }
+    if mark_rows(su, w.ws).await != 0 {
+        return Err("a mark row was written".into());
     }
     if audit_rows(su, w.ws, "attachment.agent_picture_written").await != 0 {
         return Err("an audit line was written".into());
@@ -1739,13 +1786,16 @@ async fn a_target_naming_another_agent_is_refused_as_run_over_and_one_naming_ano
     assert_eq!(attachment_rows(su, w.ws).await, 1);
 }
 
-/// W12 / WA24: the api counts for itself. With a ceiling of 2, what counts is the COMPLETE attachments
-/// uploaded by AGENT members in the last 24 hours of this workspace: old agent rows, people's rows,
-/// pending/failed rows and another workspace's rows do not. A refusal writes nothing and leaves the spent
-/// token reusable under a higher ceiling.
+/// W12 / WA24, #5530: the api counts for itself, and what it counts is the MARKS (`agent_picture_mark`) of
+/// this workspace from the last 24 hours — not `attachment` rows. With a ceiling of 2: an old mark, another
+/// workspace's mark, and every kind of `attachment` row (an agent's complete one included, a person's, a
+/// pending or failed one) do not count; one mark from 23 hours ago does. A refusal writes nothing and leaves
+/// the spent token reusable under a higher ceiling. (The old source — the agent's `complete` attachment
+/// rows — would count the three agent rows below and refuse the first write: that is the line this test
+/// holds.)
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
-async fn the_daily_ceiling_counts_only_complete_agent_rows_of_this_workspace_from_the_last_day() {
+async fn the_daily_ceiling_counts_only_marks_of_this_workspace_from_the_last_day() {
     let pools = pools().await;
     let su = &pools.su;
     assert_eq!(
@@ -1754,48 +1804,34 @@ async fn the_daily_ceiling_counts_only_complete_agent_rows_of_this_workspace_fro
     );
     let w = seed_world(su).await;
     let other_agent = seed_member(su, w.ws, "agent").await;
-    // what must NOT count
+    // what must NOT count: marks that are too old, and every attachment row there is
     for _ in 0..2 {
-        seed_attachment(su, w.ws, w.channel, w.agent, None, "complete", "25 hours").await; // too old
+        seed_mark(su, w.ws, "25 hours").await; // too old
+        seed_attachment(su, w.ws, w.channel, w.agent, None, "complete", "0 seconds").await; // no mark
         seed_attachment(su, w.ws, w.channel, w.alice, None, "complete", "0 seconds").await;
         // a person's
     }
+    seed_attachment(su, w.ws, w.channel, other_agent, None, "complete", "1 hour").await;
     seed_attachment(su, w.ws, w.channel, w.agent, None, "pending", "0 seconds").await;
     seed_attachment(su, w.ws, w.channel, w.agent, None, "failed", "0 seconds").await;
     let elsewhere = seed_world(su).await;
     for _ in 0..3 {
-        seed_attachment(
-            su,
-            elsewhere.ws,
-            elsewhere.channel,
-            elsewhere.agent,
-            None,
-            "complete",
-            "0 seconds",
-        )
-        .await;
+        seed_mark(su, elsewhere.ws, "0 seconds").await; // another workspace's marks
     }
-    // what counts: one complete agent row, another agent's, from 23 hours ago
-    seed_attachment(
-        su,
-        w.ws,
-        w.channel,
-        other_agent,
-        None,
-        "complete",
-        "23 hours",
-    )
-    .await;
-    let before = attachment_rows(su, w.ws).await;
+    // what counts: one mark from 23 hours ago
+    seed_mark(su, w.ws, "23 hours").await;
+    let (attachments_before, marks_before) =
+        (attachment_rows(su, w.ws).await, mark_rows(su, w.ws).await);
 
-    // count 1 < 2: the first picture is written
+    // count 1 < 2: the first picture is written — and it adds its mark
     let grant = mint(&pools, &w).await.expect("a token");
     let target = redeem(&pools, w.ws, &grant.token).await.expect("a target");
     write(&pools, w.ws, target, stored_png(&target), 2)
         .await
         .expect("transaction")
-        .expect("one counted row is below a ceiling of two");
-    assert_eq!(attachment_rows(su, w.ws).await, before + 1);
+        .expect("one counted mark is below a ceiling of two");
+    assert_eq!(attachment_rows(su, w.ws).await, attachments_before + 1);
+    assert_eq!(mark_rows(su, w.ws).await, marks_before + 1);
 
     // count 2 >= 2: the next run's picture is refused
     let trigger = seed_message(su, w.ws, w.channel, w.alice).await;
@@ -1810,9 +1846,10 @@ async fn the_daily_ceiling_counts_only_complete_agent_rows_of_this_workspace_fro
     assert_eq!(refused, Err(PictureWriteRefused::CapReached));
     assert_eq!(
         attachment_rows(su, w.ws).await,
-        before + 1,
+        attachments_before + 1,
         "a refusal writes no row"
     );
+    assert_eq!(mark_rows(su, w.ws).await, marks_before + 1, "and no mark");
     assert!(
         recorded_attachment(su, w.ws, run2).await.is_none(),
         "and the token records nothing"
@@ -1828,7 +1865,8 @@ async fn the_daily_ceiling_counts_only_complete_agent_rows_of_this_workspace_fro
         .await
         .expect("transaction")
         .expect("below a ceiling of three");
-    assert_eq!(attachment_rows(su, w.ws).await, before + 2);
+    assert_eq!(attachment_rows(su, w.ws).await, attachments_before + 2);
+    assert_eq!(mark_rows(su, w.ws).await, marks_before + 2);
 }
 
 /// WA10 / WA11: a refusal AFTER the caller proved the token is one audit line of closed words — the run,
@@ -2761,32 +2799,29 @@ async fn privilege_probe(pool: &PgPool, sql: &str) -> &'static str {
     }
 }
 
-/// WA18: the table holds exactly what the flow uses, role by role (`attachment-write-token-lockdown`):
-/// the worker mints, sweeps and reads (SELECT, INSERT, DELETE — no UPDATE), the api spends and records
-/// (SELECT, UPDATE — no INSERT, no DELETE), and relay, notifier and platform_admin touch nothing. Both the
-/// catalog and a real statement as each role are checked: the catalog says what is granted, the statement
-/// says it is not a privilege some other grant path still supplies.
-#[tokio::test]
-#[ignore = "needs DATABASE_URL to a disposable PG18"]
-async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
-    let pools = pools().await;
-    let expected = |role: &str| -> &'static [&'static str] {
-        match role {
-            "momo_app" => &["SELECT", "UPDATE"],
-            "momo_worker" => &["SELECT", "INSERT", "DELETE"],
-            _ => &[],
-        }
-    };
+/// The roles whose privileges on a lockdown table are measured, `public` included.
+const LOCKDOWN_ROLES: [&str; 7] = [
+    "momo_app",
+    "momo_relay",
+    "momo_worker",
+    "momo_notifier",
+    "momo_platform_admin",
+    "momo_helper_read",
+    "public",
+];
+
+/// What every runtime role holds on one table, said twice: the catalog (what is granted, every verb, every
+/// role) and a real statement as each real login role (a privilege some other grant path still supplies
+/// would show here and not in the catalog's table-level answer).
+async fn assert_table_privileges(
+    pools: &Pools,
+    table: &str,
+    statements: [(&str, &str); 4],
+    expected: fn(&str) -> &'static [&'static str],
+) {
     let mut drift: Vec<String> = Vec::new();
     let mut checked: Vec<&str> = Vec::new();
-    for role in [
-        "momo_app",
-        "momo_relay",
-        "momo_worker",
-        "momo_notifier",
-        "momo_platform_admin",
-        "public",
-    ] {
+    for role in LOCKDOWN_ROLES {
         if role != "public" && !role_exists(&pools.su, role).await {
             // not created by the development bootstrap; the block's `CONTINUE WHEN NOT EXISTS` skips it
             eprintln!("role {role} does not exist in this database: not checked");
@@ -2794,14 +2829,13 @@ async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
         }
         checked.push(role);
         for verb in VERBS {
-            let held: bool = sqlx::query_scalar(
-                "SELECT has_table_privilege($1, 'public.attachment_write_token', $2)",
-            )
-            .bind(role)
-            .bind(verb)
-            .fetch_one(&pools.su)
-            .await
-            .unwrap();
+            let held: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")
+                .bind(role)
+                .bind(format!("public.{table}"))
+                .bind(verb)
+                .fetch_one(&pools.su)
+                .await
+                .unwrap();
             let want = expected(role).contains(&verb);
             if held != want {
                 drift.push(format!("{role}:{verb} held={held} want={want}"));
@@ -2810,7 +2844,7 @@ async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
     }
     assert!(
         drift.is_empty(),
-        "the table's privileges drifted from the lockdown: {drift:?}"
+        "{table}: the table's privileges drifted from the lockdown: {drift:?}"
     );
     for role in [
         "momo_app",
@@ -2819,22 +2853,10 @@ async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
         "momo_notifier",
         "public",
     ] {
-        assert!(checked.contains(&role), "{role} was not checked");
+        assert!(checked.contains(&role), "{table}: {role} was not checked");
     }
 
     // the same, as real statements run by the real roles
-    let statements = [
-        ("SELECT", "SELECT count(*) FROM attachment_write_token"),
-        (
-            "INSERT",
-            "INSERT INTO attachment_write_token DEFAULT VALUES",
-        ),
-        (
-            "UPDATE",
-            "UPDATE attachment_write_token SET used_at = used_at WHERE false",
-        ),
-        ("DELETE", "DELETE FROM attachment_write_token WHERE false"),
-    ];
     let relay = pool_as("momo_relay", "MOMO_RELAY_PASSWORD", "momo_relay_dev_pw").await;
     let notifier = pool_as(
         "momo_notifier",
@@ -2863,7 +2885,103 @@ async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
     }
     assert!(
         wrong.is_empty(),
-        "a statement ran (or was refused) against the lockdown: {wrong:?}"
+        "{table}: a statement ran (or was refused) against the lockdown: {wrong:?}"
+    );
+}
+
+/// WA18, #5530: the token table holds exactly what the flow uses, role by role
+/// (`attachment-write-token-lockdown`): the worker mints and reads (SELECT, INSERT — no UPDATE, and **no
+/// DELETE any more**: it could free its own spent slot, and the day-old sweep is the api's now), the api
+/// spends, records and sweeps (SELECT, UPDATE, DELETE — no INSERT), and relay, notifier and platform_admin
+/// touch nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
+    let pools = pools().await;
+    assert_table_privileges(
+        &pools,
+        "attachment_write_token",
+        [
+            ("SELECT", "SELECT count(*) FROM attachment_write_token"),
+            (
+                "INSERT",
+                "INSERT INTO attachment_write_token DEFAULT VALUES",
+            ),
+            (
+                "UPDATE",
+                "UPDATE attachment_write_token SET used_at = used_at WHERE false",
+            ),
+            ("DELETE", "DELETE FROM attachment_write_token WHERE false"),
+        ],
+        |role| match role {
+            "momo_app" => &["SELECT", "UPDATE", "DELETE"],
+            "momo_worker" => &["SELECT", "INSERT"],
+            _ => &[],
+        },
+    )
+    .await;
+}
+
+/// #5530: the mark table (`agent-picture-mark-lockdown`) belongs to the api role alone — it counts, writes
+/// the row and sweeps (SELECT, INSERT, DELETE; nobody updates) — and the worker holds **nothing**: not even
+/// SELECT, not through the helper's read role, not through `PUBLIC`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_table_belongs_to_the_api_role_alone() {
+    let pools = pools().await;
+    assert_table_privileges(
+        &pools,
+        "agent_picture_mark",
+        [
+            ("SELECT", "SELECT count(*) FROM agent_picture_mark"),
+            ("INSERT", "INSERT INTO agent_picture_mark DEFAULT VALUES"),
+            (
+                "UPDATE",
+                "UPDATE agent_picture_mark SET written_at = written_at WHERE false",
+            ),
+            ("DELETE", "DELETE FROM agent_picture_mark WHERE false"),
+        ],
+        |role| match role {
+            "momo_app" => &["SELECT", "INSERT", "DELETE"],
+            _ => &[],
+        },
+    )
+    .await;
+
+    // every other role there is — the memory role and the helper's read role the worker may SET to
+    // included — holds nothing at table or column level (predefined `pg_*` roles are membership grants
+    // nobody here holds: asserted below)
+    let others: Vec<String> = sqlx::query_scalar(
+        "SELECT r.rolname FROM pg_roles r \
+          WHERE NOT r.rolsuper AND r.rolname <> 'momo_app' AND r.rolname NOT LIKE 'pg\\_%' \
+            AND (has_any_column_privilege(r.oid, 'public.agent_picture_mark', 'SELECT') \
+              OR has_any_column_privilege(r.oid, 'public.agent_picture_mark', 'INSERT') \
+              OR has_any_column_privilege(r.oid, 'public.agent_picture_mark', 'UPDATE') \
+              OR has_any_column_privilege(r.oid, 'public.agent_picture_mark', 'REFERENCES') \
+              OR has_table_privilege(r.oid, 'public.agent_picture_mark', 'DELETE') \
+              OR has_table_privilege(r.oid, 'public.agent_picture_mark', 'TRUNCATE') \
+              OR has_table_privilege(r.oid, 'public.agent_picture_mark', 'TRIGGER')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&pools.su)
+    .await
+    .unwrap();
+    assert!(
+        others.is_empty(),
+        "roles other than momo_app hold something on agent_picture_mark: {others:?}"
+    );
+    let members_of_predefined: Vec<String> = sqlx::query_scalar(
+        "SELECT r.rolname FROM pg_roles r \
+          WHERE r.rolname LIKE 'momo\\_%' \
+            AND (pg_has_role(r.oid, 'pg_write_all_data', 'USAGE') OR pg_has_role(r.oid, 'pg_read_all_data', 'USAGE') \
+              OR pg_has_role(r.oid, 'pg_write_all_data', 'MEMBER') OR pg_has_role(r.oid, 'pg_read_all_data', 'MEMBER'))",
+    )
+    .fetch_all(&pools.su)
+    .await
+    .unwrap();
+    assert!(
+        members_of_predefined.is_empty(),
+        "a runtime role is a member of pg_read_all_data / pg_write_all_data: {members_of_predefined:?}"
     );
 }
 
@@ -3322,32 +3440,33 @@ async fn rls_is_forced_and_scopes_the_api_role_to_the_workspace_it_is_bound_to()
     );
 }
 
-/// The lockdown comment's claim: no runtime role may DELETE from the table, yet deleting a parent run
-/// still clears its tokens (the foreign-key cascade runs as the table's owner) — as the superuser and as
-/// the api role.
+/// The lockdown comment's claim: the worker holds no DELETE on the token table, yet deleting a parent run
+/// still clears its tokens (the foreign-key cascade runs as the table's owner) — as the superuser and as the
+/// worker's own role, which is the point of #5530: a count read from THIS table would shrink whenever a
+/// worker that may delete runs (it holds DELETE on `agent_run` like on every ordinary table) deletes one.
+/// That is why the daily ceiling counts `agent_picture_mark`, which nothing cascades into (see
+/// `a_worker_compromised_at_the_database_level_cannot_make_todays_count_smaller`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn a_parent_run_delete_clears_the_tokens_though_the_deleting_role_holds_no_delete_on_them() {
     let pools = pools().await;
     let su = &pools.su;
-    for by_app in [false, true] {
+    for by_worker in [false, true] {
         let w = seed_world(su).await;
         mint(&pools, &w).await.expect("a token");
         assert_eq!(token_rows(su, w.ws).await, 1);
-        if by_app {
-            let (ws, run) = (w.ws, w.run);
-            with_tenant_tx(&pools.app, ws, move |conn| {
-                Box::pin(async move {
-                    sqlx::query("DELETE FROM agent_run WHERE workspace_id = $1 AND id = $2")
-                        .bind(ws)
-                        .bind(run)
-                        .execute(&mut *conn)
-                        .await?;
-                    Ok::<(), DbError>(())
-                })
-            })
-            .await
-            .expect("momo_app deletes the run");
+        if by_worker {
+            let denied = sqlx::query("DELETE FROM attachment_write_token WHERE workspace_id = $1")
+                .bind(w.ws)
+                .execute(&pools.worker)
+                .await
+                .expect_err("the worker holds no DELETE on the token table");
+            assert_eq!(db_error(denied).0, "42501");
+            sqlx::query("DELETE FROM agent_run WHERE id = $1")
+                .bind(w.run)
+                .execute(&pools.worker)
+                .await
+                .expect("momo_worker deletes the run");
         } else {
             sqlx::query("DELETE FROM agent_run WHERE id = $1")
                 .bind(w.run)
@@ -3359,7 +3478,11 @@ async fn a_parent_run_delete_clears_the_tokens_though_the_deleting_role_holds_no
             token_rows(su, w.ws).await,
             0,
             "the cascade cleared the token (deleted by {})",
-            if by_app { "momo_app" } else { "the superuser" }
+            if by_worker {
+                "momo_worker"
+            } else {
+                "the superuser"
+            }
         );
     }
 }
@@ -3397,17 +3520,21 @@ async fn slots_of(su: &PgPool, ws: Uuid) -> Vec<i16> {
     .unwrap()
 }
 
-/// WA21: a mint drops the rows of ITS workspace that expired more than a day ago — and keeps the ones that
-/// expired less than a day ago and the ones still alive — and leaves another workspace's old rows alone.
+/// WA21, #5530: the sweep is the api's, inside the spend. A mint (the worker) drops nothing — it holds no
+/// DELETE any more. A spend in one workspace drops that workspace's token rows that expired more than a day
+/// ago and its mark rows older than 48 hours (twice the counting window), keeps the tokens that expired less
+/// than a day ago and the ones still alive, keeps every mark a count can still see AND the ones between 24
+/// and 48 hours, and leaves another workspace's old rows alone.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
-async fn a_mint_clears_only_its_own_workspaces_rows_that_expired_more_than_a_day_ago() {
+async fn a_spend_sweeps_only_its_own_workspaces_old_rows_and_a_mint_sweeps_nothing() {
     let pools = pools().await;
     let su = &pools.su;
     let one = seed_world(su).await;
     let two = seed_world(su).await;
+    let mut marks_of: Vec<(Uuid, Vec<Uuid>)> = Vec::new();
     for tenant in [&one, &two] {
-        forge_expired(su, tenant, 2, "25 hours").await; // a mint in its own workspace drops it
+        forge_expired(su, tenant, 2, "25 hours").await; // a spend in its own workspace drops it
         forge_expired(su, tenant, 3, "23 hours").await; // expired, but within the day: stays
         sqlx::query(
             "INSERT INTO attachment_write_token \
@@ -3422,20 +3549,59 @@ async fn a_mint_clears_only_its_own_workspaces_rows_that_expired_more_than_a_day
         .execute(su)
         .await
         .unwrap(); // still alive: stays
+        let mut marks = Vec::new();
+        for age in [
+            "1 hour",
+            "23 hours",
+            "25 hours",
+            "47 hours",
+            "49 hours",
+            "100 hours",
+        ] {
+            marks.push(seed_mark(su, tenant.ws, age).await);
+        }
+        marks_of.push((tenant.ws, marks));
     }
     assert_eq!(slots_of(su, one.ws).await, vec![2, 3, 4]);
 
-    mint(&pools, &one).await.expect("a token");
+    // the mint sweeps nothing (and its INSERT still works without a DELETE privilege)
+    let grant = mint(&pools, &one).await.expect("a token");
+    assert_eq!(
+        slots_of(su, one.ws).await,
+        vec![1, 2, 3, 4],
+        "the day-old row is still there after a mint: the worker does not sweep"
+    );
+    assert_eq!(mark_rows(su, one.ws).await, 6, "and no mark was touched");
+
+    // the api's spend does
+    redeem(&pools, one.ws, &grant.token)
+        .await
+        .expect("a target");
     assert_eq!(
         slots_of(su, one.ws).await,
         vec![1, 3, 4],
-        "the day-old row went; the new one took the free slot; the others stay"
+        "the spend dropped the day-old row; the spent row and the others stay"
+    );
+    let (ws_one, marks_one) = &marks_of[0];
+    let left: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT attachment_id FROM agent_picture_mark WHERE workspace_id = $1 ORDER BY written_at DESC",
+    )
+    .bind(ws_one)
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(
+        left,
+        marks_one[..4].to_vec(),
+        "marks of 1, 23, 25 and 47 hours stay (a count sees the first two, the sweep waits 48 hours); \
+         the 49- and 100-hour marks went"
     );
     assert_eq!(
         slots_of(su, two.ws).await,
         vec![2, 3, 4],
         "another workspace's rows, the old one included, are not touched by the sweep"
     );
+    assert_eq!(mark_rows(su, two.ws).await, 6, "and neither are its marks");
 }
 
 // =================================================================================================
@@ -3503,4 +3669,606 @@ async fn mint_redeem_and_write_refuse_the_same_breakages() {
         red.is_empty(),
         "a breakage that one of the three calls did not refuse (they must share ONE predicate): {red:?}"
     );
+}
+
+// =================================================================================================
+// I. the daily count a compromised worker cannot make smaller (#5530)
+// =================================================================================================
+
+/// A second in-flight run for `w`'s agent in `w`'s channel (the first is spent: one picture per run).
+async fn another_run(su: &PgPool, w: &World) -> Uuid {
+    let trigger = seed_message(su, w.ws, w.channel, w.alice).await;
+    seed_run(su, w.ws, w.channel, w.agent, Some(trigger), "running").await
+}
+
+/// A whole new healthy world INSIDE an existing workspace: two people, an agent, a channel, a request and a
+/// running run. Made by the superuser, so a test can create it AFTER the worker has deleted what it likes.
+async fn seed_world_in(su: &PgPool, ws: Uuid) -> World {
+    let alice = seed_member(su, ws, "human").await;
+    let bob = seed_member(su, ws, "human").await;
+    let agent = seed_member(su, ws, "agent").await;
+    let channel = seed_channel(su, ws, alice, &[alice, bob, agent]).await;
+    let trigger = seed_message(su, ws, channel, alice).await;
+    let run = seed_run(su, ws, channel, agent, Some(trigger), "running").await;
+    World {
+        ws,
+        alice,
+        bob,
+        agent,
+        channel,
+        trigger,
+        run,
+    }
+}
+
+/// Is today's count in `ws` still at least `n`? It asks the **api's own function**, not a query of the
+/// test's: a fresh healthy run in the same workspace (created after whatever the worker did, so nothing the
+/// worker deleted is needed), minted by the worker, spent and written by the api under a ceiling of `n`.
+/// `CapReached` is "the count is still at least `n`"; a write that goes through means it fell below. (With
+/// the old source, the agent's `complete` attachment rows, every attack below turns this `false`.)
+async fn count_is_still_at_least(pools: &Pools, ws: Uuid, n: i64) -> bool {
+    let probe = seed_world_in(&pools.su, ws).await;
+    let grant = mint_for(pools, ws, probe.run, probe.agent)
+        .await
+        .expect("the probe's token");
+    let target = redeem(pools, ws, &grant.token)
+        .await
+        .expect("the probe's target");
+    match write(pools, ws, target, stored_png(&target), n).await {
+        Ok(Err(PictureWriteRefused::CapReached)) => true,
+        Ok(Ok(_)) => false,
+        other => panic!("the probe was neither written nor capped: {other:?}"),
+    }
+}
+
+/// A statement as the worker's own login role: the rows it touched, or the database's refusal as
+/// (SQLSTATE, message). `via_role` runs it after `SET LOCAL ROLE` — the roles the worker may SET to.
+async fn as_worker(
+    pools: &Pools,
+    via_role: Option<&str>,
+    sql: &str,
+) -> Result<u64, (String, String)> {
+    let mut tx = pools.worker.begin().await.expect("a worker transaction");
+    if let Some(role) = via_role {
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap_or_else(|error| panic!("the worker may SET ROLE {role}: {error}"));
+    }
+    let outcome = sqlx::query(sql)
+        .execute(&mut *tx)
+        .await
+        .map(|done| done.rows_affected());
+    match outcome {
+        Ok(rows) => {
+            tx.commit().await.expect("commit");
+            Ok(rows)
+        }
+        Err(error) => {
+            let (code, message, _) = db_error(error);
+            let _ = tx.rollback().await;
+            Err((code, message))
+        }
+    }
+}
+
+/// Everything a worker compromised at the database level could try in order to make **today's count**
+/// smaller, each in its own workspace that already holds two pictures the api wrote. The worker holds
+/// SELECT/INSERT/UPDATE/DELETE on every ordinary table (`attachment`, `member`, `channel`, `agent_run`,
+/// `workspace`…) and that is the whole problem with counting from them: the attempts that the database
+/// allows are listed as allowed on purpose, and the count must be unmoved anyway, measured by the api's own
+/// function (`count_is_still_at_least`) and by the mark rows themselves. The attempts on the mark and token
+/// tables are refused by privilege. Sabotage, as measured (#5530): count from `attachment` again (rows 1–5
+/// and 7 go red; deleting the runs alone leaves every attachment row), count from the spent tokens (rows
+/// 5–7 go red: the cascade), give the worker SELECT and DELETE on the mark table (row 9 goes red: the
+/// trigger answers instead of the privilege), give the mark table a foreign key (rows 5–7 go red: the
+/// cascade meets the trigger and the parent's delete fails). DELETE alone stays green here (a DELETE with a
+/// WHERE needs SELECT as well); `the_mark_table_belongs_to_the_api_role_alone`, the static guard and
+/// `prod_role_conformance_pg` hold that privilege.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_worker_compromised_at_the_database_level_cannot_make_todays_count_smaller() {
+    const PICTURES: i64 = 2;
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Outcome {
+        /// the database lets the worker do it: the count must not care
+        Allowed,
+        /// refused by privilege (42501)
+        Denied,
+    }
+    struct Attempt {
+        label: &'static str,
+        via_role: Option<&'static str>,
+        statements: Vec<String>,
+        /// what the FIRST statement must do (the later ones put the world back as a smarter attacker would)
+        outcome: Outcome,
+    }
+    let pools = pools().await;
+    let su = &pools.su;
+
+    let attempts = |w: &World| -> Vec<Attempt> {
+        let ws = w.ws;
+        vec![
+            Attempt {
+                label: "1 UPDATE attachment.created_at back a day",
+                via_role: None,
+                statements: vec![format!(
+                    "UPDATE attachment SET created_at = created_at - interval '25 hours' WHERE workspace_id = '{ws}'"
+                )],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "2 UPDATE attachment.status away from complete",
+                via_role: None,
+                statements: vec![format!(
+                    "UPDATE attachment SET status = 'failed' WHERE workspace_id = '{ws}'"
+                )],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "3 DELETE the attachment rows",
+                via_role: None,
+                statements: vec![format!("DELETE FROM attachment WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "4 UPDATE the agent's member.kind to human",
+                via_role: None,
+                statements: vec![format!(
+                    "UPDATE member SET kind = 'human' WHERE workspace_id = '{ws}' AND id = '{}'",
+                    w.agent
+                )],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "5 DELETE the channel (the cascade takes attachments, runs and tokens with it)",
+                via_role: None,
+                statements: vec![format!("DELETE FROM channel WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "6 DELETE the runs (the cascade takes the tokens)",
+                via_role: None,
+                statements: vec![format!("DELETE FROM agent_run WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "7 DELETE the workspace and create it again under the same id",
+                via_role: None,
+                statements: vec![
+                    format!("DELETE FROM workspace WHERE id = '{ws}'"),
+                    format!("INSERT INTO workspace(id, slug, name) VALUES ('{ws}', 'again-{ws}', 'again')"),
+                ],
+                outcome: Outcome::Allowed,
+            },
+            Attempt {
+                label: "8 DELETE the spent token rows",
+                via_role: None,
+                statements: vec![format!(
+                    "DELETE FROM attachment_write_token WHERE workspace_id = '{ws}'"
+                )],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "9 DELETE the mark rows",
+                via_role: None,
+                statements: vec![format!("DELETE FROM agent_picture_mark WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "10 UPDATE the mark rows' written_at back a day",
+                via_role: None,
+                statements: vec![format!(
+                    "UPDATE agent_picture_mark SET written_at = written_at - interval '25 hours' WHERE workspace_id = '{ws}'"
+                )],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "11 TRUNCATE the mark table",
+                via_role: None,
+                statements: vec!["TRUNCATE agent_picture_mark".to_string()],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "12 TRUNCATE the token table",
+                via_role: None,
+                statements: vec!["TRUNCATE attachment_write_token".to_string()],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "13 UPDATE a spent token's used_at back to NULL",
+                via_role: None,
+                statements: vec![format!(
+                    "UPDATE attachment_write_token SET used_at = NULL WHERE workspace_id = '{ws}'"
+                )],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "14 DELETE the mark rows after SET ROLE momo_helper_read",
+                via_role: Some("momo_helper_read"),
+                statements: vec![format!("DELETE FROM agent_picture_mark WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Denied,
+            },
+            Attempt {
+                label: "15 DELETE the mark rows after SET ROLE momo_memory",
+                via_role: Some("momo_memory"),
+                statements: vec![format!("DELETE FROM agent_picture_mark WHERE workspace_id = '{ws}'")],
+                outcome: Outcome::Denied,
+            },
+        ]
+    };
+
+    // the list is the same for every world: count it on a throwaway
+    let rows = attempts(&seed_world(su).await).len();
+    assert_eq!(rows, 15, "the table in the doc comment names these rows");
+
+    let mut failures: Vec<String> = Vec::new();
+    for index in 0..rows {
+        let w = seed_world(su).await;
+        // two pictures the api really wrote: two runs, each minted, spent and written
+        picture_of(&pools, w.ws, w.run, w.agent).await;
+        let second = another_run(su, &w).await;
+        picture_of(&pools, w.ws, second, w.agent).await;
+        assert_eq!(mark_rows(su, w.ws).await, PICTURES, "two marks to start");
+        assert!(
+            count_is_still_at_least(&pools, w.ws, PICTURES).await,
+            "the control: at a ceiling of {PICTURES} the api refuses a third picture"
+        );
+
+        let attempt = attempts(&w).swap_remove(index);
+        let mut first = true;
+        for sql in &attempt.statements {
+            let result = as_worker(&pools, attempt.via_role, sql).await;
+            if first {
+                first = false;
+                match (&result, attempt.outcome) {
+                    (Ok(rows), Outcome::Allowed) if *rows >= 1 => {}
+                    (Err((code, message)), Outcome::Denied)
+                        if code == "42501" && message.contains("permission denied") => {}
+                    (got, want) => failures.push(format!(
+                        "{}: the first statement should be {want:?}, was {got:?}",
+                        attempt.label
+                    )),
+                }
+            }
+        }
+        // the count did not move: through the api's own function and in the table itself
+        if mark_rows(su, w.ws).await != PICTURES {
+            failures.push(format!("{}: the mark rows moved", attempt.label));
+        }
+        if !count_is_still_at_least(&pools, w.ws, PICTURES).await {
+            failures.push(format!(
+                "{}: the api's count fell below {PICTURES}",
+                attempt.label
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the worker shrank today's count, or an attempt did not behave as written:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The mark table's trigger, on its own, whoever asks: UPDATE is refused outright (23514 — the superuser
+/// reaches the trigger because it holds the privilege; the api role never does), and DELETE is refused for
+/// any row inside the 24-hour window and allowed for one outside it (the window of the api's count). Margins
+/// of a minute, not exact boundaries. Sabotage: delete the trigger's DELETE branch (the in-window rows go),
+/// its UPDATE branch (the first assertion goes), or make the window 0 (the 23-hour row goes).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_table_refuses_every_update_and_every_delete_inside_the_window_whoever_asks() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let w = seed_world(su).await;
+    let fresh = seed_mark(su, w.ws, "1 minute").await;
+    let inside = seed_mark(su, w.ws, "23 hours 59 minutes").await;
+    let outside = seed_mark(su, w.ws, "24 hours 1 minute").await;
+    assert_eq!(mark_rows(su, w.ws).await, 3);
+
+    // UPDATE: the superuser holds the privilege, so the trigger is what answers
+    let update = sqlx::query("UPDATE agent_picture_mark SET written_at = written_at - interval '30 hours' WHERE workspace_id = $1")
+        .bind(w.ws)
+        .execute(su)
+        .await
+        .expect_err("a mark row is never updated");
+    let (code, message, _) = db_error(update);
+    assert_eq!(code, "23514", "{message}");
+    assert!(message.contains("append-only"), "{message}");
+    // and the api role has no UPDATE privilege to begin with
+    let by_app = app_probe(
+        &pools,
+        w.ws,
+        format!(
+            "UPDATE agent_picture_mark SET run_id = run_id WHERE workspace_id = '{}'",
+            w.ws
+        ),
+    )
+    .await;
+    assert_eq!(
+        by_app.map_err(|(code, _, _)| code),
+        Err("42501".to_string())
+    );
+
+    // DELETE as the api role, row by row, inside a savepoint that is rolled back each time
+    for (label, attachment, refused) in [
+        ("a minute old", fresh, true),
+        ("23 h 59 min old", inside, true),
+        ("24 h 1 min old", outside, false),
+    ] {
+        let outcome = app_probe(
+            &pools,
+            w.ws,
+            format!(
+                "DELETE FROM agent_picture_mark WHERE workspace_id = '{}' AND attachment_id = '{attachment}'",
+                w.ws
+            ),
+        )
+        .await;
+        if refused {
+            let (code, message, _) = outcome.expect_err(label);
+            assert_eq!(code, "23514", "{label}: {message}");
+            assert!(message.contains("counting window"), "{label}: {message}");
+        } else {
+            assert_eq!(outcome, Ok(1), "{label}: a row no count can see may go");
+        }
+    }
+    // the superuser is held to the same window
+    let swept_by_su = sqlx::query("DELETE FROM agent_picture_mark WHERE workspace_id = $1 AND written_at > clock_timestamp() - interval '24 hours'")
+        .bind(w.ws)
+        .execute(su)
+        .await
+        .expect_err("not even the owner deletes a row inside the window");
+    assert_eq!(db_error(swept_by_su).0, "23514");
+    assert_eq!(
+        mark_rows(su, w.ws).await,
+        3,
+        "every probe was rolled back or refused"
+    );
+}
+
+/// Review L-1 (#5530): the row trigger never fires on TRUNCATE, so a statement trigger on the same function
+/// refuses it — the owner included (the superuser holds TRUNCATE, so the trigger is what answers). The api
+/// role has no TRUNCATE privilege to begin with (42501). Each attempt runs in a transaction that is rolled
+/// back whatever happens, so a sabotaged run cannot empty the table under a sibling test. Sabotage: drop the
+/// statement trigger, or let the function read OLD (NULL in a statement trigger) before it asks TG_OP — the
+/// owner's TRUNCATE goes through.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_table_refuses_truncate_whoever_asks_the_owner_included() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let w = seed_world(su).await;
+    seed_mark(su, w.ws, "1 minute").await;
+    seed_mark(su, w.ws, "30 hours").await;
+
+    for (who, pool, code) in [
+        ("the owner", su, "23514"),
+        ("the api role", &pools.app, "42501"),
+    ] {
+        let mut tx = pool.begin().await.expect("a transaction");
+        let truncated = sqlx::query("TRUNCATE agent_picture_mark")
+            .execute(&mut *tx)
+            .await;
+        let _ = tx.rollback().await;
+        let error = match truncated {
+            Ok(done) => panic!(
+                "{who}: the mark table was truncated ({} rows)",
+                done.rows_affected()
+            ),
+            Err(error) => error,
+        };
+        let (got, message, _) = db_error(error);
+        assert_eq!(got, code, "{who}: {message}");
+        if code == "23514" {
+            assert!(message.contains("append-only"), "{who}: {message}");
+        }
+    }
+    assert_eq!(mark_rows(su, w.ws).await, 2, "both marks are still there");
+}
+
+/// Review M-1 (#5530): the worker may `SET ROLE` to `momo_helper_read` and `momo_memory` (INHERIT FALSE), and
+/// `has_table_privilege('momo_worker', …)` does not see what those roles hold — so the lockdown block must
+/// name them, or a stray grant to either passes the block and is still the worker's. For every role the
+/// catalog says the worker may SET to: grant it SELECT, DELETE and TRUNCATE on the mark table, run the block
+/// exactly as 179 carries it (the bootstrap files carry the same text: the static guard), and the role must
+/// hold nothing; as that role, a TRUNCATE dies at the privilege check. All inside one transaction that is
+/// rolled back, so no other test ever sees the grant. Sabotage: drop `'momo_memory'` from the block's role
+/// list (the grant survives the block).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_lockdown_takes_back_a_stray_grant_from_every_role_the_worker_may_set_to() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let migration = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../server/Migrations/179_agent_picture_mark.sql"
+    ))
+    .expect("migration 179");
+    let (begin, end) = (
+        "-- BEGIN agent-picture-mark-lockdown",
+        "-- END agent-picture-mark-lockdown",
+    );
+    let block = &migration[migration.find(begin).expect("BEGIN marker")
+        ..migration.find(end).expect("END marker") + end.len()];
+
+    // the roles the worker may SET to, from the catalog (not from a list of the test's)
+    let settable: Vec<String> = sqlx::query_scalar(
+        "SELECT r.rolname::text FROM pg_auth_members m \
+           JOIN pg_roles w ON w.oid = m.member JOIN pg_roles r ON r.oid = m.roleid \
+          WHERE w.rolname = 'momo_worker' AND m.set_option ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(
+        settable,
+        vec!["momo_helper_read".to_string(), "momo_memory".to_string()],
+        "the roles the worker may SET to (a new one belongs in the block's role list too)"
+    );
+
+    for role in &settable {
+        let mut tx = su.begin().await.expect("a transaction");
+        sqlx::query(&format!(
+            "GRANT SELECT, DELETE, TRUNCATE ON agent_picture_mark TO {role}"
+        ))
+        .execute(&mut *tx)
+        .await
+        .expect("the stray grant");
+        if let Err(error) = sqlx::raw_sql(block).execute(&mut *tx).await {
+            panic!("{role}: the block failed instead of taking the grant back: {error}");
+        }
+        let held: Vec<String> = sqlx::query_scalar(
+            "SELECT p FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p \
+              WHERE has_table_privilege($1::name, 'public.agent_picture_mark', p)",
+        )
+        .bind(role)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+        assert!(
+            held.is_empty(),
+            "{role} still holds {held:?} on agent_picture_mark after the block"
+        );
+        // as that role (what the worker would do after SET ROLE), the TRUNCATE dies at the privilege check
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let truncated = sqlx::query("TRUNCATE agent_picture_mark")
+            .execute(&mut *tx)
+            .await;
+        let _ = tx.rollback().await;
+        let error = match truncated {
+            Ok(_) => panic!("{role}: TRUNCATE went through"),
+            Err(error) => error,
+        };
+        let (code, message, _) = db_error(error);
+        assert_eq!(code, "42501", "{role}: {message}");
+        assert!(
+            message.contains("agent_picture_mark"),
+            "{role}: refused by the table's privilege: {message}"
+        );
+    }
+}
+
+/// The sweep's OWN window, with the trigger taken out of the way: the superuser runs the api's spend with
+/// `session_replication_role = replica` (triggers off), so the only thing between the marks and the sweep is
+/// the number in the code. Marks inside 48 hours stay (the ones inside 24 hours are what the count sees;
+/// the rest wait out the second window), older ones go. Sabotage: `MARK_SWEEP_AFTER_SECS` to 0 (every mark
+/// goes, the count's own rows included — with the trigger on, the spend would fail instead; see the
+/// trigger's test).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_sweeps_own_window_keeps_everything_a_count_can_see_even_with_the_trigger_out_of_the_way(
+) {
+    let pools = pools().await;
+    let su = &pools.su;
+    let w = seed_world(su).await;
+    for age in [
+        "1 minute",
+        "12 hours",
+        "23 hours 59 minutes",
+        "30 hours",
+        "47 hours",
+        "49 hours",
+        "200 hours",
+    ] {
+        seed_mark(su, w.ws, age).await;
+    }
+    let grant = mint(&pools, &w).await.expect("a token");
+    let (ws, token) = (w.ws, grant.token.clone());
+    let target = with_tenant_tx(&pools.su, ws, move |conn| {
+        Box::pin(async move {
+            sqlx::query("SET LOCAL session_replication_role = 'replica'")
+                .execute(&mut *conn)
+                .await?;
+            redeem_agent_picture_in_tx(conn, ws, &token).await
+        })
+    })
+    .await
+    .expect("the spend with triggers off");
+    assert!(target.is_some(), "the control: the spend went through");
+    let left: Vec<f64> = sqlx::query_scalar(
+        "SELECT (extract(epoch FROM clock_timestamp() - written_at) / 3600.0)::float8 \
+           FROM agent_picture_mark WHERE workspace_id = $1 ORDER BY written_at DESC",
+    )
+    .bind(w.ws)
+    .fetch_all(su)
+    .await
+    .unwrap();
+    let hours: Vec<i64> = left.iter().map(|h| h.round() as i64).collect();
+    assert_eq!(
+        hours,
+        vec![0, 12, 24, 30, 47],
+        "the marks of 0, 12, 24 (23 h 59 min), 30 and 47 hours stay; 49 and 200 hours went"
+    );
+}
+
+/// The shape of the mark table, from the catalog: no foreign key to it or from it (a cascade runs as the
+/// table's owner — every parent it could point at is a table the worker may delete from), the key is
+/// (workspace, attachment), and RLS is enabled, forced and scoped by the workspace policy. Sabotage: add a
+/// `REFERENCES` to the table (the first assertion), drop FORCE (the second).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_table_has_no_foreign_key_in_either_direction_and_rls_is_forced() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let keys: Vec<String> = sqlx::query_scalar(
+        "SELECT conname::text FROM pg_constraint \
+          WHERE contype = 'f' \
+            AND (conrelid = 'public.agent_picture_mark'::regclass \
+              OR confrelid = 'public.agent_picture_mark'::regclass)",
+    )
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert!(
+        keys.is_empty(),
+        "a foreign key on or to agent_picture_mark would let a cascade clear the count: {keys:?}"
+    );
+    let primary: Vec<String> = sqlx::query_scalar(
+        "SELECT a.attname::text FROM pg_index i \
+           JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) \
+          WHERE i.indrelid = 'public.agent_picture_mark'::regclass AND i.indisprimary \
+          ORDER BY array_position(i.indkey::int2[], a.attnum)",
+    )
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(primary, vec!["workspace_id", "attachment_id"]);
+    let (enabled, forced, policies): (bool, bool, i64) = sqlx::query_as(
+        "SELECT c.relrowsecurity, c.relforcerowsecurity, \
+                (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'ws_isolation') \
+           FROM pg_class c WHERE c.relname = 'agent_picture_mark' AND c.relkind = 'r'",
+    )
+    .fetch_one(su)
+    .await
+    .unwrap();
+    assert!(enabled && forced, "RLS must be enabled and FORCEd");
+    assert_eq!(policies, 1, "the ws_isolation policy");
+
+    // the api role sees only the workspace it is bound to
+    let one = seed_world(su).await;
+    let two = seed_world(su).await;
+    seed_mark(su, one.ws, "1 hour").await;
+    seed_mark(su, two.ws, "1 hour").await;
+    let unbound: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_picture_mark")
+        .fetch_one(&pools.app)
+        .await
+        .unwrap();
+    assert_eq!(unbound, 0, "without app.workspace_id the table is empty");
+    let ws = one.ws;
+    let visible: Vec<Uuid> = with_tenant_tx(&pools.app, ws, move |conn| {
+        Box::pin(async move {
+            Ok(
+                sqlx::query_scalar("SELECT DISTINCT workspace_id FROM agent_picture_mark")
+                    .fetch_all(&mut *conn)
+                    .await?,
+            )
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(visible, vec![one.ws]);
 }
