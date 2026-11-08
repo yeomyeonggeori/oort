@@ -86,8 +86,7 @@ img, svg, canvas { display: block; }
   max-width: 1200px; margin: 0 auto; padding: 16px 24px;
 }
 .brand { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.02em; border-radius: 10px; }
-.mark { width: 26px; height: 26px; fill: var(--ink); }
-.mark .mark-sat { fill: var(--signal); }
+.mark { width: 26px; height: 26px; fill: currentColor; }
 .top-nav { display: flex; align-items: center; gap: 8px; }
 .ghost, .pill {
   display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px;
@@ -95,11 +94,8 @@ img, svg, canvas { display: block; }
   text-decoration: none; cursor: pointer; white-space: nowrap;
 }
 .ghost { background: transparent; }
-.ghost:hover { background: var(--glass); }
 .pill { background: var(--surface-muted); }
-.pill:hover { background: var(--surface-hover); }
 .pill-quiet { background: var(--glass); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); }
-.pill-quiet:hover { background: var(--surface); }
 .pop { position: relative; }
 .menu {
   position: absolute; z-index: 10; margin: 0; padding: 6px; list-style: none; min-width: 200px;
@@ -112,7 +108,7 @@ img, svg, canvas { display: block; }
   min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent;
   font: inherit; font-size: 15px; color: var(--ink); text-decoration: none; text-align: left; cursor: pointer;
 }
-.lang-list a:hover, .chip-menu button:hover, .chip-menu button:focus { background: var(--surface-hover); }
+.chip-menu button:focus { background: var(--surface-hover); }
 .lang-list a:focus-visible, .chip-menu button:focus-visible { outline-offset: -2px; }
 .lang-list a[aria-current] { font-weight: 700; }
 .lang-list .tick, .chip-menu .tick { color: var(--signal-text); visibility: hidden; }
@@ -156,35 +152,53 @@ h1 span { display: block; }
 .get { position: relative; display: inline-flex; margin-top: 36px; border-radius: 999px; box-shadow: var(--shadow); }
 .get-main, .get-more {
   display: inline-flex; align-items: center; gap: 10px; min-height: 52px; border: 0;
-  background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 650; font-size: 16px; text-decoration: none; cursor: pointer;
+  background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; font-size: 16px; text-decoration: none; cursor: pointer;
 }
 .get-main { padding: 0 20px 0 22px; border-radius: 999px 0 0 999px; }
 .get-more { padding: 0 16px 0 12px; border-radius: 0 999px 999px 0; position: relative; }
 .get-more::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 1px; background: color-mix(in srgb, var(--on-primary) 26%, transparent); }
-.get-main:hover, .get-more:hover { background: color-mix(in srgb, var(--primary) 86%, var(--signal)); }
-.get-main:focus-visible, .get-more:focus-visible { outline-offset: 3px; border-radius: inherit; }
+/* M1: 포커스에도 반쪽 모서리는 그대로다(전역 :focus-visible 의 반경을 반쪽 모양으로 되돌린다) */
+.get-main:focus-visible { outline-offset: 3px; border-radius: 999px 0 0 999px; }
+.get-more:focus-visible { outline-offset: 3px; border-radius: 0 999px 999px 0; }
+/* :has 를 알면 링은 묶음 전체에 하나, 포커스 반쪽은 안쪽 링으로 가린다(모르면 위 규칙 그대로) */
+.get:has(> :focus-visible) { outline: 2px solid var(--signal); outline-offset: 3px; }
+.get:has(> :focus-visible) > :focus-visible { outline: 2px solid var(--on-primary); outline: 2px solid color-mix(in srgb, var(--on-primary) 72%, transparent); outline-offset: -6px; }
 .get-more[aria-expanded="true"] .i { transform: rotate(180deg); }
-.get-chip { font-weight: 500; font-size: 13px; opacity: .72; font-family: var(--mono); letter-spacing: .01em; }
+.get-t { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; text-align: left; line-height: 1.3; }
+.get-chip { font-weight: 500; font-size: 14px; opacity: .72; white-space: nowrap; }
 .chip-menu { left: 50%; top: calc(100% + 8px); transform: translateX(-50%); min-width: 248px; display: grid; gap: 2px; }
 .chip-menu.up { top: auto; bottom: calc(100% + 8px); }
 .chip-menu span { display: flex; flex-direction: column; gap: 1px; }
 .chip-menu b { font-weight: 600; }
 .chip-menu small { font-size: 13px; color: var(--ink-muted); }
-.spec { margin: 18px 0 0; font: 12.5px/1.6 var(--mono); letter-spacing: .02em; color: var(--ink-muted); }
+.spec { margin: 18px 0 0; font: 12px/1.6 var(--mono); color: var(--ink-muted); }
+.spec span { white-space: nowrap; }
 .spec-link {
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 8px;
-  font: 12.5px/1.6 var(--mono); letter-spacing: .02em; color: var(--ink-muted); text-decoration: none; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 12px;
+  font-size: 14px; line-height: 1.6; color: var(--ink-muted); text-decoration: none; border-radius: 10px;
 }
-.spec-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+/* H2-b: 폰(머리의 표지 스크립트가 html[data-phone] 를 단다)이면 첫 화면은 폰에서 되는 길부터 */
+.phone-get { display: none; }
+html[data-phone] .get, html[data-phone] .spec { display: none; }
+html[data-phone] .phone-get { display: flex; flex-direction: column; align-items: center; }
+.get-web {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 52px; margin: 36px 0 24px; padding: 0 24px;
+  border-radius: 999px; background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow);
+  font-weight: 600; font-size: 16px; text-decoration: none;
+}
+.phone-notes { display: grid; gap: 8px; justify-items: start; max-width: 30em; text-align: left; }
+.phone-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-muted); }
+.phone-note .i { width: 16px; height: 16px; margin-top: 2px; color: var(--icon); }
 
 /* 앱 화면 */
 .shot { position: relative; z-index: 1; max-width: 1180px; margin: -176px auto 0; padding: 0 24px; }
+.shot-fig { margin: 0; }
 .frame {
-  margin: 0; overflow: hidden; border-radius: 18px; background: var(--surface);
+  margin: 0; overflow: hidden; border-radius: 1.8% / 2.85%; background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--line-strong) 34%, transparent); box-shadow: var(--shadow);
 }
 .frame img { width: 100%; height: auto; }
-.caption { margin: 14px 0 0; text-align: center; font-size: 13.5px; color: var(--ink-muted); }
+.caption { margin: 14px 0 0; text-align: center; font-size: 14px; color: var(--ink-muted); }
 .caption .note { display: block; }
 
 /* 띠: 기기 목록·설치 */
@@ -198,10 +212,10 @@ h1 span { display: block; }
 .row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 72px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .row-i { width: 22px; height: 22px; color: var(--icon); }
 .row-t { display: flex; flex-direction: column; min-width: 0; }
-.row-t b { font-weight: 650; }
+.row-t b { font-weight: 600; }
 .row-t span { font-size: 14px; color: var(--ink-muted); }
 .row .pill { min-height: 34px; font-size: 14px; }
-.tag { font: 12px/1 var(--mono); letter-spacing: .02em; color: var(--ink-muted); padding: 8px 10px; border-radius: 999px; background: var(--surface-muted); white-space: nowrap; }
+.tag { font-size: 14px; color: var(--ink-muted); white-space: nowrap; }
 
 .install-art { display: flex; align-items: center; gap: 14px; margin-top: 24px !important; color: var(--icon); }
 .install-art img { border-radius: 11px; }
@@ -209,8 +223,8 @@ h1 span { display: block; }
 .install-art .folder .i { width: 26px; height: 26px; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
 .steps li { display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--line); }
-.steps .n { grid-row: span 2; font: 600 13px/28px var(--mono); color: var(--signal-text); }
-.steps b { font-weight: 650; font-size: 17px; line-height: 28px; }
+.steps .n { grid-row: span 2; font-weight: 600; font-size: 14px; line-height: 28px; font-variant-numeric: tabular-nums; color: var(--signal-text); }
+.steps b { font-weight: 600; font-size: 17px; line-height: 28px; }
 .steps li > span:last-child { color: var(--ink-muted); font-size: 15px; }
 
 /* 꼬리 */
@@ -219,10 +233,9 @@ h1 span { display: block; }
   display: grid; grid-template-columns: auto 1fr; gap: 10px 32px; align-items: baseline;
   font-size: 13px; color: var(--ink-muted);
 }
-.foot-v { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+.foot-v { margin: 0; font-family: var(--mono); font-size: 12px; }
 .foot-langs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
 .foot-langs a { text-decoration: none; border-radius: 6px; }
-.foot-langs a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .foot-langs a[aria-current] { color: var(--ink); font-weight: 600; }
 .foot-note { grid-column: 1 / -1; margin: 6px 0 0; }
 
@@ -234,13 +247,25 @@ h1 span { display: block; }
 }
 @media (max-width: 560px) {
   .top { padding: 12px 16px; }
-  .web-link { display: none; }
+  .lang-btn { width: 44px; padding: 0; justify-content: center; }
+  .lang-btn .lang-name, .lang-btn .lang-chev { display: none; }
   .hero { padding: 112px 20px 176px; min-height: 620px; }
   .shot { margin-top: -132px; padding: 0 16px; }
-  .frame { border-radius: 14px; }
   .band { padding-left: 20px; padding-right: 20px; }
   .get-main { padding: 0 16px 0 18px; }
-  .get-chip { display: none; }
+}
+/* M5: 600px 아래 컨트롤은 44(정본 §2.7) */
+@media (max-width: 599px) {
+  .ghost, .pill, .row .pill, .spec-link, .lang-list a, .chip-menu button { min-height: 44px; }
+}
+/* L2: hover 는 포인터가 있는 기기에서만. 주 버튼은 두 반쪽이 함께 잉크만 옅어진다 */
+@media (hover: hover) {
+  .ghost:hover { background: var(--glass); }
+  .pill:hover { background: var(--surface-hover); }
+  .pill-quiet:hover { background: var(--surface); }
+  .lang-list a:hover, .chip-menu button:hover { background: var(--surface-hover); }
+  .get:hover > .get-main, .get:hover > .get-more, .get-web:hover { opacity: .9; }
+  .spec-link:hover, .foot-langs a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

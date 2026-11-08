@@ -53,6 +53,10 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && open) { e.preventDefault(); close(true); }
   });
+  // 포커스가 판과 그 단추 밖으로 나가면(Tab 으로 빠져나가면) 닫는다.
+  document.addEventListener("focusin", function (e) {
+    if (open && !open.panel.contains(e.target) && !open.button.contains(e.target)) close(false);
+  });
 
   // 칩 메뉴: 화살표로 옮기고 Enter·Space 로 고른다(메뉴 버튼 패턴).
   function focusItem(i) {

@@ -25,7 +25,7 @@ APP_LANGS = {"ko", "en"}  # 앱 화면이 나오는 언어. 나머지 언어 페
 # 앱의 영어는 아직 일부 화면만 있다(clients/web 의 직접 문구). 그래서 한국어 페이지 말고는 모두 안내 한 줄을 단다.
 NO_NOTE = {"ko"}
 ROOT_LANG = "en"  # 루트(/)는 영어 페이지이고, 첫 방문이면 브라우저 언어로 옮긴다.
-VALUE_KEYS = ["DMG_ARM_URL", "DMG_X64_URL", "VERSION", "APP_VERSION", "MIN_MACOS", "WEB_URL", "SITE_HOST"]
+VALUE_KEYS = ["DMG_ARM_URL", "DMG_X64_URL", "VERSION", "MIN_MACOS", "WEB_URL", "SITE_HOST"]
 STORE_KEY = "oort.site.lang"
 DASHES = ("—", "–")
 

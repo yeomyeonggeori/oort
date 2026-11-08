@@ -12,7 +12,7 @@
 
 | 파일 | 하는 일 |
 |---|---|
-| `values.json` | 바뀌는 값 한 곳: 설치 파일 주소(`DMG_ARM_URL`·`DMG_X64_URL`), `VERSION`, `APP_VERSION`, `MIN_MACOS`, `WEB_URL`, `SITE_HOST`(hreflang 절대 주소) |
+| `values.json` | 바뀌는 값 한 곳: 설치 파일 주소(`DMG_ARM_URL`·`DMG_X64_URL`), `VERSION`, `MIN_MACOS`, `WEB_URL`, `SITE_HOST`(hreflang 절대 주소) |
 | `i18n/<lang>.json` | 문구. ko·en·ja·zh-Hans·zh-Hant·es·fr, 모든 언어의 키가 같아야 해요 |
 | `src/index.html` | 페이지 틀. `{{t.키}}`는 문구, `{{v.키}}`는 값 |
 | `src/site.css` · `src/site.js` | 모양과 칩 고르기·메뉴·언어 기억 |
@@ -45,7 +45,7 @@ ONLY=chip,lang node clients/site/scripts/check.mjs   # 일부만
 
 ## 값 바꾸기
 
-새 판을 올리면 `values.json`의 `DMG_*_URL`·`VERSION`·`APP_VERSION`만 고치고 다시 빌드해요. 설치된 앱의 업데이트 주소(`momo-alpha` Pages의 `update-*.json`)는 이 페이지와 따로예요.
+새 판을 올리면 `values.json`의 `DMG_*_URL`·`VERSION`만 고치고 다시 빌드해요. 설치된 앱의 업데이트 주소(`momo-alpha` Pages의 `update-*.json`)는 이 페이지와 따로예요.
 
 ## 언어 더하기
 
