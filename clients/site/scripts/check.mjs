@@ -408,15 +408,21 @@ async function main() {
       return [Math.round(r.width), Math.round(r.height)];
     }), sel);
     const tall = (list) => list.length > 0 && list.every(([w, h]) => w >= 44 && h >= 44);
-    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), more: await sizes(".spec-link") };
+    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), more: await sizes(".spec-link"), foot: await sizes(".foot-langs a") };
     await page.locator(".lang-btn").click();
     top.langItems = await sizes(".lang-list a");
     await page.keyboard.press("Escape");
     await page.locator(".get-more").click();
     top.chipItems = await sizes(".chip-menu button");
     await page.keyboard.press("Escape");
-    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && tall(top.more) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems);
-    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 아이콘 포함)", okTouch, JSON.stringify(top));
+    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && tall(top.more) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems)
+      && top.foot.length === LANGS.length && tall(top.foot);
+    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 아이콘·꼬리 언어 링크 포함)", okTouch, JSON.stringify(top));
+
+    // L3: 사양 줄의 모노는 숫자·버전에만(칩 이름은 본문 글꼴)
+    const spec = await page.evaluate(() => [...document.querySelectorAll(".hero .spec span")].map((s) => [s.textContent, /monospace/.test(getComputedStyle(s).fontFamily)]));
+    const monoOk = spec.length === 4 && spec.every(([text, mono]) => mono === /\d/.test(text));
+    check("사양 줄: 모노는 숫자·버전에만, 칩 이름은 본문 글꼴", monoOk, JSON.stringify(spec));
 
     // H1: TestFlight 표지는 버튼 문법(채움 + 알약)이 아니다
     const tag = await page.evaluate(() => {
