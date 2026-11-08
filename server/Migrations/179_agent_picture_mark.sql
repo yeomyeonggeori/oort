@@ -22,7 +22,8 @@
 --                       트리거가 줄을 지킨다. 줄은 내용이 없다: 워크스페이스·첨부·run·에이전트 id 와 시각뿐이다.
 --
 -- 규칙을 DB가 쥐는 곳(앱 코드가 틀려도 지켜지는 것)
---   * 한 줄은 바뀌지 않는다: 어떤 UPDATE 도 트리거가 거절한다.
+--   * 한 줄은 바뀌지 않는다: 어떤 UPDATE 도 트리거가 거절한다. 표를 비우는 TRUNCATE 도 문장 트리거가 거절한다
+--     (행 트리거는 TRUNCATE 에 걸리지 않는다. 표 주인도 마찬가지 — #5530 구현 검수 L-1).
 --   * 하루 창 안의 줄은 지울 수 없다: DELETE 는 written_at 이 24시간보다 오래된 줄만 통과한다(셈의 창과 같은 술어의
 --     정확히 반대). api 의 청소가 창 값을 잘못 써도 오늘 값은 지워지지 않고 그 tx 가 실패한다.
 --
@@ -32,7 +33,9 @@
 --
 -- 표 권한
 --   아래 agent-picture-mark-lockdown 블록: momo_app = SELECT·INSERT·DELETE(셈·행 쓰기·청소). 그 밖의 모든 역할(워커·
---   relay·notifier·platform_admin·helper 읽기 역할)은 **아무것도** 없다. 워커는 읽지도 못한다.
+--   relay·notifier·platform_admin, 워커가 SET ROLE 할 수 있는 helper 읽기 역할과 momo_memory)은 **아무것도** 없다.
+--   워커는 읽지도 못한다. SET 으로만 닿는 두 역할을 블록이 이름으로 부르는 까닭: INHERIT FALSE 멤버십의 권한은
+--   has_table_privilege('momo_worker', …)에 보이지 않는다(#5530 구현 검수 M-1).
 --   attachment-write-token-lockdown 블록도 이 파일이 **다시 낸다**(175 의 첫 판은 이미 적용된 파일이라 고치지 않는다 —
 --   169 → 177 의 team-ai-task-lockdown 과 같은 방식): momo_worker 는 DELETE 를 잃고(SELECT·INSERT), momo_app 은
 --   하루 지난 토큰 청소를 위해 DELETE 를 얻는다(SELECT·UPDATE·DELETE). 두 블록은 이 파일·bootstrap_roles.sql·
@@ -64,10 +67,12 @@ COMMENT ON TABLE agent_picture_mark IS
 -- 셈(최근 24시간)과 청소(48시간보다 오래된 줄) 용.
 CREATE INDEX agent_picture_mark_window_idx ON agent_picture_mark (workspace_id, written_at);
 
--- 덧붙이기 전용: UPDATE 는 모두 거절, DELETE 는 하루 창 밖의 줄만. 창은 api 의 셈(agent_picture.rs)과 같은 24시간이다.
+-- 덧붙이기 전용: UPDATE·TRUNCATE 는 모두 거절, DELETE 는 하루 창 밖의 줄만. 창은 api 의 셈(agent_picture.rs)과 같은
+-- 24시간이다. TRUNCATE 는 행 트리거를 거치지 않으므로 같은 함수를 문장 트리거로 한 번 더 건다(#5530 검수 L-1).
+-- TG_OP 갈래가 먼저다: 문장 트리거에서는 OLD 가 NULL 이라, 창 비교가 먼저면 거짓이 되어 TRUNCATE 가 그대로 지나간다.
 CREATE FUNCTION agent_picture_mark_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP = 'UPDATE' THEN
+  IF TG_OP IN ('UPDATE', 'TRUNCATE') THEN
     RAISE EXCEPTION 'agent_picture_mark is append-only' USING ERRCODE = '23514';
   END IF;
   IF OLD.written_at > clock_timestamp() - interval '24 hours' THEN
@@ -77,6 +82,8 @@ BEGIN
 END $$;
 CREATE TRIGGER agent_picture_mark_guard BEFORE UPDATE OR DELETE ON agent_picture_mark
   FOR EACH ROW EXECUTE FUNCTION agent_picture_mark_guard();
+CREATE TRIGGER agent_picture_mark_no_truncate BEFORE TRUNCATE ON agent_picture_mark
+  FOR EACH STATEMENT EXECUTE FUNCTION agent_picture_mark_guard();
 
 DO $$ DECLARE t text; BEGIN
   FOREACH t IN ARRAY ARRAY['agent_picture_mark'] LOOP
@@ -90,15 +97,18 @@ END $$;
 -- 179_agent_picture_mark.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
 -- between the markers. One row per picture the api wrote for an agent is what the api's daily ceiling counts,
 -- and the BYPASSRLS roles skip RLS, so their table privileges are what keeps today's number out of reach of a
--- worker compromised at the database level: momo_worker, relay, notifier, platform_admin and the helper's read
--- role hold nothing on it (a row of theirs, rewritten or deleted, is what the old count could not survive).
+-- worker compromised at the database level: momo_worker, relay, notifier, platform_admin and the two roles the
+-- worker may SET ROLE to (the helper's read role and momo_memory) hold nothing on it (a row of theirs, rewritten
+-- or deleted, is what the old count could not survive). Those two are named here because a membership granted
+-- WITH INHERIT FALSE is invisible to has_table_privilege('momo_worker', ...): a stray grant to either would
+-- pass a block that did not name it and still be the worker's (#5530 implementation review M-1).
 -- momo_app counts (SELECT), writes the row in the transaction that writes the attachment (INSERT) and sweeps
 -- rows older than twice the window (DELETE; a trigger refuses a row inside the window whoever asks); nobody
--- updates a row. The table has no foreign key in either direction on purpose: a cascade runs as the table's
--- owner, so a key to a run, channel, attachment or workspace would hand a role that may delete a parent the
--- delete the privileges withhold. Idempotent and order-proof (a pass before the table or the roles exist
--- finishes what it can, the pass after lands the rest), and it fails loudly if the result is not what is
--- written here.
+-- updates or truncates a row (the same trigger refuses both, the owner included). The table has no foreign key
+-- in either direction on purpose: a cascade runs as the table's owner, so a key to a run, channel, attachment
+-- or workspace would hand a role that may delete a parent the delete the privileges withhold. Idempotent and
+-- order-proof (a pass before the table or the roles exist finishes what it can, the pass after lands the
+-- rest), and it fails loudly if the result is not what is written here.
 DO $$
 DECLARE
   r text;
@@ -109,7 +119,7 @@ BEGIN
     RETURN;
   END IF;
   REVOKE ALL ON TABLE public.agent_picture_mark FROM PUBLIC;
-  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read', 'momo_memory'] LOOP
     CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
     allowed := CASE r
       WHEN 'momo_app' THEN ARRAY['SELECT', 'INSERT', 'DELETE']

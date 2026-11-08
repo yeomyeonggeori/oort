@@ -2074,13 +2074,13 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // review M-1 (b)): one row per picture the api wrote for an agent is what the api's daily ceiling counts,
     // and the BYPASSRLS roles skip RLS, so their table privileges are what keeps today's number out of a
     // worker's reach. `momo_app` counts, writes the row and sweeps (SELECT/INSERT/DELETE); the worker,
-    // relay, notifier and the helper's read role hold nothing; nobody updates a row; no role holds
-    // TRUNCATE/REFERENCES/TRIGGER.
+    // relay, notifier and the two roles the worker may SET to (the helper's read role and `momo_memory`,
+    // #5530 review M-1) hold nothing; nobody updates a row; no role holds TRUNCATE/REFERENCES/TRIGGER.
     let agent_picture_mark_drift: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
                        has_table_privilege(r.rolname, c.oid, p.priv)) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read'), ('momo_memory')) AS r(rolname) \
            CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname = 'agent_picture_mark' \

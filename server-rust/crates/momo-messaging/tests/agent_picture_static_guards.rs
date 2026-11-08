@@ -17,8 +17,9 @@
 //! | `the_migrations_apply_each_block_after_they_created_the_table` | moving the mark block above its `CREATE TABLE` (a pass before the table exists returns early and locks nothing); 175's first copy of the token block likewise |
 //! | `the_migrations_grant_nothing_on_the_tables_outside_the_blocks` | a `GRANT` re-added to 175 or 179 after or beside a block |
 //! | `the_token_block_still_says_what_it_exists_for` | a block that compares equal because it was emptied everywhere, a worker arm that has DELETE again, an api arm that lost it, or a grant to a role the flow does not use |
-//! | `the_mark_block_still_says_what_it_exists_for` | the same for the mark table: any grant at all to the worker, relay, notifier, platform_admin or the helper's read role; an UPDATE for anybody; a role loop that no longer walks the helper's read role |
+//! | `the_mark_block_still_says_what_it_exists_for` | the same for the mark table: any grant at all to the worker, relay, notifier, platform_admin or the two roles the worker may SET to; an UPDATE for anybody; a role loop that no longer walks the helper's read role or `momo_memory` (review M-1: a membership WITH INHERIT FALSE is invisible to `has_table_privilege('momo_worker', …)`, so the block must name them) |
 //! | `the_mark_table_has_no_foreign_key_and_the_ceiling_counts_what_the_trigger_protects` | a `REFERENCES` / `FOREIGN KEY` in the mark table's `CREATE TABLE` (a cascade runs as the table's owner and would clear the count), the 24-hour window of the count and of the trigger drifting apart |
+//! | `the_mark_trigger_refuses_truncate_and_asks_tg_op_before_the_old_row` | the `BEFORE TRUNCATE` statement trigger gone, or the function asking `OLD` before `TG_OP` (a statement trigger's `OLD` is NULL, so the window test would let TRUNCATE through — review L-1) |
 
 use std::path::PathBuf;
 
@@ -127,6 +128,7 @@ fn the_migrations_apply_each_block_after_they_created_the_table() {
     );
     for needle in [
         "CREATE TRIGGER agent_picture_mark_guard BEFORE UPDATE OR DELETE ON agent_picture_mark",
+        "CREATE TRIGGER agent_picture_mark_no_truncate BEFORE TRUNCATE ON agent_picture_mark",
         "ALTER TABLE %I FORCE ROW LEVEL SECURITY",
     ] {
         let at = text
@@ -239,7 +241,10 @@ fn the_mark_block_still_says_what_it_exists_for() {
         "'momo_worker'",
         "'momo_notifier'",
         "'momo_platform_admin'",
+        // the two roles the worker may SET ROLE to: has_table_privilege('momo_worker', ...) does not see a
+        // membership granted WITH INHERIT FALSE, so only naming them here takes back a stray grant (review M-1)
         "'momo_helper_read'",
+        "'momo_memory'",
         "ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']",
         "has_table_privilege(r, 'public.agent_picture_mark', p) IS DISTINCT FROM (p = ANY (allowed))",
         "RAISE EXCEPTION",
@@ -258,6 +263,7 @@ fn the_mark_block_still_says_what_it_exists_for() {
         "momo_notifier' THEN",
         "momo_platform_admin' THEN",
         "momo_helper_read' THEN",
+        "momo_memory' THEN",
         "ALL ON TABLE public.agent_picture_mark TO",
         "GRANT ALL",
     ] {
@@ -310,5 +316,29 @@ fn the_mark_table_has_no_foreign_key_and_the_ceiling_counts_what_the_trigger_pro
     assert!(
         sql.contains("OLD.written_at > clock_timestamp() - interval '24 hours'"),
         "the trigger refuses the delete of exactly the rows the count sees"
+    );
+}
+
+#[test]
+fn the_mark_trigger_refuses_truncate_and_asks_tg_op_before_the_old_row() {
+    // review L-1: the row trigger never sees a TRUNCATE, so the same function guards the statement too
+    let sql = statements(&read(MIGRATION));
+    assert!(
+        sql.contains(
+            "CREATE TRIGGER agent_picture_mark_no_truncate BEFORE TRUNCATE ON agent_picture_mark\n  FOR EACH STATEMENT EXECUTE FUNCTION agent_picture_mark_guard();"
+        ),
+        "the mark table must refuse TRUNCATE with a statement trigger on the guard function"
+    );
+    // and the function answers TRUNCATE before it reads OLD: in a statement trigger OLD is NULL, the window
+    // test would be false and the statement would go through
+    let refuses = sql
+        .find("IF TG_OP IN ('UPDATE', 'TRUNCATE') THEN")
+        .expect("the guard refuses UPDATE and TRUNCATE by TG_OP");
+    let window = sql
+        .find("IF OLD.written_at > clock_timestamp() - interval '24 hours' THEN")
+        .expect("the guard's window test");
+    assert!(
+        refuses < window,
+        "the TG_OP branch must come before the test that reads OLD"
     );
 }

@@ -4027,6 +4027,131 @@ async fn the_mark_table_refuses_every_update_and_every_delete_inside_the_window_
     );
 }
 
+/// Review L-1 (#5530): the row trigger never fires on TRUNCATE, so a statement trigger on the same function
+/// refuses it — the owner included (the superuser holds TRUNCATE, so the trigger is what answers). The api
+/// role has no TRUNCATE privilege to begin with (42501). Each attempt runs in a transaction that is rolled
+/// back whatever happens, so a sabotaged run cannot empty the table under a sibling test. Sabotage: drop the
+/// statement trigger, or let the function read OLD (NULL in a statement trigger) before it asks TG_OP — the
+/// owner's TRUNCATE goes through.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_table_refuses_truncate_whoever_asks_the_owner_included() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let w = seed_world(su).await;
+    seed_mark(su, w.ws, "1 minute").await;
+    seed_mark(su, w.ws, "30 hours").await;
+
+    for (who, pool, code) in [
+        ("the owner", su, "23514"),
+        ("the api role", &pools.app, "42501"),
+    ] {
+        let mut tx = pool.begin().await.expect("a transaction");
+        let truncated = sqlx::query("TRUNCATE agent_picture_mark")
+            .execute(&mut *tx)
+            .await;
+        let _ = tx.rollback().await;
+        let error = match truncated {
+            Ok(done) => panic!(
+                "{who}: the mark table was truncated ({} rows)",
+                done.rows_affected()
+            ),
+            Err(error) => error,
+        };
+        let (got, message, _) = db_error(error);
+        assert_eq!(got, code, "{who}: {message}");
+        if code == "23514" {
+            assert!(message.contains("append-only"), "{who}: {message}");
+        }
+    }
+    assert_eq!(mark_rows(su, w.ws).await, 2, "both marks are still there");
+}
+
+/// Review M-1 (#5530): the worker may `SET ROLE` to `momo_helper_read` and `momo_memory` (INHERIT FALSE), and
+/// `has_table_privilege('momo_worker', …)` does not see what those roles hold — so the lockdown block must
+/// name them, or a stray grant to either passes the block and is still the worker's. For every role the
+/// catalog says the worker may SET to: grant it SELECT, DELETE and TRUNCATE on the mark table, run the block
+/// exactly as 179 carries it (the bootstrap files carry the same text: the static guard), and the role must
+/// hold nothing; as that role, a TRUNCATE dies at the privilege check. All inside one transaction that is
+/// rolled back, so no other test ever sees the grant. Sabotage: drop `'momo_memory'` from the block's role
+/// list (the grant survives the block).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_mark_lockdown_takes_back_a_stray_grant_from_every_role_the_worker_may_set_to() {
+    let pools = pools().await;
+    let su = &pools.su;
+    let migration = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../server/Migrations/179_agent_picture_mark.sql"
+    ))
+    .expect("migration 179");
+    let (begin, end) = (
+        "-- BEGIN agent-picture-mark-lockdown",
+        "-- END agent-picture-mark-lockdown",
+    );
+    let block = &migration[migration.find(begin).expect("BEGIN marker")
+        ..migration.find(end).expect("END marker") + end.len()];
+
+    // the roles the worker may SET to, from the catalog (not from a list of the test's)
+    let settable: Vec<String> = sqlx::query_scalar(
+        "SELECT r.rolname::text FROM pg_auth_members m \
+           JOIN pg_roles w ON w.oid = m.member JOIN pg_roles r ON r.oid = m.roleid \
+          WHERE w.rolname = 'momo_worker' AND m.set_option ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(
+        settable,
+        vec!["momo_helper_read".to_string(), "momo_memory".to_string()],
+        "the roles the worker may SET to (a new one belongs in the block's role list too)"
+    );
+
+    for role in &settable {
+        let mut tx = su.begin().await.expect("a transaction");
+        sqlx::query(&format!(
+            "GRANT SELECT, DELETE, TRUNCATE ON agent_picture_mark TO {role}"
+        ))
+        .execute(&mut *tx)
+        .await
+        .expect("the stray grant");
+        if let Err(error) = sqlx::raw_sql(block).execute(&mut *tx).await {
+            panic!("{role}: the block failed instead of taking the grant back: {error}");
+        }
+        let held: Vec<String> = sqlx::query_scalar(
+            "SELECT p FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p \
+              WHERE has_table_privilege($1::name, 'public.agent_picture_mark', p)",
+        )
+        .bind(role)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+        assert!(
+            held.is_empty(),
+            "{role} still holds {held:?} on agent_picture_mark after the block"
+        );
+        // as that role (what the worker would do after SET ROLE), the TRUNCATE dies at the privilege check
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let truncated = sqlx::query("TRUNCATE agent_picture_mark")
+            .execute(&mut *tx)
+            .await;
+        let _ = tx.rollback().await;
+        let error = match truncated {
+            Ok(_) => panic!("{role}: TRUNCATE went through"),
+            Err(error) => error,
+        };
+        let (code, message, _) = db_error(error);
+        assert_eq!(code, "42501", "{role}: {message}");
+        assert!(
+            message.contains("agent_picture_mark"),
+            "{role}: refused by the table's privilege: {message}"
+        );
+    }
+}
+
 /// The sweep's OWN window, with the trigger taken out of the way: the superuser runs the api's spend with
 /// `session_replication_role = replica` (triggers off), so the only thing between the marks and the sweep is
 /// the number in the code. Marks inside 48 hours stay (the ones inside 24 hours are what the count sees;
