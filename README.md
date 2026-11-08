@@ -39,11 +39,11 @@ and follow its §0 contract to install oort.
 Report done only when `scripts/oort doctor` is PASS.
 ```
 
-Published images, a public address and Railway are covered in [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+Published images and a public address are covered in [`docs/SELF_HOST.md`](docs/SELF_HOST.md), Railway in [`infra/railway/README.md`](infra/railway/README.md).
 
 ## Your data and credentials
 
-- **Your server is the source of truth.** Messages, approvals, run state and the audit log live in your PostgreSQL. Third parties appear only where you choose them: the AI backend you pick receives the work context it needs, and the optional push relay, the only service we run for you, receives ids and routing data, never message bodies, prompts, approval details or attachments ([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
+- **Your server is the source of truth.** Messages, approvals, run state and the audit log live in your PostgreSQL. Third parties appear only where you choose them: the AI backend you pick receives the work context it needs, a Google shared drive holds files only if you pick it over your server's volume, and the optional push relay, the only service we run for you, receives ids and routing data, never message bodies, prompts, approval details or attachments ([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
 - **Credentials stay sealed.** Subscription logins (ChatGPT/Codex, Claude) belong in your Hermes volume: oort refuses to create new subscription-token links, and older ones stay sealed until deleted. An API key or Hermes bearer you give oort is stored as AES-256-GCM ciphertext under its own master key, never as plaintext, and shown back as at most its last four characters ([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [evidence, in Korean](docs/security/README.ko.md#자격증명과-provider)).
 - **Not end-to-end encrypted.** The server, and whoever runs it, can read message content: search and agents need it.
 - **Not audited or certified.** No third-party security audit, penetration test, SOC 2 or ISO certification ([current limits, in Korean](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)). Report security issues privately as [SECURITY.md](SECURITY.md) describes.

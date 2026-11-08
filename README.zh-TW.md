@@ -40,11 +40,11 @@ scripts/self_host_env.sh   # 寫出你的 env 檔並印出首次登入資訊
 只有當 `scripts/oort doctor` 為 PASS 時才回報完成。
 ```
 
-已發布的映像檔、公開位址與 Railway 部署，請見 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)。
+已發布的映像檔與公開位址請見 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)，Railway 部署請見 [`infra/railway/README.md`](infra/railway/README.md)。
 
 ## 你的資料與憑證
 
-- **事實來源是你的伺服器。** 訊息、核准、執行狀態和稽核紀錄都存放在你的 PostgreSQL 裡。第三方只出現在你自己選擇的地方：你選定的 AI 後端會收到完成工作所需的脈絡；選用的推播中繼是我們為你營運的唯一服務，它只接收 id 與投遞路由資訊，絕不接收訊息內文、提示詞、核准細節或附件（[ADR-0120](docs/adr/0120-push-notification-boundary.md)）。
+- **事實來源是你的伺服器。** 訊息、核准、執行狀態和稽核紀錄都存放在你的 PostgreSQL 裡。第三方只出現在你自己選擇的地方：你選定的 AI 後端會收到完成工作所需的脈絡；只有當你選擇用 Google 共用雲端硬碟取代伺服器上的磁碟區時，檔案才會放在那裡；選用的推播中繼是我們為你營運的唯一服務，它只接收 id 與投遞路由資訊，絕不接收訊息內文、提示詞、核准細節或附件（[ADR-0120](docs/adr/0120-push-notification-boundary.md)）。
 - **憑證會被封存。** 訂閱登入（ChatGPT/Codex、Claude）應放在你自己的 Hermes 磁碟區裡：oort 拒絕建立新的訂閱權杖連結，舊的連結在刪除前保持封存。你交給 oort 的 API 金鑰或 Hermes bearer，會用它自己的主金鑰加密成 AES-256-GCM 密文儲存，絕不以明文儲存，顯示時最多只露出最後四個字元（[ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [依據，韓文](docs/security/README.ko.md#자격증명과-provider)）。
 - **不是端對端加密。** 伺服器，以及執行它的人，可以讀取訊息內容——搜尋和代理都需要這一點。
 - **沒有經過稽核或認證。** 沒有第三方安全稽核，沒有滲透測試，沒有 SOC 2 或 ISO 認證（[目前限制，韓文](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)）。請依 [SECURITY.md](SECURITY.md) 私下回報安全問題。

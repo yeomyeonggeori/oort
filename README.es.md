@@ -40,11 +40,11 @@ y sigue su contrato §0 para instalar oort.
 Da la tarea por terminada solo cuando `scripts/oort doctor` esté en PASS.
 ```
 
-Las imágenes publicadas, una dirección pública y Railway se explican en [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+Las imágenes publicadas y una dirección pública se explican en [`docs/SELF_HOST.md`](docs/SELF_HOST.md); Railway, en [`infra/railway/README.md`](infra/railway/README.md).
 
 ## Tus datos y credenciales
 
-- **Tu servidor es la fuente de verdad.** Los mensajes, las aprobaciones, el estado de las ejecuciones y el registro de auditoría viven en tu PostgreSQL. Los terceros solo aparecen donde tú los eliges: el backend de IA que elijas recibe el contexto de trabajo que necesita, y el relay de notificaciones push opcional, el único servicio que operamos para ti, recibe identificadores y datos de entrega, nunca el cuerpo de los mensajes, prompts, detalles de aprobaciones ni adjuntos ([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
+- **Tu servidor es la fuente de verdad.** Los mensajes, las aprobaciones, el estado de las ejecuciones y el registro de auditoría viven en tu PostgreSQL. Los terceros solo aparecen donde tú los eliges: el backend de IA que elijas recibe el contexto de trabajo que necesita, una unidad compartida de Google guarda archivos solo si la eliges en lugar del volumen de tu servidor, y el relay de notificaciones push opcional, el único servicio que operamos para ti, recibe identificadores y datos de entrega, nunca el cuerpo de los mensajes, prompts, detalles de aprobaciones ni adjuntos ([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
 - **Las credenciales quedan selladas.** Los inicios de sesión por suscripción (ChatGPT/Codex, Claude) pertenecen a tu volumen de Hermes: oort se niega a crear nuevos enlaces de tokens de suscripción, y los antiguos siguen sellados hasta que se borren. Una clave de API o un bearer de Hermes que le des a oort se guarda como texto cifrado AES-256-GCM con su propia clave maestra, nunca en texto plano, y al mostrarse solo se ven, como mucho, sus cuatro últimos caracteres ([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [evidencia, en coreano](docs/security/README.ko.md#자격증명과-provider)).
 - **Sin cifrado de extremo a extremo.** El servidor, y quien lo opera, pueden leer el contenido de los mensajes: la búsqueda y los agentes lo necesitan.
 - **Sin auditoría ni certificación.** No hay auditoría de seguridad de terceros, prueba de penetración ni certificación SOC 2 o ISO ([límites actuales, en coreano](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)). Informa de los problemas de seguridad en privado, como indica [SECURITY.md](SECURITY.md).

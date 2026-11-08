@@ -40,11 +40,11 @@ https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.
 `scripts/oort doctor` が PASS のときだけ完了と報告して。
 ```
 
-公開済みイメージ、公開アドレス、Railway については [`docs/SELF_HOST.md`](docs/SELF_HOST.md) を参照してください。
+公開済みイメージと公開アドレスについては [`docs/SELF_HOST.md`](docs/SELF_HOST.md)、Railway については [`infra/railway/README.md`](infra/railway/README.md) を参照してください。
 
 ## データと認証情報
 
-- **真実の源はあなたのサーバーです。** メッセージ、承認、実行の状態、監査ログは、あなたの PostgreSQL にあります。第三者が現れるのは、あなたが選んだ場所だけです。選んだ AI バックエンドは作業に必要なコンテキストを受け取り、私たちが運用する唯一のサービスである任意のプッシュリレーは、id と配送情報だけを受け取ります。メッセージ本文、プロンプト、承認の詳細、添付は受け取りません（[ADR-0120](docs/adr/0120-push-notification-boundary.md)）。
+- **真実の源はあなたのサーバーです。** メッセージ、承認、実行の状態、監査ログは、あなたの PostgreSQL にあります。第三者が現れるのは、あなたが選んだ場所だけです。選んだ AI バックエンドは作業に必要なコンテキストを受け取り、Google 共有ドライブはサーバーのボリュームの代わりに選んだ場合だけファイルを保管し、私たちが運用する唯一のサービスである任意のプッシュリレーは、id と配送情報だけを受け取ります。メッセージ本文、プロンプト、承認の詳細、添付は受け取りません（[ADR-0120](docs/adr/0120-push-notification-boundary.md)）。
 - **認証情報は封印されます。** サブスクリプションのログイン（ChatGPT/Codex、Claude）はあなたの Hermes ボリュームに置きます。oort は新しいサブスクリプショントークンのリンクを作ることを拒み、以前のものは削除するまで封印されたままです。oort に渡した API キーや Hermes bearer は、専用のマスターキーで AES-256-GCM 暗号文として保存され、平文では保存されず、表示するときも末尾 4 文字までです（[ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [根拠（韓国語）](docs/security/README.ko.md#자격증명과-provider)）。
 - **エンドツーエンド暗号化ではありません。** サーバーと、それを運用する人は、メッセージの内容を読めます。検索とエージェントに必要だからです。
 - **監査も認証も受けていません。** 第三者によるセキュリティ監査も、侵入テストも、SOC 2 や ISO の認証もありません（[現在の限界（韓国語）](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)）。セキュリティ上の問題は [SECURITY.md](SECURITY.md) に従って非公開で報告してください。

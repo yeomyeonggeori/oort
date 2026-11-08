@@ -39,11 +39,11 @@ https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.
 `scripts/oort doctor`가 PASS일 때만 끝났다고 보고해.
 ```
 
-게시된 이미지, 공개 주소, Railway는 [`docs/SELF_HOST.ko.md`](docs/SELF_HOST.ko.md)에 있어요.
+게시된 이미지와 공개 주소는 [`docs/SELF_HOST.ko.md`](docs/SELF_HOST.ko.md)에, Railway는 [`infra/railway/README.md`](infra/railway/README.md)에 있어요.
 
 ## 데이터와 자격증명
 
-- **진실의 원천은 내 서버예요.** 메시지, 승인, 실행 상태, 감사 기록은 내 PostgreSQL에 있어요. 제3자는 내가 고른 곳에만 나타나요: 내가 고른 AI 백엔드는 일에 필요한 문맥을 받고, 우리가 운영하는 유일한 서비스인 선택 사항 푸시 릴레이는 id와 전달 정보만 받아요. 메시지 본문, 프롬프트, 승인 상세, 첨부는 받지 않아요([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
+- **진실의 원천은 내 서버예요.** 메시지, 승인, 실행 상태, 감사 기록은 내 PostgreSQL에 있어요. 제3자는 내가 고른 곳에만 나타나요: 내가 고른 AI 백엔드는 일에 필요한 문맥을 받고, Google 공유 드라이브는 서버 볼륨 대신 고른 경우에만 파일을 두고, 우리가 운영하는 유일한 서비스인 선택 사항 푸시 릴레이는 id와 전달 정보만 받아요. 메시지 본문, 프롬프트, 승인 상세, 첨부는 받지 않아요([ADR-0120](docs/adr/0120-push-notification-boundary.md)).
 - **자격증명은 봉인돼요.** 구독 로그인(ChatGPT/Codex, Claude)은 내 Hermes 볼륨에 둬요. oort는 새 구독 토큰 링크를 만들지 않고, 예전 링크는 지울 때까지 봉인된 채 남아요. oort에 넣는 API 키나 Hermes bearer는 자기 마스터 키로 AES-256-GCM 암호문이 되어 저장되고, 평문으로는 저장되지 않으며, 다시 보여 줄 때도 마지막 네 글자까지만 보여 줘요([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [근거](docs/security/README.ko.md#자격증명과-provider)).
 - **종단 간 암호화가 아니에요.** 서버와 서버를 운영하는 사람은 메시지 내용을 읽을 수 있어요. 검색과 에이전트에 필요해서예요.
 - **감사받지도 인증받지도 않았어요.** 제3자 보안 감사, 침투 시험, SOC 2·ISO 인증이 없어요([현재 한계](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)). 보안 문제는 [SECURITY.md](SECURITY.md)대로 비공개로 알려 주세요.
