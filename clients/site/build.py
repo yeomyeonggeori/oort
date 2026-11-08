@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""oort 내려받기 페이지 빌드 (#5562). 표준 라이브러리만 쓴다.
+"""oort 내려받기 페이지 빌드 (#5562). 표준 라이브러리만 쓴다(Python 3.9 이상).
 
-  python3 clients/site/build.py            # -> clients/site/dist/
-  python3 clients/site/build.py --out DIR  # 다른 폴더로
+  python3 clients/site/build.py            # -> clients/site/dist/ (어느 폴더에서 돌려도 이 파일 기준)
+  python3 clients/site/build.py --out DIR  # 다른 폴더로(확인·사보타주용)
+
+배포는 Vercel 프로젝트 oort 가 저장소 루트에서 이 스크립트를 돌리고 clients/site/dist 를 올린다(설치 명령·프레임워크 없음).
 
 src/index.html 하나에 언어별 문구(i18n/<lang>.json)와 값(values.json)을 채워 언어마다 정적 페이지를 만든다.
 CSS·스크립트는 페이지 안에 담는다(요청 하나). 다음 중 하나라도 있으면 빌드가 실패한다(exit 1):
@@ -183,9 +185,8 @@ def main(argv):
         else:
             child.unlink()
     shutil.copytree(HERE / "assets", out / "assets", ignore=shutil.ignore_patterns("*.json", ".DS_Store"))
+    # M7-S 전까지 팀 한정: 검색 엔진은 모든 경로를 읽지 않는다(페이지마다 noindex 도 있다).
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
-    (out / ".nojekyll").write_text("", encoding="utf-8")
-    (out / "CNAME").write_text(values["SITE_HOST"] + "\n", encoding="utf-8")
 
     pages = [(ROOT_LANG, True, out / "index.html")] + [(lang, False, out / lang / "index.html") for lang in LANGS]
     report = []

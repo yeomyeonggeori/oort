@@ -12,7 +12,7 @@
 
 | 파일 | 하는 일 |
 |---|---|
-| `values.json` | 바뀌는 값 한 곳: 설치 파일 주소(`DMG_ARM_URL`·`DMG_X64_URL`), `VERSION`, `APP_VERSION`, `MIN_MACOS`, `WEB_URL`, `SITE_HOST` |
+| `values.json` | 바뀌는 값 한 곳: 설치 파일 주소(`DMG_ARM_URL`·`DMG_X64_URL`), `VERSION`, `APP_VERSION`, `MIN_MACOS`, `WEB_URL`, `SITE_HOST`(hreflang 절대 주소) |
 | `i18n/<lang>.json` | 문구. ko·en·ja·zh-Hans·zh-Hant·es·fr, 모든 언어의 키가 같아야 해요 |
 | `src/index.html` | 페이지 틀. `{{t.키}}`는 문구, `{{v.키}}`는 값 |
 | `src/site.css` · `src/site.js` | 모양과 칩 고르기·메뉴·언어 기억 |
@@ -29,7 +29,7 @@ python3 clients/site/build.py                     # -> clients/site/dist/ (커�
 cd clients/site/dist && python3 -m http.server 21410 --bind 127.0.0.1
 ```
 
-결과 폴더에는 `/`(영어, 첫 방문이면 브라우저 언어로 옮김), `/<lang>/`, `assets/`, `robots.txt`, `.nojekyll`, `CNAME`이 들어가요. `dist/`는 저장소 루트 `.gitignore`가 이미 빼요.
+결과 폴더에는 `/`(영어, 첫 방문이면 브라우저 언어로 옮김), `/<lang>/`, `assets/`, `robots.txt`가 들어가요. 빌드는 어느 폴더에서 돌려도 이 스크립트 위치를 기준으로 `clients/site/dist/`에 써요(Python 3.9 이상, 표준 라이브러리만). `dist/`는 저장소 루트 `.gitignore`가 이미 빼요.
 
 빌드는 다음이면 실패해요: 어느 언어에 키가 빠졌거나 남음, 빈 값, 줄표(U+2014·U+2013), 채우지 못한 `{{자리}}`, `values.json` 값 빠짐, 결과 폴더에 없는 파일을 가리키는 링크.
 
@@ -64,4 +64,4 @@ CAPTURE_PORT=21401 node clients/site/scripts/capture-app.mjs
 
 ## 배포
 
-planner가 `dist/`를 `gh-pages` 가지에 올리고 Pages(`app.oor7.com`)로 내보내요. 워커는 push·Pages·DNS를 건드리지 않아요.
+Vercel 프로젝트 oort가 저장소를 따라 빌드해요: 저장소 루트에서 `python3 clients/site/build.py`를 돌리고 `clients/site/dist`를 올려요(설치 명령·프레임워크 없음, `clients/site/`가 바뀐 커밋만). PR마다 미리 보기 주소가 생기고(팀 로그인 필요), 실제 주소 `app.oor7.com` 반영은 planner가 해요. 저장소에 `vercel.json`은 두지 않아요(설정은 Vercel 쪽). 워커는 배포·도메인을 건드리지 않아요.

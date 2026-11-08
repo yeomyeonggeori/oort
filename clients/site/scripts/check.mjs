@@ -227,12 +227,19 @@ async function main() {
   // 4) 칩 고르기: 기본 Apple Silicon, 키보드로 Intel, Escape, x86 자동 선택
   if (ONLY.has("chip")) {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    // 칩을 모르는 브라우저(Safari·Firefox, 또는 값을 거절하는 Chromium): 규칙은 「모르면 Apple Silicon」이다.
+    // 이 Mac 의 실제 칩을 읽지 않게 거절로 고정한다(Intel 호스트에서도 같은 답).
+    await ctx.addInitScript(() => {
+      const fake = { brands: [], mobile: false, platform: "macOS", getHighEntropyValues: () => Promise.reject(new Error("unknown")) };
+      Object.defineProperty(Navigator.prototype, "userAgentData", { configurable: true, get: () => fake });
+    });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
     await settle(page);
+    await page.waitForTimeout(100);
     const href = () => page.locator("#get-mac").getAttribute("href");
     const label = () => page.locator("[data-chip-label]").textContent();
-    check("기본 칩은 Apple Silicon", (await href()) === values.DMG_ARM_URL && (await label()) === "Apple Silicon");
+    check("칩을 모르면 Apple Silicon", (await href()) === values.DMG_ARM_URL && (await label()) === "Apple Silicon");
     await page.locator("#get-mac").focus();
     await page.keyboard.press("Tab");
     const onMore = await page.evaluate(() => document.activeElement?.classList.contains("get-more") && document.activeElement.matches(":focus-visible") && getComputedStyle(document.activeElement).outlineStyle !== "none");
