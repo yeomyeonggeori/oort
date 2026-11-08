@@ -898,6 +898,33 @@ export const messageKeys = [
   "releaseNotes.v0144.suggestionsTitle",
   "releaseNotes.v0144.suggestionsTryIt",
   "releaseNotes.v0144.summary",
+  "releaseNotes.v0145.expressionsLine1",
+  "releaseNotes.v0145.expressionsLine2",
+  "releaseNotes.v0145.expressionsTopic",
+  "releaseNotes.v0145.frequentRecentChanged",
+  "releaseNotes.v0145.frequentRecentTitle",
+  "releaseNotes.v0145.frequentRecentTryIt",
+  "releaseNotes.v0145.keptEmoticonsChanged",
+  "releaseNotes.v0145.keptEmoticonsTitle",
+  "releaseNotes.v0145.keptEmoticonsTryIt",
+  "releaseNotes.v0145.noBlinkChanged",
+  "releaseNotes.v0145.noBlinkTitle",
+  "releaseNotes.v0145.noBlinkTryIt",
+  "releaseNotes.v0145.phoneLine1",
+  "releaseNotes.v0145.phoneTopic",
+  "releaseNotes.v0145.reactionGifsChanged",
+  "releaseNotes.v0145.reactionGifsTitle",
+  "releaseNotes.v0145.reactionGifsTryIt",
+  "releaseNotes.v0145.replyPreviewChanged",
+  "releaseNotes.v0145.replyPreviewTitle",
+  "releaseNotes.v0145.replyPreviewTryIt",
+  "releaseNotes.v0145.steadyPhotosChanged",
+  "releaseNotes.v0145.steadyPhotosTitle",
+  "releaseNotes.v0145.steadyPhotosTryIt",
+  "releaseNotes.v0145.suggestionSwitchChanged",
+  "releaseNotes.v0145.suggestionSwitchTitle",
+  "releaseNotes.v0145.suggestionSwitchTryIt",
+  "releaseNotes.v0145.summary",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -2330,6 +2357,33 @@ export const argumentSpecs = {
   "releaseNotes.v0144.suggestionsTitle": {},
   "releaseNotes.v0144.suggestionsTryIt": {},
   "releaseNotes.v0144.summary": {},
+  "releaseNotes.v0145.expressionsLine1": {},
+  "releaseNotes.v0145.expressionsLine2": {},
+  "releaseNotes.v0145.expressionsTopic": {},
+  "releaseNotes.v0145.frequentRecentChanged": {},
+  "releaseNotes.v0145.frequentRecentTitle": {},
+  "releaseNotes.v0145.frequentRecentTryIt": {},
+  "releaseNotes.v0145.keptEmoticonsChanged": {},
+  "releaseNotes.v0145.keptEmoticonsTitle": {},
+  "releaseNotes.v0145.keptEmoticonsTryIt": {},
+  "releaseNotes.v0145.noBlinkChanged": {},
+  "releaseNotes.v0145.noBlinkTitle": {},
+  "releaseNotes.v0145.noBlinkTryIt": {},
+  "releaseNotes.v0145.phoneLine1": {},
+  "releaseNotes.v0145.phoneTopic": {},
+  "releaseNotes.v0145.reactionGifsChanged": {},
+  "releaseNotes.v0145.reactionGifsTitle": {},
+  "releaseNotes.v0145.reactionGifsTryIt": {},
+  "releaseNotes.v0145.replyPreviewChanged": {},
+  "releaseNotes.v0145.replyPreviewTitle": {},
+  "releaseNotes.v0145.replyPreviewTryIt": {},
+  "releaseNotes.v0145.steadyPhotosChanged": {},
+  "releaseNotes.v0145.steadyPhotosTitle": {},
+  "releaseNotes.v0145.steadyPhotosTryIt": {},
+  "releaseNotes.v0145.suggestionSwitchChanged": {},
+  "releaseNotes.v0145.suggestionSwitchTitle": {},
+  "releaseNotes.v0145.suggestionSwitchTryIt": {},
+  "releaseNotes.v0145.summary": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -3779,6 +3833,33 @@ export interface MessageArgs {
   "releaseNotes.v0144.suggestionsTitle": Record<string, never>;
   "releaseNotes.v0144.suggestionsTryIt": Record<string, never>;
   "releaseNotes.v0144.summary": Record<string, never>;
+  "releaseNotes.v0145.expressionsLine1": Record<string, never>;
+  "releaseNotes.v0145.expressionsLine2": Record<string, never>;
+  "releaseNotes.v0145.expressionsTopic": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentChanged": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentTitle": Record<string, never>;
+  "releaseNotes.v0145.frequentRecentTryIt": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsChanged": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsTitle": Record<string, never>;
+  "releaseNotes.v0145.keptEmoticonsTryIt": Record<string, never>;
+  "releaseNotes.v0145.noBlinkChanged": Record<string, never>;
+  "releaseNotes.v0145.noBlinkTitle": Record<string, never>;
+  "releaseNotes.v0145.noBlinkTryIt": Record<string, never>;
+  "releaseNotes.v0145.phoneLine1": Record<string, never>;
+  "releaseNotes.v0145.phoneTopic": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsChanged": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsTitle": Record<string, never>;
+  "releaseNotes.v0145.reactionGifsTryIt": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewChanged": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewTitle": Record<string, never>;
+  "releaseNotes.v0145.replyPreviewTryIt": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosChanged": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosTitle": Record<string, never>;
+  "releaseNotes.v0145.steadyPhotosTryIt": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchChanged": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchTitle": Record<string, never>;
+  "releaseNotes.v0145.suggestionSwitchTryIt": Record<string, never>;
+  "releaseNotes.v0145.summary": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
