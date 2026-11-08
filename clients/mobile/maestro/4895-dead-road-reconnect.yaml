@@ -26,6 +26,8 @@ name: 4895-dead-road-reconnect
 - evalScript: "${output.clears = []}"
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - tapOn:
     id: "sidebar-row-channel:${CHANNEL_ID}"

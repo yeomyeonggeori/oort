@@ -36,6 +36,8 @@ use momo_agent::team_ai_task::{
 use momo_outbox::{backoff_seconds, emit_outbox, requeue, OutboxKind};
 use momo_workspace_actions::team_ai_hermes_exec as exec;
 
+use crate::agent_picture::{PictureRefusal, PictureWriter};
+
 /// Room kept between the stretched claim and the end of the job's own lease: a job that is re-claimed after
 /// its lease expired must find the dead worker's claim expired too, or it would wait for nothing.
 const LEASE_MARGIN_SECS: i64 = 15;
@@ -58,6 +60,10 @@ const ACTIVITY_STEP: i32 = 1;
 /// `failed` without calling again (the CAS on `called` keeps it at most once) and a late answer is
 /// dropped — safe, but the answer is lost.
 ///
+/// An `image` delegation has one more thing after the merging call that takes time: the picture's upload
+/// (S4, ADR-0151 증보 8 W7, [`crate::agent_picture::WRITE_DEADLINE`], 40 s), so its worst case is that much
+/// longer (S3's 「약 200초」: 120 + 2 × 20 + 30 + 40 = 230 s with the defaults).
+///
 /// `min` then `max`, never `clamp`: with a lease nearly gone the upper bound is below the lower one, and
 /// `clamp` panics on that. One second is the floor (a valid interval; a re-claim finds it expired).
 fn claim_secs_for(
@@ -66,9 +72,14 @@ fn claim_secs_for(
     job: &ClaimedAgentJob,
     now: chrono::DateTime<chrono::Utc>,
 ) -> i64 {
+    let upload = match kind {
+        HermesKind::Image => crate::agent_picture::WRITE_DEADLINE.as_secs(),
+        HermesKind::WebSearch => 0,
+    };
     let worst = config.hermes_deadlines.of(kind).as_secs()
         + 2 * config.team_ai_model_timeout.as_secs()
-        + CLAIM_SLACK_SECS;
+        + CLAIM_SLACK_SECS
+        + upload;
     let lease_left_secs = (job.lease_expires_at - now).num_seconds();
     i64::try_from(worst)
         .unwrap_or(i64::MAX)
@@ -122,11 +133,16 @@ pub(super) struct HermesSettlement {
     pub estimated: bool,
     /// The target's current display name, for the 「위임 결과 수신」 line.
     pub display_name: String,
+    /// `Some(bytes)` — the size of the attachment the api stored for this delegation — when a picture was
+    /// written, `None` when none was. Its presence (not its value) is what tells the finishing transaction to
+    /// post the answer **with** the run's picture (P6): a number, never a byte, and never a number standing
+    /// in for "there is one".
+    pub picture_bytes: Option<i64>,
 }
 
-/// One `team_ai.delegate` audit row (P11): run, kind, closed result code, ms, picture bytes (0 — this
-/// slice sends no picture), the target agent's id. **Never the request sentence, an answer, or a
-/// `MEDIA` line** (H9-I10).
+/// One `team_ai.delegate` audit row (P11): run, kind, closed result code, ms, picture bytes (the size of the
+/// attachment the api stored; `0` for none), the target agent's id. **Never the request sentence, an
+/// answer, a picture or a `MEDIA` line** (H9-I10).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn write_delegate_audit(
     conn: &mut momo_db::PgConnection,
@@ -137,6 +153,7 @@ pub(super) async fn write_delegate_audit(
     target: Uuid,
     code: &str,
     ms: i64,
+    picture_bytes: i64,
 ) -> Result<(), DbError> {
     audit::write_audit(
         conn,
@@ -151,7 +168,7 @@ pub(super) async fn write_delegate_audit(
                     "code": code,
                     "target": target.to_string(),
                     "ms": ms,
-                    "picture_bytes": 0,
+                    "picture_bytes": picture_bytes,
                 }),
             ),
     )
@@ -285,8 +302,15 @@ fn closed_code(code: DelegateCode) -> &'static str {
 
 /// A transport or HTTP failure of the one request, as the closed code a person is told (P9). Hermes's own
 /// words are never kept: the status number is all that is read.
-fn reply_code(error: &ProviderError) -> DelegateCode {
+///
+/// An answer larger than the provider's body cap ([`ProviderError::BodyTooLarge`], 12 MiB — sized for a 5 MiB
+/// picture in base64 and nothing bigger) is, for an `image` delegation, a picture past the size limit (P6:
+/// over the limit is `picture_failed`); for a search it is a plain `failed`.
+fn reply_code(error: &ProviderError, kind: HermesKind) -> DelegateCode {
     match error {
+        ProviderError::BodyTooLarge { .. } if kind == HermesKind::Image => {
+            DelegateCode::PictureFailed
+        }
         ProviderError::TimedOut(_) => DelegateCode::Timeout,
         // A busy Hermes says so with 429/503 (T5): "a moment later", not "it broke".
         ProviderError::HttpStatus(429 | 503, _) => DelegateCode::Busy,
@@ -690,10 +714,27 @@ impl AgentWorker {
             team_ai_limits::search_cap(&gathered.state.limits, &caps)
                 .is_some_and(|cap| gathered.searches_today >= cap),
         );
+        // #5372 (P14-S4): the writer an `image` delegation posts its picture with. The door offered `image` by
+        // the code constant and the operator's declaration alone (P6, A10); what **this process** can really
+        // do is judged here with the other gates that can change, right before Hermes is called — no private
+        // origin (or no client) means the picture could not be posted, and a subscription call whose result
+        // nobody can post is not made: the delegation ends `unavailable`, no `called`, no ledger row, no
+        // count. (A missing origin is not a closed door at the advertisement: it is an operator's mistake
+        // this step turns into a fixed sentence instead of a wasted picture.)
+        let writer: Option<PictureWriter> = (kind == HermesKind::Image)
+            .then(|| PictureWriter::new(self.config.api_internal_origin.as_deref()))
+            .flatten();
         let gates_hold = self.config.hermes.g4().is_ok()
             && self.config.hermes.declares(kind)
-            // `image` waits for the attachment write path (S4): it is never callable before it
-            && (kind != HermesKind::Image || team_ai_hermes::ATTACHMENT_WRITE_PATH_READY)
+            // `image` needs the code constant (S4 turned it on) and a writer: it is never callable without
+            && (kind != HermesKind::Image
+                || (team_ai_hermes::ATTACHMENT_WRITE_PATH_READY && writer.is_some()))
+            // …and the operator's oort-side attestation that Hermes delivers media strictly — the very one the
+            // hosted expression door opens on (security review M1 of #5372). Without it a `MEDIA:` line the
+            // model names could be turned into any file Hermes can read, on a volume every workspace shares;
+            // Hermes's own boot gate is the first lock, this is the second, and a worker that cannot see the
+            // first does not call on its word alone. Judged here, like the writer: not an advertisement switch
+            && (kind != HermesKind::Image || self.config.hosted_media_strict)
             // T14: the administrator's search switch and the operator's `0` close Hermes's search too,
             // also for a request that was already on its way when they were thrown
             && (kind != HermesKind::WebSearch
@@ -817,6 +858,10 @@ impl AgentWorker {
             ..HermesTrace::default()
         });
 
+        // The picture of an `image` delegation, as bytes — and nowhere else (#5372). It lives in this local
+        // from the raw answer to the writer: not in the model's input, not in a log line (`PictureBytes` prints
+        // a length), not in the audit row, not in the task row.
+        let mut picture: Option<exec::PictureBytes> = None;
         let (code, to, usage_row, merge_input) = match reply {
             HermesReply::Failed { code, ms, label } => {
                 let settle = HermesSettlement {
@@ -830,6 +875,7 @@ impl AgentWorker {
                     completion_tokens: 0,
                     estimated: true,
                     display_name,
+                    picture_bytes: None,
                 };
                 if let Some(hermes) = trace.hermes.as_mut() {
                     hermes.results.push(code.as_str());
@@ -856,14 +902,27 @@ impl AgentWorker {
                 ms,
                 label: hermes_label,
             } => {
-                let answer = exec::clean_answer(&text);
+                // #5372: what an `image` delegation drew, taken from the RAW answer (the cleaning below reads at
+                // most 400,000 characters and a 5 MiB picture is ~7 million) before any of it is cleaned. Not
+                // an image delegation: nothing is taken, whatever its text holds (S3 review I3).
+                let drew = exec::picture_of(kind, &text);
+                let mut answer = exec::clean_answer(&text);
                 let (prompt_tokens, completion_tokens, estimated) = match usage {
                     Some(usage) => (usage.prompt_tokens, usage.completion_tokens, false),
-                    None => (
-                        i32::try_from(request.chars().count() / 3 + 1).unwrap_or(i32::MAX),
-                        i32::try_from(text.chars().count() / 3 + 1).unwrap_or(i32::MAX),
-                        true,
-                    ),
+                    None => {
+                        // an estimate of what Hermes SAID: a picture's base64 is millions of characters and
+                        // no tokens, so for an image only the words count
+                        let spoken = if kind == HermesKind::Image {
+                            answer.text.chars().count()
+                        } else {
+                            text.chars().count()
+                        };
+                        (
+                            i32::try_from(request.chars().count() / 3 + 1).unwrap_or(i32::MAX),
+                            i32::try_from(spoken / 3 + 1).unwrap_or(i32::MAX),
+                            true,
+                        )
+                    }
                 };
                 let usage_row = (
                     hermes_label,
@@ -872,7 +931,25 @@ impl AgentWorker {
                     estimated,
                     ms,
                 );
-                if answer.is_empty() {
+                if let Err(code) = drew {
+                    // an image delegation whose answer holds no usable picture: `picture_failed` when
+                    // Hermes handed something over that cannot be used (or said it drew one), `failed` when
+                    // nothing says a picture was made — no merging call either way (P6, P9, A10)
+                    (code, DelegationState::Failed, usage_row, None)
+                } else if let Ok(Some(found)) = drew {
+                    // one picture: the model is told a count (`pictures: 1`) and the words, never a byte
+                    // or an address; an answer of only a picture is still an answer
+                    picture = Some(found);
+                    answer.pictures = 1;
+                    let shown =
+                        exec::result_for_model(kind, &answer).render(momo_agent::tools::ASK_HERMES);
+                    (
+                        DelegateCode::Failed,
+                        DelegationState::Done,
+                        usage_row,
+                        Some(shown),
+                    )
+                } else if answer.is_empty() {
                     (
                         DelegateCode::Failed,
                         DelegationState::Failed,
@@ -892,24 +969,27 @@ impl AgentWorker {
             }
         };
         let (label, prompt_tokens, completion_tokens, estimated, ms) = usage_row;
-        let settle_for = |code: &'static str, to: DelegationState| HermesSettlement {
-            kind: kind.as_str(),
-            target,
-            code,
-            to: Some(to),
-            ms,
-            model: label.clone(),
-            prompt_tokens,
-            completion_tokens,
-            estimated,
-            display_name: display_name.clone(),
+        let settle_for = |code: &'static str, to: DelegationState, picture_bytes: Option<i64>| {
+            HermesSettlement {
+                kind: kind.as_str(),
+                target,
+                code,
+                to: Some(to),
+                ms,
+                model: label.clone(),
+                prompt_tokens,
+                completion_tokens,
+                estimated,
+                display_name: display_name.clone(),
+                picture_bytes,
+            }
         };
 
         // Hermes answered nothing usable: the fixed `failed` sentence, no merging call.
         let Some(shown) = merge_input else {
             if let Some(hermes) = trace.hermes.as_mut() {
                 hermes.results.push(code.as_str());
-                hermes.settle = Some(settle_for(code.as_str(), to));
+                hermes.settle = Some(settle_for(code.as_str(), to, None));
             }
             trace.latency_ms = millis(started);
             return self
@@ -959,47 +1039,27 @@ impl AgentWorker {
             )
             .await;
         trace.latency_ms = millis(started);
-        match merged {
-            Merged::Text(text) => {
-                if let Some(hermes) = trace.hermes.as_mut() {
-                    hermes.results.push(team_ai_hermes::AUDIT_CODE_OK);
-                    hermes.settle = Some(settle_for(
-                        team_ai_hermes::AUDIT_CODE_OK,
-                        DelegationState::Done,
-                    ));
-                }
-                // P8: the chip. A key only the server writes (`DELEGATED_PROPS_KEY` is stripped from every
-                // person's and webhook's props).
-                let props = json!({
-                    momo_agent::team_ai_task::DELEGATED_PROPS_KEY: [
-                        {"kind": kind.as_str(), "agent_member_id": target}
-                    ]
-                });
-                let text: String = text.chars().take(team_ai::ANSWER_CHARS_MAX).collect();
-                self.team_ai_finish(
-                    job,
-                    payload,
-                    run_id,
-                    Some(text),
-                    props,
-                    spend,
-                    &model,
-                    Ending::Answered,
-                    Some(trace),
-                )
-                .await
+        // What the person is told. A write-up that failed (a tool call, two empty answers) loses nothing
+        // when the picture is in hand: the picture goes up with the fixed sentence (P16-D ⑪). A write-up
+        // that failed on a search is the `failed` sentence, as before.
+        let body: Option<String> = match merged {
+            Merged::Text(text) => Some(text.chars().take(team_ai::ANSWER_CHARS_MAX).collect()),
+            Merged::Failed if picture.is_some() => Some(exec::PICTURE_MADE_SENTENCE.to_string()),
+            Merged::Failed => None,
+        };
+        let Some(body) = body else {
+            // Hermes answered but the helper could not write it up: the delegation counts as failed for the
+            // person (a fixed sentence — Hermes's words are never posted as they are).
+            if let Some(hermes) = trace.hermes.as_mut() {
+                hermes.results.push(DelegateCode::Failed.as_str());
+                hermes.settle = Some(settle_for(
+                    DelegateCode::Failed.as_str(),
+                    DelegationState::Failed,
+                    None,
+                ));
             }
-            Merged::Failed => {
-                // Hermes answered but the helper could not write it up: the delegation counts as failed
-                // for the person (a fixed sentence — Hermes's words are never posted as they are).
-                if let Some(hermes) = trace.hermes.as_mut() {
-                    hermes.results.push(DelegateCode::Failed.as_str());
-                    hermes.settle = Some(settle_for(
-                        DelegateCode::Failed.as_str(),
-                        DelegationState::Failed,
-                    ));
-                }
-                self.team_ai_finish(
+            return self
+                .team_ai_finish(
                     job,
                     payload,
                     run_id,
@@ -1010,9 +1070,104 @@ impl AgentWorker {
                     Ending::Closed(closed_code(DelegateCode::Failed)),
                     Some(trace),
                 )
+                .await;
+        };
+
+        // #5372 (P14-S4): the picture goes up **now** — after the merging call, right before the finishing
+        // transaction (ADR-0151 증보 8 L3: a stop that lands while the helper writes up finds no row yet, and
+        // the row write's own check refuses a later one), while the run is still `running` (S2's
+        // measurement). A stop is read first: the person who stopped it gets no attachment. One write, no
+        // retry: a failed one is `picture_failed` (a second token is a second picture).
+        let mut picture_bytes: Option<i64> = None;
+        if let Some(found) = picture.take() {
+            if self
+                .team_ai_task_stopped(workspace_id, run_id)
                 .await
+                .unwrap_or(false)
+            {
+                return self
+                    .team_ai_finish(
+                        job,
+                        payload,
+                        run_id,
+                        None,
+                        json!({}),
+                        spend,
+                        &model,
+                        Ending::Closed(store::END_CANCELLED),
+                        Some(trace),
+                    )
+                    .await;
+            }
+            let written = match writer.as_ref() {
+                Some(writer) => {
+                    writer
+                        .write(&self.pool, workspace_id, run_id, agent, found.into_bytes())
+                        .await
+                }
+                // unreachable by the gate above (an image step without a writer ended `unavailable`)
+                None => Err(PictureRefusal::NoToken),
+            };
+            match written {
+                Ok(written) => picture_bytes = Some(written.size_bytes),
+                Err(refusal) => {
+                    // closed words only: the refusal holds no token, no address, no message of the api
+                    tracing::warn!(
+                        %run_id,
+                        cause = ?refusal,
+                        "team ai delegation: the picture could not be posted"
+                    );
+                    if let Some(hermes) = trace.hermes.as_mut() {
+                        hermes.results.push(DelegateCode::PictureFailed.as_str());
+                        hermes.settle = Some(settle_for(
+                            DelegateCode::PictureFailed.as_str(),
+                            DelegationState::Failed,
+                            None,
+                        ));
+                    }
+                    return self
+                        .team_ai_finish(
+                            job,
+                            payload,
+                            run_id,
+                            Some(exec::fixed_sentence(DelegateCode::PictureFailed).to_string()),
+                            json!({}),
+                            spend,
+                            &model,
+                            Ending::Closed(closed_code(DelegateCode::PictureFailed)),
+                            Some(trace),
+                        )
+                        .await;
+                }
             }
         }
+        if let Some(hermes) = trace.hermes.as_mut() {
+            hermes.results.push(team_ai_hermes::AUDIT_CODE_OK);
+            hermes.settle = Some(settle_for(
+                team_ai_hermes::AUDIT_CODE_OK,
+                DelegationState::Done,
+                picture_bytes,
+            ));
+        }
+        // P8: the chip. A key only the server writes (`DELEGATED_PROPS_KEY` is stripped from every
+        // person's and webhook's props).
+        let props = json!({
+            momo_agent::team_ai_task::DELEGATED_PROPS_KEY: [
+                {"kind": kind.as_str(), "agent_member_id": target}
+            ]
+        });
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(body),
+            props,
+            spend,
+            &model,
+            Ending::Answered,
+            Some(trace),
+        )
+        .await
     }
 
     /// G3 (+G5) right before the commit: the one Hermes this requester's delegation goes to, and whether
@@ -1211,11 +1366,11 @@ impl AgentWorker {
                 // names only: the error's own words may echo Hermes's body
                 tracing::warn!(
                     run_target = %target,
-                    code = reply_code(&error).as_str(),
+                    code = reply_code(&error, kind).as_str(),
                     "team ai delegation: the request to Hermes failed"
                 );
                 HermesReply::Failed {
-                    code: reply_code(&error),
+                    code: reply_code(&error, kind),
                     ms,
                     label,
                 }
@@ -1356,6 +1511,7 @@ impl AgentWorker {
                     completion_tokens: 0,
                     estimated: true,
                     display_name: String::new(),
+                    picture_bytes: None,
                 }),
             });
         }
@@ -1434,6 +1590,7 @@ impl AgentWorker {
                 completion_tokens: 0,
                 estimated: true,
                 display_name: String::new(),
+                picture_bytes: None,
             }),
         });
         self.team_ai_finish(
@@ -1478,13 +1635,19 @@ mod tests {
     }
 
     /// The worst time of the call and the merging on the default deadlines: the search 60 s, the picture
-    /// 120 s, two merging attempts of 20 s, a 30 s slack.
+    /// 120 s, two merging attempts of 20 s, a 30 s slack — and, for the picture only, the upload's own 40 s
+    /// (S4, #5372: `WRITE_DEADLINE`; S3's 「약 200초」 closed at 230).
     const SEARCH_WORST: i64 = 130;
-    const IMAGE_WORST: i64 = 190;
+    const IMAGE_WORST: i64 = 190 + 40;
 
     /// A job on the default 300 s lease keeps the whole worst time: nothing about the default changes.
     #[test]
     fn a_job_on_the_default_lease_keeps_the_whole_worst_time() {
+        // the picture's extra is exactly the upload's deadline, not a number of its own
+        assert_eq!(
+            IMAGE_WORST - SEARCH_WORST - 60,
+            crate::agent_picture::WRITE_DEADLINE.as_secs() as i64
+        );
         let now = Utc::now();
         let config = config_with_lease(300);
         let job = job_with_lease_left(now, 300);

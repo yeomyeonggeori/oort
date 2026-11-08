@@ -16,6 +16,8 @@ name: 5451-media-taps
 #   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… -e CHANNEL_ID=<채널 id> clients/mobile/maestro/5451-media-taps.yaml
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - extendedWaitUntil:
     visible:

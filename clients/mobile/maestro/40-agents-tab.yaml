@@ -25,6 +25,8 @@ name: 40-agents-tab
 # the desktop or a REST call from the flow, and is left to a follow-up.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 # Detour through #general before touching the tab bar, and it is not wasted

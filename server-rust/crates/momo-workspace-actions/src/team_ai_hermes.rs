@@ -43,8 +43,9 @@
 //! ## What is closed by default in production (사용자 영향 0)
 //!
 //! The operator's per-workspace ceiling (`TEAM_AI_HERMES_DAILY_CAP`) is **unset = closed**; the kind
-//! declarations are unset = no kind; the image path is a constant that is `false` until S4. A deployment of
-//! this slice therefore opens nothing by itself.
+//! declarations are unset = no kind; the image kind needs the operator's `…_IMAGE_TOOL` declaration on top of the
+//! code constant S4 turned on ([`ATTACHMENT_WRITE_PATH_READY`]). A deployment therefore opens nothing by
+//! itself: with no ceiling the door is shut before any kind is looked at.
 
 use momo_agent::connector_trial::{
     ConnectorTrialAttest, ENV_CONNECTORS_LOCKED, ENV_CONNECTOR_APPS,
@@ -65,11 +66,16 @@ pub const ENV_IMAGE_TOOL: &str = "OORT_COHOSTED_AGENT_IMAGE_TOOL";
 /// `OORT_COHOSTED_AGENT_SEARCH_TOOL`: the same for a web search. Worker-only; unset = not offered.
 pub const ENV_SEARCH_TOOL: &str = "OORT_COHOSTED_AGENT_SEARCH_TOOL";
 
-/// **S4 changes this**, and nothing else may (ADR-0201 증보 v4 P6, owner Q1 가): the code can put a
-/// picture Hermes drew into an attachment. Until it is `true` the `image` kind is never offered —
-/// whatever the operator declared and whether or not `OORT_API_INTERNAL_ORIGIN` is set (A10: the origin
-/// is a variable an operator may set for other reasons, and is never this constant's evidence).
-pub const ATTACHMENT_WRITE_PATH_READY: bool = false;
+/// **S4 (#5372) changed this to `true`**, and nothing else may change it (ADR-0201 증보 v4 P6, owner Q1
+/// 가): the code can put a picture Hermes drew into an attachment — the worker's `PictureWriter` is
+/// called by the delegation step and by nothing else (`agent_picture_static_guards.rs` holds that). With
+/// it `true` the `image` kind is offered when the operator **also** declared it (`…_IMAGE_TOOL`, G4) —
+/// those two and nothing else (A10): never because `OORT_API_INTERNAL_ORIGIN` is set (an origin is a
+/// variable an operator may set for other reasons, and is never this constant's evidence). A build in which
+/// it is `false` offers no `image` whatever the operator declared. A missing origin does not close the
+/// door; it closes the **step** before Hermes is called (a picture nobody can post is not worth a
+/// subscription call — v4.3).
+pub const ATTACHMENT_WRITE_PATH_READY: bool = true;
 
 /// `audit_log.action` of one delegation (P11): run id, kind, the closed result code, ms, picture bytes,
 /// the target agent's id — and **never** the request sentence, the result, a picture or a `MEDIA` line
@@ -943,9 +949,10 @@ mod tests {
     }
 
     #[test]
-    fn the_baseline_door_is_open_for_the_search_kind_and_the_image_kind_waits_for_s4() {
+    fn the_image_kind_needs_the_operators_declaration_and_the_code_constant_and_nothing_else() {
+        // the constant is a parameter of the door (`image_path_ready`): without it the declared `image` is not
+        // offered, with it (and the declaration) it is — P6, A10
         assert_eq!(open_facts().judge(false), search_only());
-        // `image` needs BOTH the operator's declaration and the code constant (P6, A10)
         let mut ready = open_facts();
         ready.image_path_ready = true;
         assert_eq!(
@@ -954,10 +961,15 @@ mod tests {
                 kinds: vec![HermesKind::Image, HermesKind::WebSearch]
             }
         );
-        // …and the constant ships `false`
-        // The pin S4's PR flips in the same commit as this line; `black_box` keeps the compiler from
-        // folding the constant, so the failure is a test failure naming this line, not a build error.
-        assert!(!std::hint::black_box(ATTACHMENT_WRITE_PATH_READY));
+        // …and the declaration alone is not enough either: the constant on, the operator silent about
+        // `image` → no image kind (the other half of "both")
+        let mut undeclared = ready.clone();
+        undeclared.declarations.image_tool = false;
+        assert_eq!(undeclared.judge(false), search_only());
+        // S4 (#5372) turned the constant on: this is the line that turns red if it is turned off again, and
+        // the static guard of the worker holds that nothing but the delegation step reads it. `black_box`
+        // keeps the compiler from folding the constant, so a failure is a test failure naming this line.
+        assert!(std::hint::black_box(ATTACHMENT_WRITE_PATH_READY));
         assert_eq!(ASK_HERMES_KINDS, HermesKind::ALL.map(HermesKind::as_str));
         assert_eq!(ASK_HERMES, "ask_hermes");
     }

@@ -12,6 +12,8 @@ name: 5478-expression-suggest
 # `maestro/5452-expression-panel.yaml` 머리말과 같다. 하드웨어 키보드는 꺼져 있어야 한다(`hwkb <UDID> off`).
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 # 시스템 언어가 영어인 시뮬레이터에서는 로그인 직후 「Save Password?」 가 뜬다(`dismiss-system-alerts` 는 한국어 단추만 안다) - 있으면 닫는다.
 - runFlow:
     when:

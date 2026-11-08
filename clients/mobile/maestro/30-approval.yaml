@@ -30,6 +30,8 @@ name: 30-approval
 # 실기기 파이널 체크 item rather than letting a green table imply it was covered.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 - tapOn:
