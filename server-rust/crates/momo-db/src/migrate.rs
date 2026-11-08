@@ -792,12 +792,50 @@ mod tests {
     /// theirs was in use. Tenant ENABLE + FORCE + `ws_isolation`, a composite FK into `member (workspace_id,
     /// id)` with CASCADE, no trigger, no outbox. `momo_app` writes it (SELECT, INSERT, UPDATE) and
     /// `momo_notifier` reads it (SELECT only, one line in `bootstrap_runtime_roles.sql`).
+    ///
+    /// 175 is #5371's `attachment_write_token` (ADR-0151 증보 8): the hash of a single-use, 60-second
+    /// address through which the agent-worker writes ONE picture into an in-flight run's conversation
+    /// as that run's agent. No requester or channel column (both are derived from the run when the
+    /// token is spent), `UNIQUE (workspace, run, slot)`, a guard trigger (one spend, one attachment
+    /// record), tenant ENABLE + FORCE + `ws_isolation`, and the minimum grants
+    /// (`attachment-write-token-lockdown`, the same text in the migration and both role bootstraps).
+    ///
+    /// 176 is #5459's 「이모티콘 세트 보관」 (ADR-0218 증보 6 §12 L10, S1a): the four tables
+    /// `expression_set` / `_slot` / `_image` / `_notice` (tenant ENABLE + FORCE + `ws_isolation`,
+    /// composite FKs including `(workspace, run, agent, channel)` into `agent_run`), the per-table
+    /// one-way triggers, the partial unique index that keeps one undecided set per agent, the
+    /// widened `expression_draft.candidate_index` CHECK (0..=39), and the `expression-set-lockdown`
+    /// block (the same text in the migration and both role bootstraps; the BYPASSRLS `momo_worker`
+    /// is the writer, so the block, not RLS, is the last door).
+    ///
+    /// 177 is #5370's 「도우미가 팀 Hermes에 일을 맡기는 걸음」 (ADR-0201 증보 v4 P4·P7·I6, P14-S2): five
+    /// delegation columns on `team_ai_task` (the at-most-once marker `pending → called → done|failed`, its
+    /// time, the Hermes member and the one request sentence), `team_ai_task_ended_ck` re-created so an ended
+    /// row cannot hold the sentence, and `momo_app` made unable to SELECT the sentence's column
+    /// (column-level grants in the same `team-ai-task-lockdown` block, the same text in the migration and
+    /// both role bootstraps). No new table, so no new RLS policy.
+    /// 178 is #5469's 「사진·GIF 가로세로 요약」 (ADR-0151 증보 9): `attachment_media.duration_ms`
+    /// becomes nullable (a row **without** a length is a still picture's size, a row with one is a
+    /// video's), the length range check says so (`duration_ms IS NULL OR BETWEEN …`), and
+    /// `attachment_media_still_ck` keeps a poster off a row with no length. No new column, table or
+    /// grant, so no new RLS policy and the `attachment-media-lockdown` block (the same text in
+    /// three files) is untouched. 177 is #5370's (`team_ai_task_delegation`, above); the two landed in that order
+    /// so the list is contiguous again.
+    ///
+    /// 179 is #5530's 「그림 하루 상한을 워커가 줄일 수 없는 원본에서 세기」 (ADR-0151 증보 8 보충, 구현 보안 검수
+    /// M-1 (b)): `agent_picture_mark`, one append-only row per picture the api wrote for an agent (workspace,
+    /// attachment, run, agent, time) — **no foreign key in either direction** (a cascade runs as the table's
+    /// owner), tenant ENABLE + FORCE + `ws_isolation`, a trigger that refuses every UPDATE and the delete of
+    /// any row inside the 24-hour window the api counts, and the minimum grants (`momo_app` SELECT, INSERT,
+    /// DELETE; nobody else holds anything, `agent-picture-mark-lockdown`). The same migration re-issues
+    /// 175's `attachment-write-token-lockdown` block (`momo_worker` loses DELETE, `momo_app` gains it for the
+    /// api-side sweep): the same text in this migration and both role bootstraps.
     #[test]
-    fn discovers_contiguous_migrations_001_to_174() {
+    fn discovers_contiguous_migrations_001_to_179() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=174).collect();
+        let expected: Vec<i64> = (1..=179).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -805,7 +843,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=174 under {}",
+            "expected contiguous 001..=179 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -813,7 +851,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("174_member_activity"));
+            .starts_with("179_agent_picture_mark"));
     }
 
     #[test]

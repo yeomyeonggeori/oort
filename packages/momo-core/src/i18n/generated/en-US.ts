@@ -3214,6 +3214,12 @@ export const catalog: MessageCatalog = {
       "value": "Favorites"
     }
   ],
+  "expressions.picker.sectionFrecent": [
+    {
+      "type": 0,
+      "value": "Frequent & recent"
+    }
+  ],
   "expressions.picker.sectionOther": [
     {
       "type": 0,
@@ -3238,6 +3244,248 @@ export const catalog: MessageCatalog = {
       "value": "Team library"
     }
   ],
+  "expressions.plan.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "expressions.plan.closed": [
+    {
+      "type": 0,
+      "value": "This plan is closed."
+    }
+  ],
+  "expressions.plan.concept": [
+    {
+      "type": 0,
+      "value": "Concept"
+    }
+  ],
+  "expressions.plan.confirm": [
+    {
+      "type": 0,
+      "value": "Make it"
+    }
+  ],
+  "expressions.plan.confirmed": [
+    {
+      "type": 0,
+      "value": "Started making the pictures."
+    }
+  ],
+  "expressions.plan.declare": [
+    {
+      "type": 0,
+      "value": "Do not send pictures that show a person's face. These pictures show none."
+    }
+  ],
+  "expressions.plan.editBack": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "expressions.plan.editInclude": [
+    {
+      "type": 0,
+      "value": "Include "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.plan.editName": [
+    {
+      "type": 0,
+      "value": "Display name of picture "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    }
+  ],
+  "expressions.plan.editRemoveReference": [
+    {
+      "type": 0,
+      "value": "Remove reference picture "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.editScene": [
+    {
+      "type": 0,
+      "value": "Scene of picture "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    }
+  ],
+  "expressions.plan.editSubmit": [
+    {
+      "type": 0,
+      "value": "Plan again with these changes"
+    }
+  ],
+  "expressions.plan.gif": [
+    {
+      "type": 0,
+      "value": "Base: "
+    },
+    {
+      "type": 1,
+      "value": "base"
+    },
+    {
+      "type": 0,
+      "value": ", motion: "
+    },
+    {
+      "type": 1,
+      "value": "motion"
+    }
+  ],
+  "expressions.plan.heading": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " plan"
+    }
+  ],
+  "expressions.plan.kept": [
+    {
+      "type": 0,
+      "value": "Hermes may keep what it receives and makes in its own records."
+    }
+  ],
+  "expressions.plan.motionBounce": [
+    {
+      "type": 0,
+      "value": "Bounce"
+    }
+  ],
+  "expressions.plan.motionPulse": [
+    {
+      "type": 0,
+      "value": "Pulse"
+    }
+  ],
+  "expressions.plan.motionSparkle": [
+    {
+      "type": 0,
+      "value": "Sparkle"
+    }
+  ],
+  "expressions.plan.motionWobble": [
+    {
+      "type": 0,
+      "value": "Wobble"
+    }
+  ],
+  "expressions.plan.notice": [
+    {
+      "type": 0,
+      "value": "Attached pictures are sent to Hermes's picture model."
+    }
+  ],
+  "expressions.plan.pictures": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture to make"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures to make"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.plan.referenceAlt": [
+    {
+      "type": 0,
+      "value": "Reference picture "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "expressions.plan.references": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference picture to send"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference pictures to send"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.plan.revise": [
+    {
+      "type": 0,
+      "value": "Edit scenes"
+    }
+  ],
+  "expressions.plan.scenes": [
+    {
+      "type": 0,
+      "value": "Scenes"
+    }
+  ],
   "expressions.preview.cancel": [
     {
       "type": 0,
@@ -3258,6 +3506,366 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Emoticon to send"
+    }
+  ],
+  "expressions.set.agentText": [
+    {
+      "type": 0,
+      "value": "Written by the agent: "
+    },
+    {
+      "type": 1,
+      "value": "prompt"
+    }
+  ],
+  "expressions.set.badgeGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.set.cellGray": [
+    {
+      "type": 0,
+      "value": "Not selectable, "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "displayName"
+    }
+  ],
+  "expressions.set.cellReady": [
+    {
+      "type": 1,
+      "value": "displayName"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.set.decline": [
+    {
+      "type": 0,
+      "value": "No thanks"
+    }
+  ],
+  "expressions.set.errorGeneric": [
+    {
+      "type": 0,
+      "value": "The decision did not go through. Check your access and connection, then try again."
+    }
+  ],
+  "expressions.set.errorQuota": [
+    {
+      "type": 0,
+      "value": "The library is full, so nothing was saved."
+    }
+  ],
+  "expressions.set.errorStale": [
+    {
+      "type": 0,
+      "value": "The pictures changed. Reload the card and choose again."
+    }
+  ],
+  "expressions.set.errorTaken": [
+    {
+      "type": 0,
+      "value": "Every name you picked is already taken. Pick other pictures."
+    }
+  ],
+  "expressions.set.faceOnly": [
+    {
+      "type": 0,
+      "value": "Only the person shown can approve this."
+    }
+  ],
+  "expressions.set.grayBaseMissing": [
+    {
+      "type": 0,
+      "value": "There is no base picture to add motion to."
+    }
+  ],
+  "expressions.set.grayFailed": [
+    {
+      "type": 0,
+      "value": "This scene could not be made."
+    }
+  ],
+  "expressions.set.grayNotMade": [
+    {
+      "type": 0,
+      "value": "There was not enough time to make this scene."
+    }
+  ],
+  "expressions.set.grayRefused": [
+    {
+      "type": 0,
+      "value": "The picture model said it cannot make this scene."
+    }
+  ],
+  "expressions.set.gridLabel": [
+    {
+      "type": 0,
+      "value": "Pictures in "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "expressions.set.offline": [
+    {
+      "type": 0,
+      "value": "Try again when you are connected."
+    }
+  ],
+  "expressions.set.referenceCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reference pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.register": [
+    {
+      "type": 0,
+      "value": "Save "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.registering": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "expressions.set.resultSaved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " saved to the team library"
+    }
+  ],
+  "expressions.set.resultSavedSkipped": [
+    {
+      "type": 2,
+      "value": "saved",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " saved, "
+    },
+    {
+      "type": 2,
+      "value": "skipped",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " skipped"
+    }
+  ],
+  "expressions.set.rights": [
+    {
+      "type": 0,
+      "value": "Make sure you are allowed to keep these pictures. Only the ones you pick are saved."
+    }
+  ],
+  "expressions.set.selectAll": [
+    {
+      "type": 0,
+      "value": "Select all"
+    }
+  ],
+  "expressions.set.selectNone": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "expressions.set.settledDeclined": [
+    {
+      "type": 0,
+      "value": "Nothing was saved."
+    }
+  ],
+  "expressions.set.settledDone": [
+    {
+      "type": 0,
+      "value": "This request is already settled."
+    }
+  ],
+  "expressions.set.settledExpired": [
+    {
+      "type": 0,
+      "value": "This request expired before anyone approved it."
+    }
+  ],
+  "expressions.set.summaryGray": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scene not made"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scenes not made"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.summaryReady": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " picture"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pictures"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.set.unreadable": [
+    {
+      "type": 0,
+      "value": "Could not read this picture set. Ask the assistant to make it again."
     }
   ],
   "expressions.sheet.a11y": [
@@ -3454,6 +4062,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "expressions.suggest.settingHint": [
+    {
+      "type": 0,
+      "value": "Shows matching emoticons above the message box when you pause while typing."
+    }
+  ],
+  "expressions.suggest.settingLabel": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions"
+    }
+  ],
+  "inbox.approval.open": [
+    {
+      "type": 0,
+      "value": "Open"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -5638,6 +6264,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Chats no longer shake when you open them, and the new emoticon window lets you send an emoticon and your text in one go."
+    }
+  ],
+  "releaseNotes.v0145.expressionsLine1": [
+    {
+      "type": 0,
+      "value": "On the phone, the suggestion row now spans the full width of the composer, with its ✕ at the right end."
+    }
+  ],
+  "releaseNotes.v0145.expressionsLine2": [
+    {
+      "type": 0,
+      "value": "In the smallest desktop window, the emoticon window's tabs and search box now stay on screen."
+    }
+  ],
+  "releaseNotes.v0145.expressionsTopic": [
+    {
+      "type": 0,
+      "value": "Emoticons"
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentChanged": [
+    {
+      "type": 0,
+      "value": "The top section of the Emoticons tab is now “Frequent & recent”. Where it used to show only the stills you used last, it now shows up to 12 pictures you use often and recently, stills and GIFs together. How often and how recently you used each picture both count, so one use yesterday comes before ten uses a month ago. The order stays put while the window is open and is worked out again the next time you open it. The usage history stays on this device only, and the GIF tab's “Recent” is unchanged."
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentTitle": [
+    {
+      "type": 0,
+      "value": "The pictures you use most come first"
+    }
+  ],
+  "releaseNotes.v0145.frequentRecentTryIt": [
+    {
+      "type": 0,
+      "value": "Send a few emoticons and GIFs, then open the emoticon window again with the smiley button in the composer. The pictures you just used are gathered under “Frequent & recent” at the top of the Emoticons tab."
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsChanged": [
+    {
+      "type": 0,
+      "value": "When you fully close and reopen the app, or reload the web page, emoticon pictures you have already seen are not downloaded again; they are drawn from what is kept on your device. They are kept on this device only, separately for each workspace and member, and a picture is drawn from there only while it is still in the team's emoticon list. A picture that was hidden, deleted or reported is never drawn even if it is still stored, and it is erased as soon as the new list arrives. Signing out or an expired login erases them all, and pictures unused for 7 days are cleared too."
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsTitle": [
+    {
+      "type": 0,
+      "value": "Emoticons you have seen stay on your device"
+    }
+  ],
+  "releaseNotes.v0145.keptEmoticonsTryIt": [
+    {
+      "type": 0,
+      "value": "Open a channel with many emoticons, then fully close the app and open it again (on the web, reload the page). The pictures appear right away instead of loading again."
+    }
+  ],
+  "releaseNotes.v0145.noBlinkChanged": [
+    {
+      "type": 0,
+      "value": "When someone registers, edits, hides or deletes one emoticon, the emoticons on your screen no longer all disappear and come back. A hidden or deleted emoticon is taken down on its own right away, and after a registration or an edit the pictures you see stay as they are. Nothing is downloaded again either."
+    }
+  ],
+  "releaseNotes.v0145.noBlinkTitle": [
+    {
+      "type": 0,
+      "value": "Changing one emoticon no longer blanks the rest"
+    }
+  ],
+  "releaseNotes.v0145.noBlinkTryIt": [
+    {
+      "type": 0,
+      "value": "Keep a chat with many emoticons open, and hide one of your own emoticons on another device. Only that picture is taken down and the rest stay put."
+    }
+  ],
+  "releaseNotes.v0145.phoneLine1": [
+    {
+      "type": 0,
+      "value": "VoiceOver no longer reaches the channel behind an open thread, or the home list behind an open chat."
+    }
+  ],
+  "releaseNotes.v0145.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, press and hold a message and tap the + at the end of the quick reactions row: the picker now has the same three tabs as the web, Emoticons, Emoji and GIF. It still opens on Emoji, and picking an emoticon or a GIF adds it as one reaction without sending a big picture. A GIF used as a reaction now keeps playing on web, desktop and phone, while a GIF inside a message still stops after four plays. If Reduce Motion is on, reaction GIFs stay on their first frame."
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsTitle": [
+    {
+      "type": 0,
+      "value": "GIF reactions keep moving"
+    }
+  ],
+  "releaseNotes.v0145.reactionGifsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, press and hold a message, tap the + at the end of the quick reactions row and pick a picture in the GIF tab. The GIF reaction keeps playing."
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, when you swipe a message to reply or write in a thread's reply box, a picked emoticon or GIF no longer goes into the text as :name:. It waits as a preview above the composer, and one press of send posts the picture and then your text to the same thread. The suggestion row that appears when you pause while typing now shows up in both places too. This fixes the :name: text the last update said was still there. Emoji still go straight into your text."
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewTitle": [
+    {
+      "type": 0,
+      "value": "Previews in swipe replies and threads"
+    }
+  ],
+  "releaseNotes.v0145.replyPreviewTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, swipe a message to reply and pick an emoticon with the smiley button. Check the preview above the composer, write some text and press send: the picture and your text are added to that thread one after the other."
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosChanged": [
+    {
+      "type": 0,
+      "value": "When you send a photo or GIF, the app now sends its size along with it, so the receiving screen reserves the right space before the picture arrives. A photo you see for the first time no longer grows and pushes the rows when you open a chat. This is the fix the last update said was planned for the next version. Photos sent before this update, and photos sent from an app that has not been updated yet, behave as before."
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosTitle": [
+    {
+      "type": 0,
+      "value": "New photos settle in place too"
+    }
+  ],
+  "releaseNotes.v0145.steadyPhotosTryIt": [
+    {
+      "type": 0,
+      "value": "Send a photo to a chat from an updated app, then open that chat on another device. The space for the photo is there from the start, so the rows stay still."
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchChanged": [
+    {
+      "type": 0,
+      "value": "The suggestion row that appears above the composer when you pause while typing can now be turned off in Settings. It is the “Emoticon suggestions” switch, the last row of Settings › Appearance › Conversation display on web and desktop and of Settings › Display on the phone. While it is off no suggestion row appears, however well a word matches, and turning it back on brings the row back shortly without reopening the app. It is on to begin with, and your choice is saved on this device only. The ✕ at the end of the row still turns off only that word in that chat."
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchTitle": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions can be turned off"
+    }
+  ],
+  "releaseNotes.v0145.suggestionSwitchTryIt": [
+    {
+      "type": 0,
+      "value": "Turn off “Emoticon suggestions” in Settings, then type a word that matches an emoticon tag, such as “ㅋㅋ”, and pause. No suggestion row appears, and it comes back when you turn the switch on again."
+    }
+  ],
+  "releaseNotes.v0145.summary": [
+    {
+      "type": 0,
+      "value": "Emoticons you have already seen are not downloaded again after a restart, the pictures you use most gather at the top of the Emoticons tab, and on the phone you can now react with emoticons and GIFs too."
     }
   ],
   "releaseNotes.version.current": [

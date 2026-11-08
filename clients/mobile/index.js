@@ -32,8 +32,17 @@ import {AppRegistry} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
 import {measureMode} from './measure/root';
+import {silenceLogBoxForAutomation} from './measure/automation';
 import {sessionGateLaunch} from './gate/root';
 import {installForegroundNotificationHandler} from './src/push/foregroundPresentation';
+
+/**
+ * 시험 도구가 켠 디버그 실행이면 LogBox 알림을 끈다 (#5531). 실행 인자(`-momoAutomation`·`-momoMeasure`·
+ * `-momoSessionGate`)가 없으면, 그리고 출시 빌드면 아무것도 하지 않는다(읽는 곳·이유는 `measure/automation.ts`).
+ * 띠(「Open debugger to view warnings.」)가 서지 않으면 Maestro 탭이 독립 실행 DevTools 앱을 띄울 일이 없다.
+ * 모듈 평가 시점, 루트를 등록하기 전에 부른다 — 첫 경고보다 앞이다.
+ */
+silenceLogBoxForAutomation();
 
 /**
  * 앱이 앞에 떠 있는 동안 온 푸시를 어떻게 보일지 (#4310). 처리기가 없으면 iOS 는 그 푸시를 배너도

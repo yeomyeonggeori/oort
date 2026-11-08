@@ -163,10 +163,21 @@ npm run check:maestro-syntax  # `maestro check-syntax` over every flow file, no 
 
 **Metro started by a script or an agent** runs with `CHROME_PATH=/usr/bin/false`
 (the lane, `measure.sh` and `gate/run.mjs` already do; by hand:
-`CHROME_PATH=/usr/bin/false npm start`). Otherwise a tap on the dev build's
-"Open debugger" toast makes Metro launch the real Google Chrome from that shell,
-where it aborts at once and macOS shows "Google Chrome quit unexpectedly" (#5083).
-Run `npm start` without it only when you want the debugger window.
+`CHROME_PATH=/usr/bin/false npm start`). That variable blocks only Metro's Chrome
+FALLBACK: when the debugger cannot open as the standalone DevTools app, Metro launches
+the real Google Chrome from that shell, where it aborts at once and macOS shows
+"Google Chrome quit unexpectedly" (#5083). React Native 0.86 normally opens the
+**standalone React Native DevTools app** (`@react-native/debugger-shell`) instead, and
+`react-native start` has no switch to turn that off — so a tap on the dev build's
+LogBox strip ("Open debugger to view warnings.") put a DevTools window on the machine's
+screen that outlived the run (#5531). A phone run now keeps that from happening twice
+over: the launch argument `-momoAutomation YES` (the Maestro flows pass it through
+`launchApp.arguments`; `-momoMeasure` and `-momoSessionGate` count too) makes the app
+turn the LogBox notifications off at start (`measure/automation.ts`), so there is no
+strip to tap; and `lane-phone.sh` and `measure.sh` close the DevTools window of their
+own Metro port when they end, by PID (`scripts/devtools-shell.sh`). A run started by
+hand without the argument is unchanged. Run `npm start` without CHROME_PATH only when
+you want the debugger window.
 
 ### Writing a test
 
@@ -383,9 +394,11 @@ there would otherwise boot a stack with empty mounts. The staging folder is remo
 with the stack, unless `--keep`.
 
 **Metro and the watchdog.** The lane starts Metro on 8081 — the app's own default,
-since `launchApp.arguments` cannot take a `${...}` — with `CHROME_PATH=/usr/bin/false`,
-so a tap on the dev build's "Open debugger" toast cannot launch the real Chrome (#5083).
-It reuses a Metro that already serves THIS checkout and refuses one that serves
+since `launchApp.arguments` cannot take a `${...}` — with `CHROME_PATH=/usr/bin/false`
+(it blocks Metro's Chrome fallback, #5083). Every flow launches the app with
+`momoAutomation: "YES"`, so the Debug LogBox strip — whose tap opens the standalone
+DevTools app — is never drawn, and when the lane ends it closes any DevTools window its
+own run opened (#5531). It reuses a Metro that already serves THIS checkout and refuses one that serves
 another (it asks Metro for its project root): a Metro from another tree would hand
 the app that tree's JavaScript and the table would report on code it never built.
 Each flow also runs under a watchdog (`LANE_PHONE_FLOW_TIMEOUT`, 1800 s), because

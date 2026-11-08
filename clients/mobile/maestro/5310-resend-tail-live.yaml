@@ -26,6 +26,8 @@ name: 5310-resend-tail-live
 # 마지막 행이 끝에 온전한지는 위 4) 가 잰다. 4) 가 잘린 양 > 0 을 내면 **한 번 쓸어 보고 다시 잰다**: 움직여서 0 이 되면 오프셋이 모자랐던 것이고, 안 움직이면(5b 의 D7 이 그랬다) 행 프레임이 그린 모양보다 작은 쪽이다 — 그때는 계층(hier.json)과 사진을 남겨 올린다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - tapOn:
     id: "sidebar-row-channel:${CHANNEL_ID}"

@@ -31,6 +31,7 @@ export const WORD = spell({
   center: 0,
   hidden: 0,
   absolute: 0,
+  auto: 0,
   // 키보드 이벤트 이름
   keyboardDidShow: 0,
   keyboardWillShow: 0,

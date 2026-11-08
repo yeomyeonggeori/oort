@@ -21,6 +21,8 @@ name: 4891-team-expression-add
 # 그 스택에 활성 에이전트가 있어야 서고, 없으면 「아직 에이전트가 없어요」 안내가 선다(그것도 이 흐름이 지나는 길이다).
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 - tapOn:

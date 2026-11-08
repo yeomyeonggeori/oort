@@ -3,7 +3,7 @@ import { Clock, Star, type LucideIcon } from "lucide-react";
 import {
   CONTEXT_MENU_EVENT,
   EXPRESSION_GRID_COLS,
-  EXPRESSION_SECTION_NAME_KEY,
+  expressionSectionNameKey,
   isContextMenuSummonKey,
   moveGridPosition,
   RESULTS_SECTION,
@@ -87,7 +87,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
   const sizes = sections.map((section) => section.items.length);
   const here = clampPosition(active, sizes);
   const nameOf = (section: ExpressionSection) => {
-    const key = EXPRESSION_SECTION_NAME_KEY[section.kind];
+    const key = expressionSectionNameKey(section);
     return key === null ? (section.label ?? "") : formatMessage(key);
   };
   // 이름줄은 구역이 둘 이상일 때만 선다: 구역 하나를 「기타」로 부르면 구역을 나눈 것이 아니라 이름만 붙인 것이다.
@@ -183,7 +183,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
           </div>
         ))}
       </div>}
-      <div role="group" aria-label={formatMessage("expressions.picker.setStrip")} data-testid="expression-set-strip" className="flex items-center gap-1 border-t border-line pt-2">
+      <div role="group" aria-label={formatMessage("expressions.picker.setStrip")} data-testid="expression-set-strip" className="flex shrink-0 items-center gap-1 border-t border-line pt-2">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {jumps.map((section) => {
             const Icon = SECTION_ICON[section.kind];

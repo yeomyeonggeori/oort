@@ -147,6 +147,11 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         // ADR-0218 G3.6 (#4820 C1b): what the assembler built, held for an hour.
         "expression_assembly",
         "expression_assembly_image",
+        // ADR-0218 증보 6 §12 L10 (#5459 S1a): the staging of an emoticon set.
+        "expression_set",
+        "expression_set_slot",
+        "expression_set_image",
+        "expression_set_notice",
     ] {
         let row=sqlx::query("SELECT relrowsecurity,relforcerowsecurity,EXISTS(SELECT 1 FROM pg_policy WHERE polrelid=c.oid AND polname='ws_isolation') AS policy FROM pg_class c WHERE c.oid=$1::regclass").bind(t).fetch_one(&api).await.unwrap();
         assert!(
@@ -415,6 +420,10 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         "expression_report",
         "expression_assembly",
         "expression_assembly_image",
+        "expression_set",
+        "expression_set_slot",
+        "expression_set_image",
+        "expression_set_notice",
     ] {
         let sql = format!("SELECT count(*) FROM {table}");
         let count = e::transaction(&api, foreign, move |conn| {
@@ -443,7 +452,9 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         Err(Error::NotFound)
     ));
     let outbox: Value = sqlx::query_scalar(
-        "SELECT payload FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'version'=$2",
+        // The plain notice: a change now writes a detail notice (`expression.changed.detail`, §15) with the same
+        // `version` right before it, so the version alone no longer names one row.
+        "SELECT payload FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'version'=$2 AND payload->'data'->>'type'='expression.changed'",
     )
     .bind(owner.workspace)
     .bind(hidden["version"].as_str().unwrap())
@@ -1066,4 +1077,274 @@ async fn the_kind_column_defaults_to_sticker_is_closed_and_cannot_change_after_i
         .await
         .unwrap();
     assert_eq!(after, "sticker");
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// ADR-0218 §15 (#5491): every change writes a detail notice ahead of the plain `expression.changed`, in the same
+// transaction, and the plain notice is what it always was.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Every outbox row of the workspace's expression rail, oldest first: `(outbox.id, payload)`.
+async fn rail(su: &PgPool, ws: Uuid) -> Vec<(i64, Value)> {
+    sqlx::query_as::<_, (i64, Value)>(
+        "SELECT id, payload FROM outbox WHERE workspace_id=$1 AND kind='broadcast' AND payload->>'channel'=$2 ORDER BY id",
+    )
+    .bind(ws)
+    .bind(format!("expressions:ws{}", ws.to_string().to_uppercase()))
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+/// The two rows one change added since `seen`: asserts they are the detail first and the plain notice second,
+/// that the plain notice is byte-for-byte what it was before the detail existed, and returns the detail's `data`.
+fn pair_after(rows: &[(i64, Value)], seen: usize, ws: Uuid, version: &str) -> Value {
+    assert_eq!(
+        rows.len(),
+        seen + 2,
+        "one change = one detail + one plain notice: {rows:?}"
+    );
+    let (detail_id, detail) = &rows[seen];
+    let (plain_id, plain) = &rows[seen + 1];
+    assert!(detail_id < plain_id, "the detail is written first");
+    // v1 bytes unchanged: exactly these three fields, this key, nothing more.
+    assert_eq!(
+        plain["data"],
+        json!({"type":"expression.changed","workspaceId":ws,"version":version})
+    );
+    assert_eq!(
+        plain["idempotency_key"],
+        json!(format!("expression:{ws}:{version}"))
+    );
+    assert_eq!(plain["channel"], detail["channel"]);
+    // A key of its own: the same key would make Centrifugo's idempotency cache drop the second publish.
+    assert_eq!(
+        detail["idempotency_key"],
+        json!(format!("expression-detail:{ws}:{version}"))
+    );
+    assert_ne!(detail["idempotency_key"], plain["idempotency_key"]);
+    assert_eq!(detail["data"]["type"], "expression.changed.detail");
+    assert_eq!(detail["data"]["workspaceId"], json!(ws));
+    assert_eq!(detail["data"]["version"], version);
+    detail["data"].clone()
+}
+
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn every_change_writes_its_detail_ahead_of_the_plain_notice() {
+    let (su, api, owner, member, foreign) = setup().await;
+    let ws = owner.workspace;
+    let catalog_version = |su: &PgPool| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT version FROM expression_catalog WHERE workspace_id=$1",
+            )
+            .bind(ws)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+
+    // 1. Registration — `created`, the new id.
+    let first = register(&api, owner, "alpha", pixels(), None).await;
+    let first_id = expression_id(&first);
+    let rows = rail(&su, ws).await;
+    let version = first["version"].as_str().unwrap().to_string();
+    assert_eq!(version, catalog_version(&su).await.to_string());
+    let data = pair_after(&rows, 0, ws, &version);
+    assert_eq!(data["action"], "created");
+    assert_eq!(data["expressionIds"], json!([first_id]));
+    let mut seen = rows.len();
+
+    // 2. Editing the display name — `edited`, the id, and the picture's bytes are untouched.
+    let sha_before: Vec<String> = sqlx::query_scalar(
+        "SELECT sha256 FROM expression_image WHERE workspace_id=$1 AND expression_id=$2 ORDER BY variant",
+    )
+    .bind(ws)
+    .bind(first_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    let edited = e::mutate(
+        &api,
+        owner,
+        first_id,
+        Some(e::Patch {
+            display_name: Some("새 이름".into()),
+            tags: None,
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    let rows = rail(&su, ws).await;
+    let data = pair_after(&rows, seen, ws, edited["version"].as_str().unwrap());
+    assert_eq!(data["action"], "edited");
+    assert_eq!(data["expressionIds"], json!([first_id]));
+    let sha_after: Vec<String> = sqlx::query_scalar(
+        "SELECT sha256 FROM expression_image WHERE workspace_id=$1 AND expression_id=$2 ORDER BY variant",
+    )
+    .bind(ws)
+    .bind(first_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        sha_before, sha_after,
+        "an edit never changes a picture: `edited` takes nothing down"
+    );
+    seen = rows.len();
+
+    // 3. A report hides — `hidden`, the id of the picture that must leave every screen.
+    let second = register(&api, owner, "beta", pixels(), None).await;
+    let second_id = expression_id(&second);
+    let rows = rail(&su, ws).await;
+    let data = pair_after(&rows, seen, ws, second["version"].as_str().unwrap());
+    assert_eq!(data["action"], "created");
+    assert_eq!(data["expressionIds"], json!([second_id]));
+    seen = rows.len();
+    let hidden = e::mutate(
+        &api,
+        member,
+        second_id,
+        None,
+        Some(Report {
+            reason: "other".into(),
+            detail: Some("private report".into()),
+        }),
+    )
+    .await
+    .unwrap();
+    let rows = rail(&su, ws).await;
+    let data = pair_after(&rows, seen, ws, hidden["version"].as_str().unwrap());
+    assert_eq!(data["action"], "hidden");
+    assert_eq!(data["expressionIds"], json!([second_id]));
+    seen = rows.len();
+
+    // 4. A delete — `deleted`, the id.
+    let deleted = e::mutate(&api, owner, first_id, None, None).await.unwrap();
+    assert_eq!(deleted["expression"]["status"], "deleted");
+    let rows = rail(&su, ws).await;
+    let data = pair_after(&rows, seen, ws, deleted["version"].as_str().unwrap());
+    assert_eq!(data["action"], "deleted");
+    assert_eq!(data["expressionIds"], json!([first_id]));
+    seen = rows.len();
+
+    // 5. A policy change — `policy_changed`, no id (the add policy is not a picture).
+    e::set_policy(&api, owner, "admins".into()).await.unwrap();
+    let rows = rail(&su, ws).await;
+    let data = pair_after(&rows, seen, ws, &catalog_version(&su).await.to_string());
+    assert_eq!(data["action"], "policy_changed");
+    assert_eq!(data["expressionIds"], json!([]));
+    seen = rows.len();
+    // The same policy again changes nothing and writes nothing.
+    e::set_policy(&api, owner, "admins".into()).await.unwrap();
+    assert_eq!(rail(&su, ws).await.len(), seen);
+
+    // Versions climb by one per change and pair up one detail + one plain notice each.
+    let details: Vec<i64> = rows
+        .iter()
+        .filter(|(_, row)| row["data"]["type"] == "expression.changed.detail")
+        .map(|(_, row)| row["data"]["version"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let plains: Vec<i64> = rows
+        .iter()
+        .filter(|(_, row)| row["data"]["type"] == "expression.changed")
+        .map(|(_, row)| row["data"]["version"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(details, plains);
+    assert!(
+        details.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "{details:?}"
+    );
+
+    // No other tenant: nothing was written for the foreign workspace, and nothing here names it.
+    let foreign_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1")
+        .bind(foreign.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(foreign_rows, 0);
+    let all = rows
+        .iter()
+        .map(|(_, row)| row.to_string())
+        .collect::<String>();
+    assert!(!all.contains(&foreign.workspace.to_string()));
+    // The detail says ids and words only: no display name, no report text, no picture.
+    for (_, row) in rows
+        .iter()
+        .filter(|(_, row)| row["data"]["type"] == "expression.changed.detail")
+    {
+        let text = row.to_string();
+        for leak in [
+            "private report",
+            "alpha",
+            "beta",
+            "새 이름",
+            "축하",
+            "sha256",
+            "bytes",
+            "dataBase64",
+        ] {
+            assert!(!text.contains(leak), "the detail leaks {leak}: {text}");
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_detail_that_cannot_be_written_rolls_the_whole_change_back() {
+    // The detail is part of the change, not a side effect of it: if its row cannot be inserted the registration, its
+    // version bump, its audit row and the plain notice are all gone with it.
+    let (su, api, owner, _member, _foreign) = setup().await;
+    let ws = owner.workspace;
+    let draft = draft(&api, owner, "canary_one").await;
+    let version = |su: &PgPool| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COALESCE((SELECT version FROM expression_catalog WHERE workspace_id=$1), 0)")
+                .bind(ws)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let before = (version(&su).await, rail(&su, ws).await.len());
+    sqlx::query(&format!("CREATE OR REPLACE FUNCTION expression_test_detail_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.workspace_id='{ws}'::uuid AND NEW.payload->'data'->>'type'='expression.changed.detail' THEN RAISE EXCEPTION 'expression detail canary failure'; END IF; RETURN NEW; END $$"))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TRIGGER expression_test_detail_fail BEFORE INSERT ON outbox FOR EACH ROW EXECUTE FUNCTION expression_test_detail_fail()")
+        .execute(&su)
+        .await
+        .unwrap();
+    let failed = e::activate(&api, owner, choice(&draft)).await;
+    sqlx::query("DROP TRIGGER expression_test_detail_fail ON outbox")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION expression_test_detail_fail()")
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(failed.is_err());
+    assert_eq!(
+        (version(&su).await, rail(&su, ws).await.len()),
+        before,
+        "nothing of the change survived"
+    );
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression WHERE workspace_id=$1 AND name='canary_one'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+    // With the canary gone the same draft registers, and the pair is written.
+    let receipt = e::activate(&api, owner, choice(&draft)).await.unwrap();
+    let rows = rail(&su, ws).await;
+    pair_after(&rows, before.1, ws, receipt["version"].as_str().unwrap());
 }

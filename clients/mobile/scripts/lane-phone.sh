@@ -105,6 +105,11 @@ APP_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$APP_ROOT/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# Finding and closing the DevTools windows this run opened (#5531) is a file of its own
+# so measure.sh can share it. Nothing runs on source; see its header.
+# shellcheck source=scripts/devtools-shell.sh
+. "$APP_ROOT/scripts/devtools-shell.sh"
+
 PROJECT="${LANE_PHONE_PROJECT:-momo_maestro1}"
 API_PORT="${LANE_PHONE_API_PORT:-24330}"
 CENT_PORT="${LANE_PHONE_CENT_PORT:-24331}"
@@ -446,6 +451,12 @@ unstage_mounts() {
 }
 
 METRO_PID=""
+# The DevTools windows already open for this Metro's port when the flows were about to
+# start, and whether that snapshot was taken at all (#5531). Until it is, `cleanup` does
+# not sweep: a run that died before Metro was up cannot have opened a window, and without
+# a baseline every window on the port would look like this run's.
+DEVTOOLS_BASELINE=""
+DEVTOOLS_BASELINE_TAKEN=0
 # The request-recording relay of the video flow (#5208); empty when that flow is not run.
 RECORDER_PID=""
 LOCK_HELD=0
@@ -513,6 +524,13 @@ cleanup() {
     # would also kill a lane running on a different simulator, and this file's
     # whole isolation story is that two lanes can coexist.
     [ -n "${UDID:-}" ] && pkill -f "Devices/$UDID/.*maestro-driver-iosUITests-Runner" 2>/dev/null || true
+  fi
+  # The DevTools windows this run opened (#5531), BEFORE Metro goes: only the ones that
+  # were not open when the flows began, on this run's port only — and by exact PID.
+  # scripts/devtools-shell.sh says what is matched and why. It is also what the
+  # acceptance check reads: the log line it prints names what was left to close.
+  if [ "$DEVTOOLS_BASELINE_TAKEN" = "1" ]; then
+    devtools_shells_close "$METRO_PORT" "$DEVTOOLS_BASELINE" || true
   fi
   if [ -n "$METRO_PID" ]; then
     kill -TERM "-$METRO_PID" 2>/dev/null || kill -TERM "$METRO_PID" 2>/dev/null || true
@@ -1007,14 +1025,29 @@ if [ -z "$owner" ]; then
   else
     say "starting Metro on :$METRO_PORT"
   fi
-  # CHROME_PATH=/usr/bin/false: a Maestro tap that lands on the dev build's
-  # "Open debugger" toast makes Metro's dev-middleware launch the real Google
-  # Chrome through chrome-launcher. Started from a sandboxed agent shell, that
-  # Chrome cannot register with the window server and aborts within 0.2s, and
-  # macOS puts a "Google Chrome quit unexpectedly" dialog on the owner's screen —
-  # five of them in one lane run (#5083). chrome-launcher reads CHROME_PATH first,
-  # so the launch now fails quietly in metro.log ("Failed to launch debugger app
-  # window") instead. Nothing in this lane uses the debugger.
+  # What a tap on the dev build's "Open debugger to view warnings." strip opens, and
+  # what keeps it shut (#5083, #5531). Nothing in this lane uses the debugger.
+  #
+  # * React Native 0.86 opens its debugger as a STANDALONE DevTools app
+  #   (`@react-native/debugger-shell`, started through a dotslash launcher):
+  #   dev-middleware's `enableStandaloneFuseboxShell` is on by default and
+  #   `react-native start` has no switch for it. The window outlives the run — on
+  #   11-07 one such app was still holding five windows fifteen hours later.
+  #   CHROME_PATH does not touch it.
+  # * CHROME_PATH=/usr/bin/false only blocks the FALLBACK. When the shell cannot be
+  #   prepared (offline, a corrupt download, an unsupported platform) dev-middleware
+  #   launches the real Google Chrome through chrome-launcher; started from a
+  #   sandboxed agent shell that Chrome cannot register with the window server and
+  #   aborts within 0.2s, and macOS puts a "Google Chrome quit unexpectedly" dialog on
+  #   the owner's screen — five of them in one lane run (#5083). chrome-launcher reads
+  #   CHROME_PATH first, so that launch now fails quietly in metro.log ("Failed to
+  #   launch debugger app window"). That is all the variable still does here; keep it.
+  # * What keeps the strip from being drawn at all is the launch argument: every
+  #   flow's `launchApp` passes `momoAutomation: "YES"`, and `measure/automation.ts`
+  #   turns the LogBox notifications off when the app starts (#5531).
+  # * What makes sure nothing is left if a window opens anyway is `cleanup` above: it
+  #   closes the DevTools app this run's Metro port opened, by PID, never another
+  #   port's (scripts/devtools-shell.sh).
   ( cd "$APP_ROOT" && export CHROME_PATH=/usr/bin/false \
       && exec node node_modules/react-native/cli.js "${metro_args[@]}" ) \
     >"$OUT_DIR/metro.log" 2>&1 &
@@ -1036,6 +1069,15 @@ else
   echo "[lane] report on code it never built. Stop that Metro and re-run." >&2
   exit 1
 fi
+
+# The DevTools windows already open for this Metro before the first flow touches the app
+# (#5531). `cleanup` closes only the ones that appear after this — whether this run started
+# the Metro or reused one that was already serving the checkout, a window a person had open
+# beforehand is not this run's to close. The line it logs at the end ("closed …" or "no
+# DevTools window left open by this run") is the lane's own evidence for the acceptance
+# check: zero left after one run.
+DEVTOOLS_BASELINE="$(devtools_baseline_for_port "$METRO_PORT")"
+DEVTOOLS_BASELINE_TAKEN=1
 
 # ---------------------------------------------------------------------------
 # flows

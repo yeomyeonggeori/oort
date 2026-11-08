@@ -114,6 +114,8 @@ npm --prefix clients/web run gate:csp-deploy
 docker/caddy 가 PATH 에 없으면 눈에 보이는 skip 줄(silent skip 금지,
 RED 아님), 있으면 실행하고 실패는 RED. 릴리스 체크리스트는 skip 이 없다.
 
+migration이 든 릴리스면 PR 본문의 「되돌릴 때」 줄을 CHANGELOG 릴리스 머리 문단으로 옮기고, 배포 순서를 확인한다. API에 새 값이 더해져 옛 서버가 거절하는 경우(예: 첨부 요약 `kind: image`, ADR-0151 증보 9, #5469)는 **서버를 먼저** 배포하고 그 값을 보내는 앱은 그 뒤에 낸다. 되돌릴 때 정리 SQL이 필요한 판(같은 예: 서버를 증보 9 이전으로 되돌리기 전 `DELETE FROM attachment_media WHERE duration_ms IS NULL`)은 **슈퍼유저 연결로** 실행하고(FORCE RLS 표는 슈퍼유저가 아닌 소유자에게 오류 없이 0행), 실행 뒤 같은 조건의 `SELECT count(*)`가 0인지 확인한다.
+
 새 크레이트·빈이 들어간 릴리스면 `scripts/check_dockerfile_crates.sh` 도 통과시킨다 — `server-rust/Dockerfile` 의존성 캐시 COPY 목록이 워크스페이스 멤버와 어긋나면 이미지 빌드만 깨진다(v0.1.27 publish 실패, #3876). PR CI `alignment` 잡이 `scripts/check_ghcr_notice_bundle.sh` 경유로 같은 검사를 매 PR 돈다.
 
 ---

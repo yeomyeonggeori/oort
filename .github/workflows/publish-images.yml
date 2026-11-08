@@ -96,7 +96,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha,scope=oort-rust-amd64
-          cache-to: type=gha,mode=max,scope=oort-rust-amd64
+          cache-to: type=gha,mode=min,scope=oort-rust-amd64 # mode=min: 캐시 한도(10GB) 다툼 줄이기 (#5494)
           provenance: mode=max
           sbom: true
 
@@ -116,7 +116,7 @@ jobs:
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=oort-postgres-amd64
-          cache-to: type=gha,mode=max,scope=oort-postgres-amd64
+          cache-to: type=gha,mode=min,scope=oort-postgres-amd64 # mode=min: 캐시 한도(10GB) 다툼 줄이기 (#5494)
           provenance: mode=max
           sbom: true
 
@@ -198,7 +198,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha,scope=oort-rust-arm64
-          cache-to: type=gha,mode=max,scope=oort-rust-arm64
+          cache-to: type=gha,mode=min,scope=oort-rust-arm64 # mode=min: 캐시 한도(10GB) 다툼 줄이기 (#5494)
           provenance: mode=max
           sbom: true
 
@@ -218,7 +218,7 @@ jobs:
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=oort-postgres-arm64
-          cache-to: type=gha,mode=max,scope=oort-postgres-arm64
+          cache-to: type=gha,mode=min,scope=oort-postgres-arm64 # mode=min: 캐시 한도(10GB) 다툼 줄이기 (#5494)
           provenance: mode=max
           sbom: true
 

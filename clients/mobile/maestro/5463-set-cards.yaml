@@ -1,0 +1,98 @@
+appId: app.momo.ios
+name: 5463-set-cards
+---
+# 5463-set-cards — 이모티콘 세트의 계획 카드와 세트 카드가 대화 줄에 선 폰 화면 (#5463, ADR-0218 §12 S4).
+#
+# **이 칸은 시뮬레이터를 켜지 않았다**(디스크 40GB 미만, 통합자 지시). 이 흐름은 써 두기만 했고 한 번도 돌지 않았다(`runtime-unverified`):
+# 검증 줄이 돌리고, 아래 두 가지 전제를 맞춘 뒤에 돈다.
+#
+# 전제 1 — **화면 표면이 아직 없다.** 서버는 이 두 카드를 올리지 않는다(S5a 전: 사용자 영향 0). 그래서 흐름이 서려면 `-momoMeasure SET-CARDS` 표면이 대화 줄(`MessageRow`)에
+#   승인 카드 메시지 둘(`expression.set.plan` 의 `props.action.expressionSetPlan`, `expression.set.create` 의 `props.action.expressionSet`)을 먹여야 한다.
+#   메시지 모양과 코어 픽스처는 `clients/mobile/__tests__/fixtures/setCards.tsx`(`setMessage`·`planMessage`)가 정본이고, 값은 코어
+#   `setFixtures.ts`(`FIXTURE_SET_PLAN_CARD`·`FIXTURE_SET_NORMAL`·`FIXTURE_SET_REFUSED`)다. 표면은 `PhoneExpressions.Provider` 에 코어 fake 서버(`createExpressionFixtureServer({sets})`)를
+#   쓰는 저장소를 물려야 칸 그림이 서고, 결정(`POST …/approvals/{id}/decision`)은 fake 서버가 받는다.
+# 전제 2 — 폰 키보드 자리 창(#5452)과 같은 시간에 돌리지 않는다(시뮬레이터·디스크를 함께 쓴다).
+#
+#   xcrun simctl launch <복제본 UDID> app.momo.ios --args -momoMeasure SET-CARDS -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=set-cards clients/mobile/maestro/5463-set-cards.yaml
+#   # 변형: `-momoMeasure SET-CARDS-REFUSED`(회색 칸 다섯), `SET-CARDS-WORDS`(글만의 계획), 라이트·다크, 글자 크기 최대(`xcrun simctl ui <UDID> content_size accessibility-extra-extra-extra-large`).
+#
+# **볼 장면**(design-review 가 읽는 것): ① 계획 카드(첫 고지·참조 썸네일·선언·버튼 셋의 줄바꿈) ② 장면 고치기(참조 빼기 줄·칸마다 이름·장면 입력, 키보드가 입력을 가리는가)
+# ③ 세트 카드 격자(3칸, 큰 글씨에서 2칸·이름 줄바꿈) ④ 칸 빼기·전체 해제(등록 꺼짐) ⑤ 회색 칸(점선·사유 한 줄) ⑥ 결과 줄 ⑦ 동작 줄이기(보내는 중 표시기 없음).
+
+# ---- 계획 카드 ----
+- extendedWaitUntil:
+    visible:
+      id: "expression-plan"
+    timeout: 60000
+# 디버그 빌드의 LogBox 띠가 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- takeScreenshot: ${SHOT}-plan-first
+- assertVisible:
+    id: "expression-plan-references"
+- assertVisible:
+    id: "expression-plan-declare"
+# 멤버의 첫 참조 세트: 고지 두 줄이 서 있다(서버가 준 noticeDue).
+- assertVisible:
+    id: "expression-plan-notice"
+- assertVisible:
+    id: "expression-plan-confirm"
+- assertVisible:
+    id: "expression-plan-revise"
+- assertVisible:
+    id: "expression-plan-cancel"
+
+# ---- 장면 고치기 ----
+- tapOn:
+    id: "expression-plan-revise"
+- extendedWaitUntil:
+    visible:
+      id: "expression-plan-edit"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-plan-edit
+# 첫 정지 칸의 장면 입력에 글을 넣어 키보드가 입력을 가리는지 본다(카드는 대화 줄이라 목록이 키보드 높이만큼 올라가야 한다).
+- tapOn:
+    id: "expression-plan-edit-scene-1"
+- inputText: "손을 흔드는 고양이"
+- takeScreenshot: ${SHOT}-plan-edit-keyboard
+- hideKeyboard
+- tapOn:
+    id: "expression-plan-edit-back"
+- assertNotVisible:
+    id: "expression-plan-edit"
+
+# ---- 세트 카드 ----
+- scrollUntilVisible:
+    element:
+      id: "expression-set-grid"
+    timeout: 20000
+- takeScreenshot: ${SHOT}-set-all-kept
+- assertVisible:
+    id: "expression-set-tile-0"
+# 한 칸을 빼면 등록 개수가 하나 준다.
+- tapOn:
+    id: "expression-set-tile-1"
+- assertVisible: "9개 등록"
+- takeScreenshot: ${SHOT}-set-one-left-out
+# 전체 해제: 등록은 꺼지고 「전체 선택」 이 선다.
+- tapOn:
+    id: "expression-set-select-all"
+- assertVisible:
+    id: "expression-set-select-all"
+- takeScreenshot: ${SHOT}-set-none-kept
+- tapOn:
+    id: "expression-set-select-all"
+- assertVisible: "10개 등록"
+# 종류 고르기: 고른 칸 전부에 한 번 정한다.
+- tapOn:
+    id: "expression-set-kind-sticker"
+- takeScreenshot: ${SHOT}-set-kind-sticker
+
+# ---- 등록(fake 서버가 결정을 받는다) ----
+- tapOn:
+    id: "expression-set-register"
+- extendedWaitUntil:
+    visible:
+      id: "expression-set-settled"
+    timeout: 20000
+- takeScreenshot: ${SHOT}-set-result

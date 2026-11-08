@@ -1,6 +1,11 @@
 import type {Centrifuge, Subscription} from 'centrifuge';
 import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
 import {
+  readExpressionChangedVersion,
+  readExpressionChangeDetail,
+} from '@momo/core/features/expressions/changeNotice';
+import type {ExpressionChangedDetail} from '@momo/core/features/expressions/types';
+import {
   asAgentRunEventFrame,
   asMessageDeletedFrame,
   asPinFrame,
@@ -120,7 +125,16 @@ export type ChannelRail = Pick<
    * 구독에서 **받는 것은 없다**(핸들러가 없다). 다른 구독과 같은 refcount·같은 소켓이고, 소켓이 백그라운드
    * 정책으로 내려가면 함께 내려가서 그동안 이 폰은 「접속 없음」으로 보인다(그것이 폰에서 「온라인」의 뜻이다).
    */
-  subscribeExpressions?: (workspaceId: string, handlers: {onChanged: () => void; onResync: () => void}) => () => void;
+  subscribeExpressions?: (
+    workspaceId: string,
+    handlers: {
+      /** 옛 알림(`expression.changed`). `version` 은 같은 version 의 상세가 먼저 처리됐는지 알아보는 열쇠이고, 읽을 수 없으면 `null` 이다. */
+      onChanged: (version?: string | null) => void;
+      /** 상세 알림(`expression.changed.detail`, ADR-0218 §15). 없으면 상세는 무시된다(옛 처리기와 같다). */
+      onDetail?: (detail: ExpressionChangedDetail) => void;
+      onResync: () => void;
+    },
+  ) => () => void;
   joinOnlineRollCall: (workspaceId: string) => () => void;
   /**
    * 팀 작업 보드의 **신호**(#2864, ADR-0194 D8). 한 채널의 공유 변화·세션 수명주기·도구
@@ -205,8 +219,16 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
     subscribeExpressions(workspaceId, handlers) {
       return attach(`expressions:ws${workspaceId.toUpperCase()}`, {recoverable: false, positioned: false}, sub => {
         const publication = (ctx: {data?: unknown}) => {
+          // 상세 알림은 다른 `type` 이라 아래 옛 읽기는 이것을 알림으로 보지 않는다 — 옛 폰이 그대로 무시하는 까닭이다(ADR-0218 §15 P3).
+          const detail = readExpressionChangeDetail(workspaceId, ctx.data);
+          if (detail) {
+            handlers.onDetail?.(detail);
+            return;
+          }
           const frame = ctx.data as {type?: string; workspaceId?: string} | undefined;
-          if (frame?.type === 'expression.changed' && frame.workspaceId?.toLowerCase() === workspaceId.toLowerCase()) handlers.onChanged();
+          if (frame?.type === 'expression.changed' && frame.workspaceId?.toLowerCase() === workspaceId.toLowerCase()) {
+            handlers.onChanged(readExpressionChangedVersion(frame));
+          }
         };
         sub.on('publication', publication);
         sub.on('subscribed', handlers.onResync);

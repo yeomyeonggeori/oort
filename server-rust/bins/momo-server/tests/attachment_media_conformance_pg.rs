@@ -25,6 +25,9 @@
 //! | `a_send_that_wins_while_the_object_is_read_leaves_the_write_refused` (review M-2) | drop `may_hold_media(locked, ..)` from the write's second transaction → the write lands after the send has already bound the file |
 //! | `the_media_write_spends_a_member_budget_of_its_own` (review M-1) | drop the `member_write(MemberWrite::MediaWrite)` layer from the route → the fourth write answers 200; point `MediaWrite` at the upload start's limit → the same; give it the upload start's key prefix → the third write answers 429 (the member's earlier upload start already spent a unit of the shared counter) |
 //! | `the_media_table_is_tenant_scoped_and_locked_down` | drop `FORCE ROW LEVEL SECURITY`, the `WITH CHECK`, or the composite FK → the matching step; grant `momo_app` DELETE → the privilege step |
+//! | `a_photo_or_gif_holds_its_size_before_the_send_only` (ADR-0151 증보 9, #5469, IA1~IA5) | widen `validate_image_declaration` → the range cases (the DB CHECK answers 500); drop `require_image_mime` → the PDF, SVG and HEIC; drop `image_magic_matches` → the text-as-png and the crossed formats; let the picture shape through `may_hold_media`'s terms (uploader, `complete`, unsent) → the member, pending, sent and deleted cases; accept `durationMs` or a poster on a picture → the 422 cases; drop the tenant scope → the cross-tenant cases |
+//! | `an_image_summary_rides_every_projection` (IA6) | drop the `WHEN am.duration_ms IS NULL` branch of `PAGED_ATTACHMENT_JOIN` → the pages carry a video's key set on a picture; make `from_joined` read a row without a length as nothing → the send's answer and the frame carry no summary; add a video key to the picture's object → the key-count step |
+//! | `a_picture_row_has_no_length_and_no_poster_and_the_migration_reapplies` (IA7) | drop `attachment_media_still_ck` → the poster-on-a-picture step; keep `NOT NULL` on `duration_ms` → the picture's write answers 500; drop the null branch of the length CHECK → still passes (it is the same meaning, and the step says so) |
 
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -703,6 +706,45 @@ async fn media_row(
     su: &PgPool,
     attachment: &str,
 ) -> Option<(i32, i32, i32, Option<String>, Option<i32>)> {
+    sqlx::query(
+        "SELECT duration_ms, width, height, poster_mime, octet_length(poster_bytes) AS poster_len \
+           FROM attachment_media WHERE attachment_id = $1",
+    )
+    .bind(Uuid::parse_str(attachment).expect("uuid"))
+    .fetch_optional(su)
+    .await
+    .expect("read the media row")
+    .map(|row| {
+        (
+            row.get("duration_ms"),
+            row.get("width"),
+            row.get("height"),
+            row.get("poster_mime"),
+            row.get("poster_len"),
+        )
+    })
+}
+
+fn png(width: u32, height: u32) -> Vec<u8> {
+    encoded(ImageFormat::Png, width, height)
+}
+
+/// A GIF89a header (3 x 2 logical screen) and a trailer. The route reads twelve bytes, not a header.
+fn gif() -> Vec<u8> {
+    b"GIF89a\x03\x00\x02\x00\x00\x00\x00;".to_vec()
+}
+
+/// A picture's request (ADR-0151 증보 9): its kind and its two numbers, nothing else.
+fn image_body(width: i64, height: i64) -> Value {
+    json!({"kind": "image", "width": width, "height": height})
+}
+
+/// `(duration_ms, width, height, poster_mime, octet_length(poster_bytes))` of the row, where the
+/// length may be null — a picture's row has none.
+async fn media_row_of_any_kind(
+    su: &PgPool,
+    attachment: &str,
+) -> Option<(Option<i32>, i32, i32, Option<String>, Option<i32>)> {
     sqlx::query(
         "SELECT duration_ms, width, height, poster_mime, octet_length(poster_bytes) AS poster_len \
            FROM attachment_media WHERE attachment_id = $1",
@@ -1772,13 +1814,13 @@ async fn a_poster_is_never_in_a_payload() {
         .and_then(|attachment| attachment.media.clone())
         .expect("the helper's page carries the summary too");
     assert_eq!(
-        (
-            media.duration_ms,
-            media.width,
-            media.height,
-            media.has_poster
-        ),
-        (4200, 1280, 720, true)
+        media,
+        momo_messaging::AttachmentMedia::Video {
+            duration_ms: 4200,
+            width: 1280,
+            height: 720,
+            has_poster: true
+        }
     );
     let denied = momo_db::with_tenant_tx(&su, ws, |conn| {
         Box::pin(async move {
@@ -2256,6 +2298,890 @@ async fn the_media_write_spends_a_member_budget_of_its_own() {
         started.status(),
         201,
         "starting an upload is a different budget: it is still open while the media writes are refused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0151 증보 9 · a photo's or GIF's size
+// ---------------------------------------------------------------------------
+
+/// The sentences of the three 400s that read the file (only its own uploader sees them).
+const NOT_AN_IMAGE: &str = "attachment is not an image type that can hold a size";
+const IMAGE_BYTES: &str = "attachment bytes are not the image type they are labelled as";
+const NOT_A_VIDEO: &str = "attachment is not a video type that can hold media";
+const DIMENSIONS: &str = "width and height must be integers from 1 to 16384";
+
+/// **Red proof (증보 9 IA1~IA5).** A photo or GIF takes `{kind: "image", width, height}` by the same
+/// road a video takes its length: **the uploader's**, of a file that is **complete** and that **no
+/// message carries yet**, judged by the **same two functions** (so the same 404 for everyone who may
+/// not, the same 403 for a non-member, byte for byte), the shape before any connection, the file's
+/// stored type and its first twelve bytes after. What is stored is two integers: the row has no
+/// length and no poster. A picture that names a length or a poster is a key the route does not know.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_photo_or_gif_holds_its_size_before_the_send_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let other_tenant = seed(&su, &app_pool).await;
+    let (base, reads) = start_counting_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let outsider = login(&http, &base, fixture.workspace, &fixture.outsider).await;
+    let stranger = login(&http, &base, other_tenant.workspace, &other_tenant.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let scope = (ws, ch);
+
+    // ---- 1. IA1: each of the four types takes its size, and the answer is the three-key summary ---
+    let mut photos = Vec::new();
+    for (name, mime, bytes, (w, h)) in [
+        ("a.jpg", "image/jpeg", jpeg(32, 24), (4032, 3024)),
+        ("b.png", "image/png", png(32, 24), (1170, 2532)),
+        ("c.gif", "image/gif", gif(), (480, 270)),
+        ("d.webp", "image/webp", webp(32, 24), (16_384, 1)),
+    ] {
+        let id = upload_and_complete(&http, &base, &alice, ws, ch, name, mime, &bytes).await;
+        let reads_before = reads.load(Ordering::SeqCst);
+        let written = put_media(&http, &base, &alice, scope, &id, &image_body(w, h)).await;
+        assert_eq!(written.status, 200, "{mime}: {}", written.refusal());
+        assert_eq!(
+            written.json(),
+            json!({"kind": "image", "width": w, "height": h}),
+            "{mime}: the answer is the summary a box is drawn from, three keys and nothing else"
+        );
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            reads_before + 1,
+            "{mime}: an accepted write read the object's first bytes once, and only once"
+        );
+        assert_eq!(
+            media_row_of_any_kind(&su, &id).await,
+            Some((None, w as i32, h as i32, None, None)),
+            "{mime}: a picture's row has no length and no poster"
+        );
+        photos.push(id);
+    }
+    let photo = photos[1].clone();
+
+    // ---- 2. a second write replaces the first, whole -----------------------------------------
+    let replaced = put_media(&http, &base, &alice, scope, &photo, &image_body(640, 480)).await;
+    assert_eq!(replaced.status, 200);
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 640, 480, None, None))
+    );
+    assert_eq!(media_rows(&su, &photo).await, 1, "one row per attachment");
+
+    // ---- 3. IA2: the range, judged before any connection is taken or any byte read ------------
+    let reads_before = reads.load(Ordering::SeqCst);
+    for (w, h) in [
+        (0, 480),
+        (640, 0),
+        (16_385, 480),
+        (640, 16_385),
+        (-1, 480),
+        (640, -1),
+    ] {
+        let refused = put_media(&http, &base, &alice, scope, &photo, &image_body(w, h)).await;
+        assert_eq!(refused.status, 400, "{w}x{h}");
+        assert_eq!(refused.refusal(), DIMENSIONS, "{w}x{h}");
+        // the shape is a fact about the body, so it is told to everyone who sends it: another
+        // member (who may not write at all) is told the same, and so is a stranger from outside
+        let bobs = put_media(&http, &base, &bob, scope, &photo, &image_body(w, h)).await;
+        assert_eq!((bobs.status, bobs.refusal()), (400, DIMENSIONS.to_string()));
+    }
+    // a fraction, a word, a missing number: the framework's 422 (the body is not this request)
+    for (what, body) in [
+        (
+            "a fractional width",
+            json!({"kind": "image", "width": 640.5, "height": 480}),
+        ),
+        (
+            "a word",
+            json!({"kind": "image", "width": "640", "height": 480}),
+        ),
+        ("no height", json!({"kind": "image", "width": 640})),
+        ("no numbers", json!({"kind": "image"})),
+    ] {
+        let refused = put_media(&http, &base, &alice, scope, &photo, &body).await;
+        assert_eq!(refused.status, 422, "{what}");
+    }
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        reads_before,
+        "the shape is judged before the archive is asked for a byte"
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 640, 480, None, None)),
+        "no refused write changed the row"
+    );
+
+    // ---- 4. IA5: a picture is a closed shape; a body without a kind is a video ----------------
+    for (what, body) in [
+        (
+            "a picture with a length",
+            json!({"kind": "image", "width": 1, "height": 1, "durationMs": 5}),
+        ),
+        (
+            "a picture with a poster",
+            json!({
+                "kind": "image", "width": 1, "height": 1,
+                "poster": poster("image/jpeg", &jpeg(8, 8))
+            }),
+        ),
+        (
+            "a picture that says it has a poster",
+            json!({"kind": "image", "width": 1, "height": 1, "hasPoster": false}),
+        ),
+        (
+            "a kind this route does not know",
+            json!({"kind": "audio", "width": 1, "height": 1}),
+        ),
+        (
+            "a kind in the wrong case",
+            json!({"kind": "Image", "width": 1, "height": 1}),
+        ),
+        (
+            "no kind and no length",
+            json!({"width": 640, "height": 480}),
+        ),
+    ] {
+        let refused = put_media(&http, &base, &alice, scope, &photo, &body).await;
+        assert_eq!(refused.status, 422, "{what}");
+    }
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        reads_before,
+        "a body this route cannot use never reaches the archive"
+    );
+
+    // ---- 5. IA3: the file — its stored type, its first bytes; only its uploader is told --------
+    let pdf = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "r.pdf",
+        "application/pdf",
+        b"%PDF-1.4 x",
+    )
+    .await;
+    let svg = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "v.svg",
+        "image/svg+xml",
+        b"<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>",
+    )
+    .await;
+    let heic = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "h.heic",
+        "image/heic",
+        b"\0\0\0\x18ftypheic\0\0\0\0",
+    )
+    .await;
+    let words = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "words.png",
+        "image/png",
+        b"this is not a picture, only words",
+    )
+    .await;
+    let png_as_jpeg = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "x.jpg",
+        "image/jpeg",
+        &png(8, 8),
+    )
+    .await;
+    let gif_as_webp =
+        upload_and_complete(&http, &base, &alice, ws, ch, "y.webp", "image/webp", &gif()).await;
+    let video = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "clip.mp4",
+        "video/mp4",
+        &mp4(),
+    )
+    .await;
+    for (what, id, sentence) in [
+        ("a PDF", &pdf, NOT_AN_IMAGE),
+        ("an SVG (not on the list)", &svg, NOT_AN_IMAGE),
+        ("a HEIC (not on the list)", &heic, NOT_AN_IMAGE),
+        ("a video file", &video, NOT_AN_IMAGE),
+        ("words labelled png", &words, IMAGE_BYTES),
+        ("a png labelled jpeg", &png_as_jpeg, IMAGE_BYTES),
+        ("a gif labelled webp", &gif_as_webp, IMAGE_BYTES),
+    ] {
+        let reads_before = reads.load(Ordering::SeqCst);
+        let refused = put_media(&http, &base, &alice, scope, id, &image_body(64, 48)).await;
+        assert_eq!(refused.status, 400, "{what}");
+        assert_eq!(refused.refusal(), sentence, "{what}");
+        if sentence == NOT_AN_IMAGE {
+            assert_eq!(
+                reads.load(Ordering::SeqCst),
+                reads_before,
+                "{what}: the stored type is asked before the object is read, so a document costs no read"
+            );
+        }
+        assert_eq!(media_rows(&su, id).await, 0, "{what}: nothing was written");
+    }
+    // and the other way round: a video's body on a picture is turned away by the video's own question
+    let refused = put_media(&http, &base, &alice, scope, &photo, &media_body(None)).await;
+    assert_eq!(
+        (refused.status, refused.refusal()),
+        (400, NOT_A_VIDEO.to_string())
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 640, 480, None, None))
+    );
+    // a stranger to the file is told what an id that never existed is told, not which 400 it earns
+    let hidden = put_media(&http, &base, &bob, scope, &pdf, &image_body(64, 48)).await;
+    assert_eq!(
+        (hidden.status, hidden.refusal()),
+        (404, CONTENT_NOT_FOUND.to_string())
+    );
+
+    // ---- 6. IA4: who and when — the video's rules, with the video's sentences ------------------
+    let unknown = put_media(
+        &http,
+        &base,
+        &bob,
+        scope,
+        &Uuid::new_v4().to_string(),
+        &image_body(64, 48),
+    )
+    .await;
+    assert_eq!(
+        (unknown.status, unknown.refusal()),
+        (404, CONTENT_NOT_FOUND.to_string())
+    );
+    let reads_before = reads.load(Ordering::SeqCst);
+    let by_bob = put_media(&http, &base, &bob, scope, &photo, &image_body(1, 1)).await;
+    assert_eq!(by_bob.status, 404, "bob did not upload this file");
+    assert_eq!(
+        by_bob.body, unknown.body,
+        "byte for byte the 404 of an id that never existed"
+    );
+    let by_outsider = put_media(&http, &base, &outsider, scope, &photo, &image_body(1, 1)).await;
+    assert_eq!(
+        (by_outsider.status, by_outsider.refusal()),
+        (403, NOT_A_MEMBER.to_string())
+    );
+    let pending = upload_without_completing(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "half.png",
+        "image/png",
+        &png(8, 8),
+    )
+    .await;
+    let by_pending = put_media(&http, &base, &alice, scope, &pending, &image_body(8, 8)).await;
+    assert_eq!(
+        (by_pending.status, by_pending.refusal()),
+        (404, CONTENT_NOT_FOUND.to_string())
+    );
+    assert_eq!(media_rows(&su, &pending).await, 0);
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        reads_before,
+        "a refused write never reaches the archive"
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 640, 480, None, None)),
+        "the refused writes changed nothing"
+    );
+
+    // ---- 7. tenants: another workspace's person cannot write across the line --------------------
+    let before = media_row_of_any_kind(&su, &photo).await;
+    let across_channel = put_media(
+        &http,
+        &base,
+        &stranger,
+        (other_tenant.workspace, ch),
+        &photo,
+        &image_body(1, 1),
+    )
+    .await;
+    assert_eq!(
+        (across_channel.status, across_channel.refusal()),
+        (403, NOT_A_MEMBER.to_string()),
+        "tenant one's channel is not in tenant two's workspace"
+    );
+    let with_foreign_credential =
+        put_media(&http, &base, &stranger, scope, &photo, &image_body(1, 1)).await;
+    assert_eq!(
+        with_foreign_credential.status, 403,
+        "a credential for another workspace"
+    );
+    let own_channel_foreign_file = put_media(
+        &http,
+        &base,
+        &stranger,
+        (other_tenant.workspace, other_tenant.channel),
+        &photo,
+        &image_body(1, 1),
+    )
+    .await;
+    assert_eq!(
+        (
+            own_channel_foreign_file.status,
+            own_channel_foreign_file.refusal()
+        ),
+        (404, CONTENT_NOT_FOUND.to_string()),
+        "her own channel, tenant one's file id: the row is not visible under her workspace"
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        before,
+        "nothing was written across the line"
+    );
+
+    // ---- 8. the audit trail names the kind and that there is no poster, and nothing else ---------
+    let audits: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action = 'attachment.media_set' AND target_id = $1 \
+          ORDER BY created_at, id",
+    )
+    .bind(Uuid::parse_str(&photo).expect("uuid"))
+    .fetch_all(&su)
+    .await
+    .expect("audit rows");
+    assert_eq!(audits.len(), 2, "one audit row per accepted write");
+    for (audit, replaced) in audits.iter().zip([false, true]) {
+        assert_eq!(
+            audit,
+            &json!({
+                "schema": "momo.attachment.media_set.v1",
+                "channel_id": ch.to_string(),
+                "kind": "image",
+                "has_poster": false,
+                "replaced": replaced,
+            })
+        );
+    }
+
+    // ---- 9. IA4 (sent / deleted): once a message carries the file the numbers stop moving ------
+    let (message, _) = post_with_files(&http, &base, &alice, ws, ch, "사진", None, &[&photo]).await;
+    for (who, token) in [("the uploader", &alice), ("another member", &bob)] {
+        let refused = put_media(&http, &base, token, scope, &photo, &image_body(1, 1)).await;
+        assert_eq!(
+            (refused.status, refused.refusal()),
+            (404, CONTENT_NOT_FOUND.to_string()),
+            "{who}"
+        );
+    }
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 640, 480, None, None))
+    );
+    delete_message_as(&http, &base, &alice, ws, &message).await;
+    let refused = put_media(&http, &base, &alice, scope, &photo, &image_body(1, 1)).await;
+    assert_eq!(
+        (refused.status, refused.refusal()),
+        (404, CONTENT_NOT_FOUND.to_string()),
+        "a deleted message's file"
+    );
+}
+
+/// **Red proof (증보 9 IA6).** The summary of a picture is on the send's own answer (and on the
+/// idempotent replay of that send), the channel page, the thread page, the realtime frame (the outbox
+/// row) and the team AI's read of the page — **three keys on every one**, never a video's `durationMs`
+/// or `hasPoster`. A video's summary is unchanged beside it, and a photo whose sender declared nothing
+/// carries no `media` key at all (the old message: the client's own memory is what sizes it).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_image_summary_rides_every_projection() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let scope = (ws, ch);
+    let picture = json!({"kind": "image", "width": 4032, "height": 3024});
+    let clip = json!({"kind": "video", "durationMs": 4200, "width": 1280, "height": 720, "hasPoster": true});
+
+    let declared = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "photo.png",
+        "image/png",
+        &png(16, 12),
+    )
+    .await;
+    let undeclared = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "old.jpg",
+        "image/jpeg",
+        &jpeg(16, 12),
+    )
+    .await;
+    let video = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "clip.mp4",
+        "video/mp4",
+        &mp4(),
+    )
+    .await;
+    let document = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "notes.txt",
+        "text/plain",
+        b"notes",
+    )
+    .await;
+    assert_eq!(
+        put_media(
+            &http,
+            &base,
+            &alice,
+            scope,
+            &declared,
+            &image_body(4032, 3024)
+        )
+        .await
+        .status,
+        200
+    );
+    assert_eq!(
+        put_media(
+            &http,
+            &base,
+            &alice,
+            scope,
+            &video,
+            &media_body(Some(poster("image/jpeg", &jpeg(32, 18))))
+        )
+        .await
+        .status,
+        200
+    );
+
+    // ---- 1. the send: the echo -------------------------------------------------------------
+    let client_msg_id = Uuid::new_v4();
+    let payload = json!({
+        "clientMsgId": client_msg_id, "type": "text", "body": "넷",
+        "attachmentIds": [declared, undeclared, video, document],
+    });
+    let send = |token: String, payload: Value| {
+        let http = http.clone();
+        let url = messages_url(&base, ws, ch);
+        async move {
+            let sent = http
+                .post(url)
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .await
+                .expect("post");
+            let status = sent.status().as_u16();
+            (status, sent.json::<Value>().await.expect("post body"))
+        }
+    };
+    let (status, echo) = send(alice.clone(), payload.clone()).await;
+    assert_eq!(status, 201);
+    let message = echo["id"].as_str().expect("message id").to_string();
+    let echoed = echo["attachments"].as_array().expect("attachments");
+    assert_eq!(echoed.len(), 4);
+    assert_eq!(
+        echoed[0]["media"], picture,
+        "the declared picture carries its summary"
+    );
+    assert_eq!(
+        echoed[0]["media"].as_object().expect("object").len(),
+        3,
+        "kind, width, height — a picture says nothing about a length or a poster"
+    );
+    assert_eq!(
+        echoed[0].as_object().expect("object").len(),
+        5,
+        "id, name, mime, sizeBytes, media"
+    );
+    assert!(
+        echoed[1].get("media").is_none(),
+        "a photo nobody measured has no media key: {}",
+        echoed[1]
+    );
+    assert_eq!(
+        echoed[2]["media"], clip,
+        "the video's summary is what it always was"
+    );
+    assert!(
+        echoed[3].get("media").is_none(),
+        "a document has no media key: {}",
+        echoed[3]
+    );
+
+    // ---- 2. the same send again (the retry the client_msg_id makes idempotent) ----------------
+    let (status, replay) = send(alice.clone(), payload).await;
+    assert!(
+        status == 200 || status == 201,
+        "the replay answers: {status}"
+    );
+    assert_eq!(replay["id"], echo["id"], "the replay is the same message");
+    assert_eq!(
+        replay["attachments"][0]["media"], picture,
+        "and carries the same summary"
+    );
+    assert!(replay["attachments"][1].get("media").is_none());
+
+    // ---- 3. the channel page --------------------------------------------------------------------
+    let page = get_json(&http, &messages_url(&base, ws, ch), &bob).await;
+    let row = row_of(&page, &message);
+    assert_eq!(row["attachments"][0]["media"], picture);
+    assert_eq!(
+        row["attachments"][0]["media"]
+            .as_object()
+            .expect("object")
+            .len(),
+        3
+    );
+    assert!(row["attachments"][1].get("media").is_none());
+    assert_eq!(row["attachments"][2]["media"], clip);
+    assert!(row["attachments"][3].get("media").is_none());
+
+    // ---- 4. the thread page (a GIF in a reply) ------------------------------------------------------
+    let gif_file = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "loop.gif",
+        "image/gif",
+        &gif(),
+    )
+    .await;
+    assert_eq!(
+        put_media(
+            &http,
+            &base,
+            &alice,
+            scope,
+            &gif_file,
+            &image_body(480, 270)
+        )
+        .await
+        .status,
+        200
+    );
+    let (reply, _) = post_with_files(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "답글",
+        Some(&message),
+        &[&gif_file],
+    )
+    .await;
+    let thread = get_json(
+        &http,
+        &format!("{}/{message}/replies", messages_url(&base, ws, ch)),
+        &bob,
+    )
+    .await;
+    assert_eq!(
+        row_of(&thread, &reply)["attachments"][0]["media"],
+        json!({"kind": "image", "width": 480, "height": 270})
+    );
+
+    // ---- 5. the realtime frame (the outbox row) --------------------------------------------------------
+    let frame = message_frame(&su, ws, ch, &message).await;
+    let framed = &frame["data"]["payload"]["attachments"];
+    assert_eq!(framed[0]["media"], picture);
+    assert_eq!(framed[0]["media"].as_object().expect("object").len(), 3);
+    assert!(framed[1].get("media").is_none());
+    assert_eq!(framed[2]["media"], clip);
+    for (surface, text) in [
+        ("the send's answer", echo.to_string()),
+        ("the channel page", page.to_string()),
+        ("the thread page", thread.to_string()),
+        ("the outbox row", frame.to_string()),
+    ] {
+        assert!(
+            !text.contains("dataBase64") && !text.contains("poster_bytes"),
+            "{surface}"
+        );
+    }
+
+    // ---- 6. the team AI's read role runs the same page statement ---------------------------------------
+    let helper_page = momo_db::with_tenant_tx(&su, ws, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::team_ai_tools::enter_helper_read_role(conn).await?;
+            momo_messaging::list_channel_page(conn, ch, HistoryCursor::Newest, 50).await
+        })
+    })
+    .await
+    .expect("the helper role reads a page that carries a picture's summary (it may not read the poster column)");
+    let media: Vec<Option<momo_messaging::AttachmentMedia>> = helper_page
+        .iter()
+        .find(|paged| paged.message.id.to_string() == message)
+        .map(|paged| {
+            paged
+                .attachments
+                .iter()
+                .map(|attachment| attachment.media.clone())
+                .collect()
+        })
+        .expect("the message is on the helper's page");
+    assert_eq!(
+        media,
+        vec![
+            Some(momo_messaging::AttachmentMedia::Image {
+                width: 4032,
+                height: 3024
+            }),
+            None,
+            Some(momo_messaging::AttachmentMedia::Video {
+                duration_ms: 4200,
+                width: 1280,
+                height: 720,
+                has_poster: true
+            }),
+            None,
+        ]
+    );
+}
+
+/// **Red proof (증보 9 IA7).** The table keeps a still picture's row honest by itself: `duration_ms`
+/// is nullable and is the **only** nullable number, a row with no length cannot carry a poster (the
+/// CHECK, not the route), the length range still holds when there is one, and migration 178 is safe
+/// to apply a second time (the file is re-run on the live table and nothing changes).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_picture_row_has_no_length_and_no_poster_and_the_migration_reapplies() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let photo = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "p.png",
+        "image/png",
+        &png(8, 8),
+    )
+    .await;
+    let video =
+        upload_and_complete(&http, &base, &alice, ws, ch, "v.mp4", "video/mp4", &mp4()).await;
+    assert_eq!(
+        put_media(&http, &base, &alice, (ws, ch), &photo, &image_body(8, 8))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        put_media(
+            &http,
+            &base,
+            &alice,
+            (ws, ch),
+            &video,
+            &media_body(Some(poster("image/jpeg", &jpeg(16, 16))))
+        )
+        .await
+        .status,
+        200
+    );
+    let photo_id = Uuid::parse_str(&photo).expect("uuid");
+    let video_id = Uuid::parse_str(&video).expect("uuid");
+
+    // ---- 1. which columns may be null: the length, and the poster's four — nothing else ------------
+    let nullable: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+          WHERE table_schema = 'public' AND table_name = 'attachment_media' AND is_nullable = 'YES' \
+          ORDER BY column_name",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("nullable columns");
+    assert_eq!(
+        nullable,
+        [
+            "duration_ms",
+            "poster_bytes",
+            "poster_height",
+            "poster_mime",
+            "poster_width"
+        ],
+        "width and height stay NOT NULL: a summary always has a size"
+    );
+
+    // ---- 2. the CHECKs, asked directly (as the owner: the route is not what is on trial) -------------
+    let violated = |error: sqlx::Error| error.to_string();
+    // a poster on a row with no length
+    let poster_on_a_picture = sqlx::query(
+        "UPDATE attachment_media SET poster_mime = 'image/jpeg', poster_width = 1, poster_height = 1, \
+                poster_bytes = '\\x00'::bytea WHERE attachment_id = $1",
+    )
+    .bind(photo_id)
+    .execute(&su)
+    .await
+    .map_err(violated)
+    .expect_err("a picture has no poster");
+    assert!(
+        poster_on_a_picture.contains("attachment_media_still_ck"),
+        "{poster_on_a_picture}"
+    );
+    // a video row that loses its length while it still has a poster
+    let video_loses_its_length =
+        sqlx::query("UPDATE attachment_media SET duration_ms = NULL WHERE attachment_id = $1")
+            .bind(video_id)
+            .execute(&su)
+            .await
+            .map_err(violated)
+            .expect_err("a row with a poster has a length");
+    assert!(
+        video_loses_its_length.contains("attachment_media_still_ck"),
+        "{video_loses_its_length}"
+    );
+    // the length range holds when there is a length, at both ends
+    for bad in [0_i32, -1, 86_400_001] {
+        let out_of_range =
+            sqlx::query("UPDATE attachment_media SET duration_ms = $2 WHERE attachment_id = $1")
+                .bind(video_id)
+                .bind(bad)
+                .execute(&su)
+                .await
+                .map_err(violated)
+                .expect_err("a length outside 1..=86,400,000");
+        assert!(
+            out_of_range.contains("attachment_media_duration_ck"),
+            "{bad}: {out_of_range}"
+        );
+    }
+    // the size range holds for a picture too
+    for (w, h) in [(0_i32, 8_i32), (8, 0), (16_385, 8), (8, 16_385)] {
+        let out_of_range = sqlx::query(
+            "UPDATE attachment_media SET width = $2, height = $3 WHERE attachment_id = $1",
+        )
+        .bind(photo_id)
+        .bind(w)
+        .bind(h)
+        .execute(&su)
+        .await
+        .map_err(violated)
+        .expect_err("a size outside 1..=16,384");
+        assert!(
+            out_of_range.contains("attachment_media_dimensions_ck"),
+            "{w}x{h}: {out_of_range}"
+        );
+    }
+    // nothing above changed a row
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 8, 8, None, None))
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &video)
+            .await
+            .map(|row| (row.0, row.3)),
+        Some((Some(4200), Some("image/jpeg".to_string())))
+    );
+
+    // ---- 3. re-applying the migration is harmless ----------------------------------------------------------
+    let migration = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../server/Migrations/178_attachment_media_image.sql"),
+    )
+    .expect("read migration 178");
+    for pass in 1..=2 {
+        sqlx::raw_sql(&migration)
+            .execute(&su)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("pass {pass} of migration 178 over the live table: {error}")
+            });
+    }
+    let constraints: Vec<String> = sqlx::query_scalar(
+        "SELECT conname::text FROM pg_constraint \
+          WHERE conrelid = 'public.attachment_media'::regclass AND contype = 'c' ORDER BY conname",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("check constraints");
+    assert_eq!(
+        constraints,
+        [
+            "attachment_media_dimensions_ck",
+            "attachment_media_duration_ck",
+            "attachment_media_poster_ck",
+            "attachment_media_still_ck",
+        ],
+        "each check once, none lost, none doubled"
+    );
+    assert_eq!(
+        media_row_of_any_kind(&su, &photo).await,
+        Some((None, 8, 8, None, None))
+    );
+    // and it grants nothing: the privileges are the lockdown block's, which this file does not touch
+    let grants: Vec<String> = sqlx::query_scalar(
+        "SELECT grantee::text || ':' || privilege_type FROM information_schema.role_table_grants \
+          WHERE table_schema = 'public' AND table_name = 'attachment_media' \
+            AND grantee IN ('momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read') \
+          ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("grants");
+    assert_eq!(
+        grants,
+        ["momo_app:INSERT", "momo_app:SELECT", "momo_app:UPDATE"]
     );
 }
 

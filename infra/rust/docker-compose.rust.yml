@@ -386,12 +386,21 @@ services:
       # profile. All `:-` — unset keeps a stack without Hermes exactly as it was
       # (`declared == false`: zero probes, no card). `scripts/self_host_env.sh
       # --with-agents` writes the three together with `COMPOSE_PROFILES=agents`
-      # (`oort_cohosted_agent_env_keys`). TOOLS_LOCKED is read by api ONLY (K-S2):
-      # it is the operator's own declaration that the tool lock holds; in this stack
-      # the `hermes` service cannot listen unless `lockgate.py gate` exited 0 first.
+      # (`oort_cohosted_agent_env_keys`). TOOLS_LOCKED is the operator's own declaration that
+      # the tool lock holds; in this stack the `hermes` service cannot listen unless
+      # `lockgate.py gate` exited 0 first.
+      # ADR-0201 증보 v4 P2 G4 FLIPS ADR-0203 증보 K-S2's "api only": the three `OORT_COHOSTED_AGENT_*`
+      # declarations (TOOLS_LOCKED, CONNECTORS_LOCKED, CONNECTOR_APPS) are read by api AND agent-worker, and
+      # agent-worker below carries the SAME THREE with the SAME `${VAR:-}` expressions —
+      # `scripts/tests/check_railway_catalog.py` and `scripts/tests/test_self_host_env_modes.sh` fail when one side
+      # differs. Team default mode = TOOLS_LOCKED only (the two connector variables EMPTY); connection mode = all three,
+      # on both services. The team AI's Hermes delegation (agent-worker) opens only while both connector variables are
+      # EMPTY: any non-empty value, even `0`, shuts it (fail-closed).
       HERMES_BASE_URL: ${HERMES_BASE_URL:-}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
       OORT_COHOSTED_AGENT_TOOLS_LOCKED: ${OORT_COHOSTED_AGENT_TOOLS_LOCKED:-}
+      OORT_COHOSTED_AGENT_CONNECTORS_LOCKED: ${OORT_COHOSTED_AGENT_CONNECTORS_LOCKED:-}
+      OORT_COHOSTED_AGENT_CONNECTOR_APPS: ${OORT_COHOSTED_AGENT_CONNECTOR_APPS:-}
       # #4079 / ADR-0203 증보 2026-10-19 L4 (Q3): the login relay sidecar inside the `hermes` service. Both `:-`:
       # either empty = the relay routes answer `409 login_relay_off` and the screen shows the shell command.
       # api ONLY (the worker never logs Hermes in); the key is its own secret, never HERMES_API_KEY. The
@@ -406,6 +415,11 @@ services:
       # give both services the same ones.
       TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
       TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
+      # ADR-0201 증보 v4 P7 (#5369): the operator's per-workspace ceiling on the team AI's delegations to Hermes per
+      # UTC day. UNLIKE the two above, EMPTY = CLOSED (a subscription is not the team's own money): the delegation is off
+      # until an operator sets a positive number here. `0` is closed too. The template ships it EMPTY — a value in the
+      # template would make the first release that carries the delegation active by itself. Same value on api and agent-worker.
+      TEAM_AI_HERMES_DAILY_CAP: ${TEAM_AI_HERMES_DAILY_CAP:-}
       HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
@@ -589,7 +603,20 @@ services:
       AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
       AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
       # #4072: the worker dials the same-server Hermes (the `operator_env` pin).
-      # `OORT_COHOSTED_AGENT_*` is not given here — api only (ADR-0203 증보 K-S2).
+      # ADR-0201 증보 v4 P2 G4 (#5369) flips ADR-0203 증보 K-S2's "api only": the worker reads the same three
+      # `OORT_COHOSTED_AGENT_*` declarations api reads, with the SAME expressions as api above (a test fails when
+      # they differ). The team AI's Hermes delegation opens only while TOOLS_LOCKED is true and the two connector
+      # variables are EMPTY; a non-empty value, even `0`, shuts it (fail-closed). Default (team default mode) is
+      # TOOLS_LOCKED only.
+      OORT_COHOSTED_AGENT_TOOLS_LOCKED: ${OORT_COHOSTED_AGENT_TOOLS_LOCKED:-}
+      OORT_COHOSTED_AGENT_CONNECTORS_LOCKED: ${OORT_COHOSTED_AGENT_CONNECTORS_LOCKED:-}
+      OORT_COHOSTED_AGENT_CONNECTOR_APPS: ${OORT_COHOSTED_AGENT_CONNECTOR_APPS:-}
+      # Which kinds of work this operator says the Hermes behind this worker can do (ADR-0201 증보 v4 P2 G4, #5369). The
+      # worker only; the template ships both EMPTY (nothing declared = no kind offered). `image` is offered only
+      # when the attachment write path also exists in the code (P14-S3/S4); neither name proves a capability — each is
+      # the operator's own statement, like TOOLS_LOCKED.
+      OORT_COHOSTED_AGENT_IMAGE_TOOL: ${OORT_COHOSTED_AGENT_IMAGE_TOOL:-}
+      OORT_COHOSTED_AGENT_SEARCH_TOOL: ${OORT_COHOSTED_AGENT_SEARCH_TOOL:-}
       HERMES_BASE_URL: ${HERMES_BASE_URL:-}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
       # #4820 C2a (owner 10-30 decision): this instance's own public origin (https://<host>[:port], nothing after
@@ -617,6 +644,9 @@ services:
       # (TOKEN_CAP=0 the helper, SEARCH_CAP=0 web search). The api gets the same two values (above).
       TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
       TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
+      # ADR-0201 증보 v4 P7 (#5369): the per-workspace ceiling on delegations to Hermes — EMPTY = CLOSED (see api above).
+      # This is the process that enforces it; the template ships it EMPTY on purpose.
+      TEAM_AI_HERMES_DAILY_CAP: ${TEAM_AI_HERMES_DAILY_CAP:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

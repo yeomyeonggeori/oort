@@ -2610,6 +2610,38 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             category: inline,
             reason: "none",
         },
+        // ADR-0218 증보 6 §12 L2.5 · L6.4 (#5460 S1b, A44 (a)): the set's two cards are opened in
+        // the app, whatever their arguments say. The plan card holds the first notice, the
+        // thumbnails and the declaration inside the card: only the requester is pushed, and with
+        // no 승인 button. Take either id off `judge`'s `in_app` list and the category here turns
+        // `momo.approval` (the default is Inline).
+        Card {
+            label: "expression.set.plan: only the requester, and only in the app",
+            action_type: "workspace_action",
+            payload: json!({"action": {
+                "id": "expression.set.plan",
+                "args": {"setId": "33333333-3333-4333-8333-333333333333"},
+                "pins": {
+                    "target": room.id(Who::Owner).to_string(),
+                    "setId": "33333333-3333-4333-8333-333333333333",
+                },
+            }}),
+            audience: vec![Who::Owner],
+            category: open,
+            reason: "needs_the_app",
+        },
+        Card {
+            label: "expression.set.create, nobody's face: the app shows the pictures",
+            action_type: "workspace_action",
+            payload: json!({"action": {
+                "id": "expression.set.create",
+                "args": {},
+                "pins": {"setId": "33333333-3333-4333-8333-333333333333", "subject": null},
+            }}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+            reason: "needs_the_app",
+        },
         Card {
             label: "channel.create: workspace admins",
             action_type: "workspace_action",

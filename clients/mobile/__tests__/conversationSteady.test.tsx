@@ -424,6 +424,9 @@ async function reconnect(
   }
 }
 
+/** 낭독에서 빠진 요소까지 찾는다 — 덮개가 열린 동안 판 뒤의 구조를 잴 때만 쓴다(#5546). */
+const EVEN_HIDDEN = {includeHiddenElements: true} as const;
+
 describe('메시지가 오지 않는 동안 목록은 제자리다', () => {
   it('복구할 것이 없는 재연결은 — 짧은 끊김이든 띠가 서는 끊김이든 — 목록에 아무것도 붙이지 않는다', async () => {
     const probe = await openDm();
@@ -973,15 +976,19 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(screen.queryByTestId('pin-list-pane')).toBeNull();
     // ⋮ 시트의 「고정한 메시지」 행이 고정 목록을 연다(시트가 먼저 내려간 뒤).
     await openPinList();
-    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    expect(screen.queryByTestId('conversation-menu-sheet', EVEN_HIDDEN)).toBeNull();
 
-    const column = screen.getByTestId('conversation-column');
-    const header = screen.getByTestId('conversation-header');
+    // 열린 고정 목록은 VoiceOver 의 모달 경계라(#5546) 판 뒤의 틀은 낭독에서 빠진다 — 아래 구조 단정은 숨은 것까지 본다.
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    expect(screen.queryByTestId('conversation-column')).toBeNull();
     const pane = screen.getByTestId('pin-list-pane');
+    expect(pane).toHaveProp('accessibilityViewIsModal', true);
+    const column = screen.getByTestId('conversation-column', EVEN_HIDDEN);
+    const header = screen.getByTestId('conversation-header', EVEN_HIDDEN);
     // (a) 머리와 목록은 같은 틀 안에 있고, 열린 덮개는 그 틀 **밖**이다.
-    expect(within(column).getByTestId('conversation-header')).toBeTruthy();
-    expect(within(column).getByTestId('timeline-list')).toBeTruthy();
-    expect(within(column).queryByTestId('pin-list-pane')).toBeNull();
+    expect(within(column).getByTestId('conversation-header', EVEN_HIDDEN)).toBeTruthy();
+    expect(within(column).getByTestId('timeline-list', EVEN_HIDDEN)).toBeTruthy();
+    expect(within(column).queryByTestId('pin-list-pane', EVEN_HIDDEN)).toBeNull();
     // (b) 틀은 덮개보다 트리에서 **앞**이다 = 덮개가 위에 그려지고 먼저 눌린다.
     const order = screen.UNSAFE_root
       .findAll(

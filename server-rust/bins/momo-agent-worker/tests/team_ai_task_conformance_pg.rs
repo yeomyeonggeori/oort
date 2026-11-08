@@ -2250,8 +2250,10 @@ async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
             "REFERENCES",
             "TRIGGER",
         ] {
+            // #5370: the api's SELECT is **by column** (every column but the request sentence), so at the
+            // table level it holds UPDATE only; the column loop below measures what it reads.
             let expected = match role {
-                "momo_app" => ["SELECT", "UPDATE"].contains(&verb),
+                "momo_app" => ["UPDATE"].contains(&verb),
                 "momo_worker" => ["SELECT", "INSERT", "UPDATE"].contains(&verb),
                 _ => false,
             };
@@ -2267,6 +2269,7 @@ async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
         }
         // a column-scoped grant is a privilege too (a `GRANT SELECT (note)` would read every note)
         for verb in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
+            // (the api's SELECT is on columns now: "some column" is still true, the table-level is not)
             let expected = match role {
                 "momo_app" => ["SELECT", "UPDATE"].contains(&verb),
                 "momo_worker" => ["SELECT", "INSERT", "UPDATE"].contains(&verb),
@@ -2284,6 +2287,57 @@ async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
         }
     }
     assert!(measured >= 4 * 7, "the loop must have measured something");
+
+    // 1b. Column by column (#5370, ADR-0201 증보 v4 I6): the request sentence is the one column the api's
+    //     role cannot read; every other column it could read before it still reads, the worker reads all,
+    //     and no other role reads any. Every column of the table is measured (a column added later with
+    //     no grant is read by nobody but the worker — fail closed — and this loop still holds).
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT attname::text FROM pg_attribute \
+          WHERE attrelid = 'public.team_ai_task'::regclass AND attnum > 0 AND NOT attisdropped \
+          ORDER BY attnum",
+    )
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert!(
+        columns.iter().any(|c| c == "delegation_request") && columns.len() >= 19,
+        "the scan must see the whole table, the sentence's column included: {columns:?}"
+    );
+    for role in [
+        "momo_app",
+        "momo_worker",
+        "momo_relay",
+        "momo_notifier",
+        "momo_platform_admin",
+        "momo_helper_read",
+    ] {
+        for column in &columns {
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)")
+                    .bind(role)
+                    .fetch_one(&su)
+                    .await
+                    .unwrap();
+            if !exists {
+                continue;
+            }
+            let reads: bool = sqlx::query_scalar(
+                "SELECT has_column_privilege($1, 'public.team_ai_task', $2, 'SELECT')",
+            )
+            .bind(role)
+            .bind(column)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            let expected = match role {
+                "momo_worker" => true,
+                "momo_app" => column != "delegation_request",
+                _ => false,
+            };
+            assert_eq!(reads, expected, "{role} SELECT on team_ai_task.{column}");
+        }
+    }
 
     // 2. Real statements, not only metadata. The BYPASSRLS roles are the ones row security does not
     //    stop; the api's own role is stopped from creating and from deleting.
@@ -2326,6 +2380,30 @@ async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
         Ok(1),
         "the api reads the row of its own tenant"
     );
+    // #5370: ... but never the request sentence — not by name, not by `*`, not through a condition.
+    for statement in [
+        "SELECT delegation_request FROM team_ai_task",
+        "SELECT * FROM team_ai_task",
+        "SELECT count(*) FROM team_ai_task WHERE delegation_request IS NOT NULL",
+        "SELECT run_id FROM team_ai_task ORDER BY delegation_request",
+    ] {
+        assert_eq!(
+            as_role(&su, "momo_app", ws, statement).await,
+            refused,
+            "the api cannot read the request sentence: {statement}"
+        );
+    }
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_app",
+            ws,
+            "SELECT count(*) FROM team_ai_task WHERE delegation_state IS NULL"
+        )
+        .await,
+        Ok(1),
+        "the marker itself is readable (anti-vacuity: the column grant did not take everything)"
+    );
     assert_eq!(
         as_role(
             &su,
@@ -2350,7 +2428,7 @@ async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
             .await
             .unwrap();
     for phrase in [
-        "momo_app SELECT, UPDATE",
+        "momo_app UPDATE and SELECT of every column but delegation_request",
         "momo_worker SELECT, INSERT, UPDATE",
         "no DELETE",
     ] {
@@ -2589,14 +2667,21 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
 
     // (e) The web-search allowance of a step: with one search spent today, the team's limit of one
     //     withholds the search tool; so does the operator's ceiling of zero; with neither, it is offered.
+    //     The two say DIFFERENT things (ADR-0201 증보 v4 P2, #5369): a spent allowance comes back tomorrow,
+    //     the operator's `0` does not — and only the first may ever be answered by Hermes — so the prompt
+    //     of a step names the one that is true.
     type Tune = fn(&mut WorkerConfig);
-    let cases: [(&str, Option<Value>, Tune, i32, bool); 3] = [
+    // label, the team's limits, the worker tuning, searches already spent today, is the search tool offered,
+    // and the sentence the prompt must say when it is not
+    type Case = (&'static str, Option<Value>, Tune, i32, bool, &'static str);
+    let cases: [Case; 3] = [
         (
             "no limit",
             None,
             (|_: &mut WorkerConfig| {}) as Tune,
             1,
             true,
+            "",
         ),
         (
             "the team's dailySearches",
@@ -2604,6 +2689,7 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
             (|_: &mut WorkerConfig| {}) as Tune,
             1,
             false,
+            "오늘 웹 검색을 다 썼어요",
         ),
         (
             "the operator's search ceiling of zero",
@@ -2611,9 +2697,10 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
             (|c: &mut WorkerConfig| c.team_ai_daily_search_cap = Some(0)) as Tune,
             0,
             false,
+            "웹 검색은 서버 운영자가 꺼 두었어요",
         ),
     ];
-    for (label, limits, tune, searches_spent, search_offered) in cases {
+    for (label, limits, tune, searches_spent, search_offered, why) in cases {
         reset_instance(&su).await;
         let t = seed(&su, &pool).await;
         seed_anthropic_link(&su, t.owner_id).await;
@@ -2637,9 +2724,15 @@ async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
         );
         if !search_offered {
             assert!(
-                system_prompt(step2).contains("오늘 웹 검색을 다 썼어요"),
+                system_prompt(step2).contains(why),
                 "(e) {label}: the prompt says why"
             );
+            if label.contains("zero") {
+                assert!(
+                    !system_prompt(step2).contains("오늘 웹 검색을 다 썼어요"),
+                    "(e) {label}: a zero is not a spent allowance"
+                );
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ import {
   completeUpload,
   draftFor,
   failUpload,
+  INLINE_PREVIEW_MAX_BYTES,
   progressUpload,
   removeDraft as removeDraftFrom,
   requeueUpload,
@@ -15,12 +16,15 @@ import {
   type AttachmentDraft,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
+import { declareImageSize } from "@momo/core/features/attachments/declareImageSize";
 import { completeAttachmentUpload, createAttachmentUpload } from "@momo/core/lib/api";
+import { canDeclareImageSize } from "@momo/core/lib/attachmentMedia";
 import {
   verdictForRequestFailure,
   verdictForTransferFailure,
 } from "@momo/core/features/connection/uploadFailure";
 import { deviceOnlineNow } from "@/lib/deviceOnline";
+import { measureImageFile, type PixelSize } from "./imageDimensions";
 import { putAttachmentBytes, type UploadHandle } from "./uploadTransport";
 
 // =============================================================================
@@ -44,6 +48,13 @@ import { putAttachmentBytes, type UploadHandle } from "./uploadTransport";
 // 에서는 이유가 하나 더 있다: 같은 회선을 20개가 나눠 쓰면 20개의 막대가 전부
 // 느리게 움직이고, 어느 것도 언제 끝날지 말하지 못한다. 하나씩이면 움직이는
 // 막대가 하나이고 그 하나는 진짜 속도를 말한다.
+//
+// ## 사진·GIF 의 가로세로 선언 (ADR-0151 증보 9 I7, #5469)
+//
+// 사진·GIF 는 완료 뒤에 **네 번째 왕복**이 하나 더 있다: 보내는 기기가 아는 표시 크기를 `PUT …/media` 로 선언한다. 받는 쪽이 그림이
+// 오기 전에 칸을 잡는 데 쓴다(처음 보는 사진도 대화에 들어갈 때 흔들리지 않는다). 순서가 요점이다 — **완료 뒤, 칩이 「올림」으로 바뀌기
+// 전**이다. 서버는 아직 메시지에 안 묶인 첨부에만 쓰므로, 칩이 바뀐 뒤에 부르면 빠른 전송이 먼저 묶어 이 호출이 조용히 404 가 된다.
+// 이 왕복은 덤이라 실패해도 칩은 올림이 되고 보내기는 요약 없이 간다. 재기는 바이트가 다 올라간 때 시작한다(`imageDimensions.ts`).
 //
 // ## 지운 첨부와 서버의 pending 행
 //
@@ -196,16 +207,52 @@ async function uploadOne(
   }
 
   update(key, (list) => verifyUpload(list, draft.localId));
+  // 가로세로 재기는 바이트가 다 올라간 지금 시작한다: 완료 왕복과 겹치고, 트레이가 같은 파일로 이미 시작한 풀기가 있으면 그것을 쓴다
+  // (`imageDimensions.ts` 가 한 번만 풀게 한다 — 트레이 썸네일 시험이 「파일당 한 번」을 재고 있다). 선언할 수 없는 종류(닫힌 목록 밖, 인라인
+  // 미리보기 상한을 넘는 큰 파일: 받는 쪽이 칸으로 그리지 않는다)는 풀지도 않는다.
+  const sizing = wantsImageSize(draft) ? measureImageFile(file).catch(() => null) : null;
+  let row;
   try {
-    const row = await completeAttachmentUpload(
+    row = await completeAttachmentUpload(
       target.workspaceId,
       target.channelId,
       session.id
     );
-    update(key, (list) => completeUpload(list, draft.localId, row.id));
   } catch (error) {
     const verdict = verdictForRequestFailure(error, deviceOnlineNow());
     update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
+    return;
+  }
+  // 완료 뒤, 「올림」으로 바꾸기 전: 아직 메시지에 안 묶였을 때만 서버가 받는다(위 「사진·GIF 의 가로세로 선언」).
+  if (sizing !== null) await declareSize(target, row.id, draft.mime, sizing);
+  update(key, (list) => completeUpload(list, draft.localId, row.id));
+}
+
+/** 이 초안의 가로세로를 선언할 만한가: 서버의 닫힌 목록 안이고, 받는 쪽이 칸으로 그리는 크기(인라인 미리보기 상한 이하)다. */
+function wantsImageSize(draft: AttachmentDraft): boolean {
+  return canDeclareImageSize(draft.mime) && draft.sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
+}
+
+/**
+ * 선언 한 걸음. **덤이다**: 무엇이 잘못돼도 칩을 실패시키지 않는다. 코어의 `declareImageSize` 는 던지지 않고 예산(4초)이 넘으면
+ * 기다리기를 그만두지만, 그것이 던지는 일이 생겨도 이 칸에서 끝난다 — 요약 없이 보내기가 계속된다.
+ */
+async function declareSize(
+  target: UploadTarget,
+  attachmentId: string,
+  mime: string,
+  size: Promise<PixelSize | null>
+): Promise<void> {
+  try {
+    await declareImageSize({
+      workspaceId: target.workspaceId,
+      channelId: target.channelId,
+      attachmentId,
+      mime,
+      measure: () => size,
+    });
+  } catch {
+    // 요약 없이 간다. 받는 쪽이 지금처럼 기기 기억을 쓴다.
   }
 }
 

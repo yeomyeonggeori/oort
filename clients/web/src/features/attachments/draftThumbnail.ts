@@ -4,6 +4,7 @@ import {
   type AttachmentDraft,
 } from "@momo/core/features/attachments/model";
 import { draftFile } from "./draftStore";
+import { decodeDisplayBitmap, shareImageSize, sizeOfBitmap } from "./imageDimensions";
 
 // =============================================================================
 // 컴포저 트레이 썸네일 (#2701).
@@ -47,7 +48,16 @@ const thumbnails = new WeakMap<File, Promise<string>>();
 const settled = new WeakMap<File, DraftThumbnailState>();
 
 async function renderThumbnail(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
+  // 같은 풀기가 가로세로도 알려 준다: 보내는 쪽의 가로세로 선언(`imageDimensions.ts`)이 같은 파일을 다시 풀지 않게(ADR-0151 증보 9).
+  const shareSize = shareImageSize(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await decodeDisplayBitmap(file);
+  } catch (error) {
+    shareSize(null);
+    throw error;
+  }
+  shareSize(sizeOfBitmap(bitmap));
   try {
     const canvas = document.createElement("canvas");
     canvas.width = THUMB_RENDER_PX;

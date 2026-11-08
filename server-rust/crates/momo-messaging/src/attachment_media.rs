@@ -1,5 +1,5 @@
-//! Video meta and poster — the `attachment_media` table's every statement (ADR-0151 증보 5 D5,
-//! #4673 C5).
+//! Video meta and poster, and a still picture's size — the `attachment_media` table's every
+//! statement (ADR-0151 증보 5 D5, #4673 C5; 증보 9, #5469).
 //!
 //! A phone that picks a video measures its length and size, takes a frame, and sends both before
 //! the message goes out; the receiving card then draws at the right shape with a picture in it
@@ -17,6 +17,18 @@
 //!   and whose size is bounded ([`validate_poster`]). The server reads a header, never decodes, so a
 //!   JPEG that is cut off after its header passes — a decoder on the client is what rejects that,
 //!   and the risk is a broken picture, not a server one (ADR-0151 증보 5 D5).
+//!
+//! ## A picture's size is the same road (증보 9)
+//!
+//! A photo or a GIF carries `{kind: "image", width, height}` and nothing else, so a receiving client
+//! can set the box a picture will fill before a byte of it has arrived. It is the same table, the same
+//! route, the same authorization and the same stance: the server reads **twelve bytes** of the object
+//! ([`image_magic_matches`]: the stored type is one of four and the magic number is that type's) and
+//! range-checks two integers ([`validate_image_declaration`]). It does not read the picture's header
+//! — a JPEG's frame header sits behind a variable run of segments, and its EXIF orientation is not in
+//! it, so a server reading it would give a portrait photo the shape of a landscape one. The sender measures
+//! what the receiver will measure. A row with no length is a picture ([`MediaWrite::Image`] stores
+//! `duration_ms` as null; migration 178 lets the column be null and refuses a poster on such a row).
 //!
 //! ## Who may write, and when
 //!
@@ -40,17 +52,24 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::attachment::{Attachment, AttachmentMedia, MEDIA_KIND_VIDEO};
+use crate::attachment::{Attachment, AttachmentMedia, MEDIA_KIND_IMAGE, MEDIA_KIND_VIDEO};
 use crate::member_avatar::{image_dimensions, sniff_image_mime};
 
 /// The video types a file may carry media for — a closed list (ADR-0151 증보 5 D5). Growing it is an
 /// amendment to the ADR: a new container is a new magic number to check.
 pub const VIDEO_MIMES: [&str; 3] = ["video/mp4", "video/quicktime", "video/webm"];
 
+/// The still-picture types a file may carry a size for — a closed list (ADR-0151 증보 9): the four
+/// types [`sniff_image_mime`] recognises, so "may hold a size" and "the magic number can be checked"
+/// are the same set by construction. Growing it is an amendment to the ADR: a new format is a new
+/// magic number to check. (HEIC, AVIF, BMP, TIFF and SVG are not on it: a picture of those types
+/// has no summary and draws as it always did.)
+pub const IMAGE_MIMES: [&str; 4] = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
 /// 24 hours, in milliseconds. `attachment_media_duration_ck` holds the same bound.
 pub const MEDIA_MAX_DURATION_MS: i64 = 86_400_000;
 
-/// The largest declared video side (`attachment_media_dimensions_ck`).
+/// The largest declared side, of a video or a picture (`attachment_media_dimensions_ck`).
 pub const MEDIA_MAX_DIMENSION: i64 = 16_384;
 
 /// The poster types: a photographic frame, so JPEG or WebP. PNG is a screenshot's format and GIF is
@@ -64,16 +83,20 @@ pub const POSTER_MAX_BYTES: usize = 256 * 1024;
 /// wide; 1,280 is a retina phone's width with room to spare.
 pub const POSTER_MAX_DIMENSION: u32 = 1_280;
 
-/// How many leading bytes of the object the container check reads: `ftyp` sits at offset 4..8, the
-/// EBML magic at 0..4.
-pub const VIDEO_PREFIX_BYTES: usize = 12;
+/// How many leading bytes of the object the magic check reads, for a video and for a picture:
+/// `ftyp` sits at offset 4..8, the EBML magic at 0..4, a PNG's eight-byte signature, a GIF's
+/// `GIF8Na`, a JPEG's `FF D8 FF`, and a WebP's `RIFF` + size + `WEBP` end at 12.
+pub const MEDIA_PREFIX_BYTES: usize = 12;
+
+/// [`MEDIA_PREFIX_BYTES`], by the name the video route first gave it.
+pub const VIDEO_PREFIX_BYTES: usize = MEDIA_PREFIX_BYTES;
 
 /// Why a media declaration, a poster or the object itself was refused. Each is a **400** and each
 /// has its own sentence, because the client that sent it can act on which one it was. The route
 /// judges the request's own shape first (the numbers and the poster: `Duration`, `Dimensions`,
-/// `Poster*`), for whoever sent it — they read the body and say nothing about any file — and the two
-/// that read the file (`NotAVideo`, `VideoBytes`) only after the authorization, so only the file's
-/// uploader ever sees those.
+/// `Poster*`), for whoever sent it — they read the body and say nothing about any file — and the four
+/// that read the file (`NotAVideo`, `VideoBytes`, `NotAnImage`, `ImageBytes`) only after the
+/// authorization, so only the file's uploader ever sees those.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MediaRejected {
     #[error("durationMs must be an integer from 1 to 86400000")]
@@ -84,6 +107,10 @@ pub enum MediaRejected {
     NotAVideo,
     #[error("attachment bytes are not the video type they are labelled as")]
     VideoBytes,
+    #[error("attachment is not an image type that can hold a size")]
+    NotAnImage,
+    #[error("attachment bytes are not the image type they are labelled as")]
+    ImageBytes,
     #[error("poster mime must be image/jpeg or image/webp")]
     PosterMime,
     #[error("poster dataBase64 is not valid base64")]
@@ -112,6 +139,52 @@ pub struct MediaDeclaration {
     pub duration_ms: i32,
     pub width: i32,
     pub height: i32,
+}
+
+/// A picture's declared size, once it is inside its range (ADR-0151 증보 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageDeclaration {
+    pub width: i32,
+    pub height: i32,
+}
+
+/// What a `PUT …/media` writes, once the request's own shape has passed: a video's length, size and
+/// optional poster, or a picture's size. The route builds it from the body and asks it the same two
+/// questions of the file — its stored type, its first bytes — whichever kind it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MediaWrite {
+    Video {
+        declaration: MediaDeclaration,
+        poster: Option<Poster>,
+    },
+    Image(ImageDeclaration),
+}
+
+impl MediaWrite {
+    /// The wire's `kind` word, and the audit row's.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Video { .. } => MEDIA_KIND_VIDEO,
+            Self::Image(_) => MEDIA_KIND_IMAGE,
+        }
+    }
+
+    /// Whether the file's stored type is one this kind may hold media for. Asked **before** the
+    /// object is read, so a document never costs a read.
+    pub fn require_mime(&self, stored_mime: &str) -> Result<(), MediaRejected> {
+        match self {
+            Self::Video { .. } => require_video_mime(stored_mime),
+            Self::Image(_) => require_image_mime(stored_mime),
+        }
+    }
+
+    /// Whether the object's first bytes are what its stored type says.
+    pub fn magic_matches(&self, stored_mime: &str, prefix: &[u8]) -> Result<(), MediaRejected> {
+        match self {
+            Self::Video { .. } => video_magic_matches(stored_mime, prefix),
+            Self::Image(_) => image_magic_matches(stored_mime, prefix),
+        }
+    }
 }
 
 /// The decision, in one place, of whether `attachment` may take media from `member_id` **now**:
@@ -146,6 +219,50 @@ pub fn validate_media_declaration(
         width: width as i32,
         height: height as i32,
     })
+}
+
+/// Range-check a picture's declared size (the video's range, ADR-0151 증보 9). A claim, not a
+/// measurement: the server does not open the picture.
+pub fn validate_image_declaration(
+    width: i64,
+    height: i64,
+) -> Result<ImageDeclaration, MediaRejected> {
+    let side = 1..=MEDIA_MAX_DIMENSION;
+    if !side.contains(&width) || !side.contains(&height) {
+        return Err(MediaRejected::Dimensions);
+    }
+    // both fit an i32: the bound above is well inside it
+    Ok(ImageDeclaration {
+        width: width as i32,
+        height: height as i32,
+    })
+}
+
+/// Whether the file's stored mime is a picture type that may carry a size. Asked **before** the
+/// object is read, so a document never costs a read. An exact comparison with the closed list, as
+/// for video: the stored mime is what the upload declared and `complete` matched against the
+/// archive.
+pub fn require_image_mime(stored_mime: &str) -> Result<(), MediaRejected> {
+    if IMAGE_MIMES.contains(&stored_mime) {
+        Ok(())
+    } else {
+        Err(MediaRejected::NotAnImage)
+    }
+}
+
+/// Whether the object's leading bytes are the format its stored mime names (the magic number
+/// [`sniff_image_mime`] reads). A file whose label and bytes disagree cannot hold a size. Only the
+/// magic number is read, never a header: a PNG that is cut off after its signature passes, and the
+/// receiving client's decoder is what turns it away (the same stance as a poster's, 증보 5 D5).
+pub fn image_magic_matches(stored_mime: &str, prefix: &[u8]) -> Result<(), MediaRejected> {
+    if !IMAGE_MIMES.contains(&stored_mime) {
+        return Err(MediaRejected::NotAnImage);
+    }
+    if sniff_image_mime(prefix) == Some(stored_mime) {
+        Ok(())
+    } else {
+        Err(MediaRejected::ImageBytes)
+    }
 }
 
 /// Whether the file's stored mime is a video type that may carry media. Asked **before** the object
@@ -215,9 +332,9 @@ pub fn validate_poster(declared_mime: &str, data_base64: &str) -> Result<Poster,
 /// transaction. The caller has locked the attachment row `FOR UPDATE` and asked [`may_hold_media`].
 ///
 /// **A replace is a whole replace**: a second write without a poster clears the first one's poster,
-/// so the row always describes the last request and never a mix of two. The audit row names the
-/// kind and whether there is a poster, not the numbers and never the picture.
-#[allow(clippy::too_many_arguments)]
+/// so the row always describes the last request and never a mix of two. A picture's write stores a
+/// null length and no poster (migration 178's `attachment_media_still_ck` holds the second half).
+/// The audit row names the kind and whether there is a poster, not the numbers and never the picture.
 pub async fn set_attachment_media_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -225,8 +342,7 @@ pub async fn set_attachment_media_in_tx(
     attachment_id: Uuid,
     actor_member_id: Uuid,
     via_token_id: Option<Uuid>,
-    declaration: MediaDeclaration,
-    poster: Option<&Poster>,
+    write: &MediaWrite,
 ) -> Result<AttachmentMedia, DbError> {
     let replaced: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM attachment_media \
@@ -236,6 +352,20 @@ pub async fn set_attachment_media_in_tx(
     .bind(attachment_id)
     .fetch_one(&mut *conn)
     .await?;
+
+    let (duration_ms, width, height, poster): (Option<i32>, i32, i32, Option<&Poster>) = match write
+    {
+        MediaWrite::Video {
+            declaration,
+            poster,
+        } => (
+            Some(declaration.duration_ms),
+            declaration.width,
+            declaration.height,
+            poster.as_ref(),
+        ),
+        MediaWrite::Image(declaration) => (None, declaration.width, declaration.height, None),
+    };
 
     sqlx::query(
         "INSERT INTO attachment_media \
@@ -250,9 +380,9 @@ pub async fn set_attachment_media_in_tx(
     )
     .bind(workspace_id)
     .bind(attachment_id)
-    .bind(declaration.duration_ms)
-    .bind(declaration.width)
-    .bind(declaration.height)
+    .bind(duration_ms)
+    .bind(width)
+    .bind(height)
     .bind(poster.map(|poster| poster.mime))
     .bind(poster.map(|poster| poster.width as i32))
     .bind(poster.map(|poster| poster.height as i32))
@@ -271,7 +401,7 @@ pub async fn set_attachment_media_in_tx(
                 "momo.attachment.media_set.v1",
                 json!({
                     "channel_id": channel_id.to_string(),
-                    "kind": MEDIA_KIND_VIDEO,
+                    "kind": write.kind(),
                     "has_poster": poster.is_some(),
                     "replaced": replaced,
                 }),
@@ -279,12 +409,17 @@ pub async fn set_attachment_media_in_tx(
     )
     .await?;
 
-    Ok(AttachmentMedia {
-        kind: MEDIA_KIND_VIDEO.to_string(),
-        duration_ms: i64::from(declaration.duration_ms),
-        width: i64::from(declaration.width),
-        height: i64::from(declaration.height),
-        has_poster: poster.is_some(),
+    Ok(match write {
+        MediaWrite::Video { declaration, .. } => AttachmentMedia::Video {
+            duration_ms: i64::from(declaration.duration_ms),
+            width: i64::from(declaration.width),
+            height: i64::from(declaration.height),
+            has_poster: poster.is_some(),
+        },
+        MediaWrite::Image(declaration) => AttachmentMedia::Image {
+            width: i64::from(declaration.width),
+            height: i64::from(declaration.height),
+        },
     })
 }
 
@@ -571,6 +706,184 @@ mod tests {
                 "{what}"
             );
         }
+    }
+
+    // ---- a picture's size (ADR-0151 증보 9) ---------------------------------------------
+
+    #[test]
+    fn a_picture_size_is_range_checked_at_both_ends() {
+        assert_eq!(
+            validate_image_declaration(1, 1),
+            Ok(ImageDeclaration {
+                width: 1,
+                height: 1
+            })
+        );
+        assert_eq!(
+            validate_image_declaration(16_384, 16_384),
+            Ok(ImageDeclaration {
+                width: 16_384,
+                height: 16_384
+            })
+        );
+        for (w, h) in [
+            (0, 360),
+            (640, 0),
+            (16_385, 360),
+            (640, 16_385),
+            (-1, 360),
+            (640, -1),
+            (i64::MAX, 1),
+            (1, i64::MIN),
+        ] {
+            assert_eq!(
+                validate_image_declaration(w, h),
+                Err(MediaRejected::Dimensions),
+                "{w}x{h}"
+            );
+        }
+        // the picture's bound is the video's: one constant, one DB CHECK
+        assert_eq!(MEDIA_MAX_DIMENSION, 16_384);
+    }
+
+    #[test]
+    fn only_the_four_picture_types_may_hold_a_size() {
+        for mime in IMAGE_MIMES {
+            assert_eq!(require_image_mime(mime), Ok(()), "{mime}");
+        }
+        for mime in [
+            "image/svg+xml",
+            "image/heic",
+            "image/avif",
+            "image/bmp",
+            "image/tiff",
+            "image/jpg",
+            "IMAGE/PNG",
+            "video/mp4",
+            "application/pdf",
+            "text/html",
+            "",
+        ] {
+            assert_eq!(
+                require_image_mime(mime),
+                Err(MediaRejected::NotAnImage),
+                "{mime:?}"
+            );
+        }
+        // "may hold a size" is exactly what the sniffer can tell apart: every listed type is one
+        // a real file of that type is recognised as, and nothing else is listed
+        for (mime, format) in [
+            ("image/jpeg", ImageFormat::Jpeg),
+            ("image/png", ImageFormat::Png),
+            ("image/webp", ImageFormat::WebP),
+        ] {
+            assert_eq!(
+                sniff_image_mime(&encoded(format, 8, 8)[..MEDIA_PREFIX_BYTES]),
+                Some(mime)
+            );
+        }
+        assert_eq!(
+            sniff_image_mime(b"GIF89a\x01\x00\x01\x00"),
+            Some("image/gif")
+        );
+        assert_eq!(IMAGE_MIMES.len(), 4);
+    }
+
+    #[test]
+    fn the_picture_magic_is_the_one_the_stored_type_names() {
+        let jpeg = encoded(ImageFormat::Jpeg, 32, 24);
+        let png = encoded(ImageFormat::Png, 32, 24);
+        let webp = encoded(ImageFormat::WebP, 32, 24);
+        let gif87 = b"GIF87a\x20\x00\x18\x00\x00\x00\x00\x00";
+        let gif89 = b"GIF89a\x20\x00\x18\x00\x00\x00\x00\x00";
+        // the twelve bytes the route reads are enough for every one of them
+        for (mime, bytes) in [
+            ("image/jpeg", &jpeg[..]),
+            ("image/png", &png[..]),
+            ("image/webp", &webp[..]),
+            ("image/gif", &gif87[..]),
+            ("image/gif", &gif89[..]),
+        ] {
+            let prefix = &bytes[..bytes.len().min(MEDIA_PREFIX_BYTES)];
+            assert_eq!(image_magic_matches(mime, prefix), Ok(()), "{mime}");
+        }
+        // a label that does not match the bytes, every way round
+        for (label, bytes, what) in [
+            ("image/png", &jpeg[..], "a jpeg labelled png"),
+            ("image/jpeg", &png[..], "a png labelled jpeg"),
+            ("image/gif", &webp[..], "a webp labelled gif"),
+            ("image/webp", &gif89[..], "a gif labelled webp"),
+            ("image/png", b"hello, this is text".as_slice(), "text"),
+            (
+                "image/jpeg",
+                b"<html><head></head>".as_slice(),
+                "a web page",
+            ),
+            ("image/png", b"".as_slice(), "an empty object"),
+            ("image/jpeg", &[0xFF, 0xD8][..], "a cut-off signature"),
+            // a RIFF container that is not a WebP (a WAV): the sniffer reads the fourcc at 8..12
+            (
+                "image/webp",
+                b"RIFF\x24\x00\x00\x00WAVEfmt ".as_slice(),
+                "a WAV",
+            ),
+        ] {
+            assert_eq!(
+                image_magic_matches(label, &bytes[..bytes.len().min(MEDIA_PREFIX_BYTES)]),
+                Err(MediaRejected::ImageBytes),
+                "{what}"
+            );
+        }
+        // a type that is not on the list is refused for what it is, before its bytes matter
+        assert_eq!(
+            image_magic_matches("image/svg+xml", b"<svg xmlns='x'/>"),
+            Err(MediaRejected::NotAnImage)
+        );
+        assert_eq!(
+            image_magic_matches("video/mp4", &jpeg[..MEDIA_PREFIX_BYTES]),
+            Err(MediaRejected::NotAnImage)
+        );
+    }
+
+    /// The route asks the **write** its two questions of the file, so a picture-shaped body can
+    /// never be written onto a video and a video-shaped one never onto a picture.
+    #[test]
+    fn a_write_asks_the_questions_of_its_own_kind() {
+        let picture = MediaWrite::Image(ImageDeclaration {
+            width: 4,
+            height: 3,
+        });
+        let video = MediaWrite::Video {
+            declaration: MediaDeclaration {
+                duration_ms: 1_000,
+                width: 4,
+                height: 3,
+            },
+            poster: None,
+        };
+        assert_eq!((picture.kind(), video.kind()), ("image", "video"));
+        assert_eq!(picture.require_mime("image/png"), Ok(()));
+        assert_eq!(video.require_mime("video/mp4"), Ok(()));
+        assert_eq!(
+            picture.require_mime("video/mp4"),
+            Err(MediaRejected::NotAnImage)
+        );
+        assert_eq!(
+            video.require_mime("image/png"),
+            Err(MediaRejected::NotAVideo)
+        );
+        let png = encoded(ImageFormat::Png, 4, 3);
+        let mp4 = b"\0\0\0\x18ftypmp42\0\0\0\0";
+        assert_eq!(picture.magic_matches("image/png", &png[..12]), Ok(()));
+        assert_eq!(video.magic_matches("video/mp4", mp4), Ok(()));
+        assert_eq!(
+            picture.magic_matches("image/png", mp4),
+            Err(MediaRejected::ImageBytes)
+        );
+        assert_eq!(
+            video.magic_matches("video/mp4", &png[..12]),
+            Err(MediaRejected::VideoBytes)
+        );
     }
 
     #[test]
