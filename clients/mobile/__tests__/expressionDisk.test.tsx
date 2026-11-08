@@ -14,15 +14,21 @@ import type {
   ExpressionDraft,
 } from '@momo/core/features/expressions/types';
 import {bumpSessionGeneration} from '../src/features/expressions/disk/generation';
-import type {PersistedShelf} from '../src/features/expressions/store';
+import {openPhoneExpressionDisk} from '../src/features/expressions/disk/open';
+import {
+  createPhoneExpressionStore,
+  type PersistedShelf,
+} from '../src/features/expressions/store';
 import {
   boot,
   createMemoryDiskBackend,
   diskName,
   makeFiles,
+  ME,
   OTHER_ME,
   uuid,
   World,
+  WS,
   type Booted,
   type MemoryDiskBackend,
   type Size,
@@ -623,6 +629,25 @@ describe('MA8 — 세션 경계', () => {
     expect(await made.store.image(world.item(2), 'large')).toBeNull();
     await made.store.settleDisk();
     expect(backend.names()).toEqual([]);
+  });
+
+  it('앞 세션의 정리(세대를 올림)가 새 저장소가 만들어진 뒤 start() 앞에 돌아도, start() 가 세대를 다시 잡아 새 저장소를 막지 않는다 (계정 교체의 효과 순서)', async () => {
+    const world = new World();
+    world.add(1);
+    const backend = createMemoryDiskBackend();
+    const disk = openPhoneExpressionDisk(WS, ME, backend)!;
+    const files = makeFiles();
+    const store = createPhoneExpressionStore(WS, ME, world.transport(), files, undefined, undefined, disk);
+    booted.push({store, files});
+    bumpSessionGeneration(); // 앞 사람의 `SessionProvider` 정리가 새 저장소를 만든 렌더 뒤, 새 효과(`start`) 앞에서 돈다
+    store.start();
+    await ready({store, files});
+    expect(await store.image(world.item(1), 'large')).toMatch(/^file:\/\/\/fake\//);
+    expect(backend.stats.writes).toBe(1);
+    // `start()` 뒤의 로그아웃은 여전히 막는다.
+    bumpSessionGeneration();
+    expect(await store.image(world.item(1), 'thumb')).toBeNull();
+    expect(backend.stats.writes).toBe(1);
   });
 
   it('쓰기 직전의 쓰기 문: 로그아웃이 받는 도중에 있었다면(세대가 달라졌다) 쓰지도 않는다', async () => {
