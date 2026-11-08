@@ -219,6 +219,32 @@ describe('MA2 — 읽기 문, 알림 뒤', () => {
     expect(reads(backend)).toBe(1);
   });
 
+  it('(a″) 이름 없는 옛 알림(v1)도 기록된다: 내 응답이 먼저 올린 version 의 v1 알림은 증분이 아니라 전체 읽기 한 번이 문을 연다', async () => {
+    const world = new World();
+    for (let n = 1; n <= 5; n += 1) world.add(n);
+    const backend = createMemoryDiskBackend();
+    await warmDisk(world, backend, [1, 2, 3, 4, 5]);
+    const second = start(world, backend);
+    await ready(second);
+    backend.stats.reads = 0;
+    const held = world.holdLists();
+    await second.store.mutate({
+      method: 'POST',
+      path: `/v1/workspaces/${FIXTURE_WORKSPACE_ID}/expressions/${uuid(3)}/report`,
+      body: {reason: 'other'},
+    });
+    expect(held.waiting()).toBe(0); // 응답이 캐시 version 의 바로 다음이라 델타로 얹혔다(목록 읽기 없음)
+    second.store.changed(String(world.version)); // 그 변경의 상세 없는 v1 알림이 뒤늦게 온다: 알림 version = 지금 캐시 version
+    await settle();
+    // `since` 가 알림 version 보다 작을 수 없다: 증분이 아니라 전체 읽기가 시작됐다(그리기 문 `changePending` 만으로는 증분 읽기가 문을 연다).
+    expect(world.listCalls[world.listCalls.length - 1]).toBe('');
+    expect(reads(backend)).toBe(0);
+    held.all();
+    await settle(second);
+    expect(await second.store.image(world.item(5), 'large')).toMatch(/^file:\/\/\/fake\//);
+    expect(reads(backend)).toBe(1);
+  });
+
   it('(b) 알림보다 먼저 시작한 읽기는 알림을 확인하지 못한다 — 알림 뒤 시작한 읽기가 적용돼야 연다', async () => {
     const world = new World();
     for (let n = 1; n <= 4; n += 1) world.add(n);
@@ -409,10 +435,15 @@ describe('MA4 — 읽기 문, 목록에 없는 키', () => {
     // 옛 shelf 에는 숨긴 2번이 아직 있다(그리기 힌트일 뿐이다).
     const second = start(world, backend, {shelf: {read: () => shelfWrites[0], write: jest.fn(), clear: jest.fn()}});
     expect(second.store.snapshot().shelf.map(item => item.id)).toContain(uuid(2));
+    // 화면은 읽는 동안 shelf 의 항목(그림 크기·sha 를 가진 그리기 힌트)을 그대로 넘길 수 있다. 그 sha 로 디스크 키를 만들 수 있다.
+    const shelfItem = second.store.snapshot().shelf.find(item => item.id === uuid(2))!;
+    expect(shelfItem.media?.large.sha256).toBe(world.shaOf(2, 'large'));
     await ready(second);
     const hiddenItem = {id: uuid(2), name: 'expr_2'};
     expect(await second.store.image(hiddenItem, 'large')).toBeNull();
     expect(await second.store.image(hiddenItem, 'thumb')).toBeNull();
+    // 넘겨받은 항목이 media 를 가져도 확인된 목록에 없으면 디스크도 네트워크도 보지 않는다(키는 목록의 media 로만 만든다).
+    expect(await second.store.image(shelfItem, 'large')).toBeNull();
     expect(reads(backend)).toBe(0);
     expect(world.imageCalls).toHaveLength(0);
     // 바이트는 디스크에 아직 있다 — 읽히지 않을 뿐이다.
