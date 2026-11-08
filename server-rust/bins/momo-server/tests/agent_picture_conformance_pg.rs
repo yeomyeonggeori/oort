@@ -797,6 +797,23 @@ async fn seed_tenant(w: &World) -> Tenant {
     }
 }
 
+/// A mark row `age` old for `ws` (what the api's write leaves behind, at the age a test needs), written by
+/// the superuser: nobody else may write one.
+async fn seed_mark_row(w: &World, ws: Uuid, age: &str) {
+    sqlx::query(
+        "INSERT INTO agent_picture_mark (workspace_id, attachment_id, run_id, agent_member_id, written_at) \
+         VALUES ($1, $2, $3, $4, clock_timestamp() - $5::interval)",
+    )
+    .bind(ws)
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(age)
+    .execute(&w.su)
+    .await
+    .expect("mark row");
+}
+
 /// Another run of the same agent in the same channel (every token is one run's one slot).
 async fn fresh_run(w: &World, t: &Tenant) -> Uuid {
     let trigger = seed_message(&w.su, t.ws, t.channel, t.alice).await;
@@ -2965,11 +2982,12 @@ async fn an_instance_with_no_archive_answers_drive_not_configured() {
 
 // --- WA24: the api's own daily ceiling, and a forged world ----------------------------------
 
-/// The api counts, for itself, the `complete` attachments agent members uploaded in this workspace in
-/// the last 24 hours. At the ceiling a write is `429 cap_reached`: the object that was stored is deleted,
-/// nothing is written, one audit line says why. It is per workspace, counts nothing but agent uploads
-/// that are complete and recent, and a worker that forges whole runs with the BYPASSRLS role is held to
-/// the slot limit (slot 2 is a `404`) and then to the same ceiling.
+/// The api counts, for itself, the **marks** (`agent_picture_mark`, #5530) of this workspace from the last
+/// 24 hours: one per picture the api wrote for an agent. At the ceiling a write is `429 cap_reached`: the
+/// object that was stored is deleted, nothing is written, one audit line says why. It is per workspace and
+/// counts nothing but recent marks — an agent's `complete` attachment row that no write made is not one — and
+/// a worker that forges whole runs with the BYPASSRLS role is held to the slot limit (slot 2 is a `404`) and
+/// then to the same ceiling, which it cannot talk down by deleting the attachment its picture became.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn the_daily_ceiling_is_counted_by_the_api_and_a_forged_world_meets_it_too() {
@@ -3000,12 +3018,15 @@ async fn the_daily_ceiling_is_counted_by_the_api_and_a_forged_world_meets_it_too
     let other = seed_tenant(&w).await;
     expect_201(&write_once(&w, &other, picture.clone()).await.2);
 
-    // only an agent's complete upload of the last day counts
+    // only a mark of the last day counts (#5530). Attachment rows of every kind are not what the api counts:
+    // a person's upload, a failed one, an old agent row — and an agent's complete row from today that no
+    // write of the api made (the old source counted it and would refuse this workspace's first picture)
     let counted = seed_tenant(&w).await;
     for (uploader, status, age, drive_file) in [
         (counted.alice, "complete", "0 seconds", Some("human")),
         (counted.agent, "failed", "0 seconds", None),
         (counted.agent, "complete", "2 days", Some("old")),
+        (counted.agent, "complete", "0 seconds", Some("agent-today")),
     ] {
         sqlx::query(&format!(
             "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, message_id, \
@@ -3021,13 +3042,23 @@ async fn the_daily_ceiling_is_counted_by_the_api_and_a_forged_world_meets_it_too
         .await
         .unwrap();
     }
+    seed_mark_row(&w, counted.ws, "2 days").await; // a mark two days old is outside the window
     let (_, _, seen) = write_once(&w, &counted, picture.clone()).await;
     assert_eq!(
         seen.status,
         201,
-        "a human's upload, a failed one and a two-day-old one are not today's agent pictures: {}",
+        "no attachment row and no old mark is today's count: {}",
         seen.text()
     );
+    // that write made its own mark, so the next one meets the ceiling
+    let (_, _, seen) = write_once(&w, &counted, picture.clone()).await;
+    expect_refused(&seen, 429, "cap_reached");
+
+    // a mark of today is what counts, wherever it came from: seeded directly, the first write is the cap
+    let marked = seed_tenant(&w).await;
+    seed_mark_row(&w, marked.ws, "1 hour").await;
+    let (_, _, seen) = write_once(&w, &marked, picture.clone()).await;
+    expect_refused(&seen, 429, "cap_reached");
 
     // a forged world, written by the worker's own (BYPASSRLS) role: an agent, its membership, a trigger
     // message and a run — and tokens
@@ -3064,7 +3095,16 @@ async fn the_daily_ceiling_is_counted_by_the_api_and_a_forged_world_meets_it_too
     let (id, _, _) = expect_201(&put(&w, ws, &within, picture.clone()).await);
     let row = attachment_row(&w, id).await;
     assert_eq!((row.uploader, row.channel_id), (forged_agent, channel));
-    // …and the next forged run meets the api's ceiling
+    // …the worker's own role (it may DELETE and UPDATE `attachment`) deletes the row its picture became — what
+    // used to bring the count back to zero (#5530; the other ways, `member.kind` and the parents' deletes, are
+    // `agent_picture_pg`'s fifteen attempts: a run whose agent seat holds a person is refused at the spend, so
+    // it cannot be done here and still reach the ceiling)…
+    sqlx::query("DELETE FROM attachment WHERE id = $1")
+        .bind(id)
+        .execute(&w.worker)
+        .await
+        .expect("the worker may delete an attachment row");
+    // …and the next forged run meets the api's ceiling all the same
     let run = trigger_run_slot(&w, ws, channel, forged_agent, victim.alice).await;
     let again = forge_token(&w, ws, run, forged_agent, 1).await;
     let before = w.files.objects().len();

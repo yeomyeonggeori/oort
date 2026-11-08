@@ -821,12 +821,21 @@ mod tests {
     /// grant, so no new RLS policy and the `attachment-media-lockdown` block (the same text in
     /// three files) is untouched. 177 is #5370's (`team_ai_task_delegation`, above); the two landed in that order
     /// so the list is contiguous again.
+    ///
+    /// 179 is #5530's 「그림 하루 상한을 워커가 줄일 수 없는 원본에서 세기」 (ADR-0151 증보 8 보충, 구현 보안 검수
+    /// M-1 (b)): `agent_picture_mark`, one append-only row per picture the api wrote for an agent (workspace,
+    /// attachment, run, agent, time) — **no foreign key in either direction** (a cascade runs as the table's
+    /// owner), tenant ENABLE + FORCE + `ws_isolation`, a trigger that refuses every UPDATE and the delete of
+    /// any row inside the 24-hour window the api counts, and the minimum grants (`momo_app` SELECT, INSERT,
+    /// DELETE; nobody else holds anything, `agent-picture-mark-lockdown`). The same migration re-issues
+    /// 175's `attachment-write-token-lockdown` block (`momo_worker` loses DELETE, `momo_app` gains it for the
+    /// api-side sweep): the same text in this migration and both role bootstraps.
     #[test]
-    fn discovers_contiguous_migrations_001_to_178() {
+    fn discovers_contiguous_migrations_001_to_179() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=178).collect();
+        let expected: Vec<i64> = (1..=179).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -834,7 +843,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=178 under {}",
+            "expected contiguous 001..=179 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -842,7 +851,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("178_attachment_media_image"));
+            .starts_with("179_agent_picture_mark"));
     }
 
     #[test]
