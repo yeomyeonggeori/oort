@@ -797,7 +797,6 @@ async fn seed_tenant(w: &World) -> Tenant {
     }
 }
 
-/// Another run of the same agent in the same channel (every token is one run's one slot).
 /// A mark row `age` old for `ws` (what the api's write leaves behind, at the age a test needs), written by
 /// the superuser: nobody else may write one.
 async fn seed_mark_row(w: &World, ws: Uuid, age: &str) {
@@ -815,6 +814,7 @@ async fn seed_mark_row(w: &World, ws: Uuid, age: &str) {
     .expect("mark row");
 }
 
+/// Another run of the same agent in the same channel (every token is one run's one slot).
 async fn fresh_run(w: &World, t: &Tenant) -> Uuid {
     let trigger = seed_message(&w.su, t.ws, t.channel, t.alice).await;
     seed_run(&w.su, t.ws, t.channel, t.agent, trigger).await

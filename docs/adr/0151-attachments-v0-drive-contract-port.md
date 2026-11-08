@@ -1139,7 +1139,7 @@ S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀
 
 #### 수용 기준 보충 (구현이 내야 할 사보타주 단정 — 각 항목은 해당 줄을 지우면 빨개져야 한다)
 
-- **WB1** 세는 원본: 상한 2에서 오래된(25시간) 표지·다른 워크스페이스의 표지·모든 종류의 `attachment` 행(에이전트의 `complete` 행 포함)은 세지 않고 23시간 전 표지 하나는 센다. 쓰기가 표지 줄을 하나 더한다. 서버 시험도 같다(`momo-server`의 일일 상한 시험: 표지는 센다, 오늘의 에이전트 `complete` 행은 세지 않는다, 위조 세계에서 워커가 첨부 행을 지우고 `member.kind`를 바꿔도 다음 쓰기가 429다). 옛 원본으로 되돌리면 빨갛다.
+- **WB1** 세는 원본: 상한 2에서 오래된(25시간) 표지·다른 워크스페이스의 표지·모든 종류의 `attachment` 행(에이전트의 `complete` 행 포함)은 세지 않고 23시간 전 표지 하나는 센다. 쓰기가 표지 줄을 하나 더한다. 서버 시험도 같다(`momo-server`의 일일 상한 시험: 표지는 센다, 오늘의 에이전트 `complete` 행은 세지 않는다, 위조 세계에서 워커가 자기 그림이 된 첨부 행을 지워도 다음 쓰기가 429다 — `member.kind`·부모 삭제는 HTTP 경로로는 상한까지 갈 수 없어서(에이전트 자리가 사람이면 풀기가 거절한다) WB2의 열다섯 시도가 잰다). 옛 원본으로 되돌리면 빨갛다.
 - **WB2** 워커의 시도: 시험이 `attachment` 고치기·지우기, `member.kind`, channel·run·workspace(같은 id로 다시 만들기까지) 삭제, 토큰·표지 표의 DELETE·UPDATE·TRUNCATE, `SET ROLE`로 닿는 `momo_helper_read`·`momo_memory`까지 열다섯 시도를 하고(허용되는 것은 값이 그대로, 거절되는 것은 42501) api의 함수와 표지 줄 수로 잰다. 옛 원본으로 되돌리면 `attachment`·`member`·channel·workspace를 건드린 시도가, 토큰 셈으로 되돌리면 channel·run·workspace 삭제가 빨갛다.
 - **WB3** 표 모양: 표지 표에 FK가 0(양방향 카탈로그), 키가 `(workspace_id, attachment_id)`, RLS 켜짐·FORCE·정책 하나. 역할마다(`public`·`momo_helper_read`·`momo_memory` 포함 모든 비초월 역할) 표지 표의 권한이 `momo_app`의 SELECT·INSERT·DELETE뿐이다. 운영 역할 파일 순서(역할 → migration → 역할)의 시험도 같다.
 - **WB4** 트리거: 한 분·23시간 59분 전 줄의 DELETE는 거절되고 24시간 1분 전 줄은 지워진다. 어떤 UPDATE도 거절된다(소유자도).
@@ -1154,7 +1154,7 @@ S3의 「호출자 0」은 끝났다. 이 길의 호출자는 **하나**다: 팀
 2. **표지 없이 쓰인 첨부.** 워커가 `attachment` 행을 직접 INSERT하는 길은 이 상한이 막는 길이 아니다(바이트는 api 보관소에 가지 않는다 — 그림 바이트가 api 보관소에 쓰이는 길은 이 PUT 하나이고 거기서 표지가 더해진다).
 3. **삭제된 워크스페이스의 표지 줄은 남는다**(B2·B4의 대가): id·시각뿐, 하루 상한 이하, 아무것도 가리키지 않는다.
 4. **api가 손상되면**(비우회 `momo_app`) 표지를 더하지 않거나 창 밖 줄을 지울 수 있다. 이 상한은 워커를 상대로 한다(api의 쓰기 길이 상한을 세는 주체다). 창 안의 줄은 트리거가 api에게도 지우지 못하게 한다.
-5. **되돌릴 때**: 이 migration 이전의 코드로 되돌리면 옛 발급이 하루 지난 토큰을 지우려다 `permission denied`(42501)로 실패한다(그림이 실패 문장으로 끝난다). 운영 DB에서 `GRANT DELETE ON attachment_write_token TO momo_worker;`로 되돌리고(표지 표와 트리거는 그대로 둬도 무해하다), 그 코드는 `attachment` 행을 세므로 위 구현 검수 M-1 (b)의 상태로 돌아간다.
+5. **되돌릴 때**: 이 migration 이전의 코드로 되돌리면 옛 발급이 하루 지난 토큰을 지우려다 `permission denied`(42501)로 실패한다(그림이 실패 문장으로 끝난다). 운영 DB에서 `GRANT DELETE ON attachment_write_token TO momo_worker;`로 되돌리고(표지 표와 트리거는 그대로 둬도 무해하다), 그 코드는 `attachment` 행을 세므로 위 구현 검수 M-1 (b)의 상태로 돌아간다. **배포할 때도 같은 창이 한 번 있다**: migration 179가 적용된 뒤 옛 워커가 아직 돌면 그 워커의 발급이 같은 42501로 실패하고(`PictureRefusal::Failed("database")`), 그 위임은 그림 실패 문장(`picture_failed`)으로 끝난다(run은 무너지지 않는다). 워커가 새 판으로 바뀌면 닫힌다. 옛 api가 그 창에 쓴 그림은 표지가 없어 세지 않는다(창 길이만큼 덜 센다).
 6. **동시 쓰기의 세기→INSERT 순서**(구현 검수 I-4)는 그대로다: READ COMMITTED에서 `WRITE_IN_FLIGHT`×프로세스 수만큼 넘칠 수 있다.
 
 #### runtime-unverified
