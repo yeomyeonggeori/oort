@@ -517,6 +517,42 @@ describe('read-only phone-native work detail', () => {
   });
 });
 
+// 작업 목록의 모달 플래그는 목록이 **맨 위**일 때만 선다 (#5546). 시트의 「#채널에서 보기」는 세션 없이 대화를 목록 위에 연다 —
+// 목록이 모달인 채로 남으면 iOS 는 형제인 대화 판을 통째로 낭독에서 뺀다(보이는 화면에 낭독이 못 닿는다). 대화가 맨 위이므로 대화가
+// 모달 경계이고, 판 뒤의 목록은 빠진다. 뒤로 하면 목록이 다시 경계다.
+describe('작업 목록에서 연 대화 (#5546)', () => {
+  const HIDDEN = {includeHiddenElements: true} as const;
+
+  it('「채널에서 보기」로 연 대화는 낭독에 닿고 판 뒤 작업 목록은 빠지며, 뒤로 하면 목록이 돌아온다', async () => {
+    installFetch();
+    await openBoard();
+    fireEvent.press(screen.getByTestId('work-job-row-SESSION-APP'));
+    await waitFor(() =>
+      expect(screen.getByTestId('team-detail-open-channel')).toBeTruthy(),
+    );
+    fireEvent.press(screen.getByTestId('team-detail-open-channel'));
+    // 시트가 먼저 미끄러져 내려간 뒤에 대화가 선다(#4458).
+    await waitFor(
+      () => expect(screen.getByTestId('conversation-title', HIDDEN)).toHaveTextContent(/general/),
+      {timeout: 8000},
+    );
+    // 대화는 낭독에 닿는다 — 기본 찾기(낭독에서 빠진 것은 찾지 않는다)로 잰다.
+    expect(screen.getByTestId('conversation-title')).toBeTruthy();
+    expect(screen.getAllByTestId('composer-input')).toHaveLength(1);
+    expect(screen.getByTestId('conversation-pane')).toHaveProp('accessibilityViewIsModal', true);
+    expect(screen.getByTestId('work-list-pane', HIDDEN)).toHaveProp('accessibilityViewIsModal', false);
+    // 판 뒤의 작업 목록은 마운트된 채 낭독에서만 빠진다.
+    expect(screen.getByTestId('work-jobs-list', HIDDEN)).toBeTruthy();
+    expect(screen.queryByTestId('work-jobs-list')).toBeNull();
+
+    const backs = screen.getAllByTestId('header-back');
+    fireEvent.press(backs[backs.length - 1]);
+    await waitFor(() => expect(screen.queryByTestId('conversation-title', HIDDEN)).toBeNull());
+    expect(screen.getByTestId('work-list-pane')).toHaveProp('accessibilityViewIsModal', true);
+    expect(screen.getByTestId('work-jobs-list')).toBeTruthy();
+  });
+});
+
 describe('bounded model and privacy boundary', () => {
   // LIVE-2 added `issueDisplayAttach` and its grant to the shared core, which
   // is exactly the shape this guard already exists to keep off the phone: the

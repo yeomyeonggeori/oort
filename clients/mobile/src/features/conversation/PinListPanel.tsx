@@ -115,7 +115,10 @@ export function PinListPanel({
   return (
     // 스레드 패널·작업 목록과 같은 층·같은 제스처. 대화의 엣지 스와이프 래퍼와
     // 부모-자식으로 겹치고 안쪽이 이긴다는 판정은 `EdgeSwipeBack` 이 스스로 한다.
+    // 판은 대화 화면 전체(머리·목록·입력창)를 덮는 불투명한 면이라 판 자신이 VoiceOver 의 모달 경계다(#5546) — 스레드 판·정보 페이지와
+    // 같은 자리. 안 걸면 판 뒤의 보이지 않는 채널 ‹·입력창·보내기에 낭독 초점이 닿는다.
     <EdgeSwipeBack
+      accessibilityViewIsModal
       style={styles.overlay}
       onBack={onClose}
       testID="pin-list-pane">

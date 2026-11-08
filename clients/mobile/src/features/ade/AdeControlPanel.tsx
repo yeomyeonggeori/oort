@@ -365,7 +365,9 @@ export function AdeControlPanel({
     // 스레드 패널과 같은 층·같은 제스처다. 대화의 엣지 스와이프 래퍼와 부모-자식
     // 으로 겹치고, 안쪽이 이긴다는 판정은 `EdgeSwipeBack` 이 컨텍스트로 스스로
     // 한다 — 이 화면을 열어 둔 채 엣지를 밀면 닫히는 것은 이 화면 하나다.
+    // 판은 대화 화면 전체를 덮는 불투명한 면이라 판 자신이 VoiceOver 의 모달 경계다(#5546) — 스레드 판·정보 페이지와 같은 자리.
     <EdgeSwipeBack
+      accessibilityViewIsModal
       style={styles.overlay}
       onBack={onClose}
       // 이 판 자체를 이름으로 집을 수 있어야 한다: 「덮을 뿐 밀지 않는다」는 이
