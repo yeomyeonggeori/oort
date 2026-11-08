@@ -8,7 +8,8 @@
 //
 // 재는 것: 7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류, 글자 뒤 바탕 대비,
 // 움직임 줄이기(두 장면이 같다)·WebGL 끔(대체 바탕)·화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드),
-// 언어 첫 방문·기억. 하나라도 어긋나면 exit 1.
+// 언어 첫 방문·기억, 좁은 폭(주 버튼에 칩·터치 44·TestFlight 표지·분할 버튼 포커스·메뉴 포커스 빠짐),
+// 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac). 하나라도 어긋나면 exit 1.
 // =============================================================================
 
 import { createRequire } from "node:module";
@@ -18,15 +19,15 @@ import { fileURLToPath } from "node:url";
 
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(resolve(SITE, "../web/package.json"));
-const { chromium } = require("playwright");
+const { chromium, devices } = require("playwright");
 
 const BASE = (process.env.SITE_URL || "http://127.0.0.1:21410").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR ? resolve(process.env.SHOTS_DIR) : "";
 const LANGS = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "es", "fr"];
-const SHOT_LANGS = new Set(["ko", "en", "ja", "fr"]);
+const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").map((s) => s.trim()));
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
-// ONLY=pages,motion,webgl,chip,lang,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,weight").split(",").map((s) => s.trim()));
+// ONLY=pages,motion,webgl,chip,lang,narrow,phone,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -71,7 +72,8 @@ async function measure(page) {
 /** 글자 뒤 바탕의 대비: 글자를 투명하게 한 장면을 찍어 상자 안 화소의 밝기를 잰다. */
 async function heroContrast(page, decoder) {
   const boxes = await page.evaluate(() => {
-    const els = [...document.querySelectorAll(".hero h1 span, .hero .lead, .hero .spec, .hero .spec-link")];
+    const els = [...document.querySelectorAll(".hero h1 span, .hero .lead, .hero .spec, .hero .spec-link, .hero .phone-note span")]
+      .filter((el) => el.getBoundingClientRect().width > 0);
     const list = els.map((el) => {
       const r = el.getBoundingClientRect();
       const color = getComputedStyle(el).color;
@@ -80,7 +82,7 @@ async function heroContrast(page, decoder) {
     document.documentElement.classList.add("probe-hide");
     const st = document.createElement("style");
     st.id = "probe-style";
-    st.textContent = ".probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .spec, .probe-hide .hero .spec-link { color: transparent !important; }";
+    st.textContent = ".probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .spec, .probe-hide .hero .spec-link, .probe-hide .hero .phone-note { color: transparent !important; }";
     document.head.appendChild(st);
     return list;
   });
@@ -339,7 +341,171 @@ async function main() {
     await blocked.close();
   }
 
-  // 6) 무게
+
+  // 6) 좁은 폭(390, 폰이 아닌 브라우저): 주 버튼에 칩이 보이고, 터치 44, TestFlight 표지, 분할 버튼 포커스, 메뉴 포커스 빠짐
+  if (ONLY.has("narrow")) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+    await ctx.addInitScript(() => {
+      const fake = { brands: [], mobile: false, platform: "macOS", getHighEntropyValues: () => Promise.reject(new Error("unknown")) };
+      Object.defineProperty(Navigator.prototype, "userAgentData", { configurable: true, get: () => fake });
+    });
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
+    await settle(page);
+    const cdp = await ctx.newCDPSession(page);
+    // 브라우저가 계산한 접근성 이름(숨긴 글자는 빠진다)
+    const axName = async (selector) => {
+      const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+      const { nodes } = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+      return nodes[0]?.name?.value ?? "";
+    };
+    const chipSeen = () => page.evaluate(() => {
+      const chip = document.querySelector("[data-chip-label]").getBoundingClientRect();
+      const main = document.querySelector("#get-mac").getBoundingClientRect();
+      return { w: Math.round(chip.width), inside: chip.width > 0 && chip.left >= main.left && chip.right <= main.right && chip.top >= main.top && chip.bottom <= main.bottom, text: document.querySelector("[data-chip-label]").textContent };
+    });
+    const before = { name: await axName("#get-mac"), ...(await chipSeen()) };
+    check("390: 주 버튼 글자·접근성 이름에 고른 칩(Apple Silicon)", before.inside && before.w > 0 && /Apple Silicon/.test(before.name), JSON.stringify(before));
+    await page.locator(".get-more").click();
+    await page.locator('.chip-menu [data-chip="x64"]').click();
+    const after = { name: await axName("#get-mac"), href: await page.locator("#get-mac").getAttribute("href"), ...(await chipSeen()) };
+    check("390: Intel 을 고르면 버튼 글자·접근성 이름도 Intel", after.inside && after.text === "Intel" && /Intel/.test(after.name) && !/Apple Silicon/.test(after.name) && after.href === values.DMG_X64_URL, JSON.stringify(after));
+
+    // 터치 크기: 600px 아래 컨트롤은 44 이상(언어 단추·머리 「브라우저에서 열기」·기기 줄 단추·「다른 기기」·메뉴 항목)
+    const sizes = async (sel) => page.evaluate((s) => [...document.querySelectorAll(s)].map((el) => {
+      const r = el.getBoundingClientRect();
+      return [Math.round(r.width), Math.round(r.height)];
+    }), sel);
+    const tall = (list) => list.length > 0 && list.every(([w, h]) => w >= 44 && h >= 44);
+    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), more: await sizes(".spec-link") };
+    await page.locator(".lang-btn").click();
+    top.langItems = await sizes(".lang-list a");
+    await page.keyboard.press("Escape");
+    await page.locator(".get-more").click();
+    top.chipItems = await sizes(".chip-menu button");
+    await page.keyboard.press("Escape");
+    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && tall(top.more) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems);
+    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 보임 포함)", okTouch, JSON.stringify(top));
+
+    // H1: TestFlight 표지는 버튼 문법(채움 + 알약)이 아니다
+    const tag = await page.evaluate(() => {
+      const el = document.querySelector(".row .tag");
+      const cs = getComputedStyle(el);
+      const a = /rgba\(\d+,\s*\d+,\s*\d+,\s*([\d.]+)\)/.exec(cs.backgroundColor);
+      const alpha = cs.backgroundColor === "transparent" ? 0 : a ? +a[1] : 1;
+      return { bg: cs.backgroundColor, alpha, radius: parseFloat(cs.borderTopLeftRadius), interactive: el.closest("a,button") !== null };
+    });
+    check("TestFlight 표지가 채움 알약이 아니다(배경 투명 또는 반경 10 이하)", !tag.interactive && (tag.alpha === 0 || tag.radius <= 10), JSON.stringify(tag));
+
+    // 좁은 폭의 언어 메뉴: 7개 언어 모두 판이 화면 안에 있고 항목이 한 줄이다
+    const menus = [];
+    for (const l of LANGS) {
+      await page.goto(`${BASE}/${l}/`, { waitUntil: "load" });
+      await page.locator(".lang-btn").click();
+      menus.push(await page.evaluate((code) => {
+        const m = document.getElementById("lang-list").getBoundingClientRect();
+        const items = [...document.querySelectorAll(".lang-list a")].map((a) => a.getBoundingClientRect().height);
+        return { code, left: Math.round(m.left), right: Math.round(m.right), vw: document.documentElement.clientWidth, oneLine: items.every((h) => h <= 48) };
+      }, l));
+    }
+    check("390: 언어 메뉴가 7개 언어 모두 화면 안, 항목 한 줄", menus.every((m) => m.left >= 0 && m.right <= m.vw && m.oneLine), JSON.stringify(menus.filter((m) => !(m.left >= 0 && m.right <= m.vw && m.oneLine))));
+    await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
+    await settle(page);
+
+    // L1: 언어 메뉴는 포커스가 판 밖으로 나가면 닫힌다
+    await page.locator(".lang-btn").click();
+    for (let i = 0; i < LANGS.length + 1; i++) await page.keyboard.press("Tab");
+    const tabOut = await page.evaluate(() => ({ hidden: document.getElementById("lang-list").hidden, expanded: document.querySelector(".lang-btn").getAttribute("aria-expanded"), focus: document.activeElement?.className }));
+    check("언어 메뉴: Tab 으로 판 밖에 나가면 닫힌다", tabOut.hidden === true && tabOut.expanded === "false" && /web-link/.test(tabOut.focus), JSON.stringify(tabOut));
+    await ctx.close();
+
+    // M1: 분할 버튼 포커스에도 반쪽 모서리가 그대로이고 링이 보인다(1280, 키보드)
+    const wide = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const wp = await wide.newPage();
+    await wp.goto(`${BASE}/en/`, { waitUntil: "load" });
+    await settle(wp);
+    await wp.locator(".get-more").focus();
+    await wp.keyboard.press("Shift+Tab");
+    const ring = () => wp.evaluate(() => {
+      const el = document.activeElement;
+      const cs = getComputedStyle(el);
+      const group = getComputedStyle(document.querySelector(".get"));
+      return { id: el.id || el.className, fv: el.matches(":focus-visible"), tl: cs.borderTopLeftRadius, tr: cs.borderTopRightRadius, br: cs.borderBottomRightRadius, bl: cs.borderBottomLeftRadius, ring: cs.outlineStyle !== "none" || group.outlineStyle !== "none" };
+    });
+    const onMain = await ring();
+    await wp.keyboard.press("Tab");
+    const onMore = await ring();
+    if (SHOTS) await wp.screenshot({ path: resolve(SHOTS, "focus-more-en-1280-light.png"), clip: { x: 340, y: 380, width: 600, height: 200 } });
+    check("분할 버튼 포커스: 반쪽 모서리 그대로, 링 보임", onMain.id === "get-mac" && onMain.fv && onMain.tr === "0px" && onMain.br === "0px" && onMain.tl !== "0px" && onMain.ring
+      && onMore.fv && onMore.tl === "0px" && onMore.bl === "0px" && onMore.tr !== "0px" && onMore.ring, JSON.stringify({ onMain, onMore }));
+    await wide.close();
+  }
+
+  // 7) 폰 흉내(iPhone 14, 390): 첫 화면 주 행동은 웹으로 열기, Mac 내려받기는 기기 목록에서 닿는다. JS 가 없으면 Mac 이 기본
+  if (ONLY.has("phone")) {
+    const iphone = { ...devices["iPhone 14"] };
+    delete iphone.defaultBrowserType;
+    for (const lang of ["ko", "en"]) {
+      const ctx = await browser.newContext({ ...iphone, colorScheme: "light" });
+      const page = await ctx.newPage();
+      const errors = watch(page);
+      await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+      await settle(page);
+      const st = await page.evaluate(() => {
+        const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const web = document.getElementById("get-web");
+        const r = web.getBoundingClientRect();
+        return {
+          phone: document.documentElement.hasAttribute("data-phone"),
+          webHref: web.getAttribute("href"), webVisible: vis(web), webInFirstScreen: r.bottom <= window.innerHeight, webH: Math.round(r.height),
+          macHidden: !vis(document.getElementById("get-mac")),
+          notes: [...document.querySelectorAll(".hero .phone-note")].filter(vis).length,
+          installTitle: document.getElementById("install-title").textContent,
+        };
+      });
+      // Mac 내려받기 두 줄: 스크롤해 닿으면 그 자리를 누를 수 있다
+      const rows = [];
+      for (const chip of ["arm", "x64"]) {
+        const a = page.locator(`.row a[data-row="${chip}"]`);
+        await a.scrollIntoViewIfNeeded();
+        rows.push(await a.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { href: el.getAttribute("href"), hit: el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)), h: Math.round(r.height) };
+        }));
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(100);
+      const contrast = await heroContrast(page, decoder);
+      const median = Math.min(...contrast.map((c) => c.median));
+      const rowsOk = rows[0].href === values.DMG_ARM_URL && rows[1].href === values.DMG_X64_URL && rows.every((r) => r.hit && r.h >= 44);
+      check(`iPhone 흉내 ${lang}: 첫 화면 주 행동은 웹(${values.WEB_URL}), Mac 내려받기는 기기 목록에서 닿음`,
+        st.phone && st.webHref === values.WEB_URL && st.webVisible && st.webInFirstScreen && st.macHidden && st.notes === 2 && /Mac/.test(st.installTitle) && rowsOk && errors.length === 0 && median >= 4.5,
+        `${JSON.stringify(st)} rows=${JSON.stringify(rows)} errors=${errors.length} contrast=${median.toFixed(2)}`);
+      if (SHOTS) await page.screenshot({ path: resolve(SHOTS, `iphone-${lang}-390-light.png`), fullPage: true });
+      await ctx.close();
+    }
+    // JS 가 없으면 표지가 없어 Mac 이 기본(폰 UA 여도)
+    const nojs = await browser.newContext({ ...iphone, javaScriptEnabled: false });
+    const np = await nojs.newPage();
+    await np.goto(`${BASE}/ko/`, { waitUntil: "load" });
+    const ns = await np.evaluate(() => {
+      const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      return { phone: document.documentElement.hasAttribute("data-phone"), mac: vis(document.getElementById("get-mac")), web: vis(document.getElementById("get-web")), href: document.getElementById("get-mac").getAttribute("href") };
+    });
+    check("JS 없음: 폰이어도 첫 화면은 Mac 내려받기(Apple Silicon)", !ns.phone && ns.mac && !ns.web && ns.href === values.DMG_ARM_URL, JSON.stringify(ns));
+    await nojs.close();
+    // 폰이 아닌 좁은 창(390, 데스크탑 UA)은 Mac 이 첫 화면이다
+    const desk = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const dp = await desk.newPage();
+    await dp.goto(`${BASE}/ko/`, { waitUntil: "load" });
+    await settle(dp);
+    const ds = await dp.evaluate(() => ({ phone: document.documentElement.hasAttribute("data-phone"), mac: document.getElementById("get-mac").getBoundingClientRect().height > 0 }));
+    check("데스크탑 브라우저 390 폭은 폰 표지 없이 Mac 이 첫 화면", !ds.phone && ds.mac, JSON.stringify(ds));
+    await desk.close();
+  }
+
+  // 8) 무게
   if (ONLY.has("weight")) {
     const dist = resolve(SITE, "dist");
     const html = LANGS.map((l) => statSync(resolve(dist, l, "index.html")).size);

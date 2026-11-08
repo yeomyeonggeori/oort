@@ -110,6 +110,7 @@ img, svg, canvas { display: block; }
 }
 .chip-menu button:focus { background: var(--surface-hover); }
 .lang-list a:focus-visible, .chip-menu button:focus-visible { outline-offset: -2px; }
+.lang-list a { white-space: nowrap; }
 .lang-list a[aria-current] { font-weight: 700; }
 .lang-list .tick, .chip-menu .tick { color: var(--signal-text); visibility: hidden; }
 .lang-list a[aria-current] .tick, .chip-menu [aria-checked="true"] .tick { visibility: visible; }
@@ -248,6 +249,9 @@ html[data-phone] .phone-get { display: flex; flex-direction: column; align-items
 @media (max-width: 560px) {
   .top { padding: 12px 16px; }
   .lang-btn { width: 44px; padding: 0; justify-content: center; }
+  /* 언어 단추가 머리 가운데쯤에 서므로 판은 머리 왼쪽 안쪽 여백에 맞춘다(단추 오른쪽 끝에 맞추면 화면 왼쪽 밖으로 나간다) */
+  .pop { position: static; }
+  .lang-list { left: 16px; right: auto; top: calc(100% - 4px); }
   .lang-btn .lang-name, .lang-btn .lang-chev { display: none; }
   .hero { padding: 112px 20px 176px; min-height: 620px; }
   .shot { margin-top: -132px; padding: 0 16px; }
