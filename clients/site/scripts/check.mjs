@@ -475,8 +475,9 @@ async function main() {
           return { href: el.getAttribute("href"), hit: el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)), h: Math.round(r.height) };
         }));
       }
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(100);
+      // scroll-behavior: smooth 라 scrollTo 는 움직이는 중일 수 있다. 즉시 맨 위로 옮기고 닿은 뒤에 잰다(부하에서 대비를 스크롤 중에 재던 경주)
+      await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
+      await page.waitForFunction(() => window.scrollY === 0);
       const contrast = await heroContrast(page, decoder);
       const median = Math.min(...contrast.map((c) => c.median));
       const rowsOk = rows[0].href === values.DMG_ARM_URL && rows[1].href === values.DMG_X64_URL && rows.every((r) => r.hit && r.h >= 44);
