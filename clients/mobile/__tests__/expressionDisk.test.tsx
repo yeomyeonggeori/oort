@@ -272,6 +272,41 @@ describe('MA2 — 읽기 문, 알림 뒤', () => {
     expect(reads(backend)).toBe(1);
   });
 
+  it('(b′) 알림 version 이 읽기 응답보다 앞서면(뒤처진 읽기) 그 읽기는 알림을 확인하지 못한다 — 알림 version 까지 담은 읽기가 적용돼야 연다', async () => {
+    const world = new World();
+    for (let n = 1; n <= 3; n += 1) world.add(n);
+    const backend = createMemoryDiskBackend();
+    await warmDisk(world, backend, [1, 2, 3]);
+    const second = start(world, backend);
+    await ready(second);
+    backend.stats.reads = 0;
+    const known = world.version;
+    // 알림의 변경(v+2)은 아직 목록에 보이지 않는다(뒤처진 복제본·앞단 캐시). 서버 목록은 v+1 까지만 왔다.
+    const ahead = String(known + 2);
+    world.add(4);
+    second.store.detailed({
+      type: 'expression.changed.detail',
+      workspaceId: FIXTURE_WORKSPACE_ID,
+      version: ahead,
+      action: 'edited',
+      expressionIds: [uuid(1)],
+    });
+    await settle(second);
+    // 알림이 부른 증분 읽기(`since` = v)는 적용됐고(응답 v+1) 그리기 문은 내려갔지만, 응답이 알림 version 에 못 미쳐 디스크 문은 닫힌 채다.
+    expect(world.listCalls[world.listCalls.length - 1]).toBe(`?since=${known}`);
+    expect(second.store.snapshot().items.some(item => item.id === uuid(4))).toBe(true);
+    expect(second.store.snapshot().changePending).toBe(false);
+    expect(await second.store.image(world.item(2), 'large')).toMatch(/^file:\/\/\/session\//);
+    expect(reads(backend)).toBe(0);
+    // 서버 목록이 알림 version 에 닿는다: 그 version 을 담은 다음 읽기(`since` = v+1 < 알림 ≤ 응답)가 문을 연다.
+    world.add(5);
+    expect(String(world.version)).toBe(ahead);
+    await second.store.refresh();
+    await settle(second);
+    expect(await second.store.image(world.item(3), 'large')).toMatch(/^file:\/\/\/fake\//);
+    expect(reads(backend)).toBe(1);
+  });
+
   it('(c) 재연결·오프라인 복귀는 전체 목록이 적용돼야 연다 — 증분 읽기는 열지 못한다', async () => {
     const world = new World();
     for (let n = 1; n <= 5; n += 1) world.add(n);
