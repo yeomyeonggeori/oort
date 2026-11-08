@@ -604,6 +604,13 @@ function renderShell() {
 
 type Node = {props?: Record<string, unknown>};
 
+/**
+ * 스레드 판이 열려 있는 동안 채널 쪽(머리·목록·입력창)은 화면 낭독에서 빠진다(#5544). 그 상태에서 「지금 열린 대화」·「채널의 목록」·
+ * 「채널 도크의 고지가 없다」를 묻는 찾기는 숨은 요소까지 본다 — 안 그러면 「없다」 단정이 판 뒤에 숨은 채널 때문에 거저 통과하고,
+ * `[0]` 은 스레드 판의 목록으로 바뀐다.
+ */
+const EVEN_HIDDEN = {includeHiddenElements: true} as const;
+
 /** 목록이 **물들인** 행들 — 점프가 실제로 그 행을 찾아 내려앉았다는 증거. */
 function landedIds(): string[] {
   return screen.UNSAFE_root.findAll(
@@ -659,7 +666,7 @@ async function expectLanded(
 ): Promise<void> {
   await waitFor(
     () =>
-      expect(screen.getByTestId('conversation-title')).toHaveTextContent(title),
+      expect(screen.getByTestId('conversation-title', EVEN_HIDDEN)).toHaveTextContent(title),
     SETTLE,
   );
   if (inThread) {
@@ -897,7 +904,7 @@ describe('세 상태 × 대상 종류 (#2569 수용기준 1·3)', () => {
       // 앞 방의 행이 착지로 물들지 않았다 — 앞 방의 'ready' 에 속지 않았다.
       expect(landedIds()).not.toContain(RANDOM_MSG);
       // 앞 방에서 빗나간 점프의 흔적이 없다.
-      expect(screen.queryByTestId('jump-missed')).toBeNull();
+      expect(screen.queryByTestId('jump-missed', EVEN_HIDDEN)).toBeNull();
     });
   });
 });
@@ -1654,9 +1661,9 @@ function channelSub(channelId: string): FakeChannelSub | null {
   return last?.getSubscription(centrifugoChannelName(WS, channelId)) ?? null;
 }
 
-/** 대화의 목록. 스레드 판이 열려 있으면 그 판의 목록은 두 번째다. */
+/** 대화의 목록. 스레드 판이 열려 있으면 그 판의 목록은 두 번째다(채널 목록은 그동안 낭독에서 빠져 있어 숨은 것까지 센다). */
 function channelList() {
-  return screen.getAllByTestId('timeline-list')[0];
+  return screen.getAllByTestId('timeline-list', EVEN_HIDDEN)[0];
 }
 
 const CONTENT = 4000;
@@ -1758,7 +1765,7 @@ async function readingGeneralAtItsEnd(): Promise<void> {
   fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
   await waitFor(
     () =>
-      expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+      expect(screen.getByTestId('conversation-title', EVEN_HIDDEN)).toHaveTextContent(
         'general',
       ),
     SETTLE,
@@ -1897,7 +1904,7 @@ async function openGeneral(): Promise<void> {
   fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
   await waitFor(
     () =>
-      expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+      expect(screen.getByTestId('conversation-title', EVEN_HIDDEN)).toHaveTextContent(
         'general',
       ),
     SETTLE,
@@ -2345,7 +2352,7 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
       SETTLE,
     );
     await waitFor(() => expect(landedIds()).toContain(NEW_REPLY_ID), SETTLE);
-    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(screen.queryByTestId('jump-missed', EVEN_HIDDEN)).toBeNull();
     expect(missAnnouncements()).toEqual([]);
   });
 
@@ -2414,7 +2421,7 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
     expect(screen.getByTestId('thread-title')).toBeTruthy();
     // 채널의 꼬리 읽기(탭 뒤)가 그 답글을 가져왔다.
     expect(afterReadsOf(fetchMock, GENERAL).length).toBeGreaterThan(readsBefore);
-    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(screen.queryByTestId('jump-missed', EVEN_HIDDEN)).toBeNull();
     expect(missAnnouncements()).toEqual([]);
   });
 
@@ -2516,7 +2523,7 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
     await sleep(300);
     expect(rowsHeld()).toContain(NEW_REPLY_ID);
     expect(toIndex.mock.calls.length).toBe(jumpsBefore); // 잡은 뒤로는 옮기지 않았다
-    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(screen.queryByTestId('jump-missed', EVEN_HIDDEN)).toBeNull();
     expect(missAnnouncements()).toEqual([]);
   });
 
