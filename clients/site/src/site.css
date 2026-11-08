@@ -123,7 +123,8 @@ img, svg, canvas { display: block; }
   position: relative; isolation: isolate; overflow: hidden;
   min-height: clamp(600px, 94svh, 900px); padding: 128px 24px 232px;
   display: grid; place-items: center; text-align: center;
-  /* WebGL 이 없을 때의 바탕: 같은 하늘 세 정지점 + 지평선 빛 */
+  /* WebGL 이 없을 때의 바탕: 같은 하늘 세 정지점 + 지평선 빛(color-mix 를 모르는 브라우저는 첫 줄) */
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%);
   background:
     radial-gradient(120% 70% at 22% 100%, var(--sky-low) 0%, transparent 62%),
     radial-gradient(70% 40% at 78% 30%, color-mix(in srgb, var(--dust) 14%, transparent) 0%, transparent 70%),
@@ -135,6 +136,7 @@ img, svg, canvas { display: block; }
 .hero::before {
   content: ""; position: absolute; z-index: -1; left: 50%; top: 46%; width: min(980px, 120%); height: 560px;
   transform: translate(-50%, -50%); pointer-events: none;
+  background: radial-gradient(closest-side, var(--veil) 0%, var(--veil) 45%, transparent 100%);
   background: radial-gradient(closest-side, var(--veil) 0%, color-mix(in srgb, var(--veil) 70%, transparent) 55%, transparent 100%);
 }
 .hero::after {

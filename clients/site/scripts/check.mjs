@@ -159,7 +159,7 @@ async function main() {
 
   // 2) 움직임 줄이기: 두 장면이 같고 멈춰 있다. 줄이지 않으면 두 장면이 다르다(사보타주 방향).
   if (ONLY.has("motion")) for (const reduce of [true, false]) {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: reduce ? "reduce" : "no-preference" });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, reducedMotion: reduce ? "reduce" : "no-preference" });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
     await settle(page);
@@ -261,15 +261,20 @@ async function main() {
     await settle(np);
     await np.locator(".get-more").click();
     const hit = await np.evaluate(() => {
-      const items = [...document.querySelectorAll(".chip-menu [role=menuitemradio]")];
-      return items.every((el) => {
+      const menu = document.getElementById("chip-menu");
+      const m = menu.getBoundingClientRect();
+      const f = document.querySelector(".frame").getBoundingClientRect();
+      // 메뉴 상자의 네 귀퉁이 안쪽과 항목 가운데가 모두 메뉴 자신이어야 한다(앱 화면 틀이 덮으면 아니다)
+      const pts = [[m.left + 6, m.top + 6], [m.right - 6, m.top + 6], [m.left + 6, m.bottom - 3], [m.right - 6, m.bottom - 3]];
+      for (const el of menu.querySelectorAll("[role=menuitemradio]")) {
         const r = el.getBoundingClientRect();
-        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return top && top.closest("[role=menuitemradio]") === el;
-      });
+        pts.push([r.left + r.width / 2, r.top + r.height / 2]);
+      }
+      const visible = pts.every(([x, y]) => menu.contains(document.elementFromPoint(x, y)));
+      return { visible, apart: m.bottom <= f.top || m.top >= f.bottom, up: menu.classList.contains("up") };
     });
     if (SHOTS) await np.screenshot({ path: resolve(SHOTS, "chip-menu-fr-390-light.png") });
-    check("390 폭에서 펼친 칩 메뉴가 가려지지 않는다", hit === true);
+    check("390 폭에서 펼친 칩 메뉴가 앱 화면 틀에 가려지지 않는다", hit.visible && hit.apart, JSON.stringify(hit));
     await narrow.close();
 
     const x86 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
