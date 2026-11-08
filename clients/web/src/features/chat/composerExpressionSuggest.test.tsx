@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
@@ -21,6 +21,8 @@ import type { AppLocale } from "@/i18n/localeStore";
 import { ExpressionStore } from "@/features/expressions/ExpressionStore";
 import { ExpressionsContext } from "@/features/expressions/context";
 import { resetSuggestMuteForTest } from "@momo/core/features/expressions/suggestMute";
+import { readExpressionSuggestOn, resetExpressionSuggestOnForTest, writeExpressionSuggestOn } from "@/features/expressions/suggestSetting";
+import { ExpressionSuggestRow } from "@/features/settings/appearance/ExpressionSuggestRow";
 import type { ExpressionTransport } from "@/features/expressions/transport";
 
 // =============================================================================
@@ -117,6 +119,7 @@ beforeEach(() => {
   listFails = false;
   listNeverArrives = false;
   resetSuggestMuteForTest();
+  resetExpressionSuggestOnForTest();
   resetSchedulerDisabledForTest();
   resetAttachmentDraftsForTest();
   clearDraft(WS, CH);
@@ -191,7 +194,7 @@ function composer(channelId: string) {
  * 입력창을 올린다. 보관함 읽기까지 끝난 **뒤에** 가짜 시계를 건다(`fake`): 0.3초 기다림을 시계로 정확히 잰다. 가짜 시계는 `setTimeout`·`clearTimeout` 만 건다 -
  * 약속(마이크로태스크)은 그대로 흘러서 그림 바이트 읽기가 `flush` 한 번에 끝난다.
  */
-async function mount(options: { channelId?: string; fake?: boolean; seed?: () => void } = {}): Promise<void> {
+async function mount(options: { channelId?: string; fake?: boolean; seed?: () => void; extra?: ReactElement } = {}): Promise<void> {
   options.seed?.();
   store = new ExpressionStore(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, libraryTransport());
   void store.refresh();
@@ -213,7 +216,7 @@ async function mount(options: { channelId?: string; fake?: boolean; seed?: () =>
           createElement(
             MemoryRouter,
             { initialEntries: [`/c/${id}`] },
-            createElement(OpenAgentProfileContext.Provider, { value: () => undefined }, createElement(SessionProvider, { value: session() }, composer(id)))
+            createElement(OpenAgentProfileContext.Provider, { value: () => undefined }, createElement(SessionProvider, { value: session() }, composer(id), options.extra))
           )
         )
       )
@@ -745,5 +748,60 @@ describe("그림과 ✕ 뿐이다 - 안내 글이 없고 이름은 낭독용으�
     for (const button of Array.from(row()?.querySelectorAll("button") ?? [])) expect(button.textContent).toBe("");
     expect(row()?.querySelectorAll("button")).toHaveLength(3);
     expect(sendButton()).not.toBeNull();
+  });
+});
+
+// 설정 › 모양 › 「이모티콘 추천」 (#5493, owner 2026-11-07 「설정에서 다 끌 수도 있어요」): 끄면 입력창에 줄이 서지 않고, 켜면 앱을 다시 켜지 않아도 바로 다시 선다.
+// 값은 이 기기 · 이 워크스페이스 · 이 사람의 것이라 `oort.expressions.suggest:<워크스페이스>:<사람>` 에 있다. 설정 화면의 스위치와 입력창이 같은 모듈을 읽으므로 진짜 스위치를 눌러 잰다.
+describe("설정에서 이모티콘 추천을 끄면 줄이 서지 않는다 (#5493)", () => {
+  const SETTING_KEY = `oort.expressions.suggest:${FIXTURE_WORKSPACE_ID}:${FIXTURE_MEMBER_ID}`;
+  const seedOff = () => localStorage.setItem(SETTING_KEY, JSON.stringify({ v: 1, workspaceId: FIXTURE_WORKSPACE_ID, memberId: FIXTURE_MEMBER_ID, on: false }));
+  const switchControl = () => q<HTMLButtonElement>("expression-suggest-toggle");
+
+  it("끈 채로 열면, 맞는 낱말을 쳐도 줄이 0이다 - 같은 글이 켜져 있으면 뜬다(대조)", async () => {
+    await mount({ seed: seedOff });
+    await typeAndPause("ㅋㅋㅋㅋ");
+    expect(row()).toBeNull();
+    expect(items()).toHaveLength(0);
+    await pause();
+    expect(row()).toBeNull(); // 기다림이 더 지나도 서지 않는다
+    // 대조: 저장된 끔을 지우면(기본 켜짐) 같은 낱말에 줄이 선다. 위의 0이 「안 맞아서」가 아님을 보인다.
+    await act(async () => {
+      writeExpressionSuggestOn(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, true);
+    });
+    await pause();
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
+  });
+
+  it("설정 스위치를 누르면 떠 있던 줄이 그 순간 걷히고, 다시 누르면 이미 친 글에 0.3초 뒤 다시 선다 - 앱을 다시 켜지 않는다", async () => {
+    await mount({ extra: createElement(ExpressionSuggestRow) });
+    expect(switchControl()?.getAttribute("aria-checked")).toBe("true");
+    await typeAndPause("ㅋㅋㅋㅋ");
+    expect(row()).not.toBeNull();
+
+    await click(switchControl());
+    expect(switchControl()?.getAttribute("aria-checked")).toBe("false");
+    expect(row()).toBeNull(); // 기다림 없이 바로
+    expect(textarea().value).toBe("ㅋㅋㅋㅋ"); // 쓰던 글은 그대로
+    await pause();
+    expect(row()).toBeNull();
+    // 끈 채로 글을 바꿔 쳐도 줄이 없다.
+    await typeAndPause("한숨");
+    expect(row()).toBeNull();
+    expect(readExpressionSuggestOn(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID)).toBe(false);
+
+    await click(switchControl());
+    expect(switchControl()?.getAttribute("aria-checked")).toBe("true");
+    expect(row()).toBeNull(); // 켜도 0.3초는 기다린다
+    await pause();
+    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
+  });
+
+  it("다른 사람이 끈 값은 이 입력창을 끄지 않는다 - 값은 이 사람의 것이다", async () => {
+    await mount({
+      seed: () => localStorage.setItem(`oort.expressions.suggest:${FIXTURE_WORKSPACE_ID}:someone-else`, JSON.stringify({ v: 1, workspaceId: FIXTURE_WORKSPACE_ID, memberId: "someone-else", on: false })),
+    });
+    await typeAndPause("한숨");
+    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
   });
 });

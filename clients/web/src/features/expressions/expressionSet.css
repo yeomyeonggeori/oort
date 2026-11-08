@@ -1,0 +1,32 @@
+/*
+ * 계획 카드·세트 카드 (ADR-0218 §12 L2.5·L5~L7, #5462). 색은 토큰만 읽는다(`--surface`, `--line`, `--primary`…): 이 파일에 값이 없다.
+ * 고른 칸·회색 칸의 모양을 클래스 이름이 아니라 **읽는 쪽이 이미 보는 속성**(`aria-pressed`, `data-gray`)으로 정한다: 화면과 보조기술이 같은 사실에서 나온다.
+ *
+ * 이 파일은 `main.tsx`가 `expressions.css` 옆에서 **한 번만** 불러온다. 카드 컴포넌트가 직접 `import "./expressionSet.css"` 하면 안 된다: 카드는 타임라인 모듈 그래프 안에 있고,
+ * 그 그래프를 esbuild 로 묶는 브라우저 시험 하네스(`Timeline.burst.chromium.test.ts`·`WelcomeKickoff.chromium.test.ts`)가 「CSS 를 JS 에 가져올 수 없다」로 깨진다(#5462 전체 시험에서 확인).
+ */
+
+/* 참조 그림 썸네일. 크기는 사람이 얼굴 유무를 알아볼 수 있는 최소로 한 곳에서 정한다. */
+.expression-set-thumb { width: 48px; height: 48px; flex: none; object-fit: cover; }
+
+/* 격자의 한 줄 (#5527 검수 7c M2). 열 수는 카드 폭이 정하고(`setGridColumns`) 줄이 `data-cols` 하나로 읽는다: 키보드 칸 이동이 같은 값을 쓰므로 눈에 보이는 열과 키가 걷는 열이 어긋나지 않는다.
+ * 속성이 없는 자리(폭을 모르는 동안)는 넓은 카드의 모양, 4열이다. */
+.expression-set-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.expression-set-row[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.expression-set-row[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.expression-set-row[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+
+/* 격자의 한 칸. 그림 자리는 준비된 칸과 회색 칸이 같은 크기다(L7.6: 칸이 사라져 줄이 당겨지지 않는다). 넓은 칸에서는 64×64이고, 칸이 그보다 좁으면 칸 폭에 맞춰 줄어든다(정사각을 지킨다). */
+.expression-set-picture { width: min(64px, 100%); aspect-ratio: 1; }
+.expression-set-tile { width: 100%; height: 100%; border: 2px solid var(--line); background-color: var(--surface); }
+/* 고른 칸의 테두리는 3:1 선(`--line-strong`)이다: 열 장이 모두 고른 칸일 때 격자가 검은 상자 열 개가 되지 않게, 고름은 체크 상자의 잉크 채움이 지고 테두리는 돕는다. */
+.expression-set-tile[aria-pressed="true"] { border-color: var(--line-strong); }
+.expression-set-tile:hover { background-color: var(--surface-hover); }
+/* 회색 칸: 선택·올리기·다시 시도가 없다. 점선과 아이콘과 글이 구분을 지고, 색에만 기대지 않는다. */
+.expression-set-tile[data-gray] { border-style: dashed; background-color: var(--surface-muted); cursor: default; }
+
+/* 칸 위쪽 왼쪽의 체크 상자. 고른 칸에서만 채워지고 표식이 보인다. */
+.expression-set-check { border: 1px solid var(--line-strong); background-color: var(--surface); }
+.expression-set-check svg { display: none; }
+.expression-set-tile[aria-pressed="true"] .expression-set-check { border-color: var(--primary); background-color: var(--primary); color: var(--on-primary); }
+.expression-set-tile[aria-pressed="true"] .expression-set-check svg { display: block; }

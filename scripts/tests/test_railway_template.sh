@@ -271,7 +271,12 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   hermes-no-sha-check hermes-guard-sha-stale hermes-config-hash-dropped hermes-config-hash-foreign hermes-config-hash-pre55 hermes-config-hash-old-team-default hermes-config-substring \
   hermes-config-check-dropped hermes-no-guard-install hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
-  worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
+  worker-hermes-attest-dropped api-connector-apps-only worker-connector-apps-only api-connectors-locked-only \
+  worker-connectors-locked-only worker-connectors-locked-zero connector-apps-differ api-connector-apps-dropped \
+  worker-connector-apps-dropped both-connector-apps-set compose-api-connector-apps-dropped \
+  compose-worker-connector-apps-dropped compose-worker-tools-locked-dropped compose-api-connector-apps-differs \
+  compose-worker-connector-apps-differs compose-worker-connectors-locked-differs compose-worker-tools-locked-fixed \
+  api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
   hermes-relay-key-not-unset hermes-relay-part-not-unset hermes-gate-part-not-joined hermes-gate-parts-too-few hermes-relay-unconditional \
   api-github-key-dropped worker-github-key hermes-github-key worker-github-key-renamed \
   extra-service-github-key api-public-base-dropped api-public-base-http \
@@ -285,7 +290,7 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221), the self-media origin on agent-worker and hermes only (#4820 C2a), the api's private address on agent-worker only and exactly api's own privateHostname:port (#4934); 101 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221), the self-media origin on agent-worker and hermes only (#4820 C2a), the api's private address on agent-worker only and exactly api's own privateHostname:port (#4934), api and agent-worker carry the SAME THREE OORT_COHOSTED_AGENT_* declarations in the catalog and as the same compose expression, in both directions (ADR-0201 증보 v4 G4, K-S2 flipped, #5369); 120 mutations RED"
 
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
@@ -539,16 +544,21 @@ done
 pass "sabotage strip X-Forwarded-Proto line → adapt JSON 0/4 (RED); strip X-Forwarded-For line → 0/4 (RED)"
 
 assert_403_order() {
-  local file="$1"
-  local deny_count deny_line api_line
-  deny_count="$(grep -Ec '^[[:space:]]*handle /v1/centrifugo/\* \{[[:space:]]*$' "$file" || true)"
+  # $2 is the path the exclusive 403 guards (default: the Centrifugo subscribe callback, ADR-0002;
+  # ADR-0151 증보 8 adds the agent-worker's picture write address, /v1/agent-media/*).
+  local file="$1" path="${2:-/v1/centrifugo/*}"
+  local deny_count deny_line api_line pattern
+  pattern="^[[:space:]]*handle $(printf '%s' "$path" | sed 's/[.*]/\\&/g') \\{[[:space:]]*\$"
+  deny_count="$(grep -Ec "$pattern" "$file" || true)"
   [ "$deny_count" = "1" ] || return 1
-  deny_line="$(grep -En '^[[:space:]]*handle /v1/centrifugo/\* \{[[:space:]]*$' "$file" | cut -d: -f1)"
+  deny_line="$(grep -En "$pattern" "$file" | cut -d: -f1)"
   api_line="$(grep -En '^[[:space:]]*handle /v1/\* \{[[:space:]]*$' "$file" | cut -d: -f1 | head -1)"
   [ -n "$deny_line" ] && [ -n "$api_line" ] || return 1
   [ "$deny_line" -lt "$api_line" ] || return 1
-  awk '
-    /^[[:space:]]*handle \/v1\/centrifugo\/\* \{[[:space:]]*$/ {
+  # The pattern travels in the environment: `awk -v` would process its backslash escapes (`\*`, `\{`)
+  # and turn the escaped metacharacters into live ones.
+  PATTERN="$pattern" awk '
+    $0 ~ ENVIRON["PATTERN"] {
       if (seen) exit 2
       seen = 1
       state = 1
@@ -580,6 +590,34 @@ assert_403_order() {
 
 assert_403_order "$CADDYFILE_RAILWAY" || fail "Caddyfile.railway 403 order/shape"
 pass "Caddyfile.railway /v1/centrifugo/* exclusive 403 before /v1/*"
+assert_403_order "$CADDYFILE_RAILWAY" '/v1/agent-media/*' || fail "Caddyfile.railway agent-media 403 order/shape"
+pass "Caddyfile.railway /v1/agent-media/* exclusive 403 before /v1/*"
+
+# The agent-media assertion must be able to fail: the block removed, or its body turned into a proxy.
+no_media="$TMP_ROOT/Caddyfile.no-agent-media"
+proxy_media="$TMP_ROOT/Caddyfile.proxy-agent-media"
+python3 - "$CADDYFILE_RAILWAY" "$no_media" "$proxy_media" <<'PY'
+from pathlib import Path
+import sys
+src, gone, proxied = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+text = src.read_text()
+block = "\thandle /v1/agent-media/* {\n\t\trespond 403\n\t}\n"
+if text.count(block) != 1:
+    raise SystemExit("could not locate the agent-media 403 block to sabotage")
+gone.write_text(text.replace(block, "", 1))
+proxied.write_text(text.replace(
+    block,
+    "\thandle /v1/agent-media/* {\n\t\treverse_proxy api.railway.internal:8080\n\t}\n",
+    1,
+))
+PY
+if assert_403_order "$no_media" '/v1/agent-media/*'; then
+  fail "agent-media block removed still asserted PASS — the check is not load-bearing"
+fi
+if assert_403_order "$proxy_media" '/v1/agent-media/*'; then
+  fail "agent-media block proxied still asserted PASS — the body check is not load-bearing"
+fi
+pass "sabotage agent-media 403 removed / turned into a proxy → assertion RED"
 
 broken="$TMP_ROOT/Caddyfile.broken"
 python3 - "$CADDYFILE_RAILWAY" "$broken" <<'PY'

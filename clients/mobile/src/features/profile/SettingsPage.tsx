@@ -112,6 +112,7 @@ import {
   ReleaseNotesSettingRow,
   ReleaseNotesSettingsPage,
 } from '../releaseNotes/ReleaseNotesPage';
+import {ExpressionSuggestSettingRow} from './ExpressionSuggestSetting';
 import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
 import {TEAM_AI_HELPER_PAGE} from '@momo/core/features/settings/teamAiStageModel';
 import {
@@ -717,7 +718,7 @@ export function SettingsContent({
       ) : null}
 
       {/* ① 보기 — 얼굴 영역(프로필: 얼굴·이름·상태 알약) 바로 아래(owner 10-31, #4936). 긴 「알림」 목록 밑에서 찾아 내려가던 것을
-          올렸다. 새 버전 배너는 알림이라 얼굴 바로 밑에 그대로 서고, 테마는 그 다음이다. */}
+          올렸다. 새 버전 배너는 알림이라 얼굴 바로 밑에 그대로 서고, 테마는 그 다음이다. 맨 아래 「이모티콘 추천」 켜기·끄기(#5493)는 이 폰의 다른 보기 선택과 같은 카드에 둔다. */}
       <GroupCard label="보기" testID="settings-view-card">
         <ListRow
           title="테마"
@@ -729,6 +730,7 @@ export function SettingsContent({
           testID="profile-theme-row"
         />
         {onOpenLinkPreview ? <LinkPreviewSettingRow onPress={onOpenLinkPreview} /> : null}
+        <ExpressionSuggestSettingRow workspaceId={workspaceId} memberId={member.id} />
       </GroupCard>
 
       {/* ② 상태 설정 — 짧은 편집이라 시트가 연다. */}

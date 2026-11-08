@@ -17,6 +17,7 @@ import {
 } from '@momo/core/features/expressions/fixtures';
 import type {
   Expression,
+  ExpressionChangedDetail,
   ExpressionList,
   ExpressionMedia,
 } from '@momo/core/features/expressions/types';
@@ -335,7 +336,7 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     },
   });
 
-  it('changed() 만 오고 목록이 아직 안 왔을 때 그림 층은 0개이고 칸은 그대로이며, 목록이 오면 남은 표현만 다시 서고 숨겨진 것은 글자가 된다', async () => {
+  it('changed() 만 오고 목록이 아직 안 왔을 때 그림 층은 0개이고 칸은 그대로이며, 목록이 오면 남은 표현은 받은 파일 그대로 다시 서고 숨겨진 것은 글자가 된다', async () => {
     const {store, request, files, deltas} = setup(true);
     await act(async () => store.refresh(true));
     mount(store, both());
@@ -373,12 +374,13 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     expect(boxOf(still.name, 'large')).toEqual(boxes.still);
     expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
     expect(layerCount(moving.name)).toBe(0);
-    // 알림은 옛 파일을 걷었고(계약), 다시 선 층은 걷힌 파일이 아니라 새로 받은 파일이다 — 죽은 주소를 다시 그리지 않는다.
+    // #5491: 알림은 파일을 걷지 않았고 목록은 숨겨진 표현의 파일만 걷었다 — 남은 표현은 이미 받은 파일 그대로 다시 선다(다시 받기 0).
     const uriAfter = screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri;
     const removed = files.remove.mock.calls.map(([uri]) => uri);
-    expect(removed).toContain(uriBefore);
-    expect(removed).not.toContain(uriAfter);
-    expect(uriAfter).not.toBe(uriBefore);
+    expect(uriAfter).toBe(uriBefore);
+    expect(removed).not.toContain(uriBefore);
+    expect(removed).toHaveLength(1); // 숨겨진 `moving` 의 파일 하나
+    expect(imageCalls(request).length).toBe(callsBefore);
   });
 
   it('같은 때 내 등록 응답이 그림을 걷어 읽던 목록 읽기를 버려도, 알림 뒤 목록을 다시 읽어 문이 내려간다', async () => {
@@ -453,6 +455,40 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     expect(layerCount(moving.name)).toBe(1);
   });
 
+  it('낡은 답이 두 번 이어지면 어느 표현이 내려갔는지 끝내 모른다: 두었던 파일을 전부 걷고 문은 닫힌 채 둔다 (#5491)', async () => {
+    const {store, files, deltas} = setup(true);
+    await act(async () => store.refresh(true));
+    mount(store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    const drawn = [still, moving].map(
+      item => screen.getByTestId(`expression-image-${item.name}-large`).props.source.uri,
+    );
+    act(() => store.changed());
+    await flush();
+    expect(files.remove).not.toHaveBeenCalled(); // 알림은 파일을 걷지 않는다
+    const stale = {
+      status: 200,
+      json: {...FIXTURE_LIST, version: '2', baseVersion: '1', reset: false, items: []},
+    };
+    await act(async () => {
+      deltas[0](stale);
+    });
+    await flush();
+    expect(deltas).toHaveLength(2); // 한 번 더 읽는다
+    expect(files.remove).not.toHaveBeenCalled();
+    await act(async () => {
+      deltas[1](stale);
+    });
+    await flush();
+    // 두었던 파일은 하나도 남지 않는다: 지금 그린 것뿐 아니라 앞서 받아 둔 변형도 쓴 파일 전부다.
+    const written = files.write.mock.results.map(result => result.value as string);
+    const removed = files.remove.mock.calls.map(([uri]) => uri as string);
+    expect([...removed].sort()).toEqual([...written].sort());
+    expect(removed).toEqual(expect.arrayContaining(drawn));
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+  });
+
   it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 글자가 서며 그림 층은 없다', async () => {
     const {store, deltas} = setup(true);
     await act(async () => store.refresh(true));
@@ -470,6 +506,244 @@ describe('알림 뒤 목록이 적용되기 전', () => {
   });
 });
 
+// =============================================================================
+// #5491 (ADR-0218 증보 9, §15) — 상세 알림(`expression.changed.detail`)이 오면 바뀐 표현만 건드린다.
+//
+// 등록·고치기 알림에는 그리던 그림을 그대로 둔다(빈 프레임 0, 그림 요청 0). 숨김·삭제 알림에는 그 id 만 즉시 글자로 내리고 나머지는 그대로다. 상세가 없으면
+// (옛 서버·유실) 위의 「알림 뒤 목록이 적용되기 전」 그대로 전부 내린다. 같은 version 의 둘째 알림은 건너뛴다(목록 읽기가 아직 진행 중이어도).
+// =============================================================================
+describe('상세 알림 (ADR-0218 §15)', () => {
+  const layerCount = (name: string) =>
+    screen.queryAllByTestId(new RegExp(`^expression-image-${name}-large`)).length;
+  const both = () => (
+    <>
+      <ExpressionImage expression={still} size="large" visible />
+      <ExpressionImage expression={moving} size="large" visible />
+    </>
+  );
+  const detail = (
+    action: ExpressionChangedDetail['action'],
+    expressionIds: string[],
+    version = '4',
+  ): ExpressionChangedDetail => ({
+    type: 'expression.changed.detail',
+    workspaceId: FIXTURE_WORKSPACE_ID,
+    version,
+    action,
+    expressionIds,
+  });
+  const hidesMoving = (): {status: number; json: ExpressionList} => ({
+    status: 200,
+    json: {
+      ...FIXTURE_LIST,
+      version: '4',
+      baseVersion: '3',
+      reset: false,
+      items: [{...moving, version: '4', status: 'hidden', media: null}],
+    },
+  });
+  /** 새 표현이 하나 등록됐다는 부분 읽기 답. */
+  const addsOne = (): {status: number; json: ExpressionList} => ({
+    status: 200,
+    json: {
+      ...FIXTURE_LIST,
+      version: '4',
+      baseVersion: '3',
+      reset: false,
+      items: [
+        {
+          ...FIXTURE_EXPRESSIONS[2],
+          id: '00000000-0000-4000-8000-0000000000e1',
+          name: 'fresh_one',
+          version: '4',
+        },
+      ],
+    },
+  });
+  async function mounted() {
+    const ctx = setup(true);
+    await act(async () => ctx.store.refresh(true));
+    mount(ctx.store, both());
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(layerCount(still.name)).toBe(1); // 대조: 알림 전에는 둘 다 그려져 있다
+    expect(layerCount(moving.name)).toBe(1);
+    return {
+      ...ctx,
+      boxes: {still: boxOf(still.name, 'large'), moving: boxOf(moving.name, 'large')},
+      calls: imageCalls(ctx.request).length,
+      uris: {
+        still: screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri,
+        moving: screen.getByTestId(`expression-image-${moving.name}-large`).props.source.uri,
+      },
+    };
+  }
+
+  it('등록 상세: 그리던 그림이 그대로이고(층 유지·빈 프레임 0), 파일도 요청도 걷거나 내지 않으며, 목록만 새로 읽는다', async () => {
+    const {store, request, files, deltas, boxes, calls, uris} = await mounted();
+    // 알림 순간부터 목록이 적용될 때까지 매 단계를 잰다 — 층이 한 번이라도 0개가 되면 빈 프레임이다.
+    const frames: number[] = [];
+    const watch = () => frames.push(layerCount(still.name) + layerCount(moving.name));
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'])));
+    watch();
+    await flush();
+    watch();
+    expect(deltas).toHaveLength(1); // 목록은 새로 읽는다
+    expect(store.snapshot().changePending).toBe(false); // 문은 올라가지 않는다
+    await act(async () => {
+      deltas[0](addsOne());
+    });
+    for (let step = 0; step < 4; step += 1) {
+      await flush();
+      watch();
+    }
+    expect(frames.length).toBeGreaterThan(4);
+    expect(frames.every(count => count === 2)).toBe(true);
+    expect(store.snapshot().items.some(item => item.name === 'fresh_one')).toBe(true);
+    expect(boxOf(still.name, 'large')).toEqual(boxes.still);
+    expect(tokenText(still.name)).toBeNull();
+    expect(tokenText(moving.name)).toBeNull();
+    // 같은 파일 그대로(다시 받기 0), 걷은 파일 0.
+    expect(imageCalls(request).length).toBe(calls);
+    expect(files.remove).not.toHaveBeenCalled();
+    expect(screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri).toBe(uris.still);
+    expect(screen.getByTestId(`expression-image-${moving.name}-large`).props.source.uri).toBe(uris.moving);
+  });
+
+  it('고치기 상세도 같다: 그림을 그대로 두고 목록만 새로 읽는다', async () => {
+    const {store, request, files, deltas, calls} = await mounted();
+    act(() => store.detailed(detail('edited', [still.id])));
+    await flush();
+    expect(deltas).toHaveLength(1);
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+    await act(async () => {
+      deltas[0]({
+        status: 200,
+        json: {
+          ...FIXTURE_LIST,
+          version: '4',
+          baseVersion: '3',
+          reset: false,
+          items: [{...still, version: '4', displayName: '새 표시 이름'}],
+        },
+      });
+    });
+    for (let step = 0; step < 3; step += 1) await flush();
+    expect(imageCalls(request).length).toBe(calls);
+    expect(files.remove).not.toHaveBeenCalled();
+    expect(layerCount(still.name)).toBe(1);
+  });
+
+  it('숨김 상세: 그 표현만 그 자리에서 글자가 되고 파일이 걷히며, 나머지는 층도 칸도 파일도 그대로다(요청 0)', async () => {
+    const {store, request, files, deltas, boxes, calls, uris} = await mounted();
+    act(() => store.detailed(detail('hidden', [moving.id])));
+    // 목록이 아직 안 왔어도(읽기는 붙들려 있다) 숨겨진 표현은 이미 내려가 있다.
+    expect(layerCount(moving.name)).toBe(0);
+    expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
+    expect(files.remove.mock.calls).toEqual([[uris.moving]]); // 그 표현의 파일만
+    // 남은 표현은 건드리지 않았다.
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(boxOf(still.name, 'large')).toEqual(boxes.still);
+    expect(screen.getByTestId(`expression-image-${still.name}-large`).props.source.uri).toBe(uris.still);
+    await flush();
+    expect(deltas).toHaveLength(1);
+    // 목록이 와도 같다.
+    await act(async () => {
+      deltas[0](hidesMoving());
+    });
+    for (let step = 0; step < 4; step += 1) await flush();
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(0);
+    expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
+    expect(imageCalls(request).length).toBe(calls);
+    expect(files.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('같은 version 의 v1 은 건너뛴다: 상세가 먼저 왔으면 목록 읽기가 아직 진행 중이어도 그림을 전부 내리지 않고, 읽기를 다시 시작하지도 않는다', async () => {
+    const {store, deltas} = await mounted();
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'])));
+    await flush();
+    expect(deltas).toHaveLength(1); // 읽기가 진행 중이다(아직 답이 없다)
+    act(() => store.changed('4')); // 같은 version 의 옛 알림이 뒤따른다
+    await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+    expect(deltas).toHaveLength(1);
+  });
+
+  it('다른 version 의 v1 은 건너뛰지 않는다: 상세 없이 오면 전부 내린다(지금과 같다)', async () => {
+    const {store, deltas, files} = await mounted();
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'], '4')));
+    await flush();
+    act(() => store.changed('5'));
+    await flush();
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+    expect(layerCount(moving.name)).toBe(0);
+    expect(files.remove).not.toHaveBeenCalled(); // 파일은 두고 그리기만 멈춘다
+    expect(deltas.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('v1 이 먼저 오면(순서가 뒤집혀도) 전부 내리고, 뒤늦게 온 같은 version 의 등록 상세는 할 일이 없다', async () => {
+    const {store, deltas} = await mounted();
+    act(() => store.changed('4'));
+    await flush();
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+    expect(deltas).toHaveLength(1);
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'])));
+    await flush();
+    expect(deltas).toHaveLength(1); // 두 번째 읽기도, 두 번째 걷기도 없다
+    await act(async () => {
+      deltas[0](addsOne());
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(layerCount(moving.name)).toBe(1);
+  });
+
+  it('v1 이 먼저 오고 숨김 상세가 늦게 와도 건너뛰지 않는다: 목록을 기다리지 않고 그 표현의 파일만 걷고, 앞서 시작한 읽기는 버리고 다시 읽는다 (#5491 H-5491-1)', async () => {
+    const {store, files, deltas, uris} = await mounted();
+    act(() => store.changed('4'));
+    await flush();
+    expect(store.snapshot().changePending).toBe(true);
+    expect(deltas).toHaveLength(1);
+    expect(files.remove).not.toHaveBeenCalled(); // 이름 없는 v1 은 파일을 걷지 못한다
+    act(() => store.detailed(detail('hidden', [moving.id]))); // 같은 version 의 늦은 숨김 상세
+    await flush();
+    // 상세가 그 id 의 파일을 그 자리에서 걷는다 — 목록이 오기 전에, 다른 표현의 파일은 그대로.
+    expect(files.remove.mock.calls).toEqual([[uris.moving]]);
+    expect(store.snapshot().items.some(item => item.id === moving.id)).toBe(false);
+    expect(deltas).toHaveLength(2); // 앞서 시작한 읽기는 버려지고 새로 읽는다
+    await act(async () => {
+      deltas[0](hidesMoving()); // 버려진 읽기의 늦은 답은 문을 내리지 못한다
+    });
+    expect(store.snapshot().changePending).toBe(true);
+    await act(async () => {
+      deltas[1](hidesMoving());
+    });
+    for (let step = 0; step < 6; step += 1) await flush();
+    expect(store.snapshot().changePending).toBe(false);
+    expect(layerCount(still.name)).toBe(1);
+    expect(screen.getByText(`:${moving.name}:`)).toBeTruthy();
+    expect(files.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('새로 구독하면 기억이 비워진다: 앞서 본 version 의 v1 도 다시 전부 내린다', async () => {
+    const {store} = await mounted();
+    act(() => store.detailed(detail('created', ['00000000-0000-4000-8000-0000000000e1'])));
+    await flush();
+    act(() => store.resetNotices());
+    act(() => store.changed('4'));
+    await flush();
+    expect(store.snapshot().changePending).toBe(true);
+    expect(layerCount(still.name)).toBe(0);
+  });
+});
+
 describe('쓸 수 없는 표현', () => {
   it('목록에 없거나 숨겨진 표현만 글자로 내린다(받는 중에는 글자가 아니다)', async () => {
     const {store} = setup();
@@ -478,5 +752,109 @@ describe('쓸 수 없는 표현', () => {
     mount(store, <ExpressionImage expression={ghost} size="large" visible />);
     await flush();
     expect(screen.getByText(':ghost_one:')).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// #5504 — 반응 칩의 GIF 는 4번 돌고 멈추지 않고 계속 움직인다(owner 2026-11-07). 동작 줄이기는 멈춘 첫 장면, 화면 밖은 정지.
+//
+// 서버 GIF 는 NETSCAPE 반복 횟수가 3(= 총 4번)이라 iOS(`RCTUIImageViewAnimated`)도 4번째 재생 끝에서 멈춘다. 타이머를 빼는 것만으로는 부족해서 반응 칩은 **반복 횟수만 무한으로 바꾼 파일**을
+// 그린다(`store.image(…, loop)`). 여기서는 그 파일의 바이트를 읽는다(NETSCAPE 횟수 두 바이트가 0 인가, 나머지는 서버 그대로인가). 시뮬레이터 없이 jest 로만 잰다 - 실제 재생은 인계의 측정 메모.
+// =============================================================================
+describe('반응 칩의 GIF (#5504)', () => {
+  /** 파일에 쓰인 GIF 바이트에서 NETSCAPE 반복 횟수(두 바이트). 확장이 없으면 null. */
+  const loopCountOf = (bytes: Uint8Array): number | null => {
+    const text = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
+    const at = text.indexOf('NETSCAPE2.0');
+    return at < 0 ? null : bytes[at + 11 + 2] + bytes[at + 11 + 3] * 256;
+  };
+  const gifWrites = (files: {write: jest.Mock}) =>
+    files.write.mock.calls.filter(([name]) => String(name).endsWith('.gif'));
+
+  it('4번 돌 시간이 지나도 정지 thumb 로 바뀌지 않고, 반복 횟수만 0(무한)인 파일을 그린다', async () => {
+    const {store, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    const top = () => screen.getByTestId(`expression-image-${moving.name}-reaction`);
+    act(() => {
+      fireEvent(top(), 'load');
+    });
+    await flush();
+    expect(top().props.source.uri).toMatch(/gif$/);
+    // 같은 시간에 큰 그림은 정지 thumb 로 바뀐다(위 시험) - 반응 칩은 몇 번을 더 지나도 움직이는 그림 그대로다.
+    for (let round = 0; round < 3; round += 1) {
+      await act(async () => {
+        jest.advanceTimersByTime(moving.media!.small.durationMs * 4 + 1000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(top().props.source.uri).toMatch(/gif$/);
+    }
+    expect(screen.queryByTestId(`expression-image-${moving.name}-reaction-prev`)).toBeNull();
+    // 쓰인 파일은 서버가 준 바이트에서 반복 횟수만 달라졌다: 서버 그림은 3, 반응 칩의 파일은 0.
+    const written = gifWrites(files);
+    expect(written).toHaveLength(1);
+    const served = Uint8Array.from(atob(gif.bodyBase64), char => char.charCodeAt(0));
+    expect(loopCountOf(served)).toBe(3);
+    const drawn = written[0][1] as Uint8Array;
+    expect(loopCountOf(drawn)).toBe(0);
+    expect(drawn.length).toBe(served.length);
+    expect(Array.from(drawn).filter((byte, index) => byte !== served[index])).toHaveLength(1);
+  });
+
+  it('메시지 속 그림(글 사이·가운데)은 서버가 준 파일 그대로라 4번 규칙을 지킨다', async () => {
+    const {store, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(
+      store,
+      <>
+        <ExpressionImage expression={moving} size="inline" visible />
+        <ExpressionImage expression={moving} size="medium" visible />
+      </>,
+    );
+    for (let step = 0; step < 4; step += 1) await flush();
+    const written = gifWrites(files);
+    expect(written).toHaveLength(1); // 같은 small 한 장을 둘이 나눠 쓴다
+    expect(loopCountOf(written[0][1] as Uint8Array)).toBe(3);
+  });
+
+  it('같은 표현의 반응 칩 여럿은 그림을 한 번만 받고 파일을 한 번만 쓰고 한 파일을 나눠 쓴다', async () => {
+    const {store, request, files} = setup();
+    await act(async () => store.refresh(true));
+    mount(
+      store,
+      <>
+        {[0, 1, 2, 3, 4, 5].map(index => (
+          <ExpressionImage key={index} expression={moving} size="reaction" visible />
+        ))}
+      </>,
+    );
+    for (let step = 0; step < 4; step += 1) await flush();
+    const uris = screen.getAllByTestId(`expression-image-${moving.name}-reaction`).map(node => node.props.source.uri);
+    expect(uris).toHaveLength(6);
+    expect(new Set(uris).size).toBe(1);
+    expect(imageCalls(request).filter(([input]) => String(input.path).includes('size=small'))).toHaveLength(1);
+    expect(gifWrites(files)).toHaveLength(1);
+  });
+
+  it('동작 줄이기에서는 멈춘 첫 장면(thumb)이고 움직이는 그림을 받지도 않는다', async () => {
+    release?.();
+    release = await pinReduceMotion(true);
+    const {store, request} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    expect(screen.getByTestId(`expression-image-${moving.name}-reaction`).props.source.uri).toMatch(/png$/);
+    expect(imageCalls(request).filter(([input]) => String(input.path).includes('size=small'))).toHaveLength(0);
+  });
+
+  it('화면 밖(visible 거짓)이거나 앱이 뒤에 있으면 정지 thumb 다', async () => {
+    const {store} = setup();
+    await act(async () => store.refresh(true));
+    mount(store, <ExpressionImage expression={moving} size="reaction" visible={false} />);
+    for (let step = 0; step < 4; step += 1) await flush();
+    expect(screen.getByTestId(`expression-image-${moving.name}-reaction`).props.source.uri).toMatch(/png$/);
   });
 });

@@ -129,6 +129,10 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
         // (`inline` | `open`), written by the server beside the approval it describes. A message
         // that carried a forged one would tell a client which way to draw somebody's decision.
         || matches!(key, "announce" | "bundle_of" | "decision_mode")
+        // ADR-0201 증보 v4 P8 (#5370): `team_ai_delegated` is the chip 「Hermes 도움 · 검색」 on the helper's
+        // answer. The server writes it from the delegation it actually ran, so a person or an external
+        // sender who could write the same key could dress their own message as work Hermes did.
+        || key == momo_agent::team_ai_task::DELEGATED_PROPS_KEY
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -1884,6 +1888,30 @@ mod tests {
     use momo_auth::PrincipalKind;
     use momo_messaging::StreamOutcome;
     use std::collections::BTreeMap;
+
+    /// ADR-0201 증보 v4 P8 (#5370): the chip 「Hermes 도움 · 검색」 is a claim about what the server ran, so a
+    /// person's REST send is stripped of the key and so is a webhook's (both go through
+    /// `is_server_owned_props_key`), while an ordinary prop passes.
+    #[test]
+    fn the_delegation_chip_key_is_server_owned() {
+        assert!(is_server_owned_props_key(
+            momo_agent::team_ai_task::DELEGATED_PROPS_KEY
+        ));
+        let mut client = BTreeMap::new();
+        client.insert(
+            momo_agent::team_ai_task::DELEGATED_PROPS_KEY.to_string(),
+            "[{\"kind\":\"web_search\"}]".to_string(),
+        );
+        client.insert("note".to_string(), "kept".to_string());
+        let stored = props_value(Some(&client));
+        assert!(
+            stored
+                .get(momo_agent::team_ai_task::DELEGATED_PROPS_KEY)
+                .is_none(),
+            "a person cannot dress a message as work Hermes did: {stored}"
+        );
+        assert_eq!(stored["note"], "kept");
+    }
 
     fn principal(workspace_id: Uuid) -> Principal {
         Principal {

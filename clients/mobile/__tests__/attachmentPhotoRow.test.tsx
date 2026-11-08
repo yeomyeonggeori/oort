@@ -36,6 +36,7 @@ import {
   type MessageRowActions,
   PendingRow,
 } from '../src/features/conversation/MessageRow';
+import {attachmentSizeMemory} from '../src/storage/measureMemory';
 import {ATTACHMENT_INLINE_IMAGE} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
 import {AttachmentList} from '../src/features/attachments/AttachmentList';
@@ -652,6 +653,220 @@ describe('attachmentSize (#4455)', () => {
       frames.length = 0;
       render(<AttachmentList channelId="ch" attachments={[photo('photo-a')]} />);
       expect(frames[0]).toMatchObject({width: 280, height: 210});
+    });
+  });
+
+  // -----------------------------------------------------------------------------
+  // #5469 (ADR-0151 증보 9) — 보낸 기기가 선언한 가로세로가, 처음 보는 사진의 첫 프레임 칸이다
+  // -----------------------------------------------------------------------------
+  //
+  // 위 묶음은 **이미 한 번 잰** 그림만 첫 프레임부터 제 칸에 세운다. 처음 보는 그림은 받는 동안 16:9 자리표시로 서고 잰 뒤에야 제 비율이 돼
+  // (왕복 500ms 에서 약 80pt) 대화에 처음 들어갈 때 한 번 자란다. 서버가 `media: {kind: "image", width, height}` 를 실어 주면(보낸 기기의
+  // 선언, 범위만 본 값) 칸은 첫 프레임부터 그 크기다. 선언은 **그림이 오기 전까지의 칸**일 뿐이라: 상태에는 **잰 값**만 두고 칸은 `잰 값 ?? 선언`이다.
+  // 그래서 잰 값(기억·`getSize`·`onLoad`)이 늘 이기고, 선언은 잰 크기 기억에 **쓰이지 않는다**(틀린 선언이 기억으로 굳지 않는다).
+  describe('처음 보는 사진 — 보낸 기기의 선언이 첫 프레임부터 칸이다 (#5469)', () => {
+    const picture = (width: number, height: number) => ({kind: 'image' as const, width, height});
+    const declaredPhoto = (id: string, width: number, height: number, over: Partial<MessageAttachment> = {}) =>
+      photo(id, {media: picture(width, height), ...over});
+    const sizeOf = (frame: Record<string, unknown>) => `${String(frame.width)}x${String(frame.height)}`;
+
+    it('선언이 있으면 처음 보는 사진의 첫 렌더가 이미 최종 칸이고, 받아서 재도 칸이 움직이지 않는다(행 이동 0)', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('decl-a', 4000, 3000)]} />);
+      // 첫 렌더 = 최종 칸(가로 4:3 → 폭 상한 280 안에서 280x210). 16:9 자리표시를 거치지 않는다.
+      expect(frames[0]).toMatchObject({width: 280, height: 210});
+      expect(frames[0].aspectRatio).toBeUndefined();
+      expect(measuredAttachmentSize('decl-a')).toBeNull();
+      await ready();
+      await waitFor(() => expect(calls).toHaveLength(1));
+      // 정직한 선언: 재 보니 같다.
+      act(() => calls[0].success(4000, 3000));
+      expect(frameNow()).toMatchObject({width: 280, height: 210});
+      fireEvent(screen.getByTestId('attachment-preview-image'), 'load', {
+        nativeEvent: {source: {width: 4000, height: 3000}},
+      });
+      // 렌더마다 같은 크기다 — 받기 전도 받은 뒤도, 그 사이에 다른 칸이 끼어든 프레임이 없다.
+      expect(frames.length).toBeGreaterThan(1);
+      for (const frame of frames) {
+        expect(frame).toMatchObject({width: 280, height: 210});
+        expect(frame.aspectRatio).toBeUndefined();
+      }
+      expect(measuredAttachmentSize('decl-a')).toEqual({width: 4000, height: 3000});
+    });
+
+    it('세로 사진도 같다 — 3:4 는 처음부터 240x320 이다', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('decl-tall', 3024, 4032)]} />);
+      expect(frames[0]).toMatchObject({width: 240, height: 320});
+      await ready();
+      await waitFor(() => expect(calls).toHaveLength(1));
+      act(() => calls[0].success(3024, 4032));
+      for (const frame of frames) expect(frame).toMatchObject({width: 240, height: 320});
+      expect(frameNow()).toMatchObject({width: 240, height: 320});
+    });
+
+    it('선언으로 선 칸은 **같은 숫자를 잰 크기**로 선 칸과 정확히 같다(같은 셈)', async () => {
+      holdGetSize();
+      rememberAttachmentSize('remembered-r', 1170, 2532);
+      const frames = recordPreviewFrames();
+      const first = render(<AttachmentList channelId="ch" attachments={[photo('remembered-r')]} />);
+      const fromMemory = frames[0];
+      first.unmount();
+      frames.length = 0;
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('declared-r', 1170, 2532)]} />);
+      expect(frames[0]).toEqual(fromMemory);
+      await ready();
+    });
+
+    it('선언과 잰 크기가 다르면 실제 크기가 이겨 **한 번** 고쳐 서고, 잰 값만 기억한다 — 틀린 선언은 기억으로 굳지 않는다', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      // 가로라고 선언했으나 실제 그림은 세로다.
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('liar', 4000, 3000)]} />);
+      expect(frames[0]).toMatchObject({width: 280, height: 210});
+      // 선언은 어디에도 기억되지 않았다 — 앱이 사는 동안의 지도에도, 기기에 남기는 지도에도.
+      expect(measuredAttachmentSize('liar')).toBeNull();
+      expect(attachmentSizeMemory.get('liar')).toBeNull();
+      await ready();
+      // 선언이 있어도 재는 일은 한다(재야 선언이 맞는지 안다).
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(attachmentSizeMemory.get('liar')).toBeNull();
+      act(() => calls[0].success(3000, 4000));
+      expect(frameNow()).toMatchObject({width: 240, height: 320});
+      expect(measuredAttachmentSize('liar')).toEqual({width: 3000, height: 4000});
+      expect(attachmentSizeMemory.get('liar')).toEqual([3000, 4000]);
+      // 한 번 고쳤다: 칸이 선언 → 실제로 한 번 바뀌고 되돌아오지 않는다.
+      const sequence = frames.map(sizeOf);
+      expect(sequence[0]).toBe('280x210');
+      expect(sequence[sequence.length - 1]).toBe('240x320');
+      expect([...new Set(sequence)]).toEqual(['280x210', '240x320']);
+      expect(sequence.indexOf('240x320')).toBeGreaterThan(sequence.lastIndexOf('280x210'));
+    });
+
+    it('그림이 읽히면(onLoad) 실제 크기가 이긴다 — getSize 보다 먼저 와도 같다', async () => {
+      holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('load-wins', 4000, 3000)]} />);
+      expect(frames[0]).toMatchObject({width: 280, height: 210});
+      await ready();
+      fireEvent(screen.getByTestId('attachment-preview-image'), 'load', {
+        nativeEvent: {source: {width: 3000, height: 4000}},
+      });
+      expect(frameNow()).toMatchObject({width: 240, height: 320});
+      expect(measuredAttachmentSize('load-wins')).toEqual({width: 3000, height: 4000});
+    });
+
+    it('이미 잰 크기가 있으면 선언보다 잰 크기가 이긴다 — 첫 렌더부터, 다시 재지도 않는다', async () => {
+      const {spy} = holdGetSize();
+      rememberAttachmentSize('both', 3000, 4000);
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('both', 4000, 3000)]} />);
+      expect(frames[0]).toMatchObject({width: 240, height: 320});
+      await ready();
+      expect(spy).not.toHaveBeenCalled();
+      for (const frame of frames) expect(frame).toMatchObject({width: 240, height: 320});
+    });
+
+    it('크기를 못 읽어도 선언한 칸으로 남는다 — 16:9 로 되튀지 않고, 실패는 적지 않는다', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[declaredPhoto('unreadable', 4000, 3000)]} />);
+      await ready();
+      await waitFor(() => expect(calls).toHaveLength(1));
+      act(() => calls[0].failure?.(new Error('unreadable')));
+      expect(frameNow()).toMatchObject({width: 280, height: 210});
+      expect(frameNow().aspectRatio).toBeUndefined();
+      for (const frame of frames) expect(frame).toMatchObject({width: 280, height: 210});
+      expect(measuredAttachmentSize('unreadable')).toBeNull();
+      expect(attachmentSizeMemory.get('unreadable')).toBeNull();
+    });
+
+    it('선언이 없으면(옛 메시지·옛 판이 보낸 사진) 지금과 같다 — 16:9 자리표시로 시작해 잰 뒤 제 비율이 된다', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[photo('old-message')]} />);
+      expect(frames[0]).toMatchObject({width: MAX_W, aspectRatio: 16 / 9});
+      await ready();
+      await waitFor(() => expect(calls).toHaveLength(1));
+      act(() => calls[0].success(4000, 3000));
+      expect(frameNow()).toMatchObject({width: 280, height: 210});
+      expect(measuredAttachmentSize('old-message')).toEqual({width: 4000, height: 3000});
+    });
+
+    it.each([
+      ['폭 0', {kind: 'image', width: 0, height: 100}],
+      ['폭 16385(범위 밖)', {kind: 'image', width: 16_385, height: 100}],
+      ['소수', {kind: 'image', width: 4.5, height: 100}],
+      ['높이 없음', {kind: 'image', width: 100}],
+      ['모르는 종류', {kind: 'hologram', width: 4, height: 3}],
+      ['영상 요약이 사진에 붙음', {kind: 'video', durationMs: 1_000, width: 400, height: 300, hasPoster: false}],
+    ])('어긋난 요약(%s)은 칸을 정하지 못한다 — 자리표시로 선다', async (_label, media) => {
+      holdGetSize();
+      const frames = recordPreviewFrames();
+      render(<AttachmentList channelId="ch" attachments={[photo('bad-declaration', {media: media as never})]} />);
+      expect(frames[0]).toMatchObject({width: MAX_W, aspectRatio: 16 / 9});
+      await ready();
+    });
+
+    it('이미지가 아닌 첨부에 붙은 사진 요약은 미리보기 칸도 길이도 만들지 않는다', () => {
+      holdGetSize();
+      render(
+        <AttachmentList
+          channelId="ch"
+          attachments={[photo('odd', {name: 'clip.mp4', mime: 'video/mp4', media: picture(4000, 3000)})]}
+        />,
+      );
+      expect(screen.queryByTestId('attachment-preview')).toBeNull();
+      expect(screen.getAllByTestId('attachment-item')).toHaveLength(1);
+      expect(JSON.stringify(screen.toJSON())).not.toContain('NaN');
+    });
+
+    it('여러 장(격자)은 선언을 쓰지 않는다 — 정사각 칸 그대로', async () => {
+      holdGetSize();
+      const frames = recordPreviewFrames();
+      render(
+        <AttachmentList
+          channelId="ch"
+          attachments={[declaredPhoto('grid-a', 4000, 3000), declaredPhoto('grid-b', 3000, 4000)]}
+        />,
+      );
+      expect(frames.length).toBeGreaterThan(0);
+      for (const frame of frames) expect(frame).toMatchObject({width: TILE, height: TILE});
+      await ready();
+    });
+
+    it('처음 보는 사진이 든 대화에 처음 들어가도 두 사진 모두 첫 렌더부터 제 칸이다 — 재서 답이 와도 행이 움직이지 않는다', async () => {
+      const {calls} = holdGetSize();
+      const frames = recordPreviewFrames();
+      const history = [
+        message({id: 'm1', seq: 1, authorMemberId: OTHER, body: '', attachments: [declaredPhoto('first-a', 4000, 3000)]}),
+        message({id: 'm2', seq: 2, authorMemberId: OTHER, body: '', attachments: [declaredPhoto('first-b', 3000, 4000)]}),
+      ];
+      render(
+        <Timeline
+          messages={history}
+          directory={DIRECTORY}
+          status="ready"
+          myMemberId={SELF}
+          nowMs={NOW + 60_000}
+          pending={[]}
+        />,
+      );
+      expect(frames.length).toBeGreaterThan(0);
+      // 자리표시(16:9)로 선 프레임이 하나도 없다.
+      for (const frame of frames) expect(frame.aspectRatio).toBeUndefined();
+      const before = new Set(frames.map(sizeOf));
+      expect([...before].sort()).toEqual(['240x320', '280x210']);
+      await waitFor(() => expect(calls).toHaveLength(2));
+      act(() => {
+        calls[0].success(4000, 3000);
+        calls[1].success(3000, 4000);
+      });
+      // 잰 뒤에도 같은 두 크기뿐이다.
+      expect(new Set(frames.map(sizeOf))).toEqual(before);
+      for (const frame of frames) expect(frame.aspectRatio).toBeUndefined();
     });
   });
 

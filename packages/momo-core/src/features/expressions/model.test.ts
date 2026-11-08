@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID, fixtureManualDraft } from "./fixtures";
-import { applyExpressionList, compareExpressionVersions, emptyExpressionCache, expressionCacheNeedsRefresh } from "./cache";
+import { applyExpressionList, compareExpressionVersions, emptyExpressionCache, expressionCacheNeedsRefresh, isNextExpressionVersion } from "./cache";
 import { expressionChoice, expressionDraftCard, matchesExpressionChoice } from "./cards";
 import { buildExpressionMessage, expressionAltText, expressionFallbackBody, expressionMessageModel, expressionResultMessage, expressionToken, isExpressionName, tokenizeExpressionReaction, tokenizeExpressions } from "./message";
 import { koreanInitials, searchExpressions } from "./search";
@@ -167,6 +167,13 @@ describe("workspace catalogue cache", () => {
     expect(applyExpressionList(current, { ...FIXTURE_LIST, items: [party, party] }).applied).toBe(false);
     expect(applyExpressionList(current, { ...FIXTURE_LIST, items: [party, { ...faint, name: party.name }] }).applied).toBe(false);
     expect(applyExpressionList(current, { ...FIXTURE_HIDDEN_DELTA, items: [{ ...party, name: "new_name", version: "4" }] }).applied).toBe(false);
+  });
+  it("knows the version right after another one, on digits and not on a number (a response is laid over the cache as a delta only then, #5491)", () => {
+    for (const [prior, next] of [["0", "1"], ["3", "4"], ["9", "10"], ["99", "100"], ["199", "200"], ["9007199254740992", "9007199254740993"], ["9223372036854775806", "9223372036854775807"]])
+      expect(isNextExpressionVersion(prior, next), `${prior} -> ${next}`).toBe(true);
+    // 사이에 다른 변경이 끼었거나(+2), 같거나 앞선 version 이거나, 십진 글자가 아니면 「바로 다음」이 아니다.
+    for (const [prior, next] of [["3", "5"], ["3", "3"], ["4", "3"], ["9", "11"], ["9007199254740992", "9007199254740994"], ["3", "04"], ["03", "4"], ["3", ""], ["", "1"], ["3", "4 "], ["a", "b"]])
+      expect(isNextExpressionVersion(prior, next), `${prior} -> ${next}`).toBe(false);
   });
   it("detects bigint changes without number rounding and treats reset as authoritative", () => {
     expect(compareExpressionVersions("9007199254740993", "9007199254740992")).toBeGreaterThan(0);

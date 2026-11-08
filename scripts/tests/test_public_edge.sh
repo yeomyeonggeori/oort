@@ -289,6 +289,24 @@ deny_before_v1 "$CADDYFILE" || fail "infra/rust/Caddyfile deny is missing or aft
 deny_before_v1 "$CADDYFILE_LOCAL" || fail "infra/rust/Caddyfile.local deny is missing or after /v1/*"
 pass "both Caddyfiles deny /v1/centrifugo/* before /v1/*"
 
+# ADR-0151 증보 8 (#5371): the agent-worker's picture write address is a private-network hop. Every
+# tracked edge denies it before /v1/* with a bare `respond 403` (the worker never passes the edge).
+agent_media_denied() {
+  local file="$1"
+  local deny api
+  deny="$(grep -En '^[[:space:]]*handle /v1/agent-media/\* \{[[:space:]]*$' "$file" | head -1 | cut -d: -f1)"
+  api="$(grep -En '^[[:space:]]*handle /v1/\* \{[[:space:]]*$' "$file" | head -1 | cut -d: -f1)"
+  [ -n "$deny" ] && [ -n "$api" ] && [ "$deny" -lt "$api" ] || return 1
+  [ "$(sed -n "$((deny + 1))p" "$file" | tr -d '[:space:]')" = "respond403" ]
+}
+agent_media_edges=0
+while IFS= read -r edge_file; do
+  agent_media_denied "$edge_file" || fail "$edge_file does not deny /v1/agent-media/* before /v1/*"
+  agent_media_edges=$((agent_media_edges + 1))
+done < <(git ls-files -- infra | awk -F/ '$NF ~ /^Caddyfile/')
+[ "$agent_media_edges" -ge 4 ] || fail "expected at least 4 tracked edge Caddyfiles, found ${agent_media_edges}"
+pass "all ${agent_media_edges} tracked edge Caddyfiles deny /v1/agent-media/* before /v1/*"
+
 # Real 403 on the loopback file — :80 so automatic HTTPS/ACME stays off.
 LOCAL_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
@@ -314,6 +332,13 @@ until [ -n "$local_code" ] && [ "$local_code" != "000" ]; do
 done
 printf '[test-public-edge] Caddyfile.local /v1/centrifugo/subscribe HTTP %s\n' "$local_code"
 [ "$local_code" = "403" ] || fail "Caddyfile.local /v1/centrifugo/* expected 403 got ${local_code:-none}"
+# The same running edge: a PUT at the worker's write address is refused here too (ADR-0151 증보 8).
+agent_media_token="$(printf 'A%.0s' $(seq 1 43))"
+agent_media_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+  -X PUT --data-binary 'x' \
+  "http://127.0.0.1:${LOCAL_PORT}/v1/agent-media/00000000-0000-4000-8000-000000000000/${agent_media_token}" || true)"
+printf '[test-public-edge] Caddyfile.local PUT /v1/agent-media/{ws}/{token} HTTP %s\n' "$agent_media_code"
+[ "$agent_media_code" = "403" ] || fail "Caddyfile.local /v1/agent-media/* expected 403 got ${agent_media_code:-none}"
 cleanup_local_edge
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 pass "Caddyfile.local loopback edge returns 403 for /v1/centrifugo/*"

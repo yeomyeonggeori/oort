@@ -682,6 +682,26 @@ async fn decide(
             ))
         }
     };
+    // `expressionChoices` (ADR-0218 §12 L5.4) is parsed the same way, by the contract's own shape
+    // (1 to 40 closed `Choice` items, distinct draft ids): malformed is this 400, never a verdict on
+    // the card, and it is judged before any row is read.
+    let expression_choices: Option<Vec<momo_expressions::Choice>> = match request
+        .expression_choices
+        .as_ref()
+    {
+        None => None,
+        Some(value) => match momo_expressions::set_decision::parse_choices(value) {
+            Some(choices) => Some(choices),
+            None => return respond(refusal(
+                approval_id,
+                member_id,
+                "expression_choice_invalid",
+                "expressionChoices must be 1 to 40 different {draftId, revision, sha256, kind?}",
+                StatusCode::BAD_REQUEST,
+                Utc::now(),
+            )),
+        },
+    };
     let context_max_messages = state.mentions.context_max_messages;
 
     // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
@@ -703,6 +723,7 @@ async fn decide(
             let public_origin = public_origin.clone();
             let admission_state = state.clone();
             let expression_choice = expression_choice.clone();
+            let expression_choices = expression_choices.clone();
             move |conn| {
                 Box::pin(async move {
                     decide_in_tx(
@@ -723,6 +744,7 @@ async fn decide(
                             operator_scope,
                             deliver_secret_to_agent,
                             expression_choice: expression_choice.clone(),
+                            expression_choices: expression_choices.clone(),
                             context_max_messages,
                             admission_state: Some(&admission_state),
                         },
@@ -823,6 +845,8 @@ struct DecisionInput<'a> {
     deliver_secret_to_agent: bool,
     /// ADR-0186 v8: the picture the person chose on an `expression.create` card.
     expression_choice: Option<momo_expressions::Choice>,
+    /// ADR-0218 §12 L5.4: the pictures kept on an `expression.set.create` card, already parsed.
+    expression_choices: Option<Vec<momo_expressions::Choice>>,
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
@@ -1064,24 +1088,22 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         )));
     }
 
-    // **`expressionChoice` belongs to approving an `expression.create` card, and to nothing
-    // else** (ADR-0186 v8 X8-2). Judged here for the reason `deliverSecretToAgent` is: before
-    // the status and expiry arms, so no settlement that writes can outrank it.
+    // **`expressionChoice` belongs to approving an `expression.create` card, `expressionChoices` to
+    // approving an `expression.set.create` card, and each to nothing else** (ADR-0186 v8 X8-2,
+    // ADR-0218 §12 L5.4). Judged here for the reason `deliverSecretToAgent` is: before the status
+    // and expiry arms, so no settlement that writes can outrank it.
     if let Some(code) = expression_choice_refused(
         input.expression_choice.is_some(),
-        approval.action_type == ACTION_TYPE_WORKSPACE_ACTION
-            && approval
-                .payload
-                .pointer("/action/id")
-                .and_then(Value::as_str)
-                == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE),
+        input.expression_choices.is_some(),
+        choice_card(&approval),
         input.approve,
     ) {
         return Ok(Ok(refusal(
             approval.id,
             input.member_id,
             code,
-            "expressionChoice applies only to approving an expression.create card",
+            "expressionChoice applies only to approving an expression.create card and \
+             expressionChoices only to approving an expression.set.create card",
             StatusCode::BAD_REQUEST,
             now,
         )));
@@ -1386,6 +1408,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     if is_overdue(approval.expires_at, now) {
         // An expired proposal's staged avatar image dies with it.
         discard_staged_avatar_in_tx(conn, &approval).await?;
+        end_set_card_in_tx(conn, &approval, momo_expressions::set::Retire::Expired).await?;
         return Ok(Ok(settle_expired(
             conn,
             &approval,
@@ -1445,6 +1468,15 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // such as a run cancelled by a person).
     if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && !input.approve {
         discard_staged_avatar_in_tx(conn, &approval).await?;
+        // A set card's drafts and head end with its rejection (ADR-0218 §12 L8-3).
+        end_set_card_in_tx(
+            conn,
+            &approval,
+            momo_expressions::set::Retire::Rejected {
+                by: input.member_id,
+            },
+        )
+        .await?;
     }
 
     // ---- writes ------------------------------------------------------------
@@ -1670,8 +1702,19 @@ struct Executed {
     /// nowhere else. `None` for every action but `invite.create`.
     secret_once: Option<SecretOnceDto>,
     next: Option<ActionResultNext>,
+    /// What an executed expression card adds to its result (ADR-0218): the one picture of
+    /// `expression.create`, or the settled set of `expression.set.create`. `None` for every other
+    /// action.
+    expression: Option<ExpressionOutcome>,
+}
+
+/// The one value an executed expression card adds to its result, by card.
+enum ExpressionOutcome {
     /// ADR-0218 `Result` of an executed `expression.create` (`props.result.expression`).
-    expression: Option<Value>,
+    One(Value),
+    /// ADR-0218 §12 L5.5 `SetResult` of an executed `expression.set.create`: the card's
+    /// `props.result.expressionSet` and the receipt's `result.expressionSet`.
+    Set(Value),
 }
 
 /// An executor either ran, or refused **before its first write**.
@@ -1862,6 +1905,24 @@ async fn discard_staged_avatar_in_tx(
     if let Some(image_id) = staged {
         delete_staged_avatar_image_in_tx(conn, approval.workspace_id, image_id).await?;
     }
+    Ok(())
+}
+
+/// A set card that ends without a registration — its rejection or its expiry (ADR-0218 §12 L8-3,
+/// A13/A29): the card's drafts lose their bytes and words and its head moves `proposed → expired`,
+/// in the transaction that settles the approval, so no end of an approval can leave a head behind
+/// that blocks the agent's next set. Every other card is not this function's (no-op).
+async fn end_set_card_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    end: momo_expressions::set::Retire,
+) -> Result<(), momo_db::DbError> {
+    if choice_card(approval) != ChoiceCard::Set {
+        return Ok(());
+    }
+    momo_expressions::set::retire_proposed_in_tx(conn, approval.workspace_id, approval.id, end)
+        .await
+        .map_err(expression_db_error)?;
     Ok(())
 }
 
@@ -2237,7 +2298,13 @@ async fn execute_workspace_action(
         // stands on (the resolver read it from the database), never from the payload, and the
         // person is judged by the ONE predicate the push audience and the preview also ask
         // (`adder_allows_in_tx`) against the policy as it is now. No admin or owner proxy.
-        let ActionArgs::ExpressionCreate { subject, .. } = &resolved.validated.args else {
+        // The set card (ADR-0218 증보 6 §12, #5460 S1b) names its face the same way; its executor is S2's.
+        let (ActionArgs::ExpressionCreate { subject, .. }
+        | ActionArgs::ExpressionSetCreate(crate::routes::actions::ExpressionSetSpec {
+            subject,
+            ..
+        })) = &resolved.validated.args
+        else {
             return Err(protocol_error(
                 "expression_adder action resolved without its candidates",
             ));
@@ -2570,6 +2637,23 @@ async fn execute_workspace_action(
                 "team_ai.roles.set resolved without the switch it showed",
             ));
         }
+        // ADR-0218 증보 6 §12 L6 (#5461 S2): the set card registers the pictures the person kept,
+        // item by item, in this one transaction.
+        ActionArgs::ExpressionSetCreate(spec) => {
+            match execute_expression_set_create(conn, approval, input, now, spec).await? {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
+        // The plan card's executor is S5a's (the confirmation that lets making start). A decision
+        // that reaches here rolls back and writes nothing — nothing raises that card before S5a
+        // lands (the proposal function is called by nothing). Fail closed rather than approve what
+        // cannot run.
+        ActionArgs::ExpressionSetPlan { .. } => {
+            return Err(protocol_error(
+                "the executor of an expression set plan card is not part of this build",
+            ));
+        }
     };
 
     // ---- 3b. who receives the one-time value (ADR-0186 증보 v3 V3-3a/V3-5) -----
@@ -2720,10 +2804,15 @@ async fn execute_workspace_action(
     // is a durable copy — and `secretOnce` is grafted on afterwards, outside the
     // transaction, by `decide`.
     if let Some(object) = receipt.as_object_mut() {
-        object.insert(
-            "result".into(),
-            json!({"actionId": action.id, "ref": action_ref_value}),
-        );
+        let mut result = json!({"actionId": action.id, "ref": action_ref_value});
+        // A set card's result is ids, names and counts: the receipt carries it (and a retry of the
+        // same `client_decision_id` answers it again) as the card does (ADR-0218 §12 L5.5).
+        if let (Some(ExpressionOutcome::Set(set)), Some(result)) =
+            (&executed.expression, result.as_object_mut())
+        {
+            result.insert("expressionSet".into(), set.clone());
+        }
+        object.insert("result".into(), result);
     }
 
     if !mark_approval_decided_in_tx(
@@ -2852,7 +2941,14 @@ async fn execute_workspace_action(
             rows: executed.result_rows,
             secret_shown_once: executed.secret_once.is_some(),
             next: executed.next,
-            expression: executed.expression,
+            expression: match &executed.expression {
+                Some(ExpressionOutcome::One(one)) => Some(one.clone()),
+                _ => None,
+            },
+            expression_set: match executed.expression {
+                Some(ExpressionOutcome::Set(set)) => Some(set),
+                _ => None,
+            },
         });
         let outcome = approval_card_outcome(
             approval,
@@ -4427,11 +4523,11 @@ async fn execute_expression_create(
             ],
             secret_once: None,
             next: None,
-            expression: Some(json!({
+            expression: Some(ExpressionOutcome::One(json!({
                 "id": chosen.expression_id.to_string(),
                 "name": chosen.name,
                 "token": format!(":{}:", chosen.name),
-            })),
+            }))),
         })),
         Err(momo_expressions::Error::Role) => {
             match role_required_refusal(
@@ -4482,19 +4578,185 @@ async fn execute_expression_create(
     }
 }
 
-/// `expressionChoice` is meaningful on exactly one request: **approving** an
-/// `expression.create` card, and there it is required (ADR-0186 v8 X8-2). Anywhere else it is
-/// a malformed request; approving without one names no picture. `None` = fine.
+/// `expression.set.create` (ADR-0218 §12 L6): register the pictures the person kept of a set, in
+/// this decision's transaction. Every proof is a read inside `decide_in_tx` and happens before its
+/// first write (the add role under the catalogue lock, the card's drafts, each kept draft's revision
+/// and TTL, the stored bytes hashed again); a failure is a 409/403 receipt that spends nothing and
+/// leaves every picture as it was. The set id and the face come from the **resolved** card — the
+/// head's own, never the stored payload's.
+async fn execute_expression_set_create(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    spec: &crate::routes::actions::ExpressionSetSpec,
+) -> Result<Execution, momo_db::DbError> {
+    let Some(choices) = input.expression_choices.as_ref() else {
+        // `expression_choice_refused` turns "approve without a choice" into a 400 before anything
+        // else; reaching here would mean a person approved nothing in particular.
+        return Err(protocol_error(
+            "expression.set.create approved without its choices",
+        ));
+    };
+    let actor = momo_expressions::Actor {
+        workspace: input.workspace_id,
+        member: input.member_id,
+    };
+    match momo_expressions::set_decision::decide_in_tx(
+        conn,
+        actor,
+        approval.id,
+        approval.requested_by,
+        spec.set_id,
+        spec.subject,
+        choices,
+    )
+    .await
+    {
+        Ok(decided) => {
+            let saved = decided.registered.len();
+            let skipped = decided.skipped.len();
+            let mut rows = vec![momo_agent::actions::action_row(
+                "저장",
+                format!("{saved}개"),
+            )];
+            if skipped > 0 {
+                rows.push(momo_agent::actions::action_row(
+                    "건너뜀",
+                    format!("{skipped}개"),
+                ));
+            }
+            Ok(Execution::Ran(Executed {
+                audits: Vec::new(),
+                ref_type: momo_agent::actions::REF_TYPE_EXPRESSION_SET,
+                ref_id: decided.set_id,
+                result_body: momo_agent::actions::expression_set_result_body(saved, skipped),
+                result_rows: rows,
+                secret_once: None,
+                next: None,
+                expression: Some(ExpressionOutcome::Set(json!({
+                    "setId": decided.set_id.to_string(),
+                    "registered": decided.registered.iter().map(|item| json!({
+                        "id": item.id.to_string(),
+                        "name": item.name,
+                        "token": format!(":{}:", item.name),
+                    })).collect::<Vec<_>>(),
+                    "skipped": decided.skipped.iter().map(|skip| json!({
+                        "draftId": skip.draft_id.to_string(),
+                        "name": skip.name,
+                        "reason": skip.reason.as_str(),
+                    })).collect::<Vec<_>>(),
+                }))),
+            }))
+        }
+        Err(momo_expressions::Error::Role) => {
+            match role_required_refusal(
+                conn,
+                approval,
+                input,
+                now,
+                Some(RequiredRole::ExpressionAdder),
+            )
+            .await?
+            {
+                Ok(decision) => Ok(Execution::Refused(decision)),
+                Err(_) => Err(protocol_error("role refusal could not be built")),
+            }
+        }
+        // Nothing at all registers (L6.1-5): the approval stays, the person may pick differently or
+        // reject.
+        Err(momo_expressions::Error::NameReserved) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_name_reserved",
+            "every kept name is already taken",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Quota) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_quota",
+            "the team's expression library is full",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        // A kept picture that is not a ready draft of this card (a gray slot's made-up id included),
+        // a revision or hash that is not the one shown, an expired card, a head that is no longer
+        // this approval's: the **whole** decision is stale (L6.1-3).
+        Err(
+            momo_expressions::Error::Stale
+            | momo_expressions::Error::Expired
+            | momo_expressions::Error::NotFound
+            | momo_expressions::Error::Invalid,
+        ) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_preview_stale",
+            "a picture you kept is no longer the one stored",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Db(error)) => Err(error),
+    }
+}
+
+/// Which card a decision's picture choice is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChoiceCard {
+    /// `expression.create`: one picture of up to four candidates (ADR-0186 v8 X8-2).
+    One,
+    /// `expression.set.create`: the pictures kept of a set (ADR-0218 §12 L5.4).
+    Set,
+    /// Every other card, workspace action or not.
+    Other,
+}
+
+fn choice_card(approval: &LockedApproval) -> ChoiceCard {
+    if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
+        return ChoiceCard::Other;
+    }
+    match approval
+        .payload
+        .pointer("/action/id")
+        .and_then(Value::as_str)
+    {
+        Some(id) if id == momo_agent::actions::ACTION_EXPRESSION_CREATE => ChoiceCard::One,
+        Some(id) if id == momo_agent::actions::ACTION_EXPRESSION_SET_CREATE => ChoiceCard::Set,
+        _ => ChoiceCard::Other,
+    }
+}
+
+/// The two choice fields of a decision request, judged against the card (ADR-0218 §12 L5.4):
+///
+/// | card | approving | `expressionChoice` | `expressionChoices` |
+/// |---|---|---|---|
+/// | `expression.create` | yes | required | not allowed |
+/// | `expression.set.create` | yes | not allowed | required |
+/// | anything else, or a rejection | | not allowed | not allowed |
+///
+/// A field that is there and has no place is `expression_choice_not_allowed` (both together always
+/// are: one of them has none); only then a field that is missing is `expression_choice_required`.
+/// An old client that does not know the set card sends neither and gets the second, with nothing
+/// spent. `None` = fine.
 fn expression_choice_refused(
-    present: bool,
-    is_expression_card: bool,
+    single: bool,
+    list: bool,
+    card: ChoiceCard,
     approve: bool,
 ) -> Option<&'static str> {
-    match (present, is_expression_card && approve) {
-        (true, false) => Some("expression_choice_not_allowed"),
-        (false, true) => Some("expression_choice_required"),
-        _ => None,
+    let (single_allowed, list_allowed) = match (card, approve) {
+        (ChoiceCard::One, true) => (true, false),
+        (ChoiceCard::Set, true) => (false, true),
+        _ => (false, false),
+    };
+    if (single && !single_allowed) || (list && !list_allowed) {
+        return Some("expression_choice_not_allowed");
     }
+    if (single_allowed && !single) || (list_allowed && !list) {
+        return Some("expression_choice_required");
+    }
+    None
 }
 
 /// `channel.member.add` (증보 V1/V6): seat each resolved member as `member`, as
@@ -5636,6 +5898,7 @@ mod tests {
             operator_scope: false,
             deliver_secret_to_agent: false,
             expression_choice: None,
+            expression_choices: None,
             context_max_messages: 30,
             admission_state: None,
         }
@@ -5859,9 +6122,23 @@ mod tests {
             momo_agent::actions::Proposers::TeamAiOnly
         );
         assert_eq!(unfurl.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+        // ADR-0218 증보 6 §12 (#5460 S1b, A23): the set's two cards are the helper's alone and are
+        // on the allow-list (`is_team_ai_action`), so a card with the helper's mark is judged by the
+        // bundles and the read rule — taking either id off `TEAM_AI_ACTION_IDS` makes the helper's own
+        // card refuse its approval, and a card of either without the mark is refused.
+        let set_card = action_by_id("expression.set.create").expect("registered");
+        let plan_card = action_by_id("expression.set.plan").expect("registered");
+        for action in [set_card, plan_card] {
+            assert_eq!(action.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+            assert!(
+                momo_workspace_actions::team_ai::is_team_ai_action(action.id),
+                "{} must be on the allow-list",
+                action.id
+            );
+        }
         let marked = json!({"source": "team_ai", "tools": [], "web_searches": 0});
 
-        for action in [roles_card, unfurl, channel_create] {
+        for action in [roles_card, unfurl, channel_create, set_card, plan_card] {
             assert!(
                 matches!(
                     card_provenance(Some(&marked), action),
@@ -5879,7 +6156,7 @@ mod tests {
             Some(json!({"source": 1})),
             Some(json!("team_ai")),
         ] {
-            for action in [roles_card, unfurl] {
+            for action in [roles_card, unfurl, set_card, plan_card] {
                 assert!(
                     matches!(
                         card_provenance(via.as_ref(), action),
@@ -5920,5 +6197,74 @@ mod tests {
             };
             assert_eq!(settings_row_lock_for(id), expected, "{id}");
         }
+    }
+
+    /// ADR-0218 §12 L5.4, every row: the two choice fields of a decision request against the card.
+    /// A literal table, not a function of its own inputs, so a change of the rule is a change of a
+    /// row someone reads.
+    #[test]
+    fn the_two_choice_fields_are_judged_against_the_card_in_every_row() {
+        use ChoiceCard::{One, Other, Set};
+        const NOT: Option<&str> = Some("expression_choice_not_allowed");
+        const REQ: Option<&str> = Some("expression_choice_required");
+        // (card, approving, `expressionChoice`, `expressionChoices`, the answer)
+        let table: [(ChoiceCard, bool, bool, bool, Option<&str>); 24] = [
+            (One, true, false, false, REQ),
+            (One, true, true, false, None),
+            (One, true, false, true, NOT),
+            (One, true, true, true, NOT),
+            (One, false, false, false, None),
+            (One, false, true, false, NOT),
+            (One, false, false, true, NOT),
+            (One, false, true, true, NOT),
+            (Set, true, false, false, REQ),
+            (Set, true, true, false, NOT),
+            (Set, true, false, true, None),
+            (Set, true, true, true, NOT),
+            (Set, false, false, false, None),
+            (Set, false, true, false, NOT),
+            (Set, false, false, true, NOT),
+            (Set, false, true, true, NOT),
+            (Other, true, false, false, None),
+            (Other, true, true, false, NOT),
+            (Other, true, false, true, NOT),
+            (Other, true, true, true, NOT),
+            (Other, false, false, false, None),
+            (Other, false, true, false, NOT),
+            (Other, false, false, true, NOT),
+            (Other, false, true, true, NOT),
+        ];
+        for (card, approve, single, list, expected) in table {
+            assert_eq!(
+                expression_choice_refused(single, list, card, approve),
+                expected,
+                "{card:?} approve={approve} single={single} list={list}"
+            );
+        }
+    }
+
+    /// Which cards are which: only a `workspace_action` whose id is one of the two expression ids is
+    /// ever a choice card; the same id on another approval type is not.
+    #[test]
+    fn only_a_workspace_action_card_of_the_two_ids_has_a_choice() {
+        let mut approval = spawn_card(json!({}));
+        approval.action_type = ACTION_TYPE_WORKSPACE_ACTION.to_string();
+        approval.payload = json!({"action": {"id": "expression.create"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::One);
+        approval.payload = json!({"action": {"id": "expression.set.create"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::Set);
+        for other in ["expression.set.plan", "channel.create", ""] {
+            approval.payload = json!({"action": {"id": other}});
+            assert_eq!(choice_card(&approval), ChoiceCard::Other, "{other}");
+        }
+        approval.payload = json!({"tool_call": {"name": "x"}});
+        assert_eq!(choice_card(&approval), ChoiceCard::Other);
+        approval.action_type = "tool_call".into();
+        approval.payload = json!({"action": {"id": "expression.set.create"}});
+        assert_eq!(
+            choice_card(&approval),
+            ChoiceCard::Other,
+            "the id on an approval that is not a workspace action is nothing"
+        );
     }
 }

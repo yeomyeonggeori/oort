@@ -37,6 +37,8 @@ name: 4869-reply-swipe
 # 미끄러짐 없음, 큰 글자. Maestro 의 `swipe` 는 한 번의 직선이라 「스크롤하던 손가락이 옆으로 휘는」 경합을 만들지 못한다.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - tapOn:
     id: "sidebar-row-channel:${CHANNEL_ID}"

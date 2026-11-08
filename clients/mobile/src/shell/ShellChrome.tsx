@@ -205,9 +205,10 @@ const TAB_ICON: Readonly<Record<Tab, ShellIconName>> = {
 /**
  * 층이 셸을 덮은 동안 크롬을 보조기술에서 숨긴다. 층은 크롬 **위**에 그려지므로
  * 손가락은 크롬에 닿지 않는데, VoiceOver 는 트리를 훑어 가려진 탭바·FAB 을 읽고
- * 누를 수 있다 — 대화 층은 늘 모달이 아니다(`AppShell` 의 `accessibilityViewIsModal`).
+ * 누를 수 있다 — 탭 위에 바로 연 대화 층은 모달이 아니다(`AppShell` 의 `layerUnderConversation`).
+ * 층 밑의 탭 판(홈 목록 등)도 같은 쌍으로 숨는다(`AppShell` 의 `tabBody`, #5546).
  */
-function coveredProps(covered: boolean) {
+export function coveredProps(covered: boolean) {
   return covered
     ? ({
         accessibilityElementsHidden: true,

@@ -1017,18 +1017,32 @@ pub async fn cancel_pending_approvals_for_run_in_tx(
         if result.rows_affected() == 1 {
             // An `expression.create` card's candidate pictures go with the run (ADR-0186 v8
             // X8-2: reject, expire, cancel and the TTL sweep all reclaim the bytes).
-            if approval
+            let expression_db_error = |error| match error {
+                momo_expressions::Error::Db(error) => error,
+                other => DbError::Sqlx(sqlx::Error::Protocol(other.to_string())),
+            };
+            let action_id = approval
                 .payload
                 .pointer("/action/id")
-                .and_then(Value::as_str)
-                == Some(crate::actions::ACTION_EXPRESSION_CREATE)
-            {
+                .and_then(Value::as_str);
+            if action_id == Some(crate::actions::ACTION_EXPRESSION_CREATE) {
                 momo_expressions::action::reclaim_in_tx(conn, workspace_id, id)
                     .await
-                    .map_err(|error| match error {
-                        momo_expressions::Error::Db(error) => error,
-                        other => DbError::Sqlx(sqlx::Error::Protocol(other.to_string())),
-                    })?;
+                    .map_err(expression_db_error)?;
+            }
+            // An `expression.set.create` card goes the same way and takes its head with it (ADR-0218
+            // §12 L8-3, A13/A29): the drafts' bytes and words are reclaimed and the head moves
+            // `proposed → expired` in this very transaction, so a stopped run neither keeps a set's
+            // pictures nor blocks the agent's next set.
+            if action_id == Some(crate::actions::ACTION_EXPRESSION_SET_CREATE) {
+                momo_expressions::set::retire_proposed_in_tx(
+                    conn,
+                    workspace_id,
+                    id,
+                    momo_expressions::set::Retire::Cancelled,
+                )
+                .await
+                .map_err(expression_db_error)?;
             }
             cancelled.push(approval);
         }

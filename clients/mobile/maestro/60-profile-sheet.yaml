@@ -18,6 +18,8 @@ name: 60-profile-sheet
 #     clients/mobile/maestro/60-profile-sheet.yaml
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 
 # 대화 목록 발치에는 계정 줄이 더는 없다.

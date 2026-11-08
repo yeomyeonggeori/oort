@@ -2250,6 +2250,10 @@ pub struct AgentRunSpentDto {
     /// Some of the tokens are oort's estimate (the provider reported none). ADR-0147 D3: a
     /// figure that may be an estimate says so.
     pub estimated: bool,
+    /// ADR-0201 증보 v4 P7 (#5370): how many times the helper handed work to Hermes in this run (0 or
+    /// 1). The three sums above are the helper's own rows — the team's credits; Hermes's row is a
+    /// subscription and sits under Hermes in `usage/agents`.
+    pub delegations: i64,
 }
 
 impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
@@ -2259,6 +2263,7 @@ impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
             completion_tokens: spent.completion_tokens,
             web_searches: spent.web_searches,
             estimated: spent.estimated,
+            delegations: spent.delegations,
         }
     }
 }
@@ -6276,6 +6281,12 @@ pub struct ApprovalDecisionRequest {
     /// action only (anything else is a 400) and parsed strictly by the route.
     #[serde(default, rename = "expressionChoice", alias = "expression_choice")]
     pub expression_choice: Option<serde_json::Value>,
+    /// ADR-0218 증보 6 §12 L5.4 (`SetDecision`, #5461): the pictures kept on an
+    /// `expression.set.create` card, `[{draftId, revision, sha256, kind?}]`, 1 to 40 of them.
+    /// Required on approving that card and a 400 anywhere else; exclusive with `expressionChoice`.
+    /// Parsed strictly by the route before anything is read (`momo_expressions::set_decision`).
+    #[serde(default, rename = "expressionChoices", alias = "expression_choices")]
+    pub expression_choices: Option<serde_json::Value>,
     /// ADR-0186 증보 v3 V3-3a — 「에이전트에게 연결 코드 넘기기」. Default off.
     ///
     /// Judged against the **action's** `secret_delivery` (`OptIn` only), never
@@ -6345,6 +6356,12 @@ pub struct ApprovalDecisionResult {
     /// The one-time value, **response body only**.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_once: Option<SecretOnceDto>,
+    /// ADR-0218 증보 6 §12 L5.5 (`SetResult`, #5461): what an executed `expression.set.create`
+    /// registered and skipped — `{setId, registered:[{id,name,token}], skipped:[{draftId,name,
+    /// reason}]}`. Ids, names and counts only. Stored in the receipt with the rest, so a retry of the
+    /// same `client_decision_id` answers the same sets of ids. Absent for every other action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression_set: Option<serde_json::Value>,
 }
 
 /// `{type, id}` — the durable thing an executed action produced.
@@ -7077,6 +7094,7 @@ mod tests {
                     id: "iv".into(),
                 },
                 secret_once: None,
+                expression_set: None,
             }),
             line: None,
         };

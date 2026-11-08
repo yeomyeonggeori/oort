@@ -12,6 +12,8 @@ name: 5452-panel-steady
 # 준비: `CHANNEL_ID` 채널이 있는 스택 - `measure/seed-expression-panel.py`.
 - launchApp:
     appId: app.momo.ios
+    arguments:
+      momoAutomation: "YES"
 - runFlow: subflows/ensure-signed-in.yaml
 - extendedWaitUntil:
     visible:

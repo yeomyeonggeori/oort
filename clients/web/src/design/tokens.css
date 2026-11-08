@@ -3094,6 +3094,17 @@
   max-inline-size: var(--radix-popover-content-available-width);
 }
 
+/* 같은 일의 높이 쪽 (#5527, 검수 7c B1). 위 `popover-fit`의 짝이다. 이모티콘 고르개(공용 `PopoverContent`)의 높이 상한은 pane-md(512) 고정이었고, 데스크탑 최소 창(720×480)에서
+ * 고르개가 화면 위로 섰다(높이 489, 위쪽 y -84: 탭 줄과 검색 칸이 화면 밖이라 포인터로 닿을 수 없었다). Radix가 충돌 경계(여백 8 포함)까지 남은 높이를
+ * `--radix-popover-content-available-height`로 주므로 상한은 pane-md와 그 높이 중 작은 쪽이다. 줄어드는 몫은 안쪽 스크롤 칸(고르개의 격자)이 지고,
+ * 넓은 창에서는 남은 높이가 512보다 커서 아무 일도 없다. 변수가 없는 자리(첫 계산 전, Radix 밖)에서는 예전 상한 512 그대로다(`var()` 대체값). */
+@utility max-h-pane-md-fit {
+  max-block-size: min(
+    var(--spacing-pane-md),
+    var(--radix-popover-content-available-height, var(--spacing-pane-md))
+  );
+}
+
 /* 44px 손가락 타깃 (B6). 폰에서만 커진다: 포인터에는 28px 아이콘 버튼이 맞고,
  * 데스크탑 밀도를 손가락 크기로 올리면 사이드바 한 화면에 들어가던 채널 수가
  * 절반이 된다. 커지는 것은 타깃이지 아이콘이 아니다 — 그려지는 글리프는 그대로
