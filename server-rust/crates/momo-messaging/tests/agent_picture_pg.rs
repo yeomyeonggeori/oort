@@ -3758,9 +3758,13 @@ async fn as_worker(
 /// `workspace`…) and that is the whole problem with counting from them: the attempts that the database
 /// allows are listed as allowed on purpose, and the count must be unmoved anyway, measured by the api's own
 /// function (`count_is_still_at_least`) and by the mark rows themselves. The attempts on the mark and token
-/// tables are refused by privilege. Sabotage: count from `attachment` again (rows 1–7 go red), count from
-/// the token table (rows 5–7 go red), give the worker DELETE or any verb on the mark table (rows 9–12 go
-/// red), give the mark table a foreign key (rows 5–7 go red).
+/// tables are refused by privilege. Sabotage, as measured (#5530): count from `attachment` again (rows 1–5
+/// and 7 go red; deleting the runs alone leaves every attachment row), count from the spent tokens (rows
+/// 5–7 go red: the cascade), give the worker SELECT and DELETE on the mark table (row 9 goes red: the
+/// trigger answers instead of the privilege), give the mark table a foreign key (rows 5–7 go red: the
+/// cascade meets the trigger and the parent's delete fails). DELETE alone stays green here (a DELETE with a
+/// WHERE needs SELECT as well); `the_mark_table_belongs_to_the_api_role_alone`, the static guard and
+/// `prod_role_conformance_pg` hold that privilege.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn a_worker_compromised_at_the_database_level_cannot_make_todays_count_smaller() {
