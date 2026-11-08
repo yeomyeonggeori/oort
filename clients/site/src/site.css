@@ -70,7 +70,8 @@ body {
   overflow-wrap: anywhere;
 }
 :lang(ko) body { word-break: keep-all; }
-:lang(ja) body { word-break: auto-phrase; line-break: strict; }
+/* 일본어: 문구의 구절 힌트(<wbr>, build.py PHRASE_LANGS)·문장 부호·빈칸에서만 줄을 바꾼다(WebKit 에 auto-phrase 가 없다) */
+:lang(ja) body { word-break: keep-all; line-break: strict; }
 :lang(zh-Hans) body, :lang(zh-Hant) body { line-break: strict; }
 a { color: inherit; }
 img, svg, canvas { display: block; }

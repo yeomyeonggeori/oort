@@ -9,7 +9,8 @@
 // 재는 것: 7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류, 글자 뒤 바탕 대비,
 // 움직임 줄이기(두 장면이 같다)·WebGL 끔(대체 바탕)·화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드),
 // 언어 첫 방문·기억, 좁은 폭(주 버튼에 칩·터치 44·TestFlight 표지·분할 버튼 포커스·메뉴 포커스 빠짐),
-// 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac). 하나라도 어긋나면 exit 1.
+// 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac), WebKit 일본어 줄바꿈(조사 앞에서 안 끊김).
+// 하나라도 어긋나면 exit 1.
 // =============================================================================
 
 import { createRequire } from "node:module";
@@ -19,15 +20,15 @@ import { fileURLToPath } from "node:url";
 
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(resolve(SITE, "../web/package.json"));
-const { chromium, devices } = require("playwright");
+const { chromium, webkit, devices } = require("playwright");
 
 const BASE = (process.env.SITE_URL || "http://127.0.0.1:21410").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR ? resolve(process.env.SHOTS_DIR) : "";
 const LANGS = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "es", "fr"];
 const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").map((s) => s.trim()));
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
-// ONLY=pages,motion,webgl,chip,lang,narrow,phone,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,weight").split(",").map((s) => s.trim()));
+// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -505,7 +506,55 @@ async function main() {
     await desk.close();
   }
 
-  // 8) 무게
+  // 8) WebKit(사파리 엔진) 일본어 390: 줄이 조사·작은 가나·닫는 부호로 시작하거나 여는 괄호로 끝나지 않는다(구절 힌트 <wbr> + keep-all)
+  if (ONLY.has("webkit")) {
+    const wk = await webkit.launch();
+    const iphone = { ...devices["iPhone 14"] };
+    delete iphone.defaultBrowserType;
+    for (const [name, opts] of [["390", { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 }], ["iPhone", iphone]]) {
+      const ctx = await wk.newContext({ ...opts, colorScheme: "light" });
+      const page = await ctx.newPage();
+      const errors = watch(page);
+      await page.goto(`${BASE}/ja/`, { waitUntil: "load" });
+      await settle(page);
+      const res = await page.evaluate(() => {
+        const BAD_START = "はをのにでがともへやゃゅょっァィゥェォャュョッー、。）」』";
+        const BAD_END = "（「『";
+        const lines = (el) => {
+          const out = []; let top = null, cur = "";
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            for (let i = 0; i < n.data.length; i++) {
+              const rg = document.createRange(); rg.setStart(n, i); rg.setEnd(n, i + 1);
+              const r = [...rg.getClientRects()].find((x) => x.width > 0);
+              if (r) {
+                const t = Math.round(r.top);
+                if (top !== null && t > top + 4) { out.push(cur); cur = ""; }
+                if (top === null || t > top + 4) top = t;
+              }
+              cur += n.data[i];
+            }
+          }
+          out.push(cur);
+          return out.map((l) => l.replace(/[\s ⁠]+/g, " ").trim()).filter(Boolean);
+        };
+        const blocks = [...document.querySelectorAll(".hero .lead, .hero .phone-note span, .row-t span, .steps li > span:last-child")]
+          .filter((el) => el.getBoundingClientRect().width > 0).map(lines);
+        const bad = [];
+        for (const ls of blocks) ls.forEach((l, i) => {
+          if (i > 0 && BAD_START.includes(l[0])) bad.push(`…|${l.slice(0, 6)}`);
+          if (i < ls.length - 1 && BAD_END.includes(l[l.length - 1])) bad.push(`${l.slice(-6)}|…`);
+        });
+        return { blocks: blocks.length, wrapped: blocks.filter((b) => b.length > 1).length, bad, lead: blocks[0], overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+      });
+      check(`WebKit ja ${name}: 조사·부호 앞에서 줄이 끊기지 않는다`, res.bad.length === 0 && res.wrapped > 0 && res.overflow <= 0 && errors.length === 0, JSON.stringify(res));
+      if (SHOTS && name === "390") await page.screenshot({ path: resolve(SHOTS, "webkit-ja-390-light.png"), fullPage: true });
+      await ctx.close();
+    }
+    await wk.close();
+  }
+
+  // 9) 무게
   if (ONLY.has("weight")) {
     const dist = resolve(SITE, "dist");
     const html = LANGS.map((l) => statSync(resolve(dist, l, "index.html")).size);

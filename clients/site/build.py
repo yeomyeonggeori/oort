@@ -10,6 +10,7 @@ src/index.html 하나에 언어별 문구(i18n/<lang>.json)와 값(values.json)�
 CSS·스크립트는 페이지 안에 담는다(요청 하나). 다음 중 하나라도 있으면 빌드가 실패한다(exit 1):
   - 어느 언어에 키가 빠졌거나 남는 키가 있다(기준: 모든 언어 키의 합집합) · 값이 비었다
   - 문구에 줄표(U+2014, U+2013)가 있다(디자인 규칙)
+  - 구절 힌트(|)가 PHRASE_LANGS 밖 언어에 있거나, 속성·<title> 안에 들어가는 키에 있다
   - 채우지 못한 {{자리}}가 남았다 · values.json 의 키가 빠졌다
   - 페이지가 가리키는 로컬 파일(src·href·srcset)이 결과 폴더에 없다
 """
@@ -28,6 +29,10 @@ ROOT_LANG = "en"  # 루트(/)는 영어 페이지이고, 첫 방문이면 브라
 VALUE_KEYS = ["DMG_ARM_URL", "DMG_X64_URL", "VERSION", "MIN_MACOS", "WEB_URL", "SITE_HOST"]
 STORE_KEY = "oort.site.lang"
 DASHES = ("—", "–")
+# 브라우저가 구절을 모르는(WebKit 은 word-break: auto-phrase 가 없다) 언어: 문구의 | 자리에 <wbr> 를 넣고
+# CSS 가 word-break: keep-all 로 그 자리(와 문장 부호·빈칸)에서만 줄을 바꾼다. 조사 앞에서 끊기지 않게.
+PHRASE_LANGS = {"ja"}
+PHRASE_MARK = "|"
 
 
 def fail(msg):
@@ -50,8 +55,16 @@ def load_values():
     return values
 
 
-def load_catalogs():
+def attr_keys(template):
+    # 속성 값·<title> 안에 들어가는 문구 키: 여기에는 <wbr> 를 넣을 수 없다
+    keys = set(re.findall(r'="[^"]*?\{\{t\.([a-z0-9_]+)\}\}', template))
+    keys |= set(re.findall(r"<title>[^<]*?\{\{t\.([a-z0-9_]+)\}\}", template))
+    return keys | {"lang_name"}  # 언어 메뉴·꼬리 링크도 빌드가 직접 쓴다
+
+
+def load_catalogs(template):
     cats = {lang: load_json(HERE / "i18n" / f"{lang}.json") for lang in LANGS}
+    in_attr = attr_keys(template)
     every = set()
     for cat in cats.values():
         every |= set(cat)
@@ -65,6 +78,8 @@ def load_catalogs():
                 problems.append(f"{lang}.{key}: 빈 값")
             elif any(d in val for d in DASHES):
                 problems.append(f"{lang}.{key}: 줄표(U+2014/U+2013)는 쓰지 않아요")
+            elif PHRASE_MARK in val and (lang not in PHRASE_LANGS or key in in_attr):
+                problems.append(f"{lang}.{key}: 구절 힌트({PHRASE_MARK})는 {', '.join(sorted(PHRASE_LANGS))}의 본문 글자에만 써요")
     if problems:
         fail("문구 사전이 맞지 않아요\n  " + "\n  ".join(problems))
     return cats
@@ -136,7 +151,7 @@ def render(lang, is_root, template, cats, values, parts, shot_size):
     }
     for k, v in fills.items():
         page = page.replace(k, v)
-    page = re.sub(r"\{\{t\.([a-z0-9_]+)\}\}", lambda m: esc(t[m.group(1)]) if m.group(1) in t else m.group(0), page)
+    page = re.sub(r"\{\{t\.([a-z0-9_]+)\}\}", lambda m: esc(t[m.group(1)]).replace(PHRASE_MARK, "<wbr>") if m.group(1) in t else m.group(0), page)
     page = re.sub(r"\{\{v\.([A-Z0-9_]+)\}\}", lambda m: esc(values[m.group(1)]) if m.group(1) in values else m.group(0), page)
     page = page.replace("{{b}}", base)
     left = sorted(set(re.findall(r"\{\{[^{}]*\}\}", page)))
@@ -169,9 +184,9 @@ def main(argv):
     if "--out" in argv:
         out = Path(argv[argv.index("--out") + 1]).resolve()
     values = load_values()
-    cats = load_catalogs()
-    shot_size = load_json(HERE / "assets" / "app-shots.json")
     template = (HERE / "src" / "index.html").read_text(encoding="utf-8")
+    cats = load_catalogs(template)
+    shot_size = load_json(HERE / "assets" / "app-shots.json")
     parts = {
         "css": strip_css((HERE / "src" / "site.css").read_text(encoding="utf-8")),
         "js": strip_js((HERE / "src" / "site.js").read_text(encoding="utf-8")),
