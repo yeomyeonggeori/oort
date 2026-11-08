@@ -9,7 +9,8 @@
 // 재는 것: 7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류, 글자 뒤 바탕 대비,
 // 움직임 줄이기(두 장면이 같다)·WebGL 끔(대체 바탕)·화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드),
 // 언어 첫 방문·기억, 좁은 폭(주 버튼에 칩·터치 44·TestFlight 표지·분할 버튼 포커스·메뉴 포커스 빠짐),
-// 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac), WebKit 일본어 줄바꿈(조사 앞에서 안 끊김).
+// 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac), WebKit 일본어 줄바꿈(조사 앞에서 안 끊김),
+// 머리 줄(7개 언어 × 320·360·375·390·568·600 × 일반·폰 흉내: 로고 한 줄·마크 크기·컨트롤 화면 안·넘침 0·아이콘 44·폰 링크 하나).
 // 하나라도 어긋나면 exit 1.
 // =============================================================================
 
@@ -27,8 +28,8 @@ const SHOTS = process.env.SHOTS_DIR ? resolve(process.env.SHOTS_DIR) : "";
 const LANGS = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "es", "fr"];
 const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").map((s) => s.trim()));
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
-// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,weight").split(",").map((s) => s.trim()));
+// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,header,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,header,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -118,6 +119,34 @@ async function heroContrast(page, decoder) {
   await page.evaluate(() => { document.documentElement.classList.remove("probe-hide"); document.getElementById("probe-style")?.remove(); });
   return results;
 }
+
+/** 머리 줄의 숫자. W 는 정해 둔 뷰포트 폭(폰 흉내가 레이아웃 폭을 넓혀도 속지 않게 이 값과 견준다).
+ *  로고 글자는 플렉스 항목이라 getClientRects 가 줄 수를 못 센다 → 높이 ÷ 줄 높이로 센다. */
+const headMeasure = (W) => {
+  const r = (el) => el.getBoundingClientRect();
+  const vis = (el) => el && r(el).width > 0 && r(el).height > 0;
+  const span = document.querySelector(".brand span");
+  const brand = r(document.querySelector(".brand"));
+  const mark = r(document.querySelector(".brand .mark"));
+  const nav = r(document.querySelector(".top-nav"));
+  const ctls = [...document.querySelectorAll(".top-nav .lang-btn, .top-nav .web-link")].filter(vis).map((el) => {
+    const b = r(el);
+    return { cls: el.classList.contains("web-link") ? "web" : "lang", left: Math.round(b.left * 10) / 10, right: Math.round(b.right * 10) / 10, w: Math.round(b.width), h: Math.round(b.height) };
+  });
+  const webUrl = document.querySelector(".web-link").getAttribute("href");
+  const wrapped = nav.top >= brand.bottom - 1;
+  return {
+    phone: document.documentElement.hasAttribute("data-phone"),
+    lines: Math.round(r(span).height / parseFloat(getComputedStyle(span).lineHeight)),
+    mark: `${Math.round(mark.width * 10) / 10}x${Math.round(mark.height * 10) / 10}`,
+    ctls,
+    navRight: Math.round(nav.right * 10) / 10,
+    wrapped,
+    overlap: !wrapped && ctls.some((c) => c.left < brand.right - 0.5),
+    overflow: document.documentElement.scrollWidth - W,
+    webLinks: [...document.querySelectorAll(`a[href="${webUrl}"]`)].filter((a) => vis(a) && r(a).top < innerHeight).length,
+  };
+};
 
 async function canvasShot(page) {
   return page.locator("canvas.sky").screenshot();
@@ -387,7 +416,7 @@ async function main() {
     top.chipItems = await sizes(".chip-menu button");
     await page.keyboard.press("Escape");
     const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && tall(top.more) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems);
-    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 보임 포함)", okTouch, JSON.stringify(top));
+    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 아이콘 포함)", okTouch, JSON.stringify(top));
 
     // H1: TestFlight 표지는 버튼 문법(채움 + 알약)이 아니다
     const tag = await page.evaluate(() => {
@@ -555,7 +584,86 @@ async function main() {
     await wk.close();
   }
 
-  // 9) 무게
+  // 9) 머리 줄: 7개 언어 × 320·360·375·390·568·600 × (일반·폰 흉내). 로고는 줄지도 꺾이지도 않고, 컨트롤은 화면 안,
+  //    600 아래 컨트롤은 아이콘 44×44, 폰이면 머리 「브라우저에서 열기」를 숨겨 첫 화면의 웹 링크가 하나다.
+  if (ONLY.has("header")) {
+    const iphone = { ...devices["iPhone 14"] };
+    delete iphone.defaultBrowserType;
+    const modes = [
+      ["일반", (w) => ({ viewport: { width: w, height: 700 } })],
+      ["폰", (w) => ({ ...iphone, viewport: { width: w, height: 700 }, screen: { width: w, height: 700 } })],
+    ];
+    const bad = { lines: [], mark: [], ctl: [], overflow: [], icon: [], link: [], menu: [] };
+    let scenes = 0;
+    for (const [mode, opts] of modes) {
+      for (const w of [320, 360, 375, 390, 568, 600]) {
+        const ctx = await browser.newContext({ ...opts(w), reducedMotion: "reduce", colorScheme: "light" });
+        const page = await ctx.newPage();
+        for (const lang of LANGS) {
+          await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+          await page.evaluate(() => document.fonts.ready);
+          const m = await page.evaluate(headMeasure, w);
+          const tag = `${mode}-${w}-${lang}`;
+          scenes += 1;
+          if (m.lines !== 1) bad.lines.push(`${tag}:${m.lines}줄`);
+          if (m.mark !== "26x26") bad.mark.push(`${tag}:${m.mark}`);
+          if (m.overlap || m.ctls.some((c) => c.left < -0.5 || c.right > w + 0.5)) bad.ctl.push(`${tag}:${m.ctls.map((c) => `${c.cls}${c.left}..${c.right}`).join(",")}`);
+          if (m.overflow > 0) bad.overflow.push(`${tag}:+${m.overflow}`);
+          if (w < 600 && !m.ctls.every((c) => c.w >= 44 && c.w <= 48 && c.h >= 44)) bad.icon.push(`${tag}:${m.ctls.map((c) => `${c.cls}${c.w}x${c.h}`).join(",")}`);
+          const web = m.ctls.some((c) => c.cls === "web");
+          if (m.phone !== (mode === "폰") || web === m.phone || m.webLinks !== 1) bad.link.push(`${tag}:phone=${m.phone} head=${web} links=${m.webLinks}`);
+          if (w === 320) {
+            // 가장 좁은 폭에서 언어 판이 화면 안이고 항목이 한 줄이다(판을 머리 오른쪽에 맞춘 뒤)
+            await page.locator(".lang-btn").click();
+            const mm = await page.evaluate(() => {
+              const b = document.getElementById("lang-list").getBoundingClientRect();
+              return { left: Math.round(b.left), right: Math.round(b.right), oneLine: [...document.querySelectorAll(".lang-list a")].every((a) => a.getBoundingClientRect().height <= 48) };
+            });
+            if (mm.left < 0 || mm.right > w || !mm.oneLine) bad.menu.push(`${tag}:${mm.left}..${mm.right} oneLine=${mm.oneLine}`);
+            await page.keyboard.press("Escape");
+          }
+        }
+        await ctx.close();
+      }
+    }
+    const show = (list) => `${list.length}/${scenes}${list.length ? " " + list.slice(0, 6).join(" ") : ""}`;
+    check("머리 줄: 로고 글자 한 줄(높이로 잼)", bad.lines.length === 0, show(bad.lines));
+    check("머리 줄: 로고 마크 26×26 그대로", bad.mark.length === 0, show(bad.mark));
+    check("머리 줄: 컨트롤이 화면 안, 로고와 안 겹침", bad.ctl.length === 0, show(bad.ctl));
+    check("머리 줄: 문서 가로 넘침 0", bad.overflow.length === 0, show(bad.overflow));
+    check("머리 줄: 600 아래 컨트롤은 아이콘 44×44", bad.icon.length === 0, show(bad.icon));
+    check("머리 줄: 폰이면 머리 「브라우저에서 열기」 숨김, 첫 화면 웹 링크 하나", bad.link.length === 0, show(bad.link));
+    check("머리 줄: 320 언어 판이 화면 안, 항목 한 줄(7언어 × 일반·폰)", bad.menu.length === 0, `${bad.menu.length}/14 ${bad.menu.join(" ")}`);
+
+    // 안전망: 자리가 모자라면 컨트롤 묶음이 아랫줄 오른쪽 끝으로 내려가고 넘치지 않는다(정본 #4230). 620 일반 창에서 언어 이름을 늘려 잰다
+    const sx = await browser.newContext({ viewport: { width: 620, height: 700 }, reducedMotion: "reduce" });
+    const sp = await sx.newPage();
+    await sp.goto(`${BASE}/es/`, { waitUntil: "load" });
+    await sp.evaluate(() => { document.querySelector(".lang-btn .lang-name").textContent = "Español (Latinoamérica) Latinoamérica"; });
+    const s = await sp.evaluate(headMeasure, 620);
+    check("머리 줄 안전망: 모자라면 컨트롤이 아랫줄 오른쪽 끝(넘침 0·로고 그대로)",
+      s.wrapped && Math.abs(s.navRight - (620 - 24)) <= 1 && s.overflow <= 0 && s.lines === 1 && s.mark === "26x26" && s.ctls.every((c) => c.right <= 620),
+      JSON.stringify({ wrapped: s.wrapped, navRight: s.navRight, overflow: s.overflow, lines: s.lines, mark: s.mark }));
+    await sx.close();
+
+    // 아이콘만 남은 단추도 이름을 낸다(브라우저가 계산한 접근성 이름, 일반 390 ko)
+    const ax = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const ap = await ax.newPage();
+    await ap.goto(`${BASE}/ko/`, { waitUntil: "load" });
+    const cdp = await ax.newCDPSession(ap);
+    const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+    const name = async (selector) => {
+      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+      const { nodes } = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+      return nodes[0]?.name?.value ?? "";
+    };
+    const names = { lang: await name(".lang-btn"), web: await name(".web-link") };
+    const ko = JSON.parse(readFileSync(resolve(SITE, "i18n/ko.json"), "utf8"));
+    check("390: 아이콘 단추의 접근성 이름(언어 단추에 지금 언어, 머리 링크에 「브라우저에서 열기」)", names.lang.includes(ko.lang_name) && names.web === ko.nav_web, JSON.stringify(names));
+    await ax.close();
+  }
+
+  // 10) 무게
   if (ONLY.has("weight")) {
     const dist = resolve(SITE, "dist");
     const html = LANGS.map((l) => statSync(resolve(dist, l, "index.html")).size);
