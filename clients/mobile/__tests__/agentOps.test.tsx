@@ -678,6 +678,32 @@ describe('폰 에이전트 상세 (성재 2026-10-16)', () => {
       .map(n => n.props.testID);
     expect(ids).toEqual(['agent-open-dm', 'agent-delegate-work']);
   });
+
+  // 상세는 불투명한 판으로 에이전트 목록을 덮는다 — 맨 위인 동안 VoiceOver 의 모달 경계다(#5546). 상세에서 연 대화가 위에 서면 경계는
+  // 대화로 넘어가고(상세·목록이 판 뒤에서 빠진다), 뒤로 하면 상세가 다시 경계다. 기본 찾기는 낭독에서 빠진 요소를 찾지 않으므로
+  // 「기본 찾기 0 · 숨은 것까지 1」이 「마운트는 그대로, 낭독에서만 빠짐」을 잰다.
+  it('상세가 맨 위면 밑의 에이전트 목록이 낭독에서 빠지고, 상세에서 연 대화가 그다음 경계다 (#5546)', async () => {
+    const HIDDEN = {includeHiddenElements: true} as const;
+    await openKim();
+    expect(screen.getByTestId('agent-detail-pane')).toHaveProp('accessibilityViewIsModal', true);
+    expect(screen.getByTestId(`agent-row-${KIM_AGENT}`, HIDDEN)).toBeTruthy();
+    expect(screen.queryByTestId(`agent-row-${KIM_AGENT}`)).toBeNull();
+
+    fireEvent.press(screen.getByTestId('agent-open-dm'));
+    await waitFor(() => expect(screen.getByTestId('conversation-pane', HIDDEN)).toBeTruthy());
+    expect(screen.getByTestId('conversation-pane')).toHaveProp('accessibilityViewIsModal', true);
+    expect(screen.getByTestId('agent-detail-pane', HIDDEN)).toHaveProp('accessibilityViewIsModal', false);
+    expect(screen.getByTestId('agent-open-dm', HIDDEN)).toBeTruthy();
+    expect(screen.queryByTestId('agent-open-dm')).toBeNull();
+    expect(screen.queryByTestId(`agent-row-${KIM_AGENT}`)).toBeNull();
+
+    const backs = screen.getAllByTestId('header-back');
+    fireEvent.press(backs[backs.length - 1]);
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane', HIDDEN)).toBeNull());
+    expect(screen.getByTestId('agent-detail-pane')).toHaveProp('accessibilityViewIsModal', true);
+    expect(screen.getByTestId('agent-open-dm')).toBeTruthy();
+    expect(screen.queryByTestId(`agent-row-${KIM_AGENT}`)).toBeNull();
+  });
 });
 
 describe('「에이전트가 포함된 채널」 칩', () => {
