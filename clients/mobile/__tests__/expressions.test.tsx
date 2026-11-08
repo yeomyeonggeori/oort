@@ -35,6 +35,8 @@ import {ExpressionImage} from '../src/features/expressions/ExpressionImage';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {prepareExpressionBody} from '../src/features/expressions/ExpressionText';
 import {pinReduceMotion} from './fixtures/reduceMotion';
+import {openPhoneExpressionDisk} from '../src/features/expressions/disk/open';
+import {createMemoryDiskBackend, diskName} from './fixtures/expressionDiskWorld';
 
 const base = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}/expressions`;
 const parrot = FIXTURE_EXPRESSIONS[0];
@@ -44,6 +46,8 @@ function setup(
   requestOverride?: (
     request: ExpressionFixtureRequest,
   ) => Promise<ExpressionFixtureResponse>,
+  /** `disk: true` 면 보관 칸(가짜 포트)을 붙인다(#5455 B-2). 없으면 예전 모양: 세션 폴더의 임시 파일만 쓴다. */
+  options: {disk?: boolean} = {},
 ) {
   const server = createExpressionFixtureServer();
   const request = jest.fn(
@@ -56,15 +60,21 @@ function setup(
     remove: jest.fn(),
   };
   const storage = {read: () => null, write: jest.fn()};
+  const backend = createMemoryDiskBackend();
   const store = createPhoneExpressionStore(
     FIXTURE_WORKSPACE_ID,
     FIXTURE_MEMBER_ID,
     {request},
     files,
     storage,
+    undefined,
+    options.disk
+      ? openPhoneExpressionDisk(FIXTURE_WORKSPACE_ID, FIXTURE_MEMBER_ID, backend)
+      : null,
   );
+  store.start();
   stores.push(store);
-  return {server, request, files, store, storage};
+  return {server, request, files, store, storage, backend};
 }
 function mount(store: PhoneExpressionStore, children: React.ReactNode) {
   return render(
@@ -108,7 +118,60 @@ it('uses the core fixture through the same transport port and deduplicates priva
   ).toBeNull();
 });
 
-it('revokes loaded and in-flight images on hide, reconnect and session disposal', async () => {
+// #5330 계약 시험 하나(ADR-0218 §14 M2.4-3 폰 항목, #5455 B-2): 파일이 보관 칸으로 옮겨 갔다. 알림·재연결 쪽 단정은 「화면 참조 폐기 + 보관 칸 항목 수 불변 + 늦게 온 바이트 쓰지 않음」이고,
+// 세션 끝(`dispose`)의 삭제 단정은 M2.5가 유지한다(칸을 폴더째 지운다). 숨겨진 등록의 항목은 알림이 아니라 그 뒤 목록이 적용될 때 대조 청소가 지운다.
+it('revokes loaded and in-flight images on hide, reconnect and session disposal (the compartment keeps its items on a notice, is destroyed on disposal)', async () => {
+  let complete!: (value: ExpressionFixtureResponse) => void;
+  const server = createExpressionFixtureServer();
+  const {store, files, backend} = setup(
+    async input =>
+      input.path.includes('size=small')
+        ? new Promise(resolve => {
+            complete = resolve;
+          })
+        : server.request(input),
+    {disk: true},
+  );
+  await store.refresh(true);
+  const loaded = await store.image(parrot, 'thumb');
+  expect(loaded).toMatch(/^file:\/\/\/fake\//); // 보관 칸의 파일
+  expect(backend.keysOf(diskName())).toHaveLength(1);
+  expect(backend.stats.writes).toBe(1);
+  const late = store.image(parrot, 'small');
+  // 보관 칸을 먼저 본 뒤(없다) 네트워크로 간다: 받는 중이 되기를 기다린다.
+  await waitFor(() => expect(typeof complete).toBe('function'));
+  const response = server.request({
+    method: 'GET',
+    path: `${base}/${parrot.id}/image?size=small&v=${
+      parrot.media!.small.sha256
+    }`,
+  });
+  server.request({
+    method: 'POST',
+    path: `${base}/${parrot.id}/report`,
+    body: {reason: 'other'},
+  });
+  act(() => store.changed());
+  // 알림 순간: 화면 참조는 폐기되고(닫힌 문) 보관 칸의 항목 수는 그대로다.
+  expect(store.snapshot().changePending).toBe(true);
+  expect(await store.image(parrot, 'thumb')).toBeNull();
+  expect(backend.keysOf(diskName())).toHaveLength(1);
+  expect(backend.stats.removed).toBe(0);
+  complete(response);
+  expect(await late).toBeNull(); // 전송 중이던 그림은 버려진다
+  expect(backend.stats.writes).toBe(1); // 늦게 온 바이트는 쓰지 않았다
+  await waitFor(() => expect(store.snapshot().state).toBe('ready'));
+  expect(store.snapshot().items.some(item => item.id === parrot.id)).toBe(false);
+  // 목록이 적용되자 대조 청소가 숨겨진 등록의 항목을 지웠다(알림이 아니라 목록이 알려 준다).
+  await store.settleDisk();
+  expect(backend.keysOf(diskName())).toEqual([]);
+  expect(files.remove).not.toHaveBeenCalled(); // 세션 임시 파일은 없었다
+  store.dispose();
+  expect(backend.names()).toEqual([]); // 세션 끝: 칸을 폴더째 지운다(M2.5)
+  expect(await store.image(FIXTURE_EXPRESSIONS[1], 'thumb')).toBeNull();
+});
+
+it('without a compartment (session folder only): revokes loaded and in-flight images on hide, reconnect and session disposal', async () => {
   let complete!: (value: ExpressionFixtureResponse) => void;
   const server = createExpressionFixtureServer();
   const {store, files} = setup(async input =>
@@ -178,7 +241,48 @@ it('keeps the list and the ready state while a full read is in flight — no loa
 
 // #5491 (ADR-0218 §15): 어느 등록이 바뀌었는지 모르는 알림(`changed()`, 상세 없음)은 그림을 **그리지 않게** 즉시 막지만(`changePending`) 그림 파일은 걷지 않는다.
 // 앞 판(#5330)은 알림 순간 파일을 전부 걷고 목록이 오면 보이는 그림을 전부 다시 받았다. 지금은 목록이 알려 주는 id 의 파일만 걷는다. 목록을 못 받으면 전부 걷는다.
-it('a change notice with no detail stops the drawing at once but keeps the files and the list; a delta that names nothing removes nothing (#5491)', async () => {
+// #5330 계약 시험 둘째(ADR-0218 §14 M2.4-3 폰 항목, #5455 B-2): 이름 없는 알림은 그리기만 막고 보관 칸의 항목은 지우지 않는다. 델타가 아무것도 알리지 않으면 항목 수가 그대로고 다시 받지 않는다.
+it('a change notice with no detail stops the drawing at once but keeps the list and the compartment\'s items; a delta that names nothing removes nothing (#5491, #5455)', async () => {
+  const server = createExpressionFixtureServer();
+  let reply!: (response: ExpressionFixtureResponse) => void;
+  let held: ExpressionFixtureRequest | undefined;
+  const {store, request, backend} = setup(
+    async input => {
+      if (input.path.includes('since=')) {
+        held = input;
+        return new Promise(resolve => {
+          reply = resolve;
+        });
+      }
+      return server.request(input);
+    },
+    {disk: true},
+  );
+  await store.refresh(true);
+  const uri = await store.image(parrot, 'thumb');
+  expect(backend.keysOf(diskName())).toHaveLength(1);
+  const downloads = () =>
+    request.mock.calls.filter(([input]) => input.path.includes('/image?')).length;
+  act(() => store.changed('4')); // version 을 읽을 수 있는 이름 없는 알림: 증분 읽기가 시작된다
+  expect(store.snapshot().changePending).toBe(true); // 그리기는 그 자리에서 멈춘다
+  expect(await store.image(parrot, 'thumb')).toBeNull(); // 닫힌 동안은 두었던 파일도 내주지 않는다
+  expect(backend.stats.removed).toBe(0); // 보관 칸의 항목은 지우지 않는다
+  expect(backend.keysOf(diskName())).toHaveLength(1); // 항목 수 불변
+  expect(store.snapshot().state).toBe('ready'); // 이름 목록은 그대로다
+  expect(store.snapshot().items).toHaveLength(3);
+  await act(async () => {
+    reply(server.request(held!));
+  });
+  await waitFor(() => expect(store.snapshot().changePending).toBe(false));
+  expect(store.snapshot().items).toHaveLength(3);
+  await store.settleDisk();
+  expect(backend.stats.removed).toBe(0); // 델타가 아무것도 걷지 않았다
+  expect(backend.keysOf(diskName())).toHaveLength(1);
+  expect(await store.image(parrot, 'thumb')).toBe(uri); // 같은 파일 — 다시 받지 않는다
+  expect(downloads()).toBe(1);
+});
+
+it('without a compartment: a change notice with no detail stops the drawing at once but keeps the files and the list; a delta that names nothing removes nothing (#5491)', async () => {
   const server = createExpressionFixtureServer();
   let reply!: (response: ExpressionFixtureResponse) => void;
   let held: ExpressionFixtureRequest | undefined;
