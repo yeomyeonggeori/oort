@@ -26,6 +26,10 @@ import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
 import {clearEntryDrafts} from '../lib/entryDrafts';
 import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
+import {
+  destroyExpressionDisks,
+  forgetExpressionDisk,
+} from '../features/expressions/disk/signOut';
 import {forgetExpressionShelf} from '../storage/kv';
 import {forgetMeasuredSizes} from '../storage/measureMemory';
 import {revokeDevice} from '../push/devices';
@@ -207,7 +211,14 @@ export function useAuthGate(): AuthGateState {
   // 둘 다 아니라 지우지 않는다. `SessionProvider` 의 언마운트에 걸지 않은 까닭: 그 트리가 내려가는 일이 모두 세션의 끝은 아니다.
   const leftSession = member === null || authExpired;
   useEffect(() => {
-    if (leftSession) clearEntryDrafts();
+    if (leftSession) {
+      clearEntryDrafts();
+      // 토큰 만료·복원이 거절된 시작은 `signOut` 을 거치지 않는다: 표현 그림의 기기 캐시(모든 보관 칸)·기기에 남긴 표현 보관함·잰 크기도 여기서 지운다(ADR-0218 §14 M2.5, #5455).
+      // `ExpressionProvider` 의 `dispose` 에만 걸지 않는다 — 만료된 채 앱이 켜져 로그인 화면으로 가면 그 provider 가 뜨지 않아 `dispose` 가 돌지 않는다.
+      forgetExpressionDisk();
+      forgetExpressionShelf();
+      forgetMeasuredSizes();
+    }
   }, [leftSession]);
 
   return useMemo(() => ({gate, retry: retryRestore}), [gate, retryRestore]);
@@ -244,6 +255,11 @@ export function SessionProvider({
       clearAllAttachmentDrafts();
       // 토큰 만료·계정 교체도 이 경계다 — 앞 사람의 얼굴 파일을 디스크에 남기지 않는다.
       clearMemberAvatarCache();
+      // 표현 그림의 기기 캐시(모든 보관 칸)와 기기에 남긴 표현 보관함·잰 크기도 같은 경계에서 지운다(ADR-0218 §14 M2.5). 세대는 올리지 않는다: 계정 교체로 이미 만들어진 새 저장소를 막지 않는다
+      // (앞 저장소는 이 효과보다 먼저 `dispose` 로 놓인다).
+      destroyExpressionDisks();
+      forgetExpressionShelf();
+      forgetMeasuredSizes();
       // 알림 확장에게 건넨 얼굴·채널 이름과, 시스템에 기부한 커뮤니케이션 기록도 같은 경계에서 지운다(#4316).
       void clearPresentationState();
     };
@@ -297,6 +313,8 @@ export function SessionProvider({
     // 로그아웃은 「이 기기에서 내 흔적을 지운다」이고 두 지도는 계정 구분이 없다.
     forgetMeasuredSizes();
     forgetExpressionShelf();
+    // 이모티콘 그림의 기기 캐시(모든 보관 칸)도 지운다(ADR-0218 §14 M2.5, #5455 B-2): 세대를 먼저 올려, 로그아웃과 겹쳐 늦게 닿은 저장이 지워진 칸을 되살리지 못하게 한다.
+    forgetExpressionDisk();
     // 알림이 걷어 간 시트의 글(`lib/entryDrafts.ts`)도 같은 이유로 지운다 (#5058). 메모리에만 있어 프로세스와 함께 사라지지만,
     // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 새 채널 이름·내 맥 질문이 그 사람의 시트에 나타난다.
     clearEntryDrafts();

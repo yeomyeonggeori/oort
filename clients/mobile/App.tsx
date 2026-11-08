@@ -14,7 +14,8 @@ import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
 import {useFormatMessage} from './src/i18n/useFormatMessage';
 import {useAuthGate} from './src/session/useSession';
 import AppShell from './src/shell/AppShell';
-import {initSessionStore} from './src/storage/secureSession';
+import {startExpressionDiskBoot} from './src/features/expressions/disk/boot';
+import {getPersistedSession, initSessionStore} from './src/storage/secureSession';
 import {MobileLocaleProvider} from './src/i18n/LocaleProvider';
 
 // =============================================================================
@@ -72,7 +73,17 @@ function AppChrome(): React.JSX.Element {
     const teardown = installReactQueryBridges();
     bootSpawnPort();
     let cancelled = false;
-    initSessionStore().finally(() => {
+    const sessionReady = initSessionStore();
+    // 표현 그림의 기기 캐시 시작 청소(ADR-0218 §14 M2.5): 세션을 복원하기 **전에** 시작한다 — 앱이 죽어 남은 옛 임시 폴더와 수명이 지난 항목을 지우고, 세션 저장소가 자리를 잡으면
+    // 저장된 자격이 없을 때 모든 칸을, 있을 때 현재 칸 밖을 지운다. 첫 화면을 기다리게 하지 않는다.
+    void startExpressionDiskBoot({
+      ready: sessionReady,
+      current: () => {
+        const member = getPersistedSession()?.member;
+        return member ? {workspaceId: member.workspaceId, memberId: member.id} : null;
+      },
+    });
+    sessionReady.finally(() => {
       if (!cancelled) {
         setBooted(true);
       }
