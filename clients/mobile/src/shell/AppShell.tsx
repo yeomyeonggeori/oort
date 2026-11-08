@@ -68,6 +68,7 @@ import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
 import {
   Canvas,
+  coveredProps,
   ScrollFade,
   ShellBottomBar,
   TabBarClearanceProvider,
@@ -362,8 +363,8 @@ export function Shell({
     });
     return items;
   }, [canCreateChannel]);
-  // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
-  // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
+  // 셸 위에 층이 하나라도 서 있는가. 크롬과 탭 판은 그 밑에 그려지고(트리 순서), 보조기술
+  // 에서도 숨는다(`ShellChrome` 의 `coveredProps` — 크롬, 아래 `tabBody` — 탭 판, #5546).
   const covered =
     nav.conversation !== null ||
     nav.agentList ||
@@ -383,6 +384,17 @@ export function Shell({
     nav.workSession === null &&
     nav.hosted === null &&
     nav.apps === null;
+  // 대화 밑에 탭 판 말고 다른 층(작업 목록·작업 상세·에이전트 목록·에이전트 상세 등)이 깔려 있는가 (#5546). 그 층들은 탭 판처럼 따로
+  // 숨기지 않으므로 이때는 대화 판이 VoiceOver 의 모달 경계다 — 작업 상세 위의 대화(#1292)와 같은 이유. 탭 위에 바로 연 대화는 그대로
+  // 모달이 아니다: 그 밑의 탭 판과 크롬은 `covered` 한 쌍이 뺀다.
+  const layerUnderConversation =
+    nav.agentList ||
+    nav.agent !== null ||
+    nav.workList ||
+    nav.workSession !== null ||
+    nav.hosted !== null ||
+    nav.apps !== null ||
+    nav.settings;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -408,9 +420,14 @@ export function Shell({
           낭독은 띠 안이 아니라 셸에 하나만 둔다 - 띠마다 달면 한 번 끊김이 두세 번 들린다. */}
       <ShellStripAnnouncer />
       {/* 탭 화면은 바닥 위에 투명하게 선다. 목록 끝은 탭바 밑에 숨지 않도록 시안의
-          140 만큼 비운다(`useTabBarClearance`). */}
+          140 만큼 비운다(`useTabBarClearance`).
+
+          층이 서 있는 동안 탭 판은 보조기술에서 숨는다(#5546) — 크롬과 같은 `coveredProps` 한 쌍(iOS `accessibilityElementsHidden`,
+          Android `no-hide-descendants`)이다. 층은 셸을 덮는 불투명한 판이라 눈에는 판만 보이는데, 탭 위에 바로 연 대화는 모달이 아니어서(아래
+          `layerUnderConversation`) 안 빼면 낭독이 판 뒤의 홈 목록 행·업데이트 단추·내 얼굴에 닿는다. 숨김은 언마운트가 아니다 — 층이 걷히면
+          (`covered` 가 거짓) 펼치는 것이 없어져 같은 자리 그대로 낭독에 돌아온다. */}
       <TabBarClearanceProvider>
-        <View style={styles.tabBody}>
+        <View style={styles.tabBody} {...coveredProps(covered)} testID="shell-tab-body">
           <TabPane active={nav.tab === 'home'}>
             <SidebarScreen
               active={nav.tab === 'home'}
@@ -485,7 +502,14 @@ export function Shell({
           마운트된 채 남는다 — 탭일 때와 같은 이유(스크롤 자리)로. */}
       {visited.current.has('workList') ? (
         <EdgeSwipeBack
-          accessibilityViewIsModal={nav.workList && nav.workSession === null}
+          // 목록이 **맨 위**일 때만 모달 경계다. 시트의 「#채널에서 보기」는 세션 없이 대화를 이 목록 위에 열고, 그 대화의 작성자
+          // 얼굴은 에이전트 상세를 연다 — 그때도 목록이 모달이면 iOS 는 형제인 위 층을 통째로 낭독에서 뺀다(#5546).
+          accessibilityViewIsModal={
+            nav.workList &&
+            nav.workSession === null &&
+            nav.agent === null &&
+            nav.conversation === null
+          }
           style={[styles.overlay, !nav.workList && styles.hidden]}
           onBack={onBack}
           testID="work-list-pane">
@@ -521,7 +545,13 @@ export function Shell({
           behind it: coming back from an agent's DM must land on that agent
           rather than two steps out. */}
       {nav.agent ? (
-        <EdgeSwipeBack style={styles.overlay} onBack={onBack}>
+        <EdgeSwipeBack
+          // 위에 대화가 없으면 이 판이 맨 위다 — 밑의 에이전트 목록(그리고 작업 목록)을 낭독에서 뺀다(#5546). 위에 설 수 있는 층은
+          // 대화뿐이다(작업 상세·호스티드·앱은 에이전트와 배타적, `navReducer`). 작업 상세 판과 같은 모양이다.
+          accessibilityViewIsModal={nav.conversation === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="agent-detail-pane">
           <AgentDetailScreen
             agent={nav.agent}
             onBack={onBack}
@@ -621,7 +651,7 @@ export function Shell({
           스와이프로 잇는 것은 이 피드백이 요청한 것이 아니다. */}
       {nav.conversation ? (
         <EdgeSwipeBack
-          accessibilityViewIsModal={nav.workSession !== null}
+          accessibilityViewIsModal={layerUnderConversation}
           style={styles.overlay}
           onBack={onBack}
           testID="conversation-pane">

@@ -450,6 +450,9 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+/** 낭독에서 빠진 요소까지 찾는다 — 목록 판이 열린 동안 판 뒤의 대화를 잴 때만 쓴다(#5546). */
+const EVEN_HIDDEN = {includeHiddenElements: true} as const;
+
 describe('요약 한 줄 — 두 레일의 합집합을 센다', () => {
   it('RED PROOF — 열린 턴과 작업 세션을 함께 세고, 유휴와 종료는 세지 않는다', async () => {
     installFetch();
@@ -559,13 +562,17 @@ describe('레이아웃 — 이 층은 아무것도 밀지 않는다', () => {
     fireEvent.press(screen.getByTestId('ade-summary'));
     await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
 
+    // 열린 목록 판은 VoiceOver 의 모달 경계다(#5546): 판 뒤의 대화(머리·목록·입력창)는 마운트된 채 낭독에서만 빠진다.
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    expect(screen.queryByTestId('composer-input')).toBeNull();
+    expect(screen.getByTestId('ade-panel-pane')).toHaveProp('accessibilityViewIsModal', true);
     const geometryAfter = [
-      flatStyle(screen.getByTestId('conversation-clip').props.style),
-      flatStyle(screen.getByTestId('conversation-layout').props.style),
+      flatStyle(screen.getByTestId('conversation-clip', EVEN_HIDDEN).props.style),
+      flatStyle(screen.getByTestId('conversation-layout', EVEN_HIDDEN).props.style),
     ];
     expect(geometryAfter).toEqual(geometryBefore);
-    // 컴포저도 여전히 거기 있다. 목록은 덮을 뿐 갈아 끼우지 않는다.
-    expect(screen.getByTestId('composer-dock')).toBeTruthy();
+    // 컴포저도 여전히 거기 있다. 목록은 덮을 뿐 갈아 끼우지 않는다(낭독에서만 빠진다).
+    expect(screen.getByTestId('composer-dock', EVEN_HIDDEN)).toBeTruthy();
 
     // ③ 덮는 층은 **절대 배치**다 — 흐름에서 폭도 높이도 가져가지 않는다. 이것이
     //    ②가 참인 **이유**이고, ②만으로는 다음 사람이 그 이유를 알 수 없다.
@@ -749,15 +756,15 @@ describe('관제 목록 — 무엇이, 어디서, 살아남는지', () => {
     fireEvent.press(screen.getByTestId('ade-summary'));
     await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
 
-    // #build 에 있는 세션. 지금 열려 있는 방은 #general 이다.
-    expect(screen.getByTestId('conversation-title')).toHaveTextContent(/general/);
+    // #build 에 있는 세션. 지금 열려 있는 방은 #general 이다(판 뒤라 낭독에서는 빠져 있다, #5546).
+    expect(screen.getByTestId('conversation-title', EVEN_HIDDEN)).toHaveTextContent(/general/);
     fireEvent.press(screen.getByTestId('ade-card-session|session-orphaned'));
 
     await waitFor(() =>
       expect(screen.getByTestId('conversation-title')).toHaveTextContent(/build/),
     );
     // 목록은 남아 있지 않다. 겹쳐 서면 방금 누른 카드가 어디 갔는지 모른다.
-    expect(screen.queryByTestId('ade-card-list')).toBeNull();
+    expect(screen.queryByTestId('ade-card-list', EVEN_HIDDEN)).toBeNull();
   });
 
   it('원장을 못 읽으면 목록이 그 사실을 말하고 다시 시도를 준다 — 턴은 그대로 센다', async () => {
