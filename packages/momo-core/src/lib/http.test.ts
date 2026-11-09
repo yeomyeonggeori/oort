@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LATE_WAKE_MS,
   NetworkError,
   fetchWithDeadline,
   parseRetryAfterSeconds,
@@ -107,6 +108,35 @@ describe("request deadline", () => {
     );
     caller.abort();
     await expect(pending).rejects.not.toBeInstanceOf(NetworkError);
+  });
+
+  it("marks a timeout whose deadline timer woke long after it was due, and only that one (#5587)", async () => {
+    // The Mac slept (or the app napped) with the request out: only the wall clock moved, and the
+    // deadline timer runs the moment the app wakes. The caller still gets the timeout; the report says
+    // how late the deadline woke, so the connection verdict does not read it as the server's silence.
+    vi.useFakeTimers();
+    const seen: RestOutcome[] = [];
+    const stop = subscribeRestOutcome((outcome) => seen.push(outcome));
+    try {
+      for (const asleepMs of [5 * 60_000, LATE_WAKE_MS, LATE_WAKE_MS - 1, 0]) {
+        vi.stubGlobal("fetch", neverAnswers());
+        const settled = fetchWithDeadline("http://server.test/v1/ping", {}, 15_000).catch((e: unknown) => e);
+        vi.setSystemTime(Date.now() + asleepMs);
+        await vi.advanceTimersByTimeAsync(15_000);
+        const error = await settled;
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).failure).toBe("timeout");
+      }
+      expect(seen.map((o) => (o.kind === "network" ? o.lateMs : "response"))).toEqual([
+        5 * 60_000,
+        LATE_WAKE_MS,
+        undefined,
+        undefined,
+      ]);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
   });
 
   it("does not fail a request that already answered when the deadline passes", async () => {
