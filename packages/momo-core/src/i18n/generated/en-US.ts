@@ -7550,6 +7550,18 @@ export const catalog: MessageCatalog = {
       "value": "No server address is saved on this device."
     }
   ],
+  "settings.connectionLog.cappedToday": [
+    {
+      "type": 0,
+      "value": "Today's log filled up, so its earliest entries were dropped. Counts cover the latest 500 entries."
+    }
+  ],
+  "settings.connectionLog.clear": [
+    {
+      "type": 0,
+      "value": "Clear log"
+    }
+  ],
   "settings.connectionLog.copied": [
     {
       "type": 0,
@@ -7566,6 +7578,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Holds up to the last 7 days or 500 entries. Paste it when you report a problem."
+    }
+  ],
+  "settings.connectionLog.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. Try again."
     }
   ],
   "settings.connectionLog.copyLabel": [
@@ -7606,6 +7624,12 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "settings.connectionLog.cutWhileResting": [
+    {
+      "type": 0,
+      "value": "Requests cut off while resting"
+    }
+  ],
   "settings.connectionLog.description": [
     {
       "type": 0,
@@ -7616,6 +7640,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Device offline"
+    }
+  ],
+  "settings.connectionLog.readFailedMessage": [
+    {
+      "type": 0,
+      "value": "The connection log saved on this device is damaged. Clear it to start a new one."
+    }
+  ],
+  "settings.connectionLog.readFailedTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't read the connection log"
     }
   ],
   "settings.connectionLog.restFailed": [
@@ -7645,7 +7681,7 @@ export const catalog: MessageCatalog = {
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
-      "value": "App woke late"
+      "value": "App rested, then woke"
     }
   ],
   "settings.connectionLog.windowHidden": [

@@ -65,6 +65,22 @@ export interface ConnectionDiagEntry {
 export const CONNECTION_DIAG_CAPACITY = 500;
 /** 이보다 오래된 기록은 버린다(7일). */
 export const CONNECTION_DIAG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+/**
+ * 읽을 때 받아들이는 시각의 아래 끝(2020-01-01 UTC). 이 기록은 2026년에 생겼다: 그 전 시각은 깨진 값이다(#5587 수리 1회차 H1).
+ * 위 끝은 읽는 순간 + 하루다(기기 시계가 조금 앞서 있던 기록은 살리고, 날짜로 만들 수 없는 `1e20` 같은 값은 버린다).
+ */
+export const CONNECTION_DIAG_EARLIEST_AT = Date.UTC(2020, 0, 1);
+const CLOCK_SKEW_ALLOWANCE_MS = 24 * 60 * 60 * 1_000;
+
+/** 이 시각이 기록으로 받아들일 수 있는 값인가: 유한하고, 2020년 이후이고, `now` + 하루보다 앞이다. */
+function acceptableAt(at: unknown, now: number): at is number {
+  return (
+    typeof at === "number" &&
+    Number.isFinite(at) &&
+    at >= CONNECTION_DIAG_EARLIEST_AT &&
+    at <= now + CLOCK_SKEW_ALLOWANCE_MS
+  );
+}
 
 const KIND_SET: ReadonlySet<string> = new Set(CONNECTION_DIAG_KINDS);
 
@@ -72,13 +88,13 @@ export function isConnectionDiagKind(value: unknown): value is ConnectionDiagKin
   return typeof value === "string" && KIND_SET.has(value);
 }
 
-/** 기록 한 건을 더한다. 7일보다 오래된 것과 500건을 넘는 앞쪽을 버린다. 원래 배열은 건드리지 않는다. */
+/** 기록 한 건을 더한다. 7일보다 오래된 것·하루 넘게 앞선 것과 500건을 넘는 앞쪽을 버린다. 원래 배열은 건드리지 않는다. */
 export function appendConnectionDiag(
   log: readonly ConnectionDiagEntry[],
   entry: ConnectionDiagEntry
 ): ConnectionDiagEntry[] {
   const oldest = entry.at - CONNECTION_DIAG_MAX_AGE_MS;
-  const kept = log.filter((item) => item.at >= oldest);
+  const kept = log.filter((item) => item.at >= oldest && acceptableAt(item.at, entry.at));
   kept.push({ at: entry.at, kind: entry.kind });
   return kept.length > CONNECTION_DIAG_CAPACITY ? kept.slice(kept.length - CONNECTION_DIAG_CAPACITY) : kept;
 }
@@ -89,16 +105,19 @@ export function serializeConnectionDiag(log: readonly ConnectionDiagEntry[]): st
 }
 
 /**
- * 저장소에서 읽은 값(믿지 않는 입력, `JSON.parse` 결과)을 기록으로. `[유한한 시각, 표 안의 종류]` 쌍만 남기고 나머지는 말없이
- * 버린다: 옛 모양·깨진 값·누가 끼워 넣은 글이 화면이나 복사 글에 들어가지 않는다. 상한도 다시 맞춘다.
+ * 저장소에서 읽은 값(믿지 않는 입력, `JSON.parse` 결과)을 기록으로. `[받아들일 시각, 표 안의 종류]` 쌍만 남기고 나머지는 말없이
+ * 버린다: 옛 모양·깨진 값·누가 끼워 넣은 글이 화면이나 복사 글에 들어가지 않는다. 시각은 날짜로 만들 수 있는 범위(2020년 ~ `now` +
+ * 하루)여야 하고 7일보다 오래되지 않아야 한다: `1e20` 같은 유한하지만 날짜가 아닌 값 하나가 카드를 그리다 `RangeError`로 설정
+ * 페이지를 무너뜨렸다(수리 1회차 H1). 상한도 다시 맞춘다.
  */
-export function parseConnectionDiag(raw: unknown): ConnectionDiagEntry[] {
+export function parseConnectionDiag(raw: unknown, now: number): ConnectionDiagEntry[] {
   if (!Array.isArray(raw)) return [];
+  const oldest = now - CONNECTION_DIAG_MAX_AGE_MS;
   const entries: ConnectionDiagEntry[] = [];
   for (const item of raw) {
     if (!Array.isArray(item) || item.length !== 2) continue;
     const [at, kind] = item as [unknown, unknown];
-    if (typeof at !== "number" || !Number.isFinite(at) || !isConnectionDiagKind(kind)) continue;
+    if (!acceptableAt(at, now) || at < oldest || !isConnectionDiagKind(kind)) continue;
     entries.push({ at, kind });
   }
   return entries.length > CONNECTION_DIAG_CAPACITY ? entries.slice(entries.length - CONNECTION_DIAG_CAPACITY) : entries;
@@ -133,8 +152,53 @@ export function todayConnectionDiagCounts(
  * (`clients/mobile/src/realtime/diagnostics.ts`)과 같은 모양이다.
  */
 export function formatConnectionDiag(log: readonly ConnectionDiagEntry[]): string {
-  if (log.length === 0) return "connection: no events recorded";
-  return log.map((entry) => `${new Date(entry.at).toISOString()} ${entry.kind}`).join("\n");
+  // 날짜로 만들 수 없는 시각은 읽을 때 이미 버렸다. 그래도 한 줄 때문에 글 전체(와 그것을 그리는 화면)가 무너지지 않게 건너뛴다.
+  const lines = log.flatMap((entry) => {
+    const day = new Date(entry.at);
+    return Number.isNaN(day.getTime()) ? [] : [`${day.toISOString()} ${entry.kind}`];
+  });
+  return lines.length === 0 ? "connection: no events recorded" : lines.join("\n");
+}
+
+// ---- 화면이 세는 묶음 ------------------------------------------------------------
+
+/**
+ * 설정 카드가 오늘 횟수를 보이는 묶음. 종류를 **이름으로** 나열한다(앞글자로 묶지 않는다): 「서버 응답 없음」에 늦게 깬 마감의 시간
+ * 초과(`rest.fail.timeoutLate`)가 섞여 들던 일(수리 1회차 M1)이 앞글자 묶음에서 왔다. 그 시간 초과는 서버가 아니라 이 기기의 잠을 잰
+ * 것이라 「쉬는 동안 끊긴 요청」으로 따로 센다. 한 종류는 많아야 한 묶음에 든다.
+ */
+export const CONNECTION_DIAG_GROUPS = {
+  sendBlocked: ["send.blocked.deviceOffline", "send.blocked.serverUnreachable", "send.blocked.expired"],
+  deviceOffline: ["device.offline"],
+  serverNoAnswer: ["rest.fail.timeout", "rest.fail.network", "rest.fail.gateway"],
+  socketDown: ["socket.disconnected"],
+  appRested: ["wake.late.10s", "wake.late.1m", "wake.late.10m", "wake.late.1h"],
+  cutWhileResting: ["rest.fail.timeoutLate"],
+  windowHidden: ["window.hidden"],
+} as const satisfies Record<string, readonly ConnectionDiagKind[]>;
+
+export type ConnectionDiagGroup = keyof typeof CONNECTION_DIAG_GROUPS;
+
+export interface ConnectionDiagToday {
+  /** 묶음별 오늘 횟수(이 기기 시간대 0시부터). */
+  readonly counts: Readonly<Record<ConnectionDiagGroup, number>>;
+  /**
+   * 상한(500건)이 오늘 기록의 앞쪽을 잘랐을 수 있다: 가장 오래 남은 기록이 오늘 것이고 기록이 가득 찼다. 이때 횟수는 남은 기록 기준이라
+   * 실제보다 적을 수 있고, 화면은 그 사실을 말한다(수리 1회차 M3).
+   */
+  readonly cappedToday: boolean;
+}
+
+/** 오늘의 묶음별 횟수와, 상한이 오늘 기록을 잘랐을 수 있는지. */
+export function connectionDiagToday(log: readonly ConnectionDiagEntry[], now: number): ConnectionDiagToday {
+  const perKind = new Map(todayConnectionDiagCounts(log, now).map((item) => [item.kind, item.count]));
+  const counts = {} as Record<ConnectionDiagGroup, number>;
+  for (const group of Object.keys(CONNECTION_DIAG_GROUPS) as ConnectionDiagGroup[]) {
+    counts[group] = CONNECTION_DIAG_GROUPS[group].reduce((sum: number, kind) => sum + (perKind.get(kind) ?? 0), 0);
+  }
+  const first = log[0];
+  const cappedToday = log.length >= CONNECTION_DIAG_CAPACITY && first !== undefined && first.at >= startOfLocalDay(now);
+  return { counts, cappedToday };
 }
 
 // ---- 무엇을 남기나: 사실에서 종류로 ---------------------------------------------

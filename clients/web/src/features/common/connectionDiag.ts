@@ -37,7 +37,7 @@ function load(): ConnectionDiagEntry[] {
   } catch {
     raw = null; // 저장소가 없거나 깨진 값: 빈 기록에서 시작한다.
   }
-  cache = parseConnectionDiag(raw);
+  cache = parseConnectionDiag(raw, Date.now());
   return cache;
 }
 
@@ -58,13 +58,31 @@ export function recordConnectionDiag(kind: ConnectionDiagKind, at: number = Date
   } catch {
     // 저장소가 가득 찼거나 막혔다: 이번 실행 동안은 메모리의 기록이 남는다.
   }
+  notify();
+}
+
+function notify(): void {
   for (const listener of [...listeners]) {
     try {
       listener();
     } catch {
-      // 기록을 읽는 화면의 오류가 기록을 남기는 쪽(연결 공급자)으로 번지지 않게.
+      // 기록을 읽는 화면의 오류가 기록을 남기는 쪽으로 번지지 않게.
     }
   }
+}
+
+/**
+ * 기록을 비운다(설정 카드가 기록을 읽지 못했을 때의 「기록 비우기」, 수리 1회차 H1). 저장소 칸과 메모리를 함께 비우고, 다음 기록부터
+ * 새로 쌓는다. 저장소가 막혀 있어도 메모리는 비운다.
+ */
+export function clearConnectionDiag(): void {
+  cache = [];
+  try {
+    window.localStorage.removeItem(STORAGE_SLOT);
+  } catch {
+    // 저장소가 막혔다: 이번 실행 동안은 빈 메모리 기록으로 간다.
+  }
+  notify();
 }
 
 /** 기록이 늘 때마다 알린다(설정 카드가 열려 있는 동안 다시 그린다). 돌려주는 함수가 해지다. */

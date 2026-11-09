@@ -3,8 +3,10 @@ import { LATE_WAKE_MS, type RestOutcome } from "../../lib/http";
 import {
   appendConnectionDiag,
   CONNECTION_DIAG_CAPACITY,
+  CONNECTION_DIAG_GROUPS,
   CONNECTION_DIAG_KINDS,
   CONNECTION_DIAG_MAX_AGE_MS,
+  connectionDiagToday,
   connectionDiagTransitions,
   formatConnectionDiag,
   parseConnectionDiag,
@@ -197,7 +199,8 @@ describe("상한과 저장 모양", () => {
     expect(stored).not.toContain("ws-7f3a");
 
     expect(
-      parseConnectionDiag([
+      parseConnectionDiag(
+        [
         [NOW, "device.offline"],
         [NOW + 1, PRIVATE_TARGET],
         [NOW + 2, "device.offline", "extra"],
@@ -205,12 +208,47 @@ describe("상한과 저장 모양", () => {
         [Number.POSITIVE_INFINITY, "device.online"],
         { at: NOW + 3, kind: "device.online" },
         [NOW + 4, "send.open"],
-      ])
+        ],
+        NOW + 10
+      )
     ).toEqual([
       { at: NOW, kind: "device.offline" },
       { at: NOW + 4, kind: "send.open" },
     ]);
-    for (const junk of [null, "x", 3, {}, undefined]) expect(parseConnectionDiag(junk)).toEqual([]);
+    for (const junk of [null, "x", 3, {}, undefined]) expect(parseConnectionDiag(junk, NOW)).toEqual([]);
+  });
+
+  it("날짜로 만들 수 없는 시각(1e20·음수·NaN·2020년 전·하루 넘게 앞선 값)과 7일 넘은 값은 읽을 때 버리고, 남은 기록은 복사 글이 된다 (수리 1회차 H1)", () => {
+    // 지키는 것: `1e20`처럼 유한하지만 날짜가 아닌 시각 하나가 카드의 `toISOString()`에서 RangeError를 던져 설정 > 업데이트 페이지 전체를
+    // 무너뜨렸다. 읽을 때 걸러 내면 화면·복사 글 어디에도 닿지 않는다. 바로 곁의 멀쩡한 값(하루 안쪽으로 앞선 값 포함)은 살린다.
+    const raw = JSON.parse(
+      JSON.stringify([
+        [NOW - 60_000, "window.hidden"],
+        [1e20, "device.online"],
+        [-5, "device.offline"],
+        [-1e20, "device.offline"],
+        [Date.UTC(2019, 11, 31), "send.open"],
+        [NOW + 2 * 24 * 60 * 60_000, "send.open"],
+        [NOW - CONNECTION_DIAG_MAX_AGE_MS - 1, "send.open"],
+        [NOW + 60 * 60_000, "window.visible"],
+      ])
+    ) as unknown[];
+    raw.push([Number.NaN, "device.online"]);
+    const log = parseConnectionDiag(raw, NOW);
+    expect(log).toEqual([
+      { at: NOW - 60_000, kind: "window.hidden" },
+      { at: NOW + 60 * 60_000, kind: "window.visible" },
+    ]);
+    expect(() => formatConnectionDiag(log)).not.toThrow();
+    expect(formatConnectionDiag(log).split("\n")).toHaveLength(2);
+    // 이미 메모리에 들어온 깨진 값이 있어도 복사 글은 그 줄만 건너뛴다(화면이 무너지지 않는다).
+    expect(formatConnectionDiag([{ at: 1e20, kind: "device.online" }, { at: NOW, kind: "send.open" }])).toBe(
+      `${new Date(NOW).toISOString()} send.open`
+    );
+    // 더할 때도 하루 넘게 앞선 값은 남기지 않는다(7일 정리에 안 걸리는 미래 시각이 500건이 밀어낼 때까지 남던 길).
+    expect(appendConnectionDiag([{ at: 1e20, kind: "device.online" }], { at: NOW, kind: "send.open" })).toEqual([
+      { at: NOW, kind: "send.open" },
+    ]);
   });
 
   it("종류 표의 낱말에는 주소·숫자 id가 들어갈 자리가 없다", () => {
@@ -233,6 +271,35 @@ describe("꺼내 보기: 오늘의 횟수와 복사 글", () => {
       { kind: "window.hidden", count: 1 },
       { kind: "send.blocked.serverUnreachable", count: 2 },
     ]);
+  });
+
+  it("「서버 응답 없음」은 늦게 깬 마감을 세지 않고 「쉬는 동안 끊긴 요청」이 따로 센다. 한 종류는 한 묶음에만 든다 (수리 1회차 M1)", () => {
+    const midnight = startOfLocalDay(NOW);
+    const log: ConnectionDiagEntry[] = [
+      { at: midnight + 1, kind: "rest.fail.timeoutLate" },
+      { at: midnight + 2, kind: "rest.fail.timeoutLate" },
+      { at: midnight + 3, kind: "rest.fail.timeoutLate" },
+      { at: midnight + 4, kind: "rest.fail.network" },
+      { at: midnight + 5, kind: "rest.fail.gateway" },
+      { at: midnight + 6, kind: "rest.fail.timeout" },
+      { at: midnight + 7, kind: "wake.late.10m" },
+      { at: midnight + 8, kind: "send.blocked.expired" },
+    ];
+    const { counts } = connectionDiagToday(log, midnight + 60_000);
+    expect(counts).toMatchObject({ serverNoAnswer: 3, cutWhileResting: 3, appRested: 1, sendBlocked: 1 });
+    const grouped = Object.values(CONNECTION_DIAG_GROUPS).flat() as string[];
+    expect(new Set(grouped).size).toBe(grouped.length);
+  });
+
+  it("기록이 가득 차 오늘 기록의 앞쪽이 잘렸을 수 있으면 그렇다고 말한다 (수리 1회차 M3)", () => {
+    const midnight = startOfLocalDay(NOW);
+    const fill = (from: number): ConnectionDiagEntry[] =>
+      Array.from({ length: CONNECTION_DIAG_CAPACITY }, (_, i) => ({ at: from + i, kind: "window.blur" as const }));
+    expect(connectionDiagToday(fill(midnight + 10), midnight + 60_000).cappedToday).toBe(true);
+    // 가득 찼어도 가장 오래 남은 기록이 어제 것이면 오늘 기록은 다 있다.
+    expect(connectionDiagToday(fill(midnight - 100), midnight + 60_000).cappedToday).toBe(false);
+    // 오늘 것뿐이어도 가득 차지 않았으면 잘린 적이 없다.
+    expect(connectionDiagToday(fill(midnight + 10).slice(1), midnight + 60_000).cappedToday).toBe(false);
   });
 
   it("복사 글은 한 줄에 UTC 시각과 종류 하나다", () => {

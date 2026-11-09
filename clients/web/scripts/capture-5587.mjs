@@ -58,8 +58,8 @@ async function installRoutes(context) {
   });
 }
 
-async function installShell(page) {
-  await page.addInitScript(() => {
+async function installShell(page, corrupt) {
+  await page.addInitScript((corruptStore) => {
     class CaptureSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
       constructor(url) {
@@ -114,8 +114,10 @@ async function installShell(page) {
       [at(1, 31), "rest.cleared"], [at(1, 31), "send.open"],
       [at(1, 50), "window.visible"], [at(1, 50), "window.focus"],
     ].filter(([time]) => time <= Date.now());
+    // 망가진 저장값(수리 1회차 H1): 날짜로 만들 수 없는 시각·음수·빈 값·모양이 다른 값이 섞여도 카드는 서고 멀쩡한 기록만 센다.
+    if (corruptStore) day.push([1e20, "device.online"], [-5, "device.offline"], [null, "send.open"], ["x", "window.hidden"], [at(1, 40)]);
     try { localStorage.setItem("momo.connection.diag.v1", JSON.stringify(day)); } catch { /* 저장소 없는 캡처 */ }
-  });
+  }, corrupt);
 }
 
 async function waitForServer() {
@@ -129,11 +131,13 @@ async function waitForServer() {
   throw new Error(`개발 서버가 ${ORIGIN}에 뜨지 않았다`);
 }
 
-async function scene(browser, scheme) {
+async function scene(browser, scheme, variant) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme, locale: "ko-KR", serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
-  await installShell(page);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error.message)));
+  await installShell(page, variant === "corrupt");
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, ORIGIN);
   await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
   await advanceToAccount(page);
@@ -158,10 +162,22 @@ async function scene(browser, scheme) {
   }
   await card.scrollIntoViewIfNeeded();
   await page.waitForTimeout(600);
-  await page.screenshot({ path: resolve(OUT_DIR, `settings-updates-${scheme}.png`) });
-  await card.screenshot({ path: resolve(OUT_DIR, `connection-log-card-${scheme}.png`) });
-  const blocked = (await page.getByTestId("connection-log-send-blocked").textContent()) ?? "";
-  console.log(`${scheme}: 보낼 수 없음 줄 = ${blocked.replace(/\s+/g, " ").trim()}`);
+  await page.screenshot({ path: resolve(OUT_DIR, `settings-updates-${variant}-${scheme}.png`) });
+  await card.screenshot({ path: resolve(OUT_DIR, `connection-log-card-${variant}-${scheme}.png`) });
+  const line = async (id) => ((await page.getByTestId(id).textContent()) ?? "").replace(/\s+/g, " ").trim();
+  const fallback = await page.getByTestId("render-error-boundary").count();
+  console.log(
+    `${variant}/${scheme}: ${await line("connection-log-send-blocked")} · ${await line("connection-log-rest-failed")} · ` +
+      `${await line("connection-log-cut-while-resting")} · 무너진 카드 ${fallback} · 페이지 오류 ${errors.filter((e) => e.includes("RangeError")).length}`
+  );
+  if (variant === "normal") {
+    // 복사를 눌러 결과 알림을 찍는다(헤드리스 Chromium은 클립보드 권한이 없어 실패 문장이 보이는 쪽이 보통이다).
+    await page.getByTestId("connection-log-copy").click();
+    await page.waitForTimeout(300);
+    const announced = (await card.locator('[role="status"]').textContent()) ?? "";
+    console.log(`${variant}/${scheme}: 복사 뒤 알림 = 「${announced}」`);
+    await card.screenshot({ path: resolve(OUT_DIR, `connection-log-card-after-copy-${scheme}.png`) });
+  }
   await context.close();
 }
 
@@ -177,7 +193,9 @@ async function main() {
     await waitForServer();
     const browser = await chromium.launch();
     try {
-      for (const scheme of ["light", "dark"]) await scene(browser, scheme);
+      for (const scheme of ["light", "dark"]) {
+        for (const variant of ["normal", "corrupt"]) await scene(browser, scheme, variant);
+      }
     } finally {
       await browser.close();
     }

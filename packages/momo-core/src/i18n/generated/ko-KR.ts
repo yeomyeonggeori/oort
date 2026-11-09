@@ -7194,6 +7194,18 @@ export const catalog: MessageCatalog = {
       "value": "이 기기에 저장된 서버 주소가 없어요."
     }
   ],
+  "settings.connectionLog.cappedToday": [
+    {
+      "type": 0,
+      "value": "오늘 기록이 많아 앞쪽 일부가 빠졌어요. 횟수는 남은 최근 500건 기준이에요."
+    }
+  ],
+  "settings.connectionLog.clear": [
+    {
+      "type": 0,
+      "value": "기록 비우기"
+    }
+  ],
   "settings.connectionLog.copied": [
     {
       "type": 0,
@@ -7212,6 +7224,12 @@ export const catalog: MessageCatalog = {
       "value": "최근 7일, 500건까지 들어 있어요. 문제를 알릴 때 붙여 넣어 주세요."
     }
   ],
+  "settings.connectionLog.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요. 다시 눌러 주세요."
+    }
+  ],
   "settings.connectionLog.copyLabel": [
     {
       "type": 0,
@@ -7228,6 +7246,12 @@ export const catalog: MessageCatalog = {
       "value": "번"
     }
   ],
+  "settings.connectionLog.cutWhileResting": [
+    {
+      "type": 0,
+      "value": "쉬는 동안 끊긴 요청"
+    }
+  ],
   "settings.connectionLog.description": [
     {
       "type": 0,
@@ -7238,6 +7262,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 오프라인"
+    }
+  ],
+  "settings.connectionLog.readFailedMessage": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 연결 기록이 깨졌어요. 비우면 지금부터 다시 남겨요."
+    }
+  ],
+  "settings.connectionLog.readFailedTitle": [
+    {
+      "type": 0,
+      "value": "연결 기록을 읽지 못했어요"
     }
   ],
   "settings.connectionLog.restFailed": [
@@ -7267,7 +7303,7 @@ export const catalog: MessageCatalog = {
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
-      "value": "앱이 늦게 깨어남"
+      "value": "앱이 쉬다 깸"
     }
   ],
   "settings.connectionLog.windowHidden": [
