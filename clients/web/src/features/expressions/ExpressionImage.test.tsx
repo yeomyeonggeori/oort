@@ -2,16 +2,18 @@
 // #5456: 이모티콘·GIF 를 누르면 사라지거나 흔들리던 것. 웹·데스크탑 반쪽(ExpressionImage).
 // 이 시험이 재는 것: ① 정지 그림은 누르거나 화면 밖으로 나갔다 돌아와도 같은 노드·같은 그림이다, ② GIF 를 누르면 같은 노드에서 새 장면으로 바뀌고
 // 저장소 캐시가 밀려나 있어도 그림 요청이 나가지 않는다, ③ 다시 돌 그림이 디코드되기 전에는 앞 그림이 DOM 에 그대로 남는다, ④ 칸 크기는
-// 메타데이터의 가로·세로로 먼저 잡힌다, ⑤ 오프라인·실패는 글자로 남고 다시 불러오기가 된다.
+// 메타데이터의 가로·세로로 먼저 잡힌다, ⑤ 정말로 깨진 그림만 글자로 남고 다시 불러오기가 된다, ⑥ 오프라인·세대 교체·지나가는 실패는
+// 글자가 아니라 같은 크기의 빈 칸이고 스스로 다시 받는다(#5575).
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
 import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
+import { expressionAltText } from "@momo/core/features/expressions/message";
 import type { Expression, ExpressionImage as Picture } from "@momo/core/features/expressions/types";
 import { ExpressionStore } from "./ExpressionStore";
-import type { ExpressionTransport } from "./transport";
+import { ExpressionHttpError, type ExpressionTransport } from "./transport";
 import { ExpressionsContext } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
 
@@ -179,9 +181,9 @@ describe("ExpressionImage: 누르면 사라지거나 흔들리던 것 (#5456)", 
     expect(image(swap.container)).toBeNull(); expect(swap.container.querySelector("canvas")).not.toBeNull();
   });
 
-  it("오프라인과 실패는 글자로 남고, 그림 다시 불러오기로 받아 온다", async () => {
+  it("정말로 깨진 그림(형식·디코드·4xx)은 글자로 남고, 그림 다시 불러오기로 받아 온다", async () => {
     const { store, transport } = build();
-    transport.image.mockImplementation(async () => { throw new Error("network"); });
+    transport.image.mockImplementation(async () => { throw new ExpressionHttpError(404, undefined); });
     const view = render(wrapper(store, <ExpressionImage item={gifItem} size="large" />));
     await settle();
     expect(image(view.container)).toBeNull(); expect(view.container.textContent).toContain(`:${gifItem.name}:`);
@@ -190,9 +192,68 @@ describe("ExpressionImage: 누르면 사라지거나 흔들리던 것 (#5456)", 
     fireEvent.click(view.getByRole("button", { name: "그림 다시 불러오기" }));
     await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
     expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
-    // 오프라인: 받아 둔 그림도 걷고 글자만 남긴다.
+  });
+
+  // #5575: 데스크탑에서 가만히 있어도 대화가 튀던 것. 오프라인·세대 교체 뒤 다시 받기 실패에 그림이 `:이름:` 글자가 됐다가 되돌아오며
+  // 목록 높이가 뛰었다. 이제 이 상태들은 같은 크기의 빈 칸(정지 자리표시)이고 글자는 한 번도 서지 않는다.
+  it("오프라인: 그림을 내리고 같은 크기의 빈 칸을 세운다 — 글자가 아니다. 돌아오면 다시 받는다 (#5575)", async () => {
+    const { store } = build();
+    const view = render(wrapper(store, <ExpressionImage item={gifItem} size="large" />));
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
+    const gaps = watchGaps(view.container, gifItem.name);
     await act(async () => { store.setOffline(true); });
-    expect(image(view.container)).toBeNull(); expect(view.container.textContent).toContain(`:${gifItem.name}:`);
+    // ADR-0218 「offline에서는 문자열/정지 자리표시만」: 그림은 내리고(바이트를 보이지 않는다) 칸은 그대로다.
+    expect(image(view.container)).toBeNull();
+    const box = view.container.querySelector("canvas")!;
+    expect(box.getAttribute("width")).toBe("200"); expect(box.getAttribute("height")).toBe("150");
+    expect(box.getAttribute("role")).toBe("img"); expect(box.getAttribute("aria-label")).toBe(expressionAltText(gifItem));
+    expect(view.container.textContent).toBe("");
+    expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
+    await act(async () => { store.setOffline(false); });
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
+    expect(gaps.seen.placeholders).toBe(0); gaps.stop();
+  });
+
+  it("세대 교체 뒤 다시 받기가 응답 없이 실패해도(서버 재시작) 빈 칸으로 기다렸다 스스로 다시 받는다 (#5575)", async () => {
+    const { store, transport } = build();
+    const view = render(wrapper(store, <ExpressionImage item={gifItem} size="large" />));
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
+    const gaps = watchGaps(view.container, gifItem.name);
+    // 실시간이 다시 붙어 저장소가 그림 세대를 통째로 바꿨는데, 그 순간 서버가 응답하지 않는다(fetch 의 TypeError).
+    transport.image.mockImplementation(async () => { throw new TypeError("Load failed"); });
+    await act(async () => { store.clearImages(); });
+    await settle();
+    expect(image(view.container)).toBeNull();
+    expect(view.container.querySelector("canvas")?.getAttribute("height")).toBe("150");
+    expect(view.container.textContent).toBe("");
+    expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
+    // 서버가 돌아오면 사람 손 없이 다시 받는다(1.5초 뒤 첫 재시도).
+    transport.image.mockImplementation(async (path: string) => path.includes("size=thumb") ? THUMB : GIF);
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF), { timeout: 4_000 });
+    expect(gaps.seen.placeholders).toBe(0); gaps.stop();
+  });
+
+  it("지나가는 실패와 깨진 그림을 가른다: 응답 없음·시간 초과·408·429·5xx·세대 교체 경합은 지나가는 것이다 (#5575)", async () => {
+    const cases: Array<[string, unknown, boolean]> = [
+      ["fetch 응답 없음", new TypeError("Load failed"), true],
+      ["시간 초과", Object.assign(new Error("aborted"), { name: "AbortError" }), true],
+      ["503", new ExpressionHttpError(503, undefined), true],
+      ["429", new ExpressionHttpError(429, undefined), true],
+      ["오프라인", new Error("offline"), true],
+      ["받는 도중 걷힘", new Error("evicted expression"), true],
+      ["404(숨김·틀린 sha)", new ExpressionHttpError(404, undefined), false],
+      ["형식이 다름", new Error("expression image type"), false],
+    ];
+    for (const [label, error, transient] of cases) {
+      const { store, transport } = build();
+      transport.image.mockImplementation(async () => { throw error; });
+      const view = render(wrapper(store, <ExpressionImage item={stillItem} size="large" />));
+      await settle();
+      const text = view.container.textContent ?? "";
+      expect([label, text.includes(`:${stillItem.name}:`)]).toEqual([label, !transient]);
+      expect([label, view.container.querySelector("canvas") !== null]).toEqual([label, transient]);
+      cleanup();
+    }
   });
 });
 

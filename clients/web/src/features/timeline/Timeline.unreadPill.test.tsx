@@ -19,6 +19,23 @@ import { buildTimelineItems } from "@momo/core/features/timeline/model";
 
 const FIRST = 1_000_000;
 
+/**
+ * 바닥을 떠난다(#5575): 「최신 메시지로 이동」은 떠난 상태가 250ms 이어져야 선다(늦춤). 그만큼 실제로 기다린다.
+ */
+async function leaveBottom() {
+  act(() => {
+    virtuoso.atBottomStateChange?.(false);
+  });
+  await waitReal(320);
+}
+
+/** 실제 시간을 기다린다(React 가 그 사이의 타이머 갱신을 그리도록 act 안에서). */
+async function waitReal(ms: number) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
 type RangeHandler = (range: { startIndex: number; endIndex: number }) => void;
 type ScrollerHandler = (node: HTMLElement | Window | null) => void;
 
@@ -373,7 +390,7 @@ describe("Timeline unread jump pill", () => {
     expect(pill?.getAttribute("data-new-count")).toBe("3");
   });
 
-  it("하단 필과 동시에 떠도 된다", () => {
+  it("하단 필과 동시에 떠도 된다", async () => {
     const root = mountTimeline();
     const items = buildTimelineItems(
       [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
@@ -383,9 +400,7 @@ describe("Timeline unread jump pill", () => {
     if (divider === null) throw new Error("expected unread divider");
     reportRange(divider + 2, divider + 6);
     reportObserved("above");
-    act(() => {
-      virtuoso.atBottomStateChange?.(false);
-    });
+    await leaveBottom();
     expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
     expect(root.querySelector("[data-testid='jump-latest']")).not.toBeNull();
     expect(
@@ -407,13 +422,44 @@ describe("Timeline unread jump pill", () => {
     expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
   });
 
-  it("안읽음이 없으면 하단 필만 뜬다", () => {
+  it("안읽음이 없으면 하단 필만 뜬다", async () => {
     const root = mountTimeline({ lastReadSeq: null, unreadCount: 0 });
+    await leaveBottom();
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+    expect(root.querySelector("[data-testid='jump-latest']")).not.toBeNull();
+  });
+
+  it("하단 필은 늦춰 선다: 바닥을 잠깐 떠났다 돌아오면 한 번도 서지 않는다 (#5575)", async () => {
+    const root = mountTimeline({ lastReadSeq: null, unreadCount: 0 });
+    const mounts: number[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element && (node.matches("[data-testid='jump-latest']") || node.querySelector("[data-testid='jump-latest']"))) mounts.push(1);
+        }
+      }
+    });
+    watch.observe(root, { childList: true, subtree: true });
+    // 목록이 잠깐 밀렸다 돌아온다(WebKit 의 줄 높이 변화): 떠남 → 120ms 뒤 돌아옴.
     act(() => {
       virtuoso.atBottomStateChange?.(false);
     });
-    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+    await waitReal(120);
+    act(() => {
+      virtuoso.atBottomStateChange?.(true);
+    });
+    await waitReal(320);
+    watch.disconnect();
+    expect(mounts).toHaveLength(0);
+    expect(root.querySelector("[data-testid='jump-latest']")).toBeNull();
+    // 정말로 떠나 있으면 선다.
+    await leaveBottom();
     expect(root.querySelector("[data-testid='jump-latest']")).not.toBeNull();
+    // 바닥에 닿으면 바로 걷는다(늦추지 않는다).
+    act(() => {
+      virtuoso.atBottomStateChange?.(true);
+    });
+    expect(root.querySelector("[data-testid='jump-latest']")).toBeNull();
   });
 
   it("라이브 꼬리는 상단 N에 섞지 않는다 — 구분선과 같은 동결 수다", () => {
@@ -575,11 +621,9 @@ describe("Timeline unread jump pill", () => {
     expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
   });
 
-  it("하단 필 실행 후 포커스가 최신 행 정거장에 착지한다", () => {
+  it("하단 필 실행 후 포커스가 최신 행 정거장에 착지한다", async () => {
     const root = mountTimeline({ lastReadSeq: null, unreadCount: 0 });
-    act(() => {
-      virtuoso.atBottomStateChange?.(false);
-    });
+    await leaveBottom();
     const pill = root.querySelector<HTMLButtonElement>(
       "[data-testid='jump-latest']"
     );
