@@ -54,8 +54,14 @@
   <section class="hero" aria-labelledby="hero-title" data-webgl="pending" data-running="0">
     <canvas class="sky" aria-hidden="true"></canvas>
     <div class="hero-in">
+      <p class="eyebrow">{{t.hero_eyebrow}}</p>
       <h1 id="hero-title"><span>{{t.hero_title_1}}</span> <span>{{t.hero_title_2}}</span></h1>
       <p class="lead">{{t.hero_lead}}</p>
+      <ul class="proof" role="list">
+        <li>{{t.hero_proof_1}}</li>
+        <li>{{t.hero_proof_2}}</li>
+        <li>{{t.hero_proof_3}}</li>
+      </ul>
       <div class="get" data-get data-chip="arm">
         <a class="get-main" id="get-mac" href="{{v.DMG_ARM_URL}}" data-arm="{{v.DMG_ARM_URL}}" data-x64="{{v.DMG_X64_URL}}">
           <svg class="i" aria-hidden="true"><use href="#i-download"/></svg>

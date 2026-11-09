@@ -73,6 +73,8 @@ body {
 /* 일본어: 문구의 구절 힌트(<wbr>, build.py PHRASE_LANGS)·문장 부호·빈칸에서만 줄을 바꾼다(WebKit 에 auto-phrase 가 없다) */
 :lang(ja) body { word-break: keep-all; line-break: strict; }
 :lang(zh-Hans) body, :lang(zh-Hant) body { line-break: strict; }
+/* 중국어 제목은 구절 힌트(<wbr>)·문장 부호에서만 바꾼다(「智能/体」처럼 낱말 가운데서 끊기지 않게) */
+:lang(zh-Hans) h1, :lang(zh-Hant) h1 { word-break: keep-all; }
 a { color: inherit; }
 img, svg, canvas { display: block; }
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
@@ -135,9 +137,9 @@ html[data-phone] .web-link { display: none; }
 }
 .sky { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; }
 .hero[data-webgl="off"] .sky { display: none; }
-/* 글자 뒤의 은은한 막: 움직이는 하늘이 아니라 이 색을 기준으로 대비를 잰다 */
+/* 글자 뒤의 은은한 막: 움직이는 하늘이 아니라 이 색을 기준으로 대비를 잰다. 문구가 길어져(#5568, 머리글·칩) 글 덩어리 높이를 따라 첫 화면의 90%까지 */
 .hero::before {
-  content: ""; position: absolute; z-index: -1; left: 50%; top: 46%; width: min(980px, 120%); height: 560px;
+  content: ""; position: absolute; z-index: -1; left: 50%; top: 44%; width: min(980px, 120%); height: max(560px, 90%);
   transform: translate(-50%, -50%); pointer-events: none;
   background: radial-gradient(closest-side, var(--veil) 0%, var(--veil) 45%, transparent 100%);
   background: radial-gradient(closest-side, var(--veil) 0%, color-mix(in srgb, var(--veil) 70%, transparent) 55%, transparent 100%);
@@ -146,17 +148,26 @@ html[data-phone] .web-link { display: none; }
   content: ""; position: absolute; z-index: -1; left: 0; right: 0; bottom: 0; height: 240px; pointer-events: none;
   background: linear-gradient(180deg, transparent, var(--page));
 }
-.hero-in { max-width: 860px; display: flex; flex-direction: column; align-items: center; }
+.hero-in { max-width: 1120px; display: flex; flex-direction: column; align-items: center; }
+/* 머리글: 제목 위 한 줄. 신호색은 신호에만이라 글자색 보조, 대문자·자간 없이 본문 글꼴 */
+.eyebrow { margin: 0 0 18px; font-size: 15px; line-height: 1.45; font-weight: 600; color: var(--ink-muted); text-wrap: balance; }
 h1 {
-  margin: 0; font-size: clamp(40px, 6.6vw, 78px); line-height: 1.04; letter-spacing: -.035em; font-weight: 700;
+  margin: 0; font-size: clamp(30px, 4.4vw, 56px); line-height: 1.08; letter-spacing: -.03em; font-weight: 700;
   text-wrap: balance;
 }
 h1 span { display: block; }
-:lang(ko) h1, :lang(ja) h1, :lang(zh-Hans) h1, :lang(zh-Hant) h1 { letter-spacing: -.02em; line-height: 1.14; }
-.lead { margin: 20px 0 0; max-width: 36em; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.5; color: var(--ink-muted); text-wrap: balance; }
+:lang(ko) h1, :lang(ja) h1, :lang(zh-Hans) h1, :lang(zh-Hant) h1 { letter-spacing: -.02em; line-height: 1.16; }
+.lead { margin: 22px 0 0; max-width: 38em; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.55; color: var(--ink-muted); text-wrap: balance; }
+/* 증거 칩: 단추가 아니라 표지다(반경 10, 채움 알약 아님, 누를 곳 없음). 머리카락 선만 두고 하늘을 그대로 비친다.
+   칩 줄은 리드 폭(720)을 넘지 않는다: 넓은 제목 아래로 리드·칩·주 버튼이 한 기둥에 선다 */
+.proof { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: min(100%, 720px); margin: 24px 0 0; padding: 0; list-style: none; }
+.proof li {
+  max-width: 100%; padding: 5px 12px; border: 1px solid var(--line); border-color: color-mix(in srgb, var(--line-strong) 32%, transparent); border-radius: 10px;
+  font-size: 14px; line-height: 1.45; color: var(--ink-muted); text-wrap: balance;
+}
 
 /* 주 버튼: 잉크 알약 + 칩 펼침 */
-.get { position: relative; display: inline-flex; margin-top: 36px; border-radius: 999px; box-shadow: var(--shadow); }
+.get { position: relative; display: inline-flex; margin-top: 32px; border-radius: 999px; box-shadow: var(--shadow); }
 .get-main, .get-more {
   display: inline-flex; align-items: center; gap: 10px; min-height: 52px; border: 0;
   background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; font-size: 16px; text-decoration: none; cursor: pointer;
@@ -255,10 +266,26 @@ html[data-phone] .phone-get { display: flex; flex-direction: column; align-items
   /* 판은 머리 오른쪽 안쪽 여백에 맞춘다: 언어 단추가 오른쪽 끝(폰)이나 그 옆(아이콘 하나 건너)에 서고, 판이 가장 넓게 들어가는 쪽이다 */
   .pop { position: static; }
   .lang-list { right: 16px; left: auto; top: calc(100% - 4px); }
-  .hero { padding: 112px 20px 176px; min-height: 620px; }
+  /* 폰 첫 화면(iPhone 14 흉내 390×664)에서 주 행동이 첫 화면 안에 들도록 머리글·리드·칩 사이를 줄인다(머리 줄 높이 68) */
+  .hero { padding: 88px 20px 176px; min-height: 620px; }
+  /* 폰 폭은 글 덩어리가 첫 화면 대부분을 차지해 막을 위·옆으로 넓힌다(머리글이 셰이더의 비운 자리 밖이라) */
+  .hero::before { top: 41%; width: 170%; height: 124%; }
+  .eyebrow { margin-bottom: 12px; font-size: 14px; }
+  .lead { margin-top: 16px; }
+  .proof { gap: 6px; margin-top: 18px; }
+  .proof li { padding: 4px 10px; font-size: 13px; }
+  .get { margin-top: 28px; }
+  .get-web { margin-top: 28px; }
   .shot { margin-top: -132px; padding: 0 16px; }
   .band { padding-left: 20px; padding-right: 20px; }
   .get-main { padding: 0 16px 0 18px; }
+}
+/* 아주 좁은 폰(360 이하): 긴 문구(fr·es·ja)에서도 첫 화면 주 행동이 첫 화면 안에 들도록 글자를 한 단 줄인다 */
+@media (max-width: 360px) {
+  .hero { padding-top: 80px; }
+  h1 { font-size: 28px; }
+  .lead { font-size: 15px; line-height: 1.5; }
+  .proof li { padding: 3px 9px; font-size: 12.5px; }
 }
 /* M5: 600px 아래 컨트롤은 44(정본 §2.7) */
 @media (max-width: 599px) {
