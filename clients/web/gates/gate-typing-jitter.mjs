@@ -547,7 +547,7 @@ async function openDm(page) {
 }
 
 async function runScenario(browser, engine, viewport) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 2 });
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR" });
   const page = await context.newPage();
   await installProbe(page);
   if (process.env.TYPING_JITTER_PROVE_RED_COLLAPSE === "1") await installCollapseSeam(page);

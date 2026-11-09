@@ -53,19 +53,16 @@ function pxOf(value: string, fallback: number): number {
  * 값을 읽는다.
  */
 function createMirror(node: HTMLTextAreaElement): HTMLTextAreaElement {
-  const mirror = node.ownerDocument.createElement("textarea");
+  const mirror = node.ownerDocument.createElement(node.tagName) as HTMLTextAreaElement;
   mirror.setAttribute(AUTO_GROW_MIRROR_ATTR, "");
-  mirror.setAttribute("aria-hidden", "true");
   mirror.tabIndex = -1;
   mirror.readOnly = true;
-  mirror.rows = 1;
-  mirror.style.position = "absolute";
-  mirror.style.visibility = "hidden";
-  mirror.style.pointerEvents = "none";
-  mirror.style.height = "0";
-  mirror.style.overflow = "hidden";
+  mirror.inert = true;
   return mirror;
 }
+
+/** 거울의 자리: 흐름 밖·안 보임·누를 수 없음·높이 0. 폭은 재기마다 입력창에서 붙인다. `visibility: hidden`이 보조기술에서도 뺀다. */
+const MIRROR_CSS = "position:absolute;visibility:hidden;pointer-events:none;height:0;overflow:hidden;";
 
 /**
  * `value`가 바뀔 때마다 textarea의 높이를 내용에 맞춘다.
@@ -109,7 +106,7 @@ export function useAutoGrow(
     // 폭은 살아 있는 입력창에서 읽는다 — 그 읽기도 레이아웃을 부르지만, 이때 입력창은 마지막으로 그려진 높이 그대로라
     // 다른 상자의 크기가 바뀌지 않는다.
     mirror.className = node.className;
-    mirror.style.width = `${node.getBoundingClientRect().width}px`;
+    mirror.style.cssText = `${MIRROR_CSS}width:${node.getBoundingClientRect().width}px;`;
     mirror.value = node.value;
 
     const min = line * minRows + frame;

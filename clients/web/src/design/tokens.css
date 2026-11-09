@@ -2550,8 +2550,10 @@
   @media (width >= 600px) {
     border-block-start: 0;
 
+    /* 카드 아래 18은 이제 「입력 중」 줄(`typing-line`, 높이 = text-meta 행간 18)이 진다(#5567). 폼의 아래 여백을 0으로 두고
+     * 그 줄이 늘 같은 높이로 서므로 카드는 예전과 같은 자리(판 바닥에서 18 위)에 뜨고, 독의 높이도 같다. */
     & > form {
-      padding: var(--spacing-2) var(--spacing-6) 18px;
+      padding: var(--spacing-2) var(--spacing-6) 0;
     }
 
     /* 컴포저의 후보 목록(`@`·`#`·`:`)과 `/` 명령 목록은 폼 안에 절대 위치로 서고, 가로는 폰 폭의 폼 여백(`p-3`, 12)에
@@ -2644,6 +2646,24 @@
     @media (prefers-contrast: more) {
       border-color: var(--line-strong);
     }
+  }
+}
+
+/* 「입력 중」 줄 (#5567, owner 11-09). 입력 카드 **바로 아래** 한 줄이다(Slack·Discord와 같은 자리). 누가 치든 안 치든 높이가
+ * 늘 text-meta 한 줄(18)이라 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. 글은 카드 안 글 칸의 첫 글자와 같은
+ * 세로줄에서 시작한다(넓은 창: 카드 안쪽 여백 4 + 글 칸 인셋 12 = 16, 폰 폭: 글 칸 인셋 12). 넘치면 한 줄 안에서 잘린다. */
+@utility typing-line {
+  display: flex;
+  align-items: center;
+  block-size: var(--text-meta--line-height);
+  overflow: hidden;
+  padding-inline: var(--spacing-3);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  color: var(--ink-muted);
+
+  @media (width >= 600px) {
+    padding-inline: var(--spacing-4);
   }
 }
 

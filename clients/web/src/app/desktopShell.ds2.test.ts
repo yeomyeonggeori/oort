@@ -254,7 +254,10 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(card).toMatch(/border-radius: var\(--radius-2xl\);/);
     expect(TOKENS).toMatch(/--radius-2xl: 20px;/);
     expect(card).toMatch(/box-shadow: var\(--elevation-float\);/);
-    expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 18px;/);
+    // 아래 18은 폼 여백이 아니라 카드 아래 늘 서 있는 「입력 중」 줄(text-meta 행간 18)이 진다(#5567).
+    expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 0;/);
+    expect(utility("typing-line")).toMatch(/block-size: var\(--text-meta--line-height\);/);
+    expect(TOKENS).toMatch(/--text-meta--line-height: calc\(var\(--type-rem\) \* 1\.125\);/);
     expect(COMPOSER_CARD).toMatch(/"composer-card\b/);
     expect(COMPOSER).toContain("<ComposerCard");
     expect(COMPOSER).toMatch(/"composer-dock safe-area-bottom shrink-0"/);

@@ -20,10 +20,11 @@
 //                      사라진다.
 //   6. 자기 자신 금지  내 발행이 레일로 돌아와도 내 화면에는 뜨지 않는다.
 //   7. 뭉치기          임계는 **grant 응답 값**이다. 3명이면 「3명이 작성 중」.
-//   8. 자리 예약       힌트↔작성 중 스왑에도 **캐럿과 전송 버튼이 움직이지 않는다.**
-//                      U-8의 26px 세로 예약 행은 #1749에서 액션 행 가운데 가로 슬롯으로
-//                      옮겼다. 이 게이트는 세 판의 슬롯 수·액션 행 높이와 변위를 픽셀로
-//                      재서, 시프트와 죽은 세로 밴드가 함께 돌아오지 못하게 한다.
+//   8. 자리 예약       「입력 중」 줄은 입력 카드 **바로 아래 늘 잡아 둔 한 줄**(18px)이다
+//                      (#5567, owner 11-09: 보내기 옆 오른쪽 슬롯은 일반적인 자리가 아니다).
+//                      줄이 서고 져도 **캐럿·전송 버튼·독 높이가 움직이지 않고**, 도구 줄의
+//                      힌트 슬롯과 입력창 설명(aria-describedby)도 바뀌지 않는다. 넓은 창에서
+//                      그 줄은 카드가 떠 있던 아래 여백 18을 맡으므로 독 높이가 예전과 같다.
 //   9. 이름 표지       사람 이름은 `--ink`, 나머지는 muted. 에이전트 줄의 `--agent`와
 //                      대조되는 축이 문서가 아니라 마크업에 있다.
 //
@@ -42,9 +43,9 @@
 //   TYPING_GATE_PROVE_RED_GRANT=1 npm run gate:typing
 //     expected failure: "the grant was re-fetched"
 //   TYPING_GATE_PROVE_RED_LIVE=1 npm run gate:typing
-//     expected failure: "the 작성 중 line sits inside a live region"
+//     expected failure: "the 입력 중 line sits inside a live region"
 //   TYPING_GATE_PROVE_RED_SHIFT=1 npm run gate:typing
-//     expected failure: "the composer moved when the 작성 중 line appeared"
+//     expected failure: "the composer moved when the 입력 중 line appeared"
 //   TYPING_GATE_PROVE_RED_TAIL=1 npm run gate:typing
 //     expected failure: "the verb was truncated away"
 //   TYPING_GATE_PROVE_RED_LABEL=1 npm run gate:typing
@@ -60,8 +61,8 @@
 // red seam은 **목/드라이버의 행동만** 바꾼다. AGENT는 명부에서 에이전트를 사람으로
 // 바꾸고, SELF는 내 id 대신 남의 id로 발행하고, TTL은 기다리는 동안 계속 재발행하고,
 // STOP은 멈춰야 할 구간에도 계속 타이핑하고, GRANT는 grant TTL을 12초로 줄이고, LIVE는
-// DOM에서 그 줄을 live 영역 안으로 넣고, SHIFT는 타이핑 판만 액션 행을 키워
-// 세로 예약판 시절의 이동을 되돌린다. TAIL은 꼬리를 다시 줄어들게 만들고(=1차의 「줄 전체 truncate」),
+// DOM에서 그 줄을 live 영역 안으로 넣고, SHIFT는 줄 상자의 예약 높이를 풀어(`block-size:auto`)
+// 「없을 때 0, 있을 때 18」이던 예약 없는 줄을 되돌린다. TAIL은 꼬리를 다시 줄어들게 만들고(=1차의 「줄 전체 truncate」),
 // LABEL은 sr-only 라벨을 접근성 트리에서 뺀다(=1차의 「title뿐」). 제품 소스 줄을
 // 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
@@ -86,6 +87,8 @@ const jiwooId = "00000000-0000-7000-8000-000000000104";
 // 바꾼다.
 const longAId = "00000000-0000-7000-8000-000000000105";
 const longBId = "00000000-0000-7000-8000-000000000106";
+// #5567: 둘부터 「첫 이름님 외 N명」이라 보이는 이름은 하나다. 그 한 이름이 320폭을 넘칠 만큼 긴 표시명(이름 + 직군 + 직책).
+const longCId = "00000000-0000-7000-8000-000000000107";
 const agentId = "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAA613";
 const channelId = "00000000-0000-7000-8000-000000000201";
 const otherChannelId = "00000000-0000-7000-8000-000000000202";
@@ -111,6 +114,8 @@ const AGGREGATE_THRESHOLD = 3;
 // 공유 슬롯은 `text-meta` 한 줄이다. 옛 26px 예약 행을 없앤 뒤의 구체 높이이며,
 // 0보다 크기만 하면 된다는 단정은 높이 축을 사실상 지워 버린다 (R2 N-8).
 const ACTION_META_SLOT_HEIGHT_PX = 18;
+/** 「입력 중」 줄의 예약 높이(text-meta 행간). 아무도 안 칠 때도 이 높이다 (#5567). */
+const TYPING_LINE_HEIGHT_PX = 18;
 /** 이 게이트가 쓰는 짧은 TTL. 실제 6초를 기다리면 게이트가 분 단위로 길어진다. */
 const GATE_TTL_MS = 1_200;
 /**
@@ -176,6 +181,12 @@ const roster = [
     kind: "human",
     displayName: "이도현 플랫폼엔지니어링",
     handle: "dohyun-platform",
+  }),
+  member({
+    id: longCId,
+    kind: "human",
+    displayName: "이도현 플랫폼엔지니어링 테크리드",
+    handle: "dohyun-platform-lead",
   }),
   member({
     id: agentId,
@@ -560,6 +571,8 @@ async function exercise(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 「입력 중」 문구는 사전에서 온다(#5567). 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -603,46 +616,52 @@ async function exercise(browser) {
     );
   }
 
-  // ---- 8. 액션 슬롯 스왑: 힌트↔작성 중이 캐럿을 밀지 않는다 (H-2 · U-8) ------
+  // ---- 8. 「입력 중」 줄은 카드 아래 늘 잡아 둔 한 줄이다: 서고 져도 아무것도 안 움직인다 (#5567) ----
   //
-  // 「입력창과 전송 버튼이 그 자리에 있는가」는 의견이 아니라 좌표다. 기본 힌트의
-  // 좌표를 재고, 두 명이 치기 시작해 같은 가로 슬롯이 작성 중으로 바뀐 뒤 다시 재고,
-  // 만료로 힌트가 돌아온 뒤 또 잰다. 세 판은 슬롯이 정확히 하나이고 액션 행 높이와
-  // 입력창·버튼 좌표가 같아야 한다. 별도 26px 세로 행은 존재하지 않는다.
+  // 「입력창과 전송 버튼이 그 자리에 있는가」는 의견이 아니라 좌표다. 아무도 안 칠 때 재고, 두 명이 치기 시작해 줄이 선 뒤
+  // 다시 재고, 만료로 줄이 진 뒤 또 잰다. 세 판에서 입력창·전송 y, 독 높이, 줄 상자 높이(18)가 같아야 하고, 도구 줄의
+  // 힌트 슬롯과 입력창 설명은 남의 입력과 무관하게 그대로여야 한다(옛 판은 힌트를 밀어내고 그 자리에 섰다).
   const composerBox = async () => {
     const input = await page.getByTestId("composer-input").boundingBox();
     const send = await page.getByTestId("composer-send").boundingBox();
-    return { inputY: Math.round(input?.y ?? -1), sendY: Math.round(send?.y ?? -1) };
+    const dock = await page.getByTestId("composer").boundingBox();
+    const line = await page.getByTestId("typing-line").boundingBox();
+    return {
+      inputY: Math.round(input?.y ?? -1),
+      sendY: Math.round(send?.y ?? -1),
+      dockH: Math.round(dock?.height ?? -1),
+      lineH: Math.round(line?.height ?? -1),
+    };
   };
   if (proveRedShift) {
-    // red seam: 타이핑 판만 26px 키워 남의 키가 컴포저를 미는 옛 모양을 되돌린다.
-    // React 노드는 건드리지 않으므로 실패가 슬롯 전환 자체를 깨뜨린 결과가 아니다.
+    // red seam: 줄 상자의 예약 높이를 푼다. 빈 줄은 0, 문장이 서면 18이 되어 남의 키가 내 캐럿과 보내기 단추를 민다.
+    // React 노드는 건드리지 않으므로 실패가 줄 전환 자체를 깨뜨린 결과가 아니다.
     await page.addStyleTag({
-      content:
-        '[data-testid="composer-typing"]{padding-bottom:26px!important}',
+      content: '[data-testid="typing-line"]{block-size:auto!important}',
     });
   }
+  const hintSlot = () =>
+    metaSlot(page).evaluateAll((nodes) => ({
+      count: nodes.length,
+      height:
+        nodes.length === 1
+          ? Math.round(nodes[0].getBoundingClientRect().height)
+          : -1,
+      kind: nodes[0]?.getAttribute("data-testid") ?? "missing",
+    }));
+  const describedBy = () =>
+    page.getByTestId("composer-input").getAttribute("aria-describedby");
   const beforeTyping = await composerBox();
-  if (beforeTyping.inputY < 0 || beforeTyping.sendY < 0) {
+  if (beforeTyping.inputY < 0 || beforeTyping.sendY < 0 || beforeTyping.dockH < 0) {
     throw new Error("컴포저를 측정할 수 없다");
   }
-  const beforeMeta = await metaSlot(page).evaluateAll((nodes) => ({
-    count: nodes.length,
-    height:
-      nodes.length === 1
-        ? Math.round(nodes[0].getBoundingClientRect().height)
-        : -1,
-    kind: nodes[0]?.getAttribute("data-testid") ?? "missing",
-  }));
-  const beforeDescribedBy = await page
-    .getByTestId("composer-input")
-    .getAttribute("aria-describedby");
+  const beforeMeta = await hintSlot();
+  const beforeDescribedBy = await describedBy();
   if (
-    !proveRedShift &&
-    (beforeMeta.count !== 1 ||
-      beforeMeta.height !== ACTION_META_SLOT_HEIGHT_PX ||
-      beforeMeta.kind !== "composer-hint" ||
-      beforeDescribedBy !== "composer-hint")
+    beforeMeta.count !== 1 ||
+    beforeMeta.height !== ACTION_META_SLOT_HEIGHT_PX ||
+    beforeMeta.kind !== "composer-hint" ||
+    beforeDescribedBy !== "composer-hint"
   ) {
     throw new Error(
       `기본 액션 슬롯은 힌트 하나·${ACTION_META_SLOT_HEIGHT_PX}px이어야 한다: ${JSON.stringify({
@@ -651,48 +670,66 @@ async function exercise(browser) {
       })}`
     );
   }
+  if (!proveRedShift && beforeTyping.lineH !== TYPING_LINE_HEIGHT_PX) {
+    throw new Error(
+      `아무도 안 칠 때도 「입력 중」 줄은 ${TYPING_LINE_HEIGHT_PX}px을 잡아 둬야 한다: ${beforeTyping.lineH}px`
+    );
+  }
   await publishTyping(page, { memberId: dohyunId, ttlMs: 2_500 });
   await publishTyping(page, { memberId: minseoId, ttlMs: 2_500 });
   await typingLine(page).waitFor({ timeout: 5_000 });
   const duringTyping = await composerBox();
-  const duringMeta = await metaSlot(page).evaluateAll((nodes) => ({
-    count: nodes.length,
-    height:
-      nodes.length === 1
-        ? Math.round(nodes[0].getBoundingClientRect().height)
-        : -1,
-    kind: nodes[0]?.getAttribute("data-testid") ?? "missing",
-  }));
-  const duringDescribedBy = await page
-    .getByTestId("composer-input")
-    .getAttribute("aria-describedby");
+  const duringMeta = await hintSlot();
+  const duringDescribedBy = await describedBy();
   console.log(
     `[shift] 입력창 y ${beforeTyping.inputY} -> ${duringTyping.inputY} · ` +
-      `전송 y ${beforeTyping.sendY} -> ${duringTyping.sendY}`
+      `전송 y ${beforeTyping.sendY} -> ${duringTyping.sendY} · 독 ${beforeTyping.dockH} -> ${duringTyping.dockH} · ` +
+      `줄 ${beforeTyping.lineH} -> ${duringTyping.lineH}px`
   );
   if (
     duringMeta.count !== 1 ||
-    (!proveRedShift &&
-      duringMeta.height !== ACTION_META_SLOT_HEIGHT_PX) ||
-    duringMeta.kind !== "composer-typing" ||
-    duringDescribedBy !== null ||
-    (await page.getByTestId("composer-hint").count()) !== 0
+    duringMeta.kind !== "composer-hint" ||
+    duringMeta.height !== ACTION_META_SLOT_HEIGHT_PX ||
+    duringDescribedBy !== "composer-hint"
   ) {
     throw new Error(
-      `작성 시작에 힌트가 같은 액션 슬롯으로 스왑되지 않았다: ${JSON.stringify({
+      `남이 치기 시작하자 도구 줄의 힌트 슬롯이 바뀌었다: ${JSON.stringify({
         ...duringMeta,
         describedBy: duringDescribedBy,
       })}`
     );
   }
+  const typingPlacement = await page.evaluate(() => {
+    const line = document.querySelector('[data-testid="composer-typing"]');
+    const frame = document.querySelector('[data-testid="composer-frame"]');
+    if (line === null || frame === null) return null;
+    return {
+      inFrame: frame.contains(line),
+      inActions: line.closest('[data-testid="composer-actions"]') !== null,
+      belowFrame: Math.round(line.getBoundingClientRect().top - frame.getBoundingClientRect().bottom),
+    };
+  });
   if (
-    duringTyping.inputY !== beforeTyping.inputY ||
-    duringTyping.sendY !== beforeTyping.sendY
+    typingPlacement === null ||
+    typingPlacement.inFrame ||
+    typingPlacement.inActions ||
+    typingPlacement.belowFrame < 0
   ) {
     throw new Error(
-      `the composer moved when the 작성 중 line appeared: 입력창 ${beforeTyping.inputY}->${duringTyping.inputY}, ` +
-        `전송 ${beforeTyping.sendY}->${duringTyping.sendY}. 남의 키 입력이 내 캐럿과 ` +
-        "엄지 아래의 전송 버튼을 밀어서는 안 된다 (리뷰 H-2)"
+      `「입력 중」은 카드 밖, 카드 바로 아래 줄이어야 한다: ${JSON.stringify(typingPlacement)}`
+    );
+  }
+  if (
+    duringTyping.inputY !== beforeTyping.inputY ||
+    duringTyping.sendY !== beforeTyping.sendY ||
+    duringTyping.dockH !== beforeTyping.dockH ||
+    (!proveRedShift && duringTyping.lineH !== TYPING_LINE_HEIGHT_PX)
+  ) {
+    throw new Error(
+      `the composer moved when the 입력 중 line appeared: 입력창 ${beforeTyping.inputY}->${duringTyping.inputY}, ` +
+        `전송 ${beforeTyping.sendY}->${duringTyping.sendY}, 독 ${beforeTyping.dockH}->${duringTyping.dockH}, ` +
+        `줄 ${beforeTyping.lineH}->${duringTyping.lineH}. 남의 키 입력이 내 캐럿과 ` +
+        "전송 버튼을 밀어서는 안 된다 (리뷰 H-2 · #5567)"
     );
   }
   // 사라질 때도 같다. TTL로 스스로 사라지므로 여기서 기다리는 것이 곧 그 경로다.
@@ -701,43 +738,34 @@ async function exercise(browser) {
     undefined,
     { timeout: 8_000 }
   );
-  await page.getByTestId("composer-hint").waitFor({ state: "attached" });
   const afterTyping = await composerBox();
-  const afterMeta = await metaSlot(page).evaluateAll((nodes) => ({
-    count: nodes.length,
-    height:
-      nodes.length === 1
-        ? Math.round(nodes[0].getBoundingClientRect().height)
-        : -1,
-    kind: nodes[0]?.getAttribute("data-testid") ?? "missing",
-  }));
-  const afterDescribedBy = await page
-    .getByTestId("composer-input")
-    .getAttribute("aria-describedby");
+  const afterMeta = await hintSlot();
+  const afterDescribedBy = await describedBy();
   if (
-    !proveRedShift &&
-    (afterMeta.count !== 1 ||
-      afterMeta.height !== beforeMeta.height ||
-      afterMeta.kind !== "composer-hint" ||
-      afterDescribedBy !== "composer-hint")
+    afterMeta.count !== 1 ||
+    afterMeta.height !== beforeMeta.height ||
+    afterMeta.kind !== "composer-hint" ||
+    afterDescribedBy !== "composer-hint"
   ) {
     throw new Error(
-      `작성 종료에 기본 힌트 한 행이 복원되지 않았다: ${JSON.stringify({
+      `작성 종료 뒤 기본 힌트 한 행이 그대로가 아니다: ${JSON.stringify({
         ...afterMeta,
         describedBy: afterDescribedBy,
       })}`
     );
   }
   console.log(
-    `[swap] 기본 ${beforeMeta.kind} ${beforeMeta.height}px -> 작성 중 ${duringMeta.height}px -> ` +
-      `${afterMeta.kind} ${afterMeta.height}px · 액션 슬롯 1개, 별도 예약 행 0`
+    `[reserve] 줄 ${beforeTyping.lineH} -> ${duringTyping.lineH} -> ${afterTyping.lineH}px · 독 ${beforeTyping.dockH} -> ` +
+      `${duringTyping.dockH} -> ${afterTyping.dockH}px · 힌트 슬롯 ${beforeMeta.kind} 그대로`
   );
   if (
     afterTyping.inputY !== beforeTyping.inputY ||
-    afterTyping.sendY !== beforeTyping.sendY
+    afterTyping.sendY !== beforeTyping.sendY ||
+    afterTyping.dockH !== beforeTyping.dockH
   ) {
     throw new Error(
-      `the composer moved when the 작성 중 line expired: 입력창 ${beforeTyping.inputY}->${afterTyping.inputY}`
+      `the composer moved when the 입력 중 line expired: 입력창 ${beforeTyping.inputY}->${afterTyping.inputY}, ` +
+        `독 ${beforeTyping.dockH}->${afterTyping.dockH}`
     );
   }
 
@@ -859,15 +887,20 @@ async function exercise(browser) {
     const node = document.querySelector('[data-testid="composer-actions"]');
     return node === null ? -1 : Math.round(node.getBoundingClientRect().height);
   });
+  await publishTyping(page, { memberId: longCId, ttlMs: 20_000 });
   await publishTyping(page, { memberId: longAId, ttlMs: 20_000 });
-  await publishTyping(page, { memberId: longBId, ttlMs: 20_000 });
   await typingLine(page).waitFor({ timeout: 5_000 });
+  // 둘이 치면 보이는 줄은 첫 사람 이름 + 「외 1명」이다(#5567). 둘째 신호까지 들어온 뒤에 잰다.
   await page.waitForFunction(
-    () =>
-      (
-        document.querySelector('[data-testid="composer-typing-lead"]')
-          ?.textContent ?? ""
-      ).includes("플랫폼엔지니어링"),
+    () => {
+      const line = document.querySelector('[data-testid="composer-typing"]');
+      return (
+        line?.getAttribute("data-count") === "2" &&
+        (document.querySelector('[data-testid="composer-typing-lead"]')?.textContent ?? "").includes(
+          "테크리드"
+        )
+      );
+    },
     undefined,
     { timeout: 5_000 }
   );
@@ -884,8 +917,10 @@ async function exercise(browser) {
       parseFloat(style.paddingLeft) -
       parseFloat(style.paddingRight);
     return {
-      // 잘리지 않았다면 이만큼을 원했다 — 장면이 실제로 넘치는지는 이 값으로 본다.
-      wanted: Math.round(lead.scrollWidth + tail.scrollWidth),
+      // 잘리지 않았다면 이만큼을 원했다 — 장면이 실제로 넘치는지는 이 값으로 본다. 앞의 점과 그 간격(#5567)도 줄 폭을 쓴다.
+      wanted: Math.round(
+        lead.getBoundingClientRect().left - lineBox.left + lead.scrollWidth + tail.scrollWidth
+      ),
       contentWidth: Math.round(contentWidth),
       leadClipped: Math.round(lead.scrollWidth - lead.clientWidth),
       tailClipped: Math.round(tail.scrollWidth - tail.clientWidth),
@@ -927,7 +962,7 @@ async function exercise(browser) {
     );
   }
   const narrowVisible = (await visibleTypingText(page)) ?? "";
-  if (!narrowVisible.endsWith("작성 중")) {
+  if (!narrowVisible.endsWith("입력 중…")) {
     throw new Error(
       `잘린 줄이 문장으로 끝나지 않는다: "${narrowVisible}" (리뷰 M-3)`
     );
@@ -1032,13 +1067,12 @@ async function exercise(browser) {
         "없다. `title`은 역할 없는 `<p>`의 접근 이름을 대체하지 않는다 (리뷰 M-2)"
     );
   }
-  for (const full of ["김민서 프로덕트디자인", "이도현 플랫폼엔지니어링"]) {
-    if (!spoken.includes(full)) {
-      throw new Error(
-        `assistive tech was left reading the truncated text: "${spoken}" 에 "${full}" 이 없다. ` +
-          "보이는 글자가 잘려도 보조기술은 온전한 이름을 얻어야 한다 (리뷰 M-2)"
-      );
-    }
+  // 보이는 줄이 부르는 이름(첫 사람)은 잘려도 보조기술에는 온전히 간다. 둘째 사람은 보이는 줄과 같이 「외 1명」이다.
+  if (!spoken.includes("이도현 플랫폼엔지니어링 테크리드") || !spoken.includes("외 1명")) {
+    throw new Error(
+      `assistive tech was left reading the truncated text: "${spoken}" 에 온전한 첫 이름이나 「외 1명」이 없다. ` +
+        "보이는 글자가 잘려도 보조기술은 온전한 문장을 얻어야 한다 (리뷰 M-2)"
+    );
   }
   if (spoken.includes("…")) {
     throw new Error(
@@ -1052,13 +1086,12 @@ async function exercise(browser) {
       "보이는 글자와 읽히는 글자가 같다: 잘림이 접근성 트리로 그대로 새어 나갔다 (리뷰 M-2)"
     );
   }
-  // ---- 10c. 나열 규칙은 하나다 (리뷰 N-1) -----------------------------------
-  // 「이름마다 님」. 1차는 마지막 이름에만 붙어 존대가 뒤엣사람에게만 갔다.
+  // ---- 10c. 님은 부르는 이름에 붙는다 (리뷰 N-1 → #5567) ---------------------
+  // 둘부터 「첫 이름님 외 N명」으로 뭉치므로 부르는 이름은 하나이고 님도 그 이름에 하나다. 「외 N명」에는 님이 없다.
   const honorifics = (spoken.match(/님/g) ?? []).length;
-  if (honorifics !== 2) {
+  if (honorifics !== 1 || !/테크리드님 외/.test(spoken)) {
     throw new Error(
-      `두 사람을 부르는데 님이 ${honorifics}개다 ("${spoken}"): 나열 규칙은 ` +
-        "「이름마다 님」 하나여야 한다 (리뷰 N-1)"
+      `둘이 치는데 님이 ${honorifics}개이거나 이름에 붙지 않았다 ("${spoken}"): 「○○님 외 N명」이어야 한다 (#5567)`
     );
   }
 
@@ -1079,8 +1112,8 @@ async function exercise(browser) {
     );
   }
   const shellText = (await page.locator("body").textContent()) ?? "";
-  if (shellText.includes("김인턴") && shellText.includes("작성 중")) {
-    throw new Error("an agent's name appeared beside 작성 중 somewhere on the shell");
+  if (shellText.includes("김인턴") && shellText.includes("입력 중")) {
+    throw new Error("an agent's name appeared beside 입력 중 somewhere on the shell");
   }
 
   // ---- 1b. 두 낱말이 한 화면에 있어도 섞이지 않는다 --------------------------
@@ -1095,19 +1128,19 @@ async function exercise(browser) {
   const typingText = (await visibleTypingText(page)) ?? "";
   const workingText =
     (await page.getByTestId("composer-working").textContent()) ?? "";
-  if (!typingText.includes("작성 중") || typingText.includes("작업")) {
-    throw new Error(`the human line must say 작성 중 and nothing about 작업: "${typingText}"`);
+  if (!typingText.includes("입력 중") || typingText.includes("작업")) {
+    throw new Error(`the human line must say 입력 중 and nothing about 작업: "${typingText}"`);
   }
-  if (!workingText.includes("작업 중") || workingText.includes("작성 중")) {
+  if (!workingText.includes("작업 중") || workingText.includes("입력 중")) {
     throw new Error(
-      `the agent line must say 작업 중 and never 작성 중: "${workingText}"`
+      `the agent line must say 작업 중 and never 입력 중: "${workingText}"`
     );
   }
   if (!typingText.includes("이도현")) {
     throw new Error(`the typing line must name the human: "${typingText}"`);
   }
-  // 에이전트 신호는 그릇 위, 사람 신호는 그릇의 액션 슬롯 안이다. 둘 다 한 컴포저
-  // 구역에 남되 N-5가 없앤 별도 26px 행을 되살리지 않는다.
+  // 에이전트 신호는 그릇 **위**(레일), 사람 신호는 그릇 **아래** 줄이다(#5567). 두 상태 줄이 그릇을 사이에 두고 갈라 서서
+  // 「작업 중」과 「입력 중」이 한 덩어리로 읽히지 않는다.
   const placement = await page.evaluate(() => {
     const nodes = Array.from(
       document.querySelectorAll(
@@ -1116,54 +1149,52 @@ async function exercise(browser) {
     );
     const typing = document.querySelector('[data-testid="composer-typing"]');
     const working = document.querySelector('[data-testid="composer-working"]');
+    const frame = document.querySelector('[data-testid="composer-frame"]');
+    const frameBox = frame?.getBoundingClientRect();
     return {
       order: nodes.map((node) => node.dataset.testid ?? ""),
-      typingInFrame: typing?.closest('[data-testid="composer-frame"]') !== null,
-      workingInFrame: working?.closest('[data-testid="composer-frame"]') !== null,
+      typingInFrame: frame?.contains(typing) ?? true,
+      workingInFrame: frame?.contains(working) ?? true,
+      workingAbove: frameBox ? Math.round(frameBox.top - (working?.getBoundingClientRect().bottom ?? Infinity)) : -1,
+      typingBelow: frameBox ? Math.round((typing?.getBoundingClientRect().top ?? -Infinity) - frameBox.bottom) : -1,
     };
   });
   if (
     placement.order.join(",") !== "composer-working,composer-typing" ||
-    !placement.typingInFrame ||
-    placement.workingInFrame
+    placement.typingInFrame ||
+    placement.workingInFrame ||
+    placement.workingAbove < 0 ||
+    placement.typingBelow < 0
   ) {
     throw new Error(
-      `작업 중은 그릇 위, 작성 중은 액션 슬롯 안이어야 한다: ${JSON.stringify(placement)}`
+      `작업 중은 그릇 위, 입력 중은 그릇 아래 줄이어야 한다: ${JSON.stringify(placement)}`
     );
   }
 
-  // ---- 1d. 작성 중은 액션 아이콘과 보내기 사이의 가로 슬롯에 갇힌다 (#1749) -----
+  // ---- 1d. 입력 중은 왼쪽 정렬이고 그릇 안 글 칸의 첫 글자와 같은 세로줄에서 시작한다 (#5567) -----
   //
-  // 별도 행을 없애도 좁은 폭에서 슬롯이 버튼을 덮으면 기능을 산 공간이 된다. 실제
-  // 형제 상자의 좌표로 왼쪽 액션군과 보내기 사이에만 서는지 잰다.
+  // 옛 판은 보내기 단추 왼쪽에 오른쪽 정렬로 섰다. 새 줄은 Slack·Discord처럼 왼쪽이다: 점과 문장이 글 칸의 글자 기둥
+  // (그릇 테두리 1 + 안쪽 여백 4 + 글 칸 인셋 12)에서 1px 안으로 시작하고, 그릇 오른끝을 넘지 않는다.
   const edges = await page.evaluate(() => {
-    const actions = document.querySelector('[data-testid="composer-actions"]');
     const typing = document.querySelector('[data-testid="composer-typing"]');
-    const send = document.querySelector('[data-testid="composer-send"]');
-    const left = actions?.firstElementChild;
-    const box = (node) => {
-      if (!(node instanceof Element)) return null;
-      const rect = node.getBoundingClientRect();
-      return { left: Math.round(rect.left), right: Math.round(rect.right) };
-    };
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const frame = document.querySelector('[data-testid="composer-frame"]');
+    if (!typing || !input || !frame) return null;
+    const textStart = input.getBoundingClientRect().left + parseFloat(getComputedStyle(input).paddingLeft);
     return {
-      left: box(left),
-      typing: box(typing),
-      send: box(send),
+      typingLeft: Math.round(typing.getBoundingClientRect().left),
+      textStart: Math.round(textStart),
+      typingRight: Math.round(typing.getBoundingClientRect().right),
+      frameRight: Math.round(frame.getBoundingClientRect().right),
     };
   });
-  console.log(
-    `[slot] 왼쪽 ${JSON.stringify(edges.left)} · 작성 중 ${JSON.stringify(edges.typing)} · 보내기 ${JSON.stringify(edges.send)}`
-  );
-  if (edges.left === null || edges.typing === null || edges.send === null) {
-    throw new Error(
-      `작성 중 액션 슬롯을 측정하지 못했다: ${JSON.stringify(edges)}`
-    );
-  }
-  if (edges.typing.left < edges.left.right || edges.typing.right > edges.send.left) {
-    throw new Error(
-      `작성 중 슬롯이 액션 버튼을 덮는다: ${JSON.stringify(edges)}`
-    );
+  console.log(`[align] 입력 중 왼쪽 ${edges?.typingLeft} · 글 칸 글자 ${edges?.textStart} · 오른끝 ${edges?.typingRight}/${edges?.frameRight}`);
+  if (
+    edges === null ||
+    Math.abs(edges.typingLeft - edges.textStart) > 1 ||
+    edges.typingRight > edges.frameRight
+  ) {
+    throw new Error(`입력 중 줄이 왼쪽 글자 기둥에서 시작하지 않거나 그릇 폭을 넘는다: ${JSON.stringify(edges)}`);
   }
 
   // ---- 1c. live 영역이 아니다 ----------------------------------------------
@@ -1182,22 +1213,24 @@ async function exercise(browser) {
   });
   if (insideLive !== "outside") {
     throw new Error(
-      `the 작성 중 line sits inside a live region (${insideLive}); a 3s-cadence signal would be read aloud over and over`
+      `the 입력 중 line sits inside a live region (${insideLive}); a 3s-cadence signal would be read aloud over and over`
     );
   }
 
-  // ---- 7. 뭉치기는 grant 값을 탄다 -----------------------------------------
+  // ---- 7. 뭉치기: 둘부터 「첫 이름님 외 N명」 (#5567) ------------------------
+  // 옛 판은 grant 의 임계(3)부터 뭉치고 그 아래는 이름을 늘어놓았다. 카드 아래 한 줄짜리 보조 글자에서는 이름 둘이 긴
+  // 표시명에서 바로 넘치므로 둘부터 뭉친다. 집계 수(`data-count`)는 그대로 센다.
   await publishTyping(page, { memberId: minseoId, ttlMs: 8_000 });
   await page.waitForFunction(
     () =>
-      (document.querySelector('[data-testid="composer-typing"]')?.textContent ?? "")
-        .includes("김민서"),
+      document.querySelector('[data-testid="composer-typing"]')?.getAttribute("data-count") === "2",
     undefined,
     { timeout: 5_000 }
   );
-  const twoNames = (await typingLine(page).textContent()) ?? "";
-  if (!twoNames.includes("이도현") || !twoNames.includes("김민서")) {
-    throw new Error(`two typists must both be named: "${twoNames}"`);
+  // 둘부터 뭉친다(#5567, ADR-0149 미결 「몇 명부터」를 정함): 첫 사람 이름 + 「외 1명」.
+  const twoNames = (await visibleTypingText(page)) ?? "";
+  if (twoNames !== "이도현님 외 1명이 입력 중…") {
+    throw new Error(`two typists read as the first name and one more: "${twoNames}"`);
   }
   await publishTyping(page, { memberId: jiwooId, ttlMs: 8_000 });
   await page.waitForFunction(
@@ -1213,8 +1246,13 @@ async function exercise(browser) {
       await dots.locator(":scope > span").count() !== 3) {
     throw new Error("human typing dots must stand still under reduced motion");
   }
+  // 사람 줄의 점은 글자와 같은 muted 잉크다. `--agent`는 에이전트 표지에만 쓴다(#5567).
+  if ((await dots.getAttribute("data-human")) !== "" ||
+      await dots.locator(".bg-agent").count() !== 0) {
+    throw new Error("human typing dots must not wear the agent color");
+  }
   const collapsed = (await visibleTypingText(page)) ?? "";
-  if (collapsed !== `이도현 외 ${AGGREGATE_THRESHOLD - 1}명 작성 중`) {
+  if (collapsed !== `이도현님 외 ${AGGREGATE_THRESHOLD - 1}명이 입력 중…`) {
     throw new Error(
       `three or more typists retain the first name and remaining count, read "${collapsed}"`
     );
@@ -1225,9 +1263,10 @@ async function exercise(browser) {
   // ---- N-2. 집계 숫자는 자릿폭이 고정이다 -----------------------------------
   // 2 → 3 → 4명으로 바뀌는 숫자다. 26px 아래 같은 컴포저의 「외 N명」이 이미 이
   // 표지를 쓰고 있어, 안 쓰면 한 화면에서 같은 종류의 숫자가 다르게 움직인다.
+  // 숫자는 사전 문장 안(꼬리 「 외 2명이 입력 중…」)에 있다. 꼬리 조각 전체가 자릿폭 고정이다(#5567).
   const countCell = await page.evaluate(() => {
     const node = document.querySelector(
-      '[data-testid="composer-typing-lead"] [data-numeric]'
+      '[data-testid="composer-typing-tail"][data-numeric]'
     );
     if (node === null) return null;
     return {
@@ -1235,7 +1274,7 @@ async function exercise(browser) {
       variant: getComputedStyle(node).fontVariantNumeric,
     };
   });
-  if (countCell === null || !/^\d+$/.test(countCell.text)) {
+  if (countCell === null || !/\d/.test(countCell.text)) {
     throw new Error(
       `집계 숫자가 자기 원소를 갖고 있지 않다 (${JSON.stringify(countCell)}); ` +
         "문자열 안에 녹아 있으면 자릿폭 고정을 걸 자리가 없다 (리뷰 N-2)"
@@ -1411,6 +1450,7 @@ async function captureShots(browser, options = {}) {
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
       colorScheme: scheme,
+      locale: "ko-KR",
     });
     const page = await context.newPage();
     await installRealtimeSocket(page);

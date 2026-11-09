@@ -1184,6 +1184,8 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
+  "timeline.typing.many",
+  "timeline.typing.one",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -2751,6 +2753,13 @@ export const argumentSpecs = {
   "timeline.thread.unreadChip": {
     "count": "number"
   },
+  "timeline.typing.many": {
+    "count": "number",
+    "name": "string"
+  },
+  "timeline.typing.one": {
+    "name": "string"
+  },
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -4119,6 +4128,8 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
+  "timeline.typing.many": { count: number; name: string };
+  "timeline.typing.one": { name: string };
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

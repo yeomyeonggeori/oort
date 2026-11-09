@@ -25,6 +25,8 @@
   "timeline.agentRail.sheetClose": "일하는 에이전트 닫기",
   "timeline.agentRail.openRecord": "{name} 작업 기록 열기",
   "timeline.agentRail.openActivity": "활동 보기",
+  "timeline.typing.one": "{name}님이 입력 중…",
+  "timeline.typing.many": "{name}님 외 {count, number}명이 입력 중…",
   "timeline.runException.open": "{text}. 작업 기록 열기",
   "timeline.runException.settings": "에이전트 설정 열기",
   "timeline.quote.head": "{name}에게 답장",

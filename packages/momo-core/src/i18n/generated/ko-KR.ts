@@ -8037,6 +8037,35 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "timeline.typing.many": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님 외 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명이 입력 중…"
+    }
+  ],
+  "timeline.typing.one": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 입력 중…"
+    }
+  ],
   "timeline.unfurl.label": [
     {
       "type": 0,
