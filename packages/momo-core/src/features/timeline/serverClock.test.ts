@@ -93,6 +93,17 @@ describe("pinSettledEchoes — 확정본이 에코의 시각을 잇는 장부", 
     expect(second.settled.map((pair) => pair.pending.clientMsgId)).toEqual(["k2"]);
   });
 
+  it("다른 채널의 같은 글은 에코를 잇지 않는다 — 떠난 채널의 에코가 새 채널의 첫 화면 읽기에 짝지어지지 않는다", () => {
+    // 채널 c에서 아직 날아가는 「네」(그 채널의 seq 0 위). 새로 연 채널 d의 첫 화면 읽기에 몇 시간 전 내 「네」(seq 5)가 있다.
+    const inFlight = echo("k1", "네", at(47, 10));
+    const otherChannel: Message = { ...message(5, "네", at(10, 0) - 3 * 3_600_000), channelId: "d" };
+    const { pins, settled } = pinSettledEchoes(new Map(), [otherChannel], [inFlight]);
+    expect(settled).toEqual([]);
+    expect(pins.size).toBe(0);
+    // 같은 채널의 확정본은 그대로 잇는다.
+    expect(pinSettledEchoes(new Map(), [message(5, "네", at(47, 11))], [inFlight]).settled).toHaveLength(1);
+  });
+
   it("한도를 넘으면 오래된 것부터 잊는다", () => {
     let pins: EchoPins = new Map();
     for (let i = 1; i <= 4; i += 1) {

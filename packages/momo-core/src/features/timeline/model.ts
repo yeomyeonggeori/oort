@@ -921,16 +921,23 @@ export interface SettledEcho {
 /**
  * 에코와 확정본의 짝짓기 — 규칙은 여기 한 곳이다. 메시지를 차례로 보며 각 메시지가 아직 열린 에코 중 **가장 먼저 보낸 것** 하나를
  * 정착시킨다(같은 글을 두 번 보내도 둘이 하나씩 정착한다). `open`은 보낸 순서 그대로의 남은 에코다.
+ *
+ * `sameChannel`이면 채널이 같은 짝만 잇는다. 그리는 접기(`unsettledPending`)는 한 채널의 목록만 받으므로 필요 없지만, 확정본이
+ * 들어오는 문(`pinSettledEchoes`)은 다른 채널의 첫 화면 읽기도 지난다 — 떠난 채널에서 아직 날아가는 에코가 거기 있는 내 같은 글
+ * (seq는 채널마다 따로 센다)과 짝지어지면 엉뚱한 행이 묶음을 잇고, 몇 시간 전 시각이 서버 시계 표본으로 들어간다(#5624).
  */
 export function settlePending(
   messages: readonly Message[],
-  pending: readonly PendingMessage[]
+  pending: readonly PendingMessage[],
+  sameChannel = false
 ): { open: PendingMessage[]; settled: SettledEcho[] } {
   const open = pending.slice();
   const settled: SettledEcho[] = [];
   if (open.length === 0) return { open, settled };
   for (const message of messages) {
-    const index = open.findIndex((p) => confirmsPending(message, p));
+    const index = open.findIndex(
+      (p) => confirmsPending(message, p) && (!sameChannel || uuidEq(message.channelId, p.channelId))
+    );
     if (index >= 0) settled.push({ message, pending: open.splice(index, 1)[0] });
     if (open.length === 0) break;
   }
@@ -1001,7 +1008,7 @@ export function pinSettledEchoes(
   for (const pin of pins.values()) taken.add(pin.clientMsgId);
   const fresh = batch.filter((message) => !pins.has(message.id.toLowerCase()));
   const open = pending.filter((row) => !taken.has(row.clientMsgId));
-  const { settled } = settlePending(fresh, open);
+  const { settled } = settlePending(fresh, open, true);
   if (settled.length === 0) return { pins, settled };
   const next = new Map(pins);
   for (const { message, pending: row } of settled) {
