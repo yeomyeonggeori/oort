@@ -23,7 +23,7 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `a_lost_mac_writes_one_line_cancels_its_requests_and_pushes_only_the_owner` | drop the line from `converge_in_tx`; write it when nothing moved; drop the permission cancel; drop the owner condition or the arm |
+//! | `a_lost_mac_writes_one_line_pushes_only_the_owner_and_its_request_does_not_speak_twice` | drop the line from `converge_in_tx`; drop the owner condition or the arm; let the expiry sweep write a line for a session that is not running |
 //! | `a_lost_mac_in_a_dm_never_reaches_the_dm_peer` | put the owner condition back in the arm's `WHEN` (the peer falls through to `dm`) |
 //! | `a_lost_mac_under_a_finished_session_writes_the_line_but_pushes_nobody` | drop the `was_running` gate (every finished session of a sleeping Mac pushes) |
 //! | `a_policy_that_ends_the_session_is_a_failure_notice_not_a_resume_offer` | push `resume_offer` for a session that cannot be resumed |
@@ -494,12 +494,14 @@ fn assert_owner_only(sent: &[PushDispatch], room: &Room, reason: &str) {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
-async fn a_lost_mac_writes_one_line_cancels_its_requests_and_pushes_only_the_owner() {
+async fn a_lost_mac_writes_one_line_pushes_only_the_owner_and_its_request_does_not_speak_twice() {
     let _guard = test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let room = seed_room(&su, Shape::PublicChannel, false).await;
-    let (waiting, _) = seed_permission_request(&su, &room, false).await;
+    // The agent was waiting on the owner when the Mac went quiet; the request is already past
+    // its deadline by the time the expiry sweep runs.
+    let (waiting, _) = seed_permission_request(&su, &room, true).await;
     mac_goes_quiet(&su, &room).await;
 
     let outcome = sweep_room(&room).await.expect("the session is a candidate");
@@ -524,8 +526,8 @@ async fn a_lost_mac_writes_one_line_cancels_its_requests_and_pushes_only_the_own
     assert_eq!(props["session_id"], room.session_id.to_string());
     assert_eq!(
         request_status(&su, waiting).await,
-        "cancelled",
-        "ADR-0188 D5: nobody can answer the lost session's request"
+        "pending",
+        "the tier sweep (the settlement path) does not touch work_permission_request"
     );
     // The room hears the line through the outbox (no direct publish).
     let broadcast: i64 = sqlx::query_scalar(
@@ -545,6 +547,18 @@ async fn a_lost_mac_writes_one_line_cancels_its_requests_and_pushes_only_the_own
     // A second pass finds nothing to move and writes nothing.
     assert!(sweep_room(&room).await.is_none(), "no longer a candidate");
     assert_eq!(notices(&su, &room).await.len(), 1);
+
+    // The expiry sweep closes the lost session's request at its deadline — and says nothing
+    // more: one cause, one notice (ADR-0220 P5).
+    sweep_lapsed_work_permissions(&momo_notifier_pool().await, 10_000)
+        .await
+        .expect("expiry sweep");
+    assert_eq!(request_status(&su, waiting).await, "expired");
+    assert_eq!(
+        notices(&su, &room).await.len(),
+        1,
+        "no 「10분이 지나 닫혔어요」 on top of 「맥 연결이 끊겨…」"
+    );
 }
 
 #[tokio::test]

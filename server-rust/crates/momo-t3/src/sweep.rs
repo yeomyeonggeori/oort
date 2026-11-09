@@ -47,11 +47,18 @@
 //!
 //! **The owner hears it (#5594).** The transition writes, in its own
 //! transaction, one System line in the session's thread — 「맥 연결이 끊겨 작업이
-//! 멈췄어요」 (`work_notice::WorkNotice::HostLost`) — through the one send spine,
-//! and closes the permission requests the session was waiting on (ADR-0188 D5:
-//! nobody can answer them now). The push is the judgment's: the session's owner
-//! only. One line per transition: it is written only when the guarded UPDATE
-//! moved the row, and its `client_msg_id` is the session's.
+//! 멈췄어요」 (`work_notice::WorkNotice::HostLost`) — through the one send spine.
+//! The push is the judgment's: the session's owner only, and only when a turn
+//! was running. One line per transition: it is written only when the guarded
+//! UPDATE moved the row, and its `client_msg_id` is the session's.
+//!
+//! **This transaction touches no table beyond the ones the stall sweep already
+//! writes** (message, `channel_seq`, outbox). A permission request the lost
+//! session was waiting on stays `pending`: the decision route already refuses a
+//! session that is not running, and the work-permission expiry sweep closes the
+//! row at its deadline without a second line (the session is not running). So a
+//! notifier deployed before its `work_permission_request` grant cannot stop a
+//! session from being orphaned — the settlement path stays independent of it.
 //!
 //! **Not ported here (scope):** the rest of the follow-on surface of the same
 //! function — the resume offer's 이어받기 button (`ask`, :633-702), auto-resume
@@ -68,7 +75,6 @@ use crate::error::T3Error;
 use crate::lifecycle::{terminate_in_tx, with_t3_lifecycle_tx, T3LockLadder, TerminationReason};
 use crate::reconcile::declare_destroy_intent_in_tx;
 use crate::work_notice::{post_session_notice_in_tx, WorkNotice};
-use crate::work_permission::cancel_pending_for_session_in_tx;
 
 /// The `work_tier_policy.mode` that makes host loss terminal rather than
 /// resumable (025:16). Read from the DB per session; never assumed.
@@ -313,10 +319,6 @@ async fn converge_in_tx(
     // sweep that loses the race (or runs again) writes nothing.
     let mut noticed = false;
     if transitioned {
-        // ADR-0188 D5: the requests the session was waiting on cannot be answered
-        // any more, and must not later read as 「10분이 지나 닫혔어요」 on top of this.
-        cancel_pending_for_session_in_tx(conn, candidate.workspace_id, candidate.session_id)
-            .await?;
         noticed = post_session_notice_in_tx(
             conn,
             candidate.workspace_id,

@@ -512,7 +512,7 @@ async fn seed_work(su: &PgPool) {
 }
 
 /// #5594: a member Mac that went quiet under a running session that waits on a permission
-/// request (the tier sweep orphans it, cancels the request and writes the line), and a running
+/// request (the tier sweep orphans it and writes the line; the request is left alone), and a running
 /// session on a live Mac whose request passed its deadline (the expiry sweep closes it and writes
 /// the line) — both as `momo_notifier`, whose grant on `work_permission_request` is table-scoped.
 async fn seed_stop_notice_work(
@@ -714,8 +714,9 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         .await
         .expect("count shares");
     // #5594: both stop notices were written as momo_notifier (the tier sweep swallows a
-    // per-candidate error into its stats, so the rows are the proof), and the two permission
-    // requests moved: the lost session's cancelled, the lapsed one expired.
+    // per-candidate error into its stats, so the rows are the proof), the lapsed request was
+    // expired by the expiry sweep, and the lost session's request was left to its deadline (the
+    // tier sweep does not touch the table).
     let stop_notices: Vec<String> = sqlx::query_scalar(
         "SELECT props->>'code' FROM message WHERE props->>'kind' = 'work_session_notice' \
           ORDER BY props->>'code'",
@@ -796,7 +797,7 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     );
     assert_eq!(
         request_states,
-        vec!["cancelled".to_string(), "expired".to_string()],
+        vec!["expired".to_string(), "pending".to_string()],
         "#5594: the notifier role moves work_permission_request (SELECT, UPDATE grant)"
     );
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");

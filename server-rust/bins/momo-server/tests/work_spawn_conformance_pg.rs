@@ -3758,7 +3758,8 @@ async fn a_host_ended_session_with_an_error_tells_the_owner_but_a_kill_or_a_clea
     s.host_ends(failing, 1).await;
     assert_eq!(stop_notices(&s).await.len(), 1);
 
-    // The owner pressed 멈추기: the Mac ends it with the signal's code (SIGTERM → 143).
+    // The owner pressed 멈추기 and the agent needed SIGKILL after the grace (137): the kill
+    // row, not the code, is what says it was asked for.
     let (killed, _) = s.open_session().await;
     let (status, body) = s
         .post(
@@ -3771,7 +3772,11 @@ async fn a_host_ended_session_with_an_error_tells_the_owner_but_a_kill_or_a_clea
         status == 200 || status == 201 || status == 202,
         "{status}: {body}"
     );
-    s.host_ends(killed, 143).await;
+    s.host_ends(killed, 137).await;
+
+    // The desktop app quit: workd stops every session itself (SIGTERM → 143), no kill row.
+    let (app_quit, _) = s.open_session().await;
+    s.host_ends(app_quit, 143).await;
 
     // A clean end.
     let (clean, _) = s.open_session().await;
@@ -3780,6 +3785,6 @@ async fn a_host_ended_session_with_an_error_tells_the_owner_but_a_kill_or_a_clea
     assert_eq!(
         stop_notices(&s).await.len(),
         1,
-        "a requested stop and a clean end are not failures"
+        "a requested stop, the host's own stop and a clean end are not failures"
     );
 }

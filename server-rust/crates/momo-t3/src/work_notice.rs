@@ -398,11 +398,24 @@ pub async fn kill_requested_in_tx(
     Ok(requested)
 }
 
+/// The exit code `momo-workd` reports when **it** stopped the agent: its
+/// `terminate` sends SIGTERM (128 + 15). It does so for a kill control, for the
+/// desktop app quitting (`SessionTable::shutdown`), for a spawned session whose
+/// ack the server refused, and for a mode escape (which writes its own status
+/// line). None of those is the agent failing, and the app quitting would
+/// otherwise read as a failure of every open session. An agent that crashes on
+/// its own exits with its own code or another signal (SIGKILL 137 for an OOM
+/// kill stays a failure).
+pub const HOST_STOP_EXIT_CODE: i32 = 143;
+
 /// Is this end a failure the owner should hear about (#5594)? Only the host says
-/// so — a person who ended their own session knows — with a non-zero exit code,
-/// and only when nobody asked the session to stop.
+/// so — a person who ended their own session knows — with a non-zero exit code
+/// that is not the host's own stop ([`HOST_STOP_EXIT_CODE`]), and only when
+/// nobody asked the session to stop.
 pub fn is_failed_end(host_signed: bool, exit_code: Option<i32>, kill_requested: bool) -> bool {
-    host_signed && matches!(exit_code, Some(code) if code != 0) && !kill_requested
+    host_signed
+        && matches!(exit_code, Some(code) if code != 0 && code != HOST_STOP_EXIT_CODE)
+        && !kill_requested
 }
 
 #[cfg(test)]
@@ -519,10 +532,17 @@ mod tests {
     #[test]
     fn only_a_host_reported_non_zero_end_nobody_asked_for_is_a_failure() {
         assert!(is_failed_end(true, Some(1), false));
-        assert!(is_failed_end(true, Some(143), false));
         assert!(
-            !is_failed_end(true, Some(143), true),
+            is_failed_end(true, Some(137), false),
+            "an OOM kill is a failure"
+        );
+        assert!(
+            !is_failed_end(true, Some(137), true),
             "a kill is not a failure"
+        );
+        assert!(
+            !is_failed_end(true, Some(HOST_STOP_EXIT_CODE), false),
+            "the host stopped it (app quit, kill, cleanup)"
         );
         assert!(!is_failed_end(true, Some(0), false));
         assert!(!is_failed_end(true, None, false));

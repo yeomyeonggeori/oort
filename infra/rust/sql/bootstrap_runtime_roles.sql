@@ -953,9 +953,9 @@ BEGIN
     GRANT SELECT ON TABLE work_control TO momo_notifier;
   END IF;
   -- #5594: the work-permission expiry sweep closes a lapsed request (`pending -> expired`,
-  -- `expire_lapsed_permission_requests_in_tx`) and the tier sweep cancels the requests a lost
-  -- session was waiting on (`cancel_pending_for_session_in_tx`, ADR-0188 D5). SELECT for the
-  -- cross-tenant read and the UPDATEs' WHERE; no INSERT, no DELETE.
+  -- `expire_lapsed_permission_requests_in_tx`). SELECT for the cross-tenant read and the
+  -- UPDATE's WHERE; no INSERT, no DELETE. Only that loop needs it: the tier sweep (the
+  -- settlement path) does not touch the table, so a missing grant cannot stop it.
   IF to_regclass('public.work_permission_request') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE work_permission_request TO momo_notifier;
   END IF;
