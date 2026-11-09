@@ -7194,6 +7194,88 @@ export const catalog: MessageCatalog = {
       "value": "이 기기에 저장된 서버 주소가 없어요."
     }
   ],
+  "settings.connectionLog.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "settings.connectionLog.copy": [
+    {
+      "type": 0,
+      "value": "연결 기록 복사"
+    }
+  ],
+  "settings.connectionLog.copyDescription": [
+    {
+      "type": 0,
+      "value": "최근 7일, 500건까지 들어 있어요. 문제를 알릴 때 붙여 넣어 주세요."
+    }
+  ],
+  "settings.connectionLog.copyLabel": [
+    {
+      "type": 0,
+      "value": "기록 복사"
+    }
+  ],
+  "settings.connectionLog.count": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "settings.connectionLog.description": [
+    {
+      "type": 0,
+      "value": "오늘 연결 상태가 바뀐 횟수예요. 시각과 종류만 이 기기에 남기고, 메시지·주소·이름은 남기지 않아요. 서버로 보내지 않아요."
+    }
+  ],
+  "settings.connectionLog.deviceOffline": [
+    {
+      "type": 0,
+      "value": "기기 오프라인"
+    }
+  ],
+  "settings.connectionLog.restFailed": [
+    {
+      "type": 0,
+      "value": "서버 응답 없음"
+    }
+  ],
+  "settings.connectionLog.sendBlocked": [
+    {
+      "type": 0,
+      "value": "보낼 수 없음"
+    }
+  ],
+  "settings.connectionLog.socketDown": [
+    {
+      "type": 0,
+      "value": "실시간 연결 끊김"
+    }
+  ],
+  "settings.connectionLog.title": [
+    {
+      "type": 0,
+      "value": "연결 기록"
+    }
+  ],
+  "settings.connectionLog.wakeLate": [
+    {
+      "type": 0,
+      "value": "앱이 늦게 깨어남"
+    }
+  ],
+  "settings.connectionLog.windowHidden": [
+    {
+      "type": 0,
+      "value": "창 숨김"
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,

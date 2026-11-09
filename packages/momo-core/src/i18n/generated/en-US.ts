@@ -7550,6 +7550,110 @@ export const catalog: MessageCatalog = {
       "value": "No server address is saved on this device."
     }
   ],
+  "settings.connectionLog.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "settings.connectionLog.copy": [
+    {
+      "type": 0,
+      "value": "Copy connection log"
+    }
+  ],
+  "settings.connectionLog.copyDescription": [
+    {
+      "type": 0,
+      "value": "Holds up to the last 7 days or 500 entries. Paste it when you report a problem."
+    }
+  ],
+  "settings.connectionLog.copyLabel": [
+    {
+      "type": 0,
+      "value": "Copy log"
+    }
+  ],
+  "settings.connectionLog.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " time"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " times"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.connectionLog.description": [
+    {
+      "type": 0,
+      "value": "How often the connection changed today. Only times and kinds stay on this device, never messages, addresses or names. Nothing is sent to the server."
+    }
+  ],
+  "settings.connectionLog.deviceOffline": [
+    {
+      "type": 0,
+      "value": "Device offline"
+    }
+  ],
+  "settings.connectionLog.restFailed": [
+    {
+      "type": 0,
+      "value": "No server response"
+    }
+  ],
+  "settings.connectionLog.sendBlocked": [
+    {
+      "type": 0,
+      "value": "Couldn't send"
+    }
+  ],
+  "settings.connectionLog.socketDown": [
+    {
+      "type": 0,
+      "value": "Live connection dropped"
+    }
+  ],
+  "settings.connectionLog.title": [
+    {
+      "type": 0,
+      "value": "Connection log"
+    }
+  ],
+  "settings.connectionLog.wakeLate": [
+    {
+      "type": 0,
+      "value": "App woke late"
+    }
+  ],
+  "settings.connectionLog.windowHidden": [
+    {
+      "type": 0,
+      "value": "Window hidden"
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,

@@ -1059,6 +1059,19 @@ export const messageKeys = [
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
   "settings.connection.noServer",
+  "settings.connectionLog.copied",
+  "settings.connectionLog.copy",
+  "settings.connectionLog.copyDescription",
+  "settings.connectionLog.copyLabel",
+  "settings.connectionLog.count",
+  "settings.connectionLog.description",
+  "settings.connectionLog.deviceOffline",
+  "settings.connectionLog.restFailed",
+  "settings.connectionLog.sendBlocked",
+  "settings.connectionLog.socketDown",
+  "settings.connectionLog.title",
+  "settings.connectionLog.wakeLate",
+  "settings.connectionLog.windowHidden",
   "settings.invite.guestInvitesPaused",
   "settings.notifications.alwaysDetail",
   "settings.notifications.checking",
@@ -2600,6 +2613,21 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
   "settings.connection.noServer": {},
+  "settings.connectionLog.copied": {},
+  "settings.connectionLog.copy": {},
+  "settings.connectionLog.copyDescription": {},
+  "settings.connectionLog.copyLabel": {},
+  "settings.connectionLog.count": {
+    "count": "number"
+  },
+  "settings.connectionLog.description": {},
+  "settings.connectionLog.deviceOffline": {},
+  "settings.connectionLog.restFailed": {},
+  "settings.connectionLog.sendBlocked": {},
+  "settings.connectionLog.socketDown": {},
+  "settings.connectionLog.title": {},
+  "settings.connectionLog.wakeLate": {},
+  "settings.connectionLog.windowHidden": {},
   "settings.invite.guestInvitesPaused": {},
   "settings.notifications.alwaysDetail": {},
   "settings.notifications.checking": {},
@@ -4008,6 +4036,19 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
   "settings.connection.noServer": Record<string, never>;
+  "settings.connectionLog.copied": Record<string, never>;
+  "settings.connectionLog.copy": Record<string, never>;
+  "settings.connectionLog.copyDescription": Record<string, never>;
+  "settings.connectionLog.copyLabel": Record<string, never>;
+  "settings.connectionLog.count": { count: number };
+  "settings.connectionLog.description": Record<string, never>;
+  "settings.connectionLog.deviceOffline": Record<string, never>;
+  "settings.connectionLog.restFailed": Record<string, never>;
+  "settings.connectionLog.sendBlocked": Record<string, never>;
+  "settings.connectionLog.socketDown": Record<string, never>;
+  "settings.connectionLog.title": Record<string, never>;
+  "settings.connectionLog.wakeLate": Record<string, never>;
+  "settings.connectionLog.windowHidden": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.alwaysDetail": Record<string, never>;
   "settings.notifications.checking": Record<string, never>;
