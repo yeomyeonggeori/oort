@@ -1,4 +1,6 @@
 import { uuidEq, type Message } from "@momo/core/lib/api";
+import { isSendingRow } from "@momo/core/features/connection/sendFailure";
+import type { PendingMessage } from "@momo/core/features/timeline/model";
 
 // =============================================================================
 // 타임라인 항법의 산수 (U4-j · 진단 M-9).
@@ -239,13 +241,13 @@ export const SELF_SEND_FRESH_MS = 3_000;
  */
 export function hasFreshSelfSend(
   seen: ReadonlySet<string>,
-  pending: readonly { clientMsgId: string; status: string; createdAtMs: number }[],
+  pending: readonly Pick<PendingMessage, "clientMsgId" | "status" | "createdAtMs">[],
   nowMs: number
 ): boolean {
   return pending.some(
     (row) =>
       !seen.has(row.clientMsgId) &&
-      row.status === "sending" &&
+      isSendingRow(row) &&
       nowMs - row.createdAtMs <= SELF_SEND_FRESH_MS
   );
 }
