@@ -311,8 +311,9 @@ describe("컴포저 후보 목록 가장자리 규칙은 브라우저 없이도 
     const wideAt = dock.indexOf("@media (width >= 600px)");
     expect(wideAt).toBeGreaterThan(-1);
     const wide = dock.slice(wideAt);
-    // 폼 여백의 가로 값(24 = --spacing-6)과 목록 가장자리가 **같은 블록의 같은 토큰**이다.
-    expect(/& > form \{\s*padding: var\(--spacing-2\) var\(--spacing-(\d+)\) 18px;/.exec(wide)?.[1]).toBe("6");
+    // 폼 여백의 가로 값(24 = --spacing-6)과 목록 가장자리가 **같은 블록의 같은 토큰**이다. 아래 여백은 0이다: 카드 아래 18은
+    // 「작성 중」 줄(`typing-line`)이 맡는다(#5567).
+    expect(/& > form \{\s*padding: var\(--spacing-2\) var\(--spacing-(\d+)\) 0;/.exec(wide)?.[1]).toBe("6");
     expect(wide).toMatch(/& > form > \[data-composer-popover\] \{\s*left: var\(--spacing-6\);\s*\}/);
     expect(wide).toMatch(/& > form > \[data-composer-popover="menu"\] \{\s*right: var\(--spacing-6\);\s*\}/);
     // 폰 폭(블록 밖)은 목록 규칙이 없다: `left-3`·`right-3` 그대로.

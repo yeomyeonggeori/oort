@@ -1,228 +1,108 @@
-import {
-  typingLabel,
-  typingLead,
-  typingVisualSegments,
-  typingTail,
-} from "@momo/core/features/chat/typing";
 import { RespondingDots } from "@/features/agents/RespondingIndicator";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { typingLineParts } from "./typingLineParts";
 
 // =============================================================================
-// 컴포저 공유 액션 슬롯의 「작성 중」 판 (ADR-0149 · goal B3 W2 · U-8 · #1749).
+// 「작성 중」 줄 — 입력 카드 바로 아래 한 줄 (#5567, owner 11-09: 입력창 안 오른쪽 자리는 일반적이지 않다는 지적).
 //
-// ## 힌트와 액션 행의 남는 폭을 함께 쓴다
+// ## 자리: 카드 아래, 왼쪽, 늘 잡아 둔 한 줄
 //
-// 이 줄과 입력창 레일(`ActivityRail`, 「달무리봇 · 작업 중」)은 같은 종류의 정보지만 높이를 더
-// 얻지 않는다. 사람이 작성 중이면 액션 아이콘과 보내기 사이에서 넓은 화면의 키 힌트를
-// 밀어내고, 아무도 작성하지 않으면 그 폭을 힌트나 빈 flex 슬롯이 쓴다. 액션 행의 높이는
-// 버튼이 이미 고정하므로 세 판에서 컴포저 높이는 바뀌지 않고, ↵를 배운 사람에게 별도
-// 26px 빈 띠도 남지 않는다. 폰 DM의 상시 안내는 공유 대상이 아니며 그릇 위에 남는다.
+// 앞 판(#1749 U-8)은 이 문장을 카드 안 도구 줄의 가운데 슬롯, 보내기 단추 바로 왼쪽에 오른쪽 정렬로 세웠다. 높이를 새로
+// 잡지 않으려는 선택이었지만, 입력하는 손 바로 옆에서 남의 이름이 깜빡이고 보내기 단추에 붙어 서는 자리는 어느 도구도
+// 쓰지 않는 자리였다. 이제 Slack·Discord처럼 **카드 바로 아래 왼쪽**에 작은 보조 글자로 선다.
 //
-// 이 배치가 어휘 경계를 지키는 방식도 그대로다. 패킷은 「작성 중」과 「작업 중」의
-// 혼용을 최악의 회귀로 꼽는다. 사람 신호는 컴포저 그릇 안, 에이전트 신호는 그 바로
-// 위 작업 줄에 서고 두 줄은 실제로 다른 모양을 유지한다:
+//   - 아래인 이유: 위(카드와 대화 목록 사이)에는 에이전트의 「작업 중」 줄(`ComposerActivityRail`)이 이미 선다. 사람 줄을
+//     같은 자리에 쌓으면 두 상태 줄이 붙어 서고 「작성 중(사람) / 작업 중(에이전트)」 낱말 경계가 한 덩어리로 읽힌다.
+//   - 늘 잡아 둔다: 아무도 치지 않아도 줄 칸(글 한 줄 + 위아래 숨 8)이 서 있다. 줄이 나타나고 사라질 때 아무것도 움직이지
+//     않는다(`tokens.css` `typing-line`). 숨이 있는 이유는 design-review M-1이다: 칸이 글 한 줄 높이뿐이면 글자가 카드
+//     밑변·판 밑변에서 3~4px에 끼고 카드의 그림자 띠 안에 선다.
 //
-//   | | 작성 중 (사람) | 작업 중 (에이전트) |
-//   |---|---|---|
-//   | 시계 | 없다 | 경과 시간이 붙는다 |
-//   | 누를 수 있나 | 아니다 | 작업 패널이 열린다 |
-//   | 이름 색 | `--ink` (사람의 잉크) | `--agent` |
-//   | 이름 뒤 | 점 파도(낭독은 기존 존대 문장) | 없다 |
-//   | 사라지는 법 | 6초 TTL, 스스로 | 턴이 끝나면 |
+// ## 문구는 사전에서 (ko/en `timeline.typing.*`), 낱말은 「작성 중」
 //
-// **셋째 축은 문서였다가 이제 마크업이다** (design-review PR 1059 M-1). 1차는 문장
-// 전체를 `text-ink-muted` 하나로 칠하면서 표에 「이름 색」을 적어 뒀다 — 없는 축을
-// 주장한 것이다. 그 축이 없으면 **작업 중 줄이 없을 때**(에이전트 턴이 없는 대부분의
-// 시각) 사람 줄이 가진 단서는 한 음절과 「님」뿐이고, 위 배치의 논지 자체가 그 상태를
-// 기본값으로 만든다. 이름을 `--ink`로 올려 사람 줄에도 자기 표지를 준다.
+// 낱말은 폰(`TypingBar`)·코어(`typingLabel`)·ADR-0149와 같은 「작성 중」이다(사람은 작성 중, 에이전트는 작업 중). 한 사람이면
+// 「○○님이 작성 중…」, 둘이면 두 이름 다 「○○님, △△님이 작성 중…」, 셋부터 「○○님 외 N명이 작성 중…」이다 — 폰과
+// Slack·Discord처럼 둘까지 이름을 부른다(design-review M-2). 줄이 카드 폭 전체라 이름 둘이 들어갈 자리가 있고, 넘치면
+// 아래 규칙대로 이름 쪽이 잘린다. 이름은 사람의 잉크(`--ink`, 굵게), 나머지는 muted다: 에이전트 줄의 `--agent`와
+// 대조되는 축이다(리뷰 PR 1059 M-1).
 //
-// ## 예약하는 것은 세로 행이 아니라 이미 있는 가로 슬롯이다 (H-2 · U-8 · #1749)
+// ## 잘리는 것은 이름이고 서술어는 안 잘린다 (M-3 · W-3)
 //
-// 앞 판은 힌트·작성 중·빈 판을 26px 세로 행으로 교대해 시프트를 막았지만, 빈 판이
-// 타임라인과 그릇 사이의 죽은 밴드로 남았다. 이제 같은 교대를 액션 행의 `flex-1` 슬롯이
-// 맡는다. 슬롯의 내용이 바뀌어도 입력과 전송의 y좌표는 액션 행 자체가 지키고, 좁은
-// 폭에서는 이름 쪽만 줄어든다. 높이를 새로 예약하지 않으므로 두 요구가 충돌하지 않는다.
+// 한국어는 동사가 끝에 온다. 줄 전체에 말줄임을 걸면 넘칠 때 사라지는 것이 「작성 중」이다. 그래서 문장을 둘로 나눈다:
+// 이름(들)과 **마지막 이름에 붙은 조사**(「님이」·「님」)는 줄어드는 앞부분, 그 뒤 빈칸부터(「 작성 중…」·「 외 2명이
+// 작성 중…」)는 안 줄어드는 꼬리다. 조사가 이름과 함께 잘리므로 「…님이」처럼 붙을 이름을 잃은 조사가 남지 않는다.
+// 나누는 자리는 번역문에서 찾는다: 이름 자리에 보이지 않는 표지를 넣어 문장을 만들고, 마지막 표지에 붙은(빈칸 없는)
+// 글자까지를 앞부분으로 본다. 영어는 붙은 글자가 없어 「Alice and Bob」 | 「 are typing…」으로 나뉜다. 번역에 이름 자리가
+// 없으면 문장 하나가 통째로 줄어든다.
 //
-// ## live 영역이 아니다
+// ## 읽기: 보이는 조각은 aria-hidden, 온전한 문장은 sr-only (M-2), live 영역은 아니다
 //
-// `aria-live`를 걸지 않는다. 작성 중은 3초마다 갱신되는 신호이고, live 영역에 두면
-// 보조기술이 남이 타이핑하는 동안 같은 문장을 계속 낭독한다 — 작업 패널의 1Hz 시계를
-// live 영역 **바깥**으로 뺀 것과 정확히 같은 판단이다(gate-work-panel의 live 시나리오).
-// 문장은 DOM에 있으므로 읽으려는 사람은 언제든 읽을 수 있고, 강제로 끼어들지 않는다.
-//
-// ## 한 줄로 못 박은 뒤에 남는 것 (U4-4 W1 — M-2·M-3의 한 결정)
-//
-// 액션 슬롯은 **1줄 고정을 유지한다.** 여러 줄을 허용하면 액션 행 자체가 자라 입력과
-// 전송 버튼을 다시 밀기 때문이다. 반대로 2줄을 미리 예약하면 없앤 죽은 밴드가 그릇
-// 안으로 돌아온다.
-//
-//   * **2줄 허용(가변)** — 문장이 길면 두 줄, 짧으면 한 줄. 예약이 가변이 되는 순간
-//     H-2가 통째로 되돌아온다. 그것도 더 나쁜 형태로: 지금 흔들림은 「없다↔있다」
-//     한 번인데, 가변 2줄은 **치는 사람이 한 명 늘 때마다** 26px이 오르내린다.
-//   * **2줄 고정** — 액션 행을 늘 52px로 키우면 아무도 안 치는 기본 시각에도 그릇
-//     안에 빈 한 줄이 생긴다. 화면 아래쪽 26px는 폰에서 메시지 한 줄이다.
-//
-// 1줄 고정을 고르면 **긴 이름에서 잘림은 불가피**하다. 그래서 이 파일이 하는 일은
-// 잘림을 없애는 시늉이 아니라 **잘림의 대상을 고르는 것**이다.
-//
-// ### 무엇이 잘리는가 — 이름이 잘린다, 동사는 안 잘린다 (M-3)
-//
-// 1차는 `truncate`를 줄 전체에 걸었다. 한국어는 동사가 끝에 오므로 그 줄이 넘치면
-// 잘려 나가는 것이 하필 **「작성 중」**이고, 남는 것은 「김민서 프로덕트디자…」 —
-// 집계 문구도 아니고 아무 말도 아닌 문자열이다. 게다가 그 `…`는 문장이 원래 갖고 있는
-// `…`와 **같은 글자**라, 잘린 줄과 온전한 줄이 구분되지도 않았다.
-//
-// 지금은 줄을 둘로 나눈다: 코어의 [`typingLead`](이름들 + 그 조사)만 줄어들고
-// [`typingTail`](「 작성 중…」)은 `shrink-0`으로 못 박는다. 동사는 어떤 폭에서도
-// 살아남는다.
-//
-// ### 자르는 자리는 한국어가 끊어도 되는 자리여야 한다 (U4-4R W-3)
-//
-// 1차의 꼬리는 「님이 작성 중…」이었다. 동사는 지켰는데 **님이 고아가 됐다**:
-// 320폭 실측에서 화면이 `김민서 프로덕트디자인님, 이도현 플랫폼…님이 작성 중…`이
-// 되었고, 님은 이름에 붙는 의존 형태소이므로 붙을 이름이 잘려 나간 자리에 남으면
-// 존대할 대상이 없다 — 읽으면 문장이 아니다.
-//
-// 경계를 한 칸 옮겼다(코어 `typingSegments`). 조사는 자기가 붙는 낱말과 같은 편에
-// 남고, 꼬리에는 **주어 없이 성립하는 서술어**만 남는다. 잘린 화면은
-// `이도현 플랫폼… 작성 중…`이 되고, 주어가 생략된 한국어 문장이다. 이어 붙인
-// 문자열은 1차와 한 글자도 다르지 않다.
-//
-// **1차가 이 자리에서 함께 주장했던 것 하나는 거둔다.** 「잘림의 `…`가 이름 안쪽에만
-// 생기므로 문장 끝의 `…`와 자리가 갈려 잘린 줄과 온전한 줄이 구분된다」고 적어
-// 두었는데, 리뷰가 캡처에서 실측한 결과 두 `…`는 네 글자 거리에 서서 한 번의
-// 말더듬으로 읽혔다. 1줄 고정 + `text-overflow: ellipsis`를 지키는 한 그 구분은
-// 배송되지 않는다. 지키지 못할 이득을 주석에 남겨 두면 다음 사람이 그것이 서 있는
-// 줄 안다 — 이 분할이 실제로 사는 것은 「동사는 안 잘린다」와 「조사는 고아가 되지
-// 않는다」 둘이고, 게이트가 재는 것도 그 둘이다.
-//
-// ### 잘린 이름을 되찾는 길 (M-2)
-//
-// 1차의 유일한 복구 경로는 `title` 툴팁이었고 — hover 전용이라 키보드·터치에는 길이
-// 없었다. 더 나쁜 것은 그 `title`이 **원래 노리던 일도 못 했다는 점**이다: 역할 없는
-// `<p>`의 접근 이름은 텍스트 콘텐츠에서 나오므로, 스크린리더는 잘린 채 보이는 텍스트를
-// 그대로 읽고 `title`은 설명으로 덧붙을 뿐이다. 코어가 `typingLabel`을 「보조기술이
-// 읽을 이름」이라 부르는데 그 치환이 한 번도 일어나지 않았다.
-//
-// 그래서 뒤집는다: **보이는 조각은 `aria-hidden`, 온전한 문장은 `sr-only`.** 이제
-// 보조기술은 폭과 무관하게 언제나 이름 전체를 얻고, hover는 그 위에 얹힌 포인터용
-// 보너스로 남는다(사라뜨릴 이유가 없다).
-//
-// **터치에는 여전히 복구 경로가 없고, 그것을 결함이 아니라 값으로 받는다.** 이 줄은
-// 주변시로 흘려보내는 신호이고 사람을 *식별*하는 자리가 아니다 — 그 일은 명부와
-// 헤더가 한다. 1줄 고정을 지키는 한 터치에 복구를 주려면 탭 가능한 원소를 하나
-// 세워야 하는데, 그러면 「누를 수 있나: 아니다」(위 표 둘째 줄)가 깨져 작업 중 줄과의
-// 대조축을 하나 잃는다. 잃는 쪽이 더 크다.
+// 보이는 조각은 폭에 따라 잘릴 수 있으므로 보조기술에는 온전한 문장 하나(말줄임표 없이)를 준다. live 영역이 아닌 것은
+// 그대로다: 3초마다 다시 오는 신호라 live 영역에 두면 남이 치는 동안 같은 문장을 계속 낭독한다. 점은 사람 줄의 색
+// (`--ink-muted`)이고 움직임 줄이기에서는 멈춘다(`RespondingDots`).
 // =============================================================================
-
-/**
- * 액션 행 가운데 슬롯. 문장이 있든 없든 같은 남는 폭을 차지한다 (H-2 · #1749).
- *
- * **`truncate`가 여기서 빠지고 `flex`가 들어온 것이 M-3의 실체다.** 줄 전체에 걸린
- * 말줄임은 한국어에서 동사를 먼저 먹는다. 자르는 일은 이제 안쪽의 `lead` 조각만
- * 맡고, 이 줄은 그 조각들을 한 줄에 세우는 상자다 — 문장이 있든 없든 `overflow-hidden`
- * 이 두 번째 줄로 넘어가는 것을 막는다(`whitespace-nowrap`은 조각 쪽에 있다).
- */
-const LINE_CLASS =
-  "flex min-w-0 flex-1 items-baseline justify-end overflow-hidden text-meta";
 
 export function TypingLine({
   memberIds,
-  threshold,
   directory,
 }: {
-  /** 지금 작성 중인 사람들. 이미 나·에이전트·만료분이 걸러져 있다. */
+  /** 지금 작성 중인 사람들. 나·에이전트·만료분은 이미 걸러져 있다. */
   memberIds: string[];
-  /** 서버가 말한 뭉치기 임계 (grant 응답). */
-  threshold: number;
   directory: Directory;
 }) {
-  // 이름을 못 찾은 사람은 코어의 `isEligible`이 이미 떨궜다. 그래도 여기서 한 번 더
-  // 좁히는 이유는 명부가 그 사이에 갱신될 수 있기 때문이고, 「누군가 작성 중」은
-  // 나르는 정보가 0이라 그리지 않는 편이 낫다.
+  const format = useFormatMessage();
+  // 이름을 못 찾은 사람은 코어의 `isEligible`이 이미 떨궜다. 명부가 그 사이에 바뀔 수 있어 한 번 더 좁힌다: 이름 없는
+  // 「누군가 작성 중」은 나르는 정보가 0이다.
   const names = memberIds
     .map((id) => memberFor(directory, id)?.displayName)
     .filter((name): name is string => Boolean(name));
-  const segments = typingVisualSegments(names);
-
-  if (segments.length === 0) {
-    // 문장은 없고 가로 슬롯만 있다. 액션 행 높이는 버튼이 지므로 zero-width-space나
-    // 고정 높이가 필요 없고, 아무것도 주장하지 않으므로 보조기술에서도 빠진다.
-    return (
-      <p
-        className={LINE_CLASS}
-        aria-hidden="true"
-        data-testid="composer-meta-empty"
-        data-composer-meta-slot=""
-      />
-    );
-  }
-
-  const lead = typingLead(segments);
-  const tail = typingTail(segments);
-  const label = typingLabel(names, threshold);
+  const parts = typingLineParts(format, names);
 
   return (
-    <p
-      className={LINE_CLASS}
-      data-testid="composer-typing"
-      data-count={memberIds.length}
-      data-composer-meta-slot=""
+    <div
+      className="typing-line"
+      data-testid="typing-line"
+      data-state={parts === null ? "off" : "on"}
     >
-      {/* 보조기술이 읽는 것은 **이것 하나**다 (M-2). 아래 보이는 조각들은 폭에 따라
-          잘릴 수 있고, 잘린 텍스트를 읽어 주는 것은 이 줄이 하려는 말이 아니다.
-          `title`로는 이 치환이 일어나지 않았다 — 역할 없는 `<p>`의 접근 이름은
-          텍스트 콘텐츠에서 나오고 `title`은 거기에 덧붙을 뿐이라, 스크린리더는 잘린
-          채로 읽었다. live 영역이 아닌 것은 그대로다(머리 주석). */}
-      <span className="sr-only" data-testid="composer-typing-label">
-        {label}
-      </span>
-
-      {/* 줄어드는 쪽. `min-w-0`이 있어야 flex 자식이 내용보다 작아질 수 있고, 그래야
-          `truncate`의 말줄임이 실제로 걸린다. `title`은 이제 유일한 경로가 아니라
-          포인터 사용자에게 얹히는 보너스다. */}
-      <span
-        className="min-w-0 truncate"
-        aria-hidden="true"
-        data-testid="composer-typing-lead"
-        title={label ?? undefined}
-      >
-        {lead.map((segment, index) =>
-          segment.kind === "name" ? (
-            // 사람의 잉크 (M-1). 에이전트 줄의 `--agent`와 대조되는 축이고, 이 앱이
-            // 메시지 행에서 이미 쓰는 규칙과 같다: 이름은 `--ink`, 부속물은 muted.
-            <span key={index} className="font-bold text-ink">
-              {segment.text}
-            </span>
-          ) : segment.kind === "count" ? (
-            // 2 → 3 → 4명으로 바뀌는 숫자다. 26px 아래 같은 컴포저의 「외 N명」이
-            // 이미 쓰는 표지를 그대로 쓴다 — 자릿수가 바뀌어도 폭이 안 흔들린다 (N-2).
-            <span key={index} className="text-ink-muted" data-numeric>
-              {segment.text}
-            </span>
-          ) : (
-            <span key={index} className="text-ink-muted">
-              {segment.text}
-            </span>
-          )
-        )}
-      </span>
-
-      {/* 안 줄어드는 쪽 (M-3 · W-3). 「 작성 중…」 — 한국어는 동사가 끝에 오므로, 이
-          조각이 줄어들 수 있으면 넘치는 순간 문장이 말을 잃는다. 조사(님이/명이)는
-          여기가 아니라 앞부분에 있다: 조사는 자기가 붙는 낱말과 함께 잘려야 한다.
-          `whitespace-pre`가 앞의 빈칸을 지킨다 — 잘린 이름과 서술어가 붙어 버리면
-          `플랫폼…작성 중…`이 된다. */}
-      <RespondingDots />
-      {tail !== null && (
-        <span
-          className="shrink-0 whitespace-pre text-ink-muted"
-          aria-hidden="true"
-          data-testid="composer-typing-tail"
+      {parts !== null && (
+        <p
+          className="flex min-w-0 items-center"
+          data-testid="composer-typing"
+          data-count={names.length}
         >
-          {tail.text}
-        </span>
+          <RespondingDots human />
+          <span className="sr-only" data-testid="composer-typing-label">
+            {parts.label}
+          </span>
+          {/* 줄어드는 쪽: 이름과 거기 붙은 조사. `title`은 포인터 사용자에게 얹히는 보너스다. */}
+          <span
+            className="ml-1 min-w-0 truncate"
+            aria-hidden="true"
+            data-testid="composer-typing-lead"
+            title={parts.label}
+          >
+            {parts.lead.map((piece, index) =>
+              piece.name ? (
+                <span key={index} className="font-bold text-ink">
+                  {piece.text}
+                </span>
+              ) : (
+                piece.text
+              )
+            )}
+          </span>
+          {/* 안 줄어드는 쪽: 서술어. 앞 빈칸을 `whitespace-pre`가 지켜 잘린 이름과 서술어가 붙지 않는다. 「외 N명」의 숫자가
+              바뀌어도 폭이 흔들리지 않게 자릿폭을 고정한다(N-2). */}
+          <span
+            className="shrink-0 whitespace-pre"
+            aria-hidden="true"
+            data-testid="composer-typing-tail"
+            data-numeric
+          >
+            {parts.tail}
+          </span>
+        </p>
       )}
-    </p>
+    </div>
   );
 }

@@ -323,7 +323,8 @@ async function scenes(browser, origin, scheme, viewport) {
     const msg = page.getByTestId("timeline-message").first();
     await msg.hover();
     await page.getByRole("button", { name: /답글/ }).first().click();
-    const tinput = page.getByTestId("thread-panel").locator("textarea");
+    // 입력창은 자기 시험 열쇠로 찾는다: 높이를 재는 숨은 거울도 `<textarea>`라 태그로 찾으면 둘이 잡힌다(#5567 M-5).
+    const tinput = page.getByTestId("thread-panel").getByTestId("thread-composer-input");
     await tinput.waitFor({ timeout: 8000 });
     await tinput.click();
     await page.keyboard.type("@seongjae-codex 부탁해요");
