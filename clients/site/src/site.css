@@ -197,6 +197,9 @@ h1 span { display: block; }
 .phone-get { display: none; }
 html[data-phone] .get, html[data-phone] .spec { display: none; }
 html[data-phone] .phone-get { display: flex; flex-direction: column; align-items: center; }
+/* #5568 수리 1회차 H1: 폰은 증거 칩을 주 행동·기기 안내 뒤로 내린다. 칩 줄(긴 문구 3행)이 리드와 주 행동 사이에 서면
+   375×548(iPhone SE 첫 화면)에서 「브라우저에서 열기」가 첫 화면 밖으로 밀렸다. 읽는 순서(DOM)는 그대로다(칩은 누를 곳이 아니다) */
+html[data-phone] .proof { order: 1; margin-top: 24px; }
 .get-web {
   display: inline-flex; align-items: center; gap: 10px; min-height: 52px; margin: 36px 0 24px; padding: 0 24px;
   border-radius: 999px; background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow);
@@ -266,12 +269,13 @@ html[data-phone] .phone-get { display: flex; flex-direction: column; align-items
   /* 판은 머리 오른쪽 안쪽 여백에 맞춘다: 언어 단추가 오른쪽 끝(폰)이나 그 옆(아이콘 하나 건너)에 서고, 판이 가장 넓게 들어가는 쪽이다 */
   .pop { position: static; }
   .lang-list { right: 16px; left: auto; top: calc(100% - 4px); }
-  /* 폰 첫 화면(iPhone 14 흉내 390×664)에서 주 행동이 첫 화면 안에 들도록 머리글·리드·칩 사이를 줄인다(머리 줄 높이 68) */
+  /* 폰 첫 화면(320×568·375×548·375×629·390×664, check.mjs phone 칸)에서 주 행동이 첫 화면 안에 들도록 머리글·리드·칩 사이를 줄인다(머리 줄 높이 68) */
   .hero { padding: 88px 20px 176px; min-height: 620px; }
   /* 폰 폭은 글 덩어리가 첫 화면 대부분을 차지해 막을 위·옆으로 넓힌다(머리글이 셰이더의 비운 자리 밖이라) */
   .hero::before { top: 41%; width: 170%; height: 124%; }
   .eyebrow { margin-bottom: 12px; font-size: 14px; }
-  .lead { margin-top: 16px; }
+  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」): pretty 를 모르는 브라우저는 balance 그대로 */
+  .lead { margin-top: 16px; text-wrap: pretty; }
   .proof { gap: 6px; margin-top: 18px; }
   .proof li { padding: 4px 10px; font-size: 13px; }
   .get { margin-top: 28px; }
@@ -280,12 +284,11 @@ html[data-phone] .phone-get { display: flex; flex-direction: column; align-items
   .band { padding-left: 20px; padding-right: 20px; }
   .get-main { padding: 0 16px 0 18px; }
 }
-/* 아주 좁은 폰(360 이하): 긴 문구(fr·es·ja)에서도 첫 화면 주 행동이 첫 화면 안에 들도록 글자를 한 단 줄인다 */
+/* 아주 좁은 폰(360 이하): 긴 문구(fr·es·ja)에서도 첫 화면 주 행동이 첫 화면 안에 들도록 글자를 한 단 줄인다(칩은 폰에서 주 행동 뒤라 그대로) */
 @media (max-width: 360px) {
   .hero { padding-top: 80px; }
   h1 { font-size: 28px; }
   .lead { font-size: 15px; line-height: 1.5; }
-  .proof li { padding: 3px 9px; font-size: 12.5px; }
 }
 /* M5: 600px 아래 컨트롤은 44(정본 §2.7) */
 @media (max-width: 599px) {
