@@ -1031,7 +1031,7 @@ Blocker 0 · High 3 · Medium 8 · Low 8 · Info 3. 아래는 발견마다 어�
 ## 증보 2026-11-09 (#5374) v4.4 — Hermes 위임 S6의 상태 칸을 구현하며 정한 것
 
 - Status: **Accepted** (2026-11-09 planner 위임 결재 — 증보 v4 P7·P8·P10·P14-S6 결재 범위 안의 보강. PR #5596(#5374, 대상 `32b52a7e3`) 독립 검수 r1 **PASS: Blocker 0 · High 0 · Medium 0 · Low 3 · Info 6**. 자세한 판정은 비공개 기록이다). 새 방향이 아니다. v4가 P8에서 정한 동작(「오늘 Hermes에 맡긴 횟수 4/30」과 닫힌 낱말로 말하는 「지금은 쓸 수 없어요」)의 칸 이름과 낱말 집합을 v4는 정하지 않았고, 서버 쪽 상태 include를 어느 슬라이스가 하는지도 적지 않았다. 그래서 구현(PR #5596)이 정한 모양을 사후에 적는다(v4.2가 `spent.delegations`를 사후에 적은 선례). 문서만이고 #5596의 머지를 막지 않는다. migration·새 권한은 없다. 이 절을 쓰며 서버·Hermes·운영 환경을 부르지 않았고, PR head의 openapi와 코드를 읽기만 했다.
-- **칸(이름은 PR #5596 그대로).** 모두 `GET …/settings?include=team_ai_limits_status`의 계산 칸이고 저장하지 않는다. 관리자 전용 게이트 뒤에 있고, 에이전트·멤버의 이름이나 id는 어느 칸에도 없다.
+- **칸(이름은 PR #5596 그대로).** 모두 `GET …/settings?include=team_ai_limits_status`의 계산 칸이고 저장하지 않는다. `require_workspace_operator` 게이트(워크스페이스 소유자·관리자, 또는 `platform:read` 범위를 가진 사람) 뒤에 있고, 에이전트·멤버의 이름이나 id는 어느 칸에도 없다.
 
 | 칸 | 뜻 |
 |---|---|
@@ -1041,7 +1041,7 @@ Blocker 0 · High 3 · Medium 8 · Low 8 · Info 3. 아래는 발견마다 어�
 | `usage.todayDelegations` | 00:00 UTC 뒤 표지가 `called` 이상이 된 위임 수(끝난 것 포함). 문 판정과 같은 계수 함수(`delegation_counts_in_tx`)를 쓰고, 사람이 Hermes를 직접 부른 것은 세지 않는다. ADR-0218 증보 10의 꼬리표 호출을 같은 합으로 세는 구현(E1)이 들어오면 이 칸도 그 합을 따른다 |
 | `delegationAvailable` + `delegationUnavailableReason` | 이 워크스페이스가 정하는 문의 칸(G3·G4·G5와 G6의 하루)이 모두 열렸는지, 아니면 문의 순서로 처음 닫힌 칸의 낱말(열렸으면 `null`) |
 
-- **닫힌 낱말 일곱.** `hermes_not_connected` · `hermes_ambiguous` · `tools_not_locked` · `connection_mode` · `pin_unresolved` · `ceiling_unset` · `daily_cap`. 새 어휘가 아니다. 문 판정(`DoorFacts::judge`)을 그대로 불러 나오는 문의 낱말이다. 이 읽기는 요청 쪽 절반을 연 채로 판정하므로 그 밖의 문 낱말(`rate_limited`·`busy`·`tasks_busy`·`no_kind`·`bundle_off`)은 나오지 않는다. 화면은 역할 스위치를 켠 채라도 「지금은 쓸 수 없어요」 뒤에 이 낱말의 문장을 보인다(P8·P10).
+- **닫힌 낱말 일곱.** `hermes_not_connected` · `hermes_ambiguous` · `tools_not_locked` · `connection_mode` · `pin_unresolved` · `ceiling_unset` · `daily_cap`. 새 어휘가 아니다. 문 판정(`DoorFacts::judge`)을 그대로 불러 나오는 문의 낱말이다. 이 읽기는 요청 쪽 절반을 연 채로 판정하므로 그 밖의 문 낱말 열하나(`bundle_off`·`no_human_requester`·`guest_requester`·`rate_limited`·`busy`·`tasks_busy`·`already_read`·`direct_mention`·`task_step`·`already_delegated`·`no_kind`)는 나오지 않는다. 화면은 역할 스위치를 켠 채라도 「지금은 쓸 수 없어요」 뒤에 이 낱말의 문장을 보인다(P8·P10).
 - **상한 규칙.** 관리자 값이 `null`이면 30이다. 운영자 천장이 미설정·빈 값·`0`이면 상한은 `0`이고 닫힘이다. 그 밖에는 `min(관리자 값 또는 30, 천장)`이다. 실 PG 시험이 3/100 → 3, 200/100 → 100, `null` → 30, 천장 없음·`0` → 0을 확인한다. 위임은 다른 두 한도와 방향이 반대다: 관리자 값 미설정은 「무제한」이 아니고, 운영자 천장 미설정은 「천장 없음」이 아니라 「닫힘」이다(v4.1 RL4와 같다).
 - **알려진 한계(검수 I3).** `delegationAvailable: true`는 「종류가 하나 이상 선언됐다」를 보장하지 않는다. 종류 선언(`OORT_COHOSTED_AGENT_IMAGE_TOOL`·`OORT_COHOSTED_AGENT_SEARCH_TOOL`)은 워커만 읽으므로(v4.1) api가 볼 수 없다. 역할 스위치(G1, 같은 응답의 `team_ai_roles.hermes`)와 요청 쪽 절반(누가 묻는지, 무엇을 읽었는지)도 이 칸에 접지 않는다. 그래서 참이어도 모든 요청에 도구가 광고되지는 않는다(openapi 설명에도 적혀 있다).
 - **옛 서버.** #5374 전의 서버는 이 칸들을 보내지 않는다. 코어는 칸이 없거나 서로 어긋나면 위임만 「모름 = 닫힘」으로 읽고, 나머지 한도 읽기는 그대로다.
