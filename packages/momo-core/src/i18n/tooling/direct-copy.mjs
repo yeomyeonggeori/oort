@@ -27,22 +27,32 @@ export const LEDGER_VERSION = 2;
  * Re-anchoring is a planner act: `anchor <commit>` prints a new ledger and seal, and this
  * constant changes in a reviewed diff. Nothing else may change it.
  */
-export const ANCHOR_SEAL = '14cd1f10e95c728bf5706b6f7ed9490e3902fd523f60d2412572e98e7a8dd2c1';
+export const ANCHOR_SEAL = '2de8389cf02f1f6dec527b0d338e1875a7b8d168cfd0617bb7c8757a77bf3e08';
 export const DIMENSIONS = Object.freeze(['ko', 'en', 'cat']);
 
-/** core: Korean anywhere + English only where it is copy. Clients keep the conservative #4834 English rule. */
+/**
+ * Every surface counts Korean anywhere and English only where it is copy (#5589 fix round 1: the
+ * clients' old #4834 "any one-word literal" rule counted class names and state words — ~90% noise
+ * that a strict ratchet turned into landing stops). The core excludes only the dictionary itself
+ * (catalogs, generated code, this tooling) and the language self-names.
+ */
 export const SURFACES = Object.freeze({
-  core: {roots: ['packages/momo-core/src'], files: [], english: 'copy', exclude: /^packages\/momo-core\/src\/i18n\//},
-  web: {roots: ['clients/web/src'], files: [], english: 'phrase'},
-  mobile: {roots: ['clients/mobile/src'], files: ['clients/mobile/App.tsx', 'clients/mobile/index.js'], english: 'phrase'},
+  core: {
+    roots: ['packages/momo-core/src'], files: [],
+    exclude: /^packages\/momo-core\/src\/i18n\/(?:catalogs\/|generated\/|tooling\/|autonyms\.ts$)/,
+  },
+  web: {roots: ['clients/web/src'], files: []},
+  mobile: {roots: ['clients/mobile/src'], files: ['clients/mobile/App.tsx', 'clients/mobile/index.js']},
 });
 
 // Names that carry copy: exact (case-insensitive) or a camelCase copy suffix (`actionLabel`, `emptyHeadline`).
 const COPY_EXACT = /^(?:aria-label|aria-description|aria-valuetext|aria-roledescription|aria-placeholder|title|label|text|message|description|subtitle|placeholder|alt|children|content|accessibilityLabel|accessibilityHint|accessibilityValue|headerTitle|emptyText|errorMessage|hint|caption|body|buttonText|confirmText|cancelText|headline|heading|detail|details|summary|tooltip|legend|lead|note|eyebrow|question|prompt|subject|term)$/i;
 const COPY_SUFFIX = /[a-z0-9](?:Label|Text|Title|Message|Description|Hint|Placeholder|Caption|Heading|Headline|Detail|Details|Tooltip|Copy|Summary|Note|Prompt|Legend|Question)$/;
 export const isCopyName = name => COPY_EXACT.test(name) || COPY_SUFFIX.test(name);
-// JSX attributes whose value is never shown as text. Korean in any *other* attribute counts (#5589).
-const TECH_ATTRIBUTE = /^(?:className|class|style|testID|nativeID|id|key|ref|href|src|srcSet|rel|target|role|type|name|htmlFor|form|method|action|accept|pattern|autoComplete|autoCapitalize|inputMode|enterKeyHint|lang|dir|d|viewBox|fill|stroke|points|transform|xmlns|data-[\w-]+|aria-(?:labelledby|describedby|controls|owns|activedescendant|keyshortcuts|haspopup|live|current|relevant|autocomplete|orientation|sort|errormessage|details))$/;
+// JSX attributes whose value is never shown as text, however it is computed (`cn(…)`, `a ? … : …`,
+// templates). Korean in any *other* attribute counts (#5589); `name` is not here because components
+// show it (`SettingsToggleRow name="…"`), and English in it is not copy anyway (not a copy name).
+const TECH_ATTRIBUTE = /^(?:className|class|style|testID|nativeID|id|key|ref|href|src|srcSet|rel|target|role|type|htmlFor|form|method|action|accept|pattern|autoComplete|autoCapitalize|inputMode|enterKeyHint|lang|dir|d|viewBox|fill|stroke|points|transform|xmlns|data-[\w-]+|aria-(?:labelledby|describedby|controls|owns|activedescendant|keyshortcuts|haspopup|live|current|relevant|autocomplete|orientation|sort|errormessage|details))$/;
 const TEST_PATH = /(?:^|\/)(?:__tests__|__mocks__|fixtures?|testkit|testing|generated)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/;
 const SOURCE = /\.[cm]?[jt]sx?$/;
 const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
@@ -50,7 +60,8 @@ const DIAGNOSTIC_CALL = /^(?:console\.|logger\.|log\.|invariant$|assert$)/;
 const FORMAT_CALL = /(?:^|\.)formatMessage$/;
 // `useBlockedReason("changeIt")`의 인자는 사전 틀 이름(타입이 존재를 지킨다)이지 문구가 아니다(#5260).
 const FRAME_CALL = /(?:^|\.)(?:useBlockedReason|useBlockedStale)$/;
-const SURFACE_CALL = /(?:^|\.)(?:alert|confirm|prompt|toast|setError|setStatus|announceForAccessibility)$/;
+// `setStatus` is not here: every literal handed to it is a state name (`setStatus("loading")`).
+const SURFACE_CALL = /(?:^|\.)(?:alert|confirm|prompt|toast|setError|announceForAccessibility)$/;
 // A raise reason must say why this copy cannot use a dictionary key yet, not that a tool ran.
 const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|셈|센다|센\s|세어|세기|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신/i;
 
@@ -72,11 +83,29 @@ const unwrap = node => {
   return node;
 };
 
+// Expressions that pass a literal's value on unchanged in kind: the JSX attribute above them decides
+// what the literal is (`className={cn("flex", open && "hidden")}` is a class list, not copy). An object
+// property is not one of them — its own name decides (`action={{label: "…"}}` is copy).
+const forwardsValue = (node, child) => ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+  || ts.isNonNullExpression(node) || ts.isSatisfiesExpression?.(node) || ts.isTypeAssertionExpression?.(node)
+  || ts.isConditionalExpression(node) || ts.isBinaryExpression(node) || ts.isTemplateExpression(node)
+  || ts.isTemplateSpan(node) || ts.isTaggedTemplateExpression(node) || ts.isArrayLiteralExpression(node)
+  || ts.isSpreadElement(node) || ts.isElementAccessExpression(node)
+  || ((ts.isCallExpression(node) || ts.isNewExpression(node)) && node.expression !== child)
+  || (ts.isJsxExpression(node) && ts.isJsxAttribute(node.parent));
+// A literal compared against a value is never shown (`kind === "dm" ? … : …`, `"id" in row`).
+const COMPARISON = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.LessThanToken, ts.SyntaxKind.GreaterThanToken,
+  ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanEqualsToken, ts.SyntaxKind.InKeyword,
+  ts.SyntaxKind.InstanceOfKeyword,
+]);
+
 /**
  * Counts direct copy in one file, without line numbers or copy text:
  * `ko` Hangul literals, `en` English copy, `cat` sentences assembled from dictionary output.
  */
-export function extractDirectCopy(file, source, knownKeys = [], {english = surfaceOf(file) === 'core' ? 'copy' : 'phrase'} = {}) {
+export function extractDirectCopy(file, source, knownKeys = []) {
   const result = {ko: 0, en: 0, cat: 0, unknownKeys: []};
   if (!isProductSource(file)) return result;
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
@@ -84,25 +113,59 @@ export function extractDirectCopy(file, source, knownKeys = [], {english = surfa
   const keys = new Set(knownKeys);
   const calleeOf = node => node.expression.getText(sf);
   const isFormatCall = node => ts.isCallExpression(node) && FORMAT_CALL.test(calleeOf(node));
-  function ignored(node, {insideFormat}) {
-    for (let p = node.parent; p; p = p.parent) {
-      if (ts.isImportDeclaration(p) || ts.isExportDeclaration(p) || ts.isTypeNode(p)) return true;
-      if (ts.isCallExpression(p) || ts.isNewExpression(p)) {
+  /**
+   * `skip` — never copy (imports, types, console/logger/log calls, a message key or frame name);
+   * `korean` — only Korean counts: an Error message (diagnostics are English, so Korean in one is
+   * shown to someone) and the values handed to a message (`formatMessage(k, {label: "…"})`);
+   * undefined — the ordinary rules. `forCat` keeps the #4834 rule for concatenations: an Error
+   * constructor is still a diagnostic there.
+   */
+  function exemption(node, {forCat = false} = {}) {
+    let mode;
+    for (let child = node, p = node.parent; p; child = p, p = p.parent) {
+      if (ts.isImportDeclaration(p) || ts.isExportDeclaration(p) || ts.isTypeNode(p)) return 'skip';
+      if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && p.expression !== child) {
         const callee = calleeOf(p);
-        if (DIAGNOSTIC_CALL.test(callee) || (ts.isNewExpression(p) && /Error$/.test(callee))) return true;
-        // ICU keys and user-supplied values are handled by the dictionary/type contract.
-        if (insideFormat && (FORMAT_CALL.test(callee) || FRAME_CALL.test(callee))) return true;
+        if (DIAGNOSTIC_CALL.test(callee)) return 'skip';
+        if (ts.isNewExpression(p) && /Error$/.test(callee)) {
+          if (forCat) return 'skip';
+          mode ??= 'korean';
+        }
+        if (!forCat && (FORMAT_CALL.test(callee) || FRAME_CALL.test(callee))) {
+          if (child === p.arguments?.[0]) return 'skip';
+          mode ??= 'korean';
+        }
       }
     }
-    return false;
+    return mode;
   }
+  /** The JSX attribute that receives this literal through value-forwarding expressions, if any. */
+  function enclosingAttribute(node) {
+    for (let child = node, p = node.parent; p; child = p, p = p.parent) {
+      if (ts.isJsxAttribute(p)) return p.name.getText(sf);
+      if (!forwardsValue(p, child)) return undefined;
+    }
+    return undefined;
+  }
+  /** Whether an English literal is copy: the nearest thing that names its role decides. */
   function surfaceContext(node) {
-    for (let p = node.parent; p; p = p.parent) {
+    for (let child = node, p = node.parent; p; child = p, p = p.parent) {
+      if (ts.isBinaryExpression(p) && COMPARISON.has(p.operatorToken.kind)) return false;
+      if (ts.isCaseClause(p) && p.expression === child) return false;
+      if (ts.isElementAccessExpression(p) && p.argumentExpression === child) return false;
       if (ts.isJsxAttribute(p)) return isCopyName(p.name.getText(sf));
-      if (ts.isJsxExpression(p)) return true;
-      if (ts.isPropertyAssignment(p) && isCopyName(p.name.getText(sf).replace(/['"]/g, ''))) return true;
-      if (ts.isVariableDeclaration(p) && isCopyName(p.name.getText(sf))) return true;
-      if (ts.isCallExpression(p) && SURFACE_CALL.test(calleeOf(p))) return true;
+      // A JSX child is shown; an attribute's `{…}` is judged by the attribute's name above it.
+      if (ts.isJsxExpression(p) && !ts.isJsxAttribute(p.parent)) return true;
+      // `{title: "Settings"}` is copy; `textAlign: "center"` inside a style named `title` is not.
+      if (ts.isPropertyAssignment(p) && p.initializer === child) return isCopyName(p.name.getText(sf).replace(/['"]/g, ''));
+      if (ts.isVariableDeclaration(p) && p.initializer === child) return isCopyName(p.name.getText(sf));
+      if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && p.expression !== child) {
+        if (SURFACE_CALL.test(calleeOf(p))) return true;
+        // An argument is whatever the callee's parameter is (`failureMessage("list", error)`,
+        // `toLocaleString("ko-KR")`); a callback's result still flows on (`useMemo(() => "…")`).
+        if (!ts.isArrowFunction(child) && !ts.isFunctionExpression(child)) return false;
+      }
+      if (ts.isTaggedTemplateExpression(p)) return false;
     }
     return false;
   }
@@ -127,22 +190,18 @@ export function extractDirectCopy(file, source, knownKeys = [], {english = surfa
       if (key && (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && !keys.has(key.text)) result.unknownKeys.push(key.text);
     }
     // Dictionary output is a whole sentence: joining pieces (or adding text to one) breaks word order in other languages.
-    if (concatenates(node) && !ignored(node, {insideFormat: false})) result.cat++;
+    if (concatenates(node) && exemption(node, {forCat: true}) !== 'skip') result.cat++;
     const literal = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
       || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node);
-    if (literal && !ignored(node, {insideFormat: true})) {
+    const exempt = literal ? exemption(node) : 'skip';
+    if (exempt !== 'skip') {
       const p = node.parent;
       const isName = (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)) && p.name === node;
       const text = node.text.trim();
-      const attribute = ts.isJsxAttribute(p) ? p.name.getText(sf) : undefined;
+      const attribute = ts.isJsxText(node) ? undefined : enclosingAttribute(node);
       if (!isName && text && !(attribute && TECH_ATTRIBUTE.test(attribute))) {
         if (HANGUL.test(text)) result.ko++;
-        else if (/[a-zA-Z]/.test(text)) {
-          const copy = ts.isJsxText(node) || (attribute ? isCopyName(attribute) : surfaceContext(node));
-          const phrase = !attribute && english === 'phrase'
-            && (/[a-zA-Z][ ,!?]+[a-zA-Z]/.test(text) || /^[a-zA-Z]+[.!?…]?$/.test(text));
-          if (copy || phrase) result.en++;
-        }
+        else if (!exempt && /[a-zA-Z]/.test(text) && (ts.isJsxText(node) || surfaceContext(node))) result.en++;
       }
     }
     ts.forEachChild(node, visit);
@@ -182,7 +241,7 @@ export function scanSurface(surface, {root = ROOT, readSource, files} = {}) {
   const paths = (files ?? surfaceFiles(surface, root)).filter(file => isProductSource(file) && surfaceOf(file) === surface).sort();
   for (const file of paths) {
     const source = readSource ? readSource(file) : readFileSync(join(root, file), 'utf8');
-    const {unknownKeys: unknown, ...count} = extractDirectCopy(file, source, keys, {english: SURFACES[surface].english});
+    const {unknownKeys: unknown, ...count} = extractDirectCopy(file, source, keys);
     if (DIMENSIONS.some(d => count[d])) counts[file] = count;
     unknownKeys.push(...unknown.map(key => `${file}: unknown message key ${key}`));
   }

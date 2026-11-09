@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   anchorSeal, ceilings, checkSurface, compareSurface, extractDirectCopy, isProductSource, landLedger,
-  raiseLedger, readLedger, serializeLedger, shrinkLedger, validateLedger, type Ledger,
+  raiseLedger, readLedger, serializeLedger, shrinkLedger, surfaceOf, validateLedger, type Ledger,
 } from './tooling/direct-copy.mjs';
 
 const extract = (source: string, file = 'clients/web/src/NewScreen.tsx') => {
@@ -15,7 +15,9 @@ describe('direct UI copy extraction', () => {
       + 'const options = {title: "Settings"}; const hint = `Hello ${name}`;';
     expect(extract(source)).toEqual({ko: 1, en: 4, cat: 0});
     expect(extract('<Text>English only</Text>').en).toBe(1);
-    expect(extract('setError("Something failed"); const cta = "Save";').en).toBe(2);
+    expect(extract('setError("Something failed"); const ctaLabel = "Save";').en).toBe(2);
+    // English counts by role, not by shape: a variable that is not named as copy is not copy.
+    expect(extract('const mode = "Save";').en).toBe(0);
   });
 
   it('distinguishes comments, diagnostics, technical attributes, user values and fixture files', () => {
@@ -39,11 +41,60 @@ describe('direct UI copy extraction', () => {
     expect(extract('<Notice headline="새 글" />')).toEqual({ko: 1, en: 0, cat: 0});
   });
 
-  it('counts Korean anywhere in the shared core, but English only where it is copy', () => {
+  it('counts Korean anywhere, but English only where it is copy — the same rule on every surface (#5589 r1)', () => {
     const source = 'const kind = "open"; const label = "Open"; const state = "needs review"; const note = "두 단어";';
-    expect(extract(source, 'packages/momo-core/src/features/inbox/model.ts')).toEqual({ko: 1, en: 1, cat: 0});
-    // The client rule stays the conservative #4834 one.
-    expect(extract(source, 'clients/web/src/features/inbox/model.ts')).toEqual({ko: 1, en: 3, cat: 0});
+    for (const file of ['packages/momo-core/src/features/inbox/model.ts', 'clients/web/src/features/inbox/model.ts',
+      'clients/mobile/src/features/inbox/model.ts']) {
+      expect(extract(source, file)).toEqual({ko: 1, en: 1, cat: 0});
+    }
+  });
+
+  it('judges a literal by the JSX attribute that receives it, through ternaries, calls and templates (H1)', () => {
+    // The review's cases: technical values computed inside an attribute are not copy.
+    expect(extract('<div className={open ? "visible" : "hidden"} />')).toEqual({ko: 0, en: 0, cat: 0});
+    expect(extract('<div className={cn("flex gap-2", open && "hidden")} data-testid={`row-${id}`} />'))
+      .toEqual({ko: 0, en: 0, cat: 0});
+    expect(extract('<Row data-state={blocked ? "blocked" : on ? "on" : "off"} tone={ok ? "ok" : "danger"}'
+      + ' style={{display: "none", textAlign: "center"}} />')).toEqual({ko: 0, en: 0, cat: 0});
+    // Compared values, switch cases, call arguments, state setters and index keys are not shown either.
+    expect(extract('{kind === "dm" ? null : <Info />}; if (s !== "ready") go(); switch (k) { case "idle": break; }'))
+      .toEqual({ko: 0, en: 0, cat: 0});
+    expect(extract('<Text>{n.toLocaleString("ko-KR")}</Text>; setStatus("loading"); failureMessage("list", error);'
+      + ' <Note label={COPY["save"]} />')).toEqual({ko: 0, en: 0, cat: 0});
+    // A style object inside a copy-named property is still a style: the nearest name decides.
+    expect(extract('const styles = {heroText: {alignItems: "center", textAlign: "center"}};').en).toBe(0);
+  });
+
+  it('still counts real English copy wherever it is computed (no false negatives from H1)', () => {
+    expect(extract('<button aria-label={open ? "Close panel" : "Open panel"} />').en).toBe(2);
+    expect(extract('<Input placeholder={`Search ${name}`} title={`${n} items`} />').en).toBe(2);
+    expect(extract('<p>{live && "Live"}</p>; <Text>{label ?? "Untitled"}</Text>').en).toBe(2);
+    expect(extract('<Banner action={{label: "Retry", run}} options={{title: "Settings"}} />').en).toBe(2);
+    expect(extract('const label = on ? "On" : "Off"; setError("Failed"); <Row getLabel={() => "Settings"} />').en).toBe(4);
+    expect(extract('<Button onPress={() => alert("Saved")}>Apply</Button>').en).toBe(2);
+    // Korean in a computed non-technical attribute counts; in a technical one it does not.
+    expect(extract('<Banner action={{label: "지금 새로고침"}} title={busy ? "저장 중" : "저장"} />').ko).toBe(3);
+    expect(extract('<div className={cn("x", label === "커밋" && "font-mono")} />').ko).toBe(0);
+  });
+
+  it('counts Korean in Error messages, message argument values and name= (M4); English there is not copy', () => {
+    expect(extract('throw new SaveError("저장하지 못했어요"); throw new Error("Internal failure");'))
+      .toEqual({ko: 1, en: 0, cat: 0});
+    expect(extract('new EnrollError(`Face ID를 취소해 ${n}번 다시`);').ko).toBe(2); // each template part is a literal
+    expect(extract('formatMessage("k.a.b", {label: "관리자만 보여요", kind: "agent"});')).toEqual({ko: 1, en: 0, cat: 0});
+    expect(extract('useBlockedReason("changeIt", {why: "연결이 끊겼어요"});').ko).toBe(1);
+    expect(extract('<SettingsToggleRow name="이 채널은 요약에서 빼기" /><input name="email" />')).toEqual({ko: 1, en: 0, cat: 0});
+    // Diagnostics stay out: console/logger calls, and English errors.
+    expect(extract('console.warn("진단 로그"); logger.error(new Error("한국어 진단"));').ko).toBe(0);
+  });
+
+  it('scans the core i18n folder except the dictionary, generated code, tooling and self-names (M4)', () => {
+    expect(surfaceOf('packages/momo-core/src/i18n/choices.ts')).toBe('core');
+    expect(surfaceOf('packages/momo-core/src/i18n/pseudo.ts')).toBe('core');
+    for (const file of ['packages/momo-core/src/i18n/autonyms.ts', 'packages/momo-core/src/i18n/tooling/direct-copy.mjs',
+      'packages/momo-core/src/i18n/catalogs/x.ts', 'packages/momo-core/src/i18n/generated/ko-KR.ts']) {
+      expect(surfaceOf(file)).toBeUndefined();
+    }
   });
 
   it('counts sentences assembled from dictionary output, and nothing for one whole message', () => {

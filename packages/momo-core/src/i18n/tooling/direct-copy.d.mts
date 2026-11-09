@@ -14,11 +14,11 @@ export const LEDGER_VERSION: number;
 export const ANCHOR_SEAL: string;
 export const DIMENSIONS: readonly ['ko', 'en', 'cat'];
 export const POLICY: string;
-export const SURFACES: Readonly<Record<Surface, { roots: string[]; files: string[]; english: 'copy' | 'phrase'; exclude?: RegExp }>>;
+export const SURFACES: Readonly<Record<Surface, { roots: string[]; files: string[]; exclude?: RegExp }>>;
 export function isCopyName(name: string): boolean;
 export function isProductSource(file: string): boolean;
 export function surfaceOf(file: string): Surface | undefined;
-export function extractDirectCopy(file: string, source: string, knownKeys?: string[], options?: { english?: 'copy' | 'phrase' }):
+export function extractDirectCopy(file: string, source: string, knownKeys?: string[]):
   { ko: number; en: number; cat: number; unknownKeys: string[] };
 export function surfaceFiles(surface: Surface, root?: string): string[];
 export function scanSurface(surface: Surface, options?: { root?: string; readSource?: (file: string) => string; files?: string[] }):

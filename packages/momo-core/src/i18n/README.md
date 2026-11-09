@@ -272,10 +272,19 @@ Korean literals by the 11-09 count). The format below makes that path fail.
 
 Allowed count per file = (`lowered` ?? `anchor`) + Σ `raises`, per dimension:
 
-- `ko` — Hangul literals (core: everywhere outside `src/i18n/`; clients: as before).
-- `en` — English copy. Clients keep #4834's conservative rule (JSX text, copy-named props/attributes,
-  phrases, standalone words). Core counts English only where it is copy (copy-named properties/
-  variables/attributes, alert/toast-like calls), not technical words.
+- `ko` — Hangul literals anywhere in product code, including `Error` messages (diagnostics are written
+  in English, so Korean in one reaches a person) and the values handed to a message
+  (`formatMessage(key, {label: "…"})`). Not counted: comments, types, imports, `console`/`logger`/`log`
+  calls, a message key or frame name. The core skips only the dictionary itself (`src/i18n/catalogs/`,
+  `generated/`, `tooling/`) and the language self-names (`autonyms.ts`).
+- `en` — English **copy**, by one rule on every surface: JSX text and `{…}` children, copy-named
+  attributes/properties/variables (`title`, `aria-label`, `placeholder`, `headline`, `*Label`, `*Text`, …)
+  and alert/toast/`setError`-like calls. The nearest thing that names a literal's role decides. A literal
+  that is compared (`kind === "dm"`, `case "idle":`), passed as an argument (`toLocaleString("ko-KR")`,
+  `failureMessage("list", e)`, `setStatus("loading")`), used as an index, or sits in a style object is not
+  copy; neither is English in an `Error` or a message argument. Until #5589's fix round the clients counted
+  any one-word literal: about 90% were class names and state words, and a strict ratchet turns that noise
+  into landing stops.
 - `cat` — sentences assembled from dictionary output: a `formatMessage(...)` inside a template with
   other text or another span, `formatMessage(...) + …`, or `[formatMessage(...), …].join(…)`.
   Translate the whole sentence as one key with arguments instead (ADR-0213 §4).
@@ -284,6 +293,11 @@ JSX attributes count too (#5589): Korean in **any** attribute except technical o
 `testID`, `data-*`, `id`, `href`, `role`, …), and English in copy-named ones (`title`, `aria-label`,
 `placeholder`, `headline`, `detail`, `*Label`, `*Text`, `*Title`, …). This closed a blind spot of
 305 web and 110 phone Korean literals (`headline`, `actionLabel`, `detail`, `legend`, `busyLabel`…).
+An attribute is judged by its name however the value is computed: a literal reaches it through
+ternaries, `&&`/`??`, calls such as `cn(…)`, templates and arrays, so `className={cn("flex", open && "hidden")}`
+and ``data-testid={`row-${id}`}`` count nothing. `name` is not technical for Korean, because components
+show it (`SettingsToggleRow name="…"`). An object property inside an attribute is judged by its own
+name (`action={{label: "…"}}` is copy).
 
 The scan must equal the allowance exactly: higher fails with "use a dictionary key, or add one
 explicit raise"; lower fails with "run `shrink`", so a later addition cannot spend a stale budget.
@@ -307,10 +321,10 @@ A rename moves copy to a new path: `shrink` lowers the old path once the new pat
 reason names the move. A new en-US feature file needs the same file (an empty `{}` is fine) in the
 five draft directories; `i18n:check` names the missing ones.
 
-Known limitation (from #4834, unchanged): the scanner recognises `formatMessage(...)` only by that
-callee name. An alias such as `const t = locale.service.formatMessage; t("settings.profile.languageLabel")`
-counts the key as one direct literal and skips the unknown-key check (web `LanguageRow.tsx` carries
-such references in its allowance); `cat` likewise misses concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen without history;
+Known limitation (from #4834): the scanner recognises `formatMessage(...)` only by that callee name.
+An alias such as `const t = locale.service.formatMessage; t("settings.profile.languageLabel")` is not
+counted (the key is a call argument), but it also skips the unknown-key check; `cat` likewise misses
+concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen without history;
 `land` (and review of the ledger diff) catches it, because it never carries a branch's `lowered`.
 
 P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Re-anchoring is
