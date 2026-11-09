@@ -6,9 +6,10 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import {Directory, File, Paths} from 'expo-file-system';
-import {onlineManager, focusManager} from '@tanstack/react-query';
+import {focusManager} from '@tanstack/react-query';
 import {useSession} from '../../session/useSession';
 import {useRealtime} from '../../realtime/RealtimeProvider';
+import {useConnectionGates} from '../connection/useConnectionGates';
 import {
   createPhoneExpressionStore,
   type ExpressionSnapshot,
@@ -132,16 +133,21 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
   useEffect(() => {
     void warmEmojiCatalog();
   }, []);
+  // 오프라인 판정은 웹과 같은 「보내기 가능 여부」다(#5585, 웹 `useOffline` = `!canSend`): 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
+  // 오프라인이다. 소켓은 수신용이라 소켓만 끊긴 것으로는 오프라인이 아니다 — 앞 판은 `status !== 'disconnected'` 를 함께 보아 소켓만 끊겨도
+  // 저장소가 그림을 모두 걷었고, 보관함이 비어 모든 이모티콘이 `:이름:` 글자가 됐다(대화 높이가 바뀌었다).
+  const {canSend} = useConnectionGates();
+  // 첫 읽기보다 먼저 선다: 처음부터 보낼 수 없으면 읽기를 내지 않는다(앞 판의 `setOnline` → `refresh` 순서와 같다).
+  useEffect(() => {
+    store.setOnline(canSend);
+  }, [canSend, store]);
   useEffect(() => {
     store.start();
-    store.setOnline(onlineManager.isOnline());
     void store.refresh(true);
-    const stopOnline = onlineManager.subscribe(value => store.setOnline(value));
     const stopFocus = focusManager.subscribe(focused => {
       if (focused) void store.refresh(true);
     });
     return () => {
-      stopOnline();
       stopFocus();
       store.dispose();
     };
@@ -150,11 +156,14 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
     if (status === 'connected') {
       // 실시간이 다시 이어졌다: 끊긴 동안의 알림은 오지 않았으니 전체 목록이 적용될 때까지 디스크 읽기 문을 닫는다. 저장소의 첫 연결은 재연결이 아니라 문을 올리지 않는다(ADR §14 M2.4-1).
       store.reconnected();
-      store.setOnline(onlineManager.isOnline());
       void store.refresh(true);
-    } else
-      store.setOnline(onlineManager.isOnline() && status !== 'disconnected');
-  }, [status, store]);
+    } else if (status === 'disconnected' && canSend) {
+      // 소켓만 끊겼다(표시 유예 10초가 지났다, 보낼 수는 있다): 그린 그림은 그대로 두고, 알림을 못 받는 동안 새로 서는 칸이 디스크에서 읽지 않게
+      // 문만 올린다(ADR §14 B-2 보충의 「끊김 한 번에 10초 이하」를 지킨다). 여기서 목록을 읽지 않는다 — 그 전체 읽기가 문을 도로 내리면 끊긴 동안 내내
+      // 디스크 읽기가 열린다. 문은 다시 이어진 뒤(`connected`)나 앱이 앞으로 올 때의 전체 읽기가 내린다.
+      store.socketLost();
+    }
+  }, [status, canSend, store]);
   useEffect(
     () =>
       rail?.subscribeExpressions?.(workspaceId, {
