@@ -2,11 +2,14 @@ import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { useMessages } from "@/i18n/useMessages";
 import { isDesktop, notificationClickSupported, onNotificationClick } from "@/lib/tauri";
 import type { MessageNewEvent } from "@/lib/realtime";
-import { uuidEq } from "@momo/core/lib/api";
+import { fetchWorkSessions, uuidEq, type WorkSession } from "@momo/core/lib/api";
+import { agentPanePath } from "@momo/core/features/workbench/workTab";
+import { workSessionsKey } from "@/features/work/useWorkSessions";
 import {
   useChannels,
   useDirectory,
@@ -31,6 +34,7 @@ import { useServerPause } from "./useServerPause";
 import { requestNotificationTarget } from "./requestNotificationTarget";
 import { followingKnown, resolveFollowing } from "./threadFollowStore";
 import { isThreadViewed } from "./viewedThread";
+import { isAgentSessionViewed } from "./viewedAgentSession";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
@@ -63,6 +67,10 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 // 셸이 클릭을 못 알리는 곳에만 남는다: 다른 OS, 클릭 길이 없는 옛 셸, 동시에 기다리는 배너가 한도를 넘어 일반 배너로
 // 뜬 것(그 배너의 재료로만 무장한다).
 //
+// 맥 작업 세션의 권한 요청(#5595, ADR-0188 D5·D8)은 승인 배너다. 데스크탑 셸에서만, 그 세션의 주인에게만(서버 원장이 말한
+// 주인: 캐시에 없으면 원장을 한 번 읽고 다시 판정한다). 누르면 승인 카드가 있는 그 세션의 A 칸이 열린다(`agentPanePath`).
+// 브라우저 탭에는 허락할 카드가 없어(ADR-0146 D-4) 띄우지 않는다.
+//
 // While the member's 알림 일시 중지 is on, none of it becomes a banner (#4197):
 // the phone push is stopped by the server for the same rule, so this device
 // reads the server's answer (`useServerPause`) instead of deciding alone.
@@ -94,6 +102,7 @@ function applyArm(
 
 export function DesktopNotifications() {
   const { session, workspaceId, realtime } = useSession();
+  const queryClient = useQueryClient();
   const { groups } = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
   const navigate = useNavigate();
@@ -162,8 +171,8 @@ export function DesktopNotifications() {
   // and re-establish every subscription on each roster refetch.
   const pathnameRef = useRef(location.pathname);
   pathnameRef.current = location.pathname;
-  const contextRef = useRef({ channels, directory, selfId, workspaceId });
-  contextRef.current = { channels, directory, selfId, workspaceId };
+  const contextRef = useRef({ channels, directory, selfId, workspaceId, queryClient });
+  contextRef.current = { channels, directory, selfId, workspaceId, queryClient };
 
   const canNotifyRef = useRef(canNotify);
   canNotifyRef.current = canNotify;
@@ -212,6 +221,20 @@ export function DesktopNotifications() {
       },
       inviteLinkSentence: () =>
         messagesRef.current.formatMessage("notifications.inviteLink.fallback"),
+      // 작업 권한 요청(#5595): 승인 카드를 열 수 있는 데스크탑 셸만 원장을 준다. 원장은 서버가 말한 값(캐시)뿐이다.
+      ...(isDesktop()
+        ? {
+            workSession: (sessionId: string) =>
+              current.queryClient
+                .getQueryData<WorkSession[]>(workSessionsKey(current.workspaceId))
+                ?.find((candidate) => uuidEq(candidate.id, sessionId)),
+            isWorkSessionVisible: isAgentSessionViewed,
+            workPermissionTitle: () =>
+              messagesRef.current.formatMessage("desktop.notify.workPermissionTitle"),
+            workPermissionSentence: (sessionName: string) =>
+              formatRef.current("desktop.notify.workPermission", { session: sessionName }),
+          }
+        : {}),
       nowMs,
     });
     if (!decision.show) {
@@ -224,12 +247,35 @@ export function DesktopNotifications() {
           if (aliveRef.current && contextRef.current.workspaceId === askedIn) handleEvent(event, true);
         });
       }
+      // 이 기기가 아직 모르는 세션의 권한 요청(#5595): 세션 원장을 한 번 읽고 한 번만 다시 판정한다. 못 읽으면 접는다.
+      // 캐시가 신선해도 서버까지 간다(`staleTime: 0`, design-review H-2): 그 캐시에 이 세션이 없다는 것이 곧 캐시가
+      // 낡았다는 뜻이다. 앱 기본 `staleTime`(30초)이면 `fetchQuery`가 그 캐시를 그대로 돌려줘, 보지 않던 채널에서
+      // 막 시작한 세션의 첫 권한 요청이 소리 없이 빠진다.
+      if (decision.skip === "owner-unknown" && !answered) {
+        const askedIn = current.workspaceId;
+        void current.queryClient
+          .fetchQuery({
+            queryKey: workSessionsKey(askedIn),
+            queryFn: () => fetchWorkSessions(askedIn),
+            staleTime: 0,
+          })
+          .then(
+            () => {
+              if (aliveRef.current && contextRef.current.workspaceId === askedIn) handleEvent(event, true);
+            },
+            () => undefined
+          );
+      }
       return;
     }
-    const { messageId, channelId, body } = decision.notification;
+    const { messageId, channelId, body, workSessionId, summaryLabel, bannerGroup } = decision.notification;
     const approval = decision.notification.kind === "approval";
     const threadReply = decision.notification.kind === "thread-reply";
-    const title = approval ? memberFor(current.directory, event.payload.author_member_id)?.displayName ?? decision.notification.title : decision.notification.title;
+    // 작업 권한 요청(#5595)의 제목은 코어가 정한 세션 이름이다(작성자는 흔히 받는 사람 자신이다).
+    const title =
+      approval && workSessionId === undefined
+        ? memberFor(current.directory, event.payload.author_member_id)?.displayName ?? decision.notification.title
+        : decision.notification.title;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
     // 같은 스레드의 답글은 분당 상한까지만 배너가 된다(#5017). 넘은 답글은 알린 것으로 적었으니 다시 오지 않고, 배너도 무장도 없다.
     const threadRoot = threadReply ? event.payload.root_id ?? undefined : undefined;
@@ -247,8 +293,10 @@ export function DesktopNotifications() {
       ...(event.payload.root_id ? { eventRootId: event.payload.root_id } : {}),
     };
     // 셸이 클릭을 못 알리면 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 알려 주면 무장하지 않는다(#5059): 배너의 클릭이
-    // 직접 간다. 브라우저는 배너 클릭이 직접 간다.
-    if (isDesktop() && !clickReportsRef.current) applyArm(armedRef, armedThreadRef, arm, nowMs);
+    // 직접 간다. 브라우저는 배너 클릭이 직접 간다. 작업 권한 요청(#5595)은 어림하지 않는다: 어림의 목적지는 채널·스레드뿐인데
+    // 그 카드는 A 칸에 있어서, 어림은 사람을 카드가 없는 곳에 데려간다. 클릭이 오는 배너만 카드로 간다.
+    const work = workSessionId !== undefined;
+    if (isDesktop() && !clickReportsRef.current && !work) applyArm(armedRef, armedThreadRef, arm, nowMs);
     // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
     // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
     const kindMap: Record<typeof decision.notification.kind, OsNotifyKind> = {
@@ -258,23 +306,26 @@ export function DesktopNotifications() {
       "thread-reply": "thread-reply",
     };
     osNotifier().offer({
-      kind: kindMap[decision.notification.kind],
+      // 작업 권한 요청(#5595)은 로컬 칸의 「응답 필요」 배너와 한 묶음이다: 같은 순간(맥에서 실행 허락을 기다림)을 같은
+      // 제목으로 말하고, 묶이면 「응답 필요 N건」에 세션 이름·칸 이름이 나란히 선다(design-review M-1).
+      kind: bannerGroup ?? kindMap[decision.notification.kind],
       title,
       ...(body === undefined ? {} : { body }),
-      label: title.replace(/^승인 필요 · /, ""),
+      label: summaryLabel ?? title.replace(/^승인 필요 · /, ""),
       // 승인 알림은 채널 맨 아래가 아니라 **그 카드**로 연다(#3738): 놓친 카드를 찾느라
       // 위로 스크롤하다 만료를 맞이하지 않게. 스레드 답글은 그 스레드를 열고 그 답글로 간다(#4890).
       // 멘션·DM은 지금까지처럼 채널이다.
-      route:
-        approval || threadReply
+      route: work
+        ? agentPanePath(workSessionId)
+        : approval || threadReply
           ? requestNotificationTarget(channelId, messageId, event.payload.root_id)
           : `/c/${channelId}`,
       ...(threadReply
         ? { summaryTitle: (count: number) => formatRef.current("desktop.notify.threadSummary", { count }) }
         : {}),
       ...(threadRoot === undefined ? {} : { rootId: threadRoot }),
-      // 셸이 이 배너의 클릭을 못 알릴 때만 쓰이는 어림 재료(#5059).
-      arm,
+      // 셸이 이 배너의 클릭을 못 알릴 때만 쓰이는 어림 재료(#5059). 작업 권한 요청에는 없다(위).
+      ...(work ? {} : { arm }),
     });
   }, []);
 

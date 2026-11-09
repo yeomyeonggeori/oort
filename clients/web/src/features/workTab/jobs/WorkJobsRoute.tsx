@@ -26,6 +26,7 @@ import {
 import { TEAM_BOARD_COPY, isRunItem } from "@momo/core/features/workbench/teamBoard";
 import { LOCAL_TERMINALS_PATH } from "@momo/core/features/workbench/workTab";
 import { SESSION_STATUS_LABEL } from "@momo/core/features/workbench/sessionList";
+import { PANE_MARK_LABEL, isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
@@ -521,10 +522,13 @@ function ResultCell({ row, reported }: { row: WorkJobRow; reported: string | nul
 function ThisDeviceStrip() {
   const entries = useLocalPaneAttention();
   const waiting = entries.filter((e) => e.status === "waiting").length;
-  const done = entries.filter((e) => e.status === "done").length;
+  // 오류로 끝난 칸은 「끝남」 수에 섞지 않는다(#5584 H1).
+  const failed = entries.filter((e) => isFailedMark(e.mark)).length;
+  const done = entries.filter((e) => e.status === "done").length - failed;
   const parts = [
     waiting > 0 ? `${SESSION_STATUS_LABEL.waiting} ${waiting}` : null,
     done > 0 ? `${SESSION_STATUS_LABEL.done} ${done}` : null,
+    failed > 0 ? `${PANE_MARK_LABEL.failed} ${failed}` : null,
   ].filter((part): part is string => part !== null);
   return (
     <div

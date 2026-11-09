@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
@@ -39,6 +39,7 @@ import {
 } from "@momo/core/features/auth/signedControl";
 import { desktopSigner, useHumanControlSigning, usePermissionPreviewGate } from "@/features/work/signedWork";
 import { isDesktop } from "@/lib/tauri";
+import { viewAgentSession } from "@/features/notifications/viewedAgentSession";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
 
@@ -157,6 +158,15 @@ export function agentRoutes(
         }
       : null,
   };
+}
+
+/**
+ * 이 칸이 그리는 동안 그 세션의 승인 카드가 화면에 있다고 알림 판정에 알린다(#5595, `viewedAgentSession`).
+ * DOM을 더하지 않는다.
+ */
+function ViewedAgentSession({ sessionId, children }: { sessionId: string; children: ReactNode }) {
+  useEffect(() => viewAgentSession(sessionId), [sessionId]);
+  return <>{children}</>;
 }
 
 function PaneMissing({ onClear, loading }: { onClear: () => void; loading: boolean }) {
@@ -343,7 +353,7 @@ export function useAgentPaneSource(): AgentPaneSource {
       if (entry.error && !entry.model) return <PaneError onRetry={entry.refetch} failure={entry.failure} />;
       if (!entry.model) return <Skeleton ready={false} rows={4} className="p-4" />;
       return (
-        <>
+        <ViewedAgentSession sessionId={entry.session.id}>
           {connStatus === "disconnected" ? (
             <p className="shrink-0 border-b border-line px-4 py-1 text-meta text-ink-muted" data-testid="agent-pane-offline">
               연결이 끊겨 새 진행을 받지 못하고 있어요. 받은 데까지 보여요.
@@ -364,7 +374,7 @@ export function useAgentPaneSource(): AgentPaneSource {
             offline={offline}
             instructFrom={instruct.from}
           />
-        </>
+        </ViewedAgentSession>
       );
     },
   };

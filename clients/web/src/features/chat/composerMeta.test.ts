@@ -60,7 +60,12 @@ describe("「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다 (#5567)
   it("남의 입력은 공유 슬롯을 바꾸지 않는다: 슬롯 판정에 작성 중인 사람 수가 들어가지 않는다", () => {
     expect(composer).not.toMatch(/composerMetaMode\(\{[^}]*typist/);
     // 줄은 액션 행(`meta`) 안이 아니라 카드 **뒤**, 같은 폼 안이다.
-    expect(composer).toMatch(/<\/ComposerCard>\s*\{\/\*[\s\S]*?\*\/\}\s*<TypingLine memberIds=\{typists\} directory=\{directory\} \/>\s*<\/form>/);
+    // 보내기가 막히면 같은 칸이 그 이유를 말한다(#5575 검수 H1): 칸에 넘기는 것은 막힘 문장뿐이다.
+    expect(composer).toMatch(
+      /<\/ComposerCard>\s*\{\/\*[\s\S]*?\*\/\}\s*<TypingLine memberIds=\{typists\} directory=\{directory\} blocked=\{offline \? blockedLine : null\} \/>\s*<\/form>/
+    );
+    // 카드 위에 따로 서던 막힘 줄은 없다(서고 질 때마다 목록 바닥이 움직였다).
+    expect(composer).not.toContain('data-testid="composer-offline"');
     expect(composer).not.toMatch(/meta=\{[\s\S]*?<TypingLine[\s\S]*?send=\{/);
   });
 
@@ -81,7 +86,11 @@ describe("「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다 (#5567)
 
   it("live 영역이 아니고, 보이는 조각은 aria-hidden 이며 온전한 문장은 sr-only 하나다", () => {
     expect(typingLine).not.toContain("aria-live");
-    expect(typingLine).not.toContain('role="status"');
+    // 상태 알림은 막힘 문장 하나뿐이다(#5575): 3초마다 다시 오는 「작성 중」 갈래는 live 영역이 아니다.
+    expect(typingLine.match(/role="status"/g)).toHaveLength(1);
+    expect(typingLine).toMatch(/\{blocked !== null && \(\s*<p\s+role="status"/);
+    const typingBranch = typingLine.slice(typingLine.indexOf("{parts !== null && ("));
+    expect(typingBranch).not.toContain('role="status"');
     expect(typingLine.match(/aria-hidden="true"/g)).toHaveLength(2);
     expect(typingLine).toContain('className="sr-only" data-testid="composer-typing-label"');
   });

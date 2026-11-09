@@ -85,13 +85,18 @@ const LEDGER_POLL_MS = 60_000;
  *   two hooks on one key would carry two `queryFn`s, and which one the query
  *   actually runs would depend on mount order (ADE 관제 줄, 이슈 1135).
  */
+/** 세션 원장의 질의 열쇠. 알림 판정(#5595)이 같은 원장을 캐시에서 읽고, 모르면 같은 열쇠로 한 번 읽는다. */
+export function workSessionsKey(workspaceId: string): readonly ["work-sessions", string] {
+  return ["work-sessions", workspaceId];
+}
+
 export function useWorkSessions(
   workspaceId: string,
   refetchIntervalMs: number = LEDGER_POLL_MS,
   enabled: boolean = true
 ) {
   return useQuery({
-    queryKey: ["work-sessions", workspaceId],
+    queryKey: workSessionsKey(workspaceId),
     queryFn: () => fetchWorkSessions(workspaceId),
     refetchInterval: refetchIntervalMs,
     enabled: enabled && workspaceId !== "",

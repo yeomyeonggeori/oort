@@ -65,3 +65,18 @@ export function typingLineParts(
   if (end > cursor) lead.push({ text: marked.slice(cursor, end), name: false });
   return { lead, tail: marked.slice(end), label };
 }
+
+/**
+ * 입력창이 막혔을 때(기기 오프라인 · 서버에 닿지 못함) 같은 줄에 서는 문장을 문장 단위로 나눈다 (#5575 검수 H1).
+ *
+ * 줄은 한 줄 높이로 늘 잡아 둔 칸이라 좁은 폭에서 문장이 넘친다. 넘칠 때는 **문장을 통째로** 버리고 문장 안에서는 자르지 않는다(입력창
+ * 자리표시와 같은 규칙, #1422): 각 문장이 줄바꿈 안 되는 한 덩어리로 서고, 들어가지 않는 문장은 숨은 둘째 줄로 내려간다. 조각마다 원문의
+ * 빈칸을 그대로 지니므로 이어 붙이면 원문과 같다(보조기술 · `title`은 온전한 문장을 받는다). 문장 경계는 `Intl.Segmenter`가 언어별로 찾고,
+ * 없는 환경에서는 문장 하나로 둔다.
+ */
+export function blockedLineSentences(text: string): string[] {
+  const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter === undefined) return [text];
+  const sentences = [...new Segmenter(undefined, { granularity: "sentence" }).segment(text)].map((part) => part.segment);
+  return sentences.length > 0 ? sentences : [text];
+}

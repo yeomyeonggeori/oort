@@ -4426,6 +4426,11 @@ export interface WorkSession {
   exitCode?: number;
   endReason?: string;
   resumedFromSessionId?: string;
+  /**
+   * ADR-0190 D4: `host`(호스트가 연 세션) 또는 `local_pty`(맥에서 직접 연 창을 공유한 것). 서버 DTO가
+   * 늘 싣는다. 옛 시험 줄처럼 없으면 `host`로 읽는다. kill 라우트는 `local_pty`를 받지 않는다(#5595).
+   */
+  origin?: "host" | "local_pty";
 }
 
 export async function fetchWorkSessions(

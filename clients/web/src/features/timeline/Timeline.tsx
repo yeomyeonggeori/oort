@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -83,6 +84,8 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
+import { holdScrollPosition, type ScrollHold } from "./scrollHold";
+import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
@@ -95,6 +98,7 @@ import {
   countUnreadJump,
   dataIndexFromVirtuoso,
   firstUnreadMessageSeq,
+  hasFreshSelfSend,
   reconcileDividerRelation,
   relationFromIntersection,
   shouldLatchUnreadJump,
@@ -651,6 +655,29 @@ export function Timeline({
     );
   }, [messages, myMemberId]);
 
+  // ---- 내가 보낸 글은 맨 아래로 (#5603, owner 11-09) -----------------------------
+  //
+  // 위로 올려 읽던 중이어도 **내가 보내면** 맨 아래로 가서 보낸 줄이 보인다(폰 `selfSendToken` 과 같은 규칙). 남의 말은 지금처럼
+  // 따라가지 않고 「최신 메시지로 이동」이 센다. 수리 전에는 바닥이 아닐 때 새 줄을 따라가지 않는 규칙이 내 메아리에도 걸려,
+  // 보낸 줄이 화면 아래 밖에 섰다.
+  //
+  // 신호는 **처음 나타난 내 메아리**다(`hasFreshSelfSend`). 대화를 갈아탄 첫 렌더의 메아리(다른 대화의 것·되살린 실패 행)는 보낸
+  // 것이 아니라 바탕으로만 적는다. 옮기는 손은 아래 `holdScrollPosition` 의 `expectBottom` 하나다 — 가상 목록의 따라가기
+  // (`followOutput`)를 억지로 켜지 않는다: 게이트 실측(#5603)에서 그 따라가기는 마지막 줄의 아래 몇 px 위에 앉았고, 바닥 붙이기는
+  // 줄 높이가 바뀔 때마다 진짜 바닥(거리 0)에 다시 붙인다. 바닥에서 보낸 글은 예전 길 그대로다(`expectBottom` 이 손대지 않는다).
+  const seenPendingRef = useRef<{ epoch: number; ids: ReadonlySet<string> } | null>(null);
+  const selfSendTickRef = useRef(0);
+  {
+    const rows = pending ?? [];
+    const seen = seenPendingRef.current;
+    if (seen === null || seen.epoch !== epoch) {
+      seenPendingRef.current = { epoch, ids: new Set(rows.map((row) => row.clientMsgId)) };
+    } else if (rows.some((row) => !seen.ids.has(row.clientMsgId))) {
+      if (hasFreshSelfSend(seen.ids, rows, Date.now())) selfSendTickRef.current += 1;
+      seenPendingRef.current = { epoch, ids: new Set(rows.map((row) => row.clientMsgId)) };
+    }
+  }
+
   const followOutput = useCallback(() => {
     // Same pre-batch at-bottom as the leftover sweep (#2050 R5 M-1).
     // `followOutput="auto"` would otherwise stop following while virtuoso
@@ -788,36 +815,42 @@ export function Timeline({
     if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
-  // 창의 높이가 줄어도 바닥은 바닥이다 (DS2-6 #2718). 사이드바를 접으면 떠
-  // 있는 판이 상단 줄 아래로 내려가 32px 낮아지고, 창을 줄여도 같다. 스크롤러는
-  // scrollTop을 지키므로 바닥에 있던 사람의 마지막 줄이 컴포저 뒤로 잘린다.
-  // 판정은 **줄기 전의** 위치로 한다: 스크롤 이벤트마다 적어 둔 값이다. 가상
-  // 목록의 atBottom은 같은 프레임의 크기 변화로 이미 거짓이 되었을 수 있다.
+  // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
+  // 제자리다. 데스크탑 WebKit 은 이 목록 안에서 스크롤 앵커링을 하지 않아 그림 줄이 자라면 목록이 밀렸다.
+  // 판정·바로잡기의 규칙은 `scrollHold.ts`.
+  const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
-    if (!scrollerEl || typeof ResizeObserver === "undefined") return;
-    const nearBottom = () =>
-      scrollerEl.scrollHeight - scrollerEl.scrollTop - scrollerEl.clientHeight <=
-      AT_BOTTOM_SLACK_PX;
-    let wasAtBottom = nearBottom();
-    let lastHeight = scrollerEl.clientHeight;
-    const onScroll = () => {
-      wasAtBottom = nearBottom();
-    };
-    const observer = new ResizeObserver(() => {
-      const height = scrollerEl.clientHeight;
-      if (height < lastHeight && wasAtBottom) {
-        scrollerEl.scrollTop = scrollerEl.scrollHeight;
-      }
-      lastHeight = height;
-      wasAtBottom = nearBottom();
-    });
-    scrollerEl.addEventListener("scroll", onScroll, { passive: true });
-    observer.observe(scrollerEl);
+    if (!scrollerEl) return;
+    const hold = holdScrollPosition(scrollerEl, { firstItemIndex: () => firstItemIndexRef.current });
+    holdRef.current = hold;
     return () => {
-      scrollerEl.removeEventListener("scroll", onScroll);
-      observer.disconnect();
+      hold.stop();
+      if (holdRef.current === hold) holdRef.current = null;
     };
   }, [scrollerEl]);
+
+  // 내 메아리가 들어온 커밋에서 위 바로잡기에게 「이제 바닥」이라고 알린다(#5603): 위를 읽던 중이면 그 자리에서 맨 아래로 옮기고,
+  // 이어지는 줄 높이 변화(메아리 → 확정본)에도 바닥에 붙인다. 보던 줄을 지키는 바로잡기(WebKit 수동 앵커, #5583)와 같은 모듈이
+  // 하므로 둘이 다투지 않는다. 그리기 전에 옮기려고 레이아웃 효과다.
+  const handledSelfSendRef = useRef(0);
+  useLayoutEffect(() => {
+    if (selfSendTickRef.current === handledSelfSendRef.current) return;
+    handledSelfSendRef.current = selfSendTickRef.current;
+    holdRef.current?.expectBottom();
+  }, [pending, epoch]);
+
+  // 「최신 메시지로 이동」의 늦춤 (#5575): 바닥을 떠난 상태가 잠깐 이어져야 선다. 바닥에 닿으면 바로 걷는다.
+  // 목록이 한 프레임 밀렸다 돌아오는 동안 필이 섰다 사라지며 깜빡이지 않게 한다. `atBottom` 자체(기준선 ·
+  // 따라가기)는 늦추지 않는다 — 늦추는 것은 그리기뿐이다.
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
+  useEffect(() => {
+    if (atBottom) {
+      setShowJumpLatest(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setShowJumpLatest(true), JUMP_LATEST_SHOW_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [atBottom]);
 
   const onScrollerRef = useCallback((node: HTMLElement | Window | null) => {
     setScrollerEl(node instanceof HTMLElement ? node : null);
@@ -1019,7 +1052,7 @@ export function Timeline({
           />
         </UnreadPillDock>
       )}
-      {!atBottom && (
+      {!atBottom && showJumpLatest && (
         // 컨트롤은 떠 있고 그 아래 타임라인은 계속 눌린다: 감싼 상자는 클릭을
         // 통과시키고 버튼만 받는다. 그러지 않으면 이 줄이 덮은 폭만큼 마지막
         // 메시지가 눌리지 않는 띠가 된다.
