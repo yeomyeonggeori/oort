@@ -11,6 +11,8 @@ import type { Message, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import { parseTeamAiDelegate } from "@momo/core/features/timeline/teamAi";
+// #5600: 서버(`team_ai.rs` `answer_props`)의 단위 시험과 코어 파서 시험이 함께 읽는 파일.
+import servedReply from "@momo/core/features/timeline/__fixtures__/team-ai-reply-props.json";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { AgentCard } from "./AgentCard";
@@ -393,6 +395,19 @@ describe("도우미 답의 꼬리 (v2 H4·H5·H9-I9)", () => {
       })
     );
     expect(view.querySelector('[data-testid="team-ai-reply-meta"]')).toBeNull();
+  });
+
+  it("서버가 쓰는 답 props(공용 픽스처, #5600)로 모델 칩이 선다", () => {
+    const view = mount(
+      createElement(MessageRow, {
+        message: message({ body: "REST는 자원을 주소로 다루는 방식이에요.", props: servedReply.props }),
+        startsGroup: true,
+        directory: DIRECTORY,
+      })
+    );
+    expect(view.querySelector('[data-testid="team-ai-model-chip"]')?.textContent).toBe(
+      "팀 AI · Claude Sonnet 4.5"
+    );
   });
 });
 
