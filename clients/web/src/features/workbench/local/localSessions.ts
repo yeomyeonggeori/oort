@@ -93,6 +93,12 @@ export interface LocalSessionView {
    * 만들지 않는다(ADR-0190 D4-b. 보고도 데스크탑이 읽어 채널로 준다).
    */
   signal: PaneSignal | null;
+  /**
+   * 지금 `signal`은 프로그램이 아니라 사람의 입력이 정했다(`PaneSignalState.byPerson`: hook만 쓰는 칸의 기다림에
+   * 키를 쳐서 푼 「실행 중」). 칸 머리·세션 목록이 출처 줄(「…가 알린 상태예요」)을 달지 않는다(#5584 r2 M1).
+   * 없으면 프로그램의 말이다.
+   */
+  signalByPerson?: boolean;
   exit: PtyExit | null;
   /** 시작 실패 사유(셸이 돌려준 글). */
   error: string | null;
@@ -351,7 +357,12 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
 
   const setSignals = (s: Session, next: PaneSignalState) => {
     s.signals = next;
-    if (s.view.signal !== next.signal) update(s, { signal: next.signal });
+    // 신호가 같아도 누가 정했는지가 바뀌면 다시 그린다: 사람이 푼 「실행 중」 뒤에 프로그램이 같은 「실행 중」을
+    // 말하면 그때부터 출처 줄이 붙는다(#5584 r2 M1).
+    const byPerson = next.byPerson === true;
+    if (s.view.signal !== next.signal || (s.view.signalByPerson === true) !== byPerson) {
+      update(s, { signal: next.signal, signalByPerson: byPerson });
+    }
   };
 
   const onSignal = (s: Session, generation: number, raw: unknown) => {
@@ -371,7 +382,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     const generation = ++s.generation;
     if (generation > 1) writeBoth(s, SHOW_CURSOR);
     s.signals = NO_PANE_SIGNAL;
-    update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null });
+    update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null, signalByPerson: false });
     try {
       let cwd = s.start.cwd;
       if (s.start.worktree) {

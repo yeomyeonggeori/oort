@@ -195,7 +195,8 @@ export function WorkspaceRail({
                 current={active === "work"}
                 mark={marks?.mine}
                 pillLabel="응답이 필요한 세션"
-                dotLabel="아직 안 본 끝난 세션이 있어요"
+                // 펼친 줄과 같은 판정(`destinationMarks`)의 문장: 빨간 점(실패)은 실패 문장이다(#5584 r2 H1 (b)).
+                dotLabel={marks?.mine.dotLabel}
               />
             </ul>
           </nav>

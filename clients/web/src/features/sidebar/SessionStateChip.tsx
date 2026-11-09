@@ -31,12 +31,15 @@ const TONE: Readonly<Record<PaneMark, string>> = {
 export function SessionStateChip({
   status,
   label,
+  title,
   testId = "session-state-chip",
 }: {
   /** 상태, 또는 실패한 턴의 표지 「실패」(`PaneMark`). */
   status: PaneMark;
   /** 기본은 표지 글자(`PANE_MARK_LABEL`: 상태 어휘 + 「실패」). 「끝남 · PR」처럼 목록이 덧붙일 때만 넘긴다. */
   label?: string;
+  /** 마우스를 올렸을 때의 한 줄(출처 등, #5584 r2 M3). 없으면 툴팁이 없다. */
+  title?: string;
   testId?: string;
 }) {
   return (
@@ -44,6 +47,7 @@ export function SessionStateChip({
       className={cn(CHIP_CLASS, "inline-flex items-center", TONE[status])}
       data-status={status}
       data-testid={testId}
+      title={title}
     >
       {label ?? PANE_MARK_LABEL[status]}
     </span>

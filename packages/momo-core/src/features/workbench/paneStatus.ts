@@ -1,5 +1,6 @@
 import { attachParticle } from "../../lib/koreanParticle";
 import {
+  FAILED_MARK_LABEL,
   SESSION_STATUS_LABEL,
   statusFromPhase,
   type SessionPhaseInput,
@@ -83,6 +84,11 @@ export interface PaneStatusInput {
   exitSignal: string | number | null;
   /** 이 프로세스에서 받은 마지막 하네스 신호. 다시 시작하면 null로 돌아간다. */
   signal: PaneSignal | null;
+  /**
+   * 지금 신호는 프로그램의 말이 아니라 사람의 입력으로 푼 것이다(`PaneSignalState.byPerson`). 상태 판정은 같고,
+   * 출처 줄만 달지 않는다(`paneStatusSource`). 없으면 프로그램의 말이다.
+   */
+  byPerson?: boolean;
 }
 
 /**
@@ -118,10 +124,10 @@ export function derivePaneStatus(input: PaneStatusInput): SessionStatus {
  */
 export type PaneMark = SessionStatus | "failed";
 
-/** 표지 글자. 「실패」는 팀 보드가 실패한 일에 쓰는 낱말 그대로다(`teamBoard.stateChipLabel`). */
+/** 표지 글자. 「실패」는 팀 보드가 실패한 일에 쓰는 낱말 그대로다(`teamBoard.stateChipLabel`, `FAILED_MARK_LABEL`). */
 export const PANE_MARK_LABEL: Readonly<Record<PaneMark, string>> = {
   ...SESSION_STATUS_LABEL,
-  failed: "실패",
+  failed: FAILED_MARK_LABEL,
 };
 
 /** 실패한 턴의 표지인가. */
@@ -129,7 +135,7 @@ export function isFailedMark(mark: PaneMark | undefined): boolean {
   return mark === "failed";
 }
 
-/** 세션 목록 줄(`SessionRow.failed`)의 표지. */
+/** 세션 목록 줄(`SessionRow.failed`)과 「상태로 묶기」의 실패 묶음 머리(`GroupHeader.failed`)의 표지. */
 export function rowMark(row: { status: SessionStatus; failed?: boolean }): PaneMark {
   return row.failed ? "failed" : row.status;
 }
@@ -153,10 +159,12 @@ export function sharedPaneState(input: PaneStatusInput): SessionStatus {
 /**
  * 칸 상태가 그 프로그램의 말일 때 출처 한 줄(ADR-0220 「에이전트 보고」, ADR-0190 증보
  * 「출처를 표시한다」). hook이든 OSC 7501 보고든 그 프로그램이 스스로 한 말이다. 생명주기만으로
- * 정한 상태(신호 없음·프로세스 종료)에는 붙이지 않는다.
+ * 정한 상태(신호 없음·프로세스 종료)와, 마지막 변화가 사람의 입력이었던 상태(`byPerson`: hook만
+ * 쓰는 칸의 「응답 필요」에 사람이 키를 쳐서 웹이 「실행 중」으로 푼 것, design-review #5584 r2 M1)에는
+ * 붙이지 않는다. 그 뒤 프로그램이 다시 말하면 다시 붙는다.
  */
 export function paneStatusSource(input: PaneStatusInput, programName: string): string | null {
-  if (input.phase !== "running" || input.signal === null) return null;
+  if (input.phase !== "running" || input.signal === null || input.byPerson === true) return null;
   return `${attachParticle(programName, "subject")} 알린 상태예요`;
 }
 
@@ -208,6 +216,11 @@ export interface PaneSignalState {
   signal: PaneSignal | null;
   /** 이 프로세스가 OSC 7501 보고를 한 번이라도 보냈다. 그 뒤로는 보고만 따른다. */
   reports: boolean;
+  /**
+   * 지금 `signal`은 프로그램이 낸 것이 아니라 사람의 입력으로 푼 것이다(`afterPersonInput`). 다음 신호가
+   * 오면 사라진다. 프로그램의 말일 때는 필드가 없다(design-review #5584 r2 M1: 출처 오귀속).
+   */
+  byPerson?: true;
 }
 
 export const NO_PANE_SIGNAL: PaneSignalState = { signal: null, reports: false };
@@ -245,7 +258,8 @@ export function applyPaneSignalEvent(state: PaneSignalState, event: PaneSignalEv
 export function afterPersonInput(state: PaneSignalState): PaneSignalState {
   if (state.reports) return state;
   if (state.signal !== "waiting-permission" && state.signal !== "waiting-input") return state;
-  return { signal: "working", reports: false };
+  // 이 「실행 중」은 프로그램이 한 말이 아니다: 출처 줄을 달지 않게 표시한다.
+  return { signal: "working", reports: false, byPerson: true };
 }
 
 // ---- 알림 --------------------------------------------------------------------

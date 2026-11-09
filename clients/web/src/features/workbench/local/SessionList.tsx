@@ -271,7 +271,8 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
           onClick={() => toggleGroup(row.key)}
         >
           {open ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-          {row.status ? <StatusMark status={row.status} /> : null}
+          {/* 실패 묶음(#5584 r2 H1 (c))의 머리는 빨간 ✕다. 「끝남」 묶음에는 실패한 줄이 들지 않는다. */}
+          {row.status ? <StatusMark status={rowMark({ status: row.status, failed: row.failed })} /> : null}
           <span className="min-w-0 truncate">{row.label}</span>
           <span className="sl-n" data-numeric>
             {row.count}
@@ -677,6 +678,8 @@ function SessionRowButton({
       data-testid="session-list-row"
       aria-current={current ? "true" : undefined}
       aria-label={`${row.index}번 칸, ${row.title}, ${label}, ${row.harness}${row.shared ? ", 공유됨" : ""}${where ? `, ${where}` : ""}`}
+      // 상태가 그 프로그램의 말이면 칸 머리처럼 출처를 조용히 단다(ADR-0220, #5584 r2 M3).
+      aria-description={row.source}
       tabIndex={tabStop ? 0 : -1}
       onClick={() => onActivate(row.paneId)}
       onDoubleClick={() => onMaximize(row.paneId)}
@@ -706,7 +709,11 @@ function SessionRowButton({
         {row.shared ? <Radio className="sl-shr" /> : null}
         <span className="sl-h">{row.harness}</span>
         {/* 상태는 글자 칩이 말한다(#3338, 표시 문법): 팀 작업 목록·구획 B와 같은 컴포넌트다. */}
-        <SessionStateChip status={mark} testId="session-row-chip" />
+        <SessionStateChip
+          status={mark}
+          testId="session-row-chip"
+          {...(row.source ? { title: `${label} · ${row.source}` } : {})}
+        />
       </span>
     </button>
   );

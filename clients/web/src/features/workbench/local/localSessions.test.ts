@@ -434,10 +434,19 @@ describe("하네스 신호 (#2776, ADR-0190 D4-b)", () => {
     const h = harness();
     await h.sessions.ensure("p1", 80, 24);
     h.signal("waiting-permission");
+    expect(h.sessions.getSnapshot().get("p1")?.signalByPerson).not.toBe(true);
     h.sessions.input("p1", "\u001b");
     expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("working");
+    // 이 「실행 중」은 사람이 정했다: 출처 줄을 달지 않게 표시한다(#5584 r2 M1).
+    expect(h.sessions.getSnapshot().get("p1")?.signalByPerson).toBe(true);
+    // 프로그램이 같은 「실행 중」을 다시 말하면 그 프로그램의 말이 된다(신호가 같아도 다시 그린다).
+    const before = h.sessions.getSnapshot().get("p1");
+    h.signal("working");
+    expect(h.sessions.getSnapshot().get("p1")).not.toBe(before);
+    expect(h.sessions.getSnapshot().get("p1")?.signalByPerson).toBe(false);
     h.signal("turn-done");
     h.sessions.input("p1", "x");
     expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("turn-done");
+    expect(h.sessions.getSnapshot().get("p1")?.signalByPerson).toBe(false);
   });
 });

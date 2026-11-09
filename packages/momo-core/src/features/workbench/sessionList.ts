@@ -42,6 +42,13 @@ export const SESSION_STATUS_LABEL: Readonly<Record<SessionStatus, string>> = {
   stopped: "멈춤",
 };
 
+/**
+ * 실패한 턴의 글자(design-review #5584 H1). 팀 보드가 실패한 일에 쓰는 낱말 그대로다(`teamBoard.stateChipLabel`).
+ * 상태 어휘(`SessionStatus`)가 아니라 「끝남」 위의 표지다: 칸 표지 어휘(`paneStatus.PANE_MARK_LABEL`)와 「상태로
+ * 묶기」의 실패 묶음 머리가 이 한 값을 읽는다.
+ */
+export const FAILED_MARK_LABEL = "실패";
+
 export type SessionPhaseInput = "starting" | "running" | "exited" | "failed";
 
 /**
@@ -151,6 +158,11 @@ export interface SessionListInput {
    * 「실패」로 그린다. 정렬·묶기는 `status`를 따른다.
    */
   failed?: boolean;
+  /**
+   * 상태가 그 프로그램의 말일 때의 출처 한 줄(`paneStatus.paneStatusSource`, 「Codex가 알린 상태예요」). 줄의 칩
+   * 툴팁과 읽기 도구의 설명에 실린다(design-review #5584 r2 M3). 없으면 생명주기나 사람의 입력이 정한 상태다.
+   */
+  source?: string;
   /** 팀에 공유 중인가(ADR-0190 D4). L 세션 공유가 서기 전에는 늘 false. */
   shared: boolean;
   /** null = 아직 확인 중(첫 git 읽기 전). 묶지 않고 「확인 중」 줄로 따로 보인다. */
@@ -169,6 +181,8 @@ export interface SessionRow {
   status: SessionStatus;
   /** `SessionListInput.failed` 그대로. 없으면 실패가 아니다. */
   failed?: boolean;
+  /** `SessionListInput.source` 그대로. 없으면 출처 줄이 없다. */
+  source?: string;
   shared: boolean;
   /**
    * 평탄화된 줄(worktree에 세션 하나, 또는 상태로 묶기)이면 worktree 줄을 함께 싣는다:
@@ -201,6 +215,11 @@ export interface GroupHeader {
   count: number;
   /** 상태로 묶을 때의 상태. */
   status?: SessionStatus;
+  /**
+   * 상태로 묶을 때, 「끝남」 가운데 실패한 턴만 모은 묶음이다(design-review #5584 r2 H1 (c)). 머리는 「실패」이고
+   * 표지도 실패다(`paneStatus.rowMark`). 없으면 실패 묶음이 아니다.
+   */
+  failed?: boolean;
 }
 
 export type SessionListRow = GroupHeader | WorktreeRow | SessionRow;
@@ -278,6 +297,7 @@ function sessionRow(
     harness: s.harness,
     status: s.status,
     ...(s.failed ? { failed: true } : {}),
+    ...(s.source ? { source: s.source } : {}),
     shared: s.shared,
     worktree: withWorktree ? s.git.worktree : null,
     branch: withWorktree ? s.git.branch : null,
@@ -370,11 +390,25 @@ export function buildSessionList(
 
   const rows: SessionListRow[] = [];
   if (options.grouping === "status") {
+    const pushGroup = (list: Resolved[], status: SessionStatus, failed: boolean) => {
+      if (list.length === 0) return;
+      rows.push(
+        failed
+          ? { kind: "group", key: "status:failed", label: FAILED_MARK_LABEL, count: list.length, status, failed: true }
+          : { kind: "group", key: `status:${status}`, label: SESSION_STATUS_LABEL[status], count: list.length, status }
+      );
+      for (const s of list) rows.push(sessionRow(s, 0, true, manyRepos ? label(s) : null));
+    };
     for (const status of SESSION_STATUS_ORDER) {
       const list = visible.filter((s) => s.status === status).sort(compareSessions);
-      if (list.length === 0) continue;
-      rows.push({ kind: "group", key: `status:${status}`, label: SESSION_STATUS_LABEL[status], count: list.length, status });
-      for (const s of list) rows.push(sessionRow(s, 0, true, manyRepos ? label(s) : null));
+      if (status !== "done") {
+        pushGroup(list, status, false);
+        continue;
+      }
+      // 「끝남」 가운데 실패한 턴은 「실패」 묶음으로 따로 선다(design-review #5584 r2 H1 (c)): 머리가 실패 줄 위에
+      // 초록 ✓ 「끝남」을 달지 않는다. 볼 일이 더 큰 실패가 먼저다. 정렬 순위·필터는 그대로 「끝남」이다.
+      pushGroup(list.filter((s) => s.failed === true), status, true);
+      pushGroup(list.filter((s) => s.failed !== true), status, false);
     }
     return { rows, pending, counts, repos, visible: shown.length };
   }

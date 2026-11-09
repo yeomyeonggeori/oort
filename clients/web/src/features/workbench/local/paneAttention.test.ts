@@ -4,6 +4,7 @@ import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { defaultWorkbenchLayout, focusPane, splitPane } from "@momo/core/features/workbench/layoutTree";
 import { memoryLayoutStorage, readWorkbenchLayout, writeWorkbenchLayout } from "../useWorkbenchLayout";
 import type { DesktopNotifyKind } from "@/features/notifications/preference";
+import { COALESCE_MS, createOsNotifier } from "@/features/notifications/osNotifier";
 import { createPaneAttention, focusStoredPane, type PaneObservation } from "./paneAttention";
 
 // #2776: 「응답 필요」·「끝남」이 인박스 줄과 OS 알림으로 합류한다. 알림은 상태가
@@ -162,7 +163,7 @@ describe("paneAttention: 실패한 턴 (#5584 H1)", () => {
     store.observe([failed("p1")], null);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith({
-      kind: "done",
+      kind: "failed",
       title: "실패",
       body: "3번 칸 · 빌드 스크립트 정리: 오류로 끝났어요",
       label: "3번 칸 · 빌드 스크립트 정리",
@@ -181,6 +182,67 @@ describe("paneAttention: 실패한 턴 (#5584 H1)", () => {
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify.mock.calls[1]![0]).toMatchObject({ title: "실패" });
     expect(store.entries().map((e) => e.mark)).toEqual(["failed"]);
+  });
+
+  // design-review #5584 r2 H1 (a): 1.2초 창에 함께 온 실패가 「작업 끝남 N건」으로 나갔다. 진짜 묶음(osNotifier)에
+  // 이어 붙여 **보내지는 배너 원문**을 잰다: `notify`만 흉내 내면 묶음 단계가 보이지 않는다.
+  describe("OS 배너 묶음(1.2초)에서도 실패는 실패다", () => {
+    function wired() {
+      vi.useFakeTimers();
+      const send = vi.fn(async (_title: string, _body: string | undefined, _target: unknown) => true);
+      const notifier = createOsNotifier({ send });
+      let t = 1_000;
+      const store = createPaneAttention({
+        notify: (item) => notifier.offer(item),
+        windowFocused: () => false,
+        now: () => t++,
+      });
+      const banners = () => {
+        vi.advanceTimersByTime(COALESCE_MS);
+        return send.mock.calls.map(([title, body]) => ({ title, body }));
+      };
+      return { store, banners };
+    }
+
+    it("실패 + 끝남이 한 틱: 「실패」와 「끝남」 두 배너, 「작업 끝남 2건」이 아니다", () => {
+      try {
+        const { store, banners } = wired();
+        store.observe([running("p3", 3), running("p4", 4)], null);
+        store.observe([failed("p3", 3), { ...finished("p4", 4), name: "로그 회전 설정" }], null);
+        const sent = banners();
+        expect(sent).toHaveLength(2);
+        expect(sent).toContainEqual({ title: "실패", body: "3번 칸 · 빌드 스크립트 정리: 오류로 끝났어요" });
+        expect(sent).toContainEqual({ title: "끝남", body: "4번 칸 · 로그 회전 설정: 작업이 끝났어요" });
+        expect(sent.map((b) => b.title)).not.toContain("작업 끝남 2건");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("실패 + 실패가 한 틱: 「실패 2건」, 끝남이라고 말하지 않는다", () => {
+      try {
+        const { store, banners } = wired();
+        store.observe([running("p3", 3), running("p4", 4)], null);
+        store.observe([failed("p3", 3), { ...failed("p4", 4), name: "로그 회전 설정" }], null);
+        const sent = banners();
+        expect(sent).toEqual([{ title: "실패 2건", body: "3번 칸 · 빌드 스크립트 정리, 4번 칸 · 로그 회전 설정" }]);
+        expect(sent[0]!.title).not.toContain("끝남");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("실패 둘 + 끝남 하나: 실패는 「실패 2건」으로 따로 세고, 끝남은 그대로 「끝남」", () => {
+      try {
+        const { store, banners } = wired();
+        store.observe([running("p2", 2), running("p3", 3), running("p4", 4)], null);
+        store.observe([failed("p2", 2), failed("p3", 3), finished("p4", 4)], null);
+        const titles = banners().map((b) => b.title).sort();
+        expect(titles).toEqual(["끝남", "실패 2건"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("남은 「응답 필요」 줄은 기다림의 종류가 바뀌면 따라간다", () => {

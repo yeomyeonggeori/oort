@@ -1104,6 +1104,8 @@ export function LocalTerminalDock({
       const harness = view.program.kind === "harness" ? view.program.id : "셸";
       const programName =
         view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+      // 칸 머리와 같은 출처 줄(#5584 r2 M3). 프로그램의 말일 때만 있다.
+      const source = paneSourceOf(view, programName);
       return [
         {
           paneId: id,
@@ -1112,6 +1114,7 @@ export function LocalTerminalDock({
           harness,
           status: paneStatusOf(view) ?? "idle",
           ...(isFailedMark(paneMarkOf(view)) ? { failed: true } : {}),
+          ...(source === null ? {} : { source }),
           // L 세션 공유(ADR-0190 D4-b): 기본 꺼짐. 사람이 「채널에 공유」를 골라야 켜진다(#2867).
           shared: shareSource?.share.getState(id).kind === "on",
           // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이

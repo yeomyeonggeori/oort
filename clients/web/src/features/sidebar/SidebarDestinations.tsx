@@ -8,7 +8,7 @@ import {
   WORK_PATH,
 } from "@momo/core/features/workbench/workTab";
 import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
-import { PANE_UNSEEN_LABEL, isFailedMark } from "@momo/core/features/workbench/paneStatus";
+import { isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { scheduledNavEntry } from "@momo/core/features/scheduled/model";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useScheduled } from "@/features/scheduled/useScheduled";
@@ -126,11 +126,8 @@ export function SidebarDestinations({
           mentionCount={marks.mine.pill?.count ?? 0}
           dot={marks.mine.dot}
           badgeLabel={
-            needsMe.panes > 0
-              ? `응답이 필요한 세션 ${needsMe.panes}개`
-              : marks.mine.dot !== null
-                ? PANE_UNSEEN_LABEL[failedUnseen ? "failed" : "done"]
-                : undefined
+            // 점의 문장은 점과 같은 판정(`destinationMarks`)에서 나온다: 접힌 레일과 같은 말이다(#5584 r2 H1 (b)).
+            needsMe.panes > 0 ? `응답이 필요한 세션 ${needsMe.panes}개` : marks.mine.dotLabel
           }
         />
         {liveRows.map((entry) => (

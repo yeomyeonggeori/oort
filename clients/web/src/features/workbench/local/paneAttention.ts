@@ -56,6 +56,8 @@ function statusInputOf(view: LocalSessionView): PaneStatusInput {
     exitCode: view.exit?.code ?? null,
     exitSignal: view.exit?.signal ?? null,
     signal: view.signal,
+    // 사람의 입력이 정한 신호는 출처 줄을 달지 않는다(#5584 r2 M1). 판정은 같다.
+    ...(view.signalByPerson === true ? { byPerson: true } : {}),
   };
 }
 
@@ -68,7 +70,10 @@ export function paneMarkOf(view: LocalSessionView | null | undefined): PaneMark 
   return derivePaneMark(statusInputOf(view));
 }
 
-/** 상태가 그 프로그램의 말일 때의 출처 한 줄(「Codex가 알린 상태예요」, #5584 M2). 아니면 null. */
+/**
+ * 상태가 그 프로그램의 말일 때의 출처 한 줄(「Codex가 알린 상태예요」, #5584 M2). 신호가 없거나, 마지막 변화가 사람의
+ * 입력이었으면(#5584 r2 M1) null.
+ */
 export function paneSourceOf(view: LocalSessionView | null | undefined, programName: string): string | null {
   if (!view) return null;
   return paneStatusSource(statusInputOf(view), programName);
@@ -172,7 +177,10 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
         ) {
           const copy = attentionCopy(t.status, { index: p.index, name: p.name }, p.signal);
           deps.notify({
-            kind: status === "waiting" ? "waiting" : "done",
+            // 묶음의 종류는 표지 그대로다(응답 필요·끝남·실패). 실패한 턴은 「끝남」과 다른 묶음이라 같은 1.2초 창에 와도
+            // 「작업 끝남 N건」에 섞이지 않고 「실패」·「실패 N건」으로 따로 나간다(design-review #5584 r2 H1 (a)).
+            // 켜고 끄는 설정은 「끝남」과 같다(`work-mine-done`).
+            kind: t.status,
             title: copy.title,
             body: copy.body,
             label: `${p.index}번 칸 · ${p.name}`,

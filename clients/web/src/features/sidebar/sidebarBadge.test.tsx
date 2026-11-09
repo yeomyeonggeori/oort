@@ -103,13 +103,14 @@ describe("접힌 레일 = 펼친 줄", () => {
   it("알약이 있으면 점은 없고, 응답 필요가 풀리면 안 본 끝남이 초록 점이다", () => {
     expect(marks.mine.dot).toBeNull();
     const done = destinationMarks({ needsMe: { total: 0, panes: 0 }, unreadChannels: 0, doneUnseen: true });
-    expect(done.mine).toEqual({ pill: null, dot: "ok" });
-    // 오류로 끝난 칸(#5584 H1)은 성공의 초록 점이 아니다.
+    expect(done.mine).toEqual({ pill: null, dot: "ok", dotLabel: "아직 안 본 끝난 세션이 있어요" });
+    // 오류로 끝난 칸(#5584 H1)은 성공의 초록 점이 아니고, 점의 문장도 실패다(#5584 r2 H1 (b)).
     const failed = destinationMarks({ needsMe: { total: 0, panes: 0 }, unreadChannels: 0, doneUnseen: true, failedUnseen: true });
-    expect(failed.mine).toEqual({ pill: null, dot: "danger" });
+    expect(failed.mine).toEqual({ pill: null, dot: "danger", dotLabel: "오류로 끝난 세션이 있어요" });
     expect(DOT_TONE_CLASS.danger).toBe("bg-danger");
     const waitingWins = destinationMarks({ needsMe: { total: 1, panes: 1 }, unreadChannels: 0, doneUnseen: true, failedUnseen: true });
     expect(waitingWins.mine.dot).toBeNull();
+    expect(waitingWins.mine.dotLabel).toBeUndefined();
     expect(done.chat).toEqual({ pill: null, dot: null });
   });
 });

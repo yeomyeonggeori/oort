@@ -164,8 +164,9 @@ describe("두 길 합치기: hook과 OSC 7501 보고 (#5579)", () => {
   });
 
   it("사람의 입력: hook만 있는 칸의 기다림만 푼다", () => {
-    expect(afterPersonInput({ signal: "waiting-permission", reports: false })).toEqual({ signal: "working", reports: false });
-    expect(afterPersonInput({ signal: "waiting-input", reports: false })).toEqual({ signal: "working", reports: false });
+    // 푼 「실행 중」은 사람의 입력이 정한 것이라 표시가 붙는다(#5584 r2 M1).
+    expect(afterPersonInput({ signal: "waiting-permission", reports: false })).toEqual({ signal: "working", reports: false, byPerson: true });
+    expect(afterPersonInput({ signal: "waiting-input", reports: false })).toEqual({ signal: "working", reports: false, byPerson: true });
     for (const kept of [
       { signal: "waiting-permission", reports: true },
       { signal: "waiting-input", reports: true },
@@ -323,5 +324,30 @@ describe("출처 한 줄 (#5584 M2, ADR-0220 「에이전트 보고」)", () => 
     // 신호가 없거나(생명주기만) 끝난 칸에는 붙이지 않는다.
     expect(paneStatusSource(live(null), "Codex")).toBeNull();
     expect(paneStatusSource({ phase: "exited", exitCode: 0, exitSignal: null, signal: "turn-done" }, "Codex")).toBeNull();
+  });
+
+  // design-review #5584 r2 M1: hook으로 「응답 필요」만 보낸 Claude 칸에 사람이 `y`를 치면 웹이 「실행 중」으로
+  // 푸는데, 출처 줄이 「Claude Code가 알린 상태예요」라고 말했다. Claude Code는 그 말을 하지 않았다.
+  it("사람의 입력으로 푼 상태에는 출처를 달지 않고, 프로그램이 다시 말하면 다시 단다", () => {
+    const input = (state: PaneSignalState): PaneStatusInput => ({
+      phase: "running",
+      exitCode: null,
+      exitSignal: null,
+      signal: state.signal,
+      ...(state.byPerson ? { byPerson: true } : {}),
+    });
+    let state = applyPaneSignalEvent(NO_PANE_SIGNAL, { from: "hook", signal: "waiting-permission" });
+    expect(paneStatusSource(input(state), "Claude Code")).toBe("Claude Code가 알린 상태예요");
+    state = afterPersonInput(state);
+    expect(derivePaneStatus(input(state))).toBe("running");
+    expect(paneStatusSource(input(state), "Claude Code")).toBeNull();
+    // 프로그램이 뒤이어 같은 「실행 중」을 말하면(PostToolUse) 그때부터 그 프로그램의 말이다.
+    state = applyPaneSignalEvent(state, { from: "hook", signal: "working" });
+    expect(state.byPerson).toBeUndefined();
+    expect(paneStatusSource(input(state), "Claude Code")).toBe("Claude Code가 알린 상태예요");
+    // 보고하는 칸은 사람의 입력이 상태를 바꾸지 않으므로 출처가 그대로다.
+    const reported = afterPersonInput(applyPaneSignalEvent(NO_PANE_SIGNAL, { from: "report", signal: "waiting-permission" }));
+    expect(reported.byPerson).toBeUndefined();
+    expect(paneStatusSource(input(reported), "Codex")).toBe("Codex가 알린 상태예요");
   });
 });

@@ -1,4 +1,5 @@
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
+import { PANE_UNSEEN_LABEL } from "@momo/core/features/workbench/paneStatus";
 
 // =============================================================================
 // 표시 문법 하나 (#3338 / #3335 T3, 시안 `?panel=grammar`).
@@ -55,6 +56,11 @@ export interface DestinationMark {
   pill: BadgeSpec | null;
   /** 알약이 없는 자리에서 수를 못 그릴 때만 서는 점. 알약이 있으면 항상 null. */
   dot: DotTone | null;
+  /**
+   * 점이 읽기 도구에 말하는 문장(점은 글자가 없다). 점의 톤과 **같은 판정**에서 나온다: 펼친 줄과 접힌 레일이 이 값을
+   * 읽으므로 빨간 점(실패)이 「끝난 세션」으로 들리지 않는다(design-review #5584 r2 H1 (b)). 지금은 「작업」의 점만 싣는다.
+   */
+  dotLabel?: string;
 }
 
 export interface DestinationMarks {
@@ -77,7 +83,7 @@ const NONE: DestinationMark = { pill: null, dot: null };
  *           안 그리고, 접힌 레일만 그린다(`WorkspaceRail`).
  *   inbox = 잉크 알약, 나에게 필요한 일 전부.
  *   mine  = 잉크 알약(응답 필요 칸), 없으면 아직 안 본 끝남이 초록 점. 그중 하나라도 오류로
- *           끝났으면(실패) 빨간 점이다: 실패를 초록으로 말하지 않는다.
+ *           끝났으면(실패) 빨간 점이다: 실패를 초록으로 말하지 않는다. 점의 문장(`dotLabel`)도 같이 정한다.
  *   scheduled = 잉크 알약, 보내지 못한 예약의 수(ADR-0208). 점은 없다.
  */
 export function destinationMarks(input: {
@@ -90,13 +96,17 @@ export function destinationMarks(input: {
   scheduledFailed?: number;
 }): DestinationMarks {
   const minePill = badgeFor({ needsMe: input.needsMe.panes });
+  // 점과 그 문장을 한 자리에서 정한다: 실패가 하나라도 있으면 빨간 점 + 실패 문장.
+  const mine: DestinationMark =
+    minePill !== null || !(input.failedUnseen || input.doneUnseen)
+      ? { pill: minePill, dot: null }
+      : input.failedUnseen
+        ? { pill: null, dot: "danger", dotLabel: PANE_UNSEEN_LABEL.failed }
+        : { pill: null, dot: "ok", dotLabel: PANE_UNSEEN_LABEL.done };
   return {
     chat: positive(input.unreadChannels) > 0 ? { pill: null, dot: "amber" } : NONE,
     inbox: { pill: badgeFor({ needsMe: input.needsMe.total }), dot: null },
-    mine: {
-      pill: minePill,
-      dot: minePill !== null ? null : input.failedUnseen ? "danger" : input.doneUnseen ? "ok" : null,
-    },
+    mine,
     scheduled: { pill: badgeFor({ needsMe: input.scheduledFailed }), dot: null },
   };
 }
