@@ -39,6 +39,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::team_ai::{self, FallbackReason, TeamAiWorkspace};
+use crate::team_ai_hermes;
 
 /// `team_ai_limits` as the reader sees it. `None` = that limit is not set. A stored value the
 /// settings door would refuse (a hand edit: `0`, a negative, a string) reads as **absent**, never
@@ -419,16 +420,37 @@ pub async fn month_spend_if_limited_in_tx(
     agent_month_spend_in_tx(conn, workspace_id, agent_member_id).await
 }
 
+/// The two facts of the delegation door that are this **process's**, not the database's (ADR-0201 증보 v4
+/// P8, #5374): G4's three declarations as the api reads them and whether an `operator_env` pin resolves
+/// here (G5, [`team_ai_hermes::operator_env_pin_resolves`]). The api only explains; the worker enforces
+/// with its own copy of the same variables. Default = nothing declared, nothing resolves (closed).
+#[derive(Debug, Clone, Default)]
+pub struct DelegationProcessFacts {
+    pub declarations: team_ai_hermes::HermesDeclarations,
+    pub env_pin_resolves: bool,
+}
+
 /// What the settings screen reads (B9-4) — the limits as set, the cap that actually applies after
 /// the operator's ceiling, the ceiling itself, today's and this month's usage, and whether a
 /// dollar limit can be switched on. Computed, never stored: it rides the settings GET/PATCH under
 /// `team_ai_limits_status` when asked for, and is not a PATCH-able key.
 ///
-/// **Only a boolean says whether the model is priced — never the model's name.**
+/// **The delegation to Hermes** (ADR-0201 증보 v4 P7·P8, #5374) rides the same objects under the setting's
+/// own name: `limits.dailyDelegations` (what the administrator set; `null` = the default 30, never "no
+/// limit"), `effective.dailyDelegations` (`min(that or 30, the ceiling)`; `0` = **closed**, the operator's
+/// ceiling being unset, blank or `0`), `operatorCeiling.dailyDelegations` (the positive ceiling, else `null`)
+/// with `operatorCeiling.delegationOff` (the "unset = closed" flag), `usage.todayDelegations` (delegations at
+/// or past `called` today — the counters' own source, the task row's marker), and the door's workspace half:
+/// `delegationAvailable` + `delegationUnavailableReason` (one closed word of the door, `null` when open —
+/// [`team_ai_hermes::SettingsDoorFacts::closed`]).
+///
+/// **Only a boolean says whether the model is priced — never the model's name.** Nothing about the
+/// delegation names a member or an agent either: the reason is a closed word.
 pub async fn limits_status_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     caps: &OperatorCaps,
+    process: &DelegationProcessFacts,
 ) -> Result<Value, DbError> {
     let settings: Option<Value> =
         sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
@@ -449,6 +471,29 @@ pub async fn limits_status_in_tx(
         None => (0, 0, AgentMonthSpend::default()),
     };
     let availability = monthly_usd_availability_in_tx(conn, workspace_id, state.member_id).await?;
+    // P7: the day's delegations are counted from the task row's marker (`called` or later, the UTC day of
+    // `delegation_called_at`) — the same read the door's G6 and the `called` commit judge by. The requester
+    // and the window only shape the two other counts, which this read does not show.
+    let today_delegations =
+        momo_agent::team_ai_task::delegation_counts_in_tx(conn, workspace_id, Uuid::nil(), 0)
+            .await?
+            .today;
+    let day_delegation_cap = delegation_cap(&limits, caps);
+    // G3 for the team: the helper (if it exists yet) is never a Hermes; no member has the nil id.
+    let pinned = team_ai_hermes::pinned_agents_in_tx(
+        conn,
+        workspace_id,
+        state.member_id.unwrap_or_else(Uuid::nil),
+    )
+    .await?;
+    let delegation_closed = team_ai_hermes::SettingsDoorFacts {
+        target: team_ai_hermes::resolve_team_target(&pinned),
+        declarations: process.declarations.clone(),
+        pin_resolves: process.env_pin_resolves,
+        day_cap: day_delegation_cap,
+        today: today_delegations,
+    }
+    .closed();
     let (day_resets_at_ms, month_resets_at_ms): (i64, i64) = sqlx::query_as(
         "SELECT \
            floor(extract(epoch FROM ((date_trunc('day', now() AT TIME ZONE 'UTC') \
@@ -463,16 +508,21 @@ pub async fn limits_status_in_tx(
             "dailyTokens": limits.daily_tokens,
             "dailySearches": limits.daily_searches,
             "monthlyUsd": limits.monthly_usd(),
+            "dailyDelegations": limits.daily_delegations,
         },
         "effective": {
             "dailyTokens": effective_cap(limits.daily_tokens, caps.daily_tokens),
             "dailySearches": search_cap(&limits, caps),
+            // never "none": the delegation always has a cap, and `0` is the closed door
+            "dailyDelegations": day_delegation_cap.unwrap_or(0),
         },
         "operatorCeiling": {
             "dailyTokens": caps.token_ceiling(),
             "dailySearches": caps.search_ceiling(),
             "helperOff": caps.helper_off(),
             "searchOff": caps.search_off(),
+            "dailyDelegations": caps.delegation_ceiling(),
+            "delegationOff": caps.delegation_ceiling().is_none(),
         },
         "usage": {
             "todayTokens": tokens_today,
@@ -481,9 +531,12 @@ pub async fn limits_status_in_tx(
             "monthRuns": month.runs,
             "monthUnpricedRuns": month.unpriced_runs,
             "monthEstimatedRuns": month.estimated_runs,
+            "todayDelegations": today_delegations,
         },
         "monthlyUsdAvailable": availability.is_available(),
         "monthlyUsdUnavailableReason": availability.reason(),
+        "delegationAvailable": delegation_closed.is_none(),
+        "delegationUnavailableReason": delegation_closed.map(team_ai_hermes::DoorClosed::word),
         "dayResetsAtMs": day_resets_at_ms,
         "monthResetsAtMs": month_resets_at_ms,
     }))

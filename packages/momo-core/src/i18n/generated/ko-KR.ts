@@ -6685,6 +6685,21 @@ export const catalog: MessageCatalog = {
       "value": "메시지는 2자 이상 입력하면 찾아요."
     }
   ],
+  "settings.aiLimits.ceilingDelegations": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회까지로 제한했어요."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,
@@ -6721,6 +6736,44 @@ export const catalog: MessageCatalog = {
       "value": "한도를 껐어요."
     }
   ],
+  "settings.aiLimits.delegationsHint": [
+    {
+      "type": 0,
+      "value": "도우미가 하루에 팀 Hermes에 맡길 수 있는 횟수예요. 정하지 않으면 30회예요."
+    }
+  ],
+  "settings.aiLimits.delegationsLabel": [
+    {
+      "type": 0,
+      "value": "하루 Hermes 맡기기"
+    }
+  ],
+  "settings.aiLimits.delegationsToday": [
+    {
+      "type": 0,
+      "value": "오늘 Hermes에 맡긴 횟수 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    }
+  ],
+  "settings.aiLimits.delegationsValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 맡기기 횟수"
+    }
+  ],
   "settings.aiLimits.description": [
     {
       "type": 0,
@@ -6737,6 +6790,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "1 이상의 정수로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidDelegations": [
+    {
+      "type": 0,
+      "value": "1부터 200 사이의 정수로 적어 주세요."
     }
   ],
   "settings.aiLimits.errorInvalidUsd": [
@@ -7324,6 +7383,129 @@ export const catalog: MessageCatalog = {
       "value": "기기 언어 따르기"
     }
   ],
+  "teamAi.delegation.chipImage": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 도움 · 그림"
+    }
+  ],
+  "teamAi.delegation.chipSearch": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 도움 · 검색"
+    }
+  ],
+  "teamAi.delegation.reasonAmbiguous": [
+    {
+      "type": 0,
+      "value": "연결된 Hermes가 둘 이상이라 어디에 맡길지 정하지 못해요."
+    }
+  ],
+  "teamAi.delegation.reasonCeilingUnset": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 아직 Hermes 맡기기를 열지 않았어요."
+    }
+  ],
+  "teamAi.delegation.reasonConnectionMode": [
+    {
+      "type": 0,
+      "value": "개인 앱이 연결된 Hermes라서 맡길 수 없어요."
+    }
+  ],
+  "teamAi.delegation.reasonDailyCap": [
+    {
+      "type": 0,
+      "value": "오늘 Hermes에 맡길 수 있는 횟수를 다 썼어요."
+    }
+  ],
+  "teamAi.delegation.reasonNotConnected": [
+    {
+      "type": 0,
+      "value": "Hermes가 연결돼 있지 않아요."
+    }
+  ],
+  "teamAi.delegation.reasonPinUnresolved": [
+    {
+      "type": 0,
+      "value": "서버에 Hermes 연결 정보가 없어요."
+    }
+  ],
+  "teamAi.delegation.reasonToolsNotLocked": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 Hermes의 도구 잠금을 선언하지 않았어요."
+    }
+  ],
+  "teamAi.delegation.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "지금 상태를 알 수 없어요."
+    }
+  ],
+  "teamAi.delegation.spentCredits": [
+    {
+      "type": 0,
+      "value": "크레딧 토큰 "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    }
+  ],
+  "teamAi.delegation.spentHermes": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "회"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": "(구독이라 oort가 금액을 못 재요)"
+    }
+  ],
+  "teamAi.delegation.spentLabel": [
+    {
+      "type": 0,
+      "value": "이 답이 쓴 양"
+    }
+  ],
+  "teamAi.delegation.unavailable": [
+    {
+      "type": 0,
+      "value": "지금은 쓸 수 없어요."
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,
@@ -7508,6 +7690,18 @@ export const catalog: MessageCatalog = {
       "value": "파일"
     }
   ],
+  "teamAi.roles.hermesHint": [
+    {
+      "type": 0,
+      "value": "팀 키로 못 하는 일(그림, 웹 검색이 안 되는 날의 검색)을 팀 Hermes에 한 번 맡기고 답을 합쳐요."
+    }
+  ],
+  "teamAi.roles.hermesName": [
+    {
+      "type": 0,
+      "value": "Hermes 도움"
+    }
+  ],
   "teamAi.roles.inviteAccessHint": [
     {
       "type": 0,
@@ -7554,6 +7748,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "파일을 켜면 도우미가 읽은 첨부 파일의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.noticeHermes": [
+    {
+      "type": 0,
+      "value": "Hermes 도움을 켜면 도우미가 맡기는 요청 문장이 Hermes가 쓰는 AI 회사(OpenAI 등)로 전달돼요. Hermes는 맡긴 요청 문장과 결과를 자기 기록(state.db)에 남겨요. 그 보관과 삭제는 oort가 아니라 서버 운영자가 정해요."
     }
   ],
   "teamAi.roles.noticeMemory": [

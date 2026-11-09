@@ -1113,6 +1113,16 @@ pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::Operat
     }
 }
 
+/// ADR-0201 증보 v4 P8 (#5374): G4's three declarations as **this** process reads them — the rule the
+/// agent-worker's door reads them by (`HermesDeclarations::from_lookup`: the tool lock by the api's own truth
+/// rule, the two connection-mode variables by the presence of a non-empty raw value). The api never enforces
+/// the delegation; it only explains it on the settings screen (`team_ai_limits_status.delegation…`), and the
+/// templates give it the worker's values (K-S2 flipped). The two kind declarations are the worker's alone and
+/// are not read here (v4.1).
+pub fn team_ai_hermes_from_env() -> momo_workspace_actions::team_ai_hermes::HermesDeclarations {
+    momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env)
+}
+
 fn claude_subscription_agents_from_env() -> bool {
     claude_subscription_agents_switch_on(env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
 }

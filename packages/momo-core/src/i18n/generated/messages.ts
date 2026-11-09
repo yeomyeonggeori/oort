@@ -999,12 +999,18 @@ export const messageKeys = [
   "search.state.scopeNote",
   "search.state.shortHint",
   "search.state.shortHintMessages",
+  "settings.aiLimits.ceilingDelegations",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
+  "settings.aiLimits.delegationsHint",
+  "settings.aiLimits.delegationsLabel",
+  "settings.aiLimits.delegationsToday",
+  "settings.aiLimits.delegationsValueLabel",
   "settings.aiLimits.description",
   "settings.aiLimits.errorEmpty",
   "settings.aiLimits.errorInvalidCount",
+  "settings.aiLimits.errorInvalidDelegations",
   "settings.aiLimits.errorInvalidUsd",
   "settings.aiLimits.errorOverCeiling",
   "settings.aiLimits.errorTooLarge",
@@ -1080,6 +1086,20 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "teamAi.delegation.chipImage",
+  "teamAi.delegation.chipSearch",
+  "teamAi.delegation.reasonAmbiguous",
+  "teamAi.delegation.reasonCeilingUnset",
+  "teamAi.delegation.reasonConnectionMode",
+  "teamAi.delegation.reasonDailyCap",
+  "teamAi.delegation.reasonNotConnected",
+  "teamAi.delegation.reasonPinUnresolved",
+  "teamAi.delegation.reasonToolsNotLocked",
+  "teamAi.delegation.reasonUnknown",
+  "teamAi.delegation.spentCredits",
+  "teamAi.delegation.spentHermes",
+  "teamAi.delegation.spentLabel",
+  "teamAi.delegation.unavailable",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -1110,6 +1130,8 @@ export const messageKeys = [
   "teamAi.roles.codeName",
   "teamAi.roles.filesHint",
   "teamAi.roles.filesName",
+  "teamAi.roles.hermesHint",
+  "teamAi.roles.hermesName",
   "teamAi.roles.inviteAccessHint",
   "teamAi.roles.inviteAccessName",
   "teamAi.roles.longResearchHint",
@@ -1118,6 +1140,7 @@ export const messageKeys = [
   "teamAi.roles.memoryName",
   "teamAi.roles.noticeBoth",
   "teamAi.roles.noticeFiles",
+  "teamAi.roles.noticeHermes",
   "teamAi.roles.noticeMemory",
   "teamAi.roles.workspaceAdminHint",
   "teamAi.roles.workspaceAdminName",
@@ -2500,6 +2523,9 @@ export const argumentSpecs = {
   "search.state.scopeNote": {},
   "search.state.shortHint": {},
   "search.state.shortHintMessages": {},
+  "settings.aiLimits.ceilingDelegations": {
+    "limit": "number"
+  },
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -2507,9 +2533,17 @@ export const argumentSpecs = {
     "limit": "number"
   },
   "settings.aiLimits.cleared": {},
+  "settings.aiLimits.delegationsHint": {},
+  "settings.aiLimits.delegationsLabel": {},
+  "settings.aiLimits.delegationsToday": {
+    "limit": "number",
+    "used": "number"
+  },
+  "settings.aiLimits.delegationsValueLabel": {},
   "settings.aiLimits.description": {},
   "settings.aiLimits.errorEmpty": {},
   "settings.aiLimits.errorInvalidCount": {},
+  "settings.aiLimits.errorInvalidDelegations": {},
   "settings.aiLimits.errorInvalidUsd": {},
   "settings.aiLimits.errorOverCeiling": {
     "max": "number"
@@ -2620,6 +2654,29 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "teamAi.delegation.chipImage": {
+    "name": "string"
+  },
+  "teamAi.delegation.chipSearch": {
+    "name": "string"
+  },
+  "teamAi.delegation.reasonAmbiguous": {},
+  "teamAi.delegation.reasonCeilingUnset": {},
+  "teamAi.delegation.reasonConnectionMode": {},
+  "teamAi.delegation.reasonDailyCap": {},
+  "teamAi.delegation.reasonNotConnected": {},
+  "teamAi.delegation.reasonPinUnresolved": {},
+  "teamAi.delegation.reasonToolsNotLocked": {},
+  "teamAi.delegation.reasonUnknown": {},
+  "teamAi.delegation.spentCredits": {
+    "tokens": "string"
+  },
+  "teamAi.delegation.spentHermes": {
+    "count": "number",
+    "name": "string"
+  },
+  "teamAi.delegation.spentLabel": {},
+  "teamAi.delegation.unavailable": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -2652,6 +2709,8 @@ export const argumentSpecs = {
   "teamAi.roles.codeName": {},
   "teamAi.roles.filesHint": {},
   "teamAi.roles.filesName": {},
+  "teamAi.roles.hermesHint": {},
+  "teamAi.roles.hermesName": {},
   "teamAi.roles.inviteAccessHint": {},
   "teamAi.roles.inviteAccessName": {},
   "teamAi.roles.longResearchHint": {},
@@ -2660,6 +2719,7 @@ export const argumentSpecs = {
   "teamAi.roles.memoryName": {},
   "teamAi.roles.noticeBoth": {},
   "teamAi.roles.noticeFiles": {},
+  "teamAi.roles.noticeHermes": {},
   "teamAi.roles.noticeMemory": {},
   "teamAi.roles.workspaceAdminHint": {},
   "teamAi.roles.workspaceAdminName": {},
@@ -3934,12 +3994,18 @@ export interface MessageArgs {
   "search.state.scopeNote": Record<string, never>;
   "search.state.shortHint": Record<string, never>;
   "search.state.shortHintMessages": Record<string, never>;
+  "settings.aiLimits.ceilingDelegations": { limit: number };
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;
+  "settings.aiLimits.delegationsHint": Record<string, never>;
+  "settings.aiLimits.delegationsLabel": Record<string, never>;
+  "settings.aiLimits.delegationsToday": { limit: number; used: number };
+  "settings.aiLimits.delegationsValueLabel": Record<string, never>;
   "settings.aiLimits.description": Record<string, never>;
   "settings.aiLimits.errorEmpty": Record<string, never>;
   "settings.aiLimits.errorInvalidCount": Record<string, never>;
+  "settings.aiLimits.errorInvalidDelegations": Record<string, never>;
   "settings.aiLimits.errorInvalidUsd": Record<string, never>;
   "settings.aiLimits.errorOverCeiling": { max: number };
   "settings.aiLimits.errorTooLarge": { max: number };
@@ -4015,6 +4081,20 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "teamAi.delegation.chipImage": { name: string };
+  "teamAi.delegation.chipSearch": { name: string };
+  "teamAi.delegation.reasonAmbiguous": Record<string, never>;
+  "teamAi.delegation.reasonCeilingUnset": Record<string, never>;
+  "teamAi.delegation.reasonConnectionMode": Record<string, never>;
+  "teamAi.delegation.reasonDailyCap": Record<string, never>;
+  "teamAi.delegation.reasonNotConnected": Record<string, never>;
+  "teamAi.delegation.reasonPinUnresolved": Record<string, never>;
+  "teamAi.delegation.reasonToolsNotLocked": Record<string, never>;
+  "teamAi.delegation.reasonUnknown": Record<string, never>;
+  "teamAi.delegation.spentCredits": { tokens: string };
+  "teamAi.delegation.spentHermes": { count: number; name: string };
+  "teamAi.delegation.spentLabel": Record<string, never>;
+  "teamAi.delegation.unavailable": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;
@@ -4045,6 +4125,8 @@ export interface MessageArgs {
   "teamAi.roles.codeName": Record<string, never>;
   "teamAi.roles.filesHint": Record<string, never>;
   "teamAi.roles.filesName": Record<string, never>;
+  "teamAi.roles.hermesHint": Record<string, never>;
+  "teamAi.roles.hermesName": Record<string, never>;
   "teamAi.roles.inviteAccessHint": Record<string, never>;
   "teamAi.roles.inviteAccessName": Record<string, never>;
   "teamAi.roles.longResearchHint": Record<string, never>;
@@ -4053,6 +4135,7 @@ export interface MessageArgs {
   "teamAi.roles.memoryName": Record<string, never>;
   "teamAi.roles.noticeBoth": Record<string, never>;
   "teamAi.roles.noticeFiles": Record<string, never>;
+  "teamAi.roles.noticeHermes": Record<string, never>;
   "teamAi.roles.noticeMemory": Record<string, never>;
   "teamAi.roles.workspaceAdminHint": Record<string, never>;
   "teamAi.roles.workspaceAdminName": Record<string, never>;
