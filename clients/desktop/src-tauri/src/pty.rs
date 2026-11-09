@@ -48,13 +48,18 @@
 // Raw output stays on this machine; it is never sent to the server (D2). The
 // reader hands it to the webview unchanged and, in a harness pane, to
 // `program_status.rs`, which reads OSC 7501 reports and nothing else (#5579).
+//
+// Input is the person's: `pty_write`, from the webview. The one exception is
+// `AutoReply` (ADR-0190 증보 2026-11-09, #5586): a harness pane answers its
+// own program's `OSC 7501 ; ?` with `program_status::REPLY`, fixed bytes,
+// through the same queue. No server, link, other pane or page asks for it.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex, Weak};
 use std::time::Duration;
 
 use crate::harness_path;
@@ -534,7 +539,10 @@ impl Flow {
 struct Session {
     master: Box<dyn MasterPty + Send>,
     /// Keystrokes go to the session's writer thread; a command only enqueues.
-    input: mpsc::Sender<Vec<u8>>,
+    /// Only the session keeps the sender (a send borrows it for a moment;
+    /// `AutoReply` holds it weakly), so the writer thread ends with the
+    /// session, as before #5586.
+    input: Arc<mpsc::Sender<Vec<u8>>>,
     queued: Arc<AtomicUsize>,
     flow: Arc<Flow>,
     /// Session leader = session id (portable-pty calls setsid).
@@ -616,6 +624,7 @@ impl PtyManager {
             .map_err(|e| format!("writer: {e}"))?;
 
         let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
+        let input = Arc::new(input);
         let queued = Arc::new(AtomicUsize::new(0));
         let flow = Arc::new(Flow::default());
 
@@ -631,8 +640,13 @@ impl PtyManager {
             let (flow, sink) = (flow.clone(), sink.clone());
             // A harness pane's program reports its status in band (#5579).
             // Only that harness's own reports count (`app`, design-review M1).
+            // There, and only there, the pane answers the program's query
+            // (#5586): a pane that does not read reports must not say it does.
             let harness = plan.hooks.map(str::as_bytes);
-            let status = harness.map(program_status::Scanner::for_harness);
+            let status = harness.map(|harness| {
+                let reply = AutoReply::new(&input, &queued);
+                (program_status::Scanner::for_harness(harness), reply)
+            });
             std::thread::Builder::new()
                 .name(format!("pty-{id}-read"))
                 .spawn(move || read_loop(reader, sink, flow, status, drained_tx))
@@ -826,14 +840,57 @@ fn write_loop(
     }
 }
 
+/// The one PTY write that is not the person's (ADR-0190 증보 2026-11-09,
+/// #5586): `program_status::REPLY`, the fixed answer to the pane program's
+/// own `OSC 7501 ; ?`. It joins the person's keystrokes in the session's
+/// queue, so the writer thread stays the only thing that writes and order is
+/// queue order. It never passes through the page, so nothing there counts it
+/// as the person's input (「응답 필요」 stays, no 「사람이 푼」 mark).
+struct AutoReply {
+    /// Weak: once the session is gone the reply has nowhere to go.
+    input: Weak<mpsc::Sender<Vec<u8>>>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl AutoReply {
+    fn new(input: &Arc<mpsc::Sender<Vec<u8>>>, queued: &Arc<AtomicUsize>) -> Self {
+        Self {
+            input: Arc::downgrade(input),
+            queued: queued.clone(),
+        }
+    }
+
+    /// Queue the reply under `PtyManager::write`'s bound. A child that is not
+    /// reading its input gets none, which it reads as "unsupported".
+    fn send(&self) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        let len = program_status::REPLY.len();
+        let before = self.queued.fetch_add(len, Ordering::AcqRel);
+        if before + len > MAX_QUEUED_WRITE_BYTES
+            || input.send(program_status::REPLY.to_vec()).is_err()
+        {
+            self.queued.fetch_sub(len, Ordering::AcqRel);
+        }
+    }
+}
+
 /// The bytes go to the webview unchanged. A harness pane's bytes also go
 /// through its `program_status::Scanner`, whose closed reports are the only
-/// thing this loop derives from output (ADR-0190 D4-b, #5579).
+/// thing this loop derives from output (ADR-0190 D4-b, #5579), and whose
+/// queries it answers (#5586).
+///
+/// A query is answered **before** the page gets the bytes: a program asks
+/// `OSC 7501 ; ?` and then DA1 (`CSI c`), and takes DA1's answer (xterm's,
+/// through the page and `pty_write`) arriving first as "unsupported" (spec
+/// revision 0.4, Feature detection; Claude Code's probe). Queued first, the
+/// reply reaches the child first.
 fn read_loop(
     mut reader: Box<dyn Read + Send>,
     sink: Arc<dyn PtySink>,
     flow: Arc<Flow>,
-    mut status: Option<program_status::Scanner>,
+    mut status: Option<(program_status::Scanner, AutoReply)>,
     drained: mpsc::Sender<()>,
 ) {
     let mut buf = vec![0u8; READ_CHUNK];
@@ -843,11 +900,18 @@ fn read_loop(
             Ok(0) | Err(_) => break,
             Ok(n) => {
                 flow.sent(n);
-                sink.output(buf[..n].to_vec());
-                if let Some(scanner) = status.as_mut() {
-                    for report in scanner.feed(&buf[..n]) {
-                        sink.report(program_status::signal_for(report));
+                let mut reports = Vec::new();
+                if let Some((scanner, reply)) = status.as_mut() {
+                    for seen in scanner.feed(&buf[..n]) {
+                        match seen {
+                            program_status::Seen::Query => reply.send(),
+                            program_status::Seen::Report(report) => reports.push(report),
+                        }
                     }
+                }
+                sink.output(buf[..n].to_vec());
+                for report in reports {
+                    sink.report(program_status::signal_for(report));
                 }
             }
         }
@@ -2615,6 +2679,236 @@ printf '\033]7501;state=clear\033\\end\n'
         let shell = run(false);
         assert!(shell.reports.lock().unwrap().is_empty(), "a shell pane");
         assert_eq!(shell.text(), text, "the same bytes either way");
+    }
+
+    /// xterm.js 6's answer to DA1 (`CSI c`).
+    const DA1_ANSWER: &[u8] = b"\x1b[?1;2c";
+
+    /// The page's xterm, as far as a program's probe can tell: it answers
+    /// each DA1 through `PtyManager::write` synchronously inside `output`, so
+    /// its answer follows the bytes the shell hands over. A reply the shell
+    /// queued only after handing them over would come second.
+    #[derive(Default)]
+    struct Xterm {
+        session: std::sync::OnceLock<(Weak<PtyManager>, u32)>,
+        answered: Mutex<usize>,
+        seen: Recorder,
+    }
+
+    impl PtySink for Xterm {
+        fn output(&self, bytes: Vec<u8>) {
+            self.seen.output(bytes);
+            let asked = {
+                let all = self.seen.bytes.lock().unwrap();
+                all.windows(3).filter(|w| *w == b"\x1b[c").count()
+            };
+            let mut answered = self.answered.lock().unwrap();
+            let Some((manager, id)) = self.session.get() else {
+                return;
+            };
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
+            while *answered < asked {
+                let _ = manager.write(*id, DA1_ANSWER);
+                *answered += 1;
+            }
+        }
+        fn exit(&self, exit: PtyExit) {
+            self.seen.exit(exit);
+        }
+        fn signal(&self, signal: PaneSignal) {
+            self.seen.signal(signal);
+        }
+        fn report(&self, signal: Option<PaneSignal>) {
+            self.seen.report(signal);
+        }
+    }
+
+    /// A raw, echo-less program prints `probe` (printf text) once told to,
+    /// then keeps the first `want` bytes of its input (or what came within
+    /// 5 s). `harness` = a Claude pane, else a shell pane.
+    fn probe(tag: &str, harness: bool, probe: &str, want: usize) -> (Vec<u8>, Arc<Xterm>) {
+        let dir = std::env::temp_dir().join(format!("oort-pty-7501q-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("input.bin");
+        let script: &'static str = Box::leak(
+            format!(
+                "stty raw -echo min 0 time 50; printf 'ready'; head -c 1 >/dev/null; printf '{probe}'; head -c {want} > '{}'; printf 'read'",
+                file.display()
+            )
+            .into_boxed_str(),
+        );
+        let mut plan = sh(script);
+        plan.hooks = harness.then_some("claude");
+        let manager = Arc::new(PtyManager::default());
+        let sink = Arc::new(Xterm::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        let _ = sink.session.set((Arc::downgrade(&manager), id));
+        sink.seen.wait_for("ready", SLOW);
+        manager.write(id, b"g").unwrap();
+        let exit = sink.seen.wait_exit(SLOW);
+        assert_eq!(exit.code, Some(0), "{:?}", sink.seen.text());
+        let got = std::fs::read(&file).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        (got, sink)
+    }
+
+    /// #5586: a harness pane answers its program's `OSC 7501 ; ?` with the
+    /// fixed reply, once per query, and ahead of the page's DA1 answer (the
+    /// order Claude Code's probe needs). The query's bytes still reach the
+    /// page unchanged, and a query is neither a hook signal nor a report.
+    #[test]
+    fn a_harness_pane_answers_each_query_once_before_the_pages_da1() {
+        let reply = program_status::REPLY;
+        let (got, sink) = probe(
+            "one",
+            true,
+            "\\033]7501;?\\007\\033[c",
+            reply.len() + DA1_ANSWER.len(),
+        );
+        assert_eq!(
+            got,
+            [reply, DA1_ANSWER].concat(),
+            "{:?}",
+            String::from_utf8_lossy(&got)
+        );
+        assert!(
+            sink.seen.text().contains("\x1b]7501;?\x07\x1b[c"),
+            "passed through"
+        );
+        assert!(
+            sink.seen.reports.lock().unwrap().is_empty(),
+            "a query is no report"
+        );
+        assert!(
+            sink.seen.signals.lock().unwrap().is_empty(),
+            "nor a hook signal"
+        );
+
+        // Two queries (BEL, ST), two replies, then DA1.
+        let (got, _) = probe(
+            "two",
+            true,
+            "\\033]7501;?\\007\\033]7501;?\\033\\\\\\033[c",
+            2 * reply.len() + DA1_ANSWER.len(),
+        );
+        assert_eq!(
+            got,
+            [reply, reply, DA1_ANSWER].concat(),
+            "{:?}",
+            String::from_utf8_lossy(&got)
+        );
+    }
+
+    /// #5586: anything but the exact query gets no answer, a terminal-style
+    /// reply included; and a shell pane, which reads no reports, never says
+    /// it does. The program's first input is the page's DA1 answer.
+    #[test]
+    fn other_queries_and_shell_panes_get_no_answer() {
+        let (got, _) = probe(
+            "other",
+            true,
+            "\\033]7501;??\\007\\033]7501;?x\\007\\033]7501;?:states=idle\\007\\033]7500;?\\007\\033]10;?\\007\\033]7501;?\\030\\033[c",
+            DA1_ANSWER.len(),
+        );
+        assert_eq!(got, DA1_ANSWER, "{:?}", String::from_utf8_lossy(&got));
+        let (got, sink) = probe("shell", false, "\\033]7501;?\\007\\033[c", DA1_ANSWER.len());
+        assert_eq!(got, DA1_ANSWER, "{:?}", String::from_utf8_lossy(&got));
+        assert!(sink.seen.text().contains("\x1b]7501;?\x07\x1b[c"));
+    }
+
+    /// The reply joins the input queue under the same bound and accounting
+    /// as the person's keystrokes, and holds it weakly: once the session is
+    /// gone it writes nothing and the writer's channel closes as before.
+    #[test]
+    fn an_auto_reply_is_counted_bounded_and_ends_with_the_session() {
+        let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
+        let input = Arc::new(input);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let reply = AutoReply::new(&input, &queued);
+        reply.send();
+        assert_eq!(keystrokes.try_recv().unwrap(), program_status::REPLY);
+        assert_eq!(queued.load(Ordering::Acquire), program_status::REPLY.len());
+        // A child that is not reading: the queue is full, no reply.
+        queued.store(MAX_QUEUED_WRITE_BYTES, Ordering::Release);
+        reply.send();
+        assert!(keystrokes.try_recv().is_err());
+        assert_eq!(queued.load(Ordering::Acquire), MAX_QUEUED_WRITE_BYTES);
+        queued.store(0, Ordering::Release);
+        // The session drops its sender: the channel closes, the reply is gone.
+        drop(input);
+        assert!(matches!(
+            keystrokes.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        reply.send();
+        assert_eq!(queued.load(Ordering::Acquire), 0);
+    }
+
+    /// #5586 brief 3: once answered, a Claude pane can say the same wait by
+    /// both paths (a hook line and its OSC 7501 report). The shell keeps the
+    /// two apart, each tagged by its path; the page lets the report win and
+    /// notifies once (`paneStatus.test.ts` 「Claude 모양」, unchanged here).
+    #[test]
+    fn a_claude_pane_reports_by_both_paths_and_the_shell_keeps_them_apart() {
+        let dir = std::env::temp_dir().join(format!("oort-pty-7501both-{}", std::process::id()));
+        let sock = dir.join("hook.sock");
+        let listener = pane_signal::bind(&sock).unwrap();
+        let manager = Arc::new(PtyManager::default());
+        manager.set_hook_socket(sock.clone());
+        pane_signal::serve(listener, manager.clone());
+        let script: &'static str = Box::leak(
+            format!(
+                r#"stty raw -echo min 0 time 50
+line() {{ printf '{{"pane":%s,"token":"%s","source":"claude","event":"%s","detail":"%s"}}\n' "$OORT_PANE_ID" "$OORT_PANE_TOKEN" "$1" "$2" | /usr/bin/nc -U "$OORT_PANE_HOOK_SOCK"; }}
+printf 'ready'; head -c 1 >/dev/null
+printf '\033]7501;?\007\033[c'; head -c {} >/dev/null
+line PermissionRequest none
+printf '\033]7501;state=blocked:app=claude-code:kind=permission:msg=QWxsb3cgQmFzaD8=\007'
+printf '\033]7501;state=working:app=claude-code\007'
+line Notification permission_prompt
+printf '\033]7501;state=done:app=claude-code\007'
+line Stop none
+printf 'end'
+"#,
+                program_status::REPLY.len() + DA1_ANSWER.len()
+            )
+            .into_boxed_str(),
+        );
+        let mut plan = sh(script);
+        plan.hooks = Some("claude");
+        let sink = Arc::new(Xterm::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        let _ = sink.session.set((Arc::downgrade(&manager), id));
+        sink.seen.wait_for("ready", SLOW);
+        manager.write(id, b"g").unwrap();
+        assert_eq!(
+            sink.seen.wait_exit(SLOW).code,
+            Some(0),
+            "{:?}",
+            sink.seen.text()
+        );
+        let start = Instant::now();
+        while sink.seen.signals.lock().unwrap().len() < 3 && start.elapsed() < SLOW {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        use PaneSignal::*;
+        assert_eq!(
+            *sink.seen.signals.lock().unwrap(),
+            [WaitingPermission, WaitingPermission, TurnDone],
+            "hook lines, on the hook path"
+        );
+        assert_eq!(
+            *sink.seen.reports.lock().unwrap(),
+            [Some(WaitingPermission), Some(Working), Some(TurnDone)],
+            "OSC 7501, on the report path"
+        );
+        pane_signal::remove(&sock);
     }
 
     /// The page tells a hook from a report by the channel message alone
