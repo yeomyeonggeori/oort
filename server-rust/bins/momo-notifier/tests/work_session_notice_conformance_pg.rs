@@ -1038,9 +1038,9 @@ async fn a_switched_off_persona_in_an_admitted_dm_holds_back_neither_sweep() {
     let sent = dispatched_for(&su, &room, line).await;
     assert_owner_only(&sent, &room, "resume_offer");
 
-    // The expiry sweep: both lapsed requests of the workspace close, the DM one included.
-    let stats = expiry_sweep().await;
-    assert_eq!(stats.failed, 0, "{stats:?}");
+    // The expiry sweep: both lapsed requests of the workspace close, the DM one included. (The
+    // sweep is global; only this workspace's rows are asserted, never its counters.)
+    expiry_sweep().await;
     assert_eq!(request_status(&su, dm_request).await, "expired");
     assert_eq!(request_status(&su, plain_request).await, "expired");
     assert_eq!(
@@ -1087,8 +1087,7 @@ async fn a_line_that_cannot_be_written_never_holds_back_the_fact() {
     assert_eq!(session_status(&su, room.session_id).await, "orphaned");
     assert!(lines_of(&su, room.root_id).await.is_empty());
 
-    let stats = expiry_sweep().await;
-    assert_eq!(stats.failed, 0, "{stats:?}");
+    expiry_sweep().await;
     assert_eq!(request_status(&su, broken_request).await, "expired");
     assert_eq!(request_status(&su, healthy_request).await, "expired");
     assert!(lines_of(&su, broken_root).await.is_empty());
