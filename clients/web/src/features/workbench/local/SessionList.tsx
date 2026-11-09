@@ -40,16 +40,15 @@ import {
   SESSION_FILTER_LABEL,
   SESSION_GROUPING_LABEL,
   SESSION_LIST_EMPTY,
-  SESSION_STATUS_LABEL,
   buildSessionList,
   type SessionFilter,
   type SessionGrouping,
   type SessionListInput,
   type SessionRow,
-  type SessionStatus,
   type WorktreeRow,
 } from "@momo/core/features/workbench/sessionList";
 import { resolveWorkbenchKey, type KeyPlatform } from "@momo/core/features/workbench/keymap";
+import { PANE_MARK_LABEL, rowMark, type PaneMark } from "@momo/core/features/workbench/paneStatus";
 import { SessionStateChip } from "@/features/sidebar/SessionStateChip";
 import "./sessionList.css";
 
@@ -567,15 +566,16 @@ export function StatusMark({
   withLabel = false,
   srLabel = false,
 }: {
-  status: SessionStatus;
+  /** 상태, 또는 실패한 턴의 표지 「실패」(`PaneMark`, #5584 H1: 「멈춤」의 빨간 ✕를 쓴다). */
+  status: PaneMark;
   withLabel?: boolean;
   srLabel?: boolean;
 }) {
   return (
     <span className="sl-st" data-status={status} data-testid="status-mark">
       <i aria-hidden />
-      {withLabel ? SESSION_STATUS_LABEL[status] : null}
-      {srLabel ? <span className="sr-only">{SESSION_STATUS_LABEL[status]}</span> : null}
+      {withLabel ? PANE_MARK_LABEL[status] : null}
+      {srLabel ? <span className="sr-only">{PANE_MARK_LABEL[status]}</span> : null}
     </span>
   );
 }
@@ -647,7 +647,8 @@ function SessionRowButton({
   onMaximize: (paneId: string) => void;
   menu?: readonly SessionRowMenuEntry[] | null;
 }) {
-  const label = SESSION_STATUS_LABEL[row.status];
+  const mark = rowMark(row);
+  const label = PANE_MARK_LABEL[mark];
   // 평탄화된 줄(worktree에 세션 하나, 또는 상태로 묶기)은 worktree 줄을 함께 싣는다.
   const withWorktree = row.worktree !== null || row.repo !== null;
   const where = [
@@ -705,7 +706,7 @@ function SessionRowButton({
         {row.shared ? <Radio className="sl-shr" /> : null}
         <span className="sl-h">{row.harness}</span>
         {/* 상태는 글자 칩이 말한다(#3338, 표시 문법): 팀 작업 목록·구획 B와 같은 컴포넌트다. */}
-        <SessionStateChip status={row.status} testId="session-row-chip" />
+        <SessionStateChip status={mark} testId="session-row-chip" />
       </span>
     </button>
   );

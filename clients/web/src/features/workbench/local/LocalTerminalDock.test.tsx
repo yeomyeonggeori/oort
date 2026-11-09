@@ -448,4 +448,29 @@ describe("세션 목록 (#2856)", () => {
     await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("응답이 필요한 칸이 없습니다."));
   });
 
+  it("턴 실패 보고는 칸 머리·목록에서 「실패」(빨간 ✕)이고, 상태의 출처를 단다 (#5584 H1·M2)", async () => {
+    const { signal } = await mountTwo();
+    const pane = (id: string) => document.querySelector<HTMLElement>(`[data-pane-id="${id}"]`)!;
+    const mark = () => pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status");
+    signal(2, { from: "report", signal: "turn-done" });
+    await vi.waitFor(() => expect(mark()).toBe("done"));
+    signal(2, { from: "report", signal: "turn-failed" });
+    await vi.waitFor(() => expect(mark()).toBe("failed"));
+    const label = pane("p2").getAttribute("aria-label")!;
+    expect(label.endsWith(", 실패")).toBe(true);
+    expect(label).not.toContain("끝남");
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector("[data-testid='session-list-row'][data-session-pane='p2'] [data-testid='session-row-chip']")
+          ?.textContent
+      ).toBe("실패")
+    );
+    // 출처: 표지의 툴팁과 칸의 설명. 생명주기만으로 정한 칸(p1, 신호 없음)에는 없다.
+    const status = pane("p2").querySelector("[data-testid='workbench-pane-status']")!;
+    expect(status.getAttribute("title")).toMatch(/^실패 · .+ 알린 상태예요$/);
+    expect(pane("p2").getAttribute("aria-description")).toMatch(/ 알린 상태예요$/);
+    expect(pane("p1").hasAttribute("aria-description")).toBe(false);
+    expect(pane("p1").querySelector("[data-testid='workbench-pane-status']")?.getAttribute("title")).toBe("실행 중");
+  });
+
 });

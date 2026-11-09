@@ -142,12 +142,62 @@ describe("paneAttention", () => {
   });
 });
 
+// design-review #5584 H1: 턴 실패 보고는 성공 모양(「끝남」·「작업이 끝났어요」)으로 알리지 않는다.
+describe("paneAttention: 실패한 턴 (#5584 H1)", () => {
+  const failed = (paneId: string, index = 3): PaneObservation => ({
+    paneId,
+    index,
+    name: "빌드 스크립트 정리",
+    status: "done",
+    mark: "failed",
+    signal: "turn-failed",
+  });
+  const finished = (paneId: string, index = 3): PaneObservation => ({ ...failed(paneId, index), mark: "done", signal: "turn-done" });
+  const running = (paneId: string, index = 3): PaneObservation => ({ ...failed(paneId, index), status: "running", mark: "running", signal: "working" });
+
+  it("알림은 「실패」·「오류로 끝났어요」 한 번, 인박스 줄의 표지도 실패", () => {
+    const { store, notify } = setup();
+    store.observe([running("p1")], null);
+    store.observe([failed("p1")], null);
+    store.observe([failed("p1")], null);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith({
+      kind: "done",
+      title: "실패",
+      body: "3번 칸 · 빌드 스크립트 정리: 오류로 끝났어요",
+      label: "3번 칸 · 빌드 스크립트 정리",
+    });
+    const call = notify.mock.calls[0]![0] as { title: string; body: string };
+    expect(call.title).not.toBe("끝남");
+    expect(call.body).not.toContain("작업이 끝났어요");
+    expect(store.entries().map((e) => [e.paneId, e.status, e.mark])).toEqual([["p1", "done", "failed"]]);
+  });
+
+  it("「끝남」 뒤에 곧바로 온 「실패」도 새로 알리고 줄을 바꾼다(실패가 묻히지 않는다)", () => {
+    const { store, notify } = setup();
+    store.observe([running("p1")], null);
+    store.observe([finished("p1")], null);
+    store.observe([failed("p1")], null);
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[1]![0]).toMatchObject({ title: "실패" });
+    expect(store.entries().map((e) => e.mark)).toEqual(["failed"]);
+  });
+
+  it("남은 「응답 필요」 줄은 기다림의 종류가 바뀌면 따라간다", () => {
+    const { store, pane } = setup();
+    store.observe([pane("p1", "running")], null);
+    store.observe([pane("p1", "waiting")], null);
+    store.observe([{ ...pane("p1", "waiting"), signal: "waiting-input" }], null);
+    expect(store.entries().map((e) => e.signal)).toEqual(["waiting-input"]);
+  });
+});
+
 describe("출처 규칙(core paneStatus.ts): 판정은 PTY 출력을 읽지 않는다 (ADR-0190 D4-b)", () => {
   const src = readFileSync(new URL("../../../../../../packages/momo-core/src/features/workbench/paneStatus.ts", import.meta.url), "utf8");
 
-  it("판정 모듈은 생명주기(sessionList)만 import한다", () => {
+  it("판정 모듈은 생명주기(sessionList)와 조사 붙이기(출처 한 줄, #5584 M2)만 import한다", () => {
     const imports = [...src.matchAll(/^import[^;]*from\s+"([^"]+)"/gm)].map((m) => m[1]);
-    expect(imports).toEqual(["./sessionList"]);
+    expect(imports).toEqual(["../../lib/koreanParticle", "./sessionList"]);
   });
 
   it("판정 입력에 출력·제목·바이트 필드가 없다", () => {

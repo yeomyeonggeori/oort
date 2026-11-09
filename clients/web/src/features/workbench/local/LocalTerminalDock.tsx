@@ -69,11 +69,11 @@ import {
   SESSION_STATUS_LABEL,
   type SessionListInput,
 } from "@momo/core/features/workbench/sessionList";
-import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { PANE_MARK_LABEL, isFailedMark, nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
 import { createPortal } from "react-dom";
 import { useSidebarBodySlot } from "@/features/sidebar/sidebarBodySlot";
 import { SessionList, StatusMark, type SessionListHandle, type SessionRowMenuEntry } from "./SessionList";
-import { paneAttention, paneStatusOf } from "./paneAttention";
+import { paneAttention, paneMarkOf, paneSourceOf, paneStatusOf } from "./paneAttention";
 import type { PaneLaneView, PaneShareChrome, PaneStatusView } from "../WorkbenchGrid";
 import { ShareDialog, type ShareIntent } from "./share/ShareDialog";
 import type { PaneShareSource } from "./share/paneShareSource";
@@ -144,10 +144,14 @@ function detectPlatform(): KeyPlatform {
 
 const NO_WAITING = "응답이 필요한 칸이 없습니다.";
 
+/** 칸의 프로그램 이름: 하네스 표시 이름, 셸이면 「셸」. */
+function programName(view: LocalSessionView): string {
+  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+}
+
 /** 알림·인박스에 쓰는 칸 이름: 작업 이름(OSC 제목), 없으면 프로그램 이름. */
 function paneName(view: LocalSessionView): string {
-  if (view.title) return view.title;
-  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+  return view.title || programName(view);
 }
 const SPLIT_REFUSED = "칸이 좁아 새 세션을 열 수 없습니다. 칸을 닫거나 도크를 키우세요.";
 
@@ -703,7 +707,8 @@ export function LocalTerminalDock({
       order.flatMap((id, i) => {
         const view = sessionMap.get(id);
         const status = paneStatusOf(view);
-        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, signal: view.signal }] : [];
+        const mark = paneMarkOf(view);
+        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, mark, signal: view.signal }] : [];
       }),
       active ? layout.focused : null
     );
@@ -734,7 +739,8 @@ export function LocalTerminalDock({
     }
     const view = sessionMap.get(pane.id);
     const status = paneStatusOf(view);
-    if (!view || !status) return null;
+    const mark = paneMarkOf(view);
+    if (!view || !status || !mark) return null;
     const waiting =
       status === "waiting"
         ? {
@@ -745,8 +751,11 @@ export function LocalTerminalDock({
           }
         : null;
     return {
-      mark: <StatusMark status={status} />,
-      label: SESSION_STATUS_LABEL[status],
+      // 실패한 턴(OSC 7501 `error`)은 「끝남」이 아니라 「실패」로 그린다(design-review #5584 H1).
+      mark: <StatusMark status={mark} />,
+      label: PANE_MARK_LABEL[mark],
+      // 상태가 그 프로그램의 말이면 출처를 조용히 단다(ADR-0220, #5584 M2). 셸 칸에는 신호가 없다.
+      source: paneSourceOf(view, programName(view)),
       waiting,
     };
   };
@@ -1102,6 +1111,7 @@ export function LocalTerminalDock({
           title: view.title ?? programName,
           harness,
           status: paneStatusOf(view) ?? "idle",
+          ...(isFailedMark(paneMarkOf(view)) ? { failed: true } : {}),
           // L 세션 공유(ADR-0190 D4-b): 기본 꺼짐. 사람이 「채널에 공유」를 골라야 켜진다(#2867).
           shared: shareSource?.share.getState(id).kind === "on",
           // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이

@@ -1,4 +1,10 @@
-import { statusFromPhase, type SessionPhaseInput, type SessionStatus } from "./sessionList";
+import { attachParticle } from "../../lib/koreanParticle";
+import {
+  SESSION_STATUS_LABEL,
+  statusFromPhase,
+  type SessionPhaseInput,
+  type SessionStatus,
+} from "./sessionList";
 
 // =============================================================================
 // 칸 상태 판정 (#2776, 제안서 §3.4, ADR-0190 D2·D4-b 출처 규칙).
@@ -37,13 +43,23 @@ import { statusFromPhase, type SessionPhaseInput, type SessionStatus } from "./s
  * | `working` | UserPromptSubmit, PostToolUse (+ 기다리는 칸에 사람이 입력) | 없음 | `working` |
  * | `waiting-permission` | PermissionRequest, Notification `permission_prompt` | 없음(승인 유형이 오지 않는다) | `blocked` + `kind=permission` |
  * | `waiting-input` | Notification `elicitation_dialog`(스파이크에서 관측 못 함) | 없음 | `blocked` + `question`·`auth`·없음 |
- * | `turn-done` | Stop | `agent-turn-complete`(제목 짓기 곁가지 턴은 뺀다) | `done`, `error` |
+ * | `turn-done` | Stop | `agent-turn-complete`(제목 짓기 곁가지 턴은 뺀다) | `done` |
+ * | `turn-failed` | 없음 | 없음 | `error` |
  *
- * 보고의 `error`도 「끝남」이다: 규격이 `done`과 같은 수명을 주고(사람이 볼 때까지),
- * 프로그램은 살아서 다음 지시를 기다린다. 「멈춤」은 칸의 프로세스가 멈춘 것이다.
- * 보고의 `clear`는 신호가 아니라 거둠이다(`PaneSignalEvent.signal === null`).
+ * `turn-failed`(보고의 `error`)는 실패한 턴이다(design-review #5584 H1). 수명·정렬·알림은
+ * 「끝남」과 같고(규격이 `done`과 같은 수명을 주고, 프로그램은 살아서 다음 지시를 기다린다)
+ * 상태 어휘도 `done` 그대로지만, 화면은 성공 모양(초록 체크·「작업이 끝났어요」)으로 그리지
+ * 않는다: 표지는 「실패」(`derivePaneMark`). 「멈춤」은 칸의 프로세스가 멈춘 것이라 쓰지
+ * 않는다. hook에는 이 신호가 없다(Claude `Stop`·Codex `agent-turn-complete`는 턴이 어떻게
+ * 끝났든 온다). 보고의 `clear`는 신호가 아니라 거둠이다(`PaneSignalEvent.signal === null`).
  */
-export type PaneSignal = "ready" | "working" | "waiting-permission" | "waiting-input" | "turn-done";
+export type PaneSignal =
+  | "ready"
+  | "working"
+  | "waiting-permission"
+  | "waiting-input"
+  | "turn-done"
+  | "turn-failed";
 
 export const PANE_SIGNALS: readonly PaneSignal[] = [
   "ready",
@@ -51,6 +67,7 @@ export const PANE_SIGNALS: readonly PaneSignal[] = [
   "waiting-permission",
   "waiting-input",
   "turn-done",
+  "turn-failed",
 ];
 
 /** 닫힌 목록 밖의 값은 null. 데스크탑과 웹 사이의 경계에서 한 번 더 거른다. */
@@ -86,8 +103,61 @@ export function derivePaneStatus(input: PaneStatusInput): SessionStatus {
     case "waiting-input":
       return "waiting";
     case "turn-done":
+    case "turn-failed":
       return "done";
   }
+}
+
+// ---- 표지: 실패한 턴 (design-review #5584 H1) ------------------------------------
+
+/**
+ * 칸 표지·칩·알림 제목이 그리는 열쇠. 상태 어휘(`SessionStatus`)는 닫힌 그대로 두고, 그 위에
+ * `failed` 하나를 더한다: 프로그램이 턴이 실패했다고 보고한(OSC 7501 `error`) 살아 있는 칸이다.
+ * 상태로는 `done`이라 정렬·묶기·알림 수명이 「끝남」과 같고, 모양과 글자만 실패를 말한다
+ * (빨간 ✕ = 「멈춤」의 표지, 글자 「실패」 = 팀 보드의 실패 낱말).
+ */
+export type PaneMark = SessionStatus | "failed";
+
+/** 표지 글자. 「실패」는 팀 보드가 실패한 일에 쓰는 낱말 그대로다(`teamBoard.stateChipLabel`). */
+export const PANE_MARK_LABEL: Readonly<Record<PaneMark, string>> = {
+  ...SESSION_STATUS_LABEL,
+  failed: "실패",
+};
+
+/** 실패한 턴의 표지인가. */
+export function isFailedMark(mark: PaneMark | undefined): boolean {
+  return mark === "failed";
+}
+
+/** 세션 목록 줄(`SessionRow.failed`)의 표지. */
+export function rowMark(row: { status: SessionStatus; failed?: boolean }): PaneMark {
+  return row.failed ? "failed" : row.status;
+}
+
+/** 칸 하나의 표지. 생명주기가 이기는 것은 `derivePaneStatus`와 같다(끝난 프로세스는 실패가 아니다). */
+export function derivePaneMark(input: PaneStatusInput): PaneMark {
+  const status = derivePaneStatus(input);
+  return status === "done" && input.phase === "running" && input.signal === "turn-failed" ? "failed" : status;
+}
+
+/**
+ * 공유 요약(S1)에 싣는 상태. 서버의 파생 상태 목록(ADR-0190 D4-b, `work_share.rs`
+ * `DERIVED_STATES`)에 실패가 아직 없어서, 실패한 턴은 `idle`(대기: 프로그램이 살아서 다음
+ * 지시를 기다린다)로 싣는다. `done`으로 실으면 팀 보드가 초록 체크 「끝남」으로 그린다. 무슨
+ * 일이 있었는지는 단계 표지(「턴 실패」)가 말한다. 목록에 `failed`를 더하는 것은 후속이다.
+ */
+export function sharedPaneState(input: PaneStatusInput): SessionStatus {
+  return derivePaneMark(input) === "failed" ? "idle" : derivePaneStatus(input);
+}
+
+/**
+ * 칸 상태가 그 프로그램의 말일 때 출처 한 줄(ADR-0220 「에이전트 보고」, ADR-0190 증보
+ * 「출처를 표시한다」). hook이든 OSC 7501 보고든 그 프로그램이 스스로 한 말이다. 생명주기만으로
+ * 정한 상태(신호 없음·프로세스 종료)에는 붙이지 않는다.
+ */
+export function paneStatusSource(input: PaneStatusInput, programName: string): string | null {
+  if (input.phase !== "running" || input.signal === null) return null;
+  return `${attachParticle(programName, "subject")} 알린 상태예요`;
 }
 
 /** 칸 머리 바닥 띠의 한 줄(시안 ① `.pwait`). 「응답 필요」일 때만 있다. */
@@ -187,25 +257,39 @@ export function isAttention(status: SessionStatus): status is AttentionStatus {
   return status === "waiting" || status === "done";
 }
 
+/** 알림이 되는 표지: 「응답 필요」·「끝남」, 그리고 「끝남」의 실패 모양 「실패」. */
+export type AttentionMark = AttentionStatus | "failed";
+
+export function isAttentionMark(mark: PaneMark): mark is AttentionMark {
+  return mark === "failed" || isAttention(mark);
+}
+
+/** 표지가 속한 알림 상태. 실패한 턴은 「끝남」의 수명을 따른다. */
+export function attentionStatusOf(mark: AttentionMark): AttentionStatus {
+  return mark === "failed" ? "done" : mark;
+}
+
 export interface PaneAttention {
   paneId: string;
-  status: AttentionStatus;
+  /** 새로 된 표지. 「끝남」과 「실패」는 서로 다른 전이다(실패가 끝남의 알림에 묻히지 않는다). */
+  status: AttentionMark;
 }
 
 /**
- * 이전 판정과 지금 판정을 비교해 **새로** 「응답 필요」나 「끝남」이 된 칸만
- * 돌려준다. 같은 상태가 다시 계산돼도(다시 그리기, 다른 칸의 변화) 알림은 한 번이다.
- * 이전 판정에 없던 칸(방금 연 칸)은 「실행 중」에서 온 것으로 본다.
+ * 이전 판정과 지금 판정을 비교해 **새로** 「응답 필요」·「끝남」·「실패」가 된 칸만
+ * 돌려준다. 같은 표지가 다시 계산돼도(다시 그리기, 다른 칸의 변화) 알림은 한 번이다.
+ * 이전 판정에 없던 칸(방금 연 칸)은 「실행 중」에서 온 것으로 본다. 상태(`SessionStatus`)만
+ * 넘기는 호출도 그대로 쓴다(그때는 「실패」가 오지 않는다).
  */
 export function attentionTransitions(
-  previous: ReadonlyMap<string, SessionStatus>,
-  next: ReadonlyMap<string, SessionStatus>
+  previous: ReadonlyMap<string, PaneMark>,
+  next: ReadonlyMap<string, PaneMark>
 ): PaneAttention[] {
   const out: PaneAttention[] = [];
-  for (const [paneId, status] of next) {
-    if (!isAttention(status)) continue;
-    if (previous.get(paneId) === status) continue;
-    out.push({ paneId, status });
+  for (const [paneId, mark] of next) {
+    if (!isAttentionMark(mark)) continue;
+    if (previous.get(paneId) === mark) continue;
+    out.push({ paneId, status: mark });
   }
   return out;
 }
@@ -244,19 +328,32 @@ export interface AttentionCopy {
 }
 
 /**
+ * 인박스 줄과 OS 알림 본문의 한 문장. 「실패」는 무슨 일이 있었는지를 말한다(정본 §4 오류
+ * 상태): 프로그램이 오류를 알리고 턴이 끝났다. 칸은 살아 있으니 「멈췄어요」가 아니다.
+ */
+export function attentionLine(mark: AttentionMark, signal: PaneSignal | null): string {
+  if (mark === "waiting") return waitingLine(signal) ?? "입력을 기다려요";
+  if (mark === "failed") return "오류로 끝났어요";
+  return "작업이 끝났어요";
+}
+
+/** 사이드바 「작업」 줄의 점이 말하는 것(점은 글자가 없어 읽기 도구에 이 말을 준다). */
+export const PANE_UNSEEN_LABEL = {
+  done: "아직 안 본 끝난 세션이 있어요",
+  failed: "오류로 끝난 세션이 있어요",
+} as const;
+
+/**
  * 알림 문구. 칸 번호와 칸 이름(OSC 제목이나 프로그램 이름)만 싣는다. 하네스가
- * hook에 실어 보낸 글(권한 요청 본문 등)은 소켓에서 이미 버렸다.
+ * hook에 실어 보낸 글(권한 요청 본문 등)은 소켓에서 이미 버렸다. 제목은 표지 글자다.
  */
 export function attentionCopy(
-  attention: AttentionStatus,
+  attention: AttentionMark,
   pane: { index: number; name: string },
   signal: PaneSignal | null
 ): AttentionCopy {
   const where = `${pane.index}번 칸 · ${pane.name}`;
-  if (attention === "waiting") {
-    return { title: "응답 필요", body: `${where}: ${waitingLine(signal) ?? "입력을 기다려요"}` };
-  }
-  return { title: "끝남", body: `${where}: 작업이 끝났어요` };
+  return { title: PANE_MARK_LABEL[attention], body: `${where}: ${attentionLine(attention, signal)}` };
 }
 
 // ---- ⌃⇧J ---------------------------------------------------------------------

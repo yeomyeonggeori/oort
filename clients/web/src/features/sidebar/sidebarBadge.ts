@@ -7,7 +7,8 @@ import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
 //   잉크 알약 (`--primary`) = 나에게 직접 필요한 수 (승인 · 응답 필요 · 안 읽은 멘션)
 //   호박 알약 (`--signal`)  = 안 읽은 일반 글 수 (현행)
 //   점 (수 없음)            = 접혀서 수를 못 그릴 때만. 호박 = 안 읽은 일반 글, 초록 = 아직
-//                             안 본 끝난 세션(`--ok`)
+//                             안 본 끝난 세션(`--ok`), 빨강 = 그중 오류로 끝난 세션(`--danger`,
+//                             #5584 H1: 실패가 성공의 초록으로 보이지 않게)
 //
 // 같은 자리에 둘 이상이 서면 알약은 **잉크 하나**만 그린다(필요 > 일반): 일반 안 읽음 수는
 // 채널·DM 줄에서만 센다. 사이드바 줄·접힌 구획 머리·접힌 레일이 전부 이 파일을 읽으므로 한
@@ -15,7 +16,7 @@ import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
 // =============================================================================
 
 export type BadgeTone = "ink" | "amber";
-export type DotTone = "amber" | "ok";
+export type DotTone = "amber" | "ok" | "danger";
 
 /** 알약의 색은 이 표 하나가 진다. 호출처는 클래스를 직접 적지 않는다. */
 export const BADGE_TONE_CLASS: Readonly<Record<BadgeTone, string>> = {
@@ -26,6 +27,7 @@ export const BADGE_TONE_CLASS: Readonly<Record<BadgeTone, string>> = {
 export const DOT_TONE_CLASS: Readonly<Record<DotTone, string>> = {
   amber: "bg-signal",
   ok: "bg-ok",
+  danger: "bg-danger",
 };
 
 export interface BadgeSpec {
@@ -74,13 +76,16 @@ const NONE: DestinationMark = { pill: null, dot: null };
  *   chat  = 수 없는 호박 점(안 읽은 채널이 있다). 펼침에서는 아래 채널 줄이 수를 말하므로 줄에는
  *           안 그리고, 접힌 레일만 그린다(`WorkspaceRail`).
  *   inbox = 잉크 알약, 나에게 필요한 일 전부.
- *   mine  = 잉크 알약(응답 필요 칸), 없으면 아직 안 본 끝남이 초록 점.
+ *   mine  = 잉크 알약(응답 필요 칸), 없으면 아직 안 본 끝남이 초록 점. 그중 하나라도 오류로
+ *           끝났으면(실패) 빨간 점이다: 실패를 초록으로 말하지 않는다.
  *   scheduled = 잉크 알약, 보내지 못한 예약의 수(ADR-0208). 점은 없다.
  */
 export function destinationMarks(input: {
   needsMe: Pick<NeedsMe, "total" | "panes">;
   unreadChannels: number;
   doneUnseen: boolean;
+  /** 아직 안 본 끝남 가운데 오류로 끝난(실패) 칸이 있다(#5584 H1). 생략하면 없다. */
+  failedUnseen?: boolean;
   /** 보내지 못한 예약의 수(ADR-0208). 생략하면 0이다: 이 입력을 모르는 호출처는 예전 그대로다. */
   scheduledFailed?: number;
 }): DestinationMarks {
@@ -90,7 +95,7 @@ export function destinationMarks(input: {
     inbox: { pill: badgeFor({ needsMe: input.needsMe.total }), dot: null },
     mine: {
       pill: minePill,
-      dot: minePill === null && input.doneUnseen ? "ok" : null,
+      dot: minePill !== null ? null : input.failedUnseen ? "danger" : input.doneUnseen ? "ok" : null,
     },
     scheduled: { pill: badgeFor({ needsMe: input.scheduledFailed }), dot: null },
   };

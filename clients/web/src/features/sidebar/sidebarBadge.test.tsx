@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { WorkspaceRail } from "./WorkspaceRail";
-import { badgeFor, destinationMarks } from "./sidebarBadge";
+import { DOT_TONE_CLASS, badgeFor, destinationMarks } from "./sidebarBadge";
 import { SessionStateChip } from "./SessionStateChip";
 
 vi.mock("@/features/workspace/useAddWorkspace", () => ({
@@ -104,6 +104,12 @@ describe("접힌 레일 = 펼친 줄", () => {
     expect(marks.mine.dot).toBeNull();
     const done = destinationMarks({ needsMe: { total: 0, panes: 0 }, unreadChannels: 0, doneUnseen: true });
     expect(done.mine).toEqual({ pill: null, dot: "ok" });
+    // 오류로 끝난 칸(#5584 H1)은 성공의 초록 점이 아니다.
+    const failed = destinationMarks({ needsMe: { total: 0, panes: 0 }, unreadChannels: 0, doneUnseen: true, failedUnseen: true });
+    expect(failed.mine).toEqual({ pill: null, dot: "danger" });
+    expect(DOT_TONE_CLASS.danger).toBe("bg-danger");
+    const waitingWins = destinationMarks({ needsMe: { total: 1, panes: 1 }, unreadChannels: 0, doneUnseen: true, failedUnseen: true });
+    expect(waitingWins.mine.dot).toBeNull();
     expect(done.chat).toEqual({ pill: null, dot: null });
   });
 });
@@ -150,5 +156,13 @@ describe("세션 칩", () => {
   ] as const)("%s = 글자 %s", (status, text) => {
     const { getByTestId } = render(<SessionStateChip status={status} />);
     expect(getByTestId("session-state-chip").textContent).toBe(text);
+  });
+
+  it("실패한 턴(#5584 H1)은 글자 「실패」, 위험 그릇: 성공의 「끝남」·초록이 아니다", () => {
+    const { getByTestId } = render(<SessionStateChip status="failed" />);
+    const chip = getByTestId("session-state-chip");
+    expect(chip.textContent).toBe("실패");
+    expect(chip.className).toContain("bg-danger-soft");
+    expect(chip.className).not.toContain("bg-ok-soft");
   });
 });

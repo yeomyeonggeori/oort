@@ -146,6 +146,11 @@ export interface SessionListInput {
   /** 하네스 표시(claude·codex·셸). */
   harness: string;
   status: SessionStatus;
+  /**
+   * 상태는 「끝남」이지만 프로그램이 턴 실패를 보고했다(OSC 7501 `error`, #5584 H1). 줄은
+   * 「실패」로 그린다. 정렬·묶기는 `status`를 따른다.
+   */
+  failed?: boolean;
   /** 팀에 공유 중인가(ADR-0190 D4). L 세션 공유가 서기 전에는 늘 false. */
   shared: boolean;
   /** null = 아직 확인 중(첫 git 읽기 전). 묶지 않고 「확인 중」 줄로 따로 보인다. */
@@ -162,6 +167,8 @@ export interface SessionRow {
   title: string;
   harness: string;
   status: SessionStatus;
+  /** `SessionListInput.failed` 그대로. 없으면 실패가 아니다. */
+  failed?: boolean;
   shared: boolean;
   /**
    * 평탄화된 줄(worktree에 세션 하나, 또는 상태로 묶기)이면 worktree 줄을 함께 싣는다:
@@ -270,6 +277,7 @@ function sessionRow(
     title: s.title,
     harness: s.harness,
     status: s.status,
+    ...(s.failed ? { failed: true } : {}),
     shared: s.shared,
     worktree: withWorktree ? s.git.worktree : null,
     branch: withWorktree ? s.git.branch : null,

@@ -5,9 +5,14 @@ import {
   PANE_SIGNALS,
   afterPersonInput,
   applyPaneSignalEvent,
+  PANE_MARK_LABEL,
   attentionCopy,
+  attentionLine,
   attentionTransitions,
+  derivePaneMark,
   derivePaneStatus,
+  paneStatusSource,
+  sharedPaneState,
   nextWaitingPane,
   parsePaneSignal,
   parsePaneSignalEvent,
@@ -251,5 +256,72 @@ describe("nextWaitingPane (⌃⇧J)", () => {
     expect(nextWaitingPane(ids, (id) => (id === "p2" ? "waiting" : "running"), "p2")).toBe("p2");
     expect(nextWaitingPane(ids, () => "running", "p1")).toBeNull();
     expect(nextWaitingPane([], of, null)).toBeNull();
+  });
+});
+
+// design-review #5584 H1: 프로그램이 턴 실패(OSC 7501 `error`)를 보고한 칸은 성공 모양으로 그리지 않는다.
+describe("실패한 턴: 「끝남」의 수명, 「실패」의 모양 (#5584 H1)", () => {
+  const exited = (code: number, signal: PaneSignal | null): PaneStatusInput => ({
+    phase: "exited",
+    exitCode: code,
+    exitSignal: null,
+    signal,
+  });
+
+  it("상태는 「끝남」(정렬·묶기·알림 수명), 표지는 「실패」", () => {
+    expect(PANE_SIGNALS).toContain("turn-failed");
+    expect(parsePaneSignalEvent({ from: "report", signal: "turn-failed" })).toEqual({ from: "report", signal: "turn-failed" });
+    expect(derivePaneStatus(live("turn-failed"))).toBe("done");
+    expect(derivePaneMark(live("turn-failed"))).toBe("failed");
+    expect(derivePaneMark(live("turn-done"))).toBe("done");
+    expect(PANE_MARK_LABEL.failed).toBe("실패");
+    expect(PANE_MARK_LABEL.failed).not.toBe(PANE_MARK_LABEL.done);
+    // 다른 신호의 표지는 상태 그대로다.
+    for (const signal of PANE_SIGNALS.filter((s) => s !== "turn-failed")) {
+      expect(derivePaneMark(live(signal))).toBe(derivePaneStatus(live(signal)));
+    }
+  });
+
+  it("생명주기가 이긴다: 끝난 프로세스는 마지막 신호가 실패였어도 실패 표지가 아니다", () => {
+    expect(derivePaneMark(exited(0, "turn-failed"))).toBe("done");
+    expect(derivePaneMark(exited(1, "turn-failed"))).toBe("stopped");
+  });
+
+  it("알림 문구: 제목 「실패」, 본문은 무슨 일이 있었는지. 성공의 말이 아니다", () => {
+    const copy = attentionCopy("failed", { index: 3, name: "빌드 스크립트 정리" }, "turn-failed");
+    expect(copy).toEqual({ title: "실패", body: "3번 칸 · 빌드 스크립트 정리: 오류로 끝났어요" });
+    const done = attentionCopy("done", { index: 3, name: "빌드 스크립트 정리" }, "turn-done");
+    expect(copy.title).not.toBe(done.title);
+    expect(copy.body).not.toContain("작업이 끝났어요");
+    expect(attentionLine("failed", "turn-failed")).toBe("오류로 끝났어요");
+    expect(attentionLine("done", "turn-done")).toBe("작업이 끝났어요");
+    expect(attentionLine("waiting", "waiting-input")).toBe("답을 기다려요");
+  });
+
+  it("「끝남」 뒤의 「실패」는 새 전이다(실패가 끝남의 알림에 묻히지 않는다), 같은 실패는 한 번", () => {
+    const m = (entries: [string, string][]) => new Map(entries) as Map<string, never>;
+    expect(attentionTransitions(m([["p1", "running"]]), m([["p1", "failed"]]))).toEqual([{ paneId: "p1", status: "failed" }]);
+    expect(attentionTransitions(m([["p1", "done"]]), m([["p1", "failed"]]))).toEqual([{ paneId: "p1", status: "failed" }]);
+    expect(attentionTransitions(m([["p1", "failed"]]), m([["p1", "failed"]]))).toEqual([]);
+  });
+
+  it("공유 요약은 실패를 「끝남」으로 싣지 않는다: 서버 목록에 실패가 없어 「대기」", () => {
+    expect(sharedPaneState(live("turn-failed"))).toBe("idle");
+    expect(sharedPaneState(live("turn-done"))).toBe("done");
+    expect(sharedPaneState(exited(0, "turn-failed"))).toBe("done");
+    for (const signal of PANE_SIGNALS.filter((s) => s !== "turn-failed")) {
+      expect(sharedPaneState(live(signal))).toBe(derivePaneStatus(live(signal)));
+    }
+  });
+});
+
+describe("출처 한 줄 (#5584 M2, ADR-0220 「에이전트 보고」)", () => {
+  it("그 프로그램이 알린 상태일 때만, 이름에 맞는 조사로", () => {
+    expect(paneStatusSource(live("waiting-permission"), "Codex")).toBe("Codex가 알린 상태예요");
+    expect(paneStatusSource(live("turn-failed"), "Claude Code")).toBe("Claude Code가 알린 상태예요");
+    expect(paneStatusSource(live("working"), "Grok")).toBe("Grok이 알린 상태예요");
+    // 신호가 없거나(생명주기만) 끝난 칸에는 붙이지 않는다.
+    expect(paneStatusSource(live(null), "Codex")).toBeNull();
+    expect(paneStatusSource({ phase: "exited", exitCode: 0, exitSignal: null, signal: "turn-done" }, "Codex")).toBeNull();
   });
 });
