@@ -1,12 +1,91 @@
 // ADR-0201 증보 v2 H4·H5·H9-I9 (#3893): 도우미 답의 꼬리(찾아본 것 · 출처 · 모델 라벨).
 import { describe, expect, it } from "vitest";
 import { citationAccessibleName, parseTeamAiReplyMeta, teamAiReplyMetaFor } from "./teamAiReply";
+// #5600: 서버(`team_ai.rs` `answer_props`)의 단위 시험이 같은 파일을 `include_str!` 로 읽는다.
+import servedReply from "./__fixtures__/team-ai-reply-props.json";
+
+describe("모델 칩은 서버가 쓰는 모양에서 선다 (#5600)", () => {
+  it("서버 답 props(`team_ai_model: {model, wire}`)로 「팀 AI · 모델」 칩이 선다", () => {
+    const meta = parseTeamAiReplyMeta(servedReply.props);
+    expect(meta?.modelChip).toBe("팀 AI · Claude Sonnet 4.5");
+    expect(teamAiReplyMetaFor({ state: "sent", props: servedReply.props })?.modelChip).toBe(
+      "팀 AI · Claude Sonnet 4.5"
+    );
+    // ADR-0220: 서버가 확인한 값이다. 자기 보고 꼬리표(「…보고」)가 칩에도 꼬리에도 붙지 않는다.
+    expect(meta?.modelChip).not.toContain("보고");
+    expect(meta?.appsLine).toBeNull();
+    expect(meta?.appsDetails).toEqual([]);
+  });
+
+  it("모델 id: 모르는 id 는 그대로, 주소·키처럼 보이거나 모양이 아니면 칩이 없다", () => {
+    const served = (model: unknown) =>
+      parseTeamAiReplyMeta({ source: "team_ai", team_ai_model: { model, wire: "chat_completions" } })
+        ?.modelChip ?? null;
+    expect(served("gpt-4o-mini")).toBe("팀 AI · gpt-4o-mini");
+    expect(served("claude-opus-4-1")).toBe("팀 AI · Claude Opus 4.1");
+    // 64자 안의 긴 id 는 지금의 `clean()`·`MODEL_LABEL_MAX` 규칙대로 줄인다.
+    const long = served(`accounts/fireworks/models/${"llama-v3p1-".repeat(3)}405b`);
+    expect(long?.endsWith("…")).toBe(true);
+    expect(long!.length).toBeLessThanOrEqual("팀 AI · ".length + 48);
+    for (const bad of [
+      "https://llm.internal.example/v1",
+      "http://10.0.0.7:8080",
+      `sk-${"Ab3".repeat(16)}`,
+      "x".repeat(65),
+      "claude sonnet",
+      "-leading-dash",
+      "",
+      42,
+      null,
+      undefined,
+    ]) {
+      expect(served(bad), String(bad)).toBeNull();
+    }
+    expect(
+      parseTeamAiReplyMeta({ source: "team_ai", team_ai_model: { wire: "responses" } })
+    ).toBeNull();
+  });
+
+  it("칩은 서버 객체에서만 선다: 옛 `model_label`(누구나 쓰는 글자)만으로는 서지 않는다", () => {
+    // 서버가 쓴 적 없는 옛 키만 든 글: 멤버가 REST 로 보낼 수 있는 모양이다. 칩도 꼬리도 없다.
+    expect(
+      parseTeamAiReplyMeta({ source: "team_ai", run_id: "r1", model_label: "Claude Sonnet 4.5" })
+    ).toBeNull();
+    // 서버 객체와 함께 있어도 옛 키는 칩 이름에 쓰이지 않는다.
+    expect(
+      parseTeamAiReplyMeta({ ...servedReply.props, model_label: "Fake Model" })?.modelChip
+    ).toBe("팀 AI · Claude Sonnet 4.5");
+    // 객체가 있는데 칩에 실을 수 없는 값이면 칩이 없다(옛 키가 대신 서지 않는다).
+    expect(
+      parseTeamAiReplyMeta({
+        source: "team_ai",
+        team_ai_model: { model: "https://evil.example/m", wire: "chat_completions" },
+        model_label: "Fake Model",
+      })
+    ).toBeNull();
+    // 메시지 보내기 props 는 글자 값뿐이다: 글자 `team_ai_model` 은 서버 객체가 아니다.
+    expect(
+      parseTeamAiReplyMeta({ source: "team_ai", team_ai_model: "claude-sonnet-4-5" })
+    ).toBeNull();
+  });
+
+  it("닫힌 세계: 도우미 답(`source: team_ai`)이 아니면 서버 모양이어도 칩이 없다", () => {
+    const unsourced: Record<string, unknown> = { ...servedReply.props };
+    delete unsourced.source;
+    expect(parseTeamAiReplyMeta(unsourced)).toBeNull();
+    expect(parseTeamAiReplyMeta({ ...servedReply.props, source: "hermes_gateway" })).toBeNull();
+    expect(teamAiReplyMetaFor({ state: "deleted", props: servedReply.props })).toBeNull();
+  });
+});
 
 describe("parseTeamAiReplyMeta", () => {
   it("옛 서버의 도우미 답(칸 없음)과 다른 에이전트의 글에는 아무 것도 없다", () => {
     expect(parseTeamAiReplyMeta({ source: "team_ai", run_id: "r1" })).toBeNull();
     expect(
-      parseTeamAiReplyMeta({ tools_used: [{ name: "search_messages" }], model_label: "GPT" })
+      parseTeamAiReplyMeta({
+        tools_used: [{ name: "search_messages" }],
+        team_ai_model: { model: "gpt-4o", wire: "chat_completions" },
+      })
     ).toBeNull();
     expect(parseTeamAiReplyMeta(undefined)).toBeNull();
   });
@@ -16,7 +95,7 @@ describe("parseTeamAiReplyMeta", () => {
       parseTeamAiReplyMeta({
         source: "team_ai",
         kind: "team_ai.delegate.v1",
-        model_label: "Claude Sonnet 4.5",
+        team_ai_model: servedReply.props.team_ai_model,
       })
     ).toBeNull();
   });
@@ -79,15 +158,27 @@ describe("parseTeamAiReplyMeta", () => {
     );
   });
 
-  it("모델 라벨은 「팀 AI · …」 칩이고 제어 문자는 지운다", () => {
-    const meta = parseTeamAiReplyMeta({ source: "team_ai", model_label: "Claude‮ Sonnet 4.5" });
+  it("모델 칩은 「팀 AI · …」이고, 제어·양방향 문자가 든 id 에는 칩이 없다", () => {
+    const meta = parseTeamAiReplyMeta({
+      source: "team_ai",
+      team_ai_model: { model: "claude-sonnet-4-5", wire: "anthropic_messages" },
+    });
     expect(meta?.modelChip).toBe("팀 AI · Claude Sonnet 4.5");
     expect(meta?.toolsLine).toBeNull();
+    expect(
+      parseTeamAiReplyMeta({
+        source: "team_ai",
+        team_ai_model: { model: "claude\u202e-sonnet-4-5", wire: "anthropic_messages" },
+      })
+    ).toBeNull();
   });
 
   it("지워진 메시지에는 없다", () => {
     expect(
-      teamAiReplyMetaFor({ state: "deleted", props: { source: "team_ai", model_label: "x" } })
+      teamAiReplyMetaFor({
+        state: "deleted",
+        props: { source: "team_ai", team_ai_model: { model: "x", wire: "chat_completions" } },
+      })
     ).toBeNull();
   });
 });
@@ -213,7 +304,7 @@ describe("쓴 앱 꼬리", () => {
 
   it("도우미(team_ai) 답에는 앱 줄이 서지 않는다 — 도우미는 앱 도구를 부르지 않는다(E7)", () => {
     const meta = parseTeamAiReplyMeta(
-      { source: "team_ai", model_label: "Claude Sonnet 4.5" },
+      { source: "team_ai", team_ai_model: servedReply.props.team_ai_model },
       ctx()
     );
     expect(meta?.appsLine).toBeNull();
