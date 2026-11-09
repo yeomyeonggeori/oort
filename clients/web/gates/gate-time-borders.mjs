@@ -14,7 +14,9 @@
 //                     결함이고(「7월  29일」), 구분선 셋이 전부 그 상태였다.
 //   4. 연속 행의 시각  묶음 안 개별 발화의 시각이 어디에도 없었다(당시 그룹 창은
 //                     5분, #5603부터는 같은 로컬 분). 이제 거터에 있고, hover와 키보드
-//                     포커스 **양쪽**으로 열린다(H-3).
+//                     포커스 **양쪽**으로 열린다(H-3). hover 없는 기기(터치)에서는 서지
+//                     않는다: 같은 분 묶음에서 그 시각은 언제나 머리 시각과 같다(#5624 M2,
+//                     폰 앱 #3386과 같게). 머리의 시각은 그대로 선다.
 //   5. 묶음 안 분절    연속 행 간격이 8px뿐이라 다섯 발화가 한 문단으로 뭉쳤다.
 //                     간격은 코어가 정하고(`ROW_SPACE`), 묶음 사이보다 좁되 8px보다
 //                     넓다(H-7).
@@ -33,6 +35,8 @@
 //     expected failure: "rows inside one author group are packed"
 //   BORDERS_GATE_PROVE_RED_NUMERIC=1 npm run gate:borders
 //     expected failure: "tabular-nums leaked onto Korean prose"
+//   BORDERS_GATE_PROVE_RED_TOUCH=1 npm run gate:borders
+//     expected failure: "a touch reader sees the header's time repeated"
 //
 // red seam은 **CSS만** 바꾼다(드라이버 행동). 제품 소스를 지우거나 단언을 빼라고
 // 요구하지 않으므로 증명은 반복 가능하다. TAIL은 본문 열을 flex로 만들어 꼬리를 칩
@@ -90,6 +94,7 @@ const proveRedTail = process.env.BORDERS_GATE_PROVE_RED_TAIL === "1";
 const proveRedHover = process.env.BORDERS_GATE_PROVE_RED_HOVER === "1";
 const proveRedGap = process.env.BORDERS_GATE_PROVE_RED_GAP === "1";
 const proveRedNumeric = process.env.BORDERS_GATE_PROVE_RED_NUMERIC === "1";
+const proveRedTouch = process.env.BORDERS_GATE_PROVE_RED_TOUCH === "1";
 
 // 행 id는 소문자다 — 행이 `data-message-id`를 소문자로 내놓는다.
 const OLD_MSG = "0199bbbb-0000-7000-8000-0000000000c1";
@@ -763,6 +768,64 @@ async function exercise(browser) {
   await context.close();
 }
 
+/**
+ * 4번의 터치 갈래 (#5624 M2). hover 없는 390 폭에서 연속 행의 거터 시각은 정지 상태로 서지 않고(같은 분 묶음에서 그 값은 언제나
+ * 머리 시각과 같다 — 폰 앱 #3386), 묶음 머리의 시각은 선다. 마크업(`<time datetime>`)은 남아 보조기술이 그대로 읽는다.
+ */
+async function exerciseTouch(browser) {
+  const traffic = makeTraffic();
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, traffic);
+  await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
+  await page.getByTestId("login-email").fill("borders@example.test");
+  await page.getByTestId("login-password").fill("gate-only");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId("channel-item").first().waitFor();
+  // 390px에서 사이드바는 서랍이다: 채널 행이 화면 밖이라 라우터에 직접 말한다(`gate-fold-nav`와 같다).
+  await page.evaluate((id) => {
+    window.location.hash = `#/c/${id}`;
+  }, channelId);
+  await page.waitForFunction(() => window.__bordersGateChannelSubscribed(), undefined, {
+    timeout: 15_000,
+  });
+  if (proveRedTouch) {
+    // red seam: 터치에서 이어진 줄의 시각을 다시 상시로 세운다 = 「09:12」 아래 「09:12」.
+    await page.addStyleTag({ content: "[data-row-clock]{opacity:1!important}" });
+  }
+  const hoverless = await page.evaluate(() => window.matchMedia("(hover: none)").matches);
+  if (!hoverless) throw new Error("이 컨텍스트에 hover가 있다: 터치 갈래를 재려는 판이 아니다");
+  const contTime = rowLocator(page, CONT1_MSG).getByTestId("row-time");
+  await contTime.scrollIntoViewIfNeeded();
+  await wait(250);
+  const contOpacity = await contTime.evaluate((node) => Number(getComputedStyle(node).opacity));
+  const headOpacity = await rowLocator(page, HEAD_MSG)
+    .getByTestId("row-time")
+    .evaluate((node) => Number(getComputedStyle(node).opacity));
+  const machineTime = await contTime.getAttribute("datetime");
+  console.log(`[touch] 연속 행 시각 ${contOpacity} · 머리 시각 ${headOpacity} · datetime ${machineTime ? "있음" : "없음"}`);
+  if (contOpacity > 0.01) {
+    throw new Error(
+      `a touch reader sees the header's time repeated: hover 없는 기기에서 연속 행 시각의 불투명도가 ${contOpacity}다. ` +
+        "같은 분 묶음에서 그 값은 언제나 머리 시각과 같다 — 폰 앱(#3386)처럼 서지 않아야 한다 (#5624 M2)"
+    );
+  }
+  if (headOpacity < 0.99) {
+    throw new Error(`묶음 머리의 시각이 터치에서 보이지 않는다(불투명도 ${headOpacity})`);
+  }
+  if (!machineTime || Number.isNaN(Date.parse(machineTime))) {
+    throw new Error("연속 행의 시각 마크업이 사라졌다: 보조기술은 그대로 읽어야 한다");
+  }
+  await context.close();
+}
+
 /** 리뷰용 스크린샷 (SKILL §11). 판정하지 않는다. */
 async function captureShots(browser) {
   const outDir = resolve(webRoot, "artifacts/time-borders");
@@ -802,6 +865,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await exercise(browser);
+      await exerciseTouch(browser);
       if (process.env.BORDERS_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
@@ -811,8 +875,9 @@ async function main() {
   }
   console.log("GATE PASS: 오늘/어제가 화면에 도달했고, 낭독은 절대 날짜를 얻었고,");
   console.log("           자릿폭 고정은 숫자에만 걸렸고, 연속 행은 hover에 자기");
-  console.log("           시각을 내놓았고, 묶음 안이 8px보다 넓어졌고, 꼬리가");
-  console.log("           칩 위로 돌아왔고, 라벨의 방향은 코어 값이었다.");
+  console.log("           시각을 내놓았고(터치에서는 서지 않고 머리가 시각을 말했고),");
+  console.log("           묶음 안이 8px보다 넓어졌고, 꼬리가 칩 위로 돌아왔고,");
+  console.log("           라벨의 방향은 코어 값이었다.");
 }
 
 await main();
