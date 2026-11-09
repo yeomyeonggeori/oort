@@ -154,7 +154,7 @@ pub(crate) fn is_server_owned_props_entry(key: &str, value: &str) -> bool {
 }
 
 /// #5566 — every `props.kind` value that only the server, its worker or its sweeps put on a
-/// message, so the only values a client's `kind` may not carry.
+/// message: the values a client's own `kind` may not carry.
 ///
 /// **Why a client may not write them.** Each is something a reader *trusts*:
 ///
@@ -2126,7 +2126,7 @@ mod tests {
 
     /// #5566 — the worker's completion report is the case the issue found: `kind` plus a
     /// `summary` is all the core needs to draw 「작업 완료 리포트」, and both are strings a REST
-    /// props map can carry. The `kind` entry goes, the rest of the map stays (the reader's own
+    /// props map can carry. The `kind` entry goes, the rest of the map stays (the sender's own
     /// words are not the server's to drop), and an exact match is what is refused — a kind that
     /// merely starts like one of the list is the client's own.
     #[test]
