@@ -4311,6 +4311,18 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "다른 기기에서 답했거나 작업이 끝났어요."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "이 권한 요청은 이미 처리됐어요"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

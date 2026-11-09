@@ -51,6 +51,8 @@ import {
   workSessionPresentation,
 } from '../features/work/model';
 import {canStopSession} from '@momo/core/features/work/stopWork';
+import {pendingPermission} from '@momo/core/features/workbench/agentPane';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useWorkSessionEvents} from '../features/work/queries';
 import {
   StopWorkControl,
@@ -80,6 +82,9 @@ import {useChannels, useDirectory} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 import {queryFailureDetail} from './SidebarScreen';
 
+/** 처음 보기이자, 권한 요청 알림이 착지할 때 돌아오는 보기(#5593): 승인 카드는 상세 보기 맨 위에 선다. */
+const DEFAULT_MODE: ConversationMode = 'detail';
+
 export default function WorkSessionDetailScreen({
   active,
   sessionId,
@@ -87,10 +92,16 @@ export default function WorkSessionDetailScreen({
   onOpenConversation,
   stopInitial,
   initialMode,
+  permissionLanding,
 }: {
   /** True only while this pushed surface is the top accessibility layer. */
   active: boolean;
   sessionId: string;
+  /**
+   * 권한 요청 알림으로 열렸을 때만 (#5593, `OpenWorkSession.permission`). 그 요청이 아직 열려 있으면 상세 보기 맨 위의
+   * 승인 카드가 착지 자리다(낭독 초점도 카드로). 이미 닫혔으면 그 사실을 한 줄로 말한다 — 카드 없는 화면에 조용히 두지 않는다.
+   */
+  permissionLanding?: {requestEventId: string; token: number};
   onBack: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
   /** 캡처 하네스 전용 시작 상태. 제품은 넘기지 않는다. */
@@ -100,7 +111,16 @@ export default function WorkSessionDetailScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
-  const [mode, setMode] = useState<ConversationMode>(initialMode ?? 'detail');
+  const formatMessage = useFormatMessage();
+  const [mode, setMode] = useState<ConversationMode>(initialMode ?? DEFAULT_MODE);
+  // 권한 요청 알림이 새로 착지하면 상세 보기로 돌아온다(#5593): 카드는 상세 보기 맨 위에 선다. 대화 보기에서 다른 일을
+  // 보던 중이어도 알림은 새 입구다. 렌더 중에 앞 값과 견준다(효과로 하면 대화 보기가 한 번 그려진 뒤에 바뀐다).
+  const landingToken = permissionLanding?.token;
+  const [seenLandingToken, setSeenLandingToken] = useState(landingToken);
+  if (landingToken !== seenLandingToken) {
+    setSeenLandingToken(landingToken);
+    if (landingToken !== undefined) setMode(DEFAULT_MODE);
+  }
   const reduceMotion = useReduceMotion();
   const fade = useRef(new Animated.Value(1)).current;
   const {workspaceId, member} = useSession();
@@ -312,6 +332,18 @@ export default function WorkSessionDetailScreen({
 
   const status = workSessionContinuityStatus(session, hostsQuery.data);
   const trust = workHostTrust(session, hostsQuery.data);
+  // 알림이 가리킨 요청이 지금 열린 그 요청인가(#5593). 열려 있으면 카드가 착지 자리이고, 닫혔으면 한 줄로 말한다 —
+  // 「없다」는 진행을 다 읽은 뒤에만 말한다(알림이 진행 읽기를 낡게 했으므로 다시 읽는 동안에는 기다린다).
+  const openRequest = pendingPermission(sessionEvents, session);
+  const landingOpen =
+    permissionLanding !== undefined &&
+    openRequest !== null &&
+    uuidEq(openRequest.requestEventId, permissionLanding.requestEventId);
+  const landingGone =
+    permissionLanding !== undefined &&
+    !landingOpen &&
+    eventsQuery.data !== undefined &&
+    !eventsQuery.isFetching;
   const hasCachedEvents = eventsQuery.data !== undefined;
   // 돌고 있는 동안은 재조회 때마다 안내 블록이 나타났다 사라지면 아래 줄이 밀린다.
   const streaming = session.status === 'running';
@@ -388,6 +420,14 @@ export default function WorkSessionDetailScreen({
                 </View>
               ) : null}
 
+              {landingGone ? (
+                <NoticeBlock
+                  headline={formatMessage('mobile.workPermission.landingGoneTitle')}
+                  detail={formatMessage('mobile.workPermission.landingGoneDetail')}
+                  testID="work-detail-permission-gone"
+                />
+              ) : null}
+
               {isOwner ? (
                 <SignedWorkControls
                   workspaceId={workspaceId}
@@ -395,6 +435,7 @@ export default function WorkSessionDetailScreen({
                   session={session}
                   events={sessionEvents}
                   online={online}
+                  focusToken={landingOpen ? landingToken : undefined}
                 />
               ) : null}
 

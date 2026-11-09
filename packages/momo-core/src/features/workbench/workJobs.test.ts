@@ -204,6 +204,28 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(inProgressCount([working, done, waiting])).toBe(2);
   });
 
+  it("「내 확인 필요」(#5593): 호출자가 답한 줄이 맨 위 구간이고, 승인 대기 run 보다도 위다", () => {
+    const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
+    const quiet = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d1" })), NOW);
+    const asking = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d2" })), NOW);
+    const ended = workJobRow(
+      row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d3", state: "done", endedAtMs: NOW })),
+      NOW
+    );
+    // 서버 순서(마지막 활동 최신순)로는 묻는 세션이 맨 끝이다. 끝난 줄은 물어도 「내 확인 필요」가 아니다(D5: 요청은 취소됐다).
+    const rows = [approval, quiet, ended, asking];
+    const needs = (r: typeof asking) => r.id === asking.id || r.id === ended.id;
+    const sections = workJobSections(rows, needs);
+    expect(sections.map((s) => [s.key, s.label, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", "내 확인 필요", [asking.id]],
+      ["now", "지금", [approval.id, quiet.id]],
+      ["done", "끝난 일", [ended.id]],
+    ]);
+    // 답하지 않으면(웹·옛 부름) 예전 두 구간 그대로다.
+    expect(workJobSections(rows).map((s) => s.key)).toEqual(["now", "done"]);
+    expect(workJobSections(rows, () => false).map((s) => s.key)).toEqual(["now", "done"]);
+  });
+
   it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {
     const job = workJobRow(row(wireRun()), NOW);
     expect(job.awaitingApproval).toBe(false);

@@ -46,6 +46,8 @@ import React, {
 } from 'react';
 import {
   AccessibilityInfo,
+  findNodeHandle,
+  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -296,12 +298,15 @@ export function SignedWorkControls({
   session,
   events,
   online,
+  focusToken,
 }: {
   workspaceId: string;
   memberId: string;
   session: WorkSession;
   events: readonly WorkSessionEvent[];
   online: boolean;
+  /** 권한 요청 알림이 이 카드로 착지했다(#5593). 값이 바뀔 때마다 낭독 초점이 카드의 질문으로 간다. */
+  focusToken?: number;
 }): React.JSX.Element | null {
   const surface = useSignedWorkSurface(workspaceId, memberId, session, events);
   // D-11: nothing changes unless the server says signatures are required.
@@ -315,6 +320,7 @@ export function SignedWorkControls({
       block={surface.block}
       actions={surface.actions}
       fallbackReject={surface.fallbackReject}
+      focusToken={focusToken}
     />
   );
 }
@@ -342,6 +348,7 @@ export function SignedWorkControlsView({
   fallbackReject,
   now = Date.now,
   initial,
+  focusToken,
 }: {
   permission: PendingPermission | null;
   /** The host's preview through the shared gate (#3128). */
@@ -354,6 +361,8 @@ export function SignedWorkControlsView({
   fallbackReject: ((permission: PendingPermission) => Promise<void>) | null;
   now?: () => number;
   initial?: SignedWorkInitial;
+  /** `SignedWorkControls.focusToken` 그대로. */
+  focusToken?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 닿지 않은 「거부 + 지시」의 글을 지시 칸으로 옮긴다(버리지 않는다, D-5b).
@@ -379,6 +388,7 @@ export function SignedWorkControlsView({
           lapsed={permissionLapsed(permission, now())}
           initial={initial}
           onUndelivered={text => setSeed({text})}
+          focusToken={focusToken}
         />
       ) : null}
       {ended ? null : (
@@ -407,6 +417,7 @@ export function PermissionCard({
   lapsed,
   initial,
   onUndelivered,
+  focusToken,
 }: {
   onUndelivered: (text: string) => void;
   permission: PendingPermission;
@@ -417,9 +428,22 @@ export function PermissionCard({
   fallbackReject: ((permission: PendingPermission) => Promise<void>) | null;
   lapsed: boolean;
   initial?: SignedWorkInitial;
+  /** 권한 요청 알림이 이 카드로 착지했다(#5593): 값이 바뀔 때마다 낭독 초점을 질문으로 옮긴다. */
+  focusToken?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 알림으로 온 사람에게 이 카드가 착지 자리다(#5593). 화면이 머리에 둔 초점(`work-detail-focus`) 뒤에 온다 — 카드는
+  // 진행 읽기가 끝난 뒤에 서므로 늘 나중이고, 이미 서 있던 카드에 새 탭이 오면 값이 바뀌어 다시 돈다.
+  const askRef = useRef<React.ElementRef<typeof Text>>(null);
+  useEffect(() => {
+    if (focusToken === undefined) return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      const node = findNodeHandle(askRef.current);
+      if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
+    });
+    return () => task.cancel();
+  }, [focusToken]);
   const keyboardAppearance = useKeyboardAppearance();
   const [busy, setBusy] = useState<'once' | 'session' | 'reject' | null>(null);
   const [asking, setAsking] = useState(initial?.asking ?? false);
@@ -535,7 +559,11 @@ export function PermissionCard({
     <View style={styles.card} testID="work-permission-card">
       <SectionLabel label="권한 요청" />
       <View style={styles.cardBody}>
-        <Sentence style={styles.ask} accessibilityRole="header">
+        <Sentence
+          ref={askRef}
+          style={styles.ask}
+          accessibilityRole="header"
+          testID="work-permission-ask">
           {ask}
         </Sentence>
         {/* Why the allow is shut, right under the question: a long preview

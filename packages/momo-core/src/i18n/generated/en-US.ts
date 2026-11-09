@@ -4614,6 +4614,18 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "It was answered on another device, or the work ended."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "This permission request was already handled"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

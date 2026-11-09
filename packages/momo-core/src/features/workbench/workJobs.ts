@@ -44,11 +44,18 @@ export const WORK_JOBS_COPY = {
   filterGroup: "누구의 작업",
   /** 「지금 진행 3」. 숫자는 지금 보이는 줄에서만 센다(숨은 줄 수를 말하지 않는다, ADR-0194 D5). */
   inProgress: "지금 진행",
+  /**
+   * 맨 위 구간(#5593): 내가 답해야 다음으로 가는 일 — 지금은 내 맥 세션의 권한 요청. 낱말표의 「나를 기다려요」 자리 말이다
+   * (2026-11-09 낱말표). 숫자는 다른 구간처럼 화면이 붙인다(「내 확인 필요 1」).
+   */
+  sectionNeedsMe: "내 확인 필요",
   sectionNow: "지금",
   sectionDone: "끝난 일",
   reportedTag: "에이전트 보고",
   approvalAction: "승인 카드 보기",
   approvalHint: "승인은 그 카드에서 해요",
+  /** 내 맥 세션이 권한을 묻고 기다린다(#5593). 줄을 누르면 그 세션 화면의 승인 카드다. */
+  permissionHint: "권한 요청이 왔어요",
   legacyNotice: "이 서버는 아직 호스팅 에이전트의 작업만 보여 줘요.",
   emptyMineTitle: "내가 맡긴 작업이 아직 없어요",
   emptyMineBody: "에이전트에게 일을 맡기면 결과가 여기에 모여요.",
@@ -205,23 +212,35 @@ export function inProgressCount(rows: readonly WorkJobRow[]): number {
 }
 
 export interface WorkJobSection {
-  key: "now" | "done";
+  key: "needsMe" | "now" | "done";
   label: string;
   rows: WorkJobRow[];
 }
 
 /**
- * 두 구간: 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
+ * 구간: 내 확인 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
  * 최신순)를 지킨다. 빈 구간은 만들지 않는다.
+ *
+ * 「내 확인 필요」(#5593)는 호출자가 답한다(`needsMyCheck`): 보드 줄에는 맥 세션의 권한 요청이 실리지 않아서(서버
+ * `work_board`는 호스트 세션의 상태를 원장 값으로만 낸다), 화면이 그 세션의 진행을 읽어 정한다(`pendingPermission`).
+ * 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
  */
-export function workJobSections(rows: readonly WorkJobRow[]): WorkJobSection[] {
+export function workJobSections(
+  rows: readonly WorkJobRow[],
+  needsMyCheck: (row: WorkJobRow) => boolean = () => false
+): WorkJobSection[] {
   const open = rows.filter((row) => !row.finished);
+  const mine = open.filter((row) => needsMyCheck(row));
+  const rest = open.filter((row) => !needsMyCheck(row));
   const now = [
-    ...open.filter((row) => row.awaitingApproval),
-    ...open.filter((row) => !row.awaitingApproval),
+    ...rest.filter((row) => row.awaitingApproval),
+    ...rest.filter((row) => !row.awaitingApproval),
   ];
   const done = rows.filter((row) => row.finished);
   const sections: WorkJobSection[] = [];
+  if (mine.length > 0) {
+    sections.push({ key: "needsMe", label: WORK_JOBS_COPY.sectionNeedsMe, rows: mine });
+  }
   if (now.length > 0) sections.push({ key: "now", label: WORK_JOBS_COPY.sectionNow, rows: now });
   if (done.length > 0) sections.push({ key: "done", label: WORK_JOBS_COPY.sectionDone, rows: done });
   return sections;

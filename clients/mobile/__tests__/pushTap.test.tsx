@@ -331,6 +331,16 @@ const serverLater = new Map<string, unknown[]>();
 /** `GET …/work-sessions` 의 답 — 「작업 끝남」 탭이 루트 메시지로 세션을 찾는다(#3342). */
 let workSessionRows: unknown[] = [];
 
+/** `GET …/device-keys/signing-context` — 서버가 기기 서명을 요구한다(D-11). 그때만 세션 화면에 승인 카드가 선다. */
+const SIGNING_REQUIRED = {
+  instanceId: 'instance-1',
+  serverTimeMs: T0,
+  maxLifetimeMs: 60_000,
+  maxClockSkewMs: 5_000,
+  humanControlSignatureRequired: true,
+  hostRegisterSignatureRequired: false,
+};
+
 function commitLater(channelId: string, row: unknown): void {
   serverLater.set(channelId, [...(serverLater.get(channelId) ?? []), row]);
 }
@@ -430,6 +440,13 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
     }
     if (url.includes('/work-sessions/shared')) {
       return jsonResponse(200, {sessions: [], nextCursor: null});
+    }
+    // 세션 화면이 승인 카드를 세우는 데 읽는 셋(#5593): 서명 요구(켜짐), 이 폰의 기기 키(없음), 요청의 미리보기(주인
+    // 전용 읽기 — 이 시험은 카드가 **서는지**만 잰다. 미리보기가 없으면 카드는 허락을 잠근 채 선다).
+    if (url.includes('/signing-context')) return jsonResponse(200, SIGNING_REQUIRED);
+    if (url.includes('/device-keys')) return jsonResponse(200, {deviceKeys: []});
+    if (url.includes('/permission-requests/')) {
+      return jsonResponse(404, {error: {code: 'not_found', message: 'not found'}});
     }
     if (url.includes('/work-sessions')) {
       return jsonResponse(200, {workSessions: workSessionRows});
@@ -2776,6 +2793,158 @@ describe('「작업 끝남」 탭 (#3342)', () => {
     );
     renderShell();
     await expectLanded('general', REPLY, true);
+    expect(screen.queryByTestId('work-detail-pane')).toBeNull();
+  });
+});
+
+// =============================================================================
+// 맥 세션의 권한 요청 탭 (#5593, ADR-0188 D5·D8).
+//
+// 봉투는 서버가 짓는 그대로다(`momo-push` judgment `work_permission`): reason `approval_request`, category
+// `momo.approval.open`(「열어서 결정」), `approval_id` 는 요청 이벤트 id, `thread-id` 는 세션의 루트, `message_id` 는 그 요청
+// 줄. 앱은 원장을 한 번 읽어 그 루트의 **내** 세션을 찾고, 대화가 아니라 그 세션 화면의 승인 카드로 간다.
+// =============================================================================
+const PERMISSION_EVENT = 'aaaaaaaa-0000-4000-8000-000000000021';
+const DECIDED_EVENT = 'aaaaaaaa-0000-4000-8000-000000000022';
+
+const PERMISSION_AIM: Aim = {
+  messageId: PERMISSION_EVENT,
+  threadId: ROOT,
+  category: 'momo.approval.open',
+  reason: 'approval_request',
+  approvalId: PERMISSION_EVENT,
+};
+
+/** 세션 스레드의 System 줄 하나(`work_sessions.rs` `validated_acp_event` 의 모양). */
+function sessionEventRow(
+  seq: number,
+  id: string,
+  type: string,
+  event: Record<string, unknown>,
+) {
+  return message(seq, id, {
+    rootId: ROOT,
+    authorMemberId: SELF_ID,
+    type: 'system',
+    body: 'DO_NOT_RENDER_MESSAGE_BODY',
+    props: {
+      kind: 'work_session_event',
+      schema: 'momo.work_session.acp_event.v1',
+      event_type: type,
+      event_id: id,
+      event_ts: T0 + seq * 1000,
+      event: {work_session_id: SESSION_ID, event_id: id, ...event},
+    },
+  });
+}
+
+const PERMISSION_REQUESTED = sessionEventRow(30, PERMISSION_EVENT, 'approval.requested', {
+  options: [
+    {option_id: 'allow-once', kind: 'allow_once', name: 'Allow once'},
+    {option_id: 'reject-once', kind: 'reject_once', name: 'Reject'},
+  ],
+});
+
+describe('맥 세션 권한 요청 탭 (#5593)', () => {
+  it('순수 — 「열어서 결정」 알림이 세션 루트를 가리키고 그 세션이 내 것일 때만 세션이다', () => {
+    const rows = [sessionRow({status: 'running'})] as never[];
+    const target = {
+      reason: 'approval_request' as const,
+      category: 'momo.approval.open' as const,
+      approvalId: PERMISSION_EVENT,
+      channelId: GENERAL,
+      threadRootId: ROOT,
+    };
+    expect(workSessionForTap(target, rows, SELF_ID)?.id).toBe(SESSION_ID);
+    // 남의 세션이면 아니다: 서버는 이 알림을 세션 주인에게만 보낸다. 같은 모양의 다른 승인 카드는 대화의 그 카드로 간다.
+    expect(workSessionForTap(target, rows, MINSU)).toBeNull();
+    expect(workSessionForTap(target, rows)).toBeNull();
+    // 잠금 화면에서 결정하는 평범한 승인, 승인 id 가 없는 알림, 채널 본류의 알림은 대화로 간다.
+    expect(workSessionForTap({...target, category: 'momo.approval'}, rows, SELF_ID)).toBeNull();
+    expect(workSessionForTap({...target, approvalId: null}, rows, SELF_ID)).toBeNull();
+    expect(workSessionForTap({...target, threadRootId: null}, rows, SELF_ID)).toBeNull();
+  });
+
+  it('종료 — 탭이 앱을 띄우면 대화가 아니라 그 세션 화면이 서고, 승인 카드가 그 자리다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow({status: 'running'})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(PERMISSION_AIM)),
+    );
+    renderShell();
+
+    await waitFor(() => expect(screen.getByTestId('work-detail-pane')).toBeTruthy(), SETTLE);
+    const pane = screen.getByTestId('work-detail-pane');
+    await waitFor(
+      () => expect(within(pane).getByTestId('work-permission-card')).toBeTruthy(),
+      SETTLE,
+    );
+    expect(within(pane).getByTestId('work-detail-title')).toHaveTextContent(SESSION_LABEL);
+    // 대화는 열리지 않았다 — 결정할 카드는 대화의 그 줄이 아니라 이 화면에 있다.
+    expect(screen.queryByTestId('conversation-title', EVEN_HIDDEN)).toBeNull();
+    expect(screen.queryByTestId('work-detail-permission-gone')).toBeNull();
+    // 뒤로는 그 화면이 말한 대로 「작업 목록」이다.
+    fireEvent.press(within(pane).getByLabelText('작업 목록으로'));
+    await waitFor(() => expect(screen.queryByTestId('work-detail-pane')).toBeNull());
+    expect(screen.getByTestId('work-list-pane')).toBeTruthy();
+  });
+
+  it('실행 중 — 다른 대화가 열려 있어도 그 세션 화면의 카드가 그 위를 대체한다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow({status: 'running'})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    renderShell();
+    await waitForSidebar();
+    fireEvent.press(screen.getByTestId(`sidebar-row-channel:${RANDOM}`));
+    await waitFor(
+      () => expect(screen.getByTestId('conversation-title')).toHaveTextContent('random'),
+      SETTLE,
+    );
+    await tapWhileRunning(apnsPayload(PERMISSION_AIM));
+    await waitFor(
+      () => expect(screen.getByTestId('work-permission-card')).toBeTruthy(),
+      SETTLE,
+    );
+    expect(screen.queryByTestId('conversation-title', EVEN_HIDDEN)).toBeNull();
+  });
+
+  it('이미 답한 요청이면 카드 없이 그 사실을 한 줄로 말한다 — 카드 없는 화면에 조용히 두지 않는다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow({status: 'running'})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    commitLater(
+      GENERAL,
+      sessionEventRow(31, DECIDED_EVENT, 'approval.decided', {
+        request_event_id: PERMISSION_EVENT,
+        outcome: 'selected',
+        option_id: 'allow-once',
+      }),
+    );
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(PERMISSION_AIM)),
+    );
+    renderShell();
+    await waitFor(
+      () => expect(screen.getByTestId('work-detail-permission-gone')).toBeTruthy(),
+      SETTLE,
+    );
+    expect(screen.queryByTestId('work-permission-card')).toBeNull();
+  });
+
+  it('남의 세션이면 평범한 알림처럼 그 줄이 있는 대화로 간다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow({status: 'running', memberId: MINSU})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(PERMISSION_AIM)),
+    );
+    renderShell();
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('conversation-title', EVEN_HIDDEN)).toHaveTextContent('general'),
+      SETTLE,
+    );
     expect(screen.queryByTestId('work-detail-pane')).toBeNull();
   });
 });

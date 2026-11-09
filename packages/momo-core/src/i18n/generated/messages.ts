@@ -634,6 +634,8 @@ export const messageKeys = [
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "mobile.workPermission.landingGoneDetail",
+  "mobile.workPermission.landingGoneTitle",
   "notifications.inviteLink.fallback",
   "recovery.claim.hostBody",
   "recovery.claim.hostConfirm",
@@ -2081,6 +2083,8 @@ export const argumentSpecs = {
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "mobile.workPermission.landingGoneDetail": {},
+  "mobile.workPermission.landingGoneTitle": {},
   "notifications.inviteLink.fallback": {},
   "recovery.claim.hostBody": {},
   "recovery.claim.hostConfirm": {},
@@ -3583,6 +3587,8 @@ export interface MessageArgs {
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "mobile.workPermission.landingGoneDetail": Record<string, never>;
+  "mobile.workPermission.landingGoneTitle": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "recovery.claim.hostBody": Record<string, never>;
   "recovery.claim.hostConfirm": Record<string, never>;

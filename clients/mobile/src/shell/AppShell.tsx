@@ -23,6 +23,7 @@ import {ApprovalsLiveSync} from '../features/inbox/ApprovalsLiveSync';
 import {OnlineRollCall} from '../features/presence/OnlineRollCall';
 import {ShellStripAnnouncer} from '../features/connection/ShellStripAnnouncer';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
+import {useWorkHosts} from '../features/agents/queries';
 import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
 import {ShareSheetTouchShield} from '../lib/ShareSheetTouchShield';
@@ -145,6 +146,13 @@ export type CreateStep = 'menu' | 'dm' | 'channel' | null;
 type Place = Tab | 'agentList' | 'workList';
 
 /**
+ * 세션 화면 판정(`workConsoleAvailable`)이 맥이 켜지고 꺼지는 것을 다시 보는 주기 (#5593). 웹
+ * `WORK_HOST_PRESENCE_POLL_MS`(60초, heartbeat 90초 창보다 짧다)와 같은 값이다 — 같은 판정은 같은 박자로 바뀐다.
+ * 앱이 뒤로 가면 react-query 의 인터벌은 멈춘다(`query/queryClient.ts` 의 `focusManager`).
+ */
+export const WORK_HOST_PRESENCE_POLL_MS = 60_000;
+
+/**
  * 셸 본체. 앱은 `AppShell`이 프로바이더 셋 안에서 세운다.
  *
  * 내보내는 이유는 **캡처 하네스** 하나다(`measure/surfaces.tsx`의 `shell-*`):
@@ -204,6 +212,9 @@ export function Shell({
   );
   // 탭 배지의 출처는 이 한 줄이다(#3342): 인박스 알약 = core `needsMe` 합, 홈 점 = 안 읽음.
   const needsMe = usePhoneNeedsMe();
+  // 세션 화면의 문은 웹과 같은 판정으로 선다(#5593): 이 워크스페이스에 지금 온라인인 호스트가 있는가.
+  const hostsQuery = useWorkHosts(workspaceId, true, WORK_HOST_PRESENCE_POLL_MS);
+  const workConsole = workConsoleAvailable(hostsQuery.data);
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
   // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.
   const tapRouting = useNotificationTapRouting(dispatch, {
@@ -276,6 +287,14 @@ export function Shell({
       dispatch({type: 'openWorkSession', workSession: {sessionId}}),
     [],
   );
+  // 보낸 직후 그 세션으로(#5593): 「내 맥에 보내기」 시트와 대화의 개인 에이전트 부르기. 판정(`workConsole`)을 묻지 않는다 —
+  // 보내기가 성공했다는 것이 곧 온라인인 내 맥이 있다는 서버의 답이다(꺼져 있으면 409 `work_host_offline`). 층을 걷고
+  // 작업 목록 위에 연다(`enterWorkSession`): 대화에서 불렀어도 세션 화면이 대화 밑에 깔리지 않는다.
+  const onEnterWorkSession = useCallback(
+    (sessionId: string) =>
+      dispatch({type: 'enterWorkSession', workSession: {sessionId}}),
+    [],
+  );
   const onOpenWorkList = useCallback(
     () => dispatch({type: 'openWorkList'}),
     [],
@@ -312,7 +331,6 @@ export function Shell({
   visited.current.add(nav.tab);
   if (nav.agentList) visited.current.add('agentList');
   if (nav.workList) visited.current.add('workList');
-  const workConsole = workConsoleAvailable();
 
   // + 메뉴의 행. 순서는 Buzz 의 무게 순서(가장 자주 → 드물게)가 아니라 이 제품의
   // 동사 순서다: 사람에게 말하기, 방 만들기, 에이전트 부르기, 에이전트의 일 보기.
@@ -573,6 +591,7 @@ export function Shell({
             <WorkSessionDetailScreen
               active={nav.conversation === null}
               sessionId={nav.workSession.sessionId}
+              permissionLanding={nav.workSession.permission}
             onBack={onBack}
             onOpenConversation={onOpenConversation}
           />
@@ -667,7 +686,8 @@ export function Shell({
             onOpenAgent={onOpenAgent}
             onDelegateWork={onDelegateWork}
             onAskMac={onAskMacFromConversation}
-            onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
+            // 대화의 이 길은 개인 에이전트를 부른 직후 그 세션으로 가는 것 하나다(`usePersonalAgentCall`) — 보낸 직후와 같다.
+            onOpenWorkSession={onEnterWorkSession}
             onOpenWorkList={onOpenWorkList}
             onOpenSettings={onOpenSettingsFromConversation}
             // 대화 안 검색의 「모든 대화에서 ›」(#5384): 같은 말로 검색 탭을 연다.
@@ -720,9 +740,7 @@ export function Shell({
             closeAskMac();
             setDelegate({});
           }}
-          onOpenSession={sessionId => {
-            if (workConsole) dispatch({type: 'openWorkSession', workSession: {sessionId}});
-          }}
+          onOpenSession={onEnterWorkSession}
           onOpenWorkList={() => dispatch({type: 'openWorkList'})}
         />
       ) : null}
