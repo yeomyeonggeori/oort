@@ -156,7 +156,7 @@ function signingContext(required: boolean) {
   };
 }
 
-function installFetch(): void {
+function installFetch(hosts: typeof HOSTS = HOSTS): void {
   const mock = jest.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/signing-context')) {
@@ -169,7 +169,7 @@ function installFetch(): void {
     }
     if (url.includes('/replies')) return jsonResponse(200, {messages: [PERMISSION_REQUESTED]});
     if (url.includes('/work-sessions')) return jsonResponse(200, {workSessions: [SESSION]});
-    if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: HOSTS});
+    if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: hosts});
     if (url.includes('/channels')) {
       return jsonResponse(200, {
         channels: [{id: CH, workspaceId: WS, kind: 'public', name: 'general', muted: false}],
@@ -312,5 +312,30 @@ describe('M3 착지가 있으면 낭독 초점의 주인은 착지 자리 하나
       SETTLE,
     );
     expect(focus).not.toHaveBeenCalledWith('work-detail-focus');
+  });
+});
+
+describe('수리 2회차 owner 낱말(2026-11-09) — 세션 화면의 쉬운 말과 「연결 안 됨」', () => {
+  it('정보 칸은 「실행하는 컴퓨터」·「데스크탑 앱」이고 대화로 가는 줄은 「시작한 대화로 가기」다', async () => {
+    installFetch();
+    renderLanding();
+    await waitFor(() => expect(screen.getByTestId('work-permission-card')).toBeTruthy(), SETTLE);
+    expect(screen.getByText('실행하는 컴퓨터')).toBeTruthy();
+    expect(screen.getByText('성재 맥북 · 연결됨')).toBeTruthy();
+    expect(screen.getAllByText('데스크탑 앱').length).toBeGreaterThan(0);
+    expect(screen.getByText('시작한 대화로 가기')).toBeTruthy();
+    expect(screen.queryByText('호스트')).toBeNull();
+    expect(screen.queryByText(/발원|T1 ·/)).toBeNull();
+  });
+
+  it('맥이 연결돼 있지 않으면 머리·배지와 정보 칸이 같은 낱말 「연결 안 됨」을 쓴다', async () => {
+    installFetch(HOSTS.map(h => ({...h, online: false})));
+    renderLanding();
+    await waitFor(
+      () => expect(screen.getByTestId('work-detail-status')).toHaveTextContent('연결 안 됨'),
+      SETTLE,
+    );
+    expect(screen.getByText('성재 맥북 · 연결 안 됨')).toBeTruthy();
+    expect(screen.queryByText(/호스트 응답 없음|오프라인/)).toBeNull();
   });
 });

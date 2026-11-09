@@ -442,7 +442,7 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
     expect(within(run).queryByText(WORK_JOBS_COPY.permissionHint)).toBeNull();
   });
 
-  it('세션 줄에는 맥 점이 서고, 줄 라벨이 그 맥의 이름과 켜짐·꺼짐을 말로 한다 — run 줄에는 점이 없다', async () => {
+  it('세션 줄에는 맥 점이 서고, 줄 라벨이 그 맥의 이름과 연결됨·연결 안 됨을 말로 한다 — run 줄에는 점이 없다', async () => {
     installFetch({hosts: [host(false)]});
     renderShell();
     await openWorkList();
@@ -450,12 +450,12 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
     await waitFor(
       () =>
         expect(screen.getByTestId(`work-job-row-${S_MAC}`).props.accessibilityLabel).toContain(
-          '성재 맥북 꺼짐',
+          '성재 맥북 연결 안 됨',
         ),
       SETTLE,
     );
-    // 꺼진 맥은 「꺼짐」을 글로도 말한다(수리 M5) — 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같다. 맥 이름은 자기 줄이다(L1).
-    expect(within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByText('성재 맥북 · 꺼짐')).toBeTruthy();
+    // 연결 안 된 맥은 「연결 안 됨」을 글로도 말한다(수리 M5, owner 2026-11-09 낱말) — 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같다. 맥 이름은 자기 줄이다(L1).
+    expect(within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByText('성재 맥북 · 연결 안 됨')).toBeTruthy();
     // 점은 낭독에서 빠진다(`StatusDot`) — 찾을 때 숨은 요소까지 본다. 꺼짐은 속 빈 고리다(면 = `surface`, 선 = `textFaint`).
     const dot = within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByTestId('status-dot', HIDDEN_TOO);
     expect(dot.props.accessibilityElementsHidden).toBe(true);

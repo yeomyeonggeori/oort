@@ -7537,6 +7537,9 @@ function seedShell(surface: string): void {
     surface === 'shell-work-after-send'
   ) {
     seedMacSessions();
+    // 시뮬레이터 NetInfo 가 시작 직후 「끊김」으로 읽혀 세션 화면에 폰 네트워크 안내(「오프라인입니다.」)가 서는 흔들림을 막는다
+    // (#5593 수리 2회차 캡처 — 꺼진 맥 세션 사진에서 맥 상태와 폰 네트워크 상태가 섞여 보였다). 위 `forceNetwork` 주석과 같은 이유.
+    forceNetwork(true);
   }
   if (surface === 'shell-work-permission-off') {
     harnessClient.setQueryData(SIGNING_REQUIRED_QUERY_KEY(ADE_WS), false);
@@ -8255,6 +8258,7 @@ if (
   seedWorkJobs(LAUNCHED.name);
   if (LAUNCHED.name === 'work-jobs-mac') {
     seedMacSessions();
+    forceNetwork(true);
     // 수리 1회차 M1: 승인을 기다리는 run(첫 줄)에 내 대기 승인이 걸려 있다 — 인박스 알약과 같은 원장이라 「내 확인 필요」에 함께 선다.
     harnessClient.setQueryData(['approvals', ADE_WS, 'pending'], [
       {

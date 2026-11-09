@@ -526,7 +526,7 @@ export default function WorkSessionDetailScreen({
               <View style={styles.originWrap}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${presentation.channelName} 발원 대화로 이동`}
+                  accessibilityLabel={`${presentation.channelName} 시작한 대화로 가기`}
                   onPress={() =>
                     onOpenConversation(session.channelId, presentation.channelName)
                   }
@@ -535,7 +535,7 @@ export default function WorkSessionDetailScreen({
                     pressed && styles.pressed,
                   ]}
                   testID="work-detail-origin">
-                  <Text style={styles.originLabel}>발원 대화로 이동</Text>
+                  <Text style={styles.originLabel}>시작한 대화로 가기</Text>
                   <Text accessibilityElementsHidden style={styles.originArrow}>
                     ›
                   </Text>
@@ -546,7 +546,7 @@ export default function WorkSessionDetailScreen({
               <View style={styles.metaBlock} testID="work-detail-meta">
                 <MetaRow label="실행 위치" value={presentation.location.label} />
                 <MetaRow
-                  label="호스트"
+                  label="실행하는 컴퓨터"
                   value={`${presentation.hostName} · ${presentation.hostState}`}
                 />
                 <MetaRow label="대화" value={presentation.channelName} />

@@ -648,7 +648,7 @@ describe("workHostTrust", () => {
   it("does not present a running session on an offline host as active", () => {
     expect(
       workSessionContinuityStatus(session(), [host({ online: false })])
-    ).toEqual({ key: "unavailable", label: "호스트 응답 없음" });
+    ).toEqual({ key: "unavailable", label: "연결 안 됨" });
     expect(workSessionContinuityStatus(session(), [host()]).key).toBe("running");
     expect(
       workSessionContinuityStatus(
@@ -896,7 +896,7 @@ describe("주인에게 열린 권한 요청 — 「응답 필요」 (#5593 수�
   it("요청이 없거나 주인이 아니면, 그리고 호스트 응답 없음·끝난 세션이면 원래 상태 그대로다", () => {
     const running = workSessionStatus({ status: "running" });
     expect(withOpenRequest(running, false)).toBe(running);
-    const unavailable = { key: "unavailable" as const, label: "호스트 응답 없음" };
+    const unavailable = { key: "unavailable" as const, label: "연결 안 됨" };
     expect(withOpenRequest(unavailable, true)).toBe(unavailable);
     const ended = workSessionStatus({ status: "ended" });
     expect(withOpenRequest(ended, true)).toBe(ended);

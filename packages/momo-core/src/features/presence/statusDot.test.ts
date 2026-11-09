@@ -125,10 +125,10 @@ describe("에이전트 생존 판정 → 점 (대응표)", () => {
 });
 
 describe("작업 목록 세션 줄의 맥 점 (#5593)", () => {
-  it("켜짐은 채운 초록, 꺼짐은 속 빈 고리 — 낱말은 줄 라벨이 읽는다", () => {
+  it("연결됨은 채운 초록, 연결 안 됨은 속 빈 고리 — 낱말은 줄 라벨이 읽는다 (owner 2026-11-09 낱말 결정)", () => {
     expect(macHostDot(true)).toEqual({ tone: "ok", label: MAC_HOST_ON_LABEL });
     expect(macHostDot(false)).toEqual({ tone: "muted", label: MAC_HOST_OFF_LABEL });
-    expect([MAC_HOST_ON_LABEL, MAC_HOST_OFF_LABEL]).toEqual(["켜짐", "꺼짐"]);
+    expect([MAC_HOST_ON_LABEL, MAC_HOST_OFF_LABEL]).toEqual(["연결됨", "연결 안 됨"]);
   });
 });
 

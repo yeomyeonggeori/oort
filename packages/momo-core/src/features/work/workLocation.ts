@@ -17,9 +17,9 @@ export interface WorkExecutionLocation {
 }
 
 const LOCATION_LABEL: Readonly<Record<WorkExecutionLocationKey, string>> = {
-  t1: "T1 · 데스크톱 앱",
-  t2: "T2 · 셀프호스트",
-  t3: "T3 · 클라우드",
+  t1: "데스크탑 앱",
+  t2: "셀프호스트 서버",
+  t3: "클라우드",
   unknown: "실행 위치 확인 필요",
 };
 

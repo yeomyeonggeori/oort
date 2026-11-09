@@ -816,7 +816,7 @@ export function workSessionContinuityStatus(
     (session.status === "running" || session.status === "idle") &&
     workHostOnline(session, hosts) === false
   ) {
-    return { key: "unavailable", label: "호스트 응답 없음" };
+    return { key: "unavailable", label: "연결 안 됨" };
   }
   return workSessionStatus(session);
 }

@@ -30,8 +30,8 @@ import {
 // 맡겼나, 지금 어떤가, 얼마나 걸렸나, 무엇이 나왔나(PR·에이전트 보고). 진행 스트림(단계·oort
 // 호출)은 줄을 열었을 때 서랍에서만 본다(D1). 남의 일은 결과 요약과 상태까지다(D5).
 //
-// 이 모듈은 거르지 않는다. 가시성(내가 멤버인 채널)과 「내 것」은 새 서버가 SQL에서 끝낸다
-// (`who=mine`). 옛 서버(`mode: "legacy"`)에만 화면이 「내 것」을 고른다: 그때 서버는 팀 보드
+// 이 모듈은 거르지 않는다. 가시성(내가 멤버인 채널)과 「내 작업」은 새 서버가 SQL에서 끝낸다
+// (`who=mine`). 옛 서버(`mode: "legacy"`)에만 화면이 「내 작업」을 고른다: 그때 서버는 팀 보드
 // 한 벌만 주기 때문이다. 그 고르기는 가시성이 아니라 보기다(`ownedBy`, 기존 폰 판과 같은 뜻).
 // =============================================================================
 
@@ -39,7 +39,7 @@ export type WorkFilter = "mine" | "team";
 
 export const WORK_JOBS_COPY = {
   title: "작업",
-  filterMine: "내 것",
+  filterMine: "내 작업",
   filterTeam: "팀 전체",
   filterGroup: "누구의 작업",
   /** 「지금 진행 3」. 숫자는 지금 보이는 줄에서만 센다(숨은 줄 수를 말하지 않는다, ADR-0194 D5). */
@@ -82,7 +82,7 @@ export const WORK_JOBS_COPY = {
   noResultReported: "알린 결과 없음",
 } as const;
 
-/** 기기별로 기억하는 마지막 필터(ADR-0202 D2). 기본은 언제나 「내 것」이다. */
+/** 기기별로 기억하는 마지막 필터(ADR-0202 D2). 기본은 언제나 「내 작업」이다. */
 export const WORK_FILTER_STORAGE_KEY = "oort.work.filter";
 
 export function parseWorkFilter(value: string | null | undefined): WorkFilter | null {
@@ -91,7 +91,7 @@ export function parseWorkFilter(value: string | null | undefined): WorkFilter | 
 
 /**
  * 주소가 정한 필터. `who=`가 먼저고, 옛 링크 `view=team`(ADR-0194 D2의 보드 링크)은 「팀
- * 전체」, `view=mine`은 「내 것」이다. 주소가 말하지 않으면 null(기기 기억 → 기본 「내 것」).
+ * 전체」, `view=mine`은 「내 작업」이다. 주소가 말하지 않으면 null(기기 기억 → 기본 「내 작업」).
  */
 export function workFilterFromSearch(search: string): WorkFilter | null {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
@@ -103,7 +103,7 @@ export function workFilterFromSearch(search: string): WorkFilter | null {
   return null;
 }
 
-/** 주소 → 기기 기억 → 「내 것」. */
+/** 주소 → 기기 기억 → 「내 작업」. */
 export function initialWorkFilter(search: string, remembered: string | null): WorkFilter {
   return workFilterFromSearch(search) ?? parseWorkFilter(remembered) ?? "mine";
 }
@@ -201,7 +201,7 @@ export function requesterToAgent(row: WorkJobRow): string {
 
 /**
  * 이 필터에 서는 줄. 새 서버(`jobs`)는 이미 `who`로 골라 보냈으니 그대로 둔다(클라이언트가
- * 다시 거르면 서버의 판정을 가리거나 보일 줄을 숨긴다). 옛 서버는 팀 보드 한 벌이라 「내 것」만
+ * 다시 거르면 서버의 판정을 가리거나 보일 줄을 숨긴다). 옛 서버는 팀 보드 한 벌이라 「내 작업」만
  * 여기서 고른다.
  */
 export function itemsForFilter(

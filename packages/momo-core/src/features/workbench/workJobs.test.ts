@@ -8,7 +8,7 @@ import {
   type SharedWorkSession,
 } from "../../lib/api";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
-import { stateChipLabel } from "./teamBoard";
+import { TEAM_BOARD_COPY, stateChipLabel } from "./teamBoard";
 import {
   WORK_JOBS_COPY,
   inProgressCount,
@@ -364,5 +364,12 @@ describe("fetchWorkJobs 기능 감지 (ADR-0202 D4)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "boom" }, 500)));
     await expect(fetchWorkJobs("ws", { who: "mine" })).rejects.toBeTruthy();
     expect(workJobsKnownLegacy("ws")).toBe(false);
+  });
+});
+
+describe("보기 전환 낱말 — owner 2026-11-09 「내것 -> 내 작업으로」", () => {
+  it("작업 목록과 옛 팀 보드가 같은 낱말 「내 작업」을 쓴다 — 웹·데스크탑·폰이 이 상수를 읽는다", () => {
+    expect(WORK_JOBS_COPY.filterMine).toBe("내 작업");
+    expect(TEAM_BOARD_COPY.filterMine).toBe("내 작업");
   });
 });

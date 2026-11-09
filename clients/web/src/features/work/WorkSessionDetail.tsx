@@ -1136,7 +1136,7 @@ export function WorkSessionDetail({
                 </span>
               </MetaRow>
             )}
-            {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
+            {hostName !== null && <MetaRow label="실행하는 컴퓨터">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
               <MetaRow label="마지막 실행 결과">
                 <span data-numeric className="font-mono">

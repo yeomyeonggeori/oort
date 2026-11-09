@@ -1,7 +1,7 @@
 appId: app.momo.ios
 name: 45-work-console
 ---
-# 「작업」 — 결과 중심 한 화면(내 것 / 팀 전체)과 줄을 누르면 열리는 세션 화면 또는 읽기 전용 시트 (옛 #1292 작업 콘솔의 자리).
+# 「작업」 — 결과 중심 한 화면(내 작업 / 팀 전체)과 줄을 누르면 열리는 세션 화면 또는 읽기 전용 시트 (옛 #1292 작업 콘솔의 자리).
 #
 # 이 화면은 ADR-0202 D6 의 `WorkJobsScreen` 이다(`work-jobs-*` · `work-job-row-*`). #2864 의 팀 보드 판
 # (`TeamBoardScreen` — `team-board-list` · `team-board-filter-*` · `team-board-row-*`)은 코드로만 남고 + 메뉴가 열지
@@ -40,7 +40,7 @@ name: 45-work-console
     id: "work-jobs-filter-mine"
 - assertVisible:
     id: "work-jobs-filter-team"
-# 「작업」은 내 것 / 팀 전체 두 갈래다(ADR-0202 D6). 서버가 채널 멤버십으로 걸러 준 줄만 선다. 레인의 멤버가
+# 「작업」은 내 작업 / 팀 전체 두 갈래다(ADR-0202 D6). 서버가 채널 멤버십으로 걸러 준 줄만 선다. 레인의 멤버가
 # 맡긴 세션이라 두 갈래 어느 쪽에서도 줄이 있다.
 - tapOn:
     id: "work-jobs-filter-mine"
