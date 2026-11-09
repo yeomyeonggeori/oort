@@ -308,11 +308,16 @@ done < <(git ls-files -- infra | awk -F/ '$NF ~ /^Caddyfile/')
 pass "all ${agent_media_edges} tracked edge Caddyfiles deny /v1/agent-media/* before /v1/*"
 
 # Real 403 on the loopback file — :80 so automatic HTTPS/ACME stays off.
-LOCAL_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+# #5623: Docker assigns the host port at `docker run`. A port taken from a
+# closed bind(0) socket is free only until someone else binds it first.
 cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
-  -p "127.0.0.1:${LOCAL_PORT}:80" \
+  -p "127.0.0.1::80" \
   -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
   "$CADDY_IMAGE")"
+# Cannot fail before the trap below: a bad read shows up as curl's 000.
+LOCAL_PORT="$(docker port "$cid" 80/tcp 2>/dev/null || true)"
+LOCAL_PORT="${LOCAL_PORT%%$'\n'*}"
+LOCAL_PORT="${LOCAL_PORT##*:}"
 cleanup_local_edge() {
   docker rm -f "$cid" >/dev/null 2>&1 || true
 }
@@ -342,6 +347,14 @@ printf '[test-public-edge] Caddyfile.local PUT /v1/agent-media/{ws}/{token} HTTP
 cleanup_local_edge
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 pass "Caddyfile.local loopback edge returns 403 for /v1/centrifugo/*"
+# #5623: the edge container is gone, so no process may still listen on its port.
+i=0
+while (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") >/dev/null 2>&1; do
+  i=$((i + 1))
+  [ "$i" -lt 20 ] || fail "a listener is still on port ${LOCAL_PORT} after the local edge was removed"
+  sleep 0.1
+done
+pass "teardown: no listener left on local edge port ${LOCAL_PORT}"
 
 # ---------------------------------------------------------------------------
 # ⑤ app.oor7.com: public template + local twin have 0 operational hits.
