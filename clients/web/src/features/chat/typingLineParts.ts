@@ -3,9 +3,12 @@ import type { LocaleService } from "@momo/core/i18n";
 // 「작성 중」 줄의 조각 (#5567). 사전 문장(`timeline.typing.*`)을 이름(거기 붙은 조사째) | 서술어로 나눈다 — 넘칠 때 잘리는
 // 것은 앞쪽(이름)이고 서술어는 안 잘린다. 왜 이렇게 나누는지는 `TypingLine.tsx` 머리 주석에 있다.
 
-/** 번역문에서 이름 자리를 찾는 표지(U+2063 INVISIBLE SEPARATOR, U+2064 INVISIBLE PLUS). 사람이 이름에 넣을 수 없는 글자다. */
-const FIRST_MARK = "⁣";
-const SECOND_MARK = "⁤";
+/**
+ * 번역문에서 이름 자리를 찾는 표지(U+2063 INVISIBLE SEPARATOR, U+2064 INVISIBLE PLUS). 사람이 이름에 넣을 수 없는 글자다.
+ * 이스케이프로 쓴다(#5582 R2-L1): 날 글자는 편집기·diff에서 빈 문자열로 보여, 누가 지우면 `indexOf`가 0을 돌려 조각이 조용히 틀어진다.
+ */
+const FIRST_MARK = "\u2063";
+const SECOND_MARK = "\u2064";
 
 /** 줄어드는 쪽의 한 조각. 이름이면 굵게 선다. */
 export interface TypingLeadPiece {
@@ -64,6 +67,38 @@ export function typingLineParts(
   }
   if (end > cursor) lead.push({ text: marked.slice(cursor, end), name: false });
   return { lead, tail: marked.slice(end), label };
+}
+
+/** 줄어드는 쪽의 칸 하나(#5582 R2-M1). 이름 칸은 넘치면 **자기 안에서** 말줄임되고, 이름 아닌 칸(사이 글)은 줄지 않는다. */
+export interface TypingLeadCell {
+  pieces: TypingLeadPiece[];
+  name: boolean;
+}
+
+/**
+ * 조각을 이름마다 한 칸으로 묶는다. 이름 칸 = 이름 + 거기 붙은(빈칸 없는) 글자(「님,」·「님이」)다.
+ *
+ * 붙은 글자가 이름과 같은 칸인 이유는 W-3이다: 조사는 이름에 붙는 의존 형태소라, 이름만 잘리고 조사가 남으면
+ * 「윤가람 프로덕…님, 오민재님이」처럼 붙을 이름을 잃은 조사가 선다. 같은 칸이면 이름과 함께 잘려 「윤가람 프로덕… 오민재님이」가
+ * 된다. 마지막 이름에 붙은 글자까지를 앞부분으로 보는 `typingLineParts`의 규칙과 같은 규칙을 이름마다 쓰는 것이다.
+ */
+export function typingLeadCells(lead: readonly TypingLeadPiece[]): TypingLeadCell[] {
+  const cells: TypingLeadCell[] = [];
+  for (const piece of lead) {
+    if (piece.name) {
+      cells.push({ pieces: [piece], name: true });
+      continue;
+    }
+    let rest = piece.text;
+    const previous = cells[cells.length - 1];
+    if (previous?.name === true) {
+      const attached = /^\S*/u.exec(rest)?.[0] ?? "";
+      if (attached !== "") previous.pieces.push({ text: attached, name: false });
+      rest = rest.slice(attached.length);
+    }
+    if (rest !== "") cells.push({ pieces: [{ text: rest, name: false }], name: false });
+  }
+  return cells;
 }
 
 /**

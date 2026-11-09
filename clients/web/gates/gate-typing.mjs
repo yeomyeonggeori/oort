@@ -781,9 +781,11 @@ async function exercise(browser) {
     // `lead` 안에서 이름 조각만 고른다. 라벨(`sr-only`)은 문장 전체를 들고 있어
     // 「이름을 담은 노드」로도 「동사를 담은 노드」로도 잡히므로, 그것을 피하려면
     // 조각을 이름으로 찾지 말고 **구조로** 찾아야 한다.
-    const name = Array.from(lead.querySelectorAll("span")).find((node) =>
+    // 이름 칸(#5582 R2-M1)은 이름 + 거기 붙은 조사를 함께 담으므로, 이름을 담은 **가장 안쪽** span이 이름 조각이다.
+    const holders = Array.from(lead.querySelectorAll("span")).filter((node) =>
       (node.textContent ?? "").includes("이도현")
     );
+    const name = holders.find((node) => !holders.some((other) => other !== node && node.contains(other)));
     if (!name) return null;
     return {
       name: getComputedStyle(name).color,
@@ -918,8 +920,12 @@ async function exercise(browser) {
       parseFloat(style.paddingRight);
     return {
       // 잘리지 않았다면 이만큼을 원했다 — 장면이 실제로 넘치는지는 이 값으로 본다. 앞의 점과 그 간격(#5567)도 줄 폭을 쓴다.
+      // 이름마다 자기 칸에서 줄어드는 판(#5582 R2-M1)은 넘침이 칸 안에 있으므로 칸마다 원한 폭(`scrollWidth`)을 더한다.
       wanted: Math.round(
-        lead.getBoundingClientRect().left - lineBox.left + lead.scrollWidth + tail.scrollWidth
+        lead.getBoundingClientRect().left -
+          lineBox.left +
+          Array.from(lead.children).reduce((sum, cell) => sum + cell.scrollWidth, 0) +
+          tail.scrollWidth
       ),
       contentWidth: Math.round(contentWidth),
       leadClipped: Math.round(lead.scrollWidth - lead.clientWidth),
@@ -983,29 +989,40 @@ async function exercise(browser) {
     const tail = document.querySelector('[data-testid="composer-typing-tail"]');
     if (lead === null) return null;
     const box = lead.getBoundingClientRect();
-    const walker = document.createTreeWalker(lead, NodeFilter.SHOW_TEXT);
+    // 칸(이름 칸 · 사이 글)마다 잰다(#5582 R2-M1): 이름은 자기 칸 안에서 잘리고, 말줄임표는 잘린 칸의 끝에 그려진다.
+    const cells = lead.children.length > 0 ? Array.from(lead.children) : [lead];
     let visible = "";
+    let line = "";
     let clipped = false;
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      const text = node.textContent ?? "";
-      for (let i = 0; i < text.length; i += 1) {
-        const range = document.createRange();
-        range.setStart(node, i);
-        range.setEnd(node, i + 1);
-        const rect = range.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) continue;
-        // 오른쪽 경계를 넘는 글자는 그려지지 않는다(`overflow: hidden`).
-        if (rect.right <= box.right + 0.5) visible += text[i];
-        else clipped = true;
+    for (const cell of cells) {
+      const cellRight = Math.min(box.right, cell.getBoundingClientRect().right);
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      let cellVisible = "";
+      let cellClipped = false;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent ?? "";
+        for (let i = 0; i < text.length; i += 1) {
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const rect = range.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) continue;
+          // 칸의 오른쪽 경계를 넘는 글자는 그려지지 않는다(`overflow: hidden`).
+          if (rect.right <= cellRight + 0.5) cellVisible += text[i];
+          else cellClipped = true;
+        }
       }
+      visible += cellVisible;
+      // 말줄임표는 마지막 보이는 글자를 대체해 그려진다. 줄이 눈에 말하는 문장은
+      // 「칸마다 보이는 글 + (잘렸으면) …」을 이은 앞부분 + 꼬리다.
+      line += `${cellVisible}${cellClipped ? "…" : ""}`;
+      clipped = clipped || cellClipped;
     }
     return {
       lead: visible,
       clipped,
-      // 말줄임표는 마지막 보이는 글자를 대체해 그려진다. 줄이 눈에 말하는 문장은
-      // 「보이는 앞부분 + (잘렸으면) … + 꼬리」다.
-      line: `${visible}${clipped ? "…" : ""}${tail?.textContent ?? ""}`,
+      line: `${line}${tail?.textContent ?? ""}`,
     };
   });
   if (painted === null) {

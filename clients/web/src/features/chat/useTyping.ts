@@ -15,11 +15,7 @@ import {
   type TypingSendState,
 } from "@momo/core/features/chat/typing";
 import type { RealtimeHandle } from "@momo/core/lib/realtimeEvents";
-import {
-  recordTyping,
-  rememberTypingThreshold,
-  resetTyping,
-} from "./typingStore";
+import { recordTyping, resetTyping } from "./typingStore";
 
 // =============================================================================
 // 「작성 중」 송·수신 배선 (ADR-0149 · goal B3 W2).
@@ -156,8 +152,8 @@ export function useTypingSend(
               typingGrantFrom(wire),
               Date.now()
             );
-            // 서버가 뭉치기 임계를 여기서 말한다. 화면이 그 값을 쓰는 유일한 통로다.
-            rememberTypingThreshold(wire.aggregateThreshold);
+            // grant의 `aggregateThreshold`는 화면이 읽지 않는다(#5582 R2-M3): 뭉치는 규칙은 사전의 one/two/many 세 꼴이 정하는
+            // 고정 규칙이다. 이유는 `docs/design-system/typing-line.md` 「뭉치는 수」.
           })
           .catch(refuse)
           .finally(() => {
