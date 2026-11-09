@@ -16,6 +16,9 @@
   --signal: #c2410c;
   --signal-text: #af3908;
   --agent: #2f5b8a;
+  /* 문서 상태 표지(#5590): tokens.css 의 --ok·--warn */
+  --ok: #0e7740;
+  --warn: #855900;
   --glass: rgba(255, 254, 252, .74);
   --veil: rgba(239, 237, 234, .78);
   --shadow: 0 1px 2px rgba(22, 23, 27, .06), 0 24px 60px -28px rgba(47, 91, 138, .45);
@@ -45,6 +48,8 @@
     --signal: #ff8a4c;
     --signal-text: #ff9a62;
     --agent: #8db3e2;
+    --ok: #4cc47e;
+    --warn: #d4a72c;
     --glass: rgba(32, 35, 43, .72);
     --veil: rgba(15, 20, 28, .72);
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 24px 60px -24px rgba(0, 0, 0, .8);
@@ -294,8 +299,8 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
 @media (max-width: 599px) {
   .ghost, .pill, .row .pill, .lang-list a, .chip-menu button { min-height: 44px; }
   /* 머리 컨트롤은 아이콘 하나씩 44×44. 이름은 접근성 이름(aria-label)에, 긴 자칭은 언어 메뉴 안에만 */
-  .lang-btn, .web-link { width: 44px; padding: 0; justify-content: center; }
-  .lang-btn .lang-name, .lang-btn .lang-chev, .web-link .web-t { display: none; }
+  .lang-btn, .web-link, .docs-link { width: 44px; padding: 0; justify-content: center; }
+  .lang-btn .lang-name, .lang-btn .lang-chev, .web-link .web-t, .docs-link .docs-t { display: none; }
   .web-link .i { width: 18px; height: 18px; }
   /* 웹 링크 아이콘은 언어 아이콘과 같은 모양(유리 원 없이 글리프만). 뜻은 툴팁(title)과 접근성 이름이 낸다 */
   .top-nav .web-link { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
