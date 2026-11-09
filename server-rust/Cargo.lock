@@ -2400,6 +2400,7 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "momo-db",
+ "momo-messaging",
  "momo-provider",
  "momo-wire",
  "reqwest",

@@ -178,7 +178,7 @@ pub(crate) fn is_server_owned_props_entry(key: &str, value: &str) -> bool {
 /// **Keeping it whole.** A kind the server starts writing onto a message joins this list in the
 /// same change; `every_kind_the_server_writes_is_server_only` pins each writer this list was drawn
 /// from, and the PG suite `props_kind_forgery_conformance_pg` holds its own copy of the list.
-pub(crate) const SERVER_ONLY_PROPS_KINDS: [&str; 15] = [
+pub(crate) const SERVER_ONLY_PROPS_KINDS: [&str; 16] = [
     // Cards the core draws.
     "completion_report", // the worker's report (`momo_agent_worker::completion_report`)
     momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND, // an approval card variant (LIVE-4)
@@ -192,10 +192,11 @@ pub(crate) const SERVER_ONLY_PROPS_KINDS: [&str; 15] = [
     "work_session",                          // the session card (`momo_t3::card_props`)
     "work_session_idle",                     // `work_sessions.rs`, the push's work_run_done arm
     "work_session_event",                    // `work_sessions.rs`, the push's work_permission arm
-    momo_agent::HOSTED_SKIP_NOTICE_KIND,     // a hosted agent's skip notice
-    "agent_run_timed_out",                   // the notifier's stall sweep
-    "a2a_blocked",                           // the worker's A2A refusal line
-    "team_ai.delegate.v1", // the helper's fallback line (`team_ai::fallback_props`)
+    momo_t3::work_notice::PROPS_KIND, // #5594 stop notices; the push's work_notice / resume_offer arm
+    momo_agent::HOSTED_SKIP_NOTICE_KIND, // a hosted agent's skip notice
+    "agent_run_timed_out",            // the notifier's stall sweep
+    "a2a_blocked",                    // the worker's A2A refusal line
+    "team_ai.delegate.v1",            // the helper's fallback line (`team_ai::fallback_props`)
 ];
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
@@ -2216,6 +2217,16 @@ mod tests {
             (
                 "run cancel line",
                 Value::from(crate::routes::agent_runs::CANCEL_PROPS_KIND),
+            ),
+            (
+                "work session stop notice (#5594)",
+                momo_t3::work_notice::WorkNotice::Failed {
+                    session_id: id,
+                    owner_member_id: id,
+                    exit_code: 1,
+                }
+                .props()["kind"]
+                    .clone(),
             ),
         ];
         for (writer, kind) in built {
