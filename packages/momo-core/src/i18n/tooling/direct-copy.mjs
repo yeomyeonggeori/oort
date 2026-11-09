@@ -21,7 +21,10 @@ import ts from 'typescript';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '../../../../..');
 export const LEDGER_PATH = 'packages/momo-core/src/i18n/tooling/direct-copy-baseline.json';
+export const TOOL_PATH = 'packages/momo-core/src/i18n/tooling/direct-copy.mjs';
 export const LEDGER_VERSION = 2;
+/** More new raises than this in one landing needs `--allow-many-raises`: per-file raises are not a regeneration. */
+export const MAX_NEW_RAISES_PER_LANDING = 10;
 /**
  * sha256 of the canonical frozen anchor (`anchorHead` + `anchor`). Tools never write the anchor.
  * Re-anchoring is a planner act: `anchor <commit>` prints a new ledger and seal, and this
@@ -62,8 +65,9 @@ const FORMAT_CALL = /(?:^|\.)formatMessage$/;
 const FRAME_CALL = /(?:^|\.)(?:useBlockedReason|useBlockedStale)$/;
 // `setStatus` is not here: every literal handed to it is a state name (`setStatus("loading")`).
 const SURFACE_CALL = /(?:^|\.)(?:alert|confirm|prompt|toast|setError|announceForAccessibility)$/;
-// A raise reason must say why this copy cannot use a dictionary key yet, not that a tool ran.
-const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|셈|센다|센\s|세어|세기|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신/i;
+// A raise reason must say why this copy cannot use a dictionary key yet, not that a tool ran or the
+// ledger was synced. A reason that talks about the ledger or a merge is about the tool, not the copy.
+const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|셈|센다|센\s|세어|세기|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신|\bledger\b|장부|\bbaseline\b|카운트|(?:after|post)[\s-]+(?:the\s+)?merge|\bsync\w*\s+(?:the\s+)?counts?|합친\s*(?:뒤|후|다음)|착륙\s*(?:후|뒤)/i;
 
 export function isProductSource(file) {
   return SOURCE.test(file) && !TEST_PATH.test(file);
@@ -310,10 +314,14 @@ export function validateLedger(ledger, {seal = ANCHOR_SEAL} = {}) {
     const extra = Object.keys(raise).filter(key => !['file', 'issue', 'reason', ...DIMENSIONS].includes(key));
     if (extra.length) problems.push(`${where}: unknown field ${extra.join(', ')}`);
     if (!surfaceOf(raise.file ?? '')) problems.push(`${where}: file must be a scanned product path`);
-    if (!Number.isInteger(raise.issue) || raise.issue <= 0) problems.push(`${where}: issue must be the issue number that justifies it`);
+    // Offline, the number cannot be checked against GitHub; its shape can (#5589 M2).
+    if (!Number.isInteger(raise.issue) || raise.issue < 1000 || raise.issue > 99999) {
+      problems.push(`${where}: issue must be the 4–5 digit number of the issue that justifies it`);
+    }
     const reason = typeof raise.reason === 'string' ? raise.reason.trim() : '';
-    if (reason.length < 15) problems.push(`${where}: reason must say why this copy cannot use a dictionary key yet (15+ characters)`);
-    else if (REGENERATION_REASON.test(reason)) problems.push(`${where}: a regeneration is not a reason; name the copy and why it waits for P1`);
+    const words = reason.split(/\s+/).filter(word => /\p{L}{2,}/u.test(word)).length;
+    if (reason.length < 15 || words < 3) problems.push(`${where}: reason must say in words why this copy cannot use a dictionary key yet (15+ characters)`);
+    else if (REGENERATION_REASON.test(reason)) problems.push(`${where}: a regeneration or ledger sync is not a reason; name the copy and why it waits for P1`);
     if (!DIMENSIONS.every(d => raise[d] === undefined || isCount(raise[d])) || !DIMENSIONS.some(d => raise[d] > 0)) {
       problems.push(`${where}: give at least one positive ko/en/cat delta`);
     }
@@ -422,9 +430,10 @@ const sameRaise = (a, b) => a.file === b.file && a.issue === b.issue && a.reason
 /**
  * Landing: derive the merged ledger from the target track's committed ledger plus the branch's
  * *new* raises — never from the working copy — then lower to the merged scan. Copy that neither
- * side justified stops the landing.
+ * side justified stops the landing, and so do more than MAX_NEW_RAISES_PER_LANDING new raises
+ * unless `allowManyRaises` (a raise per file is not a way to regenerate the ledger).
  */
-export function landLedger(baseLedger, oursLedger, counts) {
+export function landLedger(baseLedger, oursLedger, counts, {allowManyRaises = false} = {}) {
   const notes = [];
   let start;
   if (baseLedger?.version === LEDGER_VERSION) start = baseLedger;
@@ -435,8 +444,71 @@ export function landLedger(baseLedger, oursLedger, counts) {
   const fresh = oursLedger?.version === LEDGER_VERSION && start !== oursLedger
     ? oursLedger.raises.filter(raise => !start.raises.some(existing => sameRaise(existing, raise))) : [];
   const merged = {...start, raises: [...start.raises, ...fresh]};
-  return {...shrinkLedger(merged, counts), notes, carried: fresh.length};
+  const result = {...shrinkLedger(merged, counts), notes, carried: fresh.length, fresh};
+  if (fresh.length > MAX_NEW_RAISES_PER_LANDING && !allowManyRaises) {
+    result.refused = [...result.refused, `${fresh.length} new raises in one landing (more than ${MAX_NEW_RAISES_PER_LANDING}): `
+      + 'raising file by file is not a way to regenerate the ledger. Move the copy to dictionary keys, or list the raises '
+      + 'in the PR body and land with --allow-many-raises on an explicit decision (#5589).'];
+  }
+  return result;
 }
+
+/**
+ * What the tree alone cannot show, checked by PR CI against the PR base's ledger (#5589 M1):
+ * the anchor (and ANCHOR_SEAL) may change only in an approved re-anchor, and no file's
+ * `(lowered ?? anchor)` may go above the base's — the only way up is a raise, and the new raises
+ * are listed so the log and the ledger diff show them file by file.
+ */
+export function compareWithBase(base, head, {baseSeal, headSeal = ANCHOR_SEAL, reanchorApproved = false} = {}) {
+  const notes = [];
+  const problems = validateLedger(head, {seal: headSeal});
+  if (problems.length) return {problems, notes, fresh: [], removed: []};
+  if (base?.version !== LEDGER_VERSION) {
+    notes.push(`base ledger is ${base ? `version ${JSON.stringify(base.version)}` : 'missing'} (before #5589): nothing to compare; this change brings the v2 ledger`);
+    return {problems, notes, fresh: [...head.raises], removed: []};
+  }
+  const moved = anchorSeal(base) !== anchorSeal(head) || (baseSeal !== undefined && baseSeal !== headSeal);
+  if (moved && !reanchorApproved) {
+    problems.push('anchor, anchorHead or ANCHOR_SEAL differs from the base: re-anchoring is a planner act in a reviewed PR '
+      + 'with the policy-change-approved label (direct-copy.mjs is a policy path). Restore the base anchor and seal, '
+      + 'and lower with `shrink` or add one `raise` per file (#5589).');
+  } else if (moved) {
+    notes.push('the anchor or ANCHOR_SEAL differs from the base: a re-anchor approved by the policy-change-approved label');
+  } else {
+    const allowance = (ledger, file) => normalize(ledger.lowered[file] ?? ledger.anchor[file]);
+    const files = new Set([...Object.keys(base.anchor), ...Object.keys(base.lowered), ...Object.keys(head.lowered)]);
+    for (const file of [...files].sort()) {
+      const before = allowance(base, file);
+      const after = allowance(head, file);
+      const up = DIMENSIONS.filter(d => after[d] > before[d]).map(d => `${d} ${before[d]} → ${after[d]}`);
+      if (up.length) {
+        problems.push(`${file}: (lowered ?? anchor) went up against the base, ${up.join(', ')}. The base lowered this file; `
+          + 'a count goes up only by one explicit raise (#5589).');
+      }
+    }
+  }
+  const fresh = head.raises.filter(raise => !base.raises.some(existing => sameRaise(existing, raise)));
+  const removed = base.raises.filter(raise => !head.raises.some(existing => sameRaise(existing, raise)));
+  return {problems, notes, fresh, removed};
+}
+
+/** Scanned product files whose working copy is not what will be committed (`git status --porcelain=v1 -z`). */
+export function dirtyScannedFiles(porcelain) {
+  const entries = porcelain.split('\0');
+  const dirty = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    if (entry.length < 4) continue;
+    const [x, y, path] = [entry[0], entry[1], entry.slice(3)];
+    if (x === 'R' || x === 'C') index++; // the next entry is the source path
+    const unstaged = (x === '?' && y === '?') || y !== ' ';
+    if (unstaged && isProductSource(path) && surfaceOf(path)) dirty.push(`${x}${y} ${path}`);
+  }
+  return dirty;
+}
+
+const describeRaise = raise => `${raise.file} ${DIMENSIONS.filter(d => raise[d]).map(d => `${d}+${raise[d]}`).join(' ')} `
+  + `#${raise.issue}: ${raise.reason}`;
 
 function compact(value, keepZero = false) {
   const out = {};
@@ -572,13 +644,33 @@ function main(argv) {
   if (action === 'land') {
     const base = option(args, '--base');
     const ours = option(args, '--ours');
-    if (!base || !ours) throw new Error('land --base <target track ref> --ours <branch tip> [--check]');
+    if (!base || !ours) throw new Error('land --base <target track ref> --ours <branch tip> [--check] [--allow-many-raises]');
+    // `land` counts the working copy, which must be what will be committed (#5589 L2). A staged merge
+    // resolution is fine; an unstaged edit or an untracked file in a scanned path is not.
+    const roots = Object.values(SURFACES).flatMap(spec => [...spec.roots, ...spec.files]);
+    const dirty = dirtyScannedFiles(git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...roots]));
+    if (dirty.length) {
+      console.error(`land: scanned files differ from what will be committed (unstaged or untracked). Stage or remove them, then run land again:\n${dirty.join('\n')}`);
+      process.exitCode = 1;
+      return;
+    }
     let oursLedger;
     try { oursLedger = ledgerAt(ours); } catch { oursLedger = undefined; }
     const baseLedger = ledgerAt(base);
     const {counts, unknownKeys} = scanAll();
-    const {ledger: next, refused, notes, carried} = landLedger(baseLedger, oursLedger, counts);
+    const {ledger: next, refused, notes, carried, fresh} = landLedger(baseLedger, oursLedger, counts,
+      {allowManyRaises: args.includes('--allow-many-raises')});
     notes.forEach(note => console.error(`note: ${note}`));
+    let working;
+    try { working = readLedger(ledgerFile); } catch { working = undefined; }
+    const known = [baseLedger, oursLedger].filter(ledger => ledger?.version === LEDGER_VERSION).flatMap(ledger => ledger.raises);
+    const uncommitted = working?.version === LEDGER_VERSION && Array.isArray(working.raises)
+      ? working.raises.filter(raise => !known.some(existing => sameRaise(existing, raise))) : [];
+    if (uncommitted.length) {
+      console.error(`note: ${uncommitted.length} raise(s) in the working ledger are not in ${ours}; land reads raises from --ours only. `
+        + 'Commit them on the branch (in the merged state), then run the landing again (#5589).');
+    }
+    fresh.forEach(raise => console.error(`land: new raise ${describeRaise(raise)}`));
     const problems = [...validateLedger(next), ...unknownKeys];
     if (refused.length || problems.length) {
       console.error(`land: copy that neither side justified, or ledger problems — not written:\n${[...refused, ...problems].join('\n')}`);
@@ -596,6 +688,28 @@ function main(argv) {
     console.error(`land: carried ${carried} new raise(s); lowered ${Object.keys(next.lowered).length} file(s) in total`);
     return;
   }
+  if (action === 'compare-base') {
+    // PR CI (#5589 M1): `git fetch --depth=1 origin <base sha>` first. Reads only the base commit's
+    // ledger and seal; the head side is this checkout (on CI, the PR merge ref).
+    const [ref] = args;
+    if (!ref) throw new Error('compare-base <PR base commit>');
+    const commit = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim();
+    let base;
+    try { base = ledgerAt(commit); } catch { base = undefined; }
+    let baseSeal;
+    try { baseSeal = /^export const ANCHOR_SEAL = '([a-f0-9]{64})';$/m.exec(git(['show', `${commit}:${TOOL_PATH}`]))?.[1]; } catch { baseSeal = undefined; }
+    const reanchorApproved = process.env.DIRECT_COPY_REANCHOR_APPROVED === 'true';
+    const {problems, notes, fresh, removed} = compareWithBase(base, readLedger(ledgerFile), {baseSeal, reanchorApproved});
+    notes.forEach(note => console.log(`note: ${note}`));
+    console.log(`direct-copy: ${fresh.length} new raise(s) against base ${commit.slice(0, 12)}${fresh.length ? ':' : ''}`);
+    fresh.forEach(raise => console.log(`  + ${describeRaise(raise)}`));
+    if (removed.length) console.log(`direct-copy: ${removed.length} raise(s) removed against the base`);
+    if (problems.length) {
+      console.error(`Direct UI copy guard (base ${commit.slice(0, 12)}):\n${problems.join('\n')}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (action === 'anchor') {
     // Planner only: a deliberate re-anchor. Prints the new ledger (or writes it) and the seal to paste.
     const [ref] = args;
@@ -608,7 +722,7 @@ function main(argv) {
     console.error(JSON.stringify(totals(anchor)));
     return;
   }
-  throw new Error('Use check [core|web|mobile] | core | web | mobile | report | shrink | raise | land | anchor');
+  throw new Error('Use check [core|web|mobile] | core | web | mobile | report | shrink | raise | land | compare-base | anchor');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest';
 import {
-  anchorSeal, ceilings, checkSurface, compareSurface, extractDirectCopy, isProductSource, landLedger,
-  raiseLedger, readLedger, serializeLedger, shrinkLedger, surfaceOf, validateLedger, type Ledger,
+  anchorSeal, ceilings, checkSurface, compareSurface, compareWithBase, dirtyScannedFiles, extractDirectCopy,
+  isProductSource, landLedger, raiseLedger, readLedger, serializeLedger, shrinkLedger, surfaceOf, validateLedger,
+  type Ledger,
 } from './tooling/direct-copy.mjs';
 
 const extract = (source: string, file = 'clients/web/src/NewScreen.tsx') => {
@@ -171,6 +172,18 @@ describe('direct-copy ratchet (#5589)', () => {
     expect(raise({file: A, issue: 5600, ko: 1, reason: '병합 뒤 문구 수를 다시 세어 맞춤 (자동)'})).toMatch(/regeneration/);
   });
 
+  it('M2: the issue is a 4–5 digit number, and a ledger sync or a non-sentence is not a reason', () => {
+    const raise = (entry: object) => validateLedger({...ledger, raises: [entry]} as Ledger, {seal}).join('\n');
+    for (const issue of [1, 999, 100000, 999999]) expect(raise({file: A, issue, ko: 1, reason: REASON})).toMatch(/4–5 digit/);
+    for (const issue of [1000, 5600, 99999]) expect(raise({file: A, issue, ko: 1, reason: REASON})).toBe('');
+    // The review's bypasses (#5598 r1, M2).
+    for (const reason of ['update ledger after merge', 'sync counts with track/uxui', 'ledger bump for landing',
+      '장부 업데이트 — 착륙 후 수 맞춤', '카운트 갱신 (트랙 합친 뒤)', 'aaaaaaaaaaaaaaaaaaaa']) {
+      expect(raise({file: A, issue: 5600, ko: 1, reason})).toMatch(/regeneration or ledger sync|in words/);
+    }
+    expect(raise({file: A, issue: 5600, ko: 1, reason: 'moved from clients/web/src/Old.tsx with the rename'})).toBe('');
+  });
+
   it('raise adds one explicit entry sized to the excess; shrink only lowers and trims unused raises', () => {
     const raised = raiseLedger(ledger, A, {ko: 5, en: 1}, {issue: 5600, reason: REASON});
     expect(raised.raises).toEqual([{file: A, issue: 5600, ko: 2, reason: REASON}]);
@@ -197,6 +210,50 @@ describe('direct-copy ratchet (#5589)', () => {
     // The branch put copy back into A and edited `lowered` instead of adding a raise.
     const sneaky = {...base, lowered: {[A]: {ko: 3, en: 1}}};
     expect(landLedger(base, sneaky, {[A]: {ko: 3, en: 1}, [B]: {ko: 1}}).refused).toEqual(['clients/web/src/A.tsx: ko 1 → 3']);
+  });
+
+  it('M2: land stops on more than 10 new raises unless --allow-many-raises', () => {
+    const files = Array.from({length: 11}, (_, index) => `clients/web/src/N${index}.tsx`);
+    const many = {...ledger, raises: files.map(file => ({file, issue: 5600, ko: 1, reason: REASON}))};
+    const countsFor = (names: string[]): Record<string, {ko: number; en?: number}> =>
+      ({[A]: {ko: 3, en: 1}, [B]: {ko: 1}, ...Object.fromEntries(names.map(file => [file, {ko: 1}]))});
+    const stopped = landLedger(ledger, many, countsFor(files));
+    expect(stopped.carried).toBe(11);
+    expect(stopped.refused.join('\n')).toMatch(/11 new raises in one landing/);
+    expect(landLedger(ledger, many, countsFor(files), {allowManyRaises: true}).refused).toEqual([]);
+    const ten = {...many, raises: many.raises.slice(0, 10)};
+    expect(landLedger(ledger, ten, countsFor(files.slice(0, 10))).refused).toEqual([]);
+  });
+
+  it('M1: against the base, the anchor and seal hold and no (lowered ?? anchor) goes up', () => {
+    const base = shrinkLedger(ledger, {[A]: {ko: 1, en: 1}, [B]: {ko: 1}}).ledger; // the track lowered A to 1
+    const ok = compareWithBase(base, base, {baseSeal: seal, headSeal: seal});
+    expect(ok.problems).toEqual([]);
+    // S7a: the branch drops the track's lowered entry to bring copy back without a raise.
+    const restored = compareWithBase(base, {...base, lowered: {}}, {baseSeal: seal, headSeal: seal});
+    expect(restored.problems.join('\n')).toMatch(/A\.tsx: \(lowered \?\? anchor\) went up against the base, ko 1 → 3/);
+    // S6b: a re-anchor with a matching seal passes `check`, but not the base comparison without the label.
+    const reAnchored = {...base, anchor: {...base.anchor, [A]: {ko: 4, en: 1}}, lowered: {}};
+    const reSeal = anchorSeal(reAnchored);
+    expect(validateLedger(reAnchored, {seal: reSeal})).toEqual([]);
+    expect(compareWithBase(base, reAnchored, {baseSeal: seal, headSeal: reSeal}).problems.join('\n')).toMatch(/policy-change-approved/);
+    expect(compareWithBase(base, reAnchored, {baseSeal: seal, headSeal: reSeal, reanchorApproved: true}).problems).toEqual([]);
+    // Lowering and raising are the normal paths: listed, not refused.
+    const raised = raiseLedger(shrinkLedger(base, {[A]: {ko: 0, en: 1}, [B]: {ko: 1}}).ledger, NEW, {ko: 1}, {issue: 5600, reason: REASON});
+    const normal = compareWithBase(base, raised, {baseSeal: seal, headSeal: seal});
+    expect(normal.problems).toEqual([]);
+    expect(normal.fresh).toEqual([{file: NEW, issue: 5600, ko: 1, reason: REASON}]);
+    // A v1 base (this PR's own base) has nothing to compare.
+    expect(compareWithBase({version: 1, files: {}}, base, {headSeal: seal}).notes.join('\n')).toMatch(/nothing to compare/);
+  });
+
+  it('L2: land refuses unstaged or untracked scanned files, not a staged merge or unscanned output', () => {
+    const status = ['M  clients/web/src/Staged.tsx', ' M clients/web/src/Edited.tsx', '?? clients/mobile/src/New.tsx',
+      ' M packages/momo-core/src/i18n/generated/ko-KR.ts', '?? clients/web/src/New.test.tsx', 'UU packages/momo-core/src/x.ts',
+      'R  clients/web/src/Moved.tsx', 'clients/web/src/Old.tsx', ''].join('\0');
+    expect(dirtyScannedFiles(status)).toEqual([' M clients/web/src/Edited.tsx', '?? clients/mobile/src/New.tsx',
+      'UU packages/momo-core/src/x.ts']);
+    expect(dirtyScannedFiles('')).toEqual([]);
   });
 
   it('serializes one file per line and round-trips', () => {

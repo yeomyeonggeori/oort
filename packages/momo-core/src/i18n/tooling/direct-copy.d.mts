@@ -10,7 +10,9 @@ export interface Ledger {
   raises: Raise[];
 }
 export const LEDGER_PATH: string;
+export const TOOL_PATH: string;
 export const LEDGER_VERSION: number;
+export const MAX_NEW_RAISES_PER_LANDING: number;
 export const ANCHOR_SEAL: string;
 export const DIMENSIONS: readonly ['ko', 'en', 'cat'];
 export const POLICY: string;
@@ -31,6 +33,9 @@ export function readLedger(path?: string): Ledger;
 export function checkSurface(surface: Surface, options?: { root?: string; ledger?: unknown; seal?: string }): Record<string, Required<CopyCount>>;
 export function shrinkLedger(ledger: Ledger, counts: Record<string, CopyCount>): { ledger: Ledger; refused: string[] };
 export function raiseLedger(ledger: Ledger, file: string, actual: CopyCount | undefined, entry: { issue: number; reason: string }): Ledger;
-export function landLedger(base: unknown, ours: unknown, counts: Record<string, CopyCount>):
-  { ledger: Ledger; refused: string[]; notes: string[]; carried: number };
+export function landLedger(base: unknown, ours: unknown, counts: Record<string, CopyCount>, options?: { allowManyRaises?: boolean }):
+  { ledger: Ledger; refused: string[]; notes: string[]; carried: number; fresh: Raise[] };
+export function compareWithBase(base: unknown, head: Ledger, options?: { baseSeal?: string; headSeal?: string; reanchorApproved?: boolean }):
+  { problems: string[]; notes: string[]; fresh: Raise[]; removed: Raise[] };
+export function dirtyScannedFiles(porcelain: string): string[];
 export function serializeLedger(ledger: Ledger): string;
