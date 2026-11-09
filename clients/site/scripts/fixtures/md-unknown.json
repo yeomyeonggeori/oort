@@ -1,0 +1,148 @@
+{
+  "about": "check.mjs docs 칸의 「모르는 마크다운이면 RED」 시험 재료(#5590). clients/site/docs 를 임시 폴더에 복사해 ko/concepts.md 하나만 바꾸고 build.py --docs-src 로 빌드한다. append 는 본문 끝에 빈 줄 하나 뒤 덧붙이고, replace 는 머리 칸의 글자를 바꾼다. 빌드가 exit 1 이고 stderr 에 docs/ko/concepts.md:<줄> 과 expect 글자가 있어야 GREEN 이다. 아무것도 바꾸지 않은 대조 복사본은 exit 0 이어야 한다.",
+  "page": "ko/concepts.md",
+  "cases": [
+    {
+      "name": "인용 >",
+      "append": "> 인용은 모르는 문법이에요",
+      "expect": "인용"
+    },
+    {
+      "name": "강조 **",
+      "append": "이 낱말은 **굵게** 써요",
+      "expect": "강조"
+    },
+    {
+      "name": "강조 _",
+      "append": "이 낱말은 _기울여_ 써요",
+      "expect": "강조"
+    },
+    {
+      "name": "HTML",
+      "append": "<div>HTML 덩어리</div>",
+      "expect": "HTML"
+    },
+    {
+      "name": "그림",
+      "append": "![그림](/assets/favicon.svg)",
+      "expect": "그림"
+    },
+    {
+      "name": "제목 ####",
+      "append": "#### 넷째 단 제목",
+      "expect": "제목은 ## 와 ### 만"
+    },
+    {
+      "name": "제목 #",
+      "append": "# 첫째 단 제목",
+      "expect": "제목은 ## 와 ### 만"
+    },
+    {
+      "name": "중첩 목록",
+      "append": "- 바깥 항목\n  - 안쪽 항목",
+      "expect": "빈 줄"
+    },
+    {
+      "name": "밑줄 제목",
+      "append": "밑줄 제목\n===",
+      "expect": "빈 줄"
+    },
+    {
+      "name": "가로줄",
+      "append": "***",
+      "expect": "모르는 문법"
+    },
+    {
+      "name": "참조 링크",
+      "append": "[문서][ref]",
+      "expect": "링크는 [글자](주소)"
+    },
+    {
+      "name": "각주",
+      "append": "[^1]: 각주",
+      "expect": "각주"
+    },
+    {
+      "name": "체크 상자",
+      "append": "- [ ] 할 일",
+      "expect": "체크 상자"
+    },
+    {
+      "name": "취소선",
+      "append": "~~지운 글~~",
+      "expect": "취소선"
+    },
+    {
+      "name": "이스케이프",
+      "append": "별표 \\* 하나",
+      "expect": "이스케이프"
+    },
+    {
+      "name": "HTML 엔티티",
+      "append": "띄어쓰기&nbsp;하나",
+      "expect": "엔티티"
+    },
+    {
+      "name": "표 정렬",
+      "append": "| 가 | 나 |\n|:---|---:|\n| 1 | 2 |",
+      "expect": "정렬"
+    },
+    {
+      "name": "줄 끝 빈칸",
+      "append": "끝에 빈칸이 있어요  ",
+      "expect": "줄 끝 빈칸"
+    },
+    {
+      "name": "탭",
+      "append": "\t탭으로 들여 쓴 줄",
+      "expect": "탭"
+    },
+    {
+      "name": "다른 언어 링크",
+      "append": "[영어 개념](/docs/en/concepts/)",
+      "expect": "다른 언어"
+    },
+    {
+      "name": "없는 제목 id",
+      "append": "[없는 곳](/docs/ko/agents/#없는-제목)",
+      "expect": "없어요"
+    },
+    {
+      "name": "자동 링크",
+      "append": "<https://example.com>",
+      "expect": "HTML"
+    },
+    {
+      "name": "없는 출처",
+      "replace": [
+        "- schema_v0.sql",
+        "- docs/no-such-file.md"
+      ],
+      "expect": "저장소에 없어요"
+    },
+    {
+      "name": "모르는 상태",
+      "replace": [
+        "status: done",
+        "status: works"
+      ],
+      "expect": "status 는"
+    },
+    {
+      "name": "출처 줄 번호",
+      "replace": [
+        "- schema_v0.sql",
+        "- schema_v0.sql:11"
+      ],
+      "expect": "저장소 루트 기준 경로만"
+    },
+    {
+      "name": "모르는 머리 칸 키",
+      "replace": [
+        "checked: 2026-11-09",
+        "checked: 2026-11-09\nauthor: 누군가"
+      ],
+      "expect": "모르는 머리 칸 키"
+    }
+  ]
+}
