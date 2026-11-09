@@ -5,24 +5,32 @@ import type { ExpressionKind, ExpressionStatus } from "./types";
 // 입력 글로 이모티콘·GIF 추천: 정리·맞추기 함수 (#5454 1단계, owner 2026-11-07).
 //
 // 글을 치다 잠깐 멈추면 입력창 위에 맞는 큰 그림 몇 개를 띄우는 기능의 **순수 부분**이다. 화면(웹·폰의 추천 줄)은
-// 2단계가 이 모듈을 불러 쓴다. 이 파일이 가진 것은 셋이다:
+// 2단계가 이 모듈을 불러 쓴다. 이 파일이 가진 것은 넷이다:
 //   1. 정리: `normalizeKeyword` — 입력 글과 보관함의 꼬리표·이름을 같은 꼴로 줄인다.
 //   2. 끝말 정리표: `KEYWORD_ENDING_TABLE` — 흔한 끝말 몇 개를 한 낱말로 모은다(배고프다·배고픔 → 배고파).
-//   3. 맞추기: `suggestExpressions` — 보관함에서 맞는 큰 그림을 골라 줄 세운다.
+//   3. 맞추기: `suggestExpressionRow`·`suggestExpressions` — 문구 안의 **모든 낱말**에 맞는 큰 그림을 낱말이 나온 차례로 묶어 한 줄에 세운다
+//      (#5588, owner 2026-11-09 「여러 키워드에 걸릴 경우엔 관련한 이모티콘들을 한꺼번에」: 「ㅋㅋ 개웃기네 진심」 → ㅋㅋ 쪽 + 진심 쪽).
+//   4. 누를 때: `isKeywordOnlyInput` — 글이 그 낱말뿐이면 글을 그림으로 **바꾸고**, 문구 안의 낱말이면 글을 두고 그림을 **더한다**(#5588).
 //
 // 입력한 글은 **기기 밖으로 나가지 않는다**(owner 2026-11-07 결정: 맞추기는 기기 안에서만). 이 모듈은 네트워크·저장소·시계를 만지지
 // 않고 받은 값을 바꾸지 않는 순수 함수라, 글을 서버나 Hermes로 보낼 길이 처음부터 없다. 맞추는 상대도 기기에 있는 보관함
 // (이름·표시 이름·꼬리표)뿐이다. DOM·React·플랫폼 API가 없고 웹과 폰이 같이 쓴다. 사람이 읽는 문장은 여기 없다(사전이 가진다).
 // =============================================================================
 
-/** 한 번에 추천하는 그림 수의 기본값(입력창 위 한 줄에 3~5개). */
+/** 한 번에 추천하는 그림 수의 기본값(입력창 위 한 줄에 3~5개). 여러 낱말이 걸려도 줄 전체가 이 수를 넘지 않는다. */
 export const EXPRESSION_SUGGEST_LIMIT = 5;
+/**
+ * 여러 낱말이 그림을 낼 때 낱말 하나가 줄에 세우는 그림 수의 상한(#5588). 낱말마다 1개씩 먼저 돌고 남는 자리에 2번째를 세운다(낱말 셋이면 2·2·1,
+ * 넷이면 2·1·1·1, 다섯 이상이면 앞의 다섯 낱말이 1개씩). 그림을 낸 낱말이 **하나뿐이면** 이 상한 없이 줄 전체(`EXPRESSION_SUGGEST_LIMIT`)까지 채운다 —
+ * 「ㅋㅋ」 하나만 친 줄은 예전처럼 5개다.
+ */
+export const EXPRESSION_SUGGEST_PER_KEYWORD = 2;
 /**
  * 입력이 멈춘 뒤 추천을 맞춰 보기까지 기다리는 시간(밀리초, 0.3초). 화면이 쓴다(#5476): 이 값만큼 아무것도 안 치면 줄을 띄우고, 그 안에 한 글자라도 더 치면
  * 줄이 사라지고 기다림이 처음부터 다시 시작한다. 맞추는 함수는 기다리지 않는다: 시계는 화면 몫이다(웹과 폰이 같은 값을 쓰도록 여기 둔다).
  */
 export const EXPRESSION_SUGGEST_DEBOUNCE_MS = 300;
-/** 정리한 글이 이 글자 수(코드 포인트) 이하면 마지막 낱말뿐 아니라 글 전체도 맞춰 본다. */
+/** 정리한 글이 이 글자 수(코드 포인트) 이하면 낱말마다에 더해 글 전체도 맞춰 본다(두 낱말짜리 꼬리표·이름: 「킹 받네」 → 「킹받네」). */
 export const EXPRESSION_SUGGEST_WHOLE_TEXT_MAX = 8;
 
 /**
@@ -81,22 +89,21 @@ export function canonicalKeyword(text: string): string {
 const codePointLength = (text: string): number => Array.from(text).length;
 
 /**
- * 입력 글이 맞춰 보는 낱말들(모두 `canonicalKeyword` 꼴, 중복 없음, 빈 것 없음).
- * 첫째는 **마지막 낱말**: 띄어쓰기로 나눈 뒤 끝에서부터 정리하면 비지 않는 첫 것(「한숨 ...」의 끝은 「...」가 아니라 「한숨」).
- * 둘째는 **글 전체**: 정리한 글이 `EXPRESSION_SUGGEST_WHOLE_TEXT_MAX`자 이하일 때만(두 낱말짜리 꼬리표·이름을 위해서).
- * 비면 맞출 것이 없다. 2단계 화면의 ✕(이 낱말 추천 끄기)는 첫째 낱말을 `muted`에 넣는다.
+ * 입력 글이 맞춰 보는 낱말들(모두 `canonicalKeyword` 꼴, 중복 없음, 빈 것 없음). 차례가 줄의 차례다(#5588):
+ * 앞은 **띄어쓰기로 나눈 낱말 모두**, 글에 나온 차례대로다(「ㅋㅋ 개웃기네 진심」 → ㅋㅋ, 개웃기네, 진심). 정리해서 비는 조각(「...」)은 빠지고
+ * 같은 낱말이 다시 나오면 처음 자리 하나만 남는다.
+ * 끝은 **글 전체**: 정리한 글이 `EXPRESSION_SUGGEST_WHOLE_TEXT_MAX`자 이하이고 앞의 낱말과 다를 때만(두 낱말짜리 꼬리표·이름을 위해서).
+ * 비면 맞출 것이 없다.
  */
 export function suggestionKeywords(input: string): string[] {
-  const words = input.split(/\s+/u);
-  let last = "";
-  for (let index = words.length - 1; index >= 0 && last === ""; index--) last = canonicalKeyword(words[index]);
-  const keywords = last === "" ? [] : [last];
-  const whole = normalizeKeyword(input);
-  if (whole !== "" && codePointLength(whole) <= EXPRESSION_SUGGEST_WHOLE_TEXT_MAX) {
-    const wholeKeyword = foldEnding(whole);
-    if (wholeKeyword !== last) keywords.push(wholeKeyword);
+  const keywords = new Set<string>();
+  for (const word of input.split(/\s+/u)) {
+    const keyword = canonicalKeyword(word);
+    if (keyword !== "") keywords.add(keyword);
   }
-  return keywords;
+  const whole = normalizeKeyword(input);
+  if (whole !== "" && codePointLength(whole) <= EXPRESSION_SUGGEST_WHOLE_TEXT_MAX) keywords.add(foldEnding(whole));
+  return [...keywords];
 }
 
 /**
@@ -117,7 +124,10 @@ export interface ExpressionSuggestOptions {
   recent?: readonly string[];
   /** 즐겨찾기 표현의 id. */
   favorites?: readonly string[];
-  /** 추천을 꺼 둔 낱말. 친 그대로 넣어도 된다(같은 정리를 거쳐 비교한다). 입력의 마지막 낱말이나 글 전체가 여기 있으면 빈 결과다. */
+  /**
+   * 추천을 꺼 둔 낱말. 친 그대로 넣어도 된다(같은 정리를 거쳐 비교한다). 여기 있는 낱말은 맞추지 않는다 — 같은 글의 **다른 낱말은 그대로 맞춘다**
+   * (「ㅋㅋ」를 껐어도 「ㅋㅋ 진심」은 진심 쪽 그림을 낸다, #5588). 그림이 꺼 둔 낱말과 다른 낱말에 함께 맞으면 다른 낱말 쪽으로 선다.
+   */
   muted?: readonly string[];
   /** 최대 개수. 기본 `EXPRESSION_SUGGEST_LIMIT`(5). 1보다 작으면 빈 결과. */
   limit?: number;
@@ -128,34 +138,96 @@ const TIER_TAG = 0;
 /** 이름·표시 이름이 정확히 맞은 것(꼬리표는 안 맞음). */
 const TIER_NAME = 1;
 
-/** 맞은 칸(없으면 null). 정확히 같을 때만 맞는다 — 부분 일치는 글을 치는 도중 아무 때나 줄을 띄운다. */
-function matchTier(item: ExpressionSuggestCandidate, wanted: ReadonlySet<string>): number | null {
-  if (item.tags.some((tag) => wanted.has(canonicalKeyword(tag)))) return TIER_TAG;
-  if (wanted.has(canonicalKeyword(item.name)) || wanted.has(canonicalKeyword(item.displayName))) return TIER_NAME;
-  return null;
+/**
+ * 한 항목이 맞는 꼴들과 그 칸: 꼬리표 꼴은 칸 0, 이름·표시 이름 꼴은 칸 1(같은 꼴이 꼬리표에도 있으면 꼬리표 칸). 맞추기와 누를 때(`isKeywordOnlyInput`)가
+ * **같은 이 표**를 읽는다. 정확히 같을 때만 맞는다 — 부분 일치는 글을 치는 도중 아무 때나 줄을 띄운다.
+ */
+function matchKeys(item: ExpressionSuggestCandidate): Map<string, number> {
+  const keys = new Map<string, number>();
+  for (const tag of item.tags) keys.set(canonicalKeyword(tag), TIER_TAG);
+  for (const name of [item.name, item.displayName]) {
+    const key = canonicalKeyword(name);
+    if (!keys.has(key)) keys.set(key, TIER_NAME);
+  }
+  keys.delete("");
+  return keys;
 }
 
+/** 한 낱말 안의 줄 세우기: 칸 → 최근 쓴 것(`recent` 앞 순서) → 즐겨찾기 → 이름 → id. 보관함이 어떤 차례로 와도 같은 결과다. */
+interface Hit<T> {
+  item: T;
+  tier: number;
+  recent: number;
+  favorite: boolean;
+}
+const byRank = <T extends ExpressionSuggestCandidate>(a: Hit<T>, b: Hit<T>): number =>
+  a.tier - b.tier || a.recent - b.recent || Number(b.favorite) - Number(a.favorite) ||
+  a.item.name.localeCompare(b.item.name, "en") || a.item.id.localeCompare(b.item.id, "en");
+
 /**
- * 입력 글에 맞는 큰 이모티콘·GIF를 줄 세워 돌려준다(보관함의 항목 그대로, 같은 항목은 한 번).
+ * 낱말별로 줄 세운 그림들(낱말 차례)에서 줄 하나를 고른다. 낱말마다 1개씩 차례로 돌고, 다시 한 바퀴 돌며 2번째를 세운다(`EXPRESSION_SUGGEST_PER_KEYWORD`).
+ * 앞 낱말이 이미 세운 그림은 건너뛰고 그 낱말의 몫을 쓰지 않는다(같은 그림은 한 번). 두 바퀴 뒤에 그림을 세운 낱말이 **하나뿐이면** 그 낱말로 상한까지 채운다.
+ * 줄의 차례는 낱말 차례로 묶은 것이다(앞 낱말의 그림들 → 다음 낱말의 그림들).
+ */
+function pickRow<T extends ExpressionSuggestCandidate>(ranked: readonly (readonly T[])[], limit: number): T[] {
+  const picked: T[][] = ranked.map(() => []);
+  const cursor = ranked.map(() => 0);
+  const taken = new Set<string>();
+  let total = 0;
+  const takeNext = (group: number): boolean => {
+    const list = ranked[group];
+    while (cursor[group] < list.length && taken.has(list[cursor[group]].id)) cursor[group] += 1;
+    if (cursor[group] >= list.length) return false;
+    const item = list[cursor[group]];
+    cursor[group] += 1;
+    taken.add(item.id);
+    picked[group].push(item);
+    total += 1;
+    return true;
+  };
+  for (let round = 0; round < EXPRESSION_SUGGEST_PER_KEYWORD; round += 1) {
+    for (let group = 0; group < ranked.length && total < limit; group += 1) takeNext(group);
+  }
+  const contributing = picked.flatMap((list, group) => (list.length > 0 ? [group] : []));
+  if (contributing.length === 1) while (total < limit && takeNext(contributing[0])) continue;
+  return picked.flat();
+}
+
+/** 줄 하나: 세울 그림들과, 이 글에서 그림에 맞은 낱말들. */
+export interface ExpressionSuggestRow<T> {
+  /** 줄에 세울 그림들(보관함의 항목 그대로, 같은 항목은 한 번, 낱말 차례로 묶음). 없으면 빈 배열이다. */
+  items: T[];
+  /**
+   * 이 글에서 그림 하나라도 맞은 낱말들(`suggestionKeywords` 차례, 꺼 둔 낱말은 없다). 줄의 ✕(이 낱말 추천 끄기)가 **이것을** 끈다: 맞지 않은 낱말
+   * (「오늘」·「뭐」)까지 끄지 않고, 같은 그림이라 줄에서 빠졌거나 상한에 밀린 낱말까지는 끈다 — 끈 뒤 같은 글에 줄이 다시 서지 않게.
+   */
+  keywords: string[];
+}
+
+/** 빈 줄. 부를 때마다 새 배열이다(돌려준 배열을 호출한 쪽이 고쳐도 다음 결과가 오염되지 않게). */
+const noRow = <T>(): ExpressionSuggestRow<T> => ({ items: [], keywords: [] });
+
+/**
+ * 입력 글에 맞는 큰 이모티콘·GIF 줄 하나(#5454, 여러 낱말 #5588).
  *
- * - 맞추는 말: `suggestionKeywords(input)` — 마지막 낱말, 그리고 짧은 글이면 글 전체. 정확히 같을 때만 맞는다.
+ * - 맞추는 말: `suggestionKeywords(input)` — 문구 안의 낱말 모두(나온 차례), 그리고 짧은 글이면 글 전체. 정확히 같을 때만 맞는다. 꺼 둔 낱말(`muted`)은 뺀다.
  * - 대상: 큰 이모티콘과 GIF만. 작은 이모지 종류(`expressionKindOf` = emoji)와 active가 아닌 항목은 뺀다.
- * - 순서: 꼬리표 정확히 맞음 → 이름·표시 이름 맞음. 같은 칸 안에서는 최근 쓴 것(`recent` 앞 순서) → 즐겨찾기 → 이름·id 순
- *   (보관함이 어떤 차례로 와도 같은 결과). **`recent`·`favorites`는 순서만 바꾼다 — 맞지 않는 항목을 채워 넣지 않는다.**
- * - 맞는 것이 없거나, 글이 비었거나, 꺼 둔 낱말(`muted`)이면 빈 배열이다.
+ * - 줄: 낱말이 나온 차례로 묶고, 낱말 하나 안에서는 꼬리표 정확히 맞음 → 이름·표시 이름 맞음, 같은 칸 안에서는 최근 쓴 것(`recent` 앞 순서) → 즐겨찾기 →
+ *   이름·id 순이다. 여러 낱말이 그림을 내면 낱말마다 1~2개(`EXPRESSION_SUGGEST_PER_KEYWORD`), 하나뿐이면 상한까지, 줄 전체는 `limit`(기본 5)까지다.
+ *   **`recent`·`favorites`는 순서만 바꾼다 — 맞지 않는 항목을 채워 넣지 않는다.**
+ * - 맞는 것이 없거나, 글이 비었거나, 낱말이 모두 꺼져 있으면 빈 줄이다.
  * 값을 바꾸지 않는 순수 함수다. 네트워크·저장소를 쓰지 않는다.
  */
-export function suggestExpressions<T extends ExpressionSuggestCandidate>(
+export function suggestExpressionRow<T extends ExpressionSuggestCandidate>(
   input: string,
   catalog: readonly T[],
   options: ExpressionSuggestOptions = {},
-): T[] {
-  const limit = options.limit ?? EXPRESSION_SUGGEST_LIMIT;
-  if (!(limit >= 1)) return [];
-  const keywords = suggestionKeywords(input);
-  if (keywords.length === 0) return [];
+): ExpressionSuggestRow<T> {
+  const limit = Math.floor(options.limit ?? EXPRESSION_SUGGEST_LIMIT);
+  if (!(limit >= 1)) return noRow();
   const muted = new Set((options.muted ?? []).map(canonicalKeyword));
-  if (keywords.some((keyword) => muted.has(keyword))) return [];
+  const keywords = suggestionKeywords(input).filter((keyword) => !muted.has(keyword));
+  if (keywords.length === 0) return noRow();
 
   const wanted = new Set(keywords);
   const recentAt = new Map<string, number>();
@@ -165,19 +237,48 @@ export function suggestExpressions<T extends ExpressionSuggestCandidate>(
   const favorites = new Set(options.favorites ?? []);
 
   const seen = new Set<string>();
-  const hits: Array<{ item: T; tier: number; recent: number; favorite: boolean }> = [];
+  const hitsByKeyword = new Map<string, Array<Hit<T>>>();
   for (const item of catalog) {
     if (seen.has(item.id)) continue;
     if (expressionKindOf(item) === "emoji") continue;
     if (item.status !== undefined && item.status !== "active") continue;
-    const tier = matchTier(item, wanted);
-    if (tier === null) continue;
-    seen.add(item.id);
-    hits.push({ item, tier, recent: recentAt.get(item.id) ?? Number.MAX_SAFE_INTEGER, favorite: favorites.has(item.id) });
+    let matched = false;
+    for (const [key, tier] of matchKeys(item)) {
+      if (!wanted.has(key)) continue;
+      matched = true;
+      const hits = hitsByKeyword.get(key) ?? [];
+      hits.push({ item, tier, recent: recentAt.get(item.id) ?? Number.MAX_SAFE_INTEGER, favorite: favorites.has(item.id) });
+      hitsByKeyword.set(key, hits);
+    }
+    if (matched) seen.add(item.id);
   }
-  return hits
-    .sort((a, b) => a.tier - b.tier || a.recent - b.recent || Number(b.favorite) - Number(a.favorite) ||
-      a.item.name.localeCompare(b.item.name, "en") || a.item.id.localeCompare(b.item.id, "en"))
-    .slice(0, limit)
-    .map((hit) => hit.item);
+  const matchedKeywords = keywords.filter((keyword) => hitsByKeyword.has(keyword));
+  if (matchedKeywords.length === 0) return noRow();
+  const ranked = matchedKeywords.map((keyword) => (hitsByKeyword.get(keyword) ?? []).sort(byRank).map((hit) => hit.item));
+  return { items: pickRow(ranked, limit), keywords: matchedKeywords };
+}
+
+/** `suggestExpressionRow` 의 그림들만. */
+export function suggestExpressions<T extends ExpressionSuggestCandidate>(
+  input: string,
+  catalog: readonly T[],
+  options: ExpressionSuggestOptions = {},
+): T[] {
+  return suggestExpressionRow(input, catalog, options).items;
+}
+
+/**
+ * 입력한 글이 **이 그림의 낱말뿐**인가 — 추천 줄의 그림을 눌렀을 때 쓴 글을 바꾸는가 두는가(#5588, owner 2026-11-09 「해당 단어만 넣은 경우엔 이모티콘이
+ * 대체하는걸로(채팅없이), 해당 단어를 포함하는 문구의 경우엔 대체하지 않고 이모티콘만 추가하는 형태로」).
+ * - 참: 글이 그 낱말뿐이다 → 화면은 글을 지우고 그림만 남긴다(바꾸기). 보내면 글 없이 그림만 간다.
+ * - 거짓: 낱말이 문구 안에 있다 → 화면은 글을 그대로 두고 그림을 더한다(글 + 그림을 보내기 한 번에, `sendBundle`).
+ * 「뿐」의 기준은 맞추기와 같은 정리다: 글 **전체**를 `canonicalKeyword`(반복 줄이기·띄어쓰기와 문장부호 지우기·끝말 정리표)로 줄인 꼴이 이 그림이 맞는
+ * 낱말(꼬리표·이름·표시 이름) 하나와 같으면 낱말뿐이다. 「ㅋㅋㅋㅋ!!」·「ㅋ ㅋ ㅋ」·「배고프다」(꼬리표 배고픔)는 낱말뿐이고, 「ㅋㅋ 진심」·「ㅋㅋ😂」은 문구다.
+ * 그림을 기준으로 재는 까닭: 「킹 받네」를 친 줄에서 글 전체(킹받네)로 맞은 그림은 글을 바꾸고, 「받네」 한 낱말로만 맞은 그림은 글에 더한다.
+ * 누름이 저절로 보내지는 않는다 — 화면은 고른 그림을 입력창 위 미리 보기에 올리고, 보내기 한 번이 보낸다. (참·거짓으로 답하는 까닭: 화면 코드가 비교할
+ * 낱말 문자열을 적지 않게 — 직접 문구 장부는 화면 파일의 영어 낱말 문자열을 문구로 센다.)
+ */
+export function isKeywordOnlyInput(input: string, item: ExpressionSuggestCandidate): boolean {
+  const whole = canonicalKeyword(input);
+  return whole !== "" && matchKeys(item).has(whole);
 }
