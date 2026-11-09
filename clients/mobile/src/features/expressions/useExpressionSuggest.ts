@@ -1,4 +1,4 @@
-import {EXPRESSION_SUGGEST_DEBOUNCE_MS, suggestExpressions, suggestionKeywords} from '@momo/core/features/expressions/suggest';
+import {EXPRESSION_SUGGEST_DEBOUNCE_MS, suggestExpressionRow} from '@momo/core/features/expressions/suggest';
 import {muteKeywords, mutedKeywords} from '@momo/core/features/expressions/suggestMute';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recentExpressions} from '@momo/core/features/expressions/usage';
@@ -15,9 +15,10 @@ import {useExpressionSuggestOn} from './useExpressionSuggestSetting';
 // 하지 않는다 - 맞추는 상대는 기기에 있는 보관함(`items`)뿐이다). 규칙은 웹과 같다:
 //   · 글이 바뀌면 줄은 **그 순간** 사라지고(아래 `shown.text` 와 지금 글을 비교한다) 기다림이 처음부터 다시 시작한다. 0.3초(`EXPRESSION_SUGGEST_DEBOUNCE_MS`) 동안 글이 그대로일 때만
 //     맞춰 본다. 맞는 것이 없으면 줄은 없다.
+//   · 맞추는 말은 문구 안의 낱말 **모두**다(#5588, 코어 `suggestExpressionRow`): 「ㅋㅋ 개웃기네 진심」이면 ㅋㅋ 쪽과 진심 쪽 그림이 낱말이 나온 차례로 한 줄에 선다.
 //   · `close()`: 고른 뒤. **이 글**에 대해서만 줄을 닫는다(글이 바뀌면 다시 맞춘다). 낱말을 끄는 것이 아니다.
-//   · `mute()`: ✕. 지금 글의 낱말 **모두**(`suggestionKeywords`: 마지막 낱말과 짧은 글 전체)를 이 대화에서 끈다(`suggestMute`, 코어). 마지막 낱말만 끄면 줄이 글 전체 낱말로 떴을 때
-//     (「킹 받네」 → 「킹받네」 꼬리표) 나중에 「킹받네」만 쳤을 때 줄이 다시 뜬다.
+//   · `mute()`: ✕. 지금 줄을 세운 낱말 **모두**(코어가 돌려준 `keywords`: 그림에 맞은 낱말들, 글 전체 낱말 포함)를 이 대화에서 끈다(`suggestMute`, 코어). 맞지 않은 낱말은
+//     끄지 않는다. 한 낱말만 끄면 줄이 다른 낱말로 떴을 때(「킹 받네」 → 「킹받네」 꼬리표) 나중에 그 낱말만 쳤을 때 줄이 다시 뜬다.
 //   · `enabled` 가 거짓이거나(오프라인·미리 보기가 있음·창이 열려 있음·멘션 목록이나 명령을 치는 중·입력창에 포커스가 없음) 방을 모르거나, 보관함을 아직 못 받았거나 읽지 못했을 때도
 //     줄이 없다: 그림이 없는 줄을 보이지 않는다. 보관함 상태의 안내는 이모티콘 창이 말하고, 이 줄은 맞는 것이 있을 때만 선다.
 //   · 설정 › 보기 › 「이모티콘 추천」(#5493)을 끄면 줄이 **아예** 서지 않는다(`enabled` 와 같은 칸이지만 사람이 정한 것이라 이 훅이 직접 읽는다 - 이 훅을 쓰는 입력창은 모두 따라온다: 대화·스레드).
@@ -29,7 +30,7 @@ import {useExpressionSuggestOn} from './useExpressionSuggestSetting';
 const NONE: readonly Expression[] = [];
 
 export interface ExpressionSuggest {
-  /** 줄에 세울 그림들(1~5개). 줄이 없으면 빈 목록이다. */
+  /** 줄에 세울 그림들(1~5개, 낱말이 나온 차례로 묶음). 줄이 없으면 빈 목록이다. */
   items: readonly Expression[];
   open: boolean;
   /** 고른 뒤: 이 글에 대해 줄을 닫는다. 쓴 글과 끈 낱말은 그대로다. */
@@ -54,7 +55,7 @@ export function useExpressionSuggest({
   const suggestOn = useExpressionSuggestOn(store?.workspaceId ?? '', store?.memberId ?? '');
   // 설정이 켜져 있고 보관함을 서버에서 받아 확인한 뒤(`ready`)에만 선다: 아직 받는 중이거나, 읽지 못했거나, 끊겼으면 보일 그림이 없다.
   const active = enabled && suggestOn && scope !== null && store !== null && state === WORD.ready;
-  const [shown, setShown] = useState<{scope: string; text: string; items: readonly Expression[]} | null>(null);
+  const [shown, setShown] = useState<{scope: string; text: string; items: readonly Expression[]; keywords: readonly string[]} | null>(null);
   const [closed, setClosed] = useState<{scope: string; text: string} | null>(null);
   // 끈 낱말은 모듈 기억에 있다(`suggestMute`): 바꾸면 이 훅을 다시 그리게 한다.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
@@ -63,12 +64,12 @@ export function useExpressionSuggest({
     setShown(null);
     if (!active || scope === null || store === null || text.trim() === '') return undefined;
     const timer = setTimeout(() => {
-      const found = suggestExpressions(text, catalog, {
+      const row = suggestExpressionRow(text, catalog, {
         recent: recentExpressions(usage ?? emptyExpressionUsage(store.workspaceId, store.memberId)).map(entry => entry.id),
         favorites: readExpressionFavorites(store.workspaceId, store.memberId).ids,
         muted: mutedKeywords(scope),
       });
-      setShown(found.length > 0 ? {scope, text, items: found} : null);
+      setShown(row.items.length > 0 ? {scope, text, items: row.items, keywords: row.keywords} : null);
     }, EXPRESSION_SUGGEST_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [text, active, scope, store, catalog, usage]);
@@ -89,7 +90,7 @@ export function useExpressionSuggest({
     },
     mute: () => {
       if (scope === null) return;
-      muteKeywords(scope, suggestionKeywords(text));
+      muteKeywords(scope, current?.keywords ?? []);
       setShown(null);
       redraw();
     },

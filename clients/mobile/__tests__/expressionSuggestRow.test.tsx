@@ -8,13 +8,14 @@ import {createExpressionFixtureServer, type ExpressionFixtureRequest} from '@mom
 import {FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {FIXTURE_MEDIA} from '@momo/core/features/expressions/fixtureMedia';
 import {emptyExpressionFavorites, toggleExpressionFavorite} from '@momo/core/features/expressions/favorites';
-import {resetSuggestMuteForTest} from '@momo/core/features/expressions/suggestMute';
+import {mutedKeywords, resetSuggestMuteForTest} from '@momo/core/features/expressions/suggestMute';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {emptyExpressionUsage, recordExpressionUse} from '@momo/core/features/expressions/usage';
 import {slopTo, space, TOUCH_TARGET} from '../src/design/tokens';
 import {Composer} from '../src/features/conversation/Composer';
 import {composerFloat} from '../src/features/conversation/convDesign';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
+import {channelDraftKey, readDraft} from '../src/features/conversation/drafts';
 import type {ReplyTarget} from '../src/features/conversation/replyTarget';
 import {loadPhoneEmojiCatalog} from '../src/features/emoji/catalog';
 import {rememberEmojiCatalog} from '../src/features/emoji/catalogMemory';
@@ -36,6 +37,7 @@ jest.mock('../src/features/expressions/ExpressionImage', () => {
 
 // =============================================================================
 // 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) — 글을 치다 0.3초 멈추면 입력창 위에 맞는 그림 몇 개, 누르면 미리 보기, 저절로 보내지 않는다, ✕ 로 이 대화의 그 낱말을 끈다.
+// #5588: 문구 안의 낱말 모두를 맞춰 낱말이 나온 차례로 한 줄에 함께 세우고, 누를 때 글이 그 낱말뿐이면 글을 그림으로 바꾸고(보내면 그림만) 문구면 글을 두고 그림을 더한다.
 // 진짜 `Composer`·`ConversationLayout`·폰 저장소·코어 맞추기. 가짜: 서버(코어 fixture)·표준 이모지 목록·그림 부품. 줄이 흐름에 들지 않고 입력창이 안 움직이는 것은 시뮬레이터가 잰다.
 // =============================================================================
 
@@ -58,7 +60,8 @@ const sigh = sticker(4, 'sigh_a', ['한숨']);
 const hungry = sticker(5, 'hungry_a', ['배고픔']);
 const tinyLaugh = sticker(6, 'tiny_laugh', ['ㅋㅋ'], 'emoji');
 const other = sticker(7, 'hello_a', ['안녕']);
-const LIBRARY = [laughA, laughB, laughC, sigh, hungry, tinyLaugh, other];
+const sincere = sticker(8, 'sincere_a', ['진심']);
+const LIBRARY = [laughA, laughB, laughC, sigh, hungry, tinyLaugh, other, sincere];
 const party: CatalogEmoji = {glyph: '🎉', name: 'party popper', koreanName: '축하', shortcodes: ['tada'], keywords: [], category: 'activity', version: 1};
 const DIRECTORY = makeDirectory([]);
 const TARGET = {workspaceId: 'ws', channelId: 'ch'};
@@ -205,22 +208,54 @@ describe('맞는 그림이 뜬다 — 기기 안에서만', () => {
   });
 });
 
-describe('누르면 미리 보기에 올라간다 — 저절로 보내지 않는다', () => {
-  it('고르면 줄은 사라지고 미리 보기가 서며, 5초가 지나도 보내지 않는다. 보내기 한 번에 글과 같이 간다', async () => {
+describe('여러 낱말 — 낱말이 나온 차례로 한 줄에 함께 (#5588)', () => {
+  it('「ㅋㅋ 개웃기네 진심」: ㅋㅋ 쪽 둘 다음 진심 쪽 하나(맞지 않는 「개웃기네」는 자리가 없다). 낱말을 바꿔 치면 묶음 차례도 바뀐다', async () => {
     const {store} = await loadedStore();
-    const {onSend} = mount(store);
-    typeAndPause('ㅋㅋㅋ');
+    mount(store);
+    typeAndPause('ㅋㅋ 개웃기네 진심');
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'sincere_a']);
+    typeAndPause('진심 개웃기네 ㅋㅋ');
+    expect(names()).toEqual(['sincere_a', 'laugh_a', 'laugh_b']);
+  });
+});
+
+describe('누르면 미리 보기에 올라간다 — 저절로 보내지 않는다', () => {
+  const DRAFT = channelDraftKey('ch');
+
+  it('글이 그 낱말뿐이면(「ㅋㅋㅋ!!」) 누르는 순간 글과 초안이 지워지고 미리 보기가 선다. 5초가 지나도 보내지 않고, 보내기 한 번에 글 없이 그림만 간다 (#5588)', async () => {
+    const {store} = await loadedStore();
+    const {onSend} = mount(store, {draftKey: DRAFT});
+    typeAndPause('ㅋㅋㅋ!!');
+    expect(readDraft(DRAFT)).toBe('ㅋㅋㅋ!!');
     fireEvent.press(screen.getByTestId('composer-expression-suggest-item-laugh_b'));
     expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
     expect(row()).toBeNull();
+    expect(input().props.value).toBe(''); // 글은 그림으로 바뀌었다
+    expect(readDraft(DRAFT)).toBe('');
     wait(5000);
     expect(onSend).not.toHaveBeenCalled(); // 자동 전송 없음
     expect(row()).toBeNull();
-    expect(input().props.value).toBe('ㅋㅋㅋ'); // 쓴 글은 그대로
     fireEvent.press(screen.getByTestId('composer-send'));
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend.mock.calls[0][0]).toBe('ㅋㅋㅋ');
-    expect(onSend.mock.calls[0][1].expression.name).toBe('laugh_b');
+    expect(onSend.mock.calls[0][0]).toBe(''); // 글 없이
+    expect(onSend.mock.calls[0][1].expression.name).toBe('laugh_b'); // 그림만
+  });
+
+  it('낱말이 문구 안에 있으면(「ㅋㅋㅋ 개웃기네 진심」) 글은 그대로 두고 그림을 더한다 - 보내기 한 번에 글과 그림이 같이 간다 (#5588)', async () => {
+    const {store} = await loadedStore();
+    const {onSend} = mount(store, {draftKey: DRAFT});
+    typeAndPause('ㅋㅋㅋ 개웃기네 진심');
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-sincere_a'));
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(row()).toBeNull();
+    expect(input().props.value).toBe('ㅋㅋㅋ 개웃기네 진심'); // 쓴 글은 그대로
+    expect(readDraft(DRAFT)).toBe('ㅋㅋㅋ 개웃기네 진심');
+    wait(5000);
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0]).toBe('ㅋㅋㅋ 개웃기네 진심');
+    expect(onSend.mock.calls[0][1].expression.name).toBe('sincere_a');
   });
 
   it('이미 미리 보기가 있으면 다른 글에도 줄이 서지 않는다(보내기 한 번에 큰 그림은 하나)', async () => {
@@ -235,6 +270,19 @@ describe('누르면 미리 보기에 올라간다 — 저절로 보내지 않는
 });
 
 describe('✕ — 이 대화에서 그 낱말 추천을 끈다', () => {
+  it('여러 낱말 줄의 ✕ 는 그림에 맞은 낱말들만 끈다 - 맞지 않은 「개웃기네」는 끄지 않는다 (#5588)', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ 개웃기네 진심');
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-mute'));
+    expect(row()).toBeNull();
+    expect(mutedKeywords('ws:ch')).toEqual(['ㅋㅋ', '진심']);
+    typeAndPause('진심');
+    expect(row()).toBeNull();
+    typeAndPause('진심 한숨');
+    expect(names()).toEqual(['sigh_a']);
+  });
+
   it('끈 낱말은 글을 지웠다 다시 쳐도, 입력창을 다시 세워도 안 뜬다. 다른 낱말·다른 대화에는 뜬다', async () => {
     const {store} = await loadedStore();
     const {remountIn} = mount(store);
