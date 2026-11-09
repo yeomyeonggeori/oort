@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
@@ -45,6 +45,9 @@ import { ThreadFollowButton } from "./ThreadFollowButton";
 import { useThreadFollow } from "./useThreadFollow";
 
 const NO_REPLIES: Message[] = [];
+
+/** 내가 단 답글을 기다려 맨 아래로 가는 시간 (#5603). 보낸 뒤 목록 다시 읽기는 보통 수백 ms다. 이 안에 맨 끝 답글이 바뀌지 않으면 접는다. */
+const OWN_REPLY_FOLLOW_MS = 5_000;
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -236,6 +239,32 @@ function ThreadPanelFrame({
 
   const allReplies = query.data?.messages ?? NO_REPLIES;
 
+  // 내가 단 답글은 맨 아래로 (#5603, owner 11-09). 답글 목록은 따라가기가 없는 평범한 스크롤 상자라, 위로 올려 읽던 중에 답글을
+  // 달면 그 답글이 아래 밖에 섰다(바닥에 있어도 상자가 스스로 따라가지 않는다). 보낸 뒤 목록을 다시 읽어 **맨 끝 답글이 바뀌면**
+  // 그 커밋에서 한 번 맨 아래로 간다(그리기 전). 남의 답글은 지금처럼 따라가지 않는다. 다시 읽기가 늦거나 실패하면 기다림은
+  // `OWN_REPLY_FOLLOW_MS` 뒤에 접는다 — 그 뒤 온 남의 답글로 끌려가지 않게.
+  const repliesScrollRef = useRef<HTMLDivElement>(null);
+  const newestReplyId = allReplies[allReplies.length - 1]?.id ?? null;
+  const newestReplyRef = useRef(newestReplyId);
+  newestReplyRef.current = newestReplyId;
+  const ownReplyRef = useRef<{ newestAtSend: string | null; untilMs: number } | null>(null);
+  const onReplySent = useCallback(() => {
+    ownReplyRef.current = { newestAtSend: newestReplyRef.current, untilMs: Date.now() + OWN_REPLY_FOLLOW_MS };
+    void refetchReplies();
+  }, [refetchReplies]);
+  useLayoutEffect(() => {
+    const armed = ownReplyRef.current;
+    if (armed === null) return;
+    if (Date.now() > armed.untilMs) {
+      ownReplyRef.current = null;
+      return;
+    }
+    if (newestReplyId === armed.newestAtSend) return;
+    ownReplyRef.current = null;
+    const node = repliesScrollRef.current;
+    if (node !== null) node.scrollTop = node.scrollHeight;
+  }, [newestReplyId]);
+
   // 읽음 신호 (#4878, #4889 2단계): 스레드를 열어 둔 동안 화면에 든 답글의 최대 seq가 오르면 한 번 보낸다(열 때 첫 읽기,
   // 새 답글이 그려질 때마다). 사람이 이 창을 보고 있을 때만이다 — 창이 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다.
   // 대화 표면(`actions`가 있는 곳)만: 작업 세션 패널의 행은 사건 기록이고 읽는 대화가 아니다. 보내는 이는 이 프레임이
@@ -411,6 +440,7 @@ function ThreadPanelFrame({
       )}
 
       <div
+        ref={repliesScrollRef}
         className="min-h-0 flex-1 overflow-y-auto"
         data-message-scroll-container=""
       >
@@ -518,7 +548,7 @@ function ThreadPanelFrame({
           rootId={root.id}
           directory={directory}
           channels={channels}
-          onSent={() => void query.refetch()}
+          onSent={onReplySent}
           followHint={followHint}
         />
       )}

@@ -12,8 +12,8 @@
 //   3. 숫자만 고정     `tabular-nums`는 숫자에만 붙는다. 라벨 전체에 걸면 한글 음절이
 //                     늘어난다 — 같은 레포가 `RunClock` 독스트링에 실측으로 적어 둔
 //                     결함이고(「7월  29일」), 구분선 셋이 전부 그 상태였다.
-//   4. 연속 행의 시각  그룹 창이 5분이라 한 묶음이 5분을 덮는데 그 안 개별 발화의
-//                     시각이 어디에도 없었다. 이제 거터에 있고, hover와 키보드
+//   4. 연속 행의 시각  묶음 안 개별 발화의 시각이 어디에도 없었다(당시 그룹 창은
+//                     5분, #5603부터는 같은 로컬 분). 이제 거터에 있고, hover와 키보드
 //                     포커스 **양쪽**으로 열린다(H-3).
 //   5. 묶음 안 분절    연속 행 간격이 8px뿐이라 다섯 발화가 한 문단으로 뭉쳤다.
 //                     간격은 코어가 정하고(`ROW_SPACE`), 묶음 사이보다 좁되 8px보다
@@ -168,11 +168,11 @@ function dayAt(offsetDays, hour, minute) {
 
 const OLD_AT = dayAt(6, 12, 0);
 const YDAY_AT = dayAt(1, 12, 0);
-/** 오늘의 저자 묶음. 셋이 5분(`AUTHOR_GROUP_WINDOW_MS`) 안에 들어가야 한 묶음이다. */
+/** 오늘의 저자 묶음. 넷이 **같은 로컬 분**(9시 12분) 안에 들어가야 한 묶음이다(코어 `startsAuthorGroup`, #5603). */
 const HEAD_AT = dayAt(0, 9, 12);
-const CONT1_AT = HEAD_AT + 40_000;
-const CONT2_AT = HEAD_AT + 95_000;
-const TAIL_AT = HEAD_AT + 140_000;
+const CONT1_AT = HEAD_AT + 15_000;
+const CONT2_AT = HEAD_AT + 30_000;
+const TAIL_AT = HEAD_AT + 45_000;
 
 function row(over) {
   return {
@@ -205,7 +205,7 @@ function historyPage() {
       body: "어제 배포는 무사히 끝났습니다.",
       createdAtMs: YDAY_AT,
     }),
-    // 오늘의 묶음 — 같은 저자, 5분 창 안. 머리 행에만 아바타와 이름이 붙고 나머지
+    // 오늘의 묶음 — 같은 저자, 같은 분 안. 머리 행에만 아바타와 이름이 붙고 나머지
     // 셋은 연속 행이다(그 셋에 시각이 없었던 것이 H-3).
     row({
       id: HEAD_MSG,
@@ -595,8 +595,8 @@ async function exercise(browser) {
 
   // ---- 4. 연속 행의 시각 (H-3) ----------------------------------------------
   //
-  // 그룹 창이 5분이라 한 묶음이 5분을 덮는데, 그 안 개별 발화의 시각이 어디에도
-  // 없었다. 존재만 세지 않고 **hover 뒤의 실제 가시성**을 잰다 — 마크업만 있고
+  // 묶음 안 개별 발화의 시각이 어디에도 없었다(당시 그룹 창 5분, 지금은 같은 분).
+  // 존재만 세지 않고 **hover 뒤의 실제 가시성**을 잰다 — 마크업만 있고
   // 눈에 안 보이면 고쳐진 것이 아니다.
   const headTimes = await rowLocator(page, HEAD_MSG)
     .getByTestId("row-time")
@@ -621,7 +621,7 @@ async function exercise(browser) {
   if (hoveredOpacity < 0.99) {
     throw new Error(
       `a continuation row never showed its time: hover 뒤에도 불투명도가 ${hoveredOpacity}다. ` +
-        "5분을 덮는 묶음 안에서 개별 발화의 시각을 얻는 길이 없다 (진단 H-3)"
+        "묶음 안에서 개별 발화의 시각을 얻는 길이 없다 (진단 H-3)"
     );
   }
   // 보조기술은 hover 없이도 얻는다. 폰이 이미 모든 행의 시각을 라벨에 넣고 있었고
