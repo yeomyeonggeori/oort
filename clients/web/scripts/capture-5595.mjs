@@ -53,7 +53,7 @@ const WORK_HOST = {
   scope: "member",
   ownerMemberId: ME,
   type: "app",
-  displayName: "곽성재의 MacBook Pro",
+  displayName: "디자인실 MacBook Pro",
   capabilities: { terminal: true },
   lastSeenAtMs: NOW,
   createdAtMs: NOW - 60_000,

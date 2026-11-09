@@ -1148,7 +1148,7 @@ describe("작업 세션 권한 요청 → OS 배너 (#5595)", () => {
 
   it("세션 이름이 비면 말한 이의 이름이다", () => {
     const unnamed = { ...mine, label: "  " };
-    const decision = notifyDecision(workEvent({ author: ALIAS }), workContext({ workSession: () => unnamed, actorFor: () => "@kwak-claude" }));
-    expect(decision.show && decision.notification.title).toBe("@kwak-claude");
+    const decision = notifyDecision(workEvent({ author: ALIAS }), workContext({ workSession: () => unnamed, actorFor: () => "@dohyun-claude" }));
+    expect(decision.show && decision.notification.title).toBe("@dohyun-claude");
   });
 });
