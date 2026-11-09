@@ -17,13 +17,18 @@
 // 첫 화면 문구(#5568 문구 1안, 7개 언어 × 320·360·390·768·1280: 머리글·증거 칩 3이 사전 그대로·칩이 화면 밖으로 안 나감·
 // 제목·머리글·칩 낱말 가운데 끊김 0·줄 머리 문장 부호 0·문서 넘침 0, 제목·리드·칩 줄 수 기록, 탭 제목 「oort」, meta description 150자 이하·첫 문장에 oort·Mac),
 // 움직임 줄이기 정지 장면의 글자 줄 상자 화소 대비(7개 언어 × 320·360·390·768·1280 × 밝게·어둡게: 머리글 하위 2% 4.5 이상, 다른 글자도 기준 이상),
-// 폰 첫 화면 높이 5종(320×568·375×548·375×629·375×635·390×664) × 7개 언어의 주 행동이 첫 화면 안(Chromium) + WebKit iPhone SE·14.
+// 폰 첫 화면 높이 5종(320×568·375×548·375×629·375×635·390×664) × 7개 언어의 주 행동이 첫 화면 안(Chromium) + WebKit iPhone SE·14,
+// 문서(#5590, /docs/ 12쪽 + 루트: 320·390·768·1280 넘침 0·표 칸 넘침 0, 배지·출처·확인 날짜, 깨진 내부 링크 0·내부 링크는 / 로 시작,
+// 옆 목록·쪽마다 언어 바꾸기·noindex·하늘 캔버스 없음, 밝게·어둡게 바탕과 표지 대비, 머리 「문서」 링크(7개 언어 + 루트), /docs/ 언어 고르기,
+// 모르는 마크다운이면 빌드 RED: scripts/fixtures/md-unknown.json 의 26가지 + 바꾸지 않은 대조 GREEN).
 // 하나라도 어긋나면 exit 1.
 // =============================================================================
 
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,8 +42,8 @@ const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
 const cats = Object.fromEntries(LANGS.map((l) => [l, JSON.parse(readFileSync(resolve(SITE, `i18n/${l}.json`), "utf8"))]));
 const ko = cats.ko;
-// ONLY=pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
+// ONLY=pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,docs,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,docs,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -209,9 +214,10 @@ const headMeasure = (W) => {
   const brand = r(document.querySelector(".brand"));
   const mark = r(document.querySelector(".brand .mark"));
   const nav = r(document.querySelector(".top-nav"));
-  const ctls = [...document.querySelectorAll(".top-nav .lang-btn, .top-nav .web-link")].filter(vis).map((el) => {
+  const ctls = [...document.querySelectorAll(".top-nav .docs-link, .top-nav .lang-btn, .top-nav .web-link")].filter(vis).map((el) => {
     const b = r(el);
-    return { cls: el.classList.contains("web-link") ? "web" : "lang", left: Math.round(b.left * 10) / 10, right: Math.round(b.right * 10) / 10, w: Math.round(b.width), h: Math.round(b.height) };
+    // fit: 안의 글자·아이콘이 상자 안에 든다(44 상자에 이름 글자가 넘쳐 보이면 실패, #5590 사보타주 s10b)
+    return { cls: el.classList.contains("web-link") ? "web" : el.classList.contains("docs-link") ? "docs" : "lang", left: Math.round(b.left * 10) / 10, right: Math.round(b.right * 10) / 10, w: Math.round(b.width), h: Math.round(b.height), fit: el.scrollWidth <= el.clientWidth + 1 };
   });
   const webUrl = document.querySelector(".web-link").getAttribute("href");
   const wrapped = nav.top >= brand.bottom - 1;
@@ -681,16 +687,16 @@ async function main() {
       return [Math.round(r.width), Math.round(r.height)];
     }), sel);
     const tall = (list) => list.length > 0 && list.every(([w, h]) => w >= 44 && h >= 44);
-    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), foot: await sizes(".foot-langs a") };
+    const top = { docs: await sizes(".docs-link"), lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), foot: await sizes(".foot-langs a") };
     await page.locator(".lang-btn").click();
     top.langItems = await sizes(".lang-list a");
     await page.keyboard.press("Escape");
     await page.locator(".get-more").click();
     top.chipItems = await sizes(".chip-menu button");
     await page.keyboard.press("Escape");
-    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems)
+    const okTouch = tall(top.docs) && tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems)
       && top.foot.length === LANGS.length && tall(top.foot);
-    check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 아이콘·꼬리 언어 링크 포함)", okTouch, JSON.stringify(top));
+    check("390: 컨트롤 터치 크기 44 이상(머리 「문서」·「브라우저에서 열기」 아이콘·꼬리 언어 링크 포함)", okTouch, JSON.stringify(top));
 
     // 첫 화면에는 「다른 기기」 링크가 없다(기기 목록 자리는 그대로 있다)
     const more = await page.evaluate(() => ({
@@ -980,7 +986,7 @@ async function main() {
           if (m.mark !== "26x26") bad.mark.push(`${tag}:${m.mark}`);
           if (m.overlap || m.ctls.some((c) => c.left < -0.5 || c.right > w + 0.5)) bad.ctl.push(`${tag}:${m.ctls.map((c) => `${c.cls}${c.left}..${c.right}`).join(",")}`);
           if (m.overflow > 0) bad.overflow.push(`${tag}:+${m.overflow}`);
-          if (w < 600 && !m.ctls.every((c) => c.w >= 44 && c.w <= 48 && c.h >= 44)) bad.icon.push(`${tag}:${m.ctls.map((c) => `${c.cls}${c.w}x${c.h}`).join(",")}`);
+          if (w < 600 && !m.ctls.every((c) => c.w >= 44 && c.w <= 48 && c.h >= 44 && c.fit)) bad.icon.push(`${tag}:${m.ctls.map((c) => `${c.cls}${c.w}x${c.h}${c.fit ? "" : " 글자 넘침"}`).join(",")}`);
           const web = m.ctls.some((c) => c.cls === "web");
           if (m.phone !== (mode === "폰") || web === m.phone || m.webLinks !== 1) bad.link.push(`${tag}:phone=${m.phone} head=${web} links=${m.webLinks}`);
           if (w === 320) {
@@ -1002,7 +1008,7 @@ async function main() {
     check("머리 줄: 로고 마크 26×26 그대로", bad.mark.length === 0, show(bad.mark));
     check("머리 줄: 컨트롤이 화면 안, 로고와 안 겹침", bad.ctl.length === 0, show(bad.ctl));
     check("머리 줄: 문서 가로 넘침 0", bad.overflow.length === 0, show(bad.overflow));
-    check("머리 줄: 600 아래 컨트롤은 아이콘 44×44", bad.icon.length === 0, show(bad.icon));
+    check("머리 줄: 600 아래 컨트롤은 아이콘 44×44(문서·언어·웹, 안의 글자가 상자를 넘지 않음)", bad.icon.length === 0, show(bad.icon));
     check("머리 줄: 폰이면 머리 「브라우저에서 열기」 숨김, 첫 화면 웹 링크 하나", bad.link.length === 0, show(bad.link));
     check("머리 줄: 320 언어 판이 화면 안, 항목 한 줄(7언어 × 일반·폰)", bad.menu.length === 0, `${bad.menu.length}/14 ${bad.menu.join(" ")}`);
 
@@ -1052,6 +1058,231 @@ async function main() {
       check(`머리 로고(${scheme}): 링은 글자색, 위성은 --signal(tokens.css ${want})`, Boolean(sig) && st.paths === 2 && st.sat === want && st.ring === st.text && st.sat !== st.ring, JSON.stringify(st));
       await ctx.close();
     }
+  }
+
+  // 12) 문서(#5590): /docs/ 아래 ko·en × 6쪽 + /docs/ 루트(영어 개요). build.py 가 만든 결과를 띄운 주소에서 잰다.
+  if (ONLY.has("docs")) {
+    const DOCS = ["overview", "concepts", "quickstart", "agents", "webhooks", "security"];
+    const DOCS_LANGS = ["ko", "en"];
+    const REPO_WEB = "https://github.com/yeomyeonggeori/oort/";
+    const strings = JSON.parse(readFileSync(resolve(SITE, "docs/strings.json"), "utf8"));
+    const docsHref = (lang, slug) => (slug === "overview" ? `/docs/${lang}/` : `/docs/${lang}/${slug}/`);
+    const all = DOCS_LANGS.flatMap((lang) => DOCS.map((slug) => ({ lang, slug, path: docsHref(lang, slug) })));
+    const today = new Date().toISOString().slice(0, 10);
+
+    // (a) 넘침: 12쪽 × 320·390·768·1280. 문서 가로 넘침, 화면 밖 요소(스크롤 칸 pre·.table-wrap 의 안쪽은 빼고), 표 칸이 가로로 스크롤되면 넘침이다.
+    //     코드 블록(pre)의 가로 스크롤은 넘침이 아니라 기록이다(코드는 줄을 바꾸지 않는다, pre 는 tabindex=0 이라 키보드로 민다).
+    const docsMeasure = (W) => {
+      const outside = [...document.querySelectorAll("body *")].filter((el) => {
+        if (el.closest(".sprite")) return false;
+        const box = el.closest("pre, .table-wrap");
+        if (box && box !== el) return false;
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden") return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return false;
+        return r.right > W + 0.5 || r.left < -0.5;
+      }).map((el) => (typeof el.className === "string" && el.className ? el.className : el.tagName.toLowerCase()).slice(0, 32));
+      return {
+        doc: document.querySelector("main.doc article .doc-head h1") !== null,
+        overflow: document.documentElement.scrollWidth - W,
+        outside: outside.slice(0, 5),
+        tables: [...document.querySelectorAll(".table-wrap")].filter((t) => t.scrollWidth > t.clientWidth + 1).length,
+        pres: [...document.querySelectorAll("pre")].filter((t) => t.scrollWidth > t.clientWidth + 1).length,
+      };
+    };
+    const over = [];
+    const preRec = [];
+    let scenes = 0;
+    for (const w of [320, 390, 768, 1280]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: w <= 390 ? 2 : 1, colorScheme: "light", reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      for (const d of all) {
+        const res = await page.goto(`${BASE}${d.path}`, { waitUntil: "load" });
+        await page.evaluate(() => document.fonts.ready);
+        const m = await page.evaluate(docsMeasure, w);
+        scenes += 1;
+        // 문서 쪽이 아니면(404 등) 잴 것이 없으니 넘침 0 이 아니라 실패다
+        if (res?.status() !== 200 || !m.doc) over.push(`${d.path}@${w}:문서 쪽 아님(${res?.status()})`);
+        else if (m.overflow > 0 || m.outside.length || m.tables) over.push(`${d.path}@${w}:+${m.overflow}${m.outside.length ? " 밖 " + m.outside.join(",") : ""}${m.tables ? ` 표 스크롤 ${m.tables}` : ""}`);
+        if (m.pres) preRec.push(`${d.lang}/${d.slug}@${w}=${m.pres}`);
+      }
+      await ctx.close();
+    }
+    check("문서 넘침 0: 12쪽 × 320·390·768·1280(문서 가로 넘침·화면 밖 요소·표 칸 스크롤)", over.length === 0, `${over.length}/${scenes}${over.length ? " " + over.slice(0, 6).join(" ") : ""}`);
+    console.log(`문서 코드 블록 가로 스크롤(기록): ${preRec.length ? preRec.join(" ") : "없음"}`);
+
+    // (b) 쪽마다 상태 배지·출처·확인 날짜, noindex, 하늘 캔버스 없음, 옆 목록(현재 쪽 하나), 언어 바꾸기(같은 쪽의 ko·en), 머리 「문서」 링크(현재)
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    const metaBad = [];
+    const hrefs = new Map(); // 절대 주소 → 처음 본 쪽
+    const notRooted = [];
+    const roots = [...all, { lang: "en", slug: "overview", path: "/docs/", root: true }];
+    for (const d of roots) {
+      await page.goto(`${BASE}${d.path}`, { waitUntil: "load" });
+      const m = await page.evaluate(() => {
+        const st = document.querySelector(".doc-head .doc-status .status");
+        const t = document.querySelector(".doc-head .doc-checked time");
+        return {
+          lang: document.documentElement.lang,
+          robots: document.querySelector('meta[name="robots"]')?.content ?? "",
+          status: st ? { text: st.textContent.trim(), cls: [...st.classList].find((c) => c.startsWith("status-")) ?? "" } : null,
+          checked: t ? { dt: t.getAttribute("datetime"), text: t.textContent.trim() } : null,
+          sources: [...document.querySelectorAll(".doc-head .doc-sources li a")].map((a) => ({ href: a.getAttribute("href"), text: a.textContent.trim() })),
+          canvas: document.querySelectorAll("canvas").length,
+          h1: document.querySelectorAll("h1").length,
+          side: [...document.querySelectorAll(".docs-side a")].map((a) => ({ href: a.getAttribute("href"), cur: a.getAttribute("aria-current") })),
+          toc: [...document.querySelectorAll(".docs-toc a")].map((a) => a.getAttribute("href")),
+          langs: [...document.querySelectorAll(".lang-list a")].map((a) => ({ href: a.getAttribute("href"), lang: a.getAttribute("data-lang"), cur: a.getAttribute("aria-current") })),
+          docsLink: (() => { const a = document.querySelector(".top .docs-link"); return a ? { href: a.getAttribute("href"), cur: a.getAttribute("aria-current") } : null; })(),
+          links: [...document.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+        };
+      });
+      const label = strings[d.lang];
+      const want = docsHref(d.lang, d.slug);
+      const p = [];
+      if (m.lang !== d.lang) p.push(`lang=${m.lang}`);
+      if (!/noindex/.test(m.robots)) p.push("noindex 없음");
+      if (!m.status || !["status-done", "status-partial", "status-planned"].includes(m.status.cls) || m.status.text !== label[m.status.cls.replace("-", "_")]) p.push(`배지 ${JSON.stringify(m.status)}`);
+      if (!m.checked || !/^\d{4}-\d{2}-\d{2}$/.test(m.checked.dt ?? "") || m.checked.text !== m.checked.dt || m.checked.dt > today) p.push(`날짜 ${JSON.stringify(m.checked)}`);
+      if (!m.sources.length || m.sources.some((s) => !s.href?.startsWith(REPO_WEB) || !s.href.endsWith(`/${s.text}`))) p.push(`출처 ${m.sources.length}개 ${JSON.stringify(m.sources.slice(0, 2))}`);
+      if (m.canvas !== 0) p.push(`캔버스 ${m.canvas}`);
+      if (m.h1 !== 1) p.push(`h1 ${m.h1}`);
+      const curSide = m.side.filter((a) => a.cur === "page");
+      if (m.side.length !== DOCS.length || curSide.length !== 1 || curSide[0].href !== want || m.toc.length !== DOCS.length) p.push(`옆 목록 ${JSON.stringify(m.side.map((a) => a.href + (a.cur ? "*" : "")))}`);
+      const langOk = m.langs.length === 2 && DOCS_LANGS.every((l) => m.langs.some((a) => a.lang === l && a.href === docsHref(l, d.slug) && (a.cur === "page") === (l === d.lang)));
+      if (!langOk) p.push(`언어 바꾸기 ${JSON.stringify(m.langs)}`);
+      if (!m.docsLink || m.docsLink.href !== docsHref(d.lang, "overview") || m.docsLink.cur !== "page") p.push(`머리 문서 링크 ${JSON.stringify(m.docsLink)}`);
+      if (p.length) metaBad.push(`${d.path}: ${p.join(" · ")}`);
+      for (const h of m.links) {
+        const u = new URL(h, `${BASE}${d.path}`);
+        if (u.origin !== new URL(BASE).origin) continue;
+        if (!h.startsWith("/") && !h.startsWith("#")) notRooted.push(`${d.path}→${h}`);
+        if (!hrefs.has(u.href)) hrefs.set(u.href, d.path);
+      }
+    }
+    check("문서 쪽마다 상태 배지·출처(저장소 링크)·확인한 날짜, noindex, 하늘 캔버스 없음, 옆 목록 현재 쪽 하나, 언어 바꾸기(같은 쪽 ko·en), 머리 「문서」 현재(13쪽)",
+      metaBad.length === 0 && errors.length === 0, metaBad.length || errors.length ? `${metaBad.slice(0, 3).join(" | ")}${errors.length ? " 콘솔 " + errors.slice(0, 2).join(" | ") : ""}` : `${roots.length}/${roots.length}`);
+
+    // (c) 머리 「문서」 링크: 내려받기 페이지 7개 언어 + 루트에서 보이고, ko 는 /docs/ko/, 나머지는 /docs/en/ 으로 간다
+    const headBad = [];
+    for (const lang of ["", ...LANGS]) {
+      await page.goto(`${BASE}/${lang ? lang + "/" : ""}`, { waitUntil: "load" });
+      const a = await page.evaluate(() => {
+        const el = document.querySelector(".top-nav .docs-link");
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { href: el.getAttribute("href"), abs: el.href, seen: r.width > 0 && r.height > 0, name: el.getAttribute("aria-label") };
+      });
+      const want = lang === "ko" ? "/docs/ko/" : "/docs/en/";
+      if (!a || !a.seen || new URL(a.abs).pathname !== want || a.name !== cats[lang || "en"].nav_docs) headBad.push(`/${lang}:${JSON.stringify(a)}`);
+      else if (!hrefs.has(a.abs)) hrefs.set(a.abs, `/${lang}`);
+    }
+    check("머리 「문서」 링크: 7개 언어 + 루트에서 보이고 ko → /docs/ko/, 나머지 → /docs/en/", headBad.length === 0, headBad.length ? headBad.join(" ") : `${LANGS.length + 1}/${LANGS.length + 1}`);
+
+    // (d) 깨진 내부 링크 0: 모은 같은 출처 주소마다 200, #조각이면 그 쪽에 그 id 가 있다. 문서 쪽의 내부 링크는 / 나 # 로 시작한다
+    //     (app.oor7.com/docs 처럼 끝 / 없이 열려도 상대 주소가 어긋나지 않게)
+    const broken = [];
+    const htmlOf = new Map();
+    for (const [href, from] of hrefs) {
+      const u = new URL(href);
+      const key = u.origin + u.pathname;
+      if (!htmlOf.has(key)) {
+        const res = await fetch(key);
+        htmlOf.set(key, { status: res.status, html: res.status === 200 ? await res.text() : "" });
+      }
+      const got = htmlOf.get(key);
+      if (got.status !== 200) broken.push(`${from} → ${u.pathname} ${got.status}`);
+      else if (u.hash && !new RegExp(`id="${decodeURIComponent(u.hash.slice(1)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`).test(got.html)) broken.push(`${from} → ${u.pathname}${decodeURIComponent(u.hash)} id 없음`);
+    }
+    // 링크를 하나도 못 모으면(문서가 없으면) 깨짐 0 이 아니라 실패다: 12쪽이 모두 링크로 닿아야 한다
+    const reached = all.filter((d) => [...hrefs.keys()].some((h) => new URL(h).pathname === d.path));
+    check("문서 깨진 내부 링크 0(13쪽 + 머리 「문서」 링크, #조각 id 포함), 12쪽 모두 링크로 닿음, 문서 쪽 내부 링크는 / 나 # 로 시작", broken.length === 0 && notRooted.length === 0 && reached.length === all.length,
+      `링크 ${hrefs.size}개 · 닿은 쪽 ${reached.length}/${all.length} · 깨짐 ${broken.length}${broken.length ? " " + broken.slice(0, 4).join(" | ") : ""}${notRooted.length ? " · 상대 주소 " + notRooted.slice(0, 3).join(" ") : ""}`);
+    await ctx.close();
+
+    // (e) 밝게·어둡게: 바탕은 --page(토큰) 그대로, 표지 셋·본문·보조 글자의 대비 4.5 이상(계산), 상태가 색만으로 말하지 않는다(글자가 있다)
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const lum = (c) => { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c); return 0.2126 * lin(+m[1]) + 0.7152 * lin(+m[2]) + 0.0722 * lin(+m[3]); };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    const themeBad = [];
+    const themeRec = [];
+    for (const [scheme, bg] of [["light", "rgb(255, 254, 252)"], ["dark", "rgb(20, 23, 29)"]]) {
+      const tc = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme, reducedMotion: "reduce" });
+      const tp = await tc.newPage();
+      for (const lang of DOCS_LANGS) {
+        await tp.goto(`${BASE}/docs/${lang}/`, { waitUntil: "load" });
+        const c = await tp.evaluate(() => {
+          const col = (sel) => { const el = document.querySelector(sel); return el ? getComputedStyle(el).color : null; };
+          return {
+            body: getComputedStyle(document.body).backgroundColor,
+            ink: col(".doc-body p"), muted: col(".doc-lead"),
+            done: col(".doc-body .status-done"), partial: col(".doc-body .status-partial"), planned: col(".doc-body .status-planned"),
+            texts: [...document.querySelectorAll(".doc-body .status")].map((s) => s.textContent.trim()),
+          };
+        });
+        const pairs = ["ink", "muted", "done", "partial", "planned"].map((k) => [k, c[k] ? ratio(c[k], c.body) : 0]);
+        themeRec.push(`${lang}-${scheme} ${pairs.map(([k, v]) => `${k}=${v.toFixed(2)}`).join(" ")}`);
+        if (c.body !== bg || pairs.some(([, v]) => v < 4.5) || c.texts.length < 3 || c.texts.some((t) => !t)) themeBad.push(`${lang}-${scheme}: body=${c.body} ${pairs.filter(([, v]) => v < 4.5).map(([k, v]) => `${k}=${v.toFixed(2)}`).join(" ")}`);
+        if (SHOTS) for (const slug of ["overview", "agents"]) for (const w of [1280, 390]) {
+          const sc = await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: w <= 390 ? 2 : 1, colorScheme: scheme, reducedMotion: "reduce" });
+          const sp = await sc.newPage();
+          await sp.goto(`${BASE}${docsHref(lang, slug)}`, { waitUntil: "load" });
+          await sp.evaluate(() => document.fonts.ready);
+          await sp.screenshot({ path: resolve(SHOTS, `docs-${lang}-${slug}-${w}-${scheme}.png`), fullPage: true });
+          await sc.close();
+        }
+      }
+      await tc.close();
+    }
+    check("문서 밝게·어둡게: 바탕 --page 토큰, 본문·보조·표지 셋(됨·부분·계획) 대비 4.5 이상, 표지마다 글자", themeBad.length === 0, themeBad.length ? themeBad.join(" | ") : themeRec.join(" | "));
+
+    // (f) /docs/ 언어 고르기: 한국어 브라우저·고른 언어 ko 는 /docs/ko/, 그 밖은 /docs/ 에 남아 영어 개요
+    const pick = [];
+    for (const [locale, stored, want] of [["ko-KR", null, "/docs/ko/"], ["en-US", null, "/docs/"], ["ja-JP", null, "/docs/"], ["en-US", "ko", "/docs/ko/"], ["ko-KR", "en", "/docs/"]]) {
+      const lc = await browser.newContext({ locale });
+      if (stored) await lc.addInitScript((v) => { try { localStorage.setItem("oort.site.lang", v); } catch (e) { /* 막혀도 시험은 계속 */ } }, stored);
+      const lp = await lc.newPage();
+      await lp.goto(`${BASE}/docs/`, { waitUntil: "load" });
+      await lp.waitForLoadState("load");
+      const got = new URL(lp.url()).pathname;
+      const lang = await lp.evaluate(() => document.documentElement.lang);
+      if (got !== want || lang !== (want === "/docs/ko/" ? "ko" : "en")) pick.push(`${locale}${stored ? "+" + stored : ""}→${got}(${lang}) 기대 ${want}`);
+      await lc.close();
+    }
+    check("/docs/ 언어 고르기: 한국어 브라우저·고른 언어 ko → /docs/ko/, 그 밖은 영어 개요", pick.length === 0, pick.length ? pick.join(" ") : "5/5");
+
+    // (g) 모르는 마크다운이면 빌드가 RED: 문서 폴더를 임시로 복사해 ko/concepts.md 하나만 바꾸고 build.py --docs-src 로 빌드한다.
+    //     바꾸지 않은 복사본은 exit 0(대조), 경우마다 exit 1 + stderr 에 「docs/ko/concepts.md:<줄>」과 그 경우의 설명 글자.
+    const fx = JSON.parse(readFileSync(resolve(SITE, "scripts/fixtures/md-unknown.json"), "utf8"));
+    const tmp = mkdtempSync(join(tmpdir(), "oort-docs-md-"));
+    const build = (docsDir) => spawnSync("python3", [resolve(SITE, "build.py"), "--out", join(tmp, "dist"), "--docs-src", docsDir], { encoding: "utf8" });
+    const prepare = (edit) => {
+      const dir = join(tmp, "docs");
+      rmSync(dir, { recursive: true, force: true });
+      cpSync(resolve(SITE, "docs"), dir, { recursive: true });
+      const file = join(dir, fx.page);
+      let text = readFileSync(file, "utf8");
+      let line = null;
+      if (edit?.append !== undefined) { line = text.split("\n").length + 1; text = `${text}\n${edit.append}\n`; }
+      else if (edit?.replace) { const at = text.indexOf(edit.replace[0]); line = text.slice(0, at).split("\n").length; text = text.replace(edit.replace[0], edit.replace[1]); }
+      writeFileSync(file, text);
+      return { dir, line };
+    };
+    const control = build(prepare(null).dir);
+    const mdBad = [];
+    for (const c of fx.cases) {
+      const { dir, line } = prepare(c);
+      const r = build(dir);
+      const at = new RegExp(`docs/${fx.page.replace(".", "\\.")}:(\\d+):`).exec(r.stderr ?? "");
+      const near = at && +at[1] >= line && +at[1] <= line + 2;
+      if (r.status !== 1 || !near || !r.stderr.includes(c.expect)) mdBad.push(`${c.name}: exit=${r.status} ${(r.stderr || "").trim().split("\n").pop()?.slice(0, 90)}`);
+    }
+    rmSync(tmp, { recursive: true, force: true });
+    check(`모르는 마크다운·틀린 머리 칸이면 빌드 RED(${fx.cases.length}가지, 파일:줄을 알림), 바꾸지 않은 대조는 GREEN`, control.status === 0 && mdBad.length === 0,
+      `대조 exit=${control.status}${control.status ? " " + (control.stderr || "").trim().slice(0, 120) : ""} · RED ${fx.cases.length - mdBad.length}/${fx.cases.length}${mdBad.length ? " · 놓침 " + mdBad.slice(0, 4).join(" | ") : ""}`);
   }
 
   // 11) 무게
