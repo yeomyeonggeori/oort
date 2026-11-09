@@ -129,7 +129,7 @@ describe('seven-language catalog skeleton (#5589, ADR-0213 §2)', () => {
       expect(() => compileCatalogs(root)).not.toThrow();
       writeFeature(root, 'en-US', 'second.json', { 'second.surface.label': 'Second' });
       writeFeature(root, 'ko-KR', 'second.json', { 'second.surface.label': '둘째' });
-      expect(() => compileCatalogs(root)).toThrow(/mirror en-US/);
+      expect(() => compileCatalogs(root)).toThrow(/ja-JP: draft catalog files must mirror en-US feature files — add second\.json/);
       for (const locale of DRAFT_LOCALES) writeFeature(root, locale, 'second.json', {});
       expect(() => compileCatalogs(root)).not.toThrow();
       expect(removeLocale(root, 'es-419')).toBe(false);

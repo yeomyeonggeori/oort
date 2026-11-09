@@ -115,6 +115,9 @@ describe('direct-copy ratchet (#5589)', () => {
     expect(raise({file: A, issue: 5600, ko: 1, reason: 'track/engine 합친 뒤 장부 다시 만들기'})).toMatch(/regeneration/);
     expect(raise({file: A, issue: 5600, ko: 1, reason: 'regenerate ledger after merge'})).toMatch(/regeneration/);
     expect(raise({file: A, issue: 5600, reason: REASON})).toMatch(/positive/);
+    // Ordinary UI verbs are not regeneration notes.
+    expect(raise({file: A, issue: 5600, ko: 1, reason: '탭을 다시 세우는 안내 문구, P1 settings 키로 옮길 때까지 남겨요.'})).toBe('');
+    expect(raise({file: A, issue: 5600, ko: 1, reason: '병합 뒤 문구 수를 다시 세어 맞춤 (자동)'})).toMatch(/regeneration/);
   });
 
   it('raise adds one explicit entry sized to the excess; shrink only lowers and trims unused raises', () => {

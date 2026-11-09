@@ -52,7 +52,7 @@ const FORMAT_CALL = /(?:^|\.)formatMessage$/;
 const FRAME_CALL = /(?:^|\.)(?:useBlockedReason|useBlockedStale)$/;
 const SURFACE_CALL = /(?:^|\.)(?:alert|confirm|prompt|toast|setError|setStatus|announceForAccessibility)$/;
 // A raise reason must say why this copy cannot use a dictionary key yet, not that a tool ran.
-const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|세|센|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신/i;
+const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|셈|센다|센\s|세어|세기|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신/i;
 
 export function isProductSource(file) {
   return SOURCE.test(file) && !TEST_PATH.test(file);

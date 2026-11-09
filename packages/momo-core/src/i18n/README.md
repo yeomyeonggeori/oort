@@ -304,7 +304,13 @@ committed ledger** plus the branch's **new raise entries** (never from the worki
 conflict resolved with `--theirs` cannot smuggle counts in), then lowers it to the merged scan.
 Anything the scan has above that is copy neither side justified: `land` writes nothing and fails.
 A rename moves copy to a new path: `shrink` lowers the old path once the new path has a raise whose
-reason names the move. A raised `lowered` value inside the anchor cannot be seen without history;
+reason names the move. A new en-US feature file needs the same file (an empty `{}` is fine) in the
+five draft directories; `i18n:check` names the missing ones.
+
+Known limitation (from #4834, unchanged): the scanner recognises `formatMessage(...)` only by that
+callee name. An alias such as `const t = locale.service.formatMessage; t("settings.profile.languageLabel")`
+counts the key as one direct literal and skips the unknown-key check (web `LanguageRow.tsx` carries
+such references in its allowance); `cat` likewise misses concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen without history;
 `land` (and review of the ledger diff) catches it, because it never carries a branch's `lowered`.
 
 P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Re-anchoring is

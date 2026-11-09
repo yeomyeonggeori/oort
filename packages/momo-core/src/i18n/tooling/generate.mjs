@@ -83,8 +83,12 @@ export function compileCatalogs(root = join(HERE, 'catalogs')) {
     const catalog = {};
     const schema = {};
     const features = featuresOf(root, locale);
-    if (draft && JSON.stringify(features) !== JSON.stringify(featuresOf(root, 'en-US'))) {
-      throw new Error(`${locale}: draft catalog files must mirror en-US feature files`);
+    const english = featuresOf(root, 'en-US');
+    if (draft && JSON.stringify(features) !== JSON.stringify(english)) {
+      const missing = english.filter(f => !features.includes(f));
+      const extra = features.filter(f => !english.includes(f));
+      throw new Error(`${locale}: draft catalog files must mirror en-US feature files`
+        + `${missing.length ? ` — add ${missing.join(', ')} (an empty {} is fine)` : ''}${extra.length ? ` — remove ${extra.join(', ')}` : ''}`);
     }
     for (const feature of features) {
       const input = readCatalog(join(root, locale, feature));
