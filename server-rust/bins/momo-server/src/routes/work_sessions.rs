@@ -65,6 +65,9 @@ use momo_t3::work_control::{
     record_host_last_used_in_tx, resume_target_rejection_in_tx, spawn_call_in_tx,
     target_work_host_in_tx, NewWorkControl, ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
+use momo_t3::work_notice::{
+    is_failed_end, kill_requested_in_tx, post_session_notice_in_tx, WorkNotice,
+};
 use momo_t3::work_permission::{
     bridgeable_options, cancel_pending_for_session_in_tx, insert_permission_request_in_tx,
     withdraw_permission_request_in_tx, NewPermissionRequest,
@@ -1009,6 +1012,29 @@ async fn end_in_tx(
     // ADR-0188 D5: a request the ended session was waiting on can no longer
     // be answered by anyone (#3000).
     cancel_pending_for_session_in_tx(conn, workspace_id, session_id).await?;
+
+    // #5594 (ADR-0188 D8 「실패」, ADR-0220 P2 ④): the Mac ended the session with an
+    // error nobody asked for — one line in its thread, and the owner is pushed (the
+    // judgment's `work_notice` arm). A person's own end and a requested kill are not
+    // failures.
+    if let Some(exit_code) = exit_code {
+        let host_signed = signing_host_id.is_some();
+        if is_failed_end(host_signed, Some(exit_code), false)
+            && !kill_requested_in_tx(conn, workspace_id, session_id).await?
+        {
+            post_session_notice_in_tx(
+                conn,
+                workspace_id,
+                session_id,
+                &WorkNotice::Failed {
+                    session_id,
+                    owner_member_id: ended.member_id,
+                    exit_code,
+                },
+            )
+            .await?;
+        }
+    }
 
     let props = card_props(
         ended.id,

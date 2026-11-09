@@ -79,6 +79,7 @@ pub mod push_relay;
 pub mod run_event_retention_sweep;
 pub mod run_stall_sweep;
 pub mod share_retention_sweep;
+pub mod work_permission_sweep;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -477,6 +478,7 @@ impl Notifier {
                             terminal = candidate.is_terminal(),
                             settled = outcome.settled,
                             destroy_intended = outcome.destroy_intended,
+                            noticed = outcome.noticed,
                             orphan_source = candidate.orphan_source(),
                             grace_seconds = self.config.host_offline_grace_seconds,
                             "orphaned a stale work session"
@@ -691,6 +693,27 @@ impl Notifier {
                     approval_sweep::sweep_expired_approvals(
                         &approvals.pool,
                         approvals.config.claim_batch_size,
+                    )
+                },
+            )
+            .await;
+        });
+
+        // ---- loop 2b': the work-permission expiry sweep (#5594) ---------------
+        //
+        // Its own task for the reason 2b is: a T3 provider timing out must not stop a
+        // permission request's deadline. Runs regardless of `t3_enabled` — a member Mac's
+        // permission bridge is not a T3 feature. With no lapsed requests the cross-tenant
+        // read matches nothing and the loop costs one indexed poll.
+        let permissions = self.clone();
+        let work_permission_sweep_task = tokio::spawn(async move {
+            backoff::supervise(
+                "work permission expiry sweep",
+                permissions.config.sweep_interval,
+                || {
+                    work_permission_sweep::sweep_lapsed_work_permissions(
+                        &permissions.pool,
+                        permissions.config.claim_batch_size,
                     )
                 },
             )
@@ -1083,6 +1106,7 @@ impl Notifier {
         sweep_task.abort();
         lease_task.abort();
         approval_sweep_task.abort();
+        work_permission_sweep_task.abort();
         run_stall_sweep_task.abort();
         control_window_sweep_task.abort();
         if let Some(task) = share_retention_task {

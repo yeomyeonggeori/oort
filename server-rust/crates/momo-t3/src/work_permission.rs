@@ -15,7 +15,8 @@
 //! of a route remembering to check.
 
 use momo_db::sqlx;
-use momo_db::PgConnection;
+use momo_db::sqlx::Row;
+use momo_db::{PgConnection, PgPool};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -404,6 +405,77 @@ pub async fn withdraw_permission_request_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(result.rows_affected() == 1)
+}
+
+// ---------------------------------------------------------------------------
+// #5594 — the deadline, enforced (ADR-0188 D7 「짧은 TTL」, ADR-0220 P7 (a))
+// ---------------------------------------------------------------------------
+
+/// One request the expiry sweep closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LapsedPermissionRequest {
+    pub id: Uuid,
+    pub work_session_id: Uuid,
+    pub request_event_id: Uuid,
+}
+
+/// Workspaces holding a pending request past its deadline, across every tenant.
+///
+/// Unscoped for the reason [`crate::sweep::stale_session_candidates`] is: the sweep
+/// runs as the BYPASSRLS `momo_notifier` role, this read takes no lock, and the
+/// `workspace_id` it returns is what re-enters the tenant transaction.
+pub async fn workspaces_with_lapsed_permission_requests(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<Uuid>, T3Error> {
+    let workspaces: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT workspace_id FROM work_permission_request \
+          WHERE status = 'pending' AND expires_at <= clock_timestamp() \
+          LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(workspaces)
+}
+
+/// Close one workspace's pending requests whose deadline passed, oldest first, as
+/// `expired`. Row-locked (`SKIP LOCKED`): a decision landing at the same moment
+/// either wins its own `WHERE status = 'pending'` first or finds the row closed —
+/// 「첫 결정이 이긴다」 still holds. Returns only the rows this call moved.
+pub async fn expire_lapsed_permission_requests_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    limit: i64,
+) -> Result<Vec<LapsedPermissionRequest>, T3Error> {
+    let rows = sqlx::query(&format!(
+        "WITH due AS ( \
+           SELECT r.id FROM work_permission_request r \
+            WHERE r.workspace_id = $1 AND r.status = '{STATUS_PENDING}' \
+              AND r.expires_at <= clock_timestamp() \
+            ORDER BY r.expires_at, r.id \
+            LIMIT $2 \
+            FOR UPDATE SKIP LOCKED \
+         ) \
+         UPDATE work_permission_request r \
+            SET status = '{STATUS_EXPIRED}', updated_at = now() \
+           FROM due \
+          WHERE r.id = due.id AND r.workspace_id = $1 AND r.status = '{STATUS_PENDING}' \
+         RETURNING r.id, r.work_session_id, r.request_event_id"
+    ))
+    .bind(workspace_id)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(LapsedPermissionRequest {
+                id: row.try_get("id")?,
+                work_session_id: row.try_get("work_session_id")?,
+                request_event_id: row.try_get("request_event_id")?,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

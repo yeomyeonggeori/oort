@@ -171,8 +171,12 @@ pub fn category_for(
     reason: PushReason,
     decision: DecisionMode,
 ) -> PushCategory {
-    if matches!(props_kind, Some("resume_offer") | Some("work_session_idle"))
-        || reason == PushReason::WorkRunDone
+    // #5594: a work session's stop notice (`work_session_notice`) groups as work under either of its
+    // reasons (`resume_offer`, or `mention` for a failure): there is nothing to reply to or decide.
+    if matches!(
+        props_kind,
+        Some("resume_offer") | Some("work_session_idle") | Some("work_session_notice")
+    ) || reason == PushReason::WorkRunDone
     {
         return PushCategory::Work;
     }
@@ -715,5 +719,22 @@ mod tests {
             "judgment must never be able to select the test notification: a statement that \
              emitted it would send a stranger a test push"
         );
+    }
+
+    /// #5594: a work session's stop notice is pushed under `resume_offer` (the Mac went quiet) or
+    /// `mention` (a failure or an expiry); both group as work — no reply button on a line that is not
+    /// a conversation, and no approval button on a request that is already closed.
+    #[test]
+    fn a_work_session_notice_groups_as_work_under_both_of_its_reasons() {
+        for reason in [PushReason::ResumeOffer, PushReason::Mention] {
+            let category = category_for(
+                "system",
+                Some("work_session_notice"),
+                reason,
+                DecisionMode::Inline,
+            );
+            assert_eq!(category, PushCategory::Work, "{reason:?}");
+            assert!(!category.carries_approval_id());
+        }
     }
 }

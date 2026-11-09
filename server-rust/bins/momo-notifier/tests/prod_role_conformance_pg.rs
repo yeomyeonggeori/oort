@@ -22,7 +22,7 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`), or move a write back onto the notifier pool |
+//! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`, or #5594's `work_permission_request`), or move a write back onto the notifier pool |
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
@@ -64,8 +64,8 @@ use momo_notifier::inbox_retention_sweep::sweep_read_inbox_items;
 use momo_notifier::push::PushDrain;
 use momo_notifier::share_retention_sweep::sweep_expired_shares;
 use momo_notifier::{
-    approval_sweep, control_window_sweep, FixedAdapterResolver, Notifier, NotifierConfig,
-    PushConfig,
+    approval_sweep, control_window_sweep, work_permission_sweep, FixedAdapterResolver, Notifier,
+    NotifierConfig, PushConfig,
 };
 use momo_outbox::{emit_push_system, PushSystemReason};
 use momo_push::{
@@ -508,6 +508,84 @@ async fn seed_work(su: &PgPool) {
     .execute(su)
     .await
     .expect("attachment row");
+    seed_stop_notice_work(su, workspace, member, channel, host).await;
+}
+
+/// #5594: a member Mac that went quiet under a running session that waits on a permission
+/// request (the tier sweep orphans it, cancels the request and writes the line), and a running
+/// session on a live Mac whose request passed its deadline (the expiry sweep closes it and writes
+/// the line) — both as `momo_notifier`, whose grant on `work_permission_request` is table-scoped.
+async fn seed_stop_notice_work(
+    su: &PgPool,
+    workspace: Uuid,
+    member: Uuid,
+    channel: Uuid,
+    host: Uuid,
+) {
+    let quiet_host = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO work_host (id, workspace_id, scope, owner_member_id, type, display_name, \
+                                public_key, capabilities, last_seen_at) \
+         VALUES ($1, $2, 'member', $3, 'workd', 'mac', $4, '{}'::jsonb, \
+                 clock_timestamp() - interval '10 minutes')",
+    )
+    .bind(quiet_host)
+    .bind(workspace)
+    .bind(member)
+    .bind("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=")
+    .execute(su)
+    .await
+    .expect("quiet host");
+    for (seq, session_host, lapsed) in [(2_i64, quiet_host, false), (3_i64, host, true)] {
+        let root: Uuid = sqlx::query_scalar(
+            "INSERT INTO message (workspace_id, channel_id, seq, author_member_id, type, props, hlc_ts) \
+             VALUES ($1, $2, $3, $4, 'system', '{\"kind\":\"work_session\"}'::jsonb, $3) \
+             RETURNING id",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(seq)
+        .bind(member)
+        .fetch_one(su)
+        .await
+        .expect("stop-notice session root");
+        let session: Uuid = sqlx::query_scalar(
+            "INSERT INTO work_session (workspace_id, channel_id, member_id, host_id, \
+                                       root_message_id, tool, label) \
+             VALUES ($1, $2, $3, $4, $5, 'claude', 'dev') RETURNING id",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(member)
+        .bind(session_host)
+        .bind(root)
+        .fetch_one(su)
+        .await
+        .expect("stop-notice session");
+        sqlx::query(
+            "INSERT INTO work_permission_request \
+               (workspace_id, work_session_id, host_id, channel_id, request_event_id, options, \
+                expires_at) \
+             VALUES ($1, $2, $3, $4, $5, \
+                     '[{\"option_id\":\"a\",\"kind\":\"allow_once\"}]'::jsonb, \
+                     CASE WHEN $6 THEN clock_timestamp() - interval '1 second' \
+                          ELSE clock_timestamp() + interval '10 minutes' END)",
+        )
+        .bind(workspace)
+        .bind(session)
+        .bind(session_host)
+        .bind(channel)
+        .bind(Uuid::new_v4())
+        .bind(lapsed)
+        .execute(su)
+        .await
+        .expect("stop-notice permission request");
+    }
+    sqlx::query("UPDATE channel_seq SET last_seq = 3 WHERE channel_id = $1")
+        .bind(channel)
+        .execute(su)
+        .await
+        .expect("channel_seq past the seeded roots");
 }
 
 #[tokio::test]
@@ -553,6 +631,12 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "control window sweep",
         "momo_notifier",
         control_window_sweep::sweep_lapsed_control_windows(&notifier, 32).await,
+    );
+    // loop 2b' — the work-permission expiry sweep (#5594).
+    report.check(
+        "work permission expiry sweep",
+        "momo_notifier",
+        work_permission_sweep::sweep_lapsed_work_permissions(&notifier, 32).await,
     );
     // loop 2c' — share retention.
     report.check(
@@ -629,6 +713,21 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         .fetch_one(&db.su)
         .await
         .expect("count shares");
+    // #5594: both stop notices were written as momo_notifier (the tier sweep swallows a
+    // per-candidate error into its stats, so the rows are the proof), and the two permission
+    // requests moved: the lost session's cancelled, the lapsed one expired.
+    let stop_notices: Vec<String> = sqlx::query_scalar(
+        "SELECT props->>'code' FROM message WHERE props->>'kind' = 'work_session_notice' \
+          ORDER BY props->>'code'",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("read stop notices");
+    let request_states: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM work_permission_request ORDER BY status")
+            .fetch_all(&db.su)
+            .await
+            .expect("read permission requests");
     let unreclaimed: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM member_avatar_media WHERE drive_reclaimed_at IS NULL",
     )
@@ -689,6 +788,16 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     assert_eq!(
         shares, 0,
         "the expired share payload was deleted by the sweep"
+    );
+    assert_eq!(
+        stop_notices,
+        vec!["host_lost".to_string(), "permission_expired".to_string()],
+        "#5594: both stop notices are written by the production notifier role"
+    );
+    assert_eq!(
+        request_states,
+        vec!["cancelled".to_string(), "expired".to_string()],
+        "#5594: the notifier role moves work_permission_request (SELECT, UPDATE grant)"
     );
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");
     assert_eq!(

@@ -88,6 +88,31 @@ SCAN_SCOPE = [
         "why": "lib.rs:68 renewable_lease_candidates (SELECT only; writes nothing)",
     },
     {
+        # #5594: the tier sweep cancels a lost session's pending permission requests
+        # (sweep.rs converge_in_tx), and the work-permission expiry sweep reads the lapsed
+        # ones across tenants and closes them (work_permission_sweep.rs).
+        "path": "server-rust/crates/momo-t3/src/work_permission.rs",
+        "mode": "symbols",
+        "symbols": [
+            "cancel_pending_for_session_in_tx",
+            "workspaces_with_lapsed_permission_requests",
+            "expire_lapsed_permission_requests_in_tx",
+        ],
+        "why": "sweep.rs converge_in_tx; work_permission_sweep.rs sweep_lapsed_work_permissions",
+    },
+    {
+        # #5594: the stop notice's session site (work_session SELECT) and its write through
+        # send_message_in_tx (scanned below), from both sweeps.
+        "path": "server-rust/crates/momo-t3/src/work_notice.rs",
+        "mode": "symbols",
+        "symbols": [
+            "session_notice_site_in_tx",
+            "post_work_notice_in_tx",
+            "post_session_notice_in_tx",
+        ],
+        "why": "sweep.rs converge_in_tx HostLost; work_permission_sweep.rs PermissionExpired",
+    },
+    {
         "path": "server-rust/crates/momo-t3/src/lifecycle.rs",
         "mode": "symbols",
         "symbols": [

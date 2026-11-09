@@ -110,6 +110,9 @@ use momo_t3::work_control::{
     REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED, REFUSAL_REMOTE_HOST_KILL_ONLY, STATUS_APPROVED,
     STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
 };
+use momo_t3::work_notice::{
+    post_work_notice_in_tx, session_notice_site_in_tx, NoticeSite, SpawnRefusalReason, WorkNotice,
+};
 use momo_t3::{
     active_control_window_in_tx, expire_lapsed_control_windows_in_tx, work_tool_is_enabled_in_tx,
     T3Error,
@@ -1042,6 +1045,11 @@ async fn acknowledge_in_tx(
             "work control state changed; retry",
         )));
     };
+    // #5594 — the Mac refused to start the work. The place that called it gets one
+    // line, in closed words: the host's own label is mapped, never stored.
+    if settled.kind == KIND_SPAWN && !ok {
+        post_spawn_refusal_in_tx(conn, workspace_id, &settled, error_label).await?;
+    }
     emit_control_event(
         conn,
         workspace_id,
@@ -1052,6 +1060,77 @@ async fn acknowledge_in_tx(
     )
     .await?;
     Ok(Ok(settled))
+}
+
+/// #5594 (ADR-0220 P2 ③ 막힘, P3 (b)) — a refused spawn's line, at the place it was called:
+///
+/// 1. a spawn that names a session (a resume): that session's thread, in its voice;
+/// 2. a signed new-work spawn: the thread the owner called from — the thread the
+///    statement names, else the message it was called from (which becomes the thread);
+/// 3. a spawn decided on an approval card: that card's thread;
+/// 4. otherwise the room itself.
+///
+/// The speaker is the personal agent the owner called (ADR-0198 T5 확정 6), else the
+/// person who asked. The body and props carry one of [`SpawnRefusalReason`]'s words.
+/// No push: the judgment's `work_session_notice` arm selects nobody for this code.
+async fn post_spawn_refusal_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    control: &WorkControlRow,
+    error_label: Option<&str>,
+) -> Result<(), T3Error> {
+    let notice = WorkNotice::SpawnRefused {
+        control_id: control.id,
+        owner_member_id: control.requester_member_id,
+        session_id: control.session_id,
+        reason: SpawnRefusalReason::from_host_label(error_label),
+    };
+    let session_site = match control.session_id {
+        Some(session_id) => session_notice_site_in_tx(conn, workspace_id, session_id)
+            .await?
+            .map(|found| found.site),
+        None => None,
+    };
+    let site = match session_site {
+        Some(site) => site,
+        None => {
+            let human = control.human.as_ref();
+            let called_from = human
+                .and_then(|human| human.spawn_thread_root_id.or(human.spawn_origin_message_id));
+            let root_id = match (called_from, control.approval_message_id) {
+                (Some(root), _) => Some(root),
+                (None, Some(card)) => card_thread_root_in_tx(conn, workspace_id, card).await?,
+                (None, None) => None,
+            };
+            NoticeSite {
+                channel_id: control.channel_id,
+                root_id,
+                author_member_id: human
+                    .and_then(|human| human.spawn_agent_member_id)
+                    .unwrap_or(control.requester_member_id),
+            }
+        }
+    };
+    post_work_notice_in_tx(conn, workspace_id, site, &notice).await?;
+    Ok(())
+}
+
+/// The thread an approval card stands in: its root, or the card itself when it is
+/// top-level.
+async fn card_thread_root_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    card_message_id: Uuid,
+) -> Result<Option<Uuid>, T3Error> {
+    let root: Option<Uuid> = momo_db::sqlx::query_scalar(
+        "SELECT COALESCE(root_id, id) FROM message WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(card_message_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(momo_db::DbError::from)?;
+    Ok(root)
 }
 
 // ---------------------------------------------------------------------------

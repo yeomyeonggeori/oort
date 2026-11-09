@@ -952,6 +952,13 @@ BEGIN
   IF to_regclass('public.work_control') IS NOT NULL THEN
     GRANT SELECT ON TABLE work_control TO momo_notifier;
   END IF;
+  -- #5594: the work-permission expiry sweep closes a lapsed request (`pending -> expired`,
+  -- `expire_lapsed_permission_requests_in_tx`) and the tier sweep cancels the requests a lost
+  -- session was waiting on (`cancel_pending_for_session_in_tx`, ADR-0188 D5). SELECT for the
+  -- cross-tenant read and the UPDATEs' WHERE; no INSERT, no DELETE.
+  IF to_regclass('public.work_permission_request') IS NOT NULL THEN
+    GRANT SELECT, UPDATE ON TABLE work_permission_request TO momo_notifier;
+  END IF;
   IF to_regclass('public.work_host') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE work_host TO momo_notifier;
   END IF;
