@@ -1,5 +1,6 @@
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
+import { ConnectionDiagSection } from "@/features/settings/ConnectionDiagSection";
 import { StatusChip } from "@/features/settings/SettingsFields";
 import { SettingsRow } from "@/features/settings/shell/SettingsRow";
 import { SettingsSection } from "@/features/settings/shell/SettingsSection";
@@ -180,6 +181,8 @@ export function UpdateSection() {
           </Button>
         </SettingsRow>
       </SettingsSection>
+      {/* 연결 기록(#5587): 이 기기 안에만 남는 연결 판정 전이. 버그 보고가 닿는 이 페이지에 둔다(폰은 설정 > 정보). */}
+      <ConnectionDiagSection appVersion={version} />
     </div>
   );
 }
