@@ -55,6 +55,23 @@ function transientImageFailure(error: unknown): boolean {
 /** 지나가는 실패 뒤 다시 받기까지 기다리는 시간: 1.5초부터 두 배씩, 30초에서 멈춘다(연결이 오래 끊겨도 요청이 쌓이지 않는다). */
 const RETRY_FIRST_MS = 1_500;
 const RETRY_MAX_MS = 30_000;
+/**
+ * 스스로 다시 받는 횟수의 끝(#5575 M2). 1.5 · 3 · 6초 뒤 세 번 다시 받아도 지나가는 실패가 이어지면 더 기다리지 않고 칸 안에 실패를 말한다
+ * (이름 + 큰 칸이면 「그림 다시 불러오기」). 끝이 없으면 서버가 같은 그림에 계속 500을 내는 **영구** 실패도 영원히 빈 칸이었다.
+ */
+const RETRY_LIMIT = 3;
+/**
+ * 빈 칸이 이만큼 이어지면 칸 안에 이름을 세운다(#5575 M1). 첫 자동 재시도(1.5초)가 한 번 돌고 그 받기가 끝날 시간까지 기다린 값이라, 재연결마다
+ * 그림을 전부 걷고 다시 받는 보통의 흔들림(`resync` → 다시 받기, 게이트의 오프라인 흔들림 1.3초)에서는 이름이 깜빡이지 않고, 정말로 끊긴 동안에는
+ * 3초 안에 「여기 무슨 이모티콘이 있었는지」가 보인다. 칸의 크기는 그대로다(글자는 칸 위에 얹는다).
+ */
+const LABEL_DELAY_MS = 2 * RETRY_FIRST_MS;
+/**
+ * 이름 글자가 읽히는 칸과 그 글자의 맞춤. 큰 칸(200×150, 동작 줄이기 thumb 128×96)은 한 줄로 자르고, 고르개·미리 보기 칸(64×48)은 두 줄까지 아무 데서나
+ * 끊는다(이름은 띄어쓰기 없는 낱말이다). 여기 없는 칸, 곧 글 사이(20×15)와 반응 칩(20×20)은 글자 두세 개도 안 들어가 이름이 「:b…」로 잘리므로 같은 칸에
+ * 정지 자리표시(옅은 그릇 + 테두리, `expressions.css`)만 세우고 이름은 `title` 에 둔다. 낭독 이름(`aria-label`)은 어느 칸이든 칸(canvas)이 늘 그대로 진다.
+ */
+const LABEL_FIT: Partial<Record<string, string>> = { large: "min-w-0 truncate", medium: "line-clamp-2 break-all" };
 
 /** All images enter through the authenticated transport, including draft previews. */
 export function ExpressionImage({ item, size = "inline", still = false, onReady }: {
@@ -79,7 +96,8 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   // (옛 판은 key 를 바꿔 <img> 를 새로 만들었고, 그 사이에 글자 자리표시가 서서 칸이 비거나 높이가 바뀌었다. 이 판은 <img> 를 만들지 않는다.)
   const [shown, setShown] = useState<{ key: string; epoch: number; owner: string; src: string } | null>(null);
   // 받기에 실패한 그림의 key 와, 그 실패가 지나가는 것인지(`transientImageFailure`). 지나가는 실패는 같은 크기의 빈 칸으로 기다렸다 다시 받는다.
-  const [failed, setFailed] = useState<{ key: string; transient: boolean } | null>(null);
+  // `exhausted` 는 지나가는 실패가 다시 받기 `RETRY_LIMIT` 번 뒤에도 이어진 것이다: 더 기다리지 않고 칸 안에 실패를 말한다(M2).
+  const [failed, setFailed] = useState<{ key: string; transient: boolean; exhausted: boolean } | null>(null);
   const retries = useRef(0);
   // 그려진 <img>의 key. load는 보임보다 먼저 올 수 있고, 동작 줄이기에서는 보임이 바뀌어도 그림 주소(key)가 같아
   // <img>가 다시 만들어지지 않으므로 load가 다시 오지 않는다. 그래서 load는 기록만 하고 신호는 아래 효과가 낸다.
@@ -128,14 +146,20 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
         setShown({ key, epoch, owner, src });
         setFailed((prior) => prior?.key === key ? null : prior);
       },
-      (error: unknown) => { if (live) setFailed({ key, transient: transientImageFailure(error) }); },
+      (error: unknown) => {
+        if (!live) return;
+        const transient = transientImageFailure(error);
+        // 다시 받기를 다 쓴 칸은 그대로 실패로 남는다: 연결이 돌아오거나(`offline` 바뀜) 세대·보임이 바뀌어 위 효과가 다시 받은 한 번이 또 실패해도
+        // 새로 세 번을 기다리지 않는다. 횟수는 받기에 성공하거나 사람이 「그림 다시 불러오기」를 눌러야 0으로 돌아간다.
+        setFailed({ key, transient, exhausted: transient && retries.current >= RETRY_LIMIT });
+      },
     );
     return () => { live = false; };
   }, [store, path, key, offline, epoch, owner, animated, endless, replay, heldKey]);
   // 지나가는 실패(연결 끊김 · 서버 재시작 · 세대 교체 경합): 빈 칸으로 기다렸다가 같은 그림을 다시 받는다. 오프라인 동안은 기다리지 않는다 —
-  // 돌아오면 위 효과가 `offline` 바뀜으로 다시 받는다.
+  // 돌아오면 위 효과가 `offline` 바뀜으로 다시 받는다. 다시 받기를 다 쓴 실패(`exhausted`)는 더 기다리지 않는다.
   useEffect(() => {
-    if (failed === null || !failed.transient || failed.key !== key || offline) return;
+    if (failed === null || !failed.transient || failed.exhausted || failed.key !== key || offline) return;
     const timer = window.setTimeout(() => {
       retries.current += 1;
       setAttempt((value) => value + 1);
@@ -177,20 +201,44 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   const placeholder = path !== null && own !== undefined && broken !== key && broken !== shown?.key;
   const reserved = slot ?? (own ? { width: own.width, height: own.height } : null);
   const alt = expressionAltText(item as Expression);
+  // 같은 크기의 빈 칸이 서 있는가(받는 중 · 오프라인 · 세대 교체 · 지나가는 실패 · 다시 받기를 다 쓴 실패).
+  const waiting = current === null && placeholder && reserved !== null;
+  // 빈 칸이 `LABEL_DELAY_MS` 넘게 이어졌는가(M1). 짧은 상태는 투명한 빈 칸 그대로다: 재연결마다 모든 칸이 회색으로 깜빡이지 않는다.
+  const [lingering, setLingering] = useState(false);
+  useEffect(() => {
+    if (!waiting) { setLingering(false); return undefined; }
+    const timer = window.setTimeout(() => setLingering(true), LABEL_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [waiting]);
+  // 다시 받기를 다 쓴 실패는 늦추지 않고 바로 말한다(M2).
+  const exhausted = waiting && failed !== null && failed.exhausted && failed.key === key;
+  const labelled = waiting && (lingering || exhausted);
+  // 이름 글자가 읽히는 칸이면 `:이름:` 을 칸 위에 얹는다(`LABEL_FIT`). 작은 칸은 정지 자리표시와 `title` 뿐이다.
+  const labelFit = LABEL_FIT[size];
+  const label = labelled && labelFit !== undefined ? (
+    <span aria-hidden="true" data-expression-label="" className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden px-1 text-center text-meta text-ink-muted">
+      <span className={labelFit}>{`:${item.name}:`}</span>
+    </span>
+  ) : null;
+  // 큰 칸의 「그림 다시 불러오기」: 정말로 깨진 그림(글자 옆)과 다시 받기를 다 쓴 실패(같은 크기 칸 옆). 오프라인에는 누를 수 없으니 세우지 않는다.
+  const offerRetry = size === "large" && !offline && (broken === key || exhausted);
   const image = current ? <img src={current.src} alt={alt} className="expression-image" data-size={size} width={slot?.width} height={slot?.height}
     onLoad={onReady && !still ? () => setPainted(current.key) : undefined}
     onError={() => {
       // 그려지다 깨진 그림도 같다: 지우기가 먼저다(위 효과의 주석).
       if (store && path && heldKey) { kept.current.bytes.delete(heldKey); store.discardImage(path); }
-      setFailed({ key: current.key, transient: false });
+      setFailed({ key: current.key, transient: false, exhausted: false });
     }} />
     : placeholder && reserved ? <canvas role="img" aria-label={alt} className="expression-image" data-size={size} data-expression-placeholder="" width={reserved.width} height={reserved.height} /> : <span>{`:${item.name}:`}</span>;
-  return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}>
-    {image}
+  return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}
+    data-expression-lingering={labelled ? "" : undefined} data-expression-failed={exhausted ? "" : undefined}
+    title={labelled && labelFit === undefined ? `:${item.name}:` : undefined}>
+    {/* 이름 글자는 칸 위에 얹는다(절대 위치). 칸 옆에 단추가 서면 바깥 상자가 단추만큼 넓어지므로, 그때는 칸과 글자를 칸 크기의 상자로 한 번 감싼다. */}
+    {label !== null && offerRetry ? <span className="relative inline-block align-middle">{image}{label}</span> : <>{image}{label}</>}
     {/* 멈춘 그림 위에 덮는 단추: <img> 를 단추 안으로 옮기면 노드가 새로 만들어져 깜빡이므로, 그림은 그대로 두고 단추만 얹는다. */}
     {stopped && !still && !reduce && !endless && (
       <button type="button" onClick={() => { setStopped(false); setReplay((value) => value + 1); }} aria-label={`${item.displayName} 다시 재생`} className="absolute inset-0 rounded-sm press focus-visible:focus-ring" />
     )}
-    {size === "large" && broken === key && !offline && <button type="button" onClick={() => { setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}
+    {offerRetry && <button type="button" onClick={() => { retries.current = 0; setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}
   </span>;
 }

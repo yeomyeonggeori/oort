@@ -336,3 +336,133 @@ describe("ExpressionImage: 반응 칩의 GIF 는 계속 움직인다 (#5504)", (
     await sight.report(true); await settle(); expect(image(chip.container)).toBe(node); expect(node.src).toBe(LOOPING_GIF);
   });
 });
+
+// #5575 M1·M2 (design-review 1회차): 짧은 빈 칸은 투명하게 두되, 오래 이어지는 빈 칸(오프라인 몇 분 · 그림 길이 계속 실패)이 「빈 메시지 · 숫자만 남은 칩 ·
+// 빈 격자」로 읽히지 않게 한다. 이 시험이 재는 것: ① 3초 전에는 투명한 빈 칸, 3초 뒤에는 **같은 칸** 안에 `:이름:`(칸 노드·크기·낭독 이름 그대로),
+// ② 지나가는 실패의 자동 다시 받기는 세 번(1.5·3·6초)에서 끝나고 칸 안에 실패를 말한다(큰 칸은 「그림 다시 불러오기」), ③ 작은 칸(반응 · 글 사이)은
+// 이름 글자 대신 정지 자리표시와 `title` 이다.
+describe("ExpressionImage: 오래 이어지는 빈 칸과 다시 받기의 끝 (#5575 M1·M2)", () => {
+  /** `ExpressionImage` 의 `LABEL_DELAY_MS`(첫 자동 재시도 1.5초의 두 배). */
+  const LABEL_DELAY_MS = 3_000;
+  const labelOf = (root: HTMLElement) => root.querySelector("[data-expression-label]");
+  const rootOf = (root: HTMLElement) => root.querySelector<HTMLElement>("[data-expression-name]")!;
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  const failing = () => { throw new TypeError("Load failed"); };
+  /** 이 변형(`size=`)의 그림 읽기 수. 처음에는 화면 밖(thumb)으로 한 번 읽고 보이면 큰 그림을 읽으므로 변형별로 센다. */
+  const reads = (transport: { image: { mock: { calls: unknown[][] } } }, variant: string) => transport.image.mock.calls.filter(([path]) => String(path).includes(`size=${variant}`)).length;
+
+  it("오프라인이 3초를 넘기면 같은 크기 칸 안에 :이름: 이 서고, 그 전에는 투명한 빈 칸이며, 돌아오면 걷힌다 (M1)", async () => {
+    const { store } = build();
+    const view = render(wrapper(store, <ExpressionImage item={gifItem} size="large" />));
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
+    vi.useFakeTimers();
+    await act(async () => { store.setOffline(true); });
+    const box = view.container.querySelector("canvas")!;
+    const root = rootOf(view.container);
+    await advance(LABEL_DELAY_MS - 100);
+    // 짧은 상태: 글자도 그릇도 없다(재연결마다 깜빡이지 않는다).
+    expect(labelOf(view.container)).toBeNull();
+    expect(root.hasAttribute("data-expression-lingering")).toBe(false);
+    expect(view.container.textContent).toBe("");
+    await advance(200);
+    const label = labelOf(view.container)!;
+    expect(label.textContent).toBe(`:${gifItem.name}:`);
+    expect(label.getAttribute("aria-hidden")).toBe("true");
+    expect(root.hasAttribute("data-expression-lingering")).toBe(true);
+    expect(root.hasAttribute("data-expression-failed")).toBe(false);
+    // 칸은 같은 노드·같은 크기이고 낭독 이름도 그대로다: 글자는 칸 위에 얹힐 뿐이다. 오프라인에는 누를 단추도 없다.
+    expect(view.container.querySelector("canvas")).toBe(box);
+    expect([box.getAttribute("width"), box.getAttribute("height")]).toEqual(["200", "150"]);
+    expect(box.getAttribute("aria-label")).toBe(expressionAltText(gifItem));
+    expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
+    // 돌아오면 그림이 다시 서고 이름은 걷힌다.
+    vi.useRealTimers();
+    await act(async () => { store.setOffline(false); });
+    await waitFor(() => expect(image(view.container)?.src).toBe(GIF));
+    expect(labelOf(view.container)).toBeNull();
+    expect(root.hasAttribute("data-expression-lingering")).toBe(false);
+  });
+
+  it("지나가는 실패가 세 번 다시 받아도(1.5·3·6초) 이어지면 멈추고, 같은 크기 칸 안에 이름과 「그림 다시 불러오기」를 바로 낸다 (M2)", async () => {
+    vi.useFakeTimers();
+    const { store, transport } = build();
+    transport.image.mockImplementation(async () => failing());
+    const view = render(wrapper(store, <ExpressionImage item={stillItem} size="large" />));
+    await advance(0);
+    expect(reads(transport, "large")).toBe(1);
+    const root = rootOf(view.container);
+    await advance(1_500);
+    expect(reads(transport, "large")).toBe(2);
+    await advance(3_000);
+    expect(reads(transport, "large")).toBe(3);
+    // 아직 세 번째 다시 받기 전: 실패를 말하지 않는다(3초가 지나 칸 안 이름만 서 있다).
+    expect(root.hasAttribute("data-expression-failed")).toBe(false);
+    expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
+    await advance(6_000);
+    expect(reads(transport, "large")).toBe(4);
+    expect(root.hasAttribute("data-expression-failed")).toBe(true);
+    expect(labelOf(view.container)?.textContent).toBe(`:${stillItem.name}:`);
+    // 실패도 같은 크기 칸 안이다: 글자 한 줄로 바뀌지 않는다(칸은 256×256 을 200 안에 맞춘 200×200).
+    const box = view.container.querySelector("canvas")!;
+    expect([box.getAttribute("width"), box.getAttribute("height")]).toEqual(["200", "200"]);
+    expect(box.getAttribute("role")).toBe("img");
+    const retry = view.getByRole("button", { name: "그림 다시 불러오기" });
+    // 끝난 뒤에는 스스로 받지 않는다.
+    await advance(120_000);
+    expect(reads(transport, "large")).toBe(4);
+    // 사람이 누르면 횟수가 0으로 돌아가고 다시 받는다.
+    transport.image.mockImplementation(async (path: string) => path.includes("size=thumb") ? THUMB : STILL);
+    fireEvent.click(retry);
+    await advance(0);
+    expect(image(view.container)?.src).toBe(STILL);
+    expect(labelOf(view.container)).toBeNull();
+    expect(root.hasAttribute("data-expression-failed")).toBe(false);
+    expect(view.queryByRole("button", { name: "그림 다시 불러오기" })).toBeNull();
+  });
+
+  it("고르개 칸(가운데 크기)도 다시 받기를 다 쓰면 칸 안에 이름만 남기고, 연결이 돌아와 한 번 더 실패해도 새로 세 번을 기다리지 않는다 (M2)", async () => {
+    vi.useFakeTimers();
+    const { store, transport } = build();
+    transport.image.mockImplementation(async () => failing());
+    const view = render(wrapper(store, <ExpressionImage item={stillItem} size="medium" still />));
+    await advance(0);
+    await advance(1_500);
+    await advance(3_000);
+    await advance(6_000);
+    expect(reads(transport, "thumb")).toBe(4);
+    const root = rootOf(view.container);
+    expect(root.hasAttribute("data-expression-failed")).toBe(true);
+    expect(labelOf(view.container)?.textContent).toBe(`:${stillItem.name}:`);
+    // 고르개 칸에는 다시 불러오기 단추가 없다(칸 전체가 고르는 단추다).
+    expect(view.queryByRole("button")).toBeNull();
+    // 오프라인 → 온라인: 효과가 한 번 더 받는다. 또 실패하면 곧장 실패 칸이다.
+    await act(async () => { store.setOffline(true); });
+    await act(async () => { store.setOffline(false); });
+    await advance(0);
+    expect(reads(transport, "thumb")).toBe(5);
+    expect(root.hasAttribute("data-expression-failed")).toBe(true);
+    await advance(60_000);
+    expect(reads(transport, "thumb")).toBe(5);
+  });
+
+  it("반응 칩·글 사이의 작은 칸은 이름 글자 대신 같은 칸의 정지 자리표시와 title 이다 (M1)", async () => {
+    const { store } = build();
+    const view = render(wrapper(store, <ExpressionImage item={stillItem} size="reaction" />));
+    await waitFor(() => expect(image(view.container)).not.toBeNull());
+    vi.useFakeTimers();
+    await act(async () => { store.setOffline(true); });
+    const root = rootOf(view.container);
+    await advance(LABEL_DELAY_MS - 100);
+    expect(root.hasAttribute("data-expression-lingering")).toBe(false);
+    expect(root.hasAttribute("title")).toBe(false);
+    await advance(200);
+    // 20px 칸에는 글자 두세 개도 안 든다: 칸(canvas) 자신이 옅은 그릇과 테두리를 입고(`expressions.css`), 이름은 title·낭독 이름에 있다.
+    expect(root.hasAttribute("data-expression-lingering")).toBe(true);
+    expect(root.getAttribute("title")).toBe(`:${stillItem.name}:`);
+    expect(labelOf(view.container)).toBeNull();
+    expect(view.container.textContent).toBe("");
+    const box = view.container.querySelector("canvas")!;
+    expect(box.getAttribute("role")).toBe("img");
+    expect(box.getAttribute("aria-label")).toBe(expressionAltText(stillItem));
+  });
+});
