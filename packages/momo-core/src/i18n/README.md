@@ -304,11 +304,19 @@ explicit raise"; lower fails with "run `shrink`", so a later addition cannot spe
 `check` reads no git and runs in each tree's `npm test` (core `direct-copy.test.ts`, web
 `src/testing/directCopy.test.ts`, mobile `__tests__/directCopy.test.ts`) and in `i18n:check`.
 
+PR CI's core job also compares the ledger with the PR base (`compare-base`, after fetching that one
+commit): the anchor, `anchorHead` and `ANCHOR_SEAL` must equal the base's unless the PR carries the
+`policy-change-approved` label (a re-anchor edits `direct-copy.mjs`, a policy path, so it needs that
+approval anyway), and no file's `(lowered ?? anchor)` may go above the base's. It prints the new raises
+file by file. `land --check` is not run in CI: CI runs on the PR merge ref, where an auto-merged ledger
+would differ byte for byte without anything being wrong.
+
 ```sh
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs check            # core, web, mobile
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink           # lower only; refuses if anything went up
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs raise <file> --issue <N> --reason "<why it waits for P1>"
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs land --base origin/<track> --ours <branch tip> [--check]
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs land --base origin/<track> --ours <branch tip> [--check] [--allow-many-raises]
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs compare-base <PR base commit>  # PR CI; base must be fetched
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs report           # totals per surface (scan and anchor)
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs anchor <commit>  # planner only: prints a new ledger + seal
 ```
@@ -317,6 +325,22 @@ node packages/momo-core/src/i18n/tooling/direct-copy.mjs anchor <commit>  # plan
 committed ledger** plus the branch's **new raise entries** (never from the working copy, so a
 conflict resolved with `--theirs` cannot smuggle counts in), then lowers it to the merged scan.
 Anything the scan has above that is copy neither side justified: `land` writes nothing and fails.
+It also fails when a scanned file has unstaged changes or is untracked (it counts the working copy,
+which must be what will be committed; a staged merge resolution and generated output are fine), and
+when one landing would carry more than 10 new raises (`--allow-many-raises` is an explicit decision,
+listed in the PR body). It prints every raise it carries.
+
+**After `land` stops a landing** (copy neither side justified): in the chain's merged state — the
+landing worktree after it merged the track — move the copy to a dictionary key or add the raise,
+**commit**, then run the chain again. `land` reads raises from the committed branch tip (`--ours`),
+never from the working copy, so an uncommitted raise is ignored (it prints a note). A branch made
+before #5589 has no `raise` command; run it from the merged state, where the v2 tool is present.
+
+What the ratchet guarantees: **growth is not blocked; it shows up file by file in the ledger diff.**
+Every increase is a raise naming one file, a 4–5 digit issue and a reason (a reason about the ledger,
+a merge or a sync is refused), PR CI prints the new raises, and `land` prints them and stops past 10.
+Whether an issue number exists cannot be checked offline; reviewers read the raises in the diff.
+
 A rename moves copy to a new path: `shrink` lowers the old path once the new path has a raise whose
 reason names the move. A new en-US feature file needs the same file (an empty `{}` is fine) in the
 five draft directories; `i18n:check` names the missing ones.
@@ -324,8 +348,16 @@ five draft directories; `i18n:check` names the missing ones.
 Known limitation (from #4834): the scanner recognises `formatMessage(...)` only by that callee name.
 An alias such as `const t = locale.service.formatMessage; t("settings.profile.languageLabel")` is not
 counted (the key is a call argument), but it also skips the unknown-key check; `cat` likewise misses
-concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen without history;
-`land` (and review of the ledger diff) catches it, because it never carries a branch's `lowered`.
+concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen from the
+tree alone; PR CI's `compare-base` refuses it against the base, and `land` never carries a branch's
+`lowered`.
+
+Known limitation (#5598 review, M3): `cat` catches only direct joins — `formatMessage(...)` in a
+template with other text, `formatMessage(...) + …`, `[formatMessage(...), …].join(…)`. It misses a
+message kept in a variable and joined later, JSX siblings (`{formatMessage(k)} {n}`), `.concat()`,
+`String(formatMessage(k)) + n`, aliases, and two messages side by side in JSX. The counted places are a
+lower bound. **P1 review checklist item:** no sentence is assembled from a message and other text or
+another message, however it is joined; it becomes one key with arguments.
 
 P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Re-anchoring is
 for the planner at a stack boundary (to fold reviewed raises and lock in reductions), never to absorb
