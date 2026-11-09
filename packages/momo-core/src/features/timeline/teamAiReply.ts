@@ -7,7 +7,8 @@
 //
 //   team_ai_model: {model, wire}                실제로 답한 모델 id 와 와이어(#3894 서버가 쓰는 모양,
 //                                               #5600 에서 코어가 맞췄다). 칩은 `model` 에서 이름을 만든다.
-//                                               옛 이름 `model_label`(문자열)은 이 객체가 없을 때만 읽는다.
+//                                               옛 이름 `model_label`(문자열)은 읽지 않는다: 서버가 쓴 적이
+//                                               없고, 평면 글자 props 라 누구나 쓸 수 있다(#5600).
 //   tools_used:    [{name, channel?}]           부른 읽기 도구, 부른 순서. `name` 은 H4-1의 도구
 //                                               이름 그대로, `web_search` 는 H5의 검색. `channel` 은
 //                                               `read_channel` 의 채널 이름(`#` 없이). 회신 채널
@@ -91,25 +92,21 @@ const ADDRESS_OR_KEY = /:\/\/|[A-Za-z0-9]{32,}/;
 /**
  * 「팀 AI · 모델」 칩의 이름(#5600). 총 파싱, 던지지 않는다. 이름을 만들 수 없으면 null(칩 없음).
  *
- * 1. 서버(`team_ai.rs` `answer_props`)가 쓰는 칸은 `team_ai_model: {model, wire}` **객체**다. 메시지
- *    보내기의 props 는 글자→글자 평면 표라서 사람·웹훅은 이 객체를 만들 수 없다: 서버가 확인한
- *    값이다(ADR-0220 「서버 사실」 — 「에이전트 보고」 표지를 붙이지 않는다). 객체가 있으면 이것만
- *    본다. 값이 칩에 맞지 않아도 옛 키로 내려가지 않는다.
- * 2. 객체가 없을 때만 옛 문자열 `model_label` 을 읽는다(호환).
+ * 1. 칩은 서버(`team_ai.rs` `answer_props`)가 쓰는 `team_ai_model: {model, wire}` **객체**에서만 선다.
+ *    메시지 보내기의 props 는 글자→글자 평면 표라서 사람·웹훅은 이 객체를 만들 수 없다: 서버가
+ *    확인한 값이다(ADR-0220 「서버 사실」 — 「에이전트 보고」 표지를 붙이지 않는다).
+ * 2. 옛 문자열 `model_label` 은 읽지 않는다. 서버가 쓴 적이 없어 호환할 행이 없고, 누구나 REST 로
+ *    쓸 수 있어 남겨 두면 칩을 위조하는 길만 된다. 글자로 온 `team_ai_model` 도 객체가 아니다.
  * 3. 이름: 팀 기본 AI 가 화면에 싣는 모델 id 모양(`isModelId`, 64자)이어야 한다. Claude id 는
  *    `modelLabel` 로 사람 이름(「Claude Sonnet 4.5」)이 되고, 그 밖의 id 는 그대로 보인다.
  *    주소·키처럼 보이면 칩을 세우지 않는다. 길이는 `clean()`·`MODEL_LABEL_MAX` 규칙 그대로다.
  */
 function modelChipName(props: Props): string | null {
   const served = record(props?.["team_ai_model"]);
-  if (served !== null) {
-    const id = served["model"];
-    if (!isModelId(id) || ADDRESS_OR_KEY.test(id)) return null;
-    return clean(modelLabel(id), MODEL_LABEL_MAX);
-  }
-  const legacy = props?.["model_label"];
-  if (typeof legacy !== "string" || ADDRESS_OR_KEY.test(legacy)) return null;
-  return clean(legacy, MODEL_LABEL_MAX);
+  if (served === null) return null;
+  const id = served["model"];
+  if (!isModelId(id) || ADDRESS_OR_KEY.test(id)) return null;
+  return clean(modelLabel(id), MODEL_LABEL_MAX);
 }
 
 export interface TeamAiWebCitation {

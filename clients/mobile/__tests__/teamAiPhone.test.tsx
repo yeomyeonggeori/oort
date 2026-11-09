@@ -1,5 +1,6 @@
 import type {Member, Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import servedReply from '@momo/core/features/timeline/__fixtures__/team-ai-reply-props.json';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -285,7 +286,8 @@ describe('「그록봇에게 맡기기」 (폰)', () => {
 const V2_REPLY = {
   source: 'team_ai',
   run_id: '0199aa11-2222-7000-8000-0000000006b1',
-  model_label: 'Claude Sonnet 4.5',
+  // 서버가 쓰는 모양(#5600, 코어·서버 공용 픽스처): 칩은 이 객체에서만 선다.
+  team_ai_model: servedReply.props.team_ai_model,
   tools_used: [
     {name: 'search_messages'},
     {name: 'read_channel', channel: '마케팅'},

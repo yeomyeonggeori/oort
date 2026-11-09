@@ -356,7 +356,8 @@ describe("도우미 답의 꼬리 (v2 H4·H5·H9-I9)", () => {
   const V2_REPLY = {
     source: "team_ai",
     run_id: "00000000-0000-7000-8000-0000000006b1",
-    model_label: "Claude Sonnet 4.5",
+    // 서버가 쓰는 모양(#5600): 칩은 이 객체에서만 선다.
+    team_ai_model: servedReply.props.team_ai_model,
     tools_used: [{ name: "search_messages" }, { name: "read_channel", channel: "마케팅" }, { name: "web_search" }],
     web_citations: [
       { url: "https://www.example.com/rust-2026", title: "Rust 2026 로드맵" },
