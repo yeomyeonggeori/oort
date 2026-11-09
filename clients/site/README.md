@@ -66,7 +66,7 @@ sources:
 
 - `description`: 160자 이하. 쪽 맨 위 요약과 meta description에 나가요.
 - `status`: `done`(됨) · `partial`(부분) · `planned`(계획).
-- `checked`: 확인한 날짜(`YYYY-MM-DD`). 오늘보다 뒤면 실패해요.
+- `checked`: 확인한 날짜(`YYYY-MM-DD`). UTC 오늘 + 하루보다 뒤면 실패해요(Vercel 은 UTC 로 빌드하고, 한국 새벽에 쓴 오늘 날짜는 UTC 로 하루 뒤라서예요).
 - `sources`: 저장소 루트 기준 경로를 한 줄에 하나씩. 저장소에 있어야 하고, 줄 번호나 `#`은 붙이지 않아요.
 
 본문은 이 문법만 알아요. 나머지는 모두 「파일:줄」과 함께 빌드가 실패해요(`build.py` 머리말에 같은 목록).
