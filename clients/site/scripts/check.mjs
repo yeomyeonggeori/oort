@@ -15,7 +15,9 @@
 // 머리 줄(7개 언어 × 320·360·375·390·568·600 × 일반·폰 흉내: 로고 한 줄·마크 크기·컨트롤 화면 안·넘침 0·아이콘 44·폰 링크 하나),
 // 머리 로고 배색(링은 글자색, 위성은 tokens.css 의 --signal: 메뉴 막대 oort-tray-unread-on-* 와 같은 값),
 // 첫 화면 문구(#5568 문구 1안, 7개 언어 × 320·360·390·768·1280: 머리글·증거 칩 3이 사전 그대로·칩이 화면 밖으로 안 나감·
-// 제목·머리글·칩 낱말 가운데 끊김 0·줄 머리 문장 부호 0·문서 넘침 0, 제목·리드·칩 줄 수 기록, 탭 제목 「oort」, meta description 150자 이하).
+// 제목·머리글·칩 낱말 가운데 끊김 0·줄 머리 문장 부호 0·문서 넘침 0, 제목·리드·칩 줄 수 기록, 탭 제목 「oort」, meta description 150자 이하·첫 문장에 oort·Mac),
+// 움직임 줄이기 정지 장면의 글자 줄 상자 화소 대비(7개 언어 × 320·360·390·768·1280 × 밝게·어둡게: 머리글 하위 2% 4.5 이상, 다른 글자도 기준 이상),
+// 폰 첫 화면 높이 5종(320×568·375×548·375×629·375×635·390×664) × 7개 언어의 주 행동이 첫 화면 안(Chromium) + WebKit iPhone SE·14.
 // 하나라도 어긋나면 exit 1.
 // =============================================================================
 
@@ -35,8 +37,8 @@ const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
 const cats = Object.fromEntries(LANGS.map((l) => [l, JSON.parse(readFileSync(resolve(SITE, `i18n/${l}.json`), "utf8"))]));
 const ko = cats.ko;
-// ONLY=pages,copy,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,copy,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
+// ONLY=pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,copy,still,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -87,7 +89,9 @@ async function heroContrast(page, decoder) {
     const els = [...document.querySelectorAll(".hero .eyebrow, .hero h1 span, .hero .lead, .hero .proof li, .hero .spec, .hero .phone-note span")]
       .filter((el) => el.getBoundingClientRect().width > 0);
     const list = els.map((el) => {
-      const r = el.getBoundingClientRect();
+      // 칩(li)은 자기 테두리 화소를 바탕으로 세지 않게 글자 범위(Range) 상자로 잰다(#5568 검수 L6)
+      let r = el.getBoundingClientRect();
+      if (el.matches(".proof li")) { const rg = document.createRange(); rg.selectNodeContents(el); r = rg.getBoundingClientRect(); }
       const color = getComputedStyle(el).color;
       return { name: el.className || el.tagName.toLowerCase(), x: r.left, y: r.top + window.scrollY, w: r.width, h: r.height, color };
     });
@@ -137,6 +141,63 @@ async function heroContrast(page, decoder) {
   }
   await page.evaluate(() => { document.documentElement.classList.remove("probe-hide"); document.getElementById("probe-style")?.remove(); });
   return results;
+}
+
+/** 글자 줄 상자(Range 의 줄마다 상자) 안 화소 하나하나의 대비(#5568 수리 1회차). 글자를 투명하게 한 한 장면을 찍어
+ *  요소마다 화소 대비를 줄 세운다: p02(하위 2%)·p05(하위 5%)·min·기준 미만 비율. 요소 상자를 통째로 재면 칩 테두리 같은
+ *  자기 화소가 섞이고 중앙값은 혜성 꼬리 같은 줄기 모양 하락을 못 본다. 머리 줄 글자(로고·언어 이름)도 함께 잰다. */
+async function glyphContrast(page, decoder, dpr) {
+  const { els, bottom } = await page.evaluate(() => {
+    const sels = [["brand", ".brand span"], ["lang", ".lang-btn .lang-name"], ["eyebrow", ".hero .eyebrow"], ["title1", ".hero h1 span:nth-child(1)"], ["title2", ".hero h1 span:nth-child(2)"], ["lead", ".hero .lead"], ["chip1", ".hero .proof li:nth-child(1)"], ["chip2", ".hero .proof li:nth-child(2)"], ["chip3", ".hero .proof li:nth-child(3)"], ["spec", ".hero .spec"]];
+    const out = [];
+    for (const [name, sel] of sels) {
+      const el = document.querySelector(sel);
+      if (!el || !el.getBoundingClientRect().width) continue;
+      const rg = document.createRange();
+      rg.selectNodeContents(el);
+      const rects = [...rg.getClientRects()].filter((r) => r.width > 1 && r.height > 1).map((r) => ({ x: r.left, y: r.top + scrollY, w: r.width, h: r.height }));
+      const cs = getComputedStyle(el);
+      out.push({ name, color: cs.color, large: parseFloat(cs.fontSize) >= 24 || (parseFloat(cs.fontSize) >= 18.66 && +cs.fontWeight >= 700), rects });
+    }
+    const st = document.createElement("style");
+    st.id = "probe-glyph";
+    st.textContent = ".brand span, .lang-btn .lang-name, .hero .eyebrow, .hero h1, .hero h1 span, .hero .lead, .hero .proof li, .hero .spec, .hero .spec span { color: transparent !important; }";
+    document.head.appendChild(st);
+    return { els: out, bottom: Math.ceil(Math.max(...out.flatMap((e) => e.rects.map((r) => r.y + r.h)))) };
+  });
+  await page.waitForTimeout(80);
+  const vw = page.viewportSize().width;
+  const png = await page.screenshot({ clip: { x: 0, y: 0, width: vw, height: Math.max(page.viewportSize().height, bottom + 2) }, fullPage: true });
+  await page.evaluate(() => document.getElementById("probe-glyph")?.remove());
+  return decoder.evaluate(async ({ b64, els, dpr }) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return els.map((e) => {
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(e.color);
+      const fg = 0.2126 * lin(+m[1]) + 0.7152 * lin(+m[2]) + 0.0722 * lin(+m[3]);
+      const need = e.large ? 3 : 4.5;
+      const q = [];
+      for (const r of e.rects) {
+        const x0 = Math.max(0, Math.floor(r.x * dpr)), y0 = Math.max(0, Math.floor(r.y * dpr));
+        const x1 = Math.min(c.width, Math.ceil((r.x + r.w) * dpr)), y1 = Math.min(c.height, Math.ceil((r.y + r.h) * dpr));
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const i = (y * c.width + x) * 4;
+          const L = 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]);
+          q.push((Math.max(L, fg) + 0.05) / (Math.min(L, fg) + 0.05));
+        }
+      }
+      q.sort((a, z) => a - z);
+      const at = (p) => q[Math.min(q.length - 1, Math.floor(p * q.length))];
+      return { name: e.name, need, n: q.length, min: at(0), p02: at(0.02), p05: at(0.05), below: q.filter((v) => v < need).length / Math.max(1, q.length) };
+    });
+  }, { b64: png.toString("base64"), els, dpr });
 }
 
 /** 머리 줄의 숫자. W 는 정해 둔 뷰포트 폭(폰 흉내가 레이아웃 폭을 넓혀도 속지 않게 이 값과 견준다).
@@ -255,6 +316,12 @@ const copyMeasure = (W) => {
   };
 };
 
+/** 폰 첫 화면 주 행동(「브라우저에서 열기」)의 아래 끝(문서 y). 안 보이면 null */
+const foldBottom = () => {
+  const r = document.querySelector(".hero .get-web").getBoundingClientRect();
+  return r.height > 0 ? Math.round(r.bottom + scrollY) : null;
+};
+
 async function canvasShot(page) {
   return page.locator("canvas.sky").screenshot();
 }
@@ -332,10 +399,12 @@ async function main() {
         rec.lead.push(`${tag}=${m.leadLines}`);
         rec.chip.push(`${tag}=${m.chipLines}/${m.chipRows}행`);
         if (w === 1280) {
-          // 탭 제목은 7개 언어 모두 「oort」(owner 11-09), 링크 미리 보기 설명은 사전 그대로 150자 이하
+          // 탭 제목은 7개 언어 모두 「oort」(owner 11-09), 링크 미리 보기 설명은 사전 그대로 150자 이하이고
+          // 첫 문장이 「oort Mac 앱 내려받기」다(#5568 검수 M1: 이 주소가 무엇의 링크인지 먼저, 언어마다 같은 범위)
           const meta = await page.evaluate(() => ({ title: document.title, desc: document.querySelector('meta[name="description"]')?.content ?? null }));
           if (meta.title !== "oort") titleBad.push(`${lang}:${meta.title}`);
-          if (meta.desc !== cats[lang].meta_description || [...(meta.desc ?? "")].length > 150) metaBad.push(`${lang}:${meta.desc === null ? "없음" : [...meta.desc].length}`);
+          const first = (meta.desc ?? "").split(/[.。]/)[0];
+          if (meta.desc !== cats[lang].meta_description || [...(meta.desc ?? "")].length > 150 || !first.includes("oort") || !first.includes("Mac")) metaBad.push(`${lang}:${meta.desc === null ? "없음" : `${[...meta.desc].length}자 첫 문장 「${first.slice(0, 24)}」`}`);
         }
         await ctx.close();
       }
@@ -350,10 +419,47 @@ async function main() {
     check("첫 화면 문구: 줄 머리 문장 부호 0(머리글·제목·리드·칩)", bad.head.length === 0, show(bad.head));
     check("첫 화면 문구: 문서 가로 넘침 0, 머리글·제목·리드·칩 글자가 화면 안(7개 언어 × 320·360·390·768·1280)", bad.overflow.length === 0, show(bad.overflow));
     check("탭 제목이 「oort」(7개 언어 + 루트)", titleBad.length === 0, titleBad.length ? titleBad.join(" ") : `${LANGS.length + 1}/${LANGS.length + 1}`);
-    check("meta description 이 사전 문구 그대로, 150자 이하(7개 언어)", metaBad.length === 0, metaBad.length ? metaBad.join(" ") : LANGS.map((l) => `${l}=${[...cats[l].meta_description].length}`).join(" "));
+    check("meta description 이 사전 문구 그대로, 150자 이하, 첫 문장에 oort·Mac(내려받기 링크임을 먼저, 7개 언어)", metaBad.length === 0, metaBad.length ? metaBad.join(" ") : LANGS.map((l) => `${l}=${[...cats[l].meta_description].length}`).join(" "));
     console.log(`문구 제목 반쪽 줄 수: ${rec.title.join(" ")}`);
     console.log(`문구 리드 줄 수: ${rec.lead.join(" ")}`);
     console.log(`문구 칩 줄 수(칩마다/칩 줄 행 수): ${rec.chip.join(" ")}`);
+  }
+
+  // 1c) 움직임 줄이기 정지 장면의 글자 대비(#5568 수리 1회차 H2): 7개 언어 × 320·360·390·768·1280 × 밝게·어둡게.
+  //     정지 장면은 늘 같은 한 장이라 글자 줄 상자의 화소로 잰다. 머리글은 하위 2%(p02)가 4.5 이상이어야 한다
+  //     (정지 장면의 혜성 꼬리가 머리글을 지나면 여기서 막힌다). 로고·언어 이름·제목·리드·칩·사양도 p02 가 기준(큰 글자 3, 나머지 4.5) 이상.
+  if (ONLY.has("still")) {
+    const bad = { eyebrow: [], other: [] };
+    const low = {};
+    let scenes = 0;
+    let eb0 = null;
+    for (const scheme of ["light", "dark"]) for (const w of [320, 360, 390, 768, 1280]) {
+      const dpr = w <= 390 ? 2 : 1;
+      const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, colorScheme: scheme, reducedMotion: "reduce", deviceScaleFactor: dpr, locale: "en-US" });
+      const page = await ctx.newPage();
+      for (const lang of LANGS) {
+        await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+        await settle(page);
+        await page.waitForTimeout(100);
+        const tag = `${lang}-${w}-${scheme}`;
+        if (SHOTS && ["ko", "en"].includes(lang) && scheme === "light" && [320, 390].includes(w)) await page.screenshot({ path: resolve(SHOTS, `still-${tag}.png`) });
+        const res = await glyphContrast(page, decoder, dpr);
+        scenes += 1;
+        const eb = res.find((r) => r.name === "eyebrow");
+        const f = (r) => `${r.name} p02=${r.p02.toFixed(2)} p05=${r.p05.toFixed(2)} <${r.need}=${(r.below * 100).toFixed(1)}%`;
+        if (!eb || eb.p02 < 4.5) bad.eyebrow.push(`${tag}:${eb ? f(eb) : "머리글 없음"}`);
+        if (eb && (!eb0 || eb.p02 < eb0.p02)) eb0 = { ...eb, tag };
+        for (const r of res) {
+          if (r.name !== "eyebrow" && r.p02 < r.need) bad.other.push(`${tag}:${f(r)}`);
+          if (!low[r.name] || r.p02 < low[r.name].p02) low[r.name] = { p02: r.p02, tag };
+        }
+      }
+      await ctx.close();
+    }
+    check("움직임 줄이기 정지 장면: 머리글 글자 줄 상자 하위 2% 대비 4.5 이상(7개 언어 × 320·360·390·768·1280 × 밝게·어둡게)", bad.eyebrow.length === 0,
+      `${bad.eyebrow.length}/${scenes}${bad.eyebrow.length ? " " + bad.eyebrow.slice(0, 6).join(" ") : ""}${eb0 ? ` · 최저 ${eb0.tag} p02=${eb0.p02.toFixed(2)} p05=${eb0.p05.toFixed(2)}` : ""}`);
+    check("움직임 줄이기 정지 장면: 로고·언어 이름·제목·리드·칩·사양 글자 줄 상자 하위 2%가 기준 이상", bad.other.length === 0, `${bad.other.length}${bad.other.length ? " " + bad.other.slice(0, 6).join(" ") : ""}`);
+    console.log(`정지 장면 요소별 최저 p02(기록): ${Object.entries(low).map(([k, v]) => `${k}=${v.p02.toFixed(2)}@${v.tag}`).join(" ")}`);
   }
 
   // 2) 움직임 줄이기: 두 장면이 같고 멈춰 있다. 줄이지 않으면 두 장면이 다르다(사보타주 방향).
@@ -739,6 +845,28 @@ async function main() {
       if (SHOTS) await page.screenshot({ path: resolve(SHOTS, `iphone-${lang}-390-light.png`), fullPage: true });
       await ctx.close();
     }
+    // 폰 첫 화면 높이 여럿(#5568 수리 1회차 H1, 검수 도구와 같은 흉내: iPhone UA·터치·DPR 2·움직임 줄이기), 7개 언어 ×
+    // 320×568(SE 1세대) · 375×548(SE 2·3세대 Safari 막대 포함) · 375×629·375×635(12·13 mini) · 390×664(iPhone 14).
+    // 첫 화면 주 행동 「브라우저에서 열기」의 아래 끝이 첫 화면 높이 안이어야 한다(한 높이만 재다가 375 회귀가 지나갔다)
+    const fold = [];
+    const foldRec = [];
+    for (const [w, h] of [[320, 568], [375, 548], [375, 629], [375, 635], [390, 664]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, userAgent: iphone.userAgent, isMobile: true, hasTouch: true, deviceScaleFactor: 2, reducedMotion: "reduce", colorScheme: "light" });
+      const page = await ctx.newPage();
+      const row = [];
+      for (const lang of LANGS) {
+        await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+        await settle(page);
+        const y = await page.evaluate(foldBottom);
+        row.push(`${lang}=${y}`);
+        if (y === null || y > h) fold.push(`${w}x${h}-${lang}:${y}`);
+        if (SHOTS && w === 375 && h === 548) await page.screenshot({ path: resolve(SHOTS, `fold-${lang}-375x548.png`) });
+      }
+      foldRec.push(`${w}x${h} ${row.join(" ")}`);
+      await ctx.close();
+    }
+    check("폰 첫 화면 5종 × 7개 언어: 주 행동(브라우저에서 열기) 아래 끝이 첫 화면 안(320×568·375×548·375×629·375×635·390×664)", fold.length === 0, `${fold.length}/35${fold.length ? " " + fold.slice(0, 8).join(" ") : ""}`);
+    console.log(`폰 첫 화면 주 행동 아래 끝(기록): ${foldRec.join(" | ")}`);
     // JS 가 없으면 표지가 없어 Mac 이 기본(폰 UA 여도)
     const nojs = await browser.newContext({ ...iphone, javaScriptEnabled: false });
     const np = await nojs.newPage();
@@ -804,6 +932,26 @@ async function main() {
       if (SHOTS && name === "390") await page.screenshot({ path: resolve(SHOTS, "webkit-ja-390-light.png"), fullPage: true });
       await ctx.close();
     }
+    // WebKit 기기 흉내(iPhone SE 375×548 · iPhone 14 390×664) 7개 언어: 첫 화면 주 행동 아래 끝이 첫 화면 안(#5568 수리 1회차 H1)
+    const wkFold = [];
+    const wkRec = [];
+    for (const [dev, w, h] of [["iPhone SE", 375, 548], ["iPhone 14", 390, 664]]) {
+      const d = { ...devices[dev] };
+      delete d.defaultBrowserType;
+      const ctx = await wk.newContext({ ...d, viewport: { width: w, height: h }, reducedMotion: "reduce", colorScheme: "light" });
+      const page = await ctx.newPage();
+      const row = [];
+      for (const lang of LANGS) {
+        await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+        await settle(page);
+        const y = await page.evaluate(foldBottom);
+        row.push(`${lang}=${y}`);
+        if (y === null || y > h) wkFold.push(`${dev}-${lang}:${y}`);
+      }
+      wkRec.push(`${dev} ${w}x${h} ${row.join(" ")}`);
+      await ctx.close();
+    }
+    check("WebKit 폰 첫 화면(iPhone SE 375×548 · iPhone 14 390×664) × 7개 언어: 주 행동 아래 끝이 첫 화면 안", wkFold.length === 0, `${wkFold.length}/14${wkFold.length ? " " + wkFold.join(" ") : ""} · ${wkRec.join(" | ")}`);
     await wk.close();
   }
 
