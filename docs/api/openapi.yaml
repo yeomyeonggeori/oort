@@ -6,8 +6,15 @@ openapi: 3.0.3
 # This file is the canonical client contract for the web v0 surface. Clients
 # (f399e417:clients/web-legacy via openapi-typescript, and packages/momo-core as a
 # conformance target) follow this spec. The live server is server-rust
-# (bins/momo-server, ADR-0145); drift between this spec and the running server
-# is detected by scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
+# (bins/momo-server, ADR-0145). Drift between this spec and the running server
+# is checked two ways, and neither proves every operation here is served: the
+# router-versus-spec difference is held to an exact, listed drift in both
+# directions by server-rust/bins/momo-server/tests/dev_token_door_conformance_pg.rs
+# (`CONTRACT_WITHOUT_MOUNT` names the operations this file still declares that
+# the router does not mount), and scripts/verify_openapi_contract_rust.sh
+# round-trips only the operations listed in scripts/openapi_sampled_on_rust.txt
+# on the deployed image. The Swift pass that sampled every operation
+# (`verify_openapi_contract.sh`) was retired with the Swift server (#2142).
 #
 # Provenance note: this spec was written field-level identical to the retired
 # Swift DTOs (server/Sources/MomoServer/Routes/DTOs.swift). That tree is being
@@ -5666,89 +5673,6 @@ paths:
         "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: No such hosted agent visible to the caller, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
-
-  /v1/workspaces/{workspaceId}/agents/from-card:
-    post:
-      tags: [agents]
-      operationId: registerAgentFromCard
-      summary: Fetch an A2A v0.3 Agent Card for administrator consent.
-      description: >
-        Human workspace owner/admin only. The server fetches
-        `/.well-known/agent-card.json` with a five-second timeout, a 256KB
-        response limit, at most two manually validated redirects, and DNS/IP
-        SSRF checks on every hop. HTTPS is required except for an explicit
-        local-development opt-in. A successful parse stores public card
-        provenance and display-only security requirements with
-        status=pending_consent; failures persist nothing. Provider credentials
-        and secret-shaped card fields are rejected.
-      security: [{bearerAuth: []}]
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/RegisterAgentCardRequest"}
-      responses:
-        "201":
-          description: Public card metadata is pending administrator consent.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/AgentCardRegistrationResponse"}
-        "400":
-          description: Unsafe URL, failed fetch, redirect violation, oversize response, or invalid card.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "429": {$ref: "#/components/responses/RateLimited"}
-
-  /v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm:
-    post:
-      tags: [agents]
-      operationId: confirmAgentFromCard
-      summary: Confirm a pending Agent Card and issue its first gateway bearer.
-      description: >
-        Human workspace owner/admin only. The member(kind=agent), agent row,
-        workspace membership, one-time per-agent gateway bearer digest,
-        registration transition, and audit rows commit in one tenant
-        transaction. The raw bearer is returned once with no-store headers;
-        no card-provided credential is accepted or persisted.
-      security: [{bearerAuth: []}]
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: registrationId
-          in: path
-          required: true
-          schema: {type: string, format: uuid}
-      responses:
-        "201":
-          description: Agent member and initial gateway credential created atomically.
-          headers:
-            Cache-Control:
-              schema: {type: string, enum: [no-store]}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ConfirmAgentCardResponse"}
-        "400":
-          description: Invalid registration identifier.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404":
-          description: Pending registration not found in this workspace.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "409":
-          description: Registration was already confirmed.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/channels:
     get:
@@ -20793,42 +20717,6 @@ components:
         agent:
           $ref: "#/components/schemas/AgentMember"
 
-    RegisterAgentCardRequest:
-      type: object
-      required: [url]
-      additionalProperties: false
-      properties:
-        url:
-          type: string
-          format: uri
-          description: Agent origin or exact /.well-known/agent-card.json URL; userinfo, query, and fragment are forbidden.
-
-    AgentCardRegistration:
-      type: object
-      required: [id, status, name, url, capabilities, securitySchemes, createdAtMs]
-      properties:
-        id: {type: string, format: uuid}
-        status: {type: string, enum: [pending_consent, confirmed]}
-        name: {type: string, minLength: 1, maxLength: 100}
-        description: {type: string, maxLength: 2000}
-        url: {type: string, format: uri}
-        capabilities:
-          type: object
-          additionalProperties: true
-        securitySchemes:
-          type: object
-          description: Display-only summary; never includes submitted credentials or secrets.
-          additionalProperties: true
-        agentMemberId: {type: string, format: uuid}
-        createdAtMs: {type: integer, format: int64}
-        confirmedAtMs: {type: integer, format: int64}
-
-    AgentCardRegistrationResponse:
-      type: object
-      required: [registration]
-      properties:
-        registration: {$ref: "#/components/schemas/AgentCardRegistration"}
-
     AgentCredentialScope:
       type: string
       description: >
@@ -20897,7 +20785,7 @@ components:
         (`PUT …/unfurl-settings`, `PATCH …/memory/settings`, `PUT
         …/work-tier-policy`) with the approver's authority, and its result
         `ref` is `{type: workspace_settings, id: <workspace id>}`.
-        `plugin.install` (`{pluginId}`, one of the four official plugins,
+        `plugin.install` (`{pluginId}`, one of the seven official plugins,
         admin; ADR-0201 증보 v2 H7, #3889) is team-AI-only the same way. Its
         card names the app, its version and the domains it reaches out to
         (ADR-0113 D5), pins the manifest digest it showed, and approving runs
@@ -21680,21 +21568,6 @@ components:
         credential: {$ref: "#/components/schemas/AgentCredential"}
         revokedNow: {type: boolean}
         alreadyRevoked: {type: boolean}
-
-    ConfirmAgentCardResponse:
-      type: object
-      required: [registrationId, status, agent, credential, token, tokenType, confirmedAtMs]
-      properties:
-        registrationId: {type: string, format: uuid}
-        status: {type: string, enum: [confirmed]}
-        agent: {$ref: "#/components/schemas/AgentMember"}
-        credential: {$ref: "#/components/schemas/AgentCredential"}
-        token:
-          type: string
-          writeOnly: true
-          description: One-time-issued scoped gateway bearer; only its SHA-256 digest is persisted.
-        tokenType: {type: string, enum: [Bearer]}
-        confirmedAtMs: {type: integer, format: int64}
 
     # ---- Provider cascade + effort table (ADR-0135 D1 / ADR-0134 D2) --------
     ProviderChainEntry:
