@@ -249,6 +249,13 @@ impl PinnedAgent {
             && !self.connector_marked
             && owner_only_gate(self.scope.as_ref(), None, requester, true, true).is_none()
     }
+
+    /// **G3 for the team**, not for one requester — the settings screen has none (ADR-0201 증보 v4 P8, #5374):
+    /// a target for **every** member. That is [`Self::is_target_for`] with no owner to compare: an owner-only
+    /// agent is a target for its owner alone, so it is nobody's team Hermes and is not counted here.
+    pub fn is_team_target(&self) -> bool {
+        self.scope.is_none() && self.is_target_for(Uuid::nil())
+    }
 }
 
 /// What G3 found.
@@ -266,7 +273,21 @@ pub enum TargetResolution {
 /// **G3's rule**: of the workspace's operator-env agents, the ones that qualify for `requester`
 /// ([`PinnedAgent::is_target_for`]) — exactly one resolves, none or several close the door.
 pub fn resolve_target(pinned: &[PinnedAgent], requester: Uuid) -> TargetResolution {
-    let mut qualifying = pinned.iter().filter(|agent| agent.is_target_for(requester));
+    resolve_by(pinned, |agent| agent.is_target_for(requester))
+}
+
+/// G3's rule for the team ([`PinnedAgent::is_team_target`]): what the settings screen says about the
+/// workspace's Hermes (ADR-0201 증보 v4 P8, #5374). The same count as [`resolve_target`] — exactly one
+/// resolves, none or several close the door — over the agents every member could hand work to.
+pub fn resolve_team_target(pinned: &[PinnedAgent]) -> TargetResolution {
+    resolve_by(pinned, PinnedAgent::is_team_target)
+}
+
+fn resolve_by(
+    pinned: &[PinnedAgent],
+    qualifies: impl Fn(&PinnedAgent) -> bool,
+) -> TargetResolution {
+    let mut qualifying = pinned.iter().filter(|agent| qualifies(agent));
     match (qualifying.next(), qualifying.next()) {
         (None, _) => TargetResolution::None,
         (Some(agent), None) => TargetResolution::One(HermesTarget {
@@ -274,12 +295,9 @@ pub fn resolve_target(pinned: &[PinnedAgent], requester: Uuid) -> TargetResoluti
             handle: agent.handle.clone(),
             display_name: agent.display_name.clone(),
         }),
-        (Some(_), Some(_)) => TargetResolution::Ambiguous(
-            pinned
-                .iter()
-                .filter(|agent| agent.is_target_for(requester))
-                .count(),
-        ),
+        (Some(_), Some(_)) => {
+            TargetResolution::Ambiguous(pinned.iter().filter(|agent| qualifies(agent)).count())
+        }
     }
 }
 
@@ -702,6 +720,86 @@ impl DoorFacts {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the settings screen's half of the door (ADR-0201 증보 v4 P8·P10, #5374)
+// ---------------------------------------------------------------------------
+
+/// **G5 as this process can judge it**: an `operator_env` pin resolves while the env link is written and
+/// its key is configured (not empty, not a dev placeholder) — the agent-worker's own rule for the pin it
+/// is about to call (`resolve_stored_pin`, `operator_env_not_configured`). The templates give the api and
+/// the worker the same `HERMES_BASE_URL`/`HERMES_API_KEY`, so the settings screen explains what the worker
+/// enforces.
+pub fn operator_env_pin_resolves(env: &momo_settings::ProviderConfig) -> bool {
+    !env.base_url.trim().is_empty() && env.key_configured()
+}
+
+/// What the settings screen is told about the delegation (ADR-0201 증보 v4 P8: 「G3~G5가 안 맞거나 연결 모드
+/// 선언이 있거나(G4) 운영자 천장이 없으면(G6) 닫힌 낱말 이유와 함께 「지금은 쓸 수 없어요」」; P10: 켠 채라도
+/// G3~G5가 안 맞으면 설정 화면이 닫힌 낱말 이유를 보인다). The door's facts that depend on neither who asks nor
+/// what a request did, read by the api for `team_ai_limits_status`.
+#[derive(Debug, Clone)]
+pub struct SettingsDoorFacts {
+    /// G3 for the team ([`resolve_team_target`]).
+    pub target: TargetResolution,
+    /// G4, as **this process** reads the three variables (K-S2 flipped: the templates give the api and the
+    /// worker the same values, and their tests fail when one side differs).
+    pub declarations: HermesDeclarations,
+    /// G5 ([`operator_env_pin_resolves`]).
+    pub pin_resolves: bool,
+    /// G6: `min(workspace cap or the default 30, operator ceiling)`; `None` = closed (P7 「미설정 = 끔」).
+    pub day_cap: Option<i64>,
+    /// G6: delegations at or past `called` today (UTC).
+    pub today: i64,
+}
+
+impl SettingsDoorFacts {
+    /// The first shut gate of G3~G6, in the door's order and in the door's own closed words; `None` when all
+    /// of them are open. **One rule**: this is [`DoorFacts::judge`] itself over a request whose own half is
+    /// open — a member's plain first-turn request (G2, G7~G10 open; G6's ten-minute, concurrency and task
+    /// bounds unbounded) — so the screen and the door cannot disagree about a gate they both read.
+    ///
+    /// Not judged here, on purpose: **G1** is the bag's own `team_ai_roles.hermes`, which the same response
+    /// carries (the screen shows this word while that switch is on — P10 「켠 채라도」), and **the kinds** (which
+    /// of `image`/`web_search` the operator declared to the worker, and the helper's wire): the kind
+    /// declarations are the worker's alone (v4.1). An open answer therefore means "a member's plain request
+    /// would get past every gate the workspace decides", not "the tool is on every request".
+    pub fn closed(&self) -> Option<DoorClosed> {
+        let unbounded = i64::MAX;
+        DoorFacts {
+            roles: TeamAiRoles::default(),
+            requester: RequesterFacts {
+                human: true,
+                guest: false,
+            },
+            target: self.target.clone(),
+            declarations: HermesDeclarations {
+                image_tool: true,
+                search_tool: true,
+                ..self.declarations.clone()
+            },
+            pin_resolves: self.pin_resolves,
+            bounds: DelegationBounds {
+                day_cap: self.day_cap,
+                requester_window_max: unbounded,
+                concurrent_max: unbounded,
+                tasks_workspace_max: unbounded,
+                tasks_requester_max: unbounded,
+            },
+            usage: DelegationUsage {
+                today: self.today,
+                ..DelegationUsage::default()
+            },
+            direct_mention: false,
+            task_step: false,
+            delegated: false,
+            web: WebSearch::NotSupported,
+            image_path_ready: true,
+        }
+        .judge(false)
+        .closed()
     }
 }
 
@@ -1424,6 +1522,181 @@ mod tests {
         assert!(matches!(
             one(&[good, paused_second]),
             TargetResolution::One(_)
+        ));
+    }
+
+    /// ADR-0201 증보 v4 P8 (#5374): the settings screen's G3 is the team's — an owner-only agent, which the
+    /// door gives its own owner, is nobody's team Hermes; every other disqualifier is the door's own.
+    #[test]
+    fn the_team_target_is_one_every_member_could_hand_work_to() {
+        let good = agent("hermes");
+        match resolve_team_target(std::slice::from_ref(&good)) {
+            TargetResolution::One(target) => assert_eq!(target.member_id, good.member_id),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(resolve_team_target(&[]), TargetResolution::None);
+        let mut helper = good.clone();
+        helper.is_helper = true;
+        let mut inactive = good.clone();
+        inactive.active = false;
+        let mut paused = good.clone();
+        paused.paused = true;
+        let mut marked = good.clone();
+        marked.connector_marked = true;
+        let owner = Uuid::new_v4();
+        let mut owners_own = good.clone();
+        owners_own.scope = Some(owner_only_scope(owner));
+        // the door gives an owner-only agent to its owner…
+        assert!(matches!(
+            resolve_target(std::slice::from_ref(&owners_own), owner),
+            TargetResolution::One(_)
+        ));
+        // …and the team has no Hermes in it — nor in any agent the door refuses everyone
+        for disqualified in [helper.clone(), inactive, paused, marked, owners_own.clone()] {
+            assert_eq!(
+                resolve_team_target(std::slice::from_ref(&disqualified)),
+                TargetResolution::None,
+                "{disqualified:?}"
+            );
+        }
+        // the owner-only agent beside a team Hermes does not make it ambiguous; two team ones do
+        assert!(matches!(
+            resolve_team_target(&[owners_own, good.clone()]),
+            TargetResolution::One(_)
+        ));
+        assert_eq!(
+            resolve_team_target(&[good.clone(), agent("hermes-2")]),
+            TargetResolution::Ambiguous(2)
+        );
+        assert!(matches!(
+            resolve_team_target(&[helper, good.clone()]),
+            TargetResolution::One(_)
+        ));
+        // an owner-only row whose owner could not be read is kept as the nil owner (refuse everyone): the
+        // team judgement has no requester and must not let "nobody" match "the nil owner"
+        let mut ownerless = good;
+        ownerless.scope = Some(owner_only_scope(Uuid::nil()));
+        assert_eq!(
+            resolve_team_target(std::slice::from_ref(&ownerless)),
+            TargetResolution::None
+        );
+    }
+
+    fn settings_open() -> SettingsDoorFacts {
+        SettingsDoorFacts {
+            target: TargetResolution::One(HermesTarget {
+                member_id: Uuid::new_v4(),
+                handle: "hermes".into(),
+                display_name: "Hermes".into(),
+            }),
+            // only the three variables the api reads: no kind is declared to this process
+            declarations: HermesDeclarations {
+                tools_locked: true,
+                ..HermesDeclarations::default()
+            },
+            pin_resolves: true,
+            day_cap: Some(30),
+            today: 0,
+        }
+    }
+
+    /// P8·P10 (#5374): the settings screen's word is the door's own. Each workspace gate (G3~G6) broken alone
+    /// shuts it with exactly the word the door would say; the request's half and the kinds are not its
+    /// business (a process that declares no kind is still "open"), and neither is G1 (the bag's switch).
+    #[test]
+    fn each_workspace_gate_broken_alone_is_the_word_the_settings_screen_shows() {
+        assert_eq!(settings_open().closed(), None);
+        type Break = Box<dyn Fn(&mut SettingsDoorFacts)>;
+        let cases: Vec<(&str, Break)> = vec![
+            (
+                "hermes_not_connected",
+                Box::new(|f: &mut SettingsDoorFacts| f.target = TargetResolution::None),
+            ),
+            (
+                "hermes_ambiguous",
+                Box::new(|f: &mut SettingsDoorFacts| f.target = TargetResolution::Ambiguous(2)),
+            ),
+            (
+                "tools_not_locked",
+                Box::new(|f: &mut SettingsDoorFacts| f.declarations.tools_locked = false),
+            ),
+            (
+                "connection_mode",
+                Box::new(|f: &mut SettingsDoorFacts| f.declarations.connector_apps_set = true),
+            ),
+            (
+                "connection_mode",
+                Box::new(|f: &mut SettingsDoorFacts| f.declarations.connectors_locked_set = true),
+            ),
+            (
+                "pin_unresolved",
+                Box::new(|f: &mut SettingsDoorFacts| f.pin_resolves = false),
+            ),
+            (
+                "ceiling_unset",
+                Box::new(|f: &mut SettingsDoorFacts| f.day_cap = None),
+            ),
+            (
+                "daily_cap",
+                Box::new(|f: &mut SettingsDoorFacts| f.today = 30),
+            ),
+        ];
+        for (word, break_it) in cases {
+            let mut facts = settings_open();
+            break_it(&mut facts);
+            assert_eq!(facts.closed().map(DoorClosed::word), Some(word), "{word}");
+        }
+        // one below the day's cap is still open; past it is the cap too
+        let mut almost = settings_open();
+        almost.today = 29;
+        assert_eq!(almost.closed(), None);
+        almost.today = 31;
+        assert_eq!(almost.closed().map(DoorClosed::word), Some("daily_cap"));
+        // the door's order: a fresh instance (nothing connected, no lock, no ceiling) names G3 first
+        let fresh = SettingsDoorFacts {
+            target: TargetResolution::None,
+            declarations: HermesDeclarations::default(),
+            pin_resolves: false,
+            day_cap: None,
+            today: 0,
+        };
+        assert_eq!(
+            fresh.closed().map(DoorClosed::word),
+            Some("hermes_not_connected")
+        );
+        // and it is the door itself: the same facts as a full request give the same word
+        let mut door = open_facts();
+        door.declarations.tools_locked = false;
+        let mut screen = settings_open();
+        screen.declarations.tools_locked = false;
+        assert_eq!(screen.closed(), door.judge(false).closed());
+    }
+
+    /// G5 on the api is the worker's rule: the env link written and a real key (a dev placeholder is not one).
+    #[test]
+    fn an_operator_env_pin_resolves_only_with_a_link_and_a_real_key() {
+        let env = |base: &str, key: &str| {
+            momo_settings::ProviderConfig::from_env(|name| match name {
+                "HERMES_BASE_URL" => Some(base.to_string()),
+                "HERMES_API_KEY" => Some(key.to_string()),
+                _ => None,
+            })
+        };
+        assert!(operator_env_pin_resolves(&env(
+            "http://hermes.railway.internal:8642/v1",
+            "k7f3c9a1e5b2d8f40c6a9e1b7d3f5a2c"
+        )));
+        assert!(!operator_env_pin_resolves(&env(
+            "  ",
+            "k7f3c9a1e5b2d8f40c6a9e1b7d3f5a2c"
+        )));
+        assert!(!operator_env_pin_resolves(&env(
+            "http://hermes.railway.internal:8642/v1",
+            ""
+        )));
+        // nothing written at all: the defaults' dev bearer is not a key
+        assert!(!operator_env_pin_resolves(
+            &momo_settings::ProviderConfig::default()
         ));
     }
 

@@ -21,6 +21,7 @@
 //! | `a_dollar_limit_needs_a_model_the_server_can_price` | drop the availability check from the PATCH (cold start, unpriced model) |
 //! | `the_price_check_agrees_with_the_usage_read` | change the match rule of `pricing_available_for_model_in_tx` without changing `agent_usage_in_tx` (or the other way round) |
 //! | `the_status_read_explains_limits_ceiling_usage_and_availability` | compute the cap without the ceiling, count another workspace's ledger, or attach the status when it was not asked for |
+//! | `the_status_read_counts_todays_delegations_and_names_why_the_door_is_shut` (ADR-0201 증보 v4 P7·P8, #5374) | count a pending row, yesterday's or another workspace's delegation; drop the default 30 or the ceiling from `effective.dailyDelegations`; read the ceiling's absence as "no ceiling"; judge G3 per requester (or count the helper / a connector-marked / paused agent) instead of for the team; skip G4's connection-mode presence check or G5; name an agent in the status |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -32,6 +33,7 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_server::{build_app, AppState};
+use momo_workspace_actions::team_ai_hermes::HermesDeclarations;
 use momo_workspace_actions::team_ai_limits::OperatorCaps;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -124,14 +126,53 @@ fn ensure_schema_and_roles() {
     *ready = true;
 }
 
-async fn start_server(pool: PgPool, caps: OperatorCaps) -> String {
+/// A key `ProviderConfig::key_configured` accepts (no dev placeholder word in it).
+const TEST_OPERATOR_KEY: &str = "k7f3c9a1e5b2d8f40c6a9e1b7d3f5a2c";
+
+/// The delegation door's two facts that are the api process's (ADR-0201 증보 v4 P8, #5374): G4's
+/// declarations and whether an `operator_env` pin resolves here (G5: the env link and a real key).
+#[derive(Clone)]
+struct Process {
+    declarations: HermesDeclarations,
+    env_resolves: bool,
+}
+
+impl Process {
+    /// What `AppState::new` has: nothing declared, the defaults' dev bearer (not a key).
+    fn none() -> Process {
+        Process {
+            declarations: HermesDeclarations::default(),
+            env_resolves: false,
+        }
+    }
+
+    /// The team default mode: the tool lock declared, no connection-mode variable, the env link resolves.
+    fn team_default() -> Process {
+        Process {
+            declarations: HermesDeclarations {
+                tools_locked: true,
+                ..HermesDeclarations::default()
+            },
+            env_resolves: true,
+        }
+    }
+}
+
+async fn start_server(pool: PgPool, caps: OperatorCaps, process: Process) -> String {
+    let mut settings = momo_server::config::SettingsConfig::default();
+    if process.env_resolves {
+        settings.env_provider.base_url = "http://hermes.invalid:8642/v1".to_string();
+        settings.env_provider.bearer = TEST_OPERATOR_KEY.to_string();
+    }
     let app = build_app(
         AppState::new(
             pool,
             TEST_JWT_SECRET.to_string(),
             "ws://127.0.0.1:8000/connection/websocket".to_string(),
         )
-        .with_team_ai_caps(caps),
+        .with_team_ai_caps(caps)
+        .with_team_ai_hermes(process.declarations)
+        .with_settings(settings),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -409,6 +450,11 @@ struct Door {
 
 /// A running server, one seeded workspace and its owner's login.
 async fn door(caps: OperatorCaps) -> Door {
+    door_with(caps, Process::none()).await
+}
+
+/// [`door`] with the api process's delegation facts (#5374).
+async fn door_with(caps: OperatorCaps, process: Process) -> Door {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
@@ -422,7 +468,7 @@ async fn door(caps: OperatorCaps) -> Door {
         !superuser && !bypass,
         "the api's role must be a non-bypass role (momo_app)"
     );
-    let base = start_server(app, caps).await;
+    let base = start_server(app, caps, process).await;
     let http = reqwest::Client::new();
     let fixture = seed(&su, "limits").await;
     let owner = login(&http, &base, fixture.workspace, &fixture.owner.email).await;
@@ -729,16 +775,17 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
     let status = &bag["team_ai_limits_status"];
     assert_eq!(
         status["limits"],
-        json!({"dailyTokens": 1_000_000, "dailySearches": 10, "monthlyUsd": null})
+        json!({"dailyTokens": 1_000_000, "dailySearches": 10, "monthlyUsd": null, "dailyDelegations": null})
     );
     assert_eq!(
         status["effective"],
-        json!({"dailyTokens": 400_000, "dailySearches": 10}),
-        "the operator's 400,000 is lower than the workspace's 1,000,000"
+        json!({"dailyTokens": 400_000, "dailySearches": 10, "dailyDelegations": 0}),
+        "the operator's 400,000 is lower than the workspace's 1,000,000 (and no delegation ceiling = closed = 0)"
     );
     assert_eq!(
         status["operatorCeiling"],
-        json!({"dailyTokens": 400_000, "dailySearches": null, "helperOff": false, "searchOff": false})
+        json!({"dailyTokens": 400_000, "dailySearches": null, "helperOff": false, "searchOff": false,
+               "dailyDelegations": null, "delegationOff": true})
     );
     assert_eq!(status["usage"]["todayTokens"], 1_005_500, "{status}");
     assert_eq!(status["usage"]["todaySearches"], 4);
@@ -782,7 +829,8 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
         .unwrap();
     assert_eq!(
         free_status["team_ai_limits_status"]["effective"],
-        json!({"dailyTokens": null, "dailySearches": null})
+        json!({"dailyTokens": null, "dailySearches": null, "dailyDelegations": 0}),
+        "no token or search limit means none; the delegation is never unlimited — closed is 0"
     );
     assert_eq!(
         free_status["team_ai_limits_status"]["usage"]["todayTokens"],
@@ -810,6 +858,381 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
     assert_eq!(
         patched["team_ai_limits_status"]["effective"]["dailyTokens"],
         123
+    );
+}
+
+// --- the delegation to Hermes (ADR-0201 증보 v4 P7·P8, #5374) ---------------------------------------
+
+/// A team Hermes: an agent member (workspace scope, no connector mark) pinned to the operator's own link.
+async fn seed_hermes(su: &PgPool, workspace: Uuid, owner: Uuid) -> Uuid {
+    let hermes = seed_agent(su, workspace, owner).await;
+    pin_to_operator_env(su, workspace, hermes).await;
+    hermes
+}
+
+async fn pin_to_operator_env(su: &PgPool, workspace: Uuid, agent: Uuid) {
+    sqlx::query(
+        "INSERT INTO agent_provider_pin (agent_member_id, workspace_id, kind) \
+         VALUES ($1, $2, 'operator_env')",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("pin the agent to the operator's link");
+}
+
+async fn seed_channel(su: &PgPool, workspace: Uuid) -> Uuid {
+    let channel = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', $3)")
+        .bind(channel)
+        .bind(workspace)
+        .bind(format!("c5374-{}", &channel.simple().to_string()[..8]))
+        .execute(su)
+        .await
+        .expect("seed channel");
+    channel
+}
+
+/// When a delegation was called, relative to the UTC day the status counts.
+#[derive(Clone, Copy)]
+enum Called {
+    /// Still `pending`: no `called` time at all.
+    Never,
+    /// Now (today, UTC).
+    Now,
+    /// One second before today's 00:00 UTC.
+    Yesterday,
+}
+
+/// Where a seeded delegation lives: the workspace, its helper, a channel and the Hermes it went to.
+struct Place<'a> {
+    su: &'a PgPool,
+    workspace: Uuid,
+    helper: Uuid,
+    channel: Uuid,
+    hermes: Uuid,
+}
+
+/// One helper run with a task row carrying a delegation marker in `state`, as the worker writes it
+/// (`delegation_ck`: `pending` has no time and no target, every later state has both). `ended` closes the
+/// row the way every ending does (the marker and its time stay: they are the count's source, P7).
+async fn seed_delegation(place: &Place<'_>, state: &str, called: Called, ended: bool) {
+    let Place {
+        su,
+        workspace,
+        helper,
+        channel,
+        hermes,
+    } = *place;
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key) \
+         VALUES ($1, $2, $3, $4, 'running'::run_status, $5, $6)",
+    )
+    .bind(run)
+    .bind(workspace)
+    .bind(helper)
+    .bind(channel)
+    .bind(json!({"type": "work", "title": "s5374", "brief": "s5374"}))
+    .bind(format!("s5374:{run}"))
+    .execute(su)
+    .await
+    .expect("seed the helper's run");
+    let called_at = match called {
+        Called::Never => "NULL",
+        Called::Now => "now()",
+        Called::Yesterday => {
+            "(date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - interval '1 second'"
+        }
+    };
+    let target = (!matches!(called, Called::Never)).then_some(hermes);
+    let (row_state, end_reason, ended_at) = if ended {
+        ("ended", "'done'", "now()")
+    } else {
+        ("active", "NULL", "NULL")
+    };
+    sqlx::query(&format!(
+        "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, state, end_reason, ended_at, \
+                                   delegation_kind, delegation_state, delegation_called_at, delegation_target) \
+         VALUES ($1, $2, $3, '{row_state}', {end_reason}, {ended_at}, 'web_search', $4, {called_at}, $5)"
+    ))
+    .bind(workspace)
+    .bind(run)
+    .bind(helper)
+    .bind(state)
+    .bind(target)
+    .execute(su)
+    .await
+    .expect("seed a delegation marker");
+}
+
+async fn status_of(d: &Door) -> Value {
+    let read = get_settings(&d.http, &with_status(&d.url), &d.owner).await;
+    assert_eq!(read.status(), 200);
+    read.json::<Value>().await.unwrap()["team_ai_limits_status"].clone()
+}
+
+/// What the screen reads about the delegation, in one tuple: (limit as set, effective cap, ceiling,
+/// ceiling-off flag, today's count, available, reason).
+fn delegation_of(status: &Value) -> (Value, Value, Value, Value, Value, Value, Value) {
+    (
+        status["limits"]["dailyDelegations"].clone(),
+        status["effective"]["dailyDelegations"].clone(),
+        status["operatorCeiling"]["dailyDelegations"].clone(),
+        status["operatorCeiling"]["delegationOff"].clone(),
+        status["usage"]["todayDelegations"].clone(),
+        status["delegationAvailable"].clone(),
+        status["delegationUnavailableReason"].clone(),
+    )
+}
+
+/// A workspace with the helper on, one channel and its team Hermes, behind a server with `caps` and
+/// `process`.
+async fn delegation_door(caps: OperatorCaps, process: Process) -> (Door, Uuid, Uuid, Uuid) {
+    let d = door_with(caps, process).await;
+    let ws = d.fixture.workspace;
+    let helper = enable_the_helper(&d.http, &d.url, &d.owner, &d.su, ws).await;
+    let channel = seed_channel(&d.su, ws).await;
+    let hermes = seed_hermes(&d.su, ws, d.fixture.owner.id).await;
+    (d, helper, channel, hermes)
+}
+
+fn ceiling(cap: Option<i64>) -> OperatorCaps {
+    OperatorCaps {
+        daily_delegations: cap,
+        ..OperatorCaps::default()
+    }
+}
+
+/// ADR-0201 증보 v4 P7·P8 (#5374): `?include=team_ai_limits_status` carries what the settings screen says
+/// about the delegation to Hermes — 「오늘 Hermes에 맡긴 횟수 4/30」 and 「지금은 쓸 수 없어요」 with the door's
+/// own closed word. The count is the task rows' marker (`called` or later, today UTC — a pending row,
+/// yesterday's and another workspace's are not counted; an ended row still is); the cap is `min(the
+/// workspace's value or the default 30, the operator's ceiling)` and an unset ceiling is **closed** (`0`, with
+/// `delegationOff`), never "no limit"; the reason is G3~G6 in the door's order, judged for the team (the
+/// helper pinned to the operator's link and a connector-marked agent are not a team Hermes; two are
+/// ambiguous), with G4 as this process reads its three variables and G5 as its env link. No agent is named.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_status_read_counts_todays_delegations_and_names_why_the_door_is_shut() {
+    let _guard = test_lock().await;
+
+    // ---- the count and the cap: a ceiling of 100, the team default mode ----
+    let (d, helper, channel, hermes) =
+        delegation_door(ceiling(Some(100)), Process::team_default()).await;
+    let ws = d.fixture.workspace;
+    assert_eq!(
+        delegation_of(&status_of(&d).await),
+        (
+            json!(null),
+            json!(30),
+            json!(100),
+            json!(false),
+            json!(0),
+            json!(true),
+            json!(null)
+        ),
+        "nothing set: the default 30 under the ceiling, nothing used, the door open"
+    );
+    let here = Place {
+        su: &d.su,
+        workspace: ws,
+        helper,
+        channel,
+        hermes,
+    };
+    for (state, called, ended) in [
+        ("called", Called::Now, false),
+        ("done", Called::Now, true),
+        ("failed", Called::Now, false),
+        // not counted: never called, called yesterday
+        ("pending", Called::Never, false),
+        ("done", Called::Yesterday, true),
+    ] {
+        seed_delegation(&here, state, called, ended).await;
+    }
+    // another workspace's delegation today is not this workspace's
+    let other = delegation_door(ceiling(Some(100)), Process::team_default()).await;
+    let there = Place {
+        su: &other.0.su,
+        workspace: other.0.fixture.workspace,
+        helper: other.1,
+        channel: other.2,
+        hermes: other.3,
+    };
+    seed_delegation(&there, "called", Called::Now, false).await;
+    assert_eq!(
+        d.patch(json!({"team_ai_limits": {"dailyDelegations": 3}}))
+            .await
+            .status(),
+        200
+    );
+    let status = status_of(&d).await;
+    assert_eq!(
+        delegation_of(&status),
+        (
+            json!(3),
+            json!(3),
+            json!(100),
+            json!(false),
+            json!(3),
+            json!(false),
+            json!("daily_cap")
+        ),
+        "three called today against the administrator's three: the day's cap is spent"
+    );
+    assert!(
+        !status.to_string().contains(&hermes.to_string())
+            && !status.to_string().contains(&helper.to_string()),
+        "the status names no agent: {status}"
+    );
+    assert_eq!(
+        d.patch(json!({"team_ai_limits": {"dailyDelegations": 200}}))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        delegation_of(&status_of(&d).await),
+        (
+            json!(200),
+            json!(100),
+            json!(100),
+            json!(false),
+            json!(3),
+            json!(true),
+            json!(null)
+        ),
+        "the operator's ceiling is lower than the administrator's 200"
+    );
+    assert_eq!(
+        d.patch(json!({"team_ai_limits": {"dailyDelegations": null}}))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        delegation_of(&status_of(&d).await).1,
+        json!(30),
+        "a dropped value is the default 30 again, never \"no limit\""
+    );
+    // G1 is the bag's own switch, not this word: the bundle off leaves the workspace's half open
+    assert_eq!(
+        d.patch(json!({"team_ai_roles": {"hermes": false}}))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        status_of(&d).await["delegationUnavailableReason"],
+        json!(null)
+    );
+
+    // ---- G3 for the team ----
+    // the helper pinned to the operator's link is not a Hermes and does not make the one ambiguous
+    pin_to_operator_env(&d.su, ws, helper).await;
+    assert_eq!(status_of(&d).await["delegationAvailable"], json!(true));
+    // a connector-marked agent runs one person's apps: nobody's team Hermes (T4)
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id = $1")
+        .bind(hermes)
+        .execute(&d.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        status_of(&d).await["delegationUnavailableReason"],
+        json!("hermes_not_connected")
+    );
+    sqlx::query("UPDATE agent SET connector_owner_human_id = NULL WHERE member_id = $1")
+        .bind(hermes)
+        .execute(&d.su)
+        .await
+        .unwrap();
+    // two team Hermes: which one is meant is a guess the door does not make (P16-D ⑨)
+    seed_hermes(&d.su, ws, d.fixture.owner.id).await;
+    assert_eq!(
+        status_of(&d).await["delegationUnavailableReason"],
+        json!("hermes_ambiguous")
+    );
+
+    // ---- the process's facts: G4 and G5, and the ceiling ----
+    let connection_mode = Process {
+        declarations: HermesDeclarations {
+            tools_locked: true,
+            connector_apps_set: true,
+            ..HermesDeclarations::default()
+        },
+        env_resolves: true,
+    };
+    let unresolved = Process {
+        env_resolves: false,
+        ..Process::team_default()
+    };
+    for (caps, process, word, label) in [
+        (
+            ceiling(Some(100)),
+            Process::none(),
+            "tools_not_locked",
+            "nothing declared on the api",
+        ),
+        (
+            ceiling(Some(100)),
+            connection_mode,
+            "connection_mode",
+            "a connection-mode variable holds a value",
+        ),
+        (
+            ceiling(Some(100)),
+            unresolved,
+            "pin_unresolved",
+            "the env link or its key is missing",
+        ),
+        (
+            ceiling(None),
+            Process::team_default(),
+            "ceiling_unset",
+            "no ceiling: closed",
+        ),
+        (
+            ceiling(Some(0)),
+            Process::team_default(),
+            "ceiling_unset",
+            "a ceiling of 0: closed",
+        ),
+    ] {
+        let (shut, ..) = delegation_door(caps, process).await;
+        let status = status_of(&shut).await;
+        assert_eq!(status["delegationAvailable"], json!(false), "{label}");
+        assert_eq!(
+            status["delegationUnavailableReason"],
+            json!(word),
+            "{label}"
+        );
+        if word == "ceiling_unset" {
+            assert_eq!(
+                (
+                    &status["effective"]["dailyDelegations"],
+                    &status["operatorCeiling"]["dailyDelegations"],
+                    &status["operatorCeiling"]["delegationOff"]
+                ),
+                (&json!(0), &json!(null), &json!(true)),
+                "{label}"
+            );
+        }
+    }
+    // a fresh instance (nothing connected, nothing declared, no ceiling) names the first gate: G3
+    let fresh = door_with(OperatorCaps::default(), Process::none()).await;
+    enable_the_helper(
+        &fresh.http,
+        &fresh.url,
+        &fresh.owner,
+        &fresh.su,
+        fresh.fixture.workspace,
+    )
+    .await;
+    assert_eq!(
+        status_of(&fresh).await["delegationUnavailableReason"],
+        json!("hermes_not_connected")
     );
 }
 
