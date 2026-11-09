@@ -1770,6 +1770,22 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "desktop.notify.workPermission": [
+    {
+      "type": 1,
+      "value": "session"
+    },
+    {
+      "type": 0,
+      "value": ": 맥에서 실행 허락을 기다려요"
+    }
+  ],
+  "desktop.notify.workPermissionTitle": [
+    {
+      "type": 0,
+      "value": "응답 필요"
+    }
+  ],
   "desktop.tray.closeNotice": [
     {
       "type": 0,

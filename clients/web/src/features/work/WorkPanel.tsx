@@ -624,7 +624,7 @@ function SessionPeek({
         <p className="text-meta text-ink-muted" data-testid="work-peek-empty">
           {workHostTrust(session, hosts) !== "local"
             ? "진행 내역 중계가 검증되지 않은 호스트입니다. 세션 원장만 확인할 수 있습니다."
-            : `아직 진행 내역이 없습니다. ${emptyStepsDetail(session, hosts)}`}
+            : `아직 진행 내역이 없어요. ${emptyStepsDetail(session, hosts)}`}
         </p>
       ) : (
         <>
