@@ -91,7 +91,7 @@ sources:
 ## 첫 문구 바꾸기
 
 - 문구는 `i18n/<lang>.json`의 `hero_eyebrow`(제목 위 머리글), `hero_title_1`·`hero_title_2`(제목 두 반쪽, `src/index.html`의 `<h1>`에서 반쪽마다 블록으로 쌓여요), `hero_lead`(한 문단), `hero_proof_1`~`hero_proof_3`(리드 아래 증거 칩 셋, `<ul class="proof">`)예요. 칩은 단추가 아니라 표지라 누를 곳이 없어요.
-- 링크 미리 보기에 나가는 `meta_description`은 리드 앞 두 문장을 150자 이하로 맞춰요(`check.mjs`가 막아요). 탭 제목 `meta_title`은 7개 언어 모두 `oort` 그대로예요(owner 11-09, `check.mjs`가 막아요).
+- 링크 미리 보기에 나가는 `meta_description`은 「oort Mac 앱 내려받기. + 한 줄 소개」예요. 150자 이하이고 첫 문장에 oort·Mac이 있어야 해요(`check.mjs`가 막아요, #5568 검수 1회차 M1). 탭 제목 `meta_title`은 7개 언어 모두 `oort` 그대로예요(owner 11-09, `check.mjs`가 막아요).
 - 7개 언어를 함께 바꿔요(빌드가 키를 맞춰 봐요). 줄표는 쓰지 않고, 일본어는 아래 「언어 더하기」 4처럼 구절 힌트 `|`와 `\u00a0`을 써요. 중국어는 제목 반쪽에만 `|`를 넣어요(제목만 `word-break: keep-all`, 본문은 글자 사이 줄바꿈이 관례라 그대로). 한국어 제목에서 한 덩어리로 둘 낱말 사이는 `\u00a0`(「한\u00a0팀으로」), 리드의 가운뎃점은 앞뒤에 `\u2060`(단어 결합 문자)를 붙여 「·같은」처럼 줄 머리에 오지 않게 해요. 보이지 않는 글자는 사전에 이스케이프로 적어요.
 - 다시 재기: 빌드 → 미리 보기 → `SITE_URL=… ONLY=pages,copy,still,phone,header,webkit node clients/site/scripts/check.mjs`. 넘침·대비(정지 장면 화소 포함)·폰 첫 화면(높이 5종)·낱말 가운데 끊김·칩 넘침·일본어 줄바꿈은 단정이 막아요. 「제목 반쪽 줄 수」와 「리드 줄 수」·「칩 줄 수」는 기록이라 값을 보고 판단해요. `SHOTS_DIR`을 주면 `SHOT_LANGS` 언어의 전체 그림을 남겨요.
 

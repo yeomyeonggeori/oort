@@ -279,8 +279,11 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
   /* 폰 폭은 글 덩어리가 첫 화면 대부분을 차지해 막을 위·옆으로 넓힌다(머리글이 셰이더의 비운 자리 밖이라) */
   .hero::before { top: 41%; width: 170%; height: 124%; }
   .eyebrow { margin-bottom: 12px; font-size: 14px; }
-  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」): pretty 를 모르는 브라우저는 balance 그대로 */
-  .lead { margin-top: 16px; text-wrap: pretty; }
+  .lead { margin-top: 16px; }
+  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」, fr 「sur-le-champ.」): pretty 는 그 두 언어에만.
+     ko·ja·zh 는 balance 그대로(Chromium pretty 가 ko 를 「사람이 그 / 자리에서」로 끊었다, #5568 검수 2회차 L1). es 는 끝줄 문제가 없었고
+     WebKit pretty 에서 한 줄 늘어 balance 그대로. pretty 를 모르는 브라우저는 balance 그대로 */
+  :lang(en) .lead, :lang(fr) .lead { text-wrap: pretty; }
   .proof { gap: 6px; margin-top: 18px; }
   .proof li { padding: 4px 10px; font-size: 13px; }
   .get { margin-top: 28px; }
