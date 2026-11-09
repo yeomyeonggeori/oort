@@ -12,7 +12,7 @@ import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
 import { loopForeverDataUrl } from "@momo/core/features/expressions/gifLoop";
 import { expressionAltText } from "@momo/core/features/expressions/message";
 import type { Expression, ExpressionImage as Picture } from "@momo/core/features/expressions/types";
-import { ExpressionStore } from "./ExpressionStore";
+import { ExpressionImageInterruptedError, ExpressionStore } from "./ExpressionStore";
 import { ExpressionHttpError, type ExpressionTransport } from "./transport";
 import { ExpressionsContext } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
@@ -236,11 +236,13 @@ describe("ExpressionImage: 누르면 사라지거나 흔들리던 것 (#5456)", 
   it("지나가는 실패와 깨진 그림을 가른다: 응답 없음·시간 초과·408·429·5xx·세대 교체 경합은 지나가는 것이다 (#5575)", async () => {
     const cases: Array<[string, unknown, boolean]> = [
       ["fetch 응답 없음", new TypeError("Load failed"), true],
-      ["시간 초과", Object.assign(new Error("aborted"), { name: "AbortError" }), true],
+      ["시간 초과", new DOMException("aborted", "AbortError"), true],
+      ["디코드 실패", new DOMException("bad image", "EncodingError"), false],
       ["503", new ExpressionHttpError(503, undefined), true],
       ["429", new ExpressionHttpError(429, undefined), true],
-      ["오프라인", new Error("offline"), true],
-      ["받는 도중 걷힘", new Error("evicted expression"), true],
+      ["오프라인", new ExpressionImageInterruptedError("offline"), true],
+      ["받는 도중 걷힘", new ExpressionImageInterruptedError("evicted expression"), true],
+      ["같은 글의 보통 오류", new Error("offline"), false],
       ["404(숨김·틀린 sha)", new ExpressionHttpError(404, undefined), false],
       ["형식이 다름", new Error("expression image type"), false],
     ];

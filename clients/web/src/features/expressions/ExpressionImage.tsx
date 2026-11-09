@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { expressionAltText } from "@momo/core/features/expressions/message";
 import type { Expression, ExpressionDraft } from "@momo/core/features/expressions/types";
 import { useExpressions } from "./context";
+import { ExpressionImageInterruptedError } from "./ExpressionStore";
 
 function useReduceMotion() {
   const [reduce, setReduce] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
@@ -45,13 +46,11 @@ function slotBox(width: number, height: number, limit: number) {
  * 형식이 다름, 디코드 실패)는 다시 받아도 같으므로 글자로 둔다.
  */
 function transientImageFailure(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  const name = (error as { name?: unknown } | null)?.name;
-  if (name === "AbortError" || name === "TimeoutError") return true;
+  if (error instanceof ExpressionImageInterruptedError || error instanceof TypeError) return true;
+  // 요청 시간 초과(`binaryRequest` 의 AbortController) · 시간 제한. 디코드 실패(EncodingError)는 지나가는 것이 아니다.
+  if (error instanceof DOMException) return error.code === DOMException.ABORT_ERR || error.code === DOMException.TIMEOUT_ERR;
   const status = (error as { status?: unknown } | null)?.status;
-  if (typeof status === "number") return status === 408 || status === 429 || status >= 500;
-  const message = (error as { message?: unknown } | null)?.message;
-  return message === "offline" || message === "evicted expression";
+  return Number.isFinite(status) && (status === 408 || status === 429 || (status as number) >= 500);
 }
 /** 지나가는 실패 뒤 다시 받기까지 기다리는 시간: 1.5초부터 두 배씩, 30초에서 멈춘다(연결이 오래 끊겨도 요청이 쌓이지 않는다). */
 const RETRY_FIRST_MS = 1_500;
