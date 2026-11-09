@@ -13,12 +13,15 @@ TEMPLATE="$SCRIPT_DIR/fixtures/oort-doctor/valid.env.template"
 OVERLAY="$SCRIPT_DIR/fixtures/oort-doctor/doorbell-true.env.overlay"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-doctor-test.XXXXXX")"
 PG_CID=""
+# #5606: removed by name, so a `docker run` that created the container and then
+# failed to start it (no id printed) cannot leave a Created container behind.
+PG_NAME="oort-doctor-pg-$$"
 HTTP_PID=""
 cleanup() {
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
   # #5606: `--rm` does not help a forced removal — without `-v` the postgres
   # image's VOLUME outlives the container.
-  [ -n "$PG_CID" ] && docker rm -f -v "$PG_CID" >/dev/null 2>&1 || true
+  docker rm -f -v "$PG_NAME" >/dev/null 2>&1 || true
   case "$SANDBOX" in "${TMPDIR:-/tmp}"/oort-doctor-test.*) rm -rf -- "$SANDBOX" ;; esac
 }
 trap cleanup EXIT INT TERM
@@ -645,7 +648,8 @@ T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
-PG_CID="$(docker run -d --rm --name "oort-doctor-pg-$$" \
+PG_CID="$(docker run -d --rm --name "$PG_NAME" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \

@@ -294,9 +294,9 @@ expect_red path_injection cipher_secret_path_invalid \
 : >"$fake_log"
 expect_red restore_failure '' \
   invoke_restore restore_fail "$source_volume" "$repo_volume" "$restore_volume" "$cipher"
-# #5606: removals carry `-v`; the negative check matches any rm flag form so it
-# cannot pass vacuously when the flags change.
-grep -Eq "(^| )rm( -[a-z]+)* momo-pitr-${run_id}-restore-job" "$fake_log" \
+# #5606: removals carry `-v`; the negative check matches any rm flag form (short,
+# clustered or long like --force/--volumes) so it cannot pass vacuously when flags change.
+grep -Eq "(^| )rm( --?[a-z]+)* momo-pitr-${run_id}-restore-job" "$fake_log" \
   && fail "restore cleanup used a caller-derived container name"
 grep -Fq 'rm -f -v deadbeefcafe' "$fake_log" \
   || fail "failed restore job owned by this invocation was not cleaned with -v (#5606)"
@@ -405,7 +405,7 @@ attach_status=$?
 set -e
 [ "$attach_status" -eq 55 ] \
   || fail "attach cleanup fixture did not reach injected cp failure status=$attach_status output=$attach_output"
-! grep -Eq "(^| )rm( -[a-z]+)* $attach_source_container " "$fake_log" \
+! grep -Eq "(^| )rm( --?[a-z]+)* $attach_source_container " "$fake_log" \
   || fail "attach cleanup attempted to remove the live source container"
 ! grep -Fq "volume rm $attach_source_volume " "$fake_log" \
   || fail "attach cleanup attempted to remove the live source volume"

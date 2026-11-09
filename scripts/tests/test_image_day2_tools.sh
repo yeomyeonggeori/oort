@@ -70,7 +70,6 @@ APP_TAG="momo-rust:day2-${PREFIX}"
 # Colima/macOS: default TMPDIR (/var/folders) and /tmp are not bind-mounted
 # into the VM. Keep the sandbox under the worktree (/Users/...) so -v works.
 SANDBOX="$(mktemp -d "$REPO_ROOT/.tmp-${PREFIX}.XXXXXX")"
-PG_CID=""
 BAK_CID=""
 NET_CREATED=0
 
@@ -78,7 +77,9 @@ cleanup() {
   # #5606: `-v` so the postgres image's VOLUME goes with the container, and the
   # backup container is removed here too (a failure between its `docker run`
   # and its own `rm` used to leave it behind).
-  [ -n "$PG_CID" ] && docker rm -f -v "$PG_CID" >/dev/null 2>&1 || true
+  # By name: a `docker run` that created the container but failed to start it
+  # prints no id, and would otherwise leave a Created container.
+  docker rm -f -v "$PG_NAME" >/dev/null 2>&1 || true
   [ -n "$BAK_CID" ] && docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
   if [ "$NET_CREATED" = 1 ]; then
     docker network rm "$NET" >/dev/null 2>&1 || true
@@ -122,11 +123,11 @@ NET_CREATED=1
 
 TOKEN_PG="$(openssl rand -hex 12)"
 docker run -d --name "$PG_NAME" --network "$NET" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \
   pgvector/pgvector:0.8.7-pg18-trixie >/dev/null
-PG_CID="$PG_NAME"
 
 i=0
 while [ "$i" -lt 40 ]; do
@@ -211,6 +212,7 @@ BAK_ERR="$SANDBOX/backup.err"
 docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
 set +e
 docker run --name "$BAK_CID" --user 0 --network "$NET" --entrypoint /bin/bash \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -v "$SANDBOX:/mnt/test:ro" \
   "$IMAGE" \
   -c 'set -euo pipefail

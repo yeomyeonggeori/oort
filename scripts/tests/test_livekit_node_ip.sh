@@ -157,8 +157,11 @@ else
     name="oort-1856a-nodeip-$$"
     log="$TMP/livekit-boot.log"
     "$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true
+    # #5606: armed before the run, by name — an interrupt mid-run must not strand it.
+    trap '"$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true; rm_tmp' EXIT INT TERM
     set +e
     "$DOCKER_BIN" run -d --name "$name" \
+      --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
       -e MOMO_LIVEKIT_API_KEY=devkey \
       -e MOMO_LIVEKIT_API_SECRET=devsecret-1856a-nodeip-32chars \
       -e MOMO_LIVEKIT_NODE_IP=127.0.0.1 \
@@ -169,6 +172,9 @@ else
     run_rc=$?
     set -e
     if [ "$run_rc" -ne 0 ]; then
+      # #5606: a run that created the container and failed to start it leaves it
+      # Created; remove it by name (with its volumes) before skipping.
+      "$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true
       printf '[livekit-node-ip] docker run failed (image pull/start) — boot log proof skipped:\n' >&2
       cat "$TMP/run.err" >&2 || true
     else

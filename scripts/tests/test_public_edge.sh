@@ -311,15 +311,20 @@ pass "all ${agent_media_edges} tracked edge Caddyfiles deny /v1/agent-media/* be
 
 # Real 403 on the loopback file — :80 so automatic HTTPS/ACME stays off.
 LOCAL_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
-  -p "127.0.0.1:${LOCAL_PORT}:80" \
-  -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
-  "$CADDY_IMAGE")"
+EDGE_NAME="oort-sh2-local-edge-$$"
 cleanup_local_edge() {
-  # #5606: the caddy image declares VOLUME /data and /config; `-v` takes them along.
-  docker rm -f -v "$cid" >/dev/null 2>&1 || true
+  # #5606: by name, and armed before `docker run`. A run that creates the container
+  # and then fails to start it (a port bind) prints no id, and the old id-based
+  # cleanup left a Created container (two such, from 10-22 and 10-27). The caddy
+  # image declares VOLUME /data and /config; `-v` takes them along.
+  docker rm -f -v "$EDGE_NAME" >/dev/null 2>&1 || true
 }
 trap 'cleanup_local_edge; rm_tmp_root' EXIT INT TERM
+docker run -d --name "$EDGE_NAME" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
+  -p "127.0.0.1:${LOCAL_PORT}:80" \
+  -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
+  "$CADDY_IMAGE" >/dev/null
 deadline=$(( $(date -u +%s) + 30 ))
 local_code=""
 until local_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
