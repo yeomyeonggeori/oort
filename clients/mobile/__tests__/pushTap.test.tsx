@@ -2932,6 +2932,32 @@ describe('맥 세션 권한 요청 탭 (#5593)', () => {
     expect(screen.queryByTestId('work-permission-card')).toBeNull();
   });
 
+  it('착지한 카드의 요청이 그 뒤에 닫히면(이 카드에서 답했을 수 있다) 「이미 처리됐어요」를 세우지 않는다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow({status: 'running'})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(PERMISSION_AIM)),
+    );
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('work-permission-card')).toBeTruthy(), SETTLE);
+
+    // 결정이 원장에 남고 화면이 진행을 다시 읽는다(이 카드의 허락이든 다른 기기의 답이든 같은 줄이 온다).
+    commitLater(
+      GENERAL,
+      sessionEventRow(31, DECIDED_EVENT, 'approval.decided', {
+        request_event_id: PERMISSION_EVENT,
+        outcome: 'selected',
+        option_id: 'allow-once',
+      }),
+    );
+    await act(async () => {
+      await queryClient?.invalidateQueries({queryKey: ['work-session-events']});
+    });
+    await waitFor(() => expect(screen.queryByTestId('work-permission-card')).toBeNull(), SETTLE);
+    expect(screen.queryByTestId('work-detail-permission-gone')).toBeNull();
+  });
+
   it('남의 세션이면 평범한 알림처럼 그 줄이 있는 대화로 간다', async () => {
     installFetch();
     workSessionRows = [sessionRow({status: 'running', memberId: MINSU})];

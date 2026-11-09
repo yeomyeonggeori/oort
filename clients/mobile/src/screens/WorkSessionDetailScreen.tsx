@@ -121,6 +121,10 @@ export default function WorkSessionDetailScreen({
     setSeenLandingToken(landingToken);
     if (landingToken !== undefined) setMode(DEFAULT_MODE);
   }
+  // 이 착지에서 그 요청이 한 번이라도 열려 있었는가. 열려 있던 요청이 닫힌 것은 사람이 **이 카드에서** 답한 것일 수 있다 —
+  // 그 뒤에 「다른 기기에서 답했어요」를 세우면 방금 누른 허락을 남의 일로 말한다. 그래서 「이미 처리됐어요」는 착지한 순간부터
+  // 카드가 없을 때만 선다.
+  const [landingSeenOpen, setLandingSeenOpen] = useState<number | undefined>(undefined);
   const reduceMotion = useReduceMotion();
   const fade = useRef(new Animated.Value(1)).current;
   const {workspaceId, member} = useSession();
@@ -339,9 +343,11 @@ export default function WorkSessionDetailScreen({
     permissionLanding !== undefined &&
     openRequest !== null &&
     uuidEq(openRequest.requestEventId, permissionLanding.requestEventId);
+  if (landingOpen && landingSeenOpen !== landingToken) setLandingSeenOpen(landingToken);
   const landingGone =
     permissionLanding !== undefined &&
     !landingOpen &&
+    landingSeenOpen !== landingToken &&
     eventsQuery.data !== undefined &&
     !eventsQuery.isFetching;
   const hasCachedEvents = eventsQuery.data !== undefined;
