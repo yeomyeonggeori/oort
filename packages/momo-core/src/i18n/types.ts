@@ -3,7 +3,8 @@ import type { MessageArgs, MessageKey } from './generated/messages';
 
 /** Compiled AST only; P0-5 may supply a pseudo catalog without shipping the compiler. */
 export type MessageCatalog = Readonly<Record<string, MessageFormatElement[]>>;
-export type CatalogLocale = 'en-US' | 'ko-KR';
+/** Every ADR-0213 language has a catalog; only ko/en are complete (see `tooling/generate.mjs`). */
+export type CatalogLocale = 'en-US' | 'ko-KR' | 'ja-JP' | 'zh-Hans' | 'zh-Hant' | 'es-419' | 'fr-FR';
 export type MessageValues<K extends MessageKey> = MessageArgs[K];
 export type MessageArguments<K extends MessageKey> = MessageArgs[K] extends Record<string, never>
   ? [values?: MessageArgs[K]] : [values: MessageArgs[K]];
