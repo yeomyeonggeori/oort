@@ -229,8 +229,10 @@ export function DesktopNotifications() {
                 .getQueryData<WorkSession[]>(workSessionsKey(current.workspaceId))
                 ?.find((candidate) => uuidEq(candidate.id, sessionId)),
             isWorkSessionVisible: isAgentSessionViewed,
-            workPermissionSentence: () =>
-              messagesRef.current.formatMessage("desktop.notify.workPermission"),
+            workPermissionTitle: () =>
+              messagesRef.current.formatMessage("desktop.notify.workPermissionTitle"),
+            workPermissionSentence: (sessionName: string) =>
+              formatRef.current("desktop.notify.workPermission", { session: sessionName }),
           }
         : {}),
       nowMs,
@@ -246,10 +248,17 @@ export function DesktopNotifications() {
         });
       }
       // 이 기기가 아직 모르는 세션의 권한 요청(#5595): 세션 원장을 한 번 읽고 한 번만 다시 판정한다. 못 읽으면 접는다.
+      // 캐시가 신선해도 서버까지 간다(`staleTime: 0`, design-review H-2): 그 캐시에 이 세션이 없다는 것이 곧 캐시가
+      // 낡았다는 뜻이다. 앱 기본 `staleTime`(30초)이면 `fetchQuery`가 그 캐시를 그대로 돌려줘, 보지 않던 채널에서
+      // 막 시작한 세션의 첫 권한 요청이 소리 없이 빠진다.
       if (decision.skip === "owner-unknown" && !answered) {
         const askedIn = current.workspaceId;
         void current.queryClient
-          .fetchQuery({ queryKey: workSessionsKey(askedIn), queryFn: () => fetchWorkSessions(askedIn) })
+          .fetchQuery({
+            queryKey: workSessionsKey(askedIn),
+            queryFn: () => fetchWorkSessions(askedIn),
+            staleTime: 0,
+          })
           .then(
             () => {
               if (aliveRef.current && contextRef.current.workspaceId === askedIn) handleEvent(event, true);
@@ -259,7 +268,7 @@ export function DesktopNotifications() {
       }
       return;
     }
-    const { messageId, channelId, body, workSessionId } = decision.notification;
+    const { messageId, channelId, body, workSessionId, summaryLabel, bannerGroup } = decision.notification;
     const approval = decision.notification.kind === "approval";
     const threadReply = decision.notification.kind === "thread-reply";
     // 작업 권한 요청(#5595)의 제목은 코어가 정한 세션 이름이다(작성자는 흔히 받는 사람 자신이다).
@@ -297,10 +306,12 @@ export function DesktopNotifications() {
       "thread-reply": "thread-reply",
     };
     osNotifier().offer({
-      kind: kindMap[decision.notification.kind],
+      // 작업 권한 요청(#5595)은 로컬 칸의 「응답 필요」 배너와 한 묶음이다: 같은 순간(맥에서 실행 허락을 기다림)을 같은
+      // 제목으로 말하고, 묶이면 「응답 필요 N건」에 세션 이름·칸 이름이 나란히 선다(design-review M-1).
+      kind: bannerGroup ?? kindMap[decision.notification.kind],
       title,
       ...(body === undefined ? {} : { body }),
-      label: title.replace(/^승인 필요 · /, ""),
+      label: summaryLabel ?? title.replace(/^승인 필요 · /, ""),
       // 승인 알림은 채널 맨 아래가 아니라 **그 카드**로 연다(#3738): 놓친 카드를 찾느라
       // 위로 스크롤하다 만료를 맞이하지 않게. 스레드 답글은 그 스레드를 열고 그 답글로 간다(#4890).
       // 멘션·DM은 지금까지처럼 채널이다.

@@ -102,6 +102,17 @@ export interface DesktopNotification {
    * The card lives in that session's agent pane, not in the channel, so the caller routes by this id.
    */
   workSessionId?: string;
+  /**
+   * The name a grouped banner lists for this one, when the title is a kind word rather than a name (#5595: the
+   * session's name under the title 「응답 필요」). Absent means the title is the name.
+   */
+  summaryLabel?: string;
+  /**
+   * The OS banner family this one is grouped with, when it is not its kind's own (#5595: a work permission request is
+   * the same moment as the local pane's 「응답 필요」 banner — the agent waits for 허락 on this Mac — so they share one
+   * group and one grouped title, 「응답 필요 N건」). Absent means the kind's own group.
+   */
+  bannerGroup?: "waiting";
 }
 
 export type NotifyDecision =
@@ -316,11 +327,17 @@ export interface NotifyContext {
    */
   isWorkSessionVisible?: (sessionId: string) => boolean;
   /**
-   * The body of a work permission banner: a fixed sentence from the dictionary
-   * (`desktop.notify.workPermission`), read by the caller in the current language like `inviteLinkSentence`. The
-   * message body is the server's English (`Approval requested`) and is never shown.
+   * The title of a work permission banner: the dictionary's `desktop.notify.workPermissionTitle` (「응답 필요」, the
+   * word the local pane banner already uses for the same moment, `paneStatus.attentionCopy`). Read by the caller in
+   * the current language like `inviteLinkSentence`. Absent means the session's name is the title.
    */
-  workPermissionSentence?: () => string;
+  workPermissionTitle?: () => string;
+  /**
+   * The body of a work permission banner for one session name: the dictionary's `desktop.notify.workPermission`
+   * (「<세션 이름>: 맥에서 실행 허락을 기다려요」, the card's verb 허락 and the local pane banner's form). The message
+   * body is the server's English (`Approval requested`) and is never shown.
+   */
+  workPermissionSentence?: (session: string) => string;
   /**
    * Is this thread what the window shows right now (its panel is open on this root)? A reply is **not** in the
    * visible main timeline, so for a thread reply the channel being on screen proves nothing (`isTargetVisible` is
@@ -429,7 +446,9 @@ export function notifyDecision(
  *   alias is not its owner). Asked last, so a line filtered for another reason never costs a read.
  * - **On screen means the card.** A focused window suppresses the banner only while that session's pane is open.
  *
- * Title: the session's name (the owner's own words); body: the dictionary sentence. Nothing from the request.
+ * Copy (design-review M-1): the local pane banner's form for the same moment — title 「응답 필요」, body
+ * 「<세션 이름>: 맥에서 실행 허락을 기다려요」, with the card's verb (허락). The session's name is the owner's own words
+ * (the speaker's name when it has none). Nothing from the request itself.
  */
 function workPermissionDecision(
   message: Message,
@@ -457,14 +476,18 @@ function workPermissionDecision(
     return { show: false, skip: "not-notifiable" };
   }
   const label = session.label.trim();
+  const subject = label === "" ? context.actorFor(message.authorMemberId) : label;
+  const title = context.workPermissionTitle?.() ?? "";
   const notification: DesktopNotification = {
     kind: "approval",
     messageId: message.id,
     channelId: message.channelId,
-    title: label === "" ? context.actorFor(message.authorMemberId) : label,
+    title: title === "" ? subject : title,
     workSessionId: work.sessionId,
+    summaryLabel: subject,
+    bannerGroup: "waiting",
   };
-  const body = context.workPermissionSentence?.();
+  const body = context.workPermissionSentence?.(subject);
   if (body !== undefined && body !== "") notification.body = notificationBody(body) ?? body;
   return { show: true, notification };
 }

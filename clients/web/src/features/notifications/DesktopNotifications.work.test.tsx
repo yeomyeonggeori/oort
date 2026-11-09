@@ -15,6 +15,9 @@ import { DesktopNotifications } from "./DesktopNotifications";
 import { resetBannerClicksForTest } from "./bannerClicks";
 import { osNotifier } from "./osNotifier";
 import { reloadDesktopNotificationKindsForTest } from "./preference";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 
 // =============================================================================
 // #5595 (ADR-0188 D5·D8): 맥 작업 세션의 권한 요청이 데스크탑 OS 배너가 된다 — 그 세션의 주인에게만. 누르면 승인 카드가
@@ -113,7 +116,10 @@ let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 let onMessage: ((event: MessageNewEvent) => void) | null = null;
 
-beforeAll(() => {
+let ko: AppLocale;
+
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -199,19 +205,23 @@ function mountRail(path = "/"): HTMLElement {
       createElement(
         SessionProvider,
         { value: sessionValue() },
-        createElement(() => {
-          const location = useLocation();
-          return createElement(
-            "div",
-            null,
-            createElement(DesktopNotifications),
-            // 이동 횟수까지 읽으려고 location.key 도 싣는다(같은 주소로 다시 가도 키는 새로 난다).
-            createElement(
-              "output",
-              { "data-testid": "notification-route", "data-key": location.key },
-              location.pathname + location.search
-            )
-          );
+        // 배너 문장은 사전을 지금 언어로 읽는다: 한국어 화면으로 잰다(문구 결함 M-1이 한국어였다).
+        createElement(LocaleProvider, {
+          locale: ko,
+          children: createElement(() => {
+            const location = useLocation();
+            return createElement(
+              "div",
+              null,
+              createElement(DesktopNotifications),
+              // 이동 횟수까지 읽으려고 location.key 도 싣는다(같은 주소로 다시 가도 키는 새로 난다).
+              createElement(
+                "output",
+                { "data-testid": "notification-route", "data-key": location.key },
+                location.pathname + location.search
+              )
+            );
+          }),
         })
       )
     )
@@ -347,15 +357,14 @@ async function settleRefetch(): Promise<void> {
 const CARD_ROUTE = `/work?view=terminals&agent=${IDS.session.toLowerCase()}`;
 
 describe("작업 권한 요청 → 데스크탑 OS 배너 (#5595)", () => {
-  it("세션 주인에게 배너 한 장: 제목은 세션 이름, 본문은 사전 문장. 서버의 영어 본문·선택지 이름은 싣지 않는다", async () => {
+  it("세션 주인에게 배너 한 장: 로컬 칸 배너와 같은 꼴(「응답 필요」 / 「<세션 이름>: 맥에서 실행 허락을 기다려요」). 서버의 영어 본문·선택지 이름은 싣지 않는다", async () => {
     await mountSettled();
     await fire(permissionEvent());
 
     expect(showClickable).toHaveBeenCalledTimes(1);
     const [title, body] = showClickable.mock.calls[0] as [string, string | undefined, ClickPayload];
-    expect(title).toBe("UI 검수");
-    // 본문은 사전 문장을 지금 언어로 읽는다(이 시험의 화면은 언어 공급자 없이 기본 en-US다. 한국어 화면은 「맥의 작업이 권한 확인을 기다려요.」).
-    expect(body).toBe("A task on your Mac is waiting for your permission.");
+    expect(title).toBe("응답 필요");
+    expect(body).toBe("UI 검수: 맥에서 실행 허락을 기다려요");
     expect(JSON.stringify(showClickable.mock.calls[0])).not.toMatch(/Approval requested|Allow once|Reject/);
     expect(sentClick().target).toBe(CARD_ROUTE);
   });
@@ -392,6 +401,31 @@ describe("작업 권한 요청 → 데스크탑 OS 배너 (#5595)", () => {
     expect(fetchWorkSessions).toHaveBeenCalledWith(IDS.ws);
     expect(showClickable).toHaveBeenCalledTimes(1);
     expect(sentClick().target).toBe(CARD_ROUTE);
+  });
+
+  it("원장 캐시가 신선해도 그 세션이 없으면 서버까지 다시 읽는다: 보지 않던 채널에서 막 시작한 세션의 첫 요청 (design-review H-2)", async () => {
+    // 다른 세션 하나가 든, 방금 읽은 캐시(이 시험 클라이언트는 staleTime 무한: 캐시만 믿으면 서버에 안 간다).
+    ledger = [workSession({ id: IDS.teammateSession, label: "어제 작업" })];
+    fetchWorkSessions.mockResolvedValue([workSession({ id: IDS.teammateSession, label: "어제 작업" }), workSession()]);
+    await mountSettled();
+    await fire(permissionEvent());
+    await settleRefetch();
+    expect(fetchWorkSessions).toHaveBeenCalledTimes(1);
+    expect(showClickable).toHaveBeenCalledTimes(1);
+    expect(sentClick().target).toBe(CARD_ROUTE);
+  });
+
+  it("두 세션의 요청이 한 묶음이면 「응답 필요 2건」에 세션 이름이 나란히 선다(로컬 칸 배너와 같은 묶음)", async () => {
+    ledger = [workSession(), workSession({ id: IDS.teammateSession, label: "배포 점검" })];
+    await mountSettled();
+    await fire(
+      permissionEvent(),
+      permissionEvent({ session: IDS.teammateSession, id: "019F9A10-0000-7000-8000-0000000000D5" })
+    );
+    expect(showClickable).toHaveBeenCalledTimes(1);
+    const [title, body] = showClickable.mock.calls[0] as [string, string | undefined, ClickPayload];
+    expect(title).toBe("응답 필요 2건");
+    expect(body).toBe("UI 검수, 배포 점검");
   });
 
   it("읽은 원장에도 없으면 추측하지 않는다: 배너 없음, 다시 묻지도 않는다", async () => {

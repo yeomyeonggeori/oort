@@ -1049,12 +1049,13 @@ describe("작업 세션 권한 요청 → OS 배너 (#5595)", () => {
   function workContext(overrides: Partial<NotifyContext> = {}): NotifyContext {
     return context({
       workSession: (id) => (id.toLowerCase() === SESSION.toLowerCase() ? mine : undefined),
-      workPermissionSentence: () => "맥의 작업이 권한 확인을 기다려요.",
+      workPermissionTitle: () => "응답 필요",
+      workPermissionSentence: (session) => `${session}: 맥에서 실행 허락을 기다려요`,
       ...overrides,
     });
   }
 
-  it("세션 주인에게 승인 배너: 제목은 세션 이름, 본문은 사전 문장, 세션 id를 싣는다. 서버의 영어 본문·선택지 이름은 없다", () => {
+  it("세션 주인에게 승인 배너: 로컬 칸 배너와 같은 꼴(제목 「응답 필요」, 본문 「<세션 이름>: 맥에서 실행 허락을 기다려요」), 세션 id를 싣는다. 서버의 영어 본문·선택지 이름은 없다", () => {
     const decision = notifyDecision(workEvent(), workContext());
     expect(decision).toEqual({
       show: true,
@@ -1062,9 +1063,11 @@ describe("작업 세션 권한 요청 → OS 배너 (#5595)", () => {
         kind: "approval",
         messageId: "019F9A10-0000-7000-8000-0000000000D1",
         channelId: CHANNEL,
-        title: "UI 검수",
-        body: "맥의 작업이 권한 확인을 기다려요.",
+        title: "응답 필요",
+        body: "UI 검수: 맥에서 실행 허락을 기다려요",
         workSessionId: SESSION,
+        summaryLabel: "UI 검수",
+        bannerGroup: "waiting",
       },
     });
     expect(JSON.stringify(decision)).not.toMatch(/Approval requested|Allow once|Reject/);
@@ -1146,9 +1149,12 @@ describe("작업 세션 권한 요청 → OS 배너 (#5595)", () => {
     ).toBe(true);
   });
 
-  it("세션 이름이 비면 말한 이의 이름이다", () => {
+  it("세션 이름이 비면 말한 이의 이름으로 말한다. 제목 사전이 없으면 이름이 제목이다", () => {
     const unnamed = { ...mine, label: "  " };
     const decision = notifyDecision(workEvent({ author: ALIAS }), workContext({ workSession: () => unnamed, actorFor: () => "@dohyun-claude" }));
-    expect(decision.show && decision.notification.title).toBe("@dohyun-claude");
+    expect(decision.show && decision.notification.body).toBe("@dohyun-claude: 맥에서 실행 허락을 기다려요");
+    expect(decision.show && decision.notification.summaryLabel).toBe("@dohyun-claude");
+    const untitled = notifyDecision(workEvent(), workContext({ workPermissionTitle: undefined }));
+    expect(untitled.show && untitled.notification.title).toBe("UI 검수");
   });
 });

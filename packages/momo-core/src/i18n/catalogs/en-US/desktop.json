@@ -30,5 +30,6 @@
   "desktop.tray.remainBoth": "{approvals, plural, one {# approval} other {# approvals}} and {panes, plural, one {# pane} other {# panes}} are still waiting for you",
   "desktop.tray.closeNotice": "Closing the window keeps oort in the menu bar, so you still get notifications",
   "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}",
-  "desktop.notify.workPermission": "A task on your Mac is waiting for your permission."
+  "desktop.notify.workPermission": "{session}: waiting for permission to run on your Mac",
+  "desktop.notify.workPermissionTitle": "Waiting for you"
 }

@@ -274,6 +274,7 @@ export const messageKeys = [
   "desktop.menu.window",
   "desktop.notify.threadSummary",
   "desktop.notify.workPermission",
+  "desktop.notify.workPermissionTitle",
   "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
@@ -1615,7 +1616,10 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
-  "desktop.notify.workPermission": {},
+  "desktop.notify.workPermission": {
+    "session": "string"
+  },
+  "desktop.notify.workPermissionTitle": {},
   "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
@@ -3224,7 +3228,8 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
-  "desktop.notify.workPermission": Record<string, never>;
+  "desktop.notify.workPermission": { session: string };
+  "desktop.notify.workPermissionTitle": Record<string, never>;
   "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;

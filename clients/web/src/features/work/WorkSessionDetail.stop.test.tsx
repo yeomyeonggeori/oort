@@ -274,7 +274,15 @@ describe("화면이 내놓는 것 = kill 라우트가 받는 것 (#5595, work_ki
     await confirmStop(el);
     expect(api.end).toHaveBeenCalledWith(WS, SID);
     expect(api.kill).not.toHaveBeenCalled();
-    expect(byTestId(el, "work-end-done")?.textContent).toBe("종료를 서버에 기록했습니다.");
+    expect(byTestId(el, "work-end-done")?.textContent).toBe("세션 기록을 닫았어요.");
+  });
+
+  it("원장 종료의 확인 문장은 실제로 일어나는 일(기록만 닫힘)을 말한다 — 호스트의 작업이 끝난다고 말하지 않는다 (work_kill.rs 「PATCH ended」, design-review M-3)", () => {
+    const el = mount(session({ origin: "local_pty" }));
+    act(() => byTestId(el, "work-end-session")?.click());
+    const warning = byTestId(el, "work-end-warning")?.textContent ?? "";
+    expect(warning).toBe("세션 기록만 닫아요. 호스트에서 돌던 작업은 그대로 남을 수 있어요.");
+    expect(warning).not.toMatch(/정리됩니다|끝냅니다/);
   });
 
   it("맥에서 직접 연 창(local_pty)도 원장 종료다", async () => {
@@ -283,5 +291,94 @@ describe("화면이 내놓는 것 = kill 라우트가 받는 것 (#5595, work_ki
     await confirmStop(el);
     expect(api.end).toHaveBeenCalledTimes(1);
     expect(api.kill).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// 캐럿과 낭독 (#5595 design-review H-1, 같은 클라 `StopRunControl` #3854 H-1과 같은 규칙). 누른 단추가 확인 줄로 바뀌면
+// 그 단추가 사라진다. 캐럿이 <body>로 떨어지지 않고 안전한 쪽(취소)으로, 접으면 무장 단추로, 답이 서면 방금 선 문장으로
+// 간다. jsdom의 `.click()`은 초점을 옮기지 않으므로 키보드처럼 먼저 초점을 놓고 누른다.
+// =============================================================================
+
+describe("멈추기의 캐럿과 낭독 (#5595 design-review H-1)", () => {
+  function arm(el: HTMLElement): void {
+    act(() => byTestId(el, "work-end-session")?.focus());
+    expect(document.activeElement).toBe(byTestId(el, "work-end-session"));
+    act(() => byTestId(el, "work-end-session")?.click());
+  }
+
+  async function commitFromKeyboard(el: HTMLElement): Promise<void> {
+    arm(el);
+    act(() => byTestId(el, "work-end-commit")?.focus());
+    expect(document.activeElement).toBe(byTestId(el, "work-end-commit"));
+    await act(async () => {
+      byTestId(el, "work-end-commit")?.click();
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+  }
+
+  it("무장하면 캐럿은 안전한 쪽(취소)이고, 묻는 문장이 단추보다 먼저 오며 두 단추의 설명이다", () => {
+    const el = mount(session());
+    arm(el);
+    expect(document.activeElement).toBe(byTestId(el, "work-end-cancel"));
+    const question = byTestId(el, "work-end-warning")!;
+    expect(question.id).not.toBe("");
+    expect(byTestId(el, "work-end-commit")?.getAttribute("aria-describedby")).toBe(question.id);
+    expect(byTestId(el, "work-end-cancel")?.getAttribute("aria-describedby")).toBe(question.id);
+    // 읽는 순서: 질문 → 단추.
+    const confirm = byTestId(el, "work-end-confirm")!;
+    expect(question.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("취소하면 캐럿이 「멈추기」 단추로 돌아온다", () => {
+    const el = mount(session());
+    arm(el);
+    act(() => byTestId(el, "work-end-cancel")?.click());
+    expect(byTestId(el, "work-end-confirm")).toBeNull();
+    expect(document.activeElement).toBe(byTestId(el, "work-end-session"));
+  });
+
+  it("답이 서면 캐럿이 그 문장(상태 영역, 탭 순서 밖)으로 간다 — 맥 꺼짐 문장이 읽힌다", async () => {
+    api.kill.mockResolvedValue({ sessionStatus: "running", hostOnline: false, replayed: false });
+    const el = mount(session());
+    await commitFromKeyboard(el);
+    const line = byTestId(el, "work-stop-requested");
+    expect(line?.textContent).toBe("맥이 꺼져 있어요. 맥이 켜지면 멈춰요.");
+    expect(document.activeElement).toBe(line);
+    expect(line?.getAttribute("tabindex")).toBe("-1");
+    expect(line?.getAttribute("role")).toBe("status");
+  });
+
+  it("실패하면 캐럿은 확정 단추에 남는다(다시 누를 수 있다)", async () => {
+    api.kill.mockRejectedValue(new ApiError(500, "boom", "internal"));
+    const el = mount(session());
+    await commitFromKeyboard(el);
+    expect(byTestId(el, "work-end-error")?.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(byTestId(el, "work-end-commit"));
+  });
+
+  it("캐럿이 이 줄 밖에 있었으면 옮기지 않는다", async () => {
+    api.kill.mockResolvedValue({ sessionStatus: "running", hostOnline: true, replayed: false });
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    const el = mount(session());
+    arm(el);
+    act(() => elsewhere.focus());
+    await act(async () => {
+      byTestId(el, "work-end-commit")?.click();
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    expect(byTestId(el, "work-stop-requested")).not.toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
+  it("원장 종료 갈래도 같다: 답 문장으로 캐럿이 간다", async () => {
+    api.end.mockResolvedValue(session({ status: "ended" }));
+    const el = mount(session({ origin: "local_pty" }));
+    await commitFromKeyboard(el);
+    const done = byTestId(el, "work-end-done");
+    expect(document.activeElement).toBe(done);
+    expect(done?.getAttribute("role")).toBe("status");
   });
 });
