@@ -70,10 +70,13 @@ no-secret contract gate. Credentialed dogfood uses
   present, it fails fast unless the run is simply the default no-credential skip.
 - If local loopback is requested, both `MOMO_ENV=local` and
   `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` must be present.
-- If credentialed config is valid, it checks the OpenAI-compatible SSE provider,
-  boots local compose `api` / `relay` / `agent-worker`, verifies redacted
-  `/v1/agent-runtime/status`, proves Hermes is an active `#agent-lab` agent
-  member, and sends one `@hermes` roundtrip.
+- If credentialed config is valid, it hands the run to the former
+  `verify_external_agent_provider.sh`, retired with the Swift stack (#2165),
+  and stops there today. The checks that verifier made are manual until a
+  Rust-stack verifier replaces it: a non-streamed (`"stream": false`)
+  `/chat/completions` preflight, local compose `api` / `relay` /
+  `agent-worker` boot, the redacted link state from `GET /v1/provider/link`,
+  Hermes as an active `#agent-lab` agent member, and one `@hermes` roundtrip.
 
 ## Boundary
 
@@ -106,7 +109,7 @@ mock:
 
 ```sh
 # Terminal A: Hermes owns Codex/OpenAI OAuth or provider keys internally.
-# No real hermes on this host → scripts/mock_hermes.py (OpenAI-compatible SSE).
+# No real hermes on this host → scripts/mock_hermes.py (OpenAI-compatible; answers stream=false with one JSON body).
 python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
 ```
 
