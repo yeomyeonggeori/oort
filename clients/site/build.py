@@ -21,7 +21,7 @@ CSS·스크립트는 페이지 안에 담는다(요청 하나). 다음 중 하�
 
 문서 마크다운(이것만 안다. 나머지는 모두 빌드 실패):
   머리 칸  맨 위 --- 와 --- 사이에 title · description · status(done|partial|planned) · checked(YYYY-MM-DD) ·
-           sources(다음 줄부터 「- 저장소 루트 기준 경로」, 저장소에 있어야 한다)
+           sources(다음 줄부터 「- 저장소 루트 기준 경로」, 저장소에 있어야 한다). checked 는 UTC 오늘 + 하루까지
   제목     「## 글자」 「### 글자」. 끝에 {done}·{partial}·{planned} 를 붙이면 그 부분의 상태 표지
   문단     빈 줄로 나눈다(한 문단은 한 줄로 쓰기를 권한다)
   목록     「- 항목」 또는 「1. 항목」(번호는 1부터 차례로). 한 단계만, 한 항목은 한 줄
@@ -420,7 +420,9 @@ def parse_front(lines):
         day = None
     if day is None:
         raise MdError(no, f"checked 는 YYYY-MM-DD 날짜예요(지금 「{checked}」)")
-    if day > datetime.date.today():
+    # Vercel 은 UTC 로 빌드한다. 한국 새벽(UTC 로는 전날)에 쓴 오늘 날짜가 「미래」로 막히지 않게 UTC 오늘 + 하루까지 받는다
+    latest = datetime.datetime.now(datetime.timezone.utc).date() + datetime.timedelta(days=1)
+    if day > latest:
         raise MdError(no, f"checked({checked})가 오늘보다 뒤예요")
     if not front["sources"]:
         raise MdError(end + 1, "출처(sources)가 하나도 없어요")

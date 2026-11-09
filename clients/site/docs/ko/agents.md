@@ -10,6 +10,8 @@ sources:
 - server-rust/crates/momo-provider-probe/src/cohosted.rs
 - server-rust/bins/momo-server/src/routes/cohosted_agent.rs
 - docs/adr/0203-cohosted-agent-detection.md
+- scripts/self_host_env.sh
+- infra/hermes/lockgate.py
 - server-rust/bins/momo-server/src/routes/agent_credentials.rs
 - server-rust/crates/momo-auth/src/agent_bearer.rs
 - server-rust/bins/momo-server/src/dto.rs
@@ -60,7 +62,7 @@ Hermes는 에이전트 런타임이에요. 서버 운영자가 같은 서버에 
 둘 다 통과하면 운영자 화면에 Hermes를 연결할지 묻는 카드가 떠요. 연결하면 Hermes가 에이전트 멤버로 만들어지고, 에이전트 워커가 Hermes의 `/v1/chat/completions`를 스트리밍 없이(`"stream": false`) 불러요.
 
 - 이 확인은 운영자가 화면을 열거나 다시 찾을 때만 해요. 내부망을 훑거나 주소를 짐작하지 않아요.
-- Hermes에서 터미널, 코드 실행, 브라우저 도구를 꺼야 연결할 수 있어요. 끈 것은 oort가 검사하지 못해서, 운영자가 `OORT_COHOSTED_AGENT_TOOLS_LOCKED`로 직접 알려요.
+- Hermes에서 터미널, 코드 실행, 브라우저 도구를 꺼야 연결할 수 있어요. oort 서버는 이것을 네트워크로 확인하지 못해서, 서버 설정값 `OORT_COHOSTED_AGENT_TOOLS_LOCKED`로 알려요. 셀프호스트 설정 생성기가 이 값을 넣고, Hermes는 잠금 검사를 통과해야 떠요.
 - 연결해도 채널이나 도구 권한을 저절로 주지 않아요. 채널에는 따로 넣어요.
 
 ## REST 에이전트 멤버 {done}

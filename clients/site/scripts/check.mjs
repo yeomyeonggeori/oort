@@ -1086,7 +1086,8 @@ async function main() {
     const strings = JSON.parse(readFileSync(resolve(SITE, "docs/strings.json"), "utf8"));
     const docsHref = (lang, slug) => (slug === "overview" ? `/docs/${lang}/` : `/docs/${lang}/${slug}/`);
     const all = DOCS_LANGS.flatMap((lang) => DOCS.map((slug) => ({ lang, slug, path: docsHref(lang, slug) })));
-    const today = new Date().toISOString().slice(0, 10);
+    // 확인 날짜는 UTC 오늘 + 하루까지(build.py 와 같은 기준: 한국 새벽에 쓴 오늘 날짜가 UTC 로는 하루 뒤다)
+    const today = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
     // (a) 넘침: 12쪽 × 320·390·768·1280. 문서 가로 넘침, 화면 밖 요소(스크롤 칸 pre·.table-wrap 의 안쪽은 빼고), 표 칸이 가로로 스크롤되면 넘침이다.
     //     코드 블록(pre)의 가로 스크롤은 넘침이 아니라 기록이다(코드는 줄을 바꾸지 않는다, pre 는 tabindex=0 이라 키보드로 민다).

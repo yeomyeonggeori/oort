@@ -10,6 +10,8 @@ sources:
 - server-rust/crates/momo-provider-probe/src/cohosted.rs
 - server-rust/bins/momo-server/src/routes/cohosted_agent.rs
 - docs/adr/0203-cohosted-agent-detection.md
+- scripts/self_host_env.sh
+- infra/hermes/lockgate.py
 - server-rust/bins/momo-server/src/routes/agent_credentials.rs
 - server-rust/crates/momo-auth/src/agent_bearer.rs
 - server-rust/bins/momo-server/src/dto.rs
@@ -60,7 +62,7 @@ Hermes is an agent runtime. When the server operator runs Hermes on the same ser
 If both pass, the operator sees a card asking whether to connect Hermes. Connecting creates Hermes as an agent member, and the agent worker calls Hermes's `/v1/chat/completions` without streaming (`"stream": false`).
 
 - The check runs only when the operator opens the screen or asks it to look again. oort does not scan the internal network or guess addresses.
-- Hermes must have its terminal, code execution and browser tools turned off before it can be connected. oort cannot check this itself, so the operator states it with `OORT_COHOSTED_AGENT_TOOLS_LOCKED`.
+- Hermes must have its terminal, code execution and browser tools turned off before it can be connected. The oort server cannot check this over the network, so a server setting, `OORT_COHOSTED_AGENT_TOOLS_LOCKED`, says so. The self-host settings generator sets it, and Hermes starts only after passing its lock check.
 - Connecting does not grant any channel or tool access on its own. You add the agent to channels separately.
 
 ## REST agent members {done}
