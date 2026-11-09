@@ -1,5 +1,5 @@
 //! ADR-0113 증보 2026-10-15 (#3838) P-S1 + P3 (#3914) — the plugin registry's two
-//! reads and four writes, for the four official plugins only.
+//! reads and four writes, for the seven official plugins only.
 //!
 //! ```text
 //! GET    /v1/workspaces/{ws}/plugins                      catalog + the caller's own policy
@@ -21,8 +21,9 @@
 //!   `tests/plugin_registry_write_conformance_pg.rs`) pin the bytes to
 //!   `server/Fixtures/plugin-wire/*.json`, which the web suite feeds through the
 //!   same parser.
-//! * **Four official plugins, three guards.** A row is shown only when it is
-//!   `official`, not revoked, **and** one of [`OFFICIAL_PLUGIN_IDS`]. Anything
+//! * **Seven official plugins, three guards.** A row is shown only when it is
+//!   `official`, not revoked, **and** one of [`OFFICIAL_PLUGIN_IDS`] (seven ids,
+//!   pinned by `the_allowlist_is_the_seven_official_plugins` below). Anything
 //!   else is the same 404 as an id that does not exist.
 //! * **Admission.** Every row passes [`crate::plugin_manifest`] (digest, exact
 //!   key sets, allowlisted vocabularies, no credential-shaped key) and its
@@ -706,7 +707,7 @@ fn catalog_response(
     let mut tools_by_plugin: BTreeMap<&str, Vec<PluginPolicyToolDto>> = BTreeMap::new();
     for row in policy {
         // A projection for a plugin that is not shown (not admitted, not one of
-        // the four) is not this caller's policy here either.
+        // the seven) is not this caller's policy here either.
         if !admitted.contains_key(&row.plugin_id) {
             continue;
         }
