@@ -1070,10 +1070,39 @@ async fn acknowledge_in_tx(
 /// 3. a spawn decided on an approval card: that card's thread;
 /// 4. otherwise the room itself.
 ///
-/// The speaker is the personal agent the owner called (ADR-0198 T5 확정 6), else the
-/// person who asked. The body and props carry one of [`SpawnRefusalReason`]'s words.
-/// No push: the judgment's `work_session_notice` arm selects nobody for this code.
+/// The speaker is the personal agent the owner called (ADR-0198 T5 확정 6) while it may
+/// still speak in that room, else the person who asked. The body and props carry one
+/// of [`SpawnRefusalReason`]'s words. No push: the judgment's `work_session_notice`
+/// arm selects nobody for this code.
+///
+/// **Guarded (#5614 H1):** the whole line — its lookups and its write — runs in one
+/// SAVEPOINT. A line that cannot be written is rolled back and logged alone, and the
+/// ack commits: the Mac's answer is recorded whatever happens to the line about it.
 async fn post_spawn_refusal_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    control: &WorkControlRow,
+    error_label: Option<&str>,
+) -> Result<(), T3Error> {
+    let mut savepoint = momo_db::sqlx::Connection::begin(&mut *conn)
+        .await
+        .map_err(momo_db::DbError::from)?;
+    match spawn_refusal_line_in_tx(&mut savepoint, workspace_id, control, error_label).await {
+        Ok(()) => savepoint.commit().await.map_err(momo_db::DbError::from)?,
+        Err(error) => {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                control_id = %control.id,
+                error = %error,
+                "spawn refusal line was not written; the ack is kept"
+            );
+            savepoint.rollback().await.map_err(momo_db::DbError::from)?;
+        }
+    }
+    Ok(())
+}
+
+async fn spawn_refusal_line_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     control: &WorkControlRow,

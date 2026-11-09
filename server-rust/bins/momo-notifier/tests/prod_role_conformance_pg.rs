@@ -22,7 +22,7 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`, or #5594's `work_permission_request`), or move a write back onto the notifier pool |
+//! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`, or #5594's `work_permission_request` read), move a write back onto the notifier pool, or widen #5614's column grant (table SELECT/UPDATE opens the owner-only `preview`) |
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
@@ -632,11 +632,12 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "momo_notifier",
         control_window_sweep::sweep_lapsed_control_windows(&notifier, 32).await,
     );
-    // loop 2b' — the work-permission expiry sweep (#5594).
+    // loop 2b' — the work-permission expiry sweep (#5594): the read as the notifier, every close
+    // and line as momo_app (two pools, #5614 M2).
     report.check(
         "work permission expiry sweep",
-        "momo_notifier",
-        work_permission_sweep::sweep_lapsed_work_permissions(&notifier, 32).await,
+        "momo_notifier + momo_app",
+        work_permission_sweep::sweep_lapsed_work_permissions(&notifier, &app, 32).await,
     );
     // loop 2c' — share retention.
     report.check(
@@ -768,6 +769,22 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     let sealed = sqlx::query("SELECT attachment_id FROM scheduled_message_attachment LIMIT 1")
         .fetch_all(&notifier)
         .await;
+    // #5614 M1: the notifier reads three columns of work_permission_request and writes none.
+    let permission_privileges: (bool, bool, bool, bool, bool, bool) = sqlx::query_as(
+        "SELECT has_column_privilege('momo_notifier', 'public.work_permission_request', \
+                                     'preview', 'SELECT'), \
+                has_column_privilege('momo_notifier', 'public.work_permission_request', \
+                                     'preview_sha256', 'SELECT'), \
+                has_table_privilege('momo_notifier', 'public.work_permission_request', 'SELECT'), \
+                has_table_privilege('momo_notifier', 'public.work_permission_request', 'UPDATE'), \
+                has_any_column_privilege('momo_notifier', 'public.work_permission_request', \
+                                         'UPDATE'), \
+                has_column_privilege('momo_notifier', 'public.work_permission_request', \
+                                     'expires_at', 'SELECT')",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("read work_permission_request privileges");
     db.finish().await;
     assert!(
         readable.is_ok(),
@@ -780,6 +797,14 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     assert!(
         sealed.is_err(),
         "the reservation table stays sealed from the notifier (ADR-0208 D3)"
+    );
+    assert_eq!(
+        permission_privileges,
+        (false, false, false, false, false, true),
+        "#5614 M1: momo_notifier reads (workspace_id, status, expires_at) of \
+         work_permission_request and nothing else — never the owner-only preview — and writes \
+         none of it (preview, preview_sha256, table SELECT, table UPDATE, any column UPDATE, \
+         expires_at)"
     );
     assert!(
         report.failures.is_empty(),

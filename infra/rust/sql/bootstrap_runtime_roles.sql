@@ -952,12 +952,14 @@ BEGIN
   IF to_regclass('public.work_control') IS NOT NULL THEN
     GRANT SELECT ON TABLE work_control TO momo_notifier;
   END IF;
-  -- #5594: the work-permission expiry sweep closes a lapsed request (`pending -> expired`,
-  -- `expire_lapsed_permission_requests_in_tx`). SELECT for the cross-tenant read and the
-  -- UPDATE's WHERE; no INSERT, no DELETE. Only that loop needs it: the tier sweep (the
+  -- #5594 / #5614 M1·M2: the work-permission expiry sweep's ONE cross-tenant read
+  -- (`workspaces_with_lapsed_permission_requests`) names these three columns and nothing else.
+  -- Column-scoped: the owner-only `preview` (ADR-0188 D5), its hash and the decision columns stay
+  -- unreadable to this BYPASSRLS role, and there is no UPDATE — every close and every line runs
+  -- per workspace on the RLS-bound momo_app pool (two pools, ADR-0122 D-H4). The tier sweep (the
   -- settlement path) does not touch the table, so a missing grant cannot stop it.
   IF to_regclass('public.work_permission_request') IS NOT NULL THEN
-    GRANT SELECT, UPDATE ON TABLE work_permission_request TO momo_notifier;
+    GRANT SELECT (workspace_id,status,expires_at) ON work_permission_request TO momo_notifier;
   END IF;
   IF to_regclass('public.work_host') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE work_host TO momo_notifier;

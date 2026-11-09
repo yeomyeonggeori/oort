@@ -66,7 +66,7 @@ use momo_t3::work_control::{
     target_work_host_in_tx, NewWorkControl, ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
 use momo_t3::work_notice::{
-    is_failed_end, kill_requested_in_tx, post_session_notice_in_tx, WorkNotice,
+    is_failed_end, kill_requested_in_tx, post_session_notice_guarded_in_tx, WorkNotice,
 };
 use momo_t3::work_permission::{
     bridgeable_options, cancel_pending_for_session_in_tx, insert_permission_request_in_tx,
@@ -1016,13 +1016,14 @@ async fn end_in_tx(
     // #5594 (ADR-0188 D8 「실패」, ADR-0220 P2 ④): the Mac ended the session with an
     // error nobody asked for — one line in its thread, and the owner is pushed (the
     // judgment's `work_notice` arm). A person's own end and a requested kill are not
-    // failures.
+    // failures. The line is guarded (#5614 H1): if it cannot be written the end still
+    // commits — the Mac must always be able to say the session is over.
     if let Some(exit_code) = exit_code {
         let host_signed = signing_host_id.is_some();
         let kill_requested =
             host_signed && kill_requested_in_tx(conn, workspace_id, session_id).await?;
         if is_failed_end(host_signed, Some(exit_code), kill_requested) {
-            post_session_notice_in_tx(
+            post_session_notice_guarded_in_tx(
                 conn,
                 workspace_id,
                 session_id,

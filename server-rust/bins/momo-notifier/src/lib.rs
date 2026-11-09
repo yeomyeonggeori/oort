@@ -703,22 +703,53 @@ impl Notifier {
         //
         // Its own task for the reason 2b is: a T3 provider timing out must not stop a
         // permission request's deadline. Runs regardless of `t3_enabled` — a member Mac's
-        // permission bridge is not a T3 feature. With no lapsed requests the cross-tenant
-        // read matches nothing and the loop costs one indexed poll.
-        let permissions = self.clone();
-        let work_permission_sweep_task = tokio::spawn(async move {
-            backoff::supervise(
-                "work permission expiry sweep",
-                permissions.config.sweep_interval,
-                || {
-                    work_permission_sweep::sweep_lapsed_work_permissions(
-                        &permissions.pool,
-                        permissions.config.claim_batch_size,
-                    )
+        // permission bridge is not a T3 feature. Two pools (#5614 M2, ADR-0122 D-H4): the
+        // cross-tenant read of which workspaces have a lapsed request runs on this notifier
+        // pool; every close and every line on an RLS-bound `momo_app` pool. Without that URL
+        // the loop is not spawned (the decision route still refuses a lapsed request).
+        let work_permission_sweep_task =
+            match self.config.work_permission_sweep_database_url.as_deref() {
+                None => {
+                    tracing::warn!(
+                        "work permission expiry sweep disabled: \
+                         MOMO_WORK_PERMISSION_SWEEP_DATABASE_URL (or \
+                         MOMO_SHARE_RETENTION_DATABASE_URL / MOMO_HUDDLE_SWEEP_DATABASE_URL), the \
+                         RLS-bound momo_app connection, is not set; lapsed permission requests \
+                         will not be announced"
+                    );
+                    None
+                }
+                Some(url) => match momo_db::sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(2)
+                    .connect_lazy(url)
+                {
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            "work permission expiry sweep disabled: the RLS-bound database URL \
+                             does not parse"
+                        );
+                        None
+                    }
+                    Ok(write_pool) => {
+                        let permissions = self.clone();
+                        Some(tokio::spawn(async move {
+                            backoff::supervise(
+                                "work permission expiry sweep",
+                                permissions.config.sweep_interval,
+                                || {
+                                    work_permission_sweep::sweep_lapsed_work_permissions(
+                                        &permissions.pool,
+                                        &write_pool,
+                                        permissions.config.claim_batch_size,
+                                    )
+                                },
+                            )
+                            .await;
+                        }))
+                    }
                 },
-            )
-            .await;
-        });
+            };
 
         // ---- loop 2c: the control-window lease sweep (#1425) ---------------
         //
@@ -1106,7 +1137,9 @@ impl Notifier {
         sweep_task.abort();
         lease_task.abort();
         approval_sweep_task.abort();
-        work_permission_sweep_task.abort();
+        if let Some(task) = work_permission_sweep_task {
+            task.abort();
+        }
         run_stall_sweep_task.abort();
         control_window_sweep_task.abort();
         if let Some(task) = share_retention_task {

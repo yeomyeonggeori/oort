@@ -181,6 +181,24 @@ pub enum WorkNotice {
 const NOTICE_NAMESPACE: Uuid = Uuid::from_u128(0x5594_0000_0000_4000_8000_0000_0000_5594);
 
 impl WorkNotice {
+    /// The person the fact is about — the session's (or the spawn's) owner.
+    pub fn owner_member_id(&self) -> Uuid {
+        match self {
+            Self::HostLost {
+                owner_member_id, ..
+            }
+            | Self::SpawnRefused {
+                owner_member_id, ..
+            }
+            | Self::Failed {
+                owner_member_id, ..
+            }
+            | Self::PermissionExpired {
+                owner_member_id, ..
+            } => *owner_member_id,
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::HostLost { .. } => CODE_HOST_LOST,
@@ -330,18 +348,44 @@ pub async fn session_notice_site_in_tx(
 
 /// Write one notice line. Returns `false` when the same fact already has its
 /// line (a retried write).
+///
+/// **Unguarded**: an error here aborts the caller's transaction. The four writers
+/// of a fact (the tier sweep, the expiry sweep, the ack and the end routes) call
+/// [`post_work_notice_guarded_in_tx`] instead, so the fact commits whatever happens
+/// to its line (#5614 H1).
+///
+/// The voice: the session's persona when it may still speak in that room, else the
+/// owner. A personal agent the owner switched off (`member.status = 'suspended'`) or
+/// that left an admitted DM is refused by the DM write boundary (migration 156,
+/// `dm_agent_write_boundary`, 42501 for every role); the same seat check
+/// ([`momo_messaging::dm::dm_agent_can_speak_in_tx`], the stall sweep's) decides here,
+/// and the owner speaks the line instead. The push judgment accepts either author.
 pub async fn post_work_notice_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     site: NoticeSite,
     notice: &WorkNotice,
 ) -> Result<bool, T3Error> {
+    let owner = notice.owner_member_id();
+    let author_member_id = if site.author_member_id != owner
+        && !momo_messaging::dm::dm_agent_can_speak_in_tx(
+            conn,
+            workspace_id,
+            site.channel_id,
+            site.author_member_id,
+        )
+        .await?
+    {
+        owner
+    } else {
+        site.author_member_id
+    };
     let sent = send_message_in_tx(
         conn,
         workspace_id,
         NewMessage {
             channel_id: site.channel_id,
-            author_member_id: site.author_member_id,
+            author_member_id,
             message_type: MessageType::System,
             body: Some(notice.body().to_string()),
             props: notice.props(),
@@ -358,7 +402,8 @@ pub async fn post_work_notice_in_tx(
 }
 
 /// Write one notice in a session's thread, in its voice. `Ok(false)` when the
-/// session row is gone or the line already exists.
+/// session row is gone or the line already exists. Unguarded, like
+/// [`post_work_notice_in_tx`].
 pub async fn post_session_notice_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -369,6 +414,59 @@ pub async fn post_session_notice_in_tx(
         return Ok(false);
     };
     post_work_notice_in_tx(conn, workspace_id, found.site, notice).await
+}
+
+/// [`post_work_notice_in_tx`] inside its own SAVEPOINT (#5614 H1): a line that cannot
+/// be written is rolled back alone, logged, and reported as `Ok(false)`, and the
+/// caller's transaction — the settlement and transition, the expiry, the end, the ack
+/// it reports — commits. The line tells a fact; it must never be what keeps the fact
+/// from being recorded. Only a failure of the savepoint itself is an error.
+pub async fn post_work_notice_guarded_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    site: NoticeSite,
+    notice: &WorkNotice,
+) -> Result<bool, T3Error> {
+    let mut savepoint = sqlx::Connection::begin(&mut *conn).await?;
+    let posted = post_work_notice_in_tx(&mut savepoint, workspace_id, site, notice).await;
+    settle_guarded(savepoint, workspace_id, notice, posted).await
+}
+
+/// [`post_session_notice_in_tx`] inside its own SAVEPOINT — the session lookup
+/// included, so nothing the line needs can abort the caller.
+pub async fn post_session_notice_guarded_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    notice: &WorkNotice,
+) -> Result<bool, T3Error> {
+    let mut savepoint = sqlx::Connection::begin(&mut *conn).await?;
+    let posted = post_session_notice_in_tx(&mut savepoint, workspace_id, session_id, notice).await;
+    settle_guarded(savepoint, workspace_id, notice, posted).await
+}
+
+async fn settle_guarded(
+    savepoint: sqlx::Transaction<'_, sqlx::Postgres>,
+    workspace_id: Uuid,
+    notice: &WorkNotice,
+    posted: Result<bool, T3Error>,
+) -> Result<bool, T3Error> {
+    match posted {
+        Ok(posted) => {
+            savepoint.commit().await?;
+            Ok(posted)
+        }
+        Err(error) => {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                code = notice.code(),
+                error = %error,
+                "work notice line was not written; the fact it reports is kept"
+            );
+            savepoint.rollback().await?;
+            Ok(false)
+        }
+    }
 }
 
 /// Did anyone ask this session to stop (a `kill` control that reached, or is on its
