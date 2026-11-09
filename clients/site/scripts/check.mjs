@@ -1128,6 +1128,52 @@ async function main() {
       }
       await ctx.close();
     }
+    // (a2) 표 칸의 코드가 낱말 가운데서 끊기지 않는다(#5590 검수 M1: 「{주소}/message / s」). 줄은 `/`·`-` 뒤나 빈칸에서만 바뀐다.
+    //      12쪽 × 320·390·600·768·900·1024·1280(900 은 옆 목록이 서는 첫 폭)
+    const codeBreaks = () => {
+      const bad = [];
+      for (const code of document.querySelectorAll(".doc-body td code")) {
+        const chars = [];
+        const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          for (let i = 0; i < n.data.length; i += 1) {
+            const rg = document.createRange();
+            rg.setStart(n, i);
+            rg.setEnd(n, i + 1);
+            const r = [...rg.getClientRects()].find((x) => x.width > 0);
+            chars.push({ ch: n.data[i], top: r ? Math.round(r.top) : null });
+          }
+        }
+        let prev = null;
+        for (let j = 0; j < chars.length; j += 1) {
+          const c = chars[j];
+          if (c.top === null) continue;
+          if (prev && c.top > prev.top + 4) {
+            // 줄 끝 빈칸은 상자가 없어(top null) 건너뛰므로 바로 앞 글자(chars[j-1])로도 본다
+            const before = prev.ch;
+            const gap = chars[j - 1]?.ch;
+            if (!["/", "-", " "].includes(before) && gap !== " " && c.ch !== " ") bad.push(`${code.textContent.slice(0, 40)} 「${before}|${c.ch}」`);
+          }
+          prev = c;
+        }
+      }
+      return bad;
+    };
+    const midBreaks = [];
+    let codeScenes = 0;
+    for (const w of [320, 390, 600, 768, 900, 1024, 1280]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, colorScheme: "light", reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      for (const d of all) {
+        await page.goto(`${BASE}${d.path}`, { waitUntil: "load" });
+        await page.evaluate(() => document.fonts.ready);
+        codeScenes += 1;
+        for (const b of await page.evaluate(codeBreaks)) midBreaks.push(`${d.lang}/${d.slug}@${w}: ${b}`);
+      }
+      await ctx.close();
+    }
+    check("문서 표 칸의 코드가 낱말 가운데서 끊기지 않음(12쪽 × 320·390·600·768·900·1024·1280, `/`·`-`·빈칸에서만 줄바꿈)", midBreaks.length === 0,
+      `${midBreaks.length}${midBreaks.length ? " " + midBreaks.slice(0, 5).join(" | ") : ""} · ${codeScenes}장면`);
     check("문서 넘침 0: 12쪽 × 320·390·768·1280(문서 가로 넘침·화면 밖 요소·표 칸 스크롤)", over.length === 0, `${over.length}/${scenes}${over.length ? " " + over.slice(0, 6).join(" ") : ""}`);
     console.log(`문서 코드 블록 가로 스크롤(기록): ${preRec.length ? preRec.join(" ") : "없음"}`);
 

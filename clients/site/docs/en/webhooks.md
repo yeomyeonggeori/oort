@@ -21,7 +21,7 @@ sources:
 - clients/web/src/features/settings/EventSubscriptionSection.tsx
 ---
 
-Webhooks go both ways. An incoming webhook is an address other services use to post into a channel; an event subscription sends what happens in the workspace out to an address of yours. A workspace owner or admin creates both under AI › 외부 연결 (external connections).
+Webhooks go both ways. An incoming webhook is an address other services use to post into a channel; an event subscription sends what happens in the workspace out to an address of yours. A workspace owner or admin creates both under AI › 외부 연결 (external connections), where they are listed as 「채널로 들어오는 주소」 (incoming) and 「밖으로 보내는 알림」 (outgoing).
 
 ## Incoming webhooks
 
@@ -29,7 +29,7 @@ Three kinds are accepted. Whatever comes in is stored in the channel the same wa
 
 | Kind | Address | What is checked |
 |---|---|---|
-| oort-signed | `POST /v1/webhooks/<workspace id>/<installation id>` | HMAC-SHA256 signature, send time, delivery id |
+| oort-signed | `POST /v1/webhooks/<workspace>/<installation>` | HMAC-SHA256 signature, send time, delivery id |
 | Slack-compatible | `POST /hooks/<token>` | The secret token in the address |
 | GitHub | `POST /v1/integrations/github/webhook` | `X-Hub-Signature-256` signature |
 
@@ -50,8 +50,8 @@ The signature is the HMAC-SHA256, keyed with the secret you got when the webhook
 ```text
 v1
 POST
-/v1/webhooks/<workspace id>/<installation id>
-<installation id>
+/v1/webhooks/<workspace>/<installation>
+<installation>
 <X-Momo-Timestamp value>
 <X-Momo-Delivery-Id value>
 <SHA-256 of the body, in hex>

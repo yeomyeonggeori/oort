@@ -6,10 +6,14 @@ checked: 2026-11-09
 sources:
 - clients/site/values.json
 - clients/site/i18n/ko.json
+- clients/desktop/src-tauri/tauri.conf.json
 - docs/onboarding-deeplink.md
 - clients/web/src/features/welcome/firstRunGate.ts
-- clients/web/src/features/welcome/firstAgent.ts
+- clients/web/src/features/welcome/FirstAgentStage.tsx
+- clients/web/src/features/welcome/AiConnectList.tsx
+- packages/momo-core/src/features/onboarding/aiConnect.ts
 - packages/momo-core/src/features/hostedAgents/presets.ts
+- docs/adr/0198-agents-vs-harnesses-work-request-routing.md
 - packages/momo-core/src/features/agents/channelPlacement.ts
 - docs/adr/0162-external-agent-reception-agent-port.md
 - README.md
@@ -32,16 +36,22 @@ Use the server address or invite link your team gave you. Invite links look like
 
 ## 3. Connect a first agent {partial}
 
-Whoever creates a workspace sees the "첫 에이전트 연결" (connect your first agent) screen on their first visit, after the welcome channel. This screen is still in Korean only. Pick one agent to connect.
+After the welcome channel, newcomers see the "누구의 AI로 생각할까요?" (whose AI should it think with?) screen. This screen is still in Korean only. Connecting agents is an admin's job: anyone who is not an admin sees "에이전트 연결은 관리자가 해요." (an admin connects agents) instead of the list, and can start chatting right away.
 
-| Pick | How it connects | Status |
-|---|---|---|
-| Claude Code | Register the remote MCP server address (Agent Port) | {partial} |
-| Codex | Add the remote server as an MCP connector (Agent Port) | {partial} |
-| Grok bot | Issue a connection value and give it to the Grok bot (Agent Port) | {partial} |
-| OpenAI-compatible | Add this server's AI key on the AI screen | {done} |
+The screen lists these options, in this order.
 
-The server side of Agent Port is built, but it has not yet been checked end to end with a real client, so it is marked Partial. If you skipped this screen, you can do it later under AI › 외부 연결 (external connections). Each option is covered in [Connecting agents](/docs/en/agents/).
+| Option | How to connect | Who can call it | Status |
+|---|---|---|---|
+| API 키 · 팀 에이전트 (API key, team agent) | Opens the AI screen to add an OpenAI-compatible API key | Anyone on the team | {done} |
+| 그록봇 (Grok bot) | Issues an address and a connection value to hand to the Grok bot | The team | {partial} |
+| Claude Code · 내 도구 (my tools) | Turns this Mac's signed-in CLI into a personal agent | Only you | {partial} |
+| Codex · 내 도구 (my tools) | Turns this Mac's signed-in CLI into a personal agent | Only you | {partial} |
+
+- The two "my tools" options appear only in the desktop app, and only when the server allows them. On the web, a single line says you can add Claude Code and Codex from your Mac in the desktop app.
+- A "my tools" option can be picked only when its CLI is installed, signed in and shows as ready (준비됨).
+- If you skip this screen, you can pick it up later on the AI screen.
+
+The Grok bot connects through Agent Port, and "my tools" through the work host on your Mac. Each is covered in [Connecting agents](/docs/en/agents/).
 
 ## 4. Add it to a channel and call it {done}
 

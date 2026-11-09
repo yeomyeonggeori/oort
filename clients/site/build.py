@@ -310,7 +310,11 @@ def render_inline(text, ctx, line, in_link=False):
             code = text[i + 1:j]
             if not code.strip():
                 raise MdError(line, "빈 코드(``)는 모르는 문법이에요")
-            out.append("<code>" + esc(code) + "</code>")
+            # `/` 뒤에 줄을 바꿀 수 있는 자리(<wbr>)를 둔다: 표 칸의 주소가 낱말 가운데서 끊기지 않게(#5590 검수 M1).
+            # <wbr> 는 글자가 아니라 복사한 값에는 들어가지 않는다
+            # 자리 표시(<워크스페이스 id> 같은 꺾쇠 묶음)는 한 덩어리로 둔다(「<|워크스페이스」「<토큰|>」로 갈리지 않게)
+            html = re.sub(r"&lt;[^&<>]*&gt;", lambda m: '<span class="ph">' + m.group(0) + "</span>", esc(code).replace("/", "/<wbr>"))
+            out.append("<code>" + html + "</code>")
             i = j + 1
             continue
         if ch == "[":

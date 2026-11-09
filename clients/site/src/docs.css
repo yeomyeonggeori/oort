@@ -86,8 +86,10 @@ h2 .status, h3 .status { margin-left: 8px; position: relative; top: -2px; }
 .doc-body .table-wrap { margin: 16px 0 0; overflow-x: auto; }
 .doc-body table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.6; }
 .doc-body th, .doc-body td { padding: 10px 16px 10px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
-/* 칸 너비는 낱말 단위로 잡는다(anywhere 면 좁은 창에서 「차례」가 「차/례」로 갈린다). 코드(경로·주소)만 아무 데서나 끊는다 */
-.doc-body td code { overflow-wrap: anywhere; }
+/* 표 칸의 코드는 낱말 가운데서 끊지 않는다(#5590 검수 M1: 「{주소}/message / s」). 줄은 `/` 뒤(build.py 의 <wbr>)·`-` 뒤·빈칸에서만 바꾼다.
+   칸이 넓어져 표가 스크롤되면 check.mjs docs 칸이 막는다 */
+.doc-body td code { overflow-wrap: normal; }
+.doc-body code .ph { white-space: nowrap; }
 .doc-body th:last-child, .doc-body td:last-child { padding-right: 0; }
 .doc-body th { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
 .doc-body td .status { vertical-align: baseline; }
