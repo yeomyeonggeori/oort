@@ -1,142 +1,557 @@
-// Build/test only: AST extraction, not a runtime dependency of either client.
-import {existsSync, readFileSync, readdirSync} from 'node:fs';
+// Build/test only: AST extraction and the direct-copy ratchet (#4834, redesigned by #5589).
+// Never a runtime dependency of the core or either client.
+//
+// The ledger (`direct-copy-baseline.json`, version 2) only goes down:
+//   - `anchor` is a frozen count per file taken at `anchorHead`. Its sha256 is pinned below
+//     (`ANCHOR_SEAL`), so a tool that rewrites the anchor turns every check RED.
+//   - `lowered` holds the files that went down since the anchor (written by `shrink`/`land`).
+//   - `raises` are explicit, one-file entries with an issue number and a reason. They are the
+//     only way a count may go up.
+// Allowed count = (lowered ?? anchor) + raises, and the scan must equal it exactly: higher means
+// new hardcoded copy (use a dictionary key, or add a raise), lower means a stale allowance (run
+// `shrink`). A whole-ledger regeneration — the old landing step that rewrote `{version: 1, files}`
+// — has no place in this format and fails the check.
+import {existsSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import ts from 'typescript';
-import {execFileSync} from 'node:child_process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '../../../../..');
-const LEDGER = join(HERE, 'direct-copy-baseline.json');
-const COPY_NAME = /^(?:aria-label|aria-description|aria-valuetext|title|label|text|message|description|subtitle|placeholder|alt|children|accessibilityLabel|accessibilityHint|headerTitle|emptyText|errorMessage|hint|caption|body|buttonText|confirmText|cancelText)$/i;
+export const LEDGER_PATH = 'packages/momo-core/src/i18n/tooling/direct-copy-baseline.json';
+export const LEDGER_VERSION = 2;
+/**
+ * sha256 of the canonical frozen anchor (`anchorHead` + `anchor`). Tools never write the anchor.
+ * Re-anchoring is a planner act: `anchor <commit>` prints a new ledger and seal, and this
+ * constant changes in a reviewed diff. Nothing else may change it.
+ */
+export const ANCHOR_SEAL = '14cd1f10e95c728bf5706b6f7ed9490e3902fd523f60d2412572e98e7a8dd2c1';
+export const DIMENSIONS = Object.freeze(['ko', 'en', 'cat']);
+
+/** core: Korean anywhere + English only where it is copy. Clients keep the conservative #4834 English rule. */
+export const SURFACES = Object.freeze({
+  core: {roots: ['packages/momo-core/src'], files: [], english: 'copy', exclude: /^packages\/momo-core\/src\/i18n\//},
+  web: {roots: ['clients/web/src'], files: [], english: 'phrase'},
+  mobile: {roots: ['clients/mobile/src'], files: ['clients/mobile/App.tsx', 'clients/mobile/index.js'], english: 'phrase'},
+});
+
+// Names that carry copy: exact (case-insensitive) or a camelCase copy suffix (`actionLabel`, `emptyHeadline`).
+const COPY_EXACT = /^(?:aria-label|aria-description|aria-valuetext|aria-roledescription|aria-placeholder|title|label|text|message|description|subtitle|placeholder|alt|children|content|accessibilityLabel|accessibilityHint|accessibilityValue|headerTitle|emptyText|errorMessage|hint|caption|body|buttonText|confirmText|cancelText|headline|heading|detail|details|summary|tooltip|legend|lead|note|eyebrow|question|prompt|subject|term)$/i;
+const COPY_SUFFIX = /[a-z0-9](?:Label|Text|Title|Message|Description|Hint|Placeholder|Caption|Heading|Headline|Detail|Details|Tooltip|Copy|Summary|Note|Prompt|Legend|Question)$/;
+export const isCopyName = name => COPY_EXACT.test(name) || COPY_SUFFIX.test(name);
+// JSX attributes whose value is never shown as text. Korean in any *other* attribute counts (#5589).
+const TECH_ATTRIBUTE = /^(?:className|class|style|testID|nativeID|id|key|ref|href|src|srcSet|rel|target|role|type|name|htmlFor|form|method|action|accept|pattern|autoComplete|autoCapitalize|inputMode|enterKeyHint|lang|dir|d|viewBox|fill|stroke|points|transform|xmlns|data-[\w-]+|aria-(?:labelledby|describedby|controls|owns|activedescendant|keyshortcuts|haspopup|live|current|relevant|autocomplete|orientation|sort|errormessage|details))$/;
 const TEST_PATH = /(?:^|\/)(?:__tests__|__mocks__|fixtures?|testkit|testing|generated)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/;
 const SOURCE = /\.[cm]?[jt]sx?$/;
+const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
+const DIAGNOSTIC_CALL = /^(?:console\.|logger\.|log\.|invariant$|assert$)/;
+const FORMAT_CALL = /(?:^|\.)formatMessage$/;
+// `useBlockedReason("changeIt")`의 인자는 사전 틀 이름(타입이 존재를 지킨다)이지 문구가 아니다(#5260).
+const FRAME_CALL = /(?:^|\.)(?:useBlockedReason|useBlockedStale)$/;
+const SURFACE_CALL = /(?:^|\.)(?:alert|confirm|prompt|toast|setError|setStatus|announceForAccessibility)$/;
+// A raise reason must say why this copy cannot use a dictionary key yet, not that a tool ran.
+const REGENERATION_REASON = /re-?generat|re-?baselin|(?:refresh|rebuil[dt]|recount|re-?scan)\w*\s+(?:the\s+)?ledger|ledger\s+(?:refresh|rebuil|recount)|다시\s*(?:만들|세|센|생성)|재생성|재계산|장부\s*(?:다시|새로|갱신)|자동\s*갱신/i;
 
 export function isProductSource(file) {
   return SOURCE.test(file) && !TEST_PATH.test(file);
 }
 
-/** Counts literal occurrences, including English: no line numbers or copy text in the ledger. */
-export function extractDirectCopy(file, source, knownKeys = []) {
-  if (!isProductSource(file)) return {count: 0, unknownKeys: []};
+export function surfaceOf(file) {
+  for (const [surface, spec] of Object.entries(SURFACES)) {
+    if (spec.exclude?.test(file)) continue;
+    if (spec.files.includes(file) || spec.roots.some(root => file.startsWith(`${root}/`))) return surface;
+  }
+  return undefined;
+}
+
+const unwrap = node => {
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)
+    || ts.isSatisfiesExpression?.(node)) node = node.expression;
+  return node;
+};
+
+/**
+ * Counts direct copy in one file, without line numbers or copy text:
+ * `ko` Hangul literals, `en` English copy, `cat` sentences assembled from dictionary output.
+ */
+export function extractDirectCopy(file, source, knownKeys = [], {english = surfaceOf(file) === 'core' ? 'copy' : 'phrase'} = {}) {
+  const result = {ko: 0, en: 0, cat: 0, unknownKeys: []};
+  if (!isProductSource(file)) return result;
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
     /\.[jt]sx$/.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const keys = new Set(knownKeys);
-  const unknownKeys = [];
-  let count = 0;
-  function ignored(node) {
+  const calleeOf = node => node.expression.getText(sf);
+  const isFormatCall = node => ts.isCallExpression(node) && FORMAT_CALL.test(calleeOf(node));
+  function ignored(node, {insideFormat}) {
     for (let p = node.parent; p; p = p.parent) {
       if (ts.isImportDeclaration(p) || ts.isExportDeclaration(p) || ts.isTypeNode(p)) return true;
       if (ts.isCallExpression(p) || ts.isNewExpression(p)) {
-        const callee = p.expression.getText(sf);
-        if (/^(?:console\.|logger\.|log\.|invariant$|assert$)/.test(callee)
-          || (ts.isNewExpression(p) && /Error$/.test(callee))) return true;
+        const callee = calleeOf(p);
+        if (DIAGNOSTIC_CALL.test(callee) || (ts.isNewExpression(p) && /Error$/.test(callee))) return true;
         // ICU keys and user-supplied values are handled by the dictionary/type contract.
-        if (/(?:^|\.)formatMessage$/.test(callee)) return true;
-        // `useBlockedReason("changeIt")`의 인자는 사전 틀 이름(타입이 존재를 지킨다)이지 문구가 아니다(#5260).
-        if (/(?:^|\.)(?:useBlockedReason|useBlockedStale)$/.test(callee)) return true;
+        if (insideFormat && (FORMAT_CALL.test(callee) || FRAME_CALL.test(callee))) return true;
       }
     }
     return false;
   }
   function surfaceContext(node) {
     for (let p = node.parent; p; p = p.parent) {
-      if (ts.isJsxAttribute(p)) return COPY_NAME.test(p.name.getText(sf));
+      if (ts.isJsxAttribute(p)) return isCopyName(p.name.getText(sf));
       if (ts.isJsxExpression(p)) return true;
-      if (ts.isPropertyAssignment(p) && COPY_NAME.test(p.name.getText(sf).replace(/['"]/g, ''))) return true;
-      if (ts.isVariableDeclaration(p) && COPY_NAME.test(p.name.getText(sf))) return true;
-      if (ts.isCallExpression(p) && /(?:^|\.)(?:alert|confirm|prompt|toast|setError|setStatus|announceForAccessibility)$/.test(p.expression.getText(sf))) return true;
+      if (ts.isPropertyAssignment(p) && isCopyName(p.name.getText(sf).replace(/['"]/g, ''))) return true;
+      if (ts.isVariableDeclaration(p) && isCopyName(p.name.getText(sf))) return true;
+      if (ts.isCallExpression(p) && SURFACE_CALL.test(calleeOf(p))) return true;
+    }
+    return false;
+  }
+  function concatenates(node) {
+    if (ts.isTemplateExpression(node)) {
+      const calls = node.templateSpans.filter(span => isFormatCall(unwrap(span.expression))).length;
+      const text = node.head.text + node.templateSpans.map(span => span.literal.text).join('');
+      return calls > 0 && (node.templateSpans.length > 1 || /\S/.test(text));
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      return isFormatCall(unwrap(node.left)) || isFormatCall(unwrap(node.right));
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'join') {
+      const target = unwrap(node.expression.expression);
+      return ts.isArrayLiteralExpression(target) && target.elements.some(element => isFormatCall(unwrap(element)));
     }
     return false;
   }
   function visit(node) {
-    if (ts.isCallExpression(node) && /(?:^|\.)formatMessage$/.test(node.expression.getText(sf))) {
+    if (isFormatCall(node)) {
       const key = node.arguments[0];
-      if (key && (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && !keys.has(key.text)) unknownKeys.push(key.text);
+      if (key && (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && !keys.has(key.text)) result.unknownKeys.push(key.text);
     }
+    // Dictionary output is a whole sentence: joining pieces (or adding text to one) breaks word order in other languages.
+    if (concatenates(node) && !ignored(node, {insideFormat: false})) result.cat++;
     const literal = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
       || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node);
-    if (literal && !ignored(node)) {
+    if (literal && !ignored(node, {insideFormat: true})) {
       const p = node.parent;
       const isName = (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)) && p.name === node;
       const text = node.text.trim();
-      // Non-copy JSX attributes (className, paths, test IDs, roles, styles) are technical.
-      const attr = ts.isJsxAttribute(p) ? p : undefined;
-      if (!isName && (!attr || COPY_NAME.test(attr.name.getText(sf))) && text) {
-        const korean = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/.test(text);
-        const english = /[a-zA-Z]/.test(text) && (ts.isJsxText(node) || surfaceContext(node)
-          || /[a-zA-Z][ ,!?]+[a-zA-Z]/.test(text) || /^[a-zA-Z]+[.!?…]?$/.test(text));
-        if (korean || english) count++;
+      const attribute = ts.isJsxAttribute(p) ? p.name.getText(sf) : undefined;
+      if (!isName && text && !(attribute && TECH_ATTRIBUTE.test(attribute))) {
+        if (HANGUL.test(text)) result.ko++;
+        else if (/[a-zA-Z]/.test(text)) {
+          const copy = ts.isJsxText(node) || (attribute ? isCopyName(attribute) : surfaceContext(node));
+          const phrase = !attribute && english === 'phrase'
+            && (/[a-zA-Z][ ,!?]+[a-zA-Z]/.test(text) || /^[a-zA-Z]+[.!?…]?$/.test(text));
+          if (copy || phrase) result.en++;
+        }
       }
     }
     ts.forEachChild(node, visit);
   }
   visit(sf);
-  return {count, unknownKeys};
+  return result;
 }
 
 function filesUnder(root) {
+  if (!existsSync(root)) return [];
   return readdirSync(root, {withFileTypes: true}).flatMap(entry => {
     const path = join(root, entry.name);
     return entry.isDirectory() ? filesUnder(path) : [path];
   });
 }
 
-export function scanSurface(surface, {root = ROOT, readSource, files} = {}) {
-  if (!['web', 'mobile'].includes(surface)) throw new Error(`Unknown surface: ${surface}`);
-  const paths = files ?? [
-    ...filesUnder(join(root, `clients/${surface}/src`)),
-    ...(surface === 'mobile' ? ['App.tsx', 'index.js'].map(file => join(root, 'clients/mobile', file)).filter(existsSync) : []),
-  ].map(file => relative(root, file));
-  const keys = filesUnder(join(root, 'packages/momo-core/src/i18n/catalogs/en-US'))
+export function surfaceFiles(surface, root = ROOT) {
+  const spec = SURFACES[surface];
+  if (!spec) throw new Error(`Unknown surface: ${surface}`);
+  return [
+    ...spec.roots.flatMap(dir => filesUnder(join(root, dir))).map(file => relative(root, file)),
+    ...spec.files.filter(file => existsSync(join(root, file))),
+  ].filter(file => isProductSource(file) && surfaceOf(file) === surface).sort();
+}
+
+function messageKeys(root) {
+  return filesUnder(join(root, 'packages/momo-core/src/i18n/catalogs/en-US'))
     .filter(file => file.endsWith('.json'))
     .flatMap(file => Object.keys(JSON.parse(readFileSync(file, 'utf8'))));
+}
+
+/** `{counts: {file: {ko, en, cat}}, unknownKeys}`; files with no direct copy are omitted. */
+export function scanSurface(surface, {root = ROOT, readSource, files} = {}) {
+  const keys = messageKeys(root);
   const counts = {};
   const unknownKeys = [];
-  for (const file of paths.filter(isProductSource).sort()) {
-    const result = extractDirectCopy(file, readSource ? readSource(file) : readFileSync(join(root, file), 'utf8'), keys);
-    if (result.count) counts[file] = result.count;
-    unknownKeys.push(...result.unknownKeys.map(key => `${file}: unknown message key ${key}`));
+  const paths = (files ?? surfaceFiles(surface, root)).filter(file => isProductSource(file) && surfaceOf(file) === surface).sort();
+  for (const file of paths) {
+    const source = readSource ? readSource(file) : readFileSync(join(root, file), 'utf8');
+    const {unknownKeys: unknown, ...count} = extractDirectCopy(file, source, keys, {english: SURFACES[surface].english});
+    if (DIMENSIONS.some(d => count[d])) counts[file] = count;
+    unknownKeys.push(...unknown.map(key => `${file}: unknown message key ${key}`));
   }
   return {counts, unknownKeys};
 }
 
-export function compareCounts(baseline, actual) {
+// ---- ledger -------------------------------------------------------------------------------
+
+const ZERO = Object.freeze({ko: 0, en: 0, cat: 0});
+const normalize = value => Object.fromEntries(DIMENSIONS.map(d => [d, value?.[d] ?? 0]));
+const add = (a, b) => Object.fromEntries(DIMENSIONS.map(d => [d, (a?.[d] ?? 0) + (b?.[d] ?? 0)]));
+const same = (a, b) => DIMENSIONS.every(d => (a?.[d] ?? 0) === (b?.[d] ?? 0));
+const isCount = n => Number.isInteger(n) && n >= 0;
+const sortedObject = object => Object.fromEntries(Object.keys(object).sort().map(key => [key, object[key]]));
+
+export function anchorSeal(ledger) {
+  const anchor = Object.fromEntries(Object.keys(ledger.anchor ?? {}).sort().map(file => [file, normalize(ledger.anchor[file])]));
+  return createHash('sha256').update(JSON.stringify({anchorHead: ledger.anchorHead, anchor})).digest('hex');
+}
+
+/** Format, seal and monotonicity problems that need no scan. Empty when the ledger is usable. */
+export function validateLedger(ledger, {seal = ANCHOR_SEAL} = {}) {
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) return ['ledger: expected a JSON object'];
+  if (ledger.version !== LEDGER_VERSION) {
+    return [`ledger version ${JSON.stringify(ledger.version)} is not ${LEDGER_VERSION}: this is the shape the old whole-ledger `
+      + 'regeneration wrote ({version: 1, files}). Regenerating the ledger is not allowed (#5589). Restore the committed '
+      + 'ledger, then lower counts with `shrink` or add one explicit `raise <file> --issue N --reason ...`.'];
+  }
+  const problems = [];
+  const allowed = new Set(['version', 'policy', 'anchorHead', 'anchor', 'lowered', 'raises']);
+  for (const key of Object.keys(ledger)) {
+    if (!allowed.has(key)) problems.push(`ledger: unknown field ${key}${key === 'files' ? ' (a v1 field: the ledger was regenerated)' : ''}`);
+  }
+  if (!/^[a-f0-9]{40}$/.test(ledger.anchorHead ?? '')) problems.push('ledger: anchorHead must be a 40-hex commit');
+  const countProblem = (where, value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return `${where}: expected {ko, en, cat?}`;
+    const extra = Object.keys(value).filter(key => !DIMENSIONS.includes(key));
+    if (extra.length) return `${where}: unknown count ${extra.join(', ')}`;
+    if (!DIMENSIONS.every(d => value[d] === undefined || isCount(value[d]))) return `${where}: counts must be non-negative integers`;
+    return undefined;
+  };
+  for (const name of ['anchor', 'lowered']) {
+    const map = ledger[name];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) { problems.push(`ledger: ${name} must be an object`); continue; }
+    for (const [file, value] of Object.entries(map)) {
+      if (!surfaceOf(file)) problems.push(`${name} ${file}: not a scanned product path`);
+      const problem = countProblem(`${name} ${file}`, value);
+      if (problem) problems.push(problem);
+    }
+  }
+  if (problems.length) return problems;
+  if (anchorSeal(ledger) !== seal) {
+    problems.push('ledger: anchor seal mismatch — the frozen anchor was rewritten. Tools never write the anchor; '
+      + 'only the planner re-anchors (`anchor <commit>`), and the new seal is a reviewed edit to ANCHOR_SEAL.');
+  }
+  for (const [file, value] of Object.entries(ledger.lowered)) {
+    const anchor = ledger.anchor[file];
+    if (!anchor) problems.push(`lowered ${file}: not in the anchor (a new file needs a raise, not a lowered entry)`);
+    else if (DIMENSIONS.some(d => (value[d] ?? 0) > (anchor[d] ?? 0))) problems.push(`lowered ${file}: higher than the anchor; only raises may add`);
+    else if (same(value, anchor)) problems.push(`lowered ${file}: equal to the anchor; remove the entry`);
+  }
+  if (!Array.isArray(ledger.raises)) problems.push('ledger: raises must be an array');
+  else ledger.raises.forEach((raise, index) => {
+    const where = `raises[${index}]`;
+    if (!raise || typeof raise !== 'object' || Array.isArray(raise)) { problems.push(`${where}: expected an object`); return; }
+    const extra = Object.keys(raise).filter(key => !['file', 'issue', 'reason', ...DIMENSIONS].includes(key));
+    if (extra.length) problems.push(`${where}: unknown field ${extra.join(', ')}`);
+    if (!surfaceOf(raise.file ?? '')) problems.push(`${where}: file must be a scanned product path`);
+    if (!Number.isInteger(raise.issue) || raise.issue <= 0) problems.push(`${where}: issue must be the issue number that justifies it`);
+    const reason = typeof raise.reason === 'string' ? raise.reason.trim() : '';
+    if (reason.length < 15) problems.push(`${where}: reason must say why this copy cannot use a dictionary key yet (15+ characters)`);
+    else if (REGENERATION_REASON.test(reason)) problems.push(`${where}: a regeneration is not a reason; name the copy and why it waits for P1`);
+    if (!DIMENSIONS.every(d => raise[d] === undefined || isCount(raise[d])) || !DIMENSIONS.some(d => raise[d] > 0)) {
+      problems.push(`${where}: give at least one positive ko/en/cat delta`);
+    }
+  });
+  return problems;
+}
+
+/** Allowed counts per file: (lowered ?? anchor) + Σ raises. */
+export function ceilings(ledger) {
+  const result = {};
+  for (const file of new Set([...Object.keys(ledger.anchor), ...Object.keys(ledger.lowered)])) {
+    result[file] = normalize(ledger.lowered[file] ?? ledger.anchor[file]);
+  }
+  for (const raise of ledger.raises) result[raise.file] = add(result[raise.file] ?? ZERO, raise);
+  return result;
+}
+
+/** Scan vs ledger for one surface: every file must match its allowance exactly. */
+export function compareSurface(ledger, surface, counts) {
+  const allowed = Object.fromEntries(Object.entries(ceilings(ledger)).filter(([file]) => surfaceOf(file) === surface));
   const increases = [];
   const decreases = [];
-  for (const file of [...new Set([...Object.keys(baseline), ...Object.keys(actual)])].sort()) {
-    const before = baseline[file] ?? 0;
-    const after = actual[file] ?? 0;
-    if (after > before) increases.push(`${file}: ${before} → ${after}; use a dictionary key`);
-    if (after < before) decreases.push(`${file}: ${before} → ${after}; reduce the committed extraction ledger`);
+  const files = [...new Set([...Object.keys(allowed), ...Object.keys(counts)])].sort();
+  for (const file of files) {
+    const before = normalize(allowed[file]);
+    const after = normalize(counts[file]);
+    const up = DIMENSIONS.filter(d => after[d] > before[d]).map(d => `${d} ${before[d]} → ${after[d]}`);
+    const down = DIMENSIONS.filter(d => after[d] < before[d]).map(d => `${d} ${before[d]} → ${after[d]}`);
+    if (up.length) {
+      increases.push(`${file}: ${up.join(', ')}; put the new text in a dictionary key (no sentence concatenation), `
+        + 'or add one explicit raise: node packages/momo-core/src/i18n/tooling/direct-copy.mjs raise '
+        + `${file} --issue <N> --reason "<why this copy waits for P1>"`);
+    }
+    if (down.length) {
+      decreases.push(`${file}: ${down.join(', ')}; lower the ledger: node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink`);
+    }
   }
   return {increases, decreases};
 }
 
-export function checkSurface(surface) {
-  const ledger = JSON.parse(readFileSync(LEDGER, 'utf8'));
-  const {counts, unknownKeys} = scanSurface(surface);
-  const baseline = Object.fromEntries(Object.entries(ledger.files).filter(([file]) => file.startsWith(`clients/${surface}/`)));
-  const {increases, decreases} = compareCounts(baseline, counts);
-  // Reductions must shrink the allowance too; otherwise a later addition spends stale budget.
+export function readLedger(path = join(ROOT, LEDGER_PATH)) {
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+export function checkSurface(surface, {root = ROOT, ledger = readLedger(join(root, LEDGER_PATH)), seal = ANCHOR_SEAL} = {}) {
+  const problems = validateLedger(ledger, {seal});
+  if (problems.length) throw new Error(`Direct UI copy guard (ledger):\n${problems.join('\n')}`);
+  const {counts, unknownKeys} = scanSurface(surface, {root});
+  const {increases, decreases} = compareSurface(ledger, surface, counts);
   const failures = [...increases, ...decreases, ...unknownKeys];
-  if (failures.length) throw new Error(`Direct UI copy guard:\n${failures.join('\n')}`);
+  if (failures.length) throw new Error(`Direct UI copy guard (${surface}):\n${failures.join('\n')}`);
   return counts;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [action, arg] = process.argv.slice(2);
-  if (action === '--baseline') {
-    // Emit only. The caller reviews and writes a smaller ledger; normal checks never update it.
-    if (!/^[a-f0-9]{40}$/.test(arg ?? '')) throw new Error('--baseline requires the fixed starting HEAD');
-    const files = execFileSync('git', ['ls-tree', '-r', '--name-only', arg, 'clients/web/src', 'clients/mobile/src', 'clients/mobile/App.tsx', 'clients/mobile/index.js'], {cwd: ROOT, encoding: 'utf8'}).trim().split('\n');
-    const readSource = file => execFileSync('git', ['show', `${arg}:${file}`], {cwd: ROOT, encoding: 'utf8'});
-    const counts = {};
-    for (const surface of ['web', 'mobile']) {
-      Object.assign(counts, scanSurface(surface, {files: files.filter(file => file.startsWith(`clients/${surface}/`)), readSource}).counts);
+function trimRaises(raises, file, need) {
+  // Keep the oldest justification first; trim the newest entries down to what the file still needs.
+  const left = {...need};
+  const kept = raises.map(raise => {
+    if (raise.file !== file) return raise;
+    const next = {...raise};
+    for (const d of DIMENSIONS) {
+      const value = Math.min(raise[d] ?? 0, left[d]);
+      left[d] -= value;
+      if (value) next[d] = value; else delete next[d];
     }
-    process.stdout.write(JSON.stringify({version: 1, baselineHead: arg, files: counts}, null, 2) + '\n');
-  } else if (['web', 'mobile'].includes(action)) {
-    checkSurface(action);
-  } else throw new Error('Use web | mobile | --baseline <starting HEAD>');
+    return next;
+  });
+  return kept.filter(raise => raise.file !== file || DIMENSIONS.some(d => raise[d] > 0));
+}
+
+/** Lower-only: lowers allowances to the scan and trims raises that are no longer used. */
+export function shrinkLedger(ledger, counts) {
+  const allowed = ceilings(ledger);
+  const refused = [];
+  let raises = ledger.raises.map(raise => ({...raise}));
+  const lowered = {...ledger.lowered};
+  for (const file of [...new Set([...Object.keys(allowed), ...Object.keys(counts)])].sort()) {
+    const actual = normalize(counts[file]);
+    const ceiling = normalize(allowed[file]);
+    const over = DIMENSIONS.filter(d => actual[d] > ceiling[d]);
+    if (over.length) { refused.push(`${file}: ${over.map(d => `${d} ${ceiling[d]} → ${actual[d]}`).join(', ')}`); continue; }
+    if (same(actual, ceiling)) continue;
+    const base = normalize(ledger.lowered[file] ?? ledger.anchor[file]);
+    const need = Object.fromEntries(DIMENSIONS.map(d => [d, Math.max(0, actual[d] - base[d])]));
+    const nextBase = Object.fromEntries(DIMENSIONS.map(d => [d, Math.min(base[d], actual[d])]));
+    raises = trimRaises(raises, file, need);
+    if (ledger.anchor[file] && same(nextBase, ledger.anchor[file])) delete lowered[file];
+    else if (ledger.anchor[file]) lowered[file] = compact(nextBase, true);
+  }
+  return {ledger: {...ledger, lowered: sortedObject(lowered), raises}, refused};
+}
+
+/** One explicit raise for one file, sized to the current excess. */
+export function raiseLedger(ledger, file, actual, {issue, reason}) {
+  const ceiling = normalize(ceilings(ledger)[file]);
+  const delta = Object.fromEntries(DIMENSIONS.map(d => [d, Math.max(0, (actual?.[d] ?? 0) - ceiling[d])]));
+  if (!DIMENSIONS.some(d => delta[d])) throw new Error(`${file}: nothing to raise; the scan is within its allowance`);
+  const next = {...ledger, raises: [...ledger.raises, {file, issue, ...compact(delta), reason}]};
+  const problems = validateLedger(next, {seal: anchorSeal(ledger)});
+  if (problems.length) throw new Error(problems.join('\n'));
+  return next;
+}
+
+const sameRaise = (a, b) => a.file === b.file && a.issue === b.issue && a.reason === b.reason && same(a, b);
+
+/**
+ * Landing: derive the merged ledger from the target track's committed ledger plus the branch's
+ * *new* raises — never from the working copy — then lower to the merged scan. Copy that neither
+ * side justified stops the landing.
+ */
+export function landLedger(baseLedger, oursLedger, counts) {
+  const notes = [];
+  let start;
+  if (baseLedger?.version === LEDGER_VERSION) start = baseLedger;
+  else if (oursLedger?.version === LEDGER_VERSION) {
+    start = oursLedger;
+    notes.push('base ledger is v1 (before #5589): starting from this branch\'s v2 ledger');
+  } else throw new Error('neither ledger is v2: this landing predates #5589 on both sides');
+  const fresh = oursLedger?.version === LEDGER_VERSION && start !== oursLedger
+    ? oursLedger.raises.filter(raise => !start.raises.some(existing => sameRaise(existing, raise))) : [];
+  const merged = {...start, raises: [...start.raises, ...fresh]};
+  return {...shrinkLedger(merged, counts), notes, carried: fresh.length};
+}
+
+function compact(value, keepZero = false) {
+  const out = {};
+  for (const d of DIMENSIONS) if (value[d] || (keepZero && d !== 'cat')) out[d] = value[d] ?? 0;
+  return out;
+}
+
+export function serializeLedger(ledger) {
+  const line = value => `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${JSON.stringify(item)}`).join(', ')}}`;
+  const map = (name, object) => {
+    const entries = Object.keys(object).sort().map(file => `    ${JSON.stringify(file)}: ${line(object[file])}`);
+    return `  ${JSON.stringify(name)}: ${entries.length ? `{\n${entries.join(',\n')}\n  }` : '{}'}`;
+  };
+  const raises = ledger.raises.map(raise => `    ${line(raise)}`);
+  return `{\n  "version": ${ledger.version},\n  "policy": ${JSON.stringify(ledger.policy ?? POLICY)},\n`
+    + `  "anchorHead": ${JSON.stringify(ledger.anchorHead)},\n${map('anchor', ledger.anchor)},\n${map('lowered', ledger.lowered)},\n`
+    + `  "raises": ${raises.length ? `[\n${raises.join(',\n')}\n  ]` : '[]'}\n}\n`;
+}
+
+export const POLICY = 'Only goes down. Do not regenerate this file. Lower with `shrink`; a raise is one file with an issue and a reason '
+  + '(`raise`); landings use `land`. The anchor is frozen and sealed in direct-copy.mjs (#5589).';
+
+// ---- git-backed operations (never used by `check`, which must stay git-free for CI) ---------
+
+function git(args, options = {}) {
+  return execFileSync('git', args, {cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options});
+}
+
+function ledgerAt(ref) {
+  return JSON.parse(git(['show', `${ref}:${LEDGER_PATH}`]));
+}
+
+/** Reads every scanned file at a commit through one `git cat-file --batch`. */
+function scanCommit(commit) {
+  const roots = Object.values(SURFACES).flatMap(spec => [...spec.roots, ...spec.files]);
+  const listed = git(['ls-tree', '-r', '--name-only', commit, '--', ...roots]).trim().split('\n').filter(Boolean);
+  const files = listed.filter(file => isProductSource(file) && surfaceOf(file));
+  const output = execFileSync('git', ['cat-file', '--batch'], {
+    cwd: ROOT, input: files.map(file => `${commit}:${file}\n`).join(''), maxBuffer: 512 * 1024 * 1024,
+  });
+  const sources = new Map();
+  let offset = 0;
+  for (const file of files) {
+    const end = output.indexOf(10, offset);
+    const size = Number(output.subarray(offset, end).toString('utf8').split(' ')[2]);
+    sources.set(file, output.subarray(end + 1, end + 1 + size).toString('utf8'));
+    offset = end + 1 + size + 1;
+  }
+  const counts = {};
+  for (const surface of Object.keys(SURFACES)) {
+    const scoped = files.filter(file => surfaceOf(file) === surface);
+    Object.assign(counts, scanSurface(surface, {files: scoped, readSource: file => sources.get(file)}).counts);
+  }
+  return counts;
+}
+
+function scanAll(root = ROOT) {
+  const counts = {};
+  const unknownKeys = [];
+  for (const surface of Object.keys(SURFACES)) {
+    const result = scanSurface(surface, {root});
+    Object.assign(counts, result.counts);
+    unknownKeys.push(...result.unknownKeys);
+  }
+  return {counts, unknownKeys};
+}
+
+function totals(counts) {
+  const out = {};
+  for (const [file, count] of Object.entries(counts)) {
+    const surface = surfaceOf(file);
+    out[surface] ??= {files: 0, ko: 0, en: 0, cat: 0};
+    out[surface].files++;
+    for (const d of DIMENSIONS) out[surface][d] += count[d] ?? 0;
+  }
+  return out;
+}
+
+function option(args, name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function main(argv) {
+  const [action = 'check', ...args] = argv;
+  const ledgerFile = join(ROOT, LEDGER_PATH);
+  const write = ledger => writeFileSync(ledgerFile, serializeLedger(ledger));
+  if (action === '--baseline') {
+    throw new Error('--baseline was removed (#5589): the ledger is never re-emitted whole. Use `report`, `shrink`, `raise` or `land`.');
+  }
+  if (action === 'check' || Object.hasOwn(SURFACES, action)) {
+    const surfaces = Object.hasOwn(SURFACES, action) ? [action] : (args.length ? args : Object.keys(SURFACES));
+    const failures = [];
+    for (const surface of surfaces) {
+      try { checkSurface(surface); } catch (error) { failures.push(error.message); }
+    }
+    if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
+    return;
+  }
+  if (action === 'report') {
+    const {counts} = scanAll();
+    const ledger = readLedger(ledgerFile);
+    console.log(JSON.stringify({scan: totals(counts), anchor: ledger.anchor ? totals(ledger.anchor) : undefined}, null, 2));
+    return;
+  }
+  if (action === 'shrink') {
+    const ledger = readLedger(ledgerFile);
+    const problems = validateLedger(ledger);
+    if (problems.length) throw new Error(problems.join('\n'));
+    const {counts} = scanAll();
+    const {ledger: next, refused} = shrinkLedger(ledger, counts);
+    if (refused.length) {
+      console.error(`shrink only lowers. These files went up; use a dictionary key or one explicit raise:\n${refused.join('\n')}`);
+      process.exitCode = 1;
+      return;
+    }
+    write(next);
+    return;
+  }
+  if (action === 'raise') {
+    const [file] = args;
+    const issue = Number(String(option(args, '--issue') ?? '').replace(/^#/, ''));
+    const reason = option(args, '--reason');
+    const ledger = readLedger(ledgerFile);
+    const problems = validateLedger(ledger);
+    if (problems.length) throw new Error(problems.join('\n'));
+    const surface = surfaceOf(file ?? '');
+    if (!surface) throw new Error('raise <scanned product file> --issue <N> --reason "<why>"');
+    const {counts} = scanSurface(surface, {files: [file]});
+    write(raiseLedger(ledger, file, counts[file], {issue, reason}));
+    return;
+  }
+  if (action === 'land') {
+    const base = option(args, '--base');
+    const ours = option(args, '--ours');
+    if (!base || !ours) throw new Error('land --base <target track ref> --ours <branch tip> [--check]');
+    let oursLedger;
+    try { oursLedger = ledgerAt(ours); } catch { oursLedger = undefined; }
+    const baseLedger = ledgerAt(base);
+    const {counts, unknownKeys} = scanAll();
+    const {ledger: next, refused, notes, carried} = landLedger(baseLedger, oursLedger, counts);
+    notes.forEach(note => console.error(`note: ${note}`));
+    const problems = [...validateLedger(next), ...unknownKeys];
+    if (refused.length || problems.length) {
+      console.error(`land: copy that neither side justified, or ledger problems — not written:\n${[...refused, ...problems].join('\n')}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (args.includes('--check')) {
+      if (serializeLedger(next) !== readFileSync(ledgerFile, 'utf8')) {
+        console.error('land --check: the working ledger differs from the one derived from the base and the branch raises');
+        process.exitCode = 1;
+      }
+      return;
+    }
+    write(next);
+    console.error(`land: carried ${carried} new raise(s); lowered ${Object.keys(next.lowered).length} file(s) in total`);
+    return;
+  }
+  if (action === 'anchor') {
+    // Planner only: a deliberate re-anchor. Prints the new ledger (or writes it) and the seal to paste.
+    const [ref] = args;
+    if (!ref) throw new Error('anchor <commit> [--write]');
+    const commit = git(['rev-parse', '--verify', `${ref}^{commit}`]).trim();
+    const anchor = Object.fromEntries(Object.entries(scanCommit(commit)).map(([file, count]) => [file, compact(count, true)]));
+    const ledger = {version: LEDGER_VERSION, policy: POLICY, anchorHead: commit, anchor: sortedObject(anchor), lowered: {}, raises: []};
+    if (args.includes('--write')) write(ledger); else process.stdout.write(serializeLedger(ledger));
+    console.error(`ANCHOR_SEAL = '${anchorSeal(ledger)}' (edit direct-copy.mjs in the same reviewed change)`);
+    console.error(JSON.stringify(totals(anchor)));
+    return;
+  }
+  throw new Error('Use check [core|web|mobile] | core | web | mobile | report | shrink | raise | land | anchor');
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { main(process.argv.slice(2)); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
