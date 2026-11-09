@@ -31,7 +31,8 @@ STORE_KEY = "oort.site.lang"
 DASHES = ("—", "–")
 # 브라우저가 구절을 모르는(WebKit 은 word-break: auto-phrase 가 없다) 언어: 문구의 | 자리에 <wbr> 를 넣고
 # CSS 가 word-break: keep-all 로 그 자리(와 문장 부호·빈칸)에서만 줄을 바꾼다. 조사 앞에서 끊기지 않게.
-PHRASE_LANGS = {"ja"}
+# 중국어는 첫 화면 제목에만 쓴다(본문은 글자 사이 줄바꿈이 관례라 힌트 없이 둔다. keep-all 도 제목에만).
+PHRASE_LANGS = {"ja", "zh-Hans", "zh-Hant"}
 PHRASE_MARK = "|"
 
 
