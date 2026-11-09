@@ -45,6 +45,7 @@
 import { appsUsedFromWire, type AppsUsedEntry, type Message } from "../../lib/api";
 import { modelLabel } from "../settings/cohostedModels";
 import { isModelId } from "../settings/defaultAi";
+import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
 
 type Props = Record<string, unknown> | undefined;
 
@@ -361,12 +362,18 @@ export const TEAM_AI_SOURCES_LABEL = "출처";
  *
  * `apps` 는 「쓴 앱」 줄의 바깥 사실이다. 도우미(`team_ai`) 가 아닌 에이전트 답에도
  * 앱 보고가 있으면 줄이 선다(도우미는 앱 도구를 부르지 않으므로 그 답에는 서지 않는다).
+ *
+ * `authorKind` 는 멤버 목록이 말하는 작성자 종류다(props 에서 읽지 않는다). 도우미의 닫힌 세계
+ * (`source === "team_ai"`)는 **에이전트가 쓴 답에서만** 열린다(#5577, `serverResultAuthor.ts`): 같은
+ * 값을 실은 사람 글이나 작성자를 모르는 행에는 「팀 AI · 모델」 칩도 꼬리도 없다. 「쓴 앱」 줄은 화면이
+ * 이미 작성자를 보고 `apps` 를 넘긴다(`appsTail`).
  */
 export function parseTeamAiReplyMeta(
   props: Props,
-  apps?: AppsTailContext
+  apps?: AppsTailContext,
+  authorKind?: AuthorKind | null
 ): TeamAiReplyMeta | null {
-  const isTeamAi = !!props && props["source"] === "team_ai";
+  const isTeamAi = isAgentAuthored(authorKind) && !!props && props["source"] === "team_ai";
   // 넘기는 줄(`team_ai.delegate.v1`)은 자기 띠를 갖는다. 같은 메시지에 꼬리를 또 달지 않는다.
   if (isTeamAi && props?.["kind"] === "team_ai.delegate.v1") return null;
 
@@ -427,13 +434,14 @@ export function parseTeamAiReplyMeta(
   return meta;
 }
 
-/** 행이 부르는 입구. 지워진 행에는 없다. */
+/** 행이 부르는 입구. 지워진 행에는 없다. `authorKind` 는 멤버 목록의 작성자 종류다(#5577). */
 export function teamAiReplyMetaFor(
   message: Pick<Message, "props" | "state">,
-  apps?: AppsTailContext
+  apps?: AppsTailContext,
+  authorKind?: AuthorKind | null
 ): TeamAiReplyMeta | null {
   if (message.state === "deleted") return null;
-  return parseTeamAiReplyMeta(message.props, apps);
+  return parseTeamAiReplyMeta(message.props, apps, authorKind);
 }
 
 /** 출처 링크의 접근 이름. 새 창으로 열린다는 것을 말한다. */

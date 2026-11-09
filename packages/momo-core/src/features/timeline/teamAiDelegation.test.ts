@@ -4,16 +4,22 @@ import {
   MAX_TEAM_AI_DELEGATIONS,
   TEAM_AI_DELEGATED_PROPS_KEY,
   TEAM_AI_DELEGATION_KINDS,
-  teamAiDelegationsFor,
-  teamAiDelegationsOf,
+  teamAiDelegationsFor as delegationsForAs,
+  teamAiDelegationsOf as delegationsOfAs,
 } from "./teamAiDelegation";
-import { parseTeamAiReplyMeta } from "./teamAiReply";
+import { parseTeamAiReplyMeta as parseAs } from "./teamAiReply";
 import {
   TEAM_AI_DELEGATION_CHIP_COPY,
   TEAM_AI_DELEGATION_REASON_COPY,
 } from "../settings/teamAiCopyKeys";
 import { TEAM_AI_DELEGATION_CLOSED_WORDS } from "../settings/teamAiLimits";
 import { argumentSpecs, messageKeys } from "../../i18n/generated/messages";
+
+// #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
+// `serverResultAuthor.test.ts` 가 잰다.
+const teamAiDelegationsOf = (props: Parameters<typeof delegationsOfAs>[0]) => delegationsOfAs(props, "agent");
+const teamAiDelegationsFor = (message: Parameters<typeof delegationsForAs>[0]) => delegationsForAs(message, "agent");
+const parseTeamAiReplyMeta = (props: Parameters<typeof parseAs>[0]) => parseAs(props, undefined, "agent");
 
 const HERMES = "0195f0a8-1c2d-7e3f-8a4b-5c6d7e8f9a0b";
 const OTHER = "0195f0a8-1c2d-7e3f-8a4b-5c6d7e8f9a0c";

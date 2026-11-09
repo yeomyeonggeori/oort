@@ -16,5 +16,5 @@ export function receiptRunIdFor(input: {
   provided: boolean;
 }): string | null {
   if (!input.provided || !input.isAgent || input.deleted) return null;
-  return turnRecordRunId(input.message);
+  return turnRecordRunId(input.message, "agent");
 }
