@@ -2608,6 +2608,35 @@ printf '\033]7501;state=clear\033\\end\n'
         assert_eq!(shell.text(), text, "the same bytes either way");
     }
 
+    /// The page tells a hook from a report by the channel message alone
+    /// (#5579): the shape `parsePaneSignalEvent` reads.
+    #[test]
+    fn the_channel_sink_tags_hooks_and_reports() {
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        let sink = ChannelSink {
+            output: Channel::new(|_| Ok(())),
+            exit: Channel::new(|_| Ok(())),
+            signal: Channel::new(move |body| {
+                if let InvokeResponseBody::Json(json) = body {
+                    log.lock().unwrap().push(json);
+                }
+                Ok(())
+            }),
+        };
+        sink.signal(PaneSignal::WaitingPermission);
+        sink.report(Some(PaneSignal::WaitingInput));
+        sink.report(None);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                r#"{"from":"hook","signal":"waiting-permission"}"#,
+                r#"{"from":"report","signal":"waiting-input"}"#,
+                r#"{"from":"report","signal":null}"#,
+            ]
+        );
+    }
+
     #[test]
     fn a_signal_for_a_closed_or_unknown_pane_goes_nowhere() {
         let manager = PtyManager::default();

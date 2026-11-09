@@ -378,6 +378,8 @@ mod tests {
             b"\x1b]8;;https://example.test/state=blocked\x1b\\",
             b"\x1b]75010;state=blocked\x07",
             b"\x1b]07501;state=blocked\x07",
+            b"\x1b]7500;state=blocked\x07",
+            b"\x1b]1337;state=blocked\x07",
             b"\x1b]7501state=blocked\x07",
             b"\x1b[7501;state=blocked\x07",
             b"\x1b]7501;state=blocked\x18",
