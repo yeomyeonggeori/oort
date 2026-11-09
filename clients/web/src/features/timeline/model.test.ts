@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@momo/core/lib/api";
 import {
-  AUTHOR_GROUP_WINDOW_MS,
   addPending,
   buildTimelineItems,
   confirmsPending,
@@ -87,20 +86,47 @@ describe("author grouping", () => {
     expect(startsAuthorGroup(undefined, msg(1))).toBe(true);
   });
 
-  it("continues the group for the same author inside the window", () => {
-    const first = msg(1, "안녕하세요", { createdAtMs: DAY });
-    const second = msg(2, "확인 부탁드립니다", {
-      createdAtMs: DAY + AUTHOR_GROUP_WINDOW_MS - 1,
-    });
+  // #5603 (owner 11-09): 같은 사람의 말은 **같은 로컬 분**까지만 한 묶음이다. 시각은 로컬 생성자로 지어 시간대와 무관하다.
+  const at = (hour: number, minute: number, second = 0) =>
+    new Date(2026, 6, 25, hour, minute, second).getTime();
+
+  it("continues the group for the same author inside the same local minute", () => {
+    const first = msg(1, "안녕하세요", { createdAtMs: at(14, 47, 0) });
+    const second = msg(2, "확인 부탁드립니다", { createdAtMs: at(14, 47, 59) });
     expect(startsAuthorGroup(first, second)).toBe(false);
   });
 
-  it("starts a new group once the 300s window is exceeded", () => {
-    const first = msg(1, "배포 시작합니다", { createdAtMs: DAY });
-    const second = msg(2, "배포 끝났습니다", {
-      createdAtMs: DAY + AUTHOR_GROUP_WINDOW_MS + 1,
-    });
+  it("starts a new group at 47 → 50 (the owner report: two heads, not one)", () => {
+    const first = msg(1, "배포 시작합니다", { createdAtMs: at(14, 47, 10) });
+    const second = msg(2, "배포 끝났습니다", { createdAtMs: at(14, 50, 5) });
     expect(startsAuthorGroup(first, second)).toBe(true);
+  });
+
+  it("starts a new group when the minute turns, even two seconds apart (47:59 → 48:01)", () => {
+    const first = msg(1, "곧 끝나요", { createdAtMs: at(14, 47, 59) });
+    const second = msg(2, "끝났어요", { createdAtMs: at(14, 48, 1) });
+    expect(startsAuthorGroup(first, second)).toBe(true);
+  });
+
+  it("does not chain: messages a minute apart each start their own group", () => {
+    // 예전 규칙은 앞 메시지 기준 5분이라 3분 간격의 말이 몇 시간이든 한 묶음이 됐다.
+    const rows = [0, 3, 6, 9].map((minute, index) =>
+      msg(index + 1, `m${index}`, { createdAtMs: at(14, minute, 30) })
+    );
+    const heads = buildTimelineItems(rows).filter(
+      (item) => item.kind === "message" && item.startsGroup
+    );
+    expect(heads).toHaveLength(4);
+  });
+
+  it("joins a same-minute run under one head in the item stream", () => {
+    const rows = [5, 20, 41].map((second, index) =>
+      msg(index + 1, `m${index}`, { createdAtMs: at(14, 47, second) })
+    );
+    const groups = buildTimelineItems(rows)
+      .filter((item) => item.kind === "message")
+      .map((item) => item.kind === "message" && item.startsGroup);
+    expect(groups).toEqual([true, false, false]);
   });
 
   it("starts a new group when the author changes, case-insensitively", () => {
@@ -179,7 +205,7 @@ describe("timeline item stream", () => {
   });
 
   it("re-introduces the author on the row directly under the unread divider", () => {
-    // seq 10 and 11 are the same author inside the group window, so without the
+    // seq 10 and 11 are the same author in the same minute, so without the
     // divider rule seq 11 renders anonymous right below "새 메시지 2개".
     expect(startsAuthorGroup(messages[0], messages[1])).toBe(false);
     const items = buildTimelineItems(messages, {

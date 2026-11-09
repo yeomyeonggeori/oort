@@ -1,6 +1,11 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { isMyWorkTab, workViewOf } from "@momo/core/features/workbench/workTab";
+import {
+  AGENT_PANE_PARAM,
+  agentPaneSessionOf,
+  isMyWorkTab,
+  workViewOf,
+} from "@momo/core/features/workbench/workTab";
 import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
 import { ConnectedTerminalDock } from "@/features/workbench/agent/ConnectedTerminalDock";
@@ -39,10 +44,24 @@ export function WorkRoute() {
     navigate({ pathname: location.pathname, search: `?${params.toString()}` }, { replace: true });
   }, [needsConsoleView, location.pathname, location.search, navigate]);
 
+  // 작업 권한 요청 배너가 연 A 세션(#5595, `agentPanePath`). 격자가 그 칸을 열면 주소에서 지운다.
+  const agentSession = desktop ? agentPaneSessionOf(location.search) : null;
+  const agentSessionOpened = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete(AGENT_PANE_PARAM);
+    navigate({ pathname: location.pathname, search: `?${params.toString()}` }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+
   if (view === "jobs") return <WorkJobsRoute />;
   // 셸과 **같은 함수**로 판정한다: 셸이 도크를 내리는 바로 그때만 격자를 그린다.
   if (isMyWorkTab(location.pathname, location.search, desktop)) {
-    return <ConnectedTerminalDock presentation="tab" />;
+    return (
+      <ConnectedTerminalDock
+        presentation="tab"
+        openAgentSession={agentSession}
+        onAgentSessionOpened={agentSessionOpened}
+      />
+    );
   }
   // 웹의 터미널 격자 주소(#3334): 로컬 터미널 레인이 없다는 이유와 「작업」으로 가는 길.
   if (view === "terminals") return <MyWorkWebNotice />;

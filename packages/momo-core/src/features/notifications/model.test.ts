@@ -999,3 +999,162 @@ describe("스레드 배너 상한 (#5017): 폰 푸시의 스레드당 분당 6�
     expect([...ledger.keys()]).toEqual([OTHER_ROOT.toLowerCase()]);
   });
 });
+
+// =============================================================================
+// #5595 (ADR-0188 D5·D8): 맥 작업 세션의 권한 요청도 승인 배너다 — 세션 주인에게만.
+// 줄의 모양은 서버가 세션 스레드에 남기는 System 메시지 그대로다(`work_sessions.rs` `validated_acp_event`,
+// 미리보기는 빠지고 해시만 남는다). 세션 주인은 작성자가 아니라 서버 원장(`workSession`)이 말한다.
+// =============================================================================
+
+describe("작업 세션 권한 요청 → OS 배너 (#5595)", () => {
+  const SESSION = "019F9A10-0000-7000-8000-0000000000A1";
+  const ROOT = "019F9A10-0000-7000-8000-0000000000B1";
+  const EVENT_ID = "019F9A10-0000-7000-8000-0000000000C1";
+  const ALIAS = "00000000-0000-7000-8000-000000000104";
+
+  function workEvent(
+    overrides: { author?: string; options?: unknown[]; eventType?: string; type?: string; status?: string } = {}
+  ): MessageNewEvent {
+    return event({
+      id: "019F9A10-0000-7000-8000-0000000000D1",
+      type: overrides.type ?? "system",
+      body: "Approval requested",
+      author_member_id: overrides.author ?? SELF,
+      root_id: ROOT,
+      props: {
+        kind: "work_session_event",
+        schema: "momo.work_session.acp_event.v1",
+        source: "acp",
+        event_id: EVENT_ID,
+        event_type: overrides.eventType ?? "approval.requested",
+        event_ts: NOW,
+        event: {
+          run_id: SESSION,
+          work_session_id: SESSION,
+          channel_id: CHANNEL,
+          action: "requested",
+          action_type: "tool_call",
+          status: overrides.status ?? "pending",
+          options: overrides.options ?? [
+            { option_id: "allow", name: "Allow once", kind: "allow_once" },
+            { option_id: "reject", name: "Reject", kind: "reject_once" },
+          ],
+          preview_sha256: "a".repeat(64),
+        },
+      },
+    });
+  }
+
+  const mine = { memberId: SELF, status: "running" as const, label: "UI 검수" };
+  function workContext(overrides: Partial<NotifyContext> = {}): NotifyContext {
+    return context({
+      workSession: (id) => (id.toLowerCase() === SESSION.toLowerCase() ? mine : undefined),
+      workPermissionTitle: () => "응답 필요",
+      workPermissionSentence: (session) => `${session}: 맥에서 실행 허락을 기다려요`,
+      ...overrides,
+    });
+  }
+
+  it("세션 주인에게 승인 배너: 로컬 칸 배너와 같은 꼴(제목 「응답 필요」, 본문 「<세션 이름>: 맥에서 실행 허락을 기다려요」), 세션 id를 싣는다. 서버의 영어 본문·선택지 이름은 없다", () => {
+    const decision = notifyDecision(workEvent(), workContext());
+    expect(decision).toEqual({
+      show: true,
+      notification: {
+        kind: "approval",
+        messageId: "019F9A10-0000-7000-8000-0000000000D1",
+        channelId: CHANNEL,
+        title: "응답 필요",
+        body: "UI 검수: 맥에서 실행 허락을 기다려요",
+        workSessionId: SESSION,
+        summaryLabel: "UI 검수",
+        bannerGroup: "waiting",
+      },
+    });
+    expect(JSON.stringify(decision)).not.toMatch(/Approval requested|Allow once|Reject/);
+  });
+
+  it("작성자가 나 자신이어도 알린다 — 세션은 별칭을 부르지 않았으면 주인의 이름으로 말한다(사보타주: self 제외를 넣으면 RED)", () => {
+    expect(notifyDecision(workEvent({ author: SELF }), workContext()).show).toBe(true);
+    // 별칭(에이전트)이 쓴 줄도 같다: 주인은 원장이 말한다.
+    expect(notifyDecision(workEvent({ author: ALIAS }), workContext()).show).toBe(true);
+  });
+
+  it("세션 주인이 아니면 채널에 같이 있어도 알리지 않는다(ADR-0188 D3·D5) — 작성자가 나여도", () => {
+    const teammates = { memberId: OTHER, status: "running" as const, label: "남의 작업" };
+    for (const author of [SELF, OTHER, ALIAS]) {
+      expect(notifyDecision(workEvent({ author }), workContext({ workSession: () => teammates })), author).toEqual({
+        show: false,
+        skip: "not-owner",
+      });
+    }
+  });
+
+  it("이 기기가 아직 모르는 세션은 owner-unknown(호출자가 원장을 읽고 다시 묻는다), 원장을 못 주는 표면은 평범한 줄", () => {
+    expect(notifyDecision(workEvent(), workContext({ workSession: () => undefined }))).toEqual({
+      show: false,
+      skip: "owner-unknown",
+    });
+    // 브라우저 탭: 허락은 앱의 일이라(ADR-0146 D-4) 원장 입력이 없다. 예전처럼 알리지 않는다(작성자가 나면 self, 남이면 not-notifiable).
+    expect(notifyDecision(workEvent({ author: OTHER }), context())).toEqual({ show: false, skip: "not-notifiable" });
+    expect(notifyDecision(workEvent(), context()).show).toBe(false);
+  });
+
+  it("결정할 수 있는 선택지가 없거나, 요청이 아닌 세션 이벤트, System이 아닌 줄은 배너가 아니다", () => {
+    const always = [{ option_id: "always", name: "Always allow", kind: "allow_always" }];
+    expect(notifyDecision(workEvent({ author: OTHER, options: always }), workContext()).show).toBe(false);
+    expect(notifyDecision(workEvent({ author: OTHER, eventType: "approval.decided" }), workContext()).show).toBe(false);
+    expect(notifyDecision(workEvent({ author: OTHER, eventType: "agent.partial" }), workContext()).show).toBe(false);
+    expect(notifyDecision(workEvent({ author: OTHER, type: "text" }), workContext()).show).toBe(false);
+  });
+
+  it("끝난 세션의 요청은 이미 취소됐다: 알리지 않는다", () => {
+    for (const status of ["ended", "orphaned"] as const) {
+      const closed = { ...mine, status };
+      expect(notifyDecision(workEvent(), workContext({ workSession: () => closed })).show, status).toBe(false);
+    }
+    const idle = { ...mine, status: "idle" as const };
+    expect(notifyDecision(workEvent(), workContext({ workSession: () => idle })).show).toBe(true);
+  });
+
+  it("기존 알림 설정을 그대로 따른다: 이 기기의 승인 스위치·알림 일시 중지·채널 음소거·재연결 재생·두 번째 도착", () => {
+    expect(notifyDecision(workEvent(), workContext({ kindEnabled: (kind) => kind !== "approval" }))).toEqual({
+      show: false,
+      skip: "kind-disabled",
+    });
+    expect(notifyDecision(workEvent(), workContext({ kindEnabled: (kind) => kind !== "mention" })).show).toBe(true);
+    expect(notifyDecision(workEvent(), workContext({ paused: true }))).toEqual({ show: false, skip: "paused" });
+    expect(notifyDecision(workEvent(), workContext({ isMuted: () => true }))).toEqual({ show: false, skip: "muted" });
+    expect(notifyDecision(workEvent(), workContext({ nowMs: NOW + 10 * 60_000 }))).toEqual({
+      show: false,
+      skip: "stale",
+    });
+    expect(notifyDecision(workEvent(), workContext({ isAnnounced: () => true }))).toEqual({
+      show: false,
+      skip: "duplicate",
+    });
+  });
+
+  it("창이 앞이어도 그 세션의 카드(칸)가 안 보이면 알린다. 카드가 보이면 조용하다. 채널이 보이는 것은 카드가 아니다", () => {
+    expect(
+      notifyDecision(workEvent(), workContext({ windowFocused: true, isTargetVisible: () => true })).show
+    ).toBe(true);
+    expect(
+      notifyDecision(
+        workEvent(),
+        workContext({ windowFocused: true, isWorkSessionVisible: (id) => id.toLowerCase() === SESSION.toLowerCase() })
+      )
+    ).toEqual({ show: false, skip: "focused" });
+    expect(
+      notifyDecision(workEvent(), workContext({ windowFocused: false, isWorkSessionVisible: () => true })).show
+    ).toBe(true);
+  });
+
+  it("세션 이름이 비면 말한 이의 이름으로 말한다. 제목 사전이 없으면 이름이 제목이다", () => {
+    const unnamed = { ...mine, label: "  " };
+    const decision = notifyDecision(workEvent({ author: ALIAS }), workContext({ workSession: () => unnamed, actorFor: () => "@dohyun-claude" }));
+    expect(decision.show && decision.notification.body).toBe("@dohyun-claude: 맥에서 실행 허락을 기다려요");
+    expect(decision.show && decision.notification.summaryLabel).toBe("@dohyun-claude");
+    const untitled = notifyDecision(workEvent(), workContext({ workPermissionTitle: undefined }));
+    expect(untitled.show && untitled.notification.title).toBe("UI 검수");
+  });
+});

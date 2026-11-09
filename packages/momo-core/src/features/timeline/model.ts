@@ -588,9 +588,6 @@ export function isStrictlyOrdered(messages: Message[]): boolean {
 // 않으므로 모델도 뒤집을 이유가 없다.
 // -----------------------------------------------------------------------------
 
-/** Author group window: a new header after 5 minutes of the same author. */
-export const AUTHOR_GROUP_WINDOW_MS = 300_000;
-
 /** The two fields grouping depends on; a pending row has them before it has a seq. */
 export type GroupingRow = Pick<Message, "authorMemberId" | "createdAtMs">;
 
@@ -601,9 +598,31 @@ export function dayKey(atMs: number): string {
 }
 
 /**
- * A message starts a new author group when the author changes, when more than
- * AUTHOR_GROUP_WINDOW_MS passed since the previous message, or across a day
- * boundary. Continuation rows drop the header for density (Slack convention).
+ * Local-minute key (day + hour + minute) — the unit the row's time label shows.
+ * Two messages share a group only when they share this key (#5603).
+ */
+export function minuteKey(atMs: number): string {
+  const d = new Date(atMs);
+  return `${dayKey(atMs)} ${d.getHours()}:${d.getMinutes()}`;
+}
+
+/** One minute. Two rows further apart than this never share a group (see `startsAuthorGroup`). */
+const ONE_MINUTE_MS = 60_000;
+
+/**
+ * 같은 사람의 말은 **같은 분**까지만 한 묶음이다 (#5603, owner 11-09).
+ *
+ * 묶음이 이어지는 조건은 셋이 모두 맞을 때다: 같은 작성자, 같은 로컬 날, 같은 로컬 시·분(`minuteKey`). 분이 바뀌면
+ * 새 머리(이름·시각)가 선다 — 47분 59초와 48분 01초는 다른 묶음이다. 기준은 화면이 보여 주는 시각의 단위(시·분)와 같다:
+ * 머리가 「15:47」이라고 말하면 그 아래 말은 모두 15:47에 한 말이다.
+ *
+ * 예전 규칙(앞 메시지와 5분 안이면 이어 붙임)은 기준이 **앞 메시지**라 3~4분 간격으로 말이 이어지면 몇 시간이든 한 묶음이
+ * 됐다(owner 보고: 47분과 50분의 말이 한 묶음). 이 규칙에는 사슬이 없다: 분이 바뀌면 끊긴다.
+ *
+ * 날이 바뀌는 것은 `minuteKey`가 날을 품으므로 같이 끊긴다. 1분보다 멀면 같은 열쇠여도 끊는다 — 서머타임이 끝나는 밤에는
+ * 같은 「1:30」이 한 시간 간격으로 두 번 온다.
+ *
+ * 웹·데스크탑·폰이 이 함수 하나를 쓴다. 이어지는 행은 머리를 빼고 본문만 잇는다(밀도 — Slack·Buzz 관례).
  */
 export function startsAuthorGroup(
   previous: GroupingRow | undefined,
@@ -611,10 +630,10 @@ export function startsAuthorGroup(
 ): boolean {
   if (!previous) return true;
   if (!uuidEq(previous.authorMemberId, current.authorMemberId)) return true;
-  if (current.createdAtMs - previous.createdAtMs > AUTHOR_GROUP_WINDOW_MS) {
+  if (Math.abs(current.createdAtMs - previous.createdAtMs) >= ONE_MINUTE_MS) {
     return true;
   }
-  return dayKey(previous.createdAtMs) !== dayKey(current.createdAtMs);
+  return minuteKey(previous.createdAtMs) !== minuteKey(current.createdAtMs);
 }
 
 // ---- 멈춘 에이전트 알림 접기 (goal P3 1-2) -----------------------------------

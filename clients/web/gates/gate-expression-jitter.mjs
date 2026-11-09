@@ -259,18 +259,28 @@ const BODIES = (() => {
 
 const ANCHOR_TEXT = "앵커 줄: 회의록 정리는 내일 오전에 마칠게요.";
 
+/**
+ * 줄의 시각. 세 줄(나 · 상대 · 상대)마다 한 분이고, 상대의 두 줄은 **같은 분**이라 한 묶음이다(#5603: 묶음은 같은 로컬 분까지만).
+ * 예전에는 줄마다 1분 간격이었고 5분 묶음 창이 상대의 두 줄을 이어 붙였다 — 이 게이트가 잰 기하(머리 줄 수 · 높이)를 그대로 지키려고
+ * 묶음 모양을 같게 둔다. 기준 시각은 분의 처음(초 0)이다. 시간대 차이는 분 단위라 로컬에서도 초가 그대로다.
+ */
+const HISTORY_MINUTE0_MS = 1_785_238_380_000;
+function historyAt(i) {
+  return HISTORY_MINUTE0_MS + Math.floor(i / 3) * 60_000 + (i % 3) * 10_000;
+}
+
 function history() {
   return BODIES.map((body, i) => ({
     id: `0199eeee-0000-7000-8000-${String(i).padStart(12, "0")}`,
     channelId: dmChannelId,
     seq: i + 1,
-    hlcTs: 1_785_238_400_000 + i * 60_000,
+    hlcTs: historyAt(i),
     hlcCount: 0,
     authorMemberId: i % 3 === 0 ? meId : peerId,
     type: "text",
     body,
     state: "sent",
-    createdAtMs: 1_785_238_400_000 + i * 60_000,
+    createdAtMs: historyAt(i),
   }));
 }
 
