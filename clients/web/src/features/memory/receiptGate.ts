@@ -1,4 +1,5 @@
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
+import { AGENT_AUTHOR } from "@momo/core/features/timeline/serverResultAuthor";
 import type { Message } from "@momo/core/lib/api";
 
 /**
@@ -16,5 +17,6 @@ export function receiptRunIdFor(input: {
   provided: boolean;
 }): string | null {
   if (!input.provided || !input.isAgent || input.deleted) return null;
-  return turnRecordRunId(input.message, "agent");
+  // `isAgent` 는 멤버 목록이 말한 작성자 종류다(위에서 확인). 코어도 같은 사실을 한 번 더 본다(#5577).
+  return turnRecordRunId(input.message, AGENT_AUTHOR);
 }

@@ -23,6 +23,9 @@ import type { Member } from "../../lib/api";
 /** 메시지 작성자의 멤버 종류. 늘 멤버 목록에서 읽는다(메시지 props 에서 읽지 않는다). */
 export type AuthorKind = Member["kind"];
 
+/** 에이전트 작성자. 멤버 목록으로 이미 에이전트임을 확인한 호출자가 넘긴다(웹 `receiptGate`). */
+export const AGENT_AUTHOR: AuthorKind = "agent";
+
 /** 서버 결과 카드·칩을 세울 수 있는 작성자인가: 에이전트 멤버뿐이다. 모르면 아니다. */
 export function isAgentAuthored(authorKind: AuthorKind | null | undefined): boolean {
   return authorKind === "agent";
