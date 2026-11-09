@@ -11,9 +11,12 @@
 
 External Hermes can connect to oort through two product-supported paths:
 
-- **agent-worker SSE path**: oort owns the worker loop and calls a
-  Hermes/OpenAI-compatible `/v1/chat/completions` endpoint. This remains the
-  deterministic default for local gates. Compose service:
+- **agent-worker path**: oort owns the worker loop and calls a
+  Hermes/OpenAI-compatible `/v1/chat/completions` endpoint with
+  `"stream": false`, so each turn comes back as one JSON answer, not an SSE
+  stream (`server-rust/bins/momo-agent-worker/src/provider.rs`). Only the
+  ChatGPT-subscription Responses wire and the Anthropic Messages wire stream.
+  This remains the deterministic default for local gates. Compose service:
   `agent-worker` in `infra/rust/docker-compose.rust.yml`.
 - **Hermes gateway native platform path**: Hermes treats oort like a
   Slack/Telegram-style messaging platform, receives oort `agent.job` events,
@@ -81,7 +84,7 @@ account secrets in this env file. Those belong inside the external runtime.
 |---|---|---|---|
 | repo-local mock | `scripts/mock_hermes.py` | dev-only local bearer | deterministic agent-worker, tool-call, cost, status, and timeline smoke |
 | internal-host mock | compose `mock-hermes` image (`infra/rust/docker-compose.lane-phone.yml`) | internal smoke placeholder | image-based host-runtime smoke without real provider side effects |
-| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider SSE preflight plus one `@hermes` channel roundtrip through compose `api`, `agent-worker`, `relay`, and timeline |
+| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider `/chat/completions` preflight plus one `@hermes` channel roundtrip through compose `api`, `agent-worker`, `relay`, and timeline (manual today, see below) |
 
 ## Smoke Commands
 
@@ -109,22 +112,30 @@ scripts/local_alpha_runner.sh execute \
   --secret-env "$HOME/.momo/external-agent.env"
 ```
 
-Expected credentialed coverage:
+Expected credentialed coverage. The credentialed smoke and the local-alpha
+runner option both hand a credentialed run to the former
+`verify_external_agent_provider.sh`, which was retired with the Swift stack
+(#2165). With a provider env present they stop at that hand-off today, so the
+steps below are checked by hand and recorded as
+`runtime-unverified(external provider credentials)` until a Rust-stack
+verifier replaces it:
 
-1. OpenAI-compatible SSE preflight against `${HERMES_BASE_URL}/chat/completions`.
+1. OpenAI-compatible preflight: one non-streamed (`"stream": false`) request to
+   `${HERMES_BASE_URL}/chat/completions`, the same shape `agent-worker` sends.
 2. Local compose `api`, `relay`, `agent-worker`, `postgres`, and `centrifugo` boot
    (`infra/rust/docker-compose.rust.yml`).
-3. `/v1/agent-runtime/status` reports `mode=external-hermes`,
+3. `GET /v1/provider/link` (instance operator) reports `mode=external-hermes`,
    `availability=available`, `keyConfigured=true`, a redacted `endpointLabel`,
-   and no `degradedReason`.
+   and an empty `diagnostics` list.
 4. Seeded Hermes is verified as an active `member.kind='agent'` in `#agent-lab`.
 5. A channel message mentioning `@hermes` creates an `agent_run`, calls the
    external runtime, writes a durable agent response message, and publishes the
    final `message.new` through `relay`.
 
-On failure, evidence records a redacted failure category/reason. If status is
-reachable but degraded, `/v1/agent-runtime/status` includes `degradedReason`
-without provider tokens or raw secrets.
+If the link is configured but degraded, `GET /v1/provider/link` reports
+`availability=degraded` and lists the reasons in `diagnostics`; the response
+carries only `bearerConfigured` and at most a 4-character key tail, never a
+provider token or raw secret.
 
 ## References
 
