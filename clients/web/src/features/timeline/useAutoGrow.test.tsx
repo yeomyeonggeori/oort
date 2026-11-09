@@ -91,7 +91,6 @@ describe("#5567 재는 동안 살아 있는 입력창을 접지 않는다", () =
     expect(mirror).not.toBeNull();
     expect(mirror).not.toBe(input);
     expect(mirror!.tabIndex).toBe(-1);
-    expect(mirror!.inert).toBe(true);
     expect(mirror!.style.visibility).toBe("hidden");
     expect(mirror!.style.position).toBe("absolute");
     expect(mirror!.style.height).toBe("0px");

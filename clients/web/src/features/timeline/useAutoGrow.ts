@@ -19,8 +19,8 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
 // 초안에서 입력창이 한 줄로 접힌 순간 대화 목록의 스크롤러가 그만큼 커지고, WebKit(데스크탑 앱의 WKWebView)은 그
 // 자리에서 목록의 `scrollTop`을 커진 창의 끝으로 깎는다. 높이를 되돌려도 깎인 값은 돌아오지 않는다. 그래서 키마다
 // 목록이 (줄 수 − 1) × 한 줄(24.4px)만큼 입력창 뒤로 내려앉았다가, 줄이 늘 때 바닥 붙이기(Timeline.tsx DS2-6)가 다시
-// 끌어올렸다 — owner 11-09 「타이핑하면 위로 올라가고 진동」. Chromium은 이 깎기를 레이아웃 뒤로 미뤄 같은 코드에서
-// 움직이지 않는다. 실측(gates/gate-typing-jitter.mjs, 1280×800, 3줄 초안, 바닥 gap 0): WebKit은 접고-읽고-되돌린
+// 끌어올렸다 — owner 11-09 데스크탑 DM 「타이핑 중 화면 떨림」 보고. Chromium은 같은 조작에서 scrollTop이 변하지 않아(실측)
+// 브라우저에서는 안 보였다. 실측(gates/gate-typing-jitter.mjs, 1280×800, 3줄 초안, 바닥 gap 0): WebKit은 접고-읽고-되돌린
 // 같은 작업 안에서 `scrollTop` 2887→2838, 두 프레임 뒤에도 gap 50. Chromium 2645→2645.
 //
 // 그래서 높이를 **거울**에서 잰다: 같은 부모 안의 보이지 않는 textarea(같은 클래스·같은 폭·같은 글)다. 거울은
