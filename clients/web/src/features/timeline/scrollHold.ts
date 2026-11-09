@@ -35,8 +35,19 @@ export interface ScrollHoldOptions {
   firstItemIndex: () => number;
 }
 
-export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOptions): () => void {
-  if (typeof ResizeObserver === "undefined") return () => {};
+export interface ScrollHold {
+  /**
+   * 내가 보낸 글이 들어온다 (#5603): 위를 읽던 중이었어도 **이제부터는 바닥이다.** 보던 줄을 지키지 않고 바닥으로 옮긴 뒤 바닥에 붙인다.
+   * 이 신호가 없으면 메아리가 붙어 목록이 자란 바로 그 프레임에 이 모듈이 「보던 줄」을 제자리로 되돌려(위를 읽던 중의 바로잡기) 가상 목록의
+   * 따라가기를 무를 수 있다 — 어느 쪽이 먼저 도는지는 엔진과 타이밍에 달렸다.
+   */
+  expectBottom(): void;
+  /** 관찰을 멈춘다. */
+  stop(): void;
+}
+
+export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOptions): ScrollHold {
+  if (typeof ResizeObserver === "undefined") return { expectBottom: () => {}, stop: () => {} };
   const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= AT_BOTTOM_SLACK_PX;
   const readAnchor = (): Anchor | null => {
     const edge = scroller.getBoundingClientRect().top;
@@ -167,10 +178,21 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   structure.observe(scroller, { childList: true });
   if (scroller.firstElementChild) structure.observe(scroller.firstElementChild, { childList: true });
   scroller.addEventListener("scroll", onScroll, { passive: true });
-  return () => {
-    if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
-    scroller.removeEventListener("scroll", onScroll);
-    structure.disconnect();
-    observer.disconnect();
+  return {
+    expectBottom: () => {
+      // 바닥에 있던 목록은 늘 하던 대로 둔다(가상 목록의 따라가기 + 위 바닥 붙이기). 바닥에서 보낸 글은 수리 전에도 따라갔으므로 이 수리의
+      // 대상이 아니고, 손대지 않아야 #5583 이 잰 바닥 동작이 그대로다. 판정은 바뀌기 전의 위치다.
+      if (wasAtBottom) return;
+      anchor = null;
+      wasAtBottom = true;
+      place(scroller.scrollHeight);
+      armSettle(null);
+    },
+    stop: () => {
+      if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
+      scroller.removeEventListener("scroll", onScroll);
+      structure.disconnect();
+      observer.disconnect();
+    },
   };
 }

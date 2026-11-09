@@ -208,6 +208,37 @@ describe("buildSessionList", () => {
     ]);
   });
 
+  // design-review #5584 r2 H1 (c): 실패한 턴만 끝났을 때 「상태로 묶기」 머리가 초록 ✓ 「끝남 1」이었다.
+  it("상태로 묶기: 「끝남」 가운데 실패한 턴은 「실패」 묶음으로 따로 서고, 「끝남」 묶음에는 들지 않는다", () => {
+    const g = git("momo", "momo", "main");
+    const groups = (rows: SessionListRow[]) =>
+      rows.flatMap((r) => (r.kind === "group" ? [{ label: r.label, count: r.count, failed: r.failed === true }] : []));
+    const onlyFailed = buildSessionList([pane(3, g, { status: "done", failed: true })], { filter: "all", grouping: "status" });
+    expect(groups(onlyFailed.rows)).toEqual([{ label: "실패", count: 1, failed: true }]);
+    expect(onlyFailed.rows.some((r) => r.kind === "group" && r.label === "끝남")).toBe(false);
+
+    const mixed = buildSessionList(
+      [pane(1, g), pane(3, g, { status: "done", failed: true }), pane(4, g, { status: "done" }), pane(5, g, { status: "done", failed: true })],
+      { filter: "all", grouping: "status" }
+    );
+    expect(shape(mixed.rows)).toEqual(["# 실행 중", "1 @main", "# 실패", "3 @main", "5 @main", "# 끝남", "4 @main"]);
+    expect(groups(mixed.rows)).toEqual([
+      { label: "실행 중", count: 1, failed: false },
+      { label: "실패", count: 2, failed: true },
+      { label: "끝남", count: 1, failed: false },
+    ]);
+    // 실패 묶음 아래 줄은 전부 실패이고, 「끝남」 묶음 아래에는 실패가 없다.
+    const under = (label: string) => {
+      const start = mixed.rows.findIndex((r) => r.kind === "group" && r.label === label);
+      const next = mixed.rows.findIndex((r, i) => i > start && r.kind === "group");
+      return mixed.rows.slice(start + 1, next === -1 ? undefined : next).filter((r) => r.kind === "session");
+    };
+    expect(under("실패").every((r) => r.kind === "session" && r.failed === true)).toBe(true);
+    expect(under("끝남").every((r) => r.kind === "session" && r.failed !== true)).toBe(true);
+    // 저장소로 묶기는 그대로다(머리가 상태를 말하지 않는다).
+    expect(buildSessionList([pane(3, g, { status: "done", failed: true })], { filter: "all", grouping: "repo" }).rows.some((r) => r.kind === "group")).toBe(false);
+  });
+
   it("상태로 묶기에서 저장소가 둘이면 행마다 저장소 이름, 한 저장소를 고르면 다시 숨긴다", () => {
     const two = [pane(1, git("momo", "momo", "main")), pane(2, git("oort-site", "oort-site", "main"))];
     expect(shape(buildSessionList(two, { filter: "all", grouping: "status" }).rows)).toEqual([

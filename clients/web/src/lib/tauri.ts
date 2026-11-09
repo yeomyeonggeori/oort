@@ -668,10 +668,14 @@ export const desktopPty = {
     onOutput: (bytes: ArrayBuffer) => void,
     onExit: (exit: PtyExit) => void,
     /**
-     * A harness hook's status signal for this session (#2776,
-     * `pane_signal.rs`): one of `PaneSignal` in `@momo/core` workbench
-     * `paneStatus`. Unknown values arrive as-is; the caller filters them.
-     * Never derived from output.
+     * A harness pane's status signal (`pane_signal.rs` `PaneSignalEvent`):
+     * `{ from: "hook" | "report", signal }`. `hook` is a hook line on the
+     * app-only socket (#2776); `report` is the program's own OSC 7501 report,
+     * which the shell reads in `program_status.rs` and reduces to the same
+     * closed `PaneSignal` (null = the program withdrew it, #5579). Unknown
+     * values arrive as-is; the caller parses them with `parsePaneSignalEvent`
+     * in `@momo/core` workbench `paneStatus`. The webview derives nothing
+     * from output.
      */
     onSignal: (signal: unknown) => void = () => undefined
   ): Promise<number> {

@@ -13,7 +13,11 @@ import { showDesktopBanner, type BannerArm } from "./bannerClicks";
 // 앱 안 토스트가 아니다. OS 알림이다(ADR-0182의 대상 밖, taste §8).
 // =============================================================================
 
-export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done" | "thread-reply";
+/**
+ * 묶음의 단위. `failed`는 로컬 칸의 실패한 턴이다(design-review #5584 r2 H1): 「끝남」과 같은 창에 와도
+ * 따로 묶여 「작업 끝남 N건」에 섞이지 않는다.
+ */
+export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done" | "failed" | "thread-reply";
 
 export interface OsNotifyItem {
   kind: OsNotifyKind;
@@ -63,8 +67,11 @@ export function routeFor(items: readonly OsNotifyItem[]): string | undefined {
   return MIXED_ROUTE;
 }
 
+/** 표에 제목이 없는 종류: 묶음 제목은 그 알림의 제목(스레드 답글은 보낸 사람, 실패한 턴은 「실패」) + 건수다. */
+type TitledByItem = "thread-reply" | "failed";
+
 /** 묶였을 때의 제목. 「무엇이 일어났나」가 먼저, 건수가 뒤다. */
-const SUMMARY_TITLE: Record<Exclude<OsNotifyKind, "thread-reply">, string> = {
+const SUMMARY_TITLE: Record<Exclude<OsNotifyKind, TitledByItem>, string> = {
   approval: "승인 필요",
   mention: "멘션",
   dm: "새 메시지",
@@ -78,11 +85,14 @@ export const SUMMARY_NAMES = 3;
 /** 같은 종류를 한 묶음으로 보는 시간. */
 export const COALESCE_MS = 1200;
 
-/** 묶음 제목: 호출부가 준 것이 먼저, 없으면 표. 표에 없는 종류는 보낸 사람 이름으로 말한다(호출부가 늘 제목을 준다). */
+/**
+ * 묶음 제목: 호출부가 준 것이 먼저, 없으면 표. 표에 없는 종류는 그 알림의 제목으로 말한다(스레드 답글은 호출부가
+ * 늘 제목을 준다. 실패한 턴은 알림 제목이 곧 「실패」라서 「실패 N건」이다).
+ */
 function summaryTitleFor(first: OsNotifyItem, count: number): string {
   if (first.summaryTitle !== undefined) return first.summaryTitle(count);
-  const base = first.kind === "thread-reply" ? first.title : SUMMARY_TITLE[first.kind];
-  return `${base} ${count}건`;
+  const table: Partial<Record<OsNotifyKind, string>> = SUMMARY_TITLE;
+  return `${table[first.kind] ?? first.title} ${count}건`;
 }
 
 /** 순수: 한 종류의 알림 여럿을 배너 하나로. 하나면 그대로다. */
