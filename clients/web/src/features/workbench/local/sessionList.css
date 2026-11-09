@@ -413,11 +413,14 @@
 .sl-st[data-status="done"] {
   color: var(--ok);
 }
-.sl-st[data-status="stopped"] {
+/* 「실패」(실패한 턴, #5584 H1)는 「멈춤」의 빨간 ✕를 그대로 쓴다. 글자가 둘을 가른다. */
+.sl-st[data-status="stopped"],
+.sl-st[data-status="failed"] {
   color: var(--danger);
 }
 .sl-st[data-status="done"] > i,
-.sl-st[data-status="stopped"] > i {
+.sl-st[data-status="stopped"] > i,
+.sl-st[data-status="failed"] > i {
   inline-size: var(--session-mark-glyph);
   block-size: var(--session-mark-glyph);
   background-color: currentColor;
@@ -427,7 +430,8 @@
 .sl-st[data-status="done"] > i {
   --sl-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12.5l5 5L20 6.5'/%3E%3C/svg%3E");
 }
-.sl-st[data-status="stopped"] > i {
+.sl-st[data-status="stopped"] > i,
+.sl-st[data-status="failed"] > i {
   --sl-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
 @keyframes sl-spin {

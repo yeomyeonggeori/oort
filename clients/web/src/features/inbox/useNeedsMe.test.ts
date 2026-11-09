@@ -25,6 +25,7 @@ const approval = (id: string, over: Partial<FeedItem> = {}): FeedItem => ({
 const pane = (paneId: string, status: "waiting" | "done"): PaneAttentionEntry => ({
   paneId,
   status,
+  mark: status,
   signal: null,
   index: 1,
   name: paneId,

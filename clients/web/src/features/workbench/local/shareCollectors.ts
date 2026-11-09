@@ -125,8 +125,9 @@ export function createShareCollectors(deps: ShareCollectorsDeps): ShareCollector
       }
       if (e.signal !== view.signal) {
         e.signal = view.signal;
-        if (view.signal !== null) e.collector.onSignal(view.signal);
-        if (view.signal === "turn-done") void readGit(view.paneId, e);
+        // 거둠(null)도 넘긴다: 보고를 거둔 칸은 요약에서도 생명주기로 돌아간다(design-review M3).
+        e.collector.onSignal(view.signal);
+        if (view.signal === "turn-done" || view.signal === "turn-failed") void readGit(view.paneId, e);
       }
       if (e.title !== view.title) {
         e.title = view.title;

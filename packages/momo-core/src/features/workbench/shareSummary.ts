@@ -1,6 +1,6 @@
 import type { GitReadResult } from "./gitRead";
 import type { PaneSignal } from "./paneStatus";
-import { derivePaneStatus } from "./paneStatus";
+import { sharedPaneState } from "./paneStatus";
 import type { SessionPhaseInput, SessionStatus } from "./sessionList";
 
 // =============================================================================
@@ -12,7 +12,7 @@ import type { SessionPhaseInput, SessionStatus } from "./sessionList";
 // 이 PR은 보내지 않는다(`noopShareSender`, 기본 꺼짐).
 //
 // 입력은 아래 **타입 있는 메서드** 다섯 개뿐이다(ADR-0190 D4-b 허용 출처 셋).
-//   - `onSignal`    하네스 hook·notify 구조 신호 (닫힌 목록 `PaneSignal`)
+//   - `onSignal`    하네스 hook·notify·OSC 7501 구조 신호 (닫힌 목록 `PaneSignal`, null = 거둠)
 //   - `onTitle`     OSC 제목. **글자 모양 한 가지만** 읽고 글은 버린다
 //   - `onGit`       D3-c git 읽기 결과 (G1·G2·G4·G7·G8). 파싱은 셸에서 끝난 필드
 //   - `onLifecycle` 칸 생명주기: 시작·종료 코드
@@ -145,6 +145,7 @@ export const STAGE_LABEL: Readonly<Record<PaneSignal | "title-working" | "starte
   "waiting-permission": "실행 허락 기다림",
   "waiting-input": "답 기다림",
   "turn-done": "턴 끝남",
+  "turn-failed": "턴 실패",
   "title-working": "작업 중",
   started: "칸 시작",
   exited: "칸 종료",
@@ -194,7 +195,11 @@ const EMPTY_DIFF: S1Diff = {
 };
 
 export interface ShareCollector {
-  onSignal(signal: PaneSignal): void;
+  /**
+   * 칸이 따르는 신호. null = 신호가 없어졌다(프로그램이 OSC 7501 보고를 거뒀다, #5579): 요약도
+   * 로컬 칸처럼 생명주기로 돌아간다. 거둠은 단계가 아니라서 표지를 더하지 않는다.
+   */
+  onSignal(signal: PaneSignal | null): void;
   onTitle(title: string | null): void;
   onGit(results: GitInputs): void;
   onLifecycle(phase: SessionPhaseInput, exitCode?: number | null, exitSignal?: string | number | null): void;
@@ -259,7 +264,8 @@ export function createShareCollector(options: ShareCollectorOptions): ShareColle
       repo,
       branch,
       harness: options.harness,
-      state: derivePaneStatus({ phase, exitCode, exitSignal, signal }),
+      // 로컬 칸과 같은 판정이되, 서버 목록에 없는 「실패」만 대기로 싣는다(`sharedPaneState`).
+      state: sharedPaneState({ phase, exitCode, exitSignal, signal }),
       stages: [...stages],
       diff: { ...diff },
       prUrl,
@@ -340,7 +346,7 @@ export function createShareCollector(options: ShareCollectorOptions): ShareColle
   return {
     onSignal(next) {
       signal = next;
-      pushStage(STAGE_LABEL[next]);
+      if (next !== null) pushStage(STAGE_LABEL[next]);
       touch();
       changed();
     },

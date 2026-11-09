@@ -20,7 +20,7 @@ import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
 import { ExpressionStore } from "@/features/expressions/ExpressionStore";
 import { ExpressionsContext } from "@/features/expressions/context";
-import { resetSuggestMuteForTest } from "@momo/core/features/expressions/suggestMute";
+import { mutedKeywords, resetSuggestMuteForTest } from "@momo/core/features/expressions/suggestMute";
 import { readExpressionSuggestOn, resetExpressionSuggestOnForTest, writeExpressionSuggestOn } from "@/features/expressions/suggestSetting";
 import { ExpressionSuggestRow } from "@/features/settings/appearance/ExpressionSuggestRow";
 import type { ExpressionTransport } from "@/features/expressions/transport";
@@ -28,8 +28,10 @@ import type { ExpressionTransport } from "@/features/expressions/transport";
 // =============================================================================
 // 입력창 위의 이모티콘 추천 줄 (#5476, #5454 2단계, owner 2026-11-07 「안내 글 없이 카카오톡처럼」).
 //
-//   · 글을 치다 0.3초 멈추면 마지막 낱말(짧은 글이면 글 전체)이 꼬리표·이름과 맞는 큰 이모티콘·GIF 가 입력창 바로 위에 뜬다. 안 맞으면 줄이 없다. 계속 치면 사라진다.
-//   · 누르면 입력창 위 미리 보기에 올라간다. **저절로 보내지 않는다.** 입력칸의 Enter 는 줄이 떠 있어도 보내기 그대로이고 추천을 고르지 않는다.
+//   · 글을 치다 0.3초 멈추면 문구 안의 낱말(짧은 글이면 글 전체도)이 꼬리표·이름과 맞는 큰 이모티콘·GIF 가 입력창 바로 위에 뜬다. 여러 낱말이면 낱말이 나온 차례로 한 줄에 함께
+//     선다(#5588). 안 맞으면 줄이 없다. 계속 치면 사라진다.
+//   · 누르면 입력창 위 미리 보기에 올라간다. **저절로 보내지 않는다.** 글이 그 낱말뿐이면 글을 지워 그림으로 바꾸고(보내면 그림만), 문구면 글을 두고 그림을 더한다(#5588).
+//     입력칸의 Enter 는 줄이 떠 있어도 보내기 그대로이고 추천을 고르지 않는다.
 //   · ✕ 는 이 대화에서 그 낱말(들)의 추천을 끈다. Esc 는 줄만 닫는다. ↑(첫 줄)로 줄에 들어가 ← → Home End 로 움직인다.
 //   · 맞추기는 기기 안에서만 한다: 입력한 글은 어떤 요청에도 실리지 않는다.
 // 맞추기 규칙(정리·끝말·순서)은 코어 `suggest.test.ts` 가 재고, 키 뜻은 코어 `composerKeys.test.ts` 가 잰다. 여기서는 진짜 `Composer` 를 올려 배선을 잰다.
@@ -62,7 +64,7 @@ vi.mock("@/features/attachments/uploadTransport", () => transport);
 import { OpenAgentProfileContext } from "@/features/routing/useAgentProfile";
 import { resetAttachmentDraftsForTest } from "@/features/attachments/draftStore";
 import { resetSchedulerDisabledForTest } from "@/features/scheduled/useScheduled";
-import { clearDraft } from "@/features/chat/draftStore";
+import { clearDraft, readDraft } from "@/features/chat/draftStore";
 import { Composer } from "./Composer";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -88,7 +90,8 @@ const SIGH = make(64, "sigh_cat", "한숨냥", ["한숨"]);
 const HUNGRY = make(65, "hungry_bear", "배고픈 곰", ["배고픔"]);
 const KING = make(66, "king_bat", "킹받네곰", ["킹받네"]);
 const CHEERS = make(51, "cheers_still", "건배", ["축하"]);
-const LIBRARY = [KEUK, PPANG, TINY, SIGH, HUNGRY, KING, CHEERS];
+const JINSIM = make(67, "sincere_dog", "진심멍", ["진심"]);
+const LIBRARY = [KEUK, PPANG, TINY, SIGH, HUNGRY, KING, CHEERS, JINSIM];
 let library: typeof LIBRARY = LIBRARY;
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -341,17 +344,28 @@ describe("글을 치다 멈추면 맞는 그림이 입력창 위에 뜬다", () 
     expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
   });
 
-  it("계속 치면 줄이 그 순간 사라지고, 다시 멈추면 새 글로 다시 맞춘다", async () => {
+  it("계속 치면 줄이 그 순간 사라지고, 다시 멈추면 새 글로 다시 맞춘다 - 문구 안의 낱말도 모두 맞춘다(#5588)", async () => {
     await mount();
     await typeAndPause("ㅋㅋㅋ");
     expect(row()).not.toBeNull();
     // 한 글자라도 더 치면 시계를 흘리지 않았는데도 사라진다.
     await type("ㅋㅋㅋ 오늘 점심은");
     expect(row()).toBeNull();
+    // 멈추면 새 글로 다시 맞춘다: 「오늘」·「점심은」은 안 맞지만 문구 안의 「ㅋㅋㅋ」가 맞는다.
     await pause();
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
+    await type("ㅋㅋㅋ 오늘 점심은 한숨");
     expect(row()).toBeNull();
-    await typeAndPause("ㅋㅋㅋ 오늘 점심은 한숨");
-    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
+    await pause();
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "한숨냥 미리 보기에 올리기"]);
+  });
+
+  it("「ㅋㅋ 개웃기네 진심」: ㅋㅋ 쪽과 진심 쪽이 낱말이 나온 차례로 한 줄에 함께 선다(맞지 않는 「개웃기네」는 자리가 없다)", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ 개웃기네 진심");
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "진심멍 미리 보기에 올리기"]);
+    await typeAndPause("진심 개웃기네 ㅋㅋ");
+    expect(names()).toEqual(["진심멍 미리 보기에 올리기", "키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
   });
 
   it.each([
@@ -402,29 +416,59 @@ describe("글을 치다 멈추면 맞는 그림이 입력창 위에 뜬다", () 
 });
 
 describe("누르면 미리 보기에 올라가고, 저절로 보내지 않는다", () => {
-  it("그림을 누르면 입력창 위 미리 보기에 올라가고 줄이 닫히며 글과 포커스는 그대로다 - 시간이 지나도 보내지 않고, 보내기(Enter) 한 번에 글과 같이 간다", async () => {
+  const previewName = () => q("composer-expression-preview")?.querySelector("[data-expression-name]")?.getAttribute("data-expression-name") ?? null;
+
+  it("글이 그 낱말뿐이면(「ㅋㅋㅋ!!」) 누르는 순간 글이 지워지고 그림이 미리 보기에 선다 - 저절로 보내지 않고, 보내기(Enter) 한 번에 글 없이 그림만 간다 (#5588)", async () => {
     await mount();
-    await typeAndPause("ㅋㅋㅋ");
+    await typeAndPause("ㅋㅋㅋ!!");
+    expect(readDraft(WS, CH)).toBe("ㅋㅋㅋ!!");
     await click(items()[1] ?? null);
-    // 누른 바로 그 순간: 보내지 않았다(미리 보기 선택은 보내기가 아니다).
+    // 누른 바로 그 순간: 보내지 않았다(미리 보기 선택은 보내기가 아니다). 글은 그림으로 바뀌었다 - 입력칸도 초안도 비었다.
     expect(onSend).not.toHaveBeenCalled();
-    const preview = q("composer-expression-preview");
-    expect(preview).not.toBeNull();
-    expect(preview?.querySelector("[data-expression-name]")?.getAttribute("data-expression-name")).toBe("kk_loud");
+    expect(previewName()).toBe("kk_loud");
     expect(row()).toBeNull();
-    expect(textarea().value).toBe("ㅋㅋㅋ");
+    expect(textarea().value).toBe("");
+    expect(readDraft(WS, CH)).toBe("");
     expect(document.activeElement).toBe(textarea());
-    // 저절로 보내지 않는다: 몇 초가 흘러도, 줄이 닫힌 글을 그대로 두어도 요청이 없다.
+    // 저절로 보내지 않는다: 몇 초가 흘러도 요청이 없고 줄도 다시 서지 않는다.
     await wait(5000);
     expect(onSend).not.toHaveBeenCalled();
     expect(row()).toBeNull();
-    // 보내기는 글과 같이 한 번이다.
+    // 보내기 한 번: 글은 비고 그림만 간다(표현 메시지 하나).
     expect(await press({ key: "Enter" })).toBe(true);
     expect(onSend).toHaveBeenCalledTimes(1);
     const [body, options] = onSend.mock.calls[0] as [string, { expression?: { name: string } }];
-    expect(body).toBe("ㅋㅋㅋ");
+    expect(body).toBe("");
     expect(options.expression?.name).toBe("kk_loud");
     expect(q("composer-expression-preview")).toBeNull();
+  });
+
+  it("낱말이 문구 안에 있으면(「ㅋㅋㅋ 개웃기네 진심」) 글은 그대로 두고 그림을 더한다 - 보내기 한 번에 글과 그림이 같이 간다 (#5588)", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋㅋ 개웃기네 진심");
+    await click(items().find((button) => button.getAttribute("data-expression-id") === JINSIM.id) ?? null);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(previewName()).toBe("sincere_dog");
+    expect(row()).toBeNull();
+    expect(textarea().value).toBe("ㅋㅋㅋ 개웃기네 진심");
+    expect(readDraft(WS, CH)).toBe("ㅋㅋㅋ 개웃기네 진심");
+    expect(document.activeElement).toBe(textarea());
+    await wait(5000);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(await press({ key: "Enter" })).toBe(true);
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const [body, options] = onSend.mock.calls[0] as [string, { expression?: { name: string } }];
+    expect(body).toBe("ㅋㅋㅋ 개웃기네 진심");
+    expect(options.expression?.name).toBe("sincere_dog");
+    expect(q("composer-expression-preview")).toBeNull();
+  });
+
+  it("문구 줄의 ㅋㅋ 쪽 그림을 눌러도 문구는 그대로다 - 바꾸는 것은 글 전체가 그 그림의 낱말일 때뿐이다", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ 진심");
+    await click(items()[0] ?? null);
+    expect(previewName()).toBe("kk_giggle");
+    expect(textarea().value).toBe("ㅋㅋ 진심");
   });
 
   it("줄이 떠 있어도 Enter 는 보내기 그대로다 - 추천을 고르지 않는다 (글만 나가고 그림은 없다)", async () => {
@@ -463,6 +507,21 @@ describe("✕ 는 이 대화에서 그 낱말의 추천을 끈다", () => {
     await rerenderWith(CH);
     await typeAndPause("ㅋㅋㅋ");
     expect(row()).toBeNull();
+  });
+
+  it("여러 낱말 줄의 ✕ 는 그림에 맞은 낱말들만 끈다 - 맞지 않은 「개웃기네」는 끄지 않는다 (#5588)", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ 개웃기네 진심");
+    await click(muteButton());
+    expect(row()).toBeNull();
+    expect(mutedKeywords(`${WS}:${CH}`)).toEqual(["ㅋㅋ", "진심"]);
+    // 같은 글도, 그 낱말 하나씩도 이 대화에서는 다시 뜨지 않는다. 다른 낱말은 뜬다.
+    await typeAndPause("ㅋㅋ 개웃기네 진심!");
+    expect(row()).toBeNull();
+    await typeAndPause("진심");
+    expect(row()).toBeNull();
+    await typeAndPause("진심 한숨");
+    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
   });
 
   it("줄이 글 전체 낱말로 떴을 때는 그 낱말까지 끈다 (「킹 받네」 → 꼬리표 「킹받네」: 나중에 「킹받네」만 쳐도 다시 뜨지 않는다)", async () => {
