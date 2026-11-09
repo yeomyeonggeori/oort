@@ -102,7 +102,7 @@ describe("typingLineParts — 사전 문장을 이름(조사째) | 서술어로 
 describe("<TypingLine> — 늘 잡아 둔 한 줄", () => {
   function mount(memberIds: string[]) {
     return render(
-      createElement(LocaleProvider, { locale: korean }, createElement(TypingLine, { memberIds, directory }))
+      createElement(LocaleProvider, { locale: korean, children: createElement(TypingLine, { memberIds, directory }) })
     );
   }
 
@@ -120,7 +120,7 @@ describe("<TypingLine> — 늘 잡아 둔 한 줄", () => {
     const box = view.getByTestId("typing-line");
     act(() =>
       view.rerender(
-        createElement(LocaleProvider, { locale: korean }, createElement(TypingLine, { memberIds: [A], directory }))
+        createElement(LocaleProvider, { locale: korean, children: createElement(TypingLine, { memberIds: [A], directory }) })
       )
     );
     expect(view.getByTestId("typing-line")).toBe(box);
