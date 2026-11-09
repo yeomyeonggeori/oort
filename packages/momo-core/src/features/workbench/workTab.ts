@@ -47,6 +47,25 @@ export const WORK_CONSOLE_VIEW_PATH = "/work?view=console";
 /** 데스크탑 이 기기의 터미널 격자(옛 「내 작업」 본문). */
 export const LOCAL_TERMINALS_PATH = "/work?view=terminals";
 
+/**
+ * 데스크탑 격자에서 A 세션 하나의 칸을 여는 주소(#5595). 작업 권한 요청 배너를 누르면 여기로 온다: 승인 카드는
+ * 채널이 아니라 그 세션의 A 칸(`AgentProgressView`)에만 있다. 열쇠는 `session`이 아니다 — `?session=`은 작업
+ * 콘솔의 세션 링크다(`workViewOf`). 격자가 칸을 열고 나면 셸이 이 열쇠를 지운다(새로고침이 다시 열지 않게).
+ */
+export const AGENT_PANE_PARAM = "agent";
+
+export function agentPanePath(sessionId: string): string {
+  return `${LOCAL_TERMINALS_PATH}&${AGENT_PANE_PARAM}=${encodeURIComponent(sessionId.toLowerCase())}`;
+}
+
+/** 격자 주소가 열어 달라는 A 세션 id. 격자 보기가 아니거나 열쇠가 없으면 null. */
+export function agentPaneSessionOf(search: string): string | null {
+  if (workViewOf(search) !== "terminals") return null;
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const id = params.get(AGENT_PANE_PARAM)?.trim() ?? "";
+  return id === "" ? null : id;
+}
+
 export type WorkView = "jobs" | "terminals" | "console";
 
 /**
