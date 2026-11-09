@@ -55,7 +55,7 @@ import {
   keepPhoneDmHint,
 } from "@/features/chat/composerMeta";
 import { useTypingSend } from "@/features/chat/useTyping";
-import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
+import { useTypists } from "@/features/chat/typingStore";
 import {
   COMPOSER_SEED_EVENT,
   clearDraft,
@@ -456,23 +456,20 @@ export function Composer({
     // 명부에 없는 id도 떨군다 - 이름 없는 「누군가 작성 중」은 정보가 0이다.
     isEligible: (memberId) => memberFor(directory, memberId)?.kind === "human",
   });
-  const typingThreshold = useTypingThreshold();
   // 에이전트가 있는 채널은 입력창 위에 레일 칸을 **미리** 잡는다(#4619): 줄이 서고 사라져도 타임라인이
   // 밀리지 않으려면 칸이 먼저 있어야 한다. 칸이 폼의 윗 여백을 대신하므로 폼에 `data-rail`을 달아 `pt-0`이 되게 한다.
   const railReserved = isRailReserved({ dmAgent, directory, channelId });
 
   /**
-   * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
+   * 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
    *
-   * 폰에서 키 힌트는 원래 보이지 않는다. 빈 슬롯과 `TypingLine`은 모두 이미 높이가
-   * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
-   * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
+   * 폰에서 키 힌트는 원래 보이지 않는다. 남의 「작성 중」은 이 슬롯이 아니라 카드 아래 늘 잡아 둔 줄(`TypingLine`)에
+   * 서므로(#5567) 누가 치기 시작해도 힌트와 컴포저가 그대로다. DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
   const deliveryHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
   const dmHint = dmAdmissionHint(text, channel, directory, session.member.id) ?? deliveryHint;
   const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
-    typistCount: typists.length,
     hasDmHint: dmHint !== null,
     keysHintNeeded,
     isMobile,
@@ -904,9 +901,10 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 ·
-        // 아래 18 인셋 위에 흰 카드(`composer-card`)로 뜬다. 폰에서는 예전처럼
-        // 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
+        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 인셋에
+        // 흰 카드(`composer-card`)로 뜬다. 카드 아래는 시안의 여백 18이 아니라 늘 서 있는
+        // 「작성 중」 줄(`typing-line`, 글 한 줄 + 위아래 숨 8 = 34)이다(#5567). 폰에서는
+        // 예전처럼 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
         "composer-dock safe-area-bottom shrink-0",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
@@ -979,8 +977,8 @@ export function Composer({
         )
       )}
 
-      {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가
-          별도 26px 예약 띠를 만들지 않는다. 마지막 컨트롤 뒤에는 p-3+safe-area만 둔다. */}
+      {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
+          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. */}
       {offline && (
         <p
           role="status"
@@ -1042,7 +1040,7 @@ export function Composer({
       )}
       <form
         onSubmit={onSubmit}
-        className="relative p-3 data-rail:pt-0"
+        className="relative p-3 pb-0 data-rail:pt-0"
         // 레일 칸이 윗 여백을 대신한다(칸 24 + 여백 12가 겹쳐 쌓이지 않는다).
         data-rail={railReserved ? "" : undefined}
       >
@@ -1093,7 +1091,7 @@ export function Composer({
           }
           meta={
             <>
-              {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
+              {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
                   원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은
                   늘 붙어 있는 안 보이는 `role="status"` 노드가 맡는다: 조건부로 처음 생기는 라이브 리전은 낭독이
                   보장되지 않는다. */}
@@ -1117,10 +1115,12 @@ export function Composer({
                   sharedRow
                 />
               ) : (
-                <TypingLine
-                  memberIds={metaMode === "typing" ? typists : []}
-                  threshold={typingThreshold}
-                  directory={directory}
+                // 빈 슬롯: 문장은 없고 도구와 보내기 사이의 가로폭만 있다. 높이는 단추가 지고 보조기술에서도 빠진다.
+                <p
+                  className="min-w-0 flex-1"
+                  aria-hidden="true"
+                  data-testid="composer-meta-empty"
+                  data-composer-meta-slot=""
                 />
               )}
             </>
@@ -1250,6 +1250,9 @@ export function Composer({
             className={COMPOSER_TEXTAREA_CLASS}
           />
         </ComposerCard>
+        {/* 남의 「작성 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다(글 한 줄 + 위아래 숨 8). 아무도 안 칠 때도 같은 높이로
+            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. */}
+        <TypingLine memberIds={typists} directory={directory} />
       </form>
 
       <ComposerFormatTray

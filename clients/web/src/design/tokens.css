@@ -2550,8 +2550,10 @@
   @media (width >= 600px) {
     border-block-start: 0;
 
+    /* 카드 아래는 「작성 중」 줄(`typing-line`, 글 한 줄 + 위아래 숨 8 = 34)이 진다(#5567). 폼의 아래 여백은 0이고, 그 줄이
+     * 아무도 안 칠 때도 같은 높이로 서므로 카드는 판 바닥에서 34 위에 늘 같은 자리로 뜬다(앞 판의 폼 아래 여백 18보다 16 위). */
     & > form {
-      padding: var(--spacing-2) var(--spacing-6) 18px;
+      padding: var(--spacing-2) var(--spacing-6) 0;
     }
 
     /* 컴포저의 후보 목록(`@`·`#`·`:`)과 `/` 명령 목록은 폼 안에 절대 위치로 서고, 가로는 폰 폭의 폼 여백(`p-3`, 12)에
@@ -2644,6 +2646,50 @@
     @media (prefers-contrast: more) {
       border-color: var(--line-strong);
     }
+  }
+}
+
+/* 「작성 중」 줄 (#5567, owner 11-09). 입력 카드 **바로 아래** 한 줄이다(Slack·Discord와 같은 자리). 누가 치든 안 치든 칸이
+ * 늘 같은 높이(text-meta 한 줄 18 + 위아래 숨 `--spacing-2` 8 = 34)라 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다.
+ *
+ * 숨이 있는 이유(design-review M-1): 칸이 글 한 줄 높이뿐이던 판에서는 글자 잉크가 카드 밑변에서 3, 판 밑변에서 4px에 끼었고,
+ * 넓은 창에서는 카드의 float 그림자 띠(`--shadow-lg`, 카드 아래 약 24px까지 번진다) 한가운데 서서 밝은 테마의 렌더 대비가 토큰
+ * 쌍 6.61:1에서 4.74:1로 내려갔다. 위아래 8을 두면 잉크가 카드에서 11, 판 밑변에서 12 떨어진다 — 카드 안 글 칸의 인셋(12)과
+ * 같은 숨이고, 글자가 그림자의 진한 쪽에서 벗어난다. 글은 카드 안 글 칸의 첫 글자와 같은 세로줄에서 시작한다(넓은 창: 카드
+ * 안쪽 여백 4 + 글 칸 인셋 12 = 16, 폰 폭: 글 칸 인셋 12). 넘치면 한 줄 안에서 잘린다. */
+@utility typing-line {
+  display: flex;
+  align-items: center;
+  block-size: calc(var(--text-meta--line-height) + 2 * var(--spacing-2));
+  overflow: hidden;
+  padding-block: var(--spacing-2);
+  padding-inline: var(--spacing-3);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  color: var(--ink-muted);
+
+  @media (width >= 600px) {
+    padding-inline: var(--spacing-4);
+  }
+}
+
+/* 입력창 높이를 재는 거울의 옷 (#5567, design-review M-4).
+ *
+ * `features/timeline/useAutoGrow.ts`가 입력창과 같은 부모에 두는 숨은 textarea다. 거울은 입력창의 클래스를 그대로 달고(글꼴·
+ * 행간·패딩·줄바꿈 규칙·폰 폭 `tap-target` 최소 높이를 같이 받으려고) 스크립트는 **잰 폭**만 쓴다. 자리·가시성·포인터·높이
+ * 0은 지어낸 값이라 여기 이름을 갖는다 — `text-probe`와 같은 나눔이다.
+ *
+ * 속성을 겹친 선택자인 이유: 거울은 입력창의 클래스를 함께 단다. 그 가운데 하나가 자리·높이·넘침을 말하게 되면(`relative`·
+ * `h-*`) 같은 무게의 유틸리티끼리는 스타일시트 순서가 이기는 쪽을 정한다. 한 단계 무거운 선택자라 순서와 무관하게 거울의
+ * 값이 선다. 높이 0 + `overflow: hidden`이어도 textarea의 `scrollHeight`는 내용 높이(패딩 포함)를 답하고, `absolute`·높이
+ * 0이라 아무 상자의 크기도, 조상의 스크롤 범위도 바꾸지 않는다. */
+@utility autogrow-mirror {
+  &[data-autogrow-mirror] {
+    position: absolute;
+    visibility: hidden;
+    pointer-events: none;
+    block-size: 0;
+    overflow: hidden;
   }
 }
 
