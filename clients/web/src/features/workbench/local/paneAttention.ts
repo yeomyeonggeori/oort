@@ -35,7 +35,10 @@ import { DOCK_SESSION_KEY, type LocalSessionView } from "./localSessions";
 // 「내 작업」 탭이 번갈아 마운트돼도 같은 이전 판정을 보므로 알림이 두 번 뜨지 않는다.
 // =============================================================================
 
-/** 칸 하나의 상태(#2776): 생명주기와 하네스 hook 신호만. 출력은 읽지 않는다. */
+/**
+ * 칸 하나의 상태(#2776·#5579): 생명주기와 하네스가 스스로 낸 신호(hook과 OSC 7501 보고를 합친
+ * `view.signal`)만. 웹은 출력을 읽지 않는다(보고도 데스크탑이 읽어 채널로 준다).
+ */
 export function paneStatusOf(view: LocalSessionView | null | undefined): SessionStatus | undefined {
   if (!view) return undefined;
   return derivePaneStatus({
