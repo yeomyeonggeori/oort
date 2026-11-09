@@ -44,7 +44,7 @@ use momo_t3::work_notice::{
     post_work_notice_in_tx, NoticeSite, SpawnRefusalReason, WorkNotice, BODY_HOST_LOST,
     BODY_PERMISSION_EXPIRED,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
@@ -401,9 +401,14 @@ async fn request_status(su: &PgPool, id: Uuid) -> String {
         .expect("request status")
 }
 
-/// Every stop notice in the room: (id, body, root, author, props).
-async fn notices(su: &PgPool, room: &Room) -> Vec<(Uuid, String, Option<Uuid>, Uuid, Value)> {
-    let rows: Vec<(Uuid, Option<String>, Option<Uuid>, Uuid, Value)> = sqlx::query_as(
+/// One stop notice: (id, body, root, author, props).
+type Notice = (Uuid, String, Option<Uuid>, Uuid, Value);
+/// The same row as it is read (the body may be NULL).
+type NoticeRow = (Uuid, Option<String>, Option<Uuid>, Uuid, Value);
+
+/// Every stop notice in the room, oldest first.
+async fn notices(su: &PgPool, room: &Room) -> Vec<Notice> {
+    let rows: Vec<NoticeRow> = sqlx::query_as(
         "SELECT id, body, root_id, author_member_id, props FROM message \
           WHERE workspace_id = $1 AND channel_id = $2 \
             AND props->>'kind' = 'work_session_notice' \
@@ -789,5 +794,4 @@ async fn a_notice_naming_someone_elses_session_pushes_nobody() {
     .await;
     let sent = dispatched_for(&su, &room, line).await;
     assert!(sent.is_empty(), "{sent:?}");
-    let _ = json!(null);
 }

@@ -3571,8 +3571,11 @@ async fn an_unseated_personal_alias_in_an_admitted_dm_skips_notice_and_refuses_s
 // #5594 — when the Mac does not start or does not finish the work, the owner is told
 // ---------------------------------------------------------------------------
 
-/// Every stop notice (#5594) of the stage's workspace: (body, root, author, props).
-async fn stop_notices(s: &Stage) -> Vec<(String, Option<Uuid>, Uuid, Value)> {
+/// One stop notice (#5594): (body, root, author, props).
+type StopNotice = (String, Option<Uuid>, Uuid, Value);
+
+/// Every stop notice of the stage's workspace, oldest first.
+async fn stop_notices(s: &Stage) -> Vec<StopNotice> {
     let rows: Vec<(Option<String>, Option<Uuid>, Uuid, Value)> = sqlx::query_as(
         "SELECT body, root_id, author_member_id, props FROM message \
           WHERE workspace_id = $1 AND props->>'kind' = 'work_session_notice' ORDER BY seq",
