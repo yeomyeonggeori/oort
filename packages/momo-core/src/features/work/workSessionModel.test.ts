@@ -29,6 +29,7 @@ import {
   workSessionResumeTargets,
   workSessionStatus,
   type WorkSessionEvent,
+  withOpenRequest,
 } from "./workSessionModel";
 import { silenceLabel } from "./workSessionFormat";
 
@@ -880,5 +881,24 @@ describe("parseSessionThreadReply (N3 #3595)", () => {
     expect(parseSessionThreadReply({ ...base, state: "deleted" })).toBeNull();
     expect(parseSessionThreadReply({ ...base, body: "   " })).toBeNull();
     expect(parseSessionThreadReply({ ...base, type: "system" })).toBeNull();
+  });
+});
+
+describe("주인에게 열린 권한 요청 — 「응답 필요」 (#5593 수리 M2)", () => {
+  it("주인에게 열린 요청이 있으면 돌거나 대기 중인 세션이 「응답 필요」다", () => {
+    expect(withOpenRequest(workSessionStatus({ status: "running" }), true)).toEqual({
+      key: "waiting",
+      label: "응답 필요",
+    });
+    expect(withOpenRequest(workSessionStatus({ status: "idle" }), true).key).toBe("waiting");
+  });
+
+  it("요청이 없거나 주인이 아니면, 그리고 호스트 응답 없음·끝난 세션이면 원래 상태 그대로다", () => {
+    const running = workSessionStatus({ status: "running" });
+    expect(withOpenRequest(running, false)).toBe(running);
+    const unavailable = { key: "unavailable" as const, label: "호스트 응답 없음" };
+    expect(withOpenRequest(unavailable, true)).toBe(unavailable);
+    const ended = workSessionStatus({ status: "ended" });
+    expect(withOpenRequest(ended, true)).toBe(ended);
   });
 });

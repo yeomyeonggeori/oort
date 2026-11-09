@@ -1,6 +1,7 @@
 import { uuidEq, type Message, type WorkHost, type WorkSession } from "../../lib/api";
 import type { WorkSessionACPFrame, WorkSessionACPType } from "../../lib/realtimeEvents";
 import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
+import { SESSION_STATUS_LABEL } from "../workbench/sessionList";
 
 // =============================================================================
 // Work session model (AX-3 / MOMO-618): every rule the 작업 세션 panel renders,
@@ -131,6 +132,8 @@ export function workSessionIdleNotice(
 
 export type WorkSessionStatusKey =
   | "running"
+  /** 주인에게 열린 권한 요청이 있다(#5593 수리 M2, `withOpenRequest`). 원장 상태가 아니라 보는 사람의 상태다. */
+  | "waiting"
   | "idle"
   | "unavailable"
   | "orphaned"
@@ -790,6 +793,21 @@ export function workSessionResumeTargets(
  * heartbeat loss changes only the presentation of `running`, never the
  * session's stored state.
  */
+/**
+ * 주인에게 열린 권한 요청이 있는 세션의 상태 — 「응답 필요」(#5593 수리 M2). 폰 작업 목록의 칩(보드 상태 `waiting`)과
+ * 세션 머리가 이 한 곳의 낱말(`SESSION_STATUS_LABEL.waiting`)을 같이 읽는다. 데스크탑 A 칸이 같은 세션을 주인에게 말하는
+ * 낱말(`agentSessionStatus`)과도 같다. 요청은 주인에게만 보이므로(ADR-0188 D5) 주인이 아니거나 열린 요청이 없으면 원래
+ * 상태 그대로이고, 호스트가 응답하지 않는 세션(`unavailable`)은 그 사실이 먼저다.
+ */
+export function withOpenRequest(
+  status: WorkSessionStatus,
+  openRequestForOwner: boolean
+): WorkSessionStatus {
+  if (!openRequestForOwner) return status;
+  if (status.key !== "running" && status.key !== "idle") return status;
+  return { key: "waiting", label: SESSION_STATUS_LABEL.waiting };
+}
+
 export function workSessionContinuityStatus(
   session: WorkSession,
   hosts: readonly WorkHost[] | undefined

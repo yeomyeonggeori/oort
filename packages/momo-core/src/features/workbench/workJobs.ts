@@ -184,6 +184,14 @@ function durationTextOf(
   return span === undefined ? "방금 시작" : `${span}째`;
 }
 
+/**
+ * 주인에게 열린 권한 요청이 있는 세션 줄의 칩 상태(#5593 수리 M2) — 보드 상태 `waiting`(「응답 필요」). 세션 머리의
+ * `withOpenRequest`(`work/workSessionModel`)와 같은 낱말이다. 돌고 있거나 대기 중인 줄만 바꾼다.
+ */
+export function awaitingMeItem(item: SharedWorkSession): SharedWorkSession {
+  return item.state === "running" || item.state === "idle" ? { ...item, state: "waiting" } : item;
+}
+
 /** 「구민수 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
 export function requesterToAgent(row: WorkJobRow): string {
   return row.requester === null

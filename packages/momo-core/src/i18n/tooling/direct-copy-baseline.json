@@ -246,7 +246,7 @@
     "clients/mobile/src/features/sidebar/useDmReopen.ts": 2,
     "clients/mobile/src/features/work/SignedWorkControls.tsx": 90,
     "clients/mobile/src/features/work/StopWorkControl.tsx": 37,
-    "clients/mobile/src/features/work/WorkConversation.tsx": 89,
+    "clients/mobile/src/features/work/WorkConversation.tsx": 88,
     "clients/mobile/src/features/work/WorkSessionParts.tsx": 11,
     "clients/mobile/src/features/work/ask/model.ts": 45,
     "clients/mobile/src/features/work/ask/phoneSpawnPort.ts": 6,

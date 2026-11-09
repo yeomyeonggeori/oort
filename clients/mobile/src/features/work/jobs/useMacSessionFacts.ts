@@ -10,6 +10,7 @@ import {useQueries} from '@tanstack/react-query';
 import {useMemo} from 'react';
 
 import {useWorkHosts, useWorkSessions} from '../../agents/queries';
+import {usePendingApprovalRunIds} from '../../conversation/usePendingApprovals';
 import {workSessionEventsQuery} from '../queries';
 import {BOARD_POLL_MS} from '../teamBoard/useTeamBoard';
 
@@ -37,7 +38,12 @@ export interface MacSessionFacts {
   /** 보드 줄 id → 그 세션의 맥. 실행 줄이거나 원장·호스트 목록에서 못 찾으면 null(점을 그리지 않는다). */
   macOf: (rowId: string) => MacOfRow | null;
   /** 보드 줄 id → 내 맥 세션이 권한 요청에 답을 기다리는가. */
-  needsMyCheck: (rowId: string) => boolean;
+  permissionWaiting: (rowId: string) => boolean;
+  /**
+   * 보드 줄 id → 그 run 에 내 대기 승인이 걸려 있는가(#5593 수리 M1). 인박스 알약과 같은 원장(`usePendingApprovalRunIds`)이라
+   * 두 자리의 「나에게 필요한 일」이 같은 정의다. 세션 줄은 늘 거짓이다(세션 id 는 run id 가 아니다).
+   */
+  approvalWaiting: (rowId: string) => boolean;
 }
 
 /**
@@ -70,6 +76,7 @@ export function useMacSessionFacts(
   items: readonly SharedWorkSession[],
   active: boolean,
 ): MacSessionFacts {
+  const approvalRunIds = usePendingApprovalRunIds();
   const sessionsQuery = useWorkSessions(workspaceId, active);
   const hostsQuery = useWorkHosts(workspaceId, active);
   const sessions = sessionsQuery.data;
@@ -123,8 +130,9 @@ export function useMacSessionFacts(
             (host.revokedAtMs === undefined || host.revokedAtMs === null),
         };
       },
-      needsMyCheck: rowId => waiting.has(rowId.toLowerCase()),
+      permissionWaiting: rowId => waiting.has(rowId.toLowerCase()),
+      approvalWaiting: rowId => approvalRunIds.has(rowId.toLowerCase()),
     }),
-    [ledger, hosts, waiting],
+    [ledger, hosts, waiting, approvalRunIds],
   );
 }

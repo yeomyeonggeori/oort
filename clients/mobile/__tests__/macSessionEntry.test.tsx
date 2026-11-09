@@ -226,8 +226,20 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
-/** 이 칸의 가짜 서버. `hosts` 가 맥의 켜짐을 정한다. */
-function installFetch({hosts}: {hosts: unknown[]}): jest.Mock {
+/** 내 대기 승인 — 승인을 기다리는 그 run(`RUN-APPROVAL`)에 걸려 있다(인박스 알약이 세는 같은 원장, 수리 M1). */
+const MY_PENDING_APPROVAL = {
+  id: 'dddd0001-0000-4000-8000-000000000001',
+  workspace_id: WS,
+  run_id: 'RUN-APPROVAL',
+  channel_id: CH,
+  requested_by: AGENT_ID,
+  action_type: 'tool_call',
+  status: 'pending',
+  request_message_id: 'eeee0001-0000-4000-8000-000000000001',
+};
+
+/** 이 칸의 가짜 서버. `hosts` 가 맥의 켜짐을, `approvals` 가 내 대기 승인 원장을 정한다. */
+function installFetch({hosts, approvals = []}: {hosts: unknown[]; approvals?: unknown[]}): jest.Mock {
   const mock = jest.fn(async (input: string | URL | Request) => {
     const url = String(input);
     const path = new URL(url).pathname;
@@ -271,7 +283,7 @@ function installFetch({hosts}: {hosts: unknown[]}): jest.Mock {
     if (url.includes('/messages')) return jsonResponse(200, {messages: []});
     if (url.includes('/roster')) return jsonResponse(200, {members: []});
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
-    if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
+    if (url.includes('/approvals')) return jsonResponse(200, {approvals});
     return jsonResponse(404, {error: {code: 'not_found', message: 'not found'}});
   });
   globalThis.fetch = mock as unknown as typeof fetch;
@@ -399,6 +411,35 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
     expect(waiting.props.accessibilityLabel).toContain(WORK_JOBS_COPY.permissionHint);
     const quiet = screen.getByTestId(`work-job-row-${S_MAC}`);
     expect(within(quiet).queryByText(WORK_JOBS_COPY.permissionHint)).toBeNull();
+    // 칩도 같은 사실을 말한다(수리 M2): 「응답 필요」 — 세션 머리와 같은 코어 낱말. 묻지 않는 세션은 그대로 「실행 중」이다.
+    expect(screen.getByTestId(`work-job-state-${S_WAIT}`)).toHaveTextContent(/응답 필요/);
+    expect(waiting.props.accessibilityLabel).toContain('응답 필요');
+    expect(screen.getByTestId(`work-job-state-${S_MAC}`)).toHaveTextContent(/실행 중/);
+    expect(screen.getByTestId(`work-job-state-${S_MAC}`)).not.toHaveTextContent(/응답 필요/);
+  });
+
+  it('내 대기 승인이 걸린 run 도 같은 구간이다 — 인박스 알약과 같은 원장(수리 M1)', async () => {
+    installFetch({hosts: [host(true)], approvals: [MY_PENDING_APPROVAL]});
+    renderShell();
+    await openWorkList();
+
+    await waitFor(
+      () => expect(screen.getByText(`${WORK_JOBS_COPY.sectionNeedsMe} 2`)).toBeTruthy(),
+      SETTLE,
+    );
+    const rows = screen
+      .getAllByTestId(/^work-job-row-/)
+      .map(node => String(node.props.testID).replace('work-job-row-', ''));
+    // 구간 안은 서버 순서(마지막 활동 최신순)다.
+    expect(rows).toEqual(['RUN-APPROVAL', S_WAIT, S_MAC]);
+    const headers = screen
+      .getAllByText(/^(내 확인 필요|지금|끝난 일) \d+$/)
+      .map(node => node.props.children);
+    expect(headers).toEqual([`${WORK_JOBS_COPY.sectionNeedsMe} 2`, `${WORK_JOBS_COPY.sectionNow} 1`]);
+    // run 줄은 자기 말(승인 필요 · 승인은 그 카드에서 해요)을 그대로 쓴다 — 맥 세션의 「권한 요청」 말을 빌리지 않는다.
+    const run = screen.getByTestId('work-job-row-RUN-APPROVAL');
+    expect(within(run).getByText(WORK_JOBS_COPY.approvalHint)).toBeTruthy();
+    expect(within(run).queryByText(WORK_JOBS_COPY.permissionHint)).toBeNull();
   });
 
   it('세션 줄에는 맥 점이 서고, 줄 라벨이 그 맥의 이름과 켜짐·꺼짐을 말로 한다 — run 줄에는 점이 없다', async () => {
@@ -413,6 +454,8 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
         ),
       SETTLE,
     );
+    // 꺼진 맥은 「꺼짐」을 글로도 말한다(수리 M5) — 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같다. 맥 이름은 자기 줄이다(L1).
+    expect(within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByText('성재 맥북 · 꺼짐')).toBeTruthy();
     // 점은 낭독에서 빠진다(`StatusDot`) — 찾을 때 숨은 요소까지 본다. 꺼짐은 속 빈 고리다(면 = `surface`, 선 = `textFaint`).
     const dot = within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByTestId('status-dot', HIDDEN_TOO);
     expect(dot.props.accessibilityElementsHidden).toBe(true);

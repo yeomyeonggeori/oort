@@ -8,6 +8,7 @@ import {
   type SharedWorkSession,
 } from "../../lib/api";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
+import { stateChipLabel } from "./teamBoard";
 import {
   WORK_JOBS_COPY,
   inProgressCount,
@@ -21,6 +22,7 @@ import {
   workFilterFromSearch,
   workJobRow,
   workJobSections,
+  awaitingMeItem,
 } from "./workJobs";
 
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -224,6 +226,16 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     // 답하지 않으면(웹·옛 부름) 예전 두 구간 그대로다.
     expect(workJobSections(rows).map((s) => s.key)).toEqual(["now", "done"]);
     expect(workJobSections(rows, () => false).map((s) => s.key)).toEqual(["now", "done"]);
+  });
+
+  it("주인에게 열린 권한 요청이 있는 줄의 칩은 「응답 필요」다 — 돌거나 대기 중인 줄만(#5593 수리 M2)", () => {
+    const running = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e1" }));
+    expect(awaitingMeItem(running).state).toBe("waiting");
+    expect(stateChipLabel(awaitingMeItem(running))).toBe("응답 필요");
+    const idle = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e2", state: "idle" }));
+    expect(awaitingMeItem(idle).state).toBe("waiting");
+    const done = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e3", state: "done", endedAtMs: NOW }));
+    expect(awaitingMeItem(done)).toBe(done);
   });
 
   it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {

@@ -7,6 +7,7 @@ import {
   ROW_STATE_LABEL,
   workHostTrust,
   workSessionContinuityStatus,
+  withOpenRequest,
   type WorkEventRow,
   type WorkPlanItem,
 } from '@momo/core/features/work/workSessionModel';
@@ -29,6 +30,7 @@ import {
   FailureBanner,
   LoadingState,
   NoticeBlock,
+  OutlineButton,
   Screen,
   ScreenHeader,
   SectionLabel,
@@ -64,7 +66,9 @@ import {
   recordWorkStreamTiming,
 } from '../features/work/workStreamTiming';
 import {
+  SIGNING_REQUIRED_QUERY_KEY,
   SignedWorkControls,
+  useSigningFlag,
   useSigningRequired,
 } from '../features/work/SignedWorkControls';
 import {
@@ -73,9 +77,11 @@ import {
 } from '../features/work/WorkSessionParts';
 import {
   ModeSwitch,
+  signingReason,
   WorkConversation,
   type ConversationMode,
 } from '../features/work/WorkConversation';
+import {useQueryClient} from '@tanstack/react-query';
 import {useReduceMotion} from '../lib/useReduceMotion';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {useChannels, useDirectory} from '../features/workspace/queries';
@@ -140,7 +146,18 @@ export default function WorkSessionDetailScreen({
     session !== null && session.memberId.toLowerCase() === member.id.toLowerCase();
   // R2-E8 (#3028): the owner may allow and instruct from here once the server
   // requires device signatures (D-11). Otherwise this stays read-only.
+  // 서버의 서명 요구(D-11)를 세 값으로 읽는다(#5593 수리 H1): 요구함일 때만 카드가 서고, 꺼짐·모름·읽는 중이면 카드 자리에 그
+  // 이유와 답할 곳이 선다. 같은 질의 키라 카드(`SignedWorkControls`)와 한 번만 묻는다.
   const signing = useSigningRequired(workspaceId, isOwner);
+  const signingWhy = signingReason(useSigningFlag(workspaceId, isOwner));
+  const queryClient = useQueryClient();
+  // 서명 요구 읽기는 5분 동안 캐시된다. 「다시 확인」과 당겨서 새로고침은 그 캐시를 건너 다시 묻는다 — 읽기에 실패해 「모름」에 갇힌
+  // 화면이 스스로 풀릴 길이다.
+  const recheckSigning = useCallback(
+    () =>
+      queryClient.refetchQueries({queryKey: SIGNING_REQUIRED_QUERY_KEY(workspaceId)}),
+    [queryClient, workspaceId],
+  );
   const canStop = session !== null && canStopSession(session, member.id);
 
   const channels = useMemo(
@@ -206,6 +223,7 @@ export default function WorkSessionDetailScreen({
           refetchChannels(),
           refetchDirectory(),
           refetchEvents(),
+          recheckSigning(),
         ]),
       [
         refetchSessions,
@@ -213,6 +231,7 @@ export default function WorkSessionDetailScreen({
         refetchChannels,
         refetchDirectory,
         refetchEvents,
+        recheckSigning,
       ],
     ),
     'work-detail-refresh',
@@ -224,13 +243,23 @@ export default function WorkSessionDetailScreen({
   const focusRef = useRef<React.ElementRef<typeof View>>(null);
   const focusSessionId = session?.id ?? null;
   useEffect(() => {
-    if (!active || focusSessionId === null) return;
+    // 권한 알림으로 왔으면 초점의 주인은 착지 자리다(#5593 수리 M3): 카드의 질문, 아니면 카드를 그릴 수 없는 이유나 이미 닫혔다는
+    // 한 줄. 머리가 함께 초점을 청하면, 한 커밋에 둘이 서는 따뜻한 길(캐시가 다 있는 채로 연 화면)에서 부모인 이 효과가 자식의 착지
+    // 초점보다 늦게 돌아 머리가 이긴다.
+    if (!active || focusSessionId === null || landingToken !== undefined) return;
     const task = InteractionManager.runAfterInteractions(() => {
       const node = findNodeHandle(focusRef.current);
       if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
     });
     return () => task.cancel();
-  }, [active, focusSessionId]);
+  }, [active, focusSessionId, landingToken]);
+
+  // 이미 열려 있던 세션 화면 위로 알림이 와도 착지 자리(맨 위)가 보이게 맨 위로 올린다(#5593 수리 L4).
+  const detailScrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (landingToken === undefined) return;
+    detailScrollRef.current?.scrollTo({y: 0, animated: false});
+  }, [landingToken]);
 
   // 보기 전환: 짧은 페이드 인. 「동작 줄이기」에서는 움직임 없이 바로 바뀐다.
   const changeMode = useCallback(
@@ -334,11 +363,23 @@ export default function WorkSessionDetailScreen({
     );
   }
 
-  const status = workSessionContinuityStatus(session, hostsQuery.data);
-  const trust = workHostTrust(session, hostsQuery.data);
   // 알림이 가리킨 요청이 지금 열린 그 요청인가(#5593). 열려 있으면 카드가 착지 자리이고, 닫혔으면 한 줄로 말한다 —
   // 「없다」는 진행을 다 읽은 뒤에만 말한다(알림이 진행 읽기를 낡게 했으므로 다시 읽는 동안에는 기다린다).
   const openRequest = pendingPermission(sessionEvents, session);
+  // 주인에게 열린 요청이 있으면 머리·배지는 「응답 필요」다(#5593 수리 M2) — 목록 칩과 같은 코어 낱말.
+  const status = withOpenRequest(
+    workSessionContinuityStatus(session, hostsQuery.data),
+    isOwner && openRequest !== null,
+  );
+  const trust = workHostTrust(session, hostsQuery.data);
+  // 열린 요청이 있는데 이 폰이 카드를 그릴 수 없다(#5593 수리 H1): 서버가 서명을 요구하지 않거나(기본값), 그 설정을 읽지 못했거나,
+  // 읽는 중이다. 카드 자리에 이유(대화 보기와 같은 문장)와 지금 답할 곳(그 세션의 맥)을 말한다.
+  const permissionElsewhere = isOwner && openRequest !== null && !signing && signingWhy !== null;
+  const macName = presentation.location.host?.displayName.trim() ?? '';
+  const answerWhere =
+    macName === ''
+      ? formatMessage('mobile.workPermission.elsewhereOnMac')
+      : formatMessage('mobile.workPermission.elsewhereOnHost', {host: macName});
   const landingOpen =
     permissionLanding !== undefined &&
     openRequest !== null &&
@@ -385,6 +426,7 @@ export default function WorkSessionDetailScreen({
           </View>
           <View style={mode === 'detail' ? styles.modeBody : styles.modeHidden}>
             <ScrollView
+              ref={detailScrollRef}
               contentContainerStyle={[
                 styles.scrollBody,
                 {paddingBottom: Math.max(insets.bottom, space.lg)},
@@ -427,11 +469,38 @@ export default function WorkSessionDetailScreen({
               ) : null}
 
               {landingGone ? (
-                <NoticeBlock
-                  headline={formatMessage('mobile.workPermission.landingGoneTitle')}
-                  detail={formatMessage('mobile.workPermission.landingGoneDetail')}
-                  testID="work-detail-permission-gone"
-                />
+                <LandingFocus token={landingToken}>
+                  <NoticeBlock
+                    headline={formatMessage('mobile.workPermission.landingGoneTitle')}
+                    detail={formatMessage('mobile.workPermission.landingGoneDetail')}
+                    testID="work-detail-permission-gone"
+                  />
+                </LandingFocus>
+              ) : null}
+
+              {permissionElsewhere ? (
+                <View testID="work-detail-permission-elsewhere">
+                  <LandingFocus token={landingOpen ? landingToken : undefined}>
+                    <NoticeBlock
+                      headline={formatMessage('mobile.workPermission.elsewhereTitle')}
+                      detail={
+                        signingWhy?.settled === true
+                          ? [signingWhy.sentence, answerWhere].join(' ')
+                          : signingWhy?.sentence
+                      }
+                      testID="work-detail-permission-elsewhere-notice"
+                    />
+                  </LandingFocus>
+                  {signingWhy?.retry === true ? (
+                    <View style={styles.recheckWrap}>
+                      <OutlineButton
+                        label={formatMessage('mobile.workPermission.recheck')}
+                        onPress={() => void recheckSigning()}
+                        testID="work-detail-permission-recheck"
+                      />
+                    </View>
+                  ) : null}
+                </View>
               ) : null}
 
               {isOwner ? (
@@ -614,6 +683,34 @@ export default function WorkSessionDetailScreen({
   );
 }
 
+/**
+ * 권한 알림 착지의 낭독 초점(#5593 수리 M3) — 카드가 없을 때 그 이유 한 줄(카드를 그릴 수 없음 · 이미 닫힘)이 착지 자리다.
+ * 토큰이 바뀔 때마다 한 번 초점을 옮긴다. 상자 하나를 한 낭독 원소로 묶는다(제목과 설명을 함께 읽는다). 카드가 서는 착지는 카드가
+ * 스스로 초점을 쥔다(`PermissionCard.focusToken`).
+ */
+function LandingFocus({
+  token,
+  children,
+}: {
+  token: number | undefined;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const ref = useRef<React.ElementRef<typeof View>>(null);
+  useEffect(() => {
+    if (token === undefined) return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      const node = findNodeHandle(ref.current);
+      if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
+    });
+    return () => task.cancel();
+  }, [token]);
+  return (
+    <View ref={ref} accessible testID="work-detail-landing-focus">
+      {children}
+    </View>
+  );
+}
+
 function MetaRow({
   label,
   value,
@@ -723,6 +820,7 @@ const buildStyles = (color: Palette) =>
     },
     badgeLine: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs},
     bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.sm},
+    recheckWrap: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm},
     originWrap: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.md},
     originButton: {
       minHeight: TOUCH_TARGET,

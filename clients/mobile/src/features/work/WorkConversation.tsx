@@ -89,6 +89,33 @@ export const OWNER_ONLY_NOTICE = '담당자만 허락하고 지시를 보낼 수
 export const ENDED_NOTICE = '끝난 작업이라 지시를 더 보낼 수 없어요.';
 export const OFFLINE_NOTICE = '오프라인이라 지금은 보낼 수 없어요.';
 
+/** 서명 설정(D-11) 때문에 이 폰이 허락·지시를 못 보내는 이유. */
+export interface SigningReason {
+  /** 대화 보기 입력창과 작업 상세의 카드 자리가 같이 쓰는 한 문장. */
+  sentence: string;
+  /** 읽기에 실패했다(「모름」) — 다시 물어볼 수 있다. */
+  retry: boolean;
+  /** 서버의 답이 정해졌다(읽는 중이 아니다). */
+  settled: boolean;
+}
+
+/**
+ * 서명 요구 플래그 → 못 보내는 이유(#5593 수리 H1). 요구함이면 null. 입력창(`composerGate`)과 작업 상세의 승인 카드 자리
+ * (`WorkSessionDetailScreen`)가 이 한 곳을 읽어서, 같은 사실이 두 보기에서 다른 말을 하지 않는다.
+ */
+export function signingReason(flag: SigningFlag): SigningReason | null {
+  switch (flag) {
+    case 'required':
+      return null;
+    case 'loading':
+      return {sentence: SIGNING_LOADING_NOTICE, retry: false, settled: false};
+    case 'unknown':
+      return {sentence: SIGNING_UNKNOWN_NOTICE, retry: true, settled: true};
+    case 'off':
+      return {sentence: SIGNING_OFF_NOTICE, retry: false, settled: true};
+  }
+}
+
 export type ComposerGate =
   | {kind: 'ready'}
   /** 입력창은 보이지만 닫혀 있다. 이유를 말한다. */
@@ -107,9 +134,8 @@ export function composerGate(input: {
 }): ComposerGate {
   if (!input.owner) return {kind: 'none', notice: OWNER_ONLY_NOTICE};
   if (input.ended) return {kind: 'none', notice: ENDED_NOTICE};
-  if (input.flag === 'loading') return {kind: 'closed', notice: SIGNING_LOADING_NOTICE};
-  if (input.flag === 'unknown') return {kind: 'closed', notice: SIGNING_UNKNOWN_NOTICE};
-  if (input.flag === 'off') return {kind: 'closed', notice: SIGNING_OFF_NOTICE};
+  const signing = signingReason(input.flag);
+  if (signing !== null) return {kind: 'closed', notice: signing.sentence};
   if (input.block !== null || !input.hasActions) {
     return {kind: 'closed', notice: input.block ?? SIGNING_LOADING_NOTICE};
   }

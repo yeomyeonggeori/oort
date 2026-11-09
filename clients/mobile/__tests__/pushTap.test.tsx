@@ -340,6 +340,8 @@ const SIGNING_REQUIRED = {
   humanControlSignatureRequired: true,
   hostRegisterSignatureRequired: false,
 };
+/** 이 시험의 서명 요구 답. 기본은 요구함이고, 서버 기본값(요구 안 함)을 재는 시험만 바꾼다(#5593 수리 H1). */
+let signingBody: typeof SIGNING_REQUIRED = SIGNING_REQUIRED;
 
 function commitLater(channelId: string, row: unknown): void {
   serverLater.set(channelId, [...(serverLater.get(channelId) ?? []), row]);
@@ -443,7 +445,7 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
     }
     // 세션 화면이 승인 카드를 세우는 데 읽는 셋(#5593): 서명 요구(켜짐), 이 폰의 기기 키(없음), 요청의 미리보기(주인
     // 전용 읽기 — 이 시험은 카드가 **서는지**만 잰다. 미리보기가 없으면 카드는 허락을 잠근 채 선다).
-    if (url.includes('/signing-context')) return jsonResponse(200, SIGNING_REQUIRED);
+    if (url.includes('/signing-context')) return jsonResponse(200, signingBody);
     if (url.includes('/device-keys')) return jsonResponse(200, {deviceKeys: []});
     if (url.includes('/permission-requests/')) {
       return jsonResponse(404, {error: {code: 'not_found', message: 'not found'}});
@@ -721,6 +723,7 @@ beforeEach(() => {
   mmkvStore.clear();
   serverLater.clear();
   workSessionRows = [];
+  signingBody = SIGNING_REQUIRED;
   __resetSessionStore();
   __resetServerBaseCache();
   setServerBase(BASE);
@@ -2956,6 +2959,24 @@ describe('맥 세션 권한 요청 탭 (#5593)', () => {
     });
     await waitFor(() => expect(screen.queryByTestId('work-permission-card')).toBeNull(), SETTLE);
     expect(screen.queryByTestId('work-detail-permission-gone')).toBeNull();
+  });
+
+  it('서버가 서명을 요구하지 않으면(기본값) 카드 대신 그 이유와 답할 곳이 착지 자리에 선다 (수리 H1)', async () => {
+    installFetch();
+    signingBody = {...SIGNING_REQUIRED, humanControlSignatureRequired: false};
+    workSessionRows = [sessionRow({status: 'running'})];
+    commitLater(GENERAL, PERMISSION_REQUESTED);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(PERMISSION_AIM)),
+    );
+    renderShell();
+    await waitFor(
+      () => expect(screen.getByTestId('work-detail-permission-elsewhere')).toBeTruthy(),
+      SETTLE,
+    );
+    expect(screen.queryByTestId('work-permission-card')).toBeNull();
+    expect(screen.queryByTestId('work-detail-permission-gone')).toBeNull();
+    expect(screen.queryByTestId('conversation-title', EVEN_HIDDEN)).toBeNull();
   });
 
   it('남의 세션이면 평범한 알림처럼 그 줄이 있는 대화로 간다', async () => {
