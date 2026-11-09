@@ -2084,32 +2084,45 @@ fn nothing_but_the_command_table_reaches_the_pty() {
     assert_eq!(commands, PTY_COMMANDS, "pty.rs commands");
 }
 
-/// ADR-0190 D4-b 「긁지 않는다」 (#2776): a pane's status comes from what the
-/// harness says about itself, never from what it printed.
+/// ADR-0190 D4-b 「긁지 않는다」 (#2776) and its one exception (#5579): a
+/// pane's status comes from what the harness says about itself (a hook line,
+/// or its own OSC 7501 report), never from what it printed.
 ///
-/// * The signal path (`pane_signal.rs`) names no output identifier and reads
+/// * The hook path (`pane_signal.rs`) names no output identifier and reads
 ///   no PTY.
-/// * In `pty.rs`, the only caller of `PtySink::signal` is `deliver_signal`
-///   (the socket's path), and the output reader `read_loop` never calls it.
+/// * In `pty.rs` the read buffer goes to `sink.output` (the page, unchanged)
+///   and to `scanner.feed` (`program_status.rs`) and nowhere else. Only
+///   `read_loop` calls `PtySink::report`, with `program_status::signal_for`;
+///   only `deliver_signal` (the socket's path) calls `PtySink::signal`.
+/// * `program_status` is named in `pty.rs` on the exact lines below and in
+///   `lib.rs` as `mod program_status;`, nowhere else.
+/// * `program_status.rs` reads OSC 7501 only: its string literals are the
+///   7501 introducer and the closed words it reads (`state`, `kind`, `id` and
+///   their values), so no other OSC, no `title`, no `msg`; it names no text
+///   type, decoder, I/O, socket, thread, logging or hook path; and its public
+///   surface is the closed enums, `feed(&[u8])` and `signal_for`.
 #[test]
-fn pane_status_never_reads_terminal_output() {
+fn pane_status_reads_output_only_through_the_7501_scanner() {
+    fn production(src: &str) -> &str {
+        &src[..src.find("#[cfg(test)]\nmod tests").unwrap_or(src.len())]
+    }
     let sources = crate_sources();
-    let signal_src = &sources
-        .iter()
-        .find(|(n, _)| n == "pane_signal.rs")
-        .expect("pane_signal.rs")
-        .1;
-    let signal_code = code_only(
-        &signal_src[..signal_src
-            .find("#[cfg(test)]\nmod tests")
-            .unwrap_or(signal_src.len())],
-    );
+    let source = |name: &str| {
+        &sources
+            .iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("{name}"))
+            .1
+    };
+
+    let signal_code = code_only(production(source("pane_signal.rs")));
     for banned in [
         "output",
         "read_loop",
         "try_clone_reader",
         "MasterPty",
         "scrollback",
+        "program_status",
     ] {
         assert!(
             !idents(&signal_code).contains(&banned),
@@ -2117,20 +2130,156 @@ fn pane_status_never_reads_terminal_output() {
         );
     }
 
-    let pty_src = &sources.iter().find(|(n, _)| n == "pty.rs").unwrap().1;
-    let pty = code_only(
-        &pty_src[..pty_src
-            .find("#[cfg(test)]\nmod tests")
-            .unwrap_or(pty_src.len())],
-    );
+    let pty = code_only(production(source("pty.rs")));
     let read_loop = &pty[pty.find("fn read_loop(").expect("read_loop")..];
     let read_loop = &read_loop[..read_loop.find("\n}").unwrap()];
-    assert!(!read_loop.contains("signal"), "read_loop makes a signal");
+    let buf_uses = idents(read_loop)
+        .into_iter()
+        .filter(|t| *t == "buf")
+        .count();
+    assert_eq!(
+        buf_uses, 4,
+        "the read buffer has a use beyond page + scanner"
+    );
+    for line in [
+        "sink.output(buf[..n].to_vec());",
+        "for report in scanner.feed(&buf[..n]) {",
+        "sink.report(program_status::signal_for(report));",
+    ] {
+        assert!(
+            read_loop.lines().any(|l| l.trim() == line),
+            "read_loop lacks {line}"
+        );
+    }
+    assert!(
+        !read_loop.contains("sink.signal("),
+        "read_loop makes a hook signal"
+    );
+    assert_eq!(
+        pty.matches("sink.report(").count(),
+        1,
+        "one caller of PtySink::report"
+    );
     let deliver = &pty[pty.find("pub fn deliver_signal(").expect("deliver_signal")..];
     let deliver = &deliver[..deliver.find("\n    }").unwrap()];
-    let callers = pty.matches("sink.signal(").count();
-    assert_eq!(callers, 1, "one caller of PtySink::signal");
+    assert_eq!(
+        pty.matches("sink.signal(").count(),
+        1,
+        "one caller of PtySink::signal"
+    );
     assert!(deliver.contains("sink.signal(signal)"));
+
+    const PTY_STATUS_LINES: &[&str] = &[
+        "use crate::program_status;",
+        "let status = plan.hooks.then(program_status::Scanner::default);",
+        "mut status: Option<program_status::Scanner>,",
+        "sink.report(program_status::signal_for(report));",
+    ];
+    for (name, src) in &sources {
+        let code = code_only(src);
+        let lines: Vec<&str> = code
+            .lines()
+            .filter(|l| idents(l).contains(&"program_status"))
+            .map(str::trim)
+            .collect();
+        match name.as_str() {
+            "program_status.rs" | "shell_contract.rs" => {}
+            "pty.rs" => assert_eq!(lines, PTY_STATUS_LINES, "pty.rs names program_status"),
+            "lib.rs" => assert_eq!(lines, ["mod program_status;"], "lib.rs"),
+            _ => assert!(lines.is_empty(), "{name} reaches program_status: {lines:?}"),
+        }
+    }
+
+    let status_src = production(source("program_status.rs"));
+    let strings = string_contents(status_src);
+    let mut literals: Vec<&str> = strings.lines().collect();
+    literals.sort_unstable();
+    let mut read_words = vec![
+        "\\x1b]7501;",
+        "state",
+        "kind",
+        "id",
+        "idle",
+        "working",
+        "blocked",
+        "done",
+        "error",
+        "clear",
+        "permission",
+        "question",
+        "auth",
+    ];
+    read_words.sort_unstable();
+    assert_eq!(
+        literals, read_words,
+        "program_status.rs reads beyond OSC 7501"
+    );
+    let status_code = code_only(status_src);
+    let used: Vec<&str> = idents(&status_code)
+        .into_iter()
+        .filter(|t| {
+            [
+                "String",
+                "str",
+                "char",
+                "from_utf8",
+                "from_utf8_lossy",
+                "to_string",
+                "format",
+                "base64",
+                "decode",
+                "io",
+                "fs",
+                "net",
+                "thread",
+                "process",
+                "sync",
+                "Mutex",
+                "Arc",
+                "static",
+                "File",
+                "Write",
+                "Read",
+                "UnixStream",
+                "TcpStream",
+                "Command",
+                "Channel",
+                "emit",
+                "tauri",
+                "serde",
+                "println",
+                "eprintln",
+                "dbg",
+                "log",
+                "tracing",
+                "PtyManager",
+                "deliver_signal",
+                "signal",
+            ]
+            .contains(t)
+        })
+        .collect();
+    assert!(used.is_empty(), "program_status.rs uses {used:?}");
+    let public: Vec<&str> = status_code
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("pub "))
+        .collect();
+    assert_eq!(
+        public,
+        [
+            "pub const MAX_SEQUENCE: usize = 4096;",
+            "pub enum State {",
+            "pub enum Kind {",
+            "pub struct Report {",
+            "pub state: State,",
+            "pub kind: Option<Kind>,",
+            "pub struct Scanner {",
+            "pub fn feed(&mut self, bytes: &[u8]) -> Vec<Report> {",
+            "pub fn signal_for(report: Report) -> Option<PaneSignal> {",
+        ],
+        "program_status.rs public surface"
+    );
 }
 
 #[test]

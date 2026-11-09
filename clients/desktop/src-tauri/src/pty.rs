@@ -45,7 +45,9 @@
 // resizes a PTY. The one outside caller is `lib.rs`: the command table, and
 // ending every session on app exit and when the main page (re)loads.
 // `shell_contract.rs` pins that by source (ADR-0190 D1).
-// Raw output stays on this machine; it is never sent to the server (D2).
+// Raw output stays on this machine; it is never sent to the server (D2). The
+// reader hands it to the webview unchanged and, in a harness pane, to
+// `program_status.rs`, which reads OSC 7501 reports and nothing else (#5579).
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -57,7 +59,8 @@ use std::time::Duration;
 
 use crate::harness_path;
 use crate::harness_profile;
-use crate::pane_signal::{self, PaneSignal};
+use crate::pane_signal::{self, PaneSignal, PaneSignalEvent};
+use crate::program_status;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 
@@ -229,8 +232,9 @@ pub struct SpawnPlan {
     /// shell rebuilds its own).
     pub path: Option<OsString>,
     /// Wire the harness's status hooks to this pane (#2776): the three
-    /// `OORT_PANE_*` variables and `pane_signal::harness_hook_args`. Harness
-    /// panes only; a shell or a sign-in has nothing to report.
+    /// `OORT_PANE_*` variables and `pane_signal::harness_hook_args`; and read
+    /// its OSC 7501 reports (#5579, `program_status.rs`). Harness panes only:
+    /// a shell or a sign-in has nothing to report.
     pub hooks: bool,
     /// A profile folder's variable (#2878): `CLAUDE_CONFIG_DIR` or
     /// `CODEX_HOME` → the folder `harness_profile` decided and checked.
@@ -486,6 +490,9 @@ pub trait PtySink: Send + Sync + 'static {
     /// A harness hook's status signal for this session (#2776,
     /// `pane_signal.rs`). Never derived from output.
     fn signal(&self, _signal: PaneSignal) {}
+    /// The pane program's own OSC 7501 report (#5579, `program_status.rs`):
+    /// a signal, or `None` when it withdrew its report (`state=clear`).
+    fn report(&self, _signal: Option<PaneSignal>) {}
 }
 
 /// Output credit: bytes handed to the sink and not yet acknowledged.
@@ -620,9 +627,11 @@ impl PtyManager {
         let (drained_tx, drained_rx) = mpsc::channel::<()>();
         {
             let (flow, sink) = (flow.clone(), sink.clone());
+            // A harness pane's program reports its status in band (#5579).
+            let status = plan.hooks.then(program_status::Scanner::default);
             std::thread::Builder::new()
                 .name(format!("pty-{id}-read"))
-                .spawn(move || read_loop(reader, sink, flow, drained_tx))
+                .spawn(move || read_loop(reader, sink, flow, status, drained_tx))
                 .map_err(|e| format!("reader thread: {e}"))?;
         }
         self.sessions.lock().unwrap().insert(
@@ -813,10 +822,14 @@ fn write_loop(
     }
 }
 
+/// The bytes go to the webview unchanged. A harness pane's bytes also go
+/// through its `program_status::Scanner`, whose closed reports are the only
+/// thing this loop derives from output (ADR-0190 D4-b, #5579).
 fn read_loop(
     mut reader: Box<dyn Read + Send>,
     sink: Arc<dyn PtySink>,
     flow: Arc<Flow>,
+    mut status: Option<program_status::Scanner>,
     drained: mpsc::Sender<()>,
 ) {
     let mut buf = vec![0u8; READ_CHUNK];
@@ -827,6 +840,11 @@ fn read_loop(
             Ok(n) => {
                 flow.sent(n);
                 sink.output(buf[..n].to_vec());
+                if let Some(scanner) = status.as_mut() {
+                    for report in scanner.feed(&buf[..n]) {
+                        sink.report(program_status::signal_for(report));
+                    }
+                }
             }
         }
     }
@@ -951,7 +969,7 @@ pub struct PtyState(pub Arc<PtyManager>);
 struct ChannelSink {
     output: Channel<InvokeResponseBody>,
     exit: Channel<PtyExit>,
-    signal: Channel<PaneSignal>,
+    signal: Channel<PaneSignalEvent>,
 }
 
 impl PtySink for ChannelSink {
@@ -964,13 +982,17 @@ impl PtySink for ChannelSink {
         let _ = self.exit.send(exit);
     }
     fn signal(&self, signal: PaneSignal) {
-        let _ = self.signal.send(signal);
+        let _ = self.signal.send(PaneSignalEvent::hook(signal));
+    }
+    fn report(&self, signal: Option<PaneSignal>) {
+        let _ = self.signal.send(PaneSignalEvent::report(signal));
     }
 }
 
 /// Open one PTY. Output arrives on `on_output` as raw bytes (`ArrayBuffer`)
 /// and must be acknowledged with `pty_ack`; the exit arrives once on
-/// `on_exit`.
+/// `on_exit`; a harness pane's status signals arrive on `on_signal`, each
+/// saying whether a hook or the program's OSC 7501 report sent it.
 #[tauri::command]
 pub async fn pty_spawn(
     app: tauri::AppHandle,
@@ -978,7 +1000,7 @@ pub async fn pty_spawn(
     request: SpawnRequest,
     on_output: Channel<InvokeResponseBody>,
     on_exit: Channel<PtyExit>,
-    on_signal: Channel<PaneSignal>,
+    on_signal: Channel<PaneSignalEvent>,
 ) -> Result<u32, String> {
     let manager = state.0.clone();
     // openpty/fork block; keep them off the async workers as well as off the
@@ -1331,6 +1353,7 @@ mod tests {
         bytes: Mutex<Vec<u8>>,
         exit: Mutex<Option<PtyExit>>,
         signals: Mutex<Vec<PaneSignal>>,
+        reports: Mutex<Vec<Option<PaneSignal>>>,
     }
 
     impl PtySink for Recorder {
@@ -1342,6 +1365,9 @@ mod tests {
         }
         fn signal(&self, signal: PaneSignal) {
             self.signals.lock().unwrap().push(signal);
+        }
+        fn report(&self, signal: Option<PaneSignal>) {
+            self.reports.lock().unwrap().push(signal);
         }
     }
 
@@ -2510,6 +2536,10 @@ echo "id=$OORT_PANE_ID tlen=${#OORT_PANE_TOKEN} done"
             [PaneSignal::WaitingPermission],
             "only the line with this pane's token"
         );
+        assert!(
+            sink.reports.lock().unwrap().is_empty(),
+            "a printed prompt is not a report"
+        );
 
         // A shell pane gets no hook environment at all.
         let plan = sh(r#"echo "sock=[${OORT_PANE_HOOK_SOCK}] tok=[${OORT_PANE_TOKEN}]""#);
@@ -2524,6 +2554,58 @@ echo "id=$OORT_PANE_ID tlen=${#OORT_PANE_TOKEN} done"
             shell_sink.text()
         );
         pane_signal::remove(&sock);
+    }
+
+    /// #5579: a harness pane's program reports its status in band (OSC 7501,
+    /// as Codex writes it: ST, and BEL as Claude Code writes it). The reader
+    /// hands every byte to the page unchanged and only the scanner's closed
+    /// reports to the sink. A title that spells a state is not a report, and
+    /// a shell pane printing the same bytes reports nothing (ADR-0190 D4-b).
+    #[test]
+    fn a_harness_pane_report_reaches_its_sink_and_the_bytes_stay() {
+        let script = r#"printf 'start\033]7501;state=idle:app=codex\033\\'
+printf '\033]7501;state=working:app=codex\033\\'
+printf '\033]7501;state=blocked:app=codex:kind=permission\033\\'
+printf 'Allow command? \033]0;state=done\007\n'
+printf '\033]7501;state=done:app=claude-code\007'
+printf '\033]7501;state=clear\033\\end\n'
+"#;
+        let run = |hooks: bool| {
+            let mut plan = sh(script);
+            plan.hooks = hooks;
+            let manager = PtyManager::default();
+            let sink = Arc::new(Recorder::default());
+            manager
+                .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+                .unwrap();
+            assert_eq!(sink.wait_exit(SLOW).code, Some(0));
+            sink
+        };
+        let harness = run(true);
+        assert_eq!(
+            *harness.reports.lock().unwrap(),
+            [
+                Some(PaneSignal::Ready),
+                Some(PaneSignal::Working),
+                Some(PaneSignal::WaitingPermission),
+                Some(PaneSignal::TurnDone),
+                None,
+            ]
+        );
+        assert!(harness.signals.lock().unwrap().is_empty(), "no hook path");
+        let text = harness.text();
+        for raw in [
+            "start\x1b]7501;state=idle:app=codex\x1b\\",
+            "\x1b]7501;state=blocked:app=codex:kind=permission\x1b\\",
+            "Allow command? \x1b]0;state=done\x07",
+            "\x1b]7501;state=clear\x1b\\end",
+        ] {
+            assert!(text.contains(raw), "{raw:?} not passed through: {text:?}");
+        }
+
+        let shell = run(false);
+        assert!(shell.reports.lock().unwrap().is_empty(), "a shell pane");
+        assert_eq!(shell.text(), text, "the same bytes either way");
     }
 
     #[test]

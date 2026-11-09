@@ -64,6 +64,43 @@ pub enum PaneSignal {
     TurnDone,
 }
 
+/// Which path a signal took to the pane (#5579): a hook line on this
+/// module's socket, or the pane program's own OSC 7501 report read by
+/// `program_status.rs`. The webview decides between them
+/// (`@momo/core/features/workbench/paneStatus` `applyPaneSignalEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignalFrom {
+    Hook,
+    Report,
+}
+
+/// One message on a pane's `on_signal` channel:
+/// `{"from":"hook"|"report","signal":<PaneSignal>|null}`. `signal` is null only
+/// from a report: the program withdrew it (`state=clear`). Mirrors
+/// `PaneSignalEvent` in `@momo/core/features/workbench/paneStatus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct PaneSignalEvent {
+    pub from: SignalFrom,
+    pub signal: Option<PaneSignal>,
+}
+
+impl PaneSignalEvent {
+    pub fn hook(signal: PaneSignal) -> Self {
+        Self {
+            from: SignalFrom::Hook,
+            signal: Some(signal),
+        }
+    }
+
+    pub fn report(signal: Option<PaneSignal>) -> Self {
+        Self {
+            from: SignalFrom::Report,
+            signal,
+        }
+    }
+}
+
 /// Which harness wrote the hook. Fixed by the argv the app itself wired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -114,7 +151,8 @@ pub struct HookLine {
 /// - `elicitation_dialog` was not observed in the spike; it is kept because
 ///   Claude documents it as the other way a turn waits for an answer.
 /// - Codex 0.156 `notify` only ever carries `agent-turn-complete`; there is
-///   no approval type, so a Codex pane never shows 「응답 필요」.
+///   no approval type, so the hook path alone never gives a Codex pane
+///   「응답 필요」. Its OSC 7501 report does (#5579, `program_status.rs`).
 pub fn signal_for(source: Source, event: &str, detail: Option<&str>) -> Option<PaneSignal> {
     match (source, event, detail) {
         (Source::Claude, "SessionStart", _) => Some(PaneSignal::Ready),
@@ -421,6 +459,24 @@ mod tests {
                 "{event} {detail:?}"
             );
         }
+    }
+
+    /// The webview parses exactly this shape (`parsePaneSignalEvent`).
+    #[test]
+    fn the_channel_message_names_its_path_and_a_closed_signal() {
+        let json = |e: PaneSignalEvent| serde_json::to_string(&e).unwrap();
+        assert_eq!(
+            json(PaneSignalEvent::hook(PaneSignal::WaitingPermission)),
+            r#"{"from":"hook","signal":"waiting-permission"}"#
+        );
+        assert_eq!(
+            json(PaneSignalEvent::report(Some(PaneSignal::TurnDone))),
+            r#"{"from":"report","signal":"turn-done"}"#
+        );
+        assert_eq!(
+            json(PaneSignalEvent::report(None)),
+            r#"{"from":"report","signal":null}"#
+        );
     }
 
     #[test]
