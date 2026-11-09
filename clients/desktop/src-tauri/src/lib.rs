@@ -105,6 +105,10 @@ mod downloads;
 // which only `capabilities/pty.json` grants.
 #[cfg(desktop)]
 mod pty;
+// Program status reports (#5579, ADR-0190 D4-b): the one reader of PTY output,
+// and it reads OSC 7501 only. Fed by `pty.rs`'s reader; nothing else calls it.
+#[cfg(desktop)]
+mod program_status;
 // Where a new session starts (ADR-0190 D3-c 증보 2026-10-01, #2775): the
 // folder rule, the native folder picker and the one git write (a new
 // worktree). Reachable only through three `workbench_*` commands, which only

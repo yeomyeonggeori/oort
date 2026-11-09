@@ -34,7 +34,14 @@ import {
   serializeScrollback,
   staleScrollbackEntries,
 } from "@momo/core/features/workbench/scrollbackStore";
-import { parsePaneSignal, type PaneSignal } from "@momo/core/features/workbench/paneStatus";
+import {
+  NO_PANE_SIGNAL,
+  afterPersonInput,
+  applyPaneSignalEvent,
+  parsePaneSignalEvent,
+  type PaneSignal,
+  type PaneSignalState,
+} from "@momo/core/features/workbench/paneStatus";
 import { desktopPty, desktopStart, type PtyExit, type PtyProgram } from "@/lib/tauri";
 import { START_COPY, startErrorMessage } from "./startLocation";
 
@@ -81,10 +88,17 @@ export interface LocalSessionView {
   /** OSC 제목(셸이 알려 준 것). 없으면 null. */
   title: string | null;
   /**
-   * 이 프로세스의 하네스가 hook으로 알린 마지막 신호(#2776). 셸 칸과 hook이 없는
-   * 하네스는 늘 null이다. 출력에서 만들지 않는다(ADR-0190 D4-b).
+   * 이 프로세스의 하네스가 스스로 알린 신호: hook(#2776)과 OSC 7501 보고(#5579)를
+   * `applyPaneSignalEvent`로 합친 것. 셸 칸과 둘 다 없는 하네스는 늘 null이다. 웹은 출력에서
+   * 만들지 않는다(ADR-0190 D4-b. 보고도 데스크탑이 읽어 채널로 준다).
    */
   signal: PaneSignal | null;
+  /**
+   * 지금 `signal`은 프로그램이 아니라 사람의 입력이 정했다(`PaneSignalState.byPerson`: hook만 쓰는 칸의 기다림에
+   * 키를 쳐서 푼 「실행 중」). 칸 머리·세션 목록이 출처 줄(「…가 알린 상태예요」)을 달지 않는다(#5584 r2 M1).
+   * 없으면 프로그램의 말이다.
+   */
+  signalByPerson?: boolean;
   exit: PtyExit | null;
   /** 시작 실패 사유(셸이 돌려준 글). */
   error: string | null;
@@ -152,6 +166,8 @@ interface Session {
   ptyId: number | null;
   /** 이 세션의 spawn 세대. 다시 시작한 뒤 옛 PTY의 콜백을 버린다. */
   generation: number;
+  /** 두 길을 합친 신호 상태(#5579). `view.signal`은 이것의 `signal`이다. 세대마다 비운다. */
+  signals: PaneSignalState;
   batcher: AckBatcher | null;
   visible: TerminalLike | null;
   /** 보이는 xterm이 붙는 동안(미러가 밀린 것을 다 파싱하기 전) 온 조각. */
@@ -339,11 +355,21 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     schedulePersist(s);
   };
 
+  const setSignals = (s: Session, next: PaneSignalState) => {
+    s.signals = next;
+    // 신호가 같아도 누가 정했는지가 바뀌면 다시 그린다: 사람이 푼 「실행 중」 뒤에 프로그램이 같은 「실행 중」을
+    // 말하면 그때부터 출처 줄이 붙는다(#5584 r2 M1).
+    const byPerson = next.byPerson === true;
+    if (s.view.signal !== next.signal || (s.view.signalByPerson === true) !== byPerson) {
+      update(s, { signal: next.signal, signalByPerson: byPerson });
+    }
+  };
+
   const onSignal = (s: Session, generation: number, raw: unknown) => {
     if (s.disposed || s.generation !== generation) return;
-    const signal = parsePaneSignal(raw);
-    if (signal === null || s.view.phase === "exited" || s.view.phase === "failed") return;
-    if (s.view.signal !== signal) update(s, { signal });
+    const event = parsePaneSignalEvent(raw);
+    if (event === null || s.view.phase === "exited" || s.view.phase === "failed") return;
+    setSignals(s, applyPaneSignalEvent(s.signals, event));
   };
 
   const writeBoth = (s: Session, text: string) => {
@@ -355,7 +381,8 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
   const spawnInto = async (s: Session) => {
     const generation = ++s.generation;
     if (generation > 1) writeBoth(s, SHOW_CURSOR);
-    update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null });
+    s.signals = NO_PANE_SIGNAL;
+    update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null, signalByPerson: false });
     try {
       let cwd = s.start.cwd;
       if (s.start.worktree) {
@@ -462,6 +489,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
           serialize,
           ptyId: null,
           generation: 0,
+          signals: NO_PANE_SIGNAL,
           batcher: null,
           visible: null,
           attachQueue: null,
@@ -529,11 +557,10 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       if (!s || s.ptyId === null) return;
       const id = s.ptyId;
       // 「응답 필요」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
-      // 않으므로(스파이크 실측) 기다림은 이 사람의 입력으로 푼다. 허락이면 곧
-      // PostToolUse가, 새 요청이면 UserPromptSubmit이 뒤따른다. 출력은 보지 않는다.
-      if (s.view.signal === "waiting-permission" || s.view.signal === "waiting-input") {
-        update(s, { signal: "working" });
-      }
+      // 않으므로(스파이크 실측) hook만 있는 칸의 기다림은 이 사람의 입력으로 푼다. 허락이면
+      // 곧 PostToolUse가, 새 요청이면 UserPromptSubmit이 뒤따른다. OSC 7501로 보고하는 칸은
+      // 그대로 둔다: 프로그램이 답을 받으면 스스로 보고한다(#5579). 출력은 보지 않는다.
+      setSignals(s, afterPersonInput(s.signals));
       const bytes = typeof data === "string" ? TEXT_ENCODER.encode(data) : data;
       for (const chunk of chunkBytes(bytes)) {
         deps.pty.write(id, chunk).then(

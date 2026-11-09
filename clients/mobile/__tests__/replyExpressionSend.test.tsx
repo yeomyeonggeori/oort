@@ -248,7 +248,7 @@ describe('스레드 입력창 - 고르기 → 미리 보기 → 보내기 한 �
     expect(live.repliesPending(ROOT_ID)).toEqual([]);
   });
 
-  it('글을 치다 멈추면 스레드 입력창에도 추천 줄이 서고, 누르면 미리 보기에 오른다 - 저절로 보내지 않는다', async () => {
+  it('글을 치다 멈추면 스레드 입력창에도 추천 줄이 서고, 누르면 미리 보기에 오른다 - 저절로 보내지 않는다. 글이 그 낱말뿐이면 그림으로 바뀌어 그림만 답글로 간다 (#5588)', async () => {
     const store = await loadedStore();
     mountWith(store, <Thread />);
     await screen.findByTestId('composer-input');
@@ -259,9 +259,29 @@ describe('스레드 입력창 - 고르기 → 미리 보기 → 보내기 한 �
     fireEvent.press(screen.getByTestId('composer-expression-suggest-item-dam_kk'));
     expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
     expect(screen.queryByTestId('composer-expression-suggest')).toBeNull();
+    expect(input().props.value).toBe(''); // 「킹받네」뿐인 글은 그림으로 바뀌었다(#5588)
+    act(() => void jest.advanceTimersByTime(5000));
+    expect(reply).not.toHaveBeenCalled(); // 저절로 보내지 않는다
+    confirmAll();
+    await press('composer-send');
+    expect(requests().map(call => [call.root, call.body])).toEqual([[ROOT_ID, ':dam_kk:']]); // 글 없이 그림 하나
+  });
+
+  it('스레드 입력창에서도 낱말이 문구 안에 있으면 글은 그대로 두고 그림을 더한다 - 보내기 한 번에 그림 → 글 두 답글 (#5588)', async () => {
+    const store = await loadedStore();
+    mountWith(store, <Thread />);
+    await screen.findByTestId('composer-input');
+    act(() => void fireEvent(input(), 'focus'));
+    act(() => void fireEvent.changeText(input(), '오늘도 킹받네'));
+    act(() => void jest.advanceTimersByTime(300));
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-dam_kk'));
+    expect(screen.getByTestId('composer-expression-preview')).toBeTruthy();
+    expect(input().props.value).toBe('오늘도 킹받네'); // 쓴 글은 그대로
     act(() => void jest.advanceTimersByTime(5000));
     expect(reply).not.toHaveBeenCalled();
-    expect(input().props.value).toBe('킹받네'); // 쓴 글은 그대로
+    confirmAll(); // 첫째(그림)가 확정되어야 둘째(글)가 나간다
+    await press('composer-send');
+    expect(requests().map(call => [call.root, call.body])).toEqual([[ROOT_ID, ':dam_kk:'], [ROOT_ID, '오늘도 킹받네']]);
   });
 
   it('첫째가 실패하면 둘째는 나가지 않는다 - 입력창은 비고(대화 입력창과 같은 규칙) 실패한 행 둘이 스레드에 남아, 둘째 행에서 다시 보내도 그림부터 같은 id 로 나간다', async () => {

@@ -65,6 +65,7 @@ import { nowCardWaitingAgentId } from "./nowCardLiveness";
 import { useAgentLiveness } from "@/features/agents/useAgentLiveness";
 import { SidebarDestinations } from "./SidebarDestinations";
 import { destinationMarks } from "./sidebarBadge";
+import { isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { destinationActive } from "./sidebarDestinationsModel";
 import { setSidebarBodySlot } from "./sidebarBodySlot";
@@ -602,6 +603,7 @@ export function Sidebar({
         needsMe: needsMeState,
         unreadChannels: unreadChannels.length,
         doneUnseen: paneAttention.some((e) => e.status === "done"),
+        failedUnseen: paneAttention.some((e) => isFailedMark(e.mark)),
       }),
     [needsMeState, unreadChannels.length, paneAttention]
   );

@@ -68,6 +68,11 @@ export interface PaneStatusView {
   /** 표지의 글자(「응답 필요」 등). 칸의 접근 이름에 붙는다. */
   label: string;
   /**
+   * 상태의 출처 한 줄(「Codex가 알린 상태예요」, ADR-0220 「에이전트 보고」). 그 프로그램이 스스로
+   * 알린 상태일 때만 있다. 표지에 올리면 보이는 말이고, 읽기 도구에는 칸의 설명으로 간다.
+   */
+  source?: string | null;
+  /**
    * 「응답 필요」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
    * · `.pwait`). null이면 기다리지 않는다.
    */
@@ -623,6 +628,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
       ref={ref}
       tabIndex={-1}
       aria-label={`${index}번 칸, ${lane ? `${lane.label}, ` : ""}${title}${status ? `, ${status.label}` : ""}`}
+      aria-description={status?.source ?? undefined}
       data-pane-id={id}
       data-testid="workbench-pane"
       data-focused={focused ? "" : undefined}
@@ -698,7 +704,12 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         ) : null}
         {/* 상태 글자는 칸의 접근 이름에 이미 있다. 표지는 모양만(design-review N3). */}
         {status ? (
-          <span aria-hidden className="flex shrink-0 items-center">
+          <span
+            aria-hidden
+            data-testid="workbench-pane-status"
+            title={status.source ? `${status.label} · ${status.source}` : status.label}
+            className="flex shrink-0 items-center"
+          >
             {status.mark}
           </span>
         ) : null}
