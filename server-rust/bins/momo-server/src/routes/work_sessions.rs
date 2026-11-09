@@ -1019,9 +1019,9 @@ async fn end_in_tx(
     // failures.
     if let Some(exit_code) = exit_code {
         let host_signed = signing_host_id.is_some();
-        if is_failed_end(host_signed, Some(exit_code), false)
-            && !kill_requested_in_tx(conn, workspace_id, session_id).await?
-        {
+        let kill_requested =
+            host_signed && kill_requested_in_tx(conn, workspace_id, session_id).await?;
+        if is_failed_end(host_signed, Some(exit_code), kill_requested) {
             post_session_notice_in_tx(
                 conn,
                 workspace_id,
