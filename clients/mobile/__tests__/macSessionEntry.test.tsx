@@ -423,9 +423,11 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
 });
 
 describe('④ 「내 맥에 보내기」가 세션을 찾으면 그 세션 화면으로 바로 간다', () => {
-  it('시트의 부름이 작업 목록 위의 세션 화면을 세운다 — 뒤로는 작업 목록', async () => {
-    installFetch({hosts: [host(true)]});
-    renderShell();
+  it('시트의 부름이 작업 목록 위의 세션 화면을 세운다 — 셸의 마지막 읽기가 「꺼짐」이어도(보내기 성공이 곧 켜진 맥) · 뒤로는 작업 목록', async () => {
+    // 셸이 마지막으로 읽은 호스트 목록은 꺼짐이다(60초 박자 사이에 맥이 켜졌다). 보내기는 서버가 그 맥이 켜져 있음을
+    // 확인한 뒤에야 성공하므로(꺼져 있으면 409 `work_host_offline`) 이 길은 셸의 판정을 묻지 않는다.
+    installFetch({hosts: [host(false)]});
+    renderShell([host(false)]);
     await waitFor(() => expect(screen.getByTestId('shell-plus')).toBeTruthy(), SETTLE);
     fireEvent.press(screen.getByTestId('shell-plus'));
     fireEvent.press(screen.getByTestId('plus-menu-ai'));
