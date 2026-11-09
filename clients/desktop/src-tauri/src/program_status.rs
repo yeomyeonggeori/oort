@@ -9,16 +9,18 @@
 // OSC 7501, the Program Status Protocol (revision 0.4, 2026-10-10; kitty
 // `docs/misc-protocol.rst`). Codex writes it (`codex-rs/tui/src/
 // terminal_program_status.rs`, `state=…:app=codex[:kind=…]` + ST). Claude
-// Code writes it too, but only to a terminal that answers its `OSC 7501 ; ?`
-// probe, which oort does not (see the #5579 PR body).
+// Code writes it too (`state=…:app=claude-code[:…]` + BEL), but only to a
+// terminal that answers its feature-detection query `OSC 7501 ; ?`. A harness
+// pane answers it (#5586): this module says a query came (`Seen::Query`) and
+// `pty.rs` queues `REPLY`, fixed bytes, behind the person's keystrokes.
 //
 // Every other byte (text, titles, other OSCs, CSI) passes by without being
 // kept or forwarded. Of a 7501 report this module reads `state`, `kind`,
 // whether an `id` is present, and whether `app` names the pane's harness:
 // words from closed lists. `title` and `msg` are base64 text and are skipped
-// unread, like any other key. What leaves is a `Report` of two enums; `app`
-// is compared and never kept or shown. `shell_contract.rs` pins all of this
-// by source.
+// unread, like any other key. What leaves is a `Report` of two enums, or the
+// bare fact of a query; `app` is compared and never kept or shown. Nothing
+// read here goes into `REPLY`. `shell_contract.rs` pins all of this by source.
 //
 // The boundary, in the order a byte meets it:
 //
@@ -49,6 +51,10 @@
 //    An unknown or missing `state` drops the report; an unknown `kind`, or a
 //    `kind` on any state but `blocked`, reads as absent. Repeated key: the
 //    last one wins.
+// 7. **The query.** A payload of exactly `?` (the spec's whole query) is
+//    `Seen::Query`, once per sequence. Anything else that starts with `?` (a
+//    terminal's reply, our own echoed back, `??`, `? `) is neither a query
+//    nor a report. The closed list of queries answered is this one.
 //
 // Lifetime (the spec clears `working`/`blocked`/`idle` at a new shell prompt,
 // which oort cannot see): a new report or `state=clear` replaces the current
@@ -62,6 +68,18 @@ use crate::pane_signal::PaneSignal;
 /// The whole sequence, introducer to terminator (spec revision 0.4).
 pub const MAX_SEQUENCE: usize = 4096;
 
+/// The terminal's whole answer to `OSC 7501 ; ?` (spec revision 0.4, Feature
+/// detection: "A supporting terminal MUST reply with `?`"). Fixed bytes: the
+/// spec's own example without its notation spaces, naming the states and
+/// kinds `parse` reads. It ends with BEL, which the spec's conventions count
+/// as ST and which Claude Code's own query uses. "The only bytes a terminal
+/// writes back are the feature detection reply, which contains nothing from
+/// any report": nothing from the program's output goes into it.
+pub const REPLY: &[u8] =
+    b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x07";
+
+/// The one query answered: the payload of `OSC 7501 ; ? ST`, exactly.
+const QUERY: &[u8] = b"?";
 const INTRODUCER: &[u8] = b"\x1b]7501;";
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
@@ -94,6 +112,15 @@ pub enum Kind {
 pub struct Report {
     pub state: State,
     pub kind: Option<Kind>,
+}
+
+/// One finished 7501 sequence that means something to the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seen {
+    /// The pane harness's status report.
+    Report(Report),
+    /// The program asked `OSC 7501 ; ?`: the pane answers `REPLY`, once.
+    Query,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -131,19 +158,19 @@ impl Scanner {
         }
     }
 
-    /// The reports completed in `bytes`, in order. The bytes themselves are
-    /// not kept past the sequence they belong to.
-    pub fn feed(&mut self, bytes: &[u8]) -> Vec<Report> {
-        let mut reports = Vec::new();
+    /// The reports and queries completed in `bytes`, in order. The bytes
+    /// themselves are not kept past the sequence they belong to.
+    pub fn feed(&mut self, bytes: &[u8]) -> Vec<Seen> {
+        let mut seen = Vec::new();
         for &b in bytes {
-            if let Some(report) = self.step(b) {
-                reports.push(report);
+            if let Some(one) = self.step(b) {
+                seen.push(one);
             }
         }
-        reports
+        seen
     }
 
-    fn step(&mut self, b: u8) -> Option<Report> {
+    fn step(&mut self, b: u8) -> Option<Seen> {
         match self.mode {
             Mode::Ground => {
                 if b == ESC {
@@ -201,7 +228,7 @@ impl Scanner {
     }
 
     /// `b` follows an ESC that ended a sequence: read it as an introducer byte.
-    fn after_esc(&mut self, b: u8) -> Option<Report> {
+    fn after_esc(&mut self, b: u8) -> Option<Seen> {
         self.mode = Mode::Introducer(1);
         self.step(b)
     }
@@ -211,15 +238,17 @@ impl Scanner {
         self.mode = Mode::Ground;
     }
 
-    fn finish(&mut self, terminator: usize) -> Option<Report> {
+    fn finish(&mut self, terminator: usize) -> Option<Seen> {
         let fits = INTRODUCER.len() + self.payload.len() + terminator <= MAX_SEQUENCE;
-        let report = if fits {
-            parse(&self.payload, &self.harness)
-        } else {
+        let seen = if !fits {
             None
+        } else if self.payload == QUERY {
+            Some(Seen::Query)
+        } else {
+            parse(&self.payload, &self.harness).map(Seen::Report)
         };
         self.abort();
-        report
+        seen
     }
 }
 
@@ -322,8 +351,21 @@ mod tests {
         scan_in(b"codex", bytes)
     }
 
+    /// The reports in `bytes`, queries left out (they have their own tests).
     fn scan_in(harness: &[u8], bytes: &[u8]) -> Vec<Report> {
-        Scanner::for_harness(harness).feed(bytes)
+        Scanner::for_harness(harness)
+            .feed(bytes)
+            .into_iter()
+            .filter_map(|seen| match seen {
+                Seen::Report(report) => Some(report),
+                Seen::Query => None,
+            })
+            .collect()
+    }
+
+    /// Everything a Claude pane's scanner makes of `bytes`.
+    fn seen(bytes: &[u8]) -> Vec<Seen> {
+        Scanner::for_harness(b"claude").feed(bytes)
     }
 
     fn signals(bytes: &[u8]) -> Vec<Option<PaneSignal>> {
@@ -481,14 +523,14 @@ mod tests {
                 got.extend(scanner.feed(&whole[cut..]));
                 assert_eq!(
                     got,
-                    [report(State::Blocked, Some(Kind::Permission))],
+                    [Seen::Report(report(State::Blocked, Some(Kind::Permission)))],
                     "cut at {cut} of {:?}",
                     String::from_utf8_lossy(&whole)
                 );
             }
             // One byte per read.
             let mut scanner = Scanner::for_harness(b"codex");
-            let got: Vec<Report> = whole.iter().flat_map(|b| scanner.feed(&[*b])).collect();
+            let got: Vec<Seen> = whole.iter().flat_map(|b| scanner.feed(&[*b])).collect();
             assert_eq!(got.len(), 1);
         }
     }
@@ -554,8 +596,8 @@ mod tests {
         huge.resize(100_000, b'A');
         huge.extend_from_slice(b"\x07\x1b]7501;state=working\x1b\\");
         let mut scanner = Scanner::for_harness(b"codex");
-        let got: Vec<Report> = huge.chunks(4096).flat_map(|c| scanner.feed(c)).collect();
-        assert_eq!(got, [report(State::Working, None)]);
+        let got: Vec<Seen> = huge.chunks(4096).flat_map(|c| scanner.feed(c)).collect();
+        assert_eq!(got, [Seen::Report(report(State::Working, None))]);
         assert!(scanner.payload.capacity() <= MAX_SEQUENCE, "kept the skip");
         // An ESC aborts a skip too, and may start a real sequence.
         let mut aborted = head.to_vec();
@@ -620,5 +662,115 @@ mod tests {
                 None
             ]
         );
+    }
+
+    /// #5586: the feature-detection query, and only it, is a query. Once per
+    /// sequence, with either terminator, across any split; anything else
+    /// starting with `?` is nothing, our own reply included, so a reply
+    /// echoed back by a cooked tty cannot ask again.
+    #[test]
+    fn the_query_is_seen_once_per_sequence_and_nothing_else_is_one() {
+        // Claude Code 2.1.312's probe: BEL, then DA1 as its sentinel.
+        assert_eq!(seen(b"\x1b]7501;?\x07\x1b[c"), [Seen::Query]);
+        // The spec's form: ST.
+        assert_eq!(seen(b"\x1b]7501;?\x1b\\"), [Seen::Query]);
+        // Two queries, two; reports in between keep their place.
+        assert_eq!(
+            seen(b"\x1b]7501;?\x07\x1b]7501;state=working:app=claude-code\x07\x1b]7501;?\x1b\\"),
+            [
+                Seen::Query,
+                Seen::Report(report(State::Working, None)),
+                Seen::Query
+            ]
+        );
+        let whole = b"text \x1b[1m\x1b]7501;?\x07 more";
+        for cut in 0..=whole.len() {
+            let mut scanner = Scanner::for_harness(b"claude");
+            let mut got = scanner.feed(&whole[..cut]);
+            got.extend(scanner.feed(&whole[cut..]));
+            assert_eq!(got, [Seen::Query], "cut at {cut}");
+        }
+        let mut scanner = Scanner::for_harness(b"claude");
+        let one_by_one: Vec<Seen> = whole.iter().flat_map(|b| scanner.feed(&[*b])).collect();
+        assert_eq!(one_by_one, [Seen::Query]);
+        for not_query in [
+            &b"\x1b]7501;??\x07"[..],
+            b"\x1b]7501;?x\x07",
+            b"\x1b]7501;? \x07",
+            b"\x1b]7501; ?\x07",
+            b"\x1b]7501;?:\x07",
+            b"\x1b]7501;?:rev=1\x07",
+            b"\x1b]7501;?:states=idle,working:kinds=permission\x1b\\",
+            REPLY,
+            b"\x1b]7501;\x07",
+            b"\x1b]7501?\x07",
+            b"\x1b]7500;?\x07",
+            b"\x1b]75010;?\x07",
+            b"\x1b]07501;?\x07",
+            b"\x1b]10;?\x07",
+            b"\x1b[7501;?\x07",
+            b"\x1b]7501;?\x18",
+            b"\x1b]7501;?\x1a",
+            b"\x1b]7501;?\x1b[c",
+            b"\xc2\x9d7501;?\x07",
+            b"\x1b]7501;?\xc2\x9c",
+            b"?\x07",
+            // Unterminated: nothing until it ends.
+            b"\x1b]7501;?",
+        ] {
+            assert!(
+                seen(not_query).is_empty(),
+                "{:?}",
+                String::from_utf8_lossy(not_query)
+            );
+        }
+        // An over-long sequence that starts like the query is dropped whole.
+        let mut long = b"\x1b]7501;?".to_vec();
+        long.resize(MAX_SEQUENCE + 1, b'?');
+        long.push(0x07);
+        assert!(seen(&long).is_empty());
+    }
+
+    /// The reply is the spec's fixed answer: it starts with `?` (what Claude
+    /// Code checks, `data.startsWith("?")`), it fits, and the states and kinds
+    /// it lists are exactly the ones this module reads.
+    #[test]
+    fn the_reply_is_fixed_and_names_what_this_module_reads() {
+        assert_eq!(
+            REPLY,
+            b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x07"
+        );
+        assert!(REPLY.len() <= MAX_SEQUENCE);
+        let body = REPLY
+            .strip_prefix(INTRODUCER)
+            .and_then(|b| b.strip_suffix(&[BEL]))
+            .expect("framed as OSC 7501 … BEL");
+        let mut pairs = body.split(|&b| b == b':');
+        assert_eq!(pairs.next(), Some(QUERY));
+        let states = pairs.next().and_then(|p| p.strip_prefix(b"states="));
+        let kinds = pairs.next().and_then(|p| p.strip_prefix(b"kinds="));
+        assert!(pairs.next().is_none());
+        let states: Vec<&[u8]> = states.expect("states").split(|&b| b == b',').collect();
+        let kinds: Vec<&[u8]> = kinds.expect("kinds").split(|&b| b == b',').collect();
+        assert_eq!(states.len(), 5, "every state but clear");
+        for state in &states {
+            let mut bytes = b"\x1b]7501;state=".to_vec();
+            bytes.extend_from_slice(state);
+            bytes.push(BEL);
+            let read = scan(&bytes);
+            assert_eq!(read.len(), 1, "{:?}", String::from_utf8_lossy(state));
+            assert_ne!(read[0].state, State::Clear);
+        }
+        assert_eq!(kinds.len(), 3);
+        for kind in &kinds {
+            let mut bytes = b"\x1b]7501;state=blocked:kind=".to_vec();
+            bytes.extend_from_slice(kind);
+            bytes.push(BEL);
+            assert!(
+                matches!(scan(&bytes)[..], [Report { kind: Some(_), .. }]),
+                "{:?}",
+                String::from_utf8_lossy(kind)
+            );
+        }
     }
 }
