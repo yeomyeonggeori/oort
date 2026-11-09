@@ -5,8 +5,13 @@
 //   ② 목록이 맨 아래에서 떨어지지 않는다(거리 0),
 //   ③ 「최신 메시지로 이동」이 서지 않는다(0회).
 // 진짜로 목록 높이가 바뀌어도(등록으로 글자 → 그림, 숨김으로 그림 → 글자) 맨 아래는 맨 아래이고, 위로 올려 읽던 중이면
-//   ④ 보던 메시지의 화면 위치가 2px 넘게 움직이지 않는다(WebKit에는 이 목록 안의 스크롤 앵커링이 없다 — 가상 목록이
+//   ④ 보던 메시지의 화면(창) 위치가 2px 넘게 움직이지 않는다(WebKit에는 이 목록 안의 스크롤 앵커링이 없다 — 가상 목록이
 //      줄마다 `overflow-anchor:none`을 건다).
+// 연결이 끊겼다 돌아와도(기기 오프라인 · 서버에 닿지 못함) ⑤ 맨 아래의 마지막 줄과 위를 읽던 줄이 **창에서** 1px 넘게 움직이지
+// 않는다 — 1280 · 900 · 390. 목록 안쪽 좌표(바닥 거리 · 스크롤러 위쪽에서 줄까지)는 목록 상자가 통째로 움직이면 0을 보고하므로
+// (#5575 검수 H1: 입력창 위 오프라인 줄 26~44px, 머리 아래 허들 배너 39px), 마지막 줄의 아래 끝과 보던 줄의 위 끝을 창 좌표로도 잰다.
+// 칸 안의 이름 표지(`data-expression-label`, 오래 가는 오프라인·실패에서 같은 크기 칸 안에 서는 `:이름:`)는 「글자로 바뀜」으로 세지
+// 않는다 — 칸의 크기가 그대로이기 때문이다.
 //
 // 실제 번들 · 실제 가상 목록 · 실제 이모티콘 저장소/그림 칸을 **WebKit**(데스크탑 앱의 WKWebView와 같은 엔진)과 Chromium에서
 // 잰다. 서버는 이 파일의 가짜 `/v1`과 가짜 실시간(센트리퓨고 JSON 프로토콜의 최소판, `routeWebSocket`)이다. 인물·대화는 지어낸 것이다.
@@ -20,6 +25,7 @@
 //   EXPRESSION_JITTER_DIST=<폴더>               dist 대신 이 번들을 띄운다(수리 전 번들로 RED 를 다시 보일 때)
 //   EXPRESSION_JITTER_IMAGE_DELAY_MS=<ms>       그림 응답 지연(기본 250: 실제 망처럼 가상 목록의 100ms 따라붙기 창 밖에서 도착한다)
 //   EXPRESSION_JITTER_CAPTURE=<폴더>            오프라인 흔들림 장면에서 대화 목록을 찍는다(온라인 · 오프라인 1초 · 돌아온 뒤)
+//   EXPRESSION_JITTER_ONLY=connection           연결 끊김 → 돌아옴 장면(창 기준, 1280 · 900 · 390)만 돈다
 
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -41,6 +47,13 @@ const outDir = process.env.EXPRESSION_JITTER_OUT || null;
 const measureOnly = process.env.EXPRESSION_JITTER_MEASURE_ONLY === "1";
 const realInterval = process.env.EXPRESSION_JITTER_REAL_INTERVAL === "1";
 const viewport = { width: 1280, height: 800 };
+/** 연결 끊김 → 돌아옴을 창 기준으로 재는 폭들(넓은 창 · 좁은 창 · 폰 폭). 폰 폭에서는 셸 위쪽 연결 띠도 선다. */
+const connectionViewports = [
+  { width: 1280, height: 800 },
+  { width: 900, height: 800 },
+  { width: 390, height: 844 },
+];
+const onlyScene = process.env.EXPRESSION_JITTER_ONLY || null;
 const distOverride = process.env.EXPRESSION_JITTER_DIST || null;
 const captureDir = process.env.EXPRESSION_JITTER_CAPTURE || null;
 
@@ -48,6 +61,13 @@ async function capture(page, engine, name) {
   if (captureDir === null) return;
   mkdirSync(captureDir, { recursive: true });
   await page.locator('[data-testid="chat-timeline"]').screenshot({ path: resolve(captureDir, `${engine}-${name}.png`) });
+}
+
+/** 창 전체를 찍는다(창 기준 흔들림은 목록 밖 — 머리 · 배너 · 입력창 — 이 함께 보여야 읽힌다). */
+async function captureWindow(page, engine, name) {
+  if (captureDir === null) return;
+  mkdirSync(captureDir, { recursive: true });
+  await page.screenshot({ path: resolve(captureDir, `${engine}-${name}.png`) });
 }
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -509,10 +529,13 @@ async function startWindow(page, { expectImages, anchorText = null }) {
       const known = new Set(expectImages);
       const pattern = /:([a-z0-9_-]{2,30}):/g;
       /** 이 노드 아래의 「그림이어야 하는데 글자인」 이모티콘 이름들. */
+      // 같은 크기 칸 안의 이름 표지는 세지 않는다(칸의 크기가 그대로다). 칸을 버리고 글자가 된 것만 센다.
+      const inLabel = (node) => (node.nodeType === 1 ? node : node.parentElement)?.closest?.("[data-expression-label]") != null;
       const textHits = (root) => {
         const hits = [];
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (inLabel(node)) continue;
           for (const match of node.data.matchAll(pattern)) if (known.has(match[1])) hits.push(match[1]);
         }
         return hits;
@@ -548,11 +571,11 @@ async function startWindow(page, { expectImages, anchorText = null }) {
         for (const record of records) {
           for (const node of record.addedNodes) {
             if (node.nodeType === 1 && (node.matches?.('[data-testid="jump-latest"]') || node.querySelector?.('[data-testid="jump-latest"]'))) J.pillMounts += 1;
-            if (!scroller.contains(node)) continue;
+            if (!scroller.contains(node) || inLabel(node)) continue;
             const hits = node.nodeType === 3 ? [...node.data.matchAll(pattern)].map((m) => m[1]).filter((n) => known.has(n)) : textHits(node);
             if (hits.length) J.textInsertions.push({ t: Math.round(performance.now() - t0), hits });
           }
-          if (record.type === "characterData" && scroller.contains(record.target)) {
+          if (record.type === "characterData" && scroller.contains(record.target) && !inLabel(record.target)) {
             const hits = [...record.target.data.matchAll(pattern)].map((m) => m[1]).filter((n) => known.has(n));
             if (hits.length) J.textInsertions.push({ t: Math.round(performance.now() - t0), hits });
           }
@@ -563,7 +586,11 @@ async function startWindow(page, { expectImages, anchorText = null }) {
       channel.port1.onmessage = () => {
         if (!live()) return;
         const anchor = anchorRow();
-        const scrollerTop = scroller.getBoundingClientRect().top;
+        const scrollerBox = scroller.getBoundingClientRect();
+        const scrollerTop = scrollerBox.top;
+        const rows = scroller.querySelectorAll("[data-index]");
+        const last = rows[rows.length - 1] ?? null;
+        const round = (value) => Math.round(value * 100) / 100;
         (dirty ? J.intermediate : J.frames).push({
           t: Math.round(performance.now() - t0),
           top: scroller.scrollTop,
@@ -574,6 +601,12 @@ async function startWindow(page, { expectImages, anchorText = null }) {
           canvases: scroller.querySelectorAll("canvas.expression-image").length,
           images: scroller.querySelectorAll("img.expression-image").length,
           anchorY: anchor ? Math.round((anchor.getBoundingClientRect().top - scrollerTop) * 100) / 100 : null,
+          // 창 좌표(#5575 검수 H1): 사람의 눈이 보는 자리. 목록 상자가 통째로 움직여도 잡힌다.
+          anchorScreen: anchor ? round(anchor.getBoundingClientRect().top) : null,
+          lastIndex: last?.getAttribute("data-index") ?? null,
+          lastBottom: last ? round(last.getBoundingClientRect().bottom) : null,
+          scrollerTop: round(scrollerTop),
+          scrollerBottom: round(scrollerBox.bottom),
           typing: document.querySelector('[data-testid="typing-line"][data-state="on"], [data-testid="composer-typing"]') !== null,
           blocked: document.querySelector('[data-testid="composer-offline"]') !== null,
         });
@@ -609,6 +642,11 @@ function summarize(label, raw, extra = {}) {
   const frames = raw.frames;
   const gaps = frames.map((frame) => frame.gap);
   const anchors = frames.map((frame) => frame.anchorY).filter((value) => value !== null);
+  const spread = (values) => (values.length ? Math.round((Math.max(...values) - Math.min(...values)) * 100) / 100 : null);
+  const anchorScreens = frames.map((frame) => frame.anchorScreen).filter((value) => value !== null && value !== undefined);
+  // 마지막 줄이 바뀌면(새 줄이 붙음) 같은 줄끼리만 견준다: 첫 표본의 마지막 줄.
+  const firstLast = frames.find((frame) => frame.lastIndex !== null)?.lastIndex ?? null;
+  const lastBottoms = frames.filter((frame) => frame.lastIndex === firstLast && frame.lastBottom !== null).map((frame) => frame.lastBottom);
   const pillFrames = frames.filter((frame) => frame.pill).length;
   let pillShows = 0;
   for (let i = 0; i < frames.length; i += 1) if (frames[i].pill && (i === 0 || !frames[i - 1].pill)) pillShows += 1;
@@ -634,6 +672,13 @@ function summarize(label, raw, extra = {}) {
     anchorSpread: anchors.length ? Math.round((Math.max(...anchors) - Math.min(...anchors)) * 100) / 100 : null,
     anchorFirst: anchors[0] ?? null,
     anchorLast: anchors[anchors.length - 1] ?? null,
+    anchorScreenSpread: spread(anchorScreens),
+    anchorScreenRange: anchorScreens.length ? [Math.min(...anchorScreens), Math.max(...anchorScreens)] : null,
+    lastBottomSpread: spread(lastBottoms),
+    lastBottomRange: lastBottoms.length ? [Math.min(...lastBottoms), Math.max(...lastBottoms)] : null,
+    lastRowChanged: frames.some((frame) => frame.lastIndex !== null && frame.lastIndex !== firstLast),
+    scrollerTops: [...new Set(frames.map((frame) => frame.scrollerTop))].slice(0, 8),
+    scrollerBottoms: [...new Set(frames.map((frame) => frame.scrollerBottom))].slice(0, 8),
     typingFrames: frames.filter((frame) => frame.typing).length,
     blockedFrames: frames.filter((frame) => frame.blocked).length,
     ...extra,
@@ -650,7 +695,16 @@ async function openDm(page, backend) {
   await page.getByTestId("login-email").fill("haneul@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();
-  await page.locator(`[data-testid="channel-item"][data-channel-id="${dmChannelId}"]`).click();
+  const item = page.locator(`[data-testid="channel-item"][data-channel-id="${dmChannelId}"]`);
+  if ((page.viewportSize()?.width ?? 1280) >= 600) {
+    await item.click();
+  } else {
+    // 폰 폭: 목록은 닫힌 서랍 안에 있다. 그 줄의 링크(`#/c/<id>`)로 간다.
+    await item.waitFor({ state: "attached" });
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, dmChannelId);
+  }
   await page.getByTestId("composer-input").waitFor();
   const deadline = Date.now() + 15_000;
   while (!backend.subscribed("typing:") || !backend.subscribed("expressions:")) {
@@ -828,14 +882,8 @@ async function runBottomScene(browser, engine) {
   return results.map((entry) => ({ engine, scene: "bottom", ...entry }));
 }
 
-/** 위로 올려 읽던 중: 보던 줄이 화면에서 움직이지 않아야 한다. */
-async function runAnchorScene(browser, engine) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR" });
-  const backend = await installBackend(context);
-  const page = await context.newPage();
-  await installProbe(page);
-  await openDm(page, backend);
-  // 앵커 줄을 화면 가운데쯤에 둔다(가상 목록이 줄을 붙일 때까지 기다리며 올라간다).
+/** 앵커 줄을 화면 가운데쯤에 둔다(가상 목록이 줄을 붙일 때까지 기다리며 올라간다). */
+async function placeAnchor(page) {
   let placed = false;
   for (let step = 0; step < 40 && !placed; step += 1) {
     placed = await page.evaluate(
@@ -854,6 +902,56 @@ async function runAnchorScene(browser, engine) {
     await wait(120);
   }
   if (!placed) throw new Error("앵커 줄을 찾지 못했다");
+}
+
+/**
+ * 연결 끊김 → 돌아옴, **창 기준** (#5575 검수 H1). 맨 아래에 붙은 채(C1)와 위를 읽던 중(C2)에 기기 오프라인을 두 번 흔든다.
+ * 오프라인이 되면 입력창 쪽 「보낼 수 없어요」 줄 · 머리 아래 허들 배너 · (폰 폭) 셸 위쪽 연결 띠가 서고 진다. 목록 안쪽 좌표는 목록 상자가
+ * 통째로 움직이면 0을 보고하므로, 마지막 줄의 아래 끝과 보던 줄의 위 끝을 창 좌표로 잰다.
+ */
+async function runConnectionScene(browser, engine, vp) {
+  const context = await browser.newContext({ viewport: vp, deviceScaleFactor: 2, locale: "ko-KR" });
+  const backend = await installBackend(context);
+  const page = await context.newPage();
+  await installProbe(page);
+  await openDm(page, backend);
+  const results = [];
+  const record = async (label, body, { anchorText = null } = {}) => {
+    await startWindow(page, { expectImages: BASE_IMAGES, anchorText });
+    await body();
+    await wait(1_500);
+    const raw = await stopWindow(page);
+    results.push({ summary: summarize(label, raw, { width: vp.width }), raw });
+  };
+  const flap = async (tag) => {
+    for (let i = 0; i < 2; i += 1) {
+      if (i === 0) await captureWindow(page, engine, `${tag}-${vp.width}-1-online`);
+      await context.setOffline(true);
+      await wait(1_500);
+      if (i === 0) await captureWindow(page, engine, `${tag}-${vp.width}-2-offline`);
+      await context.setOffline(false);
+      await wait(2_500);
+      if (i === 0) await captureWindow(page, engine, `${tag}-${vp.width}-3-back`);
+    }
+  };
+  // 위 읽기를 먼저 잰다: 한 번 흔든 뒤에는 허들 상태가 「불러오지 못했습니다」 배너로 남아(검수 O2) 위 가장자리가 더 움직이지 않을 수 있다.
+  await placeAnchor(page);
+  await wait(1_500);
+  await record(`C2 위 읽기: 연결 끊김 → 돌아옴 ×2 (창 기준, ${vp.width})`, () => flap("C2"), { anchorText: ANCHOR_TEXT });
+  await settleToBottom(page);
+  await record(`C1 맨 아래: 연결 끊김 → 돌아옴 ×2 (창 기준, ${vp.width})`, () => flap("C1"));
+  await context.close();
+  return results.map((entry) => ({ engine, scene: "connection", ...entry }));
+}
+
+/** 위로 올려 읽던 중: 보던 줄이 화면에서 움직이지 않아야 한다. */
+async function runAnchorScene(browser, engine) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR" });
+  const backend = await installBackend(context);
+  const page = await context.newPage();
+  await installProbe(page);
+  await openDm(page, backend);
+  await placeAnchor(page);
   await wait(1_500);
   const results = [];
   const record = async (label, body, { expect = BASE_IMAGES, settle = 1_200, extra = {} } = {}) => {
@@ -995,6 +1093,31 @@ function judge(all) {
       if (summary.pillShows !== 0 || summary.pillMounts !== 0) {
         failures.push(`${where}: 「최신 메시지로 이동」이 ${Math.max(summary.pillShows, summary.pillMounts)}번 섰다`);
       }
+      // 창 기준(#5575 검수 H1): 바닥 거리가 0이어도 목록 상자가 움직이면 마지막 줄이 화면에서 움직인다.
+      if ((!realChange || engine === "webkit") && (summary.lastBottomSpread === null || summary.lastBottomSpread > 1)) {
+        failures.push(`${where}: 맨 아래의 마지막 줄이 창에서 ${summary.lastBottomSpread}px 움직였다 ${JSON.stringify(summary.lastBottomRange)}`);
+      }
+    }
+    if (scene === "connection") {
+      if (summary.blockedFrames === 0) failures.push(`${where}: 오프라인이 서지 않았다(장면을 못 만들었다)`);
+      if (summary.label.startsWith("C1")) {
+        // 맨 아래에서는 같은 마지막 줄을 재야 한다(위를 읽는 중에는 목록 상자 크기에 따라 붙는 줄이 바뀌어도 된다).
+        if (summary.lastRowChanged) failures.push(`${where}: 마지막 줄이 바뀌었다(장면을 못 만들었다)`);
+        if (summary.lastBottomSpread === null || summary.lastBottomSpread > 1) {
+          failures.push(`${where}: 맨 아래의 마지막 줄이 창에서 ${summary.lastBottomSpread}px 움직였다 ${JSON.stringify(summary.lastBottomRange)}`);
+        }
+        if (summary.maxGap > 1) failures.push(`${where}: 맨 아래에 붙은 목록이 ${summary.maxGap}px 떨어졌다(${summary.gapFrames}프레임)`);
+        if (summary.pillShows !== 0 || summary.pillMounts !== 0) {
+          failures.push(`${where}: 「최신 메시지로 이동」이 ${Math.max(summary.pillShows, summary.pillMounts)}번 섰다`);
+        }
+      }
+      if (summary.label.startsWith("C2") && (summary.anchorScreenSpread === null || summary.anchorScreenSpread > 1)) {
+        failures.push(`${where}: 위를 읽던 줄이 창에서 ${summary.anchorScreenSpread}px 움직였다 ${JSON.stringify(summary.anchorScreenRange)}`);
+      }
+      // 장면이 실제로 만들어졌는가: 위를 읽는 동안 목록 상자의 위 가장자리가 한 번은 움직였어야 한다(배너 · 띠가 섰다).
+      if (summary.label.startsWith("C2") && summary.scrollerTops.length < 2) {
+        failures.push(`${where}: 목록의 위 가장자리가 한 번도 움직이지 않았다(장면을 못 만들었다)`);
+      }
     }
     if (scene === "bottom" && summary.label.startsWith("10") && summary.finalGap > 1) {
       failures.push(`${where}: 돌아온 뒤 목록이 바닥에서 ${summary.finalGap}px 떨어져 있다`);
@@ -1002,8 +1125,12 @@ function judge(all) {
     if (scene === "anchor" && summary.targetAbove !== undefined && summary.targetAbove !== true) {
       failures.push(`${where}: 바뀔 줄이 화면 위 밖에 붙어 있지 않다 — ${summary.targetAbove}(장면을 못 만들었다)`);
     }
-    if (scene === "anchor" && (summary.anchorSpread === null || summary.anchorSpread > 2)) {
-      failures.push(`${where}: 보던 줄이 화면에서 ${summary.anchorSpread}px 움직였다(2px 이하여야 한다)`);
+    // 보던 줄의 자는 **창 좌표**다(#5575 검수 H1). 목록 안쪽 좌표(`anchorSpread`)는 기록만 한다: 목록 상자가 움직일 때(배너 · 띠) 줄을 창에서
+    // 제자리에 두려면 목록 안쪽 좌표는 그만큼 바뀌어야 하고, 옛 판처럼 안쪽 좌표만 지키면 줄이 상자와 함께 창에서 움직인다.
+    // 창 기준: 연결 흔들림이 든 A1은 1px, 진짜 높이 변화(A2 · A3)는 2px.
+    const screenLimit = summary.label.startsWith("A1") ? 1 : 2;
+    if (scene === "anchor" && (summary.anchorScreenSpread === null || summary.anchorScreenSpread > screenLimit)) {
+      failures.push(`${where}: 보던 줄이 창에서 ${summary.anchorScreenSpread}px 움직였다(${screenLimit}px 이하여야 한다) ${JSON.stringify(summary.anchorScreenRange)}`);
     }
     // 장면이 실제로 만들어졌는가.
     if (summary.label.startsWith("5") && summary.blockedFrames === 0) failures.push(`${where}: 오프라인이 서지 않았다(장면을 못 만들었다)`);
@@ -1040,8 +1167,13 @@ async function main() {
       if (type === null) throw new Error(`모르는 엔진: ${name}`);
       const browser = await type.launch({ headless: true });
       try {
-        all.push(...(await runBottomScene(browser, name)));
-        all.push(...(await runAnchorScene(browser, name)));
+        if (onlyScene === null) {
+          all.push(...(await runBottomScene(browser, name)));
+          all.push(...(await runAnchorScene(browser, name)));
+        } else if (onlyScene !== "connection") {
+          throw new Error(`모르는 장면: ${onlyScene}`);
+        }
+        for (const vp of connectionViewports) all.push(...(await runConnectionScene(browser, name, vp)));
       } finally {
         await browser.close();
       }
@@ -1061,7 +1193,9 @@ async function main() {
     for (const failure of failures) console.error(`FAIL ${failure}`);
     process.exit(1);
   }
-  console.log(`PASS expression-jitter: ${engineNames.join("·")} — 글자 0 · 바닥 거리 0 · 필 0 · 보던 줄 ≤2px`);
+  console.log(
+    `PASS expression-jitter: ${engineNames.join("·")} — 글자 0 · 바닥 거리 0 · 필 0 · 보던 줄 ≤2px · 연결 끊김 → 돌아옴에 마지막 줄·보던 줄 창 기준 ≤1px (${connectionViewports.map((vp) => vp.width).join(" · ")})`
+  );
 }
 
 await main();
