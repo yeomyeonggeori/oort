@@ -29,6 +29,12 @@ const CONFIRMED_NOTICE_MEMORY = 64;
 /** 디스크에 쓴 횟수가 이 수의 배수일 때마다(그리고 첫 쓰기에) 수명·바이트 상한 청소를 한다. */
 const TRIM_EVERY_WRITES = 32;
 
+/**
+ * 그림 읽기가 그림 탓이 아니라 지금의 상태 때문에 끊겼다(#5575): 오프라인이거나, 받는 도중 저장소가 그림을 걷었다(세대 교체 · 그 id 의 걷기).
+ * 화면은 이 실패를 「깨진 그림」으로 보지 않는다 — 칸을 글자로 바꾸지 않고 같은 크기의 빈 칸으로 기다린다(`ExpressionImage`).
+ */
+export class ExpressionImageInterruptedError extends Error {}
+
 /** 목록을 읽어 적용한 뒤의 상태 이름(직접 문구 장부가 센 리터럴을 늘리지 않으려고 한 번만 적는다). */
 const READY = "ready" as const;
 
@@ -238,7 +244,7 @@ export class ExpressionStore {
     this.emit();
   }
   image(path: string): Promise<string> {
-    if (this.snapshot.offline) return Promise.reject(new Error("offline"));
+    if (this.snapshot.offline) return Promise.reject(new ExpressionImageInterruptedError("offline"));
     const hit = this.images.get(path);
     if (hit) return hit;
     const generation = this.generation;
@@ -252,11 +258,11 @@ export class ExpressionStore {
     const target = this.diskTarget(path);
     if (target !== null && this.diskDoorOpen()) {
       const src = await this.readFromDisk(target);
-      if (stale()) throw new Error("evicted expression");
+      if (stale()) throw new ExpressionImageInterruptedError("evicted expression");
       if (src !== null && this.disk!.sessionUnchanged() && !this.disposed) return src;
     }
     const src = await this.transport.image(path);
-    if (stale()) throw new Error("evicted expression");
+    if (stale()) throw new ExpressionImageInterruptedError("evicted expression");
     if (target !== null) this.writeToDisk(target, src, stale);
     return src;
   }

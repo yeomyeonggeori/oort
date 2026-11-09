@@ -186,4 +186,43 @@ describe("<TypingLine> — 늘 잡아 둔 한 줄", () => {
     const view = mount(["00000000-0000-7000-8000-0000000009ff"]);
     expect(view.getByTestId("typing-line").dataset.state).toBe("off");
   });
+
+  it("보내기가 막히면 같은 칸이 이유를 말한다: 같은 상자 · 상태 알림 · 원문 그대로 · 문장마다 한 덩어리, 「작성 중」은 서지 않는다 (#5575 H1)", () => {
+    const line = "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.";
+    const view = render(
+      createElement(LocaleProvider, {
+        locale: korean,
+        children: createElement(TypingLine, { memberIds: [A], directory, blocked: line }),
+      })
+    );
+    const box = view.getByTestId("typing-line");
+    // 상자는 「작성 중」 칸 그대로다(늘 잡아 둔 높이): 막힘이 서도 목록 상자가 바뀌지 않는 이유.
+    expect(box.className).toBe("typing-line");
+    expect(box.dataset.state).toBe("blocked");
+    const blocked = view.getByTestId("composer-offline");
+    expect(blocked.getAttribute("role")).toBe("status");
+    expect(blocked.textContent).toBe(line);
+    expect(blocked.getAttribute("title")).toBe(line);
+    // 넘치면 문장을 통째로 버린다: 문장마다 줄바꿈 안 되는 한 덩어리, 첫 문장만 말줄임(마지막 방어선).
+    const pieces = [...blocked.children].map((piece) => [piece.textContent, piece.className]);
+    expect(pieces).toEqual([
+      ["오프라인이라 지금은 보낼 수 없어요. ", "min-w-0 truncate"],
+      ["쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.", "whitespace-nowrap"],
+    ]);
+    expect(blocked.className).toContain("flex-wrap");
+    expect(blocked.className).toContain("overflow-hidden");
+    expect(view.queryByTestId("composer-typing")).toBeNull();
+
+    // 풀리면 같은 칸이 다시 「작성 중」을 말한다.
+    act(() =>
+      view.rerender(
+        createElement(LocaleProvider, {
+          locale: korean,
+          children: createElement(TypingLine, { memberIds: [A], directory, blocked: null }),
+        })
+      )
+    );
+    expect(view.queryByTestId("composer-offline")).toBeNull();
+    expect(view.getByTestId("typing-line").dataset.state).toBe("on");
+  });
 });
