@@ -301,6 +301,13 @@ export function createPhoneExpressionStore(
   let reconnectConfirmed = 0;
   /** 이 저장소의 첫 `connected` 를 이미 봤는가: 첫 연결은 재연결이 아니다(`reconnected`). */
   let reconnectedOnce = false;
+  /**
+   * 실시간 소켓만 끊겨 있다(`socketLost()` 뒤, 다음 `reconnected()` 전 — #5585). 이 동안은 **어떤 목록 읽기도 디스크 읽기 문을 내리지 않는다**: 끊긴 동안의
+   * 30초 주기 읽기·고르는 순간의 확인 읽기·세트 승인·`mutate` 의 다시 읽기·앱이 앞으로 올 때의 읽기는 숨긴 그림을 메모리에서 걷을 뿐이다(`evictImageIds`).
+   * 문은 다시 이어진 뒤(`connected` → `reconnected()` → `refresh(true)`)의 전체 읽기만 내린다 — 알림을 못 받는 동안 새로 서는 칸은 디스크가 아니라
+   * 네트워크로 간다(숨긴 것은 서버가 404 로 막는다). ADR-0218 §17.
+   */
+  let socketDown = false;
   /** 디스크 쓰기가 한 번 실패하면 이 세션은 쓰기를 쉰다(재시도 폭주 방지, M2.7). */
   let writesPaused = false;
   let writesSinceTrim = 0;
@@ -369,7 +376,7 @@ export function createPhoneExpressionStore(
         if (!oldest.done) confirmedNotices.delete(oldest.value);
       }
     }
-    if (list.reset && mark.reconnect > reconnectConfirmed)
+    if (list.reset && mark.reconnect > reconnectConfirmed && !socketDown)
       reconnectConfirmed = mark.reconnect;
   };
   /**
@@ -827,6 +834,8 @@ export function createPhoneExpressionStore(
      * 그대로 한다. 앱을 다시 켤 때마다 첫 연결이 문을 닫으면 그 순간(첫 화면이 서는 때) 새로 서는 칸이 모두 네트워크로 가서 이득이 사라진다.
      */
     reconnected() {
+      // 소켓이 다시 이어졌다: 이 뒤의 전체 읽기가 문을 내릴 수 있다(첫 연결 예외·칸 없음보다 먼저 푼다).
+      socketDown = false;
       if (disk === null) return;
       if (!reconnectedOnce) {
         reconnectedOnce = true;
@@ -836,11 +845,13 @@ export function createPhoneExpressionStore(
     },
     /**
      * 실시간 소켓만 끊겼다(표시 유예가 지나 `disconnected`, 보내기는 된다 — #5585). 오프라인이 아니다: 그린 그림·받은 파일은 그대로 둔다(웹과 같다).
-     * 다만 끊긴 동안의 알림은 오지 않으므로 디스크 읽기 문을 올린다 — 새로 서는 칸은 다시 이어진 뒤나 앱이 앞으로 올 때의 **전체 목록**이 적용될 때까지
-     * 디스크에서 읽지 않고 네트워크로 간다(숨긴 것은 서버가 404 로 막는다). 앞 판은 이 자리에서 `setOnline(false)` 로 문을 닫았다(ADR §14 B-2 보충의
-     * 「끊김 한 번에 10초 이하」) — 문에 대해서는 같고, 바뀐 것은 메모리의 그림을 걷지 않는다는 것뿐이다.
+     * 다만 끊긴 동안의 알림은 오지 않으므로 디스크 읽기 문을 올리고, **다시 이어질 때까지(`reconnected()`) 어떤 목록 읽기도 그 문을 내리지 않는다**(`socketDown`):
+     * 새로 서는 칸은 디스크에서 읽지 않고 네트워크로 간다(숨긴 것은 서버가 404 로 막는다). 앞 판은 이 자리에서 `setOnline(false)` 로 문을 닫았다(ADR §14 B-2 보충의
+     * 「끊김 한 번에 10초 이하」) — 디스크에 대해서는 같다. 메모리의 그림은 걷지 않고, 끊긴 동안의 30초 주기 전체 읽기(`ExpressionProvider`)가 숨긴 것을 걷는다
+     * (웹과 같은 30초, ADR-0218 §17).
      */
     socketLost() {
+      socketDown = true;
       noteReconnect();
     },
     /** 새로 구독했다(되쏘기 포함): 앞서 본 version 은 그 틈 뒤를 말해 주지 않는다. */

@@ -14,6 +14,7 @@ import {
 import {
   ExpressionProvider,
   PhoneExpressions,
+  SOCKET_LOST_REFRESH_MS,
 } from '../src/features/expressions/ExpressionProvider';
 import {
   createPhoneExpressionStore,
@@ -23,6 +24,7 @@ import {MessageBody} from '../src/features/conversation/MessageBody';
 import {answeredStatus} from '../src/features/expressions/transport';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {pinReduceMotion} from './fixtures/reduceMotion';
+import {makeFiles, ME, uuid, World, WS} from './fixtures/expressionDiskWorld';
 
 // =============================================================================
 // #5585 — 폰: 실시간 소켓만 끊겨도 이모티콘이 `:이름:` 글자로 바뀌던 결함(웹 #5575 와 같은 규칙).
@@ -318,12 +320,12 @@ describe('정말 오프라인 · 목록 오류 ×5 — 같은 크기 정지 자�
     expect(look('끝').layers).toBe(1);
   });
 
-  it('목록 읽기가 거절되면(401) 닫힌다: 글자다(로그인 끝·멤버에서 빠짐은 지나가는 오류가 아니다)', async () => {
+  it.each([401, 403, 404])('목록 읽기가 거절되면(%i) 닫힌다: 글자다(로그인 끝·멤버에서 빠짐·워크스페이스 없음은 지나가는 오류가 아니다)', async refusal => {
     const {store, control} = realStore();
     await act(async () => store.refresh(true));
     mount(store);
     await flush();
-    control.failList = 401;
+    control.failList = refusal;
     await act(async () => store.refresh(true));
     await flush();
     expect(store.snapshot()).toMatchObject({state: 'error', shelf: []});
@@ -363,6 +365,34 @@ describe('그림 받기 실패 (#5585)', () => {
     expect(look('끝').layers).toBe(1);
   });
 
+  it('지나가는 실패가 이어지면 스스로 다시 받기는 세 번(1.5·3·6초)에서 멈춘다: 같은 그림의 칸 셋이 요청 4번을 나눠 쓰고, 그동안 글자는 0이다(보안 검수 r1 L1)', async () => {
+    const {store, control, request} = realStore();
+    control.imageStatus = 503;
+    await act(async () => store.refresh(true));
+    render(
+      <PhoneExpressions.Provider value={store}>
+        <MessageBody key="a" body={`:${NAME}:`} />
+        <MessageBody key="b" body={`:${NAME}:`} />
+        <MessageBody key="c" body={`:${NAME}:`} />
+      </PhoneExpressions.Provider>,
+    );
+    await flush();
+    const imageRequests = () =>
+      request.mock.calls.filter(([input]) => String(input.path).includes('/image?')).length;
+    const texts: number[] = [];
+    for (let second = 0; second < 120; second += 1) {
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+      });
+      await flush(1);
+      texts.push(screen.queryAllByText(`:${NAME}:`).length);
+    }
+    // 처음 1번 + 다시 3번. 한도가 없으면 30초마다 끝없이 다시 받는다.
+    expect(imageRequests()).toBe(4);
+    expect(texts.filter(count => count !== 0)).toEqual([]);
+    expect(screen.getAllByTestId(`expression-box-${NAME}-large`)).toHaveLength(3);
+  });
+
   it('정말로 깨진 그림(404)은 글자로 내린다 — 지나가는 실패만 칸으로 기다린다', async () => {
     const {store, control} = realStore();
     control.imageStatus = 404;
@@ -380,5 +410,61 @@ describe('네이티브 내려받기 오류의 상태 (#5585)', () => {
     expect(answeredStatus(new Error('Unable to download a file: HTTP 503'))).toBe(503);
     expect(answeredStatus(new Error('The network connection was lost.'))).toBeNull();
     expect(answeredStatus(new Error('Unable to download a file: no response'))).toBeNull();
+  });
+});
+
+describe('소켓만 끊긴 동안 숨김 — 30초 주기 전체 읽기 (#5585 보안 검수 r1 H1)', () => {
+  const layersOf = (name: string) =>
+    screen.queryAllByTestId(new RegExp(`^expression-image-${name}-large`)).length;
+  const textOf = (name: string) =>
+    screen
+      .queryAllByText(`:${name}:`)
+      .filter(node => !String(node.props.testID ?? '').startsWith('expression-label-')).length;
+
+  it('끊긴 동안 다른 사람이 숨긴 이모티콘은 30초 안에 칸에서 내려가 글자가 되고, 그 뒤 새로 서는 칸에도 숨긴 그림이 서지 않는다', async () => {
+    const world = new World();
+    world.add(1);
+    world.add(2);
+    const store = realCreate(WS, ME, world.transport(), makeFiles(), {read: () => null, write: jest.fn()}, undefined, null);
+    stores.push(store);
+    created.mockReturnValue(store);
+    const one = <MessageBody key="a" body=":expr_1:" />;
+    const view = render(tree('connected', one));
+    await flush();
+    expect(layersOf('expr_1')).toBe(1);
+    view.rerender(tree('connecting', one));
+    await flush();
+    view.rerender(tree('disconnected', one)); // 표시 유예 10초가 지났고 보낼 수는 있다
+    await flush();
+    world.hide(1); // 알림은 소켓으로만 오므로 이 기기에는 오지 않는다
+    world.resetCounts();
+    // 주기 읽기 전(웹과 같은 30초 창): 아직 읽지 않았고 그림이 남아 있다.
+    await act(async () => {
+      jest.advanceTimersByTime(SOCKET_LOST_REFRESH_MS - 1_000);
+    });
+    await flush(1);
+    expect(world.listCalls).toEqual([]);
+    expect(layersOf('expr_1')).toBe(1);
+    // 30초: 전체 목록을 읽어 숨긴 것을 걷는다.
+    await act(async () => {
+      jest.advanceTimersByTime(1_000);
+    });
+    await flush();
+    expect(world.listCalls).toEqual(['']);
+    expect(layersOf('expr_1')).toBe(0);
+    expect(textOf('expr_1')).toBe(1);
+    expect(store.snapshot().items.some(item => item.id === uuid(1))).toBe(false);
+    // 그 뒤 같은 이모티콘이 든 새 메시지가 선다: 메모리에서도 그리지 않는다(그림 요청 0, 글자).
+    view.rerender(tree('disconnected', [one, <MessageBody key="b" body=":expr_1:" />]));
+    await flush();
+    expect(layersOf('expr_1')).toBe(0);
+    expect(textOf('expr_1')).toBe(2);
+    expect(world.imageCalls).toEqual([]);
+    // 끊긴 채면 30초마다 다시 읽는다.
+    await act(async () => {
+      jest.advanceTimersByTime(SOCKET_LOST_REFRESH_MS);
+    });
+    await flush();
+    expect(world.listCalls).toEqual(['', '']);
   });
 });
