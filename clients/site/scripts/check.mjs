@@ -8,9 +8,12 @@
 //
 // 재는 것: 7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류, 글자 뒤 바탕 대비,
 // 움직임 줄이기(두 장면이 같다)·WebGL 끔(대체 바탕)·화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드),
-// 언어 첫 방문·기억, 좁은 폭(주 버튼에 칩·터치 44·TestFlight 표지·분할 버튼 포커스·메뉴 포커스 빠짐),
+// 언어 첫 방문·기억, 좁은 폭(주 버튼에 칩·터치 44·TestFlight 표지·분할 버튼 포커스·메뉴 포커스 빠짐·첫 화면에 「다른 기기」 없음·
+// 웹 링크 아이콘의 툴팁과 언어 아이콘과 같은 모양·꼬리 언어 링크 왼쪽 끝과 간격), 제목 반쪽·리드 줄 수 기록(7개 언어 × 390·1280,
+// 문구를 바꿀 때 줄바꿈을 보는 줄: ONLY=pages),
 // 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac), WebKit 일본어 줄바꿈(조사 앞에서 안 끊김),
-// 머리 줄(7개 언어 × 320·360·375·390·568·600 × 일반·폰 흉내: 로고 한 줄·마크 크기·컨트롤 화면 안·넘침 0·아이콘 44·폰 링크 하나).
+// 머리 줄(7개 언어 × 320·360·375·390·568·600 × 일반·폰 흉내: 로고 한 줄·마크 크기·컨트롤 화면 안·넘침 0·아이콘 44·폰 링크 하나),
+// 머리 로고 배색(링은 글자색, 위성은 tokens.css 의 --signal: 메뉴 막대 oort-tray-unread-on-* 와 같은 값).
 // 하나라도 어긋나면 exit 1.
 // =============================================================================
 
@@ -28,8 +31,9 @@ const SHOTS = process.env.SHOTS_DIR ? resolve(process.env.SHOTS_DIR) : "";
 const LANGS = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "es", "fr"];
 const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").map((s) => s.trim()));
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
-// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,header,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,header,weight").split(",").map((s) => s.trim()));
+const ko = JSON.parse(readFileSync(resolve(SITE, "i18n/ko.json"), "utf8"));
+// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -66,6 +70,9 @@ async function measure(page) {
       broken: [...document.images].filter((i) => !i.complete || i.naturalWidth === 0).map((i) => i.currentSrc || i.src),
       shot: document.querySelector(".frame img")?.currentSrc.split("/").pop(),
       getRight: Math.round(document.querySelector(".get")?.getBoundingClientRect().right ?? 0),
+      // 제목 반쪽(블록 span)마다 줄 수: 높이 ÷ 줄 높이. 리드 줄 수는 기록용
+      titleLines: [...document.querySelectorAll(".hero h1 span")].map((s) => Math.round(s.getBoundingClientRect().height / parseFloat(getComputedStyle(s).lineHeight))),
+      leadLines: (() => { const l = document.querySelector(".hero .lead"); return Math.round(l.getBoundingClientRect().height / parseFloat(getComputedStyle(l).lineHeight)); })(),
       vw,
     };
   });
@@ -74,7 +81,7 @@ async function measure(page) {
 /** 글자 뒤 바탕의 대비: 글자를 투명하게 한 장면을 찍어 상자 안 화소의 밝기를 잰다. */
 async function heroContrast(page, decoder) {
   const boxes = await page.evaluate(() => {
-    const els = [...document.querySelectorAll(".hero h1 span, .hero .lead, .hero .spec, .hero .spec-link, .hero .phone-note span")]
+    const els = [...document.querySelectorAll(".hero h1 span, .hero .lead, .hero .spec, .hero .phone-note span")]
       .filter((el) => el.getBoundingClientRect().width > 0);
     const list = els.map((el) => {
       const r = el.getBoundingClientRect();
@@ -84,7 +91,7 @@ async function heroContrast(page, decoder) {
     document.documentElement.classList.add("probe-hide");
     const st = document.createElement("style");
     st.id = "probe-style";
-    st.textContent = ".probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .spec, .probe-hide .hero .spec-link, .probe-hide .hero .phone-note { color: transparent !important; }";
+    st.textContent = ".probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .spec, .probe-hide .hero .phone-note { color: transparent !important; }";
     document.head.appendChild(st);
     return list;
   });
@@ -158,6 +165,8 @@ async function main() {
   const decoderCtx = await browser.newContext();
   const decoder = await decoderCtx.newPage();
   const summary = { pages: 0, overflow: 0, broken: 0, errors: 0, contrastWorst: Infinity, contrastMedianMin: Infinity };
+  const titleLines = {};
+  const leadLines = {};
 
   // 1) 7개 언어 × 390·1280 × 밝게·어둡게
   if (ONLY.has("pages")) for (const lang of LANGS) {
@@ -180,6 +189,8 @@ async function main() {
         summary.contrastMedianMin = Math.min(summary.contrastMedianMin, median);
         const wantShot = lang === "ko" ? "app-ko" : "app-en";
         const tag = `${lang}-${width}-${scheme}`;
+        titleLines[`${lang}-${width}`] = m.titleLines.join("+");
+        leadLines[`${lang}-${width}`] = m.leadLines;
         check(`${tag} 넘침·그림·오류·대비`,
           m.overflow <= 0 && m.outside.length === 0 && m.broken.length === 0 && errors.length === 0 && m.getRight <= m.vw && m.shot?.startsWith(`${wantShot}-${scheme}`) && median >= 4.5,
           `overflow=${m.overflow} outside=${m.outside.length} broken=${m.broken.length} errors=${errors.length} shot=${m.shot} contrast(median min)=${median.toFixed(2)} worst-pixel=${worst.toFixed(2)}${errors.length ? " " + errors.slice(0, 2).join(" | ") : ""}${m.outside.length ? " " + m.outside.join(",") : ""}`);
@@ -187,6 +198,11 @@ async function main() {
         await ctx.close();
       }
     }
+  }
+  if (ONLY.has("pages")) {
+    // 기록(막지 않음): 제목은 두 반쪽(블록 span)이라 「1+1」이 문구가 정한 두 줄이다. 문구를 바꾸면 이 두 줄과 위 넘침 단정을 본다.
+    console.log(`제목 반쪽 줄 수: ${Object.entries(titleLines).map(([k, n]) => `${k}=${n}`).join(" ")}`);
+    console.log(`리드 줄 수: ${Object.entries(leadLines).map(([k, n]) => `${k}=${n}`).join(" ")}`);
   }
 
   // 2) 움직임 줄이기: 두 장면이 같고 멈춰 있다. 줄이지 않으면 두 장면이 다르다(사보타주 방향).
@@ -402,22 +418,46 @@ async function main() {
     const after = { name: await axName("#get-mac"), href: await page.locator("#get-mac").getAttribute("href"), ...(await chipSeen()) };
     check("390: Intel 을 고르면 버튼 글자·접근성 이름도 Intel", after.inside && after.text === "Intel" && /Intel/.test(after.name) && !/Apple Silicon/.test(after.name) && after.href === values.DMG_X64_URL, JSON.stringify(after));
 
-    // 터치 크기: 600px 아래 컨트롤은 44 이상(언어 단추·머리 「브라우저에서 열기」·기기 줄 단추·「다른 기기」·메뉴 항목)
+    // 터치 크기: 600px 아래 컨트롤은 44 이상(언어 단추·머리 「브라우저에서 열기」·기기 줄 단추·메뉴 항목·꼬리 언어 링크)
     const sizes = async (sel) => page.evaluate((s) => [...document.querySelectorAll(s)].map((el) => {
       const r = el.getBoundingClientRect();
       return [Math.round(r.width), Math.round(r.height)];
     }), sel);
     const tall = (list) => list.length > 0 && list.every(([w, h]) => w >= 44 && h >= 44);
-    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), more: await sizes(".spec-link"), foot: await sizes(".foot-langs a") };
+    const top = { lang: await sizes(".lang-btn"), web: await sizes(".web-link"), rows: await sizes(".row .pill"), foot: await sizes(".foot-langs a") };
     await page.locator(".lang-btn").click();
     top.langItems = await sizes(".lang-list a");
     await page.keyboard.press("Escape");
     await page.locator(".get-more").click();
     top.chipItems = await sizes(".chip-menu button");
     await page.keyboard.press("Escape");
-    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && tall(top.more) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems)
+    const okTouch = tall(top.lang) && tall(top.web) && top.rows.length === 3 && tall(top.rows) && top.langItems.length === LANGS.length && tall(top.langItems) && tall(top.chipItems)
       && top.foot.length === LANGS.length && tall(top.foot);
     check("390: 컨트롤 터치 크기 44 이상(머리 「브라우저에서 열기」 아이콘·꼬리 언어 링크 포함)", okTouch, JSON.stringify(top));
+
+    // 첫 화면에는 「다른 기기」 링크가 없다(기기 목록 자리는 그대로 있다)
+    const more = await page.evaluate(() => ({
+      heroLinks: [...document.querySelectorAll(".hero a")].map((a) => a.getAttribute("href")),
+      toDevices: document.querySelectorAll('a[href="#devices"], .spec-link').length,
+      devices: document.getElementById("devices") !== null,
+    }));
+    check("첫 화면에 「다른 기기」 링크 없음(기기 목록은 그대로)", more.toDevices === 0 && more.devices && !more.heroLinks.some((h) => h?.startsWith("#")), JSON.stringify(more));
+
+    // 좁은 창의 웹 링크 아이콘: 툴팁(title)이 이름과 같고, 모양이 언어 아이콘과 같다(유리 원 없음, 마우스를 올리면 둘 다 같은 바탕)
+    const look = (sel) => page.evaluate((s) => {
+      const cs = getComputedStyle(document.querySelector(s));
+      return { bg: cs.backgroundColor, blur: cs.backdropFilter || cs.webkitBackdropFilter || "none", radius: cs.borderTopLeftRadius };
+    }, sel);
+    const webTitle = await page.locator(".web-link").getAttribute("title");
+    const rest = { web: await look(".web-link"), lang: await look(".lang-btn") };
+    await page.hover(".web-link");
+    const hoverWeb = await look(".web-link");
+    await page.hover(".lang-btn");
+    const hoverLang = await look(".lang-btn");
+    await page.mouse.move(1, 600);
+    const same = (a, b) => a.bg === b.bg && a.blur === b.blur && a.radius === b.radius;
+    check("390: 웹 링크 아이콘에 툴팁, 언어 아이콘과 같은 모양(가만히·마우스 올림)", webTitle === ko.nav_web && same(rest.web, rest.lang) && same(hoverWeb, hoverLang),
+      JSON.stringify({ webTitle, rest, hoverWeb, hoverLang }));
 
     // L3: 사양 줄의 모노는 숫자·버전에만(칩 이름은 본문 글꼴)
     const spec = await page.evaluate(() => [...document.querySelectorAll(".hero .spec span")].map((s) => [s.textContent, /monospace/.test(getComputedStyle(s).fontFamily)]));
@@ -435,9 +475,34 @@ async function main() {
     check("TestFlight 표지가 채움 알약이 아니다(배경 투명 또는 반경 10 이하)", !tag.interactive && (tag.alpha === 0 || tag.radius <= 10), JSON.stringify(tag));
 
     // 좁은 폭의 언어 메뉴: 7개 언어 모두 판이 화면 안에 있고 항목이 한 줄이다
+    // 꼬리 언어 링크: 줄마다 첫 링크의 글자 왼쪽 끝이 꼬리 판 번호(oort 0.1.45) 글자의 왼쪽 끝과 같다(44 상자 안 가운데 정렬로 어긋나지 않게)
     const menus = [];
+    const footBad = [];
+    let footFirst = null;
     for (const l of LANGS) {
       await page.goto(`${BASE}/${l}/`, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      const foot = await page.evaluate(() => {
+        const text = (el) => {
+          const rg = document.createRange();
+          rg.selectNodeContents(el);
+          return [...rg.getClientRects()].find((x) => x.width > 0) || { left: NaN, right: NaN };
+        };
+        const col = text(document.querySelector(".foot-v")).left;
+        const rows = new Map();
+        for (const a of document.querySelectorAll(".foot-langs a")) {
+          const t = Math.round(a.getBoundingClientRect().top);
+          if (!rows.has(t)) rows.set(t, []);
+          rows.get(t).push(a);
+        }
+        const list = [...rows.values()];
+        // 같은 줄 이웃 글자 사이 간격(글자 끝 → 다음 글자 시작)
+        const gaps = list.flatMap((row) => row.slice(1).map((a, i) => Math.round((text(a).left - text(row[i]).right) * 10) / 10));
+        return { col: Math.round(col * 10) / 10, firsts: list.map((row) => ({ name: row[0].textContent, dx: Math.round((text(row[0]).left - col) * 10) / 10 })), gaps };
+      });
+      if (l === "ko") footFirst = foot;
+      const evenGaps = foot.gaps.length > 0 && Math.max(...foot.gaps) - Math.min(...foot.gaps) <= 1;
+      if (!(Number.isFinite(foot.col) && foot.firsts.length > 0 && foot.firsts.every((f) => Math.abs(f.dx) <= 1) && evenGaps)) footBad.push(`${l}:${JSON.stringify(foot)}`);
       await page.locator(".lang-btn").click();
       menus.push(await page.evaluate((code) => {
         const m = document.getElementById("lang-list").getBoundingClientRect();
@@ -446,6 +511,7 @@ async function main() {
       }, l));
     }
     check("390: 언어 메뉴가 7개 언어 모두 화면 안, 항목 한 줄", menus.every((m) => m.left >= 0 && m.right <= m.vw && m.oneLine), JSON.stringify(menus.filter((m) => !(m.left >= 0 && m.right <= m.vw && m.oneLine))));
+    check("390: 꼬리 언어 링크 줄마다 첫 글자 왼쪽 끝이 꼬리 다른 줄과 같고, 글자 사이 간격이 고르다(7개 언어, 1px 안)", footBad.length === 0, footBad.length ? footBad.slice(0, 2).join(" ") : JSON.stringify(footFirst));
     await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
     await settle(page);
 
@@ -664,12 +730,32 @@ async function main() {
       return nodes[0]?.name?.value ?? "";
     };
     const names = { lang: await name(".lang-btn"), web: await name(".web-link") };
-    const ko = JSON.parse(readFileSync(resolve(SITE, "i18n/ko.json"), "utf8"));
     check("390: 아이콘 단추의 접근성 이름(언어 단추에 지금 언어, 머리 링크에 「브라우저에서 열기」)", names.lang.includes(ko.lang_name) && names.web === ko.nav_web, JSON.stringify(names));
     await ax.close();
   }
 
-  // 10) 무게
+  // 10) 머리 로고 배색: 새 메시지 판. 링(꼬리 포함)은 글자색, 위성은 --signal 이고 그 값은 tokens.css 의
+  //     `--signal: light-dark(라이트, 다크)` 한 줄과 같다(메뉴 막대 oort-tray-unread-on-* 를 그리는 render_tray_icons.sh 도 이 줄을 읽는다)
+  if (ONLY.has("logo")) {
+    const tokens = readFileSync(resolve(SITE, "../web/src/design/tokens.css"), "utf8");
+    const sig = /--signal:\s*light-dark\((#[0-9a-fA-F]{6}),\s*(#[0-9a-fA-F]{6})\);/.exec(tokens);
+    const rgb = (hex) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+    for (const [scheme, want] of [["light", sig && rgb(sig[1])], ["dark", sig && rgb(sig[2])]]) {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme, reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      await page.goto(`${BASE}/ko/`, { waitUntil: "load" });
+      const st = await page.evaluate(() => {
+        const paths = [...document.querySelectorAll(".brand .mark path")];
+        const sat = document.querySelector(".brand .mark .mark-sat");
+        const ring = paths.find((p) => p !== sat);
+        return { paths: paths.length, sat: sat ? getComputedStyle(sat).fill : null, ring: ring ? getComputedStyle(ring).fill : null, text: getComputedStyle(document.querySelector(".brand")).color };
+      });
+      check(`머리 로고(${scheme}): 링은 글자색, 위성은 --signal(tokens.css ${want})`, Boolean(sig) && st.paths === 2 && st.sat === want && st.ring === st.text && st.sat !== st.ring, JSON.stringify(st));
+      await ctx.close();
+    }
+  }
+
+  // 11) 무게
   if (ONLY.has("weight")) {
     const dist = resolve(SITE, "dist");
     const html = LANGS.map((l) => statSync(resolve(dist, l, "index.html")).size);

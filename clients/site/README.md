@@ -41,7 +41,13 @@ SITE_URL=http://127.0.0.1:21410 SHOTS_DIR=/tmp/site-shots node clients/site/scri
 ONLY=chip,lang node clients/site/scripts/check.mjs   # 일부만
 ```
 
-7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류·글자 대비(4.5:1), 움직임 줄이기(두 장면이 같음), WebGL 끔(대체 바탕), 화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드), 언어 첫 방문·기억, 좁은 폭(주 버튼의 칩·터치 44·TestFlight 표지·메뉴), 폰 흉내(첫 화면이 웹으로 열기, JS 없으면 Mac), WebKit 일본어 줄바꿈을 재요. `SHOT_LANGS=ko,en`으로 캡처 언어를 고를 수 있어요.
+7개 언어 × 390·1280 × 밝게·어둡게의 가로 넘침·깨진 그림·콘솔 오류·글자 대비(4.5:1), 움직임 줄이기(두 장면이 같음), WebGL 끔(대체 바탕), 화면 밖·숨긴 탭(멈춤), 칩 고르기(키보드), 언어 첫 방문·기억, 좁은 폭(주 버튼의 칩·터치 44·TestFlight 표지·메뉴·첫 화면에 「다른 기기」 없음·웹 링크 아이콘의 툴팁과 언어 아이콘과 같은 모양·꼬리 언어 링크의 왼쪽 끝과 간격), 폰 흉내(첫 화면이 웹으로 열기, JS 없으면 Mac), WebKit 일본어 줄바꿈, 머리 줄(7개 언어 × 320~600 × 일반·폰 흉내), 머리 로고 배색(링은 글자색, 위성은 `clients/web/src/design/tokens.css`의 `--signal`: 메뉴 막대 `oort-tray-unread-on-*`와 같은 값)을 재요. 제목 반쪽·리드의 줄 수는 막지 않고 기록만 해요(`ONLY=pages`). `SHOT_LANGS=ko,en`으로 캡처 언어를 고를 수 있어요.
+
+## 첫 문구 바꾸기
+
+- 문구는 `i18n/<lang>.json`의 `hero_title_1`·`hero_title_2`(제목 두 반쪽, `src/index.html`의 `<h1>`에서 반쪽마다 한 줄로 쌓여요)와 `hero_lead`(한 문단)예요. 링크 미리 보기에 나가는 `meta_title`·`meta_description`도 같은 뜻으로 맞춰요.
+- 7개 언어를 함께 바꿔요(빌드가 키를 맞춰 봐요). 줄표는 쓰지 않고, 일본어는 아래 「언어 더하기」 4처럼 구절 힌트 `|`와 ` `을 써요.
+- 다시 재기: 빌드 → 미리 보기 → `SITE_URL=… ONLY=pages,phone,webkit node clients/site/scripts/check.mjs`. 넘침·대비·폰 첫 화면·일본어 줄바꿈은 단정이 막아요. 「제목 반쪽 줄 수」(`1+1`이 문구가 정한 두 줄)와 「리드 줄 수」는 기록이라 390·1280 값을 보고 판단해요. `SHOTS_DIR`을 주면 `SHOT_LANGS` 언어의 전체 그림을 남겨요.
 
 ## 값 바꾸기
 
