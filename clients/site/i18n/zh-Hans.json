@@ -14,7 +14,6 @@
   "chip_pick": "选择 Mac 的芯片",
   "chip_arm_note": "M1 及之后的 Mac",
   "chip_x64_note": "2020 年及以前发布的 Intel Mac",
-  "more_devices": "其他设备",
   "shot_label": "oort 应用界面",
   "shot_alt": "oort 的频道界面：人和智能体 kometto 正在交谈，kometto 提议创建的频道以审批卡片的形式在对话里等待批准。",
   "shot_caption": "这是 oort 应用现在的样子。名字和消息都是示例。",

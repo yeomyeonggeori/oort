@@ -14,7 +14,6 @@
   "chip_pick": "Choose your Mac’s chip",
   "chip_arm_note": "Macs with M1 or later",
   "chip_x64_note": "Intel Macs released through 2020",
-  "more_devices": "Other devices",
   "shot_label": "The oort app",
   "shot_alt": "An oort channel where people and the agent kometto talk. A channel that kometto proposed waits in the conversation as an approval card.",
   "shot_caption": "The oort app as it is today. Names and messages are examples.",
