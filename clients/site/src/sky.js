@@ -126,13 +126,15 @@
     gl.uniform1f(U.S, scale);
   }
 
-  // 시작 장면은 혜성이 하늘 가운데쯤에 있는 순간이다. 움직임을 줄이면 이 한 장에서 멈춘다.
-  var START = 7.5;
-  var t = START;
+  // 움직이는 하늘은 혜성이 하늘 가운데쯤에 있는 순간(START)부터 돈다.
+  // 움직임을 줄이면 STILL 한 장에서 멈춘다: 26초 주기 가운데 혜성이 없는 구간(ct > 1)이다(#5568).
+  // 폰 폭에서는 글 덩어리가 하늘을 거의 다 차지해서, 혜성이 보이는 어느 순간이든 머리글·제목 아니면 머리 로고를 지난다.
+  var START = 7.5, STILL = 20;
   var still = false, inView = true, shown = !document.hidden, raf = 0, last = 0;
   var reduce = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
   var dark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   still = !!(reduce && reduce.matches);
+  var t = still ? STILL : START;
 
   function draw() {
     gl.uniform1f(U.T, t);
@@ -171,7 +173,7 @@
     new IntersectionObserver(function (es) { inView = es[es.length - 1].isIntersecting; sync(); }).observe(hero);
   }
   document.addEventListener("visibilitychange", function () { shown = !document.hidden; sync(); });
-  listen(reduce, function () { still = reduce.matches; if (still) { t = START; draw(); } sync(); });
+  listen(reduce, function () { still = reduce.matches; if (still) { t = STILL; draw(); } sync(); });
   listen(dark, function () { palette(); draw(); });
   var pending = 0;
   window.addEventListener("resize", function () {
