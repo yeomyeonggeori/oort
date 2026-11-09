@@ -57,9 +57,12 @@ describe('direct UI copy extraction', () => {
       .toEqual({ko: 0, en: 0, cat: 0});
     expect(extract('<Row data-state={blocked ? "blocked" : on ? "on" : "off"} tone={ok ? "ok" : "danger"}'
       + ' style={{display: "none", textAlign: "center"}} />')).toEqual({ko: 0, en: 0, cat: 0});
-    // Compared values, switch cases, call arguments, state setters and index keys are not shown either.
-    expect(extract('{kind === "dm" ? null : <Info />}; if (s !== "ready") go(); switch (k) { case "idle": break; }'))
-      .toEqual({ko: 0, en: 0, cat: 0});
+    // Compared values, switch cases, call arguments, state setters and index keys are not shown either,
+    // even inside a JSX child or a copy-named variable; the shown branches still count.
+    expect(extract('<div>{kind === "dm" ? null : <Info />}</div>; const title = s !== "ready" ? "Ready" : "Busy";'))
+      .toEqual({ko: 0, en: 2, cat: 0});
+    expect(extract('<p>{(() => { switch (k) { case "idle": return "Idle"; default: return null; } })()}</p>'))
+      .toEqual({ko: 0, en: 1, cat: 0});
     expect(extract('<Text>{n.toLocaleString("ko-KR")}</Text>; setStatus("loading"); failureMessage("list", error);'
       + ' <Note label={COPY["save"]} />')).toEqual({ko: 0, en: 0, cat: 0});
     // A style object inside a copy-named property is still a style: the nearest name decides.
