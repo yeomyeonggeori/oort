@@ -1207,5 +1207,7 @@
     "packages/momo-core/src/lib/wire.ts": {"ko": 1, "en": 0}
   },
   "lowered": {},
-  "raises": []
+  "raises": [
+    {"file": "clients/web/src/i18n/pseudoLocale.ts", "issue": 5589, "en": 1, "reason": "The Vite build-mode name design that gates the dev-only pseudo locale switch; a build flag, not user copy."}
+  ]
 }
