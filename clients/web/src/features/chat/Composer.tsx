@@ -978,16 +978,8 @@ export function Composer({
       )}
 
       {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
-          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. */}
-      {offline && (
-        <p
-          role="status"
-          className="px-6 pb-2 text-meta text-warn break-keep"
-          data-testid="composer-offline"
-        >
-          {blockedLine}
-        </p>
-      )}
+          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. 보내기가 막힌 이유(기기 오프라인 ·
+          서버에 닿지 못함)도 그 줄에 선다(#5575 검수 H1): 여기 따로 서면 연결이 흔들릴 때마다 대화 목록의 바닥이 26~44px 움직였다. */}
 
       {persistentPhoneDmHint && (
         <ComposerHint
@@ -1251,8 +1243,8 @@ export function Composer({
           />
         </ComposerCard>
         {/* 남의 「작성 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다(글 한 줄 + 위아래 숨 8). 아무도 안 칠 때도 같은 높이로
-            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. */}
-        <TypingLine memberIds={typists} directory={directory} />
+            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. 보내기가 막히면 같은 칸이 그 이유를 말한다(#5575). */}
+        <TypingLine memberIds={typists} directory={directory} blocked={offline ? blockedLine : null} />
       </form>
 
       <ComposerFormatTray

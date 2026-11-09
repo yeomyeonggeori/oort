@@ -20,7 +20,7 @@ import { buildTimelineItems } from "@momo/core/features/timeline/model";
 const FIRST = 1_000_000;
 
 /**
- * 바닥을 떠난다(#5575): 「최신 메시지로 이동」은 떠난 상태가 250ms 이어져야 선다(늦춤). 그만큼 실제로 기다린다.
+ * 바닥을 떠난다(#5575): 「최신 메시지로 이동」은 떠난 상태가 `JUMP_LATEST_SHOW_DELAY_MS`(240, 사다리 standard) 이어져야 선다(늦춤). 그보다 넉넉히 실제로 기다린다.
  */
 async function leaveBottom() {
   act(() => {

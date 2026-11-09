@@ -68,6 +68,11 @@ export const TOOLTIP_DELAY_MS = 120;
  * 한 번 훑어 읽는 시간보다 짧아야 해서 지연(120)보다 길게 잡았다. */
 export const TOOLTIP_SKIP_DELAY_MS = 300;
 
+/** 대화 목록이 바닥을 떠난 뒤 「최신 메시지로 이동」이 서기까지 (#5575, 검수 N1). 사다리의 standard 단(`--motion-standard`)과 같은
+ * 수다: 새 숫자를 만들지 않는다. 사람이 올려 읽는 몸짓에는 느껴지지 않을 만큼(실측: 휠로 올리면 바닥을 떠난 뒤 약 300ms에 선다),
+ * 목록이 한두 프레임 밀렸다 돌아오는 동안에는 서지 않을 만큼이다. 바닥에 닿으면 늦춤 없이 걷는다. */
+export const JUMP_LATEST_SHOW_DELAY_MS = 240;
+
 /** 툴팁 나타남. 정지(`motion-reduce`)면 애니메이션 없이 즉시 선다. */
 export const TOOLTIP_MOTION = "motion-tooltip-enter motion-reduce:animate-none";
 

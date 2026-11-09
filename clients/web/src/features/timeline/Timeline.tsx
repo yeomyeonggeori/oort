@@ -29,9 +29,6 @@ function TimelineTail() {
 }
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
-
-/** 바닥을 떠난 뒤 「최신 메시지로 이동」이 서기까지(#5575). 사람이 올려 읽는 몸짓에는 느껴지지 않을 만큼, 한두 프레임의 밀림은 넘을 만큼. */
-const JUMP_LATEST_SHOW_DELAY_MS = 250;
 import {
   type AgentRunProgress,
   type Channel,
@@ -87,6 +84,7 @@ import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBo
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { holdScrollPosition } from "./scrollHold";
+import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {

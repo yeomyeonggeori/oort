@@ -9,6 +9,9 @@ import { AT_BOTTOM_SLACK_PX } from "./navigation";
  *   제 손으로 따라붙기 전까지 「최신 메시지로 이동」이 설 수 있었다.
  * - **위를 읽던 중이면 보던 줄이 화면에서 움직이지 않는다.** 바뀌기 전에 적어 둔 「보던 줄」(화면 안에 처음 걸친 줄)이 바뀐 뒤에도 같은 화면
  *   높이에 오도록 scrollTop 을 옮긴다(수동 앵커). 수리 전 실측: 화면 위 밖의 줄이 120px 자라자 보던 줄이 73.6px 밀렸고 목록은 아무것도 하지 않았다.
+ * - **화면 높이는 창 좌표다** (#5575 검수 H1). 목록 상자 자체가 움직여도(오프라인이 되면 머리 아래 허들 배너 39px, 폰 폭에서는 셸 위쪽 연결 띠가
+ *   서며 목록의 위 가장자리를 내린다) 보던 줄은 창에서 제자리다: 목록 안쪽 좌표로 지키면 상자와 함께 39px 내려갔다(게이트는 그것을 0 으로 쟀다).
+ *   그래서 목록 상자의 크기가 바뀌어도(위·아래 가장자리 이동) 위를 읽던 중이면 같은 바로잡기를 한다. 바닥에 붙어 있으면 바닥 붙이기가 같은 일을 한다.
  *
  * 판정은 **바뀌기 전의** 위치로 한다: 스크롤 이벤트와 직전 바로잡기마다 적어 둔 값이다(가상 목록의 atBottom 은 같은 프레임의 크기 변화로 이미
  * 거짓이 되었을 수 있다). 바로잡기는 ResizeObserver 콜백(그리기 전)에서 하므로 어긋난 프레임이 화면에 그려지지 않는다.
@@ -21,7 +24,7 @@ export const SCROLLING_QUIET_MS = 150;
 interface Anchor {
   /** 가상 목록 줄의 `data-index`(앞에 붙어도 그대로인 번호). */
   index: string;
-  /** 스크롤러 위쪽에서 줄 위쪽까지(px). */
+  /** 창 위쪽에서 줄 위쪽까지(px). 목록 안쪽이 아니라 창 좌표다: 목록 상자가 움직여도 사람의 눈이 보는 자리를 지킨다. */
   top: number;
   /** 적을 때의 `firstItemIndex`. 다르면 위로 더 불러온 것이다. */
   first: number;
@@ -35,11 +38,11 @@ export interface ScrollHoldOptions {
 export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOptions): () => void {
   if (typeof ResizeObserver === "undefined") return () => {};
   const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= AT_BOTTOM_SLACK_PX;
-  const rowTop = (row: Element) => row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
   const readAnchor = (): Anchor | null => {
+    const edge = scroller.getBoundingClientRect().top;
     for (const row of scroller.querySelectorAll<HTMLElement>("[data-index]")) {
-      const top = rowTop(row);
-      if (top + row.getBoundingClientRect().height > 0) return { index: row.dataset.index ?? "", top, first: options.firstItemIndex() };
+      const box = row.getBoundingClientRect();
+      if (box.bottom > edge) return { index: row.dataset.index ?? "", top: box.top, first: options.firstItemIndex() };
     }
     return null;
   };
@@ -52,11 +55,18 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   /** 이 모듈이 방금 놓은 scrollTop. 그 값으로 오는 스크롤 이벤트는 사람의 스크롤이 아니다. */
   let placed: number | null = null;
 
-  const remember = () => {
+  /**
+   * 바뀐 뒤의 기준을 적는다. `keep`은 이 모듈이 방금 지킨 「보던 줄」이다: 그 줄이 아직 붙어 있으면 **처음 적은 창 높이를 그대로** 목표로
+   * 둔다. scrollTop 은 정수로 놓이고 목록 상자의 가장자리는 소수(예: 141.33px)라 바로잡을 때마다 1px 아래의 나머지가 남는데, 바로잡은 뒤의
+   * 자리를 다시 읽어 목표로 삼으면 그 나머지가 흔들릴 때마다 쌓인다(#5575 실측: 폰 폭 WebKit 에서 두 번 흔들려 2px). 사람이 스크롤하면
+   * 그때 다시 읽는다.
+   */
+  const remember = (keep: Anchor | null = null) => {
     wasAtBottom = nearBottom();
     lastViewport = scroller.clientHeight;
     lastContent = scroller.scrollHeight;
-    anchor = wasAtBottom ? null : readAnchor();
+    const kept = keep !== null && keep.first === options.firstItemIndex() && scroller.querySelector(`[data-index="${CSS.escape(keep.index)}"]`) !== null;
+    anchor = wasAtBottom ? null : kept ? keep : readAnchor();
   };
   const place = (top: number) => {
     scroller.scrollTop = top;
@@ -64,13 +74,11 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   };
 
   const onScroll = () => {
-    if (placed !== null && Math.abs(scroller.scrollTop - placed) < 1) {
-      placed = null;
-    } else {
-      placed = null;
-      lastForeignScrollAt = performance.now();
-    }
-    remember();
+    const own = placed !== null && Math.abs(scroller.scrollTop - placed) < 1;
+    placed = null;
+    if (!own) lastForeignScrollAt = performance.now();
+    // 이 모듈이 놓은 스크롤이면 목표(보던 줄의 처음 창 높이)를 그대로 둔다.
+    remember(own ? anchor : null);
   };
 
   /** 적어 둔 「보던 줄」이 같은 화면 높이에 오도록 옮긴다. 옮겼으면 참. */
@@ -78,7 +86,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     if (target.first !== options.firstItemIndex()) return false;
     const row = scroller.querySelector(`[data-index="${CSS.escape(target.index)}"]`);
     if (row === null) return false;
-    const drift = rowTop(row) - target.top;
+    const drift = row.getBoundingClientRect().top - target.top;
     if (Math.abs(drift) < 0.5) return false;
     place(scroller.scrollTop + drift);
     return true;
@@ -105,7 +113,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     } else {
       holdAnchor(target.anchor);
     }
-    remember();
+    remember(target.anchor);
     settleLeft -= 1;
     if (settleLeft > 0) settleFrame = requestAnimationFrame(settle);
     else settleTarget = null;
@@ -125,15 +133,16 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       armSettle(null);
       return;
     }
+    // 위를 읽던 중: 내용 높이가 바뀌었거나(줄이 자람·줆) 목록 상자의 크기가 바뀌었다(위·아래 가장자리 이동 — 배너·띠가 서고 짐).
     if (
       !wasAtBottom &&
-      content !== lastContent &&
+      (content !== lastContent || viewport !== lastViewport) &&
       anchor !== null &&
       performance.now() - lastForeignScrollAt > SCROLLING_QUIET_MS
     ) {
       const held = anchor;
       holdAnchor(held);
-      remember();
+      remember(held);
       armSettle(held);
       return;
     }
