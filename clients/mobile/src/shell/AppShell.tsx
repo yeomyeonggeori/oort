@@ -212,8 +212,11 @@ export function Shell({
   );
   // 탭 배지의 출처는 이 한 줄이다(#3342): 인박스 알약 = core `needsMe` 합, 홈 점 = 안 읽음.
   const needsMe = usePhoneNeedsMe();
-  // 세션 화면의 문은 웹과 같은 판정으로 선다(#5593): 이 워크스페이스에 지금 온라인인 호스트가 있는가.
-  const hostsQuery = useWorkHosts(workspaceId, true, WORK_HOST_PRESENCE_POLL_MS);
+  // 세션 화면의 문은 웹과 같은 판정으로 선다(#5593): 이 워크스페이스에 지금 온라인인 호스트가 있는가. 판정을 묻는 문은
+  // 작업 목록 층 안에만 있다(줄·시트의 「내 에이전트 세션 화면」) — 보낸 직후와 알림 입구는 묻지 않는다. 그래서 등록기는
+  // 그 층이 열려 있는 동안에만 읽는다: 대화를 열 때마다 아무도 안 볼 등록기를 부르는 것은 폰에서 라디오다(`useAdeControl`
+  // 의 같은 규칙, 요청 예산 시험). 닫혀 있어도 다른 화면이 읽어 둔 목록(캐시)으로 판정은 선다.
+  const hostsQuery = useWorkHosts(workspaceId, nav.workList, WORK_HOST_PRESENCE_POLL_MS);
   const workConsole = workConsoleAvailable(hostsQuery.data);
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
   // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.

@@ -53,7 +53,7 @@ import {useOnline} from '../features/inbox/useOnline';
 import {StatusDot} from '../features/presence/StatusDot';
 import {ReportedTag} from '../features/work/jobs/WorkJobParts';
 import {
-  isMyMacSessionRow,
+  isMyHostSessionRow,
   useMacSessionFacts,
   type MacOfRow,
 } from '../features/work/jobs/useMacSessionFacts';
@@ -274,7 +274,7 @@ export default function WorkJobsScreen({
               onPress={() => {
                 lastOpenedRef.current = row.id;
                 // 내 맥 세션은 그 세션 화면으로(#5593). 돌아오면 초점은 위의 효과가 이 줄로 되돌린다(`active`가 다시 참).
-                if (onOpenAgentSession !== undefined && isMyMacSessionRow(row.item, member.id)) {
+                if (onOpenAgentSession !== undefined && isMyHostSessionRow(row.item, member.id)) {
                   onOpenAgentSession(row.id);
                   return;
                 }

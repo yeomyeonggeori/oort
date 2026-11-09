@@ -40,8 +40,11 @@ export interface MacSessionFacts {
   needsMyCheck: (rowId: string) => boolean;
 }
 
-/** 내가 연 맥 세션(호스트 세션) 줄인가. 실행 줄·남의 세션·맥에서 직접 연 창(로컬 공유)은 아니다. */
-export function isMyMacSessionRow(item: SharedWorkSession, selfMemberId: string): boolean {
+/**
+ * 내가 연 호스트 세션 줄인가 — 보통 내 맥의 Claude Code·Codex 세션이다(공용·클라우드 호스트에서 연 세션도 같은 세션
+ * 화면이다). 실행 줄·남의 세션·맥에서 직접 연 창(로컬 공유)은 아니다.
+ */
+export function isMyHostSessionRow(item: SharedWorkSession, selfMemberId: string): boolean {
   // 에이전트 레인(`isAgentLane`)은 호스트 세션과 실행 줄이다 — 실행 줄을 빼면 호스트 세션이 남는다.
   return !isRunItem(item) && isAgentLane(item) && uuidEq(item.owner.memberId, selfMemberId);
 }
@@ -55,7 +58,7 @@ function watchedSession(
   ledger: ReadonlyMap<string, WorkSession>,
   selfMemberId: string,
 ): WorkSession | null {
-  if (!isMyMacSessionRow(item, selfMemberId) || isFinishedState(item.state)) return null;
+  if (!isMyHostSessionRow(item, selfMemberId) || isFinishedState(item.state)) return null;
   const session = ledger.get(item.sessionId.toLowerCase());
   if (session === undefined || session.rootMessageId === undefined) return null;
   return uuidEq(session.memberId, selfMemberId) ? session : null;
