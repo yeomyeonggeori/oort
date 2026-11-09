@@ -29,7 +29,9 @@ command -v docker >/dev/null 2>&1 || fail "docker 없음"
 command -v python3 >/dev/null 2>&1 || fail "python3 없음"
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/oort-public-edge.XXXXXX")"
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
+# #5606: remove only the directory mktemp made (never an empty value or /).
+rm_tmp_root() { case "$TMP_ROOT" in "${TMPDIR:-/tmp}"/oort-public-edge.*) rm -rf -- "$TMP_ROOT" ;; esac; }
+trap rm_tmp_root EXIT INT TERM
 
 # ---------------------------------------------------------------------------
 # ① fixture env → caddy adapt: site host, CSP tokens, no wildcard, no oor7
@@ -314,9 +316,10 @@ cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
   -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
   "$CADDY_IMAGE")"
 cleanup_local_edge() {
-  docker rm -f "$cid" >/dev/null 2>&1 || true
+  # #5606: the caddy image declares VOLUME /data and /config; `-v` takes them along.
+  docker rm -f -v "$cid" >/dev/null 2>&1 || true
 }
-trap 'cleanup_local_edge; rm -rf "$TMP_ROOT"' EXIT INT TERM
+trap 'cleanup_local_edge; rm_tmp_root' EXIT INT TERM
 deadline=$(( $(date -u +%s) + 30 ))
 local_code=""
 until local_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
@@ -340,7 +343,7 @@ agent_media_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
 printf '[test-public-edge] Caddyfile.local PUT /v1/agent-media/{ws}/{token} HTTP %s\n' "$agent_media_code"
 [ "$agent_media_code" = "403" ] || fail "Caddyfile.local /v1/agent-media/* expected 403 got ${agent_media_code:-none}"
 cleanup_local_edge
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
+trap rm_tmp_root EXIT INT TERM
 pass "Caddyfile.local loopback edge returns 403 for /v1/centrifugo/*"
 
 # ---------------------------------------------------------------------------

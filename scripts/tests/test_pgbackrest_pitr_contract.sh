@@ -294,10 +294,12 @@ expect_red path_injection cipher_secret_path_invalid \
 : >"$fake_log"
 expect_red restore_failure '' \
   invoke_restore restore_fail "$source_volume" "$repo_volume" "$restore_volume" "$cipher"
-grep -Fq "rm -f momo-pitr-${run_id}-restore-job" "$fake_log" \
+# #5606: removals carry `-v`; the negative check matches any rm flag form so it
+# cannot pass vacuously when the flags change.
+grep -Eq "(^| )rm( -[a-z]+)* momo-pitr-${run_id}-restore-job" "$fake_log" \
   && fail "restore cleanup used a caller-derived container name"
-grep -Fq 'rm -f deadbeefcafe' "$fake_log" \
-  || fail "failed restore job owned by this invocation was not cleaned"
+grep -Fq 'rm -f -v deadbeefcafe' "$fake_log" \
+  || fail "failed restore job owned by this invocation was not cleaned with -v (#5606)"
 grep -Fq '/run/input/pgbackrest_repo1_cipher_pass' "$fake_log" \
   || fail "restore did not mount the caller cipher as an input"
 grep -Fq 'install -o postgres -g postgres -m 0400' "$fake_log" \
@@ -403,7 +405,7 @@ attach_status=$?
 set -e
 [ "$attach_status" -eq 55 ] \
   || fail "attach cleanup fixture did not reach injected cp failure status=$attach_status output=$attach_output"
-! grep -Fq "rm -f $attach_source_container " "$fake_log" \
+! grep -Eq "(^| )rm( -[a-z]+)* $attach_source_container " "$fake_log" \
   || fail "attach cleanup attempted to remove the live source container"
 ! grep -Fq "volume rm $attach_source_volume " "$fake_log" \
   || fail "attach cleanup attempted to remove the live source volume"
@@ -415,8 +417,8 @@ grep -Fq "volume prune -af --filter label=com.momo.pitr.invocation-id=" "$fake_l
   || fail "attach cleanup did not use daemon-side all-volume label prune"
 [ -f "$foreign_volume_marker" ] \
   || fail "cleanup deleted a foreign same-name replacement volume"
-grep -Fq "rm -f $attach_orphan_container " "$fake_log" \
-  || fail "attach cleanup did not remove a disposable orphan container"
+grep -Fq "rm -f -v $attach_orphan_container " "$fake_log" \
+  || fail "attach cleanup did not remove a disposable orphan container with -v (#5606)"
 
 set +e
 attach_owner_output="$(env \

@@ -83,7 +83,10 @@ cmd_up() {
   pg_pass="$(gen)"
 
   log "starting isolated PostgreSQL 18 container '$container'"
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  # #5606: `-v` everywhere this container is removed. The image declares
+  # VOLUME /var/lib/postgresql, so a bare `rm -f` leaves one nameless volume
+  # behind per run (197 of them, ~9GB, on 11-09).
+  docker rm -f -v "$container" >/dev/null 2>&1 || true
   # `-e POSTGRES_PASSWORD` (no value) forwards the variable from this process's
   # environment, so the password never appears in docker's argv / `ps`.
   POSTGRES_PASSWORD="$pg_pass" docker run -d --name "$container" \
@@ -148,8 +151,8 @@ cmd_down() {
   # that was reused by something else must not be taken down.
   if [ -n "$container" ] &&
     [ "$(docker inspect -f "{{ index .Config.Labels \"$LABEL_KEY\" }}" "$container" 2>/dev/null || true)" = "$RUN_ID" ]; then
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    log "removed $container"
+    docker rm -f -v "$container" >/dev/null 2>&1 || true
+    log "removed $container (with its anonymous volume)"
   else
     log "nothing to remove for run $RUN_ID"
   fi

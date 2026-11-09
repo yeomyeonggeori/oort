@@ -71,14 +71,19 @@ APP_TAG="momo-rust:day2-${PREFIX}"
 # into the VM. Keep the sandbox under the worktree (/Users/...) so -v works.
 SANDBOX="$(mktemp -d "$REPO_ROOT/.tmp-${PREFIX}.XXXXXX")"
 PG_CID=""
+BAK_CID=""
 NET_CREATED=0
 
 cleanup() {
-  [ -n "$PG_CID" ] && docker rm -f "$PG_CID" >/dev/null 2>&1 || true
+  # #5606: `-v` so the postgres image's VOLUME goes with the container, and the
+  # backup container is removed here too (a failure between its `docker run`
+  # and its own `rm` used to leave it behind).
+  [ -n "$PG_CID" ] && docker rm -f -v "$PG_CID" >/dev/null 2>&1 || true
+  [ -n "$BAK_CID" ] && docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
   if [ "$NET_CREATED" = 1 ]; then
     docker network rm "$NET" >/dev/null 2>&1 || true
   fi
-  rm -rf "$SANDBOX"
+  case "$SANDBOX" in "$REPO_ROOT"/.tmp-"${PREFIX}".*) rm -rf -- "$SANDBOX" ;; esac
   if [ "$BUILT_HERE" = 1 ]; then
     docker rmi -f "$APP_TAG" >/dev/null 2>&1 || true
   fi
@@ -203,7 +208,7 @@ pass "in-image doctor --tier t2 --json parses; stack.* ids present (exit ${DOC_R
 BAK_CID="${PREFIX}-bak"
 BAK_OUT="$SANDBOX/backup.out"
 BAK_ERR="$SANDBOX/backup.err"
-docker rm -f "$BAK_CID" >/dev/null 2>&1 || true
+docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
 set +e
 docker run --name "$BAK_CID" --user 0 --network "$NET" --entrypoint /bin/bash \
   -v "$SANDBOX:/mnt/test:ro" \
@@ -217,16 +222,16 @@ su -s /bin/bash momo -c "/opt/momo/scripts/oort backup --tier t2 --env /home/mom
 BAK_RC=$?
 set -e
 [ "$BAK_RC" = "0" ] || {
-  docker rm -f "$BAK_CID" >/dev/null 2>&1 || true
+  docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
   fail "in-image backup exit $BAK_RC stdout=$(cat "$BAK_OUT") stderr=$(cat "$BAK_ERR")"
 }
 DUMP_PATH="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$BAK_OUT")"
 [ -n "$DUMP_PATH" ] || {
-  docker rm -f "$BAK_CID" >/dev/null 2>&1 || true
+  docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
   fail "backup printed no path: $(cat "$BAK_OUT")"
 }
 docker cp "$BAK_CID:$DUMP_PATH" "$OUT_DIR/" >/dev/null
-docker rm -f "$BAK_CID" >/dev/null 2>&1 || true
+docker rm -f -v "$BAK_CID" >/dev/null 2>&1 || true
 DUMP_HOST="${OUT_DIR}/$(basename "$DUMP_PATH")"
 [ -s "$DUMP_HOST" ] || fail "dump missing on host: $DUMP_HOST (container path $DUMP_PATH)"
 DUMP_BYTES="$(wc -c <"$DUMP_HOST" | tr -d '[:space:]')"

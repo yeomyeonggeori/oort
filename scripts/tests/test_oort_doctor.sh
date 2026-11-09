@@ -16,8 +16,10 @@ PG_CID=""
 HTTP_PID=""
 cleanup() {
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
-  [ -n "$PG_CID" ] && docker rm -f "$PG_CID" >/dev/null 2>&1 || true
-  rm -rf "$SANDBOX"
+  # #5606: `--rm` does not help a forced removal — without `-v` the postgres
+  # image's VOLUME outlives the container.
+  [ -n "$PG_CID" ] && docker rm -f -v "$PG_CID" >/dev/null 2>&1 || true
+  case "$SANDBOX" in "${TMPDIR:-/tmp}"/oort-doctor-test.*) rm -rf -- "$SANDBOX" ;; esac
 }
 trap cleanup EXIT INT TERM
 cd "$REPO_ROOT"
@@ -643,7 +645,7 @@ T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
-PG_CID="$(docker run -d --rm \
+PG_CID="$(docker run -d --rm --name "oort-doctor-pg-$$" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \
