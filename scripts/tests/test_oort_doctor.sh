@@ -93,9 +93,11 @@ validate_schema() {
 
 check_field() {
   local file="$1" id="$2" field="$3"
+  # first() rather than `| head -1`: no reader that can exit before the writer
+  # is done, so no SIGPIPE under pipefail (#5623). Details are one TSV line.
   jq -r --arg id "$id" --arg field "$field" '
-    .checks[] | select(.id == $id) | .[$field]
-  ' "$file" | head -1
+    first(.checks[] | select(.id == $id) | .[$field])
+  ' "$file"
 }
 
 has_check() {
@@ -1033,8 +1035,16 @@ docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
 # change the verdict (a check that cannot fail proves nothing): overdue → fail, past the grace window → fail
 # naming the grace, missed/send_error in the last day → info, a deleted workspace's rows → not counted,
 # and a connection that cannot skip RLS → unknown (skip), never a quiet pass.
-SCHED_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace DEFAULT VALUES RETURNING id;" | head -n1)"
-SCHED_DEAD_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace (deleted_at) VALUES (now()) RETURNING id;" | head -n1)"
+# #5623: no `| head -n1` here. `-At` printed the id and then `INSERT 0 1`; when
+# the docker relay delivered those as two writes after head had exited, the
+# second write hit a closed pipe — SIGPIPE, exit 141, and pipefail + set -e
+# ended the test with no FAIL line (11-09 PR #5612 gate). `-q` drops the tag, so
+# the whole output is the id, and a bad shape fails loudly below.
+SCHED_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -qAt -v ON_ERROR_STOP=1 -c "INSERT INTO workspace DEFAULT VALUES RETURNING id;")"
+SCHED_DEAD_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -qAt -v ON_ERROR_STOP=1 -c "INSERT INTO workspace (deleted_at) VALUES (now()) RETURNING id;")"
+UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+[[ "$SCHED_WS" =~ $UUID_RE ]] || fail "scheduler fixture workspace id is not one uuid: ${SCHED_WS}"
+[[ "$SCHED_DEAD_WS" =~ $UUID_RE ]] || fail "scheduler fixture deleted workspace id is not one uuid: ${SCHED_DEAD_WS}"
 sched_status() {
   local name="$1"
   OUT="$SANDBOX/t2-sched-${name}.json"
