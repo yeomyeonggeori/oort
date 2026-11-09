@@ -155,8 +155,9 @@ provider on the same machine also needs `--allow-local-provider` so
 - `GET /v1/provider/link` (instance operator) reported `mode=external-hermes`,
   `availability=available`, `keyConfigured=true`, and a redacted
   `endpointLabel`.
-- Seeded Hermes is an active `member.kind='agent'` with `#agent-lab`
-  membership.
+- A Hermes agent is an active `member.kind='agent'` with `#agent-lab`
+  membership (migrate seeds one only with `MOMO_AGENT_SEED_MODE=demo` or
+  `e2e`; on the default `none`, create it first).
 - `@hermes` created an `agent_run`/`agent_job`, `agent-worker` called the
   provider, usage/cost records were written, and the final agent response
   appeared in the same channel timeline.

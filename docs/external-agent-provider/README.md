@@ -115,10 +115,9 @@ scripts/local_alpha_runner.sh execute \
 Expected credentialed coverage. The credentialed smoke and the local-alpha
 runner option both hand a credentialed run to the former
 `verify_external_agent_provider.sh`, which was retired with the Swift stack
-(#2165). With a provider env present they stop at that hand-off today, so the
-steps below are checked by hand and recorded as
-`runtime-unverified(external provider credentials)` until a Rust-stack
-verifier replaces it:
+(#2165). With a provider env present they stop at that hand-off today. Until a
+Rust-stack verifier replaces it, check the steps below by hand; a run that
+skips them stays `runtime-unverified(external provider credentials)`:
 
 1. OpenAI-compatible preflight: one non-streamed (`"stream": false`) request to
    `${HERMES_BASE_URL}/chat/completions`, the same shape `agent-worker` sends.
@@ -127,15 +126,17 @@ verifier replaces it:
 3. `GET /v1/provider/link` (instance operator) reports `mode=external-hermes`,
    `availability=available`, `keyConfigured=true`, a redacted `endpointLabel`,
    and an empty `diagnostics` list.
-4. Seeded Hermes is verified as an active `member.kind='agent'` in `#agent-lab`.
+4. A Hermes agent (`member.kind='agent'`) is an active member of `#agent-lab`.
+   Migrate seeds an agent there only with `MOMO_AGENT_SEED_MODE=demo` or `e2e`;
+   the product default `none` seeds none, so create the agent first.
 5. A channel message mentioning `@hermes` creates an `agent_run`, calls the
    external runtime, writes a durable agent response message, and publishes the
    final `message.new` through `relay`.
 
 If the link is configured but degraded, `GET /v1/provider/link` reports
-`availability=degraded` and lists the reasons in `diagnostics`; the response
-carries only `bearerConfigured` and at most a 4-character key tail, never a
-provider token or raw secret.
+`availability=degraded` and lists the reasons in `diagnostics`. Of the key
+itself the response carries only `bearerConfigured` and at most a 4-character
+tail (`bearerLast4`), never a provider token or raw secret.
 
 ## References
 
