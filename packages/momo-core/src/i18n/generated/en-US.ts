@@ -1862,6 +1862,12 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.notify.workPermission": [
+    {
+      "type": 0,
+      "value": "A task on your Mac is waiting for your permission."
+    }
+  ],
   "desktop.tray.closeNotice": [
     {
       "type": 0,

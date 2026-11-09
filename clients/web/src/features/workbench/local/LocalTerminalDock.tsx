@@ -1,3 +1,4 @@
+import { uuidEq } from "@momo/core/lib/api";
 import {
   forwardRef,
   useCallback,
@@ -168,6 +169,8 @@ export function LocalTerminalDock({
   launchSource,
   startSource,
   share,
+  openAgentSession = null,
+  onAgentSessionOpened,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
@@ -206,6 +209,12 @@ export function LocalTerminalDock({
    * 골라야 켜진다.
    */
   share?: PaneShareSource;
+  /**
+   * 열어 달라는 A 세션(#5595): 작업 권한 요청 배너를 누르면 셸이 넘긴다. 이미 칸에 묶여 있으면 그 칸을 활성으로,
+   * 아니면 새 세션 메뉴와 같은 자리 규칙(`openAgent`)으로 연다. 한 번 열고 `onAgentSessionOpened`를 부른다.
+   */
+  openAgentSession?: string | null;
+  onAgentSessionOpened?: () => void;
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
@@ -544,6 +553,34 @@ export function LocalTerminalDock({
     },
     [dock.open, sessions, setLayout, tab]
   );
+
+  // 작업 권한 요청 배너를 눌러 온 A 세션(#5595): 승인 카드는 그 세션의 칸에 있다. 같은 요청은 한 번만 연다.
+  const openedRequestRef = useRef<string | null>(null);
+  const agentOpenedRef = useRef(onAgentSessionOpened);
+  agentOpenedRef.current = onAgentSessionOpened;
+  useEffect(() => {
+    if (openAgentSession === null) {
+      openedRequestRef.current = null;
+      return;
+    }
+    if (!agentRef.current || openedRequestRef.current === openAgentSession) return;
+    openedRequestRef.current = openAgentSession;
+    const current = layoutRef.current;
+    const boundPane = paneIds(current.root).find((id) =>
+      uuidEq(agentOfRef.current(id) ?? undefined, openAgentSession)
+    );
+    if (boundPane === undefined) {
+      openAgent(openAgentSession);
+    } else {
+      const result = focusPane(current, boundPane);
+      if (result.ok) {
+        setNotice(null);
+        layoutRef.current = result.layout;
+        setLayout(result.layout);
+      }
+    }
+    agentOpenedRef.current?.();
+  }, [openAgentSession, openAgent, setLayout]);
 
   const runDock = useCallback(
     (command: DockCommand) => {

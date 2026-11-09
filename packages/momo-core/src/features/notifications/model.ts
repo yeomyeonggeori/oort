@@ -1,8 +1,9 @@
-import { uuidEq, type Message } from "../../lib/api";
+import { uuidEq, type Message, type WorkSession } from "../../lib/api";
 import { payloadToMessage, type MessageNewEvent } from "../../lib/realtimeEvents";
 import { attachmentPreviewLine } from "../attachments/model";
 import { mentionsMember } from "../inbox/model";
 import { agentCardModel } from "../timeline/agentCardModel";
+import { parseWorkSessionEvent } from "../work/workSessionModel";
 
 // =============================================================================
 // Desktop notification decision (MOMO-607, ADR-0133 P2). Pure: no DOM, no Tauri,
@@ -18,10 +19,12 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //     a browser tab whose user opted in and was granted permission (#3340). The
 //     rules below are the same for both; only the gate differs;
 //   - only for the events that are addressed to a person — a mention the
-//     SERVER recorded, an approval request waiting on a human decision, and (#4890)
+//     SERVER recorded, an approval request waiting on a human decision, (#4890)
 //     a new reply from someone else in a thread the SERVER says this member
-//     follows. The follow answer is handed in (`isFollowingThread`); this module
-//     never infers a thread from who wrote in it;
+//     follows, and (#5595) a permission request from a work session on this
+//     member's own Mac, to that session's owner only. The follow and the session
+//     answers are handed in (`isFollowingThread`, `workSession`); this module
+//     never infers a thread or an owner from who wrote in it;
 //   - never when the window already has focus (zero-noise: the message is on
 //     screen, or one keystroke away);
 //   - never twice for the same message, never for one's own writing, never for
@@ -77,7 +80,14 @@ export type NotifySkip =
    * A thread reply that would otherwise show, whose follow state the server has not told this device yet (#4890).
    * The caller asks the server about that one thread and decides again with the answer; nothing is shown on a guess.
    */
-  | "follow-unknown";
+  | "follow-unknown"
+  /** A work-session permission request (#5595) for a session this member does not own: only its owner decides (ADR-0188 D3·D5). */
+  | "not-owner"
+  /**
+   * A work-session permission request that would otherwise show, for a session this device has not read yet (#5595).
+   * The caller reads the server's session ledger once and decides again; nothing is shown on a guess.
+   */
+  | "owner-unknown";
 
 export interface DesktopNotification {
   kind: NotifyKind;
@@ -87,6 +97,11 @@ export interface DesktopNotification {
   title: string;
   /** One line, truncated, code and secrets removed. Absent when there is none. */
   body?: string;
+  /**
+   * Set only for a work-session permission request (#5595): the session whose approval card the banner opens.
+   * The card lives in that session's agent pane, not in the channel, so the caller routes by this id.
+   */
+  workSessionId?: string;
 }
 
 export type NotifyDecision =
@@ -190,6 +205,35 @@ export function isThreadReplyCandidate(message: Message, isDirect = false): bool
   );
 }
 
+// ---- work-session permission request (#5595, ADR-0188 D5·D8) ---------------
+
+/**
+ * A permission request from a Claude Code·Codex session on a member's Mac, as the server records it: a System line in
+ * the session thread (`work_sessions.rs` `validated_acp_event`: `props.kind = work_session_event`,
+ * `event_type = approval.requested`). The phone push picks the same line by the same shape (`momo-push` `judgment.rs`,
+ * arm `work_permission`): a System row, the request id (`event_id`), the session id (`event.work_session_id`), and at
+ * least one decidable option (`allow_once`·`reject_once`, the only kinds the bridge records). Only ids and option
+ * **kinds** are read — never the preview, the tool title or the option names (D5: notifications carry ids; the
+ * preview is the owner's to read in the app).
+ */
+export interface WorkPermissionRequest {
+  sessionId: string;
+  requestEventId: string;
+}
+
+export function workPermissionRequestOf(message: Message): WorkPermissionRequest | null {
+  if (message.type !== "system" || message.state === "deleted") return null;
+  const event = parseWorkSessionEvent(message);
+  if (event === null || event.type !== "approval.requested") return null;
+  const options = Array.isArray(event.payload.options) ? event.payload.options : [];
+  const decidable = options.some((option: unknown) => {
+    if (typeof option !== "object" || option === null) return false;
+    const kind = (option as Record<string, unknown>).kind;
+    return kind === "allow_once" || kind === "reject_once";
+  });
+  return decidable ? { sessionId: event.sessionId, requestEventId: event.eventId } : null;
+}
+
 // ---- decision --------------------------------------------------------------
 
 /**
@@ -258,6 +302,26 @@ export interface NotifyContext {
    */
   isFollowingThread?: (rootId: string) => boolean | undefined;
   /**
+   * The work session a permission request belongs to (#5595), **as the server's session ledger says it**
+   * (`GET …/work-sessions`): its owner, state and name. `undefined` = this device has not read that session yet: the
+   * decision then ends in `owner-unknown` and the caller reads the ledger once and decides again. Absent means this
+   * surface cannot open the approval card (a browser tab: allowing is the app's, ADR-0146 D-4), so a work permission
+   * request is ordinary traffic there and never a banner.
+   */
+  workSession?: (sessionId: string) => Pick<WorkSession, "memberId" | "status" | "label"> | undefined;
+  /**
+   * Is this session's approval card on screen right now (its agent pane is open in this window, #5595)? Absent means
+   * no. The channel being on screen proves nothing here: the request is a System line in the session thread and its
+   * card lives in the pane.
+   */
+  isWorkSessionVisible?: (sessionId: string) => boolean;
+  /**
+   * The body of a work permission banner: a fixed sentence from the dictionary
+   * (`desktop.notify.workPermission`), read by the caller in the current language like `inviteLinkSentence`. The
+   * message body is the server's English (`Approval requested`) and is never shown.
+   */
+  workPermissionSentence?: () => string;
+  /**
    * Is this thread what the window shows right now (its panel is open on this root)? A reply is **not** in the
    * visible main timeline, so for a thread reply the channel being on screen proves nothing (`isTargetVisible` is
    * the channel-level question and does not apply). Absent means "assume visible", like `isTargetVisible`.
@@ -296,6 +360,9 @@ export function notifyDecision(
   if (event.type !== "message.new") return { show: false, skip: "edited" };
 
   const message = payloadToMessage(event.payload);
+  // 맥 작업 세션의 권한 요청(#5595): 세션 원장을 줄 수 있는 표면에서만 승인 갈래다(카드를 열 수 있는 곳).
+  const work = context.workSession === undefined ? null : workPermissionRequestOf(message);
+  if (work !== null) return workPermissionDecision(message, work, context);
   const isDirect = context.isDirect?.(message.channelId) ?? false;
   let kind = notifiableKind(message, context.selfMemberId, isDirect);
   // 스레드 답글 갈래(#4890): 멘션·승인·DM이 아닌 스레드 답글만 후보다. 따라가는지는 맨 끝에서 읽는다.
@@ -347,6 +414,58 @@ export function notifyDecision(
     // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
     (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
+  return { show: true, notification };
+}
+
+/**
+ * The decision for a work-session permission request (#5595). Same rules as any approval — pause, mute, this device's
+ * `approval` switch, replay, duplicate — with three differences, each from the server's own push judgment
+ * (`judgment.rs` `work_permission`):
+ *
+ * - **No self exemption.** The session speaks as its owner unless a personal agent was called, so the line's author
+ *   is very often the one person it is for. Skipping 「one's own message」 here would silence exactly the decider.
+ * - **The owner, and nobody else.** The line is broadcast to the whole channel, but only the session's owner decides
+ *   (ADR-0188 D3) and a non-owner sees the request nowhere (D5). The owner is the ledger's, never the author's (an
+ *   alias is not its owner). Asked last, so a line filtered for another reason never costs a read.
+ * - **On screen means the card.** A focused window suppresses the banner only while that session's pane is open.
+ *
+ * Title: the session's name (the owner's own words); body: the dictionary sentence. Nothing from the request.
+ */
+function workPermissionDecision(
+  message: Message,
+  work: WorkPermissionRequest,
+  context: NotifyContext
+): NotifyDecision {
+  if (context.paused) return { show: false, skip: "paused" };
+  if (context.isMuted(message.channelId)) return { show: false, skip: "muted" };
+  if (context.kindEnabled && !context.kindEnabled("approval")) {
+    return { show: false, skip: "kind-disabled" };
+  }
+  const maxAgeMs = context.maxAgeMs ?? MAX_AGE_MS;
+  if (message.hlcTs > 0 && context.nowMs - message.hlcTs > maxAgeMs) {
+    return { show: false, skip: "stale" };
+  }
+  if (context.isAnnounced(message.id)) return { show: false, skip: "duplicate" };
+  if (context.windowFocused && (context.isWorkSessionVisible?.(work.sessionId) ?? false)) {
+    return { show: false, skip: "focused" };
+  }
+  const session = context.workSession?.(work.sessionId);
+  if (session === undefined) return { show: false, skip: "owner-unknown" };
+  if (!uuidEq(session.memberId, context.selfMemberId)) return { show: false, skip: "not-owner" };
+  // 끝난 세션의 요청은 이미 취소됐다(D5: 종료·revoke 때 대기 중인 승인은 취소된다).
+  if (session.status !== "running" && session.status !== "idle") {
+    return { show: false, skip: "not-notifiable" };
+  }
+  const label = session.label.trim();
+  const notification: DesktopNotification = {
+    kind: "approval",
+    messageId: message.id,
+    channelId: message.channelId,
+    title: label === "" ? context.actorFor(message.authorMemberId) : label,
+    workSessionId: work.sessionId,
+  };
+  const body = context.workPermissionSentence?.();
+  if (body !== undefined && body !== "") notification.body = notificationBody(body) ?? body;
   return { show: true, notification };
 }
 
