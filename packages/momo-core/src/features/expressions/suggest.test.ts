@@ -10,7 +10,7 @@ import {
   normalizeKeyword,
   suggestExpressionRow,
   suggestExpressions,
-  suggestPickMode,
+  isKeywordOnlyInput,
   suggestionKeywords,
 } from "./suggest";
 import type { Expression } from "./types";
@@ -269,8 +269,8 @@ describe("여러 낱말: 낱말이 나온 차례로 묶고 낱말마다 1~2개, 
 });
 
 // #5588 (owner 2026-11-09): 「누르면 해당 단어만 넣은 경우엔 이모티콘이 대체하는걸로(채팅없이), 해당 단어를 포함하는 문구의 경우엔 대체하지 않고 이모티콘만 추가하는 형태로」.
-describe("suggestPickMode: 누를 때 글을 바꾸는가 더하는가", () => {
-  it("글 전체를 맞추기와 같은 정리로 줄인 꼴이 그 그림의 낱말이면 바꾼다(replace), 문구면 더한다(add)", () => {
+describe("isKeywordOnlyInput: 누를 때 글을 바꾸는가(낱말뿐) 더하는가(문구)", () => {
+  it("글 전체를 맞추기와 같은 정리로 줄인 꼴이 그 그림의 낱말이면 낱말뿐(바꾸기), 문구면 아니다(더하기)", () => {
     const rows: Array<[string, Expression, "replace" | "add"]> = [
       ["ㅋㅋ", LAUGH, "replace"],
       ["ㅋㅋㅋㅋ!!", LAUGH, "replace"],
@@ -292,12 +292,12 @@ describe("suggestPickMode: 누를 때 글을 바꾸는가 더하는가", () => {
       ["", LAUGH, "add"],
       ["!!", LAUGH, "add"],
     ];
-    for (const [text, item, want] of rows) expect(suggestPickMode(text, item), `${text} → ${item.name}`).toBe(want);
+    for (const [text, item, want] of rows) expect(isKeywordOnlyInput(text, item) ? "replace" : "add", `${text} → ${item.name}`).toBe(want);
   });
   it("「킹 받네」 줄에서 글 전체로 맞은 그림은 바꾸고, 한 낱말(받네)로만 맞은 그림은 더한다", () => {
     const part = made(180, "part_only", "받네곰", ["받네"]);
     const row = suggestExpressions("킹 받네", [KING, part]);
     expect(ids(row)).toEqual([part.id, KING.id]);
-    expect(row.map((item) => suggestPickMode("킹 받네", item))).toEqual(["add", "replace"]);
+    expect(row.map((item) => isKeywordOnlyInput("킹 받네", item))).toEqual([false, true]);
   });
 });

@@ -2,7 +2,7 @@ import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpres
 import { ComposerExpressionSuggest, type ExpressionSuggestHandle } from "@/features/expressions/ComposerExpressionSuggest";
 import { useExpressions } from "@/features/expressions/context";
 import { useExpressionSuggest } from "@/features/expressions/useExpressionSuggest";
-import { suggestPickMode } from "@momo/core/features/expressions/suggest";
+import { isKeywordOnlyInput } from "@momo/core/features/expressions/suggest";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
@@ -773,11 +773,11 @@ export function Composer({
 
   /**
    * 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 보내는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다.
-   * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `suggestPickMode`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고
+   * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `isKeywordOnlyInput`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고
    * 그림을 **더한다**(보내기 한 번이 그림 → 글). 지우는 길은 멘션을 고를 때와 같은 `replaceValue`(글·캐럿·초안을 함께 비운다)다.
    */
   function pickSuggestion(item: Expression) {
-    if (suggestPickMode(text, item) === "replace") autocomplete.replaceValue("", 0);
+    if (isKeywordOnlyInput(text, item)) autocomplete.replaceValue("", 0);
     setPendingExpression(item);
     suggest.close();
     inputRef.current?.focus();

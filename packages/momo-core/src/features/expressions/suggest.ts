@@ -10,7 +10,7 @@ import type { ExpressionKind, ExpressionStatus } from "./types";
 //   2. 끝말 정리표: `KEYWORD_ENDING_TABLE` — 흔한 끝말 몇 개를 한 낱말로 모은다(배고프다·배고픔 → 배고파).
 //   3. 맞추기: `suggestExpressionRow`·`suggestExpressions` — 문구 안의 **모든 낱말**에 맞는 큰 그림을 낱말이 나온 차례로 묶어 한 줄에 세운다
 //      (#5588, owner 2026-11-09 「여러 키워드에 걸릴 경우엔 관련한 이모티콘들을 한꺼번에」: 「ㅋㅋ 개웃기네 진심」 → ㅋㅋ 쪽 + 진심 쪽).
-//   4. 누를 때: `suggestPickMode` — 글이 그 낱말뿐이면 글을 그림으로 **바꾸고**, 문구 안의 낱말이면 글을 두고 그림을 **더한다**(#5588).
+//   4. 누를 때: `isKeywordOnlyInput` — 글이 그 낱말뿐이면 글을 그림으로 **바꾸고**, 문구 안의 낱말이면 글을 두고 그림을 **더한다**(#5588).
 //
 // 입력한 글은 **기기 밖으로 나가지 않는다**(owner 2026-11-07 결정: 맞추기는 기기 안에서만). 이 모듈은 네트워크·저장소·시계를 만지지
 // 않고 받은 값을 바꾸지 않는 순수 함수라, 글을 서버나 Hermes로 보낼 길이 처음부터 없다. 맞추는 상대도 기기에 있는 보관함
@@ -139,7 +139,7 @@ const TIER_TAG = 0;
 const TIER_NAME = 1;
 
 /**
- * 한 항목이 맞는 꼴들과 그 칸: 꼬리표 꼴은 칸 0, 이름·표시 이름 꼴은 칸 1(같은 꼴이 꼬리표에도 있으면 꼬리표 칸). 맞추기와 누를 때(`suggestPickMode`)가
+ * 한 항목이 맞는 꼴들과 그 칸: 꼬리표 꼴은 칸 0, 이름·표시 이름 꼴은 칸 1(같은 꼴이 꼬리표에도 있으면 꼬리표 칸). 맞추기와 누를 때(`isKeywordOnlyInput`)가
  * **같은 이 표**를 읽는다. 정확히 같을 때만 맞는다 — 부분 일치는 글을 치는 도중 아무 때나 줄을 띄운다.
  */
 function matchKeys(item: ExpressionSuggestCandidate): Map<string, number> {
@@ -268,18 +268,17 @@ export function suggestExpressions<T extends ExpressionSuggestCandidate>(
 }
 
 /**
- * 추천 줄의 그림을 눌렀을 때 쓴 글을 어떻게 하는가(#5588, owner 2026-11-09 「해당 단어만 넣은 경우엔 이모티콘이 대체하는걸로(채팅없이), 해당 단어를
- * 포함하는 문구의 경우엔 대체하지 않고 이모티콘만 추가하는 형태로」).
- * - `"replace"`: 글이 **그 낱말뿐**이다 → 글을 지우고 그림만 남긴다. 보내면 글 없이 그림만 간다.
- * - `"add"`: 낱말이 문구 안에 있다 → 글을 그대로 두고 그림을 더한다(글 + 그림을 보내기 한 번에, `sendBundle`).
+ * 입력한 글이 **이 그림의 낱말뿐**인가 — 추천 줄의 그림을 눌렀을 때 쓴 글을 바꾸는가 두는가(#5588, owner 2026-11-09 「해당 단어만 넣은 경우엔 이모티콘이
+ * 대체하는걸로(채팅없이), 해당 단어를 포함하는 문구의 경우엔 대체하지 않고 이모티콘만 추가하는 형태로」).
+ * - 참: 글이 그 낱말뿐이다 → 화면은 글을 지우고 그림만 남긴다(바꾸기). 보내면 글 없이 그림만 간다.
+ * - 거짓: 낱말이 문구 안에 있다 → 화면은 글을 그대로 두고 그림을 더한다(글 + 그림을 보내기 한 번에, `sendBundle`).
  * 「뿐」의 기준은 맞추기와 같은 정리다: 글 **전체**를 `canonicalKeyword`(반복 줄이기·띄어쓰기와 문장부호 지우기·끝말 정리표)로 줄인 꼴이 이 그림이 맞는
  * 낱말(꼬리표·이름·표시 이름) 하나와 같으면 낱말뿐이다. 「ㅋㅋㅋㅋ!!」·「ㅋ ㅋ ㅋ」·「배고프다」(꼬리표 배고픔)는 낱말뿐이고, 「ㅋㅋ 진심」·「ㅋㅋ😂」은 문구다.
  * 그림을 기준으로 재는 까닭: 「킹 받네」를 친 줄에서 글 전체(킹받네)로 맞은 그림은 글을 바꾸고, 「받네」 한 낱말로만 맞은 그림은 글에 더한다.
- * 누름이 저절로 보내지는 않는다 — 화면은 고른 그림을 입력창 위 미리 보기에 올리고, 보내기 한 번이 보낸다.
+ * 누름이 저절로 보내지는 않는다 — 화면은 고른 그림을 입력창 위 미리 보기에 올리고, 보내기 한 번이 보낸다. (참·거짓으로 답하는 까닭: 화면 코드가 비교할
+ * 낱말 문자열을 적지 않게 — 직접 문구 장부는 화면 파일의 영어 낱말 문자열을 문구로 센다.)
  */
-export type ExpressionSuggestPickMode = "replace" | "add";
-
-export function suggestPickMode(input: string, item: ExpressionSuggestCandidate): ExpressionSuggestPickMode {
+export function isKeywordOnlyInput(input: string, item: ExpressionSuggestCandidate): boolean {
   const whole = canonicalKeyword(input);
-  return whole !== "" && matchKeys(item).has(whole) ? "replace" : "add";
+  return whole !== "" && matchKeys(item).has(whole);
 }

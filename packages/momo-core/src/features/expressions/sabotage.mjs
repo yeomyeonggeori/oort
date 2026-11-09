@@ -58,7 +58,7 @@ const mutations = [
   ["contracts.schema.json", '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker"\n          ]', '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker",\n            "huge"\n          ]', "choice-kind-closed"],
   // #5588: 추천을 누를 때(낱말뿐이면 바꾸기·문구면 더하기)와 여러 낱말 줄(나온 차례·낱말마다 1~2개·줄 5개·꺼 둔 낱말·같은 그림 한 번·✕ 가 끄는 낱말).
   ["suggest.ts", "const whole = canonicalKeyword(input);\n  return whole", "const whole = input.trim();\n  return whole", "suggest-pick-no-normalize"],
-  ["suggest.ts", "return whole !== \"\" && matchKeys(item).has(whole) ? \"replace\" : \"add\";", "return whole !== \"\" && suggestionKeywords(input).some((keyword) => matchKeys(item).has(keyword)) ? \"replace\" : \"add\";", "suggest-pick-any-keyword-replaces"],
+  ["suggest.ts", "return whole !== \"\" && matchKeys(item).has(whole);", "return whole !== \"\" && suggestionKeywords(input).some((keyword) => matchKeys(item).has(keyword));", "suggest-pick-any-keyword-replaces"],
   ["suggest.ts", "for (const word of input.split(/\\s+/u)) {", "for (const word of input.split(/\\s+/u).filter((part) => canonicalKeyword(part) !== \"\").slice(-1)) {", "suggest-keywords-last-word-only"],
   ["suggest.ts", "const matchedKeywords = keywords.filter((keyword) => hitsByKeyword.has(keyword));", "const matchedKeywords = keywords.filter((keyword) => hitsByKeyword.has(keyword)).reverse();", "suggest-row-order-reversed"],
   ["suggest.ts", "for (let round = 0; round < EXPRESSION_SUGGEST_PER_KEYWORD; round += 1) {", "for (let round = 0; round < limit; round += 1) {", "suggest-no-per-keyword-cap"],
