@@ -8556,6 +8556,24 @@ export const catalog: MessageCatalog = {
       "value": " is typing…"
     }
   ],
+  "timeline.typing.two": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " are typing…"
+    }
+  ],
   "timeline.unfurl.label": [
     {
       "type": 0,

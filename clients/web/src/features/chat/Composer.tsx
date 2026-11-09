@@ -463,7 +463,7 @@ export function Composer({
   /**
    * 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
    *
-   * 폰에서 키 힌트는 원래 보이지 않는다. 남의 「입력 중」은 이 슬롯이 아니라 카드 아래 늘 잡아 둔 줄(`TypingLine`)에
+   * 폰에서 키 힌트는 원래 보이지 않는다. 남의 「작성 중」은 이 슬롯이 아니라 카드 아래 늘 잡아 둔 줄(`TypingLine`)에
    * 서므로(#5567) 누가 치기 시작해도 힌트와 컴포저가 그대로다. DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
   const deliveryHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
@@ -901,9 +901,10 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 ·
-        // 아래 18 인셋 위에 흰 카드(`composer-card`)로 뜬다. 폰에서는 예전처럼
-        // 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
+        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 인셋에
+        // 흰 카드(`composer-card`)로 뜬다. 카드 아래는 시안의 여백 18이 아니라 늘 서 있는
+        // 「작성 중」 줄(`typing-line`, 글 한 줄 + 위아래 숨 8 = 34)이다(#5567). 폰에서는
+        // 예전처럼 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
         "composer-dock safe-area-bottom shrink-0",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
@@ -976,7 +977,7 @@ export function Composer({
         )
       )}
 
-      {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「입력 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
+      {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
           그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. */}
       {offline && (
         <p
@@ -1249,8 +1250,8 @@ export function Composer({
             className={COMPOSER_TEXTAREA_CLASS}
           />
         </ComposerCard>
-        {/* 남의 「입력 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다. 넓은 창에서는 카드가 떠 있던 아래 여백 18을 이 줄이
-            맡아 카드·입력창·대화 목록의 자리가 그대로이고, 줄이 서고 져도 아무것도 움직이지 않는다. */}
+        {/* 남의 「작성 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다(글 한 줄 + 위아래 숨 8). 아무도 안 칠 때도 같은 높이로
+            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. */}
         <TypingLine memberIds={typists} directory={directory} />
       </form>
 

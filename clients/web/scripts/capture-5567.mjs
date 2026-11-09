@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// #5567 캡처: 입력창 영역 — 밝게·어둡게 × 1280·900, 혼자 입력 중(두 사람 DM)·둘 입력 중(채널). 판정하지 않는다.
+// #5567 캡처: 입력창 영역 — 밝게·어둡게 × 1280·900, 혼자 작성 중(두 사람 DM)·둘 작성 중(채널). 판정하지 않는다.
 //
 //   npm run build && node scripts/capture-5567.mjs                       지금 번들(dist)
 //   CAP5567_DIST=<다른 번들 폴더> CAP5567_TAG=before node scripts/capture-5567.mjs   수리 전 번들
