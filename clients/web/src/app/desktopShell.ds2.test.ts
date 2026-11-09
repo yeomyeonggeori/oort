@@ -249,12 +249,18 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(CHAT_SHELL).not.toMatch(/\bshadow-head\b/);
   });
 
-  it("컴포저는 반경 20 · float 그림자의 흰 카드이고 좌우 24 · 아래 18에 뜬다", () => {
+  it("컴포저는 반경 20 · float 그림자의 흰 카드이고 좌우 24에 뜨며, 카드 아래는 「작성 중」 줄 칸이다", () => {
     const card = utility("composer-card");
     expect(card).toMatch(/border-radius: var\(--radius-2xl\);/);
     expect(TOKENS).toMatch(/--radius-2xl: 20px;/);
     expect(card).toMatch(/box-shadow: var\(--elevation-float\);/);
-    expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 18px;/);
+    // 카드 아래는 폼 여백이 아니라 늘 서 있는 「작성 중」 줄(text-meta 행간 + 위아래 숨 `--spacing-2`)이 진다(#5567, M-1).
+    expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 0;/);
+    expect(utility("typing-line")).toMatch(
+      /block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/
+    );
+    expect(utility("typing-line")).toMatch(/padding-block: var\(--spacing-2\);/);
+    expect(TOKENS).toMatch(/--text-meta--line-height: calc\(var\(--type-rem\) \* 1\.125\);/);
     expect(COMPOSER_CARD).toMatch(/"composer-card\b/);
     expect(COMPOSER).toContain("<ComposerCard");
     expect(COMPOSER).toMatch(/"composer-dock safe-area-bottom shrink-0"/);

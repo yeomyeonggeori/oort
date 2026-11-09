@@ -34,8 +34,10 @@ const agentCard = readFileSync(
   new URL("./AgentCard.tsx", import.meta.url),
   "utf8"
 );
+// 컴포저의 「지금은 못 보낸다」 줄은 카드 아래 늘 잡아 둔 칸(`TypingLine.tsx`)에 선다(#5575 검수 H1: 카드 위에 따로 서면 연결이
+// 흔들릴 때마다 대화 목록이 26~44px 움직였다). 같은 옷인지는 그 줄이 사는 파일에서 본다.
 const composer = readFileSync(
-  new URL("../chat/Composer.tsx", import.meta.url),
+  new URL("../chat/TypingLine.tsx", import.meta.url),
   "utf8"
 );
 
@@ -189,7 +191,7 @@ describe("한 클라 안에서 같은 말이 두 옷을 입지 않는다", () =>
     );
     expect(
       at,
-      `Composer.tsx에서 data-testid="${APPROVAL_NOTE_BLOCKED_TWIN}" 줄을 찾지 못했다`
+      `TypingLine.tsx에서 data-testid="${APPROVAL_NOTE_BLOCKED_TWIN}" 줄을 찾지 못했다`
     ).toBeGreaterThan(-1);
     const before = composer.slice(0, at);
     const worn = [...before.matchAll(/className="([^"]*)"/g)]
