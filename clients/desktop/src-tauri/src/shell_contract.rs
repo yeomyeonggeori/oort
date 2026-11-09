@@ -2097,8 +2097,9 @@ fn nothing_but_the_command_table_reaches_the_pty() {
 /// * `program_status` is named in `pty.rs` on the exact lines below and in
 ///   `lib.rs` as `mod program_status;`, nowhere else.
 /// * `program_status.rs` reads OSC 7501 only: its string literals are the
-///   7501 introducer and the closed words it reads (`state`, `kind`, `id` and
-///   their values), so no other OSC, no `title`, no `msg`; it names no text
+///   7501 introducer and the closed words it reads (`state`, `kind`, `id`,
+///   `app` and their values, `app`'s being the one alias `claude-code` of the
+///   harness id `claude`), so no other OSC, no `title`, no `msg`; it names no text
 ///   type, decoder, I/O, socket, thread, logging or hook path; and its public
 ///   surface is the closed enums, `feed(&[u8])` and `signal_for`.
 #[test]
@@ -2171,10 +2172,17 @@ fn pane_status_reads_output_only_through_the_7501_scanner() {
 
     const PTY_STATUS_LINES: &[&str] = &[
         "use crate::program_status;",
-        "let status = plan.hooks.then(program_status::Scanner::default);",
+        "let status = harness.map(program_status::Scanner::for_harness);",
         "mut status: Option<program_status::Scanner>,",
         "sink.report(program_status::signal_for(report));",
     ];
+    // A shell or sign-in pane (`hooks: None`) gets no scanner; a harness
+    // pane's scanner takes that harness's reports only.
+    assert!(
+        pty.lines()
+            .any(|l| l.trim() == "let harness = plan.hooks.map(str::as_bytes);"),
+        "the scanner's harness is not the plan's"
+    );
     for (name, src) in &sources {
         let code = code_only(src);
         let lines: Vec<&str> = code
@@ -2199,6 +2207,9 @@ fn pane_status_reads_output_only_through_the_7501_scanner() {
         "state",
         "kind",
         "id",
+        "app",
+        "claude",
+        "claude-code",
         "idle",
         "working",
         "blocked",
@@ -2275,6 +2286,7 @@ fn pane_status_reads_output_only_through_the_7501_scanner() {
             "pub state: State,",
             "pub kind: Option<Kind>,",
             "pub struct Scanner {",
+            "pub fn for_harness(harness: &[u8]) -> Self {",
             "pub fn feed(&mut self, bytes: &[u8]) -> Vec<Report> {",
             "pub fn signal_for(report: Report) -> Option<PaneSignal> {",
         ],

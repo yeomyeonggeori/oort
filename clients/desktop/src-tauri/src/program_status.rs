@@ -13,10 +13,12 @@
 // probe, which oort does not (see the #5579 PR body).
 //
 // Every other byte (text, titles, other OSCs, CSI) passes by without being
-// kept or forwarded. Of a 7501 report this module reads `state`, `kind` and
-// whether an `id` is present: words from closed lists. `title` and `msg` are
-// base64 text and are skipped unread, like any other key. What leaves is a
-// `Report` of two enums. `shell_contract.rs` pins all of this by source.
+// kept or forwarded. Of a 7501 report this module reads `state`, `kind`,
+// whether an `id` is present, and whether `app` names the pane's harness:
+// words from closed lists. `title` and `msg` are base64 text and are skipped
+// unread, like any other key. What leaves is a `Report` of two enums; `app`
+// is compared and never kept or shown. `shell_contract.rs` pins all of this
+// by source.
 //
 // The boundary, in the order a byte meets it:
 //
@@ -37,7 +39,12 @@
 //    A record with an `id` is a sub-task of the program (Claude Code reports
 //    background tasks that way) and is ignored, `state=clear:id=…` included.
 //    `state=clear` without an id withdraws the program's report.
-// 5. **Meaning.** `signal_for` maps `state` and `kind` onto `PaneSignal`. A
+// 5. **Whose record.** `app`, when present, must name the pane's harness
+//    (`app_names`: its own id, and `claude-code` for `claude`). A report from
+//    any other program (one the harness ran in its terminal, say) is ignored.
+//    No `app` reads as the harness's own (ADR-0190 증보: `app`은 하네스 라벨과
+//    대조만 한다).
+// 6. **Meaning.** `signal_for` maps `state` and `kind` onto `PaneSignal`. A
 //    pair without `=` or with a byte outside the spec's grammar is skipped.
 //    An unknown or missing `state` drops the report; an unknown `kind`, or a
 //    `kind` on any state but `blocked`, reads as absent. Repeated key: the
@@ -106,13 +113,24 @@ enum Mode {
 }
 
 /// One pane's scanner. Holds at most one unfinished sequence between reads.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Scanner {
     mode: Mode,
     payload: Vec<u8>,
+    /// The pane's harness id (one of `pty::HARNESSES`), for the `app` check.
+    harness: Vec<u8>,
 }
 
 impl Scanner {
+    /// The scanner for a pane that runs `harness` (its id, as bytes).
+    pub fn for_harness(harness: &[u8]) -> Self {
+        Self {
+            mode: Mode::default(),
+            payload: Vec::new(),
+            harness: harness.to_vec(),
+        }
+    }
+
     /// The reports completed in `bytes`, in order. The bytes themselves are
     /// not kept past the sequence they belong to.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Report> {
@@ -195,7 +213,11 @@ impl Scanner {
 
     fn finish(&mut self, terminator: usize) -> Option<Report> {
         let fits = INTRODUCER.len() + self.payload.len() + terminator <= MAX_SEQUENCE;
-        let report = if fits { parse(&self.payload) } else { None };
+        let report = if fits {
+            parse(&self.payload, &self.harness)
+        } else {
+            None
+        };
         self.abort();
         report
     }
@@ -206,10 +228,17 @@ fn value_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b',' | b'+' | b'/' | b'=' | b'-')
 }
 
-/// One payload (`key=value(:key=value)*`) → its root-record report, if any.
-fn parse(payload: &[u8]) -> Option<Report> {
+/// Does `app` name this harness? Its own id, or the name its CLI writes.
+fn app_names(harness: &[u8], app: &[u8]) -> bool {
+    app == harness || matches!((harness, app), (b"claude", b"claude-code"))
+}
+
+/// One payload (`key=value(:key=value)*`) → the harness's root-record
+/// report, if any.
+fn parse(payload: &[u8], harness: &[u8]) -> Option<Report> {
     let mut state = None;
     let mut kind = None;
+    let mut app = None;
     let mut child = false;
     for pair in payload.split(|&b| b == b':') {
         let Some(eq) = pair.iter().position(|&b| b == b'=') else {
@@ -225,11 +254,12 @@ fn parse(payload: &[u8]) -> Option<Report> {
         match key {
             b"state" => state = Some(value),
             b"kind" => kind = Some(value),
+            b"app" => app = Some(value),
             b"id" => child = true,
             _ => {}
         }
     }
-    if child {
+    if child || app.is_some_and(|app| !app_names(harness, app)) {
         return None;
     }
     let state = match state? {
@@ -260,14 +290,15 @@ fn parse(payload: &[u8]) -> Option<Report> {
 /// | `blocked` + `kind=permission` | `WaitingPermission` | 응답 필요 · 실행 허락 |
 /// | `blocked` + `question`·`auth`·none | `WaitingInput` | 응답 필요 · 답 |
 /// | `done` | `TurnDone` | 끝남 |
-/// | `error` | `TurnDone` | 끝남 |
+/// | `error` | `TurnFailed` | 실패 · 오류로 끝났어요 |
 /// | `clear` | none | 생명주기 |
 ///
-/// `error` reads as 끝남: the spec gives it `done`'s lifetime (kept until the
-/// person has seen it), the program is alive at its prompt waiting for the
-/// person exactly as after `done`, and 멈춤 means the pane's *process* stopped
-/// (`statusFromPhase`), which it has not. Telling a failed turn apart is a
-/// design-review question, not a new word here.
+/// `error` is its own signal (design-review #5584 H1): the program said the
+/// turn failed, so the pane must not say 끝남 with a check. It keeps `done`'s
+/// lifetime (the spec keeps it until the person has seen it; the program is
+/// alive at its prompt), so the webview files it under 끝남 for ordering and
+/// notification and draws it as 실패. 멈춤 would be wrong: that is the pane's
+/// *process* stopping (`statusFromPhase`), which it has not.
 pub fn signal_for(report: Report) -> Option<PaneSignal> {
     match report.state {
         State::Idle => Some(PaneSignal::Ready),
@@ -276,7 +307,8 @@ pub fn signal_for(report: Report) -> Option<PaneSignal> {
             Some(Kind::Permission) => PaneSignal::WaitingPermission,
             Some(Kind::Question | Kind::Auth) | None => PaneSignal::WaitingInput,
         }),
-        State::Done | State::Error => Some(PaneSignal::TurnDone),
+        State::Done => Some(PaneSignal::TurnDone),
+        State::Error => Some(PaneSignal::TurnFailed),
         State::Clear => None,
     }
 }
@@ -285,12 +317,24 @@ pub fn signal_for(report: Report) -> Option<PaneSignal> {
 mod tests {
     use super::*;
 
+    /// A Codex pane: most fixtures are Codex's bytes, or carry no `app`.
     fn scan(bytes: &[u8]) -> Vec<Report> {
-        Scanner::default().feed(bytes)
+        scan_in(b"codex", bytes)
+    }
+
+    fn scan_in(harness: &[u8], bytes: &[u8]) -> Vec<Report> {
+        Scanner::for_harness(harness).feed(bytes)
     }
 
     fn signals(bytes: &[u8]) -> Vec<Option<PaneSignal>> {
-        scan(bytes).into_iter().map(signal_for).collect()
+        signals_in(b"codex", bytes)
+    }
+
+    fn signals_in(harness: &[u8], bytes: &[u8]) -> Vec<Option<PaneSignal>> {
+        scan_in(harness, bytes)
+            .into_iter()
+            .map(signal_for)
+            .collect()
     }
 
     const fn report(state: State, kind: Option<Kind>) -> Report {
@@ -303,44 +347,125 @@ mod tests {
     #[test]
     fn codex_and_claude_reports_map_to_the_closed_table() {
         use PaneSignal::*;
-        let cases: &[(&[u8], Option<PaneSignal>)] = &[
-            (b"\x1b]7501;state=idle:app=codex\x1b\\", Some(Ready)),
-            (b"\x1b]7501;state=working:app=codex\x1b\\", Some(Working)),
-            (CODEX_BLOCKED, Some(WaitingPermission)),
+        let (codex, claude): (&'static [u8], &'static [u8]) = (b"codex", b"claude");
+        let cases: &[(&'static [u8], &[u8], Option<PaneSignal>)] = &[
+            (codex, b"\x1b]7501;state=idle:app=codex\x1b\\", Some(Ready)),
             (
+                codex,
+                b"\x1b]7501;state=working:app=codex\x1b\\",
+                Some(Working),
+            ),
+            (codex, CODEX_BLOCKED, Some(WaitingPermission)),
+            (
+                codex,
                 b"\x1b]7501;state=blocked:app=codex:kind=question\x1b\\",
                 Some(WaitingInput),
             ),
             (
+                codex,
                 b"\x1b]7501;state=blocked:app=codex:kind=auth\x1b\\",
                 Some(WaitingInput),
             ),
-            (b"\x1b]7501;state=done:app=codex\x1b\\", Some(TurnDone)),
-            (b"\x1b]7501;state=error:app=codex\x1b\\", Some(TurnDone)),
-            (b"\x1b]7501;state=clear\x1b\\", None),
+            (
+                codex,
+                b"\x1b]7501;state=done:app=codex\x1b\\",
+                Some(TurnDone),
+            ),
+            // A failed turn is not a finished one (design-review #5584 H1).
+            (
+                codex,
+                b"\x1b]7501;state=error:app=codex\x1b\\",
+                Some(TurnFailed),
+            ),
+            (codex, b"\x1b]7501;state=clear\x1b\\", None),
             // Claude Code 2.1.312 (`P1r`): BEL, `app=claude-code`, base64 msg.
             (
+                claude,
                 b"\x1b]7501;state=blocked:app=claude-code:kind=permission:msg=QWxsb3cgQmFzaD8=\x07",
                 Some(WaitingPermission),
             ),
             // `dialog open`: blocked with no kind.
             (
+                claude,
                 b"\x1b]7501;state=blocked:app=claude-code\x07",
                 Some(WaitingInput),
             ),
             (
+                claude,
                 b"\x1b]7501;state=working:app=claude-code:progress=40\x07",
                 Some(Working),
             ),
+            (
+                claude,
+                b"\x1b]7501;state=error:app=claude-code\x07",
+                Some(TurnFailed),
+            ),
         ];
-        for (bytes, want) in cases {
+        for (harness, bytes, want) in cases {
             assert_eq!(
-                signals(bytes),
+                signals_in(harness, bytes),
                 [*want],
                 "{:?}",
                 String::from_utf8_lossy(bytes)
             );
         }
+        // Nothing reads an error as a finished turn.
+        for harness in [codex, claude] {
+            assert_ne!(
+                signals_in(harness, b"\x1b]7501;state=error\x07"),
+                [Some(TurnDone)]
+            );
+        }
+    }
+
+    /// ADR-0190 증보 「`app`은 하네스 라벨과 대조만 한다」 (design-review #5584 M1):
+    /// a report names its program; a pane takes only its own harness's.
+    #[test]
+    fn a_report_counts_only_when_app_names_the_pane_harness() {
+        use PaneSignal::*;
+        let blocked = |app: &str| format!("\x1b]7501;state=blocked:kind=permission{app}\x1b\\");
+        let own: [(&'static [u8], &str); 6] = [
+            (b"codex", ":app=codex"),
+            (b"codex", ""),
+            (b"claude", ":app=claude-code"),
+            (b"claude", ":app=claude"),
+            (b"claude", ""),
+            (b"grok", ":app=grok"),
+        ];
+        for (harness, app) in own {
+            assert_eq!(
+                signals_in(harness, blocked(app).as_bytes()),
+                [Some(WaitingPermission)],
+                "{} pane, {app:?}",
+                String::from_utf8_lossy(harness)
+            );
+        }
+        let foreign: [(&'static [u8], &str); 8] = [
+            (b"codex", ":app=claude-code"),
+            (b"codex", ":app=Codex"),
+            (b"codex", ":app=codex-cli"),
+            (b"codex", ":app="),
+            (b"claude", ":app=codex"),
+            (b"claude", ":app=claude-code-x"),
+            (b"grok", ":app=codex"),
+            (b"grok", ":app=claude-code"),
+        ];
+        for (harness, app) in foreign {
+            assert!(
+                scan_in(harness, blocked(app).as_bytes()).is_empty(),
+                "{} pane took {app:?}",
+                String::from_utf8_lossy(harness)
+            );
+        }
+        // The last `app` wins, like any repeated key; a foreign one in the
+        // middle of a stream changes nothing and the next own report reads.
+        assert!(scan(b"\x1b]7501;app=codex:state=done:app=other\x07").is_empty());
+        assert_eq!(
+            signals(
+                b"\x1b]7501;state=working:app=claude-code\x07\x1b]7501;state=done:app=codex\x07"
+            ),
+            [Some(TurnDone)]
+        );
     }
 
     #[test]
@@ -351,7 +476,7 @@ mod tests {
             whole.extend_from_slice(terminator);
             whole.extend_from_slice(b" more");
             for cut in 0..=whole.len() {
-                let mut scanner = Scanner::default();
+                let mut scanner = Scanner::for_harness(b"codex");
                 let mut got = scanner.feed(&whole[..cut]);
                 got.extend(scanner.feed(&whole[cut..]));
                 assert_eq!(
@@ -362,7 +487,7 @@ mod tests {
                 );
             }
             // One byte per read.
-            let mut scanner = Scanner::default();
+            let mut scanner = Scanner::for_harness(b"codex");
             let got: Vec<Report> = whole.iter().flat_map(|b| scanner.feed(&[*b])).collect();
             assert_eq!(got.len(), 1);
         }
@@ -428,7 +553,7 @@ mod tests {
         let mut huge = head.to_vec();
         huge.resize(100_000, b'A');
         huge.extend_from_slice(b"\x07\x1b]7501;state=working\x1b\\");
-        let mut scanner = Scanner::default();
+        let mut scanner = Scanner::for_harness(b"codex");
         let got: Vec<Report> = huge.chunks(4096).flat_map(|c| scanner.feed(c)).collect();
         assert_eq!(got, [report(State::Working, None)]);
         assert!(scanner.payload.capacity() <= MAX_SEQUENCE, "kept the skip");

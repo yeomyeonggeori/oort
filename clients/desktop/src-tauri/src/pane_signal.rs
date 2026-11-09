@@ -62,6 +62,10 @@ pub enum PaneSignal {
     WaitingPermission,
     WaitingInput,
     TurnDone,
+    /// The turn ended in failure: only an OSC 7501 `state=error` says so
+    /// (#5579, `program_status.rs`). No hook does: Claude Code's `Stop` and
+    /// Codex's `agent-turn-complete` fire for any turn end.
+    TurnFailed,
 }
 
 /// Which path a signal took to the pane (#5579): a hook line on this
@@ -472,6 +476,10 @@ mod tests {
         assert_eq!(
             json(PaneSignalEvent::report(Some(PaneSignal::TurnDone))),
             r#"{"from":"report","signal":"turn-done"}"#
+        );
+        assert_eq!(
+            json(PaneSignalEvent::report(Some(PaneSignal::TurnFailed))),
+            r#"{"from":"report","signal":"turn-failed"}"#
         );
         assert_eq!(
             json(PaneSignalEvent::report(None)),

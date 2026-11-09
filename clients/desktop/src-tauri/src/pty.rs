@@ -231,11 +231,13 @@ pub struct SpawnPlan {
     /// PATH to set for the child; `None` keeps the inherited one (a login
     /// shell rebuilds its own).
     pub path: Option<OsString>,
-    /// Wire the harness's status hooks to this pane (#2776): the three
-    /// `OORT_PANE_*` variables and `pane_signal::harness_hook_args`; and read
-    /// its OSC 7501 reports (#5579, `program_status.rs`). Harness panes only:
-    /// a shell or a sign-in has nothing to report.
-    pub hooks: bool,
+    /// The harness whose status this pane takes (one of `HARNESSES`), or
+    /// `None`. `Some` wires its status hooks (#2776: the three `OORT_PANE_*`
+    /// variables and `pane_signal::harness_hook_args`) and reads its OSC 7501
+    /// reports, which must name this harness in `app` when they name one at
+    /// all (#5579, `program_status.rs`). Harness panes only: a shell or a
+    /// sign-in has nothing to report.
+    pub hooks: Option<&'static str>,
     /// A profile folder's variable (#2878): `CLAUDE_CONFIG_DIR` or
     /// `CODEX_HOME` → the folder `harness_profile` decided and checked.
     pub profile: Option<(&'static str, PathBuf)>,
@@ -253,7 +255,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: None,
-                hooks: false,
+                hooks: None,
                 profile: None,
             })
         }
@@ -281,7 +283,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
-                hooks: false,
+                hooks: None,
                 profile,
             })
         }
@@ -307,7 +309,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
-                hooks: false,
+                hooks: None,
                 profile: Some(profile),
             })
         }
@@ -333,7 +335,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
-                hooks: false,
+                hooks: None,
                 profile,
             })
         }
@@ -355,7 +357,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
-                hooks: true,
+                hooks: HARNESSES.iter().copied().find(|h| *h == id.as_str()),
                 profile,
             })
         }
@@ -584,7 +586,7 @@ impl PtyManager {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let mut cmd = cmd;
         let token = match (plan.hooks, self.hook_socket.get()) {
-            (true, Some(sock)) => {
+            (Some(_), Some(sock)) => {
                 let token = pane_signal::new_token().map_err(|e| format!("token: {e}"))?;
                 cmd.env(pane_signal::ENV_SOCK, sock);
                 cmd.env(pane_signal::ENV_PANE, id.to_string());
@@ -628,7 +630,9 @@ impl PtyManager {
         {
             let (flow, sink) = (flow.clone(), sink.clone());
             // A harness pane's program reports its status in band (#5579).
-            let status = plan.hooks.then(program_status::Scanner::default);
+            // Only that harness's own reports count (`app`, design-review M1).
+            let harness = plan.hooks.map(str::as_bytes);
+            let status = harness.map(program_status::Scanner::for_harness);
             std::thread::Builder::new()
                 .name(format!("pty-{id}-read"))
                 .spawn(move || read_loop(reader, sink, flow, status, drained_tx))
@@ -1017,7 +1021,7 @@ pub async fn pty_spawn(
         let mut cmd = build_command(&plan, std::env::vars_os());
         // The hook wiring is the only argv a harness gets, and it is fixed
         // here: this binary's own path and a closed event list (#2776).
-        if let (Program::Harness { id, .. }, true) = (&request.program, plan.hooks) {
+        if let (Program::Harness { id, .. }, Some(_)) = (&request.program, plan.hooks) {
             if manager.hook_socket().is_some() {
                 if let Some(args) = std::env::current_exe()
                     .ok()
@@ -1460,7 +1464,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
-            hooks: false,
+            hooks: None,
             profile: None,
         };
         let cmd = build_command(
@@ -1493,7 +1497,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
-            hooks: false,
+            hooks: None,
             profile: None,
         };
         let manager = PtyManager::default();
@@ -1531,7 +1535,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
-            hooks: false,
+            hooks: None,
             profile: None,
         };
         let manager = PtyManager::default();
@@ -1570,7 +1574,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
-            hooks: false,
+            hooks: None,
             profile: None,
         }
     }
@@ -1584,7 +1588,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
-            hooks: false,
+            hooks: None,
             profile: None,
         }
     }
@@ -2148,7 +2152,7 @@ mod tests {
         .unwrap();
         assert_eq!(plan.profile, Some(("CLAUDE_CONFIG_DIR", folder.clone())));
         assert_eq!(plan.args, vec!["auth", "login", "--claudeai"]);
-        assert!(!plan.hooks);
+        assert_eq!(plan.hooks, None);
         // The folder rides the child's environment as the CLI's config dir.
         let env = env_of(&build_command(&plan, base(&[("PATH", "/usr/bin")])));
         assert_eq!(env["CLAUDE_CONFIG_DIR"], folder.to_string_lossy());
@@ -2232,7 +2236,7 @@ mod tests {
         let claude_dir = harness_profile::profile_root(&host.home).join("claude/회사");
         let plan = plan_spawn(&profile_harness_request("claude", "회사"), &host).unwrap();
         assert_eq!(plan.program, bin.join("claude"));
-        assert!(plan.hooks);
+        assert_eq!(plan.hooks, Some("claude"));
         assert_eq!(
             plan.profile,
             Some(("CLAUDE_CONFIG_DIR", claude_dir.clone()))
@@ -2518,7 +2522,7 @@ line "not-the-token" Stop
 echo "id=$OORT_PANE_ID tlen=${#OORT_PANE_TOKEN} done"
 "#;
         let mut plan = sh(script);
-        plan.hooks = true;
+        plan.hooks = Some("claude");
         let sink = Arc::new(Recorder::default());
         let id = manager
             .spawn(&plan, build_command(&plan, path_env()), sink.clone())
@@ -2559,8 +2563,9 @@ echo "id=$OORT_PANE_ID tlen=${#OORT_PANE_TOKEN} done"
     /// #5579: a harness pane's program reports its status in band (OSC 7501,
     /// as Codex writes it: ST, and BEL as Claude Code writes it). The reader
     /// hands every byte to the page unchanged and only the scanner's closed
-    /// reports to the sink. A title that spells a state is not a report, and
-    /// a shell pane printing the same bytes reports nothing (ADR-0190 D4-b).
+    /// reports to the sink. A title that spells a state is not a report, a
+    /// report naming another program is not this pane's (design-review M1),
+    /// and a shell pane printing the same bytes reports nothing (ADR-0190 D4-b).
     #[test]
     fn a_harness_pane_report_reaches_its_sink_and_the_bytes_stay() {
         let script = r#"printf 'start\033]7501;state=idle:app=codex\033\\'
@@ -2568,11 +2573,13 @@ printf '\033]7501;state=working:app=codex\033\\'
 printf '\033]7501;state=blocked:app=codex:kind=permission\033\\'
 printf 'Allow command? \033]0;state=done\007\n'
 printf '\033]7501;state=done:app=claude-code\007'
+printf '\033]7501;state=done\007'
+printf '\033]7501;state=error:app=codex\033\\'
 printf '\033]7501;state=clear\033\\end\n'
 "#;
         let run = |hooks: bool| {
             let mut plan = sh(script);
-            plan.hooks = hooks;
+            plan.hooks = hooks.then_some("codex");
             let manager = PtyManager::default();
             let sink = Arc::new(Recorder::default());
             manager
@@ -2588,7 +2595,9 @@ printf '\033]7501;state=clear\033\\end\n'
                 Some(PaneSignal::Ready),
                 Some(PaneSignal::Working),
                 Some(PaneSignal::WaitingPermission),
+                // `done:app=claude-code` is another program's: dropped.
                 Some(PaneSignal::TurnDone),
+                Some(PaneSignal::TurnFailed),
                 None,
             ]
         );
