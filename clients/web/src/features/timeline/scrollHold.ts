@@ -180,8 +180,8 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   scroller.addEventListener("scroll", onScroll, { passive: true });
   return {
     expectBottom: () => {
-      // 바닥에 있던 목록은 늘 하던 대로 둔다(가상 목록의 따라가기 + 위 바닥 붙이기). 여기서 한 번 더 놓으면 순서가 바뀌어 가상 목록의
-      // 마지막 따라가기가 바닥보다 8px 위에 앉는다(#5603 게이트 실측: 바닥에서 보낸 줄의 아래 8px 이 잘림). 판정은 바뀌기 전의 위치다.
+      // 바닥에 있던 목록은 늘 하던 대로 둔다(가상 목록의 따라가기 + 위 바닥 붙이기). 바닥에서 보낸 글은 수리 전에도 따라갔으므로 이 수리의
+      // 대상이 아니고, 손대지 않아야 #5583 이 잰 바닥 동작이 그대로다. 판정은 바뀌기 전의 위치다.
       if (wasAtBottom) return;
       anchor = null;
       wasAtBottom = true;

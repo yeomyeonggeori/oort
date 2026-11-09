@@ -213,9 +213,17 @@ describe("내가 보낸 글은 위로 올려 둔 채여도 맨 아래로 간다 
     expect(hold.expectBottom).not.toHaveBeenCalled();
   });
 
-  it("열 때 이미 있던 메아리는 보낸 것으로 치지 않는다(바탕으로만 적는다)", () => {
-    mount([echo("c-4")]);
+  it("목록이 통째로 바뀐 렌더(다른 대화·다시 읽기)의 메아리는 보낸 것이 아니라 바탕으로만 적는다", () => {
+    mount();
+    scrollUp();
+    // seq 가 하나도 겹치지 않는 목록 = 흐름이 바뀌었다(epoch). 그 렌더에 이미 있던 메아리는 지금 보낸 것이 아니다.
+    const other = [21, 22, 23].map((seq) => message(seq));
+    render(other, [echo("c-5")]);
+    render(other, [echo("c-5")]);
     expect(hold.expectBottom).not.toHaveBeenCalled();
+    // 그 뒤에 보낸 글은 보낸 것이다.
+    render(other, [echo("c-5"), echo("c-6")]);
+    expect(hold.expectBottom).toHaveBeenCalledTimes(1);
   });
 });
 
