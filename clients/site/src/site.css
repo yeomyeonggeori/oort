@@ -312,6 +312,12 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
   .foot-langs { row-gap: 0; }
   .foot-langs a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 7px; margin: 0 -7px; }
 }
+/* #5590: 600~767 은 「문서」만 아이콘(36×36, 이름은 aria-label·title). 이름이 긴 언어(es 「Documentación」 +
+   「Español (Latinoamérica)」)에서 머리 컨트롤이 두 줄로 접혀 머리 줄이 첫 화면 머리글(위 128)을 덮었다(600·640 에서 아래 149) */
+@media (min-width: 600px) and (max-width: 767px) {
+  .docs-link { width: 36px; padding: 0; justify-content: center; }
+  .docs-link .docs-t { display: none; }
+}
 /* L2: hover 는 포인터가 있는 기기에서만. 주 버튼은 두 반쪽이 함께 잉크만 옅어진다 */
 @media (hover: hover) {
   .ghost:hover { background: var(--glass); }

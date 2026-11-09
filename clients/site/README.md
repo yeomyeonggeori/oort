@@ -49,7 +49,7 @@ ONLY=chip,lang node clients/site/scripts/check.mjs   # 일부만
 
 ## 문서 (`/docs`, #5590)
 
-쪽은 ko·en 두 언어 × 여섯(`overview`·`concepts`·`quickstart`·`agents`·`webhooks`·`security`)이고, 파일은 `docs/<lang>/<쪽>.md`예요. 개요는 `/docs/<lang>/`, 나머지는 `/docs/<lang>/<쪽>/`에 나가요. 내려받기 페이지 머리의 「문서」는 ko 페이지에서 `/docs/ko/`, 다른 언어 페이지에서 `/docs/en/`으로 가요(문서는 ko·en만 있어요). 문서 안 링크는 모두 `/`로 시작해요(`app.oor7.com/docs`처럼 끝 `/` 없이 열려도 맞게).
+쪽은 ko·en 두 언어 × 여섯(`overview`·`concepts`·`quickstart`·`agents`·`webhooks`·`security`)이고, 파일은 `docs/<lang>/<쪽>.md`예요. 개요는 `/docs/<lang>/`, 나머지는 `/docs/<lang>/<쪽>/`에 나가요. 내려받기 페이지 머리의 「문서」는 ko 페이지에서 `/docs/ko/`, 다른 언어 페이지에서 `/docs/en/`으로 가요(문서는 ko·en만 있어요). 768 아래에서는 아이콘만 보여요(이름은 `aria-label`·`title`). 600~767에서 이름까지 보이면 es처럼 긴 언어의 머리 컨트롤이 두 줄로 접혀 첫 화면 머리글을 덮어서예요(`check.mjs` 머리 줄 칸이 600·640·700·768·860에서 막아요). 문서 안 링크는 모두 `/`로 시작해요(`app.oor7.com/docs`처럼 끝 `/` 없이 열려도 맞게).
 
 맨 위 머리 칸은 다섯 줄이 모두 있어야 해요.
 

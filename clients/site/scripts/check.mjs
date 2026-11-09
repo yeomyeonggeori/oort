@@ -1012,6 +1012,24 @@ async function main() {
     check("머리 줄: 폰이면 머리 「브라우저에서 열기」 숨김, 첫 화면 웹 링크 하나", bad.link.length === 0, show(bad.link));
     check("머리 줄: 320 언어 판이 화면 안, 항목 한 줄(7언어 × 일반·폰)", bad.menu.length === 0, `${bad.menu.length}/14 ${bad.menu.join(" ")}`);
 
+    // 머리 줄이 첫 화면 머리글을 덮지 않는다(#5590: 「문서」가 더해져 es 600·640 에서 컨트롤이 두 줄로 접혀 머리 줄 아래 149 > 머리글 위 128).
+    // 7개 언어 × 600·640·700·768·860(일반 창, 600 위는 컨트롤 이름이 보이는 폭)
+    const cover = [];
+    const coverRec = [];
+    for (const w of [600, 640, 700, 768, 860]) {
+      const cc = await browser.newContext({ viewport: { width: w, height: 700 }, reducedMotion: "reduce", colorScheme: "light" });
+      const cp = await cc.newPage();
+      for (const lang of LANGS) {
+        await cp.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+        await cp.evaluate(() => document.fonts.ready);
+        const m = await cp.evaluate(() => ({ head: Math.round(document.querySelector(".top").getBoundingClientRect().bottom), eyebrow: Math.round(document.querySelector(".hero .eyebrow").getBoundingClientRect().top) }));
+        if (m.head > m.eyebrow) cover.push(`${lang}-${w}:${m.head}>${m.eyebrow}`);
+        if (lang === "es" || lang === "fr") coverRec.push(`${lang}-${w}=${m.head}/${m.eyebrow}`);
+      }
+      await cc.close();
+    }
+    check("머리 줄이 첫 화면 머리글을 덮지 않음(7개 언어 × 600·640·700·768·860, 머리 줄 아래 ≤ 머리글 위)", cover.length === 0, cover.length ? `${cover.length}/35 ${cover.slice(0, 6).join(" ")}` : `0/35 · 기록(머리 줄 아래/머리글 위) ${coverRec.join(" ")}`);
+
     // 안전망: 자리가 모자라면 컨트롤 묶음이 아랫줄 오른쪽 끝으로 내려가고 넘치지 않는다(정본 #4230). 620 일반 창에서 언어 이름을 늘려 잰다
     const sx = await browser.newContext({ viewport: { width: 620, height: 700 }, reducedMotion: "reduce" });
     const sp = await sx.newPage();
