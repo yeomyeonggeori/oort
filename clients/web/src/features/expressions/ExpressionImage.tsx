@@ -38,6 +38,24 @@ function slotBox(width: number, height: number, limit: number) {
   const scale = Math.min(1, limit / width, limit / height);
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
+/**
+ * 그림 받기 실패가 **지나가는 것**인가(#5575): 오프라인 · 저장소가 받는 도중 걷음(세대 교체) · 응답 없음(`fetch`의 TypeError) · 시간 초과 ·
+ * 서버가 잠시 못 답함(408·429·5xx). 이런 실패에 칸을 `:이름:` 글자로 바꾸면 그림 줄(최대 200px)이 글자 한 줄이 되고, 다시 받는 순간 되돌아오며
+ * 목록 높이가 위아래로 뛴다(데스크탑 WebKit 에서 목록이 수백 px 밀리고 「최신 메시지로 이동」이 섰다). 그 밖의 실패(숨김·틀린 sha 의 404, 권한,
+ * 형식이 다름, 디코드 실패)는 다시 받아도 같으므로 글자로 둔다.
+ */
+function transientImageFailure(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === "AbortError" || name === "TimeoutError") return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === "number") return status === 408 || status === 429 || status >= 500;
+  const message = (error as { message?: unknown } | null)?.message;
+  return message === "offline" || message === "evicted expression";
+}
+/** 지나가는 실패 뒤 다시 받기까지 기다리는 시간: 1.5초부터 두 배씩, 30초에서 멈춘다(연결이 오래 끊겨도 요청이 쌓이지 않는다). */
+const RETRY_FIRST_MS = 1_500;
+const RETRY_MAX_MS = 30_000;
 
 /** All images enter through the authenticated transport, including draft previews. */
 export function ExpressionImage({ item, size = "inline", still = false, onReady }: {
@@ -61,7 +79,9 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   // 지금 화면에 걸린 그림. 다음 그림이 준비(디코드)될 때까지 이 그림이 그대로 보이고, 준비되면 같은 <img> 에서 src 만 바뀐다.
   // (옛 판은 key 를 바꿔 <img> 를 새로 만들었고, 그 사이에 글자 자리표시가 서서 칸이 비거나 높이가 바뀌었다. 이 판은 <img> 를 만들지 않는다.)
   const [shown, setShown] = useState<{ key: string; epoch: number; owner: string; src: string } | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  // 받기에 실패한 그림의 key 와, 그 실패가 지나가는 것인지(`transientImageFailure`). 지나가는 실패는 같은 크기의 빈 칸으로 기다렸다 다시 받는다.
+  const [failed, setFailed] = useState<{ key: string; transient: boolean } | null>(null);
+  const retries = useRef(0);
   // 그려진 <img>의 key. load는 보임보다 먼저 올 수 있고, 동작 줄이기에서는 보임이 바뀌어도 그림 주소(key)가 같아
   // <img>가 다시 만들어지지 않으므로 load가 다시 오지 않는다. 그래서 load는 기록만 하고 신호는 아래 효과가 낸다.
   // 신호를 받는 쪽이 없으면(본문·격자·반응의 그림) load 처리기도 달지 않는다: 줄마다 다시 그리는 비용이 늘지 않는다.
@@ -103,13 +123,30 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
       store.discardImage(path);
       throw error;
     })).then(
-      (src) => { if (live) setShown({ key, epoch, owner, src }); },
-      () => { if (live) setFailed(key); },
+      (src) => {
+        if (!live) return;
+        retries.current = 0;
+        setShown({ key, epoch, owner, src });
+        setFailed((prior) => prior?.key === key ? null : prior);
+      },
+      (error: unknown) => { if (live) setFailed({ key, transient: transientImageFailure(error) }); },
     );
     return () => { live = false; };
   }, [store, path, key, offline, epoch, owner, animated, endless, replay, heldKey]);
+  // 지나가는 실패(연결 끊김 · 서버 재시작 · 세대 교체 경합): 빈 칸으로 기다렸다가 같은 그림을 다시 받는다. 오프라인 동안은 기다리지 않는다 —
+  // 돌아오면 위 효과가 `offline` 바뀜으로 다시 받는다.
+  useEffect(() => {
+    if (failed === null || !failed.transient || failed.key !== key || offline) return;
+    const timer = window.setTimeout(() => {
+      retries.current += 1;
+      setAttempt((value) => value + 1);
+    }, Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** retries.current));
+    return () => window.clearTimeout(timer);
+  }, [failed, key, offline]);
+  // 정말로 깨진 그림의 key(지나가는 실패는 깨진 것이 아니다).
+  const broken = failed !== null && !failed.transient ? failed.key : null;
   // 걸린 그림이 지금 보여도 되는 그림인가: 이 표현의 것이고, 같은 세대의 것이고, 오프라인이 아니고, 이 표현에 아직 그림이 있고, 깨지지 않았다.
-  const current = shown && shown.owner === owner && shown.epoch === epoch && !offline && path !== null && failed !== shown.key ? shown : null;
+  const current = shown && shown.owner === owner && shown.epoch === epoch && !offline && path !== null && broken !== shown.key ? shown : null;
   // 걸린 그림이 지금 바라는 그림(key)이기도 한가. 아니면 바라는 그림을 준비하는 동안 앞 그림이 대신 걸려 있는 것이다.
   const available = current !== null && current.key === key;
   const playing = animated && available;
@@ -134,24 +171,27 @@ export function ExpressionImage({ item, size = "inline", still = false, onReady 
   const full = item.media?.[fullVariant];
   const limit = (BOX_LIMIT as Record<string, number | undefined>)[size];
   const slot = !still && !reduce && limit !== undefined && full ? slotBox(full.width, full.height, limit) : null;
-  // 아직 못 받았을 뿐 깨지지 않았다면 글자 자리표시 대신 같은 크기의 빈 칸을 세운다(받는 동안 글자 폭만큼 줄이 뛰지 않게). 깨졌거나 오프라인이면 글자다.
+  // 그림을 지금 못 그리는 이유가 지나가는 것(받는 중 · 오프라인 · 세대 교체 · 지나가는 실패)이면 글자 자리표시 대신 같은 크기의 빈 칸을 세운다
+  // (#5575: 그림 줄이 글자 한 줄로 줄었다 되돌아오며 목록이 뛰었다). 오프라인에서도 그림이 아니라 정지 자리표시다(ADR-0218 「offline에서는
+  // 문자열/정지 자리표시만」). 글자는 이 표현에 그림이 없거나(숨김·삭제는 목록에서 빠져 본문이 글자로 그린다) 그림이 정말로 깨졌을 때만이다.
   const own = item.media?.[variant];
-  const loading = !offline && path !== null && failed !== key && failed !== shown?.key && own !== undefined;
+  const placeholder = path !== null && own !== undefined && broken !== key && broken !== shown?.key;
   const reserved = slot ?? (own ? { width: own.width, height: own.height } : null);
-  const image = current ? <img src={current.src} alt={expressionAltText(item as Expression)} className="expression-image" data-size={size} width={slot?.width} height={slot?.height}
+  const alt = expressionAltText(item as Expression);
+  const image = current ? <img src={current.src} alt={alt} className="expression-image" data-size={size} width={slot?.width} height={slot?.height}
     onLoad={onReady && !still ? () => setPainted(current.key) : undefined}
     onError={() => {
       // 그려지다 깨진 그림도 같다: 지우기가 먼저다(위 효과의 주석).
       if (store && path && heldKey) { kept.current.bytes.delete(heldKey); store.discardImage(path); }
-      setFailed(current.key);
+      setFailed({ key: current.key, transient: false });
     }} />
-    : loading && reserved ? <canvas aria-hidden="true" className="expression-image" data-size={size} width={reserved.width} height={reserved.height} /> : <span>{`:${item.name}:`}</span>;
+    : placeholder && reserved ? <canvas role="img" aria-label={alt} className="expression-image" data-size={size} data-expression-placeholder="" width={reserved.width} height={reserved.height} /> : <span>{`:${item.name}:`}</span>;
   return <span ref={root} className="relative inline-block align-middle" data-expression-name={item.name}>
     {image}
     {/* 멈춘 그림 위에 덮는 단추: <img> 를 단추 안으로 옮기면 노드가 새로 만들어져 깜빡이므로, 그림은 그대로 두고 단추만 얹는다. */}
     {stopped && !still && !reduce && !endless && (
       <button type="button" onClick={() => { setStopped(false); setReplay((value) => value + 1); }} aria-label={`${item.displayName} 다시 재생`} className="absolute inset-0 rounded-sm press focus-visible:focus-ring" />
     )}
-    {size === "large" && failed === key && !offline && <button type="button" onClick={() => { setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}
+    {size === "large" && broken === key && !offline && <button type="button" onClick={() => { setFailed(null); setAttempt((value) => value + 1); }} className="ml-2 text-meta text-signal-text underline press focus-visible:focus-ring">그림 다시 불러오기</button>}
   </span>;
 }
