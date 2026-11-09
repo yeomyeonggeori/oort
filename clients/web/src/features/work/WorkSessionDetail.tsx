@@ -7,11 +7,23 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   endWorkSession,
+  killWorkSession,
   sendThreadReply,
   uuidEq,
   type WorkHost,
   type WorkSession,
 } from "@momo/core/lib/api";
+import {
+  STOP_ACTION_LABEL,
+  STOP_CONFIRM_ASK,
+  STOP_CONFIRM_DETAIL,
+  STOP_NOT_RUNNING_LINE,
+  STOP_OWNER_ONLY_LINE,
+  STOP_STOPPED_LINE,
+  stopFailureLine,
+  stopRequestedLine,
+  stopsWithKill,
+} from "@momo/core/features/work/stopWork";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { CHIP_CLASS } from "@/features/common/chip";
@@ -378,14 +390,25 @@ function ExcerptForm({
  * vocabulary), not a status. 세션 종료 is the different thing this pane really
  * can do (the process, not the turn), behind a two step confirmation, and it
  * states its own reason when it is unavailable.
+ *
+ * #5595 (ADR-0188 D3): a session on the owner's own Mac stops through the kill
+ * route (`killWorkSession`), the phone's verb and copy (core `stopWork.ts`).
+ * `PATCH ended` only settles the ledger and never reaches the Mac, so on that
+ * session it is gone from here. It stays for the sessions the kill route
+ * refuses by rule (`stopPath`: a workspace host, a shared local pane, another
+ * person's or a revoked host), where it is the only end there is. The kill
+ * answer says whether the Mac is on: off means 「맥이 켜지면 멈춰요」, never
+ * 「멈췄어요」, which waits for the ledger to say `ended`.
  */
 function SessionActions({
   session,
+  hosts,
   onExcerpt,
   excerptOpen,
   excerptRef,
 }: {
   session: WorkSession;
+  hosts: readonly WorkHost[] | undefined;
   onExcerpt: () => void;
   excerptOpen: boolean;
   excerptRef: React.RefObject<HTMLButtonElement>;
@@ -395,16 +418,27 @@ function SessionActions({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  /** The kill route's answer as one line (#5595); null until it answered. */
+  const [requested, setRequested] = useState<string | null>(null);
 
+  const kill = stopsWithKill(session, hosts);
+  const verb = kill ? STOP_ACTION_LABEL : "세션 종료";
+  const done = kill ? requested !== null : ended;
+  // 내가 멈춘 세션만 「멈췄어요」를 말한다(폰과 같은 규칙). 원장이 ended를 말할 때까지는 요청 줄이다.
+  const stopped = kill && requested !== null && session.status === "ended";
   const running = session.status === "running" || session.status === "idle";
   const owner = uuidEq(session.memberId, auth.member.id);
   const endReason = !running
-    ? session.status === "orphaned"
-      // Same M1 rule as observerStream: orphaned is resumable, not closed.
-      ? "호스트 연결이 끊긴 세션입니다."
-      : "이미 닫힌 세션입니다."
+    ? kill
+      ? STOP_NOT_RUNNING_LINE
+      : session.status === "orphaned"
+        // Same M1 rule as observerStream: orphaned is resumable, not closed.
+        ? "호스트 연결이 끊긴 세션입니다."
+        : "이미 닫힌 세션입니다."
     : !owner
-      ? "세션을 시작한 사람만 종료할 수 있습니다."
+      ? kill
+        ? STOP_OWNER_ONLY_LINE
+        : "세션을 시작한 사람만 종료할 수 있습니다."
       : null;
 
   async function end() {
@@ -412,11 +446,16 @@ function SessionActions({
     setPending(true);
     setError(null);
     try {
-      await endWorkSession(workspaceId, session.id);
-      setEnded(true);
+      if (kill) {
+        setRequested(stopRequestedLine(await killWorkSession(workspaceId, session.id)));
+      } else {
+        await endWorkSession(workspaceId, session.id);
+        setEnded(true);
+      }
       setArmed(false);
-    } catch {
-      setError("세션을 종료하지 못했습니다. 다시 시도하세요.");
+    } catch (caught) {
+      // 실패하면 누르기 전으로 돌아간다: 아직 도는 작업에 다시 누를 수 있어야 한다.
+      setError(kill ? stopFailureLine(caught) : "세션을 종료하지 못했습니다. 다시 시도하세요.");
     } finally {
       setPending(false);
     }
@@ -430,11 +469,11 @@ function SessionActions({
             type="button"
             variant="outline"
             size="sm"
-            disabled={endReason !== null || ended}
+            disabled={endReason !== null || done}
             onClick={() => setArmed(true)}
             data-testid="work-end-session"
           >
-            세션 종료
+            {verb}
           </Button>
         ) : (
           <span className="flex items-center gap-2" data-testid="work-end-confirm">
@@ -457,7 +496,7 @@ function SessionActions({
               data-testid="work-end-commit"
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "종료 중" : "종료 확정"}
+              {kill ? STOP_ACTION_LABEL : pending ? "종료 중" : "종료 확정"}
             </Button>
           </span>
         )}
@@ -480,13 +519,19 @@ function SessionActions({
           about. */}
       {armed && (
         <p className="text-meta text-ink" data-testid="work-end-warning">
-          세션 종료는 턴 하나가 아니라 이 세션 전체를 끝냅니다. 호스트에서
-          실행 중이던 작업도 함께 정리됩니다.
+          {kill
+            ? `${STOP_CONFIRM_ASK} ${STOP_CONFIRM_DETAIL}`
+            : "세션 종료는 턴 하나가 아니라 이 세션 전체를 끝냅니다. 호스트에서 실행 중이던 작업도 함께 정리됩니다."}
         </p>
       )}
-      {endReason !== null && !ended && (
+      {endReason !== null && !done && (
         <p className="text-meta text-ink-muted" data-testid="work-end-reason">
-          세션 종료: {endReason}
+          {verb}: {endReason}
+        </p>
+      )}
+      {kill && requested !== null && (
+        <p role="status" className="text-meta text-ink-muted" data-testid="work-stop-requested">
+          {stopped ? STOP_STOPPED_LINE : requested}
         </p>
       )}
       {ended && (
@@ -1298,6 +1343,7 @@ export function WorkSessionDetail({
 
       <SessionActions
         session={session}
+        hosts={hosts}
         excerptOpen={excerptOpen}
         excerptRef={excerptRef}
         onExcerpt={() => {

@@ -4,6 +4,7 @@ import { ApiError, killWorkSession } from "../../lib/api";
 import {
   canStopSession,
   stopFailureLine,
+  stopPath,
   stopRequestedLine,
 } from "./stopWork";
 
@@ -88,6 +89,31 @@ describe("canStopSession", () => {
       expect(canStopSession({ status, memberId: ME } as never, ME)).toBe(false);
     }
     expect(canStopSession({ status: "running", memberId: SID }, ME)).toBe(false);
+  });
+});
+
+describe("stopPath (#5595): 웹·데스크탑 멈추기는 kill 라우트가 받는 세션에서만 kill이다", () => {
+  const MAC = "00000000-0000-7000-8000-0000000003aa";
+  const mac = { id: MAC, scope: "member" as const, ownerMemberId: ME };
+  const mine = { hostId: MAC, memberId: ME };
+  it("세션 주인의 맥(member, 호스트 주인 = 세션 주인)에서 연 세션은 kill이다. 대소문자는 가리지 않는다", () => {
+    expect(stopPath({ ...mine, hostId: MAC.toUpperCase(), origin: "host" }, [mac])).toBe("kill");
+    expect(stopPath(mine, [{ ...mac, ownerMemberId: ME.toUpperCase() }])).toBe("kill");
+  });
+  it("길은 세션 주인 기준이다: 남이 보는 내 맥 세션도 kill 길이고, 잠금은 canStopSession이 한다", () => {
+    expect(stopPath(mine, [mac])).toBe("kill");
+    expect(canStopSession({ status: "running", memberId: ME }, SID)).toBe(false);
+  });
+  it("호스트를 아직 모르면 kill이다(서버가 판정하고 거절은 stopFailureLine이 말한다)", () => {
+    expect(stopPath(mine, undefined)).toBe("kill");
+    expect(stopPath(mine, [])).toBe("kill");
+  });
+  it("kill 라우트가 규칙상 거절하는 세션은 원장 종료다: 공용 호스트·남의 맥·폐기된 호스트·맥에서 직접 연 창", () => {
+    expect(stopPath(mine, [{ ...mac, scope: "workspace" }])).toBe("ledger");
+    expect(stopPath(mine, [{ ...mac, ownerMemberId: SID }])).toBe("ledger");
+    expect(stopPath(mine, [{ ...mac, revokedAtMs: 1 }])).toBe("ledger");
+    expect(stopPath({ ...mine, origin: "local_pty" }, [mac])).toBe("ledger");
+    expect(stopPath({ ...mine, origin: "local_pty" }, undefined)).toBe("ledger");
   });
 });
 
