@@ -347,6 +347,81 @@ async function scene(browser, origin, scheme) {
   });
   await codexA.screenshot({ path: resolve(OUT_DIR, `codex-pane-working-${tag}.png`) });
   report.scenes.push(`codex-pane-working-${tag}`);
+
+  // design-review #5584 H1: 턴 실패(OSC 7501 `error` → `turn-failed`)는 성공 모양이 아니다.
+  // 셸 칸을 보고 있는 동안 Codex 칸 A는 실패, B는 성공으로 턴을 끝낸다(둘 다 인박스에 오른다).
+  await page.locator("[data-testid='my-work-tab'] [data-pane-id='p1'] .xterm-helper-textarea").focus();
+  await page.evaluate(() => {
+    window.__report["로그 회전 설정"]("working");
+    window.__report["빌드 스크립트 정리"]("turn-failed");
+    window.__report["로그 회전 설정"]("turn-done");
+  });
+  await page.waitForTimeout(300);
+  const tokenColor = (name) =>
+    page.evaluate((n) => {
+      const probe = document.createElement("span");
+      probe.style.color = `var(${n})`;
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    }, name);
+  const markLook = (loc) =>
+    loc.locator("[data-testid='status-mark']").first().evaluate((el) => {
+      const glyph = el.querySelector("i");
+      const style = glyph ? getComputedStyle(glyph) : null;
+      return {
+        status: el.getAttribute("data-status"),
+        color: getComputedStyle(el).color,
+        mask: style ? style.webkitMaskImage || style.maskImage || "" : "",
+      };
+    });
+  const [danger, ok] = [await tokenColor("--danger"), await tokenColor("--ok")];
+  const failedLook = await markLook(codexA);
+  const doneLook = await markLook(codexB);
+  check(`${tag} 실패 칸 표지: data-status=failed, 색 --danger(≠ --ok), 글리프 ✕(≠ ✓)`,
+    failedLook.status === "failed" && failedLook.color === danger && failedLook.color !== ok &&
+      failedLook.mask.includes("M6 6l12 12") && !failedLook.mask.includes("M4 12.5l5 5L20 6.5"),
+    { failedLook: { ...failedLook, mask: failedLook.mask.slice(0, 40) }, danger, ok });
+  check(`${tag} 성공 칸은 그대로 ✓ --ok`, doneLook.status === "done" && doneLook.color === ok, { doneLook: { ...doneLook, mask: doneLook.mask.slice(0, 40) } });
+  const failedLabel = (await codexA.getAttribute("aria-label")) ?? "";
+  check(`${tag} 실패 칸 접근 이름은 「…, 실패」(「끝남」 아님)`, failedLabel.endsWith(", 실패") && !failedLabel.includes("끝남"), { failedLabel });
+  const statusTitle = await codexA.locator("[data-testid='workbench-pane-status']").getAttribute("title");
+  const description = await codexA.getAttribute("aria-description");
+  check(`${tag} 출처 한 줄: 「Codex가 알린 상태예요」(표지 툴팁·칸 설명)`,
+    statusTitle === "실패 · Codex가 알린 상태예요" && description === "Codex가 알린 상태예요", { statusTitle, description });
+  const rowChip = await page
+    .locator("[data-testid='session-list-row'][data-session-pane] [data-testid='session-row-chip'][data-status='failed']")
+    .allTextContents();
+  check(`${tag} 세션 목록 줄 칩 「실패」`, rowChip.length === 1 && rowChip[0] === "실패", { rowChip });
+  await page.getByTestId("my-work-tab").screenshot({ path: resolve(OUT_DIR, `grid-error-${tag}.png`) });
+  report.scenes.push(`grid-error-${tag}`);
+  await codexA.screenshot({ path: resolve(OUT_DIR, `codex-pane-error-${tag}.png`) });
+  report.scenes.push(`codex-pane-error-${tag}`);
+  await page.screenshot({ path: resolve(OUT_DIR, `window-error-${tag}.png`) });
+  report.scenes.push(`window-error-${tag}`);
+
+  // 인박스와 사이드바: 실패 줄은 ✕ 「오류로 끝났어요」, 사이드바 칩 「실패」.
+  await page.getByTestId("nav-inbox").click();
+  await page.getByTestId("inbox-route").waitFor();
+  await page.waitForTimeout(300);
+  const inboxRows = await page.getByTestId("inbox-local-pane").evaluateAll((rows) =>
+    rows.map((r) => ({ mark: r.querySelector("[data-testid='status-mark']")?.getAttribute("data-status"), text: r.textContent }))
+  );
+  const failedRow = inboxRows.find((r) => r.text?.includes("빌드 스크립트 정리"));
+  const doneRow = inboxRows.find((r) => r.text?.includes("로그 회전 설정"));
+  check(`${tag} 인박스 실패 줄: ✕ 「오류로 끝났어요」(「작업이 끝났어요」 아님)`,
+    failedRow?.mark === "failed" && failedRow.text.includes("오류로 끝났어요") && !failedRow.text.includes("작업이 끝났어요"),
+    { inboxRows });
+  check(`${tag} 인박스 성공 줄은 그대로 ✓ 「작업이 끝났어요」`, doneRow?.mark === "done" && doneRow.text.includes("작업이 끝났어요"), { doneRow });
+  const liveChips = await page.getByTestId("sidebar-live-pane-chip").evaluateAll((chips) =>
+    chips.map((c) => ({ status: c.getAttribute("data-status"), text: c.textContent }))
+  );
+  check(`${tag} 사이드바 줄 칩: 실패는 「실패」`, liveChips.some((c) => c.status === "failed" && c.text === "실패"), { liveChips });
+  await page.getByTestId("inbox-route").screenshot({ path: resolve(OUT_DIR, `inbox-error-${tag}.png`) });
+  report.scenes.push(`inbox-error-${tag}`);
+  await page.getByTestId("sidebar-destinations").screenshot({ path: resolve(OUT_DIR, `sidebar-error-${tag}.png`) });
+  report.scenes.push(`sidebar-error-${tag}`);
   await context.close();
 }
 
