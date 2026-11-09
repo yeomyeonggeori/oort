@@ -13,7 +13,9 @@
 // 문구를 바꿀 때 줄바꿈을 보는 줄: ONLY=pages),
 // 폰 흉내(첫 화면 주 행동이 웹, Mac 내려받기는 기기 목록, JS 없으면 Mac), WebKit 일본어 줄바꿈(조사 앞에서 안 끊김),
 // 머리 줄(7개 언어 × 320·360·375·390·568·600 × 일반·폰 흉내: 로고 한 줄·마크 크기·컨트롤 화면 안·넘침 0·아이콘 44·폰 링크 하나),
-// 머리 로고 배색(링은 글자색, 위성은 tokens.css 의 --signal: 메뉴 막대 oort-tray-unread-on-* 와 같은 값).
+// 머리 로고 배색(링은 글자색, 위성은 tokens.css 의 --signal: 메뉴 막대 oort-tray-unread-on-* 와 같은 값),
+// 첫 화면 문구(#5568 문구 1안, 7개 언어 × 320·360·390·768·1280: 머리글·증거 칩 3이 사전 그대로·칩이 화면 밖으로 안 나감·
+// 제목·머리글·칩 낱말 가운데 끊김 0·줄 머리 문장 부호 0·문서 넘침 0, 제목·리드·칩 줄 수 기록, 탭 제목 「oort」, meta description 150자 이하).
 // 하나라도 어긋나면 exit 1.
 // =============================================================================
 
@@ -31,9 +33,10 @@ const SHOTS = process.env.SHOTS_DIR ? resolve(process.env.SHOTS_DIR) : "";
 const LANGS = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "es", "fr"];
 const SHOT_LANGS = new Set((process.env.SHOT_LANGS || "ko,en,ja,fr").split(",").map((s) => s.trim()));
 const values = JSON.parse(readFileSync(resolve(SITE, "values.json"), "utf8"));
-const ko = JSON.parse(readFileSync(resolve(SITE, "i18n/ko.json"), "utf8"));
-// ONLY=pages,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
-const ONLY = new Set((process.env.ONLY || "pages,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
+const cats = Object.fromEntries(LANGS.map((l) => [l, JSON.parse(readFileSync(resolve(SITE, `i18n/${l}.json`), "utf8"))]));
+const ko = cats.ko;
+// ONLY=pages,copy,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight 로 일부만 잰다(사보타주 확인용). 기본은 전부.
+const ONLY = new Set((process.env.ONLY || "pages,copy,motion,webgl,chip,lang,narrow,phone,webkit,header,logo,weight").split(",").map((s) => s.trim()));
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -81,7 +84,7 @@ async function measure(page) {
 /** 글자 뒤 바탕의 대비: 글자를 투명하게 한 장면을 찍어 상자 안 화소의 밝기를 잰다. */
 async function heroContrast(page, decoder) {
   const boxes = await page.evaluate(() => {
-    const els = [...document.querySelectorAll(".hero h1 span, .hero .lead, .hero .spec, .hero .phone-note span")]
+    const els = [...document.querySelectorAll(".hero .eyebrow, .hero h1 span, .hero .lead, .hero .proof li, .hero .spec, .hero .phone-note span")]
       .filter((el) => el.getBoundingClientRect().width > 0);
     const list = els.map((el) => {
       const r = el.getBoundingClientRect();
@@ -91,14 +94,23 @@ async function heroContrast(page, decoder) {
     document.documentElement.classList.add("probe-hide");
     const st = document.createElement("style");
     st.id = "probe-style";
-    st.textContent = ".probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .spec, .probe-hide .hero .phone-note { color: transparent !important; }";
+    // 칩(li)은 글자색을 직접 가지므로 ul 이 아니라 li 를 가린다
+    st.textContent = ".probe-hide .hero .eyebrow, .probe-hide .hero h1, .probe-hide .hero .lead, .probe-hide .hero .proof li, .probe-hide .hero .spec, .probe-hide .hero .phone-note { color: transparent !important; }";
     document.head.appendChild(st);
     return list;
   });
   await page.waitForTimeout(80);
   const results = [];
   for (const b of boxes) {
-    const png = await page.screenshot({ clip: { x: Math.max(0, b.x), y: b.y, width: Math.max(1, b.w), height: Math.max(1, b.h) } });
+    // 첫 화면 아래로 내려간 글자(폰 흉내 664 높이의 안내 줄 등)는 그만큼 즉시 스크롤해 화면 안에서 찍는다
+    const dy = Math.max(0, Math.ceil(b.y + b.h - page.viewportSize().height + 8));
+    if (dy) {
+      await page.evaluate((y) => window.scrollTo({ top: y, left: 0, behavior: "instant" }), dy);
+      await page.waitForFunction((y) => Math.abs(window.scrollY - y) < 1, dy);
+      await page.waitForTimeout(80);
+    }
+    const png = await page.screenshot({ clip: { x: Math.max(0, b.x), y: b.y - dy, width: Math.max(1, b.w), height: Math.max(1, b.h) } });
+    if (dy) await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
     const lum = await decoder.evaluate(async (b64) => {
       const img = new Image();
       img.src = `data:image/png;base64,${b64}`;
@@ -155,6 +167,94 @@ const headMeasure = (W) => {
   };
 };
 
+/** 첫 화면 문구의 숫자(#5568 문구 1안). W 는 정해 둔 뷰포트 폭.
+ *  글자마다 Range 로 줄을 세고, 줄이 바뀐 자리의 앞뒤 글자를 본다: 둘 다 글자·숫자이고 같은 글자 마디(<wbr> 로 갈리지 않음)면
+ *  낱말 가운데 끊김이다. 중국어는 글자 사이 줄바꿈이 관례라 구절 힌트(<wbr>)가 없는 요소는 로마자·숫자 낱말 안만 보고,
+ *  힌트가 있는 요소(제목)는 일본어처럼 힌트 밖 끊김을 본다. 줄 안 바꾸는 빈칸(U+00A0)·단어 결합 문자(U+2060) 앞뒤에서 바뀌어도 끊김이다.
+ *  줄 머리에 가운뎃점·쉼표·닫는 부호가 오면 기록한다.
+ *  .hero 는 overflow: hidden 이라 안에서 화면 밖으로 나간 글자·칩은 문서 넘침으로 안 잡힌다 → 글자 상자·칩·칩 줄을 폭과 직접 견준다. */
+const copyMeasure = (W) => {
+  const zh = document.documentElement.lang.startsWith("zh");
+  const WORD = /[\p{L}\p{N}’']/u;
+  const LATIN = /[A-Za-z0-9’']/;
+  const JOIN = String.fromCharCode(0xa0, 0x2060);
+  const START = "·・,.;:!?、。，．；：！？)]}）」』’”%";
+  const read = (el) => {
+    const hinted = el.querySelector("wbr") !== null;
+    const chars = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node = 0;
+    for (let n = walker.nextNode(); n; n = walker.nextNode(), node += 1) {
+      for (let i = 0; i < n.data.length; i += 1) {
+        const rg = document.createRange();
+        rg.setStart(n, i);
+        rg.setEnd(n, i + 1);
+        const r = [...rg.getClientRects()].find((x) => x.width > 0);
+        chars.push({ ch: n.data[i], node, top: r ? r.top : null });
+      }
+    }
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    let line = 0;
+    let top = null;
+    for (const c of chars) {
+      if (c.top !== null) {
+        if (top !== null && c.top > top + lh / 2) { line += 1; top = c.top; }
+        if (top === null) top = c.top;
+      }
+      c.line = line;
+    }
+    const text = [];
+    for (const c of chars) text[c.line] = (text[c.line] || "") + c.ch;
+    const mid = [];
+    for (let j = 1; j < chars.length; j += 1) {
+      const a = chars[j - 1];
+      const b = chars[j];
+      if (b.line === a.line || b.top === null) continue;
+      const inWord = zh && !hinted ? LATIN.test(a.ch) && LATIN.test(b.ch) : WORD.test(a.ch) && WORD.test(b.ch) && a.node === b.node;
+      if (inWord || JOIN.includes(a.ch) || JOIN.includes(b.ch)) mid.push(`${text[a.line].slice(-4)}|${text[b.line].slice(0, 4)}`);
+    }
+    const head = text.slice(1).map((t) => (t || "").trimStart()).filter((t) => START.includes(t[0])).map((t) => t.slice(0, 5));
+    return { lines: line + 1, mid, head };
+  };
+  const box = (el) => el.getBoundingClientRect();
+  const seen = (el) => Boolean(el) && box(el).width > 0 && box(el).height > 0;
+  const inside = (el) => box(el).left >= -0.5 && box(el).right <= W + 0.5;
+  const eyebrow = document.querySelector(".hero .eyebrow");
+  const h1 = document.querySelector(".hero h1");
+  const spans = [...document.querySelectorAll(".hero h1 span")];
+  const lead = document.querySelector(".hero .lead");
+  const proof = document.querySelector(".hero .proof");
+  const chips = proof ? [...proof.querySelectorAll("li")] : [];
+  const cta = [document.querySelector(".hero .get"), document.querySelector(".hero .get-web")].find(seen);
+  const title = spans.map(read);
+  const eb = seen(eyebrow) ? read(eyebrow) : { lines: 0, mid: [], head: [] };
+  const ld = read(lead);
+  const cp = chips.map(read);
+  // 글자 상자(Range)가 화면 밖으로 나간 요소: 끊을 자리가 없어 한 줄로 굳은 제목 등
+  const inkOut = [eyebrow, ...spans, lead, ...chips].filter(seen).filter((el) => {
+    const rg = document.createRange();
+    rg.selectNodeContents(el);
+    const r = rg.getBoundingClientRect();
+    return r.left < -0.5 || r.right > W + 0.5;
+  }).map((el) => el.textContent.slice(0, 12));
+  return {
+    overflow: document.documentElement.scrollWidth - W,
+    inkOut,
+    eyebrow: seen(eyebrow) ? eyebrow.textContent : null,
+    chips: chips.filter(seen).map((c) => c.textContent),
+    // 자리: 머리글 → 제목 → 리드 → 칩 → 주 행동
+    order: seen(eyebrow) && seen(proof) && Boolean(cta) && box(eyebrow).bottom <= box(h1).top && box(lead).bottom <= box(proof).top && box(proof).bottom <= box(cta).top,
+    chipOut: chips.filter((c) => !inside(c) || c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent.slice(0, 12)),
+    rowOut: !proof || !inside(proof) || proof.scrollWidth > proof.clientWidth + 1,
+    titleLines: title.map((t) => t.lines).join("+"),
+    leadLines: ld.lines,
+    chipLines: cp.map((c) => c.lines).join("+"),
+    chipRows: new Set(chips.map((c) => Math.round(box(c).top))).size,
+    mid: [...title.flatMap((t) => t.mid), ...eb.mid, ...cp.flatMap((c) => c.mid)],
+    head: [...eb.head, ...title.flatMap((t) => t.head), ...ld.head, ...cp.flatMap((c) => c.head)],
+  };
+};
+
 async function canvasShot(page) {
   return page.locator("canvas.sky").screenshot();
 }
@@ -203,6 +303,57 @@ async function main() {
     // 기록(막지 않음): 제목은 두 반쪽(블록 span)이라 「1+1」이 문구가 정한 두 줄이다. 문구를 바꾸면 이 두 줄과 위 넘침 단정을 본다.
     console.log(`제목 반쪽 줄 수: ${Object.entries(titleLines).map(([k, n]) => `${k}=${n}`).join(" ")}`);
     console.log(`리드 줄 수: ${Object.entries(leadLines).map(([k, n]) => `${k}=${n}`).join(" ")}`);
+  }
+
+  // 1b) 첫 화면 문구(#5568 문구 1안): 7개 언어 × 320·360·390·768·1280(밝게, 움직임 줄이기). 줄 수는 기록(막지 않음)
+  if (ONLY.has("copy")) {
+    const bad = { present: [], chip: [], mid: [], head: [], overflow: [] };
+    const rec = { title: [], lead: [], chip: [] };
+    const titleBad = [];
+    const metaBad = [];
+    let scenes = 0;
+    for (const lang of LANGS) {
+      const plain = (key) => cats[lang][key].replaceAll("|", "");
+      const want = { eyebrow: plain("hero_eyebrow"), chips: ["hero_proof_1", "hero_proof_2", "hero_proof_3"].map(plain) };
+      for (const w of [320, 360, 390, 768, 1280]) {
+        const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, reducedMotion: "reduce", colorScheme: "light" });
+        const page = await ctx.newPage();
+        await page.goto(`${BASE}/${lang}/`, { waitUntil: "load" });
+        await page.evaluate(() => document.fonts.ready);
+        const m = await page.evaluate(copyMeasure, w);
+        const tag = `${lang}-${w}`;
+        scenes += 1;
+        if (m.eyebrow !== want.eyebrow || m.chips.length !== 3 || m.chips.some((c, i) => c !== want.chips[i]) || !m.order) bad.present.push(`${tag}:${JSON.stringify({ eyebrow: m.eyebrow, chips: m.chips, order: m.order })}`);
+        if (m.chipOut.length || m.rowOut) bad.chip.push(`${tag}:${m.chipOut.join(",")}${m.rowOut ? " 칩 줄" : ""}`);
+        if (m.mid.length) bad.mid.push(`${tag}:${m.mid.join(" ")}`);
+        if (m.head.length) bad.head.push(`${tag}:${m.head.join(" ")}`);
+        if (m.overflow > 0 || m.inkOut.length) bad.overflow.push(`${tag}:+${m.overflow}${m.inkOut.length ? " 글자 밖 " + m.inkOut.join(",") : ""}`);
+        rec.title.push(`${tag}=${m.titleLines}`);
+        rec.lead.push(`${tag}=${m.leadLines}`);
+        rec.chip.push(`${tag}=${m.chipLines}/${m.chipRows}행`);
+        if (w === 1280) {
+          // 탭 제목은 7개 언어 모두 「oort」(owner 11-09), 링크 미리 보기 설명은 사전 그대로 150자 이하
+          const meta = await page.evaluate(() => ({ title: document.title, desc: document.querySelector('meta[name="description"]')?.content ?? null }));
+          if (meta.title !== "oort") titleBad.push(`${lang}:${meta.title}`);
+          if (meta.desc !== cats[lang].meta_description || [...(meta.desc ?? "")].length > 150) metaBad.push(`${lang}:${meta.desc === null ? "없음" : [...meta.desc].length}`);
+        }
+        await ctx.close();
+      }
+    }
+    // 루트(/)는 첫 방문이면 브라우저 언어로 옮기므로 HTML 을 직접 읽는다
+    const rootTitle = /<title>([^<]*)<\/title>/.exec(await (await fetch(`${BASE}/`)).text())?.[1];
+    if (rootTitle !== "oort") titleBad.push(`/:${rootTitle}`);
+    const show = (list) => `${list.length}/${scenes}${list.length ? " " + list.slice(0, 4).join(" ") : ""}`;
+    check("첫 화면 문구: 머리글 1·증거 칩 3이 7개 언어 사전 문구 그대로, 머리글 → 제목 → 리드 → 칩 → 주 행동 자리(5개 폭)", bad.present.length === 0, show(bad.present));
+    check("첫 화면 문구: 칩이 화면 밖으로 안 나가고 칩·칩 줄의 가로 넘침 0", bad.chip.length === 0, show(bad.chip));
+    check("첫 화면 문구: 제목·머리글·칩 낱말 가운데 끊김 0(ko keep-all·ja/zh 구절 힌트·줄 안 바꾸는 빈칸)", bad.mid.length === 0, show(bad.mid));
+    check("첫 화면 문구: 줄 머리 문장 부호 0(머리글·제목·리드·칩)", bad.head.length === 0, show(bad.head));
+    check("첫 화면 문구: 문서 가로 넘침 0, 머리글·제목·리드·칩 글자가 화면 안(7개 언어 × 320·360·390·768·1280)", bad.overflow.length === 0, show(bad.overflow));
+    check("탭 제목이 「oort」(7개 언어 + 루트)", titleBad.length === 0, titleBad.length ? titleBad.join(" ") : `${LANGS.length + 1}/${LANGS.length + 1}`);
+    check("meta description 이 사전 문구 그대로, 150자 이하(7개 언어)", metaBad.length === 0, metaBad.length ? metaBad.join(" ") : LANGS.map((l) => `${l}=${[...cats[l].meta_description].length}`).join(" "));
+    console.log(`문구 제목 반쪽 줄 수: ${rec.title.join(" ")}`);
+    console.log(`문구 리드 줄 수: ${rec.lead.join(" ")}`);
+    console.log(`문구 칩 줄 수(칩마다/칩 줄 행 수): ${rec.chip.join(" ")}`);
   }
 
   // 2) 움직임 줄이기: 두 장면이 같고 멈춰 있다. 줄이지 않으면 두 장면이 다르다(사보타주 방향).
@@ -640,14 +791,14 @@ async function main() {
           out.push(cur);
           return out.map((l) => l.replace(/[\s ⁠]+/g, " ").trim()).filter(Boolean);
         };
-        const blocks = [...document.querySelectorAll(".hero .lead, .hero .phone-note span, .row-t span, .steps li > span:last-child")]
+        const blocks = [...document.querySelectorAll(".hero .eyebrow, .hero h1 span, .hero .lead, .hero .proof li, .hero .phone-note span, .row-t span, .steps li > span:last-child")]
           .filter((el) => el.getBoundingClientRect().width > 0).map(lines);
         const bad = [];
         for (const ls of blocks) ls.forEach((l, i) => {
           if (i > 0 && BAD_START.includes(l[0])) bad.push(`…|${l.slice(0, 6)}`);
           if (i < ls.length - 1 && BAD_END.includes(l[l.length - 1])) bad.push(`${l.slice(-6)}|…`);
         });
-        return { blocks: blocks.length, wrapped: blocks.filter((b) => b.length > 1).length, bad, lead: blocks[0], overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+        return { blocks: blocks.length, wrapped: blocks.filter((b) => b.length > 1).length, bad, lead: lines(document.querySelector(".hero .lead")), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
       });
       check(`WebKit ja ${name}: 조사·부호 앞에서 줄이 끊기지 않는다`, res.bad.length === 0 && res.wrapped > 0 && res.overflow <= 0 && errors.length === 0, JSON.stringify(res));
       if (SHOTS && name === "390") await page.screenshot({ path: resolve(SHOTS, "webkit-ja-390-light.png"), fullPage: true });
