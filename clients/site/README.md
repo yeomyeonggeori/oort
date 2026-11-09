@@ -46,7 +46,7 @@ ONLY=chip,lang node clients/site/scripts/check.mjs   # 일부만
 ## 첫 문구 바꾸기
 
 - 문구는 `i18n/<lang>.json`의 `hero_title_1`·`hero_title_2`(제목 두 반쪽, `src/index.html`의 `<h1>`에서 반쪽마다 한 줄로 쌓여요)와 `hero_lead`(한 문단)예요. 링크 미리 보기에 나가는 `meta_title`·`meta_description`도 같은 뜻으로 맞춰요.
-- 7개 언어를 함께 바꿔요(빌드가 키를 맞춰 봐요). 줄표는 쓰지 않고, 일본어는 아래 「언어 더하기」 4처럼 구절 힌트 `|`와 ` `을 써요.
+- 7개 언어를 함께 바꿔요(빌드가 키를 맞춰 봐요). 줄표는 쓰지 않고, 일본어는 아래 「언어 더하기」 4처럼 구절 힌트 `|`와 `\u00a0`을 써요.
 - 다시 재기: 빌드 → 미리 보기 → `SITE_URL=… ONLY=pages,phone,webkit node clients/site/scripts/check.mjs`. 넘침·대비·폰 첫 화면·일본어 줄바꿈은 단정이 막아요. 「제목 반쪽 줄 수」(`1+1`이 문구가 정한 두 줄)와 「리드 줄 수」는 기록이라 390·1280 값을 보고 판단해요. `SHOTS_DIR`을 주면 `SHOT_LANGS` 언어의 전체 그림을 남겨요.
 
 ## 값 바꾸기
