@@ -56,6 +56,20 @@ const mutations = [
   ["cards.ts", "...(kind ? { kind } : {})", "", "choice-carries-kind"],
   ["fixtureServer.ts", "kind: choice.kind ?? recommendExpressionKind(draft.media.large),", "kind: recommendExpressionKind(draft.media.large),", "fixture-server-kind-word"],
   ["contracts.schema.json", '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker"\n          ]', '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker",\n            "huge"\n          ]', "choice-kind-closed"],
+  // #5588: 추천을 누를 때(낱말뿐이면 바꾸기·문구면 더하기)와 여러 낱말 줄(나온 차례·낱말마다 1~2개·줄 5개·꺼 둔 낱말·같은 그림 한 번·✕ 가 끄는 낱말).
+  ["suggest.ts", "const whole = canonicalKeyword(input);\n  return whole", "const whole = input.trim();\n  return whole", "suggest-pick-no-normalize"],
+  ["suggest.ts", "return whole !== \"\" && matchKeys(item).has(whole);", "return whole !== \"\" && suggestionKeywords(input).some((keyword) => matchKeys(item).has(keyword));", "suggest-pick-any-keyword-replaces"],
+  ["suggest.ts", "for (const word of input.split(/\\s+/u)) {", "for (const word of input.split(/\\s+/u).filter((part) => canonicalKeyword(part) !== \"\").slice(-1)) {", "suggest-keywords-last-word-only"],
+  ["suggest.ts", "const matchedKeywords = keywords.filter((keyword) => hitsByKeyword.has(keyword));", "const matchedKeywords = keywords.filter((keyword) => hitsByKeyword.has(keyword)).reverse();", "suggest-row-order-reversed"],
+  ["suggest.ts", "for (let round = 0; round < EXPRESSION_SUGGEST_PER_KEYWORD; round += 1) {", "for (let round = 0; round < limit; round += 1) {", "suggest-no-per-keyword-cap"],
+  ["suggest.ts", "for (let round = 0; round < EXPRESSION_SUGGEST_PER_KEYWORD; round += 1) {\n    for (let group = 0; group < ranked.length && total < limit; group += 1) takeNext(group);\n  }", "for (let group = 0; group < ranked.length; group += 1) {\n    for (let round = 0; round < EXPRESSION_SUGGEST_PER_KEYWORD && total < limit; round += 1) takeNext(group);\n  }", "suggest-sequential-not-round-robin"],
+  ["suggest.ts", "for (let group = 0; group < ranked.length && total < limit; group += 1) takeNext(group);", "for (let group = 0; group < ranked.length; group += 1) takeNext(group);", "suggest-no-total-cap"],
+  ["suggest.ts", "if (contributing.length === 1) while", "if (false) while", "suggest-no-single-keyword-fill"],
+  ["suggest.ts", "const keywords = suggestionKeywords(input).filter((keyword) => !muted.has(keyword));", "const keywords = suggestionKeywords(input);", "suggest-mute-ignored"],
+  ["suggest.ts", "const keywords = suggestionKeywords(input).filter((keyword) => !muted.has(keyword));", "const keywords = suggestionKeywords(input).some((keyword) => muted.has(keyword)) ? [] : suggestionKeywords(input);", "suggest-mute-any-empties-row"],
+  ["suggest.ts", "while (cursor[group] < list.length && taken.has(list[cursor[group]].id)) cursor[group] += 1;", "while (false) cursor[group] += 1;", "suggest-dedupe-off"],
+  ["suggest.ts", "while (cursor[group] < list.length && taken.has(list[cursor[group]].id)) cursor[group] += 1;", "if (cursor[group] < list.length && taken.has(list[cursor[group]].id)) {\n      cursor[group] += 1;\n      return true;\n    }", "suggest-dedupe-eats-quota"],
+  ["suggest.ts", "return { items: pickRow(ranked, limit), keywords: matchedKeywords };", "return { items: pickRow(ranked, limit), keywords };", "suggest-mute-keywords-all-words"],
 ];
 for (const [file, needle, _replacement, name] of mutations) {
   assert.ok(readFileSync(join(directory, file), "utf8").includes(needle), `Mutation no longer applies: ${name}`);

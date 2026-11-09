@@ -152,6 +152,36 @@ describe("세션 관리자 → S1 요약 (#2861)", () => {
     expect(h.collectors.summaryOf("p1")!.state).toBe("done");
   });
 
+  it("거둔 보고(clear)는 공유 요약에도 닿는다: 로컬 칸과 같은 생명주기 상태 (#5584 M3)", async () => {
+    const h = rig();
+    await h.sessions.ensure("p1", 80, 24);
+    await settle();
+    h.collectors.setSharing("p1", true);
+    await settle();
+    h.signal({ from: "report", signal: "waiting-permission" });
+    await settle();
+    expect(h.collectors.summaryOf("p1")!.state).toBe("waiting");
+    h.signal({ from: "report", signal: null });
+    await settle();
+    expect(h.sessions.getSnapshot().get("p1")!.signal).toBeNull();
+    expect(h.collectors.summaryOf("p1")!.state).toBe("running");
+    expect(h.sent.at(-1)!.state).toBe("running");
+  });
+
+  it("실패한 턴은 공유 요약에 「끝남」으로 가지 않는다 (#5584 H1)", async () => {
+    const h = rig();
+    await h.sessions.ensure("p1", 80, 24);
+    await settle();
+    h.collectors.setSharing("p1", true);
+    await settle();
+    h.signal({ from: "report", signal: "turn-failed" });
+    await settle();
+    const s = h.collectors.summaryOf("p1")!;
+    expect(s.state).toBe("idle");
+    expect(s.stages.at(-1)).toBe(STAGE_LABEL["turn-failed"]);
+    expect(h.sent.map((x) => x.state)).not.toContain("done");
+  });
+
   it("공유가 꺼져 있으면 git을 읽지 않고 아무것도 보내지 않는다", async () => {
     const h = rig();
     await h.sessions.ensure("p1", 80, 24);

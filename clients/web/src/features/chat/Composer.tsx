@@ -2,6 +2,7 @@ import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpres
 import { ComposerExpressionSuggest, type ExpressionSuggestHandle } from "@/features/expressions/ComposerExpressionSuggest";
 import { useExpressions } from "@/features/expressions/context";
 import { useExpressionSuggest } from "@/features/expressions/useExpressionSuggest";
+import { isKeywordOnlyInput } from "@momo/core/features/expressions/suggest";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
@@ -770,8 +771,13 @@ export function Composer({
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다. */
+  /**
+   * 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 보내는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다.
+   * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `isKeywordOnlyInput`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고
+   * 그림을 **더한다**(보내기 한 번이 그림 → 글). 지우는 길은 멘션을 고를 때와 같은 `replaceValue`(글·캐럿·초안을 함께 비운다)다.
+   */
   function pickSuggestion(item: Expression) {
+    if (isKeywordOnlyInput(text, item)) autocomplete.replaceValue("", 0);
     setPendingExpression(item);
     suggest.close();
     inputRef.current?.focus();
@@ -978,16 +984,8 @@ export function Composer({
       )}
 
       {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
-          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. */}
-      {offline && (
-        <p
-          role="status"
-          className="px-6 pb-2 text-meta text-warn break-keep"
-          data-testid="composer-offline"
-        >
-          {blockedLine}
-        </p>
-      )}
+          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. 보내기가 막힌 이유(기기 오프라인 ·
+          서버에 닿지 못함)도 그 줄에 선다(#5575 검수 H1): 여기 따로 서면 연결이 흔들릴 때마다 대화 목록의 바닥이 26~44px 움직였다. */}
 
       {persistentPhoneDmHint && (
         <ComposerHint
@@ -1251,8 +1249,8 @@ export function Composer({
           />
         </ComposerCard>
         {/* 남의 「작성 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다(글 한 줄 + 위아래 숨 8). 아무도 안 칠 때도 같은 높이로
-            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. */}
-        <TypingLine memberIds={typists} directory={directory} />
+            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. 보내기가 막히면 같은 칸이 그 이유를 말한다(#5575). */}
+        <TypingLine memberIds={typists} directory={directory} blocked={offline ? blockedLine : null} />
       </form>
 
       <ComposerFormatTray
