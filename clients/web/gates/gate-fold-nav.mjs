@@ -228,6 +228,7 @@ function historyPage() {
     }),
     // 한 저자의 묶음: 머리 + 연속 + tombstone(연속). tombstone은 액션이 하나도
     // 없는 행이라(`isActionable`이 거짓) 컨트롤 없는 행의 실물 표본이다.
+    // 셋은 **같은 분**(14:20) 안이다 — 묶음은 같은 로컬 분까지만 이어진다(#5603).
     row({
       id: GROUP_HEAD_MSG,
       seq: 202,
@@ -240,7 +241,7 @@ function historyPage() {
       seq: 203,
       authorMemberId: memberId,
       body: "빠진 항목 있으면 알려 주세요.",
-      createdAtMs: base + 1_240_000,
+      createdAtMs: base + 1_220_000,
     }),
     row({
       id: TOMBSTONE_MSG,
@@ -248,7 +249,7 @@ function historyPage() {
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_280_000,
+      createdAtMs: base + 1_240_000,
     })
   );
   return rows;
