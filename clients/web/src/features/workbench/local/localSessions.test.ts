@@ -371,6 +371,65 @@ describe("하네스 신호 (#2776, ADR-0190 D4-b)", () => {
     expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
   });
 
+  it("OSC 7501 보고가 온 칸은 보고만 따르고, 거둠은 신호를 비운다 (#5579)", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    const signal = () => h.sessions.getSnapshot().get("p1")?.signal;
+    h.signal({ from: "hook", signal: "working" });
+    expect(signal()).toBe("working");
+    h.signal({ from: "report", signal: "waiting-permission" });
+    expect(signal()).toBe("waiting-permission");
+    // 보고가 온 뒤의 hook(Codex notify, 늦은 Claude Notification)은 버린다.
+    h.signal({ from: "hook", signal: "turn-done" });
+    h.signal("working");
+    expect(signal()).toBe("waiting-permission");
+    for (const bad of [{ from: "report", signal: "blocked" }, { from: "osc", signal: "working" }, { from: "hook", signal: null }]) {
+      h.signal(bad);
+    }
+    expect(signal()).toBe("waiting-permission");
+    h.signal({ from: "report", signal: null });
+    expect(signal()).toBeNull();
+  });
+
+  it("보고하는 칸의 「응답 필요」는 사람의 키로 풀지 않는다: 프로그램이 스스로 보고한다 (#5579)", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    const signal = () => h.sessions.getSnapshot().get("p1")?.signal;
+    h.signal({ from: "report", signal: "waiting-permission" });
+    // 승인 목록에서 화살표로 고르는 중, 그리고 Codex가 켠 포커스 알림(\x1b[I).
+    h.sessions.input("p1", "\u001b[B");
+    h.sessions.input("p1", "\u001b[I");
+    expect(signal()).toBe("waiting-permission");
+    h.signal({ from: "report", signal: "working" });
+    expect(signal()).toBe("working");
+    h.signal({ from: "report", signal: "turn-done" });
+    h.sessions.input("p1", "x");
+    expect(signal()).toBe("turn-done");
+    h.signal({ from: "report", signal: "ready" });
+    expect(signal()).toBe("ready");
+  });
+
+  it("웹은 출력에서 OSC 7501을 읽지 않는다: 보고는 데스크탑이 읽어 채널로만 준다", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    h.emit("\u001b]7501;state=blocked:app=codex:kind=permission\u001b\\");
+    h.emit("\u001b]7501;state=done:app=claude-code\u0007");
+    await settle();
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
+  });
+
+  it("다시 띄운 프로세스는 보고를 아직 안 보낸 칸이다: hook을 다시 따른다", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    h.signal({ from: "report", signal: "working" });
+    h.exit({ id: 1, code: 0, signal: null });
+    await h.sessions.restart("p1");
+    h.signal({ from: "hook", signal: "waiting-permission" });
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("waiting-permission");
+    h.sessions.input("p1", "\u001b");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("working");
+  });
+
   it("기다리는 칸에 사람이 입력하면 기다림이 풀린다(거부·중단에는 hook이 없다)", async () => {
     const h = harness();
     await h.sessions.ensure("p1", 80, 24);

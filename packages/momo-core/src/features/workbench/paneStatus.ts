@@ -5,13 +5,19 @@ import { statusFromPhase, type SessionPhaseInput, type SessionStatus } from "./s
 //
 // 입력은 둘뿐이다.
 //   1. 칸 생명주기: 프로세스 단계와 종료 코드(`statusFromPhase`, #2856).
-//   2. 하네스가 스스로 낸 구조 신호(`PaneSignal`): Claude Code hook, Codex
-//      `notify`. 데스크탑 셸이 앱 전용 Unix 소켓으로 받아 닫힌 목록으로 줄인다
-//      (`clients/desktop/src-tauri/src/pane_signal.rs`).
+//   2. 하네스가 스스로 낸 구조 신호(`PaneSignal`). 두 길로 온다.
+//      - hook: Claude Code hook, Codex `notify`. 데스크탑 셸이 앱 전용 Unix
+//        소켓으로 받아 닫힌 목록으로 줄인다(`clients/desktop/src-tauri/src/pane_signal.rs`).
+//      - 보고(#5579): 하네스가 자기 터미널에 쓴 OSC 7501 상태 보고(Program Status
+//        Protocol 0.4). 데스크탑 셸의 `program_status.rs`가 하네스 칸에서만 읽어
+//        `state`·`kind` 두 낱말로 줄인다. 두 길을 합치는 규칙은 `applyPaneSignalEvent`.
 //
 // **PTY 출력은 입력이 아니다.** 화면에 「permission」이나 「Allow?」가 찍혀도
 // 상태는 바뀌지 않는다. 출력 내용을 읽으면 raw가 요약의 모양으로 새어 나간다
-// (ADR-0190 D4-b 「긁지 않는다」). 소스 시험이 이 모듈의 import를 잠근다.
+// (ADR-0190 D4-b 「긁지 않는다」). 예외는 OSC 7501 하나다: 프로그램이 자기 상태를
+// 공개 규격의 구조로 말한 것이지 화면 글이 아니고, 그것도 데스크탑이 닫힌 낱말로
+// 줄인 뒤에만 여기 온다. 웹은 출력에서 아무것도 읽지 않는다. 소스 시험이 이 모듈의
+// import를 잠근다.
 //
 // OSC 제목은 여기서 판정에 쓰지 않는다: #2776 스파이크에서 Claude Code의 제목
 // 머리 글자는 작업 중(◐·◑)과 그 밖(✳)만 가르고, 「허락을 기다림」과 「쉼」은 같은
@@ -22,15 +28,20 @@ import { statusFromPhase, type SessionPhaseInput, type SessionStatus } from "./s
 
 /**
  * 하네스 구조 신호의 닫힌 목록. 셸 칸에는 오지 않는다(hook을 내는 프로그램이
- * 없다). 데스크탑이 이 밖의 값을 보내면 무시한다(`parsePaneSignal`).
+ * 없고, OSC 7501은 하네스 칸에서만 읽는다). 데스크탑이 이 밖의 값을 보내면
+ * 무시한다(`parsePaneSignal`).
  *
- * | 신호 | Claude Code 2.1.28x hook | Codex 0.156 `notify` |
- * |---|---|---|
- * | `ready` | SessionStart | 없음 |
- * | `working` | UserPromptSubmit, PostToolUse (+ 기다리는 칸에 사람이 입력) | 없음 |
- * | `waiting-permission` | PermissionRequest, Notification `permission_prompt` | 없음(승인 유형이 오지 않는다) |
- * | `waiting-input` | Notification `elicitation_dialog`(스파이크에서 관측 못 함) | 없음 |
- * | `turn-done` | Stop | `agent-turn-complete`(제목 짓기 곁가지 턴은 뺀다) |
+ * | 신호 | Claude Code 2.1.28x hook | Codex 0.156 `notify` | OSC 7501 보고(#5579) |
+ * |---|---|---|---|
+ * | `ready` | SessionStart | 없음 | `idle` |
+ * | `working` | UserPromptSubmit, PostToolUse (+ 기다리는 칸에 사람이 입력) | 없음 | `working` |
+ * | `waiting-permission` | PermissionRequest, Notification `permission_prompt` | 없음(승인 유형이 오지 않는다) | `blocked` + `kind=permission` |
+ * | `waiting-input` | Notification `elicitation_dialog`(스파이크에서 관측 못 함) | 없음 | `blocked` + `question`·`auth`·없음 |
+ * | `turn-done` | Stop | `agent-turn-complete`(제목 짓기 곁가지 턴은 뺀다) | `done`, `error` |
+ *
+ * 보고의 `error`도 「끝남」이다: 규격이 `done`과 같은 수명을 주고(사람이 볼 때까지),
+ * 프로그램은 살아서 다음 지시를 기다린다. 「멈춤」은 칸의 프로세스가 멈춘 것이다.
+ * 보고의 `clear`는 신호가 아니라 거둠이다(`PaneSignalEvent.signal === null`).
  */
 export type PaneSignal = "ready" | "working" | "waiting-permission" | "waiting-input" | "turn-done";
 
@@ -84,6 +95,87 @@ export function waitingLine(signal: PaneSignal | null): string | null {
   if (signal === "waiting-permission") return "실행 허락을 기다려요";
   if (signal === "waiting-input") return "답을 기다려요";
   return null;
+}
+
+// ---- 두 길 합치기 (#5579) -------------------------------------------------------
+
+/**
+ * 신호가 온 길. `hook`: 하네스가 띄운 hook 프로세스가 앱 전용 소켓으로 보낸 줄.
+ * `report`: 하네스가 자기 터미널에 쓴 OSC 7501 상태 보고. 둘 다 그 프로그램이 스스로
+ * 한 말(ADR-0220 「에이전트 보고」)이다. 서버가 잰 사실과 섞지 않는다.
+ */
+export type PaneSignalFrom = "hook" | "report";
+
+/**
+ * 칸 신호 채널의 한 통(데스크탑 `pane_signal.rs` `PaneSignalEvent`와 같은 모양).
+ * `signal`이 null이면 프로그램이 보고를 거뒀다(`state=clear`). report에서만 온다.
+ */
+export interface PaneSignalEvent {
+  from: PaneSignalFrom;
+  signal: PaneSignal | null;
+}
+
+/**
+ * 채널 값을 사건으로 읽는다. `{ from, signal }` 모양만 받고, 맨 신호 문자열은 hook으로
+ * 읽는다(#2776의 모양. 캡처 흉내와 그 시험이 아직 쓴다). 닫힌 목록 밖은 null.
+ */
+export function parsePaneSignalEvent(value: unknown): PaneSignalEvent | null {
+  if (typeof value === "string") {
+    const signal = parsePaneSignal(value);
+    return signal === null ? null : { from: "hook", signal };
+  }
+  if (typeof value !== "object" || value === null) return null;
+  const { from, signal } = value as { from?: unknown; signal?: unknown };
+  if (from !== "hook" && from !== "report") return null;
+  if (signal === null) return from === "report" ? { from, signal: null } : null;
+  const parsed = parsePaneSignal(signal);
+  return parsed === null ? null : { from, signal: parsed };
+}
+
+/** 칸 하나의 신호 상태. 프로세스를 다시 띄우면 `NO_PANE_SIGNAL`로 돌아간다. */
+export interface PaneSignalState {
+  /** 칸 상태를 정하는 신호. null = 없음(생명주기만 본다). */
+  signal: PaneSignal | null;
+  /** 이 프로세스가 OSC 7501 보고를 한 번이라도 보냈다. 그 뒤로는 보고만 따른다. */
+  reports: boolean;
+}
+
+export const NO_PANE_SIGNAL: PaneSignalState = { signal: null, reports: false };
+
+/**
+ * 신호 하나를 칸 상태에 합친다. 우선순위는 이렇다.
+ *
+ * 1. **보고가 온 칸은 보고만 따른다.** 그 프로세스가 OSC 7501을 한 번 보내면, 그 뒤의
+ *    hook은 버린다. 보고는 그 프로그램의 상태 전부라서 거부·중단도 `working`·`idle`로
+ *    오지만, hook은 사건 몇 개뿐이고 늦게도 온다. Claude `Notification permission_prompt`는
+ *    5~6초 뒤에 오므로, 그사이 사람이 허락했으면 「응답 필요」를 되살린다. Codex는 첫
+ *    그림에서 `idle`을 보고하므로 그 칸의 `notify`(agent-turn-complete)는 곧 덧말이 된다.
+ * 2. **같은 길 안에서는 마지막 것이 이긴다.** 보고의 거둠(`signal: null`)은 신호를 비운다.
+ *
+ * 두 길이 같은 기다림을 겹쳐 말해도 판정(`derivePaneStatus`)이 같으므로
+ * `attentionTransitions`는 「응답 필요」·「끝남」을 한 번만 낸다.
+ *
+ * 수명(규격은 `working`·`blocked`·`idle`을 새 셸 프롬프트에서 지우지만 oort는 프롬프트를
+ * 읽지 않는다): 새 보고나 거둠이 지금 것을 갈아 끼운다. 프로세스가 끝나면 생명주기가
+ * 칸을 정한다(`derivePaneStatus`). `done`·`error`는 프로그램이 갈아 끼울 때까지 남는다:
+ * Codex는 사람이 그 칸에 키·붙여넣기·클릭을 하면 스스로 `idle`을 보고한다. 칸을 보면
+ * 인박스 줄은 내려간다(`paneAttention`).
+ */
+export function applyPaneSignalEvent(state: PaneSignalState, event: PaneSignalEvent): PaneSignalState {
+  if (event.from === "report") return { signal: event.signal, reports: true };
+  if (state.reports || event.signal === null) return state;
+  return { signal: event.signal, reports: false };
+}
+
+/**
+ * 사람이 칸에 입력했다. hook만 있는 칸의 「응답 필요」는 「실행 중」으로 푼다: Claude
+ * Code는 거부·중단에 hook을 내지 않는다(#2776 스파이크 실측). 보고하는 칸은 그대로 둔다:
+ * 답을 받은 프로그램이 스스로 보고한다(Codex는 허락 키에 `working`). 입력은 읽지 않는다.
+ */
+export function afterPersonInput(state: PaneSignalState): PaneSignalState {
+  if (state.reports) return state;
+  if (state.signal !== "waiting-permission" && state.signal !== "waiting-input") return state;
+  return { signal: "working", reports: false };
 }
 
 // ---- 알림 --------------------------------------------------------------------

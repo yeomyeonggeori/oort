@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStatus } from "./sessionList";
 import {
+  NO_PANE_SIGNAL,
   PANE_SIGNALS,
+  afterPersonInput,
+  applyPaneSignalEvent,
   attentionCopy,
   attentionTransitions,
   derivePaneStatus,
   nextWaitingPane,
   parsePaneSignal,
+  parsePaneSignalEvent,
   shouldNotifyAttention,
   waitingLine,
   type PaneSignal,
+  type PaneSignalEvent,
+  type PaneSignalState,
   type PaneStatusInput,
 } from "./paneStatus";
 
@@ -57,6 +63,113 @@ describe("derivePaneStatus (#2776, 제안서 §3.4)", () => {
     expect(waitingLine("waiting-input")).toBe("답을 기다려요");
     expect(waitingLine("turn-done")).toBeNull();
     expect(waitingLine(null)).toBeNull();
+  });
+});
+
+describe("두 길 합치기: hook과 OSC 7501 보고 (#5579)", () => {
+  const hook = (signal: PaneSignal): PaneSignalEvent => ({ from: "hook", signal });
+  const report = (signal: PaneSignal | null): PaneSignalEvent => ({ from: "report", signal });
+  const fold = (events: PaneSignalEvent[]): PaneSignalState => events.reduce(applyPaneSignalEvent, NO_PANE_SIGNAL);
+
+  /** 사건을 차례로 합치며 칸 하나의 판정을 다시 내고, 새로 생긴 알림(상태)을 모은다. */
+  const notified = (steps: (PaneSignalEvent | "input")[]): string[] => {
+    let state = NO_PANE_SIGNAL;
+    let previous = new Map<string, SessionStatus>([["p1", "running"]]);
+    const out: string[] = [];
+    for (const step of steps) {
+      state = step === "input" ? afterPersonInput(state) : applyPaneSignalEvent(state, step);
+      const next = new Map<string, SessionStatus>([["p1", derivePaneStatus(live(state.signal))]]);
+      for (const t of attentionTransitions(previous, next)) out.push(t.status);
+      previous = next;
+    }
+    return out;
+  };
+
+  it("채널 값은 { from, signal } 닫힌 모양만, 맨 문자열은 hook(#2776 모양)", () => {
+    expect(parsePaneSignalEvent({ from: "hook", signal: "waiting-permission" })).toEqual(hook("waiting-permission"));
+    expect(parsePaneSignalEvent({ from: "report", signal: "turn-done" })).toEqual(report("turn-done"));
+    expect(parsePaneSignalEvent({ from: "report", signal: null })).toEqual(report(null));
+    expect(parsePaneSignalEvent("working")).toEqual(hook("working"));
+    for (const bad of [
+      { from: "hook", signal: null },
+      { from: "osc", signal: "working" },
+      { from: "report", signal: "blocked" },
+      { from: "report" },
+      { signal: "working" },
+      "Stop",
+      null,
+      3,
+      [],
+    ]) {
+      expect(parsePaneSignalEvent(bad)).toBeNull();
+    }
+  });
+
+  it("보고가 온 칸은 보고만 따르고, 같은 길에서는 마지막 것이 이긴다", () => {
+    expect(fold([hook("ready"), hook("working")])).toEqual({ signal: "working", reports: false });
+    expect(fold([hook("working"), report("waiting-permission"), hook("turn-done")])).toEqual({
+      signal: "waiting-permission",
+      reports: true,
+    });
+    expect(fold([report("working"), report("turn-done"), report(null)])).toEqual({ signal: null, reports: true });
+    expect(fold([report(null), hook("working")])).toEqual({ signal: null, reports: true });
+  });
+
+  it("거둔 보고는 생명주기로 돌아간다: 살아 있으면 실행 중, 끝나면 끝남·멈춤", () => {
+    const cleared = fold([report("waiting-permission"), report(null)]).signal;
+    expect(derivePaneStatus(live(cleared))).toBe("running");
+    expect(derivePaneStatus({ phase: "exited", exitCode: 0, exitSignal: null, signal: "waiting-permission" })).toBe("done");
+  });
+
+  it("Claude 모양: hook과 보고가 같은 기다림을 겹쳐 말해도 「응답 필요」·「끝남」은 한 번씩", () => {
+    // PermissionRequest(hook) → blocked:permission(보고) → 사람이 허락 → working(보고)
+    // → 5~6초 늦은 Notification permission_prompt(hook) → done(보고) → Stop(hook)
+    expect(
+      notified([
+        hook("waiting-permission"),
+        report("waiting-permission"),
+        "input",
+        report("working"),
+        hook("waiting-permission"),
+        hook("working"),
+        report("turn-done"),
+        hook("turn-done"),
+      ])
+    ).toEqual(["waiting", "done"]);
+    // 보고가 먼저 오고 hook이 뒤따라도 같다.
+    expect(notified([report("waiting-permission"), hook("waiting-permission"), report("working"), hook("waiting-permission")])).toEqual([
+      "waiting",
+    ]);
+  });
+
+  it("Codex 모양: 고르는 키에도 기다림은 그대로, 느린 notify에도 「끝남」은 한 번", () => {
+    expect(
+      notified([
+        report("ready"),
+        report("working"),
+        report("waiting-permission"),
+        "input",
+        report("working"),
+        report("turn-done"),
+        "input",
+        report("ready"),
+        hook("turn-done"),
+      ])
+    ).toEqual(["waiting", "done"]);
+  });
+
+  it("사람의 입력: hook만 있는 칸의 기다림만 푼다", () => {
+    expect(afterPersonInput({ signal: "waiting-permission", reports: false })).toEqual({ signal: "working", reports: false });
+    expect(afterPersonInput({ signal: "waiting-input", reports: false })).toEqual({ signal: "working", reports: false });
+    for (const kept of [
+      { signal: "waiting-permission", reports: true },
+      { signal: "waiting-input", reports: true },
+      { signal: "turn-done", reports: false },
+      { signal: "turn-done", reports: true },
+      NO_PANE_SIGNAL,
+    ] satisfies PaneSignalState[]) {
+      expect(afterPersonInput(kept)).toBe(kept);
+    }
   });
 });
 
