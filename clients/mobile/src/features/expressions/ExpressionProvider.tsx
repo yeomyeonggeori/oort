@@ -27,6 +27,8 @@ import {warmEmojiCatalog} from '../emoji/catalogMemory';
 export const PhoneExpressions = createContext<PhoneExpressionStore | null>(
   null,
 );
+/** 소켓만 끊긴 동안 전체 목록을 다시 읽는 간격 — 웹 `ExpressionsProvider` 의 30초 주기와 같은 값(ADR-0218 §17). */
+export const SOCKET_LOST_REFRESH_MS = 30_000;
 const EMPTY: ExpressionSnapshot = {
   items: [],
   shelf: [],
@@ -160,9 +162,16 @@ export function ExpressionProvider({children}: {children: React.ReactNode}) {
     } else if (status === 'disconnected' && canSend) {
       // 소켓만 끊겼다(표시 유예 10초가 지났다, 보낼 수는 있다): 그린 그림은 그대로 두고, 알림을 못 받는 동안 새로 서는 칸이 디스크에서 읽지 않게
       // 문만 올린다(ADR §14 B-2 보충의 「끊김 한 번에 10초 이하」를 지킨다). 여기서 목록을 읽지 않는다 — 그 전체 읽기가 문을 도로 내리면 끊긴 동안 내내
-      // 디스크 읽기가 열린다. 문은 다시 이어진 뒤(`connected`)나 앱이 앞으로 올 때의 전체 읽기가 내린다.
+      // 디스크 읽기가 열린다. 문은 다시 이어진 뒤(`connected`)의 전체 읽기만 내린다(끊긴 동안의 어떤 읽기도 내리지 않는다, `store.socketLost`).
       store.socketLost();
+      // 끊긴 동안은 웹처럼 30초마다 전체 목록을 읽는다(#5585 보안 검수 r1 H1): 숨긴 그림이 메모리에서 그려지는 시간을 30초로 묶는다(ADR-0218 §17, 웹
+      // `ExpressionsProvider` 의 30초 주기와 같은 값). 이 읽기도 문은 내리지 않는다. 앱이 뒤에 있는 동안은 읽지 않는다 — 앞으로 오면 초점 읽기가 한다.
+      const timer = setInterval(() => {
+        if (focusManager.isFocused()) void store.refresh(true);
+      }, SOCKET_LOST_REFRESH_MS);
+      return () => clearInterval(timer);
     }
+    return undefined;
   }, [status, canSend, store]);
   useEffect(
     () =>
