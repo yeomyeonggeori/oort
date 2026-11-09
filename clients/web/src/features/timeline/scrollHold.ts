@@ -73,23 +73,69 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     remember();
   };
 
+  /** 적어 둔 「보던 줄」이 같은 화면 높이에 오도록 옮긴다. 옮겼으면 참. */
+  const holdAnchor = (target: Anchor) => {
+    if (target.first !== options.firstItemIndex()) return false;
+    const row = scroller.querySelector(`[data-index="${CSS.escape(target.index)}"]`);
+    if (row === null) return false;
+    const drift = rowTop(row) - target.top;
+    if (Math.abs(drift) < 0.5) return false;
+    place(scroller.scrollTop + drift);
+    return true;
+  };
+
+  // 가상 목록은 줄 크기 변화를 **다음 프레임**(requestAnimationFrame)에 처리하고, 그때 스크롤 방향이 위쪽이면 스스로 위쪽 보정(scrollBy)을 한다.
+  // 위쪽 줄이 줄어 이 모듈이 먼저 위로 바로잡으면 목록에는 방향이 「위」로 보여 같은 변화를 한 번 더 보정한다(실측: 보던 줄 127.5px 이중 이동).
+  // 그래서 바로잡은 뒤 몇 프레임 동안 같은 자리를 다시 확인한다: 이 확인은 목록의 처리보다 늦게 걸린 rAF 라 그 뒤에 돌고, 그리기 전에 되돌린다.
+  // 사람이 그 사이 스크롤하면(바깥 스크롤) 멈춘다.
+  const SETTLE_FRAMES = 3;
+  /** 다시 확인할 자리: 바닥(`null` 앵커)이거나 적어 둔 보던 줄. */
+  let settleTarget: { anchor: Anchor | null } | null = null;
+  let settleLeft = 0;
+  let settleFrame = 0;
+  const settle = () => {
+    settleFrame = 0;
+    const target = settleTarget;
+    if (target === null || performance.now() - lastForeignScrollAt <= SCROLLING_QUIET_MS) {
+      settleTarget = null;
+      return;
+    }
+    if (target.anchor === null) {
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 0.5) place(scroller.scrollHeight);
+    } else {
+      holdAnchor(target.anchor);
+    }
+    remember();
+    settleLeft -= 1;
+    if (settleLeft > 0) settleFrame = requestAnimationFrame(settle);
+    else settleTarget = null;
+  };
+  const armSettle = (target: Anchor | null) => {
+    settleTarget = { anchor: target === null ? null : { ...target } };
+    settleLeft = SETTLE_FRAMES;
+    if (settleFrame === 0) settleFrame = requestAnimationFrame(settle);
+  };
+
   const observer = new ResizeObserver(() => {
     const viewport = scroller.clientHeight;
     const content = scroller.scrollHeight;
     if (wasAtBottom && (viewport < lastViewport || content !== lastContent)) {
       place(scroller.scrollHeight);
-    } else if (
+      remember();
+      armSettle(null);
+      return;
+    }
+    if (
       !wasAtBottom &&
       content !== lastContent &&
       anchor !== null &&
-      anchor.first === options.firstItemIndex() &&
       performance.now() - lastForeignScrollAt > SCROLLING_QUIET_MS
     ) {
-      const row = scroller.querySelector(`[data-index="${CSS.escape(anchor.index)}"]`);
-      if (row !== null) {
-        const drift = rowTop(row) - anchor.top;
-        if (Math.abs(drift) >= 0.5) place(scroller.scrollTop + drift);
-      }
+      const held = anchor;
+      holdAnchor(held);
+      remember();
+      armSettle(held);
+      return;
     }
     remember();
   });
@@ -113,6 +159,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   if (scroller.firstElementChild) structure.observe(scroller.firstElementChild, { childList: true });
   scroller.addEventListener("scroll", onScroll, { passive: true });
   return () => {
+    if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
     scroller.removeEventListener("scroll", onScroll);
     structure.disconnect();
     observer.disconnect();
