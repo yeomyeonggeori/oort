@@ -221,3 +221,31 @@ export function relationFromIntersection(entry: {
   if (entry.boundingClientRect.top >= root.bottom) return "below";
   return "in";
 }
+
+/**
+ * 「방금 보냈다」로 치는 창 (#5603). 메아리는 보낸 그 틱에 목록에 들어오므로 몇 초면 넉넉하다. 이보다 오래된 메아리가
+ * 처음 보이면 그것은 방금 보낸 것이 아니라 되살린 실패 행이거나 다른 대화에서 건너온 행이다.
+ */
+export const SELF_SEND_FRESH_MS = 3_000;
+
+/**
+ * 이번에 **처음 나타난** 내 메아리 가운데 방금 보낸 것이 있는가 (#5603).
+ *
+ * 내가 보낸 글은 어디를 읽고 있었든 맨 아래로 데려간다(폰 `selfSendToken`과 같은 규칙). 남의 말은 따라가지 않고 「최신
+ * 메시지로 이동」이 센다 — 그 규칙은 그대로다. 메아리(`pending`)는 이 기기에서 내가 보낸 것만 든다.
+ *
+ * - `seen`: 앞 렌더까지 본 `clientMsgId`. 다시 보내기는 같은 키라 새 전송이 아니다(실패 줄은 이미 그 자리에 있다).
+ * - 보내는 중(`sending`)이고 보낸 지 `SELF_SEND_FRESH_MS` 안이어야 한다.
+ */
+export function hasFreshSelfSend(
+  seen: ReadonlySet<string>,
+  pending: readonly { clientMsgId: string; status: string; createdAtMs: number }[],
+  nowMs: number
+): boolean {
+  return pending.some(
+    (row) =>
+      !seen.has(row.clientMsgId) &&
+      row.status === "sending" &&
+      nowMs - row.createdAtMs <= SELF_SEND_FRESH_MS
+  );
+}
