@@ -31,8 +31,15 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
 /** owner 10-30 #4790: 데스크탑 일반·스레드 입력창의 공통 상한. */
 export const COMPOSER_MAX_ROWS = 5;
 
-/** 거울 표지. 시험·캡처가 「사람이 쓰는 입력창」을 셀 때 이것을 뺀다. */
+/**
+ * 거울 표지. 시험·캡처가 「사람이 쓰는 입력창」을 셀 때 이것을 뺀다. 거울도 `<textarea>`라 태그로 찾는 로케이터
+ * (`locator("textarea")`)는 둘을 잡는다 — 입력창은 자기 시험 열쇠(`composer-input`·`thread-composer-input`·
+ * `message-editor-input`)로 찾는다(design-review M-5).
+ */
 export const AUTO_GROW_MIRROR_ATTR = "data-autogrow-mirror";
+
+/** 거울의 옷(`tokens.css` `autogrow-mirror`): 자리·가시성·포인터·높이 0. 지어낸 값이라 스타일시트가 든다(design-review M-4). */
+const MIRROR_CLASS = "autogrow-mirror";
 
 export interface AutoGrowOptions {
   minRows: number;
@@ -47,22 +54,22 @@ function pxOf(value: string, fallback: number): number {
 /**
  * 재기 전용 거울. 화면·보조기술·초점·포인터 어디에도 서지 않는다.
  *
- * 높이 0 + `overflow: hidden`이어도 textarea의 `scrollHeight`는 내용 높이(패딩 포함)를 답한다. 높이를 `auto`로
- * 두지 않는 이유는 거울의 정적 자리(부모의 끝)에서 내용만큼 솟은 상자가 조상의 스크롤 범위를 넓히지 않게 하기 위해서다.
- * 폰 폭의 `tap-target` 최소 높이(44)는 클래스가 같으므로 거울에도 그대로 걸리고, 그래서 앞 판(접어서 재기)과 같은
- * 값을 읽는다.
+ * 흐름 밖·안 보임·누를 수 없음·높이 0은 `autogrow-mirror`(tokens.css)가 든다. 높이 0 + `overflow: hidden`이어도
+ * textarea의 `scrollHeight`는 내용 높이(패딩 포함)를 답한다. 높이를 `auto`로 두지 않는 이유는 거울의 정적 자리(부모의
+ * 끝)에서 내용만큼 솟은 상자가 조상의 스크롤 범위를 넓히지 않게 하기 위해서다. 폰 폭의 `tap-target` 최소 높이(44)는
+ * 클래스가 같으므로 거울에도 그대로 걸리고, 그래서 앞 판(접어서 재기)과 같은 값을 읽는다.
  */
 function createMirror(node: HTMLTextAreaElement): HTMLTextAreaElement {
   const mirror = node.ownerDocument.createElement(node.tagName) as HTMLTextAreaElement;
   mirror.setAttribute(AUTO_GROW_MIRROR_ATTR, "");
+  // 보조기술에서 뺀다. 스타일시트를 읽지 않는 jsdom 시험의 `getByRole("textbox")`도 이 표지로 거울을 건너뛴다(M-5).
+  // 값을 `String(true)`로 쓰는 것은 사전 장부(direct-copy)가 영어 한 낱말 글자(`"true"`)를 화면 문구로 세기 때문이다.
+  mirror.setAttribute("aria-hidden", String(true));
   mirror.tabIndex = -1;
   mirror.readOnly = true;
   mirror.inert = true;
   return mirror;
 }
-
-/** 거울의 자리: 흐름 밖·안 보임·누를 수 없음·높이 0. 폭은 재기마다 입력창에서 붙인다. `visibility: hidden`이 보조기술에서도 뺀다. */
-const MIRROR_CSS = "position:absolute;visibility:hidden;pointer-events:none;height:0;overflow:hidden;";
 
 /**
  * `value`가 바뀔 때마다 textarea의 높이를 내용에 맞춘다.
@@ -102,11 +109,12 @@ export function useAutoGrow(
     const border = pxOf(styles.borderTopWidth, 0) + pxOf(styles.borderBottomWidth, 0);
     const frame = pxOf(styles.paddingTop, 0) + pxOf(styles.paddingBottom, 0) + border;
 
-    // 거울을 입력창과 같은 상자로 맞춘다: 같은 클래스(글꼴·행간·패딩·줄바꿈 규칙), 같은 바깥 폭, 같은 글.
-    // 폭은 살아 있는 입력창에서 읽는다 — 그 읽기도 레이아웃을 부르지만, 이때 입력창은 마지막으로 그려진 높이 그대로라
-    // 다른 상자의 크기가 바뀌지 않는다.
-    mirror.className = node.className;
-    mirror.style.cssText = `${MIRROR_CSS}width:${node.getBoundingClientRect().width}px;`;
+    // 거울을 입력창과 같은 상자로 맞춘다: 같은 클래스(글꼴·행간·패딩·줄바꿈 규칙) + 거울의 옷, 같은 바깥 폭, 같은 글.
+    // 폭은 살아 있는 입력창의 **레이아웃 폭**(계산된 `width`, box-sizing을 따른다)이다. `getBoundingClientRect`는 조상의
+    // 변형(scale)을 타서, 확대·축소 애니메이션 중에 재면 거울이 좁아져 줄을 더 센다(design-review N-4). 그 읽기도 레이아웃을
+    // 부르지만, 이때 입력창은 마지막으로 그려진 높이 그대로라 다른 상자의 크기가 바뀌지 않는다.
+    mirror.className = `${node.className} ${MIRROR_CLASS}`;
+    mirror.style.width = styles.width;
     mirror.value = node.value;
 
     const min = line * minRows + frame;

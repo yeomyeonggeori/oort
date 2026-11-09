@@ -16,7 +16,8 @@ import { TypingLine } from "./TypingLine";
 import { typingLineParts } from "./typingLineParts";
 
 // =============================================================================
-// 「입력 중」 줄 (#5567): 카드 아래 늘 잡아 둔 한 줄, 문구는 ko/en 사전, 잘리는 것은 이름(조사째)이고 서술어는 안 잘린다.
+// 「작성 중」 줄 (#5567): 카드 아래 늘 잡아 둔 한 줄, 문구는 ko/en 사전, 잘리는 것은 이름(조사째)이고 서술어는 안 잘린다.
+// 낱말은 폰·코어·ADR-0149와 같은 「작성 중」(design-review H-1), 둘이면 두 이름 다(M-2), 셋부터 「외 N명」이다.
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -61,32 +62,55 @@ beforeAll(async () => {
 afterEach(() => cleanup());
 
 const joined = (parts: ReturnType<typeof typingLineParts>) =>
-  parts === null ? null : `${parts.before}${parts.name}${parts.attached}${parts.tail}`;
+  parts === null ? null : `${parts.lead.map((piece) => piece.text).join("")}${parts.tail}`;
+const boldNames = (parts: ReturnType<typeof typingLineParts>) =>
+  parts?.lead.filter((piece) => piece.name).map((piece) => piece.text) ?? [];
 
 describe("typingLineParts — 사전 문장을 이름(조사째) | 서술어로 나눈다", () => {
-  it("한 사람: 「○○님이 입력 중…」, 조사 「님이」는 이름 편에 남고 꼬리는 빈칸으로 시작하는 서술어다", () => {
+  it("한 사람: 「○○님이 작성 중…」, 조사 「님이」는 이름 편에 남고 꼬리는 빈칸으로 시작하는 서술어다", () => {
     const parts = typingLineParts(ko, ["한지후"]);
-    expect(joined(parts)).toBe("한지후님이 입력 중…");
-    expect(parts).toMatchObject({ before: "", name: "한지후", attached: "님이", tail: " 입력 중…" });
+    expect(joined(parts)).toBe("한지후님이 작성 중…");
+    expect(parts?.lead).toEqual([
+      { text: "한지후", name: true },
+      { text: "님이", name: false },
+    ]);
+    expect(parts?.tail).toBe(" 작성 중…");
     // 보조기술 문장은 온전하고 말줄임표가 없다.
-    expect(parts?.label).toBe("한지후님이 입력 중");
+    expect(parts?.label).toBe("한지후님이 작성 중");
   });
 
-  it("여러 명: 「○○님 외 N명이 입력 중…」(둘부터 뭉친다), 숫자는 꼬리에 있다", () => {
+  it("둘: 두 이름을 다 부른다 「○○님, △△님이 작성 중…」 — 두 이름과 마지막 조사는 줄어드는 쪽, 서술어만 꼬리다", () => {
     const two = typingLineParts(ko, ["한지후", "오민재"]);
-    expect(joined(two)).toBe("한지후님 외 1명이 입력 중…");
-    expect(two).toMatchObject({ name: "한지후", attached: "님", tail: " 외 1명이 입력 중…" });
+    expect(joined(two)).toBe("한지후님, 오민재님이 작성 중…");
+    expect(two?.lead).toEqual([
+      { text: "한지후", name: true },
+      { text: "님, ", name: false },
+      { text: "오민재", name: true },
+      { text: "님이", name: false },
+    ]);
+    expect(two?.tail).toBe(" 작성 중…");
+    expect(two?.label).toBe("한지후님, 오민재님이 작성 중");
+  });
+
+  it("셋부터: 「○○님 외 N명이 작성 중…」, 숫자는 꼬리에 있고 뒤 사람들의 이름은 보이는 줄에 서지 않는다", () => {
     const three = typingLineParts(ko, ["한지후", "오민재", "서하윤"]);
-    expect(joined(three)).toBe("한지후님 외 2명이 입력 중…");
-    expect(three?.label).toBe("한지후님 외 2명이 입력 중");
-    // 뒤 사람들의 이름은 보이는 줄에 서지 않는다.
+    expect(joined(three)).toBe("한지후님 외 2명이 작성 중…");
+    expect(boldNames(three)).toEqual(["한지후"]);
+    expect(three?.tail).toBe(" 외 2명이 작성 중…");
+    expect(three?.label).toBe("한지후님 외 2명이 작성 중");
     expect(joined(three)).not.toContain("오민재");
   });
 
-  it("영어 사전도 같은 구조로 나뉜다: 이름 | 「 is typing…」, 복수형은 ICU가 정한다", () => {
-    expect(typingLineParts(en, ["Jihu"])).toMatchObject({ name: "Jihu", attached: "", tail: " is typing…" });
-    expect(joined(typingLineParts(en, ["Jihu", "Minjae"]))).toBe("Jihu and 1 other are typing…");
+  it("영어 사전도 같은 규칙이다: 하나 · 둘(두 이름) · 셋부터 「and N others」, 꼬리는 「 is/are typing…」", () => {
+    const one = typingLineParts(en, ["Jihu"]);
+    expect(one?.lead).toEqual([{ text: "Jihu", name: true }]);
+    expect(one?.tail).toBe(" is typing…");
+    const two = typingLineParts(en, ["Jihu", "Minjae"]);
+    expect(joined(two)).toBe("Jihu and Minjae are typing…");
+    expect(boldNames(two)).toEqual(["Jihu", "Minjae"]);
+    expect(two?.tail).toBe(" are typing…");
     expect(joined(typingLineParts(en, ["Jihu", "Minjae", "Hayun"]))).toBe("Jihu and 2 others are typing…");
+    expect(joined(typingLineParts(en, ["Jihu", "Minjae", "Hayun", "Doyun"]))).toBe("Jihu and 3 others are typing…");
   });
 
   it("아무도 없으면 문장이 없다", () => {
@@ -94,8 +118,11 @@ describe("typingLineParts — 사전 문장을 이름(조사째) | 서술어로 
   });
 
   it("번역에 이름 자리가 없으면 문장 하나가 통째로 줄어드는 쪽에 선다(꼬리가 넘치지 않는다)", () => {
-    const noSlot = (() => "누군가 입력 중…") as unknown as LocaleService["formatMessage"];
-    expect(typingLineParts(noSlot, ["한지후"])).toMatchObject({ before: "누군가 입력 중…", name: "", tail: "" });
+    const noSlot = (() => "누군가 작성 중…") as unknown as LocaleService["formatMessage"];
+    expect(typingLineParts(noSlot, ["한지후"])).toMatchObject({
+      lead: [{ text: "누군가 작성 중…", name: false }],
+      tail: "",
+    });
   });
 });
 
@@ -129,16 +156,30 @@ describe("<TypingLine> — 늘 잡아 둔 한 줄", () => {
     expect(line.dataset.count).toBe("1");
     const lead = view.getByTestId("composer-typing-lead");
     const tail = view.getByTestId("composer-typing-tail");
-    expect(`${lead.textContent}${tail.textContent}`).toBe("한지후님이 입력 중…");
+    expect(`${lead.textContent}${tail.textContent}`).toBe("한지후님이 작성 중…");
     expect(lead.getAttribute("aria-hidden")).toBe("true");
     expect(tail.getAttribute("aria-hidden")).toBe("true");
     expect(lead.querySelector(".font-bold.text-ink")?.textContent).toBe("한지후");
-    expect(view.getByTestId("composer-typing-label").textContent).toBe("한지후님이 입력 중");
+    expect(view.getByTestId("composer-typing-label").textContent).toBe("한지후님이 작성 중");
     expect(line.closest("[aria-live]")).toBeNull();
     const dots = view.getByTestId("responding-dots");
     expect(dots.dataset.human).toBe("");
     expect(dots.querySelectorAll(".bg-ink-muted")).toHaveLength(3);
     expect(dots.querySelectorAll(".bg-agent")).toHaveLength(0);
+  });
+
+  it("둘이 치면 두 이름이 다 굵게 서고, 보조기술도 두 이름을 다 읽는다 (M-2)", () => {
+    const view = mount([A, B]);
+    const lead = view.getByTestId("composer-typing-lead");
+    expect(Array.from(lead.querySelectorAll(".font-bold.text-ink")).map((node) => node.textContent)).toEqual([
+      "한지후",
+      "오민재",
+    ]);
+    expect(`${lead.textContent}${view.getByTestId("composer-typing-tail").textContent}`).toBe(
+      "한지후님, 오민재님이 작성 중…"
+    );
+    expect(view.getByTestId("composer-typing-label").textContent).toBe("한지후님, 오민재님이 작성 중");
+    expect(view.getByTestId("composer-typing").dataset.count).toBe("2");
   });
 
   it("명부에 없는 사람은 그리지 않는다(이름 없는 「누군가」는 정보가 0이다)", () => {

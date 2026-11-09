@@ -26,6 +26,7 @@
   "timeline.agentRail.openRecord": "Open {name}'s work record",
   "timeline.agentRail.openActivity": "View activity",
   "timeline.typing.one": "{name} is typing…",
+  "timeline.typing.two": "{name} and {second} are typing…",
   "timeline.typing.many": "{name} and {count, plural, one {# other} other {# others}} are typing…",
   "timeline.runException.open": "{text}. Open work record",
   "timeline.runException.settings": "Open agent settings",

@@ -54,14 +54,14 @@ export function RespondingAvatar({
   );
 }
 
-/** 점 색. 에이전트의 「답하는 중」은 에이전트 표지(`--agent`), 사람의 「입력 중」(#5567)은 글자와 같은 `--ink-muted`다. */
+/** 점 색. 에이전트의 「답하는 중」은 에이전트 표지(`--agent`), 사람의 「작성 중」(#5567)은 글자와 같은 `--ink-muted`다. */
 const DOT_AGENT = "bg-agent";
 const DOT_HUMAN = "bg-ink-muted";
 
 /**
  * 점 셋. 동작 줄이기에서는 움직이지 않고 멈춘 채 선다.
  *
- * `human`은 사람의 줄이라는 뜻이다(#5567 「입력 중」). `--agent`는 아바타·배지와 에이전트 줄에만 쓰는 색이라 사람 줄에
+ * `human`은 사람의 줄이라는 뜻이다(#5567 「작성 중」). `--agent`는 아바타·배지와 에이전트 줄에만 쓰는 색이라 사람 줄에
  * 얹으면 그 대조가 무너지므로, 사람 줄의 점은 글자와 같은 muted 잉크다.
  */
 export function RespondingDots({ human = false }: { human?: boolean } = {}) {

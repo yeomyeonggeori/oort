@@ -91,9 +91,13 @@ describe("#5567 재는 동안 살아 있는 입력창을 접지 않는다", () =
     expect(mirror).not.toBeNull();
     expect(mirror).not.toBe(input);
     expect(mirror!.tabIndex).toBe(-1);
-    expect(mirror!.style.visibility).toBe("hidden");
-    expect(mirror!.style.position).toBe("absolute");
-    expect(mirror!.style.height).toBe("0px");
+    expect(mirror!.getAttribute("aria-hidden")).toBe("true");
+    // 자리·가시성·높이 0은 스타일시트(`autogrow-mirror`)가 든다 — 스크립트가 거울에 쓰는 인라인 값은 잰 폭뿐이다(M-4).
+    // jsdom 은 스타일시트를 읽지 않으므로 그 값 자체는 designSystem.test.ts 가 CSS 에서 잰다.
+    expect(mirror!.classList.contains("autogrow-mirror")).toBe(true);
+    expect(mirror!.style.visibility).toBe("");
+    expect(mirror!.style.position).toBe("");
+    expect(mirror!.style.height).toBe("");
     act(() => view.rerender(createElement(Field, { value: "거울로 재는 글" })));
     expect(mirror!.value).toBe("거울로 재는 글");
     view.unmount();

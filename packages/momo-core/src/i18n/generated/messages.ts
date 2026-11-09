@@ -1186,6 +1186,7 @@ export const messageKeys = [
   "timeline.thread.unreadChip",
   "timeline.typing.many",
   "timeline.typing.one",
+  "timeline.typing.two",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -2760,6 +2761,10 @@ export const argumentSpecs = {
   "timeline.typing.one": {
     "name": "string"
   },
+  "timeline.typing.two": {
+    "name": "string",
+    "second": "string"
+  },
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -4130,6 +4135,7 @@ export interface MessageArgs {
   "timeline.thread.unreadChip": { count: number };
   "timeline.typing.many": { count: number; name: string };
   "timeline.typing.one": { name: string };
+  "timeline.typing.two": { name: string; second: string };
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

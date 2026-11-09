@@ -8053,7 +8053,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "명이 입력 중…"
+      "value": "명이 작성 중…"
     }
   ],
   "timeline.typing.one": [
@@ -8063,7 +8063,25 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "님이 입력 중…"
+      "value": "님이 작성 중…"
+    }
+  ],
+  "timeline.typing.two": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님, "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "님이 작성 중…"
     }
   ],
   "timeline.unfurl.label": [

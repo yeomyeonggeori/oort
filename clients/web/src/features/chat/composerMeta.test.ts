@@ -56,20 +56,22 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
   });
 });
 
-describe("「입력 중」은 카드 아래 늘 잡아 둔 한 줄이다 (#5567)", () => {
-  it("남의 입력은 공유 슬롯을 바꾸지 않는다: 슬롯 판정에 입력 중인 사람 수가 들어가지 않는다", () => {
+describe("「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다 (#5567)", () => {
+  it("남의 입력은 공유 슬롯을 바꾸지 않는다: 슬롯 판정에 작성 중인 사람 수가 들어가지 않는다", () => {
     expect(composer).not.toMatch(/composerMetaMode\(\{[^}]*typist/);
     // 줄은 액션 행(`meta`) 안이 아니라 카드 **뒤**, 같은 폼 안이다.
     expect(composer).toMatch(/<\/ComposerCard>\s*\{\/\*[\s\S]*?\*\/\}\s*<TypingLine memberIds=\{typists\} directory=\{directory\} \/>\s*<\/form>/);
     expect(composer).not.toMatch(/meta=\{[\s\S]*?<TypingLine[\s\S]*?send=\{/);
   });
 
-  it("줄은 아무도 치지 않을 때도 서 있고(높이 = text-meta 행간), 넓은 창에서는 카드 아래 여백 18을 그 줄이 맡는다", () => {
+  it("줄은 아무도 치지 않을 때도 서 있고(높이 = text-meta 행간 + 위아래 숨 8), 카드 아래를 그 줄 칸이 맡는다", () => {
     // 줄 상자는 조건 없이 그려지고, 안의 문장만 서고 진다.
     expect(typingLine).toMatch(/return \(\s*<div\s+className="typing-line"/);
     expect(typingLine).toMatch(/\{parts !== null && \(/);
     const utility = /@utility typing-line \{([\s\S]*?)\n\}/.exec(tokens)?.[1] ?? "";
-    expect(utility).toMatch(/block-size: var\(--text-meta--line-height\);/);
+    // 글 한 줄만큼의 칸이면 잉크가 카드 밑변·판 밑변에서 3~4px에 끼고 그림자 띠 안에 선다(design-review M-1).
+    expect(utility).toMatch(/block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/);
+    expect(utility).toMatch(/padding-block: var\(--spacing-2\);/);
     expect(utility).toMatch(/overflow: hidden;/);
     expect(tokens).toMatch(/--text-meta--line-height: calc\(var\(--type-rem\) \* 1\.125\);/);
     // 폼의 아래 여백은 0이다. 폰 폭은 `pb-0`, 넓은 창은 독 규칙이 정한다.
