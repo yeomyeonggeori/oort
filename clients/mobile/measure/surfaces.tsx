@@ -4663,7 +4663,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         />
       );
     // #5593: 권한 요청 알림을 누르면 도착하는 곳 — 그 세션 화면의 승인 카드(실제 항법 reducer 가 지은 상태 그대로, 밑에 작업 목록).
+    // `-off` 는 서버가 기기 서명을 요구하지 않는 판(서버 기본값, 수리 1회차 H1): 카드 자리에 그 이유와 답할 곳이 선다.
     case 'shell-work-permission':
+    case 'shell-work-permission-off':
       return (
         <Shell
           initialNav={navReducer(INITIAL_NAV, {
@@ -7530,10 +7532,14 @@ function seedShell(surface: string): void {
   if (surface === 'shell-work-from-push') seedWorkConsole();
   if (
     surface === 'shell-work-permission' ||
+    surface === 'shell-work-permission-off' ||
     surface === 'shell-work-session-mac' ||
     surface === 'shell-work-after-send'
   ) {
     seedMacSessions();
+  }
+  if (surface === 'shell-work-permission-off') {
+    harnessClient.setQueryData(SIGNING_REQUIRED_QUERY_KEY(ADE_WS), false);
   }
 
   if (surface === 'shell-home-idle') return;
@@ -8247,7 +8253,21 @@ if (
   LAUNCHED.name.startsWith('work-jobs')
 ) {
   seedWorkJobs(LAUNCHED.name);
-  if (LAUNCHED.name === 'work-jobs-mac') seedMacSessions();
+  if (LAUNCHED.name === 'work-jobs-mac') {
+    seedMacSessions();
+    // 수리 1회차 M1: 승인을 기다리는 run(첫 줄)에 내 대기 승인이 걸려 있다 — 인박스 알약과 같은 원장이라 「내 확인 필요」에 함께 선다.
+    harnessClient.setQueryData(['approvals', ADE_WS, 'pending'], [
+      {
+        id: 'measure-approval-run',
+        workspaceId: ADE_WS,
+        runId: WORK_JOBS_ROWS[0].sessionId,
+        channelId: 'ch-build',
+        requestedBy: 'measure-agent-grok',
+        actionType: 'tool_call',
+        status: 'pending',
+      },
+    ]);
+  }
 }
 if (
   LAUNCHED !== null &&
