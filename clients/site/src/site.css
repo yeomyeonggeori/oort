@@ -16,6 +16,9 @@
   --signal: #c2410c;
   --signal-text: #af3908;
   --agent: #2f5b8a;
+  /* 문서 상태 표지(#5590): tokens.css 의 --ok·--warn */
+  --ok: #0e7740;
+  --warn: #855900;
   --glass: rgba(255, 254, 252, .74);
   --veil: rgba(239, 237, 234, .78);
   --shadow: 0 1px 2px rgba(22, 23, 27, .06), 0 24px 60px -28px rgba(47, 91, 138, .45);
@@ -45,6 +48,8 @@
     --signal: #ff8a4c;
     --signal-text: #ff9a62;
     --agent: #8db3e2;
+    --ok: #4cc47e;
+    --warn: #d4a72c;
     --glass: rgba(32, 35, 43, .72);
     --veil: rgba(15, 20, 28, .72);
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 24px 60px -24px rgba(0, 0, 0, .8);
@@ -274,8 +279,11 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
   /* 폰 폭은 글 덩어리가 첫 화면 대부분을 차지해 막을 위·옆으로 넓힌다(머리글이 셰이더의 비운 자리 밖이라) */
   .hero::before { top: 41%; width: 170%; height: 124%; }
   .eyebrow { margin-bottom: 12px; font-size: 14px; }
-  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」): pretty 를 모르는 브라우저는 balance 그대로 */
-  .lead { margin-top: 16px; text-wrap: pretty; }
+  .lead { margin-top: 16px; }
+  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」, fr 「sur-le-champ.」): pretty 는 그 두 언어에만.
+     ko·ja·zh 는 balance 그대로(Chromium pretty 가 ko 를 「사람이 그 / 자리에서」로 끊었다, #5568 검수 2회차 L1). es 는 끝줄 문제가 없었고
+     WebKit pretty 에서 한 줄 늘어 balance 그대로. pretty 를 모르는 브라우저는 balance 그대로 */
+  :lang(en) .lead, :lang(fr) .lead { text-wrap: pretty; }
   .proof { gap: 6px; margin-top: 18px; }
   .proof li { padding: 4px 10px; font-size: 13px; }
   .get { margin-top: 28px; }
@@ -294,8 +302,8 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
 @media (max-width: 599px) {
   .ghost, .pill, .row .pill, .lang-list a, .chip-menu button { min-height: 44px; }
   /* 머리 컨트롤은 아이콘 하나씩 44×44. 이름은 접근성 이름(aria-label)에, 긴 자칭은 언어 메뉴 안에만 */
-  .lang-btn, .web-link { width: 44px; padding: 0; justify-content: center; }
-  .lang-btn .lang-name, .lang-btn .lang-chev, .web-link .web-t { display: none; }
+  .lang-btn, .web-link, .docs-link { width: 44px; padding: 0; justify-content: center; }
+  .lang-btn .lang-name, .lang-btn .lang-chev, .web-link .web-t, .docs-link .docs-t { display: none; }
   .web-link .i { width: 18px; height: 18px; }
   /* 웹 링크 아이콘은 언어 아이콘과 같은 모양(유리 원 없이 글리프만). 뜻은 툴팁(title)과 접근성 이름이 낸다 */
   .top-nav .web-link { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -303,6 +311,12 @@ html[data-phone] .proof { order: 1; margin-top: 24px; }
      글자 자리와 글자 사이 간격(14)은 그대로 두고 왼쪽 끝을 꼬리 다른 줄과 맞춘다(이웃 상자는 맞닿기만 한다) */
   .foot-langs { row-gap: 0; }
   .foot-langs a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 7px; margin: 0 -7px; }
+}
+/* #5590: 600~767 은 「문서」만 아이콘(36×36, 이름은 aria-label·title). 이름이 긴 언어(es 「Documentación」 +
+   「Español (Latinoamérica)」)에서 머리 컨트롤이 두 줄로 접혀 머리 줄이 첫 화면 머리글(위 128)을 덮었다(600·640 에서 아래 149) */
+@media (min-width: 600px) and (max-width: 767px) {
+  .docs-link { width: 36px; padding: 0; justify-content: center; }
+  .docs-link .docs-t { display: none; }
 }
 /* L2: hover 는 포인터가 있는 기기에서만. 주 버튼은 두 반쪽이 함께 잉크만 옅어진다 */
 @media (hover: hover) {
