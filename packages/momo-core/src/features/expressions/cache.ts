@@ -1,4 +1,22 @@
-import type { Expression, ExpressionAddPolicy, ExpressionList, ExpressionVersion } from "./types";
+import type { Expression, ExpressionAddPolicy, ExpressionImage, ExpressionList, ExpressionMedia, ExpressionVersion } from "./types";
+
+const MEDIA_VARIANTS = ["small", "large", "thumb"] as const;
+const IMAGE_FIELDS = ["mime", "sha256", "bytes", "width", "height", "frameCount", "durationMs"] as const satisfies readonly (keyof ExpressionImage)[];
+
+/**
+ * 두 그림 묶음이 같은 그림인가: 변형(small·large·thumb)마다 형식 · sha256 · 크기 · 장면 수 · 길이를 값으로 견준다(#5575).
+ * 앞 판은 `JSON.stringify` 로 견줬다. 그 문자열은 키 차례를 따르므로, 같은 그림이라도 서버가 키를 다른 차례로 보내면(지금 서버는 이름 차례로
+ * 고정이지만 계약은 차례를 정하지 않는다) 다시 읽을 때마다 「그림이 바뀌었다」가 되어 모든 그림을 걷었다(30초마다 · 창 포커스마다).
+ */
+export function sameExpressionMedia(a: ExpressionMedia | null, b: ExpressionMedia | null): boolean {
+  if (a === null || b === null) return a === b;
+  return MEDIA_VARIANTS.every((variant) => {
+    const left = a[variant];
+    const right = b[variant];
+    if (left === undefined || right === undefined) return left === right;
+    return IMAGE_FIELDS.every((field) => left[field] === right[field]);
+  });
+}
 
 export interface ExpressionCache {
   workspaceId: string;
@@ -73,7 +91,7 @@ export function applyExpressionList(cache: ExpressionCache, list: ExpressionList
   }
   const evictImageIds = cache.items.filter((prior) => {
     const current = next.get(prior.id);
-    return !current || JSON.stringify(current.media) !== JSON.stringify(prior.media);
+    return !current || !sameExpressionMedia(current.media, prior.media);
   }).map((item) => item.id);
   return {
     applied: true, needsFullRefresh: false, evictImageIds,
