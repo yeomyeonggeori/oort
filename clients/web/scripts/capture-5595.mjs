@@ -119,7 +119,16 @@ async function scene(browser, scheme) {
     check("단추가 눌린다(내 맥의 내 세션)", await stop.isEnabled());
     await shot(page, `1-stop-idle-${scheme}`);
 
-    await stop.click();
+    // 키보드로 누른다(검수 H-1): 단추가 확인 줄로 바뀌어도 캐럿이 <body>로 떨어지지 않아야 하고, 멈추는 자리마다
+    // 초점 링이 보여야 한다(`:focus-visible`). 키보드 사용자처럼 Tab으로 「멈추기」에 닿는다: 스크립트로 놓은 초점은
+    // 브라우저가 키보드 초점으로 치지 않아 뒤따르는 링 판정이 실제와 달라진다.
+    const active = () => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? "");
+    const ringVisible = () => page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? false);
+    await stop.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    check("Tab으로 「멈추기」에 닿고 링이 보인다", (await active()) === "work-end-session" && (await ringVisible()), await active());
+    await page.keyboard.press("Enter");
     const warning = page.getByTestId("work-end-warning");
     await warning.waitFor({ state: "visible" });
     check(
@@ -127,12 +136,25 @@ async function scene(browser, scheme) {
       (await warning.textContent()) === "이 작업을 멈출까요? 맥에서 돌고 있는 작업을 끝내요. 지금까지의 진행 내역은 남아요.",
       await warning.textContent()
     );
+    check("무장하면 캐럿은 「취소」다(<body>가 아니다)", (await active()) === "work-end-cancel", await active());
+    check("「취소」에 초점 링이 보인다", await ringVisible());
+    const questionId = await warning.getAttribute("id");
+    check(
+      "확정 단추가 묻는 문장을 설명으로 갖는다",
+      questionId !== null && (await page.getByTestId("work-end-commit").getAttribute("aria-describedby")) === questionId,
+      questionId ?? ""
+    );
     await shot(page, `2-stop-confirm-${scheme}`);
 
-    await page.getByTestId("work-end-commit").click();
+    await page.keyboard.press("Tab");
+    check("한 번 Tab이면 확정 「멈추기」다", (await active()) === "work-end-commit", await active());
+    await shot(page, `2b-stop-confirm-commit-focus-${scheme}`);
+    await page.keyboard.press("Enter");
     const line = page.getByTestId("work-stop-requested");
     await line.waitFor({ state: "visible", timeout: 10_000 });
     check("맥이 꺼져 있으면 「맥이 켜지면 멈춰요」다", (await line.textContent()) === "맥이 꺼져 있어요. 맥이 켜지면 멈춰요.", await line.textContent());
+    check("답이 서면 캐럿이 그 문장이다(상태 영역)", (await active()) === "work-stop-requested" && (await line.getAttribute("role")) === "status", await active());
+    check("답 문장에 초점 링이 보인다", await ringVisible());
     check("kill 라우트가 한 번 나갔고 PATCH ended는 나가지 않았다", calls.kill === 1 && calls.patch === 0, JSON.stringify(calls));
     check("요청 뒤 단추는 잠긴다", await page.getByTestId("work-end-session").isDisabled());
     await shot(page, `3-stop-offline-${scheme}`);

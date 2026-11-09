@@ -715,7 +715,7 @@ export function workHostName(
  * streaming session as unverified, which is the opposite of fail-closed.
  *
  * What a heartbeat CAN honestly carry is a claim about the future: an empty
- * step list under "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다"
+ * step list under "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓여요"
  * promises steps that a host nobody has heard from may never send. That is the
  * one place this answer is used, and only while the ledger still calls the
  * session running, because for a finished session the host's heartbeat now says
@@ -804,7 +804,7 @@ export function workSessionContinuityStatus(
 }
 
 /**
- * The copy under "아직 진행 내역이 없습니다" for a session whose thread came
+ * The copy under "아직 진행 내역이 없어요" for a session whose thread came
  * back empty. A running session on a host the registry has not heard from gets
  * the fact instead of the promise (see `workHostOnline`).
  */
@@ -816,12 +816,12 @@ export function emptyStepsDetail(
     (session.status === "running" || session.status === "idle") &&
     workHostOnline(session, hosts) === false
   ) {
-    return "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다.";
+    return "이 호스트에서 최근 신호를 받은 기록이 없어요. 새 단계가 도착하지 않을 수 있어요.";
   }
   if (session.status === "idle") {
-    return "마지막 실행은 끝났고 호스트가 같은 터미널을 열어 두고 있습니다.";
+    return "마지막 실행은 끝났고 호스트가 같은 터미널을 열어 두고 있어요.";
   }
-  return "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
+  return "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓여요.";
 }
 
 // ---- peek + excerpt ---------------------------------------------------------

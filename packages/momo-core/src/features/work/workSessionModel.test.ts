@@ -698,7 +698,7 @@ describe("workHostTrust", () => {
   });
 
   it("drops the promise of coming steps when nobody has heard the host", () => {
-    const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
+    const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓여요.";
     expect(emptyStepsDetail(session(), [host()])).toBe(promise);
     // A finished session is history: the host's heartbeat now says nothing
     // about the steps it already did or did not deliver.
@@ -708,7 +708,7 @@ describe("workHostTrust", () => {
     // No answer from the registry is not evidence either way.
     expect(emptyStepsDetail(session(), undefined)).toBe(promise);
     expect(emptyStepsDetail(session(), [host({ online: false })])).toBe(
-      "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다."
+      "이 호스트에서 최근 신호를 받은 기록이 없어요. 새 단계가 도착하지 않을 수 있어요."
     );
   });
 });
