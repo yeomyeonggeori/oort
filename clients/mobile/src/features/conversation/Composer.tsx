@@ -10,6 +10,7 @@ import {useExpressionMessages} from '../expressions/useExpressionMessages';
 import {useExpressionSuggest} from '../expressions/useExpressionSuggest';
 import {startKeyboardMemory, keyboardSlotHeight} from '../../lib/keyboardMemory';
 import {WORD} from '../../lib/techWords';
+import {isKeywordOnlyInput} from '@momo/core/features/expressions/suggest';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {useComposerPanel} from './composerPanel';
 import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
@@ -1993,8 +1994,19 @@ export function Composer({
       offline !== true &&
       focused,
   });
-  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. */
+  /**
+   * 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 보내는 것은 보내기 한 번이다.
+   * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `isKeywordOnlyInput`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고 그림을
+   * **더한다**(보내기 한 번이 그림 → 글). 지우는 길은 보내기(`submit`)의 비우기와 같다 - 초안도 지운다(`saveDraft(key, '')` 는 빈 초안을 남기므로 `onChangeText('')` 를 거치지 않는다).
+   */
   const pickSuggestion = (item: Expression) => {
+    if (isKeywordOnlyInput(text, item)) {
+      currentTextRef.current = '';
+      setText('');
+      setCaret(0);
+      caretRef.current = 0;
+      if (draftKeyRef.current !== undefined) clearDraft(draftKeyRef.current);
+    }
     setPreviewUnavailable(false);
     setExpressionPreview(item);
     suggest.close();

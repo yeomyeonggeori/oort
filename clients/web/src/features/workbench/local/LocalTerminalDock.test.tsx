@@ -448,4 +448,57 @@ describe("세션 목록 (#2856)", () => {
     await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("응답이 필요한 칸이 없습니다."));
   });
 
+  it("턴 실패 보고는 칸 머리·목록에서 「실패」(빨간 ✕)이고, 상태의 출처를 단다 (#5584 H1·M2)", async () => {
+    const { signal } = await mountTwo();
+    const pane = (id: string) => document.querySelector<HTMLElement>(`[data-pane-id="${id}"]`)!;
+    const mark = () => pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status");
+    signal(2, { from: "report", signal: "turn-done" });
+    await vi.waitFor(() => expect(mark()).toBe("done"));
+    signal(2, { from: "report", signal: "turn-failed" });
+    await vi.waitFor(() => expect(mark()).toBe("failed"));
+    const label = pane("p2").getAttribute("aria-label")!;
+    expect(label.endsWith(", 실패")).toBe(true);
+    expect(label).not.toContain("끝남");
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector("[data-testid='session-list-row'][data-session-pane='p2'] [data-testid='session-row-chip']")
+          ?.textContent
+      ).toBe("실패")
+    );
+    // 출처: 표지의 툴팁과 칸의 설명. 생명주기만으로 정한 칸(p1, 신호 없음)에는 없다.
+    const status = pane("p2").querySelector("[data-testid='workbench-pane-status']")!;
+    expect(status.getAttribute("title")).toMatch(/^실패 · .+ 알린 상태예요$/);
+    expect(pane("p2").getAttribute("aria-description")).toMatch(/ 알린 상태예요$/);
+    expect(pane("p1").hasAttribute("aria-description")).toBe(false);
+    expect(pane("p1").querySelector("[data-testid='workbench-pane-status']")?.getAttribute("title")).toBe("실행 중");
+  });
+
+  // design-review #5584 r2 M1·M3: 사람이 키를 쳐서 푼 「실행 중」에 「…가 알린 상태예요」가 붙었다(오귀속). 출처는 칸 머리
+  // 밖(세션 목록 줄)에도 같은 규칙으로 실린다.
+  it("출처 줄은 프로그램의 말일 때만: 사람의 키로 푼 「실행 중」에는 칸 머리·세션 목록 어디에도 없다 (#5584 r2 M1·M3)", async () => {
+    const { sessions, signal } = await mountTwo();
+    const pane = (id: string) => document.querySelector<HTMLElement>(`[data-pane-id="${id}"]`)!;
+    const head = () => pane("p2").querySelector("[data-testid='workbench-pane-status']")!;
+    const row = () => document.querySelector<HTMLElement>("[data-testid='session-list-row'][data-session-pane='p2']")!;
+    const chip = () => row().querySelector("[data-testid='session-row-chip']")!;
+    // hook만 쓰는 칸이 「응답 필요」를 알렸다: 그 프로그램의 말이다.
+    signal(2, "waiting-permission");
+    await vi.waitFor(() => expect(pane("p2").getAttribute("aria-description")).toMatch(/ 알린 상태예요$/));
+    await vi.waitFor(() => expect(row().getAttribute("aria-description")).toMatch(/ 알린 상태예요$/));
+    expect(chip().getAttribute("title")).toMatch(/^응답 필요 · .+ 알린 상태예요$/);
+    // 사람이 `y`를 쳤다: 웹이 「실행 중」으로 풀지만, 프로그램은 아무 말도 하지 않았다.
+    act(() => sessions.input("p2", "y"));
+    await vi.waitFor(() => expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("running"));
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("aria-description")).toBe(false));
+    expect(head().getAttribute("title")).toBe("실행 중");
+    await vi.waitFor(() => expect(row().hasAttribute("aria-description")).toBe(false));
+    expect(chip().hasAttribute("title")).toBe(false);
+    expect(document.body.innerHTML).not.toContain("알린 상태예요");
+    // 프로그램이 같은 「실행 중」을 말하면(PostToolUse) 그때부터 다시 그 프로그램의 말이다.
+    signal(2, "working");
+    await vi.waitFor(() => expect(pane("p2").getAttribute("aria-description")).toMatch(/ 알린 상태예요$/));
+    expect(head().getAttribute("title")).toMatch(/^실행 중 · .+ 알린 상태예요$/);
+    await vi.waitFor(() => expect(chip().getAttribute("title")).toMatch(/^실행 중 · .+ 알린 상태예요$/));
+  });
+
 });

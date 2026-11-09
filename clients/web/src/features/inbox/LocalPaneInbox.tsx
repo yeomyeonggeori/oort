@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { relativeLabel } from "@momo/core/features/inbox/model";
-import { waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { attentionLine } from "@momo/core/features/workbench/paneStatus";
 import { LOCAL_TERMINALS_PATH } from "@momo/core/features/workbench/workTab";
 import { StatusMark } from "@/features/workbench/local/SessionList";
 import {
@@ -44,14 +44,13 @@ export function LocalPaneInbox({ store = paneAttention() }: { store?: PaneAttent
               }}
               className="flex h-control w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >
-              <StatusMark status={e.status} srLabel />
+              <StatusMark status={e.mark} srLabel />
               <span data-numeric className="shrink-0 font-mono text-meta text-ink-muted">
                 {e.index}
               </span>
               <span className="min-w-0 truncate font-medium text-ink">{e.name}</span>
-              <span className="min-w-0 flex-1 truncate text-ink-muted">
-                {e.status === "waiting" ? waitingLine(e.signal) ?? "입력을 기다려요" : "작업이 끝났어요"}
-              </span>
+              {/* 실패한 턴은 「작업이 끝났어요」가 아니라 무슨 일이 있었는지를 말한다(#5584 H1). */}
+              <span className="min-w-0 flex-1 truncate text-ink-muted">{attentionLine(e.mark, e.signal)}</span>
               <span className="shrink-0 text-timestamp text-ink-muted">{relativeLabel(e.atMs, now)}</span>
             </button>
           </li>
