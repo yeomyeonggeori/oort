@@ -23,7 +23,9 @@ export function surfaceOf(file: string): Surface | undefined;
 export function extractDirectCopy(file: string, source: string, knownKeys?: string[]):
   { ko: number; en: number; cat: number; unknownKeys: string[] };
 export function surfaceFiles(surface: Surface, root?: string): string[];
-export function scanSurface(surface: Surface, options?: { root?: string; readSource?: (file: string) => string; files?: string[] }):
+export const KEY_CATALOG_DIR: string;
+export function messageKeys(root?: string): string[];
+export function scanSurface(surface: Surface, options?: { root?: string; readSource?: (file: string) => string; files?: string[]; keys?: string[] }):
   { counts: Record<string, Required<CopyCount>>; unknownKeys: string[] };
 export function anchorSeal(ledger: Ledger): string;
 export function validateLedger(ledger: unknown, options?: { seal?: string }): string[];

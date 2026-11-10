@@ -1,9 +1,10 @@
 import {describe, expect, it} from 'vitest';
 import {
   anchorSeal, ceilings, checkSurface, compareSurface, compareWithBase, dirtyScannedFiles, extractDirectCopy,
-  isProductSource, landLedger, raiseLedger, readLedger, serializeLedger, shrinkLedger, surfaceOf, validateLedger,
-  type Ledger,
+  isProductSource, landLedger, messageKeys, raiseLedger, readLedger, scanSurface, serializeLedger, shrinkLedger,
+  surfaceFiles, surfaceOf, validateLedger, type Ledger,
 } from './tooling/direct-copy.mjs';
+import {readRepoFile} from './tooling/direct-copy-ci-fixture.mjs';
 
 const extract = (source: string, file = 'clients/web/src/NewScreen.tsx') => {
   const {ko, en, cat} = extractDirectCopy(file, source);
@@ -121,6 +122,51 @@ describe('direct UI copy extraction', () => {
     const result = extractDirectCopy('src/Screen.tsx',
       'messages.formatMessage("common.action.save"); messages.formatMessage("missing.surface.key");', ['common.action.save']);
     expect(result).toEqual({ko: 0, en: 0, cat: 0, unknownKeys: ['missing.surface.key']});
+  });
+
+  it('r2 H1: a string that is a catalog key is not English copy; a key-shaped string the catalog lacks still is', () => {
+    const keys = ['connection.card.offlineTitle', 'teamAi.roles.chatReadHint'];
+    const source = 'const copy = {offlineTitle: "connection.card.offlineTitle", hint: `teamAi.roles.chatReadHint`};';
+    const counted = (file: string, known: string[]) => {
+      const {ko, en, cat} = extractDirectCopy(file, source, known);
+      return {ko, en, cat};
+    };
+    for (const file of ['packages/momo-core/src/features/connection/copyKeys.ts', 'clients/web/src/Keys.ts', 'clients/mobile/src/Keys.ts']) {
+      expect(counted(file, keys)).toEqual({ko: 0, en: 0, cat: 0});
+      // The catalog decides, not the dotted shape: without the keys the same names are English in copy slots.
+      expect(counted(file, [])).toEqual({ko: 0, en: 2, cat: 0});
+    }
+    const en = (code: string) => extractDirectCopy('clients/web/src/Keys.tsx', code, keys).en;
+    expect(en('const eventLabel = "momo.message"; const title = "connection.card.offlineTitel";')).toBe(2);
+    expect(en('const title = "Settings"; const label = `connection.card.${kind}`;')).toBe(2);
+    // JSX text is shown as written, so a key there is still counted.
+    expect(en('<p>connection.card.offlineTitle</p>')).toBe(1);
+  });
+});
+
+describe('r2 H1 E1: a release-notes file of keys against the real en-US catalog', () => {
+  const NOTES = 'packages/momo-core/src/features/releaseNotes/notes';
+  const copied = readRepoFile(`${NOTES}/v0_1_45.ts`).replaceAll('RELEASE_NOTE_0_1_45', 'RELEASE_NOTE_0_1_46');
+  const NEXT = `${NOTES}/v0_1_46.ts`;
+  const checkCoreWith = (source: string) => {
+    const files = [...surfaceFiles('core'), NEXT];
+    const {counts} = scanSurface('core', {files, readSource: file => file === NEXT ? source : readRepoFile(file)});
+    return {counts, ...compareSurface(readLedger(), 'core', counts)};
+  };
+
+  it('the v0.1.45 notes copied as v0.1.46 (keys only) pass `check core`', () => {
+    expect(copied).toContain('"releaseNotes.v0145.keptEmoticonsTitle"');
+    const {counts, increases, decreases} = checkCoreWith(copied);
+    expect(counts[NEXT]).toBeUndefined();
+    expect({increases, decreases}).toEqual({increases: [], decreases: []});
+  });
+
+  it('still counts a key-shaped string missing from the catalog, and real English copy, in the same file', () => {
+    const missing = copied.replace('"releaseNotes.v0145.keptEmoticonsTitle"', '"releaseNotes.v0146.notInTheCatalog"');
+    expect(checkCoreWith(missing).increases.join('\n')).toMatch(/v0_1_46\.ts: en 0 → 1/);
+    const english = copied.replace('"releaseNotes.v0145.keptEmoticonsTitle"', '"Emoticons stay on your device"');
+    expect(checkCoreWith(english).increases.join('\n')).toMatch(/v0_1_46\.ts: en 0 → 1/);
+    expect(messageKeys()).toContain('releaseNotes.v0145.keptEmoticonsTitle');
   });
 });
 

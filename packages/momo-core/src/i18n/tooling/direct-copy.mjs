@@ -108,6 +108,9 @@ const COMPARISON = new Set([
 /**
  * Counts direct copy in one file, without line numbers or copy text:
  * `ko` Hangul literals, `en` English copy, `cat` sentences assembled from dictionary output.
+ * `knownKeys` are the en-US catalog's message keys. A string that *is* one of them is a key, not
+ * English copy, wherever it sits (`title: "releaseNotes.v0145.keptEmoticonsTitle"`, a key map) —
+ * the exact catalog decides, never the dotted shape (#5589 r2 H1).
  */
 export function extractDirectCopy(file, source, knownKeys = []) {
   const result = {ko: 0, en: 0, cat: 0, unknownKeys: []};
@@ -203,9 +206,11 @@ export function extractDirectCopy(file, source, knownKeys = []) {
       const isName = (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)) && p.name === node;
       const text = node.text.trim();
       const attribute = ts.isJsxText(node) ? undefined : enclosingAttribute(node);
+      // A whole string literal equal to a catalog key names a message; JSX text and template parts are shown as written.
+      const isKey = (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && keys.has(node.text);
       if (!isName && text && !(attribute && TECH_ATTRIBUTE.test(attribute))) {
         if (HANGUL.test(text)) result.ko++;
-        else if (!exempt && /[a-zA-Z]/.test(text) && (ts.isJsxText(node) || surfaceContext(node))) result.en++;
+        else if (!exempt && !isKey && /[a-zA-Z]/.test(text) && (ts.isJsxText(node) || surfaceContext(node))) result.en++;
       }
     }
     ts.forEachChild(node, visit);
@@ -231,15 +236,20 @@ export function surfaceFiles(surface, root = ROOT) {
   ].filter(file => isProductSource(file) && surfaceOf(file) === surface).sort();
 }
 
-function messageKeys(root) {
-  return filesUnder(join(root, 'packages/momo-core/src/i18n/catalogs/en-US'))
+export const KEY_CATALOG_DIR = 'packages/momo-core/src/i18n/catalogs/en-US';
+
+/** The en-US catalog's message keys in a working tree. */
+export function messageKeys(root = ROOT) {
+  return filesUnder(join(root, KEY_CATALOG_DIR))
     .filter(file => file.endsWith('.json'))
     .flatMap(file => Object.keys(JSON.parse(readFileSync(file, 'utf8'))));
 }
 
-/** `{counts: {file: {ko, en, cat}}, unknownKeys}`; files with no direct copy are omitted. */
-export function scanSurface(surface, {root = ROOT, readSource, files} = {}) {
-  const keys = messageKeys(root);
+/**
+ * `{counts: {file: {ko, en, cat}}, unknownKeys}`; files with no direct copy are omitted. `keys` defaults
+ * to the catalog under `root`; a scan of a commit passes that commit's catalog so it reproduces.
+ */
+export function scanSurface(surface, {root = ROOT, readSource, files, keys = messageKeys(root)} = {}) {
   const counts = {};
   const unknownKeys = [];
   const paths = (files ?? surfaceFiles(surface, root)).filter(file => isProductSource(file) && surfaceOf(file) === surface).sort();
@@ -541,26 +551,33 @@ function ledgerAt(ref) {
   return JSON.parse(git(['show', `${ref}:${LEDGER_PATH}`]));
 }
 
-/** Reads every scanned file at a commit through one `git cat-file --batch`. */
+/**
+ * Reads every scanned file at a commit through one `git cat-file --batch`. The message keys come from
+ * the same commit's en-US catalog, not the working tree, so `anchor <commit>` gives the same counts
+ * (and seal) from any checkout (#5589 r2).
+ */
 function scanCommit(commit) {
   const roots = Object.values(SURFACES).flatMap(spec => [...spec.roots, ...spec.files]);
   const listed = git(['ls-tree', '-r', '--name-only', commit, '--', ...roots]).trim().split('\n').filter(Boolean);
   const files = listed.filter(file => isProductSource(file) && surfaceOf(file));
+  const catalogs = listed.filter(file => file.startsWith(`${KEY_CATALOG_DIR}/`) && file.endsWith('.json'));
+  const wanted = [...files, ...catalogs];
   const output = execFileSync('git', ['cat-file', '--batch'], {
-    cwd: ROOT, input: files.map(file => `${commit}:${file}\n`).join(''), maxBuffer: 512 * 1024 * 1024,
+    cwd: ROOT, input: wanted.map(file => `${commit}:${file}\n`).join(''), maxBuffer: 512 * 1024 * 1024,
   });
   const sources = new Map();
   let offset = 0;
-  for (const file of files) {
+  for (const file of wanted) {
     const end = output.indexOf(10, offset);
     const size = Number(output.subarray(offset, end).toString('utf8').split(' ')[2]);
     sources.set(file, output.subarray(end + 1, end + 1 + size).toString('utf8'));
     offset = end + 1 + size + 1;
   }
+  const keys = catalogs.flatMap(file => Object.keys(JSON.parse(sources.get(file))));
   const counts = {};
   for (const surface of Object.keys(SURFACES)) {
     const scoped = files.filter(file => surfaceOf(file) === surface);
-    Object.assign(counts, scanSurface(surface, {files: scoped, readSource: file => sources.get(file)}).counts);
+    Object.assign(counts, scanSurface(surface, {files: scoped, readSource: file => sources.get(file), keys}).counts);
   }
   return counts;
 }
