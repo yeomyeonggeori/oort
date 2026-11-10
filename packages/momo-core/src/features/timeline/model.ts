@@ -960,7 +960,8 @@ export function unsettledPending(
 //
 // 서버 시계를 어림해도(`serverClock.ts`) 에코와 확정본의 시각은 같은 값이 아니다. 왕복 사이에 분이 바뀌면(기기 10:47:59.8에 보냈는데
 // 서버가 10:48:00.1에 찍었다) 시계가 맞는 기기에서도 묶음이 갈리고, 세션의 첫 보내기는 아직 잰 차이가 없다. 그래서 에코가 확정본으로
-// 바뀔 때는 **에코가 쓰던 시각을 확정본이 묶음에 그대로 쓴다**: 머리/이어짐, 날 줄, 다음 행의 판정까지 그 화면에서는 에코 때와 같다.
+// 바뀔 때는 **에코가 쓰던 시각을 확정본이 묶음에 그대로 쓴다**: 그 행의 머리/이어짐이 그 화면에서는 에코 때와 같다(같은 날일 때만 —
+// 날 줄은 언제나 서버 시각이 정한다, `buildTimelineItems`의 `ownAtMs`).
 // 서버 시각으로 다시 묶는 것은 다시 불러올 때(이 장부가 없는 새 화면)뿐이다. 행의 시각 글자는 서버 값을 그대로 보여 준다 — 글자가
 // 바뀌어도 높이는 같다.
 //
@@ -1159,9 +1160,10 @@ export interface BuildItemsOptions {
    */
   settleAgainst?: readonly Message[];
   /**
-   * #5624 — 에코였던 확정본이 이어 쓸 에코의 시각(`pinSettledEchoes`가 적은 장부). 여기 있는 메시지는 **자기** 머리/이어짐과 자기
-   * 위의 날 줄을 에코 때의 시각으로 판정받는다 — 그래서 에코가 확정본으로 바뀌어도 그 행의 묶음이 같다. 그 행을 「앞 행」으로 보는 다음
-   * 행의 판정은 서버 시각을 읽는다(뒤따르는 에코·확정본이 모두 서버 시계이므로). 주지 않으면 모두 서버 시각으로 묶는다(다시 불러온 화면).
+   * #5624 — 에코였던 확정본이 이어 쓸 에코의 시각(`pinSettledEchoes`가 적은 장부). 여기 있는 메시지는 **자기** 머리/이어짐을 에코
+   * 때의 시각으로 판정받는다 — 그래서 에코가 확정본으로 바뀌어도 그 행의 묶음이 같다. 단 장부의 시각이 서버 시각과 **같은 날**일 때만이고,
+   * 날 줄은 언제나 서버 시각이 정한다(검수 H1: 밤새 남은 실패 글을 다음 날 다시 보낸 경우). 그 행을 「앞 행」으로 보는 다음 행의 판정은
+   * 서버 시각을 읽는다(뒤따르는 에코·확정본이 모두 서버 시계이므로). 주지 않으면 모두 서버 시각으로 묶는다(다시 불러온 화면).
    */
   echoPins?: EchoPins;
   /**
@@ -1187,10 +1189,23 @@ export function buildTimelineItems(
     echoPins,
     serverOffsetMs = 0,
   } = options;
-  // 행이 **자기** 머리/이어짐·날 줄을 판정받는 시각. 에코였던 확정본은 에코 때의 시각(#5624, `pinSettledEchoes`), 나머지는 서버가 찍은
+  // 행이 **자기** 머리/이어짐을 판정받는 시각. 에코였던 확정본은 에코 때의 시각(#5624, `pinSettledEchoes`), 나머지는 서버가 찍은
   // 시각이다. 앞 행으로 읽힐 때는 언제나 서버 시각(`previous.createdAtMs`)이다.
-  const ownAtMs = (message: Message): number =>
-    echoPins?.get(message.id.toLowerCase())?.atMs ?? message.createdAtMs;
+  //
+  // 장부는 **서버 시각과 같은 날**일 때만 쓴다(#5624 검수 H1). 실패한 글은 다시 보내도 처음 시각을 들고 있어서(#5221) 밤에 못 보낸
+  // 글을 아침에 다시 보내면 장부가 어제 시각을 잇는다 — 그러면 확정본이 오늘 줄 아래에 어제 날 줄을 다시 세우고(`day-<key>` 겹침),
+  // 오늘 말이 없으면 오늘이 통째로 어제 날짜 아래에 놓였다. 같은 날이면 날 줄 판정은 장부가 있든 없든 서버 시각과 같으므로, 날 줄은
+  // 언제나 서버 시각이 정하고(아래 `dayKey(message.createdAtMs)`), 장부는 같은 날 안의 머리/이어짐만 잇는다. 날을 넘긴 확정본은 서버
+  // 시각으로 묶여 그 순간 날 줄이 선다 — 사람이 다시 보낸 글이거나 자정을 걸친 왕복이라 드물고, 날짜가 틀린 화면보다 낫다.
+  //
+  // 문턱을 「같은 날」보다 좁히지 않는다: 연결이 깜빡여 몇 분 뒤 저절로 다시 나간 글(자동 재전송 창 5분)도 장부가 이어야 확정 순간에
+  // 머리가 서며 뒤집히지 않는다(웹 `useTimeline.echoStale.test.tsx`).
+  const ownAtMs = (message: Message): number => {
+    const pinned = echoPins?.get(message.id.toLowerCase())?.atMs;
+    return pinned !== undefined && dayKey(pinned) === dayKey(message.createdAtMs)
+      ? pinned
+      : message.createdAtMs;
+  };
   const items: TimelineItem[] = [];
   let previous: Message | undefined;
   // The newest `createdAtMs` among the rows laid so far — confirmed rows in the
@@ -1230,11 +1245,11 @@ export function buildTimelineItems(
     // 언제나 **화면에 남은** 직전 행이어야 접힌 자리에 빈 헤더가 생기지 않는다.
     if (pausedFold.suppressed.has(message.seq)) continue;
     const atMs = ownAtMs(message);
-    if (!previous || dayKey(previous.createdAtMs) !== dayKey(atMs)) {
+    if (!previous || dayKey(previous.createdAtMs) !== dayKey(message.createdAtMs)) {
       items.push({
         kind: "day",
-        key: `day-${dayKey(atMs)}`,
-        atMs,
+        key: `day-${dayKey(message.createdAtMs)}`,
+        atMs: message.createdAtMs,
       });
     }
     if (

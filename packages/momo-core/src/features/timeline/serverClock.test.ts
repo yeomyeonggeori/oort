@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import {
   buildTimelineItems,
+  dayKey,
   pinSettledEchoes,
   type EchoPins,
   type PendingMessage,
+  type TimelineItem,
 } from "./model";
 import {
   SERVER_CLOCK_MAX_ROUND_TRIP_MS,
@@ -135,5 +137,110 @@ describe("pinSettledEchoes — 확정본이 에코의 시각을 잇는 장부", 
         ?.startsGroup;
     expect(startsGroup(0)).toBe(true);
     expect(startsGroup(90_000)).toBe(false);
+  });
+});
+
+// ---- H1(검수 1회차): 오래된 메아리 ------------------------------------------------
+//
+// 실패한 글은 다시 보내도 처음 시각을 들고 있다(`retryPending`은 상태만 바꾼다, 새로고침 뒤에도 그 시각으로 되살아난다 #5221). 장부가
+// 그 시각을 그대로 이으면, 밤에 못 보낸 글을 아침에 다시 보낸 확정본이 어제 날짜로 자기 날 줄을 판정받는다. 날 줄은 언제나 서버 시각이
+// 정한다 — 장부는 같은 날 안에서만 머리/이어짐을 잇는다.
+
+const PEER = "00000000-0000-7000-8000-0000000002ff";
+const on = (d: number, h: number, m: number, s = 0, ms = 0) => new Date(2026, 10, d, h, m, s, ms).getTime();
+
+function said(seq: number, author: string, body: string, createdAtMs: number): Message {
+  return { ...message(seq, body, createdAtMs), authorMemberId: author };
+}
+
+/** 그린 줄의 날짜가 맞는가: 키는 겹치지 않고, 날 줄은 시간 순서이고, 확정본마다 바로 위 날 줄이 자기 서버 시각의 날이다. */
+function dayIssues(items: TimelineItem[]): string[] {
+  const issues: string[] = [];
+  const keys = items.map((item) => item.key);
+  const repeated = keys.filter((key, index) => keys.indexOf(key) !== index);
+  if (repeated.length > 0) issues.push(`겹친 키 ${repeated.join(",")}`);
+  let day: string | null = null;
+  let dayAt = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    if (item.kind === "day") {
+      if (item.atMs <= dayAt) issues.push(`날 줄 순서 ${item.key}`);
+      day = item.key;
+      dayAt = item.atMs;
+    }
+    if (item.kind === "message" && day !== `day-${dayKey(item.message.createdAtMs)}`) {
+      issues.push(`「${item.message.body}」이 ${day} 아래`);
+    }
+  }
+  return issues;
+}
+
+/** 한 글의 머리/이어짐(확정본이든 에코든). */
+function headOf(items: TimelineItem[], body: string): boolean | undefined {
+  for (const item of items) {
+    if (item.kind === "message" && item.message.body === body) return item.startsGroup;
+    if (item.kind === "pending" && item.pending.body === body) return item.startsGroup;
+  }
+  return undefined;
+}
+
+describe("H1 — 장부는 날을 넘긴 메아리를 잇지 않는다(날 줄은 서버 시각이 정한다)", () => {
+  it("밤에 못 보낸 글을 아침에 다시 보내 확정되면(오늘 남의 말이 이미 있음) 어제 날 줄이 오늘 줄 아래 다시 서지 않는다", () => {
+    const failed: PendingMessage = { ...echo("k1", "실패했던 글", on(9, 23, 55), 1), status: "failed" };
+    const before = [said(1, PEER, "어제 남의 말", on(9, 23, 50)), said(2, PEER, "오늘 남의 말", on(10, 9, 0))];
+    const mine = said(3, ME, "실패했던 글", on(10, 9, 5));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [failed]);
+    expect(pins.size).toBe(1);
+    const items = buildTimelineItems([...before, mine], { echoPins: pins });
+    expect(dayIssues(items)).toEqual([]);
+    expect(items.filter((item) => item.kind === "day").map((item) => item.key)).toEqual([
+      `day-${dayKey(on(9, 0, 0))}`,
+      `day-${dayKey(on(10, 0, 0))}`,
+    ]);
+  });
+
+  it("오늘 말이 없을 때 다시 보낸 글이 확정되면 그 위에 오늘 날 줄이 서고, 뒤에 오는 오늘 말도 오늘 아래에 놓인다", () => {
+    const failed: PendingMessage = { ...echo("k1", "실패했던 글", on(9, 23, 55), 1), status: "failed" };
+    const mine = said(2, ME, "실패했던 글", on(10, 9, 5));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [failed]);
+    const items = buildTimelineItems(
+      [said(1, PEER, "어제 남의 말", on(9, 23, 50)), mine, said(3, PEER, "그 뒤 남의 말", on(10, 9, 6))],
+      { echoPins: pins }
+    );
+    expect(dayIssues(items)).toEqual([]);
+  });
+
+  it("어제 내 글에 이어진 줄이던 메아리도, 다음 날 확정되면 오늘 날 줄 아래 머리로 선다(날 줄 아래 이어진 줄 없음)", () => {
+    const failed: PendingMessage = { ...echo("k1", "실패했던 글", on(9, 23, 55, 10), 1), status: "failed" };
+    const mineYesterday = said(1, ME, "어제 내 글", on(9, 23, 55));
+    expect(headOf(buildTimelineItems([mineYesterday], { pending: [failed] }), "실패했던 글")).toBe(false);
+    const mine = said(2, ME, "실패했던 글", on(10, 9, 5));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [failed]);
+    const items = buildTimelineItems([mineYesterday, mine], { echoPins: pins });
+    expect(dayIssues(items)).toEqual([]);
+    expect(headOf(items, "실패했던 글")).toBe(true);
+  });
+
+  it("자정을 걸친 보내기(기기 23:59:59.8 → 서버 00:00:00.1)도 확정본은 새 날 줄 아래에 선다", () => {
+    const mineBefore = said(1, ME, "자정 전 글", on(9, 23, 59, 30));
+    const row = echo("k1", "자정의 글", on(9, 23, 59, 59, 800), 1);
+    const mine = said(2, ME, "자정의 글", on(10, 0, 0, 0, 100));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [row]);
+    const items = buildTimelineItems([mineBefore, mine, said(3, PEER, "자정 뒤 남의 말", on(10, 0, 0, 5))], {
+      echoPins: pins,
+    });
+    expect(dayIssues(items)).toEqual([]);
+  });
+
+  it("같은 날 안에서는 장부가 그대로 일한다 — 몇 분 뒤 저절로 다시 나간 글의 확정본은 메아리 때 묶음을 지킨다", () => {
+    // 10:47:30에 이어 보낸 글이 연결이 끊겨 실패하고, 3분 뒤 저절로 다시 나가 서버가 10:50:31에 찍었다. 좁은 문턱(왕복 몇 초)으로
+    // 장부를 끊으면 여기서 확정 순간에 머리가 서며 뒤집힌다.
+    const head = said(1, ME, "앞 글", on(9, 10, 47, 10));
+    const failed: PendingMessage = { ...echo("k1", "이어 보낸 글", on(9, 10, 47, 30), 1), status: "failed" };
+    expect(headOf(buildTimelineItems([head], { pending: [failed] }), "이어 보낸 글")).toBe(false);
+    const mine = said(2, ME, "이어 보낸 글", on(9, 10, 50, 31));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [failed]);
+    const items = buildTimelineItems([head, mine], { echoPins: pins });
+    expect(headOf(items, "이어 보낸 글")).toBe(false);
+    expect(dayIssues(items)).toEqual([]);
   });
 });
