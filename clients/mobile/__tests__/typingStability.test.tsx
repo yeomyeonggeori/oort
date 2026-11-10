@@ -70,13 +70,14 @@ describe('H-3 — 자리를 예약한다', () => {
     // 아래의 컴포저 전체가 위아래로 뛰었다.
     render(<TypingBar segments={[]} />);
     expect(line()).toBeTruthy();
-    expect(flatten(line().props.style).minHeight).toBeGreaterThan(0);
+    // 칸은 고정 높이다(#5645: `minHeight` 였던 앞 판은 큰 글자에서 글이 칸을 밀었다).
+    expect(flatten(line().props.style).height).toBeGreaterThan(0);
   });
 
   it('예약 높이는 1줄이다 — 두 줄을 예약하면 정말로 빈 띠가 생긴다', () => {
     render(<TypingBar segments={[]} />);
-    // lineHeight 한 줄 + 아래 여백. 두 줄치(32+)를 예약하지 않는다.
-    expect(flatten(line().props.style).minHeight).toBeLessThan(32);
+    // 줄 상자 한 줄(가장 큰 글자에서도 16 × 상한 1.6 = 25.6). 두 줄치(32+)를 예약하지 않는다.
+    expect(flatten(line().props.style).height).toBeLessThan(32);
   });
 
   it('있을 때와 없을 때의 높이가 같다 — 그것이 「안 움직인다」의 뜻이다', () => {
@@ -84,7 +85,7 @@ describe('H-3 — 자리를 예약한다', () => {
     const emptyStyle = flatten(line().props.style);
     rerender(<TypingBar segments={typingVisualSegments(['김민수'])} />);
     const fullStyle = flatten(line().props.style);
-    expect(fullStyle.minHeight).toBe(emptyStyle.minHeight);
+    expect(fullStyle.height).toBe(emptyStyle.height);
     expect(fullStyle.lineHeight).toBe(emptyStyle.lineHeight);
   });
 

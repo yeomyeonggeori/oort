@@ -1,6 +1,7 @@
 import {typingLead, typingNameCells, typingTail, type TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {font, line as lineScale, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {RespondingDots} from '../agents/RespondingDots';
@@ -26,10 +27,9 @@ import {CONV} from './convDesign';
 //
 // ## 문장은 코어가 짓는다
 //
-// 몇 명부터 이름을 접어 「N명이 작성 중」이 되는지는 **서버가 grant 응답으로
-// 내려보내는 값**이고(`aggregateThreshold`), 그 값을 문장으로 바꾸는 규칙은 두
-// 클라가 공유해야 한다. 그러므로 이 파일에 들어오는 것은 이미 완성된 한 문장이고,
-// 여기서 하는 일은 **어디에 어떤 무게로 놓을 것인가**뿐이다.
+// 몇 명부터 이름을 접는지는 코어의 고정 규칙(1명 · 2명 · 3명부터 「외 N명」)이고 화면은 서버 grant 의
+// `aggregateThreshold` 를 읽지 않는다(`docs/design-system/typing-line.md` 3절). 이 파일에 들어오는 것은 코어가
+// 지은 조각이고, 여기서 하는 일은 **어디에 어떤 무게로 놓을 것인가**뿐이다.
 //
 // ## 자리 — 컴포저 바로 위, 활동 줄 아래
 //
@@ -51,14 +51,22 @@ import {CONV} from './convDesign';
 // 박자로** 그렇게 한다. 키보드가 올라온 폰에서 그 아래에 있는 것은 **엄지 밑의
 // 전송 버튼**이다.
 //
-// 이 판정을 이미 웹이 내렸고, **그 근거가 하필 폰이었다**
-// (`clients/web/src/features/chat/TypingLine.tsx` "## 공유 행은 항상 26px을 예약한다"):
-// *"폰에서는 키보드가 올라온 상태에서 엄지 아래의 전송 버튼이 움직인다."*
+// 이 판정을 이미 웹이 내렸고, **그 근거가 하필 폰이었다**(웹 리뷰: *"폰에서는 키보드가 올라온 상태에서 엄지
+// 아래의 전송 버튼이 움직인다."* — 지금 웹의 같은 결정은 `tokens.css` `typing-line`의 고정 칸이다).
 // 웹 리뷰가 폰을 들어 설득한 결정을 정작 폰이 반대로 구현했었다.
 //
-// 예약 높이는 **1줄 고정**이다(웹과 같은 트레이드오프). 두 줄까지 예약하면 평소에
-// 정말로 빈 띠가 생기고, 이름이 길어 두 줄이 되는 경우는 드물다 — 그때는 이
-// 줄이 한 줄 밀어내는 쪽을 택한다.
+// 예약 높이는 **1줄**이다(웹과 같은 트레이드오프). 두 줄까지 예약하면 평소에 정말로 빈 띠가 생긴다. 그래서 줄의
+// 글은 모두 한 줄로 서고(`numberOfLines`), 넘치면 이름 쪽이 줄어든다.
+//
+// ## 1줄은 **글자 크기 배율만큼** 1줄이다 (#5645, #5582 검수 M2)
+//
+// 앞 판의 예약은 `minHeight: 16` 고정이었고 글은 Dynamic Type 상한 없이 16 × 배율로 자랐다. 배율 1.35 면 줄이
+// 설 때마다 약 5.6pt, 접근성 크기에서는 그 이상 대화가 밀렸다 돌아왔다 — 예약이 배율 1 에서만 참이었다. 이제 칸은
+// `typingSlotHeight(배율)` = 줄 상자 16 × min(배율, 바 단추 상한 1.6)로 **고정 높이**(`height`)이고, 줄의 글은 모두 같은
+// 상한(`maxFontSizeMultiplier`)에서 멈춘다. 그래서 같은 배율에서는 빈 줄 · 한 이름 · 두 이름 · 「외 N명」이 모두 같은
+// 높이다. 바로 위 레일 칸(`railSlotHeight`)과 같은 식 · 같은 상한이라 두 줄이 함께 자라고 함께 멈춘다. `minHeight` 가
+// 아니라 `height` 인 이유: 소수 배율에서 글 상자가 픽셀 올림으로 칸보다 0.3pt 커질 수 있고, 그것이 칸을 밀면 대화가
+// 그만큼 움직인다. 상한을 두는 이유는 레일과 같다 — 상한이 없으면 가장 큰 글자(배율 3.571)에서 57pt 빈 띠가 늘 선다.
 //
 // ## 예약은 12, 줄 상자는 16 — 이 줄이 「마지막 행 → 알약」 간격 20 의 한가운데다 (#4264)
 //
@@ -68,7 +76,8 @@ import {CONV} from './convDesign';
 // 두 조각을 정리했다: 대화 화면은 목록 꼬리를 0 으로 받고(`CONV.conversationTail`), 이 줄은 아래 4 를 지고
 // 있던 것을 **걷는다**. 줄 상자(`line.meta` 16)는 그대로인데 흐름에서는 `TYPING_RESERVE`(12)만 먹고, 상자의 아래
 // `TYPING_OVERHANG`(4)는 컴포저가 늘 비워 두는 위 여백(8) 위에 걸친다 — 거기는 빈 자리다. 글이 서 있을 때
-// (16 Pro 실측, 글자 기준) 마지막 글자 → 「작성 중」 글자 18 → 10pt, 「작성 중」 글자 → 알약 15 → 7pt 다.
+// (16 Pro 실측, 글자 기준) 마지막 글자 → 「작성 중」 글자 18 → 10pt, 「작성 중」 글자 → 알약 15 → 7pt 다. 여기 숫자는
+// 글자 배율 1 의 값이다: 큰 글자에서는 줄 상자가 자란 만큼 흐름(`typingReserve`)이 자라고 걸침 4 는 그대로다.
 //
 // 걸친 만큼 **다음 형제가 올라와 겹친다.** 다음 형제가 컴포저 루트이면 겹치는 곳이 빈 위 여백이라 아무것도 안
 // 가린다. 다음 형제가 중단 영수증·개인 호출 알림(`stopOutcome`)이면 그 글줄의 위 4 가 걸침을 받아야 하므로
@@ -78,14 +87,30 @@ import {CONV} from './convDesign';
 // =============================================================================
 
 /**
- * 이 줄이 대화 화면의 도크 **흐름**에서 먹는 높이 — 비어 있어도, 글이 있어도 같다(H-3). 마지막 행 → 알약
- * 간격(`CONV.listPillGap`)에서 목록 꼬리와 컴포저 위 여백을 뺀 나머지다.
+ * 글자 배율 1 에서 이 줄이 대화 화면의 도크 **흐름**에서 먹는 높이 — 비어 있어도, 글이 있어도 같다(H-3). 마지막 행 →
+ * 알약 간격(`CONV.listPillGap`)에서 목록 꼬리와 컴포저 위 여백을 뺀 나머지다. 다른 배율은 `typingReserve`.
  */
 export const TYPING_RESERVE =
   CONV.listPillGap - CONV.conversationTail - CONV.composerTopAir;
 
-/** 줄 상자가 예약보다 큰 만큼. 컴포저 위 여백(`CONV.composerTopAir`)보다 작아야 알약에 안 닿는다. */
+/**
+ * 줄 상자가 흐름보다 큰 만큼. 컴포저 위 여백(`CONV.composerTopAir`)보다 작아야 알약에 안 닿는다. 글자 배율을 따라
+ * 자라지 **않는다** — 자라면 큰 글자에서 걸침이 위 여백 8 을 넘어 알약 위로 내려앉는다. 자라는 몫은 흐름이 진다.
+ */
 export const TYPING_OVERHANG = lineScale.meta - TYPING_RESERVE;
+
+/**
+ * 줄 상자(칸)의 높이 (#5645). 줄 상자 하나(`line.meta` 16)를 글자 배율만큼 키우고 바 단추 상한(1.6)에서 멈춘다 — 줄의
+ * 글이 모두 같은 상한(`maxFontSizeMultiplier`)을 달아서 글 상자도 정확히 이만큼이다. 레일 칸(`railSlotHeight`)과 같은 식.
+ */
+export function typingSlotHeight(fontScale: number): number {
+  return lineScale.meta * Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
+}
+
+/** 이 줄이 도크 흐름에서 먹는 높이(칸 − 걸침). 같은 배율에서는 줄이 비든 차든 같다. 배율 1 에서 `TYPING_RESERVE`. */
+export function typingReserve(fontScale: number): number {
+  return typingSlotHeight(fontScale) - TYPING_OVERHANG;
+}
 
 /**
  * 컴포저 위 「작성 중」 한 줄.
@@ -121,9 +146,9 @@ export function TypingBar({
   testID?: string;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
+  const {fontScale} = useWindowDimensions();
   const empty = segments.length === 0;
-  // 이름 칸의 시험 표지. 이름마다 자기 한 줄 칸이고(#5582 R2-M1, 코어 `typingNameCells`), Yoga가 넘친 폭을 이름의 글 폭에
-  // 비례해 나눠 짧은 이름은 거의 다 남는다 — 첫 이름이 길어도 둘째 사람이 줄에서 사라지지 않는다.
+  // 이름 칸의 시험 표지. 이름마다 자기 한 줄 칸이다(#5582 R2-M1, 코어 `typingNameCells`).
   const nameCellTestID = `${testID}-name`;
   return (
     <View
@@ -134,7 +159,8 @@ export function TypingBar({
       accessibilityLabel={empty ? undefined : label ?? segments.map(part => part.text).join('')}
       // 누르는 것이 없는 줄이다. 위 레일(`ActivityRailSlot`)의 손가락 슬롭이 이 줄 위로 내려오므로 이 줄이 터치를 가로채지 않게 한다(#4620).
       pointerEvents="none"
-      style={styles.line}
+      // 칸 높이는 인라인이다 — 글자 배율을 곱한 값이라 스타일시트에 못 박지 못한다(레일 칸과 같다).
+      style={[styles.line, {height: typingSlotHeight(fontScale)}]}
       testID={testID}>
       {!empty ? (
         <>
@@ -142,7 +168,8 @@ export function TypingBar({
             {typingNameCells(typingLead(segments)).map((cell, index) => (
               <Text
                 key={index}
-                numberOfLines={cell.name ? 1 : undefined}
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                numberOfLines={1}
                 style={cell.name ? styles.nameCell : styles.textCell}
                 testID={cell.name ? nameCellTestID : undefined}>
                 {cell.segments.map((segment, at) => (
@@ -154,7 +181,9 @@ export function TypingBar({
             ))}
           </View>
           <RespondingDots />
-          <Text style={styles.tail}>{typingTail(segments)?.text}</Text>
+          <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} numberOfLines={1} style={styles.tail}>
+            {typingTail(segments)?.text}
+          </Text>
         </>
       ) : null}
     </View>
@@ -172,10 +201,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: space.xs,
-    // 자리 예약의 실체 (H-3): 줄이 비어도 이 높이가 남으므로 아래의 컴포저가
-    // 남의 키보드 박자로 움직이지 않는다. 1줄 고정이다.
-    minHeight: lineScale.meta,
-    // 흐름에서는 `TYPING_RESERVE` 만 먹는다 — 줄 상자의 아래 `TYPING_OVERHANG` 는 다음 형제의 위 여백 위에
+    // 자리 예약의 실체 (H-3)는 인라인 `height`(`typingSlotHeight`)다: 줄이 비어도 그 높이가 남으므로 아래의 컴포저와
+    // 위의 대화가 남의 키보드 박자로 움직이지 않는다.
+    // 흐름에서는 `typingReserve` 만 먹는다 — 줄 상자의 아래 `TYPING_OVERHANG` 는 다음 형제의 위 여백 위에
     // 걸친다(머리말 「예약은 12, 줄 상자는 16」).
     marginBottom: -TYPING_OVERHANG,
   },
