@@ -58,6 +58,13 @@
 //!   `MOMO_SHARE_RETENTION_INTERVAL_MS` (600000, floored at 10000) sets its cadence.
 //!   Without the URL the sweep does not run.
 //!
+//! * `MOMO_WORK_PERMISSION_SWEEP_DATABASE_URL` (default
+//!   `MOMO_SHARE_RETENTION_DATABASE_URL`, then `MOMO_HUDDLE_SWEEP_DATABASE_URL`) — the
+//!   RLS-bound `momo_app` connection the work-permission expiry sweep (#5594, #5614 M2)
+//!   closes lapsed requests and writes their lines through; the notifier's own pool only
+//!   reads which workspaces have one. Without the URL the sweep does not run (the decision
+//!   route still refuses a lapsed request by itself).
+//!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
 
@@ -194,6 +201,11 @@ pub struct NotifierConfig {
     /// connection). The shared-session retention sweep deletes through it and
     /// nothing else: the notifier's own pool has no DELETE. Never logged.
     pub share_retention_database_url: Option<String>,
+    /// #5594 / #5614 M2: `MOMO_WORK_PERMISSION_SWEEP_DATABASE_URL`, falling back to
+    /// `MOMO_SHARE_RETENTION_DATABASE_URL` and then `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the
+    /// same RLS-bound `momo_app` connection). The work-permission expiry sweep writes
+    /// through it and nothing else. Never logged.
+    pub work_permission_sweep_database_url: Option<String>,
     /// #3377: `MOMO_SHARE_RETENTION_INTERVAL_MS` (600000, floored at 10000). A
     /// payload that expires after 30 days does not need the 300 ms tier-sweep
     /// cadence the loop used to borrow.
@@ -311,6 +323,9 @@ impl NotifierConfig {
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
             share_retention_database_url: env("MOMO_SHARE_RETENTION_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
+            work_permission_sweep_database_url: env("MOMO_WORK_PERMISSION_SWEEP_DATABASE_URL")
+                .or_else(|| env("MOMO_SHARE_RETENTION_DATABASE_URL"))
+                .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
             share_retention_interval: Duration::from_millis(
                 env_number("MOMO_SHARE_RETENTION_INTERVAL_MS", 600_000u64)?.max(10_000),
             ),
@@ -349,6 +364,7 @@ impl NotifierConfig {
             attachment_reclaim: None,
             attachment_reclaim_database_url: None,
             share_retention_database_url: None,
+            work_permission_sweep_database_url: None,
             share_retention_interval: Duration::from_millis(300),
             run_stall: momo_outbox::StallPolicy::default(),
         }
