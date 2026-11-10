@@ -30,6 +30,9 @@ export function notifyThisDevice(
     paused: serverPauseActive(),
   });
   if (!decision.show || decision.notification.kind !== "approval") return decision;
+  // 작업 세션 권한 요청(#5595)은 코어가 제목(세션 이름)·본문(사전 문장)을 이미 정했다. 서버 본문은 영어
+  // 「Approval requested」이고 작성자는 흔히 받는 사람 자신이라, 아래의 승인 카드 덮어쓰기를 타지 않는다.
+  if (decision.notification.workSessionId !== undefined) return decision;
   if (event.payload.props?.can_decide === false) return { show: false, skip: "not-notifiable" };
   const question = event.payload.body?.trim();
   // 서버 질문이 없는 옛 카드는 현재 제목을 본문으로 읽어요. 문구를 새로 짓지 않아요.

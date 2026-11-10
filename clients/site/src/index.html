@@ -19,7 +19,7 @@
 </head>
 <body>
 <svg class="sprite" aria-hidden="true" focusable="false">
-  <!-- Lucide (ISC) 0.454.0: download, chevron-down, languages, arrow-up-right, laptop, smartphone, globe, check, folder, arrow-right -->
+  <!-- Lucide (ISC) 0.454.0: download, chevron-down, languages, arrow-up-right, laptop, smartphone, globe, check, folder, arrow-right, book-open -->
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
@@ -30,6 +30,7 @@
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
   <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
 </svg>
 
 <header class="top">
@@ -38,6 +39,7 @@
     <span>oort</span>
   </a>
   <nav class="top-nav" aria-label="{{t.nav_label}}">
+    <a class="ghost docs-link" href="{{b}}docs/{{docs_lang}}/" hreflang="{{docs_lang}}" aria-label="{{t.nav_docs}}" title="{{t.nav_docs}}"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="docs-t">{{t.nav_docs}}</span></a>
     <div class="pop" data-pop>
       <button type="button" class="ghost lang-btn" aria-expanded="false" aria-controls="lang-list" aria-label="{{t.lang_button}}: {{t.lang_name}}">
         <svg class="i" aria-hidden="true"><use href="#i-languages"/></svg><span class="lang-name">{{t.lang_name}}</span><svg class="i i-sm lang-chev" aria-hidden="true"><use href="#i-chevron"/></svg>

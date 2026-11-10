@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fffefc">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14171d">
+<title>{{page_title}}</title>
+<meta name="description" content="{{description}}">
+{{hreflang}}
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+{{root_redirect}}
+<script>(function(){try{var n=navigator,u=n.userAgentData;if((u&&u.mobile===true)||/iPhone|iPod|Android.*Mobile/.test(n.userAgent||""))document.documentElement.setAttribute("data-phone","")}catch(e){}})();</script>
+<style>{{css}}</style>
+</head>
+<body class="docs" data-doc="{{slug}}">
+<a class="skip" href="#doc">{{d.skip}}</a>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <!-- Lucide (ISC) 0.454.0: book-open, languages, chevron-down, check, arrow-up-right -->
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+</svg>
+
+<header class="top">
+  <a class="brand" href="{{brand_href}}" aria-label="oort">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill-rule="evenodd"><path d="M18.59 10.46A8 8 0 0 1 7.32 20.1A0.5 0.5 0 0 0 6.91 20.08L3.6 21.38A0.75 0.75 0 0 1 2.62 20.4L3.92 17.09A0.5 0.5 0 0 0 3.9 16.68A8 8 0 0 1 13.54 5.41A4.5 4.5 0 0 0 18.59 10.46ZM15 13A4 4 0 1 0 7 13A4 4 0 1 0 15 13Z"/><path class="mark-sat" d="M21 6A3 3 0 1 1 15 6A3 3 0 1 1 21 6Z"/></g></svg>
+    <span>oort</span>
+  </a>
+  <nav class="top-nav" aria-label="{{t.nav_label}}">
+    <a class="ghost docs-link" href="{{docs_home}}" aria-current="page" aria-label="{{t.nav_docs}}" title="{{t.nav_docs}}"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="docs-t">{{t.nav_docs}}</span></a>
+    <div class="pop" data-pop>
+      <button type="button" class="ghost lang-btn" aria-expanded="false" aria-controls="lang-list" aria-label="{{t.lang_button}}: {{t.lang_name}}">
+        <svg class="i" aria-hidden="true"><use href="#i-languages"/></svg><span class="lang-name">{{t.lang_name}}</span><svg class="i i-sm lang-chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <ul class="menu lang-list" id="lang-list" role="list" hidden>
+{{lang_items}}
+      </ul>
+    </div>
+    <a class="pill pill-quiet web-link" href="{{v.WEB_URL}}" aria-label="{{t.nav_web}}" title="{{t.nav_web}}"><span class="web-t">{{t.nav_web}}</span><svg class="i i-sm" aria-hidden="true"><use href="#i-out"/></svg></a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+  <nav class="docs-side" aria-labelledby="docs-side-title">
+    <p class="docs-side-h" id="docs-side-title">{{d.toc_label}}</p>
+    <ol role="list">
+{{side_items}}
+    </ol>
+  </nav>
+  <details class="docs-toc">
+    <summary><span class="docs-toc-h">{{d.toc_label}}</span><span class="docs-toc-now">{{doc_title}}</span><svg class="i i-sm" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+    <ol role="list">
+{{side_items}}
+    </ol>
+  </details>
+
+  <main class="doc" id="doc">
+    <article>
+      <header class="doc-head">
+        <h1 id="doc-title">{{doc_title}}</h1>
+        <p class="doc-lead">{{description}}</p>
+        <dl class="doc-meta">
+          <div class="doc-meta-row"><dt>{{d.status_label}}</dt><dd class="doc-status">{{doc_status}}</dd></div>
+          <div class="doc-meta-row"><dt>{{d.checked_label}}</dt><dd class="doc-checked">{{doc_checked}}</dd></div>
+        </dl>
+        <details class="doc-sources">
+          <summary>{{doc_sources_count}}<svg class="i i-sm" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+          <p>{{d.sources_note}}</p>
+          <ul role="list">
+{{doc_sources}}
+          </ul>
+        </details>
+      </header>
+      <div class="doc-body">
+{{doc_body}}
+      </div>
+      <nav class="doc-pager" aria-label="{{d.pager_label}}">
+{{doc_pager}}
+      </nav>
+    </article>
+  </main>
+</div>
+
+<footer class="foot">
+  <p class="foot-v">oort {{v.VERSION}}</p>
+  <nav class="foot-langs" aria-label="{{t.foot_langs}}">
+{{foot_langs}}
+  </nav>
+  <p class="foot-note">{{t.foot_note}}</p>
+</footer>
+
+<script>{{js}}</script>
+</body>
+</html>
