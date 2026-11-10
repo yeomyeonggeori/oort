@@ -68,6 +68,8 @@ const gateNow = () => Date.now() + backendClock.shiftMs;
 const KNOWN_RAPID_SETTLE = true;
 /** 보낸 뒤 바닥에서 7~8px 위에 앉는 것(#5617 알려 둔 것)도 같은 뿌리다. 고쳐지면 false 로 바꿔 「끝 바닥 거리 ≤ 1px」를 단정한다. */
 const KNOWN_SEND_SHORTFALL = true;
+/** 그 알려진 모자람의 크기(실측 7.4~8px). 이보다 더 떨어지면 알려진 것이 아니다 — 실패다. */
+const KNOWN_SHORTFALL_MAX_PX = 9;
 /** 장면표 게이트에 넘길 기록. */
 const records = [];
 const viewport = { width: 1280, height: 800 };
@@ -634,7 +636,9 @@ async function startSampler(page, { aboveText, sentText, firstText = null, seam 
         }
         requestAnimationFrame(tick);
       };
-      requestAnimationFrame(tick);
+      // 첫 표본은 지금 바로(보내기 전) 적는다: 첫 rAF 를 기다리면 바로 뒤의 Enter 로 메아리가 이미 붙은 프레임이 「처음」이 되어
+      // 기대 이동이 어긋난다(실측: 연달아 장면에서 처음 바닥 거리 65px).
+      tick();
       window.__skewSampler = () => {
         running = false;
         return samples;
@@ -854,7 +858,7 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
     failures.push(`${where}: 위 줄이 ${result.travel}px(처음 → 끝 ${result.net}px) 움직였다 — 보낸 칸 높이 ${result.expected}px ± 1px 여야 한다`);
   }
   if (result.gapAfter === null || result.gapAfter > 1) {
-    if (KNOWN_SEND_SHORTFALL) {
+    if (KNOWN_SEND_SHORTFALL && result.gapAfter <= KNOWN_SHORTFALL_MAX_PX) {
       record.known = `${record.known ? `${record.known} · ` : ""}끝 바닥 거리 ${result.gapAfter}px — 알려진 실패(#5617)`;
       console.log(`[${where}] 알려진 실패(기록만): 끝 바닥 거리 ${result.gapAfter}px(#5617)`);
     } else {
