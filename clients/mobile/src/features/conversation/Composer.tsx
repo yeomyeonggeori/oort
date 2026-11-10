@@ -309,6 +309,8 @@ export {PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 // 이모티콘 창의 사전 열쇠(#5452). 모듈 값이라 직접 문구 장부가 세지 않는다.
 const KEYBOARD_KEY = 'expressions.sheet.keyboard';
 const PREVIEW_CLEARED_KEY = 'expressions.preview.cleared';
+/** 추천 줄의 「바꾸기」로 쓴 글이 지워졌을 때 낭독으로 한 번 알리는 문장(#5602 M3). */
+const SUGGEST_REPLACED_KEY = 'expressions.suggest.replaced';
 
 /** 작은 창·큰 글자에서도 편집 중인 줄과 그 앞 줄을 남긴다. */
 const MIN_ROWS = 2;
@@ -1976,14 +1978,16 @@ export function Composer({
     AccessibilityInfo.announceForAccessibility(expressionCopy(PREVIEW_CLEARED_KEY));
   }, [expressionCopy]);
   // ---- 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) ----------------------------------------------------
-  // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다. 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 미리 보기에 올릴 수 없는 입력창(묶음 보내기를 켜지 않음) · 이미 미리 보기가 있음(큰 그림은
+  // 글을 치다 0.3초 멈추면 **방금 친 낱말**이 키워드일 때 입력창 위에 맞는 이모티콘·GIF 가 떠 있는 줄이다(#5602 M1). 맞추기는 기기 안에서만 한다(네트워크 없음). 줄이 서지 않는 때: 미리 보기에 올릴 수 없는 입력창(묶음 보내기를 켜지 않음) · 이미 미리 보기가 있음(큰 그림은
   // 하나) · 이모티콘 창이 서 있음(키보드로 칠 때만) · 멘션 목록이나 명령을 치는 중 · 오프라인 · 입력창에 포커스가 없음(목록을 눌러 쉬거나 키보드를 내림).
+  // 캐럿은 쉼이 끝나는 순간 읽는다. 한 번도 알지 못했으면(콜드 스타트의 iOS 사정, 위 `caret` 주석) 모른다고 넘기고 코어가 글 끝으로 본다.
   const suggest = useExpressionSuggest({
     scope:
       attachmentWorkspaceId === undefined || attachmentChannelId === undefined
         ? null
         : `${attachmentWorkspaceId}:${attachmentChannelId}`,
     text,
+    readCaret: () => (selectionKnownRef.current ? caretRef.current : null),
     enabled:
       previewing &&
       expressionPreview === null &&
@@ -1998,6 +2002,8 @@ export function Composer({
    * 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 보내는 것은 보내기 한 번이다.
    * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `isKeywordOnlyInput`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고 그림을
    * **더한다**(보내기 한 번이 그림 → 글). 지우는 길은 보내기(`submit`)의 비우기와 같다 - 초안도 지운다(`saveDraft(key, '')` 는 빈 초안을 남기므로 `onChangeText('')` 를 거치지 않는다).
+   * 바꿀 때는 낭독으로 한 번 알린다(#5602 M3): 쓴 글이 사라지는 것을 화면을 못 보는 사람도 알아야 한다. iOS 에는 live region 이 없어 미리 보기 ✕(`clearPreview`)와 같은 길로 말한다.
+   * 더할 때는 글이 그대로라 따로 알리지 않는다(미리 보기가 서는 것은 같다).
    */
   const pickSuggestion = (item: Expression) => {
     if (isKeywordOnlyInput(text, item)) {
@@ -2006,6 +2012,7 @@ export function Composer({
       setCaret(0);
       caretRef.current = 0;
       if (draftKeyRef.current !== undefined) clearDraft(draftKeyRef.current);
+      AccessibilityInfo.announceForAccessibility(expressionCopy(SUGGEST_REPLACED_KEY, {name: item.displayName}));
     }
     setPreviewUnavailable(false);
     setExpressionPreview(item);
@@ -2647,12 +2654,14 @@ export function Composer({
         </View>
       ) : null}
 
-      {/* 키워드 추천 줄 (#5478): 멘션 목록처럼 **도크 밖으로 뜬다** - 서고 사라져도 도크가 자라거나 줄지 않아 대화가 흔들리지 않는다. 그림과 ✕ 뿐, 안내 글 없음. */}
+      {/* 키워드 추천 줄 (#5478): 멘션 목록처럼 **도크 밖으로 뜬다** - 서고 사라져도 도크가 자라거나 줄지 않아 대화가 흔들리지 않는다. 그림과 ✕ 뿐, 안내 글 없음.
+          ✕ 는 줄을 띄운 낱말을 이 대화에서 끄고, 아래로 쓸어내리면 「이번만 닫기」다(다음 키워드까지, #5602). */}
       {suggest.open ? (
         <ComposerExpressionSuggest
           items={suggest.items}
           onPick={pickSuggestion}
           onMute={suggest.mute}
+          onDismiss={suggest.close}
           marginHorizontal={floatInset}
         />
       ) : null}

@@ -21,6 +21,7 @@ import type {
   RosterMember,
 } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
+import { applyKeyboardModality } from "@/design/focusModality";
 import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -413,10 +414,12 @@ export function Composer({
   // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 추천이 뜬다(#5476). 맞추기는 기기 안에서만 한다(네트워크 없음). 이미 미리 본 그림이 있거나(큰 그림은 하나),
   // 오프라인이거나(그림을 받을 수 없다), 멘션·채널·`:` 후보나 `/` 명령을 치는 중이면(`autocomplete.kind`) 줄이 서지 않는다.
   const suggestRef = useRef<ExpressionSuggestHandle>(null);
+  // 줄은 **방금 친 낱말**(캐럿 바로 앞 낱말)이 키워드일 때만 선다(#5602 M1): 캐럿은 0.3초 쉼이 끝나는 순간 입력칸에서 읽는다.
   const suggest = useExpressionSuggest({
     workspaceId,
     channelId,
     text,
+    readCaret: () => inputRef.current?.selectionStart ?? null,
     enabled: !offline && pendingExpression === null && autocomplete.kind === null && parseSlashCommand(text) === null,
   });
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
@@ -783,13 +786,13 @@ export function Composer({
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 ✕: 이 대화에서 이 낱말 추천을 끈다. */
+  /** 추천 줄의 ✕: 줄을 띄운 낱말 하나를 이 대화에서 끈다(#5602 M2). */
   function muteSuggestion() {
     suggest.mute();
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 Esc: 줄만 닫는다(쓴 글도 끈 낱말도 그대로). */
+  /** 추천 줄의 Esc: 줄을 닫고 다음 키워드까지 닫아 둔다(#5602 M1). 쓴 글도 끈 낱말도 그대로다. */
   function dismissSuggestion() {
     suggest.close();
     inputRef.current?.focus();
@@ -866,6 +869,10 @@ export function Composer({
         return;
       case "suggest-focus":
         event.preventDefault();
+        // ↑ 는 글 입력 칸 안의 키라 모달리티 표지(`focusModality.ts`)가 키보드로 올리지 않는다: 마우스로 입력칸에 들어온 사람은 표지가 「포인터」인 채로
+        // 줄에 들어가고, 포인터 표지는 첫 칸의 초점 링을 걷는다(#5602 M4, 실측 `outline: none`). 여기서는 ↑ 가 캐럿이 아니라 초점을 옮긴 키보드 탐색이다 —
+        // 라이트박스(#5275)처럼 옮기기 전에 표지를 올린다.
+        applyKeyboardModality(document);
         suggestRef.current?.focus();
         return;
       case "preview-dismiss":

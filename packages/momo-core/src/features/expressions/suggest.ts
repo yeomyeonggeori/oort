@@ -5,12 +5,26 @@ import type { ExpressionKind, ExpressionStatus } from "./types";
 // 입력 글로 이모티콘·GIF 추천: 정리·맞추기 함수 (#5454 1단계, owner 2026-11-07).
 //
 // 글을 치다 잠깐 멈추면 입력창 위에 맞는 큰 그림 몇 개를 띄우는 기능의 **순수 부분**이다. 화면(웹·폰의 추천 줄)은
-// 2단계가 이 모듈을 불러 쓴다. 이 파일이 가진 것은 넷이다:
+// 2단계가 이 모듈을 불러 쓴다. 이 파일이 가진 것은 다섯이다:
 //   1. 정리: `normalizeKeyword` — 입력 글과 보관함의 꼬리표·이름을 같은 꼴로 줄인다.
 //   2. 끝말 정리표: `KEYWORD_ENDING_TABLE` — 흔한 끝말 몇 개를 한 낱말로 모은다(배고프다·배고픔 → 배고파).
 //   3. 맞추기: `suggestExpressionRow`·`suggestExpressions` — 문구 안의 **모든 낱말**에 맞는 큰 그림을 낱말이 나온 차례로 묶어 한 줄에 세운다
 //      (#5588, owner 2026-11-09 「여러 키워드에 걸릴 경우엔 관련한 이모티콘들을 한꺼번에」: 「ㅋㅋ 개웃기네 진심」 → ㅋㅋ 쪽 + 진심 쪽).
 //   4. 누를 때: `isKeywordOnlyInput` — 글이 그 낱말뿐이면 글을 그림으로 **바꾸고**, 문구 안의 낱말이면 글을 두고 그림을 **더한다**(#5588).
+//   5. **언제 띄우는가**: `planExpressionSuggest` — 글·캐럿·직전 닫힘을 받아 「줄을 띄울지, 무엇을 보일지, 다음 닫힘」을 돌려준다(#5602 M1,
+//      owner 2026-11-09 「추천안대로」). 웹·폰 훅은 이 함수를 0.3초 쉼마다 부르고 결과를 그대로 화면에 옮길 뿐이다(시계와 입력 연결만 훅에 있다).
+//
+// 언제 띄우는가 (#5602 M1). 이 규칙이 적힌 곳은 여기와 두 훅의 머리말뿐이다(ADR-0218 은 「정확히 맞춘다·기기 밖으로 안 나간다」만 적는다):
+//   · **방금 친 낱말이 키워드일 때만** 뜬다. 방금 친 낱말 = 캐럿 바로 앞 글자를 품은 띄어쓰기 없는 조각(`suggestionWordAtCaret`). 캐럿을 모르면 글 끝이다.
+//     「ㅋㅋ 」처럼 캐럿 바로 앞이 띄어쓰기면 붙은 낱말이 없다. 글 가운데를 고치는 동안은 그 낱말만 본다(끝 낱말이 키워드여도 안 뜬다).
+//     글 앞에 「ㅋㅋ」가 한 번 들어갔다고 메시지를 다 쓸 때까지 쉴 때마다 줄이 다시 서지 않는다(옛 규칙은 7번 쉬면 7번 섰다).
+//   · 짧은 글 전체(정리 뒤 `EXPRESSION_SUGGEST_WHOLE_TEXT_MAX`자 이하, 「킹 받네」 → 킹받네)가 키워드면 캐럿과 무관하게 뜬다 — 「낱말뿐이면 바꾸기」 길이 살아 있어야 한다.
+//     방금 친 낱말이 키워드면 그 낱말이 먼저다(줄을 띄운 낱말 = `trigger`).
+//   · 뜨면 보이는 것은 지금처럼 **문구 안에서 맞은 낱말 모두**의 그림이다(`suggestExpressionRow`): 「ㅋㅋ 개웃기네 진심」의 「진심」에서 ㅋㅋ 쪽과 진심 쪽이 함께 선다.
+//   · Esc·폰 「이번만 닫기」는 줄을 띄운 낱말(정리한 꼴 + 몇째 낱말인지)을 기억해 **다음 키워드까지** 닫아 둔다: 「ㅋㅋ」에서 닫고 「ㅋㅋㅋ」로 늘려도,
+//     「ㅋㅋ 」로 띄어 글 전체로 맞아도 닫힌 채다. 다른 키워드를 치거나(같은 낱말이라도 다른 자리), 보내거나 다 지우면 풀린다.
+//   · ✕ 는 줄을 띄운 **그 낱말 하나만** 이 대화에서 끈다(`suggestMute`). 낭독 이름 「이 낱말 추천 끄기」와 하는 일이 같다. 방금 친 낱말을 껐으면 같은 글이
+//     글 전체 규칙으로 다시 뜨지도 않는다.
 //
 // 입력한 글은 **기기 밖으로 나가지 않는다**(owner 2026-11-07 결정: 맞추기는 기기 안에서만). 이 모듈은 네트워크·저장소·시계를 만지지
 // 않고 받은 값을 바꾸지 않는 순수 함수라, 글을 서버나 Hermes로 보낼 길이 처음부터 없다. 맞추는 상대도 기기에 있는 보관함
@@ -101,9 +115,15 @@ export function suggestionKeywords(input: string): string[] {
     const keyword = canonicalKeyword(word);
     if (keyword !== "") keywords.add(keyword);
   }
-  const whole = normalizeKeyword(input);
-  if (whole !== "" && codePointLength(whole) <= EXPRESSION_SUGGEST_WHOLE_TEXT_MAX) keywords.add(foldEnding(whole));
+  const whole = wholeTextKeyword(input);
+  if (whole !== null) keywords.add(whole);
   return [...keywords];
+}
+
+/** 글 전체 낱말: 정리한 글이 `EXPRESSION_SUGGEST_WHOLE_TEXT_MAX`자 이하일 때 그 꼴(끝말 정리표까지), 아니면 `null`. 맞추기와 줄 띄우기가 같은 이 값을 쓴다. */
+function wholeTextKeyword(input: string): string | null {
+  const whole = normalizeKeyword(input);
+  return whole !== "" && codePointLength(whole) <= EXPRESSION_SUGGEST_WHOLE_TEXT_MAX ? foldEnding(whole) : null;
 }
 
 /**
@@ -198,8 +218,8 @@ export interface ExpressionSuggestRow<T> {
   /** 줄에 세울 그림들(보관함의 항목 그대로, 같은 항목은 한 번, 낱말 차례로 묶음). 없으면 빈 배열이다. */
   items: T[];
   /**
-   * 이 글에서 그림 하나라도 맞은 낱말들(`suggestionKeywords` 차례, 꺼 둔 낱말은 없다). 줄의 ✕(이 낱말 추천 끄기)가 **이것을** 끈다: 맞지 않은 낱말
-   * (「오늘」·「뭐」)까지 끄지 않고, 같은 그림이라 줄에서 빠졌거나 상한에 밀린 낱말까지는 끈다 — 끈 뒤 같은 글에 줄이 다시 서지 않게.
+   * 이 글에서 그림 하나라도 맞은 낱말들(`suggestionKeywords` 차례, 꺼 둔 낱말은 없다). 줄을 띄울 낱말(`planExpressionSuggest` 의 `trigger`)은 이 안에서
+   * 고른다 — 방금 친 낱말이 여기 없으면(맞는 그림이 없거나 꺼 둠) 그 낱말로는 줄이 서지 않는다. ✕ 는 이 목록 전체가 아니라 `trigger` 하나를 끈다(#5602 M2).
    */
   keywords: string[];
 }
@@ -281,4 +301,110 @@ export function suggestExpressions<T extends ExpressionSuggestCandidate>(
 export function isKeywordOnlyInput(input: string, item: ExpressionSuggestCandidate): boolean {
   const whole = canonicalKeyword(input);
   return whole !== "" && matchKeys(item).has(whole);
+}
+
+// =============================================================================
+// 언제 띄우는가 (#5602 M1, owner 2026-11-09 「추천안대로」). 규칙은 이 파일 머리말의 「언제 띄우는가」가 적는다. 아래는 그 규칙의 순수 함수다:
+// 시계·저장소·화면을 모르고, 같은 값을 넣으면 같은 값이 나온다. 웹·폰 훅은 0.3초 쉼마다 이 함수를 부르고, 돌려받은 닫힘을 다음 부름에 그대로 넘긴다.
+// =============================================================================
+
+/**
+ * 줄을 띄운 낱말(#5602). Esc·폰 「이번만 닫기」가 이것을 기억하고(`dismissal`), ✕ 가 이 낱말(`keyword`) 하나를 끈다.
+ * - `keyword`: `canonicalKeyword` 꼴(정리 + 끝말 정리표).
+ * - `wordIndex`: 글 안에서 몇째 낱말인지(0부터). 띄어쓰기로 나눈 조각 가운데 정리해서 비지 않는 것만 센다(「ㅋㅋ !! 진심」의 진심은 1).
+ *   글 전체로 맞았으면 `null` 이다(자리가 없다).
+ */
+export interface ExpressionSuggestTrigger {
+  keyword: string;
+  wordIndex: number | null;
+}
+
+/** 띄어쓰기 없는 조각 하나씩. `suggestionKeywords` 의 `split(/\s+/u)` 와 같은 띄어쓰기 기준이다(`u`: 전각 공백도 띄어쓰기). */
+const WORD_RUN = /\S+/gu;
+
+/**
+ * 캐럿에 붙은 낱말 — 「방금 친 낱말」(#5602 M1). 캐럿 **바로 앞 글자**를 품은 띄어쓰기 없는 조각이다: 낱말 끝이든 가운데든 그 조각 전체를 본다.
+ * - 캐럿을 모르면(`null`·`undefined`·숫자가 아님) 글 끝이다. 글 밖의 값은 글 안으로 당긴다.
+ * - 캐럿 바로 앞이 띄어쓰기이거나 글 맨 앞(0)이면 붙은 낱말이 없다: 「ㅋㅋ |」와 「ㅋㅋ |진심」은 둘 다 없음이다(그 자리에서 방금 친 것은 띄어쓰기다).
+ * - 정리해서 비는 조각(「!!」·「...」)은 낱말이 아니다.
+ */
+export function suggestionWordAtCaret(input: string, caret?: number | null): ExpressionSuggestTrigger | null {
+  const at = typeof caret === "number" && Number.isFinite(caret) ? Math.min(Math.max(Math.floor(caret), 0), input.length) : input.length;
+  let wordIndex = 0;
+  for (const match of input.matchAll(WORD_RUN)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (start >= at) return null;
+    const keyword = canonicalKeyword(match[0]);
+    if (at <= end) return keyword === "" ? null : { keyword, wordIndex };
+    if (keyword !== "") wordIndex += 1;
+  }
+  return null;
+}
+
+/**
+ * 닫아 둔 낱말과 같은 낱말인가: 정리한 꼴이 같고 자리가 같다. 어느 한쪽이 글 전체로 맞은 것(`wordIndex` 가 `null`)이면 꼴만 본다 —
+ * 「ㅋㅋ」에서 닫고 「ㅋㅋ 」로 띄어 글 전체로 맞아도, 「킹 받네」(글 전체)에서 닫고 「킹받네」 한 낱말로 쳐도 닫힌 채다.
+ */
+function sameTrigger(a: ExpressionSuggestTrigger, b: ExpressionSuggestTrigger): boolean {
+  return a.keyword === b.keyword && (a.wordIndex === null || b.wordIndex === null || a.wordIndex === b.wordIndex);
+}
+
+/** `planExpressionSuggest` 가 받는 지금 상태. */
+export interface ExpressionSuggestState {
+  /** 입력칸의 지금 글. */
+  text: string;
+  /** 캐럿 위치(UTF-16 위치, 입력칸의 `selectionStart` 와 같은 단위). 모르면 `null` 이고 글 끝으로 본다. */
+  caret?: number | null;
+  /** 직전 부름이 돌려준 닫힘(Esc·「이번만 닫기」가 기억한 낱말). 없으면 `null`. */
+  dismissal?: ExpressionSuggestTrigger | null;
+}
+
+/** `planExpressionSuggest` 의 답. */
+export interface ExpressionSuggestPlan<T> {
+  /** 줄에 세울 그림들. 비었으면 줄이 없다. */
+  items: T[];
+  /** 줄을 띄운 낱말. 줄이 없으면 `null`. Esc·「이번만 닫기」는 이것을 닫힘으로 기억하고, ✕ 는 이 `keyword` 하나를 끈다. */
+  trigger: ExpressionSuggestTrigger | null;
+  /** 다음 부름에 넘길 닫힘. 풀렸으면 `null`. */
+  dismissal: ExpressionSuggestTrigger | null;
+}
+
+/**
+ * 추천 줄을 띄울지, 무엇을 보일지(#5602 M1). 글·캐럿·직전 닫힘 → 줄의 그림들·줄을 띄운 낱말·다음 닫힘.
+ *
+ * 1. 글이 비었으면(띄어쓰기뿐) 줄이 없고 닫힘이 풀린다(보냈거나 다 지웠다).
+ * 2. 줄을 띄울 낱말(`trigger`)을 고른다. 차례가 정해져 있다:
+ *    - 방금 친 낱말(`suggestionWordAtCaret`)을 이 대화에서 껐으면 **아무것도** 띄우지 않는다 — 같은 글이 글 전체 규칙으로 다시 서면 끈 낱말이 되살아난 것처럼 보인다.
+ *    - 방금 친 낱말이 그림에 맞으면 그 낱말.
+ *    - 아니면 짧은 글 전체가 그림에 맞으면 글 전체 낱말(`wordIndex` 는 `null`).
+ *    - 둘 다 아니면 줄이 없다. 닫힘은 그대로 둔다(키워드가 아닌 낱말을 쳐도 닫힘은 풀리지 않는다).
+ * 3. 그 낱말이 닫아 둔 낱말과 같으면(`sameTrigger`) 줄이 없고 닫힘을 그대로 둔다. 방금 친 낱말이 닫혀 있으면 글 전체 낱말로 내려가지 않는다.
+ * 4. 아니면 줄이 선다: 그림은 문구 안에서 맞은 낱말 모두의 것(`suggestExpressionRow`)이고, 다른 키워드를 친 것이니 닫힘은 풀린다.
+ *
+ * 값을 바꾸지 않는 순수 함수다. 시계(0.3초 쉼)는 부르는 쪽의 몫이다.
+ */
+export function planExpressionSuggest<T extends ExpressionSuggestCandidate>(
+  state: ExpressionSuggestState,
+  catalog: readonly T[],
+  options: ExpressionSuggestOptions = {},
+): ExpressionSuggestPlan<T> {
+  const held = state.dismissal ?? null;
+  if (state.text.trim() === "") return { items: [], trigger: null, dismissal: null };
+  const row = suggestExpressionRow(state.text, catalog, options);
+  const matched = new Set(row.keywords);
+  const muted = new Set((options.muted ?? []).map(canonicalKeyword));
+  const typed = suggestionWordAtCaret(state.text, state.caret);
+  const whole = wholeTextKeyword(state.text);
+  const trigger: ExpressionSuggestTrigger | null =
+    typed !== null && muted.has(typed.keyword)
+      ? null
+      : typed !== null && matched.has(typed.keyword)
+        ? typed
+        : whole !== null && matched.has(whole)
+          ? { keyword: whole, wordIndex: null }
+          : null;
+  if (trigger === null) return { items: [], trigger: null, dismissal: held };
+  if (held !== null && sameTrigger(trigger, held)) return { items: [], trigger: null, dismissal: held };
+  return { items: row.items, trigger, dismissal: null };
 }
