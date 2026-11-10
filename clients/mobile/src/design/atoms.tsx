@@ -560,7 +560,7 @@ export function OutlineButton({
       accessibilityRole="button"
       accessibilityLabel={busy === true ? shown : accessibilityLabel ?? label}
       accessibilityState={busy === true ? {busy: true, disabled: true} : undefined}
-      disabled={busy === true}
+      disabled={busy === true ? true : undefined}
       onPress={onPress}
       style={({pressed}) => [styles.outline, pressed && styles.pressed]}
       testID={testID}>
