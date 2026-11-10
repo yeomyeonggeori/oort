@@ -670,7 +670,8 @@ async function main() {
   const failures = cells.filter((cell) => cell.verdict === "FAIL" || cell.verdict === "장면 못 만듦");
   const notMeasured = cells.filter((cell) => cell.verdict === "재지 않음");
   const measured = cells.filter((cell) => cell.verdict.startsWith("PASS") || ["FAIL", "알려진 실패"].includes(cell.verdict) || cell.verdict.startsWith("기록만"));
-  const empty = nothingRan(measured.length, "timeline-still");
+  // 잰 칸도 「재지 않음」 칸도 없으면(아무 장면도 돌지 않았다) 실패다. 부하로 모두 「재지 않음」이면 아래의 NOT-MEASURED(종료 3)다 — 어느 쪽도 PASS 가 아니다.
+  const empty = nothingRan(measured.length + notMeasured.length, "timeline-still");
   if (failures.length > 0 || empty !== null) {
     for (const cell of failures) console.error(`FAIL ${cell.set} ${cell.scene} [${cell.engine} ${cell.width}] ${(cell.reasons ?? []).join(" · ")}`);
     if (empty !== null) console.error(`FAIL ${empty}`);
