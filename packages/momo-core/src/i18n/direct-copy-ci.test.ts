@@ -35,6 +35,15 @@ describe('PR CI ledger step compares with the merge ref base (#5589 r2 M1)', () 
     expect(unraisedCopy.status).not.toBe(0);
   });
 
+  it('a re-anchor PR is RED without the policy-change-approved label and green with it (label read at run time)', () => {
+    const {runs: {reanchorUnlabelled, reanchorLabelled}, u2} = scenario;
+    expect(reanchorUnlabelled.out).toContain(`against base ${u2.slice(0, 12)}`);
+    expect(reanchorUnlabelled.out).toMatch(/anchor, anchorHead or ANCHOR_SEAL differs from the base/);
+    expect(reanchorUnlabelled.status).not.toBe(0);
+    expect(reanchorLabelled.out).toMatch(/a re-anchor approved by the policy-change-approved label/);
+    expect(reanchorLabelled.status).toBe(0);
+  });
+
   it('keeps the token away from node and takes no base from the event (r2 L-c, M1)', () => {
     const {script, env} = workflowLedgerStep();
     expect(script).toMatch(/env -u GH_TOKEN node "\$tool" check/);

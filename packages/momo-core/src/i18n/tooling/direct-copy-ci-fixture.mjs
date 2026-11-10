@@ -8,6 +8,7 @@
 //   #5700, and after an approved re-anchor lands (u3) it would go RED.
 import {execFileSync, spawnSync} from 'node:child_process';
 import {chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -60,8 +61,8 @@ const C = 'clients/web/src/C.tsx';
 const REASON = 'Banner sentence waits for the P1 web extraction of this screen.';
 
 /**
- * Builds the track history, runs the workflow step on four refs and removes everything.
- * Returns `{runs: {afterRaise, afterReanchor, notMerge, unraisedCopy}, u2, u3}`; each run is `{status, out, mergeBase}`.
+ * Builds the track history, runs the workflow step on five refs (one twice, with and without the
+ * approval label) and removes everything. Each run is `{status, out, mergeBase}`.
  */
 export function runLedgerStepScenario({workflow} = {}) {
   const step = workflowLedgerStep(workflow);
@@ -141,23 +142,28 @@ export function runLedgerStepScenario({workflow} = {}) {
     const prC = git(origin, 'rev-parse', 'HEAD');
     git(origin, 'checkout', '-q', 'track');
     mergeRef('4', u3, prC);
+    // The re-anchor itself arriving as a PR (u2 ← u3): only the policy-change-approved label lets it through.
+    mergeRef('5', u2, u3);
     // Not a merge ref: the PR head itself.
     git(origin, 'update-ref', 'refs/pull/3/merge', prB);
     refs['3'] = {merge: prB, head: prB, mergeBase: u1};
 
     const bin = join(work, 'bin');
     mkdirSync(bin);
-    writeFileSync(join(bin, 'gh'), '#!/bin/sh\nexit 0\n'); // no labels
+    // The PR's labels, one per line, as `gh api … --jq '.labels[].name'` prints them.
+    writeFileSync(join(bin, 'gh'), '#!/bin/sh\n[ -n "$FAKE_LABELS" ] && printf \'%s\\n\' "$FAKE_LABELS"\nexit 0\n');
     chmodSync(join(bin, 'gh'), 0o755);
 
-    const run = name => {
-      const ci = join(work, `ci-${name}`);
+    // The directory that holds `typescript`, wherever this checkout resolves it from.
+    const modules = dirname(dirname(createRequire(import.meta.url).resolve('typescript/package.json')));
+    const run = (name, labels = '') => {
+      const ci = join(work, `ci-${name}-${labels ? 'labelled' : 'none'}`);
       mkdirSync(ci);
       git(ci, 'init', '-q');
       git(ci, 'remote', 'add', 'origin', `file://${origin}`);
       git(ci, 'fetch', '-q', '--no-tags', '--depth=1', 'origin', `refs/pull/${name}/merge`);
       git(ci, 'checkout', '-q', '--detach', 'FETCH_HEAD');
-      symlinkSync(join(ROOT, 'node_modules'), join(ci, 'node_modules'));
+      symlinkSync(modules, join(ci, 'node_modules'));
       const context = {
         'secrets.GITHUB_TOKEN': 'fixture-not-a-credential',
         'github.repository': 'example/oort',
@@ -172,11 +178,17 @@ export function runLedgerStepScenario({workflow} = {}) {
       });
       const env = Object.fromEntries(Object.entries(step.env).map(([key, value]) => [key, fill(value)]));
       const result = spawnSync('bash', ['-c', fill(step.script)], {
-        cwd: ci, encoding: 'utf8', timeout: 60_000, env: {...gitEnv, PATH: `${bin}:${gitEnv.PATH}`, ...env},
+        cwd: ci, encoding: 'utf8', timeout: 60_000, env: {...gitEnv, PATH: `${bin}:${gitEnv.PATH}`, FAKE_LABELS: labels, ...env},
       });
       return {status: result.status, out: `${result.stdout ?? ''}\n${result.stderr ?? ''}`, mergeBase: refs[name].mergeBase};
     };
-    return {runs: {afterRaise: run('1'), afterReanchor: run('2'), notMerge: run('3'), unraisedCopy: run('4')}, u2, u3};
+    return {
+      runs: {
+        afterRaise: run('1'), afterReanchor: run('2'), notMerge: run('3'), unraisedCopy: run('4'),
+        reanchorUnlabelled: run('5'), reanchorLabelled: run('5', 'needs-review\npolicy-change-approved'),
+      },
+      u2, u3,
+    };
   } finally {
     rmSync(work, {recursive: true, force: true});
   }
