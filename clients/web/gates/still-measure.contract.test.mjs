@@ -47,6 +47,14 @@ describe("숫자 넷", () => {
     expect(judgeCell(numbers, { kind: "reading" }).verdict).toBe("장면 못 만듦");
     expect(motionOf([])).toBeNull();
   });
+
+  it("보던 줄이 화면 밖으로 밀려 사라지면 남은 프레임이 0px 여도 실패다", () => {
+    // 앞 붙이기 보정을 끈 번들(실측): 보던 줄이 2,274px 아래로 밀려 붙임 범위 밖 — 사라진 프레임을 빼면 움직임 0 이었다.
+    const numbers = stillNumbers({ series: [110, 110, 110, null, null, null] });
+    expect(numbers.unexplainedPx).toBe(0);
+    expect(numbers.vanishedFrames).toBe(3);
+    expect(judgeCell(numbers, { kind: "reading", minSamples: 3 }).verdict).toBe("FAIL");
+  });
 });
 
 describe("환경 값 — 0번 돌고 통과할 수 없다 (#5644 검수 M1)", () => {

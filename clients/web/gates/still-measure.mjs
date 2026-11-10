@@ -151,6 +151,9 @@ export function stillNumbers({ series, expected = 0, gaps = [], pills = [], pill
   for (let i = 0; i < pills.length; i += 1) if (pills[i] && (i === 0 ? !pillAtStart : !pills[i - 1])) pillShows += 1;
   const unexplained =
     motion === null ? null : expected === 0 ? motion.range : round2(Math.max(Math.abs(motion.range - expected), Math.abs(Math.abs(motion.net) - expected)));
+  // 한 번 보인 줄이 뒤에 사라진 프레임 수: 보던 줄이 화면 밖(가상 목록의 붙임 범위 밖)으로 밀려 난 것이다. 그 프레임을 빼고 재면 0px 로 보인다.
+  const firstSeen = series.findIndex((value) => typeof value === "number" && Number.isFinite(value));
+  const vanished = firstSeen < 0 ? 0 : series.slice(firstSeen).filter((value) => !(typeof value === "number" && Number.isFinite(value))).length;
   return {
     reversals: motion?.reversals ?? null,
     unexplainedPx: unexplained,
@@ -158,6 +161,7 @@ export function stillNumbers({ series, expected = 0, gaps = [], pills = [], pill
     // 필을 적지 않은 기록(옛 게이트의 프레임)은 「안 잼」(null)이다 — 0 으로 치지 않는다.
     pillShows: pills.length === 0 && pillMounts === 0 ? null : Math.max(pillShows, pillAtStart ? 0 : pillMounts),
     expectedPx: expected,
+    vanishedFrames: vanished,
     motion,
   };
 }
@@ -176,6 +180,7 @@ export function judgeCell(numbers, { kind, limit, minSamples = 10 }) {
     return { verdict: "장면 못 만듦", reasons: [`지켜본 줄의 표본이 ${numbers.motion?.samples ?? 0}개뿐이다`] };
   }
   if (numbers.reversals !== 0) reasons.push(`되돌아옴 ${numbers.reversals}회`);
+  if (numbers.vanishedFrames > 0) reasons.push(`지켜본 줄이 ${numbers.vanishedFrames}프레임 동안 사라졌다(화면 밖으로 밀림)`);
   if (kind === "entry") {
     // 대화 진입: 첫 줄이 그려진 뒤 마지막 줄이 창에서 움직인 폭 ≤ 1px · 필 0. 바닥 거리는 기록만 한다(첫 착지의 몇 px 는 #5567 기록).
     const cap = limit ?? LIMITS.stillPx;
