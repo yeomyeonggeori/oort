@@ -180,7 +180,8 @@ export function TypingBar({
               </Text>
             ))}
           </View>
-          <RespondingDots />
+          {/* 사람의 줄이라 점은 글자와 같은 흐린 잉크다(에이전트 색은 에이전트 줄에만, #5645). */}
+          <RespondingDots human />
           <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} numberOfLines={1} style={styles.tail}>
             {typingTail(segments)?.text}
           </Text>

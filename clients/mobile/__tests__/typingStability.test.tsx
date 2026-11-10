@@ -176,6 +176,21 @@ describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
   });
 });
 
+describe('점 색 — 사람의 줄은 에이전트 색을 쓰지 않는다 (#5645, #5582 검수 M3)', () => {
+  it('「작성 중」 줄의 점은 글자와 같은 흐린 잉크다', () => {
+    // 폰은 「작업 중」(에이전트)과 「작성 중」(사람)이 컴포저 위에 붙어 선다. 앞 판은 두 줄의 점이 같은 에이전트 색이었다.
+    render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
+    const dots = screen.getAllByTestId(/^responding-dot-/, {includeHiddenElements: true});
+    expect(dots).toHaveLength(3);
+    for (const dot of dots) {
+      expect(flatten(dot.props.style).backgroundColor).toBe(color.textMuted);
+      expect(flatten(dot.props.style).backgroundColor).not.toBe(color.agent);
+    }
+    // 꼬리 글과 같은 잉크다.
+    expect(flatten(screen.getByText(' 작성 중').props.style).color).toBe(color.textMuted);
+  });
+});
+
 describe('M-6 — 이 줄이 AA 를 지난다', () => {
   it('textFaint 를 쓰지 않는다', () => {
     // 실측: textFaint on bg = 3.562:1 (본문 AA 4.5 미달) · textMuted = 6.358:1.
