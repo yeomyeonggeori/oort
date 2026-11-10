@@ -6,7 +6,15 @@ import {
   type TypingSegment,
 } from '@momo/core/features/chat/typing';
 import React, {useState} from 'react';
-import {StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type TextStyle,
+} from 'react-native';
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {font, line as lineScale, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
@@ -171,14 +179,32 @@ export function typingNameRoom(
   return lineWidth - 2 * SAFE_GUTTER - 2 * space.xs - RESPONDING_DOTS_WIDTH - tailWidth - fixed;
 }
 
-/** 거울이 잰 폭을 기억하는 열쇠. 같은 글 · 같은 옷(이름 칸 · 이름 아닌 칸 · 꼬리)이면 폭이 같다. */
-function pieceKey(kind: 'name' | 'text' | 'tail', text: string): string {
+/** 거울이 재는 조각의 옷: 이름 칸 · 이름 아닌 칸 · 꼬리. 옷이 다르면 같은 글이어도 폭이 다르다. */
+const NAME_PIECE = 0;
+const TEXT_PIECE = 1;
+const TAIL_PIECE = 2;
+
+/** 거울의 시험 표지 꼬리(`<testID>` 뒤에 붙는다): 거울 · 조각 · 꼬리 조각. */
+const MEASURE_SUFFIX = '-measure';
+const MEASURE_TAIL_SUFFIX = '-tail';
+
+/** 거울이 잰 폭을 기억하는 열쇠. 같은 글 · 같은 옷이면 폭이 같다. */
+function pieceKey(kind: number, text: string): string {
   return `${kind}:${text}`;
 }
 
 /** 칸의 글(이름 + 거기 붙은 쉼표 같은 것). */
 function cellText(cell: TypingNameCell): string {
   return cell.segments.map(segment => segment.text).join('');
+}
+
+/** 칸 안의 조각들 — 이름만 굵은 사람 잉크다(M-4). 보이는 칸과 거울이 **같은 것**을 그려야 잰 폭이 맞는다. */
+function cellSegments(cell: TypingNameCell, nameStyle: StyleProp<TextStyle>): React.JSX.Element[] {
+  return cell.segments.map((segment, at) => (
+    <Text key={at} style={segment.kind === 'name' ? nameStyle : undefined}>
+      {segment.text}
+    </Text>
+  ));
 }
 
 /**
@@ -251,8 +277,9 @@ export function TypingBar({
   const empty = segments.length === 0;
   const cells = typingNameCells(typingLead(segments));
   const tail = typingTail(segments);
-  const keys = cells.map(cell => pieceKey(cell.name ? 'name' : 'text', cellText(cell)));
-  const tailKey = pieceKey('tail', tail?.text ?? '');
+  const keys = cells.map(cell => pieceKey(cell.name ? NAME_PIECE : TEXT_PIECE, cellText(cell)));
+  const tailKey = pieceKey(TAIL_PIECE, tail?.text ?? '');
+  const measureTestID = `${testID}${MEASURE_SUFFIX}`;
   // 재는 것은 두 이름일 때뿐이다(한 이름은 줄어드는 칸이 하나라 앞 판 그대로가 같은 답이다).
   const measuring = cells.filter(cell => cell.name).length >= 2;
   const widths = measuring ? measuredNameWidths(cells, keys, tailKey, natural, lineWidth) : null;
@@ -297,11 +324,7 @@ export function TypingBar({
                   numberOfLines={1}
                   style={[cell.name ? styles.nameCell : styles.textCell, width !== undefined && {width}]}
                   testID={cell.name ? nameCellTestID : undefined}>
-                  {cell.segments.map((segment, at) => (
-                    <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
-                      {segment.text}
-                    </Text>
-                  ))}
+                  {cellSegments(cell, styles.name)}
                 </Text>
               );
             })}
@@ -318,8 +341,8 @@ export function TypingBar({
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               pointerEvents="none"
-              style={styles.mirror}
-              testID={`${testID}-measure`}>
+              style={[StyleSheet.absoluteFill, styles.mirror]}
+              testID={measureTestID}>
               {cells.map((cell, index) => (
                 <Text
                   key={`${index}:${keys[index]}`}
@@ -327,12 +350,8 @@ export function TypingBar({
                   numberOfLines={1}
                   onLayout={event => remember(keys[index], event.nativeEvent.layout.width)}
                   style={cell.name ? styles.nameCell : styles.textCell}
-                  testID={`${testID}-measure-${index}`}>
-                  {cell.segments.map((segment, at) => (
-                    <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
-                      {segment.text}
-                    </Text>
-                  ))}
+                  testID={`${measureTestID}-${index}`}>
+                  {cellSegments(cell, styles.name)}
                 </Text>
               ))}
               <Text
@@ -341,7 +360,7 @@ export function TypingBar({
                 numberOfLines={1}
                 onLayout={event => remember(tailKey, event.nativeEvent.layout.width)}
                 style={styles.tail}
-                testID={`${testID}-measure-tail`}>
+                testID={`${measureTestID}${MEASURE_TAIL_SUFFIX}`}>
                 {tail?.text}
               </Text>
             </View>
@@ -380,5 +399,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.
   name: {color: color.text, fontWeight: '700'},
   // 재는 거울(#5645): 흐름 밖에 서고 보이지 않는다. 조각마다 제 글 폭으로 서도록 세로로 쌓고 왼쪽에 붙인다.
-  mirror: {position: 'absolute', top: 0, left: 0, opacity: 0, alignItems: 'flex-start'},
+  // (절대 배치는 그리는 자리에서 `StyleSheet.absoluteFill` 로 더한다.)
+  mirror: {opacity: 0, alignItems: 'flex-start'},
 });
