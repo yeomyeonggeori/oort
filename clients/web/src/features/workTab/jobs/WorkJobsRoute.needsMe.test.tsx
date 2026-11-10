@@ -5,12 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ApiError,
-  type Approval,
-  type SharedWorkSession,
-  type WorkSessionACPFrame,
-} from "@momo/core/lib/api";
+import { ApiError, type Approval, type SharedWorkSession } from "@momo/core/lib/api";
+import type { WorkSessionACPFrame } from "@momo/core/lib/realtimeEvents";
 import { approvalItem } from "@momo/core/features/inbox/model";
 import { WORK_JOBS_COPY, WORK_FILTER_STORAGE_KEY } from "@momo/core/features/workbench/workJobs";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
