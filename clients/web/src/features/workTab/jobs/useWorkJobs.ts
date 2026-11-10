@@ -22,7 +22,8 @@ import { railCoversItems, teamBoardKey } from "@/features/workTab/teamBoard/useT
 //
 // 박자(#5640): 실시간이 붙어 있고 줄의 집 채널을 모두 듣고 있으면 60초 박자를 멈춘다 — 권한 요청·결정·상태 전환은 신호가
 // 다시 읽게 한다. 끊겼거나(연결 중 포함) 듣는 채널 상한을 넘은 줄이 있으면 60초 박자다. 실시간이 있는 동안 신호가 없는 것
-// (diff·단계 숫자, 60초를 넘긴 멘션 run, 권한 요청의 만료)은 창 포커스의 재읽기가 받친다.
+// (diff·단계 숫자, 60초를 넘긴 멘션 run, 권한 요청의 만료)과 화면을 떠난 동안의 일은 다시 들어올 때·창에 돌아올 때의
+// 재읽기가 받친다(`staleTime: 0`).
 // =============================================================================
 
 const PAGE = 50;
@@ -51,6 +52,10 @@ export function useWorkJobsList(workspaceId: string, filter: WorkFilter, live = 
     refetchInterval: (q) =>
       workJobsPollMs(live, q.state.data?.pages.flatMap((page) => page.sessions ?? []) ?? []),
     refetchOnWindowFocus: true,
+    // 「작업」을 떠난 동안(승인 카드·A 칸·채널로 간 동안) 온 결정·요청은 이 화면의 레일이 듣지 못하고, 실시간이 붙어 있으면
+    // 박자도 없다. 앱 기본 신선 시간(30초)을 따르면 그 안에 돌아오거나 창에 돌아와도 다시 읽지 않아, 답한 줄이 「응답 필요」에
+    // 남는다. 그래서 이 목록은 늘 낡은 것으로 본다: 다시 들어올 때와 창에 돌아올 때마다 한 번 읽는다.
+    staleTime: 0,
     enabled: workspaceId !== "",
   });
   const items = useMemo<SharedWorkSession[]>(

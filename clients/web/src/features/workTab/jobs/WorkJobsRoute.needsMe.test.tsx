@@ -3,7 +3,7 @@
 import { act, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Approval, type SharedWorkSession } from "@momo/core/lib/api";
 import type { WorkSessionACPFrame } from "@momo/core/lib/realtimeEvents";
@@ -101,8 +101,9 @@ function Probe() {
   return null;
 }
 
+// 앱의 쿼리 기본값(`app/queryClient.ts`: 신선 시간 30초)과 같게 둔다 — 다시 들어올 때 다시 읽는지가 그 값에 달려 있다.
 function mount(entry = "/work"): ReactNode {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
   return (
     <LocaleProvider locale={locale}>
       <QueryClientProvider client={client}>
@@ -111,7 +112,16 @@ function mount(entry = "/work"): ReactNode {
             <Probe />
             <Routes>
               <Route path="/work" element={<WorkJobsRoute />} />
-              <Route path="/c/:id" element={<div data-testid="channel-page" />} />
+              <Route
+                path="/c/:id"
+                element={
+                  <div data-testid="channel-page">
+                    <Link to="/work" data-testid="back-to-work">
+                      작업
+                    </Link>
+                  </div>
+                }
+              />
               <Route path="/" element={<div data-testid="home" />} />
             </Routes>
           </MemoryRouter>
@@ -406,5 +416,31 @@ describe("갱신: 권한 요청·결정이 실시간으로 오면 다시 읽는�
     const after = screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === macSession.sessionId)!;
     expect(after).not.toBe(before);
     expect(document.activeElement).toBe(after);
+  });
+});
+
+describe("다른 화면에서 답하고 돌아오면 다시 읽는다 (#5640)", () => {
+  it("「작업」을 떠난 동안 온 결정은 실시간이 듣지 못한다 — 돌아오면 30초 안이어도 목록을 다시 읽어 줄이 「지금」으로 간다", async () => {
+    const run = runRow({
+      sessionId: "00000000-0000-7000-8000-0000000000c1",
+      runId: "00000000-0000-7000-8000-0000000000c1",
+      requestedBy: DOHYUN,
+      owner: AGENT,
+      label: "#launch 채널에 공지 올리기",
+      phase: "awaiting_approval",
+      trigger: "mention",
+    });
+    board(new Set([macSession.sessionId]), { mine: [run] });
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([macSession.sessionId]));
+    // 카드가 있는 채널로 떠난다(데스크탑의 A 칸도 같다: 「작업」 화면이 내려간다).
+    fireEvent.click(screen.getByTestId("work-job-approval-link"));
+    await screen.findByTestId("channel-page");
+    const reads = api.fetchWorkJobs.mock.calls.length;
+    // 그동안 답했다: 서버는 이제 `running`을 준다.
+    board(new Set(), { mine: [run] });
+    fireEvent.click(screen.getByTestId("back-to-work"));
+    await waitFor(() => expect(api.fetchWorkJobs.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(sectionKeys()).toEqual(["now"]));
   });
 });

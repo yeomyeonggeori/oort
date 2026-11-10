@@ -217,26 +217,5 @@ describe("「작업」의 「응답 필요」 줄이 연 A 칸: 승인 카드에
     });
     await vi.waitFor(() => expect(document.activeElement).toBe(card));
   });
-
-  it("카드가 서기 전에 사람이 다른 곳으로 갔으면 캐럿을 빼앗지 않는다", async () => {
-    const { sessions } = fakeSessions();
-    const { source } = fakeSource(SUMMARY, { delayMs: 200 });
-    const elsewhere = document.createElement("button");
-    document.body.append(elsewhere);
-    try {
-      await mount(sessions, source, SID, vi.fn());
-      // 격자는 열리면 활성 칸으로 캐럿을 보낸다(기존 동작). 그 뒤에 사람이 다른 곳을 누른다.
-      await vi.waitFor(() => expect(pane("p2").contains(document.activeElement)).toBe(true));
-      // 격자의 열림 프레임(requestAnimationFrame)이 다 지난 뒤에 누른다.
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      act(() => elsewhere.focus());
-      await vi.waitFor(() =>
-        expect(pane("p2").querySelector('[data-testid="agent-permission"]')).not.toBeNull()
-      );
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(document.activeElement).toBe(elsewhere);
-    } finally {
-      elsewhere.remove();
-    }
-  });
+  // 「사람이 다른 곳으로 갔으면 빼앗지 않는다」는 격자 자신의 초점 프레임과 섞이지 않게 `focusPermissionCard.test.ts`가 잰다.
 });
