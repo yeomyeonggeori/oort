@@ -558,9 +558,11 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.dismiss",
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.replaced",
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
   "inbox.approval.open",
@@ -2001,9 +2003,13 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.dismiss": {},
   "expressions.suggest.group": {},
   "expressions.suggest.mute": {},
   "expressions.suggest.pick": {
+    "name": "string"
+  },
+  "expressions.suggest.replaced": {
     "name": "string"
   },
   "expressions.suggest.settingHint": {},
@@ -3553,9 +3559,11 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.dismiss": Record<string, never>;
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.replaced": { name: string };
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
