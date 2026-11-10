@@ -2025,6 +2025,16 @@ export const catalog: MessageCatalog = {
       "value": "그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요."
     }
   ],
+  "expressions.image.waitingA11y": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이모티콘"
+    }
+  ],
   "expressions.import.displayName": [
     {
       "type": 0,
@@ -3751,6 +3761,12 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "expressions.suggest.dismiss": [
+    {
+      "type": 0,
+      "value": "이번만 닫기"
+    }
+  ],
   "expressions.suggest.group": [
     {
       "type": 0,
@@ -3771,6 +3787,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기에 올리기"
+    }
+  ],
+  "expressions.suggest.replaced": [
+    {
+      "type": 0,
+      "value": "쓴 글을 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이모티콘으로 바꿨어요"
     }
   ],
   "expressions.suggest.settingHint": [

@@ -28,13 +28,14 @@ import type { ExpressionTransport } from "@/features/expressions/transport";
 // =============================================================================
 // 입력창 위의 이모티콘 추천 줄 (#5476, #5454 2단계, owner 2026-11-07 「안내 글 없이 카카오톡처럼」).
 //
-//   · 글을 치다 0.3초 멈추면 문구 안의 낱말(짧은 글이면 글 전체도)이 꼬리표·이름과 맞는 큰 이모티콘·GIF 가 입력창 바로 위에 뜬다. 여러 낱말이면 낱말이 나온 차례로 한 줄에 함께
-//     선다(#5588). 안 맞으면 줄이 없다. 계속 치면 사라진다.
+//   · 글을 치다 0.3초 멈추면 **방금 친 낱말**(짧은 글이면 글 전체도)이 꼬리표·이름과 맞을 때 큰 이모티콘·GIF 가 입력창 바로 위에 뜬다(#5602 M1). 서면 문구 안에서 맞은
+//     낱말 모두가 낱말이 나온 차례로 한 줄에 함께 선다(#5588). 안 맞으면 줄이 없다. 계속 치면 사라진다.
 //   · 누르면 입력창 위 미리 보기에 올라간다. **저절로 보내지 않는다.** 글이 그 낱말뿐이면 글을 지워 그림으로 바꾸고(보내면 그림만), 문구면 글을 두고 그림을 더한다(#5588).
 //     입력칸의 Enter 는 줄이 떠 있어도 보내기 그대로이고 추천을 고르지 않는다.
-//   · ✕ 는 이 대화에서 그 낱말(들)의 추천을 끈다. Esc 는 줄만 닫는다. ↑(첫 줄)로 줄에 들어가 ← → Home End 로 움직인다.
+//   · ✕ 는 줄을 띄운 낱말 하나를 이 대화에서 끈다(#5602 M2). Esc 는 줄을 닫고 다음 키워드까지 닫아 둔다(#5602 M1). ↑(첫 줄)로 줄에 들어가 ← → Home End 로 움직이고,
+//     마우스로 입력칸에 들어왔어도 첫 칸에 초점 링이 선다(#5602 M4).
 //   · 맞추기는 기기 안에서만 한다: 입력한 글은 어떤 요청에도 실리지 않는다.
-// 맞추기 규칙(정리·끝말·순서)은 코어 `suggest.test.ts` 가 재고, 키 뜻은 코어 `composerKeys.test.ts` 가 잰다. 여기서는 진짜 `Composer` 를 올려 배선을 잰다.
+// 맞추기 규칙(정리·끝말·순서)과 언제 띄우는지(가장자리 표)는 코어 `suggest.test.ts` 가 재고, 키 뜻은 코어 `composerKeys.test.ts` 가 잰다. 여기서는 진짜 `Composer` 를 올려 배선을 잰다.
 // =============================================================================
 
 const scheduledApi = vi.hoisted(() => ({
@@ -344,16 +345,16 @@ describe("글을 치다 멈추면 맞는 그림이 입력창 위에 뜬다", () 
     expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
   });
 
-  it("계속 치면 줄이 그 순간 사라지고, 다시 멈추면 새 글로 다시 맞춘다 - 문구 안의 낱말도 모두 맞춘다(#5588)", async () => {
+  it("계속 치면 줄이 그 순간 사라지고, 다시 멈추면 새 글로 다시 묻는다 - 방금 친 낱말이 키워드일 때만 서고, 서면 문구 안의 낱말을 모두 맞춘다(#5602 M1·#5588)", async () => {
     await mount();
     await typeAndPause("ㅋㅋㅋ");
     expect(row()).not.toBeNull();
     // 한 글자라도 더 치면 시계를 흘리지 않았는데도 사라진다.
     await type("ㅋㅋㅋ 오늘 점심은");
     expect(row()).toBeNull();
-    // 멈추면 새 글로 다시 맞춘다: 「오늘」·「점심은」은 안 맞지만 문구 안의 「ㅋㅋㅋ」가 맞는다.
+    // 멈춰도 다시 서지 않는다: 방금 친 낱말 「점심은」이 키워드가 아니다(옛 규칙은 문구 앞의 「ㅋㅋㅋ」로 다시 섰다).
     await pause();
-    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
+    expect(row()).toBeNull();
     await type("ㅋㅋㅋ 오늘 점심은 한숨");
     expect(row()).toBeNull();
     await pause();
@@ -412,6 +413,102 @@ describe("글을 치다 멈추면 맞는 그림이 입력창 위에 뜬다", () 
     await type("ㅋㅋㅋ");
     await realWait(EXPRESSION_SUGGEST_DEBOUNCE_MS + 100);
     expect(row()).toBeNull();
+  });
+});
+
+/** 줄이 **선** 횟수: 줄의 기준 상자가 문서에 새로 붙을 때마다 하나(쉼마다 다시 서면 그때마다 센다). */
+function countRowAppearances() {
+  let count = 0;
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of Array.from(record.addedNodes)) {
+        if (node instanceof HTMLElement && (node.matches("[data-testid='composer-expression-suggest-anchor']") || node.querySelector("[data-testid='composer-expression-suggest-anchor']"))) count += 1;
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  return {
+    get count() {
+      observer.takeRecords().forEach((record) => {
+        for (const node of Array.from(record.addedNodes)) {
+          if (node instanceof HTMLElement && (node.matches("[data-testid='composer-expression-suggest-anchor']") || node.querySelector("[data-testid='composer-expression-suggest-anchor']"))) count += 1;
+        }
+      });
+      return count;
+    },
+    stop: () => observer.disconnect(),
+  };
+}
+
+describe("방금 친 낱말이 키워드일 때만 선다 (#5602 M1, owner 2026-11-09 「추천안대로」)", () => {
+  it("확인 숫자: 「ㅋㅋ 개웃기네 진심」을 낱말마다 쉬며 치면(쉼 7번) 줄이 선 횟수 2(옛 판 7) - 끝의 줄에는 ㅋㅋ 쪽과 진심 쪽이 함께 있다", async () => {
+    await mount();
+    const seen = countRowAppearances();
+    for (const text of ["ㅋㅋ", "ㅋㅋ 개", "ㅋㅋ 개웃", "ㅋㅋ 개웃기네", "ㅋㅋ 개웃기네 ", "ㅋㅋ 개웃기네 진", "ㅋㅋ 개웃기네 진심"]) await typeAndPause(text);
+    expect(seen.count).toBe(2);
+    seen.stop();
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "진심멍 미리 보기에 올리기"]);
+  });
+
+  it("확인 숫자: 「ㅋㅋ」에서 Esc → 「ㅋㅋㅋ」 0번, 이어서 「ㅋㅋㅋ 진심」 1번", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ");
+    expect(row()).not.toBeNull();
+    expect(await press({ key: "Escape" })).toBe(true);
+    const seen = countRowAppearances();
+    await typeAndPause("ㅋㅋㅋ");
+    await wait(2000);
+    expect(seen.count).toBe(0);
+    await typeAndPause("ㅋㅋㅋ 진심");
+    expect(seen.count).toBe(1);
+    seen.stop();
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "진심멍 미리 보기에 올리기"]);
+  });
+
+  it("확인 숫자: ✕ 뒤 같은 대화에서 그 낱말은 0번, 다른 대화에서는 1번 선다", async () => {
+    await mount();
+    await typeAndPause("한숨");
+    await click(muteButton());
+    const seen = countRowAppearances();
+    await typeAndPause("");
+    await typeAndPause("한숨");
+    await typeAndPause("오늘도 한숨");
+    expect(seen.count).toBe(0);
+    await rerenderWith(CH_B);
+    await typeAndPause("한숨");
+    expect(seen.count).toBe(1);
+    seen.stop();
+    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
+  });
+
+  it("글 가운데를 고칠 때는 캐럿이 있는 낱말만 본다 - 끝 낱말이 키워드여도 가운데를 고치는 동안은 서지 않고, 캐럿 낱말이 키워드면 선다(캐럿은 쉼이 끝날 때 입력칸에서 읽는다)", async () => {
+    await mount();
+    await type("오늘 저녁 ㅋㅋ");
+    textarea().setSelectionRange(2, 2); // 「오늘|」
+    await pause();
+    expect(row()).toBeNull();
+    await type("진심 저녁 ㅋㅋ");
+    textarea().setSelectionRange(2, 2); // 「진심|」
+    await pause();
+    expect(names()).toEqual(["진심멍 미리 보기에 올리기", "키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
+  });
+
+  it("한글 조합 중에 줄이 서도 조합을 끊지 않는다 - 초점·글·캐럿이 입력칸에 그대로다", async () => {
+    await mount();
+    await act(async () => {
+      textarea().focus();
+      textarea().dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    });
+    await typeAndPause("ㅋㅋ 진심");
+    expect(row()).not.toBeNull();
+    expect(document.activeElement).toBe(textarea());
+    expect(textarea().value).toBe("ㅋㅋ 진심");
+    expect(textarea().selectionStart).toBe("ㅋㅋ 진심".length);
+    await act(async () => {
+      textarea().dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "심" }));
+    });
+    expect(textarea().value).toBe("ㅋㅋ 진심");
+    expect(document.activeElement).toBe(textarea());
   });
 });
 
@@ -509,19 +606,24 @@ describe("✕ 는 이 대화에서 그 낱말의 추천을 끈다", () => {
     expect(row()).toBeNull();
   });
 
-  it("여러 낱말 줄의 ✕ 는 그림에 맞은 낱말들만 끈다 - 맞지 않은 「개웃기네」는 끄지 않는다 (#5588)", async () => {
+  it("여러 낱말 줄의 ✕ 는 줄을 띄운 낱말 하나만 끈다 - 이름 「이 낱말 추천 끄기」와 같은 수 (#5602 M2)", async () => {
     await mount();
     await typeAndPause("ㅋㅋ 개웃기네 진심");
+    expect(muteButton()?.getAttribute("aria-label")).toBe("이 낱말 추천 끄기");
     await click(muteButton());
     expect(row()).toBeNull();
-    expect(mutedKeywords(`${WS}:${CH}`)).toEqual(["ㅋㅋ", "진심"]);
-    // 같은 글도, 그 낱말 하나씩도 이 대화에서는 다시 뜨지 않는다. 다른 낱말은 뜬다.
+    // 진심(방금 친 낱말)만 꺼졌다. 줄에 함께 섰던 ㅋㅋ 는 꺼지지 않았다(옛 판은 [ㅋㅋ, 진심] 둘을 껐다).
+    expect(mutedKeywords(`${WS}:${CH}`)).toEqual(["진심"]);
+    // 같은 글도, 진심만 쳐도 이 대화에서는 다시 뜨지 않는다.
     await typeAndPause("ㅋㅋ 개웃기네 진심!");
     expect(row()).toBeNull();
     await typeAndPause("진심");
     expect(row()).toBeNull();
-    await typeAndPause("진심 한숨");
-    expect(names()).toEqual(["한숨냥 미리 보기에 올리기"]);
+    // ㅋㅋ 는 그대로 선다. 끈 진심 쪽 그림은 그 줄에도 없다.
+    await typeAndPause("진심 ㅋㅋ");
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기"]);
+    await typeAndPause("진심 ㅋㅋ 한숨");
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "한숨냥 미리 보기에 올리기"]);
   });
 
   it("줄이 글 전체 낱말로 떴을 때는 그 낱말까지 끈다 (「킹 받네」 → 꼬리표 「킹받네」: 나중에 「킹받네」만 쳐도 다시 뜨지 않는다)", async () => {
@@ -561,7 +663,7 @@ describe("키보드", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("줄 안의 Esc 는 줄만 닫고 입력칸으로 돌아온다 - 글도 낱말도 그대로라, 다시 치면 다시 뜬다. ↓ 는 줄을 닫지 않고 입력칸으로 돌아간다", async () => {
+  it("줄 안의 Esc 는 줄을 닫고 입력칸으로 돌아온다 - 다음 키워드까지 닫혀 있고(같은 낱말을 늘려도), 다른 키워드·다 지우기에서 풀린다. ↓ 는 줄을 닫지 않고 입력칸으로 돌아간다 (#5602 M1)", async () => {
     await mount();
     await typeAndPause("ㅋㅋㅋ");
     await press({ key: "ArrowUp" });
@@ -573,16 +675,54 @@ describe("키보드", () => {
     expect(row()).toBeNull();
     expect(document.activeElement).toBe(textarea());
     expect(textarea().value).toBe("ㅋㅋㅋ");
-    // 같은 글에서는 닫힌 채이고, 글이 바뀌어 멈추면 다시 맞춘다(낱말을 끈 것이 아니다).
+    // 같은 글에서도, 같은 자리의 같은 낱말을 늘려도, 띄어 써서 글 전체로 맞아도 닫힌 채다(옛 판은 다음 글자에서 다시 섰다).
     await pause();
     expect(row()).toBeNull();
     await typeAndPause("ㅋㅋㅋㅋ");
-    expect(row()).not.toBeNull();
-    // 닫힘은 「이 글」에 대한 것이다: 닫은 뒤 글을 지웠다가 같은 낱말을 다시 치면 새로 맞춘다.
+    expect(row()).toBeNull();
+    await typeAndPause("ㅋㅋㅋㅋ ");
+    expect(row()).toBeNull();
+    // 다른 키워드를 치면 풀리고 선다(그 줄에는 ㅋㅋ 쪽도 함께 있다). 낱말을 끈 것이 아니다.
+    await typeAndPause("ㅋㅋㅋㅋ 한숨");
+    expect(names()).toEqual(["키득 미리 보기에 올리기", "빵터짐 미리 보기에 올리기", "한숨냥 미리 보기에 올리기"]);
+    expect(mutedKeywords(`${WS}:${CH}`)).toEqual([]);
+    // 다 지우면 풀린다: 닫은 뒤 글을 비웠다가 같은 낱말을 다시 치면(빈 글에서 쉬지 않아도) 다시 선다.
+    await typeAndPause("ㅋㅋ");
     await press({ key: "Escape" });
     expect(row()).toBeNull();
-    await typeAndPause("");
+    await type("");
     await typeAndPause("ㅋㅋㅋㅋ");
+    expect(row()).not.toBeNull();
+  });
+
+  it("M4: 마우스로 입력칸에 들어온 사람(모달리티 표지 「포인터」)이 ↑ 로 줄에 들어가면 표지가 「키보드」로 오른다 - 첫 칸에 초점 링이 선다 (#5602)", async () => {
+    await mount();
+    document.documentElement.setAttribute("data-focus-modality", "pointer"); // 입력칸을 마우스로 누른 뒤의 표지(`focusModality.ts`)
+    try {
+      await typeAndPause("ㅋㅋㅋ");
+      expect(await press({ key: "ArrowUp" })).toBe(true);
+      expect(document.activeElement).toBe(items()[0]);
+      // 포인터 표지는 :focus-visible 의 링을 걷는다(tokens.css 「포인터 모달리티」). ↑ 는 글 입력 칸의 키라 표지가 스스로 오르지 않는다 - 줄로 옮긴 쪽이 올린다.
+      expect(document.documentElement.getAttribute("data-focus-modality")).toBe("keyboard");
+      // ↑ 가 줄로 가지 않는 때(줄이 없음)는 표지를 건드리지 않는다.
+      await press({ key: "Escape" }, items()[0]);
+      document.documentElement.setAttribute("data-focus-modality", "pointer");
+      expect(await press({ key: "ArrowUp" })).toBe(false);
+      expect(document.documentElement.getAttribute("data-focus-modality")).toBe("pointer");
+    } finally {
+      document.documentElement.removeAttribute("data-focus-modality");
+    }
+  });
+
+  it("줄이 설 수 없는 동안(오프라인)에 글을 다 지워도 닫힘이 풀린다 - 돌아와 같은 낱말을 치면 선다 (#5602)", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ");
+    expect(await press({ key: "Escape" })).toBe(true);
+    act(() => store!.setOffline(true));
+    await type("");
+    await type("ㅋㅋㅋ");
+    act(() => store!.setOffline(false));
+    await pause();
     expect(row()).not.toBeNull();
   });
 
@@ -727,6 +867,96 @@ html, body { margin: 0; }
         }
       }
       expect(problems).toEqual([]);
+    },
+    180_000
+  );
+
+  // #5602 (이번 승격의 목표 「대화 흔들림 0」): 줄이 서고 질 때 **대화 목록**이 움직이지 않는다. 위 H1 은 독·카드 자리를 재고, 이 시험은 그 위의 목록을 잰다.
+  // 진짜 `Composer` 가 줄을 연 채 그린 마크업을 대화 판처럼 세로로 쌓은 판(목록 = 남는 높이를 먹는 스크롤 칸, 아래에 독)에 올리고, 목록을 맨 아래로 내린 뒤
+  // 줄이 선 때 → 진 때 → 다시 선 때 마지막 메시지의 화면 위치·스크롤 위치·바닥 거리·목록 높이를 잰다. 줄이 흐름 안에 들면(사보타주: 줄의 `absolute` 를 빼기) 독이 자라
+  // 목록이 줄고 마지막 메시지가 그만큼 위로 밀린다.
+  it.skipIf(ENGINES.length === 0)(
+    "줄이 서고 질 때 대화 목록 이동 0px: 맨 아래에 붙은 목록의 마지막 메시지 자리·스크롤 위치·바닥 거리·목록 높이가 그대로다 (1280 · 390, #5602)",
+    async () => {
+      await mount({ fake: false });
+      await type("ㅋㅋㅋ");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, EXPRESSION_SUGGEST_DEBOUNCE_MS + 200));
+      });
+      expect(row()).not.toBeNull();
+      const html = host?.innerHTML ?? "";
+      const classes = [...(host?.querySelectorAll("[class]") ?? [])].flatMap((el) => [...el.classList]);
+      const here = dirname(fileURLToPath(import.meta.url));
+      const expressionsCss = readFileSync(join(here, "..", "expressions", "expressions.css"), "utf8");
+      const css = await compileTokensCss(classes);
+      const playwright = await import("playwright");
+      const messages = Array.from({ length: 40 }, (_, index) => `<div class="msg" data-msg="${index}">메시지 ${index}</div>`).join("");
+      const shifts: Array<{ at: string; rowHeight: number; deltas: number[] }> = [];
+
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          for (const width of [1280, 390]) {
+            const page = await browser.newPage({ viewport: { width, height: 800 } });
+            try {
+              await page.setContent(`<!doctype html><html lang="ko"><head><style>${css}
+${expressionsCss}
+html, body { margin: 0; height: 100%; }
+#pane { display: flex; flex-direction: column; height: 100vh; width: ${width}px; }
+#list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.msg { height: 44px; padding: 0 16px; line-height: 44px; }
+</style></head><body class="bg-surface text-ink"><div id="pane"><div id="list">${messages}</div>${html}</div></body></html>`);
+              // 입력칸에 포커스가 있어야 줄이 선다(밖이면 CSS 가 물린다).
+              await page.focus('[data-testid="composer-input"]');
+              await page.evaluate(() => {
+                const list = document.getElementById("list");
+                if (list) list.scrollTop = list.scrollHeight;
+              });
+              const measure = () =>
+                page.evaluate(() => {
+                  const list = document.getElementById("list") as HTMLElement;
+                  const last = list.lastElementChild as HTMLElement;
+                  const rowBox = document.querySelector('[data-testid="composer-expression-suggest"]')?.getBoundingClientRect();
+                  return {
+                    lastTop: last.getBoundingClientRect().top,
+                    scrollTop: list.scrollTop,
+                    bottomGap: list.scrollHeight - list.scrollTop - list.clientHeight,
+                    listHeight: list.getBoundingClientRect().height,
+                    rowHeight: rowBox?.height ?? 0,
+                  };
+                });
+              const withRow = await measure();
+              // 줄이 진다(기준 상자째 걷는다: 화면에서 줄이 사라질 때와 같은 DOM).
+              await page.evaluate(() => {
+                const anchor = document.querySelector('[data-testid="composer-expression-suggest-anchor"]');
+                (window as unknown as { __anchor?: Element | null }).__anchor = anchor;
+                anchor?.remove();
+              });
+              const withoutRow = await measure();
+              // 다시 선다(독의 첫 자식으로).
+              await page.evaluate(() => {
+                const anchor = (window as unknown as { __anchor?: Element | null }).__anchor;
+                const dock = document.querySelector('[data-testid="composer"]');
+                if (anchor && dock) dock.insertBefore(anchor, dock.firstChild);
+              });
+              const back = await measure();
+              const keys = ["lastTop", "scrollTop", "bottomGap", "listHeight"] as const;
+              shifts.push({
+                at: `${engine} ${width}`,
+                rowHeight: withRow.rowHeight,
+                deltas: keys.flatMap((key) => [Math.abs(withoutRow[key] - withRow[key]), Math.abs(back[key] - withoutRow[key])]),
+              });
+            } finally {
+              await page.close();
+            }
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      // 줄이 실제로 보였다(높이 0 의 줄로는 이 시험이 아무것도 재지 않는다).
+      for (const shift of shifts) expect(shift.rowHeight, shift.at).toBeGreaterThan(30);
+      expect(shifts.map((shift) => ({ at: shift.at, worst: Math.max(...shift.deltas) }))).toEqual(shifts.map((shift) => ({ at: shift.at, worst: 0 })));
     },
     180_000
   );

@@ -306,6 +306,7 @@ export const messageKeys = [
   "expressions.draft.rights",
   "expressions.draft.source",
   "expressions.draft.waiting",
+  "expressions.image.waitingA11y",
   "expressions.import.displayName",
   "expressions.import.displayNamePlaceholder",
   "expressions.import.face",
@@ -558,9 +559,11 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.dismiss",
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.replaced",
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
   "inbox.approval.open",
@@ -1683,6 +1686,9 @@ export const argumentSpecs = {
     "host": "string"
   },
   "expressions.draft.waiting": {},
+  "expressions.image.waitingA11y": {
+    "name": "string"
+  },
   "expressions.import.displayName": {},
   "expressions.import.displayNamePlaceholder": {},
   "expressions.import.face": {},
@@ -2001,9 +2007,13 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.dismiss": {},
   "expressions.suggest.group": {},
   "expressions.suggest.mute": {},
   "expressions.suggest.pick": {
+    "name": "string"
+  },
+  "expressions.suggest.replaced": {
     "name": "string"
   },
   "expressions.suggest.settingHint": {},
@@ -3301,6 +3311,7 @@ export interface MessageArgs {
   "expressions.draft.rights": Record<string, never>;
   "expressions.draft.source": { host: string };
   "expressions.draft.waiting": Record<string, never>;
+  "expressions.image.waitingA11y": { name: string };
   "expressions.import.displayName": Record<string, never>;
   "expressions.import.displayNamePlaceholder": Record<string, never>;
   "expressions.import.face": Record<string, never>;
@@ -3553,9 +3564,11 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.dismiss": Record<string, never>;
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.replaced": { name: string };
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;

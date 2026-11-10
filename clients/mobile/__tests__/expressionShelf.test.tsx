@@ -275,14 +275,18 @@ it('읽는 동안에는 읽기 도우미가 토큰 글을 읽고, 목록이 확�
   expect(screen.queryByLabelText(':party_parrot:')).toBeNull();
 });
 
-it('끊기면 닫히고(글자), 다시 읽는 동안에는 마지막 목록으로 칸이 선다', async () => {
+it('끊기면 그림은 내리되 칸은 남고(같은 크기 정지 자리표시, #5585), 다시 읽는 동안에도 마지막 목록으로 칸이 선다', async () => {
   const {store} = setup();
   await act(async () => store.refresh(true));
   mount(store, <MessageBody body=":party_parrot:" />);
   expect(screen.getByTestId('expression-box-party_parrot-large')).toBeTruthy();
   act(() => store.setOnline(false));
-  expect(store.snapshot()).toMatchObject({state: 'offline', items: [], shelf: []});
-  expect(screen.getByText(':party_parrot:')).toBeTruthy();
+  // 확인된 목록(`items`)은 비어 고르개·보내기는 닫힌 채이고, 보관함은 칸만 세운다 — 글자가 아니며 그림 층도 없다(D3).
+  expect(store.snapshot()).toMatchObject({state: 'offline', items: []});
+  expect(names(store.snapshot().shelf)).toEqual(names(FIXTURE_EXPRESSIONS));
+  expect(screen.queryByText(':party_parrot:')).toBeNull();
+  expect(StyleSheet.flatten(screen.getByTestId('expression-box-party_parrot-large').props.style)).toMatchObject({width: 160, height: 160});
+  expect(screen.queryByTestId('expression-image-party_parrot-large')).toBeNull();
   // 다시 이어지면 읽는 동안(loading)은 마지막 목록으로 선다.
   act(() => store.setOnline(true));
   expect(store.snapshot().state).toBe('loading');

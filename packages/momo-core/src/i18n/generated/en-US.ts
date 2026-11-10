@@ -2193,6 +2193,16 @@ export const catalog: MessageCatalog = {
       "value": "Loading the picture. Register after you have seen the new preview."
     }
   ],
+  "expressions.image.waitingA11y": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " emoticon"
+    }
+  ],
   "expressions.import.displayName": [
     {
       "type": 0,
@@ -4058,6 +4068,12 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "expressions.suggest.dismiss": [
+    {
+      "type": 0,
+      "value": "Close for now"
+    }
+  ],
   "expressions.suggest.group": [
     {
       "type": 0,
@@ -4074,6 +4090,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Preview "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.suggest.replaced": [
+    {
+      "type": 0,
+      "value": "Replaced your text with "
     },
     {
       "type": 1,

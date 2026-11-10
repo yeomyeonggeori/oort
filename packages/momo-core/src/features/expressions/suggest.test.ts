@@ -11,7 +11,11 @@ import {
   suggestExpressionRow,
   suggestExpressions,
   isKeywordOnlyInput,
+  planExpressionSuggest,
   suggestionKeywords,
+  suggestionWordAtCaret,
+  type ExpressionSuggestPlan,
+  type ExpressionSuggestTrigger,
 } from "./suggest";
 import type { Expression } from "./types";
 
@@ -253,7 +257,7 @@ describe("여러 낱말: 낱말이 나온 차례로 묶고 낱말마다 1~2개, 
     expect(ids(suggestExpressions("ㅋㅋ 진심", [both, ...K], { muted: ["ㅋㅋ"] }))).toEqual([both.id]);
   });
 
-  it("줄의 낱말(✕ 가 끄는 것) = 그림에 맞은 낱말 모두: 안 맞은 낱말은 없고, 같은 그림이라 빠졌거나 상한에 밀린 낱말은 있다", () => {
+  it("줄의 낱말(줄을 띄울 낱말을 고르는 목록) = 그림에 맞은 낱말 모두: 안 맞은 낱말은 없고, 같은 그림이라 빠졌거나 상한에 밀린 낱말은 있다", () => {
     expect(suggestExpressionRow("ㅋㅋ 개웃기네 진심", ALL).keywords).toEqual(["ㅋㅋ", "진심"]);
     // 낱말은 정리한 꼴이다(졸림 → 졸려, 끝말 정리표).
     expect(suggestExpressionRow("ㅋㅋ 진심 피곤 졸림 대박 맛있다", ALL).keywords).toEqual(["ㅋㅋ", "진심", "피곤", "졸려", "대박", "맛있다"]);
@@ -299,5 +303,242 @@ describe("isKeywordOnlyInput: 누를 때 글을 바꾸는가(낱말뿐) 더하�
     const row = suggestExpressions("킹 받네", [KING, part]);
     expect(ids(row)).toEqual([part.id, KING.id]);
     expect(row.map((item) => isKeywordOnlyInput("킹 받네", item))).toEqual([false, true]);
+  });
+});
+
+// =============================================================================
+// #5602 M1 (owner 2026-11-09 「추천안대로」): 방금 친 낱말이 키워드일 때만 줄이 선다. 시험 이름의 「표 N」은 설계 검토(Fable 11-10) 3절 (a)의 가장자리 표
+// 줄 차례다(1 방금 친 낱말 · 2 띄어쓰기 뒤 · 3 글 전체 · 4 문장부호 · 5 가운데 고치기 · 6 지우기 · 7 한글 조합 · 8 보이는 것 · 9 Esc·이번만 닫기 ·
+// 10 Esc 뒤 띄어쓰기 · 11 ✕). 「정함」은 표가 열어 둔 곳을 이 칸이 정한 것이다(인계의 planner 확인 목록과 같다).
+// =============================================================================
+describe("planExpressionSuggest: 방금 친 낱말이 키워드일 때만 (#5602 M1)", () => {
+  const SINCERE = made(18, "sincere_dog", "진심멍", ["진심"]);
+  const PART = made(19, "part_only", "받네곰", ["받네"]);
+  const LIB = [...CATALOG, SINCERE];
+
+  /** 화면 흉내: 쉼마다 `planExpressionSuggest` 를 부르고 닫힘을 다음 부름에 넘긴다. 쉼 사이에 글이 바뀌므로 줄은 쉼마다 새로 선다 → 줄이 선 쉼의 수 = 줄이 선 횟수. */
+  function screen(catalog: readonly Expression[] = LIB) {
+    let dismissal: ExpressionSuggestTrigger | null = null;
+    let current: ExpressionSuggestPlan<Expression> | null = null;
+    let shown = 0;
+    const muted: string[] = [];
+    return {
+      pause(text: string, caret?: number | null) {
+        current = planExpressionSuggest({ text, caret, dismissal }, catalog, { muted });
+        dismissal = current.dismissal;
+        if (current.items.length > 0) shown += 1;
+        return current;
+      },
+      /** Esc·폰 「이번만 닫기」: 지금 줄을 띄운 낱말을 닫아 둔다. */
+      dismiss() {
+        if (current?.trigger) dismissal = current.trigger;
+        current = null;
+      },
+      /** ✕: 지금 줄을 띄운 낱말 하나를 이 대화에서 끈다. */
+      mute() {
+        if (current?.trigger) muted.push(current.trigger.keyword);
+        current = null;
+      },
+      get shown() {
+        return shown;
+      },
+      get muted() {
+        return [...muted];
+      },
+    };
+  }
+  const plan = (text: string, caret?: number | null, catalog: readonly Expression[] = LIB) => planExpressionSuggest({ text, caret }, catalog);
+
+  it("확인 숫자: 「ㅋㅋ 개웃기네 진심」을 낱말마다 쉬며 치면(쉼 7번) 줄이 선 횟수 2(옛 규칙 7) - 끝의 줄에는 ㅋㅋ 쪽과 진심 쪽이 함께 있다", () => {
+    const pauses = ["ㅋㅋ", "ㅋㅋ 개", "ㅋㅋ 개웃", "ㅋㅋ 개웃기네", "ㅋㅋ 개웃기네 ", "ㅋㅋ 개웃기네 진", "ㅋㅋ 개웃기네 진심"];
+    // 옛 규칙(문구 안 어느 낱말이든 맞으면 선다): 7번 다.
+    expect(pauses.filter((text) => suggestExpressionRow(text, LIB).items.length > 0)).toHaveLength(7);
+    const view = screen();
+    const plans = pauses.map((text) => view.pause(text));
+    expect(view.shown).toBe(2);
+    expect(plans.map((step) => step.items.length > 0)).toEqual([true, false, false, false, false, false, true]);
+    expect(ids(plans[6].items)).toEqual(ids([LAUGH, SINCERE]));
+    expect(plans[6].trigger).toEqual({ keyword: "진심", wordIndex: 2 });
+  });
+
+  it("확인 숫자: 「ㅋㅋ」에서 Esc → 「ㅋㅋㅋ」 0번, 이어서 「ㅋㅋㅋ 진심」 1번(ㅋㅋ 쪽도 함께 선다)", () => {
+    const view = screen();
+    expect(ids(view.pause("ㅋㅋ").items)).toEqual(ids([LAUGH]));
+    view.dismiss();
+    const before = view.shown;
+    view.pause("ㅋㅋㅋ");
+    expect(view.shown - before).toBe(0);
+    const after = view.pause("ㅋㅋㅋ 진심");
+    expect(view.shown - before).toBe(1);
+    expect(ids(after.items)).toEqual(ids([LAUGH, SINCERE]));
+    expect(after.dismissal).toBeNull(); // 다른 키워드를 쳐서 풀렸다
+  });
+
+  it("표 1 방금 친 낱말 = 캐럿 바로 앞 글자를 품은 띄어쓰기 없는 조각(가운데여도 조각 전체) - 캐럿을 모르면 글 끝이고, 글 밖의 캐럿은 글 안으로 당긴다", () => {
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", 6)).toEqual({ keyword: "ㅋㅋ", wordIndex: 1 });
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", 4)).toEqual({ keyword: "ㅋㅋ", wordIndex: 1 }); // 「오늘 ㅋ|ㅋㅋ」
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", 2)).toEqual({ keyword: "오늘", wordIndex: 0 });
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", 1)).toEqual({ keyword: "오늘", wordIndex: 0 });
+    for (const unknown of [undefined, null, Number.NaN, 99]) expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", unknown), String(unknown)).toEqual({ keyword: "ㅋㅋ", wordIndex: 1 });
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", -3)).toBeNull();
+    expect(suggestionWordAtCaret("오늘 ㅋㅋㅋ", 0)).toBeNull();
+    // 줄: 끝 낱말이 키워드면 캐럿을 몰라도 선다. 앞 낱말만 키워드면 캐럿이 거기 있을 때만.
+    expect(plan("오늘 ㅋㅋ", null).trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: 1 });
+    expect(plan("ㅋㅋ 오늘 점심 뭐 먹지", null).items).toEqual([]);
+    expect(plan("ㅋㅋ 오늘 점심 뭐 먹지", 2).trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: 0 });
+  });
+
+  it("표 1 (정함) 캐럿이 띄어쓰기 바로 뒤 낱말 앞이면(「ㅋㅋ |진심」) 붙은 낱말이 없다 - 그 자리에서 방금 친 것은 띄어쓰기다", () => {
+    expect(suggestionWordAtCaret("ㅋㅋ 진심", 3)).toBeNull();
+    expect(plan("ㅋㅋ 오늘 진심", 6).items).toEqual([]); // 「ㅋㅋ 오늘 |진심」
+    expect(plan("ㅋㅋ 오늘 진심", 8).trigger).toEqual({ keyword: "진심", wordIndex: 2 });
+  });
+
+  it("표 1 (정함) 정리해서 비는 조각(「!!」·「...」)은 낱말이 아니고 몇째 낱말인지도 세지 않는다", () => {
+    expect(suggestionWordAtCaret("ㅋㅋ !! 진심")).toEqual({ keyword: "진심", wordIndex: 1 });
+    expect(suggestionWordAtCaret("ㅋㅋ ...")).toBeNull();
+    expect(suggestionWordAtCaret("... ㅋㅋ")).toEqual({ keyword: "ㅋㅋ", wordIndex: 0 });
+  });
+
+  it("표 2 「ㅋㅋ」 뒤 띄어쓰기: 붙은 낱말이 없어 그 낱말로는 안 서지만, 짧은 글은 글 전체 규칙으로 계속 선다 - 긴 글은 안 선다", () => {
+    expect(suggestionWordAtCaret("ㅋㅋ ")).toBeNull();
+    expect(plan("ㅋㅋ ").trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: null });
+    expect(ids(plan("ㅋㅋ ").items)).toEqual(ids([LAUGH]));
+    expect(plan("ㅋㅋ 오늘 점심 뭐 먹지 ").items).toEqual([]); // 정리 뒤 8자를 넘는다
+    expect(plan("ㅋㅋ 오늘 ").items).toEqual([]); // 짧아도 글 전체(ㅋㅋ오늘)는 키워드가 아니다
+  });
+
+  it("표 3 글 전체 맞춤(정리 뒤 8자 이하, 「킹 받네」)은 캐럿과 무관하게 선다 - 「낱말뿐이면 바꾸기」 길이 살아 있다", () => {
+    for (const caret of [0, 1, 2, 4, null]) {
+      const step = plan("킹 받네", caret);
+      expect(step.trigger, String(caret)).toEqual({ keyword: "킹받네", wordIndex: null });
+      expect(ids(step.items), String(caret)).toEqual([KING.id]);
+      expect(isKeywordOnlyInput("킹 받네", step.items[0])).toBe(true);
+    }
+  });
+
+  it("표 3 (정함) 방금 친 낱말과 글 전체가 둘 다 키워드면 방금 친 낱말이 줄을 띄운다(✕·Esc 는 그 낱말에 걸린다)", () => {
+    const step = plan("킹 받네", null, [KING, PART]);
+    expect(step.trigger).toEqual({ keyword: "받네", wordIndex: 1 });
+    expect(ids(step.items)).toEqual([PART.id, KING.id]); // 보이는 것은 맞은 낱말 모두
+  });
+
+  it("표 4 문장부호(「ㅋㅋㅋㅋ!!」)는 정리가 지우므로 같은 낱말이다", () => {
+    expect(plan("ㅋㅋㅋㅋ!!").trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: 0 });
+    expect(plan("진심 ㅋㅋㅋ~~").trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: 1 });
+    expect(plan("ㅋㅋ!! 진심?!").trigger).toEqual({ keyword: "진심", wordIndex: 1 });
+  });
+
+  it("표 5 글 가운데를 고칠 때는 캐럿이 있는 낱말만 본다 - 끝 낱말이 키워드여도 가운데를 고치는 동안은 안 서고, 가운데 낱말이 키워드면 선다", () => {
+    expect(plan("오늘 저녁 ㅋㅋ", 2).items).toEqual([]);
+    expect(plan("오늘 저녁 ㅋㅋ", 5).items).toEqual([]);
+    const middle = plan("진심 저녁 ㅋㅋ", 2);
+    expect(middle.trigger).toEqual({ keyword: "진심", wordIndex: 0 });
+    expect(ids(middle.items)).toEqual(ids([SINCERE, LAUGH]));
+  });
+
+  it("표 6 지우기(백스페이스): 지운 뒤 캐럿에 붙은 낱말이 키워드면 새로 친 것과 같게 선다", () => {
+    const view = screen();
+    for (const text of ["오늘 한숨 쉬", "오늘 한숨 "]) expect(view.pause(text).items).toEqual([]);
+    expect(view.pause("오늘 한숨").trigger).toEqual({ keyword: "한숨", wordIndex: 1 });
+    expect(ids(view.pause("오늘 한숨").items)).toEqual(ids([SIGH]));
+  });
+
+  it("표 7 한글 조합 중은 따로 다루지 않는다: 조합 중간 꼴(ㅈ·지·진·진ㅅ·진시)은 키워드가 아니라 줄이 없고, 다 친 낱말(진심)에서 선다 - NFD 로 와도 같다", () => {
+    const view = screen();
+    const steps = ["ㅋㅋ ㅈ", "ㅋㅋ 지", "ㅋㅋ 진", "ㅋㅋ 진ㅅ", "ㅋㅋ 진시", "ㅋㅋ 진심"].map((text) => view.pause(text).items.length > 0);
+    expect(steps).toEqual([false, false, false, false, false, true]);
+    expect(plan("ㅋㅋ 진심".normalize("NFD")).trigger).toEqual({ keyword: "진심", wordIndex: 1 });
+  });
+
+  it("표 8 뜨면 보이는 것은 문구 안에서 맞은 낱말 모두의 그림이다(지금 `suggestExpressionRow` 그대로)", () => {
+    for (const text of ["ㅋㅋ 개웃기네 진심", "진심 개웃기네 ㅋㅋ", "한숨 ㅋㅋ 배고파"]) {
+      expect(ids(plan(text).items), text).toEqual(ids(suggestExpressionRow(text, LIB).items));
+    }
+    expect(ids(plan("한숨 ㅋㅋ 배고파").items)).toEqual(ids([SIGH, LAUGH, HUNGRY]));
+  });
+
+  it("표 9 Esc·이번만 닫기는 (낱말, 자리)를 기억한다: 같은 자리의 같은 낱말은 늘려도 닫힌 채, 다른 키워드·다른 자리의 같은 낱말에서 풀린다", () => {
+    const view = screen();
+    view.pause("ㅋㅋ");
+    view.dismiss();
+    expect(view.pause("ㅋㅋㅋ").items).toEqual([]);
+    expect(view.pause("ㅋㅋㅋㅋ!!").items).toEqual([]);
+    // 키워드가 아닌 낱말을 쳐도 풀리지 않는다: 지우고 돌아와도 닫힌 채다.
+    expect(view.pause("ㅋㅋㅋ 오").items).toEqual([]);
+    expect(view.pause("ㅋㅋㅋ").items).toEqual([]);
+    // 같은 낱말이라도 다른 자리면 다른 키워드를 친 것이다.
+    const again = view.pause("ㅋㅋㅋ 오늘 ㅋㅋ");
+    expect(again.trigger).toEqual({ keyword: "ㅋㅋ", wordIndex: 2 });
+    expect(again.dismissal).toBeNull();
+    // 풀린 뒤에는 처음 자리로 돌아가도 선다.
+    expect(view.pause("ㅋㅋㅋ").items.length).toBeGreaterThan(0);
+  });
+
+  it("표 9 보내거나 다 지우면 닫힘이 풀린다(빈 글·띄어쓰기뿐인 글)", () => {
+    for (const blank of ["", "   "]) {
+      const view = screen();
+      view.pause("ㅋㅋ");
+      view.dismiss();
+      expect(view.pause("ㅋㅋ").items).toEqual([]);
+      expect(view.pause(blank)).toEqual({ items: [], trigger: null, dismissal: null });
+      expect(view.pause("ㅋㅋ").items.length, JSON.stringify(blank)).toBeGreaterThan(0);
+    }
+  });
+
+  it("표 9 (정함) 방금 친 낱말이 닫혀 있으면 글 전체 낱말로 내려가지 않는다(「킹 받네」: 받네를 닫으면 킹받네로도 같은 글에 다시 서지 않는다)", () => {
+    const view = screen([KING, PART]);
+    expect(view.pause("킹 받네").trigger).toEqual({ keyword: "받네", wordIndex: 1 });
+    view.dismiss();
+    expect(view.pause("킹 받네").items).toEqual([]);
+  });
+
+  it("표 10 Esc 뒤 띄어쓰기(「ㅋㅋ 」): 닫힘은 정리한 꼴로 기억해서 글 전체로 맞은 같은 낱말도 닫힌 채다 - (정함) 거꾸로 글 전체에서 닫고 한 낱말로 쳐도 닫힌 채다", () => {
+    const view = screen();
+    view.pause("ㅋㅋ");
+    view.dismiss();
+    expect(view.pause("ㅋㅋ ").items).toEqual([]);
+    expect(view.pause("ㅋㅋㅋ  ").items).toEqual([]);
+    const reverse = screen();
+    expect(reverse.pause("킹 받네").trigger).toEqual({ keyword: "킹받네", wordIndex: null });
+    reverse.dismiss();
+    expect(reverse.pause("킹받네").items).toEqual([]);
+    expect(reverse.pause("킹받네 ㅋㅋ").items.length).toBeGreaterThan(0);
+  });
+
+  it("표 11 ✕ 는 줄을 띄운 낱말 하나만 끈다: 「ㅋㅋ 개웃기네 진심」에서 끄면 진심만 - 그 뒤 진심은 0번, ㅋㅋ 는 선다(진심 쪽 그림 없이)", () => {
+    const view = screen();
+    view.pause("ㅋㅋ 개웃기네 진심");
+    view.mute();
+    expect(view.muted).toEqual(["진심"]);
+    const before = view.shown;
+    expect(view.pause("진심").items).toEqual([]);
+    expect(view.pause("ㅋㅋ 개웃기네 진심!!").items).toEqual([]);
+    expect(view.shown - before).toBe(0);
+    const laugh = view.pause("진심 ㅋㅋ");
+    expect(ids(laugh.items)).toEqual(ids([LAUGH]));
+  });
+
+  it("표 11 ✕ 는 글 전체로 맞았으면 그 낱말을 끈다 - (정함) 방금 친 낱말을 껐으면 같은 글이 글 전체 규칙으로 다시 서지 않는다", () => {
+    const whole = screen();
+    whole.pause("킹 받네");
+    whole.mute();
+    expect(whole.muted).toEqual(["킹받네"]);
+    expect(whole.pause("킹받네").items).toEqual([]);
+    const both = screen([KING, PART]);
+    both.pause("킹 받네");
+    both.mute();
+    expect(both.muted).toEqual(["받네"]);
+    expect(both.pause("킹 받네").items).toEqual([]);
+    expect(both.pause("킹 받네", 1).trigger).toEqual({ keyword: "킹받네", wordIndex: null }); // 캐럿이 「킹」에 있으면 방금 친 낱말은 킹(키워드 아님)이고 글 전체가 선다
+  });
+
+  it("돌려준 값은 넘긴 닫힘을 바꾸지 않고, 같은 값을 넣으면 같은 답이다", () => {
+    const held = Object.freeze({ keyword: "ㅋㅋ", wordIndex: 0 });
+    const first = planExpressionSuggest({ text: "ㅋㅋㅋ", caret: 3, dismissal: held }, LIB);
+    const second = planExpressionSuggest({ text: "ㅋㅋㅋ", caret: 3, dismissal: held }, LIB);
+    expect(first).toEqual(second);
+    expect(first.dismissal).toBe(held);
+    expect(held).toEqual({ keyword: "ㅋㅋ", wordIndex: 0 });
   });
 });

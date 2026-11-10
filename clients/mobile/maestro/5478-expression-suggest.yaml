@@ -8,7 +8,8 @@ name: 5478-expression-suggest
 #
 # 흐름: 입력창에 「ㅋㅋㅋ」 → 0.3초 멈추면 줄(그림 + ✕만, 안내 글 없음)이 입력창 바로 위에 뜬다 → 그림 하나를 누름 → 줄은 사라지고 입력창 위 미리 보기가 서며 「ㅋㅋㅋ」 는 그림으로
 # 바뀐다. 대화에는 아직 아무것도 안 나갔다(저절로 보내지 않는다) → 보내기 한 번 → 미리 보기가 비워지고 대화에 큰 그림(`expression-body-large`)만 온다(글 메시지 없음).
-# 이어서 문구 「오늘도 ㅋㅋㅋ 웃겨」 → 줄 → 그림을 누름 → 글은 그대로 → 보내기 한 번 → 큰 그림과 글이 온다. 서버가 받은 개수·순서는 레인 DB 에서 읽는다(인계 「시험」).
+# 이어서 문구 「오늘도 웃겨 ㅋㅋㅋ」 → 줄 → 그림을 누름 → 글은 그대로 → 보내기 한 번 → 큰 그림과 글이 온다. 서버가 받은 개수·순서는 레인 DB 에서 읽는다(인계 「시험」).
+# #5602 M1: 줄은 **방금 친 낱말**이 키워드일 때만 선다 - 문구는 키워드(ㅋㅋㅋ)로 끝나야 줄이 선다(옛 문구 「오늘도 ㅋㅋㅋ 웃겨」는 끝 낱말 「웃겨」가 키워드가 아니라 이제 줄이 없다).
 #
 # 준비: `CHANNEL_ID` 채널이 있고 팀 보관함에 꼬리표 「ㅋㅋ」 를 가진 `dam_kk` 가 있는 스택 - `measure/seed-expression-panel.py`(꼬리표 ㅋㅋ·한숨·배고픔 포함). 돌리는 법은
 # `maestro/5452-expression-panel.yaml` 머리말과 같다. 하드웨어 키보드는 꺼져 있어야 한다(`hwkb <UDID> off`).
@@ -76,10 +77,10 @@ name: 5478-expression-suggest
       id: "expression-body-large"
     timeout: 20000
 
-# ④ 문구 「오늘도 ㅋㅋㅋ 웃겨」 - 낱말이 문구 안에 있으니 누르면 글은 그대로 두고 그림을 더한다(#5588). 보내기 한 번에 그림 → 글이 간다.
+# ④ 문구 「오늘도 웃겨 ㅋㅋㅋ」 - 낱말이 문구 안에 있으니 누르면 글은 그대로 두고 그림을 더한다(#5588). 보내기 한 번에 그림 → 글이 간다.
 - tapOn:
     id: "composer-input"
-- inputText: "오늘도 ㅋㅋㅋ 웃겨"
+- inputText: "오늘도 웃겨 ㅋㅋㅋ"
 - extendedWaitUntil:
     visible:
       id: "composer-expression-suggest-item-dam_kk"
@@ -98,5 +99,5 @@ name: 5478-expression-suggest
     timeout: 20000
 - extendedWaitUntil:
     visible:
-      text: "오늘도 ㅋㅋㅋ 웃겨"
+      text: "오늘도 웃겨 ㅋㅋㅋ"
     timeout: 20000
