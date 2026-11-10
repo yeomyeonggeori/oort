@@ -12,7 +12,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import {font} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
+import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {
   EXPRESSION_REPEATS,
@@ -20,10 +21,12 @@ import {
   expressionVariantFor,
   isAnimatedMedia,
   keepsMoving,
+  nameOf,
   type PhoneExpressionSize,
 } from './expressionBox';
 import {useExpressions} from './ExpressionProvider';
 import {IMAGE_MISS} from './store';
+import {useExpressionMessages} from './useExpressionMessages';
 
 export type {PhoneExpressionSize} from './expressionBox';
 
@@ -77,6 +80,25 @@ const RETRY_FIRST_MS = 1_500;
 const RETRY_MAX_MS = 30_000;
 /** 스스로 다시 받는 횟수의 끝(웹 #5575 M2): 1.5 · 3 · 6초 뒤 세 번. 서버가 같은 그림에 계속 5xx 를 내는 영구 실패가 끝없는 받기가 되지 않게 한다. */
 const RETRY_LIMIT = 3;
+/**
+ * 빈 칸이 이만큼 이어지면 칸 안에 이름을 세운다(#5627, 웹 #5575 M1 과 같은 값). 첫 자동 재시도(1.5초)가 한 번 돌고 그 받기가 끝날 시간이라, 보내기
+ * 게이트의 짧은 흔들림(오프라인 ↔ 온라인 1~2초)에는 이름이 깜빡이지 않고, 정말로 오래 못 받는 동안에는 3초 안에 「무슨 이모티콘이었는지」가 보인다.
+ * 다시 받기를 다 쓴 실패(`exhausted`)는 기다리지 않고 곧바로 세운다(M2).
+ */
+const LABEL_DELAY_MS = 2 * RETRY_FIRST_MS;
+/**
+ * 칸 안 이름 글자가 서는 칸과 그 줄 수(웹 `LABEL_FIT` 과 같은 규칙). 큰 칸은 한 줄로 자르고(끝 말줄임), 중간 칸과 시트의 큰 칸(`tile`)은 두 줄까지 —
+ * 이름은 띄어쓰기 없는 한 낱말이라 줄에 안 들어가면 글자 단위로 끊긴다(웹 `break-all`). 여기 없는 칸(반응 칩 20 · 글 사이 · 고르개 32)은 글자 두세 개도
+ * 안 들어가 이름이 잘린 조각이 되므로 같은 칸에 정지 자리표시(옅은 그릇 + 짙은 테두리)만 세우고, 이름은 읽기 도우미 이름이 진다(웹은 `title`).
+ */
+const LABEL_LINES: Partial<Record<PhoneExpressionSize, number>> = {large: 1, medium: 2, tile: 2};
+/** 스타일의 낱말 값도 표의 키에서 꺼낸다 — 이 파일에 낱말 글자를 새로 쓰면 직접 문구 장부가 는다(`expressionBox.ts` 머리말). */
+const WORD = nameOf<'center' | 'hidden'>({center: 0, hidden: 0});
+/** 칸 안 이름 글자의 시험 표지. #5585 시험의 「칸 안 이름 표지는 세지 않는다」 거르개가 이 앞머리를 본다. */
+const labelMark = (name: string, size: PhoneExpressionSize) => `expression-label-${name}-${size}`;
+/** 칸 높이에 온전히 들어가는 줄 수: 글자 배율이 크면 두 줄 칸도 한 줄이 된다(반쯤 잘린 줄을 세우지 않는다). 적어도 한 줄. */
+const fitLines = (most: number, height: number, fontScale: number) =>
+  Math.max(1, Math.min(most, Math.floor(height / (line.meta * fontScale))));
 
 /** Animated files never enter the picker grid/tile or an offscreen/reduced-motion cell. */
 export function ExpressionImage({
@@ -89,6 +111,8 @@ export function ExpressionImage({
   visible?: boolean;
 }) {
   const {store, shelf, state, changePending} = useExpressions();
+  const styles = useStyles(buildStyles);
+  const formatMessage = useExpressionMessages();
   const {
     fontScale,
     height: windowHeight,
@@ -289,14 +313,33 @@ export function ExpressionImage({
   const takesPress = !still && size !== 'reaction' && !reduceMotion;
   const onPress = takesPress ? (animated ? replay : swallow) : undefined;
 
-  // 읽기 도우미 이름: 서버가 확인한 목록(`ready`, 알림 뒤 목록이 적용된 뒤)일 때만 표시 이름·태그를 읽는다. 읽는 중·알림 뒤에는 그 사이 숨겨졌을 수 있는
-  // 표현의 이름을 읽어 주지 않고 토큰 글(`:이름:`)을 읽는다(#5473 L-5451-1).
-  const label =
-    live && storeReady && !held
-      ? expressionAltText(live)
-      : expressionToken(expression.name);
   // 닫힌 동안(알림 뒤·읽는 중·오프라인·오류)에는 그림 층을 그리지 않는다(위 효과가 상태도 비운다 — 효과가 돌기 전 한 프레임에 옛 층이 비치지 않게 여기서도 거른다).
   const drawn = closed ? NO_LAYERS : layers;
+  // 같은 크기의 빈 칸이 서 있는가(받는 중 · 닫힌 동안 · 지나가는 실패 · 다시 받기를 다 쓴 실패). 아래에서 글자로 내리는 경우는 빈 칸이 아니다.
+  const waiting = isLive && box !== null && drawn.length === 0 && broken !== targetKey;
+  // 빈 칸이 `LABEL_DELAY_MS` 넘게 이어졌는가(#5627, 웹 M1). 짧은 빈 칸은 투명한 그대로다: 흔들림마다 모든 칸이 회색으로 깜빡이지 않는다.
+  const [lingering, setLingering] = useState(false);
+  useEffect(() => {
+    if (!waiting) {
+      setLingering(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setLingering(true), LABEL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [waiting]);
+  // 다시 받기를 다 쓴 실패는 늦추지 않고 바로 말한다(웹 M2).
+  const exhausted = waiting && failed !== null && failed.exhausted && failed.key === targetKey;
+  // 칸 안에 이름이 서 있는가: 그림이 오면(층이 서면) 같은 자리에서 그림으로 바뀌고 칸의 크기는 그대로다.
+  const labelled = waiting && (lingering || exhausted);
+
+  // 읽기 도우미 이름: 서버가 확인한 목록(`ready`, 알림 뒤 목록이 적용된 뒤)일 때만 표시 이름·태그를 읽는다. 읽는 중·알림 뒤에는 그 사이 숨겨졌을 수 있는
+  // 표현의 이름을 읽어 주지 않고 토큰 글(`:이름:`)을 읽는다(#5473 L-5451-1). 칸 안에 이름이 선 동안은 보이는 것과 같은 고정 이름으로 「<이름> 이모티콘」을
+  // 읽는다(#5627) — 고정 이름은 본문에 이미 적힌 글이라 확인되지 않은 목록의 표시 이름·태그를 읽어 주지 않는다는 위 약속도 그대로다.
+  const label = labelled
+    ? formatMessage('expressions.image.waitingA11y', {name: expression.name})
+    : live && storeReady && !held
+      ? expressionAltText(live)
+      : expressionToken(expression.name);
   // 이 표현을 지금 쓸 수 없다(숨김·삭제·목록 밖) 또는 그림이 정말로 깨졌다 — 그때만 글자다. 받는 중·닫힌 동안·지나가는 실패에는 같은 크기 칸이 비어 있다(#5585).
   if (!isLive || box === null || (drawn.length === 0 && broken === targetKey)) {
     return (
@@ -304,14 +347,35 @@ export function ExpressionImage({
     );
   }
   const top = drawn.length - 1;
+  const lines = LABEL_LINES[size];
   return (
     <Text accessibilityLabel={label} onPress={onPress}>
       <View
         ref={native}
         collapsable={false}
         pointerEvents="none"
-        style={{width: box.width, height: box.height}}
+        style={[
+          {width: box.width, height: box.height},
+          // 칸 자신이 옅은 그릇과 테두리를 입는다(웹 `[data-expression-lingering]`). RN 의 테두리는 상자 안쪽에 그려져 칸의 크기가 그대로다.
+          labelled && (lines === undefined ? styles.placeholderSmall : styles.placeholder),
+        ]}
         testID={`expression-box-${expression.name}-${size}`}>
+        {labelled && lines !== undefined ? (
+          // 이름 글자는 칸 위에 얹는다(절대 위치, 칸 안에서 잘린다) — 칸의 크기를 바꾸지 않는다. 낭독은 바깥 글자의 이름이 지므로 읽기 도우미에서는 숨긴다(웹 `aria-hidden`).
+          <View
+            style={[LAYER, styles.labelFrame]}
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants">
+            <Text
+              style={styles.labelText}
+              numberOfLines={fitLines(lines, box.height, fontScale)}
+              ellipsizeMode="tail"
+              testID={labelMark(expression.name, size)}>
+              {expressionToken(expression.name)}
+            </Text>
+          </View>
+        ) : null}
         {drawn.map((layer, index) => (
           <Image
             key={layer.key}
@@ -332,3 +396,36 @@ export function ExpressionImage({
     </Text>
   );
 }
+
+/**
+ * 오래 비어 있는 칸의 모양(#5627). 웹 `expressions.css` 의 `[data-expression-lingering]` 을 폰 역할로 옮겼다: 그릇 `surface-muted` → `surfaceMuted`,
+ * 테두리 `line` → `border`, 작은 칸의 테두리 `line-strong` → `textFaint`(반응 칩처럼 바탕이 이미 그릇 색인 자리에서도 칸이 보인다), 모서리
+ * `radius-sm`, 글자 `text-meta`·`ink-muted` → `font.meta`·`line.meta`·`textMuted`. 테두리는 상자 안쪽이라 칸의 크기를 바꾸지 않는다.
+ */
+const buildStyles = (color: Palette) =>
+  StyleSheet.create({
+    placeholder: {
+      backgroundColor: color.surfaceMuted,
+      borderColor: color.border,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+    },
+    placeholderSmall: {
+      backgroundColor: color.surfaceMuted,
+      borderColor: color.textFaint,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+    },
+    labelFrame: {
+      alignItems: WORD.center,
+      justifyContent: WORD.center,
+      overflow: WORD.hidden,
+      paddingHorizontal: space.xs,
+    },
+    labelText: {
+      color: color.textMuted,
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      textAlign: WORD.center,
+    },
+  });
