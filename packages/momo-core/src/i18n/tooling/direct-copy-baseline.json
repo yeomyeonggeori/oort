@@ -918,7 +918,7 @@
     "clients/web/src/features/work/TakeoverBlock.tsx": 3,
     "clients/web/src/features/work/TakeoverDisclosure.tsx": 3,
     "clients/web/src/features/work/TerminalDock.tsx": 27,
-    "clients/web/src/features/work/WorkPanel.tsx": 92,
+    "clients/web/src/features/work/WorkPanel.tsx": 90,
     "clients/web/src/features/work/WorkSessionDetail.tsx": 106,
     "clients/web/src/features/work/WorkSessionIdleCard.tsx": 4,
     "clients/web/src/features/work/controlStream.ts": 57,

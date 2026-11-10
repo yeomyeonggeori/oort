@@ -4371,6 +4371,18 @@ export const catalog: MessageCatalog = {
       "value": "다시 확인"
     }
   ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "다시 확인 중"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

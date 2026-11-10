@@ -7,6 +7,7 @@ import {
   ROW_STATE_LABEL,
   workHostTrust,
   workSessionContinuityStatus,
+  withMacSubject,
   withOpenRequest,
   type WorkEventRow,
   type WorkPlanItem,
@@ -158,6 +159,20 @@ export default function WorkSessionDetailScreen({
       queryClient.refetchQueries({queryKey: SIGNING_REQUIRED_QUERY_KEY(workspaceId)}),
     [queryClient, workspaceId],
   );
+  // 「다시 확인」은 읽는 동안을 단추에서 보이고(표시기 + 「다시 확인 중」), 다시 읽어도 모르면 그 사실을 말한다(#5593 수리
+  // 3회차 M1). 읽기는 실패해도 던지지 않고 같은 「모름」을 돌려주므로 플래그만으로는 화면이 한 글자도 바뀌지 않는다 — 그래서
+  // 단추를 누른 일이 끝났다는 것을 이 화면이 따로 기억한다. 세션마다 따로다(다른 세션을 비추면 처음부터).
+  const [recheckBusy, setRecheckBusy] = useState(false);
+  const [recheckedSession, setRecheckedSession] = useState<string | null>(null);
+  const recheckFromButton = useCallback(async () => {
+    setRecheckBusy(true);
+    try {
+      await recheckSigning();
+    } finally {
+      setRecheckBusy(false);
+      setRecheckedSession(sessionId);
+    }
+  }, [recheckSigning, sessionId]);
   const canStop = session !== null && canStopSession(session, member.id);
 
   const channels = useMemo(
@@ -367,9 +382,12 @@ export default function WorkSessionDetailScreen({
   // 「없다」는 진행을 다 읽은 뒤에만 말한다(알림이 진행 읽기를 낡게 했으므로 다시 읽는 동안에는 기다린다).
   const openRequest = pendingPermission(sessionEvents, session);
   // 주인에게 열린 요청이 있으면 머리·배지는 「응답 필요」다(#5593 수리 M2) — 목록 칩과 같은 코어 낱말.
-  const status = withOpenRequest(
-    workSessionContinuityStatus(session, hostsQuery.data),
-    isOwner && openRequest !== null,
+  // 맥 연결이 끊긴 세션의 머리·배지는 주어를 붙인다: 「맥 연결 안 됨」(#5593 수리 3회차 L3 — 폰 자신의 오프라인과 갈리게).
+  const status = withMacSubject(
+    withOpenRequest(
+      workSessionContinuityStatus(session, hostsQuery.data),
+      isOwner && openRequest !== null,
+    ),
   );
   const trust = workHostTrust(session, hostsQuery.data);
   // 열린 요청이 있는데 이 폰이 카드를 그릴 수 없다(#5593 수리 H1): 서버가 서명을 요구하지 않거나(기본값), 그 설정을 읽지 못했거나,
@@ -422,6 +440,7 @@ export default function WorkSessionDetailScreen({
               nameOf={nameOf}
               refreshControl={refreshControl}
               scrollProps={scrollProps}
+              hostName={macName}
             />
           </View>
           <View style={mode === 'detail' ? styles.modeBody : styles.modeHidden}>
@@ -485,7 +504,12 @@ export default function WorkSessionDetailScreen({
                       headline={formatMessage('mobile.workPermission.elsewhereTitle')}
                       detail={
                         signingWhy?.settled === true
-                          ? [signingWhy.sentence, answerWhere].join(' ')
+                          ? [
+                              signingWhy.retry && recheckedSession === sessionId
+                                ? formatMessage('mobile.workPermission.recheckMissed')
+                                : signingWhy.sentence,
+                              answerWhere,
+                            ].join(' ')
                           : signingWhy?.sentence
                       }
                       testID="work-detail-permission-elsewhere-notice"
@@ -495,7 +519,9 @@ export default function WorkSessionDetailScreen({
                     <View style={styles.recheckWrap}>
                       <OutlineButton
                         label={formatMessage('mobile.workPermission.recheck')}
-                        onPress={() => void recheckSigning()}
+                        busy={recheckBusy}
+                        busyLabel={formatMessage('mobile.workPermission.rechecking')}
+                        onPress={() => void recheckFromButton()}
                         testID="work-detail-permission-recheck"
                       />
                     </View>
@@ -511,6 +537,7 @@ export default function WorkSessionDetailScreen({
                   events={sessionEvents}
                   online={online}
                   focusToken={landingOpen ? landingToken : undefined}
+                  hostName={macName}
                 />
               ) : null}
 

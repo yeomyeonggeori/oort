@@ -1,6 +1,7 @@
 import { uuidEq, type Message, type WorkHost, type WorkSession } from "../../lib/api";
 import type { WorkSessionACPFrame, WorkSessionACPType } from "../../lib/realtimeEvents";
 import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
+import { MAC_HOST_OFF_LABEL } from "../presence/statusDot";
 import { SESSION_STATUS_LABEL } from "../workbench/sessionList";
 
 // =============================================================================
@@ -149,9 +150,13 @@ export interface WorkSessionStatus {
  * `exitCode` is ADR-0139's last tool result, not a session-ending result. It
  * therefore never decides whether an `ended` session failed.
  *
- * `orphaned` keeps the mac wording (호스트 연결 끊김) rather than being folded
- * into 오류: the session is not known to have failed, its host went away, and
- * those are different facts to the person deciding whether to resume.
+ * `orphaned` keeps its own key rather than being folded into 오류: the session
+ * is not known to have failed, its host went away, and those are different
+ * facts to the person deciding whether to resume. Its WORD is the one the
+ * owner chose for a computer that is not connected (「연결 안 됨」, 2026-11-09) —
+ * the same word `unavailable` and the mac dot use, so one slot never alternates
+ * between two names for one fact (#5593 수리 3회차 M2). The key still carries
+ * the accent tone (there is something to do: resume elsewhere).
  */
 export function workSessionStatus(
   session: Pick<WorkSession, "exitCode"> & { status: string }
@@ -161,7 +166,7 @@ export function workSessionStatus(
     return { key: "idle", label: "완료 · 대기 중" };
   }
   if (session.status === "orphaned") {
-    return { key: "orphaned", label: "호스트 연결 끊김" };
+    return { key: "orphaned", label: MAC_HOST_OFF_LABEL };
   }
   if (session.status === "ended") {
     return { key: "done", label: "종료됨" };
@@ -816,9 +821,23 @@ export function workSessionContinuityStatus(
     (session.status === "running" || session.status === "idle") &&
     workHostOnline(session, hosts) === false
   ) {
-    return { key: "unavailable", label: "연결 안 됨" };
+    return { key: "unavailable", label: MAC_HOST_OFF_LABEL };
   }
   return workSessionStatus(session);
+}
+
+/** 폰 세션 머리(부제·배지)의 「연결 안 됨」에 붙는 주어(#5593 수리 3회차 L3, owner 추천안 「맥 연결 안 됨」). */
+export const MAC_NOT_CONNECTED_HEAD_LABEL = `맥 ${MAC_HOST_OFF_LABEL}`;
+
+/**
+ * 폰 세션 화면의 머리·배지에서는 「연결 안 됨」에 주어를 붙인다(#5593 수리 3회차 L3): 주어가 없으면 폰에서는 「내 폰이 연결 안
+ * 됨」으로도 읽힌다(같은 화면에 폰 자신의 「오프라인입니다.」 안내가 설 수 있다). 「연결 안 됨」으로 읽는 두 열쇠(`unavailable`·
+ * `orphaned`) 모두에 붙인다 — 하나만 붙이면 같은 자리가 두 말 사이를 오간다. 열쇠(색)는 그대로다. 정보 칸(「사무실 맥 mini ·
+ * 연결 안 됨」)과 웹은 이미 주어가 있거나 다른 자리라 이 함수를 부르지 않는다.
+ */
+export function withMacSubject(status: WorkSessionStatus): WorkSessionStatus {
+  if (status.key !== "unavailable" && status.key !== "orphaned") return status;
+  return { key: status.key, label: MAC_NOT_CONNECTED_HEAD_LABEL };
 }
 
 /**

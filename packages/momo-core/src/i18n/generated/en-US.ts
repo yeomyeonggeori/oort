@@ -4674,6 +4674,18 @@ export const catalog: MessageCatalog = {
       "value": "Check again"
     }
   ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "Checking again"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "Checked again, but the signing setting still couldn’t be read."
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

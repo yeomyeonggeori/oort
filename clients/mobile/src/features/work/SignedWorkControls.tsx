@@ -203,6 +203,8 @@ export function usePermissionPreviewGate(
   sessionId: string,
   permission: PendingPermission | null,
   enabled: boolean,
+  /** 그 세션을 실행하는 맥의 이름 — 막힘 문장의 답할 곳(#5593 수리 3회차 M2). 없으면 「맥에서」. */
+  hostName?: string,
 ): PermissionPreviewGate {
   const requestEventId = permission?.requestEventId ?? '';
   const read = useQuery({
@@ -222,6 +224,7 @@ export function usePermissionPreviewGate(
       : read.isError
         ? {status: 'error'}
         : {status: 'loading'},
+    hostName,
   );
 }
 
@@ -249,6 +252,7 @@ export function useSignedWorkSurface(
   memberId: string,
   session: WorkSession,
   events: readonly WorkSessionEvent[],
+  hostName?: string,
 ) {
   const owner = session.memberId.toLowerCase() === memberId.toLowerCase();
   const flag = useSigningFlag(workspaceId, owner);
@@ -273,6 +277,7 @@ export function useSignedWorkSurface(
     session.id,
     permission,
     owner && required,
+    hostName,
   );
   const block: SignBlock = signBlockFor(key.view);
   const fallbackReject = useMemo(
@@ -299,6 +304,7 @@ export function SignedWorkControls({
   events,
   online,
   focusToken,
+  hostName,
 }: {
   workspaceId: string;
   memberId: string;
@@ -307,8 +313,10 @@ export function SignedWorkControls({
   online: boolean;
   /** 권한 요청 알림이 이 카드로 착지했다(#5593). 값이 바뀔 때마다 낭독 초점이 카드의 질문으로 간다. */
   focusToken?: number;
+  /** 그 세션을 실행하는 맥의 이름 — 카드의 막힘 문장이 안내 상자와 같은 「{맥 이름}에서 답해 주세요」를 쓴다. */
+  hostName?: string;
 }): React.JSX.Element | null {
-  const surface = useSignedWorkSurface(workspaceId, memberId, session, events);
+  const surface = useSignedWorkSurface(workspaceId, memberId, session, events, hostName);
   // D-11: nothing changes unless the server says signatures are required.
   if (!surface.owner || !surface.required) return null;
   return (

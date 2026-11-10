@@ -83,8 +83,10 @@ import {permissionLapsed} from '@momo/core/features/workbench/agentPane';
 export const SIGNING_OFF_NOTICE =
   '이 서버는 아직 서명된 지시를 받지 않아요. 기기 서명 요구가 켜지면 허락과 지시를 여기서 보낼 수 있어요.';
 export const SIGNING_LOADING_NOTICE = '서명 설정을 확인하는 중이에요.';
+// 「다시 확인」(#5593 수리 3회차 M1): 작업 상세의 단추와 두 보기의 당겨서 새로고침이 모두 5분 캐시를 건너 다시 읽는다.
+// 예전 「다시 열어 주세요」는 그 캐시 때문에 5분 안에는 맞지 않았고, 바로 아래 단추와도 다른 행동을 권했다.
 export const SIGNING_UNKNOWN_NOTICE =
-  '서명 설정을 확인하지 못했어요. 잠시 뒤에 다시 열어 주세요.';
+  '서명 설정을 확인하지 못했어요. 잠시 뒤에 다시 확인해 주세요.';
 export const OWNER_ONLY_NOTICE = '담당자만 허락하고 지시를 보낼 수 있어요.';
 export const ENDED_NOTICE = '끝난 작업이라 지시를 더 보낼 수 없어요.';
 export const OFFLINE_NOTICE = '오프라인이라 지금은 보낼 수 없어요.';
@@ -648,6 +650,7 @@ export function WorkConversation({
   nameOf,
   refreshControl,
   scrollProps,
+  hostName,
 }: {
   workspaceId: string;
   memberId: string;
@@ -660,9 +663,11 @@ export function WorkConversation({
   nameOf: (memberId: string) => string;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   scrollProps?: PullScrollProps;
+  /** 그 세션을 실행하는 맥의 이름 — 대화 사이 카드의 막힘 문장이 답할 곳으로 쓴다(#5593 수리 3회차 M2). */
+  hostName?: string;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
-  const surface = useSignedWorkSurface(workspaceId, memberId, session, events);
+  const surface = useSignedWorkSurface(workspaceId, memberId, session, events, hostName);
   const [pending, setPending] = useState<PendingSend[]>([]);
   const [seed, setSeed] = useState<{text: string} | null>(null);
   const counter = useRef(0);

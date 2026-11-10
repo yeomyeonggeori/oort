@@ -538,21 +538,40 @@ export function OutlineButton({
   onPress,
   testID,
   accessibilityLabel,
+  busy,
+  busyLabel,
 }: {
   label: string;
   onPress: () => void;
   testID?: string;
   accessibilityLabel?: string;
+  /**
+   * 누른 일이 도는 중이다(#5593 수리 3회차 M1): 표시기와 `busyLabel` 이 낱말 자리에 서고 다시 누를 수 없다.
+   * `PrimaryButton` 의 진행과 같은 규칙이다 — 표시기가 함께 돌므로 `busyLabel` 에 말줄임을 붙이지 않는다.
+   */
+  busy?: boolean;
+  busyLabel?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const shown = busy === true ? busyLabel ?? label : label;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityLabel={busy === true ? shown : accessibilityLabel ?? label}
+      accessibilityState={busy === true ? {busy: true, disabled: true} : undefined}
+      disabled={busy === true}
       onPress={onPress}
       style={({pressed}) => [styles.outline, pressed && styles.pressed]}
       testID={testID}>
-      <Sentence style={styles.retryLabel}>{label}</Sentence>
+      {busy === true ? (
+        <View style={styles.buttonBusy}>
+          <ActivityIndicator color={palette.accentText} />
+          <Sentence style={styles.retryLabel}>{shown}</Sentence>
+        </View>
+      ) : (
+        <Sentence style={styles.retryLabel}>{label}</Sentence>
+      )}
     </Pressable>
   );
 }

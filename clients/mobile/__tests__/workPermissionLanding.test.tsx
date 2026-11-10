@@ -144,6 +144,8 @@ function jsonResponse(status: number, body: unknown): Response {
 /** 서버가 서명 요구를 어떻게 답하는가. `fail` 은 읽기 실패(5xx)다 — 폰은 그것을 「모름」으로 읽는다. */
 type Signing = 'required' | 'off' | 'fail';
 let signing: Signing = 'required';
+/** 서명 설정 읽기를 붙잡아 둔다(「다시 확인」이 도는 동안을 보려고). null 이면 바로 답한다. */
+let signingHold: Promise<void> | null = null;
 
 function signingContext(required: boolean) {
   return {
@@ -160,6 +162,7 @@ function installFetch(hosts: typeof HOSTS = HOSTS): void {
   const mock = jest.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/signing-context')) {
+      if (signingHold !== null) await signingHold;
       if (signing === 'fail') return jsonResponse(500, {error: {message: 'boom'}});
       return jsonResponse(200, signingContext(signing === 'required'));
     }
@@ -183,7 +186,10 @@ function installFetch(hosts: typeof HOSTS = HOSTS): void {
 
 let queryClient: QueryClient | null = null;
 
-function renderLanding() {
+/** `landing: null` 은 목록 줄로 들어간 길이다 — 셸의 `openWorkSession` 은 `{sessionId}` 만 넘긴다(알림 착지 없음). */
+function renderLanding({
+  landing = {requestEventId: REQUEST, token: 1},
+}: {landing?: {requestEventId: string; token: number} | null} = {}) {
   queryClient = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
   });
@@ -194,7 +200,7 @@ function renderLanding() {
           <WorkSessionDetailScreen
             active
             sessionId={SID}
-            permissionLanding={{requestEventId: REQUEST, token: 1}}
+            permissionLanding={landing ?? undefined}
             onBack={() => {}}
             onOpenConversation={() => {}}
           />
@@ -216,6 +222,7 @@ beforeEach(() => {
   setServerBase(BASE);
   sessionPort.applyLogin(LOGIN_BODY);
   signing = 'required';
+  signingHold = null;
 });
 
 afterEach(() => {
@@ -268,6 +275,62 @@ describe('H1 카드를 그릴 수 없는 착지도 이유와 답할 곳을 말�
     fireEvent.press(within(elsewhere).getByTestId('work-detail-permission-recheck'));
     await waitFor(() => expect(screen.getByTestId('work-permission-card')).toBeTruthy(), SETTLE);
     expect(screen.queryByTestId('work-detail-permission-elsewhere')).toBeNull();
+  });
+});
+
+describe('수리 3회차 — 「다시 확인」은 읽는 동안을 보이고, 다시 읽어도 모르면 그 사실을 말한다(M1)', () => {
+  it('누르면 단추가 「다시 확인 중」(바쁨)이 되고, 또 못 읽으면 안내 문장이 그 사실과 답할 곳을 말한다', async () => {
+    signing = 'fail';
+    installFetch();
+    renderLanding();
+    const answerWhere = formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'});
+
+    const elsewhere = await waitFor(
+      () => screen.getByTestId('work-detail-permission-elsewhere'),
+      SETTLE,
+    );
+    // 문장이 권하는 행동이 바로 아래 단추와 같다(「다시 열어 주세요」가 아니다).
+    expect(within(elsewhere).getByText(`${SIGNING_UNKNOWN_NOTICE} ${answerWhere}`)).toBeTruthy();
+    expect(SIGNING_UNKNOWN_NOTICE).toMatch(/다시 확인해 주세요\.$/);
+    expect(within(elsewhere).getByTestId('work-detail-permission-recheck')).toHaveTextContent(
+      formatMessage('mobile.workPermission.recheck'),
+    );
+
+    // 서버는 아직 답하지 못한다. 읽기를 붙잡아 두고 누른다 — 도는 동안 단추가 그것을 말한다.
+    let release: () => void = () => {};
+    signingHold = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    fireEvent.press(within(elsewhere).getByTestId('work-detail-permission-recheck'));
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('work-detail-permission-recheck').props.accessibilityState).toMatchObject({
+          busy: true,
+          disabled: true,
+        }),
+      SETTLE,
+    );
+    expect(screen.getByTestId('work-detail-permission-recheck')).toHaveTextContent(
+      formatMessage('mobile.workPermission.rechecking'),
+    );
+
+    // 또 못 읽었다: 화면이 그대로가 아니라 「다시 확인했지만 …」과 답할 곳을 말하고, 단추는 다시 누를 수 있다.
+    signingHold = null;
+    await act(async () => {
+      release();
+    });
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText(`${formatMessage('mobile.workPermission.recheckMissed')} ${answerWhere}`),
+        ).toBeTruthy(),
+      SETTLE,
+    );
+    const button = screen.getByTestId('work-detail-permission-recheck');
+    expect(button.props.accessibilityState?.busy).not.toBe(true);
+    expect(button.props.accessibilityState?.disabled).not.toBe(true);
+    expect(button).toHaveTextContent(formatMessage('mobile.workPermission.recheck'));
+    expect(screen.queryByTestId('work-permission-card')).toBeNull();
   });
 });
 
@@ -328,14 +391,41 @@ describe('수리 2회차 owner 낱말(2026-11-09) — 세션 화면의 쉬운 �
     expect(screen.queryByText(/발원|T1 ·/)).toBeNull();
   });
 
-  it('맥이 연결돼 있지 않으면 머리·배지와 정보 칸이 같은 낱말 「연결 안 됨」을 쓴다', async () => {
+  it('맥이 연결돼 있지 않으면 머리·배지와 정보 칸이 같은 낱말 「연결 안 됨」을 쓴다 — 머리·배지는 주어를 붙여 「맥 연결 안 됨」(수리 3회차 L3)', async () => {
     installFetch(HOSTS.map(h => ({...h, online: false})));
     renderLanding();
     await waitFor(
-      () => expect(screen.getByTestId('work-detail-status')).toHaveTextContent('연결 안 됨'),
+      () => expect(screen.getByTestId('work-detail-status')).toHaveTextContent('맥 연결 안 됨'),
       SETTLE,
     );
+    // 부제(머리)와 배지 둘 다 주어가 있다 — 폰 자신의 「오프라인입니다.」와 헷갈리지 않게.
+    expect(screen.getAllByText('맥 연결 안 됨')).toHaveLength(2);
+    expect(screen.queryByText('연결 안 됨')).toBeNull();
     expect(screen.getByText('성재 맥북 · 연결 안 됨')).toBeTruthy();
     expect(screen.queryByText(/호스트 응답 없음|오프라인/)).toBeNull();
+  });
+});
+
+describe('수리 3회차 L1 — 목록 줄로 들어간 길도 카드 없는 착지와 같은 안내를 받는다', () => {
+  it('알림 착지 없이 연 세션 화면에서도 서명 요구가 꺼져 있으면 이유와 「지금은 그 맥에서 답해 주세요」가 선다', async () => {
+    const focus = jest.spyOn(AccessibilityInfo, 'setAccessibilityFocus').mockImplementation(() => {});
+    signing = 'off';
+    installFetch();
+    renderLanding({landing: null});
+
+    const elsewhere = await waitFor(
+      () => screen.getByTestId('work-detail-permission-elsewhere'),
+      SETTLE,
+    );
+    expect(
+      within(elsewhere).getByText(
+        `${SIGNING_OFF_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'})}`,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('work-permission-card')).toBeNull();
+    // 착지가 없으니 「이미 닫혔어요」도 없고, 낭독 초점은 예전처럼 머리가 받는다. (이 시험은 파일 맨 끝에 둔다: 머리 초점은
+    // `InteractionManager` 로 미뤄져 뒤 시험의 초점 단정에 섞일 수 있다.)
+    expect(screen.queryByTestId('work-detail-permission-gone')).toBeNull();
+    await waitFor(() => expect(focus).toHaveBeenCalledWith('work-detail-focus'), SETTLE);
   });
 });

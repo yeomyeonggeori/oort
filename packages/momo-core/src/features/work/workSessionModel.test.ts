@@ -29,6 +29,7 @@ import {
   workSessionResumeTargets,
   workSessionStatus,
   type WorkSessionEvent,
+  withMacSubject,
   withOpenRequest,
 } from "./workSessionModel";
 import { silenceLabel } from "./workSessionFormat";
@@ -900,5 +901,26 @@ describe("주인에게 열린 권한 요청 — 「응답 필요」 (#5593 수�
     expect(withOpenRequest(unavailable, true)).toBe(unavailable);
     const ended = workSessionStatus({ status: "ended" });
     expect(withOpenRequest(ended, true)).toBe(ended);
+  });
+});
+
+describe("맥 연결 낱말 — 한 자리에 한 말 (#5593 수리 3회차 M2·L3)", () => {
+  it("고아 세션도 「연결 안 됨」이다 — 레지스트리가 못 본 세션과 같은 말, 열쇠(색)는 그대로", () => {
+    expect(workSessionStatus({ status: "orphaned" })).toEqual({ key: "orphaned", label: "연결 안 됨" });
+  });
+
+  it("폰 세션 머리는 「연결 안 됨」으로 읽는 두 열쇠에 주어를 붙이고, 다른 상태는 그대로 둔다", () => {
+    expect(withMacSubject({ key: "unavailable", label: "연결 안 됨" })).toEqual({
+      key: "unavailable",
+      label: "맥 연결 안 됨",
+    });
+    expect(withMacSubject(workSessionStatus({ status: "orphaned" }))).toEqual({
+      key: "orphaned",
+      label: "맥 연결 안 됨",
+    });
+    const running = workSessionStatus({ status: "running" });
+    expect(withMacSubject(running)).toBe(running);
+    const waiting = withOpenRequest(running, true);
+    expect(withMacSubject(waiting)).toBe(waiting);
   });
 });

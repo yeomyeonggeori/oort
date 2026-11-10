@@ -12,6 +12,8 @@
   "mobile.workPermission.elsewhereOnHost": "For now, answer it on {host}.",
   "mobile.workPermission.elsewhereOnMac": "For now, answer it on your Mac.",
   "mobile.workPermission.recheck": "Check again",
+  "mobile.workPermission.rechecking": "Checking again",
+  "mobile.workPermission.recheckMissed": "Checked again, but the signing setting still couldn’t be read.",
   "mobile.ios.cameraUsage": "Use the camera to attach photos to conversations or scan a QR code to connect this device to a workspace.",
   "mobile.ios.faceIdUsage": "Use Face ID to confirm instructions sent to agents from this device.",
   "mobile.ios.localNetworkUsage": "Use the local network to connect to an oort server on the same network.",
