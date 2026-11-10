@@ -30,7 +30,7 @@ export const MAX_NEW_RAISES_PER_LANDING = 10;
  * Re-anchoring is a planner act: `anchor <commit>` prints a new ledger and seal, and this
  * constant changes in a reviewed diff. Nothing else may change it.
  */
-export const ANCHOR_SEAL = '2de8389cf02f1f6dec527b0d338e1875a7b8d168cfd0617bb7c8757a77bf3e08';
+export const ANCHOR_SEAL = '46ba42caa717a872cd05396f14a0fd7d42ca134f091202b774a92198b138c410';
 export const DIMENSIONS = Object.freeze(['ko', 'en', 'cat']);
 
 /**

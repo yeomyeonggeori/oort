@@ -69,7 +69,7 @@
     "clients/mobile/src/features/directory/MemberProfileSheet.tsx": {"ko": 21, "en": 0},
     "clients/mobile/src/features/directory/profileHero.tsx": {"ko": 3, "en": 0},
     "clients/mobile/src/features/emoji/EmojiPicker.tsx": {"ko": 14, "en": 0},
-    "clients/mobile/src/features/expressions/ExpressionPhotoForm.tsx": {"ko": 0, "en": 4, "cat": 1},
+    "clients/mobile/src/features/expressions/ExpressionPhotoForm.tsx": {"ko": 0, "en": 0, "cat": 1},
     "clients/mobile/src/features/expressions/TeamExpressionPicker.tsx": {"ko": 3, "en": 1},
     "clients/mobile/src/features/home/workingCard.ts": {"ko": 10, "en": 0},
     "clients/mobile/src/features/home/workspaceLogo.ts": {"ko": 4, "en": 0},
@@ -305,7 +305,7 @@
     "clients/web/src/features/settings/AiMyAccountsSection.tsx": {"ko": 12, "en": 0},
     "clients/web/src/features/settings/AppearanceSection.tsx": {"ko": 2, "en": 0},
     "clients/web/src/features/settings/CohostedAgentCard.tsx": {"ko": 2, "en": 0},
-    "clients/web/src/features/settings/DesktopNotificationGroup.tsx": {"ko": 59, "en": 1},
+    "clients/web/src/features/settings/DesktopNotificationGroup.tsx": {"ko": 59, "en": 0},
     "clients/web/src/features/settings/DevAccessChannelPicker.tsx": {"ko": 8, "en": 0},
     "clients/web/src/features/settings/DevAccessCreateForm.tsx": {"ko": 16, "en": 0},
     "clients/web/src/features/settings/DevAccessList.tsx": {"ko": 23, "en": 0},
@@ -517,7 +517,6 @@
     "packages/momo-core/src/features/cliLogin/consent.ts": {"ko": 63, "en": 0},
     "packages/momo-core/src/features/commands/registry.ts": {"ko": 77, "en": 1},
     "packages/momo-core/src/features/commands/serverActions.ts": {"ko": 1, "en": 0},
-    "packages/momo-core/src/features/connection/copyKeys.ts": {"ko": 0, "en": 47},
     "packages/momo-core/src/features/directory/model.ts": {"ko": 30, "en": 0},
     "packages/momo-core/src/features/emoji/catalog.ts": {"ko": 9, "en": 0},
     "packages/momo-core/src/features/emoji/choices.ts": {"ko": 6, "en": 0},
@@ -570,11 +569,6 @@
     "packages/momo-core/src/features/presence/pauseUntil.ts": {"ko": 37, "en": 0},
     "packages/momo-core/src/features/presence/statusDot.ts": {"ko": 1, "en": 0},
     "packages/momo-core/src/features/readState/copy.ts": {"ko": 5, "en": 0},
-    "packages/momo-core/src/features/releaseNotes/notes/v0_1_41.ts": {"ko": 0, "en": 9},
-    "packages/momo-core/src/features/releaseNotes/notes/v0_1_42.ts": {"ko": 0, "en": 18},
-    "packages/momo-core/src/features/releaseNotes/notes/v0_1_43.ts": {"ko": 0, "en": 18},
-    "packages/momo-core/src/features/releaseNotes/notes/v0_1_44.ts": {"ko": 0, "en": 10},
-    "packages/momo-core/src/features/releaseNotes/notes/v0_1_45.ts": {"ko": 0, "en": 10},
     "packages/momo-core/src/features/reminders/model.ts": {"ko": 30, "en": 0},
     "packages/momo-core/src/features/reminders/presets.ts": {"ko": 5, "en": 0},
     "packages/momo-core/src/features/routing/routingModel.ts": {"ko": 23, "en": 0},
@@ -601,7 +595,6 @@
     "packages/momo-core/src/features/settings/notificationRules.ts": {"ko": 9, "en": 0},
     "packages/momo-core/src/features/settings/quotaModel.ts": {"ko": 36, "en": 0},
     "packages/momo-core/src/features/settings/remoteWorkProfile.ts": {"ko": 16, "en": 0},
-    "packages/momo-core/src/features/settings/teamAiCopyKeys.ts": {"ko": 0, "en": 7},
     "packages/momo-core/src/features/settings/teamAiNextStep.ts": {"ko": 36, "en": 0},
     "packages/momo-core/src/features/settings/teamAiSwitch.ts": {"ko": 9, "en": 0},
     "packages/momo-core/src/features/settings/teamKeyForm.ts": {"ko": 49, "en": 0},
@@ -667,11 +660,13 @@
   "lowered": {
     "clients/web/src/features/inbox/LocalPaneInbox.tsx": {"ko": 1, "en": 0},
     "clients/web/src/features/sidebar/SidebarDestinations.tsx": {"ko": 9, "en": 0},
-    "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0}
+    "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0},
+    "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6}
   },
   "raises": [
     {"file": "packages/momo-core/src/features/workbench/paneStatus.ts", "issue": 5579, "ko": 2, "reason": "Local pane status lines (waiting for input or permission, ended with an error, done) that #5584 moved into the core from the web inbox and sidebar; they wait for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/workbench/sessionList.ts", "issue": 5579, "ko": 1, "reason": "The failed-session mark shared by the session list and the team board chip (FAILED_MARK_LABEL, #5584); it waits for the P1 workbench namespace."},
-    {"file": "packages/momo-core/src/features/workbench/shareSummary.ts", "issue": 5579, "ko": 1, "reason": "The turn-failed label in the pane share summary (#5584); it waits for the P1 workbench namespace."}
+    {"file": "packages/momo-core/src/features/workbench/shareSummary.ts", "issue": 5579, "ko": 1, "reason": "The turn-failed label in the pane share summary (#5584); it waits for the P1 workbench namespace."},
+    {"file": "packages/momo-core/src/features/work/stopWork.ts", "issue": 5595, "ko": 1, "reason": "The stop button word (STOP_ACTION_LABEL) and two refusal sentences that #5605 shares between phone and web/desktop session detail; they wait for the P1 work namespace."}
   ]
 }
