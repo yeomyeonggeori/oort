@@ -714,6 +714,18 @@ describe("키보드", () => {
     }
   });
 
+  it("줄이 설 수 없는 동안(오프라인)에 글을 다 지워도 닫힘이 풀린다 - 돌아와 같은 낱말을 치면 선다 (#5602)", async () => {
+    await mount();
+    await typeAndPause("ㅋㅋ");
+    expect(await press({ key: "Escape" })).toBe(true);
+    act(() => store!.setOffline(true));
+    await type("");
+    await type("ㅋㅋㅋ");
+    act(() => store!.setOffline(false));
+    await pause();
+    expect(row()).not.toBeNull();
+  });
+
   it("입력칸의 Esc 도 줄만 닫는다 - 한 번 더 누르면 아래(링크 카드·미리 보기·인용)로 내려가 여기서는 키가 지나간다", async () => {
     await mount();
     await typeAndPause("ㅋㅋㅋ");

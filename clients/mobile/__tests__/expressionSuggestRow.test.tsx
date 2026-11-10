@@ -427,6 +427,20 @@ describe('「이번만 닫기」 — 줄을 아래로 쓸어내리기, 낭독은
     expect(mutedKeywords('ws:ch')).toEqual([]);
   });
 
+  it('줄이 설 수 없는 동안(키보드를 내림)에 글을 다 지워도 닫힘이 풀린다 - 돌아와 같은 낱말을 치면 선다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ');
+    const cell = screen.getByTestId('composer-expression-suggest-item-laugh_a');
+    fireEvent(cell, 'accessibilityAction', {nativeEvent: {actionName: cell.props.accessibilityActions[0].name}});
+    act(() => void fireEvent(input(), 'blur'));
+    typeText('');
+    typeText('ㅋㅋㅋ');
+    focusInput();
+    wait(300);
+    expect(row()).not.toBeNull();
+  });
+
   it('보내면 닫힘이 풀린다 - 같은 낱말을 다시 치면 선다', async () => {
     const {store} = await loadedStore();
     mount(store);
