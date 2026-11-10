@@ -10766,14 +10766,15 @@ paths:
         mention run crosses 60 seconds, so a client also refetches on focus.
 
         The owner's waiting session (#5639, ADR-0202 D4, ADR-0188 D3 and D5):
-        in an include=jobs page, an agent-lane session that has a permission
-        request still pending and not yet expired has state waiting instead of
-        running or idle (status stays the ledger word), but only for a caller
-        who can answer it: the caller owns the session and also owns the
+        in an include=jobs page, a running agent-lane session that has a
+        permission request still pending and not yet expired has state waiting
+        instead of running (status stays the ledger word), but only for a
+        caller who can answer it: the caller owns the session and also owns the
         session's host, which is not revoked, the same rule the
-        permission-decisions route applies. A session on a host someone else
-        registered (a shared host) or on a revoked host is never waiting, for
-        anyone. The next read after the request is decided, expires or is
+        permission-decisions route applies. A session that is not running
+        (idle, ended, orphaned), on a host someone else registered (a shared
+        host) or on a revoked host is never waiting, for anyone; the decision
+        route would close or refuse that request too. The next read after the request is decided, expires or is
         cancelled has the ledger word again. No key is added and nothing of the
         request (tool, title, options, preview) or of the host is sent. Every
         other caller, and every read without include=jobs (including the single

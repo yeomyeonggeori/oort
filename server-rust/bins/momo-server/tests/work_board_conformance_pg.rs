@@ -26,10 +26,10 @@
 //! | `b11_mention_managed_linked_and_stale_runs_are_not_listed` | mention·managed work run 제외, 세션에 연결된 run은 세션 한 줄만, 종료 30일 뒤 제외 | the `input.type` / hosted `EXISTS` / `NOT EXISTS` link / retention predicates |
 //! | `b12_a_cursor_is_stable_across_mixed_sources` | 세션+run 혼합 목록의 커서 완전·무중복·동률 안정 | the `(activity_us, id) <` keyset over `board` |
 //! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류에서는 없음, managed work run도 냄·최상위 mention은 마지막 전환만·하위 run은 없음(#3853 migration 135) | the trigger's state comparison and its type/top-level/final-transition guards |
-//! | `b20_the_owner_reads_their_session_waiting_on_a_permission_request` | 주인의 `include=jobs` 읽기만 `waiting`(team·mine), 결정·만료·취소 뒤 원래 낱말(running·idle), 주인 아닌 멤버·`include` 없음·`runs`뿐·단건 읽기는 같은 바이트, 새 키·요청 내용 없음(#5639) | the `ws.member_id = $2` / `pr.expires_at >` / `$9` conditions of `awaiting_owner` in `work_board::SELECT` |
+//! | `b20_the_owner_reads_their_session_waiting_on_a_permission_request` | 주인의 `include=jobs` 읽기만 `waiting`(team·mine), 결정·만료·취소 뒤 원래 낱말(running), 주인 아닌 멤버·`include` 없음·`runs`뿐·단건 읽기는 같은 바이트, 새 키·요청 내용 없음(#5639) | the `ws.member_id = $2` / `pr.expires_at >` / `$9` conditions of `awaiting_owner` in `work_board::SELECT` |
 //! | `b21_a_waiting_session_reads_only_its_own_workspaces_requests` | 다른 워크스페이스의 요청이 섞이지 않음 — api 역할(RLS)과, RLS가 없는 읽기에서도 쿼리 자체의 워크스페이스 조건으로(#5639) | the `pr.workspace_id = ws.workspace_id` condition of `awaiting_owner` |
 //! | `b22_a_session_on_a_host_someone_else_owns_never_waits` | 세션 주인 ≠ 호스트 주인(공유 호스트)이면 세션 주인도 호스트 주인도 `waiting` 아님, 결정 경로도 둘 다 403(#5639) | the `h.owner_member_id = $2` decider check of `awaiting_owner` |
-//! | `b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts` | 같은 준비물(내 맥·공유 맥·해지된 맥·앨리스의 맥 × 주인·앨리스·밥)에서 보드가 `waiting`을 준 사람 집합 = 결정 경로가 받아들인(200) 사람 집합(#5639) | the decider check (`h.owner_member_id`, `h.revoked_at IS NULL`) drifting from `active_host_owner_in_tx` |
+//! | `b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts` | 같은 준비물(내 맥·공유 맥·해지된 맥·`idle` 세션·앨리스의 맥 × 주인·앨리스·밥)에서 보드가 `waiting`을 준 사람 집합 = 결정 경로가 받아들인(200) 사람 집합(#5639) | the decider check (`h.owner_member_id`, `h.revoked_at IS NULL`) drifting from `active_host_owner_in_tx`; `idle` mapped to `waiting` in `state_of_host_session` |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -3269,24 +3269,17 @@ async fn b20_the_owner_reads_their_session_waiting_on_a_permission_request() {
     decide_request(&b, request).await;
     assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "running");
 
-    // Cancelled → the ledger word, for an idle session too.
-    sqlx::query(
-        "UPDATE work_session SET status = 'idle', idle_at = clock_timestamp() WHERE id = $1",
-    )
-    .bind(asking)
-    .execute(&b.su)
-    .await
-    .expect("the turn ends");
-    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "idle");
+    // Cancelled → the ledger word.
     pending_request(&b.app, Asking::of(&b, asking)).await;
     assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "waiting");
-    assert_eq!(jobs_state(&b, &b.alice_token, asking, "").await, "idle");
+    assert_eq!(jobs_state(&b, &b.alice_token, asking, "").await, "running");
     assert_eq!(
         cancel_requests(&b, asking).await,
         2,
         "the new request and the lapsed, unswept one"
     );
-    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "idle");
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "running");
+    // (An idle session with a stray pending row is b23's: it never waits.)
 }
 
 #[tokio::test]
@@ -3508,6 +3501,7 @@ async fn b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts()
         ("owner·own", &b.owner_token, b.desktop),
         ("owner·shared", &b.owner_token, alice_shared),
         ("owner·revoked", &b.owner_token, owner_old_mac),
+        ("owner·idle", &b.owner_token, b.desktop),
         ("alice·own", &b.alice_token, alice_mac),
     ] {
         let session = open_host_session(&b.http, &b.base, token, &b.tenant, host).await;
@@ -3519,6 +3513,21 @@ async fn b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts()
         .execute(&b.su)
         .await
         .expect("revoke the old Mac");
+    // The turn ended under a request the ledger did not get to cancel (the idle
+    // transition cancels it; this row stays pending on purpose).
+    let idle = sessions[3].1;
+    sqlx::query(
+        "UPDATE work_session SET status = 'idle', idle_at = clock_timestamp() WHERE id = $1",
+    )
+    .bind(idle)
+    .execute(&b.su)
+    .await
+    .expect("the turn ends");
+    assert_eq!(
+        jobs_state(&b, &b.owner_token, idle, "").await,
+        "idle",
+        "an idle session keeps its word under a pending request"
+    );
     let viewers = [
         ("owner", &b.owner_token),
         ("alice", &b.alice_token),
@@ -3558,12 +3567,13 @@ async fn b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts()
         BTreeSet::from([("alice", "alice·own"), ("owner", "owner·own")])
     );
     // Every other outcome is the route's own refusal: not the decider (403), or
-    // — for the revoked Mac's owner — a request nobody can answer any more (409).
+    // — for the owner of the revoked Mac and of the idle session — a request
+    // nobody can answer any more (409).
     for (who, name, status, code) in &outcomes {
         if accepted.contains(&(*who, *name)) {
             continue;
         }
-        let expected = if (*who, *name) == ("owner", "owner·revoked") {
+        let expected = if who == &"owner" && ["owner·revoked", "owner·idle"].contains(name) {
             (409, json!("permission_request_closed"))
         } else {
             (403, json!("permission_owner_only"))

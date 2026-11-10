@@ -49,7 +49,9 @@
 //! that has a permission request still `pending` and not yet past its
 //! `expires_at` (ADR-0188 D5's `work_permission_request`, read through its
 //! pending index) answers `state = "waiting"` — the word shared sessions
-//! already use — instead of `running` / `idle`.
+//! already use — instead of `running`. Only a **running** session waits: the
+//! decision route closes a request whose session is not running, so an idle,
+//! ended or orphaned session keeps its ledger word.
 //!
 //! 「응답 필요」 means **I can answer it**, so the flag asks exactly who the
 //! decision route (`momo-server` `routes::work_permissions::decide_in_tx`,
@@ -392,14 +394,16 @@ fn pr_number_of(url: &str) -> Option<i64> {
 
 /// A Mac session's board word. `awaiting_owner` (the owner's `include_jobs`
 /// read, a pending unexpired permission request — see the module docs) turns a
-/// live session into `waiting`; an ended or orphaned session keeps its word.
+/// **running** session into `waiting`. Every other status keeps its word: the
+/// decision route closes a request whose session is not running
+/// (`work_permissions::decide_in_tx`), so nobody can answer it.
 fn state_of_host_session(
     status: &str,
     exit_code: Option<i32>,
     awaiting_owner: bool,
 ) -> &'static str {
     match status {
-        "running" | "idle" if awaiting_owner => "waiting",
+        "running" if awaiting_owner => "waiting",
         "running" => "running",
         "idle" => "idle",
         "ended" if exit_code == Some(0) => "done",
@@ -632,9 +636,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_live_session_waits_for_its_owner() {
+    fn only_a_running_session_waits_for_its_owner() {
         assert_eq!(state_of_host_session("running", None, true), "waiting");
-        assert_eq!(state_of_host_session("idle", None, true), "waiting");
+        // The decision route closes a request on a session that is not running,
+        // so an idle one is not 「응답 필요」 even if a stray row is pending.
+        assert_eq!(state_of_host_session("idle", None, true), "idle");
         // A session that is over keeps its word even if a stray row is pending.
         assert_eq!(state_of_host_session("ended", Some(0), true), "done");
         assert_eq!(state_of_host_session("ended", Some(2), true), "stopped");
