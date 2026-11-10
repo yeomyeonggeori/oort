@@ -129,7 +129,7 @@ const KNOWN_FAILURE_LIST = [
   },
   {
     key: "older|webkit|*",
-    issue: "위로 더 불러오기(WebKit): 보던 줄 3.9px, 그리고 세 번에 한 번꼴 맨 위에 닿아도 옛 쪽을 안 부름(읽기 0 — 내렸다 올려도)",
+    issue: "위로 더 불러오기(WebKit): 보던 줄 3.9px, 그리고 1280 · 900 에서 맨 위에 닿아도 옛 쪽을 안 부를 때가 잦음(읽기 0 — 내렸다 올려도. 실측 3번 실행 2/6 · 마지막 실행 2/2 · 사보타주 번들 2/2, 390 은 0)",
     maxUnexplainedPx: 6,
     maxReversals: 0,
     notBuilt: "옛 쪽이 붙지 않았다(읽기 0",
