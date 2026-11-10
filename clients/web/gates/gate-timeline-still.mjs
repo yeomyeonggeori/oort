@@ -275,7 +275,8 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
 
 async function newContext(browser, vp, { unfurls = {} } = {}) {
   const context = await browser.newContext({ viewport: vp, deviceScaleFactor: 2, locale: "ko-KR" });
-  const backend = await installBackend(context, { port, rows, paged: true, olderDelayMs: 900, unfurls });
+  // 옛 쪽 응답은 2.5초 늦게 온다: 맨 위에 닿은 뒤 재기 창을 연 다음에 앞에 붙는다.
+  const backend = await installBackend(context, { port, rows, paged: true, olderDelayMs: 2_500, unfurls });
   const page = await context.newPage();
   return { context, backend, page };
 }
@@ -470,16 +471,18 @@ async function contentScenes(browser, engine, vp, recordOnly) {
         await page.evaluate((selector) => {
           document.querySelector(selector).scrollTop = 0;
         }, scrollerSelector);
-        // 맨 위에 닿아도 가상 목록이 옛 쪽을 부르지 않을 때가 있다(실측: WebKit 1280 에서 읽기 0). 조금 내렸다 다시 올려 범위를 바꾼다(최대 세 번).
-        for (let nudge = 0; nudge < 3 && backend.state.olderReads === readsBefore; nudge += 1) {
-          await wait(700);
+        // 맨 위에 닿아도 가상 목록이 옛 쪽을 부르지 않을 때가 있다(실측: WebKit 1280 에서 읽기 0 — 맨 위 줄이 붙은 채라 「맨 위에 닿음」이
+        // 바뀌지 않는다). 그때는 2,000px 내렸다 다시 올린다(최대 두 번). 몇 번 그랬는지 비고에 적는다(장면의 숫자와 따로 보는 사실).
+        let nudges = 0;
+        for (; nudges < 2; nudges += 1) {
+          await wait(1_000);
           if (backend.state.olderReads !== readsBefore) break;
           await page.evaluate((selector) => {
-            const scroller = document.querySelector(selector);
-            scroller.scrollTop = 40;
-            requestAnimationFrame(() => {
-              scroller.scrollTop = 0;
-            });
+            document.querySelector(selector).scrollTop = 2_000;
+          }, scrollerSelector);
+          await wait(400);
+          await page.evaluate((selector) => {
+            document.querySelector(selector).scrollTop = 0;
           }, scrollerSelector);
         }
         await wait(300);
@@ -492,18 +495,31 @@ async function contentScenes(browser, engine, vp, recordOnly) {
           return null;
         }, scrollerSelector);
         if (watchId === null) return { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: ["맨 위에 보던 줄이 없다"] } };
+        const heightNow = () => page.evaluate((selector) => document.querySelector(selector).scrollHeight, scrollerSelector);
+        const heightAtOpen = await heightNow();
         const record = await recordWindow(page, { name: "w", messageId: watchId, edge: "top" }, async () => {
+          // 옛 쪽이 실제로 앞에 붙을 때까지(목록 높이가 자람) 기다린다.
           const deadline = Date.now() + 10_000;
-          while (backend.state.olderReads === readsBefore && Date.now() < deadline) await wait(100);
+          while (Date.now() < deadline && (await heightNow()) - heightAtOpen < 500) await wait(100);
         }, 1_500);
         const numbers = numbersFromRecord(record, { watch: "w" });
         // 옛 쪽이 앞에 붙었는가: 목록 높이가 크게 자랐다(50줄).
         const heights = record.frames.map((frame) => frame.sh).filter((value) => typeof value === "number");
         const grew = heights.length ? heights[heights.length - 1] - heights[0] : 0;
         if (backend.state.olderReads === readsBefore || grew < 500) {
+          const state = await page.evaluate((selector) => {
+            const scroller = document.querySelector(selector);
+            const first = scroller.querySelector("[data-index]");
+            return { top: scroller.scrollTop, rows: scroller.querySelectorAll("[data-index]").length, firstIndex: first?.getAttribute("data-index"), firstText: first?.textContent?.slice(0, 30) };
+          }, scrollerSelector);
+          if (process.env.TIMELINE_STILL_DEBUG === "1") console.log(`[debug older] ${JSON.stringify(state)} reads=${backend.state.olderReads}`);
           return { numbers, verdict: { verdict: "장면 못 만듦", reasons: [`옛 쪽이 붙지 않았다(읽기 ${backend.state.olderReads - readsBefore}, 목록 높이 +${grew}px)`] } };
         }
-        return { numbers, verdict: judgeCell(numbers, { kind: "reading" }), note: `옛 쪽 붙음: 목록 높이 +${grew}px · scrollTop ${record.frames[0]?.top}→${record.frames.at(-1)?.top}` };
+        return {
+          numbers,
+          verdict: judgeCell(numbers, { kind: "reading" }),
+          note: `옛 쪽 붙음: 목록 높이 +${grew}px · scrollTop ${record.frames[0]?.top}→${record.frames.at(-1)?.top}${nudges > 0 ? ` · 맨 위에 닿아도 안 불러 ${nudges}번 내렸다 올림` : ""}`,
+        };
       });
     }
   } finally {

@@ -176,6 +176,10 @@ export function stillNumbers({ series, expected = 0, gaps = [], pills = [], pill
  */
 export function judgeCell(numbers, { kind, limit, minSamples = 10 }) {
   const reasons = [];
+  // 한 번 보인 줄이 사라졌으면(화면 밖으로 밀림) 표본이 적어도 「장면 못 만듦」이 아니라 실패다.
+  if (numbers.motion !== null && numbers.vanishedFrames > 0 && numbers.motion.samples < minSamples) {
+    return { verdict: "FAIL", reasons: [`지켜본 줄이 ${numbers.motion.samples}프레임 보인 뒤 ${numbers.vanishedFrames}프레임 동안 사라졌다(화면 밖으로 밀림)`] };
+  }
   if (numbers.motion === null || numbers.motion.samples < minSamples) {
     return { verdict: "장면 못 만듦", reasons: [`지켜본 줄의 표본이 ${numbers.motion?.samples ?? 0}개뿐이다`] };
   }
