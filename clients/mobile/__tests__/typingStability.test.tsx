@@ -98,6 +98,19 @@ describe('H-3 — 자리를 예약한다', () => {
   });
 });
 
+/** 호스트 `Text`의 글(안쪽 `Text`까지 이어 붙인 것). */
+function textOf(node: {props: {children?: unknown}}): string {
+  const walk = (child: unknown): string =>
+    typeof child === 'string' || typeof child === 'number'
+      ? String(child)
+      : Array.isArray(child)
+        ? child.map(walk).join('')
+        : child && typeof child === 'object' && 'props' in child
+          ? walk((child as {props: {children?: unknown}}).props.children)
+          : '';
+  return walk(node.props.children);
+}
+
 describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
   it('이름 조각만 다르게 칠한다', () => {
     render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
@@ -123,12 +136,25 @@ describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
 
   it('한 줄이다 — 읽던 자리를 밀어내지 않는다', () => {
     render(<TypingBar segments={typingVisualSegments(['김민수', '이하늘'])} />);
-    // #4797: 바깥은 점을 함께 담는 View, 한 줄 제한은 이름 Text가 진다.
+    // #4797: 바깥은 점을 함께 담는 View, 한 줄 제한은 이름 칸 Text가 진다.
     expect(flatten(line().props.style).flexDirection).toBe('row');
-    const lead = screen.getByText('김민수, 이하늘');
-    expect(lead.props.numberOfLines).toBe(1);
-    expect(flatten(lead.props.style).flexShrink).toBe(1);
     expect(flatten(screen.getByText(' 작성 중').props.style).flexShrink).toBe(0);
+  });
+
+  it('둘이면 이름마다 자기 한 줄 칸에서 줄어든다 — 첫 이름이 길어도 둘째 사람이 남는다 (#5582 R2-M1)', () => {
+    render(<TypingBar segments={typingVisualSegments(['김민수 프로덕트디자인 리드 겸 서비스기획 총괄', '이하늘'])} />);
+    // 앞 판은 「A, B」가 한 줄 제한 Text 하나라 넘치면 뒤 이름부터 잘렸다. 이제 이름 칸이 둘이고, 각자 한 줄 제한·줄어듦이다.
+    const cells = screen.getAllByTestId('composer-typing-name');
+    // 두 이름은 서로의 안에 있지 않다(한쪽이 줄어도 다른 쪽을 끌고 가지 않는다). 쉼표는 첫 이름 칸 안이라 함께 잘린다.
+    expect(cells.map(cell => textOf(cell))).toEqual(['김민수 프로덕트디자인 리드 겸 서비스기획 총괄,', '이하늘']);
+    for (const cell of cells) {
+      expect(cell.props.numberOfLines).toBe(1);
+      expect(flatten(cell.props.style).flexShrink).toBe(1);
+    }
+    expect(screen.queryByText('김민수 프로덕트디자인 리드 겸 서비스기획 총괄, 이하늘')).toBeNull();
+    // 칸 안에서도 이름만 사람 잉크로 굵다.
+    expect(flatten(screen.getByText('김민수 프로덕트디자인 리드 겸 서비스기획 총괄').props.style).fontWeight).toBe('700');
+    expect(flatten(screen.getByText(',').props.style ?? {}).fontWeight).toBeUndefined();
   });
 
   it('세 명부터 첫 이름 외 N명으로 접고, 낭독은 전체 인원수를 말한다', () => {
@@ -139,7 +165,9 @@ describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
         label={typingLabel(['김민수', '이하늘', '박도윤'])}
       />,
     );
-    expect(screen.getByText('김민수 외 2명')).toBeTruthy();
+    // 이름 칸 「김민수」 + 줄지 않는 칸 「 외 2명」(#5582: 이름만 줄어든다).
+    expect(screen.getByText('김민수')).toBeTruthy();
+    expect(flatten(screen.getByText(' 외 2명').props.style).flexShrink).toBe(0);
     expect(flatten(screen.getByText('김민수').props.style).color).toBe(color.text);
     expect(screen.queryByText('이하늘')).toBeNull();
     expect(screen.queryByText('박도윤')).toBeNull();

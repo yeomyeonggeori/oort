@@ -63,8 +63,7 @@ function createMirror(node: HTMLTextAreaElement): HTMLTextAreaElement {
   const mirror = node.ownerDocument.createElement(node.tagName) as HTMLTextAreaElement;
   mirror.setAttribute(AUTO_GROW_MIRROR_ATTR, "");
   // 보조기술에서 뺀다. 스타일시트를 읽지 않는 jsdom 시험의 `getByRole("textbox")`도 이 표지로 거울을 건너뛴다(M-5).
-  // 값을 `String(true)`로 쓰는 것은 사전 장부(direct-copy)가 영어 한 낱말 글자(`"true"`)를 화면 문구로 세기 때문이다.
-  mirror.setAttribute("aria-hidden", String(true));
+  mirror.setAttribute("aria-hidden", "true");
   mirror.tabIndex = -1;
   mirror.readOnly = true;
   mirror.inert = true;

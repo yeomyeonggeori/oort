@@ -49,6 +49,20 @@ export function extractDirectCopy(file, source, knownKeys = []) {
     }
     return false;
   }
+  // `el.setAttribute(name, value)`의 값은 JSX 속성 값과 같은 규칙이다: 이름이 문구 속성(`aria-label`·`title` …)이 아니면 기술 값이다.
+  // 앞 판은 `setAttribute("aria-hidden", "true")`의 `"true"`를 영어 한 낱말 문구로 셌다(#5582, design-review R2-N1).
+  function technicalAttributeValue(node) {
+    const call = node.parent;
+    if (!call || !ts.isCallExpression(call)) return false;
+    const callee = call.expression.getText(sf);
+    if (!/(?:^|\.)setAttribute(?:NS)?$/.test(callee)) return false;
+    const ns = callee.endsWith('NS');
+    const name = call.arguments[ns ? 1 : 0];
+    // 속성 이름(`"role"`·`"hidden"`)은 어떤 경우에도 화면 문구가 아니다.
+    if (node === name) return true;
+    if (call.arguments[ns ? 2 : 1] !== node || !name) return false;
+    return (ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) && !COPY_NAME.test(name.text);
+  }
   function visit(node) {
     if (ts.isCallExpression(node) && /(?:^|\.)formatMessage$/.test(node.expression.getText(sf))) {
       const key = node.arguments[0];
@@ -56,7 +70,7 @@ export function extractDirectCopy(file, source, knownKeys = []) {
     }
     const literal = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
       || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node);
-    if (literal && !ignored(node)) {
+    if (literal && !ignored(node) && !technicalAttributeValue(node)) {
       const p = node.parent;
       const isName = (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)) && p.name === node;
       const text = node.text.trim();

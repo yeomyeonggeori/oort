@@ -13,7 +13,7 @@ import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 import { TypingLine } from "./TypingLine";
-import { typingLineParts } from "./typingLineParts";
+import { typingLeadCells, typingLineParts } from "./typingLineParts";
 
 // =============================================================================
 // 「작성 중」 줄 (#5567): 카드 아래 늘 잡아 둔 한 줄, 문구는 ko/en 사전, 잘리는 것은 이름(조사째)이고 서술어는 안 잘린다.
@@ -123,6 +123,40 @@ describe("typingLineParts — 사전 문장을 이름(조사째) | 서술어로 
       lead: [{ text: "누군가 작성 중…", name: false }],
       tail: "",
     });
+  });
+});
+
+describe("typingLeadCells — 이름마다 한 칸, 조사는 자기 이름 칸 안 (#5582 R2-M1 · W-3)", () => {
+  const cellTexts = (parts: ReturnType<typeof typingLineParts>) =>
+    typingLeadCells(parts?.lead ?? []).map((cell) => ({ text: cell.pieces.map((piece) => piece.text).join(""), name: cell.name }));
+
+  it("둘: 「○○님,」 · 「 」 · 「△△님이」 — 첫 이름의 「님,」도 그 이름과 함께 잘린다(고아 조사가 없다)", () => {
+    expect(cellTexts(typingLineParts(ko, ["한지후", "오민재"]))).toEqual([
+      { text: "한지후님,", name: true },
+      { text: " ", name: false },
+      { text: "오민재님이", name: true },
+    ]);
+    // 칸 안에서도 이름만 굵다.
+    expect(typingLeadCells(typingLineParts(ko, ["한지후", "오민재"])?.lead ?? [])[0]?.pieces).toEqual([
+      { text: "한지후", name: true },
+      { text: "님,", name: false },
+    ]);
+  });
+
+  it("하나 · 셋부터: 이름 칸 하나(「○○님이」 · 「○○님」), 영어 둘: 「A」 · 「 and 」 · 「B」", () => {
+    expect(cellTexts(typingLineParts(ko, ["한지후"]))).toEqual([{ text: "한지후님이", name: true }]);
+    expect(cellTexts(typingLineParts(ko, ["한지후", "오민재", "서하윤"]))).toEqual([{ text: "한지후님", name: true }]);
+    expect(cellTexts(typingLineParts(en, ["Jihu", "Minjae"]))).toEqual([
+      { text: "Jihu", name: true },
+      { text: " and ", name: false },
+      { text: "Minjae", name: true },
+    ]);
+  });
+
+  it("칸을 이어 붙이면 줄어드는 쪽과 한 글자도 다르지 않다", () => {
+    for (const parts of [typingLineParts(ko, ["한지후", "오민재"]), typingLineParts(en, ["Jihu", "Minjae", "Hayun"])]) {
+      expect(cellTexts(parts).map((cell) => cell.text).join("")).toBe(parts?.lead.map((piece) => piece.text).join(""));
+    }
   });
 });
 

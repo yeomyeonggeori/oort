@@ -3,7 +3,6 @@ import {
   liveTypists,
   mergeTypingSignal,
   pruneTypingSignals,
-  TYPING_AGGREGATE_THRESHOLD_FALLBACK,
   type TypingSignal,
 } from "@momo/core/features/chat/typing";
 import type { TypingFrame } from "@momo/core/lib/realtimeEvents";
@@ -33,14 +32,8 @@ import type { TypingFrame } from "@momo/core/lib/realtimeEvents";
 const SWEEP_MS = 1_000;
 
 let signals: readonly TypingSignal[] = [];
-/**
- * 서버가 마지막으로 말한 뭉치기 임계.
- *
- * grant 응답에서만 온다(`aggregateThreshold`). 읽기만 하는 사람은 grant를 받을 이유가
- * 없으므로 미러가 기본값이고, 한 번이라도 발행해 본 뒤에는 서버 값이 이긴다. 갈려도
- * 무해한 유일한 숫자다 — 3명에서 뭉치는 대신 4명에서 뭉치는 화면은 틀린 말을 하지 않는다.
- */
-let threshold = TYPING_AGGREGATE_THRESHOLD_FALLBACK;
+// 뭉치기 임계는 저장하지 않는다(#5582 R2-M3). 앞 판은 grant의 `aggregateThreshold`를 여기 담고 구독 훅을 냈지만 화면이 한 번도
+// 읽지 않았다. 뭉치는 규칙은 사전의 one/two/many 세 꼴이 정하는 고정 규칙이다(`docs/design-system/typing-line.md` 「뭉치는 수」).
 
 const listeners = new Set<() => void>();
 
@@ -73,20 +66,8 @@ export function sweepTyping(nowMs = Date.now()): void {
   emit(next);
 }
 
-/** grant가 알려 준 서버 값을 기억한다. */
-export function rememberTypingThreshold(value: number): void {
-  if (!Number.isFinite(value) || value === threshold) return;
-  threshold = value;
-  for (const listener of listeners) listener();
-}
-
-export function typingThreshold(): number {
-  return threshold;
-}
-
 /** 세션 해제 · 워크스페이스 전환 · 테스트. */
 export function resetTyping(): void {
-  threshold = TYPING_AGGREGATE_THRESHOLD_FALLBACK;
   if (signals.length === 0) return;
   emit([]);
 }
@@ -138,7 +119,3 @@ export function useTypists(options: {
   });
 }
 
-/** 저장소가 아는 임계를 구독한다 (grant가 도착하면 바뀐다). */
-export function useTypingThreshold(): number {
-  return useSyncExternalStore(subscribe, typingThreshold, typingThreshold);
-}

@@ -1,7 +1,7 @@
 import { RespondingDots } from "@/features/agents/RespondingIndicator";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
-import { blockedLineSentences, typingLineParts } from "./typingLineParts";
+import { blockedLineSentences, typingLeadCells, typingLineParts } from "./typingLineParts";
 
 // =============================================================================
 // 「작성 중」 줄 — 입력 카드 바로 아래 한 줄 (#5567, owner 11-09: 입력창 안 오른쪽 자리는 일반적이지 않다는 지적).
@@ -50,6 +50,10 @@ import { blockedLineSentences, typingLineParts } from "./typingLineParts";
 // 설명(`title`)과 같은 값이다. 칸이 한 줄이라 넘치면 문장을 통째로 버린다(`blockedLineSentences`) — 폰 폭에서는 첫 문장만 보이고,
 // 온전한 문장은 보조기술과 `title`이 받는다.
 // =============================================================================
+
+/** 이름 칸: 넘치면 자기 안에서 말줄임된다(#5582 R2-M1). 사이 글 칸: 앞뒤 빈칸을 지키고 줄지 않는다. */
+const NAME_CELL_CLASS = "min-w-0 truncate";
+const TEXT_CELL_CLASS = "whitespace-pre";
 
 export function TypingLine({
   memberIds,
@@ -102,22 +106,32 @@ export function TypingLine({
           <span className="sr-only" data-testid="composer-typing-label">
             {parts.label}
           </span>
-          {/* 줄어드는 쪽: 이름과 거기 붙은 조사. `title`은 포인터 사용자에게 얹히는 보너스다. */}
+          {/* 줄어드는 쪽: 이름과 거기 붙은 조사. 이름마다 격자 칸 하나라 이름마다 자기 칸에서 줄어든다(#5582 R2-M1, `typing-names`):
+              짧은 이름은 온전하고 긴 이름이 남는 폭을 나눠 말줄임된다. 조사는 자기 이름 칸 안이라 이름과 함께 잘린다(W-3,
+              `typingLeadCells`). `title`은 포인터 사용자에게 얹히는 보너스다. */}
           <span
-            className="ml-1 min-w-0 truncate"
+            className="typing-names ml-1 min-w-0"
             aria-hidden="true"
             data-testid="composer-typing-lead"
             title={parts.label}
           >
-            {parts.lead.map((piece, index) =>
-              piece.name ? (
-                <span key={index} className="font-bold text-ink">
-                  {piece.text}
-                </span>
-              ) : (
-                piece.text
-              )
-            )}
+            {typingLeadCells(parts.lead).map((cell, index) => (
+              <span
+                key={index}
+                className={cell.name ? NAME_CELL_CLASS : TEXT_CELL_CLASS}
+                data-typing-name={cell.name ? "" : undefined}
+              >
+                {cell.pieces.map((piece, at) =>
+                  piece.name ? (
+                    <span key={at} className="font-bold text-ink">
+                      {piece.text}
+                    </span>
+                  ) : (
+                    piece.text
+                  )
+                )}
+              </span>
+            ))}
           </span>
           {/* 안 줄어드는 쪽: 서술어. 앞 빈칸을 `whitespace-pre`가 지켜 잘린 이름과 서술어가 붙지 않는다. 「외 N명」의 숫자가
               바뀌어도 폭이 흔들리지 않게 자릿폭을 고정한다(N-2). */}

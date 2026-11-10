@@ -25,6 +25,17 @@ describe('new direct UI copy guard sabotage', () => {
     }
   });
 
+  it('treats DOM setAttribute values like JSX attribute values: technical unless the attribute carries copy (#5582)', () => {
+    // 앞 판은 `"true"`를 영어 한 낱말 문구로 셌다 — 그래서 거울 textarea가 `String(true)`로 우회했다(R2-N1).
+    expect(extract('mirror.setAttribute("aria-hidden", "true");').count).toBe(0);
+    expect(extract('node.setAttributeNS(null, "role", "presentation");').count).toBe(0);
+    // 문구를 나르는 속성은 그대로 센다.
+    expect(extract('node.setAttribute("aria-label", "Close");').count).toBe(1);
+    expect(extract('node.setAttribute("title", "삭제");').count).toBe(1);
+    // 같은 낱말이라도 setAttribute 값 자리가 아니면 예전처럼 센다.
+    expect(extract('const word = "true";').count).toBe(1);
+  });
+
   it('ignores line movement but rejects a new file and increases in either language', () => {
     const source = '<Text>저장</Text>; <Text>Continue</Text>;';
     expect(extract(source).count).toBe(extract('\n\n' + source).count);

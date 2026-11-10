@@ -69,14 +69,19 @@ describe("「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다 (#5567)
     expect(composer).not.toMatch(/meta=\{[\s\S]*?<TypingLine[\s\S]*?send=\{/);
   });
 
-  it("줄은 아무도 치지 않을 때도 서 있고(높이 = text-meta 행간 + 위아래 숨 8), 카드 아래를 그 줄 칸이 맡는다", () => {
+  it("줄은 아무도 치지 않을 때도 서 있고(높이 = text-meta 행간 + 위아래 숨, 넓은 창 8 · 폰 폭 4), 카드 아래를 그 줄 칸이 맡는다", () => {
     // 줄 상자는 조건 없이 그려지고, 안의 문장만 서고 진다.
     expect(typingLine).toMatch(/return \(\s*<div\s+className="typing-line"/);
     expect(typingLine).toMatch(/\{parts !== null && \(/);
     const utility = /@utility typing-line \{([\s\S]*?)\n\}/.exec(tokens)?.[1] ?? "";
-    // 글 한 줄만큼의 칸이면 잉크가 카드 밑변·판 밑변에서 3~4px에 끼고 그림자 띠 안에 선다(design-review M-1).
-    expect(utility).toMatch(/block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/);
-    expect(utility).toMatch(/padding-block: var\(--spacing-2\);/);
+    // 글 한 줄만큼의 칸이면 잉크가 카드 밑변·판 밑변에서 3~4px에 끼고 그림자 띠 안에 선다(design-review M-1). 폰 폭은 그림자가
+    // 없어 숨이 한 단계 아래(4)다 — 자판이 올라온 화면에서 대화를 22가 아니라 14만 내준다(#5582 R2-M2, `typingLineFit.browser.test.ts`).
+    const wideAt = utility.indexOf("@media (width >= 600px)");
+    expect(wideAt).toBeGreaterThan(-1);
+    expect(utility.slice(wideAt)).toMatch(/block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/);
+    expect(utility.slice(wideAt)).toMatch(/padding-block: var\(--spacing-2\);/);
+    expect(utility.slice(0, wideAt)).toMatch(/block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-1\)\);/);
+    expect(utility.slice(0, wideAt)).toMatch(/padding-block: var\(--spacing-1\);/);
     expect(utility).toMatch(/overflow: hidden;/);
     expect(tokens).toMatch(/--text-meta--line-height: calc\(var\(--type-rem\) \* 1\.125\);/);
     // 폼의 아래 여백은 0이다. 폰 폭은 `pb-0`, 넓은 창은 독 규칙이 정한다.

@@ -562,5 +562,8 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     expect(grow).toContain('"autogrow-mirror"');
     expect(grow).not.toMatch(/cssText|visibility\s*:|position\s*:|pointer-events/);
     expect(grow).not.toMatch(/mirror\.style\.(?!width\b)[A-Za-z]+\s*=/);
+    // CSSOM 메서드 꼴도 같은 우회다(#5582, design-review R2-N1): `style.setProperty("visibility", …)`는 위 두 줄을 피해 갔다.
+    expect(grow).not.toMatch(/\.style\.(?:setProperty|removeProperty)\s*\(/);
+    expect(grow).not.toMatch(/setAttribute\(\s*["'`]style["'`]/);
   });
 });
