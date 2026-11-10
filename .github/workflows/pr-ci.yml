@@ -777,29 +777,44 @@ jobs:
       - name: test — @momo/core (vitest)
         run: npm run test --workspace @momo/core
 
-      # 직접 문구 장부(#5589)가 트리만으로 못 보는 두 가지를 PR base와 비교해 막는다: 기준·봉인(anchor·anchorHead·
-      # ANCHOR_SEAL) 손대기, 그리고 파일마다 (lowered ?? anchor)를 base보다 올리기(올리는 길은 raise뿐). 새 raise는
-      # 파일별로 로그에 찍힌다. base 커밋 하나만 얕게 받는다. `land --check`는 여기 두지 않는다 — CI는 병합 ref에서
-      # 돌아서, 트랙이 움직여 장부 JSON이 자동으로 합쳐지면 바이트 비교가 헛빨강을 낸다. 기준을 다시 잡는 PR은
-      # direct-copy.mjs(정책 경로)의 ANCHOR_SEAL을 바꾸므로 정책 승인 라벨이 어차피 필요하다. 같은 라벨을 이벤트
-      # 페이로드가 아니라 API로 지금 값을 읽어서, 라벨을 붙인 뒤에는 이 잡을 다시 돌리기만 하면 된다. 조회가 실패하면
-      # 승인 없음으로 본다(기준이 그대로인 PR은 영향이 없다).
-      - name: 직접 문구 장부 — PR base와 비교(기준·봉인·lowered, 새 raise 요약)
-        if: github.event_name == 'pull_request'
+      # 직접 문구 장부(#5589)가 트리만으로 못 보는 두 가지를 병합 ref의 base와 비교해 막는다: 기준·봉인(anchor·
+      # anchorHead·ANCHOR_SEAL) 손대기, 그리고 파일마다 (lowered ?? anchor)를 base보다 올리기(올리는 길은 raise뿐).
+      # 새 raise는 파일별로 로그에 찍힌다. `land --check`는 여기 두지 않는다 — CI는 병합 ref에서 돌아서, 트랙이 움직여
+      # 장부 JSON이 자동으로 합쳐지면 바이트 비교가 헛빨강을 낸다.
+      #   · base = 병합 ref(HEAD)의 첫 부모 = 이 실행이 합친 트랙 끝. `github.event.pull_request.base.sha`는 GitHub가
+      #     PR 머리와 트랙의 merge-base로 둬서, 트랙이 움직인 뒤에는 남의 raise를 이 PR의 새 raise로 찍고 승인된
+      #     재기준 뒤에는 헛빨강을 낸다(#5589 r2 M1). 얕은 체크아웃은 부모를 숨기므로(`HEAD^1` 실패) 커밋 객체를 바로
+      #     읽고, 부모가 둘이 아니면(병합 ref가 아니면) 멈춘다. 그 커밋 하나만 얕게 받는다.
+      #   · 기준을 다시 잡는 PR은 direct-copy.mjs(정책 경로)의 ANCHOR_SEAL을 바꾸므로 정책 승인 라벨이 어차피 필요하다.
+      #     같은 라벨을 이벤트 페이로드가 아니라 API로 지금 값을 읽어서, 라벨을 붙인 뒤에는 이 잡을 다시 돌리기만 하면
+      #     된다. 조회가 실패하면 승인 없음으로 본다(기준이 그대로인 PR은 영향이 없다). 토큰은 셸의 라벨 조회에만 쓰고
+      #     node(PR이 바꾼 의존이 실리는 프로세스)에는 넘기지 않는다.
+      #   · 세 표면 `check`를 먼저 돌린다(git 없음): 표면별 시험 파일이 지워져도 CI가 웹·폰을 본다.
+      #   · 앞 단계(vitest)가 빨강이어도 돈다 — 새 raise 요약이 로그에 남아야 한다.
+      # 이 단계는 `packages/momo-core/src/i18n/direct-copy-ci.test.ts`가 가짜 저장소의 얕은 병합 ref에서 그대로 돌린다.
+      - name: 직접 문구 장부 — 병합 ref의 base와 비교(세 표면 check, 기준·봉인·lowered, 새 raise 요약)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          tool=packages/momo-core/src/i18n/tooling/direct-copy.mjs
+          env -u GH_TOKEN node "$tool" check
+          parents="$(git cat-file -p HEAD | awk '/^parent /{print $2}')"
+          if [ "$(printf '%s\n' "$parents" | grep -c .)" -ne 2 ]; then
+            echo "직접 문구 장부: HEAD가 PR 병합 ref(부모 둘)가 아니에요 — 비교할 base를 정할 수 없어요" >&2
+            exit 1
+          fi
+          base="$(printf '%s\n' "$parents" | head -n 1)"
+          git fetch --no-tags --depth=1 origin "$base"
+          labels="$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' || true)"
           approved=false
-          if gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' | grep -Fxq policy-change-approved; then
+          if printf '%s\n' "$labels" | grep -Fxq policy-change-approved; then
             approved=true
           fi
-          DIRECT_COPY_REANCHOR_APPROVED="$approved" \
-            node packages/momo-core/src/i18n/tooling/direct-copy.mjs compare-base "$BASE_SHA"
+          env -u GH_TOKEN DIRECT_COPY_REANCHOR_APPROVED="$approved" node "$tool" compare-base "$base"
 
   node_web:
     name: TS web — 타입체크 + 단위 시험

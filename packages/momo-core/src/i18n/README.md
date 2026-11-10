@@ -282,9 +282,14 @@ Allowed count per file = (`lowered` ?? `anchor`) + Σ `raises`, per dimension:
   and alert/toast/`setError`-like calls. The nearest thing that names a literal's role decides. A literal
   that is compared (`kind === "dm"`, `case "idle":`), passed as an argument (`toLocaleString("ko-KR")`,
   `failureMessage("list", e)`, `setStatus("loading")`), used as an index, or sits in a style object is not
-  copy; neither is English in an `Error` or a message argument. Until #5589's fix round the clients counted
-  any one-word literal: about 90% were class names and state words, and a strict ratchet turns that noise
-  into landing stops.
+  copy; neither is English in an `Error` or a message argument. A string literal that **is** a key of the
+  en-US catalog is a message key, not copy, wherever it sits (`title: "releaseNotes.v0145.summary"` in a
+  release-notes file, `offlineTitle: "connection.card.offlineTitle"` in a key map): the catalog decides
+  by exact match, never the dotted shape, so `"momo.message"` or a key the catalog lacks still counts.
+  `anchor <commit>` reads that commit's catalog, so it gives the same seal from any checkout. Until
+  #5589's fix rounds the clients counted any one-word literal (about 90% class names and state words) and
+  the core counted its key maps (119 of 168 core `en`); a strict ratchet turns that noise into landing
+  stops.
 - `cat` — sentences assembled from dictionary output: a `formatMessage(...)` inside a template with
   other text or another span, `formatMessage(...) + …`, or `[formatMessage(...), …].join(…)`.
   Translate the whole sentence as one key with arguments instead (ADR-0213 §4).
@@ -304,8 +309,11 @@ explicit raise"; lower fails with "run `shrink`", so a later addition cannot spe
 `check` reads no git and runs in each tree's `npm test` (core `direct-copy.test.ts`, web
 `src/testing/directCopy.test.ts`, mobile `__tests__/directCopy.test.ts`) and in `i18n:check`.
 
-PR CI's core job also compares the ledger with the PR base (`compare-base`, after fetching that one
-commit): the anchor, `anchorHead` and `ANCHOR_SEAL` must equal the base's unless the PR carries the
+PR CI's core job also runs `check` on all three surfaces and compares the ledger with the **base of the
+PR merge ref** — the merge commit's first parent, i.e. the track tip that run merged (`compare-base`,
+after fetching that one commit). Not GitHub's `pull_request.base.sha`: that is the merge-base, so once
+the track moved it would list another PR's raises as this PR's and go RED after an approved re-anchor
+(#5598 review r2; `direct-copy-ci.test.ts` runs the workflow step on a shallow merge ref). The anchor, `anchorHead` and `ANCHOR_SEAL` must equal the base's unless the PR carries the
 `policy-change-approved` label (a re-anchor edits `direct-copy.mjs`, a policy path, so it needs that
 approval anyway), and no file's `(lowered ?? anchor)` may go above the base's. It prints the new raises
 file by file. `land --check` is not run in CI: CI runs on the PR merge ref, where an auto-merged ledger
@@ -316,7 +324,7 @@ node packages/momo-core/src/i18n/tooling/direct-copy.mjs check            # core
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink           # lower only; refuses if anything went up
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs raise <file> --issue <N> --reason "<why it waits for P1>"
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs land --base origin/<track> --ours <branch tip> [--check] [--allow-many-raises]
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs compare-base <PR base commit>  # PR CI; base must be fetched
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs compare-base <merge ref base>  # PR CI; base must be fetched
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs report           # totals per surface (scan and anchor)
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs anchor <commit>  # planner only: prints a new ledger + seal
 ```
@@ -359,6 +367,8 @@ message kept in a variable and joined later, JSX siblings (`{formatMessage(k)} {
 lower bound. **P1 review checklist item:** no sentence is assembled from a message and other text or
 another message, however it is joined; it becomes one key with arguments.
 
-P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Re-anchoring is
+P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Replacing a literal
+with a key that is in the en-US catalog lowers `ko` and adds no `en`; add the key to the catalog in the
+same change. Re-anchoring is
 for the planner at a stack boundary (to fold reviewed raises and lock in reductions), never to absorb
 unexplained growth. Extracted copy text and user data are never written to the ledger.
