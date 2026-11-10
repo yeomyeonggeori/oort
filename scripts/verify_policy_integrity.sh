@@ -259,7 +259,8 @@ policy_path() {
     scripts/tests/test_license_gate.sh|\
     scripts/tests/test_policy_integrity_gate.sh|\
     scripts/tests/test_trusted_policy_runner.sh|\
-    scripts/tests/fixtures/policy-integrity/*)
+    scripts/tests/fixtures/policy-integrity/*|\
+    packages/momo-core/src/i18n/tooling/direct-copy.mjs)
       return 0
       ;;
     *)

@@ -1,4 +1,43 @@
+export type Surface = 'core' | 'web' | 'mobile';
+export interface CopyCount { ko?: number; en?: number; cat?: number }
+export interface Raise extends CopyCount { file: string; issue: number; reason: string }
+export interface Ledger {
+  version: number;
+  policy?: string;
+  anchorHead: string;
+  anchor: Record<string, CopyCount>;
+  lowered: Record<string, CopyCount>;
+  raises: Raise[];
+}
+export const LEDGER_PATH: string;
+export const TOOL_PATH: string;
+export const LEDGER_VERSION: number;
+export const MAX_NEW_RAISES_PER_LANDING: number;
+export const ANCHOR_SEAL: string;
+export const DIMENSIONS: readonly ['ko', 'en', 'cat'];
+export const POLICY: string;
+export const SURFACES: Readonly<Record<Surface, { roots: string[]; files: string[]; exclude?: RegExp }>>;
+export function isCopyName(name: string): boolean;
 export function isProductSource(file: string): boolean;
-export function extractDirectCopy(file: string, source: string, knownKeys?: string[]): { count: number; unknownKeys: string[] };
-export function compareCounts(baseline: Record<string, number>, actual: Record<string, number>): { increases: string[]; decreases: string[] };
-export function checkSurface(surface: 'web' | 'mobile'): Record<string, number>;
+export function surfaceOf(file: string): Surface | undefined;
+export function extractDirectCopy(file: string, source: string, knownKeys?: string[]):
+  { ko: number; en: number; cat: number; unknownKeys: string[] };
+export function surfaceFiles(surface: Surface, root?: string): string[];
+export const KEY_CATALOG_DIR: string;
+export function messageKeys(root?: string): string[];
+export function scanSurface(surface: Surface, options?: { root?: string; readSource?: (file: string) => string; files?: string[]; keys?: string[] }):
+  { counts: Record<string, Required<CopyCount>>; unknownKeys: string[] };
+export function anchorSeal(ledger: Ledger): string;
+export function validateLedger(ledger: unknown, options?: { seal?: string }): string[];
+export function ceilings(ledger: Ledger): Record<string, Required<CopyCount>>;
+export function compareSurface(ledger: Ledger, surface: Surface, counts: Record<string, CopyCount>): { increases: string[]; decreases: string[] };
+export function readLedger(path?: string): Ledger;
+export function checkSurface(surface: Surface, options?: { root?: string; ledger?: unknown; seal?: string }): Record<string, Required<CopyCount>>;
+export function shrinkLedger(ledger: Ledger, counts: Record<string, CopyCount>): { ledger: Ledger; refused: string[] };
+export function raiseLedger(ledger: Ledger, file: string, actual: CopyCount | undefined, entry: { issue: number; reason: string }): Ledger;
+export function landLedger(base: unknown, ours: unknown, counts: Record<string, CopyCount>, options?: { allowManyRaises?: boolean }):
+  { ledger: Ledger; refused: string[]; notes: string[]; carried: number; fresh: Raise[] };
+export function compareWithBase(base: unknown, head: Ledger, options?: { baseSeal?: string; headSeal?: string; reanchorApproved?: boolean }):
+  { problems: string[]; notes: string[]; fresh: Raise[]; removed: Raise[] };
+export function dirtyScannedFiles(porcelain: string): string[];
+export function serializeLedger(ledger: Ledger): string;
