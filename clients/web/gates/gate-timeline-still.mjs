@@ -142,18 +142,6 @@ const KNOWN_FAILURE_LIST = [
     maxMissingFrames: 0,
   },
   {
-    key: "reaction-up-added|chromium|*",
-    issue: "Chromium 위 읽기 중 화면 위 밖 줄에 반응이 붙으면 보던 줄이 칩 줄 높이만큼(32px · 폰 폭 48px) 밀리고 그대로(바로잡지 않음, 실행에 따라 0.4px)",
-    maxUnexplainedPx: 48,
-    maxReversals: 0,
-  },
-  {
-    key: "reaction-up-removed|chromium|390",
-    issue: "Chromium 폰 폭 위 읽기 중 반응이 떨어지면 보던 줄 48px(추가와 같은 뿌리)",
-    maxUnexplainedPx: 48,
-    maxReversals: 0,
-  },
-  {
     key: "reaction-bottom-added|webkit|*",
     issue: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px(1280 · 900)",
     maxUnexplainedPx: 2,
@@ -302,8 +290,8 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
 
 async function newContext(browser, vp, { unfurls = {} } = {}) {
   const context = await browser.newContext({ viewport: vp, deviceScaleFactor: 2, locale: "ko-KR" });
-  // 옛 쪽 응답은 2.5초 늦게 온다: 맨 위에 닿은 뒤 재기 창을 연 다음에 앞에 붙는다.
-  const backend = await installBackend(context, { port, rows, paged: true, olderDelayMs: 2_500, unfurls });
+  // 옛 쪽 응답은 0.9초 늦게 온다(더 불러오기 장면만 2.5초로 늘려 재기 창 안에서 붙게 한다).
+  const backend = await installBackend(context, { port, rows, paged: true, olderDelayMs: 900, unfurls });
   const page = await context.newPage();
   return { context, backend, page };
 }
@@ -447,6 +435,11 @@ async function contentScenes(browser, engine, vp, recordOnly) {
     if (sceneNames.includes("card") || sceneNames.includes("reaction")) {
       await placeAnchor(page);
       await wait(1_500);
+      // 앵커를 찾아 올라가는 동안 가상 목록이 옛 쪽을 부를 수 있다. 그 응답이 붙기 전에 위 읽기 창을 열면 앞 붙이기가 장면에 섞인다(실측: 옛 쪽
+      // 응답을 2.5초로 늦춘 판에서 Chromium 반응 위 읽기가 칩 높이만큼 밀림) — 날아가는 읽기가 끝나고 붙을 때까지 기다린다.
+      const settleDeadline = Date.now() + 10_000;
+      while (backend.state.olderInFlight > 0 && Date.now() < settleDeadline) await wait(100);
+      await wait(600);
       const anchorRow = rowAt(ANCHOR_INDEX);
       const anchorWatch = { name: "w", messageId: anchorRow.id, edge: "top" };
       if (sceneNames.includes("card")) {
@@ -494,6 +487,8 @@ async function contentScenes(browser, engine, vp, recordOnly) {
     if (sceneNames.includes("older")) {
       await measureCell(meta("older", "위로 더 불러오기", { kind: "reading" }), async () => {
         const readsBefore = backend.state.olderReads;
+        // 이 장면만 옛 쪽 응답을 2.5초로 늦춘다: 맨 위에 닿은 뒤 재기 창을 연 다음에 앞에 붙는다.
+        backend.state.olderDelayMs = 2_500;
         // 사람이 맨 위까지 올린다(가상 목록이 위쪽 줄을 재며 스스로 바로잡는 동안을 지나 보낸다). 옛 쪽 응답은 0.9초 늦게 온다.
         await page.evaluate((selector) => {
           document.querySelector(selector).scrollTop = 0;
@@ -836,20 +831,27 @@ async function main() {
 
   const failures = cells.filter((cell) => cell.verdict === "FAIL" || cell.verdict === "장면 못 만듦");
   const notMeasured = cells.filter((cell) => cell.verdict === "재지 않음");
-  const measured = cells.filter((cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FAIL" || cell.verdict.startsWith("알려진 실패") || cell.verdict.startsWith("기록만"));
+  const notBuilt = cells.filter((cell) => cell.verdict === "알려진 실패(장면 못 만듦)");
+  const measured = cells.filter(
+    (cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FAIL" || cell.verdict === "알려진 실패" || cell.verdict.startsWith("기록만")
+  );
   // 잰 칸도 「재지 않음」 칸도 없으면(아무 장면도 돌지 않았다) 실패다. 부하로 모두 「재지 않음」이면 아래의 NOT-MEASURED(종료 3)다 — 어느 쪽도 PASS 가 아니다.
-  const empty = nothingRan(measured.length + notMeasured.length, "timeline-still");
+  const empty = nothingRan(measured.length + notMeasured.length + notBuilt.length, "timeline-still");
   if (failures.length > 0 || empty !== null) {
     for (const cell of failures) console.error(`FAIL ${cell.set} ${cell.scene} [${cell.engine} ${cell.width}] ${(cell.reasons ?? []).join(" · ")}`);
     if (empty !== null) console.error(`FAIL ${empty}`);
     process.exit(1);
   }
-  const known = cells.filter((cell) => cell.verdict.startsWith("알려진 실패"));
+  const known = cells.filter((cell) => cell.verdict === "알려진 실패");
   if (notMeasured.length > 0) {
-    console.log(`NOT-MEASURED timeline-still: ${notMeasured.length}칸 재지 않음(부하) · 잰 칸 ${measured.length} · 알려진 실패 ${known.length} — 통과로 치지 않는다`);
+    console.log(
+      `NOT-MEASURED timeline-still: ${notMeasured.length}칸 재지 않음(부하) · 잰 칸 ${measured.length} · 알려진 실패 ${known.length} · 알려진 장면 못 만듦 ${notBuilt.length} — 통과로 치지 않는다`
+    );
     process.exit(3);
   }
-  console.log(`PASS timeline-still: ${measured.length}칸 · 알려진 실패 ${known.length}(기록) — 되돌아옴 0 · 맨 아래 ≤1px · 위 읽기 ≤2px · 필 0`);
+  console.log(
+    `PASS timeline-still: ${measured.length}칸 · 알려진 실패 ${known.length}(기록) · 알려진 장면 못 만듦 ${notBuilt.length}(재지 못함) — 되돌아옴 0 · 맨 아래 ≤1px · 위 읽기 ≤2px · 필 0`
+  );
 }
 
 await main();

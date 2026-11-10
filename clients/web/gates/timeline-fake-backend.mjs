@@ -329,6 +329,9 @@ export async function installBackend(context, { port, rows = history(), paged = 
     offset: 0,
     failedTargets: [],
     olderReads: 0,
+    /** 아직 답하지 않은 옛 쪽 읽기 수, 그리고 그 응답의 지연(장면마다 바꿀 수 있다). */
+    olderInFlight: 0,
+    olderDelayMs,
     unfurlReads: 0,
     unfurlImageReads: 0,
   };
@@ -444,7 +447,9 @@ export async function installBackend(context, { port, rows = history(), paged = 
       const page = pool.slice(-limit);
       if (before !== null) {
         state.olderReads += 1;
-        await wait(olderDelayMs);
+        state.olderInFlight += 1;
+        await wait(state.olderDelayMs);
+        state.olderInFlight -= 1;
       }
       return json(route, { messages: page, ...(pool.length > page.length ? { nextBefore: page[0].seq } : {}) });
     }
