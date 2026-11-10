@@ -2,6 +2,8 @@ import 'react-native-url-polyfill/auto';
 import React from 'react';
 import {act, cleanup, render, screen} from '@testing-library/react-native';
 import {AppState, StyleSheet} from 'react-native';
+import {focusManager} from '@tanstack/react-query';
+import {REQUEST_TIMEOUT_MS} from '@momo/core/lib/http';
 import {
   createExpressionFixtureServer,
   type ExpressionFixtureRequest,
@@ -438,9 +440,9 @@ describe('소켓만 끊긴 동안 숨김 — 30초 주기 전체 읽기 (#5585 �
     await flush();
     world.hide(1); // 알림은 소켓으로만 오므로 이 기기에는 오지 않는다
     world.resetCounts();
-    // 주기 읽기 전(웹과 같은 30초 창): 아직 읽지 않았고 그림이 남아 있다.
+    // 주기 읽기 전(웹과 같은 30초 창): 아직 읽지 않았고 그림이 남아 있다. 숫자는 글자 그대로 쓴다(상수를 쓰면 숫자를 바꿔도 따라간다, r2 M1).
     await act(async () => {
-      jest.advanceTimersByTime(SOCKET_LOST_REFRESH_MS - 1_000);
+      jest.advanceTimersByTime(29_000);
     });
     await flush(1);
     expect(world.listCalls).toEqual([]);
@@ -462,9 +464,186 @@ describe('소켓만 끊긴 동안 숨김 — 30초 주기 전체 읽기 (#5585 �
     expect(world.imageCalls).toEqual([]);
     // 끊긴 채면 30초마다 다시 읽는다.
     await act(async () => {
-      jest.advanceTimersByTime(SOCKET_LOST_REFRESH_MS);
+      jest.advanceTimersByTime(30_000);
     });
     await flush();
     expect(world.listCalls).toEqual(['', '']);
+  });
+});
+
+describe('이어지지 않은 동안의 시계 — 틈의 시작부터 30초 · 앞에 있을 때만 · 떠나면 남지 않음 (#5585 보안 검수 r2 H1·M1)', () => {
+  // 박자는 글자 그대로 30초로 잰다(ADR-0218 §17 이 약속한 값). 상수를 가져다 쓰면 숫자를 5분으로 바꿔도 시험이 따라가 초록이다(r2 M1).
+  const BEAT = 30_000;
+  const layersOf = (name: string) =>
+    screen.queryAllByTestId(new RegExp(`^expression-image-${name}-large`)).length;
+  const textOf = (name: string) =>
+    screen
+      .queryAllByText(`:${name}:`)
+      .filter(node => !String(node.props.testID ?? '').startsWith('expression-label-')).length;
+
+  afterEach(() => {
+    // 남은 `false` 는 뒤 시험의 주기 읽기를 소리 없이 0으로 만든다.
+    focusManager.setFocused(undefined);
+  });
+
+  /** 진짜 저장소 + 가짜 세계. 목록 GET 이 나간 가짜 시각(ms)을 적는다. */
+  function clockStore() {
+    const world = new World();
+    world.add(1);
+    const readAt: number[] = [];
+    const inner = world.transport();
+    const transport = {
+      request: jest.fn(async (input: ExpressionFixtureRequest) => {
+        if (input.method === 'GET' && String(input.path).split('?')[0].endsWith('/expressions')) {
+          readAt.push(Date.now());
+        }
+        return inner.request(input);
+      }),
+    };
+    const store = realCreate(WS, ME, transport, makeFiles(), {read: () => null, write: jest.fn()}, undefined, null);
+    stores.push(store);
+    created.mockReturnValue(store);
+    return {world, readAt};
+  }
+
+  /** 틈의 시작(`gap`)에서 `ms` 가 지난 때까지 가짜 시계를 돌리고 받기를 마친다. */
+  async function until(gap: number, ms: number) {
+    await act(async () => {
+      jest.advanceTimersByTime(Math.max(0, gap + ms - Date.now()));
+    });
+    await flush(1);
+  }
+
+  it('틈의 시작(소켓이 실제로 끊긴 때 — 표시 유예 10초 포함)부터 30초에 전체 목록을 읽어, 그사이 숨긴 그림이 글자가 된다 (r2 H1 가: 수리 전 40초)', async () => {
+    expect(SOCKET_LOST_REFRESH_MS).toBe(BEAT);
+    // 한 박자의 목록 읽기는 다음 박자 전에 끝나거나 마감된다(목록 GET 마감 < 30초): 박자의 읽기가 겹치지 않는다.
+    expect(REQUEST_TIMEOUT_MS).toBeLessThan(BEAT);
+    const {world, readAt} = clockStore();
+    const one = <MessageBody key="a" body=":expr_1:" />;
+    const view = render(tree('connected', one));
+    await flush();
+    expect(layersOf('expr_1')).toBe(1);
+    const gap = Date.now();
+    view.rerender(tree('connecting', one)); // 소켓이 끊겼다 — 표시 상태는 유예 10초 동안 `connecting`
+    world.hide(1); // 알림은 소켓으로만 오므로 이 기기에는 오지 않는다
+    readAt.length = 0;
+    await until(gap, 10_000);
+    view.rerender(tree('disconnected', one)); // 유예 끝
+    await flush();
+    await until(gap, BEAT - 1_000);
+    expect(readAt).toEqual([]);
+    expect(layersOf('expr_1')).toBe(1);
+    await until(gap, BEAT);
+    await flush();
+    expect(readAt.map(at => at - gap)).toEqual([BEAT]);
+    expect(layersOf('expr_1')).toBe(0);
+    expect(textOf('expr_1')).toBe(1);
+  });
+
+  it('끊긴 채 다시 연결 사건(「지금 다시 연결」·네트워크 종류 바뀜)이 25초마다 이어져도 시계는 처음부터 돌지 않는다: 틈의 시작부터 30초마다 읽는다 (r2 H1 나: 수리 전 120초 동안 0번)', async () => {
+    const {world, readAt} = clockStore();
+    const one = <MessageBody key="a" body=":expr_1:" />;
+    const view = render(tree('connected', one));
+    await flush();
+    const gap = Date.now();
+    view.rerender(tree('connecting', one));
+    world.hide(1);
+    readAt.length = 0;
+    // 유예 끝(10초) 뒤 25초마다 다시 연결 사건이 온다: `connecting`(새 유예 10초) → `disconnected`. 소켓은 끝내 붙지 않는다.
+    const turns: Array<[number, Status | 'look']> = [
+      [10_000, 'disconnected'],
+      [BEAT + 1_000, 'look'],
+      [35_000, 'connecting'],
+      [45_000, 'disconnected'],
+      [70_000, 'connecting'],
+      [80_000, 'disconnected'],
+      [105_000, 'connecting'],
+      [115_000, 'disconnected'],
+    ];
+    const looked: number[] = [];
+    for (const [ms, turn] of turns) {
+      await until(gap, ms);
+      if (turn === 'look') {
+        looked.push(layersOf('expr_1'), textOf('expr_1'));
+        continue;
+      }
+      view.rerender(tree(turn, one));
+      await flush();
+    }
+    await until(gap, 4 * BEAT);
+    await flush();
+    // 30초 안에 숨긴 그림이 글자가 됐다(층 0 · 글자 1).
+    expect(looked).toEqual([0, 1]);
+    // 박자는 틈의 시작에 걸린 그대로다 — 다시 연결 사건이 시계를 처음부터 돌리지 않는다.
+    expect(readAt.map(at => at - gap)).toEqual([BEAT, 2 * BEAT, 3 * BEAT, 4 * BEAT]);
+    expect(layersOf('expr_1')).toBe(0);
+    expect(textOf('expr_1')).toBe(1);
+  });
+
+  it('앱이 뒤에 있는 동안은 읽지 않고, 앞으로 오면 초점 읽기 한 번 뒤 다시 30초 박자다 (r2 M1: 뒤로 간 앱의 읽기 0)', async () => {
+    const {readAt} = clockStore();
+    const one = <MessageBody key="a" body=":expr_1:" />;
+    const view = render(tree('connected', one));
+    await flush();
+    view.rerender(tree('connecting', one));
+    await flush();
+    view.rerender(tree('disconnected', one));
+    await flush();
+    act(() => focusManager.setFocused(false));
+    readAt.length = 0;
+    await act(async () => {
+      jest.advanceTimersByTime(5 * BEAT);
+    });
+    await flush();
+    expect(readAt).toEqual([]);
+    act(() => focusManager.setFocused(true));
+    await flush();
+    expect(readAt).toHaveLength(1); // 앞으로 올 때의 초점 읽기
+    await act(async () => {
+      jest.advanceTimersByTime(BEAT);
+    });
+    await flush();
+    expect(readAt).toHaveLength(2); // 그 뒤 박자
+  });
+
+  it('시계는 쌓이지 않고 떠나면 남지 않는다: 끊김·재연결 5번 뒤 이어진 동안 0번, 끊긴 90초에 정확히 3번, 보낼 수 없는 동안 0번, 화면을 떠난 뒤 0번 (r2 M1)', async () => {
+    // 진짜 저장소는 오프라인·`dispose` 뒤 읽기를 스스로 버려서 남은 시계를 GET 수로 볼 수 없다. Provider 가 부른 `refresh` 를 그대로 센다.
+    const store = fakeStore();
+    created.mockReturnValue(store);
+    const view = render(tree('connected'));
+    await flush(1);
+    for (let round = 0; round < 5; round += 1) {
+      view.rerender(tree('connecting'));
+      await flush(1);
+      view.rerender(tree('disconnected'));
+      await flush(1);
+      await act(async () => {
+        jest.advanceTimersByTime(5_000);
+      });
+      view.rerender(tree('connected'));
+      await flush(1);
+    }
+    const refreshesOver = async (beats: number) => {
+      store.refresh.mockClear();
+      await act(async () => {
+        jest.advanceTimersByTime(beats * BEAT);
+      });
+      return store.refresh.mock.calls.length;
+    };
+    expect(await refreshesOver(4)).toBe(0); // 이어진 동안
+    view.rerender(tree('connecting'));
+    await flush(1);
+    view.rerender(tree('disconnected'));
+    await flush(1);
+    expect(await refreshesOver(3)).toBe(3); // 끊긴 동안 박자마다 한 번 — 시계가 겹쳐 쌓이지 않는다
+    mockGates.canSend = false;
+    view.rerender(tree('disconnected'));
+    await flush(1);
+    expect(await refreshesOver(3)).toBe(0); // 보낼 수 없는 동안(오프라인이 맡는다)
+    mockGates.canSend = true;
+    view.rerender(tree('disconnected'));
+    await flush(1);
+    view.unmount();
+    expect(await refreshesOver(4)).toBe(0); // 화면을 떠난 뒤
   });
 });
