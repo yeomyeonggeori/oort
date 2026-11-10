@@ -187,12 +187,11 @@ function ImageTile({
   const box = single && !fixedFrame ? inlineImageBox(natural ?? declared) : null;
   // 오는 동안(`waiting`)에도 크기를 아는 한 장이면 그림이 설 상자를 세운다. 못 불러온 경우는 읽을 수 있는 옛 틀로 돌아간다.
   const waiting = preview.status === "loading";
-  const reserved = fixedFrame ? preview.status !== "ready" : single && box !== null && waiting;
+  const ready = preview.status === "ready";
+  const reserved = fixedFrame ? !ready : single && box !== null && waiting;
   // 그림과 그 자리(`<canvas>`)가 같은 클래스를 쓴다: 자리를 세우는 상자와 그림이 서는 상자가 갈라질 길이 없다.
-  const pictureClass = fixedFrame
-    ? cn("block image-corner object-contain", ...PICTURE_FRAME_FIT)
-    : single
-    ? cn("block image-corner object-contain", ...(box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN))
+  const pictureClass = single
+    ? cn("block image-corner object-contain", ...(fixedFrame ? PICTURE_FRAME_FIT : box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN))
     : "block size-full image-corner object-cover";
   const compact = isCompactImage(box);
   const learnNaturalSize = (node: HTMLImageElement) => {
@@ -223,7 +222,7 @@ function ImageTile({
         aria-label={actionName}
         title={label}
         className={
-          preview.status === "ready"
+          ready
             ? cn(CLIP_CLASS, !single && "size-full", ...(fixedFrame ? RESERVED_FRAME_EXTRA : []))
             : reserved
               ? cn(CLIP_CLASS, ...RESERVED_FRAME_EXTRA)

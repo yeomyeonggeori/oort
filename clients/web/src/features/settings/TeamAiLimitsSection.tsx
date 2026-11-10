@@ -31,6 +31,9 @@ import { InlineBanner } from "@/features/common/States";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useLocaleService } from "@/i18n/useLocaleService";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { delegationOf } from "@momo/core/features/settings/teamAiLimits";
+import { hermesSettingsVisible } from "@momo/core/features/settings/teamAiHermesView";
+import { TeamAiDelegationLimitItem } from "./TeamAiDelegationLimitItem";
 
 // =============================================================================
 // 설정 › AI › 팀 AI 키 › 「사용 한도」 (#5026, #4944의 화면 몫, ADR-0201 증보 v3 B9).
@@ -346,6 +349,16 @@ export function TeamAiLimitsSection({
             onSave={(field, value) => save.mutate({ field, value })}
           />
         ))}
+        {/* 하루 Hermes 맡기기(#5375): 운영자가 위임을 연 서버에서만 선다. 지금 운영(천장 없음)에서는 줄이 없다. */}
+        {hermesSettingsVisible(delegationOf(status)) && (
+          <TeamAiDelegationLimitItem
+            workspaceId={workspaceId}
+            status={delegationOf(status)}
+            offline={offline}
+            locked={status.operatorCeiling.helperOff}
+            busy={save.isPending}
+          />
+        )}
       </ul>
     </section>
   );
