@@ -15,6 +15,8 @@
 //   SEND_FOLLOW_DIST=<폴더>               dist 대신 이 번들을 띄운다(수리 전 번들로 RED 를 다시 보일 때)
 //   SEND_FOLLOW_CAPTURE=<폴더>            Chromium 밝게·어둡게 캡처(묶음 · 보낸 직후)
 //   SEND_FOLLOW_SKEW=1                    ⑤ 시계 어긋남 장면만 돌린다(#5624, 아래)
+// 머리 출력: 엔진마다 `CSS.supports('overflow-anchor','auto')`와 타임라인 스크롤러의 계산값을 찍는다(#5638, `engine-anchor.mjs`).
+//   ⑥ 기록만(#5638): 스레드 답글 목록 가운데에서 읽는 중 위쪽 답글이 120px 자랄 때 보던 줄 이동(손보정이 없는 목록 — v0.1.47 근거).
 //
 // ⑤ 시계 어긋남(#5624): 가짜 서버가 확정본을 「지금 + 어긋남」으로 찍는다(응답 지연 1.5초). 바닥에서 내 글을 하나 보낸 뒤(그 응답이
 //    서버 시계를 알려 준다) 같은 분에 하나 더 보내는 동안, 화면이 그린 모든 프레임에서 바로 위 줄의 위치와 보낸 줄의 높이를 잰다.
@@ -25,6 +27,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
+import { printEngineAnchorHeader, scrollerOverflowAnchor } from "./engine-anchor.mjs";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -315,6 +318,73 @@ async function send(page, inputTestId, text) {
   await input.press("Enter");
 }
 
+/**
+ * 스레드 답글 목록의 자리 지키기를 잰다(기록만, 단정 없음 — #5638). 답글 목록은 가상화 없는 `overflow-y-auto` 상자이고 손보정
+ * (`scrollHold`)이 붙어 있지 않다. 위를 읽는 중 화면 위 밖의 답글이 자랄 때 보던 줄을 지키는 것은 브라우저 스크롤 앵커링뿐이다.
+ * Playwright 의 두 엔진은 모두 앵커링이 있어(2026-11-10 실측) 그대로 재면 둘 다 0 근처가 나온다. 그래서 같은 장면을 두 번 잰다:
+ *   - 그대로(`asIs`): 앵커링이 있는 엔진 — Chromium · macOS 27 WebKit 의 값.
+ *   - 대조(`anchorOff`): 이 상자만 잠깐 `overflow-anchor:none` 으로 두고 잰 뒤 되돌린다 — 앵커링이 없는 macOS 14~26 WebKit 의 값.
+ * 맨 위(scrollTop 0)에서는 규격상 앵커링이 서지 않으므로 가운데에서 읽는다. 자라는 줄은 화면 위 밖에 통째로 있는 마지막 답글이고,
+ * 그 줄의 최소 높이를 지금 높이 + 120px 로 두어 키우고, 실제로 얼마나 자랐는지(`grew`, 상자의 scrollHeight 차)를 함께 적는다.
+ */
+async function threadGrowProbe(page, selector) {
+  return page.evaluate(async (sel) => {
+    const node = document.querySelector(sel);
+    if (node === null) return { error: "답글 목록이 없다" };
+    const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const round = (value) => Math.round(value * 100) / 100;
+    const measure = async () => {
+      const scrollRange = node.scrollHeight - node.clientHeight;
+      node.scrollTop = Math.round(scrollRange / 2);
+      await frames();
+      await new Promise((done) => setTimeout(done, 300));
+      const box = node.getBoundingClientRect();
+      const rows = [...node.querySelectorAll("[data-message-id]")];
+      const above = rows.filter((row) => row.getBoundingClientRect().bottom < box.top - 10);
+      const visible = rows.find((row) => row.getBoundingClientRect().top >= box.top);
+      if (above.length === 0 || visible === undefined) {
+        return { error: `장면을 못 만들었다(위 밖 ${above.length}줄, 보이는 줄 ${visible ? 1 : 0}, scrollTop ${node.scrollTop}/${scrollRange})` };
+      }
+      const before = visible.getBoundingClientRect().top;
+      const scrollTopStart = node.scrollTop;
+      const heightStart = node.scrollHeight;
+      // 줄 자체를 120px 키운다(안에 덩어리를 붙이면 줄의 배치가 일부를 삼켜 74px 만 자랐다 — 첫 실측).
+      const grower = above[above.length - 1];
+      grower.style.minHeight = `${grower.getBoundingClientRect().height + 120}px`;
+      await frames();
+      const moveAfter2Frames = round(visible.getBoundingClientRect().top - before);
+      await new Promise((done) => setTimeout(done, 400));
+      const result = {
+        grew: round(node.scrollHeight - heightStart),
+        aboveRows: above.length,
+        moveAfter2Frames,
+        moveAfter400ms: round(visible.getBoundingClientRect().top - before),
+        scrollTopDelta: round(node.scrollTop - scrollTopStart),
+        overflowAnchorBox: getComputedStyle(node).getPropertyValue("overflow-anchor") || "(계산값 없음)",
+      };
+      grower.style.removeProperty("min-height");
+      await frames();
+      await new Promise((done) => setTimeout(done, 200));
+      return result;
+    };
+    const asIs = await measure();
+    // 대조: 이 상자만 잠깐 끈다(인라인 값은 재고 나면 지운다 — 게이트 안의 측정 전용, 제품 코드가 아니다).
+    node.style.overflowAnchor = "none";
+    const anchorOff = await measure();
+    node.style.removeProperty("overflow-anchor");
+    return { asIs, anchorOff };
+  }, selector);
+}
+
+function formatThreadGrow(grow) {
+  if (grow.error) return grow.error;
+  const one = (m) =>
+    m.error
+      ? m.error
+      : `자람 ${m.grew}px → 보던 줄 2프레임 ${m.moveAfter2Frames}px · 400ms ${m.moveAfter400ms}px · scrollTop ${m.scrollTopDelta >= 0 ? "+" : ""}${m.scrollTopDelta} (상자 overflow-anchor ${m.overflowAnchorBox}, 위 밖 ${m.aboveRows}줄)`;
+  return `그대로: ${one(grow.asIs)} | 앵커링 끈 대조: ${one(grow.anchorOff)}`;
+}
+
 async function capture(page, engine, name) {
   if (captureDir === null) return;
   mkdirSync(captureDir, { recursive: true });
@@ -329,6 +399,7 @@ async function runScenes(browser, engine, colorScheme) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await openChannel(page);
+  console.log(`[${where}] 타임라인 스크롤러 overflow-anchor=${await scrollerOverflowAnchor(page, SCROLLER)}`);
 
   // ④ 묶음: 같은 사람 47분 · 50분은 머리 둘, 같은 52분 두 말은 머리 하나.
   const heads = await page.evaluate((ids) => {
@@ -445,6 +516,10 @@ async function runScenes(browser, engine, colorScheme) {
     failures.push(`${where}: 답글을 달았는데 답글 목록이 맨 아래로 가지 않았다 (거리 ${threadAfter?.distance}, 보임 ${threadAfter?.rowVisible})`);
   }
   await capture(page, `${engine}-${colorScheme}`, "3-after-thread-reply");
+
+  // ⑥ 기록만(#5638 → v0.1.47 근거): 스레드 답글 목록에서 위를 읽는 중 위쪽 답글이 120px 자랄 때 보던 줄 이동.
+  const grow = await threadGrowProbe(page, THREAD);
+  console.log(`[${where}] 스레드 위 읽기 +120px(기록만): ${formatThreadGrow(grow)}`);
   await context.close();
   return failures;
 }
@@ -619,6 +694,7 @@ async function main() {
       if (type === null) throw new Error(`모르는 엔진: ${name}`);
       const browser = await type.launch({ headless: true });
       try {
+        await printEngineAnchorHeader(browser, name);
         if (skewOnly) {
           failures.push(...(await runSkewScenes(browser, name, "light")));
           if (captureDir !== null && name === "chromium") failures.push(...(await runSkewScenes(browser, name, "dark")));
