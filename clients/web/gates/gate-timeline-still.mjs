@@ -144,6 +144,17 @@ async function loadGate() {
 }
 
 const cells = [];
+/** 끝낼 때 함께 닫을 것(미리보기 · 자식 게이트). 신호로 끊겨도 남기지 않는다. */
+let activeServer = null;
+let activeChild = null;
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    activeChild?.kill("SIGTERM");
+    Promise.resolve(activeServer?.stop())
+      .catch(() => {})
+      .finally(() => process.exit(130));
+  });
+}
 
 function pushCell(cell) {
   cells.push({ known: null, note: "", ...cell });
@@ -401,6 +412,7 @@ async function runNewScenes() {
     portEnvVar: "TIMELINE_STILL_PORT",
     extraArgs: distOverride ? ["--outDir", distOverride] : [],
   });
+  activeServer = server;
   try {
     for (const name of engineNames) {
       const type = { webkit, chromium, firefox }[name];
@@ -445,6 +457,7 @@ async function runNewScenes() {
     }
   } finally {
     await server.stop();
+    activeServer = null;
   }
 }
 
@@ -453,11 +466,15 @@ async function runNewScenes() {
 function runChild(script, env) {
   return new Promise((done) => {
     const child = spawn(process.execPath, [resolve(webRoot, "gates", script)], { cwd: webRoot, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    activeChild = child;
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("close", (code) => done({ code, stdout, stderr }));
+    child.on("close", (code) => {
+      activeChild = null;
+      done({ code, stdout, stderr });
+    });
   });
 }
 
