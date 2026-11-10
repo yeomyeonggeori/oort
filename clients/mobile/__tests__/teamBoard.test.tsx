@@ -41,7 +41,7 @@ import {
 } from './fixtures/fakeClock';
 
 // 「작업」 팀 보드 한 열 판 (#2864). 이 시험은 화면 단위다: 서버가 걸러 준 줄만 그리고,
-// 상태 순서로 서고, 「내 것」은 주인이 나인 줄이고, 시트는 읽기 전용이다.
+// 상태 순서로 서고, 「내 작업」은 주인이 나인 줄이고, 시트는 읽기 전용이다.
 
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
@@ -350,7 +350,7 @@ describe('보이는 것은 서버가 준 줄뿐이다 (가시성이 새지 않�
   });
 });
 
-describe('「내 것」 필터', () => {
+describe('「내 작업」 필터 (owner 2026-11-09 「내것 -> 내 작업으로」)', () => {
   it('주인이 나인 줄만 남기고(A 레인 포함) 개수를 말한다. 「전체」로 돌아오면 모두 보인다', async () => {
     installFetch();
     renderBoard();
@@ -361,7 +361,7 @@ describe('「내 것」 필터', () => {
       '전체 5',
     );
     expect(screen.getByTestId('team-board-filter-mine')).toHaveTextContent(
-      '내 것 3',
+      '내 작업 3',
     );
     fireEvent.press(screen.getByTestId('team-board-filter-mine'));
     expect(rowIds()).toEqual([

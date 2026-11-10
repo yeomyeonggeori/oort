@@ -70,6 +70,7 @@ import {
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
 import { SessionVerificationChip } from "./SessionVerificationChip";
+import { MAC_HOST_OFF_LABEL, MAC_HOST_ON_LABEL } from "@momo/core/features/presence/statusDot";
 import {
   HANDOFF_COPY,
   handoffAdvisory,
@@ -404,11 +405,12 @@ function MySessionRow({
           {hostName}
         </span>
         <span className="shrink-0">·</span>
+        {/* 같은 카드의 배지와 같은 말(owner 2026-11-09 「연결 안 됨」, #5593 수리 3회차 M2): 폰 정보 칸·목록 맥 줄과 한 정의다. */}
         <span className="shrink-0" data-testid="my-work-session-host-state">
           {hostOnline === true
-            ? "온라인"
+            ? MAC_HOST_ON_LABEL
             : hostOnline === false
-              ? "응답 없음"
+              ? MAC_HOST_OFF_LABEL
               : "상태 확인 필요"}
         </span>
         <span className="shrink-0">·</span>

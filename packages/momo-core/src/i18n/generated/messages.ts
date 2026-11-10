@@ -638,6 +638,14 @@ export const messageKeys = [
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "mobile.workPermission.elsewhereOnHost",
+  "mobile.workPermission.elsewhereOnMac",
+  "mobile.workPermission.elsewhereTitle",
+  "mobile.workPermission.landingGoneDetail",
+  "mobile.workPermission.landingGoneTitle",
+  "mobile.workPermission.recheck",
+  "mobile.workPermission.rechecking",
+  "mobile.workPermission.recheckMissed",
   "notifications.inviteLink.fallback",
   "recovery.claim.hostBody",
   "recovery.claim.hostConfirm",
@@ -2112,6 +2120,16 @@ export const argumentSpecs = {
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "mobile.workPermission.elsewhereOnHost": {
+    "host": "string"
+  },
+  "mobile.workPermission.elsewhereOnMac": {},
+  "mobile.workPermission.elsewhereTitle": {},
+  "mobile.workPermission.landingGoneDetail": {},
+  "mobile.workPermission.landingGoneTitle": {},
+  "mobile.workPermission.recheck": {},
+  "mobile.workPermission.rechecking": {},
+  "mobile.workPermission.recheckMissed": {},
   "notifications.inviteLink.fallback": {},
   "recovery.claim.hostBody": {},
   "recovery.claim.hostConfirm": {},
@@ -3639,6 +3657,14 @@ export interface MessageArgs {
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "mobile.workPermission.elsewhereOnHost": { host: string };
+  "mobile.workPermission.elsewhereOnMac": Record<string, never>;
+  "mobile.workPermission.elsewhereTitle": Record<string, never>;
+  "mobile.workPermission.landingGoneDetail": Record<string, never>;
+  "mobile.workPermission.landingGoneTitle": Record<string, never>;
+  "mobile.workPermission.recheck": Record<string, never>;
+  "mobile.workPermission.rechecking": Record<string, never>;
+  "mobile.workPermission.recheckMissed": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "recovery.claim.hostBody": Record<string, never>;
   "recovery.claim.hostConfirm": Record<string, never>;

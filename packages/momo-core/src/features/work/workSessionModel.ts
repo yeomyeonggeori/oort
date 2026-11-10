@@ -1,6 +1,9 @@
 import { uuidEq, type Message, type WorkHost, type WorkSession } from "../../lib/api";
 import type { WorkSessionACPFrame, WorkSessionACPType } from "../../lib/realtimeEvents";
 import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
+import { MAC_HOST_OFF_LABEL } from "../presence/statusDot";
+import { workRunnerSubject, type WorkExecutionLocationKey } from "./workLocation";
+import { SESSION_STATUS_LABEL } from "../workbench/sessionList";
 
 // =============================================================================
 // Work session model (AX-3 / MOMO-618): every rule the 작업 세션 panel renders,
@@ -131,6 +134,8 @@ export function workSessionIdleNotice(
 
 export type WorkSessionStatusKey =
   | "running"
+  /** 주인에게 열린 권한 요청이 있다(#5593 수리 M2, `withOpenRequest`). 원장 상태가 아니라 보는 사람의 상태다. */
+  | "waiting"
   | "idle"
   | "unavailable"
   | "orphaned"
@@ -146,9 +151,13 @@ export interface WorkSessionStatus {
  * `exitCode` is ADR-0139's last tool result, not a session-ending result. It
  * therefore never decides whether an `ended` session failed.
  *
- * `orphaned` keeps the mac wording (호스트 연결 끊김) rather than being folded
- * into 오류: the session is not known to have failed, its host went away, and
- * those are different facts to the person deciding whether to resume.
+ * `orphaned` keeps its own key rather than being folded into 오류: the session
+ * is not known to have failed, its host went away, and those are different
+ * facts to the person deciding whether to resume. Its WORD is the one the
+ * owner chose for a computer that is not connected (「연결 안 됨」, 2026-11-09) —
+ * the same word `unavailable` and the mac dot use, so one slot never alternates
+ * between two names for one fact (#5593 수리 3회차 M2). The key still carries
+ * the accent tone (there is something to do: resume elsewhere).
  */
 export function workSessionStatus(
   session: Pick<WorkSession, "exitCode"> & { status: string }
@@ -158,7 +167,7 @@ export function workSessionStatus(
     return { key: "idle", label: "완료 · 대기 중" };
   }
   if (session.status === "orphaned") {
-    return { key: "orphaned", label: "호스트 연결 끊김" };
+    return { key: "orphaned", label: MAC_HOST_OFF_LABEL };
   }
   if (session.status === "ended") {
     return { key: "done", label: "종료됨" };
@@ -790,6 +799,21 @@ export function workSessionResumeTargets(
  * heartbeat loss changes only the presentation of `running`, never the
  * session's stored state.
  */
+/**
+ * 주인에게 열린 권한 요청이 있는 세션의 상태 — 「응답 필요」(#5593 수리 M2). 폰 작업 목록의 칩(보드 상태 `waiting`)과
+ * 세션 머리가 이 한 곳의 낱말(`SESSION_STATUS_LABEL.waiting`)을 같이 읽는다. 데스크탑 A 칸이 같은 세션을 주인에게 말하는
+ * 낱말(`agentSessionStatus`)과도 같다. 요청은 주인에게만 보이므로(ADR-0188 D5) 주인이 아니거나 열린 요청이 없으면 원래
+ * 상태 그대로이고, 호스트가 응답하지 않는 세션(`unavailable`)은 그 사실이 먼저다.
+ */
+export function withOpenRequest(
+  status: WorkSessionStatus,
+  openRequestForOwner: boolean
+): WorkSessionStatus {
+  if (!openRequestForOwner) return status;
+  if (status.key !== "running" && status.key !== "idle") return status;
+  return { key: "waiting", label: SESSION_STATUS_LABEL.waiting };
+}
+
 export function workSessionContinuityStatus(
   session: WorkSession,
   hosts: readonly WorkHost[] | undefined
@@ -798,9 +822,24 @@ export function workSessionContinuityStatus(
     (session.status === "running" || session.status === "idle") &&
     workHostOnline(session, hosts) === false
   ) {
-    return { key: "unavailable", label: "호스트 응답 없음" };
+    return { key: "unavailable", label: MAC_HOST_OFF_LABEL };
   }
   return workSessionStatus(session);
+}
+
+/**
+ * 폰 세션 화면의 머리·배지에서는 「연결 안 됨」에 주어를 붙인다(#5593 수리 3회차 L3): 주어가 없으면 폰에서는 「내 폰이 연결 안
+ * 됨」으로도 읽힌다(같은 화면에 폰 자신의 「오프라인입니다.」 안내가 설 수 있다). 주어는 실행 위치가 정한다(`workRunnerSubject`):
+ * 데스크탑 앱이면 「맥 연결 안 됨」, 셀프호스트 서버·클라우드·모름이면 「실행하는 컴퓨터 연결 안 됨」(planner 2026-11-10 — 틀린
+ * 사실을 적지 않기). 「연결 안 됨」으로 읽는 두 열쇠(`unavailable`·`orphaned`) 모두에 붙인다 — 하나만 붙이면 같은 자리가 두 말
+ * 사이를 오간다. 열쇠(색)는 그대로다. 정보 칸(「사무실 맥 mini · 연결 안 됨」)은 이미 이름이 주어라 부르지 않는다.
+ */
+export function withRunnerSubject(
+  status: WorkSessionStatus,
+  location: WorkExecutionLocationKey
+): WorkSessionStatus {
+  if (status.key !== "unavailable" && status.key !== "orphaned") return status;
+  return { key: status.key, label: `${workRunnerSubject(location)} ${MAC_HOST_OFF_LABEL}` };
 }
 
 /**

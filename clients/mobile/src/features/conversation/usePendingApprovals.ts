@@ -150,6 +150,18 @@ export function usePendingApprovals(channelId: string): PendingApprovals {
  * 읽었거나(로딩·서버가 승인 경로를 안 실음·실패) 대기가 없으면 빈 목록이라 덮어쓰기는 아무것도 바꾸지 않는다 — 모르면 기다림으로
  * 세우지 않는다.
  */
+/**
+ * 대기 승인이 걸린 run 의 id 들(소문자) — 작업 목록의 「응답 필요」가 run 줄을 고르는 재료다(#5593 수리 M1). 인박스 알약
+ * (`useNeedsAction` → `needsMe`)과 **같은 원장**을 읽어, 두 자리의 「나에게 필요한 일」이 같은 정의를 쓴다. 캐시만 읽는다.
+ */
+export function usePendingApprovalRunIds(): ReadonlySet<string> {
+  const {approvals} = usePendingApprovalLedger();
+  return useMemo(
+    () => new Set((approvals ?? []).map(approval => approval.runId.toLowerCase())),
+    [approvals],
+  );
+}
+
 export function useWorkspaceApprovalWaits(): readonly ApprovalWait[] {
   const {approvals} = usePendingApprovalLedger();
   return useMemo(

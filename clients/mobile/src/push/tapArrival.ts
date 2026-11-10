@@ -9,7 +9,12 @@ import {
   type NotificationResponse,
 } from 'expo-notifications';
 
-import {PUSH_ACTION, type PushCategory, type PushReason} from './contract';
+import {
+  PUSH_ACTION,
+  PUSH_CATEGORY,
+  type PushCategory,
+  type PushReason,
+} from './contract';
 import {parsePushEnvelope, pushPayloadOf, threadRootId} from './envelope';
 
 // =============================================================================
@@ -290,25 +295,62 @@ export function planNotificationLanding(
 // 본문이나 `props.session_id` 를 다시 읽어 오지 않는다(알림이 들고 오지 않은 것을
 // 알림 대신 지어내지 않는다).
 
+// ---- 맥 세션의 권한 요청 탭 (#5593, ADR-0188 D5·D8) ------------------------------
+//
+// 서버는 맥 세션의 권한 요청을 새 낱말 없이 보낸다(`momo-push` judgment `work_permission`): reason 은
+// `approval_request`, category 는 「열어서 결정」(`momo.approval.open` — 잠금 화면에서 허락하지 않는다), `approval_id`
+// 는 **요청 이벤트 id**, `thread-id` 는 세션의 루트, `message_id` 는 그 요청 줄이다. 서버 머리말의 말 그대로 「탭이 식별자만
+// 으로 세션과 요청을 찾게」 지은 봉투다. 그래서 「작업 끝남」과 같은 한 번의 원장 읽기로 세션을 찾고, 그 세션 화면의
+// 승인 카드로 간다 — 채널의 그 줄로 가면 결정할 카드가 없다(카드는 세션 화면에만 있다).
+//
+// 같은 모양의 다른 알림과 가르는 선 셋: 루트가 세션의 루트이고(채널까지 맞아야), 승인 id 가 있고, 그 세션의 **주인이
+// 나**다. 서버는 이 알림을 세션 주인 한 사람에게만 보낸다(ADR-0188 D3). 남의 세션 스레드에 선 「열어서 결정」 승인
+// 카드(에이전트가 그 스레드에서 올린 것)는 주인 줄에서 걸러져 평소처럼 대화의 그 카드로 간다.
+
+/** 맥 세션의 권한 요청 알림인가: 「열어서 결정」 승인 알림이고 승인 id(= 요청 이벤트 id)가 있다. */
+export function isWorkPermissionTap(
+  target: Pick<NotificationTarget, 'reason'> &
+    Partial<Pick<NotificationTarget, 'category' | 'approvalId'>>,
+): boolean {
+  return (
+    target.reason === 'approval_request' &&
+    target.category === PUSH_CATEGORY.approvalOpen &&
+    (target.approvalId ?? '') !== ''
+  );
+}
+
+/** 대화가 아니라 세션 화면으로 가 볼 탭인가: 「작업 끝남」 또는 맥 세션의 권한 요청(세션은 원장에서 찾는다). */
+export function opensWorkSession(
+  target: Pick<NotificationTarget, 'reason'> &
+    Partial<Pick<NotificationTarget, 'category' | 'approvalId'>>,
+): boolean {
+  return target.reason === 'work_session_idle' || isWorkPermissionTap(target);
+}
+
 /**
- * 「작업 끝남」 알림이 열어야 할 세션, 없으면 null.
+ * 「작업 끝남」·맥 세션 권한 요청 알림이 열어야 할 세션, 없으면 null.
  *
  * null 은 「대화로 간다」다: 다른 이유의 알림이거나, 세션이 이 목록에 없을 때다(원장이
  * 지워졌거나, 이 사람이 볼 수 없다). 그때 알림은 거짓말을 한 것이 아니므로 기존 착지
- * (채널의 그 카드)가 그대로 답이 된다.
+ * (채널의 그 카드)가 그대로 답이 된다. 권한 요청은 그 세션의 주인이 나일 때만 세션이다(위 머리말).
  */
 export function workSessionForTap(
-  target: Pick<NotificationTarget, 'reason' | 'channelId' | 'threadRootId'>,
+  target: Pick<NotificationTarget, 'reason' | 'channelId' | 'threadRootId'> &
+    Partial<Pick<NotificationTarget, 'category' | 'approvalId'>>,
   sessions: readonly WorkSession[] | undefined,
+  selfMemberId?: string,
 ): WorkSession | null {
-  if (target.reason !== 'work_session_idle') return null;
+  if (!opensWorkSession(target)) return null;
   const rootId = target.threadRootId;
   if (rootId === null) return null;
+  const ownerOnly = isWorkPermissionTap(target);
   return (
     sessions?.find(
       session =>
         uuidEq(session.rootMessageId, rootId) &&
-        uuidEq(session.channelId, target.channelId),
+        uuidEq(session.channelId, target.channelId) &&
+        (!ownerOnly ||
+          (selfMemberId !== undefined && uuidEq(session.memberId, selfMemberId))),
     ) ?? null
   );
 }

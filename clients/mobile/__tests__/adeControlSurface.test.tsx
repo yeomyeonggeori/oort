@@ -627,7 +627,7 @@ describe('관제 목록 — 무엇이, 어디서, 살아남는지', () => {
     // 3분류 칩과 **원장의 더 정밀한 사실**이 함께 선다.
     expect(
       screen.getByTestId('ade-card-meta-session|session-orphaned'),
-    ).toHaveTextContent(/호스트 연결 끊김/);
+    ).toHaveTextContent(/연결 안 됨/); // #5593 수리 3회차 M2: 고아 세션도 owner 낱말
     // 그리고 카드는 자기 방을 말한다 — 요약이 워크스페이스 전역이라 필수다.
     expect(
       screen.getByTestId('ade-card-meta-session|session-orphaned'),
