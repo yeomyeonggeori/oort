@@ -104,6 +104,21 @@ describe('#5624 폰: 내 글의 머리/이어짐은 에코에서 확정본으로
     expect(heads('경계의 글')).toEqual([false]);
   });
 
+  it('세션의 첫 보내기(아직 잰 차이가 없음)는 에코 때 정한 머리를 확정본이 그대로 지킨다 — 응답이 알려 준 차이로 다시 묶지 않는다', async () => {
+    // 검수 1회차 M2(사보타주 B): 훅이 장부를 **새로 잰** 차이로 적으면(직전 렌더가 쓴 값이 아니라) 여기서 머리가 이어진 줄로 접힌다.
+    // 이미 화면에 있는 내 글(서버 시각 10:48:15, 같은 분 — 확정본이 들어오는 같은 문 `applyBatch` 로 싣는다). 이 기기는 아직 서버 시계를
+    // 모르고, 기기 시계는 90초 늦다.
+    jest.setSystemTime(at(47, 0));
+    const {result} = renderHook(useRecordedTimeline);
+    act(() => result.current.ingest(confirmed('앞서 쓴 글', at(48, 15))));
+    expect(layouts.at(-1)).toEqual({'앞서 쓴 글': true});
+    const first = await sendHeld(result, '첫 보내기');
+    await first(Date.now() + 90_000);
+    // 에코는 기기 시계로 75초 떨어져 머리였다. 확정본도 머리다(응답이 알려 준 차이로 고쳐 묶으면 이어진 줄로 접히며 출렁인다).
+    expect(heads('첫 보내기')).toEqual([true]);
+    expect(result.current.state.messages.map(m => m.body)).toEqual(['앞서 쓴 글', '첫 보내기']);
+  });
+
   it('연달아 두 번 보내면(첫 응답이 둘째 에코보다 먼저, 서버 +90초) 둘째 글이 한 번도 머리가 되지 않는다', async () => {
     const {result} = renderHook(useRecordedTimeline);
     const a = await sendHeld(result, '하나');
