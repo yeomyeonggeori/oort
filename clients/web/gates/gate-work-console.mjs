@@ -695,9 +695,9 @@ async function assertConsole(context, state) {
     .getByTestId("work-console-location")
     .allTextContents();
   const expected = [
-    "T1 · 데스크톱 앱",
-    "T2 · 셀프호스트",
-    "T3 · 클라우드",
+    "데스크탑 앱",
+    "셀프호스트 서버",
+    "클라우드",
     "실행 위치 확인 필요",
   ];
   for (const label of expected) {
@@ -853,7 +853,7 @@ async function assertConsole(context, state) {
       .getByTestId("work-console-location")
       .textContent()
   )?.trim();
-  if (reloadedLocation !== "T3 · 클라우드") {
+  if (reloadedLocation !== "클라우드") {
     throw new Error(`direct session link recovered ${reloadedLocation}`);
   }
   if (!(await page.getByTestId("work-console-list").isVisible())) {

@@ -4357,6 +4357,62 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "mobile.workPermission.elsewhereOnHost": [
+    {
+      "type": 0,
+      "value": "지금은 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에서 답해 주세요."
+    }
+  ],
+  "mobile.workPermission.elsewhereOnMac": [
+    {
+      "type": 0,
+      "value": "지금은 맥에서 답해 주세요."
+    }
+  ],
+  "mobile.workPermission.elsewhereTitle": [
+    {
+      "type": 0,
+      "value": "맥이 권한을 묻고 있어요"
+    }
+  ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "다른 기기에서 답했거나, 기한이 지났거나, 작업이 끝났을 수 있어요."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "이 권한 요청은 이미 닫혔어요"
+    }
+  ],
+  "mobile.workPermission.recheck": [
+    {
+      "type": 0,
+      "value": "다시 확인"
+    }
+  ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "다시 확인 중"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

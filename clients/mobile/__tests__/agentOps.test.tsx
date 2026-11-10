@@ -807,7 +807,7 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     await waitFor(() =>
       expect(
         screen.getByLabelText(
-          /어제 끝난 작업, 종료됨, T1 · 데스크톱 앱\. 끝난 작업입니다\./,
+          /어제 끝난 작업, 종료됨, 데스크탑 앱\. 끝난 작업입니다\./,
         ),
       ).toBeTruthy(),
     );
@@ -818,11 +818,11 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     await openKimWork();
     await waitFor(() =>
       expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
-        /T1 · 데스크톱 앱/,
+        /데스크탑 앱/,
       ),
     );
     expect(screen.getByTestId('agent-session-SESSION-CLOUD')).toHaveTextContent(
-      /T3 · 클라우드/,
+      /클라우드/,
     );
   });
 
@@ -847,7 +847,7 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     expect({done: ink('SESSION-DONE')}).toEqual({done: lightPalette.textMuted});
   });
 
-  it('원장이 아니라 연속성 상태를 부른다 — 신호 없는 호스트는 여기서도 「호스트 응답 없음」 (#1503)', async () => {
+  it('원장이 아니라 연속성 상태를 부른다 — 신호 없는 호스트는 여기서도 「연결 안 됨」 (#1503, owner 2026-11-09 낱말)', async () => {
     // 이 카드는 `workSessionStatus` 로 원장을 그대로 읽던 **유일한** 자리였고,
     // 나머지 다섯 표면은 `workSessionContinuityStatus` 를 지난다. 그 차이는 색이
     // 아니라 문장으로 드러난다: 같은 세션을 작업 콘솔은 「호스트 응답 없음」이라
@@ -866,7 +866,7 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     // 뒤다(그때까지는 원장 그대로이고, 그것도 정직한 중간 상태다).
     await waitFor(() =>
       expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
-        /호스트 응답 없음/,
+        /연결 안 됨/,
       ),
     );
     const row = screen.getByTestId('agent-session-SESSION-APP');
@@ -905,7 +905,7 @@ describe('what the agent is doing, and whether you can turn things off', () => {
       /실행 중/,
     );
     expect(screen.getByTestId('agent-session-SESSION-APP')).not.toHaveTextContent(
-      /호스트 응답 없음/,
+      /연결 안 됨/,
     );
   });
 
