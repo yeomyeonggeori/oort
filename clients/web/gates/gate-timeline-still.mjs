@@ -157,7 +157,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 function pushCell(cell) {
-  cells.push({ known: null, note: "", ...cell });
+  // 위를 읽는 장면의 바닥 거리는 재는 값이 아니다(일부러 떨어져 있다) — 어느 묶음의 칸이든 비운다.
+  const numbers = cell.kind === "reading" && cell.numbers ? { ...cell.numbers, maxGapPx: null } : cell.numbers;
+  cells.push({ known: null, note: "", ...cell, numbers });
 }
 
 /** 새 장면 한 칸: 부하를 보고, 재고, 숫자 넷과 판정을 적는다. */
@@ -174,8 +176,6 @@ async function measureCell(meta, run) {
     result = { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: [String(error.message ?? error).split("\n")[0]] } };
   }
   const loadAfter = loadNow();
-  // 위를 읽는 장면의 바닥 거리는 재는 값이 아니다(일부러 떨어져 있다).
-  if (meta.kind === "reading" && result.numbers) result.numbers = { ...result.numbers, maxGapPx: null };
   let verdict = result.verdict.verdict;
   const known = knownFailure(meta.sceneKey, meta.engine, meta.width);
   if (meta.recordOnly && verdict !== "장면 못 만듦") verdict = `기록만(${verdict})`;
