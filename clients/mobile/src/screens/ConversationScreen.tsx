@@ -2377,6 +2377,8 @@ export default function ConversationScreen({
               unreadCount={boundary?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={timeline.pending}
+              echoPins={timeline.echoPins}
+              serverOffsetMs={timeline.serverOffsetMs}
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
