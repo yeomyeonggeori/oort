@@ -80,7 +80,7 @@ import {queryFailureDetail} from './SidebarScreen';
 // 이 화면에는 승인 단추가 없다: 승인 대기 줄은 카드가 있는 채널로 간다(D5).
 //
 // 내 맥 세션의 줄(#5593, ADR-0188)은 시트가 아니라 **그 세션 화면**을 연다 — 허락·지시·멈추기가 있는 곳이다(세션
-// 화면의 문이 설 때만, `onOpenAgentSession`). 그 세션이 권한 요청에 답을 기다리면 맨 위 「내 확인 필요」 구간에 서고,
+// 화면의 문이 설 때만, `onOpenAgentSession`). 그 세션이 권한 요청에 답을 기다리면 맨 위 「응답 필요」 구간에 서고,
 // 세션 줄에는 그 맥이 켜져 있는지 점이 선다(`useMacSessionFacts`).
 // =============================================================================
 
@@ -137,7 +137,7 @@ export default function WorkJobsScreen({
     [list.items, list.mode, filter, member.id, nowMs],
   );
   const facts = useMacSessionFacts(workspaceId, member.id, list.items, active);
-  // 「내 확인 필요」: 내 맥 세션의 권한 요청, 그리고 내 대기 승인이 걸린 run(#5593 수리 M1 — 인박스 알약과 같은 원장).
+  // 「응답 필요」: 내 맥 세션의 권한 요청, 그리고 내 대기 승인이 걸린 run(#5593 수리 M1 — 인박스 알약과 같은 원장).
   const sections = useMemo(
     () =>
       workJobSections(

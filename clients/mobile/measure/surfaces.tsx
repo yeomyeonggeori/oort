@@ -4651,7 +4651,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onBack={() => {}}
         />
       );
-    // #5593 (ADR-0188 A 레인 ①): 내 맥 세션 줄 — 맨 위 「내 확인 필요」, 줄마다 맥 점(켜짐·꺼짐). 줄을 누르면 세션 화면이다.
+    // #5593 (ADR-0188 A 레인 ①): 내 맥 세션 줄 — 맨 위 「응답 필요」, 줄마다 맥 점(켜짐·꺼짐). 줄을 누르면 세션 화면이다.
     case 'work-jobs-mac':
       return (
         <WorkJobsScreen
@@ -8259,7 +8259,7 @@ if (
   if (LAUNCHED.name === 'work-jobs-mac') {
     seedMacSessions();
     forceNetwork(true);
-    // 수리 1회차 M1: 승인을 기다리는 run(첫 줄)에 내 대기 승인이 걸려 있다 — 인박스 알약과 같은 원장이라 「내 확인 필요」에 함께 선다.
+    // 수리 1회차 M1: 승인을 기다리는 run(첫 줄)에 내 대기 승인이 걸려 있다 — 인박스 알약과 같은 원장이라 「응답 필요」에 함께 선다.
     harnessClient.setQueryData(['approvals', ADE_WS, 'pending'], [
       {
         id: 'measure-approval-run',

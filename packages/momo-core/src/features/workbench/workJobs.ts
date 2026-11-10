@@ -7,6 +7,7 @@ import type {
   WorkJobsMode,
 } from "../../lib/api";
 import { elapsedSpan } from "../agents/runPhase";
+import { SESSION_STATUS_LABEL } from "./sessionList";
 import {
   sessionElapsedReadout,
   type SessionElapsedReadout,
@@ -46,9 +47,11 @@ export const WORK_JOBS_COPY = {
   inProgress: "지금 진행",
   /**
    * 맨 위 구간(#5593): 내가 답해야 다음으로 가는 일 — 지금은 내 맥 세션의 권한 요청. 낱말표의 「나를 기다려요」 자리 말이다
-   * (2026-11-09 낱말표). 숫자는 다른 구간처럼 화면이 붙인다(「내 확인 필요 1」).
+   * (2026-11-09 낱말표). 숫자는 다른 구간처럼 화면이 붙인다(「응답 필요 1」).
+   * 글자를 따로 적지 않고 세션 상태의 정본 낱말(`SESSION_STATUS_LABEL.waiting`)을 읽는다(owner 2026-11-10 「응답 필요」) —
+   * 구간 머리글 → 줄 칩 → 세션 머리·배지가 한 정의에서 나온다.
    */
-  sectionNeedsMe: "내 확인 필요",
+  sectionNeedsMe: SESSION_STATUS_LABEL.waiting,
   sectionNow: "지금",
   sectionDone: "끝난 일",
   reportedTag: "에이전트 보고",
@@ -226,10 +229,10 @@ export interface WorkJobSection {
 }
 
 /**
- * 구간: 내 확인 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
+ * 구간: 응답 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
  * 최신순)를 지킨다. 빈 구간은 만들지 않는다.
  *
- * 「내 확인 필요」(#5593)는 호출자가 답한다(`needsMyCheck`): 보드 줄에는 맥 세션의 권한 요청이 실리지 않아서(서버
+ * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`): 보드 줄에는 맥 세션의 권한 요청이 실리지 않아서(서버
  * `work_board`는 호스트 세션의 상태를 원장 값으로만 낸다), 화면이 그 세션의 진행을 읽어 정한다(`pendingPermission`).
  * 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
  */

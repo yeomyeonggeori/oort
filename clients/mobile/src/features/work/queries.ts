@@ -62,7 +62,7 @@ export function workSessionEventsKey(
 }
 
 /**
- * 세션 하나의 진행 읽기 — 열쇠와 읽기 한 벌. 세션 화면(`useWorkSessionEvents`)과 작업 목록의 「내 확인 필요」 판정
+ * 세션 하나의 진행 읽기 — 열쇠와 읽기 한 벌. 세션 화면(`useWorkSessionEvents`)과 작업 목록의 「응답 필요」 판정
  * (`useMacSessionFacts`, #5593)이 같은 것을 쓴다: 목록이 읽어 둔 진행은 세션을 열 때 그대로 따뜻하고, 요청은 한 벌이다.
  */
 export function workSessionEventsQuery(

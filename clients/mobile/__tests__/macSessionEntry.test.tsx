@@ -25,7 +25,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //   ① 세션 화면의 문은 웹과 같은 판정으로 선다: 이 워크스페이스에 지금 온라인인 호스트가 있는가. 예전에는 정적 표
 //      (`provided:false`)만 읽어서 운영 빌드에서는 어떤 문도 서지 않았다.
 //   ② 작업 목록에서 내 맥 세션 줄을 누르면 시트가 아니라 그 세션 화면이다.
-//   ③ 내 맥 세션이 권한 요청에 답을 기다리면 맨 위 「내 확인 필요」 구간에 서고, 세션 줄에는 맥 점이 선다.
+//   ③ 내 맥 세션이 권한 요청에 답을 기다리면 맨 위 「응답 필요」 구간에 서고, 세션 줄에는 맥 점이 선다.
 //   ④ 「내 맥에 보내기」가 세션을 찾으면 그 세션 화면으로 바로 간다.
 //
 // 셸 전체를 세운다(`AppShell`). 가짜는 서버의 답(`fetch`)뿐이고, 판정·항법·목록·세션 화면은 진짜다. ④만 두 시트
@@ -385,7 +385,7 @@ describe('① ② 세션 화면의 문은 「온라인 호스트가 있는가」
   });
 });
 
-describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「내 확인 필요」다', () => {
+describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「응답 필요」다', () => {
   it('서버 순서로는 맨 끝인 줄이 승인 대기 run 보다도 위, 첫 구간의 유일한 줄로 선다', async () => {
     installFetch({hosts: [host(true)]});
     renderShell();
@@ -401,7 +401,7 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
       .map(node => String(node.props.testID).replace('work-job-row-', ''));
     expect(rows).toEqual([S_WAIT, 'RUN-APPROVAL', S_MAC]);
     const headers = screen
-      .getAllByText(/^(내 확인 필요|지금|끝난 일) \d+$/)
+      .getAllByText(/^(응답 필요|지금|끝난 일) \d+$/)
       .map(node => node.props.children);
     expect(headers).toEqual([`${WORK_JOBS_COPY.sectionNeedsMe} 1`, `${WORK_JOBS_COPY.sectionNow} 2`]);
 
@@ -433,7 +433,7 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
     // 구간 안은 서버 순서(마지막 활동 최신순)다.
     expect(rows).toEqual(['RUN-APPROVAL', S_WAIT, S_MAC]);
     const headers = screen
-      .getAllByText(/^(내 확인 필요|지금|끝난 일) \d+$/)
+      .getAllByText(/^(응답 필요|지금|끝난 일) \d+$/)
       .map(node => node.props.children);
     expect(headers).toEqual([`${WORK_JOBS_COPY.sectionNeedsMe} 2`, `${WORK_JOBS_COPY.sectionNow} 1`]);
     // run 줄은 자기 말(승인 필요 · 승인은 그 카드에서 해요)을 그대로 쓴다 — 맥 세션의 「권한 요청」 말을 빌리지 않는다.

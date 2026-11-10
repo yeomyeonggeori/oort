@@ -8,6 +8,7 @@ import {
   type SharedWorkSession,
 } from "../../lib/api";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
+import { SESSION_STATUS_LABEL } from "./sessionList";
 import { TEAM_BOARD_COPY, stateChipLabel } from "./teamBoard";
 import {
   WORK_JOBS_COPY,
@@ -206,7 +207,7 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(inProgressCount([working, done, waiting])).toBe(2);
   });
 
-  it("「내 확인 필요」(#5593): 호출자가 답한 줄이 맨 위 구간이고, 승인 대기 run 보다도 위다", () => {
+  it("「응답 필요」(#5593): 호출자가 답한 줄이 맨 위 구간이고, 승인 대기 run 보다도 위다", () => {
     const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
     const quiet = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d1" })), NOW);
     const asking = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d2" })), NOW);
@@ -214,12 +215,12 @@ describe("줄 모델 (ADR-0202 D1)", () => {
       row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d3", state: "done", endedAtMs: NOW })),
       NOW
     );
-    // 서버 순서(마지막 활동 최신순)로는 묻는 세션이 맨 끝이다. 끝난 줄은 물어도 「내 확인 필요」가 아니다(D5: 요청은 취소됐다).
+    // 서버 순서(마지막 활동 최신순)로는 묻는 세션이 맨 끝이다. 끝난 줄은 물어도 「응답 필요」가 아니다(D5: 요청은 취소됐다).
     const rows = [approval, quiet, ended, asking];
     const needs = (r: typeof asking) => r.id === asking.id || r.id === ended.id;
     const sections = workJobSections(rows, needs);
     expect(sections.map((s) => [s.key, s.label, s.rows.map((r) => r.id)])).toEqual([
-      ["needsMe", "내 확인 필요", [asking.id]],
+      ["needsMe", "응답 필요", [asking.id]],
       ["now", "지금", [approval.id, quiet.id]],
       ["done", "끝난 일", [ended.id]],
     ]);
@@ -371,5 +372,12 @@ describe("보기 전환 낱말 — owner 2026-11-09 「내것 -> 내 작업으�
   it("작업 목록과 옛 팀 보드가 같은 낱말 「내 작업」을 쓴다 — 웹·데스크탑·폰이 이 상수를 읽는다", () => {
     expect(WORK_JOBS_COPY.filterMine).toBe("내 작업");
     expect(TEAM_BOARD_COPY.filterMine).toBe("내 작업");
+  });
+});
+
+describe("맨 위 구간 낱말 — owner 2026-11-10 「응답 필요」", () => {
+  it("구간 머리글은 세션 상태의 정본 낱말을 읽는다 — 글자를 따로 적지 않는다(정의 하나)", () => {
+    expect(WORK_JOBS_COPY.sectionNeedsMe).toBe("응답 필요");
+    expect(WORK_JOBS_COPY.sectionNeedsMe).toBe(SESSION_STATUS_LABEL.waiting);
   });
 });
