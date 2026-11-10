@@ -49,9 +49,18 @@
 //! that has a permission request still `pending` and not yet past its
 //! `expires_at` (ADR-0188 D5's `work_permission_request`, read through its
 //! pending index) answers `state = "waiting"` — the word shared sessions
-//! already use — instead of `running` / `idle`. Only the session owner decides
-//! such a request (ADR-0188 D3·D5), so only the owner's read changes; every other
-//! member reads the ledger word as before. The next read after the request is
+//! already use — instead of `running` / `idle`.
+//!
+//! 「응답 필요」 means **I can answer it**, so the flag asks exactly who the
+//! decision route (`momo-server` `routes::work_permissions::decide_in_tx`,
+//! ADR-0188 D3: 결정자 = 세션 소유자 = host 소유자) accepts: the viewer owns the
+//! session **and** owns the session's live host — the predicate of
+//! `work_control::active_host_owner_in_tx` (same workspace, same id,
+//! `revoked_at IS NULL`). A session on a host someone else registered (a shared
+//! host) or on a revoked host never waits, for anyone. Every other member reads
+//! the ledger word as before. `work_board_conformance_pg` b23 locks the board's
+//! set of waiting readers to the decision route's set of accepted deciders.
+//! The next read after the request is
 //! decided, expires or is cancelled is the ledger word again. Nothing of the
 //! request (tool, title, options, preview) is read, and the ledger `status` is
 //! untouched. Without `include_jobs` the flag is not evaluated, so the shipped
@@ -65,7 +74,9 @@
 //! ## What is not selected, on purpose
 //!
 //! No terminal text, input, control or attach column, no commit title, no file
-//! name, no path, no host id, no PTY/display endpoint. A host session has no S1
+//! name, no path, no host id, no PTY/display endpoint. (The session's host id is
+//! *compared* once, inside the waiting flag's decider check, and never selected.)
+//! A host session has no S1
 //! payload, so its repo / branch / diff / PR fields are `None` and its stage list
 //! is empty; the field names are `momo-core`'s `ShareSummaryS1`.
 //!
@@ -212,6 +223,11 @@ WITH sess AS ( \
          NULL::text AS requester_name, NULL::int AS step_count, NULL::int AS run_commits, \
          NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id, \
          CASE WHEN $9::boolean AND ws.origin = 'host' AND ws.member_id = $2 \
+                   AND EXISTS (SELECT 1 FROM work_host h \
+                                WHERE h.workspace_id = ws.workspace_id \
+                                  AND h.id = ws.host_id \
+                                  AND h.revoked_at IS NULL \
+                                  AND h.owner_member_id = $2) \
               THEN EXISTS (SELECT 1 FROM work_permission_request pr \
                             WHERE pr.workspace_id = ws.workspace_id \
                               AND pr.work_session_id = ws.id \
@@ -679,9 +695,38 @@ mod tests {
         assert_eq!(pr_number_of("https://github.com/acme/app"), None);
     }
 
+    /// #5639: the waiting flag's decider check — `active_host_owner_in_tx`'s
+    /// predicate (ADR-0188 D3). The one place the session's host id appears.
+    const DECIDER_HOST_CHECK: &str = "exists (select 1 from work_host h \
+         where h.workspace_id = ws.workspace_id \
+         and h.id = ws.host_id \
+         and h.revoked_at is null \
+         and h.owner_member_id = $2)";
+
+    #[test]
+    fn the_host_id_is_only_compared_in_the_decider_check_never_selected() {
+        let lowered = SELECT.to_lowercase();
+        // The check is a condition of the waiting flag's CASE (its select list
+        // is `1`), so it can only ever answer the boolean `awaiting_owner`.
+        assert!(
+            lowered.contains(&format!(
+                "case when $9::boolean and ws.origin = 'host' and ws.member_id = $2 \
+                 and {DECIDER_HOST_CHECK} then exists (select 1 from work_permission_request pr"
+            )),
+            "the decider check sits in the waiting flag's condition"
+        );
+        assert_eq!(lowered.matches(DECIDER_HOST_CHECK).count(), 1);
+        // Nothing else of the host: no second read of work_host, no other
+        // mention of a host id anywhere in the statement.
+        assert_eq!(lowered.matches("work_host").count(), 1, "work_host once");
+        assert_eq!(lowered.matches("host_id").count(), 1, "host_id once");
+    }
+
     #[test]
     fn the_query_selects_no_terminal_control_or_commit_column() {
-        let lowered = SELECT.to_lowercase();
+        // The decider check compares the host id (see the test above); the rest
+        // of the statement must not name any of these, host_id included.
+        let lowered = SELECT.to_lowercase().replacen(DECIDER_HOST_CHECK, "", 1);
         for forbidden in [
             "pty_id",
             "attach_endpoint",

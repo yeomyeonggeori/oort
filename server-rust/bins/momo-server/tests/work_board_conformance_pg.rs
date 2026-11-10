@@ -28,6 +28,8 @@
 //! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류에서는 없음, managed work run도 냄·최상위 mention은 마지막 전환만·하위 run은 없음(#3853 migration 135) | the trigger's state comparison and its type/top-level/final-transition guards |
 //! | `b20_the_owner_reads_their_session_waiting_on_a_permission_request` | 주인의 `include=jobs` 읽기만 `waiting`(team·mine), 결정·만료·취소 뒤 원래 낱말(running·idle), 주인 아닌 멤버·`include` 없음·`runs`뿐·단건 읽기는 같은 바이트, 새 키·요청 내용 없음(#5639) | the `ws.member_id = $2` / `pr.expires_at >` / `$9` conditions of `awaiting_owner` in `work_board::SELECT` |
 //! | `b21_a_waiting_session_reads_only_its_own_workspaces_requests` | 다른 워크스페이스의 요청이 섞이지 않음 — api 역할(RLS)과, RLS가 없는 읽기에서도 쿼리 자체의 워크스페이스 조건으로(#5639) | the `pr.workspace_id = ws.workspace_id` condition of `awaiting_owner` |
+//! | `b22_a_session_on_a_host_someone_else_owns_never_waits` | 세션 주인 ≠ 호스트 주인(공유 호스트)이면 세션 주인도 호스트 주인도 `waiting` 아님, 결정 경로도 둘 다 403(#5639) | the `h.owner_member_id = $2` decider check of `awaiting_owner` |
+//! | `b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts` | 같은 준비물(내 맥·공유 맥·해지된 맥·앨리스의 맥 × 주인·앨리스·밥)에서 보드가 `waiting`을 준 사람 집합 = 결정 경로가 받아들인(200) 사람 집합(#5639) | the decider check (`h.owner_member_id`, `h.revoked_at IS NULL`) drifting from `active_host_owner_in_tx` |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -3388,4 +3390,184 @@ async fn b21_a_waiting_session_reads_only_its_own_workspaces_requests() {
     pending_request(&b.app, Asking::of(&b, asking)).await;
     assert_eq!(read_as_superuser().await, "waiting");
     assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "waiting");
+}
+
+// ---------------------------------------------------------------------------
+// 22·23 — 「응답 필요」 = I can answer it: the board asks who the decision
+// route accepts (ADR-0188 D3: 결정자 = 세션 소유자 = host 소유자)
+// ---------------------------------------------------------------------------
+
+/// The `approval.requested` event id of request row `request`.
+async fn event_of(su: &PgPool, request: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT request_event_id FROM work_permission_request WHERE id = $1")
+        .bind(request)
+        .fetch_one(su)
+        .await
+        .expect("request event id")
+}
+
+/// A pending request on `session` (running on `host`, in the tenant's channel).
+async fn pending_on(b: &Board, session: Uuid, host: Uuid) -> Uuid {
+    let request = pending_request(
+        &b.app,
+        Asking {
+            host,
+            ..Asking::of(b, session)
+        },
+    )
+    .await;
+    event_of(&b.su, request).await
+}
+
+/// The real decision route, as `token`: an unsigned **reject** (a reject needs
+/// no device signature even with R2 on). Answers `(status, error code)`.
+async fn decide_as(b: &Board, token: &str, session: Uuid, event: Uuid) -> (u16, Value) {
+    let response = b
+        .http
+        .post(format!(
+            "{}/v1/workspaces/{}/work-sessions/{session}/permission-decisions",
+            b.base, b.tenant.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({"requestEventId": event, "optionId": "reject", "kind": "reject_once"}))
+        .send()
+        .await
+        .expect("decide");
+    if response.status().as_u16() == 200 {
+        return (200, Value::Null);
+    }
+    let (status, code, _) = error_of(response).await;
+    (status, code)
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b22_a_session_on_a_host_someone_else_owns_never_waits() {
+    let b = board().await;
+    // alice registered a shared Mac; the owner's session runs on it.
+    let (shared_host, _) = seed_host(
+        &b.su,
+        &b.tenant,
+        b.alice,
+        "workspace",
+        "app",
+        "앨리스가 등록한 공용 맥",
+    )
+    .await;
+    let shared = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, shared_host).await;
+    // Control: the owner's session on the owner's own Mac, with a request too.
+    let own = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+    let shared_event = pending_on(&b, shared, shared_host).await;
+    pending_on(&b, own, b.desktop).await;
+
+    // The session owner who does not own the host: not waiting, in any jobs read.
+    for query in ["", "&who=mine", "&who=team"] {
+        assert_eq!(
+            jobs_state(&b, &b.owner_token, own, query).await,
+            "waiting",
+            "control{query}: own Mac"
+        );
+        assert_eq!(
+            jobs_state(&b, &b.owner_token, shared, query).await,
+            "running",
+            "session owner, not host owner{query}"
+        );
+    }
+    // The host owner who does not own the session: not waiting either.
+    for session in [shared, own] {
+        assert_eq!(
+            jobs_state(&b, &b.alice_token, session, "").await,
+            "running",
+            "host owner, not session owner"
+        );
+    }
+    // …because neither of them can answer it.
+    for token in [&b.owner_token, &b.alice_token] {
+        assert_eq!(
+            decide_as(&b, token, shared, shared_event).await,
+            (403, json!("permission_owner_only"))
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts() {
+    use std::collections::BTreeSet;
+    let b = board().await;
+    // alice: a shared Mac she registered, and her own Mac.
+    let (alice_shared, _) =
+        seed_host(&b.su, &b.tenant, b.alice, "workspace", "app", "공용 맥").await;
+    let (alice_mac, _) = seed_host(&b.su, &b.tenant, b.alice, "member", "app", "앨리스의 맥").await;
+    // The owner's second Mac, revoked after its session asked.
+    let (owner_old_mac, _) =
+        seed_host(&b.su, &b.tenant, b.tenant.owner, "member", "app", "옛 맥").await;
+
+    let mut sessions = Vec::new();
+    for (name, token, host) in [
+        ("owner·own", &b.owner_token, b.desktop),
+        ("owner·shared", &b.owner_token, alice_shared),
+        ("owner·revoked", &b.owner_token, owner_old_mac),
+        ("alice·own", &b.alice_token, alice_mac),
+    ] {
+        let session = open_host_session(&b.http, &b.base, token, &b.tenant, host).await;
+        let event = pending_on(&b, session, host).await;
+        sessions.push((name, session, event));
+    }
+    sqlx::query("UPDATE work_host SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(owner_old_mac)
+        .execute(&b.su)
+        .await
+        .expect("revoke the old Mac");
+    let viewers = [
+        ("owner", &b.owner_token),
+        ("alice", &b.alice_token),
+        ("bob", &b.bob_token),
+    ];
+
+    // The board's set, read before anyone decides anything.
+    let mut waiting = BTreeSet::new();
+    for (who, token) in viewers {
+        let list = jobs(&b, token, "").await;
+        for (name, session, _) in &sessions {
+            if row(&list, *session).is_some_and(|item| item["state"] == "waiting") {
+                waiting.insert((who, *name));
+            }
+        }
+    }
+    // The decision route's set: every person tries every request.
+    let mut accepted = BTreeSet::new();
+    let mut outcomes = Vec::new();
+    for (who, token) in viewers {
+        for (name, session, event) in &sessions {
+            let (status, code) = decide_as(&b, token, *session, *event).await;
+            if status == 200 {
+                accepted.insert((who, *name));
+            }
+            outcomes.push((who, *name, status, code));
+        }
+    }
+
+    assert_eq!(
+        waiting, accepted,
+        "the board waits for exactly the people the decision route accepts\n{outcomes:#?}"
+    );
+    // Not vacuous: two people can answer, each their own request only.
+    assert_eq!(
+        waiting,
+        BTreeSet::from([("alice", "alice·own"), ("owner", "owner·own")])
+    );
+    // Every other outcome is the route's own refusal: not the decider (403), or
+    // — for the revoked Mac's owner — a request nobody can answer any more (409).
+    for (who, name, status, code) in &outcomes {
+        if accepted.contains(&(*who, *name)) {
+            continue;
+        }
+        let expected = if (*who, *name) == ("owner", "owner·revoked") {
+            (409, json!("permission_request_closed"))
+        } else {
+            (403, json!("permission_owner_only"))
+        };
+        assert_eq!((*status, code.clone()), expected, "{who} → {name}");
+    }
 }

@@ -25,10 +25,12 @@
 //!   absent, and the page echoes `who` only to a caller that used the new
 //!   parameters.
 //! * **The owner's waiting Mac session (#5639, ADR-0202 D4 · ADR-0188 D3·D5).**
-//!   With `include=jobs`, a `host` session the caller owns that has a pending,
-//!   unexpired permission request reads `state: "waiting"` (an existing word).
-//!   No key is added and nothing of the request is sent; any other caller, and
-//!   every read without `include=jobs`, gets the ledger word as before.
+//!   With `include=jobs`, a `host` session with a pending, unexpired permission
+//!   request reads `state: "waiting"` (an existing word) for the one caller
+//!   `work_permissions::decide_in_tx` would accept: the session owner who also
+//!   owns the session's unrevoked host. No key is added and nothing of the
+//!   request or the host is sent; any other caller, and every read without
+//!   `include=jobs`, gets the ledger word as before.
 //! * **Realtime is event → refetch.** `work.session.share_changed` carries only
 //!   the session id and the kind; a client that receives one re-reads this
 //!   endpoint. Nothing in the event is trusted as board content.
