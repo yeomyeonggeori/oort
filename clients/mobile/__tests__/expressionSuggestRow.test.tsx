@@ -1,7 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import React from 'react';
 import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
-import {Dimensions, Keyboard, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Keyboard, StyleSheet} from 'react-native';
 import type {CatalogEmoji} from '@momo/core/features/emoji/catalog';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {createExpressionFixtureServer, type ExpressionFixtureRequest} from '@momo/core/features/expressions/fixtureServer';
@@ -26,6 +26,8 @@ import {createPhoneExpressionStore, type PhoneExpressionStore} from '../src/feat
 import {writeExpressionFavorites} from '../src/features/expressions/useExpressionFavorites';
 import {__setNonSecretStore, type NonSecretStore} from '../src/storage/kv';
 import {pinReduceMotion} from './fixtures/reduceMotion';
+import {finger} from './fixtures/finger';
+import {SWIPE_DISMISS_PT} from '../src/features/expressions/ComposerExpressionSuggest';
 
 jest.mock('../src/features/emoji/catalog', () => ({loadPhoneEmojiCatalog: jest.fn()}));
 jest.mock('../src/lib/haptics', () => ({haptics: {event: jest.fn(), light: jest.fn()}}));
@@ -38,6 +40,8 @@ jest.mock('../src/features/expressions/ExpressionImage', () => {
 // =============================================================================
 // 키워드 추천 줄 (#5478, 코어 #5454 1단계, 웹 #5476 의 짝) — 글을 치다 0.3초 멈추면 입력창 위에 맞는 그림 몇 개, 누르면 미리 보기, 저절로 보내지 않는다, ✕ 로 이 대화의 그 낱말을 끈다.
 // #5588: 문구 안의 낱말 모두를 맞춰 낱말이 나온 차례로 한 줄에 함께 세우고, 누를 때 글이 그 낱말뿐이면 글을 그림으로 바꾸고(보내면 그림만) 문구면 글을 두고 그림을 더한다.
+// #5602: 줄은 방금 친 낱말이 키워드일 때만 서고(M1), ✕ 는 그 낱말 하나만 끄고(M2), 「이번만 닫기」(쓸어내리기·접근성 동작)는 다음 키워드까지 닫아 두고, 바꾸기는 낭독으로 알린다(M3).
+// 언제 서는지의 가장자리 표는 코어 `suggest.test.ts` 가 잰다. 여기서는 진짜 입력창의 배선(캐럿·닫힘·끔·손짓·알림)을 잰다.
 // 진짜 `Composer`·`ConversationLayout`·폰 저장소·코어 맞추기. 가짜: 서버(코어 fixture)·표준 이모지 목록·그림 부품. 줄이 흐름에 들지 않고 입력창이 안 움직이는 것은 시뮬레이터가 잰다.
 // =============================================================================
 
@@ -270,17 +274,20 @@ describe('누르면 미리 보기에 올라간다 — 저절로 보내지 않는
 });
 
 describe('✕ — 이 대화에서 그 낱말 추천을 끈다', () => {
-  it('여러 낱말 줄의 ✕ 는 그림에 맞은 낱말들만 끈다 - 맞지 않은 「개웃기네」는 끄지 않는다 (#5588)', async () => {
+  it('여러 낱말 줄의 ✕ 는 줄을 띄운 낱말 하나만 끈다 - 이름 「이 낱말 추천 끄기」와 같은 수 (#5602 M2)', async () => {
     const {store} = await loadedStore();
     mount(store);
     typeAndPause('ㅋㅋ 개웃기네 진심');
+    expect(screen.getByTestId('composer-expression-suggest-mute').props.accessibilityLabel).toBe('이 낱말 추천 끄기');
     fireEvent.press(screen.getByTestId('composer-expression-suggest-mute'));
     expect(row()).toBeNull();
-    expect(mutedKeywords('ws:ch')).toEqual(['ㅋㅋ', '진심']);
+    expect(mutedKeywords('ws:ch')).toEqual(['진심']); // 옛 판은 [ㅋㅋ, 진심] 둘을 껐다
     typeAndPause('진심');
     expect(row()).toBeNull();
     typeAndPause('진심 한숨');
     expect(names()).toEqual(['sigh_a']);
+    typeAndPause('진심 ㅋㅋ'); // ㅋㅋ 는 꺼지지 않았다. 끈 진심 쪽 그림은 그 줄에도 없다
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'laugh_c']);
   });
 
   it('끈 낱말은 글을 지웠다 다시 쳐도, 입력창을 다시 세워도 안 뜬다. 다른 낱말·다른 대화에는 뜬다', async () => {
@@ -300,6 +307,155 @@ describe('✕ — 이 대화에서 그 낱말 추천을 끈다', () => {
     remountIn(TARGET); // 원래 대화로 돌아와 다시 세워도 꺼진 채
     typeAndPause('ㅋㅋ');
     expect(row()).toBeNull();
+  });
+});
+
+/** 줄이 **선** 횟수: 쉼마다 줄이 없다가 있게 되면 하나. 쉼 사이에 글이 바뀌어 줄은 매번 걷힌다(글이 바뀌는 순간 사라진다). */
+function countingPauses() {
+  let count = 0;
+  return {
+    pause(text: string) {
+      const before = row() !== null;
+      focusInput();
+      typeText(text);
+      const hidden = row() === null;
+      wait(300);
+      if ((hidden || !before) && row() !== null) count += 1;
+    },
+    get count() {
+      return count;
+    },
+  };
+}
+
+describe('방금 친 낱말이 키워드일 때만 선다 (#5602 M1)', () => {
+  it('확인 숫자: 「ㅋㅋ 개웃기네 진심」을 낱말마다 쉬며 치면(쉼 7번) 줄이 선 횟수 2(옛 판 7) - 끝의 줄에는 ㅋㅋ 쪽과 진심 쪽이 함께 있다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    const seen = countingPauses();
+    for (const text of ['ㅋㅋ', 'ㅋㅋ 개', 'ㅋㅋ 개웃', 'ㅋㅋ 개웃기네', 'ㅋㅋ 개웃기네 ', 'ㅋㅋ 개웃기네 진', 'ㅋㅋ 개웃기네 진심']) seen.pause(text);
+    expect(seen.count).toBe(2);
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'sincere_a']);
+  });
+
+  it('캐럿은 쉼이 끝날 때 입력창이 아는 값이다: 글 가운데(「진심|」)를 고치면 그 낱말로 서고, 키워드가 아닌 낱말(「오늘|」)이면 끝 낱말이 키워드여도 서지 않는다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    const caretAt = (start: number) => act(() => void fireEvent(input(), 'selectionChange', {nativeEvent: {selection: {start, end: start}}}));
+    focusInput();
+    typeText('오늘 저녁 ㅋㅋ');
+    caretAt(2);
+    wait(300);
+    expect(row()).toBeNull();
+    typeText('진심 저녁 ㅋㅋ');
+    caretAt(2);
+    wait(300);
+    expect(names()).toEqual(['sincere_a', 'laugh_a', 'laugh_b']);
+  });
+});
+
+describe('「이번만 닫기」 — 줄을 아래로 쓸어내리기, 낭독은 같은 일을 하는 접근성 동작 (#5602)', () => {
+  const tray = () => screen.getByTestId('composer-expression-suggest') as unknown as {props: Record<string, (event: unknown) => unknown>};
+
+  it('확인 숫자: 반 칸 넘게 쓸어내리면 닫히고 - 같은 낱말 0번, 다음 키워드 1번. 끄지 않는다(✕ 와 다르다)', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ');
+    const hand = finger(tray());
+    hand.down(100, 400);
+    expect(hand.move(102, 410)).toBe(true); // 아래로, 문턱(8) 넘게 → 줄이 가져간다
+    // 가져간 자리부터 잰다(`PanResponder` 는 가져가는 순간 거리를 0으로 둔다): 반 칸(22)보다 2 더, 천천히(속도로 닫히지 않게).
+    hand.move(102, 410 + SWIPE_DISMISS_PT + 2, 400);
+    hand.up();
+    expect(row()).toBeNull();
+    expect(mutedKeywords('ws:ch')).toEqual([]);
+    const seen = countingPauses();
+    seen.pause('ㅋㅋㅋ');
+    wait(2000);
+    expect(seen.count).toBe(0);
+    seen.pause('ㅋㅋㅋ 진심');
+    expect(seen.count).toBe(1);
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'sincere_a']);
+  });
+
+  it('짧게·천천히 끌다 놓으면 닫히지 않고, 가로로 먼저 움직인 손가락과 탭은 줄이 가져가지 않는다(그림 누르기 그대로)', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ');
+    const slow = finger(tray());
+    slow.down(100, 400);
+    expect(slow.move(100, 412, 200)).toBe(true);
+    slow.move(100, 412 + SWIPE_DISMISS_PT - 2, 400); // 가져간 자리부터 반 칸에 2 모자라게, 천천히
+    slow.up();
+    expect(row()).not.toBeNull();
+    const sideways = finger(tray());
+    sideways.down(100, 400);
+    expect(sideways.move(130, 410)).toBe(false);
+    const up = finger(tray());
+    up.down(100, 400);
+    expect(up.move(100, 380)).toBe(false);
+    const tap = finger(tray());
+    tap.down(100, 400);
+    expect(tap.move(101, 404)).toBe(false);
+    expect(row()).not.toBeNull();
+    // 짧아도 아래로 빠르게 튕기면 닫는다(0.7pt/ms 넘게).
+    const flick = finger(tray());
+    flick.down(100, 400);
+    expect(flick.move(100, 410, 10)).toBe(true);
+    flick.move(100, 420, 10);
+    flick.up();
+    expect(row()).toBeNull();
+  });
+
+  it('낭독: 칸·✕ 의 동작 목록에 「이번만 닫기」가 있고 누르면 쓸어내린 것과 같다 - 두 손가락 Z(나가기)도 같다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ');
+    const cell = screen.getByTestId('composer-expression-suggest-item-laugh_a');
+    expect(cell.props.accessibilityActions).toEqual([{name: expect.any(String), label: '이번만 닫기'}]);
+    expect(screen.getByTestId('composer-expression-suggest-mute').props.accessibilityActions).toEqual(cell.props.accessibilityActions);
+    fireEvent(cell, 'accessibilityAction', {nativeEvent: {actionName: cell.props.accessibilityActions[0].name}});
+    expect(row()).toBeNull();
+    typeAndPause('ㅋㅋㅋ');
+    expect(row()).toBeNull(); // 다음 키워드까지 닫힌 채
+    typeAndPause('ㅋㅋㅋ 한숨');
+    expect(names()).toEqual(['laugh_a', 'laugh_b', 'sigh_a']);
+    act(() => void screen.getByTestId('composer-expression-suggest').props.onAccessibilityEscape());
+    expect(row()).toBeNull();
+    typeAndPause('ㅋㅋㅋ 한숨!!');
+    expect(row()).toBeNull();
+    expect(mutedKeywords('ws:ch')).toEqual([]);
+  });
+
+  it('보내면 닫힘이 풀린다 - 같은 낱말을 다시 치면 선다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋ');
+    const cell = screen.getByTestId('composer-expression-suggest-item-laugh_a');
+    fireEvent(cell, 'accessibilityAction', {nativeEvent: {actionName: cell.props.accessibilityActions[0].name}});
+    typeAndPause('ㅋㅋㅋ');
+    expect(row()).toBeNull();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    typeAndPause('ㅋㅋ');
+    expect(row()).not.toBeNull();
+  });
+});
+
+describe('「바꾸기」는 낭독으로 한 번 알린다 (#5602 M3)', () => {
+  it('글이 그 낱말뿐이라 글이 지워질 때 알림 1번, 문구에 그림을 더할 때는 0번', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    const {store} = await loadedStore();
+    mount(store);
+    typeAndPause('ㅋㅋㅋ!!');
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-laugh_b'));
+    expect(input().props.value).toBe('');
+    expect(announce.mock.calls).toEqual([['쓴 글을 laugh_b 표시 이모티콘으로 바꿨어요']]);
+    fireEvent.press(screen.getByTestId('composer-send'));
+    announce.mockClear();
+    typeAndPause('ㅋㅋㅋ 개웃기네 진심');
+    fireEvent.press(screen.getByTestId('composer-expression-suggest-item-sincere_a'));
+    expect(input().props.value).toBe('ㅋㅋㅋ 개웃기네 진심');
+    expect(announce).not.toHaveBeenCalled();
   });
 });
 
@@ -360,7 +516,43 @@ describe('줄이 서지 않는 때', () => {
   });
 });
 
+type JsonNode = {type: string; props: Record<string, unknown>; children: Array<JsonNode | string> | null};
+/** 흐름 안의 화면: 절대 위치 층(흐름 밖이라 자리를 먹지 않는다)을 뺀 나머지 트리. 이것이 같으면 도크·목록의 배치 입력이 같다. */
+function flowTree(node: JsonNode | JsonNode[] | string | null): unknown {
+  if (node === null || typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(flowTree);
+  if ((StyleSheet.flatten(node.props.style as never) as {position?: string} | undefined)?.position === 'absolute') return null;
+  // 손잡이(함수)는 렌더마다 새 값이라 뺀다: 배치를 정하는 것은 값(스타일·글·속성)이다.
+  const values = Object.fromEntries(Object.entries(node.props).filter(([, value]) => typeof value !== 'function'));
+  return {type: node.type, props: {...values, style: StyleSheet.flatten(node.props.style as never)}, children: (node.children ?? []).map(flowTree).filter(child => child !== null)};
+}
+
 describe('자리', () => {
+  it('줄이 서고 질 때 대화 목록 이동 0 (#5602): 화면에서 흐름 안의 트리가 줄이 선 때·진 때·다시 선 때 똑같다 - 도크 높이가 그대로라 목록이 밀리지 않는다', async () => {
+    const {store} = await loadedStore();
+    mount(store);
+    focusInput();
+    typeText('ㅋㅋ');
+    const before = flowTree(screen.toJSON() as JsonNode);
+    wait(300);
+    expect(row()).not.toBeNull();
+    const withRow = flowTree(screen.toJSON() as JsonNode);
+    const cell = screen.getByTestId('composer-expression-suggest-item-laugh_a');
+    fireEvent(cell, 'accessibilityAction', {nativeEvent: {actionName: cell.props.accessibilityActions[0].name}});
+    expect(row()).toBeNull();
+    const withoutRow = flowTree(screen.toJSON() as JsonNode);
+    typeAndPause('ㅋㅋ 한숨');
+    expect(row()).not.toBeNull();
+    typeText('ㅋㅋ');
+    wait(300);
+    // 「ㅋㅋ」(0째)는 이미 닫았지만 「ㅋㅋ 한숨」에서 풀렸다 → 같은 글에서 다시 선다.
+    expect(row()).not.toBeNull();
+    const back = flowTree(screen.toJSON() as JsonNode);
+    expect(withRow).toEqual(before);
+    expect(withoutRow).toEqual(before);
+    expect(back).toEqual(before);
+  });
+
   it('도크 밖으로 뜬다: 흐름에 들지 않고(서고 사라져도 입력창·대화가 안 움직인다) 바깥 칸은 눌림을 받지 않는다', async () => {
     const {store} = await loadedStore();
     mount(store);

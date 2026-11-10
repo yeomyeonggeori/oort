@@ -193,6 +193,8 @@
   "expressions.suggest.group": "이모티콘 추천",
   "expressions.suggest.pick": "{name} 미리 보기에 올리기",
   "expressions.suggest.mute": "이 낱말 추천 끄기",
+  "expressions.suggest.dismiss": "이번만 닫기",
+  "expressions.suggest.replaced": "쓴 글을 {name} 이모티콘으로 바꿨어요",
   "expressions.suggest.settingLabel": "이모티콘 추천",
   "expressions.suggest.settingHint": "글을 쓰다 멈추면 맞는 이모티콘을 입력창 위에 보여 줘요.",
   "expressions.picker.teamGroup": "팀 보관함",
