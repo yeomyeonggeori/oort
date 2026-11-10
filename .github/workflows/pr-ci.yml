@@ -811,9 +811,9 @@ jobs:
           fi
           base="$(printf '%s\n' "$parents" | head -n 1)"
           git fetch --no-tags --depth=1 origin "$base"
-          labels="$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' || true)"
           approved=false
-          if printf '%s\n' "$labels" | grep -Fxq policy-change-approved; then
+          if labels="$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name')" \
+            && printf '%s\n' "$labels" | grep -Fxq policy-change-approved; then
             approved=true
           fi
           env -u GH_TOKEN DIRECT_COPY_REANCHOR_APPROVED="$approved" node "$tool" compare-base "$base" || rc=1
