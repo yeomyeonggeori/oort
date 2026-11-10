@@ -5,8 +5,8 @@
 //   ② 목록이 맨 아래에서 떨어지지 않는다(거리 0),
 //   ③ 「최신 메시지로 이동」이 서지 않는다(0회).
 // 진짜로 목록 높이가 바뀌어도(등록으로 글자 → 그림, 숨김으로 그림 → 글자) 맨 아래는 맨 아래이고, 위로 올려 읽던 중이면
-//   ④ 보던 메시지의 화면(창) 위치가 2px 넘게 움직이지 않는다(WebKit에는 이 목록 안의 스크롤 앵커링이 없다 — 가상 목록이
-//      줄마다 `overflow-anchor:none`을 건다).
+//   ④ 보던 메시지의 화면(창) 위치가 2px 넘게 움직이지 않는다(이 목록 안에서는 어느 엔진도 스크롤 앵커링을 하지 않는다 — 가상
+//      목록이 줄마다, 타임라인이 스크롤러에 `overflow-anchor:none`을 건다, #5638).
 // 연결이 끊겼다 돌아와도(기기 오프라인 · 서버에 닿지 못함) ⑤ 맨 아래의 마지막 줄과 위를 읽던 줄이 **창에서** 1px 넘게 움직이지
 // 않는다 — 1280 · 900 · 390. 목록 안쪽 좌표(바닥 거리 · 스크롤러 위쪽에서 줄까지)는 목록 상자가 통째로 움직이면 0을 보고하므로
 // (#5575 검수 H1: 입력창 위 오프라인 줄 26~44px, 머리 아래 허들 배너 39px), 마지막 줄의 아래 끝과 보던 줄의 위 끝을 창 좌표로도 잰다.
@@ -26,6 +26,9 @@
 //   EXPRESSION_JITTER_IMAGE_DELAY_MS=<ms>       그림 응답 지연(기본 250: 실제 망처럼 가상 목록의 100ms 따라붙기 창 밖에서 도착한다)
 //   EXPRESSION_JITTER_CAPTURE=<폴더>            오프라인 흔들림 장면에서 대화 목록을 찍는다(온라인 · 오프라인 1초 · 돌아온 뒤)
 //   EXPRESSION_JITTER_ONLY=connection           연결 끊김 → 돌아옴 장면(창 기준, 1280 · 900 · 390)만 돈다
+//   EXPRESSION_JITTER_ONLY=bottom               맨 아래 장면(1~10, 등록 · 숨김 포함)만 돈다
+//   EXPRESSION_JITTER_REPEAT=<N>                맨 아래 장면을 새 창으로 N번 되풀이한다(기본 1, 단정은 회차마다 같다 — #5638)
+// 머리 출력: 엔진마다 `CSS.supports('overflow-anchor','auto')`와 타임라인 스크롤러의 계산값을 찍는다(#5638, `engine-anchor.mjs`).
 
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -33,6 +36,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { chromium, webkit } from "playwright";
+import { printEngineAnchorHeader, scrollerOverflowAnchor } from "./engine-anchor.mjs";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -54,6 +58,7 @@ const connectionViewports = [
   { width: 390, height: 844 },
 ];
 const onlyScene = process.env.EXPRESSION_JITTER_ONLY || null;
+const bottomRepeat = Math.max(1, Number(process.env.EXPRESSION_JITTER_REPEAT || 1));
 const distOverride = process.env.EXPRESSION_JITTER_DIST || null;
 const captureDir = process.env.EXPRESSION_JITTER_CAPTURE || null;
 
@@ -762,12 +767,13 @@ async function untilTrue(fn, label, timeout = 10_000) {
 
 const BASE_IMAGES = ["coffee_break", "good_job", "rocket_launch", "sleepy_cat", "bug_hunt", "high_five", "old_flag"];
 
-async function runBottomScene(browser, engine) {
+async function runBottomScene(browser, engine, run = 1) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR" });
   const backend = await installBackend(context);
   const page = await context.newPage();
   await installProbe(page);
   await openDm(page, backend);
+  if (run === 1) console.log(`[${engine}] 타임라인 스크롤러 overflow-anchor=${await scrollerOverflowAnchor(page, scrollerSelector)}`);
   const results = [];
   const record = async (label, body, { expect = BASE_IMAGES, settle = 1_200 } = {}) => {
     const before = { ...backend.state, sockets: undefined, active: undefined };
@@ -889,7 +895,7 @@ async function runBottomScene(browser, engine) {
 
   if (measureOnly) results.push(...(await mechanismProbe(page)));
   await context.close();
-  return results.map((entry) => ({ engine, scene: "bottom", ...entry }));
+  return results.map((entry) => ({ engine, scene: "bottom", run, ...entry }));
 }
 
 /** 앵커 줄을 화면 가운데쯤에 둔다(가상 목록이 줄을 붙일 때까지 기다리며 올라간다). */
@@ -1086,25 +1092,27 @@ async function mechanismProbe(page) {
 function judge(all) {
   const failures = [];
   for (const entry of all) {
-    const { summary, engine, scene } = entry;
+    const { summary, engine, scene, run } = entry;
     if (summary.probe) continue;
-    const where = `${engine} ${summary.label}`;
+    const where = `${engine}${bottomRepeat > 1 ? ` #${run}` : ""} ${summary.label}`;
     if (summary.frames < 20) failures.push(`${where}: 그려진 프레임 표본이 ${summary.frames}개뿐이다(재기가 장면을 못 봤다)`);
     if (summary.maxText !== 0 || summary.textInsertions !== 0) {
       failures.push(`${where}: 아는 이모티콘이 :이름: 글자로 바뀌었다 (프레임 최대 ${summary.maxText}개, 붙은 횟수 ${summary.textInsertions}, ${JSON.stringify(summary.textNames)})`);
     }
-    const realChange = summary.label.startsWith("8") || summary.label.startsWith("9");
     if (scene === "bottom" && !summary.label.startsWith("10")) {
-      // 진짜 높이 변화(등록 · 숨김)의 바닥 거리는 데스크탑 엔진(WebKit)에서 잰다. Chromium 은 가상 목록이 바로잡은 scrollTop 을 한 프레임
-      // 되돌려 쓰고 끝맞춤이 2px 모자라는 것을 기록만 한다(남은 일). 일시적 상태의 바닥 거리는 두 엔진 모두 0 이어야 한다.
-      if (summary.maxGap > 1 && (!realChange || engine === "webkit")) {
+      // 진짜 높이 변화(등록 · 숨김)도 두 엔진 모두 바닥 거리 ≤1px 이다(#5638). 예전에는 Chromium 만 기록만 했다(#5583 당시 가상 목록이
+      // 바로잡은 scrollTop 을 한 프레임 되돌려 쓰고 끝맞춤이 2px 모자랐다). 2026-11-10 새 창 10번 되풀이
+      // (`EXPRESSION_JITTER_ONLY=bottom EXPRESSION_JITTER_REPEAT=10`)에서 스크롤러 앵커링을 끈 번들도, 끄기 전 번들도 10/10 바닥 거리 0 ·
+      // 마지막 줄 ≤0.75px 이라 단정으로 올렸다 — 2px 모자람은 지금 번들에서 재현되지 않는다. 바닥 붙이기(`scrollHold`)를 끈 번들에서는
+      // Chromium 등록이 165px, 숨김이 2px 떨어져 이 단정이 빨개진다.
+      if (summary.maxGap > 1) {
         failures.push(`${where}: 맨 아래에 붙은 목록이 ${summary.maxGap}px 떨어졌다(${summary.gapFrames}프레임)`);
       }
       if (summary.pillShows !== 0 || summary.pillMounts !== 0) {
         failures.push(`${where}: 「최신 메시지로 이동」이 ${Math.max(summary.pillShows, summary.pillMounts)}번 섰다`);
       }
       // 창 기준(#5575 검수 H1): 바닥 거리가 0이어도 목록 상자가 움직이면 마지막 줄이 화면에서 움직인다.
-      if ((!realChange || engine === "webkit") && (summary.lastBottomSpread === null || summary.lastBottomSpread > 1)) {
+      if (summary.lastBottomSpread === null || summary.lastBottomSpread > 1) {
         failures.push(`${where}: 맨 아래의 마지막 줄이 창에서 ${summary.lastBottomSpread}px 움직였다 ${JSON.stringify(summary.lastBottomRange)}`);
       }
     }
@@ -1177,13 +1185,15 @@ async function main() {
       if (type === null) throw new Error(`모르는 엔진: ${name}`);
       const browser = await type.launch({ headless: true });
       try {
-        if (onlyScene === null) {
-          all.push(...(await runBottomScene(browser, name)));
-          all.push(...(await runAnchorScene(browser, name)));
-        } else if (onlyScene !== "connection") {
-          throw new Error(`모르는 장면: ${onlyScene}`);
+        await printEngineAnchorHeader(browser, name);
+        if (onlyScene !== null && onlyScene !== "connection" && onlyScene !== "bottom") throw new Error(`모르는 장면: ${onlyScene}`);
+        if (onlyScene === null || onlyScene === "bottom") {
+          for (let run = 1; run <= bottomRepeat; run += 1) all.push(...(await runBottomScene(browser, name, run)));
         }
-        for (const vp of connectionViewports) all.push(...(await runConnectionScene(browser, name, vp)));
+        if (onlyScene === null) all.push(...(await runAnchorScene(browser, name)));
+        if (onlyScene === null || onlyScene === "connection") {
+          for (const vp of connectionViewports) all.push(...(await runConnectionScene(browser, name, vp)));
+        }
       } finally {
         await browser.close();
       }
@@ -1191,7 +1201,7 @@ async function main() {
   } finally {
     await server.stop();
   }
-  for (const entry of all) console.log(`[${entry.engine}] ${JSON.stringify(entry.summary)}`);
+  for (const entry of all) console.log(`[${entry.engine}${bottomRepeat > 1 && entry.run ? ` #${entry.run}` : ""}] ${JSON.stringify(entry.summary)}`);
   if (outDir !== null) {
     mkdirSync(outDir, { recursive: true });
     writeFileSync(resolve(outDir, "expression-jitter.json"), JSON.stringify(all, null, 1));
@@ -1202,6 +1212,10 @@ async function main() {
   if (failures.length > 0) {
     for (const failure of failures) console.error(`FAIL ${failure}`);
     process.exit(1);
+  }
+  if (onlyScene === "bottom") {
+    console.log(`PASS expression-jitter (맨 아래 장면만 × ${bottomRepeat}회): ${engineNames.join("·")} — 글자 0 · 바닥 거리 ≤1px · 필 0 · 마지막 줄 창 기준 ≤1px`);
+    return;
   }
   console.log(
     `PASS expression-jitter: ${engineNames.join("·")} — 글자 0 · 바닥 거리 0 · 필 0 · 보던 줄 ≤2px · 연결 끊김 → 돌아옴에 마지막 줄·보던 줄 창 기준 ≤1px (${connectionViewports.map((vp) => vp.width).join(" · ")})`

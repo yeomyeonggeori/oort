@@ -529,7 +529,7 @@ describe("이어지는 행의 거터 칩 (#4619 planner 결정 2)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "hover가 없는 기기(터치)에서는 거터 칩이 서지 않고 시각이 처음부터 서 있다",
+    "hover가 없는 기기(터치)에서는 거터 칩도, 이어지는 행의 시각도 서지 않는다(#5624 M2, 폰 앱 #3386과 같게)",
     async () => {
       const html = rowHtml({ name: "정하윤", startsGroup: false, runs: [run()] });
       const css = await compileTokensCss(classesOf(html));
@@ -553,7 +553,8 @@ describe("이어지는 행의 거터 칩 (#4619 planner 결정 2)", () => {
               continue;
             }
             if (g.chip.display !== "none") problems.push(`${engine}: 터치 기기에서 칩의 display가 ${g.chip.display}`);
-            if (!(g.time.opacity > 0.99)) problems.push(`${engine}: 터치 기기에서 시각 투명도 ${g.time.opacity}`);
+            // 같은 분 묶음에서 이어지는 행의 시각은 언제나 머리 시각과 같다 — 터치에서는 서지 않는다(#5624 M2).
+            if (!(g.time.opacity < 0.01)) problems.push(`${engine}: 터치 기기에서 이어지는 행의 시각 투명도 ${g.time.opacity}`);
           } finally {
             await ctx.close();
           }
