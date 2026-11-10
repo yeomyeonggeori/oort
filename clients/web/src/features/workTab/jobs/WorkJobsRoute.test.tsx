@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type SharedWorkSession, type WorkJobsMode } from "@momo/core/lib/api";
 import { WORK_FILTER_STORAGE_KEY } from "@momo/core/features/workbench/workJobs";
+import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { RealtimeHandle } from "@/lib/realtime";
@@ -20,6 +21,8 @@ const api = vi.hoisted(() => ({
   fetchWorkJobs: vi.fn(),
   fetchSharedWorkSession: vi.fn(),
   fetchWorkSessions: vi.fn(),
+  // 「응답 필요」의 run 줄 재료(#5640): 인박스 배지와 같은 승인 원장. 여기서는 비어 있다.
+  fetchApprovals: vi.fn(),
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/lib/api")>()),
@@ -32,8 +35,10 @@ vi.mock("@/lib/tauri", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri")>()),
   isDesktop: () => shell.desktop,
 }));
-vi.mock("@/features/workspace/useWorkspace", () => ({
+vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/workspace/useWorkspace")>()),
   useChannels: () => ({ groups: { channels: [{ id: CH_AGENT_LAB, kind: "public", name: "agent-lab" }], dms: [] } }),
+  useDirectory: () => ({ directory: makeDirectory([]), isLoading: false }),
 }));
 
 const { WorkJobsRoute } = await import("./WorkJobsRoute");
@@ -125,6 +130,7 @@ beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
   api.fetchSharedWorkSession.mockRejectedValue(new ApiError(404, "shared work session not found"));
   api.fetchWorkSessions.mockResolvedValue([]);
+  api.fetchApprovals.mockResolvedValue([]);
   shell.desktop = false;
   try {
     window.localStorage.removeItem(WORK_FILTER_STORAGE_KEY);

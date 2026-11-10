@@ -1903,6 +1903,12 @@ export const catalog: MessageCatalog = {
       "value": "작업 중"
     }
   ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

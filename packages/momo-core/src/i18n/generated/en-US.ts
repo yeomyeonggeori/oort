@@ -2071,6 +2071,12 @@ export const catalog: MessageCatalog = {
       "value": "Working"
     }
   ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "Allow it from the phone or desktop app"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

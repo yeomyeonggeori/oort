@@ -1,22 +1,28 @@
 import {
   useCallback,
   useEffect,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type FocusEvent,
   type KeyboardEvent,
 } from "react";
 import { ListChecks, SquareTerminal } from "lucide-react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { SharedWorkSession } from "@momo/core/lib/api";
 import { uuidEq } from "@momo/core/lib/api";
+import { isRealtimeConnected } from "@momo/core/lib/realtimeEvents";
 import {
+  NEEDS_ME_SECTION,
   WORK_JOBS_COPY,
   inProgressCount,
   inProgressLabel,
   itemsForFilter,
   reportedSummary,
   requesterToAgent,
+  rowNeedsMe,
   searchWithFilter,
   workJobRow,
   workJobSections,
@@ -24,7 +30,7 @@ import {
   type WorkJobRow,
 } from "@momo/core/features/workbench/workJobs";
 import { TEAM_BOARD_COPY, isRunItem } from "@momo/core/features/workbench/teamBoard";
-import { LOCAL_TERMINALS_PATH } from "@momo/core/features/workbench/workTab";
+import { LOCAL_TERMINALS_PATH, agentPanePath } from "@momo/core/features/workbench/workTab";
 import { SESSION_STATUS_LABEL } from "@momo/core/features/workbench/sessionList";
 import { PANE_MARK_LABEL, isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { useSession } from "@/app/session";
@@ -34,12 +40,15 @@ import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
+import { useDecidableApprovalRunIds } from "@/features/inbox/useNeedsMe";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { TeamBoardDrawer } from "@/features/workTab/teamBoard/TeamBoardDrawer";
 import { StateChip } from "@/features/workTab/teamBoard/TeamBoardParts";
 import { useTeamBoardItem, useTeamBoardRail } from "@/features/workTab/teamBoard/useTeamBoard";
+import { workConsoleSessionPath } from "@/features/workConsole/model";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop } from "@/lib/tauri";
-import { ApprovalCardLink, JobPrLink, ReportedTag } from "./WorkJobParts";
+import { ApprovalCardLink, JobPrLink, PermissionHint, ReportedTag } from "./WorkJobParts";
 import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWorkJobs";
 
 // Reading this as: 「작업」 한 화면(결과 중심 목록 + 서랍) for internal team users on web+Tauri,
@@ -55,6 +64,15 @@ import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWor
 //
 // 키보드: j/k 또는 위·아래 화살표로 줄을 옮기고, Enter가 서랍을 열고, Esc가 닫고 열었던 줄로
 // 돌아온다. 줄은 로빙 tabindex 한 벌이다(팀 보드와 같은 문법).
+//
+// 「응답 필요」 구간(#5640, ADR-0202 D1·D5, ADR-0188 D5): 「내 작업」 맨 위. 줄을 올리는 판정은 코어 `rowNeedsMe` 하나다 —
+// 내 맥 세션은 서버가 준 상태 `waiting`(#5639)만, 내가 맡긴 run은 인박스 배지와 같은 승인 원장·같은 판정
+// (`useDecidableApprovalRunIds`)만 읽는다. 화면이 세션마다 진행을 따로 읽어 짐작하지 않는다. 내 맥 세션 줄의 Enter·클릭은 서랍이
+// 아니라 승인 카드로 간다: 데스크탑은 그 세션의 A 칸(`agentPanePath`, 격자가 카드에 초점), 브라우저는 세션 화면(작업 콘솔)이고
+// 허락은 줄 아래 한 줄이 폰·데스크탑 앱으로 안내한다(브라우저에는 허락 카드가 없다, ADR-0146 D-4).
+//
+// 갱신: 그 세션의 권한 요청·결정(ACP `approval.*`)이 실시간으로 오면 다시 읽는다. 60초 박자는 실시간이 끊겼거나 듣지 못하는
+// 채널이 있을 때만이다. 줄이 구간 사이를 옮겨도 초점은 그 줄을 따라가고, 스크롤한 목록은 보던 줄이 제자리에 남는다(움직임 없음).
 
 const MINUTE_MS = 60_000;
 
@@ -68,7 +86,7 @@ function useMinuteNow(): number {
 }
 
 export function WorkJobsRoute() {
-  const { workspaceId, session } = useSession();
+  const { workspaceId, session, realtime, connStatus } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const offline = useOffline();
@@ -77,9 +95,14 @@ export function WorkJobsRoute() {
   const filter = currentWorkFilter(location.search);
   const nowMs = useMinuteNow();
   const desktop = isDesktop();
+  const formatMessage = useFormatMessage();
+  const selfId = session.member.id;
 
-  const list = useWorkJobsList(workspaceId, filter);
-  useTeamBoardRail(workspaceId, list.items);
+  // 실시간이 붙어 있으면 60초 박자를 멈춘다(듣지 못하는 채널이 있으면 `useWorkJobsList`가 박자를 지킨다).
+  const live = realtime !== null && isRealtimeConnected(connStatus);
+  const list = useWorkJobsList(workspaceId, filter, live);
+  useTeamBoardRail(workspaceId, list.items, { rereadOnApproval: true });
+  const approvalRunIds = useDecidableApprovalRunIds();
 
   const chooseFilter = useCallback(
     (next: WorkFilter) => {
@@ -99,7 +122,13 @@ export function WorkJobsRoute() {
       ),
     [list.items, list.mode, filter, session.member.id, nowMs]
   );
-  const sections = useMemo(() => workJobSections(rows), [rows]);
+  const sections = useMemo(
+    () =>
+      workJobSections(rows, (row) =>
+        rowNeedsMe(row, { filter, selfMemberId: selfId, approvalRunIds })
+      ),
+    [rows, filter, selfId, approvalRunIds]
+  );
   const running = inProgressCount(rows);
 
   const fromList =
@@ -155,6 +184,61 @@ export function WorkJobsRoute() {
   }, [openId]);
 
   const orderedIds = useMemo(() => sections.flatMap((s) => s.rows.map((r) => r.id)), [sections]);
+  const sectionOf = useMemo(
+    () => new Map(sections.flatMap((s) => s.rows.map((r) => [r.id.toLowerCase(), s.key] as const))),
+    [sections]
+  );
+
+  // 줄이 구간을 옮기면(지금 → 응답 필요) 그 줄은 다른 목록에서 새로 서고, 그 줄에 있던 캐럿은 body로 떨어진다. 그 줄로 돌려준다.
+  const focusedRowRef = useRef<{ id: string; el: HTMLElement } | null>(null);
+  const onRowFocus = useCallback((id: string, el: HTMLElement) => {
+    focusedRowRef.current = { id, el };
+  }, []);
+  const onRowBlur = useCallback((event: FocusEvent<HTMLButtonElement>) => {
+    const el = event.currentTarget;
+    if (event.relatedTarget !== null) {
+      if (focusedRowRef.current?.el === el) focusedRowRef.current = null;
+      return;
+    }
+    // 받는 곳 없는 blur는 둘 중 하나다: 사람이 빈 곳을 눌렀거나(줄은 그대로 있다), 줄이 구간을 옮겨 DOM에서 빠졌다.
+    queueMicrotask(() => {
+      if (el.isConnected && focusedRowRef.current?.el === el) focusedRowRef.current = null;
+    });
+  }, []);
+
+  // 스크롤한 목록에서 줄이 구간을 옮겨도 보던 줄이 밀리지 않게 한다. 데스크탑 셸(WebKit)은 브라우저의 스크롤 고정(overflow-anchor)이
+  // 없어 직접 맞춘다: 보이는 줄 가운데 구간이 그대로인 첫 줄을 제자리에 둔다. 맨 위(scrollTop 0)에서는 맞추지 않는다 — 새로 선
+  // 「응답 필요」가 보여야 한다. 움직임은 없다(scrollTop을 한 번에 고친다).
+  const anchorsRef = useRef<RowAnchor[]>([]);
+  const readAnchors = useCallback(() => {
+    anchorsRef.current = visibleRowAnchors(listRef.current);
+  }, []);
+  useLayoutEffect(() => {
+    const last = focusedRowRef.current;
+    if (last !== null && !last.el.isConnected) {
+      const active = document.activeElement;
+      const next = rowRefs.current.get(last.id.toLowerCase());
+      if (next && (active === null || active === document.body)) {
+        next.focus({ preventScroll: true });
+        focusedRowRef.current = { id: last.id, el: next };
+      } else if (!next) {
+        focusedRowRef.current = null;
+      }
+    }
+    const list = listRef.current;
+    if (list !== null && list.scrollTop > 0) {
+      const top = list.getBoundingClientRect().top;
+      for (const anchor of anchorsRef.current) {
+        if (sectionOf.get(anchor.id) !== anchor.section) continue;
+        const el = rowRefs.current.get(anchor.id);
+        if (!el) continue;
+        const delta = el.getBoundingClientRect().top - top - anchor.offset;
+        if (delta !== 0) list.scrollTop += delta;
+        break;
+      }
+    }
+    readAnchors();
+  }, [sectionOf, readAnchors]);
   const rovingId =
     activeId !== null && orderedIds.some((id) => uuidEq(id, activeId))
       ? activeId
@@ -276,6 +360,7 @@ export function WorkJobsRoute() {
           aria-label={WORK_JOBS_COPY.listLabel}
           aria-busy={firstLoad}
           role="region"
+          onScroll={readAnchors}
         >
           {desktop && filter === "mine" && <ThisDeviceStrip />}
           {firstLoad ? (
@@ -341,24 +426,42 @@ export function WorkJobsRoute() {
                     </span>
                   </h2>
                   <ul className="flex flex-col">
-                    {section.rows.map((row) => (
-                      <JobRow
-                        key={row.id}
-                        row={row}
-                        selected={openId !== null && uuidEq(row.id, openId)}
-                        tabStop={rovingId !== null && uuidEq(row.id, rovingId)}
-                        rowRef={(el) => {
-                          const key = row.id.toLowerCase();
-                          if (el) rowRefs.current.set(key, el);
-                          else rowRefs.current.delete(key);
-                        }}
-                        onOpen={() => {
-                          setActiveId(row.id);
-                          setCard(row.id);
-                        }}
-                        onKeyDown={(e) => onRowKeyDown(e, row.id)}
-                      />
-                    ))}
+                    {section.rows.map((row) => {
+                      const needsMe = section.key === NEEDS_ME_SECTION;
+                      // 내 맥 세션의 권한 요청: 줄이 곧 승인 카드로 가는 길이다(서랍이 아니다).
+                      const permission = needsMe && !isRunItem(row.item);
+                      return (
+                        <JobRow
+                          key={row.id}
+                          row={row}
+                          needsMe={needsMe}
+                          permission={
+                            permission
+                              ? { inApp: desktop ? null : formatMessage("desktop.workPermission.allowInApp") }
+                              : null
+                          }
+                          approvalLink={row.awaitingApproval || (needsMe && isRunItem(row.item))}
+                          selected={openId !== null && uuidEq(row.id, openId)}
+                          tabStop={rovingId !== null && uuidEq(row.id, rovingId)}
+                          rowRef={(el) => {
+                            const key = row.id.toLowerCase();
+                            if (el) rowRefs.current.set(key, el);
+                            else rowRefs.current.delete(key);
+                          }}
+                          onOpen={() => {
+                            setActiveId(row.id);
+                            if (permission) {
+                              navigate(desktop ? agentPanePath(row.id) : workConsoleSessionPath(row.id));
+                            } else {
+                              setCard(row.id);
+                            }
+                          }}
+                          onKeyDown={(e) => onRowKeyDown(e, row.id)}
+                          onFocus={onRowFocus}
+                          onBlur={onRowBlur}
+                        />
+                      );
+                    })}
                   </ul>
                 </section>
               ))}
@@ -403,23 +506,65 @@ export function WorkJobsRoute() {
   );
 }
 
+/** 보이는 줄 하나의 자리(스크롤 고정의 재료). */
+interface RowAnchor {
+  id: string;
+  section: string;
+  /** 목록 상자 위 가장자리에서 줄 위 가장자리까지(px). */
+  offset: number;
+}
+
+/** 고정 후보로 적어 두는 보이는 줄의 상한. 줄이 구간을 옮기면 그 줄은 건너뛰고 다음 후보를 쓴다. */
+const MAX_ROW_ANCHORS = 8;
+
+function visibleRowAnchors(list: HTMLElement | null): RowAnchor[] {
+  if (list === null) return [];
+  const box = list.getBoundingClientRect();
+  const out: RowAnchor[] = [];
+  for (const el of list.querySelectorAll<HTMLElement>('[data-testid="work-job-row"]')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom <= box.top || rect.top >= box.bottom) continue;
+    const id = el.dataset.jobId?.toLowerCase();
+    const section = el.closest<HTMLElement>("[data-section]")?.dataset.section;
+    if (id === undefined || section === undefined) continue;
+    out.push({ id, section, offset: rect.top - box.top });
+    if (out.length >= MAX_ROW_ANCHORS) break;
+  }
+  return out;
+}
+
 function JobRow({
   row,
+  needsMe,
+  permission,
+  approvalLink,
   selected,
   tabStop,
   rowRef,
   onOpen,
   onKeyDown,
+  onFocus,
+  onBlur,
 }: {
   row: WorkJobRow;
+  needsMe: boolean;
+  /**
+   * 내 맥 세션의 권한 요청 줄(「응답 필요」). 누르면 서랍 대신 승인 카드로 간다: 데스크탑은 그 세션의 A 칸, 브라우저는 세션 화면.
+   * `inApp`은 브라우저에서만 서는 안내(허락은 폰·데스크탑 앱에서)다.
+   */
+  permission: { inApp: string | null } | null;
+  approvalLink: boolean;
   selected: boolean;
   tabStop: boolean;
   rowRef: (element: HTMLButtonElement | null) => void;
   onOpen: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onFocus: (id: string, element: HTMLElement) => void;
+  onBlur: (event: FocusEvent<HTMLButtonElement>) => void;
 }) {
   const reported = reportedSummary(row.reported);
   const result = <ResultCell row={row} reported={reported} />;
+  const hintId = useId();
   return (
     <li>
       <button
@@ -427,13 +572,19 @@ function JobRow({
         type="button"
         tabIndex={tabStop ? 0 : -1}
         aria-current={selected ? "true" : undefined}
-        aria-expanded={selected}
+        // 권한 요청 줄은 서랍을 열지 않고 다른 화면으로 간다: 펼침 상태를 말하지 않는다.
+        aria-expanded={permission === null ? selected : undefined}
+        aria-describedby={permission === null ? undefined : hintId}
         onClick={onOpen}
         onKeyDown={onKeyDown}
+        onFocus={(event) => onFocus(row.id, event.currentTarget)}
+        onBlur={onBlur}
         data-testid="work-job-row"
         data-job-id={row.id}
         data-source={row.item.source}
         data-approval={row.awaitingApproval ? "" : undefined}
+        data-needs-me={needsMe ? "" : undefined}
+        data-permission={permission === null ? undefined : ""}
         className={cn(
           "work-jobs-row w-full rounded-lg px-3 py-2 text-start text-body text-ink focus-visible:focus-ring",
           "active:bg-surface-pressed",
@@ -473,9 +624,10 @@ function JobRow({
           {row.channel}
         </span>
       </button>
-      {(row.pr !== null || row.awaitingApproval) && (
+      {(row.pr !== null || approvalLink || permission !== null) && (
         <div className="mb-1 ms-3 flex flex-wrap items-center gap-2">
-          {row.awaitingApproval && <ApprovalCardLink channelId={row.channelId} channel={row.channel} />}
+          {permission !== null && <PermissionHint id={hintId} inApp={permission.inApp} />}
+          {approvalLink && <ApprovalCardLink channelId={row.channelId} channel={row.channel} />}
           {row.pr !== null && <JobPrLink pr={row.pr} />}
         </div>
       )}

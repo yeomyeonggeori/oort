@@ -10,7 +10,7 @@ import {
   fetchSharedWorkSessions,
   type SharedWorkSession,
 } from "@momo/core/lib/api";
-import { homeChannelIds } from "@momo/core/features/workbench/teamBoard";
+import { homeChannelIds, isRunItem } from "@momo/core/features/workbench/teamBoard";
 import { useSession } from "@/app/session";
 import { useChannels } from "@/features/workspace/useWorkspace";
 
@@ -87,13 +87,34 @@ export function useTeamBoardItem(
 }
 
 /**
+ * 받은 줄의 집 채널을 레일이 모두 듣는가. 레일은 줄의 집 채널을 먼저 세우고 상한(`MAX_TEAM_BOARD_CHANNELS`)에서
+ * 자르므로, 집 채널 수가 상한 이하면 빠짐없이 듣는다. 넘으면 듣지 못하는 줄은 타이머가 받친다(#5640).
+ */
+export function railCoversItems(items: readonly SharedWorkSession[]): boolean {
+  const seen = new Set(homeChannelIds(items).map((id) => id.toLowerCase()));
+  return seen.size <= MAX_TEAM_BOARD_CHANNELS;
+}
+
+/** 권한 요청·결정의 ACP 사건(#5640). 받으면 그 세션의 「응답 필요」가 바뀌었을 수 있다. 그 밖의 ACP(글·도구 진행)는 다시 읽지 않는다. */
+export const PERMISSION_FRAME_TYPES: ReadonlySet<string> = new Set([
+  "approval.requested",
+  "approval.decided",
+  "approval.auto_allowed",
+]);
+
+/**
  * 공유 변화 신호를 듣고 보드를 다시 읽는다. 듣는 채널은 지금 보이는 줄의 집 채널과
  * 내가 속한 채널들이다(아직 줄이 없는 채널의 새 공유도 들어야 한다).
+ *
+ * `rereadOnApproval`(「작업」 화면, #5640): 목록에 있는 세션의 권한 요청·결정이 실시간으로 오면 다시 읽는다. 서버가 그 세션의
+ * 상태를 `waiting`으로 내거나 거두기 때문이다. 목록에 없는 세션·다른 ACP 사건(`agent.partial` 등)은 읽기를 부르지 않는다.
  */
 export function useTeamBoardRail(
   workspaceId: string,
-  items: readonly SharedWorkSession[]
+  items: readonly SharedWorkSession[],
+  options: { rereadOnApproval?: boolean } = {}
 ) {
+  const rereadOnApproval = options.rereadOnApproval === true;
   const { realtime } = useSession();
   const queryClient = useQueryClient();
   const channels = useChannels(workspaceId);
@@ -142,6 +163,16 @@ export function useTeamBoardRail(
     []
   );
 
+  // 목록의 세션 id(소문자). 구독을 다시 맺지 않고 최신 줄로 판정하려고 ref에 둔다.
+  const sessionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  sessionIdsRef.current = useMemo(
+    () =>
+      new Set(
+        items.filter((item) => !isRunItem(item)).map((item) => item.sessionId.toLowerCase())
+      ),
+    [items]
+  );
+
   useEffect(() => {
     if (!realtime || workspaceId === "") return;
     const ids = watchKey === "" ? [] : watchKey.split(",");
@@ -155,7 +186,13 @@ export function useTeamBoardRail(
         onLifecycle: reread,
         onToolTransition: reread,
         onObserver: () => undefined,
-        onAcpEvent: () => undefined,
+        onAcpEvent: rereadOnApproval
+          ? (frame) => {
+              if (!PERMISSION_FRAME_TYPES.has(frame.type)) return;
+              if (!sessionIdsRef.current.has(frame.payload.work_session_id.toLowerCase())) return;
+              reread();
+            }
+          : () => undefined,
         // 재연결·재구독: 놓친 것은 읽기로 고친다.
         onResync: reread,
       })
@@ -163,5 +200,5 @@ export function useTeamBoardRail(
     return () => {
       for (const stop of stops) stop();
     };
-  }, [realtime, workspaceId, watchKey, reread]);
+  }, [realtime, workspaceId, watchKey, reread, rereadOnApproval]);
 }

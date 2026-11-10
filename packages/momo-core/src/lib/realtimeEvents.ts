@@ -23,6 +23,11 @@ import { num, str } from "./wire";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
+/** 실시간이 지금 붙어 있는가(「연결 중」은 아니다). 신호가 읽기를 부르는 화면이 느린 박자를 멈출지 정할 때 쓴다(#5640). */
+export function isRealtimeConnected(status: RealtimeStatus): boolean {
+  return status === "connected";
+}
+
 export interface MessageNewEvent {
   type: "message.new" | "message.edited";
   v: number;

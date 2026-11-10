@@ -31,5 +31,6 @@
   "desktop.tray.closeNotice": "창을 닫아도 메뉴 막대에서 계속 알림을 받아요",
   "desktop.notify.threadSummary": "스레드 답글 {count, number}건",
   "desktop.notify.workPermission": "{session}: 맥에서 실행 허락을 기다려요",
-  "desktop.notify.workPermissionTitle": "응답 필요"
+  "desktop.notify.workPermissionTitle": "응답 필요",
+  "desktop.workPermission.allowInApp": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
 }

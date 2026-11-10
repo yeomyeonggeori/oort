@@ -24,6 +24,8 @@ import {
   workJobRow,
   workJobSections,
   awaitingMeItem,
+  rowNeedsMe,
+  type WorkJobRow,
 } from "./workJobs";
 
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -379,5 +381,74 @@ describe("맨 위 구간 낱말 — owner 2026-11-10 「응답 필요」", () =>
   it("구간 머리글은 세션 상태의 정본 낱말을 읽는다 — 글자를 따로 적지 않는다(정의 하나)", () => {
     expect(WORK_JOBS_COPY.sectionNeedsMe).toBe("응답 필요");
     expect(WORK_JOBS_COPY.sectionNeedsMe).toBe(SESSION_STATUS_LABEL.waiting);
+  });
+});
+
+describe("「응답 필요」 한 판정 — 서버가 준 사실만 (#5640, ADR-0202 D1·D5)", () => {
+  const RUN_ID = "00000000-0000-7000-8000-0000000000c1";
+  const mine = (over: Record<string, unknown> = {}) =>
+    workJobRow(
+      row(
+        wireSession({
+          sessionId: "00000000-0000-7000-8000-0000000000e1",
+          origin: "host",
+          owner: { memberId: ME, displayName: "김도현" },
+          harness: "claude",
+          ...over,
+        })
+      ),
+      NOW
+    );
+  const facts = (over: Partial<Parameters<typeof rowNeedsMe>[1]> = {}) => ({
+    filter: "mine" as const,
+    selfMemberId: ME,
+    approvalRunIds: new Set<string>(),
+    ...over,
+  });
+
+  it("내 맥 세션은 서버가 `waiting`을 준 것만 선다 — `running`은 요청이 있어도 화면이 짐작하지 않는다", () => {
+    expect(rowNeedsMe(mine({ state: "waiting" }), facts())).toBe(true);
+    expect(rowNeedsMe(mine({ state: "running" }), facts())).toBe(false);
+    expect(rowNeedsMe(mine({ state: "idle" }), facts())).toBe(false);
+  });
+
+  it("「팀 전체」, 남의 세션, 로컬 공유 터미널, 끝난 줄에는 서지 않는다", () => {
+    expect(rowNeedsMe(mine({ state: "waiting" }), facts({ filter: "team" }))).toBe(false);
+    expect(
+      rowNeedsMe(mine({ state: "waiting", owner: { memberId: OTHER, displayName: "김민지" } }), facts())
+    ).toBe(false);
+    // 로컬 공유 터미널의 `waiting`은 그 기기의 입력 대기다(보는 사람 누구에게나 같다).
+    expect(rowNeedsMe(mine({ state: "waiting", origin: "local_pty" }), facts())).toBe(false);
+    expect(rowNeedsMe(mine({ state: "done", endedAtMs: NOW - 1000 }), facts())).toBe(false);
+  });
+
+  it("에이전트 실행 줄은 승인 원장이 고른 run id로만 선다 — 보드의 phase만으로는 서지 않는다", () => {
+    const run = workJobRow(row(wireRun({ phase: "running" })), NOW);
+    const phaseOnly = workJobRow(row(wireRun({ phase: "awaiting_approval" })), NOW);
+    expect(rowNeedsMe(run, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(true);
+    // 서버가 대문자 id를 내도 같은 run이다(id 비교는 소문자로).
+    const upper = workJobRow(row(wireRun({ runId: RUN_ID.toUpperCase() })), NOW);
+    expect(rowNeedsMe(upper, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(true);
+    expect(rowNeedsMe(phaseOnly, facts())).toBe(false);
+    // 남이 맡긴 run은 내 결정 대기가 있어도 「내 작업」의 내 줄이 아니다.
+    const others = workJobRow(row(wireRun({ requestedBy: { memberId: OTHER, displayName: "김민지" } })), NOW);
+    expect(rowNeedsMe(others, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(false);
+    expect(rowNeedsMe(run, facts({ filter: "team", approvalRunIds: new Set([RUN_ID]) }))).toBe(false);
+  });
+
+  it("구간 순서는 응답 필요 → 지금 → 끝난 일이고, 비면 머리글도 없다", () => {
+    const waiting = mine({ state: "waiting" });
+    const running = mine({ sessionId: "00000000-0000-7000-8000-0000000000e2", state: "running" });
+    const done = mine({ sessionId: "00000000-0000-7000-8000-0000000000e3", state: "done", endedAtMs: NOW - 1000 });
+    const judge = (r: WorkJobRow) => rowNeedsMe(r, facts());
+    expect(workJobSections([done, running, waiting], judge).map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [waiting.id]],
+      ["now", [running.id]],
+      ["done", [done.id]],
+    ]);
+    expect(workJobSections([done, running], judge).map((s) => s.key)).toEqual(["now", "done"]);
+    expect(workJobSections([waiting], (r) => rowNeedsMe(r, facts({ filter: "team" }))).map((s) => s.key)).toEqual([
+      "now",
+    ]);
   });
 });

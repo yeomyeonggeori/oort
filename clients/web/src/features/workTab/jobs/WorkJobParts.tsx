@@ -111,3 +111,26 @@ export function ApprovalCardLink({ channelId, channel }: { channelId: string; ch
     </Link>
   );
 }
+
+/**
+ * 내 맥 세션의 권한 요청 줄 아래 한 줄(#5640). 줄 단추가 `aria-describedby`로 읽는다. 브라우저에서는 허락할 곳(폰·데스크탑 앱)을
+ * 함께 말한다: 브라우저에는 허락 카드가 없다(ADR-0146 D-4). 글자는 코어 상수와 사전에서만 온다.
+ */
+export function PermissionHint({ id, inApp }: { id: string; inApp: string | null }) {
+  return (
+    <span
+      id={id}
+      data-testid="work-job-permission-hint"
+      className="inline-flex min-h-6 min-w-0 max-w-full flex-wrap items-center gap-x-1 px-1 py-1 text-timestamp text-ink-muted break-keep"
+    >
+      <ShieldCheck aria-hidden className="size-3 shrink-0 text-warn" />
+      <span className="font-medium text-ink">{WORK_JOBS_COPY.permissionHint}</span>
+      {inApp !== null && (
+        <>
+          <span aria-hidden>·</span>
+          <span data-testid="work-job-permission-in-app">{inApp}</span>
+        </>
+      )}
+    </span>
+  );
+}

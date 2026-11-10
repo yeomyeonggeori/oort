@@ -1,10 +1,11 @@
-import type {
-  AgentNextAction,
-  AgentReportedResult,
-  AgentResultKind,
-  AgentToolCountKey,
-  SharedWorkSession,
-  WorkJobsMode,
+import {
+  uuidEq,
+  type AgentNextAction,
+  type AgentReportedResult,
+  type AgentResultKind,
+  type AgentToolCountKey,
+  type SharedWorkSession,
+  type WorkJobsMode,
 } from "../../lib/api";
 import { elapsedSpan } from "../agents/runPhase";
 import { SESSION_STATUS_LABEL } from "./sessionList";
@@ -195,6 +196,47 @@ export function awaitingMeItem(item: SharedWorkSession): SharedWorkSession {
   return item.state === "running" || item.state === "idle" ? { ...item, state: "waiting" } : item;
 }
 
+/** 「응답 필요」 구간을 정하는 사실(#5640). 화면이 모으고 판정은 `rowNeedsMe` 하나가 한다. */
+export interface NeedsMeRowFacts {
+  filter: WorkFilter;
+  selfMemberId: string;
+  /**
+   * 내 결정을 기다리는 승인이 걸린 run의 id(소문자). 인박스·레일 배지가 세는 승인과 **같은 원장·같은 판정**에서 온 것이어야
+   * 한다(웹 `decidableApprovals`). 보드의 `phase: awaiting_approval`로 대신하지 않는다.
+   */
+  approvalRunIds: ReadonlySet<string>;
+}
+
+/**
+ * 이 줄이 「응답 필요」에 서는가 (#5640, ADR-0202 D1·D5, ADR-0188 D5). 웹·데스크탑 「작업 · 내 작업」의 한 판정이다.
+ *
+ * 줄 종류마다 올리는 사실이 하나다. 화면이 따로 읽어 추측하지 않는다(지어내지 않기):
+ *   - 내 맥 세션(호스트 세션, 내가 주인): **서버가 준** 보드 상태 `waiting`. 서버(#5639)는 `include=jobs`로 읽는 사람이 그
+ *     요청에 답할 수 있을 때만(세션 주인이면서 해지 안 된 호스트의 주인, 실행 중) `waiting`을 준다. `running`이면 올리지 않는다
+ *     (폰처럼 세션마다 진행을 읽어 `awaitingMeItem`으로 바꾸지 않는다).
+ *   - 내가 맡긴 에이전트 실행 줄: 그 run에 내 결정을 기다리는 승인이 있다(`approvalRunIds`).
+ *   - 로컬 공유 터미널: 올리지 않는다. 그 `waiting`은 그 기기의 입력 대기라 보는 사람 누구에게나 같고, 여기서 답할 수 없다
+ *     (데스크탑은 「이 기기」 줄이 이 기기의 칸을 센다).
+ *   - 「팀 전체」, 남의 줄, 끝난 줄: 없다.
+ */
+export function rowNeedsMe(row: WorkJobRow, facts: NeedsMeRowFacts): boolean {
+  if (facts.filter !== "mine" || row.finished) return false;
+  const item = row.item;
+  if (isRunItem(item)) {
+    const runId = item.runId ?? item.sessionId;
+    return (
+      item.requestedBy != null &&
+      uuidEq(item.requestedBy.memberId, facts.selfMemberId) &&
+      facts.approvalRunIds.has(runId.toLowerCase())
+    );
+  }
+  return (
+    item.origin === "host" &&
+    uuidEq(item.owner.memberId, facts.selfMemberId) &&
+    item.state === "waiting"
+  );
+}
+
 /** 「구민수 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
 export function requesterToAgent(row: WorkJobRow): string {
   return row.requester === null
@@ -222,8 +264,11 @@ export function inProgressCount(rows: readonly WorkJobRow[]): number {
   return rows.filter((row) => !row.finished).length;
 }
 
+/** 맨 위 「응답 필요」 구간의 열쇠(#5593·#5640). 화면이 구간을 가릴 때 이 상수를 읽는다. */
+export const NEEDS_ME_SECTION = "needsMe" as const;
+
 export interface WorkJobSection {
-  key: "needsMe" | "now" | "done";
+  key: typeof NEEDS_ME_SECTION | "now" | "done";
   label: string;
   rows: WorkJobRow[];
 }
@@ -232,9 +277,9 @@ export interface WorkJobSection {
  * 구간: 응답 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
  * 최신순)를 지킨다. 빈 구간은 만들지 않는다.
  *
- * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`): 보드 줄에는 맥 세션의 권한 요청이 실리지 않아서(서버
- * `work_board`는 호스트 세션의 상태를 원장 값으로만 낸다), 화면이 그 세션의 진행을 읽어 정한다(`pendingPermission`).
- * 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
+ * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`). 웹·데스크탑(#5640)은 `rowNeedsMe`로 서버가 준 사실만 읽는다(#5639의
+ * `include=jobs` 상태 `waiting` + 인박스 배지와 같은 승인 원장). 폰은 아직 그 세션의 진행을 읽어 정한다(`pendingPermission`, v0.1.47에
+ * 서버 사실로 옮긴다). 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
  */
 export function workJobSections(
   rows: readonly WorkJobRow[],
