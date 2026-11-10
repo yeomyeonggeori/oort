@@ -702,7 +702,8 @@ function expressionAdapter(entries, run, loads) {
 function sendAdapter(entries, run, loads) {
   for (const entry of entries) {
     const numbers = entry.samples
-      ? stillNumbers({ series: entry.samples.map((one) => one.aboveTop), expected: entry.expected ?? 0, gaps: entry.samples.map((one) => one.gap ?? null) })
+      ? // send-follow ⑤ 의 표본은 rAF 안(그리기 · ResizeObserver 앞)에서 적은 값이라 바닥 거리 열은 비운다 — 끝 바닥 거리는 send-follow 가 따로 단정한다.
+        stillNumbers({ series: entry.samples.map((one) => one.aboveTop), expected: entry.expected ?? 0 })
       : entry.distances || entry.unexplainedPx !== undefined
         ? {
             reversals: null,
