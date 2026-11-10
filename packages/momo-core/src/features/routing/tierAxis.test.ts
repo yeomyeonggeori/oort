@@ -61,9 +61,9 @@ describe("the three tiers are always on screen, in the shipped vocabulary", () =
     const axis = resolveExecutionTierAxis(input());
     expect(axis.options.map((option) => option.key)).toEqual([...EXECUTION_TIER_KEYS]);
     expect(axis.options.map((option) => option.label)).toEqual([
-      "T1 · 데스크톱 앱",
-      "T2 · 셀프호스트",
-      "T3 · 클라우드",
+      "데스크탑 앱",
+      "셀프호스트 서버",
+      "클라우드",
     ]);
   });
 
@@ -181,7 +181,7 @@ describe("the inherited value is the workspace policy, stated as it is", () => {
       input({ policy: { mode: "auto", autoTarget: "cloud" } })
     );
     expect(axis.inherited.key).toBe("t3");
-    expect(axis.inherited.label).toBe("상속 (자동 재개: T3 · 클라우드)");
+    expect(axis.inherited.label).toBe("상속 (자동 재개: 클라우드)");
     expect(axis.summary).toBe(
       `${EXECUTION_TIER_LABEL} ${workExecutionLocationLabel("t3")}`
     );
@@ -196,7 +196,7 @@ describe("the inherited value is the workspace policy, stated as it is", () => {
     );
     expect(axis.inherited.key).toBe("t2");
     expect(axis.inherited.sentence).toBe(
-      "이 메시지가 작업을 일으키면 호스트를 잃었을 때 T2 · 셀프호스트에서 마지막 push 커밋으로 새로 시작합니다."
+      "이 메시지가 작업을 일으키면 호스트를 잃었을 때 셀프호스트 서버에서 마지막 push 커밋으로 새로 시작합니다."
     );
   });
 

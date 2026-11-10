@@ -515,7 +515,8 @@ export function NoticeBlock({
  * 어절 우선 줄바꿈은 공백이 있는 글에서 뜻이 있다(한 낱말에는 효과가 없고 해도 없다). 그래서 문장뿐 아니라 두 낱말 이상의
  * **라벨**(「다음 결정 보기」·「기본 제공」·단추 이름)에도 쓴다 — 결정 무대·테마·에이전트 비용(#4982)은 한글이 든 글자 전부가
  * 이 부품이고, 하네스(`__tests__/fixtures/hangulWord.ts`)가 빠진 글자를 센다. 숫자·이모지·아이콘 글리프에는 쓰지 않는다.
- * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
+ * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다. `ref` 도 받는다(React 19 에서 함수 부품의 `ref` 는
+ * 보통 prop 이라 아래 `rest` 와 함께 `Text` 로 간다) — 낭독 초점을 이 글로 옮기는 자리가 쓴다(승인 카드의 질문, #5593).
  *
  * **줄 높이에 여유를 준다**(`withLineHeadroom`, #5288): 여러 줄로 접힌 글이 첫 줄만 그려지고 잘리는 결함은 `hangul-word` 탓이 아니라(여섯 줄바꿈
  * 전략이 같은 절대 y 에서 똑같이 났다) 글 상자 높이가 float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다. 한글이 없는 글에서
@@ -523,7 +524,9 @@ export function NoticeBlock({
  * 요구와 정확히 같으면(정수 줄 높이 글 전부) 줄바꿈 전략이 꺼져 한 글자 고아 줄이 났다(근거·실측은 `lineHeadroom.ts`).
  */
 export function Sentence(
-  props: React.ComponentProps<typeof Text>,
+  props: React.ComponentProps<typeof Text> & {
+    ref?: React.Ref<React.ElementRef<typeof Text>>;
+  },
 ): React.JSX.Element {
   const {style, ...rest} = props;
   return <Text lineBreakStrategyIOS="hangul-word" {...rest} style={withLineHeadroom(style)} />;
@@ -535,21 +538,40 @@ export function OutlineButton({
   onPress,
   testID,
   accessibilityLabel,
+  busy,
+  busyLabel,
 }: {
   label: string;
   onPress: () => void;
   testID?: string;
   accessibilityLabel?: string;
+  /**
+   * 누른 일이 도는 중이다(#5593 수리 3회차 M1): 표시기와 `busyLabel` 이 낱말 자리에 서고 다시 누를 수 없다.
+   * `PrimaryButton` 의 진행과 같은 규칙이다 — 표시기가 함께 돌므로 `busyLabel` 에 말줄임을 붙이지 않는다.
+   */
+  busy?: boolean;
+  busyLabel?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const shown = busy === true ? busyLabel ?? label : label;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityLabel={busy === true ? shown : accessibilityLabel ?? label}
+      accessibilityState={busy === true ? {busy: true, disabled: true} : undefined}
+      disabled={busy === true ? true : undefined}
       onPress={onPress}
       style={({pressed}) => [styles.outline, pressed && styles.pressed]}
       testID={testID}>
-      <Sentence style={styles.retryLabel}>{label}</Sentence>
+      {busy === true ? (
+        <View style={styles.buttonBusy}>
+          <ActivityIndicator color={palette.accentText} />
+          <Sentence style={styles.retryLabel}>{shown}</Sentence>
+        </View>
+      ) : (
+        <Sentence style={styles.retryLabel}>{label}</Sentence>
+      )}
     </Pressable>
   );
 }

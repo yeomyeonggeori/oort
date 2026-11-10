@@ -2025,6 +2025,16 @@ export const catalog: MessageCatalog = {
       "value": "그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요."
     }
   ],
+  "expressions.image.waitingA11y": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이모티콘"
+    }
+  ],
   "expressions.import.displayName": [
     {
       "type": 0,
@@ -3751,6 +3761,12 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "expressions.suggest.dismiss": [
+    {
+      "type": 0,
+      "value": "이번만 닫기"
+    }
+  ],
   "expressions.suggest.group": [
     {
       "type": 0,
@@ -3771,6 +3787,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 미리 보기에 올리기"
+    }
+  ],
+  "expressions.suggest.replaced": [
+    {
+      "type": 0,
+      "value": "쓴 글을 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이모티콘으로 바꿨어요"
     }
   ],
   "expressions.suggest.settingHint": [
@@ -4325,6 +4355,62 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "언어를 적용하는 중이에요."
+    }
+  ],
+  "mobile.workPermission.elsewhereOnHost": [
+    {
+      "type": 0,
+      "value": "지금은 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에서 답해 주세요."
+    }
+  ],
+  "mobile.workPermission.elsewhereOnMac": [
+    {
+      "type": 0,
+      "value": "지금은 맥에서 답해 주세요."
+    }
+  ],
+  "mobile.workPermission.elsewhereTitle": [
+    {
+      "type": 0,
+      "value": "맥이 권한을 묻고 있어요"
+    }
+  ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "다른 기기에서 답했거나, 기한이 지났거나, 작업이 끝났을 수 있어요."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "이 권한 요청은 이미 닫혔어요"
+    }
+  ],
+  "mobile.workPermission.recheck": [
+    {
+      "type": 0,
+      "value": "다시 확인"
+    }
+  ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "다시 확인 중"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
     }
   ],
   "notifications.inviteLink.fallback": [

@@ -382,3 +382,18 @@ describe("멈추기의 캐럿과 낭독 (#5595 design-review H-1)", () => {
     expect(done?.getAttribute("role")).toBe("status");
   });
 });
+
+describe("owner 낱말 2026-11-09 — 세션 상세의 쉬운 말과 「연결 안 됨」 (#5593 수리 2회차)", () => {
+  it("정보 칸 이름은 「실행하는 컴퓨터」다 — 「호스트」가 아니다", () => {
+    const el = mount(session());
+    const labels = Array.from(el.querySelectorAll("dt, [data-meta-label]")).map((n) => n.textContent ?? "");
+    expect(el.textContent).toContain("실행하는 컴퓨터");
+    expect(labels).not.toContain("호스트");
+  });
+
+  it("맥이 연결돼 있지 않으면 상태 낱말은 「연결 안 됨」이다 — 「호스트 응답 없음」이 아니다", () => {
+    const el = mount(session(), [workHost({ online: false })]);
+    expect(el.textContent).toContain("연결 안 됨");
+    expect(el.textContent).not.toContain("호스트 응답 없음");
+  });
+});

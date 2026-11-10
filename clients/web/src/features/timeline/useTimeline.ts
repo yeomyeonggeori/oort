@@ -65,13 +65,16 @@ import {
   discardPending,
   emptyTimeline,
   failPending,
+  pinSettledEchoes,
   reconcileMessages,
   removePending,
   unsettledPending,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
 } from "@momo/core/features/timeline/model";
+import { observeServerClock, serverClockOffsetNowMs } from "@momo/core/features/timeline/serverClock";
 import {
   MAX_CONSUMED_ARRIVAL_IDS,
   MAX_PENDING_ARRIVAL_GRANTS,
@@ -176,6 +179,10 @@ export interface UseTimelineResult {
   recoveryMarkers: RecoveryMarker[];
   /** Local echoes awaiting their server seq (M10). Never inside `state`. */
   pending: PendingMessage[];
+  /** #5624 — 에코였던 확정본이 이 화면에서 이어 쓰는 에코의 시각. `buildTimelineItems`의 `echoPins`로 넘긴다. */
+  echoPins: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms). `buildTimelineItems`의 `serverOffsetMs`·에코의 시각 글자로 넘긴다. */
+  serverOffsetMs: number;
   /**
    * The one send path: optimistic echo now, server seq when it lands.
    * `routing` is the composer's per-request override (ADR-0134 D1) and
@@ -281,6 +288,13 @@ export function useTimeline(
   });
   const [recoveryMarkers, setRecoveryMarkers] = useState<RecoveryMarker[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  // #5624 — 에코였던 확정본이 묶음에 이어 쓸 에코의 시각(코어 `pinSettledEchoes`). 확정본이 들어오는 문(`applyBatch`)에서 적는다.
+  const [echoPins, setEchoPins] = useState<EchoPins>(() => new Map());
+  const echoPinsRef = useRef<EchoPins>(echoPins);
+  // 서버 시계와 이 기기 시계의 차이(코어 `serverClock.ts`). 에코의 묶음·시각 글자가 이 값을 더해 서버 시각의 확정본과 견준다. 상태로
+  // 두어 값이 바뀌면 화면이 다시 묶는다. ref는 「직전 렌더가 쓴 값」이다 — 장부는 그 값으로 적는다.
+  const [serverOffsetMs, setServerOffsetMs] = useState(serverClockOffsetNowMs);
+  const serverOffsetRef = useRef(serverOffsetMs);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -451,6 +465,25 @@ export function useTimeline(
       // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
       // 않으므로 여기서 아무것도 내놓지 않는다.
       seedEndedRuns(endedStreamRunIds(batch));
+      // #5624 — 이 배치가 정착시키는 에코의 시각을 확정본에 잇는다. 보내기 응답과 실시간 프레임 중 어느 쪽이 먼저 와도 이 문을
+      // 지나므로, 확정본을 처음 그리는 렌더가 이미 장부를 본다(같은 틱의 두 상태 갱신은 한 렌더로 묶인다).
+      const shownOffset = serverOffsetRef.current;
+      const pinned = pinSettledEchoes(echoPinsRef.current, batch, pendingRef.current, shownOffset);
+      if (pinned.pins !== echoPinsRef.current) {
+        echoPinsRef.current = pinned.pins;
+        setEchoPins(pinned.pins);
+      }
+      // 이은 짝마다 서버 시계를 잰다: 에코를 보낸 기기 시각과 지금 사이에 서버가 확정본을 찍었다(보내기 응답·실시간 프레임 모두).
+      // 다시 보낸 글은 창이 첫 시도부터라 넓어지고, 너무 넓은 창은 코어가 버린다.
+      const receivedAtMs = Date.now();
+      for (const { message, pending: row } of pinned.settled) {
+        observeServerClock({ sentAtMs: row.createdAtMs, receivedAtMs, serverAtMs: message.createdAtMs });
+      }
+      const measuredOffset = serverClockOffsetNowMs();
+      if (measuredOffset !== shownOffset) {
+        serverOffsetRef.current = measuredOffset;
+        setServerOffsetMs(measuredOffset);
+      }
       // 장부 ref 는 updater 밖에서 맞춘다 (`updatePending` 과 같은 이유:
       // React 는 updater 를 돌리고 결과를 버릴 수 있다).
       setState((s) => reconcileMessages(s, batch));
@@ -717,8 +750,9 @@ export function useTimeline(
         ...(carries && options?.replyToId !== undefined ? { replyToId: options.replyToId } : {}),
         ...(carries && options?.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
         ...(after === undefined ? {} : { after }),
-        // Local clock, used only for grouping and the time label on a row that
-        // has not been ordered yet. Ordering still waits for seq.
+        // Local clock. The timers compare it with this device's `Date.now()`;
+        // grouping and the label add the server offset (#5624, `echoAtMs`).
+        // Ordering still waits for seq.
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: "sending",
@@ -1324,6 +1358,8 @@ export function useTimeline(
     resume,
     recoveryMarkers,
     pending,
+    echoPins,
+    serverOffsetMs,
     send,
     resend,
     discard,

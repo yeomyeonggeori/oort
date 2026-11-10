@@ -244,8 +244,8 @@ const SESSION_EVENTS = [
   }),
 ];
 
-// 「작업」은 팀 보드다(#2864). 에이전트 세션 화면(허락 서명 컨트롤이 있는 곳)은 내가 시킨
-// 에이전트 세션을 보드의 시트에서 눌러야 열린다. 원장 한 줄마다 그 길의 줄을 하나 만든다.
+// 「작업」은 팀 보드다(#2864). 에이전트 세션 화면(허락 서명 컨트롤이 있는 곳)은 내가 시킨 에이전트 세션의
+// 줄을 누르면 바로 열린다(#5593 — 예전에는 보드의 시트를 한 번 거쳤다). 원장 한 줄마다 그 길의 줄을 하나 만든다.
 function sharedRowFor(session: WorkSession): SharedWorkSession {
   return {
     sessionId: session.id,
@@ -285,6 +285,8 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 interface RouteOverrides {
+  /** 보드(`GET …/work-sessions/shared`)의 답. 주지 않으면 원장 한 줄마다 내 세션 줄 하나다. */
+  board?: () => Response | Promise<Response>;
   workSessions?: () => Response | Promise<Response>;
   workHosts?: () => Response | Promise<Response>;
   sessionEvents?: () => Response | Promise<Response>;
@@ -294,6 +296,7 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
   const mock = jest.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/work-sessions/shared')) {
+      if (overrides.board) return overrides.board();
       return jsonResponse(200, {
         sessions: WORK_SESSIONS.map(sharedRowFor),
         nextCursor: null,
@@ -385,18 +388,14 @@ async function openBoard(): Promise<void> {
   );
 }
 
-/** 보드 → 줄 → 읽기 전용 시트 → 「내 에이전트 세션 화면」 → 에이전트 세션 화면. */
+/** 보드 → 내 세션 줄 → 에이전트 세션 화면(#5593: 줄이 곧 그 화면의 문이다 — 시트를 거치지 않는다). */
 async function openWorkDetail(sessionId: string): Promise<void> {
   await openBoard();
   fireEvent.press(screen.getByTestId(`work-job-row-${sessionId}`));
-  await waitFor(() =>
-    expect(screen.getByTestId('team-detail-open-agent-session')).toBeTruthy(),
-  );
-  fireEvent.press(screen.getByTestId('team-detail-open-agent-session'));
-  // 시트가 먼저 미끄러져 내려간 뒤에 에이전트 세션 화면이 선다(#4458).
   await waitFor(() => expect(screen.getByTestId('work-detail-pane')).toBeTruthy(), {
     timeout: 8000,
   });
+  expect(screen.queryByTestId('team-detail-sheet')).toBeNull();
 }
 
 describe('read-only phone-native work detail', () => {
@@ -523,10 +522,32 @@ describe('read-only phone-native work detail', () => {
 describe('작업 목록에서 연 대화 (#5546)', () => {
   const HIDDEN = {includeHiddenElements: true} as const;
 
+  // 시트가 서는 줄 — 호스팅 에이전트의 run(#5593 뒤로 내 세션 줄은 시트 대신 세션 화면을 연다).
+  const RUN_ROW = {
+    ...sharedRowFor(WORK_SESSIONS[0]!),
+    sessionId: 'RUN-HOSTED',
+    source: 'run',
+    runId: 'RUN-HOSTED',
+    requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '온보딩 문구 다듬기',
+    owner: {memberId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', displayName: '그록봇'},
+    harness: 'hosted',
+    status: 'running',
+    state: 'running',
+    endedAtMs: null,
+  };
+
   it('「채널에서 보기」로 연 대화는 낭독에 닿고 판 뒤 작업 목록은 빠지며, 뒤로 하면 목록이 돌아온다', async () => {
-    installFetch();
+    installFetch({
+      board: () =>
+        jsonResponse(200, {
+          sessions: [...WORK_SESSIONS.map(sharedRowFor), RUN_ROW],
+          nextCursor: null,
+        }),
+    });
     await openBoard();
-    fireEvent.press(screen.getByTestId('work-job-row-SESSION-APP'));
+    fireEvent.press(screen.getByTestId('work-job-row-RUN-HOSTED'));
     await waitFor(() =>
       expect(screen.getByTestId('team-detail-open-channel')).toBeTruthy(),
     );

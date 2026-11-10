@@ -99,7 +99,9 @@ import {
 } from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
 import {
+  PERMISSION_PREVIEW_QUERY_KEY,
   PermissionCard,
+  SIGNING_REQUIRED_QUERY_KEY,
   SignedWorkControlsView,
   type SignedWorkActions,
   type SignedWorkInitial,
@@ -128,6 +130,7 @@ import {Shell} from '../src/shell/AppShell';
 import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
 import {ExpressionPhotoSurface} from './expressionPhoto';
+import {ExpressionNameSurface} from './expressionName';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
@@ -2242,6 +2245,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return (
       <ExpressionPhotoSurface which={name.slice('expressionphoto'.length).replace(/^-/, '')} />
     );
+  }
+  // #5627: 그림을 못 받은 이모티콘 칸 안의 이름(`measure/expressionName.tsx`, 배송되는 본문·칸 + 코어 가짜 서버, 합성 그림·가상 이름).
+  if (name === 'expressionname' || name.startsWith('expressionname-')) {
+    return <ExpressionNameSurface which={name.slice('expressionname'.length).replace(/^-/, '')} />;
   }
   // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
   if (name === 'convmenu' || name.startsWith('convmenu-')) {
@@ -4647,6 +4654,52 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           initialFilter={name === 'work-jobs-team' ? 'team' : 'mine'}
           onOpenConversation={() => {}}
           onBack={() => {}}
+        />
+      );
+    // #5593 (ADR-0188 A 레인 ①): 내 맥 세션 줄 — 맨 위 「응답 필요」, 줄마다 맥 점(켜짐·꺼짐). 줄을 누르면 세션 화면이다.
+    case 'work-jobs-mac':
+      return (
+        <WorkJobsScreen
+          active
+          initialFilter="mine"
+          onOpenConversation={() => {}}
+          onOpenAgentSession={() => {}}
+          onBack={() => {}}
+        />
+      );
+    // #5593: 권한 요청 알림을 누르면 도착하는 곳 — 그 세션 화면의 승인 카드(실제 항법 reducer 가 지은 상태 그대로, 밑에 작업 목록).
+    // `-off` 는 서버가 기기 서명을 요구하지 않는 판(서버 기본값, 수리 1회차 H1): 카드 자리에 그 이유와 답할 곳이 선다.
+    case 'shell-work-permission':
+    case 'shell-work-permission-off':
+      return (
+        <Shell
+          initialNav={navReducer(INITIAL_NAV, {
+            type: 'openWorkSessionFromNotification',
+            workSession: {
+              sessionId: MAC_WAIT_ID,
+              permission: {requestEventId: MAC_REQUEST_ID, token: 1},
+            },
+          })}
+        />
+      );
+    // #5593: 목록에서 내 맥 세션 줄을 누른 뒤의 세션 화면(목록 위에 한 겹).
+    case 'shell-work-session-mac':
+      return (
+        <Shell
+          initialNav={navReducer(navReducer(INITIAL_NAV, {type: 'openWorkList'}), {
+            type: 'openWorkSession',
+            workSession: {sessionId: MAC_QUIET_ID},
+          })}
+        />
+      );
+    // #5593: 「내 맥에 보내기」가 만든 세션을 찾은 직후 — 방금 시작한 세션 화면(층을 걷고 작업 목록 위에, `enterWorkSession`).
+    case 'shell-work-after-send':
+      return (
+        <Shell
+          initialNav={navReducer(INITIAL_NAV, {
+            type: 'enterWorkSession',
+            workSession: {sessionId: MAC_NEW_ID},
+          })}
         />
       );
     case 'work-jobs-detail':
@@ -7482,6 +7535,20 @@ function seedShell(surface: string): void {
     ]);
   }
   if (surface === 'shell-work-from-push') seedWorkConsole();
+  if (
+    surface === 'shell-work-permission' ||
+    surface === 'shell-work-permission-off' ||
+    surface === 'shell-work-session-mac' ||
+    surface === 'shell-work-after-send'
+  ) {
+    seedMacSessions();
+    // 시뮬레이터 NetInfo 가 시작 직후 「끊김」으로 읽혀 세션 화면에 폰 네트워크 안내(「오프라인입니다.」)가 서는 흔들림을 막는다
+    // (#5593 수리 2회차 캡처 — 꺼진 맥 세션 사진에서 맥 상태와 폰 네트워크 상태가 섞여 보였다). 위 `forceNetwork` 주석과 같은 이유.
+    forceNetwork(true);
+  }
+  if (surface === 'shell-work-permission-off') {
+    harnessClient.setQueryData(SIGNING_REQUIRED_QUERY_KEY(ADE_WS), false);
+  }
 
   if (surface === 'shell-home-idle') return;
   // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.
@@ -7687,6 +7754,134 @@ function seedWorkJobs(surface: string): void {
   harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'team'], {
     pages: [{sessions: empty ? [] : WORK_JOBS_TEAM_ROWS, nextCursor: null, mode: 'jobs'}],
     pageParams: [null],
+  });
+}
+
+// ---- #5593 (ADR-0188 A 레인 ①): 내 맥 세션 씨앗 ------------------------------------------
+// 보드 줄(호스트 id 없음) · 세션 원장(호스트 id·스레드 루트) · 호스트 목록(켜짐) · 진행(권한 요청)을 배송되는 화면이 읽는 그
+// 질의 키에 꽂는다. 사람은 하네스의 나(이도현)이고 맥은 둘이다: 켜진 「도현 맥북」, 꺼진 「사무실 맥 mini」.
+const MAC_WAIT_ID = 'measure-mac-wait';
+const MAC_QUIET_ID = 'measure-mac-quiet';
+const MAC_OFFICE_ID = 'measure-mac-office';
+const MAC_NEW_ID = 'measure-mac-new';
+const MAC_REQUEST_ID = 'measure-mac-request';
+const MAC_HOSTS = [
+  ADE_HOSTS[0],
+  {
+    id: 'host-mac-office',
+    workspaceId: ADE_WS,
+    scope: 'member',
+    ownerMemberId: SELF,
+    type: 'app',
+    displayName: '사무실 맥 mini',
+    capabilities: {},
+    createdAtMs: 0,
+    online: false,
+  },
+] as const;
+
+function macBoardRow(id: string, label: string, minutesAgo: number, over: Partial<SharedWorkSession> = {}) {
+  return tbRow({
+    sessionId: id,
+    source: 'session',
+    origin: 'host',
+    label,
+    folderLabel: null,
+    repo: null,
+    branch: null,
+    harness: 'claude',
+    owner: {memberId: SELF, displayName: '이도현'},
+    homeChannel: {id: 'ch-deploy', name: '배포'},
+    state: 'running',
+    status: 'running',
+    startedAtMs: Date.now() - (minutesAgo + 14) * 60_000,
+    lastActivityAt: TB_MIN(minutesAgo),
+    ...over,
+  });
+}
+
+function macLedgerRow(id: string, hostId: string, label: string, over: Record<string, unknown> = {}) {
+  return adeSession({
+    id,
+    memberId: SELF,
+    hostId,
+    rootMessageId: `${id}-root`,
+    channelId: 'ch-deploy',
+    tool: 'claude',
+    label,
+    startedAtMs: Date.now() - 20 * 60_000,
+    ...over,
+  });
+}
+
+function seedMacSessions(): void {
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  harnessClient.setQueryData(['work-hosts', ADE_WS], MAC_HOSTS);
+  const rows = [
+    WORK_JOBS_ROWS[0],
+    macBoardRow(MAC_QUIET_ID, '릴레이 재시작 절차 문서로 정리하기', 2),
+    macBoardRow(MAC_OFFICE_ID, '결제 웹훅 재시도 로그 살펴보기', 5, {state: 'idle', status: 'idle'}),
+    macBoardRow(MAC_WAIT_ID, '배포 스크립트의 오래된 단계 걷어내기', 8),
+    WORK_JOBS_ROWS[2],
+  ];
+  harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'mine'], {
+    pages: [{sessions: rows, nextCursor: null, mode: 'jobs'}],
+    pageParams: [null],
+  });
+  harnessClient.setQueryData(['work-sessions', ADE_WS], [
+    macLedgerRow(MAC_WAIT_ID, 'host-mac', '배포 스크립트의 오래된 단계 걷어내기'),
+    macLedgerRow(MAC_QUIET_ID, 'host-mac', '릴레이 재시작 절차 문서로 정리하기'),
+    macLedgerRow(MAC_OFFICE_ID, 'host-mac-office', '결제 웹훅 재시도 로그 살펴보기', {status: 'idle'}),
+    macLedgerRow(MAC_NEW_ID, 'host-mac', 'onboarding 문구 해요체로 바꿔 줘', {
+      startedAtMs: Date.now() - 4_000,
+    }),
+  ]);
+  const event = (id: string, sessionId: string, type: string, atMs: number, payload: Record<string, unknown>) => ({
+    eventId: id,
+    type,
+    sessionId,
+    atMs,
+    seq: 1,
+    payload: {work_session_id: sessionId, ...payload},
+  });
+  harnessClient.setQueryData(['work-session-events', ADE_WS, 'ch-deploy', `${MAC_WAIT_ID}-root`], {
+    truncated: false,
+    events: [
+      event('measure-mac-tool', MAC_WAIT_ID, 'agent.status', Date.now() - 90_000, {
+        tool_call_name: 'edit_file',
+        detail: 'scripts/deploy.sh 의 3단계를 지워요',
+      }),
+      event(MAC_REQUEST_ID, MAC_WAIT_ID, 'approval.requested', Date.now() - 60_000, {
+        preview_sha256: permissionPreviewSha256(SW_HOST_PREVIEW),
+        options: [
+          {option_id: 'allow-once', kind: 'allow_once', name: 'Allow once'},
+          {option_id: 'reject-once', kind: 'reject_once', name: 'Reject'},
+        ],
+      }),
+    ],
+  });
+  for (const id of [MAC_QUIET_ID, MAC_OFFICE_ID, MAC_NEW_ID]) {
+    harnessClient.setQueryData(['work-session-events', ADE_WS, 'ch-deploy', `${id}-root`], {
+      truncated: false,
+      events:
+        id === MAC_QUIET_ID
+          ? [
+              event('measure-mac-quiet-tool', id, 'agent.status', Date.now() - 120_000, {
+                tool_call_name: 'read_file',
+                detail: 'docs/runbooks/relay-restart.md 를 읽어요',
+              }),
+            ]
+          : [],
+    });
+  }
+  // 승인 카드: 서버가 서명을 요구하고(D-11), 주인의 미리보기 읽기가 요청의 해시와 맞는다(#3128). 기기 키는 시뮬레이터에 없다 —
+  // 카드는 그 이유를 한 줄로 말한 채 선다(Face ID 왕복은 runtime-unverified).
+  harnessClient.setQueryData(SIGNING_REQUIRED_QUERY_KEY(ADE_WS), true);
+  harnessClient.setQueryData(PERMISSION_PREVIEW_QUERY_KEY(ADE_WS, MAC_WAIT_ID, MAC_REQUEST_ID), {
+    permissionRequest: {id: 'r', sessionId: MAC_WAIT_ID, requestEventId: MAC_REQUEST_ID, status: 'pending'},
+    options: [],
+    preview: SW_HOST_PREVIEW,
   });
 }
 
@@ -8066,6 +8261,22 @@ if (
   LAUNCHED.name.startsWith('work-jobs')
 ) {
   seedWorkJobs(LAUNCHED.name);
+  if (LAUNCHED.name === 'work-jobs-mac') {
+    seedMacSessions();
+    forceNetwork(true);
+    // 수리 1회차 M1: 승인을 기다리는 run(첫 줄)에 내 대기 승인이 걸려 있다 — 인박스 알약과 같은 원장이라 「응답 필요」에 함께 선다.
+    harnessClient.setQueryData(['approvals', ADE_WS, 'pending'], [
+      {
+        id: 'measure-approval-run',
+        workspaceId: ADE_WS,
+        runId: WORK_JOBS_ROWS[0].sessionId,
+        channelId: 'ch-build',
+        requestedBy: 'measure-agent-grok',
+        actionType: 'tool_call',
+        status: 'pending',
+      },
+    ]);
+  }
 }
 if (
   LAUNCHED !== null &&

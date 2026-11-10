@@ -179,7 +179,7 @@ describe("카드 목록", () => {
       hosts
     );
     expect(item.state).toBe("blocked");
-    expect(item.detail).toBe("호스트 연결 끊김");
+    expect(item.detail).toBe("연결 안 됨"); // #5593 수리 3회차 M2: 고아 세션도 owner 낱말 「연결 안 됨」
     expect(item.durability).toBe("device_bound");
   });
 

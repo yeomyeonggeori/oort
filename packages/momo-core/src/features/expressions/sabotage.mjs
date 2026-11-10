@@ -70,6 +70,20 @@ const mutations = [
   ["suggest.ts", "while (cursor[group] < list.length && taken.has(list[cursor[group]].id)) cursor[group] += 1;", "while (false) cursor[group] += 1;", "suggest-dedupe-off"],
   ["suggest.ts", "while (cursor[group] < list.length && taken.has(list[cursor[group]].id)) cursor[group] += 1;", "if (cursor[group] < list.length && taken.has(list[cursor[group]].id)) {\n      cursor[group] += 1;\n      return true;\n    }", "suggest-dedupe-eats-quota"],
   ["suggest.ts", "return { items: pickRow(ranked, limit), keywords: matchedKeywords };", "return { items: pickRow(ranked, limit), keywords };", "suggest-mute-keywords-all-words"],
+  // #5602 M1: 방금 친 낱말이 키워드일 때만(캐럿·띄어쓰기·빈 조각·글 전체·끈 낱말) + Esc·이번만 닫기의 닫힘(자리·글 전체·풀림).
+  ["suggest.ts", "if (trigger === null) return { items: [], trigger: null, dismissal: held };", "if (trigger === null && row.items.length === 0) return { items: [], trigger: null, dismissal: held };", "plan-any-word-opens-row"],
+  ["suggest.ts", "const at = typeof caret === \"number\" && Number.isFinite(caret) ? Math.min(Math.max(Math.floor(caret), 0), input.length) : input.length;", "const at = input.length;", "plan-caret-ignored"],
+  ["suggest.ts", "if (start >= at) return null;", "if (start > at) return null;", "plan-word-after-space-attached"],
+  ["suggest.ts", "if (keyword !== \"\") wordIndex += 1;", "wordIndex += 1;", "plan-empty-token-counted"],
+  ["suggest.ts", ": whole !== null && matched.has(whole)\n          ? { keyword: whole, wordIndex: null }", ": false\n          ? { keyword: String(whole), wordIndex: null }", "plan-whole-text-off"],
+  ["suggest.ts", "typed !== null && muted.has(typed.keyword)\n      ? null\n      : typed", "false\n      ? null\n      : typed", "plan-muted-word-falls-back-to-whole"],
+  ["suggest.ts", ": typed !== null && matched.has(typed.keyword)\n        ? typed\n        : whole !== null && matched.has(whole)\n          ? { keyword: whole, wordIndex: null }", ": whole !== null && matched.has(whole)\n        ? { keyword: whole, wordIndex: null }\n        : typed !== null && matched.has(typed.keyword)\n          ? typed", "plan-whole-before-typed"],
+  ["suggest.ts", "if (held !== null && sameTrigger(trigger, held)) return", "if (false) return", "plan-dismissal-ignored"],
+  ["suggest.ts", "(a.wordIndex === null || b.wordIndex === null || a.wordIndex === b.wordIndex)", "true", "plan-dismissal-position-ignored"],
+  ["suggest.ts", "(a.wordIndex === null || b.wordIndex === null || a.wordIndex === b.wordIndex)", "(a.wordIndex === b.wordIndex)", "plan-dismissal-whole-differs"],
+  ["suggest.ts", "if (state.text.trim() === \"\") return { items: [], trigger: null, dismissal: null };", "if (state.text.trim() === \"\") return { items: [], trigger: null, dismissal: held };", "plan-blank-keeps-dismissal"],
+  ["suggest.ts", "if (trigger === null) return { items: [], trigger: null, dismissal: held };", "if (trigger === null) return { items: [], trigger: null, dismissal: null };", "plan-any-word-releases-dismissal"],
+  ["suggest.ts", "return { items: row.items, trigger, dismissal: null };", "return { items: row.items, trigger, dismissal: held };", "plan-new-keyword-keeps-dismissal"],
 ];
 for (const [file, needle, _replacement, name] of mutations) {
   assert.ok(readFileSync(join(directory, file), "utf8").includes(needle), `Mutation no longer applies: ${name}`);

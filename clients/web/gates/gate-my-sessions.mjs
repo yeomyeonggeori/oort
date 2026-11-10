@@ -851,7 +851,7 @@ async function assertContinuity(context, state) {
   }
   if (
     (await offline.getByTestId("my-work-session-status").textContent())?.trim() !==
-    "호스트 응답 없음"
+    "연결 안 됨"
   ) {
     throw new Error("offline running session lost the host-unavailable copy");
   }

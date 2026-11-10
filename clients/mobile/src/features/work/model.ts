@@ -58,13 +58,13 @@ export function workSessionPresentation(
     ownerName: owner.handle ? `${owner.name} ${owner.handle}` : owner.name,
     hostName:
       location.host?.displayName.trim() ||
-      (location.host === null ? '호스트 확인 필요' : '이름 없는 호스트'),
+      (location.host === null ? '컴퓨터 확인 필요' : '이름 없는 컴퓨터'),
     hostState:
       location.host === null
         ? '상태 확인 필요'
         : location.host.online
-          ? '온라인'
-          : '오프라인',
+          ? '연결됨'
+          : '연결 안 됨',
     location,
   };
 }

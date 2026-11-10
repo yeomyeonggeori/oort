@@ -306,6 +306,7 @@ export const messageKeys = [
   "expressions.draft.rights",
   "expressions.draft.source",
   "expressions.draft.waiting",
+  "expressions.image.waitingA11y",
   "expressions.import.displayName",
   "expressions.import.displayNamePlaceholder",
   "expressions.import.face",
@@ -558,9 +559,11 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.dismiss",
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.replaced",
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
   "inbox.approval.open",
@@ -636,6 +639,14 @@ export const messageKeys = [
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "mobile.workPermission.elsewhereOnHost",
+  "mobile.workPermission.elsewhereOnMac",
+  "mobile.workPermission.elsewhereTitle",
+  "mobile.workPermission.landingGoneDetail",
+  "mobile.workPermission.landingGoneTitle",
+  "mobile.workPermission.recheck",
+  "mobile.workPermission.rechecking",
+  "mobile.workPermission.recheckMissed",
   "notifications.inviteLink.fallback",
   "recovery.claim.hostBody",
   "recovery.claim.hostConfirm",
@@ -1683,6 +1694,9 @@ export const argumentSpecs = {
     "host": "string"
   },
   "expressions.draft.waiting": {},
+  "expressions.image.waitingA11y": {
+    "name": "string"
+  },
   "expressions.import.displayName": {},
   "expressions.import.displayNamePlaceholder": {},
   "expressions.import.face": {},
@@ -2001,9 +2015,13 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.dismiss": {},
   "expressions.suggest.group": {},
   "expressions.suggest.mute": {},
   "expressions.suggest.pick": {
+    "name": "string"
+  },
+  "expressions.suggest.replaced": {
     "name": "string"
   },
   "expressions.suggest.settingHint": {},
@@ -2106,6 +2124,16 @@ export const argumentSpecs = {
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "mobile.workPermission.elsewhereOnHost": {
+    "host": "string"
+  },
+  "mobile.workPermission.elsewhereOnMac": {},
+  "mobile.workPermission.elsewhereTitle": {},
+  "mobile.workPermission.landingGoneDetail": {},
+  "mobile.workPermission.landingGoneTitle": {},
+  "mobile.workPermission.recheck": {},
+  "mobile.workPermission.rechecking": {},
+  "mobile.workPermission.recheckMissed": {},
   "notifications.inviteLink.fallback": {},
   "recovery.claim.hostBody": {},
   "recovery.claim.hostConfirm": {},
@@ -3301,6 +3329,7 @@ export interface MessageArgs {
   "expressions.draft.rights": Record<string, never>;
   "expressions.draft.source": { host: string };
   "expressions.draft.waiting": Record<string, never>;
+  "expressions.image.waitingA11y": { name: string };
   "expressions.import.displayName": Record<string, never>;
   "expressions.import.displayNamePlaceholder": Record<string, never>;
   "expressions.import.face": Record<string, never>;
@@ -3553,9 +3582,11 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.dismiss": Record<string, never>;
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.replaced": { name: string };
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
@@ -3631,6 +3662,14 @@ export interface MessageArgs {
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "mobile.workPermission.elsewhereOnHost": { host: string };
+  "mobile.workPermission.elsewhereOnMac": Record<string, never>;
+  "mobile.workPermission.elsewhereTitle": Record<string, never>;
+  "mobile.workPermission.landingGoneDetail": Record<string, never>;
+  "mobile.workPermission.landingGoneTitle": Record<string, never>;
+  "mobile.workPermission.recheck": Record<string, never>;
+  "mobile.workPermission.rechecking": Record<string, never>;
+  "mobile.workPermission.recheckMissed": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "recovery.claim.hostBody": Record<string, never>;
   "recovery.claim.hostConfirm": Record<string, never>;

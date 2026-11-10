@@ -661,12 +661,18 @@
     "clients/web/src/features/inbox/LocalPaneInbox.tsx": {"ko": 1, "en": 0},
     "clients/web/src/features/sidebar/SidebarDestinations.tsx": {"ko": 9, "en": 0},
     "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0},
-    "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6}
+    "clients/web/src/features/work/WorkPanel.tsx": {"ko": 39, "en": 0},
+    "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},
+    "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [
     {"file": "packages/momo-core/src/features/workbench/paneStatus.ts", "issue": 5579, "ko": 2, "reason": "Local pane status lines (waiting for input or permission, ended with an error, done) that #5584 moved into the core from the web inbox and sidebar; they wait for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/workbench/sessionList.ts", "issue": 5579, "ko": 1, "reason": "The failed-session mark shared by the session list and the team board chip (FAILED_MARK_LABEL, #5584); it waits for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/workbench/shareSummary.ts", "issue": 5579, "ko": 1, "reason": "The turn-failed label in the pane share summary (#5584); it waits for the P1 workbench namespace."},
-    {"file": "packages/momo-core/src/features/work/stopWork.ts", "issue": 5595, "ko": 1, "reason": "The stop button word (STOP_ACTION_LABEL) and two refusal sentences that #5605 shares between phone and web/desktop session detail; they wait for the P1 work namespace."}
+    {"file": "packages/momo-core/src/features/work/stopWork.ts", "issue": 5595, "ko": 1, "reason": "The stop button word (STOP_ACTION_LABEL) and two refusal sentences that #5605 shares between phone and web/desktop session detail; they wait for the P1 work namespace."},
+    {"file": "packages/momo-core/src/features/presence/statusDot.ts", "issue": 5593, "ko": 2, "reason": "The Mac host dot words on work session rows (MAC_HOST_ON_LABEL, MAC_HOST_OFF_LABEL) that #5621 added; they wait for the P1 presence namespace."},
+    {"file": "packages/momo-core/src/features/work/workLocation.ts", "issue": 5593, "ko": 2, "reason": "The runner subject words (workRunnerSubject: the Mac or the running computer) that #5621 puts before a disconnected status; they wait for the P1 work namespace."},
+    {"file": "packages/momo-core/src/features/workbench/permissionPreviewGate.ts", "issue": 5593, "ko": 2, "reason": "The refusal sentence that now ends with where to answer (a template around the runner name), shared by the phone and web permission cards in #5621; it waits for the P1 workbench namespace."},
+    {"file": "packages/momo-core/src/features/workbench/workJobs.ts", "issue": 5593, "ko": 1, "reason": "The permission request hint on a session row (permissionHint) that #5621 added to the needs-reply section; it waits for the P1 workbench namespace."}
   ]
 }
