@@ -324,6 +324,20 @@ describe('두 이름이 넘치면 짧은 이름은 온전히 남고 긴 이름�
     expect(screen.getAllByText(SHORT_NAME)).toHaveLength(1);
   });
 
+  it('거울의 조각은 하나도 줄지 않는다 — 칸 높이에 묶인 그릇에서 이름 조각이 높이 0 으로 눌려 재이지 않게', () => {
+    // 그릇은 칸(16~25.6) 높이에 묶이고 조각 넷(이름 둘 · 빈칸 · 꼬리)이 세로로 쌓인다. 이름 칸 옷(`flexShrink: 1`)을 그대로
+    // 입으면 Yoga 가 이름 조각을 높이 0 으로 누른다(yoga-mirror5645 계산) — 그때 잰 폭이 0 이면 나누기가 조용히 꺼진다.
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    const pieces = [0, 1, 2, 'tail'].map(at =>
+      screen.getByTestId(`composer-typing-measure-${at}`, {includeHiddenElements: true}),
+    );
+    for (const piece of pieces) expect(flatten(piece.props.style).flexShrink).toBe(0);
+    // 보이는 이름 칸은 그대로 줄 수 있다(재기 전 앞 판 배치의 줄임).
+    for (const cell of screen.getAllByTestId('composer-typing-name')) {
+      expect(flatten(cell.props.style).flexShrink).toBe(1);
+    }
+  });
+
   it('이름이 바뀌면 바뀐 조각만 다시 잰다 — 남은 조각의 잰 값은 그대로 쓴다', () => {
     const {rerender} = render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
     layLine(390, [W.long + W.comma, W.space, W.short]);

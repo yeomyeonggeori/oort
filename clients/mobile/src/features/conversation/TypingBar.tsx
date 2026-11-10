@@ -349,7 +349,7 @@ export function TypingBar({
                   maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
                   numberOfLines={1}
                   onLayout={event => remember(keys[index], event.nativeEvent.layout.width)}
-                  style={cell.name ? styles.nameCell : styles.textCell}
+                  style={[cell.name ? styles.nameCell : styles.textCell, styles.mirrorPiece]}
                   testID={`${measureTestID}-${index}`}>
                   {cellSegments(cell, styles.name)}
                 </Text>
@@ -359,7 +359,7 @@ export function TypingBar({
                 maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
                 numberOfLines={1}
                 onLayout={event => remember(tailKey, event.nativeEvent.layout.width)}
-                style={styles.tail}
+                style={[styles.tail, styles.mirrorPiece]}
                 testID={`${measureTestID}${MEASURE_TAIL_SUFFIX}`}>
                 {tail?.text}
               </Text>
@@ -401,4 +401,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 재는 거울(#5645): 흐름 밖에 서고 보이지 않는다. 조각마다 제 글 폭으로 서도록 세로로 쌓고 왼쪽에 붙인다.
   // (절대 배치는 그리는 자리에서 `StyleSheet.absoluteFill` 로 더한다.)
   mirror: {opacity: 0, alignItems: 'flex-start'},
+  // 거울 조각은 줄지 않는다. 그릇이 칸 높이(16~25.6)에 묶여 있어 조각 넷을 세로로 쌓으면 넘치는데, 이름 칸의
+  // `flexShrink: 1` 을 그대로 두면 Yoga 가 이름 조각을 세로로 0 까지 눌러(Yoga 계산) 높이 0 으로 재게 된다 — 잰 폭이 0 이면
+  // 나누기가 「다 들어간다」로 읽혀 앞 판 배치로 조용히 돌아간다. 넘친 조각은 투명한 채 칸 아래로 삐져나갈 뿐이다.
+  mirrorPiece: {flexShrink: 0},
 });
