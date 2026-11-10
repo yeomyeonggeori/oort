@@ -4,6 +4,7 @@ import {
   tabLabel,
   TABS,
   visibleTabs,
+  workConsoleAvailable,
   type NavState,
   type OpenHostedConnection,
 } from '../src/nav/state';
@@ -370,6 +371,57 @@ describe('「작업 끝남」 알림 입구 (#3342)', () => {
     expect(toList).toMatchObject({tab: 'home', workSession: null, workList: true});
     const toHome = navReducer(toList, {type: 'back'});
     expect(toHome).toMatchObject({tab: 'home', workSession: null, workList: false});
+  });
+});
+
+describe('세션 화면의 문 — 웹과 같은 판정 (#5593)', () => {
+  const host = (over: Record<string, unknown> = {}) => ({online: true, revokedAtMs: null, ...over});
+
+  it('지금 온라인인 호스트가 하나라도 있으면 선다 — 누구의 호스트든(관전 표면, #2854)', () => {
+    expect(workConsoleAvailable([host()])).toBe(true);
+    expect(workConsoleAvailable([host({online: false}), host()])).toBe(true);
+  });
+
+  it('호스트가 없거나, 모두 꺼졌거나, 해지됐거나, 아직 목록을 못 받았으면 서지 않는다', () => {
+    expect(workConsoleAvailable([])).toBe(false);
+    expect(workConsoleAvailable([host({online: false})])).toBe(false);
+    expect(workConsoleAvailable([host({revokedAtMs: 1})])).toBe(false);
+    expect(workConsoleAvailable(undefined)).toBe(false);
+    expect(workConsoleAvailable(null)).toBe(false);
+  });
+});
+
+describe('보낸 직후 그 세션으로 (#5593)', () => {
+  it('열린 대화·에이전트 층을 걷고 작업 목록 위에 세션을 연다 — 탭은 그대로', () => {
+    const stacked = nav({
+      tab: 'inbox',
+      conversation: OPEN,
+      agentList: true,
+      agent: {memberId: 'A-1', displayName: '그록봇', handle: 'grok'},
+    });
+    const next = navReducer(stacked, {
+      type: 'enterWorkSession',
+      workSession: {sessionId: 'S-1'},
+    });
+    expect(next).toEqual(nav({tab: 'inbox', workList: true, workSession: {sessionId: 'S-1'}}));
+  });
+
+  it('뒤로는 한 겹씩이다 — 세션 → 작업 목록 → 보낸 탭', () => {
+    const opened = navReducer(nav({tab: 'search', conversation: OPEN}), {
+      type: 'enterWorkSession',
+      workSession: {sessionId: 'S-1'},
+    });
+    const toList = navReducer(opened, {type: 'back'});
+    expect(toList).toEqual(nav({tab: 'search', workList: true}));
+    expect(navReducer(toList, {type: 'back'})).toEqual(nav({tab: 'search'}));
+  });
+
+  it('(대조) 같은 자리에서 옛 `openWorkSession` 은 대화를 남긴다 — 대화 판이 세션 판 위에 그려져 새 화면이 가려진다', () => {
+    const opened = navReducer(nav({conversation: OPEN}), {
+      type: 'openWorkSession',
+      workSession: {sessionId: 'S-1'},
+    });
+    expect(opened.conversation).toEqual(OPEN);
   });
 });
 

@@ -7,6 +7,7 @@ import type {
   WorkJobsMode,
 } from "../../lib/api";
 import { elapsedSpan } from "../agents/runPhase";
+import { SESSION_STATUS_LABEL } from "./sessionList";
 import {
   sessionElapsedReadout,
   type SessionElapsedReadout,
@@ -30,8 +31,8 @@ import {
 // 맡겼나, 지금 어떤가, 얼마나 걸렸나, 무엇이 나왔나(PR·에이전트 보고). 진행 스트림(단계·oort
 // 호출)은 줄을 열었을 때 서랍에서만 본다(D1). 남의 일은 결과 요약과 상태까지다(D5).
 //
-// 이 모듈은 거르지 않는다. 가시성(내가 멤버인 채널)과 「내 것」은 새 서버가 SQL에서 끝낸다
-// (`who=mine`). 옛 서버(`mode: "legacy"`)에만 화면이 「내 것」을 고른다: 그때 서버는 팀 보드
+// 이 모듈은 거르지 않는다. 가시성(내가 멤버인 채널)과 「내 작업」은 새 서버가 SQL에서 끝낸다
+// (`who=mine`). 옛 서버(`mode: "legacy"`)에만 화면이 「내 작업」을 고른다: 그때 서버는 팀 보드
 // 한 벌만 주기 때문이다. 그 고르기는 가시성이 아니라 보기다(`ownedBy`, 기존 폰 판과 같은 뜻).
 // =============================================================================
 
@@ -39,16 +40,25 @@ export type WorkFilter = "mine" | "team";
 
 export const WORK_JOBS_COPY = {
   title: "작업",
-  filterMine: "내 것",
+  filterMine: "내 작업",
   filterTeam: "팀 전체",
   filterGroup: "누구의 작업",
   /** 「지금 진행 3」. 숫자는 지금 보이는 줄에서만 센다(숨은 줄 수를 말하지 않는다, ADR-0194 D5). */
   inProgress: "지금 진행",
+  /**
+   * 맨 위 구간(#5593): 내가 답해야 다음으로 가는 일 — 지금은 내 맥 세션의 권한 요청. 낱말표의 「나를 기다려요」 자리 말이다
+   * (2026-11-09 낱말표). 숫자는 다른 구간처럼 화면이 붙인다(「응답 필요 1」).
+   * 글자를 따로 적지 않고 세션 상태의 정본 낱말(`SESSION_STATUS_LABEL.waiting`)을 읽는다(owner 2026-11-10 「응답 필요」) —
+   * 구간 머리글 → 줄 칩 → 세션 머리·배지가 한 정의에서 나온다.
+   */
+  sectionNeedsMe: SESSION_STATUS_LABEL.waiting,
   sectionNow: "지금",
   sectionDone: "끝난 일",
   reportedTag: "에이전트 보고",
   approvalAction: "승인 카드 보기",
   approvalHint: "승인은 그 카드에서 해요",
+  /** 내 맥 세션이 권한을 묻고 기다린다(#5593). 줄을 누르면 그 세션 화면의 승인 카드다. */
+  permissionHint: "권한 요청이 왔어요",
   legacyNotice: "이 서버는 아직 호스팅 에이전트의 작업만 보여 줘요.",
   emptyMineTitle: "내가 맡긴 작업이 아직 없어요",
   emptyMineBody: "에이전트에게 일을 맡기면 결과가 여기에 모여요.",
@@ -75,7 +85,7 @@ export const WORK_JOBS_COPY = {
   noResultReported: "알린 결과 없음",
 } as const;
 
-/** 기기별로 기억하는 마지막 필터(ADR-0202 D2). 기본은 언제나 「내 것」이다. */
+/** 기기별로 기억하는 마지막 필터(ADR-0202 D2). 기본은 언제나 「내 작업」이다. */
 export const WORK_FILTER_STORAGE_KEY = "oort.work.filter";
 
 export function parseWorkFilter(value: string | null | undefined): WorkFilter | null {
@@ -84,7 +94,7 @@ export function parseWorkFilter(value: string | null | undefined): WorkFilter | 
 
 /**
  * 주소가 정한 필터. `who=`가 먼저고, 옛 링크 `view=team`(ADR-0194 D2의 보드 링크)은 「팀
- * 전체」, `view=mine`은 「내 것」이다. 주소가 말하지 않으면 null(기기 기억 → 기본 「내 것」).
+ * 전체」, `view=mine`은 「내 작업」이다. 주소가 말하지 않으면 null(기기 기억 → 기본 「내 작업」).
  */
 export function workFilterFromSearch(search: string): WorkFilter | null {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
@@ -96,7 +106,7 @@ export function workFilterFromSearch(search: string): WorkFilter | null {
   return null;
 }
 
-/** 주소 → 기기 기억 → 「내 것」. */
+/** 주소 → 기기 기억 → 「내 작업」. */
 export function initialWorkFilter(search: string, remembered: string | null): WorkFilter {
   return workFilterFromSearch(search) ?? parseWorkFilter(remembered) ?? "mine";
 }
@@ -177,6 +187,14 @@ function durationTextOf(
   return span === undefined ? "방금 시작" : `${span}째`;
 }
 
+/**
+ * 주인에게 열린 권한 요청이 있는 세션 줄의 칩 상태(#5593 수리 M2) — 보드 상태 `waiting`(「응답 필요」). 세션 머리의
+ * `withOpenRequest`(`work/workSessionModel`)와 같은 낱말이다. 돌고 있거나 대기 중인 줄만 바꾼다.
+ */
+export function awaitingMeItem(item: SharedWorkSession): SharedWorkSession {
+  return item.state === "running" || item.state === "idle" ? { ...item, state: "waiting" } : item;
+}
+
 /** 「구민수 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
 export function requesterToAgent(row: WorkJobRow): string {
   return row.requester === null
@@ -186,7 +204,7 @@ export function requesterToAgent(row: WorkJobRow): string {
 
 /**
  * 이 필터에 서는 줄. 새 서버(`jobs`)는 이미 `who`로 골라 보냈으니 그대로 둔다(클라이언트가
- * 다시 거르면 서버의 판정을 가리거나 보일 줄을 숨긴다). 옛 서버는 팀 보드 한 벌이라 「내 것」만
+ * 다시 거르면 서버의 판정을 가리거나 보일 줄을 숨긴다). 옛 서버는 팀 보드 한 벌이라 「내 작업」만
  * 여기서 고른다.
  */
 export function itemsForFilter(
@@ -205,23 +223,35 @@ export function inProgressCount(rows: readonly WorkJobRow[]): number {
 }
 
 export interface WorkJobSection {
-  key: "now" | "done";
+  key: "needsMe" | "now" | "done";
   label: string;
   rows: WorkJobRow[];
 }
 
 /**
- * 두 구간: 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
+ * 구간: 응답 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
  * 최신순)를 지킨다. 빈 구간은 만들지 않는다.
+ *
+ * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`): 보드 줄에는 맥 세션의 권한 요청이 실리지 않아서(서버
+ * `work_board`는 호스트 세션의 상태를 원장 값으로만 낸다), 화면이 그 세션의 진행을 읽어 정한다(`pendingPermission`).
+ * 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
  */
-export function workJobSections(rows: readonly WorkJobRow[]): WorkJobSection[] {
+export function workJobSections(
+  rows: readonly WorkJobRow[],
+  needsMyCheck: (row: WorkJobRow) => boolean = () => false
+): WorkJobSection[] {
   const open = rows.filter((row) => !row.finished);
+  const mine = open.filter((row) => needsMyCheck(row));
+  const rest = open.filter((row) => !needsMyCheck(row));
   const now = [
-    ...open.filter((row) => row.awaitingApproval),
-    ...open.filter((row) => !row.awaitingApproval),
+    ...rest.filter((row) => row.awaitingApproval),
+    ...rest.filter((row) => !row.awaitingApproval),
   ];
   const done = rows.filter((row) => row.finished);
   const sections: WorkJobSection[] = [];
+  if (mine.length > 0) {
+    sections.push({ key: "needsMe", label: WORK_JOBS_COPY.sectionNeedsMe, rows: mine });
+  }
   if (now.length > 0) sections.push({ key: "now", label: WORK_JOBS_COPY.sectionNow, rows: now });
   if (done.length > 0) sections.push({ key: "done", label: WORK_JOBS_COPY.sectionDone, rows: done });
   return sections;

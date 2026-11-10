@@ -4,9 +4,11 @@ import {uuidEq} from '@momo/core/lib/api';
 import {
   channelLabel,
   isRunItem,
+  stateChipLabel,
 } from '@momo/core/features/workbench/teamBoard';
 import {
   WORK_JOBS_COPY,
+  awaitingMeItem,
   inProgressCount,
   inProgressLabel,
   itemsForFilter,
@@ -50,7 +52,14 @@ import {
   type Palette,
 } from '../design/tokens';
 import {useOnline} from '../features/inbox/useOnline';
+import {StatusDot} from '../features/presence/StatusDot';
 import {ReportedTag} from '../features/work/jobs/WorkJobParts';
+import {
+  isMyHostSessionRow,
+  useMacSessionFacts,
+  type MacOfRow,
+} from '../features/work/jobs/useMacSessionFacts';
+import {macHostDot} from '@momo/core/features/presence/statusDot';
 import {useWorkFilter, useWorkJobsList} from '../features/work/jobs/useWorkJobs';
 import {TeamBoardDetailSheet} from '../features/work/teamBoard/TeamBoardDetailSheet';
 import {StateChip} from '../features/work/teamBoard/TeamBoardParts';
@@ -69,7 +78,12 @@ import {queryFailureDetail} from './SidebarScreen';
 // (PR·에이전트 보고), 걸린 시간, 채널. 진행(단계)은 줄을 열면 읽기 전용 시트에서만 본다.
 // 「내 것 / 팀 전체」는 서버에 묻는 보기다(`who`). 기본은 「내 것」이고 기기에 기억한다.
 // 이 화면에는 승인 단추가 없다: 승인 대기 줄은 카드가 있는 채널로 간다(D5).
+//
+// 내 맥 세션의 줄(#5593, ADR-0188)은 시트가 아니라 **그 세션 화면**을 연다 — 허락·지시·멈추기가 있는 곳이다(세션
+// 화면의 문이 설 때만, `onOpenAgentSession`). 그 세션이 권한 요청에 답을 기다리면 맨 위 「응답 필요」 구간에 서고,
+// 세션 줄에는 그 맥이 켜져 있는지 점이 선다(`useMacSessionFacts`).
 // =============================================================================
+
 
 const MINUTE_MS = 60_000;
 const FOCUS_RETURN_MS = 60;
@@ -122,7 +136,16 @@ export default function WorkJobsScreen({
       ),
     [list.items, list.mode, filter, member.id, nowMs],
   );
-  const sections = useMemo(() => workJobSections(rows), [rows]);
+  const facts = useMacSessionFacts(workspaceId, member.id, list.items, active);
+  // 「응답 필요」: 내 맥 세션의 권한 요청, 그리고 내 대기 승인이 걸린 run(#5593 수리 M1 — 인박스 알약과 같은 원장).
+  const sections = useMemo(
+    () =>
+      workJobSections(
+        rows,
+        row => facts.permissionWaiting(row.id) || facts.approvalWaiting(row.id),
+      ),
+    [rows, facts],
+  );
   const running = inProgressCount(rows);
 
   const fromList =
@@ -248,6 +271,8 @@ export default function WorkJobsScreen({
           renderItem={({item: row}) => (
             <JobRow
               row={row}
+              mac={facts.macOf(row.id)}
+              permissionWaiting={!row.finished && facts.permissionWaiting(row.id)}
               rowRef={node => {
                 const key = row.id.toLowerCase();
                 if (node === null) rowRefs.current.delete(key);
@@ -255,6 +280,11 @@ export default function WorkJobsScreen({
               }}
               onPress={() => {
                 lastOpenedRef.current = row.id;
+                // 내 맥 세션은 그 세션 화면으로(#5593). 돌아오면 초점은 위의 효과가 이 줄로 되돌린다(`active`가 다시 참).
+                if (onOpenAgentSession !== undefined && isMyHostSessionRow(row.item, member.id)) {
+                  onOpenAgentSession(row.id);
+                  return;
+                }
                 setOpenId(row.id);
               }}
             />
@@ -349,10 +379,16 @@ function FilterBar({
 
 function JobRow({
   row,
+  mac,
+  permissionWaiting,
   rowRef,
   onPress,
 }: {
   row: WorkJobRow;
+  /** 그 세션의 맥(#5593). 모르면 null — 점을 그리지 않는다. */
+  mac: MacOfRow | null;
+  /** 내 맥 세션이 권한 요청에 답을 기다린다(#5593). 칩도 「응답 필요」다(수리 M2). */
+  permissionWaiting: boolean;
   rowRef: React.Ref<React.ElementRef<typeof Pressable>>;
   onPress: () => void;
 }): React.JSX.Element {
@@ -363,19 +399,41 @@ function JobRow({
     reported ??
     row.pr?.number ??
     (row.finished ? WORK_JOBS_COPY.noResultReported : WORK_JOBS_COPY.noResultYet);
+  const macName = mac !== null && mac.name !== '' ? mac.name : null;
   const meta = [row.durationText, row.channel].filter(
     (part): part is string => part !== null && part !== '',
   );
+  // 칩은 서버가 본 보드 상태다. 주인에게 열린 권한 요청이 있으면 「응답 필요」(수리 M2, 세션 머리와 같은 코어 낱말).
+  const chipItem = permissionWaiting ? awaitingMeItem(row.item) : row.item;
+  // 점은 낭독에서 빠진다(`StatusDot`): 줄 라벨이 맥의 상태를 말로 한다(「도현 맥북 연결됨」).
+  const macDot = mac === null ? null : macHostDot(mac.online);
+  // 맥 줄(수리 L1·M5): 맥 이름은 자기 줄에 서서 긴 이름이 채널·걸린 시간을 밀어내지 않는다. 꺼진 맥은 「꺼짐」을 글로도 말한다 —
+  // 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같아서 모양만으로는 「대기 중인 맥」으로 읽힐 수 있다.
+  const macText =
+    macDot === null
+      ? null
+      : [macName, mac?.online === true ? null : macDot.label]
+          .filter((part): part is string => part !== null)
+          .join(' · ');
+  const macSpoken =
+    macDot === null
+      ? null
+      : [macName, macDot.label]
+          .filter((part): part is string => part !== null)
+          .join(' ');
   return (
     <TapRow
       rowRef={rowRef}
       onPress={onPress}
       accessibilityLabel={[
         row.title,
-        row.statusLabel,
+        stateChipLabel(chipItem),
+        permissionWaiting ? WORK_JOBS_COPY.permissionHint : null,
         who,
         reported !== null ? `${WORK_JOBS_COPY.reportedTag}, ${reported}` : result,
-        ...meta,
+        macSpoken,
+        row.durationText,
+        row.channel,
         row.awaitingApproval ? WORK_JOBS_COPY.approvalHint : null,
       ]
         .filter((part): part is string => part !== null && part !== '')
@@ -394,7 +452,7 @@ function JobRow({
         {/* 상태 칩 줄은 서버가 본 사실만. 에이전트가 스스로 알린 말은 꼬리표와 한 덩어리로
             아래 줄에 선다(design-review H-1, 웹 결과 칸과 같은 묶음). */}
         <View style={styles.chipLine}>
-          <StateChip item={row.item} testID={`work-job-state-${row.id}`} />
+          <StateChip item={chipItem} testID={`work-job-state-${row.id}`} />
         </View>
         <View style={styles.resultLine}>
           {reported !== null ? <ReportedTag testID={`work-job-reported-tag-${row.id}`} /> : null}
@@ -409,6 +467,17 @@ function JobRow({
           <Text style={styles.rowApproval} testID={`work-job-approval-${row.id}`}>
             {WORK_JOBS_COPY.approvalHint}
           </Text>
+        ) : null}
+        {permissionWaiting ? (
+          <Text style={styles.rowApproval}>{WORK_JOBS_COPY.permissionHint}</Text>
+        ) : null}
+        {macDot !== null ? (
+          <View style={styles.metaLine}>
+            <StatusDot tone={macDot.tone} />
+            <Text style={styles.rowMeta} numberOfLines={1}>
+              {macText}
+            </Text>
+          </View>
         ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>
           {meta.join(' · ')}
@@ -455,7 +524,8 @@ const buildStyles = (color: Palette) =>
     rowResult: {flexShrink: 1, fontSize: font.label, lineHeight: line.label, color: color.text},
     rowResultMuted: {color: color.textMuted},
     rowApproval: {fontSize: font.meta, lineHeight: line.meta, color: color.text, fontWeight: '600'},
-    rowMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    metaLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
+    rowMeta: {flexShrink: 1, fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     chevron: {
       fontSize: font.heading,
       lineHeight: line.body,

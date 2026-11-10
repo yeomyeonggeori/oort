@@ -1,7 +1,7 @@
 appId: app.momo.ios
 name: 45-work-console
 ---
-# 「작업」 — 결과 중심 한 화면(내 것 / 팀 전체)과 줄을 누르면 열리는 읽기 전용 시트 (옛 #1292 작업 콘솔의 자리).
+# 「작업」 — 결과 중심 한 화면(내 작업 / 팀 전체)과 줄을 누르면 열리는 세션 화면 또는 읽기 전용 시트 (옛 #1292 작업 콘솔의 자리).
 #
 # 이 화면은 ADR-0202 D6 의 `WorkJobsScreen` 이다(`work-jobs-*` · `work-job-row-*`). #2864 의 팀 보드 판
 # (`TeamBoardScreen` — `team-board-list` · `team-board-filter-*` · `team-board-row-*`)은 코드로만 남고 + 메뉴가 열지
@@ -40,7 +40,7 @@ name: 45-work-console
     id: "work-jobs-filter-mine"
 - assertVisible:
     id: "work-jobs-filter-team"
-# 「작업」은 내 것 / 팀 전체 두 갈래다(ADR-0202 D6). 서버가 채널 멤버십으로 걸러 준 줄만 선다. 레인의 멤버가
+# 「작업」은 내 작업 / 팀 전체 두 갈래다(ADR-0202 D6). 서버가 채널 멤버십으로 걸러 준 줄만 선다. 레인의 멤버가
 # 맡긴 세션이라 두 갈래 어느 쪽에서도 줄이 있다.
 - tapOn:
     id: "work-jobs-filter-mine"
@@ -51,16 +51,32 @@ name: 45-work-console
 - assertVisible:
     id: "work-job-row-${WORK_SESSION_ID}"
 
-# 줄을 누르면 읽기 전용 시트가 열린다. 터미널·입력·멈춤이 없고, 바닥에는 이동만 있다.
+# 줄을 누르면 — 내 세션 줄은 이 워크스페이스에 온라인 호스트가 있으면 그 세션 화면을 바로 연다(#5593, ADR-0188
+# A 레인 ①, 웹과 같은 판정). 레인의 호스트가 꺼져 있으면 예전처럼 읽기 전용 시트다(터미널·입력·멈춤이 없고, 바닥에는
+# 이동만 있다). 판정은 레인의 호스트 heartbeat 에 달려 있으므로 둘 중 선 쪽을 재고 목록으로 돌아온다.
 - tapOn:
     id: "work-job-row-${WORK_SESSION_ID}"
 - extendedWaitUntil:
     visible:
-      id: "team-detail-terminal-note"
+      id: "(work-detail-title|team-detail-terminal-note)"
     timeout: 60000
-- assertVisible:
-    id: "team-detail-open-channel"
-- tapOn:
-    id: "team-detail-close"
-- assertVisible:
-    id: "work-jobs-list"
+- runFlow:
+    when:
+      visible:
+        id: "team-detail-terminal-note"
+    commands:
+      - assertVisible:
+          id: "team-detail-open-channel"
+      - tapOn:
+          id: "team-detail-close"
+- runFlow:
+    when:
+      visible:
+        id: "work-detail-title"
+    commands:
+      - tapOn:
+          id: "header-back"
+- extendedWaitUntil:
+    visible:
+      id: "work-jobs-list"
+    timeout: 30000

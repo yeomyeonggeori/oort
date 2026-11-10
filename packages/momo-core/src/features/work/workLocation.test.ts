@@ -16,9 +16,9 @@ const host = (type: string, id = "HOST-1"): WorkHost => ({
 
 describe("workExecutionLocation", () => {
   it.each([
-    ["app", "t1", "T1 · 데스크톱 앱"],
-    ["workd", "t2", "T2 · 셀프호스트"],
-    ["cloud", "t3", "T3 · 클라우드"],
+    ["app", "t1", "데스크탑 앱"],
+    ["workd", "t2", "셀프호스트 서버"],
+    ["cloud", "t3", "클라우드"],
   ] as const)("maps only the canonical %s host type", (type, key, label) => {
     expect(workExecutionLocation({ hostId: "host-1" }, [host(type)])).toMatchObject({
       key,
