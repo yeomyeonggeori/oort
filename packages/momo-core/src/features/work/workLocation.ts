@@ -47,6 +47,24 @@ export function workExecutionLocationLabel(
   return LOCATION_LABEL[key];
 }
 
+/**
+ * 상태 앞에 서는 주어(「{주어} 연결 안 됨」, #5593 수리 3회차). 데스크탑 앱(맥)일 때만 「맥」이고, 셀프호스트 서버·클라우드·
+ * 모름은 「실행하는 컴퓨터」다 — 화면에 틀린 사실을 적지 않는다(셀프호스트 서버를 「맥」이라 부르지 않는다). 폰 세션 머리와 권한
+ * 카드의 막힘 문장(폰·웹·데스크탑)이 이 한 곳을 읽는다.
+ */
+export function workRunnerSubject(key: WorkExecutionLocationKey): string {
+  return key === "t1" ? "맥" : "실행하는 컴퓨터";
+}
+
+/** 답할 곳: 실행하는 컴퓨터의 이름이 있으면 그 이름, 없으면 실행 위치의 주어(`workRunnerSubject`). */
+export function workRunnerPlace(
+  name: string | null | undefined,
+  key: WorkExecutionLocationKey
+): string {
+  const trimmed = name?.trim() ?? "";
+  return trimmed !== "" ? trimmed : workRunnerSubject(key);
+}
+
 /** `work_host.type`이 증명한 실행 위치만 공용 표시 계약으로 옮긴다. */
 export function workExecutionLocation(
   session: Pick<WorkSession, "hostId">,

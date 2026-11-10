@@ -663,7 +663,7 @@ export function WorkConversation({
   nameOf: (memberId: string) => string;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   scrollProps?: PullScrollProps;
-  /** 그 세션을 실행하는 맥의 이름 — 대화 사이 카드의 막힘 문장이 답할 곳으로 쓴다(#5593 수리 3회차 M2). */
+  /** 대화 사이 카드의 막힘 문장이 말하는 답할 곳(#5593 수리 3회차 M2, `workRunnerPlace`). */
   hostName?: string;
 }): React.JSX.Element {
   const queryClient = useQueryClient();

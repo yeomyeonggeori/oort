@@ -13,6 +13,7 @@
 // =============================================================================
 
 import type { WorkPermissionPreviewResponse } from "../../lib/api";
+import { workRunnerSubject } from "../work/workLocation";
 import {
   checkPermissionPreview,
   parsePermissionPreview,
@@ -51,7 +52,7 @@ export type PermissionPreviewGate =
 
 /** 허락할 수 없는 이유(해요체). 다시 열릴 수 없는 막힘에는 답할 곳(`permissionPreviewBlockLine`)이 뒤에 붙는다. */
 const PERMISSION_PREVIEW_BLOCK_REASON: Readonly<Record<Exclude<PermissionPreviewBlock, "unavailable">, string>> = {
-  missing: "맥이 이 요청의 미리보기를 보내지 않아 허락할 수 없어요.",
+  missing: "실행하는 컴퓨터가 이 요청의 미리보기를 보내지 않아 허락할 수 없어요.",
   malformed: "미리보기를 확인할 수 없어 허락할 수 없어요.",
   mismatch: "받은 미리보기가 요청과 맞지 않아 허락할 수 없어요. 서버가 내용을 바꿨을 수 있어요.",
   display_altered: "미리보기에 화면에 그대로 보일 수 없는 글자가 있어 허락할 수 없어요.",
@@ -61,18 +62,18 @@ const PERMISSION_PREVIEW_BLOCK_REASON: Readonly<Record<Exclude<PermissionPreview
 /**
  * 허락할 수 없는 이유마다 한 문장(해요체). 거부는 늘 할 수 있다고 함께 말한다. 다시 열릴 수 없는 막힘은 「거부하거나 {맥 이름}에서
  * 답해 주세요.」로 끝난다 — 폰 세션 화면의 안내 상자(「지금은 {맥 이름}에서 답해 주세요.」)와 같은 말이다(#5593 수리 3회차 M2,
- * 예전 「호스트에서 결정해 주세요」). 이름을 모르거나 넘기지 않으면 「맥에서」다(폰 안내 상자의 같은 갈래). 「에서」는 이름의 받침과
- * 상관없이 붙으므로 이름 뒤에 다른 조사를 쓰지 않는다.
+ * 예전 「호스트에서 결정해 주세요」). `place`는 답할 곳이다: 부르는 쪽이 `workRunnerPlace`(이름, 없으면 실행 위치의 주어)로 정한다.
+ * 넘기지 않으면 실행 위치를 모르는 것이라 「실행하는 컴퓨터에서」다(「맥」이라 단정하지 않는다). 「에서」는 받침과 상관없이 붙는다.
  */
-export function permissionPreviewBlockLine(reason: PermissionPreviewBlock, hostName?: string | null): string {
+export function permissionPreviewBlockLine(reason: PermissionPreviewBlock, place?: string | null): string {
   if (reason === "unavailable") {
     return "미리보기를 받아 오지 못해 허락할 수 없어요. 연결이 돌아오면 다시 받아 와요. 거부는 지금도 할 수 있어요.";
   }
-  const name = hostName?.trim() ?? "";
-  return `${PERMISSION_PREVIEW_BLOCK_REASON[reason]} 거부하거나 ${name === "" ? "맥" : name}에서 답해 주세요.`;
+  const name = place?.trim() ?? "";
+  return `${PERMISSION_PREVIEW_BLOCK_REASON[reason]} 거부하거나 ${name === "" ? workRunnerSubject("unknown") : name}에서 답해 주세요.`;
 }
 
-/** 이름 없는 판(「맥에서」). 이름을 모르는 표면(웹·데스크탑 A 칸)과 시험이 읽는다. */
+/** 답할 곳을 넘기지 않은 판(「실행하는 컴퓨터에서」). 그것을 모르는 표면(웹·데스크탑 A 칸)과 시험이 읽는다. */
 export const PERMISSION_PREVIEW_BLOCK_LINE: Readonly<Record<PermissionPreviewBlock, string>> = {
   missing: permissionPreviewBlockLine("missing"),
   malformed: permissionPreviewBlockLine("malformed"),
@@ -152,12 +153,12 @@ export function permissionAllowGone(gate: PermissionPreviewGate): boolean {
 /**
  * 카드의 허락 문. `eventSha256`은 요청 이벤트(`approval.requested`)의 해시,
  * 조회 응답에도 해시가 있으면 둘이 같아야 한다(다르면 바꿔치기로 본다).
- * `hostName`은 그 세션을 실행하는 컴퓨터의 이름이다 — 막힘 문장의 답할 곳에 선다(없으면 「맥에서」).
+ * `place`는 답할 곳이다(`workRunnerPlace` — 컴퓨터 이름, 없으면 실행 위치의 주어). 넘기지 않으면 「실행하는 컴퓨터에서」.
  */
 export function permissionPreviewGate(
   eventSha256: string | null,
   fetched: PermissionPreviewFetch,
-  hostName?: string | null
+  place?: string | null
 ): PermissionPreviewGate {
   if (fetched.status === "loading") return { state: "loading" };
   if (fetched.status === "error") {
@@ -165,7 +166,7 @@ export function permissionPreviewGate(
   }
   const readSha256 = fetched.data.permissionRequest.previewSha256;
   if (eventSha256 !== null && typeof readSha256 === "string" && readSha256 !== eventSha256) {
-    return { state: "blocked", reason: "mismatch", preview: null, line: permissionPreviewBlockLine("mismatch", hostName) };
+    return { state: "blocked", reason: "mismatch", preview: null, line: permissionPreviewBlockLine("mismatch", place) };
   }
   const expected = eventSha256 ?? (typeof readSha256 === "string" ? readSha256 : null);
   const check = checkPermissionPreview(fetched.data.preview, expected);
@@ -174,7 +175,7 @@ export function permissionPreviewGate(
     state: "blocked",
     reason: check.reason,
     preview: check.reason === "truncated" ? truncatedPreview(fetched.data.preview) : null,
-    line: permissionPreviewBlockLine(check.reason, hostName),
+    line: permissionPreviewBlockLine(check.reason, place),
   };
 }
 

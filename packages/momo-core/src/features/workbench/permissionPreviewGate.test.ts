@@ -89,17 +89,18 @@ describe("permissionPreviewGate (#3128)", () => {
   });
 
   it("a block that cannot lift says where to answer with the same words as the phone's notice box (#5593 수리 3회차 M2)", () => {
-    // 이름을 넘기면 「거부하거나 {맥 이름}에서 답해 주세요.」, 없으면 「맥에서」 — 폰 안내 상자의 두 갈래와 같은 말이다.
-    expect(permissionPreviewGate(null, read(null), "성재 맥북")).toMatchObject({
+    // 답할 곳을 넘기면 「거부하거나 {맥 이름}에서 답해 주세요.」 — 폰 안내 상자와 같은 말이다. 넘기지 않으면(실행 위치를 모름)
+    // 「실행하는 컴퓨터에서」 — 「맥」이라 단정하지 않는다.
+    expect(permissionPreviewGate(null, read(null), "도현 맥북")).toMatchObject({
       state: "blocked",
       reason: "missing",
-      line: "맥이 이 요청의 미리보기를 보내지 않아 허락할 수 없어요. 거부하거나 성재 맥북에서 답해 주세요.",
+      line: "실행하는 컴퓨터가 이 요청의 미리보기를 보내지 않아 허락할 수 없어요. 거부하거나 도현 맥북에서 답해 주세요.",
     });
     expect(permissionPreviewGate(cutHash, read(cut, cutHash), "  ")).toMatchObject({
-      line: "미리보기가 길어 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 맥에서 답해 주세요.",
+      line: "미리보기가 길어 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 실행하는 컴퓨터에서 답해 주세요.",
     });
     for (const line of Object.values(PERMISSION_PREVIEW_BLOCK_LINE)) {
-      expect(line).not.toMatch(/호스트/);
+      expect(line).not.toMatch(/호스트|맥/);
     }
   });
 

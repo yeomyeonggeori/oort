@@ -29,9 +29,10 @@ import {
   workSessionResumeTargets,
   workSessionStatus,
   type WorkSessionEvent,
-  withMacSubject,
   withOpenRequest,
+  withRunnerSubject,
 } from "./workSessionModel";
+import { workRunnerPlace, workRunnerSubject } from "./workLocation";
 import { silenceLabel } from "./workSessionFormat";
 
 // =============================================================================
@@ -909,18 +910,30 @@ describe("맥 연결 낱말 — 한 자리에 한 말 (#5593 수리 3회차 M2·
     expect(workSessionStatus({ status: "orphaned" })).toEqual({ key: "orphaned", label: "연결 안 됨" });
   });
 
+  it("주어는 실행 위치가 정한다: 데스크탑 앱만 「맥」, 셀프호스트 서버·클라우드·모름은 「실행하는 컴퓨터」", () => {
+    const unavailable = { key: "unavailable" as const, label: "연결 안 됨" };
+    expect(
+      (["t1", "t2", "t3", "unknown"] as const).map((key) => [key, withRunnerSubject(unavailable, key).label])
+    ).toEqual([
+      ["t1", "맥 연결 안 됨"],
+      ["t2", "실행하는 컴퓨터 연결 안 됨"],
+      ["t3", "실행하는 컴퓨터 연결 안 됨"],
+      ["unknown", "실행하는 컴퓨터 연결 안 됨"],
+    ]);
+    // 답할 곳: 이름이 있으면 이름(실행 위치와 상관없이), 없으면 같은 주어.
+    expect(workRunnerPlace(" 사무실 맥 mini ", "t2")).toBe("사무실 맥 mini");
+    expect(workRunnerPlace("", "t1")).toBe("맥");
+    expect(workRunnerPlace(null, "unknown")).toBe(workRunnerSubject("unknown"));
+  });
+
   it("폰 세션 머리는 「연결 안 됨」으로 읽는 두 열쇠에 주어를 붙이고, 다른 상태는 그대로 둔다", () => {
-    expect(withMacSubject({ key: "unavailable", label: "연결 안 됨" })).toEqual({
-      key: "unavailable",
-      label: "맥 연결 안 됨",
-    });
-    expect(withMacSubject(workSessionStatus({ status: "orphaned" }))).toEqual({
+    expect(withRunnerSubject(workSessionStatus({ status: "orphaned" }), "t1")).toEqual({
       key: "orphaned",
       label: "맥 연결 안 됨",
     });
     const running = workSessionStatus({ status: "running" });
-    expect(withMacSubject(running)).toBe(running);
+    expect(withRunnerSubject(running, "t1")).toBe(running);
     const waiting = withOpenRequest(running, true);
-    expect(withMacSubject(waiting)).toBe(waiting);
+    expect(withRunnerSubject(waiting, "t2")).toBe(waiting);
   });
 });

@@ -62,8 +62,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '김도현',
+  handle: 'dohyeon',
 };
 
 const LOGIN_BODY = {
@@ -97,7 +97,7 @@ const HOSTS = [
     scope: 'member',
     ownerMemberId: SELF_ID,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -245,7 +245,7 @@ describe('H1 카드를 그릴 수 없는 착지도 이유와 답할 곳을 말�
     expect(within(elsewhere).getByText(formatMessage('mobile.workPermission.elsewhereTitle'))).toBeTruthy();
     expect(
       within(elsewhere).getByText(
-        `${SIGNING_OFF_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'})}`,
+        `${SIGNING_OFF_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '도현 맥북'})}`,
       ),
     ).toBeTruthy();
     // 꺼짐은 서버의 정해진 답이라 다시 물을 단추가 없다. 카드도, 「이미 닫혔어요」도 없다.
@@ -265,7 +265,7 @@ describe('H1 카드를 그릴 수 없는 착지도 이유와 답할 곳을 말�
     );
     expect(
       within(elsewhere).getByText(
-        `${SIGNING_UNKNOWN_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'})}`,
+        `${SIGNING_UNKNOWN_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '도현 맥북'})}`,
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId('work-permission-card')).toBeNull();
@@ -283,7 +283,7 @@ describe('수리 3회차 — 「다시 확인」은 읽는 동안을 보이고, 
     signing = 'fail';
     installFetch();
     renderLanding();
-    const answerWhere = formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'});
+    const answerWhere = formatMessage('mobile.workPermission.elsewhereOnHost', {host: '도현 맥북'});
 
     const elsewhere = await waitFor(
       () => screen.getByTestId('work-detail-permission-elsewhere'),
@@ -384,7 +384,7 @@ describe('수리 2회차 owner 낱말(2026-11-09) — 세션 화면의 쉬운 �
     renderLanding();
     await waitFor(() => expect(screen.getByTestId('work-permission-card')).toBeTruthy(), SETTLE);
     expect(screen.getByText('실행하는 컴퓨터')).toBeTruthy();
-    expect(screen.getByText('성재 맥북 · 연결됨')).toBeTruthy();
+    expect(screen.getByText('도현 맥북 · 연결됨')).toBeTruthy();
     expect(screen.getAllByText('데스크탑 앱').length).toBeGreaterThan(0);
     expect(screen.getByText('시작한 대화로 가기')).toBeTruthy();
     expect(screen.queryByText('호스트')).toBeNull();
@@ -401,8 +401,20 @@ describe('수리 2회차 owner 낱말(2026-11-09) — 세션 화면의 쉬운 �
     // 부제(머리)와 배지 둘 다 주어가 있다 — 폰 자신의 「오프라인입니다.」와 헷갈리지 않게.
     expect(screen.getAllByText('맥 연결 안 됨')).toHaveLength(2);
     expect(screen.queryByText('연결 안 됨')).toBeNull();
-    expect(screen.getByText('성재 맥북 · 연결 안 됨')).toBeTruthy();
+    expect(screen.getByText('도현 맥북 · 연결 안 됨')).toBeTruthy();
     expect(screen.queryByText(/호스트 응답 없음|오프라인/)).toBeNull();
+  });
+
+  it('셀프호스트 서버의 세션은 「맥」이라 부르지 않는다 — 머리·배지는 「실행하는 컴퓨터 연결 안 됨」(planner 11-10)', async () => {
+    installFetch(HOSTS.map(h => ({...h, type: 'workd', online: false})));
+    renderLanding();
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('work-detail-status')).toHaveTextContent('실행하는 컴퓨터 연결 안 됨'),
+      SETTLE,
+    );
+    expect(screen.getAllByText('실행하는 컴퓨터 연결 안 됨')).toHaveLength(2);
+    expect(screen.queryByText('맥 연결 안 됨')).toBeNull();
   });
 });
 
@@ -419,7 +431,7 @@ describe('수리 3회차 L1 — 목록 줄로 들어간 길도 카드 없는 착
     );
     expect(
       within(elsewhere).getByText(
-        `${SIGNING_OFF_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '성재 맥북'})}`,
+        `${SIGNING_OFF_NOTICE} ${formatMessage('mobile.workPermission.elsewhereOnHost', {host: '도현 맥북'})}`,
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId('work-permission-card')).toBeNull();

@@ -1,4 +1,5 @@
 import {uuidEq} from '@momo/core/lib/api';
+import {workRunnerPlace} from '@momo/core/features/work/workLocation';
 import {
   emptyStepsDetail,
   eventsForSession,
@@ -7,7 +8,7 @@ import {
   ROW_STATE_LABEL,
   workHostTrust,
   workSessionContinuityStatus,
-  withMacSubject,
+  withRunnerSubject,
   withOpenRequest,
   type WorkEventRow,
   type WorkPlanItem,
@@ -382,18 +383,22 @@ export default function WorkSessionDetailScreen({
   // 「없다」는 진행을 다 읽은 뒤에만 말한다(알림이 진행 읽기를 낡게 했으므로 다시 읽는 동안에는 기다린다).
   const openRequest = pendingPermission(sessionEvents, session);
   // 주인에게 열린 요청이 있으면 머리·배지는 「응답 필요」다(#5593 수리 M2) — 목록 칩과 같은 코어 낱말.
-  // 맥 연결이 끊긴 세션의 머리·배지는 주어를 붙인다: 「맥 연결 안 됨」(#5593 수리 3회차 L3 — 폰 자신의 오프라인과 갈리게).
-  const status = withMacSubject(
+  // 연결이 끊긴 세션의 머리·배지는 주어를 붙인다(#5593 수리 3회차 L3 — 폰 자신의 오프라인과 갈리게). 주어는 실행 위치가 정한다:
+  // 데스크탑 앱이면 「맥 연결 안 됨」, 그 밖·모름이면 「실행하는 컴퓨터 연결 안 됨」(코어 `workRunnerSubject`).
+  const status = withRunnerSubject(
     withOpenRequest(
       workSessionContinuityStatus(session, hostsQuery.data),
       isOwner && openRequest !== null,
     ),
+    presentation.location.key,
   );
   const trust = workHostTrust(session, hostsQuery.data);
   // 열린 요청이 있는데 이 폰이 카드를 그릴 수 없다(#5593 수리 H1): 서버가 서명을 요구하지 않거나(기본값), 그 설정을 읽지 못했거나,
   // 읽는 중이다. 카드 자리에 이유(대화 보기와 같은 문장)와 지금 답할 곳(그 세션의 맥)을 말한다.
   const permissionElsewhere = isOwner && openRequest !== null && !signing && signingWhy !== null;
   const macName = presentation.location.host?.displayName.trim() ?? '';
+  // 권한 카드의 막힘 문장이 말하는 답할 곳: 이름, 없으면 실행 위치의 주어(코어 한 곳, 웹·데스크탑과 같은 판정).
+  const answerPlace = workRunnerPlace(macName, presentation.location.key);
   const answerWhere =
     macName === ''
       ? formatMessage('mobile.workPermission.elsewhereOnMac')
@@ -440,7 +445,7 @@ export default function WorkSessionDetailScreen({
               nameOf={nameOf}
               refreshControl={refreshControl}
               scrollProps={scrollProps}
-              hostName={macName}
+              hostName={answerPlace}
             />
           </View>
           <View style={mode === 'detail' ? styles.modeBody : styles.modeHidden}>
@@ -537,7 +542,7 @@ export default function WorkSessionDetailScreen({
                   events={sessionEvents}
                   online={online}
                   focusToken={landingOpen ? landingToken : undefined}
-                  hostName={macName}
+                  hostName={answerPlace}
                 />
               ) : null}
 

@@ -405,7 +405,7 @@ function JobRow({
   );
   // 칩은 서버가 본 보드 상태다. 주인에게 열린 권한 요청이 있으면 「응답 필요」(수리 M2, 세션 머리와 같은 코어 낱말).
   const chipItem = permissionWaiting ? awaitingMeItem(row.item) : row.item;
-  // 점은 낭독에서 빠진다(`StatusDot`): 줄 라벨이 맥의 상태를 말로 한다(「성재 맥북 켜짐」).
+  // 점은 낭독에서 빠진다(`StatusDot`): 줄 라벨이 맥의 상태를 말로 한다(「도현 맥북 연결됨」).
   const macDot = mac === null ? null : macHostDot(mac.online);
   // 맥 줄(수리 L1·M5): 맥 이름은 자기 줄에 서서 긴 이름이 채널·걸린 시간을 밀어내지 않는다. 꺼진 맥은 「꺼짐」을 글로도 말한다 —
   // 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같아서 모양만으로는 「대기 중인 맥」으로 읽힐 수 있다.

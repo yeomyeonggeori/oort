@@ -203,7 +203,7 @@ export function usePermissionPreviewGate(
   sessionId: string,
   permission: PendingPermission | null,
   enabled: boolean,
-  /** 그 세션을 실행하는 맥의 이름 — 막힘 문장의 답할 곳(#5593 수리 3회차 M2). 없으면 「맥에서」. */
+  /** 막힘 문장의 답할 곳(#5593 수리 3회차 M2): 컴퓨터 이름, 없으면 실행 위치의 주어(`workRunnerPlace`). 없으면 「실행하는 컴퓨터에서」. */
   hostName?: string,
 ): PermissionPreviewGate {
   const requestEventId = permission?.requestEventId ?? '';
@@ -313,7 +313,7 @@ export function SignedWorkControls({
   online: boolean;
   /** 권한 요청 알림이 이 카드로 착지했다(#5593). 값이 바뀔 때마다 낭독 초점이 카드의 질문으로 간다. */
   focusToken?: number;
-  /** 그 세션을 실행하는 맥의 이름 — 카드의 막힘 문장이 안내 상자와 같은 「{맥 이름}에서 답해 주세요」를 쓴다. */
+  /** 막힘 문장의 답할 곳 — 안내 상자와 같은 「{맥 이름}에서 답해 주세요」(이름이 없으면 실행 위치의 주어, `workRunnerPlace`). */
   hostName?: string;
 }): React.JSX.Element | null {
   const surface = useSignedWorkSurface(workspaceId, memberId, session, events, hostName);

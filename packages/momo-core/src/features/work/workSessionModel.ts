@@ -2,6 +2,7 @@ import { uuidEq, type Message, type WorkHost, type WorkSession } from "../../lib
 import type { WorkSessionACPFrame, WorkSessionACPType } from "../../lib/realtimeEvents";
 import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
 import { MAC_HOST_OFF_LABEL } from "../presence/statusDot";
+import { workRunnerSubject, type WorkExecutionLocationKey } from "./workLocation";
 import { SESSION_STATUS_LABEL } from "../workbench/sessionList";
 
 // =============================================================================
@@ -826,18 +827,19 @@ export function workSessionContinuityStatus(
   return workSessionStatus(session);
 }
 
-/** 폰 세션 머리(부제·배지)의 「연결 안 됨」에 붙는 주어(#5593 수리 3회차 L3, owner 추천안 「맥 연결 안 됨」). */
-export const MAC_NOT_CONNECTED_HEAD_LABEL = `맥 ${MAC_HOST_OFF_LABEL}`;
-
 /**
  * 폰 세션 화면의 머리·배지에서는 「연결 안 됨」에 주어를 붙인다(#5593 수리 3회차 L3): 주어가 없으면 폰에서는 「내 폰이 연결 안
- * 됨」으로도 읽힌다(같은 화면에 폰 자신의 「오프라인입니다.」 안내가 설 수 있다). 「연결 안 됨」으로 읽는 두 열쇠(`unavailable`·
- * `orphaned`) 모두에 붙인다 — 하나만 붙이면 같은 자리가 두 말 사이를 오간다. 열쇠(색)는 그대로다. 정보 칸(「사무실 맥 mini ·
- * 연결 안 됨」)과 웹은 이미 주어가 있거나 다른 자리라 이 함수를 부르지 않는다.
+ * 됨」으로도 읽힌다(같은 화면에 폰 자신의 「오프라인입니다.」 안내가 설 수 있다). 주어는 실행 위치가 정한다(`workRunnerSubject`):
+ * 데스크탑 앱이면 「맥 연결 안 됨」, 셀프호스트 서버·클라우드·모름이면 「실행하는 컴퓨터 연결 안 됨」(planner 2026-11-10 — 틀린
+ * 사실을 적지 않기). 「연결 안 됨」으로 읽는 두 열쇠(`unavailable`·`orphaned`) 모두에 붙인다 — 하나만 붙이면 같은 자리가 두 말
+ * 사이를 오간다. 열쇠(색)는 그대로다. 정보 칸(「사무실 맥 mini · 연결 안 됨」)은 이미 이름이 주어라 부르지 않는다.
  */
-export function withMacSubject(status: WorkSessionStatus): WorkSessionStatus {
+export function withRunnerSubject(
+  status: WorkSessionStatus,
+  location: WorkExecutionLocationKey
+): WorkSessionStatus {
   if (status.key !== "unavailable" && status.key !== "orphaned") return status;
-  return { key: status.key, label: MAC_NOT_CONNECTED_HEAD_LABEL };
+  return { key: status.key, label: `${workRunnerSubject(location)} ${MAC_HOST_OFF_LABEL}` };
 }
 
 /**

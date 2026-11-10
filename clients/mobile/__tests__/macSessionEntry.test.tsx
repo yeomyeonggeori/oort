@@ -78,8 +78,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '김도현',
+  handle: 'dohyeon',
 };
 
 const LOGIN_BODY = {
@@ -100,7 +100,7 @@ function boardSession(id: string, label: string, minutesAgo: number) {
     label,
     folderLabel: null,
     status: 'running',
-    owner: {memberId: SELF_ID, displayName: '곽성재'},
+    owner: {memberId: SELF_ID, displayName: '김도현'},
     homeChannel: {id: CH, name: 'general'},
     startedAtMs: NOW - (minutesAgo + 10) * 60_000,
     endedAtMs: null,
@@ -120,7 +120,7 @@ function boardSession(id: string, label: string, minutesAgo: number) {
 const APPROVAL_RUN = {
   source: 'run',
   runId: 'RUN-APPROVAL',
-  requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+  requestedBy: {memberId: SELF_ID, displayName: '김도현'},
   stepCount: 1,
   origin: 'agent_run',
   label: '#launch 채널에 공지 올리기',
@@ -181,7 +181,7 @@ function host(online: boolean) {
     scope: 'member',
     ownerMemberId: SELF_ID,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online,
@@ -450,12 +450,12 @@ describe('③ 권한 요청에 답을 기다리는 내 맥 세션은 맨 위 「
     await waitFor(
       () =>
         expect(screen.getByTestId(`work-job-row-${S_MAC}`).props.accessibilityLabel).toContain(
-          '성재 맥북 연결 안 됨',
+          '도현 맥북 연결 안 됨',
         ),
       SETTLE,
     );
     // 연결 안 된 맥은 「연결 안 됨」을 글로도 말한다(수리 M5, owner 2026-11-09 낱말) — 속 빈 고리는 같은 줄 「○ 대기」 칩의 고리와 모양이 같다. 맥 이름은 자기 줄이다(L1).
-    expect(within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByText('성재 맥북 · 연결 안 됨')).toBeTruthy();
+    expect(within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByText('도현 맥북 · 연결 안 됨')).toBeTruthy();
     // 점은 낭독에서 빠진다(`StatusDot`) — 찾을 때 숨은 요소까지 본다. 꺼짐은 속 빈 고리다(면 = `surface`, 선 = `textFaint`).
     const dot = within(screen.getByTestId(`work-job-row-${S_MAC}`)).getByTestId('status-dot', HIDDEN_TOO);
     expect(dot.props.accessibilityElementsHidden).toBe(true);
