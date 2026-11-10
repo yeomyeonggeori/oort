@@ -43,6 +43,7 @@ import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
@@ -254,6 +255,8 @@ export function Timeline({
   unreadCount,
   recoveryMarkers,
   pending,
+  echoPins,
+  serverOffsetMs,
   actions,
   reactions,
   pins,
@@ -318,6 +321,13 @@ export function Timeline({
   recoveryMarkers?: RecoveryMarker[];
   /** Local echoes awaiting their seq; folded in at the tail (M10). */
   pending?: PendingMessage[];
+  /**
+   * #5624 — 에코였던 확정본이 이 화면에서 이어 쓰는 에코의 시각(`useTimeline`의 `echoPins`). 있으면 에코가 확정본으로 바뀌어도
+   * 머리/이어짐이 그대로다. 없는 표면(작업 기록 등)은 서버 시각으로 묶는다.
+   */
+  echoPins?: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms, `useTimeline`의 `serverOffsetMs`). 에코의 묶음과 시각 글자가 쓴다. */
+  serverOffsetMs?: number;
   /**
    * B11 — what a row may do to its message. Omitted where the surface is a
    * transcript rather than a conversation (the work session event log), and the
@@ -508,6 +518,8 @@ export function Timeline({
         unreadCount,
         recoveryMarkers,
         pending,
+        echoPins,
+        serverOffsetMs,
       }),
       (item) => ({
         hasRollup: rollupFor(item.message) !== null,
@@ -526,6 +538,8 @@ export function Timeline({
     unreadCount,
     recoveryMarkers,
     pending,
+    echoPins,
+    serverOffsetMs,
     reactions,
     myMemberIdForFold,
     rollupFor,
@@ -978,6 +992,7 @@ export function Timeline({
               <PendingRow
                 pending={item.pending}
                 startsGroup={item.startsGroup}
+                serverOffsetMs={serverOffsetMs}
                 directory={directory}
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}

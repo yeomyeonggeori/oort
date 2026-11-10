@@ -1566,6 +1566,8 @@ export function ChatShell() {
               unreadCount={timelineUnread.unreadCount}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
+              echoPins={stressCount > 0 ? undefined : timeline.echoPins}
+              serverOffsetMs={timeline.serverOffsetMs}
               // B11 — the stress fixture renders synthetic rows with no server
               // row behind them, so the actions are withheld there rather than
               // offered and then failing on every click.
