@@ -74,7 +74,7 @@
   "teamAi.delegation.spentLabel": "이 답이 쓴 양",
   "teamAi.delegation.spentCredits": "크레딧 토큰 {tokens}",
   "teamAi.delegation.spentHermes": "{name} {count, plural, other {#회}}(구독이라 oort가 금액을 못 재요)",
-  "teamAi.delegation.spentCreditsEstimated": "크레딧 토큰 약 {tokens}(일부는 oort가 어림한 값이에요)",
+  "teamAi.delegation.spentCreditsEstimated": "크레딧 토큰 약 {tokens}(어림)",
   "teamAi.delegation.spentLine": "{label}: {credits}",
   "teamAi.delegation.spentLineWithHermes": "{label}: {credits} · {hermes}",
   "teamAi.delegation.hermesFallbackName": "Hermes",

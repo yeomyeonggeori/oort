@@ -74,7 +74,7 @@
   "teamAi.delegation.spentLabel": "What this answer used",
   "teamAi.delegation.spentCredits": "Credit tokens {tokens}",
   "teamAi.delegation.spentHermes": "{name} {count, plural, one {# time} other {# times}} (a subscription, so oort cannot measure the cost)",
-  "teamAi.delegation.spentCreditsEstimated": "Credit tokens about {tokens} (partly estimated by oort)",
+  "teamAi.delegation.spentCreditsEstimated": "Credit tokens about {tokens} (estimate)",
   "teamAi.delegation.spentLine": "{label}: {credits}",
   "teamAi.delegation.spentLineWithHermes": "{label}: {credits} · {hermes}",
   "teamAi.delegation.hermesFallbackName": "Hermes",

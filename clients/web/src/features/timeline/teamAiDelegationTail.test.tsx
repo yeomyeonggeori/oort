@@ -216,7 +216,7 @@ describe("이 답이 쓴 양 (P7·P8)", () => {
   it("어림이면 그렇다고 말한다", () => {
     const view = renderRow(answer(DELEGATED), { ...SPENT, estimated: true });
     expect(view.querySelector('[data-testid="team-ai-spent-line"]')?.textContent).toBe(
-      "이 답이 쓴 양: 크레딧 토큰 약 12.3k(일부는 oort가 어림한 값이에요) · 팀 Hermes 1회(구독이라 oort가 금액을 못 재요)"
+      "이 답이 쓴 양: 크레딧 토큰 약 12.3k(어림) · 팀 Hermes 1회(구독이라 oort가 금액을 못 재요)"
     );
   });
 

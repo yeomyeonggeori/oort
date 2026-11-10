@@ -7834,7 +7834,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " (partly estimated by oort)"
+      "value": " (estimate)"
     }
   ],
   "teamAi.delegation.spentHermes": [

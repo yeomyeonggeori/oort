@@ -7478,7 +7478,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "(일부는 oort가 어림한 값이에요)"
+      "value": "(어림)"
     }
   ],
   "teamAi.delegation.spentHermes": [
