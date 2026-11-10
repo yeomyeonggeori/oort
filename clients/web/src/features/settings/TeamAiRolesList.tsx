@@ -8,7 +8,7 @@ import {
   type TeamAiSwitchableBundle,
 } from "@momo/core/features/settings/teamAiRoles";
 import { TEAM_AI_ROLE_COPY, teamAiRoleNoticeKey } from "@momo/core/features/settings/teamAiCopyKeys";
-import { hermesRowUnavailableKey, hermesSettingsVisible } from "@momo/core/features/settings/teamAiHermesView";
+import { hermesRowUnavailable, hermesSettingsVisible } from "@momo/core/features/settings/teamAiHermesView";
 import type { TeamAiDelegationStatus } from "@momo/core/features/settings/teamAiLimits";
 import { Switch } from "@/design/ui/switch";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
@@ -28,9 +28,9 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 // 머리글자와 묶음 id를 이어 짓는다.
 //
 // 「Hermes 도움」(`hermes`, ADR-0201 증보 v4 P10, #5375)은 표(`TEAM_AI_BUNDLES`)에 없다: 부르는 쪽이 위임 칸(`hermes`)을
-// 넘길 때만 목록 끝에 선다(설정만 — 온보딩은 넘기지 않는다). 운영자가 위임을 연 서버에서만 서고(`hermesSettingsVisible`),
-// 고지 두 문장은 행에 늘 보인다(그래야 켤 때의 고지 기록이 사실이다). 켜져 있는데 서버 문이 닫혀 있으면 「지금은 쓸 수
-// 없어요」와 서버 낱말의 까닭이 한 줄 더 선다.
+// 넘길 때만 목록 끝에 선다(설정만 — 온보딩은 넘기지 않는다). 서버가 위임 칸을 보냈으면 운영자 천장이 비어 있어도 선다
+// (`hermesSettingsVisible`, 증보 v4 P8). 고지 두 문장은 행에 늘 보인다(그래야 켤 때의 고지 기록이 사실이다). 켜져 있는데
+// 서버 문이 닫혀 있으면 「지금은 쓸 수 없어요.」 한 줄이 더 서고, 까닭은 코어 판정(`hermesRowUnavailable`)이 사실일 때만 붙인다.
 // =============================================================================
 
 function RoleRow({
@@ -130,11 +130,13 @@ export function TeamAiRolesList({
   const formatMessage = useFormatMessage();
   const listTestId = `${testIdPrefix}-roles`;
   const hermesShown = hermes !== null && hermesSettingsVisible(hermes);
-  const hermesReason = hermes === null ? null : hermesRowUnavailableKey(roles.hermes, hermes);
+  const hermesClosed = hermes === null ? null : hermesRowUnavailable(roles.hermes, hermes);
   const hermesUnavailable =
-    hermesReason === null
+    hermesClosed === null
       ? null
-      : `${formatMessage("teamAi.delegation.unavailable")} ${formatMessage(hermesReason)}`;
+      : hermesClosed.reason === null
+        ? formatMessage("teamAi.delegation.unavailable")
+        : `${formatMessage("teamAi.delegation.unavailable")} ${formatMessage(hermesClosed.reason)}`;
   return (
     <ul className="flex min-w-0 flex-col" aria-labelledby={labelledBy} data-testid={listTestId}>
       {TEAM_AI_BUNDLES.map((id) => (

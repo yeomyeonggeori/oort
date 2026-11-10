@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   delegationInputMax,
   delegationInputText,
-  hermesRowUnavailableKey,
+  hermesLimitItemVisible,
+  hermesRowUnavailable,
   hermesSettingsVisible,
   parseDelegationInput,
 } from "./teamAiHermesView";
@@ -23,37 +24,50 @@ function status(over: Partial<TeamAiDelegationStatus> = {}): TeamAiDelegationSta
   };
 }
 
-describe("hermesSettingsVisible", () => {
-  it("운영자 천장이 있으면 보인다 — 다른 문이 닫혀 있어도(연결 안 됨은 안내로 보인다)", () => {
+/** 지금 운영의 모양: 천장 없음 = 닫힘. 첫 닫힌 문은 G3(연결)일 수 있다. */
+const OPS_OFF = status({
+  ceiling: null,
+  ceilingOff: true,
+  effective: 0,
+  available: false,
+  unavailableReason: "hermes_not_connected",
+});
+
+describe("hermesSettingsVisible · hermesLimitItemVisible (P8이 정본)", () => {
+  it("서버가 위임 칸을 보냈으면 행은 선다 — 운영자 천장이 비어 있는 지금 운영에서도", () => {
     expect(hermesSettingsVisible(status())).toBe(true);
-    expect(
-      hermesSettingsVisible(status({ available: false, unavailableReason: "hermes_not_connected" }))
-    ).toBe(true);
+    expect(hermesSettingsVisible(OPS_OFF)).toBe(true);
   });
 
-  it("천장이 비었거나(지금 운영) 서버가 칸을 보내지 않았으면 아무것도 보이지 않는다", () => {
-    // 지금 운영의 모양: 천장 없음 = 닫힘. 첫 닫힌 문은 G3(연결)일 수 있지만 그래도 보이지 않는다.
-    const opsOff = status({
-      ceiling: null,
-      ceilingOff: true,
-      effective: 0,
-      available: false,
-      unavailableReason: "hermes_not_connected",
-    });
-    expect(hermesSettingsVisible(opsOff)).toBe(false);
+  it("하루 칸은 천장이 있을 때만(P7 「천장 안에서 조정」)", () => {
+    expect(hermesLimitItemVisible(status())).toBe(true);
+    expect(hermesLimitItemVisible(OPS_OFF)).toBe(false);
+  });
+
+  it("서버가 칸을 보내지 않았으면(옛 서버) 행도 칸도 없다", () => {
     expect(hermesSettingsVisible(UNKNOWN_DELEGATION_STATUS)).toBe(false);
+    expect(hermesLimitItemVisible(UNKNOWN_DELEGATION_STATUS)).toBe(false);
   });
 });
 
-describe("hermesRowUnavailableKey", () => {
-  it("묶음이 켜져 있고 문이 닫혔을 때만 서버 낱말의 문장", () => {
-    const closed = status({ available: false, unavailableReason: "hermes_not_connected" });
-    expect(hermesRowUnavailableKey(true, closed)).toBe("teamAi.delegation.reasonNotConnected");
-    expect(hermesRowUnavailableKey(true, status({ available: false, unavailableReason: "daily_cap" }))).toBe(
-      "teamAi.delegation.reasonDailyCap"
-    );
-    expect(hermesRowUnavailableKey(false, closed)).toBeNull();
-    expect(hermesRowUnavailableKey(true, status())).toBeNull();
+describe("hermesRowUnavailable", () => {
+  it("천장이 있고 문이 닫혔으면 서버 낱말의 문장", () => {
+    expect(hermesRowUnavailable(true, status({ available: false, unavailableReason: "hermes_not_connected" }))).toEqual({
+      reason: "teamAi.delegation.reasonNotConnected",
+    });
+    expect(hermesRowUnavailable(true, status({ available: false, unavailableReason: "daily_cap" }))).toEqual({
+      reason: "teamAi.delegation.reasonDailyCap",
+    });
+  });
+
+  it("천장이 비었으면 까닭 없이 「지금은 쓸 수 없어요」만 — 첫 닫힌 문이 「연결 안 됨」이어도 그 말을 붙이지 않는다", () => {
+    expect(OPS_OFF.unavailableReason).toBe("hermes_not_connected");
+    expect(hermesRowUnavailable(true, OPS_OFF)).toEqual({ reason: null });
+  });
+
+  it("묶음이 꺼졌거나 문이 열려 있으면 줄이 없다", () => {
+    expect(hermesRowUnavailable(false, OPS_OFF)).toBeNull();
+    expect(hermesRowUnavailable(true, status())).toBeNull();
   });
 });
 

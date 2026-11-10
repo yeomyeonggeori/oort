@@ -15,6 +15,7 @@ import { useRunLedger } from "./useRunLedger";
 import { useVisibleThoughtRun } from "./visibleThoughtRuns";
 import { openWorkPanel } from "./workLogStore";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
+import { TEAM_AI_DELEGATION_WAIT_COPY, teamAiDelegationWait } from "@momo/core/features/timeline/teamAiDelegationView";
 
 /** 아직 원장을 못 읽었을 때의 요약 재료: 시간만 말하고 에이전트 보고 숫자는 지어내지 않아요. */
 const NO_REPORT: RunReportSummary = { stages: 0, kinds: [] };
@@ -69,13 +70,25 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
     return () => { watching = false; stop(); };
   }, [expanded, working, live, realtime, workspaceId, run.id, run.channelId, run.agentMemberId]);
   const lastReport = run.lastEventAtMs;
-  const quiet = working && live && lastReport !== undefined && Date.now() - lastReport >= IDLE_CUTOFF_MS;
+  // Hermes를 기다리는 동안(서버가 정한 종류별 마감 안, #5375)은 「소식 없음」으로 바꾸지 않고 stage 옆에 마감을 알린다.
+  // 서버는 그동안 원장에 행을 쓰지 않는다 — 마감을 넘기면 아래 원래 규칙으로 돌아간다.
+  const delegationWait = working ? teamAiDelegationWait(run, Date.now()) : null;
+  const waitUntil = delegationWait?.untilMs;
+  useEffect(() => {
+    // 분 단위 시계(위)는 마감을 최대 1분 늦게 본다: 마감 순간에 한 번 더 그린다.
+    if (waitUntil === undefined) return;
+    const timer = setTimeout(() => tick((value) => value + 1), Math.max(0, waitUntil - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [waitUntil]);
+  const quiet = working && live && delegationWait === null && lastReport !== undefined && Date.now() - lastReport >= IDLE_CUTOFF_MS;
+  const waitHint = delegationWait === null ? null : formatMessage(TEAM_AI_DELEGATION_WAIT_COPY[delegationWait.kind], { minutes: delegationWait.minutes });
   const stage = Array.from(run.latestStage?.replace(/\s+/g, " ").trim() ?? "").slice(0, 40).join("");
   const name = memberFor(directory, run.agentMemberId)?.displayName ?? "에이전트";
   const duration = run.finishedAtMs === undefined ? undefined : Math.max(0, run.finishedAtMs - (run.startedAtMs ?? run.createdAtMs));
   // 요약의 숫자는 에이전트가 말한 것만이에요(단계·활동 합계). oort가 잰 호출 수는 출처가 달라 섞지 않아요(#4654).
   const summary = duration === undefined ? REQUEST_WORD[state] : runReportChipText(duration, ledger.report ?? NO_REPORT, formatMessage);
-  const label = open ? `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}` : summary;
+  // 마감 안내는 stage **뒤**에 같은 줄로 붙는다(줄 높이 24 그대로 — 대화가 밀리지 않는다). 좁아서 잘리면 stage가 먼저 남는다.
+  const label = open ? `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}${waitHint === null ? "" : ` · ${waitHint}`}` : summary;
   // 보이는 글은 몸과 꼬리표로 나눠 그린다: 좁은 칸에서 몸이 줄임표를 받아도 「에이전트 보고」(숫자가 누구의 말인지)는 남는다.
   const chip = duration === undefined ? null : runReportChipParts(duration, ledger.report ?? NO_REPORT, formatMessage);
   if (!open) {

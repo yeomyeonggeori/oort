@@ -333,6 +333,21 @@ function settingsBoard(hermes: TeamAiDelegationStatus, hermesOn = true): string 
   );
 }
 
+/** 진행 줄을 재는 때(위임 stage 뒤 초). 20초가 기준이다. */
+const PROGRESS_AT = [20, 60, 100, 130] as const;
+
+function progressMarkups(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const at of PROGRESS_AT) {
+    out[`progress-${at}`] = html([
+      row(REQUEST, { runStatus: [progressRun(at * 1_000)], showThought: true }),
+      row(NEXT),
+      row(msg("0199eeee-0000-7000-8000-000000000603", 14, ME, "좋아요. 표지 시안 기다릴게요.")),
+    ]);
+  }
+  return out;
+}
+
 describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지 않는다 (#5375)", () => {
   it.skipIf(!ENGINES.includes("chromium"))(
     "그림 받는 중 → 도착 → 못 불러옴, 쓴 양 없음 → 도착: 답의 높이와 다음 글의 자리가 같다 (실제 Chromium)",
@@ -347,7 +362,9 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
         legacyLoading: markupFor("loading", pictureAnswer(false)),
         legacyReady: markupFor("ready", pictureAnswer(false)),
       };
-      const css = await compileTokensCss(Object.values(markups).flatMap(classesOf));
+      // 진행 줄: 위임 stage 뒤 20·60·100초(마감 안 — 안내 한 줄)와 130초(마감 뒤 — 「소식 없음」). 대화는 요청 → 다음 글 둘.
+      const progress = progressMarkups();
+      const css = await compileTokensCss([...Object.values(markups), ...Object.values(progress)].flatMap(classesOf));
       const { chromium } = await import("playwright");
       const browser = await chromium.launch();
       const problems: string[] = [];
@@ -386,18 +403,23 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
           const grew = legacyReady.nextTop - legacyLoading.nextTop;
           measured.push(`${columnWidth}px 대조(예전 길) 이동 ${grew}px`);
           if (grew <= TOL) problems.push(`${columnWidth}px: 대조가 움직이지 않았다(${grew}px) — 자가 실제 이동을 못 잰다`);
+          // 진행 줄이 「위임: … · 그림」 → 「… · 그림은 2분까지 걸릴 수 있어요」 → 「2분째 소식 없음」으로 바뀌어도 다음 글이 그대로다.
+          const first = await show(p, progress["progress-20"]!, square);
+          for (const at of PROGRESS_AT) {
+            const g = await show(p, progress[`progress-${at}`]!, square);
+            const moved = g.nextTop - first.nextTop;
+            if (Math.abs(moved) > TOL) problems.push(`${columnWidth}px: 진행 줄 20초 → ${at}초에서 다음 글이 ${moved}px 움직였다`);
+          }
+          measured.push(`${columnWidth}px 진행 줄 20→60→100→130초 이동 0px 확인`);
         }
 
         const capDir = process.env.CAP5375_DIR;
         if (capDir !== undefined && capDir !== "") {
           mkdirSync(capDir, { recursive: true });
           const boards: Record<string, string> = {
-            "timeline-progress": html([
-              row(REQUEST, { runStatus: [progressRun(20_000)], showThought: true }),
-            ]),
-            "timeline-progress-100s": html([
-              row(REQUEST, { runStatus: [progressRun(100_000)], showThought: true }),
-            ]),
+            "timeline-progress-60s": progress["progress-60"]!,
+            "timeline-progress-100s": progress["progress-100"]!,
+            "timeline-progress-130s": progress["progress-130"]!,
             "timeline-done-picture": markups.ready,
             "timeline-done-search": html([row(REQUEST), row(searchAnswer()), row(NEXT)]),
             "timeline-failed": html([

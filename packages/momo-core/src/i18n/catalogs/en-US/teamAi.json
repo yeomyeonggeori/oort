@@ -78,6 +78,8 @@
   "teamAi.delegation.spentLine": "{label}: {credits}",
   "teamAi.delegation.spentLineWithHermes": "{label}: {credits} · {hermes}",
   "teamAi.delegation.hermesFallbackName": "Hermes",
+  "teamAi.delegation.waitImage": "Pictures can take up to {minutes, plural, one {# minute} other {# minutes}}",
+  "teamAi.delegation.waitSearch": "Searches can take up to {minutes, plural, one {# minute} other {# minutes}}",
   "teamAi.delegation.unavailable": "Not available right now.",
   "teamAi.delegation.reasonNotConnected": "Hermes is not connected.",
   "teamAi.delegation.reasonAmbiguous": "More than one Hermes is connected, so the helper cannot tell which one to use.",

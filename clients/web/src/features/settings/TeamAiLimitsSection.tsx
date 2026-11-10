@@ -32,7 +32,7 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useLocaleService } from "@/i18n/useLocaleService";
 import { BlockedReason } from "@/features/common/BlockedReason";
 import { delegationOf } from "@momo/core/features/settings/teamAiLimits";
-import { hermesSettingsVisible } from "@momo/core/features/settings/teamAiHermesView";
+import { hermesLimitItemVisible } from "@momo/core/features/settings/teamAiHermesView";
 import { TeamAiDelegationLimitItem } from "./TeamAiDelegationLimitItem";
 
 // =============================================================================
@@ -349,8 +349,9 @@ export function TeamAiLimitsSection({
             onSave={(field, value) => save.mutate({ field, value })}
           />
         ))}
-        {/* 하루 Hermes 맡기기(#5375): 운영자가 위임을 연 서버에서만 선다. 지금 운영(천장 없음)에서는 줄이 없다. */}
-        {hermesSettingsVisible(delegationOf(status)) && (
+        {/* 하루 Hermes 맡기기(#5375): 운영자 천장이 있을 때만 선다(P7 「천장 안에서 조정」). 천장이 빈 지금 운영에서는
+            역할 행이 「지금은 쓸 수 없어요」를 말하고 이 칸은 없다. */}
+        {hermesLimitItemVisible(delegationOf(status)) && (
           <TeamAiDelegationLimitItem
             workspaceId={workspaceId}
             status={delegationOf(status)}

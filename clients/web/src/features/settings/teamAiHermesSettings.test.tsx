@@ -18,9 +18,10 @@ import { TeamAiRolesList } from "./TeamAiRolesList";
 // =============================================================================
 // 설정의 「Hermes 도움」 행과 「하루 Hermes 맡기기」 칸 (ADR-0201 증보 v4 P7·P8·P10, #5375).
 //
-//   1. 운영자가 위임을 열지 않은 서버(천장 없음 — 지금 운영)·모름: 행도 칸도 없다(새로 보이는 것 0).
-//   2. 연 서버: 행이 목록 끝에 서고 고지 두 문장이 행에 늘 보인다. 켜져 있는데 문이 닫혔으면 「지금은 쓸 수 없어요」 + 서버 낱말.
-//      꺼져 있으면 까닭 줄 없이 스위치만(다시 켜는 길).
+//   1. 운영자 천장이 빈 서버(지금 운영, 증보 v4 P8이 정본): 행은 서고 「지금은 쓸 수 없어요.」만 — 서버의 첫 닫힌 문 낱말
+//      (「연결 안 됨」)을 붙이지 않는다. 스위치는 쓸 수 있고 하루 칸은 없다. 서버가 위임 칸을 모르면 행도 없다.
+//   2. 천장이 있는 서버: 행이 목록 끝에 서고 고지 두 문장이 행에 늘 보인다. 켜져 있는데 문이 닫혔으면 「지금은 쓸 수 없어요」
+//      + 서버 낱말. 꺼져 있으면 까닭 줄 없이 스위치만(다시 켜는 길).
 //   3. 온보딩처럼 위임 칸을 넘기지 않는 목록에는 행이 없다.
 //   4. 하루 칸: 오늘 횟수/실제 상한은 서버 값 그대로, 천장을 넘는 값은 보내지 않는다, 빈 칸은 기본 30으로(`null`).
 // =============================================================================
@@ -125,10 +126,15 @@ function list(hermes: TeamAiDelegationStatus | null | undefined, rolesValue = ro
 }
 
 describe("역할 목록의 「Hermes 도움」 행", () => {
-  it("운영자가 열지 않았거나(천장 없음) 모르면 행이 없다", () => {
-    expect(pick(list(OPS_OFF), "t-role-row-hermes")).toBeNull();
-    act(() => root?.unmount());
-    root = null;
+  it("천장이 빈 지금 운영: 행과 스위치는 서고 「지금은 쓸 수 없어요.」만 — 「연결 안 됨」을 붙이지 않는다", () => {
+    const view = list(OPS_OFF);
+    expect(pick(view, "t-role-row-hermes")).not.toBeNull();
+    expect(pick(view, "t-role-unavailable-hermes")?.textContent).toBe("지금은 쓸 수 없어요.");
+    expect(pick(view, "t-role-row-hermes")?.textContent).not.toContain("연결돼 있지 않아요");
+    expect(pick<HTMLButtonElement>(view, "t-role-hermes")?.disabled).toBe(false);
+  });
+
+  it("서버가 위임 칸을 모르면(옛 서버) 행이 없다", () => {
     expect(pick(list(UNKNOWN_DELEGATION_STATUS), "t-role-row-hermes")).toBeNull();
   });
 
@@ -219,7 +225,7 @@ async function type(element: HTMLInputElement | null, value: string) {
 }
 
 describe("「사용 한도」의 하루 Hermes 맡기기 칸", () => {
-  it("운영자가 열지 않은 서버(지금 운영)에는 칸이 없다 — 다른 한도는 그대로", async () => {
+  it("천장이 빈 서버(지금 운영)에는 칸이 없다(P7 「천장 안에서 조정」) — 다른 한도는 그대로", async () => {
     const view = await section(OPS_OFF);
     expect(pick(view, "team-ai-limits")).not.toBeNull();
     expect(pick(view, "team-ai-limit-delegations-item")).toBeNull();

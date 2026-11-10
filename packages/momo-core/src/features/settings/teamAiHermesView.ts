@@ -4,14 +4,19 @@
 // 읽기는 `teamAiLimits.ts`의 위임 칸(`TeamAiDelegationStatus`, 서버 문의 닫힌 낱말)이 한다. 여기는 그 사실을 화면이
 // 언제 그리고 무엇을 쓰는지로만 바꾼다. 웹·폰이 같은 판정을 쓴다.
 //
-// **언제 보이는가 (planner 브리프 #5375 「꺼져 있을 때는 아무것도 새로 보이지 않아요」):** 운영자가 위임을 연 서버
-// (천장이 있음)에서만 보인다. 천장이 비었거나 서버가 위임 칸을 보내지 않았으면(모름) 행도 칸도 없다. 그래서 운영이
-// 꺼진 지금은 설정에 새 줄이 하나도 생기지 않는다. 증보 v4 P8은 천장이 없을 때도 「지금은 쓸 수 없어요」를 말하라고
-// 했는데, 그 문장은 운영자가 연 뒤 다른 문(G3~G5, 오늘 횟수)이 닫혔을 때만 보인다 — 이 갈림은 인계에 결정 항목으로
-// 남긴다. 판정은 까닭 낱말이 아니라 `ceilingOff`로 한다: 까닭은 **처음 닫힌 문**이고 G3(연결)가 G6(천장)보다 앞이라,
-// 운영이 꺼진 서버도 「연결 안 됨」으로 읽힐 수 있다.
+// **언제 보이는가 (ADR 증보 v4 P8이 정본, planner 2026-11-10 답):** 서버가 위임 칸을 온전히 보냈으면(`known`) 소유자·관리자의
+// 설정에 「Hermes 도움」 행이 선다 — 운영자 천장이 비어 있는 지금 운영에서도. 한도 가방 자체가 소유자·관리자에게만 읽히므로
+// 일반 멤버에게는 아무것도 새로 보이지 않는다. 서버가 위임 칸을 모르면(옛 서버) 행이 없다(모르는 것을 말하지 않는다).
 //
-// 묶음이 꺼져 있어도 행은 남는다(스위치가 다시 켜는 길이다). 그때는 까닭 줄을 그리지 않는다.
+// **까닭은 사실대로:** 묶음이 켜져 있고 문이 닫혔으면 「지금은 쓸 수 없어요.」를 보인다. 운영자 천장이 비었으면(`ceilingOff`)
+// 서버의 까닭 낱말을 쓰지 않는다 — 그 낱말은 **처음 닫힌 문**이고 G3(연결)이 G6(천장)보다 앞이라, 천장이 꺼진 서버에서도
+// 「연결 안 됨」으로 읽힐 수 있다. 증보 v4(P8·P9 실패 문장 표)에는 천장이 빈 경우의 문장이 없으므로 그때는 까닭 줄 없이
+// 「지금은 쓸 수 없어요.」만 보인다(새 문장을 지어내지 않는다). 천장이 있으면 서버 낱말의 문장을 그대로 붙인다.
+//
+// **조작:** 역할 스위치는 늘 쓸 수 있다(묶음은 관리자의 설정이고, P10 「켠 채라도 … 이유를 보인다」). 「하루 Hermes 맡기기」
+// 칸은 천장이 있을 때만 선다 — P7이 이 값을 「천장 안에서 조정한다」고 했고 천장이 비면 실제 상한이 0이라 고를 것이 없다.
+//
+// 묶음이 꺼져 있으면 행과 스위치는 남고(다시 켜는 길이다) 까닭 줄은 그리지 않는다.
 // =============================================================================
 
 import type { PlainMessageKey } from "./teamAiCopyKeys";
@@ -22,21 +27,32 @@ import {
   type TeamAiDelegationStatus,
 } from "./teamAiLimits";
 
-/** 설정에 Hermes 맡기기(역할 행·하루 칸)를 그리는가: 서버가 위임 칸을 온전히 보냈고 운영자 천장이 있다. */
+/** 설정에 「Hermes 도움」 역할 행을 그리는가: 서버가 위임 칸을 온전히 보냈다(운영자 천장이 비어 있어도). */
 export function hermesSettingsVisible(status: TeamAiDelegationStatus): boolean {
+  return status.known;
+}
+
+/** 「하루 Hermes 맡기기」 칸을 그리는가: 위 조건 + 운영자 천장이 있다(P7 「천장 안에서 조정」). */
+export function hermesLimitItemVisible(status: TeamAiDelegationStatus): boolean {
   return status.known && !status.ceilingOff;
 }
 
+/** 역할 행 아래의 「지금은 쓸 수 없어요.」 줄. `reason`이 `null`이면 까닭 문장 없이 그 한 문장만 보인다. */
+export interface HermesRowUnavailable {
+  reason: PlainMessageKey | null;
+}
+
 /**
- * 역할 행 아래의 「지금은 쓸 수 없어요」 뒤에 붙는 까닭의 키. 묶음이 켜져 있고(G1) 워크스페이스 쪽 문이 닫혀 있을 때만
- * 있다. 묶음이 꺼졌으면 스위치가 이미 말한다.
+ * 역할 행 아래 줄의 판정(한 곳). 묶음이 켜져 있고(G1) 워크스페이스 쪽 문이 닫혀 있을 때만 있다. 묶음이 꺼졌으면 스위치가
+ * 이미 말한다. 운영자 천장이 비었으면 까닭은 없다(서버의 첫 닫힌 문 낱말이 천장 사실과 다를 수 있고, 증보에 그 문장이 없다).
  */
-export function hermesRowUnavailableKey(
+export function hermesRowUnavailable(
   bundleOn: boolean,
   status: TeamAiDelegationStatus
-): PlainMessageKey | null {
+): HermesRowUnavailable | null {
   if (!bundleOn || status.available) return null;
-  return TEAM_AI_DELEGATION_REASON_COPY[status.unavailableReason ?? "unknown"];
+  if (status.ceilingOff) return { reason: null };
+  return { reason: TEAM_AI_DELEGATION_REASON_COPY[status.unavailableReason ?? "unknown"] };
 }
 
 /** 하루 맡기기 칸이 받는 가장 큰 값: 설정 상한(200)과 운영자 천장 중 작은 것. 천장이 없으면 설정 상한. */

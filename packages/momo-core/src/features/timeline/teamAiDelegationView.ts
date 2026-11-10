@@ -13,9 +13,13 @@
 // 이 파일에는 사용자 문구가 없다. 문구는 사전 `teamAi.delegation.*`에 있다.
 // =============================================================================
 
-import type { AgentRunSpent, Message } from "../../lib/api";
+import type { AgentRunProgress, AgentRunSpent, Message } from "../../lib/api";
 import type { AuthorKind } from "./serverResultAuthor";
-import { teamAiDelegationsFor, type TeamAiDelegation } from "./teamAiDelegation";
+import {
+  teamAiDelegationsFor,
+  type TeamAiDelegation,
+  type TeamAiDelegationKind,
+} from "./teamAiDelegation";
 
 /**
  * 토큰 수를 짧게: 999 → 「999」, 12,345 → 「12.3k」, 1,234,567 → 「1.2M」. 언어와 상관없이 같은 모양이다(증보 v4 P8의
@@ -87,4 +91,61 @@ export function teamAiDelegatedAnswerOf(
     runId: typeof runId === "string" && runId !== "" ? runId.toLowerCase() : null,
     picture: delegations.some((item) => item.kind === "image"),
   };
+}
+
+// ---- 위임을 기다리는 동안의 진행 줄 (planner 2026-11-10 답 ②) -------------------------------------------
+//
+// 서버는 위임 걸음의 stage(「위임: {이름} · 그림」)를 걸음을 시작할 때 한 번 쓰고, Hermes를 기다리는 동안에는 원장에 행을
+// 쓰지 않는다(`delegate.rs`). 그래서 90초 「N분째 소식 없음」 규칙이 그림 위임(길면 2분)의 한가운데서 stage 글을 지운다.
+// 화면은 서버를 다시 판정하지 않고 **서버가 정한 마감**을 알려 준다: 마지막 stage가 위임 걸음의 것이고 그 시각부터 종류별
+// 마감 안이면 stage 글을 그대로 두고 「그림은 2분까지 걸릴 수 있어요」를 붙인다. 마감을 넘기면 원래 규칙으로 돌아간다.
+
+/**
+ * Hermes 호출 마감(ADR-0201 증보 v4 P4 「그림 120초 / 검색 60초」, v4.2 `WorkerConfig::hermes_deadlines`의 기본값).
+ * 서버 값을 화면이 읽을 길은 없다 — 증보가 바뀌면 이 표를 함께 고친다.
+ */
+export const TEAM_AI_DELEGATION_DEADLINE_MS = {
+  image: 120_000,
+  web_search: 60_000,
+} as const satisfies Record<TeamAiDelegationKind, number>;
+
+/** 마감을 알리는 한 줄의 사전 키(`{minutes}` = 마감의 분). */
+export const TEAM_AI_DELEGATION_WAIT_COPY = {
+  image: "teamAi.delegation.waitImage",
+  web_search: "teamAi.delegation.waitSearch",
+} as const satisfies Record<TeamAiDelegationKind, string>;
+
+/**
+ * 서버가 닫힌 낱말로 조립하는 위임 stage(`momo_agent::team_ai_task::delegation_stage_label`, 받기 전 갈래):
+ * 「위임: {이름} · 그림」 / 「위임: {이름} · 검색」. 받은 뒤의 「위임 결과 수신: …」과 규칙이 거절해 쓰인 머리 「위임 중」은
+ * 기다림이 아니다(종류를 모른다).
+ */
+const DELEGATION_STAGE = /^위임: .+ · (그림|검색)$/u;
+
+/** 위임을 기다리는 중이라는 화면 사실: 종류와 그 마감 시각. */
+export interface TeamAiDelegationWait {
+  kind: TeamAiDelegationKind;
+  /** stage 시각 + 종류별 마감. 이 시각이 지나면 기다림이 아니다. */
+  untilMs: number;
+  /** 마감의 분(문구의 `{minutes}`). */
+  minutes: number;
+}
+
+/**
+ * 이 run이 지금 Hermes를 기다리는 중인가(마감 안). 도우미 작업 run(서버가 `spent`를 싣는 run — 그 stage는 워커가 닫힌 낱말로
+ * 쓴다)의 마지막 stage가 위임 걸음이고, 그 stage 시각(`lastEventAtMs`)부터 종류별 마감 안일 때만 값이 있다. 다른 에이전트가
+ * 스스로 쓴 「위임: …」 stage는 작업 run이 아니어서 여기 오지 않는다.
+ */
+export function teamAiDelegationWait(
+  run: Pick<AgentRunProgress, "latestStage" | "lastEventAtMs" | "spent">,
+  nowMs: number
+): TeamAiDelegationWait | null {
+  if (run.spent === undefined || run.lastEventAtMs === undefined) return null;
+  const match = DELEGATION_STAGE.exec(run.latestStage?.trim() ?? "");
+  if (match === null) return null;
+  const kind: TeamAiDelegationKind = match[1] === "그림" ? "image" : "web_search";
+  const deadline = TEAM_AI_DELEGATION_DEADLINE_MS[kind];
+  const untilMs = run.lastEventAtMs + deadline;
+  if (nowMs >= untilMs) return null;
+  return { kind, untilMs, minutes: Math.round(deadline / 60_000) };
 }

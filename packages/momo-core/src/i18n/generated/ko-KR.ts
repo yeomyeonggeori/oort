@@ -7562,6 +7562,36 @@ export const catalog: MessageCatalog = {
       "value": "지금은 쓸 수 없어요."
     }
   ],
+  "teamAi.delegation.waitImage": [
+    {
+      "type": 0,
+      "value": "그림은 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분까지 걸릴 수 있어요"
+    }
+  ],
+  "teamAi.delegation.waitSearch": [
+    {
+      "type": 0,
+      "value": "검색은 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분까지 걸릴 수 있어요"
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,

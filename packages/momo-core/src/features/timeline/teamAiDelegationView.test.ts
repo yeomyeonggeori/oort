@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { TEAM_AI_DELEGATED_PROPS_KEY } from "./teamAiDelegation";
 import {
   compactTokenText,
+  TEAM_AI_DELEGATION_DEADLINE_MS,
   TEAM_AI_SPENT_LINE_SIZER,
+  teamAiDelegationWait,
   teamAiDelegatedAnswerOf,
   teamAiSpentLineOf,
 } from "./teamAiDelegationView";
@@ -87,5 +89,41 @@ describe("쓴 양 줄", () => {
     for (const count of [999_999, 99_999, 9_999_999]) {
       expect(TEAM_AI_SPENT_LINE_SIZER.tokens.length).toBeGreaterThanOrEqual(compactTokenText(count).length);
     }
+  });
+});
+
+describe("teamAiDelegationWait (위임을 기다리는 동안의 진행 줄)", () => {
+  const STAGE_AT = 1_000_000;
+  const SPENT_ROW = { promptTokens: 1, completionTokens: 1, webSearches: 0, estimated: false, delegations: 0 };
+  const run = (latestStage: string, spent: typeof SPENT_ROW | null = SPENT_ROW) => ({
+    latestStage,
+    lastEventAtMs: STAGE_AT,
+    ...(spent === null ? {} : { spent }),
+  });
+
+  it("그림: stage 시각부터 120초 안이면 기다림(60초·100초), 넘으면 아니다(130초)", () => {
+    const image = run("위임: 팀 Hermes · 그림");
+    expect(teamAiDelegationWait(image, STAGE_AT + 60_000)).toEqual({
+      kind: "image",
+      untilMs: STAGE_AT + TEAM_AI_DELEGATION_DEADLINE_MS.image,
+      minutes: 2,
+    });
+    expect(teamAiDelegationWait(image, STAGE_AT + 100_000)?.kind).toBe("image");
+    expect(teamAiDelegationWait(image, STAGE_AT + 120_000)).toBeNull();
+    expect(teamAiDelegationWait(image, STAGE_AT + 130_000)).toBeNull();
+  });
+
+  it("검색: 60초 마감, 1분", () => {
+    const search = run("위임: 팀 Hermes · 검색");
+    expect(teamAiDelegationWait(search, STAGE_AT + 50_000)).toMatchObject({ kind: "web_search", minutes: 1 });
+    expect(teamAiDelegationWait(search, STAGE_AT + 70_000)).toBeNull();
+  });
+
+  it("받은 뒤·머리 낱말·다른 stage·도우미 작업 run이 아닌 run은 기다림이 아니다", () => {
+    expect(teamAiDelegationWait(run("위임 결과 수신: 팀 Hermes"), STAGE_AT + 10_000)).toBeNull();
+    expect(teamAiDelegationWait(run("위임 중"), STAGE_AT + 10_000)).toBeNull();
+    expect(teamAiDelegationWait(run("조사 중 · 1／3 · 가격 비교"), STAGE_AT + 10_000)).toBeNull();
+    // 바깥 에이전트가 스스로 쓴 같은 모양의 stage(작업 run이 아니라 spent가 없다).
+    expect(teamAiDelegationWait(run("위임: 하위봇 · 그림", null), STAGE_AT + 10_000)).toBeNull();
   });
 });

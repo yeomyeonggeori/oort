@@ -1104,6 +1104,8 @@ export const messageKeys = [
   "teamAi.delegation.spentLine",
   "teamAi.delegation.spentLineWithHermes",
   "teamAi.delegation.unavailable",
+  "teamAi.delegation.waitImage",
+  "teamAi.delegation.waitSearch",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -2694,6 +2696,12 @@ export const argumentSpecs = {
     "label": "string"
   },
   "teamAi.delegation.unavailable": {},
+  "teamAi.delegation.waitImage": {
+    "minutes": "number"
+  },
+  "teamAi.delegation.waitSearch": {
+    "minutes": "number"
+  },
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -4116,6 +4124,8 @@ export interface MessageArgs {
   "teamAi.delegation.spentLine": { credits: string; label: string };
   "teamAi.delegation.spentLineWithHermes": { credits: string; hermes: string; label: string };
   "teamAi.delegation.unavailable": Record<string, never>;
+  "teamAi.delegation.waitImage": { minutes: number };
+  "teamAi.delegation.waitSearch": { minutes: number };
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;
