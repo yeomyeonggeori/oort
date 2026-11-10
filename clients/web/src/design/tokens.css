@@ -2373,6 +2373,16 @@
     padding-inline: var(--spacing-2);
   }
 }
+/* 대화 타임라인 스크롤러(가상 목록)는 브라우저 스크롤 앵커링을 쓰지 않는다 (#5638). 스크롤 위치의 주인은
+ * 가상 목록 + `scrollHold` 한 길이다. 앵커링은 엔진마다 다르다: Chromium · Playwright WebKit 26.5 ·
+ * macOS 27의 WKWebView(데스크탑 앱)는 켜져 있고(2026-11-10 실측), macOS 14~26의 시스템 WebKit 에는 없다
+ * (Safari 27 릴리스 노트에서 처음 켜짐). 데스크탑 앱은 OS 의 WebKit 을 쓰니 팀 맥의 OS 판에 따라 둘 다
+ * 만난다. 켜 두면 일부 엔진에서만 손이 하나 더 끼어 엔진마다 다른 길로 움직인다. 가상 목록은 줄마다 이미
+ * 끄지만 스크롤러에는 걸지 않는다. 스레드 답글 목록에는 걸지 않는다: 거기는 손보정이 없어 앵커링이
+ * 자리를 지키는 유일한 손이다(손보정을 먼저 붙인 뒤 끈다). */
+@utility timeline-scroller {
+  overflow-anchor: none;
+}
 
 @utility channel-head-title {
   font-size: var(--text-heading);
