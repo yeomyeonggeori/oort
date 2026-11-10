@@ -30,6 +30,7 @@ import {
   parseMessagePreview,
   type MessagePreview,
 } from "../approvals/messagePreview";
+import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -932,8 +933,19 @@ function turnCard(props: Props): AgentTurnCard | null {
 /**
  * The structured body of an agent event, or null when the message is ordinary
  * prose. Deleted rows never produce a card: the tombstone is the whole story.
+ *
+ * `authorKind` is the author's member kind, read from the directory (never from
+ * the props). Only the turn record asks it (#5577, `serverResultAuthor.ts`): the
+ * 「에이전트 실행 결과」 card is the server's measure of an agent's run, drawn off
+ * ordinary keys (`status`, `error`, `error_code`, `usage`), so a person's message
+ * that carries them, or a row whose author is not known, is plain prose. A caller
+ * that only asks for approval cards (notifications, the decision stage) need not
+ * pass it.
  */
-export function agentCardModel(message: Message): AgentCardModel | null {
+export function agentCardModel(
+  message: Message,
+  authorKind?: AuthorKind | null
+): AgentCardModel | null {
   if (message.state === "deleted") return null;
   const props = message.props;
   if (message.type === "approval_request") {
@@ -963,6 +975,7 @@ export function agentCardModel(message: Message): AgentCardModel | null {
   // 내용이 비면 `completionReportCard` 가 `null` 을 내고 평범한 턴으로 떨어진다.
   const completion = completionReportCard(props);
   if (completion !== null) return completion;
+  if (!isAgentAuthored(authorKind)) return null;
   return turnCard(props);
 }
 

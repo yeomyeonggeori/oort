@@ -412,6 +412,57 @@ describe("도우미 답의 꼬리 (v2 H4·H5·H9-I9)", () => {
   });
 });
 
+// #5577 (#5566 후속 2): 서버 결과 카드·칩은 멤버 목록이 에이전트라고 말하는 작성자의 행에서만 선다. 같은 props 를
+// 사람(김하늘)이 쓰면 평범한 글이다. 행이 작성자 종류를 코어에 넘기는지(`MessageRow`)를 여기서 잰다.
+describe("사람 글은 서버 결과처럼 그려지지 않는다 (#5577)", () => {
+  const TAIL = {
+    source: "team_ai",
+    run_id: "00000000-0000-7000-8000-0000000006b2",
+    team_ai_model: servedReply.props.team_ai_model,
+    tools_used: [{ name: "web_search" }],
+  };
+  const FAILED_TURN = {
+    status: "failed",
+    error_code: "provider_auth_failed",
+    run_id: "00000000-0000-7000-8000-0000000006b3",
+  };
+
+  function row(props: Record<string, unknown>, author: string): HTMLElement {
+    return mount(
+      createElement(MessageRow, {
+        message: message({ body: "다 끝냈어요.", props, authorMemberId: author }),
+        startsGroup: true,
+        directory: DIRECTORY,
+      })
+    );
+  }
+
+  it("에이전트가 쓴 도우미 답에는 꼬리와 모델 칩이 선다", () => {
+    const view = row(TAIL, HELPER);
+    expect(view.querySelector('[data-testid="team-ai-model-chip"]')?.textContent).toBe(
+      "팀 AI · Claude Sonnet 4.5"
+    );
+  });
+
+  it("사람이 쓴 같은 표지에는 꼬리도 모델 칩도 없다", () => {
+    const view = row(TAIL, OTHER);
+    expect(view.textContent).toContain("다 끝냈어요.");
+    expect(view.querySelector('[data-testid="team-ai-reply-meta"]')).toBeNull();
+    expect(view.querySelector('[data-testid="team-ai-model-chip"]')).toBeNull();
+  });
+
+  it("에이전트가 쓴 실패 기록에는 「에이전트 실행 결과」 카드가 선다", () => {
+    const view = row(FAILED_TURN, HELPER);
+    expect(view.textContent).toContain("에이전트 실행 결과");
+  });
+
+  it("사람이 쓴 같은 표지에는 그 카드가 없고 본문만 남는다", () => {
+    const view = row(FAILED_TURN, OTHER);
+    expect(view.textContent).toContain("다 끝냈어요.");
+    expect(view.textContent).not.toContain("에이전트 실행 결과");
+  });
+});
+
 describe("도우미의 워크스페이스 설정 카드 (v2 H6-1)", () => {
   function mountAction(id: string): HTMLElement {
     const card = agentCardModel(
