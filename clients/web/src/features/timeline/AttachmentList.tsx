@@ -122,6 +122,15 @@ const CLIP_CLASS = "block max-w-full overflow-hidden image-corner press focus-vi
  */
 const RESERVED_FRAME_EXTRA = ["bg-surface-hover", "hover:bg-surface-raised"] as const;
 
+/**
+ * 도우미가 Hermes에 맡겨 받은 그림의 틀 (ADR-0201 증보 v4 P6·P8, #5375). 워커가 올린 그림에는 가로세로 요약이 없다(ADR-0151
+ * 증보 9 I9) — 크기를 모른 채 180 자리에서 서면 그림이 온 뒤 최대 320으로 자라 대화가 밀린다. 그래서 이 그림은 크기가 아니라
+ * **고정된 정사각 틀**에 선다: 받는 동안·온 뒤·못 불러온 뒤가 같은 틀(폭 = 보통 상자의 높이 320, 좁은 열에서는 열 폭)이고, 그림은
+ * 틀 안에 비율대로 들어간다(`object-contain`, 남는 곳은 틀의 중립 면). 비율은 명시 값이라 그림의 자연 비율이 이기지 않는다.
+ * 기억한 자연 크기(`naturalSizes`)도 이 틀을 바꾸지 않는다(다시 마운트돼도 같은 틀).
+ */
+const PICTURE_FRAME_FIT = ["aspect-square", "w-inline-image-h", "max-w-full", "h-auto"] as const;
+
 /** 이미지 위에 뜨는 행동 줄. 면 위에 얹으므로 사진 위에서도 읽힌다. */
 const OVERLAY_CLASS =
   "absolute right-2 top-2 flex items-center gap-1 rounded-md bg-surface shadow-sm";
@@ -140,10 +149,13 @@ function ImageTile({
   position,
   onOpen,
   registerSource,
+  pictureFrame = false,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
+  /** 고정 틀에 세운다(`PICTURE_FRAME_FIT`). 한 장일 때만 뜻이 있다. */
+  pictureFrame?: boolean;
   layout: "single" | "grid-2" | "grid-3";
   /** 여러 장일 때의 「n/N」. 같은 이름(「이미지」)의 버튼들이 서로 구별되게 한다. */
   position: string | null;
@@ -170,12 +182,16 @@ function ImageTile({
   // 칸을 정하는 크기: 잰 것(디코드했거나 기억한 것)이 먼저고, 없으면 보내는 기기의 선언이다. 선언은 상태에도 기억에도 넣지 않는다 —
   // 읽는 자리마다 다시 고르므로 그림이 오면 실제 크기가 이기고, 거짓 선언이 「잰 크기」로 남을 길이 없다(증보 9 I6).
   const declared = attachmentImageSizeOf(attachment);
-  const box = single ? inlineImageBox(natural ?? declared) : null;
+  // 고정 틀(맡겨 받은 그림)은 크기를 묻지 않는다: 오는 동안·온 뒤·못 불러온 뒤가 같은 틀이다.
+  const fixedFrame = single && pictureFrame;
+  const box = single && !fixedFrame ? inlineImageBox(natural ?? declared) : null;
   // 오는 동안(`waiting`)에도 크기를 아는 한 장이면 그림이 설 상자를 세운다. 못 불러온 경우는 읽을 수 있는 옛 틀로 돌아간다.
   const waiting = preview.status === "loading";
-  const reserved = single && box !== null && waiting;
+  const reserved = fixedFrame ? preview.status !== "ready" : single && box !== null && waiting;
   // 그림과 그 자리(`<canvas>`)가 같은 클래스를 쓴다: 자리를 세우는 상자와 그림이 서는 상자가 갈라질 길이 없다.
-  const pictureClass = single
+  const pictureClass = fixedFrame
+    ? cn("block image-corner object-contain", ...PICTURE_FRAME_FIT)
+    : single
     ? cn("block image-corner object-contain", ...(box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN))
     : "block size-full image-corner object-cover";
   const compact = isCompactImage(box);
@@ -208,7 +224,7 @@ function ImageTile({
         title={label}
         className={
           preview.status === "ready"
-            ? cn(CLIP_CLASS, !single && "size-full")
+            ? cn(CLIP_CLASS, !single && "size-full", ...(fixedFrame ? RESERVED_FRAME_EXTRA : []))
             : reserved
               ? cn(CLIP_CLASS, ...RESERVED_FRAME_EXTRA)
               : cn(PREVIEW_FRAME_CLASS, !single && "size-full")
@@ -231,13 +247,13 @@ function ImageTile({
             <canvas
               aria-hidden="true"
               data-testid="attachment-image-reserve"
-              width={box.width}
-              height={box.height}
+              width={box === null ? 1 : box.width}
+              height={box === null ? 1 : box.height}
               className={pictureClass}
             />
             {/* 글은 틀(`figure`, 이 칸의 `relative`) 위에 얹는다: 틀이 그림과 같은 크기라 같은 자리다. */}
             <span className="absolute inset-0 flex items-center justify-center px-2 text-meta text-ink-muted">
-              {ATTACH_COPY.previewLoading}
+              {waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed}
             </span>
           </>
         ) : (
@@ -292,12 +308,14 @@ function ImageGroup({
   images,
   onOpen,
   registerSource,
+  pictureFrame,
 }: {
   workspaceId: string;
   channelId: string;
   images: MessageAttachment[];
   onOpen: (attachmentId: string, opener: HTMLButtonElement) => void;
   registerSource: (id: string, node: HTMLImageElement | null) => void;
+  pictureFrame?: boolean;
 }) {
   const columns = imageGridColumns(images.length);
   const tiles = images.map((attachment, index) => (
@@ -308,6 +326,7 @@ function ImageGroup({
       attachment={attachment}
       layout={columns === 1 ? "single" : columns === 2 ? "grid-2" : "grid-3"}
       registerSource={registerSource}
+      pictureFrame={pictureFrame}
       position={images.length > 1 ? `${index + 1}/${images.length}` : null}
       onOpen={(opener) => onOpen(attachment.id, opener)}
     />
@@ -458,6 +477,7 @@ export function AttachmentList({
   muted,
   senderName,
   sentAtMs,
+  pictureFrame,
 }: {
   /** 첨부는 채널에 속한다. 프록시 주소가 그 사실 위에 서 있다. */
   channelId: string;
@@ -467,6 +487,11 @@ export function AttachmentList({
   senderName?: string;
   /** 같은 칩의 보낸 시각. 서버 시각이 아직 없는 echo 행은 넘기지 않는다. */
   sentAtMs?: number;
+  /**
+   * 한 장 그림을 고정 틀에 세운다(#5375): 도우미가 Hermes에 맡겨 받은 그림처럼 가로세로 요약이 없는 그림이 늦게 떠도
+   * 줄 높이가 바뀌지 않게. 판정은 행이 서버 소유 칩 칸으로 한다(`teamAiDelegatedAnswerOf`).
+   */
+  pictureFrame?: boolean;
 }) {
   // 워크스페이스는 셸이 이미 알고 있다. 타임라인 전체에 프롭으로 흘려보내는 대신
   // 여기서 읽는다 — `Composer` 가 같은 값을 같은 방법으로 읽는다.
@@ -500,6 +525,7 @@ export function AttachmentList({
               workspaceId={workspaceId}
               channelId={channelId}
               images={images}
+              pictureFrame={pictureFrame}
               registerSource={(id, node) => {
                 if (node) sources.current.set(id, node);
                 else sources.current.delete(id);

@@ -7403,6 +7403,12 @@ export const catalog: MessageCatalog = {
       "value": " 도움 · 검색"
     }
   ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
   "teamAi.delegation.reasonAmbiguous": [
     {
       "type": 0,
@@ -7461,6 +7467,20 @@ export const catalog: MessageCatalog = {
       "value": "tokens"
     }
   ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "크레딧 토큰 약 "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": "(일부는 oort가 어림한 값이에요)"
+    }
+  ],
   "teamAi.delegation.spentHermes": [
     {
       "type": 1,
@@ -7498,6 +7518,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이 답이 쓴 양"
+    }
+  ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
     }
   ],
   "teamAi.delegation.unavailable": [

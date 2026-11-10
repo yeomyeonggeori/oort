@@ -1088,6 +1088,7 @@ export const messageKeys = [
   "settings.profile.languageSystem",
   "teamAi.delegation.chipImage",
   "teamAi.delegation.chipSearch",
+  "teamAi.delegation.hermesFallbackName",
   "teamAi.delegation.reasonAmbiguous",
   "teamAi.delegation.reasonCeilingUnset",
   "teamAi.delegation.reasonConnectionMode",
@@ -1097,8 +1098,11 @@ export const messageKeys = [
   "teamAi.delegation.reasonToolsNotLocked",
   "teamAi.delegation.reasonUnknown",
   "teamAi.delegation.spentCredits",
+  "teamAi.delegation.spentCreditsEstimated",
   "teamAi.delegation.spentHermes",
   "teamAi.delegation.spentLabel",
+  "teamAi.delegation.spentLine",
+  "teamAi.delegation.spentLineWithHermes",
   "teamAi.delegation.unavailable",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
@@ -2660,6 +2664,7 @@ export const argumentSpecs = {
   "teamAi.delegation.chipSearch": {
     "name": "string"
   },
+  "teamAi.delegation.hermesFallbackName": {},
   "teamAi.delegation.reasonAmbiguous": {},
   "teamAi.delegation.reasonCeilingUnset": {},
   "teamAi.delegation.reasonConnectionMode": {},
@@ -2671,11 +2676,23 @@ export const argumentSpecs = {
   "teamAi.delegation.spentCredits": {
     "tokens": "string"
   },
+  "teamAi.delegation.spentCreditsEstimated": {
+    "tokens": "string"
+  },
   "teamAi.delegation.spentHermes": {
     "count": "number",
     "name": "string"
   },
   "teamAi.delegation.spentLabel": {},
+  "teamAi.delegation.spentLine": {
+    "credits": "string",
+    "label": "string"
+  },
+  "teamAi.delegation.spentLineWithHermes": {
+    "credits": "string",
+    "hermes": "string",
+    "label": "string"
+  },
   "teamAi.delegation.unavailable": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
@@ -4083,6 +4100,7 @@ export interface MessageArgs {
   "settings.profile.languageSystem": Record<string, never>;
   "teamAi.delegation.chipImage": { name: string };
   "teamAi.delegation.chipSearch": { name: string };
+  "teamAi.delegation.hermesFallbackName": Record<string, never>;
   "teamAi.delegation.reasonAmbiguous": Record<string, never>;
   "teamAi.delegation.reasonCeilingUnset": Record<string, never>;
   "teamAi.delegation.reasonConnectionMode": Record<string, never>;
@@ -4092,8 +4110,11 @@ export interface MessageArgs {
   "teamAi.delegation.reasonToolsNotLocked": Record<string, never>;
   "teamAi.delegation.reasonUnknown": Record<string, never>;
   "teamAi.delegation.spentCredits": { tokens: string };
+  "teamAi.delegation.spentCreditsEstimated": { tokens: string };
   "teamAi.delegation.spentHermes": { count: number; name: string };
   "teamAi.delegation.spentLabel": Record<string, never>;
+  "teamAi.delegation.spentLine": { credits: string; label: string };
+  "teamAi.delegation.spentLineWithHermes": { credits: string; hermes: string; label: string };
   "teamAi.delegation.unavailable": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;

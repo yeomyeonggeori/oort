@@ -7759,6 +7759,12 @@ export const catalog: MessageCatalog = {
       "value": " help · search"
     }
   ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
   "teamAi.delegation.reasonAmbiguous": [
     {
       "type": 0,
@@ -7817,6 +7823,20 @@ export const catalog: MessageCatalog = {
       "value": "tokens"
     }
   ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "Credit tokens about "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": " (partly estimated by oort)"
+    }
+  ],
   "teamAi.delegation.spentHermes": [
     {
       "type": 1,
@@ -7865,6 +7885,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "What this answer used"
+    }
+  ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
     }
   ],
   "teamAi.delegation.unavailable": [

@@ -14,6 +14,8 @@ import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
 import { AppNoticeLine, TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { TeamAiDelegationTail } from "./TeamAiDelegationTail";
+import { teamAiDelegatedAnswerOf } from "@momo/core/features/timeline/teamAiDelegationView";
 import { githubNoticeFor } from "@momo/core/features/github/model";
 import { GithubNoticeStrip } from "@/features/github/GithubNoticeStrip";
 import { useAppNotice, useAppsTailContext } from "./appsTail";
@@ -563,6 +565,8 @@ export function MessageRow({
     () => teamAiReplyMetaFor(message, appsTail, authorKind),
     [message, appsTail, authorKind]
   );
+  // Hermes에 맡겨 끝낸 답(서버 소유 칩 칸, ADR-0201 v4 P8 · #5375): 칩·쓴 양 줄·그림 자리. 칸이 없으면 null.
+  const delegatedAnswer = useMemo(() => teamAiDelegatedAnswerOf(message, authorKind), [message, authorKind]);
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message);
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
@@ -1165,7 +1169,8 @@ export function MessageRow({
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}
         {!deleted && githubNotice && <GithubNoticeStrip notice={githubNotice} />}
-        {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
+        {teamAiReply && delegatedAnswer === null && <TeamAiReplyMeta meta={teamAiReply} />}
+        {delegatedAnswer && <TeamAiDelegationTail meta={teamAiReply} answer={delegatedAnswer} directory={directory} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
             delegate={teamAiDelegate}
@@ -1188,6 +1193,7 @@ export function MessageRow({
             attachments={attachments}
             senderName={name}
             sentAtMs={message.createdAtMs}
+            pictureFrame={delegatedAnswer?.picture === true}
           />
         )}
         {!deleted && unfurls.length > 0 && (
