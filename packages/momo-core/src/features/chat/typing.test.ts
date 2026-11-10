@@ -18,6 +18,7 @@ import {
   typingLabel,
   typingLead,
   typingSegments,
+  typingNameCells,
   typingVisualSegments,
   typingSentence,
   typingTail,
@@ -862,3 +863,34 @@ describe("Esc keeps one meaning per open thing", () => {
    expect(text(["A", "B", "C", "D"])).toBe("A 외 3명 작성 중");
    expect(typingLabel(["A", "B", "C"])).toBe("3명이 작성 중");
  });
+
+describe("typingNameCells — 이름마다 한 칸 (#5582 R2-M1)", () => {
+  const cells = (names: string[]) =>
+    typingNameCells(typingLead(typingVisualSegments(names))).map((cell) => ({
+      text: cell.segments.map((segment) => segment.text).join(""),
+      name: cell.name,
+    }));
+
+  it("둘: 쉼표는 첫 이름 칸 안(함께 잘린다), 빈칸은 줄지 않는 칸, 둘째 이름은 자기 칸", () => {
+    expect(cells(["김민수", "이하늘"])).toEqual([
+      { text: "김민수,", name: true },
+      { text: " ", name: false },
+      { text: "이하늘", name: true },
+    ]);
+  });
+
+  it("셋부터: 이름 칸 하나 + 줄지 않는 「 외 N명」 칸 하나, 하나: 이름 칸 하나", () => {
+    expect(cells(["김민수", "이하늘", "박도윤"])).toEqual([
+      { text: "김민수", name: true },
+      { text: " 외 2명", name: false },
+    ]);
+    expect(cells(["김민수"])).toEqual([{ text: "김민수", name: true }]);
+  });
+
+  it("칸을 이어 붙이면 앞부분과 한 글자도 다르지 않다", () => {
+    for (const names of [["김민수", "이하늘"], ["김민수", "이하늘", "박도윤"], ["A"]]) {
+      const lead = typingLead(typingVisualSegments(names));
+      expect(cells(names).map((cell) => cell.text).join("")).toBe(lead.map((segment) => segment.text).join(""));
+    }
+  });
+});

@@ -13,6 +13,7 @@
 //
 // 사용: npm run build && node gates/gate-typing-jitter.mjs
 //   TYPING_JITTER_ENGINES=webkit,chromium  (기본 둘 다)
+//   TYPING_JITTER_VIEWPORTS=1280x800,900x700,390x844  (기본, 폰 폭 포함 #5582)
 //   TYPING_JITTER_OUT=<폴더>               프레임 기록 JSON을 남긴다
 //   TYPING_JITTER_MEASURE_ONLY=1           단정 없이 숫자만 찍는다(원인 실측용)
 
@@ -32,7 +33,8 @@ const engineNames = (process.env.TYPING_JITTER_ENGINES || "webkit,chromium")
   .filter(Boolean);
 const outDir = process.env.TYPING_JITTER_OUT || null;
 const measureOnly = process.env.TYPING_JITTER_MEASURE_ONLY === "1";
-const viewports = (process.env.TYPING_JITTER_VIEWPORTS || "1280x800,900x700")
+// 600 아래(폰 폭)도 기본으로 돈다(#5582, design-review R2-L4): 폰 폭은 「작성 중」 칸이 26이고 독 구조(위 경계선 · 폼 p-3)가 다르다.
+const viewports = (process.env.TYPING_JITTER_VIEWPORTS || "1280x800,900x700,390x844")
   .split(",")
   .map((pair) => {
     const [width, height] = pair.split("x").map(Number);
@@ -515,7 +517,16 @@ async function openDm(page) {
   await page.getByTestId("login-email").fill("jitter@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();
-  await page.locator(`[data-testid="channel-item"][data-channel-id="${dmChannelId}"]`).click();
+  const narrow = (page.viewportSize()?.width ?? 1280) < 600;
+  if (narrow) {
+    // 폰 폭에서는 사이드바가 서랍이라 채널 행이 화면 밖이다. 행이 가리키는 주소(`#/c/<id>`)로 똑같이 연다.
+    await page.locator(`[data-testid="channel-item"][data-channel-id="${dmChannelId}"]`).waitFor({ state: "attached" });
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, dmChannelId);
+  } else {
+    await page.locator(`[data-testid="channel-item"][data-channel-id="${dmChannelId}"]`).click();
+  }
   await page.getByTestId("composer-input").waitFor();
   await page.waitForFunction(() => window.__jitterReady("typing:"), undefined, { timeout: 15_000 });
   // 기록이 다 그려지고 목록이 바닥에 앉을 때까지.
@@ -592,9 +603,12 @@ async function runScenario(browser, engine, viewport) {
 
   // C. 둘 다 (owner 장면): 상대 표시가 켜지고 꺼지는 동안 한 줄 안에서 입력한다.
   await record("C 입력+표시", async () => {
+    // 이 장면은 **한 줄** 입력이다(높이 변화 0을 단정한다). 폰 폭(390)의 입력창은 한 줄에 한국어 스무 자 남짓이라 넓은 창의
+    // 초안이 두 줄로 접힌다 — 그것은 줄 늘기(D·E가 잰다)이지 흔들림이 아니다. 그래서 폰 폭은 한 줄에 드는 초안을 친다(#5582).
+    const narrow = viewport.width < 600;
     const typing = (async () => {
-      await typeText(page, "네 지금 확인해 볼게요 잠시만요 ");
-      await typeText(page, "staging 로그부터 봅니다");
+      await typeText(page, narrow ? "네 확인해 볼게요 " : "네 지금 확인해 볼게요 잠시만요 ");
+      await typeText(page, narrow ? "잠시만요" : "staging 로그부터 봅니다");
     })();
     const toggles = togglePeer(page, { cycles: 3 });
     await Promise.all([typing, toggles]);
