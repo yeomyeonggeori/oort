@@ -1,10 +1,10 @@
-import {describe, expect, it} from 'vitest';
+import {beforeAll, describe, expect, it} from 'vitest';
 import {
   anchorSeal, ceilings, checkSurface, compareSurface, compareWithBase, dirtyScannedFiles, extractDirectCopy,
   isProductSource, landLedger, messageKeys, raiseLedger, readLedger, scanSurface, serializeLedger, shrinkLedger,
   surfaceFiles, surfaceOf, validateLedger, type Ledger,
 } from './tooling/direct-copy.mjs';
-import {readRepoFile} from './tooling/direct-copy-ci-fixture.mjs';
+import {ANCHOR_SCENARIO_FILES, readRepoFile, runAnchorScenario, withTempTree} from './tooling/direct-copy-ci-fixture.mjs';
 
 const extract = (source: string, file = 'clients/web/src/NewScreen.tsx') => {
   const {ko, en, cat} = extractDirectCopy(file, source);
@@ -142,6 +142,13 @@ describe('direct UI copy extraction', () => {
     // JSX text is shown as written, so a key there is still counted.
     expect(en('<p>connection.card.offlineTitle</p>')).toBe(1);
   });
+
+  it('#5582 (carried over): a DOM setAttribute value is a call argument — aria-hidden "true" is no copy, Korean still is', () => {
+    // The old scanner counted the `"true"`, so a mirror textarea dodged it with `String(true)` (#5582 R2-N1).
+    expect(extract('mirror.setAttribute("aria-hidden", "true");')).toEqual({ko: 0, en: 0, cat: 0});
+    expect(extract('node.setAttributeNS(null, "role", "presentation");')).toEqual({ko: 0, en: 0, cat: 0});
+    expect(extract('node.setAttribute("title", "삭제");')).toEqual({ko: 1, en: 0, cat: 0});
+  });
 });
 
 describe('r2 H1 E1: a release-notes file of keys against the real en-US catalog', () => {
@@ -167,6 +174,55 @@ describe('r2 H1 E1: a release-notes file of keys against the real en-US catalog'
     const english = copied.replace('"releaseNotes.v0145.keptEmoticonsTitle"', '"Emoticons stay on your device"');
     expect(checkCoreWith(english).increases.join('\n')).toMatch(/v0_1_46\.ts: en 0 → 1/);
     expect(messageKeys()).toContain('releaseNotes.v0145.keptEmoticonsTitle');
+  });
+});
+
+describe('r3 M1: only the canonical en-US catalog files (directly in en-US/) hold message keys', () => {
+  const CATALOG = 'packages/momo-core/src/i18n/catalogs/en-US';
+  const SOURCE = 'packages/momo-core/src/features/sample/bypass.ts';
+  // The review's reproduction: three English sentences declared as "keys" in a JSON in a catalog subfolder.
+  const tree = (catalogFile: string) => ({
+    [`${CATALOG}/settings.json`]: '{"settings.page.title": "Settings page"}\n',
+    [`${CATALOG}/${catalogFile}`]: '{"Delete channel?": "", "Settings": "", "Really delete it": ""}\n',
+    [SOURCE]: 'export const copy = {title: "Delete channel?", label: "Settings", hint: "Really delete it"};\n',
+  });
+  const {ledger, seal} = sealed({});
+
+  it('a JSON in a catalog subfolder gives no keys: its strings stay English copy and `check core` is RED', () => {
+    withTempTree(tree('extra/bypass.json'), root => {
+      expect(messageKeys(root)).toEqual(['settings.page.title']);
+      expect(() => checkSurface('core', {root, ledger, seal})).toThrow(/bypass\.ts: en 0 → 3/);
+    });
+  });
+
+  it('control: the same strings in a canonical file are keys (that file\'s key shape is `generate.mjs --check`\'s job)', () => {
+    withTempTree(tree('zz.json'), root => {
+      expect([...messageKeys(root)].sort()).toEqual(['Delete channel?', 'Really delete it', 'Settings', 'settings.page.title']);
+      expect(checkSurface('core', {root, ledger, seal})).toEqual({});
+    });
+  });
+
+  it('a tree without the catalog folder has no keys rather than an error', () => {
+    withTempTree({[SOURCE]: 'export const copy = {};\n'}, root => expect(messageKeys(root)).toEqual([]));
+  });
+});
+
+describe('r3 L2 · M1: `anchor <commit>` counts with that commit\'s canonical catalog', () => {
+  const {committedKey, workingKey, subfolderKey} = ANCHOR_SCENARIO_FILES;
+  let scenario: ReturnType<typeof runAnchorScenario>;
+  beforeAll(() => { scenario = runAnchorScenario(); }, 60_000);
+
+  it('reads the commit\'s catalog, not the working copy\'s', () => {
+    expect(scenario.status, scenario.err).toBe(0);
+    expect(scenario.anchor, scenario.err).toBeDefined();
+    // The commit's key is a key there: no direct copy in that file (so the catalog was read at all).
+    expect(scenario.anchor?.[committedKey]).toBeUndefined();
+    // A key that only the uncommitted working catalog has is English copy at that commit.
+    expect(scenario.anchor?.[workingKey]).toEqual({ko: 0, en: 1});
+  });
+
+  it('ignores a JSON in a catalog subfolder of the commit', () => {
+    expect(scenario.anchor?.[subfolderKey]).toEqual({ko: 0, en: 1});
   });
 });
 

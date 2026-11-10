@@ -286,6 +286,8 @@ Allowed count per file = (`lowered` ?? `anchor`) + Σ `raises`, per dimension:
   en-US catalog is a message key, not copy, wherever it sits (`title: "releaseNotes.v0145.summary"` in a
   release-notes file, `offlineTitle: "connection.card.offlineTitle"` in a key map): the catalog decides
   by exact match, never the dotted shape, so `"momo.message"` or a key the catalog lacks still counts.
+  Only the feature files directly in `catalogs/en-US/` (the ones `generate.mjs` reads and holds to the key
+  shape) give keys; a JSON in a subfolder does not, so it cannot hide English copy.
   `anchor <commit>` reads that commit's catalog, so it gives the same seal from any checkout. Until
   #5589's fix rounds the clients counted any one-word literal (about 90% class names and state words) and
   the core counted its key maps (119 of 168 core `en`); a strict ratchet turns that noise into landing

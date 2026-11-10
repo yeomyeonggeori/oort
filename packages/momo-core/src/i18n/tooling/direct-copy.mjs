@@ -237,12 +237,21 @@ export function surfaceFiles(surface, root = ROOT) {
 }
 
 export const KEY_CATALOG_DIR = 'packages/momo-core/src/i18n/catalogs/en-US';
+/**
+ * A canonical en-US catalog file: a `*.json` directly in `KEY_CATALOG_DIR`, the files `generate.mjs`
+ * reads and holds to the `feature.surface.intent` key shape. A JSON in a subfolder is no catalog: its
+ * keys would hide English copy from the count while nothing checks their shape (#5589 r3 M1).
+ */
+const isKeyCatalog = file => file.startsWith(`${KEY_CATALOG_DIR}/`) && file.endsWith('.json')
+  && !file.slice(KEY_CATALOG_DIR.length + 1).includes('/');
 
 /** The en-US catalog's message keys in a working tree. */
 export function messageKeys(root = ROOT) {
-  return filesUnder(join(root, KEY_CATALOG_DIR))
-    .filter(file => file.endsWith('.json'))
-    .flatMap(file => Object.keys(JSON.parse(readFileSync(file, 'utf8'))));
+  const dir = join(root, KEY_CATALOG_DIR);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, {withFileTypes: true})
+    .filter(entry => entry.isFile() && isKeyCatalog(`${KEY_CATALOG_DIR}/${entry.name}`))
+    .flatMap(entry => Object.keys(JSON.parse(readFileSync(join(dir, entry.name), 'utf8'))));
 }
 
 /**
@@ -562,7 +571,7 @@ function scanCommit(commit) {
   const roots = Object.values(SURFACES).flatMap(spec => [...spec.roots, ...spec.files]);
   const listed = git(['ls-tree', '-r', '--name-only', commit, '--', ...roots]).trim().split('\n').filter(Boolean);
   const files = listed.filter(file => isProductSource(file) && surfaceOf(file));
-  const catalogs = listed.filter(file => file.startsWith(`${KEY_CATALOG_DIR}/`) && file.endsWith('.json'));
+  const catalogs = listed.filter(isKeyCatalog);
   const wanted = [...files, ...catalogs];
   const output = execFileSync('git', ['cat-file', '--batch'], {
     cwd: ROOT, input: wanted.map(file => `${commit}:${file}\n`).join(''), maxBuffer: 512 * 1024 * 1024,

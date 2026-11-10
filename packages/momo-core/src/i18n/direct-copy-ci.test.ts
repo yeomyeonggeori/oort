@@ -44,6 +44,12 @@ describe('PR CI ledger step compares with the merge ref base (#5589 r2 M1)', () 
     expect(reanchorLabelled.status).toBe(0);
   });
 
+  it('runs after a red earlier step, but not after a cancel (r2 L-b; the `if:` as written, #5589 r3 L1)', () => {
+    // An `if:` without a status function means `success() && …` to GitHub: without `!cancelled()` the step
+    // would skip whenever vitest is red, and the raise summary would vanish when it is needed most.
+    expect(workflowLedgerStep().if).toBe("${{ !cancelled() && github.event_name == 'pull_request' }}");
+  });
+
   it('keeps the token away from node and takes no base from the event (r2 L-c, M1)', () => {
     const {script, env} = workflowLedgerStep();
     expect(script).toMatch(/env -u GH_TOKEN node "\$tool" check/);

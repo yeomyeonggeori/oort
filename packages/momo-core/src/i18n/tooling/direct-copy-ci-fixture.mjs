@@ -1,4 +1,5 @@
-// Node-only test fixture for `direct-copy-ci.test.ts` (#5589 r2 M1); not part of the runtime exports.
+// Node-only test fixture for `direct-copy-ci.test.ts` (#5589 r2 M1) and the tree/commit scans of
+// `direct-copy.test.ts` (#5589 r3); not part of the runtime exports.
 //
 // Runs the real "직접 문구 장부" step of `.github/workflows/pr-ci.yml` in a throwaway repository, on a
 // shallow checkout of a PR merge ref (as actions/checkout makes it), with GitHub's expressions filled in
@@ -53,7 +54,90 @@ export function workflowLedgerStep(workflow = readRepoFile('.github/workflows/pr
   }
   const run = at('run');
   if (run < 0 || !/run:\s*\|\s*$/.test(body[run])) throw new Error('pr-ci.yml: the ledger step needs a `run: |` block');
-  return {env, script: block(run).map(line => line.slice(keyIndent + 2)).join('\n')};
+  // The step's `if:` as written (undefined when it has none, which GitHub reads as `success()`).
+  const condition = at('if') >= 0 ? body[at('if')].trimStart().slice('if:'.length).trim() : undefined;
+  return {env, script: block(run).map(line => line.slice(keyIndent + 2)).join('\n'), if: condition};
+}
+
+/** A git environment that never reads the developer's config, hooks or signing setup. */
+function isolatedGit(work) {
+  writeFileSync(join(work, 'gitconfig'), '[init]\n\tdefaultBranch = track\n[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n');
+  const env = {
+    PATH: process.env.PATH ?? '', HOME: work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(work, 'gitconfig'),
+    GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+  };
+  return {env, git: (cwd, ...args) => execFileSync('git', args, {cwd, env, encoding: 'utf8'}).trim()};
+}
+
+function writeFiles(root, files) {
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, file)), {recursive: true});
+    writeFileSync(join(root, file), text);
+  }
+}
+
+/** The directory that holds `typescript`, wherever this checkout resolves it from. */
+const typescriptModules = () => dirname(dirname(createRequire(import.meta.url).resolve('typescript/package.json')));
+
+/** Writes `files` (repo-relative path → text) under a throwaway root, runs `fn(root)` and removes the root. */
+export function withTempTree(files, fn) {
+  const root = mkdtempSync(join(tmpdir(), 'oort-direct-copy-tree-'));
+  try {
+    writeFiles(root, files);
+    return fn(root);
+  } finally {
+    rmSync(root, {recursive: true, force: true});
+  }
+}
+
+const SAMPLE = 'packages/momo-core/src/features/sample';
+const CATALOG = 'packages/momo-core/src/i18n/catalogs/en-US';
+/** The files `runAnchorScenario` scans: one per question, so each count answers one thing. */
+export const ANCHOR_SCENARIO_FILES = Object.freeze({
+  committedKey: `${SAMPLE}/committedKey.ts`,
+  workingKey: `${SAMPLE}/workingKey.ts`,
+  subfolderKey: `${SAMPLE}/subfolderKey.ts`,
+});
+
+/**
+ * `anchor <commit>` in a throwaway repository with the real tool (#5589 r3 L2, M1). The commit's
+ * catalog has `sample.card.title`, and a subfolder JSON (`en-US/extra/`) has "Delete channel?". The
+ * working copy's catalog is then rewritten (not committed) to hold only `sample.card.subtitle`. The
+ * anchor must count with the commit's canonical catalog: `committedKey.ts` (the commit's key) absent,
+ * `workingKey.ts` (a key only the working copy has) en 1, `subfolderKey.ts` (a subfolder "key") en 1.
+ */
+export function runAnchorScenario() {
+  const work = mkdtempSync(join(tmpdir(), 'oort-direct-copy-anchor-'));
+  try {
+    const {env, git} = isolatedGit(work);
+    const repo = join(work, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q');
+    const {committedKey, workingKey, subfolderKey} = ANCHOR_SCENARIO_FILES;
+    writeFiles(repo, {
+      [TOOL_PATH]: readRepoFile(TOOL_PATH),
+      [`${CATALOG}/sample.json`]: '{"sample.card.title": "Title"}\n',
+      [`${CATALOG}/extra/bypass.json`]: '{"Delete channel?": ""}\n',
+      [committedKey]: 'export const copy = {title: "sample.card.title"};\n',
+      [workingKey]: 'export const copy = {title: "sample.card.subtitle"};\n',
+      [subfolderKey]: 'export const copy = {title: "Delete channel?"};\n',
+    });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'c1: catalog and sources');
+    const commit = git(repo, 'rev-parse', 'HEAD');
+    // The working copy disagrees with the commit: a scan that reads it instead gets other counts.
+    writeFiles(repo, {[`${CATALOG}/sample.json`]: '{"sample.card.subtitle": "Subtitle"}\n'});
+    symlinkSync(typescriptModules(), join(repo, 'node_modules'));
+    // A relative path, as the workflow runs it: the tool's main() compares argv[1] with its own real path,
+    // and an absolute path under a symlinked temp folder (macOS `/var` → `/private/var`) would not match.
+    const result = spawnSync(process.execPath, [TOOL_PATH, 'anchor', commit], {cwd: repo, encoding: 'utf8', timeout: 60_000, env});
+    let anchor;
+    try { anchor = JSON.parse(result.stdout).anchor; } catch { anchor = undefined; }
+    return {status: result.status, anchor, commit, err: result.stderr ?? ''};
+  } finally {
+    rmSync(work, {recursive: true, force: true});
+  }
 }
 
 const A = 'clients/web/src/A.tsx';
@@ -68,14 +152,8 @@ export function runLedgerStepScenario({workflow} = {}) {
   const step = workflowLedgerStep(workflow);
   const work = mkdtempSync(join(tmpdir(), 'oort-direct-copy-ci-'));
   try {
-    writeFileSync(join(work, 'gitconfig'), '[init]\n\tdefaultBranch = track\n[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n');
     // Never the developer's git: no inherited GIT_DIR, hooks, signing or global config.
-    const gitEnv = {
-      PATH: process.env.PATH ?? '', HOME: work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(work, 'gitconfig'),
-      GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
-      GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
-    };
-    const git = (cwd, ...args) => execFileSync('git', args, {cwd, env: gitEnv, encoding: 'utf8'}).trim();
+    const {env: gitEnv, git} = isolatedGit(work);
     const realTool = readRepoFile(TOOL_PATH);
     const sealed = (anchorHead, anchor, raises = []) => {
       const ledger = {version: 2, anchorHead, anchor, lowered: {}, raises};
@@ -84,12 +162,7 @@ export function runLedgerStepScenario({workflow} = {}) {
       if (tool === realTool) throw new Error('could not place the fixture seal in direct-copy.mjs');
       return {[TOOL_PATH]: tool, [LEDGER_PATH]: serializeLedger(ledger)};
     };
-    const write = (repo, files) => {
-      for (const [file, text] of Object.entries(files)) {
-        mkdirSync(dirname(join(repo, file)), {recursive: true});
-        writeFileSync(join(repo, file), text);
-      }
-    };
+    const write = writeFiles;
 
     const origin = join(work, 'origin');
     mkdirSync(origin);
@@ -154,8 +227,7 @@ export function runLedgerStepScenario({workflow} = {}) {
     writeFileSync(join(bin, 'gh'), '#!/bin/sh\n[ -n "$FAKE_LABELS" ] && printf \'%s\\n\' "$FAKE_LABELS"\nexit 0\n');
     chmodSync(join(bin, 'gh'), 0o755);
 
-    // The directory that holds `typescript`, wherever this checkout resolves it from.
-    const modules = dirname(dirname(createRequire(import.meta.url).resolve('typescript/package.json')));
+    const modules = typescriptModules();
     const run = (name, labels = '') => {
       const ci = join(work, `ci-${name}-${labels ? 'labelled' : 'none'}`);
       mkdirSync(ci);
