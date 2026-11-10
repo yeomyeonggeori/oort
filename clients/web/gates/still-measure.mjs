@@ -217,6 +217,7 @@ export async function startStillRecorder(page, spec) {
     R.gen += 1;
     const gen = R.gen;
     R.frames = [];
+    R.intermediate = 0;
     R.pillMounts = 0;
     R.scrolls = 0;
     R.on = true;
@@ -242,6 +243,13 @@ export async function startStillRecorder(page, spec) {
       }
     });
     mo.observe(document.body, { childList: true, subtree: true });
+    // 그려진 모양만 센다(expression-jitter 와 같은 규칙): 이 프레임의 rAF 뒤로 DOM 이 바뀌었으면 그 표본은 아직 그려지지 않은 중간
+    // 상태다(다음 그리기 전에 ResizeObserver 가 바로잡을 수 있다). 그런 표본은 세기만 한다(`intermediate`).
+    let dirty = false;
+    const dirtyWatch = new MutationObserver(() => {
+      dirty = true;
+    });
+    dirtyWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     let watchedScroller = null;
     const onScroll = () => {
       if (live()) R.scrolls += 1;
@@ -250,6 +258,10 @@ export async function startStillRecorder(page, spec) {
     const channel = new MessageChannel();
     channel.port1.onmessage = () => {
       if (!live()) return;
+      if (dirty) {
+        R.intermediate += 1;
+        return;
+      }
       const scroller = scrollerNow();
       if (scroller !== watchedScroller) {
         watchedScroller?.removeEventListener("scroll", onScroll);
@@ -275,8 +287,10 @@ export async function startStillRecorder(page, spec) {
       if (!live()) {
         watchedScroller?.removeEventListener("scroll", onScroll);
         mo.disconnect();
+        dirtyWatch.disconnect();
         return;
       }
+      dirty = false;
       channel.port2.postMessage(0);
       requestAnimationFrame(tick);
     };
@@ -289,7 +303,7 @@ export async function stopStillRecorder(page) {
   return page.evaluate(() => {
     const R = window.__still;
     R.on = false;
-    return { frames: R.frames, pillMounts: R.pillMounts, pillAtStart: R.pillAtStart, scrolls: R.scrolls };
+    return { frames: R.frames, intermediate: R.intermediate, pillMounts: R.pillMounts, pillAtStart: R.pillAtStart, scrolls: R.scrolls };
   });
 }
 
@@ -301,7 +315,9 @@ export async function stopStillRecorder(page) {
  */
 export async function installEntryRecorder(page, spec) {
   await page.addInitScript((spec) => {
-    const E = (window.__stillEntry = { frames: [], done: false, pillMounts: 0, startedAt: null });
+    const E = (window.__stillEntry = { frames: [], done: false, pillMounts: 0, startedAt: null, intermediate: 0 });
+    let dirty = false;
+    let dirtyWatch = null;
     const round = (value) => Math.round(value * 100) / 100;
     const rowOf = (scroller) => {
       const node = scroller.querySelector(`[data-message-id="${spec.messageId}"]`);
@@ -309,6 +325,11 @@ export async function installEntryRecorder(page, spec) {
     };
     let mo = null;
     const sample = () => {
+      // 그려지지 않은 중간 상태는 세기만 한다(startStillRecorder 와 같은 규칙).
+      if (dirty) {
+        if (E.startedAt !== null) E.intermediate += 1;
+        return;
+      }
       const scroller = document.querySelector(spec.scroller);
       const rows = scroller ? scroller.querySelectorAll("[data-index]").length : 0;
       if (E.startedAt === null) {
@@ -328,6 +349,7 @@ export async function installEntryRecorder(page, spec) {
       if (t > spec.windowMs) {
         E.done = true;
         mo?.disconnect();
+        dirtyWatch?.disconnect();
         return;
       }
       const row = scroller ? rowOf(scroller) : null;
@@ -356,6 +378,13 @@ export async function installEntryRecorder(page, spec) {
     channel.port1.onmessage = sample;
     const tick = () => {
       if (E.done) return;
+      if (dirtyWatch === null && document.body) {
+        dirtyWatch = new MutationObserver(() => {
+          dirty = true;
+        });
+        dirtyWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+      }
+      dirty = false;
       channel.port2.postMessage(0);
       requestAnimationFrame(tick);
     };
@@ -366,7 +395,12 @@ export async function installEntryRecorder(page, spec) {
 /** 진입 기록이 끝날 때까지 기다려 돌려준다. */
 export async function readEntryRecord(page, timeoutMs = 20_000) {
   await page.waitForFunction(() => window.__stillEntry?.done === true, null, { timeout: timeoutMs });
-  return page.evaluate(() => ({ frames: window.__stillEntry.frames, pillMounts: window.__stillEntry.pillMounts, pillAtStart: false }));
+  return page.evaluate(() => ({
+    frames: window.__stillEntry.frames,
+    intermediate: window.__stillEntry.intermediate,
+    pillMounts: window.__stillEntry.pillMounts,
+    pillAtStart: false,
+  }));
 }
 
 /** 모은 프레임에서 한 줄의 숫자 넷. */

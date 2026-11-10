@@ -96,7 +96,55 @@ const TYPING_VIEWPORTS = { 1280: "1280x800", 900: "900x700", 390: "390x844" };
  * 알려진 실패: 지금 코드에서 실패하고 수리는 다른 칸에 있는 장면. 키는 `장면|엔진|폭`(엔진 · 폭은 `*` 가능).
  * 이 표에 있으면 숫자와 함께 「알려진 실패」로 적고 판정에서 뺀다. 고쳐지면 「알려진 실패 → 통과」로 적는다(목록에서 지울 때).
  */
-const KNOWN_FAILURES = new Map([]);
+const KNOWN_FAILURE_LIST = [
+  // 2026-11-10 실측(이 맥, Playwright WebKit 26.5 · Chromium 149, 칸마다 부하 기록). 수리는 다른 칸이다(인계 맨 위).
+  {
+    key: "older|*|*",
+    issue: "위로 더 불러오기: 옛 쪽이 붙은 뒤 보던 줄이 3.9~5.3px 밀림(WebKit 390 만 0.4~0.9px)",
+    maxUnexplainedPx: 6,
+    maxReversals: 0,
+  },
+  {
+    key: "entry-card|chromium|*",
+    issue: "진입 중 링크 카드가 0.7초 늦게 서면 Chromium 에서 마지막 줄 4.75px",
+    maxUnexplainedPx: 5,
+    maxReversals: 0,
+    maxMissingFrames: 0,
+  },
+  {
+    key: "entry-card|chromium|390",
+    issue: "폰 폭 Chromium 진입: 첫 그림 한 프레임이 맨 위(scrollTop 0) + 늦은 카드",
+    maxUnexplainedPx: 5,
+    maxReversals: 0,
+    maxMissingFrames: 2,
+    maxPill: 1,
+  },
+  {
+    key: "entry|chromium|390",
+    issue: "폰 폭 Chromium 진입: 첫 그림 한 프레임이 맨 위(scrollTop 0), 필이 한 번 설 수 있음",
+    maxUnexplainedPx: 1,
+    maxReversals: 0,
+    maxMissingFrames: 2,
+    maxPill: 1,
+  },
+  {
+    key: "reaction-bottom-added|webkit|*",
+    issue: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px(1280 · 900)",
+    maxUnexplainedPx: 2,
+    maxReversals: 0,
+    maxGapPx: 1,
+    maxPill: 0,
+  },
+  {
+    key: "reaction-bottom-removed|webkit|*",
+    issue: "WebKit 맨 아래 반응 제거: 바닥 거리 2px(1280 · 900)",
+    maxUnexplainedPx: 1,
+    maxReversals: 0,
+    maxGapPx: 2,
+    maxPill: 0,
+  },
+];
+const KNOWN_FAILURES = new Map(KNOWN_FAILURE_LIST.map((entry) => [entry.key, entry]));
 
 function knownFailure(scene, engine, width) {
   for (const key of [`${scene}|${engine}|${width}`, `${scene}|${engine}|*`, `${scene}|*|${width}`, `${scene}|*|*`]) {
@@ -105,10 +153,27 @@ function knownFailure(scene, engine, width) {
   return null;
 }
 
+/**
+ * 알려진 실패의 테두리 안인가: 잰 숫자가 적어 둔 상한을 넘지 않을 때만 「알려진 실패」다. 넘거나 줄이 사라졌으면(사보타주 · 새 회귀) 실패다.
+ * 상한이 없는 항목은 테두리가 없다는 뜻이 아니라 그 숫자를 보지 않는다는 뜻이다(진입의 「가장 새 줄 없는 프레임」은 `maxMissingFrames`).
+ */
+function withinKnown(known, numbers, extra = {}) {
+  if (numbers === null || numbers.vanishedFrames > 0) return false;
+  if (known.maxUnexplainedPx !== undefined && (numbers.unexplainedPx ?? Infinity) > known.maxUnexplainedPx) return false;
+  if (known.maxReversals !== undefined && (numbers.reversals ?? Infinity) > known.maxReversals) return false;
+  if (known.maxGapPx !== undefined && (numbers.maxGapPx ?? Infinity) > known.maxGapPx) return false;
+  if (known.maxMissingFrames !== undefined && (extra.missing ?? 0) > known.maxMissingFrames) return false;
+  if (known.maxPill !== undefined && (numbers.pillShows ?? 0) > known.maxPill) return false;
+  return true;
+}
+
 // ---------------------------------------------------------------------------------------------- 대화 픽스처
 
-/** 옛 줄 60개 + expression-jitter 의 62줄(첫 쪽 50줄 · 위로 두 쪽 더). */
-const OLDER = 60;
+/**
+ * 옛 줄 300개 + expression-jitter 의 62줄(첫 쪽 50줄 · 위로 일곱 쪽 더). 진입 때 가상 목록이 맨 위 줄을 한 번 그리며 옛 쪽을 스스로
+ * 부르는 일이 있어(실측: 진입 첫 프레임 scrollTop 0), 위로 더 불러오기 장면에 늘 다음 쪽이 남게 넉넉히 둔다.
+ */
+const OLDER = 300;
 const LAST = BODIES.length - 1;
 const ANCHOR_INDEX = BODIES.indexOf(ANCHOR_TEXT);
 /** 진입 장면에서 카드가 늦게 오는 줄(맨 아래 쪽). */
@@ -162,13 +227,21 @@ function pushCell(cell) {
   cells.push({ known: null, note: "", ...cell, numbers });
 }
 
-/** 새 장면 한 칸: 부하를 보고, 재고, 숫자 넷과 판정을 적는다. */
-async function measureCell(meta, run) {
+/** 마지막으로 잰 창의 프레임(실패 칸의 흔적으로 남긴다). */
+let lastRecord = null;
+
+/**
+ * 새 장면 한 칸: 부하를 보고, 재고, 숫자 넷과 판정을 적는다. 부하로 재지 않으면 `onSkip` 으로 장면의 손만 쓴다(뒤 장면이 기대는 상태 —
+ * 반응 제거는 반응 추가가 붙인 것을 뗀다).
+ */
+async function measureCell(meta, run, { onSkip = null } = {}) {
   const gate = await loadGate();
   if (!gate.ok) {
     pushCell({ ...meta, verdict: "재지 않음", loadBefore: gate.load, loadAfter: null, numbers: null, note: `부하 ${gate.load} > ${loadMax}` });
+    if (onSkip) await onSkip().catch(() => {});
     return;
   }
+  lastRecord = null;
   let result;
   try {
     result = await run();
@@ -179,7 +252,8 @@ async function measureCell(meta, run) {
   let verdict = result.verdict.verdict;
   const known = knownFailure(meta.sceneKey, meta.engine, meta.width);
   if (meta.recordOnly && verdict !== "장면 못 만듦") verdict = `기록만(${verdict})`;
-  else if (known !== null && verdict === "FAIL") verdict = "알려진 실패";
+  else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, result.extra)) verdict = "알려진 실패";
+  else if (known !== null && verdict === "FAIL") result.verdict.reasons.push(`알려진 실패의 테두리(${known.issue}) 밖`);
   pushCell({
     ...meta,
     verdict,
@@ -188,7 +262,12 @@ async function measureCell(meta, run) {
     loadBefore: gate.load,
     loadAfter,
     known,
-    note: [result.note, loadAfter > loadMax ? `재는 동안 부하가 올랐다(${loadAfter})` : ""].filter(Boolean).join(" · "),
+    note: [result.note, lastRecord?.intermediate ? `중간 표본 ${lastRecord.intermediate}` : "", loadAfter > loadMax ? `재는 동안 부하가 올랐다(${loadAfter})` : ""]
+      .filter(Boolean)
+      .join(" · "),
+    // 실패 칸의 흔적(수리 칸이 볼 프레임): 판정이 PASS 가 아니면 남긴다(JSON 에만).
+    trace: verdict === "PASS" || lastRecord === null ? undefined : lastRecord.frames.map((frame) => [frame.t, frame.watch?.w ?? frame.watch?.last ?? null, frame.top, frame.gap]),
+    intermediate: lastRecord?.intermediate ?? null,
   });
 }
 
@@ -218,6 +297,7 @@ async function entryScene(browser, engine, vp, { withCard }) {
     });
     await openDm(page, backend, origin, { settle: false });
     const record = await readEntryRecord(page);
+    lastRecord = record;
     const numbers = numbersFromRecord(record, { watch: "last" });
     const missingFrames = record.frames.filter((frame) => frame.watch.last === null);
     const missing = missingFrames.length;
@@ -234,7 +314,12 @@ async function entryScene(browser, engine, vp, { withCard }) {
       }
     }
     if (process.env.TIMELINE_STILL_DEBUG === "1") console.log(JSON.stringify(record.frames.slice(0, 60).map((f) => [f.t, f.rows, f.top, f.gap, f.topId?.slice(-4), f.visible, f.watch.last])));
-    return { numbers, verdict, note: `표본 ${record.frames.length}프레임 · 줄 없는 프레임 ${missing}` };
+    return {
+      numbers,
+      verdict,
+      extra: { missing },
+      note: `표본 ${record.frames.length}프레임(그려지지 않은 중간 표본 ${record.intermediate}) · 줄 없는 프레임 ${missing} · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
+    };
   } finally {
     await context.close();
   }
@@ -247,6 +332,7 @@ async function recordWindow(page, watch, body, settleMs = 1_500) {
   await body();
   await wait(settleMs);
   const record = await stopStillRecorder(page);
+  lastRecord = record;
   if (process.env.TIMELINE_STILL_DEBUG === "1") {
     // 움직인 프레임만 줄여 찍는다(원인 실측용).
     const moved = record.frames.filter((frame, i, all) => i === 0 || frame.watch.w !== all[i - 1].watch.w || frame.sh !== all[i - 1].sh || frame.top !== all[i - 1].top);
@@ -312,6 +398,10 @@ async function contentScenes(browser, engine, vp, recordOnly) {
     }
     if (sceneNames.includes("reaction")) {
       for (const action of ["added", "removed"]) {
+        const onSkip = async () => {
+          backend.reaction(action, last, "👍");
+          await wait(1_200);
+        };
         await measureCell(meta(`reaction-bottom-${action}`, `반응 ${action === "added" ? "추가" : "제거"} — 맨 아래`, { kind: "bottom" }), async () => {
           const before = await heightOf(page, last.id);
           const record = await recordWindow(page, lastWatch, async () => backend.reaction(action, last, "👍"), 1_200);
@@ -321,7 +411,7 @@ async function contentScenes(browser, engine, vp, recordOnly) {
           const made = action === "added" ? chips > 0 && after > before : chips === 0 && after < before;
           if (!made) return { numbers, verdict: { verdict: "장면 못 만듦", reasons: [`반응 칩 ${chips} · 줄 ${before}→${after}`] } };
           return { numbers, verdict: judgeCell(numbers, { kind: "bottom" }), note: `줄 ${before}→${after}px` };
-        });
+        }, { onSkip });
       }
     }
 
@@ -355,6 +445,10 @@ async function contentScenes(browser, engine, vp, recordOnly) {
         const targetId = await rowAboveViewport(page, candidates);
         const target = rows.find((row) => row.id === targetId) ?? null;
         for (const action of ["added", "removed"]) {
+          const onSkip = async () => {
+            if (target !== null) backend.reaction(action, target, "👍");
+            await wait(1_200);
+          };
           await measureCell(meta(`reaction-up-${action}`, `반응 ${action === "added" ? "추가" : "제거"} — 위 읽기`, { kind: "reading" }), async () => {
             if (target === null) return { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: ["화면 위 밖에 붙은 줄이 없다"] } };
             const before = await heightOf(page, target.id);
@@ -364,7 +458,7 @@ async function contentScenes(browser, engine, vp, recordOnly) {
             const made = after !== null && before !== null && (action === "added" ? after > before : after < before);
             if (!made) return { numbers, verdict: { verdict: "장면 못 만듦", reasons: [`위쪽 줄 ${before}→${after}`] } };
             return { numbers, verdict: judgeCell(numbers, { kind: "reading" }), note: `위쪽 줄 ${before}→${after}px` };
-          });
+          }, { onSkip });
         }
       }
     }
@@ -376,6 +470,18 @@ async function contentScenes(browser, engine, vp, recordOnly) {
         await page.evaluate((selector) => {
           document.querySelector(selector).scrollTop = 0;
         }, scrollerSelector);
+        // 맨 위에 닿아도 가상 목록이 옛 쪽을 부르지 않을 때가 있다(실측: WebKit 1280 에서 읽기 0). 조금 내렸다 다시 올려 범위를 바꾼다(최대 세 번).
+        for (let nudge = 0; nudge < 3 && backend.state.olderReads === readsBefore; nudge += 1) {
+          await wait(700);
+          if (backend.state.olderReads !== readsBefore) break;
+          await page.evaluate((selector) => {
+            const scroller = document.querySelector(selector);
+            scroller.scrollTop = 40;
+            requestAnimationFrame(() => {
+              scroller.scrollTop = 0;
+            });
+          }, scrollerSelector);
+        }
         await wait(300);
         const watchId = await page.evaluate((selector) => {
           const scroller = document.querySelector(selector);
@@ -483,7 +589,7 @@ const failLinesOf = (run) => run.stderr.split("\n").filter((line) => line.starts
 
 /** 기존 게이트의 칸 판정: 그 게이트의 FAIL 줄 가운데 이 칸의 위치(`where`)로 시작하는 것이 있으면 FAIL. */
 function legacyVerdict(run, where) {
-  const hits = failLinesOf(run).filter((line) => line.slice(5).startsWith(where));
+  const hits = failLinesOf(run).filter((line) => line.slice(5).startsWith(`${where}:`));
   return hits.length ? { verdict: "FAIL", reasons: hits.map((line) => line.slice(5)) } : { verdict: "PASS", reasons: [] };
 }
 

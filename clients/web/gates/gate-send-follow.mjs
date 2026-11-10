@@ -692,7 +692,9 @@ function summarize(samples) {
     }
   }
   const motion = motionOf(tops);
+  const heightSeq = seq.filter((value, i) => i === 0 || value !== seq[i - 1]);
   return {
+    heightSeq,
     travel: motion === null ? null : Math.round(motion.range * 10) / 10,
     net: motion?.net ?? null,
     gapBefore: gapBefore === null ? null : Math.round(gapBefore * 100) / 100,
@@ -750,19 +752,39 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
   const seam = proveRed === "bounce" && !rapid && !boundary ? "bounce" : proveRed === "rapid-shift" && rapid && !recordOnly ? "rapid-shift" : null;
   let result;
   let edgeAt = null;
-  if (rapid) {
-    // 연달아 두 번: 첫 응답이 오기 전에 둘째를 보낸다. 위 줄은 화면에 있던 마지막 남의 말이다.
-    const input = page.getByTestId("composer-input");
-    await input.click();
-    await input.fill(first);
-    if (edge === "minute") edgeAt = serverSecondTarget(0, 0);
+  const prior = `${name} 그 전 글입니다.`;
+  if (rapid && edge !== null) {
+    // ⑦ (#5637 재확인 검수 L8): 내 그 전 글(같은 분)이 확정된 뒤, 경계 2초 · 1.5초 전에 연달아 둘(앞 글 A · 둘째 B)을 보낸다. 서버는
+    // 2.1초 뒤 찍어 둘 다 다음 분(자정이면 다음 날)이다. A 의 응답이 알려 주는 차이(+1.05초)를 더해도 B 메아리는 경계 0.45초 전(앞 분)이다 —
+    // 검수가 코어 탐침으로 본 판(A 10:47:58.0 · B 10:47:59.0 → 서버 10:48:00.1 · 00.3)과 같은 모양.
+    if (edge === "minute") edgeAt = serverSecondTarget(0, 0) + 60_000;
     if (edge === "midnight") {
       const midnight = new Date(gateNow());
       midnight.setHours(24, 0, 0, 0);
       edgeAt = midnight.getTime();
     }
-    // 분 경계 · 자정 0.6초 전에 앞 글, 0.25초 뒤에 둘째. 아니면 서버 분의 10초에서 시작한다(분이 바뀌지 않는다).
-    await setGateClock(page, edgeAt === null ? serverSecondTarget(10, skewMs) : edgeAt - 600);
+    backendClock.postDelayMs = 150;
+    await setGateClock(page, edgeAt - 20_000);
+    await send(page, "composer-input", prior);
+    await waitConfirmed(page, prior);
+    backendClock.postDelayMs = 2_100;
+    const input = page.getByTestId("composer-input");
+    await input.click();
+    await input.fill(first);
+    await setGateClock(page, edgeAt - 2_000);
+    await startSampler(page, { aboveText: prior, sentText: second, firstText: first, seam });
+    await input.press("Enter");
+    await wait(500);
+    await send(page, "composer-input", second);
+    await waitConfirmed(page, first);
+    await waitConfirmed(page, second);
+    result = summarize(await stopSampler(page));
+  } else if (rapid) {
+    // 연달아 두 번: 첫 응답이 오기 전에 둘째를 보낸다. 위 줄은 화면에 있던 마지막 남의 말이다. 서버 분의 10초에서 시작한다(분이 바뀌지 않는다).
+    const input = page.getByTestId("composer-input");
+    await input.click();
+    await input.fill(first);
+    await setGateClock(page, serverSecondTarget(10, skewMs));
     await startSampler(page, { aboveText: "같은 52분의 둘째 말입니다.", sentText: second, firstText: first, seam });
     await input.press("Enter");
     await wait(250);
@@ -823,9 +845,19 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
   };
   const failures = [];
   if (recordOnly) {
-    const rel = (stamp) => (stamp === null || edgeAt === null ? "?" : `${((stamp.arrivedAt - edgeAt) / 1000).toFixed(2)}초`);
-    record.record = `둘째 줄 높이 바뀜 ${result.heightChanges}번 · ${result.heightChangePx}px`;
-    record.note = `보낸 시각(경계 기준): 앞 ${rel(firstStamp)} · 둘째 ${rel(secondStamp)} · 높이 ${JSON.stringify(result.heights)} · 위 줄 ${result.travel}px(기대 ${result.expected}, 되돌아옴 ${result.reversals})`;
+    const rel = (ms) => (ms === null || ms === undefined || edgeAt === null ? "?" : `${((ms - edgeAt) / 1000).toFixed(2)}초`);
+    const priorStamp = stampOf(prior);
+    // 전제: 그 전 글은 경계 앞에 찍혔고, 앞 글 · 둘째는 경계 앞에 나가 경계 뒤에 찍혔다. 아니면 이 판을 재지 않은 것이다.
+    const built =
+      priorStamp !== null && firstStamp !== null && secondStamp !== null &&
+      priorStamp.stampedAt < edgeAt && firstStamp.arrivedAt < edgeAt && secondStamp.arrivedAt < edgeAt &&
+      firstStamp.stampedAt >= edgeAt && secondStamp.stampedAt >= edgeAt;
+    record.record = built
+      ? `둘째 줄 높이 바뀜 ${result.heightChanges}번 · ${result.heightChangePx}px (${result.heightSeq.join("→")})`
+      : "장면 못 만듦(경계를 못 걸침)";
+    record.note =
+      `경계 기준 — 그 전 글 찍힘 ${rel(priorStamp?.stampedAt)} · 앞 글 나감 ${rel(firstStamp?.arrivedAt)} → 찍힘 ${rel(firstStamp?.stampedAt)} · ` +
+      `둘째 나감 ${rel(secondStamp?.arrivedAt)} → 찍힘 ${rel(secondStamp?.stampedAt)} · 위 줄 ${result.travel}px(기대 ${result.expected}, 되돌아옴 ${result.reversals})`;
     console.log(`[${where}] 기록만: ${record.record} — ${record.note}`);
     records.push(record);
     return failures;
