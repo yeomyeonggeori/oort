@@ -254,12 +254,17 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(card).toMatch(/border-radius: var\(--radius-2xl\);/);
     expect(TOKENS).toMatch(/--radius-2xl: 20px;/);
     expect(card).toMatch(/box-shadow: var\(--elevation-float\);/);
-    // 카드 아래는 폼 여백이 아니라 늘 서 있는 「작성 중」 줄(text-meta 행간 + 위아래 숨 `--spacing-2`)이 진다(#5567, M-1).
+    // 카드 아래는 폼 여백이 아니라 늘 서 있는 「작성 중」 줄(text-meta 행간 + 위아래 숨)이 진다(#5567, M-1). 숨은 넓은 창
+    // `--spacing-2`(칸 34), 그림자가 없는 폰 폭 `--spacing-1`(칸 26)이다(#5582 R2-M2).
     expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 0;/);
-    expect(utility("typing-line")).toMatch(
-      /block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/
+    const typingLine = utility("typing-line");
+    const typingWide = typingLine.slice(typingLine.indexOf("@media (width >= 600px)"));
+    expect(typingLine.indexOf("@media (width >= 600px)")).toBeGreaterThan(-1);
+    expect(typingWide).toMatch(/block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-2\)\);/);
+    expect(typingWide).toMatch(/padding-block: var\(--spacing-2\);/);
+    expect(typingLine.slice(0, typingLine.indexOf("@media"))).toMatch(
+      /block-size: calc\(var\(--text-meta--line-height\) \+ 2 \* var\(--spacing-1\)\);[\s\S]*padding-block: var\(--spacing-1\);/
     );
-    expect(utility("typing-line")).toMatch(/padding-block: var\(--spacing-2\);/);
     expect(TOKENS).toMatch(/--text-meta--line-height: calc\(var\(--type-rem\) \* 1\.125\);/);
     expect(COMPOSER_CARD).toMatch(/"composer-card\b/);
     expect(COMPOSER).toContain("<ComposerCard");

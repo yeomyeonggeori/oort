@@ -1,4 +1,4 @@
-import {typingLead, typingTail, type TypingSegment} from '@momo/core/features/chat/typing';
+import {typingLead, typingNameCells, typingTail, type TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {font, line as lineScale, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
@@ -122,6 +122,9 @@ export function TypingBar({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const empty = segments.length === 0;
+  // 이름 칸의 시험 표지. 이름마다 자기 한 줄 칸이고(#5582 R2-M1, 코어 `typingNameCells`), Yoga가 넘친 폭을 이름의 글 폭에
+  // 비례해 나눠 짧은 이름은 거의 다 남는다 — 첫 이름이 길어도 둘째 사람이 줄에서 사라지지 않는다.
+  const nameCellTestID = `${testID}-name`;
   return (
     <View
       accessible={!empty}
@@ -135,13 +138,21 @@ export function TypingBar({
       testID={testID}>
       {!empty ? (
         <>
-          <Text numberOfLines={1} style={styles.lead}>
-            {typingLead(segments).map((segment, index) => (
-              <Text key={index} style={segment.kind === 'name' ? styles.name : undefined}>
-                {segment.text}
+          <View style={styles.lead}>
+            {typingNameCells(typingLead(segments)).map((cell, index) => (
+              <Text
+                key={index}
+                numberOfLines={cell.name ? 1 : undefined}
+                style={cell.name ? styles.nameCell : styles.textCell}
+                testID={cell.name ? nameCellTestID : undefined}>
+                {cell.segments.map((segment, at) => (
+                  <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
+                    {segment.text}
+                  </Text>
+                ))}
               </Text>
             ))}
-          </Text>
+          </View>
           <RespondingDots />
           <Text style={styles.tail}>{typingTail(segments)?.text}</Text>
         </>
@@ -168,9 +179,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 걸친다(머리말 「예약은 12, 줄 상자는 16」).
     marginBottom: -TYPING_OVERHANG,
   },
+  // 앞부분: 이름 칸들이 한 줄로 선다. 줄어드는 것은 이 묶음이고, 그 안에서 이름 칸마다 줄어든다(`typingNameCells`).
+  lead: {flexDirection: 'row', flexShrink: 1, minWidth: 0},
+  // 이름 칸: 넘치면 자기 안에서 말줄임된다.
+  nameCell: {flexShrink: 1, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
+  // 이름 아닌 칸(「 외 2명」·쉼표 뒤 빈칸): 줄지 않는다.
+  textCell: {flexShrink: 0, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
+  tail: {flexShrink: 0, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
   // 이름만 한 급 밝다 (M-4). 「작성」과 「작업」을 가르는 한 음절 말고 **눈에
   // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.
-  lead: {flexShrink: 1, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
-  tail: {flexShrink: 0, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
   name: {color: color.text, fontWeight: '700'},
 });
