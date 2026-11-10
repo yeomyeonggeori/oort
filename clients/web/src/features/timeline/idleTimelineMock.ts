@@ -19,6 +19,8 @@ export function idleTimelineMock(
     resume: { lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 },
     recoveryMarkers: [],
     pending: [],
+    echoPins: new Map(),
+    serverOffsetMs: 0,
     send: async () => undefined,
     resend: async () => undefined,
     discard: () => null,

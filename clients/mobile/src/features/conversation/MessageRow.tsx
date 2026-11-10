@@ -79,6 +79,7 @@ import {
   canPinMessage,
   canReactToMessage,
   canReplyToMessage,
+  echoAtMs,
   hasAnyAction,
   type MessageActionAvailability,
   type PendingMessage,
@@ -4373,6 +4374,7 @@ export function PendingRow({
   onDiscard,
   failureKind = null,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
+  serverOffsetMs = 0,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
@@ -4405,10 +4407,15 @@ export function PendingRow({
    * (`null`) 지금까지처럼 「전송 실패」만 말한다. 상태 코드·서버 원문은 어디에도 없다.
    */
   failureKind?: SendFailureKind | null;
+  /**
+   * #5624 — 서버 시계와 이 기기 시계의 차이(ms). 시각 글자에 더해 확정본(서버 시각)과 같은 시계를 말하게 한다. 묶음 판정과 같은 값이다.
+   */
+  serverOffsetMs?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
+  const shownAtMs = echoAtMs(pending, serverOffsetMs);
   // 인용 머리의 재료(#5381 Q4). 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을 때 그 글이 어디 있는지 아무도
   // 보장하지 못한다(웹 `PendingRow` 와 같은 규칙).
   const echoQuoteHead: QuoteHeadSpec | undefined = quote
@@ -4505,7 +4512,7 @@ export function PendingRow({
             memberId={pending.authorMemberId}
             // 기기 시계의 보낸 시각(`Author` 의 `time` 설명). 서버 사본이 오기 전에도 시각 글자가 서 있어서
             // 교체 때 글자가 새로 생기지 않는다. 시각을 알 수 없으면(유한한 수가 아니면) 지어내지 않는다.
-            time={Number.isFinite(pending.createdAtMs) ? timeLabel(pending.createdAtMs) : undefined}
+            time={Number.isFinite(shownAtMs) ? timeLabel(shownAtMs) : undefined}
             pendingMark={slowMark}
           />
         ) : null}

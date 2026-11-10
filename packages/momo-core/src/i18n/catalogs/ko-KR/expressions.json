@@ -221,6 +221,7 @@
   "expressions.kind.hintEmoji": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 작은 이모티콘이에요.",
   "expressions.kind.hintSticker": "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요.",
   "expressions.kind.autoNote": "그림의 크기와 움직임에 맞춰 골라 뒀어요. 바꿀 수 있어요.",
+  "expressions.image.waitingA11y": "{name} 이모티콘",
   "expressions.set.summaryReady": "그림 {count, number}개",
   "expressions.set.summaryGray": "만들지 못한 장면 {count, number}개",
   "expressions.set.grayRefused": "이 장면은 그림 모델이 만들 수 없다고 했어요",

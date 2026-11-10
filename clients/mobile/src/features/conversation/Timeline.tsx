@@ -4,6 +4,7 @@ import {
   buildTimelineItems,
   emptyChannelCopy,
   withTurnPlaceholders,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineStreamItem,
@@ -935,6 +936,8 @@ function TimelineInner({
   unreadCount,
   recoveryMarkers,
   pending,
+  echoPins,
+  serverOffsetMs,
   working,
   reactions,
   pins,
@@ -1020,6 +1023,10 @@ function TimelineInner({
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
   pending?: PendingMessage[];
+  /** #5624 — 에코였던 확정본이 이어 쓰는 에코의 시각(`useTimeline`의 `echoPins`). 있으면 에코가 확정본으로 바뀌어도 머리/이어짐이 그대로다. */
+  echoPins?: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms, `useTimeline`의 `serverOffsetMs`). 에코의 묶음과 시각 글자가 쓴다. */
+  serverOffsetMs?: number;
   /**
    * 지금 이 채널에서 열린 턴을 가진 에이전트들 (#999). 스트림의 맨 끝에 「작업 중」
    * 한 칸씩을 얻는다 — 답이 나타날 바로 그 자리다.
@@ -1397,10 +1404,12 @@ function TimelineInner({
         unreadCount,
         recoveryMarkers,
         pending,
+        echoPins,
+        serverOffsetMs,
         // 그리지 않는 답글(스레드로만 간 것)의 확정본도 에코를 정착시킨다 — 보내지 못해 남은 에코의 확정본이 나중에 도착하는 경우.
         settleAgainst: messages,
       })),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind, mainFlow],
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, echoPins, serverOffsetMs, showRollup, channelKind, mainFlow],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
   // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
@@ -3189,6 +3198,7 @@ function TimelineInner({
           <PendingRow
             pending={item.pending}
             startsGroup={item.startsGroup}
+            serverOffsetMs={serverOffsetMs}
             directory={directory}
             quote={resolveQuote(
               {replyToId: item.pending.replyToId},
@@ -3345,6 +3355,7 @@ function TimelineInner({
     },
     [
       directory,
+      serverOffsetMs,
       reactions,
       pins,
       unfurls,

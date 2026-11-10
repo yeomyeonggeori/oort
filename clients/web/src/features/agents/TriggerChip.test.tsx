@@ -448,8 +448,10 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     expect(empty.childElementCount).toBe(0);
   });
 
-  it("hover가 없는 기기에서는 거터 칩을 세우지 않는다(그 자리는 늘 서 있는 시각의 것이다)", () => {
+  it("hover가 없는 기기에서는 거터 칩을 세우지 않고, 이어지는 행의 시각도 상시로 세우지 않는다(#5624 M2)", () => {
     const css = readFileSync(resolve(process.cwd(), "src/design/tokens.css"), "utf8");
-    expect(css).toMatch(/@media \(hover: none\)\s*\{[^}]*\[data-row-clock\][^}]*\}[^}]*\[data-row-chip\]\s*\{\s*display:\s*none;/s);
+    expect(css).toMatch(/@media \(hover: none\)\s*\{\s*\[data-row-chip\]\s*\{\s*display:\s*none;/s);
+    // 같은 분 묶음(#5603)에서 이어지는 행의 시각은 언제나 머리 시각과 같다. 터치에서 그것을 상시로 세우던 규칙이 돌아오면 붉다(폰 앱 #3386과 같게).
+    expect(css).not.toMatch(/\[data-row-clock\]\s*\{[^}]*opacity:\s*1/);
   });
 });
