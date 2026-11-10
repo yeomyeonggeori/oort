@@ -26,6 +26,12 @@
 // whose binary the app's signature seals. A process squatting on the path is
 // not that child and is not believed.
 //
+// Every request also carries the run's control secret (#5619): `start` makes
+// 32 random bytes for each child and writes them as one line on the CHILD'S
+// STDIN (never argv, env, a file or a log line); the app adds them to a
+// request only after the peer check above, so they never reach anyone but
+// that child. workd acts on no request without them.
+//
 // Development builds (`debug_assertions`) are unsigned, so they keep the host
 // key in a 0600 dev file and start workd with `--dev-unsigned-peer`. A release
 // build never does either: its host key is the ThisDeviceOnly keychain item
@@ -190,33 +196,55 @@ impl std::fmt::Debug for WorkHostState {
 /// concurrent registers would both pass `already_registered`; security L5).
 #[derive(Default)]
 pub struct WorkHostState {
-    child: Mutex<Option<Child>>,
+    child: Mutex<Option<Running>>,
     registering: Mutex<()>,
 }
 
+/// The child and the control secret it was handed (#5619).
+struct Running {
+    child: Child,
+    secret: String,
+}
+
+/// Who a control-socket request is for: the child's pid, which the socket's
+/// peer must be, and the secret the request carries once it is (#5619). No
+/// `Debug`: the secret is never formatted.
+pub struct WorkdPeer {
+    pub pid: u32,
+    secret: String,
+}
+
+impl WorkdPeer {
+    pub fn new(pid: u32, secret: String) -> Self {
+        Self { pid, secret }
+    }
+}
+
 impl WorkHostState {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Running>> {
         self.child
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// The running child's pid, reaping one that has exited.
-    fn running_pid(&self) -> Option<u32> {
+    /// The running child, reaping one that has exited.
+    fn running(&self) -> Option<WorkdPeer> {
         let mut guard = self.lock();
         let alive = match guard.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(None)),
+            Some(running) => matches!(running.child.try_wait(), Ok(None)),
             None => false,
         };
         if !alive {
             *guard = None;
         }
-        guard.as_ref().map(Child::id)
+        guard
+            .as_ref()
+            .map(|running| WorkdPeer::new(running.child.id(), running.secret.clone()))
     }
 
     /// SIGTERM and wait; used when the app exits.
     pub fn stop_now(&self) {
-        if let Some(mut child) = self.lock().take() {
+        if let Some(Running { mut child, .. }) = self.lock().take() {
             // SAFETY: plain syscall on our own child.
             unsafe {
                 libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
@@ -421,6 +449,14 @@ fn read_registered(layout: &Layout) -> Option<Registered> {
     })
 }
 
+/// A new control secret for one `run` (#5619): 32 bytes from the OS random
+/// source as 64 lower-case hex digits, the shape workd accepts.
+fn control_secret() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(hex::encode(bytes))
+}
+
 /// The pid behind a connected Unix socket (macOS `LOCAL_PEERPID`).
 fn peer_pid(stream: &UnixStream) -> Option<u32> {
     let mut pid: libc::pid_t = 0;
@@ -438,9 +474,9 @@ fn peer_pid(stream: &UnixStream) -> Option<u32> {
     (status == 0 && pid > 0).then_some(pid as u32)
 }
 
-/// One request on the control socket, believed only if the peer is `expected`.
-pub fn ask_workd(socket: &Path, expected_pid: u32, op: &str) -> Result<Value, String> {
-    ask_workd_request(socket, expected_pid, &json!({ "op": op })).map_err(|error| match error {
+/// One request on the control socket, believed only if the peer is `peer`.
+pub fn ask_workd(socket: &Path, peer: &WorkdPeer, op: &str) -> Result<Value, String> {
+    ask_workd_request(socket, peer, &json!({ "op": op })).map_err(|error| match error {
         WorkdError::Refused(_) => "socket_refused".to_string(),
         WorkdError::Socket(code) => code,
     })
@@ -465,30 +501,36 @@ impl WorkdError {
 }
 
 /// One JSON request on the control socket (ADR-0146 개정 D-6·D-7 `pin_root`,
-/// `revoke_device`), believed only if the peer is `expected`.
+/// `revoke_device`), believed only if the peer is `peer`.
 pub fn ask_workd_request(
     socket: &Path,
-    expected_pid: u32,
+    peer: &WorkdPeer,
     request: &Value,
 ) -> Result<Value, WorkdError> {
-    ask_workd_request_within(socket, expected_pid, request, SOCKET_TIMEOUT)
+    ask_workd_request_within(socket, peer, request, SOCKET_TIMEOUT)
 }
 
 /// [`ask_workd_request`] with an explicit wait, for the one op that outlasts a local read.
 pub fn ask_workd_request_within(
     socket: &Path,
-    expected_pid: u32,
+    peer: &WorkdPeer,
     request: &Value,
     timeout: Duration,
 ) -> Result<Value, WorkdError> {
     let socket_error = |code: &str| WorkdError::Socket(code.to_string());
     let mut stream = UnixStream::connect(socket).map_err(|_| socket_error("socket_unavailable"))?;
-    if peer_pid(&stream) != Some(expected_pid) {
+    if peer_pid(&stream) != Some(peer.pid) {
         return Err(socket_error("socket_peer_not_our_child"));
     }
+    // #5619: the secret goes on only now, to the peer just checked.
+    let mut request = request.clone();
+    let Some(fields) = request.as_object_mut() else {
+        return Err(socket_error("socket_write_failed"));
+    };
+    fields.insert("auth".into(), Value::String(peer.secret.clone()));
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
-    let mut line = serde_json::to_vec(request).map_err(|_| socket_error("socket_write_failed"))?;
+    let mut line = serde_json::to_vec(&request).map_err(|_| socket_error("socket_write_failed"))?;
     line.push(b'\n');
     stream
         .write_all(&line)
@@ -679,14 +721,15 @@ pub struct Service<'a> {
 
 impl Service<'_> {
     pub fn status(&self) -> LocalStatus {
-        let running_pid = self.state.running_pid();
-        let heartbeat = running_pid
-            .and_then(|pid| ask_workd(&self.layout.socket, pid, "status").ok())
+        let running = self.state.running();
+        let heartbeat = running
+            .as_ref()
+            .and_then(|peer| ask_workd(&self.layout.socket, peer, "status").ok())
             .map(|status| heartbeat_of(&status));
         LocalStatus {
             sidecar: self.sidecar.is_some(),
             registered: read_registered(&self.layout),
-            running: running_pid.is_some(),
+            running: running.is_some(),
             heartbeat,
             adapters: find_adapters(&crate::harness_path::current_search_path()),
             work_folder: self.layout.work_folder.display().to_string(),
@@ -696,23 +739,23 @@ impl Service<'_> {
 
     /// The running workd's R2 view, or `None` when it is not running.
     pub fn host_trust(&self) -> Result<Option<HostTrust>, WorkdError> {
-        let Some(pid) = self.state.running_pid() else {
+        let Some(peer) = self.state.running() else {
             return Ok(None);
         };
-        let status = ask_workd_request(&self.layout.socket, pid, &json!({ "op": "status" }))?;
+        let status = ask_workd_request(&self.layout.socket, &peer, &json!({ "op": "status" }))?;
         Ok(host_trust_of(&status))
     }
 
     /// `pin_root` (ADR-0146 D-6 ①): the root's public half, once. `Ok(true)`
     /// pinned now, `Ok(false)` the same key was already pinned.
     pub fn pin_root(&self, key_id: &str, public_key: &str) -> Result<bool, WorkdError> {
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         let answer = ask_workd_request(
             &self.layout.socket,
-            pid,
+            &peer,
             &json!({ "op": "pin_root", "keyId": key_id, "alg": "p256", "publicKey": public_key }),
         )?;
         Ok(answer.get("pinned") == Some(&Value::Bool(true)))
@@ -721,13 +764,13 @@ impl Service<'_> {
     /// `revoke_device` (ADR-0146 D-7): a root-signed letter, straight to the
     /// host — the server cannot hide it.
     pub fn revoke_device(&self, revocation: &Value) -> Result<(), WorkdError> {
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         ask_workd_request(
             &self.layout.socket,
-            pid,
+            &peer,
             &json!({ "op": "revoke_device", "revocation": revocation }),
         )
         .map(|_| ())
@@ -738,13 +781,13 @@ impl Service<'_> {
     /// config can). Called only after the native dialog
     /// ([`crate::device_key::reset_after_confirm`], #3129).
     pub fn reset_signature_requirement(&self) -> Result<bool, WorkdError> {
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         let answer = ask_workd_request(
             &self.layout.socket,
-            pid,
+            &peer,
             &json!({ "op": "reset_signature_requirement" }),
         )?;
         Ok(answer.get("required") == Some(&Value::Bool(true)))
@@ -760,13 +803,13 @@ impl Service<'_> {
         label: Option<&str>,
     ) -> Result<bool, WorkdError> {
         check_remote_profile_args(harness, label)?;
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         let answer = ask_workd_request(
             &self.layout.socket,
-            pid,
+            &peer,
             &set_remote_profile_request(harness, label),
         )?;
         Ok(answer.get("reset") == Some(&Value::Bool(true)))
@@ -783,13 +826,13 @@ impl Service<'_> {
         label: &str,
     ) -> Result<PathBuf, WorkdError> {
         check_remote_profile_args(harness, Some(label))?;
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         let answer = ask_workd_request(
             &self.layout.socket,
-            pid,
+            &peer,
             &json!({ "op": "prepare_remote_profile", "harness": harness, "label": label }),
         )?;
         accepted_remote_profile_dir(&self.layout, harness, label, &answer)
@@ -804,13 +847,13 @@ impl Service<'_> {
         if !body.is_object() {
             return Err(WorkdError::Refused("invalid_request".into()));
         }
-        let pid = self
+        let peer = self
             .state
-            .running_pid()
+            .running()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
         ask_workd_request_within(
             &self.layout.socket,
-            pid,
+            &peer,
             &json!({ "op": "share_session", "sessionId": session_id, "body": body }),
             SHARE_SOCKET_TIMEOUT,
         )
@@ -968,7 +1011,7 @@ impl Service<'_> {
         if read_registered(&self.layout).is_none() {
             return Err("not_registered".to_string());
         }
-        if self.state.running_pid().is_some() {
+        if self.state.running().is_some() {
             return Ok(());
         }
         self.layout.ensure_root()?;
@@ -978,24 +1021,36 @@ impl Service<'_> {
             .mode(0o600)
             .open(&self.layout.log)
             .map_err(|error| format!("workd log: {error}"))?;
-        let child = Command::new(&sidecar)
+        let secret = control_secret().map_err(|error| format!("start_failed: {error}"))?;
+        let mut child = Command::new(&sidecar)
             .args(run_args(&self.layout, self.development))
             .env_clear()
             .envs(child_env())
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(log)
             .spawn()
             .map_err(|error| format!("start_failed: {error}"))?;
-        *self.state.lock() = Some(child);
+        // #5619: the run's control secret, one line on the child's stdin; the
+        // pipe closes right after it.
+        let handed_over = child
+            .stdin
+            .take()
+            .map(|mut stdin| stdin.write_all(format!("{secret}\n").as_bytes()));
+        if !matches!(handed_over, Some(Ok(()))) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("start_failed: control secret".to_string());
+        }
+        *self.state.lock() = Some(Running { child, secret });
         Ok(())
     }
 
     pub fn stop(&self) {
-        if let Some(pid) = self.state.running_pid() {
-            let _ = ask_workd(&self.layout.socket, pid, "shutdown");
+        if let Some(peer) = self.state.running() {
+            let _ = ask_workd(&self.layout.socket, &peer, "shutdown");
             let deadline = Instant::now() + STOP_TIMEOUT;
-            while Instant::now() < deadline && self.state.running_pid().is_some() {
+            while Instant::now() < deadline && self.state.running().is_some() {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
@@ -1524,8 +1579,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A secret of the right shape, made at run time.
+    fn test_secret() -> String {
+        control_secret().unwrap()
+    }
+
     /// The app believes the socket only when its peer is the child it
-    /// started: a process squatting on the path is refused.
+    /// started: a process squatting on the path is refused, and never sees
+    /// the run's control secret (#5619). The child itself gets it on every
+    /// request.
     #[test]
     fn a_socket_whose_peer_is_not_our_child_is_not_believed() {
         let dir = PathBuf::from(format!("/tmp/wh-sock-{}", std::process::id()));
@@ -1534,7 +1596,8 @@ mod tests {
         let _ = std::fs::remove_file(&socket);
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let server = std::thread::spawn(move || {
-            for stream in listener.incoming().take(2) {
+            let mut lines = Vec::new();
+            for stream in listener.incoming().take(3) {
                 let mut stream = stream.unwrap();
                 let mut line = String::new();
                 let _ =
@@ -1542,18 +1605,30 @@ mod tests {
                 let _ = stream.write_all(
                     b"{\"ok\":true,\"heartbeat\":{\"lastOkAtMs\":1,\"failing\":false}}\n",
                 );
+                lines.push(line);
             }
+            lines
         });
+        let secret = test_secret();
         // The squatter here is this very process, not a child we started.
-        let impostor_pid = std::process::id() + 1;
+        let impostor = WorkdPeer::new(std::process::id() + 1, secret.clone());
         assert_eq!(
-            ask_workd(&socket, impostor_pid, "status").unwrap_err(),
+            ask_workd(&socket, &impostor, "status").unwrap_err(),
             "socket_peer_not_our_child"
         );
-        let answer = ask_workd(&socket, std::process::id(), "status").unwrap();
+        let child = WorkdPeer::new(std::process::id(), secret.clone());
+        let answer = ask_workd(&socket, &child, "status").unwrap();
         assert!(!heartbeat_of(&answer).failing);
         drop(UnixStream::connect(&socket));
-        let _ = server.join();
+        let lines = server.join().unwrap();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "", "the impostor was sent nothing");
+        let sent: Value = serde_json::from_str(lines[1].trim()).unwrap();
+        assert_eq!(sent, json!({"op": "status", "auth": secret}));
+        assert!(
+            lines.iter().filter(|line| line.contains(&secret)).count() == 1,
+            "the secret went to the believed peer only"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1641,7 +1716,7 @@ mod tests {
         });
         let error = ask_workd_request(
             &socket,
-            std::process::id(),
+            &WorkdPeer::new(std::process::id(), test_secret()),
             &set_remote_profile_request("claude", Some("회사")),
         )
         .unwrap_err();
@@ -1677,15 +1752,10 @@ mod tests {
             }
         });
         let request = json!({"op": "share_session"});
-        let default = ask_workd_request(&socket, std::process::id(), &request).unwrap_err();
+        let peer = WorkdPeer::new(std::process::id(), test_secret());
+        let default = ask_workd_request(&socket, &peer, &request).unwrap_err();
         assert_eq!(default, WorkdError::Socket("socket_read_failed".into()));
-        assert!(ask_workd_request_within(
-            &socket,
-            std::process::id(),
-            &request,
-            Duration::from_secs(6)
-        )
-        .is_ok());
+        assert!(ask_workd_request_within(&socket, &peer, &request, Duration::from_secs(6)).is_ok());
         let _ = server.join();
         let _ = std::fs::remove_dir_all(&dir);
     }
