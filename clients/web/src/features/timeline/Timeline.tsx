@@ -914,7 +914,10 @@ export function Timeline({
         // 위에서 더 당기는 몸짓의 뜻은 언제나 "더 옛날 것"이지 "앱을 다시 열기"가
         // 아니다. `none`이 아닌 이유는 고무줄 자체는 남겨야 화면이 살아 있게
         // 느껴지기 때문이다.
-        className="overscroll-contain h-full"
+        // `timeline-scroller` (#5638): 브라우저 스크롤 앵커링을 끈다. 스크롤 위치는 가상 목록과
+        // `scrollHold` 한 길로만 움직이고, 앵커링이 있는 엔진(Chromium · macOS 27 WebKit)과 없는
+        // 엔진(macOS 14~26 WebKit)이 같은 길을 탄다.
+        className="overscroll-contain h-full timeline-scroller"
         data={items}
         components={TIMELINE_COMPONENTS}
         data-testid="timeline-virtuoso"

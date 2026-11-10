@@ -16,11 +16,14 @@
 //   TYPING_JITTER_VIEWPORTS=1280x800,900x700,390x844  (기본, 폰 폭 포함 #5582)
 //   TYPING_JITTER_OUT=<폴더>               프레임 기록 JSON을 남긴다
 //   TYPING_JITTER_MEASURE_ONLY=1           단정 없이 숫자만 찍는다(원인 실측용)
+//   TYPING_JITTER_DIST=<폴더>               dist 대신 이 번들을 띄운다(수리 전 번들과 숫자를 견줄 때)
+// 머리 출력: 엔진마다 `CSS.supports('overflow-anchor','auto')`와 타임라인 스크롤러의 계산값을 찍는다(#5638, `engine-anchor.mjs`).
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
+import { printEngineAnchorHeader } from "./engine-anchor.mjs";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -33,6 +36,7 @@ const engineNames = (process.env.TYPING_JITTER_ENGINES || "webkit,chromium")
   .filter(Boolean);
 const outDir = process.env.TYPING_JITTER_OUT || null;
 const measureOnly = process.env.TYPING_JITTER_MEASURE_ONLY === "1";
+const distOverride = process.env.TYPING_JITTER_DIST || null;
 // 600 아래(폰 폭)도 기본으로 돈다(#5582, design-review R2-L4): 폰 폭은 「작성 중」 칸이 26이고 독 구조(위 경계선 · 폼 p-3)가 다르다.
 const viewports = (process.env.TYPING_JITTER_VIEWPORTS || "1280x800,900x700,390x844")
   .split(",")
@@ -572,8 +576,8 @@ async function runScenario(browser, engine, viewport) {
   const features = await page.evaluate(() => {
     const scroller = document.querySelector('[data-testid="chat-timeline"] [data-virtuoso-scroller]');
     return {
-      overflowAnchor: CSS.supports("overflow-anchor", "none"),
-      scrollerOverflowAnchor: scroller ? getComputedStyle(scroller).getPropertyValue("overflow-anchor") || "(none)" : null,
+      overflowAnchorAuto: CSS.supports("overflow-anchor", "auto"),
+      scrollerOverflowAnchor: scroller ? getComputedStyle(scroller).getPropertyValue("overflow-anchor") || "(계산값 없음)" : null,
       fieldSizing: CSS.supports("field-sizing", "content"),
     };
   });
@@ -720,7 +724,12 @@ function judge(all) {
 }
 
 async function main() {
-  const server = await startGuardedPreview({ webRoot, port, portEnvVar: "TYPING_JITTER_PORT" });
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "TYPING_JITTER_PORT",
+    extraArgs: distOverride ? ["--outDir", resolve(distOverride)] : [],
+  });
   const all = [];
   try {
     for (const name of engineNames) {
@@ -728,6 +737,7 @@ async function main() {
       if (type === null) throw new Error(`모르는 엔진: ${name}`);
       const browser = await type.launch({ headless: true });
       try {
+        await printEngineAnchorHeader(browser, name);
         for (const viewport of viewports) {
           all.push(...(await runScenario(browser, name, viewport)));
         }
