@@ -887,7 +887,11 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
   // 위 줄은 보낸 칸 높이(연달아면 두 칸의 합) ± 1px 만큼 한 방향으로만 움직인다(#5641: 옛 문턱은 +10px · 되돌아옴 미계수 · 연달아 미단정).
   // 움직인 폭(최대 − 최소)과 처음 → 끝이 둘 다 기대 ± 1px 이어야 한다.
   if (result.travel === null || result.expected === null || Math.abs(result.travel - result.expected) > 1 || Math.abs(Math.abs(result.net) - result.expected) > 1) {
-    failures.push(`${where}: 위 줄이 ${result.travel}px(처음 → 끝 ${result.net}px) 움직였다 — 보낸 칸 높이 ${result.expected}px ± 1px 여야 한다`);
+    // 기대(보낸 칸 높이 + 처음 바닥 거리 − 끝 바닥 거리)는 처음 → 끝과 같게 만들어져 있다. 실제로 재는 것은 「움직인 폭 = 처음 → 끝」(갔다가
+    // 돌아온 몫이 없음) · 되돌아옴 0 · 끝 바닥 거리(아래)다.
+    failures.push(
+      `${where}: 위 줄이 움직인 폭 ${result.travel}px 가 처음 → 끝 ${Math.abs(result.net)}px(기대 ${result.expected}px = 보낸 칸 + 바닥 거리 변화)와 1px 넘게 다르다 — 갔다가 돌아온 몫`
+    );
   }
   if (result.gapAfter === null || result.gapAfter > 1) {
     if (KNOWN_SEND_SHORTFALL && result.gapAfter <= KNOWN_SHORTFALL_MAX_PX) {
