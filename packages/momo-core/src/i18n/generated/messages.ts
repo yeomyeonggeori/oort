@@ -306,6 +306,7 @@ export const messageKeys = [
   "expressions.draft.rights",
   "expressions.draft.source",
   "expressions.draft.waiting",
+  "expressions.image.waitingA11y",
   "expressions.import.displayName",
   "expressions.import.displayNamePlaceholder",
   "expressions.import.face",
@@ -1685,6 +1686,9 @@ export const argumentSpecs = {
     "host": "string"
   },
   "expressions.draft.waiting": {},
+  "expressions.image.waitingA11y": {
+    "name": "string"
+  },
   "expressions.import.displayName": {},
   "expressions.import.displayNamePlaceholder": {},
   "expressions.import.face": {},
@@ -3307,6 +3311,7 @@ export interface MessageArgs {
   "expressions.draft.rights": Record<string, never>;
   "expressions.draft.source": { host: string };
   "expressions.draft.waiting": Record<string, never>;
+  "expressions.image.waitingA11y": { name: string };
   "expressions.import.displayName": Record<string, never>;
   "expressions.import.displayNamePlaceholder": Record<string, never>;
   "expressions.import.face": Record<string, never>;

@@ -221,6 +221,7 @@
   "expressions.kind.hintEmoji": "A small picture. Use it between words and in reactions. It stays a small emoticon even when it moves.",
   "expressions.kind.hintSticker": "A large picture. It is sent big, and a moving one shows under GIF.",
   "expressions.kind.autoNote": "Picked to match the picture's size and motion. You can change it.",
+  "expressions.image.waitingA11y": "{name} emoticon",
   "expressions.set.summaryReady": "{count, plural, one {# picture} other {# pictures}}",
   "expressions.set.summaryGray": "{count, plural, one {# scene not made} other {# scenes not made}}",
   "expressions.set.grayRefused": "The picture model said it cannot make this scene.",
