@@ -606,7 +606,7 @@ describe('이어지지 않은 동안의 시계 — 틈의 시작부터 30초 · 
     expect(readAt).toHaveLength(2); // 그 뒤 박자
   });
 
-  it('시계는 쌓이지 않고 떠나면 남지 않는다: 끊김·재연결 5번 뒤 이어진 동안 0번, 끊긴 90초에 정확히 3번, 보낼 수 없는 동안 0번, 화면을 떠난 뒤 0번 (r2 M1)', async () => {
+  it('시계는 쌓이지 않고 떠나면 남지 않는다: 끊김·재연결 5번 뒤 이어진 동안 0번, 끊긴 90초에 정확히 3번, 보낼 수 없는 동안 0번, Provider 가 내려간 뒤(앱 셸이 내려감·로그아웃) 0번 (r2 M1)', async () => {
     // 진짜 저장소는 오프라인·`dispose` 뒤 읽기를 스스로 버려서 남은 시계를 GET 수로 볼 수 없다. Provider 가 부른 `refresh` 를 그대로 센다.
     const store = fakeStore();
     created.mockReturnValue(store);
@@ -644,6 +644,6 @@ describe('이어지지 않은 동안의 시계 — 틈의 시작부터 30초 · 
     view.rerender(tree('disconnected'));
     await flush(1);
     view.unmount();
-    expect(await refreshesOver(4)).toBe(0); // 화면을 떠난 뒤
+    expect(await refreshesOver(4)).toBe(0); // Provider 가 내려간 뒤
   });
 });
