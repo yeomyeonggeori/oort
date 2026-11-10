@@ -22,7 +22,6 @@ import type { Channel, Message, RosterMember } from "@momo/core/lib/api";
 import type { EchoPins, PendingMessage } from "@momo/core/features/timeline/model";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import type { UseTimelineResult } from "@/features/timeline/useTimeline";
 import { ChatShell } from "./ChatShell";
 
 const WS = "00000000-0000-7000-8000-000000000001";
