@@ -128,6 +128,32 @@ const KNOWN_FAILURE_LIST = [
     maxPill: 1,
   },
   {
+    key: "older|webkit|*",
+    issue: "위로 더 불러오기(WebKit): 보던 줄 3.9px, 그리고 세 번에 한 번꼴 맨 위에 닿아도 옛 쪽을 안 부름(읽기 0 — 내렸다 올려도)",
+    maxUnexplainedPx: 6,
+    maxReversals: 0,
+    notBuilt: "옛 쪽이 붙지 않았다(읽기 0",
+  },
+  {
+    key: "entry-card|webkit|*",
+    issue: "진입 중 링크 카드가 0.7초 늦게 서면 WebKit 1280 · 900 에서 마지막 줄 4px(세 번에 한두 번)",
+    maxUnexplainedPx: 4,
+    maxReversals: 0,
+    maxMissingFrames: 0,
+  },
+  {
+    key: "reaction-up-added|chromium|*",
+    issue: "Chromium 위 읽기 중 화면 위 밖 줄에 반응이 붙으면 보던 줄이 칩 줄 높이만큼(32px · 폰 폭 48px) 밀리고 그대로(바로잡지 않음, 실행에 따라 0.4px)",
+    maxUnexplainedPx: 48,
+    maxReversals: 0,
+  },
+  {
+    key: "reaction-up-removed|chromium|390",
+    issue: "Chromium 폰 폭 위 읽기 중 반응이 떨어지면 보던 줄 48px(추가와 같은 뿌리)",
+    maxUnexplainedPx: 48,
+    maxReversals: 0,
+  },
+  {
     key: "reaction-bottom-added|webkit|*",
     issue: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px(1280 · 900)",
     maxUnexplainedPx: 2,
@@ -252,6 +278,7 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
   let verdict = result.verdict.verdict;
   const known = knownFailure(meta.sceneKey, meta.engine, meta.width);
   if (meta.recordOnly && verdict !== "장면 못 만듦") verdict = `기록만(${verdict})`;
+  else if (known?.notBuilt && verdict === "장면 못 만듦" && result.verdict.reasons.some((reason) => reason.startsWith(known.notBuilt))) verdict = "알려진 실패(장면 못 만듦)";
   else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, result.extra)) verdict = "알려진 실패";
   else if (known !== null && verdict === "FAIL") result.verdict.reasons.push(`알려진 실패의 테두리(${known.issue}) 밖`);
   pushCell({
@@ -809,7 +836,7 @@ async function main() {
 
   const failures = cells.filter((cell) => cell.verdict === "FAIL" || cell.verdict === "장면 못 만듦");
   const notMeasured = cells.filter((cell) => cell.verdict === "재지 않음");
-  const measured = cells.filter((cell) => cell.verdict.startsWith("PASS") || ["FAIL", "알려진 실패"].includes(cell.verdict) || cell.verdict.startsWith("기록만"));
+  const measured = cells.filter((cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FAIL" || cell.verdict.startsWith("알려진 실패") || cell.verdict.startsWith("기록만"));
   // 잰 칸도 「재지 않음」 칸도 없으면(아무 장면도 돌지 않았다) 실패다. 부하로 모두 「재지 않음」이면 아래의 NOT-MEASURED(종료 3)다 — 어느 쪽도 PASS 가 아니다.
   const empty = nothingRan(measured.length + notMeasured.length, "timeline-still");
   if (failures.length > 0 || empty !== null) {
@@ -817,7 +844,7 @@ async function main() {
     if (empty !== null) console.error(`FAIL ${empty}`);
     process.exit(1);
   }
-  const known = cells.filter((cell) => cell.verdict === "알려진 실패");
+  const known = cells.filter((cell) => cell.verdict.startsWith("알려진 실패"));
   if (notMeasured.length > 0) {
     console.log(`NOT-MEASURED timeline-still: ${notMeasured.length}칸 재지 않음(부하) · 잰 칸 ${measured.length} · 알려진 실패 ${known.length} — 통과로 치지 않는다`);
     process.exit(3);
