@@ -10764,6 +10764,16 @@ paths:
         runs on each board transition and for top-level mention runs on their
         final transition (done, failed or stopped); nothing is emitted when a
         mention run crosses 60 seconds, so a client also refetches on focus.
+
+        The owner's waiting session (#5639, ADR-0202 D4, ADR-0188 D3 and D5):
+        in an include=jobs page, an agent-lane session the caller owns that has
+        a permission request still pending and not yet expired has state
+        waiting instead of running or idle (status stays the ledger word). The
+        next read after the request is decided, expires or is cancelled has the
+        ledger word again. No key is added and nothing of the request (tool,
+        title, options, preview) is sent. Every other caller, and every read
+        without include=jobs (including the single read below), gets the ledger
+        word as before.
       security:
         - bearerAuth: []
       parameters:

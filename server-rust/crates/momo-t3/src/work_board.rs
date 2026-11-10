@@ -43,6 +43,20 @@
 //! not read. `who_mine` narrows the page to rows the viewer asked for (runs) or
 //! owns (sessions), inside the same visibility.
 //!
+//! ## The owner's own session waiting on an answer (ADR-0202 D4, #5639)
+//!
+//! With `include_jobs`, a Mac session (`origin = 'host'`) **the viewer owns**
+//! that has a permission request still `pending` and not yet past its
+//! `expires_at` (ADR-0188 D5's `work_permission_request`, read through its
+//! pending index) answers `state = "waiting"` — the word shared sessions
+//! already use — instead of `running` / `idle`. Only the session owner decides
+//! such a request (ADR-0188 D3·D5), so only the owner's read changes; every other
+//! member reads the ledger word as before. The next read after the request is
+//! decided, expires or is cancelled is the ledger word again. Nothing of the
+//! request (tool, title, options, preview) is read, and the ledger `status` is
+//! untouched. Without `include_jobs` the flag is not evaluated, so the shipped
+//! responses are unchanged.
+//!
 //! There is no workspace-wide view (Q4): a member of a different channel gets
 //! nothing, not a 403. The list and the single read share this one query, so
 //! "not a member", "not shared", "no such session" and "another tenant's id" are
@@ -196,7 +210,14 @@ WITH sess AS ( \
            AS activity_us, \
          'session'::text AS source, NULL::text AS run_status, NULL::uuid AS requester_id, \
          NULL::text AS requester_name, NULL::int AS step_count, NULL::int AS run_commits, \
-         NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id \
+         NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id, \
+         CASE WHEN $9::boolean AND ws.origin = 'host' AND ws.member_id = $2 \
+              THEN EXISTS (SELECT 1 FROM work_permission_request pr \
+                            WHERE pr.workspace_id = ws.workspace_id \
+                              AND pr.work_session_id = ws.id \
+                              AND pr.status = 'pending' \
+                              AND pr.expires_at > clock_timestamp()) \
+              ELSE false END AS awaiting_owner \
     FROM work_session ws \
     JOIN channel c \
       ON c.workspace_id = ws.workspace_id AND c.id = ws.channel_id AND c.archived_at IS NULL \
@@ -257,7 +278,7 @@ runs AS ( \
               ELSE 'mention' END AS job_trigger, \
          CASE WHEN $9::boolean AND jsonb_typeof(r.output->'artifacts') = 'object' \
               THEN r.output->'artifacts' END AS agent_report, \
-         rm.id AS result_message_id \
+         rm.id AS result_message_id, false AS awaiting_owner \
     FROM agent_run r \
     JOIN channel c \
       ON c.workspace_id = r.workspace_id AND c.id = r.channel_id AND c.archived_at IS NULL \
@@ -353,8 +374,16 @@ fn pr_number_of(url: &str) -> Option<i64> {
     tail.parse().ok()
 }
 
-fn state_of_host_session(status: &str, exit_code: Option<i32>) -> &'static str {
+/// A Mac session's board word. `awaiting_owner` (the owner's `include_jobs`
+/// read, a pending unexpired permission request — see the module docs) turns a
+/// live session into `waiting`; an ended or orphaned session keeps its word.
+fn state_of_host_session(
+    status: &str,
+    exit_code: Option<i32>,
+    awaiting_owner: bool,
+) -> &'static str {
     match status {
+        "running" | "idle" if awaiting_owner => "waiting",
         "running" => "running",
         "idle" => "idle",
         "ended" if exit_code == Some(0) => "done",
@@ -393,7 +422,11 @@ fn decode(row: &sqlx::postgres::PgRow) -> Result<BoardItem, T3Error> {
         )
     } else {
         let tool: String = row.try_get("tool")?;
-        (tool, state_of_host_session(&status, exit_code).to_string())
+        let awaiting_owner: bool = row.try_get("awaiting_owner")?;
+        (
+            tool,
+            state_of_host_session(&status, exit_code, awaiting_owner).to_string(),
+        )
     };
     let pr_url: Option<String> = row.try_get("pr_url")?;
     let run = if is_run {
@@ -575,11 +608,44 @@ mod tests {
 
     #[test]
     fn a_host_session_state_comes_from_the_ledger() {
-        assert_eq!(state_of_host_session("running", None), "running");
-        assert_eq!(state_of_host_session("idle", None), "idle");
-        assert_eq!(state_of_host_session("ended", Some(0)), "done");
-        assert_eq!(state_of_host_session("ended", Some(2)), "stopped");
-        assert_eq!(state_of_host_session("orphaned", None), "stopped");
+        assert_eq!(state_of_host_session("running", None, false), "running");
+        assert_eq!(state_of_host_session("idle", None, false), "idle");
+        assert_eq!(state_of_host_session("ended", Some(0), false), "done");
+        assert_eq!(state_of_host_session("ended", Some(2), false), "stopped");
+        assert_eq!(state_of_host_session("orphaned", None, false), "stopped");
+    }
+
+    #[test]
+    fn only_a_live_session_waits_for_its_owner() {
+        assert_eq!(state_of_host_session("running", None, true), "waiting");
+        assert_eq!(state_of_host_session("idle", None, true), "waiting");
+        // A session that is over keeps its word even if a stray row is pending.
+        assert_eq!(state_of_host_session("ended", Some(0), true), "done");
+        assert_eq!(state_of_host_session("ended", Some(2), true), "stopped");
+        assert_eq!(state_of_host_session("orphaned", None, true), "stopped");
+    }
+
+    #[test]
+    fn the_waiting_flag_reads_the_pending_index_and_nothing_of_the_request() {
+        let lowered = SELECT.to_lowercase();
+        let start = lowered
+            .find("from work_permission_request")
+            .expect("the waiting flag reads the permission ledger");
+        let probe = &lowered[start..start + lowered[start..].find(") else").unwrap()];
+        // The pending index is `(workspace_id, work_session_id) WHERE status = 'pending'`.
+        for needed in [
+            "pr.workspace_id = ws.workspace_id",
+            "pr.work_session_id = ws.id",
+            "pr.status = 'pending'",
+            "pr.expires_at > clock_timestamp()",
+        ] {
+            assert!(probe.contains(needed), "{needed}");
+        }
+        // Existence only: no column of the request is selected.
+        assert!(lowered.contains("then exists (select 1 from work_permission_request pr"));
+        for column in ["options", "preview", "decided", "request_event_id"] {
+            assert!(!lowered.contains(column), "{column}");
+        }
     }
 
     #[test]
