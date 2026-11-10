@@ -57,6 +57,7 @@ function fakeStore() {
     snapshot: jest.fn(() => ({items: [], shelf: [], state: 'ready', revision: 0})),
     refresh: jest.fn(async () => undefined),
     setOnline: jest.fn(),
+    socketLost: jest.fn(),
     reconnected: jest.fn(),
     dispose: jest.fn(),
     changed: jest.fn(),
