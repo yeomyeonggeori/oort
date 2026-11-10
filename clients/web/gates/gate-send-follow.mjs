@@ -20,15 +20,25 @@
 //
 // ⑤ 시계 어긋남(#5624): 가짜 서버가 확정본을 「지금 + 어긋남」으로 찍는다(응답 지연 1.5초). 바닥에서 내 글을 하나 보낸 뒤(그 응답이
 //    서버 시계를 알려 준다) 같은 분에 하나 더 보내는 동안, 화면이 그린 모든 프레임에서 바로 위 줄의 위치와 보낸 줄의 높이를 잰다.
-//    ±90초·0초, 분 경계(시계는 맞고 응답 사이에 분이 바뀜), 연달아 두 번. 보낸 줄은 처음부터 끝까지 한 높이(이어진 줄)여야 하고, 위 줄의
-//    이동 폭은 이어진 줄 하나만큼(옛 규칙 44px)이어야 한다. 고치기 전에는 메아리에 머리가 섰다 접히며 72px였다.
+//    ±90초·0초, 분 경계(시계는 맞고 응답 사이에 분이 바뀜), 연달아 두 번. 보낸 줄은 처음부터 끝까지 한 높이(이어진 줄)여야 하고, 위 줄은
+//    **보낸 줄(목록의 칸) 높이 ± 1px 만큼 한 방향으로만** 움직여야 한다(되돌아옴 0 — `still-measure.mjs`, #5641). 연달아 두 번은 두 칸 높이의
+//    합 ± 1px. 고치기 전에는 메아리에 머리가 섰다 접히며 72px였다.
+//    시계(#5641): 페이지의 `Date` 와 가짜 서버의 「지금」을 **같은 만큼** 옮겨, 장면이 분의 알려진 초에서 시작한다(타이머 · rAF ·
+//    `performance.now` 는 그대로). ±90초·0초·연달아는 서버 시계로 분의 10초에서 시작해 분이 바뀌지 않는다(벽시계 분 경계의 거짓 RED 없음).
+//    분 경계는 둘째 글을 「서버 분 경계 2.5초 전」에 보내고 서버가 3초 뒤 찍어, 메아리는 앞 분 · 확정본은 다음 분이 되게 한다 — 그 전제
+//    (메아리가 이어진 줄로 섰고 서버가 다음 분에 찍었다)를 단정하고, 아니면 「장면을 못 만들었다」로 실패한다(타이밍이 빗나가 그냥 통과하지 않는다).
+// ⑦ 기록만(#5641, #5637 재확인 검수 Low): 분 경계 · 자정에 **연달아 두 번** 보내기가 걸칠 때 둘째 줄의 높이가 바뀐 횟수와 px.
+//   SEND_FOLLOW_OUT=<폴더>                장면 기록(send-follow.json · send-follow-skew.json)을 남긴다(장면표 게이트가 읽는다)
+//   SEND_FOLLOW_PROVE_RED=<이름>          구멍 넷을 일부러 다시 열어 RED 를 보인다(#5641): bounce(범위 안 되돌아옴) · rapid-shift(연달아의
+//                                         이동 폭) · minute-straddle(시계 고정을 끄고 분 경계에 걸침) · late-boundary(분 경계 장면의 타이밍이 빗나감)
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 import { printEngineAnchorHeader, scrollerOverflowAnchor } from "./engine-anchor.mjs";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { listEnv, motionOf, nothingRan } from "./still-measure.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,10 +51,25 @@ const engineNames = (process.env.SEND_FOLLOW_ENGINES || "webkit,chromium")
 const distOverride = process.env.SEND_FOLLOW_DIST || null;
 const captureDir = process.env.SEND_FOLLOW_CAPTURE || null;
 const skewOnly = process.env.SEND_FOLLOW_SKEW === "1";
-// ⑤의 장면 하나만 돌린다(예: boundary). 비우면 다섯 장면 모두.
-const skewScenesWanted = (process.env.SEND_FOLLOW_SKEW_SCENES || "").split(",").map((name) => name.trim()).filter(Boolean);
-// ⑤ 가짜 서버의 시계: 확정본의 `createdAtMs`는 지금 + skewMs, 응답은 postDelayMs 뒤.
-const backendClock = { skewMs: 0, postDelayMs: 150 };
+const SKEW_SCENES = ["plus90", "minus90", "zero", "boundary", "rapid", "rapid-boundary", "rapid-midnight"];
+// ⑤·⑦의 장면 고르기(예: boundary). 비우면 모두. 모르는 이름은 실패한다(오타로 장면을 통째로 건너뛰지 않게).
+const skewScenesWanted = listEnv("SEND_FOLLOW_SKEW_SCENES", SKEW_SCENES, []);
+if (engineNames.length === 0) throw new Error("SEND_FOLLOW_ENGINES 가 비었다");
+const outDir = process.env.SEND_FOLLOW_OUT || null;
+const PROVE_RED = ["bounce", "rapid-shift", "minute-straddle", "late-boundary"];
+const proveRed = process.env.SEND_FOLLOW_PROVE_RED ? listEnv("SEND_FOLLOW_PROVE_RED", PROVE_RED)[0] : null;
+// ⑤ 가짜 서버의 시계: 확정본의 `createdAtMs`는 지금 + shiftMs + skewMs, 응답은 postDelayMs 뒤. shiftMs 는 페이지의 `Date` 와 같이 옮긴다.
+const backendClock = { skewMs: 0, postDelayMs: 150, shiftMs: 0, holdUntil: null, stamps: [] };
+const gateNow = () => Date.now() + backendClock.shiftMs;
+/**
+ * 연달아 두 번의 되돌아옴은 알려진 실패다(#5641 실측 2026-11-10: 첫 글이 붙는 프레임에 위 줄이 64.4px 올라갔다가 다음 프레임에 7.4px
+ * 내려앉음 — #5617 이 알려 둔 「바닥에서 보내기 거리 8px」과 같은 것). 고쳐지면 이 값을 false 로 바꿔 단정으로 올린다.
+ */
+const KNOWN_RAPID_SETTLE = true;
+/** 보낸 뒤 바닥에서 7~8px 위에 앉는 것(#5617 알려 둔 것)도 같은 뿌리다. 고쳐지면 false 로 바꿔 「끝 바닥 거리 ≤ 1px」를 단정한다. */
+const KNOWN_SEND_SHORTFALL = true;
+/** 장면표 게이트에 넘길 기록. */
+const records = [];
 const viewport = { width: 1280, height: 800 };
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -182,9 +207,11 @@ async function installBackend(context) {
         ...(sent.rootId ? { rootId: sent.rootId } : {}),
       });
       // 서버처럼 지연을 둔다: 메아리가 먼저 서고 확정본이 뒤따른다. 서버는 응답 직전에 시각을 찍는다(⑤의 분 경계가 이 순서를 쓴다).
+      const arrivedAt = gateNow();
       await wait(backendClock.postDelayMs);
-      message.createdAtMs = Date.now() + backendClock.skewMs;
+      message.createdAtMs = gateNow() + backendClock.skewMs;
       message.hlcTs = message.createdAtMs;
+      backendClock.stamps.push({ body: message.body, arrivedAt: arrivedAt + backendClock.skewMs, stampedAt: message.createdAtMs });
       if (sent.rootId) state.replies.push(message);
       else state.messages.push(message);
       return json(route, message, 201);
@@ -238,6 +265,21 @@ async function installRealtimeSocket(page) {
       }
     }
     window.WebSocket = GateWebSocket;
+    // 게이트 시계(#5641): `Date` 만 옮긴다(타이머 · rAF · performance.now 는 그대로). 가짜 서버의 「지금」도 같은 만큼 옮긴다.
+    const RealDate = Date;
+    let shift = 0;
+    function GateDate(...args) {
+      if (!new.target) return new RealDate(RealDate.now() + shift).toString();
+      return args.length === 0 ? new RealDate(RealDate.now() + shift) : new RealDate(...args);
+    }
+    GateDate.now = () => RealDate.now() + shift;
+    GateDate.parse = RealDate.parse;
+    GateDate.UTC = RealDate.UTC;
+    GateDate.prototype = RealDate.prototype;
+    window.Date = GateDate;
+    window.__gateClockShift = (ms) => {
+      shift = ms;
+    };
     window.__sendFollowSubscribed = () => [...sockets].some((s) => [...s.subscriptions].some((name) => name.startsWith("ch:")));
     window.__sendFollowPublish = (frame) => {
       offset += 1;
@@ -411,8 +453,8 @@ async function runScenes(browser, engine, colorScheme) {
     return out;
   }, [MIN47_MSG, MIN50_MSG, SAME1_MSG, SAME2_MSG]);
   console.log(`[${where}] 머리: 47분 ${heads[MIN47_MSG]} · 50분 ${heads[MIN50_MSG]} · 52분 첫 ${heads[SAME1_MSG]} · 52분 둘째 ${heads[SAME2_MSG]}`);
-  if (heads[MIN47_MSG] !== true || heads[MIN50_MSG] !== true) failures.push(`${where}: 47분·50분의 말이 머리 둘이 아니다 (${JSON.stringify(heads)})`);
-  if (heads[SAME1_MSG] !== true || heads[SAME2_MSG] !== false) failures.push(`${where}: 같은 52분의 두 말이 머리 하나가 아니다 (${JSON.stringify(heads)})`);
+  if (heads[MIN47_MSG] !== true || heads[MIN50_MSG] !== true) failures.push(`${where} ④: 47분·50분의 말이 머리 둘이 아니다 (${JSON.stringify(heads)})`);
+  if (heads[SAME1_MSG] !== true || heads[SAME2_MSG] !== false) failures.push(`${where} ④: 같은 52분의 두 말이 머리 하나가 아니다 (${JSON.stringify(heads)})`);
   await capture(page, `${engine}-${colorScheme}`, "1-groups-47-50-and-same-minute");
 
   // 기준: 바닥에서 보낸다(수리 전에도 따라가던 길). 위에서 보낸 결과가 이것과 같아야 한다.
@@ -427,7 +469,7 @@ async function runScenes(browser, engine, colorScheme) {
   const before = await measureList(page, SCROLLER, null);
   const pillBefore = await page.getByTestId("jump-latest").count();
   if (before === null || before.distance < 400 || pillBefore !== 1) {
-    failures.push(`${where}: 위로 올린 장면을 못 만들었다 (거리 ${before?.distance}, 필 ${pillBefore})`);
+    failures.push(`${where} ①: 위로 올린 장면을 못 만들었다 (거리 ${before?.distance}, 필 ${pillBefore})`);
   }
   const sentText = `위에서 보낸 글 ${engine}`;
   await send(page, "composer-input", sentText);
@@ -439,9 +481,10 @@ async function runScenes(browser, engine, colorScheme) {
   console.log(
     `[${where}] 채널 보내기: 전 거리 ${before?.distance} → 0.7초 ${soon?.distance}(보임 ${soon?.rowVisible}, ${soon?.detail}) → 1.7초 ${later?.distance}(보임 ${later?.rowVisible}, ${later?.detail}) · 필 ${pillBefore}→${pillAfter}`
   );
-  if (soon === null || soon.distance > 2 || !soon.rowVisible) failures.push(`${where}: 보낸 뒤 맨 아래로 가지 않았다 (0.7초 거리 ${soon?.distance}, 보임 ${soon?.rowVisible})`);
-  if (later === null || later.distance > 2 || !later.rowVisible) failures.push(`${where}: 맨 아래로 갔다가 되돌아갔다 (1.7초 거리 ${later?.distance}, 보임 ${later?.rowVisible})`);
-  if (pillAfter !== 0) failures.push(`${where}: 보낸 뒤에도 「최신 메시지로 이동」이 서 있다`);
+  if (soon === null || soon.distance > 2 || !soon.rowVisible) failures.push(`${where} ①: 보낸 뒤 맨 아래로 가지 않았다 (0.7초 거리 ${soon?.distance}, 보임 ${soon?.rowVisible})`);
+  if (later === null || later.distance > 2 || !later.rowVisible) failures.push(`${where} ①: 맨 아래로 갔다가 되돌아갔다 (1.7초 거리 ${later?.distance}, 보임 ${later?.rowVisible})`);
+  if (pillAfter !== 0) failures.push(`${where} ①: 보낸 뒤에도 「최신 메시지로 이동」이 서 있다`);
+  records.push({ engine, name: "up-send", scene: "① 위에서 보내기(0.7 · 1.7초 바닥 거리)", kind: "bottom", where: `${where} ①`, distances: [soon?.distance ?? null, later?.distance ?? null].filter((value) => value !== null), pillShows: pillAfter });
   await capture(page, `${engine}-${colorScheme}`, "2-after-send-from-scrolled-up");
 
   // ② 대조: 위로 올려 둔 채 남의 말이 온다 — 화면은 그대로, 필이 센다.
@@ -471,9 +514,18 @@ async function runScenes(browser, engine, colorScheme) {
   const peerCount = Number((await page.getByTestId("jump-latest").getAttribute("data-new-count").catch(() => null)) ?? -1);
   console.log(`[${where}] 남의 말: 스크롤 ${parked?.scrollTop} → ${afterPeer?.scrollTop} · 필 개수 ${peerCount}`);
   if (parked === null || afterPeer === null || Math.abs(afterPeer.scrollTop - parked.scrollTop) > 8) {
-    failures.push(`${where}: 남의 말에 읽던 화면이 밀렸다 (${parked?.scrollTop} → ${afterPeer?.scrollTop})`);
+    failures.push(`${where} ②: 남의 말에 읽던 화면이 밀렸다 (${parked?.scrollTop} → ${afterPeer?.scrollTop})`);
   }
-  if (peerCount !== 1) failures.push(`${where}: 남의 말을 필이 1개로 세지 않는다 (${peerCount})`);
+  records.push({
+    engine,
+    name: "peer",
+    scene: "② 위 읽는 중 남의 말(scrollTop 변화)",
+    kind: "reading",
+    where: `${where} ②`,
+    unexplainedPx: parked && afterPeer ? Math.abs(afterPeer.scrollTop - parked.scrollTop) : null,
+    note: `필 개수 ${peerCount} · 문턱 ±8px(옛 판정)`,
+  });
+  if (peerCount !== 1) failures.push(`${where} ②: 남의 말을 필이 1개로 세지 않는다 (${peerCount})`);
 
   // ③ 스레드: 답글 목록을 맨 위로 올려 둔 채 답글을 단다.
   const rootRow = page.locator(`[data-testid="timeline-message"][data-message-id="${ROOT_MSG}"]`);
@@ -513,36 +565,73 @@ async function runScenes(browser, engine, colorScheme) {
   const threadAfter = await measureList(page, THREAD, replyText);
   console.log(`[${where}] 스레드 답글: 거리 ${threadBefore?.distance} → ${threadAfter?.distance}(보임 ${threadAfter?.rowVisible})`);
   if (threadAfter === null || threadAfter.distance > 2 || !threadAfter.rowVisible) {
-    failures.push(`${where}: 답글을 달았는데 답글 목록이 맨 아래로 가지 않았다 (거리 ${threadAfter?.distance}, 보임 ${threadAfter?.rowVisible})`);
+    failures.push(`${where} ③: 답글을 달았는데 답글 목록이 맨 아래로 가지 않았다 (거리 ${threadAfter?.distance}, 보임 ${threadAfter?.rowVisible})`);
   }
+  records.push({ engine, name: "thread-reply", scene: "③ 스레드 답글 달기(바닥 거리)", kind: "bottom", where: `${where} ③`, distances: threadAfter ? [threadAfter.distance] : [] });
   await capture(page, `${engine}-${colorScheme}`, "3-after-thread-reply");
 
   // ⑥ 기록만(#5638 → v0.1.47 근거): 스레드 답글 목록에서 위를 읽는 중 위쪽 답글이 120px 자랄 때 보던 줄 이동.
   const grow = await threadGrowProbe(page, THREAD);
   console.log(`[${where}] 스레드 위 읽기 +120px(기록만): ${formatThreadGrow(grow)}`);
+  records.push({
+    engine,
+    name: "thread-grow",
+    scene: "⑥ 스레드 위 읽기 — 위쪽 답글 +120px(보던 줄 400ms)",
+    kind: "reading",
+    where: `${where} ⑥`,
+    recordOnly: true,
+    record: grow.error ?? `그대로 ${grow.asIs?.moveAfter400ms ?? grow.asIs?.error}px · 앵커링 끈 대조 ${grow.anchorOff?.moveAfter400ms ?? grow.anchorOff?.error}px`,
+    unexplainedPx: grow.asIs?.moveAfter400ms ?? null,
+    note: formatThreadGrow(grow),
+  });
   await context.close();
   return failures;
 }
 
-/** 페이지 안에서 매 프레임 「위 줄의 top」과 「보낸 줄의 높이」를 적기 시작한다. `stop`이 모은 값을 돌려준다. */
-async function startSampler(page, aboveText, sentText) {
+/**
+ * 페이지 안에서 매 프레임 「위 줄의 top · bottom」과 「보낸 줄의 높이 · bottom」을 적기 시작한다. `stop`이 모은 값을 돌려준다.
+ * 위 줄의 기대 이동은 `summarize` 가 낸다(위 줄 top 아래로 새로 생긴 높이). 맨 아래에 붙은 목록이면 위 줄은 정확히 그만큼 한 방향으로 올라간다.
+ * `firstText` 는 연달아 두 번에서 앞 글(확정을 기다리는 데만 쓴다).
+ * `seam` 은 구멍을 일부러 다시 여는 사보타주(#5641)다: bounce = 위 줄이 다 움직인 뒤 3프레임 동안 5px 되돌아갔다 다시 감(옛 문턱 +10px
+ * 안의 되돌아옴), rapid-shift = 두 글이 다 확정된 뒤 목록을 30px 위로 한 번 밀어 둠(바닥에 덜 앉음 — 옛 판정은 연달아의 이동 폭을 안 봄).
+ */
+async function startSampler(page, { aboveText, sentText, firstText = null, seam = null }) {
   await page.evaluate(
-    ({ selector, aboveText, sentText }) => {
+    ({ selector, aboveText, sentText, firstText, seam }) => {
       const samples = [];
       let running = true;
       const rowOf = (text) =>
         [...document.querySelectorAll(`${selector} [data-testid='timeline-message'], ${selector} [data-testid='timeline-pending']`)]
           .reverse()
           .find((el) => (el.textContent ?? "").includes(text)) ?? null;
+      let baseline = null;
+      let bounceLeft = seam === "bounce" ? 4 : 0;
+      let shifted = false;
       const tick = () => {
         if (!running) return;
         const above = rowOf(aboveText);
         const sent = rowOf(sentText);
+        const first = firstText === null ? null : rowOf(firstText);
+        const top = above === null ? null : above.getBoundingClientRect().top;
+        if (baseline === null && top !== null) baseline = top;
+        const list = document.querySelector(selector);
         samples.push({
-          aboveTop: above === null ? null : above.getBoundingClientRect().top,
+          gap: list ? list.scrollHeight - list.scrollTop - list.clientHeight : null,
+          aboveTop: top,
+          aboveBottom: above === null ? null : above.getBoundingClientRect().bottom,
+          sentBottom: sent === null ? null : sent.getBoundingClientRect().bottom,
           sentHeight: sent === null ? null : Math.round(sent.getBoundingClientRect().height),
           sentPending: sent === null ? null : sent.getAttribute("data-testid") === "timeline-pending",
         });
+        if (seam === "bounce" && above !== null && bounceLeft > 0 && sent !== null && baseline - top > 20 && sent.getAttribute("data-testid") === "timeline-message") {
+          bounceLeft -= 1;
+          above.style.transform = bounceLeft > 0 ? "translateY(5px)" : "";
+        }
+        const settled = (row) => row !== null && row.getAttribute("data-testid") === "timeline-message";
+        if (seam === "rapid-shift" && !shifted && settled(sent) && settled(first)) {
+          shifted = true;
+          document.querySelector(selector).scrollTop -= 30;
+        }
         requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
@@ -551,7 +640,7 @@ async function startSampler(page, aboveText, sentText) {
         return samples;
       };
     },
-    { selector: SCROLLER, aboveText, sentText }
+    { selector: SCROLLER, aboveText, sentText, firstText, seam }
   );
 }
 
@@ -576,20 +665,70 @@ function summarize(samples) {
   const heights = [...new Set(samples.map((one) => one.sentHeight).filter((value) => value !== null))];
   const echoHeights = [...new Set(samples.filter((one) => one.sentPending === true).map((one) => one.sentHeight))];
   const settledHeights = [...new Set(samples.filter((one) => one.sentPending === false).map((one) => one.sentHeight))];
+  // 기대 이동 = 마지막의 「보낸 줄 bottom − 위 줄 top」 − 처음의 「위 줄 높이」: 위 줄의 top 아래로 새로 생긴 높이(새 칸 · 줄 사이 여백 ·
+  // 위 줄 자신이 이어짐으로 바뀐 몫). 맨 아래에 붙은 목록이면 위 줄은 정확히 그만큼 올라간다. 목록 끝이 바닥에서 떨어지면 어긋난다.
+  const initial = samples.find((one) => one.aboveTop !== null && one.aboveBottom !== null && one.sentBottom === null) ?? null;
+  const final = [...samples].reverse().find((one) => one.sentBottom !== null && one.aboveTop !== null) ?? null;
+  // 처음에 목록이 바닥에서 떨어져 있었으면(#5617 알려 둔 것: 앞 글을 보낸 뒤 7~8px 위에 앉음) 바닥에 붙으며 그만큼 더 올라간다 — 그 몫은 기대에
+  // 더하고 따로 적는다(`gapBefore`). 끝의 바닥 거리(`gapAfter`)는 따로 단정한다.
+  const gapBefore = initial?.gap ?? null;
+  const gapAfter = final?.gap ?? null;
+  const expected =
+    final === null || initial === null
+      ? null
+      : Math.round((final.sentBottom - final.aboveTop - (initial.aboveBottom - initial.aboveTop) + (gapBefore ?? 0) - (gapAfter ?? 0)) * 100) / 100;
+  // 보낸 줄의 높이가 바뀐 횟수와 그 폭(⑦ 기록): 이어진 프레임 사이의 다른 값.
+  let heightChanges = 0;
+  let heightChangePx = 0;
+  const seq = samples.map((one) => one.sentHeight).filter((value) => value !== null);
+  for (let i = 1; i < seq.length; i += 1) {
+    if (seq[i] !== seq[i - 1]) {
+      heightChanges += 1;
+      heightChangePx += Math.abs(seq[i] - seq[i - 1]);
+    }
+  }
+  const motion = motionOf(tops);
   return {
-    travel: tops.length === 0 ? null : Math.round((Math.max(...tops) - Math.min(...tops)) * 10) / 10,
+    travel: motion === null ? null : Math.round(motion.range * 10) / 10,
+    net: motion?.net ?? null,
+    gapBefore: gapBefore === null ? null : Math.round(gapBefore * 100) / 100,
+    gapAfter: gapAfter === null ? null : Math.round(gapAfter * 100) / 100,
+    reversals: motion?.reversals ?? null,
+    steps: motion?.steps ?? null,
+    expected,
     heights,
     echoHeights,
     settledHeights,
+    heightChanges,
+    heightChangePx,
     frames: samples.length,
+    series: samples.filter((one) => one.aboveTop !== null).map((one) => ({ aboveTop: one.aboveTop, gap: one.gap })),
   };
 }
 
-/** 밀리초 뒤의 다음 분 경계까지 남은 시간. */
-const msToMinute = () => 60_000 - (Date.now() % 60_000);
+/**
+ * 게이트 시계를 옮긴다: 페이지의 `Date` 와 가짜 서버의 「지금」이 같이 `targetMs` 가 된다(이 순간 기준).
+ * 타이머 · rAF · performance.now 는 건드리지 않는다.
+ */
+async function setGateClock(page, targetMs) {
+  const shift = targetMs - Date.now();
+  backendClock.shiftMs = shift;
+  await page.evaluate((ms) => window.__gateClockShift(ms), shift);
+}
 
-/** ⑤ 한 장면: 바닥에서 앞 글을 보내 확정시킨 뒤(또는 `rapid`면 곧바로) 둘째 글을 보내며 잰다. */
-async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary = false, rapid = false }) {
+/** 서버 시계(게이트 시계 + 어긋남)로 「다음 분의 `second` 초」가 되는 게이트 시각. */
+function serverSecondTarget(second, skewMs) {
+  const server = gateNow() + skewMs;
+  return Math.floor(server / 60_000) * 60_000 + 60_000 + second * 1000 - skewMs;
+}
+
+const minuteOf = (ms) => Math.floor(ms / 60_000);
+
+/**
+ * ⑤ 한 장면: 바닥에서 앞 글을 보내 확정시킨 뒤(또는 `rapid`면 곧바로) 둘째 글을 보내며 잰다. ⑦(`recordOnly`)은 분 경계 · 자정에 연달아 두 번.
+ * 시계는 게이트가 고정한다(위 머리 주석).
+ */
+async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary = false, rapid = false, edge = null, recordOnly = false }) {
   const where = `${engine}/${colorScheme}/${name}`;
   const context = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR", colorScheme });
   await installBackend(context);
@@ -597,71 +736,142 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
   await installRealtimeSocket(page);
   await openChannel(page);
   backendClock.skewMs = skewMs;
-  // 분 경계: 서버는 1초 뒤에 찍는다. 앞 글의 응답이 알려 주는 차이는 그 지연의 절반쯤(+0.5초)이므로, 둘째 글을 경계 0.75초 전에
-  // 보내면 메아리의 어림 시각은 경계 앞(같은 분, 이어진 줄)이고 서버의 시각은 경계 뒤(다음 분)다 — 확정본이 에코의 묶음을 이어야 하는 판.
-  backendClock.postDelayMs = boundary ? 1000 : 1500;
+  backendClock.stamps = [];
+  // 분 경계: 서버는 3초 뒤에 찍는다. 앞 글의 응답이 알려 주는 차이는 그 지연의 절반(+1.5초)이므로, 둘째 글을 서버 분 경계 2.5초 전에
+  // 보내면 메아리의 어림 시각은 경계 1초 전(앞 분, 이어진 줄)이고 서버의 시각은 경계 0.5초 뒤(다음 분)다 — 확정본이 에코의 묶음을 이어야
+  // 하는 판. 누르기까지 1초 가까이 늦어도 판이 바뀌지 않는다. 왕복 3초는 시계 표본의 한도(4초) 안이다.
+  backendClock.postDelayMs = boundary ? 3000 : 1500;
   const first = `${name} 앞 글입니다.`;
   const second = `${name} 이어 보낸 글입니다.`;
+  const seam = proveRed === "bounce" && !rapid && !boundary ? "bounce" : proveRed === "rapid-shift" && rapid && !recordOnly ? "rapid-shift" : null;
   let result;
+  let edgeAt = null;
   if (rapid) {
     // 연달아 두 번: 첫 응답이 오기 전에 둘째를 보낸다. 위 줄은 화면에 있던 마지막 남의 말이다.
-    await startSampler(page, "같은 52분의 둘째 말입니다.", second);
-    await send(page, "composer-input", first);
+    const input = page.getByTestId("composer-input");
+    await input.click();
+    await input.fill(first);
+    if (edge === "minute") edgeAt = serverSecondTarget(0, 0);
+    if (edge === "midnight") {
+      const midnight = new Date(gateNow());
+      midnight.setHours(24, 0, 0, 0);
+      edgeAt = midnight.getTime();
+    }
+    // 분 경계 · 자정 0.6초 전에 앞 글, 0.25초 뒤에 둘째. 아니면 서버 분의 10초에서 시작한다(분이 바뀌지 않는다).
+    await setGateClock(page, edgeAt === null ? serverSecondTarget(10, skewMs) : edgeAt - 600);
+    await startSampler(page, { aboveText: "같은 52분의 둘째 말입니다.", sentText: second, firstText: first, seam });
+    await input.press("Enter");
     await wait(250);
     await send(page, "composer-input", second);
     await waitConfirmed(page, first);
     await waitConfirmed(page, second);
     result = summarize(await stopSampler(page));
   } else {
-    if (boundary) {
-      // 앞 글은 경계 5~15초 전에(같은 분), 둘째는 경계 0.35초 전에 보낸다 — 서버는 0.6초 뒤 경계를 넘겨 찍는다.
-      while (msToMinute() > 15_000 || msToMinute() < 5_000) await wait(200);
-    }
+    await setGateClock(page, serverSecondTarget(boundary ? 30 : 10, skewMs));
     await send(page, "composer-input", first);
     await waitConfirmed(page, first);
     await capture(page, engine, `skew-${name}-${colorScheme}-1-before`);
-    await startSampler(page, first, second);
+    await startSampler(page, { aboveText: first, sentText: second, seam });
+    const input = page.getByTestId("composer-input");
+    await input.click();
+    await input.fill(second);
     if (boundary) {
-      // 글은 미리 채워 두고 Enter만 경계 0.75초 전에 누른다(누르기까지의 지연을 줄인다).
-      const input = page.getByTestId("composer-input");
-      await input.click();
-      await input.fill(second);
-      while (msToMinute() > 1_500) await wait(20);
-      while (msToMinute() > 750) await wait(5);
-      await input.press("Enter");
-    } else {
-      await send(page, "composer-input", second);
+      // 글은 미리 채워 두고 시계를 서버 분 경계 2.5초 전으로 옮긴 뒤 바로 누른다. late-boundary 사보타주는 경계 0.5초 뒤로 옮긴다.
+      await setGateClock(page, serverSecondTarget(proveRed === "late-boundary" ? 0.5 : -2.5, skewMs));
+    } else if (proveRed === "minute-straddle") {
+      // 사보타주: 시계 고정을 끄고 둘째 글을 다음 분(서버 시계)으로 넘긴다 — 옛 게이트가 벽시계 분 경계에서 보던 거짓 RED.
+      await setGateClock(page, serverSecondTarget(2, skewMs));
     }
+    await input.press("Enter");
     await wait(boundary ? 200 : 700);
     await capture(page, engine, `skew-${name}-${colorScheme}-2-echo`);
     await waitConfirmed(page, second);
     result = summarize(await stopSampler(page));
     await capture(page, engine, `skew-${name}-${colorScheme}-3-confirmed`);
   }
+  const stamps = [...backendClock.stamps];
   await context.close();
   backendClock.skewMs = 0;
   backendClock.postDelayMs = 150;
+  backendClock.shiftMs = 0;
+  const stampOf = (text) => stamps.find((one) => one.body === text) ?? null;
+  const firstStamp = stampOf(first);
+  const secondStamp = stampOf(second);
   console.log(
-    `[${where}] 위 줄 이동 ${result.travel}px · 보낸 줄 높이 ${JSON.stringify(result.heights)} ` +
-      `(메아리 ${JSON.stringify(result.echoHeights)} → 확정 ${JSON.stringify(result.settledHeights)}) · 프레임 ${result.frames}`
+    `[${where}] 위 줄 이동 ${result.travel}px(기대 ${result.expected}px · 되돌아옴 ${result.reversals} · ${result.steps}번 · 바닥 거리 ${result.gapBefore}→${result.gapAfter}) · 보낸 줄 높이 ${JSON.stringify(result.heights)} ` +
+      `(메아리 ${JSON.stringify(result.echoHeights)} → 확정 ${JSON.stringify(result.settledHeights)}, 바뀐 횟수 ${result.heightChanges} · ${result.heightChangePx}px) · 프레임 ${result.frames}`
   );
+  const record = {
+    engine,
+    name,
+    scene: recordOnly ? `⑦ ${edge === "midnight" ? "자정" : "분 경계"}에 연달아 두 번(기록만)` : `⑤ 시계 어긋남 ${name}`,
+    kind: "expected",
+    where,
+    samples: result.series,
+    expected: result.expected,
+    travel: result.travel,
+    heights: result.heights,
+    heightChanges: result.heightChanges,
+    heightChangePx: result.heightChangePx,
+    gapBefore: result.gapBefore,
+    gapAfter: result.gapAfter,
+    recordOnly,
+  };
   const failures = [];
+  if (recordOnly) {
+    const rel = (stamp) => (stamp === null || edgeAt === null ? "?" : `${((stamp.arrivedAt - edgeAt) / 1000).toFixed(2)}초`);
+    record.record = `둘째 줄 높이 바뀜 ${result.heightChanges}번 · ${result.heightChangePx}px`;
+    record.note = `보낸 시각(경계 기준): 앞 ${rel(firstStamp)} · 둘째 ${rel(secondStamp)} · 높이 ${JSON.stringify(result.heights)} · 위 줄 ${result.travel}px(기대 ${result.expected}, 되돌아옴 ${result.reversals})`;
+    console.log(`[${where}] 기록만: ${record.record} — ${record.note}`);
+    records.push(record);
+    return failures;
+  }
+  record.note = `바닥 거리 ${result.gapBefore}→${result.gapAfter}px${result.gapBefore > 1 ? "(앞 글 뒤 떨어져 앉음 — #5617 알려 둔 것, 기대 이동에 더함)" : ""}`;
   const height = result.heights[0] ?? 99;
   if (result.heights.length !== 1) {
     failures.push(`${where}: 보낸 줄의 높이가 보내는 동안 바뀌었다 ${JSON.stringify(result.heights)} — 머리가 섰다 사라졌다 (#5624)`);
   }
-  if (!rapid && !boundary && height > 44) {
+  const sameMinute = firstStamp !== null && secondStamp !== null && minuteOf(firstStamp.stampedAt) === minuteOf(secondStamp.stampedAt);
+  if (!boundary && !rapid && proveRed !== "minute-straddle" && !sameMinute) {
+    // 시계를 고정했으므로 일어나면 안 된다. 일어났으면 이 장면은 재려던 것을 재지 않았다(거짓 RED 도 거짓 초록도 내지 않는다).
+    failures.push(`${where}: 장면을 못 만들었다 — 두 글 사이에 서버 분이 바뀌었다(${firstStamp?.stampedAt} → ${secondStamp?.stampedAt})`);
+  } else if (!rapid && !boundary && height > 44) {
     // 서버 시계로도 같은 분이다: 이어진 줄이어야 한다(메아리가 기기 시계로 묶이면 머리가 선다).
     failures.push(`${where}: 같은 분에 이어 보낸 글이 이어진 줄이 아니다(높이 ${height}px) — 메아리가 기기 시계로 묶였다`);
   }
-  if (!rapid && (result.travel === null || result.travel > height + 10)) {
-    // 위 줄은 보낸 줄 하나만큼 **한 방향으로만** 움직인다(이어진 줄이면 44px 안팎). 더 움직였으면 되돌아온 것이다.
-    failures.push(`${where}: 위 줄이 ${result.travel}px 움직였다 — 보낸 줄(${height}px) 하나만큼이어야 한다(되돌아옴)`);
-  }
   if (boundary) {
-    // 분 경계: 서버는 다음 분에 찍었다. 메아리가 어느 쪽에 서든(어림한 차이의 오차 안) 확정 때 바뀌지 않는 것이 요점이다.
-    console.log(`[${where}] 경계의 글은 ${height > 44 ? "머리(다음 분)" : "이어진 줄(앞 분)"}로 서고 그대로였다`);
+    // 분 경계의 전제: 메아리는 앞 분(이어진 줄)으로 섰고, 서버는 다음 분에 찍었다. 아니면 장부가 일하는 판을 재지 않은 것이다.
+    const crossed = firstStamp !== null && secondStamp !== null && minuteOf(secondStamp.stampedAt) > minuteOf(firstStamp.stampedAt);
+    const echoContinued = result.echoHeights.length > 0 && result.echoHeights.every((value) => value <= 44);
+    if (!crossed || !echoContinued) {
+      failures.push(`${where}: 장면을 못 만들었다 — 메아리가 이어진 줄로 서고(${JSON.stringify(result.echoHeights)}) 서버가 다음 분에 찍어야 한다(분 넘김 ${crossed})`);
+    }
+    console.log(`[${where}] 경계의 글은 ${height > 44 ? "머리(다음 분)" : "이어진 줄(앞 분)"}로 서고 그대로였다 · 서버 분 넘김 ${crossed}`);
   }
+  // 위 줄은 보낸 칸 높이(연달아면 두 칸의 합) ± 1px 만큼 한 방향으로만 움직인다(#5641: 옛 문턱은 +10px · 되돌아옴 미계수 · 연달아 미단정).
+  // 움직인 폭(최대 − 최소)과 처음 → 끝이 둘 다 기대 ± 1px 이어야 한다.
+  if (result.travel === null || result.expected === null || Math.abs(result.travel - result.expected) > 1 || Math.abs(Math.abs(result.net) - result.expected) > 1) {
+    failures.push(`${where}: 위 줄이 ${result.travel}px(처음 → 끝 ${result.net}px) 움직였다 — 보낸 칸 높이 ${result.expected}px ± 1px 여야 한다`);
+  }
+  if (result.gapAfter === null || result.gapAfter > 1) {
+    if (KNOWN_SEND_SHORTFALL) {
+      record.known = `${record.known ? `${record.known} · ` : ""}끝 바닥 거리 ${result.gapAfter}px — 알려진 실패(#5617)`;
+      console.log(`[${where}] 알려진 실패(기록만): 끝 바닥 거리 ${result.gapAfter}px(#5617)`);
+    } else {
+      failures.push(`${where}: 보낸 뒤 목록이 바닥에서 ${result.gapAfter}px 떨어져 앉았다`);
+    }
+  }
+  if (result.reversals === null || result.reversals !== 0) {
+    if (rapid && KNOWN_RAPID_SETTLE) {
+      // 알려진 실패(#5617 「바닥에서 보내기 7~8px 모자람」): 세션의 첫 글이 붙는 프레임에 목록이 그 줄만큼 올라갔다가 다음 프레임에
+      // 7~8px 내려앉는다. 수리는 v0.1.47 M-3 칸이다. 기록만 하고 판정에서 뺀다(움직인 폭 · 처음 → 끝은 위에서 단정한다).
+      record.known = `${record.known ? `${record.known} · ` : ""}되돌아옴 ${result.reversals}회 — 알려진 실패(#5617 첫 글 7~8px 내려앉음)`;
+      console.log(`[${where}] 알려진 실패(기록만): ${record.known}`);
+    } else {
+      failures.push(`${where}: 위 줄이 되돌아왔다(${result.reversals}회)`);
+    }
+  }
+  records.push(record);
   return failures;
 }
 
@@ -673,6 +883,8 @@ async function runSkewScenes(browser, engine, colorScheme) {
     { name: "zero", skewMs: 0 },
     { name: "boundary", skewMs: 0, boundary: true },
     { name: "rapid", skewMs: 90_000, rapid: true },
+    { name: "rapid-boundary", skewMs: 0, rapid: true, edge: "minute", recordOnly: true },
+    { name: "rapid-midnight", skewMs: 0, rapid: true, edge: "midnight", recordOnly: true },
   ]) {
     if (skewScenesWanted.length > 0 && !skewScenesWanted.includes(scene.name)) continue;
     failures.push(...(await skewScene(browser, engine, colorScheme, scene)));
@@ -709,12 +921,22 @@ async function main() {
   } finally {
     await server.stop();
   }
+  if (outDir !== null) {
+    mkdirSync(outDir, { recursive: true });
+    const file = resolve(outDir, skewOnly ? "send-follow-skew.json" : "send-follow.json");
+    writeFileSync(file, JSON.stringify(records, null, 1));
+    console.log(`장면 기록: ${file}`);
+  }
+  const empty = nothingRan(records.length, "send-follow");
+  if (empty !== null) failures.push(empty);
   if (failures.length > 0) {
     for (const failure of failures) console.error(`FAIL ${failure}`);
     process.exit(1);
   }
   if (skewOnly) {
-    console.log(`PASS send-follow skew: ${engineNames.join("·")} — ±90초·0초·분 경계에서 이어 보낸 글이 처음부터 이어진 줄이고 위 줄은 44px 안팎 · 연달아 두 번에서 높이 불변`);
+    console.log(
+      `PASS send-follow skew: ${engineNames.join("·")} — ±90초·0초·분 경계에서 이어 보낸 글이 처음부터 이어진 줄 · 위 줄은 보낸 칸 높이 ±1px · 되돌아옴 0 · 연달아 두 번은 두 칸 합 ±1px (⑦ 분 경계·자정 연달아는 기록만)`
+    );
     return;
   }
   console.log(`PASS send-follow: ${engineNames.join("·")} — 위에서 보내면 맨 아래(≤2px, 1초 뒤에도) · 남의 말은 제자리(±8px)·필 1 · 스레드 답글 맨 아래 · 47/50분 머리 둘 · 같은 분 머리 하나`);
