@@ -1,8 +1,19 @@
 // ADR-0201 증보 v2 H4·H5·H9-I9 (#3893): 도우미 답의 꼬리(찾아본 것 · 출처 · 모델 라벨).
 import { describe, expect, it } from "vitest";
-import { citationAccessibleName, parseTeamAiReplyMeta, teamAiReplyMetaFor } from "./teamAiReply";
+import {
+  citationAccessibleName,
+  parseTeamAiReplyMeta as parseAs,
+  teamAiReplyMetaFor as metaForAs,
+} from "./teamAiReply";
 // #5600: 서버(`team_ai.rs` `answer_props`)의 단위 시험이 같은 파일을 `include_str!` 로 읽는다.
 import servedReply from "./__fixtures__/team-ai-reply-props.json";
+
+// #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
+// `serverResultAuthor.test.ts` 가 잰다.
+const parseTeamAiReplyMeta = (props: Parameters<typeof parseAs>[0], apps?: Parameters<typeof parseAs>[1]) =>
+  parseAs(props, apps, "agent");
+const teamAiReplyMetaFor = (message: Parameters<typeof metaForAs>[0], apps?: Parameters<typeof metaForAs>[1]) =>
+  metaForAs(message, apps, "agent");
 
 describe("모델 칩은 서버가 쓰는 모양에서 선다 (#5600)", () => {
   it("서버 답 props(`team_ai_model: {model, wire}`)로 「팀 AI · 모델」 칩이 선다", () => {

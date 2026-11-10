@@ -538,6 +538,16 @@ describe('에이전트 답 행에 칩이 붙는 자리', () => {
     expect(mockReceipt).toHaveBeenCalledWith(WS, 'run-1');
   });
 
+  // #5577: 같은 턴 기록 표지를 사람이 실으면 어느 run 의 기록도 아니다 — 행이 멤버 목록의 작성자 종류를 코어에 넘긴다.
+  it('사람이 같은 표지를 실은 글에는 영수증을 묻지도 칩을 달지도 않는다', async () => {
+    mockReceipt.mockResolvedValue(receipt({servedCount: 2}));
+    row(turnRecord({authorMemberId: SELF}));
+    await act(async () => {});
+    expect(screen.getByTestId('message-row')).toBeTruthy();
+    expect(mockReceipt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('memory-receipt-chip')).toBeNull();
+  });
+
   it('일반 메시지에는 영수증을 묻지도 칩을 달지도 않는다', async () => {
     row(turnRecord({props: {}}));
     await act(async () => {});
