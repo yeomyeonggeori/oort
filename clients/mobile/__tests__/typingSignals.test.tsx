@@ -124,7 +124,10 @@ function typingLineText(): string {
     if (typeof child === 'string') return child;
     if (Array.isArray(child)) return child.map(walk).join('');
     if (child && typeof child === 'object' && 'props' in child) {
-      return walk((child as {props: {children?: unknown}}).props.children);
+      const element = child as {props: {children?: unknown; accessibilityElementsHidden?: boolean}};
+      // 사람에게 숨긴 갈래(두 이름의 폭을 재는 거울, #5645)는 줄이 「말하는」 글이 아니다.
+      if (element.props.accessibilityElementsHidden === true) return '';
+      return walk(element.props.children);
     }
     return '';
   };

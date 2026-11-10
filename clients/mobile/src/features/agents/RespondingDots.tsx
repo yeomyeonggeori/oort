@@ -23,6 +23,14 @@ const STEP_MS = 200;
 const LOW = 0.3;
 const STILL = 0.6;
 const DOTS = [0, 1, 2] as const;
+/** 점 하나의 지름(pt). 글자 배율을 따르지 않는다. */
+const DOT = 4;
+
+/**
+ * 점 셋이 줄에서 차지하는 폭(점 셋 + 사이 둘). 「작성 중」 줄이 이름 칸들의 몫을 셈할 때 뺀다(`TypingBar`, #5645) —
+ * 아래 `row`·`dot` 스타일과 같은 수에서 나온다.
+ */
+export const RESPONDING_DOTS_WIDTH = DOTS.length * DOT + (DOTS.length - 1) * space.xs;
 
 /** 점 셋. `human`은 사람의 「작성 중」 줄이라는 뜻이다 — 점이 에이전트 색 대신 흐린 잉크다. */
 export function RespondingDots({human = false}: {human?: boolean} = {}): React.JSX.Element {
@@ -80,6 +88,6 @@ export function RespondingDots({human = false}: {human?: boolean} = {}): React.J
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     row: {flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'center'},
-    dot: {width: 4, height: 4, borderRadius: radius.pill, backgroundColor: color.agent},
+    dot: {width: DOT, height: DOT, borderRadius: radius.pill, backgroundColor: color.agent},
     dotHuman: {backgroundColor: color.textMuted},
   });

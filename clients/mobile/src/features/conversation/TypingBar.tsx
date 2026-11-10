@@ -1,10 +1,16 @@
-import {typingLead, typingNameCells, typingTail, type TypingSegment} from '@momo/core/features/chat/typing';
-import React from 'react';
-import {StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {
+  typingLead,
+  typingNameCells,
+  typingTail,
+  type TypingNameCell,
+  type TypingSegment,
+} from '@momo/core/features/chat/typing';
+import React, {useState} from 'react';
+import {StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {font, line as lineScale, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
-import {RespondingDots} from '../agents/RespondingDots';
+import {RESPONDING_DOTS_WIDTH, RespondingDots} from '../agents/RespondingDots';
 import {CONV} from './convDesign';
 
 // =============================================================================
@@ -112,6 +118,98 @@ export function typingReserve(fontScale: number): number {
   return typingSlotHeight(fontScale) - TYPING_OVERHANG;
 }
 
+// =============================================================================
+// 두 이름이 넘칠 때 — 짧은 이름은 온전히 남는다 (#5645, #5582 검수 M1)
+//
+// 앞 판은 이름 칸마다 `flexShrink: 1` 이었고, Yoga 는 넘친 폭을 **글 폭에 비례해** 나눈다. 그래서 긴 이름(309) + 짧은
+// 이름(31)이 390 폭에 서면 짧은 이름도 28 로 줄어 세 글자 이름이 「이…」가 됐다(Yoga 계산). 웹은 `typing-names`
+// (`grid-auto-columns: minmax(0, max-content)`)로 **남는 폭을 똑같이 나누되 자기 글 폭에서 멈춘다** — 짧은 이름은 온전하고
+// 긴 이름만 준다. Yoga 에는 grid 가 없고, 「똑같이 나누되 글 폭에서 멈춤」은 어떤 flex 속성 조합으로도 안 나온다(줄임은 늘
+// 글 폭 비례다). 그래서 폰은 **재고 셈한다**: 줄의 조각마다 제 글 폭을 숨은 거울(`useComposerInputLayout` 의 거울과 같은
+// 꼴)로 재고, 줄 폭에서 나머지를 뺀 몫을 웹과 같은 규칙(`shareTypingNameWidths`)으로 나눠 이름 칸에 **명시 폭**을 준다.
+//
+// - 재는 것은 두 이름일 때뿐이다. 한 이름(「A」·「A 외 N명」)은 줄어드는 칸이 하나라 앞 판 그대로가 이미 같은 답이다.
+// - 아직 못 쟀거나(첫 프레임) 다 들어가면 명시 폭이 없다 — 앞 판과 **같은 배치**다. 잰 값이 오면 이름 폭만 바뀌고 칸 높이는
+//   그대로라 대화는 움직이지 않는다.
+// =============================================================================
+
+/**
+ * 두 이름이 넘칠 때 이름마다 받을 폭. 남는 폭(`room`)을 이름 수로 똑같이 나누되 자기 글 폭(`naturals`)에서 멈추고, 멈춘
+ * 이름이 남긴 몫은 나머지 이름이 다시 나눈다(웹 `minmax(0, max-content)` 칸과 같은 규칙). 다 들어가면 null(줄일 칸 없음).
+ */
+export function shareTypingNameWidths(
+  naturals: readonly number[],
+  room: number,
+): number[] | null {
+  const total = naturals.reduce((sum, width) => sum + width, 0);
+  if (total <= room) return null;
+  const widths = naturals.map(() => 0);
+  let left = Math.max(0, room);
+  let count = naturals.length;
+  const ascending = naturals
+    .map((width, index) => ({width, index}))
+    .sort((a, b) => a.width - b.width);
+  for (const {width, index} of ascending) {
+    const take = Math.min(width, left / count);
+    widths[index] = take;
+    left -= take;
+    count -= 1;
+  }
+  return widths;
+}
+
+/**
+ * 이름 칸들이 나눠 가질 폭: 줄 폭에서 좌우 여백(`SAFE_GUTTER` × 2), 앞부분 · 점 · 꼬리 사이 둘(`space.xs` × 2), 점
+ * (`RESPONDING_DOTS_WIDTH`), 꼬리, 이름 아닌 칸(쉼표 뒤 빈칸)을 뺀 것. 아래 `line` 스타일과 같은 수에서 나온다.
+ */
+export function typingNameRoom(
+  lineWidth: number,
+  tailWidth: number,
+  textCellWidths: readonly number[],
+): number {
+  const fixed = textCellWidths.reduce((sum, width) => sum + width, 0);
+  return lineWidth - 2 * SAFE_GUTTER - 2 * space.xs - RESPONDING_DOTS_WIDTH - tailWidth - fixed;
+}
+
+/** 거울이 잰 폭을 기억하는 열쇠. 같은 글 · 같은 옷(이름 칸 · 이름 아닌 칸 · 꼬리)이면 폭이 같다. */
+function pieceKey(kind: 'name' | 'text' | 'tail', text: string): string {
+  return `${kind}:${text}`;
+}
+
+/** 칸의 글(이름 + 거기 붙은 쉼표 같은 것). */
+function cellText(cell: TypingNameCell): string {
+  return cell.segments.map(segment => segment.text).join('');
+}
+
+/**
+ * 칸마다 줄 명시 폭(이름 칸만, 이름 아닌 칸은 undefined). 아직 못 잰 조각이 있거나 줄 폭을 모르거나 다 들어가면 null —
+ * 그때는 앞 판 배치 그대로다.
+ */
+function measuredNameWidths(
+  cells: readonly TypingNameCell[],
+  keys: readonly string[],
+  tailKey: string,
+  natural: Readonly<Record<string, number>>,
+  lineWidth: number,
+): (number | undefined)[] | null {
+  const tailWidth = natural[tailKey];
+  if (lineWidth <= 0 || tailWidth === undefined) return null;
+  const widths = keys.map(key => natural[key]);
+  if (widths.some(width => width === undefined)) return null;
+  const nameIndexes = cells.flatMap((cell, index) => (cell.name ? [index] : []));
+  const textWidths = cells.flatMap((cell, index) => (cell.name ? [] : [widths[index] ?? 0]));
+  const shares = shareTypingNameWidths(
+    nameIndexes.map(index => widths[index] ?? 0),
+    typingNameRoom(lineWidth, tailWidth, textWidths),
+  );
+  if (shares === null) return null;
+  const out: (number | undefined)[] = cells.map(() => undefined);
+  nameIndexes.forEach((cellIndex, at) => {
+    out[cellIndex] = shares[at];
+  });
+  return out;
+}
+
 /**
  * 컴포저 위 「작성 중」 한 줄.
  *
@@ -147,7 +245,31 @@ export function TypingBar({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const {fontScale} = useWindowDimensions();
+  // 줄 폭과 거울이 잰 조각 폭(#5645). 둘 다 두 이름이 넘칠 때 이름 칸의 몫을 셈하는 데만 쓴다.
+  const [lineWidth, setLineWidth] = useState(0);
+  const [natural, setNatural] = useState<Readonly<Record<string, number>>>({});
   const empty = segments.length === 0;
+  const cells = typingNameCells(typingLead(segments));
+  const tail = typingTail(segments);
+  const keys = cells.map(cell => pieceKey(cell.name ? 'name' : 'text', cellText(cell)));
+  const tailKey = pieceKey('tail', tail?.text ?? '');
+  // 재는 것은 두 이름일 때뿐이다(한 이름은 줄어드는 칸이 하나라 앞 판 그대로가 같은 답이다).
+  const measuring = cells.filter(cell => cell.name).length >= 2;
+  const widths = measuring ? measuredNameWidths(cells, keys, tailKey, natural, lineWidth) : null;
+  const onLine = (event: LayoutChangeEvent): void => {
+    const next = event.nativeEvent.layout.width;
+    setLineWidth(previous => (previous === next ? previous : next));
+  };
+  // 잰 폭을 기억한다. 지금 줄에 있는 조각만 남겨 기억이 쌓이지 않는다(이름이 바뀌면 바뀐 조각만 다시 잰다).
+  const remember = (key: string, width: number): void =>
+    setNatural(previous => {
+      if (previous[key] === width) return previous;
+      const next: Record<string, number> = {[key]: width};
+      for (const kept of [...keys, tailKey]) {
+        if (kept !== key && previous[kept] !== undefined) next[kept] = previous[kept];
+      }
+      return next;
+    });
   // 이름 칸의 시험 표지. 이름마다 자기 한 줄 칸이다(#5582 R2-M1, 코어 `typingNameCells`).
   const nameCellTestID = `${testID}-name`;
   return (
@@ -161,30 +283,69 @@ export function TypingBar({
       pointerEvents="none"
       // 칸 높이는 인라인이다 — 글자 배율을 곱한 값이라 스타일시트에 못 박지 못한다(레일 칸과 같다).
       style={[styles.line, {height: typingSlotHeight(fontScale)}]}
+      onLayout={onLine}
       testID={testID}>
       {!empty ? (
         <>
           <View style={styles.lead}>
-            {typingNameCells(typingLead(segments)).map((cell, index) => (
-              <Text
-                key={index}
-                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                numberOfLines={1}
-                style={cell.name ? styles.nameCell : styles.textCell}
-                testID={cell.name ? nameCellTestID : undefined}>
-                {cell.segments.map((segment, at) => (
-                  <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
-                    {segment.text}
-                  </Text>
-                ))}
-              </Text>
-            ))}
+            {cells.map((cell, index) => {
+              const width = widths?.[index];
+              return (
+                <Text
+                  key={index}
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  numberOfLines={1}
+                  style={[cell.name ? styles.nameCell : styles.textCell, width !== undefined && {width}]}
+                  testID={cell.name ? nameCellTestID : undefined}>
+                  {cell.segments.map((segment, at) => (
+                    <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
+                      {segment.text}
+                    </Text>
+                  ))}
+                </Text>
+              );
+            })}
           </View>
           {/* 사람의 줄이라 점은 글자와 같은 흐린 잉크다(에이전트 색은 에이전트 줄에만, #5645). */}
           <RespondingDots human />
           <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} numberOfLines={1} style={styles.tail}>
-            {typingTail(segments)?.text}
+            {tail?.text}
           </Text>
+          {measuring ? (
+            // 거울: 같은 글 · 같은 옷 · 같은 상한으로 그린 숨은 조각들. 흐름 밖(절대 배치)이라 줄을 밀지 않고, 보이지도
+            // 읽히지도 눌리지도 않는다. 각 조각의 제 폭(줄어들기 전 폭)만 잰다.
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              style={styles.mirror}
+              testID={`${testID}-measure`}>
+              {cells.map((cell, index) => (
+                <Text
+                  key={`${index}:${keys[index]}`}
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  numberOfLines={1}
+                  onLayout={event => remember(keys[index], event.nativeEvent.layout.width)}
+                  style={cell.name ? styles.nameCell : styles.textCell}
+                  testID={`${testID}-measure-${index}`}>
+                  {cell.segments.map((segment, at) => (
+                    <Text key={at} style={segment.kind === 'name' ? styles.name : undefined}>
+                      {segment.text}
+                    </Text>
+                  ))}
+                </Text>
+              ))}
+              <Text
+                key={tailKey}
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                numberOfLines={1}
+                onLayout={event => remember(tailKey, event.nativeEvent.layout.width)}
+                style={styles.tail}
+                testID={`${testID}-measure-tail`}>
+                {tail?.text}
+              </Text>
+            </View>
+          ) : null}
         </>
       ) : null}
     </View>
@@ -210,7 +371,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 앞부분: 이름 칸들이 한 줄로 선다. 줄어드는 것은 이 묶음이고, 그 안에서 이름 칸마다 줄어든다(`typingNameCells`).
   lead: {flexDirection: 'row', flexShrink: 1, minWidth: 0},
-  // 이름 칸: 넘치면 자기 안에서 말줄임된다.
+  // 이름 칸: 넘치면 자기 안에서 말줄임된다. 두 이름이 넘치면 셈한 명시 폭을 더 받는다(#5645).
   nameCell: {flexShrink: 1, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
   // 이름 아닌 칸(「 외 2명」·쉼표 뒤 빈칸): 줄지 않는다.
   textCell: {flexShrink: 0, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
@@ -218,4 +379,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 이름만 한 급 밝다 (M-4). 「작성」과 「작업」을 가르는 한 음절 말고 **눈에
   // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.
   name: {color: color.text, fontWeight: '700'},
+  // 재는 거울(#5645): 흐름 밖에 서고 보이지 않는다. 조각마다 제 글 폭으로 서도록 세로로 쌓고 왼쪽에 붙인다.
+  mirror: {position: 'absolute', top: 0, left: 0, opacity: 0, alignItems: 'flex-start'},
 });
