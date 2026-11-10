@@ -231,6 +231,19 @@ describe("H1 — 장부는 날을 넘긴 메아리를 잇지 않는다(날 줄�
     expect(dayIssues(items)).toEqual([]);
   });
 
+  it("같은 날 한참 뒤 손으로 다시 보낸 글(10:00:30 실패 → 15:00)도 그 화면에서는 메아리 때 묶음을 지킨다 — (가)가 받아 둔 대가", () => {
+    // 날 줄은 서버 시각 그대로라 날짜는 맞다. 머리/이어짐은 메아리 때(10:00 머리 아래 이어진 줄)를 지키고, 다시 불러오면 15:00 머리로 선다.
+    const head = said(1, ME, "앞 글", on(9, 10, 0, 10));
+    const failed: PendingMessage = { ...echo("k1", "실패했던 글", on(9, 10, 0, 30), 1), status: "failed" };
+    expect(headOf(buildTimelineItems([head], { pending: [failed] }), "실패했던 글")).toBe(false);
+    const mine = said(2, ME, "실패했던 글", on(9, 15, 0, 5));
+    const { pins } = pinSettledEchoes(new Map(), [mine], [failed]);
+    const items = buildTimelineItems([head, mine], { echoPins: pins });
+    expect(dayIssues(items)).toEqual([]);
+    expect(headOf(items, "실패했던 글")).toBe(false);
+    expect(headOf(buildTimelineItems([head, mine]), "실패했던 글")).toBe(true);
+  });
+
   it("같은 날 안에서는 장부가 그대로 일한다 — 몇 분 뒤 저절로 다시 나간 글의 확정본은 메아리 때 묶음을 지킨다", () => {
     // 10:47:30에 이어 보낸 글이 연결이 끊겨 실패하고, 3분 뒤 저절로 다시 나가 서버가 10:50:31에 찍었다. 좁은 문턱(왕복 몇 초)으로
     // 장부를 끊으면 여기서 확정 순간에 머리가 서며 뒤집힌다.
