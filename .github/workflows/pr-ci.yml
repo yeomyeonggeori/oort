@@ -789,8 +789,9 @@ jobs:
       #     같은 라벨을 이벤트 페이로드가 아니라 API로 지금 값을 읽어서, 라벨을 붙인 뒤에는 이 잡을 다시 돌리기만 하면
       #     된다. 조회가 실패하면 승인 없음으로 본다(기준이 그대로인 PR은 영향이 없다). 토큰은 셸의 라벨 조회에만 쓰고
       #     node(PR이 바꾼 의존이 실리는 프로세스)에는 넘기지 않는다.
-      #   · 세 표면 `check`를 먼저 돌린다(git 없음): 표면별 시험 파일이 지워져도 CI가 웹·폰을 본다.
-      #   · 앞 단계(vitest)가 빨강이어도 돈다 — 새 raise 요약이 로그에 남아야 한다.
+      #   · 세 표면 `check`를 먼저 돌린다(git 없음): 표면별 시험 파일이 지워져도 CI가 웹·폰을 본다. `check`가 빨강이어도
+      #     비교까지 돌고 끝에 실패한다 — 장부가 빨강의 이유일 때 새 raise 요약이 가장 필요하다.
+      #   · 앞 단계(vitest)가 빨강이어도 돈다(같은 이유).
       # 이 단계는 `packages/momo-core/src/i18n/direct-copy-ci.test.ts`가 가짜 저장소의 얕은 병합 ref에서 그대로 돌린다.
       - name: 직접 문구 장부 — 병합 ref의 base와 비교(세 표면 check, 기준·봉인·lowered, 새 raise 요약)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -801,7 +802,8 @@ jobs:
         run: |
           set -euo pipefail
           tool=packages/momo-core/src/i18n/tooling/direct-copy.mjs
-          env -u GH_TOKEN node "$tool" check
+          rc=0
+          env -u GH_TOKEN node "$tool" check || rc=1
           parents="$(git cat-file -p HEAD | awk '/^parent /{print $2}')"
           if [ "$(printf '%s\n' "$parents" | grep -c .)" -ne 2 ]; then
             echo "직접 문구 장부: HEAD가 PR 병합 ref(부모 둘)가 아니에요 — 비교할 base를 정할 수 없어요" >&2
@@ -814,7 +816,8 @@ jobs:
           if printf '%s\n' "$labels" | grep -Fxq policy-change-approved; then
             approved=true
           fi
-          env -u GH_TOKEN DIRECT_COPY_REANCHOR_APPROVED="$approved" node "$tool" compare-base "$base"
+          env -u GH_TOKEN DIRECT_COPY_REANCHOR_APPROVED="$approved" node "$tool" compare-base "$base" || rc=1
+          exit "$rc"
 
   node_web:
     name: TS web — 타입체크 + 단위 시험

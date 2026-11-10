@@ -502,7 +502,7 @@ export function compareWithBase(base, head, {baseSeal, headSeal = ANCHOR_SEAL, r
   return {problems, notes, fresh, removed};
 }
 
-/** Scanned product files whose working copy is not what will be committed (`git status --porcelain=v1 -z`). */
+/** Scanned files (and en-US catalogs) whose working copy is not what will be committed (`git status --porcelain=v1 -z`). */
 export function dirtyScannedFiles(porcelain) {
   const entries = porcelain.split('\0');
   const dirty = [];
@@ -512,7 +512,9 @@ export function dirtyScannedFiles(porcelain) {
     const [x, y, path] = [entry[0], entry[1], entry.slice(3)];
     if (x === 'R' || x === 'C') index++; // the next entry is the source path
     const unstaged = (x === '?' && y === '?') || y !== ' ';
-    if (unstaged && isProductSource(path) && surfaceOf(path)) dirty.push(`${x}${y} ${path}`);
+    // The en-US catalog is a scan input too: its keys are not English copy (#5589 r2).
+    const scanned = (isProductSource(path) && surfaceOf(path)) || (path.startsWith(`${KEY_CATALOG_DIR}/`) && path.endsWith('.json'));
+    if (unstaged && scanned) dirty.push(`${x}${y} ${path}`);
   }
   return dirty;
 }

@@ -56,11 +56,12 @@ export function workflowLedgerStep(workflow = readRepoFile('.github/workflows/pr
 }
 
 const A = 'clients/web/src/A.tsx';
+const C = 'clients/web/src/C.tsx';
 const REASON = 'Banner sentence waits for the P1 web extraction of this screen.';
 
 /**
- * Builds the track history, runs the workflow step on three merge refs and removes everything.
- * Returns `{runs: {afterRaise, afterReanchor, notMerge}, u2, u3}`; each run is `{status, out, mergeBase}`.
+ * Builds the track history, runs the workflow step on four refs and removes everything.
+ * Returns `{runs: {afterRaise, afterReanchor, notMerge, unraisedCopy}, u2, u3}`; each run is `{status, out, mergeBase}`.
  */
 export function runLedgerStepScenario({workflow} = {}) {
   const step = workflowLedgerStep(workflow);
@@ -129,6 +130,17 @@ export function runLedgerStepScenario({workflow} = {}) {
     git(origin, 'commit', '-qam', 'u3: approved re-anchor');
     const u3 = git(origin, 'rev-parse', 'HEAD');
     mergeRef('2', u3, prB);
+    // PR-C, after the re-anchor: a new file with two Korean lines and a raise for only one of them.
+    git(origin, 'checkout', '-qb', 'pr-c', u3);
+    write(origin, {
+      [LEDGER_PATH]: sealed('2'.repeat(40), {[A]: {ko: 2, en: 0}}, [{file: C, issue: 5701, ko: 1, reason: REASON}])[LEDGER_PATH],
+      [C]: 'export const C = () => <><p>처음 보는 글</p><p>올리지 않은 글</p></>;\n',
+    });
+    git(origin, 'add', '-A');
+    git(origin, 'commit', '-qm', 'PR-C: one raise, two lines');
+    const prC = git(origin, 'rev-parse', 'HEAD');
+    git(origin, 'checkout', '-q', 'track');
+    mergeRef('4', u3, prC);
     // Not a merge ref: the PR head itself.
     git(origin, 'update-ref', 'refs/pull/3/merge', prB);
     refs['3'] = {merge: prB, head: prB, mergeBase: u1};
@@ -164,7 +176,7 @@ export function runLedgerStepScenario({workflow} = {}) {
       });
       return {status: result.status, out: `${result.stdout ?? ''}\n${result.stderr ?? ''}`, mergeBase: refs[name].mergeBase};
     };
-    return {runs: {afterRaise: run('1'), afterReanchor: run('2'), notMerge: run('3')}, u2, u3};
+    return {runs: {afterRaise: run('1'), afterReanchor: run('2'), notMerge: run('3'), unraisedCopy: run('4')}, u2, u3};
   } finally {
     rmSync(work, {recursive: true, force: true});
   }

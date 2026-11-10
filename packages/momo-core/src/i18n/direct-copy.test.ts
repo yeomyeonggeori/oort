@@ -299,9 +299,10 @@ describe('direct-copy ratchet (#5589)', () => {
   it('L2: land refuses unstaged or untracked scanned files, not a staged merge or unscanned output', () => {
     const status = ['M  clients/web/src/Staged.tsx', ' M clients/web/src/Edited.tsx', '?? clients/mobile/src/New.tsx',
       ' M packages/momo-core/src/i18n/generated/ko-KR.ts', '?? clients/web/src/New.test.tsx', 'UU packages/momo-core/src/x.ts',
-      'R  clients/web/src/Moved.tsx', 'clients/web/src/Old.tsx', ''].join('\0');
+      'R  clients/web/src/Moved.tsx', 'clients/web/src/Old.tsx',
+      ' M packages/momo-core/src/i18n/catalogs/en-US/settings.json', ' M packages/momo-core/src/i18n/catalogs/ko-KR/settings.json', ''].join('\0');
     expect(dirtyScannedFiles(status)).toEqual([' M clients/web/src/Edited.tsx', '?? clients/mobile/src/New.tsx',
-      'UU packages/momo-core/src/x.ts']);
+      'UU packages/momo-core/src/x.ts', ' M packages/momo-core/src/i18n/catalogs/en-US/settings.json']);
     expect(dirtyScannedFiles('')).toEqual([]);
   });
 

@@ -27,9 +27,17 @@ describe('PR CI ledger step compares with the merge ref base (#5589 r2 M1)', () 
     expect(scenario.runs.notMerge.status).not.toBe(0);
   });
 
-  it('runs the three-surface check first and keeps the token away from node (r2 L-a, L-c)', () => {
+  it('checks all three surfaces itself, and a red check still prints the raise summary before failing (r2 L-a, L-b)', () => {
+    const {runs: {unraisedCopy}, u3} = scenario;
+    expect(unraisedCopy.out).toMatch(/clients\/web\/src\/C\.tsx: ko 1 → 2/);
+    expect(unraisedCopy.out).toContain(`direct-copy: 1 new raise(s) against base ${u3.slice(0, 12)}`);
+    expect(unraisedCopy.out).toContain('+ clients/web/src/C.tsx ko+1 #5701');
+    expect(unraisedCopy.status).not.toBe(0);
+  });
+
+  it('keeps the token away from node and takes no base from the event (r2 L-c, M1)', () => {
     const {script, env} = workflowLedgerStep();
-    expect(script).toMatch(/env -u GH_TOKEN node "\$tool" check\n/);
+    expect(script).toMatch(/env -u GH_TOKEN node "\$tool" check/);
     expect(script).toMatch(/env -u GH_TOKEN DIRECT_COPY_REANCHOR_APPROVED="\$approved" node "\$tool" compare-base "\$base"/);
     expect(Object.keys(env)).not.toContain('BASE_SHA');
   });
