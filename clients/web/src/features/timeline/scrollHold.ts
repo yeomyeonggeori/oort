@@ -279,9 +279,10 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     // 위를 읽던 중: 내용 높이가 바뀌었거나(줄이 자람·줆) 목록 상자의 크기가 바뀌었다(위·아래 가장자리 이동 — 배너·띠가 서고 짐).
     if (!wasAtBottom && (content !== lastContent || viewport !== lastViewport) && anchor !== null && !coOwnerHandles()) {
       // 적은 뒤 스크롤 이벤트 없이 scrollTop 이 달라져 있을 수 있다(스크립트가 이 프레임의 그리기 직전에 옮겼다 — 이벤트는 다음 프레임에 온다).
-      // 다른 손이 없는 목록, 그리고 사람이 손으로 스크롤하는 중에는 그 스크롤도 뜻한 이동이라 그만큼은 두고 줄 높이 변화만 바로잡는다
-      // (되돌리면 「메시지로 이동」을 무른다). 가만히 있던 가상 목록에서는 그대로 둔다: 이 칸 전부터 그 자리를 기준으로 잰 동작이다.
-      const held = coOwner === undefined || handScrolling() ? carried(anchor) : anchor;
+      // 다른 손이 없는 목록에서는 그 스크롤도 뜻한 이동이라 그만큼은 두고 줄 높이 변화만 바로잡는다(되돌리면 「메시지로 이동」을 무른다).
+      // 가상 목록에서는 **밀림으로 본다**: 거기서 이벤트 없이 달라진 scrollTop 은 목록의 두 번째 보정일 수 있고, 여기서 그것을 뜻한 이동으로
+      // 두면 그대로 남는다(게이트 실측: 휠로 내리는 중 위 밖 줄이 120px 줄 때 보던 줄이 120px 더 올라감).
+      const held = coOwner === undefined ? carried(anchor) : anchor;
       holdAnchor(held);
       remember(held);
       armSettle("anchor");

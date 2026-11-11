@@ -319,9 +319,6 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     // **스크립트가** 아래로 옮긴 스크롤(메시지로 이동)과 같은 프레임의 자람: 손대지 않는다 — 목록이 자리를 다시 놓는 중에 붙들면 이동을 무른다.
     const scripted = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:30+growAbove:120"] });
     expect(scripted.moved).toBe(90);
-    // 휠로 내리는 중에 스크립트가 그리기 직전 스크롤을 옮겼다(이벤트가 아직 안 옴): 그 이동은 두고 자람만 바로잡는다.
-    const jumpWhileWheeling = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "growAbove:120+scroll:200"], inFrame: true });
-    expect(Math.abs(jumpWhileWheeling.moved - -230)).toBeLessThanOrEqual(1);
     // 위로 올리는 프레임: 손대지 않는다 — 가상 목록의 위쪽 보정과 겹치면 두 번 보정된다(이 가짜 목록에는 그 보정이 없어 그대로 밀린다).
     const up = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:-30+growAbove:120"] });
     expect(up.moved).toBe(150);

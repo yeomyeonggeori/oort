@@ -13,7 +13,8 @@ import { ThreadPanel } from "./ThreadPanel";
 // 그 손을 **언제 · 어느 상자에 · 어떤 규칙으로** 거는지 잰다(손 자체는 가짜로 바꿔 쥔다):
 //   - 상자가 `timeline-scroller` 를 입는다 — 그 클래스가 `overflow-anchor:none` 으로 계산되는 것은 `Timeline.burst.chromium.test.ts` 가
 //     진짜 엔진에서 잠근다. 클래스만 붙이고 손을 안 걸면 위쪽 답글이 자랄 때 읽던 답글이 그 높이만큼 밀린다.
-//   - 답글이 처음 채워진 뒤에 건다(채워지는 동안 걸면 그 채움을 따라 바닥으로 갈 수 있다 — 스레드는 맨 위에서 열린다).
+//   - 평범한 목록 규칙(`plainListHold("data-message-id")`)으로 건다 — 「맨 위에 선 채로는 바닥이 아니다」가 그 안에 있어, 스레드를 열 때
+//     답글이 채워지며 바닥으로 끌려가지 않는다(진짜 엔진에서는 `scrollHold.chromium.test.ts` · 게이트 T0 가 잰다).
 //   - 루트가 바뀌면 앞 손을 걷고 새로 건다.
 //   - 내가 단 답글이 목록에 서면 `expectBottom` 을 부른다(직접 scrollTop 을 놓으면 보던 답글 지키기가 되돌린다).
 // 진짜 엔진의 숫자(WebKit · Chromium: 보던 답글 ≤ 2px · 바닥 ≤ 1px · 열면 맨 위)는 `gates/gate-thread-hold.mjs` 가 잰다.
@@ -97,17 +98,14 @@ afterEach(() => {
 });
 
 describe("스레드 답글 목록의 자리 지키기 (#5649)", () => {
-  it("답글 상자는 스크롤 앵커링을 끄는 클래스를 입고, 답글이 채워진 뒤 그 상자에 평범한 목록 규칙으로 손을 건다", async () => {
-    let release: (value: { messages: Message[] }) => void = () => undefined;
-    api.fetch.mockImplementation(() => new Promise((resolve) => (release = resolve)));
+  it("답글 상자는 스크롤 앵커링을 끄는 클래스를 입고, 그 상자에 평범한 목록 규칙으로 손을 한 번 건다", async () => {
+    api.fetch.mockResolvedValue({ messages: [reply(11), reply(12)] });
     const { container } = mount();
-    await waitFor(() => expect(scrollBox(container)).not.toBeNull());
+    await waitFor(() => expect(scrollBox(container)?.querySelectorAll("[data-message-id]")).toHaveLength(3));
     expect(scrollBox(container)?.classList.contains("timeline-scroller")).toBe(true);
-    // 답글을 읽는 중: 아직 걸지 않는다.
-    expect(holds.made).toHaveLength(0);
-
-    await act(async () => release({ messages: [reply(11), reply(12)] }));
-    await waitFor(() => expect(holds.made).toHaveLength(1));
+    // 답글을 읽는 동안에도, 채워진 뒤에도 같은 손 하나다(다시 걸지 않는다).
+    expect(holds.made).toHaveLength(1);
+    expect(holds.made[0].stop).not.toHaveBeenCalled();
     expect(holds.made[0].node).toBe(scrollBox(container));
     expect(holds.made[0].options).toEqual({ plainList: "data-message-id" });
     // 줄 선택자가 실제 줄과 맞는다: 그 속성으로 루트와 답글이 잡힌다.

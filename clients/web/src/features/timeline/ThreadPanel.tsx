@@ -245,22 +245,22 @@ function ThreadPanelFrame({
   // 답글이 제자리(스크롤하는 중에도), 스크롤해 내려와 바닥에 닿아 있으면 새 답글 · 늦게 뜨는 그림에도 바닥이다. 맨 위에 선 채로는
   // 바닥이 아니다(`plainListHold`) — 스레드는 루트가 보이는 맨 위에서 열린다.
   //
-  // 답글이 **처음 채워진 뒤부터** 지킨다(뼈대 → 답글로 바뀌는 동안은 지킬 줄이 없고, 그 채움을 「새 답글」로 보고 바닥으로 따라가면 안
-  // 된다). 루트가 바뀌면 새로 건다: 앞 스레드에서 적어 둔 「바닥이었다」가 새 스레드로 넘어가지 않는다. 그리기 전에 걸고 걷으려고
+  // 열 때 답글이 채워지며(뼈대가 걷히고 답글이 펴지는 몇 프레임) 바닥으로 끌려가지 않는 것도 그 「맨 위는 바닥이 아니다」가 지킨다.
+  //
+  // 루트가 바뀌면 새로 건다: 앞 스레드에서 적어 둔 「바닥이었다」 · 「보던 답글」이 새 스레드로 넘어가지 않는다. 그리기 전에 걸고 걷으려고
   // 레이아웃 효과다(걷기가 늦으면 앞 스레드의 관찰자가 새 스레드의 첫 그림을 옮긴다).
   const repliesScrollRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<ScrollHold | null>(null);
-  const repliesReady = !query.isLoading;
   useLayoutEffect(() => {
     const node = repliesScrollRef.current;
-    if (node === null || !repliesReady) return;
+    if (node === null) return;
     const hold = holdScrollPosition(node, plainListHold("data-message-id"));
     holdRef.current = hold;
     return () => {
       hold.stop();
       if (holdRef.current === hold) holdRef.current = null;
     };
-  }, [root.id, repliesReady]);
+  }, [root.id]);
 
   // 내가 단 답글은 맨 아래로 (#5603, owner 11-09). 위로 올려 읽던 중에 답글을 달면 그 답글이 아래 밖에 섰다. 보낸 뒤 목록을 다시 읽어
   // **맨 끝 답글이 바뀌면** 그 커밋에서 맨 아래로 간다(그리기 전). 옮기는 손은 위 자리 지키기의 `expectBottom` 이다: 따로 scrollTop 을
@@ -283,14 +283,7 @@ function ThreadPanelFrame({
     }
     if (newestReplyId === armed.newestAtSend) return;
     ownReplyRef.current = null;
-    const hold = holdRef.current;
-    if (hold !== null) {
-      hold.expectBottom();
-      return;
-    }
-    // 자리 지키기가 아직 걸리지 않았다(답글을 처음 채우는 중): 직접 옮긴다.
-    const node = repliesScrollRef.current;
-    if (node !== null) node.scrollTop = node.scrollHeight;
+    holdRef.current?.expectBottom();
   }, [newestReplyId]);
 
   // 읽음 신호 (#4878, #4889 2단계): 스레드를 열어 둔 동안 화면에 든 답글의 최대 seq가 오르면 한 번 보낸다(열 때 첫 읽기,
