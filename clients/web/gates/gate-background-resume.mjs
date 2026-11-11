@@ -18,6 +18,7 @@
 //   C 뒤에 20초(30초 문턱 아래), 그동안 네트워크가 끊겨 소켓이 다시 붙기를 기다리는 중 → 앞으로 온 순간부터 새 글이 보이기까지(목표 1초)
 //   D 앱이 앞에 있는 채로 맥이 20초 잠들었다(창 사건 없음, 소켓은 조용히 죽음) → 깬 순간부터 새 글이 보이기까지(목표 5초)
 //   E 뒤에 있는 동안 위로 올려 읽던 사람: 놓친 글 20건을 따라잡은 뒤 읽던 줄이 움직이지 않는다(≤ 2px)
+//   G 뒤에 있는 동안 다른 사람이 DM → 메뉴 막대 점(owner 11-11 「켜줘」: 폰이 울리는 DM은 맥 표시도 켠다, 목표 5초)
 //   F 뒤에 40초, 웹뷰도 소켓도 살아 있었다(수리 뒤 데스크탑의 보통 경우) → 그 사이 온 글은 이미 들어와 있고, 돌아와도 소켓을 다시 열지
 //     않는다(다시 붙기 0회, 연결 화면 0회). 소켓이 「들은 시각」(`lastHeardAt`)이 실제 엔진에서 잡히는지가 여기서 갈린다
 //
@@ -33,6 +34,8 @@ import {
   CHANNELS,
   GENERAL_ID,
   ME,
+  PEER,
+  WORKSPACE_ID,
   channelRail,
   installBackend,
   messageNewFrame,
@@ -164,7 +167,10 @@ async function debugShot(page) {
   console.error(await page.evaluate(() => JSON.stringify(window.__invokes.map((c) => c.cmd))));
 }
 
-async function openScene(browser) {
+/** 장면 G 의 1:1 DM(나와 PEER). */
+const DM_ID = "00000000-0000-7000-8000-0000000002d1";
+
+async function openScene(browser, { dm = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
     locale: "ko-KR",
@@ -174,6 +180,14 @@ async function openScene(browser) {
   });
   const backend = await installBackend(context, port, { live: true, pingSeconds: 25 });
   backend.state.readStates = CHANNELS.map((channel) => readStateRow(channel.id, channel.id === GENERAL_ID ? 9 : 3, channel.id === GENERAL_ID ? 9 : 3, 0));
+  if (dm) {
+    // 나중에 건 길이 먼저 답한다(Playwright): 채널 목록에 DM 하나를 더한다.
+    const direct = { id: DM_ID, workspaceId: WORKSPACE_ID, kind: "dm", name: "", muted: false, memberIds: [ME, PEER] };
+    await context.route(/\/workspaces\/[^/]+\/channels$/, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [...CHANNELS, direct] }) })
+    );
+    backend.state.readStates.push(readStateRow(DM_ID, 2, 2, 0));
+  }
   const page = await context.newPage();
   await installPageShims(page);
   try {
@@ -442,6 +456,36 @@ async function sceneE(browser) {
   }
 }
 
+async function sceneG(browser) {
+  const { context, page, backend } = await openScene(browser, { dm: true });
+  try {
+    await page.evaluate(() => window.__away());
+    await sleep(2_000);
+    check((await trayUnread(page)) === 0, "G: 시작할 때 메뉴 막대 점이 이미 켜져 있다");
+    // 다른 기기의 사람이 나에게 DM. 서버는 같은 트랜잭션에서 DM 의 안 읽음(읽음 투영)을 올리고, 메시지 프레임과 인박스 신호를 보낸다.
+    const row = peerMessage(3, "잠깐 통화 돼요?", { channelId: DM_ID });
+    backend.state.readStates = backend.state.readStates.map((r) =>
+      r.channel_id === DM_ID.toUpperCase() ? { ...r, latest_seq: 3, unread_count: 1 } : r
+    );
+    const t0 = Date.now();
+    backend.publish(channelRail(DM_ID), messageNewFrame(row));
+    backend.publish(personalRail, { type: "inbox_item.created", v: 1, ts: t0, payload: { item_id: "0199aa11-4444-7000-8000-000000000002" } });
+    const ms = await timeUntil(
+      page,
+      () => {
+        const sent = window.__invokes.filter((call) => call.cmd === "tray_status_set");
+        return sent.length > 0 && sent[sent.length - 1].args.status.unread > 0;
+      },
+      null,
+      15_000
+    );
+    results.push({ scene: "G", label: "뒤에 있는 동안 DM → 메뉴 막대 점", ms });
+    check(ms !== null && ms <= 5_000, `G: DM 뒤 메뉴 막대 점까지 ${ms}ms (5초 안이어야, null = 켜지지 않음)`);
+  } finally {
+    await context.close();
+  }
+}
+
 async function sceneF(browser) {
   const { context, page, backend } = await openScene(browser);
   try {
@@ -482,7 +526,7 @@ async function main() {
   try {
     const browser = await engine.launch();
     try {
-      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF };
+      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF, G: sceneG };
       for (const [name, run] of Object.entries(scenes)) {
         if (only !== null && !only.has(name)) continue;
         await run(browser);

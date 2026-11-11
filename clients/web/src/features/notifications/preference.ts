@@ -19,11 +19,15 @@ export type DesktopNotifyKind =
   | "work-mine-done";
 
 /**
- * Dock badge switches (#3339). The badge is the needs-me count and nothing
- * else (`useNeedsMeCount`, one source); these only decide whether it is drawn
- * and whether unread DMs are added on top (default off, owner decision).
+ * Dock badge switches (#3339). The badge is the needs-me count (`useNeedsMeCount`, one source); these decide whether
+ * it is drawn and whether the unread DMs the phone would ring for are added on top (core `pushAlikeDmUnread`). The menu-bar
+ * dot follows the same number (#5193).
+ *
+ * `dockDms` (#5660, owner 2026-11-11 「켜줘」) replaces `dockDm`: on by default. A new key on purpose: the old one was
+ * stored as `false` by everyone who saved any switch while the default was off (2026-10-02 decision), so reading it would
+ * keep the old default for exactly the people the owner meant. The old key is ignored.
  */
-export type DockPrefKey = "dockBadge" | "dockDm";
+export type DockPrefKey = "dockBadge" | "dockDms";
 export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 
 // =============================================================================
@@ -60,7 +64,8 @@ export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   "work-mine-done": true,
   dm: false,
   dockBadge: true,
-  dockDm: false,
+  // 기본 켬(#5660, owner 11-11): 폰이 울리는 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`(기본 끔)은 읽지 않는다.
+  dockDms: true,
 };
 
 const PREFERENCE_KEYS = Object.keys(

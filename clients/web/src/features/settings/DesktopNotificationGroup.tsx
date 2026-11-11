@@ -319,7 +319,7 @@ export function DesktopNotificationGroup() {
   const dockCellText = (row: DesktopNotificationKindRow): string => {
     if (!kinds.dockBadge) return "꺼짐";
     if (row.dock === "counted") return "수에 포함";
-    if (row.dock === "dm") return kinds.dockDm ? "수에 포함" : "세지 않아요";
+    if (row.dock === "dm") return kinds.dockDms ? "수에 포함" : "세지 않아요";
     return "세지 않아요";
   };
   // 좁은 카드에서 접힌 열의 내용을 이름 아래 한 줄로 말한다.
@@ -449,14 +449,14 @@ export function DesktopNotificationGroup() {
           </SettingsRow>
           <SettingsRow
             label="새 DM도 독 배지에 세기"
-            description="1:1 대화의 새 글을 독 배지 수에 더해요. 기본은 꺼짐이에요."
+            description="폰이 울리는 DM의 새 글을 독 배지와 메뉴 막대 표시에 더해요. 알림을 끈 대화는 세지 않아요."
             labelId={dockDmLabelId}
             descriptionId={dockDmDescId}
             keep
           >
             <Switch
               testId="desktop-notification-dock-dm"
-              checked={kinds.dockDm}
+              checked={kinds.dockDms}
               disabled={kindsLocked || !kinds.dockBadge}
               labelledBy={dockDmLabelId}
               describedBy={
@@ -466,7 +466,7 @@ export function DesktopNotificationGroup() {
                     ? `${dockDmDescId} ${dockOffReasonId}`
                     : dockDmDescId
               }
-              onCheckedChange={(next) => setDesktopNotificationKind("dockDm", next)}
+              onCheckedChange={(next) => setDesktopNotificationKind("dockDms", next)}
             />
           </SettingsRow>
           {!kinds.dockBadge && (

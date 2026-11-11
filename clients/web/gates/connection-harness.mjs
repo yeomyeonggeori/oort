@@ -18,7 +18,7 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 export const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 export const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
-const PEER = "019F94E3-7B0F-7A22-9C13-4D5E6F708192";
+export const PEER = "019F94E3-7B0F-7A22-9C13-4D5E6F708192";
 const AGENT = "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90";
 
 export const CHANNELS = [
