@@ -148,6 +148,25 @@ describe("업데이트 확인 일정 — 저장소 (#5661)", () => {
     expect(kinds()).toEqual(["update.check.off"]);
   });
 
+  it("새 판을 알리는 동안 다시 묻기가 실패해도 알림은 그대로다(실패는 기록에 남는다)", async () => {
+    tauri.check.mockResolvedValue(UPDATE);
+    const view = render(createElement(StateProbe));
+    stop = startUpdateWatch();
+    await flush();
+    expect(view.querySelector('[data-testid="probe"]')?.textContent).toBe("available");
+
+    // 맥이 잤다 깼고, 망이 아직 붙지 않았다.
+    tauri.check.mockRejectedValue(new Error("error sending request for url"));
+    await advance(WAKE_RECHECK_GAP_MS);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(tauri.check).toHaveBeenCalledTimes(2);
+    expect(view.querySelector('[data-testid="probe"]')?.textContent).toBe("available");
+    expect(kinds()).toEqual(["update.check.failed"]);
+  });
+
   it("설정 > 업데이트는 마지막으로 물은 시각을 보인다", async () => {
     tauri.check.mockResolvedValue(null);
     const view = render(createElement(UpdateSection));

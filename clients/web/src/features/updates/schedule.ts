@@ -23,8 +23,13 @@ import { startWakeWatch } from "@momo/core/features/connection/diagnosticLog";
 export const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** 확인이 실패했을 때 다시 묻기까지. 6시간을 기다리면 잠깐의 오프라인이 하루를 잃게 한다. */
 export const RETRY_AFTER_FAILURE_MS = 30 * 60 * 1000;
-/** 깸·창 보임·온라인이 곧바로 묻게 하는 조건: 마지막으로 물은 지 이만큼은 지났다. */
+/** 깸·창 보임·온라인이 곧바로 묻게 하는 조건: 마지막으로 **답을 받은** 지 이만큼은 지났다. */
 export const WAKE_RECHECK_GAP_MS = 30 * 60 * 1000;
+/**
+ * 실패 뒤 창 보임·초점이 다시 묻기까지의 바닥. 오프라인에서 창을 오갈 때마다 실패를 쌓지 않게 한다. 「다시 온라인」은 이 바닥을
+ * 지나지 않는다: 뚜껑을 열면 늦게 깬 시계가 망이 붙기 전에 묻고 실패하는 것이 보통이고, 몇 초 뒤의 온라인이 바로 그 답을 받을 차례다.
+ */
+export const NUDGE_AFTER_FAILURE_MS = 60 * 1000;
 /** 벽시계 마감을 보는 시계의 간격. 숫자만 비교하므로 싸다. */
 export const SCHEDULE_TICK_MS = 60 * 1000;
 
@@ -41,9 +46,15 @@ export interface UpdateScheduleDeps {
   readonly check: () => Promise<ScheduledCheckResult>;
 }
 
+/** 「돌아왔다」는 신호의 종류. `online`은 실패 뒤 바닥(1분)을 지나지 않는다. */
+export type NudgeReason = "back" | "online";
+
 export interface UpdateSchedule {
-  /** 창이 다시 보임·초점·온라인 같은 「돌아왔다」는 신호. 마지막 확인이 30분보다 오래됐으면 곧바로 묻는다. */
-  readonly nudge: () => void;
+  /**
+   * 창이 다시 보임·초점(`back`)·다시 온라인(`online`) 같은 「돌아왔다」는 신호. 마지막으로 답을 받은 지 30분이 넘었으면 곧바로
+   * 묻는다. 마지막 시도가 실패였다면 `back`은 그 시도 뒤 1분이 지나야 묻는다.
+   */
+  readonly nudge: (reason?: NudgeReason) => void;
   readonly stop: () => void;
 }
 
@@ -63,8 +74,10 @@ export function nextDueAt(result: ScheduledCheckResult, checkedAt: number): numb
 export function startUpdateSchedule(deps: UpdateScheduleDeps): UpdateSchedule {
   let stopped = false;
   let running = false;
-  /** 마지막으로 실제로 물은(거절되지 않은) 시각. */
-  let lastCheckedAt: number | null = null;
+  /** 마지막으로 답을 받은(실패·거절이 아닌) 확인의 시각. 「돌아왔다」 신호의 30분 간격은 이것으로 잰다. */
+  let lastAnsweredAt: number | null = null;
+  /** 마지막으로 실제로 물은(거절되지 않은) 시각. 실패 뒤 1분 바닥은 이것으로 잰다. */
+  let lastAttemptAt: number | null = null;
   let dueAt = Number.NEGATIVE_INFINITY;
 
   async function run(): Promise<void> {
@@ -75,7 +88,8 @@ export function startUpdateSchedule(deps: UpdateScheduleDeps): UpdateSchedule {
       const result = await deps.check();
       const due = nextDueAt(result, at);
       if (due !== null) {
-        lastCheckedAt = at;
+        lastAttemptAt = at;
+        if (result !== "failed") lastAnsweredAt = at;
         dueAt = due;
       }
     } finally {
@@ -83,9 +97,12 @@ export function startUpdateSchedule(deps: UpdateScheduleDeps): UpdateSchedule {
     }
   }
 
-  function nudge(): void {
+  function nudge(reason: NudgeReason = "back"): void {
     if (stopped) return;
-    if (lastCheckedAt !== null && deps.now() - lastCheckedAt < WAKE_RECHECK_GAP_MS) return;
+    const now = deps.now();
+    if (lastAnsweredAt !== null && now - lastAnsweredAt < WAKE_RECHECK_GAP_MS) return;
+    // 실패한 시도가 방금 있었다: 창을 오가는 손으로는 1분에 한 번까지만. 다시 온라인은 곧바로.
+    if (reason !== "online" && lastAttemptAt !== null && now - lastAttemptAt < NUDGE_AFTER_FAILURE_MS) return;
     void run();
   }
 

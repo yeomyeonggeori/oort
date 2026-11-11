@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  NUDGE_AFTER_FAILURE_MS,
   RECHECK_INTERVAL_MS,
   RETRY_AFTER_FAILURE_MS,
   SCHEDULE_TICK_MS,
@@ -148,6 +149,35 @@ describe("startUpdateSchedule (#5661)", () => {
     await settle();
     expect(mac.checks).toHaveLength(2);
     expect(mac.checks[1]).toBe(mac.checks[0]! + WAKE_RECHECK_GAP_MS);
+  });
+
+  it("뚜껑을 열자 망이 붙기 전에 물어 실패해도, 몇 초 뒤 「다시 온라인」이 곧바로 다시 묻는다", async () => {
+    const mac = fakeMac(["current", "failed"]);
+    const schedule = startUpdateSchedule(mac.deps);
+    await settle();
+    await mac.awake(1 * HOUR);
+    mac.sleep(8 * HOUR);
+    await mac.awake(SCHEDULE_TICK_MS); // 늦게 깬 시계가 묻고, 망이 아직이라 실패
+    expect(mac.checks).toHaveLength(2);
+    await mac.awake(5 * 1000);
+    schedule.nudge("online");
+    await settle();
+    expect(mac.checks).toHaveLength(3);
+    expect((mac.checks[2] ?? 0) - (mac.checks[1] ?? 0)).toBeLessThanOrEqual(SCHEDULE_TICK_MS);
+  });
+
+  it("실패 뒤 창을 오가는 신호는 1분에 한 번까지만 묻는다 (오프라인에서 실패를 쌓지 않게)", async () => {
+    const mac = fakeMac(["failed", "failed", "failed"]);
+    const schedule = startUpdateSchedule(mac.deps);
+    await settle();
+    await mac.awake(10 * 1000);
+    schedule.nudge();
+    await settle();
+    expect(mac.checks).toHaveLength(1);
+    await mac.awake(NUDGE_AFTER_FAILURE_MS);
+    schedule.nudge();
+    await settle();
+    expect(mac.checks).toHaveLength(2);
   });
 
   it("거절된 확인(받는 중)은 마감을 옮기지 않아 다음 칸이 다시 묻는다", async () => {

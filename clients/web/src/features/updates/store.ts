@@ -122,31 +122,39 @@ export function useLastCheckedAt(): number | null {
  * running version is still the old one, so the manifest would offer the same
  * build again and flip 「곧 다시 실행」 back to 「새 버전」.
  *
+ * While a new build is already on offer, a re-check keeps the offer on screen
+ * (#5661): no 「확인 중」 blink of the pill on every wake or window return, and a
+ * re-check that fails because the network is not back yet does not take the
+ * pill away. The shell keeps the update it found (`pending`) when a check
+ * errors, so 「업데이트」 still installs that build. The failure is still logged.
+ *
  * Resolves with what it learned, for the schedule (`schedule.ts`). A failed
  * check goes into the connection log (설정 > 업데이트 > 연결 기록) as a time and
- * a kind only.
+ * a kind only. 「마지막 확인」 moves only when a check got an answer.
  */
 export async function checkForUpdate(): Promise<ScheduledCheckResult> {
   if (!isDesktop()) return "refused";
   if (inFlight || state.kind === "installing" || state.kind === "installed") return "refused";
   inFlight = true;
-  set({ kind: "checking" });
+  const offered = state.kind === "available";
+  if (!offered) set({ kind: "checking" });
   try {
     const found = await desktopUpdater.check();
     lastCheckedAt = Date.now();
     set(found ? { kind: "available", update: found } : { kind: "current" });
     return found ? "available" : "current";
   } catch (error) {
-    lastCheckedAt = Date.now();
+    const at = Date.now();
     if (messageOf(error) === UPDATER_DISABLED) {
       if (!offRecorded) {
         offRecorded = true;
-        recordConnectionDiag("update.check.off", lastCheckedAt);
+        recordConnectionDiag("update.check.off", at);
       }
       set({ kind: "off" });
       return "off";
     }
-    recordConnectionDiag("update.check.failed", lastCheckedAt);
+    recordConnectionDiag("update.check.failed", at);
+    if (offered) return "failed";
     set({
       kind: "failed",
       phase: "check",
@@ -275,14 +283,15 @@ export function startUpdateWatch(): () => void {
     if (document.visibilityState === "visible") schedule.nudge();
   };
   const onBack = () => schedule.nudge();
+  const onOnline = () => schedule.nudge("online");
   document.addEventListener("visibilitychange", onVisible);
   window.addEventListener("focus", onBack);
-  window.addEventListener("online", onBack);
+  window.addEventListener("online", onOnline);
   return () => {
     schedule.stop();
     document.removeEventListener("visibilitychange", onVisible);
     window.removeEventListener("focus", onBack);
-    window.removeEventListener("online", onBack);
+    window.removeEventListener("online", onOnline);
     watching = false;
   };
 }
