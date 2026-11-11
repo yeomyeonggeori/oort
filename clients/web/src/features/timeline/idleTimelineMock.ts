@@ -30,6 +30,8 @@ export function idleTimelineMock(
     reload: () => undefined,
     loadingOlder: false,
     reachedStart: true,
+    olderFailed: false,
+    retryOlder: () => undefined,
     reactions: {},
     toggleReaction: async () => undefined,
     pins: {},
