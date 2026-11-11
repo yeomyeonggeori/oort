@@ -92,12 +92,13 @@ fn the_main_window_hands_file_drops_to_the_page() {
 /// The main window's web view keeps running while the window is put away, minimized or covered (#5660).
 ///
 /// WebKit's default `inactiveSchedulingPolicy` is `suspend`: measured on macOS 27 with a bare WKWebView
-/// (`worker-5660-handoff.md`), a window put away with `orderOut` (what the red button does, #5196) had its page
+/// (#5660, numbers in its PR body), a window put away with `orderOut` (what the red button does, #5196) had its page
 /// suspended about 4 minutes later and woke for a few seconds every ~8.6 minutes; a message pushed in between reached
 /// the page up to 514 s late. The realtime socket, the notification banners and the menu-bar dot all live in that
 /// page, so they went quiet with it until the window came back. `disabled` maps to `WKInactiveSchedulingPolicy.none`
-/// (wry 0.55, macOS 14+, the bundle's minimum): the same probe answered every push within 0.3 s for as long as the
-/// Mac was awake.
+/// (tauri-runtime 2.11 `From<&WindowConfig>` → tauri-runtime-wry `with_background_throttling` → wry 0.55 sets it on
+/// `WKPreferences`, macOS 14+, the bundle's minimum): the same probe answered every push within 0.32 s for as long as
+/// the Mac was awake.
 ///
 /// Read through Tauri's own config parser, not the JSON: a misspelt key or value would be dropped or refused there,
 /// and that is the reading the shell acts on.

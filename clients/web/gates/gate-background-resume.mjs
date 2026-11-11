@@ -17,7 +17,9 @@
 //     (목표 1초) + 「연결 중·끊김」 카드·띠가 한 번도 서지 않는다 + 바닥에 있던 목록은 바닥에 남는다(바닥 거리 ≤ 1px)
 //   C 뒤에 20초(30초 문턱 아래), 그동안 네트워크가 끊겨 소켓이 다시 붙기를 기다리는 중 → 앞으로 온 순간부터 새 글이 보이기까지(목표 1초)
 //   D 앱이 앞에 있는 채로 맥이 20초 잠들었다(창 사건 없음, 소켓은 조용히 죽음) → 깬 순간부터 새 글이 보이기까지(목표 5초)
-//   E 뒤에 있는 동안 위로 올려 읽던 사람: 따라잡은 뒤 읽던 줄이 움직이지 않는다(≤ 2px)
+//   E 뒤에 있는 동안 위로 올려 읽던 사람: 놓친 글 20건을 따라잡은 뒤 읽던 줄이 움직이지 않는다(≤ 2px)
+//   F 뒤에 40초, 웹뷰도 소켓도 살아 있었다(수리 뒤 데스크탑의 보통 경우) → 그 사이 온 글은 이미 들어와 있고, 돌아와도 소켓을 다시 열지
+//     않는다(다시 붙기 0회, 연결 화면 0회). 소켓이 「들은 시각」(`lastHeardAt`)이 실제 엔진에서 잡히는지가 여기서 갈린다
 //
 // 5분·30분 장면은 따로 재지 않는다: 번들의 판단은 「30초 넘게 자리를 비웠다」 한 갈래라 35초(B)와 같은 길을 간다. 실제 시간의 길이가
 // 다르게 만드는 것(웹뷰 멈춤·앱 낮잠·잠자기)은 데스크탑 실물에서만 잴 수 있다(인계의 runtime-unverified 절차).
@@ -25,7 +27,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync } from "node:fs";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import {
   CHANNELS,
@@ -45,6 +47,8 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.BACKGROUND_GATE_PORT || 5235);
 const origin = `http://127.0.0.1:${port}`;
 const measureOnly = process.argv.includes("--measure");
+/** 번들 엔진: 기본 Chromium, `BACKGROUND_GATE_ENGINE=webkit`이면 번들 WebKit(데스크탑 웹뷰와 같은 엔진, 셸·스케줄링은 아님). */
+const engine = process.env.BACKGROUND_GATE_ENGINE === "webkit" ? webkit : chromium;
 const jsonOut = (() => {
   const at = process.argv.indexOf("--json");
   return at === -1 ? null : process.argv[at + 1];
@@ -69,6 +73,8 @@ async function installPageShims(page) {
     // 데스크탑의 첫 화면은 「이 페이지의 서버」를 모른다(페이지가 tauri://localhost에서 온다): 고른 서버를 미리 적어 둔다.
     try {
       localStorage.setItem("momo.web.server.v1", server);
+      // 「업데이트 소식」은 이 게이트가 재는 것이 아니다: 이미 본 것으로 둔다(엔진마다 뜨는 때가 달라 Escape 로 닫기가 흔들렸다).
+      localStorage.setItem("momo.web.release-notes.seen.v1", "999.0.0");
     } catch {
       /* 저장소 없는 페이지 */
     }
@@ -402,7 +408,13 @@ async function sceneE(browser) {
       }, SCROLLER);
     const start = await pick();
     // 새 글은 채운 글보다 뒤(seq)다: 따라잡은 글은 목록 아래에 붙고, 위에서 읽던 줄은 그대로여야 한다.
-    const rows = await awayFrozen(page, backend, 35_000, ["위로 올려 읽는 동안 온 글"], 200);
+    const rows = await awayFrozen(
+      page,
+      backend,
+      35_000,
+      Array.from({ length: 20 }, (_, i) => `위로 올려 읽는 동안 온 글 ${i + 1}`),
+      200
+    );
     await page.evaluate(() => window.__back());
     await page.waitForFunction(
       (id) => {
@@ -423,8 +435,37 @@ async function sceneE(browser) {
       { selector: SCROLLER, id: start?.id }
     );
     const shift = start && end !== null ? Math.round(Math.abs(end - start.top) * 10) / 10 : null;
-    results.push({ scene: "E", label: "위로 올려 읽던 줄이 따라잡은 뒤 움직인 거리(px)", shift, anchor });
+    results.push({ scene: "E", label: "위로 올려 읽던 줄이 20건을 따라잡은 뒤 움직인 거리(px)", shift, anchor });
     check(shift !== null && shift <= 2, `E: 읽던 줄이 ${shift}px 움직였다(2px 안이어야)`);
+  } finally {
+    await context.close();
+  }
+}
+
+async function sceneF(browser) {
+  const { context, page, backend } = await openScene(browser);
+  try {
+    const handshakes = backend.state.handshakes;
+    await page.evaluate(() => window.__away());
+    await sleep(20_000);
+    const row = peerSendsInGeneral(backend, 10, "뒤에 있는 동안 바로 온 글");
+    await sleep(20_000); // 그동안 서버 핑(25초 간격)이 적어도 한 번 온다
+    const already = await page.evaluate(rowVisible, row.id.toLowerCase());
+    const uiBefore = await page.evaluate(() => window.__connectionUi.length);
+    await page.evaluate(() => window.__back());
+    await sleep(2_500);
+    const ui = await page.evaluate((from) => window.__connectionUi.slice(from), uiBefore);
+    const reconnects = backend.state.handshakes - handshakes;
+    results.push({
+      scene: "F",
+      label: "뒤에 40초(웹뷰·소켓 살아 있음) → 돌아와도 다시 붙지 않고 글은 이미 있다",
+      alreadyBeforeReturn: already,
+      reconnects,
+      connectionUi: ui.map((u) => u.what),
+    });
+    check(already, "F: 살아 있는 소켓으로 온 글이 돌아오기 전에 들어와 있지 않다");
+    check(reconnects === 0, `F: 살아 있는 소켓을 돌아온 순간 다시 열었다(다시 붙기 ${reconnects}회)`);
+    check(ui.length === 0, `F: 돌아온 순간 연결 화면이 섰다: ${ui.map((u) => u.what).join(" / ")}`);
   } finally {
     await context.close();
   }
@@ -439,9 +480,9 @@ async function main() {
     ...(dist ? { extraArgs: ["--outDir", resolve(dist)] } : {}),
   });
   try {
-    const browser = await chromium.launch();
+    const browser = await engine.launch();
     try {
-      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE };
+      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF };
       for (const [name, run] of Object.entries(scenes)) {
         if (only !== null && !only.has(name)) continue;
         await run(browser);
@@ -453,7 +494,9 @@ async function main() {
   } finally {
     await server.stop();
   }
-  if (jsonOut) writeFileSync(jsonOut, JSON.stringify({ dist: dist ?? "dist", results, failures }, null, 2));
+  if (jsonOut) {
+    writeFileSync(jsonOut, JSON.stringify({ dist: dist ?? "dist", engine: engine.name(), results, failures }, null, 2));
+  }
   if (measureOnly) {
     for (const line of failures) console.log(`MEASURE (not asserted): ${line}`);
     return;
