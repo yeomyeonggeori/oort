@@ -687,7 +687,7 @@ async fn two_tenants_never_mix_even_for_a_caller_that_bypasses_rls() {
 
     let ws_a = a.ws;
     let mut tx = su.begin().await.expect("superuser tx");
-    let bypassing = followed_unread_by_channel_in_tx(&mut *tx, ws_a, reader)
+    let bypassing = followed_unread_by_channel_in_tx(&mut tx, ws_a, reader)
         .await
         .expect("superuser read");
     tx.rollback().await.expect("rollback");
