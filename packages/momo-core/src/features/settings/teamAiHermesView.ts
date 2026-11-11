@@ -8,10 +8,11 @@
 // 설정에 「Hermes 도움」 행이 선다 — 운영자 천장이 비어 있는 지금 운영에서도. 한도 가방 자체가 소유자·관리자에게만 읽히므로
 // 일반 멤버에게는 아무것도 새로 보이지 않는다. 서버가 위임 칸을 모르면(옛 서버) 행이 없다(모르는 것을 말하지 않는다).
 //
-// **까닭은 사실대로:** 묶음이 켜져 있고 문이 닫혔으면 「지금은 쓸 수 없어요.」를 보인다. 운영자 천장이 비었으면(`ceilingOff`)
-// 서버의 까닭 낱말을 쓰지 않는다 — 그 낱말은 **처음 닫힌 문**이고 G3(연결)이 G6(천장)보다 앞이라, 천장이 꺼진 서버에서도
-// 「연결 안 됨」으로 읽힐 수 있다. 증보 v4(P8·P9 실패 문장 표)에는 천장이 빈 경우의 문장이 없으므로 그때는 까닭 줄 없이
-// 「지금은 쓸 수 없어요.」만 보인다(새 문장을 지어내지 않는다). 천장이 있으면 서버 낱말의 문장을 그대로 붙인다.
+// **까닭은 사실대로:** 묶음이 켜져 있고 문이 닫혔으면 「지금은 쓸 수 없어요.」 뒤에 까닭을 붙인다(P8 「닫힌 낱말 이유와 함께」).
+// 운영자 천장이 비었으면(`ceilingOff`) 서버의 까닭 낱말을 쓰지 않는다 — 그 낱말은 **처음 닫힌 문**이고 G3(연결)이 G6(천장)
+// 보다 앞이라, 천장이 꺼진 서버에서도 「연결 안 됨」으로 읽힐 수 있다. 그때는 따로 오는 서버 사실 `ceilingOff` 자체가 까닭이고
+// 늘 참인 문장 `ceiling_unset`(「서버 운영자가 아직 Hermes 맡기기를 열지 않았어요.」)을 고정으로 붙인다(#5375 수리 1회차,
+// 검수 M1). 천장이 있으면 서버 낱말의 문장을 그대로 붙인다.
 //
 // **조작:** 역할 스위치는 늘 쓸 수 있다(묶음은 관리자의 설정이고, P10 「켠 채라도 … 이유를 보인다」). 「하루 Hermes 맡기기」
 // 칸은 천장이 있을 때만 선다 — P7이 이 값을 「천장 안에서 조정한다」고 했고 천장이 비면 실제 상한이 0이라 고를 것이 없다.
@@ -44,14 +45,15 @@ export interface HermesRowUnavailable {
 
 /**
  * 역할 행 아래 줄의 판정(한 곳). 묶음이 켜져 있고(G1) 워크스페이스 쪽 문이 닫혀 있을 때만 있다. 묶음이 꺼졌으면 스위치가
- * 이미 말한다. 운영자 천장이 비었으면 까닭은 없다(서버의 첫 닫힌 문 낱말이 천장 사실과 다를 수 있고, 증보에 그 문장이 없다).
+ * 이미 말한다. 운영자 천장이 비었으면 까닭은 서버의 첫 닫힌 문 낱말이 아니라 천장 사실의 문장(`ceiling_unset`)이다 —
+ * 첫 닫힌 문 낱말(예: 「연결 안 됨」)은 천장 사실과 다를 수 있다.
  */
 export function hermesRowUnavailable(
   bundleOn: boolean,
   status: TeamAiDelegationStatus
 ): HermesRowUnavailable | null {
   if (!bundleOn || status.available) return null;
-  if (status.ceilingOff) return { reason: null };
+  if (status.ceilingOff) return { reason: TEAM_AI_DELEGATION_REASON_COPY.ceiling_unset };
   return { reason: TEAM_AI_DELEGATION_REASON_COPY[status.unavailableReason ?? "unknown"] };
 }
 

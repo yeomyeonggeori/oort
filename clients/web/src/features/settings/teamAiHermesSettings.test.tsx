@@ -18,8 +18,8 @@ import { TeamAiRolesList } from "./TeamAiRolesList";
 // =============================================================================
 // 설정의 「Hermes 도움」 행과 「하루 Hermes 맡기기」 칸 (ADR-0201 증보 v4 P7·P8·P10, #5375).
 //
-//   1. 운영자 천장이 빈 서버(지금 운영, 증보 v4 P8이 정본): 행은 서고 「지금은 쓸 수 없어요.」만 — 서버의 첫 닫힌 문 낱말
-//      (「연결 안 됨」)을 붙이지 않는다. 스위치는 쓸 수 있고 하루 칸은 없다. 서버가 위임 칸을 모르면 행도 없다.
+//   1. 운영자 천장이 빈 서버(지금 운영, 증보 v4 P8이 정본): 행은 서고 「지금은 쓸 수 없어요.」 + 천장 사실의 까닭
+//      (「서버 운영자가 아직 Hermes 맡기기를 열지 않았어요.」) — 서버의 첫 닫힌 문 낱말(「연결 안 됨」)을 붙이지 않는다. 스위치는 쓸 수 있고 하루 칸은 없다. 서버가 위임 칸을 모르면 행도 없다.
 //   2. 천장이 있는 서버: 행이 목록 끝에 서고 고지 두 문장이 행에 늘 보인다. 켜져 있는데 문이 닫혔으면 「지금은 쓸 수 없어요」
 //      + 서버 낱말. 꺼져 있으면 까닭 줄 없이 스위치만(다시 켜는 길).
 //   3. 온보딩처럼 위임 칸을 넘기지 않는 목록에는 행이 없다.
@@ -126,10 +126,12 @@ function list(hermes: TeamAiDelegationStatus | null | undefined, rolesValue = ro
 }
 
 describe("역할 목록의 「Hermes 도움」 행", () => {
-  it("천장이 빈 지금 운영: 행과 스위치는 서고 「지금은 쓸 수 없어요.」만 — 「연결 안 됨」을 붙이지 않는다", () => {
+  it("천장이 빈 지금 운영: 행과 스위치는 서고 「지금은 쓸 수 없어요.」 + 천장 까닭 — 「연결 안 됨」을 붙이지 않는다", () => {
     const view = list(OPS_OFF);
     expect(pick(view, "t-role-row-hermes")).not.toBeNull();
-    expect(pick(view, "t-role-unavailable-hermes")?.textContent).toBe("지금은 쓸 수 없어요.");
+    expect(pick(view, "t-role-unavailable-hermes")?.textContent).toBe(
+      "지금은 쓸 수 없어요. 서버 운영자가 아직 Hermes 맡기기를 열지 않았어요."
+    );
     expect(pick(view, "t-role-row-hermes")?.textContent).not.toContain("연결돼 있지 않아요");
     expect(pick<HTMLButtonElement>(view, "t-role-hermes")?.disabled).toBe(false);
   });

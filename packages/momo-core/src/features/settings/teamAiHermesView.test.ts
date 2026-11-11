@@ -60,9 +60,9 @@ describe("hermesRowUnavailable", () => {
     });
   });
 
-  it("천장이 비었으면 까닭 없이 「지금은 쓸 수 없어요」만 — 첫 닫힌 문이 「연결 안 됨」이어도 그 말을 붙이지 않는다", () => {
+  it("천장이 비었으면 까닭은 천장 사실의 문장 — 첫 닫힌 문이 「연결 안 됨」이어도 그 말을 붙이지 않는다", () => {
     expect(OPS_OFF.unavailableReason).toBe("hermes_not_connected");
-    expect(hermesRowUnavailable(true, OPS_OFF)).toEqual({ reason: null });
+    expect(hermesRowUnavailable(true, OPS_OFF)).toEqual({ reason: "teamAi.delegation.reasonCeilingUnset" });
   });
 
   it("묶음이 꺼졌거나 문이 열려 있으면 줄이 없다", () => {
