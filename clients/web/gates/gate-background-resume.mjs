@@ -2,6 +2,7 @@
 //
 //   npm run build && node gates/gate-background-resume.mjs                 (BACKGROUND_GATE_PORT 로 포트를 옮긴다)
 //   BACKGROUND_GATE_DIST=<번들> node gates/gate-background-resume.mjs --measure   (단정 없이 숫자만: 수리 전 번들을 잴 때)
+//   --scenes A,C  장면만 고른다 · --json <파일>  숫자를 남긴다 · BACKGROUND_GATE_DEBUG=<png>  로그인·채널 열기에서 막히면 그 화면을 남긴다
 //
 // **이 숫자는 번들의 판단만 잰다.** 헤드리스 Chromium 의 페이지는 진짜로 뒤로 가지 않고, WKWebView 의 비활성 스케줄링도 맥의 앱 낮잠도
 // 돌지 않는다. 그래서 「뒤에 있음」은 사건으로 흉내 낸다: 보임·초점을 바꿔 그 사건을 쏘고(`__away`/`__back`), 웹뷰가 멈춘 시간은
@@ -150,6 +151,13 @@ function readStateRow(channelId, latest, read, mentions) {
   };
 }
 
+/** 막혔을 때 그 화면과 셸에 간 명령들을 남긴다(`BACKGROUND_GATE_DEBUG`가 있을 때만). */
+async function debugShot(page) {
+  if (!process.env.BACKGROUND_GATE_DEBUG) return;
+  await page.screenshot({ path: process.env.BACKGROUND_GATE_DEBUG });
+  console.error(await page.evaluate(() => JSON.stringify(window.__invokes.map((c) => c.cmd))));
+}
+
 async function openScene(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -165,10 +173,7 @@ async function openScene(browser) {
   try {
     await signIn(page, origin);
   } catch (error) {
-    if (process.env.BACKGROUND_GATE_DEBUG) {
-      await page.screenshot({ path: process.env.BACKGROUND_GATE_DEBUG });
-      console.error(await page.evaluate(() => document.body.innerText.slice(0, 600)));
-    }
+    await debugShot(page);
     throw error;
   }
   // 데스크탑은 처음 들어온 판에 「업데이트 소식」을 띄운다: 이 게이트가 재는 것이 아니므로 닫는다.
@@ -180,11 +185,7 @@ async function openScene(browser) {
   try {
     await openGeneral(page);
   } catch (error) {
-    if (process.env.BACKGROUND_GATE_DEBUG) {
-      await page.screenshot({ path: process.env.BACKGROUND_GATE_DEBUG });
-      console.error(await page.evaluate(() => document.body.innerText.slice(0, 300)));
-      console.error(await page.evaluate(() => JSON.stringify(window.__invokes.map((c) => c.cmd))));
-    }
+    await debugShot(page);
     throw error;
   }
   // 레일이 다 붙을 때까지(타임라인·알림 레일·개인 채널).
@@ -243,7 +244,7 @@ async function sceneA(browser) {
     check((await trayUnread(page)) === 0, "A: 시작할 때 메뉴 막대 점이 이미 켜져 있다");
     // 다른 기기의 사람이 열려 있지 않은 채널에서 나를 멘션한다. 서버는 같은 트랜잭션에서 멘션 수를 올리고(읽음 투영),
     // 메시지 프레임(채널)과 인박스 신호(개인 채널)를 보낸다.
-    const row = peerMessage(4, `@seongjae 확인 부탁해요`, {
+    const row = peerMessage(4, "확인 부탁해요", {
       channelId: OTHER.id,
       props: { mention_member_ids: [ME.toUpperCase()] },
     });
