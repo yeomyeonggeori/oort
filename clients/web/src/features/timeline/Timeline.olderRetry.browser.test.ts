@@ -105,6 +105,13 @@ async function buildAssets(): Promise<{ js: string; css: string }> {
       "h-full",
       "relative",
       "timeline-scroller",
+      // 실패 줄의 자리(떠 있는 한 줄). 따옴표 짝으로 읽는 아래 추출은 주석의 백틱과 어긋나 이 클래스들을 놓칠 수 있다 — 놓치면 줄이
+      // 흐름 안에 서서 목록을 밀고, 보던 줄 이동 단정이 시험대 탓으로 깨진다.
+      "layer-content-float",
+      "absolute",
+      "inset-x-0",
+      "top-0",
+      "bg-pane",
       ...sources.flatMap((file) => quotedClassTokens(readFileSync(join(HERE, file), "utf8"))),
     ]),
   ]);
@@ -212,6 +219,19 @@ const setTop = (page: Page, value: number) =>
 
 const wait = (page: Page, ms: number) => page.waitForTimeout(ms);
 
+/** 「long 251」 줄(옛 쪽이 붙기 전 맨 위 줄)의 화면 위치(px, 창 기준 — 스크롤러째 밀려도 잡는다). 없으면 null. */
+const rowTop = (page: Page): Promise<number | null> =>
+  page.evaluate((selector) => {
+    const scroller = document.querySelector(selector);
+    if (!(scroller instanceof HTMLElement)) return null;
+    for (const item of scroller.querySelectorAll("[data-index]")) {
+      if ((item.textContent ?? "").includes("long 251")) {
+        return item.getBoundingClientRect().top;
+      }
+    }
+    return null;
+  }, SCROLLER);
+
 /** 옛 쪽 요청이 `count` 개가 되고 마지막 것이 끝날 때까지(최대 `ms`). 넘으면 그대로 돌려준다 — 단정은 부른 쪽이 한다. */
 async function waitRequests(page: Page, count: number, ms: number): Promise<OlderRequest[]> {
   const deadline = Date.now() + ms;
@@ -241,6 +261,7 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
         .getByTestId("timeline-older-error")
         .waitFor({ state: "visible", timeout: 1_000 })
         .then(() => true, () => false);
+      const topWithLine = await rowTop(page);
       // 연속 실패 간격(첫 실패 뒤 1초)을 넘긴 뒤 사람이 조금 내렸다가 다시 올린다.
       await wait(page, 1_100);
       await setTop(page, 1_500);
@@ -255,6 +276,10 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
       expect(settled.length, `${label(cell)} 읽기 총수`).toBe(2);
       expect(lineShown, `${label(cell)} 실패 줄`).toBe(true);
       await page.getByTestId("timeline-older-error").waitFor({ state: "detached", timeout: 2_000 });
+      // 실패 줄이 뜨고 진 것 · 옛 쪽이 붙은 것으로 보던 줄이 밀리지 않는다(떠 있는 한 줄 + 앞붙이기 보정, ≤ 2px).
+      const topAfter = await rowTop(page);
+      expect(topWithLine, `${label(cell)} 실패 줄이 선 동안 보던 줄`).not.toBeNull();
+      expect(Math.abs((topAfter ?? Number.NaN) - (topWithLine ?? Number.NaN)), `${label(cell)} 보던 줄 이동 px`).toBeLessThanOrEqual(2);
       expect(errors).toEqual([]);
     } finally {
       await close();
