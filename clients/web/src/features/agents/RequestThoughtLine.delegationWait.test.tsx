@@ -116,6 +116,8 @@ describe("위임을 기다리는 동안의 진행 줄", () => {
   it("검색은 1분: 50초에는 안내, 마감(60초) 뒤 90초 전에는 stage만", () => {
     mountAt(STAGE_AT + 50_000, "위임: 팀 Hermes · 검색");
     expect(line()).toContain("위임: 팀 Hermes · 검색 · 검색은 1분까지 걸릴 수 있어요");
+    // 좁은 자리의 짧은 글(#5375 수리 1회차). 어느 쪽이 보이는지는 브라우저 시험(teamAiDelegation.shift)이 잰다.
+    expect(line()).toContain("검색 최대 1분");
     cleanup();
     mountAt(STAGE_AT + 70_000, "위임: 팀 Hermes · 검색");
     expect(line()).toContain("위임: 팀 Hermes · 검색");
