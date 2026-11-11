@@ -680,12 +680,12 @@ fn an_update_restart_goes_through_the_exit_that_stops_the_work_host() {
 /// (「확인 실패」 every six hours) instead of 「이 앱은 확인하지 않아요」.
 #[test]
 fn the_disabled_update_check_code_is_the_one_the_web_branches_on() {
-    const TAURI_TS: &str = include_str!("../../../web/src/lib/tauri.ts");
+    const MODEL_TS: &str = include_str!("../../../web/src/features/updates/model.ts");
     let quoted = format!("export const UPDATER_DISABLED = \"{}\";", crate::updater::UPDATER_DISABLED);
     assert_eq!(
-        TAURI_TS.matches(quoted.as_str()).count(),
+        MODEL_TS.matches(quoted.as_str()).count(),
         1,
-        "clients/web/src/lib/tauri.ts must declare `{quoted}`"
+        "clients/web/src/features/updates/model.ts must declare `{quoted}`"
     );
 }
 

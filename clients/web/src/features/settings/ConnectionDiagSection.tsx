@@ -40,6 +40,8 @@ const ROWS: Readonly<Record<ConnectionDiagGroup, { readonly labelKey: PlainMessa
   appRested: { labelKey: "settings.connectionLog.wakeLate", testId: "connection-log-wake-late" },
   cutWhileResting: { labelKey: "settings.connectionLog.cutWhileResting", testId: "connection-log-cut-while-resting" },
   windowHidden: { labelKey: "settings.connectionLog.windowHidden", testId: "connection-log-window-hidden" },
+  // 새 버전 확인이 피드에 닿지 못한 횟수(#5661). 확인하지 않는 판(`update.check.off`)은 묶음에 들지 않고 복사 글에만 남는다.
+  updateCheckFailed: { labelKey: "settings.connectionLog.updateCheckFailed", testId: "connection-log-update-check-failed" },
 };
 const ROW_ORDER = Object.keys(ROWS) as ConnectionDiagGroup[];
 

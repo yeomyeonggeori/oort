@@ -7776,6 +7776,12 @@ export const catalog: MessageCatalog = {
       "value": "Connection log"
     }
   ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "Update check failed"
+    }
+  ],
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
@@ -7916,6 +7922,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "Last checked"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "Not checking"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "This build doesn't check for new versions by itself. Download and install new versions yourself."
     }
   ],
   "teamAi.helper.aliasesLine": [

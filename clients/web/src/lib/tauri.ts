@@ -1605,23 +1605,15 @@ export interface UpdateProgress {
 }
 
 /**
- * The rejection `updater_check` gives in a build that never asks the feed: a
- * local, dev or debug build, or a DMG built without the channel flag (#5661).
- * Same string as `UPDATER_DISABLED` in `clients/desktop/src-tauri/src/updater.rs`
- * (`shell_contract.rs` pins the pair).
- */
-export const UPDATER_DISABLED = "updater_disabled";
-
-/**
  * Self-update, in three separate acts (ADR-0133 P2, MOMO-606).
  *
  * Unlike the rest of this file, `check` and `install` REJECT on failure instead
  * of degrading quietly. "I could not reach the update server" and "you are on
  * the latest build" must never look the same to a tester, or a stalled release
  * channel stays invisible until someone reports a bug that was fixed a week
- * ago. A build that cannot check at all rejects too, with `UPDATER_DISABLED`
- * (#5661). `relaunch` resolves at once and the app ends shortly after, through
- * its normal exit.
+ * ago. A build that cannot check at all rejects too, with the closed code
+ * `UPDATER_DISABLED` (`features/updates/model.ts`, #5661). `relaunch` resolves
+ * at once and the app ends shortly after, through its normal exit.
  */
 export const desktopUpdater = {
   /** Ask the manifest. Resolves to null when this build is current. */

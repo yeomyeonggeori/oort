@@ -51,9 +51,9 @@ pub const PROGRESS_EVENT: &str = "momo:update-progress";
 
 /// The rejection `updater_check` gives in a build that never asks the feed
 /// (local, dev, debug, or a `--public` DMG built without `MOMO_CHANNEL_BUILD=1`).
-/// A closed code, not a sentence: `clients/web/src/lib/tauri.ts` branches on
-/// exactly this string (`UPDATER_DISABLED`), and `shell_contract.rs` pins the
-/// two together.
+/// A closed code, not a sentence: `clients/web/src/features/updates/model.ts`
+/// declares the same `UPDATER_DISABLED` and the store branches on exactly this
+/// string; `shell_contract.rs` pins the two together.
 pub const UPDATER_DISABLED: &str = "updater_disabled";
 
 /// The update found by the last `updater_check`, held so `updater_install` does

@@ -17,15 +17,28 @@ import type { AvailableUpdate } from "@/lib/tauri";
 //   installing bytes moving; the app is still fully usable
 //   installed  swapped on disk, waiting for a restart THEY choose
 //   failed     say what broke and offer the retry
+//   off        this build never asks (no channel flag); new builds come by hand
 //
 // Collapsing `current` into `idle` is the tempting simplification and it is
-// wrong: "up to date" is a fact worth showing, and "never asked" is not.
+// wrong: "up to date" is a fact worth showing, and "never asked" is not. The
+// same goes for `off` (#5661): an owner's app said 「최신」 for six days while it
+// had never looked at a feed.
 // =============================================================================
+
+/**
+ * The rejection `updater_check` gives in a build that never asks the feed: a
+ * local, dev or debug build, or a DMG built without the channel flag (#5661).
+ * Same string as `UPDATER_DISABLED` in `clients/desktop/src-tauri/src/updater.rs`;
+ * `shell_contract.rs` pins the pair. It lives here, not in `lib/tauri.ts`, so
+ * the tests that mock the bridge module do not have to repeat it.
+ */
+export const UPDATER_DISABLED = "updater_disabled";
 
 export type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "current" }
+  | { kind: "off" }
   | { kind: "available"; update: AvailableUpdate }
   | {
       kind: "installing";
@@ -146,6 +159,23 @@ export function formatPublishedAt(
     year: "numeric",
     month: "long",
     day: "numeric",
+  });
+}
+
+/**
+ * When the last check ran, for 설정 > 업데이트 (#5661): month, day and minute in
+ * the reader's locale. The point is to see that the app still asks — a date
+ * that stopped moving is the six-day story told on screen. An unusable time is
+ * dropped (null) rather than shown as "Invalid Date".
+ */
+export function formatCheckedAt(at: number, locale?: string): string | null {
+  const parsed = new Date(at);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 

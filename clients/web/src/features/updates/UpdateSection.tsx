@@ -5,7 +5,9 @@ import { StatusChip } from "@/features/settings/SettingsFields";
 import { SettingsRow } from "@/features/settings/shell/SettingsRow";
 import { SettingsSection } from "@/features/settings/shell/SettingsSection";
 import { CardBody } from "@/features/settings/workTierPolicy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
+  formatCheckedAt,
   formatPublishedAt,
   progressLabel,
   progressPercent,
@@ -16,6 +18,7 @@ import {
   installUpdate,
   relaunchIntoUpdate,
   useAppVersion,
+  useLastCheckedAt,
   useUpdateState,
 } from "./store";
 
@@ -76,11 +79,16 @@ function stateSentence(state: UpdateState): string {
 export function UpdateSection() {
   const state = useUpdateState();
   const version = useAppVersion();
+  const lastCheckedAt = useLastCheckedAt();
+  const formatMessage = useFormatMessage();
 
   const hasUpdate =
     state.kind === "available" || state.kind === "installing" || state.kind === "installed";
   const published = hasUpdate ? formatPublishedAt(state.update.publishedAt) : null;
   const busy = state.kind === "checking" || state.kind === "installing";
+  // 이 판은 피드를 묻지 않는다(#5661): 「최신」도 「직접 확인」 단추도 거짓이 된다. 사실 한 문장만 선다.
+  const off = state.kind === "off";
+  const checkedAt = !off && lastCheckedAt !== null ? formatCheckedAt(lastCheckedAt) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
@@ -105,11 +113,26 @@ export function UpdateSection() {
             <span className="text-body text-ink">{published}</span>
           </SettingsRow>
         )}
-        <SettingsRow label="상태" description={stateSentence(state)} keep>
-          <div className="flex items-center gap-2" data-testid="update-status">
-            <StateChip state={state} />
+        <SettingsRow
+          label="상태"
+          description={off ? formatMessage("settings.updates.offSentence") : stateSentence(state)}
+          keep
+        >
+          <div className="flex items-center gap-2" data-testid="update-status" data-update-state={state.kind}>
+            {off ? (
+              <StatusChip tone="muted">{formatMessage("settings.updates.offChip")}</StatusChip>
+            ) : (
+              <StateChip state={state} />
+            )}
           </div>
         </SettingsRow>
+        {checkedAt && (
+          <SettingsRow label={formatMessage("settings.updates.lastCheckedLabel")}>
+            <span className="font-mono text-body text-ink" data-numeric data-testid="update-last-checked">
+              {checkedAt}
+            </span>
+          </SettingsRow>
+        )}
 
         {state.kind === "failed" && (
           <CardBody>
@@ -169,17 +192,19 @@ export function UpdateSection() {
             )}
           </SettingsRow>
         )}
-        <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => void checkForUpdate()}
-            data-testid="update-check"
-          >
-            {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
-          </Button>
-        </SettingsRow>
+        {!off && (
+          <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void checkForUpdate()}
+              data-testid="update-check"
+            >
+              {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
+            </Button>
+          </SettingsRow>
+        )}
       </SettingsSection>
       {/* 연결 기록(#5587): 이 기기 안에만 남는 연결 판정 전이. 버그 보고가 닿는 이 페이지에 둔다(폰은 설정 > 정보). */}
       <ConnectionDiagSection appVersion={version} />

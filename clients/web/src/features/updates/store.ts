@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from "react";
+import { recordConnectionDiag } from "@/features/common/connectionDiag";
 import { appVersion, desktopUpdater, isDesktop } from "@/lib/tauri";
 import type { AvailableUpdate } from "@/lib/tauri";
-import { RELAUNCH_COUNTDOWN_SECONDS, type UpdateState } from "./model";
+import { RELAUNCH_COUNTDOWN_SECONDS, UPDATER_DISABLED, type UpdateState } from "./model";
 import { flushBeforeRelaunch } from "./relaunchFlush";
+import { startUpdateSchedule, type ScheduledCheckResult } from "./schedule";
 
 // =============================================================================
 // The one update channel this app run has (ADR-0133 P2, MOMO-606).
@@ -17,18 +19,22 @@ import { flushBeforeRelaunch } from "./relaunchFlush";
 // `useSyncExternalStore` so React never tears between the two renderers.
 // =============================================================================
 
-/**
- * How often a long-running window asks again. Six hours, not six minutes: a
- * tester who leaves the app open for a week should still learn about a build,
- * and an internal channel that publishes twice a day gains nothing from polling
- * a static file on a CDN every few minutes.
- */
-const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// How often a long-running window asks again lives in `schedule.ts` (#5661):
+// at launch, every six hours of WALL-CLOCK time, thirty minutes after a failure,
+// and once when the Mac wakes or the window comes back. Six hours, not six
+// minutes: an internal channel that publishes twice a day gains nothing from
+// polling a static file on a CDN every few minutes. The old `setInterval(6h)`
+// counted only awake time, so a laptop shut every night could go days between
+// checks.
 
 let state: UpdateState = { kind: "idle" };
 let currentVersion: string | null = null;
 let watching = false;
 let inFlight = false;
+/** When the last check that actually asked (or learned it cannot ask) finished. */
+let lastCheckedAt: number | null = null;
+/** `update.check.off` goes into the connection log once per run, not every six hours. */
+let offRecorded = false;
 /** Seconds left before the automatic restart, or null when none is scheduled. */
 let relaunchIn: number | null = null;
 let relaunchTimer: number | null = null;
@@ -59,6 +65,10 @@ function versionSnapshot(): string | null {
   return currentVersion;
 }
 
+function lastCheckedSnapshot(): number | null {
+  return lastCheckedAt;
+}
+
 function messageOf(error: unknown): string | null {
   if (error === null || error === undefined) return null;
   if (typeof error === "string") return error;
@@ -85,6 +95,11 @@ export function useUpdateState(): UpdateState {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
+/** When the last finished check ran (epoch ms), or null before the first one. */
+export function useLastCheckedAt(): number | null {
+  return useSyncExternalStore(subscribe, lastCheckedSnapshot, lastCheckedSnapshot);
+}
+
 /**
  * Ask the manifest.
  *
@@ -98,20 +113,40 @@ export function useUpdateState(): UpdateState {
  * artifact, so the web side cannot tell a local build (which the published
  * manifest would only ever downgrade) from a shipping one. That judgement
  * lives in the shell, where the build kind is known: `updater_check` in
- * `clients/desktop/src-tauri/src/updater.rs` reports "up to date" unless
- * `MOMO_CHANNEL_BUILD=1` was set at compile time (#1281, W-B2-5), so the
- * `{kind: "current"}` a local build settles on here is the shell's honest
- * answer.
+ * `clients/desktop/src-tauri/src/updater.rs` does not ask the feed unless
+ * `MOMO_CHANNEL_BUILD=1` was set at compile time (#1281, W-B2-5). Then the
+ * shell rejects with `UPDATER_DISABLED`, and that becomes `{kind: "off"}` here
+ * — never `current`: a build that did not look must not say 「최신」 (#5661).
+ *
+ * A check while an installed update waits for its restart is refused too: the
+ * running version is still the old one, so the manifest would offer the same
+ * build again and flip 「곧 다시 실행」 back to 「새 버전」.
+ *
+ * Resolves with what it learned, for the schedule (`schedule.ts`). A failed
+ * check goes into the connection log (설정 > 업데이트 > 연결 기록) as a time and
+ * a kind only.
  */
-export async function checkForUpdate(): Promise<void> {
-  if (!isDesktop()) return;
-  if (inFlight || state.kind === "installing") return;
+export async function checkForUpdate(): Promise<ScheduledCheckResult> {
+  if (!isDesktop()) return "refused";
+  if (inFlight || state.kind === "installing" || state.kind === "installed") return "refused";
   inFlight = true;
   set({ kind: "checking" });
   try {
     const found = await desktopUpdater.check();
+    lastCheckedAt = Date.now();
     set(found ? { kind: "available", update: found } : { kind: "current" });
+    return found ? "available" : "current";
   } catch (error) {
+    lastCheckedAt = Date.now();
+    if (messageOf(error) === UPDATER_DISABLED) {
+      if (!offRecorded) {
+        offRecorded = true;
+        recordConnectionDiag("update.check.off", lastCheckedAt);
+      }
+      set({ kind: "off" });
+      return "off";
+    }
+    recordConnectionDiag("update.check.failed", lastCheckedAt);
     set({
       kind: "failed",
       phase: "check",
@@ -119,6 +154,7 @@ export async function checkForUpdate(): Promise<void> {
       detail: messageOf(error),
       update: null,
     });
+    return "failed";
   } finally {
     inFlight = false;
   }
@@ -211,13 +247,14 @@ export async function relaunchIntoUpdate(): Promise<void> {
 }
 
 /**
- * Resolve the running version and start the periodic check. Idempotent, and a
- * no-op in a browser tab, where there is no app bundle to replace and a reload
- * already gets the newest bundle.
+ * Resolve the running version and start the schedule (`schedule.ts`): a check
+ * now, then by the wall clock, and once when the Mac wakes, the window is shown
+ * again or the device comes back online. Idempotent, and a no-op in a browser
+ * tab, where there is no app bundle to replace and a reload already gets the
+ * newest bundle.
  *
- * Returns the cleanup for the interval. Deliberately NOT tied to a component's
- * lifetime beyond the shell: navigating to another route must not restart the
- * check.
+ * Returns the cleanup. Deliberately NOT tied to a component's lifetime beyond
+ * the shell: navigating to another route must not restart the check.
  */
 export function startUpdateWatch(): () => void {
   if (!isDesktop() || watching) return () => {};
@@ -227,11 +264,25 @@ export function startUpdateWatch(): () => void {
     currentVersion = version;
     for (const listener of listeners) listener();
   });
-  void checkForUpdate();
 
-  const timer = window.setInterval(() => void checkForUpdate(), RECHECK_INTERVAL_MS);
+  const schedule = startUpdateSchedule({
+    now: () => Date.now(),
+    setTimer: (run, ms) => window.setTimeout(run, ms),
+    clearTimer: (handle) => window.clearTimeout(handle as number),
+    check: checkForUpdate,
+  });
+  const onVisible = () => {
+    if (document.visibilityState === "visible") schedule.nudge();
+  };
+  const onBack = () => schedule.nudge();
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", onBack);
+  window.addEventListener("online", onBack);
   return () => {
-    window.clearInterval(timer);
+    schedule.stop();
+    document.removeEventListener("visibilitychange", onVisible);
+    window.removeEventListener("focus", onBack);
+    window.removeEventListener("online", onBack);
     watching = false;
   };
 }
@@ -249,6 +300,8 @@ export function resetUpdateStoreForTest(): void {
   currentVersion = null;
   watching = false;
   inFlight = false;
+  lastCheckedAt = null;
+  offRecorded = false;
   clearRelaunchTimer();
   relaunchIn = null;
   listeners.clear();

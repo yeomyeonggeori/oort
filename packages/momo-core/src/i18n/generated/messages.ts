@@ -1089,6 +1089,7 @@ export const messageKeys = [
   "settings.connectionLog.sendBlocked",
   "settings.connectionLog.socketDown",
   "settings.connectionLog.title",
+  "settings.connectionLog.updateCheckFailed",
   "settings.connectionLog.wakeLate",
   "settings.connectionLog.windowHidden",
   "settings.invite.guestInvitesPaused",
@@ -1112,6 +1113,9 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "settings.updates.lastCheckedLabel",
+  "settings.updates.offChip",
+  "settings.updates.offSentence",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -2672,6 +2676,7 @@ export const argumentSpecs = {
   "settings.connectionLog.sendBlocked": {},
   "settings.connectionLog.socketDown": {},
   "settings.connectionLog.title": {},
+  "settings.connectionLog.updateCheckFailed": {},
   "settings.connectionLog.wakeLate": {},
   "settings.connectionLog.windowHidden": {},
   "settings.invite.guestInvitesPaused": {},
@@ -2697,6 +2702,9 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "settings.updates.lastCheckedLabel": {},
+  "settings.updates.offChip": {},
+  "settings.updates.offSentence": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -4112,6 +4120,7 @@ export interface MessageArgs {
   "settings.connectionLog.sendBlocked": Record<string, never>;
   "settings.connectionLog.socketDown": Record<string, never>;
   "settings.connectionLog.title": Record<string, never>;
+  "settings.connectionLog.updateCheckFailed": Record<string, never>;
   "settings.connectionLog.wakeLate": Record<string, never>;
   "settings.connectionLog.windowHidden": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
@@ -4135,6 +4144,9 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "settings.updates.lastCheckedLabel": Record<string, never>;
+  "settings.updates.offChip": Record<string, never>;
+  "settings.updates.offSentence": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;

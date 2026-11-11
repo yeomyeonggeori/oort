@@ -7402,6 +7402,12 @@ export const catalog: MessageCatalog = {
       "value": "연결 기록"
     }
   ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "업데이트 확인 실패"
+    }
+  ],
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
@@ -7542,6 +7548,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "마지막 확인"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "확인 안 함"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "이 앱은 스스로 새 버전을 확인하지 않는 판이에요. 새 버전은 직접 내려받아 설치해요."
     }
   ],
   "teamAi.helper.aliasesLine": [
