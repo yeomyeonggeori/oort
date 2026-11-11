@@ -72,9 +72,12 @@ const PAGE = `<!doctype html><html><head><style>
 html, body { margin: 0; }
 #box { height: 400px; overflow-y: auto; overflow-anchor: none; }
 .row { height: 50px; box-sizing: border-box; }
+.row.grow-120 { height: 170px; }
+.row.grow-400 { height: 450px; }
+.margin-300 { margin-bottom: 300px; }
 </style></head><body><div id="host"></div></body></html>`;
 
-/** 페이지 안의 실험대. 줄을 키우는 것은 클래스가 아니라 `style.minHeight`(스크립트)다 — 실제 앱에서 늦게 뜨는 그림이 줄을 키우는 것과 같다. */
+/** 페이지 안의 실험대. 줄은 클래스로 키운다(이 트리의 규칙: 시험도 런타임에 스타일을 쓰지 않는다 — `designSystem.test.ts`). */
 function installLab() {
   const frames = (count = 2) =>
     new Promise<void>((done) => {
@@ -86,6 +89,12 @@ function installLab() {
   let hold: ReturnType<Window["__scrollHold"]["holdScrollPosition"]> | null = null;
   let rowAttribute = "data-row";
   const rowAt = (index: number) => list.children[index] as HTMLElement;
+  /** 줄을 `amount`px 키운다(0 · 120 · 400 가운데 하나). */
+  const grow = (row: HTMLElement, amount: number) => {
+    if (![0, 120, 400].includes(amount)) throw new Error(`모르는 높이: ${amount}`);
+    row.classList.toggle("grow-120", amount === 120);
+    row.classList.toggle("grow-400", amount === 400);
+  };
   const lab: Window["__lab"] = {
     token: 0,
     frames,
@@ -156,12 +165,12 @@ function installLab() {
         for (const action of step.split("+")) {
           const [name, value] = action.split(":");
           const amount = Number(value);
-          if (name === "growAbove") rowAt(1).style.minHeight = `${50 + amount}px`;
-          else if (name === "growNext") rowAt(2).style.minHeight = `${50 + amount}px`;
-          else if (name === "growLast") rowAt(rows.length - 1).style.minHeight = `${50 + amount}px`;
+          if (name === "growAbove") grow(rowAt(1), amount);
+          else if (name === "growNext") grow(rowAt(2), amount);
+          else if (name === "growLast") grow(rowAt(rows.length - 1), amount);
           else if (name === "scroll") box.scrollTop += amount;
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
-          else if (name === "margin") list.style.marginBottom = `${amount}px`;
+          else if (name === "margin") list.classList.add("margin-300");
           else if (name === "prepend") lab.token += 1;
           else if (name === "append") {
             const row = document.createElement("div");
