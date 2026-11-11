@@ -16,6 +16,7 @@ import type { RealtimeHandle } from "@/lib/realtime";
  * - `general` — 메시지 0개(머리말 한 줄). 로그인 뒤 첫 화면 자리.
  * - `long` — 300줄. 첫 쪽 50줄, `before=` 마다 50줄.
  * - `short` — 첫 쪽이 4줄인데 더 옛 글이 있다(`nextBefore`). 진입 직후 이미 맨 위에 닿은 대화.
+ * - `replies` — 200줄 중 101~196 이 스레드 답글(본류에 안 섬). 첫 쪽은 본류 4줄, 첫 옛 쪽은 본류 0줄, 그다음 쪽부터 본류 줄.
  * 시험은 `window.__timelineOlder` 로 대화를 바꾸고, 다음 옛 쪽 읽기를 망 오류로 끊고, 옛 쪽 읽기 기록을 읽는다.
  */
 
@@ -26,10 +27,15 @@ const CHANNELS = {
   general: "00000000-0000-7000-8000-00000000c001",
   long: "00000000-0000-7000-8000-00000000c002",
   short: "00000000-0000-7000-8000-00000000c003",
+  replies: "00000000-0000-7000-8000-00000000c004",
 } as const;
 type ChannelName = keyof typeof CHANNELS;
-const TOTAL: Record<ChannelName, number> = { general: 0, long: 300, short: 120 };
-const HEAD: Record<ChannelName, number> = { general: 0, long: 50, short: 4 };
+const TOTAL: Record<ChannelName, number> = { general: 0, long: 300, short: 120, replies: 200 };
+const HEAD: Record<ChannelName, number> = { general: 0, long: 50, short: 4, replies: 50 };
+/** `replies` 대화에서 스레드 답글인 줄(본류 밖). */
+const isHiddenReply = (name: ChannelName, seq: number) => name === "replies" && seq >= 101 && seq <= 196;
+const messageId = (name: ChannelName, seq: number) =>
+  `0199bbbb-0000-7000-8000-${CHANNELS[name].slice(-4)}${String(seq).padStart(8, "0")}`;
 const PAGE = 50;
 
 const realtime = {
@@ -63,8 +69,9 @@ function member(): RosterMember {
 function message(name: ChannelName, seq: number): Message {
   const channel = CHANNELS[name];
   return {
-    id: `0199bbbb-0000-7000-8000-${channel.slice(-4)}${String(seq).padStart(8, "0")}`,
+    id: messageId(name, seq),
     channelId: channel,
+    ...(isHiddenReply(name, seq) ? { rootId: messageId(name, 100) } : {}),
     seq,
     hlcTs: seq,
     hlcCount: 0,

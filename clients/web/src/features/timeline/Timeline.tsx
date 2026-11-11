@@ -904,9 +904,12 @@ export function Timeline({
     },
     []
   );
+  // 가장 옛 줄(답글 포함)이 바뀌어도 다시 본다: 옛 쪽이 본류에 줄을 하나도 더하지 않으면(스레드 답글뿐) 목록 번호도 위 상태도 그대로라
+  // 두 신호 모두 다시 나가지 않는다.
+  const oldestLoadedSeq = messages[0]?.seq ?? null;
   useEffect(() => {
     if (atTopRef.current) checkTopSoon();
-  }, [timelineChannelId, checkTopSoon]);
+  }, [timelineChannelId, oldestLoadedSeq, checkTopSoon]);
   const onAtTopChange = useCallback(
     (top: boolean) => {
       atTopRef.current = top;

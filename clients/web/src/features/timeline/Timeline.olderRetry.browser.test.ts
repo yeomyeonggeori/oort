@@ -28,7 +28,7 @@ const CORE_SRC = join(WEB_ROOT, "../../packages/momo-core/src");
 const HARNESS = join(HERE, "timelineOlder.harness.tsx");
 
 type EngineName = "chromium" | "webkit";
-type ChannelName = "general" | "long" | "short";
+type ChannelName = "general" | "long" | "short" | "replies";
 type OlderRequest = { at: number; channel: ChannelName; before: number; outcome: "ok" | "failed" | "pending" };
 
 function engineMissing(name: EngineName): string | null {
@@ -319,6 +319,29 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
       expect(errors).toEqual([]);
     } finally {
       await close();
+    }
+  }, 30_000);
+
+  // 지키는 것 (나''): 옛 쪽이 본류에 줄을 하나도 더하지 않으면(스레드 답글뿐) 목록은 그대로 맨 위다 — 그래도 다음 쪽을 이어 읽는다.
+  // 곧장 들어가도(새 목록), 빈 대화를 거쳐도(같은 목록).
+  it.each(cells)("(나'') 답글뿐인 옛 쪽 뒤에도 맨 위면 이어 읽는다 — $engine $viewport.width", async (cell) => {
+    for (const via of [false, true]) {
+      const { page, close, errors } = await openHarness(cell.engine, cell.viewport, via ? "general" : "replies", via);
+      try {
+        if (via) {
+          await page.locator(`${SCROLLER} [data-index]`).first().waitFor({ state: "attached", timeout: 5_000 });
+          await wait(page, 400);
+          await page.evaluate(() => window.__timelineOlder.open("replies"));
+        }
+        const list = await waitRequests(page, 2, 4_000);
+        expect(
+          list.map((entry) => entry.before),
+          `${label(cell)} ${via ? "빈 대화를 거쳐" : "곧장"}: 읽은 쪽`
+        ).toEqual(expect.arrayContaining([151, 101]));
+        expect(errors).toEqual([]);
+      } finally {
+        await close();
+      }
     }
   }, 30_000);
 
