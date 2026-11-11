@@ -535,7 +535,7 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
             const cp = await c.newPage();
             await cp.setContent(page(capCss, variant.column));
             for (const [name, markup] of Object.entries(boards)) {
-              if ("only" in variant && !name.startsWith(variant.only)) continue;
+              if (variant.only !== undefined && !name.startsWith(variant.only)) continue;
               for (const scheme of ["light", "dark"] as const) {
                 if (variant.tag === "zoom200" && scheme === "dark") continue;
                 await cp.emulateMedia({ colorScheme: scheme });
