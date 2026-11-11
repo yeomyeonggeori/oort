@@ -25,7 +25,7 @@ const virtuoso = vi.hoisted(() => ({
   atBottomStateChange: null as ((bottom: boolean) => void) | null,
 }));
 const hold = vi.hoisted(() => ({ expectBottom: vi.fn(), stop: vi.fn() }));
-vi.mock("./scrollHold", () => ({ holdScrollPosition: () => hold }));
+vi.mock("./scrollHold", () => ({ holdScrollPosition: () => hold, virtualListHold: () => ({}) }));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(

@@ -85,7 +85,7 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
-import { holdScrollPosition, type ScrollHold } from "./scrollHold";
+import { holdScrollPosition, virtualListHold, type ScrollHold } from "./scrollHold";
 import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -830,12 +830,12 @@ export function Timeline({
   }, []);
 
   // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
-  // 제자리다. 데스크탑 WebKit 은 이 목록 안에서 스크롤 앵커링을 하지 않아 그림 줄이 자라면 목록이 밀렸다.
-  // 판정·바로잡기의 규칙은 `scrollHold.ts`.
+  // 제자리다. 이 목록 안에서는 브라우저 스크롤 앵커링이 돌지 않아(`timeline-scroller`) 그림 줄이 자라면 목록이 밀린다.
+  // 판정·바로잡기의 규칙은 `scrollHold.ts`(스레드 답글 목록과 같은 모듈, 가상 목록용 규칙은 `virtualListHold`).
   const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
     if (!scrollerEl) return;
-    const hold = holdScrollPosition(scrollerEl, { firstItemIndex: () => firstItemIndexRef.current });
+    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current));
     holdRef.current = hold;
     return () => {
       hold.stop();
@@ -916,7 +916,7 @@ export function Timeline({
         // 느껴지기 때문이다.
         // `timeline-scroller` (#5638): 브라우저 스크롤 앵커링을 끈다. 스크롤 위치는 가상 목록과
         // `scrollHold` 한 길로만 움직이고, 앵커링이 있는 엔진(Chromium · macOS 27 WebKit)과 없는
-        // 엔진(macOS 14~26 WebKit)이 같은 길을 탄다.
+        // 엔진(문서상 macOS 14~26 WebKit)이 같은 길을 탄다.
         className="overscroll-contain h-full timeline-scroller"
         data={items}
         components={TIMELINE_COMPONENTS}
