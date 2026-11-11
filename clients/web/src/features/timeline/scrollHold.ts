@@ -143,6 +143,8 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   let lastForeignDirection: "up" | "down" = "down";
   /** 이 모듈이 방금 놓은 scrollTop. 그 값으로 오는 스크롤 이벤트는 사람의 스크롤이 아니다. */
   let placed: number | null = null;
+  /** 스크롤 이벤트에서 「곧 올 ResizeObserver 에게 맡긴」 내용 높이. 다음 스크롤 이벤트까지 그대로면 관찰자는 오지 않는다. */
+  let deferredContent: number | null = null;
 
   /** 지금의 줄 높이 변화는 다른 손(가상 목록)이 스스로 메운다 — 손대지 않는다. */
   const coOwnerHandles = () =>
@@ -159,6 +161,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     lastViewport = scroller.clientHeight;
     lastContent = scroller.scrollHeight;
     lastTop = scroller.scrollTop;
+    deferredContent = null;
     const kept = keep !== null && keep.token === prependToken() && findRow(keep.key) !== null;
     anchor = wasAtBottom ? null : kept ? keep : readAnchor();
   };
@@ -195,11 +198,14 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     // 스크롤과 같은 프레임에 줄 높이가 바뀌었다(이 이벤트는 그 프레임의 ResizeObserver 보다 먼저 온다). 보던 줄은 이 스크롤이 옮긴 만큼만
     // 움직였어야 한다 — 나머지는 줄 높이 변화가 민 것이다. 여기서 다시 적으면 그 밀림이 새 기준에 섞여 사라지므로, 적어 둔 자리를 스크롤이
     // 옮긴 만큼만 옮겨 두고(높이 기록은 그대로) 바로잡기는 곧 올 ResizeObserver 에게 맡긴다: 바로잡는 곳이 한 군데여야 다시 확인(settle)이
-    // 가상 목록의 처리 뒤에 걸린다.
-    const resized = scroller.scrollHeight !== lastContent || scroller.clientHeight !== lastViewport;
-    if (resized && !wasAtBottom && anchor !== null && !coOwnerHandles()) {
+    // 가상 목록의 처리 뒤에 걸린다. 다만 한 프레임을 기다려도 관찰자가 오지 않았으면(지켜보는 상자의 크기는 그대로인 채 내용 높이만
+    // 바뀌었다 — 바깥 여백 같은 것) 맡긴 것을 거두고 다시 적는다: 붙들고 있으면 「바닥에 닿았다」를 영영 다시 읽지 못한다.
+    const content = scroller.scrollHeight;
+    const resized = content !== lastContent || scroller.clientHeight !== lastViewport;
+    if (resized && !wasAtBottom && anchor !== null && deferredContent !== content && !coOwnerHandles()) {
       anchor = carried(anchor);
       lastTop = top;
+      deferredContent = content;
       return;
     }
     remember();
@@ -221,9 +227,13 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       if (distanceToBottom(scroller) > 0.5) place(scroller.scrollHeight);
       remember();
     } else if (settleTarget === "anchor" && anchor !== null && !coOwnerHandles()) {
-      const held = anchor;
-      holdAnchor(held);
-      remember(held);
+      // 줄 높이가 또 바뀌어 있으면(이 프레임의 ResizeObserver 가 아직 보지 않았다) 그쪽에 맡긴다: 바로잡기는 거기 한 군데이고, 거기서
+      // 다시 걸어야 다음 확인이 목록의 처리 뒤에 돈다.
+      if (scroller.scrollHeight === lastContent && scroller.clientHeight === lastViewport) {
+        const held = anchor;
+        holdAnchor(held);
+        remember(held);
+      }
     } else {
       settleTarget = null;
       return;

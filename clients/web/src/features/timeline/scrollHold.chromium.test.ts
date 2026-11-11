@@ -129,6 +129,8 @@ function installLab() {
           if (name === "growAbove") rowAt(1).style.minHeight = `${50 + amount}px`;
           else if (name === "growLast") rowAt(rows.length - 1).style.minHeight = `${50 + amount}px`;
           else if (name === "scroll") box.scrollTop += amount;
+          else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
+          else if (name === "margin") list.style.marginBottom = `${amount}px`;
           else if (name === "prepend") lab.token += 1;
           else if (name === "append") {
             const row = document.createElement("div");
@@ -225,6 +227,13 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     const control = await scene({ kind: "plain", hold: false, startTop: "bottom", steps: ["growLast:120", "append:1"] });
     expect(control.gap).toBe(170);
     const held = await scene({ kind: "plain", hold: true, startTop: "bottom", steps: ["growLast:120", "append:1"] });
+    expect(held.gap).toBeLessThanOrEqual(1);
+  });
+
+  it.skipIf(!chromiumAvailable)("평범한 목록: 지켜보는 상자의 크기는 그대로인 채 내용 높이만 바뀐 뒤에도, 바닥에 닿으면 다시 바닥으로 안다", async () => {
+    // 바깥 여백은 줄 목록 상자의 크기를 바꾸지 않아 ResizeObserver 가 오지 않는다. 그 변화를 스크롤 이벤트에서 「맡겨 둔」 채로 붙들면
+    // 그 뒤 스크롤해 내려와도 바닥으로 읽지 못해 새 줄을 따라가지 않는다.
+    const held = await scene({ kind: "plain", hold: true, startTop: 500, steps: ["margin:300+scroll:30", "scrollToEnd:1", "append:1", "growLast:120"] });
     expect(held.gap).toBeLessThanOrEqual(1);
   });
 
