@@ -138,6 +138,7 @@ describe("업데이트 확인 일정 — 저장소 (#5661)", () => {
     expect(status?.getAttribute("data-update-state")).toBe("off");
     expect(status?.textContent).not.toContain("최신");
     expect(view.textContent).not.toContain("가장 최신");
+    expect(view.textContent).not.toContain("앱이 스스로 새 버전으로 바꿔요");
     // 묻지 않는 판에 「업데이트 확인」 단추는 거짓 약속이다.
     expect(view.querySelector('[data-testid="update-check"]')).toBeNull();
     expect(view.querySelector('[data-testid="update-last-checked"]')).toBeNull();

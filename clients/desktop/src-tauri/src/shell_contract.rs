@@ -664,7 +664,9 @@ fn an_update_restart_goes_through_the_exit_that_stops_the_work_host() {
     let exit = &lib[lib
         .find("if let tauri::RunEvent::Exit = _event {")
         .expect("lib.rs handles `RunEvent::Exit`")..];
-    let exit = &exit[..exit.find("\n            }\n").expect("end of the `Exit` arm")];
+    let exit = &exit[..exit
+        .find("\n            }\n")
+        .expect("end of the `Exit` arm")];
     assert!(
         exit.contains("host.stop_now();"),
         "the `Exit` arm no longer stops the work host: {exit}"
@@ -681,7 +683,10 @@ fn an_update_restart_goes_through_the_exit_that_stops_the_work_host() {
 #[test]
 fn the_disabled_update_check_code_is_the_one_the_web_branches_on() {
     const MODEL_TS: &str = include_str!("../../../web/src/features/updates/model.ts");
-    let quoted = format!("export const UPDATER_DISABLED = \"{}\";", crate::updater::UPDATER_DISABLED);
+    let quoted = format!(
+        "export const UPDATER_DISABLED = \"{}\";",
+        crate::updater::UPDATER_DISABLED
+    );
     assert_eq!(
         MODEL_TS.matches(quoted.as_str()).count(),
         1,

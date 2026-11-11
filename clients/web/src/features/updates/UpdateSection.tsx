@@ -94,7 +94,12 @@ export function UpdateSection() {
     <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
       <SettingsSection
         title="앱 업데이트"
-        description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요. 쓰던 글은 그대로 남아요."
+        description={
+          // 확인하지 않는 판에서 「앱이 스스로 새 버전으로 바꿔요」는 거짓이다(#5661): 상태 줄의 한 문장만 둔다.
+          off
+            ? undefined
+            : "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요. 쓰던 글은 그대로 남아요."
+        }
       >
         <SettingsRow label="지금 버전">
           <span className="font-mono text-body text-ink" data-numeric>
