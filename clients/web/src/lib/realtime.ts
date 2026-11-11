@@ -148,14 +148,35 @@ export function watchExpressionChanges(handle: RealtimeHandle, workspaceId: stri
   return expressionWatchers.get(handle)?.(workspaceId, changed, resync, detail) ?? (() => {});
 }
 
+/**
+ * 받은 것이 있을 때마다 그 시각을 적는 웹소켓(#5660). centrifuge-js 는 서버 핑을 밖으로 알리지 않는다: 소켓의 `message` 사건을
+ * 직접 들어야 「뒤에 있는 동안에도 서버의 말을 들었나」를 안다(`RealtimeHandle.lastHeardAt`). 받은 내용은 보지 않는다.
+ * 웹소켓이 없는 곳(시험의 일부 환경)에서는 null 이고, 그러면 centrifuge 가 스스로 고른 것을 쓴다.
+ */
+function heardWebSocket(onHeard: () => void): typeof WebSocket | null {
+  const Base = globalThis.WebSocket;
+  if (typeof Base !== "function") return null;
+  return class HeardWebSocket extends Base {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      this.addEventListener("message", onHeard);
+    }
+  };
+}
+
 export function createRealtime(
   realtimeWebSocketUrl: string,
   onStatus: (status: RealtimeStatus) => void
 ): RealtimeHandle {
+  let heardAt: number | null = null;
+  const websocket = heardWebSocket(() => {
+    heardAt = Date.now();
+  });
   const client = new Centrifuge(realtimeWebSocketUrl, {
     getToken: fetchRealtimeToken,
     minReconnectDelay: 500,
     maxReconnectDelay: 20_000,
+    ...(websocket === null ? {} : { websocket }),
   });
 
   // `connecting` means two different things to a reader and only one thing to
@@ -676,6 +697,7 @@ export function createRealtime(
       client.disconnect();
       client.connect();
     },
+    lastHeardAt: () => heardAt,
     dispose: () => {
       expressionWatchers.delete(handle);
       shared.clear();

@@ -1302,5 +1302,12 @@ export interface RealtimeHandle {
    * backfill path a spontaneous reconnect takes.
    */
   reconnect: () => void;
+  /**
+   * 소켓이 서버에게서 마지막으로 무언가(핑·발행물·답) 들은 시각, epoch ms (#5660). 들은 적이 없으면 null.
+   *
+   * 「연결됨」 상태만으로는 잠든 사이 죽은 소켓과 뒤에서도 핑을 받은 소켓을 가를 수 없다. 돌아온 순간 다시 열지(`resume.ts`)는 이
+   * 값으로 정한다. 없는 구현(폰)은 「모른다」이고, 그러면 예전처럼 30초 넘게 비웠다 돌아오면 다시 연다.
+   */
+  lastHeardAt?: () => number | null;
   dispose: () => void;
 }

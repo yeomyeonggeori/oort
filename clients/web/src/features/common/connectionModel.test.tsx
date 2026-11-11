@@ -11,8 +11,17 @@ import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
 import { fetchWithDeadline } from "@momo/core/lib/http";
 import { ConnectionCard } from "@/features/sidebar/ConnectionCard";
 import { useConnection } from "./connectionContext";
+import { resetConnectionDiagForTest } from "./connectionDiag";
 import { ConnectionProvider } from "./connectionModel";
 import { useOffline } from "./useOffline";
+import { resetWakeWatchForTest } from "./wakeWatch";
+
+// 데스크탑 웹뷰인 척(#5660 ⑥-2): `document.hasFocus()`를 믿지 않고 창 사건으로 초점을 따르는 길을 잰다. 기본은 브라우저다.
+const shell = vi.hoisted(() => ({ desktop: false }));
+vi.mock("@/lib/tauri", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tauri")>()),
+  isDesktop: () => shell.desktop,
+}));
 
 /**
  * 연결 상태 모델이 화면에 닿는 자리(#5220, #5201 S-B). 코어의 판정 규칙(`model.test.ts`·`screenState.test.ts`)은
@@ -27,6 +36,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const reconnect = vi.fn();
+/** 소켓이 서버에게서 마지막으로 들은 시각(#5660). null 이면 「모른다」(예전 판정 그대로). */
+const heard: { at: number | null } = { at: null };
 let korean: AppLocale;
 
 beforeAll(async () => {
@@ -51,7 +62,7 @@ function session(connStatus: RealtimeStatus): SessionContextValue {
   return {
     session: {},
     workspaceId: "w",
-    realtime: { reconnect } as unknown as RealtimeHandle,
+    realtime: { reconnect, lastHeardAt: () => heard.at } as unknown as RealtimeHandle,
     connStatus,
     logout: () => undefined,
     replaceSessionMember: () => undefined,
@@ -96,6 +107,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-03T04:00:00Z"));
   reconnect.mockReset();
+  heard.at = null;
+  shell.desktop = false;
   setOnLine(true);
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
 });
@@ -107,6 +120,8 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
+  resetConnectionDiagForTest();
+  resetWakeWatchForTest();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -335,6 +350,87 @@ describe("⑥ 창이 30초 넘게 숨었다 돌아오면 소켓을 새로 연다
     vi.mocked(document.hasFocus).mockReturnValue(true);
     act(() => void window.dispatchEvent(new Event("focus")));
     expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("⑥-2 돌아온 순간은 확인하고, 끊겼으면 기다리지 않는다 (#5660)", () => {
+  const visibility = (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    act(() => void document.dispatchEvent(new Event("visibilitychange", { bubbles: true })));
+  };
+  const blur = () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    act(() => void window.dispatchEvent(new Event("blur")));
+  };
+  const focus = () => {
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    act(() => void window.dispatchEvent(new Event("focus")));
+  };
+
+  it("뒤에서도 핑을 들은 소켓은 30분 숨었다 돌아와도 끊고 다시 열지 않는다", () => {
+    mountHealthy();
+    visibility("hidden");
+    for (let i = 0; i < 72; i += 1) {
+      advance(25_000);
+      heard.at = Date.now(); // 25초마다 서버 핑
+    }
+    advance(3_000);
+    visibility("visible");
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("30초 넘게 숨었고 그동안 아무것도 듣지 못했으면(잠든 사이 죽은 소켓) 「연결됨」이어도 연다", () => {
+    mountHealthy();
+    heard.at = Date.now();
+    visibility("hidden");
+    advance(5 * 60_000);
+    visibility("visible");
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("다시 붙기를 기다리는 중이면 5초만 비웠다 돌아와도 곧바로 연다(백오프의 남은 시간을 기다리지 않는다)", () => {
+    mountHealthy();
+    setStatus("disconnected");
+    blur();
+    advance(5_000);
+    focus();
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("처음 붙는 중(`connecting`)에는 창을 오가도 손대지 않는다", () => {
+    mount("connecting");
+    blur();
+    advance(5_000);
+    focus();
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("데스크탑에서 돌아온 순간 `hasFocus()`가 거짓이어도 창 사건으로 돌아옴을 안다", () => {
+    shell.desktop = true;
+    mountHealthy();
+    blur();
+    advance(31_000);
+    // 데스크탑 웹뷰: 창이 앞에 왔는데 `hasFocus()`는 아직 거짓이다(`useChannelViewingBeat`이 적어 둔 그 현상).
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(document.hasFocus()).toBe(false);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("앞에 둔 채 맥이 20초 잠들었다 깨면(창 사건 없음) 늦게 깬 시계가 소켓을 연다", () => {
+    mountHealthy();
+    heard.at = Date.now();
+    // 잠자기: 시계만 20초 건너뛰고 그동안 타이머는 하나도 돌지 않았다. 깨어난 뒤 첫 시계가 20초 늦게 운다.
+    vi.setSystemTime(Date.now() + 20_000);
+    advance(5_000);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("타이머만 늦게 깼고 그 사이에도 서버의 말을 들었으면(숨은 탭의 묶인 타이머) 열지 않는다", () => {
+    mountHealthy();
+    vi.setSystemTime(Date.now() + 20_000);
+    heard.at = Date.now() - 2_000; // 멈춘 동안이 아니라 그 뒤에 들었다
+    advance(5_000);
+    expect(reconnect).not.toHaveBeenCalled();
   });
 });
 

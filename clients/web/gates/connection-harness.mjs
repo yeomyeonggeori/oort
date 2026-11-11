@@ -103,11 +103,55 @@ export const TIMELINE = [
 const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
+/** 다른 사람(PEER)이 쓴 메시지 한 줄. `live` 모드의 게이트가 「다른 기기에서 보낸 글」로 쓴다. */
+export function peerMessage(seq, body, extra = {}) {
+  return message(seq, PEER, body, { hlcTs: Date.now(), createdAtMs: Date.now(), ...extra });
+}
+
+/** 레일이 실어 나르는 `message.new` 프레임(서버 `build_broadcast_payload`의 모양). */
+export function messageNewFrame(row) {
+  return {
+    type: "message.new",
+    v: 1,
+    ts: row.createdAtMs,
+    seq: row.seq,
+    payload: {
+      id: row.id,
+      channel_id: row.channelId.toUpperCase(),
+      seq: row.seq,
+      type: row.type,
+      body: row.body,
+      author_member_id: row.authorMemberId,
+      hlc_ts: row.hlcTs,
+      hlc_count: 0,
+      created_at_ms: row.createdAtMs,
+      state: "sent",
+      ...(row.props ? { props: row.props } : {}),
+    },
+  };
+}
+
+/** 채널의 실시간 이름(`centrifugoChannelName`과 같은 규칙). */
+export const channelRail = (channelId) => `ch:ws${WORKSPACE_ID.toUpperCase()}.${channelId.toUpperCase()}`;
+/** 내 개인 채널(인박스·읽음 신호, `readStateRailChannelName`). */
+export const personalRail = `user:read-state#${ME.toUpperCase()}`;
+
 /**
  * 가짜 서버 한 벌을 컨텍스트에 건다. `port`는 실시간 주소를 짓는 데만 쓴다(그 주소는 아무도 듣지 않고,
  * 컨텍스트가 `routeWebSocket`으로 가로챈다).
+ *
+ * `options.live`(#5660): 서버가 먼저 말하는 모드. 기본은 꺼짐이고, 꺼져 있으면 예전과 바이트까지 같다.
+ *   - 연결 답에 `ping`·`pong`을 싣고 그 간격으로 핑을 보낸다(`options.pingSeconds`, 기본 25 — 운영 센트리퓨고의 기본값).
+ *     이게 없으면 클라이언트는 조용히 죽은 소켓을 영영 알아채지 못한다(재는 값이 구조상 ∞가 된다).
+ *   - `publish(rail, data)`: 채널마다 기록(offset)을 쌓고, 그 채널을 구독한 살아 있는 소켓에 밀어 준다.
+ *     재구독이 `recover`로 오면 그 offset 뒤의 기록을 `recovered: true`로 되돌려 준다(운영의 `ch:` 네임스페이스처럼).
+ *   - `silenceSockets()`: 지금 붙어 있는 소켓을 **닫지 않고** 죽인다(맥 잠자기·웹뷰 멈춤 뒤의 소켓: 핑도 답도 프레임도 없다).
+ *     `dropSockets()`는 깨끗한 닫힘이라 클라이언트가 곧바로 안다 — 잠자기는 그렇지 않다. 새로 여는 소켓은 멀쩡하다.
+ *   - `state.readStates`(선 모양 그대로)를 `GET …/read-state`로, `state.extraMessages`를 메시지 목록(`after`를 따른다)으로 답한다.
  */
-export async function installBackend(context, port) {
+export async function installBackend(context, port, options = {}) {
+  const live = options.live === true;
+  const pingSeconds = options.pingSeconds ?? 25;
   const session = {
     accessToken: "gate-only-not-a-credential",
     refreshToken: "gate-only-not-a-credential",
@@ -125,6 +169,18 @@ export async function installBackend(context, port) {
     /** 연 적이 있는 실시간 연결의 수(다시 연결 시도가 실제로 나갔는지 센다). */
     handshakes: 0,
     sockets: new Set(),
+    /** `live`: 채널 이름 → 쌓인 발행물(`{ offset, data }`). */
+    history: new Map(),
+    /** `live`: 소켓 → 그 소켓이 구독한 채널 이름들. */
+    subscriptions: new Map(),
+    /** `live`: 조용히 죽은 소켓(닫히지 않았지만 아무것도 오가지 않는다). */
+    silenced: new Set(),
+    /** `live`: `GET …/read-state`가 돌려주는 줄(선 모양: `channel_id`·`mention_count` …). */
+    readStates: [],
+    /** `live`: 메시지 목록 끝에 붙는 줄(다른 기기에서 보낸 글). */
+    extraMessages: [],
+    /** `live`: 서버가 받은 `GET …/read-state`의 시각들. */
+    readStateFetches: [],
   };
 
   await context.route("**/v1/**", async (route) => {
@@ -152,12 +208,24 @@ export async function installBackend(context, port) {
     }
     if (/\/workspaces\/[^/]+\/channels$/.test(path)) return json(route, { channels: CHANNELS });
     if (/\/workspaces\/[^/]+\/roster$/.test(path)) return json(route, { members: ROSTER });
+    if (live && /\/workspaces\/[^/]+\/read-state$/.test(path) && request.method() === "GET") {
+      state.readStateFetches.push(Date.now());
+      return json(route, { read_states: state.readStates });
+    }
     if (/\/channels\/[^/]+\/messages$/.test(path)) {
       if (request.method() === "POST") {
         const body = JSON.parse(request.postData() ?? "{}");
         const seq = 2_000 + state.sends.length;
         state.sends.push(body);
         return json(route, message(seq, ME, String(body.body ?? ""), { clientMsgId: body.clientMsgId }));
+      }
+      if (live) {
+        const channelId = path.split("/channels/")[1].split("/")[0].toLowerCase();
+        const after = Number(url.searchParams.get("after") ?? "0");
+        const rows = [...TIMELINE, ...state.extraMessages].filter(
+          (row) => row.channelId.toLowerCase() === channelId && row.seq > after
+        );
+        return json(route, { messages: rows });
       }
       return json(route, { messages: TIMELINE });
     }
@@ -180,14 +248,54 @@ export async function installBackend(context, port) {
       return;
     }
     state.sockets.add(ws);
-    ws.onClose(() => state.sockets.delete(ws));
+    let pinger = null;
+    ws.onClose(() => {
+      state.sockets.delete(ws);
+      state.subscriptions.delete(ws);
+      state.silenced.delete(ws);
+      if (pinger !== null) clearInterval(pinger);
+    });
     ws.onMessage((raw) => {
+      // 조용히 죽은 소켓: 받은 것에 답하지 않는다(닫지도 않는다).
+      if (state.silenced.has(ws)) return;
       for (const line of String(raw).split("\n")) {
         if (!line.trim()) continue;
         const command = JSON.parse(line);
         if (command.connect) {
           state.handshakes += 1;
-          ws.send(JSON.stringify({ id: command.id, connect: { client: "gate-client", version: "6.0.0" } }));
+          const connect = { client: "gate-client", version: "6.0.0" };
+          if (live) {
+            Object.assign(connect, { ping: pingSeconds, pong: true });
+            pinger = setInterval(() => {
+              if (!state.silenced.has(ws)) ws.send("{}");
+            }, pingSeconds * 1_000);
+          }
+          ws.send(JSON.stringify({ id: command.id, connect }));
+        } else if (command.subscribe && live) {
+          const name = command.subscribe.channel;
+          const log = state.history.get(name) ?? [];
+          const top = log.length;
+          const asked = command.subscribe.recover === true && command.subscribe.epoch === "gate";
+          const since = Number(command.subscribe.offset ?? 0);
+          const publications = asked
+            ? log.filter((pub) => pub.offset > since).map((pub) => ({ data: pub.data, offset: pub.offset }))
+            : [];
+          if (!state.subscriptions.has(ws)) state.subscriptions.set(ws, new Set());
+          state.subscriptions.get(ws).add(name);
+          ws.send(
+            JSON.stringify({
+              id: command.id,
+              subscribe: {
+                recoverable: true,
+                positioned: true,
+                epoch: "gate",
+                offset: top,
+                recovered: asked,
+                was_recovering: asked,
+                publications,
+              },
+            })
+          );
         } else if (command.subscribe) {
           ws.send(
             JSON.stringify({
@@ -217,6 +325,21 @@ export async function installBackend(context, port) {
     },
     dropSockets: () => {
       for (const ws of [...state.sockets]) ws.close({ code: 4000, reason: "gate-drop" });
+    },
+    /** `live`: 지금 붙은 소켓을 닫지 않고 죽인다(잠자기·웹뷰 멈춤 뒤의 소켓). */
+    silenceSockets: () => {
+      for (const ws of state.sockets) state.silenced.add(ws);
+    },
+    /** `live`: 채널에 한 건 발행한다. 그 채널을 구독한 살아 있는 소켓만 받는다(죽은 소켓의 몫은 기록에만 남는다). */
+    publish: (rail, data) => {
+      const log = state.history.get(rail) ?? [];
+      const pub = { offset: log.length + 1, data };
+      log.push(pub);
+      state.history.set(rail, log);
+      for (const [ws, names] of state.subscriptions) {
+        if (!names.has(rail) || state.silenced.has(ws)) continue;
+        ws.send(JSON.stringify({ push: { channel: rail, pub: { data, offset: pub.offset } } }));
+      }
     },
   };
 }

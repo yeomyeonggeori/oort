@@ -30,11 +30,13 @@ import {
   restFailureDiagKind,
   socketDiagKind,
 } from "@momo/core/features/connection/diagnosticLog";
-import { RESUME_AFTER_HIDDEN_MS } from "@momo/core/features/connection/thresholds";
+import { verdictOnLateWake, verdictOnReturn } from "@momo/core/features/connection/resume";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
+import { documentForeground } from "@/features/chat/useChannelViewingBeat";
 import { readBrowserOnline, useBrowserOffline } from "./browserOffline";
 import { ConnectionContext, type ConnectionContextValue } from "./connectionContext";
 import { recordConnectionDiag, startConnectionDiagWatch } from "./connectionDiag";
+import { subscribeLateWake } from "./wakeWatch";
 
 // =============================================================================
 // 연결 상태 모델을 돌리는 공급자 (#5220, #5201 S-B).
@@ -147,34 +149,61 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     realtime?.reconnect();
   }, [emit, realtime]);
 
-  // 창이 오래 숨었다 돌아오면 소켓을 새로 연다. 절전·최소화 동안 죽은 소켓은 핑 시간 초과까지 「연결됨」으로
-  // 보일 수 있다(감사 문서 §2.1). 자리 비움은 숨김과 포커스 잃음 중 먼저 오는 것에서 시작하고, 돌아옴은 보임과
-  // 포커스 중 먼저 오는 것에서 끝난다. 세 이벤트가 같은 판정(`지금 자리에 없나`)을 다시 읽는다. 현재 상태가
-  // 무엇이든 연다: 멀쩡해 보이는 소켓이 바로 그 대상이다.
+  // 창 사건은 진단 기록과 「숨었나」(저절로 다시 확인의 조건)에만 쓴다. 다시 열지는 아래 효과가 정한다.
   useEffect(() => {
-    const away = () => pageHidden() || !document.hasFocus();
-    let awaySince: number | null = away() ? Date.now() : null;
     setHidden(pageHidden());
     const sync = (event: Event) => {
       recordConnectionDiag(
         WINDOW_DIAG[event.type as keyof typeof WINDOW_DIAG] ?? (pageHidden() ? "window.hidden" : "window.visible")
       );
       setHidden(pageHidden());
-      if (away()) {
-        awaySince ??= Date.now();
-        return;
-      }
-      const since = awaySince;
-      awaySince = null;
-      if (since === null || Date.now() - since < RESUME_AFTER_HIDDEN_MS) return;
-      reconnectNow();
     };
     const names = ["visibilitychange", "blur", "focus"];
     for (const name of names) window.addEventListener(name, sync);
     return () => {
       for (const name of names) window.removeEventListener(name, sync);
     };
-  }, [reconnectNow]);
+  }, []);
+
+  // 돌아온 순간·깨어난 순간에 소켓을 다시 열지(#5220 → #5660, 판정은 코어 `resume.ts`).
+  //  - 자리 비움은 숨김과 초점 잃음 중 먼저 오는 것에서 시작하고, 돌아옴은 둘 다 돌아온 순간이다. 「앞에 있나」는 「보고 있음」 신호와 같은 어댑터
+  //    (`documentForeground`)가 답한다: 데스크탑 웹뷰의 `document.hasFocus()`는 창이 앞인데도 거짓일 수 있어서, 그것을 읽던 예전 판정은 돌아온 순간을
+  //    놓칠 수 있었다.
+  //  - 돌아온 순간: 다시 붙기를 기다리는 중이면 기다리지 않고 지금 연다. 30초 넘게 비웠고 그동안 서버의 말을 듣지 못한 소켓(잠든 사이 죽은 소켓)도
+  //    연다. 뒤에서도 핑을 들은 소켓은 건드리지 않는다: 이미 다 받았고, 끊었다 다시 여는 것은 눈앞에서 연결을 흔들 뿐이다.
+  //  - 깨어난 순간: 앱을 앞에 둔 채 맥이 잠들었다 깨면 창 사건이 없다. 늦게 깬 시계(`wakeWatch.ts`)가 그 사실이고, 멈춘 동안 아무것도 듣지 못했으면
+  //    핑 마감(최대 35초)을 기다리지 않고 연다.
+  //  다시 열면 레일마다 놓친 것을 메운다(타임라인은 복구·`?after`, 읽음 투영은 `ReadStateLiveSync`).
+  const connStatusRef = useRef(connStatus);
+  connStatusRef.current = connStatus;
+  useEffect(() => {
+    const facts = () => {
+      const heardAt = realtime?.lastHeardAt?.() ?? null;
+      return {
+        // 처음 붙는 중(`connecting`)은 기다리는 소켓이 아니다: 손대지 않는다. 한 번 붙은 뒤의 끊김만 `disconnected`다(#786 매핑).
+        socketConnected: connStatusRef.current !== "disconnected",
+        heardAgoMs: heardAt === null ? null : Date.now() - heardAt,
+      };
+    };
+    let awaySince: number | null = documentForeground.isForeground() ? null : Date.now();
+    const stopForeground = documentForeground.subscribe((foreground) => {
+      if (!foreground) {
+        awaySince ??= Date.now();
+        return;
+      }
+      const since = awaySince;
+      awaySince = null;
+      if (since === null) return;
+      if (verdictOnReturn({ awayMs: Date.now() - since, ...facts() }) === "reconnect") reconnectNow();
+    });
+    const stopWake = subscribeLateWake((_kind, _at, lateMs) => {
+      if (verdictOnLateWake({ lateMs, ...facts() }) === "reconnect") reconnectNow();
+    });
+    return () => {
+      stopForeground();
+      stopWake();
+    };
+  }, [reconnectNow, realtime]);
 
   const value = useMemo<ConnectionContextValue>(
     () => ({ view: state.view, recovered: isRecovered(state), reconnectNow }),
