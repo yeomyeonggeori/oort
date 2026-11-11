@@ -118,6 +118,8 @@ describe("스레드 답글 목록의 자리 지키기 (#5649)", () => {
     api.fetch.mockResolvedValue({ messages: [reply(11)] });
     const { rerender, client } = mount();
     await waitFor(() => expect(holds.made).toHaveLength(1));
+    // 새 루트의 답글이 이미 받아져 있다(읽는 중을 거치지 않는다): 다시 거는 까닭은 루트가 바뀐 것 하나다.
+    client.setQueryData(["thread", WS, CH, "other-root"], { messages: [{ ...reply(21), rootId: "other-root" }] });
     rerender(tree(client, rootOf("other-root")));
     await waitFor(() => expect(holds.made).toHaveLength(2));
     expect(holds.made[0].stop).toHaveBeenCalledTimes(1);

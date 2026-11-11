@@ -12,6 +12,7 @@
 //   T4 바닥: 마지막 답글이 120px 자람(늦게 뜨는 그림) · 남의 새 답글 → 그려진 모든 프레임에서 바닥 거리 ≤ 1px
 //   T5 창 높이 800 → 640 → 800: 위 읽기 ≤ 2px · 바닥 ≤ 1px
 //   T6 움직임 줄이기 설정에서 T1
+//   T7 한 화면에 다 들어오는 짧은 스레드: 답글이 자라 넘쳐도 맨 위 그대로(맨 위에 선 채로는 「바닥」이 아니다)
 // 타임라인(가상 목록):
 //   L1 가만히 위 읽기 +120px (대조 — 이 칸 전부터 지키던 장면)
 //   L2 휠로 **내리는 중** 위 밖 줄 ±120px → 이동 차 ≤ 2px · 거꾸로 간 프레임 0
@@ -70,6 +71,8 @@ const meId = "00000000-0000-7000-8000-000000000131";
 const peerId = "00000000-0000-7000-8000-000000000132";
 const channelId = "00000000-0000-7000-8000-000000000231";
 const ROOT_MSG = "0199ffff-0000-7000-8000-000000000a20";
+/** 답글 둘뿐인 짧은 스레드의 루트(T7). */
+const SHORT_ROOT_MSG = "0199ffff-0000-7000-8000-000000000a22";
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -95,33 +98,35 @@ function todayAt(hour, minute) {
 function row(over) {
   return { channelId, hlcCount: 0, type: "text", state: "sent", ...over, hlcTs: over.hlcTs ?? over.createdAtMs };
 }
-/** 두 사람이 2분마다 번갈아 한 말 60줄. 가운데 하나가 답글 30개의 스레드 루트다. */
+/** 두 사람이 2분마다 번갈아 한 말 60줄. 가운데 둘이 스레드 루트다: 답글 30개짜리와 답글 2개짜리. */
 function history() {
   const rows = [];
   for (let i = 0; i < 60; i += 1) {
     const at = todayAt(9, 0) + i * 120_000;
     const isRoot = i === 30;
+    const isShortRoot = i === 32;
     rows.push(
       row({
-        id: isRoot ? ROOT_MSG : `0199ffff-0000-7000-8000-${String(0xa00 + i).padStart(12, "0")}`,
+        id: isRoot ? ROOT_MSG : isShortRoot ? SHORT_ROOT_MSG : `0199ffff-0000-7000-8000-${String(0xa00 + i).padStart(12, "0")}`,
         seq: 100 + i,
         authorMemberId: i % 2 === 0 ? peerId : meId,
-        body: isRoot ? "릴리스 노트 초안은 이 스레드에서 이어 갈게요." : `${i + 1}번째 이야기입니다. 오늘 일정과 남은 일을 정리했어요.`,
+        body: isRoot ? "릴리스 노트 초안은 이 스레드에서 이어 갈게요." : isShortRoot ? "짧은 확인은 이 스레드에서 할게요." : `${i + 1}번째 이야기입니다. 오늘 일정과 남은 일을 정리했어요.`,
         createdAtMs: at,
         ...(isRoot ? { thread: { reply_count: 30, last_reply_seq: 1029, last_reply_at: at + 30 * 60_000 } } : {}),
+        ...(isShortRoot ? { thread: { reply_count: 2, last_reply_seq: 1101, last_reply_at: at + 10 * 60_000 } } : {}),
       })
     );
   }
   return rows;
 }
-function replies() {
+function replies(rootId = ROOT_MSG, count = 30, firstSeq = 1000, idBase = 0xc00) {
   const rows = [];
-  for (let i = 0; i < 30; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     rows.push(
       row({
-        id: `0199ffff-0000-7000-8000-${String(0xc00 + i).padStart(12, "0")}`,
-        seq: 1000 + i,
-        rootId: ROOT_MSG,
+        id: `0199ffff-0000-7000-8000-${String(idBase + i).padStart(12, "0")}`,
+        seq: firstSeq + i,
+        rootId,
         authorMemberId: i % 2 === 0 ? peerId : meId,
         body: `답글 ${i + 1}: 항목을 하나씩 확인하고 있어요.`,
         createdAtMs: todayAt(11, 0) + i * 120_000,
@@ -140,7 +145,7 @@ function json(route, body, status = 200) {
 }
 
 async function installBackend(context) {
-  const state = { messages: history(), replies: replies() };
+  const state = { messages: history(), replies: replies(), shortReplies: replies(SHORT_ROOT_MSG, 2, 1100, 0xd00) };
   await context.route("**/healthz", (route) => json(route, { status: "ok" }));
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
@@ -158,7 +163,9 @@ async function installBackend(context) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
     if (/\/expressions$/.test(path)) return json(route, { workspaceId, version: "1", baseVersion: null, reset: true, addPolicy: "members", items: [] });
-    if (path.endsWith("/replies")) return json(route, { messages: state.replies, following: true });
+    if (path.endsWith("/replies")) {
+      return json(route, { messages: path.toLowerCase().includes(SHORT_ROOT_MSG) ? state.shortReplies : state.replies, following: true });
+    }
     if (path.includes("/messages")) {
       if (url.searchParams.has("after") || url.searchParams.has("before")) return json(route, { messages: [] });
       return json(route, { messages: state.messages });
@@ -346,22 +353,23 @@ async function openChannel(page) {
 }
 
 /** 스레드를 연다. 연 뒤 **게이트가 스크롤을 건드리기 전의** scrollTop 을 돌려준다(T0: 열면 맨 위). */
-async function openThread(page) {
+async function openThread(page, rootId = ROOT_MSG, rowCount = 31) {
   await page.locator(TIMELINE).evaluate((node) => {
     node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) * 0.5);
   });
   await wait(500);
-  const rootRow = page.locator(`[data-testid="timeline-message"][data-message-id="${ROOT_MSG}"]`);
+  const rootRow = page.locator(`${TIMELINE} [data-testid="timeline-message"][data-message-id="${rootId}"]`);
   await rootRow.scrollIntoViewIfNeeded();
   await rootRow.hover();
   await rootRow.getByTestId("toolbar-reply").click();
   await page.getByTestId("thread-composer-input").waitFor({ state: "visible" });
   await page.waitForFunction(
-    (selector) => {
+    ([selector, root, count]) => {
       const node = document.querySelector(selector);
-      return node !== null && node.querySelectorAll("[data-message-id]").length >= 30 && node.scrollHeight > node.clientHeight + 400;
+      const panel = document.querySelector('[data-testid="thread-panel"]');
+      return node !== null && panel?.getAttribute("data-root-id") === root && node.querySelectorAll("[data-message-id]").length === count;
     },
-    THREAD,
+    [THREAD, rootId, rowCount],
     { timeout: 15_000 }
   );
   await wait(700);
@@ -694,6 +702,29 @@ async function threadScenes(page, backend, rows, tag) {
     },
     async () => true
   );
+
+  // T7 짧은 스레드: 한 화면에 다 들어와 맨 위에 서 있다(위도 바닥도 되는 자리). 답글이 자라 넘쳐도 맨 위 그대로다.
+  const shortScene = `스레드${tag} 짧은 목록(한 화면) — 답글이 자라 넘쳐도 맨 위`;
+  const short = await openThread(page, SHORT_ROOT_MSG, 3);
+  const fits = await page.locator(THREAD).evaluate((node) => node.scrollHeight <= node.clientHeight);
+  const shortPicked = await page.evaluate(([s, r]) => window.__hold.pickBottom(s, r), [THREAD, "[data-message-id]"]);
+  if (shortPicked.error || !fits || short.scrollTop > 1) {
+    rows.push({ scene: shortScene, verdict: "FAIL", note: `장면을 못 만들었다(${shortPicked.error ?? ""} 한 화면 ${fits} · 연 직후 scrollTop ${short.scrollTop})` });
+    return;
+  }
+  await record(page);
+  await wait(150);
+  await page.evaluate(() => window.__hold.grow(900));
+  await wait(700);
+  const grown = await stop(page);
+  const tops = grown.frames.map((frame) => frame.top);
+  const overflow = await page.locator(THREAD).evaluate((node) => node.scrollHeight - node.clientHeight);
+  const worstTop = tops.length > 0 ? Math.max(...tops) : null;
+  rows.push({
+    scene: shortScene,
+    verdict: overflow >= 400 && tops.length >= 10 && worstTop !== null && worstTop <= 1 ? "PASS" : "FAIL",
+    note: `${overflow >= 400 ? "" : "장면을 못 만들었다 · "}넘친 높이 ${overflow}px · 가장 큰 scrollTop ${worstTop} · 프레임 ${tops.length}`,
+  });
 }
 
 async function timelineScenes(page, rows) {
