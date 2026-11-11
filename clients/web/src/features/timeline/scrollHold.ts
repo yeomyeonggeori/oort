@@ -21,12 +21,12 @@ import { AT_BOTTOM_SLACK_PX } from "./navigation";
  * 거짓이 되었을 수 있다). 바로잡기는 ResizeObserver 콜백(그리기 전)에서 하므로 어긋난 프레임이 화면에 그려지지 않는다.
  *
  * **사람이 스크롤하는 중에도 지킨다** (#5649). 스크롤 이벤트는 그 프레임의 ResizeObserver 보다 먼저 오고, 거기서 보던 줄을 그냥 다시 적으면
- * 방금 바뀐 줄 높이가 새 기준에 섞여 사라진다(실측: 스레드 상자의 앵커링을 끄고 휠로 내리는 중 위 밖 답글이 120px 자라면 보던 답글이
- * 120px 튀었다). 그래서 스크롤 이벤트에서 목록 높이가 달라져 있으면, 보던 줄이 **그 스크롤이 옮긴 만큼만** 움직였는지 보고 나머지를
- * 바로잡는다. scrollTop 에 더하는 보정이라 사람의 스크롤 방향 · 거리는 그대로다.
+ * 방금 바뀐 줄 높이가 새 기준에 섞여 사라진다(실측: 휠로 내리는 중 위 밖 줄이 120px 자라면 보던 줄이 120px 튀었다 — 타임라인, 그리고
+ * 앵커링을 끈 스레드 상자). 그래서 스크롤 이벤트에서 목록 높이가 달라져 있으면 다시 적지 않고, 적어 둔 자리를 **그 스크롤이 옮긴 만큼만**
+ * 옮겨 둔다. 바로잡기는 같은 프레임의 ResizeObserver 가 한다. scrollTop 에 더하는 보정이라 사람의 스크롤 방향 · 거리는 그대로다.
  *
  * 다른 손이 같은 목록을 옮기는 경우(`coOwner` — 가상 목록)에는 그 손의 몫에 손대지 않고 다시 적기만 한다: 위로 더 불러오기
- * (`prependToken` 이 바뀐다 — 목록이 앞에 붙은 높이를 스스로 메운다)와 사람이 스크롤한 직후(`ownsScroll`).
+ * (`prependToken` 이 바뀐다 — 목록이 앞에 붙은 높이를 스스로 메운다)와 사람이 **위로** 올리는 중 · 그 직후(`ownsScroll`).
  */
 export const SCROLLING_QUIET_MS = 150;
 
@@ -72,8 +72,13 @@ const distanceToBottom = (scroller: HTMLElement) => scroller.scrollHeight - scro
 
 /**
  * 타임라인: react-virtuoso 가상 목록. 줄은 `data-index`(앞에 붙어도 그대로인 번호), 내용 상자는 스크롤러 안의 상자 하나와 그 안의 줄 목록이다.
- * 가상 목록은 위로 더 불러온 높이를 스스로 메우고(`firstItemIndex`), 사람이 위로 올리는 동안은 위쪽 보정을 스스로 돈다 — 그래서 사람이
- * 스크롤한 지 `SCROLLING_QUIET_MS` 안에는 손대지 않는다.
+ * 가상 목록은 위로 더 불러온 높이를 스스로 메우고(`firstItemIndex`), 사람이 **위로** 올리는 동안은 위쪽 보정을 스스로 돈다(올리며 새로 그린
+ * 줄의 실제 높이가 어림과 다른 만큼 — 4.18.11 `upwardScrollFixSystem`: 방향이 「위」일 때만, 방향은 스크롤이 멎고 50ms 안에 지워진다).
+ * 그래서 위로 올린 지 `SCROLLING_QUIET_MS` 안에는 손대지 않는다: 이 모듈이 같은 변화를 먼저 바로잡으면 두 번 보정된다. 그 창을 150ms 로
+ * 넉넉히 둔 것은 목록의 50ms 타이머가 늦게 돌아도 겹치지 않게 하려는 것이다.
+ *
+ * **아래로** 내리는 중 · 그 직후에는 목록이 아무것도 하지 않는다(방향이 「위」가 아니다). 그때 위 밖 줄이 자라면 이 모듈이 지킨다 (#5649 —
+ * 수리 전에는 방향을 가리지 않고 150ms 를 비워, 내리는 중 · 멈춘 직후에는 아무도 맡지 않았다: 두 엔진 실측 120px).
  */
 export function virtualListHold(firstItemIndex: () => number): ScrollHoldOptions {
   return {
@@ -82,7 +87,7 @@ export function virtualListHold(firstItemIndex: () => number): ScrollHoldOptions
     atBottom: (scroller) => distanceToBottom(scroller) <= AT_BOTTOM_SLACK_PX,
     coOwner: {
       prependToken: firstItemIndex,
-      ownsScroll: ({ sinceMs }) => sinceMs <= SCROLLING_QUIET_MS,
+      ownsScroll: ({ sinceMs, direction }) => direction === "up" && sinceMs <= SCROLLING_QUIET_MS,
       settleFrames: 3,
     },
   };
@@ -185,41 +190,48 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     if (top !== lastTop) lastForeignDirection = top < lastTop ? "up" : "down";
     lastForeignScrollAt = performance.now();
     // 스크롤과 같은 프레임에 줄 높이가 바뀌었다(이 이벤트는 그 프레임의 ResizeObserver 보다 먼저 온다). 보던 줄은 이 스크롤이 옮긴 만큼만
-    // 움직였어야 한다 — 나머지는 줄 높이 변화가 민 것이니 바로잡는다. 그냥 다시 적으면 그 밀림이 새 기준에 섞여 사라진다.
+    // 움직였어야 한다 — 나머지는 줄 높이 변화가 민 것이다. 여기서 다시 적으면 그 밀림이 새 기준에 섞여 사라지므로, 적어 둔 자리를 스크롤이
+    // 옮긴 만큼만 옮겨 두고(높이 기록은 그대로) 바로잡기는 곧 올 ResizeObserver 에게 맡긴다: 바로잡는 곳이 한 군데여야 다시 확인(settle)이
+    // 가상 목록의 처리 뒤에 걸린다.
     const resized = scroller.scrollHeight !== lastContent || scroller.clientHeight !== lastViewport;
     if (resized && !wasAtBottom && anchor !== null && !coOwnerHandles()) {
-      holdAnchor({ ...anchor, top: anchor.top - (top - lastTop) });
+      anchor = { ...anchor, top: anchor.top - (top - lastTop) };
+      lastTop = top;
+      return;
     }
     remember();
   };
 
   // 다른 손이 있는 목록만: 바로잡은 뒤 몇 프레임 동안 같은 자리를 다시 확인한다(`ScrollCoOwner.settleFrames`).
-  // 사람이 그 사이 스크롤하면(바깥 스크롤) 멈춘다.
+  //   - 바닥: 사람이 그 사이 스크롤하면(바깥 스크롤) 멈춘다 — 바닥을 떠난 것이다.
+  //   - 보던 줄: **지금 적혀 있는** 보던 줄을 본다. 사람이 그 사이 아래로 스크롤했으면 그 스크롤 뒤에 다시 적은 자리이고(사람이 옮긴 만큼은
+  //     이미 들어 있다), rAF 시점에 그 자리에서 벗어나 있으면 스크립트(가상 목록의 두 번째 보정)가 옮긴 것이라 되돌린다. 사람이 위로
+  //     올리기 시작했으면 멈춘다 — 그때의 보정은 목록의 몫이다.
   const settleFrames = coOwner?.settleFrames ?? 0;
-  /** 다시 확인할 자리: 바닥(`null` 앵커)이거나 적어 둔 보던 줄. */
-  let settleTarget: { anchor: Anchor | null } | null = null;
+  /** 다시 확인할 자리: 바닥이거나 보던 줄. */
+  let settleTarget: "bottom" | "anchor" | null = null;
   let settleLeft = 0;
   let settleFrame = 0;
   const settle = () => {
     settleFrame = 0;
-    const target = settleTarget;
-    if (target === null || performance.now() - lastForeignScrollAt <= SCROLLING_QUIET_MS) {
+    if (settleTarget === "bottom" && performance.now() - lastForeignScrollAt > SCROLLING_QUIET_MS) {
+      if (distanceToBottom(scroller) > 0.5) place(scroller.scrollHeight);
+      remember();
+    } else if (settleTarget === "anchor" && anchor !== null && !coOwnerHandles()) {
+      const held = anchor;
+      holdAnchor(held);
+      remember(held);
+    } else {
       settleTarget = null;
       return;
     }
-    if (target.anchor === null) {
-      if (distanceToBottom(scroller) > 0.5) place(scroller.scrollHeight);
-    } else {
-      holdAnchor(target.anchor);
-    }
-    remember(target.anchor);
     settleLeft -= 1;
     if (settleLeft > 0) settleFrame = requestAnimationFrame(settle);
     else settleTarget = null;
   };
-  const armSettle = (target: Anchor | null) => {
+  const armSettle = (target: "bottom" | "anchor") => {
     if (settleFrames === 0) return;
-    settleTarget = { anchor: target === null ? null : { ...target } };
+    settleTarget = target;
     settleLeft = settleFrames;
     if (settleFrame === 0) settleFrame = requestAnimationFrame(settle);
   };
@@ -230,7 +242,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     if (wasAtBottom && (viewport < lastViewport || content !== lastContent)) {
       place(scroller.scrollHeight);
       remember();
-      armSettle(null);
+      armSettle("bottom");
       return;
     }
     // 위를 읽던 중: 내용 높이가 바뀌었거나(줄이 자람·줆) 목록 상자의 크기가 바뀌었다(위·아래 가장자리 이동 — 배너·띠가 서고 짐).
@@ -238,7 +250,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       const held = anchor;
       holdAnchor(held);
       remember(held);
-      armSettle(held);
+      armSettle("anchor");
       return;
     }
     remember();
@@ -269,7 +281,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       anchor = null;
       wasAtBottom = true;
       place(scroller.scrollHeight);
-      armSettle(null);
+      armSettle("bottom");
     },
     stop: () => {
       if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
