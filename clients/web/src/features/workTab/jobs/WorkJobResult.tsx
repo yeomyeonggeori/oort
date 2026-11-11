@@ -54,7 +54,7 @@ export interface JobApprovalFacts {
 function KindTag({ label, testId }: { label: string; testId: string }) {
   return (
     <span
-      className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 bg-muted-soft text-ink")}
+      className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 self-start bg-muted-soft text-ink")}
       data-testid={testId}
     >
       <ShieldCheck aria-hidden className="size-3 shrink-0 text-warn" />

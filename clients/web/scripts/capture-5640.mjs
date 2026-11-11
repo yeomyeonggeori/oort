@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// 「작업 · 내 작업」의 「응답 필요」 구간 캡처·실측 (#5640, ADR-0202 D1·D5, ADR-0188 D5).
+// 「작업 · 내 작업」의 「응답 필요」 구간 캡처·실측 (#5640, ADR-0202 D1·D5·증보 2026-11-11, ADR-0188 D5).
 //
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
 //
@@ -9,7 +9,10 @@
 // 가상 인물이다. **라이브 서버·데스크탑 앱·실기기 왕복은 runtime-unverified**다.
 //
 // 재는 것:
-//   - 구간 순서(응답 필요 → 지금 → 끝난 일), 「팀 전체」에는 구간 없음, 가로 넘침 0, 줄 아래 안내 잘림 0
+//   - 구간 순서(응답 필요 → 지금 → 끝난 일), 「팀 전체」에는 구간 없음, 가로 넘침 0, 결과 칸 글 잘림 0
+//   - 수리 1회차: 열 이름, 결과 칸 꼬리표(승인 요청 · 권한 요청 · 에이전트 보고), 결정자 줄의 승인·거부(결과 열 안),
+//     결정자가 아닌 줄의 대기 줄 + 카드 링크, 줄 사이 머리카락 선, 결정 중(「보내는 중」)·결정 실패(단추 자리의 한 줄),
+//     데스크탑 셸 흉내(`__TAURI_INTERNALS__`)에서 권한 요청 줄의 「열어서 답하기」
 //   - 1280·900·390 × 밝게·어둡게, 200% 확대(1280 창 = CSS 640), 키보드 초점 링
 //   - 줄이 구간을 옮길 때(지금 → 응답 필요) 스크롤한 목록의 보던 줄 이동 px와 캐럿 유지. 브라우저의 스크롤 고정을 끄고
 //     (`overflow-anchor: none`, 데스크탑 셸 WebKit에는 이 기능이 없다) 화면 코드의 고정만으로 잰다.
@@ -64,6 +67,8 @@ const runBase = { source: "run", requestedBy: me, origin: "agent_run", folderLab
 const macWaiting = { ...macBase, sessionId: id(1), label: "결제 웹훅 재시도 고치기", harness: "claude", startedAtMs: NOW - 18 * 60_000, lastActivityAt: sec - 40 };
 const macQuiet = { ...macBase, sessionId: id(2), label: "릴리스 노트 초안 쓰기", harness: "codex", startedAtMs: NOW - 9 * 60_000, lastActivityAt: sec - 120 };
 const runApproval = { ...runBase, runId: id(3), label: "#launch 채널에 v0.1.46 공지 올리기", status: "running", state: "running", phase: "awaiting_approval", trigger: "mention", startedAtMs: NOW - 4 * 60_000, stepCount: 1, lastActivityAt: sec - 60 };
+// 결정이 내 몫이 아닌 승인 대기 run(원장의 내 결정 목록에 없다): 「지금」 맨 위, 단추 없이 대기 줄과 카드 링크.
+const runNonDecider = { ...runBase, runId: id(6), label: "#general 공지 고정하기", status: "running", state: "running", phase: "awaiting_approval", trigger: "work", startedAtMs: NOW - 7 * 60_000, stepCount: 1, lastActivityAt: sec - 70 };
 const runWorking = { ...runBase, runId: id(4), label: "온보딩 문구 해요체로 다듬기", status: "running", state: "running", phase: "running", trigger: "work", startedAtMs: NOW - 12 * 60_000, stepCount: 2, stages: ["코드 읽기", "문구 고치기"], branch: "feat/onboarding-copy", lastActivityAt: sec - 90 };
 const doneRows = Array.from({ length: 12 }, (_, i) => ({
   ...runBase,
@@ -102,8 +107,8 @@ const json = (route, body, status = 200) => route.fulfill({ status, contentType:
 /** 서버 흉내(#5639): 주인이 `include=jobs`로 읽을 때만 대기 요청이 있는 실행 중 맥 세션이 `waiting`. */
 function boardView(state) {
   const view = (row) => (row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId) ? { ...row, state: "waiting" } : row);
-  const mine = [macWaiting, runApproval, macQuiet, runWorking, ...doneRows].map(view);
-  const team = [macWaiting, runApproval, othersTerminal, macQuiet, runWorking, ...doneRows].map(view);
+  const mine = [macWaiting, runApproval, runNonDecider, macQuiet, runWorking, ...doneRows].map(view);
+  const team = [macWaiting, runApproval, runNonDecider, othersTerminal, macQuiet, runWorking, ...doneRows].map(view);
   return { mine, team };
 }
 
@@ -117,7 +122,14 @@ async function installRoutes(context, state) {
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.endsWith("/approvals")) return json(route, { approvals: url.searchParams.get("status") === "pending" ? approvals : [] });
+    if (path.endsWith("/decision")) {
+      state.decisions += 1;
+      if (state.decision === "hold") return; // 답을 붙잡아 「보내는 중」을 잰다(컨텍스트를 닫으면 끝난다).
+      if (state.decision === "fail") return json(route, {}, 500);
+      state.decided = true;
+      return json(route, { status: "approved", decided_by: memberId, decided_at_ms: Date.now() });
+    }
+    if (path.endsWith("/approvals")) return json(route, { approvals: url.searchParams.get("status") === "pending" && !state.decided ? approvals : [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [host] });
     if (path.endsWith("/work-sessions/shared")) {
@@ -170,10 +182,10 @@ async function signIn(page, origin) {
 }
 
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-/** 줄 아래 안내·제목이 한 글자라도 잘리면 그 글. 숨은 요소는 세지 않는다. */
+/** 결과 칸 글·제목이 한 글자라도 잘리면 그 글. 숨은 요소는 세지 않는다. */
 const clippedText = (page) =>
   page.evaluate(() => {
-    const nodes = document.querySelectorAll('[data-testid="work-job-permission-hint"], [data-testid="work-job-permission-hint"] > span, [data-testid="work-job-row"] [data-col="task"] > span:first-child');
+    const nodes = document.querySelectorAll('[data-testid="work-job-approval-summary"], [data-testid="work-job-approval-waiting"], [data-testid="work-job-permission-in-app"], [data-testid="work-job-approval-link"] > span, [data-testid="work-job-row"] [data-col="task"] > span:first-child');
     const out = [];
     for (const el of nodes) {
       if (el.getClientRects().length === 0) continue;
@@ -190,12 +202,38 @@ const shot = async (page, name, opts = {}) => {
   shots.push(`${name}.png`);
 };
 
-async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false }) {
-  const state = { waiting: new Set(waiting), boardReads: 0 };
+/** 데스크탑 셸 흉내(명령은 빈 답). 「작업」 화면이 `isDesktop()`으로 가르는 것만 본다 — 실제 WKWebView·A 칸은 runtime-unverified. */
+async function installDesktop(page, origin) {
+  await page.addInitScript((serverOrigin) => {
+    const callbacks = new Map();
+    let next = 1;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() { /* 구독 해제 흉내 */ } };
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+      transformCallback(cb) { const id = next++; callbacks.set(id, cb); return id; },
+      unregisterCallback(id) { callbacks.delete(id); },
+      convertFileSrc: (p) => p,
+      async invoke(cmd) {
+        if (cmd === "keychain_available") return true;
+        if (cmd === "keychain_store_refresh_token") { window.__kc = true; return null; }
+        if (cmd === "keychain_refresh_token_handle") return window.__kc ? "shell:00000000000000000000000000000001" : null;
+        if (cmd === "keychain_clear_refresh_token") { window.__kc = false; return null; }
+        if (cmd === "deep_link_take_pending") return [];
+        if (cmd.startsWith("plugin:event|")) return 1;
+        return null;
+      },
+    };
+    try { localStorage.setItem("momo.web.server.v1", serverOrigin); } catch { /* 저장소 없는 캡처 */ }
+  }, origin);
+}
+
+async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false, desktop = false, decision = "ok" }) {
+  const state = { waiting: new Set(waiting), boardReads: 0, decision, decisions: 0, decided: false };
   const context = await browser.newContext({ viewport, deviceScaleFactor, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", locale: "ko-KR" });
   await installRoutes(context, state);
   const page = await context.newPage();
   await installRealtime(page);
+  if (desktop) await installDesktop(page, origin);
   if (noNativeAnchor) {
     await page.addInitScript(() => {
       const style = document.createElement("style");
@@ -221,8 +259,35 @@ async function scene(browser, origin, scheme, viewport, tag) {
   check(`${tag} 응답 필요: 서버가 준 맥 세션 + 원장의 run`, JSON.stringify(needs) === JSON.stringify([macWaiting.sessionId, runApproval.runId]), needs);
   const header = (await page.locator('[data-section="needsMe"] h2').innerText()).replace(/\s+/g, " ").trim();
   check(`${tag} 머리글 「응답 필요 2」`, header === "응답 필요 2", header);
-  const hint = (await page.getByTestId("work-job-permission-hint").innerText()).replace(/\s+/g, " ").trim();
-  check(`${tag} 줄 아래 안내`, hint === "권한 요청이 왔어요 · 허락은 폰이나 데스크탑 앱에서 보내 주세요", hint);
+  const text = (loc) => loc.innerText().then((t) => t.replace(/\s+/g, " ").trim());
+  const job = (rowId) => page.locator('[data-testid="work-job"]', { has: page.locator(`[data-testid="work-job-row"][data-job-id="${rowId}"]`) });
+  // 결과 칸 꼬리표: 맥 세션 → 권한 요청(브라우저: 허락할 곳 안내), run → 승인 요청 + 승인·거부.
+  const permJob = job(macWaiting.sessionId);
+  check(`${tag} 권한 요청 꼬리표`, (await text(permJob.getByTestId("work-job-permission-tag").locator("visible=true").first())) === "권한 요청");
+  check(`${tag} 권한 요청 안내(브라우저)`, (await text(permJob.getByTestId("work-job-permission-in-app").locator("visible=true").first())) === "허락은 폰이나 데스크탑 앱에서 보내 주세요");
+  check(`${tag} 권한 요청: 브라우저에는 단추 없음`, (await permJob.getByTestId("work-job-permission-open").count()) === 0);
+  const runJob = job(runApproval.runId);
+  check(`${tag} 승인 요청 꼬리표`, (await text(runJob.getByTestId("work-job-approval-tag").locator("visible=true").first())) === "승인 요청");
+  await runJob.getByTestId("work-job-approval-approve").waitFor();
+  check(`${tag} 결정자: 승인·거부가 보인다`, (await runJob.getByTestId("work-job-approval-approve").isVisible()) && (await runJob.getByTestId("work-job-approval-reject").isVisible()));
+  const nonJob = job(runNonDecider.runId);
+  check(`${tag} 비결정자: 단추 없음`, (await nonJob.getByTestId("work-job-approval-approve").count()) === 0);
+  check(`${tag} 비결정자: 대기 줄`, (await text(nonJob.getByTestId("work-job-approval-waiting").locator("visible=true").first())) === "관리자의 승인을 기다려요");
+  check(`${tag} 비결정자: 카드 링크`, await nonJob.getByTestId("work-job-approval-link").isVisible());
+  check(`${tag} 비결정자: 「지금」 맨 위`, (await rowIdsIn(page, "now"))[0] === runNonDecider.runId, await rowIdsIn(page, "now"));
+  // 한 작업 = 한 덩어리: 줄 사이 머리카락 선 1px, 컨트롤은 결과 글과 같은 열(왼쪽 끝이 같다).
+  const sep = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="work-job"]')).borderBottomWidth);
+  check(`${tag} 줄 사이 선 1px`, sep === "1px", sep);
+  const align = await runJob.evaluate((li) => {
+    const cell = [...li.querySelectorAll('[data-testid="work-job-approval-tag"]')].find((el) => el.getClientRects().length > 0);
+    const btn = li.querySelector('[data-testid="work-job-approval-reject"]');
+    return Math.round(btn.getBoundingClientRect().left - cell.getBoundingClientRect().left);
+  });
+  check(`${tag} 승인·거부가 결과 글과 같은 열(왼쪽 끝 차 0px)`, align === 0, align);
+  if (viewport.width >= 1280) {
+    const heads = await page.evaluate(() => [...document.querySelectorAll('[data-testid="work-jobs-table"] > div[aria-hidden] > span')].map((e) => e.textContent));
+    check(`${tag} 열 이름`, JSON.stringify(heads) === JSON.stringify(["작업", "결과", "상태", "작업 시간", "요청 채널"]), heads);
+  }
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
   check(`${tag} 안내·제목 잘림 0`, (await clippedText(page)).length === 0, await clippedText(page));
   await shot(page, `5640-mine-${tag}`);
@@ -242,9 +307,10 @@ async function scene(browser, origin, scheme, viewport, tag) {
     await shot(page, `5640-focus-ring-${tag}`);
 
     await page.getByTestId("work-jobs-filter-team").click();
-    await page.waitForFunction(() => document.querySelectorAll('[data-testid="work-job-row"]').length === 17);
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="work-job-row"]').length === 18);
     check(`${tag} 팀 전체: 구간 없음`, JSON.stringify(await sectionOrder(page)) === JSON.stringify(["now", "done"]), await sectionOrder(page));
-    check(`${tag} 팀 전체: 안내 없음`, (await page.getByTestId("work-job-permission-hint").count()) === 0);
+    check(`${tag} 팀 전체: 권한 요청 꼬리표 없음`, (await page.getByTestId("work-job-permission-tag").count()) === 0);
+    check(`${tag} 팀 전체: 결정 단추 0`, (await page.getByTestId("work-job-approval-approve").count()) + (await page.getByTestId("work-job-approval-reject").count()) === 0);
     await shot(page, `5640-team-${tag}`);
   }
   await context.close();
@@ -317,6 +383,54 @@ async function jumpScene(browser, origin, scheme) {
   await context.close();
 }
 
+/** 데스크탑 셸 흉내: 권한 요청 줄의 「열어서 답하기」(내용 없는 허락 단추는 없다). */
+async function desktopScene(browser, origin, scheme) {
+  const { context, page } = await openContext(browser, origin, { scheme, viewport: { width: 1280, height: 800 }, desktop: true });
+  await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]').length === 2);
+  const open = page.getByTestId("work-job-permission-open");
+  check(`desktop-${scheme} 「열어서 답하기」 하나`, (await open.count()) === 1 && (await open.innerText()).trim() === "열어서 답하기");
+  check(`desktop-${scheme} 권한 요청: 안내 줄 없음`, (await page.getByTestId("work-job-permission-in-app").locator("visible=true").count()) === 0);
+  check(`desktop-${scheme} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+  await shot(page, `5640-desktop-${scheme}`);
+  await open.click();
+  // 격자가 `agent=`를 읽고 주소에서 걷을 수 있어 「터미널 보기로 갔다」를 잰다(같은 길의 jsdom 시험이 `agent=`까지 잰다).
+  const landed = await page.waitForFunction(() => (window.location.href.includes("view=terminals") ? window.location.href : null)).then((h) => h.jsonValue()).catch(async () => page.evaluate(() => window.location.href));
+  check(`desktop-${scheme} 「열어서 답하기」 → 그 세션의 A 칸(터미널 보기)`, String(landed).includes("view=terminals"), landed);
+  await context.close();
+}
+
+/** 결정 중(답을 붙잡음) → 「보내는 중」, 결정 실패(500) → 단추 자리의 한 줄, 단추는 남는다. */
+async function decideScene(browser, origin, scheme) {
+  for (const mode of ["hold", "fail"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme, viewport: { width: 1280, height: 800 }, decision: mode });
+    await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]').length === 2);
+    const approve = page.getByTestId("work-job-approval-approve");
+    // 키보드만으로: 그 줄 단추에서 Tab 한 번 = 거부, 두 번 = 승인(실수로 승인이 먼저 오지 않는다).
+    await page.locator(`[data-testid="work-job-row"][data-job-id="${runApproval.runId}"]`).focus();
+    const active = () => page.evaluate(() => ({ id: document.activeElement?.getAttribute("data-testid"), visible: document.activeElement?.matches(":focus-visible") ?? false }));
+    await page.keyboard.press("Tab");
+    const first = await active();
+    await page.keyboard.press("Tab");
+    const second = await active();
+    check(`decide-${mode}-${scheme} 키보드: 줄 → Tab 거부 → Tab 승인(초점 링 보임)`, first.id === "work-job-approval-reject" && second.id === "work-job-approval-approve" && second.visible, { first, second });
+    await page.keyboard.press("Enter");
+    if (mode === "hold") {
+      await page.waitForFunction(() => document.querySelector('[data-testid="work-job-approval-approve"]')?.textContent === "보내는 중");
+      check(`decide-hold-${scheme} 「보내는 중」·aria-disabled`, (await approve.getAttribute("aria-disabled")) === "true");
+      await page.keyboard.press("Enter");
+      check(`decide-hold-${scheme} 두 번 나가지 않는다`, state.decisions === 1, state.decisions);
+      await shot(page, `5640-deciding-${scheme}`);
+    } else {
+      await page.getByTestId("work-job-approval-error").waitFor();
+      check(`decide-fail-${scheme} 실패 줄은 alert`, (await page.getByTestId("work-job-approval-error").getAttribute("role")) === "alert");
+      check(`decide-fail-${scheme} 단추는 남는다`, (await approve.innerText()).trim() === "승인");
+      check(`decide-fail-${scheme} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+      await shot(page, `5640-decide-failed-${scheme}`);
+    }
+    await context.close();
+  }
+}
+
 /** 브라우저에서 내 맥 세션 줄 Enter → 세션 화면(작업 콘솔). */
 async function enterScene(browser, origin) {
   const { context, page } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 } });
@@ -350,6 +464,14 @@ async function main() {
       await jumpScene(browser, preview.origin, "dark");
     }
     if (ONLY === "" || ONLY === "enter") await enterScene(browser, preview.origin);
+    if (ONLY === "" || ONLY === "desktop") {
+      await desktopScene(browser, preview.origin, "light");
+      await desktopScene(browser, preview.origin, "dark");
+    }
+    if (ONLY === "" || ONLY === "decide") {
+      await decideScene(browser, preview.origin, "light");
+      await decideScene(browser, preview.origin, "dark");
+    }
   } finally {
     await browser.close();
     await preview.stop?.();
