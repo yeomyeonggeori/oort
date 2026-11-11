@@ -80,6 +80,8 @@
   "teamAi.delegation.hermesFallbackName": "Hermes",
   "teamAi.delegation.waitImage": "그림은 {minutes, number}분까지 걸릴 수 있어요",
   "teamAi.delegation.waitSearch": "검색은 {minutes, number}분까지 걸릴 수 있어요",
+  "teamAi.delegation.waitImageShort": "그림 최대 {minutes, number}분",
+  "teamAi.delegation.waitSearchShort": "검색 최대 {minutes, number}분",
   "teamAi.delegation.unavailable": "지금은 쓸 수 없어요.",
   "teamAi.delegation.reasonNotConnected": "Hermes가 연결돼 있지 않아요.",
   "teamAi.delegation.reasonAmbiguous": "연결된 Hermes가 둘 이상이라 어디에 맡길지 정하지 못해요.",

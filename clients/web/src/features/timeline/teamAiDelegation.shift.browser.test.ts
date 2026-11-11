@@ -28,9 +28,11 @@ import { MessageRow } from "./MessageRow";
 //       그림 비율 셋(정사각·가로 3:2·세로 2:3) × 열 폭 셋(300·480·720).
 //   (2) 쓴 양의 숫자가 없음 → 도착(어림 아님·어림)으로 바뀌어도 같다.
 //   (3) 대조: 칩 칸이 없는 답(예전 길)의 같은 그림은 「받는 중」 → 「도착」에서 실제로 자란다(이 시험의 자가 진짜 움직임을 잰다).
+//   (4) 위임을 기다리는 진행 줄의 마감 안내가 스레드 패널 320·폭 390에서도 칸 안에 온전히 보이고 이름을 밀어내지 않는다(짧은 글),
+//       넓은 열에서는 긴 문장이다(#5375 수리 1회차, 검수 M2).
 //
 // 캡처: `CAP5375_DIR` 이 있으면 대화(진행 중·끝 그림·끝 검색·실패·시간 초과)와 설정(켜짐·꺼짐·연결 안 됨) 판을 1280·390,
-// 밝게·어둡게, 200%(640 CSS px · 배율 2)로 그 폴더에 쓴다. 번들 Chromium 헤드리스만 띄운다.
+// 밝게·어둡게, 200%(640 CSS px · 배율 2)로, 진행 중 판은 스레드 패널 320으로도 그 폴더에 쓴다. 번들 Chromium 헤드리스만 띄운다.
 // =============================================================================
 
 vi.mock("@/features/reminders/RemindDialog", () => ({ RemindDialog: () => null }));
@@ -336,6 +338,54 @@ function settingsBoard(hermes: TeamAiDelegationStatus, hermesOn = true): string 
 /** 진행 줄을 재는 때(위임 stage 뒤 초). 20초가 기준이다. */
 const PROGRESS_AT = [20, 60, 100, 130] as const;
 
+/**
+ * 생각 줄이 서는 좁은 자리(#5375 수리 1회차, 검수 M2): 요청 스레드 패널의 기본 폭(`--spacing-pane` 320)과 폭 390 화면의 대화 열
+ * (358 = 캡처의 390 판과 같은 열). 이 폭에서 마감 안내가 줄임표에 잘리지 않고 온전히 보여야 하고(짧은 글), 넓은 열(720)에서는
+ * 긴 문장 그대로다.
+ */
+const WAIT_COLUMNS = [
+  { tag: "thread320", width: 320, long: false },
+  { tag: "390", width: 358, long: false },
+  { tag: "wide720", width: 720, long: true },
+] as const;
+
+interface ThoughtLineGeometry {
+  slotLeft: number;
+  slotRight: number;
+  /** 마감 안내 꼬리(`request-thought-wait`). 없으면 null. */
+  wait: { left: number; right: number; text: string } | null;
+  /** 몸(이름·stage)이 받은 폭, 줄임표 없이 필요한 폭, 같은 글꼴의 에이전트 이름만의 폭. */
+  body: { width: number; natural: number; name: number } | null;
+}
+
+/** 열에 올린 진행 줄의 생각 줄 한 줄을 잰다(`show` 뒤에 부른다). `name` 은 몸 앞의 에이전트 이름이다. */
+async function thoughtLine(p: Page, name: string): Promise<ThoughtLineGeometry> {
+  return p.evaluate((name) => {
+    const slot = document.querySelector<HTMLElement>('[data-testid="request-thought-slot"]')!.getBoundingClientRect();
+    const tail = document.querySelector<HTMLElement>('[data-testid="request-thought-wait"]');
+    const bodyEl = tail?.previousElementSibling as HTMLElement | null | undefined;
+    const t = tail?.getBoundingClientRect();
+    let body: ThoughtLineGeometry["body"] = null;
+    if (bodyEl) {
+      // 이름만 든 같은 글꼴의 조각을 몸 옆에 잠깐 놓고 잰다(자리에 영향이 없게 떠 있는 채로).
+      const probe = document.createElement("span");
+      probe.className = "whitespace-pre";
+      probe.style.position = "absolute";
+      probe.textContent = name;
+      bodyEl.parentElement!.append(probe);
+      const nameWidth = probe.getBoundingClientRect().width;
+      probe.remove();
+      body = { width: bodyEl.getBoundingClientRect().width, natural: bodyEl.scrollWidth, name: nameWidth };
+    }
+    return {
+      slotLeft: slot.left,
+      slotRight: slot.right,
+      wait: tail && t ? { left: t.left, right: t.right, text: tail.innerText } : null,
+      body,
+    };
+  }, name);
+}
+
 function progressMarkups(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const at of PROGRESS_AT) {
@@ -413,6 +463,43 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
           measured.push(`${columnWidth}px 진행 줄 20→60→100→130초 이동 0px 확인`);
         }
 
+        // 좁은 자리(스레드 패널 320·폭 390)와 넓은 열(720): 마감 안내가 온전히 보이고(줄임표 없이 칸 안, 이름을 밀어내지 않고),
+        // 진행 줄이 바뀌어도 다음 글이 그대로다.
+        for (const narrow of WAIT_COLUMNS) {
+          await p.setContent(page(css, narrow.width));
+          const square = SIZES[0]!;
+          const first = await show(p, progress["progress-20"]!, square);
+          for (const at of PROGRESS_AT) {
+            const g = await show(p, progress[`progress-${at}`]!, square);
+            const moved = g.nextTop - first.nextTop;
+            if (Math.abs(moved) > TOL) problems.push(`${narrow.tag}(${narrow.width}px): 진행 줄 20초 → ${at}초에서 다음 글이 ${moved}px 움직였다`);
+            const line = await thoughtLine(p, "오르트 도우미");
+            if (at === 130) {
+              if (line.wait !== null) problems.push(`${narrow.tag}: 마감 뒤(130초)에도 안내가 남았다`);
+              continue;
+            }
+            const where = `${narrow.tag}(${narrow.width}px) ${at}초`;
+            if (line.wait === null) {
+              problems.push(`${where}: 마감 안내 꼬리가 없다`);
+              continue;
+            }
+            const want = narrow.long ? "그림은 2분까지 걸릴 수 있어요" : "그림 최대 2분";
+            if (line.wait.text.trim() !== `· ${want}`) problems.push(`${where}: 보이는 안내 글이 「${line.wait.text}」다(기대 「· ${want}」)`);
+            if (line.wait.left < line.slotLeft - TOL || line.wait.right > line.slotRight + TOL) {
+              problems.push(`${where}: 안내가 칸 밖으로 나갔다(안내 ${line.wait.left}~${line.wait.right}, 칸 ${line.slotLeft}~${line.slotRight})`);
+            }
+            // 안내가 이름까지 밀어내지 않는다: 몸에 이름만큼의 폭은 남는다(긴 안내를 좁은 칸에 그대로 두면 몸이 줄임표 하나가 된다).
+            if (line.body === null || line.body.width + TOL < line.body.name) {
+              problems.push(`${where}: 몸이 이름 폭(${line.body?.name}px)보다 좁다(${line.body?.width}px) — 안내가 이름을 밀어냈다`);
+            }
+            measured.push(
+              `${where}: 칸 ${Math.round(line.slotRight - line.slotLeft)}px · 안내 「${line.wait.text.trim()}」 ${Math.round(line.wait.right - line.wait.left)}px` +
+                (line.body ? ` · 몸 ${Math.round(line.body.width)}/${line.body.natural}px(이름 ${Math.round(line.body.name)}px)` : "") +
+                ` · 다음 글 이동 ${moved}px`
+            );
+          }
+        }
+
         const capDir = process.env.CAP5375_DIR;
         if (capDir !== undefined && capDir !== "") {
           mkdirSync(capDir, { recursive: true });
@@ -440,12 +527,15 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
             { tag: "1280", viewport: 1280, column: 760, scale: 2 },
             { tag: "390", viewport: 390, column: 358, scale: 2 },
             { tag: "zoom200", viewport: 640, column: 600, scale: 2 },
+            // 요청 스레드 패널의 기본 폭(`--spacing-pane` 320): 생각 줄이 서는 판만(#5375 수리 1회차, 검수 M2).
+            { tag: "thread320", viewport: 320, column: 320, scale: 2, only: "timeline-progress" },
           ];
           for (const variant of variants) {
             const c = await browser.newContext({ viewport: { width: variant.viewport, height: 900 }, deviceScaleFactor: variant.scale });
             const cp = await c.newPage();
             await cp.setContent(page(capCss, variant.column));
             for (const [name, markup] of Object.entries(boards)) {
+              if ("only" in variant && !name.startsWith(variant.only)) continue;
               for (const scheme of ["light", "dark"] as const) {
                 if (variant.tag === "zoom200" && scheme === "dark") continue;
                 await cp.emulateMedia({ colorScheme: scheme });

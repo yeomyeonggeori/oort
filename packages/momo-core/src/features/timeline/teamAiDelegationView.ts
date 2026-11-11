@@ -116,6 +116,15 @@ export const TEAM_AI_DELEGATION_WAIT_COPY = {
 } as const satisfies Record<TeamAiDelegationKind, string>;
 
 /**
+ * 좁은 자리(스레드 패널 320·폭 390)의 짧은 안내(`{minutes}` = 마감의 분, #5375 수리 1회차). 긴 문장은 그 폭에서 이름까지 밀어내
+ * 줄임표 하나만 남기므로, 그 폭에서는 같은 사실(종류·마감)을 짧게 말한다.
+ */
+export const TEAM_AI_DELEGATION_WAIT_SHORT_COPY = {
+  image: "teamAi.delegation.waitImageShort",
+  web_search: "teamAi.delegation.waitSearchShort",
+} as const satisfies Record<TeamAiDelegationKind, string>;
+
+/**
  * 서버가 닫힌 낱말로 조립하는 위임 stage(`momo_agent::team_ai_task::delegation_stage_label`, 받기 전 갈래):
  * 「위임: {이름} · 그림」 / 「위임: {이름} · 검색」. 받은 뒤의 「위임 결과 수신: …」과 규칙이 거절해 쓰인 머리 「위임 중」은
  * 기다림이 아니다(종류를 모른다).

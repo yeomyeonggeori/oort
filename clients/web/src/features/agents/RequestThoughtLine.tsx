@@ -15,7 +15,11 @@ import { useRunLedger } from "./useRunLedger";
 import { useVisibleThoughtRun } from "./visibleThoughtRuns";
 import { openWorkPanel } from "./workLogStore";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
-import { TEAM_AI_DELEGATION_WAIT_COPY, teamAiDelegationWait } from "@momo/core/features/timeline/teamAiDelegationView";
+import {
+  TEAM_AI_DELEGATION_WAIT_COPY,
+  TEAM_AI_DELEGATION_WAIT_SHORT_COPY,
+  teamAiDelegationWait,
+} from "@momo/core/features/timeline/teamAiDelegationView";
 
 /** 아직 원장을 못 읽었을 때의 요약 재료: 시간만 말하고 에이전트 보고 숫자는 지어내지 않아요. */
 const NO_REPORT: RunReportSummary = { stages: 0, kinds: [] };
@@ -82,13 +86,17 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
   }, [waitUntil]);
   const quiet = working && live && delegationWait === null && lastReport !== undefined && Date.now() - lastReport >= IDLE_CUTOFF_MS;
   const waitHint = delegationWait === null ? null : formatMessage(TEAM_AI_DELEGATION_WAIT_COPY[delegationWait.kind], { minutes: delegationWait.minutes });
+  const waitHintShort = delegationWait === null ? null : formatMessage(TEAM_AI_DELEGATION_WAIT_SHORT_COPY[delegationWait.kind], { minutes: delegationWait.minutes });
   const stage = Array.from(run.latestStage?.replace(/\s+/g, " ").trim() ?? "").slice(0, 40).join("");
   const name = memberFor(directory, run.agentMemberId)?.displayName ?? "에이전트";
   const duration = run.finishedAtMs === undefined ? undefined : Math.max(0, run.finishedAtMs - (run.startedAtMs ?? run.createdAtMs));
   // 요약의 숫자는 에이전트가 말한 것만이에요(단계·활동 합계). oort가 잰 호출 수는 출처가 달라 섞지 않아요(#4654).
   const summary = duration === undefined ? REQUEST_WORD[state] : runReportChipText(duration, ledger.report ?? NO_REPORT, formatMessage);
-  // 마감 안내는 stage **뒤**에 같은 줄로 붙는다(줄 높이 24 그대로 — 대화가 밀리지 않는다). 좁아서 잘리면 stage가 먼저 남는다.
-  const label = open ? `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}${waitHint === null ? "" : ` · ${waitHint}`}` : summary;
+  const stageLabel = `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}`;
+  // 마감 안내는 stage **뒤**에 같은 줄의 꼬리로 붙는다(줄 높이 24 그대로 — 대화가 밀리지 않는다). 몸(이름·stage)이 먼저 줄임표를
+  // 받고 꼬리의 안내는 남는다. 줄 칸이 24rem보다 좁으면(스레드 패널 320·폭 390) 꼬리는 짧은 글이다 — 긴 글은 그 폭에서 이름까지
+  // 밀어낸다(#5375 수리 1회차, 검수 M2). 낭독 이름은 늘 긴 글 전체다.
+  const label = open ? `${stageLabel}${waitHint === null ? "" : ` · ${waitHint}`}` : summary;
   // 보이는 글은 몸과 꼬리표로 나눠 그린다: 좁은 칸에서 몸이 줄임표를 받아도 「에이전트 보고」(숫자가 누구의 말인지)는 남는다.
   const chip = duration === undefined ? null : runReportChipParts(duration, ledger.report ?? NO_REPORT, formatMessage);
   if (!open) {
@@ -120,14 +128,26 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
     );
   }
   return (
-    <div className="flex h-6 min-w-0 shrink-0 items-center" data-testid="request-thought-slot" data-run-id={run.id}>
+    // `@container`: 마감 안내 꼬리가 이 줄 칸의 폭(대화 열 폭에서 옴)을 보고 긴 글·짧은 글을 고른다. 칸은 행 몸의 블록 자식이라 폭이 바뀌지 않는다.
+    <div className="flex h-6 min-w-0 shrink-0 items-center @container" data-testid="request-thought-slot" data-run-id={run.id}>
       <span role="status" aria-live="polite" className="sr-only">{name} {REQUEST_WORD[state]}</span>
       <Popover open={expanded} onOpenChange={setExpanded}>
         <PopoverTrigger asChild>
           <button type="button" aria-label={`${name} ${label}, 과정 ${expanded ? "접기" : "보기"}`} className="flex h-full min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring" data-testid="request-thought-line">
             <RespondingAvatar directory={directory} memberId={run.agentMemberId} />
             {!open && state === "done" && <Check className="size-4 shrink-0 text-ok" aria-hidden="true" />}
-            <span className="min-w-0 truncate" data-numeric={!open || quiet ? "" : undefined}>{name} · {quiet ? `${Math.floor((Date.now() - lastReport!) / 60_000)}분째 소식 없음` : label}</span>
+            {waitHint === null ? (
+              <span className="min-w-0 truncate" data-numeric={!open || quiet ? "" : undefined}>{name} · {quiet ? `${Math.floor((Date.now() - lastReport!) / 60_000)}분째 소식 없음` : label}</span>
+            ) : (
+              <span className="flex min-w-0 items-baseline">
+                <span className="min-w-0 truncate">{name} · {stageLabel}</span>
+                <span className="shrink-0 whitespace-pre" data-testid="request-thought-wait">
+                  {" · "}
+                  <span className="hidden @sm:inline">{waitHint}</span>
+                  <span className="@sm:hidden">{waitHintShort}</span>
+                </span>
+              </span>
+            )}
             {working && live && <RespondingDots />}
             <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
           </button>

@@ -7577,6 +7577,21 @@ export const catalog: MessageCatalog = {
       "value": "분까지 걸릴 수 있어요"
     }
   ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "그림 최대 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
   "teamAi.delegation.waitSearch": [
     {
       "type": 0,
@@ -7590,6 +7605,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "분까지 걸릴 수 있어요"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "검색 최대 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
     }
   ],
   "teamAi.helper.aliasesLine": [

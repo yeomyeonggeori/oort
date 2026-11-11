@@ -7965,6 +7965,21 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "Picture: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
   "teamAi.delegation.waitSearch": [
     {
       "type": 0,
@@ -7999,6 +8014,21 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "Search: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
     }
   ],
   "teamAi.helper.aliasesLine": [
