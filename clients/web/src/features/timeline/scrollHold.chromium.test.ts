@@ -39,7 +39,7 @@ if (!chromiumAvailable) {
 /**
  * `virtualFixing` 은 가상 목록의 위쪽 보정을 흉내 낸다(react-virtuoso 4.18.11 `upwardScrollFixSystem` 을 읽고 옮긴 모형): 줄 크기 변화를
  * **다음 프레임**(rAF)에 처리하고, 그때 스크롤 방향이 「위」이면 바뀐 높이만큼 scrollTop 을 옮긴다. 방향은 스크롤 이벤트마다 정하고
- * (이 모듈이 놓은 스크롤도 센다) 50ms 뒤 지운다. 진짜 가상 목록이 아니라 「같은 변화를 한 번 더 보정하는 다른 손」의 모형이다.
+ * (이 모듈이 놓은 스크롤도 센다) 잠시 뒤 지운다(진짜는 50ms — 여기서는 부하로 프레임이 늘어져도 장면이 서게 120ms). 진짜 가상 목록이 아니라 「같은 변화를 한 번 더 보정하는 다른 손」의 모형이다.
  */
 type Kind = "plain" | "virtual" | "virtualFixing";
 type Probe = {
@@ -136,7 +136,7 @@ function installLab() {
             timer = window.setTimeout(() => {
               timer = 0;
               direction = "none";
-            }, 50);
+            }, 120);
           }
         });
         new ResizeObserver(() => {
@@ -169,6 +169,11 @@ function installLab() {
           else if (name === "growNext") grow(rowAt(2), amount);
           else if (name === "growLast") grow(rowAt(rows.length - 1), amount);
           else if (name === "scroll") box.scrollTop += amount;
+          else if (name === "wheel") {
+            // 사람의 손: 휠 이벤트가 먼저 오고 스크롤이 따른다(합성 휠 이벤트는 스스로 스크롤하지 않는다).
+            box.dispatchEvent(new WheelEvent("wheel", { deltaY: amount }));
+            box.scrollTop += amount;
+          }
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
           else if (name === "margin") list.classList.add("margin-300");
           else if (name === "prepend") lab.token += 1;
@@ -301,16 +306,22 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     expect(result.gap).toBeLessThanOrEqual(1);
   });
 
-  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 아래로 내린 직후의 자람은 지키고, 위로 올린 직후 · 앞에 붙은 뒤의 자람은 목록의 몫으로 둔다", async () => {
+  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 사람이 휠로 내린 직후의 자람은 지키고, 위로 올린 직후 · 스크립트가 옮긴 직후 · 앞에 붙은 뒤의 자람은 목록의 몫으로 둔다", async () => {
     // 가만히: 지킨다(이 칸 전부터).
     const still = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["growAbove:120"] });
     expect(Math.abs(still.moved)).toBeLessThanOrEqual(1);
-    // 아래로 내린 직후(150ms 안): 가상 목록은 방향이 「위」일 때만 스스로 보정한다 — 이 모듈이 지킨다(#5649, 수리 전 120px).
-    const down = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:30", "growAbove:120"] });
+    // 휠로 아래로 내린 직후(150ms 안): 가상 목록은 방향이 「위」일 때만 스스로 보정한다 — 이 모듈이 지킨다(#5649, 수리 전 120px).
+    const down = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "growAbove:120"] });
     expect(Math.abs(down.moved - -30)).toBeLessThanOrEqual(1);
-    // 아래로 내리는 것과 같은 프레임.
-    const downSameFrame = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:30", "growAbove:120+scroll:30"] });
+    // 휠로 내리는 것과 같은 프레임.
+    const downSameFrame = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "growAbove:120+wheel:30"] });
     expect(Math.abs(downSameFrame.moved - -60)).toBeLessThanOrEqual(1);
+    // **스크립트가** 아래로 옮긴 스크롤(메시지로 이동)과 같은 프레임의 자람: 손대지 않는다 — 목록이 자리를 다시 놓는 중에 붙들면 이동을 무른다.
+    const scripted = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:30+growAbove:120"] });
+    expect(scripted.moved).toBe(90);
+    // 휠로 내리는 중에 스크립트가 그리기 직전 스크롤을 옮겼다(이벤트가 아직 안 옴): 그 이동은 두고 자람만 바로잡는다.
+    const jumpWhileWheeling = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "growAbove:120+scroll:200"], inFrame: true });
+    expect(Math.abs(jumpWhileWheeling.moved - -230)).toBeLessThanOrEqual(1);
     // 위로 올리는 프레임: 손대지 않는다 — 가상 목록의 위쪽 보정과 겹치면 두 번 보정된다(이 가짜 목록에는 그 보정이 없어 그대로 밀린다).
     const up = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["scroll:-30+growAbove:120"] });
     expect(up.moved).toBe(150);
@@ -328,7 +339,7 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     expect(Math.abs(still.moved)).toBeLessThanOrEqual(1);
     expect(still.scrollTop).toBe(500);
     // 아래로 내리는 것과 같은 프레임에 줄었다: 사람의 스크롤(30px)은 그대로 두고, 목록의 두 번째 보정만 되돌린다.
-    const scrolling = await scene({ kind: "virtualFixing", hold: true, startTop: 500, before: ["growAbove:120"], steps: ["growAbove:0+scroll:30"] });
+    const scrolling = await scene({ kind: "virtualFixing", hold: true, startTop: 500, before: ["growAbove:120"], steps: ["growAbove:0+wheel:30"] });
     expect(Math.abs(scrolling.moved - -30)).toBeLessThanOrEqual(1);
     expect(scrolling.scrollTop).toBe(530);
     // 앞의 확인이 아직 도는 동안(3프레임) 다른 줄이 또 줄었다, 이번에는 스크롤과 같은 프레임에: 두 번째 변화도 관찰자가 바로잡고
@@ -338,7 +349,7 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
       hold: true,
       startTop: 500,
       before: ["growAbove:120+growNext:120"],
-      steps: ["growAbove:0", "growNext:0+scroll:30"],
+      steps: ["growAbove:0", "growNext:0+wheel:30"],
     });
     expect(Math.abs(twice.moved - -30)).toBeLessThanOrEqual(1);
     // 모형이 정말 한 번 더 보정한다는 대조: 위로 올리는 프레임의 자람은 이 모듈이 손대지 않고 모형이 메운다(보던 줄은 스크롤한 만큼만).

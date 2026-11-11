@@ -26,9 +26,12 @@ import { AT_BOTTOM_SLACK_PX } from "./navigation";
  * 옮겨 둔다. 바로잡기는 같은 프레임의 ResizeObserver 가 한다. scrollTop 에 더하는 보정이라 사람의 스크롤 방향 · 거리는 그대로다.
  *
  * 다른 손이 같은 목록을 옮기는 경우(`coOwner` — 가상 목록)에는 그 손의 몫에 손대지 않고 다시 적기만 한다: 위로 더 불러오기
- * (`prependToken` 이 바뀐다 — 목록이 앞에 붙은 높이를 스스로 메운다)와 사람이 **위로** 올리는 중 · 그 직후(`ownsScroll`).
+ * (`prependToken` 이 바뀐다 — 목록이 앞에 붙은 높이를 스스로 메운다)와 스크롤 직후(`ownsScroll` — 사람이 휠 · 터치로 **아래로** 내리는
+ * 때만 빼고).
  */
 export const SCROLLING_QUIET_MS = 150;
+/** 휠 · 터치가 이 안에 왔으면 지금의 스크롤은 사람의 손이 움직인 것으로 본다(휠 이벤트는 그 스크롤 이벤트보다 한두 프레임 먼저 온다). */
+export const HAND_SCROLL_MS = SCROLLING_QUIET_MS * 2;
 
 interface Anchor {
   /** 줄의 이름(`rowAttribute` 의 값). 가상 목록은 앞에 붙어도 그대로인 번호, 스레드는 메시지 id. */
@@ -44,10 +47,10 @@ export interface ScrollCoOwner {
   /** 목록이 앞에 붙은 줄을 스스로 메울 때마다 바뀌는 값(가상 목록의 `firstItemIndex`). */
   prependToken: () => number;
   /**
-   * 사람이 방금 한 스크롤 뒤의 줄 높이 변화를 **목록이 스스로 메우는가**. 참이면 이 모듈은 손대지 않는다.
-   * `sinceMs` 는 마지막 사람 스크롤부터의 시간, `direction` 은 그 스크롤의 방향이다.
+   * 방금 있은 스크롤 뒤의 줄 높이 변화를 **이 모듈이 손대지 말아야 하는가**(목록이 스스로 메우거나, 목록이 스크롤을 옮기는 중이다).
+   * `sinceMs` 는 이 모듈이 놓지 않은 마지막 스크롤부터의 시간, `direction` 은 그 방향, `byHand` 는 그 스크롤이 사람의 손(휠 · 터치)인가다.
    */
-  ownsScroll: (scroll: { sinceMs: number; direction: "up" | "down" }) => boolean;
+  ownsScroll: (scroll: { sinceMs: number; direction: "up" | "down"; byHand: boolean }) => boolean;
   /**
    * 바로잡은 뒤 같은 자리를 다시 확인할 프레임 수. 가상 목록은 줄 크기 변화를 **다음 프레임**(requestAnimationFrame)에 처리하고, 그때
    * 스크롤 방향이 위쪽이면 스스로 위쪽 보정(scrollBy)을 한다. 위쪽 줄이 줄어 이 모듈이 먼저 위로 바로잡으면 목록에는 방향이 「위」로 보여
@@ -77,8 +80,12 @@ const distanceToBottom = (scroller: HTMLElement) => scroller.scrollHeight - scro
  * 그래서 위로 올린 지 `SCROLLING_QUIET_MS` 안에는 손대지 않는다: 이 모듈이 같은 변화를 먼저 바로잡으면 두 번 보정된다. 그 창을 150ms 로
  * 넉넉히 둔 것은 목록의 50ms 타이머가 늦게 돌아도 겹치지 않게 하려는 것이다.
  *
- * **아래로** 내리는 중 · 그 직후에는 목록이 아무것도 하지 않는다(방향이 「위」가 아니다). 그때 위 밖 줄이 자라면 이 모듈이 지킨다 (#5649 —
- * 수리 전에는 방향을 가리지 않고 150ms 를 비워, 내리는 중 · 멈춘 직후에는 아무도 맡지 않았다: 두 엔진 실측 120px).
+ * 사람이 **아래로** 내리는 중 · 그 직후에는 목록이 아무것도 하지 않는다(방향이 「위」가 아니다). 그때 위 밖 줄이 자라면 이 모듈이 지킨다
+ * (#5649 — 수리 전에는 방향을 가리지 않고 150ms 를 비워, 내리는 중 · 멈춘 직후에는 아무도 맡지 않았다: 두 엔진 실측 120px).
+ *
+ * 다만 **사람의 손(휠 · 터치)이 움직인 스크롤일 때만**이다. 스크립트가 아래로 옮기는 스크롤(「최신 메시지로 이동」 · 메시지로 이동 — 목록이
+ * 줄을 새로 재며 몇 프레임에 걸쳐 자리를 다시 놓는다)의 직후는 예전처럼 비워 둔다: 거기서 이 모듈이 자리를 붙들면 그 이동을 무른다.
+ * 스크롤 막대 끌기 · 키보드로 내리는 스크롤은 가를 길이 없어 스크립트 쪽으로 친다(예전과 같다).
  */
 export function virtualListHold(firstItemIndex: () => number): ScrollHoldOptions {
   return {
@@ -87,7 +94,7 @@ export function virtualListHold(firstItemIndex: () => number): ScrollHoldOptions
     atBottom: (scroller) => distanceToBottom(scroller) <= AT_BOTTOM_SLACK_PX,
     coOwner: {
       prependToken: firstItemIndex,
-      ownsScroll: ({ sinceMs, direction }) => direction === "up" && sinceMs <= SCROLLING_QUIET_MS,
+      ownsScroll: ({ sinceMs, direction, byHand }) => sinceMs <= SCROLLING_QUIET_MS && !(byHand && direction === "down"),
       settleFrames: 3,
     },
   };
@@ -146,9 +153,17 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   /** 스크롤 이벤트에서 「곧 올 ResizeObserver 에게 맡긴」 내용 높이. 다음 스크롤 이벤트까지 그대로면 관찰자는 오지 않는다. */
   let deferredContent: number | null = null;
 
-  /** 지금의 줄 높이 변화는 다른 손(가상 목록)이 스스로 메운다 — 손대지 않는다. */
+  /** 휠 · 터치가 마지막으로 온 때. 사람의 손이 움직인 스크롤과 스크립트가 옮긴 스크롤을 가른다. */
+  let lastHandInputAt = Number.NEGATIVE_INFINITY;
+  const onHandInput = () => {
+    lastHandInputAt = performance.now();
+  };
+  const handScrolling = () => performance.now() - lastHandInputAt <= HAND_SCROLL_MS;
+
+  /** 지금의 줄 높이 변화는 다른 손(가상 목록)의 몫이다 — 손대지 않는다. */
   const coOwnerHandles = () =>
-    coOwner !== undefined && coOwner.ownsScroll({ sinceMs: performance.now() - lastForeignScrollAt, direction: lastForeignDirection });
+    coOwner !== undefined &&
+    coOwner.ownsScroll({ sinceMs: performance.now() - lastForeignScrollAt, direction: lastForeignDirection, byHand: handScrolling() });
 
   /**
    * 바뀐 뒤의 기준을 적는다. `keep`은 이 모듈이 방금 지킨 「보던 줄」이다: 그 줄이 아직 붙어 있으면 **처음 적은 창 높이를 그대로** 목표로
@@ -215,7 +230,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   //   - 바닥: 사람이 그 사이 스크롤하면(바깥 스크롤) 멈춘다 — 바닥을 떠난 것이다.
   //   - 보던 줄: **지금 적혀 있는** 보던 줄을 본다. 사람이 그 사이 아래로 스크롤했으면 그 스크롤 뒤에 다시 적은 자리이고(사람이 옮긴 만큼은
   //     이미 들어 있다), rAF 시점에 그 자리에서 벗어나 있으면 스크립트(가상 목록의 두 번째 보정)가 옮긴 것이라 되돌린다. 사람이 위로
-  //     올리기 시작했으면 멈춘다 — 그때의 보정은 목록의 몫이다.
+  //     올리기 시작했거나 스크립트가 스크롤을 옮기면 멈춘다 — 그때의 자리는 목록의 몫이다.
   const settleFrames = coOwner?.settleFrames ?? 0;
   /** 다시 확인할 자리: 바닥이거나 보던 줄. */
   let settleTarget: "bottom" | "anchor" | null = null;
@@ -264,9 +279,9 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     // 위를 읽던 중: 내용 높이가 바뀌었거나(줄이 자람·줆) 목록 상자의 크기가 바뀌었다(위·아래 가장자리 이동 — 배너·띠가 서고 짐).
     if (!wasAtBottom && (content !== lastContent || viewport !== lastViewport) && anchor !== null && !coOwnerHandles()) {
       // 적은 뒤 스크롤 이벤트 없이 scrollTop 이 달라져 있을 수 있다(스크립트가 이 프레임의 그리기 직전에 옮겼다 — 이벤트는 다음 프레임에 온다).
-      // 다른 손이 없는 목록에서는 그 스크롤도 뜻한 이동이라 그만큼은 두고 줄 높이 변화만 바로잡는다(되돌리면 「메시지로 이동」을 무른다).
-      // 가상 목록에서는 그대로 둔다: 거기서 이벤트 없이 달라진 scrollTop 은 목록의 보정이고, 이 칸 전부터 그 자리를 기준으로 잰 동작이다.
-      const held = coOwner === undefined ? carried(anchor) : anchor;
+      // 다른 손이 없는 목록, 그리고 사람이 손으로 스크롤하는 중에는 그 스크롤도 뜻한 이동이라 그만큼은 두고 줄 높이 변화만 바로잡는다
+      // (되돌리면 「메시지로 이동」을 무른다). 가만히 있던 가상 목록에서는 그대로 둔다: 이 칸 전부터 그 자리를 기준으로 잰 동작이다.
+      const held = coOwner === undefined || handScrolling() ? carried(anchor) : anchor;
       holdAnchor(held);
       remember(held);
       armSettle("anchor");
@@ -292,6 +307,8 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   structure.observe(scroller, { childList: true });
   if (scroller.firstElementChild) structure.observe(scroller.firstElementChild, { childList: true });
   scroller.addEventListener("scroll", onScroll, { passive: true });
+  scroller.addEventListener("wheel", onHandInput, { passive: true });
+  scroller.addEventListener("touchmove", onHandInput, { passive: true });
   return {
     expectBottom: () => {
       // 바닥에 있던 목록은 늘 하던 대로 둔다(가상 목록의 따라가기 + 위 바닥 붙이기). 바닥에서 보낸 글은 수리 전에도 따라갔으므로 이 수리의
@@ -305,6 +322,8 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     stop: () => {
       if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("wheel", onHandInput);
+      scroller.removeEventListener("touchmove", onHandInput);
       structure.disconnect();
       observer.disconnect();
     },
