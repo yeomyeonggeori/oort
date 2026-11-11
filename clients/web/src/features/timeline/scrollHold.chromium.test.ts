@@ -36,7 +36,12 @@ if (!chromiumAvailable) {
   console.warn(`scrollHold Chromium 시험을 건너뛴다: Playwright Chromium 이 없다 (${chromiumAvailability.path})`);
 }
 
-type Kind = "plain" | "virtual";
+/**
+ * `virtualFixing` 은 가상 목록의 위쪽 보정을 흉내 낸다(react-virtuoso 4.18.11 `upwardScrollFixSystem` 을 읽고 옮긴 모형): 줄 크기 변화를
+ * **다음 프레임**(rAF)에 처리하고, 그때 스크롤 방향이 「위」이면 바뀐 높이만큼 scrollTop 을 옮긴다. 방향은 스크롤 이벤트마다 정하고
+ * (이 모듈이 놓은 스크롤도 센다) 50ms 뒤 지운다. 진짜 가상 목록이 아니라 「같은 변화를 한 번 더 보정하는 다른 손」의 모형이다.
+ */
+type Kind = "plain" | "virtual" | "virtualFixing";
 type Probe = {
   /** 보던 줄(창 위 끝에 처음 걸친 줄 아래 둘째 줄)의 위 끝이 장면 동안 움직인 값(px). */
   moved: number;
@@ -88,14 +93,15 @@ function installLab() {
       hold?.stop();
       hold = null;
       lab.token = 0;
-      rowAttribute = kind === "virtual" ? "data-index" : "data-row";
+      const virtual = kind !== "plain";
+      rowAttribute = virtual ? "data-index" : "data-row";
       const host = document.getElementById("host") as HTMLElement;
       host.replaceChildren();
       box = document.createElement("div");
       box.id = "box";
       // 가상 목록은 스크롤러 안에 상자 하나, 그 안에 줄 목록을 둔다. 평범한 목록은 줄 목록이 스크롤 상자의 자식이다.
       list = document.createElement("div");
-      if (kind === "virtual") {
+      if (virtual) {
         const viewport = document.createElement("div");
         list.dataset.testid = "virtuoso-item-list";
         viewport.append(list);
@@ -108,9 +114,33 @@ function installLab() {
         list.append(row);
       }
       host.append(box);
+      if (kind === "virtualFixing") {
+        // 이 모듈보다 먼저 관찰자를 건다: 진짜 가상 목록처럼 그 rAF 가 이 모듈의 다시 확인보다 앞에 돈다.
+        let prevTop = box.scrollTop;
+        let prevHeight = list.offsetHeight;
+        let direction: "up" | "down" | "none" = "none";
+        let timer = 0;
+        box.addEventListener("scroll", () => {
+          if (box.scrollTop !== prevTop) direction = box.scrollTop < prevTop ? "up" : "down";
+          prevTop = box.scrollTop;
+          if (timer === 0) {
+            timer = window.setTimeout(() => {
+              timer = 0;
+              direction = "none";
+            }, 50);
+          }
+        });
+        new ResizeObserver(() => {
+          requestAnimationFrame(() => {
+            const change = list.offsetHeight - prevHeight;
+            prevHeight = list.offsetHeight;
+            if (change !== 0 && direction === "up" && box.scrollTop !== 0) box.scrollTop += change;
+          });
+        }).observe(list);
+      }
       if (!withHold) return;
       const { holdScrollPosition, plainListHold, virtualListHold } = window.__scrollHold;
-      hold = holdScrollPosition(box, kind === "virtual" ? virtualListHold(() => lab.token) : plainListHold(rowAttribute));
+      hold = holdScrollPosition(box, virtual ? virtualListHold(() => lab.token) : plainListHold(rowAttribute));
     },
     expectBottom: () => hold?.expectBottom(),
     run: async (steps, inFrame = false) => {
@@ -280,5 +310,19 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     // 앞에 붙었다(`firstItemIndex` 가 바뀜): 그 높이는 목록이 스스로 메운다 — 손대지 않는다.
     const prepended = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["prepend:1+growAbove:120"] });
     expect(prepended.moved).toBe(120);
+  });
+
+  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 목록이 같은 변화를 한 번 더 보정해도 그리기 전에 되돌린다 — 가만히, 그리고 아래로 내리는 중", async () => {
+    // 위 밖 줄이 줄면 이 모듈이 위로 바로잡고, 그 스크롤이 목록에는 「위」로 보여 다음 프레임에 같은 높이를 한 번 더 옮긴다(#5575: 127.5px).
+    const still = await scene({ kind: "virtualFixing", hold: true, startTop: 500, before: ["growAbove:120"], steps: ["growAbove:0"] });
+    expect(Math.abs(still.moved)).toBeLessThanOrEqual(1);
+    expect(still.scrollTop).toBe(500);
+    // 아래로 내리는 것과 같은 프레임에 줄었다: 사람의 스크롤(30px)은 그대로 두고, 목록의 두 번째 보정만 되돌린다.
+    const scrolling = await scene({ kind: "virtualFixing", hold: true, startTop: 500, before: ["growAbove:120"], steps: ["growAbove:0+scroll:30"] });
+    expect(Math.abs(scrolling.moved - -30)).toBeLessThanOrEqual(1);
+    expect(scrolling.scrollTop).toBe(530);
+    // 모형이 정말 한 번 더 보정한다는 대조: 위로 올리는 프레임의 자람은 이 모듈이 손대지 않고 모형이 메운다(보던 줄은 스크롤한 만큼만).
+    const upward = await scene({ kind: "virtualFixing", hold: true, startTop: 500, steps: ["scroll:-30+growAbove:120"] });
+    expect(Math.abs(upward.moved - 30)).toBeLessThanOrEqual(1);
   });
 });
