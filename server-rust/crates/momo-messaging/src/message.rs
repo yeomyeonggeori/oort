@@ -879,6 +879,15 @@ async fn finish_send_in_tx(
         threads == ThreadPolicy::Maintain,
     )
     .await?;
+    // #5667 — the thread's followers (the ones just pulled in included) hear that their channel's
+    // followed-thread total moved.
+    crate::thread_follow::signal_followers_of_reply_in_tx(
+        &mut *conn,
+        workspace_id,
+        &message,
+        threads == ThreadPolicy::Maintain,
+    )
+    .await?;
 
     // Read AFTER the binding the caller performed and BEFORE the payload is
     // built, which is the only ordering that makes the broadcast describe the
