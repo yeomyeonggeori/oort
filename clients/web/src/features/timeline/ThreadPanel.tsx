@@ -43,6 +43,7 @@ import type { RealtimeHandle } from "@/lib/realtime";
 import { followOnReplyHint } from "@momo/core/features/timeline/threadFollow";
 import { ThreadFollowButton } from "./ThreadFollowButton";
 import { useThreadFollow } from "./useThreadFollow";
+import { holdScrollPosition, plainListHold, type ScrollHold } from "./scrollHold";
 
 const NO_REPLIES: Message[] = [];
 
@@ -239,11 +240,32 @@ function ThreadPanelFrame({
 
   const allReplies = query.data?.messages ?? NO_REPLIES;
 
-  // 내가 단 답글은 맨 아래로 (#5603, owner 11-09). 답글 목록은 따라가기가 없는 평범한 스크롤 상자라, 위로 올려 읽던 중에 답글을
-  // 달면 그 답글이 아래 밖에 섰다(바닥에 있어도 상자가 스스로 따라가지 않는다). 보낸 뒤 목록을 다시 읽어 **맨 끝 답글이 바뀌면**
-  // 그 커밋에서 한 번 맨 아래로 간다(그리기 전). 남의 답글은 지금처럼 따라가지 않는다. 다시 읽기가 늦거나 실패하면 기다림은
-  // `OWN_REPLY_FOLLOW_MS` 뒤에 접는다 — 그 뒤 온 남의 답글로 끌려가지 않게.
+  // 답글 목록의 자리 지키기 (#5649). 가상화 없는 평범한 스크롤 상자이고 브라우저 스크롤 앵커링을 끈다(`timeline-scroller`) — 앵커링이
+  // 없는 엔진(문서상 macOS 14~26 의 WebKit)에서도 같게 움직이도록 타임라인과 같은 손(`scrollHold`)이 지킨다: 위를 읽는 중이면 보던
+  // 답글이 제자리(스크롤하는 중에도), 스크롤해 내려와 바닥에 닿아 있으면 새 답글 · 늦게 뜨는 그림에도 바닥이다. 맨 위에 선 채로는
+  // 바닥이 아니다(`plainListHold`) — 스레드는 루트가 보이는 맨 위에서 열린다.
+  //
+  // 답글이 **처음 채워진 뒤부터** 지킨다(뼈대 → 답글로 바뀌는 동안은 지킬 줄이 없고, 그 채움을 「새 답글」로 보고 바닥으로 따라가면 안
+  // 된다). 루트가 바뀌면 새로 건다: 앞 스레드에서 적어 둔 「바닥이었다」가 새 스레드로 넘어가지 않는다. 그리기 전에 걸고 걷으려고
+  // 레이아웃 효과다(걷기가 늦으면 앞 스레드의 관찰자가 새 스레드의 첫 그림을 옮긴다).
   const repliesScrollRef = useRef<HTMLDivElement>(null);
+  const holdRef = useRef<ScrollHold | null>(null);
+  const repliesReady = !query.isLoading;
+  useLayoutEffect(() => {
+    const node = repliesScrollRef.current;
+    if (node === null || !repliesReady) return;
+    const hold = holdScrollPosition(node, plainListHold("data-message-id"));
+    holdRef.current = hold;
+    return () => {
+      hold.stop();
+      if (holdRef.current === hold) holdRef.current = null;
+    };
+  }, [root.id, repliesReady]);
+
+  // 내가 단 답글은 맨 아래로 (#5603, owner 11-09). 위로 올려 읽던 중에 답글을 달면 그 답글이 아래 밖에 섰다. 보낸 뒤 목록을 다시 읽어
+  // **맨 끝 답글이 바뀌면** 그 커밋에서 맨 아래로 간다(그리기 전). 옮기는 손은 위 자리 지키기의 `expectBottom` 이다: 따로 scrollTop 을
+  // 놓으면 같은 프레임에 「보던 답글」을 지키는 바로잡기가 그것을 되돌린다. 남의 답글은 위를 읽던 중이면 따라가지 않는다. 다시 읽기가
+  // 늦거나 실패하면 기다림은 `OWN_REPLY_FOLLOW_MS` 뒤에 접는다 — 그 뒤 온 남의 답글로 끌려가지 않게.
   const newestReplyId = allReplies[allReplies.length - 1]?.id ?? null;
   const newestReplyRef = useRef(newestReplyId);
   newestReplyRef.current = newestReplyId;
@@ -261,6 +283,12 @@ function ThreadPanelFrame({
     }
     if (newestReplyId === armed.newestAtSend) return;
     ownReplyRef.current = null;
+    const hold = holdRef.current;
+    if (hold !== null) {
+      hold.expectBottom();
+      return;
+    }
+    // 자리 지키기가 아직 걸리지 않았다(답글을 처음 채우는 중): 직접 옮긴다.
     const node = repliesScrollRef.current;
     if (node !== null) node.scrollTop = node.scrollHeight;
   }, [newestReplyId]);
@@ -441,7 +469,8 @@ function ThreadPanelFrame({
 
       <div
         ref={repliesScrollRef}
-        className="min-h-0 flex-1 overflow-y-auto"
+        // `timeline-scroller` (#5649): 브라우저 스크롤 앵커링을 끈다. 자리는 위 `scrollHold` 가 지킨다.
+        className="timeline-scroller min-h-0 flex-1 overflow-y-auto"
         data-message-scroll-container=""
       >
         <TimelineLiveRegionProvider>

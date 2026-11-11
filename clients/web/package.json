@@ -47,6 +47,7 @@
     "gate:send-follow": "npm run build && node gates/gate-send-follow.mjs",
     "gate:fold": "npm run build && node gates/gate-fold-nav.mjs",
     "gate:composer": "npm run build && node gates/gate-composer.mjs",
+    "gate:thread-hold": "npm run build && node gates/gate-thread-hold.mjs",
     "gate:connection": "npm run build && node gates/gate-connection.mjs",
     "gate:webhook": "npm run build && node gates/gate-webhook-credential.mjs",
     "gate:attachment": "npm run build && node gates/gate-attachment.mjs",
