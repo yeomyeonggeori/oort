@@ -246,7 +246,10 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     if (settleFrames === 0) return;
     settleTarget = target;
     settleLeft = settleFrames;
-    if (settleFrame === 0) settleFrame = requestAnimationFrame(settle);
+    // 이미 걸려 있던 확인은 걷고 다시 건다: 앞의 확인이 rAF 안에서 스스로 이어 건 것이면 목록의 처리(이 프레임의 ResizeObserver 에서 건
+    // rAF)보다 **앞에** 서 있어, 목록의 두 번째 보정을 보지 못하고 지나간다.
+    if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
+    settleFrame = requestAnimationFrame(settle);
   };
 
   const observer = new ResizeObserver(() => {

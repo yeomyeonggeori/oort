@@ -157,6 +157,7 @@ function installLab() {
           const [name, value] = action.split(":");
           const amount = Number(value);
           if (name === "growAbove") rowAt(1).style.minHeight = `${50 + amount}px`;
+          else if (name === "growNext") rowAt(2).style.minHeight = `${50 + amount}px`;
           else if (name === "growLast") rowAt(rows.length - 1).style.minHeight = `${50 + amount}px`;
           else if (name === "scroll") box.scrollTop += amount;
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
@@ -321,6 +322,16 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     const scrolling = await scene({ kind: "virtualFixing", hold: true, startTop: 500, before: ["growAbove:120"], steps: ["growAbove:0+scroll:30"] });
     expect(Math.abs(scrolling.moved - -30)).toBeLessThanOrEqual(1);
     expect(scrolling.scrollTop).toBe(530);
+    // 앞의 확인이 아직 도는 동안(3프레임) 다른 줄이 또 줄었다, 이번에는 스크롤과 같은 프레임에: 두 번째 변화도 관찰자가 바로잡고
+    // 확인을 다시 걸어야 목록의 두 번째 보정을 본다(확인이 rAF 에서 먼저 바로잡거나, 먼저 걸린 채로 두면 120px 이 남는다).
+    const twice = await scene({
+      kind: "virtualFixing",
+      hold: true,
+      startTop: 500,
+      before: ["growAbove:120+growNext:120"],
+      steps: ["growAbove:0", "growNext:0+scroll:30"],
+    });
+    expect(Math.abs(twice.moved - -30)).toBeLessThanOrEqual(1);
     // 모형이 정말 한 번 더 보정한다는 대조: 위로 올리는 프레임의 자람은 이 모듈이 손대지 않고 모형이 메운다(보던 줄은 스크롤한 만큼만).
     const upward = await scene({ kind: "virtualFixing", hold: true, startTop: 500, steps: ["scroll:-30+growAbove:120"] });
     expect(Math.abs(upward.moved - 30)).toBeLessThanOrEqual(1);
