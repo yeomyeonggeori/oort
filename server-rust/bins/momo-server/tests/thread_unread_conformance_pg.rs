@@ -893,8 +893,8 @@ async fn outbox_mark(su: &PgPool) -> i64 {
 /// row's other keys unchanged; a reply signals the follower and not its author, and the read route and
 /// the stop route each signal the caller's own personal channel.
 ///
-/// Sabotage: map `0` instead of the projection's value in `read_state_row_dto` → alice's line reads 0;
-/// drop the field from `ReadStateRowDto` → the key set goes red.
+/// Sabotage (measured RED, see the PR): map `0` instead of the projection's value in
+/// `read_state_row_dto` → alice's line reads 0.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn the_read_state_line_carries_the_followed_total_and_the_routes_signal_it() {

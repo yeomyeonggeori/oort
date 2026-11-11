@@ -376,10 +376,10 @@ fn recipients(frames: &[(Uuid, Uuid)]) -> Vec<Uuid> {
 /// * channel 1, thread C — `carol`'s root, `bob` replies: `author` never touched it: 0;
 /// * channel 2, thread D — `bob` replies three times, one is deleted: 2.
 ///
-/// Sabotage (each measured RED, see the PR): drop `r.author_member_id <> $2` from
-/// `followed_unread_by_channel_in_tx` → channel 1 reads 3; drop `tf.state IN ('auto', 'followed')` →
-/// channel 1 reads 3 (thread B counts); drop `r.seq > tf.last_read_reply_seq` → channel 2 reads 3
-/// after the partial read below… and the sums diverge.
+/// Sabotage (measured RED, see the PR), all in `followed_unread_by_channel_in_tx`: drop
+/// `r.author_member_id <> $2` → channel 1 reads 3 against a per-thread sum of 2; drop
+/// `tf.state IN ('auto', 'followed')` → thread B counts; drop `r.seq > tf.last_read_reply_seq` → the
+/// partial read below lowers nothing.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn the_channel_total_is_the_sum_of_the_followed_threads_summaries() {
@@ -453,11 +453,12 @@ async fn the_channel_total_is_the_sum_of_the_followed_threads_summaries() {
 /// Reading the thread to its head takes it out of the total, and the reader's personal channel gets one
 /// frame; reading again (nothing moves) sends nothing. Stopping following takes the thread out too
 /// (one frame), following again brings back what is still unread (one frame), and a follow that
-/// changes nothing sends nothing.
+/// changes nothing sends nothing. A stopped follow's position still keeps up with a read, but that
+/// read moves no total, so it sends nothing.
 ///
-/// Sabotage: drop the emit in `mark_thread_read_in_tx` → the read frame count is 0; drop the emit in
-/// `set_thread_follow_in_tx` → the stop frame count is 0; emit on every request (ignore RETURNING) → the
-/// no-op read and the no-op follow each send one.
+/// Sabotage (measured RED, see the PR): turn off the emit in `mark_thread_read_in_tx` → the read frame
+/// count is 0; drop the emit in `set_thread_follow_in_tx` → the stop frame count is 0; drop the
+/// following gate on the read emit → the stopped follow's read sends one.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn reading_and_stopping_take_a_thread_out_of_the_total_and_tell_the_readers_devices() {
@@ -493,7 +494,7 @@ async fn reading_and_stopping_take_a_thread_out_of_the_total_and_tell_the_reader
     );
 
     // One more reply, then stop following: the thread leaves the total.
-    say(&app, &room, ch, "bob", Some(root), "r3").await;
+    let (_, r3) = say(&app, &room, ch, "bob", Some(root), "r3").await;
     assert_eq!(total(&app, &room, ch, "author").await, 1);
     let mark = outbox_mark(&su).await;
     follow(&app, &room, ch, root, "author", false).await;
@@ -519,6 +520,15 @@ async fn reading_and_stopping_take_a_thread_out_of_the_total_and_tell_the_reader
         "following again brings back what is still unread (r3)"
     );
     assert_eq!(frames_since(&su, mark).await, vec![(reader, ch)]);
+
+    // Stop again, then read r3 while stopped: the position moves, the total (0) does not — no frame.
+    follow(&app, &room, ch, root, "author", false).await;
+    let mark = outbox_mark(&su).await;
+    read_thread(&app, &room, ch, root, "author", r3).await;
+    assert!(
+        frames_since(&su, mark).await.is_empty(),
+        "a stopped follow counts nowhere, so reading it tells no device anything"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -532,10 +542,9 @@ async fn reading_and_stopping_take_a_thread_out_of_the_total_and_tell_the_reader
 /// not the author, not a member who stopped following, not a follower who left the channel, not a
 /// member who never followed.
 ///
-/// Sabotage: drop the `signal_followers_of_reply_in_tx` call → no frame at all; drop
-/// `tf.member_id <> $4` → the author gets one; drop `ms.left_at IS NULL` → the person who left gets one;
-/// drop `tf.state IN ('auto', 'followed')` → the stopped member gets one; call it before
-/// `auto_follow_in_tx` → the person mentioned in this reply gets none.
+/// Sabotage (measured RED, see the PR), in `signal_followers_of_reply_in_tx`: send no frame → no
+/// recipient; drop `tf.member_id <> $4` → the author gets one; drop `ms.left_at IS NULL` → the person
+/// who left gets one.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn a_new_reply_tells_every_live_follower_but_its_author() {
@@ -614,8 +623,8 @@ async fn a_new_reply_tells_every_live_follower_but_its_author() {
 /// A channel the reader is no longer a member of counts nowhere: its line is gone from the projection
 /// (with the threads they still follow there), and the other channel's line is untouched.
 ///
-/// Sabotage: none in this change's code holds it — the projection's existing `ms.left_at IS NULL` join
-/// does; dropping that join's predicate turns this red.
+/// What holds it is the projection's existing `ms.left_at IS NULL` join (lines exist only for live
+/// memberships), not this change's statement — this test pins that the new value follows those lines.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn a_channel_the_reader_left_counts_nowhere() {
@@ -740,7 +749,8 @@ const PROJECTION_BEFORE_5667: &str = "SELECT c.id AS channel_id, \
             AND ms.left_at IS NULL \
           ORDER BY ms.joined_at, c.id";
 
-/// Sabotage: fold the followed total into `unread_count` or `mention_count` → this goes red.
+/// Sabotage (measured RED, see the PR): fold the followed total into `unread_count` in
+/// `list_read_state_projection` → this goes red.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn the_existing_fields_are_exactly_the_old_projections() {
