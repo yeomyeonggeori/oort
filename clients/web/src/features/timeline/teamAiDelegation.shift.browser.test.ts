@@ -344,9 +344,11 @@ const PROGRESS_AT = [20, 60, 100, 130] as const;
  * 긴 문장 그대로다.
  */
 const WAIT_COLUMNS = [
-  { tag: "thread320", width: 320, long: false },
-  { tag: "390", width: 358, long: false },
-  { tag: "wide720", width: 720, long: true },
+  // 스레드 패널을 가장 좁힌 폭(`--spacing-pane-sm` 192, `thread-pane`의 min-inline-size): 이름까지 남길 자리는 없다(칸 안에서 겹치지만 않는다).
+  { tag: "thread192", width: 192, long: false, nameFits: false },
+  { tag: "thread320", width: 320, long: false, nameFits: true },
+  { tag: "390", width: 358, long: false, nameFits: true },
+  { tag: "wide720", width: 720, long: true, nameFits: true },
 ] as const;
 
 interface ThoughtLineGeometry {
@@ -356,6 +358,8 @@ interface ThoughtLineGeometry {
   wait: { left: number; right: number; text: string } | null;
   /** 몸(이름·stage)이 받은 폭, 줄임표 없이 필요한 폭, 같은 글꼴의 에이전트 이름만의 폭. */
   body: { width: number; natural: number; name: number } | null;
+  /** 몸·꼬리를 감싼 글 칸의 오른끝. 꼬리가 이보다 나가면 점·화살표를 덮는다. */
+  boxRight: number;
 }
 
 /** 열에 올린 진행 줄의 생각 줄 한 줄을 잰다(`show` 뒤에 부른다). `name` 은 몸 앞의 에이전트 이름이다. */
@@ -367,21 +371,24 @@ async function thoughtLine(p: Page, name: string): Promise<ThoughtLineGeometry> 
     const t = tail?.getBoundingClientRect();
     let body: ThoughtLineGeometry["body"] = null;
     if (bodyEl) {
-      // 이름만 든 같은 글꼴의 조각을 몸 옆에 잠깐 놓고 잰다(자리에 영향이 없게 떠 있는 채로).
-      const probe = document.createElement("span");
-      probe.className = "whitespace-pre";
-      probe.style.position = "absolute";
-      probe.textContent = name;
-      bodyEl.parentElement!.append(probe);
-      const nameWidth = probe.getBoundingClientRect().width;
-      probe.remove();
+      // 몸 글의 첫 낱자부터 이름 길이만큼을 Range로 잰다(줄임표로 잘려도 글자는 제자리에 놓여 있다). 스타일은 쓰지 않는다.
+      const text = [...bodyEl.childNodes].find((node): node is Text => node.nodeType === Node.TEXT_NODE);
+      let nameWidth = Number.NaN;
+      if (text !== undefined && text.data.startsWith(name)) {
+        const range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, name.length);
+        nameWidth = range.getBoundingClientRect().width;
+      }
       body = { width: bodyEl.getBoundingClientRect().width, natural: bodyEl.scrollWidth, name: nameWidth };
     }
+    const box = tail?.parentElement?.getBoundingClientRect();
     return {
       slotLeft: slot.left,
       slotRight: slot.right,
       wait: tail && t ? { left: t.left, right: t.right, text: tail.innerText } : null,
       body,
+      boxRight: box?.right ?? Number.NaN,
     };
   }, name);
 }
@@ -488,13 +495,20 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
             if (line.wait.left < line.slotLeft - TOL || line.wait.right > line.slotRight + TOL) {
               problems.push(`${where}: 안내가 칸 밖으로 나갔다(안내 ${line.wait.left}~${line.wait.right}, 칸 ${line.slotLeft}~${line.slotRight})`);
             }
-            // 안내가 이름까지 밀어내지 않는다: 몸에 이름만큼의 폭은 남는다(긴 안내를 좁은 칸에 그대로 두면 몸이 줄임표 하나가 된다).
-            if (line.body === null || line.body.width + TOL < line.body.name) {
-              problems.push(`${where}: 몸이 이름 폭(${line.body?.name}px)보다 좁다(${line.body?.width}px) — 안내가 이름을 밀어냈다`);
+            // 꼬리가 글 칸을 넘어 점·화살표를 덮지 않는다.
+            if (!(line.wait.right <= line.boxRight + TOL)) {
+              problems.push(`${where}: 안내가 글 칸 오른끝(${line.boxRight})을 넘었다(${line.wait.right}) — 점·화살표를 덮는다`);
+            }
+            if (line.body === null || !(line.body.name > 0)) {
+              problems.push(`${where}: 몸 글에서 이름 폭을 재지 못했다(자가 아무것도 재지 않는다)`);
+            } else if (narrow.nameFits && line.body.width + TOL < line.body.name) {
+              // 안내가 이름까지 밀어내지 않는다: 몸에 이름만큼의 폭은 남는다(긴 안내를 좁은 칸에 그대로 두면 몸이 줄임표 하나가 된다).
+              problems.push(`${where}: 몸이 이름 폭(${line.body.name}px)보다 좁다(${line.body.width}px) — 안내가 이름을 밀어냈다`);
             }
             measured.push(
               `${where}: 칸 ${Math.round(line.slotRight - line.slotLeft)}px · 안내 「${line.wait.text.trim()}」 ${Math.round(line.wait.right - line.wait.left)}px` +
                 (line.body ? ` · 몸 ${Math.round(line.body.width)}/${line.body.natural}px(이름 ${Math.round(line.body.name)}px)` : "") +
+                ` · 안내 오른끝 ${Math.round(line.wait.right)} / 글 칸 오른끝 ${Math.round(line.boxRight)}` +
                 ` · 다음 글 이동 ${moved}px`
             );
           }

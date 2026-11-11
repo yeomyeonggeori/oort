@@ -141,7 +141,9 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
             ) : (
               <span className="flex min-w-0 items-baseline">
                 <span className="min-w-0 truncate">{name} · {stageLabel}</span>
-                <span className="shrink-0 whitespace-pre" data-testid="request-thought-wait">
+                {/* 꼬리는 줄지 않되 글 칸보다 넓어지지는 않는다: 스레드 패널을 가장 좁힌 192에서는 몸이 0이 된 뒤 꼬리도 줄임표를 받고,
+                    점·화살표를 덮지 않는다. */}
+                <span className="max-w-full shrink-0 overflow-hidden text-ellipsis whitespace-pre" data-testid="request-thought-wait">
                   {" · "}
                   <span className="hidden @sm:inline">{waitHint}</span>
                   <span className="@sm:hidden">{waitHintShort}</span>
