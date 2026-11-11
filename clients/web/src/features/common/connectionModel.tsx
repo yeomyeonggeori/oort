@@ -176,13 +176,21 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   //  다시 열면 레일마다 놓친 것을 메운다(타임라인은 복구·`?after`, 읽음 투영은 `ReadStateLiveSync`).
   const connStatusRef = useRef(connStatus);
   connStatusRef.current = connStatus;
+  // 돌아옴·깨어남으로 마지막에 다시 연 시각: 둘이 연달아 와도 막 붙던 시도를 끊지 않게(`RESUME_KICK_SETTLE_MS`). 효과가 다시 서도 이어진다.
+  const kickedAtRef = useRef<number | null>(null);
   useEffect(() => {
+    const kick = () => {
+      kickedAtRef.current = Date.now();
+      reconnectNow();
+    };
     const facts = () => {
       const heardAt = realtime?.lastHeardAt?.() ?? null;
+      const now = Date.now();
       return {
         // 처음 붙는 중(`connecting`)은 기다리는 소켓이 아니다: 손대지 않는다. 한 번 붙은 뒤의 끊김만 `disconnected`다(#786 매핑).
         socketConnected: connStatusRef.current !== "disconnected",
-        heardAgoMs: heardAt === null ? null : Date.now() - heardAt,
+        heardAgoMs: heardAt === null ? null : now - heardAt,
+        kickedAgoMs: kickedAtRef.current === null ? null : now - kickedAtRef.current,
       };
     };
     let awaySince: number | null = documentForeground.isForeground() ? null : Date.now();
@@ -194,10 +202,10 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       const since = awaySince;
       awaySince = null;
       if (since === null) return;
-      if (verdictOnReturn({ awayMs: Date.now() - since, ...facts() }) === "reconnect") reconnectNow();
+      if (verdictOnReturn({ awayMs: Date.now() - since, ...facts() }) === "reconnect") kick();
     });
     const stopWake = subscribeLateWake((_kind, _at, lateMs) => {
-      if (verdictOnLateWake({ lateMs, ...facts() }) === "reconnect") reconnectNow();
+      if (verdictOnLateWake({ lateMs, ...facts() }) === "reconnect") kick();
     });
     return () => {
       stopForeground();

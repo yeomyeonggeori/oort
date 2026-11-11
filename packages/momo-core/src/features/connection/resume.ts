@@ -1,5 +1,5 @@
 import { LATE_WAKE_MS } from "../../lib/http";
-import { RESUME_AFTER_HIDDEN_MS, SOCKET_HEARD_RECENTLY_MS } from "./thresholds";
+import { RESUME_AFTER_HIDDEN_MS, RESUME_KICK_SETTLE_MS, SOCKET_HEARD_RECENTLY_MS } from "./thresholds";
 
 // =============================================================================
 // 돌아온 순간·깨어난 순간에 실시간 소켓을 다시 열지 정하는 판정 (#5660).
@@ -19,6 +19,11 @@ import { RESUME_AFTER_HIDDEN_MS, SOCKET_HEARD_RECENTLY_MS } from "./thresholds";
 
 export type ResumeVerdict = "keep" | "reconnect";
 
+/** 방금(`RESUME_KICK_SETTLE_MS` 안) 이 판정으로 다시 열었다: 그 시도가 붙는 중일 수 있으니 끊지 않는다. */
+function justKicked(kickedAgoMs: number | null | undefined): boolean {
+  return kickedAgoMs !== null && kickedAgoMs !== undefined && kickedAgoMs < RESUME_KICK_SETTLE_MS;
+}
+
 export interface ReturnFacts {
   /** 자리를 비운 시간(숨김 또는 초점 잃음이 시작된 뒤로). */
   readonly awayMs: number;
@@ -26,10 +31,13 @@ export interface ReturnFacts {
   readonly socketConnected: boolean;
   /** 소켓이 서버에게서 마지막으로 무언가 들은 지 얼마나 됐나. 들은 적이 없거나 모르면 null. */
   readonly heardAgoMs: number | null;
+  /** 이 판정(돌아옴·깨어남)으로 마지막에 다시 연 지 얼마나 됐나. 연 적이 없으면 null(생략 가능). */
+  readonly kickedAgoMs?: number | null;
 }
 
 /** 사람이 앞으로 돌아온 순간. */
 export function verdictOnReturn(facts: ReturnFacts): ResumeVerdict {
+  if (justKicked(facts.kickedAgoMs)) return "keep";
   // 다시 붙기를 미루며 기다리는 중이다(백오프는 20초까지 간다): 돌아온 사람을 그 남은 시간 동안 기다리게 하지 않는다.
   if (!facts.socketConnected) return "reconnect";
   // 짧은 자리 비움은 소켓이 스스로 알아챈다(#5220의 규칙 그대로).
@@ -44,6 +52,7 @@ export interface LateWakeFacts {
   readonly lateMs: number;
   readonly socketConnected: boolean;
   readonly heardAgoMs: number | null;
+  readonly kickedAgoMs?: number | null;
 }
 
 /**
@@ -53,6 +62,7 @@ export interface LateWakeFacts {
  */
 export function verdictOnLateWake(facts: LateWakeFacts): ResumeVerdict {
   if (!(facts.lateMs >= LATE_WAKE_MS)) return "keep";
+  if (justKicked(facts.kickedAgoMs)) return "keep";
   if (!facts.socketConnected) return "reconnect";
   if (facts.heardAgoMs !== null && facts.heardAgoMs < facts.lateMs) return "keep";
   return "reconnect";

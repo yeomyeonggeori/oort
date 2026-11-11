@@ -425,6 +425,18 @@ describe("⑥-2 돌아온 순간은 확인하고, 끊겼으면 기다리지 않�
     expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("깨어나며 연 직후 창이 앞으로 와도 한 번만 연다(막 붙던 시도를 끊지 않는다)", () => {
+    mountHealthy();
+    heard.at = Date.now();
+    blur();
+    vi.setSystemTime(Date.now() + 40_000); // 뒤에 둔 채 40초 잠들었다
+    advance(5_000); // 깬 뒤 첫 시계: 늦게 깸 → 연다
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    setStatus("disconnected"); // 다시 붙는 중
+    focus(); // 사람이 곧바로 앞으로 가져왔다
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("타이머만 늦게 깼고 그 사이에도 서버의 말을 들었으면(숨은 탭의 묶인 타이머) 열지 않는다", () => {
     mountHealthy();
     vi.setSystemTime(Date.now() + 20_000);

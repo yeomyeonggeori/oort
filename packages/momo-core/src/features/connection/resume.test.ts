@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LATE_WAKE_MS } from "../../lib/http";
 import { verdictOnLateWake, verdictOnReturn } from "./resume";
-import { RESUME_AFTER_HIDDEN_MS, SOCKET_HEARD_RECENTLY_MS } from "./thresholds";
+import { RESUME_AFTER_HIDDEN_MS, RESUME_KICK_SETTLE_MS, SOCKET_HEARD_RECENTLY_MS } from "./thresholds";
 
 // #5660: 돌아온 순간·깨어난 순간에 소켓을 다시 열지. 끊긴(기다리는) 소켓은 기다리지 않고, 살아 있는 소켓은 흔들지 않는다.
 
@@ -52,5 +52,21 @@ describe("시계가 늦게 깬 순간", () => {
 
   it("다시 붙기를 기다리는 중이었다면 깬 순간 지금 다시 연다", () => {
     expect(verdictOnLateWake({ lateMs: 15_000, socketConnected: false, heardAgoMs: 1_000 })).toBe("reconnect");
+  });
+});
+
+describe("방금 다시 열었으면 그 시도를 끊지 않는다", () => {
+  it("깨어난 순간 연 뒤 5초 안에 창이 돌아와도 다시 열지 않는다(소켓은 아직 붙는 중)", () => {
+    expect(
+      verdictOnReturn({ awayMs: 60_000, socketConnected: false, heardAgoMs: 60_000, kickedAgoMs: RESUME_KICK_SETTLE_MS - 1 })
+    ).toBe("keep");
+    expect(verdictOnLateWake({ lateMs: 30_000, socketConnected: false, heardAgoMs: null, kickedAgoMs: 100 })).toBe("keep");
+  });
+
+  it("5초가 지나도 붙지 않았으면 다시 연다", () => {
+    expect(
+      verdictOnReturn({ awayMs: 60_000, socketConnected: false, heardAgoMs: 60_000, kickedAgoMs: RESUME_KICK_SETTLE_MS })
+    ).toBe("reconnect");
+    expect(verdictOnLateWake({ lateMs: 30_000, socketConnected: false, heardAgoMs: null, kickedAgoMs: null })).toBe("reconnect");
   });
 });
