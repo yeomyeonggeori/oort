@@ -1,7 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import type { AgentRunProgress } from "@momo/core/lib/api";
+import { uuidEq } from "@momo/core/lib/api";
 import { needsMe, type NeedsMe } from "@momo/core/features/inbox/needsMe";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { runBundleCanDecide, runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
+import { runProgressSnapshot, subscribeRunProgress } from "@/features/agents/agentRunProgressStore";
 import {
   useLocalPaneAttention,
   type PaneAttentionEntry,
@@ -21,6 +25,8 @@ import { useMentionCount, useNeedsAction } from "./useInbox";
 export interface DecidableApproval {
   approvalId: string;
   runId: string | null;
+  /** 그 원장 행 그대로(인박스가 그리는 행). 「작업」의 결과 칸이 내용과 결정 컨트롤을 이 행에서 읽는다(#5640). */
+  item: FeedItem;
 }
 
 /**
@@ -32,18 +38,48 @@ export function decidableApprovals(items: readonly FeedItem[]): DecidableApprova
   const out: DecidableApproval[] = [];
   for (const item of items) {
     const awaited = awaitedApprovalId(approvalRowControl(item, { offline: false }));
-    if (awaited !== null) out.push({ approvalId: awaited, runId: item.runId ?? null });
+    if (awaited !== null) out.push({ approvalId: awaited, runId: item.runId ?? null, item });
   }
   return out;
 }
 
-/** 내 결정을 기다리는 승인이 걸린 run의 id(소문자). 「작업」의 run 줄을 「응답 필요」로 올리는 재료다. */
-export function decidableApprovalRunIds(items: readonly FeedItem[]): ReadonlySet<string> {
-  const ids = new Set<string>();
+/** run 진행 한 줄을 찾는 길: 그 승인의 채널과 run id로. 없으면 모른다(`undefined`). */
+export type RunProgressLookup = (
+  channelId: string,
+  runId: string
+) => Pick<AgentRunProgress, "bundle"> | undefined;
+
+/**
+ * 「작업 · 내 작업」의 run 줄이 결정을 세우는 재료(#5640): run id(소문자) → 그 run의 내 결정 대기 승인 하나.
+ *
+ * 판정은 인박스·배지와 같은 하나다(`decidableApprovals`). 한 가지만 더 거둔다: 서버가 run 진행에서 **보는 사람에게 「못 한다」고 답한
+ * 승인**(`bundle.canDecide === false`, 서버가 결정 라우트의 역할·소유자 조건을 이 사람에게 물은 답)은 뺀다. 대화 카드가 같은 사실로 단추를
+ * 거두는 규칙(`runBundleCanDecide`, `AgentCard`)과 같다 — 그 결정자(`requiredRole`이 정한 사람)가 아니면 이 줄에 단추가 서지 않는다.
+ * `true`나 모름을 근거로 더하지는 않는다. 한 run에 대기 승인이 둘이면 원장 순서의 첫 승인이다.
+ */
+export function workDecisionsByRun(
+  items: readonly FeedItem[],
+  runFor: RunProgressLookup = () => undefined
+): ReadonlyMap<string, DecidableApproval> {
+  const byRun = new Map<string, DecidableApproval>();
   for (const approval of decidableApprovals(items)) {
-    if (approval.runId !== null) ids.add(approval.runId.toLowerCase());
+    if (approval.runId === null) continue;
+    const key = approval.runId.toLowerCase();
+    if (byRun.has(key)) continue;
+    if (runBundleCanDecide(runFor(approval.item.channelId, approval.runId), approval.approvalId) === false) {
+      continue;
+    }
+    byRun.set(key, approval);
   }
-  return ids;
+  return byRun;
+}
+
+/** 내 결정을 기다리는 승인이 걸린 run의 id(소문자). 「작업」의 run 줄을 「응답 필요」로 올리는 재료다. */
+export function decidableApprovalRunIds(
+  items: readonly FeedItem[],
+  runFor?: RunProgressLookup
+): ReadonlySet<string> {
+  return new Set(workDecisionsByRun(items, runFor).keys());
 }
 
 /**
@@ -96,13 +132,42 @@ export function useNeedsMe(): NeedsMe {
   );
 }
 
+/** 「작업」이 읽는 결정 재료: run → 결정 대기 승인, 그리고 원장이 한 번이라도 답했는지(모르는 동안 「기다려요」를 지어내지 않는다). */
+export interface WorkDecisions {
+  byRun: ReadonlyMap<string, DecidableApproval>;
+  /** 원장이 답했다(로딩·미제공·첫 실패가 아니다). 이때만 「원장에 없다」가 사실이다. */
+  ledgerKnown: boolean;
+  /**
+   * 그 run이 지금 묻는 승인의 카드 문장(서버가 쓴 것, run 진행 bundle의 `intent`). 모르면 null. `approvalId`를 주면 그 승인의 문장일
+   * 때만 준다(다른 승인의 문장을 이 승인의 내용으로 말하지 않는다).
+   */
+  intentFor: (channelId: string, runId: string, approvalId?: string) => string | null;
+}
+
 /**
  * 「작업 · 내 작업」의 run 줄 재료(#5640): 배지와 **같은 원장**(`useNeedsAction`, 같은 쿼리 열쇠라 두 번 읽지 않는다)을 같은 판정
- * (`decidableApprovals`)으로 읽는다. 승인 원장이 없는 서버에서는 빈 집합이다(배지와 같은 규칙).
+ * (`workDecisionsByRun`)으로 읽는다. 승인 원장이 없는 서버에서는 빈 집합이다(배지와 같은 규칙).
  */
-export function useDecidableApprovalRunIds(): ReadonlySet<string> {
+export function useWorkDecisions(): WorkDecisions {
   const needsAction = useDecisionLedger();
-  return useMemo(() => decidableApprovalRunIds(needsAction.items), [needsAction.items]);
+  const progress = useSyncExternalStore(subscribeRunProgress, runProgressSnapshot, runProgressSnapshot);
+  // 원장이 한 번이라도 답했다(`dataUpdatedAt > 0`)고, 「이 서버에는 없다」가 아니다.
+  const ledgerKnown = isSurfaceProvided("approvals") && needsAction.updatedAtMs > 0 && !needsAction.absent;
+  return useMemo(() => {
+    const runFor = (channelId: string, runId: string) =>
+      progress.get(channelId.toLowerCase())?.find((run) => uuidEq(run.id, runId));
+    return {
+      byRun: workDecisionsByRun(needsAction.items, runFor),
+      ledgerKnown,
+      intentFor: (channelId: string, runId: string, approvalId?: string) => {
+        const run = runFor(channelId, runId);
+        const snapshot = run === undefined ? undefined : runBundleSnapshot(run);
+        if (snapshot === undefined) return null;
+        if (approvalId !== undefined && !uuidEq(snapshot.approvalId ?? "", approvalId)) return null;
+        return snapshot.intent ?? null;
+      },
+    };
+  }, [needsAction.items, progress, ledgerKnown]);
 }
 
 export function useNeedsMeCount(): number {

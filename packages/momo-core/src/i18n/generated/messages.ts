@@ -287,6 +287,10 @@ export const messageKeys = [
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
+  "desktop.workJobs.openToAnswer",
+  "desktop.workJobs.reportedTitle",
+  "desktop.workJobs.tagApproval",
+  "desktop.workJobs.tagPermission",
   "desktop.workPermission.allowInApp",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
@@ -1672,6 +1676,12 @@ export const argumentSpecs = {
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
+  "desktop.workJobs.openToAnswer": {},
+  "desktop.workJobs.reportedTitle": {
+    "summary": "string"
+  },
+  "desktop.workJobs.tagApproval": {},
+  "desktop.workJobs.tagPermission": {},
   "desktop.workPermission.allowInApp": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
@@ -3312,6 +3322,10 @@ export interface MessageArgs {
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
+  "desktop.workJobs.openToAnswer": Record<string, never>;
+  "desktop.workJobs.reportedTitle": { summary: string };
+  "desktop.workJobs.tagApproval": Record<string, never>;
+  "desktop.workJobs.tagPermission": Record<string, never>;
   "desktop.workPermission.allowInApp": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;

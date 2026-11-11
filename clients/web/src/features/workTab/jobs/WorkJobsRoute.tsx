@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -14,6 +13,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import type { SharedWorkSession } from "@momo/core/lib/api";
 import { uuidEq } from "@momo/core/lib/api";
 import { isRealtimeConnected } from "@momo/core/lib/realtimeEvents";
+import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import { approvalWaitingLine } from "@momo/core/features/timeline/requestBundle";
 import {
   NEEDS_ME_SECTION,
   WORK_JOBS_COPY,
@@ -24,9 +25,12 @@ import {
   requesterToAgent,
   rowNeedsMe,
   searchWithFilter,
+  workJobResultHasControls,
+  workJobResultKind,
   workJobRow,
   workJobSections,
   type WorkFilter,
+  type WorkJobResultKind,
   type WorkJobRow,
 } from "@momo/core/features/workbench/workJobs";
 import { TEAM_BOARD_COPY, isRunItem } from "@momo/core/features/workbench/teamBoard";
@@ -40,7 +44,9 @@ import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { useDecidableApprovalRunIds } from "@/features/inbox/useNeedsMe";
+import { decisionNote } from "@/features/inbox/approvalsPanel";
+import { useInvalidateApprovals } from "@/features/inbox/useInbox";
+import { useWorkDecisions } from "@/features/inbox/useNeedsMe";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { TeamBoardDrawer } from "@/features/workTab/teamBoard/TeamBoardDrawer";
 import { StateChip } from "@/features/workTab/teamBoard/TeamBoardParts";
@@ -48,16 +54,24 @@ import { useTeamBoardItem, useTeamBoardRail } from "@/features/workTab/teamBoard
 import { workConsoleSessionPath } from "@/features/workConsole/model";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop } from "@/lib/tauri";
-import { ApprovalCardLink, JobPrLink, PermissionHint, ReportedTag } from "./WorkJobParts";
+import {
+  JobResultActions,
+  JobResultCell,
+  type JobApprovalFacts,
+} from "./WorkJobResult";
 import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWorkJobs";
 
 // Reading this as: 「작업」 한 화면(결과 중심 목록 + 서랍) for internal team users on web+Tauri,
 // density 7/10, motion 0/10.
 //
-// ADR-0202 D1·D2·D6 (U1 #3842). 줄 하나 = 맡긴 일 하나. 줄이 말하는 것은 결과다: 누가 어느
-// 에이전트에게 맡겼나, 상태, 결과(PR·에이전트 보고), 걸린 시간, 채널. 진행 스트림은 줄을 열면
-// 서랍(기존 `TeamBoardDrawer`)에서만 본다. 이 화면에는 승인 단추가 없다: 승인 대기 줄은 카드가
-// 있는 채널로 간다(D5). 남의 터미널·화면은 여기에 오지 않는다(D5).
+// ADR-0202 D1·D2·D6 (U1 #3842). 줄 하나 = 맡긴 일 하나. 열은 작업 · 결과 · 상태 · 작업 시간 · 요청 채널(owner 2026-11-11)이고,
+// 줄이 말하는 것은 결과다: 결과 칸 머리의 꼬리표가 승인 요청 · 권한 요청 · 에이전트 보고를 가른다(`WorkJobResult`). 진행 스트림은
+// 줄을 열면 서랍(기존 `TeamBoardDrawer`)에서만 본다. 승인 단추는 「내 작업」 「응답 필요」의 내 run 줄에, 그 승인의 결정자 본인에게만
+// 선다(ADR-0202 증보 2026-11-11: 인박스·대화 카드와 같은 결정 부품·같은 원장·같은 라우트). 그 밖의 승인 대기 줄은 카드가 있는 채널로
+// 간다. 「팀 전체」와 남의 줄에는 단추가 없다(D5 「대신 승인 없음」). 남의 터미널·화면은 여기에 오지 않는다(D5).
+//
+// 한 작업 = 한 덩어리(owner 2026-11-11): 줄마다 아래에 머리카락 선 하나를 두고, 딸린 컨트롤(승인·거부, 카드 링크, PR 링크)은 줄 아래
+// 따로 서지 않고 결과 열 안으로 내려앉는다.
 //
 // 필터는 주소가 정본이다(`?who=mine|team`, 옛 `?view=team`은 「팀 전체」). 주소가 말하지 않으면
 // 기기 기억, 그것도 없으면 「내 것」(D2).
@@ -67,9 +81,9 @@ import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWor
 //
 // 「응답 필요」 구간(#5640, ADR-0202 D1·D5, ADR-0188 D5): 「내 작업」 맨 위. 줄을 올리는 판정은 코어 `rowNeedsMe` 하나다 —
 // 내 맥 세션은 서버가 준 상태 `waiting`(#5639)만, 내가 맡긴 run은 인박스 배지와 같은 승인 원장·같은 판정
-// (`useDecidableApprovalRunIds`)만 읽는다. 화면이 세션마다 진행을 따로 읽어 짐작하지 않는다. 내 맥 세션 줄의 Enter·클릭은 서랍이
-// 아니라 승인 카드로 간다: 데스크탑은 그 세션의 A 칸(`agentPanePath`, 격자가 카드에 초점), 브라우저는 세션 화면(작업 콘솔)이고
-// 허락은 줄 아래 한 줄이 폰·데스크탑 앱으로 안내한다(브라우저에는 허락 카드가 없다, ADR-0146 D-4).
+// (`useWorkDecisions`)만 읽는다. 화면이 세션마다 진행을 따로 읽어 짐작하지 않는다. 내 맥 세션 줄의 Enter·클릭과 결과 칸의
+// 「열어서 답하기」는 서랍이 아니라 승인 카드로 간다: 데스크탑은 그 세션의 A 칸(`agentPanePath`, 격자가 카드에 초점), 브라우저는
+// 세션 화면(작업 콘솔)이고 허락은 결과 칸의 한 줄이 폰·데스크탑 앱으로 안내한다(브라우저에는 허락 카드가 없다, ADR-0146 D-4).
 //
 // 갱신: 그 세션의 권한 요청·결정(ACP `approval.*`)이 실시간으로 오면 다시 읽는다. 60초 박자는 실시간이 끊겼거나 듣지 못하는
 // 채널이 있을 때만이다. 줄이 구간 사이를 옮겨도 초점은 그 줄을 따라가고, 스크롤한 목록은 보던 줄이 제자리에 남는다(움직임 없음).
@@ -102,7 +116,20 @@ export function WorkJobsRoute() {
   const live = realtime !== null && isRealtimeConnected(connStatus);
   const list = useWorkJobsList(workspaceId, filter, live);
   useTeamBoardRail(workspaceId, list.items, { rereadOnApproval: true });
-  const approvalRunIds = useDecidableApprovalRunIds();
+  const decisions = useWorkDecisions();
+  const approvalRunIds = useMemo(() => new Set(decisions.byRun.keys()), [decisions.byRun]);
+  const invalidateApprovals = useInvalidateApprovals();
+  // 그 자리 결정의 결과 한 줄(받은함과 같은 문장, `decisionNote`). 결정이 닿으면 줄이 구간을 옮기므로 결과는 목록 위 상태 노드가 읽는다.
+  const [decisionText, setDecisionText] = useState("");
+  const onDecided = useCallback(
+    (outcome: DecisionOutcome) => {
+      setDecisionText(decisionNote(outcome).text);
+      // 받은함과 같이 원장을 다시 읽고(배지·「응답 필요」가 함께 바뀐다), 줄의 phase가 바뀌었으니 목록도 다시 읽는다.
+      invalidateApprovals();
+      void list.refetch();
+    },
+    [invalidateApprovals, list]
+  );
 
   const chooseFilter = useCallback(
     (next: WorkFilter) => {
@@ -402,6 +429,9 @@ export function WorkJobsRoute() {
             />
           ) : (
             <div className="flex flex-col px-2 pb-4" data-testid="work-jobs-table">
+              <p className="sr-only" role="status" data-testid="work-jobs-decision-note">
+                {decisionText}
+              </p>
               <div
                 aria-hidden
                 className="work-jobs-row border-b border-line px-3 py-2 text-timestamp font-semibold text-ink-muted"
@@ -428,19 +458,26 @@ export function WorkJobsRoute() {
                   <ul className="flex flex-col">
                     {section.rows.map((row) => {
                       const needsMe = section.key === NEEDS_ME_SECTION;
+                      const kind = workJobResultKind(row, needsMe);
                       // 내 맥 세션의 권한 요청: 줄이 곧 승인 카드로 가는 길이다(서랍이 아니다).
-                      const permission = needsMe && !isRunItem(row.item);
+                      const permission = kind === "permission";
+                      const openPermission = () =>
+                        navigate(desktop ? agentPanePath(row.id) : workConsoleSessionPath(row.id));
                       return (
                         <JobRow
                           key={row.id}
                           row={row}
                           needsMe={needsMe}
-                          permission={
-                            permission
-                              ? { inApp: desktop ? null : formatMessage("desktop.workPermission.allowInApp") }
-                              : null
-                          }
-                          approvalLink={row.awaitingApproval || (needsMe && isRunItem(row.item))}
+                          kind={kind}
+                          permission={permission}
+                          inApp={permission && !desktop ? formatMessage("desktop.workPermission.allowInApp") : null}
+                          approval={kind === "approval" ? approvalFacts(row, decisions, needsMe) : null}
+                          desktop={desktop}
+                          onOpenPermission={() => {
+                            setActiveId(row.id);
+                            openPermission();
+                          }}
+                          onDecided={onDecided}
                           selected={openId !== null && uuidEq(row.id, openId)}
                           tabStop={rovingId !== null && uuidEq(row.id, rovingId)}
                           rowRef={(el) => {
@@ -450,11 +487,8 @@ export function WorkJobsRoute() {
                           }}
                           onOpen={() => {
                             setActiveId(row.id);
-                            if (permission) {
-                              navigate(desktop ? agentPanePath(row.id) : workConsoleSessionPath(row.id));
-                            } else {
-                              setCard(row.id);
-                            }
+                            if (permission) openPermission();
+                            else setCard(row.id);
                           }}
                           onKeyDown={(e) => onRowKeyDown(e, row.id)}
                           onFocus={onRowFocus}
@@ -533,11 +567,39 @@ function visibleRowAnchors(list: HTMLElement | null): RowAnchor[] {
   return out;
 }
 
+/**
+ * 승인 요청 줄이 아는 사실을 모은다: 내가 결정할 승인, 서버가 쓴 카드 문장, 결정자가 아닐 때의 대기 줄.
+ *
+ * 결정(단추)은 **「응답 필요」에 선 줄에만** 준다 — 그 구간이 곧 「내 작업」 · 내가 맡긴 run · 인박스와 같은 판정으로 내가 결정할
+ * 승인이다(`rowNeedsMe`). 「팀 전체」와 남의 줄은 원장에 같은 승인이 있어도 단추가 없다(ADR-0202 D5 「대신 승인 없음」). 대기 줄은
+ * 원장이 답했고 그 승인이 원장의 내 결정 목록에 없을 때만 선다 — 원장이 오는 중이거나 없는 서버, 또는 내가 결정할 수 있는데 「팀
+ * 전체」라 단추만 없는 줄에서 「기다려요」를 지어내지 않는다.
+ */
+function approvalFacts(
+  row: WorkJobRow,
+  decisions: ReturnType<typeof useWorkDecisions>,
+  needsMe: boolean
+): JobApprovalFacts {
+  const runId = row.item.runId ?? row.id;
+  const mine = decisions.byRun.get(runId.toLowerCase()) ?? null;
+  return {
+    decision: needsMe ? mine : null,
+    item: mine?.item ?? null,
+    intent: decisions.intentFor(row.channelId, runId, mine?.approvalId),
+    waiting: mine === null && decisions.ledgerKnown ? approvalWaitingLine() : null,
+  };
+}
+
 function JobRow({
   row,
   needsMe,
+  kind,
   permission,
-  approvalLink,
+  inApp,
+  approval,
+  desktop,
+  onOpenPermission,
+  onDecided,
   selected,
   tabStop,
   rowRef,
@@ -548,12 +610,18 @@ function JobRow({
 }: {
   row: WorkJobRow;
   needsMe: boolean;
+  /** 결과 칸이 말하는 종류(코어 `workJobResultKind`). */
+  kind: WorkJobResultKind;
   /**
    * 내 맥 세션의 권한 요청 줄(「응답 필요」). 누르면 서랍 대신 승인 카드로 간다: 데스크탑은 그 세션의 A 칸, 브라우저는 세션 화면.
-   * `inApp`은 브라우저에서만 서는 안내(허락은 폰·데스크탑 앱에서)다.
    */
-  permission: { inApp: string | null } | null;
-  approvalLink: boolean;
+  permission: boolean;
+  /** 권한 요청 줄, 브라우저에서만 서는 안내(허락은 폰·데스크탑 앱에서). */
+  inApp: string | null;
+  approval: JobApprovalFacts | null;
+  desktop: boolean;
+  onOpenPermission: () => void;
+  onDecided: (outcome: DecisionOutcome) => void;
   selected: boolean;
   tabStop: boolean;
   rowRef: (element: HTMLButtonElement | null) => void;
@@ -563,18 +631,23 @@ function JobRow({
   onBlur: (event: FocusEvent<HTMLButtonElement>) => void;
 }) {
   const reported = reportedSummary(row.reported);
-  const result = <ResultCell row={row} reported={reported} />;
-  const hintId = useId();
+  const result = (
+    <JobResultCell row={row} kind={kind} reported={reported} approval={approval} inApp={inApp} />
+  );
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   return (
-    <li>
+    // 한 작업 = 한 덩어리: 줄 단추와 결과 열의 컨트롤이 한 `li` 안에 서고, 덩어리 사이는 머리카락 선 하나다(가장 조용한 구분).
+    <li className="border-b border-line last:border-b-0" data-testid="work-job">
       <button
-        ref={rowRef}
+        ref={(el) => {
+          buttonRef.current = el;
+          rowRef(el);
+        }}
         type="button"
         tabIndex={tabStop ? 0 : -1}
         aria-current={selected ? "true" : undefined}
         // 권한 요청 줄은 서랍을 열지 않고 다른 화면으로 간다: 펼침 상태를 말하지 않는다.
-        aria-expanded={permission === null ? selected : undefined}
-        aria-describedby={permission === null ? undefined : hintId}
+        aria-expanded={permission ? undefined : selected}
         onClick={onOpen}
         onKeyDown={onKeyDown}
         onFocus={(event) => onFocus(row.id, event.currentTarget)}
@@ -584,7 +657,8 @@ function JobRow({
         data-source={row.item.source}
         data-approval={row.awaitingApproval ? "" : undefined}
         data-needs-me={needsMe ? "" : undefined}
-        data-permission={permission === null ? undefined : ""}
+        data-permission={permission ? "" : undefined}
+        data-result-kind={kind}
         className={cn(
           "work-jobs-row w-full rounded-lg px-3 py-2 text-start text-body text-ink focus-visible:focus-ring",
           "active:bg-surface-pressed",
@@ -606,7 +680,7 @@ function JobRow({
           >
             {requesterToAgent(row)}
           </span>
-          <span data-narrow="" className="min-w-0 flex-col gap-1 text-timestamp text-ink-muted">
+          <span data-narrow="" className="min-w-0 flex-col gap-1 pt-1 text-timestamp text-ink-muted">
             {result}
             <span className="truncate">{row.channel}</span>
           </span>
@@ -624,46 +698,23 @@ function JobRow({
           {row.channel}
         </span>
       </button>
-      {(row.pr !== null || approvalLink || permission !== null) && (
-        <div className="mb-1 ms-3 flex flex-wrap items-center gap-2">
-          {permission !== null && <PermissionHint id={hintId} inApp={permission.inApp} />}
-          {approvalLink && <ApprovalCardLink channelId={row.channelId} channel={row.channel} />}
-          {row.pr !== null && <JobPrLink pr={row.pr} />}
+      {workJobResultHasControls(row, kind, desktop) && (
+        // 결과 열 안으로 내려앉는 컨트롤(단추 안에 단추를 둘 수 없어 형제로 둔다). 같은 열 격자라 넓을 때는 결과 열, 좁을 때는 첫 열에 선다.
+        <div className="work-jobs-row px-3 pb-2" data-testid="work-job-extras">
+          <span data-col="extra" className="min-w-0">
+            <JobResultActions
+              row={row}
+              kind={kind}
+              approval={approval}
+              desktop={desktop}
+              onOpenPermission={onOpenPermission}
+              onDecided={onDecided}
+              focusRow={() => buttonRef.current?.focus({ preventScroll: true })}
+            />
+          </span>
         </div>
       )}
     </li>
-  );
-}
-
-/**
- * 결과 칸: 에이전트 보고(꼬리표와 한 덩어리) → 아니면 서버가 본 PR 번호 → 아니면 도는 중 「아직 결과
- * 없음」, 끝났으면 「알린 결과 없음」. 에이전트 보고는 닫힌 낱말 셋(한 일·테스트·다음 할 일)이라
- * 길이가 정해져 있어, 자르지 않고 어절에서 접는다(좁으면 꼬리표 아래로 내려간다).
- */
-function ResultCell({ row, reported }: { row: WorkJobRow; reported: string | null }) {
-  if (reported !== null) {
-    return (
-      <span
-        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
-        data-testid="work-job-result"
-        title={`${WORK_JOBS_COPY.reportedTag}: ${reported}`}
-      >
-        <ReportedTag />
-        <span className="min-w-0 break-keep text-meta text-ink">{reported}</span>
-      </span>
-    );
-  }
-  if (row.pr !== null) {
-    return (
-      <span className="min-w-0 truncate text-meta text-ink" data-testid="work-job-result">
-        {row.pr.number}
-      </span>
-    );
-  }
-  return (
-    <span className="min-w-0 truncate text-meta text-ink-muted" data-testid="work-job-result">
-      {row.finished ? WORK_JOBS_COPY.noResultReported : WORK_JOBS_COPY.noResultYet}
-    </span>
   );
 }
 

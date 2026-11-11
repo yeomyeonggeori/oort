@@ -3990,9 +3990,11 @@
   container-type: inline-size;
 }
 
-/* 「작업」 한 화면의 줄. 맡긴 일 | 결과 | 상태 120 | 걸린 시간 104 | 채널 96. 목록 상자가 900보다
- * 좁으면(서랍이 열린 1440 창 포함) 결과·채널 열을 접고 그 내용은 첫 열 셋째 줄(`data-narrow`)로
- * 옮긴다. 560보다 좁으면(폰 폭 셸) 걸린 시간 열도 접는다: 서랍이 말한다. */
+/* 「작업」 한 화면의 줄. 작업 | 결과 | 상태 120 | 작업 시간 104 | 요청 채널 96. 목록 상자가 900보다
+ * 좁으면(서랍이 열린 1440 창 포함) 결과·요청 채널 열을 접고 그 내용은 첫 열 셋째 줄(`data-narrow`)로
+ * 옮긴다. 560보다 좁으면(폰 폭 셸) 작업 시간 열도 접는다: 서랍이 말한다.
+ * 결과 칸의 컨트롤(승인·거부, 카드·PR 링크, #5640)은 줄 단추 밖 같은 격자의 `extra` 칸에 서서, 넓을 때는 결과 열,
+ * 좁을 때는 첫 열 — 결과 글이 선 그 열 — 로 내려앉는다. */
 @utility work-jobs-row {
   display: grid;
   align-items: center;
@@ -4003,12 +4005,20 @@
     display: none;
   }
 
+  > [data-col="extra"] {
+    grid-column: 2;
+  }
+
   @container (width < 900px) {
     grid-template-columns: minmax(0, 1fr) 120px 104px;
 
     > [data-col="result"],
     > [data-col="channel"] {
       display: none;
+    }
+
+    > [data-col="extra"] {
+      grid-column: 1;
     }
 
     [data-narrow] {

@@ -2071,6 +2071,34 @@ export const catalog: MessageCatalog = {
       "value": "Working"
     }
   ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "Open to answer"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "Agent report: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "Permission request"
+    }
+  ],
   "desktop.workPermission.allowInApp": [
     {
       "type": 0,

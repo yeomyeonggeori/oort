@@ -68,7 +68,7 @@ export function ReportedFacts({ reported }: { reported: AgentReportedResult }) {
   );
 }
 
-/** 줄 아래의 PR 링크(줄 전체가 단추라 안에 둘 수 없어 형제로 둔다). */
+/** 결과 칸 아래층의 PR 링크(줄 전체가 단추라 안에 둘 수 없어 형제로 둔다). */
 export function JobPrLink({ pr }: { pr: { number: string; repo: string; href: string } }) {
   return (
     <a
@@ -94,8 +94,8 @@ export function JobPrLink({ pr }: { pr: { number: string; repo: string; href: st
 }
 
 /**
- * 승인 대기 줄의 길: 카드가 있는 채널로 간다. 「작업」 화면은 승인 단추를 따로 갖지 않는다
- * (ADR-0202 D1·D5). 결정은 그 카드에서, 그 권한자가 한다.
+ * 승인 대기 줄의 길: 카드가 있는 채널로 간다. 이 승인의 결정이 내 몫이 아닐 때(결정자가 아니거나 「팀 전체」·남의 줄) 결과 칸이
+ * 세우는 컨트롤은 이 링크 하나다(ADR-0202 D5, 증보 2026-11-11). 결정은 그 카드에서, 그 권한자가 한다.
  */
 export function ApprovalCardLink({ channelId, channel }: { channelId: string; channel: string }) {
   return (
@@ -109,28 +109,5 @@ export function ApprovalCardLink({ channelId, channel }: { channelId: string; ch
         {WORK_JOBS_COPY.approvalAction} · {channel}
       </span>
     </Link>
-  );
-}
-
-/**
- * 내 맥 세션의 권한 요청 줄 아래 한 줄(#5640). 줄 단추가 `aria-describedby`로 읽는다. 브라우저에서는 허락할 곳(폰·데스크탑 앱)을
- * 함께 말한다: 브라우저에는 허락 카드가 없다(ADR-0146 D-4). 글자는 코어 상수와 사전에서만 온다.
- */
-export function PermissionHint({ id, inApp }: { id: string; inApp: string | null }) {
-  return (
-    <span
-      id={id}
-      data-testid="work-job-permission-hint"
-      className="inline-flex min-h-6 min-w-0 max-w-full flex-wrap items-center gap-x-1 px-1 py-1 text-timestamp text-ink-muted break-keep"
-    >
-      <ShieldCheck aria-hidden className="size-3 shrink-0 text-warn" />
-      <span className="font-medium text-ink">{WORK_JOBS_COPY.permissionHint}</span>
-      {inApp !== null && (
-        <>
-          <span aria-hidden>·</span>
-          <span data-testid="work-job-permission-in-app">{inApp}</span>
-        </>
-      )}
-    </span>
   );
 }

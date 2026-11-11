@@ -76,11 +76,12 @@ export const WORK_JOBS_COPY = {
   listLabel: "맡긴 작업 목록",
   thisDevice: "이 기기",
   openTerminals: "터미널 열기",
-  colTask: "맡긴 일",
+  /** 열 이름(owner 2026-11-11): 「작업」 · 「결과」 · 「상태」 · 「작업 시간」 · 「요청 채널」. */
+  colTask: "작업",
   colState: "상태",
   colResult: "결과",
-  colDuration: "걸린 시간",
-  colChannel: "채널",
+  colDuration: "작업 시간",
+  colChannel: "요청 채널",
   noResultYet: "아직 결과 없음",
   /** 끝났는데 에이전트가 결과를 알리지 않았다(실패·멈춤 포함). 빈칸으로 두지 않는다. */
   noResultReported: "알린 결과 없음",
@@ -235,6 +236,34 @@ export function rowNeedsMe(row: WorkJobRow, facts: NeedsMeRowFacts): boolean {
     uuidEq(item.owner.memberId, facts.selfMemberId) &&
     item.state === "waiting"
   );
+}
+
+/**
+ * 결과 칸이 말하는 것의 종류(#5640 수리 1회차, owner 2026-11-11). 칸 머리의 꼬리표가 이 종류를 말한다: 승인 요청 · 권한 요청 ·
+ * 에이전트 보고, 그리고 꼬리표 없는 PR 번호·「결과 없음」.
+ */
+export type WorkJobResultKind = "approval" | "permission" | "reported" | "pr" | "none";
+
+/**
+ * 결과 칸의 종류 — 한 판정. 「응답 필요」에 선 줄은 그 구간에 올린 사실이 곧 종류다(내 맥 세션 → 권한 요청, 내가 맡긴 run → 승인 요청,
+ * `rowNeedsMe`). 그 밖의 줄은 서버 phase가 승인 대기인 run이면 승인 요청(결정은 내 몫이 아니다), 아니면 에이전트 보고 → PR → 없음이다.
+ * 끝난 줄은 승인을 묻지 않는다(끝난 run의 요청은 이미 닫혔다).
+ */
+export function workJobResultKind(row: WorkJobRow, needsMe: boolean): WorkJobResultKind {
+  if (needsMe) return isRunItem(row.item) ? "approval" : "permission";
+  if (!row.finished && row.awaitingApproval) return "approval";
+  if (reportedSummary(row.reported) !== null) return "reported";
+  if (row.pr !== null) return "pr";
+  return "none";
+}
+
+/**
+ * 결과 칸 아래층(줄 단추 밖의 컨트롤 — 승인·거부·열기·카드 링크, 「열어서 답하기」, PR 링크)이 서는가. 서는 것이 없으면 그 층 자체가 없어
+ * 줄 높이가 늘지 않는다. 「열어서 답하기」는 허락을 보낼 수 있는 데스크탑 앱에서만 선다(브라우저는 안내 한 줄뿐이다).
+ */
+export function workJobResultHasControls(row: WorkJobRow, kind: WorkJobResultKind, desktop: boolean): boolean {
+  if (row.pr !== null || kind === "approval") return true;
+  return kind === "permission" && desktop;
 }
 
 /** 「구민수 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
