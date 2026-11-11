@@ -120,7 +120,8 @@ function installLab() {
       const watch = rows[first + 2] ?? rows[rows.length - 1];
       const before = watch.getBoundingClientRect().top;
       for (const step of steps) {
-        if (!inFrame) await new Promise((done) => setTimeout(done, 0));
+        if (inFrame) await frames(1);
+        else await new Promise((done) => setTimeout(done, 0));
         // `+` 로 이은 동작은 프레임을 넘기지 않고 한 태스크에서 한다(스크롤과 줄 높이 변화가 한 프레임에 겹친다).
         for (const action of step.split("+")) {
           const [name, value] = action.split(":");
