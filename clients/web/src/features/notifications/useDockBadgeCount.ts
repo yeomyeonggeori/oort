@@ -4,10 +4,9 @@ import { useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { useNeedsMeCount } from "@/features/inbox/useNeedsMe";
 import { useChannels, useReadStates } from "@/features/workspace/useWorkspace";
 import { unreadFor } from "@momo/core/features/workspace/directory";
-import { pushAlikeDmUnread } from "@momo/core/features/notifications/model";
+import { dmUnreadForBadge } from "@momo/core/features/notifications/model";
 import { dockBadgeCount } from "./dockBadgeCount";
 import { useDesktopNotificationKinds } from "./preference";
-import { serverPauseActive } from "./serverPause";
 
 /** 주소가 가리키는 대화(`/c/:id`). 대화 화면이 아니면 null. */
 function routeChannelId(pathname: string): string | null {
@@ -19,8 +18,8 @@ function routeChannelId(pathname: string): string | null {
  * 보도록 이 훅 하나에서 계산한다. 수는 `useNeedsMeCount` 하나에서 오고(레일·인박스 배지와 같은 값), 여기서는
  * 「독 배지」 스위치와 DM 몫만 얹는다(`dockBadgeCount`).
  *
- * DM 몫(#5660, owner 11-11 「켜줘」): 폰이 울리는 DM의 안 읽은 수를 코어 `pushAlikeDmUnread`가 낸다. 서버 읽음 투영 그대로이고,
- * 폰 푸시와 같은 순서로 거른다: 알림 일시 중지(서버 값, `serverPause.ts`) → 채널 알림 끄기 → 지금 앞에서 보고 있는 대화.
+ * DM 몫(#5660, owner 11-11 「켜줘」): 안 읽은 DM의 수를 코어 `dmUnreadForBadge`가 낸다. 서버 읽음 투영 그대로이고, 다른 몫과 같이
+ * 채널 알림 끄기·알림 일시 중지와 무관하다(ADR-0124 D2·D4-A). 거르는 것은 지금 앞에서 보고 있는 대화와 멘션과의 겹침뿐이다.
  */
 export function useDockBadgeCount(): number {
   const { workspaceId } = useSession();
@@ -31,10 +30,9 @@ export function useDockBadgeCount(): number {
   const { pathname } = useLocation();
   const foreground = useDocumentForeground();
   const unreadDms = prefs.dockDms
-    ? pushAlikeDmUnread({
-        dms: groups.dms.map((dm) => ({ id: dm.id, muted: dm.muted === true })),
+    ? dmUnreadForBadge({
+        dms: groups.dms,
         readState: (id) => unreadFor(readStates.byChannel, id) ?? undefined,
-        paused: serverPauseActive(),
         viewingChannelId: foreground ? routeChannelId(pathname) : null,
       })
     : 0;

@@ -310,7 +310,7 @@ describe("DesktopNotificationGroup", () => {
       expect(box(`desktop-notification-kind-${id}`).getAttribute("aria-checked")).toBe("true");
     }
     expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("false");
-    // 폰이 울리는 DM은 메뉴 막대 점·독 배지를 켠다(owner 11-11). 배너(OS 알림 열)는 그대로 기본 끔이다.
+    // 안 읽은 DM은 메뉴 막대 점·독 배지를 켠다(owner 11-11). 배너(OS 알림 열)는 그대로 기본 끔이다.
     expect(box("desktop-notification-dock-dm").getAttribute("aria-checked")).toBe("true");
     expect(box("desktop-notification-dock-badge").getAttribute("aria-checked")).toBe("true");
     // 폰 푸시 열에는 입력이 없다(폰 설정은 폰 앱에서).

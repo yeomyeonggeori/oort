@@ -204,14 +204,14 @@ const lastStatus = () => hoisted.setTrayStatus.mock.lastCall?.[0] as TrayStatusW
 const pick = (payload: unknown) => act(() => hoisted.trayHandler?.(payload));
 
 describe("TrayStatus: 셸로 보내기 (#5193)", () => {
-  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본(폰이 울리는 DM 포함, #5660), DM 끔, 배지 끔", () => {
+  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본(안 읽은 DM 포함, #5660), DM 끔, 배지 끔", () => {
     act(() => setDesktopNotificationKind("dockDms", true, localStorage));
     mount();
     const both = () => [
       hoisted.setDockBadge.mock.lastCall?.[0],
       lastStatus().unread,
     ];
-    // 기본은 DM 몫을 더한다(4 + 5): 폰이 울리는 DM이면 메뉴 막대 점도 켜진다.
+    // 기본은 DM 몫을 더한다(4 + 5): 안 읽은 DM이 있으면 메뉴 막대 점도 켜진다.
     expect(both()).toEqual([9, 9]);
     hoisted.needsMe = 7;
     render();

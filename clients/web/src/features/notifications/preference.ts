@@ -20,7 +20,8 @@ export type DesktopNotifyKind =
 
 /**
  * Dock badge switches (#3339). The badge is the needs-me count (`useNeedsMeCount`, one source); these decide whether
- * it is drawn and whether the unread DMs the phone would ring for are added on top (core `pushAlikeDmUnread`). The menu-bar
+ * it is drawn and whether unread DMs are added on top (core `dmUnreadForBadge`; like every share, muting and the pause do not
+ * touch it, ADR-0124 D2·D4-A). The menu-bar
  * dot follows the same number (#5193).
  *
  * `dockDms` (#5660, owner 2026-11-11 「켜줘」) replaces `dockDm`: on by default. A new key on purpose: the old one was
@@ -64,7 +65,7 @@ export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   "work-mine-done": true,
   dm: false,
   dockBadge: true,
-  // 기본 켬(#5660, owner 11-11): 폰이 울리는 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`(기본 끔)은 읽지 않는다.
+  // 기본 켬(#5660, owner 11-11): 안 읽은 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`(기본 끔)은 읽지 않는다.
   dockDms: true,
 };
 

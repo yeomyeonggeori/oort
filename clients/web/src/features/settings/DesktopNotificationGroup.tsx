@@ -449,7 +449,7 @@ export function DesktopNotificationGroup() {
           </SettingsRow>
           <SettingsRow
             label="새 DM도 독 배지에 세기"
-            description="폰이 울리는 DM의 새 글을 독 배지와 메뉴 막대 표시에 더해요. 알림을 끈 대화는 세지 않아요."
+            description="DM의 새 글을 독 배지와 메뉴 막대 표시에 더해요."
             labelId={dockDmLabelId}
             descriptionId={dockDmDescId}
             keep

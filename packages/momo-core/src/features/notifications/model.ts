@@ -740,32 +740,30 @@ export function openTarget(
 // ---- 메뉴 막대 점·독 배지에 더하는 DM 몫 (#5660, owner 2026-11-11 「켜줘」) ------------------------------
 
 /**
- * 폰이 울리는 DM은 맥의 메뉴 막대 점·독 배지도 켠다. 「폰은 울렸는데 맥 표시는 없음」을 없애는 것이 목표라, 폰 푸시(`momo-push`
- * `judgment.rs`의 `dm` 갈래)와 이 파일의 배너 판정(`notifyDecision`)이 쓰는 순서를 그대로 쓴다: 알림 일시 중지(방해 금지) → 채널
- * 알림 끄기 → 지금 보고 있음. 내 글은 서버의 안 읽음에 들어가지 않는다(보내면 내 읽음 위치가 함께 오른다).
+ * 안 읽은 DM은 맥의 메뉴 막대 점·독 배지도 켠다(owner 11-11). 배지의 규칙은 다른 몫(승인·응답 필요 칸·멘션)과 같다: ADR-0124 D2·D4-A
+ * 「음소거·방해 금지는 푸시만 막고 배지·안 읽음은 그대로(돌아오면 확인)」. 그래서 채널 알림 끄기와 알림 일시 중지는 여기서 보지 않는다
+ * (한 표시 안에서 몫마다 규칙이 다르면 안 된다, planner 11-11). 거르는 것은 둘뿐이다:
+ *   - **지금 앞에서 보고 있는 대화**: 화면에 있는 글은 알릴 것이 아니다(배너 판정 `notifyDecision`의 `focused`와 같은 뜻).
+ *   - **멘션과 두 번 세지 않기**: DM 안에서 나를 멘션한 글은 이미 멘션 수(`mentionCount`, 「나에게 필요한 일」)로 셌다.
  *
  * **수는 서버의 읽음 투영 그대로다**(`read-state`의 `unreadCount`). 이 기기가 세지 않으므로 다른 기기에서 읽으면 다음 투영에서 함께 줄어든다.
- * DM 안에서 나를 멘션한 글은 이미 멘션 수(`mentionCount`, 「나에게 필요한 일」)로 셌다: 그 몫을 빼서 두 번 세지 않는다.
+ * 내 글은 서버의 안 읽음에 들어가지 않는다(보내면 내 읽음 위치가 함께 오른다).
  *
- * 따라가는 스레드의 답글은 여기 없다: 서버가 「따라가는 스레드의 안 읽은 답글」을 워크스페이스 단위로 주지 않는다(스레드마다 기록 페이지의
- * 요약에만 있다). 그 값이 생기면 같은 자리에 더한다.
+ * 따라가는 스레드의 답글은 여기 없다: 서버가 「따라가는 스레드의 안 읽은 답글」을 워크스페이스 단위로 주지 않는다(#5667). 그 값이 생기면
+ * 같은 자리에 같은 규칙으로 더한다.
  */
-export interface PushAlikeDmInput {
-  /** 내 대화 목록의 DM(1:1·그룹 DM). `muted` 는 서버의 채널 알림 끄기(`Channel.muted`). */
-  readonly dms: readonly { readonly id: string; readonly muted: boolean }[];
+export interface DmBadgeInput {
+  /** 내 대화 목록의 DM(1:1·그룹 DM). */
+  readonly dms: readonly { readonly id: string }[];
   /** 서버 읽음 투영의 그 채널 줄. 없으면(아직 못 읽음) 세지 않는다. */
   readonly readState: (channelId: string) => { readonly unreadCount: number; readonly mentionCount: number } | undefined;
-  /** 서버가 마지막으로 답한 알림 일시 중지(`serverPause.ts`와 같은 값). */
-  readonly paused: boolean;
   /** 앞에 있는 창이 지금 보여 주는 대화. 창이 뒤에 있거나 대화가 아니면 null. */
   readonly viewingChannelId: string | null;
 }
 
-export function pushAlikeDmUnread(input: PushAlikeDmInput): number {
-  if (input.paused) return 0;
+export function dmUnreadForBadge(input: DmBadgeInput): number {
   let total = 0;
   for (const dm of input.dms) {
-    if (dm.muted) continue;
     if (input.viewingChannelId !== null && uuidEq(input.viewingChannelId, dm.id)) continue;
     const row = input.readState(dm.id);
     if (row === undefined) continue;

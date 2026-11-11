@@ -70,7 +70,7 @@ function mount() {
 }
 
 describe("DockBadge (#3339)", () => {
-  it("독 배지는 useNeedsMeCount에 폰이 울리는 DM의 안 읽은 수를 더한 수를 그린다 (#5660)", () => {
+  it("독 배지는 useNeedsMeCount에 안 읽은 DM의 수를 더한 수를 그린다 (#5660)", () => {
     mount();
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 4 + DM 2 + 3
     hoisted.needsMe = 7;
@@ -95,19 +95,19 @@ describe("DockBadge (#3339)", () => {
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
   });
 
-  it("지금 앞에서 보고 있는 DM과 알림을 끈 DM은 세지 않는다 (#5660)", () => {
+  it("지금 앞에서 보고 있는 DM은 세지 않는다. 알림을 끈 DM은 센다 — 배지는 별개 원장이다 (#5660, ADR-0124 D2)", () => {
     hoisted.pathname = "/c/dm1";
     mount();
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7); // 4 + dm2 3
     hoisted.dm2Muted = true;
     act(() => root?.render(createElement(DockBadge)));
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7);
   });
 
-  it("알림 일시 중지는 「나에게 필요한 일」은 그대로 두고 DM 몫만 거둔다 — 폰도 울리지 않는다 (#4197, #5660)", () => {
+  it("알림 일시 중지는 독 배지를 건드리지 않는다 — DM 몫까지 배지는 별개 원장이다 (#4197, #5660, ADR-0124 D4-A)", () => {
     setServerPause(true);
     mount();
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
     act(() => setServerPause(false));
     act(() => root?.render(createElement(DockBadge)));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
