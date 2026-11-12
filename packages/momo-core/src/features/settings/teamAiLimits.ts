@@ -18,7 +18,7 @@
 //     천장까지 따진 실제 한도를 말한다.
 //   - **Hermes에 맡기기**(ADR-0201 증보 v4 P7·P8, 서버 #5369·#5374)는 방향이 반대다. `dailyDelegations`
 //     (1~200)가 없으면 「제한 없음」이 아니라 **기본 30**이고, 운영자 천장 `TEAM_AI_HERMES_DAILY_CAP`은
-//     **비어 있으면 닫힘**이다. 계산된 읽기는 같은 객체에 위임 칸을 더해 「오늘 Hermes에 맡긴 횟수 4/30」과
+//     **비어 있으면 천장 없음**(`0`이면 끔)이다. 계산된 읽기는 같은 객체에 위임 칸을 더해 「오늘 Hermes에 맡긴 횟수 4/30」과
 //     「지금은 쓸 수 없어요」의 닫힌 낱말을 준다(`TeamAiDelegationStatus`). 이 칸을 모르는 옛 서버도 나머지
 //     읽기는 그대로 되고, 위임 칸만 「모름 = 닫힘」으로 읽는다.
 //
@@ -83,7 +83,7 @@ export const DAILY_DELEGATIONS_DEFAULT = 30;
  *   tools_not_locked      G4: 운영자가 도구 잠금을 선언하지 않았다
  *   connection_mode       G4: 연결 모드(한 사람의 앱이 붙은 Hermes) 선언이 있다
  *   pin_unresolved        G5: 운영자 연결(env 링크·키)이 풀리지 않는다
- *   ceiling_unset         G6: 운영자 천장이 비었다(위임이 닫혀 있다)
+ *   ceiling_unset         G6: 운영자가 `0`으로 꺼 두었다(위임이 닫혀 있다)
  *   daily_cap             G6: 오늘 횟수를 다 썼다
  *
  * `unknown`은 **코어가 붙이는 낱말**이다: 서버가 위임 칸을 보내지 않았거나(옛 서버) 모양이 어긋났거나 모르는
@@ -115,9 +115,9 @@ export interface TeamAiDelegationStatus {
   limit: number | null;
   /** 실제로 걸리는 하루 횟수: min(관리자 값 또는 30, 운영자 천장). **0 = 닫힘**. 모르면 `null`. */
   effective: number | null;
-  /** 운영자 천장(양수). 없으면 `null` — 그때 `ceilingOff`가 참이다. */
+  /** 운영자 천장(양수). 없으면 `null` — 천장 없음(`ceilingOff` 거짓) 또는 끔(`ceilingOff` 참). */
   ceiling: number | null;
-  /** 운영자 천장이 비었다(미설정·빈 값·0): 위임이 닫혀 있다. 모를 때도 참(닫힌 쪽)이다. */
+  /** 운영자가 `0`으로 꺼 두었다: 위임이 닫혀 있다. 미설정은 천장 없음이라 거짓이다. 모를 때는 참(닫힌 쪽)이다. */
   ceilingOff: boolean;
   /** 오늘(UTC) 맡긴 횟수(`called` 이상, 끝난 것 포함). 모르면 `null`. */
   today: number | null;
@@ -267,8 +267,9 @@ function readDelegationStatus(
     effectiveCap === null ||
     (ceilingRaw !== null && ceilingCap === null) ||
     typeof ceilingOff !== "boolean" ||
-    ceilingOff !== (ceilingCap === null) ||
-    // 천장이 없으면(닫힘) 실제 횟수는 0이고, 천장이 있으면 1 이상이다(min(1~200 또는 30, 양수 천장))
+    // 끔이면 숫자가 없어야 한다. 숫자 없음 + 끔 아님은 「천장 없음」(새 서버)이고, 옛 서버의 「숫자 없음 = 끔」도 그대로 읽힌다
+    (ceilingOff && ceilingCap !== null) ||
+    // 끔이면 실제 횟수는 0이고, 아니면 1 이상이다(천장 없음: 1~200 또는 30, 양수 천장: min(그 값, 천장))
     ceilingOff !== (effectiveCap === 0) ||
     today === null ||
     typeof available !== "boolean" ||
