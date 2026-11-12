@@ -1,5 +1,6 @@
 import type { Message } from "../../lib/api";
 import type { CascadeFallbackFrame } from "../../lib/realtimeEvents";
+import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
 
 // =============================================================================
 // Provider cascade notices (ADR-0135 D1 / MOMO-627). Pure: no DOM, no fetch, no
@@ -176,8 +177,18 @@ const WORKER_TURN_RECORD_SOURCE = "agent_worker.final_text.v0";
  * One per run is also enforced below the client: the worker looks for an
  * existing `(run_id, author_member_id, type='text')` row and returns early if
  * it finds one, so the settled final-text row cannot be written twice.
+ *
+ * Both marks are ordinary props, so the record is also an AGENT's row (#5577,
+ * `serverResultAuthor.ts`): the gateway and the worker write it under the run's
+ * agent member, and a person's message carrying the same marks — or a row whose
+ * author the directory does not know — is the record of no run. `authorKind` is
+ * the author's member kind from the directory, never from the props.
  */
-export function turnRecordRunId(message: Message): string | null {
+export function turnRecordRunId(
+  message: Message,
+  authorKind?: AuthorKind | null
+): string | null {
+  if (!isAgentAuthored(authorKind)) return null;
   const props = message.props;
   if (!props) return null;
   const settled =

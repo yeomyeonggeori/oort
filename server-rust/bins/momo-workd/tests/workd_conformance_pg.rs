@@ -756,18 +756,39 @@ impl Workd {
         self.start_with(&[])
     }
 
-    /// `run` as the desktop app starts it (#2778): with the control socket.
+    /// `run` as the desktop app starts it (#2778): with the control socket,
+    /// and the run's control secret as the one stdin line (#5619).
     /// The test binary is unsigned, so the socket takes it as a peer only
     /// with `--dev-unsigned-peer` (fences 1–2 still hold).
-    fn start_with_socket(&mut self, socket: &Path) -> u32 {
-        self.start_with(&[
-            std::ffi::OsStr::new("--control-socket"),
-            socket.as_os_str(),
-            std::ffi::OsStr::new("--dev-unsigned-peer"),
-        ])
+    async fn start_with_socket(&mut self, folder: &SocketFolder) -> u32 {
+        use tokio::io::AsyncWriteExt as _;
+        let socket = folder.sock();
+        let pid = self.start_with_stdin(
+            &[
+                std::ffi::OsStr::new("--control-socket"),
+                socket.as_os_str(),
+                std::ffi::OsStr::new("--dev-unsigned-peer"),
+            ],
+            std::process::Stdio::piped(),
+        );
+        let mut stdin = self
+            .child
+            .as_mut()
+            .and_then(|child| child.stdin.take())
+            .expect("piped stdin");
+        stdin
+            .write_all(format!("{}\n", folder.1).as_bytes())
+            .await
+            .unwrap();
+        drop(stdin);
+        pid
     }
 
     fn start_with(&mut self, extra: &[&std::ffi::OsStr]) -> u32 {
+        self.start_with_stdin(extra, std::process::Stdio::inherit())
+    }
+
+    fn start_with_stdin(&mut self, extra: &[&std::ffi::OsStr], stdin: std::process::Stdio) -> u32 {
         // Appended, so a restart keeps the earlier log lines.
         let log = std::fs::OpenOptions::new()
             .create(true)
@@ -784,6 +805,7 @@ impl Workd {
             // #2630 F1: fake credentials in the host's own environment; no
             // agent and no command an agent runs may see them.
             .envs(PLANTED_ENV)
+            .stdin(stdin)
             .stdout(std::process::Stdio::null())
             .stderr(log)
             .kill_on_drop(true)
@@ -2675,8 +2697,9 @@ async fn wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end() {
 // ---------------------------------------------------------------------------
 
 /// A private 0700 folder under /tmp for the control socket (`sun_path` is 104
-/// bytes; the Workd folder under `$TMPDIR` is too long on macOS).
-struct SocketFolder(PathBuf);
+/// bytes; the Workd folder under `$TMPDIR` is too long on macOS), and the
+/// control secret the test, standing in for the app, hands each run (#5619).
+struct SocketFolder(PathBuf, String);
 
 impl SocketFolder {
     fn new() -> Self {
@@ -2686,7 +2709,8 @@ impl SocketFolder {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        Self(dir)
+        let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        Self(dir, secret)
     }
 
     fn sock(&self) -> PathBuf {
@@ -2700,10 +2724,13 @@ impl Drop for SocketFolder {
     }
 }
 
-/// One request on the control socket, as the desktop app sends it.
-async fn ask_socket(path: &Path, request: Value) -> Value {
+/// One request on the control socket, as the desktop app sends it: with the
+/// run's secret (#5619).
+async fn ask_socket(folder: &SocketFolder, request: Value) -> Value {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    let mut stream = tokio::net::UnixStream::connect(path)
+    let mut request = request;
+    request["auth"] = Value::String(folder.1.clone());
+    let mut stream = tokio::net::UnixStream::connect(folder.sock())
         .await
         .expect("connect the control socket");
     stream
@@ -2718,8 +2745,8 @@ async fn ask_socket(path: &Path, request: Value) -> Value {
     serde_json::from_str(out.trim()).expect("one JSON line")
 }
 
-async fn socket_signatures(path: &Path) -> Value {
-    ask_socket(path, json!({"op": "status"})).await["humanSignatures"].clone()
+async fn socket_signatures(folder: &SocketFolder) -> Value {
+    ask_socket(folder, json!({"op": "status"})).await["humanSignatures"].clone()
 }
 
 fn signal(workd: &Workd, signal: libc::c_int) {
@@ -2806,7 +2833,7 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
     let folder = SocketFolder::new();
     let socket = folder.sock();
-    workd.start_with_socket(&socket);
+    workd.start_with_socket(&folder).await;
     wait_until("the host to heartbeat", &workd, || async {
         host_row(&http, base, &token, &fixture, host).await["lastSeenAtMs"]
             .as_i64()
@@ -2816,7 +2843,7 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
 
     // ---- the server requires signatures, no root here: the half state -----
     let half = wait_until("the server's word on the socket", &workd, || async {
-        let status = socket_signatures(&socket).await;
+        let status = socket_signatures(&folder).await;
         (status["serverRequired"] == true).then_some(status)
     })
     .await;
@@ -2846,13 +2873,13 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     let body: Value = response.json().await.unwrap();
     let root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
     let pinned = ask_socket(
-        &socket,
+        &folder,
         json!({"op": "pin_root", "keyId": root_id, "alg": "p256", "publicKey": root.public_b64}),
     )
     .await;
     assert_eq!(pinned, json!({"ok": true, "pinned": true}));
     let latched = wait_until("the host to latch R2", &workd, || async {
-        let status = socket_signatures(&socket).await;
+        let status = socket_signatures(&folder).await;
         (status["required"] == true).then_some(status)
     })
     .await;
@@ -3002,7 +3029,7 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     let address = server.address;
     let _server_off = start_server_at(app_pool.clone(), flag(false), address).await;
     let off = wait_until("the server's `false` on the socket", &workd, || async {
-        let status = socket_signatures(&socket).await;
+        let status = socket_signatures(&folder).await;
         (status["serverRequired"] == false).then_some(status)
     })
     .await;
@@ -3028,10 +3055,10 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     // ---- a host restart: the latch is read back; the server's own ----------
     // unsigned resume (legal on the server with the flag off) is refused.
     assert_eq!(workd.stop().await, Some(0));
-    workd.start_with_socket(&socket);
+    workd.start_with_socket(&folder).await;
     let restarted = wait_until("the restarted host's status", &workd, || async {
         match tokio::net::UnixStream::connect(&socket).await {
-            Ok(_) => Some(socket_signatures(&socket).await),
+            Ok(_) => Some(socket_signatures(&folder).await),
             Err(_) => None,
         }
     })
@@ -3076,9 +3103,9 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
     }
 
     // ---- only the local reset lowers it --------------------------------------
-    let reset = ask_socket(&socket, json!({"op": "reset_signature_requirement"})).await;
+    let reset = ask_socket(&folder, json!({"op": "reset_signature_requirement"})).await;
     assert_eq!(reset, json!({"ok": true, "required": false}));
-    let lowered = socket_signatures(&socket).await;
+    let lowered = socket_signatures(&folder).await;
     assert_eq!(lowered["required"], false, "{lowered}");
     assert_eq!(lowered["serverRequired"], false, "{lowered}");
     let (session_after, spawn_after) = accepted_resume(

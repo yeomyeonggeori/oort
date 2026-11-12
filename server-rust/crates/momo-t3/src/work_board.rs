@@ -43,6 +43,31 @@
 //! not read. `who_mine` narrows the page to rows the viewer asked for (runs) or
 //! owns (sessions), inside the same visibility.
 //!
+//! ## The owner's own session waiting on an answer (ADR-0202 D4, #5639)
+//!
+//! With `include_jobs`, a Mac session (`origin = 'host'`) **the viewer owns**
+//! that has a permission request still `pending` and not yet past its
+//! `expires_at` (ADR-0188 D5's `work_permission_request`, read through its
+//! pending index) answers `state = "waiting"` — the word shared sessions
+//! already use — instead of `running`. Only a **running** session waits: the
+//! decision route closes a request whose session is not running, so an idle,
+//! ended or orphaned session keeps its ledger word.
+//!
+//! 「응답 필요」 means **I can answer it**, so the flag asks exactly who the
+//! decision route (`momo-server` `routes::work_permissions::decide_in_tx`,
+//! ADR-0188 D3: 결정자 = 세션 소유자 = host 소유자) accepts: the viewer owns the
+//! session **and** owns the session's live host — the predicate of
+//! `work_control::active_host_owner_in_tx` (same workspace, same id,
+//! `revoked_at IS NULL`). A session on a host someone else registered (a shared
+//! host) or on a revoked host never waits, for anyone. Every other member reads
+//! the ledger word as before. `work_board_conformance_pg` b23 locks the board's
+//! set of waiting readers to the decision route's set of accepted deciders.
+//! The next read after the request is
+//! decided, expires or is cancelled is the ledger word again. Nothing of the
+//! request (tool, title, options, preview) is read, and the ledger `status` is
+//! untouched. Without `include_jobs` the flag is not evaluated, so the shipped
+//! responses are unchanged.
+//!
 //! There is no workspace-wide view (Q4): a member of a different channel gets
 //! nothing, not a 403. The list and the single read share this one query, so
 //! "not a member", "not shared", "no such session" and "another tenant's id" are
@@ -51,7 +76,9 @@
 //! ## What is not selected, on purpose
 //!
 //! No terminal text, input, control or attach column, no commit title, no file
-//! name, no path, no host id, no PTY/display endpoint. A host session has no S1
+//! name, no path, no host id, no PTY/display endpoint. (The session's host id is
+//! *compared* once, inside the waiting flag's decider check, and never selected.)
+//! A host session has no S1
 //! payload, so its repo / branch / diff / PR fields are `None` and its stage list
 //! is empty; the field names are `momo-core`'s `ShareSummaryS1`.
 //!
@@ -196,7 +223,19 @@ WITH sess AS ( \
            AS activity_us, \
          'session'::text AS source, NULL::text AS run_status, NULL::uuid AS requester_id, \
          NULL::text AS requester_name, NULL::int AS step_count, NULL::int AS run_commits, \
-         NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id \
+         NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id, \
+         CASE WHEN $9::boolean AND ws.origin = 'host' AND ws.member_id = $2 \
+                   AND EXISTS (SELECT 1 FROM work_host h \
+                                WHERE h.workspace_id = ws.workspace_id \
+                                  AND h.id = ws.host_id \
+                                  AND h.revoked_at IS NULL \
+                                  AND h.owner_member_id = $2) \
+              THEN EXISTS (SELECT 1 FROM work_permission_request pr \
+                            WHERE pr.workspace_id = ws.workspace_id \
+                              AND pr.work_session_id = ws.id \
+                              AND pr.status = 'pending' \
+                              AND pr.expires_at > clock_timestamp()) \
+              ELSE false END AS awaiting_owner \
     FROM work_session ws \
     JOIN channel c \
       ON c.workspace_id = ws.workspace_id AND c.id = ws.channel_id AND c.archived_at IS NULL \
@@ -257,7 +296,7 @@ runs AS ( \
               ELSE 'mention' END AS job_trigger, \
          CASE WHEN $9::boolean AND jsonb_typeof(r.output->'artifacts') = 'object' \
               THEN r.output->'artifacts' END AS agent_report, \
-         rm.id AS result_message_id \
+         rm.id AS result_message_id, false AS awaiting_owner \
     FROM agent_run r \
     JOIN channel c \
       ON c.workspace_id = r.workspace_id AND c.id = r.channel_id AND c.archived_at IS NULL \
@@ -353,8 +392,18 @@ fn pr_number_of(url: &str) -> Option<i64> {
     tail.parse().ok()
 }
 
-fn state_of_host_session(status: &str, exit_code: Option<i32>) -> &'static str {
+/// A Mac session's board word. `awaiting_owner` (the owner's `include_jobs`
+/// read, a pending unexpired permission request — see the module docs) turns a
+/// **running** session into `waiting`. Every other status keeps its word: the
+/// decision route closes a request whose session is not running
+/// (`work_permissions::decide_in_tx`), so nobody can answer it.
+fn state_of_host_session(
+    status: &str,
+    exit_code: Option<i32>,
+    awaiting_owner: bool,
+) -> &'static str {
     match status {
+        "running" if awaiting_owner => "waiting",
         "running" => "running",
         "idle" => "idle",
         "ended" if exit_code == Some(0) => "done",
@@ -393,7 +442,11 @@ fn decode(row: &sqlx::postgres::PgRow) -> Result<BoardItem, T3Error> {
         )
     } else {
         let tool: String = row.try_get("tool")?;
-        (tool, state_of_host_session(&status, exit_code).to_string())
+        let awaiting_owner: bool = row.try_get("awaiting_owner")?;
+        (
+            tool,
+            state_of_host_session(&status, exit_code, awaiting_owner).to_string(),
+        )
     };
     let pr_url: Option<String> = row.try_get("pr_url")?;
     let run = if is_run {
@@ -575,11 +628,46 @@ mod tests {
 
     #[test]
     fn a_host_session_state_comes_from_the_ledger() {
-        assert_eq!(state_of_host_session("running", None), "running");
-        assert_eq!(state_of_host_session("idle", None), "idle");
-        assert_eq!(state_of_host_session("ended", Some(0)), "done");
-        assert_eq!(state_of_host_session("ended", Some(2)), "stopped");
-        assert_eq!(state_of_host_session("orphaned", None), "stopped");
+        assert_eq!(state_of_host_session("running", None, false), "running");
+        assert_eq!(state_of_host_session("idle", None, false), "idle");
+        assert_eq!(state_of_host_session("ended", Some(0), false), "done");
+        assert_eq!(state_of_host_session("ended", Some(2), false), "stopped");
+        assert_eq!(state_of_host_session("orphaned", None, false), "stopped");
+    }
+
+    #[test]
+    fn only_a_running_session_waits_for_its_owner() {
+        assert_eq!(state_of_host_session("running", None, true), "waiting");
+        // The decision route closes a request on a session that is not running,
+        // so an idle one is not 「응답 필요」 even if a stray row is pending.
+        assert_eq!(state_of_host_session("idle", None, true), "idle");
+        // A session that is over keeps its word even if a stray row is pending.
+        assert_eq!(state_of_host_session("ended", Some(0), true), "done");
+        assert_eq!(state_of_host_session("ended", Some(2), true), "stopped");
+        assert_eq!(state_of_host_session("orphaned", None, true), "stopped");
+    }
+
+    #[test]
+    fn the_waiting_flag_reads_the_pending_index_and_nothing_of_the_request() {
+        let lowered = SELECT.to_lowercase();
+        let start = lowered
+            .find("from work_permission_request")
+            .expect("the waiting flag reads the permission ledger");
+        let probe = &lowered[start..start + lowered[start..].find(") else").unwrap()];
+        // The pending index is `(workspace_id, work_session_id) WHERE status = 'pending'`.
+        for needed in [
+            "pr.workspace_id = ws.workspace_id",
+            "pr.work_session_id = ws.id",
+            "pr.status = 'pending'",
+            "pr.expires_at > clock_timestamp()",
+        ] {
+            assert!(probe.contains(needed), "{needed}");
+        }
+        // Existence only: no column of the request is selected.
+        assert!(lowered.contains("then exists (select 1 from work_permission_request pr"));
+        for column in ["options", "preview", "decided", "request_event_id"] {
+            assert!(!lowered.contains(column), "{column}");
+        }
     }
 
     #[test]
@@ -613,9 +701,38 @@ mod tests {
         assert_eq!(pr_number_of("https://github.com/acme/app"), None);
     }
 
+    /// #5639: the waiting flag's decider check — `active_host_owner_in_tx`'s
+    /// predicate (ADR-0188 D3). The one place the session's host id appears.
+    const DECIDER_HOST_CHECK: &str = "exists (select 1 from work_host h \
+         where h.workspace_id = ws.workspace_id \
+         and h.id = ws.host_id \
+         and h.revoked_at is null \
+         and h.owner_member_id = $2)";
+
+    #[test]
+    fn the_host_id_is_only_compared_in_the_decider_check_never_selected() {
+        let lowered = SELECT.to_lowercase();
+        // The check is a condition of the waiting flag's CASE (its select list
+        // is `1`), so it can only ever answer the boolean `awaiting_owner`.
+        assert!(
+            lowered.contains(&format!(
+                "case when $9::boolean and ws.origin = 'host' and ws.member_id = $2 \
+                 and {DECIDER_HOST_CHECK} then exists (select 1 from work_permission_request pr"
+            )),
+            "the decider check sits in the waiting flag's condition"
+        );
+        assert_eq!(lowered.matches(DECIDER_HOST_CHECK).count(), 1);
+        // Nothing else of the host: no second read of work_host, no other
+        // mention of a host id anywhere in the statement.
+        assert_eq!(lowered.matches("work_host").count(), 1, "work_host once");
+        assert_eq!(lowered.matches("host_id").count(), 1, "host_id once");
+    }
+
     #[test]
     fn the_query_selects_no_terminal_control_or_commit_column() {
-        let lowered = SELECT.to_lowercase();
+        // The decider check compares the host id (see the test above); the rest
+        // of the statement must not name any of these, host_id included.
+        let lowered = SELECT.to_lowercase().replacen(DECIDER_HOST_CHECK, "", 1);
         for forbidden in [
             "pty_id",
             "attach_endpoint",

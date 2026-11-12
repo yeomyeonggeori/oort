@@ -947,6 +947,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/read",
             put(routes::thread_follow::mark_read),
         )
+        // ADR-0124 증보 5 (#5689) — 「모두 읽음」 for the threads the caller follows: the same
+        // position statement as the route above, for every followed thread with an unread reply.
+        // One request moves up to 100 positions, so it carries a per-member budget.
+        .route(
+            "/v1/workspaces/{ws}/threads/read-all",
+            post(routes::thread_follow::read_all)
+                .route_layer(member_write(rate_limit::MemberWrite::ThreadReadAll)),
+        )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
         // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because

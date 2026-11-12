@@ -7403,6 +7403,12 @@ export const catalog: MessageCatalog = {
       "value": " 도움 · 검색"
     }
   ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
   "teamAi.delegation.reasonAmbiguous": [
     {
       "type": 0,
@@ -7412,7 +7418,7 @@ export const catalog: MessageCatalog = {
   "teamAi.delegation.reasonCeilingUnset": [
     {
       "type": 0,
-      "value": "서버 운영자가 아직 Hermes 맡기기를 열지 않았어요."
+      "value": "서버 운영자가 Hermes 맡기기를 꺼 두었어요."
     }
   ],
   "teamAi.delegation.reasonConnectionMode": [
@@ -7461,6 +7467,20 @@ export const catalog: MessageCatalog = {
       "value": "tokens"
     }
   ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "크레딧 토큰 약 "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": "(어림)"
+    }
+  ],
   "teamAi.delegation.spentHermes": [
     {
       "type": 1,
@@ -7500,10 +7520,106 @@ export const catalog: MessageCatalog = {
       "value": "이 답이 쓴 양"
     }
   ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
+    }
+  ],
   "teamAi.delegation.unavailable": [
     {
       "type": 0,
       "value": "지금은 쓸 수 없어요."
+    }
+  ],
+  "teamAi.delegation.waitImage": [
+    {
+      "type": 0,
+      "value": "그림은 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분까지 걸릴 수 있어요"
+    }
+  ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "그림 최대 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "teamAi.delegation.waitSearch": [
+    {
+      "type": 0,
+      "value": "검색은 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분까지 걸릴 수 있어요"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "검색 최대 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
     }
   ],
   "teamAi.helper.aliasesLine": [

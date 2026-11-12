@@ -172,6 +172,11 @@ ignoreUntil = 2027-01-22
 reason = "fast-xml-parser 4.5.7 (XMLBuilder comment/CDATA delimiter injection) via @react-native-community/cli-config-android/-platform-apple 20.1.0 (RN CLI, build machine only, handles the project's own files). Fix = RN CLI 20.2.0 (toolchain upgrade); not in the Metro release bundle."
 
 [[IgnoredVulns]]
+id = "GHSA-474x-hrwr-fgx4"
+ignoreUntil = 2027-01-22
+reason = "fast-xml-parser 4.5.7 (low, CVE-2026-126066: quadratic CPU in readStopNodeData() only with the non-default stopNodes option) via @react-native-community/cli-config-android/-platform-apple 20.1.0 (RN CLI, build machine only). Not reachable: the only three XMLParser call sites (getMainActivity.js, getInfo.js, getBuildConfigurationFromXcScheme.js) pass { ignoreAttributes: false } without stopNodes and parse the project's own AndroidManifest.xml / xcworkspacedata / .xcscheme. No 4.x fix (legacy tag = 4.5.7); fixed in 5.12.0 (major), which RN CLI 20.2.0 (fast-xml-parser ^5.3.6) brings. Same follow-up and expiry as GHSA-gh4j-gqv2-49f6 (RN CLI 20.2 toolchain upgrade, tracking issue: #5674 by planner)."
+
+[[IgnoredVulns]]
 id = "GHSA-5p2g-fcmc-qvqq"
 ignoreUntil = 2027-01-22
 reason = "image-size 1.2.1 (JXL/HEIF parser infinite loop = DoS) via metro 0.84.4 (the bundler reads the app's own image assets at build time). Fix is image-size 2.0.3 (major) so it needs a Metro release; not in the Metro release bundle."

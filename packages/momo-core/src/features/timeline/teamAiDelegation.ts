@@ -15,6 +15,7 @@
 // =============================================================================
 
 import type { Message } from "../../lib/api";
+import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
 
 /** 서버가 답에 다는 칩 칸의 키(`momo_agent::team_ai_task::DELEGATED_PROPS_KEY`). */
 export const TEAM_AI_DELEGATED_PROPS_KEY = "team_ai_delegated";
@@ -49,8 +50,15 @@ function record(value: unknown): Record<string, unknown> | null {
 /**
  * 답 `props`에서 「Hermes 도움」 칩을 읽는다. 칩이 없으면 빈 배열이다(옛 서버, 맡기지 않은 답, 위임이 실패한 답,
  * 도우미가 아닌 메시지). 같은 종류·같은 Hermes는 한 번만, 서버가 쓴 순서대로, 많아야 `MAX_TEAM_AI_DELEGATIONS`개.
+ *
+ * `authorKind` 는 멤버 목록의 작성자 종류다. 칩은 **에이전트가 쓴 도우미 답에만** 선다(#5577,
+ * `serverResultAuthor.ts`): 모르면 빈 배열이다.
  */
-export function teamAiDelegationsOf(props: Record<string, unknown> | undefined): TeamAiDelegation[] {
+export function teamAiDelegationsOf(
+  props: Record<string, unknown> | undefined,
+  authorKind?: AuthorKind | null
+): TeamAiDelegation[] {
+  if (!isAgentAuthored(authorKind)) return [];
   if (!props || props["source"] !== "team_ai") return [];
   const raw = props[TEAM_AI_DELEGATED_PROPS_KEY];
   if (!Array.isArray(raw)) return [];
@@ -75,8 +83,9 @@ export function teamAiDelegationsOf(props: Record<string, unknown> | undefined):
 
 /** 행이 부르는 입구. 지워진 메시지에는 칩이 없다. */
 export function teamAiDelegationsFor(
-  message: Pick<Message, "props" | "state">
+  message: Pick<Message, "props" | "state">,
+  authorKind?: AuthorKind | null
 ): TeamAiDelegation[] {
   if (message.state === "deleted") return [];
-  return teamAiDelegationsOf(message.props);
+  return teamAiDelegationsOf(message.props, authorKind);
 }
