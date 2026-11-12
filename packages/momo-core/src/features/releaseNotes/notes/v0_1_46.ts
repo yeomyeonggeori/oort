@@ -58,7 +58,7 @@ import type { ReleaseNote } from "../model";
 //       en 「On desktop, adding or removing a reaction on the last message no longer nudges the chat.」
 //   · #5670 미착륙 → `conversationsLine3` 뺌(그러면 Line1·Line2도 뺀다. Line4가 남아 묶음은 그대로 선다).
 //       ko 「웹과 데스크탑의 스레드에서 위쪽 답글이 자라거나 줄어도 보던 답글이 제자리에 있고, 맨 아래에서는 새 답글을 따라가요.」
-//       en 「In web and desktop threads, the reply you read stays put as earlier ones change; at the bottom, new ones stay in view.」
+//       en 「In web and desktop threads, the reply you read stays put as replies above change; new ones stay in view at the bottom.」
 //   · #5735 미착륙 → `agentsLine2` 뺌(Line1이 남는다). 다른 글은 「작업 콘솔」이라는 화면 이름을 쓰지 않는다.
 //       ko 「웹과 데스크탑의 「작업 콘솔」은 「작업」 안의 세션 화면이 되었고, 「← 작업」으로 돌아가면 열었던 줄로 돌아와요.」
 //       en 「On web and desktop, the work console is now the session view inside Work, and “← Work” returns to the row you opened.」

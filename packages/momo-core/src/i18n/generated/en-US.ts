@@ -6711,7 +6711,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0146.conversationsLine3": [
     {
       "type": 0,
-      "value": "In web and desktop threads, the reply you read stays put as earlier ones change; at the bottom, new ones stay in view."
+      "value": "In web and desktop threads, the reply you read stays put as replies above change; new ones stay in view at the bottom."
     }
   ],
   "releaseNotes.v0146.conversationsLine4": [
@@ -6723,7 +6723,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0146.desktopLine1": [
     {
       "type": 0,
-      "value": "After updating, quit the desktop app with ⌘Q once and reopen it, so the part that runs work on your Mac updates too."
+      "value": "After updating, once no work runs on this Mac, quit the desktop app with ⌘Q and reopen it so every part of it updates."
     }
   ],
   "releaseNotes.v0146.desktopLine2": [
@@ -6741,7 +6741,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0146.needsReplyChanged": [
     {
       "type": 0,
-      "value": "On web and desktop, the top of My work in Work now has a section for work waiting on you. When an agent job you started needs your approval, you approve or reject it right in that row. When a session on your Mac asks for permission, its row says so, and in the desktop app “Open to answer” takes you straight to that session's approval card. That permission request also shows up as a desktop notification. The phone's work list puts the same rows first, and tapping your session row or a permission notification opens that session's screen directly. When Codex running in a desktop terminal pane waits for an answer, that pane now shows it needs you. Stopping one of your Mac sessions on web or desktop now ends the work on the Mac, as it already did on the phone. If work on your Mac stops because the connection dropped or it failed, or a permission request closes after 10 minutes, a line is added to that session and its owner is notified."
+      "value": "On web and desktop, the top of My work in Work now has a section for work waiting on you. When an agent job you started needs your approval, you approve or reject it right in that row, or press Open when the approval has to be decided on its card. When a session on your Mac asks for permission, its row says so, and in the desktop app “Open to answer” takes you straight to that session's approval card. That permission request also shows up as a desktop notification. The phone's work list puts the same rows first, and tapping your session row or a permission notification opens that session's screen directly. When Codex running in a desktop terminal pane waits for an answer, that pane now shows it needs you. Stopping one of your Mac sessions on web or desktop now ends the work on the Mac, as it already did on the phone. If work on your Mac stops because the connection dropped or it failed, or a permission request closes after 10 minutes, a line is added to that session and its owner is notified."
     }
   ],
   "releaseNotes.v0146.needsReplyTitle": [
