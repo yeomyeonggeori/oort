@@ -33,7 +33,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 import { markAgentWorking, resetAgentWorking } from "@/features/agents/agentWorkingSignal";
 import { signalFromProgress } from "@momo/core/features/agents/runPhase";
 import { ChannelMemberPanel } from "./ChannelContextControls";
-import { activeAgentRunsQueryKey, RAIL_REFETCH_GAP_MS } from "./useChannelMemberNow";
+import { activeAgentRunsQueryKey, RAIL_REFETCH_GAP_MS, SNAPSHOT_WAIT_MS } from "./useChannelMemberNow";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-000000000201";
@@ -376,6 +376,29 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     await settle();
     visibility.mockRestore();
     expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
+  });
+
+  it("첫 읽기가 늦으면 기다림 상한 뒤 아는 만큼으로 묶고, 늦게 온 답은 글만 바꾼다(묶음 이동 없음)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let answer: (value: unknown) => void = () => undefined;
+    api.fetchAllActiveAgentRuns.mockImplementation(
+      () => new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+    await mount();
+    await open();
+    // 기다리는 동안은 줄을 세우지 않는다(곧 다른 묶음으로 뛸 줄이다)
+    expect(document.querySelector('[data-testid="channel-member-item"]')).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_WAIT_MS + 50);
+    });
+    await settle();
+    expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
+    await act(async () => answer({ runs: defaultRuns() }));
+    await settle();
+    expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
   });
 
   it("레일 신호는 간격 안에서 한 번으로 모아 다시 읽는다", async () => {
