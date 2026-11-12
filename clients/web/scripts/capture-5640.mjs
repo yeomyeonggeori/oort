@@ -706,6 +706,21 @@ async function doublePressScene(browser, origin, viewport) {
   }
 }
 
+/** 결정 직후의 줄(영수증, 그 자리) 캡처: 어둡게 1280·390. 밝게는 `doublePressScene`이 찍는다. */
+async function heldShot(browser, origin, viewport) {
+  const { context, page, state } = await openContext(browser, origin, { scheme: "dark", viewport, server: { twoDeciders: true, decisionDelayMs: 100, roundTripMs: 100 } });
+  await twoDecidersReady(page);
+  const a = await approveCenter(page, runApproval.runId);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.click(a.x, a.y);
+  await page.waitForFunction(() => document.querySelector('[data-testid="work-job-approval-settled"]') !== null);
+  await sleep(400);
+  const held = await page.evaluate((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`) !== null, runApproval.runId);
+  check(`held-${viewport.width}-dark 결정한 줄이 영수증과 함께 그 자리`, held && state.decisions === 1, { held, decisions: state.decisions });
+  await shot(page, `5640-decided-held-${viewport.width}-dark`);
+  await context.close();
+}
+
 /** Enter 연타: A의 「승인」에 초점을 두고 Enter를 거듭 친다. 나간 결정 1건, 초점은 다음 줄의 단추가 아니다. */
 async function enterRepeatScene(browser, origin) {
   for (const roundTripMs of [40, 100, 300]) {
@@ -836,6 +851,8 @@ async function main() {
     if (ONLY === "" || ONLY === "h1" || ONLY === "double") {
       await doublePressScene(browser, preview.origin, { width: 1280, height: 800 });
       await doublePressScene(browser, preview.origin, { width: 390, height: 844 });
+      await heldShot(browser, preview.origin, { width: 1280, height: 800 });
+      await heldShot(browser, preview.origin, { width: 390, height: 844 });
     }
     if (ONLY === "" || ONLY === "h1") await enterRepeatScene(browser, preview.origin);
     if (ONLY === "" || ONLY === "h1" || ONLY === "shift") await shiftGuardScene(browser, preview.origin);
