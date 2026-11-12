@@ -78,8 +78,8 @@
 //! projection again" — like the inbox signals, it is never a number a client must fold in order:
 //!
 //! * **a new reply** — every follower of that thread except its author, who is still a live member of
-//!   the (non-archived) channel ([`signal_followers_of_reply_in_tx`], right after the automatic follow so
-//!   the people it just pulled in are included);
+//!   the (non-archived) channel ([`signal_followers_of_reply_in_tx`], after the automatic follow so the
+//!   people it just pulled in are included, and after the reply's own channel broadcast, in one batch);
 //! * **the reader read the thread** — the signal moved the position of a row they follow;
 //! * **follow / stop following** — the write changed the row's state.
 //!
@@ -91,7 +91,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use momo_db::DbError;
-use momo_outbox::{emit_outbox, OutboxKind};
+use momo_outbox::{emit_outbox, emit_outbox_batch, OutboxKind};
 use momo_wire::payload::BroadcastPayload;
 use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
@@ -622,18 +622,32 @@ pub(crate) async fn signal_followers_of_reply_in_tx(
     .bind(message.author_member_id)
     .fetch_all(&mut *conn)
     .await?;
+    // One frame per follower, all in one batch insert: the send transaction (which holds the channel's
+    // sequence row lock) pays two round trips here however many people follow the thread.
     let cause = format!("m:{}", upper(message.id));
-    for follower in followers {
-        emit_followed_unread_in_tx(
-            &mut *conn,
-            workspace_id,
-            follower,
-            message.channel_id,
-            root_id,
-            &cause,
-        )
-        .await?;
-    }
+    let timestamp_ms = Utc::now().timestamp_millis();
+    let frames: Vec<(Value, Option<Uuid>)> = followers
+        .into_iter()
+        .map(|follower| {
+            let payload = build_followed_unread_payload(
+                workspace_id,
+                follower,
+                message.channel_id,
+                root_id,
+                &cause,
+                timestamp_ms,
+            );
+            (payload, Some(follower))
+        })
+        .collect();
+    emit_outbox_batch(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &frames,
+    )
+    .await?;
     Ok(())
 }
 
