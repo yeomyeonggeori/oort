@@ -181,6 +181,7 @@ export function useMailbox(
               unresolved && item.channel.name !== null
                 ? `#${item.channel.name}`
                 : resolved,
+            place: context.placeFor(item.channel.id, item.channel),
             actor: context.actorFor(item.actorMemberId),
             nowMs,
             lastReadSeq: readStates.byChannel.get(item.channel.id.toLowerCase())
@@ -382,6 +383,7 @@ function useComposedMailbox(
       return dmEntry({
         channelId: channel.id,
         channelLabel: context.labelFor(channel.id),
+        place: context.placeFor(channel.id),
         readState: stateOf(channel.id),
         messages,
         selfMemberId: selfId,
@@ -395,12 +397,14 @@ function useComposedMailbox(
         context.actorFor(message.authorMemberId),
         context.labelFor(message.channelId),
         nowMs,
+        context.placeFor(message.channelId),
       ),
     );
     const threads = roots.map((root, index) =>
       threadEntry({
         root,
         channelLabel: context.labelFor(root.channelId),
+        place: context.placeFor(root.channelId),
         readState: stateOf(root.channelId),
         lastReply: replyResults.lastReplies[index],
         selfMemberId: selfId,
