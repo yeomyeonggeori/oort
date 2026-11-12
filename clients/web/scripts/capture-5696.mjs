@@ -196,7 +196,8 @@ function check(name, ok, detail = "") {
 const geometry = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll("[data-testid='mailbox-row']")].map((row) => {
-      // 목록 안의 위치(목록 맨 위 기준). 목록 칸이 스스로 스크롤해도(선택한 줄을 보이게) 줄의 자리는 이 값으로 잰다.
+      // 목록 안의 위치(목록 맨 위 기준). 목록 칸이 스크롤돼도 줄의 자리는 이 값으로 잰다 — 칸의 스크롤 자체는
+      // 아래 `scrollTops`가 따로 적는다(누르기 전 Playwright가 대상 줄을 보이게 굴리는 몫과 누른 뒤의 몫을 갈라서).
       const origin = row.closest("ul").getBoundingClientRect().top;
       const li = row.closest("li").getBoundingClientRect();
       const source = row.querySelector("[data-testid='mailbox-row-source']");
@@ -261,20 +262,28 @@ async function scene(browser, origin, opts) {
   // 읽음으로 바뀔 때 줄 이동 0: 안 읽은 DM 줄을 눌러 읽음이 되게 하고 모든 줄의 위치를 다시 잰다.
   // 좁은 화면은 누르면 목록이 상세로 바뀌므로, 넓은 화면에서만 잰다.
   let readShift = null;
+  let scrollTops = null;
   if (opts.name === "1440" || opts.name === "200pct") {
-    await page.locator("[data-testid='mailbox-row'][data-entry-key='inbox:00000000-0000-7000-8000-000000000902']").click();
+    const target = page.locator("[data-testid='mailbox-row'][data-entry-key='inbox:00000000-0000-7000-8000-000000000902']");
+    const paneScroll = () => page.evaluate(() => document.querySelector("[data-testid='inbox-list-pane']").scrollTop);
+    const atRest = await paneScroll();
+    await target.scrollIntoViewIfNeeded();
+    const beforeClick = await paneScroll();
+    await target.click();
     await page.waitForFunction(
       () => document.querySelector("[data-entry-key='inbox:00000000-0000-7000-8000-000000000902']")?.getAttribute("data-unread") === "false",
       null,
       { timeout: 10_000 }
     );
     await page.waitForTimeout(300);
+    scrollTops = { atRest, beforeClick, afterRead: await paneScroll() };
+    check(`${tag} 누른 뒤 목록 칸 스크롤이 그대로 (${JSON.stringify(scrollTops)})`, scrollTops.afterRead === scrollTops.beforeClick);
     const after = await geometry(page);
     readShift = Math.max(...rows.map((r, i) => Math.abs(after[i].top - r.top) + Math.abs(after[i].height - r.height)));
     check(`${tag} 읽음으로 바뀌어도 줄 이동 0 (최대 ${readShift.toFixed(2)}px)`, readShift <= 0.01);
     await list.screenshot({ path: resolve(OUT_DIR, `list-after-read-${tag}.png`) });
   }
-  report.push({ tag, rowHeight: heights[0], spread, readShift, overflowRows: rows.filter((r) => r.overflow).map((r) => r.source) });
+  report.push({ tag, rowHeight: heights[0], spread, readShift, scrollTops, overflowRows: rows.filter((r) => r.overflow).map((r) => r.source) });
   await context.close();
 }
 
