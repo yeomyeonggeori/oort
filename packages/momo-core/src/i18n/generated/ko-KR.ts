@@ -1955,6 +1955,36 @@ export const catalog: MessageCatalog = {
       "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
     }
   ],
+  "desktop.workSession.backAria": [
+    {
+      "type": 0,
+      "value": "작업으로 돌아가기"
+    }
+  ],
+  "desktop.workSession.backLabel": [
+    {
+      "type": 0,
+      "value": "작업"
+    }
+  ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "세션 목록"
+    }
+  ],
+  "desktop.workSession.listTitle": [
+    {
+      "type": 0,
+      "value": "최근 세션"
+    }
+  ],
+  "desktop.workSession.pageTitle": [
+    {
+      "type": 0,
+      "value": "세션"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

@@ -225,7 +225,7 @@ describe("④ offline/stale/liveness copy is distinct from active", () => {
   it("refuses to sell updatedAtMs as a liveness heartbeat", () => {
     expect(HOSTED_LIVENESS_NOTE).toContain("상태가 마지막으로 바뀐 때");
     expect(HOSTED_LIVENESS_NOTE).toContain("실시간");
-    expect(HOSTED_READONLY_NOTE).toContain("데스크톱");
+    expect(HOSTED_READONLY_NOTE).toContain("데스크탑");
   });
 
   it("names the two timestamps the read model actually carries", () => {
