@@ -389,6 +389,16 @@ export interface ReadState {
    * `latestReadableSeq` (the shared decision function lands with #4228).
    */
   closedAtSeq?: number | null;
+  /**
+   * ADR-0124 amendment 4 (#5667). The unread replies, written by other people, in the threads the
+   * caller follows in this channel. Wire name `followed_unread_reply_count`. A reply that names the
+   * caller is counted here **and** in `mentionCount`.
+   *
+   * **`undefined` means "this response did not say"**, like `latestReadableSeq`: a server without
+   * #5667, the `PUT read-state` response and the realtime `read_state` frame omit it. A merge keeps
+   * the cached value; a reader treats a value it never had as `0`.
+   */
+  followedUnreadReplyCount?: number;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -2690,6 +2700,8 @@ interface WireReadState {
   latest_readable_seq?: number;
   /** ADR-0177 D6/D8. `null` = not closed (GET), absent = the response did not say. */
   closed_at_seq?: number | null;
+  /** ADR-0124 amendment 4 (#5667). Absent on an older server and on a `PUT read-state` response. */
+  followed_unread_reply_count?: number;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2736,6 +2748,9 @@ function toReadState(wire: WireReadState): ReadState {
   if (latestReadableSeq !== undefined) state.latestReadableSeq = latestReadableSeq;
   const closedAtSeq = closedAtSeqFromWire(wire);
   if (closedAtSeq !== undefined) state.closedAtSeq = closedAtSeq;
+  // A count, not a seq, but the same shape: a non-negative integer, anything else is "did not say".
+  const followedUnreadReplyCount = seqFromWire(wire.followed_unread_reply_count);
+  if (followedUnreadReplyCount !== undefined) state.followedUnreadReplyCount = followedUnreadReplyCount;
   return state;
 }
 

@@ -299,7 +299,7 @@ describe("DesktopNotificationGroup", () => {
     expect(host.textContent).not.toContain("준비");
   });
 
-  it("종류 × 채널 표: 기본값, DM은 꺼짐, 폰 열은 정보뿐 (#3339)", async () => {
+  it("종류 × 채널 표: 기본값, DM 배너는 꺼짐·DM 독 배지는 켬(#5660), 폰 열은 정보뿐 (#3339)", async () => {
     const host = mount(createElement(DesktopNotificationGroup));
     await act(async () => {
       await Promise.resolve();
@@ -310,7 +310,8 @@ describe("DesktopNotificationGroup", () => {
       expect(box(`desktop-notification-kind-${id}`).getAttribute("aria-checked")).toBe("true");
     }
     expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("false");
-    expect(box("desktop-notification-dock-dm").getAttribute("aria-checked")).toBe("false");
+    // 안 읽은 DM은 메뉴 막대 점·독 배지를 켠다(owner 11-11). 배너(OS 알림 열)는 그대로 기본 끔이다.
+    expect(box("desktop-notification-dock-dm").getAttribute("aria-checked")).toBe("true");
     expect(box("desktop-notification-dock-badge").getAttribute("aria-checked")).toBe("true");
     // 폰 푸시 열에는 입력이 없다(폰 설정은 폰 앱에서).
     const rows = host.querySelectorAll("tbody tr");
@@ -341,7 +342,7 @@ describe("참여한 스레드의 새 답글 행 (#4890)", () => {
   const row = (host: HTMLElement) =>
     host.querySelector('[data-testid="desktop-notification-kind-thread-reply"]')!.closest("tr")!;
 
-  it("사전에서 읽은 이름·설명으로 서고, 기본은 켜짐이며, 독 배지는 세지 않고 폰 푸시 열은 「곧 열려요」다", async () => {
+  it("사전에서 읽은 이름·설명으로 서고, 기본은 켜짐이며, 독 배지는 세고(#5660) 폰 푸시 열은 「곧 열려요」다", async () => {
     const host = await mountKorean();
     const target = row(host);
     expect(target.textContent).toContain("참여한 스레드의 새 답글");
@@ -350,7 +351,7 @@ describe("참여한 스레드의 새 답글 행 (#4890)", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(toggle.getAttribute("aria-label")).toBe("참여한 스레드의 새 답글 OS 알림");
     const cells = target.querySelectorAll("td");
-    expect(cells[1]?.textContent).toBe("세지 않아요");
+    expect(cells[1]?.textContent).toBe("수에 포함");
     expect(cells[2]?.textContent).toBe("곧 열려요");
   });
 

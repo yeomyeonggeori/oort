@@ -20,7 +20,7 @@ export interface ConnectionContextValue {
   readonly recovered: boolean;
   /**
    * 「지금 다시 연결」: 소켓을 다시 열고 틈의 시계를 새로 시작한다(말하던 카드는 곧바로 「연결 중」으로
-   * 이어진다). 창이 30초 넘게 숨었다 돌아올 때도 같은 길이다.
+   * 이어진다). 돌아온 순간·깨어난 순간에 소켓이 끊겼거나 잠든 사이 죽었다고 판정될 때(코어 `resume.ts`, #5660)도 같은 길이다.
    */
   readonly reconnectNow: () => void;
 }

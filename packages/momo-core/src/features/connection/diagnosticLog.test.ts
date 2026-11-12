@@ -148,6 +148,7 @@ describe("늦게 깬 타이머", () => {
     let clock = NOW;
     let pending: (() => void) | null = null;
     const late: Array<[ConnectionDiagKind, number]> = [];
+    const lateBy: number[] = [];
     const stop = startWakeWatch({
       now: () => clock,
       setTimer: (run) => {
@@ -157,7 +158,10 @@ describe("늦게 깬 타이머", () => {
       clearTimer: () => {
         pending = null;
       },
-      onLate: (kind, at) => late.push([kind, at]),
+      onLate: (kind, at, lateMs) => {
+        late.push([kind, at]);
+        lateBy.push(lateMs);
+      },
     });
     const fire = (afterMs: number) => {
       clock += afterMs;
@@ -173,6 +177,8 @@ describe("늦게 깬 타이머", () => {
       ["wake.late.1m", NOW + 5_000 + 5_900 + 5_000 + 4 * 60_000],
       ["wake.late.10s", NOW + 5_000 + 5_900 + 5_000 + 4 * 60_000 + 17_000],
     ]);
+    // 늦은 정도 그대로(#5660: 소켓을 다시 열지 정하는 쪽이 읽는다).
+    expect(lateBy).toEqual([4 * 60_000, 12_000]);
     stop();
     expect(pending).toBeNull();
   });

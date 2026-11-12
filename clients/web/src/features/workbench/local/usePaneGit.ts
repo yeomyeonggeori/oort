@@ -5,6 +5,7 @@ import {
 } from "@momo/core/features/workbench/sessionList";
 import type { GitReadCommand, GitReadResult } from "@momo/core/features/workbench/gitRead";
 import { readWorkbenchGit } from "@/lib/tauri";
+import { everyWhileVisible } from "@/features/common/everyWhileVisible";
 
 // 세션 목록의 칸별 git 사실 (#2856). **읽기는 `readWorkbenchGit`(#2855 G1~G8)뿐이다.**
 // 새 git 호출·폴더 인자는 없다. 칸마다 G1·G2·G3·G7 넷을 차례로 읽는다.
@@ -169,11 +170,12 @@ export function usePaneGit(
     );
     schedulerRef.current = scheduler;
     scheduler.sync(panesRef.current);
-    const timer = window.setInterval(() => scheduler.refresh(), PANE_GIT_REFRESH_MS);
+    // 주기 다시 읽기는 창이 보이는 동안만(#5660: 데스크탑 웹뷰는 치운 뒤에도 돈다), 다시 보이면 한 번.
+    const stopPeriodic = everyWhileVisible(() => scheduler.refresh(), PANE_GIT_REFRESH_MS);
     const onFocus = () => scheduler.refresh();
     window.addEventListener("focus", onFocus);
     return () => {
-      window.clearInterval(timer);
+      stopPeriodic();
       window.removeEventListener("focus", onFocus);
       scheduler.dispose();
       schedulerRef.current = null;
