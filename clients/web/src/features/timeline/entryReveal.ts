@@ -12,7 +12,7 @@
  *
  * 판정은 크기 · 스크롤이 바뀔 때마다(ResizeObserver 는 그리기 전에 돈다) 다시 한다. 바닥이 목적지가 아닌 움직임(메시지로 이동 같은
  * 스크립트의 스크롤, 사람의 휠 · 터치)이 먼저 오면 그때 바로 보인다. 어느 것도 오지 않아도 `REVEAL_FAILSAFE_MS` 뒤에는 보인다 —
- * 가려진 채 남는 일은 없다. 속성 값은 보인 까닭이다(`bottom` · `empty` · `jump` · `hand` · `timeout`): 게이트가 읽는다.
+ * 가려진 채 남는 일은 없다. 속성 값은 보인 까닭이다(`bottom` · `empty` · `jump` · `hand` · `timeout`) — 왜 그 프레임에 보였는지 DOM 에서 읽힌다.
  */
 export const PLACED_ATTRIBUTE = "data-placed";
 
@@ -63,7 +63,7 @@ export function revealWhenPlaced(
   };
   const onHand = () => reveal("hand");
   // 관찰자가 붙자마자 콜백을 부르는 환경(시험의 가짜 ResizeObserver)에서도 아래 정리가 아직 없는 타이머를 건드리지 않게 먼저 둔다.
-  let failsafe: number | undefined;
+  let failsafe = 0;
 
   const observer = new ResizeObserver(check);
   const watched = new Set<Element>();
@@ -88,7 +88,7 @@ export function revealWhenPlaced(
   failsafe = window.setTimeout(() => reveal("timeout"), failsafeMs);
 
   function stop() {
-    if (failsafe !== undefined) window.clearTimeout(failsafe);
+    window.clearTimeout(failsafe);
     observer.disconnect();
     structure.disconnect();
     scroller.removeEventListener("scroll", check);
