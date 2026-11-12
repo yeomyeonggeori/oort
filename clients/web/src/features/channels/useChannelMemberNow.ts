@@ -12,12 +12,16 @@ import {
   type ChannelAgentNow,
 } from "@momo/core/features/agents/channelAgentNow";
 import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
+import { isUncollected } from "@momo/core/features/agents/runWaiting";
 import { useSession } from "@/app/session";
-import { useAgentWorkingSignals } from "@/features/agents/agentWorkingSignal";
+import { agentTurnsInChannel, useAgentWorkingSignals } from "@/features/agents/agentWorkingSignal";
 
 // =============================================================================
 // 채널 멤버 패널의 「지금」 읽기 (#5686). 패널이 **열려 있을 때만** 이 훅이 선다(패널 목록 컴포넌트가 Dialog 안에
 // 있어 닫히면 사라진다). 닫혀 있으면 요청도 타이머도 없다.
+//
+// 에이전트 멤버가 없는 채널(사람만·빈 채널)에서는 읽지 않는다(`enabled`). 패널은 이 읽기를 **기다리지 않는다**:
+// 명부의 줄은 첫 프레임부터 서고, 읽기가 돌아오면 에이전트 줄의 둘째 줄 자리를 그대로 채운다(#5686 수리 1회차, 검수 H1).
 //
 // 언제 읽나:
 //   1. 열 때 한 번 — `GET …/agent-runs?state=active`(쪽 상한까지, 보통 한 번). 5초 안에 다시 열면 받아 둔 답을 쓴다.
@@ -34,8 +38,6 @@ export const SLOW_POLL_MS = 60_000;
 export const RAIL_REFETCH_GAP_MS = 5_000;
 /** 「n분째」를 고쳐 그리는 시계. 1분 단위 글이라 이 간격이면 많아야 15초 늦다. */
 export const MEMBER_NOW_CLOCK_MS = 15_000;
-/** 열 때 묶음을 정하기 전에 첫 읽기를 기다리는 상한. 넘으면 아는 만큼으로 묶는다. */
-export const SNAPSHOT_WAIT_MS = 1_200;
 /** 다시 열 때 받아 둔 답을 그대로 쓰는 시간. */
 const ACTIVE_RUNS_STALE_MS = 5_000;
 
@@ -97,8 +99,11 @@ export interface ChannelMemberNow {
    * 유예는 그 시각에 멈춘다(끊긴 소켓 위에서 시계가 계속 가면 에이전트가 아니라 우리의 짐작을 잰다, ADR-0200 증보 7 ③).
    */
   stale: boolean;
-  /** 묶음을 정해도 되는가: 첫 읽기가 끝났거나 기다림 상한을 넘었다. */
-  settled: boolean;
+  /**
+   * 레일 신호가 지금 이 채널에서 열린 턴으로 아는 에이전트(id 소문자). 「지금」 읽기의 답이 아직 없을 때도 열 때의 묶음이
+   * 「일하는 에이전트」를 가를 수 있게(레일과 같은 판정: 낡은 신호·「아직 받지 않았어요」 유예를 넘은 run은 뺌).
+   */
+  railWorking: ReadonlySet<string>;
   nowMs: number;
   retry: () => void;
 }
@@ -142,10 +147,15 @@ export function useChannelMemberNow(
   useEffect(() => {
     if (query.dataUpdatedAt > lastRefetchAt.current) lastRefetchAt.current = query.dataUpdatedAt;
   }, [query.dataUpdatedAt]);
+  const failing = query.isError;
+  const fetching = query.isFetching;
   useEffect(() => {
     if (fingerprint === lastFingerprint.current) return;
     lastFingerprint.current = fingerprint;
     if (!enabled || !answered) return;
+    // 마지막 읽기가 실패한 동안에는 신호로 다시 묻지 않는다(실패마다 다시 묻기가 붙어 늘어난다, 검수 L1): 박자와
+    // 「다시 불러오기」가 맡는다. 도는 읽기가 있으면 그 답을 기다린다(끊고 다시 읽으면 열 때의 요청이 둘이 된다, L2).
+    if (failing || fetching) return;
     if (trailing.current !== null) return;
     const wait = lastRefetchAt.current + RAIL_REFETCH_GAP_MS - Date.now();
     const fire = () => {
@@ -155,7 +165,7 @@ export function useChannelMemberNow(
     };
     if (wait <= 0) fire();
     else trailing.current = setTimeout(fire, wait);
-  }, [enabled, answered, fingerprint, refetch]);
+  }, [enabled, answered, failing, fetching, fingerprint, refetch]);
   useEffect(
     () => () => {
       if (trailing.current !== null) clearTimeout(trailing.current);
@@ -164,17 +174,15 @@ export function useChannelMemberNow(
     []
   );
 
-  const [waited, setWaited] = useState(false);
-  useEffect(() => {
-    if (!enabled) return;
-    const id = setTimeout(() => setWaited(true), SNAPSHOT_WAIT_MS);
-    return () => clearTimeout(id);
-  }, [enabled]);
-
   const stale = answered && (options.offline === true || query.isError);
   const nowMs = useClock(enabled && !stale, MEMBER_NOW_CLOCK_MS);
   // 줄을 재는 시각: 끊겼거나 다시 읽기가 실패했으면 마지막으로 받은 때, 아니면 지금.
   const linesAt = stale && query.dataUpdatedAt > 0 ? query.dataUpdatedAt : nowMs;
+  const railWorking = new Set<string>();
+  for (const turn of agentTurnsInChannel(signals, channelId, nowMs)) {
+    if (isUncollected(turn.server, nowMs)) continue;
+    railWorking.add(turn.memberId.toLowerCase());
+  }
   const runs = query.data?.runs;
   const lines = useMemo(
     () => (runs === undefined ? new Map<string, ChannelAgentNow>() : channelAgentNow(runs, channelId, linesAt)),
@@ -189,17 +197,12 @@ export function useChannelMemberNow(
         : query.isError
           ? "failed"
           : "pending";
-  const settled =
-    !enabled ||
-    waited ||
-    query.fetchStatus === "paused" ||
-    (query.status !== "pending" && !query.isFetching);
 
   return {
     lines,
     read: read === "ready" && query.isError ? "failed" : read,
     stale,
-    settled,
+    railWorking,
     nowMs,
     retry: () => void refetch(),
   };

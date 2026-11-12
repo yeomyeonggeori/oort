@@ -8186,7 +8186,7 @@ export const catalog: MessageCatalog = {
   "timeline.memberPanel.groupPeople": [
     {
       "type": 0,
-      "value": "사람 "
+      "value": "접속 확인 안 됨 "
     },
     {
       "type": 2,

@@ -37,7 +37,6 @@ import {
   activeAgentRunsQueryKey,
   RAIL_REFETCH_GAP_MS,
   SLOW_POLL_MS,
-  SNAPSHOT_WAIT_MS,
 } from "./useChannelMemberNow";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -204,6 +203,14 @@ async function open() {
   await settle();
 }
 
+/** 같은 채널을 방금 열어 「지금」 답을 받아 둔 상태에서 연다(받아 둔 답으로 「일하는 에이전트」를 가른다). */
+async function openKnown(runs: AgentRunProgress[] = defaultRuns()) {
+  await act(async () => {
+    client.setQueryData(activeAgentRunsQueryKey(WS), { runs });
+  });
+  await open();
+}
+
 async function close() {
   const button = document.querySelector<HTMLButtonElement>('[data-testid="channel-member-close"]')!;
   await act(async () => {
@@ -267,9 +274,9 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(after);
   });
 
-  it("묶음 차례·머리의 수, 에이전트와 사람의 한 줄", async () => {
+  it("묶음 차례·머리의 수, 에이전트와 사람의 한 줄(받아 둔 답이 있을 때)", async () => {
     await mount();
-    await open();
+    await openKnown();
     expect(sections()).toEqual([
       { group: "working", heading: "일하는 에이전트 2", ids: [DALMURI, SAEBYEOK] },
       { group: "agents", heading: "그 밖의 에이전트 1", ids: [BYEOLBIT] },
@@ -306,7 +313,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
 
   it("다른 채널의 run은 제목도 수도 나오지 않는다", async () => {
     await mount();
-    await open();
+    await openKnown();
     const text = panel()!.textContent ?? "";
     expect(text).not.toContain("비공개 채널의 일");
     // 별빛봇은 다른 채널에서 일하지만 이 패널에서는 일하지 않는 에이전트다
@@ -316,7 +323,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
 
   it("열려 있는 동안 run이 끝나도 묶음은 그대로(글만 바뀜), 닫고 다시 열면 옮겨 간다", async () => {
     await mount();
-    await open();
+    await openKnown();
     expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("working");
 
     // 달무리봇의 run이 끝났다는 다음 읽기
@@ -352,7 +359,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
 
   it("보는 사람이 없는 순간(창이 가려짐)에는 묶음을 다시 정한다", async () => {
     await mount();
-    await open();
+    await openKnown();
     await act(async () => {
       client.setQueryData(activeAgentRunsQueryKey(WS), { runs: defaultRuns().slice(1) });
     });
@@ -367,8 +374,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
   });
 
-  it("첫 읽기가 늦으면 기다림 상한 뒤 아는 만큼으로 묶고, 늦게 온 답은 글만 바꾼다(묶음 이동 없음)", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("첫 프레임부터 명부의 줄이 선다: 받아 둔 답이 없으면 에이전트는 한 묶음이고, 늦게 온 답은 그 줄의 둘째 줄만 채운다", async () => {
     let answer: (value: unknown) => void = () => undefined;
     api.fetchAllActiveAgentRuns.mockImplementation(
       () => new Promise((resolve) => {
@@ -377,17 +383,55 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     );
     await mount();
     await open();
-    // 기다리는 동안은 줄을 세우지 않는다(곧 다른 묶음으로 뛸 줄이다)
-    expect(document.querySelector('[data-testid="channel-member-item"]')).toBeNull();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SNAPSHOT_WAIT_MS + 50);
-    });
+    // 읽기가 돌아오기 전: 막대가 아니라 일곱 줄 그대로, 에이전트는 「에이전트 3」 한 묶음
+    expect(document.querySelectorAll('[data-testid="skeleton-row"]').length).toBe(0);
+    expect(sections()).toEqual([
+      { group: "agents", heading: "에이전트 3", ids: [DALMURI, SAEBYEOK, BYEOLBIT] },
+      { group: "online", heading: "온라인 3", ids: [ME, SEOYEON, JUNHO] },
+      { group: "offline", heading: "오프라인 1", ids: [YUNA] },
+    ]);
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("liveness");
+    const before = sections();
+    await act(async () => answer({ runs: defaultRuns(), truncated: false, pages: 1 }));
     await settle();
-    expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
-    await act(async () => answer({ runs: defaultRuns() }));
-    await settle();
-    expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
+    // 답이 와도 묶음·차례·머리는 그대로이고, 일하는 두 줄의 둘째 줄만 「작업 중 …」으로 채워진다
+    expect(sections()).toEqual(before);
     expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
+    expect(rowOf(SAEBYEOK)!.querySelector('[data-testid="channel-member-request"]')?.textContent).toBe("「배포 준비 체크리스트」");
+    expect(rowOf(BYEOLBIT)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("liveness");
+  });
+
+  it("레일 신호가 아는 run이 있으면 답을 기다리지 않고 첫 열기에서도 「일하는 에이전트」를 가른다", async () => {
+    api.fetchAllActiveAgentRuns.mockImplementation(() => new Promise(() => undefined));
+    act(() => markAgentWorking(signalFromProgress(defaultRuns()[0]!)!));
+    // 다른 채널의 신호는 이 패널의 묶음을 바꾸지 않는다
+    act(() => markAgentWorking({ ...signalFromProgress(defaultRuns()[2]!)!, channelId: OTHER_CH }));
+    await mount();
+    await open();
+    expect(sections().map((s) => [s.group, s.heading, s.ids])).toEqual([
+      ["working", "일하는 에이전트 1", [DALMURI]],
+      ["agents", "그 밖의 에이전트 2", [SAEBYEOK, BYEOLBIT]],
+      ["online", "온라인 3", [ME, SEOYEON, JUNHO]],
+      ["offline", "오프라인 1", [YUNA]],
+    ]);
+  });
+
+  it("사람만 있는 채널은 「지금」을 읽지 않고 줄이 바로 선다", async () => {
+    const people = MEMBERS.filter((m) => m.kind === "human");
+    await mount(people);
+    await open();
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(0);
+    expect(document.querySelectorAll('[data-testid="channel-member-item"]').length).toBe(4);
+    expect(document.querySelector('[data-testid="channel-member-now-failed"]')).toBeNull();
+  });
+
+  it("열 때의 첫 초점은 이 PR 전처럼 「멤버 추가」이고, 목록 칸은 Tab으로 따로 닿는다", async () => {
+    await mount();
+    await open();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("channel-member-add");
+    const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
+    expect(list.tabIndex).toBe(0);
+    expect(list.getAttribute("aria-label")).toBe("채널 멤버 목록");
   });
 
   it("연결이 끊겼거나 다시 읽기가 실패하면 「n분째」는 마지막으로 받은 때에 멈추고, 다시 읽히면 지금 시각으로 돌아온다", async () => {
@@ -448,6 +492,45 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     });
     await settle();
     expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it("레일 간격은 5초다(숫자를 글자로): 신호 4초 뒤에는 아직, 5.5초 뒤에는 한 번", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await open();
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      markAgentWorking(signalFromProgress({ ...defaultRuns()[0]!, latestStage: "단계 1" })!)
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    // 1초 간격이면 여기서 이미 2번이다
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    // 10초 간격이면 여기서 아직 1번이다
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it("2초마다 단계 신호가 오는 1분 동안 「지금」 읽기는 열 때 1번 + 레일로 12번(숫자를 글자로)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await open();
+    for (let i = 1; i <= 30; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await act(async () =>
+        markAgentWorking(signalFromProgress({ ...defaultRuns()[0]!, latestStage: `단계 ${i}` })!)
+      );
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    // 5초 간격: 열 때 1번 + 레일로 5초마다 한 번(1분에 12번) = 13번. 간격을 1초로 줄이면 31번, 10초로 늘리면 7번이 된다.
+    expect(api.fetchAllActiveAgentRuns.mock.calls.length).toBe(13);
   });
 
   it("「지금」 읽기가 실패하면 발치에 한 줄과 다시 불러오기, 서버에 없는 읽기면 아무 말도 없다", async () => {

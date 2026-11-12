@@ -81,17 +81,25 @@ const {
   topicView: TOPIC_VIEW_LABEL,
 } = canonicalCopy(webRoot);
 
-/** 멤버 패널 에이전트 줄의 낱말(#5686): 사전이 정본이다. 게이트가 낱말을 다시 적지 않는다. */
-const AGENT_KIND_WORD = Object.fromEntries(
-  ["ko-KR", "en-US"].map((locale) => [
-    locale,
-    JSON.parse(
+/**
+ * 멤버 패널에서 에이전트 줄을 **눈에 보이게** 가르는 글(#5686): 에이전트 줄이 든 묶음의 머리(「일하는 에이전트 N」·「그 밖의
+ * 에이전트 N」·「에이전트 N」). 사전이 정본이라 게이트가 낱말을 다시 적지 않고, 값의 `{count…}` 앞 글만 쓴다.
+ */
+const AGENT_HEADING_PREFIXES = Object.fromEntries(
+  ["ko-KR", "en-US"].map((locale) => {
+    const catalog = JSON.parse(
       readFileSync(
         resolve(webRoot, `../../packages/momo-core/src/i18n/catalogs/${locale}/timeline.json`),
         "utf8"
       )
-    )["timeline.memberPanel.agentKind"],
-  ])
+    );
+    return [
+      locale,
+      ["groupWorking", "groupAgents", "groupOtherAgents"].map((key) =>
+        catalog[`timeline.memberPanel.${key}`].split("{")[0].trim()
+      ),
+    ];
+  })
 );
 
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
@@ -365,21 +373,6 @@ async function installRoutes(context, traffic, options = {}) {
   });
 }
 
-/**
- * 패널 줄이 설 때까지 기다린다(#5686): 패널은 연 순간 「지금 실행 중」을 읽고, 그 답(또는 1.2초 상한) 뒤에 묶음을 정해
- * 줄을 세운다. 그 전은 높이를 지키는 막대다. 그래서 줄 수는 그 짧은 기다림 뒤에 센다(줄이 끝내 안 서면 아래 단언이 붉다).
- */
-async function settledMemberRows(page) {
-  await page
-    .waitForFunction(
-      () => document.querySelectorAll('[data-testid="channel-member-item"]').length > 0,
-      undefined,
-      { timeout: 6_000 }
-    )
-    .catch(() => undefined);
-  return page.getByTestId("channel-member-item").count();
-}
-
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await advanceToAccount(page);
@@ -514,16 +507,28 @@ async function exercise(browser) {
   await page.keyboard.press("Enter");
   const memberPanel = page.getByTestId("channel-member-panel");
   await memberPanel.waitFor();
-  if ((await settledMemberRows(page)) !== 3) {
+  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
     throw new Error("the member panel did not render the same three rows the count names");
   }
   const agentRow = page.locator(
     '[data-testid="channel-member-item"][data-member-kind="agent"]'
   );
-  // 에이전트 줄의 낱말은 사전 키(`timeline.memberPanel.agentKind`, #5686)다: 화면 언어의 사전에서 읽는다.
-  const agentWord = await page.evaluate(() => document.documentElement.lang);
-  const expectedAgentWord = AGENT_KIND_WORD[agentWord.startsWith("ko") ? "ko-KR" : "en-US"];
-  if ((await agentRow.count()) !== 1 || !((await agentRow.textContent()) ?? "").includes(expectedAgentWord)) {
+  // 보이는 글로 가른다(#5686): 에이전트 줄이 든 묶음의 머리가 화면에 서 있고, 그 글이 화면 언어 사전의 에이전트 묶음
+  // 머리다. 줄 안의 숨은 낭독 문장(`sr-only`)은 재지 않는다(`innerText`는 보이는 글만 읽는다).
+  const lang = await page.evaluate(() => document.documentElement.lang);
+  const agentHeading = page
+    .locator('[data-testid="channel-member-section"]', { has: agentRow })
+    .locator("h2");
+  const headingText =
+    (await agentHeading.count()) === 1 && (await agentHeading.isVisible())
+      ? (await agentHeading.innerText()).trim()
+      : "";
+  if (
+    (await agentRow.count()) !== 1 ||
+    !AGENT_HEADING_PREFIXES[lang.startsWith("ko") ? "ko-KR" : "en-US"].some(
+      (prefix) => prefix !== "" && headingText.startsWith(prefix)
+    )
+  ) {
     throw new Error("the member panel did not distinguish the agent row in text");
   }
   await page.keyboard.press("Escape");
@@ -537,7 +542,7 @@ async function exercise(browser) {
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   await countNode.click();
   await page.getByTestId("channel-member-offline").waitFor();
-  if ((await settledMemberRows(page)) !== 3) {
+  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
     throw new Error("the offline member panel hid the last received roster");
   }
   if ((await page.getByTestId("channel-member-failed").count()) !== 0) {
@@ -711,7 +716,7 @@ async function exerciseRosterStates(browser) {
     undefined,
     { timeout: 6_000 }
   );
-  if ((await settledMemberRows(loadingPage)) !== 3) {
+  if ((await loadingPage.getByTestId("channel-member-item").count()) !== 3) {
     throw new Error("the member panel did not replace loading rows with the roster");
   }
   await loadingContext.close();
@@ -754,7 +759,7 @@ async function exerciseRosterStates(browser) {
       `the inline retry must make the third roster request, saw ${retryTraffic.rosterAttempts}`
     );
   }
-  if ((await settledMemberRows(retryPage)) !== 3) {
+  if ((await retryPage.getByTestId("channel-member-item").count()) !== 3) {
     throw new Error("the inline retry did not recover the member rows");
   }
   await retryContext.close();

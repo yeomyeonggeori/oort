@@ -350,6 +350,158 @@ describe("채널 멤버 패널의 줄은 상태가 바뀌어도 밀리지 않는
   );
 });
 
+// ---- 열 때: 첫 프레임부터 닫힐 때까지 패널이 뛰지 않는다 (#5686 수리 1회차, 검수 H1) ---------------------------------
+// 패널은 「지금」 읽기를 기다리지 않는다: 명부의 줄이 첫 프레임부터 서고, 읽기가 돌아오면 에이전트 줄의 둘째 줄만 채운다.
+// 멤버 12명(에이전트 5)으로 읽기를 300ms·1500ms 늦춰 열고, 연 직후·기다리는 중·답이 온 뒤의 마크업을 실제 엔진에 올려
+// 패널 높이와 발치 단추(「멤버 추가」「닫기」)의 자리를 잰다. 기대: 모든 순간 같은 값.
+
+const EXTRA: RosterMember[] = [
+  member("00000000-0000-7000-8000-000000000105", "human", "정하윤", "hayun", { online: true }),
+  member("00000000-0000-7000-8000-000000000106", "human", "한지우", "jiwoo", { online: false }),
+  member("00000000-0000-7000-8000-000000000107", "human", "오세린", "serin", { online: true }),
+  member("00000000-0000-7000-8000-000000000304", "agent", "노을봇", "noeul"),
+  member("00000000-0000-7000-8000-000000000305", "agent", "은하봇", "eunha"),
+];
+const TWELVE: RosterMember[] = [...FIRST, ...EXTRA];
+
+/** 읽기를 `delayMs` 늦춘 채 패널을 열고, 연 직후부터 답이 온 뒤까지의 마크업을 차례로 모은다. */
+async function openingFrames(delayMs: number): Promise<{ at: string; html: string }[]> {
+  api.fetchRoster.mockResolvedValue(TWELVE);
+  api.fetchAllActiveAgentRuns.mockImplementation(
+    () =>
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ runs: [run(), hermes()], truncated: false, pages: 1 }), delayMs)
+      )
+  );
+  api.fetchAgentLiveness.mockImplementation(async (_ws: string, agentId: string) => {
+    if (agentId.toLowerCase() === SAEBYEOK) throw new ApiError(404, "not hosted");
+    return { agentMemberId: agentId, state: "alive_idle", lastSignalAtMs: Date.now() - 2 * MIN };
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => {
+    root?.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(LocaleProvider, {
+          locale: korean,
+          children: createElement(
+            SessionProvider,
+            { value: session() },
+            createElement(ChannelMemberPanel, {
+              channelId: CH,
+              channelName: "design-lab",
+              members: TWELVE,
+              status: "ready",
+              offline: false,
+              onRetry: () => undefined,
+              onAddMember: () => undefined,
+            })
+          ),
+        })
+      )
+    );
+  });
+  await settle();
+  const frames: { at: string; html: string }[] = [];
+  const grab = (at: string) =>
+    frames.push({ at, html: document.querySelector<HTMLElement>('[data-testid="channel-member-panel"]')!.outerHTML });
+  const start = Date.now();
+  // 연 직후(첫 커밋): 기다리는 일 없이 바로 잰다
+  act(() => {
+    document.querySelector<HTMLButtonElement>('[data-testid="channel-member-count"]')!.click();
+  });
+  grab("연 직후");
+  while (Date.now() - start < delayMs + 400) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    grab(`${Math.round((Date.now() - start) / 100) * 100}ms`);
+  }
+  await settle();
+  grab("답이 온 뒤");
+  act(() => root?.unmount());
+  root = null;
+  host.remove();
+  host = null;
+  return frames;
+}
+
+describe("채널 멤버 패널을 열 때 뛰지 않는다 (#5686 수리 1회차)", () => {
+  it.skipIf(ENGINES.length === 0)(
+    "멤버 12명, 「지금」 읽기 300ms·1500ms: 연 직후부터 답이 온 뒤까지 패널 높이와 발치 단추 자리가 한 번도 안 바뀐다(두 엔진)",
+    async () => {
+      const runs: Record<string, { at: string; html: string }[]> = {
+        "300ms": await openingFrames(300),
+        "1500ms": await openingFrames(1500),
+      };
+      for (const [delay, frames] of Object.entries(runs)) {
+        const first = frames[0]!.html;
+        const last = frames[frames.length - 1]!.html;
+        // 시험이 헛돌지 않게: 연 직후에도 줄 12개가 서 있고, 답이 온 뒤에는 일하는 줄이 채워져 있다.
+        expect((first.match(/data-testid="channel-member-item"/g) ?? []).length, `${delay} 연 직후 줄 수`).toBe(12);
+        expect(first.includes('data-testid="skeleton-row"'), `${delay} 연 직후 막대`).toBe(false);
+        expect(first.includes('data-now="run"'), `${delay} 연 직후에는 아직 답이 없다`).toBe(false);
+        expect(last.includes('data-now="run"'), `${delay} 답이 온 뒤 채워진 줄`).toBe(true);
+      }
+      const css = await compileTokensCss(Object.values(runs).flat().flatMap((frame) => classesOf(frame.html)));
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      const report: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
+          try {
+            const p = await ctx.newPage();
+            for (const [delay, frames] of Object.entries(runs)) {
+              const seen: { at: string; height: number; add: number; close: number }[] = [];
+              for (const frame of frames) {
+                await p.setContent(page(css, frame.html, 16));
+                seen.push({
+                  at: frame.at,
+                  ...(await p.evaluate(() => {
+                    const top = (id: string) =>
+                      Math.round(document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().top * 100) / 100;
+                    return {
+                      height:
+                        Math.round(
+                          document.querySelector('[data-testid="channel-member-panel"]')!.getBoundingClientRect().height * 100
+                        ) / 100,
+                      add: top("channel-member-add"),
+                      close: top("channel-member-close"),
+                    };
+                  })),
+                });
+              }
+              const base = seen[0]!;
+              for (const s of seen) {
+                if (s.height !== base.height || s.add !== base.add || s.close !== base.close) {
+                  problems.push(
+                    `${engine} ${delay} 「${s.at}」: 높이 ${base.height} → ${s.height}, 멤버 추가 y ${base.add} → ${s.add}, 닫기 y ${base.close} → ${s.close}`
+                  );
+                }
+              }
+              report.push(`${engine} ${delay}: ${seen.length}순간, 높이 ${base.height}px, 멤버 추가 y ${base.add}, 닫기 y ${base.close}`);
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      console.info(`[#5686 열 때]\n${report.join("\n")}`);
+      if (problems.length > 0) console.info(`[#5686 열 때 문제 ${problems.length}건]\n${problems.slice(0, 20).join("\n")}`);
+      expect(problems).toEqual([]);
+    },
+    240_000
+  );
+});
+
 // ---- 캡처 (선택): `MEMBER_PANEL_SHOTS=<폴더>`일 때만 돈다. 시험이 아니라 검수용 그림이다 ----------------------------
 // 네 상태(로딩·빈·오류·오프라인)와 「지금」 읽기 실패, 아주 긴 글, 키보드 초점, 밝게·어둡게, 좁은 폭(360), 브라우저 확대 200%, 큰 글자(뿌리 200%).
 const SHOTS = process.env.MEMBER_PANEL_SHOTS ?? "";

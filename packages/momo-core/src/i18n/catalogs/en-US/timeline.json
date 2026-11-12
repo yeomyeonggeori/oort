@@ -29,7 +29,7 @@
   "timeline.memberPanel.groupAgents": "Agents {count, number}",
   "timeline.memberPanel.groupOtherAgents": "Other agents {count, number}",
   "timeline.memberPanel.groupOnline": "Online {count, number}",
-  "timeline.memberPanel.groupPeople": "People {count, number}",
+  "timeline.memberPanel.groupPeople": "Presence unknown {count, number}",
   "timeline.memberPanel.groupOffline": "Offline {count, number}",
   "timeline.memberPanel.request": "“{text}”",
   "timeline.memberPanel.stageSpoken": "{stage} (agent report)",

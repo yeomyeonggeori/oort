@@ -366,15 +366,21 @@ function ChannelMemberList({
   const { directory } = useDirectory(workspaceId);
   const mayAct = mayActOnLiveness(memberFor(directory, session.member.id)?.role);
   const connected = connStatus === "connected";
-  const groupOf = (member: RosterMember): MemberPanelGroup =>
-    memberPanelGroupOf(
+  // 일하는 에이전트: 받아 둔 「지금」 답(같은 채널을 최근에 열었음)이나 레일 신호가 아는 run. 둘 다 없으면 에이전트는
+  // 한 묶음(「에이전트 N」)이다 — 패널은 「지금」 읽기를 기다리지 않는다(수리 1회차, 검수 H1).
+  const groupOf = (member: RosterMember): MemberPanelGroup => {
+    const id = member.id.toLowerCase();
+    return memberPanelGroupOf(
       withOwnConnection(member, session.member.id, connected),
-      now.lines.has(member.id.toLowerCase())
+      now.lines.has(id) || now.railWorking.has(id)
     );
+  };
 
+  // 묶음은 열 때 **첫 프레임에** 한 번 정한다. 읽기가 돌아와도 열려 있는 동안에는 다시 짜지 않고(줄 안의 글만 채운다),
+  // 다음에 열 때나 보는 사람이 없는 순간(창이 가려짐)에 다시 정한다.
   const frozen = useRef<ReadonlyMap<string, MemberPanelGroup> | null>(null);
   const [, regroup] = useState(0);
-  if (frozen.current === null && now.settled) frozen.current = memberPanelSnapshot(members, groupOf);
+  if (frozen.current === null) frozen.current = memberPanelSnapshot(members, groupOf);
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "hidden") return;
@@ -385,10 +391,6 @@ function ChannelMemberList({
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  if (frozen.current === null) {
-    // 첫 읽기를 기다리는 짧은 동안(상한 `SNAPSHOT_WAIT_MS`): 묶음을 정하기 전에 줄을 세우면 곧 다른 묶음으로 뛴다.
-    return <Skeleton ready={false} rows={Math.min(Math.max(members.length, 1), 6)} className="p-4" />;
-  }
   const sections = memberPanelSections(members, groupOf, frozen.current);
   const hasWorking = sections.some((section) => section.group === "working");
   return (
@@ -452,14 +454,16 @@ function ChannelMemberPanelBody({
 }) {
   const formatMessage = useFormatMessage();
   const showList = members.length > 0;
-  // 연 순간부터 읽는다(명부가 아직 오는 중이어도): 명부가 닿을 때 「지금」도 이미 와 있어 묶음을 바로 정한다.
-  const now = useChannelMemberNow(channelId, true, { offline });
+  // 에이전트 멤버가 없으면(사람만·빈 채널) 「지금」을 읽지 않는다. 읽어도 줄은 기다리지 않는다(명부의 줄이 첫 프레임부터).
+  const hasAgent = members.some((member) => member.kind === "agent");
+  const now = useChannelMemberNow(channelId, hasAgent, { offline });
   return (
     <>
       <div
         className="min-h-0 flex-1 overflow-y-auto focus-visible:focus-ring"
         data-testid="channel-member-list"
-        // 목록은 길어질 수 있고 줄은 눌리지 않는다: 키보드로 굴릴 수 있게 목록 자체가 초점을 받는다.
+        // 목록은 길어질 수 있고 줄은 눌리지 않는다: 키보드로 굴릴 수 있게 목록 자체가 초점을 받는다. 다만 열 때의 첫
+        // 초점은 이 PR 전처럼 목록 밖의 첫 행동이다(`firstActionFocus`, 검수 M3).
         {...(showList
           ? { tabIndex: 0, role: "region", "aria-label": formatMessage("timeline.memberPanel.listLabel") }
           : {})}
@@ -483,7 +487,7 @@ function ChannelMemberPanelBody({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line p-4">
-        {showList && now.read === "failed" && (
+        {hasAgent && now.read === "failed" && (
           <p className="mr-auto flex min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
             <span className="min-w-0">{formatMessage("timeline.memberPanel.nowFailed")}</span>
             <Button type="button" variant="ghost" size="sm" onClick={now.retry} data-testid="channel-member-now-retry">
@@ -514,6 +518,22 @@ function ChannelMemberPanelBody({
       </div>
     </>
   );
+}
+
+/**
+ * 열 때의 첫 초점: 이 PR 전과 같은 자리 — 목록 밖의 첫 행동(실패 띠의 「다시 시도」, 빈 목록의 「멤버 추가」, 발치의
+ * 「멤버 추가」, 「닫기」 차례). 목록 칸은 초점을 받을 수 있지만(키보드로 굴리기) 첫 초점은 아니다: WebKit은 기본 설정에서
+ * Tab이 단추를 건너뛰어, 목록이 첫 초점이면 「멤버 추가」에 키보드로 닿는 길이 없다(검수 M3).
+ */
+function firstActionFocus(event: Event) {
+  const content = event.currentTarget;
+  if (!(content instanceof HTMLElement)) return;
+  const first = [
+    ...content.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled])"),
+  ].find((element) => element.closest('[data-testid="channel-member-list"]') === null || element.closest("[data-testid=\"channel-member-empty\"]") !== null);
+  if (first === undefined) return;
+  event.preventDefault();
+  first.focus();
 }
 
 function memberListLabel(status: ChannelMemberListStatus, count: number): string {
@@ -591,6 +611,7 @@ export function ChannelMemberPanel({
         data-testid="channel-member-panel"
         data-roster-status={status}
         aria-busy={status === "loading" || undefined}
+        onOpenAutoFocus={firstActionFocus}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           restoreDialogOpenerFocus(triggerRef.current);
