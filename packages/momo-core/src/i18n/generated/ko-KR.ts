@@ -7408,6 +7408,12 @@ export const catalog: MessageCatalog = {
       "value": "연결 기록"
     }
   ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "업데이트 확인 실패"
+    }
+  ],
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
@@ -7548,6 +7554,112 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "settings.updates.cutLine": [
+    {
+      "type": 0,
+      "value": "지금 다시 시작하면 끊겨요: "
+    },
+    {
+      "type": 1,
+      "value": "items"
+    }
+  ],
+  "settings.updates.cutPanes": [
+    {
+      "type": 0,
+      "value": "터미널 칸 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "settings.updates.cutSessions": [
+    {
+      "type": 0,
+      "value": "작업 세션 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "settings.updates.cutUnknown": [
+    {
+      "type": 0,
+      "value": "확인하지 못한 작업"
+    }
+  ],
+  "settings.updates.description": [
+    {
+      "type": 0,
+      "value": "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 앱이 스스로 다시 실행돼요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요. 쓰던 글은 그대로 남아요."
+    }
+  ],
+  "settings.updates.holdTitle": [
+    {
+      "type": 0,
+      "value": "작업이 끝나면 다시 시작해요"
+    }
+  ],
+  "settings.updates.installRowDescription": [
+    {
+      "type": 0,
+      "value": "설치가 끝나면 앱이 스스로 다시 실행돼요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요."
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "마지막 확인"
+    }
+  ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "지금 말고"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "확인 안 함"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "이 앱은 스스로 새 버전을 확인하지 않는 판이에요. 새 버전은 직접 내려받아 설치해요."
+    }
+  ],
+  "settings.updates.restartNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 시작"
+    }
+  ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "다시 시작 대기"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요."
     }
   ],
   "teamAi.helper.aliasesLine": [

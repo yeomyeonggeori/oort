@@ -1,3 +1,5 @@
+import type { LocaleService } from "@momo/core/i18n";
+import type { LocalWorkVerdict } from "@momo/core/features/workbench/localWork";
 import type { AvailableUpdate } from "@/lib/tauri";
 
 // =============================================================================
@@ -17,15 +19,28 @@ import type { AvailableUpdate } from "@/lib/tauri";
 //   installing bytes moving; the app is still fully usable
 //   installed  swapped on disk, waiting for a restart THEY choose
 //   failed     say what broke and offer the retry
+//   off        this build never asks (no channel flag); new builds come by hand
 //
 // Collapsing `current` into `idle` is the tempting simplification and it is
-// wrong: "up to date" is a fact worth showing, and "never asked" is not.
+// wrong: "up to date" is a fact worth showing, and "never asked" is not. The
+// same goes for `off` (#5661): an owner's app said 「최신」 for six days while it
+// had never looked at a feed.
 // =============================================================================
+
+/**
+ * The rejection `updater_check` gives in a build that never asks the feed: a
+ * local, dev or debug build, or a DMG built without the channel flag (#5661).
+ * Same string as `UPDATER_DISABLED` in `clients/desktop/src-tauri/src/updater.rs`;
+ * `shell_contract.rs` pins the pair. It lives here, not in `lib/tauri.ts`, so
+ * the tests that mock the bridge module do not have to repeat it.
+ */
+export const UPDATER_DISABLED = "updater_disabled";
 
 export type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "current" }
+  | { kind: "off" }
   | { kind: "available"; update: AvailableUpdate }
   | {
       kind: "installing";
@@ -150,6 +165,23 @@ export function formatPublishedAt(
 }
 
 /**
+ * When the last check ran, for 설정 > 업데이트 (#5661): month, day and minute in
+ * the reader's locale. The point is to see that the app still asks — a date
+ * that stopped moving is the six-day story told on screen. An unusable time is
+ * dropped (null) rather than shown as "Invalid Date".
+ */
+export function formatCheckedAt(at: number, locale?: string): string | null {
+  const parsed = new Date(at);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
  * One sentence for the sidebar badge. Short on purpose: the badge lives in a
  * 240px column next to a name that can already be truncating.
  */
@@ -170,6 +202,21 @@ export function badgeLabel(state: UpdateState): string | null {
 
 /** Seconds the 「곧 다시 실행돼요」 card counts down before restarting on its own. */
 export const RELAUNCH_COUNTDOWN_SECONDS = 3;
+
+/**
+ * One line that says what 「지금 다시 시작」 stops while the restart waits for local work (#5661): terminal panes,
+ * work sessions, and work it could not check. Counts come from the core verdict (`localWorkVerdict`).
+ */
+export function restartCutLine(
+  cut: Extract<LocalWorkVerdict, { kind: "busy" }>,
+  formatMessage: LocaleService["formatMessage"]
+): string {
+  const items: string[] = [];
+  if (cut.panes > 0) items.push(formatMessage("settings.updates.cutPanes", { count: cut.panes }));
+  if (cut.sessions > 0) items.push(formatMessage("settings.updates.cutSessions", { count: cut.sessions }));
+  if (cut.unknown) items.push(formatMessage("settings.updates.cutUnknown"));
+  return formatMessage("settings.updates.cutLine", { items: items.join(", ") });
+}
 
 /**
  * True when the profile row should carry the 「업데이트」 pill (owner 결정 2026-10-16).
@@ -210,4 +257,24 @@ export function pillTooltip(state: UpdateState): string | null {
     default:
       return null;
   }
+}
+
+export const RAIL_CARD_GAP = 8;
+const RAIL_CARD_SIDE_OFFSET = 8;
+/** 카드 폭(`w-pane-picker`)보다 넉넉한 값: 카드가 닿을 수 있는 가로 끝. */
+const RAIL_CARD_REACH = 360;
+
+/**
+ * 접힌 레일의 카드가 아래쪽에 비워 둘 높이(#5661 수리 2회차 H2): 카드가 닿는 폭 안에 선 입력창 독(`data-composer-shell`) 가운데
+ * 가장 높이 선 것의 위 끝보다 8px 위까지만 내려온다. 그래서 저절로 열린 카드가 쓰던 글을 가리지 않는다(대화 아래 귀퉁이는 덮을 수
+ * 있다). 오른쪽 스레드 판처럼 카드가 닿지 않는 입력창과, 입력창이 없는 화면은 기본 여백 8px.
+ */
+export function railCardBottomPadding(pillRight: number, viewportHeight: number, composers: readonly DOMRectReadOnly[]): number {
+  const reach = pillRight + RAIL_CARD_SIDE_OFFSET + RAIL_CARD_REACH;
+  let top = viewportHeight;
+  for (const r of composers) {
+    if (r.width <= 0 || r.height <= 0 || r.left >= reach) continue;
+    top = Math.min(top, r.top);
+  }
+  return Math.max(RAIL_CARD_GAP, viewportHeight - top + RAIL_CARD_GAP);
 }
