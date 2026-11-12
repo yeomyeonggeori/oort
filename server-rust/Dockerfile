@@ -288,8 +288,15 @@ COPY clients/web/ ./
 
 ARG MOMO_BUILD_SHA=unknown
 ENV MOMO_BUILD_SHA=${MOMO_BUILD_SHA}
+# `npm run build` is `tsc -b && vite build`, and the type check over the web
+# tree plus `@momo/core` needs about 2.5GB of heap (3,025 files, measured
+# 2026-11-13). Node sizes its default heap limit from the machine's memory —
+# about 2GB on an 8GB builder — so on such a machine the build died with
+# "JavaScript heap out of memory" while the same commit built on a larger one
+# (#5722). The limit is stated here, for this command only, so the result does
+# not depend on the builder; nothing of it reaches the runtime image.
 RUN set -eux; \
-    npm run build; \
+    NODE_OPTIONS=--max-old-space-size=4096 npm run build; \
     test -s dist/index.html; \
     # The stamp is the point of the ARG — if the vite plugin ever stops
     # injecting it, this build fails here rather than shipping a bundle that
