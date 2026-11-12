@@ -97,7 +97,13 @@ async function buildAssets(): Promise<{ js: string; css: string }> {
       return { path, base: dirname(path), content: readFileSync(path, "utf8") };
     },
   });
-  const sources = ["UpdateButton.tsx", "railCard.harness.tsx", "../../design/ui/popover.tsx", "../../design/ui/button.tsx"];
+  const sources = [
+    "UpdateButton.tsx",
+    "railCard.harness.tsx",
+    "../../design/ui/popover.tsx",
+    "../../design/ui/button.tsx",
+    "../settings/shell/SettingsNav.tsx",
+  ];
   const css = compiler.build([...new Set(sources.flatMap((file) => quotedClassTokens(readFileSync(join(HERE, file), "utf8"))))]);
   return { js, css };
 }
@@ -121,7 +127,7 @@ async function openHarness(
   engine: EngineName,
   win: (typeof WINDOWS)[number],
   mode: (typeof MODES)[number],
-  placement: "rail" | "row" = "rail"
+  placement: "rail" | "row" | "settings" = "rail"
 ): Promise<{ page: Page; close: () => Promise<void> }> {
   const browser = browsers.get(engine);
   if (!browser || !assets) throw new Error(`${engine} not launched`);
@@ -319,6 +325,68 @@ describe.skipIf(ENGINES.length === 0)("접힌 레일 카드는 초안이 자라�
       expect(dock.height).toBeGreaterThan(100);
       expect(overlapArea(card, dock)).toBe(0);
       expect(card.y).toBeGreaterThanOrEqual(0);
+    } finally {
+      await close();
+    }
+  }, 30_000);
+});
+
+/**
+ * 시험대의 셈이 실제로 움직이는지(위 「다시 시작 0번」 단정이 헛돌지 않는지)와, 단추에 닿는 길이 Tab이라는 것. 틀에 초점이 선 뒤
+ * Tab → 「지금 다시 시작」 → Enter면 다시 시작 1번(Chromium). WebKit 기본 설정은 Tab이 단추에 서지 않아(macOS 「키보드 탐색」 꺼짐과
+ * 같음) 누름으로 셈만 확인한다.
+ */
+describe.skipIf(ENGINES.length === 0)("틀에서 Tab으로 단추에 닿고, 그때만 다시 시작한다 (#5661 수리 3회차)", () => {
+  it.each(focusCells)("$engine $placement", async (cell) => {
+    const { page, close } = await openHarness(cell.engine, WINDOWS[0], "hold", cell.placement);
+    try {
+      await typingWithCardClosed(page);
+      await page.locator('[data-testid="update-pill"]').focus();
+      await page.keyboard.press("Enter");
+      await settledCard(page);
+      expect(await focusedTestId(page)).toBe("update-card");
+      if (cell.engine === "chromium") {
+        await page.keyboard.press("Tab");
+        expect(await focusedTestId(page)).toBe("update-card-now");
+        await page.keyboard.press("Enter");
+      } else {
+        // WebKit 기본값에서는 틀에서 Tab이 `body`로 나가 카드가 닫힌다(잰 값, 수리 3회차 인계). 셈은 누름으로 확인한다.
+        await page.locator('[data-testid="update-card-now"]').click();
+      }
+      await page.waitForTimeout(200);
+      expect(await relaunches(page)).toBe(1);
+    } finally {
+      await close();
+    }
+  }, 30_000);
+});
+
+/**
+ * 설정 전면의 예고 알약은 목록 스크롤 바닥에 붙어, 창이 낮아 목록이 넘쳐도 알약 · 예고 카드 · 두 단추가 창 안에 선다(#5661 수리 3회차
+ * M1). 사보타주: `SettingsNav.tsx` 알약 묶음의 `sticky -bottom-2`를 빼면 720×480 · 1100×760 칸이 붉다.
+ */
+const SETTINGS_WINDOWS = [
+  { label: "720x480", viewport: { width: 720, height: 480 }, scale: 1 },
+  { label: "1100x760", viewport: { width: 1100, height: 760 }, scale: 1 },
+  { label: "1280x800", viewport: { width: 1280, height: 800 }, scale: 1 },
+] as const;
+
+describe.skipIf(ENGINES.length === 0)("설정 전면의 예고는 창 높이와 상관없이 창 안에 선다 (#5661)", () => {
+  it.each(ENGINES.flatMap((engine) => SETTINGS_WINDOWS.map((win) => ({ engine, win }))))("$engine $win.label", async (cell) => {
+    const { page, close } = await openHarness(cell.engine, cell.win, "countdown", "settings");
+    try {
+      await settledCard(page);
+      const inView = (b: Box) =>
+        b.width > 0 && b.x >= 0 && b.y >= 0 && b.x + b.width <= cell.win.viewport.width && b.y + b.height <= cell.win.viewport.height;
+      for (const selector of [
+        '[data-testid="settings-restart-notice"] [data-testid="update-pill"]',
+        '[data-testid="update-card"]',
+        '[data-testid="update-card-defer"]',
+        '[data-testid="update-card-now"]',
+      ]) {
+        const box = await boxOf(page, selector);
+        expect(inView(box), `${selector} ${JSON.stringify(box)}`).toBe(true);
+      }
     } finally {
       await close();
     }
