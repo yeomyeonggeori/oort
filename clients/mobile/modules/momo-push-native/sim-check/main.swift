@@ -660,7 +660,9 @@ do {
   check(inWorkspaceB.communication?.conversationIdentifier != inDesign.communication?.conversationIdentifier, "the same channel id in another workspace is another conversation")
   let reply = P.plan(envelope: envelope("mention", category: "momo.mention", channel: designChannel, thread: threadRoot), resolution: resolution(doh), settings: on, channel: design, avatarPNG: face)
   check(reply.communication?.conversationIdentifier == inDesign.communication?.conversationIdentifier, "a reply in a thread is the same conversation as its room")
-  check(reply.communication?.isThreadReply == true && reply.communication?.messageBody == "스레드 · 시안 확인 부탁드려요", "and its preview starts with the thread mark")
+  // #5660 (owner 11-11): no 「스레드 · 」 before a reply's text. The room's name is the group, the text is the text.
+  check(reply.communication?.isThreadReply == true && reply.communication?.messageBody == "시안 확인 부탁드려요", "and its preview is the text alone, no thread mark")
+  check(reply.display.body == "시안 확인 부탁드려요" && !reply.display.body.contains("·"), "the banner's body has no thread mark either")
   check(reply.communication?.groupName == "#디자인", "with the room's name")
   check(inDesign.communication?.isThreadReply == false && inDesign.communication?.messageBody == "시안 확인 부탁드려요", "a top-level message has no thread mark")
 
@@ -680,7 +682,7 @@ do {
   check(!hidden.showsResolvedText, "and the notification is marked as not saying what it is")
   check(hidden.communication?.messageBody.contains("시안") == false && hidden.display.body.contains("시안") == false, "none of the text is anywhere in it")
   let hiddenReply = P.plan(envelope: envelope("mention", category: "momo.mention", thread: threadRoot), resolution: resolution(doh), settings: previewOff, channel: design, avatarPNG: face)
-  check(hiddenReply.communication?.messageBody == "스레드 · 새 메시지", "a thread reply with the preview off keeps only the thread mark")
+  check(hiddenReply.communication?.messageBody == "새 메시지" && hiddenReply.communication?.groupName == "#디자인", "a thread reply with the preview off says only 새 메시지, under its room's name (#5660: no thread mark)")
   let hiddenPhoto = P.plan(envelope: envelope("dm", channel: dmChannel), resolution: resolution(doh, body: "사진 2장"), settings: previewOff, channel: directChannel, avatarPNG: face)
   check(hiddenPhoto.display.body == "새 메시지", "a photo count is a preview too")
 

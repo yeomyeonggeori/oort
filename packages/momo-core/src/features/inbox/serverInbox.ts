@@ -246,3 +246,14 @@ export function asInboxEvent(data: unknown): InboxEvent | null {
   const itemId = str(record(frame?.payload), "item_id");
   return itemId === undefined ? { type } : { type, itemId };
 }
+
+/** 같은 개인 채널의 「따라가는 스레드의 안 읽은 답글 수가 바뀌었을 수 있다」 신호(서버 #5667, ADR-0124 증보 4). */
+export const FOLLOWED_UNREAD_EVENT = "followed_unread.updated";
+
+/**
+ * 개인 채널의 발행물이 `followed_unread.updated`인가. 프레임은 id만 싣고 수를 싣지 않는다: 뜻은 「읽음 투영을 다시 읽어라」뿐이라
+ * `type`만 본다. 인박스 신호와 따로 둔다 — 인박스 목록은 이 신호로 다시 읽을 까닭이 없다(인박스 항목이 생기지 않는 직접 따라가기에도 온다).
+ */
+export function isFollowedUnreadSignal(data: unknown): boolean {
+  return str(record(data), "type") === FOLLOWED_UNREAD_EVENT;
+}

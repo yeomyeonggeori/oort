@@ -261,8 +261,8 @@ export interface WakeWatchDeps {
   readonly now: () => number;
   readonly setTimer: (run: () => void, ms: number) => unknown;
   readonly clearTimer: (handle: unknown) => void;
-  /** 타이머가 `LATE_WAKE_MS` 넘게 늦게 깼다. 종류는 늦은 정도의 칸이다. */
-  readonly onLate: (kind: ConnectionDiagKind, at: number) => void;
+  /** 타이머가 `LATE_WAKE_MS` 넘게 늦게 깼다. 종류는 늦은 정도의 칸이고, `lateMs`는 늦은 정도 그대로다(#5660: 소켓을 다시 열지 정하는 쪽이 쓴다). */
+  readonly onLate: (kind: ConnectionDiagKind, at: number, lateMs: number) => void;
 }
 
 /**
@@ -278,8 +278,9 @@ export function startWakeWatch(deps: WakeWatchDeps, periodMs: number = WAKE_WATC
     handle = null;
     if (stopped) return;
     const at = deps.now();
-    const kind = wakeLateDiagKind(at - dueAt);
-    if (kind !== null) deps.onLate(kind, at);
+    const lateMs = at - dueAt;
+    const kind = wakeLateDiagKind(lateMs);
+    if (kind !== null) deps.onLate(kind, at, lateMs);
     dueAt = at + periodMs;
     handle = deps.setTimer(tick, periodMs);
   }

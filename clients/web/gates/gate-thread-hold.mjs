@@ -19,7 +19,9 @@
 //   L2 휠로 **내리는 중** 위 밖 줄 ±120px → 이동 차 ≤ 2px · 거꾸로 간 프레임 0
 //   L3 내리다 멈춘 지 60ms 뒤 ±120px → ≤ 2px
 //   L4 올리는 중 · 올리다 멈춘 직후 +120px — **기록만**(가상 목록의 위쪽 보정 몫, 이 칸이 바꾸지 않는 길)
-//   L5 휠로 한 번 내린 뒤 30 · 80 · 160ms 에 「최신 메시지로 이동」 → 끝 바닥 거리가 휠 없이 누른 값과 ±1px 안(검수 H1 — WebKit 에서 360~526px 못 미쳤다)
+//   L5 휠로 한 번 내린 뒤 30 · 80 · 160ms 에 「최신 메시지로 이동」 → 끝 바닥 거리 ≤ 9px(휠 없이 누른 값 7px 이 상한 근거 — 검수 1·2회차)
+//   L6 휠 뒤 30 · 80 · 160ms 에 키보드 End(바닥 ≤ 9px) · PageDown(≥ 450px) — 줄에 초점을 둔 채(검수 2회차 H1)
+//   L7 누른 뒤에도 휠이 이어진다(20ms 간격 6px 세 번) → 바닥 ≤ 9px (검수 2회차 H1)
 //
 // 재는 법: 프레임마다 그려진 모양(rAF 뒤의 태스크에서 읽고, 그 사이 DOM 이 바뀐 표본은 버린다 — #5641 `still-measure` 와 같은 규칙)의
 // 보던 줄 위 끝(창 좌표) · scrollTop · 바닥 거리를 적는다. 휠 장면은 A/B 다: 같은 휠 열을 자람 없이 돌린 값이 기준이라 엔진이 휠을
@@ -184,63 +186,48 @@ async function installBackend(context) {
     }
     return json(route, {});
   });
+  // 가짜 실시간(센트리퓨고 JSON 프로토콜의 최소판). 공용 가짜 서버(`timeline-fake-backend`)와 같은 `routeWebSocket` 이다: 앱이 소켓 객체를 직접
+  // 건드려도(다시 붙기 · 조용히 죽은 소켓 판정) 진짜 소켓처럼 구는 쪽이 낫다.
+  const sockets = new Set();
+  let offset = 0;
+  await context.routeWebSocket(/\/connection\/websocket/, (ws) => {
+    const entry = { ws, channels: new Set() };
+    sockets.add(entry);
+    ws.onClose(() => sockets.delete(entry));
+    ws.onMessage((raw) => {
+      for (const line of String(raw).split("\n")) {
+        if (!line.trim()) continue;
+        const command = JSON.parse(line);
+        if (command.connect) ws.send(JSON.stringify({ id: command.id, connect: { client: "thread-hold", version: "6.0.0" } }));
+        else if (command.subscribe) {
+          entry.channels.add(command.subscribe.channel);
+          ws.send(JSON.stringify({ id: command.id, subscribe: { recoverable: true, positioned: true, epoch: "thread-hold", offset, recovered: false, publications: [] } }));
+        } else if (command.unsubscribe) {
+          entry.channels.delete(command.unsubscribe.channel);
+          ws.send(JSON.stringify({ id: command.id, unsubscribe: {} }));
+        } else if (command.id !== undefined) {
+          const key = Object.keys(command).find((name) => name !== "id") ?? "ping";
+          ws.send(JSON.stringify({ id: command.id, [key]: {} }));
+        }
+      }
+    });
+  });
+  state.subscribed = () => [...sockets].some((entry) => [...entry.channels].some((name) => name.startsWith("ch:")));
+  state.publish = (frame) => {
+    offset += 1;
+    const stamped = { ...frame, ts: Date.now() };
+    for (const entry of sockets) {
+      for (const name of entry.channels) {
+        if (name.startsWith("ch:")) entry.ws.send(JSON.stringify({ push: { channel: name, pub: { data: stamped, offset } } }));
+      }
+    }
+  };
   return state;
 }
 
-/** 가짜 실시간(센트리퓨고 JSON 프로토콜의 최소판) + 페이지 안의 재는 도구. */
+/** 페이지 안의 재는 도구(가짜 실시간은 `installBackend` 의 `routeWebSocket` 이 맡는다). */
 async function installPage(page) {
   await page.addInitScript(() => {
-    const sockets = new Set();
-    let offset = 0;
-    class GateWebSocket {
-      static CONNECTING = 0;
-      static OPEN = 1;
-      static CLOSING = 2;
-      static CLOSED = 3;
-      constructor(url) {
-        this.url = url;
-        this.readyState = GateWebSocket.CONNECTING;
-        this.subscriptions = new Set();
-        sockets.add(this);
-        queueMicrotask(() => {
-          this.readyState = GateWebSocket.OPEN;
-          this.onopen?.(new Event("open"));
-        });
-      }
-      send(data) {
-        const out = [];
-        for (const line of String(data).trim().split("\n")) {
-          const command = JSON.parse(line);
-          if (command.connect) out.push({ id: command.id, connect: { client: "thread-hold", version: "6" } });
-          else if (command.subscribe) {
-            this.subscriptions.add(command.subscribe.channel);
-            out.push({ id: command.id, subscribe: { recoverable: true, positioned: true, recovered: true, epoch: "thread-hold", offset } });
-          } else if (command.unsubscribe) {
-            this.subscriptions.delete(command.unsubscribe.channel);
-            out.push({ id: command.id, unsubscribe: {} });
-          } else out.push({ id: command.id });
-        }
-        queueMicrotask(() => this.onmessage?.(new MessageEvent("message", { data: out.map((x) => JSON.stringify(x)).join("\n") })));
-      }
-      close() {
-        this.readyState = GateWebSocket.CLOSED;
-        sockets.delete(this);
-        this.onclose?.(new CloseEvent("close", { code: 1000 }));
-      }
-    }
-    window.WebSocket = GateWebSocket;
-    window.__holdSubscribed = () => [...sockets].some((s) => [...s.subscriptions].some((name) => name.startsWith("ch:")));
-    window.__holdPublish = (frame) => {
-      offset += 1;
-      const stamped = { ...frame, ts: Date.now() };
-      for (const socket of sockets) {
-        for (const name of socket.subscriptions) {
-          if (!name.startsWith("ch:")) continue;
-          socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ push: { channel: name, pub: { data: stamped, offset } } }) }));
-        }
-      }
-    };
-
     // ---- 재는 도구 ----
     const round = (value) => Math.round(value * 100) / 100;
     const H = (window.__hold = { gen: 0, frames: [], marks: [] });
@@ -344,7 +331,7 @@ async function installPage(page) {
 const TIMELINE = '[data-testid="timeline-virtuoso"]';
 const THREAD = '[data-testid="thread-panel"] [data-message-scroll-container]';
 
-async function openChannel(page) {
+async function openChannel(page, backend) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await advanceToAccount(page);
   await page.getByTestId("login-email").fill("haneul@example.test");
@@ -352,7 +339,9 @@ async function openChannel(page) {
   await page.getByTestId("login-submit").click();
   await page.locator(`[data-testid="channel-item"][data-channel-id="${channelId}"]`).click();
   await page.getByTestId("composer-input").waitFor();
-  await page.waitForFunction(() => window.__holdSubscribed?.() === true, null, { timeout: 15_000 });
+  for (const start = Date.now(); !backend.subscribed(); await wait(100)) {
+    if (Date.now() - start > 15_000) throw new Error("채널 구독이 15초 안에 서지 않았다");
+  }
   await page.waitForFunction(
     (selector) => {
       const node = document.querySelector(selector);
@@ -690,16 +679,12 @@ async function threadScenes(page, backend, rows, tag, measured) {
     async () => {
       const seq = 3000 + rows.length;
       backend.replies.push(row({ id: replyId, seq, rootId: ROOT_MSG, authorMemberId: peerId, body: replyBody, createdAtMs: Date.now() }));
-      await page.evaluate(
-        ({ ch, author, id, seq, root, body }) =>
-          window.__holdPublish({
-            type: "message.new",
-            v: 1,
-            seq,
-            payload: { id, channel_id: ch, root_id: root, seq, type: "text", body, author_member_id: author, hlc_ts: Date.now(), hlc_count: 0 },
-          }),
-        { ch: channelId, author: peerId, id: replyId, seq, root: ROOT_MSG, body: replyBody }
-      );
+      backend.publish({
+        type: "message.new",
+        v: 1,
+        seq,
+        payload: { id: replyId, channel_id: channelId, root_id: ROOT_MSG, seq, type: "text", body: replyBody, author_member_id: peerId, hlc_ts: Date.now(), hlc_count: 0 },
+      });
     },
     async (grew) => grew >= 20 && (await page.locator(THREAD).getByText(replyBody).count()) === 1
   );
@@ -781,10 +766,10 @@ async function threadSwitchScene(page, backend, rows, tag, measured) {
 async function measureLongRoot(browser) {
   const context = await browser.newContext({ viewport: { width: viewport.width, height: 640 }, deviceScaleFactor: 2, locale: "ko-KR", colorScheme: "light" });
   try {
-    await installBackend(context);
+    const backend = await installBackend(context);
     const page = await context.newPage();
     await installPage(page);
-    await openChannel(page);
+    await openChannel(page, backend);
     await openThread(page, LONG_ROOT_MSG, 31);
     // 루트 높이가 두 번 연달아 같을 때까지 기다려 읽는다(그림 · 글꼴이 늦게 자리를 잡을 수 있다).
     let rootHeight = -1;
@@ -800,8 +785,13 @@ async function measureLongRoot(browser) {
   }
 }
 
-/** L5: 휠로 한 번 내린 뒤 `afterMs` 에 「최신 메시지로 이동」을 누른다(null 이면 휠 없이 — 기준). 끝 바닥 거리를 돌려준다. */
-async function jumpRun(page, afterMs) {
+/**
+ * L5~L7: 휠로 한 번 내린 뒤 `afterMs` 에 이동을 한다(null 이면 휠 없이 — 기준). `via` 는 이동 방법:
+ *   click    「최신 메시지로 이동」 누르기(L5)  ·  end  키보드 End(L6)  ·  pagedown  키보드 PageDown(L6)
+ *   clickWheels  누른 뒤 20ms 간격으로 작은 휠 세 번이 이어진다(L7 — 휠이 이어져도 바닥에 간다).
+ * 끝 바닥 거리 · 움직인 거리를 돌려준다.
+ */
+async function jumpRun(page, afterMs, via = "click") {
   await park(page, TIMELINE, 0.4);
   await page.waitForFunction(() => document.querySelector('[data-testid="jump-latest"]') !== null, null, { timeout: 5000 }).catch(() => {});
   const box = await page.locator(TIMELINE).boundingBox();
@@ -810,35 +800,89 @@ async function jumpRun(page, afterMs) {
     window.__hold.node = document.querySelector('[data-testid="timeline-virtuoso"]');
     window.__hold.watch = null;
   });
+  const focused = await page.evaluate(() => {
+    const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+    const edge = list.getBoundingClientRect();
+    const row = [...list.querySelectorAll('[data-testid="timeline-message"]')].find((el) => el.getBoundingClientRect().top > edge.top + 80);
+    row?.focus();
+    return row !== undefined && list.contains(document.activeElement) && document.activeElement !== list;
+  });
   await record(page);
   await wait(100);
+  const topBefore = await page.evaluate(() => window.__hold.node.scrollTop);
   if (afterMs !== null) {
     await page.mouse.wheel(0, WHEEL.dy);
     await wait(afterMs);
   }
-  const pill = await page.evaluate(() => {
-    const button = document.querySelector('[data-testid="jump-latest"]');
-    if (button === null) return false;
-    button.click();
-    return true;
-  });
+  let pill = true;
+  if (via === "click" || via === "clickWheels") {
+    pill = await page.evaluate(() => {
+      const button = document.querySelector('[data-testid="jump-latest"]');
+      if (button === null) return false;
+      button.click();
+      return true;
+    });
+    if (via === "clickWheels") {
+      for (let i = 0; i < 3; i += 1) {
+        await wait(20);
+        await page.mouse.wheel(0, 6);
+      }
+    }
+  } else await page.keyboard.press(via === "end" ? "End" : "PageDown");
   await wait(1800);
   const { frames } = await stop(page);
   const last = frames[frames.length - 1];
-  return { pill, gap: last ? last.gap : null, top: last ? last.top : null };
+  return { pill, focused, gap: last ? last.gap : null, moved: last ? round2(last.top - topBefore) : null, client: viewport.height };
 }
+
+/** 이동 뒤 바닥 거리 상한(px): 이 장면의 원래 값이 7px 이다(휠 없이 누른 값). 기준 실행과 견주지 않고 상한으로 단정한다(검수 2회차 M1). */
+const JUMP_GAP_MAX = 9;
 
 async function jumpScenes(page, rows) {
   const base = await jumpRun(page, null);
-  rows.push({ scene: "타임라인 최신 메시지로 이동 — 휠 없이(기준)", verdict: base.pill && base.gap !== null ? "기록" : "FAIL", gapPx: base.gap, note: `${base.pill ? "" : "장면을 못 만들었다(이동 버튼이 없다) · "}끝 바닥 거리 ${base.gap}px` });
+  rows.push({
+    scene: "타임라인 최신 메시지로 이동 — 휠 없이(기준)",
+    verdict: base.pill && base.gap !== null && base.gap <= JUMP_GAP_MAX ? "PASS" : "FAIL",
+    gapPx: base.gap,
+    note: `${base.pill ? "" : "장면을 못 만들었다(이동 버튼이 없다) · "}끝 바닥 거리 ${base.gap}px (상한 ${JUMP_GAP_MAX})`,
+  });
   for (const afterMs of [30, 80, 160]) {
     const run = await jumpRun(page, afterMs);
-    const built = run.pill && base.gap !== null && run.gap !== null;
+    const built = run.pill && run.gap !== null;
     rows.push({
       scene: `타임라인 휠 뒤 ${afterMs}ms 에 최신 메시지로 이동`,
-      verdict: built && run.gap <= base.gap + LIMIT.bottomPx ? "PASS" : "FAIL",
+      verdict: built && run.gap <= JUMP_GAP_MAX ? "PASS" : "FAIL",
       gapPx: run.gap,
-      note: `${built ? "" : "장면을 못 만들었다 · "}끝 바닥 거리 ${run.gap}px (휠 없이 ${base.gap}px)`,
+      note: `${built ? "" : "장면을 못 만들었다 · "}끝 바닥 거리 ${run.gap}px (상한 ${JUMP_GAP_MAX})`,
+    });
+  }
+  // L6 키보드: 휠 직후 End → 바닥 · PageDown → 한 쪽 가까이(휠 30px 에 더해 ≥ 450px).
+  for (const afterMs of [30, 80, 160]) {
+    const end = await jumpRun(page, afterMs, "end");
+    const builtEnd = end.focused && end.gap !== null && end.moved !== null && end.moved > 200;
+    rows.push({
+      scene: `타임라인 휠 뒤 ${afterMs}ms 에 키보드 End`,
+      verdict: builtEnd && end.gap <= JUMP_GAP_MAX ? "PASS" : "FAIL",
+      gapPx: end.gap,
+      note: `${builtEnd ? "" : "장면을 못 만들었다 · "}줄 초점 ${end.focused} · 끝 바닥 거리 ${end.gap}px (상한 ${JUMP_GAP_MAX}) · 움직인 거리 ${end.moved}px`,
+    });
+    const page_ = await jumpRun(page, afterMs, "pagedown");
+    const builtPage = page_.focused && page_.moved !== null;
+    rows.push({
+      scene: `타임라인 휠 뒤 ${afterMs}ms 에 키보드 PageDown`,
+      verdict: builtPage && page_.moved >= 450 ? "PASS" : "FAIL",
+      note: `${builtPage ? "" : "장면을 못 만들었다 · "}줄 초점 ${page_.focused} · 움직인 거리 ${page_.moved}px (하한 450 — 휠 30 + 한 쪽)`,
+    });
+  }
+  // L7 누른 뒤에도 휠이 이어진다.
+  for (const afterMs of [30, 80, 160]) {
+    const run = await jumpRun(page, afterMs, "clickWheels");
+    const built = run.pill && run.gap !== null;
+    rows.push({
+      scene: `타임라인 휠 뒤 ${afterMs}ms 에 최신 메시지로 이동 · 이어서 휠 세 번`,
+      verdict: built && run.gap <= JUMP_GAP_MAX ? "PASS" : "FAIL",
+      gapPx: run.gap,
+      note: `${built ? "" : "장면을 못 만들었다 · "}끝 바닥 거리 ${run.gap}px (상한 ${JUMP_GAP_MAX})`,
     });
   }
 }
@@ -863,17 +907,17 @@ async function runEngine(browser, engine) {
   const backend = await installBackend(context);
   const page = await context.newPage();
   await installPage(page);
-  await openChannel(page);
+  await openChannel(page, backend);
   if (sets.includes("timeline")) await timelineScenes(page, rows);
   if (sets.includes("thread")) await threadScenes(page, backend, rows, "", await measureLongRoot(browser));
   await context.close();
   if (sets.includes("thread")) {
     // T6 움직임 줄이기: 같은 위 읽기 장면을 한 번.
     const reduced = await browser.newContext({ viewport, deviceScaleFactor: 2, locale: "ko-KR", colorScheme: "light", reducedMotion: "reduce" });
-    await installBackend(reduced);
+    const reducedBackend = await installBackend(reduced);
     const reducedPage = await reduced.newPage();
     await installPage(reducedPage);
-    await openChannel(reducedPage);
+    await openChannel(reducedPage, reducedBackend);
     await openThread(reducedPage);
     await readingScene(reducedPage, { name: "스레드(움직임 줄이기)", selector: THREAD, rowSelector: "[data-message-id]", park: 0.5 }, rows);
     await reduced.close();
