@@ -66,7 +66,7 @@ Rules:
 The scales are closed sets in `tokens.css`: the dynamic spacing multiplier, the stock radius scale, and the stock text sizes are all cleared. An off-grid class does not silently render at the wrong size, it fails to compile.
 
 - **Spacing only from {4, 8, 12, 16, 24, 32}px** = Tailwind `1, 2, 3, 4, 6, 8` (plus `0` and the 1px `px` hairline). `p-5`, `py-1.5`, `p-[13px]`, `gap-[15px]` are violations. Control heights are a separate axis: `h-control-sm` / `h-control` / `h-control-lg`.
-- **Radius only from the web ladder** (ADR-0189 D6): `rounded-sm` 6 (code chip) / `rounded-md` 10 (badge, tag, menu item) / `rounded-lg` 14 (row selection, input vessel) / `rounded-xl` 18 (pane) / `rounded-2xl` 20 (card, dialog) / `rounded-full` (buttons, icon buttons, count badges). No `rounded-[12px]`, no mixing by feel.
+- **Radius only from the web ladder** (ADR-0189 D6): `rounded-sm` 6 (code chip) / `rounded-md` 10 (badge, tag, menu item) / `rounded-lg` 14 (row selection, input vessel; 구분선 있는 표의 줄은 각진 띠(README §2.4)) / `rounded-xl` 18 (pane) / `rounded-2xl` 20 (card, dialog) / `rounded-full` (buttons, icon buttons, count badges). No `rounded-[12px]`, no mixing by feel.
 - **Typography via semantic roles, not size inflation**: `text-timestamp` / `text-meta` / `text-body` / `text-title` / `text-display`. No `text-sm`, no `text-[13px]`, no external font. Hierarchy via weight + `text-ink-muted`, max 2 weights per component.
 - **Numbers** (counters, costs, seq, token counts) carry `data-numeric` (tabular-nums from the base layer) plus `font-mono` and right-alignment where they form a column. Never animate faster than the data changes; no count-up theater.
 - **Shell geometry** comes from named utilities (`app-shell`), not arbitrary grid values.
