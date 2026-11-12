@@ -333,8 +333,7 @@ describe.skipIf(ENGINES.length === 0)("접힌 레일 카드는 초안이 자라�
 
 /**
  * 시험대의 셈이 실제로 움직이는지(위 「다시 시작 0번」 단정이 헛돌지 않는지)와, 단추에 닿는 길이 Tab이라는 것. 틀에 초점이 선 뒤
- * Tab → 「지금 다시 시작」 → Enter면 다시 시작 1번(Chromium). WebKit 기본 설정은 Tab이 단추에 서지 않아(macOS 「키보드 탐색」 꺼짐과
- * 같음) 누름으로 셈만 확인한다.
+ * Tab → 「지금 다시 시작」 → Enter면 다시 시작 1번(두 엔진, #5708부터 WebKit도 Tab으로).
  */
 describe.skipIf(ENGINES.length === 0)("틀에서 Tab으로 단추에 닿고, 그때만 다시 시작한다 (#5661 수리 3회차)", () => {
   it.each(focusCells)("$engine $placement", async (cell) => {
@@ -345,14 +344,10 @@ describe.skipIf(ENGINES.length === 0)("틀에서 Tab으로 단추에 닿고, 그
       await page.keyboard.press("Enter");
       await settledCard(page);
       expect(await focusedTestId(page)).toBe("update-card");
-      if (cell.engine === "chromium") {
-        await page.keyboard.press("Tab");
-        expect(await focusedTestId(page)).toBe("update-card-now");
-        await page.keyboard.press("Enter");
-      } else {
-        // WebKit 기본값에서는 틀에서 Tab이 `body`로 나가 카드가 닫힌다(잰 값, 수리 3회차 인계). 셈은 누름으로 확인한다.
-        await page.locator('[data-testid="update-card-now"]').click();
-      }
+      // 두 엔진 모두 Tab으로 단추에 닿는다: 카드가 직접 옮기므로 WebKit 기본 설정(Tab이 단추에 서지 않음)에서도 같다(#5708).
+      await page.keyboard.press("Tab");
+      expect(await focusedTestId(page)).toBe("update-card-now");
+      await page.keyboard.press("Enter");
       await page.waitForTimeout(200);
       expect(await relaunches(page)).toBe(1);
     } finally {
@@ -389,6 +384,91 @@ describe.skipIf(ENGINES.length === 0)("설정 전면의 예고는 창 높이와 
       }
     } finally {
       await close();
+    }
+  }, 30_000);
+});
+
+const tabCells = ENGINES.flatMap((engine) => (["rail", "row"] as const).map((placement) => ({ engine, placement })));
+
+/**
+ * Tab이 카드를 닫지 않고 카드 안 단추로 간다(#5708). 틀 → Tab → 첫 단추(「지금 말고」) → Tab → 마지막 단추(「지금 다시 시작」) → Tab →
+ * 첫 단추(돈다). Shift+Tab은 틀에서 마지막 단추, 첫 단추에서 마지막 단추. 두 엔진 모두 카드가 열린 채여야 한다(WebKit 기본 설정은 브라우저
+ * 순서에 맡기면 초점이 `body`로 나가 카드가 닫혔다). 사보타주: `UpdateButton.tsx`의 `moveCardFocus`(카드의 `onKeyDown`)를 빼면 WebKit 칸이 붉다.
+ */
+describe.skipIf(ENGINES.length === 0)("카드의 Tab은 카드가 직접 단추로 옮기고 끝에서 돈다 (#5708)", () => {
+  it.each(tabCells)("$engine $placement: Tab · Shift+Tab", async (cell) => {
+    const { page, close } = await openHarness(cell.engine, WINDOWS[0], "countdown", cell.placement);
+    try {
+      // 예고(카운트다운) 카드는 단추가 둘이다(「지금 말고」 · 「지금」). 저절로 열린 카드는 초점이 없으니 틀에 초점을 둔다.
+      await settledCard(page);
+      await page.locator('[data-testid="update-card"]').focus();
+      expect(await focusedTestId(page)).toBe("update-card");
+      const seen: Array<string | null> = [];
+      for (const key of ["Tab", "Tab", "Tab", "Tab"]) {
+        await page.keyboard.press(key);
+        seen.push(await focusedTestId(page));
+      }
+      expect(seen).toEqual(["update-card-defer", "update-card-now", "update-card-defer", "update-card-now"]);
+      expect(await page.locator('[data-testid="update-card"]').count()).toBe(1);
+      await page.keyboard.press("Shift+Tab");
+      expect(await focusedTestId(page)).toBe("update-card-defer");
+      await page.keyboard.press("Shift+Tab");
+      expect(await focusedTestId(page)).toBe("update-card-now");
+      // 틀로 되돌아와 Shift+Tab: 마지막 단추.
+      await page.locator('[data-testid="update-card"]').focus();
+      await page.keyboard.press("Shift+Tab");
+      expect(await focusedTestId(page)).toBe("update-card-now");
+      await page.waitForTimeout(200);
+      expect(await relaunches(page)).toBe(0);
+    } finally {
+      await close();
+    }
+  }, 30_000);
+});
+
+/**
+ * 키보드로 연 카드 틀에는 보이는 초점 고리(디자인 시스템의 `focus-ring`, 2px 인셋)가 서고, 마우스로 열면 서지 않는다(#5708).
+ * 사보타주: `UpdateButton.tsx` 카드의 `focus-visible:focus-ring`을 빼면 키보드 칸이 붉고, 알약 `onPill`의 `applyKeyboardModality`를 빼면
+ * 역시 키보드 칸이 붉다.
+ */
+describe.skipIf(ENGINES.length === 0)("카드 틀의 초점 고리: 키보드로 열면 서고 마우스로 열면 서지 않는다 (#5708)", () => {
+  const ring = (page: Page) =>
+    page.evaluate(() => {
+      const card = document.querySelector('[data-testid="update-card"]');
+      if (!(card instanceof HTMLElement)) return null;
+      const style = getComputedStyle(card);
+      return { focused: document.activeElement === card, style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+    });
+
+  it.each(tabCells)("$engine $placement", async (cell) => {
+    const keyboard = await openHarness(cell.engine, WINDOWS[0], "hold", cell.placement);
+    try {
+      const { page } = keyboard;
+      await settledCard(page);
+      await page.keyboard.press("Escape");
+      await page.locator('[data-testid="update-card"]').waitFor({ state: "detached" });
+      // 닫힌 카드가 초점을 알약으로 돌려주는 것은 조금 뒤(약 15ms)다. 그 전에 Enter 를 누르면 뒤늦은
+      // 돌려주기가 새 카드에서 초점을 빼앗아 카드가 닫힌다 — 초점이 돌아온 것을 보고 누른다.
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "update-pill");
+      await page.keyboard.press("Enter");
+      await settledCard(page);
+      expect(await ring(page)).toEqual({ focused: true, style: "solid", width: 2 });
+    } finally {
+      await keyboard.close();
+    }
+    const mouse = await openHarness(cell.engine, WINDOWS[0], "hold", cell.placement);
+    try {
+      const { page } = mouse;
+      await settledCard(page);
+      await page.keyboard.press("Escape");
+      await page.locator('[data-testid="update-card"]').waitFor({ state: "detached" });
+      await page.locator('[data-testid="update-pill"]').click();
+      await settledCard(page);
+      const mouseRing = await ring(page);
+      expect(mouseRing?.focused).toBe(true);
+      expect(mouseRing?.style === "none" || mouseRing?.width === 0).toBe(true);
+    } finally {
+      await mouse.close();
     }
   }, 30_000);
 });

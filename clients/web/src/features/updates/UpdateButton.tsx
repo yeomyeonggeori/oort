@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ArrowDownToLine, Check, CircleAlert, RefreshCw } from "lucide-react";
+import { applyKeyboardModality } from "@/design/focusModality";
 import { Button } from "@/design/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/design/ui/popover";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
@@ -38,9 +39,9 @@ import {
 // 않아(`startUpdateWatch` 는 데스크탑 전용) 아무것도 그리지 않는다.
 //
 // 누르면: 새 버전이면 받기를 시작하고, 어떤 상태든 줄 위에 카드가 열린다. 받는
-// 동안은 게이지, 끝나면 3초 뒤 자동으로 다시 실행(카운트다운은 store 가 들고 있어
+// 동안은 게이지, 끝나면 3초 뒤 자동으로 다시 시작(카운트다운은 store 가 들고 있어
 // 카드를 닫아도 계속된다), 실패하면 이유와 「다시 확인」. 이 맥에서 로컬 작업이 돌면
-// 카운트다운 대신 「작업이 끝나면 다시 시작해요」와 「지금 다시 시작」, 그리고 지금 누르면
+// 카운트다운 대신 「이 맥의 작업이 끝나면 다시 시작해요」와 「지금 다시 시작」, 그리고 지금 누르면
 // 무엇이 끊기는지 한 줄을 보인다(#5661, 판정은 코어 `localWork.ts`).
 //
 // 툴팁은 이 앱의 관례(`title`)가 아니라 직접 그린다. 네이티브 `title` 은 0.7초
@@ -56,7 +57,7 @@ function cardTitle(state: UpdateState, countdown: number | null): string {
     case "installing":
       return "새 버전을 받는 중";
     case "installed":
-      return countdown === null ? "다시 실행해 주세요" : "곧 다시 실행돼요";
+      return countdown === null ? "다시 시작해 주세요" : "곧 다시 시작돼요";
     case "failed":
       return "업데이트하지 못했어요";
     case "checking":
@@ -98,6 +99,23 @@ function CardIcon({ state }: { state: UpdateState }) {
   if (state.kind === "failed")
     return <CircleAlert className={`${cls} text-danger`} aria-hidden="true" />;
   return <ArrowDownToLine className={`${cls} text-signal-text`} aria-hidden="true" />;
+}
+
+/**
+ * 카드 안에서 Tab은 카드가 직접 옮긴다(#5708): 틀(초점은 여기서 시작) → 첫 단추 → … → 마지막 단추 → 첫 단추, Shift+Tab은 거꾸로(틀에서는
+ * 마지막 단추). WebKit 기본 설정은 Tab이 단추에 서지 않아(맥 「키보드 탐색」 꺼짐) 브라우저 순서에 맡기면 초점이 `body`로 나가 카드가 닫힌다.
+ */
+function moveCardFocus(event: KeyboardEvent<HTMLElement>): void {
+  if (event.key !== "Tab" || event.ctrlKey || event.metaKey) return;
+  const stops = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)"));
+  if (stops.length === 0) return;
+  event.preventDefault();
+  const at = stops.indexOf(document.activeElement as HTMLElement);
+  const step = event.shiftKey ? -1 : 1;
+  const next = at === -1 ? (event.shiftKey ? stops.length - 1 : 0) : (at + step + stops.length) % stops.length;
+  // Radix 초점 범위(`FocusScope`, 끝에서 도는 규칙)도 같은 키를 읽고 끝 단추에서 스스로 옮긴다. 같은 자리로 가지만 우리가 먼저 옮기면
+  // 그 뒤 범위가 옮긴 자리를 끝으로 읽고 한 번 더 옮겨 버린다 — 그 처리가 끝난 뒤에 옮긴다.
+  queueMicrotask(() => stops[next]?.focus());
 }
 
 export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail" }) {
@@ -169,7 +187,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 「다시 확인」을 누른 사람이 결과를 보기 전에 줄이 사라지면 아무 일도 없었던 것처럼 읽힌다.
   if (!pillWorthShowing(state) && !open) return null;
 
-  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 실행돼요」는 거짓이다(수리 2회차).
+  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 시작돼요」는 거짓이다(수리 2회차).
   const stopped = state.kind === "installed" && hold === null && countdown === null;
   const tooltip = holding
     ? formatMessage("settings.updates.holdTitle")
@@ -182,8 +200,11 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 단추 줄은 설치를 마친 카드에만 이름을 단다(낭독 설명에 이어 붙임). 다른 상태의 단추는 그대로.
   const cardHasActions = state.kind === "installed";
 
-  const onPill = () => {
+  const onPill = (event: MouseEvent<HTMLButtonElement>) => {
     autoOpened.current = false;
+    // 키보드(Enter·Space)로 눌렀으면 표지를 올려 틀의 초점 고리가 서게 한다(#5708): Enter·Space는 표지를 올리지 않아 `pointer`인 채면 링이 걷힌다.
+    // 마우스로 누르면 `detail`이 1 이상이라 표지가 그대로(`pointer`) 링이 뜨지 않는다.
+    if (event.detail === 0) applyKeyboardModality(document);
     setOpen(true);
     if (state.kind === "available") void installUpdate();
   };
@@ -258,11 +279,13 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
         }}
         // 접힌 레일: 카드는 입력창 위쪽 끝보다 위에 선다(H2). 붙은 알약에서 떨어져도 끝까지 밀어 올린다.
         {...(rail ? { collisionPadding: { top: RAIL_CARD_GAP, bottom: readRailCardBottomPadding(buttonRef.current) }, sticky: "always" as const } : {})}
+
+        onKeyDown={moveCardFocus}
         aria-label="앱 업데이트"
         aria-describedby={cardHasActions ? `${textId} ${actionsId}` : textId}
         data-testid="update-card"
         data-update-state={state.kind}
-        className="update-card flex flex-col gap-3 p-4"
+        className="update-card flex flex-col gap-3 p-4 focus-visible:focus-ring"
       >
         <div className="flex items-start gap-3">
           <span className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-muted">
@@ -340,7 +363,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
               <Button
                 size="sm"
                 onClick={() => void relaunchIntoUpdate()}
-                aria-label="지금 다시 실행"
+                aria-label="지금 다시 시작"
                 data-testid="update-card-now"
               >
                 <RefreshCw aria-hidden="true" />
