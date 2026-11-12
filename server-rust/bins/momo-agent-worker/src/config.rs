@@ -722,18 +722,27 @@ fn env(key: &str) -> Option<String> {
     }
 }
 
-/// The raw value of an operator ceiling variable (#5685 review H1). Unlike [`env`], a value that is
-/// present but not UTF-8 stays a **value** (its bytes decoded lossily), so the number parser refuses it and
-/// the worker does not boot — it is never read as "unset", which for a ceiling means "no ceiling". Blank is
-/// still unset: the parser reads it so.
-fn env_ceiling(key: &str) -> Option<String> {
-    std::env::var_os(key).map(|raw| raw.to_string_lossy().into_owned())
+/// The raw value of an operator variable whose **absence opens something** — the three ceilings and the
+/// Hermes declarations (#5685 review H1 and its 마무리). Unlike [`env`], a value that is present but not UTF-8
+/// stays a **value** (its bytes decoded lossily, with a warning): a ceiling's number parser refuses it (the
+/// worker does not boot), a connection-mode declaration counts as present (G4 shut), and the tool lock and
+/// the kind declarations are not `1`/`true`/`yes`/`on` (not declared). It is never read as "unset". Blank is
+/// still unset: each reader reads it so.
+fn env_raw(key: &str) -> Option<String> {
+    let raw = std::env::var_os(key)?;
+    if raw.to_str().is_none() {
+        tracing::warn!(
+            variable = key,
+            "operator variable is not UTF-8; it is read as an unreadable value, never as unset"
+        );
+    }
+    Some(raw.to_string_lossy().into_owned())
 }
 
 /// One operator ceiling (`TEAM_AI_DAILY_*_CAP`): unset or empty = none, `0` = off, a positive
 /// number = the ceiling. The same rule the api reads it by (`parse_operator_cap`).
 fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
-    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env_ceiling(key).as_deref())
+    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env_raw(key).as_deref())
         .map_err(|invalid| ConfigError::NotANumber(invalid.0))
 }
 
@@ -743,7 +752,7 @@ fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
 fn operator_hermes_cap(
 ) -> Result<momo_workspace_actions::team_ai_limits::HermesCeiling, ConfigError> {
     operator_hermes_cap_from(
-        env_ceiling(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref(),
+        env_raw(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref(),
     )
 }
 
@@ -873,9 +882,11 @@ impl WorkerConfig {
             team_ai_daily_search_cap: operator_cap("TEAM_AI_DAILY_SEARCH_CAP")?,
             team_ai_task: team_ai_task_limits_from_env()?,
             team_ai_hermes_daily_cap: operator_hermes_cap()?,
-            // `env` already reads a blank value as unset; `from_lookup` applies the same rule again so the
-            // declarations do not depend on which helper a caller passes.
-            hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env),
+            // `from_lookup` reads a blank value as unset itself; `env_raw` keeps a value that is not UTF-8 as a
+            // value, so a connection-mode declaration that cannot be read still shuts G4 (#5685 마무리).
+            hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(
+                env_raw,
+            ),
             hermes_deadlines: HermesDeadlines::default(),
         })
     }
@@ -1113,6 +1124,8 @@ mod tests {
     /// #5685 review M3: the probe's line about the three operator ceilings — `hermes=<HermesCeiling> tokens=…
     /// searches=…` as the real `from_env()` read them, or `refused <ConfigError>` when it refused to boot.
     const CAPS_PROBE_LINE: &str = "OORT_CAPS_WIRING_PROBE ";
+    /// #5685 마무리: the probe's line about the Hermes declarations — `g4=<Result> image=<bool> search=<bool>`.
+    const DECL_PROBE_LINE: &str = "OORT_DECL_WIRING_PROBE ";
 
     /// The child half of [`the_strict_media_value_opens_the_door_switch_only_as_an_exact_one`]: it
     /// prints what the REAL `WorkerConfig::from_env()` made of the environment it was started with.
@@ -1132,6 +1145,12 @@ mod tests {
                     config.team_ai_hermes_daily_cap,
                     config.team_ai_daily_token_cap,
                     config.team_ai_daily_search_cap
+                );
+                println!(
+                    "\n{DECL_PROBE_LINE}g4={:?} image={} search={}",
+                    config.hermes.g4(),
+                    config.hermes.image_tool,
+                    config.hermes.search_tool
                 );
             }
             // no strict-media line: the strict test reads a refusal as "no answer" and fails, as before
@@ -1165,18 +1184,20 @@ mod tests {
     /// What the real `from_env()` makes of the operator ceilings when `vars` (raw, possibly not UTF-8) are the
     /// only operator variables in a child's environment: the probe's one ceilings line, without its marker.
     fn the_caps_from_env_in_a_child(vars: &[(&str, &std::ffi::OsStr)]) -> String {
+        the_probe_line(vars, CAPS_PROBE_LINE)
+    }
+
+    /// The probe's one line that starts with `marker`, without the marker.
+    fn the_probe_line(vars: &[(&str, &std::ffi::OsStr)], marker: &str) -> String {
         let (stdout, stderr) = probe_in_a_child(vars);
         let answers: Vec<&str> = stdout
             .lines()
-            .filter_map(|line| {
-                line.split_once(CAPS_PROBE_LINE)
-                    .map(|(_, answer)| answer.trim())
-            })
+            .filter_map(|line| line.split_once(marker).map(|(_, answer)| answer.trim()))
             .collect();
         match answers.as_slice() {
             [answer] => answer.to_string(),
             other => panic!(
-                "the probe must print exactly one ceilings line, got {other:?}:\n{stdout}\n{stderr}"
+                "the probe must print exactly one `{marker}` line, got {other:?}:\n{stdout}\n{stderr}"
             ),
         }
     }
@@ -1318,6 +1339,57 @@ mod tests {
         }
         for (label, vars, expected) in cases {
             assert_eq!(the_caps_from_env_in_a_child(&vars), expected, "{label}");
+        }
+    }
+
+    /// #5685 마무리: the Hermes declarations through the real `from_env()` in a child. A value that is present but
+    /// not UTF-8 is never "unset": a connection-mode declaration that cannot be read shuts G4 (absence would open
+    /// it), and an unreadable tool lock or kind declaration is "not declared" (the closed side, as before).
+    #[test]
+    fn the_hermes_declarations_reach_the_config_from_the_real_environment() {
+        use std::ffi::OsStr;
+        const LOCKED: &str = "OORT_COHOSTED_AGENT_TOOLS_LOCKED";
+        const CONNECTORS: &str = "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED";
+        const APPS: &str = "OORT_COHOSTED_AGENT_CONNECTOR_APPS";
+        const SEARCH: &str = "OORT_COHOSTED_AGENT_SEARCH_TOOL";
+        let line = |vars: &[(&str, &OsStr)]| the_probe_line(vars, DECL_PROBE_LINE);
+        let locked = (LOCKED, OsStr::new("1"));
+        let search = (SEARCH, OsStr::new("1"));
+        assert_eq!(
+            line(&[locked, search]),
+            "g4=Ok(()) image=false search=true",
+            "team default mode"
+        );
+        assert_eq!(
+            line(&[locked, search, (APPS, OsStr::new("com.momo.plugins.gmail"))]),
+            "g4=Err(ConnectionMode) image=false search=true"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            const IMAGE: &str = "OORT_COHOSTED_AGENT_IMAGE_TOOL";
+            let broken = OsStr::from_bytes(b"x\xff");
+            for name in [APPS, CONNECTORS] {
+                assert_eq!(
+                    line(&[locked, search, (name, broken)]),
+                    "g4=Err(ConnectionMode) image=false search=true",
+                    "{name} not UTF-8 is a value: connection mode, G4 shut"
+                );
+            }
+            assert_eq!(
+                line(&[(LOCKED, OsStr::from_bytes(b"1\xff")), search]),
+                "g4=Err(ToolsNotLocked) image=false search=true",
+                "an unreadable tool lock is not a lock"
+            );
+            assert_eq!(
+                line(&[
+                    locked,
+                    (SEARCH, OsStr::from_bytes(b"1\xff")),
+                    (IMAGE, OsStr::from_bytes(b"on\xff"))
+                ]),
+                "g4=Ok(()) image=false search=false",
+                "an unreadable kind is not declared"
+            );
         }
     }
 

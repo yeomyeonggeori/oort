@@ -1094,7 +1094,7 @@ pub fn team_ai_caps_from_lookup(
     use momo_workspace_actions::team_ai_limits::{
         parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
     };
-    let raw = |key: &str| lookup(key).map(|value| value.to_string_lossy().into_owned());
+    let raw = |key: &str| lookup(key).map(|value| operator_value_lossy(key, value));
     let read = |key: &'static str| match parse_operator_cap(key, raw(key).as_deref()) {
         Ok(cap) => cap,
         Err(invalid) => {
@@ -1137,7 +1137,32 @@ pub fn team_ai_hermes_ceiling(
 /// templates give it the worker's values (K-S2 flipped). The two kind declarations are the worker's alone and
 /// are not read here (v4.1).
 pub fn team_ai_hermes_from_env() -> momo_workspace_actions::team_ai_hermes::HermesDeclarations {
-    momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env)
+    team_ai_hermes_from_lookup(|key| std::env::var_os(key))
+}
+
+/// [`team_ai_hermes_from_env`] over a given lookup of raw values (#5685 마무리). A declaration that is present
+/// but not UTF-8 stays a **value**: a connection-mode declaration that cannot be read counts as present and
+/// shuts G4 (its absence would open it), and an unreadable tool lock is not a lock. `from_lookup` reads blank as
+/// unset itself.
+pub fn team_ai_hermes_from_lookup(
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> momo_workspace_actions::team_ai_hermes::HermesDeclarations {
+    momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(|key| {
+        lookup(key).map(|value| operator_value_lossy(key, value))
+    })
+}
+
+/// An operator variable whose absence opens something (a ceiling, a G4 declaration), as text: a value that is
+/// not UTF-8 is decoded lossily with a warning, so it stays an (unreadable) value and is never read as unset
+/// (#5685 review H1 and its 마무리).
+fn operator_value_lossy(key: &str, value: std::ffi::OsString) -> String {
+    if value.to_str().is_none() {
+        tracing::warn!(
+            variable = key,
+            "operator variable is not UTF-8; it is read as an unreadable value, never as unset"
+        );
+    }
+    value.to_string_lossy().into_owned()
 }
 
 fn claude_subscription_agents_from_env() -> bool {
@@ -3971,6 +3996,55 @@ mod tests {
             );
             let older = caps_of(vec![(TOKENS, broken()), (SEARCHES, broken())]);
             assert_eq!((older.daily_tokens, older.daily_searches), (None, None));
+        }
+    }
+
+    /// #5685 마무리: G4's declarations as the api reads them, through an injected lookup. A connection-mode
+    /// declaration that is present but not UTF-8 shuts G4 (its absence would open it); an unreadable tool lock
+    /// is not a lock (the closed side, as before).
+    #[test]
+    fn the_hermes_declarations_read_an_unreadable_value_as_a_value() {
+        use momo_workspace_actions::team_ai_hermes::AttestProblem;
+        use std::ffi::OsString;
+        const LOCKED: &str = "OORT_COHOSTED_AGENT_TOOLS_LOCKED";
+        const CONNECTORS: &str = "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED";
+        const APPS: &str = "OORT_COHOSTED_AGENT_CONNECTOR_APPS";
+        let g4 = |vars: Vec<(&'static str, OsString)>| {
+            team_ai_hermes_from_lookup(move |key| {
+                vars.iter()
+                    .find(|(name, _)| *name == key)
+                    .map(|(_, value)| value.clone())
+            })
+            .g4()
+        };
+        assert_eq!(
+            g4(vec![(LOCKED, OsString::from("1"))]),
+            Ok(()),
+            "team default mode"
+        );
+        assert_eq!(
+            g4(vec![
+                (LOCKED, OsString::from("1")),
+                (APPS, OsString::from("  "))
+            ]),
+            Ok(()),
+            "blank is unset"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let broken = || OsString::from_vec(b"x\xff".to_vec());
+            for name in [APPS, CONNECTORS] {
+                assert_eq!(
+                    g4(vec![(LOCKED, OsString::from("1")), (name, broken())]),
+                    Err(AttestProblem::ConnectionMode),
+                    "{name} not UTF-8"
+                );
+            }
+            assert_eq!(
+                g4(vec![(LOCKED, OsString::from_vec(b"1\xff".to_vec()))]),
+                Err(AttestProblem::ToolsNotLocked)
+            );
         }
     }
 
