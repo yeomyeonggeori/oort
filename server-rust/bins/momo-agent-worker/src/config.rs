@@ -722,19 +722,29 @@ fn env(key: &str) -> Option<String> {
     }
 }
 
+/// The raw value of an operator ceiling variable (#5685 review H1). Unlike [`env`], a value that is
+/// present but not UTF-8 stays a **value** (its bytes decoded lossily), so the number parser refuses it and
+/// the worker does not boot — it is never read as "unset", which for a ceiling means "no ceiling". Blank is
+/// still unset: the parser reads it so.
+fn env_ceiling(key: &str) -> Option<String> {
+    std::env::var_os(key).map(|raw| raw.to_string_lossy().into_owned())
+}
+
 /// One operator ceiling (`TEAM_AI_DAILY_*_CAP`): unset or empty = none, `0` = off, a positive
 /// number = the ceiling. The same rule the api reads it by (`parse_operator_cap`).
 fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
-    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env(key).as_deref())
+    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env_ceiling(key).as_deref())
         .map_err(|invalid| ConfigError::NotANumber(invalid.0))
 }
 
 /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7; 증보 2026-11-12, #5685): unset or blank = no ceiling,
-/// `0` = off, a positive number = the ceiling. A value that is not a whole number is an error here (the
-/// worker does not boot), like `TEAM_AI_DAILY_*_CAP`.
+/// `0` = off, a positive number = the ceiling. A value that is not a whole number (or not UTF-8) is an
+/// error here (the worker does not boot), like `TEAM_AI_DAILY_*_CAP`.
 fn operator_hermes_cap(
 ) -> Result<momo_workspace_actions::team_ai_limits::HermesCeiling, ConfigError> {
-    operator_hermes_cap_from(env(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref())
+    operator_hermes_cap_from(
+        env_ceiling(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref(),
+    )
 }
 
 /// [`operator_hermes_cap`] over a given raw value (the environment-free half its test reads).
@@ -1100,6 +1110,9 @@ mod tests {
     const PROBE_MARKER: &str = "OORT_TEST_STRICT_WIRING_PROBE";
     /// The one line the probe prints, followed by `true` or `false`.
     const PROBE_LINE: &str = "OORT_STRICT_WIRING_PROBE hosted_media_strict=";
+    /// #5685 review M3: the probe's line about the three operator ceilings — `hermes=<HermesCeiling> tokens=…
+    /// searches=…` as the real `from_env()` read them, or `refused <ConfigError>` when it refused to boot.
+    const CAPS_PROBE_LINE: &str = "OORT_CAPS_WIRING_PROBE ";
 
     /// The child half of [`the_strict_media_value_opens_the_door_switch_only_as_an_exact_one`]: it
     /// prints what the REAL `WorkerConfig::from_env()` made of the environment it was started with.
@@ -1110,10 +1123,20 @@ mod tests {
         if std::env::var_os(PROBE_MARKER).is_none() {
             return; // the parent test drives this one
         }
-        let config =
-            WorkerConfig::from_env().expect("the probe's minimal environment is a valid config");
         // `--nocapture` appends a test's output to the harness's `test … ... ` line: start a new one.
-        println!("\n{PROBE_LINE}{}", config.hosted_media_strict);
+        match WorkerConfig::from_env() {
+            Ok(config) => {
+                println!("\n{PROBE_LINE}{}", config.hosted_media_strict);
+                println!(
+                    "\n{CAPS_PROBE_LINE}hermes={:?} tokens={:?} searches={:?}",
+                    config.team_ai_hermes_daily_cap,
+                    config.team_ai_daily_token_cap,
+                    config.team_ai_daily_search_cap
+                );
+            }
+            // no strict-media line: the strict test reads a refusal as "no answer" and fails, as before
+            Err(error) => println!("\n{CAPS_PROBE_LINE}refused {error:?}"),
+        }
     }
 
     /// What the real `from_env()` makes of `OORT_HOSTED_MEDIA_STRICT=<value>` (`None`: not in the
@@ -1121,6 +1144,46 @@ mod tests {
     /// environment is the child's alone and no test here ever calls `set_var`, which would race every
     /// other test of the binary.
     fn the_door_switch_from_env_in_a_child(value: Option<&str>) -> bool {
+        let vars: Vec<(&str, &std::ffi::OsStr)> = value
+            .map(|value| (STRICT_VAR, std::ffi::OsStr::new(value)))
+            .into_iter()
+            .collect();
+        let (stdout, stderr) = probe_in_a_child(&vars);
+        let answers: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| line.split_once(PROBE_LINE).map(|(_, answer)| answer.trim()))
+            .collect();
+        match answers.as_slice() {
+            ["true"] => true,
+            ["false"] => false,
+            other => panic!(
+                "the probe must print exactly one `true`/`false` answer, got {other:?}:\n{stdout}\n{stderr}"
+            ),
+        }
+    }
+
+    /// What the real `from_env()` makes of the operator ceilings when `vars` (raw, possibly not UTF-8) are the
+    /// only operator variables in a child's environment: the probe's one ceilings line, without its marker.
+    fn the_caps_from_env_in_a_child(vars: &[(&str, &std::ffi::OsStr)]) -> String {
+        let (stdout, stderr) = probe_in_a_child(vars);
+        let answers: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| {
+                line.split_once(CAPS_PROBE_LINE)
+                    .map(|(_, answer)| answer.trim())
+            })
+            .collect();
+        match answers.as_slice() {
+            [answer] => answer.to_string(),
+            other => panic!(
+                "the probe must print exactly one ceilings line, got {other:?}:\n{stdout}\n{stderr}"
+            ),
+        }
+    }
+
+    /// Runs [`strict_wiring_probe_child`] in a child process with an empty environment plus `vars`, and
+    /// returns its stdout and stderr once it ran its one test.
+    fn probe_in_a_child(vars: &[(&str, &std::ffi::OsStr)]) -> (String, String) {
         // libtest names a test by its module path below the crate: `config::tests::<fn>`.
         let below_the_crate = module_path!().split_once("::").map_or("", |(_, rest)| rest);
         let test = format!("{below_the_crate}::strict_wiring_probe_child");
@@ -1134,27 +1197,17 @@ mod tests {
             .env_clear()
             .env(PROBE_MARKER, "1")
             .env("WORKER_DATABASE_URL", "postgres://probe.invalid/probe");
-        if let Some(value) = value {
-            child.env(STRICT_VAR, value);
+        for (key, value) in vars {
+            child.env(key, value);
         }
         let out = child.output().expect("spawn the probe");
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(
             out.status.success() && stdout.contains("test result: ok. 1 passed;"),
             "the probe did not run its one test (a probe that ran 0 tests must not count):\n{stdout}\n{stderr}"
         );
-        let answers: Vec<&str> = stdout
-            .lines()
-            .filter_map(|line| line.split_once(PROBE_LINE).map(|(_, answer)| answer.trim()))
-            .collect();
-        match answers.as_slice() {
-            ["true"] => true,
-            ["false"] => false,
-            other => panic!(
-                "the probe must print exactly one `true`/`false` answer, got {other:?}:\n{stdout}\n{stderr}"
-            ),
-        }
+        (stdout, stderr)
     }
 
     /// #4820 C2b second security review, Medium-1: the seam between the environment and the door
@@ -1189,6 +1242,82 @@ mod tests {
                 !the_door_switch_from_env_in_a_child(value),
                 "{label} ({value:?}) must leave the door switch shut"
             );
+        }
+    }
+
+    /// #5685 review M3 + H1: the seam between the environment and the three operator ceilings, through the real
+    /// `from_env()` in a child (no `set_var` here). Pinning `team_ai_hermes_daily_cap` (or a token/search
+    /// ceiling) to a constant, reading another name, or reading a value that is not UTF-8 as "unset" turns it
+    /// red. Unset and blank are no ceiling, `0` is off, a number is the ceiling, and anything unreadable —
+    /// a word, or bytes that are not UTF-8 — stops the worker at boot.
+    #[test]
+    fn the_ceilings_reach_the_config_from_the_real_environment() {
+        use std::ffi::OsStr;
+        const HERMES: &str = "TEAM_AI_HERMES_DAILY_CAP";
+        const TOKENS: &str = "TEAM_AI_DAILY_TOKEN_CAP";
+        const SEARCHES: &str = "TEAM_AI_DAILY_SEARCH_CAP";
+        /// (label, the operator variables in the child's environment, the probe's ceilings line)
+        type Case<'a> = (&'a str, Vec<(&'a str, &'a OsStr)>, &'a str);
+        let mut cases: Vec<Case> = vec![
+            (
+                "nothing set",
+                vec![],
+                "hermes=NoCeiling tokens=None searches=None",
+            ),
+            (
+                "hermes empty",
+                vec![(HERMES, OsStr::new(""))],
+                "hermes=NoCeiling tokens=None searches=None",
+            ),
+            (
+                "hermes blank",
+                vec![(HERMES, OsStr::new("  "))],
+                "hermes=NoCeiling tokens=None searches=None",
+            ),
+            (
+                "hermes 0",
+                vec![(HERMES, OsStr::new("0"))],
+                "hermes=Off tokens=None searches=None",
+            ),
+            (
+                "hermes 12",
+                vec![(HERMES, OsStr::new(" 12 "))],
+                "hermes=Ceiling(12) tokens=None searches=None",
+            ),
+            (
+                "hermes a word",
+                vec![(HERMES, OsStr::new("ten"))],
+                "refused NotANumber(\"TEAM_AI_HERMES_DAILY_CAP\")",
+            ),
+            (
+                "tokens 0, searches 7",
+                vec![(TOKENS, OsStr::new("0")), (SEARCHES, OsStr::new("7"))],
+                "hermes=NoCeiling tokens=Some(0) searches=Some(7)",
+            ),
+        ];
+        // a value that is present but not UTF-8 is unreadable, never "unset" (= no ceiling)
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let broken = OsStr::from_bytes(b"0\xff");
+            cases.push((
+                "hermes not UTF-8",
+                vec![(HERMES, broken)],
+                "refused NotANumber(\"TEAM_AI_HERMES_DAILY_CAP\")",
+            ));
+            cases.push((
+                "tokens not UTF-8",
+                vec![(TOKENS, broken)],
+                "refused NotANumber(\"TEAM_AI_DAILY_TOKEN_CAP\")",
+            ));
+            cases.push((
+                "searches not UTF-8",
+                vec![(SEARCHES, broken)],
+                "refused NotANumber(\"TEAM_AI_DAILY_SEARCH_CAP\")",
+            ));
+        }
+        for (label, vars, expected) in cases {
+            assert_eq!(the_caps_from_env_in_a_child(&vars), expected, "{label}");
         }
     }
 
@@ -1377,6 +1506,15 @@ mod tests {
             operator_hermes_cap_from(Some("ten")),
             Err(ConfigError::NotANumber("TEAM_AI_HERMES_DAILY_CAP"))
         ));
+        // #5685 review L3 — the template's own state: the tool lock declared, no kind, no ceiling. The kind
+        // condition keeps the worker from even reading the delegation's inputs.
+        let locked_only = WorkerConfig::for_target("postgres://x/y").with_hermes_declarations(
+            HermesDeclarations {
+                tools_locked: true,
+                ..HermesDeclarations::default()
+            },
+        );
+        assert!(!locked_only.hermes_delegation_opened(), "no kind declared");
         // the default config (what a test or a fresh process without the variable runs) is no ceiling
         assert_eq!(
             WorkerConfig::for_target("postgres://x/y").team_ai_hermes_daily_cap,
