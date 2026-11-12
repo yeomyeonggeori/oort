@@ -182,8 +182,16 @@ export function useChannelMemberNow(
     []
   );
 
-  // 연 때 60초보다 오래된 답은 새 답이 올 때까지 없는 것으로 친다(열려 있는 동안 받은 답은 `dataUpdatedAt`이 연 때 뒤라 통과).
-  const usable = answered && openedAt.current - query.dataUpdatedAt <= MEMBER_NOW_ANSWER_MAX_AGE_MS;
+  // 연 때 60초보다 오래된 답은 새 답이 올 때까지 없는 것으로 친다. 열려 있는 동안 받은 답은 시각을 비교하지 않고 「연 때 있던
+  // 답과 다른 답인가」로 가른다: 벽시계가 뒤로 가도(60초 넘게) 새 답을 낡은 것으로 거르지 않는다(#5711 L2).
+  const openedWith = useRef(query.dataUpdatedAt);
+  const receivedWhileOpen = query.dataUpdatedAt !== openedWith.current;
+  const usable =
+    answered && (receivedWhileOpen || openedAt.current - query.dataUpdatedAt <= MEMBER_NOW_ANSWER_MAX_AGE_MS);
+  // 첫 읽기부터 실패한 뒤 다시 읽는 동안에도 실패 줄(과 그 단추)을 둔다: 단추가 사라지면 초점이 패널 그릇으로 간다(#5711 L3).
+  const failedBefore = useRef(false);
+  if (query.isError) failedBefore.current = true;
+  else if (query.data !== undefined) failedBefore.current = false;
   const stale = usable && (options.offline === true || query.isError);
   const nowMs = useClock(enabled && !stale, MEMBER_NOW_CLOCK_MS);
   // 줄을 재는 시각: 끊겼거나 다시 읽기가 실패했으면 마지막으로 받은 때, 아니면 지금.
@@ -204,7 +212,7 @@ export function useChannelMemberNow(
       ? "absent"
       : usable
         ? "ready"
-        : query.isError
+        : query.isError || (failedBefore.current && query.isFetching)
           ? "failed"
           : "pending";
 
