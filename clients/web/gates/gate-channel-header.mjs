@@ -365,6 +365,21 @@ async function installRoutes(context, traffic, options = {}) {
   });
 }
 
+/**
+ * 패널 줄이 설 때까지 기다린다(#5686): 패널은 연 순간 「지금 실행 중」을 읽고, 그 답(또는 1.2초 상한) 뒤에 묶음을 정해
+ * 줄을 세운다. 그 전은 높이를 지키는 막대다. 그래서 줄 수는 그 짧은 기다림 뒤에 센다(줄이 끝내 안 서면 아래 단언이 붉다).
+ */
+async function settledMemberRows(page) {
+  await page
+    .waitForFunction(
+      () => document.querySelectorAll('[data-testid="channel-member-item"]').length > 0,
+      undefined,
+      { timeout: 6_000 }
+    )
+    .catch(() => undefined);
+  return page.getByTestId("channel-member-item").count();
+}
+
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await advanceToAccount(page);
@@ -499,7 +514,7 @@ async function exercise(browser) {
   await page.keyboard.press("Enter");
   const memberPanel = page.getByTestId("channel-member-panel");
   await memberPanel.waitFor();
-  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
+  if ((await settledMemberRows(page)) !== 3) {
     throw new Error("the member panel did not render the same three rows the count names");
   }
   const agentRow = page.locator(
@@ -522,7 +537,7 @@ async function exercise(browser) {
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   await countNode.click();
   await page.getByTestId("channel-member-offline").waitFor();
-  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
+  if ((await settledMemberRows(page)) !== 3) {
     throw new Error("the offline member panel hid the last received roster");
   }
   if ((await page.getByTestId("channel-member-failed").count()) !== 0) {
@@ -696,7 +711,7 @@ async function exerciseRosterStates(browser) {
     undefined,
     { timeout: 6_000 }
   );
-  if ((await loadingPage.getByTestId("channel-member-item").count()) !== 3) {
+  if ((await settledMemberRows(loadingPage)) !== 3) {
     throw new Error("the member panel did not replace loading rows with the roster");
   }
   await loadingContext.close();
@@ -739,7 +754,7 @@ async function exerciseRosterStates(browser) {
       `the inline retry must make the third roster request, saw ${retryTraffic.rosterAttempts}`
     );
   }
-  if ((await retryPage.getByTestId("channel-member-item").count()) !== 3) {
+  if ((await settledMemberRows(retryPage)) !== 3) {
     throw new Error("the inline retry did not recover the member rows");
   }
   await retryContext.close();
