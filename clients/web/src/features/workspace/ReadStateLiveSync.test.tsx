@@ -23,6 +23,7 @@ const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENV
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let rail: { member: string; onEvent: (event: InboxEvent) => void; onResync: () => void } | null = null;
+let followedRail: { member: string; onSignal: () => void; onResync: () => void } | null = null;
 let stops = 0;
 
 beforeAll(() => {
@@ -31,6 +32,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.useFakeTimers();
   rail = null;
+  followedRail = null;
   stops = 0;
 });
 afterEach(() => {
@@ -48,6 +50,13 @@ function sessionValue(): SessionContextValue {
       return () => {
         stops += 1;
         rail = null;
+      };
+    },
+    subscribeFollowedUnread: (member: string, handlers: { onSignal: () => void; onResync: () => void }) => {
+      followedRail = { member, ...handlers };
+      return () => {
+        stops += 1;
+        followedRail = null;
       };
     },
   } as unknown as RealtimeHandle;
@@ -108,6 +117,22 @@ describe("ReadStateLiveSync (#5660)", () => {
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
+  it("따라가는 스레드의 답글 신호(`followed_unread.updated`, 서버 #5667)도 같은 창으로 합쳐 한 번 무효화한다 (#5660)", () => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    mount(client);
+    expect(followedRail?.member).toBe(IDS.self);
+    act(() => {
+      followedRail?.onSignal();
+      rail?.onEvent({ type: "inbox_item.created", itemId: "a" });
+      followedRail?.onSignal();
+      vi.advanceTimersByTime(249);
+    });
+    expect(readStateCalls(invalidate)).toBe(0);
+    act(() => void vi.advanceTimersByTime(1));
+    expect(readStateCalls(invalidate)).toBe(1);
+  });
+
   it("다시 붙으면(끊긴 동안 온 신호는 다시 오지 않을 수 있다) 한 번 다시 읽는다", () => {
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");
@@ -127,7 +152,7 @@ describe("ReadStateLiveSync (#5660)", () => {
     act(() => root?.unmount());
     root = null;
     act(() => void vi.advanceTimersByTime(1_000));
-    expect(stops).toBe(1);
+    expect(stops).toBe(2); // 인박스 신호·답글 신호 두 손잡이 모두
     expect(readStateCalls(invalidate)).toBe(0);
   });
 });

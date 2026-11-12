@@ -20,6 +20,11 @@ import { useSession } from "@/app/session";
 // - 개인 채널 구독은 인박스·예약 메시지 화면과 **공유**한다(refcount): 더 붙어도 소켓은 늘지 않는다.
 // - 폴링(30초)은 그물로 남는다: 신호를 놓친 경우(구서버, 구독 거절)에도 수는 결국 맞는다.
 //
+// **따라가는 스레드의 답글 몫(owner 11-11 「켜줘」, 서버 #5667).** 읽음 투영 줄의 `followed_unread_reply_count`가 바뀌었을 수 있으면 서버가 같은
+// 개인 채널로 `followed_unread.updated`(id만)를 보낸다: 따라가는 스레드에 남의 새 답글, **어느 기기에서든** 그 스레드를 읽음, 따라가기 바꿈. 직접
+// 따라가기만 누른 사람에게는 인박스 항목·신호가 없어서(migration 126) 인박스 신호로는 모자라다. 같은 합치기 창(250ms)으로 한 번 다시 읽는다.
+// 다른 기기에서 스레드를 읽으면 이 신호 → 다시 읽기로 맥의 표시가 꺼진다. 옛 서버는 이 신호를 보내지 않는다: 폴링이 남는다.
+//
 // 아무것도 그리지 않는다.
 // =============================================================================
 
@@ -31,7 +36,7 @@ export function ReadStateLiveSync() {
   const selfId = session.member.id;
 
   useEffect(() => {
-    if (!realtime?.subscribeInbox) return;
+    if (!realtime?.subscribeInbox && !realtime?.subscribeFollowedUnread) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const refresh = () => {
       if (timer !== null) clearTimeout(timer);
@@ -40,9 +45,11 @@ export function ReadStateLiveSync() {
         void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
       }, DEBOUNCE_MS);
     };
-    const off = realtime.subscribeInbox(selfId, { onEvent: refresh, onResync: refresh });
+    const offInbox = realtime.subscribeInbox?.(selfId, { onEvent: refresh, onResync: refresh });
+    const offFollowed = realtime.subscribeFollowedUnread?.(selfId, { onSignal: refresh, onResync: refresh });
     return () => {
-      off();
+      offInbox?.();
+      offFollowed?.();
       if (timer !== null) clearTimeout(timer);
     };
   }, [realtime, selfId, workspaceId, client]);

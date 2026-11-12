@@ -1274,6 +1274,20 @@ export interface RealtimeHandle {
     handlers: { onEvent: (event: InboxEvent) => void; onResync: () => void }
   ) => () => void;
   /**
+   * The signed-in member's `followed_unread.updated` signals (ADR-0124 amendment 4, #5667) on the
+   * same personal channel as the inbox signals: the `followed_unread_reply_count` of a read-state
+   * row may have changed (a new reply in a followed thread, a thread read on any device, a follow
+   * change). Ids only, never the number, so a signal means "read the read-state list again";
+   * `onResync` fires on (re)subscribe.
+   *
+   * Optional like `subscribeInbox`: a runtime that has not wired it (the phone) or a server without
+   * #5667 simply leaves the 30-second read-state poll as the only refresh.
+   */
+  subscribeFollowedUnread?: (
+    memberId: string,
+    handlers: { onSignal: () => void; onResync: () => void }
+  ) => () => void;
+  /**
    * The signed-in member's scheduled-message signals (ADR-0208 D12, #4215):
    * `scheduled_message.updated` on the same personal channel as the inbox signals
    * (`user:read-state#<MEMBER>`). A frame holds ids, status and time only (never the text), so the

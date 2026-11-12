@@ -49,6 +49,7 @@ import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 import { workHostNoticeChannelName } from "@momo/core/features/settings/thisMacHost";
 import {
   asInboxEvent,
+  isFollowedUnreadSignal,
   readStateRailChannelName,
   type InboxEvent,
 } from "@momo/core/features/inbox/serverInbox";
@@ -653,6 +654,30 @@ export function createRealtime(
     );
   }
 
+  // ADR-0124 amendment 4 (#5667, #5660): `followed_unread.updated` rides the SAME personal channel (`attach`
+  // shares the one subscription). Ids only: the caller re-reads the read-state list. Every other type is dropped.
+  function subscribeFollowedUnread(
+    memberId: string,
+    handlers: { onSignal: () => void; onResync: () => void }
+  ): () => void {
+    return attach(
+      readStateRailChannelName(memberId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onSubscribed = () => handlers.onResync();
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (isFollowedUnreadSignal(ctx.data)) handlers.onSignal();
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   // ADR-0208 D12 (#4215): the scheduled-message signal rides the SAME personal channel as the inbox
   // signals (`attach` shares the one subscription). `asInboxEvent` drops every other type, so this
   // caller reads its own: `asScheduledMessageFrame` returns null for anything that is not
@@ -683,6 +708,7 @@ export function createRealtime(
 
   const handle: RealtimeHandle = {
     subscribeInbox,
+    subscribeFollowedUnread,
     subscribeScheduled,
     subscribeWorkHostNotices,
     subscribeChannel,
