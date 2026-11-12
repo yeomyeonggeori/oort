@@ -7759,6 +7759,12 @@ export const catalog: MessageCatalog = {
       "value": " help · search"
     }
   ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
   "teamAi.delegation.reasonAmbiguous": [
     {
       "type": 0,
@@ -7817,6 +7823,20 @@ export const catalog: MessageCatalog = {
       "value": "tokens"
     }
   ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "Credit tokens about "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": " (estimate)"
+    }
+  ],
   "teamAi.delegation.spentHermes": [
     {
       "type": 1,
@@ -7867,10 +7887,148 @@ export const catalog: MessageCatalog = {
       "value": "What this answer used"
     }
   ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
+    }
+  ],
   "teamAi.delegation.unavailable": [
     {
       "type": 0,
       "value": "Not available right now."
+    }
+  ],
+  "teamAi.delegation.waitImage": [
+    {
+      "type": 0,
+      "value": "Pictures can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "Picture: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "teamAi.delegation.waitSearch": [
+    {
+      "type": 0,
+      "value": "Searches can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "Search: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
     }
   ],
   "teamAi.helper.aliasesLine": [
