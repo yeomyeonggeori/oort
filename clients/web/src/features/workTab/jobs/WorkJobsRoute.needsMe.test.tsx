@@ -880,7 +880,8 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
       const error = await within(needsMeSlot(0)).findByTestId("work-job-approval-error", {}, { timeout: 3000 });
       expect(error.getAttribute("role")).toBe("alert");
       // 단추 옆(같은 줄의 형제)이지 단추 아래 새 줄이 아니다 — 상자가 하나뿐이다.
-      expect(error.parentElement!.contains(within(needsMeSlot(0)).getByTestId("work-job-approval-approve"))).toBe(true);
+      const approveButton = within(needsMeSlot(0)).getByTestId("work-job-approval-approve");
+      expect(error.parentElement).toBe(approveButton.parentElement!.parentElement);
       expect(within(needsMeSlot(0)).getAllByTestId("work-job-control-box")).toHaveLength(1);
       expect(rowsIn("needsMe")).toEqual([R(1), R(8)]);
       pressSlot(0);
