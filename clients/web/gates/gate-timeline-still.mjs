@@ -8,6 +8,9 @@
 // 새 장면(이 파일이 잰다 — 실제 번들 · 실제 가상 목록, 가짜 서버는 `timeline-fake-backend.mjs`):
 //   진입         대화에 들어갈 때, 첫 줄이 그려진 뒤 2초 동안 가장 새 줄의 아래 끝(창 좌표) 이동 ≤ 1px · 필 0. 재기 전에 바닥으로 다시
 //                놓지 않는다. 「진입+카드」는 같은 장면에 링크 카드가 0.7초 늦게 오는 판(카드를 메시지마다 따로 읽는 길, #5469).
+//   작은 대화 진입  메시지 12 · 24개뿐인 대화(#5717 — 첫 줄이 늘 붙어 있어 맨 위에서 열렸다). 판정: 목록이 자리를 잡아 보였는가
+//                (`data-placed` 가 `bottom` — 안전판 `timeout` 이면 실패) · 끝 바닥 거리 ≤ 8px · 끝에 「최신 메시지로 이동」 없음 · 가린
+//                프레임 ≤ 8. 진입 장면의 판정(머리 프레임 · 바닥 ≤ 1px)은 비고에 기록만 한다. 폭은 1280 · 390 만.
 //   링크 카드    서버가 카드를 다 읽고 알림(`message.unfurl`) — 맨 아래: 마지막 줄 ≤ 1px · 바닥 거리 ≤ 1px · 되돌아옴 0 · 필 0 /
 //                위 읽기: 화면 위 밖의 줄에 카드가 붙을 때 보던 줄(창 좌표) ≤ 2px · 되돌아옴 0.
 //   반응         반응 하나가 붙고 떨어짐(`reaction.added` · `reaction.removed`) — 링크 카드와 같은 문턱.
@@ -30,7 +33,7 @@
 //   TIMELINE_STILL_PORT=<포트>        새 장면의 미리보기 포트(기본 5240). 기존 게이트는 +1 · +2 · +3 을 쓴다
 //   TIMELINE_STILL_ENGINES=webkit,chromium,firefox   (기본 셋 다. firefox 는 판이 없으면 「못 잼」 한 줄)
 //   TIMELINE_STILL_WIDTHS=1280,900,390               (기본 셋 다)
-//   TIMELINE_STILL_SCENES=entry,entry-card,card,reaction,older   새 장면 고르기
+//   TIMELINE_STILL_SCENES=entry,entry-card,entry-small,card,reaction,older   새 장면 고르기
 //   TIMELINE_STILL_SETS=new,typing,expression,send   새 장면 · 불러올 기존 게이트 고르기
 //   TIMELINE_STILL_LOAD_MAX=<수>       부하 문턱(기본 12)
 //   TIMELINE_STILL_LOAD_WAIT=<초>      장면마다 부하가 문턱 아래로 내려오기를 기다리는 최대 시간(기본 0 = 기다리지 않음)
@@ -82,7 +85,7 @@ import {
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINES = ["webkit", "chromium", "firefox"];
 const WIDTHS = ["1280", "900", "390"];
-const SCENES = ["entry", "entry-card", "card", "reaction", "older"];
+const SCENES = ["entry", "entry-card", "entry-small", "card", "reaction", "older"];
 const SETS = ["new", "typing", "expression", "send"];
 // 환경 값은 미리보기를 띄우기 전에 읽는다: 틀린 값은 장면을 건너뛰지 않고 여기서 실패한다.
 const port = positiveIntEnv("TIMELINE_STILL_PORT", 5240);
@@ -127,6 +130,15 @@ const URL_BODIES = {
 const rows = history({ olderCount: OLDER, overrides: URL_BODIES });
 const rowAt = (bodyIndex) => rows[bodyIndex + OLDER];
 const urlOf = (row) => /https?:\/\/\S+/.exec(row.body)?.[0] ?? null;
+
+/**
+ * 작은 대화(#5717): 옛 줄 없이 첫 `count` 줄뿐(한 쪽에 다 들어와 처음까지 닿는다). 그림이 늦게 서며 줄 높이를 바꾸지 않게 이모티콘 줄
+ * 둘은 글로 바꾼다. 12줄은 1280 에서도 넘친다(넘침이 `SMALL_MIN_OVERFLOW` 아래면 장면을 못 만든 것이다 — 맨 아래 · 맨 위가 같아 잴 것이 없다).
+ */
+const SMALL_SIZES = [12, 24];
+const SMALL_WIDTHS = [1280, 390];
+const SMALL_MIN_OVERFLOW = 100;
+const smallRows = (count) => history({ overrides: { 15: "그 부분은 내일 다시 볼게요.", 17: "네, 정리해서 올릴게요." } }).slice(0, count);
 
 // ---------------------------------------------------------------------------------------------- 부하
 
@@ -220,21 +232,22 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
 
 // ---------------------------------------------------------------------------------------------- 새 장면
 
-async function newContext(browser, vp, { unfurls = {} } = {}) {
+async function newContext(browser, vp, { unfurls = {}, conversation = rows } = {}) {
   const context = await browser.newContext({ viewport: vp, deviceScaleFactor: 2, locale: "ko-KR" });
   // 옛 쪽 응답은 0.9초 늦게 온다(더 불러오기 장면만 2.5초로 늘려 재기 창 안에서 붙게 한다).
-  const backend = await installBackend(context, { port, rows, paged: true, olderDelayMs: 900, unfurls });
+  const backend = await installBackend(context, { port, rows: conversation, paged: true, olderDelayMs: 900, unfurls });
   const page = await context.newPage();
   return { context, backend, page };
 }
 
-/** 대화 진입: 첫 줄이 그려진 뒤 2초. 재기 전에 바닥으로 다시 놓지 않는다. */
-async function entryScene(browser, engine, vp, { withCard }) {
+/** 대화 진입: 첫 줄이 그려진 뒤 2초. 재기 전에 바닥으로 다시 놓지 않는다. `small` 이면 그 수만큼의 작은 대화(#5717). */
+async function entryScene(browser, engine, vp, { withCard, small = null }) {
   const cardRow = rowAt(ENTRY_CARD);
   const unfurls = withCard ? { [cardRow.id]: { restDelayMs: 700, cards: [unfurlCard(cardRow, urlOf(cardRow))] } } : {};
-  const { context, backend, page } = await newContext(browser, vp, { unfurls });
+  const conversation = small === null ? rows : smallRows(small);
+  const { context, backend, page } = await newContext(browser, vp, { unfurls, conversation });
   try {
-    const newest = rows[rows.length - 1];
+    const newest = conversation[conversation.length - 1];
     await installEntryRecorder(page, {
       scroller: scrollerSelector,
       startSelector: '[data-message-id^="0199eee"]',
@@ -243,21 +256,40 @@ async function entryScene(browser, engine, vp, { withCard }) {
       edge: "bottom",
       windowMs: 2_000,
     });
-    await openDm(page, backend, origin, { settle: false });
+    await openDm(page, backend, origin, small === null ? { settle: false } : { settle: false, minImages: 0, minOverflow: SMALL_MIN_OVERFLOW });
     const record = await readEntryRecord(page, 20_000, 2_000);
     lastRecord = record;
     // 줄이 붙었어도 목록이 가려진 프레임은 그려지지 않았다(#5678 — `entryWindow`): 창은 처음 보인 프레임부터다. 가려 둔 프레임 수는 따로
     // 세고 상한(`MAX_ENTRY_HIDDEN_FRAMES`)을 넘으면 실패다 — 빈 화면으로 오래 끌어 「흔들림 0」을 사지 못하게.
     const hidden = record.hidden ?? { frames: 0, ms: 0, never: false };
-    const hiddenNote = `줄이 붙은 뒤 가려진 ${hidden.frames}프레임(${hidden.ms}ms)`;
+    let hiddenNote = `줄이 붙은 뒤 가려진 ${hidden.frames}프레임(${hidden.ms}ms)`;
+    // 작은 대화(#5717): 창이 끝난 뒤 목록이 **자리를 잡아** 보였는가(`data-placed` 가 `bottom` — 안전판 `timeout` 은 자리 잡기에 실패한 것),
+    // 바닥에 있는가(≤ 8px, 그리기 조건 `REVEAL_GAP_PX` 와 같은 값), 「최신 메시지로 이동」이 없는가. 수리 전에는 셋 다 어긋났다(맨 위에서 열림).
+    const smallReasons = [];
+    if (small !== null) {
+      const end = await page.evaluate((selector) => {
+        const scroller = document.querySelector(selector);
+        return {
+          placed: scroller?.getAttribute("data-placed") ?? null,
+          gap: scroller ? Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) : null,
+          overflow: scroller ? scroller.scrollHeight - scroller.clientHeight : null,
+          pill: document.querySelector('[data-testid="jump-latest"]') !== null,
+        };
+      }, scrollerSelector);
+      if (end.placed !== "bottom") smallReasons.push(`목록이 자리를 잡아 보인 것이 아니다(data-placed=${end.placed} — bottom 이어야)`);
+      if (end.gap === null || end.gap > 8) smallReasons.push(`끝 바닥 거리 ${end.gap}px(> 8)`);
+      if (end.pill) smallReasons.push("끝에 「최신 메시지로 이동」이 서 있다");
+      hiddenNote += ` · 메시지 ${small}개 · 넘침 ${end.overflow}px · data-placed=${end.placed}`;
+    }
     if (hidden.never) {
-      return { numbers: null, verdict: { verdict: "FAIL", reasons: [`이 대화의 줄이 붙은 뒤 ${hidden.ms}ms 동안 목록이 한 번도 보이지 않았다`] }, extra: { hidden: hidden.frames }, note: hiddenNote };
+      return { numbers: null, verdict: { verdict: "FAIL", reasons: [`이 대화의 줄이 붙은 뒤 ${hidden.ms}ms 동안 목록이 한 번도 보이지 않았다`, ...smallReasons] }, extra: { hidden: hidden.frames }, note: hiddenNote };
     }
     // 자리 잡기 전 프레임(머리)과 그 뒤(몸)를 가른다(`entrySettle`). 머리가 있으면 그것만으로 실패다 — 그 프레임들이 그려졌다(검수 r1 H1).
     // 몸의 숫자 넷은 평소 문턱으로 본다. 알려진 실패는 머리 프레임 수(`maxUnsettledFrames`)와 몸의 숫자에 따로 상한을 둔다.
     const settle = entrySettle(record.frames);
     if (settle.body.length === 0) {
-      return { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: [`창 안에서 가장 새 줄이 세 프레임 이어 제자리에 선 적이 없다(표본 ${record.frames.length})`] } };
+      const reasons = [`창 안에서 가장 새 줄이 세 프레임 이어 제자리에 선 적이 없다(표본 ${record.frames.length})`, ...smallReasons];
+      return { numbers: null, verdict: { verdict: smallReasons.length > 0 ? "FAIL" : "장면 못 만듦", reasons }, extra: { hidden: hidden.frames }, note: hiddenNote };
     }
     const numbers = numbersFromRecord({ ...record, frames: settle.body }, { watch: "last" });
     const unsettled = settle.head.length;
@@ -270,6 +302,16 @@ async function entryScene(browser, engine, vp, { withCard }) {
       verdict.verdict = "FAIL";
       verdict.reasons.push(`${hiddenNote} — 상한 ${MAX_ENTRY_HIDDEN_FRAMES}프레임 넘게 빈 화면`);
     }
+    let judged = verdict;
+    let recorded = "";
+    if (small !== null) {
+      // 작은 대화의 판정은 위 셋과 가린 프레임 상한이다. 진입 판정(머리 프레임 · 바닥 거리 ≤ 1px)은 기록만 한다: WebKit 24개 대화는 수리 전
+      // 번들에서도 처음 보인 한 프레임이 바닥 4px 위였다가 다음 프레임에 붙는다(그리기 조건 8px 안 — 이 장면이 잡으려는 맨 위 열림이 아니다).
+      recorded = ` · 진입 판정(기록만) ${verdict.verdict}${verdict.reasons.length ? `: ${verdict.reasons.join(" · ")}` : ""}`;
+      const reasons = [...smallReasons];
+      if (hidden.frames > MAX_ENTRY_HIDDEN_FRAMES) reasons.push(`${hiddenNote} — 상한 ${MAX_ENTRY_HIDDEN_FRAMES}프레임 넘게 빈 화면`);
+      judged = { verdict: reasons.length > 0 ? "FAIL" : "PASS", reasons };
+    }
     if (withCard) {
       const cardShown = await page.locator(`[data-message-id="${cardRow.id}"] [data-testid="unfurl-card"]`).count();
       if (cardShown === 0 || backend.state.unfurlReads === 0) {
@@ -279,11 +321,11 @@ async function entryScene(browser, engine, vp, { withCard }) {
     if (process.env.TIMELINE_STILL_DEBUG === "1") console.log(JSON.stringify(record.frames.slice(0, 60).map((f) => [f.t, f.rows, f.top, f.gap, f.topId?.slice(-4), f.visible, f.watch.last])));
     return {
       numbers,
-      verdict,
+      verdict: judged,
       extra: { unsettled, hidden: hidden.frames },
       head: unsettled ? { frames: unsettled, ms: settle.body[0].t, maxOffsetPx: settle.maxOffsetPx, maxGapPx: settle.maxGapPx, missing: settle.missing } : null,
       hidden,
-      note: `표본 ${record.frames.length}프레임(그리기 직전) · ${hiddenNote} · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
+      note: `표본 ${record.frames.length}프레임(그리기 직전) · ${hiddenNote} · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번${recorded}`,
     };
   } finally {
     await context.close();
@@ -541,6 +583,13 @@ async function runNewScenes() {
               await measureCell({ ...tag, sceneKey: "entry-card", scene: "대화 진입 + 링크 카드 0.7초 늦게", kind: "entry" }, () =>
                 entryScene(browser, name, vp, { withCard: true })
               );
+            }
+            if (sceneNames.includes("entry-small") && SMALL_WIDTHS.includes(width)) {
+              for (const count of SMALL_SIZES) {
+                await measureCell({ ...tag, sceneKey: `entry-small-${count}`, scene: `작은 대화 진입(메시지 ${count}개)`, kind: "entry" }, () =>
+                  entryScene(browser, name, vp, { withCard: false, small: count })
+                );
+              }
             }
             if (sceneNames.some((scene) => ["card", "reaction", "older"].includes(scene))) {
               const gate = await loadGate();
