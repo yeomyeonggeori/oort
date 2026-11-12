@@ -41,8 +41,12 @@ export const TeamBoardDrawer = forwardRef<
     item: SharedWorkSession;
     nowMs: number;
     onClose: () => void;
+    /** 목록 줄과 같은 칩 낱말(「작업」 화면이 준다, #5640 수리 3회차). 없으면 공용 `stateChipLabel`. */
+    stateLabel?: string;
+    /** 승인 대기 줄의 안내 문장을 바꿀 때(목록에서 바로 결정하는 줄). 없으면 「승인은 그 카드에서 해요」. */
+    approvalHint?: string;
   }
->(function TeamBoardDrawer({ item, nowMs, onClose }, ref) {
+>(function TeamBoardDrawer({ item, nowMs, onClose, stateLabel, approvalHint }, ref) {
   const where = whereLabel(item);
   const facts = diffFacts(item.diff);
   const markers = stageMarkers(item);
@@ -92,9 +96,9 @@ export const TeamBoardDrawer = forwardRef<
           )}
         </p>
         <p className="flex flex-wrap items-center gap-2">
-          <StateChip item={item} />
+          <StateChip item={item} label={stateLabel} />
           <span className="break-keep text-meta text-ink">
-            {awaitingApproval ? WORK_JOBS_COPY.approvalHint : stateSentence(item, nowMs)}
+            {awaitingApproval ? (approvalHint ?? WORK_JOBS_COPY.approvalHint) : stateSentence(item, nowMs)}
           </span>
         </p>
         {/* 승인 대기(새 서버의 phase, ADR-0202 D1): 승인 단추는 여기 없다. 카드가 있는 자리로 간다. */}

@@ -447,6 +447,14 @@ export function remainingTime(
   return `${Math.floor(remaining / DAY_MS)}일 남음`;
 }
 
+/**
+ * 결정자가 아닌 사람에게 승인 카드가 하는 대기 한 줄: 결정자 한 사람을 알면 그 이름, 모르면 「관리자」. 카드(`requestBundleModel`의
+ * `waitingFor`)와 「작업 · 내 작업」의 결과 칸(#5640)이 이 한 문장을 같이 읽는다.
+ */
+export function approvalWaitingLine(approverName?: string): string {
+  return approverName ? `${approverName} 님의 승인을 기다려요` : "관리자의 승인을 기다려요";
+}
+
 export function requestBundleModel(
   card: AgentApprovalCard,
   context: RequestBundleContext
@@ -518,9 +526,7 @@ export function requestBundleModel(
               target === undefined ? undefined : context.nameFor?.(target)
             )
           : undefined
-        : approver
-        ? `${approver} 님의 승인을 기다려요`
-        : "관리자의 승인을 기다려요"
+        : approvalWaitingLine(approver)
       : undefined;
   const result = bundle?.result;
   const rows =

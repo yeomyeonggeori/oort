@@ -68,7 +68,7 @@ export function ReportedFacts({ reported }: { reported: AgentReportedResult }) {
   );
 }
 
-/** 줄 아래의 PR 링크(줄 전체가 단추라 안에 둘 수 없어 형제로 둔다). */
+/** 결과 칸 아래층의 PR 링크(줄 전체가 단추라 안에 둘 수 없어 형제로 둔다). */
 export function JobPrLink({ pr }: { pr: { number: string; repo: string; href: string } }) {
   return (
     <a
@@ -94,8 +94,8 @@ export function JobPrLink({ pr }: { pr: { number: string; repo: string; href: st
 }
 
 /**
- * 승인 대기 줄의 길: 카드가 있는 채널로 간다. 「작업」 화면은 승인 단추를 따로 갖지 않는다
- * (ADR-0202 D1·D5). 결정은 그 카드에서, 그 권한자가 한다.
+ * 승인 대기 줄의 길: 카드가 있는 채널로 간다. 이 승인의 결정이 내 몫이 아닐 때(결정자가 아니거나 「팀 전체」·남의 줄) 결과 칸이
+ * 세우는 컨트롤은 이 링크 하나다(ADR-0202 D5, 증보 2026-11-11). 결정은 그 카드에서, 그 권한자가 한다.
  */
 export function ApprovalCardLink({ channelId, channel }: { channelId: string; channel: string }) {
   return (

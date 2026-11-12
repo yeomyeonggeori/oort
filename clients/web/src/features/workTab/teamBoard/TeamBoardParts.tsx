@@ -48,7 +48,11 @@ const STATE_TONE: Readonly<Record<SharedSessionState, string>> = {
   stopped: "bg-danger-soft text-danger",
 };
 
-export function StateChip({ item }: { item: SharedWorkSession }) {
+/**
+ * `label`: 이 칩을 그리는 화면이 자기 낱말을 줄 때(「작업」 줄은 승인 대기도 「응답 필요」, 코어 `workJobStateLabel` #5640). 없으면 공용
+ * `stateChipLabel` 그대로다(서랍·옛 보드).
+ */
+export function StateChip({ item, label }: { item: SharedWorkSession; label?: string }) {
   // 승인 대기 run(ADR-0202 D1)은 응답이 필요한 세션과 같은 그릇·모양으로 말한다: 사람이 할 일이 있다.
   const approval = isAwaitingApproval(item);
   const Icon = approval ? CircleAlert : STATE_ICON[item.state];
@@ -64,7 +68,7 @@ export function StateChip({ item }: { item: SharedWorkSession }) {
       data-approval={approval ? "" : undefined}
     >
       <Icon aria-hidden className="size-3 shrink-0" />
-      {stateChipLabel(item)}
+      {label ?? stateChipLabel(item)}
     </span>
   );
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect } from "react";
+import { act, createElement, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
@@ -59,7 +59,21 @@ function fakeSessions() {
   return { sessions, kills };
 }
 
-function fakeSource(summary: AgentPaneSummary) {
+/** 스레드를 읽은 뒤에야 서는 승인 카드(주인의 판: `tabindex`가 있다). */
+function LateCard({ paneId, delayMs }: { paneId: string; delayMs: number }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setReady(true), delayMs);
+    return () => clearTimeout(id);
+  }, [delayMs]);
+  return createElement(
+    "div",
+    { "data-testid": `agent-${paneId}` },
+    ready ? createElement("section", { "data-testid": "agent-permission", tabIndex: -1 }, "권한 요청") : null
+  );
+}
+
+function fakeSource(summary: AgentPaneSummary, card: { delayMs: number } | null = null) {
   const mem = new Map<string, string>();
   const store = createAgentPaneStore(() => ({
     getItem: (k) => mem.get(k) ?? null,
@@ -71,7 +85,10 @@ function fakeSource(summary: AgentPaneSummary) {
     bindings: store.get(),
     candidates: [],
     summary: (id) => (id === SID ? summary : null),
-    render: (id, paneId) => createElement("div", { "data-testid": `agent-${paneId}` }, id),
+    render: (id, paneId) =>
+      card === null
+        ? createElement("div", { "data-testid": `agent-${paneId}` }, id)
+        : createElement(LateCard, { paneId, delayMs: card.delayMs }),
   });
   return { store, source };
 }
@@ -185,4 +202,20 @@ describe("알림이 연 A 세션 (#5595)", () => {
     rerender(null);
     expect(opened).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("「작업」의 「응답 필요」 줄이 연 A 칸: 승인 카드에 초점 (#5640)", () => {
+  it("카드가 스레드를 읽은 뒤 늦게 서도, 서는 순간 그 카드에 초점이 간다", async () => {
+    const { sessions } = fakeSessions();
+    const { source } = fakeSource(SUMMARY, { delayMs: 60 });
+    await mount(sessions, source, SID, vi.fn());
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-focused")).toBe(true));
+    const card = await vi.waitFor(() => {
+      const el = pane("p2").querySelector<HTMLElement>('[data-testid="agent-permission"]');
+      if (el === null) throw new Error("card not yet");
+      return el;
+    });
+    await vi.waitFor(() => expect(document.activeElement).toBe(card));
+  });
+  // 「사람이 다른 곳으로 갔으면 빼앗지 않는다」는 격자 자신의 초점 프레임과 섞이지 않게 `focusPermissionCard.test.ts`가 잰다.
 });
