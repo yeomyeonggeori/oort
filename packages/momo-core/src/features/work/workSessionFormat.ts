@@ -54,6 +54,8 @@ import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
  */
 export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>> = {
   running: "bg-muted-soft text-warn",
+  // #5593 수리 M2: 주인에게 열린 권한 요청(「응답 필요」). 지금은 폰만 내는 상태이고, 실행 중(경고 톤)과 갈리게 주목 톤이다.
+  waiting: "bg-muted-soft text-signal-text",
   idle: "bg-muted-soft text-ink-muted",
   unavailable: "bg-muted-soft text-ink-muted",
   orphaned: "bg-muted-soft text-signal-text",

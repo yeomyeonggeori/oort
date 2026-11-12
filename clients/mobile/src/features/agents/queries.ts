@@ -153,12 +153,23 @@ export function useWorkSessions(
  * degraded answer and not a reason to fail the screen: `hostTier` answers
  * `unknown` for an absent registry, which is a sentence rather than a blank.
  */
-export function useWorkHosts(workspaceId: string, enabled = true) {
+export function useWorkHosts(
+  workspaceId: string,
+  enabled = true,
+  /**
+   * 셸의 세션 화면 판정(`workConsoleAvailable`, #5593)만 준다 — 맥이 켜지고 꺼지는 것을 다시 본다. 같은 키의 관측자 중
+   * 가장 짧은 간격을 쓰므로 요청은 여전히 한 벌이다(`useWorkSessions` 의 같은 인자).
+   */
+  refetchIntervalMs?: number,
+) {
   return useQuery({
     queryKey: agentKeys.workHosts(workspaceId),
     queryFn: () => fetchWorkHosts(workspaceId),
     enabled,
     retry: false,
+    ...(refetchIntervalMs === undefined
+      ? {}
+      : {refetchInterval: refetchIntervalMs}),
   });
 }
 

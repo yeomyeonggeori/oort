@@ -4656,6 +4656,62 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "mobile.workPermission.elsewhereOnHost": [
+    {
+      "type": 0,
+      "value": "For now, answer it on "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "mobile.workPermission.elsewhereOnMac": [
+    {
+      "type": 0,
+      "value": "For now, answer it on your Mac."
+    }
+  ],
+  "mobile.workPermission.elsewhereTitle": [
+    {
+      "type": 0,
+      "value": "Your Mac is asking for permission"
+    }
+  ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "It may have been answered on another device, expired, or the work may have ended."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "This permission request is already closed"
+    }
+  ],
+  "mobile.workPermission.recheck": [
+    {
+      "type": 0,
+      "value": "Check again"
+    }
+  ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "Checking again"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "Checked again, but the signing setting still couldn’t be read."
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

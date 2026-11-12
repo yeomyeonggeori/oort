@@ -222,100 +222,155 @@ and actual Hermes execution are deferred to planner; no simulator, Xcode, Docker
 or capture was used. No Rust `include_str!` input was added. No commit/push/PR
 was made; planner owns those delivery steps.
 
-## P0-5 — pseudo locale and direct-copy CI (#4834)
+## P0-5 — pseudo locale (#4834, #5589)
 
-`tooling/pseudo.mjs` exports `pseudoCatalog(compiledCatalog)` for development and
-stack QA. Pass its result to `createMessageService({messageLocale: 'en-XA', catalog})`.
-It clones ICU ASTs, accents only literal characters, adds `[` / `]` boundaries,
-and expands the total literal length by 35%, including markers. Padding rounds
-to whole Unicode code points; labels shorter than 7 code points and argument-only
-messages cannot always fit the 30–40% band while retaining both markers. For
-branching messages the budget covers all branch literals, rather than the length
-of runtime argument values. Keys, arguments, selectors, plural offsets, pound,
-tags and number/date skeletons are preserved. Tags remain subject to P0-1's
-approved-adapter restriction. This tool and its output are **not exported or
-loaded by product entries**; never commit a pseudo catalog to `generated/`.
+`pseudo.ts` exports `pseudoCatalog(compiledCatalog)` and `PSEUDO_LOCALE` (`en-XA`). It clones ICU
+ASTs, accents only literal characters, adds `[` / `]` boundaries, and expands the total literal
+length by 35%, including markers. Padding is placed at word ends (#5589), so a long message keeps
+its line-break opportunities; one unbroken `~` run would report overflow no real language causes.
+Labels shorter than 7 code points and argument-only messages cannot always fit the 30–40% band
+while retaining both markers. For branching messages the budget covers all branch literals.
+Keys, arguments, selectors, plural offsets, pound, tags and number/date skeletons are preserved.
+The module reads the parser's AST type numbers as plain constants (pinned by `pseudo.test.ts`), so
+it never loads the parser at runtime. `tooling/pseudo.mjs` re-exports it with the parser's
+`parse`/`TYPE` for tests.
 
-Existing `generation.test.ts` already runs the P0-1 compiler with `check: true`
-under core `npm test`: missing/blank keys, ICU parsing, argument name/type mismatch
-and stale generated files fail there. No second validator or workflow change is
-needed. `pseudo.test.ts` proves AST preservation and real service formatting.
+It is **not exported from the `@momo/core/i18n` barrel** and no language list offers it. The web
+client loads it only in development and `--mode design` builds (`clients/web/src/i18n/pseudoLocale.ts`,
+`?pseudo=1` per tab); a production build contains neither the module nor the switch. The capture
+lane `npm --prefix clients/web run capture:pseudo` renders representative screens in pseudo mode and
+counts visible text that is not bracketed (did not come from the dictionary). Never commit a pseudo
+catalog to `generated/`.
 
-`tooling/direct-copy-baseline.json` records the baseline HEAD
-`ec72216333e1a26be9387da5a3863ffd065ca4b2` (track/uxui after the S3 screen PRs;
-see "Ledger refresh" below) and **file → occurrence count** for
-web/mobile production JS/TS sources (including mobile `App.tsx`/`index.js`).
-`tooling/direct-copy.mjs` uses the existing
-TypeScript parser, not a Korean-only regex: JSX text, accessible names, known copy
-properties, Korean literals, English phrases and standalone English words are
-counted, including template segments. This deliberately conservative English
-rule also budgets standalone technical enum words. Comments, imports/types,
-property names, non-copy JSX attributes, diagnostic calls (`console`, `logger`,
-`log`, Error constructors/assertions), test/fixture/testkit files, generated files
-are excluded. Product design controls remain included. Scan roots are
-`clients/{web,mobile}/src` plus mobile `App.tsx`/`index.js`; trees outside them
-(`clients/*/measure/` measurement harnesses, `clients/mobile/maestro/`,
-`clients/web/e2e/`, `scripts/`) are not scanned. Mobile `index.js` imports only
-`measure/root` (a launch-argument reader) and requires the harness modules in a
-measure mode; whether they ship in a release bundle is not verified here. Dynamic
-user content has no literal to count;
-message keys/arguments are validated by the dictionary and typed service instead.
-Literal `formatMessage` references are checked against every English feature JSON.
+## Seven catalogs (#5589, ADR-0213 §2)
 
-One test in each client's existing `npm test` invokes the scanner with Node.
-**Increases fail per file**, including previously absent files. Reductions also
-fail with an instruction to shrink that file's committed allowance (remove zero
-entries), preventing future copy from spending stale budget. Moving lines leaves
-counts unchanged. Equal-count replacement is intentionally not a content diff;
-review must still enforce dictionary-only new user copy. This does not migrate
-existing screen copy (P1), inspect shared-core copy, or infer runtime/dataflow
-strings. Extracted copy text and user data are not written to the ledger.
+`catalogs/<locale>/` exists for all seven ADR-0213 languages. `ko-KR` and `en-US` are **complete**:
+same keys, and together they define the key/argument contract (`generated/messages.ts`). `ja-JP`,
+`zh-Hans`, `zh-Hant`, `es-419` and `fr-FR` are **drafts**: each mirrors the en-US feature files,
+keys may be missing or blank (blank = untranslated and left out), and a present key must keep the
+en-US argument names, with each argument either bare or of the contract's type. The generator emits
+`generated/<locale>.ts` for all seven and `loadMessageCatalog` has one chunk per language. At runtime
+a missing draft key shows English and reports `missing-message` (the service's existing fallback).
+The user-visible language list stays ko/en (web/mobile `availableLocales`) until P2's native review.
+
+ICU plural (CLDR categories per language, e.g. French/Spanish `many`), number and date arguments
+compile for drafts the same way; `generation.test.ts` proves it on a fixture root, not the product
+catalogs (translations are P2).
+
+## Direct-copy ratchet (#4834, redesigned by #5589)
+
+`tooling/direct-copy-baseline.json` (version 2) is the ledger of hardcoded copy outside the
+dictionary. **It only goes down.** Before #5589 the landing chain re-emitted the whole ledger at
+every landing, so new copy became allowance unreviewed (since 10-30: core +226, web +26, phone +51
+Korean literals by the 11-09 count). The format below makes that path fail.
+
+| Field | Meaning | Who writes it |
+|---|---|---|
+| `anchor` | Frozen per-file counts at `anchorHead`. Its sha256 is pinned in `direct-copy.mjs` (`ANCHOR_SEAL`). | Planner only, by a deliberate re-anchor (`anchor <commit>` prints the ledger and the seal; the seal edit is a reviewed code change) |
+| `lowered` | Files whose allowance went down since the anchor. Never above the anchor. | `shrink`, `land` |
+| `raises` | One file, one issue number, one reason each; the only way a count goes up. A reason must say why the copy waits for P1 — a regeneration/refresh note is rejected. | A person, through `raise` |
+
+Allowed count per file = (`lowered` ?? `anchor`) + Σ `raises`, per dimension:
+
+- `ko` — Hangul literals anywhere in product code, including `Error` messages (diagnostics are written
+  in English, so Korean in one reaches a person) and the values handed to a message
+  (`formatMessage(key, {label: "…"})`). Not counted: comments, types, imports, `console`/`logger`/`log`
+  calls, a message key or frame name. The core skips only the dictionary itself (`src/i18n/catalogs/`,
+  `generated/`, `tooling/`) and the language self-names (`autonyms.ts`).
+- `en` — English **copy**, by one rule on every surface: JSX text and `{…}` children, copy-named
+  attributes/properties/variables (`title`, `aria-label`, `placeholder`, `headline`, `*Label`, `*Text`, …)
+  and alert/toast/`setError`-like calls. The nearest thing that names a literal's role decides. A literal
+  that is compared (`kind === "dm"`, `case "idle":`), passed as an argument (`toLocaleString("ko-KR")`,
+  `failureMessage("list", e)`, `setStatus("loading")`), used as an index, or sits in a style object is not
+  copy; neither is English in an `Error` or a message argument. A string literal that **is** a key of the
+  en-US catalog is a message key, not copy, wherever it sits (`title: "releaseNotes.v0145.summary"` in a
+  release-notes file, `offlineTitle: "connection.card.offlineTitle"` in a key map): the catalog decides
+  by exact match, never the dotted shape, so `"momo.message"` or a key the catalog lacks still counts.
+  Only the feature files directly in `catalogs/en-US/` (the ones `generate.mjs` reads and holds to the key
+  shape) give keys; a JSON in a subfolder does not, so it cannot hide English copy.
+  `anchor <commit>` reads that commit's catalog, so it gives the same seal from any checkout. Until
+  #5589's fix rounds the clients counted any one-word literal (about 90% class names and state words) and
+  the core counted its key maps (119 of 168 core `en`); a strict ratchet turns that noise into landing
+  stops.
+- `cat` — sentences assembled from dictionary output: a `formatMessage(...)` inside a template with
+  other text or another span, `formatMessage(...) + …`, or `[formatMessage(...), …].join(…)`.
+  Translate the whole sentence as one key with arguments instead (ADR-0213 §4).
+
+JSX attributes count too (#5589): Korean in **any** attribute except technical ones (`className`,
+`testID`, `data-*`, `id`, `href`, `role`, …), and English in copy-named ones (`title`, `aria-label`,
+`placeholder`, `headline`, `detail`, `*Label`, `*Text`, `*Title`, …). This closed a blind spot of
+305 web and 110 phone Korean literals (`headline`, `actionLabel`, `detail`, `legend`, `busyLabel`…).
+An attribute is judged by its name however the value is computed: a literal reaches it through
+ternaries, `&&`/`??`, calls such as `cn(…)`, templates and arrays, so `className={cn("flex", open && "hidden")}`
+and ``data-testid={`row-${id}`}`` count nothing. `name` is not technical for Korean, because components
+show it (`SettingsToggleRow name="…"`). An object property inside an attribute is judged by its own
+name (`action={{label: "…"}}` is copy).
+
+The scan must equal the allowance exactly: higher fails with "use a dictionary key, or add one
+explicit raise"; lower fails with "run `shrink`", so a later addition cannot spend a stale budget.
+`check` reads no git and runs in each tree's `npm test` (core `direct-copy.test.ts`, web
+`src/testing/directCopy.test.ts`, mobile `__tests__/directCopy.test.ts`) and in `i18n:check`.
+
+PR CI's core job also runs `check` on all three surfaces and compares the ledger with the **base of the
+PR merge ref** — the merge commit's first parent, i.e. the track tip that run merged (`compare-base`,
+after fetching that one commit). Not GitHub's `pull_request.base.sha`: that is the merge-base, so once
+the track moved it would list another PR's raises as this PR's and go RED after an approved re-anchor
+(#5598 review r2; `direct-copy-ci.test.ts` runs the workflow step on a shallow merge ref). The anchor, `anchorHead` and `ANCHOR_SEAL` must equal the base's unless the PR carries the
+`policy-change-approved` label (a re-anchor edits `direct-copy.mjs`, a policy path, so it needs that
+approval anyway), and no file's `(lowered ?? anchor)` may go above the base's. It prints the new raises
+file by file. `land --check` is not run in CI: CI runs on the PR merge ref, where an auto-merged ledger
+would differ byte for byte without anything being wrong.
 
 ```sh
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs web
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs mobile
-# Audit/reproduce the baseline (commit or tree id); emit only, never auto-update allowances.
-# The output must equal the committed ledger's `version`, `baselineHead` and `files`.
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs --baseline ec72216333e1a26be9387da5a3863ffd065ca4b2
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs check            # core, web, mobile
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink           # lower only; refuses if anything went up
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs raise <file> --issue <N> --reason "<why it waits for P1>"
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs land --base origin/<track> --ours <branch tip> [--check] [--allow-many-raises]
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs compare-base <merge ref base>  # PR CI; base must be fetched
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs report           # totals per surface (scan and anchor)
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs anchor <commit>  # planner only: prints a new ledger + seal
 ```
 
-### Ledger refresh at the S3 landing (2026-10-31)
+`land` replaces the old landing re-emission. It derives the merged ledger from the **target track's
+committed ledger** plus the branch's **new raise entries** (never from the working copy, so a
+conflict resolved with `--theirs` cannot smuggle counts in), then lowers it to the merged scan.
+Anything the scan has above that is copy neither side justified: `land` writes nothing and fails.
+It also fails when a scanned file has unstaged changes or is untracked (it counts the working copy,
+which must be what will be committed; a staged merge resolution and generated output are fine), and
+when one landing would carry more than 10 new raises (`--allow-many-raises` is an explicit decision,
+listed in the PR body). It prints every raise it carries.
 
-The ledger was first emitted at `078f76b1056191fdfc1664f9c837ffa6fbf0482c`
-(P0-1). Before this PR could land, the S3 UXUI screen PRs (#4847 #4848 #4853
-#4859 #4860 #4863 #4867 #4899 #4901 and fixes) had added direct copy, so the
-ledger was re-emitted with `--baseline` at track/uxui `ec7221633` (two emissions
-are byte-identical; the PR's own client files are test-only, so the merge commit
-emits the same counts). Result: 880 → 902 entries, **22 new files, 16 raised
-files, 0 lowered, 0 removed**, +450 occurrences (web 18 files, mobile 20):
+**After `land` stops a landing** (copy neither side justified): in the chain's merged state — the
+landing worktree after it merged the track — move the copy to a dictionary key or add the raise,
+**commit**, then run the chain again. `land` reads raises from the committed branch tip (`--ours`),
+never from the working copy, so an uncommitted raise is ignored (it prints a note). A branch made
+before #5589 has no `raise` command; run it from the merged state, where the v2 tool is present.
 
-| Added | Count | Disposition |
-|---|---|---|
-| Hangul/JSX/accessible-name literals | 123 in 16 files | 119 in 14 files are screen copy for P1 migration; 3 are the Intl capability probe's expected strings (`intl.ts`), 1 is the reconnect fallback literal (`ConversationHeader.tsx`, dictionary key `mobile.connection.reconnectNow` is the source of truth; the fallback serves isolated harnesses without a dictionary and a test pins its value) |
-| Standalone English words, class and selector strings | 320 | not user copy (state/kind/event/style names the conservative rule budgets) |
-| Dictionary keys passed through an aliased call (`const t = service.formatMessage; t("key")`) | 9 | scanner blind spot, see below |
-| Replaced literals | −2 | `ApprovalDecision.tsx` accessible names became templates |
+What the ratchet guarantees: **growth is not blocked; it shows up file by file in the ledger diff.**
+Every increase is a raise naming one file, a 4–5 digit issue and a reason (a reason about the ledger,
+a merge or a sync is refused), PR CI prints the new raises, and `land` prints them and stops past 10.
+Whether an issue number exists cannot be checked offline; reviewers read the raises in the diff.
 
-Every new or raised entry has a line in the ledger's `reasons` map (PR, the
-copy/technical split and the disposition). `reasons` is informational: the
-checker reads `files` only, so it adds no gate and no format contract. Do not
-copy copy text into it.
+A rename moves copy to a new path: `shrink` lowers the old path once the new path has a raise whose
+reason names the move. A new en-US feature file needs the same file (an empty `{}` is fine) in the
+five draft directories; `i18n:check` names the missing ones.
 
-Policy: refresh only to re-base at a landing. Emit with `--baseline <HEAD>`, diff
-against the committed ledger, and explain every new or raised file in `reasons`.
-Never refresh to hide new user copy that should use a dictionary key. P1 migration
-lowers a file's count and deletes its `reason`; the checker already fails on a stale
-(higher) allowance. A refresh at a later HEAD changes `baselineHead` too, and the
-emission does not carry `reasons`, so copy the existing lines over for files that
-keep a raised allowance.
+Known limitation (from #4834): the scanner recognises `formatMessage(...)` only by that callee name.
+An alias such as `const t = locale.service.formatMessage; t("settings.profile.languageLabel")` is not
+counted (the key is a call argument), but it also skips the unknown-key check; `cat` likewise misses
+concatenations through an alias. A raised `lowered` value inside the anchor cannot be seen from the
+tree alone; PR CI's `compare-base` refuses it against the base, and `land` never carries a branch's
+`lowered`.
 
-Known limitation (decision pending with the planner): the scanner recognises
-`formatMessage(...)` only by that callee name. An alias such as
-`const t = locale.service.formatMessage; {t("settings.profile.languageLabel")}`
-counts the key as one direct literal (so a screen that follows the dictionary rule
-through the alias is flagged) and skips the unknown-key check. Web
-`LanguageRow.tsx` carries 9 such references in its allowance.
+Known limitation (#5598 review, M3): `cat` catches only direct joins — `formatMessage(...)` in a
+template with other text, `formatMessage(...) + …`, `[formatMessage(...), …].join(…)`. It misses a
+message kept in a variable and joined later, JSX siblings (`{formatMessage(k)} {n}`), `.concat()`,
+`String(formatMessage(k)) + n`, aliases, and two messages side by side in JSX. The counted places are a
+lower bound. **P1 review checklist item:** no sentence is assembled from a message and other text or
+another message, however it is joined; it becomes one key with arguments.
 
-Stack QA should check buttons, settings rows, errors, accessible names and
-multiline text in en-XA, including narrow widths and large type. This change
-itself renders no screens.
+P1 migration lowers counts (`shrink`) and deletes the raises it makes unnecessary. Replacing a literal
+with a key that is in the en-US catalog lowers `ko` and adds no `en`; add the key to the catalog in the
+same change. Re-anchoring is
+for the planner at a stack boundary (to fold reviewed raises and lock in reductions), never to absorb
+unexplained growth. Extracted copy text and user data are never written to the ledger.

@@ -1136,7 +1136,7 @@ export function WorkSessionDetail({
                 </span>
               </MetaRow>
             )}
-            {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
+            {hostName !== null && <MetaRow label="실행하는 컴퓨터">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
               <MetaRow label="마지막 실행 결과">
                 <span data-numeric className="font-mono">
@@ -1185,8 +1185,8 @@ export function WorkSessionDetail({
             tone="neutral"
             message={
               session.remoteDisplayAvailable
-                ? "호스트 응답이 없어 터미널 관전과 라이브 화면을 볼 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
-                : "호스트 응답이 없어 터미널을 관전할 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
+                ? "실행하는 컴퓨터와 연결되지 않아 터미널 관전과 라이브 화면을 볼 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
+                : "실행하는 컴퓨터와 연결되지 않아 터미널을 관전할 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
             }
             testId="work-host-offline"
           />

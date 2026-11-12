@@ -7,6 +7,7 @@ import {AccessibilityInfo} from 'react-native';
 
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import {teamBoardKey} from '../features/work/teamBoard/useTeamBoard';
+import {workSessionEventsKey} from '../features/work/queries';
 import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
 import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useChannels, useDirectory} from '../features/workspace/queries';
@@ -17,6 +18,8 @@ import {
   NOTIFICATION_TAP_COPY,
   openableChannel,
   unavailableCopy,
+  isWorkPermissionTap,
+  opensWorkSession,
   workSessionForTap,
   type NotificationTarget,
 } from './tapArrival';
@@ -217,15 +220,20 @@ export function useNotificationTapRouting(
       // 읽어 이 알림의 루트와 맞는 것을 찾고, 없으면 아래의 대화 착지로 떨어진다.
       // 읽는 동안 탭은 대기로 남는다 — 사람이 다른 곳을 고르면 위에서 접힌다.
       //
-      // 「작업 콘솔을 싣는가」(`isSurfaceProvided('workConsole')`)는 묻지 않는다. 그 판정은
+      // 「작업 콘솔을 싣는가」(`workConsoleAvailable`)는 묻지 않는다. 그 판정은
       // 호스트 목록을 읽은 **뒤에야** 서는데, 콜드 런치의 탭은 그보다 먼저 온다 — 묻는
       // 순간 이 길이 닫혀 있는 것이 정상이 된다. 세션 원장이 이 서버에 없으면 읽기가
       // 실패하고, 실패는 아래에서 대화로 떨어진다.
-      if (target.reason === 'work_session_idle' && pending.session !== 'missed') {
+      //
+      // 맥 세션의 권한 요청(#5593)도 같은 길이다: 대화의 그 줄이 아니라 **그 세션 화면의 승인 카드**로 간다
+      // (`isWorkPermissionTap` 머리말). 착지(`permission`)는 요청 이벤트 id 를 들고 가고, 그 세션의 진행 읽기는
+      // 낡게 한다 — 그 캐시가 이 요청보다 먼저 읽혔으면 화면이 카드 없이 서기 때문이다(승인 원장을 다시 읽게 하는
+      // 아래 `invalidateApprovals` 와 같은 이유).
+      if (opensWorkSession(target) && pending.session !== 'missed') {
         if (pending.session === 'asking') return;
         pending.session = 'asking';
         void fetchWorkSessions(workspaceId)
-          .then(sessions => workSessionForTap(target, sessions))
+          .then(sessions => workSessionForTap(target, sessions, member.id))
           .catch(() => null)
           .then(session => {
             // 그 사이 사람이 옮겼거나 새 탭이 왔다면 이 답은 낡았다.
@@ -233,9 +241,26 @@ export function useNotificationTapRouting(
             if (session !== null) {
               pendingRef.current = null;
               setNotice(null);
+              const requestEventId = target.approvalId;
+              const permission =
+                isWorkPermissionTap(target) && requestEventId !== null
+                  ? {requestEventId, token: pending.token}
+                  : undefined;
+              if (permission !== undefined) {
+                void queryClient.invalidateQueries({
+                  queryKey: workSessionEventsKey(
+                    workspaceId,
+                    session.channelId,
+                    session.rootMessageId ?? '',
+                  ),
+                });
+              }
               enter({
                 type: 'openWorkSessionFromNotification',
-                workSession: {sessionId: session.id},
+                workSession:
+                  permission === undefined
+                    ? {sessionId: session.id}
+                    : {sessionId: session.id, permission},
               });
               return;
             }

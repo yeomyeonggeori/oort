@@ -199,3 +199,20 @@ rotation hold를 정리해요**(#2824 M3·#3098). 이 경로가 드물어 감수
 `runtime-unverified`: 실제 브라우저·WKWebView의 모듈 맵 동작과 새로고침, Tauri 새로고침 뒤
 메뉴·PTY, 화면 캡처·독립 design-review, 병합 트리 검증. 시험의 모듈 맵은 사양(HTML
 「fetch a single module script」)의 모델이지 브라우저 실행이 아니에요.
+
+## 의사 언어 en-XA — #5589
+
+사전을 거치지 않은 글을 한눈에 찾는 개발 도구예요. 사람이 고르는 언어가 아니라서 언어 목록(`availableLocales`, ko·en)에는 없어요.
+
+- **켜기**: 개발 서버(`npm run dev`)나 `--mode design` 빌드에서 주소에 `?pseudo=1`을 붙여요. 이 탭(sessionStorage)에서 계속
+  켜져 있고 `?pseudo=0`으로 꺼요. 켜지면 모든 사전 문구가 `[Ľáñğúáğé~]`처럼 대괄호·악센트·약 35% 길이로 바뀌고 `html lang`은
+  `en-XA`예요. 대괄호가 없는 글은 사전 밖이에요.
+- **출시 빌드에는 없어요**: `pseudoLocale.ts`의 `PSEUDO_LOCALE_BUILD`(`import.meta.env.DEV || MODE === "design"`)가 출시 빌드에서
+  상수 false라, `boot.ts`의 갈래와 코어 `pseudo.ts`·영어 사전을 부르는 동적 import가 번들에서 빠져요. 확인(2026-11-09):
+  `vite build` 결과물에 악센트 표·`oort.locale.pseudo`·`en-XA`가 0건, `--mode design` 결과물에는 있어요.
+- **캡처 레인**: `npm run capture:pseudo`(design 빌드 → `scripts/capture-pseudo.mjs`). 가짜 `/v1`(`gates/connection-harness.mjs`,
+  사람 이름은 예시 이름)로 로그인 전 두 화면·채널·받은함·설정 프로필·새 소식을 밝게 1280×860으로 찍고, 화면마다 보이는 글(텍스트
+  + aria-label·placeholder·title·alt)을 dictionary(통째로 대괄호) · mixed(대괄호 조각에 다른 글이 붙음 = 이어 붙이기) ·
+  direct(사전 밖) · fixture(가짜 서버 데이터)로 세어 `pseudo-report.json`에 남겨요. 이미 만든 번들은
+  `PSEUDO_CAPTURE_DIST=/절대/경로`, 결과 폴더는 `OUT_DIR`로 정해요. 넘침·잘림 판정은 하지 않고 수와 그림을 남겨요.
+- 데스크탑(Tauri)도 같은 `boot.ts`를 쓰지만 출시 데스크탑 번들은 출시 빌드라 의사 언어가 없어요. 폰은 아직 연결하지 않았어요(P1-6 이후).
