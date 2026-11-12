@@ -842,32 +842,35 @@ const decisionCenter = async (page, rowId, which) => {
  * 터치는 CDP `Input.dispatchTouchEvent`(손떨림이면 `touchMove` 1px, Chromium만). 서버는 실제처럼(거부 → run 끝남). 나간 결정은 1건이어야 한다.
  */
 async function matrixScene(browser, origin, engine) {
-  const inputs = engine === "chromium" ? ["mouse", "touch"] : ["mouse"];
+  // 수리 5회차: WebKit 터치(`touchscreen.tap`, 손떨림은 둘째 탭을 옮김)와 +600ms를 더해 검수 r3의 96장면 표와 같은 칸.
+  const inputs = ["mouse", "touch"];
   const summary = [];
   for (const which of ["approve", "reject"]) {
     for (const input of inputs) {
       for (const jitter of [0, 1]) {
-        for (const gapMs of [250, 1100, 1600, 2500, 4000]) {
+        for (const gapMs of [250, 600, 1100, 1600, 2500, 4000]) {
           const tag = `matrix-${engine}-${which}-${input}-jit${jitter}-gap${gapMs}`;
           const viewport = input === "touch" ? { width: 390, height: 844 } : { width: 1280, height: 800 };
           const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: input === "touch", server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
           await twoDecidersReady(page);
-          // 원장이 와서 줄이 막 올라온 1초(막기)가 지난 뒤, 사람이 본 단추를 누른다.
-          await sleep(1100);
+          // 원장이 와서 줄이 막 올라온 1초(막기)와 목록 위 띠가 서는 이동(약 0.9초 뒤 45px)이 가라앉은 뒤, 사람이 본 단추를 누른다.
+          await settle(page);
           const a = await decisionCenter(page, runApproval.runId, which);
-          const cdp = input === "touch" ? await context.newCDPSession(page) : null;
+          const cdp = input === "touch" && engine === "chromium" ? await context.newCDPSession(page) : null;
           const press = async (dx) => {
             if (cdp) {
               await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: a.x, y: a.y, id: 1 }] });
               if (dx > 0) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: a.x + dx, y: a.y + dx, id: 1 }] });
               await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            } else if (input === "touch") {
+              await page.touchscreen.tap(a.x + dx, a.y + dx);
             } else {
               if (dx > 0) await page.mouse.move(a.x + dx, a.y + dx);
               await page.mouse.down();
               await page.mouse.up();
             }
           };
-          if (!cdp) await page.mouse.move(a.x, a.y);
+          if (input === "mouse") await page.mouse.move(a.x, a.y);
           await press(0);
           await sleep(gapMs);
           const under = await underPoint(page, a.x + jitter, a.y + jitter);
@@ -1116,6 +1119,74 @@ async function nextAskScene(browser, origin) {
   }
 }
 
+/**
+ * 붙든 줄을 떠나 A가 빠지면 그 자리에 선 B의 단추(H1②③ 실측, 두 엔진 터치 390): A를 결정 → 구간 머리글(A의 줄 밖)을 탭 → A가 빠지고 B가
+ * 올라온다 → B가 선 지 1초 안에 누른 단추 상자 안 8·12·20px 옆 탭은 결정이 아니다 → 1초 뒤의 탭은 결정이다. 누른 단추의 실제 상자를 적는다.
+ */
+async function boxScene(browser, origin, engine) {
+  const summary = [];
+  for (const which of ["approve", "reject"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 390, height: 844 }, touch: true, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await twoDecidersReady(page);
+    await settle(page);
+    const tap = await touchTapper(context, page, engine);
+    const box = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${runApproval.runId}"]`) }).getByTestId(`work-job-approval-${which}`).boundingBox();
+    const a = { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+    await tap(a.x, a.y);
+    await page.waitForFunction(() => document.querySelector('[data-testid="work-job-approval-settled"]') !== null, null, { timeout: 10_000 });
+    const head = await page.locator('[data-section="needsMe"] h2').boundingBox();
+    await tap(head.x + 20, head.y + head.height / 2);
+    await page.waitForFunction((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`) === null, runApproval.runId, { timeout: 10_000 });
+    const t0 = Date.now();
+    const offsets = [[8, 0], [0, 12], [20, 0]].map(([dx, dy]) => [Math.min(dx, Math.floor(box.width / 2) - 1), Math.min(dy, Math.floor(box.height / 2) - 1)]);
+    const unders = [];
+    for (const [dx, dy] of offsets) {
+      unders.push(JSON.stringify(await underPoint(page, a.x + dx, a.y + dy)));
+      await tap(a.x + dx, a.y + dy);
+      await sleep(120);
+    }
+    const within = Date.now() - t0;
+    const swallowed = state.decisions === 1;
+    const look = await page.evaluate(() => document.querySelector(".work-jobs-list")?.hasAttribute("data-shift-guard") ?? false);
+    await sleep(1300);
+    await tap(a.x, a.y);
+    await sleep(700);
+    check(`box-${engine}-${which} B가 선 지 1초 안 상자 안 탭 3번 → 결정 아님(막힌 모양), 1초 뒤 → B 결정`, swallowed && look && state.decisions === 2 && state.decidedOrder[1] === approval2.id, { decisions: state.decisions, within, look, box, offsets, unders });
+    summary.push(`${which}: box=${Math.round(box.width)}x${Math.round(box.height)} offsets=${offsets.map((o) => o.join(",")).join("/")} in ${within}ms → ${swallowed ? "삼킴" : "결정"}, 1초 뒤 → ${state.decisions}건`);
+    await context.close();
+  }
+  console.log(`MEASURE box-${engine}: ${summary.join(" | ")}`);
+}
+
+/** 마우스: A를 승인하고 포인터를 그대로 둔 채 휠로 굴려 B의 「승인」을 그 점에 오게 한다(M1). 1초 안 누름 → 결정 아님(막힌 모양), 1초 뒤 → B 결정. */
+async function wheelScene(browser, origin, engine) {
+  const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 600 }, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+  await twoDecidersReady(page);
+  await settle(page);
+  const a = await decisionCenter(page, runApproval.runId, "approve");
+  const b = await decisionCenter(page, runApproval2.runId, "approve");
+  await mousePress(page, a.x, a.y);
+  await page.waitForFunction(() => document.querySelector('[data-testid="work-job-approval-settled"]') !== null, null, { timeout: 10_000 });
+  await sleep(300);
+  await page.mouse.wheel(0, b.y - a.y);
+  await page.waitForFunction(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-decision]") !== null, [a.x, a.y], { timeout: 5000 }).catch(() => {});
+  await sleep(150);
+  const under = await underPoint(page, a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await sleep(150);
+  const first = state.decisions;
+  const look = await page.evaluate(() => document.querySelector(".work-jobs-list")?.hasAttribute("data-shift-guard") ?? false);
+  await sleep(1200);
+  const later = await underPoint(page, a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await sleep(700);
+  check(`wheel-${engine} 붙든 동안 굴려 B가 그 점에: 1초 안 누름 → 결정 아님(막힌 모양), 1초 뒤 → B 결정`, under.job === runApproval2.runId && under.decision === "approve" && first === 1 && look && state.decisions === 2 && state.decidedOrder[1] === approval2.id, { under, first, look, later, decisions: state.decisions });
+  console.log(`MEASURE wheel-${engine}: under=${under.job?.slice(-2)}/${under.decision} first-click→${first}건 look=${look} after-1s→${state.decisions}건`);
+  await context.close();
+}
+
 /** 삼킨 누름의 막힌 모양(검수 3회차 M1·L1): 줄이 막 올라온 1초 안의 터치 탭 → 결정 0건, 0.15초·0.45초 뒤에도 막힌 모양. 캡처 밝게·어둡게 1280·390. */
 async function guardLookScene(browser, origin) {
   for (const scheme of ["light", "dark"]) {
@@ -1232,6 +1303,17 @@ async function main() {
       await nextAskScene(browser, preview.origin);
       await guardLookScene(browser, preview.origin);
       await queuedChipScene(browser, preview.origin);
+    }
+    if (ONLY === "" || ONLY === "fix5" || ONLY === "box") {
+      await boxScene(browser, preview.origin, "chromium");
+      await wheelScene(browser, preview.origin, "chromium");
+      const wk = await webkit.launch();
+      try {
+        await boxScene(wk, preview.origin, "webkit");
+        await wheelScene(wk, preview.origin, "webkit");
+      } finally {
+        await wk.close();
+      }
     }
   } finally {
     await browser.close();
