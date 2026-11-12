@@ -8851,6 +8851,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load what the agents are doing."
     }
   ],
+  "timeline.memberPanel.nowFailedMid": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
   "timeline.memberPanel.nowFailedShort": [
     {
       "type": 0,

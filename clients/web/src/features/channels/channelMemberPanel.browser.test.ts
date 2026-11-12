@@ -8,9 +8,9 @@ import { ApiError, type AgentRunProgress, type RosterMember } from "@momo/core/l
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { compileTokensCss, ENGINES } from "@/design/appearance/compileTokensTestKit";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import koTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json";
+import enTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/en-US/timeline.json";
 import { createAppLocale } from "@/i18n/localeStore";
 import type { AppLocale } from "@/i18n/localeStore";
 
@@ -130,9 +130,7 @@ const hermes = (over: Partial<AgentRunProgress> = {}) =>
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-const catalog = (locale: string) =>
-  JSON.parse(readFileSync(resolve(process.cwd(), `../../packages/momo-core/src/i18n/catalogs/${locale}/timeline.json`), "utf8")) as Record<string, string>;
-const CATALOG = { ko: catalog("ko-KR"), en: catalog("en-US") };
+const CATALOG = { ko: koTimeline as Record<string, string>, en: enTimeline as Record<string, string> };
 let korean: AppLocale;
 let english: AppLocale;
 
@@ -553,7 +551,12 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
       const report: string[] = [];
       const VIEWPORTS = [
         { name: "1280", width: 1280 },
+        { name: "640", width: 640 },
         { name: "512", width: 512 },
+        { name: "511", width: 511 },
+        { name: "390", width: 390 },
+        { name: "375", width: 375 },
+        { name: "374", width: 374 },
         { name: "360", width: 360 },
         { name: "320", width: 320 },
       ];
@@ -626,6 +629,10 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
                         reasonCount: reasons.length,
                         shownCount: shown.length,
                         shownText: shown[0]?.textContent ?? "",
+                        shownAriaHidden: shown.every((el) => el.getAttribute("aria-hidden") === "true"),
+                        srText: failed.querySelector('[data-testid="channel-member-now-failed-sr"]')?.textContent ?? "",
+                        srVisible: failed.querySelector('[data-testid="channel-member-now-failed-sr"]')?.getAttribute("aria-hidden") ?? "none",
+                        titleText: failed.getAttribute("title") ?? "",
                         textHeight: text.getBoundingClientRect().height,
                         lineHeight: Number.parseFloat(style.lineHeight),
                         whiteSpace: style.whiteSpace,
@@ -644,8 +651,20 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
                     // 까닭 글 요소 자체를 잰다: 보이는 것이 정확히 하나이고, 글자가 사전의 짧은 글(640 미만)/긴 글(640 이상)이며,
                     // 기본 글자에서는 말줄임 없이 다 들어간다(320·360 × 한국어·영어). 글을 숨기거나 지우면 여기서 RED다.
                     const dict = name.startsWith("영어") ? CATALOG.en : CATALOG.ko;
-                    const wanted = vp.width < 640 ? dict["timeline.memberPanel.nowFailedShort"] : dict["timeline.memberPanel.nowFailed"];
-                    if (foot.reasonCount !== 2) problems.push(`${at}: 까닭 글 요소 ${foot.reasonCount}개(2개여야 함)`);
+                    // 단계: 512 이상 긴 글, 375~511 중간 글, 375 미만 짧은 글
+                    const wanted =
+                      vp.width >= 512
+                        ? dict["timeline.memberPanel.nowFailed"]
+                        : vp.width >= 375
+                          ? dict["timeline.memberPanel.nowFailedMid"]
+                          : dict["timeline.memberPanel.nowFailedShort"];
+                    const fullSentence = dict["timeline.memberPanel.nowFailed"];
+                    // 낭독: 어느 폭에서든 전체 문장이 한 번(보이는 글은 aria-hidden, 전체 문장은 sr-only 한 곳)이고 `title`에도 있다
+                    if (foot.srText !== fullSentence) problems.push(`${at}: 낭독 글 「${foot.srText}」 ≠ 전체 문장`);
+                    if (foot.srVisible !== "none") problems.push(`${at}: 낭독 글이 aria-hidden`);
+                    if (!foot.shownAriaHidden) problems.push(`${at}: 보이는 글이 낭독에도 잡힘(두 번 읽힘)`);
+                    if (foot.titleText !== fullSentence) problems.push(`${at}: title 「${foot.titleText}」 ≠ 전체 문장`);
+                    if (foot.reasonCount !== 3) problems.push(`${at}: 까닭 글 요소 ${foot.reasonCount}개(3개여야 함)`);
                     if (foot.shownCount !== 1) problems.push(`${at}: 보이는 까닭 글 ${foot.shownCount}개(1개여야 함)`);
                     if (foot.shownText !== wanted) problems.push(`${at}: 보이는 글 「${foot.shownText}」 ≠ 「${wanted}」`);
                     if (font.px === 16 && foot.textFull > foot.textClient) {
@@ -772,6 +791,8 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
             { name: "wide", width: 1280, height: 900, rootFontPx: 16, scale: 1 },
             { name: "360", width: 360, height: 780, rootFontPx: 16, scale: 1 },
             { name: "320", width: 320, height: 780, rootFontPx: 16, scale: 1 },
+            { name: "375", width: 375, height: 780, rootFontPx: 16, scale: 1 },
+            { name: "512", width: 512, height: 780, rootFontPx: 16, scale: 1 },
             // 브라우저 확대 200%: 1280 창이 CSS 640px가 되고 화소는 두 배다.
             { name: "zoom200", width: 640, height: 450, rootFontPx: 16, scale: 2 },
             // 큰 글자(브라우저 기본 글자 200%): 확대와 다르다 — 틀은 그대로, rem만 두 배.

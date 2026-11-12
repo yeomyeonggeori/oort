@@ -42,6 +42,7 @@
   "timeline.memberPanel.agentKind": "에이전트",
   "timeline.memberPanel.listLabel": "채널 멤버 목록",
   "timeline.memberPanel.nowFailed": "에이전트가 지금 하는 일을 불러오지 못했어요.",
+  "timeline.memberPanel.nowFailedMid": "하는 일을 못 불러왔어요",
   "timeline.memberPanel.nowFailedShort": "실패했어요",
   "timeline.memberPanel.nowRetry": "다시 불러오기",
   "timeline.typing.one": "{name}님이 작성 중…",

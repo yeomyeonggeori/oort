@@ -488,14 +488,20 @@ function ChannelMemberPanelBody({
 
       <div className="flex items-center justify-end gap-2 border-t border-line p-4">
         {hasAgent && now.read === "failed" && (
-          <p className="mr-auto flex h-control-sm min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
-            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701). 글은 어느 폭에서도 눈에 보인다
-                (#5711): 640 미만은 짧은 글, 640 이상은 긴 글이고, 모자라면 말줄임이다. 두 글 모두 `truncate`가 `hidden`/
-                `inline`과 같은 요소에 있어 보임 클래스가 말줄임을 덮지 않는다(큰 글자에서도 줄바꿈 없음). 「다시 불러오기」는
-                줄어들지 않되 칸보다 넓어지지 않고(`max-w-full`), 모자라면 글이 말줄임으로 줄어 이웃 단추와 겹치지 않는다. 줄 높이는
-                단추 높이로 고정(`h-control-sm`)이라 큰 글자에서 글줄이 더 커도 발치가 늘지 않는다. */}
-            <span className="min-w-0 truncate sm:hidden" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
-            <span className="hidden min-w-0 truncate sm:block" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+          <p
+            className="mr-auto flex h-control-sm min-w-0 items-center gap-2 text-meta text-ink-muted"
+            data-testid="channel-member-now-failed"
+            title={formatMessage("timeline.memberPanel.nowFailed")}
+          >
+            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701). 보이는 글은 폭에 따라 세
+                단계다(#5711): 512px 이상 긴 글, 375~511px 대상을 말하는 중간 글, 375px 미만 짧은 글(이 폭에서는 대상 없이
+                실패만 말한다). 모두 말줄임 없이 들어가는 폭에서만 고른다. 각 글은 `truncate`가 보임 클래스와 같은 요소에 있어
+                큰 글자에서도 줄바꿈이 없다. 낭독은 폭과 무관하게 전체 문장 한 번이다: 보이는 글은 `aria-hidden`, 전체 문장은
+                `sr-only` 한 곳(`title`에도 같은 문장). */}
+            <span className="sr-only" data-testid="channel-member-now-failed-sr">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-short" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-mid" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedMid")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-long" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailed")}</span>
             <Button
               type="button"
               variant="ghost"
