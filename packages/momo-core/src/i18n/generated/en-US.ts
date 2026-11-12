@@ -8019,7 +8019,7 @@ export const catalog: MessageCatalog = {
   "settings.updates.holdTitle": [
     {
       "type": 0,
-      "value": "Restarts when your work ends"
+      "value": "Restarts when work on this Mac ends"
     }
   ],
   "settings.updates.installRowDescription": [

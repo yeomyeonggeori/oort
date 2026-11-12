@@ -39,9 +39,9 @@ import {
 // 않아(`startUpdateWatch` 는 데스크탑 전용) 아무것도 그리지 않는다.
 //
 // 누르면: 새 버전이면 받기를 시작하고, 어떤 상태든 줄 위에 카드가 열린다. 받는
-// 동안은 게이지, 끝나면 3초 뒤 자동으로 다시 실행(카운트다운은 store 가 들고 있어
+// 동안은 게이지, 끝나면 3초 뒤 자동으로 다시 시작(카운트다운은 store 가 들고 있어
 // 카드를 닫아도 계속된다), 실패하면 이유와 「다시 확인」. 이 맥에서 로컬 작업이 돌면
-// 카운트다운 대신 「작업이 끝나면 다시 시작해요」와 「지금 다시 시작」, 그리고 지금 누르면
+// 카운트다운 대신 「이 맥의 작업이 끝나면 다시 시작해요」와 「지금 다시 시작」, 그리고 지금 누르면
 // 무엇이 끊기는지 한 줄을 보인다(#5661, 판정은 코어 `localWork.ts`).
 //
 // 툴팁은 이 앱의 관례(`title`)가 아니라 직접 그린다. 네이티브 `title` 은 0.7초
@@ -57,7 +57,7 @@ function cardTitle(state: UpdateState, countdown: number | null): string {
     case "installing":
       return "새 버전을 받는 중";
     case "installed":
-      return countdown === null ? "다시 실행해 주세요" : "곧 다시 실행돼요";
+      return countdown === null ? "다시 시작해 주세요" : "곧 다시 시작돼요";
     case "failed":
       return "업데이트하지 못했어요";
     case "checking":
@@ -187,7 +187,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 「다시 확인」을 누른 사람이 결과를 보기 전에 줄이 사라지면 아무 일도 없었던 것처럼 읽힌다.
   if (!pillWorthShowing(state) && !open) return null;
 
-  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 실행돼요」는 거짓이다(수리 2회차).
+  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 시작돼요」는 거짓이다(수리 2회차).
   const stopped = state.kind === "installed" && hold === null && countdown === null;
   const tooltip = holding
     ? formatMessage("settings.updates.holdTitle")
@@ -363,7 +363,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
               <Button
                 size="sm"
                 onClick={() => void relaunchIntoUpdate()}
-                aria-label="지금 다시 실행"
+                aria-label="지금 다시 시작"
                 data-testid="update-card-now"
               >
                 <RefreshCw aria-hidden="true" />

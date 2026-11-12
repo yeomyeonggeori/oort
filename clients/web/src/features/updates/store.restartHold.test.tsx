@@ -141,7 +141,7 @@ describe("업데이트 뒤 다시 시작의 문 (저장소)", () => {
   it("칸이 일하는 동안은 기다리고 끊길 것을 한 줄로 말한다. 끝난 뒤 쉬는 상태가 2분 이어지면 그때 다시 시작한다", async () => {
     await installWith({ ...NONE, panes: [pane("working"), pane("waiting-permission")] });
     expect(byId("update-card-now")?.getAttribute("data-hold")).toBe("true");
-    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when work on this Mac ends");
     expect(byId("update-card-subline")?.textContent).toBe("Restarting now stops: 2 terminal panes");
     await advance(30 * 60 * 1000);
     expect(tauri.relaunch).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe("업데이트 뒤 다시 시작의 문 (저장소)", () => {
     });
     expect(result).toBe("refused");
     expect(tauri.check).not.toHaveBeenCalled();
-    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when work on this Mac ends");
   });
 
   it("「지금 다시 시작」 뒤에는 그때 판정 중이던 문이 끝나도 다시 시작을 한 번 더 걸지 않는다", async () => {
@@ -306,7 +306,7 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     });
     await advance(50);
     // 카드는 열렸다(왜 다시 시작하지 않는지가 거기 있다). 초점은 입력창에 남는다.
-    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when work on this Mac ends");
     expect(document.activeElement).toBe(field);
     act(() => pressKey("Enter"));
     act(() => pressKey(" "));
@@ -335,7 +335,7 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
   it("H3 기다린 뒤 카운트다운이 시작되면 닫아 둔 카드가 초점을 가져가지 않고 다시 열리고, 「지금 말고」로 미룰 수 있다", async () => {
     const field = typingInComposer();
     await installWith({ ...NONE, panes: [pane("working")] });
-    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when work on this Mac ends");
     expect(document.activeElement).toBe(field);
     // 기다리는 카드를 닫고 계속 일한다.
     act(() => pressKey("Escape"));
@@ -346,7 +346,7 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     facts = { ...NONE, panes: [pane("turn-done")] };
     await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
     // 예고: 카드가 다시 열리고 남은 시간을 말한다. 초점은 입력창 그대로다.
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(byId("update-card-subline")?.textContent).toContain(`${RELAUNCH_AFTER_WAIT_SECONDS}초 뒤`);
     expect(document.activeElement).toBe(field);
     expect(byId("update-card-defer")?.textContent).toBe("Not now");
@@ -359,7 +359,7 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     });
     await advance(60 * 60 * 1000);
     expect(tauri.relaunch).not.toHaveBeenCalled();
-    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
+    expect(byId("update-card-title")?.textContent).toBe("다시 시작해 주세요");
     expect(byId("update-card-now")).not.toBeNull();
     expect(byId("update-card-defer")).toBeNull();
   });
@@ -373,7 +373,7 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     });
     await advance(60_000);
     expect(tauri.relaunch).not.toHaveBeenCalled();
-    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
+    expect(byId("update-card-title")?.textContent).toBe("다시 시작해 주세요");
   });
 });
 
@@ -421,7 +421,7 @@ describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점,
     message.textContent = "지난 대화";
     document.body.append(message);
     await installWith({ ...NONE, panes: [pane("working")] });
-    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when work on this Mac ends");
     expect(document.activeElement).toBe(field);
 
     act(() => pressOutside(message));
@@ -457,7 +457,7 @@ describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점,
     await advance(50);
     facts = { ...NONE, panes: [pane("turn-done")] };
     await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(document.activeElement).toBe(field);
 
     act(() => pressKey("Escape"));
@@ -495,7 +495,7 @@ describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점,
 
     facts = { ...NONE, panes: [pane("turn-done")] };
     await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
   });
 
   it("설치가 한 번 실패한 뒤 다시 확인하면 다시 받을 수 있다(설치 잠금이 풀린다)", async () => {
@@ -537,7 +537,7 @@ describe("업데이트 수리 3회차: 다시 시작 단추는 첫 초점을 받
     expect(document.activeElement).toBe(byId("update-card"));
     // 낭독: 카드 이름(앱 업데이트) 뒤에 제목 · 부제 · 단추 이름이 설명으로 읽힌다.
     expect(byId("update-card")?.getAttribute("role")).toBe("dialog");
-    expect(describedText()).toContain("Restarts when your work ends");
+    expect(describedText()).toContain("Restarts when work on this Mac ends");
     expect(describedText()).toContain("Restart now");
 
     act(() => pressKey("Escape"));
@@ -573,12 +573,12 @@ describe("업데이트 수리 3회차: 다시 시작 단추는 첫 초점을 받
     await advance(50);
     facts = { ...NONE, panes: [pane("turn-done")] };
     await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     act(() => root?.unmount());
     host?.remove();
     mountCard();
     await advance(50);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(byId("update-card-defer")).not.toBeNull();
   });
 
@@ -594,7 +594,7 @@ describe("업데이트 수리 3회차: 다시 시작 단추는 첫 초점을 받
 
     mountCard();
     await advance(50);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(byId("update-card-subline")?.textContent).toContain("3초 뒤");
     await advance(3_000);
     expect(tauri.relaunch).toHaveBeenCalledTimes(1);
@@ -614,7 +614,7 @@ describe("업데이트 후속: 보일 곳이 없으면 카운트다운을 시작
 
     mountCard();
     await advance(50);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(byId("update-card-subline")?.textContent).toContain("30초 뒤");
     await advance(29_000);
     expect(tauri.relaunch).not.toHaveBeenCalled();
@@ -635,7 +635,7 @@ describe("업데이트 후속: 보일 곳이 없으면 카운트다운을 시작
     });
     await advance(0);
     const row = byId("connect-update-notice");
-    expect(row?.textContent).toContain("곧 다시 실행");
+    expect(row?.textContent).toContain("곧 다시 시작");
     await advance(2_000);
     expect(tauri.relaunch).not.toHaveBeenCalled();
     await advance(1_500);
