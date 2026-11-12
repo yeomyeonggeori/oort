@@ -13370,7 +13370,7 @@ paths:
       description: >
         ADR-0124 amendment 5 (#5689). For every thread the caller **follows** (`auto` or
         `followed`) that has an unread reply - the replies `followed_unread_reply_count`
-        counts - moves the caller's read position to the thread's last reply, in one
+        counts - moves the caller's read position to the thread's last reply, in one write
         transaction, through the same statement as `markThreadRead`: the position becomes
         `LEAST(the last reply this request saw, the thread's last reply)` and is written only
         when that is greater than what is stored, so it never moves backward and a reply that
@@ -13380,30 +13380,38 @@ paths:
 
         Which channels: those the caller is a live member of and that are not archived (the
         channels `listReadStates` has a line for), narrowed to `channel_ids` when given.
-        `channel_ids` absent or `null` means all of them; `[]` means none (a no-op). An id that
+        The body is a JSON object whose only key is `channel_ids`: `{}` or
+        `{"channel_ids": null}` means all of them, `{"channel_ids": []}` means none (a no-op).
+        Any other body is 400 before anything is read - an unknown key (a misspelt
+        `channelIds` is never read as "all"), a body that is not an object (a bare `[]`), an
+        id that is not a uuid, malformed JSON. Duplicate ids count once. An id that
         is not such a channel - one the caller is not in, has left, an archived one, another
         workspace's, one that never existed - is skipped without a word: the answer is the
         one the request would get without it, so it says nothing about whether that channel
         exists. A guest (ADR-0219) reaches only the channels they are in.
 
 
-        Answer: the `listReadStates` lines of the channels where a position moved, read after
-        the write (`followed_unread_reply_count` is `0` unless a reply landed meanwhile or the
-        cap was hit), `marked_thread_count`, and `has_more`. At most 100 threads move per
+        Answer: the `listReadStates` lines of the channels where a position moved, read in a
+        second transaction **after** the write commits (`followed_unread_reply_count` is `0`
+        unless the cap was hit or a reply landed meanwhile - a reply that lands just after the
+        commit can already be counted, and its own frame makes the client read again),
+        `marked_thread_count`, and `has_more`. At most 100 threads move per
         request; when more were waiting `has_more` is `true` and the client calls again until
         it is `false`. With `has_more: false`, the same request again answers
         `{"read_states": [], "marked_thread_count": 0, "has_more": false}` and sends nothing.
 
 
         Signal: one ids-only `followed_unread.updated` frame per changed channel on the
-        caller's personal channel (`user:read-state#<MEMBER>`), in the same transaction's
+        caller's personal channel (`user:read-state#<MEMBER>`), in the write transaction's
         outbox; its `root_id` is one of the threads that moved there, not a list. Nobody
         else hears anything. The channel cursor (`updateReadState`) does not move and the
         inbox's thread-reply items stay as they are - exactly what reading one thread does.
 
 
         Human bearer only: an agent bearer is refused whatever its scopes, a developer token
-        is refused (the route is not on its closed table), and the caller must be an active
+        is refused (the route is not on its closed table), so are the narrow notification
+        and lock-screen tokens, a work-host signature and the legacy gateway secret (each has
+        its own allow-list without this path), and the caller must be an active
         human member of the workspace. Per-member budget `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`
         (default 60 per window). Nothing is audited.
       security:
@@ -13424,7 +13432,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ThreadReadAllResponse"
         "400":
-          description: More than 500 `channel_ids`.
+          description: >
+            The body is not exactly the shape: not valid JSON, not an object, a key other than
+            `channel_ids`, `channel_ids` not an array of uuids or `null`, or more than 500
+            distinct ids.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -13436,13 +13447,13 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "415":
-          description: The request has no JSON body (send `{}` for every channel).
+        "413":
+          description: The body is larger than the server's body limit.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "422":
-          description: The body is not the shape (`channel_ids` not an array of uuids).
+        "415":
+          description: The request has no JSON content type (send `{}` for every channel).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -27729,6 +27740,7 @@ components:
 
     ThreadReadAllRequest:
       type: object
+      additionalProperties: false
       properties:
         channel_ids:
           type: array
@@ -27740,7 +27752,8 @@ components:
           description: >
             Narrow the request to these channels. Absent or `null` = every channel the caller is
             a live member of; `[]` = none. Ids that are not the caller's live, unarchived channels
-            are skipped without a word. Duplicates are ignored.
+            are skipped without a word. Duplicates count once (the 500 is distinct ids). No other
+            key is accepted.
 
     ThreadReadAllResponse:
       type: object

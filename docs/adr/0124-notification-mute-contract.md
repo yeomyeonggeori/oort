@@ -185,11 +185,11 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 
 ### D13. 라우트: `POST /v1/workspaces/{ws}/threads/read-all`
 
-- **본문** `{"channel_ids"?: uuid[]}`(snake_case, 읽음 상태 무리와 같다). 없거나 `null`이면 부른 사람이 지금 멤버인 모든 채널, `[]`이면 아무 채널도 아니다(아무것도 하지 않는다). 본문은 JSON이어야 한다 — 모든 채널이면 `{}`. 멤버 id는 받지 않는다.
+- **본문** `{"channel_ids"?: uuid[] | null}`(snake_case, 읽음 상태 무리와 같다). **JSON 객체이고 키는 `channel_ids` 하나뿐**이다. `{}`와 `{"channel_ids": null}`만 「부른 사람이 지금 멤버인 모든 채널」이고, `{"channel_ids": []}`는 아무 채널도 아니다(아무것도 하지 않는다). 그 밖의 본문 — 모르는 키(`channelIds` 같은 오타), 객체가 아닌 본문(맨 배열 `[]`·`null`·문자열), uuid가 아닌 id, 형식이 틀린 JSON — 은 아무것도 읽기 전에 400이다(보안 검수 r1 M2: 위치는 앞으로만 가서, 잘못 읽힌 본문이 「모두 읽음」이 되면 되돌릴 수 없다). JSON 형식 표시(`Content-Type`)가 없으면 415. 오류 본문은 모두 `ErrorResponse` 모양이다. 멤버 id는 받지 않는다.
 - **대상**: 부른 사람이 **따라가는**(`auto`·`followed`) 스레드 가운데 안 읽은 답글이 있는 것. 「안 읽은 답글이 있다」는 D10의 스레드별 수와 글자 그대로 같은 술어다. 채널은 부른 사람이 지금 멤버(`left_at IS NULL`)이고 보관되지 않은 것 — 곧 읽음 투영에 줄이 있어 `followed_unread_reply_count`가 세는 스레드만이다. 위치가 이미 머리에 있는 스레드는 고르지 않아서, 고른 스레드는 반드시 움직인다.
 - **같은 도메인 함수**: 위치를 옮기는 문장은 `PUT …/messages/{root}/read`와 **하나**다(`advance_read_positions_in_tx`). 새 위치 = `LEAST(이 호출이 본 스레드 머리, 지금 머리)`이고 저장된 값보다 클 때만 쓴다 — 뒤로 가지 않고, 있는 답글 너머로 가지 않는다. 행을 새로 만들지 않고, 그만 따라간 행은 고르지 않는다.
-- **한 트랜잭션**: 후보 행을 `(channel, root)` 순서로 잠그고(`FOR UPDATE`) 같은 트랜잭션에서 옮긴다. 두 기기가 동시에 눌러도 서로 기다릴 뿐 교착하지 않는다. 기다리는 동안 온 답글은 안 읽은 채로 남고(이 호출이 본 머리까지만 옮긴다), 다른 기기가 더 앞으로 옮긴 위치는 당기지 않는다.
-- **응답**: `{"read_states": [ReadStateRow…], "marked_thread_count": n, "has_more": bool}`. `read_states`는 위치가 바뀐 채널의 `GET …/read-state` 줄과 같은 모양이고 쓴 뒤에 읽은 값이다(상한에 걸리지 않았고 그사이 새 답글이 오지 않았으면 그 채널의 `followed_unread_reply_count`는 `0`). 바뀐 것이 없으면 `[]`. `has_more: false`일 때 같은 요청을 다시 보내면 `{"read_states":[],"marked_thread_count":0,"has_more":false}`이고 신호도 없다.
+- **한 쓰기 트랜잭션**: 후보 행을 `(channel, root)` 순서로 잠그고(`FOR UPDATE`) 같은 트랜잭션에서 옮기고 신호를 넣은 뒤 커밋한다. 두 기기가 동시에 눌러도 서로 기다릴 뿐 교착하지 않는다. 기다리는 동안 온 답글은 안 읽은 채로 남고(이 호출이 본 머리까지만 옮긴다), 다른 기기가 더 앞으로 옮긴 위치는 당기지 않는다.
+- **응답**: `{"read_states": [ReadStateRow…], "marked_thread_count": n, "has_more": bool}`. `read_states`는 위치가 바뀐 채널의 `GET …/read-state` 줄과 같은 모양이고, 쓰기 트랜잭션을 **커밋한 뒤** 두 번째 테넌트 트랜잭션에서 읽은 값이다(상한에 걸리지 않았고 그사이 새 답글이 오지 않았으면 그 채널의 `followed_unread_reply_count`는 `0`). 커밋 뒤에 읽으므로 그 짧은 사이에 온 답글이 수에 섞일 수 있다 — 클라이언트는 그 답글의 신호로 다시 맞춘다. 커밋 전에 읽지 않는 이유(보안 검수 r1 M1): 투영 읽기는 부른 사람의 밀린 양 전체에 비례하는데, 그동안 그 스레드로 오는 답글 보내기가 채널 순번 잠금을 쥔 채 따라가기 행을 기다리게 된다. 바뀐 것이 없으면 `[]`. `has_more: false`일 때 같은 요청을 다시 보내면 `{"read_states":[],"marked_thread_count":0,"has_more":false}`이고 신호도 없다.
 
 ### D14. 신호
 
@@ -197,7 +197,7 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 
 ### D15. 권한·경계
 
-- **사람만**: 에이전트 bearer는 이 길에 범위가 없어 문에서 403이고, 처리기의 `require_human`이 한 번 더 막는다. 개발자 토큰은 닫힌 표에 없어 거절된다. 그다음 활성 사람 멤버인지 본다(받은함 모두 읽음과 같은 검사).
+- **사람만**: 에이전트 bearer는 이 길에 범위가 없어 문에서 403이고, 처리기의 `require_human`이 한 번 더 막는다. 개발자 토큰은 닫힌 표에 없어 거절된다. 알림 확장·잠금화면용 좁은 토큰, 작업 호스트 서명, 옛 게이트웨이 비밀도 각자의 허용 경로 목록에 이 길이 없어 거절된다. 그다음 활성 사람 멤버인지 본다(받은함 모두 읽음과 같은 검사).
 - **본인 위치만**: 모든 문장이 bearer의 `member_id`를 묶는다. 요청 모양에 멤버가 없다.
 - **조용히 건너뛰기**: `channel_ids`에 지금 멤버가 아닌 채널·나간 채널·보관된 채널·다른 워크스페이스의 채널·없는 id가 섞여 있으면 건너뛰고, 응답은 그 id가 없을 때와 같다(있는지 떠볼 수 없다). 시험이 그런 id만 보낸 응답과 `[]`의 응답이 바이트까지 같음을 잠근다.
 - **손님(ADR-0219)**: 멤버십 행이 살아 있는 채널만 — 같은 술어가 막는다. 손님 전용 판정 함수(`visible_channel`)가 생기면 이 길도 그것을 쓰는지 다시 본다.
@@ -206,7 +206,7 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 
 ### D16. 상한 [추정]
 
-- `channel_ids` 최대 500개 — 채널 목록 한 쪽 상한(`CHANNEL_LIST_LIMIT_MAX`). 넘으면 400.
+- `channel_ids` 최대 500개(중복을 뺀 수) — 채널 목록 한 쪽 상한(`CHANNEL_LIST_LIMIT_MAX`). 넘으면 400.
 - 한 요청에 옮기는 스레드 최대 100개 — 받은함 한 쪽 상한(`INBOX_MAX_LIMIT`). 받은함 모두 읽음에는 상한이 없어 그대로 따를 숫자가 없었다. 넘으면 100개만 옮기고 `has_more: true` — 클라이언트는 `false`가 될 때까지 다시 부른다. 고른 스레드는 반드시 움직이므로 다시 부를 때마다 남은 수가 줄어든다.
 - 분당 호출: 멤버별 쓰기 예산 표면 `thread_read_all`, 창(60초)마다 기본 60, `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`(0이면 끈다). 다른 멤버별 쓰기 예산(예약·업로드·영상 정보·미리보기)과 같은 수다. 넘으면 429 + `Retry-After`.
 
