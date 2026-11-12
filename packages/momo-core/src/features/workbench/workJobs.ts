@@ -333,16 +333,22 @@ export interface WorkJobSection {
  */
 export function workJobSections(
   rows: readonly WorkJobRow[],
-  needsMyCheck: (row: WorkJobRow) => boolean = () => false
+  needsMyCheck: (row: WorkJobRow) => boolean = () => false,
+  /**
+   * 방금 그 자리에서 결정해 「응답 필요」의 칸에 붙든 줄(#5640 수리 4회차). **끝났어도** 그 칸에 남는다 — 서버는 거부하면 run을
+   * 바로 끝내고(`stopped`), 승인한 run도 곧바로 끝날 수 있다. 끝난 줄을 먼저 걷으면 붙든 줄이 「끝난 일」로 가서 다음 줄의 결정
+   * 단추가 방금 누른 자리로 올라온다.
+   */
+  heldInPlace: (row: WorkJobRow) => boolean = () => false
 ): WorkJobSection[] {
-  const open = rows.filter((row) => !row.finished);
-  const mine = open.filter((row) => needsMyCheck(row));
-  const rest = open.filter((row) => !needsMyCheck(row));
+  const open = rows.filter((row) => !row.finished || heldInPlace(row));
+  const mine = open.filter((row) => heldInPlace(row) || needsMyCheck(row));
+  const rest = open.filter((row) => !heldInPlace(row) && !needsMyCheck(row));
   const now = [
     ...rest.filter((row) => row.awaitingApproval),
     ...rest.filter((row) => !row.awaitingApproval),
   ];
-  const done = rows.filter((row) => row.finished);
+  const done = rows.filter((row) => row.finished && !heldInPlace(row));
   const sections: WorkJobSection[] = [];
   if (mine.length > 0) {
     sections.push({ key: "needsMe", label: WORK_JOBS_COPY.sectionNeedsMe, rows: mine });

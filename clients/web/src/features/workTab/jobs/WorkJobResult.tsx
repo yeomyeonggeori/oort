@@ -49,6 +49,20 @@ export interface JobApprovalFacts {
   intent: string | null;
   /** 결정자가 아닐 때의 대기 줄(카드와 같은 문장). 원장이 아직 답하지 않았으면 null — 「원장에 없다」를 지어내지 않는다. */
   waiting: string | null;
+  /**
+   * 방금 이 줄에서 결정해 그 자리에 붙든 동안의 영수증(받은함과 같은 「승인을 기록했어요.」·「거부를 기록했어요.」, 수리 4회차). 있으면
+   * 결과 칸은 이 한 줄이 먼저다. `decision`이 없으면 이 한 줄뿐이다(결정 전의 꼬리표·되돌릴 수 없음·만료를 말하지 않는다).
+   */
+  receipt: string | null;
+}
+
+function ReceiptLine({ text }: { text: string }) {
+  return (
+    <span className="min-w-0 break-keep text-meta text-ink" data-testid="work-job-approval-settled">
+      <Check className="me-1 inline size-4 align-text-bottom" aria-hidden="true" />
+      {text}
+    </span>
+  );
 }
 
 type RowControl = ReturnType<typeof approvalRowControl>;
@@ -97,6 +111,13 @@ export function JobResultCell({
   inApp: string | null;
 }) {
   const formatMessage = useFormatMessage();
+  if (kind === "approval" && approval?.receipt && approval.decision === null) {
+    return (
+      <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
+        <ReceiptLine text={approval.receipt} />
+      </span>
+    );
+  }
   if (kind === "approval") {
     const item = approval?.item ?? null;
     // 무엇을 승인하는가: 서버가 쓴 카드 문장이 먼저, 없으면 원장 행의 문장(인박스 행과 같은 말). 둘 다 없으면 꼬리표만.
@@ -105,6 +126,7 @@ export function JobResultCell({
     const timeLabel = item?.timeLabel ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
+        {approval?.receipt && <ReceiptLine text={approval.receipt} />}
         <KindTag label={formatMessage("desktop.workJobs.tagApproval")} testId="work-job-approval-tag" />
         {summary !== null && (
           <span className="min-w-0 break-keep text-meta text-ink" data-testid="work-job-approval-summary">
@@ -205,7 +227,7 @@ export function JobResultActions({
             onDecided={onDecided}
             focusRow={focusRow}
           />
-        ) : (
+        ) : approval?.receipt ? null : (
           <ApprovalCardLink channelId={row.channelId} channel={row.channel} />
         ))}
       {kind === "permission" && desktop && (

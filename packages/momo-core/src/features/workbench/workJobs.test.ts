@@ -235,6 +235,28 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(workJobSections(rows, () => false).map((s) => s.key)).toEqual(["now", "done"]);
   });
 
+  it("붙든 줄(방금 그 자리에서 결정함, 수리 4회차)은 끝났어도 「응답 필요」의 그 칸에 남고 「끝난 일」에 두 번 서지 않는다", () => {
+    // 서버는 거부하면 run을 바로 끝낸다(`stopped`).
+    const rejected = workJobRow(
+      row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c5", state: "stopped", endedAtMs: NOW, phase: "cancelled" })),
+      NOW
+    );
+    const next = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c6", phase: "awaiting_approval" })), NOW);
+    const ended = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c7", state: "done", endedAtMs: NOW })), NOW);
+    expect(rejected.finished).toBe(true);
+    const rows = [rejected, next, ended];
+    const sections = workJobSections(rows, (r) => r.id === next.id, (r) => r.id === rejected.id);
+    expect(sections.map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [rejected.id, next.id]],
+      ["done", [ended.id]],
+    ]);
+    // 붙들지 않으면 예전대로 「끝난 일」이다.
+    expect(workJobSections(rows, (r) => r.id === next.id).map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [next.id]],
+      ["done", [rejected.id, ended.id]],
+    ]);
+  });
+
   it("주인에게 열린 권한 요청이 있는 줄의 칩은 「응답 필요」다 — 돌거나 대기 중인 줄만(#5593 수리 M2)", () => {
     const running = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e1" }));
     expect(awaitingMeItem(running).state).toBe("waiting");
