@@ -42,6 +42,7 @@
   "timeline.memberPanel.agentKind": "Agent",
   "timeline.memberPanel.listLabel": "Channel member list",
   "timeline.memberPanel.nowFailed": "Couldn't load what the agents are doing.",
+  "timeline.memberPanel.nowFailedShort": "Couldn't load activity",
   "timeline.memberPanel.nowRetry": "Reload",
   "timeline.typing.one": "{name} is typing…",
   "timeline.typing.two": "{name} and {second} are typing…",

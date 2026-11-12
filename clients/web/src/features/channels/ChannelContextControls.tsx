@@ -488,14 +488,23 @@ function ChannelMemberPanelBody({
 
       <div className="flex items-center justify-end gap-2 border-t border-line p-4">
         {hasAgent && now.read === "failed" && (
-          <p className="mr-auto flex min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
-            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701): 좁은 폭에서는 글을
-                낭독용으로만 두고 「다시 불러오기」만 보이며, 넓은 창에서도 모자라면 글이 줄어든다. */}
-            <span className="sr-only min-w-0 truncate sm:not-sr-only">
-              {formatMessage("timeline.memberPanel.nowFailed")}
-            </span>
-            <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={now.retry} data-testid="channel-member-now-retry">
-              {formatMessage("timeline.memberPanel.nowRetry")}
+          <p className="mr-auto flex h-control-sm min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
+            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701). 글은 어느 폭에서도 눈에 보인다
+                (#5711): 640 미만은 짧은 글, 640 이상은 긴 글이고, 모자라면 말줄임이다. 두 글 모두 `truncate`가 `hidden`/
+                `inline`과 같은 요소에 있어 보임 클래스가 말줄임을 덮지 않는다(큰 글자에서도 줄바꿈 없음). 「다시 불러오기」는
+                줄어들지 않되 칸보다 넓어지지 않고(`max-w-full`), 모자라면 글이 말줄임으로 줄어 이웃 단추와 겹치지 않는다. 줄 높이는
+                단추 높이로 고정(`h-control-sm`)이라 큰 글자에서 글줄이 더 커도 발치가 늘지 않는다. */}
+            <span className="min-w-0 truncate sm:hidden">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
+            <span className="hidden min-w-0 truncate sm:block">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="max-w-full shrink-0"
+              onClick={now.retry}
+              data-testid="channel-member-now-retry"
+            >
+              <span className="min-w-0 truncate">{formatMessage("timeline.memberPanel.nowRetry")}</span>
             </Button>
           </p>
         )}

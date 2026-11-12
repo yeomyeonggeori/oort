@@ -666,4 +666,44 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     expect(document.querySelector('[data-testid="channel-member-now-failed"]')).not.toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("channel-member-add");
   });
+
+  // ---- #5711 L2: 벽시계가 뒤로 가도 새 답을 거르지 않는다 --------------------------------------------------------------
+  it("연 뒤 시계가 60초 넘게 뒤로 가도 그 뒤에 받은 새 답은 쓴다(뒤로 간 시계는 「오래됨」이 아니다)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    let answer: (value: unknown) => void = () => undefined;
+    await openWithAnswerAged(MEMBER_NOW_ANSWER_MAX_AGE_MS + 2_000, () => new Promise((resolve) => { answer = resolve; }));
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).not.toBe("run");
+    vi.setSystemTime(Date.now() - 2 * MIN);
+    await act(async () => answer({ runs: defaultRuns(), truncated: false, pages: 1 }));
+    await settle();
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
+  });
+
+  // ---- #5711 L3: 첫 읽기부터 실패해도 「다시 불러오기」를 누르면 초점이 그 단추에 남는다 ------------------------------------
+  it("첫 읽기부터 실패한 패널에서 「다시 불러오기」를 눌러도 단추가 남고 초점이 그대로다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.fetchAllActiveAgentRuns.mockRejectedValue(new ApiError(503, "unavailable"));
+    await mount();
+    await open();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    await settle();
+    const retry = () => document.querySelector<HTMLButtonElement>('[data-testid="channel-member-now-retry"]');
+    expect(retry()).not.toBeNull();
+    const button = retry()!;
+    api.fetchAllActiveAgentRuns.mockImplementation(() => new Promise(() => undefined));
+    await act(async () => {
+      button.focus();
+    });
+    expect(document.activeElement).toBe(button);
+    await act(async () => {
+      button.click();
+    });
+    await settle();
+    // 다시 읽는 중에도 같은 단추가 서 있고 초점은 그 단추다
+    expect(retry()).toBe(button);
+    expect(document.activeElement).toBe(button);
+  });
 });

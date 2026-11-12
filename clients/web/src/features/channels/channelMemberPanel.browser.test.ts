@@ -519,7 +519,7 @@ describe("채널 멤버 패널을 열 때 뛰지 않는다 (#5686 수리 1회차
 // 실제로 섰는지(시험이 헛돌지 않게)를 잰다.
 describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움직인다 (#5701)", () => {
   it.skipIf(ENGINES.length === 0)(
-    "멤버 3명·12명 × 넓은 창·360 × 읽기 성공·실패: 패널 높이·목록 높이·발치 단추·줄 자리가 모든 순간 같다",
+    "멤버 3명·12명 × 넓은 창·512·360 × 글자 기본·150%·200% × 읽기 성공·실패: 모든 순간 같은 값이고, 실패 글은 보이고 한 줄이며, 발치 단추 상자가 겹치지 않는다",
     async () => {
       const THREE = FIRST.filter((m) => [ME, DALMURI, SAEBYEOK].includes(m.id));
       const scenes: Record<string, { at: string; html: string }[]> = {};
@@ -535,54 +535,106 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
       const playwright = await import("playwright");
       const problems: string[] = [];
       const report: string[] = [];
+      const VIEWPORTS = [
+        { name: "1280", width: 1280 },
+        { name: "512", width: 512 },
+        { name: "360", width: 360 },
+      ];
+      const FONTS = [
+        { name: "기본", px: 16 },
+        { name: "150%", px: 24 },
+        { name: "200%", px: 32 },
+      ];
       for (const engine of ENGINES) {
         const browser = await playwright[engine].launch();
         try {
-          for (const vp of [{ name: "1280", width: 1280 }, { name: "360", width: 360 }]) {
-            const ctx = await browser.newContext({ viewport: { width: vp.width, height: 1400 } });
-            try {
-              const p = await ctx.newPage();
-              for (const [name, frames] of Object.entries(scenes)) {
-                const seen: string[] = [];
-                for (const frame of frames) {
-                  await p.setContent(page(css, frame.html, 16));
-                  seen.push(
-                    await p.evaluate(() => {
-                      const box = (sel: string) => {
+          for (const vp of VIEWPORTS) {
+            for (const font of FONTS) {
+              const ctx = await browser.newContext({ viewport: { width: vp.width, height: 2400 } });
+              try {
+                const p = await ctx.newPage();
+                for (const [name, frames] of Object.entries(scenes)) {
+                  const at = `${engine} ${vp.name} ${font.name} ${name}`;
+                  const seen: string[] = [];
+                  let last = "";
+                  for (const frame of frames) {
+                    // 같은 마크업은 같은 값이라 다시 재지 않는다
+                    if (frame.html === last) {
+                      seen.push(seen[seen.length - 1]!);
+                      continue;
+                    }
+                    last = frame.html;
+                    await p.setContent(page(css, frame.html, font.px));
+                    seen.push(
+                      await p.evaluate(() => {
+                        const box = (sel: string) => {
+                          const r = document.querySelector(sel)!.getBoundingClientRect();
+                          return `${Math.round(r.top * 100) / 100}+${Math.round(r.height * 100) / 100}`;
+                        };
+                        const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
+                        const base = list.getBoundingClientRect().top - list.scrollTop;
+                        const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="channel-member-item"]')]
+                          .map((row) => Math.round((row.getBoundingClientRect().top - base) * 100) / 100)
+                          .join(",");
+                        return [
+                          `panel ${box('[data-testid="channel-member-panel"]')}`,
+                          `list ${box('[data-testid="channel-member-list"]')}`,
+                          `add ${box('[data-testid="channel-member-add"]')}`,
+                          `close ${box('[data-testid="channel-member-close"]')}`,
+                          `rows ${rows}`,
+                        ].join(" | ");
+                      })
+                    );
+                  }
+                  const distinct = [...new Set(seen)];
+                  report.push(`${at}: ${seen.length}순간 → ${distinct[0]}`);
+                  if (distinct.length !== 1) problems.push(`${at}: 서로 다른 값 ${distinct.length}개\n  ${distinct.join("\n  ")}`);
+                  // 마지막 마크업(실패가 선 뒤): 글이 눈에 보이고 한 줄이며, 발치 단추 상자가 서로·패널 밖으로 겹치지 않는다
+                  if (name.endsWith("실패")) {
+                    const foot = await p.evaluate(() => {
+                      const rect = (sel: string) => {
                         const r = document.querySelector(sel)!.getBoundingClientRect();
-                        return `${Math.round(r.top * 100) / 100}+${Math.round(r.height * 100) / 100}`;
+                        return { l: r.left, r: r.right, t: r.top, b: r.bottom, h: r.height };
                       };
-                      const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
-                      const base = list.getBoundingClientRect().top - list.scrollTop;
-                      const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="channel-member-item"]')]
-                        .map((row) => Math.round((row.getBoundingClientRect().top - base) * 100) / 100)
-                        .join(",");
-                      return [
-                        `panel ${box('[data-testid="channel-member-panel"]')}`,
-                        `list ${box('[data-testid="channel-member-list"]')}`,
-                        `add ${box('[data-testid="channel-member-add"]')}`,
-                        `close ${box('[data-testid="channel-member-close"]')}`,
-                        `rows ${rows}`,
-                      ].join(" | ");
-                    })
-                  );
+                      const failed = document.querySelector('[data-testid="channel-member-now-failed"]')!;
+                      const text = [...failed.querySelectorAll<HTMLElement>("span")].find((el) => getComputedStyle(el).display !== "none")!;
+                      const style = getComputedStyle(text);
+                      return {
+                        textWidth: text.getBoundingClientRect().width,
+                        textFull: text.scrollWidth,
+                        textHeight: text.getBoundingClientRect().height,
+                        lineHeight: Number.parseFloat(style.lineHeight),
+                        whiteSpace: style.whiteSpace,
+                        retry: rect('[data-testid="channel-member-now-retry"]'),
+                        add: rect('[data-testid="channel-member-add"]'),
+                        close: rect('[data-testid="channel-member-close"]'),
+                        panel: rect('[data-testid="channel-member-panel"]'),
+                      };
+                    });
+                    const overlap = (a: { l: number; r: number }, b: { l: number; r: number }) => Math.min(a.r, b.r) - Math.max(a.l, b.l);
+                    if (overlap(foot.retry, foot.add) > 0.5) problems.push(`${at}: 「다시 불러오기」와 「멤버 추가」 상자가 ${overlap(foot.retry, foot.add)}px 겹침`);
+                    if (overlap(foot.add, foot.close) > 0.5) problems.push(`${at}: 「멤버 추가」와 「닫기」 상자가 겹침`);
+                    if (foot.close.r > foot.panel.r + 0.5) problems.push(`${at}: 「닫기」가 패널 밖으로 넘침`);
+                    if (foot.textHeight > foot.lineHeight * 1.5) problems.push(`${at}: 실패 글이 줄바꿈됨(높이 ${foot.textHeight})`);
+                    if (foot.whiteSpace !== "nowrap") problems.push(`${at}: 실패 글 white-space ${foot.whiteSpace}`);
+                    // 기본 글자에서는 어느 폭에서도 까닭이 보인다(말줄임이어도 글자가 남는다)
+                    if (font.px === 16 && foot.textWidth < 48) problems.push(`${at}: 실패 글이 보이지 않음(폭 ${foot.textWidth})`);
+                    report.push(`${at} 실패 글 폭 ${Math.round(foot.textWidth)}px / 전체 ${Math.round(foot.textFull)}px, 패널 ${Math.round(foot.panel.r - foot.panel.l)}px`);
+                  }
                 }
-                const distinct = [...new Set(seen)];
-                report.push(`${engine} ${vp.name} ${name}: ${seen.length}순간 → ${distinct[0]}`);
-                if (distinct.length !== 1) problems.push(`${engine} ${vp.name} ${name}: 서로 다른 값 ${distinct.length}개\n  ${distinct.join("\n  ")}`);
+              } finally {
+                await ctx.close();
               }
-            } finally {
-              await ctx.close();
             }
           }
         } finally {
           await browser.close();
         }
       }
-      console.info(`[#5701 읽기 실패]\n${report.join("\n")}`);
+      console.info(`[#5701·#5711 읽기 실패]\n${report.join("\n")}`);
       expect(problems).toEqual([]);
     },
-    360_000
+    900_000
   );
 });
 
