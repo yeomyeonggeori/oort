@@ -94,7 +94,7 @@ import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBo
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { holdScrollPosition, virtualListHold, type ScrollHold } from "./scrollHold";
-import { revealWhenPlaced, type EntryReveal } from "./entryReveal";
+import { PLACED_ATTRIBUTE, revealWhenPlaced, type EntryReveal } from "./entryReveal";
 import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -857,10 +857,13 @@ export function Timeline({
   // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
   // 제자리다. 이 목록 안에서는 브라우저 스크롤 앵커링이 돌지 않아(`timeline-scroller`) 그림 줄이 자라면 목록이 밀린다.
   // 판정·바로잡기의 규칙은 `scrollHold.ts`(스레드 답글 목록과 같은 모듈, 가상 목록용 규칙은 `virtualListHold`).
+  // 진입 첫 그림이 서기 전(`data-placed` 가 없을 때)은 지키지 않는다(#5717): 붙을 때의 맨 위 줄을 「보던 줄」로 적어 가상 목록이
+  // 바닥으로 간 것을 맨 위로 되돌렸다. 값은 보지 않는다 — 안전판(`timeout`) · 이동(`jump`)으로 보인 뒤에도 그때부터 지킨다.
   const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
     if (!scrollerEl) return;
-    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current));
+    const entering = () => !scrollerEl.hasAttribute(PLACED_ATTRIBUTE);
+    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current, entering));
     holdRef.current = hold;
     return () => {
       hold.stop();
