@@ -229,6 +229,7 @@ export const messageKeys = [
   "connection.load.membersTitle",
   "connection.load.newerTitle",
   "connection.load.notificationRulesTitle",
+  "connection.load.olderTitle",
   "connection.load.readMarkersTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
@@ -1595,6 +1596,7 @@ export const argumentSpecs = {
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
   "connection.load.notificationRulesTitle": {},
+  "connection.load.olderTitle": {},
   "connection.load.readMarkersTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
@@ -3252,6 +3254,7 @@ export interface MessageArgs {
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
   "connection.load.notificationRulesTitle": Record<string, never>;
+  "connection.load.olderTitle": Record<string, never>;
   "connection.load.readMarkersTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
