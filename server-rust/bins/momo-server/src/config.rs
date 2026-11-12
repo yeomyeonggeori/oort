@@ -534,6 +534,12 @@ pub struct RateLimitConfig {
     /// few half-written ones on the way; that fits with room to spare, and anything past it is
     /// retried by the client after `Retry-After`. See ADR-0170 증보 2026-11-01 D20.
     pub unfurl_preview_per_member_limit: u32,
+    /// `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER` (default 60 per window). 0 disables.
+    /// `POST …/threads/read-all` (ADR-0124 증보 5, #5689): one request moves up to
+    /// `THREAD_READ_ALL_MAX_THREADS` read positions. [추정] the 60 of the other per-member write
+    /// budgets: a person presses 「모두 읽음」 a few times a minute at most, and a client that is told
+    /// `has_more` calls again once per 100 threads.
+    pub thread_read_all_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -556,6 +562,7 @@ impl Default for RateLimitConfig {
             unfurl_proxy_per_member_limit: 240,
             photo_draft_per_member_limit: 10,
             unfurl_preview_per_member_limit: 60,
+            thread_read_all_per_member_limit: 60,
         }
     }
 }
@@ -629,6 +636,9 @@ impl RateLimitConfig {
             unfurl_preview_per_member_limit: lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.unfurl_preview_per_member_limit),
+            thread_read_all_per_member_limit: lookup("RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.thread_read_all_per_member_limit),
         }
     }
 }
@@ -4433,9 +4443,10 @@ mod tests {
                 defaults.photo_draft_per_member_limit,
                 defaults.unfurl_preview_per_member_limit,
                 defaults.media_write_per_member_limit,
+                defaults.thread_read_all_per_member_limit,
             ),
-            (120, 600, 60, 60, 240, 10, 60, 60),
-            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one, ADR-0151 증보 5 D5 for the media write), docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10, 60, 60, 60),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one, ADR-0151 증보 5 D5 for the media write, ADR-0124 증보 5 for the thread read-all), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -4449,6 +4460,7 @@ mod tests {
             ("photo draft", defaults.photo_draft_per_member_limit),
             ("unfurl preview", defaults.unfurl_preview_per_member_limit),
             ("media write", defaults.media_write_per_member_limit),
+            ("thread read-all", defaults.thread_read_all_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4551,6 +4563,14 @@ mod tests {
                 ..defaults
             },
             "the media write name moves the media write field and not the upload start's"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER", "15")),
+            RateLimitConfig {
+                thread_read_all_per_member_limit: 15,
+                ..defaults
+            },
+            "the thread read-all name moves its own field and nothing else"
         );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
