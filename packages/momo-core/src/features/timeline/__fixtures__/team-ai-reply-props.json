@@ -1,0 +1,16 @@
+{
+  "about": "#5600 — 도우미(team_ai) 답 메시지의 props. 서버(server-rust/bins/momo-agent-worker/src/team_ai.rs `answer_props`·`answer_model_label`)가 trace의 모델·와이어로 쓰는 모양 그대로이고, 코어 `parseTeamAiReplyMeta`가 같은 파일로 「팀 AI · 모델」 칩을 읽는다. 한쪽만 바꾸면 양쪽 시험 중 하나가 빨개진다.",
+  "trace": {
+    "model": "claude-sonnet-4-5-20250929",
+    "wire": "anthropic_messages"
+  },
+  "run_id": "0195f0a8-0000-7000-8000-0000000056a0",
+  "props": {
+    "run_id": "0195f0a8-0000-7000-8000-0000000056a0",
+    "source": "team_ai",
+    "team_ai_model": {
+      "model": "claude-sonnet-4-5-20250929",
+      "wire": "anthropic_messages"
+    }
+  }
+}

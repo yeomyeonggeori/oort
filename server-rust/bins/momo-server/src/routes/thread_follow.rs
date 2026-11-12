@@ -2,8 +2,10 @@
 //! (ADR-0206 증보 1 F8, #4889).
 //!
 //! 「따라가기」 and 「그만 따라가기」 for the **caller**: the owner is the bearer, the request has no
-//! body and no member id, and nothing is broadcast, audited or rate-budgeted (a personal setting that
-//! changes nothing anyone else sees; other devices converge on their next read — ADR-0177's rule).
+//! body and no member id, and nothing is audited or rate-budgeted (a personal setting that changes
+//! nothing anyone else sees). Nothing goes to anyone else either; since ADR-0124 증보 4 (#5667) a write
+//! that changed the row puts one ids-only `followed_unread.updated` frame on the **caller's own**
+//! personal channel, so their other devices re-read the channel's followed-thread total.
 //! Both verbs are idempotent and answer `200 {following}` with the effective state after the write.
 //!
 //! The guard order is the one `GET …/replies` uses, so a caller cannot learn from a follow what they
@@ -94,7 +96,9 @@ async fn write(
 ///
 /// The same door as the follow verbs: human bearer only, the thread read's guard order (workspace scope
 /// → live channel member, the same bytes for a channel that does not exist → the root), nothing
-/// broadcast, audited or rate-budgeted. It writes **no new row**: for a thread the caller does not
+/// audited or rate-budgeted; when it moved the position of a thread the caller follows, one ids-only
+/// `followed_unread.updated` frame goes to the caller's own personal channel (ADR-0124 증보 4, #5667).
+/// It writes **no new row**: for a thread the caller does not
 /// follow it changes nothing and answers `{following: false}` — a client may send it without knowing
 /// whether it follows. A DM is the same no-op (there are no follow rows there). A negative position is
 /// `400`.

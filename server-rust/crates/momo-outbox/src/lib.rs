@@ -1,9 +1,10 @@
 //! `momo-outbox` — the single write-path egress (invariant #3).
 //!
 //! **This crate is the only place in the workspace that owns `outbox` table
-//! SQL.** [`emit`] holds the sole outbox-insert statement ([`emit::emit_outbox`]);
+//! SQL.** [`emit`] holds the outbox-insert statements ([`emit::emit_outbox`] and
+//! its batch form [`emit::emit_outbox_batch`], #5667);
 //! [`relay`] holds the consumer claim (`FOR UPDATE SKIP LOCKED`). A domain crate
-//! cannot append an outbox row except through [`emit::emit_outbox`], so the
+//! cannot append an outbox row except through [`emit`], so the
 //! single-write-path invariant moves from "did all 18 call sites obey the
 //! convention" (the Swift reality — inline inserts scattered across 18 route
 //! files) to "there is exactly one chokepoint, guarded by the compiler and a
@@ -55,7 +56,7 @@ pub use agent_job::{
     RUN_CANCELLED_JOB_LAST_ERROR, RUN_STALLED_JOB_LAST_ERROR, WORKER_JOB_METHOD,
     WORKER_JOB_METHODS,
 };
-pub use emit::{emit_outbox, OutboxKind};
+pub use emit::{emit_outbox, emit_outbox_batch, OutboxKind};
 pub use gateway::{
     claim_gateway_jobs_in_tx, claim_hosted_gateway_jobs_in_tx, clamp_claim_limit,
     clamp_hosted_lease_seconds, close_connector_foreign_jobs_in_tx, gateway_lease_authorized,

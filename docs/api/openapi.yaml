@@ -2107,7 +2107,10 @@ paths:
         `team_ai_limits_status` (ADR-0201 증보 v3 B9-4, #4944): the team AI's
         limits as set, the cap that applies after the operator's ceiling,
         today's and this month's usage and whether a monthly dollar limit can
-        be switched on. It is never stored and is not a PATCH-able key. Without
+        be switched on — and (ADR-0201 증보 v4 P7·P8, #5374) the same for the
+        helper's delegation to the team's Hermes: today's count, the day's cap,
+        whether the operator left it closed and the closed word of the first shut
+        gate. It is never stored and is not a PATCH-able key. Without
         the parameter the response is exactly the stored bag (a workspace that
         never wrote a key still reads `{}`). Any other `include` value is 400.
       security:
@@ -2204,8 +2207,8 @@ paths:
         helper on, the settings screen on the PATCH that turns `files` or `memory`
         on. It is taken out of the body before the merge, so it is never stored,
         never echoed in the bag and not one of the keys the settings audit row
-        names. Its fields are `bundles` (one or two distinct names from `files`,
-        `memory` — the bundles that carry a notice; `code`, `chat_read` and any
+        names. Its fields are `bundles` (one to three distinct names from `files`,
+        `memory`, `hermes` — the bundles that carry a notice; `code`, `chat_read` and any
         other name are 400), `noticeVersion` (the wording the screen showed; it
         must be one the server lists, and an unknown one is 400 rather than a
         record of words nobody read) and `via` (`onboarding` or `settings`; `card`
@@ -10761,6 +10764,21 @@ paths:
         runs on each board transition and for top-level mention runs on their
         final transition (done, failed or stopped); nothing is emitted when a
         mention run crosses 60 seconds, so a client also refetches on focus.
+
+        The owner's waiting session (#5639, ADR-0202 D4, ADR-0188 D3 and D5):
+        in an include=jobs page, a running agent-lane session that has a
+        permission request still pending and not yet expired has state waiting
+        instead of running (status stays the ledger word), but only for a
+        caller who can answer it: the caller owns the session and also owns the
+        session's host, which is not revoked, the same rule the
+        permission-decisions route applies. A session that is not running
+        (idle, ended, orphaned), on a host someone else registered (a shared
+        host) or on a revoked host is never waiting, for anyone; the decision
+        route would close or refuse that request too. The next read after the request is decided, expires or is
+        cancelled has the ledger word again. No key is added and nothing of the
+        request (tool, title, options, preview) or of the host is sent. Every
+        other caller, and every read without include=jobs (including the single
+        read below), gets the ledger word as before.
       security:
         - bearerAuth: []
       parameters:
@@ -13139,8 +13157,12 @@ paths:
         becomes a direct one, and a thread the caller stopped following is followed
         again — this is the only way back from `DELETE`, because nothing automatic
         (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
-        no body. A personal setting: nothing is broadcast, and other devices see it on
-        their next read of the thread (`getThreadReplies` → `following`).
+        no body. A personal setting: nothing is broadcast to anyone else, and other devices
+        see it on their next read of the thread (`getThreadReplies` → `following`). When the
+        write changed the record (`PUT` here or `DELETE` below), the caller's own personal
+        channel gets one ids-only `followed_unread.updated` frame (ADR-0124 amendment 4,
+        #5667): the channel's `followed_unread_reply_count` in `listReadStates` may have
+        changed.
 
         Guard order is the thread read's: active channel membership (403, the same
         bytes for a channel that does not exist), then the root (404 when it is absent
@@ -13264,7 +13286,10 @@ paths:
         a late or stale signal from another device cannot rewind it, and it never passes the
         last reply that exists, so a request cannot mark replies that have not been written
         as read. The replies past the position that other people wrote are what
-        `ThreadRollup.unread_reply_count` counts.
+        `ThreadRollup.unread_reply_count` counts. When the position of a thread the caller
+        follows moved, the caller's personal channel gets one ids-only
+        `followed_unread.updated` frame (ADR-0124 amendment 4, #5667) so their other devices
+        re-read `listReadStates` (`followed_unread_reply_count`).
 
 
         This is the **only** thing that moves the position. A `GET …/replies` does not (the
@@ -13355,6 +13380,18 @@ paths:
         revives. The `PUT .../read-state` response and the realtime
         `read_state` frame do not carry them (ADR-0177 D10: no closure event);
         other devices pick a closure up on their next read of this list.
+        ADR-0124 amendment 4 (#5667) adds `followed_unread_reply_count` to every
+        row (always present, `0` when none): the unread replies in the threads
+        the caller follows in that channel. When it may have changed - a new
+        reply in a followed thread (every follower but its author, while still
+        a member of the channel), the caller reading a followed thread
+        (`PUT .../messages/{rootId}/read` moved the position), the caller
+        following or stopping following (`PUT`/`DELETE .../follow` changed the
+        row) - the caller's personal channel (`user:read-state#<MEMBER>`) gets a
+        `followed_unread.updated` frame through the outbox. The frame carries
+        ids only (`workspace_id`, `member_id`, `channel_id`, `root_id`) and
+        means "read this list again"; it never carries the number. The
+        `PUT .../read-state` response and the `read_state` frame are unchanged.
       security:
         - bearerAuth: []
       parameters:
@@ -26369,17 +26406,21 @@ components:
             bundles:
               type: array
               minItems: 1
-              maxItems: 2
+              maxItems: 3
               uniqueItems: true
-              description: The bundles whose line the screen showed (the two that carry a notice).
-              items: {type: string, enum: [files, memory]}
+              description: >
+                The bundles whose line the screen showed (the ones that carry a notice: `files`, `memory`,
+                and `hermes` — ADR-0201 증보 v4 P10, whose two-sentence notice says the request sentence goes to
+                the AI company Hermes uses and stays in Hermes's own record).
+              items: {type: string, enum: [files, memory, hermes]}
             noticeVersion:
               type: string
               description: >
                 The wording version the screen showed. One of the versions the server lists
                 (`momo_agent::team_ai_roles::NOTICE_VERSIONS`, newest last); a new wording appends
-                a version and never removes one while a client can still show it.
-              enum: ["2026-11-01.v1"]
+                a version and never removes one while a client can still show it. `2026-11-06.v2` added
+                the `hermes` notice (#5369); the `files` and `memory` lines are the same in both.
+              enum: ["2026-11-01.v1", "2026-11-06.v2"]
             via:
               type: string
               description: The screen. `card` is not here — a card's consent is the approval's own record.
@@ -26412,41 +26453,56 @@ components:
         (ADR-0147 증보 2026-10-30), not the provider's invoice, and a run on a model with no price
         adds tokens but no dollars (`monthUnpricedRuns`). The model's name is never returned — only
         whether it is priced.
-      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs]
+        **The delegation to the team's Hermes** (ADR-0201 증보 v4 P7·P8, #5374) rides the same objects
+        under the setting's own name (`dailyDelegations`, `todayDelegations`) plus
+        `delegationAvailable`/`delegationUnavailableReason` — and runs the other way round: an unset
+        workspace value is the default 30 (never "no limit"), and an unset operator ceiling
+        (`TEAM_AI_HERMES_DAILY_CAP` empty, blank or `0`) is **closed**. A server older than #5374 sends
+        none of these fields; a client reads their absence as "unknown, closed". No agent or member is
+        named anywhere in the delegation fields.
+      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs, delegationAvailable, delegationUnavailableReason]
       properties:
         limits:
           type: object
           description: What the administrator set (`team_ai_limits`), `null` where nothing is set.
-          required: [dailyTokens, dailySearches, monthlyUsd]
+          required: [dailyTokens, dailySearches, monthlyUsd, dailyDelegations]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
             monthlyUsd: {type: number, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, nullable: true, description: "What the administrator set for the day's delegations to Hermes; `null` = not set, which is the default 30 — never \"no limit\"."}
         effective:
           type: object
           description: >
             The cap that applies after the operator's ceiling: the lower of the workspace's limit and
             the ceiling, `null` for none. `0` is the operator's off switch (the helper for tokens,
-            web search for searches).
-          required: [dailyTokens, dailySearches]
+            web search for searches). `dailyDelegations` is never `null`: it is
+            `min(the workspace's value or the default 30, the operator's ceiling)`, and `0` when the
+            ceiling is unset — the delegation is closed.
+          required: [dailyTokens, dailySearches, dailyDelegations]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 0, maximum: 200, description: "The day's delegations to Hermes this workspace may make; 0 = closed (no operator ceiling)."}
         operatorCeiling:
           type: object
           description: >
             The server operator's env ceilings as the api process reads them
-            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`; set the same values on the api and
-            the agent-worker — the worker enforces, the api only explains). `null` = no ceiling.
-          required: [dailyTokens, dailySearches, helperOff, searchOff]
+            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`, `TEAM_AI_HERMES_DAILY_CAP`; set the same
+            values on the api and the agent-worker — the worker enforces, the api only explains). `null` =
+            no ceiling — except `dailyDelegations`, whose `null` is the closed delegation
+            (`delegationOff`).
+          required: [dailyTokens, dailySearches, helperOff, searchOff, dailyDelegations, delegationOff]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
             helperOff: {type: boolean, description: "TEAM_AI_DAILY_TOKEN_CAP=0 — the operator switched the helper off."}
             searchOff: {type: boolean, description: "TEAM_AI_DAILY_SEARCH_CAP=0 — web search is off for everyone."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, nullable: true, description: "TEAM_AI_HERMES_DAILY_CAP as a positive per-workspace ceiling; null when unset, blank or 0 (closed)."}
+            delegationOff: {type: boolean, description: "TEAM_AI_HERMES_DAILY_CAP is unset, blank or 0 — the delegation to Hermes is closed (P7 「미설정 = 끔」). True exactly when dailyDelegations is null."}
         usage:
           type: object
-          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns]
+          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns, todayDelegations]
           properties:
             todayTokens: {type: integer, format: int64, description: "Prompt + completion tokens since 00:00 UTC."}
             todaySearches: {type: integer, format: int64, description: "Provider-side web searches since 00:00 UTC."}
@@ -26454,6 +26510,7 @@ components:
             monthRuns: {type: integer, format: int64}
             monthUnpricedRuns: {type: integer, format: int64, description: "Runs on a model with no price on file (counted in tokens, not in dollars)."}
             monthEstimatedRuns: {type: integer, format: int64, description: "Runs whose tokens or price are estimates: the dollar figure is a lower bound."}
+            todayDelegations: {type: integer, format: int64, minimum: 0, description: "Delegations to Hermes called since 00:00 UTC (the task rows' marker at `called` or later, ended ones included) — the count the day's cap is judged by. A person who calls Hermes directly is not counted."}
         monthlyUsdAvailable:
           type: boolean
           description: Whether a monthly dollar limit can be switched on now.
@@ -26464,6 +26521,25 @@ components:
           description: >
             Why not (`null` when it can): `model_unpriced` (the helper's last request ran on a model with no price on file)
             or `no_usage_yet` (the helper has not answered anything, so there is no model to price).
+        delegationAvailable:
+          type: boolean
+          description: >
+            ADR-0201 증보 v4 P8 (#5374). Every gate of the delegation door this workspace decides is open:
+            G3 (exactly one Hermes every member could hand work to — an operator-env agent that is active,
+            not paused, not connector-marked, not owner-only and not the helper), G4 (the operator's
+            declarations as the api reads them: the tool lock true and no connection-mode variable with a
+            value), G5 (the operator's env link and key) and G6's day (the ceiling set and today's count
+            under the cap). The role switch (G1, `team_ai_roles.hermes` in the same bag) is not folded in,
+            and neither is a request's own half (who asks, what it read) nor the kinds the worker was told
+            it may offer — so `true` does not promise the tool on every request.
+        delegationUnavailableReason:
+          type: string
+          nullable: true
+          enum: [hermes_not_connected, hermes_ambiguous, tools_not_locked, connection_mode, pin_unresolved, ceiling_unset, daily_cap, null]
+          description: >
+            The first shut gate, in the door's order and in the door's own closed words (`null` exactly when
+            `delegationAvailable` is true) — what the screen shows after 「지금은 쓸 수 없어요」 (P8, P10:
+            even while the role switch is on).
         dayResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of the next 00:00 UTC."}
         monthResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of 00:00 UTC on the first of next month."}
 
@@ -27485,6 +27561,7 @@ components:
         - marked_unread_before_seq
         - latest_readable_seq
         - closed_at_seq
+        - followed_unread_reply_count
       properties:
         channel_id:
           type: string
@@ -27536,6 +27613,22 @@ components:
             every channel that is not a DM). Always present. Another member's
             closure is never returned. Reviving writes nothing: the stored value
             stays and the client compares it with `latest_readable_seq`.
+        followed_unread_reply_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0124 amendment 4 (#5667). The unread replies in the threads the
+            **caller** follows in this channel: the sum, over those threads, of
+            the thread summary's `unread_reply_count` (other people's undeleted
+            `text` replies past the caller's thread read position; ADR-0206
+            amendment 1 F10). `0` when the caller follows nothing here or has
+            read it all. Always present. It does not change `unread_count` or
+            `mention_count`, and a reply that names the caller is counted both
+            here and in `mention_count`. Like every unread and badge number it
+            ignores channel mute and the notification pause (ADR-0124 D2,
+            D4-A). The `followed_unread.updated` frame on the caller's personal
+            channel says when to read it again.
 
     ReadStateListResponse:
       type: object

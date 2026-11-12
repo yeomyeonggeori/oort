@@ -8,6 +8,8 @@
 
 import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
 import type { TeamAiBundle, TeamAiNoticeKind, TeamAiRolesErrorKind } from "./teamAiRoles";
+import type { TeamAiDelegationUnavailableReason } from "./teamAiLimits";
+import type { TeamAiDelegationKind } from "../timeline/teamAiDelegation";
 import type { TeamAiNameStatus } from "./teamAiNextStep";
 import { TeamAiSetupError, type TeamAiRenameErrorKind } from "./teamAiSetup";
 import { teamDefaultSaveMessage } from "./defaultAi";
@@ -34,6 +36,8 @@ export const TEAM_AI_ROLE_COPY = {
   files: { name: "teamAi.roles.filesName", hint: "teamAi.roles.filesHint" },
   memory: { name: "teamAi.roles.memoryName", hint: "teamAi.roles.memoryHint" },
   code: { name: "teamAi.roles.codeName", hint: "teamAi.roles.codeHint" },
+  // ADR-0201 증보 v4 P10 (#5374): 묶음 이름은 서버 표의 라벨 「Hermes 도움」과 같다.
+  hermes: { name: "teamAi.roles.hermesName", hint: "teamAi.roles.hermesHint" },
 } as const satisfies Record<TeamAiBundle, { name: PlainMessageKey; hint: PlainMessageKey }>;
 
 /** 파일·기억이 공급자로 보내는 내용의 고지. 서버 카드의 고지 문장(`NOTICE_VERSION` 2026-11-01.v1)과 같은 뜻이다. */
@@ -43,12 +47,52 @@ export const TEAM_AI_NOTICE_COPY = {
   both: "teamAi.roles.noticeBoth",
 } as const satisfies Record<TeamAiNoticeKind, PlainMessageKey>;
 
-/** 설정의 역할 칸이 행 옆에 늘 보이는 고지. 파일·기억만 있고 나머지 묶음은 null이다. */
+/**
+ * 설정의 역할 칸이 행 옆에 늘 보이는 고지. 파일·기억은 서버 카드의 고지(`NOTICE_VERSION` 2026-11-01.v1)와 같은 뜻의
+ * 한 줄이고, `hermes`는 서버의 `NOTICE_HERMES`(2026-11-06.v2)와 같은 두 문장을 **한 문구**로 둔다(증보 v4 P10:
+ * 무엇이 어디로 가는지 + Hermes 쪽 기록의 보관이 누구의 설정인지). 한 문구라서 이 키로 행 고지를 그리는 화면은
+ * 둘째 문장을 빠뜨릴 수 없다 — 이 줄을 보인 행만 켜기에 고지 기록(`teamAiSettingsToggleNotice`)을 싣는다.
+ * 나머지 묶음은 null이다.
+ */
 export function teamAiRoleNoticeKey(bundle: TeamAiBundle): PlainMessageKey | null {
   if (bundle === "files") return TEAM_AI_NOTICE_COPY.files;
   if (bundle === "memory") return TEAM_AI_NOTICE_COPY.memory;
+  if (bundle === "hermes") return "teamAi.roles.noticeHermes";
   return null;
 }
+
+/** 이름 하나(`{name}`)만 받는 문구의 키. */
+export type NameMessageKey = {
+  [K in MessageKey]: MessageArgs[K] extends { name: string }
+    ? keyof MessageArgs[K] extends "name"
+      ? K
+      : never
+    : never;
+}[MessageKey];
+
+/**
+ * 도우미 답의 「Hermes 도움」 칩(ADR-0201 증보 v4 P8): 맡긴 종류마다 한 키. `{name}`은 그 Hermes 멤버의 **지금**
+ * 표시 이름이다(P1: 이름을 글자로 박지 않는다 — `teamAiDelegationsOf`가 멤버 id를 준다).
+ */
+export const TEAM_AI_DELEGATION_CHIP_COPY = {
+  image: "teamAi.delegation.chipImage",
+  web_search: "teamAi.delegation.chipSearch",
+} as const satisfies Record<TeamAiDelegationKind, NameMessageKey>;
+
+/**
+ * 「지금은 쓸 수 없어요」(`teamAi.delegation.unavailable`) 뒤에 붙는 까닭(P8·P10). 서버 문의 닫힌 낱말마다 한 문장이고,
+ * `unknown`(서버가 말하지 않음)도 문장이 있다. 낱말을 더하면 이 표가 컴파일을 멈춘다.
+ */
+export const TEAM_AI_DELEGATION_REASON_COPY = {
+  hermes_not_connected: "teamAi.delegation.reasonNotConnected",
+  hermes_ambiguous: "teamAi.delegation.reasonAmbiguous",
+  tools_not_locked: "teamAi.delegation.reasonToolsNotLocked",
+  connection_mode: "teamAi.delegation.reasonConnectionMode",
+  pin_unresolved: "teamAi.delegation.reasonPinUnresolved",
+  ceiling_unset: "teamAi.delegation.reasonCeilingUnset",
+  daily_cap: "teamAi.delegation.reasonDailyCap",
+  unknown: "teamAi.delegation.reasonUnknown",
+} as const satisfies Record<TeamAiDelegationUnavailableReason, PlainMessageKey>;
 
 export const TEAM_AI_RENAME_ERROR_COPY = {
   taken: "teamAi.helper.nameErrorTaken",

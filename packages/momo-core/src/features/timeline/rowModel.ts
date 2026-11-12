@@ -10,6 +10,7 @@ import {
   resolveArtifact,
   type ArtifactPresentation,
 } from "./artifacts";
+import type { AuthorKind } from "./serverResultAuthor";
 
 // =============================================================================
 // What one timeline row renders (MOMO-620 R1). Pure: no DOM, no React, so the
@@ -190,9 +191,17 @@ function stateFor(card: AgentCardModel | null): ArtifactState | null {
   return note === undefined ? { status: card.status } : { status: card.status, note };
 }
 
-/** Everything one row renders, decided once. */
-export function rowPresentation(message: Message): RowPresentation {
-  const card = agentCardModel(message);
+/**
+ * Everything one row renders, decided once.
+ *
+ * `authorKind` is the author's member kind from the directory (`agentCardModel`): without
+ * `"agent"` a turn record is plain prose and a diff carries no run-state chip (#5577).
+ */
+export function rowPresentation(
+  message: Message,
+  authorKind?: AuthorKind | null
+): RowPresentation {
+  const card = agentCardModel(message, authorKind);
 
   // 사람의 결정을 기다리는 카드는 아티팩트보다 앞선다. 로그인 핸드오프가 승인과
   // 같은 자리에 서는 이유도 같다: 이 행이 요구하는 것은 읽기가 아니라 결정이고,

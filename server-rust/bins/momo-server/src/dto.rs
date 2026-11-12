@@ -4121,6 +4121,9 @@ pub struct ReadStateRowDto {
     pub latest_readable_seq: i64,
     /// The **caller's own** closure watermark, never another member's.
     pub closed_at_seq: Option<i64>,
+    /// ADR-0124 증보 4 (#5667): unread replies in the threads the caller follows in this channel (the
+    /// sum of the thread summaries' `unread_reply_count`). Always present, `0` when there are none.
+    pub followed_unread_reply_count: i64,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
@@ -7505,6 +7508,7 @@ mod tests {
                 },
                 latest_readable_seq: 2,
                 closed_at_seq: None,
+                followed_unread_reply_count: 3,
             }],
         })
         .expect("serialize");
@@ -7533,6 +7537,22 @@ mod tests {
         );
         // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
         assert!(json["read_states"][0].get("state").is_none(), "{json}");
+        // ADR-0124 증보 4 (#5667): exactly one key more, snake_case like its siblings; every other key
+        // and value of the row is what it was.
+        assert_eq!(
+            json["read_states"][0],
+            serde_json::json!({
+                "channel_id": "c",
+                "last_read_seq": 1,
+                "latest_seq": 2,
+                "unread_count": 1,
+                "mention_count": 0,
+                "marked_unread_before_seq": null,
+                "latest_readable_seq": 2,
+                "closed_at_seq": null,
+                "followed_unread_reply_count": 3,
+            }),
+        );
     }
 
     /// ADR-0177 증보 D7 (#4227): the closure body is exactly `{ "seenSeq": <integer> }`.

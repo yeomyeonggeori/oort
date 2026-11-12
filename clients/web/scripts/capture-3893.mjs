@@ -77,7 +77,7 @@ function roster() {
 const REPLY_V2 = {
   source: "team_ai",
   run_id: "0199aa11-2222-7000-8000-0000000038a1",
-  model_label: "Claude Sonnet 4.5",
+  team_ai_model: { model: "claude-sonnet-4-5-20250929", wire: "anthropic_messages" },
   tools_used: [{ name: "search_messages" }, { name: "read_channel", channel: "마케팅" }, { name: "web_search" }],
   web_citations: [
     { url: "https://www.example.com/blog/launch-checklist-2026", title: "2026 출시 체크리스트, 무엇을 먼저 할까" },

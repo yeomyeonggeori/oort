@@ -6092,10 +6092,64 @@ export interface AgentRun {
    * 검증하지 않은 자기 보고다. 보고가 없으면(옛 서버·벤더 경로) 키 자체가 없다.
    */
   appsUsed?: AppsUsedEntry[];
+  /** 이 run이 쓴 양(`AgentRunSpent`). 팀 AI 작업 run의 상세에만 있고, 다른 run·옛 서버는 키가 없다. */
+  spent?: AgentRunSpent;
   startedAtMs?: number;
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+/**
+ * 한 run이 쓴 양(openapi `AgentRunSpent` — ADR-0201 증보 v3 B12 #4968, `delegations`는 증보 v4 P7 #5370). 팀 AI 작업
+ * run에만 서버가 싣는다. **한 run이지 한 사람이 아니다**: 요청자·멤버 칸이 없다(ADR-0147 증보 2026-10-30 D6).
+ * 금액도 없다 — 단가가 있으면 화면이 토큰으로 「약 … 이상」을 계산한다.
+ */
+export interface AgentRunSpent {
+  promptTokens: number;
+  completionTokens: number;
+  /** 공급자 쪽 웹 검색 횟수(원장의 `web_search_requests`). */
+  webSearches: number;
+  /** 토큰 일부가 oort의 어림이다(공급자가 알려 주지 않았다). 그 숫자는 어림이라고 말한다(ADR-0147 D3). */
+  estimated: boolean;
+  /**
+   * 이 run에서 도우미가 팀 Hermes에 맡긴 횟수(지금은 0 또는 1 — 한 요청은 한 번 맡긴다). 위의 토큰·검색은 **도우미
+   * 자신의 행(팀 크레딧)만**이고, Hermes 쪽은 구독이라 oort가 금액을 재지 못해 여기 섞이지 않는다(P7·P8 「Hermes
+   * 1회(구독 — oort가 금액을 못 재요)」). 이 칸을 모르는 옛 서버(#5370 전)는 맡긴 적이 없으므로 0으로 읽는다.
+   */
+  delegations: number;
+}
+
+function spentCount(source: Record<string, unknown>, key: string): number | undefined {
+  const value = source[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * run의 `spent` 하나를 읽는다. **절대 던지지 않는다**: 진행 쪽은 `runs.map(parse)`라 더해진 칸 하나가 채널 전체의
+ * 진행을 비우면 안 된다. 칸이 모자라거나 모양이 다르면(음수·소수·문자열) `undefined` — 쓴 양을 말하지 않는다
+ * (모르는 숫자를 지어내지 않는다). `delegations`만은 **없으면 0**이다(그 칸 전의 서버); 있는데 모양이 다르면
+ * 나머지처럼 `undefined`다.
+ */
+export function agentRunSpentFromWire(value: unknown): AgentRunSpent | undefined {
+  const source = record(value);
+  if (source === null) return undefined;
+  const promptTokens = spentCount(source, "promptTokens");
+  const completionTokens = spentCount(source, "completionTokens");
+  const webSearches = spentCount(source, "webSearches");
+  const estimated = source["estimated"];
+  const delegations =
+    source["delegations"] === undefined ? 0 : spentCount(source, "delegations");
+  if (
+    promptTokens === undefined ||
+    completionTokens === undefined ||
+    webSearches === undefined ||
+    typeof estimated !== "boolean" ||
+    delegations === undefined
+  ) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens, webSearches, estimated, delegations };
 }
 
 /** 「쓴 앱」 한 줄. 와이어 키는 이 셋뿐이다(본문·인자·결과·URL·토큰이 실릴 키가 없다). */
@@ -6350,6 +6404,8 @@ export interface AgentRunProgress {
   approvalExpiresAtMs?: number;
   /** 서버가 이 run의 승인 하나를 보는 사람 기준으로 읽어 준 것. 옛 서버·승인 없는 run은 없다. */
   bundle?: AgentRunBundle;
+  /** 이 run이 쓴 양(`AgentRunSpent`, 팀 AI 작업 run만). 다른 run·옛 서버·모양이 다른 값은 없다. */
+  spent?: AgentRunSpent;
   /** 서버가 쓴 닫힌 코드(`approval_expired` …). 모르는 코드도 그대로 온다. */
   endReason?: string;
   /** 1 = 다음에 가져갈 순서. 아직 아무도 가져가지 않은 run에만 있다. */
@@ -6493,6 +6549,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const approvalId = optionalString(source, "approvalId");
   const approvalExpiresAtMs = optionalFiniteNumber(source, "approvalExpiresAtMs");
   const bundle = agentRunBundleFromWire(source.bundle);
+  const spent = agentRunSpentFromWire(source.spent);
   const endReason = optionalString(source, "endReason");
   const queuePosition = optionalPositiveInt(source, "queuePosition");
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
@@ -6528,6 +6585,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
     ...(approvalExpiresAtMs === undefined ? {} : { approvalExpiresAtMs }),
     ...(bundle === undefined ? {} : { bundle }),
+    ...(spent === undefined ? {} : { spent }),
     ...(endReason === undefined ? {} : { endReason }),
     ...(queuePosition === undefined ? {} : { queuePosition }),
     ...(aheadTotal === undefined ? {} : { aheadTotal }),
@@ -7145,6 +7203,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
   const appsUsed = appsUsedFromWire(
     source.appsUsed ?? record(output)?.["appsUsed"]
   );
+  const spent = agentRunSpentFromWire(source.spent);
   return {
     ...summary,
     workspaceId: workspaceId.toLowerCase(),
@@ -7154,6 +7213,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
     ...(input === null ? {} : { input }),
     ...(output === undefined || output === null ? {} : { output }),
     ...(appsUsed === null ? {} : { appsUsed }),
+    ...(spent === undefined ? {} : { spent }),
   };
 }
 

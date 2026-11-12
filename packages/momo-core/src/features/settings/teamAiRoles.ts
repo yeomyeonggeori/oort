@@ -3,15 +3,16 @@
 //
 // 서버 쪽 사실:
 //   - 설정 가방(`GET|PATCH /v1/workspaces/{ws}/settings`, 관리자 전용)의 `team_ai_roles` 객체다.
-//     묶음은 일곱이고 `chat_read`는 칸이 아니라 늘 켜져 있다. 나머지 여섯 칸이 불리언이다.
+//     묶음은 여덟이고 `chat_read`는 칸이 아니라 늘 켜져 있다. 나머지 일곱 칸이 불리언이다(일곱째
+//     `hermes`「Hermes 도움」은 ADR-0201 증보 v4 P10, 서버 #5369 / 코어 #5374).
 //   - **기본은 모두 켬(owner 답 2026-11-01).** 키가 없거나 칸이 없거나 `null`이면 켬이다.
 //     칸이 **있는데** 불리언이 아니면 끔이다(바깥에서 들어온 값은 닫힌 쪽으로 읽는다). 객체가 아닌
-//     값이면 여섯 칸 모두 끔이다. 서버 읽기(`TeamAiRoles::from_value`)와 같은 규칙이다.
+//     값이면 일곱 칸 모두 끔이다. 서버 읽기(`TeamAiRoles::from_value`)와 같은 규칙이다.
 //   - PATCH는 이 키만 **한 단계 아래로 병합**한다: 이름을 댄 칸만 바뀌고 안 댄 칸은 그대로,
 //     `null`은 그 칸을 지운다(= 켬). 그래서 칸 하나만 보내도 다른 묶음이 움직이지 않는다.
 //     `chat_read`·모르는 묶음·불리언 아닌 값은 400, 팀 기억이 꺼져 있는데 기억을 켜면 409 `team_memory_off`.
 //   - 묶음이 꺼지면 서버가 그 묶음의 도구와 카드를 요청에 광고하지 않고 실행도 거절한다(구조).
-//   - 고지 기록(#5040): 파일·기억의 「공급자로 가는 내용」 줄을 보인 화면은 같은 설정 PATCH 본문에
+//   - 고지 기록(#5040): 파일·기억의 「공급자로 가는 내용」 줄(과 `hermes`의 두 줄 고지, P10)을 보인 화면은 같은 설정 PATCH 본문에
 //     `team_ai_roles_notice {bundles, noticeVersion, via}`를 실어 그 사실을 남긴다. 설정이 아니라
 //     기록이라 가방에 저장되지도 응답에 실리지도 않는다. 없어도 아무것도 막지 않고(옛 클라이언트),
 //     서버가 모르는 판·묶음·via는 400이다. 판은 **화면이 말한다**: 이 모듈의 `TEAM_AI_NOTICE_VERSION`은
@@ -32,7 +33,13 @@ export const TEAM_MEMORY_OFF = "team_memory_off";
 /** 대화·읽기. 칸이 아니라 늘 켜져 있고, 보내면 400이다. 화면은 잠긴 행으로만 보인다. */
 export const TEAM_AI_ALWAYS_ON_BUNDLE = "chat_read" as const;
 
-/** 관리자가 끄고 켤 수 있는 여섯 묶음. ADR B3 표의 순서이고 서버 `SWITCHABLE_BUNDLES`와 같다. */
+/** 「Hermes 도움」: 도우미가 팀 키로 못 하는 일(그림, 검색이 안 되는 날의 웹 검색)을 팀 Hermes에 맡긴다(ADR-0201 증보 v4 P10). */
+export const TEAM_AI_HERMES_BUNDLE = "hermes" as const;
+
+/**
+ * 관리자가 끄고 켤 수 있는 일곱 묶음. ADR 표의 순서이고 서버 `SWITCHABLE_BUNDLES`와 같다(`hermes`가 마지막,
+ * 증보 v4 P10). 읽기(`readTeamAiRoles`)·변경(`teamAiRolesChange`)이 이 표를 돈다.
+ */
 export const TEAM_AI_SWITCHABLE_BUNDLES = [
   "workspace_admin",
   "invite_access",
@@ -40,57 +47,91 @@ export const TEAM_AI_SWITCHABLE_BUNDLES = [
   "files",
   "memory",
   "code",
+  TEAM_AI_HERMES_BUNDLE,
 ] as const;
 
 export type TeamAiSwitchableBundle = (typeof TEAM_AI_SWITCHABLE_BUNDLES)[number];
 
-/** 화면이 보이는 일곱 묶음(ADR B3 표의 순서). */
-export const TEAM_AI_BUNDLES = [
+/** 묶음 여덟 전부(ADR 표의 순서): 늘 켜진 `chat_read` + 끄고 켤 수 있는 일곱. 역할 모델(`TeamAiRoles`)의 칸이다. */
+export const TEAM_AI_ALL_BUNDLES = [
   TEAM_AI_ALWAYS_ON_BUNDLE,
   ...TEAM_AI_SWITCHABLE_BUNDLES,
 ] as const;
 
-export type TeamAiBundle = (typeof TEAM_AI_BUNDLES)[number];
+export type TeamAiBundle = (typeof TEAM_AI_ALL_BUNDLES)[number];
+
+/**
+ * 역할 목록 화면이 **행으로 그리는** 일곱 묶음(ADR B3 표의 순서). `hermes`는 여기에 없다: 그 행은 고지 두 줄과
+ * 「지금은 쓸 수 없어요」 이유·오늘 횟수(`teamAiLimits`의 위임 칸)를 함께 보여야 해서(P8·P10) 그것을 그리는 화면
+ * (P14-S7 웹·데스크탑, S8 폰)이 자기 PR에서 `TEAM_AI_HERMES_BUNDLE` 행을 더한다. 한 화면이 이 표를 바꾸면 다른
+ * 화면에도 고지 없는 행이 생기므로 표는 그대로 둔다. 행이 없는 화면에서 `hermes`는 저장된 값(기본 켬) 그대로다.
+ */
+export const TEAM_AI_BUNDLES = [
+  TEAM_AI_ALWAYS_ON_BUNDLE,
+  "workspace_admin",
+  "invite_access",
+  "long_research",
+  "files",
+  "memory",
+  "code",
+] as const satisfies readonly TeamAiBundle[];
 
 export type TeamAiRoles = Readonly<Record<TeamAiBundle, boolean>>;
 
 /**
  * 켜면 부른 사람이 볼 수 있는 파일·기억의 **내용**이 팀 AI 공급자로 가는 묶음(B3 고지).
- * 화면은 이 둘이 켜져 있을 때 고지 한 줄을 보이고, 설정의 역할 칸은 옆에 늘 보인다.
+ * 화면은 이 둘이 켜져 있을 때 고지 한 줄을 보이고, 설정의 역할 칸은 옆에 늘 보인다. 온보딩의 고지 기록은
+ * 이 둘만 싣는다(온보딩이 보이는 줄이 이 둘뿐이다).
  */
 export const TEAM_AI_NOTICE_BUNDLES = ["files", "memory"] as const;
 
 export type TeamAiNoticeBundle = (typeof TEAM_AI_NOTICE_BUNDLES)[number];
 
+/**
+ * 고지 기록에 실을 수 있는 묶음: 위 둘 + `hermes`(켜면 도우미가 맡기는 요청 문장이 Hermes가 쓰는 AI 회사로 간다는
+ * 두 줄 고지, 증보 v4 P10). 서버에서 고지(`notice_for`)가 있는 묶음과 같다. `hermes`는 그 두 줄을 실제로 보인
+ * 화면만 싣는다 — 설정 행이 그 고지를 보이며 켤 때(`teamAiSettingsToggleNotice`)이고, 온보딩은 싣지 않는다.
+ */
+export const TEAM_AI_RECORDED_NOTICE_BUNDLES = [
+  ...TEAM_AI_NOTICE_BUNDLES,
+  TEAM_AI_HERMES_BUNDLE,
+] as const;
+
+export type TeamAiRecordedNoticeBundle = (typeof TEAM_AI_RECORDED_NOTICE_BUNDLES)[number];
+
 /** 고지 기록을 싣는 요청 본문의 키. 설정이 아니라 기록이라 가방에 저장되지 않는다(#5040). */
 export const TEAM_AI_ROLES_NOTICE_KEY = "team_ai_roles_notice";
 
 /**
- * 사전의 고지 문장(`teamAi.roles.*`의 파일·기억 줄)이 가리키는 문구의 판. 서버 `NOTICE_VERSIONS`에
+ * 사전의 고지 문장(`teamAi.roles.*`의 파일·기억 줄과 `hermes` 두 줄)이 가리키는 문구의 판. 서버 `NOTICE_VERSIONS`에
  * 있어야 기록된다(모르는 판은 400). **사전의 고지 문장을 바꾸면 이 값을 올리고, 서버 목록에 판을
  * 더한다**(옛 판은 지우지 않는다: 설치된 클라이언트가 아직 옛 문구를 보일 수 있다).
+ *
+ * `2026-11-06.v2`는 `hermes` 고지를 더한 판이다(증보 v4.1 「고지 판」: 서버가 먼저 올렸고 코어는 그 행의 문구를
+ * 사전에 넣는 #5374가 올린다). 파일·기억 줄은 v1과 같은 글자라 지금 화면이 남기는 v2 기록도 사실이다.
  */
-export const TEAM_AI_NOTICE_VERSION = "2026-11-01.v1";
+export const TEAM_AI_NOTICE_VERSION = "2026-11-06.v2";
 
 /** 고지 줄을 보인 화면. 서버의 `ScreenNotice`와 같고, 카드는 승인 자신의 기록이라 여기 없다. */
 export type TeamAiNoticeVia = "onboarding" | "settings";
 
 /** 화면이 「이 고지 줄을 보였다」고 서버에 남기는 기록(`team_ai_roles_notice`의 값). */
 export interface TeamAiRolesNotice {
-  bundles: TeamAiNoticeBundle[];
+  bundles: TeamAiRecordedNoticeBundle[];
   noticeVersion: string;
   via: TeamAiNoticeVia;
 }
 
 /**
- * 고지 기록을 만든다. 고지가 있는 묶음(파일·기억)만 남기고 표 순서로 중복 없이 담는다. 남는 묶음이
- * 없으면 null이다(보일 줄이 없었으니 남길 기록도 없다).
+ * 고지 기록을 만든다. 고지가 있는 묶음(파일·기억·`hermes`)만 남기고 표 순서로 중복 없이 담는다. 남는 묶음이
+ * 없으면 null이다(보일 줄이 없었으니 남길 기록도 없다). **부르는 쪽이 보인 줄만 넘긴다**: 기록은 「이 줄을
+ * 보였다」는 사실이라 보이지 않은 묶음을 넘기면 거짓 기록이 된다.
  */
 export function teamAiRolesNotice(
   via: TeamAiNoticeVia,
   bundles: readonly string[]
 ): TeamAiRolesNotice | null {
-  const shown = TEAM_AI_NOTICE_BUNDLES.filter((id) => bundles.includes(id));
+  const shown = TEAM_AI_RECORDED_NOTICE_BUNDLES.filter((id) => bundles.includes(id));
   return shown.length === 0
     ? null
     : { bundles: shown, noticeVersion: TEAM_AI_NOTICE_VERSION, via };
@@ -131,7 +172,8 @@ export async function withNoticeFallback<T>(
 
 /**
  * 설정 화면의 스위치 하나가 싣는 고지 기록. **켤 때만**, 고지 줄이 있는 묶음일 때만이다: 끄는 것은
- * 공급자로 가는 내용을 늘리지 않고, 다른 묶음은 보인 고지가 없다.
+ * 공급자로 가는 내용을 늘리지 않고, 다른 묶음은 보인 고지가 없다. 설정의 역할 행은 고지를 행 옆에 늘 보이므로
+ * (`teamAiRoleNoticeKey`) 그 행의 스위치가 켤 때 남기는 기록은 사실이다 — `hermes` 행도 그 고지를 보여야 부른다.
  */
 export function teamAiSettingsToggleNotice(
   bundle: TeamAiSwitchableBundle,
@@ -140,7 +182,7 @@ export function teamAiSettingsToggleNotice(
   return next ? teamAiRolesNotice("settings", [bundle]) : null;
 }
 
-/** 기본값: 일곱 묶음 모두 켬. 온보딩을 건너뛰었거나 설정이 없는 워크스페이스도 같다. */
+/** 기본값: 여덟 묶음 모두 켬(`hermes`도 기본 켬, P10). 온보딩을 건너뛰었거나 설정이 없는 워크스페이스도 같다. */
 export function defaultTeamAiRoles(): TeamAiRoles {
   return {
     chat_read: true,
@@ -150,6 +192,7 @@ export function defaultTeamAiRoles(): TeamAiRoles {
     files: true,
     memory: true,
     code: true,
+    hermes: true,
   };
 }
 

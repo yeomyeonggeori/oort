@@ -837,3 +837,182 @@ async fn the_thread_updated_frame_carries_no_per_reader_number() {
         "the frame keeps exactly its keys: {frame}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 5 — the read-state projection's followed-thread total (#5667, ADR-0124 증보 4)
+// ---------------------------------------------------------------------------
+
+/// `GET …/read-state` as `token` reads it: the line of `channel`.
+async fn read_state_line(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    channel: Uuid,
+) -> Value {
+    let response = http
+        .get(format!("{base}/v1/workspaces/{workspace}/read-state"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("GET read-state");
+    assert_eq!(response.status(), 200, "GET read-state is 200");
+    let body: Value = response.json().await.expect("read-state body");
+    body["read_states"]
+        .as_array()
+        .expect("read_states")
+        .iter()
+        .find(|line| line["channel_id"].as_str() == Some(&channel.to_string()))
+        .unwrap_or_else(|| panic!("a line for the channel: {body}"))
+        .clone()
+}
+
+/// `followed_unread.updated` frames for `member` written after `since`.
+async fn followed_frames_since(su: &PgPool, since: i64, member: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE id > $1 AND partition_key = $2 \
+            AND payload->'data'->>'type' = 'followed_unread.updated'",
+    )
+    .bind(since)
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("count frames")
+}
+
+async fn outbox_mark(su: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT COALESCE(max(id), 0)::bigint FROM outbox")
+        .fetch_one(su)
+        .await
+        .expect("outbox watermark")
+}
+
+/// Over HTTP: every `GET read-state` line carries `followed_unread_reply_count` (snake_case, always
+/// present, `0` when nothing is followed) equal to the thread summary's `unread_reply_count`, with the
+/// row's other keys unchanged; a reply signals the follower and not its author, and the read route and
+/// the stop route each signal the caller's own personal channel.
+///
+/// Sabotage (measured RED, see the PR): map `0` instead of the projection's value in
+/// `read_state_row_dto` → alice's line reads 0.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_read_state_line_carries_the_followed_total_and_the_routes_signal_it() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+
+    let workspace = seed_workspace(&su, "followed-total").await;
+    let alice = seed_human(&su, workspace, "alice").await;
+    let bob = seed_human(&su, workspace, "bob").await;
+    let carol = seed_human(&su, workspace, "carol").await;
+    let channel = seed_channel(&su, workspace, "public", alice.id).await;
+    for member in [&alice, &bob, &carol] {
+        join(&su, workspace, channel, member.id).await;
+    }
+    let alice_token = login(&http, &base, workspace, &alice.email).await;
+    let bob_token = login(&http, &base, workspace, &bob.email).await;
+    let carol_token = login(&http, &base, workspace, &carol.email).await;
+
+    let (root, _) =
+        post_message(&http, &base, &alice_token, workspace, channel, None, "원문").await;
+    post_message(
+        &http,
+        &base,
+        &bob_token,
+        workspace,
+        channel,
+        Some(root),
+        "첫 답글",
+    )
+    .await;
+    let mark = outbox_mark(&su).await;
+    let (_, second) = post_message(
+        &http,
+        &base,
+        &bob_token,
+        workspace,
+        channel,
+        Some(root),
+        "둘째 답글",
+    )
+    .await;
+    assert_eq!(
+        followed_frames_since(&su, mark, alice.id).await,
+        1,
+        "the reply tells its follower"
+    );
+    assert_eq!(
+        followed_frames_since(&su, mark, bob.id).await,
+        0,
+        "…and not its author"
+    );
+
+    let line = read_state_line(&http, &base, &alice_token, workspace, channel).await;
+    let summary = thread_summary(&http, &base, &alice_token, workspace, channel, root).await;
+    assert_eq!(line["followed_unread_reply_count"], 2, "{line}");
+    assert_eq!(
+        line["followed_unread_reply_count"], summary["unread_reply_count"],
+        "the line's total is the thread summary's number when one thread is followed"
+    );
+    let mut keys: Vec<&str> = line
+        .as_object()
+        .expect("line object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "channel_id",
+            "closed_at_seq",
+            "followed_unread_reply_count",
+            "last_read_seq",
+            "latest_readable_seq",
+            "latest_seq",
+            "marked_unread_before_seq",
+            "mention_count",
+            "unread_count",
+        ],
+        "exactly one key more than before: {line}"
+    );
+    assert_eq!(
+        read_state_line(&http, &base, &bob_token, workspace, channel).await
+            ["followed_unread_reply_count"],
+        0,
+        "bob wrote both replies"
+    );
+    assert_eq!(
+        read_state_line(&http, &base, &carol_token, workspace, channel).await
+            ["followed_unread_reply_count"],
+        0,
+        "carol follows nothing: 0, never an absent key"
+    );
+
+    // Reading the thread empties the total and tells alice's other devices.
+    let mark = outbox_mark(&su).await;
+    let (status, body) = put_read(
+        &http,
+        &read_url(&base, workspace, channel, root),
+        &alice_token,
+        second,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        read_state_line(&http, &base, &alice_token, workspace, channel).await
+            ["followed_unread_reply_count"],
+        0
+    );
+    assert_eq!(followed_frames_since(&su, mark, alice.id).await, 1);
+
+    // Stopping following tells bob's devices.
+    let mark = outbox_mark(&su).await;
+    let follow_url =
+        format!("{base}/v1/workspaces/{workspace}/channels/{channel}/messages/{root}/follow");
+    assert_eq!(delete_follow(&http, &follow_url, &bob_token).await, 200);
+    assert_eq!(followed_frames_since(&su, mark, bob.id).await, 1);
+}
