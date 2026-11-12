@@ -506,9 +506,6 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     // #4775: thumbnail/photo computed border radius is measured at runtime; the crop's WAAPI
     // frames likewise interpolate getBoundingClientRect geometry. Fixed visibility/transform live in CSS.
     "features/attachments/useStageHero.ts",
-    // #5662: 옛 쪽 실패 줄의 `top` — 맨 위 날짜 줄의 아래 끝을 `getBoundingClientRect` 로 재서 스크롤마다 옮긴다(그 줄을 덮지 않게).
-    // 떠 있는 자리 · 층은 CSS(`layer-content-float absolute inset-x-0 top-0`)에 있다.
-    "features/timeline/Timeline.tsx",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {
