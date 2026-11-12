@@ -1,3 +1,5 @@
+import type { LocaleService } from "@momo/core/i18n";
+import type { LocalWorkVerdict } from "@momo/core/features/workbench/localWork";
 import type { AvailableUpdate } from "@/lib/tauri";
 
 // =============================================================================
@@ -200,6 +202,21 @@ export function badgeLabel(state: UpdateState): string | null {
 
 /** Seconds the 「곧 다시 실행돼요」 card counts down before restarting on its own. */
 export const RELAUNCH_COUNTDOWN_SECONDS = 3;
+
+/**
+ * One line that says what 「지금 다시 시작」 stops while the restart waits for local work (#5661): terminal panes,
+ * work sessions, and work it could not check. Counts come from the core verdict (`localWorkVerdict`).
+ */
+export function restartCutLine(
+  cut: Extract<LocalWorkVerdict, { kind: "busy" }>,
+  formatMessage: LocaleService["formatMessage"]
+): string {
+  const items: string[] = [];
+  if (cut.panes > 0) items.push(formatMessage("settings.updates.cutPanes", { count: cut.panes }));
+  if (cut.sessions > 0) items.push(formatMessage("settings.updates.cutSessions", { count: cut.sessions }));
+  if (cut.unknown) items.push(formatMessage("settings.updates.cutUnknown"));
+  return formatMessage("settings.updates.cutLine", { items: items.join(", ") });
+}
 
 /**
  * True when the profile row should carry the 「업데이트」 pill (owner 결정 2026-10-16).

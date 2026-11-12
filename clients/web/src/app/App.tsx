@@ -15,6 +15,7 @@ import {
   type RealtimeStatus,
 } from "@/lib/realtime";
 import { startUpdateWatch } from "@/features/updates/store";
+import { localWorkSource } from "@/features/updates/localWorkSource";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
@@ -215,8 +216,9 @@ export function App() {
 
   // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
   // the connect screen is the reader most likely to need the build that fixes
-  // why they are stuck. No-op in a browser tab.
-  useEffect(() => startUpdateWatch(), []);
+  // why they are stuck. No-op in a browser tab. The automatic restart after an
+  // install waits for local work on this Mac to end (#5661): `localWorkSource`.
+  useEffect(() => startUpdateWatch({ localWork: localWorkSource }), []);
 
   useEffect(() => {
     if (session && isClaimPath(window.location.pathname)) {

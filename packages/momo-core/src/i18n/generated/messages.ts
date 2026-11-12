@@ -1113,9 +1113,17 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "settings.updates.cutLine",
+  "settings.updates.cutPanes",
+  "settings.updates.cutSessions",
+  "settings.updates.cutUnknown",
+  "settings.updates.description",
+  "settings.updates.holdTitle",
+  "settings.updates.installRowDescription",
   "settings.updates.lastCheckedLabel",
   "settings.updates.offChip",
   "settings.updates.offSentence",
+  "settings.updates.restartNow",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -2702,9 +2710,23 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "settings.updates.cutLine": {
+    "items": "string"
+  },
+  "settings.updates.cutPanes": {
+    "count": "number"
+  },
+  "settings.updates.cutSessions": {
+    "count": "number"
+  },
+  "settings.updates.cutUnknown": {},
+  "settings.updates.description": {},
+  "settings.updates.holdTitle": {},
+  "settings.updates.installRowDescription": {},
   "settings.updates.lastCheckedLabel": {},
   "settings.updates.offChip": {},
   "settings.updates.offSentence": {},
+  "settings.updates.restartNow": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -4144,9 +4166,17 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "settings.updates.cutLine": { items: string };
+  "settings.updates.cutPanes": { count: number };
+  "settings.updates.cutSessions": { count: number };
+  "settings.updates.cutUnknown": Record<string, never>;
+  "settings.updates.description": Record<string, never>;
+  "settings.updates.holdTitle": Record<string, never>;
+  "settings.updates.installRowDescription": Record<string, never>;
   "settings.updates.lastCheckedLabel": Record<string, never>;
   "settings.updates.offChip": Record<string, never>;
   "settings.updates.offSentence": Record<string, never>;
+  "settings.updates.restartNow": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;

@@ -11,6 +11,7 @@ import {
   formatPublishedAt,
   progressLabel,
   progressPercent,
+  restartCutLine,
   type UpdateState,
 } from "./model";
 import {
@@ -19,6 +20,8 @@ import {
   relaunchIntoUpdate,
   useAppVersion,
   useLastCheckedAt,
+  useRelaunchCountdown,
+  useRelaunchHold,
   useUpdateState,
 } from "./store";
 
@@ -80,7 +83,12 @@ export function UpdateSection() {
   const state = useUpdateState();
   const version = useAppVersion();
   const lastCheckedAt = useLastCheckedAt();
+  const countdown = useRelaunchCountdown();
+  const hold = useRelaunchHold();
   const formatMessage = useFormatMessage();
+  // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(#5661). 카드와 같은 판정이다.
+  const holding = state.kind === "installed" && hold !== null && countdown === null;
+  const cutLine = holding && hold.cut !== null ? restartCutLine(hold.cut, formatMessage) : null;
 
   const hasUpdate =
     state.kind === "available" || state.kind === "installing" || state.kind === "installed";
@@ -96,9 +104,8 @@ export function UpdateSection() {
         title="앱 업데이트"
         description={
           // 확인하지 않는 판에서 「앱이 스스로 새 버전으로 바꿔요」는 거짓이다(#5661): 상태 줄의 한 문장만 둔다.
-          off
-            ? undefined
-            : "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요. 쓰던 글은 그대로 남아요."
+          // 다시 시작은 이 맥에서 도는 작업이 끝나기를 기다릴 수 있다(#5661): 「3초 뒤에」라고 약속하지 않는다.
+          off ? undefined : formatMessage("settings.updates.description")
         }
       >
         <SettingsRow label="지금 버전">
@@ -120,7 +127,13 @@ export function UpdateSection() {
         )}
         <SettingsRow
           label="상태"
-          description={off ? formatMessage("settings.updates.offSentence") : stateSentence(state)}
+          description={
+            off
+              ? formatMessage("settings.updates.offSentence")
+              : holding
+                ? formatMessage("settings.updates.holdTitle")
+                : stateSentence(state)
+          }
           keep
         >
           <div className="flex items-center gap-2" data-testid="update-status" data-update-state={state.kind}>
@@ -182,8 +195,8 @@ export function UpdateSection() {
             label={state.kind === "available" ? "새 버전 설치" : "다시 실행"}
             description={
               state.kind === "available"
-                ? "설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요."
-                : "기다리지 않고 지금 다시 실행해도 돼요."
+                ? formatMessage("settings.updates.installRowDescription")
+                : (cutLine ?? "기다리지 않고 지금 다시 실행해도 돼요.")
             }
           >
             {state.kind === "available" ? (
@@ -192,7 +205,7 @@ export function UpdateSection() {
               </Button>
             ) : (
               <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
-                지금 다시 실행
+                {holding ? formatMessage("settings.updates.restartNow") : "지금 다시 실행"}
               </Button>
             )}
           </SettingsRow>

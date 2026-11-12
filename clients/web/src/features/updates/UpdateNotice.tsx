@@ -1,6 +1,13 @@
 import { InlineBanner } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { badgeLabel, badgeWorthShowing } from "./model";
-import { installUpdate, relaunchIntoUpdate, useUpdateState } from "./store";
+import {
+  installUpdate,
+  relaunchIntoUpdate,
+  useRelaunchCountdown,
+  useRelaunchHold,
+  useUpdateState,
+} from "./store";
 
 // =============================================================================
 // 연결 화면의 업데이트 알림 (ADR-0133 P2, MOMO-606).
@@ -19,16 +26,24 @@ import { installUpdate, relaunchIntoUpdate, useUpdateState } from "./store";
 
 export function UpdateNotice() {
   const state = useUpdateState();
+  const countdown = useRelaunchCountdown();
+  const hold = useRelaunchHold();
+  const formatMessage = useFormatMessage();
   if (!badgeWorthShowing(state)) return null;
 
-  const label = badgeLabel(state);
+  // 이 맥의 작업이 끝나기를 기다리는 동안은 「곧 다시 실행」이 아니다(#5661).
+  const holding = state.kind === "installed" && hold !== null && countdown === null;
+  const label = holding ? formatMessage("settings.updates.holdTitle") : badgeLabel(state);
   if (!label) return null;
 
   const action =
     state.kind === "available"
       ? { label: "지금 업데이트", run: () => void installUpdate() }
       : state.kind === "installed"
-        ? { label: "지금 다시 실행", run: () => void relaunchIntoUpdate() }
+        ? {
+            label: holding ? formatMessage("settings.updates.restartNow") : "지금 다시 실행",
+            run: () => void relaunchIntoUpdate(),
+          }
         : null;
 
   return (

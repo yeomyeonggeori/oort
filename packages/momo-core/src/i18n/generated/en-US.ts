@@ -7924,6 +7924,104 @@ export const catalog: MessageCatalog = {
       "value": "Use device language"
     }
   ],
+  "settings.updates.cutLine": [
+    {
+      "type": 0,
+      "value": "Restarting now stops: "
+    },
+    {
+      "type": 1,
+      "value": "items"
+    }
+  ],
+  "settings.updates.cutPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutSessions": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work session"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work sessions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutUnknown": [
+    {
+      "type": 0,
+      "value": "work that could not be checked"
+    }
+  ],
+  "settings.updates.description": [
+    {
+      "type": 0,
+      "value": "The app updates itself. A download is installed only after its signature checks out. When the install finishes the app restarts on its own; if work is running on this Mac, it waits until that work ends. What you were typing stays."
+    }
+  ],
+  "settings.updates.holdTitle": [
+    {
+      "type": 0,
+      "value": "Restarts when your work ends"
+    }
+  ],
+  "settings.updates.installRowDescription": [
+    {
+      "type": 0,
+      "value": "When the install finishes the app restarts on its own. If work is running on this Mac, it waits until that work ends."
+    }
+  ],
   "settings.updates.lastCheckedLabel": [
     {
       "type": 0,
@@ -7940,6 +8038,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "This build doesn't check for new versions by itself. Download and install new versions yourself."
+    }
+  ],
+  "settings.updates.restartNow": [
+    {
+      "type": 0,
+      "value": "Restart now"
     }
   ],
   "teamAi.helper.aliasesLine": [
