@@ -978,6 +978,47 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     }
   });
 
+  it("터치 · 늦은 거절: 누른 적도 가리킨 적도 없는 손이(기준점 없음) 1px 떨며 그 칸을 탭해도 1초 동안은 결정이 아니다", async () => {
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(0);
+    let deliver: (runs: AgentRunProgress[]) => void = () => undefined;
+    const stop = startRunProgress({
+      workspaceId: WS,
+      channelIds: [CH_AGENT_LAB],
+      realtime: null,
+      fetchProgress: () => new Promise<AgentRunProgress[]>((resolve) => (deliver = resolve)),
+    });
+    try {
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+      await sleepMs(1100);
+      await act(async () =>
+        deliver([
+          {
+            id: R(1),
+            channelId: CH_AGENT_LAB,
+            agentMemberId: AGENT.memberId,
+            status: "running",
+            phase: "awaiting_approval",
+            leaseState: "live",
+            stepCount: 0,
+            ahead: [],
+            createdAtMs: Date.now(),
+            updatedAtMs: Date.now(),
+            bundle: { approvalId: A(1), status: "pending", decisionMode: "inline", canDecide: false, actionType: "tool_call" },
+          } as AgentRunProgress,
+        ])
+      );
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]));
+      fireEvent.pointerMove(list(), { clientX: 301, clientY: 121, pointerType: "touch" });
+      pressSlot(0, "approve", { clientX: 301, clientY: 121 }, "touch");
+      await sleepMs(50);
+      expect(decisionCalls()).toHaveLength(0);
+    } finally {
+      stop();
+    }
+  });
+
   it("원장이 늦게 와서 줄이 「지금」에서 「응답 필요」로 올라와도, 막 선 승인은 짧은 보호 시간 동안 움직이지 않은 포인터 누름을 받지 않고 그 뒤에는 받는다", async () => {
     board(new Set(), { mine: twoRuns });
     serveDecisions(0);
