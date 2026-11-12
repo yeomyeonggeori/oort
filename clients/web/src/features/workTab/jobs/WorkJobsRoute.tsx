@@ -209,6 +209,8 @@ export function WorkJobsRoute() {
   const needsMeRef = useRef<HTMLElement | null>(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  const byRunRef = useRef(decisions.byRun);
+  byRunRef.current = decisions.byRun;
   useEffect(() => {
     if (held.size === 0) return;
     const tick = () => {
@@ -222,7 +224,10 @@ export function WorkJobsRoute() {
       for (const [runKey, entry] of held) {
         const row = rowsRef.current.find((r) => runKeyOf(r) === runKey) ?? null;
         const waited = now - entry.atMs;
-        const stillAsking = row !== null && row.awaitingApproval && waited < HOLD_MAX_MS;
+        // 목록이 아직 승인 대기라고 말해도, 원장이 그 run의 **다른** 승인을 내놓았다면 그것은 새 요청이다(기다리지 않는다).
+        const next = byRunRef.current.get(runKey);
+        const sameAsk = next === undefined || uuidEq(next.approvalId, entry.decision.approvalId);
+        const stillAsking = row !== null && row.awaitingApproval && sameAsk && waited < HOLD_MAX_MS;
         if (row === null || (waited >= HOLD_MIN_MS && !pointerOnSection && !stillAsking)) release.push(runKey);
       }
       if (release.length === 0) return;
@@ -237,7 +242,12 @@ export function WorkJobsRoute() {
   }, [held]);
 
   const guardRef = useRef<{ untilMs: number; spot: PointerSpot | null } | null>(null);
-  const layoutKey = sections.map((s) => `${s.key}:${s.rows.map((r) => r.id).join(",")}`).join("|");
+  // 줄의 자리(구간·순서), 붙든 줄, 결정 단추가 실은 승인이 바뀌면 포인터 밑의 단추가 다른 결정이 될 수 있다.
+  const layoutKey = [
+    ...sections.map((s) => `${s.key}:${s.rows.map((r) => r.id).join(",")}`),
+    `held:${[...held.keys()].join(",")}`,
+    `asks:${[...decisions.byRun.values()].map((d) => d.approvalId).join(",")}`,
+  ].join("|");
   const lastLayoutRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (lastLayoutRef.current !== null && lastLayoutRef.current !== layoutKey) {

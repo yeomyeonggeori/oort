@@ -781,6 +781,41 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3회�
     15_000
   );
 
+  it("한 run에 승인이 둘이면: 첫 승인을 결정한 칸에는 원장이 내놓은 둘째 승인의 단추가 아니라 영수증이 서고, 놓인 뒤 선 둘째 승인은 움직이지 않은 포인터 누름을 받지 않는다", async () => {
+    const one = twoRuns[0]!;
+    const second = approval({ id: A(2), runId: R(1) });
+    const decided = new Set<string>();
+    api.fetchWorkJobs.mockResolvedValue({ sessions: [one], nextCursor: null, mode: "jobs" });
+    api.fetchApprovals.mockImplementation(async () => [twoApprovals[0]!, second].filter((a) => !decided.has(a.id)));
+    api.authedResponse.mockImplementation(async (path: string) => {
+      if (!String(path).endsWith("/decision")) return httpResponse(404, {});
+      decided.add(decodeURIComponent(String(path).split("/").at(-2)!));
+      return httpResponse(200, { status: "approved", decided_by: ME, decided_at_ms: Date.now() });
+    });
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1)]));
+    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+    fireEvent.pointerMove(list, { clientX: 300, clientY: 120 });
+    const reads = api.fetchApprovals.mock.calls.length;
+    pressSlot(0);
+    await waitFor(() => expect(within(needsMeSlot(0)).queryByTestId("work-job-approval-settled")).not.toBeNull());
+    await waitFor(() => expect(api.fetchApprovals.mock.calls.length).toBeGreaterThan(reads));
+    await sleepMs(50);
+    // 원장은 이제 둘째 승인(A2)을 이 run의 대기로 준다. 방금 누른 칸에는 영수증이 남는다.
+    expect(within(needsMeSlot(0)).queryByTestId("work-job-approval-approve")).toBeNull();
+    pressSlot(0);
+    await sleepMs(50);
+    expect(decidedIds()).toEqual([A(1)]);
+    // 놓이면 같은 칸에 둘째 승인의 단추가 선다(새 요청): 포인터가 움직이기 전에는 결정이 아니고, 움직인 뒤에는 결정이다.
+    await waitFor(() => expect(within(needsMeSlot(0)).queryByTestId("work-job-approval-approve")).not.toBeNull(), { timeout: 4000 });
+    pressSlot(0);
+    await sleepMs(50);
+    expect(decidedIds()).toEqual([A(1)]);
+    fireEvent.pointerMove(list, { clientX: 300, clientY: 160 });
+    pressSlot(0);
+    await waitFor(() => expect(decidedIds()).toEqual([A(1), A(2)]));
+  });
+
   it("Enter 연타(키보드): A의 승인에서 Enter를 거듭 쳐도 나간 결정은 1건이고 초점은 다음 줄의 결정 단추로 가지 않는다", async () => {
     board(new Set(), { mine: twoRuns });
     serveDecisions(40);
