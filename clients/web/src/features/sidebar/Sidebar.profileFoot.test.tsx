@@ -347,6 +347,8 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     const railPill = rail.querySelector('[data-testid="update-pill"]') as HTMLElement | null;
     expect(railPill?.getAttribute("data-placement")).toBe("rail");
     expect(railPill?.getAttribute("aria-label")).toBe("업데이트. 0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
+    // 레일은 가로로 넘친 것을 잘라 직접 그린 툴팁이 서지 못한다: 설명은 레일 타일과 같은 `title`이다.
+    expect(railPill?.getAttribute("title")).toBe("0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
     const railOrder = Array.from(rail.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
     expect(railOrder.indexOf("update-pill")).toBeLessThan(railOrder.indexOf("profile-card"));
     resetUpdateStoreForTest();

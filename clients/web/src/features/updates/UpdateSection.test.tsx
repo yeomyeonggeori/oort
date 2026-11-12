@@ -22,11 +22,13 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+import { UpdateNotice } from "./UpdateNotice";
 import { UpdateSection } from "./UpdateSection";
 import {
   checkForUpdate,
   installUpdate,
   resetUpdateStoreForTest,
+  seedUpdateStateForTest,
   startUpdateWatch,
 } from "./store";
 
@@ -151,5 +153,32 @@ describe("설정 > 업데이트 (#3578 S5a)", () => {
     seen.push(host?.textContent ?? "");
     expect(seen.every((text) => text.length > 0)).toBe(true);
     for (const text of seen) expect(text).not.toMatch(/습니다/);
+  });
+});
+
+describe("다시 시작이 이 맥의 작업을 기다리는 동안 (#5661)", () => {
+  const HOLD = { cut: { kind: "busy" as const, panes: 1, sessions: 1, unknown: false } };
+
+  it("설정 > 업데이트: 상태 문장은 「작업이 끝나면」이고, 다시 시작 줄은 끊길 것 한 줄과 「지금 다시 시작」이다", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, HOLD));
+    const el = await mount();
+    expect(el.textContent).toContain("Restarts when your work ends");
+    expect(el.textContent).toContain("Restarting now stops: 1 terminal pane, 1 work session");
+    expect(q(el, "update-relaunch")?.textContent).toBe("Restart now");
+  });
+
+  it("연결 화면 띠: 같은 문장과 「지금 다시 시작」", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, HOLD));
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(UpdateNotice));
+      await Promise.resolve();
+    });
+    const notice = q(host, "connect-update-notice");
+    expect(notice?.textContent).toContain("Restarts when your work ends");
+    expect(notice?.textContent).toContain("Restart now");
+    expect(notice?.textContent).not.toContain("지금 다시 실행");
   });
 });
