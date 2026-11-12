@@ -46,6 +46,7 @@ describe("부제: 제품 말투(#3694)", () => {
       (kind) =>
         serverEntry(parseInboxItem({ ...WIRE_ITEM, kind })!, {
           channelLabel: "#agent-lab",
+          place: { kind: "channel" as const, name: "agent-lab" },
           actor: { name: "그록봇", isAgent: false },
           nowMs: 0,
         }).reason
@@ -74,6 +75,7 @@ describe("parseInboxItem / parseInboxPage", () => {
     expect(item?.readAtMs).toBeNull();
     const entry = serverEntry(item!, {
       channelLabel: "#agent-lab",
+          place: { kind: "channel" as const, name: "agent-lab" },
       actor: { name: "그록봇", handle: "grokbot", isAgent: true },
       nowMs: Date.UTC(2026, 9, 11, 4, 8, 12),
     });
@@ -90,6 +92,7 @@ describe("parseInboxItem / parseInboxPage", () => {
     const read = parseInboxItem({ ...WIRE_ITEM, readAt: "2026-10-11T04:09:00.000001Z" })!;
     const entry = serverEntry(read, {
       channelLabel: "#agent-lab",
+          place: { kind: "channel" as const, name: "agent-lab" },
       actor: { name: "그록봇", isAgent: false },
       nowMs: Date.UTC(2026, 9, 11, 5),
     });
@@ -103,6 +106,7 @@ describe("parseInboxItem / parseInboxPage", () => {
     })!;
     const entry = serverEntry(del, {
       channelLabel: "#x",
+      place: { kind: "channel", name: "x" },
       actor: { name: "a", isAgent: false },
       nowMs: 0,
     });
@@ -125,6 +129,7 @@ describe("parseInboxItem / parseInboxPage", () => {
   it("필터는 종류가 아니라 사유로 건다(멘션이기도 한 답글은 멘션 탭에도 있다)", () => {
     const entry = serverEntry(parseInboxItem(WIRE_ITEM)!, {
       channelLabel: "#a",
+      place: { kind: "channel", name: "a" },
       actor: { name: "a", isAgent: false },
       nowMs: 0,
     });
@@ -275,7 +280,8 @@ describe("isServerItemUnread: 위치가 항목을 지났으면 목록이 낡았�
   });
 
   it("serverEntry는 그 판정을 쓰고 안 읽음 말고는 아무것도 바꾸지 않는다", () => {
-    const input = { channelLabel: "#agent-lab", actor: { name: "그록봇", isAgent: false }, nowMs: 0 };
+    const input = { channelLabel: "#agent-lab",
+          place: { kind: "channel" as const, name: "agent-lab" }, actor: { name: "그록봇", isAgent: false }, nowMs: 0 };
     const plain = serverEntry(at(5), input);
     const passed = serverEntry(at(5), { ...input, lastReadSeq: 5 });
     expect(plain.unread).toBe(true);

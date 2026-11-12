@@ -1,3 +1,10 @@
 {
-  "inbox.approval.open": "열기"
+  "inbox.approval.open": "열기",
+  "inbox.source.thread": "스레드 · {channel}",
+  "inbox.source.threadUnknown": "스레드",
+  "inbox.source.dm": "DM · {name}",
+  "inbox.source.dmGroup": "DM · {names} 외 {count, number}명",
+  "inbox.source.dmUnknown": "DM",
+  "inbox.source.channelUnknown": "채널",
+  "inbox.source.task": "처리할 일 · 승인 요청"
 }

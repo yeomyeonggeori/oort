@@ -10,11 +10,13 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import AppShell from '../src/shell/AppShell';
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import {setHapticMode} from '../src/lib/haptics';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -206,6 +208,35 @@ describe('인박스 「전체」 (#3663)', () => {
     expect(keys.some(k => k.startsWith('mention:'))).toBe(true);
   });
 
+  // #5696: 이름 아래 출처 한 줄은 웹과 같은 코어 판정이다 — 처리할 일은 종류 표시, DM은 「DM · 이름」, 내 글의 스레드는
+  // 「스레드 · #채널」, 채널 멘션은 「#채널」. 낭독 이름에도 같은 출처가 든다.
+  it('줄마다 이름 아래 출처 한 줄: 처리할 일 · DM · 스레드 · 채널 멘션이 같은 자리에 선다', async () => {
+    installFetch(fullWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    const sourceOf = (prefix: string) => {
+      const key = rowKeys().find(k => k.startsWith(prefix));
+      return key === undefined ? '' : screen.getByTestId(`mailbox-source-${key}`);
+    };
+    expect(sourceOf('approval:')).toHaveTextContent('처리할 일 · 승인 요청');
+    expect(sourceOf(`dm:${DM_SEO}`)).toHaveTextContent('DM · 서연');
+    expect(sourceOf(`dm:${DM_BOT}`)).toHaveTextContent('DM · 김인턴');
+    expect(sourceOf('thread:')).toHaveTextContent('스레드 · #general');
+    expect(sourceOf('mention:')).toHaveTextContent(/^#general$/);
+    const mentionKey = rowKeys().find(k => k.startsWith('mention:'));
+    const mentionButton = within(screen.getByTestId(`mailbox-row-${mentionKey}`)).getByRole('button');
+    expect(mentionButton.props.accessibilityLabel).toMatch(/^안 읽음, 멘션, #general, /);
+    // 줄 높이: 출처는 모든 줄에서 비지 않은 한 줄이다(출처가 무엇이든 그 자리가 같은 높이로 선다).
+    for (const key of rowKeys()) {
+      const source = screen.getByTestId(`mailbox-source-${key}`);
+      expect(source.props.numberOfLines).toBe(1);
+      expect(String(source.props.children).trim()).not.toBe('');
+      // 글자색은 둘째 등급(본문 AA 4.5:1 이상)이다 — 셋째 등급(textFaint)은 3.76~3.89:1이라 출처를 말하는 줄에 못 쓴다.
+      const ink = StyleSheet.flatten(source.props.style).color;
+      expect([darkPalette.textMuted, lightPalette.textMuted]).toContain(ink);
+    }
+  });
+
   it('안 읽음은 점으로 말한다: 안 읽은 DM엔 있고 읽은 DM엔 없다', async () => {
     installFetch(fullWorld());
     await openInbox();
@@ -297,6 +328,25 @@ describe('인박스 서버 투영 (#3684)', () => {
     expect(screen.getByTestId('inbox-tab-reply')).toBeTruthy();
     // 조합 경로의 읽기(DM 최근 페이지)는 한 건도 나가지 않는다.
     expect(mock.mock.calls.some(c => String(c[0]).includes(`/channels/${DM_SEO}/messages`))).toBe(false);
+  });
+
+  // #5696: 내 채널 목록에 없는 장소(떠난 DM·볼 수 없게 된 채널)의 출처는 서버 항목이 준 채널 사실만으로 선다 — 훅이 그 사실을
+  // 장소 판정에 넘기지 않으면 「DM」·「#design-private」가 「채널」로 떨어진다.
+  it('서버 항목의 출처: 목록 밖 DM은 「DM」, 목록 밖 채널은 서버가 준 이름, 목록 안 채널은 내 목록의 이름이다', async () => {
+    const world = serverWorld();
+    const gone = 'dddddddd-0000-4000-8000-000000000001';
+    const hidden = 'dddddddd-0000-4000-8000-000000000002';
+    const page = world.inbox?.pages[''] as {items: unknown[]};
+    page.items.push(
+      wireItem('C1', {kind: 'dm', reasons: ['dm'], quotedMessage: undefined, channel: {id: gone, name: null, kind: 'dm'}}),
+      wireItem('C2', {channel: {id: hidden, name: 'design-private', kind: 'private'}}),
+    );
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys()).toContain('inbox:c2'), {timeout: 10_000});
+    expect(screen.getByTestId('mailbox-source-inbox:c1')).toHaveTextContent(/^DM$/);
+    expect(screen.getByTestId('mailbox-source-inbox:c2')).toHaveTextContent(/^#design-private$/);
+    expect(screen.getByTestId('mailbox-source-inbox:a1')).toHaveTextContent(/^#general$/);
   });
 
   it('더 보기가 서버 커서로 다음 쪽을 이어 붙인다', async () => {
