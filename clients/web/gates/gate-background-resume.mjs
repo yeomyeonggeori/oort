@@ -19,6 +19,8 @@
 //   D 앱이 앞에 있는 채로 맥이 20초 잠들었다(창 사건 없음, 소켓은 조용히 죽음) → 깬 순간부터 새 글이 보이기까지(목표 5초)
 //   E 뒤에 있는 동안 위로 올려 읽던 사람: 놓친 글 20건을 따라잡은 뒤 읽던 줄이 움직이지 않는다(≤ 2px)
 //   G 뒤에 있는 동안 다른 사람이 DM → 메뉴 막대 점(owner 11-11 「켜줘」: 폰이 울리는 DM은 맥 표시도 켠다, 목표 5초)
+//   H 뒤에 있는 동안 내가 따라가는 스레드에 남이 답글 → 메뉴 막대 점(같은 owner 결정, 서버 #5667 흉내: 투영 필드 + 개인 채널 신호),
+//     이어서 다른 기기에서 그 스레드를 읽음 → 점이 꺼짐(각 목표 5초)
 //   F 뒤에 40초, 웹뷰도 소켓도 살아 있었다(수리 뒤 데스크탑의 보통 경우) → 그 사이 온 글은 이미 들어와 있고, 돌아와도 소켓을 다시 열지
 //     않는다(다시 붙기 0회, 연결 화면 0회). 소켓이 「들은 시각」(`lastHeardAt`)이 실제 엔진에서 잡히는지가 여기서 갈린다
 //
@@ -486,6 +488,68 @@ async function sceneG(browser) {
   }
 }
 
+/**
+ * 뒤에 있는 동안 내가 따라가는 스레드에 남이 답글 → 메뉴 막대 점, 그리고 다른 기기에서 그 스레드를 읽음 → 점이 꺼짐(서버 #5667 흉내).
+ * 서버는 읽음 투영 줄에 `followed_unread_reply_count`를 싣고, 값이 바뀌면 개인 채널로 id만 실은 `followed_unread.updated`를 보낸다.
+ * 인박스 신호는 보내지 않는다: 직접 따라가기만 누른 사람에게는 인박스 항목이 없다(migration 126). 그래서 이 장면은 새 신호의 길만 잰다.
+ * 멘션 수는 0 그대로다(겹침 빼기가 이 장면을 가리지 않게). 장면 A–G 의 투영 줄에는 이 필드가 없다(= #5667 전 서버, 그대로 통과해야 한다).
+ */
+async function sceneH(browser) {
+  const { context, page, backend } = await openScene(browser);
+  const followed = (n) => {
+    backend.state.readStates = backend.state.readStates.map((r) => ({
+      ...r,
+      followed_unread_reply_count: r.channel_id === OTHER.id.toUpperCase() ? n : 0,
+    }));
+  };
+  const signal = (ts) =>
+    backend.publish(personalRail, {
+      type: "followed_unread.updated",
+      v: 1,
+      ts,
+      payload: {
+        workspace_id: WORKSPACE_ID.toUpperCase(),
+        member_id: ME.toUpperCase(),
+        channel_id: OTHER.id.toUpperCase(),
+        root_id: "00000000-0000-7000-8000-0000000003e1",
+      },
+    });
+  const trayLit = (want) =>
+    timeUntil(
+      page,
+      (on) => {
+        const sent = window.__invokes.filter((call) => call.cmd === "tray_status_set");
+        const unread = sent.length === 0 ? 0 : sent[sent.length - 1].args.status.unread;
+        return on ? unread > 0 : sent.length > 0 && unread === 0;
+      },
+      want,
+      15_000
+    );
+  try {
+    followed(0);
+    await page.evaluate(() => window.__away());
+    await sleep(2_000);
+    check((await trayUnread(page)) === 0, "H: 시작할 때 메뉴 막대 점이 이미 켜져 있다");
+    followed(1);
+    const t0 = Date.now();
+    signal(t0);
+    const onMs = await trayLit(true);
+    const fetchesOn = backend.state.readStateFetches.filter((at) => at >= t0).length;
+    let offMs = null;
+    if (onMs !== null) {
+      // 폰에서 그 스레드를 읽었다: 서버 값이 0이 되고 같은 신호가 온다.
+      followed(0);
+      signal(Date.now());
+      offMs = await trayLit(false);
+    }
+    results.push({ scene: "H", label: "뒤에 있는 동안 따라가는 스레드에 답글 → 메뉴 막대 점, 다른 기기에서 읽음 → 꺼짐", ms: onMs, offMs, readStateFetches: fetchesOn });
+    check(onMs !== null && onMs <= 5_000, `H: 답글 뒤 메뉴 막대 점까지 ${onMs}ms (5초 안이어야, null = 켜지지 않음)`);
+    check(offMs !== null && offMs <= 5_000, `H: 다른 기기에서 읽은 뒤 점이 꺼지기까지 ${offMs}ms (5초 안이어야, null = 꺼지지 않음)`);
+  } finally {
+    await context.close();
+  }
+}
+
 async function sceneF(browser) {
   const { context, page, backend } = await openScene(browser);
   try {
@@ -526,7 +590,7 @@ async function main() {
   try {
     const browser = await engine.launch();
     try {
-      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF, G: sceneG };
+      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF, G: sceneG, H: sceneH };
       for (const [name, run] of Object.entries(scenes)) {
         if (only !== null && !only.has(name)) continue;
         await run(browser);
