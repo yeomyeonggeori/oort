@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 import { printEngineAnchorHeader, scrollerOverflowAnchor } from "./engine-anchor.mjs";
 import { startGuardedPreview } from "./preview-guard.mjs";
-import { listEnv, motionOf, nothingRan } from "./still-measure.mjs";
+import { listEnv, motionOf, nothingRan, rapidSettleWithin, SEND_KNOWN, shortfallWithin } from "./still-measure.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,8 +68,9 @@ const gateNow = () => Date.now() + backendClock.shiftMs;
 const KNOWN_RAPID_SETTLE = true;
 /** 보낸 뒤 바닥에서 7~8px 위에 앉는 것(#5617 알려 둔 것)도 같은 뿌리다. 고쳐지면 false 로 바꿔 「끝 바닥 거리 ≤ 1px」를 단정한다. */
 const KNOWN_SEND_SHORTFALL = true;
-/** 그 알려진 모자람의 크기(실측 7.4~8px). 이보다 더 떨어지면 알려진 것이 아니다 — 실패다. */
-const KNOWN_SHORTFALL_MAX_PX = 9;
+// 두 알려진 실패의 테두리(되돌아옴 ≤ 2회 · 가장 큰 되돌아감 ≤ 9px · 바닥 거리 ≤ 9px)는 `SEND_KNOWN`(still-measure.mjs)에 있다.
+/** 이번 실행에서 알려진 실패가 실제로 났는가(고쳐졌으면 「목록에서 빼라」를 알린다). */
+const knownSeen = { rapidSettle: 0, rapidRuns: 0, shortfall: 0, shortfallRuns: 0 };
 /** 장면표 게이트에 넘길 기록. */
 const records = [];
 const viewport = { width: 1280, height: 800 };
@@ -700,6 +701,7 @@ function summarize(samples) {
     gapBefore: gapBefore === null ? null : Math.round(gapBefore * 100) / 100,
     gapAfter: gapAfter === null ? null : Math.round(gapAfter * 100) / 100,
     reversals: motion?.reversals ?? null,
+    maxBackPx: motion?.maxBackPx ?? null,
     steps: motion?.steps ?? null,
     expected,
     heights,
@@ -893,20 +895,37 @@ async function skewScene(browser, engine, colorScheme, { name, skewMs, boundary 
       `${where}: 위 줄이 움직인 폭 ${result.travel}px 가 처음 → 끝 ${Math.abs(result.net)}px(기대 ${result.expected}px = 보낸 칸 + 바닥 거리 변화)와 1px 넘게 다르다 — 갔다가 돌아온 몫`
     );
   }
-  if (result.gapAfter === null || result.gapAfter > 1) {
-    if (KNOWN_SEND_SHORTFALL && result.gapAfter <= KNOWN_SHORTFALL_MAX_PX) {
-      record.known = `${record.known ? `${record.known} · ` : ""}끝 바닥 거리 ${result.gapAfter}px — 알려진 실패(#5617)`;
-      console.log(`[${where}] 알려진 실패(기록만): 끝 바닥 거리 ${result.gapAfter}px(#5617)`);
-    } else {
-      failures.push(`${where}: 보낸 뒤 목록이 바닥에서 ${result.gapAfter}px 떨어져 앉았다`);
+  // 바닥 거리: 표본이 없으면(`null`) 알려진 모자람으로 넘기지 않고 실패다. 처음 바닥 거리도 알려진 모자람 안이어야 기대 이동에 더한다(#5641 검수 r1 M3).
+  const shortfall = SEND_KNOWN.shortfall;
+  knownSeen.shortfallRuns += 1;
+  if (result.gapBefore !== null && result.gapBefore > 1) {
+    knownSeen.shortfall += 1;
+    if (!(KNOWN_SEND_SHORTFALL && shortfallWithin(result.gapBefore))) {
+      failures.push(`${where}: 보내기 전 목록이 바닥에서 ${result.gapBefore}px 떨어져 있었다 — 알려진 모자람(≤ ${shortfall.maxGapPx}px, ${shortfall.issue}) 밖`);
     }
   }
+  if (result.gapAfter === null || result.gapAfter > 1) {
+    knownSeen.shortfall += 1;
+    if (KNOWN_SEND_SHORTFALL && shortfallWithin(result.gapAfter)) {
+      record.known = `${record.known ? `${record.known} · ` : ""}끝 바닥 거리 ${result.gapAfter}px — 알려진 실패(${shortfall.issue}: ${shortfall.what})`;
+      console.log(`[${where}] 알려진 실패(기록만): 끝 바닥 거리 ${result.gapAfter}px(${shortfall.issue})`);
+    } else {
+      failures.push(`${where}: 보낸 뒤 목록이 바닥에서 ${result.gapAfter}px 떨어져 앉았다${result.gapAfter === null ? "(표본 없음)" : ""}`);
+    }
+  }
+  if (rapid) knownSeen.rapidRuns += 1;
   if (result.reversals === null || result.reversals !== 0) {
-    if (rapid && KNOWN_RAPID_SETTLE) {
+    const settle = SEND_KNOWN.rapidSettle;
+    if (rapid) knownSeen.rapidSettle += 1;
+    if (rapid && KNOWN_RAPID_SETTLE && rapidSettleWithin(result)) {
       // 알려진 실패(#5617 「바닥에서 보내기 7~8px 모자람」): 세션의 첫 글이 붙는 프레임에 목록이 그 줄만큼 올라갔다가 다음 프레임에
-      // 7~8px 내려앉는다. 수리는 v0.1.47 M-3 칸이다. 기록만 하고 판정에서 뺀다(움직인 폭 · 처음 → 끝은 위에서 단정한다).
-      record.known = `${record.known ? `${record.known} · ` : ""}되돌아옴 ${result.reversals}회 — 알려진 실패(#5617 첫 글 7~8px 내려앉음)`;
+      // 7~8px 내려앉는다. 수리는 v0.1.47 M-3 칸이다. 테두리(되돌아옴 ≤ 2회 · 가장 큰 되돌아감 ≤ 9px) 안일 때만 기록하고 판정에서 뺀다.
+      record.known = `${record.known ? `${record.known} · ` : ""}되돌아옴 ${result.reversals}회 · 가장 큰 되돌아감 ${result.maxBackPx}px — 알려진 실패(${settle.issue}: ${settle.what})`;
       console.log(`[${where}] 알려진 실패(기록만): ${record.known}`);
+    } else if (rapid && KNOWN_RAPID_SETTLE) {
+      failures.push(
+        `${where}: 위 줄이 되돌아왔다(${result.reversals}회 · 가장 큰 되돌아감 ${result.maxBackPx}px) — 알려진 실패의 테두리(≤ ${settle.maxReversals}회 · ≤ ${settle.maxBackPx}px, ${settle.issue}) 밖`
+      );
     } else {
       failures.push(`${where}: 위 줄이 되돌아왔다(${result.reversals}회)`);
     }
@@ -966,6 +985,13 @@ async function main() {
     const file = resolve(outDir, skewOnly ? "send-follow-skew.json" : "send-follow.json");
     writeFileSync(file, JSON.stringify(records, null, 1));
     console.log(`장면 기록: ${file}`);
+  }
+  // 고쳐졌는데 알려진 실패로 남은 것을 알린다(판정은 바꾸지 않는다).
+  if (KNOWN_RAPID_SETTLE && knownSeen.rapidRuns > 0 && knownSeen.rapidSettle === 0) {
+    console.log(`[알려진 실패 → 통과] 연달아 장면 ${knownSeen.rapidRuns}번 모두 되돌아옴 0 — 고쳐졌으면 KNOWN_RAPID_SETTLE 을 false 로(목록에서 빼라, ${SEND_KNOWN.rapidSettle.issue})`);
+  }
+  if (KNOWN_SEND_SHORTFALL && knownSeen.shortfallRuns > 0 && knownSeen.shortfall === 0) {
+    console.log(`[알려진 실패 → 통과] ⑤ ${knownSeen.shortfallRuns}장면 모두 바닥 거리 ≤ 1px — 고쳐졌으면 KNOWN_SEND_SHORTFALL 을 false 로(목록에서 빼라, ${SEND_KNOWN.shortfall.issue})`);
   }
   const empty = nothingRan(records.length, "send-follow");
   if (empty !== null) failures.push(empty);

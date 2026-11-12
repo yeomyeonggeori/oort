@@ -19,10 +19,12 @@
 //   ⑦ 분 경계 연달아 두 번(기록만)).
 //
 // 부하 규칙: 장면마다 재기 전 1분 평균 부하를 적고, 문턱(`TIMELINE_STILL_LOAD_MAX`, 기본 12)을 넘으면 그 장면은 「재지 않음」이다 —
-// 통과도 실패도 아니다. 하나라도 「재지 않음」이면 마지막 줄은 PASS 가 아니라 NOT-MEASURED(종료 코드 3)다. 잰 칸이 0개여도 같다.
+// 통과도 실패도 아니다. 마지막 판정은 `finalVerdict`(still-measure.mjs): 판정한 칸이 0이면 FAIL(종료 1), 재지 않음 · 알려진 장면 못
+// 만듦 · 꼭 재야 하는 엔진(WebKit · Chromium)의 판 없음이 하나라도 있으면 PASS 가 아니라 NOT-MEASURED(종료 3)다.
 // 위치(px · 되돌아옴) 게이트다. 속도(fps) 게이트(`gate:scroll`)는 부하를 타는 본질이 달라 이 표에 섞지 않는다.
 //
-// 알려진 실패(`KNOWN_FAILURES`)는 수리를 다른 칸에 둔 장면이다. 숫자와 함께 「알려진 실패」로 적고 판정에서 뺀다.
+// 알려진 실패(`TIMELINE_KNOWN_FAILURES`, still-measure.mjs)는 수리를 다른 칸에 둔 칸이다. 정확한 칸 키 · 수리 이슈 번호 · 잰 값에 붙인
+// 상한과 함께 적고, 그 테두리 안일 때만 「알려진 실패」로 판정에서 뺀다. 고쳐져 통과하면 「목록에서 빼라」고 알린다.
 //
 // 사용: npm run build && node gates/gate-timeline-still.mjs
 //   TIMELINE_STILL_PORT=<포트>        새 장면의 미리보기 포트(기본 5240). 기존 게이트는 +1 · +2 · +3 을 쓴다
@@ -46,18 +48,23 @@ import { printEngineAnchorHeader, scrollerOverflowAnchor } from "./engine-anchor
 import { startGuardedPreview } from "./preview-guard.mjs";
 import {
   DEFAULT_LOAD_MAX,
+  entrySettle,
+  finalVerdict,
+  frameGaps,
   installEntryRecorder,
   judgeCell,
+  knownFailureFor,
   listEnv,
   loadNow,
-  nothingRan,
   numbersFromRecord,
   positiveIntEnv,
   positiveNumberEnv,
   readEntryRecord,
+  staleKnown,
   startStillRecorder,
   stillNumbers,
   stopStillRecorder,
+  withinKnown,
 } from "./still-measure.mjs";
 import {
   ANCHOR_TEXT,
@@ -91,95 +98,6 @@ const outDir = process.env.TIMELINE_STILL_OUT ? resolve(process.env.TIMELINE_STI
 
 const VIEWPORTS = { 1280: { width: 1280, height: 800 }, 900: { width: 900, height: 800 }, 390: { width: 390, height: 844 } };
 const TYPING_VIEWPORTS = { 1280: "1280x800", 900: "900x700", 390: "390x844" };
-
-/**
- * 알려진 실패: 지금 코드에서 실패하고 수리는 다른 칸에 있는 장면. 키는 `장면|엔진|폭`(엔진 · 폭은 `*` 가능).
- * 이 표에 있으면 숫자와 함께 「알려진 실패」로 적고 판정에서 뺀다. 고쳐지면 「알려진 실패 → 통과」로 적는다(목록에서 지울 때).
- */
-const KNOWN_FAILURE_LIST = [
-  // 2026-11-10 실측(이 맥, Playwright WebKit 26.5 · Chromium 149, 칸마다 부하 기록). 수리는 다른 칸이다(인계 맨 위).
-  {
-    key: "older|*|*",
-    issue: "위로 더 불러오기: 옛 쪽이 붙은 뒤 보던 줄이 3.9~5.3px 밀림(WebKit 390 만 0.4~0.9px)",
-    maxUnexplainedPx: 6,
-    maxReversals: 0,
-  },
-  {
-    key: "entry-card|chromium|*",
-    issue: "진입 중 링크 카드가 0.7초 늦게 서면 Chromium 에서 마지막 줄 4.75px",
-    maxUnexplainedPx: 5,
-    maxReversals: 0,
-    maxMissingFrames: 0,
-  },
-  {
-    key: "entry-card|chromium|390",
-    issue: "폰 폭 Chromium 진입: 첫 그림 한 프레임이 맨 위(scrollTop 0) + 늦은 카드",
-    maxUnexplainedPx: 5,
-    maxReversals: 0,
-    maxMissingFrames: 2,
-    maxPill: 1,
-  },
-  {
-    key: "entry|chromium|390",
-    issue: "폰 폭 Chromium 진입: 첫 그림 한 프레임이 맨 위(scrollTop 0), 필이 한 번 설 수 있음",
-    maxUnexplainedPx: 1,
-    maxReversals: 0,
-    maxMissingFrames: 2,
-    maxPill: 1,
-  },
-  {
-    key: "older|webkit|*",
-    issue: "위로 더 불러오기(WebKit): 보던 줄 3.9px, 그리고 1280 · 900 에서 맨 위에 닿아도 옛 쪽을 안 부를 때가 잦음(읽기 0 — 내렸다 올려도. 실측 3번 실행 2/6 · 마지막 실행 2/2 · 사보타주 번들 2/2, 390 은 0)",
-    maxUnexplainedPx: 6,
-    maxReversals: 0,
-    notBuilt: "옛 쪽이 붙지 않았다(읽기 0",
-  },
-  {
-    key: "entry-card|webkit|*",
-    issue: "진입 중 링크 카드가 0.7초 늦게 서면 WebKit 1280 · 900 에서 마지막 줄 4px(세 번에 한두 번)",
-    maxUnexplainedPx: 4,
-    maxReversals: 0,
-    maxMissingFrames: 0,
-  },
-  {
-    key: "reaction-bottom-added|webkit|*",
-    issue: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px(1280 · 900)",
-    maxUnexplainedPx: 2,
-    maxReversals: 0,
-    maxGapPx: 1,
-    maxPill: 0,
-  },
-  {
-    key: "reaction-bottom-removed|webkit|*",
-    issue: "WebKit 맨 아래 반응 제거: 바닥 거리 2px(1280 · 900)",
-    maxUnexplainedPx: 1,
-    maxReversals: 0,
-    maxGapPx: 2,
-    maxPill: 0,
-  },
-];
-const KNOWN_FAILURES = new Map(KNOWN_FAILURE_LIST.map((entry) => [entry.key, entry]));
-
-function knownFailure(scene, engine, width) {
-  for (const key of [`${scene}|${engine}|${width}`, `${scene}|${engine}|*`, `${scene}|*|${width}`, `${scene}|*|*`]) {
-    if (KNOWN_FAILURES.has(key)) return KNOWN_FAILURES.get(key);
-  }
-  return null;
-}
-
-/**
- * 알려진 실패의 테두리 안인가: 잰 숫자가 적어 둔 상한을 넘지 않을 때만 「알려진 실패」다. 넘거나 줄이 사라졌으면(사보타주 · 새 회귀) 실패다.
- * 상한이 없는 항목은 테두리가 없다는 뜻이 아니라 그 숫자를 보지 않는다는 뜻이다(진입의 「가장 새 줄 없는 프레임」은 `maxMissingFrames`).
- */
-function withinKnown(known, numbers, extra = {}) {
-  if (numbers === null || numbers.vanishedFrames > 0) return false;
-  if (known.maxUnexplainedPx !== undefined && (numbers.unexplainedPx ?? Infinity) > known.maxUnexplainedPx) return false;
-  if (known.maxReversals !== undefined && (numbers.reversals ?? Infinity) > known.maxReversals) return false;
-  if (known.maxGapPx !== undefined && (numbers.maxGapPx ?? Infinity) > known.maxGapPx) return false;
-  if (known.maxMissingFrames !== undefined && (extra.missing ?? 0) > known.maxMissingFrames) return false;
-  if (known.maxPill !== undefined && (numbers.pillShows ?? 0) > known.maxPill) return false;
-  return true;
-}
 
 // ---------------------------------------------------------------------------------------------- 대화 픽스처
 
@@ -263,12 +181,16 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
     result = { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: [String(error.message ?? error).split("\n")[0]] } };
   }
   const loadAfter = loadNow();
+  // 그리기 직전 표본을 놓친 창은 통과로 치지 않는다(놓친 프레임에 흔들림이 숨을 수 있다 — #5641 검수 r1 M1). 실패는 그대로 실패다.
+  const gaps = lastRecord === null ? null : frameGaps(lastRecord.frames);
+  if (gaps?.reason && result.verdict.verdict === "PASS") result.verdict = { verdict: "장면 못 만듦", reasons: [gaps.reason] };
+  else if (gaps?.reason) result.verdict.reasons.push(gaps.reason);
   let verdict = result.verdict.verdict;
-  const known = knownFailure(meta.sceneKey, meta.engine, meta.width);
+  const known = knownFailureFor(meta.sceneKey, meta.engine, meta.width);
   if (meta.recordOnly && verdict !== "장면 못 만듦") verdict = `기록만(${verdict})`;
   else if (known?.notBuilt && verdict === "장면 못 만듦" && result.verdict.reasons.some((reason) => reason.startsWith(known.notBuilt))) verdict = "알려진 실패(장면 못 만듦)";
-  else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, result.extra)) verdict = "알려진 실패";
-  else if (known !== null && verdict === "FAIL") result.verdict.reasons.push(`알려진 실패의 테두리(${known.issue}) 밖`);
+  else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, { kind: meta.kind, unsettled: result.extra?.unsettled ?? 0 })) verdict = "알려진 실패";
+  else if (known !== null && verdict === "FAIL") result.verdict.reasons.push(`알려진 실패의 테두리(${known.key} ${known.issue}) 밖`);
   pushCell({
     ...meta,
     verdict,
@@ -277,12 +199,19 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
     loadBefore: gate.load,
     loadAfter,
     known,
-    note: [result.note, lastRecord?.intermediate ? `중간 표본 ${lastRecord.intermediate}` : "", loadAfter > loadMax ? `재는 동안 부하가 올랐다(${loadAfter})` : ""]
+    note: [
+      result.note,
+      known !== null && verdict === "PASS" ? `알려진 실패 목록(${known.issue})에 있지만 통과` : "",
+      gaps?.missed ? `놓친 프레임 ${gaps.missed}` : "",
+      gaps?.cross ? `그리기 뒤 값이 달랐던 프레임 ${gaps.cross}` : "",
+      loadAfter > loadMax ? `재는 동안 부하가 올랐다(${loadAfter})` : "",
+    ]
       .filter(Boolean)
       .join(" · "),
     // 실패 칸의 흔적(수리 칸이 볼 프레임): 판정이 PASS 가 아니면 남긴다(JSON 에만).
     trace: verdict === "PASS" || lastRecord === null ? undefined : lastRecord.frames.map((frame) => [frame.t, frame.watch?.w ?? frame.watch?.last ?? null, frame.top, frame.gap]),
-    intermediate: lastRecord?.intermediate ?? null,
+    missed: gaps?.missed ?? null,
+    cross: gaps?.cross ?? null,
   });
 }
 
@@ -312,16 +241,20 @@ async function entryScene(browser, engine, vp, { withCard }) {
       windowMs: 2_000,
     });
     await openDm(page, backend, origin, { settle: false });
-    const record = await readEntryRecord(page);
+    const record = await readEntryRecord(page, 20_000, 2_000);
     lastRecord = record;
-    const numbers = numbersFromRecord(record, { watch: "last" });
-    const missingFrames = record.frames.filter((frame) => frame.watch.last === null);
-    const missing = missingFrames.length;
+    // 자리 잡기 전 프레임(머리)과 그 뒤(몸)를 가른다(`entrySettle`). 머리가 있으면 그것만으로 실패다 — 그 프레임들이 그려졌다(검수 r1 H1).
+    // 몸의 숫자 넷은 평소 문턱으로 본다. 알려진 실패는 머리 프레임 수(`maxUnsettledFrames`)와 몸의 숫자에 따로 상한을 둔다.
+    const settle = entrySettle(record.frames);
+    if (settle.body.length === 0) {
+      return { numbers: null, verdict: { verdict: "장면 못 만듦", reasons: [`창 안에서 가장 새 줄이 세 프레임 이어 제자리에 선 적이 없다(표본 ${record.frames.length})`] } };
+    }
+    const numbers = numbersFromRecord({ ...record, frames: settle.body }, { watch: "last" });
+    const unsettled = settle.head.length;
     const verdict = judgeCell(numbers, { kind: "entry" });
-    if (missing > 0 && verdict.verdict !== "장면 못 만듦") {
+    if (unsettled > 0 && verdict.verdict !== "장면 못 만듦") {
       verdict.verdict = "FAIL";
-      const tops = [...new Set(missingFrames.map((frame) => frame.top))].join("→");
-      verdict.reasons.push(`첫 줄이 그려진 뒤 ${missing}프레임(${missingFrames.at(-1)?.t ?? 0}ms) 동안 가장 새 줄이 화면에 없었다 — 그동안 scrollTop ${tops}, 바닥 거리 최대 ${Math.max(...missingFrames.map((frame) => frame.gap ?? 0))}px`);
+      verdict.reasons.push(`첫 줄이 그려진 뒤 ${unsettled}프레임(${settle.body[0].t}ms) 동안 자리 잡지 않은 모양이 그려졌다 — ${settle.summary}`);
     }
     if (withCard) {
       const cardShown = await page.locator(`[data-message-id="${cardRow.id}"] [data-testid="unfurl-card"]`).count();
@@ -333,8 +266,8 @@ async function entryScene(browser, engine, vp, { withCard }) {
     return {
       numbers,
       verdict,
-      extra: { missing },
-      note: `표본 ${record.frames.length}프레임(그려지지 않은 중간 표본 ${record.intermediate}) · 줄 없는 프레임 ${missing} · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
+      extra: { unsettled },
+      note: `표본 ${record.frames.length}프레임(그리기 직전) · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
     };
   } finally {
     await context.close();
@@ -549,7 +482,23 @@ async function contentScenes(browser, engine, vp, recordOnly) {
   }
 }
 
+/**
+ * 엔진 판 확인(미리보기를 띄우기 전): Playwright 가 기대하는 판이 캐시에 없는 엔진은 「못 잼」 한 줄로 적고 새 장면 · 기존 게이트 모두에서
+ * 뺀다. WebKit · Chromium 은 꼭 재야 하는 엔진이라(`required`) 그 「못 잼」은 통과가 아니다(#5641 검수 r1 M4). Firefox 는 기록만이다.
+ */
+function availableEngines() {
+  const live = [];
+  for (const name of engineNames) {
+    const path = { webkit, chromium, firefox }[name].executablePath();
+    if (existsSync(path)) live.push(name);
+    else pushCell({ set: "*", sceneKey: "*", scene: "(모든 장면)", engine: name, width: "*", verdict: "못 잼", required: name !== "firefox", numbers: null, note: `Playwright 가 기대하는 판이 캐시에 없다: ${path} (받지 않음)` });
+  }
+  return live;
+}
+let liveEngines = [];
+
 async function runNewScenes() {
+  if (liveEngines.length === 0) return;
   const server = await startGuardedPreview({
     webRoot,
     port,
@@ -558,12 +507,8 @@ async function runNewScenes() {
   });
   activeServer = server;
   try {
-    for (const name of engineNames) {
+    for (const name of liveEngines) {
       const type = { webkit, chromium, firefox }[name];
-      if (!existsSync(type.executablePath())) {
-        pushCell({ set: "new", sceneKey: "*", scene: "(모든 새 장면)", engine: name, width: "*", verdict: "못 잼", numbers: null, note: `Playwright 가 기대하는 판이 캐시에 없다: ${type.executablePath()} (받지 않음)` });
-        continue;
-      }
       // Firefox 는 기록만 한다(Playwright 판과 데스크탑 엔진이 다르다 — 표에 함께 적어 엔진 차이를 본다).
       const recordOnly = name === "firefox";
       const browser = await type.launch({ headless: true });
@@ -622,7 +567,7 @@ function runChild(script, env) {
   });
 }
 
-const childEngines = () => engineNames.filter((name) => name !== "firefox");
+const childEngines = () => liveEngines.filter((name) => name !== "firefox");
 const failLinesOf = (run) => run.stderr.split("\n").filter((line) => line.startsWith("FAIL "));
 
 /** 기존 게이트의 칸 판정: 그 게이트의 FAIL 줄 가운데 이 칸의 위치(`where`)로 시작하는 것이 있으면 FAIL. */
@@ -783,6 +728,7 @@ function markdown() {
 async function main() {
   childOut = outDir ? resolve(outDir, "children") : mkdtempSync(resolve(tmpdir(), "timeline-still-"));
   console.log(`[timeline-still] 부하 ${loadNow()} (문턱 ${loadMax}) · 엔진 ${engineNames.join(",")} · 폭 ${widths.join(",")} · 장면 ${sceneNames.join(",")} · 묶음 ${setNames.join(",")}`);
+  liveEngines = availableEngines();
   try {
     if (setNames.includes("new")) await runNewScenes();
     const engines = childEngines().join(",");
@@ -820,38 +766,23 @@ async function main() {
     if (!outDir) rmSync(childOut, { recursive: true, force: true });
   }
 
-  const table = markdown();
-  console.log(table);
+  // 고쳐졌는데 목록에 남은 알려진 실패 · 수리 이슈가 아직 없는 줄을 알린다(판정은 바꾸지 않는다).
+  const notices = staleKnown(cells).map((line) => `[알려진 실패 → 통과] ${line}`);
+  const placeholders = [...new Set(cells.filter((cell) => cell.known?.placeholder).map((cell) => cell.known.key))];
+  if (placeholders.length > 0) notices.push(`[알려진 실패] 수리 이슈가 아직 없어 #5641 을 단 줄 ${placeholders.length}: ${placeholders.join(", ")}`);
+  const verdict = finalVerdict(cells);
+  const table = [markdown(), "", ...notices.map((line) => `- ${line}`), "", ...verdict.err, ...verdict.out].join("\n");
+  console.log(markdown());
   if (outDir) {
     mkdirSync(outDir, { recursive: true });
-    writeFileSync(resolve(outDir, "timeline-still.json"), JSON.stringify({ at: new Date().toISOString(), loadMax, engines: engineNames, widths, scenes: sceneNames, sets: setNames, dist: distOverride, cells }, null, 1));
+    writeFileSync(resolve(outDir, "timeline-still.json"), JSON.stringify({ at: new Date().toISOString(), loadMax, engines: engineNames, widths, scenes: sceneNames, sets: setNames, dist: distOverride, cells, notices, verdict }, null, 1));
     writeFileSync(resolve(outDir, "timeline-still.md"), `${table}\n`);
     console.log(`표: ${resolve(outDir, "timeline-still.md")}`);
   }
-
-  const failures = cells.filter((cell) => cell.verdict === "FAIL" || cell.verdict === "장면 못 만듦");
-  const notMeasured = cells.filter((cell) => cell.verdict === "재지 않음");
-  const notBuilt = cells.filter((cell) => cell.verdict === "알려진 실패(장면 못 만듦)");
-  const measured = cells.filter(
-    (cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FAIL" || cell.verdict === "알려진 실패" || cell.verdict.startsWith("기록만")
-  );
-  // 잰 칸도 「재지 않음」 칸도 없으면(아무 장면도 돌지 않았다) 실패다. 부하로 모두 「재지 않음」이면 아래의 NOT-MEASURED(종료 3)다 — 어느 쪽도 PASS 가 아니다.
-  const empty = nothingRan(measured.length + notMeasured.length + notBuilt.length, "timeline-still");
-  if (failures.length > 0 || empty !== null) {
-    for (const cell of failures) console.error(`FAIL ${cell.set} ${cell.scene} [${cell.engine} ${cell.width}] ${(cell.reasons ?? []).join(" · ")}`);
-    if (empty !== null) console.error(`FAIL ${empty}`);
-    process.exit(1);
-  }
-  const known = cells.filter((cell) => cell.verdict === "알려진 실패");
-  if (notMeasured.length > 0) {
-    console.log(
-      `NOT-MEASURED timeline-still: ${notMeasured.length}칸 재지 않음(부하) · 잰 칸 ${measured.length} · 알려진 실패 ${known.length} · 알려진 장면 못 만듦 ${notBuilt.length} — 통과로 치지 않는다`
-    );
-    process.exit(3);
-  }
-  console.log(
-    `PASS timeline-still: ${measured.length}칸 · 알려진 실패 ${known.length}(기록) · 알려진 장면 못 만듦 ${notBuilt.length}(재지 못함) — 되돌아옴 0 · 맨 아래 ≤1px · 위 읽기 ≤2px · 필 0`
-  );
+  for (const line of notices) console.log(line);
+  for (const line of verdict.err) console.error(line);
+  for (const line of verdict.out) console.log(line);
+  process.exit(verdict.code);
 }
 
 await main();

@@ -80,7 +80,7 @@ export function loadNow() {
 /**
  * 위치 열 하나에서 움직임을 센다.
  * @param {(number|null|undefined)[]} series 프레임마다 한 값(창 좌표 px). null 은 그 프레임에 줄이 없음.
- * @returns {null | { samples: number, reversals: number, range: number, net: number, steps: number, first: number, last: number, min: number, max: number }}
+ * @returns {null | { samples: number, reversals: number, maxBackPx: number, range: number, net: number, steps: number, first: number, last: number, min: number, max: number }}
  */
 export function motionOf(series, { floor = MOVE_FLOOR_PX, step = STEP_PX } = {}) {
   const values = series.filter((value) => typeof value === "number" && Number.isFinite(value));
@@ -88,6 +88,9 @@ export function motionOf(series, { floor = MOVE_FLOOR_PX, step = STEP_PX } = {})
   let reversals = 0;
   let direction = 0;
   let pivot = values[0];
+  // 한 방향으로 간 덩어리(다리)들: 되돌아감의 크기를 재려고 적는다(#5641 r1 M3 — 횟수만으로는 40px 되돌아감도 「2회」와 같다).
+  const legs = [];
+  let legStart = values[0];
   for (const value of values.slice(1)) {
     if (direction === 0) {
       if (value - pivot > floor) {
@@ -101,6 +104,8 @@ export function motionOf(series, { floor = MOVE_FLOOR_PX, step = STEP_PX } = {})
       if (value > pivot) pivot = value;
       else if (pivot - value > floor) {
         reversals += 1;
+        legs.push({ direction: 1, size: pivot - legStart });
+        legStart = pivot;
         direction = -1;
         pivot = value;
       }
@@ -108,10 +113,17 @@ export function motionOf(series, { floor = MOVE_FLOOR_PX, step = STEP_PX } = {})
       pivot = value;
     } else if (value - pivot > floor) {
       reversals += 1;
+      legs.push({ direction: -1, size: legStart - pivot });
+      legStart = pivot;
       direction = 1;
       pivot = value;
     }
   }
+  if (direction !== 0) legs.push({ direction, size: Math.abs(pivot - legStart) });
+  // 되돌아감: 처음 → 끝의 방향(움직임이 없으면 첫 다리의 방향)과 반대로 간 다리 가운데 가장 큰 것.
+  const netValue = values[values.length - 1] - values[0];
+  const mainDirection = Math.abs(netValue) > floor ? Math.sign(netValue) : (legs[0]?.direction ?? 0);
+  const maxBackPx = legs.filter((leg) => leg.direction !== mainDirection).reduce((most, leg) => Math.max(most, leg.size), 0);
   let steps = 0;
   let moving = false;
   for (let i = 1; i < values.length; i += 1) {
@@ -124,6 +136,7 @@ export function motionOf(series, { floor = MOVE_FLOOR_PX, step = STEP_PX } = {})
   return {
     samples: values.length,
     reversals,
+    maxBackPx: round2(maxBackPx),
     range: round2(max - min),
     net: round2(values[values.length - 1] - values[0]),
     steps,
@@ -209,8 +222,15 @@ export function judgeCell(numbers, { kind, limit, minSamples = 10 }) {
 
 // ---------------------------------------------------------------------------------------------- 브라우저 안에서 적기
 
+// 표본을 뜨는 때(#5641 검수 r1 H1 · M1): **그리기 직전**. 프레임마다 rAF 에서 새 ResizeObserver 를 만들어 `<html>` 바로 아래의 1px
+// 탐침을 관찰한다. 새 관찰자는 관찰자 목록의 맨 끝이라, 그 프레임의 다른 관찰자(가상 목록 · scrollHold)가 바로잡은 뒤 · 그리기 앞에
+// 콜백이 돈다. 표본은 하나도 버리지 않는다 — 옛 판은 「rAF 뒤 DOM 이 바뀐 프레임」을 버려 실제로 그려진 첫 프레임(진입의 맨 위 ·
+// 빈 목록)과 한 프레임 흔들림까지 지웠다. 곁에서 그리기 뒤(rAF 에서 게시한 메시지) 값을 한 번 더 떠, 그 사이 DOM 이 바뀌지 않았는데
+// 값이 다르면 `cross: true` 로 적는다(그리기 직전 표본이 놓친 바로잡기가 있었다는 흔적 — 비고에 수를 낸다).
+// 관찰자 콜백이 오지 않은 프레임은 프레임 번호(`n`)의 빈칸으로 남는다(`frameGaps`).
+
 /**
- * 프레임마다 그려진 모양을 적기 시작한다(rAF 안에서 게시한 메시지는 그 프레임의 그리기 · ResizeObserver 콜백이 끝난 뒤에 돈다).
+ * 프레임마다 그려진 모양을 적기 시작한다(위 「표본을 뜨는 때」).
  * 지켜보는 줄은 **메시지 id** 로 찾는다(가상 목록의 `data-index`·「마지막 줄」은 확정 · 채우기 때 다른 줄이 된다).
  * @param {import("playwright").Page} page
  * @param {{ scroller: string, watch: { name: string, messageId?: string, text?: string, edge: "top" | "bottom" }[] }} spec
@@ -221,7 +241,6 @@ export async function startStillRecorder(page, spec) {
     R.gen += 1;
     const gen = R.gen;
     R.frames = [];
-    R.intermediate = 0;
     R.pillMounts = 0;
     R.scrolls = 0;
     R.on = true;
@@ -247,25 +266,18 @@ export async function startStillRecorder(page, spec) {
       }
     });
     mo.observe(document.body, { childList: true, subtree: true });
-    // 그려진 모양만 센다(expression-jitter 와 같은 규칙): 이 프레임의 rAF 뒤로 DOM 이 바뀌었으면 그 표본은 아직 그려지지 않은 중간
-    // 상태다(다음 그리기 전에 ResizeObserver 가 바로잡을 수 있다). 그런 표본은 세기만 한다(`intermediate`).
-    let dirty = false;
-    const dirtyWatch = new MutationObserver(() => {
-      dirty = true;
+    // 그리기 뒤 대조 표본이 믿을 만한가: 그리기 직전 표본을 뜬 뒤 DOM 이 바뀌었으면 대조하지 않는다.
+    let changedAfter = false;
+    const changeWatch = new MutationObserver(() => {
+      changedAfter = true;
     });
-    dirtyWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    changeWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     let watchedScroller = null;
     const onScroll = () => {
       if (live()) R.scrolls += 1;
     };
     const round = (value) => Math.round(value * 100) / 100;
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => {
-      if (!live()) return;
-      if (dirty) {
-        R.intermediate += 1;
-        return;
-      }
+    const read = () => {
       const scroller = scrollerNow();
       if (scroller !== watchedScroller) {
         watchedScroller?.removeEventListener("scroll", onScroll);
@@ -284,17 +296,51 @@ export async function startStillRecorder(page, spec) {
           frame.watch[target.name] = row ? round(row.getBoundingClientRect()[target.edge]) : null;
         }
       }
-      R.frames.push(frame);
+      return frame;
     };
-    channel.port1.onmessage();
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;left:-9px;top:0;width:1px;height:1px;pointer-events:none";
+    document.documentElement.appendChild(probe);
+    let n = 0;
+    let pending = null;
+    let previous = null;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      if (!live() || pending === null) return;
+      const frame = pending;
+      pending = null;
+      if (changedAfter) return;
+      const after = read();
+      frame.cross = after.top !== frame.top || Object.keys(frame.watch).some((name) => {
+        const a = frame.watch[name];
+        const b = after.watch[name];
+        return (a === null) !== (b === null) || (a !== null && Math.abs(a - b) > 0.5);
+      });
+    };
+    // 시작 표본(지금, 바뀌기 전).
+    R.frames.push({ ...read(), n: 0 });
     const tick = () => {
+      previous?.disconnect();
+      previous = null;
       if (!live()) {
         watchedScroller?.removeEventListener("scroll", onScroll);
         mo.disconnect();
-        dirtyWatch.disconnect();
+        changeWatch.disconnect();
+        probe.remove();
         return;
       }
-      dirty = false;
+      n += 1;
+      const frameNo = n;
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        if (!live()) return;
+        const frame = { ...read(), n: frameNo };
+        R.frames.push(frame);
+        pending = frame;
+        changedAfter = false;
+      });
+      observer.observe(probe);
+      previous = observer;
       channel.port2.postMessage(0);
       requestAnimationFrame(tick);
     };
@@ -307,39 +353,60 @@ export async function stopStillRecorder(page) {
   return page.evaluate(() => {
     const R = window.__still;
     R.on = false;
-    return { frames: R.frames, intermediate: R.intermediate, pillMounts: R.pillMounts, pillAtStart: R.pillAtStart, scrolls: R.scrolls };
+    return { frames: R.frames, pillMounts: R.pillMounts, pillAtStart: R.pillAtStart, scrolls: R.scrolls };
   });
 }
 
 /**
- * 대화 진입 장면: 페이지가 뜰 때부터 rAF 마다 스크롤러를 찾고, **처음 줄이 그려진 프레임부터** `windowMs` 동안 적는다.
+ * 대화 진입 장면: 페이지가 뜰 때부터 프레임마다(그리기 직전) 스크롤러를 적는다. 창을 고르는 일은 `entryWindow`(순수)가 한다 —
+ * **이 대화의 줄이 처음 붙은 프레임**부터 `windowMs`(그 프레임이 깨끗한지와 무관하다, #5641 검수 r1 H1).
  * `spec.startSelector` 는 「이 대화의 줄」을 고르는 선택자다(로그인 뒤 먼저 열린 채널의 줄과 가른다).
  * 재기 전에 스크롤 위치를 바로잡지 않는다(그 바로잡기가 재려는 것을 가린다). 지켜보는 줄이 아직 붙지 않은 프레임은 `null` 로 남고
  * 따로 센다(`missing`) — 첫 그리기에 가장 새 줄이 없다가 나중에 서면 그것도 화면이 뛴 것이다.
  */
 export async function installEntryRecorder(page, spec) {
   await page.addInitScript((spec) => {
-    const E = (window.__stillEntry = { frames: [], done: false, pillMounts: 0, startedAt: null, intermediate: 0 });
-    let dirty = false;
-    let dirtyWatch = null;
+    const E = (window.__stillEntry = { raw: [], done: false, pillMounts: 0, firstMatchAt: null });
     const round = (value) => Math.round(value * 100) / 100;
     const rowOf = (scroller) => {
       const node = scroller.querySelector(`[data-message-id="${spec.messageId}"]`);
       return node?.closest("[data-index]") ?? node ?? null;
     };
     let mo = null;
-    const sample = () => {
-      // 그려지지 않은 중간 상태는 세기만 한다(startStillRecorder 와 같은 규칙).
-      if (dirty) {
-        if (E.startedAt !== null) E.intermediate += 1;
-        return;
-      }
+    let changeWatch = null;
+    let changedAfter = false;
+    let pending = null;
+    const read = () => {
       const scroller = document.querySelector(spec.scroller);
-      const rows = scroller ? scroller.querySelectorAll("[data-index]").length : 0;
-      if (E.startedAt === null) {
-        // 시작: 이 대화의 줄이 처음 그려진 프레임(`startSelector`). 로그인 뒤 먼저 열린 다른 채널의 줄로 시작하지 않는다.
-        if (rows === 0 || scroller.querySelector(spec.startSelector) === null) return;
-        E.startedAt = performance.now();
+      if (!scroller) return null;
+      const rows = scroller.querySelectorAll("[data-index]").length;
+      const row = rowOf(scroller);
+      let topId = null;
+      const edge = scroller.getBoundingClientRect().top;
+      for (const node of scroller.querySelectorAll("[data-message-id]")) {
+        if (node.getBoundingClientRect().top >= edge - 1) {
+          topId = node.getAttribute("data-message-id");
+          break;
+        }
+      }
+      return {
+        t: performance.now(),
+        rows,
+        match: rows > 0 && scroller.querySelector(spec.startSelector) !== null,
+        top: scroller.scrollTop,
+        topId,
+        visible: getComputedStyle(scroller).visibility !== "hidden" && Number(getComputedStyle(scroller.closest('[data-testid="chat-timeline"]') ?? scroller).opacity) > 0,
+        pill: document.querySelector('[data-testid="jump-latest"]') !== null,
+        gap: round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight),
+        watch: { [spec.name]: row ? round(row.getBoundingClientRect()[spec.edge]) : null },
+      };
+    };
+    const sample = (frameNo) => {
+      const frame = read();
+      if (frame === null) return;
+      frame.n = frameNo;
+      if (E.firstMatchAt === null && frame.match) {
+        E.firstMatchAt = frame.t;
         mo = new MutationObserver((records) => {
           for (const record of records) {
             for (const node of record.addedNodes) {
@@ -349,62 +416,305 @@ export async function installEntryRecorder(page, spec) {
         });
         mo.observe(document.body, { childList: true, subtree: true });
       }
-      const t = performance.now() - E.startedAt;
-      if (t > spec.windowMs) {
+      if (E.firstMatchAt !== null && frame.t - E.firstMatchAt > spec.windowMs + 50) {
         E.done = true;
         mo?.disconnect();
-        dirtyWatch?.disconnect();
+        changeWatch?.disconnect();
         return;
       }
-      const row = scroller ? rowOf(scroller) : null;
-      let topId = null;
-      if (scroller) {
-        const edge = scroller.getBoundingClientRect().top;
-        for (const node of scroller.querySelectorAll("[data-message-id]")) {
-          if (node.getBoundingClientRect().top >= edge - 1) {
-            topId = node.getAttribute("data-message-id");
-            break;
-          }
-        }
-      }
-      E.frames.push({
-        t: Math.round(t),
-        rows,
-        top: scroller ? scroller.scrollTop : null,
-        topId,
-        visible: scroller ? getComputedStyle(scroller).visibility !== "hidden" && Number(getComputedStyle(scroller.closest('[data-testid="chat-timeline"]') ?? scroller).opacity) > 0 : null,
-        pill: document.querySelector('[data-testid="jump-latest"]') !== null,
-        gap: scroller ? round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) : null,
-        watch: { [spec.name]: row ? round(row.getBoundingClientRect()[spec.edge]) : null },
-      });
+      E.raw.push(frame);
+      pending = frame;
+      changedAfter = false;
     };
-    const channel = new MessageChannel();
-    channel.port1.onmessage = sample;
-    const tick = () => {
-      if (E.done) return;
-      if (dirtyWatch === null && document.body) {
-        dirtyWatch = new MutationObserver(() => {
-          dirty = true;
+    const boot = () => {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;left:-9px;top:0;width:1px;height:1px;pointer-events:none";
+      document.documentElement.appendChild(probe);
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        if (pending === null) return;
+        const frame = pending;
+        pending = null;
+        if (changedAfter) return;
+        const after = read();
+        frame.cross = after === null || after.top !== frame.top || (after.watch[spec.name] === null) !== (frame.watch[spec.name] === null) ||
+          (after.watch[spec.name] !== null && Math.abs(after.watch[spec.name] - frame.watch[spec.name]) > 0.5);
+      };
+      let n = 0;
+      let previous = null;
+      const tick = () => {
+        previous?.disconnect();
+        previous = null;
+        if (E.done) {
+          probe.remove();
+          return;
+        }
+        if (changeWatch === null && document.body) {
+          changeWatch = new MutationObserver(() => {
+            changedAfter = true;
+          });
+          changeWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+        }
+        n += 1;
+        const frameNo = n;
+        const observer = new ResizeObserver(() => {
+          observer.disconnect();
+          if (!E.done) sample(frameNo);
         });
-        dirtyWatch.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
-      }
-      dirty = false;
-      channel.port2.postMessage(0);
+        observer.observe(probe);
+        previous = observer;
+        channel.port2.postMessage(0);
+        requestAnimationFrame(tick);
+      };
       requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    if (document.documentElement) boot();
+    else document.addEventListener("DOMContentLoaded", boot);
   }, spec);
 }
 
-/** 진입 기록이 끝날 때까지 기다려 돌려준다. */
-export async function readEntryRecord(page, timeoutMs = 20_000) {
+/** 진입 기록이 끝날 때까지 기다려 창(`entryWindow`)을 골라 돌려준다. */
+export async function readEntryRecord(page, timeoutMs = 20_000, windowMs = 2_000) {
   await page.waitForFunction(() => window.__stillEntry?.done === true, null, { timeout: timeoutMs });
-  return page.evaluate(() => ({
-    frames: window.__stillEntry.frames,
-    intermediate: window.__stillEntry.intermediate,
-    pillMounts: window.__stillEntry.pillMounts,
-    pillAtStart: false,
-  }));
+  const raw = await page.evaluate(() => ({ raw: window.__stillEntry.raw, pillMounts: window.__stillEntry.pillMounts }));
+  const picked = entryWindow(raw.raw, { windowMs });
+  return { frames: picked.frames, before: picked.before, pillMounts: raw.pillMounts, pillAtStart: false };
+}
+
+// ---------------------------------------------------------------------------------------------- 창 고르기 · 놓친 프레임 (순수)
+
+/**
+ * 진입 장면의 창: **이 대화의 줄이 처음 붙은 프레임**(`match`)부터 `windowMs` 안의 프레임 전부. 그 프레임이 「깨끗한지」는 보지 않고,
+ * 창 안의 프레임은 하나도 버리지 않는다(#5641 검수 r1 H1 — 옛 판은 처음 깨끗한 프레임에서 시작해 진입 첫 2~3프레임을 창 밖에 뒀다).
+ * @param {{ t: number, match: boolean }[]} raw 페이지가 뜬 뒤 프레임마다 적은 것(`t` 는 performance.now)
+ * @returns {{ frames: object[], before: number }} `frames` 의 `t` 는 시작 프레임 기준 ms, `before` 는 시작 앞 프레임 수
+ */
+export function entryWindow(raw, { windowMs }) {
+  const start = raw.findIndex((frame) => frame.match === true);
+  if (start < 0) return { frames: [], before: raw.length };
+  const t0 = raw[start].t;
+  const frames = raw
+    .slice(start)
+    .filter((frame) => frame.t - t0 <= windowMs)
+    .map((frame) => ({ ...frame, t: Math.round(frame.t - t0) }));
+  return { frames, before: start };
+}
+
+/**
+ * 진입 창을 「자리 잡기 전(머리)」과 「그 뒤(몸)」로 가른다. 몸은 가장 새 줄이 **세 프레임 이어** 보이고 그 셋이 1px 안에 있는 첫 프레임부터다.
+ * 머리는 그 앞 프레임 전부다 — 가장 새 줄이 없거나(맨 위 · 빈 목록), 엉뚱한 곳에 있다가 사라지는 프레임(검수 r1 H1 의 WebKit 판 A).
+ * @returns {{ head: object[], body: object[], summary: string }}
+ */
+export function entrySettle(frames, watch = "last") {
+  const at = (i) => frames[i]?.watch?.[watch];
+  let start = -1;
+  for (let i = 0; i + 2 < frames.length; i += 1) {
+    const trio = [at(i), at(i + 1), at(i + 2)];
+    if (trio.every((value) => typeof value === "number") && Math.max(...trio) - Math.min(...trio) <= MOVE_FLOOR_PX) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return { head: frames, body: [], summary: "" };
+  const head = frames.slice(0, start);
+  const settled = at(start);
+  const tops = [...new Set(head.map((frame) => frame.top))].join("→");
+  const offsets = head.filter((frame) => typeof frame.watch?.[watch] === "number").map((frame) => Math.abs(frame.watch[watch] - settled));
+  const summary = head.length
+    ? `가장 새 줄 없음 ${head.filter((frame) => frame.watch?.[watch] === null || frame.watch?.[watch] === undefined).length}프레임` +
+      `${offsets.length ? ` · 제자리에서 ${round2(Math.max(...offsets))}px 떨어져 보임 ${offsets.length}프레임` : ""} · scrollTop ${tops} · 바닥 거리 최대 ${Math.max(...head.map((frame) => frame.gap ?? 0))}px`
+    : "";
+  return { head, body: frames.slice(start), summary };
+}
+
+/** 놓친 프레임을 이 수보다 많이 놓친 창은 「장면 못 만듦」이다(놓친 프레임에 흔들림이 숨을 수 있다). */
+export const MAX_MISSED_FRAMES = 2;
+
+/**
+ * 창 안에서 그리기 직전 표본이 오지 않은 프레임(프레임 번호 `n` 의 빈칸)과, 그리기 뒤 대조가 달랐던 프레임 수.
+ * @returns {{ missed: number, missedAtStart: number, cross: number, reason: string | null }}
+ */
+export function frameGaps(frames) {
+  const numbered = frames.filter((frame) => typeof frame.n === "number");
+  let missed = 0;
+  let missedAtStart = 0;
+  for (let i = 1; i < numbered.length; i += 1) {
+    const gap = Math.max(0, numbered[i].n - numbered[i - 1].n - 1);
+    missed += gap;
+    if (i <= 3) missedAtStart += gap;
+  }
+  const cross = frames.filter((frame) => frame.cross === true).length;
+  const reason =
+    missed > MAX_MISSED_FRAMES || missedAtStart > 0
+      ? `그리기 직전 표본을 ${missed}프레임 놓쳤다(처음 세 프레임 사이 ${missedAtStart}) — 놓친 프레임에 흔들림이 숨을 수 있다`
+      : null;
+  return { missed, missedAtStart, cross, reason };
+}
+
+// ---------------------------------------------------------------------------------------------- 알려진 실패 (순수)
+
+/**
+ * 장면표의 알려진 실패: 지금 코드에서 실패하고 수리는 다른 칸에 있는 칸. 키는 **정확한** `장면|엔진|폭`이다(별표 없음 — 지금
+ * 통과하는 칸을 덮지 않게, #5641 검수 r1 M2). 줄마다 수리 이슈 번호(`issue`)가 있다. `placeholder: true` 는 수리 이슈가 아직 없어
+ * 찾은 칸(#5641)을 단 줄이다(planner 가 이슈를 열면 번호만 바꾼다). 적은 상한은 2026-11-12 이 게이트(그리기 직전 표본)로 잰 값에
+ * 바짝 붙였다. **적지 않은 숫자는 보지 않는 것이 아니라 그 장면의 평소 문턱을 따른다**(`withinKnown`).
+ * `notBuilt` 는 「장면을 못 만든 까닭」의 앞부분이다 — 그 까닭으로 못 만든 칸은 통과가 아니라 따로 센다(`finalVerdict`).
+ */
+const ENTRY_HEAD = "진입 첫 프레임: 이 대화의 줄이 붙은 첫 1~3프레임에 목록 맨 위 · 가장 새 줄 없는 목록이 그려지고 20~80ms 뒤 자리 잡음";
+const NO_ISSUE = { issue: "#5641", placeholder: true };
+export const TIMELINE_KNOWN_FAILURES = Object.freeze(
+  [
+    // 2026-11-12 실측: 이 게이트(그리기 직전 표본), Playwright Chromium 149 · WebKit 26.5. Chromium 은 세 폭 × 3번 같은 값(부하 8~39),
+    // WebKit 은 낮은 부하(6~11) 3번 + 높은 부하(18~33) 2번 가운데 가장 큰 값. 자리 잡기 전 프레임은 `entrySettle` 의 머리다.
+    { key: "entry|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,038px)`, maxUnsettledFrames: 2 },
+    { key: "entry|chromium|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,038px)`, maxUnsettledFrames: 2 },
+    { key: "entry|chromium|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,297px)`, maxUnsettledFrames: 2 },
+    { key: "entry|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(낮은 부하 1프레임 가장 새 줄 없음, 높은 부하 3프레임 — 맨 위 → 제자리 811px 아래 → 없음)`, maxUnsettledFrames: 3 },
+    { key: "entry|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
+    { key: "entry|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2~3프레임)`, maxUnsettledFrames: 3 },
+    { key: "entry-card|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
+    { key: "entry-card|chromium|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
+    { key: "entry-card|chromium|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
+    { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
+    { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
+    { key: "entry-card|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
+    { key: "older|chromium|1280", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
+    { key: "older|chromium|900", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
+    { key: "older|chromium|390", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
+    {
+      key: "older|webkit|1280",
+      issue: "#5662",
+      what: "맨 위에 닿아도 옛 쪽을 안 불러옴(빈 대화를 거쳐 첫 쪽이 한 프레임 안에 온 대화 — 낮은 부하 3/3) · 불러온 때(높은 부하 1/2)는 보던 줄 4.69px",
+      maxUnexplainedPx: 4.69,
+      notBuilt: "옛 쪽이 붙지 않았다(읽기 0",
+    },
+    {
+      key: "older|webkit|900",
+      issue: "#5662",
+      what: "맨 위에 닿아도 옛 쪽을 안 불러옴(낮은 부하 3/3) · 불러온 때(높은 부하 1/1)는 보던 줄 4.69px",
+      maxUnexplainedPx: 4.69,
+      notBuilt: "옛 쪽이 붙지 않았다(읽기 0",
+    },
+    { key: "reaction-bottom-added|webkit|1280", ...NO_ISSUE, what: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px", maxUnexplainedPx: 1.63 },
+    { key: "reaction-bottom-added|webkit|900", ...NO_ISSUE, what: "WebKit 맨 아래 반응 추가: 마지막 줄 1.63px", maxUnexplainedPx: 1.63 },
+    { key: "reaction-bottom-removed|webkit|1280", ...NO_ISSUE, what: "WebKit 맨 아래 반응 제거: 바닥 거리 2px", maxGapPx: 2 },
+    { key: "reaction-bottom-removed|webkit|900", ...NO_ISSUE, what: "WebKit 맨 아래 반응 제거: 바닥 거리 2px", maxGapPx: 2 },
+  ].map((entry) => Object.freeze(entry))
+);
+
+/** 그 칸의 알려진 실패 항목(정확한 키만). */
+export function knownFailureFor(scene, engine, width, list = TIMELINE_KNOWN_FAILURES) {
+  return list.find((entry) => entry.key === `${scene}|${engine}|${width}`) ?? null;
+}
+
+/**
+ * 알려진 실패의 테두리 안인가: 숫자마다 적은 상한(없으면 그 장면의 평소 문턱) 안일 때만이다. 지켜본 줄이 적어 둔 프레임 수(`maxVanishedFrames`,
+ * 기본 0)보다 오래 사라졌으면(사보타주 · 새 회귀) 밖이다.
+ * @param {object} known  `TIMELINE_KNOWN_FAILURES` 의 한 줄
+ * @param {object|null} numbers  `stillNumbers` 의 결과
+ * @param {{ kind: "entry" | "bottom" | "reading", unsettled?: number }} cell  `unsettled` = 진입의 자리 잡기 전 프레임 수(`entrySettle`)
+ */
+export function withinKnown(known, numbers, { kind, unsettled = 0 }) {
+  if (numbers === null || numbers === undefined || numbers.vanishedFrames > (known.maxVanishedFrames ?? 0)) return false;
+  const pxCap = known.maxUnexplainedPx ?? (kind === "reading" ? LIMITS.readingPx : LIMITS.stillPx);
+  if ((numbers.unexplainedPx ?? Infinity) > pxCap) return false;
+  if ((numbers.reversals ?? Infinity) > (known.maxReversals ?? 0)) return false;
+  if (kind === "bottom" && (numbers.maxGapPx ?? Infinity) > (known.maxGapPx ?? LIMITS.gapPx)) return false;
+  if (unsettled > (known.maxUnsettledFrames ?? 0)) return false;
+  if (kind !== "reading" && (numbers.pillShows ?? 0) > (known.maxPill ?? 0)) return false;
+  return true;
+}
+
+/**
+ * 고쳐졌는데 목록에 남은 항목: 이번 실행에서 그 키의 칸을 쟀고 모두 통과했으면(또는 `notBuilt` 칸이 이제 만들어졌으면) 「목록에서 빼라」.
+ * @returns {string[]} 알릴 문장
+ */
+export function staleKnown(cells, list = TIMELINE_KNOWN_FAILURES) {
+  const lines = [];
+  for (const entry of list) {
+    const hits = cells.filter((cell) => `${cell.sceneKey}|${cell.engine}|${cell.width}` === entry.key);
+    if (hits.length === 0) continue;
+    if (hits.every((cell) => cell.verdict === "PASS")) {
+      lines.push(`알려진 실패 ${entry.key}(${entry.issue})가 이번 실행에서 ${hits.length}칸 모두 통과했다 — 고쳐졌으면 목록에서 빼라`);
+    } else if (entry.notBuilt && hits.every((cell) => cell.verdict !== "알려진 실패(장면 못 만듦)")) {
+      lines.push(`알려진 장면 못 만듦 ${entry.key}(${entry.issue})가 이번 실행에서 만들어졌다 — 고쳐졌으면 notBuilt 를 빼라`);
+    }
+  }
+  return lines;
+}
+
+/** 판정한 칸(통과 · 실패 · 알려진 실패). 기록만 · 재지 않음 · 못 만듦 · 못 잼은 판정이 아니다. */
+const judged = (cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FAIL" || cell.verdict === "알려진 실패";
+
+/**
+ * 게이트의 마지막 판정(순수). 종료 코드 1 = FAIL, 3 = NOT-MEASURED(통과 아님), 0 = PASS.
+ *   - 실패 칸이나 모르는 「장면 못 만듦」이 있으면 FAIL.
+ *   - **판정한 칸이 0이면 FAIL** — 부하 · 못 만듦 · 판 없음 어느 까닭이든 「0칸 PASS」는 없다(#5641 검수 r1 H2).
+ *   - 재지 않음(부하) · 알려진 장면 못 만듦 · 꼭 재야 하는 엔진(WebKit · Chromium)의 판 없음이 하나라도 있으면 NOT-MEASURED.
+ * 「알려진 장면 못 만듦」은 통과로 세지 않고 따로 크게 적는다.
+ * @returns {{ code: 0 | 1 | 3, out: string[], err: string[] }}
+ */
+export function finalVerdict(cells, label = "timeline-still") {
+  const failures = cells.filter((cell) => cell.verdict === "FAIL" || cell.verdict === "장면 못 만듦");
+  const notMeasured = cells.filter((cell) => cell.verdict === "재지 않음");
+  const notBuilt = cells.filter((cell) => cell.verdict === "알려진 실패(장면 못 만듦)");
+  const noEngine = cells.filter((cell) => cell.verdict === "못 잼" && cell.required === true);
+  const judgedCells = cells.filter(judged);
+  const known = cells.filter((cell) => cell.verdict === "알려진 실패");
+  const recordOnly = cells.filter((cell) => cell.verdict.startsWith("기록만"));
+  const where = (cell) => `${cell.scene} [${cell.engine} ${cell.width}]`;
+  const unmeasuredLine = `재지 않음(부하) ${notMeasured.length} · 알려진 장면 못 만듦 ${notBuilt.length} · 엔진 판 없음 ${noEngine.length}`;
+  const err = [];
+  for (const cell of failures) err.push(`FAIL ${cell.set} ${where(cell)} ${(cell.reasons ?? []).join(" · ")}`);
+  const empty = nothingRan(judgedCells.length, label);
+  if (empty !== null) err.push(`FAIL ${empty} (${unmeasuredLine})`);
+  if (err.length > 0) return { code: 1, out: [], err };
+  const out = [];
+  if (notBuilt.length + noEngine.length > 0) {
+    out.push("================================================================");
+    for (const cell of notBuilt) out.push(`!! 재지 못한 칸 — 알려진 장면 못 만듦: ${where(cell)} ${cell.known?.issue ?? ""} ${(cell.reasons ?? []).join(" · ")}`);
+    for (const cell of noEngine) out.push(`!! 재지 못한 칸 — 꼭 재야 하는 엔진의 판이 없다: ${cell.engine} (${cell.note ?? ""})`);
+    out.push("================================================================");
+  }
+  // 기존 묶음의 칸은 그 게이트의 판정 그대로다 — 숫자 넷이 이 표의 문턱 밖인 PASS 칸을 따로 센다(#5641 검수 r1 M5).
+  const outside = judgedCells.filter((cell) => cell.set !== "new" && cell.verdict.startsWith("PASS") && outsideLimits(cell));
+  const summary =
+    `판정한 칸 ${judgedCells.length}(새 장면 ${judgedCells.filter((cell) => cell.set === "new").length} — 숫자 넷의 문턱 · 기존 묶음 ` +
+    `${judgedCells.filter((cell) => cell.set !== "new").length} — 그 게이트의 판정) · 알려진 실패 ${known.length}(기록) · 기록만 ${recordOnly.length} · ` +
+    `문턱 밖 숫자를 가진 기존 묶음 PASS ${outside.length}`;
+  if (notMeasured.length + notBuilt.length + noEngine.length > 0) {
+    out.push(`NOT-MEASURED ${label}: ${unmeasuredLine} — 통과로 치지 않는다 · ${summary}`);
+    return { code: 3, out, err: [] };
+  }
+  out.push(`PASS ${label}: ${summary}`);
+  return { code: 0, out, err: [] };
+}
+
+/** 숫자 넷이 이 표의 문턱(맨 아래 ≤ 1px · 바닥 ≤ 1px · 위 읽기 ≤ 2px · 되돌아옴 0) 밖인가. */
+function outsideLimits(cell) {
+  const n = cell.numbers;
+  if (!n) return false;
+  const cap = cell.kind === "reading" ? LIMITS.readingPx : cell.kind === "expected" ? LIMITS.expectedPx : LIMITS.stillPx;
+  return (n.reversals ?? 0) > 0 || (n.unexplainedPx ?? 0) > cap || (cell.kind === "bottom" && (n.maxGapPx ?? 0) > LIMITS.gapPx);
+}
+
+/**
+ * send-follow ⑤ 의 알려진 실패 테두리(#5641 검수 r1 M3). 옛 판은 연달아 장면의 되돌아옴을 몇 번이든 · 몇 px 이든 기록만 했다.
+ * 실측(2026-11-10 · 11-12): 연달아 되돌아옴 2회 · 가장 큰 되돌아감 7.4px, 보낸 뒤 바닥 거리 8px.
+ */
+export const SEND_KNOWN = Object.freeze({
+  rapidSettle: Object.freeze({ issue: "#5641", placeholder: true, what: "연달아 두 번: 첫 글이 붙은 다음 프레임 7.4px 내려앉음(#5617 에서 알려 둔 것)", maxReversals: 2, maxBackPx: 9 }),
+  shortfall: Object.freeze({ issue: "#5641", placeholder: true, what: "바닥에서 보낸 뒤 8px 위에 앉음(#5617 에서 알려 둔 것)", maxGapPx: 9 }),
+});
+
+/** 연달아 장면의 되돌아옴이 알려진 테두리 안인가(횟수와 가장 큰 되돌아감 둘 다). */
+export function rapidSettleWithin({ reversals, maxBackPx }, bound = SEND_KNOWN.rapidSettle) {
+  return Number.isFinite(reversals) && Number.isFinite(maxBackPx) && reversals <= bound.maxReversals && maxBackPx <= bound.maxBackPx;
+}
+
+/** 바닥 거리가 알려진 모자람 안인가. 표본이 없으면(`null`) 안이 아니다 — 실패다. */
+export function shortfallWithin(gapPx, bound = SEND_KNOWN.shortfall) {
+  return typeof gapPx === "number" && Number.isFinite(gapPx) && gapPx <= bound.maxGapPx;
 }
 
 /** 모은 프레임에서 한 줄의 숫자 넷. */
