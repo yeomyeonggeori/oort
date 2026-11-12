@@ -546,7 +546,7 @@ async fn thread_with_replies(
 /// outbox row at all. A single thread read afterwards leaves the inbox alone too.
 ///
 /// Sabotage (measured, see the PR): drop the `member_id` binding of the position statement → carol's
-/// position moves; open the transaction without the tenant GUC → the call is refused.
+/// position moves; reset the tenant GUC inside the transaction → the call fails (500) instead of 200.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn read_all_moves_every_followed_unread_thread_and_signals_each_changed_channel_once() {
@@ -936,7 +936,8 @@ async fn a_guest_reads_only_the_channels_they_are_in() {
 // ---------------------------------------------------------------------------
 
 /// An agent bearer (whatever its scopes) and another workspace's bearer are 403; more than 500 ids is
-/// 400; a body that is not the shape is 4xx. None of them moves a position or writes an outbox row.
+/// 400; an id that is not a uuid is 422 and no body at all is 415. None of them moves a position or
+/// writes an outbox row.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn refusals_move_nothing() {
@@ -1022,10 +1023,10 @@ async fn refusals_move_nothing() {
         .send()
         .await
         .expect("POST without a body");
-    assert!(
-        no_body.status().is_client_error(),
-        "no JSON body is refused: {}",
-        no_body.status()
+    assert_eq!(
+        no_body.status().as_u16(),
+        415,
+        "no JSON body is refused as the wrong media type (send {{}} for every channel)"
     );
     assert_eq!(
         outbox_rows_since(&su, mark).await,

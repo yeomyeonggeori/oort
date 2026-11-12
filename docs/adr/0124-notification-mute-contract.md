@@ -189,11 +189,11 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 - **대상**: 부른 사람이 **따라가는**(`auto`·`followed`) 스레드 가운데 안 읽은 답글이 있는 것. 「안 읽은 답글이 있다」는 D10의 스레드별 수와 글자 그대로 같은 술어다. 채널은 부른 사람이 지금 멤버(`left_at IS NULL`)이고 보관되지 않은 것 — 곧 읽음 투영에 줄이 있어 `followed_unread_reply_count`가 세는 스레드만이다. 위치가 이미 머리에 있는 스레드는 고르지 않아서, 고른 스레드는 반드시 움직인다.
 - **같은 도메인 함수**: 위치를 옮기는 문장은 `PUT …/messages/{root}/read`와 **하나**다(`advance_read_positions_in_tx`). 새 위치 = `LEAST(이 호출이 본 스레드 머리, 지금 머리)`이고 저장된 값보다 클 때만 쓴다 — 뒤로 가지 않고, 있는 답글 너머로 가지 않는다. 행을 새로 만들지 않고, 그만 따라간 행은 고르지 않는다.
 - **한 트랜잭션**: 후보 행을 `(channel, root)` 순서로 잠그고(`FOR UPDATE`) 같은 트랜잭션에서 옮긴다. 두 기기가 동시에 눌러도 서로 기다릴 뿐 교착하지 않는다. 기다리는 동안 온 답글은 안 읽은 채로 남고(이 호출이 본 머리까지만 옮긴다), 다른 기기가 더 앞으로 옮긴 위치는 당기지 않는다.
-- **응답**: `{"read_states": [ReadStateRow…], "marked_thread_count": n, "has_more": bool}`. `read_states`는 위치가 바뀐 채널의 `GET …/read-state` 줄과 같은 모양이고 쓴 뒤에 읽은 값이다(그 채널의 `followed_unread_reply_count`는 상한에 걸렸거나 그사이 답글이 오지 않았으면 `0`). 바뀐 것이 없으면 `[]`. `has_more: false`일 때 같은 요청을 다시 보내면 `{"read_states":[],"marked_thread_count":0,"has_more":false}`이고 신호도 없다.
+- **응답**: `{"read_states": [ReadStateRow…], "marked_thread_count": n, "has_more": bool}`. `read_states`는 위치가 바뀐 채널의 `GET …/read-state` 줄과 같은 모양이고 쓴 뒤에 읽은 값이다(상한에 걸리지 않았고 그사이 새 답글이 오지 않았으면 그 채널의 `followed_unread_reply_count`는 `0`). 바뀐 것이 없으면 `[]`. `has_more: false`일 때 같은 요청을 다시 보내면 `{"read_states":[],"marked_thread_count":0,"has_more":false}`이고 신호도 없다.
 
 ### D14. 신호
 
-바뀐 채널마다 부른 사람의 개인 채널(`user:read-state#<MEMBER>`)로 `followed_unread.updated` 한 건이다. 모양은 D11 그대로이고 같은 트랜잭션의 outbox 묶음 넣기(`emit_outbox_batch`)로 쓴다. `root_id`는 그 채널에서 옮긴 스레드 하나(가장 작은 id)이고 목록이 아니다 — 프레임의 뜻은 그대로 「투영을 다시 읽어라」다. idempotency 원인은 `ra:<그 루트>:<새 위치>`다(위치는 앞으로만 가므로 다른 변화와 겹치지 않는다). 바뀐 것이 없으면 0건이고, 다른 사람에게는 아무것도 가지 않는다. 이 프레임의 `root_id`를 읽는 클라이언트는 아직 없다(#5660 후속·#5690이 처음 읽는다).
+바뀐 채널마다 부른 사람의 개인 채널(`user:read-state#<MEMBER>`)로 `followed_unread.updated` 한 건이다. 모양은 D11 그대로이고 같은 트랜잭션의 outbox 묶음 넣기(`emit_outbox_batch`)로 쓴다. `root_id`는 그 채널에서 옮긴 스레드 하나(가장 작은 id)이고 목록이 아니다 — 프레임의 뜻은 그대로 「투영을 다시 읽어라」다. idempotency 원인은 `ra:<그 루트>:<새 위치>`다(위치는 앞으로만 가므로 다른 변화와 겹치지 않는다). 바뀐 것이 없으면 0건이고, 다른 사람에게는 아무것도 가지 않는다. 지금 이 프레임을 받는 웹 클라이언트(#5660 후속, `isFollowedUnreadSignal`)는 종류만 보고 투영을 다시 읽으며 `root_id`는 읽지 않는다. 앞으로도 `root_id`로 스레드 하나만 다시 그리면 안 된다.
 
 ### D15. 권한·경계
 
