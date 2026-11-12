@@ -13157,8 +13157,12 @@ paths:
         becomes a direct one, and a thread the caller stopped following is followed
         again — this is the only way back from `DELETE`, because nothing automatic
         (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
-        no body. A personal setting: nothing is broadcast, and other devices see it on
-        their next read of the thread (`getThreadReplies` → `following`).
+        no body. A personal setting: nothing is broadcast to anyone else, and other devices
+        see it on their next read of the thread (`getThreadReplies` → `following`). When the
+        write changed the record (`PUT` here or `DELETE` below), the caller's own personal
+        channel gets one ids-only `followed_unread.updated` frame (ADR-0124 amendment 4,
+        #5667): the channel's `followed_unread_reply_count` in `listReadStates` may have
+        changed.
 
         Guard order is the thread read's: active channel membership (403, the same
         bytes for a channel that does not exist), then the root (404 when it is absent
@@ -13282,7 +13286,10 @@ paths:
         a late or stale signal from another device cannot rewind it, and it never passes the
         last reply that exists, so a request cannot mark replies that have not been written
         as read. The replies past the position that other people wrote are what
-        `ThreadRollup.unread_reply_count` counts.
+        `ThreadRollup.unread_reply_count` counts. When the position of a thread the caller
+        follows moved, the caller's personal channel gets one ids-only
+        `followed_unread.updated` frame (ADR-0124 amendment 4, #5667) so their other devices
+        re-read `listReadStates` (`followed_unread_reply_count`).
 
 
         This is the **only** thing that moves the position. A `GET …/replies` does not (the
@@ -13373,6 +13380,18 @@ paths:
         revives. The `PUT .../read-state` response and the realtime
         `read_state` frame do not carry them (ADR-0177 D10: no closure event);
         other devices pick a closure up on their next read of this list.
+        ADR-0124 amendment 4 (#5667) adds `followed_unread_reply_count` to every
+        row (always present, `0` when none): the unread replies in the threads
+        the caller follows in that channel. When it may have changed - a new
+        reply in a followed thread (every follower but its author, while still
+        a member of the channel), the caller reading a followed thread
+        (`PUT .../messages/{rootId}/read` moved the position), the caller
+        following or stopping following (`PUT`/`DELETE .../follow` changed the
+        row) - the caller's personal channel (`user:read-state#<MEMBER>`) gets a
+        `followed_unread.updated` frame through the outbox. The frame carries
+        ids only (`workspace_id`, `member_id`, `channel_id`, `root_id`) and
+        means "read this list again"; it never carries the number. The
+        `PUT .../read-state` response and the `read_state` frame are unchanged.
       security:
         - bearerAuth: []
       parameters:
@@ -27542,6 +27561,7 @@ components:
         - marked_unread_before_seq
         - latest_readable_seq
         - closed_at_seq
+        - followed_unread_reply_count
       properties:
         channel_id:
           type: string
@@ -27593,6 +27613,22 @@ components:
             every channel that is not a DM). Always present. Another member's
             closure is never returned. Reviving writes nothing: the stored value
             stays and the client compares it with `latest_readable_seq`.
+        followed_unread_reply_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0124 amendment 4 (#5667). The unread replies in the threads the
+            **caller** follows in this channel: the sum, over those threads, of
+            the thread summary's `unread_reply_count` (other people's undeleted
+            `text` replies past the caller's thread read position; ADR-0206
+            amendment 1 F10). `0` when the caller follows nothing here or has
+            read it all. Always present. It does not change `unread_count` or
+            `mention_count`, and a reply that names the caller is counted both
+            here and in `mention_count`. Like every unread and badge number it
+            ignores channel mute and the notification pause (ADR-0124 D2,
+            D4-A). The `followed_unread.updated` frame on the caller's personal
+            channel says when to read it again.
 
     ReadStateListResponse:
       type: object
