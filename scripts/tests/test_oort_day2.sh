@@ -11,12 +11,15 @@ OORT="$REPO_ROOT/scripts/oort"
 TEMPLATE="$SCRIPT_DIR/fixtures/oort-doctor/valid.env.template"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-day2-test.XXXXXX")"
 PG_CID=""
+# #5606: removed by name, so a `docker run` that created the container and then
+# failed to start it (no id printed) cannot leave a Created container behind.
+PG_NAME="oort-day2-pg-$$"
 HTTP_PID=""
 cleanup() {
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
   # #5606: `--rm` does not help a forced removal — without `-v` the postgres
   # image's VOLUME outlives the container.
-  [ -n "$PG_CID" ] && docker rm -f -v "$PG_CID" >/dev/null 2>&1 || true
+  docker rm -f -v "$PG_NAME" >/dev/null 2>&1 || true
   case "$SANDBOX" in "${TMPDIR:-/tmp}"/oort-day2-test.*) rm -rf -- "$SANDBOX" ;; esac
 }
 trap cleanup EXIT INT TERM
@@ -473,7 +476,8 @@ PSQL_BIN="$(momo_pg_client_bin psql)" || fail "psql 없음 (postgresql-client �
 # #5623: Docker assigns the host port at `docker run`. It used to be picked
 # here by probing first, so a docs gate running beside this one could pick the
 # same free 25432 and bind it first.
-PG_CID="$(docker run -d --rm --name "oort-day2-pg-$$" \
+PG_CID="$(docker run -d --rm --name "$PG_NAME" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \

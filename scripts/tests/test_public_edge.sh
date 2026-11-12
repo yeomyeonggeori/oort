@@ -29,7 +29,9 @@ command -v docker >/dev/null 2>&1 || fail "docker 없음"
 command -v python3 >/dev/null 2>&1 || fail "python3 없음"
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/oort-public-edge.XXXXXX")"
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
+# #5606: remove only the directory mktemp made (never an empty value or /).
+rm_tmp_root() { case "$TMP_ROOT" in "${TMPDIR:-/tmp}"/oort-public-edge.*) rm -rf -- "$TMP_ROOT" ;; esac; }
+trap rm_tmp_root EXIT INT TERM
 
 # ---------------------------------------------------------------------------
 # ① fixture env → caddy adapt: site host, CSP tokens, no wildcard, no oor7
@@ -308,21 +310,28 @@ done < <(git ls-files -- infra | awk -F/ '$NF ~ /^Caddyfile/')
 pass "all ${agent_media_edges} tracked edge Caddyfiles deny /v1/agent-media/* before /v1/*"
 
 # Real 403 on the loopback file — :80 so automatic HTTPS/ACME stays off.
+EDGE_NAME="oort-sh2-local-edge-$$"
+cleanup_local_edge() {
+  # #5606: by name, and armed before `docker run`. A run that creates the container
+  # and then fails to start it prints no id, and an id-based cleanup left a Created
+  # container (two such, from 10-22 and 10-27). The caddy image declares VOLUME
+  # /data and /config; `-v` takes them along.
+  docker rm -f -v "$EDGE_NAME" >/dev/null 2>&1 || true
+}
+trap 'cleanup_local_edge; rm_tmp_root' EXIT INT TERM
 # #5623: Docker assigns the host port at `docker run`. A port taken from a
 # closed bind(0) socket is free only until someone else binds it first.
-cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
+docker run -d --name "$EDGE_NAME" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -p "127.0.0.1::80" \
   -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
-  "$CADDY_IMAGE")"
-# A failed read leaves LOCAL_PORT empty; the numeric check after the trap
-# turns that into a named FAIL instead of curl falling back to this host's :80.
-LOCAL_PORT="$(docker port "$cid" 80/tcp 2>/dev/null || true)"
+  "$CADDY_IMAGE" >/dev/null
+# A failed read leaves LOCAL_PORT empty; the numeric check below (after the trap
+# is armed) turns that into a named FAIL instead of curl falling back to this
+# host's :80.
+LOCAL_PORT="$(docker port "$EDGE_NAME" 80/tcp 2>/dev/null || true)"
 LOCAL_PORT="${LOCAL_PORT%%$'\n'*}"
 LOCAL_PORT="${LOCAL_PORT##*:}"
-cleanup_local_edge() {
-  docker rm -f "$cid" >/dev/null 2>&1 || true
-}
-trap 'cleanup_local_edge; rm -rf "$TMP_ROOT"' EXIT INT TERM
 [[ "$LOCAL_PORT" =~ ^[0-9]+$ ]] || fail "local edge host port unreadable: ${LOCAL_PORT:-none}"
 deadline=$(( $(date -u +%s) + 30 ))
 local_code=""
@@ -347,7 +356,7 @@ agent_media_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
 printf '[test-public-edge] Caddyfile.local PUT /v1/agent-media/{ws}/{token} HTTP %s\n' "$agent_media_code"
 [ "$agent_media_code" = "403" ] || fail "Caddyfile.local /v1/agent-media/* expected 403 got ${agent_media_code:-none}"
 cleanup_local_edge
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
+trap rm_tmp_root EXIT INT TERM
 pass "Caddyfile.local loopback edge returns 403 for /v1/centrifugo/*"
 # #5623: the edge container is gone, so no process may still listen on its port.
 i=0
