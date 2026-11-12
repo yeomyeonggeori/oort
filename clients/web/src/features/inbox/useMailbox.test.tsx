@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
   fetchThreadReplies: vi.fn(),
   markInboxItemRead: vi.fn(),
   markInboxReadAll: vi.fn(),
+  markFollowedThreadsRead: vi.fn(),
   advertiseReadState: vi.fn(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   fetchThreadReplies: api.fetchThreadReplies,
   markInboxItemRead: api.markInboxItemRead,
   markInboxReadAll: api.markInboxReadAll,
+  markFollowedThreadsRead: api.markFollowedThreadsRead,
 }));
 vi.mock("@/features/chat/advertiseReadState", () => ({
   advertiseReadState: api.advertiseReadState,
@@ -428,6 +430,59 @@ describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커�
     // 인박스 항목만 읽는 길이 아니다: 그 길은 점을 못 끈다.
     expect(api.markInboxReadAll).not.toHaveBeenCalled();
     expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
+});
+
+// 메뉴 막대 「모두 읽음 처리」의 스레드 몫(#5690, 서버 #5689). 채널 위치·받은함 항목은 건드리지 않고 스레드 읽음 길만 부른다.
+describe("useMailboxReadActions.markFollowedThreads (#5690)", () => {
+  const page = (over: object) => ({ readStates: [], markedThreadCount: 0, hasMore: false, ...over });
+
+  it("hasMore가 거짓이 될 때까지 같은 요청을 되부르고, 채널 읽음·인박스 읽음 길은 부르지 않는다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead
+      .mockResolvedValueOnce(page({ markedThreadCount: 100, hasMore: true }))
+      .mockResolvedValueOnce(page({ markedThreadCount: 7, hasMore: false }));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledTimes(2);
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledWith(WS);
+    expect(result).toEqual({ marked: 107, outcome: "done" });
+    expect(api.advertiseReadState).not.toHaveBeenCalled();
+    expect(api.markInboxReadAll).not.toHaveBeenCalled();
+    expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
+
+  it("hasMore가 계속 참이어도 상한(10번)에서 멈추고 partial로 알린다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead.mockResolvedValue(page({ markedThreadCount: 100, hasMore: true }));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledTimes(10);
+    expect(result).toEqual({ marked: 1000, outcome: "partial" });
+  });
+
+  it("서버가 이 길을 모르면(404) unsupported이고 던지지 않는다. 그 밖의 실패는 failed로 남기고 다시 누를 수 있다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead.mockRejectedValueOnce(new ApiError(404, "nf"));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 0, outcome: "unsupported" });
+    api.markFollowedThreadsRead.mockRejectedValueOnce(new Error("down"));
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 0, outcome: "failed" });
+    api.markFollowedThreadsRead.mockResolvedValueOnce(page({ markedThreadCount: 2 }));
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 2, outcome: "done" });
   });
 });
 

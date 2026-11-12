@@ -2761,7 +2761,11 @@ export async function fetchReadStates(
   const res = await request<{ read_states: WireReadState[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/read-state`
   );
-  const states = arrayField(res, "read_states");
+  return readStatesFromWire(arrayField(res, "read_states"));
+}
+
+/** The rows of a `read_states` array that have the six required fields, as domain rows. */
+function readStatesFromWire(states: readonly unknown[] | null): ReadState[] {
   return states === null ? [] : states.filter((state): state is WireReadState => {
     return typeof state === "object" && state !== null &&
       typeof (state as Record<string, unknown>).channel_id === "string" &&
@@ -2825,6 +2829,44 @@ export async function updateReadState(
     { method: "PUT", body: JSON.stringify(body) }
   );
   return toReadState(res);
+}
+
+/** `POST …/threads/read-all` answer (ADR-0124 amendment 5, #5689). */
+export interface FollowedThreadsReadAll {
+  /** Read-state rows of the channels whose followed-thread position moved; same shape as `GET read-state`. */
+  readStates: ReadState[];
+  /** How many followed threads this call moved. */
+  markedThreadCount: number;
+  /** The server stopped at its per-call cap: send the same request again until this is `false`. */
+  hasMore: boolean;
+}
+
+/**
+ * Move every followed thread (optionally only those in `channelIds`) to its last reply (ADR-0124 amendment 5, #5689).
+ * The body is required: `{}` means every channel the caller is in, `channel_ids: []` means none (so an empty list is
+ * never sent by accident: an absent `channelIds` omits the key). A server that does not know the route answers 404/405
+ * and the caller falls back to the old behaviour. It does not read the inbox "thread" rows and does not move channel cursors.
+ */
+export async function markFollowedThreadsRead(
+  workspaceId: string,
+  channelIds?: readonly string[]
+): Promise<FollowedThreadsReadAll> {
+  const body: Record<string, unknown> = {};
+  if (channelIds !== undefined) body.channel_ids = channelIds;
+  const res = await request<{
+    read_states?: unknown;
+    marked_thread_count?: unknown;
+    has_more?: unknown;
+  }>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/read-all`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const count = seqFromWire(res.marked_thread_count);
+  return {
+    readStates: readStatesFromWire(arrayField(res, "read_states")),
+    markedThreadCount: count ?? 0,
+    hasMore: res.has_more === true,
+  };
 }
 
 /**

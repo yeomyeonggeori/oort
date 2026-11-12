@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   approvals: 0,
   panes: 0,
   readRows: [] as unknown[],
+  threadAnswers: [] as { status: number; body: unknown }[],
   showNotification: vi.fn(async (_text: string, _body?: string, _options?: { ask?: boolean }) => true),
   items: [] as unknown[],
   adeProvided: true,
@@ -135,10 +136,16 @@ beforeEach(() => {
   hoisted.approvals = 0;
   hoisted.panes = 0;
   hoisted.readRows = [];
+  hoisted.threadAnswers = [];
   hoisted.showNotification.mockClear();
   hoisted.showNotification.mockImplementation(async () => true);
   // 모의 `/v1`: 읽음 위치를 올리는 요청(PUT read-state)에 그 채널의 새 상태로 답한다.
   fetchMock = vi.fn(async (url: unknown, init?: { body?: string }) => {
+    // 스레드 읽음 길(#5689): 시험이 `hoisted.threadAnswers`에 답을 줄줄이 넣는다. 비어 있으면 「더 없음」.
+    if (String(url).endsWith("/threads/read-all")) {
+      const answer = hoisted.threadAnswers.shift() ?? { status: 200, body: { read_states: [], marked_thread_count: 0, has_more: false } };
+      return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
+    }
     const channel = decodeURIComponent(String(url).split("/channels/")[1]?.split("/")[0] ?? "");
     const body = JSON.parse(init?.body ?? "{}") as { last_read_seq: number };
     return new Response(
@@ -431,6 +438,72 @@ describe("TrayStatus: 모두 읽음 처리 (#5195)", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// 스레드 답글 몫(#5690, 서버 #5689). 채널 읽음 위치로는 끄지 않는다(받은함 「스레드」 줄까지 읽음이 되므로): 스레드 읽음 길만 부른다.
+describe("TrayStatus: 모두 읽음 처리의 스레드 몫 (#5690)", () => {
+  const MENTION_CH = "0a1b2c3d-0000-4000-8000-0000000000c1";
+  const THREAD_CH = "0a1b2c3d-0000-4000-8000-0000000000c3";
+  const settle = async () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+  const calls = () =>
+    fetchMock.mock.calls.map((call) => ({
+      method: (call[1] as { method?: string } | undefined)?.method ?? "GET",
+      url: decodeURIComponent(String(call[0])),
+      body: JSON.parse(((call[1] as { body?: string } | undefined)?.body ?? "{}")) as Record<string, unknown>,
+    }));
+  const ok = (over: object) => ({ status: 200, body: { read_states: [], marked_thread_count: 0, has_more: false, ...over } });
+
+  it("답글 몫만 있어도 항목이 켜지고, 누르면 채널 읽음 위치는 올리지 않고 스레드 길만 {}로 부르며 hasMore가 거짓이 될 때까지 되부른다", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [ok({ marked_thread_count: 100, has_more: true }), ok({ marked_thread_count: 5 })];
+    mount();
+    expect(lastStatus().readAll).toBe(true);
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => [c.method, c.url.replace(/^.*\/v1/, ""), c.body])).toEqual([
+      ["POST", "/workspaces/w/threads/read-all", {}],
+      ["POST", "/workspaces/w/threads/read-all", {}],
+    ]);
+  });
+
+  it("멘션 채널과 답글 몫이 같이 있으면 채널 위치와 스레드 길을 둘 다 부른다(서로 기다리지 않는다)", async () => {
+    hoisted.readRows = [
+      readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, unreadCount: 10, mentionCount: 2 }),
+      readRow(THREAD_CH, { followedUnreadReplyCount: 1 }),
+    ];
+    mount();
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => c.method).sort()).toEqual(["POST", "PUT"]);
+    expect(calls().filter((c) => c.method === "PUT").map((c) => c.url.split("/channels/")[1])).toEqual([`${MENTION_CH}/read-state`]);
+  });
+
+  it("답글 몫이 없으면 스레드 길을 부르지 않는다", async () => {
+    hoisted.readRows = [readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, mentionCount: 1, followedUnreadReplyCount: 0 })];
+    mount();
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => c.method)).toEqual(["PUT"]);
+  });
+
+  it("서버가 이 길을 모르는 판(404)과 실패(500)에서도 던지지 않고, 다시 누를 수 있다", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 2 })];
+    hoisted.threadAnswers = [
+      { status: 404, body: { error: { message: "nf" } } },
+      { status: 500, body: { error: { message: "boom" } } },
+      ok({ marked_thread_count: 2 }),
+    ];
+    mount();
+    for (let press = 0; press < 3; press += 1) {
+      pick({ action: "read-all" });
+      await settle();
+    }
+    expect(calls().filter((c) => c.method === "POST")).toHaveLength(3);
+    expect(lastStatus().readAll).toBe(true); // 응답을 못 받은 동안 남은 수는 그대로라 단추도 그대로다
   });
 });
 
