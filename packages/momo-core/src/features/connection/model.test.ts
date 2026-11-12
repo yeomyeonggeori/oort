@@ -222,6 +222,9 @@ describe("문턱의 정본", () => {
       AUTO_RESEND_MAX_ATTEMPTS: 3,
       AUTO_RESEND_WINDOW_MS: 300_000,
       RESUME_AFTER_HIDDEN_MS: 30_000,
+      // #5660: 돌아온 순간의 판정(`resume.ts`)이 읽는다.
+      SOCKET_HEARD_RECENTLY_MS: 35_000,
+      RESUME_KICK_SETTLE_MS: 5_000,
       RECOVERED_FLASH_MS: 2_000,
       REST_PROBE_FIRST_DELAY_MS: 2_000,
       REST_PROBE_MAX_DELAY_MS: 30_000,

@@ -3,6 +3,7 @@ import { watchExpressionChanges } from "@/lib/realtime";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useSession } from "@/app/session";
 import { useOffline } from "@/features/common/useOffline";
+import { everyWhileVisible } from "@/features/common/everyWhileVisible";
 import { photoFixtureFromQuery } from "@momo/core/features/expressions/photo";
 import { MANUAL_UPLOAD_CODES } from "@momo/core/features/expressions/types";
 import type { ManualUploadCode } from "@momo/core/features/expressions/types";
@@ -40,9 +41,10 @@ export function TeamExpressionsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const refresh = () => { if (navigator.onLine) void store.refresh(); };
     window.addEventListener("focus", refresh);
-    // Foreground and periodic full reads also recover from missed catalogue signals.
-    const timer = window.setInterval(refresh, 30000);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); store.dispose(); };
+    // Foreground and periodic full reads also recover from missed catalogue signals. The periodic read skips a hidden
+    // window and catches up once when it is shown again (#5660: the desktop webview keeps running behind the window).
+    const stopPeriodic = everyWhileVisible(refresh, 30000);
+    return () => { stopPeriodic(); window.removeEventListener("focus", refresh); store.dispose(); };
   }, [store]);
   return <ExpressionsContext.Provider value={store} key={`${workspaceId}:${memberId}`}>{children}</ExpressionsContext.Provider>;
 }

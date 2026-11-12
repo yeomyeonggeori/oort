@@ -736,3 +736,85 @@ export function openTarget(
   }
   return `/c/${armed.channelId}`;
 }
+
+// ---- 메뉴 막대 점·독 배지에 더하는 DM 몫 (#5660, owner 2026-11-11 「켜줘」) ------------------------------
+
+/**
+ * 안 읽은 DM은 맥의 메뉴 막대 점·독 배지도 켠다(owner 11-11). 배지의 규칙은 다른 몫(승인·응답 필요 칸·멘션)과 같다: ADR-0124 D2·D4-A
+ * 「음소거·방해 금지는 푸시만 막고 배지·안 읽음은 그대로(돌아오면 확인)」. 그래서 채널 알림 끄기와 알림 일시 중지는 여기서 보지 않는다
+ * (한 표시 안에서 몫마다 규칙이 다르면 안 된다, planner 11-11). 거르는 것은 둘뿐이다:
+ *   - **지금 앞에서 보고 있는 대화**: 화면에 있는 글은 알릴 것이 아니다(배너 판정 `notifyDecision`의 `focused`와 같은 뜻).
+ *   - **멘션과 두 번 세지 않기**: DM 안에서 나를 멘션한 글은 이미 멘션 수(`mentionCount`, 「나에게 필요한 일」)로 셌다.
+ *
+ * **수는 서버의 읽음 투영 그대로다**(`read-state`의 `unreadCount`). 이 기기가 세지 않으므로 다른 기기에서 읽으면 다음 투영에서 함께 줄어든다.
+ * 내 글은 서버의 안 읽음에 들어가지 않는다(보내면 내 읽음 위치가 함께 오른다).
+ *
+ * 따라가는 스레드의 답글은 바로 아래 `followedRepliesForBadge`가 같은 규칙으로 센다(서버 #5667의 채널 줄 값).
+ */
+export interface DmBadgeInput {
+  /** 내 대화 목록의 DM(1:1·그룹 DM). */
+  readonly dms: readonly { readonly id: string }[];
+  /** 서버 읽음 투영의 그 채널 줄. 없으면(아직 못 읽음) 세지 않는다. */
+  readonly readState: (channelId: string) => { readonly unreadCount: number; readonly mentionCount: number } | undefined;
+  /** 앞에 있는 창이 지금 보여 주는 대화. 창이 뒤에 있거나 대화가 아니면 null. */
+  readonly viewingChannelId: string | null;
+}
+
+export function dmUnreadForBadge(input: DmBadgeInput): number {
+  let total = 0;
+  for (const dm of input.dms) {
+    if (input.viewingChannelId !== null && uuidEq(input.viewingChannelId, dm.id)) continue;
+    const row = input.readState(dm.id);
+    if (row === undefined) continue;
+    const unread = Number.isFinite(row.unreadCount) ? Math.max(0, Math.trunc(row.unreadCount)) : 0;
+    const mentions = Number.isFinite(row.mentionCount) ? Math.max(0, Math.trunc(row.mentionCount)) : 0;
+    total += Math.max(0, unread - mentions);
+  }
+  return total;
+}
+
+// ---- 메뉴 막대 점·독 배지에 더하는 따라가는 스레드의 답글 몫 (#5660, owner 2026-11-11 「켜줘」) ----------------
+
+/**
+ * 따라가는 스레드에 남이 단 답글도 맥의 메뉴 막대 점·독 배지를 켠다(owner 11-11, 폰은 이 답글에 울린다: 푸시 `thread_reply`). 규칙은 DM 몫과
+ * 같다(ADR-0124 D2·D4-A): 채널 알림 끄기·알림 일시 중지는 보지 않는다. 입력에 그 값이 없다.
+ *
+ * **수는 서버 읽음 투영의 채널 줄 값 그대로다**(`followedUnreadReplyCount`, 서버 #5667: 그 채널에서 내가 따라가는 스레드들의 안 읽은 남의 답글
+ * 합, 스레드 요약의 `unread_reply_count`와 같은 정의). 다른 기기에서 스레드를 읽으면 서버가 개인 채널로 신호(`followed_unread.updated`)를 보내고,
+ * 다시 읽은 투영에서 줄어든다.
+ *
+ * - **필드가 없으면 0이다**: #5667 전 서버(셀프호스트는 서버가 늦게 올라갈 수 있다)에서는 이 몫이 없을 뿐 나머지는 그대로다.
+ * - **멘션과 두 번 세지 않기, 덜 세는 쪽으로**: 나를 멘션한 답글은 서버가 `mentionCount`와 이 값 **양쪽**에 넣는다. 채널 줄에는 그 겹침의 수가
+ *   없어서 정확히 뺄 수 없다. 그래서 채널마다 `max(답글 수 − 멘션 수, 0)`을 더한다: 그 채널의 합은 `max(멘션, 답글)`이 되어 실제(겹침을 뺀 합)보다
+ *   크지 않다. 줄어드는 만큼은 그 채널의 멘션 수 이하이고, 멘션 몫이 이미 그 채널을 세므로 **켜져야 할 때는 언제나 켜진다**(꺼짐/켜짐은 맞고 수만
+ *   ±로 작을 수 있다).
+ * - **지금 앞에서 그 스레드를 보고 있으면 세지 않는다**: 값이 채널 단위라 스레드 하나만 뺄 수 없어서, 앞에 있는 창이 스레드를 열어 둔 **그 채널의 몫
+ *   전체**를 뺀다(덜 세는 쪽). 같은 채널의 다른 따라가는 스레드는 패널을 닫거나 창이 뒤로 가면 다시 센다. 열어 둔 스레드는 읽음 신호
+ *   (`PUT …/messages/{root}/read`)로 서버 값에서도 곧 빠진다 — 여기서 빼는 것은 그 사이 점이 깜빡이지 않게 하려는 것이다.
+ * - DM은 이 몫에 없다: DM에는 따라가기가 없고(서버가 거절), DM의 답글은 DM 몫(`unreadCount`, 채널 seq 기준)이 이미 센다. 그래서 입력은 DM이
+ *   아닌 채널만 받는다.
+ */
+export interface FollowedRepliesBadgeInput {
+  /** 내 대화 목록의 채널(DM이 아닌 것). */
+  readonly channels: readonly { readonly id: string }[];
+  /** 서버 읽음 투영의 그 채널 줄. 없으면(아직 못 읽음) 세지 않는다. `followedUnreadReplyCount`가 없으면(옛 서버) 0이다. */
+  readonly readState: (
+    channelId: string
+  ) => { readonly mentionCount: number; readonly followedUnreadReplyCount?: number } | undefined;
+  /** 앞에 있는 창이 지금 열어 둔 스레드의 채널. 창이 뒤에 있거나 열린 스레드가 없으면 null. */
+  readonly viewingThreadChannelId: string | null;
+}
+
+export function followedRepliesForBadge(input: FollowedRepliesBadgeInput): number {
+  let total = 0;
+  for (const channel of input.channels) {
+    if (input.viewingThreadChannelId !== null && uuidEq(input.viewingThreadChannelId, channel.id)) continue;
+    const row = input.readState(channel.id);
+    if (row === undefined) continue;
+    const raw = row.followedUnreadReplyCount;
+    const replies = raw !== undefined && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+    const mentions = Number.isFinite(row.mentionCount) ? Math.max(0, Math.trunc(row.mentionCount)) : 0;
+    total += Math.max(0, replies - mentions);
+  }
+  return total;
+}

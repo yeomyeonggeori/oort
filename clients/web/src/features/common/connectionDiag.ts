@@ -2,11 +2,11 @@ import {
   appendConnectionDiag,
   parseConnectionDiag,
   serializeConnectionDiag,
-  startWakeWatch,
   type ConnectionDiagEntry,
   type ConnectionDiagKind,
 } from "@momo/core/features/connection/diagnosticLog";
 import { isDesktop } from "@/lib/tauri";
+import { subscribeLateWake } from "./wakeWatch";
 
 // =============================================================================
 // 연결 판정 진단 기록의 웹 저장소 (#5587). 모양·상한·읽는 법은 코어 `diagnosticLog.ts`가 갖고, 여기는 이 기기의 localStorage에
@@ -15,7 +15,7 @@ import { isDesktop } from "@/lib/tauri";
 // - **데스크탑 앱에서만** 남긴다: 기록을 꺼내 보는 자리(설정 > 업데이트)가 데스크탑에만 있다. 브라우저 탭에 아무도 못 보는 기록을
 //   쌓지 않는다.
 // - 시각과 종류 낱말만 남긴다(코어의 닫힌 표). 서버로 보내지 않는다. 저장소가 없거나 가득 차도 앱은 그대로다(전부 try/catch).
-// - 늦게 깬 타이머를 재는 시계는 앱에 하나다(`startConnectionDiagWatch`가 두 번 불려도 한 번만 건다).
+// - 늦게 깬 타이머를 재는 시계는 앱에 하나다(`wakeWatch.ts`; `startConnectionDiagWatch`가 두 번 불려도 한 번만 듣는다).
 // =============================================================================
 
 const STORAGE_SLOT = "momo.connection.diag.v1";
@@ -93,15 +93,13 @@ export function subscribeConnectionDiag(listener: () => void): () => void {
   };
 }
 
-/** 늦게 깬 타이머를 재는 시계를 건다. 앱에 하나만 서고, 데스크탑이 아니면 걸지 않는다. */
+/**
+ * 늦게 깬 타이머를 기록에 남기기 시작한다. 한 번만 듣고, 데스크탑이 아니면 듣지 않는다. 시계는 앱에 하나인 `wakeWatch.ts`의 것이다
+ * (연결 공급자도 같은 시계를 듣는다, #5660).
+ */
 export function startConnectionDiagWatch(): void {
   if (stopWatch !== null || !enabled()) return;
-  stopWatch = startWakeWatch({
-    now: () => Date.now(),
-    setTimer: (run, ms) => setTimeout(run, ms),
-    clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-    onLate: (kind, at) => recordConnectionDiag(kind, at),
-  });
+  stopWatch = subscribeLateWake((kind, at) => recordConnectionDiag(kind, at));
 }
 
 /** 시험 전용: 메모리 기록과 시계를 처음으로 되돌린다(저장소는 시험이 비운다). */

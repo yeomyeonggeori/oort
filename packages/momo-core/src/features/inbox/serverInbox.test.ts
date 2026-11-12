@@ -4,6 +4,7 @@ import { ApiError, fetchInbox, isInboxAbsent, markInboxItemRead, markInboxReadAl
 import {
   asInboxEvent,
   inboxQueryString,
+  isFollowedUnreadSignal,
   parseInboxItem,
   parseInboxPage,
   parseInboxTimeMs,
@@ -155,6 +156,19 @@ describe("쿼리·실시간 이름", () => {
     });
     expect(asInboxEvent({ type: "read_state.updated" })).toBeNull();
     expect(asInboxEvent("x")).toBeNull();
+  });
+
+  it("따라가는 스레드의 답글 신호(#5667)는 따로 읽고, 인박스 신호로 읽지 않는다(인박스 목록을 다시 읽을 까닭이 없다)", () => {
+    const frame = {
+      type: "followed_unread.updated",
+      v: 1,
+      payload: { workspace_id: "W", member_id: "M", channel_id: "C", root_id: "R" },
+    };
+    expect(isFollowedUnreadSignal(frame)).toBe(true);
+    expect(asInboxEvent(frame)).toBeNull();
+    expect(isFollowedUnreadSignal({ type: "inbox_item.created", payload: { item_id: "X1" } })).toBe(false);
+    expect(isFollowedUnreadSignal({ type: "scheduled_message.updated" })).toBe(false);
+    expect(isFollowedUnreadSignal("followed_unread.updated")).toBe(false);
   });
 });
 
