@@ -101,7 +101,8 @@ export function JobResultCell({
     const item = approval?.item ?? null;
     // 무엇을 승인하는가: 서버가 쓴 카드 문장이 먼저, 없으면 원장 행의 문장(인박스 행과 같은 말). 둘 다 없으면 꼬리표만.
     const summary = approval?.intent ?? item?.predicate ?? null;
-    const meta = item === null ? [] : [item.note, item.timeLabel].filter((part): part is string => !!part);
+    const note = item?.note ?? null;
+    const timeLabel = item?.timeLabel ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
         <KindTag label={formatMessage("desktop.workJobs.tagApproval")} testId="work-job-approval-tag" />
@@ -110,9 +111,14 @@ export function JobResultCell({
             {summary}
           </span>
         )}
-        {meta.length > 0 && (
-          <span className="min-w-0 break-keep text-timestamp text-ink-muted">{meta.join(" · ")}</span>
+        {/* 「되돌릴 수 없음」은 받은함(`InboxDetail`의 `text-meta text-warn`)과 같은 무게로 따로 선다 — 한 번 누르면 끝나는 단추 바로 위다
+            (#5640 수리 3회차, 검수 M5). 기한은 옅은 글자 그대로. */}
+        {note !== null && (
+          <span className="min-w-0 break-keep text-meta text-warn" data-testid="work-job-approval-note">
+            {note}
+          </span>
         )}
+        {timeLabel !== null && <span className="min-w-0 break-keep text-timestamp text-ink-muted">{timeLabel}</span>}
         {approval !== null && approval.waiting !== null && (
           <span className="min-w-0 break-keep text-timestamp text-ink-muted" data-testid="work-job-approval-waiting">
             {approval.waiting}

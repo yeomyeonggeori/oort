@@ -924,6 +924,10 @@ describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", (
     expect(count).toBe(2);
     expect(chips.filter((c) => c === "응답 필요")).toHaveLength(count);
     expect(chipOf(R(4))).toBe("승인 대기");
+    // 「되돌릴 수 없음」은 받은함과 같은 무게(`text-meta text-warn`)로 따로 선다(검수 M5).
+    const note = within(screen.getAllByTestId("work-job").find((li) => li.querySelector<HTMLElement>('[data-testid="work-job-row"]')!.dataset.jobId === R(1))!).getAllByTestId("work-job-approval-note")[0]!;
+    expect(note.textContent).toBe("되돌릴 수 없음");
+    expect(note.className).toContain("text-warn");
     // 화면 전체에서 「응답 필요」 칩 = 머리글 수(이 픽스처에는 구간 밖 대기 세션이 없다).
     expect(screen.getAllByTestId("team-board-state").filter((c) => c.textContent === "응답 필요")).toHaveLength(count);
   });
