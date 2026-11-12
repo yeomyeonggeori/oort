@@ -314,7 +314,8 @@ cid="$(docker run -d --name "oort-sh2-local-edge-$$" \
   -p "127.0.0.1::80" \
   -v "${CADDYFILE_LOCAL}:/etc/caddy/Caddyfile:ro" \
   "$CADDY_IMAGE")"
-# Cannot fail before the trap below: a bad read shows up as curl's 000.
+# A failed read leaves LOCAL_PORT empty; the numeric check after the trap
+# turns that into a named FAIL instead of curl falling back to this host's :80.
 LOCAL_PORT="$(docker port "$cid" 80/tcp 2>/dev/null || true)"
 LOCAL_PORT="${LOCAL_PORT%%$'\n'*}"
 LOCAL_PORT="${LOCAL_PORT##*:}"
@@ -322,6 +323,7 @@ cleanup_local_edge() {
   docker rm -f "$cid" >/dev/null 2>&1 || true
 }
 trap 'cleanup_local_edge; rm -rf "$TMP_ROOT"' EXIT INT TERM
+[[ "$LOCAL_PORT" =~ ^[0-9]+$ ]] || fail "local edge host port unreadable: ${LOCAL_PORT:-none}"
 deadline=$(( $(date -u +%s) + 30 ))
 local_code=""
 until local_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
