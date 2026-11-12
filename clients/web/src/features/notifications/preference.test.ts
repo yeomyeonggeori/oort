@@ -31,7 +31,7 @@ describe("desktop notification kinds preference", () => {
       "work-mine-done": true,
       dm: false,
       dockBadge: true,
-      dockDm: false,
+      dockDms: true,
     });
   });
 

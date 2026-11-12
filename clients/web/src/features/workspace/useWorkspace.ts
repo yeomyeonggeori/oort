@@ -121,6 +121,9 @@ export function useInvalidateReadStates(workspaceId: string) {
  * so the value the cached row already holds stays. Replacing the row wholesale would turn a closed
  * DM's `closedAtSeq` into `undefined` the moment the person opened any other conversation, and the
  * closed DM would come back. `null` is different: it IS an answer ("not closed") and replaces.
+ *
+ * `followedUnreadReplyCount` (#5667, ADR-0124 amendment 4) is the third: only a `GET` row carries it, and reading a
+ * channel does not read the threads inside it, so a `PUT` answer must not drop the menu-bar dot's thread share (#5660).
  */
 export function mergeReadStateRow(current: ReadState, incoming: ReadState): ReadState {
   const merged: ReadState = { ...incoming };
@@ -129,6 +132,9 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
   }
   if (incoming.closedAtSeq === undefined && current.closedAtSeq !== undefined) {
     merged.closedAtSeq = current.closedAtSeq;
+  }
+  if (incoming.followedUnreadReplyCount === undefined && current.followedUnreadReplyCount !== undefined) {
+    merged.followedUnreadReplyCount = current.followedUnreadReplyCount;
   }
   return merged;
 }
