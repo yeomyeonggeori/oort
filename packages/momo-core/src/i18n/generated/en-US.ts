@@ -1530,6 +1530,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the notification rules"
     }
   ],
+  "connection.load.olderTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load earlier messages"
+    }
+  ],
   "connection.load.readMarkersTitle": [
     {
       "type": 0,

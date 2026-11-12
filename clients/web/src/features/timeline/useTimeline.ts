@@ -133,6 +133,14 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
+/**
+ * 옛 쪽 읽기가 `failures` 번 이어 실패한 뒤, 맨 위 닿음으로 다시 읽기까지 둘 간격(#5662): 1초에서 두 배씩, 30초에서 멈춘다.
+ * 「다시 시도」 단추는 이 간격을 넘는다.
+ */
+export function olderRetryGapMs(failures: number): number {
+  return Math.min(30_000, 1_000 * 2 ** Math.max(0, failures - 1));
+}
+
 
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
@@ -205,10 +213,18 @@ export interface UseTimelineResult {
   resendAll: () => Promise<void>;
   /** 실패한 행마다 원인 한 줄의 종류(#5221). 알 수 없는 오류는 항목이 없다. 되살린 행도 남겨 둔 종류가 돌아온다. */
   failureKinds: ReadonlyMap<string, SendFailureKind>;
+  /**
+   * 맨 위에 닿았을 때의 옛 쪽 읽기. 거부하지 않는다(실패는 `olderFailed`). 이미 읽는 중이면 하나 더 내지 않고, 실패가 이어지면
+   * 닿을 때마다 바로 다시 내지 않고 간격을 둔다(#5662).
+   */
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
+  /** 마지막 옛 쪽 읽기가 실패했다(#5662). 다음 읽기가 성공하거나 대화를 바꾸면 내려간다. */
+  olderFailed: boolean;
+  /** 실패 줄의 「다시 시도」(#5662): 연속 실패 간격 없이 바로 읽는다. 읽는 중이면 아무것도 하지 않는다. */
+  retryOlder: () => void;
   /** B11 — `message id -> emoji -> member ids`, case-folded on ingest. */
   reactions: ReactionMap;
   /**
@@ -297,6 +313,14 @@ export function useTimeline(
   const serverOffsetRef = useRef(serverOffsetMs);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
+  const [olderFailed, setOlderFailed] = useState(false);
+  // 옛 쪽을 읽고 있는 대화(#5662). 상태(`loadingOlder`)의 클로저로 막으면 같은 틱의 두 부름(맨 위 닿음 · 다시 시도)이 둘 다 지나간다.
+  const olderFlightRef = useRef<number | null>(null);
+  // 방문 번호(#5662): 받아 둔 글을 비우고 대화를 새로 읽을 때마다 오른다. 옛 쪽 읽기는 낸 방문에서만 합치고, 읽는 중 막기도 방문별이다 —
+  // 대화 id 만 보면 A → B → A 로 돌아온 A 에 앞 방문의 늦은 응답이 합쳐져 가운데가 비고, 돌아온 A 의 닿음은 그 읽기에 막힌다.
+  const olderVisitRef = useRef(0);
+  // 이어진 옛 쪽 실패 수와 마지막 실패 시각 — 맨 위 닿음으로 다시 읽을 때의 간격(`olderRetryGapMs`).
+  const olderFailuresRef = useRef({ count: 0, atMs: 0 });
   const [reloadNonce, setReloadNonce] = useState(0);
   // B11. Kept beside the messages rather than inside them: a reaction changes
   // far more often than the message it annotates, and folding it into the row
@@ -979,6 +1003,9 @@ export function useTimeline(
       setState(emptyTimeline());
       setStatus("loading");
       setReachedStart(false);
+      setOlderFailed(false);
+      olderFailuresRef.current = { count: 0, atMs: 0 };
+      olderVisitRef.current += 1;
     }
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
@@ -1202,31 +1229,52 @@ export function useTimeline(
     if (channelId) loadPins(channelId);
   }, [channelId, loadPins]);
 
-  const loadOlder = useCallback(async () => {
-    if (!channelId || loadingOlder || reachedStart) return;
-    const oldest = state.oldestSeq;
-    if (oldest === null) return;
-    setLoadingOlder(true);
-    try {
-      const page = await fetchMessages(workspaceId, channelId, {
-        before: oldest,
-        limit: PAGE_LIMIT,
-      });
-      applyBatch(page.messages);
-      hydrateUnfurls(page.messages, channelId);
-      if (page.nextBefore === undefined) setReachedStart(true);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [
-    workspaceId,
-    channelId,
-    state.oldestSeq,
-    loadingOlder,
-    reachedStart,
-    applyBatch,
-    hydrateUnfurls,
-  ]);
+  // 옛 쪽 읽기(#5662). 전에는 `catch` 가 없어 실패가 처리 안 된 거부로 사라지고 화면은 아무 말도 안 했다 — 그리고 가상 목록의
+  // `startReached` 는 같은 첫 줄 번호로는 다시 나가지 않으므로 그 대화에서는 다시 읽지 않았다. 지금은 실패를 `olderFailed` 로
+  // 알리고(목록 위 한 줄 + 「다시 시도」), 다시 맨 위에 닿으면(`Timeline` 의 닿음 확인) 다시 읽는다. 실패가 이어지면 닿을 때마다
+  // 바로 내지 않고 간격을 둔다(망이 끊긴 채 맨 위에서 흔들리는 손가락이 읽기를 쏟아내지 않게). 「다시 시도」(`manual`)는 간격을 넘는다.
+  const readOlder = useCallback(
+    async (manual: boolean) => {
+      const visit = olderVisitRef.current;
+      if (!channelId || reachedStart || olderFlightRef.current === visit) return;
+      const oldest = state.oldestSeq;
+      if (oldest === null) return;
+      const failures = olderFailuresRef.current;
+      if (!manual && failures.count > 0 && Date.now() - failures.atMs < olderRetryGapMs(failures.count)) return;
+      olderFlightRef.current = visit;
+      setLoadingOlder(true);
+      try {
+        const page = await fetchMessages(workspaceId, channelId, {
+          before: oldest,
+          limit: PAGE_LIMIT,
+        });
+        // 떠난 대화의 쪽은 지금 대화에 합치지 않는다(합치면 앞 대화 줄이 섞이고, 가장 옛 줄이 내려가 지금 대화의 그 사이를 건너뛴다).
+        if (channelRef.current !== channelId || olderVisitRef.current !== visit) return;
+        applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channelId);
+        if (page.nextBefore === undefined) setReachedStart(true);
+        if (channelRef.current === channelId) {
+          olderFailuresRef.current = { count: 0, atMs: 0 };
+          setOlderFailed(false);
+        }
+      } catch {
+        // 떠난 대화 · 지난 방문의 실패는 지금 대화에 말하지 않는다.
+        if (channelRef.current === channelId && olderVisitRef.current === visit) {
+          olderFailuresRef.current = { count: olderFailuresRef.current.count + 1, atMs: Date.now() };
+          setOlderFailed(true);
+        }
+      } finally {
+        if (olderFlightRef.current === visit) olderFlightRef.current = null;
+        setLoadingOlder(false);
+      }
+    },
+    [workspaceId, channelId, state.oldestSeq, reachedStart, applyBatch, hydrateUnfurls]
+  );
+  // 가상 목록이 `startReached(index)` 로 부르므로 인자는 받지 않는다.
+  const loadOlder = useCallback(() => readOlder(false), [readOlder]);
+  const retryOlder = useCallback(() => {
+    void readOlder(true);
+  }, [readOlder]);
 
   const reload = useCallback(() => {
     keepOnReloadRef.current = newestSeqRef.current !== null;
@@ -1369,6 +1417,8 @@ export function useTimeline(
     reload,
     loadingOlder,
     reachedStart,
+    olderFailed,
+    retryOlder,
     reactions,
     toggleReaction,
     pins,

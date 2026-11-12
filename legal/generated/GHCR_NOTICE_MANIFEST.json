@@ -7,15 +7,15 @@
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "8566661184401b95dbdc4526c996d14deb2cde55431d6577b22330dac4434173",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "6d7b202438660a304ef47f3e94d6f15a6eb61d499866e987cc41fb6f20d84b3c",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "5d828c8b16a917dbd328ea8e1a58865a03199ad37ba1abcf924a63e17ec9c3ec",
-    "THIRD_PARTY_NOTICES.md": "15c7704a174bb2513c086855287ab036ae79a678ac79348e7e452a49c0f959c2"
+    "THIRD_PARTY_NOTICES.md": "9faaaa6b15513cc10ffd5eb319413ed9fe700fdc6f443aa8053d1f993fd25247"
   },
   "inputs": {
     "clarify_sha256": "06d582a72150cf2c0d3604f47640a3eee3cc9e84ad06d41e48adcd413f1affad",
     "clients_web_package_lock_sha256": "0e4507662218a825c370dcef97ee7d5ff5bad8f5238da3f50bbb5f5e85ba2c2d",
-    "server_rust_cargo_lock_sha256": "518f8a71a3a41fafbde5ed537da746a4bc0cefdc0155b9ecd3aebd7294770c1c",
+    "server_rust_cargo_lock_sha256": "0eab92949de48abd883f620c0102dd1c7a908d0b3bb375b9347a3ad65923567d",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "8566661184401b95dbdc4526c996d14deb2cde55431d6577b22330dac4434173",
-    "sha256_manifest_sha256": "6b5cd78c463c731dcc06fc9971785893f368911714fc734d7d9e0941c6c449d5"
+    "bundle_sha256": "6d7b202438660a304ef47f3e94d6f15a6eb61d499866e987cc41fb6f20d84b3c",
+    "sha256_manifest_sha256": "8f37dd429a487fa05307d771f399f2f5d987b9a4f76d6abc55084526a8aedc05"
   },
   "packages": [
     {
@@ -5716,7 +5716,7 @@
       "repository": "https://github.com/bytecodealliance/rustix",
       "source": "package-tree",
       "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "version": "1.1.5"
+      "version": "1.1.6"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
