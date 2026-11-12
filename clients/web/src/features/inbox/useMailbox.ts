@@ -44,6 +44,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { useSession } from "@/app/session";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
+  applyFollowedThreadShareToCache,
   applyReadStateToCache,
   useChannels,
   useReadStates,
@@ -772,7 +773,7 @@ export function useMailboxReadActions() {
   /**
    * 메뉴 막대 「모두 읽음 처리」의 스레드 몫(#5690, 서버 #5689): 따라가는 스레드의 읽은 위치를 마지막 답글로 올린다.
    * 채널 읽음 위치(`markChannelsRead`)와 받은함 줄은 건드리지 않는다 — 스레드를 직접 읽을 때와 같은 범위다.
-   * 응답의 채널 줄(`followedUnreadReplyCount` 0)을 캐시에 바로 끼우고, `hasMore`면 같은 요청을 되부른다
+   * 응답 줄의 답글 몫(`followedUnreadReplyCount`)만 캐시의 채널 줄에 바로 끼우고(채널 위치·멘션 수는 캐시 값을 지킨다), `hasMore`면 같은 요청을 되부른다
    * (`THREAD_READ_ALL_MAX_CALLS`번 안에서). 서버가 이 길을 모르면(404·405) 아무것도 하지 않고 `unsupported`로 돌려준다 —
    * 지금처럼 답글 몫이 남는다. 그 밖의 실패는 `failed`이고, 이미 읽은 만큼은 캐시에 남으며 다시 누를 수 있다.
    */
@@ -787,7 +788,7 @@ export function useMailboxReadActions() {
         }
         const page = await markFollowedThreadsRead(workspaceId);
         marked += page.markedThreadCount;
-        for (const row of page.readStates) applyReadStateToCache(client, workspaceId, row);
+        for (const row of page.readStates) applyFollowedThreadShareToCache(client, workspaceId, row);
         if (!page.hasMore) break;
       }
     } catch (error) {

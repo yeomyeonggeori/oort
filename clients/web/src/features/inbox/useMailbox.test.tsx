@@ -59,6 +59,7 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
   useChannels: () => channelsValue,
   useReadStates: () => readStatesValue,
   applyReadStateToCache: () => undefined,
+  applyFollowedThreadShareToCache: () => undefined,
 }));
 
 const feedContext = {
