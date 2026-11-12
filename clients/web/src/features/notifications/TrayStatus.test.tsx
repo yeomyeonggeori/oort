@@ -81,7 +81,7 @@ vi.mock("@/features/ade/useAdeControl", () => ({
 vi.mock("@/features/capabilities/useSurfaceProvided", () => ({
   useSurfaceProvidedWhileOpen: (id: string) => id === "ade" && hoisted.adeProvided,
 }));
-vi.mock("react-router-dom", () => ({ useNavigate: () => hoisted.navigate }));
+vi.mock("react-router-dom", () => ({ useNavigate: () => hoisted.navigate, useLocation: () => ({ pathname: "/" }) }));
 vi.mock("@/features/directory/useNewDm", () => ({ useOpenNewDm: () => hoisted.openNewDm }));
 vi.mock("@/features/agents/workLogStore", () => ({
   openWorkPanel: (...args: unknown[]) => hoisted.openWorkPanel(...args),
@@ -169,6 +169,8 @@ beforeEach(() => {
     spy.mockClear();
   }
   localStorage.clear();
+  // 이 파일의 다른 장면은 메뉴·줄을 잰다: DM 몫(#5660, 기본 켬)은 첫 장면만 따로 재고 여기서는 꺼 둔다.
+  localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDms: false }));
   reloadDesktopNotificationKindsForTest(localStorage);
 });
 afterEach(() => {
@@ -202,19 +204,21 @@ const lastStatus = () => hoisted.setTrayStatus.mock.lastCall?.[0] as TrayStatusW
 const pick = (payload: unknown) => act(() => hoisted.trayHandler?.(payload));
 
 describe("TrayStatus: 셸로 보내기 (#5193)", () => {
-  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본, DM 합산, 배지 끔", () => {
+  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본(안 읽은 DM 포함, #5660), DM 끔, 배지 끔", () => {
+    act(() => setDesktopNotificationKind("dockDms", true, localStorage));
     mount();
     const both = () => [
       hoisted.setDockBadge.mock.lastCall?.[0],
       lastStatus().unread,
     ];
-    expect(both()).toEqual([4, 4]);
+    // 기본은 DM 몫을 더한다(4 + 5): 안 읽은 DM이 있으면 메뉴 막대 점도 켜진다.
+    expect(both()).toEqual([9, 9]);
     hoisted.needsMe = 7;
     render();
-    expect(both()).toEqual([7, 7]);
-    // DM 합산을 켜면 둘 다 더해지고(7 + 5), 독 배지를 끄면 둘 다 0이다.
-    act(() => setDesktopNotificationKind("dockDm", true, localStorage));
     expect(both()).toEqual([12, 12]);
+    // DM 스위치를 끄면 둘 다 needsMe 그대로, 독 배지를 끄면 둘 다 0이다.
+    act(() => setDesktopNotificationKind("dockDms", false, localStorage));
+    expect(both()).toEqual([7, 7]);
     act(() => setDesktopNotificationKind("dockBadge", false, localStorage));
     expect(both()).toEqual([0, 0]);
   });

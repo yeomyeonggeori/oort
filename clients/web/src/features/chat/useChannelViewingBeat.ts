@@ -46,10 +46,12 @@ const assumeForeground = () => true;
 
 /**
  * 사람이 이 창을 보고 있는가 — 위 어댑터(`documentForeground`)를 구독한다(탭이 보이고 창이 포커스를 가졌다). 뒤에 있는 동안 온
- * 답글을 읽은 것으로 치지 않는 판정이 이 하나다: 스레드 패널의 읽음 신호(`ThreadPanel`)와 열린 스레드의 요약 줄(`ChatShell` →
- * `Timeline.viewingThreadId`)이 같은 값을 읽어야 서로 어긋나지 않는다(#5032). 서버 렌더에서는 앞이라고 본다.
+ * 글·답글을 읽은 것으로 치지 않는 판정이 이 하나다: 스레드 패널의 읽음 신호(`ThreadPanel`), 열린 스레드의 요약 줄(`ChatShell` →
+ * `Timeline.viewingThreadId`), 열어 둔 채널의 읽음 위치(`ChatShell`, #5660)가 같은 값을 읽어야 서로 어긋나지 않는다(#5032). 서버
+ * 렌더에서는 앞이라고 본다.
  *
- * `enabled`가 거짓이면 구독도 재그림도 없다(늘 앞이라고 답한다): 호스트는 열린 스레드가 없을 때 창 앞뒤 전환에 다시 그려질 이유가 없다.
+ * `enabled`가 거짓이면 구독도 재그림도 없다(늘 앞이라고 답한다): 쓸 일이 없을 때(열린 대화·스레드가 없을 때) 창 앞뒤 전환에 다시
+ * 그려지지 않게 하려는 것이다.
  */
 export function useDocumentForeground(enabled = true): boolean {
   return useSyncExternalStore(

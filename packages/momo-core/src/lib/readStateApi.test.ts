@@ -243,6 +243,37 @@ describe("read-state wire: DM closure fields (ADR-0177)", () => {
   });
 });
 
+// #5660 · 서버 #5667(ADR-0124 증보 4): 채널 줄마다 따라가는 스레드의 안 읽은 남의 답글 합. 옛 서버·`PUT` 응답에는 없다 —
+// 없으면 키를 만들지 않는다(0으로 지어내지 않는다: 캐시 합류가 가진 값을 지켜야 해서).
+describe("read-state wire: followed_unread_reply_count (#5667)", () => {
+  it("숫자는 숫자로 옮기고, 없거나 망가졌으면 키를 만들지 않는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          read_states: [
+            { ...WIRE, channel_id: "two", followed_unread_reply_count: 2 },
+            { ...WIRE, channel_id: "zero", followed_unread_reply_count: 0 },
+            { ...WIRE, channel_id: "old" },
+            { ...WIRE, channel_id: "bad", followed_unread_reply_count: -1 },
+            { ...WIRE, channel_id: "text", followed_unread_reply_count: "3" },
+          ],
+        })
+      )
+    );
+    const states = await fetchReadStates("ws");
+    expect(states.map((s) => [s.channelId, s.followedUnreadReplyCount])).toEqual([
+      ["two", 2],
+      ["zero", 0],
+      ["old", undefined],
+      ["bad", undefined],
+      ["text", undefined],
+    ]);
+    expect(states[2]).not.toHaveProperty("followedUnreadReplyCount");
+  });
+});
+
 describe("touchChannelViewing", () => {
   it("PUT .../channels/{ch}/viewing 를 본문 없이 보낸다", async () => {
     installHost();
