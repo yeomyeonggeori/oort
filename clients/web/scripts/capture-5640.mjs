@@ -732,20 +732,23 @@ async function enterRepeatScene(browser, origin) {
  * 포인터를 움직인 뒤의 누름은 결정이다(보호가 모든 누름을 막지 않는다).
  */
 async function shiftGuardScene(browser, origin) {
-  // (a) 늦은 원장
+  // (a) 늦은 원장. 원장이 온 뒤 A의 「승인」이 설 점을 같은 픽스처의 다른 창에서 먼저 재고(배치는 같은 자료면 같다), 포인터를 그 점에
+  // 둔 채 원장이 늦게 오게 한다.
   {
+    const probe = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, server: { twoDeciders: true } });
+    await twoDecidersReady(probe.page);
+    const { x, y } = await approveCenter(probe.page, runApproval.runId);
+    await probe.context.close();
     const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, server: { twoDeciders: true, ledgerDelayMs: 2500 } });
     await page.waitForFunction((rid) => document.querySelector(`[data-section="now"] [data-job-id="${rid}"]`) !== null, runApproval.runId);
-    const link = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${runApproval.runId}"]`) }).getByTestId("work-job-approval-link").boundingBox();
-    const x = link.x + link.width / 2;
-    const y = link.y + link.height / 2;
+    const before = await underPoint(page, x, y);
     await page.mouse.move(x, y);
     await twoDecidersReady(page);
     const under = await underPoint(page, x, y);
     await page.mouse.down();
     await page.mouse.up();
     await sleep(400);
-    check("late-ledger 링크 자리에 결정 단추가 선다(재현 조건)", under.decision !== null, under);
+    check("late-ledger 원장 전에는 결정 단추가 아닌 점에 결정 단추가 선다(재현 조건)", before.decision === null && under.decision === "approve" && under.job === runApproval.runId, { before, under });
     check("late-ledger 링크 자리에 선 결정 단추: 움직이지 않은 누름은 결정이 아니다", state.decisions === 0, { under, decisions: state.decisions });
     await page.mouse.move(x + 8, y);
     await page.mouse.move(x, y);
