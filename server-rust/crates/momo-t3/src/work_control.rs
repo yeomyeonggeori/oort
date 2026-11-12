@@ -1590,6 +1590,11 @@ pub async fn work_host_is_active_in_tx(
 
 /// The registered owner of an unrevoked host (Swift `activeHostOwner`
 /// :1007-1025) — who may acknowledge its controls.
+///
+/// The permission decision route uses this as its decider rule (ADR-0188 D3).
+/// `work_board`'s waiting flag (#5639) repeats this predicate inline in its SQL
+/// (`h.workspace_id`, `h.id`, `h.revoked_at IS NULL`, `h.owner_member_id`):
+/// change both together. `work_board_conformance_pg` b23 fails if they drift.
 pub async fn active_host_owner_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
