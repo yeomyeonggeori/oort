@@ -407,6 +407,8 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     });
     await settle();
     expect(elapsed()).toBe("4분째");
+    // 마지막으로 받은 사실이라 낱말을 확인된 색으로 칠하지 않는다
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.hasAttribute("data-stale")).toBe(true);
 
     api.fetchAllActiveAgentRuns.mockImplementation(async () => ({ runs: fixed, truncated: false, pages: 1 }));
     await rerender(MEMBERS, false);
@@ -416,6 +418,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     await settle();
     expect(document.querySelector('[data-testid="channel-member-now-failed"]')).toBeNull();
     expect(elapsed()).toBe("8분째");
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.hasAttribute("data-stale")).toBe(false);
   });
 
   it("레일 신호는 간격 안에서 한 번으로 모아 다시 읽는다", async () => {

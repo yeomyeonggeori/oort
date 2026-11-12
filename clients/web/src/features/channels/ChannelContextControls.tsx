@@ -176,15 +176,25 @@ function agentNowSpoken(line: ChannelAgentNow, formatMessage: Format): string[] 
   return parts;
 }
 
-function AgentNowLine({ line, formatMessage }: { line: ChannelAgentNow; formatMessage: Format }) {
+function AgentNowLine({
+  line,
+  stale,
+  formatMessage,
+}: {
+  line: ChannelAgentNow;
+  /** 마지막으로 받은 때의 사실이다(끊김·다시 읽기 실패): 낱말을 확인된 것처럼 칠하지 않는다(레일의 끊긴 줄과 같은 이유). */
+  stale: boolean;
+  formatMessage: Format;
+}) {
   return (
     <span
       className={NOW_LINE_CLASS}
       data-testid="channel-member-now"
       data-now="run"
       data-phase={line.phase}
+      data-stale={stale ? "" : undefined}
     >
-      <span className={cn("shrink-0", line.needsHuman ? "text-warn" : "text-ink")}>
+      <span className={cn("shrink-0", stale ? undefined : line.needsHuman ? "text-warn" : "text-ink")}>
         {line.word}
       </span>
       {line.stage !== undefined ? (
@@ -284,6 +294,7 @@ function AgentMemberRow({
   member,
   group,
   line,
+  stale,
   mayAct,
   nowMs,
   formatMessage,
@@ -291,6 +302,7 @@ function AgentMemberRow({
   member: RosterMember;
   group: MemberPanelGroup;
   line: ChannelAgentNow | undefined;
+  stale: boolean;
   mayAct: boolean;
   nowMs: number;
   formatMessage: Format;
@@ -323,7 +335,7 @@ function AgentMemberRow({
       <span className="@container flex min-w-0 flex-1 flex-col" aria-hidden="true">
         <RowIdentity member={member} />
         {line !== undefined ? (
-          <AgentNowLine line={line} formatMessage={formatMessage} />
+          <AgentNowLine line={line} stale={stale} formatMessage={formatMessage} />
         ) : (
           <span className={NOW_LINE_CLASS} data-testid="channel-member-now" data-now={dot ? "liveness" : "none"}>
             {dot ? <span className="min-w-0 truncate">{dot.label}</span> : null}
@@ -401,6 +413,7 @@ function ChannelMemberList({
                   member={member}
                   group={section.group}
                   line={now.lines.get(member.id.toLowerCase())}
+                  stale={now.stale}
                   mayAct={mayAct}
                   nowMs={now.nowMs}
                   formatMessage={formatMessage}
