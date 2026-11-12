@@ -1372,6 +1372,8 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(0, "approve", at({ x: spot.x + 20, y: spot.y + 10 }), "touch");
     await sleepMs(100);
     expect(decidedIds()).toEqual([A(1)]);
+    // 붙든 동안 같은 자리 삼킴이 결정 단추를 삼켰으면 목록에도 막힌 모양이 선다(#5712, 검수 4회차 L5 Z15).
+    expect(list().hasAttribute("data-shift-guard")).toBe(true);
     fireEvent.click(document.body, { detail: 1, clientX: 40, clientY: 900 });
     await waitFor(() => expect(within(needsMeSlot(0)).getByTestId("work-job-extras").hasAttribute("data-shift-guard")).toBe(false));
     // 떠나면 붙들기가 끝나고(다음 박자) 새 요청의 단추가 그 자리로 올라온다 — 선 때부터 1초 막기가 맡는다.
@@ -1512,12 +1514,18 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
       fireEvent.pointerLeave(list(), { pointerType: "touch" });
       let elapsed = 0;
       for (const t of [250, 600, 1300, 2500, 4000]) {
-        await sleepMs(t - elapsed);
-        elapsed = t;
+        await sleepMs(Math.max(0, t - elapsed));
+        expect(decidedIds()).toEqual([A(1), A(8)]);
+        // 그 자리는 여전히 B의 칸이다(줄이 움직이지 않는다).
+        expect(rowsIn("needsMe").slice(0, 2)).toEqual([R(1), R(8)]);
         pressSlot(1, which, at({ x: b.x + 5, y: b.y + 3 }), "touch");
         fireEvent.pointerLeave(list(), { pointerType: "touch" });
+        await sleepMs(100);
+        elapsed = t + 100;
+        // 누를 때마다 센다 — 셋째 줄이 그 자리로 올라와 결정되면 바로 여기서 드러난다.
+        expect(decidedIds()).toEqual([A(1), A(8)]);
       }
-      await sleepMs(300);
+      await sleepMs(200);
       expect(decidedIds()).toEqual([A(1), A(8)]);
       expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(5)]);
       expect(receiptIn(1)).toBe(RECEIPT[which]);

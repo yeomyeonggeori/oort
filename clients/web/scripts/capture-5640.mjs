@@ -3,6 +3,7 @@
 // 「작업 · 내 작업」의 「응답 필요」 구간 캡처·실측 (#5640, ADR-0202 D1·D5·증보 2026-11-11, ADR-0188 D5).
 //
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
+//   (`CAPTURE_ONLY=fix5712`: 마우스 뒤 손가락 · 줄 높이가 같은 세 줄 차례로 · 둘째 줄 누른 자리 다시 — 두 엔진. `CAPTURE_DIST=<폴더>`: 그 빌드를 띄움)
 //
 // 백엔드가 없다. `/v1/**`는 이 파일의 고정 응답이고, 보드는 #5639 계약을 흉내 낸다: `include=jobs`로 읽는 사람이 세션 주인일
 // 때만, 대기 요청이 있는 실행 중 맥 세션의 상태가 `waiting`이다. 승인 원장은 인박스 배지가 읽는 그 경로다. 사람·컴퓨터 이름은
@@ -853,7 +854,7 @@ async function matrixScene(browser, origin, engine) {
           const viewport = input === "touch" ? { width: 390, height: 844 } : { width: 1280, height: 800 };
           const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: input === "touch", server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
           await twoDecidersReady(page);
-          // 원장이 와서 줄이 막 올라온 1초(막기)와 목록 위 띠가 서는 이동(약 0.9초 뒤 45px)이 가라앉은 뒤, 사람이 본 단추를 누른다.
+          // 원장이 와서 줄이 막 올라온 1초(막기)가 지나 자리가 가라앉은 뒤, 사람이 본 단추를 누른다.
           await settle(page);
           const a = await decisionCenter(page, runApproval.runId, which);
           const cdp = input === "touch" && engine === "chromium" ? await context.newCDPSession(page) : null;
@@ -932,9 +933,9 @@ async function touchTapper(context, page, engine) {
   };
 }
 /**
- * 줄 자리가 가라앉을 때까지 기다린다: A의 「승인」 자리가 1.2초 동안 그대로일 때까지(최대 8초). 이 하네스의 가짜 소켓은 연결되지
- * 않아 원장이 온 지 약 0.9초 뒤 목록 위에 「연결 중…」 띠가 서며 목록 전체가 45px 내려간다 — 그 1초 안의 누름은 막기가 삼키는 것이 맞다
- * (단추가 선 때부터 1초). 사람이 자리를 본 뒤의 누름을 재려고 기다린다.
+ * 줄 자리가 가라앉을 때까지 기다린다: A의 「승인」 자리가 1.2초 동안 그대로일 때까지(최대 8초). 원장이 와서 줄이 막 선 1초 안의 누름은
+ * 막기가 삼키는 것이 맞다(단추가 선 때부터 1초) — 사람이 자리를 본 뒤의 누름을 재려고 기다린다. (#5700 앞에는 가짜 소켓이 연결되지 않아
+ * 약 0.9초 뒤 목록 위에 「연결 중…」 띠가 서며 목록이 45px 내려갔다. #5700 뒤로는 띠가 서지 않는다 — #5712에서 30회 표본 0회.)
  */
 async function settle(page, rowId = runApproval.runId) {
   const t0 = Date.now();
@@ -1005,6 +1006,96 @@ async function threeRowsScene(browser, origin, engine) {
     await context.close();
   }
   console.log(`MEASURE three-rows-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M2): 마우스로 A를 결정하고 마우스는 그대로 둔 채 손가락으로 그 점을 ±8px 흩어 네 번(+500·+1000·+1700·+2600ms).
+ * 터치가 끝나며 오는 `pointerleave`가 마우스 자리를 지우면 A가 1.2초에 놓여 B가 그 점에 서고 다음 탭이 B를 결정했다. 나간 결정 1건.
+ */
+async function mixedScene(browser, origin, engine) {
+  const summary = [];
+  for (const which of ["approve", "reject"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, touch: true, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await twoDecidersReady(page);
+    await settle(page);
+    const tap = await touchTapper(context, page, engine);
+    const a = await decisionCenter(page, runApproval.runId, which);
+    await mousePress(page, a.x, a.y);
+    const t0 = Date.now();
+    const unders = [];
+    for (const [dx, dy, at] of [[8, 3, 500], [-8, -2, 1000], [7, 3, 1700], [0, 0, 2600]]) {
+      await sleep(Math.max(0, at - (Date.now() - t0)));
+      const under = await underPoint(page, a.x + dx, a.y + dy);
+      unders.push(`${(under.job ?? "-").slice(-2)}/${under.decision ?? under.testid}`);
+      await tap(a.x + dx, a.y + dy);
+    }
+    await sleep(900);
+    check(`mixed-${engine}-${which} 마우스 결정 → 손가락 ±8px 네 번 → 나간 결정 1건(A ${which})`, state.decisions === 1 && state.decidedHow[0] === (which === "approve"), { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), unders });
+    summary.push(`${which}=${state.decisions}(${unders.join(",")})`);
+    await context.close();
+  }
+  console.log(`MEASURE mixed-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M1): 터치로 세 줄을 차례로, **줄 높이가 같은** 1280과 390(셋째 단추의 가운데에서 10px 아래 = 둘째 상자와 겹친 쪽).
+ * 앞 줄이 놓이면 셋째 줄이 둘째를 누른 자리로 올라와 「붙든 동안 같은 자리」에 끝없이 막혔다. 간격과 상관없이 3건.
+ */
+async function threeRowsEvenScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport, dy] of [["1280", { width: 1280, height: 900 }, 0], ["390", { width: 390, height: 1500 }, 10]]) {
+    for (const gapMs of [500, 1500, 2500]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 3, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      for (const [i, rid] of [runApproval.runId, runApproval2.runId, runApproval3.runId].entries()) {
+        const c = await decisionCenter(page, rid, "approve");
+        await tap(c.x, c.y + (i === 2 ? dy : 0));
+        await sleep(gapMs);
+      }
+      await sleep(600);
+      check(`three-even-${engine}-${name}-gap${gapMs} 터치로 세 줄 차례로(줄 높이 같음) → 3건`, state.decisions === 3, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${name}/gap${gapMs}=${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE three-even-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M1의 ㉡): A를 결정하고 1.6초 뒤 B를 결정한 다음, B를 누른 자리(5px 옆)를 +250·+600·+1300·+2500·+4000ms에 다시.
+ * 셋째 줄을 살리는 수리가 이 보호를 풀면 안 된다 — 나간 결정은 A·B 2건이고 그 점 밑은 늘 B의 영수증.
+ */
+async function repressSecondScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport] of [["1280", { width: 1280, height: 900 }], ["390", { width: 390, height: 1500 }]]) {
+    for (const which of ["approve", "reject"]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 3, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const a = await decisionCenter(page, runApproval.runId, which);
+      await tap(a.x, a.y);
+      await sleep(1600);
+      const b = await decisionCenter(page, runApproval2.runId, which);
+      await tap(b.x, b.y);
+      const t0 = Date.now();
+      const unders = [];
+      for (const at of [250, 600, 1300, 2500, 4000]) {
+        await sleep(Math.max(0, at - (Date.now() - t0)));
+        const under = await underPoint(page, b.x + 5, b.y + 3);
+        unders.push(`${(under.job ?? "-").slice(-2)}/${under.decision ?? under.testid}`);
+        await tap(b.x + 5, b.y + 3);
+      }
+      await sleep(900);
+      const onReceipt = unders.every((u) => u === `${runApproval2.runId.slice(-2)}/work-job-approval-settled`);
+      check(`repress-second-${engine}-${name}-${which} A → B → B 자리 다시 다섯 번 → 나간 결정 2건(A·B), 그 점 밑은 B의 영수증`, state.decisions === 2 && onReceipt, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), unders });
+      summary.push(`${name}/${which}=${state.decisions}${onReceipt ? "" : `(${unders.join(",")})`}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE repress-second-${engine}: ${summary.join(" ")}`);
 }
 
 /**
@@ -1238,7 +1329,9 @@ async function enterScene(browser, origin) {
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
+  // `CAPTURE_DIST`: 다른 빌드 폴더를 띄운다(수리 전 빌드로 같은 장면의 RED를 재려고, #5712).
+  const extraArgs = process.env.CAPTURE_DIST ? ["--outDir", resolve(process.env.CAPTURE_DIST)] : [];
+  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs });
   const browser = await chromium.launch();
   try {
     if (ONLY === "" || ONLY === "scenes") {
@@ -1303,6 +1396,18 @@ async function main() {
       await nextAskScene(browser, preview.origin);
       await guardLookScene(browser, preview.origin);
       await queuedChipScene(browser, preview.origin);
+    }
+    if (ONLY === "" || ONLY === "fix5712") {
+      const wk = await webkit.launch();
+      try {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+          await mixedScene(b, preview.origin, engine);
+          await threeRowsEvenScene(b, preview.origin, engine);
+          await repressSecondScene(b, preview.origin, engine);
+        }
+      } finally {
+        await wk.close();
+      }
     }
     if (ONLY === "" || ONLY === "fix5" || ONLY === "box") {
       await boxScene(browser, preview.origin, "chromium");
