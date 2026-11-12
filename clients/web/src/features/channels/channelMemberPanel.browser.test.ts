@@ -349,3 +349,134 @@ describe("채널 멤버 패널의 줄은 상태가 바뀌어도 밀리지 않는
     240_000
   );
 });
+
+// ---- 캡처 (선택): `MEMBER_PANEL_SHOTS=<폴더>`일 때만 돈다. 시험이 아니라 검수용 그림이다 ----------------------------
+// 네 상태(로딩·빈·오류·오프라인)와 「지금」 읽기 실패, 키보드 초점, 밝게·어둡게, 좁은 폭(360), 큰 글자(뿌리 200%).
+const SHOTS = process.env.MEMBER_PANEL_SHOTS ?? "";
+
+/** 패널 하나를 그 상태로 열어 마크업을 얻는다. */
+async function stateHtml(options: {
+  members: RosterMember[];
+  status: "loading" | "ready" | "failed";
+  offline?: boolean;
+  nowFails?: boolean;
+}): Promise<string> {
+  api.fetchRoster.mockResolvedValue(options.members);
+  if (options.nowFails === true) api.fetchAllActiveAgentRuns.mockRejectedValue(new ApiError(503, "unavailable"));
+  else api.fetchAllActiveAgentRuns.mockResolvedValue({ runs: [run(), hermes()], truncated: false, pages: 1 });
+  api.fetchAgentLiveness.mockImplementation(async (_ws: string, agentId: string) => {
+    if (agentId.toLowerCase() === SAEBYEOK) throw new ApiError(404, "not hosted");
+    return { agentMemberId: agentId, state: "alive_idle", lastSignalAtMs: Date.now() - 2 * MIN };
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => {
+    root?.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(LocaleProvider, {
+          locale: korean,
+          children: createElement(
+            SessionProvider,
+            { value: session() },
+            createElement(ChannelMemberPanel, {
+              channelId: CH,
+              channelName: "design-lab",
+              members: options.members,
+              status: options.status,
+              offline: options.offline ?? false,
+              onRetry: () => undefined,
+              onAddMember: () => undefined,
+            })
+          ),
+        })
+      )
+    );
+  });
+  await settle();
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('[data-testid="channel-member-count"]')!.click();
+  });
+  // 실패는 한 번 다시 묻고(1초) 기다림 상한(1.2초)을 넘긴다.
+  for (let i = 0; i < (options.nowFails === true ? 40 : 1); i += 1) {
+    await settle();
+    if (options.nowFails !== true || document.querySelector('[data-testid="channel-member-now-failed"]')) break;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+  }
+  const html = document.querySelector<HTMLElement>('[data-testid="channel-member-panel"]')!.outerHTML;
+  act(() => root?.unmount());
+  root = null;
+  host.remove();
+  host = null;
+  return html;
+}
+
+describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
+  it.skipIf(SHOTS === "" || !ENGINES.includes("chromium"))(
+    "네 상태·「지금」 실패·키보드 초점 · 밝게/어둡게 · 넓은 창/360/큰 글자",
+    async () => {
+      const { mkdirSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      mkdirSync(SHOTS, { recursive: true });
+      const list = (await scenes())["처음"];
+      act(() => root?.unmount());
+      root = null;
+      host?.remove();
+      host = null;
+      const states: Record<string, string> = {
+        목록: list,
+        로딩: await stateHtml({ members: [], status: "loading" }),
+        빈: await stateHtml({ members: [], status: "ready" }),
+        오류: await stateHtml({ members: [], status: "failed" }),
+        오프라인: await stateHtml({ members: FIRST, status: "ready", offline: true }),
+        지금실패: await stateHtml({ members: FIRST, status: "ready", nowFails: true }),
+      };
+      const css = await compileTokensCss(Object.values(states).flatMap(classesOf));
+      const playwright = await import("playwright");
+      const browser = await playwright.chromium.launch();
+      const written: string[] = [];
+      try {
+        for (const colorScheme of ["light", "dark"] as const) {
+          for (const vp of [
+            { name: "wide", width: 1280, height: 900, rootFontPx: 16 },
+            { name: "360", width: 360, height: 780, rootFontPx: 16 },
+            { name: "font200", width: 1280, height: 1400, rootFontPx: 32 },
+          ]) {
+            const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, colorScheme });
+            try {
+              const p = await ctx.newPage();
+              const names = vp.name === "wide" ? Object.keys(states) : ["목록", "지금실패"];
+              for (const name of names) {
+                await p.setContent(page(css, states[name]!, vp.rootFontPx));
+                const file = join(SHOTS, `${name}-${colorScheme}-${vp.name}.png`);
+                await p.screenshot({ path: file });
+                written.push(file);
+              }
+              if (vp.name === "wide") {
+                // 키보드: 패널을 연 뒤 첫 Tab은 목록(굴릴 수 있는 칸)에 선다
+                await p.setContent(page(css, states["목록"]!, vp.rootFontPx));
+                await p.keyboard.press("Tab");
+                const focused = await p.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? "");
+                const file = join(SHOTS, `키보드-${colorScheme}-${vp.name}-${focused}.png`);
+                await p.screenshot({ path: file });
+                written.push(file);
+              }
+            } finally {
+              await ctx.close();
+            }
+          }
+        }
+      } finally {
+        await browser.close();
+      }
+      console.info(`[#5686 캡처 ${written.length}장]\n${written.join("\n")}`);
+      expect(written.length).toBeGreaterThan(0);
+    },
+    240_000
+  );
+});
