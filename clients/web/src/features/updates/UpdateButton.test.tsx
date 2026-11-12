@@ -103,7 +103,7 @@ describe("업데이트 알약: 상태 → UI (성재 결재 2026-10-16)", () => 
     seed({ kind: "available", update: UPDATE });
     expect(pill()?.textContent).toBe("업데이트");
     expect(byId("update-pill-tooltip")?.textContent).toBe(
-      "0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요."
+      "0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 시작해요."
     );
     expect(pill()?.getAttribute("aria-describedby")).toBe(byId("update-pill-tooltip")?.id);
     expect(pill()?.getAttribute("aria-label")).toContain("0.1.28로 업데이트할 수 있어요");
@@ -202,7 +202,7 @@ describe("업데이트 카드", () => {
   });
 });
 
-describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
+describe("자동 다시 시작 (store 가 시계를 쥔다)", () => {
   async function finishInstall() {
     tauri.check.mockResolvedValue(UPDATE);
     tauri.install.mockResolvedValue(undefined);
@@ -212,12 +212,12 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     });
   }
 
-  it("설치가 끝나면 3초 카운트다운 뒤에 한 번 다시 실행한다", async () => {
+  it("설치가 끝나면 3초 카운트다운 뒤에 한 번 다시 시작한다", async () => {
     vi.useFakeTimers();
     mount();
     await finishInstall();
     expect(RELAUNCH_COUNTDOWN_SECONDS).toBe(3);
-    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 시작돼요");
     expect(byId("update-card-subline")?.textContent).toContain("3초 뒤");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -237,7 +237,7 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     expect(tauri.relaunch).toHaveBeenCalledTimes(1);
   });
 
-  it("「지금」은 기다리지 않고 한 번만 다시 실행하고 남은 시계를 치운다", async () => {
+  it("「지금」은 기다리지 않고 한 번만 다시 시작하고 남은 시계를 치운다", async () => {
     vi.useFakeTimers();
     mount();
     await finishInstall();
@@ -264,11 +264,11 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     });
     expect(tauri.relaunch).not.toHaveBeenCalled();
     act(() => pill()?.click());
-    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
+    expect(byId("update-card-title")?.textContent).toBe("다시 시작해 주세요");
     expect(byId("update-card-now")).not.toBeNull();
   });
 
-  it("다시 실행하기 전에 쓰던 글을 저장하라는 신호를 먼저, 동기로 보낸다", async () => {
+  it("다시 시작하기 전에 쓰던 글을 저장하라는 신호를 먼저, 동기로 보낸다", async () => {
     vi.useFakeTimers();
     const order: string[] = [];
     const onFlush = () => order.push("flush");
@@ -285,7 +285,7 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     expect(order).toEqual(["flush", "relaunch"]);
   });
 
-  it("다시 실행이 실패하면 설치 상태와 「지금」을 남긴다", async () => {
+  it("다시 시작이 실패하면 설치 상태와 「지금」을 남긴다", async () => {
     vi.useFakeTimers();
     tauri.relaunch.mockRejectedValue(new Error("nope"));
     mount();
@@ -293,7 +293,7 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
+    expect(byId("update-card-title")?.textContent).toBe("다시 시작해 주세요");
     expect(byId("update-card-now")).not.toBeNull();
   });
 });

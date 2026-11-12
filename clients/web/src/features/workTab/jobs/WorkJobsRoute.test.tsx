@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type SharedWorkSession, type WorkJobsMode } from "@momo/core/lib/api";
 import { WORK_FILTER_STORAGE_KEY } from "@momo/core/features/workbench/workJobs";
+import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { RealtimeHandle } from "@/lib/realtime";
@@ -20,6 +21,8 @@ const api = vi.hoisted(() => ({
   fetchWorkJobs: vi.fn(),
   fetchSharedWorkSession: vi.fn(),
   fetchWorkSessions: vi.fn(),
+  // 「응답 필요」의 run 줄 재료(#5640): 인박스 배지와 같은 승인 원장. 여기서는 비어 있다.
+  fetchApprovals: vi.fn(),
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/lib/api")>()),
@@ -32,8 +35,10 @@ vi.mock("@/lib/tauri", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri")>()),
   isDesktop: () => shell.desktop,
 }));
-vi.mock("@/features/workspace/useWorkspace", () => ({
+vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/workspace/useWorkspace")>()),
   useChannels: () => ({ groups: { channels: [{ id: CH_AGENT_LAB, kind: "public", name: "agent-lab" }], dms: [] } }),
+  useDirectory: () => ({ directory: makeDirectory([]), isLoading: false }),
 }));
 
 const { WorkJobsRoute } = await import("./WorkJobsRoute");
@@ -125,6 +130,7 @@ beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
   api.fetchSharedWorkSession.mockRejectedValue(new ApiError(404, "shared work session not found"));
   api.fetchWorkSessions.mockResolvedValue([]);
+  api.fetchApprovals.mockResolvedValue([]);
   shell.desktop = false;
   try {
     window.localStorage.removeItem(WORK_FILTER_STORAGE_KEY);
@@ -228,12 +234,17 @@ describe("「작업」 한 화면: 결과 중심 줄 (ADR-0202 D1)", () => {
     expect(screen.getByTestId("work-jobs-running").textContent).toBe("지금 진행 1");
   });
 
-  it("승인 필요 줄은 맨 위에 서고, 승인 단추 없이 카드가 있는 채널로 간다(대신 승인 없음, D5)", async () => {
+  it("승인 대기 줄은 맨 위에 서고, 승인 단추 없이 카드가 있는 채널로 간다(대신 승인 없음, D5)", async () => {
     serve({ mine: [mineRun, approvalRun], team: [] });
     render(mount());
     const rows = await screen.findAllByTestId("work-job-row");
     expect(rows[0]!.dataset.jobId).toBe(approvalRun.sessionId);
-    expect(within(rows[0]!).getByTestId("team-board-state").textContent).toBe("승인 필요");
+    // 원장에 내 결정이 없는 승인 대기 줄은 「응답 필요」 구간 밖이다: 칩은 「응답 필요」가 아니라 「승인 대기」(수리 3회차, 한국어 낱말은
+    // `WorkJobsRoute.needsMe.test.tsx`가 잠근다 — 이 파일은 로케일 없이 그려 영어 사전을 읽는다). 무엇을 기다리는지는 꼬리표가 말한다.
+    expect(screen.queryAllByTestId("work-jobs-section").map((s) => s.dataset.section)).not.toContain("needsMe");
+    expect(within(rows[0]!).getByTestId("team-board-state").textContent).not.toBe("응답 필요");
+    expect(within(rows[0]!).getAllByTestId("work-job-approval-tag").length).toBeGreaterThan(0);
+    expect(rows[0]!.textContent).not.toContain("승인 필요");
     const link = screen.getByTestId("work-job-approval-link");
     expect(link.getAttribute("href")).toBe(`/c/${CH_AGENT_LAB}`);
     // 「작업」 화면에는 결정 단추가 없다.
@@ -244,6 +255,48 @@ describe("「작업」 한 화면: 결과 중심 줄 (ADR-0202 D1)", () => {
     expect(document.querySelector('[data-testid^="approval-decision"]')).toBeNull();
     fireEvent.click(link);
     await screen.findByTestId("channel-page");
+  });
+
+  it("줄의 띠는 `li`가 그린다: 각진 채움·눌림·초점 링이 직계 줄 단추에서만 켜지고 컨트롤 층까지 덮는다(수리 2회차)", async () => {
+    // 픽셀(네 모서리·컨트롤 층의 채움, 거부 알약 위에서 꺼짐)은 `scripts/capture-5640.mjs`가 진짜 브라우저로 잰다. 여기서는 그 띠가
+    // 어디에 걸려 있는지를 잠근다: 둥근 채움을 줄 단추에 되돌리면(옛 판) 컨트롤 층이 띠 밖에 남는다.
+    serve({ mine: [mineRun, approvalRun], team: [] });
+    render(mount());
+    const rows = await screen.findAllByTestId("work-job-row");
+    const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+    for (const row of rows) {
+      const li = row.closest('[data-testid="work-job"]')!;
+      expect(row.parentElement, "줄 단추는 띠(li)의 직계 자식이다 — 띠의 `> button` 상태 셀렉터가 그것을 읽는다").toBe(li);
+      expect(classes(li)).toEqual(
+        expect.arrayContaining([
+          "pointer-hover:has-[>button:hover:not(:active)]:bg-surface-hover",
+          "has-[>button:active]:bg-surface-pressed",
+          "has-[>button:focus-visible]:focus-ring",
+        ])
+      );
+      // 각진 띠: 띠와 줄 단추 어디에도 반경이 없고, 줄 단추는 자기 링을 그리지 않는다(두 겹 없음).
+      for (const el of [li, row]) expect(classes(el).filter((c) => /(^|:)rounded/.test(c))).toEqual([]);
+      expect(classes(row)).not.toContain("focus-visible:focus-ring");
+      expect(classes(row)).toContain("focus-visible:outline-none");
+      // 줄 단추가 제 자리를 칠하는 채움은 띠와 같은 토큰뿐이다(다른 색이면 띠 안에 상자가 선다).
+      const fills = classes(row).filter((c) => /(^|:)bg-/.test(c));
+      expect(fills.every((c) => /bg-surface-(hover|pressed)$/.test(c)), fills.join(" ")).toBe(true);
+    }
+    // 컨트롤 층(PR 링크·카드 링크)은 같은 띠 안, 줄 단추 밖이다.
+    const extras = screen.getAllByTestId("work-job-extras");
+    expect(extras.length).toBe(2);
+    for (const layer of extras) {
+      const band = layer.closest('[data-testid="work-job"]')!;
+      expect(layer.parentElement).toBe(band);
+      expect(band.querySelector(':scope > [data-testid="work-job-row"]')!.contains(layer)).toBe(false);
+    }
+    // 펼친 줄: 펼침 채움도 띠(li)가 칠한다.
+    const mine = rows.find((r) => r.dataset.jobId === mineRun.sessionId)!;
+    const prLi = mine.closest('[data-testid="work-job"]')!;
+    fireEvent.click(mine);
+    await screen.findByTestId("team-board-drawer");
+    expect(classes(prLi)).toContain("bg-surface-hover");
+    expect(prLi.hasAttribute("data-selected")).toBe(true);
   });
 
   it("줄을 누르면 서랍이 열리고 「에이전트 보고」 절이 닫힌 칸만 키-값으로 말한다. Esc가 닫는다", async () => {

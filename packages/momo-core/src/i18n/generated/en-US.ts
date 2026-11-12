@@ -2077,6 +2077,52 @@ export const catalog: MessageCatalog = {
       "value": "Working"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "You can also approve it from the list"
+    }
+  ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "Open to answer"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "Agent report: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Awaiting approval"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "Permission request"
+    }
+  ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "Allow it from the phone or desktop app"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -8107,7 +8153,7 @@ export const catalog: MessageCatalog = {
   "settings.updates.holdTitle": [
     {
       "type": 0,
-      "value": "Restarts when your work ends"
+      "value": "Restarts when work on this Mac ends"
     }
   ],
   "settings.updates.installRowDescription": [

@@ -16,9 +16,22 @@ export function InboxApprovalActions({
   approvalId,
   onSettled,
   execution,
+  lead = "실행 전에 내 허가가 필요해요.",
+  className = "pb-2",
+  testIdPrefix = "inbox-approval",
+  decisionLabel,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
+  /**
+   * 두 번째 호출자(「작업 · 내 작업」의 결과 칸, #5640)가 자리에 맞게 바꾸는 것은 이 셋뿐이다: 단추 앞 문장, 둘레, 시험 id 머리.
+   * 결정 컨트롤·라우트·영수증은 그대로 한 벌이다. 기본값이 받은함의 모습이다.
+   */
+  lead?: string;
+  className?: string;
+  testIdPrefix?: string;
+  /** 한 화면에 결정이 여럿 서면 어느 결정인지 접근성 이름에 남긴다(`ApprovalActions`). */
+  decisionLabel?: string;
   /**
    * 스폰 승인의 호스트 후보 (ADR-0125 D6-A, 이슈 1114).
    *
@@ -48,10 +61,11 @@ export function InboxApprovalActions({
         }
         onSettled(outcome);
       }}
-      lead="실행 전에 내 허가가 필요해요."
-      className="pb-2"
-      testIdPrefix="inbox-approval"
+      lead={lead}
+      className={className}
+      testIdPrefix={testIdPrefix}
       execution={execution ?? null}
+      {...(decisionLabel !== undefined ? { decisionLabel } : {})}
     />
   );
 }

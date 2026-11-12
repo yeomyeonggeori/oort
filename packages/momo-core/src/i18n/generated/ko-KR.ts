@@ -1909,6 +1909,52 @@ export const catalog: MessageCatalog = {
       "value": "작업 중"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "승인은 목록에서도 할 수 있어요"
+    }
+  ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "열어서 답하기"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 보고: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인 대기"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "권한 요청"
+    }
+  ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -7672,19 +7718,19 @@ export const catalog: MessageCatalog = {
   "settings.updates.description": [
     {
       "type": 0,
-      "value": "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 앱이 스스로 다시 실행돼요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요. 쓰던 글은 그대로 남아요."
+      "value": "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 앱이 스스로 다시 시작해요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요. 쓰던 글은 그대로 남아요."
     }
   ],
   "settings.updates.holdTitle": [
     {
       "type": 0,
-      "value": "작업이 끝나면 다시 시작해요"
+      "value": "이 맥의 작업이 끝나면 다시 시작해요"
     }
   ],
   "settings.updates.installRowDescription": [
     {
       "type": 0,
-      "value": "설치가 끝나면 앱이 스스로 다시 실행돼요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요."
+      "value": "설치가 끝나면 앱이 스스로 다시 시작해요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요."
     }
   ],
   "settings.updates.lastCheckedLabel": [
