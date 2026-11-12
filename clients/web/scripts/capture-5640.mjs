@@ -1034,6 +1034,26 @@ async function mixedScene(browser, origin, engine) {
     summary.push(`${which}=${state.decisions}(${unders.join(",")})`);
     await context.close();
   }
+  // 마우스가 목록을 떠나 A가 놓이고 B가 그 점에 선 뒤 1초 안의 손가락 ±8px 두 번: 마우스 표지도 손가락 누름은 누른 단추의 상자로 잰다.
+  for (const which of ["approve", "reject"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, touch: true, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await twoDecidersReady(page);
+    await settle(page);
+    const tap = await touchTapper(context, page, engine);
+    const a = await decisionCenter(page, runApproval.runId, which);
+    await mousePress(page, a.x, a.y);
+    await sleep(300);
+    await page.mouse.move(640, 30);
+    await page.waitForFunction(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-decision]") != null, [a.x, a.y], { timeout: 6000 });
+    await sleep(150);
+    await tap(a.x + 8, a.y + 3);
+    await sleep(350);
+    await tap(a.x - 8, a.y - 2);
+    await sleep(900);
+    check(`mixed-left-${engine}-${which} 마우스 결정 → 목록 밖 → B가 선 지 1초 안 손가락 ±8px 두 번 → 나간 결정 1건(A ${which})`, state.decisions === 1 && state.decidedHow[0] === (which === "approve"), { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+    summary.push(`left/${which}=${state.decisions}`);
+    await context.close();
+  }
   console.log(`MEASURE mixed-${engine}: ${summary.join(" ")}`);
 }
 
