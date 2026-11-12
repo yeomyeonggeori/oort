@@ -256,7 +256,7 @@ async function sceneRail(browser, origin, scheme, zoom) {
   check(`${tag} 레일 항목·아바타·대화 영역을 잴 수 있다`, measurable(before), JSON.stringify(before));
 
   await page.evaluate(() => { window.__updateMode = "offer"; });
-  await page.clock.fastForward("01:00:00");
+  await fastForward(page, "01:00:00");
   await page.getByTestId("update-pill").waitFor({ timeout: 5_000 }).catch(() => undefined);
   const pill = page.locator('[data-testid="workspace-rail"] [data-testid="update-pill"]');
   check(`${tag} 레일에 알약이 섰다(작은 모양)`, (await pill.count()) === 1 && (await pill.getAttribute("data-placement")) === "rail");
@@ -346,6 +346,18 @@ async function runFor(page, ms) {
         runForNoted = true;
         console.log(`참고 가짜 시계를 돌리는 중 페이지 오류를 넘김: ${String(error).split("\n")[0]}`);
       }
+    }
+  }
+}
+
+/** `runFor`와 같은 까닭으로 `clock.fastForward`의 같은 페이지 오류를 넘긴다(시계는 이미 그 시각으로 넘어가 있다). */
+async function fastForward(page, spec) {
+  try {
+    await page.clock.fastForward(spec);
+  } catch (error) {
+    if (!runForNoted) {
+      runForNoted = true;
+      console.log(`참고 가짜 시계를 돌리는 중 페이지 오류를 넘김: ${String(error).split("\n")[0]}`);
     }
   }
 }
@@ -554,6 +566,10 @@ async function sceneSettingsNotice(browser, origin, engine, scheme = "light") {
     await page.getByTestId("update-card-defer").click();
     await runFor(page, 60_000);
     check(`${engine} ${scheme} 설정: 「지금 말고」 뒤 1분 0번`, (await relaunched(page)) === 0);
+    // 설정의 Esc는 「가장 위 층」 것이다: 열린 카드가 먼저 닫히고 설정은 남는다.
+    await page.keyboard.press("Escape");
+    await page.getByTestId("update-card").waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
+    check(`${engine} ${scheme} 설정: Esc는 카드만 닫고 설정은 남는다`, (await page.getByTestId("update-card").count()) === 0 && (await page.getByTestId("settings-nav").count()) === 1);
   } finally {
     sessionStatus = "running";
     await context.close();
