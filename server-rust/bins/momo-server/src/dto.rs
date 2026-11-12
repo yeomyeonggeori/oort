@@ -4134,8 +4134,12 @@ pub struct ReadStateListResponseDto {
 
 /// `POST …/threads/read-all` request (ADR-0124 증보 5, #5689). snake_case like the read-state family.
 /// `channel_ids` absent or `null` = every channel the caller is a member of; `[]` = none (a no-op). No
-/// member id: the positions moved are always the bearer's.
+/// member id: the positions moved are always the bearer's. **Closed** (security review r1 M2): an
+/// unknown key is refused, so a misspelt `channelIds` is never read as "every channel". The route
+/// also refuses a body that is not an object before it gets here (serde would read a bare `[]` as
+/// this struct with no ids).
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThreadReadAllRequestDto {
     #[serde(default)]
     pub channel_ids: Option<Vec<Uuid>>,

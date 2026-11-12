@@ -475,6 +475,23 @@ async fn outbox_rows_since(su: &PgPool, since: i64) -> i64 {
         .expect("count outbox rows")
 }
 
+/// Every `followed_unread.updated` frame written after `since`, whoever its partition key names, as
+/// `(payload.channel, payload member_id, payload channel_id)` — where it is delivered and what it says.
+async fn frame_targets_since(su: &PgPool, since: i64) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT payload->>'channel', \
+                payload->'data'->'payload'->>'member_id', \
+                payload->'data'->'payload'->>'channel_id' \
+           FROM outbox \
+          WHERE id > $1 AND payload->'data'->>'type' = 'followed_unread.updated' \
+          ORDER BY id",
+    )
+    .bind(since)
+    .fetch_all(su)
+    .await
+    .expect("read frame targets")
+}
+
 async fn outbox_mark(su: &PgPool) -> i64 {
     sqlx::query_scalar("SELECT COALESCE(max(id), 0)::bigint FROM outbox")
         .fetch_one(su)
@@ -679,6 +696,28 @@ async fn read_all_moves_every_followed_unread_thread_and_signals_each_changed_ch
         outbox_rows_since(&su, mark).await,
         2,
         "and nothing else is written to the outbox"
+    );
+    // Where the frames really go is `payload.channel` (the partition key only orders them): both are
+    // on alice's own personal channel, name alice, and name exactly the two channels that changed.
+    let personal = format!("user:read-state#{}", alice.id.to_string().to_uppercase());
+    let mut targets = frame_targets_since(&su, mark).await;
+    targets.sort();
+    let mut changed: Vec<String> = [one, two]
+        .iter()
+        .map(|channel| channel.to_string().to_uppercase())
+        .collect();
+    changed.sort();
+    assert_eq!(
+        targets,
+        changed
+            .iter()
+            .map(|channel| (
+                personal.clone(),
+                alice.id.to_string().to_uppercase(),
+                channel.clone()
+            ))
+            .collect::<Vec<_>>(),
+        "each frame is on alice's personal channel, about alice, for one changed channel"
     );
     assert_eq!(
         position_of(&su, r1, carol.id).await,
@@ -936,7 +975,7 @@ async fn a_guest_reads_only_the_channels_they_are_in() {
 // ---------------------------------------------------------------------------
 
 /// An agent bearer (whatever its scopes) and another workspace's bearer are 403; more than 500 ids is
-/// 400; an id that is not a uuid is 422 and no body at all is 415. None of them moves a position or
+/// 400; an id that is not a uuid is 400 and no body at all is 415. None of them moves a position or
 /// writes an outbox row.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
@@ -1016,7 +1055,7 @@ async fn refusals_move_nothing() {
         &json!({"channel_ids": ["not-a-uuid"]}),
     )
     .await;
-    assert_eq!(status, 422, "an id that is not a uuid");
+    assert_eq!(status, 400, "an id that is not a uuid");
     let no_body = http
         .post(format!("{base}/v1/workspaces/{workspace}/threads/read-all"))
         .bearer_auth(&alice_token)
@@ -1047,6 +1086,208 @@ async fn refusals_move_nothing() {
     )
     .await;
     assert_eq!((status, text.as_str()), (200, NOTHING));
+    // The cap counts distinct ids: one id 501 times is one id.
+    let repeated = vec![Uuid::new_v4(); 501];
+    let (status, text) = read_all_raw(
+        &http,
+        &base,
+        &alice_token,
+        workspace,
+        &json!({"channel_ids": repeated}),
+    )
+    .await;
+    assert_eq!((status, text.as_str()), (200, NOTHING));
+}
+
+// ---------------------------------------------------------------------------
+// 4b — a body that is not exactly the shape (security review r1 M2)
+// ---------------------------------------------------------------------------
+
+/// `POST …/threads/read-all` with a raw body and a JSON content type.
+async fn read_all_text(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    body: &str,
+) -> (u16, String) {
+    let response = http
+        .post(format!("{base}/v1/workspaces/{workspace}/threads/read-all"))
+        .bearer_auth(token)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .expect("POST read-all");
+    let status = response.status().as_u16();
+    (status, response.text().await.unwrap_or_default())
+}
+
+/// A body that is not exactly `{}` / `{"channel_ids": [...] | null}` is 400 in the `ErrorResponse`
+/// shape and moves nothing — a misspelt key (`channelIds`, `channel_id`), an extra key, a bare array,
+/// a body that is not an object, an empty body, an id that is not a uuid. `{"channel_ids": null}`
+/// and `{}` are "every channel"; `{"channel_ids": []}` is none.
+///
+/// Sabotage (measured, see the PR): drop `deny_unknown_fields` → `channelIds` marks every channel
+/// (200); drop the object check → a bare `[]` does.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_body_that_is_not_exactly_the_shape_is_400_and_moves_nothing() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+
+    let workspace = seed_workspace(&su, "read-all-body").await;
+    let alice = seed_human(&su, workspace, "alice").await;
+    let bob = seed_human(&su, workspace, "bob").await;
+    let channel = seed_channel(&su, workspace, alice.id).await;
+    for member in [&alice, &bob] {
+        join(&su, workspace, channel, member.id).await;
+    }
+    let alice_token = login(&http, &base, workspace, &alice.email).await;
+    let bob_token = login(&http, &base, workspace, &bob.email).await;
+    let (root, head) = thread_with_replies(
+        &http,
+        &base,
+        workspace,
+        channel,
+        &alice_token,
+        &bob_token,
+        1,
+    )
+    .await;
+    let before = position_of(&su, root, alice.id).await;
+    assert!(before < Some(head), "alice has an unread reply");
+
+    let mark = outbox_mark(&su).await;
+    for body in [
+        format!(r#"{{"channelIds": ["{channel}"]}}"#),
+        format!(r#"{{"channel_id": ["{channel}"]}}"#),
+        format!(
+            r#"{{"channel_ids": ["{channel}"], "member_id": "{}"}}"#,
+            bob.id
+        ),
+        "[]".to_string(),
+        format!(r#"["{channel}"]"#),
+        "null".to_string(),
+        r#""all""#.to_string(),
+        "1".to_string(),
+        String::new(),
+        "{".to_string(),
+        r#"{"channel_ids": "all"}"#.to_string(),
+        r#"{"channel_ids": ["not-a-uuid"]}"#.to_string(),
+    ] {
+        let (status, text) = read_all_text(&http, &base, &alice_token, workspace, &body).await;
+        assert_eq!(status, 400, "body {body:?}: {text}");
+        let error: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        assert!(
+            error["error"]["message"].is_string(),
+            "body {body:?} is answered in the ErrorResponse shape: {text}"
+        );
+    }
+    assert_eq!(outbox_rows_since(&su, mark).await, 0, "no frame");
+    assert_eq!(
+        position_of(&su, root, alice.id).await,
+        before,
+        "nothing moved"
+    );
+
+    let (status, text) = read_all_text(
+        &http,
+        &base,
+        &alice_token,
+        workspace,
+        r#"{"channel_ids": []}"#,
+    )
+    .await;
+    assert_eq!((status, text.as_str()), (200, NOTHING));
+    let (status, text) = read_all_text(
+        &http,
+        &base,
+        &alice_token,
+        workspace,
+        r#"{"channel_ids": null}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    let body: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        body["marked_thread_count"], 1,
+        "null is every channel: {body}"
+    );
+    assert_eq!(position_of(&su, root, alice.id).await, Some(head));
+    // `{}` is every channel too (here: nothing left to do).
+    let (status, text) = read_all_text(&http, &base, &alice_token, workspace, "{}").await;
+    assert_eq!((status, text.as_str()), (200, NOTHING));
+}
+
+// ---------------------------------------------------------------------------
+// 4c — the write commits before the answer's lines are read (security review r1 M1)
+// ---------------------------------------------------------------------------
+
+/// The answer's read-state lines are read in a second transaction, after the positions and frames
+/// are committed: while that read is held back (another session holds a table only the projection
+/// reads), the moved position and its frame are already visible to everyone else — so a reply sent to
+/// that thread meanwhile never waits for the read of the caller's whole projection. Once released the
+/// call answers 200 with the line.
+///
+/// Sabotage (measured, see the PR): read the lines inside the write transaction (one transaction, as
+/// before the fix) → the position is not visible while the read waits.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_positions_are_committed_before_the_answers_lines_are_read() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+
+    let workspace = seed_workspace(&su, "read-all-commit").await;
+    let alice = seed_human(&su, workspace, "alice").await;
+    let bob = seed_human(&su, workspace, "bob").await;
+    let channel = seed_channel(&su, workspace, alice.id).await;
+    for member in [&alice, &bob] {
+        join(&su, workspace, channel, member.id).await;
+    }
+    let alice_token = login(&http, &base, workspace, &alice.email).await;
+    let bob_token = login(&http, &base, workspace, &bob.email).await;
+    let (root, head) = thread_with_replies(
+        &http,
+        &base,
+        workspace,
+        channel,
+        &alice_token,
+        &bob_token,
+        1,
+    )
+    .await;
+    assert!(position_of(&su, root, alice.id).await < Some(head));
+
+    // `dm_closure` is read by the read-state projection and by nothing the write path touches.
+    let mut holder = su.begin().await.expect("begin holder");
+    sqlx::query("LOCK TABLE dm_closure IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *holder)
+        .await
+        .expect("hold the projection's table");
+    let mark = outbox_mark(&su).await;
+    let call = {
+        let (http, base, token) = (http.clone(), base.clone(), alice_token.clone());
+        tokio::spawn(async move { read_all(&http, &base, &token, workspace, &json!({})).await })
+    };
+    wait_for_lock_waiter(&su).await;
+    let committed_position = position_of(&su, root, alice.id).await;
+    let committed_frames = followed_frames_since(&su, mark, alice.id).await;
+    holder.commit().await.expect("release");
+    let body = call.await.expect("read-all task");
+    assert_eq!(
+        (committed_position, committed_frames),
+        (Some(head), 1),
+        "the position and its frame are committed while the answer's lines are still being read"
+    );
+    assert_eq!(changed_channels(&body), sorted(&[channel]), "{body}");
+    assert_eq!(body["read_states"][0]["followed_unread_reply_count"], 0);
 }
 
 // ---------------------------------------------------------------------------
