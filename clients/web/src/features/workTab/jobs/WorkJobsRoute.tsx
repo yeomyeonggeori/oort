@@ -359,18 +359,28 @@ export function WorkJobsRoute() {
       const spot = pointerRef.current;
       const box = needsMeRef.current?.getBoundingClientRect() ?? null;
       const pointerOnSection = pointerInside(spot, box);
-      const release: string[] = [];
+      const gone: string[] = [];
+      const free: string[] = [];
+      let underHand = false;
       for (const [runKey, entry] of held) {
         const row = rowsRef.current.find((r) => runKeyOf(r) === runKey) ?? null;
+        if (row === null) {
+          gone.push(runKey);
+          continue;
+        }
         const waited = now - entry.atMs;
         // 원장이 그 run의 **다른** 승인(새 요청)을 내놓았으면 그 요청은 영수증 아래 새 줄에 선다(`approvalFacts`) — 붙들기는 같은 규칙으로
         // 끝난다(수리 5회차 M3: 놓이면 새 단추가 누른 그 점으로 올라오므로, 사람이 그 줄을 떠나기 전에는 놓지 않는다).
         const next = byRunRef.current.get(runKey);
         const sameAsk = next === undefined || uuidEq(next.approvalId, entry.decision.approvalId);
-        const stillAsking = row !== null && row.awaitingApproval && sameAsk && waited < HOLD_MAX_MS;
-        const free = entry.touch ? entry.movedOn : !pointerOnSection && !stillAsking;
-        if (row === null || (waited >= HOLD_MIN_MS && free)) release.push(runKey);
+        const stillAsking = row.awaitingApproval && sameAsk && waited < HOLD_MAX_MS;
+        if (waited >= HOLD_MIN_MS && (entry.touch ? entry.movedOn : !pointerOnSection && !stillAsking)) free.push(runKey);
+        else if (entry.press !== null) underHand = true;
       }
+      // 아직 손 밑인 붙든 줄(누른 자리가 살아 있음)이 하나라도 있으면 어떤 줄도 놓지 않고, 놓을 때는 함께 놓는다(#5712, 검수 4회차 M1):
+      // 위 줄이 빠지면 아래 줄들이 한 칸씩 올라와 다음 줄의 단추가 그 누른 자리에 서고, 「붙든 동안 같은 자리」 삼킴이 그 단추를 끝없이
+      // 막는다(줄을 차례로 결정하는 터치에서 셋째 줄이 안 눌림). 입력 종류와 상관없이 같다 — 마우스는 포인터가 구간 위인 동안 원래 이렇다.
+      const release = underHand ? gone : [...gone, ...free];
       if (release.length === 0) return;
       setHeld((current) => {
         const next = new Map(current);

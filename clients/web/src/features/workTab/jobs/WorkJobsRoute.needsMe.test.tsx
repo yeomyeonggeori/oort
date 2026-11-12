@@ -730,9 +730,10 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
    * `finishOnApprove`면 곧바로 끝난다. 목록 순서도 실제처럼 **결정이 닿은 run이 맨 앞**이다(`ORDER BY activity_us DESC`, 결정이 그 run의
    * `updated_at`을 올린다 — `work_board.rs`).
    */
-  function serveDecisions(roundTripMs: number, opts: { finishOnApprove?: boolean; runs?: SharedWorkSession[] } = {}) {
+  function serveDecisions(roundTripMs: number, opts: { finishOnApprove?: boolean; runs?: SharedWorkSession[]; approvals?: Approval[] } = {}) {
     const decided = new Map<string, boolean>();
     const runs = opts.runs ?? twoRuns;
+    const asks = opts.approvals ?? twoApprovals;
     const board = () => {
       const now = runs.map((r) => {
         const approve = decided.get(r.runId!);
@@ -750,13 +751,13 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     });
     api.fetchApprovals.mockImplementation(async () => {
       await sleepMs(roundTripMs);
-      return twoApprovals.filter((a) => !decided.has(a.runId!));
+      return asks.filter((a) => !decided.has(a.runId!));
     });
     api.authedResponse.mockImplementation(async (path: string, init?: { body?: string }) => {
       if (!String(path).endsWith("/decision")) return httpResponse(404, {});
       const approvalId = decodeURIComponent(String(path).split("/").at(-2)!);
       const approve = (JSON.parse(init?.body ?? "{}") as { approve?: boolean }).approve !== false;
-      decided.set(twoApprovals.find((a) => a.id === approvalId)!.runId!, approve);
+      decided.set(asks.find((a) => a.id === approvalId)!.runId!, approve);
       await sleepMs(roundTripMs);
       return httpResponse(200, { status: approve ? "approved" : "rejected", decided_by: ME, decided_at_ms: Date.now() });
     });
@@ -1459,6 +1460,70 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     expect(decidedIds()).toEqual([A(1)]);
     await settleAnswers();
   }, 15_000);
+
+  const threeRuns = [runOf(1), runOf(8), runOf(5)];
+  const threeApprovals = [...twoApprovals, approval({ id: A(5), runId: R(5) })];
+
+  it.each([
+    ["1.5초 간격", 1500, false],
+    ["2.5초 간격", 2500, false],
+    ["1.5초 간격, B를 결정한 뒤 B의 줄 안 다른 곳을 한 번 누름", 1500, true],
+  ] as const)(
+    "터치로 서로 다른 세 줄을 차례로(%s, 줄 높이가 같음): 손 밑의 붙든 줄이 있는 동안 앞 줄이 놓이지 않아 셋째 줄의 「승인」이 제자리에서 눌린다 — 3건",
+    async (_name, gap, inRowTap) => {
+      mockSlotGeometry();
+      board(new Set(), { mine: threeRuns });
+      serveDecisions(40, { runs: threeRuns, approvals: threeApprovals });
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(5)]), { timeout: 3000 });
+      await sleepMs(1100);
+      pressSlot(0, "approve", at(slotButton(0, "approve")), "touch");
+      fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      await sleepMs(gap);
+      pressSlot(1, "approve", at(slotButton(1, "approve")), "touch");
+      fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      await waitFor(() => expect(receiptIn(1)).toBe(RECEIPT.approve), { timeout: 3000 });
+      // B의 줄 안, 누른 단추 상자 밖(줄 왼쪽)을 누른다: A는 떠났지만 B는 아직 손 밑이다.
+      if (inRowTap) pressSlot(1, "approve", { clientX: 40, clientY: SLOT_H + 40 }, "touch");
+      await sleepMs(gap);
+      const c = rowsIn("needsMe").indexOf(R(5));
+      pressSlot(c, "approve", at(slotButton(c, "approve")), "touch");
+      await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8), A(5)]), { timeout: 3000 });
+      expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(5)]);
+      await settleAnswers();
+    },
+    20_000
+  );
+
+  it.each(["approve", "reject"] as const)(
+    "터치 · %s: A를 결정하고 1.6초 뒤 B를 결정한 다음, B를 누른 자리(5px 옆)를 +250·+600·+1300·+2500·+4000ms에 다시 눌러도 나간 결정은 A·B 2건이고 그 자리에는 B의 영수증이 남는다",
+    async (which) => {
+      mockSlotGeometry();
+      board(new Set(), { mine: threeRuns });
+      serveDecisions(40, { runs: threeRuns, approvals: threeApprovals });
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(5)]), { timeout: 3000 });
+      await sleepMs(1100);
+      pressSlot(0, which, at(slotButton(0, which)), "touch");
+      fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      await sleepMs(1600);
+      const b = slotButton(1, which);
+      pressSlot(1, which, at(b), "touch");
+      fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      let elapsed = 0;
+      for (const t of [250, 600, 1300, 2500, 4000]) {
+        await sleepMs(t - elapsed);
+        elapsed = t;
+        pressSlot(1, which, at({ x: b.x + 5, y: b.y + 3 }), "touch");
+        fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      }
+      await sleepMs(300);
+      expect(decidedIds()).toEqual([A(1), A(8)]);
+      expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(5)]);
+      expect(receiptIn(1)).toBe(RECEIPT[which]);
+    },
+    20_000
+  );
 });
 
 describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
